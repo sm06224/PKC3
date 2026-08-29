@@ -566,17 +566,33 @@ function runQueryScan(cid: string, key: string | null): {
   for (;;) {
     const rows = database.selectObjects(
       after === undefined
-        ? `SELECT lid, entry_order, substr(body, 1, ?) AS head FROM entries WHERE cid = ?
+        ? `SELECT lid, entry_order, substr(body, 1, ?) AS head, body_tags FROM entries WHERE cid = ?
              ORDER BY entry_order, lid LIMIT ?`
-        : `SELECT lid, entry_order, substr(body, 1, ?) AS head FROM entries
+        : `SELECT lid, entry_order, substr(body, 1, ?) AS head, body_tags FROM entries
             WHERE cid = ? AND (entry_order > ? OR (entry_order = ? AND lid > ?))
             ORDER BY entry_order, lid LIMIT ?`,
       after === undefined
         ? [FRONTMATTER_SCAN_CHARS, cid, QUERY_SCAN_CHUNK]
         : [FRONTMATTER_SCAN_CHARS, cid, after.entryOrder, after.entryOrder, after.lid, QUERY_SCAN_CHUNK],
-    ) as unknown as Array<{ lid: string; entry_order: number; head: string | null }>;
+    ) as unknown as Array<{
+      lid: string;
+      entry_order: number;
+      head: string | null;
+      body_tags?: string | null;
+    }>;
     if (rows.length === 0) break;
-    scan.feed(rows.map((r) => ({ lid: r.lid, head: r.head ?? '' })));
+    scan.feed(
+      rows.map((r) => ({
+        lid: r.lid,
+        head: r.head ?? '',
+        /**
+         * 🔴 **NULL を `[]` に潰さない**(#550 段④)── 走査(`runSmartScan`)と
+         *   **同じ綴り**にする。`null` は「まだ集約していない」で、
+         *   「タグが 1 つも無い」とは別である。
+         */
+        bodyTags: r.body_tags === null || r.body_tags === undefined ? null : decodeTags(r.body_tags),
+      })),
+    );
     const last = rows[rows.length - 1]!;
     after = { entryOrder: last.entry_order, lid: last.lid };
     if (rows.length < QUERY_SCAN_CHUNK) break;

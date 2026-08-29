@@ -41,7 +41,7 @@ import type {
   KeyResult as QueryKeys,
 } from '@features/query/group-by';
 // ⚠ 「未設定」の綴りは features 側の 1 か所(`''`)── ここで書き写さない(§7)
-import { UNSET as QUERY_UNSET } from '@features/query/group-by';
+import { TAGS_KEY, UNSET as QUERY_UNSET } from '@features/query/group-by';
 import type { TaskScan } from '@features/schedule/task-cards';
 import type { ContactScan } from '@features/contact/contact-card';
 import type { SnippetScan } from '@features/snippet/snippet-table';
@@ -688,7 +688,8 @@ export function connectStoreEffects(
           dispatcher.dispatch({ type: 'SET_TAG_SUGGESTIONS', tags: [] });
           break;
         }
-        void ask('tags').then(
+        // 🔑 綴りは `TAGS_KEY` 1 か所(#550 段④ ── 候補と集計が同じ組を見る)
+        void ask(TAGS_KEY).then(
           (out) => {
             if (disposed) return;
             /**
