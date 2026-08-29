@@ -1120,3 +1120,55 @@ test('🔴 1 面では、図を押すと原文が開く(別窓は開かない) (
 
   expect(errors, errors.join('\n')).toEqual([]);
 });
+
+/**
+ * 🔴 **インライン編集で「雛形を入れる」を押しても何も起きない**(user 報告 2026-08-28)。
+ *
+ * > 「インライン編集モードで雛形などの挿入ボタンを押しても何もおこらない /
+ * >  no-op 系動作か雛形のモーダルかなんかを描画しようとして
+ * >  インライン編集位置からフォーカスが外れてしまっている?」
+ *
+ * 🔑 **見立てのとおりだった。** `mousedown` の既定が入力欄の焦点を外す →
+ * `blur` が行を確定する → **`row-source` が DOM から消える** → `click` の時点で
+ * `formatTarget` が書き込む先を見つけられず、**無言で return**。
+ *
+ * ⚠ **この spec は実ブラウザでしか意味が無い** ── happy-dom は dispatch で `blur` を
+ *   飛ばさないので(`row-swap.ts` の注記)、unit では**直す前も緑**になる。
+ * ⚠ **2 列の面では再現しない**(`editor-body` は行と違って消えない)ので、
+ *   live のまま測る = **この file が正しい置き場**である。
+ */
+test('🔴 インライン編集中に「雛形を入れる」を押すと、行が閉じずに一覧が出る (user 報告)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+  await openLive(page, '# 題\n\nさいしょの段落です。\n');
+
+  const live = page.locator('[data-pkc-region="editor-live"]');
+  // 行を開く(ここが「インライン編集位置」)
+  await modClickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
+  const row = live.locator('[data-pkc-field="row-source"]');
+  await expect(row, '前提: 行が開いていない(この検査は何も見ていない)').toBeVisible();
+
+  const btn = page.locator('[data-pkc-action="insert-snippet"]');
+  await expect(btn, '前提: 「雛形を入れる」が画面に無い').toBeVisible();
+  await btn.click();
+
+  /**
+   * 🔴 **行が生きたままであること**が肝 ── 直す前はここで `row-source` が
+   *   消えており、その結果 handler が書き込む先を失って無言で終わっていた。
+   */
+  await expect(
+    row,
+    '🔴 押した瞬間に行が閉じた ── 焦点が外れて書き込む先が消えている(user 報告の形)',
+  ).toBeVisible();
+
+  // 🔑 **押した結果が画面に出る**(no-op ではない)。⚠ 選択子は実装から引いた
+  //    (`app-dialog.ts` の `DIALOG_REGION` / `pick-snippet`)── 推測で書かない
+  await expect(
+    page.locator('[data-pkc-region="app-dialog"] [data-pkc-field="pick-snippet"]').first(),
+    '雛形の一覧が出ない(押しても何も起きない ── user 報告の形)',
+  ).toBeVisible({ timeout: 5000 });
+
+  expect(errors, 'ページ例外が出ている').toEqual([]);
+});

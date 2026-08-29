@@ -32,6 +32,7 @@
  * `AppState.openBody.body` で、こちらは「窓」に過ぎない。
  */
 import { applyBlocks, EMPTY_VIEW, type BlockView } from './apply-blocks';
+import { isAppDialogOpen } from '@adapter/ui/render/app-dialog';
 import { splitTopLevelBlocks } from '@features/markdown/html-blocks';
 import {
   buildBlockPartition,
@@ -1264,6 +1265,23 @@ export class RowSwap {
       a.pendingCommit = true;
       return false;
     }
+    /**
+     * 🔴 **アプリのダイアログが開いている間は確定しない**(user 報告 2026-08-28)。
+     *
+     * > 「インライン編集モードで雛形などの挿入ボタンを押しても何もおこらない /
+     * >  …インライン編集位置からフォーカスが外れてしまっている?」
+     *
+     * ⚠ `showModal()` は焦点を**ダイアログの中へ移す**ので `blur` が飛び、ここが
+     *   行を確定して **`row-source` を DOM から外していた**。すると雛形を選んだ後に
+     *   `insert-snippet` が書き込む先を見つけられず、**無言で終わる**。
+     * 🔑 **これは「押した本人が待っている」場面である** ── 確定して閉じるのではなく、
+     *   **開けたまま待つ**のが正しい(ダイアログを閉じれば `app-dialog` が
+     *   `focusedBefore` へ焦点を返す ── 行が残っていて初めてその経路が生きる)。
+     * ⚠ `blur` を握り潰すのではなく**確定を遅らせるだけ** ── ダイアログを閉じた後に
+     *   別の所を押せば、そのときの `blur` が普通に確定する。
+     * ⚠ **変換中(`composing`)の扱いは上のまま** ── そちらが先に効く。
+     */
+    if (isAppDialogOpen()) return false;
     const text = a.textarea.value;
     const start = a.startLine;
     const end = a.endLine;
