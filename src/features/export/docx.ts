@@ -69,6 +69,29 @@ export type DocxBlock =
    * `hr` と同じに畳むと **Word でだけ改頁が水平線になる**(実際そうだった)。
    */
   | { readonly kind: 'pagebreak' }
+  /**
+   * 🔴 **自由配置の板の印**(#530 段①)。⚠ **中身を入れ子で持たない** ──
+   * 中身は**この印の後ろに続く `span` 個**の塊である。
+   *
+   * 🔑 入れ子にしなかった理由は 1 つ:`htmlToDocxBlocks` が返す
+   * `images` / `figures` は**塊の添字**で場所を指しているので、
+   * 入れ子へ畳むと**その添字が全部狂う**(画像が別の場所に差し替わる)。
+   *
+   * ⚠ **Word 側はこの印から何も出さない** ── 中身は後ろの塊としてこれまでどおり
+   * 段落になるので、**docx の出力は 1 バイトも変わらない**。
+   * 位置を使うのは PowerPoint 側だけである(`pptx.ts` の `board`)。
+   */
+  | {
+      readonly kind: 'place';
+      /** 板の左上からの px。⚠ 正本は本文の記法(`x=` / `y=`)である。 */
+      readonly x: number;
+      readonly y: number;
+      /** 省略可 ── 描画側の既定に合わせる(ここで数え直さない)。 */
+      readonly w: number | null;
+      readonly h: number | null;
+      /** 後ろに続く「中身の塊」の数。⚠ 0 なら中身が無い(空の付箋)。 */
+      readonly span: number;
+    }
   | { readonly kind: 'table'; readonly rows: readonly (readonly DocxCell[])[] }
   /**
    * 🔴 **画像**(#187 段②)。⚠ **縦横比を保つ** ── PKC2 は全画像を 480×360 px に
@@ -261,6 +284,13 @@ function blockXml(block: DocxBlock, rels: Map<string, string>): string {
     case 'hr':
       // 水平線は「下線だけの空段落」── OOXML に `<hr>` は無い
       return `<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:sz="6" w:space="1" w:color="999999"/></w:pBdr></w:pPr></w:p>`;
+    case 'place':
+      /**
+       * 🔴 **Word では何も出さない**(#530 段①)。中身は後ろの塊が出すので、
+       * ここで何か出すと**二重に**なる。⚠ 「位置を無視して普通に流す」が
+       * Word 側の正しい振る舞いである(Word に自由配置の面は無い)。
+       */
+      return '';
     case 'pagebreak':
       // ⚠ 段落そのものに `w:pageBreakBefore` を付けない ── 次の塊が何であっても
       //    効くように、**改頁だけの段落**を置く(表の直前でも同じ形で効く)

@@ -25,6 +25,93 @@ const partOf = (r: ReturnType<typeof buildPptx>, name: string): string => {
   return found!.text;
 };
 
+const place = (
+  x: number,
+  y: number,
+  w: number | null,
+  h: number | null,
+  span: number,
+): ExportBlock => ({ kind: 'place', x, y, w, h, span });
+
+describe('\u{1f534} 自由配置の板が「置いたとおりの場所」で出る(#530 段①)', () => {
+  /**
+   * \u{1f534} **1 枚だけでは何も測れない。** 位置を丸ごと無視する実装でも
+   * 「`<a:off>` が在る」は真になる ── 既存の文字の塊も `<p:sp>` + `<a:off>` である
+   * (CLAUDE.md §1「範囲が広すぎて別物に満たされる」)。
+   * \u{1f511} だから **2 枚置いて、2 つの `<a:off>` が違う**ことを見る。
+   */
+  it('\u{1f534} 2 枚の板が別々の場所へ出る（位置を無視すると落ちる）', () => {
+    const r = buildPptx(
+      [place(0, 0, 240, 96, 1), p('左上'), place(480, 240, 240, 96, 1), p('右下')],
+      { title: 'T' },
+    );
+    const xml = partOf(r, 'ppt/slides/slide1.xml');
+    const offs = [...xml.matchAll(/<a:off x="(\d+)" y="(\d+)"\/>/g)].map((m) => [
+      Number(m[1]),
+      Number(m[2]),
+    ]);
+    // 空振り防止 ── 図形が 1 つも無ければ、この検査は何も見ていない
+    expect(offs.length, '図形が 1 つも出ていない').toBeGreaterThanOrEqual(2);
+    const xs = offs.map((o) => o[0]!);
+    const ys = offs.map((o) => o[1]!);
+    expect(new Set(xs).size, '2 枚の板が同じ x に出ている（位置を見ていない）').toBeGreaterThan(1);
+    expect(new Set(ys).size, '2 枚の板が同じ y に出ている（位置を見ていない）').toBeGreaterThan(1);
+    // \u{1f511} 置いた**順序**まで見る（x が大きい板は、右に出る）
+    expect(Math.max(...xs)).toBeGreaterThan(Math.min(...xs));
+    // 中身の字が両方とも出ている（板の中身を捨てていない）
+    expect(xml).toContain('左上');
+    expect(xml).toContain('右下');
+  });
+
+  it('\u{1f534} 板は 1 枚で 1 スライド ── 直前の見出しがその題になる', () => {
+    const slides = splitIntoSlides(
+      [h(2, '体制図'), place(0, 0, 240, 96, 1), p('部長'), h(2, '次の節'), p('本文')],
+      'ノート',
+    );
+    expect(slides.map((s) => s.title)).toEqual(['体制図', '次の節']);
+    expect(slides[0]!.boxes.map((b) => b.kind)).toEqual(['board']);
+    // ⚠ 板の後ろの本文が、板のスライドへ流れ込んでいない
+    expect(slides[0]!.lines).toEqual([]);
+    expect(slides[1]!.lines).toHaveLength(1);
+  });
+
+  it('\u{1f534} 見出しの無い本文が続いても、板のスライドへ流れ込まない', () => {
+    /**
+     * \u{1f511} **上の test だけでは足りない**（変異試験 M3 が生き延びた）──
+     * 次が見出しなら、どのみち新しいスライドが開くので、
+     * 「板の後ろで閉じる」を壊しても緑のままだった。
+     * ⚠ **閉じていなければ落ちる場面**は「見出しの無い本文が続く」形だけである。
+     */
+    const slides = splitIntoSlides(
+      [place(0, 0, 240, 96, 1), p('部長'), p('板の後ろの本文')],
+      'ノート',
+    );
+    expect(slides).toHaveLength(2);
+    expect(slides[0]!.boxes.map((b) => b.kind)).toEqual(['board']);
+    expect(slides[0]!.lines, '板のスライドへ本文が流れ込んだ').toEqual([]);
+    expect(slides[1]!.lines).toHaveLength(1);
+  });
+
+  it('⚠ 対照群: 板でない普通の段落は、これまでどおり本文として積まれる', () => {
+    const slides = splitIntoSlides([h(2, '節'), p('本文')], 'ノート');
+    expect(slides[0]!.boxes).toEqual([]);
+    expect(slides[0]!.lines).toHaveLength(1);
+  });
+
+  it('\u{1f534} 大きすぎる板は「縮める」── 枠からはみ出さない（裁定 A）', () => {
+    // 板の px を器よりずっと大きくする（12192000 EMU / 9525 ≒ 1280 px が全幅）
+    const r = buildPptx([place(0, 0, 4000, 3000, 1), p('大きい板')], { title: 'T' });
+    const xml = partOf(r, 'ppt/slides/slide1.xml');
+    const shapes = [...xml.matchAll(/<a:off x="(\d+)" y="(\d+)"\/><a:ext cx="(\d+)" cy="(\d+)"\/>/g)];
+    expect(shapes.length, '図形が 1 つも出ていない').toBeGreaterThan(0);
+    for (const m of shapes) {
+      const [x, y, cx, cy] = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])];
+      expect(x + cx, '図形がスライドの右へはみ出した').toBeLessThanOrEqual(12192000);
+      expect(y + cy, '図形がスライドの下へはみ出した').toBeLessThanOrEqual(6858000);
+    }
+  });
+});
+
 describe('切れ方(PKC2 と同じ)', () => {
   it('🔴 H1 は扉 / H2 は副題 / H3 は本文 ── 表のとおりに切れる', () => {
     const slides = splitIntoSlides(

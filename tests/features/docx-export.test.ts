@@ -280,6 +280,44 @@ describe('HTML(画面と同じもの)→ 塊', () => {
   });
 });
 
+describe('\u{1f534} 自由配置の板の印(#530 段①)', () => {
+  const BOARD =
+    '<div class="pkc-place" data-pkc-x="12" data-pkc-y="34" data-pkc-w="240" data-pkc-h="96">' +
+    '<p>部長</p><p>課長</p></div>';
+
+  it('\u{1f534} 位置を印として残し、中身は後ろの塊として写す', () => {
+    const r = blocksOf(BOARD);
+    expect(r.blocks[0]).toEqual({ kind: 'place', x: 12, y: 34, w: 240, h: 96, span: 2 });
+    // \u{1f511} 中身は**入れ子にしない** ── 後ろに並ぶ(images / figures の添字を狂わせない)
+    expect(r.blocks.slice(1).map((b) => b.kind)).toEqual(['p', 'p']);
+  });
+
+  it('⚠ 大きさが書いていなければ null（既定を数え直さない）', () => {
+    const r = blocksOf('<div class="pkc-place" data-pkc-x="8"><p>あ</p></div>');
+    expect(r.blocks[0]).toEqual({ kind: 'place', x: 8, y: 0, w: null, h: null, span: 1 });
+  });
+
+  it('\u{1f534} Word の出力は 1 バイトも変わらない（印は何も出さない）', () => {
+    /**
+     * \u{1f511} **これが「印にした」ことの意味である** ── docx 側は位置を持たないので、
+     * 板を足したせいで Word の中身が動いたら、それは**副作用**である。
+     * ⚠ 比べるのは「板つき」と「板を外して中身だけ」── 同じ字が出るはず。
+     */
+    const body = (html: string): string =>
+      part(buildDocx(blocksOf(html).blocks, '題名', ISO), 'word/document.xml');
+    const withBoard = body(BOARD);
+    const plain = body('<p>部長</p><p>課長</p>');
+    expect(withBoard).toBe(plain);
+    // 空振り防止 ── 中身が出ていなければ何も測っていない
+    expect(plain).toContain('部長');
+  });
+
+  it('⚠ 対照群: 板でない div は、これまでどおり中へ降りる', () => {
+    const r = blocksOf('<div><p>あ</p></div>');
+    expect(r.blocks.map((b) => b.kind)).toEqual(['p']);
+  });
+});
+
 describe('画像(#187 段②)', () => {
   it('🔴 縦横比を保って本文幅に収める(PKC2 は全部 480x360 に潰していた)', () => {
     // 本文幅は 9638 twip = 6.693in = 6,120,130 EMU(A4 21cm − 余白 2cm×2 = 17cm)。

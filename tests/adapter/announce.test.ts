@@ -773,6 +773,7 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
+    ['2026-08-29-board-to-pptx', 'e6d0b4b3'],
     ['2026-08-29-narrow-no-hscroll', '8f325cfd'],
     // ⚠ 指紋を差し替えたのは **まだ配っていない entry** だから(着地前に文面を直した)
     ['2026-08-29-reachable-controls', '07081d45'],
@@ -794,7 +795,6 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-08-28-help-manual-idle', 'c00593e0'],
     ['2026-08-28-image-zoom-pan', 'bb6fd0b9'],
     ['2026-08-28-diagram-zoom', 'de5baf60'],
-    ['2026-08-28-columns-inline-edit', 'd8b12951'],
     // ⚠ 上限 20 を超えたので 2026-08-29 に落とした(原本は CHANGELOG)
     //['2026-08-28-uml-templates', '93cb2d2a'],
     // ⚠ 上限 20 を超えたので 2026-08-29 に落とした(原本は CHANGELOG)

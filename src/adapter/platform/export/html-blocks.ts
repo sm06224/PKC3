@@ -57,6 +57,18 @@ function pushRun(out: DocxRun[], text: string, style: RunStyle): void {
 }
 
 /** 見出しの階層。⚠ `h7` は無いので 6 に丸める(段落ごと落とさない)。 */
+/**
+ * 板の位置の属性を読む(#530 段①)。⚠ 描画側(`place-board.ts` の `intAttr`)と
+ * **同じ意味論**にする ── 無ければ `null`、数でなければ `null`。
+ * 🔑 ここで既定値を作らない(描画と別の規則を持つと、画面と生成物がずれる)。
+ */
+function pxAttr(el: Element, name: string): number | null {
+  const raw = el.getAttribute(name);
+  if (raw === null || raw.trim() === '') return null;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) ? n : null;
+}
+
 function headingLevel(tag: string): 1 | 2 | 3 | 4 | 5 | 6 | null {
   const m = /^h([1-6])$/.exec(tag);
   return m ? (Number(m[1]) as 1 | 2 | 3 | 4 | 5 | 6) : null;
@@ -315,6 +327,32 @@ export function htmlToDocxBlocks(doc: Document): {
       if (gone !== null) {
         skipped += 1;
         blocks.push({ kind: 'skipped', ...gone });
+        continue;
+      }
+      /**
+       * 🔴 **自由配置の板**(#530 段①)。位置(`x=` / `y=`)を**印として**残し、
+       * 中身はこれまでどおり後ろへ写す。
+       *
+       * ⚠ **中へ降りるより先に**拾う ── 降りてしまうと、位置がどこにも残らず
+       * 「置いたとおりに並べた板が、縦に並んだ字」になる(いまがそれである)。
+       * 🔑 印だけなので **Word の出力は 1 バイトも変わらない**(`docx.ts` の
+       * `place` は何も出さない)。使うのは PowerPoint 側だけ。
+       * ⚠ **入れ子にしない** ── `images` / `figures` が持つ添字が狂うため
+       * (`docx.ts` の `place` の注記)。
+       */
+      if (el.classList.contains('pkc-place')) {
+        const at = blocks.length;
+        // ⚠ 先に場所を取る(中身を写す前)── 後から `splice` すると添字が狂う
+        blocks.push({ kind: 'place', x: 0, y: 0, w: null, h: null, span: 0 });
+        walkBlocks(el);
+        blocks[at] = {
+          kind: 'place',
+          x: pxAttr(el, 'data-pkc-x') ?? 0,
+          y: pxAttr(el, 'data-pkc-y') ?? 0,
+          w: pxAttr(el, 'data-pkc-w'),
+          h: pxAttr(el, 'data-pkc-h'),
+          span: blocks.length - at - 1,
+        };
         continue;
       }
       // ⚠ 知らない器(`div` / `section` / `details`)は**中へ降りる** ──
