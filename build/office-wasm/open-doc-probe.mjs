@@ -503,6 +503,22 @@ const browser = await chromium.launchPersistentContext(profile, {
   executablePath: '/opt/pw-browsers/chromium',
 });
 const page = await browser.newPage();
+/**
+ * 🔴 **console の行に「いつ出たか」を添える**(#117 / #199。2026-08-29 に穴を踏んだ)。
+ *
+ * ⚠ `events` は `dt` を持つのに **console は時刻なしの配列**だったので、
+ * `memory access out of bounds` が出ても **起動中か / クリックか / 打鍵か**が
+ * 分からなかった ── つまり「クリックで落ちる」(#117 の題)の再現かどうかを
+ * **書けなかった**。CLAUDE.md §4「計器の名前が範囲より広い」の時間版である。
+ *
+ * 🔑 **`events` と同じ時間軸に載せる** ── 別の起点で測ると、2 つの配列を
+ * 突き合わせられない(一式を IDB へ積む時間ぶんズレる)。
+ * ⚠ 計測窓に入る前に出た行は `[pre]` と書く ── **0ms と区別する**
+ * (「準備中に出た」も読める信号である)。
+ */
+let t0 = 0;
+/** 行頭に付ける時刻。⚠ **ASCII だけ**(非 ASCII を捨てる `safeLine` と同じ規律)。 */
+const stamp = () => (t0 === 0 ? '[pre]' : `[+${Date.now() - t0}ms]`);
 page.on('console', (m) => {
   const t = safeLine(`[${m.type()}] ${m.text()}`);
   if (t === null) return;
@@ -511,13 +527,13 @@ page.on('console', (m) => {
   //    見分けられなくなる(CLAUDE.md §4「観測点が別の物に満たされる」の器版)。
   //    🔑 本命は MEMFS の log(`result.ime.trace`)で、こちらはその控えである。
   if (t.includes('PKC3-IME') && result.imeConsole.length < 200) result.imeConsole.push(t);
-  if (result.console.length < 60) result.console.push(t);
+  if (result.console.length < 60) result.console.push(`${stamp()}${t}`);
 });
 page.on('pageerror', (e) => {
   const t = safeLine(`[pageerror] ${String(e)}`);
-  if (t) result.console.push(t);
+  if (t) result.console.push(`${stamp()}${t}`);
 });
-page.on('crash', () => result.console.push('[crash] page crashed'));
+page.on('crash', () => result.console.push(`${stamp()}[crash] page crashed`));
 
 try {
   // 一式を IDB へ(PKC が入れる形と同じ)
@@ -575,7 +591,7 @@ try {
     };
   }, { doc: b64, name: NAME });
 
-  const t0 = Date.now();
+  t0 = Date.now();
   await page.goto(NO_DOC ? `${base}/office/host.html` : `${base}/office/host.html?await-doc=1&name=${encodeURIComponent(NAME)}`, { waitUntil: 'commit' });
 
   /**
@@ -822,11 +838,20 @@ try {
          */
         const clip = { x: box.x, y: box.y, width: box.w, height: box.h };
         const frames = (n = 5) => framesOf(clip, n);
+        /**
+         * 🔴 **操作にも時刻を付ける**(#117。2026-08-29)。
+         *
+         * ⚠ console に時刻を付けただけでは、まだ**どの操作の話か**は言えない ──
+         * 「起動より後」までしか絞れない。🔑 押した / 打った瞬間を同じ時間軸に
+         * 置いて初めて、`memory access out of bounds` を**操作に帰属**できる。
+         */
+        result.ime.at = { click: Date.now() - t0 };
         await page.mouse.click(box.x + box.w * 0.4, box.y + box.h * 0.35);
         result.ime.clicked = true;
         await page.waitForTimeout(3000);
         result.ime.marks.clicked = await traceLen();
         const beforeFrames = await frames();
+        result.ime.at.type = Date.now() - t0;
         await page.keyboard.type('a', { delay: 120 });
         await page.waitForTimeout(3000);
         result.ime.marks.typed = await traceLen();
@@ -844,6 +869,7 @@ try {
          * ⚠ **これが偽なら `accept0` は読めない** ── 健全なビルドでも
          *   キャレットが無ければ `accept0` を返す(#156 本文の「まだ言えないこと」)。
          */
+        result.ime.at.selectAll = Date.now() - t0;
         await page.keyboard.press('Control+a');
         await page.waitForTimeout(2500);
         result.ime.marks.selectedAll = await traceLen();
