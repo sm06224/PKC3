@@ -64,7 +64,7 @@ export const RELATION_CANDIDATE_MAX = 200;
 import { getAncestorFolders } from '@features/relation/tree';
 import { BODY_LINK_KIND, renderRelationMap } from './relation-map';
 import { bodyLinkTargets } from '@features/entry-ref/body-links';
-import { ENTRY_ACTION_LABELS } from '@features/entry-actions';
+import { ADOPT_IMAGES_LABEL, adoptImagesLabel, ENTRY_ACTION_LABELS } from '@features/entry-actions';
 
 /** 素性の行(`data-pkc-field` → 値を入れる `<dd>`)。 */
 type Rows = Map<string, HTMLElement>;
@@ -794,7 +794,7 @@ export class InspectorRenderer {
     // ⚠ 字を入れるのは**札の span** ── ボタン自身に入れると図案ごと消える
     //    (`iconButton` が `data-pkc-field="label"` で作っている)
     const label = b.querySelector<HTMLElement>('[data-pkc-field="label"]');
-    if (label) setText(label, `外部の画像を取り込む(${count} 枚)`);
+    if (label) setText(label, adoptImagesLabel(count));
   }
 
   /** 値を入れる。⚠ 器に無い field を書こうとしたら形の宣言が漏れている。 */
@@ -1121,7 +1121,7 @@ export class InspectorRenderer {
      * ⚠ **文言に枚数を入れる** ── 押すと**その枚数ぶん外へ通信する**ので、
      *   押す前に規模が分かる形にする(#264 の棄却理由②)。
      */
-    btn('adopt-external-images', '外部の画像を取り込む');
+    btn('adopt-external-images', ADOPT_IMAGES_LABEL);
     btn('export-entry', ENTRY_ACTION_LABELS['export-entry']!);
     /**
      * 🔴 **相手に渡せる 1 枚**(#491)。
@@ -1144,7 +1144,7 @@ export class InspectorRenderer {
      * ⚠ **消さずに畳む**のは、隣の並びを動かさないためである(業務画面の作法
      *   「同じものが常に同じ場所にある」)。
      */
-    btn('export-folder', 'フォルダを書き出す');
+    btn('export-folder', ENTRY_ACTION_LABELS['export-folder']!);
     // 🔴 **Word で出す**(#187 段①)。⚠ 隣の「書き出す」と**別の物**である ──
     //    あちらは取り込み直せるバックアップ、こちらは片道の Word 文書
     btn('export-entry-docx', ENTRY_ACTION_LABELS['export-entry-docx']!);
@@ -1171,7 +1171,7 @@ export class InspectorRenderer {
      *   そのまま貼るための物だからである。
      */
     btn('copy-plain-markdown', ENTRY_ACTION_LABELS['copy-plain-markdown']!);
-    if (shape === 'entry+link') btn('write-back-file', '書き戻す');
+    if (shape === 'entry+link') btn('write-back-file', ENTRY_ACTION_LABELS['write-back-file']!);
     btn('show-history', ENTRY_ACTION_LABELS['show-history']!);
     btn('delete-entry', ENTRY_ACTION_LABELS['delete-entry']!);
     this.region.append(actions);

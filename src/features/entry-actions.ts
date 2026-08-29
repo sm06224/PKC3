@@ -11,13 +11,16 @@
  *
  * 🔑 だから**字はここ 1 か所**。情報ペインも右クリックも、ここから引く。
  *
- * ## ⚠ ここに在るのは「右クリックにも出す物」だけである
+ * ## ⚠ 条件つきの物も、ここに在る(2026-08-29、#500 案 C)
  *
- * 情報ペインは**ほかにも操作を持つ**(`Word` / `PowerPoint` / `PDF` /
- * `フォルダを書き出す` / `外部の画像を取り込む` / `書き戻す`)。
- * ⚠ **それらは抜き出していない** ── 条件つきで畳む物が混ざっており、
- * 全部をここへ移すと**畳む判定まで持ち込む**ことになる(主題が 2 つになる)。
- * 🔑 右クリックに出す物が増えたら、そのときここへ足す。
+ * 起票時は「条件つきで畳む物は抜き出さない ── 畳む判定まで持ち込むことになる」と
+ * 書いてあったが、**畳む判定は結局 2 か所に生えた**(情報ペインが `hidden` を
+ * 付け外しし、右クリックには出ないまま)。⚠ その形の実害は #500 で実測した ──
+ * `フォルダを書き出す` / `外部の画像を取り込む` / `書き戻す` の 3 つは
+ * **右ペインが唯一の入口**で、見出し 10 個のノートでは帯が画面外へ落ち、
+ * 右ペインを畳んだ user からは**画面ごと消える**。
+ * 🔑 だから判定は `when` として**この表 1 か所**に持ち、
+ * 情報ペインも右クリックもここから引く(§7)。
  *
  * ⚠ **pure module**。browser API を持たない。
  */
@@ -26,6 +29,49 @@
 export interface EntryAction {
   readonly action: string;
   readonly label: string;
+  /**
+   * 🔴 **出す条件**(#500 案 C)。⚠ 書いていないものは**いつでも出す**。
+   *
+   * ⚠ 条件つきの物を「常に出して、押したら失敗する」形にしない ──
+   *   #399 ① で確かめてある:フォルダでないノートで `フォルダを書き出す` を押すと
+   *   `folderSource` が投げて「書き出しに失敗しました」と出る。
+   *   **押せるのに必ず失敗する**のは、出ない(畳んである)より悪い。
+   * 🔑 判定に使う材料は **`entryMetas` と `linkedFiles` だけ**にする ──
+   *   本文を読まないと決まらない条件をここへ入れると、右クリックした瞬間に
+   *   worker を叩く経路がもう 1 本増える(§7)。
+   */
+  readonly when?: 'folder' | 'linked';
+}
+
+/**
+ * 条件を見るのに要る材料。⚠ **本文は要らない**(上の `when` の docstring)。
+ */
+export interface EntryMenuContext {
+  /** ノートの種類。⚠ 分からないときは `null`(条件つきの物は出さない側に倒す)。 */
+  readonly archetype: string | null;
+  /** 開いた元ファイルの名前。⚠ 開いていなければ `null`。 */
+  readonly linkedFile: string | null;
+}
+
+/**
+ * ⚠ **`when` の値ごとに 1 本ずつ書く**(三項演算子で 2 分しない)── 値が増えたとき、
+ * `else` に落ちて**別の条件として静かに評価される**のを型で止めるため。
+ */
+const WHEN: Readonly<
+  Record<NonNullable<EntryAction['when']>, (ctx: EntryMenuContext) => boolean>
+> = {
+  folder: (ctx) => ctx.archetype === 'folder',
+  linked: (ctx) => ctx.linkedFile !== null,
+};
+
+/**
+ * 🔴 **この 1 件に、いま出せる物だけを返す**(#500 案 C)。
+ *
+ * ⚠ 並びは `ENTRY_MENU_ACTIONS` のまま ── 条件で消えるのは**行だけ**で、
+ *   残った物の順番は動かない(業務画面の作法「同じものが常に同じ場所にある」)。
+ */
+export function entryMenuActions(ctx: EntryMenuContext): readonly EntryAction[] {
+  return ENTRY_MENU_ACTIONS.filter((a) => a.when === undefined || WHEN[a.when](ctx));
 }
 
 /**
@@ -52,6 +98,16 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    */
   { action: 'export-entry-html', label: '閲覧用 HTML' },
   /**
+   * 🔴 **フォルダのときだけ出す**(#399 ① / #500 案 C)。
+   *
+   * ⚠ 隣の `書き出す` と**同じ形の物**(`.pkc3.zip`)なので真横に置く ──
+   *   違うのは「中に入っているものごと」入る点だけである。
+   * 🔑 **右クリックはフォルダにとって自然な手**である ── フォルダは
+   *   サイドバーとファイラの**行**として現れるので、そこで押せるようになると
+   *   右ペインまで目を移さずに済む。
+   */
+  { action: 'export-folder', label: 'フォルダを書き出す', when: 'folder' },
+  /**
    * 🔴 **右ペインが唯一の入口だった 3 つ**(#500。2026-08-29 に**実測で確定**)。
    *
    * ⚠ この 3 つを画面に出す所は**右ペインの帯 1 か所だけ**だった。ところが実測すると:
@@ -72,6 +128,17 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
   { action: 'export-entry-docx', label: 'Word' },
   { action: 'export-entry-pptx', label: 'PowerPoint' },
   { action: 'export-entry-pdf', label: 'PDF' },
+  /**
+   * 🔴 **開いた元ファイルが在るときだけ出す**(#500 案 C)。
+   *
+   * ⚠ これは**上書き**である ── 上の書き出し 5 つと違って新しい file を作らない。
+   *   だから渡す物の群れの**外**、履歴のすぐ上に置く。
+   * ⚠ 行き先(ファイル名)は右ペインの説明が出している ── メニューは字だけなので、
+   *   **押す前に行き先が読めるのは右ペインだけ**である。
+   *   🔑 それでよい:この口が要るのは「file を開いて直して戻す」最中の user で、
+   *   その人は**自分が何を開いたか知っている**。
+   */
+  { action: 'write-back-file', label: '書き戻す', when: 'linked' },
   { action: 'show-history', label: '履歴' },
   { action: 'delete-entry', label: '削除' },
 ];
@@ -86,15 +153,17 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
  * ⚠ 行の一覧をそのまま出すと、**押した物と効く先が食い違う**
  * (本文を押したのに「削除」が出て、消えるのは選んでいるノート)。
  *
- * ## 🔴 1 つしか置かない
+ * ## 🔴 足すなら理由を 1 つずつ書く
  *
  * #426 自身が「**入口を増やすのは安いが、中身が育つと畳めなくなる**」と書いている。
- * user が頼んだのは **段組みの切替**(#522「センターペインもしくはショートカット、
- * コンテキストメニューに用意したい」)なので、**それだけ**を置く。
- * ⚠ 足したくなったら、**なぜその 1 つが要るか**を #426 に書いてからにする。
+ * ⚠ だから**黙って増やさない** ── 1 行ごとに、なぜここでなければならないかを書く。
+ * いま在るのは 3 つで、理由はそれぞれ下に書いてある(段組み = user の依頼 #522 /
+ * 横に留める = 行から留めると同じ物が 2 枚並ぶ / 取り込み = **本文が開いている
+ * ときにしか数えられない**)。
  *
  * ⚠ **既定を奪う場面は増やさない** ── リンク・図・入力欄・選択範囲の上では
  *   これまでどおりブラウザのメニューが出る(段① が置いた門がそのまま効く)。
+ *
  */
 export const BODY_MENU_ACTIONS: readonly EntryAction[] = [
   { action: 'cycle-read-columns', label: '段組みを切り替える' },
@@ -114,6 +183,43 @@ export const BODY_MENU_ACTIONS: readonly EntryAction[] = [
    */
   { action: 'pin-split', label: 'このノートを横に留める' },
 ];
+
+/**
+ * 🔴 **外部の画像を取り込むの字**(#264 段① / #500 案 C)── **枚数まで含めて 1 か所**。
+ *
+ * ⚠ 押すと**その枚数ぶん外へ通信する**ので、押す前に規模が読める形にする
+ *   (#264 の棄却理由②)。⚠ 数えるのは**宛先の数**である(同じ URL が 2 回出ても 1)。
+ * 🔑 情報ペインと右クリックで**別の字にしない** ── 組み立てをここに持つ。
+ */
+export const ADOPT_IMAGES_LABEL = '外部の画像を取り込む';
+
+/** 枚数つきの字。⚠ 0 枚では呼ばない(0 枚なら出さないので、書く字が無い)。 */
+export function adoptImagesLabel(count: number): string {
+  return `${ADOPT_IMAGES_LABEL}(${count} 枚)`;
+}
+
+/**
+ * 🔴 **本文の上で、いま出せる物だけを返す**(#500 案 C)。
+ *
+ * ## ⚠ なぜ「取り込み」だけ本文の側なのか
+ *
+ * 条件つきの 3 つのうち、`フォルダを書き出す` と `書き戻す` は
+ * **`entryMetas` / `linkedFiles` だけで決まる**ので行のメニューに置ける。
+ * ⚠ ところが「外部の画像が何枚あるか」は**本文を読まないと決まらない** ──
+ *   行を右クリックした瞬間、その本文はまだ届いていないことがある
+ *   (選ばれてから読みに行くので)。
+ * 🔴 そのまま行のメニューへ置くと、**同じ行を押しても出るときと出ないときがある**
+ *   という、いちばん分かりにくい形になる。
+ * 🔑 本文の上なら**開いていることが前提**なので、枚数は必ず数えられる。
+ *   そして user から見ても筋が通る ── 画像は**いま見えている**。
+ */
+export function bodyMenuActions(ctx: { readonly externalImages: number }): readonly EntryAction[] {
+  if (ctx.externalImages <= 0) return BODY_MENU_ACTIONS;
+  return [
+    ...BODY_MENU_ACTIONS,
+    { action: 'adopt-external-images', label: adoptImagesLabel(ctx.externalImages) },
+  ];
+}
 
 /** 綴り → 字。⚠ 情報ペインはこちらを引く(並びは向こうが決める)。 */
 export const ENTRY_ACTION_LABELS: Readonly<Record<string, string>> = Object.fromEntries(

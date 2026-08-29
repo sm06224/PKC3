@@ -73,13 +73,52 @@ function resolveFrom(referrer, ref) {
 
 /**
  * @param {{kind: 'product'|'dev', capKb: number, floorKb: number,
+ *          sidecarCapKb?: number, sidecarFloorKb?: number,
  *          files: {path: string, bytes: number}[],
  *          text: Map<string, string>}} input
  * @returns {{lines: string[], errors: string[]}}
  */
-export function inspectDist({ kind, capKb, floorKb, files, text }) {
+/**
+ * 「持ち歩ける 1 枚」の雛形の**名前**(#400 段④)。⚠ 綴りは 3 か所で一致していなければ
+ * ならない ── `release.yml` / `pages.yml` が置く名前と、ここ。
+ * 🔑 だから **export して `tests/workflow-steps.test.ts` 側から引ける**ようにする
+ *   (片方だけ改名すると、また黙って検品対象に混ざる)。
+ */
+export const PORTABLE_TEMPLATE = 'portable-template.html';
+
+export function inspectDist({
+  kind,
+  capKb,
+  floorKb,
+  sidecarCapKb,
+  sidecarFloorKb,
+  files,
+  text,
+}) {
   const maps = files.filter((f) => f.path.endsWith('.map'));
-  const shipped = files.filter((f) => !f.path.endsWith('.map'));
+  /**
+   * 🔴 **配るが、アプリの一部ではない物**(#400 段④。2026-08-29 に本番を止めて分かった)。
+   *
+   * `portable-template.html` は「持ち歩ける 1 枚」の雛形で、**押したときだけ**
+   * 取りに行く。だから ①SW の precache に載せてはいけない(install のたびに
+   * 7 MB 増える)②アプリの「配る量」に数えてはいけない(訪問者は落とさない)。
+   *
+   * ⚠ **これを知らずに 2 つとも数えていた** ── `release.yml` は自分の検品の**後**に
+   *   この file を足し、`pages.yml` は**その zip を展開して検品する**ので、
+   *   v3.2.0 の本番配布が「precache に載っていない生成物がある」+
+   *   「cap を 6563.8 KB 超過」で落ちた(実測 run 33256868235)。
+   * ⚠ **v3.1.0 の `release.yml` にはこの step が無い**(144 行 / `portable` 0 件)──
+   *   つまり**この経路は今日まで一度も通っていなかった**(§2)。
+   *
+   * 🔑 だから「検品の後に足す」という**順番**に頼るのをやめ、**規則の側**が
+   *   別立てだと知る。⚠ 名前は**丸ごと一致**で見る(#225 の教訓 ── 尻だけ留めると
+   *   前に伸びた名前に当たる)。
+   * ⚠ `dev` 側の `_site/dev/portable-template.html` は**ここへ書かない** ──
+   *   `check-dist.mjs dev` は `dist/` を見るので、そこにこの file は**存在しえない**
+   *   (成り立たない条件を書かない。§1)。
+   */
+  const sidecar = files.filter((f) => f.path === PORTABLE_TEMPLATE);
+  const shipped = files.filter((f) => !f.path.endsWith('.map') && f.path !== PORTABLE_TEMPLATE);
   const kb = (b) => (b / 1024).toFixed(1);
   const shippedBytes = shipped.reduce((a, f) => a + f.bytes, 0);
   const mapBytes = maps.reduce((a, f) => a + f.bytes, 0);
@@ -178,6 +217,17 @@ export function inspectDist({ kind, capKb, floorKb, files, text }) {
       }
       const want = shipped.map((f) => f.path).filter((p) => p !== 'sw.js');
       const have = new Set(listed.map((u) => u.replace(/^\.\//, '')));
+      /**
+       * 🔴 **両方向を見る**(#225 の教訓)。上の `want` から外しただけだと
+       *   「載っていない」しか守れない ── **載せてしまった**ときに鳴らない。
+       * ⚠ 載せると install のたびに 7 MB 落ちる(しかも二重に持つ)。
+       */
+      if (have.has(PORTABLE_TEMPLATE)) {
+        errors.push(
+          `precache に ${PORTABLE_TEMPLATE} が載っている ── ` +
+            'これは押したときだけ取りに行く雛形で、install で落とす物ではない',
+        );
+      }
       const missing = want.filter((p) => !have.has(p));
       const extra = [...have].filter((p) => !want.includes(p));
       if (listed.length === 0) {
@@ -216,6 +266,38 @@ export function inspectDist({ kind, capKb, floorKb, files, text }) {
   // PR gate に足さない(CI を長くしない・user 指示 2026-07-30)。
   // 🔑 手違いの検出であって、サイズを守らせる規律ではない ── 通常増減で触れたら
   // 動かしてよい。止めたいのは誤取込・取り違えという**桁の事故**である。
+  /**
+   * 🔴 **別立てにしたぶん、別立ての門を置く**(2026-08-29)。
+   *
+   * ⚠ アプリの cap から外した瞬間、この file は**どんな大きさでも通る**ようになる ──
+   *   0 バイトでも、誤って 100 MB でも。それは tripwire を 1 つ**撤廃した**のと同じである
+   *   (CLAUDE.md「予算は手違いの検出。⚠ 撤廃はしない」)。
+   * 🔑 実測 **7051.7 KB**(2026-08-29、`VITE_PKC_KIND=product npm run build:portable`)──
+   *   アプリ本体を 1 枚へ inline するので、binary が base64 で膨らむぶん本体より大きい。
+   * ⚠ 予算が**渡っていない**ときは黙って通さない ── optional にすると、
+   *   呼び側が渡し忘れた日に**門ごと消える**(§7「待ちの口は optional にしない」)。
+   */
+  if (sidecar.length > 0) {
+    const bytes = sidecar.reduce((a, f) => a + f.bytes, 0);
+    lines.push(`  別立て: ${PORTABLE_TEMPLATE} ${kb(bytes)} KB(precache しない / cap の外)`);
+    if (sidecarCapKb === undefined || sidecarFloorKb === undefined) {
+      errors.push(
+        `${PORTABLE_TEMPLATE} が在るのに、その予算が渡っていない ── ` +
+          '呼び側が `sidecarCapKb` / `sidecarFloorKb` を渡していない(門が消えている)',
+      );
+    } else if (bytes > sidecarCapKb * 1024) {
+      errors.push(
+        `${PORTABLE_TEMPLATE} が cap を ${kb(bytes - sidecarCapKb * 1024)} KB 超過` +
+          `(cap ${sidecarCapKb} KB)。取り違えでなければ引き上げてよい`,
+      );
+    } else if (bytes < sidecarFloorKb * 1024) {
+      errors.push(
+        `${PORTABLE_TEMPLATE} が下限を ${kb(sidecarFloorKb * 1024 - bytes)} KB 下回る` +
+          `(下限 ${sidecarFloorKb} KB)── 空 / 途中で切れた雛形を配ろうとしている`,
+      );
+    }
+  }
+
   const capBytes = capKb * 1024;
   const floorBytes = floorKb * 1024;
   const remain = capBytes - shippedBytes;

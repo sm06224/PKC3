@@ -24,6 +24,9 @@ type Input = {
   kind: 'product' | 'dev';
   capKb: number;
   floorKb: number;
+  /** 「持ち歩ける 1 枚」の雛形だけの予算(#400 段④)。⚠ 雛形が在るのに欠けたら鳴る。 */
+  sidecarCapKb?: number;
+  sidecarFloorKb?: number;
   files: File[];
   text: Map<string, string>;
 };
@@ -448,5 +451,96 @@ describe('配る量の床(kind ごと)', () => {
   it('⚠ それでも「空 / 途中で切れた」は弾く(床を 0 にしていない)', () => {
     // 検出したいのは chunk の欠落・取り違え ── 数百 KB を下回る product はありえない
     expect(floors['product'], 'product の床が緩すぎる').toBeGreaterThanOrEqual(500);
+  });
+});
+
+/**
+ * 🔴 **「持ち歩ける 1 枚」の雛形は、アプリの一部ではない**(#400 段④)。
+ *
+ * ## この節が在るのは、本番配布を実際に止めたからである(2026-08-29)
+ *
+ * `release.yml` は自分の検品の**後**に `portable-template.html` を zip へ足し、
+ * `pages.yml` は**その zip を展開して検品する** ── つまり「検品の後に足す」という
+ * **順番**に頼っていた。v3.2.0 の本番配布はそこで落ちた(run 33256868235):
+ *
+ *     ✗ precache に載っていない生成物がある: portable-template.html
+ *     ✗ 配る量が cap を 6563.8 KB 超過(cap 7000 KB)
+ *
+ * ⚠ **v3.1.0 の `release.yml` にはこの step が無い**(144 行 / `portable` 0 件)──
+ *   この経路は**一度も通っていなかった**(CLAUDE.md §2)。
+ *
+ * 🔑 だから順番ではなく**規則の側**が知る。そして
+ *   **外したぶんの門を、外した場所に置き直す**(撤廃しない)。
+ */
+describe('🔴 持ち歩ける 1 枚の雛形(#400 段④ / 2026-08-29 に本番を止めた)', () => {
+  const PORTABLE = 'portable-template.html';
+  /** 健全な product に、実測と同じ大きさの雛形を足す。 */
+  function withPortable(bytes = 7_220_940): Input {
+    const i = healthy('product');
+    i.files.push({ path: PORTABLE, bytes });
+    i.sidecarCapKb = 9000;
+    i.sidecarFloorKb = 3000;
+    return i;
+  }
+
+  it('🔴 雛形が入っていても通る(本番配布を止めた 2 件が両方消えている)', () => {
+    const errs = run(withPortable());
+    expect(errs).toEqual([]);
+  });
+
+  it('🔴 **対照群** ── 同じ大きさを普通の生成物として足すと、ちゃんと cap で鳴る', () => {
+    /**
+     * ⚠ これが無いと「雛形を除いた」のか「cap の判定ごと死んだ」のか見分けられない
+     *   (CLAUDE.md §1「救い手が変わっただけ」)。
+     */
+    const i = healthy('product');
+    i.files.push({ path: 'assets/huge-EEEEEEEE.js', bytes: 7_220_940 });
+    expect(run(i).join('')).toContain('cap を');
+  });
+
+  it('🔴 precache に**載せてしまった**ら鳴る(install で 7 MB 落とさせない)', () => {
+    const i = withPortable();
+    const sw = i.text.get('sw.js')!;
+    i.text.set('sw.js', sw.replace('];', `,"./${PORTABLE}"];`));
+    expect(run(i).join('')).toContain('precache に portable-template.html が載っている');
+  });
+
+  it('⚠ 逆向き ── precache に載っていなくても鳴らない(除外が効いている)', () => {
+    expect(run(withPortable()).join('')).not.toContain('precache に載っていない');
+  });
+
+  it('🔴 予算を渡し忘れたら鳴る(門ごと消えたことに気づける)', () => {
+    const i = withPortable();
+    delete i.sidecarCapKb;
+    expect(run(i).join('')).toContain('その予算が渡っていない');
+    const j = withPortable();
+    delete j.sidecarFloorKb;
+    expect(run(j).join('')).toContain('その予算が渡っていない');
+  });
+
+  it('🔴 雛形が肥ったら鳴る(誤取込 1 本を止める)', () => {
+    expect(run(withPortable(12_000_000)).join('')).toContain(
+      'portable-template.html が cap を',
+    );
+  });
+
+  it('🔴 雛形が空 / 途中で切れていたら鳴る', () => {
+    /**
+     * ⚠ **ここが要る理由**:雛形を `shipped` から外した瞬間、
+     *   「空のファイルが出荷されている」検査は**この file に届かなくなった**。
+     *   外したぶんの門を置き直していなければ、**0 バイトの雛形を配って緑**になる。
+     */
+    expect(run(withPortable(0)).join('')).toContain('portable-template.html が下限を');
+    expect(run(withPortable(1_000_000)).join('')).toContain('portable-template.html が下限を');
+  });
+
+  it('⚠ 雛形はアプリの「配る量」に数えない(数字そのものを見る)', () => {
+    const base = inspect(healthy('product')).lines.join('\n');
+    const withIt = inspect(withPortable()).lines.join('\n');
+    const grab = (s: string): string => /配る量: ([\d.]+) KB/.exec(s)?.[1] ?? '';
+    expect(grab(withIt), '雛形の分だけ配る量が増えている').toBe(grab(base));
+    // ⚠ 空振り防止 ── 別立ての行はちゃんと出ている(黙って消していない)
+    expect(withIt).toContain('別立て: portable-template.html');
+    expect(base, '雛形が無いのに別立ての行が出ている').not.toContain('別立て:');
   });
 });
