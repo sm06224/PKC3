@@ -1,0 +1,262 @@
+/** @vitest-environment happy-dom */
+/**
+ * 🔴 **読む面を横に並べる**(#505 段②)── 画面に何が出るか。
+ *
+ * ⚠ ここで**いちばん大事な 1 件**は「留めた枠に `detail-*` が生えないこと」である。
+ * 生えると、本文を押したときの受け手(`binder.ts` の
+ * `closest('[data-pkc-field="detail-body"]')` が 4 か所)が**留めた枠の押しを
+ * 主の枠の押しとして扱う** ── 留めた枠の行番号で**選んでいるノートを書き換える**、
+ * という「押した物と効く先が食い違う」事故になる。
+ */
+import { describe, expect, it } from 'vitest';
+import { Dispatcher } from '../../src/adapter/state/dispatcher';
+import { CenterRouter } from '../../src/adapter/ui/render/center';
+
+async function settle(): Promise<void> {
+  for (let i = 0; i < 12; i += 1) await Promise.resolve();
+}
+
+function boot(): { root: HTMLElement; d: Dispatcher; center: CenterRouter; said: string[] } {
+  const root = document.createElement('div');
+  root.setAttribute('data-pkc-region', 'detail');
+  document.body.append(root);
+  const said: string[] = [];
+  const center = new CenterRouter(root, undefined, null, undefined, undefined, (t) => said.push(t));
+  const d = new Dispatcher();
+  d.dispatch({
+    type: 'SYS_BOOTED',
+    cid: 'c1',
+    metas: [
+      { lid: 'a', title: '資料 A', archetype: 'text' },
+      { lid: 'b', title: '資料 B', archetype: 'text' },
+    ] as never,
+    relations: [],
+  });
+  d.onState((s) => center.render(s));
+  return { root, d, center, said };
+}
+
+/** その面に在る `data-pkc-field` の値を全部。 */
+function fieldsIn(el: Element): string[] {
+  return [...el.querySelectorAll('[data-pkc-field]')].map(
+    (n) => n.getAttribute('data-pkc-field') ?? '',
+  );
+}
+
+describe('既定は 1 枠 ── 何も留めなければ画面は変わらない', () => {
+  /**
+   * 🔴 **見るのは「器が在るか」ではなく「送りの持ち主が誰か」**である。
+   *
+   * ⚠ 1 稿目は `split-row` が 0 件であることを見ていたが、実装は**器を最初から
+   * 作る**形に変わった(主の renderer が器を握るので後から差し替えられない)。
+   * 🔑 器が在ること自体は害ではない ── 害になるのは
+   * **`DetailRenderer` の送りの持ち主(`scroller`)が外の器から移ってしまう**ことで、
+   * それは `closest('[data-pkc-region="split-frame"]')` が当たるかで決まる。
+   * だから**そこを見る**。
+   */
+  it('🔴 印が付かず、送りの持ち主も今までどおり(外の器)', async () => {
+    const { root, d } = boot();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: '# A\n' });
+    await settle();
+    expect(root.querySelector('[data-pkc-view-pane="detail"]')?.hasAttribute('data-pkc-split')).toBe(
+      false,
+    );
+    const body = root.querySelector('[data-pkc-field="detail-body"]');
+    // ⚠ 前提: 主の枠は描けている(空振りで通っていない)
+    expect(body).not.toBeNull();
+    expect(root.querySelector('[data-pkc-field="detail-title"]')?.textContent).toBe('資料 A');
+    // 🔑 `scroller` が掴むのはこれ ── 当たらない = 外の器のまま
+    expect(body!.closest('[data-pkc-region="split-frame"]')).toBeNull();
+  });
+
+  it('🔴 留めると、主の枠も自分で送るようになる(枠ごとに送る)', async () => {
+    const { root, d } = boot();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: '# A\n' });
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'b' });
+    await settle();
+    const body = root.querySelector('[data-pkc-field="detail-body"]')!;
+    expect(body.closest('[data-pkc-region="split-frame"]')).not.toBeNull();
+    expect(root.querySelector('[data-pkc-view-pane="detail"]')?.getAttribute('data-pkc-split')).toBe(
+      'on',
+    );
+  });
+});
+
+describe('留めると横に並ぶ', () => {
+  it('🔴 枠が出て、その中に留めたノートの題名と本文が出る', async () => {
+    const { root, d } = boot();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: '# A\n' });
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'b' });
+    d.dispatch({ type: 'SPLIT_BODY_LOADED', lid: 'b', body: '# B の本文\n' });
+    await settle();
+    const frame = root.querySelector('[data-pkc-split-lid="b"]');
+    expect(frame).not.toBeNull();
+    expect(frame!.querySelector('[data-pkc-field="split-title"]')?.textContent).toBe('資料 B');
+    expect(frame!.textContent).toContain('B の本文');
+  });
+
+  it('🔴 留めた枠に `detail-*` は 1 つも生えない(押した物と効く先を食い違わせない)', async () => {
+    const { root, d } = boot();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: '# A\n' });
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'b' });
+    d.dispatch({ type: 'SPLIT_BODY_LOADED', lid: 'b', body: '# B\n' });
+    await settle();
+    const frame = root.querySelector('[data-pkc-split-lid="b"]')!;
+    // ⚠ 前提: この枠に field が 1 つ以上在る(空の枠を「無い」と読まない)
+    expect(fieldsIn(frame).length).toBeGreaterThan(0);
+    expect(fieldsIn(frame).filter((f) => f.startsWith('detail-'))).toEqual([]);
+    // 🔑 主の枠のほうは今までどおり `detail-*` である
+    const main = root.querySelector('[data-pkc-split-main]')!;
+    expect(fieldsIn(main)).toContain('detail-body');
+  });
+
+  it('🔴 留めた枠には帯(編集など)を出さない ── 直るのは主の枠のほうだから', async () => {
+    const { root, d } = boot();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: '# A\n' });
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'b' });
+    d.dispatch({ type: 'SPLIT_BODY_LOADED', lid: 'b', body: '# B\n' });
+    await settle();
+    const frame = root.querySelector('[data-pkc-split-lid="b"]')!;
+    expect(frame.querySelector('[data-pkc-action="start-edit"]')).toBeNull();
+    // ⚠ 前提: 主の枠には在る(「そもそも帯が無い」で通っていない)
+    const main = root.querySelector('[data-pkc-split-main]')!;
+    expect(main.querySelector('[data-pkc-action="start-edit"]')).not.toBeNull();
+  });
+
+  it('🔴 外す口が在る(置けるなら外せる)', async () => {
+    const { root, d } = boot();
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'b' });
+    await settle();
+    const off = root.querySelector('[data-pkc-action="unsplit-entry"]');
+    expect(off).not.toBeNull();
+    expect(off!.getAttribute('data-pkc-lid')).toBe('b');
+  });
+
+  it('🔴 外すと枠ごと消え、器も畳まれる', async () => {
+    const { root, d } = boot();
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'b' });
+    await settle();
+    expect(root.querySelectorAll('[data-pkc-split-lid]')).toHaveLength(1);
+    d.dispatch({ type: 'UNPIN_SPLIT_ENTRY', lid: 'b' });
+    await settle();
+    expect(root.querySelectorAll('[data-pkc-split-lid]')).toHaveLength(0);
+    // 🔑 印が外れる = CSS も送りの持ち主も**今までどおり**へ戻る
+    expect(root.querySelector('[data-pkc-view-pane="detail"]')?.hasAttribute('data-pkc-split')).toBe(
+      false,
+    );
+    // 🔑 畳んだ後も主の枠は生きている(器の出し入れで壊していない)
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: '# A\n' });
+    await settle();
+    expect(root.querySelector('[data-pkc-field="detail-title"]')?.textContent).toBe('資料 A');
+  });
+});
+
+describe('🔴 留めても、いま読んでいる位置が飛ばない(変異試験 M5 が空いていた)', () => {
+  /**
+   * ⚠ `DetailRenderer` は骨組みを組み直したあと `scroller.scrollTop` を戻す。
+   * その `scroller` は「**いちばん近い枠、無ければ外の器**」で決まる ──
+   * 🔴 **枠を見る側を落とすと、留めた枠の初回描画が外の器を 0 へ戻す** =
+   * user から見れば「横に留めたら、読んでいた場所が先頭へ飛んだ」。
+   * ⚠ これは DOM の形(親が居るか)を見る test では死なない ── **位置そのもの**を見る。
+   */
+  it('留めた枠を出しても、外の器の送りは動かない', async () => {
+    const { root, d } = boot();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: '# A\n' });
+    await settle();
+    root.scrollTop = 300;
+    // ⚠ 前提: 送れたこと(0 のままなら空振り)
+    expect(root.scrollTop).toBe(300);
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'b' });
+    d.dispatch({ type: 'SPLIT_BODY_LOADED', lid: 'b', body: '# B\n' });
+    await settle();
+    expect(root.scrollTop, '留めたら読んでいた場所が飛んだ').toBe(300);
+  });
+});
+
+describe('🔴 一覧を押しても、留めた枠は動かない', () => {
+  it('主の枠だけ入れ替わる', async () => {
+    const { root, d } = boot();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: '# A\n' });
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'b' });
+    d.dispatch({ type: 'SPLIT_BODY_LOADED', lid: 'b', body: '# B\n' });
+    await settle();
+    const main = root.querySelector('[data-pkc-split-main]')!;
+    expect(main.querySelector('[data-pkc-field="detail-title"]')?.textContent).toBe('資料 A');
+    // 別のノートを開く
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'b' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'b', body: '# B\n' });
+    await settle();
+    expect(main.querySelector('[data-pkc-field="detail-title"]')?.textContent).toBe('資料 B');
+    // 🔑 留めた枠は「資料 B」のまま(消えていない・入れ替わっていない)
+    const frame = root.querySelector('[data-pkc-split-lid="b"]');
+    expect(frame).not.toBeNull();
+    expect(frame!.querySelector('[data-pkc-field="split-title"]')?.textContent).toBe('資料 B');
+  });
+});
+
+describe('🔴 知らないノートの枠は出さない(変異試験 M12 が空いていた)', () => {
+  /**
+   * ⚠ 「消したら消える」は **reducer 側**(`removeEntryFromState`)が守っている ──
+   * だから描画側の絞り(`knownSplitLids`)を外しても、その test では死なない。
+   * 🔑 描画側が守っているのは**別の場面**である:憶えていた並びを起動時に戻したが、
+   * そのノートが**もう居ない**とき。effect が本文 `null` を受けて外すまでの間、
+   * ここが止めていないと **開けない lid を指す空の枠**が出る。
+   */
+  it('起動で戻した並びに居ないノートが混ざっていても、枠は出ない', async () => {
+    const { root, d } = boot();
+    d.dispatch({ type: 'SPLIT_RESTORED', lids: ['b', 'gone'] });
+    await settle();
+    // ⚠ 前提: 片方は在るので、枠は 1 つ出る(「そもそも出ない」で通っていない)
+    expect(root.querySelectorAll('[data-pkc-split-lid]')).toHaveLength(1);
+    expect(root.querySelector('[data-pkc-split-lid="gone"]')).toBeNull();
+    // 🔑 state には残っている(黙って忘れない ── 外すのは effect の仕事)
+    expect(d.getState().splitLids).toEqual(['b', 'gone']);
+  });
+});
+
+describe('🔴 編集に入っても、分割は解かない(user 裁定 2026-08-28)', () => {
+  /**
+   * ⚠ 設計の初稿は「編集に入ったら分割を解く」だった ── 理由は user の字が
+   * 「**閲覧時に**分割したい」だったから。🔴 **その読みは狭かった**。
+   * 段組み(段①)で同じ判断を一度し、**#543 で覆されている**:
+   * 「段組のままでインライン編集がしたい」。⚠ 段② で繰り返さない。
+   */
+  it('編集に入っても、留めた枠は出たまま', async () => {
+    const { root, d } = boot();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: '# A\n' });
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'b' });
+    d.dispatch({ type: 'SPLIT_BODY_LOADED', lid: 'b', body: '# B\n' });
+    await settle();
+    expect(root.querySelectorAll('[data-pkc-split-lid]')).toHaveLength(1);
+    d.dispatch({ type: 'START_EDIT' });
+    await settle();
+    // ⚠ 前提: 本当に編集へ入ったこと(空振りで通っていない)
+    expect(d.getState().phase).toBe('editing');
+    expect(root.querySelectorAll('[data-pkc-split-lid]'), '編集に入ったら枠が消えた').toHaveLength(1);
+    expect(
+      root.querySelector('[data-pkc-split-lid] [data-pkc-field="split-body"]'),
+      '編集中に留めた枠の本文が消えた',
+    ).not.toBeNull();
+  });
+});
+
+describe('消したノートの枠は残らない', () => {
+  it('🔴 消すと枠も消える', async () => {
+    const { root, d } = boot();
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'b' });
+    await settle();
+    expect(root.querySelectorAll('[data-pkc-split-lid]')).toHaveLength(1);
+    d.dispatch({ type: 'DELETE_ENTRIES', lids: ['b'] });
+    await settle();
+    expect(root.querySelectorAll('[data-pkc-split-lid]')).toHaveLength(0);
+  });
+});

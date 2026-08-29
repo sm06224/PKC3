@@ -72,6 +72,10 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
  */
 export const SKIPPED_KEYS: readonly { readonly key: string; readonly why: string }[] = [
   {
+    key: 'pkc3.split-lids',
+    why: '中身が lid そのもの(#505 段②)── 別の端末・別の container へ運ぶと、そこに居ないノートを指す枠が復活する。並べ方は運べても「どのノートか」は運べない',
+  },
+  {
     key: 'pkc3.flags',
     why: 'flag は設定ではない(15 枠 + 畳む条件の宣言 + フラグ画面という別の機構)。運ぶと畳む条件を跨いで別の端末へ持ち込むことになる',
   },

@@ -3,6 +3,7 @@
 import './styles/app.css';
 
 import { Dispatcher } from '@adapter/state/dispatcher';
+import { loadSplitLids, saveSplitLids } from '@adapter/platform/split-store';
 import { isAsidePane, viewModeLabel, type ViewMode } from '@adapter/state/app-state';
 import { bindEditLockRelease } from '@adapter/state/edit-lock-release';
 import { connectStoreEffects, type StoreEffects } from '@adapter/state/store-effects';
@@ -758,12 +759,21 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   // 🔑 追記欄は**本文とは別の器**(P8 段⑧)── 本文は追記のたびに書き換わって
   // 再描画されるので、同じ器に入れると打ちかけの文字も focus も消える
   const appendBox = new AppendBoxRenderer(regions.append);
+  /**
+   * 🔴 **横に並べた並びを憶える**(#505 段②)。
+   * ⚠ **変わったときだけ**書く ── 毎 state で書くと、打鍵のたびに localStorage を叩く。
+   */
+  let lastSplit: readonly string[] = [];
   dispatcher.onState((state) => {
     browse.render(state, browseMode);
     center.render(state);
     appendBox.render(state);
     inspector.render(state);
     markView(state.viewMode);
+    if (state.splitLids !== lastSplit) {
+      lastSplit = state.splitLids;
+      saveSplitLids(state.splitLids);
+    }
   });
   // status: provenance + エラーの可視化(review B-1 ── 無言の操作拒否を作らない)
   // 🔑 常時見えるのは**版だけ**(P8)。`opfs-sahpool` のような開発者語は
@@ -2797,6 +2807,19 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   if (appDualPrefs.isPreviewOn()) {
     dispatcher.dispatch({ type: 'DUAL_SET_PREVIEW', on: true });
+  }
+  /**
+   * 🔑 **前に横へ留めたノートは、次に開いても留まっている**(#505 段②)。
+   *
+   * ⚠ 憶えているのは端末側(`localStorage`)、効かせるのは state である ──
+   *   `DUAL_SET_PREVIEW` と同じ作法で、起動で 1 度だけ写す。
+   * ⚠ `SYS_BOOTED` の**後**に出す(前だと boot が state を組み直して消える)。
+   * ⚠ 消えたノートの lid が混ざっていても構わない ── 本文が読めなかった分は
+   *   effect が `UNPIN_SPLIT_ENTRY` で外す(自己修復)。
+   */
+  const restoredSplit = loadSplitLids();
+  if (restoredSplit.length > 0) {
+    dispatcher.dispatch({ type: 'SPLIT_RESTORED', lids: restoredSplit });
   }
   /**
    * 🔑 **覚えている探し方が「予定」なら、起動でそのまま集める**(#292 段⑤)。

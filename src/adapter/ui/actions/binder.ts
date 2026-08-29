@@ -3928,6 +3928,25 @@ const ACTIONS: Record<string, ActionHandler> = {
   'cycle-read-columns': (_dispatcher, _target, services, root) => {
     cycleReadColumns(root, (text) => services.showStatus?.(text));
   },
+  /**
+   * 🔴 **いま読んでいるノートを横へ留める**(#505 段②)。
+   *
+   * ⚠ 押し所は**本文の右クリック**なので、対象は `selectedLid` である
+   * (行から押すと、その行が選ばれてしまって**同じ物が 2 枚並ぶ**)。
+   * ⚠ **断り文はここに書かない** ── 満杯・フォルダの理由は reducer が 1 か所で
+   * 出す(2 か所に規則を置かない。CLAUDE.md §7)。
+   */
+  'pin-split': (dispatcher) => {
+    const lid = dispatcher.getState().selectedLid;
+    if (lid === null) return;
+    dispatcher.dispatch({ type: 'PIN_SPLIT_ENTRY', lid });
+  },
+  /** 🔴 **外す**(#505 段②)。⚠ 置けるなら外せる ── 枠の中の `× 外す` が押す。 */
+  'unsplit-entry': (dispatcher, target) => {
+    const lid = target.closest<HTMLElement>('[data-pkc-lid]')?.getAttribute('data-pkc-lid');
+    if (lid === null || lid === undefined || lid === '') return;
+    dispatcher.dispatch({ type: 'UNPIN_SPLIT_ENTRY', lid });
+  },
   'open-tile': (_dispatcher, target, services) => {
     const lid = target.closest('[data-pkc-tile]')?.getAttribute('data-pkc-tile');
     if (lid) services.openTile?.(lid);

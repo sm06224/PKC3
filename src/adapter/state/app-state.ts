@@ -16,6 +16,12 @@ import { isPlaceOpen } from '@features/markdown/place-notation';
 import { replaceTaskCards, type TaskScan } from '@features/schedule/task-cards';
 import type { ContactScan } from '@features/contact/contact-card';
 import type { SnippetScan } from '@features/snippet/snippet-table';
+import {
+  normalizeSplitLids,
+  pinSplitLid,
+  SPLIT_PINNED_MAX,
+  unpinSplitLid,
+} from '@features/split-frames';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import type { PersistState } from '@adapter/platform/storage-persist';
 import type { OpenExtension } from '@adapter/platform/extension-links';
@@ -427,6 +433,26 @@ export interface AppState {
   /** 範囲選択(`Shift`)の起点。⚠ 押すたびに更新する ── 起点が古いと範囲が飛ぶ。 */
   selectionAnchor: string | null;
   /**
+   * 🔴 **横に並べて留めたノート**(#505 段②。user 指示 2026-08-28)。
+   *
+   * > 「ウルトラワイドモニター用に閲覧時にセンターペインを任意分割して、
+   * > **複数ドキュメントを開いたり**…」
+   *
+   * ⚠ **主の枠は `selectedLid`** であって、ここには入らない ── 主は一覧を押すたびに
+   * 変わり、こちらは **user が留める / 外すときだけ**変わる。混ぜると
+   * 「押した瞬間に相手が消える」= 突き合わせが成立しない。
+   * 🔑 並びは**留めた順**。上限と正規化は `features/split-frames.ts` が 1 か所で持つ。
+   */
+  splitLids: readonly string[];
+  /**
+   * 留めた枠に出す本文。⚠ **無い = まだ読めていない**(空文字ではない)。
+   *
+   * ⚠ `openBody` とは**別の入れ物**である ── あちらは「編集しうる 1 件」、
+   * こちらは「**映すだけ**の N 件」。同じ口に混ぜると、留めた枠の本文が
+   * 編集中の下書きを踏む(`REQUEST_DUAL_PREVIEW` を分けたのと同じ理由)。
+   */
+  splitBodies: ReadonlyMap<string, string>;
+  /**
    * 🔴 **いま開いている拡張の窓**(#195 / C-5 段②-b)。
    *
    * ⚠ **なぜ state に載せるのか** ── 台帳の実体は
@@ -749,6 +775,8 @@ export const initialState: AppState = {
   dual: initialDual,
   selection: [],
   selectionAnchor: null,
+  splitLids: [],
+  splitBodies: new Map<string, string>(),
   openExtensions: [],
   freshLid: null,
   viewMode: 'detail',
@@ -791,6 +819,14 @@ export const initialState: AppState = {
 };
 
 export type UserAction =
+  /**
+   * 🔴 **このノートを横に並べる / 並べるのをやめる**(#505 段②)。
+   *
+   * ⚠ **対で置く**(user 指示 2026-08-23「なんで双方向にする発想がでねぇんだよ!」)
+   * ── 置けるのに外せないと、間違えて留めた物を戻す道が無い。
+   */
+  | { type: 'PIN_SPLIT_ENTRY'; lid: string }
+  | { type: 'UNPIN_SPLIT_ENTRY'; lid: string }
   | { type: 'SELECT_ENTRY'; lid: string }
   | { type: 'SET_VIEW_MODE'; mode: ViewMode }
   /**
@@ -1213,6 +1249,13 @@ export type UserAction =
 export type SystemCommand =
   | { type: 'SYS_BOOTED'; cid: string; metas: EntryMeta[]; relations: Relation[] }
   | { type: 'BODY_LOADED'; lid: string; body: string }
+  /**
+   * 留めた枠の本文が読めた(#505 段②)。⚠ `BODY_LOADED` と**別の口**である ──
+   * あちらは `openBody` を作る(= 編集の下書きになる)。
+   */
+  | { type: 'SPLIT_BODY_LOADED'; lid: string; body: string }
+  /** 前回の並びを憶えていたので戻す(#505 段②)。⚠ 起動時に 1 度だけ。 */
+  | { type: 'SPLIT_RESTORED'; lids: readonly string[] }
   | { type: 'BODY_LOAD_FAILED'; lid: string; error: string }
   | { type: 'BODY_PERSISTED'; lid: string; body: string }
   /**
@@ -1340,6 +1383,15 @@ export type DomainEvent =
    *   別経路で読むと、並んでいる書込を追い越す(2026-08-17 に踏んだ形)。
    */
   | { type: 'REQUEST_DUAL_PREVIEW'; lid: string }
+  /**
+   * 🔴 **留めた枠の本文を読む**(#505 段②)。
+   *
+   * ⚠ `REQUEST_BODY` / `REQUEST_DUAL_PREVIEW` と**行き先が違う**ので分けてある
+   * (`openBody` / 下見 / 留めた枠)。🔑 ただし**読む口は 1 本**
+   * (`store.getBody`)で、**同じ直列の列**に並べる ── 別経路で読むと、
+   * 並んでいる書込を追い越す(2026-08-17 に踏んだ形)。
+   */
+  | { type: 'REQUEST_SPLIT_BODY'; lid: string }
   /**
    * 🔴 **スマートフォルダの中身を集める**(#421 段①)。
    *
@@ -3039,14 +3091,23 @@ function reduceCore(
        */
       return { state: { ...state, showUndatedTasks: !state.showUndatedTasks }, events: [] };
     case 'BODY_PERSISTED': {
+      /**
+       * 🔴 **留めた枠にも同じノートが出ていることがある**(#505 段②)。
+       * ⚠ ここで追随させないと、主の枠で直しても**留めた枠だけ古いまま**になる。
+       * ⚠ `openBody` の早期 return の**前**に置く ── 後ろに置くと、
+       *   選択が移った後の ack で留めた枠が更新されない(片側だけ在る非対称)。
+       */
+      const persistedSplit = syncSplitBody(state, action.lid, action.body);
+      const base =
+        persistedSplit === state.splitBodies ? state : { ...state, splitBodies: persistedSplit };
       // ack された内容を disk 事実として記録(選択が移って openBody が破棄
       // 済みなら捨てる ── stale ack で別 entry の作業域を汚さない)
       if (!state.openBody || state.openBody.lid !== action.lid)
-        return { state, events: [] };
+        return { state: base, events: [] };
       const ob = state.openBody;
-      if (ob.persisted === action.body) return { state, events: [] };
+      if (ob.persisted === action.body) return { state: base, events: [] };
       return {
-        state: { ...state, openBody: { ...ob, persisted: action.body } },
+        state: { ...base, openBody: { ...ob, persisted: action.body } },
         events: [],
       };
     }
@@ -3060,15 +3121,20 @@ function reduceCore(
      *   (`ENTRY_RESTORED` / `BODY_REWRITTEN` の編集中分岐と同じ作法)。
      */
     case 'REMOTE_BODY_CHANGED': {
+      // 🔴 留めた枠は**編集中かどうかに関わらず**追随させる(#505 段②)──
+      //    別の窓が書いたものを、こちらの留めた枠が古いまま映し続けない
+      const remoteSplit = syncSplitBody(state, action.lid, action.body);
+      const base =
+        remoteSplit === state.splitBodies ? state : { ...state, splitBodies: remoteSplit };
       // ⚠ 編集中だけ ── `ready` は `reloadSnapshot` が先送りなしで面倒を見る
       //   (両方で受けると、同じ問いに答える口が 2 つになる。CLAUDE.md §7)
-      if (state.phase !== 'editing') return { state, events: [] };
+      if (state.phase !== 'editing') return { state: base, events: [] };
       const ob = state.openBody;
-      if (!ob || ob.lid !== action.lid) return { state, events: [] };
+      if (!ob || ob.lid !== action.lid) return { state: base, events: [] };
       // ⚠ 自分が書いた内容がそのまま返ってきた回は印を立てない(自分と衝突しない)
-      if (ob.persisted === action.body) return { state, events: [] };
+      if (ob.persisted === action.body) return { state: base, events: [] };
       return {
-        state: { ...state, openBody: { ...ob, persisted: action.body, diskAhead: true } },
+        state: { ...base, openBody: { ...ob, persisted: action.body, diskAhead: true } },
         events: [],
       };
     }
@@ -3958,6 +4024,71 @@ function reduceCore(
     }
     case 'SMART_RESCAN':
       return { state, events: smartScanFor(state, action.lid) };
+    case 'PIN_SPLIT_ENTRY': {
+      const meta = state.entryMetas.get(action.lid);
+      // ⚠ 居ないものは留めない(消えた lid を指す枠を作らない)
+      if (meta === undefined) return { state, events: [] };
+      /**
+       * ⚠ **フォルダは本文を持たない** ── 留めると枠が永久に空になる。
+       * 🔑 断るときは**理由を言う**(黙って何も起きないのが dead click である)。
+       */
+      if (meta.archetype === 'folder')
+        return {
+          state: { ...state, notice: 'フォルダは横に並べられません(本文がありません)' },
+          events: [],
+        };
+      const pinned = pinSplitLid(state.splitLids, action.lid);
+      if (pinned === state.splitLids) {
+        // ⚠ 「既に在る」と「満杯」を分ける ── 前者は黙ってよいが、後者は言う
+        if (state.splitLids.includes(action.lid)) return { state, events: [] };
+        return {
+          state: {
+            ...state,
+            notice: `横に並べられるのは ${SPLIT_PINNED_MAX} 件までです`,
+          },
+          events: [],
+        };
+      }
+      return {
+        state: { ...state, splitLids: pinned },
+        // ⚠ 既に読めているなら読み直さない(留め直すたびに全文を往復させない)
+        events: state.splitBodies.has(action.lid)
+          ? []
+          : [{ type: 'REQUEST_SPLIT_BODY', lid: action.lid }],
+      };
+    }
+    case 'UNPIN_SPLIT_ENTRY': {
+      const rest = unpinSplitLid(state.splitLids, action.lid);
+      if (rest === state.splitLids) return { state, events: [] };
+      return {
+        state: { ...state, splitLids: rest, splitBodies: dropSplitBody(state.splitBodies, action.lid) },
+        events: [],
+      };
+    }
+    case 'SPLIT_BODY_LOADED': {
+      /**
+       * ⚠ **追い越しを捨てる**(`DUAL_PREVIEW_LOADED` と同じ)── 読みは非同期なので、
+       * 外した後に届くことが普通に起きる。留めていないものは黙って捨てる。
+       */
+      if (!state.splitLids.includes(action.lid)) return { state, events: [] };
+      if (state.splitBodies.get(action.lid) === action.body) return { state, events: [] };
+      const bodies = new Map(state.splitBodies);
+      bodies.set(action.lid, action.body);
+      return { state: { ...state, splitBodies: bodies }, events: [] };
+    }
+    case 'SPLIT_RESTORED': {
+      const restored = normalizeSplitLids(action.lids);
+      if (restored.length === 0) return { state, events: [] };
+      /**
+       * ⚠ ここでは**知らない lid を落とさない** ── 起動の順で `entryMetas` が
+       * まだ空のことがあり、落とすと**憶えた並びが黙って消える**。
+       * 🔑 消えたノートは effect が本文 `null` を受けて外す(自己修復)。
+       */
+      return {
+        state: { ...state, splitLids: restored },
+        events: restored.map((lid) => ({ type: 'REQUEST_SPLIT_BODY', lid })),
+      };
+    }
     case 'DUAL_PREVIEW_LOADED': {
       /**
        * ⚠ **追い越しを捨てる**(#273 残件)── 読みは非同期なので、送った先の行を
@@ -4290,6 +4421,14 @@ function removeEntryFromState(
       taskScan: scanTask,
       contactScan: scanContact,
       snippetScan: scanSnippet,
+      /**
+       * 🔴 **消したノートを留めたままにしない**(#505 段②)。
+       * ⚠ 残すと、その枠は**開けない lid** を指したまま空で居座る。
+       * 🔑 #535 ② で `taskScan` 系に同じ穴が在ったのと**同じ形**である ──
+       *   「1 件消す経路」に落とす処理を書き忘れる、が この repo の癖である。
+       */
+      splitLids: unpinSplitLid(state.splitLids, lid),
+      splitBodies: dropSplitBody(state.splitBodies, lid),
     },
     events,
   };
@@ -4341,6 +4480,34 @@ function keepContacts(
  * ⚠ **変化が無ければ同じ配列を返す** ── 描画の指紋を無駄に壊さない
  * (`keepLinks` / `keepContacts` と同じ作法)。
  */
+/**
+ * 留めた枠の本文を 1 件落とす。⚠ **居なければ同じ Map を返す**(指紋を動かさない)。
+ */
+function dropSplitBody(
+  bodies: ReadonlyMap<string, string>,
+  lid: string,
+): ReadonlyMap<string, string> {
+  if (!bodies.has(lid)) return bodies;
+  const next = new Map(bodies);
+  next.delete(lid);
+  return next;
+}
+
+/**
+ * 🔴 **留めた枠の本文を、書込に追随させる**(#505 段②)。
+ *
+ * ⚠ これが無いと、**同じノートを主の枠で直しても留めた枠は古いまま**になる
+ * (user から見れば「片方だけ直った」)。⚠ 留めていない lid では**何もしない** ──
+ * 触っていない Map を作り直すと、面が毎回組み直る。
+ */
+function syncSplitBody(state: AppState, lid: string, body: string): ReadonlyMap<string, string> {
+  if (!state.splitLids.includes(lid)) return state.splitBodies;
+  if (state.splitBodies.get(lid) === body) return state.splitBodies;
+  const next = new Map(state.splitBodies);
+  next.set(lid, body);
+  return next;
+}
+
 function withoutLid<T extends { readonly lid: string }>(
   items: readonly T[],
   lid: string,

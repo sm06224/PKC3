@@ -9,6 +9,7 @@
  */
 import type { AppState, ViewMode } from '@adapter/state/app-state';
 import { DetailRenderer, type AssetLender } from './detail';
+import { SplitView } from './split-view';
 import { SettingsRenderer } from './settings';
 import { FlagsRenderer } from './flags';
 import { HelpRenderer } from './help';
@@ -49,6 +50,11 @@ function toPane(view: ViewMode): PaneView {
 export class CenterRouter {
   private readonly panes: Record<PaneView, HTMLElement>;
   private readonly detail: DetailRenderer;
+  /**
+   * 🔴 **横に並べる器**(#505 段②)。⚠ 何も留めていなければ**器も作らない**ので、
+   * 既定の画面は 1 バイトも変わらない。
+   */
+  private readonly split: SplitView;
   private readonly settings: SettingsRenderer;
   private readonly flags: FlagsRenderer;
   private readonly help: HelpRenderer;
@@ -107,6 +113,11 @@ export class CenterRouter {
      * ⚠ renderer は dispatch しない(層規約)── 投げるのは `main.ts` の仕事。
      */
     onBodyChange?: (body: string) => void,
+    /**
+     * 🔴 **枠を減らしたことを user に言う口**(#505 段②)。
+     * ⚠ 既定は何もしない ── test は自分で渡す。黙って消さないための口である。
+     */
+    notify?: (text: string) => void,
   ) {
     const pane = (view: PaneView): HTMLElement => {
       const el = document.createElement('div');
@@ -136,7 +147,6 @@ export class CenterRouter {
     this.bar.append(close);
     region.prepend(this.bar);
     this.scroll = new ScrollMemory(region);
-    this.detail = new DetailRenderer(this.panes.detail, assets, markdown, onBodyChange ?? null);
     /**
      * ⚠ **`now` は板にも渡す**(2026-08-23)。札の日付は「今年なら `MM/DD`」で
      *   出すので、渡さないと test が**年を跨いだ日に落ちる**
@@ -157,6 +167,40 @@ export class CenterRouter {
      *   つまり **1 回目だけ必ず飛ぶ**(実測でそうなった)。
      * 🔑 この時点の `scrollTop` は 0 なので、`use()` が動かす物は無い。
      */
+    /**
+     * 🔴 **留めた枠は、主の枠と同じ `DetailRenderer` で描く**(#505 段②)。
+     * ⚠ 描き方を 2 つ作らない ── PKC2 が「同じ markdown を 5 面が別経路で描く」で
+     * 構造的な Gap を抱えたのと同じ道になる。
+     * ⚠ `onBodyChange` は渡さない(留めた枠は書かない)。
+     */
+    this.split = new SplitView(
+      this.panes.detail,
+      /**
+       * ⚠ **主の器は `SplitView` が作る**(2026-08-29)── 器の同一性は
+       * `DetailRenderer` の前提で、後から差し替えられない。並べ始めてから
+       * 器を移す形にしたら、主の描画が**枠ごと消していた**(test が捕まえた)。
+       */
+      /**
+       * ⚠ **印は面へ焼く**(2026-08-29)── 面の外(段組みの判定と `app.css` の
+       * 直接の子セレクタ)が読むので、器の中に隠すと当たらなくなる。
+       */
+      (host) =>
+        new DetailRenderer(
+          host,
+          assets,
+          markdown,
+          onBodyChange ?? null,
+          undefined,
+          undefined,
+          undefined,
+          null,
+          this.panes.detail,
+        ),
+      (host, lid) =>
+        new DetailRenderer(host, assets, markdown, null, undefined, undefined, undefined, lid),
+      notify,
+    );
+    this.detail = this.split.main;
     this.scroll.use('detail');
   }
 
@@ -180,7 +224,7 @@ export class CenterRouter {
     }
     // 🔑 帯は**本文以外のとき**だけ出す(本文は「閉じる」対象ではない)
     this.bar.hidden = view === 'detail';
-    if (view === 'detail') this.detail.render(state);
+    if (view === 'detail') this.split.render(state);
     else if (view === 'query') this.query.render(state);
     else if (view === 'dual') this.dual.render(state);
     else if (view === 'settings') this.settings.render(state);

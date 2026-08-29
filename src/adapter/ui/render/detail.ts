@@ -159,7 +159,7 @@ export class DetailRenderer {
   }
   private set mode(m: Mode) {
     this._mode = m;
-    this.region.setAttribute('data-pkc-detail-mode', m);
+    (this.markOn ?? this.region).setAttribute('data-pkc-detail-mode', m);
   }
   private lastSelected: string | null = null;
   /** view で最後に描いた body(null = openBody 不在の loading 表示)。 */
@@ -308,6 +308,34 @@ export class DetailRenderer {
      * ⚠ 既定はアプリ共有の 1 個 ── test は自分で `new` して渡す。
      */
     private readonly extensionGrants: ExtensionGrants = appExtensionGrants,
+    /**
+     * 🔴 **留めた枠として描く**(#505 段②)。`null` = 主の枠(これまでどおり)。
+     *
+     * 立っているとき、この面は:
+     * - 出すノートを `state.selectedLid` ではなく**この lid** にする
+     * - 本文を `state.splitBodies` から取る(`openBody` は主の枠のものである)
+     * - **編集に入らない / 帯も履歴も出さない** ── 読むための枠だからである
+     * - 🔴 **`data-pkc-field` の綴りを `detail-` から `split-` へ変える**
+     *
+     * ⚠ 最後の 1 つが**いちばん大事**である。綴りを変えないと、本文を押したときの
+     * 受け手(`binder.ts` の `closest('[data-pkc-field="detail-body"]')` が 4 か所)が
+     * **留めた枠の押しを主の枠の押しとして扱う** ── 留めた枠の行番号で
+     * **選んでいるノートを書き換える**、という「押した物と効く先が食い違う」事故になる。
+     * 🔑 綴りを変える規則は `field()` **1 か所**に置く(呼び側で分岐しない)。
+     */
+    private readonly pinnedLid: string | null = null,
+    /**
+     * 🔴 **`data-pkc-detail-mode` を焼く先**(2026-08-29)。既定は自分の器。
+     *
+     * ⚠ この印は**面の外**から読まれる ── 段組みの `viewPane()` と、
+     * `app.css` の `[data-pkc-region='detail'] > [data-pkc-view-pane='detail'][data-pkc-detail-mode='view']`
+     * (**直接の子**で当てている)。だから器が 1 段内側へ入ると
+     * **両方が当たらなくなる** ── 段組みが永久に切れ、貼り付く帯が外れた
+     * (フル smoke が 6 + 3 件で捕まえた)。
+     * 🔑 **印は 1 か所で焼き、在り処は配線が決める** ── 主の枠は面へ、
+     * 留めた枠は自分の器へ。2 か所で書かない(CLAUDE.md §7)。
+     */
+    private readonly markOn: HTMLElement | null = null,
   ) {
     this.region = region;
     this.assets = assets;
@@ -318,6 +346,20 @@ export class DetailRenderer {
      * 何もしない(test が renderer を作り捨てても積み害は無い)。
      */
     region.ownerDocument.addEventListener('selectionchange', () => this.syncCopySelection());
+  }
+
+  /**
+   * 🔴 **この面が名乗る `data-pkc-field`**(#505 段②)。
+   *
+   * 主の枠は今までどおり `detail-*`、留めた枠は `split-*`。
+   * ⚠ **呼び側で分岐しない** ── 分岐を散らすと、1 か所だけ `detail-` のまま
+   * 残った瞬間に上の事故が戻る(しかも押すまで分からない)。
+   */
+  /** 留めた枠の題名の指紋(#505 段②)。⚠ 主の枠では使わない。 */
+  private lastPinnedTitle: string | null = null;
+
+  private field(name: string): string {
+    return this.pinnedLid === null ? name : name.replace(/^detail-/, 'split-');
   }
 
   /**
@@ -389,6 +431,28 @@ export class DetailRenderer {
   }
 
   render(state: AppState): void {
+    /**
+     * 🔴 **留めた枠は、選択にも編集にも関係なく「その 1 件」を出す**(#505 段②)。
+     *
+     * ⚠ ここを通さずに下の指紋へ落とすと、**一覧を押すたびに留めた枠まで
+     * 描き直る** ── user から見れば「横に並べたのに、押したら相手が消えた」。
+     * 🔑 指紋は (この lid の本文, 題名) の 2 つだけ ── `selectedLid` も `phase` も
+     * この枠には効かない。
+     */
+    if (this.pinnedLid !== null) {
+      const pinned = this.pinnedLid;
+      const pinnedBody = state.splitBodies.get(pinned) ?? null;
+      const pinnedTitle = state.entryMetas.get(pinned)?.title ?? '';
+      if (
+        this.lastSelected === pinned &&
+        this.lastBody === pinnedBody &&
+        this.lastPinnedTitle === pinnedTitle
+      )
+        return;
+      this.lastPinnedTitle = pinnedTitle;
+      this.renderView(state, pinnedBody);
+      return;
+    }
     const editing = state.phase === 'editing' && state.openBody !== null;
     if (editing) {
       // 入力中の再描画はカーソル / IME を壊す ── 同一 entry の編集中は何もしない
@@ -423,20 +487,20 @@ export class DetailRenderer {
 
   private title(state: AppState, lid: string): HTMLElement {
     const title = document.createElement('h2');
-    title.setAttribute('data-pkc-field', 'detail-title');
+    title.setAttribute('data-pkc-field', this.field('detail-title'));
     title.textContent = state.entryMetas.get(lid)?.title ?? '';
     return title;
   }
 
   private renderView(state: AppState, body: string | null): void {
     this.mode = 'view';
-    this.lastSelected = state.selectedLid;
+    this.lastSelected = this.pinnedLid ?? state.selectedLid;
     this.lastBody = body;
     this.lastPhase = state.phase;
     this.lastPanel = state.revisionPanel;
     this.lastPreview = state.revisionPreview;
 
-    const lid = state.selectedLid;
+    const lid = this.pinnedLid ?? state.selectedLid;
     if (!lid) {
       this.disposeLends();
       this.region.textContent = '';
@@ -452,7 +516,7 @@ export class DetailRenderer {
        *   (「同じものは 1 か所」の規則)。ここは**場所を教える文だけ**にする。
        */
       const guide = document.createElement('p');
-      guide.setAttribute('data-pkc-field', 'detail-empty');
+      guide.setAttribute('data-pkc-field', this.field('detail-empty'));
       // ⚠ **実際のボタンの文言を指す** ── P10 で「新規」は「+ ノート」になった。
       //    案内が画面と食い違うと、探しても見つからない
       guide.textContent =
@@ -468,17 +532,17 @@ export class DetailRenderer {
       this.region.textContent = '';
       this.dropBarState(); // ⚠ slot ごと作り直すので、いま出している形も忘れる
       this.titleEl = document.createElement('h2');
-      this.titleEl.setAttribute('data-pkc-field', 'detail-title');
+      this.titleEl.setAttribute('data-pkc-field', this.field('detail-title'));
       this.barSlot = document.createElement('div');
-      this.barSlot.setAttribute('data-pkc-field', 'detail-bar-slot');
+      this.barSlot.setAttribute('data-pkc-field', this.field('detail-bar-slot'));
       this.panelSlot = document.createElement('div');
-      this.panelSlot.setAttribute('data-pkc-field', 'detail-panel-slot');
+      this.panelSlot.setAttribute('data-pkc-field', this.field('detail-panel-slot'));
       // ⚠ 確認の帯は**本文の器の外**に置く ── 中に入れると `applyBlocks` の
       //    差分が「知らない子」として消す(そして次の描画で戻るので点滅する)
       this.noticeSlot = document.createElement('div');
-      this.noticeSlot.setAttribute('data-pkc-field', 'detail-notice-slot');
+      this.noticeSlot.setAttribute('data-pkc-field', this.field('detail-notice-slot'));
       this.bodyHost = document.createElement('div');
-      this.bodyHost.setAttribute('data-pkc-field', 'detail-body-host');
+      this.bodyHost.setAttribute('data-pkc-field', this.field('detail-body-host'));
       this.region.append(
         this.titleEl,
         this.barSlot,
@@ -513,7 +577,7 @@ export class DetailRenderer {
         this.bodyView = EMPTY_VIEW;
         this.bodyHost!.textContent = '';
         const loading = document.createElement('p');
-        loading.setAttribute('data-pkc-field', 'detail-loading');
+        loading.setAttribute('data-pkc-field', this.field('detail-loading'));
         loading.textContent = '読み込んでいます…';
         this.bodyHost!.append(loading);
       }
@@ -572,7 +636,7 @@ export class DetailRenderer {
         this.bodyView = EMPTY_VIEW;
         this.bodyHost!.textContent = '';
         this.bodyHost!.className = 'pkc-md-rendered';
-        this.bodyHost!.setAttribute('data-pkc-field', 'detail-body');
+        this.bodyHost!.setAttribute('data-pkc-field', this.field('detail-body'));
         // 🔑 散文の読み幅を受ける印(2026-08-08 の紙面フォーマット)。
         //    ⚠ 器の名前(field / region)とは別に名乗る ── 同じ印を編集の 2 面と
         //    書き出しの器も付けており、**4 面 + 書き出しが同じ幅で見える**根拠がこれ
@@ -730,7 +794,20 @@ export class DetailRenderer {
    *  実際にそう外した)。
    */
   private get scroller(): HTMLElement {
-    return this.region.closest<HTMLElement>('[data-pkc-region="detail"]') ?? this.region;
+    /**
+     * 🔴 **横に並べているときは、枠ごとに送る**(#505 段②)。
+     *
+     * ⚠ 並べた枠が**外の器 1 本**で送られると、片方を読み進めるだけで
+     * もう片方も動く ── 「突き合わせながら読む」が成立しない。
+     * 🔑 **主の枠も留めた枠も同じ規則**で書く(`pinnedLid` で分岐しない)──
+     * 分岐すると、主の枠だけ外の器を掴んだままになって噛み合わない。
+     * ⚠ 並べていないときは `split-frame` の親が居ないので、**今までどおり**外の器。
+     */
+    return (
+      this.region.closest<HTMLElement>('[data-pkc-region="split-frame"]') ??
+      this.region.closest<HTMLElement>('[data-pkc-region="detail"]') ??
+      this.region
+    );
   }
 
   /** 骨組みを組み直したときの位置戻し。⚠ **本文が入ってから**呼ぶ。 */
@@ -767,6 +844,14 @@ export class DetailRenderer {
    * 🔑 器を組み直すのは**形が変わるときだけ**(編集 / 再保存 / 無し の 3 形)。
    */
   private renderBar(state: AppState, bodyReady: boolean): void {
+    /**
+     * 🔴 **留めた枠には出さない**(#505 段②)。
+     *
+     * ⚠ 出すと「押した物と効く先が食い違う」── 留めた枠の帯の「編集」を押すと、
+     * 直るのは**選んでいるノート**(主の枠のほう)である。#426 段② で
+     * 本文の右クリックを行の一覧と分けたのと**同じ理由**である。
+     */
+    if (this.pinnedLid !== null) return;
     const slot = this.barSlot!;
     // error phase では「編集」を出さない ── START_EDIT は ready 限定なので、
     // 出したまま無言 no-op にしない(review B-1 原則: 無言の操作拒否を作らない)
@@ -924,6 +1009,14 @@ export class DetailRenderer {
    * (`app-state.ts` は作り直すときだけ新しい object を置く)。
    */
   private renderPanel(state: AppState, lid: string): void {
+    /**
+     * 🔴 **留めた枠には出さない**(#505 段②)。
+     *
+     * ⚠ 出すと「押した物と効く先が食い違う」── 留めた枠の帯の「編集」を押すと、
+     * 直るのは**選んでいるノート**(主の枠のほう)である。#426 段② で
+     * 本文の右クリックを行の一覧と分けたのと**同じ理由**である。
+     */
+    if (this.pinnedLid !== null) return;
     const slot = this.panelSlot!;
     const shown =
       state.phase === 'ready' && state.revisionPanel && state.revisionPanel.lid === lid
