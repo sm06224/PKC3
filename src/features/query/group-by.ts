@@ -26,6 +26,15 @@
 
 import { parseFrontmatter, type FrontmatterValue } from '../markdown/frontmatter';
 import { resolveCap } from '../notation/caps';
+import { tagsForMatch } from '../flavor/entry-tags';
+
+/**
+ * 🔴 **タグの key の綴りは 1 か所**(#550 段④、2026-08-29)。
+ *
+ * ⚠ この字は **3 か所**から引かれる(束ねる規則 / 目録 / タグ欄の候補)。
+ *   直書きすると、綴りを変えたときに**片方だけ**が付いてくる(CLAUDE.md §7)。
+ */
+export const TAGS_KEY = 'tags';
 
 /**
  * 🔴 **worker が読む本文の先頭の字数**(#184。レビュー A-2 で直した)。
@@ -46,6 +55,16 @@ export const FRONTMATTER_SCAN_CHARS = resolveCap('frontmatter', 'bytes') + 64;
 export interface QueryRow {
   lid: string;
   head: string;
+  /**
+   * 🔴 **索引に入っている本文中タグ**(#550 段④)。⚠ **綴りはスマートフォルダの
+   *   `SmartScanRow` と揃える** ── 同じ列を読む口が 2 つの名前を持つと、
+   *   「集計に出る組」と「スマートフォルダに集まる件」が静かに食い違う。
+   *
+   * ⚠ `null` = **まだ集約していない行**(旧ビルドが書いた / 移行前)。
+   *   `[]`(タグが 1 つも無い)とは**別**である ── 潰すと、埋め戻しの前後で
+   *   「本当にタグが無い」と「まだ数えていない」が同じ顔になる。
+   */
+  bodyTags?: readonly string[] | null;
 }
 
 /** 束ねた 1 組。 */
@@ -164,13 +183,36 @@ export function createQueryScan(key: string | null): QueryScan {
       for (const row of rows) {
         scanned += 1;
         const { meta } = parseFrontmatter(row.head);
+        /**
+         * 🔴 **タグだけは「本文の中」も数える**(#550 段④、user 要望 2026-08-29
+         *   「タグのみで集計された表示が必要」)。
+         *
+         * 🔑 そろえるのは `tagsForMatch` **1 本**である ── 走査(スマートフォルダ)と
+         *   同じ口を通すので、**集計に出る組**と**フォルダに集まる件**がずれない
+         *   (CLAUDE.md §7「同じ問いに答える口を 2 つ作らない」)。
+         * ⚠ ここで `readTags` を直に呼ばない ── 索引を無視して frontmatter だけ見る
+         *   ことになり、本文中タグが**集計からだけ消える**。
+         * ⚠ 本文は受け取らない(`head` と索引だけ)── 全件の本文を主スレッドや
+         *   heap へ載せない、というこの file 冒頭の前提を崩さないため。
+         */
+        const tags = tagsForMatch(row.head, row.bodyTags ?? null);
         for (const [k, value] of Object.entries(meta)) {
           // ⚠ 値を持たない key は「束ねられない」ので目録に出さない
           if (valuesOf(value).length === 0) continue;
+          // ⚠ タグは下で数える(frontmatter に在っても本文に在っても 1 件)
+          if (k === TAGS_KEY) continue;
           count.set(k, (count.get(k) ?? 0) + 1);
         }
+        /**
+         * 🔴 **本文にしかタグが無いノートでも、目録に「tags」を出す**。
+         *
+         * ⚠ ここを frontmatter だけで数えると、`tags:` を 1 度も書いていない
+         *   container では**本文中タグが何百件あっても picker に出ない** ──
+         *   索引を作ったのに**読み手が居ない**形になる(#526 と同じ穴)。
+         */
+        if (tags.length > 0) count.set(TAGS_KEY, (count.get(TAGS_KEY) ?? 0) + 1);
         if (key === null) continue;
-        const values = valuesOf(meta[key]);
+        const values = key === TAGS_KEY ? tags : valuesOf(meta[key]);
         if (values.length === 0) {
           take(UNSET, row.lid);
           continue;

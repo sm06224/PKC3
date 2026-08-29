@@ -108,6 +108,80 @@ describe('集計を worker の実物で(#184)', () => {
     expect(byStatus.groups[0]).toMatchObject({ value: '済', total: 1, lids: ['n1'] });
   });
 
+  /**
+   * 🔴 **本文の中に書いたタグも集計に出る**(#550 段④)。
+   *
+   * ⚠ ここは **SQL が `body_tags` を引いているか**の検査である ── features 側の
+   *   test(`query-group-by.test.ts`)は行を手で渡すので、**列を引き忘れても緑**になる
+   *   (CLAUDE.md §7「同じ値を複数の経路へ渡すものは、経路ごとに pin する」)。
+   * ⚠ **対照群を同じ it に置く** ── frontmatter にしか書いていないノートが
+   *   これまでどおり出ること。置かないと「常に当たる」形に化けても気づけない。
+   */
+  it('🔴 本文の行に書いたタグが、集計の組になる(SQL が body_tags を引いている)', async () => {
+    await put('t1', 'タグ本文', '# 買い物メモ\n\n#買い物 #家事\n\n牛乳を買う\n', 20);
+    await put('t2', 'タグ前置き', '---\ntags: [設計]\n---\n\n本文\n', 21);
+    const r = await groupBy('tags');
+    const values = r.groups.map((g) => g.value);
+    expect(values, '本文中タグが組になっていない = 列を引いていない').toContain('買い物');
+    expect(values).toContain('家事');
+    // ⚠ 対照群 ── frontmatter に書いたタグはこれまでどおり
+    expect(values).toContain('設計');
+    expect(r.groups.find((g) => g.value === '買い物')?.lids).toContain('t1');
+    expect(r.groups.find((g) => g.value === '設計')?.lids).toContain('t2');
+    // 🔴 目録にも出る(picker に出ないと選べない)
+    const k = await keys();
+    expect(k.keys.some((x) => x.key === 'tags')).toBe(true);
+  });
+
+  /**
+   * 🔴 **2 ページ目の SQL も同じ列を引いている**(#550 段④)。
+   *
+   * ⚠ 走査は 500 件ずつ読む**2 本の SQL**(1 ページ目 / 続き)でできている ──
+   *   ところが既存の test は数件しか入れないので、**続きの 1 本は一度も走っていなかった**
+   *   (CLAUDE.md §2「分岐を書いたら、分岐の数だけ実際に走らせた記録を持つ」)。
+   * 🔑 だから **別の container**で 500 件を超えさせ、いちばん後ろにだけタグを置く。
+   * ⚠ **同じ container に足さない** ── 他の test が「何件見たか」を等値で見ているので、
+   *   足した瞬間にそちらが落ちる(実際 1 稿目で 2 件落とした)。
+   */
+  it('🔴 500 件を超えた先(2 ページ目)の本文中タグも集計に出る', async () => {
+    const CID2 = 'q-page';
+    await call({ op: 'openContainer', cid: CID2, title: 'p' } as StorageRequest);
+    const put2 = (lid: string, body: string, order: number) =>
+      call({
+        op: 'upsertEntry',
+        cid: CID2,
+        entry: {
+          lid,
+          title: lid,
+          archetype: 'text',
+          entryOrder: order,
+          status: null,
+          date: null,
+          archived: false,
+          body,
+        },
+        checkpoint: false,
+        keepLatest: 10,
+      } as StorageRequest);
+    for (let i = 0; i < 505; i += 1) {
+      await put2(`p${String(i).padStart(4, '0')}`, '本文だけ\n', 1000 + i);
+    }
+    // ⚠ **いちばん後ろ**に置く(`ORDER BY entry_order, lid` の最後 = 2 ページ目)
+    await put2('zzz', '# 週末\n\n#二頁目\n', 9999);
+    const out = (await call({ op: 'queryScan', cid: CID2, key: 'tags' } as StorageRequest)) as {
+      keys: KeyResult;
+      groups: GroupResult | null;
+    };
+    // ⚠ 前提の検算 ── 本当に 2 ページ目まで読んでいる(500 件を超えている)
+    expect(out.keys.scanned, '500 件を超えていない = 続きの SQL を踏んでいない').toBeGreaterThan(
+      500,
+    );
+    expect(
+      out.groups!.groups.map((g) => g.value),
+      '2 ページ目のタグが出ていない = 続きの SQL が列を引いていない',
+    ).toContain('二頁目');
+  }, 60_000);
+
   it('🔴 窓の大きさは cap から導く(直書きしない ── 囲みのぶんが足りなくなる)', () => {
     /**
      * ⚠ 1 稿目は `16 * 1024` を直書きし、コメントに「字数はバイト数以下だから入る」と

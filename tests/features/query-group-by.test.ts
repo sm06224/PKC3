@@ -3,6 +3,7 @@ import {
   collectKeys,
   groupByKey,
   QUERY_LIMITS,
+  TAGS_KEY,
   UNSET,
   type QueryRow,
 } from '@features/query/group-by';
@@ -125,5 +126,65 @@ describe('query: frontmatter で束ねる(#184)', () => {
     const out = collectKeys(rows(['a', head]));
     expect(out.keys).toHaveLength(QUERY_LIMITS.keys);
     expect(out.omittedKeys).toBe(4);
+  });
+});
+
+/**
+ * 🔴 **タグだけは「本文の中」も数える**(#550 段④、user 要望 2026-08-29
+ *   「タグのみで集計された表示が必要」)。
+ *
+ * ⚠ **対照群を同じ describe に置く** ── 索引を渡さない行が今までどおり
+ *   未設定へ落ちること / タグ以外の key は本文中タグに影響されないこと。
+ *   置かないと「索引を混ぜた」ではなく「**常に当たる**」に化けても気づけない。
+ */
+describe('query: タグは本文の中も数える(#550 段④)', () => {
+  it('🔴 frontmatter に tags: が無くても、本文中タグで組ができる', () => {
+    const out = groupByKey(
+      [{ lid: 'a', head: '# 買い物メモ\n', bodyTags: ['買い物', '家事'] }],
+      'tags',
+    );
+    expect(out.groups.map((g) => g.value).sort()).toEqual(['家事', '買い物']);
+    expect(out.groups.every((g) => g.lids.includes('a'))).toBe(true);
+  });
+
+  it('🔴 frontmatter に tags: が無くても、目録に tags が出る(picker に出ないと選べない)', () => {
+    const out = collectKeys([{ lid: 'a', head: '本文だけ\n', bodyTags: ['買い物'] }]);
+    expect(out.keys.map((k) => k.key)).toContain('tags');
+    expect(out.keys.find((k) => k.key === 'tags')?.count).toBe(1);
+  });
+
+  it('🔴 文書タグと本文中タグは 1 つに畳む(同じノートを 2 回数えない)', () => {
+    const out = collectKeys([
+      { lid: 'a', head: fm(['tags: [買い物]']), bodyTags: ['買い物', '家事'] },
+    ]);
+    // ⚠ **1 件**である ── frontmatter と本文の両方に在っても、ノートは 1 つ
+    expect(out.keys.find((k) => k.key === 'tags')?.count).toBe(1);
+    const g = groupByKey(
+      [{ lid: 'a', head: fm(['tags: [買い物]']), bodyTags: ['買い物', '家事'] }],
+      'tags',
+    );
+    // ⚠ 同じ名前は 1 組(`sameTag` で畳む ── 走査と同じ規則)
+    expect(g.groups.map((x) => x.value).sort()).toEqual(['家事', '買い物']);
+    expect(g.groups.find((x) => x.value === '買い物')?.total).toBe(1);
+  });
+
+  it('⚠ 対照群: 索引を渡さない行は、これまでどおり frontmatter だけで決まる', () => {
+    const out = groupByKey(rows(['a', '# 見出しだけ\n\n#買い物 #家事\n']), 'tags');
+    // ⚠ 本文にタグ行が**書いてあっても**、索引(bodyTags)が無ければ当てない
+    //    ── 走査の契約(`tagsForMatch` の `indexed: null`)と同じ。埋め戻しで揃う
+    expect(out.groups).toHaveLength(1);
+    expect(out.groups[0]).toMatchObject({ value: UNSET, lids: ['a'] });
+  });
+
+  it('⚠ 対照群: タグ以外の key は本文中タグに影響されない', () => {
+    const out = collectKeys([
+      { lid: 'a', head: fm(['author: 佐藤']), bodyTags: ['買い物'] },
+    ]);
+    expect(out.keys.find((k) => k.key === 'author')?.count).toBe(1);
+    expect(out.keys.find((k) => k.key === 'tags')?.count).toBe(1);
+  });
+
+  it('🔑 綴りは 1 か所(TAGS_KEY)── 直書きが 2 か所目を作らないように', () => {
+    expect(TAGS_KEY).toBe('tags');
   });
 });
