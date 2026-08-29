@@ -671,6 +671,7 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
+    ['2026-08-29-office-26-8', '4f773942'],
     ['2026-08-29-split-frames', '6f5b67a5'],
     ['2026-08-29-body-context-columns', '6ca52dbd'],
     ['2026-08-29-deleted-stays-in-lists', '12a531b6'],
@@ -691,7 +692,8 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-08-28-columns-inline-edit', 'd8b12951'],
     ['2026-08-28-uml-templates', '93cb2d2a'],
     ['2026-08-28-html-blocked-reason', '350d8307'],
-    ['2026-08-28-column-rule', 'b79c168b'],
+    // ⚠ 上限 20 を超えたので 2026-08-29 に落とした(原本は CHANGELOG)
+    // ['2026-08-28-column-rule', 'b79c168b'],
     // ⚠ 上限 20 を超えたので 2026-08-29 に落とした(原本は CHANGELOG)
     // ['2026-08-28-columns-cycle', '3a081472'],
     // ⚠ 上限 20 を超えたので 2026-08-29 に落とした(原本は CHANGELOG / 突合は docs-parity の DROPPED)
