@@ -131,12 +131,27 @@ const ctx = self as unknown as {
 };
 
 ctx.onmessage = (ev: MessageEvent): void => {
-  const req = ev.data as ChartJobRequest;
-  renderChartPng(req)
+  /**
+   * 🔴 **封筒を開ける**(2026-08-29 に判明。それまで grafu は 1 度も描けていなかった)。
+   *
+   * ⚠ `WorkerLease` は依頼を **`{ id, payload }` に包んで**投げる
+   *   (`worker-lease.ts:135` / `:184`)。ここは 1 稿目それを開けずに
+   *   `ev.data` を丸ごと依頼として読んでいたので、`req.width` は **undefined** ──
+   *   `undefined * dpr` = **NaN** → `new OffscreenCanvas(NaN, …)` が投げ、
+   *   器は `data-pkc-chart-state="failed"` のまま**画面に何も出なかった**。
+   * 🔴 **`id` だけは偶然通っていた**(封筒の最上位に在るので)── だから
+   *   「返事は返るのに中身が無い」という、いちばん見分けにくい形になっていた。
+   * 🔑 同じ lease を使う `markdown-worker.ts:45` は `const { id, payload } = ev.data;`
+   *   と正しく開けている ── **綴りを合わせる**。
+   * ⚠ 両端の unit がそれぞれ「相手を模した stub」と話していたので、
+   *   **どちらも緑のまま**この食い違いが残った(CLAUDE.md §7)。
+   */
+  const { id, payload } = ev.data as { id: number; payload: ChartJobRequest };
+  renderChartPng(payload)
     .then((result) => {
-      ctx.postMessage({ id: req.id, ok: true, result }, [result.png]);
+      ctx.postMessage({ id, ok: true, result }, [result.png]);
     })
     .catch((e: unknown) => {
-      ctx.postMessage({ id: req.id, ok: false, error: String(e).slice(0, 200) });
+      ctx.postMessage({ id, ok: false, error: String(e).slice(0, 200) });
     });
 };

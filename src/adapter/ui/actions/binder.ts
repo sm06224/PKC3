@@ -462,7 +462,7 @@ export interface BinderServices {
    * @param diagramSource 図なら**その原文**。⚠ 渡ったときは `src`(焼いた PNG)を
    *   使わず、**原文からベクタを起こして**開く(user 報告 2026-08-28)。
    */
-  viewBig?(src: string, title: string, diagramSource?: string): void;
+  viewBig?(src: string, title: string, diagram?: { kind: 'mermaid' | 'chart'; source: string }): void;
   /** 未参照 asset の掃除(P4b)。確認・報告の UI も実体側の責務。 */
   purgeOrphanAssets?(): void;
   /** 注意の面を閉じる(P6c review H-2)。 */
@@ -3315,9 +3315,23 @@ const ACTIONS: Record<string, ActionHandler> = {
      *   *書き出し* と同じ「原寸で見たい」側である)。
      * ⚠ **添付の画像は原本がベクタではない**ので、これまでどおり `src` を開く。
      */
-    const host = img.closest<HTMLElement>('[data-pkc-mermaid-src]');
-    const source = host?.getAttribute('data-pkc-mermaid-src') ?? '';
-    services.viewBig?.(img.src, img.alt || '図', source === '' ? undefined : source);
+    const mmd = img.closest<HTMLElement>('[data-pkc-mermaid-src]');
+    const chart = img.closest<HTMLElement>('[data-pkc-chart-src]');
+    /**
+     * ⚠ **図と grafu で作り直し方が違う**(2026-08-29、棚卸しで判明)。
+     * 🔑 mermaid は SVG を吐くので**ベクタ**にできるが、**chart.js はベクタを吐かない**
+     *   (`chart-raster.ts` の `savable: false` と、その注記)── なので chart は
+     *   **大きく焼き直す**しかない。
+     * 🔴 1 稿目は `data-pkc-mermaid-src` だけを見ていたので、**grafu は小さい PNG が
+     *   開いたまま**だった ── user 報告(ぽしょぽしょ)が grafu では直っていなかった。
+     */
+    const src = mmd?.getAttribute('data-pkc-mermaid-src') ?? '';
+    const csrc = chart?.getAttribute('data-pkc-chart-src') ?? '';
+    services.viewBig?.(
+      img.src,
+      img.alt || '図',
+      src !== '' ? { kind: 'mermaid', source: src } : csrc !== '' ? { kind: 'chart', source: csrc } : undefined,
+    );
   },
   /**
    * 図を保存する(P8 段⑦)。⚠ 画面は PNG だが、**書き出すのはベクタ**
