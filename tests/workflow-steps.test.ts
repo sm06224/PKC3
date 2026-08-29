@@ -679,4 +679,41 @@ describe('#400 段④ ── 雛形を置く順番', () => {
         'portable-template.html',
       );
   });
+
+  /**
+   * 🔴 **step の名前が、YAML のコメントで切られていない**(2026-08-29 に踏んだ)。
+   *
+   * ⚠ YAML は**空白の後の `#`** から先を捨てる。だから
+   *   `name: 検品(テンプレートが配られたか / #591)` は
+   *   **「検品(テンプレートが配られたか /」で切れる** ── CI の画面には
+   *   宙ぶらりんの名前だけが出て、**issue 番号が読み手に届かない**。
+   * 🔑 この repo の作法は「**読み手に渡す識別子は、渡す前に実在と中身を確かめる**」で、
+   *   番号が消える形はそこに当たる。
+   *
+   * ⚠ **YAML の parser を足さない**(この repo に dep は無い)── 規則そのものを見る:
+   *   **引用符で囲っていない値**の中に ` #` が在れば、そこから先は落ちる。
+   *   🔑 直し方は 1 つ、**値を引用符で囲む**こと。
+   */
+  it('🔴 step の名前が YAML のコメントで切れていない', () => {
+    const bad: string[] = [];
+    let seen = 0;
+    for (const file of readdirSync(DIR).filter((f) => f.endsWith('.yml'))) {
+      for (const line of readFileSync(join(DIR, file), 'utf-8').split('\n')) {
+        const m = /^\s*(?:- )?name:\s*(.*)$/.exec(line);
+        if (m === null) continue;
+        const v = (m[1] ?? '').trim();
+        if (v === '') continue;
+        seen += 1;
+        // ⚠ 引用符で囲ってあれば `#` は落ちない ── 対象外
+        if (/^['"]/.test(v)) continue;
+        if (/\s#/.test(v)) bad.push(`${file}: ${line.trim()}`);
+      }
+    }
+    // ⚠ 空振り防止 ── name の行を本当に読めている
+    expect(seen, 'name の行が 1 つも読めていない(台の空振り)').toBeGreaterThan(10);
+    expect(
+      bad,
+      'YAML のコメントで名前が切れる ── 値を引用符で囲む(#591 の step で実際に踏んだ)',
+    ).toEqual([]);
+  });
 });
