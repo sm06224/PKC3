@@ -38,6 +38,8 @@ import {
 } from '@features/snippet/snippet-table';
 import { planSearch, toLikePattern } from '@features/filter/search-query';
 import { countTaskCandidates } from '@features/markdown/task-count';
+import { bodyTags } from '@features/flavor/entry-tags';
+import { decodeTags, encodeTags } from '@features/flavor/tags';
 import {
   TASK_LIMITS,
   type TaskCard,
@@ -379,8 +381,15 @@ function backfillDerivedColumns(database: Database): void {
     for (const r of rows) {
       const body = r.body ?? '';
       database.exec({
-        sql: `UPDATE entries SET task_total = ?, body_chars = ? WHERE cid = ? AND lid = ?`,
-        bind: [countTaskCandidates(body).total, body.length, r.cid, r.lid],
+        sql: `UPDATE entries SET task_total = ?, body_chars = ?, body_tags = ?
+                WHERE cid = ? AND lid = ?`,
+        bind: [
+          countTaskCandidates(body).total,
+          body.length,
+          encodeTags(bodyTags(body)),
+          r.cid,
+          r.lid,
+        ],
       });
     }
     seen += rows.length;
@@ -712,8 +721,15 @@ function runSmartScan(
    */
   const full = scan.needsFullBody;
   const chunk = full ? TASK_SCAN_CHUNK : QUERY_SCAN_CHUNK;
+  /**
+   * 🔴 **集約したタグは、丸ごと読むかに関係なく必ず引く**(#550 段②)。
+   *
+   * ⚠ 「丸ごと読むときは本文から数え直せばよい」と書きたくなるが、**書かない** ──
+   *   同じ問いに答える口が 2 つになり、片方だけ規則が古くなる(§7)。
+   *   当たり判定の入口は `tagsForMatch` **1 本**である。
+   */
   // ⚠ 先頭だけのときは `substr` に文字数を渡すので、束縛の数が 1 つ増える
-  const col = full ? 'body' : 'substr(body, 1, ?) AS head';
+  const col = full ? 'body, body_tags' : 'substr(body, 1, ?) AS head, body_tags';
   const head = full ? [] : [FRONTMATTER_SCAN_CHARS];
   let after: { entryOrder: number; lid: string } | undefined;
   for (;;) {
@@ -733,10 +749,31 @@ function runSmartScan(
       entry_order: number;
       head?: string | null;
       body?: string | null;
+      body_tags?: string | null;
     }>;
     if (rows.length === 0) break;
     // ⚠ 塊ごとに捨てる ── 候補が 5000 件あっても heap に載るのは 1 塊ぶん
-    scan.feed(rows.map((r) => ({ lid: r.lid, body: (full ? r.body : r.head) ?? '' })));
+    scan.feed(
+      rows.map((r) => ({
+        lid: r.lid,
+        body: (full ? r.body : r.head) ?? '',
+        /**
+         * ⚠ **NULL を `[]` に潰さない** ── `tagsForMatch` の契約が
+         *   「まだ集約していない(`null`)」を受け取る形だからである。
+         * 🔑 **ただし、いまは出る答えが同じ**(どちらも文書タグだけで当てる)──
+         *   だから**ここを潰す変異は生き延びるのが正しい**。守っているのは
+         *   意味であって答えではない(CLAUDE.md「これが無いと壊れると書く前に、
+         *   外して壊れるのを見る」── 外しても壊れなかったので、そう書いてある)。
+         * 🔴 **「まだ集約していない」を実際に拾うのは SQL のほう**である
+         *   (`NEEDS_BACKFILL` の `body_tags IS NULL`)── そちらを潰すと、
+         *   旧ビルドが書いた行が**永久に埋まらない**。
+         */
+        bodyTags:
+          r.body_tags === null || r.body_tags === undefined
+            ? null
+            : decodeTags(r.body_tags),
+      })),
+    );
     const last = rows[rows.length - 1]!;
     after = { entryOrder: last.entry_order, lid: last.lid };
     if (rows.length < chunk) break;
@@ -984,12 +1021,13 @@ const BACKFILL_CHUNK = 200;
  *   `task_total` は #277 で、`body_chars` は 2026-08-19 に足したので、
  *   その間に書かれた行は前者だけ埋まっている)。
  */
-const NEEDS_BACKFILL = 'task_total IS NULL OR body_chars IS NULL';
+const NEEDS_BACKFILL =
+  'task_total IS NULL OR body_chars IS NULL OR body_tags IS NULL';
 
 const UPSERT_SQL = `INSERT INTO entries
     (cid, lid, title, archetype, created_at, updated_at,
-     entry_order, status, date, archived, task_total, body_chars, body)
-  VALUES (?, ?, ?, ?, datetime('now'), datetime('now'), ?, ?, ?, ?, ?, ?, ?)
+     entry_order, status, date, archived, task_total, body_chars, body_tags, body)
+  VALUES (?, ?, ?, ?, datetime('now'), datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(cid, lid) DO UPDATE SET
     title = excluded.title,
     archetype = excluded.archetype,
@@ -1000,6 +1038,7 @@ const UPSERT_SQL = `INSERT INTO entries
     archived = excluded.archived,
     task_total = excluded.task_total,
     body_chars = excluded.body_chars,
+    body_tags = excluded.body_tags,
     body = excluded.body`;
 
 function bindUpsert(cid: string, e: EntryUpsert): (string | number | null)[] {
@@ -1029,6 +1068,13 @@ function bindUpsert(cid: string, e: EntryUpsert): (string | number | null)[] {
      *   丸めて出すので、書記素まで数え直す実費を払う理由が無い。
      */
     e.body.length,
+    /**
+     * 🔴 **本文中のタグも、書くときここで集約する**(#550 段②)。理由は上の 2 つと
+     * 同じ ── 呼び側 12 経路に持たせると、落とした経路のノートだけタグが古くなる。
+     * ⚠ **重複はここで排除する**(user の字「保存時に重複排除して集約する」)。
+     * ⚠ **frontmatter へは書き戻さない**(裁定 B)── 集約の置き場はこの列である。
+     */
+    encodeTags(bodyTags(e.body)),
     e.body,
   ];
 }

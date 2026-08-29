@@ -42,7 +42,8 @@ import {
 } from '../markdown/frontmatter';
 import { isKnownArchetype } from '../flavor/archetype-label';
 import { countTaskCandidates } from '../markdown/task-count';
-import { MAX_TAG_CHARS, normalizeTag, readTags, sameTag } from '../flavor/tags';
+import { MAX_TAG_CHARS, normalizeTag, sameTag } from '../flavor/tags';
+import { tagsForMatch } from '../flavor/entry-tags';
 
 /**
  * 🔴 **この入れ物の archetype**。⚠ 綴りはここ 1 か所 ── 直書きすると、
@@ -607,8 +608,23 @@ export interface SmartScan {
    * ノートの本文を食わせる(呼ぶのは storage worker)。
    * ⚠ `needsFullBody` が false のときは**先頭だけ**でよい / true のときは**丸ごと**。
    */
-  feed(rows: readonly { lid: string; body: string }[]): void;
+  feed(rows: readonly SmartScanRow[]): void;
   finish(): SmartHit;
+}
+
+/**
+ * 走査へ食わせる 1 行(#550 段②)。
+ *
+ * ⚠ `body` は `needsFullBody` に従う ── false なら**先頭だけ**である。
+ * 🔴 だから**本文中のタグはここには載っていない**(本文のどこにでも書けるので)。
+ *   代わりに保存時に集約した索引(`entries.body_tags`)を `bodyTags` で渡す。
+ * ⚠ `null` = **まだ集約していない行**(旧ビルドが書いた / 移行前)── そのときは
+ *   文書タグだけで当てる(壊れではなく遅れ。次の起動の埋め戻しで揃う)。
+ */
+export interface SmartScanRow {
+  readonly lid: string;
+  readonly body: string;
+  readonly bodyTags?: readonly string[] | null;
 }
 
 /**
@@ -683,10 +699,14 @@ export function createSmartScan(spec: SmartSpec, selfLid: string): SmartScan {
       for (const row of rows) {
         if (row.lid === selfLid) continue;
         /**
-         * ⚠ **タグの読み方は `readTags` 1 本**(§7)── ここに独自の読み方を
-         *   書くと、一覧に出る札と「当たるかどうか」が静かに食い違う。
+         * ⚠ **タグの読み方は 1 本**(§7)── ここに独自の読み方を書くと、
+         *   一覧に出る札と「当たるかどうか」が静かに食い違う。
+         * 🔴 **2026-08-29(#550 段②)から、文書タグ + 本文中タグの両方**である。
+         *   合わせるのは `tagsForMatch` ── `readTags` を直に呼ぶと**本文中タグが
+         *   当たらない**(そして落ちるノートは黙って消えるので、誰も気づかない)。
          */
-        if (!matchesSmartTags(spec, readTags(row.body))) continue;
+        if (!matchesSmartTags(spec, tagsForMatch(row.body, row.bodyTags ?? null)))
+          continue;
         /**
          * 🔴 **チェック項目は本文を読んで確定する**(段④)── `task_total` は
          *   多めなので、SQL が縮めた候補をここで正確な数に取り直す。

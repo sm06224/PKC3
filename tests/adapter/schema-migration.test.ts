@@ -25,14 +25,15 @@ import {
   applySchema,
   TASK_CANDIDATE_WHERE,
 } from '../../src/adapter/platform/storage/storage-worker';
+import { decodeTags } from '../../src/features/flavor/tags';
 
 /**
  * 🔑 **旧い形の DDL を作る** ── いまの DDL から、後から足した列と索引を落とす。
  * ⚠ DDL を手で書き写さない ── 写すと、本物が変わったときにここだけ古くなり、
  *   「旧い DB」のつもりで**別物**を作ることになる(§1 の空振り)。
  */
-function oldSchemaDdl(): string[] {
-  const added = ENTRY_ADDED_COLUMNS.map((c) => c.name);
+function oldSchemaDdl(drop?: readonly string[]): string[] {
+  const added = drop ?? ENTRY_ADDED_COLUMNS.map((c) => c.name);
   return SCHEMA_DDL
     // ⚠ 後付け列を**使う**もの(索引など)は、旧い DB にはそもそも作れない
     .filter((ddl) => !added.some((n) => new RegExp(`\\b${n}\\b`).test(ddl) && /INDEX/.test(ddl)))
@@ -54,10 +55,16 @@ beforeAll(async () => {
   sqlite3 = await sqlite3InitModule();
 }, 30_000);
 
-/** 旧い形(task_total 無し)の DB を作り、行を入れて返す。 */
-function oldDb(rows: ReadonlyArray<readonly [string, string]>): Database {
+/**
+ * 旧い形の DB を作り、行を入れて返す。
+ * @param drop 落とす後付け列。省略すると**全部**落とす(いちばん古い形)。
+ */
+function oldDb(
+  rows: ReadonlyArray<readonly [string, string]>,
+  drop?: readonly string[],
+): Database {
   const db = new sqlite3.oo1.DB(':memory:');
-  for (const ddl of oldSchemaDdl()) db.exec(ddl);
+  for (const ddl of oldSchemaDdl(drop)) db.exec(ddl);
   db.exec('PRAGMA user_version = 3');
   for (const [lid, body] of rows) {
     db.exec({
@@ -82,6 +89,15 @@ const taskTotal = (db: Database, lid: string): number =>
 const bodyChars = (db: Database, lid: string): number | null => {
   const v = db.selectValue(`SELECT body_chars FROM entries WHERE lid = ?`, [lid]);
   return v === undefined ? -1 : v === null ? null : Number(v);
+};
+/**
+ * 本文中タグの索引(#550 段②)。
+ * ⚠ **`null`(まだ集約していない)と `[]`(集約した結果 0 件)を潰さない** ──
+ *   潰すと、旧ビルドが書いた行を「埋め戻し済み」と誤認する。
+ */
+const bodyTagsOf = (db: Database, lid: string): string[] | null => {
+  const v = db.selectValue(`SELECT body_tags FROM entries WHERE lid = ?`, [lid]);
+  return v === null || v === undefined ? null : decodeTags(String(v));
 };
 
 describe('entries の後付け列(#277 段②)', () => {
@@ -120,6 +136,62 @@ describe('entries の後付け列(#277 段②)', () => {
     expect(taskTotal(db, 't-quote'), '引用の中を落としている').toBe(1);
     expect(taskTotal(db, 't-plain'), 'チェックが無いのに数が入った').toBe(0);
     expect(taskTotal(db, 't-fence'), 'fence の中まで数えた').toBe(0);
+    db.close();
+  });
+
+  /**
+   * 🔴 **本文中タグの索引も埋まる**(#550 段②)。
+   *
+   * ⚠ 埋まらないと、**既にノートを持っている user だけ**本文中タグで当たらない
+   *   ── 手元の新規 DB では `CREATE TABLE` が最新形を作るので**一度も走らない**
+   *   経路である(CLAUDE.md §2「弱いのではなく実行されない」)。
+   */
+  it('🔴 本文中タグの索引が、既存行にも埋まる', () => {
+    const db = oldDb([
+      ['g-tag', '# 章\n\n#買い物 #家事\n'],
+      ['g-none', '# ただの本文\n'],
+      ['g-fence', '```\n#にせもの\n```\n'],
+      ['g-dup', '#請求\n\n# 別の章\n\n#請求\n'],
+    ]);
+    applySchema(db);
+    expect(bodyTagsOf(db, 'g-tag'), '既存行の索引が埋まっていない').toEqual(['買い物', '家事']);
+    /**
+     * ⚠ **`[]` で埋まる**(`null` のままにしない)── 残すと毎回の open が
+     *   同じ行を読み直し、埋め戻しが**永久に尽きない**。
+     */
+    expect(bodyTagsOf(db, 'g-none'), 'タグが無い行が null のまま(埋め戻しが尽きない)').toEqual(
+      [],
+    );
+    expect(bodyTagsOf(db, 'g-fence'), 'fence の中まで拾った').toEqual([]);
+    expect(bodyTagsOf(db, 'g-dup'), '重複が畳まれていない').toEqual(['請求']);
+    db.close();
+  });
+
+  /**
+   * 🔴 **「旧い」は 1 つではない**(CLAUDE.md §2、#297 で踏んだ型)。
+   *
+   * ⚠ 上の 2 件は**いちばん古い形**(後付け列が 1 つも無い)を通している ──
+   *   その DB は `task_total` も NULL なので、`NEEDS_BACKFILL` の
+   *   **どの項が生きていても**埋め戻しが走る。つまり
+   *   **`body_tags IS NULL` の項を丸ごと外しても緑のまま**だった
+   *   (変異試験 M2 が SURVIVED で教えた)。
+   * 🔴 **そして外れていたのは、既存 user 全員が通る当の経路である** ──
+   *   前の版で開いた DB は `task_total` / `body_chars` が**既に埋まっている**
+   *   ので、`body_tags` の項だけが埋め戻しの引き金になる。
+   *   ⚠ 外れていたら、**いま在るノートの本文中タグは永久に索引に入らない**。
+   * 🔑 だから **N 個目の門だけが鳴る場面**を作る(門を N 個置いたら N 通り)。
+   */
+  it('🔴 前の版で開いた DB(body_tags だけ無い)でも埋め戻しが走る', () => {
+    const db = oldDb([['h-tag', '本文\n\n#買い物\n']], ['body_tags']);
+    // ⚠ **前提** ── 前の版が既に埋めた状態を作る(ここが崩れると門を 1 つしか見ない)
+    db.exec('UPDATE entries SET task_total = 0, body_chars = length(body)');
+    expect(cols(db).has('body_tags'), '前提が崩れている(既に列が在る)').toBe(false);
+    expect(taskTotal(db, 'h-tag'), '前提が崩れている(task_total が埋まっていない)').toBe(0);
+    applySchema(db);
+    expect(
+      bodyTagsOf(db, 'h-tag'),
+      '既存 user の本文中タグが索引に入っていない(埋め戻しの引き金が効いていない)',
+    ).toEqual(['買い物']);
     db.close();
   });
 
