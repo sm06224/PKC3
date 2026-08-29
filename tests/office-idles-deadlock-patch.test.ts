@@ -63,7 +63,7 @@ function tree(body: string): Tree {
     read: () => readFileSync(join(dir, REL), 'utf-8'),
     run: () => {
       try {
-        return { code: 0, out: execFileSync('python3', [SCRIPT, dir], { encoding: 'utf-8' }) };
+        return { code: 0, out: execFileSync('python3', [SCRIPT, dir], { encoding: 'utf-8', stdio: 'pipe' }) };
       } catch (e) {
         const err = e as { status?: number; stderr?: string; stdout?: string };
         return { code: err.status ?? 1, out: `${err.stdout ?? ''}${err.stderr ?? ''}` };
@@ -136,7 +136,7 @@ describe('#199 の直し(IdlesLockGuard)', () => {
     try {
       let code = 0;
       try {
-        execFileSync('python3', [SCRIPT, dir], { encoding: 'utf-8' });
+        execFileSync('python3', [SCRIPT, dir], { encoding: 'utf-8', stdio: 'pipe' });
       } catch (e) {
         code = (e as { status?: number }).status ?? 1;
       }

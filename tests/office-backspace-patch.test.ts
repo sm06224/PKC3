@@ -125,7 +125,7 @@ function tree(over: Partial<Record<'h' | 'win' | 'ctx', string>> = {}): Tree {
 /** patch を回す。⚠ **落ちても投げない**(exit を検めたいので自分で拾う)。 */
 function run(dir: string): { code: number; out: string } {
   try {
-    const out = execFileSync('python3', [SCRIPT, dir], { encoding: 'utf-8' });
+    const out = execFileSync('python3', [SCRIPT, dir], { encoding: 'utf-8', stdio: 'pipe' });
     return { code: 0, out };
   } catch (e) {
     const err = e as { status?: number; stdout?: string; stderr?: string };

@@ -806,3 +806,79 @@ describe('🔴 native のダイアログを使わない(#299)', () => {
     expect(dialog, '器が知らせる口を持っていない').toContain('export function alertInApp');
   });
 });
+
+/**
+ * 🔴 **子プロセスの stderr を、親の画面へ漏らさない**(#558)。
+ *
+ * ⚠ `execFileSync` / `execSync` の既定は「**stderr は親へ素通り**」である
+ *   (Node の doc: *stderr by default will be output to the parent process' stderr
+ *   unless stdio is specified*)。⚠ **わざと異常終了させる test** はこの既定のせいで、
+ *   緑のまま毎回 stderr へ ERROR を吐く。
+ *
+ * 🔴 **実害が出た**(2026-08-29):全スイートに常在した 2 行を
+ *   「上流の錨が本当に外れた」証拠と読み、**存在しない不具合を起票して撤回した**。
+ *   CLAUDE.md「**全スイートの stderr は 0 行を保つ**。1 行でも常在すると、
+ *   本物のエラーがそこに紛れる」がこの形で効いた。
+ *
+ * 🔑 **もう 1 つ得がある** ── 既定のままだと `catch` の `err.stderr` は **null** なので、
+ *   `out: stdout + stderr` と書いた helper が **stderr を 1 文字も返していなかった**
+ *   (5 か所ともそうだった)。明示すると**検査の材料が戻る**。
+ *
+ * ⚠ **コメントを落とさない。** これは「**bare な呼び出しが無い**」という
+ *   *無い* ことの主張なので、広く拾うほうが安全側である(codeOnly の docstring)。
+ *   ⚠ そのぶん**行番号が原文どおり**になるので、落ちたとき指せる。
+ */
+describe('🔴 test が起こす子プロセスは stdio を明示する(#558)', () => {
+  const CALL = /\b(execFileSync|execSync|spawnSync)\s*\(/g;
+
+  /** 呼び出しの `(` から対応する `)` までを返す(素朴な括弧数え)。 */
+  function callText(src: string, openParen: number): string {
+    let depth = 0;
+    for (let i = openParen; i < src.length; i += 1) {
+      if (src[i] === '(') depth += 1;
+      else if (src[i] === ')') {
+        depth -= 1;
+        if (depth === 0) return src.slice(openParen, i + 1);
+      }
+    }
+    return src.slice(openParen);
+  }
+
+  function sitesIn(src: string, file: string): { where: string; call: string }[] {
+    return [...src.matchAll(CALL)].map((m) => ({
+      where: `${file}:${src.slice(0, m.index).split('\n').length}`,
+      call: callText(src, m.index + m[0].length - 1),
+    }));
+  }
+
+  const sites = textFiles('tests')
+    .filter((f) => f.endsWith('.ts'))
+    .flatMap((f) => sitesIn(readFileSync(f, 'utf-8'), f));
+
+  it('⚠ 前提: 走査が呼び出しを実際に拾っている(空振り防止)', () => {
+    expect(sites.length, '子プロセスの呼び出しを 1 件も拾えていない').toBeGreaterThan(10);
+  });
+
+  it('🔴 どの呼び出しも stdio を書いている', () => {
+    const bare = sites.filter((s) => !s.call.includes('stdio')).map((s) => s.where);
+    expect(bare, `stdio を書いていない(子の stderr が画面へ漏れる): ${bare.join(' / ')}`).toEqual(
+      [],
+    );
+  });
+
+  /**
+   * ⚠ 検査そのものが効くこと(括弧数えが壊れたら、この形を見逃す)。
+   * 🔴 **見本の名前は組み立てる** ── 字面に置くと、この file 自身が
+   *   「stdio の無い呼び出し」として自分の検査に引っかかる(実際 1 度引っかかった)。
+   */
+  it('⚠ 走査は stdio の有無を見分けられる', () => {
+    const name = `exec${'File'}Sync`;
+    const bare = `${name}('x', [], { encoding: 'utf-8' });`;
+    expect(sitesIn(bare, 'f').length, '見本を拾えていない').toBe(1);
+    expect(sitesIn(bare, 'f')[0]!.call.includes('stdio'), '無いのに在ると読んだ').toBe(false);
+    const ok = `${name}('x', [], { encoding: 'utf-8', stdio: 'pipe' });`;
+    expect(sitesIn(ok, 'f')[0]!.call.includes('stdio'), '在るのに無いと読んだ').toBe(true);
+    // ⚠ 行番号は**原文の行**(コメントを落とさないので、ずれない)
+    expect(sitesIn(`// a\n// b\n${bare}`, 'f')[0]!.where, '行番号がずれている').toBe('f:3');
+  });
+});

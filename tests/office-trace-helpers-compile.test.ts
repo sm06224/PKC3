@@ -71,7 +71,7 @@ describe('ヘルパーの当て先は、スコープ検査にも全部載って�
             + '"specs":sorted(set(re.findall(chr(34)+"(vcl/[^"+chr(34)+"]+[.]cxx)"+chr(34), b)))}))',
         ].join('\n'),
       ],
-      { encoding: 'utf-8' },
+      { encoding: 'utf-8', stdio: 'pipe' },
     );
     const { patch, specs } = JSON.parse(out) as { patch: string[]; specs: string[] };
     // ⚠ 空振り防止 ── 0 対 0 でも「一致」は真になる
