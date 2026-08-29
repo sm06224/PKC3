@@ -147,6 +147,69 @@ ANCHOR_ALL = "\ngb_emscripten_fs_image_all_files = "
 # 🔴 上流が既に言語を入れたら止める(二重に入れない / 直ったことに気づく)
 UPSTREAM_ALREADY = "LC_MESSAGES"
 
+# 🔴 **Basic IDE(ツール → マクロ → マクロの編集)の設定一式**(#431 段④)。
+#
+# ## なぜ要るか ── 押しても無言で何も起きない
+#
+# 手元の 26.8 の一式に `dialog-crash-probe.mjs` の `macro` suite を当てた実測:
+#
+# | 押したもの | 結果 |
+# |---|---|
+# | ツール → マクロ | 🟢 子メニューが開く(面 2 → 3 枚) |
+# | Run Macro… | 🟢 Macro Selector が開く(面 3 → 2 枚) |
+# | 🔴 Edit Macros… | 🔴 **何も起きない**(面 3 → 1 枚 / fault 0 件) |
+#
+# ⚠ 対照群(`macro-run` suite)で「子メニューの項目は押せている」ことを確かめてある
+# ので、これは**計器の話ではない**。
+#
+# ## 原因 ── コードは在るのに、その面が読む設定が配られていない
+#
+# | 見たもの | 結果 |
+# |---|---|
+# | 配った目録の `soffice.cfg/modules/` | `swriter` / `scalc` / `simpress` … **12 個**。🔴 `BasicIDE` は **0 件** |
+# | 上流 `CustomTarget_emscripten_fs_image.mk`(1,828 行) | 🔴 `BasicIDE` の一致 **0 件** |
+# | `soffice.wasm` | 🟢 **コードは在る**(`basctl` 133 件 / `ModulWindow` 3 件) |
+#
+# 🔑 上流の一覧は **wasm で scripting を切っていた時代**に書かれている ──
+# こちらが `PKC3_WASM_SCRIPTING=yes` で開けても、**設定だけが付いてこない**。
+# LO は開けなければ `SAL_WARN` して `return false` するので、**無言**で終わる
+# (#135 / #144 / #145 / #225 と同じ型)。
+#
+# ## ⚠ 条件は `Module_basctl.mk` と**同じ物**にする
+#
+# あちらは `ifneq ($(filter SCRIPTING,$(BUILD_TYPE)),)` の中で
+# `Library_basctl` と `UIConfig_basicide` を積む ── つまり **scripting を切った焼きでは
+# instdir に file が無い**。⚠ 条件を揃えないと
+# `gb_Deliver_deliver: file does not exist in instdir` で **make ごと止まる**
+# (#225 の 1 稿目で実際に 1 本潰した)。
+#
+# ⚠ 一覧は `basctl/UIConfig_basicide.mk` の**登録**から採った ── file システムの
+# 実在で数えない(CLAUDE.md §8)。登録に条件は 1 つも付いていない。
+BASICIDE_UI = (
+    "basicmacrodialog", "breakpointmenus", "codecomplete", "colorscheme",
+    "combobox", "defaultlanguage", "deletelangdialog", "dialogpage",
+    "dockingorganizer", "dockingstack", "dockingwatch", "exportdialog",
+    "gotolinedialog", "importlibdialog", "libpage", "managebreakpoints",
+    "managelanguages", "modulepage", "newlibdialog", "objectbrowser",
+    "organizedialog", "sortmenu",
+)
+BASICIDE_XML = (
+    ("popupmenu", ("dialog", "tabbar")),
+    ("menubar", ("menubar",)),
+    ("statusbar", ("statusbar",)),
+    ("toolbar", (
+        "dialogbar", "findbar", "fullscreenbar", "insertcontrolsbar",
+        "formcontrolsbar", "macrobar", "standardbar", "translationbar",
+    )),
+)
+_CFG = "$(INSTROOT)/$(LIBO_SHARE_FOLDER)/config/soffice.cfg/modules/BasicIDE"
+BASICIDE_FILES = tuple(
+    f"{_CFG}/{sub}/{n}.xml" for sub, names in BASICIDE_XML for n in names
+) + tuple(f"{_CFG}/ui/{n}.ui" for n in BASICIDE_UI)
+
+# 🔴 上流が入れ始めたら止める(二重に入れない / 直ったことに気づく)
+BASICIDE_ALREADY = "modules/BasicIDE"
+
 LANG_BLOCK = """# PKC3: 日本語 UI の「言語の登録」を配る(#158)── 上流の一覧は en-US を名指しで
 # 焼いており、他言語の registry を 1 行も入れていない。configure にレバーは無い
 # (ENABLE_WASM_STRIP_LOCALES は死に変数 / --disable-wasm-strip は Emscripten で無効)。
@@ -246,6 +309,18 @@ def main() -> int:
         )
         return 1
 
+    # ⚠ 上流が Basic IDE を入れ始めたら止める(#431 の分が要らなくなった合図)。
+    # 🔑 コメントを外した**実行行**で見る ── file 全体で問うと、上流が
+    #    `# BasicIDE is stripped for wasm` のような散文を 1 行足しただけで
+    #    焼くたびに落ちる(§1「範囲が広すぎて散文に満たされる」)。
+    if BASICIDE_ALREADY in code_only:
+        print(
+            f"ERROR: 上流が既に Basic IDE を入れている({BASICIDE_ALREADY} が実行行に在る)\n"
+            "  → #431 の分は要らなくなった可能性がある。確かめてから外すこと",
+            file=sys.stderr,
+        )
+        return 1
+
     text = text.replace(
         ANCHOR_WRITER,
         "\n" + _block(WRITER_FILES, "Writer が読むのに入っていなかった(#135)") + ANCHOR_WRITER,
@@ -254,7 +329,19 @@ def main() -> int:
         ANCHOR_CALC,
         "\n" + _block(CALC_FILES, "Calc が読むのに入っていなかった(#135)") + ANCHOR_CALC,
     )
-    text = text.replace(ANCHOR_ALL, "\n" + LANG_BLOCK + ANCHOR_ALL)
+    # 🔴 Basic IDE は `Module_basctl.mk` と**同じ条件**で囲む(#431 段④)。
+    #    ⚠ 囲まないと scripting を切った焼きで
+    #      `gb_Deliver_deliver: file does not exist in instdir` が出て make ごと止まる。
+    basicide = (
+        "ifneq ($(filter SCRIPTING,$(BUILD_TYPE)),)\n"
+        + _block(
+            BASICIDE_FILES,
+            "Basic IDE の設定一式(#431 段④)── 上流の一覧に 1 件も無く、"
+            "「マクロの編集」が無言で開かなかった",
+        )
+        + "\nendif # SCRIPTING ── Basic IDE(#431)\n"
+    )
+    text = text.replace(ANCHOR_ALL, "\n" + basicide + "\n" + LANG_BLOCK + ANCHOR_ALL)
     # .mo のブロックは all_files の**定義行の直後**へ(`+=` なので前に置くと上書きで消える)
     all_line_start = text.index(ANCHOR_ALL) + 1
     all_line_end = text.index("\n", all_line_start)
@@ -285,6 +372,22 @@ def main() -> int:
     #    (#135 と同じ「無言で空」)。
     at_lang = text.index("registry/Langpack-$(lang).xcd")
     at_all = text.index("\ngb_emscripten_fs_image_all_files = ")
+    # 🔴 Basic IDE の後条件 ── ①一覧の中(all_files より前)②**条件の中**。
+    #    ⚠ ②を見ないと、条件の外に落ちても make は通り、scripting を切った焼きで
+    #      初めて止まる(気づくのが 30 分後になる)。
+    at_bi_open = text.index("ifneq ($(filter SCRIPTING,$(BUILD_TYPE)),)")
+    at_bi_close = text.index("endif # SCRIPTING ── Basic IDE(#431)")
+    if not at_bi_close < at_all:
+        print("ERROR: Basic IDE のブロックが一覧の外(all_files より後ろ)に在る", file=sys.stderr)
+        return 1
+    for f in BASICIDE_FILES:
+        if text.count(f) != 1:
+            print(f"ERROR: {f} が 1 件でない", file=sys.stderr)
+            return 1
+        at = text.index(f)
+        if not (at_bi_open < at < at_bi_close):
+            print(f"ERROR: {f} が SCRIPTING のブロックの外に在る", file=sys.stderr)
+            return 1
     at_mo_dep = text.index(": $(call gb_Postprocess_get_target,AllResources)")
     at_mo_add = text.index("gb_emscripten_fs_image_all_files += $(shell find ")
     if not at_lang < at_all:

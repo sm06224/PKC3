@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { codeOnly as stripComments } from './helpers/code-only';
 
@@ -930,5 +931,34 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
       counts.reduce((a, b) => a + b, 0),
       'smoke の test が増減した(足したらこの数を直す)',
     ).toBe(356);
+  });
+});
+
+describe('\u{1f534} 生成物を追跡しない(2026-08-29)', () => {
+  /**
+   * \u{1f534} **`5cafa46` で `__pycache__/*.pyc` が 13 file 混入していた。**
+   *
+   * ⚠ `.gitignore` にも無かったので、**patch script を 1 度動かすだけで作業ツリーが
+   * 汚れる**状態だった ── `git status` に常に出るので、
+   * **本物の変更が雑音に埋もれる**(CLAUDE.md §9「自分と他人のツリーを壊さない」)。
+   *
+   * \u{1f511} **等値で 0 件を pin する**(「増えていない」ではなく「1 件も無い」)──
+   * 件数で見ると、同じ数だけ別の生成物が入っても緑になる。
+   */
+  it('\u{1f534} Python の中間生成物(__pycache__ / *.pyc)が 1 件も追跡されていない', () => {
+    const tracked = execFileSync('git', ['ls-files'], {
+      encoding: 'utf-8',
+      // ⚠ 子プロセスの stdio は明示する(#558)
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+      .split('\n')
+      .filter(Boolean);
+    // 空振り防止 ── `git ls-files` が空を返したら、この検査は何も見ていない
+    expect(tracked.length, 'git ls-files が空(この検査は何も見ていない)').toBeGreaterThan(100);
+    const junk = tracked.filter((p) => p.includes('__pycache__/') || p.endsWith('.pyc'));
+    expect(
+      junk,
+      '中間生成物が commit されている ── .gitignore に入れて git rm -r --cached すること',
+    ).toEqual([]);
   });
 });
