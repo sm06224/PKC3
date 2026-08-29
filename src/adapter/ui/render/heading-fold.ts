@@ -28,7 +28,22 @@ import { foldSpans, hiddenByFolds } from '@features/markdown/heading-fold';
 /** 畳んでいる印。⚠ 見出しそのものに付ける(配下ではない)。 */
 const FOLDED = 'data-pkc-folded';
 
-function headingLevel(el: Element): number {
+/**
+ * 🔴 **畳んでいるかを問う口は 1 つ**(#426 段②)。
+ *
+ * ⚠ 右クリックのメニューは「畳む」と「出す」で**字が変わる**ので、
+ * 印を外から読む必要が出た ── 🔑 属性の綴りを外へ写さず、**ここに聞く**
+ * (CLAUDE.md §7「同じ問いに答える口が 2 つあると、片方だけ壊しても届かない」)。
+ */
+export function isHeadingFolded(heading: Element): boolean {
+  return heading.hasAttribute(FOLDED);
+}
+
+/**
+ * 見出しの段(`h1`→1 … `h6`→6。見出しでなければ 0)。
+ * 🔑 **綴りは 1 か所**(#426 段②)── binder も畳みの計算も、ここに聞く。
+ */
+export function headingLevel(el: Element): number {
   const m = /^H([1-6])$/.exec(el.tagName);
   return m === null ? 0 : Number(m[1]);
 }
@@ -93,6 +108,25 @@ export function applyHeadingFold(host: HTMLElement): number {
     if (el instanceof HTMLElement) el.hidden = hidden.has(i);
   }
   return spans.length;
+}
+
+/**
+ * 🔴 **原文の行から見出しの節点を引く**(#426 段②)。
+ *
+ * 右クリックのメニューは器の直下に出るので、押した見出しは
+ * **押したボタンの祖先に居ない** ── 🔑 開いたときに写した行番号から引き直す。
+ *
+ * ⚠ **`host` の直下だけを見る** ── `applyHeadingFold` / `revealBlock` と
+ * **同じ塊の数え方**である(入れ子の見出しを拾うと、畳みの計算に載っていない
+ * 節点を畳もうとして無言の no-op になる)。
+ * ⚠ 引けなければ `null` ── **当てずっぽうで別の見出しを畳まない**。
+ */
+export function headingAtSourceLine(host: HTMLElement, line: number): Element | null {
+  for (const el of host.children) {
+    if (headingLevel(el) === 0) continue;
+    if (el.getAttribute('data-pkc-source-line') === String(line)) return el;
+  }
+  return null;
 }
 
 /**

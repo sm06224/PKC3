@@ -28,7 +28,8 @@
  *   PKC3_REDRAW=1        打鍵が版面に出るか + 保存した中身に入るか(#154)
  *     PKC3_REDRAW_ENTRY=click|dblclick|tab   PKC3_REDRAW_X / _Y  押す比
  *   PKC3_PASTE=1         コピーと貼り付けが効くか(#121)
- *     PKC3_PASTE_VIA=keys|menu               近道キー / `編集` メニュー
+ *     PKC3_PASTE_VIA=keys|menu|browser       近道キー / `編集` メニュー /
+ *                                            🔴 **ブラウザのクリップボードを跨ぐ**(#121 の残り)
  *     PKC3_MENU_SHOT=/path.png               🔑 コピーの**後**の `編集` を撮る
  *                                            (`形式を選択して貼り付け` の灰色 = #121 の肝)
  *     PKC3_PRE_PASTE_SHOT=/path.png          貼る直前(選択が畳めたか)
@@ -504,6 +505,23 @@ const browser = await chromium.launchPersistentContext(profile, {
 });
 const page = await browser.newPage();
 /**
+ * 🔴 **クリップボードの許可は、跨ぐ腕のときだけ与える**(#121、2026-08-29)。
+ *
+ * ⚠ 常に与えると **他の腕の環境まで変わる** ── `keys` / `menu` は LO の中で閉じており、
+ * 許可の有無に依らないはずなのに、「許可を与えたら通った」を後から切り分けられなくなる
+ * (CLAUDE.md「1 度の実験が 2 つを主張していた」)。
+ * 🔑 与えないと `writeText()` は**拒まれる**(headless の既定は prompt)ので、
+ * この腕だけは与える ── ⚠ そのうえで「固まった / 拒まれた」は**判定不能**として読む。
+ */
+if (process.env.PKC3_PASTE_VIA === 'browser') {
+  try {
+    await browser.grantPermissions(['clipboard-read', 'clipboard-write']);
+    result.clipboardPermission = 'granted';
+  } catch (e) {
+    result.clipboardPermission = safeErr(e);
+  }
+}
+/**
  * 🔴 **console の行に「いつ出たか」を添える**(#117 / #199。2026-08-29 に穴を踏んだ)。
  *
  * ⚠ `events` は `dt` を持つのに **console は時刻なしの配列**だったので、
@@ -540,7 +558,21 @@ try {
   await page.goto(`${base}/office/host.html`, { waitUntil: 'domcontentloaded' });
   result.staged = await page.evaluate(async () => {
     const { fetch, indexedDB } = globalThis;
-    const m = await (await fetch('/office-pack/pack.json')).json();
+    /**
+     * 🔴 **足りない file は、名前で言う**(2026-08-29 に 1 回転溶かした)。
+     * ⚠ `(await fetch(...)).json()` は 404 の空 body で
+     * `SyntaxError: Unexpected end of JSON input` を投げる ── その字面は
+     * **何が無いのか 1 文字も言わない**ので、「probe が壊れた」と読んでしまう
+     * (実際は「渡した一式に `pack.json` が無い」= 引数の取り違えだった)。
+     * 🔑 計器は**落ちた理由を名前で言う**(CLAUDE.md §6「shell と CI が
+     * 『失敗した』を食べる」の evaluate 版)。
+     */
+    const grab = async (path) => {
+      const r = await fetch(path);
+      if (!r.ok) throw new Error(`${path} が取れない(HTTP ${r.status})`);
+      return r;
+    };
+    const m = await (await grab('/office-pack/pack.json')).json();
     const names = [...m.files, ...m.fonts];
     const db = await new Promise((res, rej) => {
       const r = indexedDB.open('pkc3-office-pack', 1);
@@ -560,7 +592,7 @@ try {
       });
     let bytes = 0;
     for (const n of names) {
-      const b = await (await fetch(`/office-pack/${n}`)).blob();
+      const b = await (await grab(`/office-pack/${n}`)).blob();
       bytes += b.size;
       await put('files', n, b);
     }
@@ -1115,8 +1147,17 @@ try {
         await save();
         // 🔑 **対照群** ── ここが 1 でなければ、以降は全部読めない
         paste.typed = await readSaved('typed');
-        await page.keyboard.press('Control+a');
-        await page.waitForTimeout(800);
+        const via = process.env.PKC3_PASTE_VIA ?? 'keys';
+        paste.via = via;
+        /**
+         * ⚠ **全選択するのは「LO の中でコピーする腕」だけ**(#121、2026-08-29)。
+         * `browser` の腕は LO の中の字をコピーしないので、ここで全選択すると
+         * **貼り付けが対照群の字を置き換えて消す** ── 対照群ごと壊れる。
+         */
+        if (via !== 'browser') {
+          await page.keyboard.press('Control+a');
+          await page.waitForTimeout(800);
+        }
         /**
          * 🔴 **コピーの出し方を選べるようにする**(#121 の手順は**メニュー**である)。
          *
@@ -1129,8 +1170,6 @@ try {
          * ⚠ **開いたことを別に数える**(`menuWindows`)── 開いていない回を
          *   「コピーが効かなかった」と読まないため。
          */
-        const via = process.env.PKC3_PASTE_VIA ?? 'keys';
-        paste.via = via;
         const countWindows = () => page.evaluate(COUNT_QT_WINDOWS);
         /**
          * 🔑 **項目は近道キーで選ぶ**(座標を当てない)。実測した `編集` メニューの綴りは
@@ -1162,6 +1201,31 @@ try {
             await page.keyboard.press('Escape');
             await page.waitForTimeout(1200);
           }
+        } else if (via === 'browser') {
+          /**
+           * 🔴 **ブラウザのクリップボードを跨ぐ**(#121 の残り 1 手。2026-08-29)。
+           *
+           * ⚠ `keys` / `menu` の 2 本は **LO 1 インスタンスの中で閉じている**ので、
+           * `navigator.clipboard` を 1 度も跨がない ── #121 の候補 1(主スレッド閉塞)と
+           * 候補 2(`clipboard-read` の権限)が当たる**当の経路を踏んでいない**。
+           * 🔑 この腕は「**別のアプリで写した字を LO へ貼る**」を作る:
+           *   外(ホストの頁)から `writeText` で種を置き、LO へ `Ctrl+V` する。
+           *
+           * ⚠ **固まる形で失敗しうる** ── #121 は「頁から `writeText()` を呼んだだけで
+           *   レンダラが 45 秒フリーズ(2 回再現)」と記録している。だから
+           *   **頁の中と Node の両方**に締切を置き、固まった回は
+           *   「貼れていない」ではなく **判定不能**として読む。
+           */
+          const seedJs = `(async () => {
+            const late = new Promise((r) => setTimeout(() => r({ hung: 'in-page' }), 20000));
+            const w = navigator.clipboard.writeText(${JSON.stringify('OUTSIDE7')})
+              .then(() => ({ ok: true }), (e) => ({ err: String(e).slice(0, 120) }));
+            return await Promise.race([w, late]);
+          })()`;
+          paste.seed = await Promise.race([
+            page.evaluate(seedJs).catch((e) => ({ err: safeErr(e) })),
+            new Promise((r) => setTimeout(() => r({ hung: 'node' }), 30000)),
+          ]);
         } else {
           await page.keyboard.press('Control+c');
         }
@@ -1191,6 +1255,7 @@ try {
         if (via === 'menu') {
           paste.menuPaste = await menuPick('p');
         } else {
+          // ⚠ `browser` も近道キーで貼る ── 問いは**橋**であって、メニューではない
           await page.keyboard.press('Control+v');
         }
         await page.waitForTimeout(2500);
@@ -1200,15 +1265,43 @@ try {
         const c = paste.copied?.count ?? null;
         const v = paste.pasted?.count ?? null;
         paste.controlLanded = t === 1 && paste.base?.size !== paste.typed?.size;
-        paste.verdict = !paste.controlLanded
-          ? '判定不能(打鍵か保存が届いていない)'
-          : c === 0
-            ? 'Ctrl+C が文字として入った'
-            : v === 2
-              ? '貼れた'
-              : v === 1
-                ? '貼れていない'
-                : '読めない件数: ' + String(v);
+        if (via === 'browser') {
+          /**
+           * 🔑 数えるのは**外から置いた字**である(打った字ではない)。
+           * ⚠ 対照群(`controlLanded`)は打った字のままで良い ── それが崩れた回は
+           *   保存も打鍵も届いていないので、どのみち読めない。
+           */
+          paste.outside = await (async () => {
+            try {
+              return await page.evaluate(TYPED_IN_SAVED('OUTSIDE7'));
+            } catch (e) {
+              paste.hungAt = paste.hungAt ?? 'outside';
+              return { err: safeErr(e) };
+            }
+          })();
+          const o = paste.outside?.count ?? null;
+          paste.verdict = !paste.controlLanded
+            ? '判定不能(打鍵か保存が届いていない)'
+            : paste.seed?.hung
+              ? `判定不能(クリップボードへ書く所で固まった: ${paste.seed.hung})`
+              : paste.seed?.err
+                ? `判定不能(クリップボードへ書けなかった: ${paste.seed.err})`
+                : o !== null && o >= 1
+                  ? '外から貼れた'
+                  : o === 0
+                    ? '外からは貼れていない'
+                    : `読めない件数: ${String(o)}`;
+        } else {
+          paste.verdict = !paste.controlLanded
+            ? '判定不能(打鍵か保存が届いていない)'
+            : c === 0
+              ? 'Ctrl+C が文字として入った'
+              : v === 2
+                ? '貼れた'
+                : v === 1
+                  ? '貼れていない'
+                  : '読めない件数: ' + String(v);
+        }
       }
     } catch (e) {
       paste.err = safeErr(e);

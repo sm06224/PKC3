@@ -1833,7 +1833,18 @@ export class DetailRenderer {
     if (description.trim() !== '') {
       const desc = document.createElement('div');
       desc.className = 'pkc-md-rendered';
-      desc.setAttribute('data-pkc-field', 'detail-body');
+      /**
+       * 🔴 **綴りは `field()` から取る**(2026-08-29、着地前レビュー ⚠5)。
+       *
+       * ⚠ ここだけ**リテラルで `detail-body` を直書き**していた ── 留めた枠は
+       *   `detail-` を `split-` へ変えることで「押した物と効く先が食い違う」を
+       *   防いでいるのに(この file の `field()` の説明)、**添付の説明だけ
+       *   その仕掛けをすり抜けて**いた。
+       * ⚠ 実害:添付を横に留めて、その説明の見出しを右クリックすると、
+       *   受け手は `root.querySelector('[data-pkc-field="detail-body"]')` で
+       *   **主の枠**を掴む(器の並びは主が先)── 右を押したのに左が畳まれる。
+       */
+      desc.setAttribute('data-pkc-field', this.field('detail-body'));
       // 🔑 添付の説明も本文と同じ読み幅(2026-08-08)。⚠ ここは**別に描く経路**
       //    なので、読む面に印を付けただけでは届かない(CLAUDE.md「経路ごとに pin」)
       desc.setAttribute('data-pkc-prose', '');

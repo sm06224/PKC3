@@ -15,7 +15,13 @@
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { deliveredEntryOf, type ExtDeliveredEntry } from '@features/extension/ext-delivery';
 import { isLaunchableUrl } from '@features/launcher/tiles';
-import { revealBlock, toggleHeadingFold } from '../render/heading-fold';
+import {
+  headingAtSourceLine,
+  headingLevel,
+  isHeadingFolded,
+  revealBlock,
+  toggleHeadingFold,
+} from '../render/heading-fold';
 import { quoteOnEnter } from '@features/markdown/quote-assist';
 import { renumberLists } from '@features/markdown/list-renumber';
 import { stripDialect } from '@features/markdown/strip-dialect';
@@ -119,7 +125,7 @@ import { appKeymap, type KeymapStore } from '@adapter/ui/render/keymap';
 import { appOpenInEdit, OpenInEditStore } from '@adapter/ui/render/open-in-edit';
 import { chordOf, findCommand, isMac, typesCharacter, KEY_COMMANDS } from '@features/keymap';
 import { paletteRows } from '@features/palette/palette-rows';
-import { bodyMenuActions, entryMenuActions } from '@features/entry-actions';
+import { bodyMenuActions, entryMenuActions, headingMenuActions } from '@features/entry-actions';
 import {
   closeContextMenu,
   contextMenuOpen,
@@ -868,6 +874,9 @@ function runBulkTag(
 
 const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'start-edit',
+  // 🔑 **右クリックから入る編集も同じ門**(#426 段②。着地前レビュー 🔴1)──
+  //    載せ忘れると「取り込み中は帯からは断られ、メニューからは通る」になる
+  'edit-from-heading',
   'commit-edit',
   'append-entry',
   // ⚠ 選んだ全部の本文を書く(#402 ①)── 取込・書出しの最中に走らせない
@@ -1167,6 +1176,107 @@ function bodySourceLineAt(
   }
   const line = Number(mark.getAttribute('data-pkc-source-line'));
   return Number.isInteger(line) && line >= 0 ? line : null;
+}
+
+/**
+ * 🔴 **編集に入る口は 1 本**(#426 段②。着地前レビュー 🔴1)。
+ *
+ * ⚠ 直す前は `START_EDIT` を撃つ所が **3 か所**あり、門(飛んでいる書込を待つ /
+ * 別タブとの編集ロック / 入れたか確かめて返す)を持っていたのは**帯の「編集」だけ**
+ * だった ── `Ctrl`(`⌘`)+クリックと、右クリックの「ここから編集する」は
+ * **ロックを取らずに編集へ入って**いた(= 同じノートを 2 枚が持ち、後に保存したほうが勝つ)。
+ * 🔑 §7 の作法どおり**判定を 1 か所へ寄せる** ── 呼び手は「どの行から開くか」だけ渡す。
+ *
+ * @param atLine 押した行(`null` = 帯の「編集」= 先頭から)
+ */
+function startEditAt(
+  dispatcher: Dispatcher,
+  services: BinderServices,
+  atLine: number | null,
+): void {
+  const lock = services.acquireEditLock;
+  const lid = dispatcher.getState().openBody?.lid ?? null;
+  /**
+   * 🔴 **飛んでいる書込を待ってから始める**(#288)。⚠ 待たないと、
+   * チェックの印を押した直後の編集で**押す前の本文**が入力欄に出て、
+   * 打った時点で印が黙って戻る(2026-08-19 に smoke が実際に踏んだ)。
+   * ⚠ 待つのは chain が空になるまで ── 何も飛んでいなければその場で返る。
+   */
+  /**
+   * ⚠ **渡されていない環境では今までどおり同期に始まる**(`null`)── test の
+   *   fake や旧い配線を非同期に変えない(乗せ換えたとき unit が 40 件落ちた)。
+   */
+  const ready = services.settle?.() ?? null;
+  if (!lock || lid === null) {
+    if (ready === null) dispatcher.dispatch({ type: 'START_EDIT', ...(atLine === null ? {} : { atLine }) });
+    else void ready.then(() => dispatcher.dispatch({ type: 'START_EDIT', ...(atLine === null ? {} : { atLine }) }));
+    return;
+  }
+  void (ready === null ? lock(lid) : ready.then(() => lock(lid))).then((grant) => {
+    if (grant !== 'granted') {
+      // ⚠ 文言は理由と対(§1 / レビュー M-7)── holder 不在を「別のタブで編集中」と
+      //    言うと、user は存在しない編集タブを探す
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error:
+          grant === 'denied'
+            ? 'このノートは別のタブで編集中です(そちらを閉じるか保存してください)'
+            : '本体タブと通信できません(少し待ってもう一度お試しください)',
+      });
+      return;
+    }
+    // 🔴 dispatch の**前**に自分の lid か確かめる(レビュー M-3)── acquire を待つ間に
+    //    user が別のノートを選んでいると、reducer は**そのノート**の編集を受理する
+    //    = ロック無しの編集が成立してしまう。dispatch は同期なのでここの検査に窓は無い
+    if (dispatcher.getState().openBody?.lid !== lid) {
+      services.releaseEditLock?.(lid);
+      return;
+    }
+    dispatcher.dispatch({ type: 'START_EDIT', ...(atLine === null ? {} : { atLine }) });
+    // ⚠ 「editing に居るか」では足りない ── reducer が断る理由は選択以外にもある
+    //    (writeLock / tileWrite 中)。**自分の lid が入ったか**で見る
+    const st = dispatcher.getState();
+    if (!(st.phase === 'editing' && st.openBody?.lid === lid))
+      services.releaseEditLock?.(lid);
+  });
+}
+
+/**
+ * 🔴 **右クリックのメニューが運んできた「押した見出しの行」**(#426 段②)。
+ *
+ * ⚠ メニューの器は **root の直下**に出るので、押したボタンは押した物の中に居ない
+ * ── だから受け手は `closest` では**必ず外す**。🔑 開くときにボタンへ写した
+ * 行番号(`openContextMenu` の `carry`)を、ここで 1 か所だけ読む。
+ * ⚠ 綴りをあちこちに写さない(§7)── この関数と `onContextMenu` の 2 か所だけが知る。
+ */
+const MENU_LINE_ATTR = 'data-pkc-menu-line';
+
+function menuCarriedLine(target: Element): number | null {
+  const raw = target.getAttribute(MENU_LINE_ATTR);
+  if (raw === null) return null;
+  const line = Number(raw);
+  return Number.isInteger(line) && line >= 0 ? line : null;
+}
+
+/**
+ * メニューから押されたときの「その見出し」。
+ *
+ * 🔑 **押した所から辿れるならそちらが正しい**(見出しの頭の小さなボタン)。
+ * 辿れないときだけ、運んできた行から引き直す。
+ *
+ * ⚠ **2 本は排他である**(着地前レビュー ⚠6 で言い直した)── 運ぶ印を持つのは
+ * `openContextMenu` が**器の直下**に組むボタンだけで、見出しの中には決して居ない。
+ * だから順番を入れ替えても挙動は 1 つも変わらない ── 1 稿目は「この向きでなければ
+ * ならない」と書いていたが、**外して壊れることを 1 度も見ていなかった**
+ * (CLAUDE.md「これが無いと壊れる、と書く前に外して壊れるのを見る」)。
+ */
+function headingForAction(root: HTMLElement, target: Element): Element | null {
+  const direct = target.closest('h1,h2,h3,h4,h5,h6');
+  if (direct !== null) return direct;
+  const line = menuCarriedLine(target);
+  if (line === null) return null;
+  const host = root.querySelector<HTMLElement>('[data-pkc-field="detail-body"]');
+  return host === null ? null : headingAtSourceLine(host, line);
 }
 
 /**
@@ -2025,53 +2135,9 @@ const ACTIONS: Record<string, ActionHandler> = {
     dispatcher.dispatch({ type: 'REFRESH_QUERY' });
   },
   'start-edit': (dispatcher, _target, services) => {
-    const lock = services.acquireEditLock;
-    const lid = dispatcher.getState().openBody?.lid ?? null;
-    /**
-     * 🔴 **飛んでいる書込を待ってから始める**(#288)。⚠ 待たないと、
-     * チェックの印を押した直後の編集で**押す前の本文**が入力欄に出て、
-     * 打った時点で印が黙って戻る(2026-08-19 に smoke が実際に踏んだ)。
-     * ⚠ 待つのは chain が空になるまで ── 何も飛んでいなければその場で返る。
-     */
-    /**
-     * ⚠ **渡されていない環境では今までどおり同期に始まる**(`null`)── test の
-     *   fake や旧い配線を非同期に変えない(乗せ換えたとき unit が 40 件落ちた)。
-     */
-    const ready = services.settle?.() ?? null;
-    if (!lock || lid === null) {
-      if (ready === null) dispatcher.dispatch({ type: 'START_EDIT' });
-      else void ready.then(() => dispatcher.dispatch({ type: 'START_EDIT' }));
-      return;
-    }
-    void (ready === null ? lock(lid) : ready.then(() => lock(lid))).then((grant) => {
-      if (grant !== 'granted') {
-        // ⚠ 文言は理由と対(§1 / レビュー M-7)── holder 不在を「別のタブで編集中」と
-        //    言うと、user は存在しない編集タブを探す
-        dispatcher.dispatch({
-          type: 'OP_FAILED',
-          error:
-            grant === 'denied'
-              ? 'このノートは別のタブで編集中です(そちらを閉じるか保存してください)'
-              : '本体タブと通信できません(少し待ってもう一度お試しください)',
-        });
-        return;
-      }
-      // 🔴 dispatch の**前**に自分の lid か確かめる(レビュー M-3)── acquire を待つ間に
-      //    user が別のノートを選んでいると、reducer は**そのノート**の編集を受理する
-      //    = ロック無しの編集が成立してしまう。dispatch は同期なのでここの検査に窓は無い
-      if (dispatcher.getState().openBody?.lid !== lid) {
-        services.releaseEditLock?.(lid);
-        return;
-      }
-      dispatcher.dispatch({ type: 'START_EDIT' });
-      // ⚠ 「editing に居るか」では足りない ── reducer が断る理由は選択以外にもある
-      //    (writeLock / tileWrite 中)。**自分の lid が入ったか**で見る
-      const st = dispatcher.getState();
-      if (!(st.phase === 'editing' && st.openBody?.lid === lid))
-        services.releaseEditLock?.(lid);
-    });
+    startEditAt(dispatcher, services, null);
   },
-  // ⚠ 第 4 引数の **root** を使う(target ではない)── 追記欄の出口は detail の
+    // ⚠ 第 4 引数の **root** を使う(target ではない)── 追記欄の出口は detail の
   //    兄弟なので、押したボタンから題名欄へは辿れない(P8 段⑲)
   'commit-edit': (dispatcher, _target, _services, root) => {
     renameFromEditorInput(dispatcher, root);
@@ -3476,8 +3542,39 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   `BODY_WRITE_ACTIONS` には**載せない**(取り込み中でも畳んでよい)。
    */
   'toggle-heading-fold': (_dispatcher, target) => {
-    const heading = target.closest('h1,h2,h3,h4,h5,h6');
+    /**
+     * 🔴 **右クリックからも来る**(#426 段②)── そのとき押したボタンは
+     * 器の直下に居るので、`closest` では見出しに当たらない。
+     * 🔑 判定は `headingForAction` **1 本**(2 つ目の綴りを生やさない。§7)。
+     */
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    const heading = headingForAction(root, target);
     if (heading !== null) toggleHeadingFold(heading);
+  },
+  /**
+   * 🔴 **その見出しから編集に入る**(#426 段②)。
+   *
+   * ⚠ 近道(`Ctrl` / `⌘` + クリック)は**そのまま残す** ── #426 の
+   * 「既存の操作を移さない。増やすだけ」。🔑 効き先も同じ `START_EDIT` である
+   * (別の入口に別の意味を持たせない)。
+   */
+  'edit-from-heading': (dispatcher, target, services) => {
+    const line = menuCarriedLine(target);
+    if (line === null) return;
+    // 🔑 門は `startEditAt` **1 本**(飛んでいる書込を待つ / 別タブのロック / 返し)
+    startEditAt(dispatcher, services, line);
+  },
+  /**
+   * 🔴 **その見出しを追記の入り先にする**(#426 段②)。
+   *
+   * ⚠ 断り文まで含めて `pickAppendTarget` **1 本**に任せる ── ここで
+   * 追記できるかを別に判定すると、近道(`Alt` + クリック)と食い違う日が来る。
+   */
+  'append-at-heading': (dispatcher, target) => {
+    const line = menuCarriedLine(target);
+    if (line === null) return;
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    pickAppendTarget(dispatcher, root, line);
   },
   /**
    * 🔴 **よく開くサイトをアプリ一覧に足す**(#401 ①)。
@@ -6066,11 +6163,59 @@ export function bindActions(
        *   「右ペインには出るのにメニューには出ない」が静かに生まれる(§7)。
        */
       const ob = dispatcher.getState().openBody;
+      const body = bodyMenuActions({ externalImages: ob ? externalImageUrls(ob.body).length : 0 });
+      /**
+       * 🔴 **見出しの上なら、見出しの 3 つを頭へ足す**(#426 段② の残り)。
+       *
+       * ⚠ **差し替えない** ── 見出しは本文の中に在るので、いまも本文のメニューが
+       *   出ている。差し替えると**見出しの上でだけ段組みを切り替えられなくなる**
+       *   (在る動線を 1 つ失う)。
+       * 🔑 行は `bodySourceLineAt` **1 本**で引く ── `Ctrl` / `Alt` の近道と
+       *   同じ関数なので、「近道では入れるのにメニューからは入れない」が生まれない。
+       * ⚠ 見出しが `host` の直下でないときは足さない ── 畳みの計算(`foldSpans`)が
+       *   直下の塊だけを数えているので、拾っても**押して何も起きない**。
+       */
+      const host = target.closest<HTMLElement>('[data-pkc-field="detail-body"]');
+      const heading = target.closest('h1,h2,h3,h4,h5,h6');
+      /**
+       * 🔴 **行は「押した所」ではなく「見出し」から引く**(着地前レビュー ⚠4)。
+       *
+       * ⚠ 実物の見出しの**先頭ピクセルは畳みのボタン**である(`applyHeadingFold` が
+       *   描画のたびに `prepend` する)。押した所から引くと `OWN_MEANING` に当たって
+       *   `null` になり、**帯の上で右クリックしたときだけ 3 つが消える** ──
+       *   user から見て同じ「見出しを右クリックした」なのに結果が違う。
+       * 🔑 見出し自身は `OWN_MEANING` ではないので、そのまま渡せば当たる。
+       *   ⚠ リンク・図は**手前の門**(`:6084`)で既に降りているので、
+       *   ここで見出しへ寄せてもブラウザ既定は奪わない。
+       */
+      const line = heading === null ? null : bodySourceLineAt(dispatcher, heading);
+      /**
+       * 🔴 **押しても何も起きない口は 1 つずつ畳む**(着地前レビュー ⚠7 / 動線 ⚠2 ⚠6)。
+       *
+       * ⚠ 1 稿目は「入れ子の見出しでは 3 つとも出さない」だったが、その理由
+       *   (畳みの計算が本文の直下しか数えない)は**畳みにしか当たっていなかった** ──
+       *   引用の中の見出しでも `Ctrl`+クリックは編集に入れるので、メニューだけ
+       *   出さないのは「近道では入れるのにメニューからは入れない」を自分で作る。
+       * ⚠ 追記は 2 つの条件が要る:①`text` / `textlog` だけ(`appendModeOf`)
+       *   ②入り先の一覧が **`#`〜`###` しか数えない**(`append-target.ts`)ので、
+       *   `####` 以下で出すと**押した見出しではなく上の `###`** が入り先になる。
+       */
+      const level = heading === null ? 0 : headingLevel(heading);
       openContextMenu(
         root,
         { x: ev.clientX, y: ev.clientY },
-        bodyMenuActions({ externalImages: ob ? externalImageUrls(ob.body).length : 0 }),
+        heading === null || line === null
+          ? body
+          : [
+              ...headingMenuActions({
+                folded: isHeadingFolded(heading),
+                foldable: heading.parentElement === host,
+                appendable: level >= 1 && level <= 3 && appendModeOf(dispatcher.getState()).kind === 'ready',
+              }),
+              ...body,
+            ],
         root.ownerDocument.activeElement,
+        line === null ? {} : { [MENU_LINE_ATTR]: String(line) },
       );
       return;
     }
