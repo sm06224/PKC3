@@ -248,6 +248,7 @@ export function bodyMenuActions(ctx: { readonly externalImages: number }): reado
 export const HEADING_MENU_ACTIONS: readonly EntryAction[] = [
   { action: 'edit-from-heading', label: 'ここから編集する' },
   { action: 'append-at-heading', label: 'ここに追記する' },
+  { action: 'toggle-heading-fold', label: 'この見出しの中身を畳む' },
 ];
 
 /**
@@ -256,15 +257,34 @@ export const HEADING_MENU_ACTIONS: readonly EntryAction[] = [
  * ⚠ **畳みの字は状態で変わる** ── 「畳む」と書いてあるのに開くのでは、
  * 押す前に起きることが読めない(user 指示 2026-08-21「設問は画面で何が起きるかで書く」
  * と同じ向き ── メニューの字も**起きること**で書く)。
+ *
+ * 🔴 **押しても何も起きない口は 1 つずつ畳む**(#426「押せない項目を黙って出さない」)。
+ * ⚠ 1 稿目は「入れ子の見出しでは 3 つとも出さない」だったが、**理由は畳みにしか
+ * 当たっていなかった** ── 引用の中の見出しでも `Ctrl`+クリックは編集に入れるので、
+ * メニューだけ出さないのは「近道では入れるのにメニューからは入れない」を
+ * **自分で作る**ことになる(着地前レビュー ⚠7)。
+ *
+ * @param folded いま畳んでいるか(字が変わる)
+ * @param foldable 畳めるか ── 畳みの計算は**本文の直下の塊**しか数えないので、
+ *   引用や `:::` の中の見出しでは押しても何も起きない
+ * @param appendable 追記の入り先にできるか ── 追記は `text` / `textlog` だけで、
+ *   入り先の一覧は **`#` 〜 `###` しか数えない**(`append-target.ts`)。
+ *   ⚠ `####` 以下で出すと、**押した見出しではなく上の `###`** が入り先になる
  */
-export function headingMenuActions(ctx: { readonly folded: boolean }): readonly EntryAction[] {
-  return [
-    ...HEADING_MENU_ACTIONS,
-    {
+export function headingMenuActions(ctx: {
+  readonly folded: boolean;
+  readonly foldable: boolean;
+  readonly appendable: boolean;
+}): readonly EntryAction[] {
+  const out: EntryAction[] = [{ action: 'edit-from-heading', label: 'ここから編集する' }];
+  if (ctx.appendable) out.push({ action: 'append-at-heading', label: 'ここに追記する' });
+  if (ctx.foldable) {
+    out.push({
       action: 'toggle-heading-fold',
       label: ctx.folded ? 'この見出しの中身を出す' : 'この見出しの中身を畳む',
-    },
-  ];
+    });
+  }
+  return out;
 }
 
 /** 綴り → 字。⚠ 情報ペインはこちらを引く(並びは向こうが決める)。 */

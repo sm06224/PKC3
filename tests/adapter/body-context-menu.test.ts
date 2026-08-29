@@ -311,7 +311,27 @@ describe('条件つきの操作が、右クリックから走る(#500 案 C)', (
  *    出ている。差し替えると**見出しの上でだけ段組みが切り替えられなくなる**。
  */
 describe('見出しの右クリック(#426 段② の残り)', () => {
-  const HEAD_BODY = ['## 章', '', '中身', '', '## つぎ', ''].join('\n');
+  /**
+   * ⚠ **見出しは 3 段ぶん持つ** ── `##`(1 つ目)/ `##`(2 つ目)/ `####`。
+   * 🔴 **2 つ目が要る理由**:1 稿目の fixture は行 0 の見出ししか押しておらず、
+   *   運ぶ値を `'0'` に固定する変異が **6 件の assert を全部素通り**した
+   *   (着地前レビュー 🔴2)── 「押した見出しの身元を運ぶ」という当の機構を、
+   *   どの test も 1 度も見ていなかった。
+   * 🔴 **`####` が要る理由**:追記の入り先は `#`〜`###` しか数えないので、
+   *   そこで「ここに追記する」を出すと**上の見出し**が入り先になる(動線 ⚠6)。
+   */
+  const HEAD_BODY = [
+    '## 章',
+    '',
+    '中身',
+    '',
+    '## つぎ',
+    '',
+    '#### こまかい',
+    '',
+    '![そと](https://example.com/a.png)',
+    '',
+  ].join('\n');
 
   function rig() {
     document.body.textContent = '';
@@ -328,12 +348,13 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
       '<h2 data-pkc-source-line="0" id="h-a">章</h2>' +
       '<p data-pkc-source-line="2" id="p-in">中身</p>' +
       '<h2 data-pkc-source-line="4" id="h-b">つぎ</h2>' +
+      '<h4 data-pkc-source-line="6" id="h-deep">こまかい</h4>' +
       /**
        * 🔴 **入れ子の見出し**(引用や `:::` の中は実在する)。
        * ⚠ 畳みの計算(`foldSpans`)は **host の直下**しか数えないので、
-       * ここに口を出しても**押して何も起きない**(無言の dead click)。
+       * ここで「畳む」を出しても押して何も起きない ── 畳みだけ畳む。
        */
-      '<blockquote data-pkc-source-line="6"><h3 data-pkc-source-line="6" id="h-nest">引用の中</h3></blockquote>';
+      '<blockquote data-pkc-source-line="8"><h3 data-pkc-source-line="8" id="h-nest">引用の中</h3></blockquote>';
     root.append(host);
     const sel = document.createElement('select');
     sel.setAttribute('data-pkc-field', 'append-target');
@@ -341,10 +362,14 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
      * ⚠ **印は製品と同じ関数から引く**(`sectionAt`)── 手で綴りを書くと、
      * 印の作り方が変わった日に**この test だけが古い綴りを持つ**(そして
      * 「選べません」に落ちるのに、原因が fixture 側だと気づけない)。
+     * 🔴 **2 つ入れる** ── 1 つだけだと `not.toBe('')` が実質「章」固定になり、
+     *   運ぶ行を潰す変異を見逃す。
      */
-    const slug = sectionAt(HEAD_BODY, 0)?.slug ?? '';
-    expect(slug, '見出しの印が引けていない(fixture の前提が崩れている)').not.toBe('');
-    for (const value of ['', slug]) {
+    const slugA = sectionAt(HEAD_BODY, 0)?.slug ?? '';
+    const slugB = sectionAt(HEAD_BODY, 4)?.slug ?? '';
+    expect([slugA, slugB], '見出しの印が引けていない(fixture の前提が崩れている)').not.toContain('');
+    expect(slugA, '2 つの見出しの印が同じ(区別できない)').not.toBe(slugB);
+    for (const value of ['', slugA, slugB]) {
       const opt = document.createElement('option');
       opt.value = value;
       sel.append(opt);
@@ -369,6 +394,18 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
           date: null,
           archived: 0,
         } as never,
+        // ⚠ 追記できない種類(添付)── 「ここに追記する」を畳む側の対照群
+        {
+          lid: 'a1',
+          title: '添付',
+          archetype: 'attachment',
+          created_at: null,
+          updated_at: null,
+          entry_order: 2,
+          status: null,
+          date: null,
+          archived: 0,
+        } as never,
       ],
       relations: [],
     });
@@ -379,22 +416,33 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
       d,
       said,
       host,
+      sel,
       head: root.querySelector('#h-a')!,
+      head2: root.querySelector('#h-b')!,
+      deep: root.querySelector('#h-deep')!,
       para: root.querySelector('#p-in')!,
       nested: root.querySelector('#h-nest')!,
-      sel,
       menu: () => root.querySelector(MENU),
       acts: (): string[] =>
         [...root.querySelectorAll(`${MENU} button[data-pkc-action]`)].map(
           (b) => b.getAttribute('data-pkc-action') ?? '',
         ),
+      lines: (): (string | null)[] =>
+        [...root.querySelectorAll(`${MENU} button[data-pkc-action]`)].map((b) =>
+          b.getAttribute('data-pkc-menu-line'),
+        ),
       press: (action: string): void => {
         root.querySelector<HTMLElement>(`${MENU} [data-pkc-action="${action}"]`)!.click();
+      },
+      /** 添付のノートへ切り替える(追記できない側)。 */
+      toAttachment: (): void => {
+        d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+        d.dispatch({ type: 'BODY_LOADED', lid: 'a1', body: HEAD_BODY });
       },
     };
   }
 
-  it('🔴 見出しの 3 つが**頭に**足され、本文の 3 つも残る(動線を 1 つも失わない)', () => {
+  it('🔴 見出しの 3 つが**頭に**足され、本文の分も残る(動線を 1 つも失わない)', () => {
     const r = rig();
     rightClick(r.head);
     const acts = r.acts();
@@ -405,28 +453,54 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     ]);
     /**
      * 🔴 **差し替えていないことを、ここで見る。**
-     * ⚠ 「頭 3 つが正しい」だけでは、本文の 3 つを落とす変異が生き延びる
-     *   ── 落ちるのは #522 で user が頼んだ段組みの切替である。
+     * ⚠ 「頭 3 つが正しい」だけでは、本文の分を落とす変異が生き延びる
+     *   ── 落ちるのは #522 で user が頼んだ段組み切替である。
+     * 🔴 **条件つきの「取り込む」まで見る**(着地前レビュー 🔴3)── `BODY_MENU_ACTIONS`
+     *   だけと突き合わせる変異は、fixture に外部画像が 0 枚だと素通りした。
      */
-    expect(acts.slice(3), '本文のメニューが消えている').toEqual(
-      BODY_MENU_ACTIONS.map((a) => a.action),
-    );
+    expect(acts.slice(3), '本文のメニューが消えている / 取り込みが見出しの枝だけ落ちた').toEqual([
+      ...BODY_MENU_ACTIONS.map((a) => a.action),
+      'adopt-external-images',
+    ]);
   });
 
   it('🔴 **段落の上では増えない**(対照群 ── 見出しの物が常に出る作りではない)', () => {
     const r = rig();
     rightClick(r.para);
-    expect(r.acts(), '段落の上でも見出しの物が出た').toEqual(
-      BODY_MENU_ACTIONS.map((a) => a.action),
-    );
+    expect(r.acts(), '段落の上でも見出しの物が出た').toEqual([
+      ...BODY_MENU_ACTIONS.map((a) => a.action),
+      'adopt-external-images',
+    ]);
   });
 
   it('🔴 押したボタンが「押した見出しの行」を運んでいる', () => {
     const r = rig();
     rightClick(r.head);
-    for (const b of root_buttons(r.menu()!)) {
-      expect(b.getAttribute('data-pkc-menu-line'), `${b.getAttribute('data-pkc-action')} が運んでいない`).toBe('0');
-    }
+    expect(new Set(r.lines()), '1 つ目の見出しの行を運んでいない').toEqual(new Set(['0']));
+  });
+
+  /**
+   * 🔴 **2 つ目の見出しを押す**(着地前レビュー 🔴2)。
+   * ⚠ これが無いと、運ぶ値を `'0'` に固定する変異が**全部の assert を素通り**する
+   *   ── 実害は「2 つ目以降の見出しを右クリックすると、先頭の章が畳まれ、
+   *   先頭から編集に入る」。
+   */
+  it('🔴 2 つ目の見出しでは、2 つ目の行が運ばれ、2 つ目の章が畳まれる', () => {
+    const r = rig();
+    rightClick(r.head2);
+    expect(new Set(r.lines()), '2 つ目の見出しの行を運んでいない').toEqual(new Set(['4']));
+    r.press('toggle-heading-fold');
+    // ⚠ **対照群**:1 つ目の章の中身は畳まれない(先頭を掴んでいない証拠)
+    expect((r.para as HTMLElement).hidden, '2 つ目を押したのに 1 つ目が畳まれた').toBe(false);
+    expect((r.deep as HTMLElement).hidden, '2 つ目の章の中身が畳まれていない').toBe(true);
+  });
+
+  it('🔴 2 つ目の見出しからは、2 つ目の行で編集に入る', () => {
+    const r = rig();
+    rightClick(r.head2);
+    r.press('edit-from-heading');
+    expect(r.d.getState().phase, '編集に入っていない').toBe('editing');
+    expect(r.d.getState().editOpenAt, '先頭の行で開いている').toBe(4);
   });
 
   it('🔴 「ここから編集する」で、その行から編集に入る', () => {
@@ -435,6 +509,56 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     r.press('edit-from-heading');
     expect(r.d.getState().phase, '編集に入っていない').toBe('editing');
     expect(r.d.getState().editOpenAt, '押した見出しの行を持っていっていない').toBe(0);
+  });
+
+  /**
+   * 🔴 **編集の門を通っている**(着地前レビュー 🔴1)。
+   * ⚠ 直す前は `START_EDIT` を直に撃っていたので、**別タブが編集中でも入れた**
+   *   (帯の「編集」なら断られる = メニューからだけ門が無い形)。
+   */
+  it('🔴 別のタブが編集中なら、メニューからも入れない(理由が出る)', async () => {
+    document.body.textContent = '';
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    const host = document.createElement('div');
+    host.setAttribute('data-pkc-field', 'detail-body');
+    host.innerHTML = '<h2 data-pkc-source-line="0" id="h-a">章</h2>';
+    root.append(host);
+    document.body.append(root);
+    const said: string[] = [];
+    const d = new Dispatcher();
+    bindActions(root, d, {
+      showStatus: (t) => said.push(t),
+      acquireEditLock: () => Promise.resolve('denied'),
+    });
+    d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [
+        {
+          lid: 'n1',
+          title: 't',
+          archetype: 'text',
+          created_at: null,
+          updated_at: null,
+          entry_order: 1,
+          status: null,
+          date: null,
+          archived: 0,
+        } as never,
+      ],
+      relations: [],
+    });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '## 章\n' });
+    rightClick(root.querySelector('#h-a')!);
+    root.querySelector<HTMLElement>(`${MENU} [data-pkc-action="edit-from-heading"]`)!.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(d.getState().phase, 'ロックを取れていないのに編集へ入った').toBe('ready');
+    // ⚠ 断り文は state に載る(`OP_FAILED`)── 画面はそれを読む
+    expect(d.getState().error ?? '', '断った理由が出ていない').toContain('別のタブ');
+    void said;
   });
 
   /**
@@ -452,7 +576,7 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     r.press('toggle-heading-fold');
     expect((r.para as HTMLElement).hidden, 'メニューから押しても畳まれない').toBe(true);
     // ⚠ 次の見出しは畳まない(章の外まで巻き込んでいない)
-    expect((r.root.querySelector('#h-b') as HTMLElement).hidden).toBe(false);
+    expect((r.head2 as HTMLElement).hidden).toBe(false);
   });
 
   it('🔴 畳んでいるときは字が「出す」になる(押す前に起きることが読める)', () => {
@@ -471,34 +595,74 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
   });
 
   /**
-   * 🔴 **見出しの頭の小さなボタンは、いままでどおり効く**(#426 で壊していない)。
+   * 🔴 **見出しの頭のボタンの上でも同じ 3 つが出る**(着地前レビュー ⚠4)。
    *
-   * ⚠ この経路は**変異試験で見つけた穴**である(M3 が SURVIVED)── 畳みの
-   * 受け手から「押した所から辿る」枝を丸ごと落としても、**test が 1 つも落ちなかった**。
-   * つまり `heading-fold.test.ts` は `toggleHeadingFold` を**直に呼んでいる**だけで、
-   * **委譲を通した押し**は誰も見ていなかった(CLAUDE.md §2「通っていない経路」)。
+   * ⚠ 実物の見出しの**先頭ピクセルは畳みのボタン**である(`applyHeadingFold` が
+   *   描画のたびに `prepend` する)。押した所から行を引くと `OWN_MEANING` に当たって
+   *   `null` になり、**帯の上で右クリックしたときだけ 3 つが消えて**いた。
    */
-  it('🔴 見出しの頭のボタンからも、いままでどおり畳める(委譲を通して)', () => {
+  it('🔴 見出しの頭の畳みボタンの上で右クリックしても、3 つが出る', () => {
     const r = rig();
     applyHeadingFold(r.host);
     const btn = r.host.querySelector<HTMLElement>('#h-a [data-pkc-field="heading-fold"]');
     expect(btn, '畳みのボタンが出ていない(fixture の前提が崩れている)').not.toBeNull();
+    rightClick(btn!);
+    expect(r.acts().slice(0, 3), '帯の上で右クリックすると 3 つが消える').toEqual([
+      'edit-from-heading',
+      'append-at-heading',
+      'toggle-heading-fold',
+    ]);
+    expect(new Set(r.lines()), '帯の上では行を運べていない').toEqual(new Set(['0']));
+  });
+
+  it('🔴 見出しの頭のボタンからも、いままでどおり畳める(委譲を通して)', () => {
+    const r = rig();
+    applyHeadingFold(r.host);
+    const btn = r.host.querySelector<HTMLElement>('#h-a [data-pkc-field="heading-fold"]');
     btn!.click();
     expect((r.para as HTMLElement).hidden, '見出しのボタンから畳めない').toBe(true);
   });
 
   /**
-   * 🔴 **押しても何も起きない口を出さない**(#426 の「押せない項目を黙って出さない」)。
-   *
-   * ⚠ 変異試験 M6 が SURVIVED で教えた ── `host` の直下という条件を外しても
-   * 落ちる test が無かった(入れ子の見出しを持つ fixture が 1 つも無かった)。
+   * 🔴 **押しても何も起きない口だけを畳む**(着地前レビュー ⚠7)。
+   * ⚠ 1 稿目は入れ子の見出しで 3 つとも落としていたが、その理由(畳めない)は
+   *   **畳みにしか当たっていなかった** ── `Ctrl`+クリックは入れ子でも編集に入れる。
    */
-  it('🔴 **入れ子の見出し**(引用の中)では出さない ── 畳めないので', () => {
+  it('🔴 **入れ子の見出し**(引用の中)では「畳む」だけ出さない', () => {
     const r = rig();
     rightClick(r.nested);
-    expect(r.acts(), '押しても畳めない見出しに口を出した').toEqual(
-      BODY_MENU_ACTIONS.map((a) => a.action),
+    const acts = r.acts();
+    expect(acts, '入れ子で編集の口まで落ちている').toContain('edit-from-heading');
+    expect(acts, '入れ子で押しても何も起きない「畳む」を出した').not.toContain(
+      'toggle-heading-fold',
     );
+  });
+
+  /**
+   * 🔴 **`####` 以下では「ここに追記する」を出さない**(動線レビュー ⚠6)。
+   * ⚠ 入り先の一覧は `#`〜`###` しか数えないので、出すと**押した見出しではなく
+   *   上の `###`** が入り先になる(押した物と効く先が食い違う)。
+   */
+  it('🔴 `####` の見出しでは「ここに追記する」を出さない', () => {
+    const r = rig();
+    rightClick(r.deep);
+    const acts = r.acts();
+    expect(acts, '編集の口まで落ちている').toContain('edit-from-heading');
+    expect(acts, '入り先にできない見出しで追記の口を出した').not.toContain('append-at-heading');
+  });
+
+  /**
+   * 🔴 **追記できない種類のノートでは出さない**(動線レビュー ⚠2)。
+   * ⚠ 追記は `text` / `textlog` だけ。出しても `pickAppendTarget` が**黙って降りる**
+   *   ので、押した人には何が起きるはずだったのかを推測する材料が 1 つも無い。
+   */
+  it('🔴 添付のノートでは「ここに追記する」を出さない', () => {
+    const r = rig();
+    r.toAttachment();
+    rightClick(r.head);
+    const acts = r.acts();
+    expect(acts, '編集の口まで落ちている').toContain('edit-from-heading');
+    expect(acts, '追記できないノートで追記の口を出した').not.toContain('append-at-heading');
   });
 
   it('🔴 「ここに追記する」で、追記の入り先が動く', () => {
@@ -506,13 +670,18 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     rightClick(r.head);
     expect(r.sel.value, '押す前から選ばれている').toBe('');
     r.press('append-at-heading');
-    expect(r.sel.value, 'メニューから押しても入り先が動かない').not.toBe('');
+    expect(r.sel.value, 'メニューから押しても入り先が動かない').toBe(
+      sectionAt(HEAD_BODY, 0)?.slug ?? '',
+    );
+  });
+
+  it('🔴 2 つ目の見出しからの追記は、2 つ目が入り先になる', () => {
+    const r = rig();
+    rightClick(r.head2);
+    r.press('append-at-heading');
+    expect(r.sel.value, '押した見出しではない所が入り先になった').toBe(
+      sectionAt(HEAD_BODY, 4)?.slug ?? '',
+    );
   });
 });
 
-/** メニューの中のボタンを数える(空振り防止つき ── 0 個なら assert が空回りする)。 */
-function root_buttons(menu: Element): HTMLElement[] {
-  const bs = [...menu.querySelectorAll<HTMLElement>('button[data-pkc-action]')];
-  expect(bs.length, 'メニューにボタンが 1 つも無い').toBeGreaterThan(0);
-  return bs;
-}

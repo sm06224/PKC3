@@ -39,7 +39,11 @@ export function isHeadingFolded(heading: Element): boolean {
   return heading.hasAttribute(FOLDED);
 }
 
-function headingLevel(el: Element): number {
+/**
+ * 見出しの段(`h1`→1 … `h6`→6。見出しでなければ 0)。
+ * 🔑 **綴りは 1 か所**(#426 段②)── binder も畳みの計算も、ここに聞く。
+ */
+export function headingLevel(el: Element): number {
   const m = /^H([1-6])$/.exec(el.tagName);
   return m === null ? 0 : Number(m[1]);
 }
