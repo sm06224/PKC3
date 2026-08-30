@@ -1194,6 +1194,25 @@ try {
    * | `pasted.count === 1` | コピーか貼り付けのどちらかが効いていない |
    * | `hungAt` が非 null | 🔴 **主スレッドが返ってこない**(候補 1 の裏取り) |
    */
+  /**
+   * 🔴 **引き金を割る第 3 の腕**(#117、2026-08-30)。
+   *
+   * 実測: **押す群 5/10 で fault / 押さない群 0/10**。⚠ ただし 2 群の差は
+   * 「押したか」だけではない ── 押す群は**その直前に版面の位置を採る**
+   * (`CANVAS_BOX` = shadow root を歩く `evaluate`)。
+   * 🔑 だから**位置だけ採って押さない**腕を作る。ここが 0 なら、引き金は**クリック**である。
+   * ⚠ この腕は `PKC3_BOX_ONLY=1` の回だけ走る(既定では何もしない)。
+   */
+  if (process.env.PKC3_BOX_ONLY === '1' && result.opened) {
+    mark('位置だけ採る');
+    try {
+      result.boxOnly = { box: await canvasBox() };
+      await page.waitForTimeout(20000);
+      result.boxOnly.waited = true;
+    } catch (e) {
+      result.boxOnly = { err: safeErr(e) };
+    }
+  }
   if (PASTE && result.opened) {
     mark('貼り付けの門');
     const NEEDLE = 'ZULU9';
