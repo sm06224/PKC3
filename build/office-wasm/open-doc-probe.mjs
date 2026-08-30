@@ -1144,6 +1144,31 @@ try {
    *   指定する(`コピー(Y)` のように、英語の頭文字とは違う)。
    * ⚠ **開いたことを数で残す**(`windows`)── 開いていない回の絵を読まないため。
    */
+  /**
+   * 🔴 **箱の中へ file を 1 つ置く**(#146、`PKC3_SEED_FILE=<path>` の回だけ)。
+   *
+   * ⚠ 画像の挿入ダイアログは **Qt の file dialog** で、`/home/web_user` から始まる
+   *   (実測)。LO の `Path/Current/Graphic` を `/work` にしても**動かなかった**
+   *   ので、次に確かめるのは「**そこへ置けば見えるか**」である。
+   * 🔑 見えるなら、直しは「PKC が渡すときに添付をその場所へ書く」だけで済む。
+   */
+  if (process.env.PKC3_SEED_FILE && result.opened) {
+    try {
+      result.seedFile = await page.evaluate(
+        `(() => {
+          const lo = window.__lo;
+          if (!lo || !lo.FS) return { err: '__lo がまだ無い' };
+          const p = ${JSON.stringify(process.env.PKC3_SEED_FILE)};
+          try { lo.FS.mkdirTree(p.slice(0, p.lastIndexOf('/'))); } catch (e) { /* 既に在る */ }
+          lo.FS.writeFile(p, new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]));
+          const st = lo.FS.stat(p);
+          return { path: p, size: st.size };
+        })()`,
+      );
+    } catch (e) {
+      result.seedFile = { err: safeErr(e) };
+    }
+  }
   if (process.env.PKC3_MENU_OPEN && result.opened) {
     const tour = {};
     result.menuTour = tour;
@@ -1167,13 +1192,38 @@ try {
         }
         tour.clicked = process.env.PKC3_MENU_NO_CLICK !== '1';
         tour.before = await page.evaluate(COUNT_QT_WINDOWS);
-        await page.keyboard.press(process.env.PKC3_MENU_OPEN);
-        await page.waitForTimeout(2500);
-        tour.opened = await page.evaluate(COUNT_QT_WINDOWS);
-        if (process.env.PKC3_MENU_ITEM) {
+        /**
+         * 🔴 **開くまで押し直す**(#146、2026-08-30 実測)。
+         *
+         * ⚠ `Alt+キー` でメニューが開くのは **17 回中 4 回**しかない
+         *   (押さない・fault 無しの回で数えた)。⚠ #117 の落下とは**別**である
+         *   ── 落ちていない回でも開かない。
+         * 🔑 1 回の走りで押し直せば、24% でも数回で当たる。
+         * ⚠ 押し直しの回数は `tour.tries` に残す(何回目で開いたかを後から読む)。
+         */
+        const tries = Math.max(1, Number(process.env.PKC3_MENU_TRIES ?? 1));
+        tour.tries = 0;
+        for (let t = 0; t < tries; t += 1) {
+          await page.keyboard.press(process.env.PKC3_MENU_OPEN);
+          await page.waitForTimeout(2500);
+          tour.tries = t + 1;
+          tour.opened = await page.evaluate(COUNT_QT_WINDOWS);
+          if (tour.opened > tour.before) break;
+        }
+        /**
+         * 🔴 **開いていない回に項目の鍵を押さない**(2026-08-30 に実際に踏んだ)。
+         *
+         * ⚠ `Alt+I` が効かなかった回に `i` を押したら、**本文に `i` が入った**
+         *   (`Alpha beta gamma` → `iAlpha beta gamma`、文字数 16 → 17)。
+         *   計器が**測る対象を書き換えて**いたことになる。
+         * 🔑 貼り付けの門と同じ形の罠なので、同じ形で塞ぐ。
+         */
+        if (process.env.PKC3_MENU_ITEM && tour.opened > tour.before) {
           await page.keyboard.press(process.env.PKC3_MENU_ITEM);
           await page.waitForTimeout(6000);
           tour.afterItem = await page.evaluate(COUNT_QT_WINDOWS);
+        } else if (process.env.PKC3_MENU_ITEM) {
+          tour.skippedItem = 'メニューが開かなかったので項目は押していない';
         }
         if (process.env.PKC3_MENU_SHOT) {
           await page.screenshot({ path: process.env.PKC3_MENU_SHOT });
