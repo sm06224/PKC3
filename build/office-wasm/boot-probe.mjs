@@ -47,9 +47,30 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, extname, resolve } from 'node:path';
 import { chromium } from '@playwright/test';
+import { armWatchdog } from './probe-watchdog.mjs';
 
 const ROOT = resolve(process.argv[2] ?? '.');
 const OUT = process.argv[3] ?? '';
+
+/**
+ * 🔴 **全体の締切**(#624)。`open-doc-probe` が **4h58m** 固まって
+ * JSON を 1 バイトも残さなかったので、probe 全部に置いた。
+ *
+ * ⚠ `page.evaluate()` に**既定の締切は無い** ── 版面が 100% で回り続けると
+ * `await` は永久に返らず、例外を投げないので **`finally` も走らない**。
+ * 🔑 だから「**何段目で止まったか**」を残せるのは見張りだけである。
+ * ⚠ 締切は `PKC3_HARD_LIMIT_SEC` で伸ばせる(既定 900 秒)。
+ * ⚠ 出るのは**時間切れの記録**であって、probe の通常の出力ではない ──
+ *   `timedOut: true` は「できなかった」ではなく **判定不能**と読む。
+ */
+let live = null;
+const watched = {};
+const wd = armWatchdog({
+  result: watched,
+  out: OUT,
+  limitSec: Number(process.env.PKC3_HARD_LIMIT_SEC ?? 900),
+  browser: () => live,
+});
 // ⚠ ハーネス自身の自己検品(起動しない題材を渡して**失敗として鳴る**か見る)を
 //    現実的な時間で回せるように外へ出す。既定は wasm 149MB のコンパイルを見込んだ値。
 // ⚠ 300 秒では足りなかった(run 31350624048 は timeout 時点で `onLoaded` までしか
@@ -186,6 +207,9 @@ async function main() {
     ...(executablePath ? { executablePath } : {}),
     ...(executablePath ? {} : channel ? { channel } : {}),
   });
+  // 🔑 見張りが閉じる相手(起動してから渡す)
+  live = browser;
+  wd.mark('起動');
 
   let page;
   let sampler;
@@ -201,6 +225,7 @@ async function main() {
     page.on('pageerror', (e) => pageErrors.push(String(e).slice(0, 400)));
 
     // ── 対照群: 同じサーバ・同じヘッダ・同じブラウザで空ページ ──────────
+    wd.mark('__blank を開く');
     await page.goto(`${base}/__blank`, { waitUntil: 'load' });
     result.isolatedBaseline = await page.evaluate(() => globalThis.crossOriginIsolated === true);
     // 落ち着かせてから測る(ブラウザ起動直後の伸び縮みを拾わない)
@@ -209,6 +234,7 @@ async function main() {
 
     // ── 本番: LibreOffice を起動 ────────────────────────────────────
     const t0 = Date.now();
+    wd.mark('qt_soffice.html を開く');
     await page.goto(`${base}/qt_soffice.html`, { waitUntil: 'commit' });
     result.isolated = await page.evaluate(() => globalThis.crossOriginIsolated === true);
 

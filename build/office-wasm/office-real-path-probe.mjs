@@ -33,9 +33,30 @@ import { createServer } from 'node:http';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { join, extname, resolve } from 'node:path';
 import { chromium } from '@playwright/test';
+import { armWatchdog } from './probe-watchdog.mjs';
 
 const PACK = resolve(process.argv[2] ?? '/tmp/pages-out');
 const OUT = process.argv[3] ?? '';
+
+/**
+ * 🔴 **全体の締切**(#624)。`open-doc-probe` が **4h58m** 固まって
+ * JSON を 1 バイトも残さなかったので、probe 全部に置いた。
+ *
+ * ⚠ `page.evaluate()` に**既定の締切は無い** ── 版面が 100% で回り続けると
+ * `await` は永久に返らず、例外を投げないので **`finally` も走らない**。
+ * 🔑 だから「**何段目で止まったか**」を残せるのは見張りだけである。
+ * ⚠ 締切は `PKC3_HARD_LIMIT_SEC` で伸ばせる(既定 900 秒)。
+ * ⚠ 出るのは**時間切れの記録**であって、probe の通常の出力ではない ──
+ *   `timedOut: true` は「できなかった」ではなく **判定不能**と読む。
+ */
+let live = null;
+const watched = {};
+const wd = armWatchdog({
+  result: watched,
+  out: OUT,
+  limitSec: Number(process.env.PKC3_HARD_LIMIT_SEC ?? 900),
+  browser: () => live,
+});
 const DIST = resolve('dist');
 const DPR = Number(process.env.PKC3_DPR ?? 1);
 const SHOTS = `/tmp/pkc3-real-shots-dpr${DPR}`;
@@ -116,6 +137,9 @@ async function main() {
     args: ['--no-sandbox', '--disable-dev-shm-usage'],
     executablePath: '/opt/pw-browsers/chromium',
   });
+  // 🔑 見張りが閉じる相手(起動してから渡す)
+  live = browser;
+  wd.mark('起動');
   const result = { dpr: DPR, base, steps: [] };
   const page = await browser.newPage();
   const lines = [];
@@ -124,6 +148,7 @@ async function main() {
 
   try {
     // ① まず host.html を開いて origin を作り、IDB へ一式を仕込む
+    wd.mark('host.html を開く');
     await page.goto(`${base}/office/host.html`, { waitUntil: 'domcontentloaded' });
     result.staged = await page.evaluate(async () => {
       // ⚠ browser の global を裸で書かない(lint は node として読む ── 1 度 CI を赤にした)
@@ -164,7 +189,9 @@ async function main() {
     });
 
     // ② 実 user 経路で起動(host.html が幾何を仕込む)
+    wd.mark('host.html を開く');
     await page.goto(`${base}/office/host.html`, { waitUntil: 'commit' });
+    wd.mark('版面を待つ');
     await page.waitForFunction(
       () => {
         const s = document.querySelector('#screen');

@@ -56,6 +56,7 @@
  * ⚠ **撮影の口を持たない** ── この probe は画素を 1 枚も撮らない(rule 6)。
  */
 import { chromium } from '@playwright/test';
+import { armWatchdog } from './probe-watchdog.mjs';
 import { createServer } from 'node:http';
 import { readFile, writeFile, rm } from 'node:fs/promises';
 import { join, extname } from 'node:path';
@@ -63,6 +64,26 @@ import { tmpdir } from 'node:os';
 
 const PACK = process.argv[2] ?? '/tmp/lo-wasm';
 const OUT = process.argv[3] ?? '';
+
+/**
+ * 🔴 **全体の締切**(#624)。`open-doc-probe` が **4h58m** 固まって
+ * JSON を 1 バイトも残さなかったので、probe 全部に置いた。
+ *
+ * ⚠ `page.evaluate()` に**既定の締切は無い** ── 版面が 100% で回り続けると
+ * `await` は永久に返らず、例外を投げないので **`finally` も走らない**。
+ * 🔑 だから「**何段目で止まったか**」を残せるのは見張りだけである。
+ * ⚠ 締切は `PKC3_HARD_LIMIT_SEC` で伸ばせる(既定 900 秒)。
+ * ⚠ 出るのは**時間切れの記録**であって、probe の通常の出力ではない ──
+ *   `timedOut: true` は「できなかった」ではなく **判定不能**と読む。
+ */
+let live = null;
+const watched = {};
+const wd = armWatchdog({
+  result: watched,
+  out: OUT,
+  limitSec: Number(process.env.PKC3_HARD_LIMIT_SEC ?? 900),
+  browser: () => live,
+});
 /** 試す書式。⚠ **odt が対照群**なので先頭から動かさない。 */
 const FORMATS = (process.env.PKC3_FORMATS ?? 'odt,doc,rtf,docx').split(',');
 /** 1 形式あたりの待ち(ms)。⚠ boot が重いので短くしない。 */
@@ -161,6 +182,9 @@ const browser = await chromium.launchPersistentContext(PROFILE, {
   args: ['--no-sandbox', '--disable-dev-shm-usage'],
   executablePath: process.env.PKC3_CHROMIUM ?? '/opt/pw-browsers/chromium',
 });
+// 🔑 見張りが閉じる相手(起動してから渡す)
+live = browser;
+wd.mark('起動');
 
 /** ⚠ 非 ASCII の行は丸ごと捨てる(本文が混じる唯一の経路 ── 機密の取り扱い 3)。 */
 const safeLine = (s) => (/[^\x20-\x7e]/.test(s) ? null : s.slice(0, 200));
@@ -188,6 +212,7 @@ for (const fmt of FORMATS) {
     await page.addInitScript((text) => {
       window.__input = text;
     }, INPUT_TEXT);
+    wd.mark('probe.html を開く');
     await page.goto(`${base}/probe.html?fmt=${encodeURIComponent(fmt)}`, { waitUntil: 'commit' });
     /**
      * 観測点は **MEMFS に出来た file**(size > 0)。

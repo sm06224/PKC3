@@ -32,6 +32,27 @@ import { readFile } from 'node:fs/promises';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, extname, resolve, basename } from 'node:path';
 import { chromium } from '@playwright/test';
+import { armWatchdog } from './probe-watchdog.mjs';
+
+/**
+ * 🔴 **全体の締切**(#624)。`open-doc-probe` が **4h58m** 固まって
+ * JSON を 1 バイトも残さなかったので、probe 全部に置いた。
+ *
+ * ⚠ `page.evaluate()` に**既定の締切は無い** ── 版面が 100% で回り続けると
+ * `await` は永久に返らず、例外を投げないので **`finally` も走らない**。
+ * 🔑 だから「**何段目で止まったか**」を残せるのは見張りだけである。
+ * ⚠ 締切は `PKC3_HARD_LIMIT_SEC` で伸ばせる(既定 900 秒)。
+ * ⚠ 出るのは**時間切れの記録**であって、probe の通常の出力ではない ──
+ *   `timedOut: true` は「できなかった」ではなく **判定不能**と読む。
+ */
+let live = null;
+const watched = {};
+const wd = armWatchdog({
+  result: watched,
+  out: '',
+  limitSec: Number(process.env.PKC3_HARD_LIMIT_SEC ?? 900),
+  browser: () => live,
+});
 
 const ROOT = resolve(process.argv[2] ?? '.');
 const fontsIdx = process.argv.indexOf('--fonts');
@@ -222,8 +243,13 @@ async function main() {
       viewport: { width: 1280, height: 900 },
       ...(existsSync(bundled) ? { executablePath: bundled } : {}),
     });
+    // 🔑 見張りが閉じる相手(起動してから渡す)
+    live = browser;
+    wd.mark('起動');
     const page = await browser.newPage();
+    wd.mark('__harness を開く');
     await page.goto(`${base}/__harness?case=${c.key}`, { waitUntil: 'commit' });
+    wd.mark('版面を待つ');
     const painted = await page.waitForFunction((fn) => {
       for (const cv of eval(fn)(document.querySelector('#screen'))) {
         const r = cv.getBoundingClientRect();
