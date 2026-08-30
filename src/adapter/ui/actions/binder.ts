@@ -4872,6 +4872,8 @@ export const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
   'insert-snippet': '[data-pkc-action="insert-snippet"]',
   'toggle-sidebar': '[data-pkc-action="toggle-pane"][data-pkc-pane="sidebar"]',
   'toggle-inspector': '[data-pkc-action="toggle-pane"][data-pkc-pane="inspector"]',
+  // 🔴 追記欄も同じ形で押す(#609)── 3 面で押し方を変えない
+  'toggle-append': '[data-pkc-action="toggle-pane"][data-pkc-pane="append"]',
   'view-query': '[data-pkc-action="set-view"][data-pkc-view="query"]',
   'open-settings': '[data-pkc-action="set-view"][data-pkc-view="settings"]',
   'open-flags': '[data-pkc-action="set-view"][data-pkc-view="flags"]',

@@ -303,3 +303,45 @@ test('🔴 狭い窓でペインを畳んでも、本文は狭くならない (#
 
   expect(errors, 'ページ例外 0 件').toEqual([]);
 });
+
+/**
+ * 🔴 **追記欄も鍵で畳める**(#609)。
+ *
+ * ⚠ 直す前、畳める 3 面のうち**追記欄だけ**が「掴む帯は在るが鍵もパレットも無い」
+ * 状態だった ── そして #607 と重なると、狭い窓では**マウスの戻し口も消えていた**。
+ *
+ * 🔑 unit は「登記が在る」までしか見られない ── **本当に畳むか**は
+ * `COMMAND_TARGETS` → 実物のボタン → binder という配線を通って初めて分かるので、
+ * ここで端から端まで 1 度通す(CLAUDE.md §7「両端が stub と話していると通る」)。
+ */
+test('🔴 追記欄も鍵で畳めて、戻せる (#609)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  const shell = page.locator(SHELL);
+
+  // ⚠ 前提 ── 追記欄が出ていること(ノートを開いていないと器ごと無い)
+  await expect(page.locator('[data-pkc-region="append"]'), '追記欄が出ていない').toBeVisible();
+  await expect(shell, '最初から畳まれている(台の前提)').not.toHaveAttribute(
+    'data-pkc-hidden-panes',
+    /append/,
+  );
+
+  await page.keyboard.press('Alt+Backslash');
+  await expect(shell, '鍵で畳めていない').toHaveAttribute('data-pkc-hidden-panes', /append/);
+  await expect(page.locator('[data-pkc-region="append"]'), '印は付いたが消えていない').toBeHidden();
+
+  // 🔴 **片道の操作を作らない**(2026-08-23)── 同じ鍵で戻る
+  await page.keyboard.press('Alt+Backslash');
+  await expect(shell, '同じ鍵で戻らない').not.toHaveAttribute('data-pkc-hidden-panes', /append/);
+  await expect(page.locator('[data-pkc-region="append"]')).toBeVisible();
+
+  // 🔴 **掴む帯は畳んでも残る**(#197 ── 鍵を知らない user の戻し口)
+  await page.keyboard.press('Alt+Backslash');
+  await expect(
+    page.locator('[data-pkc-region="pane-grip"][data-pkc-pane="append"]'),
+    '畳んだら掴む帯まで消えた(戻し口が無くなる)',
+  ).toBeVisible();
+
+  expect(errors, 'ページ例外 0 件').toEqual([]);
+});
