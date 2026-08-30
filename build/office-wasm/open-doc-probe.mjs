@@ -1470,17 +1470,36 @@ try {
          *   **「貼れた」とは書かない**(何が入ったかを見ていない)。
          * ⚠ 窓が増減した回は読まない ── ダイアログが出ただけでも版面は変わる。
          */
+        /**
+         * 🔴 **メニューが開いていない回を読まない**(2026-08-30 に踏みかけた)。
+         *
+         * ⚠ `menu` の腕は `Alt+E` → `p` の 2 手だが、**`Alt+E` が効かない回**がある
+         *   (実測 2 回:窓の数が `before` から動いていない)。そのとき続く `y` / `p` は
+         *   **ただの字として本文に入る** ── 版面は変わるので、
+         *   🔴 **「貼り付けで版面が変わった」に化ける**。
+         * ⚠ 危うくそのまま「メニュー経由は 4/4 で貼れた」と報告するところだった
+         *   (実際は 2 回が字の入力)。CLAUDE.md §4「観測点が放っておいても変わるなら、
+         *   変化は届いた証拠にならない」の顔違いである。
+         */
+        const menuOpened =
+          via !== 'menu' ||
+          (typeof paste.menuPaste?.opened === 'number' &&
+            typeof paste.menuPaste?.before === 'number' &&
+            paste.menuPaste.opened > paste.menuPaste.before);
+        screen.menuOpened = menuOpened;
         screen.verdict = !FRAMES
           ? '見ていない'
           : screen.typedOnScreen !== true
             ? '判定不能(打鍵が版面に届いていない)'
-            : screen.winAfter !== screen.winBefore
-              ? `判定不能(窓が ${String(screen.winBefore)} → ${String(screen.winAfter)} に変わった)`
-              : screen.pastedOnScreen === true
-                ? '貼り付けで版面が変わった(何が入ったかは言えない)'
-                : screen.pastedOnScreen === false
-                  ? '貼り付けで版面は変わらなかった'
-                  : '判定不能(版面を採れなかった)';
+            : !menuOpened
+              ? '判定不能(メニューが開いていない ── 続く鍵は字として入る)'
+              : screen.winAfter !== screen.winBefore
+                ? `判定不能(窓が ${String(screen.winBefore)} → ${String(screen.winAfter)} に変わった)`
+                : screen.pastedOnScreen === true
+                  ? '貼り付けで版面が変わった(何が入ったかは言えない)'
+                  : screen.pastedOnScreen === false
+                    ? '貼り付けで版面は変わらなかった'
+                    : '判定不能(版面を採れなかった)';
         if (via === 'browser') {
           /**
            * 🔑 数えるのは**外から置いた字**である(打った字ではない)。
