@@ -230,3 +230,76 @@ test('🔴 shell に変数が書かれ、CSS がそれを読んでいる (#497)'
   expect(cols.split(/\s+/)[0], `列の値が実寸と違う(${cols})`).toBe(`${side}px`);
   expect(errors, 'pageerror が出た').toEqual([]);
 });
+
+/**
+ * 🔴 **畳んだら本文は広くなる ── 狭い窓でも**(#607)。
+ *
+ * ## user から見て何が起きていたか
+ *
+ * スマホ相当(480px)で一覧を畳むと、本文が **480px → 241px** に**狭くなった**。
+ * ⚠ 畳むのは「本文を広く見たい」からなので、**逆に働いていた**。
+ *
+ * ## 🔴 unit では原理的に届かない
+ *
+ * 原因は **CSS の詳細度**である ── 畳んだ版面 `[shell][data-pkc-hidden-panes~='…']`
+ * は **(0,2,0)**、狭い版面は `@media` の中の `[shell]` = **(0,1,0)** で、
+ * **`@media` は詳細度を上げない**。happy-dom は CSS を組まないので、
+ * どちらが勝つかは**実ブラウザでしか分からない**。
+ *
+ * 🔑 観測点は**本文の実寸** ── 版面の字面ではなく、user が見る幅を測る。
+ */
+test('🔴 狭い窓でペインを畳んでも、本文は狭くならない (#607)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 480, height: 900 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+
+  const detail = async (): Promise<number> => widthOf(page, 'center');
+
+  /**
+   * ⚠ **前提 = 対照群** ── 畳む前の幅を採る。
+   * 🔑 これが無いと「畳んだら広くなった」を**何とも比べずに**言うことになる。
+   */
+  const before = await detail();
+  expect(before, '本文の幅を測れていない(台の空振り)').toBeGreaterThan(0);
+
+  for (const [pane, chord] of [
+    ['sidebar', 'Alt+BracketLeft'],
+    ['inspector', 'Alt+BracketRight'],
+  ] as const) {
+    await page.keyboard.press(chord);
+    await expect(
+      page.locator(SHELL),
+      `${pane} が畳まれていない(台の前提)`,
+    ).toHaveAttribute('data-pkc-hidden-panes', new RegExp(pane));
+    const after = await detail();
+    // 🔴 **狭くならない** ── #607 は 480 → 241 / 261 だった
+    expect(after, `${pane} を畳んだら本文が狭くなった: ${before} → ${after}`).toBeGreaterThanOrEqual(
+      before,
+    );
+    await page.keyboard.press(chord); // 戻す(次の腕を独立させる)
+    await expect(page.locator(SHELL)).not.toHaveAttribute(
+      'data-pkc-hidden-panes',
+      new RegExp(pane),
+    );
+  }
+
+  // 🔴 **両方畳んでも同じ**(3 属性の選択子を書き忘れると、ここだけ元に戻る)
+  await page.keyboard.press('Alt+BracketLeft');
+  await page.keyboard.press('Alt+BracketRight');
+  await expect(page.locator(SHELL)).toHaveAttribute('data-pkc-hidden-panes', /sidebar/);
+  await expect(page.locator(SHELL)).toHaveAttribute('data-pkc-hidden-panes', /inspector/);
+  const both = await detail();
+  expect(both, `両方畳んだら本文が狭くなった: ${before} → ${both}`).toBeGreaterThanOrEqual(before);
+
+  /**
+   * 🔴 **画面から溢れていない**(#586 と同じ実害の裏取り)。
+   * ⚠ 「本文が広い」だけを見ると、**器ごと窓の外へ出た**回も合格になる。
+   */
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflow, '横にはみ出している').toBeLessThanOrEqual(0);
+
+  expect(errors, 'ページ例外 0 件').toEqual([]);
+});

@@ -4512,6 +4512,47 @@ li[data-pkc-row-slot] {
       'notices   notices  notices'
       'status    status   status';
   }
+  /**
+   * 🔴 **畳んだ版面も、この幅では「この帯の版面」を使う**(#607。2026-08-30)。
+   *
+   * ⚠ 直す前は、file の頭に在る `[shell][data-pkc-hidden-panes~='sidebar']`
+   *   などが **(0,2,0)** で、この `@media` の中の `[shell]`(**(0,1,0)**)に
+   *   **常に勝っていた** ── `@media` は詳細度を上げない。
+   * 🔑 帰結が逆立ちしていた:**畳むと本文がかえって狭くなる**
+   *   (480px で 480px → **241px**。畳んだ版面が右 220px / 左 200px の列を
+   *   そのまま持ち続けるため)。⚠ 畳むのは「本文を広く見たい」からである。
+   * ⚠ **3 属性の選択子も要る** ── 頭の「両方畳む」規則が **(0,3,0)** なので、
+   *   2 属性の規則では勝てない(1 つ書き忘れると、その組み合わせだけ元に戻る)。
+   */
+  [data-pkc-region='shell'][data-pkc-hidden-panes~='inspector'] {
+    /* 情報はこの幅ではもともと下の行 ── 列はこの帯の既定のまま */
+    grid-template-columns: var(--pkc-pane-sidebar, minmax(180px, 22vw)) 8px minmax(0, 1fr);
+    grid-template-areas:
+      'sidebar   gripl detail'
+      'inspector inspector inspector'
+      'capture   capture  capture'
+      'timers    timers   timers'
+      'alarms    alarms   alarms'
+      'announce  announce announce'
+      'update    update   update'
+      'notices   notices  notices'
+      'status    status   status';
+  }
+  [data-pkc-region='shell'][data-pkc-hidden-panes~='sidebar'],
+  [data-pkc-region='shell'][data-pkc-hidden-panes~='sidebar'][data-pkc-hidden-panes~='inspector'] {
+    /* ⚠ 掴む帯は**残す**(#197)── 畳んだものを戻す口がここしか無い */
+    grid-template-columns: 8px minmax(0, 1fr);
+    grid-template-areas:
+      'gripl detail'
+      'inspector inspector'
+      'capture   capture'
+      'timers    timers'
+      'alarms    alarms'
+      'announce  announce'
+      'update    update'
+      'notices   notices'
+      'status    status';
+  }
   /* ⚠ 右の列は下へ寝るので、右の掴む帯は**畳む**(境目が無くなるため) */
   [data-pkc-region='pane-grip'][data-pkc-pane='inspector'] {
     display: none;
@@ -4573,6 +4614,30 @@ li[data-pkc-row-slot] {
       'status';
     /* ⚠ 10 区画(P11 でお知らせが 1 つ / #413 で帯が 3 つ増えた)── 本文だけが伸びる */
     grid-template-rows: auto 1fr auto auto auto auto auto auto auto auto;
+  }
+  /**
+   * 🔴 **1 列の版面は、畳んでいても 1 列である**(#607)。
+   *
+   * ⚠ 上の帯と同じ理由 ── 頭の畳み規則が (0,2,0) / (0,3,0) で、
+   *   この `@media` の (0,1,0) に勝ってしまう。
+   * 🔑 ここでは**列を増やさない**のが答えなので、3 通りを 1 つにまとめられる
+   *   (畳んだ面は `display: none` なので、行は自然に潰れる)。
+   */
+  [data-pkc-region='shell'][data-pkc-hidden-panes~='sidebar'],
+  [data-pkc-region='shell'][data-pkc-hidden-panes~='inspector'],
+  [data-pkc-region='shell'][data-pkc-hidden-panes~='sidebar'][data-pkc-hidden-panes~='inspector'] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'sidebar'
+      'detail'
+      'inspector'
+      'capture'
+      'timers'
+      'alarms'
+      'announce'
+      'update'
+      'notices'
+      'status';
   }
   [data-pkc-region='sidebar'] {
     max-height: 30vh;
