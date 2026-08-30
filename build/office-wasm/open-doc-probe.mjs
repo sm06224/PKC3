@@ -249,6 +249,32 @@ const COUNT_QT_WINDOWS = () => {
  * ⚠ 探すのは**空白を落とした形**でも見る ── ODF は書いた字を
  * `<text:s/>` などで割ることがあるので、素の一致だけだと取りこぼす。
  */
+/**
+ * 🔴 **保存が済んだかを、固定の待ちではなく `mtime` で見る**(2026-08-30)。
+ *
+ * ⚠ 直す前は `Ctrl+S` のあと **6 秒固定**で読んでいたが、それでは**早すぎる回がある** ──
+ * 同じ一式を `save-existing-probe.mjs` で測ると、**12 秒後**には
+ * `size 8814 → 9782` / `mtime` も動いていた(2026-08-30 実測)。
+ * 🔴 早く読むと「打った字が保存に入っていない」= **対照群が届いていない**と出て、
+ * その回の判定が丸ごと無意味になる(#121 で実際にそう読みかけた)。
+ */
+const WORK_STAT = `(() => {
+  const lo = window.__lo;
+  if (!lo || !lo.FS) return null;
+  let name = null;
+  try {
+    for (const n of lo.FS.readdir('/work')) {
+      if (n === '.' || n === '..') continue;
+      name = n;
+    }
+  } catch (e) { return null; }
+  if (name === null) return null;
+  try {
+    const st = lo.FS.stat('/work/' + name);
+    return { name: name, size: st.size, mtimeMs: +st.mtime };
+  } catch (e) { return null; }
+})()`;
+
 const TYPED_IN_SAVED = (needle) => `(async () => {
   const lo = window.__lo;
   if (!lo || !lo.FS) return { err: 'no FS' };
@@ -599,6 +625,30 @@ const watchdog = setTimeout(() => {
   // ⚠ `unref()` しない ── 閉じが固まったとき、この timer だけが出口である
   setTimeout(() => process.exit(2), 3000);
 }, HARD_SEC * 1000);
+
+/**
+ * 🔑 **`Ctrl+S` を押し、`/work` の file が動くまで待つ。**
+ *
+ * ⚠ 返り値は待った ms(動かなければ `null`)── **「保存できなかった」ではなく
+ * 「見えなかった」**として読むこと。上限は `PKC3_SAVE_WAIT_MS`(既定 30 秒)。
+ */
+const pressSaveAndWait = async () => {
+  const before = await page.evaluate(WORK_STAT).catch(() => null);
+  await page.keyboard.press('Control+s');
+  const capMs = Number(process.env.PKC3_SAVE_WAIT_MS ?? 30_000);
+  const t0 = Date.now();
+  for (;;) {
+    await page.waitForTimeout(1_500);
+    const now = await page.evaluate(WORK_STAT).catch(() => null);
+    if (before !== null && now !== null
+        && (now.mtimeMs !== before.mtimeMs || now.size !== before.size)) {
+      // ⚠ 書き終えた直後に読むと途中の姿を掴みうる ── 1 呼吸置く
+      await page.waitForTimeout(1_500);
+      return Date.now() - t0;
+    }
+    if (Date.now() - t0 > capMs) return null;
+  }
+};
 
 try {
   // 一式を IDB へ(PKC が入れる形と同じ)
@@ -1083,8 +1133,7 @@ try {
          * ⚠ `Escape` の**後**に保存する ── 実機の症状は「Escape でいっぺんに
          *   現れる」なので、その一手を挟んだ後の状態を保存の対象にする。
          */
-        await page.keyboard.press('Control+s');
-        await page.waitForTimeout(6000);
+        result.redraw.saveWaitedMs = await pressSaveAndWait();
         try {
           result.redraw.saved = await page.evaluate(TYPED_IN_SAVED('HELLO 12345'));
         } catch (e) {
@@ -1180,8 +1229,7 @@ try {
     };
     /** ⚠ 保存の後は長めに待つ ── 落ちたのではなく**遅い**だけのことがある。 */
     const save = async () => {
-      await page.keyboard.press('Control+s');
-      await page.waitForTimeout(6000);
+      paste.saveWaitedMs = await pressSaveAndWait();
     };
     try {
       const box = await canvasBox();
