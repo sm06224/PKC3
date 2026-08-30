@@ -103,19 +103,32 @@
 | **動詞の実行**(dispatch を 1 か所に寄せる) | 🟢 **解けている**。`binder.ts` の委譲 1 本(= PKC2 の「入口は多く、判定は 1 か所」) |
 | **動詞の宣言**(何と呼び / どの対象に効き / どの面に出てよいか) | 🔴 **場所が無い** |
 
-登記簿は現在 **4 つ**、未登記が **約 150**:
+登記簿は現在 **5 つ**(初稿は 4 つと書いていたが、`render/commands.ts` の 2 本は別配列である)、未登記が **約 150**:
 
 | 登記簿 | 数 | どこへ配るか |
 |---|---|---|
-| `KEY_COMMANDS`(`features/keymap.ts`) | 51 | 鍵 + パレット + ヘルプ |
-| `ENTRY_MENU_ACTIONS`(`features/entry-actions.ts`) | 12 | 情報ペイン + 右クリック(**`when` 付き**) |
-| `BODY_MENU_ACTIONS`(同) | 3 | 本文の右クリック |
-| `COLLECTION_COMMANDS` / `SETTINGS_COMMANDS`(`render/commands.ts`) | — | 左の下 / 設定 |
+| `KEY_COMMANDS`(`features/keymap.ts`) | **52** | 鍵 + パレット + ヘルプ |
+| `ENTRY_MENU_ACTIONS`(`features/entry-actions.ts`) | **11**(`when` 付き 2) | 情報ペイン + 右クリック |
+| `BODY_MENU_ACTIONS`(同) | **2** | 本文の右クリック |
+| `COLLECTION_COMMANDS`(`render/commands.ts`) | **2** | 左の下 |
+| `SETTINGS_COMMANDS`(同) | **5** | 設定 |
 | 🔴 **それ以外** | **約 150** | **22 の描画 file が手で `<button>` を組んでいる**(例: `format-bar.ts` は 6 個を直書き) |
+| **登記済みの合計** | **72** | ─ |
+
+> ⚠ **数え直した(2026-08-30)。初稿の「51 / 12 / 3 / —」は 3 か所ずれていた。**
+> 観測点は**名前そのもの**である ── `ENTRY_MENU_ACTIONS` = `copy-entry-ref` /
+> `copy-plain-markdown` / `export-entry` / `export-entry-html` / `export-folder` /
+> `export-entry-docx` / `export-entry-pptx` / `export-entry-pdf` / `write-back-file` /
+> `show-history` / `delete-entry`、`BODY_MENU_ACTIONS` = `cycle-read-columns` / `pin-split`、
+> `COLLECTION_COMMANDS` = `import-file` / `export-archive`、
+> `SETTINGS_COMMANDS` = `export-html` / `export-portable` / `export-markdown` /
+> `export-structure` / `purge-orphan-assets`。
+> 🔑 **件数だけ書くと、次に読む人が検算できない**(CLAUDE.md §8「件数ではなく集合」)。
+> ⚠ `KEY_COMMANDS` が 51 → 52 になったのは #615 で `toggle-append` を足したためである。
 
 🔑 **既に部分的な正解が芽生えている 3 点**(推薦はこれを一般化するだけ):
 
-1. `entry-actions.ts` は **字の正本 + `when`(閉じた union)+ 複数面への射影**を実現している ── ⚠ ただし 183 分の 12
+1. `entry-actions.ts` は **字の正本 + `when`(閉じた union)+ 複数面への射影**を実現している ── ⚠ ただし 183 分の 11
 2. パレットは `KEY_COMMANDS` **そのもの**を出す(別配列を持たない ── `palette/palette-rows.ts:10-14` に明記)
 3. `SHORTCUT_BUTTON` が鍵 → ボタンを `.click()` する橋。⚠ そして**畳んだペインは DOM に残る**
    (CSS で列を落とすだけ)ので、**畳んでもパレットから押せる** ── R4 の答えの種はここに在る
