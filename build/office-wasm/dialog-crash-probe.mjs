@@ -81,9 +81,30 @@ import { existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, extname, resolve } from 'node:path';
 import { chromium } from '@playwright/test';
+import { armWatchdog } from './probe-watchdog.mjs';
 
 const ROOT = resolve(process.argv[2] ?? '.');
 const OUT = process.argv[3] ?? '';
+
+/**
+ * 🔴 **全体の締切**(#624)。`open-doc-probe` が **4h58m** 固まって
+ * JSON を 1 バイトも残さなかったので、probe 全部に置いた。
+ *
+ * ⚠ `page.evaluate()` に**既定の締切は無い** ── 版面が 100% で回り続けると
+ * `await` は永久に返らず、例外を投げないので **`finally` も走らない**。
+ * 🔑 だから「**何段目で止まったか**」を残せるのは見張りだけである。
+ * ⚠ 締切は `PKC3_HARD_LIMIT_SEC` で伸ばせる(既定 900 秒)。
+ * ⚠ 出るのは**時間切れの記録**であって、probe の通常の出力ではない ──
+ *   `timedOut: true` は「できなかった」ではなく **判定不能**と読む。
+ */
+let live = null;
+const watched = {};
+const wd = armWatchdog({
+  result: watched,
+  out: OUT,
+  limitSec: Number(process.env.PKC3_HARD_LIMIT_SEC ?? 900),
+  browser: () => live,
+});
 const SHOTS = join(ROOT, `__shots-${process.env.PKC3_PROBE_SUITE ?? 'dialog'}`);
 /** ⚠ SAFE_HEAP 込みの起動。素で 1.8 秒でも、ここでは数分を見込む。 */
 const BOOT_TIMEOUT_MS = Number(process.env.PKC3_BOOT_TIMEOUT_MS ?? 900_000);
@@ -406,6 +427,9 @@ async function main() {
     args: ['--no-sandbox', '--disable-dev-shm-usage'],
     ...(executablePath ? { executablePath } : {}),
   });
+  // 🔑 見張りが閉じる相手(起動してから渡す)
+  live = browser;
+  wd.mark('起動');
 
   let page;
   try {
@@ -423,6 +447,7 @@ async function main() {
     });
 
     const t0 = Date.now();
+    wd.mark('qt_soffice.html を開く');
     await page.goto(`${base}/qt_soffice.html`, { waitUntil: 'commit' });
     result.isolated = await page.evaluate(() => globalThis.crossOriginIsolated === true);
 

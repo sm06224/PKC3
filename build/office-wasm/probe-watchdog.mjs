@@ -71,6 +71,19 @@ export function armWatchdog({ result, out, limitSec, browser }) {
     if (b !== null && b !== undefined) Promise.resolve(b.close()).catch(() => {});
     setTimeout(() => process.exit(2), 3000);
   }, limitSec * 1000);
+  /**
+   * 🔴 **`disarm()` を書き忘れても無害にする**(2026-08-30、#624 で配る前に)。
+   *
+   * ⚠ 忘れると**害が出る側**へ倒れることを実測した ── 仕事が終わっているのに
+   * node が締切まで生き残り、**良い JSON の上に偽の「時間切れ」を書いて `exit 2`**
+   * する(実測: 3 秒の締切で `elapsedMs: 3003` / `timedOutPhase: "start"`)。
+   * 🔑 `unref()` すると「**この timer だけのために node を生かさない**」ので、
+   * 仕事が終わった回は素通りして終わる。
+   * ⚠ **守りは落ちない** ── 固まる回は browser の socket など**参照つきの handle**が
+   * event loop を生かしているので、timer は変わらず発火する(自作の対照群 2 本で確認)。
+   * ⚠ 中の猶予 timer(3 秒)は `unref()` しない ── あちらは**出口そのもの**である。
+   */
+  timer.unref();
 
   return {
     /** 段の名前を進める。落ちたときこの名前が出る。 */
