@@ -498,7 +498,19 @@ jobs:
           #    (`AC_ARG_ENABLE(scripting)` は action-if-not-given を持つので
           #    `${...+set}` が常に set)が、`AC_ARG_WITH(templates)` は
           #    **action を 1 つも持たない**ので使える(実物で確認)。
-          test "$n" -eq 15
+          # 🔴 15 → 16(2026-08-30)。`patch-lo-fsimage-cmdline.py`(#591 の**直し**)。
+          #    ⚠ テンプレートを効かせた回(33285888070)が `make` で落ちた ──
+          #    `Error 127` の実体は **`/bin/sh: Argument list too long`** である。
+          #    詰め込みの recipe は `--preload $(shell cat $^)` で**数千の path を
+          #    行にそのまま並べる**ので、`sh -c "<行まるごと>"` の **1 引数**が
+          #    `MAX_ARG_STRLEN`(128 KiB)を越えた。
+          #    実測: 直前の成功は **130,251 byte**(残り 821)/ テンプレート 34 件で
+          #    **132,359 byte**(1,287 超過)── **上流の注記どおり使い切っていた**。
+          #    🔑 直しは展開を **make から shell へ移す**だけ(`$$(cat $^)`)。
+          #    行が短いままなので上限が `ARG_MAX`(約 2MB)側になる。
+          #    ⚠ 機構は手元の make で両方向を確かめた(129KB=通る / 133KB=Error 127 /
+          #    直しを当てた 136KB=通る)。
+          test "$n" -eq 16
 
       # 🔴 **Qt と LO の「握手」を、リンクの 16 分前に確かめる**(2026-08-10)。
       #    LO は Qt の embind シンボルを名指しで export する。無いと
