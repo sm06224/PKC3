@@ -267,6 +267,54 @@ print(sum(1 for f in d['files'] if f['filename'].endswith('/cui/ui/querydialog.u
 `vcl/ui/querydialog.ui` / `recalcquerydialog.ui` / `safemodequerydialog.ui` に
 満たされる(実測: 古い一式 4 つは完全一致 0 件 / 部分一致 3 件)。
 
+## 13. 🔴 probe は固まる ── 締切と、計器の選び方(2026-08-30)
+
+### 13.1 全体の締切を張る
+
+⚠ **Playwright の `page.evaluate()` に既定の締切は無い。** 版面(LO wasm)が 100% で
+回り続けると `await` は**永久に返らない**。🔴 そして固まった `await` は例外を投げないので
+**`finally` も走らない** ── JSON が 1 バイトも書かれず、**何段目で止まったのかも残らない**。
+
+実測(`open-doc-probe` の貼り付けの門): 経過 **4h58m** / renderer の CPU 時間 **5h00m** /
+RSS **1.07 GB** / log **0 byte**。⚠ 完了通知には **exit code 0** と出た
+(`node …; echo "exit=$?"` の形だったため ── CLAUDE.md §6)。
+
+🔑 機構は `build/office-wasm/probe-watchdog.mjs`:
+
+```js
+import { armWatchdog } from './probe-watchdog.mjs';
+const wd = armWatchdog({ result, out: OUT, limitSec: LIMIT_SEC + 600, browser: () => browser });
+wd.mark('観測ループ');   // 落ちたとき段の名前が出る
+wd.disarm();             // 正常に終わったら止める
+```
+
+⚠ **`result.error` だけに書かない** ── 閉じると待っていた `await` が reject し、
+probe 自身の `catch` が上書きして末尾がもう一度 JSON を書く(実測で踏んだ)。
+だから `timedOutError` / `timedOutPhase` という**自分の欄**を持つ。
+⚠ 閉じる猶予は 3 秒 ── 即座に `process.exit` すると **chrome が 2 個残る**。
+
+🔴 **締切を持つのは 3 本だけ**(`open-doc` / `save-existing` / 今後足す分)。
+残り 11 本は同じ形で何時間でも固まる ── 追う先は issue に在る。
+
+### 13.2 🔴 **保存を見たいなら `save-existing-probe` を使う**
+
+同じ一式・同じ文書で、保存が通った回を数えた(2026-08-30):
+
+| 計器 | 保存が通った |
+|---|---|
+| **`save-existing-probe.mjs`** | 🟢 **6 / 6** |
+| `open-doc-probe.mjs`(打鍵の門) | 🔴 **4 / 11** |
+
+⚠ 打鍵そのものは **11/11 で画面に出る**(`landedWhileTyping: true`)── 落ちるのは
+**保存の一手だけ**で、しかも **3 秒以内に起きるか、30 秒経っても起きないかの二値**である。
+
+⚠ 外した仮説を 2 つ記録しておく(同じ道を 2 度歩かないため):
+**①「`Ctrl+S` の後の待ちが 6 秒固定で早すぎる」** → 6 秒に戻しても見えた。外れ。
+**②「`Ctrl+S` の直前の `Escape` が殺している」** → 外しても落ちた(1/3)。外れ。
+
+🔑 だから**保存が絡む判定は `save-existing-probe` で採る**。
+`open-doc-probe` の門は、保存に依らない観測点(版面が変わったか)なら信用できる。
+
 ## 11. ⚠ 焼きは 1 本ずつ投げる
 
 2 本同時に dispatch したら**片方が 4 時間 11 分**かかった(単独なら 29〜33 分)。
