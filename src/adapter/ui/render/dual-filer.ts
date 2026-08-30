@@ -177,7 +177,7 @@ const COMMAND_ITEMS: readonly {
   {
     action: 'dual-preview-toggle',
     command: 'dual-preview',
-    label: '下見',
+    label: 'プレビュー',
     hint: (from) => `${from}のペインで指している行の中身を、その場で数行だけ出します`,
     empty: null,
   },

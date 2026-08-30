@@ -37,14 +37,14 @@ export interface SettingsEntry {
  */
 export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: string }[] = [
   { key: 'pkc3.theme', label: '見た目' },
-  { key: 'pkc3.panes', label: '面の畳み方' },
+  { key: 'pkc3.panes', label: '列の畳み方' },
   /**
    * ⚠ **畳み方と対**(#497)── 片方だけ運ぶと「畳んだのは移ったのに幅は既定」に
    * なる。⚠ px なので端末で意味が変わりそうに見えるが、値は
    * `clamp(0px, Npx, 45vw)` として当たるので**狭い端末では自分で縮む**
    * (`pkc3.text-scale` と同じ考え方 ── 使い方の好みは人に付く)。
    */
-  { key: 'pkc3.pane-sizes', label: '面の大きさ' },
+  { key: 'pkc3.pane-sizes', label: '列の幅' },
   { key: 'pkc3.editor-mode', label: '編集の仕方' },
   { key: 'pkc3.open-in-edit', label: '「開く」で編集に入るか' },
   { key: 'pkc3.page-format', label: '紙面' },
@@ -55,9 +55,9 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
   //    見分けにくいと感じる濃さは**人に付く**(文字の大きさと同じ考え方)
   { key: 'pkc3.column-rule', label: '段の境界線' },
   { key: 'pkc3.tag-badge', label: '本文のタグの見せ方' },
-  { key: 'pkc3.keymap', label: '鍵の割当' },
+  { key: 'pkc3.keymap', label: 'ショートカットキーの割り当て' },
   { key: 'pkc3.browse', label: '探し方のタブ' },
-  { key: 'pkc3.dual-preview', label: '2 ペインの下見' },
+  { key: 'pkc3.dual-preview', label: '2 ペインのプレビュー' },
   { key: 'pkc3.paste-source', label: '貼り付けの判定' },
   { key: 'pkc3.query-key', label: '集計の束ね方' },
   { key: 'pkc3.alarm', label: '予定の時刻に知らせるか' },

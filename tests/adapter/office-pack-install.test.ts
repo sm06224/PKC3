@@ -158,7 +158,7 @@ describe('OfficePackInstaller', () => {
     expect(r.ok).toBe(true);
     expect(r.ok && r.meta?.version).toBe('lo-wasm-dev');
     expect(r.ok && r.meta?.source).toBe('url');
-    expect(r.ok && r.message).toContain('配備しました');
+    expect(r.ok && r.message).toContain('入れました');
   });
 
   /**
@@ -171,14 +171,14 @@ describe('OfficePackInstaller', () => {
     const r = await installer.installFromUrl();
     expect(order, '永続化を頼む前に書いている').toEqual(['persist', 'install']);
     // 許可されたときは、余計なことを言わない
-    expect(r.ok && r.message).not.toContain('消えることがあります');
+    expect(r.ok && r.message).not.toContain('自動で消されることがあります');
   });
 
   it('🔴 永続化を断られたら、そのことを言う(黙って消えうる状態にしない)', async () => {
     const { installer } = make({ persist: async () => false });
     const r = await installer.installFromUrl();
     expect(r.ok, '断られただけで設置ごと失敗にしない').toBe(true);
-    expect(r.ok && r.message).toContain('消えることがあります');
+    expect(r.ok && r.message).toContain('自動で消されることがあります');
   });
 
   it('🔴 目録に従ってフォントを取る(PKC3 側に名前を書き写さない)', async () => {
@@ -215,7 +215,7 @@ describe('OfficePackInstaller', () => {
       install: async () => { throw new Error('QuotaExceededError: quota'); },
     });
     const r = await installer.installFromUrl();
-    expect(!r.ok && r.message).toContain('保存容量');
+    expect(!r.ok && r.message).toContain('空き容量');
     expect(!r.ok && r.message, '必要な量を言う').toContain('77MB');
   });
 
@@ -312,7 +312,7 @@ describe('parsePackManifest', () => {
 
   it('🔴 フォントが 1 本も無い目録は受け付けない(日本語が豆腐になる)', () => {
     expect(() => parsePackManifest({ files: ['soffice.js'], fonts: [] })).toThrow(
-      /豆腐/,
+      /□ ばかりになって読めない/,
     );
   });
 

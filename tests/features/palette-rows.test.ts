@@ -88,7 +88,7 @@ describe('操作を名前で探す(一覧)', () => {
        *   「いまは押せません」だけだと、user は**いつなら押せるのか分からない**。
        */
       const row = paletteRows('', BINDINGS, NONE).find((r) => r.id === 'commit-edit')!;
-      expect(row.why).toContain('2 列の編集');
+      expect(row.why).toContain('2 ペインの編集');
       expect(row.why).toContain('にいるときだけ効きます');
     });
 

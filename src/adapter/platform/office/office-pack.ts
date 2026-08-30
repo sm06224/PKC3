@@ -101,12 +101,12 @@ export function parsePackManifest(v: unknown): PackManifest {
   const fonts = Array.isArray(m.fonts) ? m.fonts.filter((f) => typeof f === 'string') : [];
   const files = Array.isArray(m.files) ? m.files.filter((f) => typeof f === 'string') : [];
   if (files.length === 0) {
-    throw new OfficePackError('取得元の目録(pack.json)が読めません ── 配布元が違う可能性があります。');
+    throw new OfficePackError('配布元のファイル一覧(pack.json)が読めません ── 配布元が違う可能性があります。');
   }
   if (fonts.length < MIN_FONT_COUNT) {
     throw new OfficePackError(
-      '取得元の目録に日本語フォントが 1 つもありません。'
-        + 'この一式では日本語が豆腐になるため受け付けません。',
+      '配布元のファイル一覧に日本語フォントが 1 つもありません。'
+        + 'このままでは日本語が □ ばかりになって読めないので、取り込みません。',
     );
   }
   return {
@@ -184,13 +184,13 @@ export function assertPackComplete(names: Iterable<string>): void {
   const have = new Set(names);
   const missing = REQUIRED_PACK_FILES.filter((f) => !have.has(f));
   if (missing.length > 0) {
-    throw new OfficePackError(`Office 一式に足りない file があります: ${missing.join(', ')}`);
+    throw new OfficePackError(`Office 一式に足りないファイルがあります: ${missing.join(', ')}`);
   }
   const fonts = fontNames(have);
   if (fonts.length < MIN_FONT_COUNT) {
     throw new OfficePackError(
       '日本語フォント(fonts/*.ttf)が 1 つも入っていません。'
-        + 'この一式では日本語が豆腐になるため受け付けません。',
+        + 'このままでは日本語が □ ばかりになって読めないので、取り込みません。',
     );
   }
 }

@@ -413,6 +413,6 @@ describe('アプリの窓の × 閉じる', () => {
     expect(
       closeViewWindow({ holding: () => true, close: () => {}, isClosed: () => false }),
     ).toBe('refused');
-    expect(CLOSE_VIEW_WINDOW_REFUSED, '次に何をすればよいか書いていない').toContain('窓の ×');
+    expect(CLOSE_VIEW_WINDOW_REFUSED, '次に何をすればよいか書いていない').toContain('× で閉じてください');
   });
 });

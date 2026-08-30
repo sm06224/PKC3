@@ -335,7 +335,7 @@ test('🔴 画像の別の窓は img で開く(PDF の箱にならない)', asyn
     await popup.evaluate(() => document.body.getAttribute('data-pkc-fit')),
     '添付の窓が収めて開いていない(見え方が変わった)',
   ).toBe('contain');
-  await popup.locator('[data-pkc-field="asset-window-zoom"] button', { hasText: '等倍' }).click();
+  await popup.locator('[data-pkc-field="asset-window-zoom"] button', { hasText: '実寸' }).click();
   expect(
     await popup.evaluate(() => document.body.getAttribute('data-pkc-fit')),
     '添付の窓を実寸にできない(押しても何も起きない)',
@@ -400,7 +400,7 @@ test('🔴 本文に貼った画像を押すと、別窓で実寸で開き、掴
   const img = page.locator('[data-pkc-field="detail-body"] img[data-pkc-asset-key]');
   await expect(img).toHaveAttribute('src', /^blob:/, { timeout: 10_000 });
   // ⚠ **押せることが画面に出ている**(印だけ付けても user は気づかない)
-  expect(await img.getAttribute('title'), '押せることが画面に出ていない').toContain('別の窓');
+  expect(await img.getAttribute('title'), '押せることが画面に出ていない').toContain('別のウィンドウ');
 
   const [win] = await Promise.all([context.waitForEvent('page'), img.click()]);
   await win.waitForSelector('[data-pkc-field="asset-window-image"]', { timeout: 10_000 });

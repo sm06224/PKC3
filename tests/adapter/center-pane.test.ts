@@ -354,7 +354,7 @@ describe('🔴 面の帯(user 目線レビュー U-3)', () => {
     await tick();
     expect(s.d.getState().viewMode, '本文へ畳んでいない').toBe('detail');
     expect(s.d.getState().error, '黙って畳んだ(窓が残る理由が分からない)').toContain(
-      '窓の ×',
+      '× で閉じてください',
     );
   });
 

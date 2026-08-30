@@ -103,7 +103,7 @@ describe('start-edit の編集権ゲート(#177)', () => {
     q('[data-pkc-action="start-edit"]')!.click();
     await tick();
     expect(d.getState().phase).toBe('ready');
-    expect(d.getState().error).toContain('本体タブと通信できません');
+    expect(d.getState().error).toContain('最初に開いた PKC のタブと通信できません');
     expect(d.getState().error, '存在しない編集タブを探させる文言').not.toContain('編集中です');
   });
 

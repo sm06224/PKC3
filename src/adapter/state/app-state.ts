@@ -2472,8 +2472,8 @@ function reduceCore(
           ...(diskAhead
             ? {
                 error:
-                  '別の窓の変更と重なりました。こちらの内容で保存し、' +
-                  '別の窓の版は履歴に残してあります(履歴から戻せます)',
+                  '別のウィンドウの変更と重なりました。こちらの内容で保存し、' +
+                  '別のウィンドウの版は履歴に残してあります(履歴から戻せます)',
               }
             : {}),
         },
@@ -3752,7 +3752,7 @@ function reduceCore(
         return {
           state: {
             ...state,
-            error: `復元できません: 同じ ID の entry が既に存在します (${action.entryLid})`,
+            error: `復元できません: 同じ ID のノートが既にあります(${action.entryLid})`,
           },
           events: [],
         };

@@ -88,7 +88,7 @@ function toMessage(e: unknown, what: string): string {
   if (e instanceof OfficePackError) return e.message;
   const raw = e instanceof Error ? e.message : String(e);
   if (/quota/i.test(raw)) {
-    return `${what}に失敗しました: この端末の保存容量が足りません(約 77MB 要ります)。`;
+    return `${what}に失敗しました: この端末の空き容量が足りません(約 77MB 必要です)。`;
   }
   return `${what}に失敗しました: ${raw.slice(0, 160)}`;
 }
@@ -161,7 +161,7 @@ export class OfficePackInstaller {
    * まだ開ける、が最悪(user は消えたと思って容量を当てにする)。
    */
   async remove(): Promise<PackResult> {
-    if (this.running) return { ok: false, message: 'いま設置中です。終わってから操作してください。' };
+    if (this.running) return { ok: false, message: 'いま Office 一式を入れている最中です。終わるまでお待ちください。' };
     try {
       await this.deps.store.remove();
       const left = await this.readMeta();
@@ -206,10 +206,10 @@ export class OfficePackInstaller {
         meta,
         // ⚠ **黙って消えうることを黙っていない。** 拒否されたことを伝えないと、
         //    後日消えたときに user は原因を名指しできない
-        message: `Office 一式を配備しました(${humanBytes(meta.totalBytes)})`
+        message: `Office 一式を入れました(${humanBytes(meta.totalBytes)})`
           + (persisted
             ? ''
-            : '。この端末では保存の永続化が許可されなかったため、容量が足りなくなると消えることがあります'),
+            : '。ただし、このブラウザから「消さずに残す」許可がもらえなかったため、端末の空き容量が減ると自動で消されることがあります'),
       };
     } catch (e) {
       return { ok: false, message: toMessage(e, what) };

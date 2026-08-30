@@ -1303,7 +1303,7 @@ function startEditAt(
         error:
           grant === 'denied'
             ? 'このノートは別のタブで編集中です(そちらを閉じるか保存してください)'
-            : '本体タブと通信できません(少し待ってもう一度お試しください)',
+            : '最初に開いた PKC のタブと通信できません(少し待ってもう一度お試しください)',
       });
       return;
     }
@@ -3869,7 +3869,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       // ⚠ **無言で空の file を落とさない** ── 押した user は「入った」と読む
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: '持ち出せる設定がまだありません(見た目や鍵の割当を変えると入ります)',
+        error: '持ち出せる設定がまだありません(見た目やショートカットキーの割当を変えると入ります)',
       });
       return;
     }
@@ -4708,7 +4708,7 @@ const ACTIONS: Record<string, ActionHandler> = {
         else
           dispatcher.dispatch({
             type: 'OP_FAILED',
-            error: `「${where}」へ送れませんでした(窓が閉じているかもしれません)`,
+            error: `「${where}」へ送れませんでした(送り先のウィンドウが閉じているかもしれません)`,
           });
       })
       .catch(() => {
@@ -4796,7 +4796,7 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     confirmThen(
       root,
-      'ゴミ箱を空にします(削除済み entry の履歴も消え、元に戻せません)。よろしいですか?',
+      'ゴミ箱を空にします(捨てたノートの履歴も消え、元に戻せません)。よろしいですか?',
       { okLabel: '空にする', danger: true },
       dispatcher,
       notWhileEditing(dispatcher, '編集を終了してから空にしてください'),
@@ -5943,7 +5943,7 @@ export function bindActions(
       if (every !== undefined && every !== '') {
         dispatcher.dispatch({
           type: 'OP_FAILED',
-          error: '繰り返しの予定は掴んで動かせません。本文の「@日付 毎週」を書き直してください',
+          error: '繰り返しの予定はドラッグで動かせません。本文の「@日付 毎週」を書き直してください',
         });
         return;
       }

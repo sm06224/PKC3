@@ -121,7 +121,7 @@ export function officeEntry(input: OfficeEntryInput): OfficeEntry {
        * 🔑 O6 で設置の面ができたら、**ここを場所付きの文へ戻す**
        * (`tests/features/office-entry.test.ts` が場所の名指しを見張っている)。
        */
-      reason: 'Office 表示にはひとそろい(約 77MB)が要ります。まだ入っていません。',
+      reason: 'Office 表示には一式(約 77MB)が要ります。まだ入っていません。',
     };
   }
   return { kind: 'open', label: 'Office で開く' };

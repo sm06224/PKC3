@@ -132,7 +132,7 @@ function addZoom(doc: Document, img: HTMLImageElement, startFit: boolean): void 
       // 収める ── 大きさの指定を**外す**(CSS の `max-width/height` に任せる)
       img.style.width = '';
       doc.body.setAttribute('data-pkc-fit', 'contain');
-      pct.textContent = '収める';
+      pct.textContent = '全体';
       return;
     }
     doc.body.removeAttribute('data-pkc-fit');
@@ -173,8 +173,8 @@ function addZoom(doc: Document, img: HTMLImageElement, startFit: boolean): void 
   bar.append(
     button('−', '小さくする', () => step(1 / 1.25)),
     button('＋', '大きくする', () => step(1.25)),
-    button('等倍', '実寸で見る', () => set(1)),
-    button('収める', '窓に収まる大きさへ戻す', fit),
+    button('実寸', '実寸で見る', () => set(1)),
+    button('収める', 'ウィンドウに収まる大きさに戻す', fit),
     pct,
   );
   doc.body.append(bar);
@@ -321,7 +321,7 @@ function fill(
    */
   const p = doc.createElement('p');
   p.textContent =
-    'この browser は PDF を画面に出せません。元の画面の「ダウンロード」から保存して開いてください。';
+    'このブラウザでは PDF を表示できません。PKC の画面に戻り、添付の「ダウンロード」から保存して開いてください';
   obj.append(p);
   doc.body.append(obj);
 }

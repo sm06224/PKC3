@@ -174,7 +174,7 @@ export async function writeArchive(src: ArchiveSource, exportedAt: string): Prom
   const metas = await src.listEntryMetas();
   // ⚠ 断るなら**読み出しの前**に断る。末尾の判定だけだと、0 件でも本文・履歴を
   // 舐めて全添付を ZIP に書いてから投げる ── 捨てるためだけの仕事(review L2)
-  if (metas.length === 0) throw new Error('書き出せる entry が 1 件もありません');
+  if (metas.length === 0) throw new Error('書き出せるノートが 1 件もありません');
   const metaOf = new Map(metas.map((m) => [m.lid, m]));
 
   // ── container.json を**部品として**積む(丸ごと文字列にしない)
@@ -310,7 +310,7 @@ export async function writeArchive(src: ArchiveSource, exportedAt: string): Prom
 
   // 🔴 「書き出したつもりで空」を作らない
   if (entryCount === 0) {
-    throw new Error('書き出せる entry が 1 件もありません');
+    throw new Error('書き出せるノートが 1 件もありません');
   }
 
   warn.finish();

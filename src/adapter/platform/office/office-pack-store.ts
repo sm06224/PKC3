@@ -81,7 +81,7 @@ function write(
   return new Promise((resolve, reject) => {
     const t = db.transaction(stores, 'readwrite');
     const fail = (e: unknown): void =>
-      reject(e instanceof Error ? e : new Error('idb transaction failed'));
+      reject(e instanceof Error ? e : new Error('この端末の保存領域(IndexedDB)に書き込めませんでした'));
     t.oncomplete = () => resolve();
     t.onerror = () => fail(t.error);
     t.onabort = () => fail(t.error ?? new Error('idb transaction aborted'));
@@ -172,7 +172,7 @@ export class OfficePackStore {
     let totalBytes = 0;
     for (const [i, name] of names.entries()) {
       const blob = files.get(name);
-      if (!blob) throw new OfficePackError(`内部矛盾: ${name} の Blob がありません`);
+      if (!blob) throw new OfficePackError(`ファイルの中身を取り出せませんでした(${name})`);
       opts.onProgress?.(i, names.length, name);
       metaFiles.push({ name, bytes: blob.size, sha256: await sha256Hex(blob) });
       totalBytes += blob.size;

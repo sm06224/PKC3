@@ -677,7 +677,7 @@ describe('readContainerBundle — 黙って落とさない', () => {
         { format: name, version: 1, entries: [{ lid: 'g1', filename: 'g.textlog.zip' }] },
         [{ name: 'g.textlog.zip', bytes: await textlogBundle({ lid: 'g1' }) }],
       );
-      await expect(readContainerBundle(zip)).rejects.toThrow(/batch 形式のみ/);
+      await expect(readContainerBundle(zip)).rejects.toThrow(/batch 形式のバックアップ/);
     }
     // 本物の 3 形式は受ける(判定を厳しくしすぎて全部落とすのも退化)
     for (const name of [
@@ -691,7 +691,7 @@ describe('readContainerBundle — 黙って落とさない', () => {
 
   it('batch でない format は断る / entries が配列でなければ断る', async () => {
     const a = await outer({ format: 'pkc2-package', version: 1, entries: [] }, []);
-    await expect(readContainerBundle(a)).rejects.toThrow(/batch 形式のみ/);
+    await expect(readContainerBundle(a)).rejects.toThrow(/batch 形式のバックアップ/);
     const b = await outer({ format: 'pkc2-texts-container-bundle', version: 1 }, []);
     await expect(readContainerBundle(b)).rejects.toThrow(/entries の配列/);
     const c = await outer(

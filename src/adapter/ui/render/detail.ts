@@ -1459,11 +1459,11 @@ export class DetailRenderer {
       const ok = document.createElement('button');
       ok.type = 'button';
       ok.setAttribute('data-pkc-field', 'fm-commit');
-      ok.textContent = '確定';
+      ok.textContent = '保存';
       const cancel = document.createElement('button');
       cancel.type = 'button';
       cancel.setAttribute('data-pkc-field', 'fm-cancel');
-      cancel.textContent = 'やめる';
+      cancel.textContent = 'キャンセル';
       const close = (): void => {
         fmEditing = false;
         renderFmCard();
@@ -1548,7 +1548,7 @@ export class DetailRenderer {
      */
     if (openAt !== null) swap.openAt(openAt);
     editAll.addEventListener('click', () => {
-      if (!swap.activateAll()) note.textContent = 'この本文は全文編集に開けません';
+      if (!swap.activateAll()) note.textContent = 'この本文は「全文を編集」に切り替えられません';
     });
 
     /**
@@ -1599,7 +1599,7 @@ export class DetailRenderer {
           note.textContent = ALREADY_WHOLE_NOTE;
           return;
         }
-        if (!swap.activateAll()) note.textContent = 'この本文は全文編集に開けません';
+        if (!swap.activateAll()) note.textContent = 'この本文は「全文を編集」に切り替えられません';
         return;
       }
       const forward = cmd === 'redo';
@@ -1721,7 +1721,7 @@ export class DetailRenderer {
     const info = document.createElement('div');
     info.setAttribute('data-pkc-field', 'attachment-info');
     const label = document.createElement('span');
-    label.textContent = `${meta.name || '(無名)'} — ${meta.mime}${
+    label.textContent = `${meta.name || '(名前なし)'} — ${meta.mime}${
       meta.size !== null ? ` — ${humanBytes(meta.size)}` : ''
     }`;
     info.append(label);
@@ -1773,18 +1773,18 @@ export class DetailRenderer {
        */
       if (canOpenAssetWindow(meta.mime)) {
         const pdf = assetPreviewKind(meta.mime) === 'pdf';
-        const view = iconButton('view-asset', '別の窓で見る');
+        const view = iconButton('view-asset', '別のウィンドウで見る');
         view.setAttribute('data-pkc-asset-key', meta.assetKey);
         view.setAttribute('data-pkc-asset-name', meta.name || (pdf ? 'PDF' : '画像'));
         view.setAttribute('data-pkc-asset-mime', meta.mime);
         view.title = pdf
-          ? 'PDF を別の窓で開きます(大きく開くので頁を読めます)'
-          : '画像を別の窓で開きます(本文を書きながら見られます)';
+          ? 'PDF を別のウィンドウで開きます(大きく開くのでページを読めます)'
+          : '画像を別のウィンドウで開きます(本文を書きながら見られます)';
         info.append(view);
       }
       if (isAppMime(meta.mime)) {
         const run = iconButton('launch-asset', '起動', 'launch-asset');
-        run.title = '囲いの中で開きます(PKC3 の中身には触れません)';
+        run.title = 'PKC3 から切り離して開きます(PKC3 の中身には触れません)';
         info.append(run);
         /**
          * 🔴 **素のまま(同一オリジン)で開く**(P10)。ここだけに置く ──
@@ -1794,9 +1794,9 @@ export class DetailRenderer {
          *   保存領域に手が届くので、自分の許可記録を自分で書ける)。
          * 設計: `docs/development/p10-launcher-same-origin-2026-08.md`
          */
-        const rawRun = iconButton('launch-asset-raw', '素のまま起動', 'launch-asset-raw');
+        const rawRun = iconButton('launch-asset-raw', 'ノートを渡して起動', 'launch-asset-raw');
         rawRun.title =
-          'PKC3 と同じ場所で開きます。IndexedDB や cookie を使うアプリが動きますが、このアプリは PKC3 の中身にも手が届きます';
+          'PKC3 と同じ保存領域で開きます。自分でデータを保存するアプリも動きますが、このアプリは PKC3 のノートを全部読めますし、書き換えもできます';
         info.append(rawRun);
         /**
          * 🔴 **目次を見せて起動**(#195 / C-5 段①)。
@@ -1810,7 +1810,7 @@ export class DetailRenderer {
          */
         if (this.extensionGrants.isGranted(meta.assetKey)) {
           run.title =
-            '囲いの中で開きます(PKC3 の中身には触れません)。このアプリにはノートの目次を見せます ── 取り消しは設定から';
+            'PKC3 から切り離して開きます(PKC3 の中身には触れません)。このアプリにはノートの目次を見せます ── 取り消しは設定から';
         } else {
           const extRun = iconButton(
             'launch-asset-extension',
@@ -1859,7 +1859,7 @@ export class DetailRenderer {
     rename.setAttribute('aria-label', 'この添付の名前');
     rename.value = entryTitle;
     // ⚠ 文言は**起きること**で書く(user 指示 2026-08-21)
-    rename.title = '名前を変えて、この欄の外を押すと変わります';
+    rename.title = '名前を書き換えて、この欄の外を押すと保存されます';
     host.append(rename);
 
     if (isAppMime(meta.mime)) host.append(appTileControls(rawBody));
@@ -2173,7 +2173,7 @@ export class DetailRenderer {
       if (!pending) return;
       pending.setAttribute('data-pkc-fence-asset-error', '');
       pending.removeAttribute('data-pkc-fence-asset-pending');
-      pending.textContent = `この囲みの中身(添付)を読めません: ${why}`;
+      pending.textContent = `このコードブロックの中身(添付)を読み込めません: ${why}`;
     };
     const assets = this.assets;
     await Promise.all(
@@ -2185,7 +2185,7 @@ export class DetailRenderer {
           let text = this.fenceTexts.get(key);
           if (text === undefined) {
             if (!assets) {
-              for (const h of mine) fail(h, '添付を読む口がありません');
+              for (const h of mine) fail(h, 'いま添付を読み込めません(読み込みの準備ができていません)');
               return;
             }
             /**
@@ -2283,7 +2283,7 @@ export class DetailRenderer {
         const p = document.createElement('p');
         p.setAttribute('data-pkc-field', 'attachment-no-preview');
         p.textContent = isAppMime(mime)
-          ? 'この種類は画面に出せません。上の「起動」で開けます(ダウンロードしても開けます)'
+          ? 'この種類のファイルは画面に出せません。上の「起動」で開けます(ダウンロードしても開けます)'
           : 'この種類は画面に出せません。上の「ダウンロード」で保存して開いてください';
         host.append(p);
         return;
@@ -2337,7 +2337,7 @@ export class DetailRenderer {
         const note = document.createElement('p');
         note.setAttribute('data-pkc-field', 'attachment-pdf-fallback');
         note.textContent =
-          'この browser は PDF を画面に出せません。上の「ダウンロード」で保存して開いてください';
+          'お使いのブラウザは PDF を画面に出せません。上の「ダウンロード」で保存して開いてください';
         obj.append(note);
         host.append(obj);
       }
@@ -2527,7 +2527,7 @@ function appTileControls(rawBody: string): HTMLElement {
   };
   // ⚠ グループ名は**並び順そのもの**(名前順に並ぶ)── placeholder でそう言う
   field('app-group', 'set-app-group', 'グループ(名前順に並びます)', fm['attachment.app_group'], 16);
-  field('app-icon', 'set-app-icon', '目印', fm['attachment.app_icon'], 3);
+  field('app-icon', 'set-app-icon', 'アイコン', fm['attachment.app_icon'], 3);
   return box;
 }
 

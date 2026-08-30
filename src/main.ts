@@ -1410,7 +1410,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     else if (ev.type === 'degraded') {
       // 🔴 **窓は生きて見えるが保存が効かない**(#117)。⚠ 2026-08-16 まで、この
       //    放送は受け側の `parseEvent` に case が無く**黙って捨てられていた**
-      showStatus('Office が不安定になりました。保存が効きません ── 窓を読み込み直してください');
+      showStatus('Office が不安定になりました。保存が効きません ── ウィンドウを読み込み直してください');
     }
   });
   /**
@@ -1840,7 +1840,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           if (!kind) {
             dispatcher.dispatch({
               type: 'OP_FAILED',
-              error: `この種類は別の窓で開けません: ${name}`,
+              error: `この種類は別のウィンドウで開けません: ${name}`,
             });
             return;
           }
@@ -1860,7 +1860,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             // ⚠ popup を止められた ── **理由を言う**(押して無反応にしない)
             dispatcher.dispatch({
               type: 'OP_FAILED',
-              error: '別の窓を開けませんでした(ポップアップが止められています)',
+              error: '別のウィンドウを開けませんでした(ポップアップが止められています)',
             });
           }
         } catch (e) {
@@ -1943,7 +1943,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           if (!win) {
             dispatcher.dispatch({
               type: 'OP_FAILED',
-              error: '別の窓を開けませんでした(ポップアップが止められています)',
+              error: '別のウィンドウを開けませんでした(ポップアップが止められています)',
             });
           }
         } catch (e) {
@@ -2317,7 +2317,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     openOffice: (target) => {
       const r = officeOpener.open(target);
       if (!r.ok) dispatcher.dispatch({ type: 'OP_FAILED', error: r.message });
-      else if (r.reused) showStatus('開いている Office の窓に表示します');
+      else if (r.reused) showStatus('開いている Office のウィンドウに表示します');
     },
     /**
      * 🔴 **Office 一式の設置 / 削除**(#88 / O6-a)。⚠ ここは**渡すだけ** ──

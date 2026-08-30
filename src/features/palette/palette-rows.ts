@@ -93,7 +93,7 @@ function reasonOf(cmd: KeyCommand): string {
     return `${NOT_READY_PREFIX}${where}にいるときだけ効きます`;
   }
   const note = cmd.note ?? '';
-  return note === '' ? `${NOT_READY_PREFIX}いまこの操作の口が画面にありません` : `${NOT_READY_PREFIX}${note}`;
+  return note === '' ? `${NOT_READY_PREFIX}いまこの操作のボタンが画面に出ていません` : `${NOT_READY_PREFIX}${note}`;
 }
 
 /**

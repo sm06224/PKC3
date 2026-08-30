@@ -206,7 +206,7 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
       // 大きさが meta と食い違う = 書きかけのまま `.json` が置かれた(壊れている)。
       // ⚠ 残しても永久に直らないので捨てる ── ただし**黙らない**
       await discardStaged(dir, save.key);
-      deps.fail(`Office の保存を取り込めませんでした(${save.name}: 中身が壊れています)`);
+      deps.fail(`Office で保存した内容を取り込めませんでした(${save.name}: 中身が壊れています)`);
       return 'failed';
     }
     // ⚠ **`ready` を先に見る。** 見ないと reducer に黙って捨てられ、
@@ -265,7 +265,7 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
       }
       if (!windowKnew) announce(save.key, token);
       await discardStaged(dir, save.key);
-      deps.notify(`Office の保存を取り込みました: ${save.name}`);
+      deps.notify(`Office で保存した内容を取り込みました: ${save.name}`);
       return 'replaced';
     }
     const lid = await deps.createNote(save, bytes);
@@ -280,7 +280,7 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
     //    ⚠ 窓が既に閉じていても放送は投げるだけ ── 誰も聞かなくても害は無い
     announce(save.key, lid);
     await discardStaged(dir, save.key);
-    deps.notify(`Office の保存を取り込みました: ${save.name}`);
+    deps.notify(`Office で保存した内容を取り込みました: ${save.name}`);
     return 'created';
   }
 
@@ -300,7 +300,7 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
         try {
           out.push(await takeOne(dir, save));
         } catch (e) {
-          deps.fail(`Office の保存を取り込めませんでした(${save.name}): ${String(e)}`);
+          deps.fail(`Office で保存した内容を取り込めませんでした(${save.name}): ${String(e)}`);
           out.push('failed');
         } finally {
           inFlight.delete(save.key);
@@ -337,7 +337,7 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
     },
 
     reportWindowFailure(reason) {
-      deps.fail(`Office の保存を PKC へ渡せませんでした: ${reason}`);
+      deps.fail(`Office で保存した内容を PKC3 へ渡せませんでした: ${reason}`);
     },
   };
 }

@@ -67,7 +67,7 @@ export const HANG_GAP_BACKGROUND_MS = 70_000;
  * 「応答していません」だけでは user は何をすればいいか分からない。
  */
 export const HANG_MESSAGE =
-  'Office の窓が応答していません。窓のタブを閉じて、開き直してください';
+  'Office のウィンドウが応答していません。Office のタブを閉じて、開き直してください';
 
 export interface OfficeHangWatchDeps {
   readonly now?: () => number;

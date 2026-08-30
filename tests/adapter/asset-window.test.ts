@@ -316,7 +316,7 @@ describe('図の別窓(実寸 + 拡大縮小 ── #527 案 A)', () => {
       expect(labels, `マウスだけで拡大縮小・往復できない(fit=${String(fit)})`).toEqual([
         '−',
         '＋',
-        '等倍',
+        '実寸',
         '収める',
       ]);
     }
@@ -378,9 +378,9 @@ describe('図の別窓(実寸 + 拡大縮小 ── #527 案 A)', () => {
         .find((x) => x.textContent === label)
         ?.dispatchEvent(new Event('click'));
     };
-    press('等倍');
+    press('実寸');
     expect(doc.body.hasAttribute('data-pkc-fit'), '実寸にしたのに収める印が残っている').toBe(false);
-    expect(img.style.width, '等倍で実寸にならない').toBe('400px');
+    expect(img.style.width, '実寸で原寸にならない').toBe('400px');
     press('収める');
     expect(doc.body.getAttribute('data-pkc-fit'), '収めるへ戻れない(片道の操作)').toBe('contain');
     expect(img.style.width, '収めるへ戻したのに幅が残っている').toBe('');
@@ -448,7 +448,7 @@ describe('図の別窓(実寸 + 拡大縮小 ── #527 案 A)', () => {
    *   入れないと `apply()` が幅を書かず、**何を押しても 0 のまま**で
    *   「動かない」と「そもそも測れていない」が区別できない(空振り)。
    */
-  it('🔴 ＋ と − で幅が動き、等倍で戻る', async () => {
+  it('🔴 ＋ と − で幅が動き、実寸で戻る', async () => {
     const win = await open('natural');
     const img = win.document.querySelector<HTMLImageElement>(
       '[data-pkc-field="asset-window-image"]',
@@ -467,8 +467,8 @@ describe('図の別窓(実寸 + 拡大縮小 ── #527 案 A)', () => {
     expect(img.style.width, '− で戻らない').toBe('400px');
     press('−');
     expect(img.style.width, '− で小さくならない').toBe('320px');
-    press('等倍');
-    expect(img.style.width, '等倍で実寸へ戻らない').toBe('400px');
+    press('実寸');
+    expect(img.style.width, '実寸で原寸へ戻らない').toBe('400px');
   });
 
   /**

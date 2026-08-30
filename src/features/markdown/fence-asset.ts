@@ -55,7 +55,7 @@ export function takeFenceAsset(rest: string): FenceAssetParse {
     //   「書いたのに出ない」を追うことになる
     return { kind: 'invalid', why: `添付を ${hits.length} つ書いています(1 つにしてください)` };
   const key = hits[0]!.slice(FENCE_ASSET_PREFIX.length);
-  if (key === '') return { kind: 'invalid', why: '添付の鍵が空です' };
+  if (key === '') return { kind: 'invalid', why: '`asset:` の後ろに添付の名前がありません' };
   return {
     kind: 'one',
     key,

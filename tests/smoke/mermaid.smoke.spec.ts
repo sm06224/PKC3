@@ -677,7 +677,7 @@ test('🔴 図を押すと別窓で実寸で開き、拡大縮小できる (#527
 
   const img = page.locator('[data-pkc-field="detail-body"] [data-pkc-mermaid-src] img');
   // ⚠ **押せることが画面に出ている**(カーソルと吹き出し)── 常設のボタンは増やさない
-  expect(await img.getAttribute('title'), '押せることが画面に出ていない').toContain('別の窓');
+  expect(await img.getAttribute('title'), '押せることが画面に出ていない').toContain('別のウィンドウ');
   await expect(
     page.locator('[data-pkc-field="detail-body"] [data-pkc-field="diagram-open"]'),
     '常設のボタンが増えている(#501 と逆向き)',

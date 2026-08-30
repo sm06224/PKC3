@@ -53,7 +53,7 @@ export function packStatusText(meta: OfficePackMeta | null): string {
 export function packBuildText(meta: OfficePackMeta | null): string {
   if (meta === null) return '';
   const b = meta.build;
-  if (b === null) return 'ビルドの素性は不明です(この一式を入れた頃は記録していませんでした)';
+  if (b === null) return 'どのビルドかは分かりません(この一式を入れた頃は記録していませんでした)';
   const parts: string[] = [];
   // ⚠ sha は**先頭 12 字**(全部は読めないし、突合には足りる)
   if (b.loSha !== '') parts.push(`LibreOffice ${b.loSha.slice(0, 12)}`);
@@ -148,8 +148,8 @@ export function buildOfficePackPanel(state: OfficePackState = appOfficePack): Of
   const intro = document.createElement('p');
   intro.setAttribute('data-pkc-field', 'settings-note');
   intro.textContent =
-    'Word / Excel / PowerPoint の添付を、別の窓で開いて読めるようにします。'
-    + '約 77MB のひとそろいをこの端末に入れます ── 一度入れれば、次からは端末の中から起動します。';
+    'Word / Excel / PowerPoint の添付を、別のウィンドウで開いて読めるようにします。'
+    + '約 77MB の一式をこの端末に入れます ── 一度入れれば、次からは端末の中から起動します。';
   root.append(intro);
 
   const status = document.createElement('p');
@@ -187,7 +187,7 @@ export function buildOfficePackPanel(state: OfficePackState = appOfficePack): Of
   //    action を書くと、中身の空な受け手を 1 つ増やすことになる
   input.setAttribute('data-pkc-field', 'office-pack-input');
   const fromFile = button('choose-office-pack', 'ファイルから入れる', 'office-pack-file');
-  fromFile.title = '手元の lo-wasm-qt6.zip を選びます(配布元に届かない環境でも入ります)';
+  fromFile.title = '手元の lo-wasm-qt6.zip を選びます(配布元につながらない環境でも入れられます)';
   const remove = button('remove-office-pack', '削除', 'office-pack-remove');
   remove.title = 'この端末からひとそろいを消します(ノートや添付は消えません)';
   row.append(fromUrl, fromFile, remove, input);

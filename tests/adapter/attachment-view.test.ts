@@ -353,8 +353,8 @@ describe('添付の詳細から起動する(P10)', () => {
     expect(run, '「起動」が無い').not.toBeNull();
     expect(raw, '「素のまま起動」が無い').not.toBeNull();
     // ⚠ 文言だけでなく**何が起きるか**が読めること(素のままは危険側なので)
-    expect(run!.getAttribute('title')).toContain('囲いの中');
-    expect(raw!.getAttribute('title')).toContain('PKC3 の中身にも手が届きます');
+    expect(run!.getAttribute('title')).toContain('PKC3 から切り離して開きます');
+    expect(raw!.getAttribute('title')).toContain('PKC3 のノートを全部読めます');
     // 図案が入っている(押せる物だと分かる)
     expect(run!.querySelector('[data-pkc-icon] svg path')).not.toBeNull();
   });

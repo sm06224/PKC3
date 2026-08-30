@@ -62,16 +62,16 @@ export type KeyContext =
 /** 文脈の見出し。⚠ test が「名乗った文脈の下に出ているか」を全数で突き合わせる。 */
 export const CONTEXT_LABELS: Readonly<Record<KeyContext, string>> = {
   global: '画面のどこでも',
-  editor: '2 列の編集(原文・題名の欄)',
-  append: '継ぎ足しの欄',
+  editor: '2 ペインの編集(原文と題名の欄)',
+  append: '追記の欄',
   row: '1 面の編集(開いている行の欄)',
-  live: '1 面の編集(面そのもの)',
+  live: '1 画面での編集(画面ぜんたい)',
   /**
    * ⚠ **2 ペインでも効く**(2026-08-20)── 開く / ゴミ箱 / 行送りは両方の面で
    *   同じ意味なので `filer` 1 つのままにしてある(user に同じ操作を 2 回
    *   割り当て直させない)。見出しがどちらか一方だけを名乗ると**嘘になる**。
    */
-  filer: 'フォルダの表と 2 ペイン(行に焦点があるとき)',
+  filer: 'フォルダの一覧と 2 ペイン(行を選んでいるとき)',
   /** ⚠ こちらは**2 ペインにしか存在しない操作**だけ(反対側へ写す / 移す など)。 */
   dual: '2 ペインだけの操作(そのペインに焦点があるとき)',
 };
@@ -365,7 +365,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
      *   文字を打たない鍵にすれば即座に効く。
      */
     whileTyping: true,
-    note: '打鍵中に効くのは Mod+, のほう(Alt+3 は文字を打つ鍵なので門で止まる)',
+    note: '文字を打っている間に効くのは Mod+, のほうです(Alt+3 は文字が入るキーなので、打っている間は効きません)',
   },
   {
     id: 'open-flags',
@@ -401,7 +401,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['global'],
     defaults: ['F1', 'Alt+5', 'Mod+Shift+Slash'],
     whileTyping: true,
-    note: 'PKC2 の Ctrl+? と同じ手。F1 は文字を打つ鍵ではないので打鍵中でも効きます',
+    note: 'PKC2 の Ctrl+? と同じキーです。F1 は文字が入らないキーなので、文字を打っている間でも効きます',
   },
   /**
    * ⚠ **番号は末尾に足す**(#241 段⑥-a)。集計と設定の間へ差し込むと、
@@ -419,7 +419,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
      *   ⚠ こちらで勝手に別の鍵を足さない(既に体で覚えた割当をずらさない)。
      */
     whileTyping: true,
-    note: '別の場所を左右に開いて、まとめて移す面です(打鍵中に鍵で開くなら、割当を文字を打たない鍵へ)',
+    note: '別の場所を左右に開いて、まとめて移す面です(文字を打っている間にキーで開きたいときは、文字が入らないキーへ割り当て直してください)',
   },
   {
     id: 'toggle-sidebar',
@@ -510,7 +510,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    */
   {
     id: 'dual-preview',
-    label: '下見を出す / しまう',
+    label: 'プレビューを出す / しまう',
     contexts: ['dual'],
     defaults: ['F9'],
     note: '本文を読みに行くので、要るときだけ出してください',
@@ -559,7 +559,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     label: 'ハイライト',
     contexts: ['editor', 'row'],
     defaults: ['Alt+Shift+H'],
-    note: '選んだ字を == で囲みます(色を付けたいときは ==[red]…== と書けます)',
+    note: '選んだ文字を == で囲みます(色を付けたいときは ==[red]…== と書けます)',
   },
   {
     id: 'format-ruby',
@@ -588,13 +588,13 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['editor', 'row'],
     defaults: ['Mod+K'],
   },
-  // ── 継ぎ足しの欄
+  // ── 追記の欄
   {
     id: 'append-send',
-    label: '継ぎ足しを送る',
+    label: '追記を送る',
     contexts: ['append'],
     defaults: ['Mod+Enter'],
-    note: '継ぎ足しの欄の中だけ',
+    note: '追記の欄の中だけ',
   },
   // ── 1 面(ライブ)の行の欄
   {
