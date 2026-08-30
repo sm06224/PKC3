@@ -16,9 +16,9 @@ import {
   applyReadColumns,
   initialReadColumns,
   installColumnFit,
-  setColumnFoldNotify,
   installColumnWheel,
 } from '@adapter/ui/render/read-columns';
+import { setFoldNotify } from '@adapter/ui/render/fold-notify';
 import { appOpenInEdit } from '@adapter/ui/render/open-in-edit';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { appPaneSizes, applyPaneSizes } from '@adapter/ui/render/pane-size';
@@ -862,12 +862,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   };
 
   /**
-   * 🔴 **段組みが畳まれたら、帯で言う**(#551)。⚠ 起動時ではなく**ここ**で配る ──
-   *   `installColumnFit` を呼ぶ時点では `showStatus` がまだ無い。
-   * 🔑 口は 1 つだけ(`read-columns.ts` が判定を持つ)── 呼び側が独自に
-   *   「畳まれたか」を数え直すと、帯と実際の面が食い違う(CLAUDE.md §7)。
+   * 🔴 **幅が足りなくて畳んだら、帯で言う**(#551 / #606)。⚠ 起動時ではなく**ここ**で
+   *   配る ── `installColumnFit` を呼ぶ時点では `showStatus` がまだ無い。
+   * 🔑 **口は 1 つだけ**(`fold-notify.ts`)── 段組みも**横に並べた枠**もここを通る。
+   *   ⚠ #606 まで枠は**別の口**(`CenterRouter` の引数)を要求していて、ここが
+   *   渡していなかったので**製品では 1 度も出ていなかった**。
+   *   ⚠ この 1 行を落とすと**両方の帯が同時に消える**ので、
+   *   `tests/smoke/read-columns.smoke.spec.ts` が鳴る(実測)。
+   * ⚠ **別名を作らない**(2 巡目レビュー R-1)── `setColumnFoldNotify` という
+   *   委譲用の名前を残したら、台がそこを迂回して**欠陥の再導入を素通り**させた。
    */
-  setColumnFoldNotify(showStatus);
+  setFoldNotify(showStatus);
 
   /**
    * 🔴 **外からの依頼を受ける口**(#189 / C-4 と #194 / C-3)。
