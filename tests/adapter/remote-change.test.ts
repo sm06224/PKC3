@@ -170,7 +170,7 @@ describe('重なったまま保存したときに、黙らない(#178)', () => {
   it('🔴 画面に理由が出て、戻し方まで書いてある', () => {
     const { state } = commitOverRemote();
     expect(state.error, '黙って上書きした(user は日付が消えたとしか見えない)').toBeTruthy();
-    expect(state.error, '何が起きたか書いていない').toContain('別の窓');
+    expect(state.error, '何が起きたか書いていない').toContain('別のウィンドウ');
     expect(state.error, '戻し方が書いていない').toContain('履歴');
   });
 

@@ -33,8 +33,8 @@ export interface TagBadgeSpec {
 }
 
 export const TAG_BADGES: readonly TagBadgeSpec[] = [
-  { id: 'chip', label: '札(既定・薄い灰色の下地)' },
-  { id: 'outline', label: '枠の札(下地なし・細い枠)' },
+  { id: 'chip', label: 'バッジ(既定・薄い灰色の下地)' },
+  { id: 'outline', label: '枠だけのバッジ(下地なし・細い枠)' },
   { id: 'plain', label: '文字のまま(いままでと同じ)' },
 ] as const;
 

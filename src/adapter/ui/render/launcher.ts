@@ -49,18 +49,18 @@ export class LauncherRenderer {
     name.type = 'text';
     name.setAttribute('data-pkc-field', 'launcher-add-name');
     name.placeholder = '名前';
-    name.setAttribute('aria-label', '足すリンクの名前');
+    name.setAttribute('aria-label', 'リンクの名前');
     const url = document.createElement('input');
     url.type = 'text';
     url.setAttribute('data-pkc-field', 'launcher-add-url');
     url.placeholder = 'https://…';
-    url.setAttribute('aria-label', '足すリンクのアドレス');
+    url.setAttribute('aria-label', 'リンクのアドレス');
     const go = document.createElement('button');
     go.type = 'button';
     go.setAttribute('data-pkc-action', 'add-url-tile');
     go.setAttribute('data-pkc-field', 'launcher-add-go');
     // ⚠ 文言は**起きること**で書く(user 指示 2026-08-21)
-    go.title = 'この一覧にリンクを 1 つ足します(押すと別の窓で開けるようになります)';
+    go.title = 'この一覧にリンクを 1 つ足します(足したリンクは別のウィンドウで開きます)';
     go.textContent = 'リンクを足す';
     add.append(name, url, go);
 
@@ -108,7 +108,7 @@ export class LauncherRenderer {
             //    出ます」とだけ書いていた ── PKC3 だけの user には**実行できない
             //    指示**で、しかも当時は実際に登録する導線が無かった
             // ⚠ **行き止まりにしない**(P8 段⑭)── いまは道が 2 本ある
-            'アプリがありません。HTML のファイルを添付して、その画面の「アプリとして登録」を押すか、上の欄によく開くサイトのアドレスを入れてください'
+            'アプリがありません。HTML ファイルを添付すると、その添付の画面に「アプリとして登録」のチェックが出ます。よく開くサイトなら、上の欄に名前とアドレスを入れて「リンクを足す」を押してください'
           : '絞り込みに一致するものがありません';
       list.append(empty);
       return;
@@ -126,7 +126,7 @@ export class LauncherRenderer {
      */
     const lead = document.createElement('p');
     lead.setAttribute('data-pkc-field', 'launcher-lead');
-    lead.textContent = 'アプリは別の窓で開きます';
+    lead.textContent = 'アプリは別のウィンドウで開きます';
     list.append(lead);
 
     let group: string | null = null;

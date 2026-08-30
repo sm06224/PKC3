@@ -995,7 +995,7 @@ test('🔴 本体を読み込めないときも、宙吊りにならず画面に
    * その場で出せていなければ **「起動中…」のまま永久に止まる**。
    */
   await expect(page.locator('#status')).toHaveText('停止', { timeout: 15_000 });
-  await expect(page.locator('#msg')).toContainText('本体を読み込めません');
+  await expect(page.locator('#msg')).toContainText('Office のプログラムを読み込めません');
   expect(
     await page.evaluate(() => (window as unknown as { __okCalled?: boolean }).__okCalled),
     '失敗したのに ok() を呼んでいる',

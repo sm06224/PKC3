@@ -242,7 +242,7 @@ class Parser {
       this.take();
       this.take();
       const end = this.peek();
-      if (end === undefined || end.t !== 'ref') throw new Fail('#REF!', '範囲の終わりが升の名前ではありません');
+      if (end === undefined || end.t !== 'ref') throw new Fail('#REF!', '範囲の終わりがセルの名前ではありません');
       this.take();
       const out: Value[] = [];
       for (let r = Math.min(t.row, end.row); r <= Math.max(t.row, end.row); r += 1) {
@@ -391,7 +391,7 @@ function cellValue(ctx: Ctx, row: number, col: number): Value {
   if (!isFormula(raw)) return raw;
   // 🔴 **循環は黙って 0 にしない**(升に `#CYCLE!` を出す)
   if (ctx.depth >= MAX_DEPTH) {
-    throw new Fail('#CYCLE!', `升どうしがぐるぐる参照しているか、${MAX_DEPTH} 段より深く辿っています`);
+    throw new Fail('#CYCLE!', `セルどうしがぐるぐる参照しているか、${MAX_DEPTH} 段より深く辿っています`);
   }
   return new Parser(tokenize(raw.slice(1)), { rows: ctx.rows, depth: ctx.depth + 1 }).parse();
 }

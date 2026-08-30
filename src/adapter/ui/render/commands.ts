@@ -58,7 +58,7 @@ export const SETTINGS_COMMANDS: readonly CollectionCommand[] = [
   { action: 'export-html', label: '閲覧用 HTML', title: '読むだけの 1 枚にまとめます' },
   {
     action: 'export-portable',
-    label: '持ち歩ける 1 枚',
+    label: '持ち歩ける HTML 1 枚',
     /**
      * 🔴 **「閲覧用 HTML」との違いを、題名ではなく説明で言い切る**(#400 段④)。
      * ⚠ どちらも「HTML 1 枚」なので、**何が違うか**を書かないと選べない ──
@@ -78,7 +78,7 @@ export const SETTINGS_COMMANDS: readonly CollectionCommand[] = [
      * 🔑 #346(PDF)と**同じ形の欠け**である:道は在るのに**道しるべ**が無い。
      */
     title:
-      '1 ノート = 1 つの .md にして zip で保存します。PKC3 を捨てても読める形で、Pandoc など他の道具にもそのまま渡せます',
+      '1 ノート = 1 つの .md にして zip で保存します。PKC3 を使わなくなっても読める形で、Pandoc など他のアプリにもそのまま渡せます',
   },
   /**
    * 🔴 **構成をテキストでコピー**(#429 段①)── AI に整理を頼むための材料。
@@ -95,7 +95,7 @@ export const SETTINGS_COMMANDS: readonly CollectionCommand[] = [
   {
     action: 'purge-orphan-assets',
     label: '使っていない添付を消す',
-    title: 'どのノートからも参照されていない添付を削除します(元に戻せません)',
+    title: 'どのノートでも使っていない添付を消します(元に戻せません)',
   },
 ] as const;
 
@@ -151,19 +151,19 @@ function buildSettingsFile(): HTMLElement {
   box.setAttribute('data-pkc-region', 'settings-file');
   const h = document.createElement('h4');
   h.textContent = '設定の持ち出し';
-  h.title = '見た目・鍵の割当・紙面などを、別の端末へ持っていきます(ノートは移りません)';
+  h.title = '見た目・ショートカットキーの割り当て・紙面などを、別の端末へ持っていきます(ノートは移りません)';
   box.append(h);
 
   const note = document.createElement('p');
   note.setAttribute('data-pkc-field', 'settings-file-note');
   note.textContent =
-    '見た目・面の畳み方・編集の仕方・紙面・鍵の割当などを 1 つのファイルにします。ノートは入りません。許可とフラグとお知らせの既読は、その端末のものなので運びません。';
+    '見た目・ペインの畳み方・編集の仕方・紙面・ショートカットキーの割り当てなどを 1 つのファイルにします。ノートは入りません。許可とフラグとお知らせの既読は、その端末のものなので持っていきません。';
   box.append(note);
 
   const row = document.createElement('div');
   row.setAttribute('data-pkc-field', 'settings-file-row');
   const out = iconButton('export-settings', '設定を書き出す');
-  out.title = 'いまの設定を 1 つのファイルにして落とします';
+  out.title = 'いまの設定を 1 つのファイルにして保存します';
   row.append(out);
 
   /**
@@ -200,11 +200,11 @@ function buildSettingsFile(): HTMLElement {
   apply.setAttribute('data-pkc-action', 'apply-settings');
   apply.setAttribute('data-pkc-field', 'settings-file-apply');
   /**
-   * ⚠ **「当てる」にしない** ── 同じ面に整理案の「当てる」が既に在り、
+   * ⚠ **「適用する」にしない** ── 同じ面に整理案の「適用する」が既に在り、
    *   **同じ字のボタンが 2 つ**並ぶと user はどちらか見分けられない
    *   (`docs-parity` の等値 pin が教えた ── 検査が正しい)。
    */
-  apply.textContent = '設定を当てる';
+  apply.textContent = '設定を適用';
   /**
    * 🔴 **変わるものが 1 件も無ければ押せない**(#414)。
    * ⚠ 既定は `disabled` ── 選ぶ前から押せる形にしない(dead click を作らない)。
@@ -235,14 +235,14 @@ function buildPlanApply(): HTMLElement {
   const box = document.createElement('section');
   box.setAttribute('data-pkc-region', 'plan-apply');
   const sum = document.createElement('h4');
-  sum.textContent = '整理案を当てる';
+  sum.textContent = '整理案を適用する';
   sum.title = 'AI から返ってきた整理案(mv / mkdir / rename)を貼ると、何が起きるかを先に見せます';
   box.append(sum);
 
   const note = document.createElement('p');
   note.setAttribute('data-pkc-field', 'plan-note');
   note.textContent =
-    '「構成をコピー」で出した内容を AI に渡し、返ってきた案をここへ貼ってください。当てる前に、何がどう動くかを全部お見せします。';
+    '「構成をコピー」で出した内容を AI に渡し、返ってきた案をここへ貼ってください。適用する前に、何がどう動くかを全部お見せします。';
   box.append(note);
 
   const ta = document.createElement('textarea');
@@ -271,7 +271,7 @@ function buildPlanApply(): HTMLElement {
   apply.type = 'button';
   apply.setAttribute('data-pkc-action', 'apply-plan');
   apply.setAttribute('data-pkc-field', 'plan-apply');
-  apply.textContent = '当てる';
+  apply.textContent = '適用する';
   /**
    * 🔴 **誤りが 1 行でもあれば押せない**(#429 段③)。
    * ⚠ 半分だけ当たると、どこまで進んだのか user にも分からなくなる。
@@ -295,7 +295,7 @@ function buildStorageProfile(): HTMLElement {
   const box = document.createElement('section');
   box.setAttribute('data-pkc-region', 'storage-profile');
   const h = document.createElement('h4');
-  h.textContent = '何が容量を食っているか';
+  h.textContent = '何が容量を使っているか';
   box.append(h);
 
   const btn = document.createElement('button');
@@ -303,7 +303,7 @@ function buildStorageProfile(): HTMLElement {
   btn.setAttribute('data-pkc-action', 'storage-profile');
   btn.setAttribute('data-pkc-field', 'storage-profile-run');
   btn.textContent = '調べる';
-  btn.title = '添付の重い順にノートを並べます。押すとそのノートへ飛べます';
+  btn.title = '添付の重い順にノートを並べます。行を押すと、そのノートを開きます';
   box.append(btn);
 
   /** 合計の言い方。⚠ 空のときは畳む(空の枠を出さない)。 */

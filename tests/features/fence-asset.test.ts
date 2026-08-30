@@ -53,7 +53,7 @@ describe('見出しから添付を読む', () => {
   it('🔴 鍵が空なら理由を返す(黙ってふつうの囲みに落とさない)', () => {
     const r = takeFenceAsset(' asset:');
     expect(r.kind).toBe('invalid');
-    expect(r.kind === 'invalid' && r.why).toContain('空');
+    expect(r.kind === 'invalid' && r.why).toContain('添付の名前がありません');
   });
 
   it('印は本文の `![](asset:…)` と同じ綴り(2 つ目の書き方を作らない)', () => {

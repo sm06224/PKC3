@@ -187,7 +187,7 @@ describe('revision flow (P5b)', () => {
     // lid 衝突(既存 e1)── 黙って上書きしない
     d.dispatch({ type: 'RESTORE_TRASH', entryLid: 'e1', revId: 'r-t' });
     await tick();
-    expect(d.getState().error).toContain('既に存在します');
+    expect(d.getState().error).toContain('既にあります');
   });
 
   it('編集中の着弾・同一 lid: draft 無傷 + diskAhead(無変更 cancel で復元内容が勝つ)', async () => {

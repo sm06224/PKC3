@@ -85,7 +85,7 @@ test('🔴 別窓が同じノートを書いたら、保存時に理由が出る
   await expect(
     page.locator('[data-pkc-region="status"]'),
     '黙って上書きした(user は日付が消えたとしか見えない)',
-  ).toContainText('別の窓の変更と重なりました', { timeout: 15_000 });
+  ).toContainText('別のウィンドウの変更と重なりました', { timeout: 15_000 });
   await expect(
     page.locator('[data-pkc-region="status"]'),
     '戻し方が書いていない',

@@ -179,7 +179,7 @@ export class SettingsRenderer {
     const note = document.createElement('p');
     note.setAttribute('data-pkc-field', 'settings-note');
     note.textContent =
-      '最初は OS の設定に従います。一度選ぶと、この端末ではそちらを覚えています。';
+      '最初は OS の設定に従います。一度選ぶと、この端末では選んだ配色を覚えます。';
     dd.append(note);
     dl.append(dt, dd);
 
@@ -212,7 +212,7 @@ export class SettingsRenderer {
       '本文の読み幅と、印刷したときの紙の大きさが決まります。既定は A4 縦です。' +
       'フル HD を選ぶと読み幅の上限が外れ、画面の幅いっぱいまで広がります。' +
       '表・図・コードはどの紙面でも幅いっぱいのままです。' +
-      '書き出した HTML には、書き出したときの紙面が焼かれます。';
+      '書き出した HTML は、書き出したときの紙面のまま表示されます。';
     pd.append(pnote);
     dl.append(pt, pd);
 
@@ -279,7 +279,7 @@ export class SettingsRenderer {
     // ⚠ **何が変わって、何に気をつけるか**を書く(押した後に探させない)
     cnote.textContent =
       '横に広い画面で、本文を新聞のように段へ流します。' +
-      '送りが横向きになり、マウスホイールはそのまま横へ送れます。' +
+      '読み進める向きが横になり、マウスのホイールでそのまま横へスクロールできます。' +
       '画面の幅が足りないときは自動で 1 段に戻ります。' +
       '表と図は段の幅まで縮むので、広く見たいときは段を減らしてください。' +
       '2 ペインで編集している間は 1 段に戻ります(その場の編集では段のままです)。';
@@ -320,7 +320,7 @@ export class SettingsRenderer {
     tnote.setAttribute('data-pkc-field', 'settings-note');
     // ⚠ **何が動いて、何が動かないか**を書く(押した後に探させない)
     tnote.textContent =
-      '本文と画面の字の大きさが変わります。押すとその場で効きます。' +
+      '本文と画面の字の大きさが変わります。選ぶとその場で変わります。' +
       '読み幅(1 行の長さ)は動かないので、大きくすると 1 行に入る字が減ります。' +
       'この端末だけの設定で、ノートの中身には入りません。';
     td.append(tnote);
@@ -356,8 +356,8 @@ export class SettingsRenderer {
     const gnote = document.createElement('p');
     gnote.setAttribute('data-pkc-field', 'settings-note');
     gnote.textContent =
-      '本文の行に「#買い物 #家事」と書いた行の見え方です。押すとその場で効きます。' +
-      '札にすると本文の文章と見分けやすくなります。' +
+      '本文に「#買い物 #家事」と書いた行の見え方です。押すとその場で効きます。' +
+      'バッジにすると本文の文章と見分けやすくなります。' +
       '本文そのものは変わりません(書いた字はそのままです)。';
     gd.append(gnote);
     dl.append(gt, gd);
@@ -386,7 +386,7 @@ export class SettingsRenderer {
     enote.setAttribute('data-pkc-field', 'settings-note');
     // ⚠ **いつ効くか**を書く ── 書かないと「押したのに変わらない」に見える
     enote.textContent =
-      '押した行だけが原文になる 1 面の編集(ライブ)が最初の設定です。' +
+      '既定は「1 画面で編集(ライブ)」です ── 押した行だけがマークダウンの元の文になり、その場で書き替えられます。' +
       '2 ペインは左に原文、右にプレビューが並びます。' +
       '切り替えは、次に編集を開いたときから効きます。';
     ed.append(enote);
@@ -431,7 +431,7 @@ export class SettingsRenderer {
     onote.textContent =
       // ⚠ **記法を書かない** ── ここは `textContent` なので `**` がそのまま画面に出る
       //   (PKC2 が同じ失敗をしていて、`notice-log.ts` の冒頭がまさにこれを戒めている)
-      '最初の設定では、フォルダの表で Enter を押すと「読む」ところから始まります。' +
+      '既定では、フォルダの一覧で Enter を押すと、まず「読む」状態で開きます。' +
       'ここを入れると、開いた時点で編集に入ります。' +
       '行を 1 回押して選んだだけでは編集に入りません(それは「選ぶ」で、「開く」ではありません)。';
     od.append(onote);
@@ -458,7 +458,7 @@ export class SettingsRenderer {
     anote.setAttribute('data-pkc-field', 'settings-note');
     anote.textContent =
       '本文の行に時刻まで書いた予定(- [ ] 打ち合わせ @2026-08-27 14:00)が対象です。' +
-      '時間になると短い音が鳴り、画面の下に帯が出ます。押すとそのノートを開きます。' +
+      '時間になると短い音が鳴り、画面の下に知らせが出ます。押すとそのノートを開きます。' +
       'PKC を開いている間だけ鳴ります ── 閉じている間は鳴りません(ブラウザでは' +
       '閉じたページを時刻で起こすことができないためです)。' +
       'ここを入れると、起動したときに予定を数えます(切のままなら数えません)。';
@@ -564,14 +564,14 @@ export class SettingsRenderer {
     const wrap = document.createElement('section');
     wrap.setAttribute('data-pkc-region', 'settings-same-origin');
     const h = document.createElement('h3');
-    h.textContent = '素のまま起動を許したアプリ';
+    h.textContent = 'ノートを渡して開くことを許したアプリ';
     const note = document.createElement('p');
     note.setAttribute('data-pkc-field', 'settings-note');
     note.textContent =
       'ここに載っているアプリは、ノート・添付・設定を全部読み書きできます。' +
       '中身が 1 バイトでも変われば許可は外れ、次に開くときまた聞きます。' +
       '⚠ これらのアプリは、この一覧そのものも書き換えられます' +
-      '(同じ場所で動くので、どこに保存しても届きます)。';
+      '(PKC3 と同じ保存領域で動くので、どこに保存しても、そのアプリから触れます)。';
     this.sameOriginList = document.createElement('ul');
     this.sameOriginList.setAttribute('data-pkc-field', 'same-origin-list');
     wrap.append(h, note, this.sameOriginList);
@@ -630,7 +630,7 @@ export class SettingsRenderer {
     note.setAttribute('data-pkc-field', 'settings-note');
     // ⚠ **見えるものを書く**(「projection を渡す」では判断できない)
     note.textContent =
-      'ここに載っているアプリは、ノートの題名・種類・日付・印の一覧を読めます。' +
+      'ここに載っているアプリは、ノートの題名・種類・日付と、完了や片づけの状態の一覧を読めます。' +
       '本文と添付は渡りません。' +
       '中身が 1 バイトでも変われば許可は外れ、次に開くときまた聞きます。';
     this.extensionList = document.createElement('ul');
@@ -739,8 +739,8 @@ export class SettingsRenderer {
     note.setAttribute('data-pkc-field', 'settings-note');
     note.textContent =
       'コピーすると、同じ内容が複数の形(ウェブページの形 / リッチテキスト / ただの文字)で' +
-      '持ち回られます。どれが正確かは相手のアプリによって違うので、崩れるときは切り替えてください。' +
-      'フラグの「貼り付けたとき、何が届いてどれを使ったかを画面に出す」を点けると、' +
+      'クリップボードに入ります。どれが正確かは相手のアプリによって違うので、崩れるときは切り替えてください。' +
+      'フラグの「貼り付けたとき、何が届いてどれを使ったかを画面に出す」を入れると、' +
       '実際に何が届いたかが見えます(中身は出しません)。';
     dd.append(note);
     dl.append(dt, dd);
@@ -1067,7 +1067,7 @@ export class SettingsRenderer {
     }
     if (eff <= 1) {
       el.textContent =
-        `いまの画面は段組みに足りないので、ふつうの縦送りで出ています` +
+        `いまの画面は段組みには狭いので、ふつうの 1 段で表示しています` +
         `(${count} 段には ${Math.ceil(minWidthForColumns(2, fontPx))}px 以上の幅が要ります)。`;
       return;
     }
@@ -1126,9 +1126,9 @@ const PERSIST_TEXT: Record<PersistState, string> = {
 const PHASE_LABEL: Record<string, string> = {
   spawn: '起動',
   enqueue: '受付',
-  dispatch: '送出',
+  dispatch: '実行開始',
   done: '完了',
   fail: '失敗',
-  kill: '終了(未使用)',
+  kill: '終了(しばらく使われないため)',
   dispose: '破棄',
 };

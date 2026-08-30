@@ -657,7 +657,7 @@ function boardShapes(
       textBox(
         // ⚠ 番号は離す ── 題名(2)/ 本文(3)と衝突させない
         base + 100 + n,
-        `板 ${n + 1}`,
+        `付箋 ${n + 1}`,
         {
           x: originX + Math.round(it.x * EMU_PER_PX * k),
           y: originY + Math.round(it.y * EMU_PER_PX * k),

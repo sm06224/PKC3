@@ -420,7 +420,7 @@
       busy = true;
       try {
         var dir = await dirPromise;
-        if (!dir) throw new Error('この browser には OPFS がありません');
+        if (!dir) throw new Error('このブラウザでは保存先(OPFS)を使えません');
         for (var i = 0; i < hits.length; i += 1) await handOff(dir, hits[i]);
       } catch (e) {
         // 🔴 **黙って落とさない。** user は保存したつもりでいる
@@ -637,9 +637,9 @@
     + "var ask=function(kind){return new Promise(function(ok,ng){var id=++seq;"
     + "waiting[id]=function(d){if(d&&d.parts)ok(d.parts);else ng(clipErr(d&&d.error));};"
     + "try{ch.postMessage({clip:'read',id:id,kind:kind})}"
-    + "catch(e){delete waiting[id];ng(clipErr('本体の窓へ放送できません'));return}"
+    + "catch(e){delete waiting[id];ng(clipErr('本体のウィンドウへ放送できません'));return}"
     + "setTimeout(function(){if(waiting[id]){delete waiting[id];"
-    + "ng(clipErr('本体の窓が 5 秒返しませんでした'))}},5000);});};"
+    + "ng(clipErr('本体のウィンドウが 5 秒返しませんでした'))}},5000);});};"
     + "if(self.navigator&&!self.navigator.clipboard){"
     + "Object.defineProperty(self.navigator,'clipboard',{configurable:true,value:{"
     + "write:function(items){return toParts(items).then(send,function(){})},"
@@ -1028,7 +1028,7 @@
       lastSavedProfile = xcu;
     } catch (e) {
       // ⚠ **大きさのために起動を落とさない。** 小さい窓のほうが、開かないよりましである
-      console.warn('窓の大きさを仕込めませんでした', e);
+      console.warn('ウィンドウの大きさを仕込めませんでした', e);
     }
   }
 
@@ -1092,7 +1092,7 @@
     if (F.isSavable(name, alienOk)) return;
     var ext = F.extOf(name);
     roEl.textContent = '保存できません';
-    roEl.title = ext + ' はこの Office では保存できません(読むだけ)';
+    roEl.title = ext + ' はこの Office では保存できません(読むことはできます)';
     roEl.hidden = false;
     if (dead || degraded) return;
     nosaveEl.textContent = '';
@@ -1117,7 +1117,7 @@
     restartEl.textContent = '';
     var what = document.createElement('span');
     // ⚠ **失うものを先に書く**(`degrade()` と同じ向き)── 押してから知るのでは遅い
-    what.textContent = '表示言語の設定を変えました。窓を開き直すと切り替わります。'
+    what.textContent = '表示言語の設定を変えました。ウィンドウを開き直すと切り替わります。'
       + ' ⚠ 保存していない変更は失われます。';
     var again = document.createElement('button');
     again.textContent = '開き直す';
@@ -1174,7 +1174,7 @@
       if (lack.every(function (x) { return /isolation|SharedArrayBuffer/.test(x); })) {
         var hint = document.createElement('div');
         hint.className = 'why';
-        hint.textContent = '準備が終わっていないだけかもしれません。読み直すと有効になることがあります。';
+        hint.textContent = '準備が終わっていないだけかもしれません。下の「読み込み直す」を押すと使えるようになることがあります。';
         var retry = document.createElement('button');
         retry.textContent = '読み込み直す';
         retry.addEventListener('click', function () { location.reload(); });
@@ -1185,7 +1185,7 @@
       return;
     }
     var db;
-    try { db = await openDb(); } catch (e) { fail('保管庫を開けません'); return; }
+    try { db = await openDb(); } catch (e) { fail('この端末の保存領域を開けません'); return; }
     var meta = await idbGet(db, 'meta', 'pack');
     if (!meta || !Array.isArray(meta.files)) {
       fail('Office 一式がまだ入っていません(PKC3 の設定から入れてください)');
@@ -1309,7 +1309,7 @@
             //    初期化待ちのまま宙吊りになり、`await qtLoad(...)` は解決も棄却も
             //    しない ── **下の catch には入らない**。だから理由はここで出し切る。
             console.error(e);
-            died('本体を読み込めません: ' + String((e && e.message) || e).slice(0, 160));
+            died('Office のプログラムを読み込めません: ' + String((e && e.message) || e).slice(0, 160));
           });
           return {};
         },
@@ -1319,7 +1319,7 @@
           //    "crashed":true}`)。以前は生 JSON を上部バーへ流すだけで、版面は
           //    生きているように見えたままだった
           onExit: function (d) {
-            if (d && d.crashed) { died((d && d.text) || 'crashed'); return; }
+            if (d && d.crashed) { died((d && d.text) || '原因は分かりませんでした'); return; }
             setStatus('終了しました');
           },
           entryFunction: window.soffice_entry,

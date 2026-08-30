@@ -699,7 +699,7 @@ describe('繰り返し(#344 段②)', () => {
     await tick(20);
     expect(store[BIN], '本文が書き替わっている').toBe(body);
     // ⚠ 断りは**言葉で**出す ── 黙って何もしないと、user は壊れたと読む
-    expect(d.getState().error).toContain('繰り返しの予定は掴んで動かせません');
+    expect(d.getState().error).toContain('繰り返しの予定はドラッグで動かせません');
   });
 
   /**

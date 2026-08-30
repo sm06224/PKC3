@@ -1053,7 +1053,7 @@ test('🔴 組み込みタイルを押すと別窓が開き、本文の面は残
   await expect(
     page.locator('[data-pkc-field="launcher-lead"]'),
     '別の窓で開くと書いていない',
-  ).toHaveText('アプリは別の窓で開きます');
+  ).toHaveText('アプリは別のウィンドウで開きます');
 
   const popup = context.waitForEvent('page');
   await clickReal(page, builtinTile('dual'));

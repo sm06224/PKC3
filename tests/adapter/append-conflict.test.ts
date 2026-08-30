@@ -163,7 +163,7 @@ describe('追記が別の窓の書込を消さない(#178)', () => {
 
     expect(n, 'やり直しが 1 回で止まっていない(無限に回る)').toBe(2);
     expect(errors, '黙ってやめた(user は追記が消えたとしか見えない)').toHaveLength(1);
-    expect(errors[0], '何が起きたか書いていない').toContain('別の窓');
+    expect(errors[0], '何が起きたか書いていない').toContain('別のウィンドウ');
     expect(errors[0], '次にどうすればよいか書いていない').toContain('もう一度');
     // 🔑 **書込ロックが解けている** ── 解かないと user は永久に追記できない
     expect(d.getState().writeLock, '書込ロックを握ったままにしている').toBeNull();

@@ -1087,7 +1087,7 @@ export function connectStoreEffects(
               dispatcher.dispatch({
                 type: 'OP_FAILED',
                 error:
-                  '別の窓がこのノートを書き替えたため、設定を保存できませんでした(もう一度押してください)',
+                  '別のウィンドウがこのノートを書き替えたため、設定を保存できませんでした(もう一度押してください)',
               });
               return fail();
             }
@@ -1322,7 +1322,7 @@ export function connectStoreEffects(
           const parts = [`${wrote} 件に${verb}`];
           if (skipped > 0)
             parts.push(ev.mode === 'add' ? `${skipped} 件は既に付いていました` : `${skipped} 件は付いていませんでした`);
-          if (failed > 0) parts.push(`${failed} 件は書けませんでした(別の窓が書き替えた可能性があります)`);
+          if (failed > 0) parts.push(`${failed} 件は書けませんでした(別のウィンドウが書き替えた可能性があります)`);
           /**
            * 🔴 **外しきれていないことを言う**(2026-08-29)。⚠ 黙ると
            *   「外したのに、まだそのタグで集まる」= 壊れて見える。
@@ -1707,7 +1707,7 @@ export function connectStoreEffects(
               if (attempt === 'empty' || attempt === 'missing') return refuse(attempt);
               if (attempt.stamps.conflict === true)
                 return fail(
-                  '別の窓がこのノートを書き替えたため、追記できませんでした(もう一度押してください)',
+                  '別のウィンドウがこのノートを書き替えたため、追記できませんでした(もう一度押してください)',
                 );
             }
             const { stamps, newBody, ext, base } = attempt;
@@ -1809,7 +1809,7 @@ export function connectStoreEffects(
               dispatcher.dispatch({
                 type: 'OP_FAILED',
                 error:
-                  '別の窓がこのノートを書き替えたため、反映できませんでした(もう一度押してください)',
+                  '別のウィンドウがこのノートを書き替えたため、反映できませんでした(もう一度押してください)',
               });
               return;
             }

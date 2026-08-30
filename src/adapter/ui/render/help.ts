@@ -250,7 +250,7 @@ export class HelpRenderer {
     const kn = document.createElement('p');
     kn.setAttribute('data-pkc-field', 'settings-note');
     kn.textContent =
-      'Ctrl は Mac では ⌘ でも同じように効きます。割り当て直しは設定の面でできます。';
+      'Ctrl は Mac では ⌘ でも同じように効きます。割り当て直しは設定画面でできます。';
     body.append(kn);
     this.keys = document.createElement('div');
     this.keys.setAttribute('data-pkc-region', 'help-keymap');
@@ -297,7 +297,7 @@ export class HelpRenderer {
       dd.setAttribute('data-pkc-field', 'help-key-chords');
       dd.setAttribute('data-pkc-command', cmd.id);
       const list = bindings[cmd.id] ?? cmd.defaults;
-      dd.textContent = list.length === 0 ? '割当なし' : list.map((c) => chordLabel(c)).join(' / ');
+      dd.textContent = list.length === 0 ? '割り当てなし' : list.map((c) => chordLabel(c)).join(' / ');
       dl.append(dt, dd);
     }
     host.append(dl);

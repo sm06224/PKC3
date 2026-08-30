@@ -443,7 +443,7 @@ export async function readContainerBundle(zip: Blob): Promise<Pkc2ContainerBundl
   }
   const format = String(manifest?.format);
   if (!isBatchFormat(format)) {
-    throw new ZipReadError(`この受理器は batch 形式のみ扱えます(format=${format})`);
+    throw new ZipReadError(`この形式は取り込めません(batch 形式のバックアップを選んでください。読み取った形式: ${format})`);
   }
   if (manifest.version !== 1) {
     throw new ZipReadError(

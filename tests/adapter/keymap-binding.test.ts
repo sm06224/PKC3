@@ -932,6 +932,6 @@ describe('ヘルプの一覧', () => {
     expect(
       region.querySelector('[data-pkc-field="help-key-chords"][data-pkc-command="toggle-replace"]')
         ?.textContent,
-    ).toBe('割当なし');
+    ).toBe('割り当てなし');
   });
 });

@@ -46,7 +46,7 @@ describe('① よく開くサイトをアプリ一覧に足す (#401)', () => {
     expect(q('launcher-add-url'), 'アドレスの欄が無い').toBeTruthy();
     expect(q('launcher-add-name'), '名前の欄が無い').toBeTruthy();
     // ⚠ 文言は**起きること**で書く(user 指示 2026-08-21)
-    expect(q('launcher-add-go').title).toContain('別の窓で開ける');
+    expect(q('launcher-add-go').title).toContain('別のウィンドウで開きます');
   });
 
   /**

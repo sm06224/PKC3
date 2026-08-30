@@ -938,7 +938,7 @@ export class InspectorRenderer {
         cands.id = 'pkc-tag-candidates';
         this.tagCandidates = cands;
         const add = iconButton('add-tag', 'タグを足す');
-        add.title = 'このノートの本文にタグを足します(frontmatter の tags: に入ります)';
+        add.title = 'このノートにタグを足します(本文の先頭の「この文書の情報」に入ります)';
         form.append(input, cands, add);
         dd.append(chips, form);
         this.rows.set('inspector-tag-chips', chips);
@@ -958,7 +958,7 @@ export class InspectorRenderer {
      * ⚠ 持っていないノートでは**行ごと畳む**(全ノートに「無し」を出さない)。
      */
     row('状態', 'inspector-status');
-    row('居場所', 'inspector-folder');
+    row('フォルダ', 'inspector-folder');
     row('作成', 'inspector-created');
     row('更新', 'inspector-updated');
     /**
@@ -1047,7 +1047,7 @@ export class InspectorRenderer {
      *   「どこに集まっているか」は分からない。
      * ⚠ 値は押せる札なので `setRow` ではなく専用の器を持つ。
      */
-    row('集まり先', 'inspector-smart');
+    row('スマートフォルダ', 'inspector-smart');
     /**
      * 🔴 **関係**(#185 / 台帳 #180 の A-7)。⚠ 親子(居場所)は上の「居場所」行が
      * 既に出しているので、ここは**それ以外**(関連 / 分類 / 時系列 / 出典)を出す。
@@ -1087,7 +1087,7 @@ export class InspectorRenderer {
      *   **行ごと畳む** ── 「送り先がありません」を常設すると、user は
      *   **押せない物**を毎回読むことになる。畳みは `paintExtSend` が決める。
      */
-    row('このアプリへ送る', 'inspector-ext-send');
+    row('アプリへ送る', 'inspector-ext-send');
     if (shape === 'entry+link') row('元ファイル', 'inspector-linked-file');
     this.region.append(dl);
 

@@ -30,7 +30,7 @@ export const THEMES = [
   { id: 'solarized-dark', label: 'Solarized ダーク', dark: true },
   { id: 'dracula', label: 'Dracula', dark: true },
   { id: 'nord', label: 'Nord', dark: true },
-  { id: 'terminal', label: '端末', dark: true },
+  { id: 'terminal', label: 'ターミナル(端末風)', dark: true },
 ] as const;
 
 export type Theme = (typeof THEMES)[number]['id'];

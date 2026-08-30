@@ -13,6 +13,7 @@
  * 切り替える(その時に計測してから)。
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
+import { lidOfNode } from './lid-of-node';
 import { deliveredEntryOf, type ExtDeliveredEntry } from '@features/extension/ext-delivery';
 import { isLaunchableUrl } from '@features/launcher/tiles';
 import {
@@ -1303,7 +1304,7 @@ function startEditAt(
         error:
           grant === 'denied'
             ? 'このノートは別のタブで編集中です(そちらを閉じるか保存してください)'
-            : '本体タブと通信できません(少し待ってもう一度お試しください)',
+            : '最初に開いた PKC のタブと通信できません(少し待ってもう一度お試しください)',
       });
       return;
     }
@@ -3213,8 +3214,7 @@ const ACTIONS: Record<string, ActionHandler> = {
      *   本文の面は `data-pkc-entry` を持たないので、そのときだけ
      *   「いま開いているノート」へ落ちる。
      */
-    const fromDom = target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
-    const lid = fromDom ?? st.openBody?.lid ?? st.selectedLid;
+    const lid = lidOfNode(target, st.openBody?.lid ?? st.selectedLid);
     if (lid === null || lid === undefined) return;
     if (st.phase !== 'ready') {
       dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから表を打ってください' });
@@ -3309,8 +3309,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (!Number.isInteger(line) || line < 0 || !Number.isInteger(col) || col < 0) return;
     if ((what !== 'row' && what !== 'col') || (mode !== 'add' && mode !== 'remove')) return;
     const st = dispatcher.getState();
-    const fromDom = target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
-    const lid = fromDom ?? st.openBody?.lid ?? st.selectedLid;
+    const lid = lidOfNode(target, st.openBody?.lid ?? st.selectedLid);
     if (lid === null || lid === undefined) return;
     if (st.phase !== 'ready') {
       dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから表を触ってください' });
@@ -3332,9 +3331,11 @@ const ACTIONS: Record<string, ActionHandler> = {
      * 🔑 札には `data-pkc-entry` が焼いてあるので、そこから引く。
      * ⚠ 本文の面は `data-pkc-entry` を持たない(器はノートを表す要素ではない)
      *   ので、そのときだけ「いま開いているノート」へ落ちる。
+     * 🔴 **2026-08-30 に同じ罠が再発した** ── #505 の「横に留めた枠」は
+     *   `data-pkc-split-lid` を焼くので、`data-pkc-entry` だけを見ていると
+     *   **主の枠のノートへ落ちる**。引き方は `lid-of-node.ts` の 1 か所へ寄せた。
      */
-    const fromDom = target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
-    const lid = fromDom ?? st.openBody?.lid ?? st.selectedLid;
+    const lid = lidOfNode(target, st.openBody?.lid ?? st.selectedLid);
     if (lid === null || lid === undefined) return;
     if (st.phase !== 'ready') {
       dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してからチェックしてください' });
@@ -3869,7 +3870,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       // ⚠ **無言で空の file を落とさない** ── 押した user は「入った」と読む
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: '持ち出せる設定がまだありません(見た目や鍵の割当を変えると入ります)',
+        error: '持ち出せる設定がまだありません(見た目やショートカットキーの割当を変えると入ります)',
       });
       return;
     }
@@ -4708,7 +4709,7 @@ const ACTIONS: Record<string, ActionHandler> = {
         else
           dispatcher.dispatch({
             type: 'OP_FAILED',
-            error: `「${where}」へ送れませんでした(窓が閉じているかもしれません)`,
+            error: `「${where}」へ送れませんでした(送り先のウィンドウが閉じているかもしれません)`,
           });
       })
       .catch(() => {
@@ -4796,7 +4797,7 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     confirmThen(
       root,
-      'ゴミ箱を空にします(削除済み entry の履歴も消え、元に戻せません)。よろしいですか?',
+      'ゴミ箱を空にします(捨てたノートの履歴も消え、元に戻せません)。よろしいですか?',
       { okLabel: '空にする', danger: true },
       dispatcher,
       notWhileEditing(dispatcher, '編集を終了してから空にしてください'),
@@ -5943,7 +5944,7 @@ export function bindActions(
       if (every !== undefined && every !== '') {
         dispatcher.dispatch({
           type: 'OP_FAILED',
-          error: '繰り返しの予定は掴んで動かせません。本文の「@日付 毎週」を書き直してください',
+          error: '繰り返しの予定はドラッグで動かせません。本文の「@日付 毎週」を書き直してください',
         });
         return;
       }

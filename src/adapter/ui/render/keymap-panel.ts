@@ -99,7 +99,7 @@ export function buildKeymapPanel(
   const intro = doc.createElement('p');
   intro.setAttribute('data-pkc-field', 'settings-note');
   intro.textContent =
-    'キーはここで割り当て直せます。1 つのコマンドに複数の割当を持てます。' +
+    'キーはここで割り当て直せます。1 つの操作に複数の割り当てを持てます。' +
     'Ctrl は Mac では ⌘ でも同じように効きます。' +
     '「割り当て」を押してから、使いたいキーを押してください(Esc でやめます)。';
   root.append(intro);
@@ -108,7 +108,7 @@ export function buildKeymapPanel(
   resetAll.type = 'button';
   resetAll.setAttribute('data-pkc-field', 'keymap-reset-all');
   resetAll.textContent = 'すべて既定に戻す';
-  resetAll.title = '自分で割り当てた分を捨てて、最初の割当に戻します';
+  resetAll.title = '自分で割り当てたキーを消して、はじめの割り当てに戻します';
   resetAll.addEventListener('click', () => {
     store.resetAll();
   });

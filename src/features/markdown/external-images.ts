@@ -162,9 +162,9 @@ export function sandboxBlockedNote(kinds: readonly SandboxBlockedKind[]): string
   const what = seen.map((k) => SANDBOX_BLOCKED_LABELS[k]).join('・');
   return (
     `この HTML は${what}を読み込もうとしましたが、止めました。` +
-    'この箱の中では外部から取ってこられません。' +
+    'この表示枠は外とつながらない作りなので、外部からは取ってこられません。' +
     'どうしても動かしたいときは、HTML をファイルとして添付し、その画面の' +
-    '「アプリとして登録」を押してください(アプリは別の窓で開くので、外から取ってこられます)。'
+    '「アプリとして登録」を押してください(アプリは別のウィンドウで開くので、外から取ってこられます)。'
   );
 }
 // ⚠ 名前を `pkc-html-render-…` で始めない(2026-08-06 に踏んだ)── 箱の id が

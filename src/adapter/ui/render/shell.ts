@@ -116,7 +116,7 @@ const CREATE_BUTTONS: readonly { archetype: string; label: string }[] = [
    * 🔴 **条件に合うノートが自動で集まる入れ物**(#421 段①。user 要望 2026-08-26)。
    * ⚠ フォルダの**隣**に置く ── 探すときに 2 か所を見ないで済む。
    */
-  { archetype: 'smart', label: 'スマート' },
+  { archetype: 'smart', label: 'スマートフォルダ' },
   // 🔴 **雛形**(#196 / B-2)── 作れないと user は自分の雛形を持てない
   { archetype: 'snippet', label: '雛形' },
   { archetype: 'todo', label: 'Todo' },
@@ -236,7 +236,7 @@ export function paintAlarmBar(root: HTMLElement, due: readonly AlarmDue[]): void
       open.title = 'その予定を書いたノートを開きます';
       const close = iconButton('dismiss-alarm', '閉じる');
       close.setAttribute('data-pkc-alarm', d.key);
-      close.title = 'この知らせを片付けます(本文は変わりません)';
+      close.title = 'この知らせを閉じます(本文は変わりません)';
       li.append(text, open, close);
       list.append(li);
     }
@@ -325,7 +325,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
    * 「題名で絞り込みます」と書いてあった ── いまは**本文も探す**ので、そのままだと
    * 「本文は探せない」という嘘を user に見せ続ける(§1 の「文言と実装の食い違い」)。
    */
-  filter.title = '題名と本文から探します(Esc で消えます)';
+  filter.title = '題名と本文から探します(Esc で、打った字を消します)';
   // ⚠ `placeholder` は名前ではない ── 値を入れると読み上げから消える
   filter.setAttribute('aria-label', '題名と本文から探す');
   findBar.append(filter);
@@ -342,7 +342,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   sort.setAttribute('aria-label', '一覧の並び順');
   sort.title = '一覧の並び順を変えます';
   for (const [value, label] of [
-    ['manual', '手動の順'],
+    ['manual', '自分で並べた順'],
     ['updated', '更新が新しい順'],
     ['title', '題名順'],
     ['archetype', '種類順'],
@@ -464,10 +464,10 @@ export function buildShell(root: HTMLElement): ShellRegions {
    */
   const rec = iconButton('start-audio-capture', '録音');
   rec.setAttribute('data-pkc-field', 'start-audio-capture');
-  rec.title = 'マイクで録って、いま開いているノートに入れます';
-  const screen = iconButton('start-screen-capture', '画面');
+  rec.title = 'マイクで録音して、いま開いているノートに入れます';
+  const screen = iconButton('start-screen-capture', '画面録画');
   screen.setAttribute('data-pkc-field', 'start-screen-capture');
-  screen.title = '画面を録って、いま開いているノートに入れます';
+  screen.title = '画面を録画して、いま開いているノートに入れます';
   /**
    * 🔴 **タイマー**(#279。user 指示 2026-08-19「…タイマー…は組み込みアプリで
    * リリースしたい」)。
@@ -476,9 +476,9 @@ export function buildShell(root: HTMLElement): ShellRegions {
    * ⚠ **中央の面(アプリの一覧)にしない** ── 見るために本文を退かすことになる
    *   (#300 / #292 段⑤ の見分け方「閉じたとき user が失うものは何か」)。
    */
-  const timer = iconButton('start-timer', '計る');
+  const timer = iconButton('start-timer', '時間を計る');
   timer.setAttribute('data-pkc-field', 'start-timer');
-  timer.title = 'いま開いているノートの作業時間を計ります(止めると本文に入ります)';
+  timer.title = 'いま開いているノートの作業時間を計ります(止めると、計った時間を本文に書きます)';
   createBar.append(kind, create, pick, today, attach, rec, screen, timer);
 
   const attachInput = document.createElement('input');
@@ -575,7 +575,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
     btn.setAttribute('aria-label', `${PANE_LABELS[id]}の列`);
     // 🔴 **帯は 2 つの仕事をする**(#497)── 押すと畳み、掴むと幅が変わる。
     //    ⚠ 掴めることを字にも書く ── `cursor` だけだと、触りの端末には何も出ない。
-    btn.title = `${PANE_LABELS[id]}の列を畳む・戻す(掴むと幅、矢印キーでも動く)`;
+    btn.title = `${PANE_LABELS[id]}の列を畳む・戻す(左右にドラッグすると幅が変わります。矢印キーでも動かせます)`;
     grips[id] = btn;
   }
   /**
@@ -615,10 +615,10 @@ export function buildShell(root: HTMLElement): ShellRegions {
   const caseBox = document.createElement('input');
   caseBox.type = 'checkbox';
   caseBox.setAttribute('data-pkc-field', 'replace-case');
-  caseBox.title = 'これを入れると、大文字と小文字が違う語は置き換えません';
-  caseLabel.append(caseBox, document.createTextNode('大小を区別'));
+  caseBox.title = 'チェックを入れると、大文字と小文字が違う語は置き換えません';
+  caseLabel.append(caseBox, document.createTextNode('大文字と小文字を区別'));
   replaceBar.append(caseLabel);
-  const runReplace = iconButton('replace-all', '全部置換');
+  const runReplace = iconButton('replace-all', 'すべて置換');
   runReplace.title = '編集中の本文で、探す語を全部置き換えます';
   replaceBar.append(runReplace);
   /**
@@ -659,7 +659,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   appendGrip.setAttribute('data-pkc-pane', 'append');
   appendGrip.setAttribute('aria-pressed', 'true');
   appendGrip.setAttribute('aria-label', `${PANE_LABELS.append}`);
-  appendGrip.title = `${PANE_LABELS.append}を畳む・戻す(掴むと高さ、矢印キーでも動く)`;
+  appendGrip.title = `${PANE_LABELS.append}を畳む・戻す(上下にドラッグすると高さが変わります。矢印キーでも動かせます)`;
   center.append(replaceBar, detail, appendGrip, append);
 
   // ── 右(付随情報)────────────────────────────────
@@ -695,7 +695,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   captureText.setAttribute('data-pkc-field', 'capture-status');
   const stopBtn = iconButton('stop-capture', '止める');
   stopBtn.setAttribute('data-pkc-field', 'stop-capture');
-  stopBtn.title = '収録を止めて、いま開いているノートに入れます';
+  stopBtn.title = '録音・画面録画を止めて、いま開いているノートに入れます';
   const dropBtn = iconButton('discard-capture', '捨てる');
   dropBtn.setAttribute('data-pkc-field', 'discard-capture');
   dropBtn.title = '収録を捨てます(残しません)';

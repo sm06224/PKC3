@@ -135,7 +135,7 @@ export async function openViewInWindow(
   });
   if (url === null) {
     // ⚠ 組めないのは base に `#` が残っているとき ── **黙って本文で開かない**
-    fallback(view, deps, '別の窓を開けませんでした');
+    fallback(view, deps, '別のウィンドウを開けませんでした');
     return 'pane';
   }
   // 🔑 **聞く耳を先に張ってから開く** ── 逆にすると、速い窓の合図を取りこぼす
@@ -143,7 +143,7 @@ export async function openViewInWindow(
   deps.open(url);
   if (await answered) return 'window';
   // 🔑 合図が返らなかった = 窓が出ていない。**ここで初めて**中央の面を使う
-  fallback(view, deps, 'ブラウザが新しい窓を塞いだようです');
+  fallback(view, deps, 'ブラウザが新しいウィンドウをブロックしたようです');
   return 'pane';
 }
 
@@ -156,7 +156,7 @@ function fallback(view: ViewMode, deps: ViewWindowDeps, why: string): void {
   const landed = deps.openInPane(view);
   deps.fail(
     landed
-      ? `${why}(この画面で開きました)。別の窓で使うには、ポップアップの許可を出してください`
+      ? `${why}(この画面で開きました)。別のウィンドウで使うには、ポップアップの許可を出してください`
       : `${why}。編集を終えてから、もう一度お試しください`,
   );
 }
@@ -258,4 +258,4 @@ export function closeViewWindow(deps: CloseViewWindowDeps): CloseViewWindowResul
 
 /** `'refused'` のときに出す理由。⚠ **次に何をすればよいか**まで書く。 */
 export const CLOSE_VIEW_WINDOW_REFUSED =
-  'この窓はブラウザの決まりで閉じられません(窓の × で閉じてください)。本文に戻りました';
+  'このウィンドウはブラウザの制限で閉じられません(ブラウザのウィンドウ枠にある × で閉じてください)。本文に戻りました';

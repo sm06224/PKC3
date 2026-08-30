@@ -154,7 +154,7 @@ export function buildOfficeEntry(
     //    上書き保存が**新しいノートを増やす**
     btn.setAttribute('data-pkc-office-lid', att.lid);
     // ⚠ 別窓であることを**押す前に**言う(勝手に窓が増えたように見せない)
-    btn.title = '別の窓で開きます。PKC3 の編集はそのまま続けられます';
+    btn.title = '別のウィンドウで開きます。PKC3 の編集はそのまま続けられます';
     return btn;
   }
 

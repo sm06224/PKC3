@@ -199,6 +199,61 @@ describe('書換の門(MOVE_PLACE)', () => {
     expect(events.filter((e) => e.type === 'REQUEST_BODY_REWRITE')).toHaveLength(0);
   });
 
+  /**
+   * 🔴 **横に留めた枠の付箋も、その枠のノートへ書く**(#281 検算 2026-08-30)。
+   *
+   * ⚠ 直す前は `openBody` だけを見ていたので、留めた枠の付箋を動かすと
+   *   ①主の枠が板でなければ**黙って no-op** ②主の枠も板なら**別のノートの
+   *   同じ行を書き換えうる**、の 2 つに落ちていた。
+   * 🔑 この it は**主の枠を板ではないノート**にして撃つ ── そうしないと、
+   *   openBody から拾った行が偶然一致して「直った」に見えることがある。
+   */
+  it('🔴 横に留めた枠の付箋は、その枠のノートの行を書く(主の枠ではない)', () => {
+    const d = new Dispatcher();
+    const events: DomainEvent[] = [];
+    d.onEvent((e) => events.push(e));
+    d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [meta('n1', 'ふつうのノート'), meta('n2', '板')],
+      relations: [],
+    });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: 'ただの本文\nもう 1 行\n' });
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'n2' });
+    d.dispatch({ type: 'SPLIT_BODY_LOADED', lid: 'n2', body: BOARD });
+    events.length = 0;
+
+    d.dispatch({ type: 'MOVE_PLACE', lid: 'n2', line: 5, x: 10, y: 20 });
+    const ev = events.find((e) => e.type === 'REQUEST_BODY_REWRITE');
+    expect(ev, '留めた枠の付箋を動かしても書換の依頼が出ない').toBeDefined();
+    expect(ev).toMatchObject({
+      lid: 'n2',
+      rewrite: { kind: 'place-move', line: 5, openLine: BOARD.split('\n')[5], x: 10, y: 20 },
+    });
+  });
+
+  /**
+   * 対照群 ── 🔑 **留めていない lid では書かない。** これが無いと、上の it は
+   * 「lid の門を丸ごと外した」変異でも緑になる(門が生きていることを見ていない)。
+   */
+  it('🔴 対照群: 留めてもいない・開いてもいない lid では書かない', () => {
+    const d = new Dispatcher();
+    const events: DomainEvent[] = [];
+    d.onEvent((e) => events.push(e));
+    d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [meta('n1', 'ふつうのノート'), meta('n2', '板')],
+      relations: [],
+    });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: 'ただの本文\nもう 1 行\n' });
+    events.length = 0;
+    d.dispatch({ type: 'MOVE_PLACE', lid: 'n2', line: 5, x: 10, y: 20 });
+    expect(events.filter((e) => e.type === 'REQUEST_BODY_REWRITE')).toHaveLength(0);
+  });
+
   it('🔴 開いているノートと違う lid では書かない(実在する別ノートの lid でも)', () => {
     const { d, events } = booted();
     // ⚠ metas に**実在する** n2 で撃つ ── 「meta が無いから」の門に救われない形で、
