@@ -485,7 +485,20 @@ jobs:
           #    🔑 だから option では開かない。上流が読まない名前
           #    (`PKC3_WASM_SCRIPTING`)を条件にして、**渡した回だけ**開ける。
           #    ⚠ **既定は 1 バイトも変わらない**(job の env で渡している)。
-          test "$n" -eq 14
+          # 🔴 14 → 15(2026-08-30)。`patch-lo-templates.py`(#591 の**直し**)。
+          #    ⚠ #591 は PR #601 で `--with-templates=yes` を渡して閉じたつもりだったが、
+          #    **届いていなかった** ── `configure.ac:3495` が `enable_wasm_strip` の
+          #    ブロックの中で `with_templates=no` を**無条件に上書き**する
+          #    (`patch-lo-scripting.py` と同じ 2 段。1301 行が Emscripten で
+          #    `enable_wasm_strip=yes` を無条件に立てるので逃げられない)。
+          #    🔑 直しは上流自身の書き方へ揃えるだけ ──
+          #    `test "${with_templates+set}" = set || with_templates=no`。
+          #    ⚠ **既定は 1 バイトも変わらない**(渡さなければ no のまま)。
+          #    ⚠ `patch-lo-scripting.py` はこの書き方が使えなかった
+          #    (`AC_ARG_ENABLE(scripting)` は action-if-not-given を持つので
+          #    `${...+set}` が常に set)が、`AC_ARG_WITH(templates)` は
+          #    **action を 1 つも持たない**ので使える(実物で確認)。
+          test "$n" -eq 15
 
       # 🔴 **Qt と LO の「握手」を、リンクの 16 分前に確かめる**(2026-08-10)。
       #    LO は Qt の embind シンボルを名指しで export する。無いと
@@ -611,8 +624,19 @@ jobs:
           #    🔑 **フォルダは作られて中身が 0 件**になり、Impress の
           #    「Select a Template」が**空の一覧**を出していた。
           #    ⚠ 「上流にテンプレートが無い」ではない(.otp 23 件 / .ott .otg 11 件)。
-          #    ⚠ `=yes` は `configure.ac:3622` の `WITH_TEMPLATES=TRUE` を**保つ**枝である
-          #      (実装を読んで確かめた ── 別の所で弾かれない)。
+          # 🔴 **2026-08-30: ここに書いてあったことは誤りだった。**
+          #    1 稿目は「`=yes` は `configure.ac:3622` の `WITH_TEMPLATES=TRUE` を
+          #    **保つ**枝である(実装を読んで確かめた ── **別の所で弾かれない**)」と
+          #    書いていたが、**弾かれる**。run 33279050889 の一式を落として目録を
+          #    数えたら **`.otp` 0 件 / `.ott` 0 件**(拡張子 5 種のどれも 1 件も無い)。
+          #    真因は `patch-lo-scripting.py`(#431)と**同じ 2 段**である:
+          #    `configure.ac:1301` が Emscripten で `enable_wasm_strip=yes` を
+          #    無条件に立て、`configure.ac:3495` がその中で
+          #    **`with_templates=no` を無条件に上書き**する
+          #    (option 解析は 2458 行 ── **後から来るほうが勝つ**)。
+          #    🔑 だからこの行は**単独では効かない**。届かせているのは
+          #    `patch-lo-templates.py` で、この行はその patch が尊重する**指示**である
+          #    ── ⚠ **片方だけ消すと静かに空へ戻る**ので、下の後条件で両方を留める。
           --with-templates=yes
           CONF
           . ~/emsdk/emsdk_env.sh
@@ -625,6 +649,14 @@ jobs:
           grep -q '^export ENABLE_QT6=TRUE' config_host.mk
           grep -q '^export ENABLE_QT5=$' config_host.mk
           grep -q '^export VCL_PLUGIN_INFO= qt6$' config_host.mk
+          # 🔴 **テンプレートの指示が届いたか、ここで見る**(#591、2026-08-30)。
+          #    ⚠ 1 稿目は「渡したから入っているはず」で 2 時間の make を回し、
+          #    **焼き上がってから目録が 0 件**と分かった(run 33279050889)。
+          #    🔑 `WITH_TEMPLATES` は `config_host.mk.in:794` に在るので、
+          #    **configure の直後(27 分)に読める** ── 落ちるなら早く落とす。
+          #    ⚠ これは `--with-templates=yes`(上)と `patch-lo-templates.py` の
+          #    **両方**が生きていないと真にならない = 片方を消せばここで鳴る。
+          grep -q '^export WITH_TEMPLATES=TRUE$' config_host.mk
           # 🔴 **日本語 UI を建てる**(#158)。⚠ 渡すまで **`--with-lang` は 1 件も無く、
           #    en-US だけを建てていた** ── 日本語フォントは入れてあるので
           #    「描画は日本語・UI は英語」という食い違いになっていた(user が実機で発見)。
