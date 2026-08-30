@@ -22,6 +22,7 @@ import {
 } from '@features/read-columns';
 // ⚠ 綴りを写さない ── 見張る属性の正本は当てている側に在る(CLAUDE.md §7)
 import { TEXT_SCALE_ATTR } from './text-scale';
+import { sayFolded, setFoldNotify } from './fold-notify';
 
 const KEY = 'pkc3.read-columns';
 
@@ -198,7 +199,11 @@ export function lastReadPaneMetrics(): { width: number; fontPx: number } | null 
  * ⚠ **新しい見え方を作らない** ── 出すのは `cycleReadColumns` が既に使っている
  *   画面下の帯で、文言もそちらと同じ形にする(要る幅を px で言う)。
  */
-let foldNotify: ((text: string) => void) | null = null;
+/**
+ * ⚠ **口は自前で持たない**(#606。2026-08-30)── `fold-notify.ts` へ寄せた。
+ *   横に並べる枠が同じ知らせを**別の口**で出そうとして配線を落としていたので、
+ *   「幅が足りないので畳んだ」を言う口を 1 つにした。
+ */
 
 /** 段組みの状態。 */
 type FoldState = 'columns' | 'folded' | 'single';
@@ -206,9 +211,12 @@ type FoldState = 'columns' | 'folded' | 'single';
 /** 段組みの状態。⚠ `null` = まだ 1 度も判定していない(起動直後)。 */
 let foldState: FoldState | null = null;
 
-/** 帯へ出す口を配る(`main.ts` が起動時に 1 度だけ呼ぶ)。 */
+/**
+ * 帯へ出す口を配る(`main.ts` が起動時に 1 度だけ呼ぶ)。
+ * ⚠ **段組み専用ではない** ── 横に並べる枠も同じ口を通る(`fold-notify.ts`)。
+ */
 export function setColumnFoldNotify(fn: ((text: string) => void) | null): void {
-  foldNotify = fn;
+  setFoldNotify(fn);
 }
 
 /** ⚠ test 用 ── 状態を「まだ判定していない」へ戻す。 */
@@ -228,9 +236,9 @@ export function resetColumnFoldState(): void {
 function noteFoldState(next: FoldState, say: (prev: FoldState) => string | null): void {
   const prev = foldState;
   foldState = next;
-  if (prev === null || prev === next || foldNotify === null) return;
+  if (prev === null || prev === next) return;
   const text = say(prev);
-  if (text !== null) foldNotify(text);
+  if (text !== null) sayFolded(text);
 }
 
 export function fitColumnHeight(root: ParentNode, doc: Document = document): number | null {

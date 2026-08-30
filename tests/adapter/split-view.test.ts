@@ -11,6 +11,7 @@
 import { describe, expect, it } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { CenterRouter } from '../../src/adapter/ui/render/center';
+import { setFoldNotify } from '../../src/adapter/ui/render/fold-notify';
 
 async function settle(): Promise<void> {
   for (let i = 0; i < 12; i += 1) await Promise.resolve();
@@ -21,7 +22,17 @@ function boot(): { root: HTMLElement; d: Dispatcher; center: CenterRouter; said:
   root.setAttribute('data-pkc-region', 'detail');
   document.body.append(root);
   const said: string[] = [];
-  const center = new CenterRouter(root, undefined, null, undefined, undefined, (t) => said.push(t));
+  /**
+   * 🔴 **製品と同じ口を使う**(#606。2026-08-30)。
+   * ⚠ 直す前はここで `CenterRouter` の 6 番目の引数に自前の口を渡していた ──
+   *   ところが **`main.ts` は渡していなかった**ので、この test は緑のまま
+   *   **製品では 1 度も帯が出ていなかった**(CLAUDE.md §7
+   *   「両端が相手を模した stub と話していると、綴りの食い違いが両方緑のまま通る」)。
+   * 🔑 口を 1 つに寄せたので、**台が偽装できなくなった** ── ここで配るのは
+   *   `main.ts:870` が配るのと**同じ口**である。
+   */
+  setFoldNotify((t) => said.push(t));
+  const center = new CenterRouter(root, undefined, null, undefined, undefined);
   const d = new Dispatcher();
   d.dispatch({
     type: 'SYS_BOOTED',
@@ -258,5 +269,62 @@ describe('消したノートの枠は残らない', () => {
     d.dispatch({ type: 'DELETE_ENTRIES', lids: ['b'] });
     await settle();
     expect(root.querySelectorAll('[data-pkc-split-lid]')).toHaveLength(0);
+  });
+});
+
+/**
+ * 🔴 **枠を畳んだら、帯に理由が出る**(#606。2026-08-30)。
+ *
+ * ## ⚠ この文言は、いままで**誰も見ていなかった**
+ *
+ * 台は `said` を集めていたが、**どの test も assert していなかった**
+ * (`grep said` = 定義と push だけ)。しかも `main.ts` が口を渡していなかったので、
+ * **製品でも 1 度も出ていない** ── つまり「黙って消さない」という規律は
+ * **文言が在るだけ**で、どこにも効いていなかった。
+ *
+ * ## ⚠ happy-dom は幅を持たない ── だから採寸を差す
+ *
+ * `measure` は `getBoundingClientRect().width` が 0 なら `null` を返し、
+ * `fitCount` は「**測れないなら減らさない**」で `wanted` を返す ──
+ * つまり素の happy-dom では**畳みが 1 度も起きない**(だから台が書けなかった)。
+ * 🔑 器の `getBoundingClientRect` だけを差して、**畳みが実際に起きる幅**を作る。
+ */
+describe('枠を畳んだ理由を帯に出す(#606)', () => {
+  it('🔴 幅が足りなくて枠を減らしたら、その理由が帯に出る', async () => {
+    const { d, root, said } = boot();
+    const row = root.querySelector<HTMLElement>('[data-pkc-region="split-row"]');
+    expect(row, '器が無い(台の前提が崩れている)').not.toBeNull();
+    // 1 枠 448px + すき間 16px なので、500px には 1 枠しか入らない
+    row!.getBoundingClientRect = () => ({ width: 500, height: 300 }) as DOMRect;
+
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'b' });
+    await settle();
+
+    // ⚠ 空振り防止 ── 畳みが起きていないなら、下の assert は自明に通る
+    expect(
+      root.querySelectorAll('[data-pkc-split-lid]').length,
+      '枠が畳まれていない(この台では文言を見られない)',
+    ).toBe(0);
+    expect(said, '枠を畳んだのに理由が出ていない').toEqual([
+      '幅が足りないので、横に並べる枠を 1 枚畳みました',
+    ]);
+  });
+
+  /** ⚠ **対照群** ── 広ければ黙る(何にでも喋る実装を落とす)。 */
+  it('⚠ 幅が足りていれば何も言わない', async () => {
+    const { d, root, said } = boot();
+    const row = root.querySelector<HTMLElement>('[data-pkc-region="split-row"]');
+    row!.getBoundingClientRect = () => ({ width: 2000, height: 300 }) as DOMRect;
+
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'b' });
+    await settle();
+
+    expect(
+      root.querySelectorAll('[data-pkc-split-lid]').length,
+      '枠が置かれていない(台の空振り)',
+    ).toBeGreaterThan(0);
+    expect(said, '畳んでいないのに喋った').toEqual([]);
   });
 });

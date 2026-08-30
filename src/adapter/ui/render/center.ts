@@ -113,11 +113,6 @@ export class CenterRouter {
      * ⚠ renderer は dispatch しない(層規約)── 投げるのは `main.ts` の仕事。
      */
     onBodyChange?: (body: string) => void,
-    /**
-     * 🔴 **枠を減らしたことを user に言う口**(#505 段②)。
-     * ⚠ 既定は何もしない ── test は自分で渡す。黙って消さないための口である。
-     */
-    notify?: (text: string) => void,
   ) {
     const pane = (view: PaneView): HTMLElement => {
       const el = document.createElement('div');
@@ -198,7 +193,6 @@ export class CenterRouter {
         ),
       (host, lid) =>
         new DetailRenderer(host, assets, markdown, null, undefined, undefined, undefined, lid),
-      notify,
     );
     this.detail = this.split.main;
     this.scroll.use('detail');

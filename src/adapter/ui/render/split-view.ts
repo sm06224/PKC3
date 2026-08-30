@@ -34,6 +34,7 @@ import type { AppState } from '@adapter/state/app-state';
 import type { DetailRenderer } from './detail';
 import { fittingSplitFrames, knownSplitLids } from '@features/split-frames';
 import { READ_COLUMN_BASE_FONT_PX } from '@features/read-columns';
+import { sayFolded } from './fold-notify';
 
 /** 枠 1 つを作る口。⚠ `DetailRenderer` を直に `new` しない(依存を配線側が持つ)。 */
 export type MakeFrameRenderer = (host: HTMLElement, pinnedLid: string) => DetailRenderer;
@@ -78,8 +79,6 @@ export class SplitView {
     private readonly pane: HTMLElement,
     makeMain: (host: HTMLElement) => DetailRenderer,
     private readonly makeFrame: MakeFrameRenderer,
-    /** 減らしたことを user に言う口。⚠ **黙って消さない**(#551 と同じ規律)。 */
-    private readonly notify: (text: string) => void = () => {},
   ) {
     const doc = pane.ownerDocument;
     this.row = doc.createElement('div');
@@ -119,7 +118,12 @@ export class SplitView {
     const dropped = wanted - shown;
     if (dropped === this.lastDropped) return;
     this.lastDropped = dropped;
-    if (dropped > 0) this.notify(`幅が足りないので、横に並べる枠を ${dropped} 枚畳みました`);
+    /**
+     * 🔴 **口は共有の 1 つ**(#606)── 直す前はコンストラクタ引数で受けており、
+     *   `main.ts` が渡していなかったので**製品では 1 度も出ていなかった**
+     *   (test だけが自分で渡していた = CLAUDE.md §7)。
+     */
+    if (dropped > 0) sayFolded(`幅が足りないので、横に並べる枠を ${dropped} 枚畳みました`);
   }
 
   /** 器を並びへ合わせる。⚠ **同じなら 1 バイトも触らない**(scroll と図が生き残る)。 */
