@@ -1150,8 +1150,22 @@ try {
     try {
       const box = await canvasBox();
       if (box) {
-        await page.mouse.click(box.x + box.w * 0.4, box.y + box.h * 0.35);
-        await page.waitForTimeout(2000);
+        /**
+         * 🔴 **押さずに開く**(`PKC3_MENU_NO_CLICK=1`。#126 / #117、2026-08-30)。
+         *
+         * ⚠ ここは長らく「`Alt+キー` は 41% の回で fault になる」と記録していたが、
+         *   **読み違えだった** ── 3 腕の実測で、fault の引き金は
+         *   **その直前のクリック**である(押さない 0/20 / 押す 5/10)。
+         * 🔑 つまり**押さなければ落ちない**。メニューは窓の accelerator なので、
+         *   版面を押さなくても開く見込みがある ── 開くなら、撮り直しは
+         *   **落ちない条件で**できる。⚠ 開かなければ `opened === before` に出るので、
+         *   その回は読まない(既存の作法どおり)。
+         */
+        if (process.env.PKC3_MENU_NO_CLICK !== '1') {
+          await page.mouse.click(box.x + box.w * 0.4, box.y + box.h * 0.35);
+          await page.waitForTimeout(2000);
+        }
+        tour.clicked = process.env.PKC3_MENU_NO_CLICK !== '1';
         tour.before = await page.evaluate(COUNT_QT_WINDOWS);
         await page.keyboard.press(process.env.PKC3_MENU_OPEN);
         await page.waitForTimeout(2500);
