@@ -28,6 +28,7 @@ import type { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { initialState } from '../../src/adapter/state/app-state';
 import {
   NOTICES,
+  NOTICE_SEEN_MAX,
   NOTICE_SHOW_MAX,
   recentNotices,
   type Notice,
@@ -119,6 +120,37 @@ describe('お知らせの帯', () => {
     expect([...store.seenIds()].sort(), '全部を読んだのに既読になっていない').toEqual(
       NOTES.map((n) => n.id).sort(),
     );
+  });
+
+  /**
+   * 🔴 **帯が出した登記表が、そのまま既読の席を守る側へ渡る**
+   * (2026-08-29 の変異試験 M7 が SURVIVED で教えた)。
+   *
+   * ⚠ 既定の配線では帯が出すのも席を守るのも `NOTICES` なので、**渡し忘れても
+   *   結果が同じ**になり、既存の台では 1 度も見えなかった
+   *   (CLAUDE.md §7「同じ値が 2 か所にある」/ 2026-08-27「前も後も通るなら守っていない」)。
+   * 🔑 だから **`NOTICES` に 1 件も入っていない登記表**で帯を組み、
+   *   閉じたあとに**その分が既読の席に残っている**ことを見る。
+   *   ⚠ 渡っていなければ「登記表に無い id」として真っ先に捨てられる。
+   */
+  it('🔴 帯に渡した登記表が、既読の席を守る側にも渡る', () => {
+    const store = new NoticeStore(memory());
+    const a = createAnnounce(region, store, NOTES);
+    // 席を溢れさせる ── 溢れなければ取捨が起きず、渡し忘れても結果が同じ(空振り)
+    const top = NOTES.map((n) => n.id).sort().at(-1) ?? '';
+    store.markSeen(
+      Array.from({ length: NOTICE_SEEN_MAX }, (_, i) => `${top}-zz${i}`),
+      NOTES,
+    );
+    a.present();
+    a.dismiss();
+
+    const seen = new Set(store.seenIds());
+    expect(store.seenIds(), '切り詰めが起きていない(台の空振り)').toHaveLength(NOTICE_SEEN_MAX);
+    expect(
+      NOTES.filter((n) => !seen.has(n.id)).map((n) => n.id),
+      '帯に出した分が既読から落ちた ── 登記表が渡っていない',
+    ).toEqual([]);
   });
 
   /**
@@ -800,16 +832,22 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-08-29-deleted-stays-in-lists', '12a531b6'],
     // ⚠ 指紋を差し替えたのは **まだ配っていない entry** だから(着地前に文面を直した)
     ['2026-08-29-import-drop-undo', 'c93f2f64'],
-    ['2026-08-29-context-menu-export', '8ca9b28a'],
-    ['2026-08-29-tag-polish', 'e9da20c1'],
-    ['2026-08-29-tag-journey', '1a7bb721'],
-    ['2026-08-29-tag-parity', 'b194be1a'],
-    ['2026-08-29-tag-rollup', 'e383ea42'],
-    ['2026-08-29-contacts-clear-filter', 'b960c631'],
-    ['2026-08-29-tag-badges', '4179d98c'],
-    ['2026-08-29-columns-folded-reason', '7cce7be1'],
-    ['2026-08-29-in-body-tags', 'a5b7156f'],
-    ['2026-08-28-help-manual-idle', 'c00593e0'],
+    /**
+     * ⚠ 下の 10 件は **上限を超えて落ちたのではない** ── `NOTICE_KEEP_MAX` を
+     *   **20 → 10 へ下げた**からである(#596 E、下の「登記表と画面のずれ」)。
+     * ⚠ この 10 件はそれ以前から **帯にもヘルプにも出ていなかった**(`NOTICE_SHOW_MAX` = 10)。
+     *   つまり登記表から消しても **画面は 1px も変わらない**。原本は `CHANGELOG.md`。
+     */
+    // ['2026-08-29-context-menu-export', '8ca9b28a'],
+    // ['2026-08-29-tag-polish', 'e9da20c1'],
+    // ['2026-08-29-tag-journey', '1a7bb721'],
+    // ['2026-08-29-tag-parity', 'b194be1a'],
+    // ['2026-08-29-tag-rollup', 'e383ea42'],
+    // ['2026-08-29-contacts-clear-filter', 'b960c631'],
+    // ['2026-08-29-tag-badges', '4179d98c'],
+    // ['2026-08-29-columns-folded-reason', '7cce7be1'],
+    // ['2026-08-29-in-body-tags', 'a5b7156f'],
+    // ['2026-08-28-help-manual-idle', 'c00593e0'],
     // ⚠ 上限 20 を超えたので 2026-08-29 に落とした(原本は CHANGELOG)
     //['2026-08-28-uml-templates', '93cb2d2a'],
     // ⚠ 上限 20 を超えたので 2026-08-29 に落とした(原本は CHANGELOG)
@@ -985,51 +1023,62 @@ describe('お知らせの文面は固定(#220-7)', () => {
 });
 
 /**
- * 🔴 **登記表に在るのに、どこにも出ない entry を数える**(#596 E ── 案①)。
+ * 🔴 **登記表に在るものは、全部アプリから読める**(#596 E ── 案⑴)。
  *
- * ## なぜ要るか
+ * ## 直す前(2026-08-29 の実測)
  *
- * 登記表は **20 件**持つ(`NOTICE_KEEP_MAX`)が、帯もヘルプも **10 件**しか出さない
- * (`recentNotices` の既定 = `NOTICE_SHOW_MAX`。⚠ **切るのはそこ 1 か所**なので、
- * 面ごとの違いは無い)。つまり **11 件目より後ろは、アプリのどこからも読めない**。
+ * 登記表は **20 件**持つのに、帯もヘルプも **10 件**しか出さなかった
+ * (`recentNotices` の既定 = `NOTICE_SHOW_MAX`)── つまり **10 件が
+ * アプリのどこからも読めない**まま配られていた(今日配ったものの半分を含む)。
+ * ⚠ 足した人には見えない ── 1 件足すと、いちばん古い 1 件が**黙って窓の外へ出る**。
  *
- * ⚠ **足した人には見えない** ── 1 件足すと、いちばん古い 1 件が**黙って窓の外へ出る**。
- *   実際 2026-08-29 に「タグの見せ方」の知らせがそうなり、
- *   **今日はじめて開いた user は二度と読めない**。
- * 🔑 だから**等値で名指しする** ── 足した人は、この表を直すときに
- *   **自分が何を押し出したか**を必ず見る(#596 E の「N 件が窓の外になります」を、
- *   鳴らす代わりに**名前で**出す形)。
+ * ## 直した形
  *
- * ⚠ **件数だけでは足りない** ── 10 件のまま入れ替わっても数は動かない。
- * 🔑 原本は `CHANGELOG.md` に在る(`docs-parity` が登記表 + `DROPPED` と等値で突き合わせる)
- *   ── ここが見ているのは「**アプリから辿れるか**」であって、原本の有無ではない。
+ * 🔑 `NOTICE_KEEP_MAX` を `NOTICE_SHOW_MAX` と**同じ数**にした。
+ *   ⚠ 2 倍だった理由は「**原本は残す**」だが、その役目はいま `CHANGELOG.md` が担う。
+ *   ⚠ **user から見える所は 1px も変わらない**(その 10 件はもともと出ていない)。
+ *
+ * ## だから守るのは「押し出しの一覧」ではなく「押し出しが起きないこと」
+ *
+ * ⚠ 1 稿目は**読めない entry を等値で名指し**する形だった ── それは
+ *   「読めないものが在る」を**前提にした**計器である。前提ごと消したので、
+ *   **0 件であること**を見る形へ書き換えた。
  */
-describe('窓の外へ出たお知らせ(#596 E)', () => {
-  /** ⚠ 上から順に「古いほう」── 足したら**先頭に 1 件増える**。 */
-  const UNREACHABLE: readonly string[] = [
-    '2026-08-29-context-menu-export',
-    '2026-08-29-tag-polish',
-    '2026-08-29-tag-journey',
-    '2026-08-29-tag-parity',
-    '2026-08-29-tag-rollup',
-    '2026-08-29-contacts-clear-filter',
-    '2026-08-29-tag-badges',
-    '2026-08-29-columns-folded-reason',
-    '2026-08-29-in-body-tags',
-    '2026-08-28-help-manual-idle',
-  ];
-
-  it('🔴 どこにも出ない entry を等値で名指しする(押し出した人がその場で見る)', () => {
+describe('登記表と画面のずれ(#596 E)', () => {
+  it('🔴 どこにも出ない entry が 1 件も無い', () => {
     const shown = new Set(recentNotices(NOTICES).map((n) => n.id));
     expect(
       NOTICES.filter((n) => !shown.has(n.id)).map((n) => n.id),
-      'アプリから読めない entry が変わった ── 押し出したものを確かめて、この表を直す',
-    ).toEqual(UNREACHABLE);
+      'アプリから読めない entry が生まれた ── 登記表を切るか、出す数を増やす',
+    ).toEqual([]);
   });
 
-  it('⚠ 空振り防止 ── 出る側が本当に 10 件ある(窓そのものが壊れていない)', () => {
-    expect(recentNotices(NOTICES)).toHaveLength(NOTICE_SHOW_MAX);
-    // 🔴 **登記表 = 出る + 出ない**(数え落としが無い)
-    expect(NOTICES).toHaveLength(NOTICE_SHOW_MAX + UNREACHABLE.length);
+  it('⚠ 空振り防止 ── 登記表も出る側も、本当に中身がある', () => {
+    // ⚠ 0 件どうしなら上の検査は常に真になる
+    expect(NOTICES.length, '登記表が空(空振り)').toBeGreaterThanOrEqual(5);
+    expect(recentNotices(NOTICES)).toHaveLength(NOTICES.length);
+  });
+
+  /**
+   * 🔴 **上限を超えたら、超えた分が読めなくなる**ことを、その場で見せる。
+   * ⚠ これが無いと「登記表を 11 件にしても誰も鳴らない」── 上の検査は
+   *   `recentNotices` を通すので、**11 件目が黙って落ちる**だけである。
+   */
+  it('🔴 上限を 1 件超えると、いちばん古い 1 件が読めなくなる(だから超えさせない)', () => {
+    /**
+     * ⚠ **足すのは先頭である**(2026-08-29 の着地前レビュー C)。
+     *   1 稿目は末尾へ足していたが、手順書は「`NOTICES` の**先頭**に 1 件足す」
+     *   (`.claude/skills/notice-writing/SKILL.md`)── 末尾に足す形は**現実には起きない**。
+     * 🔑 そして実際に落ちるのは「足した分」ではなく **いちばん古い既存の 1 件**である
+     *   ── 足した人から見て**自分が押し出した物が見えない**のが、この欠陥の顔だった。
+     */
+    const over = [
+      { id: '2026-09-01-over', title: '新しく足した分', items: ['先頭に足しました。'] },
+      ...NOTICES,
+    ];
+    const shown = new Set(recentNotices(over).map((n) => n.id));
+    expect(over.filter((n) => !shown.has(n.id)).map((n) => n.id)).toEqual([
+      NOTICES[NOTICES.length - 1]!.id,
+    ]);
   });
 });
