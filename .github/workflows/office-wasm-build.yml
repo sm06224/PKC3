@@ -1078,6 +1078,20 @@ jobs:
             sort -u /tmp/undef.txt > /tmp/undef-uniq.txt || true
             echo "undefined symbol 件数: $(wc -l < /tmp/undef-uniq.txt)"
             head -20 < /tmp/undef-uniq.txt
+            # 🔴 **落ちた行の前後を出す**(2026-08-30)。
+            #    ⚠ 上の grep は `wasm-ld: error` / `error:` / `make: ***` しか拾わない ──
+            #    run 33285888070 は **`Error 127`(command not found)** で落ちたのに、
+            #    **その 127 が何のコマンドだったのかが 1 行も読めなかった**。
+            #    🔑 型に当たらないエラーこそ読みたいので、**落ちた行の手前をそのまま出す**
+            #    (CLAUDE.md「未確認は assert ではなく診断で出す」)。
+            first=$(grep -nE '^make(\[[0-9]+\])?: \*\*\* ' /tmp/make.log | head -1 | cut -d: -f1 || true)
+            if [ -n "${first:-}" ]; then
+              from=$(( first > 80 ? first - 80 : 1 ))
+              echo "--- 落ちた行($first)の $from 行目から ---"
+              sed -n "${from},${first}p" /tmp/make.log
+            else
+              echo '(make.log に「*** 」の行が無い ── 落ち方が変わった)'
+            fi
           else
             echo '(make.log 無し)'
           fi
