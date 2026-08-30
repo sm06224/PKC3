@@ -1227,6 +1227,65 @@ try {
       result.boxOnly = { err: safeErr(e) };
     }
   }
+  /**
+   * 🔴 **語数の遅延**(#126 項目 3、2026-08-30)。
+   *
+   * 実機レポート:「N words, N characters が**入力中は更新されない**」。
+   * 🔑 **押さずに打つ** ── 開いた直後は caret が本文の先頭に在るので、
+   *   クリックしなくても字は入る。⚠ こうすると #117 の引き金(クリック)を踏まない。
+   * ⚠ 状態の帯は canvas の中なので**字は読めない** ── 読むのは
+   *   「**帯の絵が変わったか**」だけである(何と表示されたかは言えない)。
+   * ⚠ だから判定は 2 点で採る:打った直後(約 0.8 秒)と、少し待った後(約 5 秒)。
+   *   前者が偽で後者が真なら**遅れている**、両方真なら**遅れていない**。
+   */
+  if (process.env.PKC3_WORDCOUNT === '1' && result.opened) {
+    mark('語数の門');
+    const wc = {};
+    result.wordCount = wc;
+    try {
+      const box = await canvasBox();
+      if (box) {
+        // ⚠ 帯は版面の下端 ── 左寄りに「N 単語, N 文字」が出る
+        const strip = {
+          x: Math.round(box.x),
+          y: Math.round(box.y + box.h - 44),
+          width: Math.round(box.w * 0.4),
+          height: 44,
+        };
+        wc.strip = strip;
+        /**
+         * 🔑 **対照群を先に置く** ── 打鍵が版面に届いていない回は、
+         * 帯が変わらなくても**何も言えない**(CLAUDE.md §4)。
+         */
+        const body = {
+          x: Math.round(box.x),
+          y: Math.round(box.y),
+          width: Math.round(box.w),
+          height: Math.round(box.h - 60),
+        };
+        const bodyBase = await framesOf(body, 3);
+        const base = await framesOf(strip, 3);
+        await page.keyboard.type('XYZ', { delay: 120 });
+        const soon = await framesOf(strip, 2);
+        await page.waitForTimeout(5000);
+        const later = await framesOf(strip, 3);
+        const bodyAfter = await framesOf(body, 3);
+        wc.typedOnScreen = swapped(bodyBase, bodyAfter);
+        wc.changedSoon = swapped(base, soon);
+        wc.changedLater = swapped(base, later);
+        wc.verdict =
+          wc.typedOnScreen !== true
+            ? '判定不能(打鍵が版面に届いていない)'
+            : wc.changedSoon === true
+              ? '遅れていない(打った直後に帯が変わった)'
+              : wc.changedLater === true
+                ? '遅れている(直後は変わらず、待つと変わった)'
+                : '帯が最後まで変わらなかった(語数が更新されていない)';
+      }
+    } catch (e) {
+      wc.err = safeErr(e);
+    }
+  }
   if (PASTE && result.opened) {
     mark('貼り付けの門');
     const NEEDLE = 'ZULU9';
