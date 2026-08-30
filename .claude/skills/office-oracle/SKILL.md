@@ -41,6 +41,33 @@ sha256sum /tmp/lo-wasm-qt6.zip   # release の digest と突き合わせる
 tag と資産名は `mcp__github__get_release_by_tag`(MCP は通る)で引く。
 ⚠ tag は**使い回される**(release の説明にそう書いてある)ので、**digest で同一性を言う**。
 
+### 🔴 `fetch-and-run.sh` は**古い一式を黙って使い回す**(2026-08-30 に踏みかけた)
+
+`bash build/office-wasm/fetch-and-run.sh --fetch-only` は便利だが、
+**5 つの file が揃っていれば取得を飛ばす**(`have_all`)。⚠ **焼き直した直後に走らせると、
+前の一式のまま probe が回る** ── 直した症状がそのまま再現し、
+**存在しない不具合を追う**ことになる。
+
+🔑 **焼き直した後は必ず `--force` を付ける**:
+
+```bash
+bash build/office-wasm/fetch-and-run.sh --force --fetch-only
+```
+
+⚠ そして**取れたのが新しい物かを数で確かめる** ── 日付は当てにならない
+(unzip は zip 内の時刻を書く)。目録の**総数**が動く:
+
+```bash
+python3 -c "
+import json; d=json.load(open('/tmp/lo-wasm/soffice.data.js.metadata'))
+print('総数', len(d['files']))"
+```
+
+実測: テンプレートを入れる前 **1,993** → 入れた後 **2,027**(#591)。
+⚠ **この 1 行を先に走らせる**のが「どのビルドを見ているか」の確定である
+(`cowork-verification` skill が外部へ頼むときに要求しているのと同じことを、
+**自分の harness にも当てる**)。
+
 ## 2. 🔴 フォントを足す(足さないと弾かれる)
 
 release の zip に **`.ttf` は 1 つも入っていない**。`assertPackComplete` が
