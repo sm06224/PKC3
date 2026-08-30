@@ -1551,6 +1551,30 @@ try {
     }
   }
   /**
+   * 🔴 **host は落ちたことを user に言えたか**(#121 / #117、2026-08-30)。
+   *
+   * ⚠ `host.html` は `window.onerror` で `memory access out of bounds` を拾って
+   *   `died()` を出す**はず**である。⚠ しかし probe には
+   *   `[pageerror] RuntimeError: memory access out of bounds` が上がっているのに、
+   *   **その回でも打鍵は版面に届いていた** ── つまり
+   *   「拾えたか」を**確かめずに「拾えるはず」と書いてはいけない**。
+   * 🔑 だから**帯の字をそのまま読む** ── `準備中…` / `表示中` / `停止` / `不安定`。
+   */
+  try {
+    result.hostBar = await Promise.race([
+      page.evaluate(`(() => {
+        const t = (id) => {
+          const el = document.getElementById(id);
+          return el === null ? null : { text: (el.textContent || '').slice(0, 120), hidden: el.hidden === true };
+        };
+        return { status: t('status'), warn: t('warn'), msg: t('msg') };
+      })()`),
+      new Promise((r) => setTimeout(() => r({ hung: true }), 8000)),
+    ]);
+  } catch (e) {
+    result.hostBar = { err: safeErr(e) };
+  }
+  /**
    * 🔴 **詰まっている相手を「名前で」言う ── 全 worker の stack を 1 枚撮る**
    * (#199 の「次の一手 ②」、2026-08-24)。
    *
