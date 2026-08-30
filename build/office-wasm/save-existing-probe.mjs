@@ -42,6 +42,7 @@ import { tmpdir } from 'node:os';
 import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
 import { chromium } from '@playwright/test';
+import { armWatchdog } from './probe-watchdog.mjs';
 
 const PACK = resolve(process.argv[2]);
 const DOC = resolve(process.argv[3]);
@@ -114,6 +115,18 @@ const browser = await chromium.launchPersistentContext(PROFILE, {
   executablePath: '/opt/pw-browsers/chromium',
 });
 const page = await browser.newPage();
+
+/**
+ * 🔴 **全体の締切**(2026-08-30)。⚠ `LIMIT_SEC` が縛るのは**版面が出るまで**だけで、
+ * その後ろの一手(打鍵 / `Ctrl+S` / 検め)は `await page.evaluate(…)` を素で呼ぶ ──
+ * 版面が固まると**永久に返らず、`finally` も走らない**。
+ */
+const wd = armWatchdog({
+  result,
+  out: OUT,
+  limitSec: Number(process.env.PKC3_HARD_LIMIT_SEC ?? LIMIT_SEC + 600),
+  browser: () => browser,
+});
 page.on('console', (m) => {
   const t = safeLine(`[${m.type()}] ${m.text()}`);
   if (t && result.console.length < 40) result.console.push(t);
@@ -250,6 +263,7 @@ const WINDOWS = `(() => {
 })()`;
 
 try {
+  wd.mark('起動');
   await page.goto(`${base}/office/host.html`, { waitUntil: 'domcontentloaded' });
   result.staged = await page.evaluate(async () => {
     const m = await (await globalThis.fetch('/office-pack/pack.json')).json();
@@ -505,6 +519,7 @@ await browser.close().catch(() => {});
 server.close();
 // 🔴 **profile を残さない**(開いた文書の痕跡が入る)。⚠ 「後で使うかも」は残す理由にならない
 await rm(PROFILE, { recursive: true, force: true }).catch(() => {});
+wd.disarm();
 const text = JSON.stringify(result, null, 1);
 if (OUT) await writeFile(OUT, text);
 console.log(text);
