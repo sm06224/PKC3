@@ -41,6 +41,47 @@ sha256sum /tmp/lo-wasm-qt6.zip   # release の digest と突き合わせる
 tag と資産名は `mcp__github__get_release_by_tag`(MCP は通る)で引く。
 ⚠ tag は**使い回される**(release の説明にそう書いてある)ので、**digest で同一性を言う**。
 
+### 🔴 調査用の焼きは **`lo-wasm-dev` に出ない**(2026-08-30 に踏みかけた)
+
+`office-wasm-build.yml` は**調査用のスイッチが入ると別の tag へ出す**。
+⚠ `lo-wasm-dev` を引いて「焼いたはずの物が入っていない」と読むのが罠である ──
+実際、名前つきの焼きが成功した直後に `lo-wasm-dev` を引いたら
+**別 run(前の焼き)の中身**が返ってきた。
+
+| 渡したスイッチ | tag |
+|---|---|
+| なし(配布用) | `lo-wasm-dev` |
+| `profiling_funcs: true` | **`lo-wasm-names`** |
+| `safe_heap: true` | `lo-wasm-safeheap` |
+| 両方 | `lo-wasm-safeheap-names` |
+
+🔑 **検算は 1 つ: 落とした一式の `build-info.json` の `run_id` が、自分が回した run と一致するか。**
+`profiling_funcs` / `safe_heap` の値もそこに書いてある ── **引いた先ではなく、
+落とした物で確かめる**。
+
+⚠ **workflow の artifact(`actions/artifacts/.../zip`)からは取れない** ── 落とし先が
+`*.blob.core.windows.net` で、この箱のプロキシが **403 CONNECT** で塞ぐ(実測)。
+🔑 **release 資産の経路(`github.com/.../releases/download/...`)だけが通る**ので、
+「artifact が取れない = 手元で確かめられない」と読まない(§0 の「取り方を数え上げる」)。
+
+### 🔴 名前が本当に入っているかを、使う前に確かめる
+
+`profiling_funcs` の焼きは**名前 section が末尾に付く**ので、先頭 40MB を見ても 0 件である
+(⚠ そこで「名前が入っていない」と読みかける)。**末尾から探す**:
+
+```bash
+python3 - <<'EOF'
+import os
+p='/tmp/lo-named/pack/soffice.wasm'; sz=os.path.getsize(p)
+f=open(p,'rb'); f.seek(max(0, sz-60_000_000)); tail=f.read()
+for s in (b'SfxDispatcher', b'basctl', b'ScriptDocument', b'sfx2'):
+    print(s.decode(), tail.count(s))
+EOF
+```
+
+実測(名前つき): `SfxDispatcher` **47** / `basctl` **1806** / `ScriptDocument` **285** /
+`sfx2` **1356**。⚠ 名前なしのビルドはここが**全部 0** になる。
+
 ### 🔴 `fetch-and-run.sh` は**古い一式を黙って使い回す**(2026-08-30 に踏みかけた)
 
 `bash build/office-wasm/fetch-and-run.sh --fetch-only` は便利だが、
