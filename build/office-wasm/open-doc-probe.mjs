@@ -63,6 +63,7 @@
 
 import { createServer } from 'node:http';
 import { readFile, writeFile, rm } from 'node:fs/promises';
+import { writeFileSync } from 'node:fs';
 import { join, extname, resolve, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
@@ -553,9 +554,56 @@ page.on('pageerror', (e) => {
 });
 page.on('crash', () => result.console.push(`${stamp()}[crash] page crashed`));
 
+/**
+ * 🔴 **全体の締切**(2026-08-30。**5 時間固まって学んだ**)。
+ *
+ * ⚠ `LIMIT_SEC`(第 5 引数)が縛るのは**観測ループだけ**である。その後ろの門
+ * (`PKC3_PASTE` / `PKC3_REDRAW` …)は `await page.evaluate(…)` を素で呼ぶので、
+ * **版面が 100% で回り続けると永久に返らない** ── Playwright の `evaluate` に
+ * 既定の締切は無い。
+ *
+ * 🔴 **そして `finally` も走らない。** 固まった `await` は例外を投げないので、
+ * JSON は 1 バイトも書かれず、**何段目で止まったのかも残らない**
+ * (実測 2026-08-30: 経過 4h58m / renderer の CPU 時間 5h00m / RSS 1.07GB / log 0 byte)。
+ *
+ * 🔑 だから**外側に見張りを置く**。落ちるときは
+ * **段の名前と経過を書いてから**落ちる ── CLAUDE.md §6「計器は落ちた理由を名前で言う」。
+ * ⚠ 判定は「貼れなかった」ではなく **`timedOut: true` = 判定不能**である。
+ */
+let phase = 'start';
+const mark = (name) => {
+  phase = name;
+  result.phases = result.phases ?? [];
+  result.phases.push({ name, atMs: Date.now() - T_START });
+};
+const T_START = Date.now();
+const HARD_SEC = Number(process.env.PKC3_HARD_LIMIT_SEC ?? LIMIT_SEC + 600);
+const watchdog = setTimeout(() => {
+  result.timedOut = true;
+  result.error = `時間切れ(${HARD_SEC} 秒)。段 「${phase}」 で戻らなかった`;
+  result.elapsedMs = Date.now() - T_START;
+  // ⚠ 同期で書く ── 非同期の書き込みも固まりうる
+  const text = JSON.stringify(result, null, 1);
+  if (OUT) writeFileSync(OUT, text);
+  else process.stdout.write(text + '\n');
+  process.stderr.write(`${result.error}\n`);
+  /**
+   * ⚠ **閉じる猶予を 3 秒だけ与える**（2026-08-30 の実測で足した）。
+   * 即座に `process.exit` すると **chrome が 2 つ残る** ── 次の probe が
+   * それを拾って変な測り方になる。
+   * ⚠ ただし `close()` 自体も固まりうるので**待ち切らない**。
+   * 🔑 それでも残ったら **PID で殺す**（`pkill -f` は自分の命令行にも
+   *   当たる ── CLAUDE.md §6）。
+   */
+  browser.close().catch(() => {});
+  // ⚠ `unref()` しない ── 閉じが固まったとき、この timer だけが出口である
+  setTimeout(() => process.exit(2), 3000);
+}, HARD_SEC * 1000);
+
 try {
   // 一式を IDB へ(PKC が入れる形と同じ)
   await page.goto(`${base}/office/host.html`, { waitUntil: 'domcontentloaded' });
+  mark('一式を IDB へ入れる');
   result.staged = await page.evaluate(async () => {
     const { fetch, indexedDB } = globalThis;
     /**
@@ -645,6 +693,7 @@ try {
   let poked = false;
 
   let deadStreak = 0;
+  mark('観測ループ');
   for (let i = 0; i * 5 < LIMIT_SEC; i += 1) {
     await page.waitForTimeout(5_000);
     if (POKE_SEC > 0 && !poked && (Date.now() - t0) / 1000 >= POKE_SEC) {
@@ -840,6 +889,7 @@ try {
   const swapped = (a, b) => (a === null || b === null ? null : b.every((h) => !a.includes(h)));
 
   if (IME && result.opened) {
+    mark('IME の門');
     try {
       const box = await canvasBox();
       result.ime = { clicked: false, before: await page.evaluate(IME_DEEP) };
@@ -956,6 +1006,7 @@ try {
    * 「Impress 固有」が言える ── 片方だけ回して結論を書かない。
    */
   if (REDRAW && result.opened) {
+    mark('打鍵の門');
     try {
       const box = await canvasBox();
       result.redraw = { clicked: false };
@@ -1114,6 +1165,7 @@ try {
    * | `hungAt` が非 null | 🔴 **主スレッドが返ってこない**(候補 1 の裏取り) |
    */
   if (PASTE && result.opened) {
+    mark('貼り付けの門');
     const NEEDLE = 'ZULU9';
     const paste = { clicked: false, hungAt: null };
     result.paste = paste;
@@ -1433,6 +1485,7 @@ try {
 
   // 🔑 **計装はまとめて最後に読む**(出口を 1 つにする ── 2026-08-10 の教訓)。
   //    ⚠ `null`(この焼きに計装が無い)と `[]`(在るが 1 行も出ていない)を混ぜない。
+  mark('計装を読む');
   result.idlesTrace = await page.evaluate(IDLES_TRACE).catch((e) => ({ err: String(e).slice(0, 80) }));
 
   if (SHOT) {
@@ -1441,6 +1494,7 @@ try {
 } catch (e) {
   result.error = safeErr(e);
 } finally {
+  clearTimeout(watchdog);
   const text = JSON.stringify(result, null, 1);
   if (OUT) await writeFile(OUT, text);
   else console.log(text);
