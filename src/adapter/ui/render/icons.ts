@@ -277,9 +277,15 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   /** 本文の置換(#191)── 書き換えるので鉛筆と同じ仲間の図案にする。 */
   'toggle-replace': 'pencil',
   'replace-all': 'check',
-  /** ペインの開閉(#197)── 畳む向きの山を出す(左の列は左へ、右の列は右へ)。 */
-  'toggle-pane:sidebar': 'chevron-left',
-  'toggle-pane:inspector': 'chevron-right',
+  /**
+   * 🔴 **ペインの開閉の図案はここに置かない**(#609 で消した。2026-08-30)。
+   *
+   * ⚠ 直す前は `'toggle-pane:sidebar': 'chevron-left'` などが在ったが、
+   * **`src` / `tests` 全体で参照 0 件**だった ── 掴む帯は `shell.ts` で
+   * 手組みするので `iconButton` を通らず、**この山形は 1 度も画面に出ていない**。
+   * 🔑 死んだ登記は「そこに在る」と次に読む人へ嘘をつくので消す
+   * (帯の見た目は `app.css` の `[data-pkc-region='pane-grip']::after`)。
+   */
 };
 
 /**

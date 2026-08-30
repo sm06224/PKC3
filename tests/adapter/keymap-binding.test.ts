@@ -894,6 +894,8 @@ describe('近道の受け手と、打鍵中の免除(等値で pin する)', () 
       'view-dual',
       'toggle-sidebar',
       'toggle-inspector',
+      // ⚠ 2026-08-30 に足した(#609 ── 畳める 3 面のうち追記欄だけ鍵が無かった)
+      'toggle-append',
       'toggle-focus-mode',
       'nav-back',
       'nav-forward',

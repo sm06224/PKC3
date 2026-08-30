@@ -210,23 +210,90 @@ describe('画面への適用', () => {
  *   `選択子 { 宣言 }` を読み、選択子リストは `,` で割って丸ごと一致で探す)。
  * ⚠ `@media` の中まで拾わない ── 印刷や狭い版面だけの規則で「画面の規則を
  *   消しても緑」になる。
+ *
+ * 🔴 **`@media` の飛ばし方を変えた**(#609 / #607。2026-08-30)。
+ *
+ * ⚠ 直す前は `css.indexOf('@media')` で**そこから先を丸ごと捨てて**いた ──
+ *   だから **`@media` の中に在る規則を 1 つも読めなかった**。#609 は
+ *   「幅の版面を**原理的に見ていない**」とこの行を名指ししており、実際 #607 で
+ *   狭い 2 帯に畳み版面を足したとき、この test は**何も見ていなかった**。
+ * 🔑 いまは**入れ子を数えて at-rule のブロックだけを飛ばす** ── 画面の規則は
+ *   file の最後まで読み、`@media` の中は読まない(元の意図はそのまま守る)。
  */
 describe('CSS(畳んだ列が本当に消えるか)', () => {
   // ⚠ **注釈を先に剥ぐ** ── 剥がないと直前の注釈が選択子の一部として拾われ、
   //    丸ごと一致が 1 件も当たらない(この test 自身が 1 度そうなった)
   const css = readFileSync('src/styles/app.css', 'utf-8').replace(/\/\*[\s\S]*?\*\//g, '');
-  const at = css.indexOf('@media');
-  const screenOnly = css.slice(0, at === -1 ? undefined : at);
 
-  function rulesFor(selector: string): string[] {
-    const out: string[] = [];
-    const re = /([^{}]+)\{([^{}]*)\}/g;
-    for (const m of screenOnly.matchAll(re)) {
-      const sels = m[1]!.split(',').map((x) => x.trim().replace(/\s+/g, ' '));
-      if (sels.includes(selector)) out.push(m[2]!);
+  /** `選択子 { 宣言 }` を、at-rule のブロックを飛ばしながら全部読む。 */
+  function topLevelRules(): { sels: string[]; body: string }[] {
+    const out: { sels: string[]; body: string }[] = [];
+    let i = 0;
+    while (i < css.length) {
+      const open = css.indexOf('{', i);
+      if (open === -1) break;
+      const head = css.slice(i, open).trim();
+      if (head.startsWith('@')) {
+        let depth = 1;
+        let j = open + 1;
+        for (; j < css.length && depth > 0; j += 1) {
+          if (css[j] === '{') depth += 1;
+          else if (css[j] === '}') depth -= 1;
+        }
+        i = j;
+        continue;
+      }
+      const close = css.indexOf('}', open);
+      if (close === -1) break;
+      out.push({
+        sels: head.split(',').map((x) => x.trim().replace(/\s+/g, ' ')),
+        body: css.slice(open + 1, close),
+      });
+      i = close + 1;
     }
     return out;
   }
+
+  const TOP = topLevelRules();
+
+  function rulesFor(selector: string): string[] {
+    return TOP.filter((r) => r.sels.includes(selector)).map((r) => r.body);
+  }
+
+  /**
+   * 🔴 **読み方そのものを検める**(#609。2026-08-30)。
+   *
+   * ⚠ この 2 件が無いと、上の `topLevelRules` を「最初の `@media` で切る」形へ
+   *   戻す変更が**誰にも気づかれない** ── 戻した瞬間、下の検査は全部
+   *   「規則が無い」ではなく「**読まなかった**」で緑になりうる。
+   * 🔑 見るのは 2 方向:①`@media` の**後ろ**に在る画面の規則が読めること
+   *   ②`@media` の**中**の規則は読まないこと。
+   */
+  it('🔴 @media の後ろに在る画面の規則も読む(切り捨てていない)', () => {
+    // 枠を横に並べる規則(`app.css` の 5,100 行台 = 最初の `@media` より後ろ)
+    const hit = rulesFor(
+      "[data-pkc-view-pane='detail'][data-pkc-split='on'] [data-pkc-region='split-row']",
+    );
+    expect(hit.length, '@media より後ろの画面の規則を読めていない').toBeGreaterThan(0);
+    expect(hit.join(''), '読めた規則の中身が空(拾い方が壊れている)').toContain('display: flex');
+  });
+
+  it('🔴 @media の中の規則は読まない(狭い版面で画面の規則を消しても緑、を作らない)', () => {
+    /**
+     * 錨は `@media (max-width: 720px)` の中に**しか無い**もの。
+     *
+     * ⚠ 1 稿目は `[data-pkc-pane='inspector']` を錨にしたが、それは
+     *   **top-level にも在った**(`grid-area: gripr`)ので、この test 自身が
+     *   落ちて教えてくれた ── 「中にしか無い」を確かめずに錨を選んでいた。
+     */
+    const MEDIA_ONLY = "[data-pkc-region='pane-grip']:not([data-pkc-axis='y'])";
+    expect(rulesFor(MEDIA_ONLY), '@media の中まで読んでいる').toEqual([]);
+    // ⚠ 空振り防止 ── その選択子が CSS のどこかには実在すること
+    expect(
+      readFileSync('src/styles/app.css', 'utf-8'),
+      '錨にした選択子が CSS から消えている(この test の前提が崩れた)',
+    ).toContain(MEDIA_ONLY);
+  });
 
   it('🔴 畳んだ列は display:none になる(印だけ付いて見えたままにしない)', () => {
     const hit = rulesFor(
