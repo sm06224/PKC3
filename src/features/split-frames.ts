@@ -57,6 +57,23 @@ export const SPLIT_PINNED_MAX = SPLIT_FRAME_MAX - 1;
 export const SPLIT_FRAME_GAP_PX = READ_COLUMN_GAP_PX;
 
 /**
+ * 🔴 **留めた枠が飾りに取られる幅**(px。#608)。
+ *
+ * 留めた枠だけ `border-left: 1px` + `padding-left: var(--s5)` が付く
+ * (`app.css` の `[data-pkc-split-lid]`)。⚠ `box-sizing: border-box` なので、
+ * これは**枠の中身から引かれる** ── 数えないと、判定より**中身が狭い**枠が並ぶ。
+ *
+ * 🔴 **実測(2026-08-30)**:窓 1428px / 面の中身 915px で、判定は
+ * 「2 枠入る」(448×2 + 16 = 912 ≤ 915)なのに、実際の中身は**両枠とも 441px** ──
+ * **下限を 7px 割っていた**。飾りを数えると 448×2 + 16 + 17 = 929 > 915 で畳む。
+ * ⚠ #608 は「~11px 足りない計算」と書いていたが、**実測は 7px** である
+ * (`flex-basis: 0` は飾りを**中身の外**へ置くので、痩せるのは 1 枠ぶんだけ)。
+ *
+ * ⚠ **16 を 2 つ目に書かない** ── 余白は gap と**同じ `--s5`** である。
+ */
+export const SPLIT_PINNED_CHROME_PX = 1 + SPLIT_FRAME_GAP_PX;
+
+/**
  * 留めた並びを整える ── **空を捨て、重複を捨て、上限で切る**。
  *
  * ⚠ **主の lid は捨てない** ── 同じノートを主と留めた枠の両方に出すのは
@@ -130,7 +147,13 @@ export function fittingSplitFrames(paneWidth: number, wanted: number, fontPx: nu
   if (!Number.isFinite(paneWidth) || paneWidth <= 0) return 1;
   const min = readColumnMinPx(fontPx);
   for (let n = want; n >= 2; n -= 1) {
-    if (paneWidth >= min * n + SPLIT_FRAME_GAP_PX * (n - 1)) return n;
+    /**
+     * ⚠ **飾りも引く**(#608)── 留めた枠は n − 1 枚あり、それぞれ
+     * `border-left` + `padding-left` を**中身の外**に持つ。
+     * 🔑 数えないと「入る」と読んで**下限を割った枠**を並べる(実測 441px)。
+     */
+    const need = min * n + (SPLIT_FRAME_GAP_PX + SPLIT_PINNED_CHROME_PX) * (n - 1);
+    if (paneWidth >= need) return n;
   }
   return 1;
 }

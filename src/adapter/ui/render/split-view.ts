@@ -44,14 +44,45 @@ interface Frame {
   readonly renderer: DetailRenderer;
 }
 
-/** 面の幅と本文の大きさ。⚠ 測れない環境(test)では `null` ── そのとき畳まない。 */
-function measure(row: HTMLElement): { width: number; fontPx: number } | null {
-  const width = row.getBoundingClientRect().width;
+/** CSS の長さを px にする。⚠ 読めない値は 0(採寸を NaN で汚さない)。 */
+function px(value: string | undefined): number {
+  const n = Number.parseFloat(value ?? '');
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * 面の**中身の幅**と本文の大きさ。⚠ 測れない環境(test)では `null` ── そのとき畳まない。
+ *
+ * 🔴 **測るのは器(`split-row`)ではなく面(`pane`)である**(#608)。
+ *
+ * ⚠ 1 稿目は `row` を測っていたが、**何も並べていない間の `row` は
+ * `display: contents`**(`app.css:5193-5197`)なので
+ * `getBoundingClientRect().width` が **0** を返す ── そこから
+ * 「測れないなら減らさない」へ落ちて `wanted` をそのまま通していた。
+ * 🔑 結果、**畳んだ次の描画は 0 と読んで全部戻し、その次は 676 と読んで全部畳む** ──
+ * 狭い窓で一覧を押すたびに **0 枚 ⇄ 3 枚**で入れ替わっていた(#608 の実測)。
+ *
+ * ⚠ **「row が 0 なら pane を測る」にはしない** ── 同じ問いに答える口が 2 つになる
+ * (CLAUDE.md §7)。面は**どちらの状態でも実寸を持つ**ので、口は 1 つで足りる。
+ * 🔑 面の中身の幅 = 器が占める幅である(面は縦の flex で、器は `flex: 1 1 auto` =
+ * 交差軸いっぱいに伸びる)。⚠ だから `padding` と `border` を**引く**
+ * (`box-sizing: border-box` なので外寸には含まれている)。
+ */
+function measure(pane: HTMLElement): { width: number; fontPx: number } | null {
+  const box = pane.getBoundingClientRect().width;
+  if (!Number.isFinite(box) || box <= 0) return null;
+  const view = pane.ownerDocument.defaultView;
+  const cs = view === null ? null : view.getComputedStyle(pane);
+  const width =
+    box -
+    px(cs?.paddingLeft) -
+    px(cs?.paddingRight) -
+    px(cs?.borderLeftWidth) -
+    px(cs?.borderRightWidth);
   if (!Number.isFinite(width) || width <= 0) return null;
-  const view = row.ownerDocument.defaultView;
-  const px = view === null ? Number.NaN : Number.parseFloat(view.getComputedStyle(row).fontSize);
+  const font = Number.parseFloat(cs?.fontSize ?? '');
   // ⚠ 採寸できない環境では**標準の大きさ**へ落ちる(0 や NaN を渡さない)
-  return { width, fontPx: Number.isFinite(px) && px > 0 ? px : READ_COLUMN_BASE_FONT_PX };
+  return { width, fontPx: Number.isFinite(font) && font > 0 ? font : READ_COLUMN_BASE_FONT_PX };
 }
 
 export class SplitView {
@@ -74,6 +105,15 @@ export class SplitView {
   private shown: readonly string[] = [];
   /** 直前に「入らないので減らしました」と言った件数。⚠ 同じ事を繰り返し言わない。 */
   private lastDropped = 0;
+  /**
+   * 直前に描いた state。⚠ 窓の大きさが変わったときに**描き直す**ために持つ
+   * (#608)── `render` は state を要るので、持たないと resize から呼べない。
+   */
+  private lastState: AppState | null = null;
+  /** 直前に置けると判定した枠数。⚠ **変わったときだけ**描き直す(振動させない)。 */
+  private lastFit = 0;
+  /** 見張りを外す口。⚠ 面と同じ寿命なので普段は呼ばないが、test が使う。 */
+  private stopWatch: (() => void) | null = null;
 
   constructor(
     private readonly pane: HTMLElement,
@@ -88,6 +128,66 @@ export class SplitView {
     this.row.append(this.mainHost);
     pane.append(this.row);
     this.main = makeMain(this.mainHost);
+    this.watch();
+  }
+
+  /**
+   * 🔴 **窓の大きさが変わったら測り直す**(#608)。
+   *
+   * ⚠ 直す前は `SplitView.render` を呼ぶのが `center.ts` の 1 か所だけで、
+   * **`ResizeObserver` が付いていなかった** ── 900px まで狭めても
+   * **1 枠 448px の下限を無視して 203px の枠が 3 枚**残っていた。
+   * ⚠ 🟢 段組みのほうには最初から付いている(`read-columns.ts` の
+   * `installColumnFit`)── **同じ「幅で畳む」機構が、片方だけ見ていなかった**。
+   *
+   * 🔑 `installColumnFit` と同じ作法を写す:
+   * ①**面 1 枚だけ**を見る(document を見張らない = 常駐を足さない)
+   * ②🔴 **答えが変わったときだけ触る** ── `fitCount` が前と同じなら
+   * **1 バイトも書かない**(毎フレーム描き直すと、送りも図も作り直しになる)。
+   *
+   * ⚠ `ResizeObserver` が無い環境(happy-dom)では**何もしない** ──
+   * そこでは `measure` も `null` を返すので、畳みの判定自体が走らない。
+   */
+  private watch(): void {
+    const RO = (globalThis as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
+    if (RO === undefined) return;
+    const ro = new RO(() => this.refit());
+    ro.observe(this.pane);
+    this.stopWatch = () => ro.disconnect();
+  }
+
+  /** 見張りを外す(test 用)。⚠ 二度呼んでも安全。 */
+  stop(): void {
+    this.stopWatch?.();
+    this.stopWatch = null;
+  }
+
+  /**
+   * 幅が変わったので測り直す。⚠ **答えが変わったときだけ**描き直す。
+   *
+   * 🔴 **これは「安さ」の門であって、輪を止めているのではない**(2026-08-30、
+   * 変異試験で判明)。⚠ 1 稿目のコメントは「これが無いと、描き直しが面の高さを
+   * 変え、それがまた `ResizeObserver` を鳴らす**輪**になる」と書いていたが、
+   * **外しても test は 1 件も落ちなかった**(N4 / N5 が SURVIVED)── 描き直しても
+   * `sync` の枠ごとの門(`frames.has(lid)` / `lids.includes(lid)`)が節点を
+   * 作り直さず、`DetailRenderer` も指紋が同じなら早く返るので、**観測できる
+   * 違いが 1 つも無い**。
+   * ⚠ CLAUDE.md「『これが無いと壊れる』と書く前に、外して壊れるのを見る。
+   * 見ないなら書かない」── 見たので、書き直した。
+   *
+   * 🔑 **残す理由は 1 つだけ**:resize は連射で来るので、鳴るたびに枠 N 枚分の
+   * renderer を歩くのは**無駄**である(`installColumnFit` が同じ理由で
+   * 「同じ値なら書かない」を持っている)。⚠ 消しても壊れないので、
+   * **消す日は「安さが要らなくなった」を理由にすること** ──
+   * 「効いていないから」ではない。
+   */
+  private refit(): void {
+    const state = this.lastState;
+    if (state === null) return;
+    const want = knownSplitLids(state.splitLids, state.entryMetas);
+    const fit = this.fitCount(want.length + 1);
+    if (fit === this.lastFit) return;
+    this.render(state);
   }
 
   /**
@@ -96,8 +196,10 @@ export class SplitView {
    * ⚠ **主の枠は必ず描く** ── 留めたものが 0 件でも、ここが唯一の描き口である。
    */
   render(state: AppState): void {
+    this.lastState = state;
     const want = knownSplitLids(state.splitLids, state.entryMetas);
     const fit = this.fitCount(want.length + 1);
+    this.lastFit = fit;
     // ⚠ 減らすのは**後ろから**(先に留めた物が残る ── `split-frames.ts` の規約)
     const show = want.slice(0, Math.max(fit - 1, 0));
     this.sayIfDropped(want.length, show.length);
@@ -109,7 +211,7 @@ export class SplitView {
   /** 器に何枠置けるか。⚠ 測れないときは**減らさない**(test で全部消えない)。 */
   private fitCount(wanted: number): number {
     if (wanted <= 1) return 1;
-    const m = measure(this.row);
+    const m = measure(this.pane);
     if (m === null) return wanted;
     return fittingSplitFrames(m.width, wanted, m.fontPx);
   }

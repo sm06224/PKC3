@@ -171,3 +171,100 @@ test('🔴 本文を右クリックして横に留めると、2 つの枠が並�
 
   expect(errors, 'ページ例外 0 件').toEqual([]);
 });
+
+/**
+ * 🔴 **狭い窓で枠が 0 枚 ⇄ 3 枚に入れ替わり続ける / 窓を狭めても畳まない**(#608)。
+ *
+ * ## 🔴 unit では原理的に届かない
+ *
+ * 振動の原因は「何も並べていない間の器が `display: contents` で**幅 0**」である。
+ * happy-dom は**そもそも採寸しない**ので、器も面も 0 ── **どちらを測っていても
+ * 同じ答え**になり、区別できない。🔑 だから**実ブラウザで、実際に狭めて**見る。
+ *
+ * ## 見るのは 2 つ
+ *
+ * ① **窓を狭めただけで畳む**(押さなくても) ── 直す前は 900px で 203px の枠が 3 枚
+ * ② **押しても入れ替わらない** ── 直す前は押すたびに 0 / 3 / 0 / 3
+ */
+test('🔴 狭い窓では枠が畳まれ、押しても入れ替わらない (#608)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await gotoApp(page);
+
+  await createEntry(page, 'text');
+  await writeBody(page, `# 資料 A\n\n${LONG}`);
+  await createEntry(page, 'text');
+  await writeBody(page, `# 資料 B\n\n${LONG}`);
+
+  await page.locator('[data-pkc-field="detail-body"] p').first().click({ button: 'right' });
+  await expect(page.locator(MENU), 'メニューが出ない').toBeVisible();
+  await page.locator(MENU).locator('button[data-pkc-action="pin-split"]').click();
+
+  /**
+   * 出ている枠の数(主 + 留め)。
+   *
+   * ⚠ **`[data-pkc-region="split-frame"]` を数えない** ── 1 枠まで畳むと
+   * `mark(false)` が主の印を外すので、**0 件**になる(枠は在るのに 0 と読める)。
+   * 🔑 数えるのは**留めた枠 + 主の 1**(unit 側と同じ数え方)。
+   */
+  const count = async (): Promise<number> =>
+    (await page.locator('[data-pkc-split-lid]').count()) + 1;
+
+  /**
+   * ⚠ **前提 = 対照群** ── 広い窓では 2 枠出ている。
+   *
+   * 🔴 1 稿目は「3 枠」と書いて落ちた ── 2 枚留めても、1600px の窓の**面**は
+   * 3 枠ぶん(448 × 3 + 16 × 2 = 1376px)に届かないので、**正しく 2 枠**である。
+   * ⚠ 前提を assert していなければ、「押しても入れ替わらなかった」を
+   * **畳みが 1 度も起きていない回**で言うところだった。
+   */
+  expect(await count(), '広い窓で 2 枠出ていない(台の前提)').toBe(2);
+
+  /**
+   * 🔴 **各枠が下限を満たしている** ── #608 の「203px の枠が 3 枚」の直接の否定。
+   * ⚠ 見るのは**枠の中身の幅**(留めた枠には `border-left` + `padding-left` が
+   * 付くので、外寸で見ると甘く読める)。
+   */
+  const inner = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-pkc-region="split-frame"]')].map((el) => {
+      const cs = getComputedStyle(el);
+      const num = (v: string): number => Number.parseFloat(v) || 0;
+      return Math.round(
+        el.getBoundingClientRect().width -
+          num(cs.paddingLeft) -
+          num(cs.paddingRight) -
+          num(cs.borderLeftWidth) -
+          num(cs.borderRightWidth),
+      );
+    }),
+  );
+  expect(inner.length, '枠が 1 つも無い').toBe(2);
+  for (const w of inner) {
+    // ⚠ 1 枠の下限は本文の文字の大きさに載る(標準 13px なら 448px)
+    expect(w, `枠が下限より狭い: ${inner.join(' / ')}`).toBeGreaterThanOrEqual(448);
+  }
+
+  // ① 🔴 **押さずに窓だけ狭める** ── これで畳めば `ResizeObserver` が効いている
+  await page.setViewportSize({ width: 900, height: 900 });
+  await expect
+    .poll(count, { message: '窓を狭めても畳まない(resize を見ていない)' })
+    .toBe(1);
+
+  // 🔴 **黙って消していない**(#606 の口が生きていること)
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '枠を畳んだのに理由が出ていない',
+  ).toContainText('幅が足りないので');
+
+  // ② 🔴 **押しても入れ替わらない**(直す前は 0 / 3 / 0 / 3)
+  const seen: number[] = [];
+  for (let i = 0; i < 4; i += 1) {
+    await page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').nth(i % 2).click();
+    await expect(page.locator('[data-pkc-split-main]')).toBeVisible();
+    seen.push(await count());
+  }
+  expect(new Set(seen).size, `押すたびに枠数が入れ替わっている: ${seen.join(' / ')}`).toBe(1);
+  expect(seen[0], '狭めた直後と、押した後で枠数が違う').toBe(1);
+
+  expect(errors, 'ページ例外 0 件').toEqual([]);
+});
