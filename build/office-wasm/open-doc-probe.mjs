@@ -1293,6 +1293,44 @@ try {
         screen.typedOnScreen = swapped(screenBase, await shotsOrNull('打鍵の後を撮る', clip));
         await mustBeAlive('打鍵の後');
         await save();
+        /**
+         * 🔴 **仮説を殺す 1 手**(#121、2026-08-30)。
+         *
+         * ⚠ 落ちる回には**形がある**(実測 3 腕 10 回):失敗した 2 回は
+         *   どちらも「**打鍵は版面に出た(`typedOnScreen: true`)のに、
+         *   その後の `Ctrl+S` も `Ctrl+V` も効かない**」だった。
+         *   ⚠ しかも `page.evaluate('1')` は返る(息はある)。
+         * 🔑 打った字は**素のキー**、効かないのは**全部 `Ctrl` 併用**である ──
+         *   だから仮説は「**修飾キーの経路だけが落ちる**」。
+         * ⚠ この 1 手はその仮説が真なら**必ず真になる**(素の打鍵は通る):
+         *   偽なら false になり、仮説ごと落ちる。
+         * ⚠ 入れる字は判定に使う綴り(`ZULU9` / `OUTSIDE7`)と重ならない物にする。
+         */
+        if (paste.saveWaitedMs === null) {
+          const before = await shotsOrNull('素の打鍵の前', clip);
+          await page.keyboard.type('Q', { delay: 120 });
+          await page.waitForTimeout(1500);
+          screen.plainAfterFailedSave = swapped(before, await shotsOrNull('素の打鍵の後', clip));
+          /**
+           * 🔴 **仮説の切り分け ── 落ちているのは LO か、こちらの打ち方か**(#121)。
+           *
+           * ⚠ 前段で分かったのは「**素のキーは通り、`Ctrl` 併用だけ通らない**」である。
+           *   そこには 2 つの読みがある:
+           *     ① LO / Qt が修飾つきの鍵を処理しなくなった(製品の話)
+           *     ② Playwright の `press('Control+s')` の出し方が届かなくなった(計器の話)
+           * 🔑 だから**同じ意味の別の出し方**を 1 回だけ試す ── `down` / `press` / `up` に
+           *   分けて撃つ。⚠ これが通れば**②**、通らなければ**①**である。
+           * ⚠ どちらでも本文は汚さない(`Ctrl+S` は保存であって字を入れない)。
+           */
+          const st0 = await page.evaluate(WORK_STAT).catch(() => null);
+          await page.keyboard.down('Control');
+          await page.keyboard.press('s');
+          await page.keyboard.up('Control');
+          await page.waitForTimeout(6000);
+          const st1 = await page.evaluate(WORK_STAT).catch(() => null);
+          screen.splitModifierSaved =
+            st0 !== null && st1 !== null && (st0.mtimeMs !== st1.mtimeMs || st0.size !== st1.size);
+        }
         // 🔑 **対照群(file)** ── ここが 1 でなければ、file 側は全部読めない
         paste.typed = await readSaved('typed');
         const via = process.env.PKC3_PASTE_VIA ?? 'keys';
