@@ -16,9 +16,9 @@ import {
   applyReadColumns,
   initialReadColumns,
   installColumnFit,
-  setColumnFoldNotify,
   installColumnWheel,
 } from '@adapter/ui/render/read-columns';
+import { setFoldNotify } from '@adapter/ui/render/fold-notify';
 import { appOpenInEdit } from '@adapter/ui/render/open-in-edit';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { appPaneSizes, applyPaneSizes } from '@adapter/ui/render/pane-size';
@@ -868,9 +868,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   ⚠ #606 まで枠は**別の口**(`CenterRouter` の引数)を要求していて、ここが
    *   渡していなかったので**製品では 1 度も出ていなかった**。
    *   ⚠ この 1 行を落とすと**両方の帯が同時に消える**ので、
-   *   `tests/smoke/read-columns.smoke.spec.ts` が鳴る。
+   *   `tests/smoke/read-columns.smoke.spec.ts` が鳴る(実測)。
+   * ⚠ **別名を作らない**(2 巡目レビュー R-1)── `setColumnFoldNotify` という
+   *   委譲用の名前を残したら、台がそこを迂回して**欠陥の再導入を素通り**させた。
    */
-  setColumnFoldNotify(showStatus);
+  setFoldNotify(showStatus);
 
   /**
    * 🔴 **外からの依頼を受ける口**(#189 / C-4 と #194 / C-3)。

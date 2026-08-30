@@ -29,7 +29,7 @@ function boot(): { root: HTMLElement; d: Dispatcher; center: CenterRouter; said:
    *   **製品では 1 度も帯が出ていなかった**(CLAUDE.md §7
    *   「両端が相手を模した stub と話していると、綴りの食い違いが両方緑のまま通る」)。
    * 🔑 口を 1 つに寄せたので、**台が偽装できなくなった** ── ここで配るのは
-   *   `main.ts:870` が配るのと**同じ口**である。
+   *   `main.ts:873` が配るのと**同じ口**である。
    */
   setFoldNotify((t) => said.push(t));
   const center = new CenterRouter(root, undefined, null, undefined, undefined);
@@ -294,8 +294,16 @@ describe('枠を畳んだ理由を帯に出す(#606)', () => {
     const { d, root, said } = boot();
     const row = root.querySelector<HTMLElement>('[data-pkc-region="split-row"]');
     expect(row, '器が無い(台の前提が崩れている)').not.toBeNull();
-    // 1 枠 448px + すき間 16px なので、500px には 1 枠しか入らない
-    row!.getBoundingClientRect = () => ({ width: 500, height: 300 }) as DOMRect;
+    /**
+     * ⚠ **数字は実測で書く**(2 巡目レビュー R-6)。1 稿目は「1 枠 448px」と
+     *   書いていたが、それは**標準の文字(13px)のとき**の値である ──
+     *   happy-dom の既定 `font-size` は **16px** なので、実際に使われるのは
+     *   `readColumnMinPx(16) = 551.4px`、2 枠の閾値は **1118.8px**。
+     *   ⚠ 結論(狭いと 1 枠)は合っていたが、**書いた数字は使われていなかった**。
+     * 🔑 だから**境目のすぐ下**を使う ── 適当に小さい値だと、
+     *   「採寸が死んでいても畳む」形と区別できない(R-5)。
+     */
+    row!.getBoundingClientRect = () => ({ width: 1100, height: 300 }) as DOMRect;
 
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
     d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'b' });
@@ -315,7 +323,15 @@ describe('枠を畳んだ理由を帯に出す(#606)', () => {
   it('⚠ 幅が足りていれば何も言わない', async () => {
     const { d, root, said } = boot();
     const row = root.querySelector<HTMLElement>('[data-pkc-region="split-row"]');
-    row!.getBoundingClientRect = () => ({ width: 2000, height: 300 }) as DOMRect;
+    /**
+     * 🔑 **境目のすぐ上**(1118.8px)を使う(2 巡目レビュー R-5)。
+     * ⚠ 1 稿目は 2000px で、**採寸が完全に死んでいても緑**だった
+     *   (`measure` が `null` → `fitCount` が「測れないなら減らさない」→ 黙る)。
+     *   実測: `measure` を常に `null` にする変異が、この対照群**だけ**では SURVIVED。
+     * 🔑 境目のすぐ上下に置くと、①採寸が読まれていること
+     *   ②境目が文字の大きさに載っていること(R-4)を**同時に**見られる。
+     */
+    row!.getBoundingClientRect = () => ({ width: 1200, height: 300 }) as DOMRect;
 
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
     d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'b' });
@@ -327,4 +343,89 @@ describe('枠を畳んだ理由を帯に出す(#606)', () => {
     ).toBeGreaterThan(0);
     expect(said, '畳んでいないのに喋った').toEqual([]);
   });
+});
+
+/**
+ * 🔴 **帯の作法**(2026-08-30 の 2 巡目レビュー R-2 / R-3 / R-4)。
+ * ⚠ 3 件とも、変異が **SURVIVED** で教えたものである ──
+ *   直前の台は「畳んだら言う」しか見ておらず、**言い方**を 1 つも守っていなかった。
+ */
+describe('枠を畳んだ帯の作法(#606)', () => {
+  /** 器の幅を固定して、その状態で render を n 回起こす。 */
+  async function pinned(width: number, renders: number): Promise<string[]> {
+    const { d, root, said } = boot();
+    const row = root.querySelector<HTMLElement>('[data-pkc-region="split-row"]');
+    row!.getBoundingClientRect = () => ({ width, height: 300 }) as DOMRect;
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'b' });
+    for (let i = 0; i < renders; i += 1) d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await settle();
+    return said;
+  }
+
+  /**
+   * 🔴 **同じことを繰り返し言わない**(R-2)。
+   * ⚠ 帯は 1 行しかなく(`main.ts` の `noticeLine`)、**押した答えを上書きする** ──
+   *   畳んだまま何か dispatch するたびに言うと、user がコピーして出た
+   *   「コピーしました」が**次の ack で必ず消える**。
+   *   🔑 段組み側は同じ事故を踏んで直してある(`read-columns.ts` の `noteFoldState`)。
+   */
+  it('🔴 畳んだまま何度描き直しても、理由は 1 度しか言わない', async () => {
+    const said = await pinned(1100, 3);
+    // ⚠ 空振り防止 ── 1 度も言っていないなら「1 度だけ」は自明に通る
+    expect(said.length, '1 度も言っていない(台の空振り)').toBeGreaterThan(0);
+    expect(said, '描き直すたびに言っている ── 帯が他の知らせを潰す').toHaveLength(1);
+  });
+
+  /**
+   * 🔴 **「0 枚畳みました」と言わない**(R-3)。
+   * ⚠ 畳んだ状態から広げて戻ると `dropped` が 0 になる ──
+   *   そこで喋ると「幅が足りないので、横に並べる枠を **0 枚**畳みました」という
+   *   意味の通らない帯が出る。
+   */
+  it('🔴 広げて戻したとき「0 枚畳みました」と言わない', async () => {
+    const { d, root, said } = boot();
+    const row = root.querySelector<HTMLElement>('[data-pkc-region="split-row"]');
+    let w = 1100;
+    row!.getBoundingClientRect = () => ({ width: w, height: 300 }) as DOMRect;
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'b' });
+    await settle();
+    expect(said, '畳んだ側が言っていない(台の空振り)').toHaveLength(1);
+
+    w = 1200; // 広げて戻す
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await settle();
+    expect(
+      root.querySelectorAll('[data-pkc-split-lid]').length,
+      '広げたのに枠が戻っていない(台の空振り)',
+    ).toBeGreaterThan(0);
+    expect(said.filter((t) => t.includes('0 枚')), '「0 枚畳みました」と言った').toEqual([]);
+  });
+
+  /**
+   * 🔴 **境目は文字の大きさに載る**(R-4 / #509)。
+   * ⚠ 測った `fontPx` を捨てて標準(13px)を使う変異が **SURVIVED** だった ──
+   *   特大(17px)の user は 1 枠 586px 要るのに 448px で判定され、
+   *   **読めない幅まで枠が並ぶ**。
+   * 🔑 器の `font-size` を変えて、**同じ幅で答えが変わる**ことを見る。
+   */
+  it('🔴 同じ幅でも、文字が大きければ枠が入らない', async () => {
+    const wide = await framesAt(1100, '13px'); // 閾値 912 → 2 枠入る
+    const big = await framesAt(1100, '17px'); // 閾値 1187.7 → 1 枠しか入らない
+    expect(wide, '標準の文字で 2 枠入っていない(台の空振り)').toBe(2);
+    expect(big, '特大の文字なのに標準の閾値で判定している').toBe(1);
+  });
+
+  async function framesAt(width: number, fontSize: string): Promise<number> {
+    const { d, root } = boot();
+    const row = root.querySelector<HTMLElement>('[data-pkc-region="split-row"]');
+    row!.getBoundingClientRect = () => ({ width, height: 300 }) as DOMRect;
+    row!.style.fontSize = fontSize;
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'b' });
+    await settle();
+    // 主の枠 + 留めた枠 の合計(主は `data-pkc-split-main`)
+    return root.querySelectorAll('[data-pkc-split-lid]').length + 1;
+  }
 });

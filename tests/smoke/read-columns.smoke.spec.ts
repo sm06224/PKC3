@@ -1082,11 +1082,15 @@ test('🔴 窓を狭めて段組みが畳まれると、理由が帯に出る (#
 
   const status = page.locator('[data-pkc-region="status"]');
   // ⚠ 縮める**前**に帯が出ていないこと(後で出た文字が最初から在った、を作らない)
-  await expect(status).not.toContainText('幅が足りない');
+  // ⚠ **文言を丸ごと当てる**(#606 の 2 巡目レビュー R-10)── 口を 1 つに寄せたので
+  //   「幅が足りない」は**枠の帯**(「…横に並べる枠を N 枚畳みました」)にも当たる。
+  //   この spec は枠を 1 枚も留めないので今は空振りしないが、将来足したときに
+  //   **別の口に満たされる**(CLAUDE.md §1「救い手が変わっただけ」)。
+  await expect(status).not.toContainText('幅が足りないので段組みをやめました');
 
   // 🔴 912px を割る幅へ縮める
   await page.setViewportSize({ width: 700, height: 900 });
-  await expect(status, '畳まれたのに理由が出ない').toContainText('幅が足りない');
+  await expect(status, '畳まれたのに理由が出ない').toContainText('幅が足りないので段組みをやめました');
   await expect(
     page.locator('[data-pkc-view-pane="detail"]'),
     '帯は出たが段組みは畳まれていない(帯が嘘)',

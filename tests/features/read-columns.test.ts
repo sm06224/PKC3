@@ -10,6 +10,7 @@
  * ⑤ 🔴 **縦のホイールが横送りになる**(無いとマウスだけで読めない)
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { setFoldNotify } from '../../src/adapter/ui/render/fold-notify';
 import { initialState } from '../../src/adapter/state/app-state';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { SettingsRenderer } from '../../src/adapter/ui/render/settings';
@@ -34,7 +35,6 @@ import { TEXT_SCALES } from '../../src/features/text-scale';
 import {
   applyReadColumns,
   resetColumnFoldState,
-  setColumnFoldNotify,
   chooseReadColumns,
   columnScroller,
   currentReadColumns,
@@ -917,12 +917,12 @@ describe('🔴 段組みを畳んだら理由を言う(#551)', () => {
 
   beforeEach(() => {
     resetColumnFoldState();
-    setColumnFoldNotify(null);
+    setFoldNotify(null);
   });
 
   it('🔴 広い → 狭い で「幅が足りない」と出て、要る幅を px で言う', () => {
     const said: string[] = [];
-    setColumnFoldNotify((t) => said.push(t));
+    setFoldNotify((t) => said.push(t));
     const { root, wide } = setup();
     applyReadColumns(document.documentElement, '3');
 
@@ -957,7 +957,7 @@ describe('🔴 段組みを畳んだら理由を言う(#551)', () => {
 
   it('🔴 狭い → 広い で「戻した」と出る(片道にしない)', () => {
     const said: string[] = [];
-    setColumnFoldNotify((t) => said.push(t));
+    setFoldNotify((t) => said.push(t));
     const { root, wide } = setup();
     applyReadColumns(document.documentElement, '2');
     wide(1400);
@@ -973,7 +973,7 @@ describe('🔴 段組みを畳んだら理由を言う(#551)', () => {
 
   it('⚠ 同じ状態が続く間は黙る(仕切りを動かすたびに帯を出さない)', () => {
     const said: string[] = [];
-    setColumnFoldNotify((t) => said.push(t));
+    setFoldNotify((t) => said.push(t));
     const { root, wide } = setup();
     applyReadColumns(document.documentElement, '2');
     wide(700);
@@ -996,7 +996,7 @@ describe('🔴 段組みを畳んだら理由を言う(#551)', () => {
    */
   it('🔴 1 段 → 2 段 と自分で選んだときは「戻しました」と言わない', () => {
     const said: string[] = [];
-    setColumnFoldNotify((t) => said.push(t));
+    setFoldNotify((t) => said.push(t));
     const { root, wide } = setup();
     applyReadColumns(document.documentElement, '1');
     wide(1400);
@@ -1009,7 +1009,7 @@ describe('🔴 段組みを畳んだら理由を言う(#551)', () => {
 
   it('⚠ 1 段を選んでいるときは言わない(畳まれたのではなく、そう選んでいる)', () => {
     const said: string[] = [];
-    setColumnFoldNotify((t) => said.push(t));
+    setFoldNotify((t) => said.push(t));
     const { root, wide } = setup();
     applyReadColumns(document.documentElement, '2');
     wide(1400);
@@ -1022,7 +1022,7 @@ describe('🔴 段組みを畳んだら理由を言う(#551)', () => {
 
   it('⚠ 面が居ない回は状態を触らない(2 ペイン編集から戻って帯が出ない)', () => {
     const said: string[] = [];
-    setColumnFoldNotify((t) => said.push(t));
+    setFoldNotify((t) => said.push(t));
     const { root, live, wide } = setup();
     applyReadColumns(document.documentElement, '2');
     wide(1400);

@@ -7,7 +7,7 @@
  *
  * | 何を畳んだか | 口 | 状態 |
  * |---|---|---|
- * | 本文の段組み | `read-columns.ts` の module 変数 | 🟢 `main.ts:870` で配線されていた |
+ * | 本文の段組み | `read-columns.ts` の module 変数 | 🟢 `main.ts:873` で配線されていた |
  * | 横に並べた枠 | `SplitView` の**コンストラクタ引数** | 🔴 **`main.ts` が渡していなかった** |
  *
  * ⚠ 後者は**文言も受け口も在った**のに、`main.ts` が `CenterRouter` を 5 引数で
