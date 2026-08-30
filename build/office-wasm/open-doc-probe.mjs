@@ -33,6 +33,9 @@
  *     PKC3_MENU_SHOT=/path.png               🔑 コピーの**後**の `編集` を撮る
  *                                            (`形式を選択して貼り付け` の灰色 = #121 の肝)
  *     PKC3_PRE_PASTE_SHOT=/path.png          貼る直前(選択が畳めたか)
+ *     PKC3_FRAMES=1                          🔴 **保存に依らない判定**を併せて採る
+ *                                            (版面が変わったか。file 側の対照群は 4/11 しか
+ *                                             成立しないが、こちらは 11/11 で成立する)
  *   PKC3_MENU_OPEN=<キー> メニューを 1 つ開いて撮るだけ(例 `Alt+i`)
  *     PKC3_MENU_ITEM=<キー>                  項目まで選ぶ(⚠ **日本語 UI の近道キー**)
  *     PKC3_MENU_SHOT=/path.png
@@ -216,6 +219,16 @@ const STACKS = process.env.PKC3_STACKS === '1';
  */
 const REDRAW = process.env.PKC3_REDRAW === '1';
 const PASTE = process.env.PKC3_PASTE === '1';
+/**
+ * 🔴 **版面を撮ってよいか**(#121、2026-08-30)。
+ *
+ * ⚠ 撮影の口は「呼ばない」ではなく **「渡さなければ撮れない形にする」**
+ * (機密資料の取り扱い 6)。だから既定は `false` で、下の `framesOf` は
+ * この 3 つのどれも渡っていない回に **`null`** を返す ── 兄弟の
+ * `save-existing-probe.mjs` の `PKC3_FRAMES` と綴りを揃えた。
+ * ⚠ 出るのは sha256 の先頭 16 桁だけ(PNG は保存しない)。
+ */
+const FRAMES = process.env.PKC3_FRAMES === '1';
 /** ⚠ `qt-window` は shadow root の中にも生えるので、**潜って**数える。 */
 const COUNT_QT_WINDOWS = () => {
   let n = 0;
@@ -896,7 +909,7 @@ try {
   const framesOf = async (clip, n = 5) => {
     const set = new Set();
     for (let i = 0; i < n; i += 1) {
-      const png = IME || REDRAW ? await page.screenshot({ clip }) : null;
+      const png = IME || REDRAW || FRAMES ? await page.screenshot({ clip }) : null;
       if (png === null) return null;
       set.add(createHash('sha256').update(png).digest('hex').slice(0, 16));
       await page.waitForTimeout(400);
@@ -1181,11 +1194,70 @@ try {
    * | `pasted.count === 1` | コピーか貼り付けのどちらかが効いていない |
    * | `hungAt` が非 null | 🔴 **主スレッドが返ってこない**(候補 1 の裏取り) |
    */
+  /**
+   * 🔴 **引き金を割る第 3 の腕**(#117、2026-08-30)。
+   *
+   * 実測: **押す群 5/10 で fault / 押さない群 0/10**。⚠ ただし 2 群の差は
+   * 「押したか」だけではない ── 押す群は**その直前に版面の位置を採る**
+   * (`CANVAS_BOX` = shadow root を歩く `evaluate`)。
+   * 🔑 だから**位置だけ採って押さない**腕を作る。ここが 0 なら、引き金は**クリック**である。
+   * ⚠ この腕は `PKC3_BOX_ONLY=1` の回だけ走る(既定では何もしない)。
+   */
+  if (process.env.PKC3_BOX_ONLY === '1' && result.opened) {
+    mark('位置だけ採る');
+    try {
+      result.boxOnly = { box: await canvasBox() };
+      await page.waitForTimeout(20000);
+      result.boxOnly.waited = true;
+    } catch (e) {
+      result.boxOnly = { err: safeErr(e) };
+    }
+  }
   if (PASTE && result.opened) {
     mark('貼り付けの門');
     const NEEDLE = 'ZULU9';
     const paste = { clicked: false, hungAt: null };
     result.paste = paste;
+    /**
+     * 🔴 **版面が固まったら「判定不能」で戻る**(#121、2026-08-30 に実測)。
+     *
+     * ⚠ 4 回に 1 度ほど、貼り付けの門で **renderer が 100%% CPU / 1.1 GB** のまま
+     *   戻らなくなる(実測 102%% / 1,128 MB。#624 の見張りが 840 秒で切るまで固まり、
+     *   止まった段は `貼り付けの門`・`screen` は空だった)。
+     * 🔴 **そのとき「貼れていない」と読んではいけない** ── 固まっているのは
+     *   版面であって、クリップボードの橋ではない(CLAUDE.md §4「対照群が崩れた回を
+     *   結果として数えない」)。
+     * 🔑 だから**節目ごとに息を確かめる** ── `page.evaluate` に既定の締切は
+     *   無いので、**自分で競走させる**。⚠ 固まった回はここで打ち切る
+     *   (以降の `evaluate` も `screenshot` も同じように返らないため)。
+     */
+    class Wedged extends Error {}
+    const mustBeAlive = async (label) => {
+      const ok = await Promise.race([
+        page.evaluate('1').then(() => true, () => false),
+        new Promise((r) => setTimeout(() => r(false), 8000)),
+      ]);
+      if (ok !== true) {
+        paste.wedgedAt = label;
+        throw new Wedged(label);
+      }
+    };
+    /**
+     * 🔑 **撮る所も競走させる** ── 固まった版面では `screenshot` も返らない。
+     * ⚠ 返す `null` は `swapped()` が「**採れていない**」と読むので、そのまま
+     *   **判定不能**へ倒れる(空配列にしない ── 空だと「変わった」と誤読する)。
+     */
+    const shotsOrNull = async (label, clip) => {
+      const r = await Promise.race([
+        framesOf(clip).catch(() => null),
+        new Promise((res) => setTimeout(() => res('HUNG'), 20000)),
+      ]);
+      if (r === 'HUNG') {
+        paste.hungAt = paste.hungAt ?? label;
+        return null;
+      }
+      return r;
+    };
     /** ⚠ 保存が走らなかった回を「入っていない」と読まないための読み口。 */
     const readSaved = async (label) => {
       try {
@@ -1208,12 +1280,77 @@ try {
         await page.mouse.click(box.x + box.w * fx, box.y + box.h * fy);
         paste.clicked = true;
         await page.waitForTimeout(2500);
+        await mustBeAlive('押した後');
+        /**
+         * 🔴 **保存に依らない観測点を、同じ回で併せて採る**(#121、2026-08-30)。
+         *
+         * ⚠ ここまでの判定は**保存された file の中に字が在るか**だけで採っていたが、
+         *   実測でその対照群は **4/11** しか成立しない ── 打鍵は **11/11** 版面に
+         *   届いているのに、file が 30 秒動かない回がある。つまり
+         *   **7 回に 1 度も読めない計器**で #121 を測っていた。
+         * 🔑 だから**版面が変わったか**を併せて採る(11/11 で成立する)。
+         * ⚠ **file 側を捨てない** ── 版面は「変わった」しか言えず、
+         *   **何が入ったかは言えない**(字は読まない)。**2 つは別のことを主張する**
+         *   ので、どちらも出して読み手に分けさせる。
+         * ⚠ 撮れるのは `PKC3_FRAMES=1` を渡した回だけ(撮影の口は渡さない形)。
+         */
+        const clip = { x: box.x, y: box.y, width: box.w, height: box.h };
+        const screen = {
+          ...(FRAMES ? {} : { why: 'PKC3_FRAMES=1 を渡していないので版面を見ていない' }),
+        };
+        paste.screen = screen;
         // 🔑 **基準** ── 打つ前の大きさ。保存が走ったかを、これとの差で見る
         paste.base = await readSaved('base');
+        const screenBase = await shotsOrNull('基準を撮る', clip);
         await page.keyboard.type(NEEDLE, { delay: 120 });
         await page.waitForTimeout(1500);
+        /**
+         * 🔑 **対照群(版面)** ── 打鍵が届いたか。
+         * ⚠ 保存の**前**に採る ── 後に採ると「保存が版面を変えた」と混ざる
+         *   (実測で `saveChangedScreen` は真になる)。
+         */
+        screen.typedOnScreen = swapped(screenBase, await shotsOrNull('打鍵の後を撮る', clip));
+        await mustBeAlive('打鍵の後');
         await save();
-        // 🔑 **対照群** ── ここが 1 でなければ、以降は全部読めない
+        /**
+         * 🔴 **仮説を殺す 1 手**(#121、2026-08-30)。
+         *
+         * ⚠ 落ちる回には**形がある**(実測 3 腕 10 回):失敗した 2 回は
+         *   どちらも「**打鍵は版面に出た(`typedOnScreen: true`)のに、
+         *   その後の `Ctrl+S` も `Ctrl+V` も効かない**」だった。
+         *   ⚠ しかも `page.evaluate('1')` は返る(息はある)。
+         * 🔑 打った字は**素のキー**、効かないのは**全部 `Ctrl` 併用**である ──
+         *   だから仮説は「**修飾キーの経路だけが落ちる**」。
+         * ⚠ この 1 手はその仮説が真なら**必ず真になる**(素の打鍵は通る):
+         *   偽なら false になり、仮説ごと落ちる。
+         * ⚠ 入れる字は判定に使う綴り(`ZULU9` / `OUTSIDE7`)と重ならない物にする。
+         */
+        if (paste.saveWaitedMs === null) {
+          const before = await shotsOrNull('素の打鍵の前', clip);
+          await page.keyboard.type('Q', { delay: 120 });
+          await page.waitForTimeout(1500);
+          screen.plainAfterFailedSave = swapped(before, await shotsOrNull('素の打鍵の後', clip));
+          /**
+           * 🔴 **仮説の切り分け ── 落ちているのは LO か、こちらの打ち方か**(#121)。
+           *
+           * ⚠ 前段で分かったのは「**素のキーは通り、`Ctrl` 併用だけ通らない**」である。
+           *   そこには 2 つの読みがある:
+           *     ① LO / Qt が修飾つきの鍵を処理しなくなった(製品の話)
+           *     ② Playwright の `press('Control+s')` の出し方が届かなくなった(計器の話)
+           * 🔑 だから**同じ意味の別の出し方**を 1 回だけ試す ── `down` / `press` / `up` に
+           *   分けて撃つ。⚠ これが通れば**②**、通らなければ**①**である。
+           * ⚠ どちらでも本文は汚さない(`Ctrl+S` は保存であって字を入れない)。
+           */
+          const st0 = await page.evaluate(WORK_STAT).catch(() => null);
+          await page.keyboard.down('Control');
+          await page.keyboard.press('s');
+          await page.keyboard.up('Control');
+          await page.waitForTimeout(6000);
+          const st1 = await page.evaluate(WORK_STAT).catch(() => null);
+          screen.splitModifierSaved =
+            st0 !== null && st1 !== null && (st0.mtimeMs !== st1.mtimeMs || st0.size !== st1.size);
+        }
+        // 🔑 **対照群(file)** ── ここが 1 でなければ、file 側は全部読めない
         paste.typed = await readSaved('typed');
         const via = process.env.PKC3_PASTE_VIA ?? 'keys';
         paste.via = via;
@@ -1320,6 +1457,16 @@ try {
         if (process.env.PKC3_PRE_PASTE_SHOT) {
           await page.screenshot({ path: process.env.PKC3_PRE_PASTE_SHOT });
         }
+        /**
+         * ⚠ 版面の基準は**貼る直前**に採り直す(打つ前ではない)── 間にコピーと
+         *   選択畳みが入っているので、そこを跨ぐと「貼れた」を**選択の見た目**で
+         *   満たしてしまう。
+         * ⚠ **窓の数も採る** ── 版面が変わった理由が「ダイアログが出た」ことも
+         *   ありうる。ここで要るのは**増えていないこと**だけである。
+         */
+        await mustBeAlive('貼る直前');
+        const screenPreP = await shotsOrNull('貼る直前を撮る', clip);
+        screen.winBefore = await countWindows();
         if (via === 'menu') {
           paste.menuPaste = await menuPick('p');
         } else {
@@ -1327,12 +1474,51 @@ try {
           await page.keyboard.press('Control+v');
         }
         await page.waitForTimeout(2500);
+        screen.pastedOnScreen = swapped(screenPreP, await shotsOrNull('貼った後を撮る', clip));
+        screen.winAfter = await countWindows();
         await save();
         paste.pasted = await readSaved('pasted');
         const t = paste.typed?.count ?? null;
         const c = paste.copied?.count ?? null;
         const v = paste.pasted?.count ?? null;
         paste.controlLanded = t === 1 && paste.base?.size !== paste.typed?.size;
+        /**
+         * 🔴 **版面側の判定**(file の判定とは**別に**出す)。
+         *
+         * ⚠ 言えることの範囲を狭く書く ── 版面は「変わった」しか言わないので、
+         *   **「貼れた」とは書かない**(何が入ったかを見ていない)。
+         * ⚠ 窓が増減した回は読まない ── ダイアログが出ただけでも版面は変わる。
+         */
+        /**
+         * 🔴 **メニューが開いていない回を読まない**(2026-08-30 に踏みかけた)。
+         *
+         * ⚠ `menu` の腕は `Alt+E` → `p` の 2 手だが、**`Alt+E` が効かない回**がある
+         *   (実測 2 回:窓の数が `before` から動いていない)。そのとき続く `y` / `p` は
+         *   **ただの字として本文に入る** ── 版面は変わるので、
+         *   🔴 **「貼り付けで版面が変わった」に化ける**。
+         * ⚠ 危うくそのまま「メニュー経由は 4/4 で貼れた」と報告するところだった
+         *   (実際は 2 回が字の入力)。CLAUDE.md §4「観測点が放っておいても変わるなら、
+         *   変化は届いた証拠にならない」の顔違いである。
+         */
+        const menuOpened =
+          via !== 'menu' ||
+          (typeof paste.menuPaste?.opened === 'number' &&
+            typeof paste.menuPaste?.before === 'number' &&
+            paste.menuPaste.opened > paste.menuPaste.before);
+        screen.menuOpened = menuOpened;
+        screen.verdict = !FRAMES
+          ? '見ていない'
+          : screen.typedOnScreen !== true
+            ? '判定不能(打鍵が版面に届いていない)'
+            : !menuOpened
+              ? '判定不能(メニューが開いていない ── 続く鍵は字として入る)'
+              : screen.winAfter !== screen.winBefore
+                ? `判定不能(窓が ${String(screen.winBefore)} → ${String(screen.winAfter)} に変わった)`
+                : screen.pastedOnScreen === true
+                  ? '貼り付けで版面が変わった(何が入ったかは言えない)'
+                  : screen.pastedOnScreen === false
+                    ? '貼り付けで版面は変わらなかった'
+                    : '判定不能(版面を採れなかった)';
         if (via === 'browser') {
           /**
            * 🔑 数えるのは**外から置いた字**である(打った字ではない)。
@@ -1373,7 +1559,39 @@ try {
       }
     } catch (e) {
       paste.err = safeErr(e);
+      /**
+       * 🔑 **固まった回は、両方の判定を「判定不能」で塗る。**
+       * ⚠ 片方だけ塗ると、もう片方の**古い値が結果として読まれる**。
+       */
+      if (typeof paste.wedgedAt === 'string') {
+        paste.verdict = `判定不能(版面が固まった: ${paste.wedgedAt})`;
+        if (paste.screen) paste.screen.verdict = paste.verdict;
+      }
     }
+  }
+  /**
+   * 🔴 **host は落ちたことを user に言えたか**(#121 / #117、2026-08-30)。
+   *
+   * ⚠ `host.html` は `window.onerror` で `memory access out of bounds` を拾って
+   *   `died()` を出す**はず**である。⚠ しかし probe には
+   *   `[pageerror] RuntimeError: memory access out of bounds` が上がっているのに、
+   *   **その回でも打鍵は版面に届いていた** ── つまり
+   *   「拾えたか」を**確かめずに「拾えるはず」と書いてはいけない**。
+   * 🔑 だから**帯の字をそのまま読む** ── `準備中…` / `表示中` / `停止` / `不安定`。
+   */
+  try {
+    result.hostBar = await Promise.race([
+      page.evaluate(`(() => {
+        const t = (id) => {
+          const el = document.getElementById(id);
+          return el === null ? null : { text: (el.textContent || '').slice(0, 120), hidden: el.hidden === true };
+        };
+        return { status: t('status'), warn: t('warn'), msg: t('msg') };
+      })()`),
+      new Promise((r) => setTimeout(() => r({ hung: true }), 8000)),
+    ]);
+  } catch (e) {
+    result.hostBar = { err: safeErr(e) };
   }
   /**
    * 🔴 **詰まっている相手を「名前で」言う ── 全 worker の stack を 1 枚撮る**
