@@ -287,13 +287,33 @@ describe('消したノートの枠は残らない', () => {
  * `measure` は `getBoundingClientRect().width` が 0 なら `null` を返し、
  * `fitCount` は「**測れないなら減らさない**」で `wanted` を返す ──
  * つまり素の happy-dom では**畳みが 1 度も起きない**(だから台が書けなかった)。
- * 🔑 器の `getBoundingClientRect` だけを差して、**畳みが実際に起きる幅**を作る。
+ * 🔑 **面**(`[data-pkc-view-pane="detail"]`)の `getBoundingClientRect` を差して、
+ * **畳みが実際に起きる幅**を作る。
+ *
+ * ⚠ **差す先は器ではなく面である**(#608 で移した)── 器(`split-row`)は
+ * 何も並べていない間 `display: contents` で幅 0 なので、そこを測っていたせいで
+ * **押すたびに 0 枚 ⇄ 3 枚で入れ替わっていた**。
+ * 🔑 差す口は `sizePane` **1 つ**にしてある(4 か所に散らすと、移した日に
+ * 直し漏れた台だけが静かに空振りする)。
  */
+/**
+ * 面の幅を固定する(happy-dom は採寸しないため)。
+ *
+ * @returns 後から幅を書き換える口 ── 「広げて戻す」を書くのに要る
+ */
+function sizePane(root: HTMLElement, width: number): (next: number) => void {
+  const pane = root.querySelector<HTMLElement>('[data-pkc-view-pane="detail"]');
+  expect(pane, '面が無い(台の前提が崩れている)').not.toBeNull();
+  let w = width;
+  pane!.getBoundingClientRect = () => ({ width: w, height: 300 }) as DOMRect;
+  return (next: number) => {
+    w = next;
+  };
+}
+
 describe('枠を畳んだ理由を帯に出す(#606)', () => {
   it('🔴 幅が足りなくて枠を減らしたら、その理由が帯に出る', async () => {
     const { d, root, said } = boot();
-    const row = root.querySelector<HTMLElement>('[data-pkc-region="split-row"]');
-    expect(row, '器が無い(台の前提が崩れている)').not.toBeNull();
     /**
      * ⚠ **数字は実測で書く**(2 巡目レビュー R-6)。1 稿目は「1 枠 448px」と
      *   書いていたが、それは**標準の文字(13px)のとき**の値である ──
@@ -303,7 +323,7 @@ describe('枠を畳んだ理由を帯に出す(#606)', () => {
      * 🔑 だから**境目のすぐ下**を使う ── 適当に小さい値だと、
      *   「採寸が死んでいても畳む」形と区別できない(R-5)。
      */
-    row!.getBoundingClientRect = () => ({ width: 1100, height: 300 }) as DOMRect;
+    sizePane(root, 1100);
 
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
     d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'b' });
@@ -322,7 +342,6 @@ describe('枠を畳んだ理由を帯に出す(#606)', () => {
   /** ⚠ **対照群** ── 広ければ黙る(何にでも喋る実装を落とす)。 */
   it('⚠ 幅が足りていれば何も言わない', async () => {
     const { d, root, said } = boot();
-    const row = root.querySelector<HTMLElement>('[data-pkc-region="split-row"]');
     /**
      * 🔑 **境目のすぐ上**(1118.8px)を使う(2 巡目レビュー R-5)。
      * ⚠ 1 稿目は 2000px で、**採寸が完全に死んでいても緑**だった
@@ -331,7 +350,7 @@ describe('枠を畳んだ理由を帯に出す(#606)', () => {
      * 🔑 境目のすぐ上下に置くと、①採寸が読まれていること
      *   ②境目が文字の大きさに載っていること(R-4)を**同時に**見られる。
      */
-    row!.getBoundingClientRect = () => ({ width: 1200, height: 300 }) as DOMRect;
+    sizePane(root, 1200);
 
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
     d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'b' });
@@ -354,8 +373,7 @@ describe('枠を畳んだ帯の作法(#606)', () => {
   /** 器の幅を固定して、その状態で render を n 回起こす。 */
   async function pinned(width: number, renders: number): Promise<string[]> {
     const { d, root, said } = boot();
-    const row = root.querySelector<HTMLElement>('[data-pkc-region="split-row"]');
-    row!.getBoundingClientRect = () => ({ width, height: 300 }) as DOMRect;
+    sizePane(root, width);
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
     d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'b' });
     for (let i = 0; i < renders; i += 1) d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
@@ -385,15 +403,13 @@ describe('枠を畳んだ帯の作法(#606)', () => {
    */
   it('🔴 広げて戻したとき「0 枚畳みました」と言わない', async () => {
     const { d, root, said } = boot();
-    const row = root.querySelector<HTMLElement>('[data-pkc-region="split-row"]');
-    let w = 1100;
-    row!.getBoundingClientRect = () => ({ width: w, height: 300 }) as DOMRect;
+    const widen = sizePane(root, 1100);
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
     d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'b' });
     await settle();
     expect(said, '畳んだ側が言っていない(台の空振り)').toHaveLength(1);
 
-    w = 1200; // 広げて戻す
+    widen(1200); // 広げて戻す
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
     await settle();
     expect(
@@ -419,13 +435,146 @@ describe('枠を畳んだ帯の作法(#606)', () => {
 
   async function framesAt(width: number, fontSize: string): Promise<number> {
     const { d, root } = boot();
-    const row = root.querySelector<HTMLElement>('[data-pkc-region="split-row"]');
-    row!.getBoundingClientRect = () => ({ width, height: 300 }) as DOMRect;
-    row!.style.fontSize = fontSize;
+    sizePane(root, width);
+    // ⚠ 文字の大きさも**面**に置く(採寸と同じ元から読むため)
+    root.querySelector<HTMLElement>('[data-pkc-view-pane="detail"]')!.style.fontSize = fontSize;
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
     d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'b' });
     await settle();
     // 主の枠 + 留めた枠 の合計(主は `data-pkc-split-main`)
     return root.querySelectorAll('[data-pkc-split-lid]').length + 1;
   }
+});
+
+/**
+ * 🔴 **狭い窓で枠が入れ替わり続ける / 窓を狭めても畳まない**(#608)。
+ *
+ * ## user から見て何が起きていたか
+ *
+ * ノートを 2 枚「横に留める」で並べ、900px の窓で左の一覧を押すと ──
+ * **1 回目 0 枚 / 2 回目 3 枚 / 3 回目 0 枚 / 4 回目 3 枚**と交互に入れ替わり、
+ * 画面には 1 文字も出なかった。そして**窓を狭めただけでは畳まなかった**
+ * (1 枠の下限 448px なのに、900px の窓で **203px の枠が 3 枚**残る)。
+ *
+ * ## 原因は 1 つ ── **測る先が器だった**
+ *
+ * 何も並べていない間、器(`split-row`)は `display: contents` なので幅 **0**。
+ * `measure` は 0 で `null` を返し、`fitCount` は「測れないなら減らさない」で
+ * `wanted` を返す ── **畳んだ次は全部戻し、その次は全部畳む**。
+ *
+ * ⚠ **happy-dom では振動そのものは再現しない**(器はいつでも 0 なので、
+ * 直す前は「常に全部出る」side に貼り付く)。🔑 だからここで見るのは
+ * **「器ではなく面を測っていること」**であり、⚠ 振動そのものは
+ * `tests/smoke/split-frames.smoke.spec.ts` が実ブラウザで見る。
+ */
+describe('枠の畳みは面の幅で決める(#608)', () => {
+  /** 主 + 留めた枠の合計。 */
+  function count(root: HTMLElement): number {
+    return root.querySelectorAll('[data-pkc-split-lid]').length + 1;
+  }
+
+  async function pinTwo(d: Dispatcher): Promise<void> {
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'b' });
+    await settle();
+  }
+
+  /**
+   * 🔴 **器が 0 でも、面が測れれば畳む。**
+   *
+   * ⚠ 器の幅は**明示的に 0 に差す** ── happy-dom の既定に頼ると、
+   *   「たまたま 0 だった」のか「`display: contents` を再現している」のかが
+   *   読めない(台が何を主張しているか字で残す)。
+   */
+  it('🔴 器が幅 0(display: contents)でも、面の幅で畳む', async () => {
+    const { d, root } = boot();
+    const row = root.querySelector<HTMLElement>('[data-pkc-region="split-row"]');
+    expect(row, '器が無い(台の前提が崩れている)').not.toBeNull();
+    row!.getBoundingClientRect = () => ({ width: 0, height: 0 }) as DOMRect;
+    sizePane(root, 1100); // 境目 1118.8px のすぐ下 → 1 枠しか入らない
+    await pinTwo(d);
+    expect(count(root), '器の 0 を読んで「減らさない」へ落ちている').toBe(1);
+  });
+
+  /**
+   * 🔴 **対照群 ── 器がいくら広くても、面が狭ければ畳む。**
+   *
+   * ⚠ これが無いと、上の 1 件は「器を読んでいるが、たまたま 0 だから畳んだ」でも通る。
+   *   🔑 器を**わざと広く**して、答えが器に載っていないことを見る。
+   */
+  it('🔴 器を広く差しても、面が狭ければ畳む(器は読んでいない)', async () => {
+    const { d, root } = boot();
+    const row = root.querySelector<HTMLElement>('[data-pkc-region="split-row"]');
+    row!.getBoundingClientRect = () => ({ width: 4000, height: 300 }) as DOMRect;
+    sizePane(root, 1100);
+    await pinTwo(d);
+    expect(count(root), '器の幅で判定している').toBe(1);
+  });
+
+  /** ⚠ 空振り防止 ── 面が広ければ 2 枠出る(この台が何も畳まないわけではない)。 */
+  it('⚠ 面が広ければ 2 枠出る(台の空振り防止)', async () => {
+    const { d, root } = boot();
+    sizePane(root, 1200); // 境目のすぐ上
+    await pinTwo(d);
+    expect(count(root), '広いのに畳んでいる').toBe(2);
+  });
+
+  /**
+   * 🔴 **面の `padding` は引く**(`box-sizing: border-box` なので外寸に入っている)。
+   *
+   * ⚠ 引かないと、面の枠飾りのぶんだけ**中身より広く**見積もる ──
+   *   境目ちょうどで「入るはず」と読んで、実際には収まらない幅で並べる。
+   * 🔑 境目(1118.8px)を挟んで、`padding` があるとどちら側に落ちるかで見る。
+   */
+  it('🔴 面の padding を引いてから判定する', async () => {
+    const { d, root } = boot();
+    const pane = root.querySelector<HTMLElement>('[data-pkc-view-pane="detail"]');
+    // 外寸 1130 ── 素で読めば境目(1118.8)の上だが、左右 8px の余白を引くと 1114 で下
+    pane!.style.paddingLeft = '8px';
+    pane!.style.paddingRight = '8px';
+    sizePane(root, 1130);
+    await pinTwo(d);
+    expect(count(root), '外寸のまま判定している(余白を引いていない)').toBe(1);
+  });
+
+  /**
+   * 🔴 **窓の大きさが変わったら測り直す**(#608 のもう半分)。
+   *
+   * ⚠ 直す前は `SplitView.render` を呼ぶのが `center.ts` の 1 か所だけで、
+   *   **`ResizeObserver` が付いていなかった** ── 段組み側
+   *   (`installColumnFit`)には付いているのに、**片方だけ見ていなかった**。
+   * ⚠ happy-dom は `ResizeObserver` を持たないので、**偽物を差して**
+   *   「鳴らしたら測り直す」ところまでを見る。
+   */
+  it('🔴 面の幅が変わったら、鳴らされた時点で畳み直す', async () => {
+    const fired: (() => void)[] = [];
+    const g = globalThis as { ResizeObserver?: unknown };
+    const had = 'ResizeObserver' in g;
+    const prev = g.ResizeObserver;
+    g.ResizeObserver = class {
+      constructor(cb: () => void) {
+        fired.push(cb);
+      }
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    };
+    try {
+      const { d, root } = boot();
+      const widen = sizePane(root, 1200);
+      await pinTwo(d);
+      expect(count(root), '広いうちは 2 枠(台の空振り)').toBe(2);
+      // ⚠ **前提**: 見張りが 1 つ以上付いている(0 個なら以下は自明に通る)
+      expect(fired.length, '見張りが 1 つも付いていない').toBeGreaterThan(0);
+
+      widen(1100); // 狭める ── ⚠ dispatch は 1 度も起こさない
+      for (const cb of fired) cb();
+      await settle();
+      expect(count(root), '窓を狭めても畳まない(resize を見ていない)').toBe(1);
+    } finally {
+      if (had) g.ResizeObserver = prev;
+      else delete g.ResizeObserver;
+    }
+  });
+
 });
