@@ -244,3 +244,59 @@ print(sum(1 for f in d['files'] if f['filename'].endswith('/cui/ui/querydialog.u
 
 2 本同時に dispatch したら**片方が 4 時間 11 分**かかった(単独なら 29〜33 分)。
 runner を奪い合うので、**2 本が 2 倍ではなく 8 倍**になる。
+
+## 12. 🔴 詰め込みの命令行は **128 KiB** で切れる(2026-08-30、#591)
+
+焼きが `make` の 15 分で落ち、こう出た:
+
+```
+make[1]: *** [static/CustomTarget_emscripten_fs_image.mk:1985: … ] Error 127
+```
+
+⚠ **`Error 127` を「command not found」と読まない。** 実体は
+**`/bin/sh: Argument list too long`** で、make はこれを 127 で報告する。
+
+### なぜ起きるか
+
+上流の recipe は `--preload $(shell cat $^)` と書く ── **make が展開する**ので
+**数千の path が recipe の行にそのまま並ぶ**。recipe は `&&` / `||` を含むので
+make は `/bin/sh -c "<行まるごと>"` で起動する = **行全体が 1 引数**。
+
+🔑 ここで効くのは `ARG_MAX`(約 2MB)ではなく **`MAX_ARG_STRLEN` = 128 KiB**
+(1 引数の上限)である。⚠ **この違いを知らないと「件数が少ないから関係ない」と
+読み違える**(実際に 1 度そう判断して、正解を自分で潰した)。
+
+### 余裕を数える(足す前に)
+
+```bash
+python3 -c "
+import json; d=json.load(open('<pack>/soffice.data.js.metadata'))
+n=[f['filename'].lstrip('/') for f in d['files']]
+b=sum(len(x)+1 for x in n)
+print(f'{len(n):,} file / {b:,} byte / 128KiB まで残り {131072-b:,}')"
+```
+
+実測(LO 47104c82): **1,993 file = 130,251 byte ── 残り 821 byte しか無い**。
+⚠ **1 file 平均 65 byte なので、13 file 足せば溢れる。**
+
+### 直っている形(`patch-lo-fsimage-cmdline.py`)
+
+    --preload $(shell cat $^)   →   --preload $$(cat $^)
+
+展開を **make から shell へ移す** ── recipe の行が短いままなので、上限が
+`ARG_MAX`(約 2MB)側になる。⚠ 語の分割は変わらない(`$(shell …)` の出力も
+shell が分割していた)。
+
+### 🔑 手元で確かめる(30 秒。焼かなくてよい)
+
+```bash
+cd /tmp && for n in 129000 133000; do
+  printf 'all:\n\t@cd . && /bin/true %s || echo fallback\n' "$(head -c $n < /dev/zero | tr '\0' x)" > Mk
+  make -f Mk >/dev/null 2>&1; echo "$n -> exit=$?"
+done
+# 129000 -> exit=0 / 133000 -> exit=2(`Argument list too long` / Error 127)
+```
+
+⚠ **診断の grep はこの行を拾わない** ── `Argument list too long` には
+`error:` も `***` も無い。だから workflow の診断に「**落ちた行の手前 80 行**」を
+出す段を置いてある(2026-08-30)。**型に当たらないエラーこそ読みたい。**
