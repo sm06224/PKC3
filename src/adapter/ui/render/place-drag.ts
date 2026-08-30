@@ -13,6 +13,7 @@
  * (捨てないと、離した指の `click` が塊の中の押し物に落ちる)。
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
+import { lidOfNode } from '@adapter/ui/actions/lid-of-node';
 
 /** 押すと掴むの境目(px)。 */
 const DRAG_SLOP = 4;
@@ -96,7 +97,12 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
     }
     const lineRaw = d.block.getAttribute('data-pkc-place-line');
     const line = Number(lineRaw);
-    const lid = dispatcher.getState().openBody?.lid ?? null;
+    /**
+     * 🔴 **どの枠の板か**(#281 検算 2026-08-30)── 1 稿目は `openBody` だけを
+     * 見ていたので、**横に留めた枠**の付箋を動かすと主の枠のノートを相手にしていた。
+     * 引き方は `lid-of-node.ts` の 1 か所(`data-pkc-entry` / `data-pkc-split-lid`)。
+     */
+    const lid = lidOfNode(d.block, dispatcher.getState().openBody?.lid ?? null);
     /**
      * ⚠ 見た目は**常に**いったん戻す ── 書けた場合は BODY_REWRITTEN の再描画が
      * 正しい位置に置き直す。戻さないと、断られた drop(byte 不一致 / 行ずれ)で

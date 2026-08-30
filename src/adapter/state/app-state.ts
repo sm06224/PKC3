@@ -2905,13 +2905,21 @@ function reduceCore(
         };
       const meta = state.entryMetas.get(action.lid);
       if (!meta) return { state, events: [] };
-      if (!state.openBody || state.openBody.lid !== action.lid) return { state, events: [] };
+      /**
+       * 🔴 **画面に出ている本文は 1 つではない**(#281 検算 2026-08-30)。
+       * ⚠ 1 稿目は `openBody` だけを見ていたので、**横に留めた枠**の付箋は
+       *   ①主の枠が板でなければ黙って no-op ②主の枠も板なら**別のノートの
+       *   同じ行を書き換えうる**、の 2 つに落ちていた。
+       * 🔑 `screenBodyOf` が「その lid が、いま画面のどこに出ているか」を 1 か所で答える。
+       */
+      const shown = screenBodyOf(state, action.lid);
+      if (shown === null) return { state, events: [] };
       if (!Number.isInteger(action.x) || !Number.isInteger(action.y)) return { state, events: [] };
       if (action.x < 0 || action.y < 0) return { state, events: [] };
       // 🔑 開き行は**この場で**捕捉する(描画が焼いた行番号 → 画面が見ている本文の字)。
       //    disk 側とずれていれば movePlace が byte 一致で断る。
       if (!Number.isInteger(action.line) || action.line < 0) return { state, events: [] };
-      const openLine = state.openBody.body.split('\n')[action.line];
+      const openLine = shown.split('\n')[action.line];
       if (openLine === undefined || !isPlaceOpen(openLine)) return { state, events: [] };
       return {
         state,
@@ -4483,6 +4491,21 @@ function keepContacts(
 /**
  * 留めた枠の本文を 1 件落とす。⚠ **居なければ同じ Map を返す**(指紋を動かさない)。
  */
+/**
+ * 🔴 **その lid の本文が、いま画面のどこに出ているか**(#281 検算 2026-08-30)。
+ *
+ * 画面に本文が出る器は 2 つある ── **主の枠**(`openBody`。編集しうる 1 件)と
+ * **横に留めた枠**(`splitBodies`。映すだけの N 件)。⚠ どちらか一方しか見ない
+ * 判定を書くと、もう一方の枠の操作が**黙って別のノートへ落ちる**。
+ *
+ * @returns 出ていなければ `null`(呼び側は**書かずに返す** ── 画面に無い物の
+ *   行番号を信じて書くと、当てずっぽうで別の所を消す)。
+ */
+export function screenBodyOf(state: AppState, lid: string): string | null {
+  if (state.openBody && state.openBody.lid === lid) return state.openBody.body;
+  return state.splitBodies.get(lid) ?? null;
+}
+
 function dropSplitBody(
   bodies: ReadonlyMap<string, string>,
   lid: string,
