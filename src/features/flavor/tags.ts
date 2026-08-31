@@ -12,6 +12,7 @@
  * タグが効かない(§7 の型)。
  */
 import { parseFrontmatter } from '@features/markdown/frontmatter';
+import { hashRunWords, strandedHashWords } from './tag-words';
 
 /** 1 ノートのタグ数の上限。⚠ 上限が無いと、事故った本文が一覧を埋め尽くす。 */
 export const MAX_TAGS = 32;
@@ -35,7 +36,67 @@ function normalize(raw: string): string {
    * ⚠ 本文のタグ行から来る名前は `parseTagLine` が既に井桁を外しているので、
    *   ここは**打った字**にだけ効く(綴りの正本は 1 つのまま)。
    */
-  return raw.trim().replace(/^#+/, '').trim().replace(/\s+/g, ' ');
+  // ⚠ 井桁が空白を挟んで続く形(`# #買い物`)も落とす ── `/^#+/` だけだと
+  //    **`#買い物` という井桁つきの名前**が残る(2026-08-29 に直したはずの形が戻る)
+  return raw.trim().replace(/^[#\s]+/u, '').trim().replace(/\s+/g, ' ');
+}
+
+/**
+ * 🔴 **1 本の字を、いくつのタグとして読むか**(#637。user 裁定 2026-08-31)。
+ *
+ * > 「**#tag1 #tag2 ってすればいいやん**」
+ *
+ * ⚠ この 1 行で、それまでの案(カンマ・読点・セミコロンを足す)は**取り下げた** ──
+ * 区切りを 3 つ足すより、**user が実際に書く形を 1 つ通す**ほうが強い。
+ *
+ * ## 規則は 1 つ:**井桁が付いていれば、空白で区切る**
+ *
+ * | 打った字 | 何個 | なぜ |
+ * |---|---|---|
+ * | `#買い物 #家事` | **2** | 全部の語が `#` で始まる = 並べて書いている |
+ * | `買い物 家事` | **1**「買い物 家事」 | 🔴 **空白入りのタグは意図である**(下記) |
+ * | `買い物, 家事` | **2** | frontmatter が元から受けていた形(落とさない) |
+ * | `#買い物` | **1** | 語が 1 つなら井桁を外すだけ |
+ *
+ * 🔴 **空白だけでは割らない。** 空白入りのタグ名は事故ではなく意図で、
+ * `tests/features/tags.test.ts` と `bulk-tag.test.ts` が pin している。
+ * ⚠ しかも `encodeTags`(下)は索引の `|` を**空白へ変換する**ので、
+ *   こちら自身が空白入りの名前を**作る側**に居る ── 空白で割ると自分の索引を割る。
+ * 🔑 井桁が**全部の語に付いている**ときだけ割れば、その心配が消える。
+ *
+ * ⚠ **判定はここ 1 か所**(§7)── 打つ欄も frontmatter もここを通す。
+ *   欄だけに split を書くと、同じ字が場所によって 1 個にも 2 個にもなる。
+ */
+export function splitTags(raw: string): string[] {
+  const s = raw.trim();
+  if (s === '') return [];
+  // 🔑 **井桁の並びかどうかは `hashRunWords` 1 か所**(#637 の着地前レビュー B)──
+  //    ここに 2 本目の判定を書くと、同じ字が欄と `tags:` で別の個数になる
+  const words = hashRunWords(s) ?? strandedHashWords(s);
+  /**
+   * ⚠ 井桁の並びでないときは、これまでどおり**カンマだけ**で割る(空白は割らない)。
+   * 🔑 **角括弧は落とす**(着地前の動線レビュー F)── マニュアルは `tags:` の行に
+   *   `[#買い物, #家事]` と書く形を薦めているので、それを**欄へ貼る人が居る**。
+   *   落とさないと「[買い物」「家事]」という 2 つの名前ができる(実測)。
+   */
+  const bare = /^\[.*\]$/u.test(s) ? s.slice(1, -1) : s;
+  /**
+   * ⚠ **カンマは井桁の並びの中でも区切りである**(2 稿目で `#買い物,#家事` を落として判明)。
+   *   空白が 1 つも無いので語は 1 つになり、井桁の並びとしては割れない ── ここで
+   *   もう一度カンマで割らないと「買い物,#家事」という 1 つの名前になる。
+   */
+  const parts = (words ?? [bare]).flatMap((w) => w.split(','));
+  const out: string[] = [];
+  for (const part of parts) {
+    // ⚠ `#買い物, #家事` のように区切りを重ねて書かれることがある ── 末尾の
+    //    区切りらしき字は落とす(落とさないと「買い物,」という別のタグになる)
+    const t = normalize(part.replace(/[,、;；]+$/u, ''));
+    if (t === '' || [...t].length > MAX_TAG_CHARS) continue;
+    if (out.some((x) => sameTag(x, t))) continue;
+    out.push(t);
+    if (out.length >= MAX_TAGS) break;
+  }
+  return out;
 }
 
 /**
@@ -97,14 +158,28 @@ export function readTags(body: string): string[] {
   const { meta } = parseFrontmatter(body);
   const raw = meta.tags;
   if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    // ⚠ 文字列の形は **`splitTags` 1 か所**で読む(§7)── 打つ欄と規則を分けない。
+    //    これで `tags: #買い物 #家事` も打った欄と同じに 2 個として読める。
+    return splitTags(String(raw));
+  }
   /**
-   * ⚠ **空の要素は `null` で来る**(frontmatter の parser がそう返す)。
-   * そのまま `String()` すると **`"null"` という名前のタグ**が生まれる
-   * (test が捕まえた)── 値の無いものは先に落とす。
+   * 🔴 **配列の中身も割る**(#637 の着地前レビュー A。**これが元の不具合の本体**)。
+   *
+   * ⚠ 1 稿目は文字列の枝しか割っておらず、**user が既に持っているノートが直らなかった** ──
+   *   直す前の打つ欄は `normalizeTag('#買い物 #家事')` = **`買い物 #家事`** という
+   *   1 つの名前を作り、`,` を含まないので quote すらされずに
+   *   **`tags: ["買い物 #家事"]`** として保存されていた(実測)。
+   *   つまり「一つになってしまう」と報告された当のノートが、1 稿目では 1 個のままだった。
+   * ⚠ **カンマでは割らない** ── `["買い物, 家事"]` は `,` を含むので writer が
+   *   **わざと quote した 1 つの名前**である(`scalarNeedsQuote`)。割ると別のデータを壊す。
    */
-  const parts: string[] = Array.isArray(raw)
-    ? raw.filter((v) => v !== null && v !== undefined).map((v) => String(v))
-    : String(raw).split(',');
+  const parts: string[] = raw
+    .filter((v) => v !== null && v !== undefined)
+    .flatMap((v) => {
+      const s = String(v);
+      return ((hashRunWords(s) ?? strandedHashWords(s) ?? [s]) as string[]);
+    });
   const out: string[] = [];
   for (const part of parts) {
     const t = normalize(part);

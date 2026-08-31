@@ -307,7 +307,8 @@ export class FilerRenderer {
     input.placeholder = 'タグ';
     input.setAttribute('aria-label', '集める条件にするタグ');
     const add = iconButton('smart-cond-add', '条件に足す');
-    add.title = 'このタグが付いたノートを集めます(複数の条件は「全部付いている」で絞ります)';
+    add.title =
+      '打ったタグが付いたノートを集めます(複数の条件は「全部付いている」で絞ります)。井桁を付けて空白で並べると、まとめて足せます';
     bar.append(input, add);
 
     /**
@@ -444,9 +445,9 @@ export class FilerRenderer {
       tag.placeholder = 'タグ';
       tag.setAttribute('aria-label', 'まとめて付け外しするタグ');
       const add = iconButton('bulk-tag-add', 'タグを付ける');
-      add.title = `選んでいる ${marks.length} 件の本文に、このタグを足します`;
+      add.title = `選んでいる ${marks.length} 件の本文に、打ったタグを足します(井桁を付けて空白で並べると、まとめて足せます)`;
       const off = iconButton('bulk-tag-remove', 'タグを外す');
-      off.title = `選んでいる ${marks.length} 件の本文から、このタグを消します`;
+      off.title = `選んでいる ${marks.length} 件の本文から、打ったタグを消します(井桁を付けて空白で並べると、まとめて外せます)`;
       bulk.append(count, del, tag, add, off, clear);
       host.append(bulk);
     }

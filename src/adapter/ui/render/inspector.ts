@@ -938,7 +938,8 @@ export class InspectorRenderer {
         cands.id = 'pkc-tag-candidates';
         this.tagCandidates = cands;
         const add = iconButton('add-tag', 'タグを足す');
-        add.title = 'このノートにタグを足します(本文の先頭の「この文書の情報」に入ります)';
+        add.title =
+          'このノートにタグを足します(本文の先頭の「この文書の情報」に入ります)。井桁を付けて空白で並べると、まとめて足せます';
         form.append(input, cands, add);
         dd.append(chips, form);
         this.rows.set('inspector-tag-chips', chips);

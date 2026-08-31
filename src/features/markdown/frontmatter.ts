@@ -28,6 +28,7 @@
  */
 
 import { resolveCap } from '../notation/caps';
+import { looksHashTagged } from '../flavor/tag-words';
 
 export type FrontmatterValue =
   | string
@@ -188,7 +189,7 @@ function frontmatterRunLength(lines: readonly string[]): number {
      *   `parseFlatYaml:442` と同じ `startsWith('#')` でよい(`trimStart()` は
      *   **no-op になる** ── 効かない防御を残さない)。
      */
-    const line = stripTrailingComment(lines[i] ?? '');
+    const line = stripTrailingComment(lines[i] ?? '', lines[i + 1]);
     /**
      * 🔴 **空行でも切らない。ただしブロック配列は閉じる**(2 巡目 A-1 + 3 巡目 1-A)。
      *
@@ -269,8 +270,10 @@ function topLevelKeyLines(lines: readonly string[]): boolean[] {
   const flags: boolean[] = [];
   /** 開いているブロックの key の字下げ幅(閉じていれば `null`)。 */
   let openIndent: number | null = null;
-  for (const raw of lines) {
-    const line = stripTrailingComment(raw.replace(/\r?\n$/, ''));
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i] ?? '';
+    // ⚠ 次の行も渡す ── 「井桁の並びか」の判定が箇条書きの有無を見るため(#637 D)
+    const line = stripTrailingComment(raw.replace(/\r?\n$/, ''), lines[i + 1]);
     if (line.trim() === '') {
       openIndent = null;
       flags.push(false);
@@ -483,8 +486,59 @@ export function parseFrontmatter(body: string): FrontmatterResult {
  * ときだけ** quote を追跡する。plain scalar 中の `'`(例: `title: it's a pen`)
  * は quote 開始ではないので、素朴な行末コメント除去に落ちる(P3-4 review #4)。
  */
-function stripTrailingComment(line: string): string {
+/**
+ * 🔴 **`tags:` の値が「井桁の並び」なら、行末コメントとして刈らない**(#637)。
+ *
+ * > user:「**#tag1 #tag2 ってすればいいやん**」(2026-08-31)
+ *
+ * ⚠ 実測(直す前。`/tmp` の probe で 10 形を当てた):
+ *
+ * | 書いた字 | 読めたタグ |
+ * |---|---|
+ * | `tags: #買い物 #家事` | **0 個** |
+ * | `tags: #買い物` | **0 個** |
+ * | `tags: #買い物,#家事` | **0 個** |
+ * | `tags: [#買い物, #家事]` | **1 個**「[#買い物」 |
+ *
+ * ── どれも YAML の行末コメント規則(空白 + `#` から先は注釈)に刈られていた。
+ * ⚠ **本文のタグ行では `#買い物 #家事` が正しく 2 個になる**ので、user から見ると
+ *   **同じ字が場所によって 2 個にも 0 個にもなる** ── これが「一つになってしまう」の
+ *   片割れである(もう片割れは打つ欄。`splitTags` を見よ)。
+ *
+ * 🔑 **刈らない条件は 1 つ:語が全部 `#` で始まり、`#` の後ろに字がある。**
+ * ⚠ だからコメントは**そのまま書ける** ── `tags: # 買うものは後で` は
+ *   語が `#` と `買うものは後で` に割れ、後者が `#` で始まらないので**注釈のまま**。
+ *   マニュアルの約束(「`---` の中は YAML のコメントとして書けます」)を壊さない。
+ * ⚠ `[` で囲った形も同じに扱う ── `[#買い物, #家事]` は中身を見てから判定する
+ *   (囲いだけ外して、`,` の分割は `parseInlineArray` に任せる)。
+ *
+ * ⚠ **`tags` 以外の key には効かせない。** `title: #TODO` を値に変えると、
+ *   注釈のつもりで書いた字が題名として画面へ出る ── 直す理由が無い所は変えない。
+ */
+function isTagHashRun(key: string, value: string, next: string | undefined): boolean {
+  // ⚠ タグを持つ key は 2 つある ── `smart-tags`(スマートフォルダの条件)を
+  //    落とすと、同じ字が入れ物によって別の意味になる(§7)
+  if (key !== 'tags' && key !== 'smart-tags') return false;
+  /**
+   * 🔴 **次の行が箇条書きなら、そちらが値である**(着地前レビュー D)。
+   *
+   * ⚠ 実測(この門が無いとき):
+   *   `tags: #買い物メモ` の次に `- 牛乳` / `- 卵` と書いた本文で、
+   *   **牛乳と卵が閉じの内側に取り残され、誰も読まなくなる**
+   *   (直す前は `#買い物メモ` が注釈で、箇条書きのほうがタグだった)。
+   * 🔑 「隠した行は必ず誰かが読んでいる」を守る側へ倒す ── 井桁の並びは
+   *   注釈としても読めるが、**箇条書きは値としてしか読めない**。
+   */
+  if (next !== undefined && /^\s*-\s+/u.test(next)) return false;
+  // 🔑 **判定は `tag-words.ts` 1 か所**(#637 の着地前レビュー B)── 欄と同じ規則
+  return looksHashTagged(value);
+}
+
+function stripTrailingComment(line: string, next?: string): string {
   const colon = findKeyColon(line);
+  if (colon >= 0 && isTagHashRun(line.slice(0, colon).trim(), line.slice(colon + 1), next)) {
+    return line.trimEnd();
+  }
   let i = colon >= 0 ? colon + 1 : 0;
   while (i < line.length && (line[i] === ' ' || line[i] === '\t')) i++;
   const q = line[i];
@@ -540,7 +594,7 @@ function parseFlatYaml(lines: readonly string[]): Record<string, FrontmatterValu
   while (i < lines.length) {
     const raw = lines[i] ?? '';
     i += 1;
-    const line = stripTrailingComment(raw);
+    const line = stripTrailingComment(raw, lines[i]);
     if (line.trim() === '') continue;
     if (line.startsWith('#')) continue;
 

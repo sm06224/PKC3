@@ -108,7 +108,7 @@ import { insertSnippet, nextSnippetSlot } from '@features/snippet/snippet-expand
 import { abbrBeforeCaret } from '@features/snippet/snippet-table';
 import { snippetMenu, snippetMenuNote } from '@features/snippet/snippet-menu';
 import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
-import { normalizeTag } from '@features/flavor/tags';
+import { splitTags } from '@features/flavor/tags';
 import { isEntrySort, NATURAL_DESC } from '@features/filter/entry-sort';
 import { COLUMN_PANES, isPaneId } from '@features/pane-visibility';
 import { STRUCTURAL, isRelationKind } from '@features/relation/kinds';
@@ -857,8 +857,10 @@ function runBulkTag(
   mode: 'add' | 'remove',
 ): void {
   const field = root.querySelector<HTMLInputElement>('[data-pkc-field="bulk-tag"]');
-  const tag = normalizeTag(field?.value ?? '');
-  if (tag === '') {
+  // 🔑 **打った字を何個と読むかは `splitTags` 1 か所**(#637)──
+  //   `#請求 #未払` と打てば 2 つ付く(本文のタグの行と同じ字である)
+  const tags = splitTags(field?.value ?? '');
+  if (tags.length === 0) {
     // ⚠ **無言で終わらせない**(帯は出ているのに何も起きない dead click になる)
     dispatcher.dispatch({
       type: 'OP_FAILED',
@@ -874,7 +876,10 @@ function runBulkTag(
     dispatcher.dispatch({ type: 'OP_FAILED', error: '選んでいるものがありません' });
     return;
   }
-  dispatcher.dispatch({ type: 'BULK_TAG', lids, tag, mode });
+  // 🔑 **1 回の頼みは 1 回で撃つ**(#637 の着地前レビュー)── 1 つずつ撃つと、
+  //   知らせが 1 通ずつ出て**後の 1 通が前を塗り潰す**(12 件に「請求」が付いたのに
+  //   「0 件に付けました」と出る)。並びのまま渡せば、答えも 1 通で全部を語れる。
+  dispatcher.dispatch({ type: 'BULK_TAG', lids, tags, mode });
   // 🔑 通したら欄を空にする(次の 1 つを打てる)── ⚠ 断ったときは残す
   if (field) field.value = '';
 }
@@ -2444,13 +2449,14 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = st.scopeLid;
     if (lid === null) return;
     const field = root.querySelector<HTMLInputElement>('[data-pkc-field="smart-cond"]');
-    const tag = normalizeTag(field?.value ?? '');
-    if (tag === '') {
+    // 🔑 **打った字の読み方はどの欄でも同じ**(#637)── `#請求 #未払` で 2 条件
+    const tags = splitTags(field?.value ?? '');
+    if (tags.length === 0) {
       // ⚠ **無言で終わらせない**(帯は出ているのに何も起きない dead click になる)
       dispatcher.dispatch({ type: 'OP_FAILED', error: '集める条件にするタグを入力してください' });
       return;
     }
-    dispatcher.dispatch({ type: 'SMART_COND', lid, tag, mode: 'add' });
+    for (const tag of tags) dispatcher.dispatch({ type: 'SMART_COND', lid, tag, mode: 'add' });
     // 🔑 通したら欄を空にする(次の 1 つを打てる)── ⚠ 断ったときは残す
     if (field) field.value = '';
   },
@@ -2518,13 +2524,25 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = st.selectedLid;
     if (lid === null) return;
     const field = root.querySelector<HTMLInputElement>('[data-pkc-field="tag-add-input"]');
-    const tag = normalizeTag(field?.value ?? '');
-    if (tag === '') {
+    /**
+     * 🔴 **`#買い物 #家事` と打てば 2 つ付く**(#637。user 裁定 2026-08-31)。
+     *
+     * ⚠ 直す前はこの欄だけが**割らなかった** ── 本文のタグの行に同じ字を
+     *   書けば 2 つになるのに、ここへ打つと **「買い物 #家事」という 1 つの名前**が
+     *   できていた(⚠ 先頭の井桁は `normalizeTag` が落とすので、**打った字そのものは
+     *   どこにも残らない** ── 2 稿目で実測して訂正した。`#買い物` を grep しても
+     *   見つからないので、壊れたノートを探す人が探し当てられない形だった)。
+     * 🔑 何個と読むかは `splitTags` 1 か所(§7)── 欄も本文も同じ規則にする。
+     * 🔑 **既に壊れた名前は、読むときに繋ぎ直す**(`strandedHashWords`)──
+     *   直す前に打った人のノートは、割り方を直しただけでは 1 個のままだからである。
+     */
+    const tags = splitTags(field?.value ?? '');
+    if (tags.length === 0) {
       // ⚠ **無言で終わらせない**(欄は出ているのに何も起きない dead click になる)
       dispatcher.dispatch({ type: 'OP_FAILED', error: '足すタグを入力してください' });
       return;
     }
-    dispatcher.dispatch({ type: 'BULK_TAG', lids: [lid], tag, mode: 'add' });
+    dispatcher.dispatch({ type: 'BULK_TAG', lids: [lid], tags, mode: 'add' });
     // 🔑 通したら欄を空にする(次の 1 つを打てる)── ⚠ 断ったときは残す
     if (field) field.value = '';
   },
@@ -2539,7 +2557,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = st.selectedLid;
     const tag = target.getAttribute('data-pkc-tag') ?? '';
     if (lid === null || tag === '') return;
-    dispatcher.dispatch({ type: 'BULK_TAG', lids: [lid], tag, mode: 'remove' });
+    dispatcher.dispatch({ type: 'BULK_TAG', lids: [lid], tags: [tag], mode: 'remove' });
   },
   'bulk-tag-remove': (dispatcher, _target, _services, root) =>
     runBulkTag(dispatcher, root, 'remove'),
