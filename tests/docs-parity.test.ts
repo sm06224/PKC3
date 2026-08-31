@@ -43,6 +43,8 @@ import { buildOfficePackPanel } from '../src/adapter/ui/render/office-pack-panel
 import { OfficePackState } from '../src/adapter/ui/render/office-entry-view';
 import { codeOnly } from './helpers/code-only';
 import { ENTRY_ACTION_LABELS } from '../src/features/entry-actions';
+import { takeFenceAsset } from '../src/features/markdown/fence-asset';
+import { readFenceAssetText } from '../src/features/asset/fence-asset-read';
 
 /** src 配下の TS を全部集める(「無い」ことの主張を file 単位で逃さない)。 */
 function srcFiles(dir = 'src', out: string[] = []): string[] {
@@ -476,6 +478,108 @@ describe('マニュアルと実装の突合', () => {
     for (const { label } of PASTE_SOURCES) {
       expect(MANUAL, `マニュアルに貼り付けの「${label}」の説明が無い`).toContain(`**${label}**`);
     }
+  });
+
+  /**
+   * 🔴 **コードブロックが添付を読めなかったときの字が、マニュアルと 1 字も違わない**(#636)。
+   *
+   * ⚠ 直す前は pin が **0 件**で、実際に 1 件割れていた ── 製品は
+   *   「`asset:` の後ろに添付の名前がありません」、マニュアルは「添付の ID が空です」。
+   *   user は**画面に出た字でマニュアルを引く**ので、割れた瞬間に節ごと届かなくなる。
+   * 🔑 期待値は**実装を呼んで作る**(字を test に書き写さない)── 書き写すと
+   *   「同じ規則の 2 本目」になり、製品を直しても test は自分の綴りを守り続ける。
+   * ⚠ 探すのは**その節の中だけ** ── マニュアル全体で探すと、別の章の散文に
+   *   満たされる(CLAUDE.md §1)。
+   */
+  it('🔴 添付を読めなかったときの字が、マニュアルの節に在る', async () => {
+    const head = MANUAL.indexOf('#### 中身を添付から取る');
+    expect(head, 'マニュアルに「中身を添付から取る」の節が無い(空振り)').toBeGreaterThan(0);
+    const next = MANUAL.indexOf('\n#### ', head + 1);
+    expect(next, '節の終わりが見つからない(空振り)').toBeGreaterThan(head);
+    const section = MANUAL.slice(head, next);
+
+    // ⚠ 実装が出す 4 通りを、実装から取る
+    const parse2 = takeFenceAsset('asset:a asset:b');
+    const parseEmpty = takeFenceAsset('asset:');
+    const missing = await readFenceAssetText(async () => null, 'k');
+    const notText = await readFenceAssetText(
+      async () => ({ text: () => Promise.reject(new Error('x')) }) as unknown as Blob,
+      'k',
+    );
+    const whys = [
+      parse2.kind === 'invalid' ? parse2.why : '',
+      parseEmpty.kind === 'invalid' ? parseEmpty.why : '',
+      missing.ok ? '' : missing.why,
+      notText.ok ? '' : notText.why,
+    ];
+    expect(whys.filter((w) => w !== ''), '実装から理由を 4 通り取れていない(空振り)').toHaveLength(4);
+
+    // 🔴 **表の 1 列目と「丸ごと」突き合わせる**(変異試験 M5 が SURVIVED で教えた)。
+    // ⚠ `toContain` だと**部分一致で救われる** ── 製品を「字として読めません」から
+    //   「読めません」へ縮める変異は、マニュアルの長いほうに含まれるので通ってしまう。
+    // ⚠ 集合で見るので「マニュアルにだけ在る行」も落とす(製品が出さない字を
+    //   読ませない)。
+    // ⚠ 節には表が 2 つある ── **理由の表だけ**を取る(見出し行から数える)
+    const lines = section.split('\n');
+    const at = lines.findIndex((l) => l.startsWith('| 出る字 |'));
+    expect(at, '節に「出る字」の表が無い(空振り)').toBeGreaterThanOrEqual(0);
+    const listed: string[] = [];
+    for (const line of lines.slice(at + 2)) {
+      if (!line.startsWith('|')) break;
+      listed.push(line.split('|')[1]!.trim());
+    }
+    expect(listed.length, '節に理由の表が無い(空振り)').toBeGreaterThan(0);
+    expect([...listed].sort(), 'マニュアルの理由の表が、実装の出す字と一致しない').toEqual(
+      [...whys].sort(),
+    );
+  });
+
+  /**
+   * 🔴 **user の言葉で引いて当たる**(#636 の user 報告そのもの)。
+   *
+   * > 「**マニュアルにコードフェンスにアセットを埋め込む方法が書いていない**」
+   *
+   * ⚠ 実際は 39 行書いてあったが、`アセット` が **0 件**で、画面に出る
+   *   「コードブロック」も **0 件**だった ── **在るのに引けない**。
+   * 🔑 ヘルプの探す欄は**見出しを結果として並べる**ので、見出しに両方入れておく。
+   */
+  it('🔴 添付を埋め込む節の見出しが、user の言葉で引ける', () => {
+    const heading = MANUAL.split('\n').find((l) => l.startsWith('#### 中身を添付から取る'));
+    expect(heading, '節の見出しが無い(空振り)').toBeTruthy();
+    for (const word of ['アセット', 'コードブロック', '埋め込']) {
+      expect(heading, `見出しに「${word}」が無い ── その語で探しても当たらない`).toContain(word);
+    }
+  });
+
+  /**
+   * 🔴 **表が途中で切れていない**(#636 で 2 件見つかった)。
+   *
+   * 実害:段落のすぐ後ろに `|` の行が続くと、markdown はそれを**段落の続き**として
+   * 出すので、**生の `|` が並んだ行**が画面に出る。実際に:
+   * - ショートカットの表が ⚠ 段落で切れ、**左右のペインを畳む等 4 行**が生で出ていた
+   * - 書き出しの一覧が **9 行**まるごと別の節(設定の読み込み)の末尾に落ちており、
+   *   本体の表は **1 行**しか無かった
+   * ⚠ どちらも「見出しは在るのに中身が届かない」── この issue の当の症状である。
+   */
+  it('🔴 マニュアルの表に、見出しから切れた行が 1 つも無い', () => {
+    const lines = MANUAL.split('\n');
+    let inFence = false;
+    const stranded: string[] = [];
+    for (const [i, line] of lines.entries()) {
+      if (/^\s*(```|~~~)/.test(line)) {
+        inFence = !inFence;
+        continue;
+      }
+      if (inFence || !line.startsWith('|')) continue;
+      if ((lines[i - 1] ?? '').startsWith('|')) continue;
+      // 見出し行なら、次が区切り行(`|---|`)であるはず
+      if (/^\|[\s:|-]+\|\s*$/.test(lines[i + 1] ?? '')) continue;
+      stranded.push(`${i + 1}: ${line.slice(0, 60)}`);
+    }
+    expect(stranded, '表から切れた行がある(生の | が画面に出る)').toEqual([]);
+    // ⚠ 囲みの開閉が釣り合っていないと、走査は**中身を本文と読み違える** ──
+    //   そのまま緑になると「切れた行が無い」が別の理由で成立する(空振り)
+    expect(inFence, '囲みの開閉が釣り合っていない(走査がずれている)').toBe(false);
   });
 
   it('🔴 図の書き出しが**生きている**(死んだコードに戻らない)', () => {
@@ -1106,6 +1210,8 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    // ⚠ 上限 10 を超えたので 2026-08-31 に落とした(原本は CHANGELOG)
+    '押しても何も起きなかった所と、画面が狭いときに消えていた所を直しました',
     // ⚠ 上限 10 を超えたので 2026-08-31 に落とした(原本は CHANGELOG)
     'Office 表示の一式が LibreOffice 26.8 になりました',
     // ⚠ 上限 10 を超えたので 2026-08-31 に落とした(原本は CHANGELOG)
