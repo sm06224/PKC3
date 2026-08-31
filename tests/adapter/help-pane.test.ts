@@ -15,6 +15,7 @@
  *   `ASIDE`)── 片方だけに足すと「押しても本文が出る」。両方を**振る舞いで**突合する
  */
 import { describe, expect, it, beforeEach } from 'vitest';
+import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import { HelpRenderer, MANUAL_TEXT, versionText } from '../../src/adapter/ui/render/help';
 import { CenterRouter } from '../../src/adapter/ui/render/center';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
@@ -622,5 +623,171 @@ describe('🔴 中央の面の表が 2 つある(食い違いを落とす)', () 
     await Promise.resolve();
     expect(seen, 'ヘルプが共有の口を使っていない(面ごとに worker を立てる形)').toHaveLength(1);
     expect(host.querySelector('[data-probe="1"]'), '描いた結果が入っていない').not.toBeNull();
+  });
+});
+
+/**
+ * 🔴 **マニュアルの中を探す欄**(#636。user 指示 2026-08-31
+ * 「**ヘルプにマニュアルの中を探すを置いて**」)。
+ *
+ * ⚠ 置き場を間違えると**静かに壊れる**ので、そこを重点的に留める:
+ * ① 器の**中**に置くと `drawManual` の `innerHTML = …` で欄ごと消える
+ * ② `built` ガードの**外**に置くと、`render()` が毎回走るので**打った字が消える**
+ * ③ 本文を `hidden` で畳むと、その字が**ブラウザの Ctrl+F から見えなくなる**
+ */
+describe('マニュアルの中を探す(#636)', () => {
+  let region: HTMLElement;
+  beforeEach(() => {
+    document.body.textContent = '';
+    region = document.createElement('div');
+    document.body.append(region);
+  });
+
+  const box = (): HTMLInputElement =>
+    region.querySelector<HTMLInputElement>('[data-pkc-field="help-find"]')!;
+  const countText = (): string =>
+    region.querySelector('[data-pkc-field="help-find-count"]')?.textContent ?? '';
+  const rows = (): HTMLElement[] => [
+    ...region.querySelectorAll<HTMLElement>('[data-pkc-region="help-find-hits"] button'),
+  ];
+  const type = (s: string): void => {
+    box().value = s;
+    box().dispatchEvent(new Event('input', { bubbles: true }));
+  };
+
+  it('🔴 欄が出て、打つと当たった節が並ぶ', () => {
+    new HelpRenderer(region).render();
+    expect(box(), '探す欄が無い').not.toBeNull();
+    type('ルビ');
+    expect(rows().length, '当たった節が 1 つも出ない').toBeGreaterThan(0);
+    expect(countText(), '件数を出していない').toMatch(/か所/);
+  });
+
+  it('🔴 見つからないときは、次の一手を書く(「0 件」で終わらせない)', () => {
+    new HelpRenderer(region).render();
+    type('そんな語はどこにもありません');
+    expect(rows().length).toBe(0);
+    expect(countText(), '理由も次の一手も出ていない').toContain('別の言い方');
+  });
+
+  /** 🔴 ①器の中に置いていないか ── マニュアルを描き直しても欄が残る。 */
+  it('🔴 マニュアルを描き直しても、欄と打った字が残る', async () => {
+    const r = new HelpRenderer(region, {
+      render: async () => '<h1>あ</h1><h2>い</h2>',
+    });
+    r.render();
+    const before = box();
+    type('ルビ');
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(box(), '描き直しで欄が作り直された(binder が押す寸前のボタンを捨てる)').toBe(before);
+    expect(box().value, '打った字が消えた').toBe('ルビ');
+  });
+
+  /** 🔴 ②`built` ガードの外に置いていないか ── `render()` は開いている間毎回走る。 */
+  it('🔴 面を描き直しても、打った字が消えない', () => {
+    const r = new HelpRenderer(region);
+    r.render();
+    type('予定');
+    const hits = rows().length;
+    r.render();
+    r.render();
+    expect(box().value, 'render のたびに欄が組み直されている').toBe('予定');
+    expect(rows().length, '結果まで消えている').toBe(hits);
+  });
+
+  it('⚠ Esc で打った字を消す(結果も消える)', () => {
+    new HelpRenderer(region).render();
+    type('予定');
+    expect(rows().length).toBeGreaterThan(0);
+    box().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(box().value).toBe('');
+    expect(rows().length, '結果が残っている').toBe(0);
+    expect(countText(), '件数が残っている').toBe('');
+  });
+
+  /**
+   * 🔴 ③**本文を畳まない**(user 指示②と衝突する)。
+   * ⚠ 打つ前と打った後で、器の中の**字が 1 文字も減らない**ことを見る。
+   */
+  it('🔴 打っても、マニュアル本体は 1 文字も隠さない', () => {
+    new HelpRenderer(region).render();
+    const host = region.querySelector('[data-pkc-region="help-manual"]')!;
+    const before = host.textContent ?? '';
+    expect(before.length, '台の空振り(本文が空)').toBeGreaterThan(1000);
+    type('ルビ');
+    expect(host.textContent, 'マニュアル本体を畳んでいる ── ブラウザの検索から消える').toBe(
+      before,
+    );
+    expect(
+      host.querySelectorAll('[hidden]').length,
+      '本文の一部を hidden にしている',
+    ).toBe(0);
+  });
+
+  /** 🔴 押した行から、その節の見出しへ送る(飛び先は源文の通し番号)。 */
+  it('🔴 行を押すと、その節の見出しへ送る', async () => {
+    // ⚠ **実物の描画を通す** ── 見出しの数が源文と揃っていないと、
+    //    「番号で飛ぶ」という主張そのものを見られない(3 本の作り物では空振り)
+    const r = new HelpRenderer(region, { render: async (t) => renderMarkdown(t) });
+    r.render();
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    const host = region.querySelector('[data-pkc-region="help-manual"]')!;
+    const heads = [...host.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6')];
+    // ⚠ 空振り防止 ── 実物が描けていること(作り物 3 本では主張が立たない)
+    expect(heads.length, 'マニュアルが描けていない(台の空振り)').toBeGreaterThan(50);
+    const seen: HTMLElement[] = [];
+    for (const h of heads)
+      h.scrollIntoView = function (this: HTMLElement): void {
+        seen.push(this);
+      };
+    type('ルビ');
+    const row = rows()[0];
+    expect(row, '押す行が無い').not.toBeUndefined();
+    row!.click();
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    expect(seen.length, 'どの見出しへも送っていない(dead click)').toBeGreaterThan(0);
+  });
+
+  /**
+   * 🔴 **描けなかったときも dead click にしない**(#636。着地前に自分で踏んだ)。
+   *
+   * ⚠ ワーカーが無い / 描画に失敗したときは `drawManual` が**素の原文**を出すので、
+   *   `h1〜h6` が **0 本**になる ── 番号で飛ぶ実装をそのまま通すと、
+   *   **並んだ行が全部 dead click** になり、理由も出ない。
+   * 🔑 そのときは**行の比**で送る(正確ではないが、押した手応えは返る)。
+   */
+  it('🔴 マニュアルが素の原文で出ていても、押せば送る', async () => {
+    // ⚠ markdown の口を渡さない = 素の原文の経路
+    new HelpRenderer(region).render();
+    const host = region.querySelector<HTMLElement>('[data-pkc-region="help-manual"]')!;
+    expect(
+      host.querySelectorAll('h1,h2,h3,h4,h5,h6').length,
+      '台の前提が崩れている(素の原文なら見出しは 0 本)',
+    ).toBe(0);
+    // happy-dom は版面を組まないので、送り先を持てるように寸法を差す
+    Object.defineProperty(host, 'scrollHeight', { value: 10_000, configurable: true });
+    host.scrollTop = 0;
+    type('ルビ');
+    const row = rows()[0];
+    expect(row, '押す行が無い').not.toBeUndefined();
+    row!.click();
+    // ⚠ 送るのは `manualReady` を待ってから ── 同期に見ると必ず 0 になる
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    expect(host.scrollTop, '押しても 1px も動かない(dead click)').toBeGreaterThan(0);
+  });
+
+  /**
+   * ⚠ **見出しを増やしていない**(`h3` の並びは別の test が等値 pin している)。
+   * 🔑 ここは「増やしていない」を**この節の側からも**見る ── 増やした人が
+   *   2 か所で気づける。
+   */
+  it('⚠ 探す欄のために見出しを増やしていない', () => {
+    new HelpRenderer(region).render();
+    expect([...region.querySelectorAll('h3')].map((h) => h.textContent)).toEqual([
+      'これまでのお知らせ',
+      'ショートカットキー',
+      'マニュアル',
+    ]);
   });
 });

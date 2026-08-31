@@ -502,3 +502,99 @@ test('🔴 低い画面でも、お知らせの帯が画面ごとスクロール
 
   expect(errors).toEqual([]);
 });
+
+/**
+ * 🔴 **マニュアルの中を探す**(#636。user 指示 2026-08-31)。
+ *
+ * ## なぜ実ブラウザで見るのか
+ *
+ * 🔴 **押した先へ本当に送られるか**は、版面を組む相手でしか見られない ──
+ *   unit(happy-dom)は版面を組まないので `scrollIntoView` を差し替えて
+ *   「呼ばれた」までしか言えない。**実際に位置が動く**のはここでしか見られない。
+ * 🔴 **本文を畳んでいない**ことも、ここで見る意味がある ── 畳むと
+ *   ブラウザの「ページ内を検索」から消える(user 指示②と衝突する)。
+ */
+test('🔴 マニュアルの中を探して、押すとその節まで送られる (#636)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await gotoApp(page);
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="help"]');
+
+  const host = page.locator('[data-pkc-region="help-manual"]');
+  await expect(host.locator('h1,h2,h3').first()).toBeVisible();
+
+  // ⚠ 空振り防止 ── 打つ前の字数を控える(畳んでいないことを後で見る)
+  const before = ((await host.textContent()) ?? '').length;
+  expect(before, 'マニュアルが描かれていない(台の空振り)').toBeGreaterThan(1000);
+
+  const box = page.locator('[data-pkc-field="help-find"]');
+  await expect(box).toBeVisible();
+  await box.fill('ルビ');
+
+  const rows = page.locator('[data-pkc-region="help-find-hits"] button');
+  await expect(rows.first()).toBeVisible();
+  const count = await page.locator('[data-pkc-field="help-find-count"]').textContent();
+  expect(count ?? '', '件数が出ていない').toMatch(/か所/);
+
+  // 🔴 **本文は 1 文字も隠していない**
+  expect(((await host.textContent()) ?? '').length, 'マニュアル本体を畳んでいる').toBe(before);
+
+  // 🔴 **押すと実際に位置が動く**
+  const top0 = await host.evaluate((el) => el.scrollTop);
+  await rows.first().click();
+  await expect
+    .poll(async () => host.evaluate((el) => el.scrollTop), {
+      message: '押しても 1px も動かない(dead click)',
+    })
+    .not.toBe(top0);
+
+  expect(errors, 'console に赤が出ている').toEqual([]);
+});
+
+/**
+ * 🔴 **ヘルプを読んでいる間は `Ctrl+F` をブラウザに返す**(#636)。
+ *
+ * ⚠ **ブラウザの検索の窓そのものは見られない**(chrome の UI であって DOM ではない)。
+ * 🔑 だから見るのは **①既定を止めていない ②焦点をノートの絞り込み欄へ奪っていない
+ *   ③畳んだ左の列を勝手に開いていない** の 3 つ ── ③が user の言う実害である。
+ * 🔑 **対照群を同じ test に置く**(本文の面では従来どおり奪う)。
+ */
+test('🔴 ヘルプでは Ctrl+F を奪わない / 本文では奪う (#636)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await gotoApp(page);
+
+  // 押した鍵が既定を止められたかを拾う(ブラウザの UI は見られないので、ここで見る)
+  await page.evaluate(() => {
+    (window as unknown as { __kept: boolean[] }).__kept = [];
+    window.addEventListener(
+      'keydown',
+      (ev) => {
+        if (ev.key.toLowerCase() === 'f' && (ev.ctrlKey || ev.metaKey))
+          (window as unknown as { __kept: boolean[] }).__kept.push(!ev.defaultPrevented);
+      },
+      // ⚠ **後から**見る(アプリのハンドラより後 = 止めたかどうかが確定している)
+      false,
+    );
+  });
+  const kept = async (): Promise<boolean[]> =>
+    page.evaluate(() => (window as unknown as { __kept: boolean[] }).__kept);
+
+  // ── 対照群: 本文の面では、これまでどおり奪って絞り込みの欄へ入る ──
+  await page.keyboard.press('Control+f');
+  await expect(page.locator('[data-pkc-field="entry-filter"]')).toBeFocused();
+  expect((await kept())[0], '本文の面で既定を止めていない(奪う側が壊れた)').toBe(false);
+  await page.locator('[data-pkc-field="entry-filter"]').blur();
+
+  // ── 🔴 ヘルプの面では譲る ──
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="help"]');
+  await expect(page.locator('[data-pkc-field="help-find"]')).toBeVisible();
+  await page.keyboard.press('Control+f');
+  expect((await kept())[1], 'ヘルプでも既定を止めている ── ブラウザの検索が出ない').toBe(true);
+  await expect(
+    page.locator('[data-pkc-field="entry-filter"]'),
+    'ヘルプなのに焦点がノートの絞り込み欄へ飛んでいる',
+  ).not.toBeFocused();
+
+  expect(errors, 'console に赤が出ている').toEqual([]);
+});

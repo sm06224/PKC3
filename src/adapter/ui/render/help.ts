@@ -34,6 +34,13 @@ import { NOTICES, noticeDate, recentNotices, type Notice } from '@features/notic
 import manualText from '../../../../docs/manual.md?raw';
 import { KEY_COMMANDS, chordLabel } from '@features/keymap';
 import { appKeymap, type KeymapStore } from './keymap';
+import {
+  findInManual,
+  manualLineCount,
+  MANUAL_FIND_MAX_SECTIONS,
+  type ManualHit,
+  type ManualSection,
+} from '@features/help/manual-find';
 
 /** 焼き込んだマニュアルの原文(test から掴めるよう named export)。 */
 export const MANUAL_TEXT: string = manualText;
@@ -91,6 +98,16 @@ export class HelpRenderer {
   private lastCid = '';
   /** ショートカットの一覧(#256)。⚠ 器は捨てず、中身だけ書き換える。 */
   private keys: HTMLElement | null = null;
+  /** 探した件数を出す所(#636)。 */
+  private findCount: HTMLElement | null = null;
+  /** 探した結果の一覧(#636)。 */
+  private findHits: HTMLElement | null = null;
+  /**
+   * 🔴 **マニュアルを描き終える約束**(#636)。
+   * ⚠ `manualDrawn` は `await` の**前**に立つので、「描いた」と言っていても
+   *   器が空の瞬間がある ── 飛ぶ前に**ここを待つ**。
+   */
+  private manualReady: Promise<void> | null = null;
   private offKeymap: (() => void) | null = null;
 
   constructor(
@@ -175,7 +192,7 @@ export class HelpRenderer {
     if (this.built) {
       // 🔴 **手放してあったら入れ直す**(#531 H3)。⚠ 器は在るので、
       //    描き直すのは**中身だけ**である
-      if (!this.manualDrawn) void this.drawManual(currentContainerId || this.lastCid);
+      if (!this.manualDrawn) this.manualReady = this.drawManual(currentContainerId || this.lastCid);
       return;
     }
     this.built = true;
@@ -267,6 +284,45 @@ export class HelpRenderer {
     mh.textContent = 'マニュアル';
     body.append(mh);
 
+    /**
+     * 🔴 **探す欄は器の「外・直上」に置く**(#636)。
+     *
+     * ⚠ **器の中に入れてはいけない** ── `drawManual` は `host.innerHTML = …` で
+     *   中身を丸ごと差し替えるので、欄ごと消える。
+     * ⚠ **`built` ガードの内側で 1 度だけ組む** ── `render()` は面を開いている間
+     *   **毎回**走るので、外に置くと**打った字が 1 文字ごとに消える**。
+     * ⚠ **`<h3>` を足さない** ── `help-pane.test.ts` が h3 の並びを**等値 pin**
+     *   している(見出しを増やすと落ちる)。
+     * ⚠ **`data-pkc-action` を足さない** ── `operation-table.test.ts` の等値 pin が
+     *   5 つ鳴る。押した所は**ここで直に受ける**(前例: `app-dialog.ts` の
+     *   `palette-filter`)。
+     */
+    const findBar = document.createElement('div');
+    findBar.setAttribute('data-pkc-region', 'help-find-bar');
+    const find = document.createElement('input');
+    // 🔑 **面に居座る欄**なので `search`(`entry-filter` / `dual-filter` と同じ流儀)
+    find.type = 'search';
+    find.setAttribute('data-pkc-field', 'help-find');
+    find.placeholder = 'マニュアルの中を探す';
+    find.title = 'マニュアルの中を探します(Esc で、打った字を消します)';
+    // ⚠ placeholder を名前代わりにしない(消えると読み上げが黙る)
+    find.setAttribute('aria-label', 'マニュアルの中を探す');
+    this.findCount = document.createElement('span');
+    this.findCount.setAttribute('data-pkc-field', 'help-find-count');
+    this.findHits = document.createElement('div');
+    this.findHits.setAttribute('data-pkc-region', 'help-find-hits');
+    find.addEventListener('input', () => {
+      this.syncFind(find.value);
+    });
+    find.addEventListener('keydown', (ev) => {
+      // ⚠ 面の鍵へ漏らさない ── ここは字を打つ欄である
+      if ((ev as KeyboardEvent).key !== 'Escape') return;
+      find.value = '';
+      this.syncFind('');
+    });
+    findBar.append(find, this.findCount, this.findHits);
+    body.append(findBar);
+
     this.manualHost = document.createElement('div');
     this.manualHost.setAttribute('data-pkc-region', 'help-manual');
     this.manualHost.className = 'pkc-md-rendered';
@@ -274,7 +330,8 @@ export class HelpRenderer {
     this.manualHost.textContent = 'マニュアルを読み込んでいます…';
     body.append(this.manualHost);
 
-    void this.drawManual(currentContainerId);
+    this.manualReady = this.drawManual(currentContainerId);
+    void this.manualReady;
   }
 
   /**
@@ -312,6 +369,89 @@ export class HelpRenderer {
    * 置いていたガードは**誰も通らない死んだ防御**で、消しても test は 1 件も
    * 落ちなかった(「在るのに効かない」は次に読む人を惑わせる)。
    */
+  /**
+   * 🔴 **打った字で節を絞る**(#636)。⚠ **本文は 1 バイトも隠さない** ──
+   *   隠すとブラウザの Ctrl+F から見えなくなり、user 指示②と衝突する。
+   */
+  private syncFind(query: string): void {
+    const count = this.findCount;
+    const hits = this.findHits;
+    if (!count || !hits) return;
+    hits.textContent = '';
+    const q = query.trim();
+    if (q === '') {
+      count.textContent = '';
+      return;
+    }
+    const found = findInManual(MANUAL_TEXT, q);
+    if (found.length === 0) {
+      // ⚠ **次の一手を書く** ── 「0 件」だけだと、user は打ち方が悪いのか
+      //    載っていないのか分からない
+      count.textContent =
+        '見つかりませんでした ── 別の言い方でも試せます(例: ルビ / 予定 / 書き出し)';
+      return;
+    }
+    const total = found.reduce((n, h) => n + h.count, 0);
+    const shown = found.slice(0, MANUAL_FIND_MAX_SECTIONS);
+    const rest = found.length - shown.length;
+    // ⚠ **切ったことを言う**(黙って減らさない)
+    count.textContent =
+      `${total} か所(${found.length} 節)` + (rest > 0 ? ` ── 下に出すのは ${shown.length} 節、あと ${rest} 節` : '');
+    for (const hit of shown) hits.append(this.findRow(hit));
+  }
+
+  /** 探した結果の 1 行。押すとその節へ送る。 */
+  private findRow(hit: ManualHit): HTMLElement {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.setAttribute('data-pkc-find-index', String(hit.section.index));
+    // ⚠ 記法は落として出す(`**強調**` の星がそのまま見えないように)
+    row.textContent = `${hit.section.title.replace(/[*`_]/gu, '')}(${hit.count})`;
+    row.addEventListener('click', () => {
+      void this.jumpToSection(hit.section);
+    });
+    return row;
+  }
+
+  /**
+   * 🔴 **その節まで送る**(#636)。
+   *
+   * ⚠ **`id` では飛べない** ── 見出し 160 本のうち `id` が焼かれるのは h1〜h3 だけで、
+   *   しかも同一 document に本文の面が常駐しているので `#slug` はそちらに当たる。
+   * 🔑 **源文の見出しの通し番号**で、描かれた `h1〜h6` の同じ番号を掴む
+   *   (**160 = 160** の対応を `manual-find.test.ts` が pin している)。
+   * ⚠ **描き終えるのを待つ** ── `manualDrawn` は `await` の前に立つので、
+   *   開いた直後に押すと器はまだ空である。
+   */
+  private async jumpToSection(section: ManualSection): Promise<void> {
+    if (!this.manualDrawn) this.manualReady = this.drawManual(this.lastCid);
+    await this.manualReady;
+    const host = this.manualHost;
+    if (!host) return;
+    if (section.index < 0) {
+      host.scrollTop = 0;
+      return;
+    }
+    const heads = host.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6');
+    const head = heads[section.index];
+    if (head) {
+      head.scrollIntoView({ block: 'start' });
+      return;
+    }
+    /**
+     * 🔴 **見出しが 1 本も無いときの逃げ道**(着地前に自分で踏んだ)。
+     *
+     * ⚠ ワーカーが無い / 描画に失敗したときは `drawManual` が
+     *   **素の原文**(`host.textContent = MANUAL_TEXT`)を出すので、
+     *   `h1〜h6` が **0 本**になる ── そのまま返すと、**並んだ行が全部
+     *   dead click** になる(押しても何も起きず、理由も出ない)。
+     * 🔑 だから**行の比**で送る。正確ではないが、**押した手応えは返る**。
+     */
+    const lines = manualLineCount(MANUAL_TEXT);
+    const ratio = lines > 0 ? section.line / lines : 0;
+    host.scrollTop = Math.round(host.scrollHeight * ratio);
+  }
+
   private async drawManual(currentContainerId: string): Promise<void> {
     if (!this.manualHost) return;
     const host = this.manualHost;

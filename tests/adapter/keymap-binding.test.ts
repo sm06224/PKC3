@@ -15,7 +15,7 @@ import { readFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
-import { bindActions } from '../../src/adapter/ui/actions/binder';
+import { bindActions, runGlobalCommand } from '../../src/adapter/ui/actions/binder';
 import { KeymapStore } from '../../src/adapter/ui/render/keymap';
 import { buildKeymapPanel, CONTEXT_LABELS as LABEL_OF } from '../../src/adapter/ui/render/keymap-panel';
 import { HelpRenderer } from '../../src/adapter/ui/render/help';
@@ -186,6 +186,60 @@ describe('画面への配線', () => {
      * ⚠ 見えない欄に焦点だけ入れて終わりにすると、user からは**無反応**に見える。
      */
     expect(appPanes.getHidden(), '一覧が畳まれたまま焦点だけ入れている').not.toContain('sidebar');
+  });
+
+  /**
+   * 🔴 **ヘルプを読んでいる間は `Ctrl+F` をブラウザに返す**(#636。user 指示 2026-08-31)。
+   *
+   * ⚠ **直す前は、どの門もこれを守っていなかった** ── 上の #583 の test は
+   *   `viewMode` を 1 度も触らないので(既定は `'detail'`)、**実装を丸ごと外しても全緑**。
+   * ⚠ 実測(直す前):ヘルプの面でも `defaultPrevented === true` / 焦点が
+   *   `entry-filter` へ移り、**本文の面とまったく同じ**だった。
+   *
+   * 🔑 観測点は **`dispatchEvent` の返り**である ── `preventDefault` が呼ばれたら
+   *   `false` を返す。「ブラウザに返した」= **既定動作を止めなかった**ことなので、
+   *   焦点の行き先ではなく**ここ**が主張の中心になる。
+   * 🔑 **対照群を同じ it に置く** ── 本文の面では従来どおり止めて欄へ入る。
+   *   置かないと「別の理由で止まらなくなった」を次に見抜けない。
+   */
+  it('🔴 ヘルプを開いている間だけ Ctrl+F をブラウザに返す(#636)', () => {
+    const { root, d } = mounted();
+    const filter = root.querySelector<HTMLInputElement>('[data-pkc-field="entry-filter"]')!;
+    expect(filter, '絞り込みの欄が無い(台の空振り)').not.toBeNull();
+
+    // ── 対照群: 本文の面では、これまでどおり止めて欄へ入る ──
+    expect(d.getState().viewMode, '台の前提が崩れている(既定は本文の面)').toBe('detail');
+    const keptDetail = press('f', { code: 'KeyF', ctrlKey: true });
+    expect(keptDetail, '本文の面で既定を止めていない(奪う側が壊れた)').toBe(false);
+    expect(document.activeElement, '本文の面で欄に入っていない').toBe(filter);
+    filter.blur();
+
+    // ── 🔴 ヘルプの面では譲る ──
+    d.dispatch({ type: 'SET_VIEW_MODE', mode: 'help' });
+    expect(d.getState().viewMode, 'ヘルプの面へ移れていない(台の空振り)').toBe('help');
+    const keptHelp = press('f', { code: 'KeyF', ctrlKey: true });
+    expect(keptHelp, 'ヘルプでも既定を止めている ── ブラウザの検索が出ない').toBe(true);
+    expect(
+      document.activeElement,
+      'ヘルプなのに焦点がノートの絞り込み欄へ飛んでいる',
+    ).not.toBe(filter);
+  });
+
+  /**
+   * 🔴 **譲るのは鍵だけ ── パレットからは押せるまま**(#636)。
+   *
+   * ⚠ 門を `runGlobalCommand` の中に置くと、パレットが `dry` でその答えを読み、
+   *   **「いまは押せません」と誤って断って**行を `disabled` にする。
+   *   裁定は「Ctrl+F を**返す**」であって「操作を**消す**」ではない。
+   */
+  it('🔴 ヘルプを開いていても、パレットからは絞り込みへ移れる(#636)', () => {
+    const { root, d, store } = mounted();
+    d.dispatch({ type: 'SET_VIEW_MODE', mode: 'help' });
+    const noop = (): void => {};
+    expect(
+      runGlobalCommand('focus-search', root, d, store, noop, noop, true),
+      'ヘルプで押せない扱いになっている(パレットが誤って断る)',
+    ).toBe(true);
   });
 
   it('既定の Ctrl+N でノートができる', () => {
