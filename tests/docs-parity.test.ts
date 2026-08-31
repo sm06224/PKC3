@@ -26,6 +26,7 @@ import { RENDERABLE_FENCE_LANGS } from '../src/features/markdown/markdown-render
 import { viewModeLabel, type ViewMode } from '../src/adapter/state/app-state';
 import { openableViewNames } from '../src/adapter/platform/deep-link';
 import { NOTICES, NOTICE_KEEP_MAX } from '../src/features/notice/notice-log';
+import { PASTE_SOURCES } from '../src/features/markdown/paste-source';
 import { MAX_TABS } from '../src/features/relation/dual-pane';
 import { RELATION_KINDS } from '../src/features/relation/kinds';
 import { MAX_SMART_TAGS, smartCondError } from '../src/features/smart/smart-spec';
@@ -458,6 +459,22 @@ describe('マニュアルと実装の突合', () => {
     for (const { label } of offBar) {
       expect(MANUAL, `マニュアルに「${label}」の説明が無い(帯に出ないので余計に要る)`)
         .toContain(`**${label}**`);
+    }
+  });
+
+  /**
+   * 🔴 **貼り付けの読み取り方の名前が、マニュアルと食い違わない**(#636)。
+   *
+   * ⚠ 直す前は **pin が 1 件も無かった** ── 実際に食い違っていた:設定画面は
+   *   「ウェブページの形をそのまま(html の**囲み**)」、マニュアルは同じ字を
+   *   逐語で引いた `#####` 見出しを持つのに、**どちらを直しても何も鳴らなかった**。
+   * 🔑 書式パネル(上の輪)と同じ形で留める ── 選択肢を足した人が
+   *   「マニュアルに書き忘れた」でそのまま出荷できないようにする。
+   */
+  it('🔴 貼り付けの読み取り方の名前が、マニュアルに在る', () => {
+    expect(PASTE_SOURCES.length, '選択肢が 0 件(空振り)').toBeGreaterThan(0);
+    for (const { label } of PASTE_SOURCES) {
+      expect(MANUAL, `マニュアルに貼り付けの「${label}」の説明が無い`).toContain(`**${label}**`);
     }
   });
 
@@ -1089,6 +1106,8 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    // ⚠ 上限 10 を超えたので 2026-08-31 に落とした(原本は CHANGELOG)
+    '読んでいるノートを横に留めて、2 つ並べて読めるようになりました',
     // ⚠ 上限 10 を超えたので 2026-08-31 に落とした(原本は CHANGELOG)
     '本文を右クリックすると、段組みを切り替えられるようになりました',
     // ⚠ 上限 10 を超えたので 2026-08-31 に落とした(原本は CHANGELOG)

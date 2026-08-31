@@ -60,7 +60,7 @@ export const PASTE_SOURCES = [
   },
   {
     id: 'html-fence',
-    label: 'ウェブページの形をそのまま(html の囲み)',
+    label: 'ウェブページの形をそのまま(html のコードブロック)',
     hint: '見た目のまま残します。色や段組が消えては困るときに(あとで直すには HTML を触ります)',
   },
   {
@@ -103,7 +103,7 @@ export interface PasteAttempt {
 const LABEL: Record<PasteUsed, string> = {
   permalink: 'ノートへのリンク',
   html: 'ウェブページの形',
-  'html-fence': 'ウェブページの形(html の囲み)',
+  'html-fence': 'ウェブページの形(html のコードブロック)',
   rtf: 'リッチテキスト',
   plain: 'そのままの文字',
 };
@@ -173,10 +173,10 @@ export function choosePaste(args: {
   /**
    * 🔴 **そのまま囲みにする**(user 要望 2026-08-27)。⚠ **変換を試さない** ──
    * この設定を選んだ user は「変換すると落ちるものが在る」と言っている。
-   * ⚠ RTF も見送る(囲みにできるのは HTML だけ)── **理由は残す**。
+   * ⚠ RTF も見送る(コードブロックにできるのは HTML だけ)── **理由は残す**。
    */
   if (source === 'html-fence') {
-    if (sizes.rtf > 0) skipped.push({ kind: 'rtf', why: '囲みにできるのは HTML だけです' });
+    if (sizes.rtf > 0) skipped.push({ kind: 'rtf', why: 'コードブロックにできるのは HTML だけです' });
     if (sizes.html === 0) {
       skipped.push({ kind: 'html', why: '届いていません' });
       return done('plain', null);

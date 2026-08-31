@@ -693,7 +693,7 @@ export class SettingsRenderer {
     const note = document.createElement('p');
     note.setAttribute('data-pkc-field', 'settings-note');
     note.textContent =
-      '本文に書かれた外部の画像(https:// で始まるもの)と、HTML ブロックの中の画像です。' +
+      '本文に書かれた外部の画像(https:// で始まるもの)と、html のコードブロックの中の画像です。' +
       '読み込むと、相手のサーバーに「この端末がいまこれを開いた」ことが伝わります。' +
       '「常に確認」ではノートごとに聞き、答えはタブを閉じるまで覚えます。' +
       '書き出した HTML に画像が入るのは「常にオン」のときだけです。';

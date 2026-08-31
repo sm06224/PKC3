@@ -232,7 +232,7 @@ export const DIAGRAM_TEMPLATES: readonly DiagramTemplate[] = [
     ),
   },
 ];
-/** コード塊の雛形。カーソルは中。 */
+/** コードブロックの雛形。カーソルは中。 */
 export const CODE_BLOCK = template(`\`\`\`\n${CARET}\n\`\`\`\n`);
 
 /**
@@ -351,7 +351,7 @@ export const FORMAT_OPS: readonly { op: FormatOp; label: string; onBar?: false }
   { op: 'link', label: 'リンク' },
   { op: 'table', label: '表' },
   { op: 'mermaid', label: '図' },
-  { op: 'codeblock', label: 'コード塊' },
+  { op: 'codeblock', label: 'コードブロック' },
   /**
    * 🔴 **帯には出さない**(`onBar: false`)。⚠ **表は 1 つのまま**にしてある ──
    * 「書式の操作は何があるか」と「帯に何を並べるか」を別の表に分けると、
