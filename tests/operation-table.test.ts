@@ -105,12 +105,12 @@ describe('操作の全数台帳(#582 段①)', () => {
       outsideActionsTable: x.outsideActionsTable.length,
       unregistered: x.unregistered,
     }).toEqual({
-      total: 224,
-      receivers: 183,
+      total: 225,
+      receivers: 184,
       registered: 71,
       both: 30,
       outsideActionsTable: 41,
-      unregistered: 153,
+      unregistered: 154,
     });
   });
 

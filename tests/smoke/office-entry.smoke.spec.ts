@@ -112,6 +112,16 @@ test('🔴 設定に Office 一式の状態と、入れる 2 つの導線が出�
   }
   // ⚠ 入っていないのに「削除」が押せると、押しても何も起きないボタンになる
   await expect(section.locator('[data-pkc-field="office-pack-remove"]')).toBeDisabled();
+  /**
+   * 🔴 **設定の初期化は、一式が入っていなくても押せる**(#634)。
+   *
+   * ⚠ ここは「削除」と**わざと違う** ── 落ちて開けなくなった user が使う口なので、
+   *   一式の状態で塞ぐと**出口が消える**。押した結果は「すでに初期状態です」と答える。
+   */
+  await expect(
+    section.locator('[data-pkc-field="office-pack-reset-profile"]'),
+    '設定の初期化が押せない(落ちた user の出口が塞がっている)',
+  ).toBeEnabled();
   // ⚠ 何もしていないときに進捗を出さない
   await expect(section.locator('[data-pkc-field="office-pack-progress"]')).toBeHidden();
 
