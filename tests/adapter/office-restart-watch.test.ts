@@ -167,18 +167,50 @@ describe('窓(host.html)の配線', () => {
     expect(host).toContain('<div id="restart" hidden></div>');
   });
 
-  it('🔴 開き直す前に設定を退避している', () => {
+  /**
+   * 🔴 **関数から入って切り出す**(#634 で踏んだ)。
+   *
+   * ⚠ 「開き直す」ボタンは **2 つ**になった(#160 の帯 / #634 の初期化の帯)。
+   *   素の `indexOf("again.textContent = '開き直す'")` は**先に出てくるほう**を掴むので、
+   *   関数を跨いで**別の帯を検めてしまう** ── 実際 CI がそれで落ちた
+   *   (CLAUDE.md §1「範囲が広すぎて別物に満たされる」)。
+   * 🔑 隣へ漏れないよう、**次の関数の手前**で切る。
+   */
+  const fnBlock = (name: string): string => {
+    const at = host.indexOf(`function ${name}(`);
+    expect(at, `${name} が無い`).toBeGreaterThan(-1);
+    const next = host.indexOf('\n  function ', at + 1);
+    return host.slice(at, next > -1 ? next : at + 2000);
+  };
+
+  it('🔴 開き直す前に設定を退避している(#160 の帯)', () => {
     // ⚠ 退避せずに reload すると、変えた設定ごと消えて
     //    「開き直したのに変わらない」という**いちばん悪い形**になる(#159 の逆流)。
-    //    🔑 押した時の処理を切り出して、その中で順番を見る
-    const at = host.indexOf("again.textContent = '開き直す'");
-    expect(at, '開き直すボタンが無い').toBeGreaterThan(-1);
-    const block = host.slice(at, at + 600);
+    const block = fnBlock('showRestartBand');
+    // ⚠ 空振り防止 ── 切り出しが壊れていたら、以降は何も測っていない
+    expect(block, '切り出しが壊れている(開き直すボタンが入っていない)')
+      .toContain("again.textContent = '開き直す'");
     const save = block.indexOf('saveProfile(FS)');
     const reload = block.indexOf('location.reload()');
     expect(save, '退避を呼んでいない').toBeGreaterThan(-1);
     expect(reload, '開き直していない').toBeGreaterThan(-1);
     expect(save, '退避より先に開き直している').toBeLessThan(reload);
+  });
+
+  /**
+   * 🔴 **反対側**(#634)。⚠ こちらは**退避してはいけない** ──
+   * 設定を捨てた直後なので、退避すると**消したばかりの設定が戻る**
+   * (「消す」と「消えたままにする」は別物)。
+   * 🔑 片側を直したら対称の反対側を疑う、の実体である。
+   */
+  it('🔴 設定を初期化した後の「開き直す」は、退避を呼ばない(#634)', () => {
+    const block = fnBlock('resetProfileFromApp');
+    expect(block, '切り出しが壊れている(開き直すボタンが入っていない)')
+      .toContain("again.textContent = '開き直す'");
+    expect(block, '開き直していない').toContain('location.reload()');
+    expect(block, '🔴 退避を呼んでいる ── 消した設定が戻る').not.toContain('saveProfile(');
+    // ⚠ 捨てる印を立てていること(`pagehide` の退避も止まる)
+    expect(block, '退避を止める印を立てていない').toContain('dropProfile()');
   });
 
   it('🔴 事故の帯と重ねない', () => {
