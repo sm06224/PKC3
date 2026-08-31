@@ -881,3 +881,61 @@ describe('Word の書き出しでも、囲みが指す添付が入る(#444 段�
     expect(xml).toContain('このコードブロックの中身は添付');
   });
 });
+
+/**
+ * 🔴 **Word / PowerPoint も「読めなかった添付」を注意に出す**(#636)。
+ *
+ * ⚠ 直す前は `readFenceAssets` に `onSkip` を渡していなかったので、
+ *   コードブロックが指す添付が読めなくても **注意は 0 件**だった ── それでいて
+ *   マニュアルには「書き出すときに読めなかった理由が残る」と書いて出荷していた
+ *   (積んでいたのは閲覧用 HTML だけ)。
+ * ⚠ 本文の中には理由が出る(`renderMarkdown` が器に書く)ので、**中身を見る
+ *   test では気づけない** ── 見るのは `report` に届いた行である。
+ */
+describe('Word / PowerPoint — 読めなかった添付の注意(#636)', () => {
+  /** `report` を捕まえる腕。`blob` を渡せば「読めた」対照群になる。 */
+  function setup(blob: Blob | null) {
+    const notes: string[][] = [];
+    const src = source({
+      getBody: async () => '```csv asset:ast-miss\n控え\n```',
+      getAssetBlob: async () => blob,
+    });
+    const d = {
+      ...deps(src),
+      report: (n: readonly string[]) => notes.push([...n]),
+      renderBody: async (text: string, opts?: RenderMarkdownOptions) =>
+        renderMarkdown(text, opts ?? {}),
+    } as unknown as ExportDeps;
+    return { d, notes };
+  }
+
+  it('🔴 読めなかったら、どの添付が欠けたかを report へ渡す', async () => {
+    const { d, notes } = setup(null);
+    const { dispatcher } = fakeDispatcher('ready');
+    expect(await exportEntryDocx(dispatcher, d, 'n1')).toBe(true);
+    expect(notes, 'report が 1 度も呼ばれていない').toHaveLength(1);
+    expect(
+      notes[0]!.filter((n) => n.includes('ast-miss')),
+      '読めなかった添付が注意に出ていない',
+    ).toEqual(['コードブロックが指している添付を焼き込めませんでした(ast-miss): その添付が見つかりません']);
+  });
+
+  /**
+   * 🔴 **対照群** ── 読めた回は注意が出ない。
+   * ⚠ これが無いと「常に何か言っている」実装でも上の test は通る。
+   */
+  it('読めた添付では、その注意は出ない', async () => {
+    const { d, notes } = setup(new Blob(['a,b\n1,2\n'], { type: 'text/csv' }));
+    const { dispatcher } = fakeDispatcher('ready');
+    expect(await exportEntryDocx(dispatcher, d, 'n1')).toBe(true);
+    expect(notes[0]!.filter((n) => n.includes('ast-miss'))).toEqual([]);
+  });
+
+  /** ⚠ PowerPoint は別の入口である ── 片方だけ配線が落ちる形を作らない。 */
+  it('🔴 PowerPoint でも同じ注意が出る', async () => {
+    const { d, notes } = setup(null);
+    const { dispatcher } = fakeDispatcher('ready');
+    expect(await exportEntryPptx(dispatcher, d, 'n1')).toBe(true);
+    expect(notes[0]!.some((n) => n.includes('ast-miss'))).toBe(true);
+  });
+});

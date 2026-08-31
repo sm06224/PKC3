@@ -326,7 +326,19 @@ async function collectOfficeBlocks(
   lid: string,
   target: OfficeTarget,
   fail: (msg: string) => false,
-): Promise<{ blocks: DocxBlock[]; media: OoxmlMedia[]; title: string } | null> {
+): Promise<{
+  blocks: DocxBlock[];
+  media: OoxmlMedia[];
+  title: string;
+  /**
+   * 🔴 **読めなかった添付の注意**(#636)。⚠ 閲覧用 HTML は 2026-08-06 から
+   *   積んでいたのに、Word / PowerPoint は `onSkip` を渡しておらず **0 件**だった
+   *   ── マニュアルには「書き出すときに理由が残る」と書いて出荷していた。
+   * ⚠ **optional にしない** ── `report` と同じ理由(配線が落ちても tsc が黙ると、
+   *   user が見るのは「どの添付が欠けたか」が消えた形である)。
+   */
+  warnings: string[];
+} | null> {
   /**
    * 🔴 **直前の保存が disk に着いてから読む**(2026-08-17 実測)。
    * ⚠ `phase === 'ready'` は「編集を終えた」しか言っていない ── 本文の書込は
@@ -363,9 +375,12 @@ async function collectOfficeBlocks(
    *   Word / PowerPoint だけ「この囲みの中身は添付に在ります」が残る。
    * ⚠ 読めなかったものは束に入らない ── 器のまま理由が出る(黙って空にしない)。
    */
+  const warnings: string[] = [];
   const fenceAssets = await readFenceAssets(
     (k) => deps.source.getAssetBlob(k),
     collectFenceAssetKeys(body.slice(skip)),
+    (k, why) =>
+      warnings.push(`コードブロックが指している添付を焼き込めませんでした(${k}): ${why}`),
   );
   const html = await renderBody(body.slice(skip), {
     vars: extractVars(body),
@@ -483,7 +498,7 @@ async function collectOfficeBlocks(
     };
     media.push({ name, blob: drawn.blob });
   }
-  return { blocks, media, title };
+  return { blocks, media, title, warnings };
 }
 
 /**
@@ -558,7 +573,8 @@ async function exportEntryOffice(
     );
     deps.download(`${safeName(got.title)}-${stamp(now)}.${target.ext}`, built.blob);
     // 🔴 **落としたものは件数で言う**(#213 の裁定 A と同じ向き)
-    deps.report(built.warnings);
+    // 🔴 **両方を出す**(#636)── 添付の注意はここでしか出ない(組み立て側は知らない)
+    deps.report([...got.warnings, ...built.warnings]);
     // ⚠ 「書き出しました」は `notify`(一時の知らせ)で言う ── state の action に
     //    書き出し用の型は無い(増やさない)
     // ⚠ **数えて見せるものは形式で違う** ── スライドは「枚数」がいちばん効く
