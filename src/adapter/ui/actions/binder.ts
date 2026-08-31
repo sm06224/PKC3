@@ -521,6 +521,12 @@ export interface BinderServices {
   installOfficePack?(): void;
   installOfficePackFromFile?(file: File): void;
   removeOfficePack?(): void;
+  /**
+   * 🔴 **Office 側の設定を初期状態に戻す**(#634)。
+   * ⚠ `removeOfficePack` では戻らない ── あれは一式(IndexedDB)だけを消し、
+   *   LO の設定(localStorage)は残る。落ちる設定を保存した user の**唯一の出口**。
+   */
+  resetOfficeProfile?(): void;
   /** 配色を切り替える(P7b 段⑨c)。⚠ user の好みで、flag でも container でもない。 */
   setTheme?(theme: string): void;
   /**
@@ -4370,6 +4376,13 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'remove-office-pack': (_dispatcher, _target, services) => {
     services.removeOfficePack?.();
+  },
+  /**
+   * 🔴 **Office の設定を初期状態に戻す**(#634)。⚠ 引数を採らない ──
+   * 消すのは決まった 1 鍵(`pkc3-office-profile`)だけである。
+   */
+  'reset-office-profile': (_dispatcher, _target, services) => {
+    services.resetOfficeProfile?.();
   },
   'set-theme': (_dispatcher, target, services) => {
     // `<select>` なら選ばれた値、ボタンなら属性(どちらの形でも受ける)

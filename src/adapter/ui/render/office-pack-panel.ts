@@ -190,7 +190,24 @@ export function buildOfficePackPanel(state: OfficePackState = appOfficePack): Of
   fromFile.title = '手元の lo-wasm-qt6.zip を選びます(配布元につながらない環境でも入れられます)';
   const remove = button('remove-office-pack', '削除', 'office-pack-remove');
   remove.title = 'この端末からひとそろいを消します(ノートや添付は消えません)';
-  row.append(fromUrl, fromFile, remove, input);
+  /**
+   * 🔴 **Office の設定を初期状態に戻す**(#634)。
+   *
+   * ⚠ **「削除」では戻らない** ── 一式を消しても設定は localStorage に残るので、
+   *   入れ直しても同じ設定で開く。落ちる設定を保存してしまうと**出られなくなる**
+   *   (user 報告 2026-08-30「リボン UI がオンで開くとクラッシュしました」)。
+   * ⚠ **押せなくしない。** 何も保存されていなくても「すでに初期状態です」と答える
+   *   ほうが、灰色のボタンより分かる(困っている user は必ずここを押す)。
+   */
+  const resetProfile = button(
+    'reset-office-profile',
+    'Office の設定を初期化',
+    'office-pack-reset-profile',
+  );
+  resetProfile.title =
+    'Office の中で変えた設定(ツールバーの形・表示言語など)を消して、次に開くときは素の状態から始めます。'
+    + 'ノートも一式も消えません';
+  row.append(fromUrl, fromFile, remove, resetProfile, input);
   root.append(row);
 
   const progress = document.createElement('p');
@@ -225,6 +242,9 @@ export function buildOfficePackPanel(state: OfficePackState = appOfficePack): Of
     fromFile.disabled = busy;
     // ⚠ 入っていないのに「削除」を押せると、押しても何も起きないボタンになる
     remove.disabled = busy || meta === null;
+    // ⚠ 設定の初期化は**一式が入っていなくても押せる**(落ちて開けない人が使う口
+    //    なので、一式の状態で塞がない)。⚠ 設置中だけは止める
+    resetProfile.disabled = busy;
   };
   sync();
   const off = state.onChange(sync);

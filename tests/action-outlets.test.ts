@@ -62,6 +62,7 @@ const UNRESOLVED: readonly string[] = [
   'move-order-down',
   'move-order-up',
   'remove-office-pack',
+  'reset-office-profile',
   'set-app-group',
   'set-app-icon',
   'toggle-todo',

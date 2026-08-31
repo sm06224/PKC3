@@ -115,6 +115,10 @@ import {
   OfficePackInstaller,
   type PackResult,
 } from '@adapter/platform/office/office-pack-install';
+import {
+  announceOfficeProfileReset,
+  resetOfficeProfile,
+} from '@adapter/platform/office/office-profile';
 import { readAppStorage } from '@adapter/platform/app-storage';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import { formatAssetRef } from '@features/asset/asset-ref-format';
@@ -2333,6 +2337,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     },
     removeOfficePack: () => {
       void officeInstaller.remove().then(finishOfficePack);
+    },
+    /**
+     * 🔴 **Office の設定を初期状態に戻す**(#634)。⚠ 判断は
+     * `office-profile.ts` に在る(ここは渡して、言うだけ)── `main.ts` は
+     * どの test からも実行されない(CLAUDE.md 2026-08-08)。
+     * ⚠ **描き直さない** ── 消したことで設定の面の見た目は 1 つも変わらない
+     *   (このボタンは一式の状態でも profile の有無でも押せる)。結果は
+     *   `showStatus` の 1 行で言う ── 押して無反応にしないのはそちらである。
+     */
+    resetOfficeProfile: () => {
+      showStatus(resetOfficeProfile(localStorage, announceOfficeProfileReset).message);
     },
     // 🎨 配色(P7b 段⑨c、user 指示「最初はライトとダークのみに」)。
     // ⚠ 属性は **`<html>`** に付ける ── `:root` の変数を上書きするため

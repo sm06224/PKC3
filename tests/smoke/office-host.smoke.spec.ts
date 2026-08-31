@@ -127,8 +127,16 @@ test('🔴 wasm の異常終了は画面に出る(そして無関係な例外で
       () => getComputedStyle(document.getElementById('screen') as HTMLElement).pointerEvents,
     ),
   ).toBe('none');
-  // 読み直す導線が在る(user が自力で抜けられる)
-  await expect(page.locator('#msg button')).toHaveCount(1);
+  /**
+   * 🔴 **抜ける道は 2 つ**(#634)。⚠ 数だけ見ない ── **字で等値に pin する**。
+   * 「読み込み直す」だけだと、**落ちる設定はそのまま書き戻る**ので何度押しても
+   * 同じ所で止まる(user から見ると出口が無い)。順番も見る ── 軽いほうが先。
+   */
+  await expect(page.locator('#msg button')).toHaveCount(2);
+  expect(await page.locator('#msg button').allTextContents()).toEqual([
+    '読み込み直す',
+    '設定を初期化して開き直す',
+  ]);
 });
 
 /**
@@ -937,7 +945,12 @@ test('🔴 スレッドが落ちて命令が通らなくなったら、そう出
   await expect(page.locator('#warn')).toBeVisible();
   // 🔑 **失うものを先に言う。** 「不安定」だけでは user は保存を試み続ける
   await expect(page.locator('#warn')).toContainText('保存');
-  await expect(page.locator('#warn button')).toHaveCount(1);
+  // 🔴 停止の帯と**同じ 2 つ**(#634)── 「効かなくなった」ほうも設定が原因のことがある
+  await expect(page.locator('#warn button')).toHaveCount(2);
+  expect(await page.locator('#warn button').allTextContents()).toEqual([
+    '読み込み直す',
+    '設定を初期化して開き直す',
+  ]);
 
   // 🔴 **停止とは別物**。版面は触れるまま(本文を読んで写せる状態を残す)
   expect(
@@ -1794,4 +1807,104 @@ test('🔴 office-format.js に判定の口が無い版が読まれたら、断�
   await openWithDoc(page, 'a.docx', { alienPack: 'svt' });
   await expect(page.locator('#nosave'), '判定できないのに黙っている').toBeVisible();
   await expect(page.locator('#ro'), '判定できないのに印が出ていない').toBeVisible();
+});
+
+/**
+ * 🔴 **落ちる設定から出られること**(#634)。
+ *
+ * user 報告 2026-08-30「**新しいlibreofficeはリボンUIがオンで開くとクラッシュしました /
+ * 見た目上、かなり静かに壊れました**」で分かった形はこうである ──
+ * ① LO の中で設定を変える ② その設定で LO が落ちる ③ 落ちる前に退避されている
+ * ④ 次に開くと書き戻されて**また落ちる**。
+ * ⚠ 一式の「削除」は IndexedDB しか消さない(`office-pack-store.ts:211`)ので、
+ * **入れ直しても直らない** ── アプリの中に出口が 1 つも無かった。
+ *
+ * 🔑 **観測点は「消したか」ではなく「開き直した後に残っていないか」**である ──
+ * `saveProfile` は `pagehide` でも走るので、消してすぐ開き直すと
+ * **その退避が書き戻して復活させる**。「消す」と「消えたままにする」は別物で、
+ * 前者だけ見る test は `profileReset` の門を外しても緑のままになる。
+ */
+const BAD_PROFILE = [
+  '<?xml version="1.0" encoding="UTF-8"?>',
+  '<oor:items xmlns:oor="http://openoffice.org/2001/registry">',
+  '<item oor:path="/org.openoffice.Office.UI.ToolbarMode">',
+  '<prop oor:name="PKC3_BAD_MARKER" oor:op="fuse"><value>notebookbar.ui</value></prop></item>',
+  '</oor:items>',
+].join('');
+
+/** 退避を仕込み、それが LO へ書き戻っている状態まで進める(前提を assert する)。 */
+async function bootWithBadProfile(page: import('@playwright/test').Page): Promise<void> {
+  await page.goto('/office/host.html');
+  await seedFakePack(page);
+  await page.evaluate((xcu) => {
+    localStorage.setItem('pkc3-office-profile', xcu);
+  }, BAD_PROFILE);
+  await page.reload();
+  await expect(page.locator('#status')).toContainText('表示中', { timeout: 15_000 });
+  // ⚠ 空振り防止 ── 退避が本当に書き戻っていること(でなければ以降は何も測っていない)
+  expect(
+    await page.evaluate(() => (window as unknown as { __xcu?: string }).__xcu ?? ''),
+    'この test の前提(退避が LO へ書き戻る)が成り立っていない',
+  ).toContain('PKC3_BAD_MARKER');
+  await page.evaluate(() => {
+    (window as unknown as { __beforeReset?: boolean }).__beforeReset = true;
+  });
+}
+
+/** 開き直しを待つ(印は window に置く ── 再読み込みで消えるのが合図)。 */
+async function waitReloaded(page: import('@playwright/test').Page): Promise<void> {
+  await page.waitForFunction(
+    () => (window as unknown as { __beforeReset?: boolean }).__beforeReset === undefined,
+    null,
+    { timeout: 20_000 },
+  );
+  await expect(page.locator('#status')).toContainText('表示中', { timeout: 15_000 });
+}
+
+test('🔴 本体から「設定を初期化」しても、書きかけの窓を勝手に閉じない(#634)', async ({ page }) => {
+  await bootWithBadProfile(page);
+  // 本体の設定画面が投げる合図と**同じもの**を投げる
+  await page.evaluate(() => {
+    const ch = new BroadcastChannel('pkc3-office');
+    ch.postMessage({ pkc3Office: 'reset-profile', payload: {} });
+    ch.close();
+  });
+  // ⚠ **開き直さない** ── 生きている窓は保存していない編集を抱えている
+  await expect(page.locator('#restart')).toContainText('設定を初期化しました');
+  expect(
+    await page.evaluate(() => (window as unknown as { __beforeReset?: boolean }).__beforeReset),
+    '勝手に開き直した(書きかけを捨てさせている)',
+  ).toBe(true);
+  // 🔴 **消えたままであること** ── `pagehide` の退避が書き戻さない
+  expect(
+    await page.evaluate(() => {
+      window.dispatchEvent(new Event('pagehide'));
+      return localStorage.getItem('pkc3-office-profile');
+    }),
+    '閉じるときの退避が、消した設定を書き戻している(出られないまま)',
+  ).toBeNull();
+  // user が押したときだけ開き直る
+  await page.locator('#restart').getByRole('button', { name: '開き直す' }).click();
+  await waitReloaded(page);
+  expect(
+    await page.evaluate(() => localStorage.getItem('pkc3-office-profile')),
+    '開き直したら戻ってきている',
+  ).toBeNull();
+});
+
+test('🔴 停止の帯から設定を初期化して開き直せる(#634)', async ({ page }) => {
+  await bootWithBadProfile(page);
+  await page.evaluate(() =>
+    window.dispatchEvent(
+      new ErrorEvent('error', { message: 'RuntimeError: null function or function signature mismatch' }),
+    ),
+  );
+  await expect(page.locator('#msg')).toContainText('Office が停止しました');
+  // ⚠ 「読み込み直す」だけでは**同じ所へ戻る** ── 出口はこちらである
+  await page.locator('#msg').getByRole('button', { name: '設定を初期化して開き直す' }).click();
+  await waitReloaded(page);
+  expect(
+    await page.evaluate(() => localStorage.getItem('pkc3-office-profile')),
+    '停止の帯から初期化したのに、退避が残っている',
+  ).toBeNull();
 });

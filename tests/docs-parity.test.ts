@@ -500,7 +500,13 @@ describe('マニュアルと実装の突合', () => {
     const panel = buildOfficePackPanel(new OfficePackState());
     const labels = [...panel.root.querySelectorAll('button')].map((b) => b.textContent ?? '');
     // ⚠ **等値**で見る(包含だと足したものが素通りする)
-    expect(labels).toEqual(['取得して入れる', 'ファイルから入れる', '削除']);
+    // ⚠ 「設定を初期化」は #634 で足した ── 一式の削除では Office の設定が消えないため
+    expect(labels).toEqual([
+      '取得して入れる',
+      'ファイルから入れる',
+      '削除',
+      'Office の設定を初期化',
+    ]);
     for (const label of labels) {
       expect(MANUAL, `マニュアルに「${label}」の説明が無い`).toContain(`**${label}**`);
     }
@@ -1083,6 +1089,8 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    // ⚠ 上限 10 を超えたので 2026-08-31 に落とした(原本は CHANGELOG)
+    '消したノートが、予定・連絡先・雛形の一覧から消えるようになりました',
     // ⚠ 上限 10 を超えたので 2026-08-30 に落とした(原本は CHANGELOG)
     '連絡先や Markdown を、PKC3 の画面に落として取り込めるようになりました',
     // ⚠ 上限を 10 へ揃えたので 2026-08-29 に落とした(原本は CHANGELOG)

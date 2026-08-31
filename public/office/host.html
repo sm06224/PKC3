@@ -160,6 +160,12 @@
       if (adoptSaved) adoptSaved(d.payload || {});
       return;
     }
+    if (d.pkc3Office === 'reset-profile') {
+      // 🔴 本体の設定画面から「設定を初期化」が押された(#634)。
+      //    ⚠ ここで受けないと、この窓が閉じるときに**書き戻して復活させる**
+      resetProfileFromApp();
+      return;
+    }
     if (d.pkc3Office === 'reload-request') {
       var q = d.payload && d.payload.name
         ? '?name=' + encodeURIComponent(d.payload.name) + '&await-doc=1' : '?await-doc=1';
@@ -200,9 +206,19 @@
     var again = document.createElement('button');
     again.textContent = '読み込み直す';
     again.addEventListener('click', function () { location.reload(); });
+    /**
+     * 🔴 **困っているその場から戻せるようにする**(#634)。
+     *
+     * ⚠ 「読み込み直す」だけだと、**落ちる設定はそのまま書き戻る**ので
+     * 何度押しても同じ所で止まる ── user から見ると出口が無い。
+     */
+    var fresh = document.createElement('button');
+    fresh.textContent = '設定を初期化して開き直す';
+    fresh.addEventListener('click', resetProfileAndReload);
     msgEl.appendChild(head);
     msgEl.appendChild(why);
     msgEl.appendChild(again);
+    msgEl.appendChild(fresh);
     msgEl.hidden = false;
     say('crashed', { reason: String(reason).slice(0, 300) });
   }
@@ -239,8 +255,14 @@
     var again = document.createElement('button');
     again.textContent = '読み込み直す';
     again.addEventListener('click', function () { location.reload(); });
+    // 🔴 停止と同じ出口を添える(#634)── 「効かなくなった」ほうも
+    //    設定が原因のことがあり、読み込み直すだけでは同じ所へ戻る
+    var fresh = document.createElement('button');
+    fresh.textContent = '設定を初期化して開き直す';
+    fresh.addEventListener('click', resetProfileAndReload);
     warnEl.appendChild(what);
     warnEl.appendChild(again);
+    warnEl.appendChild(fresh);
     warnEl.hidden = false;
     say('degraded', { reason: String(reason).slice(0, 300) });
   }
@@ -933,6 +955,61 @@
   var PROFILE_KEY = 'pkc3-office-profile';
   var PROFILE_MAX = 1000000;
   var lastSavedProfile = null;
+  /**
+   * 🔴 **設定を捨てると決めた**(#634)。
+   *
+   * ⚠ 旗が要るのは、`saveProfile` が **`pagehide` でも呼ばれる**からである ──
+   * 消してすぐ `location.reload()` すると、その pagehide が**手元の(落ちる)設定を
+   * 書き戻して**しまい、消したことが user から見て**何も起きない**。
+   * 🔑 「消す」と「消えたままにする」は別物であり、片方だけでは出られない。
+   */
+  var profileReset = false;
+
+  /**
+   * 🔴 **退避した設定を捨てる**(#634)。⚠ 開き直しはしない(呼び側が決める)。
+   *
+   * user 報告 2026-08-30「リボン UI がオンで開くとクラッシュしました」の出口。
+   * ⚠ 落ちる設定が退避されると、開くたびに書き戻されて**また落ちる** ──
+   * 一式を削除しても IndexedDB しか消えないので、入れ直しても直らない。
+   */
+  function dropProfile() {
+    profileReset = true;
+    try { localStorage.removeItem(PROFILE_KEY); } catch (e) { /* 触れない端末 */ }
+    lastSavedProfile = null;
+  }
+
+  /** 停止・不調の帯から押したとき。⚠ **もう編集は続けられない**ので即座に開き直す。 */
+  function resetProfileAndReload() {
+    dropProfile();
+    location.reload();
+  }
+
+  /**
+   * 🔴 **本体の設定画面から初期化されたとき**(#634)。
+   *
+   * ⚠ ここで `location.reload()` しない ── この窓は**生きていて、保存していない
+   * 編集を抱えているかもしれない**。設定のボタンを押しただけで書きかけを捨てさせない。
+   * 🔑 退避だけ止めて(`dropProfile`)、開き直すかは**この窓で user が決める**。
+   */
+  function resetProfileFromApp() {
+    dropProfile();
+    // ⚠ 停止・不調の帯が出ているなら、そちらに同じ出口が在る ── 重ねない
+    if (dead || degraded) return;
+    nosaveEl.hidden = true;
+    restartEl.textContent = '';
+    var what = document.createElement('span');
+    // ⚠ **失うものを先に書く**(`showRestartBand` と同じ向き)
+    what.textContent = 'Office の設定を初期化しました。ウィンドウを開き直すと素の状態で始まります。'
+      + ' ⚠ 保存していない変更は失われます。';
+    var again = document.createElement('button');
+    again.textContent = '開き直す';
+    // 🔴 ここでは退避しない ── 退避すると、消したばかりの設定が戻る
+    again.addEventListener('click', function () { location.reload(); });
+    restartEl.appendChild(what);
+    restartEl.appendChild(again);
+    restartEl.hidden = false;
+    say('profile-reset', {});
+  }
 
   /**
    * 保存済みプロファイルを読み、**窓の幾何の prop を剥いで**返す(無効なら null)。
@@ -1043,6 +1120,9 @@
   function saveProfile(FS) {
     try {
       if (!FS) return;
+      // 🔴 捨てると決めた後は**書き戻さない**(#634)。⚠ これが無いと
+      //    `pagehide` の退避が、消したばかりの設定を復活させる
+      if (profileReset) return;
       var txt = FS.readFile(PROFILE_PATH, { encoding: 'utf8' });
       if (!txt || txt === lastSavedProfile) return;
       if (txt.length > PROFILE_MAX) return;
