@@ -254,6 +254,37 @@ test('ブックマークで開いた窓が、合図つきの 1 通だけを受�
    */
   expect(calls, '計器が働いていない(window.open を数えられていない)').toBe(1);
 
-  expect(errors, `記事の頁で例外 ── ${state}${opens}${moment}`).toEqual([]);
+  /**
+   * 🔴 **計器が答えを返した**(#387 診断第 5 段。2026-08-31 の赤で確定)。
+   *
+   * 出た 1 行(逐語):
+   *
+   *     pageerror: Failed to execute 'open' on 'Window':
+   *       The provided callback is no longer runnable.
+   *       @? at window.open (eval at evaluate (:311:30), <anonymous>:8:14)
+   *
+   * 🔑 **`window.open` は 1 回**だった ── つまり上の①(同じ行が 2 回走った)ではなく
+   *   **②「窓を作ったうえで例外も上げた」**である。同じ回に
+   *   窓 2 枚 / 合図 36 字 / 返事 `{"ok":true}` / 取り込みの帯が**全部揃っていた**
+   *   (= 流れは最後まで成功している)。
+   *
+   * ⚠ **投げているのは製品ではない。** 名指しされた枠は `eval at evaluate` ──
+   *   `page.evaluate` が作った文脈で、そこに在るのは**この test が仕込んだ包み**である
+   *   (`<anonymous>:8` = `return real(...args)`)。製品の経路に `bind` した写しは無い。
+   *
+   * 🔑 だから**この 1 種類だけ**を外す ── 文言は**丸ごと一致**で、枠は
+   *   `eval at evaluate`(= こちらが注入した script)であることまで要求する。
+   *   ⚠ 部分一致にしない / 他の例外は 1 つも外さない(`KNOWN_CONSOLE_NOISE` と同じ作法)。
+   * ⚠ 外した件数は**必ず出す** ── 黙って消すと、増えても誰も気づかない。
+   */
+  const OPEN_NOISE =
+    "Failed to execute 'open' on 'Window': The provided callback is no longer runnable.";
+  const isHarnessOpenNoise = (line: string): boolean =>
+    line.startsWith(`pageerror: ${OPEN_NOISE}`) && line.includes('(eval at evaluate (');
+  const appErrors = errors.filter((l) => !isHarnessOpenNoise(l));
+  const muted = errors.length - appErrors.length;
+  const mutedNote = muted > 0 ? ` / 計器の雑音を ${muted} 件外した(#387 ②)` : '';
+
+  expect(appErrors, `記事の頁で例外 ── ${state}${opens}${moment}${mutedNote}`).toEqual([]);
   expect(errorsPkc, `PKC3 で例外 ── ${state}`).toEqual([]);
 });
