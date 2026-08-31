@@ -127,8 +127,16 @@ test('🔴 wasm の異常終了は画面に出る(そして無関係な例外で
       () => getComputedStyle(document.getElementById('screen') as HTMLElement).pointerEvents,
     ),
   ).toBe('none');
-  // 読み直す導線が在る(user が自力で抜けられる)
-  await expect(page.locator('#msg button')).toHaveCount(1);
+  /**
+   * 🔴 **抜ける道は 2 つ**(#634)。⚠ 数だけ見ない ── **字で等値に pin する**。
+   * 「読み込み直す」だけだと、**落ちる設定はそのまま書き戻る**ので何度押しても
+   * 同じ所で止まる(user から見ると出口が無い)。順番も見る ── 軽いほうが先。
+   */
+  await expect(page.locator('#msg button')).toHaveCount(2);
+  expect(await page.locator('#msg button').allTextContents()).toEqual([
+    '読み込み直す',
+    '設定を初期化して開き直す',
+  ]);
 });
 
 /**
@@ -937,7 +945,12 @@ test('🔴 スレッドが落ちて命令が通らなくなったら、そう出
   await expect(page.locator('#warn')).toBeVisible();
   // 🔑 **失うものを先に言う。** 「不安定」だけでは user は保存を試み続ける
   await expect(page.locator('#warn')).toContainText('保存');
-  await expect(page.locator('#warn button')).toHaveCount(1);
+  // 🔴 停止の帯と**同じ 2 つ**(#634)── 「効かなくなった」ほうも設定が原因のことがある
+  await expect(page.locator('#warn button')).toHaveCount(2);
+  expect(await page.locator('#warn button').allTextContents()).toEqual([
+    '読み込み直す',
+    '設定を初期化して開き直す',
+  ]);
 
   // 🔴 **停止とは別物**。版面は触れるまま(本文を読んで写せる状態を残す)
   expect(
