@@ -659,3 +659,39 @@ describe('スマートフォルダは期日と状態を持てる(#283 の (B))',
     expect(extractMeta(SMART_ARCHETYPE, body('archived: true\n')).archived).toBe(false);
   });
 });
+
+/**
+ * 🔴 **`smart-tags:` にも井桁で書ける**(#637)。
+ *
+ * ⚠ 直す前はここだけ `split(',')` を書いていたので、`smart-tags: #請求 #未払` と
+ *   手で書くと **1 つの条件**になり、しかも frontmatter 側で行末コメントに
+ *   刈られて **0 件**になっていた ── **同じ字が `tags:` と別の意味**だった(§7)。
+ * 🔑 割り方は `splitTags` 1 か所へ寄せ、**上限だけ**この面が持つ
+ *   (`MAX_SMART_TAGS` = 8 は `MAX_TAGS` = 32 より狭い)。
+ */
+describe('条件を井桁で書く(#637)', () => {
+  it('🔴 `#請求 #未払` は 2 つの条件になる', () => {
+    expect(readSmartSpec(`---\n${SMART_TAGS_KEY}: #請求 #未払\n---\n`).tags).toEqual([
+      '請求',
+      '未払',
+    ]);
+  });
+
+  it('🔴 角括弧に入れて書いても読める', () => {
+    expect(readSmartSpec(`---\n${SMART_TAGS_KEY}: [#請求, #未払]\n---\n`).tags).toEqual([
+      '請求',
+      '未払',
+    ]);
+  });
+
+  it('🔴 対照群: 井桁が無ければ空白入りの 1 つ(意図した名前を割らない)', () => {
+    expect(readSmartSpec(`---\n${SMART_TAGS_KEY}: 請求 未払\n---\n`).tags).toEqual(['請求 未払']);
+  });
+
+  it('⚠ 上限はこの面が持つ(`MAX_SMART_TAGS` で切る)', () => {
+    const many = Array.from({ length: MAX_SMART_TAGS + 3 }, (_, i) => `#t${i}`).join(' ');
+    expect(readSmartSpec(`---\n${SMART_TAGS_KEY}: ${many}\n---\n`).tags).toHaveLength(
+      MAX_SMART_TAGS,
+    );
+  });
+});

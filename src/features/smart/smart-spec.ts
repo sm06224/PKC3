@@ -42,7 +42,7 @@ import {
 } from '../markdown/frontmatter';
 import { isKnownArchetype } from '../flavor/archetype-label';
 import { countTaskCandidates } from '../markdown/task-count';
-import { MAX_TAG_CHARS, normalizeTag, sameTag } from '../flavor/tags';
+import { MAX_TAG_CHARS, normalizeTag, sameTag, splitTags } from '../flavor/tags';
 import { tagsForMatch } from '../flavor/entry-tags';
 
 /**
@@ -274,7 +274,15 @@ function readSmartTags(raw: FrontmatterValue | undefined): readonly string[] {
    */
   const parts: string[] = Array.isArray(raw)
     ? raw.filter((v) => v !== null && v !== undefined).map((v) => String(v))
-    : String(raw).split(',');
+    /**
+     * 🔴 **割り方は `splitTags` 1 か所**(#637。§7)── 直す前はここだけ
+     *   `split(',')` を書いていたので、`smart-tags: #請求 #未払` と手で書くと
+     *   **「請求 未払」という 1 つの条件**になり、1 件も集まらなかった
+     *   (打つ欄・`tags:` と**同じ字が別の意味**になっていた)。
+     * ⚠ 上限だけはここが持つ(`MAX_SMART_TAGS` = 8 は `MAX_TAGS` = 32 より狭い)
+     *   ── 下の輪が数え直すので、`splitTags` の上限は通過点にすぎない。
+     */
+    : splitTags(String(raw));
   const out: string[] = [];
   for (const part of parts) {
     const t = normalizeTag(part);

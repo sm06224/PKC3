@@ -11,7 +11,12 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta, Relation } from '../../src/core/model/entry-meta';
-import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
+import {
+  initialState,
+  reduce,
+  type AppState,
+  type DomainEvent,
+} from '../../src/adapter/state/app-state';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { buildShell } from '../../src/adapter/ui/render/shell';
@@ -1200,5 +1205,55 @@ describe('列で引く条件(#421 段②)', () => {
     await tick(60);
     // ⚠ **2 件書いたのに走査は 1 回**(0 では困る ── 集め直しは起きなければならない)
     expect(s.scans.length - before, '走査が積み上がっている').toBe(1);
+  });
+});
+
+/**
+ * 🔴 **条件の欄でも `#請求 #未払` で 2 つ足せる**(#637)。
+ *
+ * ⚠ タグを打つ欄は 3 つあるので、**欄ごとに 1 件ずつ**見る ── 1 か所だけ
+ *   直すと、同じ字が場所によって別の個数になる形が残る(§7)。
+ * ⚠ そして **`smart-tags:` を手で書いた形**も同じ規則で読めることを、
+ *   `smart-spec.test.ts` の側で見る(書く側と読む側は別の場所である)。
+ */
+describe('条件の欄で複数のタグ(#637)', () => {
+  function mountCond() {
+    document.body.textContent = '';
+    const root = document.createElement('div');
+    document.body.append(root);
+    buildShell(root);
+    const region = document.createElement('div');
+    root.append(region);
+    const r = new FilerRenderer(region);
+    const d = new Dispatcher();
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: METAS, relations: RELS });
+    d.dispatch({ type: 'SET_SCOPE', lid: 's1' });
+    const seen: DomainEvent[] = [];
+    d.onEvent((e) => seen.push(e));
+    r.render(d.getState());
+    bindActions(root, d, {});
+    return { region, seen };
+  }
+
+  const asked = (seen: readonly DomainEvent[]): string[] =>
+    seen
+      .filter((e): e is Extract<DomainEvent, { type: 'REQUEST_SMART_COND' }> =>
+        e.type === 'REQUEST_SMART_COND')
+      .map((e) => e.tag);
+
+  it('🔴 `#請求 #未払` で 2 つの条件を頼む', () => {
+    const m = mountCond();
+    const box = m.region.querySelector<HTMLInputElement>('[data-pkc-field="smart-cond"]')!;
+    box.value = '#請求 #未払';
+    m.region.querySelector<HTMLElement>('[data-pkc-action="smart-cond-add"]')!.click();
+    expect(asked(m.seen), '1 つの条件にまとめられた').toEqual(['請求', '未払']);
+  });
+
+  it('🔴 対照群: 井桁が無ければ空白入りの 1 つ(意図した名前を割らない)', () => {
+    const m = mountCond();
+    const box = m.region.querySelector<HTMLInputElement>('[data-pkc-field="smart-cond"]')!;
+    box.value = '請求 未払';
+    m.region.querySelector<HTMLElement>('[data-pkc-action="smart-cond-add"]')!.click();
+    expect(asked(m.seen), '意図した空白入りの名前を割った').toEqual(['請求 未払']);
   });
 });

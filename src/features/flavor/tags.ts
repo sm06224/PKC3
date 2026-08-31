@@ -39,6 +39,53 @@ function normalize(raw: string): string {
 }
 
 /**
+ * 🔴 **1 本の字を、いくつのタグとして読むか**(#637。user 裁定 2026-08-31)。
+ *
+ * > 「**#tag1 #tag2 ってすればいいやん**」
+ *
+ * ⚠ この 1 行で、それまでの案(カンマ・読点・セミコロンを足す)は**取り下げた** ──
+ * 区切りを 3 つ足すより、**user が実際に書く形を 1 つ通す**ほうが強い。
+ *
+ * ## 規則は 1 つ:**井桁が付いていれば、空白で区切る**
+ *
+ * | 打った字 | 何個 | なぜ |
+ * |---|---|---|
+ * | `#買い物 #家事` | **2** | 全部の語が `#` で始まる = 並べて書いている |
+ * | `買い物 家事` | **1**「買い物 家事」 | 🔴 **空白入りのタグは意図である**(下記) |
+ * | `買い物, 家事` | **2** | frontmatter が元から受けていた形(落とさない) |
+ * | `#買い物` | **1** | 語が 1 つなら井桁を外すだけ |
+ *
+ * 🔴 **空白だけでは割らない。** 空白入りのタグ名は事故ではなく意図で、
+ * `tests/features/tags.test.ts` と `bulk-tag.test.ts` が pin している。
+ * ⚠ しかも `encodeTags`(下)は索引の `|` を**空白へ変換する**ので、
+ *   こちら自身が空白入りの名前を**作る側**に居る ── 空白で割ると自分の索引を割る。
+ * 🔑 井桁が**全部の語に付いている**ときだけ割れば、その心配が消える。
+ *
+ * ⚠ **判定はここ 1 か所**(§7)── 打つ欄も frontmatter もここを通す。
+ *   欄だけに split を書くと、同じ字が場所によって 1 個にも 2 個にもなる。
+ */
+export function splitTags(raw: string): string[] {
+  const s = raw.trim();
+  if (s === '') return [];
+  // ⚠ 全角空白も区切り(日本語で打つと入る)。`\s` は環境で揺れるので使わない
+  const words = s.split(/[ \t\u3000]+/u).filter((w) => w !== '');
+  const allHashed = words.length >= 2 && words.every((w) => w.startsWith('#'));
+  // ⚠ 井桁の並びでないときは、これまでどおり**カンマだけ**で割る(空白は割らない)
+  const parts = allHashed ? words : s.split(',');
+  const out: string[] = [];
+  for (const part of parts) {
+    // ⚠ `#買い物, #家事` のように区切りを重ねて書かれることがある ── 末尾の
+    //    区切りらしき字は落とす(落とさないと「買い物,」という別のタグになる)
+    const t = normalize(part.replace(/[,、;；]+$/u, ''));
+    if (t === '' || [...t].length > MAX_TAG_CHARS) continue;
+    if (out.some((x) => sameTag(x, t))) continue;
+    out.push(t);
+    if (out.length >= MAX_TAGS) break;
+  }
+  return out;
+}
+
+/**
  * 🔴 **正規化した形を外にも出す**(#402 ①)。
  * ⚠ 一括の入力欄から来る字は `  請求済  ` のような形をしている ── 呼び側が
  *   自前で `trim` すると、**読む側(`readTags`)と規則が 2 つ**になる(§7)。
@@ -102,9 +149,14 @@ export function readTags(body: string): string[] {
    * そのまま `String()` すると **`"null"` という名前のタグ**が生まれる
    * (test が捕まえた)── 値の無いものは先に落とす。
    */
-  const parts: string[] = Array.isArray(raw)
-    ? raw.filter((v) => v !== null && v !== undefined).map((v) => String(v))
-    : String(raw).split(',');
+  if (!Array.isArray(raw)) {
+    // ⚠ 文字列の形は **`splitTags` 1 か所**で読む(§7)── 打つ欄と規則を分けない。
+    //    これで `tags: #買い物 #家事` も打った欄と同じに 2 個として読める。
+    return splitTags(String(raw));
+  }
+  const parts: string[] = raw
+    .filter((v) => v !== null && v !== undefined)
+    .map((v) => String(v));
   const out: string[] = [];
   for (const part of parts) {
     const t = normalize(part);

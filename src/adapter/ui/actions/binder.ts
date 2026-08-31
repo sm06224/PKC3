@@ -108,7 +108,7 @@ import { insertSnippet, nextSnippetSlot } from '@features/snippet/snippet-expand
 import { abbrBeforeCaret } from '@features/snippet/snippet-table';
 import { snippetMenu, snippetMenuNote } from '@features/snippet/snippet-menu';
 import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
-import { normalizeTag } from '@features/flavor/tags';
+import { splitTags } from '@features/flavor/tags';
 import { isEntrySort, NATURAL_DESC } from '@features/filter/entry-sort';
 import { COLUMN_PANES, isPaneId } from '@features/pane-visibility';
 import { STRUCTURAL, isRelationKind } from '@features/relation/kinds';
@@ -857,8 +857,10 @@ function runBulkTag(
   mode: 'add' | 'remove',
 ): void {
   const field = root.querySelector<HTMLInputElement>('[data-pkc-field="bulk-tag"]');
-  const tag = normalizeTag(field?.value ?? '');
-  if (tag === '') {
+  // 🔑 **打った字を何個と読むかは `splitTags` 1 か所**(#637)──
+  //   `#請求 #未払` と打てば 2 つ付く(本文のタグの行と同じ字である)
+  const tags = splitTags(field?.value ?? '');
+  if (tags.length === 0) {
     // ⚠ **無言で終わらせない**(帯は出ているのに何も起きない dead click になる)
     dispatcher.dispatch({
       type: 'OP_FAILED',
@@ -874,7 +876,11 @@ function runBulkTag(
     dispatcher.dispatch({ type: 'OP_FAILED', error: '選んでいるものがありません' });
     return;
   }
-  dispatcher.dispatch({ type: 'BULK_TAG', lids, tag, mode });
+  // ⚠ **1 つずつ撃つ** ── 書込は 1 本の鎖に直列化されているので、2 つ目は
+  //   1 つ目を書いた後の本文を読む(だから `expectHash` の衝突にならない)。
+  //   スマートフォルダへ落として入れる経路と同じ形である
+  //   (`store-effects.ts` の `for (const tag of spec.tags)`)。
+  for (const tag of tags) dispatcher.dispatch({ type: 'BULK_TAG', lids, tag, mode });
   // 🔑 通したら欄を空にする(次の 1 つを打てる)── ⚠ 断ったときは残す
   if (field) field.value = '';
 }
@@ -2444,13 +2450,14 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = st.scopeLid;
     if (lid === null) return;
     const field = root.querySelector<HTMLInputElement>('[data-pkc-field="smart-cond"]');
-    const tag = normalizeTag(field?.value ?? '');
-    if (tag === '') {
+    // 🔑 **打った字の読み方はどの欄でも同じ**(#637)── `#請求 #未払` で 2 条件
+    const tags = splitTags(field?.value ?? '');
+    if (tags.length === 0) {
       // ⚠ **無言で終わらせない**(帯は出ているのに何も起きない dead click になる)
       dispatcher.dispatch({ type: 'OP_FAILED', error: '集める条件にするタグを入力してください' });
       return;
     }
-    dispatcher.dispatch({ type: 'SMART_COND', lid, tag, mode: 'add' });
+    for (const tag of tags) dispatcher.dispatch({ type: 'SMART_COND', lid, tag, mode: 'add' });
     // 🔑 通したら欄を空にする(次の 1 つを打てる)── ⚠ 断ったときは残す
     if (field) field.value = '';
   },
@@ -2518,13 +2525,23 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = st.selectedLid;
     if (lid === null) return;
     const field = root.querySelector<HTMLInputElement>('[data-pkc-field="tag-add-input"]');
-    const tag = normalizeTag(field?.value ?? '');
-    if (tag === '') {
+    /**
+     * 🔴 **`#買い物 #家事` と打てば 2 つ付く**(#637。user 裁定 2026-08-31)。
+     *
+     * ⚠ 直す前はこの欄だけが**割らなかった** ── 本文のタグの行に同じ字を
+     *   書けば 2 つになるのに、ここへ打つと **「#買い物 #家事」という 1 つの名前**が
+     *   できていた。しかも frontmatter へは quote 付きで書き戻すので、
+     *   **読み直しても割れない** ── user の言う「一つになってしまう」の実体である。
+     * 🔑 何個と読むかは `splitTags` 1 か所(§7)── 欄も本文も同じ規則にする。
+     */
+    const tags = splitTags(field?.value ?? '');
+    if (tags.length === 0) {
       // ⚠ **無言で終わらせない**(欄は出ているのに何も起きない dead click になる)
       dispatcher.dispatch({ type: 'OP_FAILED', error: '足すタグを入力してください' });
       return;
     }
-    dispatcher.dispatch({ type: 'BULK_TAG', lids: [lid], tag, mode: 'add' });
+    for (const tag of tags)
+      dispatcher.dispatch({ type: 'BULK_TAG', lids: [lid], tag, mode: 'add' });
     // 🔑 通したら欄を空にする(次の 1 つを打てる)── ⚠ 断ったときは残す
     if (field) field.value = '';
   },
