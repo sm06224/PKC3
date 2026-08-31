@@ -38,7 +38,17 @@ export type BodyRewrite =
        *   付けるだけだと、12 件に間違えて付けたものを 12 回開いて消すことになる。
        */
       kind: 'tag';
-      tag: string;
+      /**
+       * 🔴 **並びで受ける**(#637。着地前の動線レビューで判明)。
+       *
+       * ⚠ 直す前は `tag: string` で、`#買い物 #家事` は **2 回に分けて撃って**いた。
+       *   書き込みは正しく届くが、**知らせが 1 通ずつ出て後の 1 通が前を塗り潰す**
+       *   ── 12 件に「請求」が付いたのに、画面に残るのは
+       *   「0 件に付けました / 12 件は既に付いていました」(= 2 つ目のタグの話)だった。
+       * 🔑 **1 回の頼みは 1 回で答える** ── 並びをここまで運べば、
+       *   読み書きも 1 往復で済み、知らせも 1 通で全部を語れる(§7)。
+       */
+      tags: readonly string[];
       mode: 'add' | 'remove';
     }
   | {
@@ -221,8 +231,20 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
      * ⚠ 変わらないとき(既に在る / 元から無い)は `null` ── 呼び側が
      *   「書かない」を選べる(同じ本文を書き直して更新日時だけ動かさない)。
      */
-    const next = withTag(readTags(body), rewrite.tag, rewrite.mode);
-    if (next === null) return null;
+    /**
+     * ⚠ **並びは畳む**(#637)── 途中の 1 つが `null`(既に在る / 元から無い)でも
+     *   止めない。1 つでも動いたら書く、1 つも動かなければ `null`。
+     */
+    let cur = readTags(body);
+    let moved = false;
+    for (const tag of rewrite.tags) {
+      const next = withTag(cur, tag, rewrite.mode);
+      if (next === null) continue;
+      cur = next;
+      moved = true;
+    }
+    if (!moved) return null;
+    const next = cur;
     // ⚠ 空になったら **鍵ごと消す**(`tags: []` を残さない ── 読み手が
     //    「空のタグが 1 つ在る」と読む形を作らない)
     return spliceFrontmatterKeys(body, { tags: next.length === 0 ? undefined : next });

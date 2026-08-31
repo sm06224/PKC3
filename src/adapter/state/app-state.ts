@@ -1143,7 +1143,7 @@ export type UserAction =
    * ⚠ 相手は**いま表に出ている印**だけ(`delete-selected` と同じ規則 ── 画面に
    *   無いものを触らない)。呼び側がその集合を渡す。
    */
-  | { type: 'BULK_TAG'; lids: readonly string[]; tag: string; mode: 'add' | 'remove' }
+  | { type: 'BULK_TAG'; lids: readonly string[]; tags: readonly string[]; mode: 'add' | 'remove' }
   /**
    * 🔴 **一時の知らせ**(#402 ①)。⚠ `OP_FAILED` と混ぜない ── あちらは赤い帯で、
    *   こちらは成功の内訳である(「3 件は既に付いていました」を失敗にしない)。
@@ -1589,7 +1589,8 @@ export type DomainEvent =
        *   既に付いていただけで、赤い帯が 3 回出る)。ここは**まとめて 1 通**言う。
        */
       type: 'REQUEST_BULK_TAG';
-      tag: string;
+      /** ⚠ **並び**(#637)── 1 回の頼みを 2 通の知らせに割らない。 */
+      tags: readonly string[];
       mode: 'add' | 'remove';
       targets: readonly {
         lid: string;
@@ -3624,7 +3625,9 @@ function reduceCore(
      */
     case 'BULK_TAG': {
       if (state.phase !== 'ready') return { state, events: [] };
-      if (action.tag.trim() === '') return { state, events: [] };
+      // ⚠ 空の名前は落とす(打った字の割り方は `splitTags` が持つ ── ここは受けるだけ)
+      const tags = action.tags.map((t) => t.trim()).filter((t) => t !== '');
+      if (tags.length === 0) return { state, events: [] };
       const targets = action.lids
         .map((lid) => state.entryMetas.get(lid))
         .filter((m): m is EntryMeta => m !== undefined)
@@ -3637,7 +3640,7 @@ function reduceCore(
       if (targets.length === 0) return { state, events: [] };
       return {
         state,
-        events: [{ type: 'REQUEST_BULK_TAG', tag: action.tag, mode: action.mode, targets }],
+        events: [{ type: 'REQUEST_BULK_TAG', tags, mode: action.mode, targets }],
       };
     }
     case 'SHOW_HISTORY': {

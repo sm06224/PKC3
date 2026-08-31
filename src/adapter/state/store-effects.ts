@@ -537,7 +537,7 @@ export function connectStoreEffects(
               dispatcher.dispatch({ type: 'OP_FAILED', error: refusal });
               return;
             }
-            for (const tag of spec.tags) dispatcher.dispatch({ type: 'BULK_TAG', lids, tag, mode });
+            dispatcher.dispatch({ type: 'BULK_TAG', lids, tags: spec.tags, mode });
             /**
              * 🔑 **書いた後に集め直す** ── 同じ `enqueue` の列に並ぶので、
              *   上の書込が終わってから走る(古い本文で集めることはない)。
@@ -1243,8 +1243,21 @@ export function connectStoreEffects(
       case 'REQUEST_BULK_TAG':
         enqueue(async () => {
           if (disposed) return;
-          let wrote = 0;
-          let skipped = 0;
+          /**
+           * 🔴 **タグごとに数える**(#637。着地前の動線レビューで判明)。
+           *
+           * ⚠ 直す前は 1 タグ 1 頼みだったので、`#請求 #未払` を 12 件へ足すと
+           *   知らせが 2 通出て、**後の 1 通が前を塗り潰して**いた ── 画面に残るのは
+           *   「0 件に付けました / 12 件は既に付いていました」(= 未払の話)で、
+           *   **請求が 12 件に付いた事実が消えていた**。⚠ しかもフォルダの帯には
+           *   タグの札が出ないので、user が結果を確かめる手立てはこの 1 行しか無い。
+           * 🔑 だから**名前ごとに数えて、1 通で全部言う**。
+           */
+          const wroteBy = new Map<string, number>();
+          const skippedBy = new Map<string, number>();
+          const bump = (m: Map<string, number>, tag: string): void => {
+            m.set(tag, (m.get(tag) ?? 0) + 1);
+          };
           let failed = 0;
           /**
            * 🔴 **本文にも同じタグが書いてあると、外しても外れない**
@@ -1265,20 +1278,29 @@ export function connectStoreEffects(
                 failed++;
                 continue;
               }
-              const newBody = applyBodyRewrite(body, {
-                kind: 'tag',
-                tag: ev.tag,
-                mode: ev.mode,
-              });
-              // ⚠ **`null` は失敗ではない** ── 「既に付いている / 元から無い」も
-              //    ここへ来る。数だけ分けて、赤い帯にしない
-              if (newBody === null) {
-                skipped++;
-                continue;
+              /**
+               * ⚠ **1 件につき 1 往復**(#637)── 並びを順に当ててから、まとめて
+               *   1 回書く。1 タグ 1 往復にすると、2 つ目が 1 つ目の `expectHash` を
+               *   追い越しうるうえ、書込の回数がタグの数だけ増える。
+               * ⚠ **`null` は失敗ではない** ── 「既に付いている / 元から無い」も
+               *   ここへ来る。名前ごとに数だけ分けて、赤い帯にしない。
+               */
+              let newBody = body;
+              for (const tag of ev.tags) {
+                const next = applyBodyRewrite(newBody, { kind: 'tag', tags: [tag], mode: ev.mode });
+                if (next === null) {
+                  bump(skippedBy, tag);
+                  continue;
+                }
+                newBody = next;
+                bump(wroteBy, tag);
               }
+              if (newBody === body) continue;
               // ⚠ 外した**後の本文**にまだ残っているか(= 本文の行に書いてある)
-              if (ev.mode === 'remove' && collectEntryTags(newBody).inBody.some((t2) => sameTag(t2, ev.tag)))
-                stillInBody++;
+              if (ev.mode === 'remove') {
+                const inBody = collectEntryTags(newBody).inBody;
+                if (ev.tags.some((tag) => inBody.some((t2) => sameTag(t2, tag)))) stillInBody++;
+              }
               const ext = extractMeta(t.archetype, newBody);
               const stamps = await store.persistEntry(
                 {
@@ -1297,14 +1319,13 @@ export function connectStoreEffects(
                 failed++;
                 continue;
               }
-              wrote++;
               stamp(t.lid, stamps);
               if (!disposed)
                 dispatcher.dispatch({
                   type: 'BODY_REWRITTEN',
                   lid: t.lid,
                   body: newBody,
-                  rewrite: { kind: 'tag', tag: ev.tag, mode: ev.mode },
+                  rewrite: { kind: 'tag', tags: ev.tags, mode: ev.mode },
                   status: ext.status,
                   date: ext.date,
                   archived: ext.archived,
@@ -1319,16 +1340,31 @@ export function connectStoreEffects(
            *   3 件が既に付いていたことも 1 件が失敗したことも消える。
            */
           const verb = ev.mode === 'add' ? '付けました' : '外しました';
-          const parts = [`${wrote} 件に${verb}`];
-          if (skipped > 0)
-            parts.push(ev.mode === 'add' ? `${skipped} 件は既に付いていました` : `${skipped} 件は付いていませんでした`);
+          const already = ev.mode === 'add' ? '既に付いていました' : '付いていませんでした';
+          /**
+           * 🔑 **1 つのときは、これまでと 1 文字も変えない**(#637)── 既存の pin
+           *   (`bulk-tag-wiring.test.ts` / `smart-folder.test.ts`)が留めている字である。
+           * 🔑 **2 つ以上のときだけ名前を出す** ── 名前が無いと、どちらのタグの話か
+           *   読めない(「0 件に付けました」が、付いた側の話に見えてしまう)。
+           */
+          const one = ev.tags.length === 1;
+          const label = (tag: string): string => (one ? '' : `${tag}:`);
+          const parts: string[] = [];
+          // ⚠ **打った順に並べる**(数の多い順に並べ替えない ── 打った字と読み合わせる)
+          for (const tag of ev.tags) {
+            const w = wroteBy.get(tag) ?? 0;
+            const k = skippedBy.get(tag) ?? 0;
+            // ⚠ 1 つのときは 0 件でも言う(押した手応えを消さない)
+            if (w > 0 || one) parts.push(`${label(tag)}${w} 件に${verb}`);
+            if (k > 0) parts.push(`${label(tag)}${k} 件は${already}`);
+          }
           if (failed > 0) parts.push(`${failed} 件は書けませんでした(別のウィンドウが書き替えた可能性があります)`);
           /**
            * 🔴 **外しきれていないことを言う**(2026-08-29)。⚠ 黙ると
            *   「外したのに、まだそのタグで集まる」= 壊れて見える。
            */
           if (stillInBody > 0)
-            parts.push(`${stillInBody} 件は本文の中にも書いてあるので、まだこのタグが付いています`);
+            parts.push(`${stillInBody} 件は本文の中にも書いてあるので、まだそのタグが付いています`);
           dispatcher.dispatch({ type: 'OP_NOTICE', message: parts.join(' / ') });
         });
         break;

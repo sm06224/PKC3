@@ -56,9 +56,9 @@ describe('タグを 1 つ足す / 外す', () => {
 
 describe('本文への当て方(書換の 1 本を通る)', () => {
   const add = (body: string, tag: string): string | null =>
-    applyBodyRewrite(body, { kind: 'tag', tag, mode: 'add' });
+    applyBodyRewrite(body, { kind: 'tag', tags: [tag], mode: 'add' });
   const off = (body: string, tag: string): string | null =>
-    applyBodyRewrite(body, { kind: 'tag', tag, mode: 'remove' });
+    applyBodyRewrite(body, { kind: 'tag', tags: [tag], mode: 'remove' });
 
   it('🔴 frontmatter が無い本文にも付く(器から作る)', () => {
     const out = add('ただの本文\n', '請求済')!;

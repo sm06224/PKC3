@@ -470,7 +470,7 @@ describe('タグを付けたら勝手に落ちる(user 要望 2026-08-26)', () =
       type: 'BODY_REWRITTEN',
       lid,
       body,
-      rewrite: { kind: 'tag', tag: '請求', mode: 'add' },
+      rewrite: { kind: 'tag', tags: ['請求'], mode: 'add' },
       status: null,
       date: null,
       archived: false,
@@ -987,7 +987,7 @@ describe('配線(effect 層まで)', () => {
     await tick(40);
     const before = s.scans.length;
     // ⚠ 行を書く経路は 1 本(`stamp`)なので、どれで書いても同じ所を通る
-    s.d.dispatch({ type: 'BULK_TAG', lids: ['a'], tag: '請求', mode: 'add' });
+    s.d.dispatch({ type: 'BULK_TAG', lids: ['a'], tags: ['請求'], mode: 'add' });
     await tick(60);
     // 🔑 **前提を assert する** ── 書けていない回は「頼み直さない」と見分けが付かない
     expect(readTags(s.disk.a!), '前提が崩れている(そもそも書けていない)').toEqual(['請求']);
@@ -1139,7 +1139,7 @@ describe('列で引く条件(#421 段②)', () => {
     await tick();
     const before = s.scans.length;
     // 別のノートにタグを付ける(= 行を書く)
-    s.d.dispatch({ type: 'BULK_TAG', lids: ['a'], tag: '請求', mode: 'add' });
+    s.d.dispatch({ type: 'BULK_TAG', lids: ['a'], tags: ['請求'], mode: 'add' });
     await tick(50);
     expect(s.scans.length, '書いたのに集め直していない').toBeGreaterThan(before);
   });
@@ -1150,7 +1150,7 @@ describe('列で引く条件(#421 段②)', () => {
     s.d.dispatch({ type: 'SET_SCOPE', lid: 's1' });
     await tick();
     const before = s.scans.length;
-    s.d.dispatch({ type: 'BULK_TAG', lids: ['a'], tag: '請求', mode: 'add' });
+    s.d.dispatch({ type: 'BULK_TAG', lids: ['a'], tags: ['請求'], mode: 'add' });
     await tick(50);
     expect(s.scans.length, 'その場で当て直せるのに走査を頼んだ').toBe(before);
     expect(s.d.getState().smartHits.get('s1')?.lids, 'その場で落ちていない').toEqual(['a']);
@@ -1166,7 +1166,7 @@ describe('列で引く条件(#421 段②)', () => {
    */
   it('🔴 本文にも書いてあるタグを外したら、まだ付いていることを言う', async () => {
     const s = setup({ a: `---\ntags: [請求]\n---\n\n# 章\n\n#請求\n` });
-    s.d.dispatch({ type: 'BULK_TAG', lids: ['a'], tag: '請求', mode: 'remove' });
+    s.d.dispatch({ type: 'BULK_TAG', lids: ['a'], tags: ['請求'], mode: 'remove' });
     await tick(50);
     expect(s.d.getState().notice ?? '', '外れていないことを言っていない').toContain(
       '本文の中にも書いてあるので',
@@ -1176,7 +1176,7 @@ describe('列で引く条件(#421 段②)', () => {
   /** ⚠ **対照群** ── 本文に書いていなければ、余計なことを言わない。 */
   it('⚠ 対照群: frontmatter にだけ在るタグを外したときは何も足さない', async () => {
     const s = setup({ a: `---\ntags: [請求]\n---\n\n# 章\n\n本文\n` });
-    s.d.dispatch({ type: 'BULK_TAG', lids: ['a'], tag: '請求', mode: 'remove' });
+    s.d.dispatch({ type: 'BULK_TAG', lids: ['a'], tags: ['請求'], mode: 'remove' });
     await tick(50);
     const notice = s.d.getState().notice ?? '';
     expect(notice, '外れているのに「まだ付いている」と言った').not.toContain(
@@ -1201,7 +1201,7 @@ describe('列で引く条件(#421 段②)', () => {
     s.d.dispatch({ type: 'SET_SCOPE', lid: 's1' });
     await tick();
     const before = s.scans.length;
-    s.d.dispatch({ type: 'BULK_TAG', lids: ['a', 'b'], tag: '請求', mode: 'add' });
+    s.d.dispatch({ type: 'BULK_TAG', lids: ['a', 'b'], tags: ['請求'], mode: 'add' });
     await tick(60);
     // ⚠ **2 件書いたのに走査は 1 回**(0 では困る ── 集め直しは起きなければならない)
     expect(s.scans.length - before, '走査が積み上がっている').toBe(1);
@@ -1255,5 +1255,32 @@ describe('条件の欄で複数のタグ(#637)', () => {
     box.value = '請求 未払';
     m.region.querySelector<HTMLElement>('[data-pkc-action="smart-cond-add"]')!.click();
     expect(asked(m.seen), '意図した空白入りの名前を割った').toEqual(['請求 未払']);
+  });
+});
+
+/**
+ * 🔴 **条件を 2 つ打ったら、2 つとも本文に着く**(#637 の着地前レビュー C)。
+ *
+ * ⚠ 上の `describe` は **event(`REQUEST_SMART_COND`)しか見ていない** ──
+ *   `writeSmartCond` の直列化を外す変異が素通りする(2 つ目が 1 つ目を読む前に
+ *   走ると、先に書いた条件が黙って消える)。
+ * 🔑 **観測点は disk に着いた本文**にする(§4)。
+ */
+describe('条件を 2 つ打つと、2 つとも本文に着く(#637)', () => {
+  it('🔴 `#請求 #未払` を 1 回押すと、条件が 2 つ書かれる', async () => {
+    const s = setup({ s1: `---\n${SMART_TAGS_KEY}: \n---\n説明の文\n` });
+    s.d.dispatch({ type: 'SMART_COND', lid: 's1', tag: '請求', mode: 'add' });
+    s.d.dispatch({ type: 'SMART_COND', lid: 's1', tag: '未払', mode: 'add' });
+    await tick(40);
+    expect(readSmartSpec(s.disk.s1!).tags, '先に書いた条件が消えた').toEqual(['請求', '未払']);
+    expect(s.disk.s1, '説明文が壊れた').toContain('説明の文');
+  });
+
+  /** ⚠ 対照群: 1 つだけのときはこれまでどおり(規則そのものが生きていること)。 */
+  it('⚠ 対照群: 1 つだけなら 1 つ', async () => {
+    const s = setup({ s1: `---\n${SMART_TAGS_KEY}: \n---\n説明の文\n` });
+    s.d.dispatch({ type: 'SMART_COND', lid: 's1', tag: '請求', mode: 'add' });
+    await tick(40);
+    expect(readSmartSpec(s.disk.s1!).tags).toEqual(['請求']);
   });
 });

@@ -818,7 +818,7 @@ describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
     // ⚠ 訂正(2026-08-30, #628): 直訳っぽい字を言い直した(a27dd7e0 → 8454a2af)。挙動は変えていない
-    ['2026-08-31-multi-tags', 'b917a728'],
+    ['2026-08-31-multi-tags', '134f7823'],
     ['2026-08-31-office-settings-reset', '410c0a00'],
     ['2026-08-30-plain-japanese', '6b3b32cc'],
     ['2026-08-29-split-open-at', '8454a2af'],

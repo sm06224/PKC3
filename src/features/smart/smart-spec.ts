@@ -43,6 +43,7 @@ import {
 import { isKnownArchetype } from '../flavor/archetype-label';
 import { countTaskCandidates } from '../markdown/task-count';
 import { MAX_TAG_CHARS, normalizeTag, sameTag, splitTags } from '../flavor/tags';
+import { hashRunWords, strandedHashWords } from '../flavor/tag-words';
 import { tagsForMatch } from '../flavor/entry-tags';
 
 /**
@@ -273,7 +274,14 @@ function readSmartTags(raw: FrontmatterValue | undefined): readonly string[] {
    *   同じ罠を踏んで直してある)。
    */
   const parts: string[] = Array.isArray(raw)
-    ? raw.filter((v) => v !== null && v !== undefined).map((v) => String(v))
+    ? // 🔴 **配列の中身も割る**(#637 の着地前レビュー A)── `[#請求 #未払]` と
+      //    手で書いた条件が「請求 #未払」という 1 つになり、1 件も集まらなかった
+      raw
+        .filter((v) => v !== null && v !== undefined)
+        .flatMap((v) => {
+          const t = String(v);
+          return ((hashRunWords(t) ?? strandedHashWords(t) ?? [t]) as string[]);
+        })
     /**
      * 🔴 **割り方は `splitTags` 1 か所**(#637。§7)── 直す前はここだけ
      *   `split(',')` を書いていたので、`smart-tags: #請求 #未払` と手で書くと

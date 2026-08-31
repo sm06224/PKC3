@@ -28,6 +28,7 @@
  */
 
 import { resolveCap } from '../notation/caps';
+import { looksHashTagged } from '../flavor/tag-words';
 
 export type FrontmatterValue =
   | string
@@ -188,7 +189,7 @@ function frontmatterRunLength(lines: readonly string[]): number {
      *   `parseFlatYaml:442` と同じ `startsWith('#')` でよい(`trimStart()` は
      *   **no-op になる** ── 効かない防御を残さない)。
      */
-    const line = stripTrailingComment(lines[i] ?? '');
+    const line = stripTrailingComment(lines[i] ?? '', lines[i + 1]);
     /**
      * 🔴 **空行でも切らない。ただしブロック配列は閉じる**(2 巡目 A-1 + 3 巡目 1-A)。
      *
@@ -269,8 +270,10 @@ function topLevelKeyLines(lines: readonly string[]): boolean[] {
   const flags: boolean[] = [];
   /** 開いているブロックの key の字下げ幅(閉じていれば `null`)。 */
   let openIndent: number | null = null;
-  for (const raw of lines) {
-    const line = stripTrailingComment(raw.replace(/\r?\n$/, ''));
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i] ?? '';
+    // ⚠ 次の行も渡す ── 「井桁の並びか」の判定が箇条書きの有無を見るため(#637 D)
+    const line = stripTrailingComment(raw.replace(/\r?\n$/, ''), lines[i + 1]);
     if (line.trim() === '') {
       openIndent = null;
       flags.push(false);
@@ -512,22 +515,28 @@ export function parseFrontmatter(body: string): FrontmatterResult {
  * ⚠ **`tags` 以外の key には効かせない。** `title: #TODO` を値に変えると、
  *   注釈のつもりで書いた字が題名として画面へ出る ── 直す理由が無い所は変えない。
  */
-function isTagHashRun(key: string, value: string): boolean {
+function isTagHashRun(key: string, value: string, next: string | undefined): boolean {
   // ⚠ タグを持つ key は 2 つある ── `smart-tags`(スマートフォルダの条件)を
   //    落とすと、同じ字が入れ物によって別の意味になる(§7)
   if (key !== 'tags' && key !== 'smart-tags') return false;
-  const v = value.trim();
-  const inner = v.startsWith('[') && v.endsWith(']') ? v.slice(1, -1) : v;
-  // ⚠ 全角空白も区切り(日本語で打つと入る)。`splitTags` と同じ字集合にする
-  const words = inner.split(/[ \t\u3000]+/u).filter((w) => w !== '');
-  if (words.length === 0) return false;
-  // ⚠ `#` 単独は「ここから注釈」の印そのもの ── 後ろに字があるものだけ数える
-  return words.every((w) => w.startsWith('#') && w.length >= 2);
+  /**
+   * 🔴 **次の行が箇条書きなら、そちらが値である**(着地前レビュー D)。
+   *
+   * ⚠ 実測(この門が無いとき):
+   *   `tags: #買い物メモ` の次に `- 牛乳` / `- 卵` と書いた本文で、
+   *   **牛乳と卵が閉じの内側に取り残され、誰も読まなくなる**
+   *   (直す前は `#買い物メモ` が注釈で、箇条書きのほうがタグだった)。
+   * 🔑 「隠した行は必ず誰かが読んでいる」を守る側へ倒す ── 井桁の並びは
+   *   注釈としても読めるが、**箇条書きは値としてしか読めない**。
+   */
+  if (next !== undefined && /^\s*-\s+/u.test(next)) return false;
+  // 🔑 **判定は `tag-words.ts` 1 か所**(#637 の着地前レビュー B)── 欄と同じ規則
+  return looksHashTagged(value);
 }
 
-function stripTrailingComment(line: string): string {
+function stripTrailingComment(line: string, next?: string): string {
   const colon = findKeyColon(line);
-  if (colon >= 0 && isTagHashRun(line.slice(0, colon).trim(), line.slice(colon + 1))) {
+  if (colon >= 0 && isTagHashRun(line.slice(0, colon).trim(), line.slice(colon + 1), next)) {
     return line.trimEnd();
   }
   let i = colon >= 0 ? colon + 1 : 0;
@@ -585,7 +594,7 @@ function parseFlatYaml(lines: readonly string[]): Record<string, FrontmatterValu
   while (i < lines.length) {
     const raw = lines[i] ?? '';
     i += 1;
-    const line = stripTrailingComment(raw);
+    const line = stripTrailingComment(raw, lines[i]);
     if (line.trim() === '') continue;
     if (line.startsWith('#')) continue;
 
