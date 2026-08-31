@@ -130,7 +130,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     label: '絞り込みの欄へ移る',
     contexts: ['global'],
     defaults: ['Mod+F'],
-    note: '左の一覧の絞り込み欄に焦点を移します',
+    note: '左の一覧の絞り込み欄に焦点を移します(ヘルプを開いている間は、ブラウザの検索が出ます)',
   },
   /**
    * 🔴 **日付を入れる道具**(user 指示 2026-08-23)。
