@@ -819,7 +819,7 @@ describe('PowerPoint の出口(#187 段⑤)', () => {
  *
  * ⚠ ここは**画面の DOM を読んでいない** ── `export-archive.ts` は
  *   その場で**もう一度描いて**から塊に畳む。渡さないと、配った .docx にだけ
- *   「この囲みの中身は添付に在ります」が残る(持ち出したら中身が消える)。
+ *   「このコードブロックの中身は添付に在ります」が残る(持ち出したら中身が消える)。
  */
 describe('Word の書き出しでも、囲みが指す添付が入る(#444 段②)', () => {
   const ASSET = 'ヤギ座標系の覚書';
@@ -878,6 +878,6 @@ describe('Word の書き出しでも、囲みが指す添付が入る(#444 段�
     expect(await exportEntryDocx(dispatcher, d, 'n1')).toBe(true);
     const xml = await got[0]!.text();
     // 🔑 対照群 ── 上の test の「入る」は「いつでも入る」ではない
-    expect(xml).toContain('この囲みの中身は添付');
+    expect(xml).toContain('このコードブロックの中身は添付');
   });
 });

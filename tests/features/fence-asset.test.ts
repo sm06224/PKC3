@@ -12,6 +12,7 @@
  */
 import { humanBytes } from '../../src/features/human-bytes';
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import {
   FENCE_ASSET_PREFIX,
   takeFenceAsset,
@@ -81,7 +82,7 @@ describe('本文に書いたときの器(#444 段①)', () => {
 
   it('🔴 誰も埋めなかったときに読める字が出る(書き出しで中身が消えない)', () => {
     const out = html('```csv asset:ast-k1\n```');
-    expect(out, '空の器を出している').toContain('この囲みの中身は添付');
+    expect(out, '空の器を出している').toContain('このコードブロックの中身は添付');
     expect(out, 'どの添付かが分からない').toContain('ast-k1');
   });
 
@@ -333,5 +334,48 @@ describe('本文が指している添付の鍵を数え上げる(#444 段②)', 
 
   it('印が 1 つも無い本文は、markdown を読まずに空を返す', () => {
     expect(collectFenceAssetKeys('ふつうの本文')).toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **同じ 1 行の呼び名が、途中で入れ替わらない**(#636)。
+ *
+ * ⚠ 実測(直す前):添付を指すコードブロックの断り書きは **1 つの `<p>`** である ──
+ *   `markdown-render.ts` が `data-pkc-fence-asset-pending` として書き、
+ *   読めなかったときに `detail.ts` の `fail()` が**その同じ node の textContent を
+ *   上書き**する。ところが前者は「この**囲み**の中身は添付」、後者は
+ *   「この**コードブロック**の中身(添付)を読み込めません」で、
+ *   🔴 **user は同じ場所で 2 つの呼び名を読んでいた**。
+ *
+ * 🔑 だから**原文で留める** ── この 2 つは離れた file に在り、
+ *   片方だけ直しても他のどの test も鳴らない(#636 の調査で pin 0 件と確認)。
+ */
+describe('添付を指すコードブロックの呼び名(#636)', () => {
+  const read = (p: string): string => readFileSync(new URL(p, import.meta.url), 'utf8');
+  const WRITER = read('../../src/features/markdown/markdown-render.ts');
+  const FAILER = read('../../src/adapter/ui/render/detail.ts');
+
+  it('🔴 書く側と、失敗を上書きする側が、同じ呼び名を使う', () => {
+    // ⚠ 空振り防止 ── そもそもその 1 行が在ること
+    expect(WRITER, '書く側の字が見つからない(名前が変わった?)').toContain(
+      'data-pkc-fence-asset-pending',
+    );
+    expect(FAILER, '上書きする側の字が見つからない').toContain('data-pkc-fence-asset-pending');
+    expect(WRITER, '書く側が「囲み」と呼んでいる').toContain('このコードブロックの中身は添付');
+    expect(FAILER, '失敗側が別の呼び名になっている').toContain(
+      'このコードブロックの中身(添付)を読み込めません',
+    );
+  });
+
+  it('🔴 添付まわりの断り書きに「囲み」を残さない', () => {
+    for (const [name, src] of [
+      ['markdown-render.ts', WRITER],
+      ['pkc3-html.ts', read('../../src/features/export/pkc3-html.ts')],
+    ] as const) {
+      // ⚠ 見るのは**画面に出る文言(とその引用)**だけ ── 散文の「囲み」に
+      //    当たると、`:::` の話を書いただけで落ちる(§1 の範囲が広すぎる型)
+      expect(src, `${name} に古い呼び名の文言が残っている`).not.toContain('この囲みの中身');
+      expect(src, `${name} に古い呼び名の文言が残っている`).not.toContain('囲みが指している添付');
+    }
   });
 });

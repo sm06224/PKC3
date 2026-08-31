@@ -242,7 +242,7 @@ export function htmlToDocxBlocks(doc: Document): {
       /**
        * 🔴 **画面の道具は文書ではない**(同上)。コピーの ⧉ と切替の ‹/› は
        * fence ごとに付く器なので、素通しすると**塊ごとに ⧉ の段落**が入る
-       * (実測: ふつうのコード塊でも 1 つ入っていた)。
+       * (実測: ふつうのコードブロックでも 1 つ入っていた)。
        */
       if (tag === 'button' || tag === 'input' || tag === 'label') continue;
       if (el.classList.contains('pkc-render-source')) continue;

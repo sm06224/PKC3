@@ -455,7 +455,7 @@ function buildRenderableBlockHtml(
  *   器だけ置いて、adapter の hydrator が埋める(mermaid と同じ形)。
  * 🔴 **誰も埋めなかったときに読める字にする** ── 書き出した HTML には hydrator が
  *   居ないので、ここが空だと「持ち出したら中身が消える」になる(PKC の芯に反する)。
- *   だから **「この囲みの中身は添付(asset:…)に在ります」** と、鍵ごと出しておく。
+ *   だから **「このコードブロックの中身は添付(asset:…)に在ります」** と、鍵ごと出しておく。
  * ⚠ 囲みの中に書いた字は**控え**として残す ── 添付が読めたら hydrator が捨てる。
  */
 function buildFenceAssetHtml(
@@ -474,7 +474,7 @@ function buildFenceAssetHtml(
     //   効かなかった理由が要る(#264 段② と同じ向き)
     return (
       `<div class="pkc-md-block" data-pkc-md-block-kind="code"${sourceLineAttrs}>` +
-      `<p data-pkc-fence-asset-error>この囲みは添付を指していますが読めません: ` +
+      `<p data-pkc-fence-asset-error>このコードブロックは添付を指していますが読めません: ` +
       `${md.utils.escapeHtml(parse.why)}</p>` +
       `</div>`
     );
@@ -488,7 +488,7 @@ function buildFenceAssetHtml(
     `<div class="pkc-md-block" data-pkc-md-block-kind="code"` +
     ` data-pkc-fence-asset-key="${escapeHtmlAttr(parse.key)}"` +
     ` data-pkc-fence-asset-info="${escapeHtmlAttr(info)}"${sourceLineAttrs}>` +
-    `<p data-pkc-fence-asset-pending>この囲みの中身は添付(asset:` +
+    `<p data-pkc-fence-asset-pending>このコードブロックの中身は添付(asset:` +
     `${md.utils.escapeHtml(parse.key)})に在ります</p>` +
     fallback +
     `</div>`
@@ -522,14 +522,14 @@ function fenceAssetOfInfo(info: string): { parse: FenceAssetParse; withoutAsset:
  * 書き出し側が「どの添付を字として読むか」を決めるために使う。
  * ⚠ 戻るのは **`kind: 'one'` だけ**── 書き方が使えない囲みは読まない
  *   (描く側がその場で理由を出す)。
- * ⚠ **重複は畳む**(同じ鍵を 2 つの囲みが指しても読みは 1 回)。
+ * ⚠ **重複は畳む**(同じ鍵を 2 つのコードブロックが指しても読みは 1 回)。
  * ⚠ fence の判定は markdown-it 自身にさせる ── 自前の正規表現で数えると
  *   引用の中・リストの中・`~~~` の囲みを取りこぼす。
  * ⚠ **読むのは前処理の前の原文である。** だから数えは描画と 1:1 ではない ──
  *   `%%%…%%%` の中の囲みも数える(**多く読む**側)/ `{{vars.x}}` の展開で
  *   初めて現れる囲みは数えない(**焼かれずに器が残る**側)。
  *   🔑 どちらも**黙って空にはならない** ── 多い側は上限つきの読みが 1 回増えるだけ、
- *   少ない側は「この囲みの中身は添付に在ります」が残って**何が入っていないか読める**。
+ *   少ない側は「このコードブロックの中身は添付に在ります」が残って**何が入っていないか読める**。
  */
 export function collectFenceAssetKeys(text: string): string[] {
   if (!text.includes(FENCE_ASSET_PREFIX)) return [];
