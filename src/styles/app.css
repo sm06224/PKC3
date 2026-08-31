@@ -4869,8 +4869,21 @@ li[data-pkc-row-slot] {
   margin: 0;
   padding-left: var(--s5);
 }
+/* 🔴 **箱を出る道**(#645。user 要望 2026-08-31
+   「ヘルプの中からマニュアルをアプリとして出してください」)。
+   ⚠ **マニュアルの箱の直上**に置く ── 下に置くと、60vh の箱を
+   スクロールし切らないと見つからない(= 在るのに届かない)。 */
+[data-pkc-region='help-manual-open'] {
+  display: flex;
+  gap: var(--s3);
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: var(--s3);
+}
+
 /* 🔴 **マニュアルは縦に長い** ── 器ごとスクロールさせると面の頭
-   (版・お知らせ)まで流れるので、ここだけを箱にする。 */
+   (版・お知らせ)まで流れるので、ここだけを箱にする。
+   ⚠ この箱が狭いこと自体が #645 の苦情である ── 出る道は上のボタン。 */
 [data-pkc-region='help-manual'] {
   max-height: 60vh;
   overflow: auto;

@@ -492,6 +492,17 @@ export interface BinderServices {
    */
   openTile?(lid: string): void;
   /**
+   * 🔴 **マニュアルを独立した窓で開く**(#645。user 要望 2026-08-31
+   * 「**ヘルプの中からマニュアルをアプリとして出してください**」)。
+   *
+   * ⚠ **`openTile` とは別の口にする** ── あちらは lid でタイルを引くが、
+   *   ヘルプの中のボタンにはタイルが無い。同じ物を 2 通りで引かせない(§7)。
+   * ⚠ **同期で呼ぶ**(実体側が `window.open` を user gesture の中で撃つ)。
+   * ⚠ 省略可 ── 渡らない環境では、そもそもボタンを出さない
+   *   (`HelpRenderer` が `openManual` を持たなければ組まない)。
+   */
+  openManualWindow?(): void;
+  /**
    * 🔴 **選んでいる添付を起動する**(P10、user 指示 2026-08-05
    * 「HTML アセットの詳細画面から起動できない」)。
    *
@@ -4301,6 +4312,22 @@ const ACTIONS: Record<string, ActionHandler> = {
   'open-tile': (_dispatcher, target, services) => {
     const lid = target.closest('[data-pkc-tile]')?.getAttribute('data-pkc-tile');
     if (lid) services.openTile?.(lid);
+  },
+  /**
+   * 🔴 **マニュアルの窓を開く**(#645)。⚠ ヘルプの中の口(`help.ts`)と
+   *   アプリの一覧のタイル(`tiles.ts` の `builtin:manual`)は、どちらも
+   *   最後は同じ 1 本(`platform/manual-window.ts`)へ落ちる。
+   */
+  'open-manual-window': (dispatcher, _target, services) => {
+    // ⚠ **無言で終えない** ── 配線が落ちた版でも、押した手応えは返す
+    if (services.openManualWindow === undefined) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: 'この版ではマニュアルのウィンドウを開けません',
+      });
+      return;
+    }
+    services.openManualWindow();
   },
   /**
    * 🔑 **作る種類の一覧を開く / 閉じる**(P10 の分割ボタン)。

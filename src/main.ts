@@ -78,7 +78,12 @@ import { showNotices, clearNotices } from '@adapter/ui/render/notices';
 import { createImportUndo, importPanel } from '@adapter/ui/actions/import-undo';
 import { createUpdatePrompt } from '@adapter/ui/render/update-card';
 import { createAnnounce, announceServices } from '@adapter/ui/render/announce';
-import { versionText } from '@adapter/ui/render/help';
+import { versionText, MANUAL_TEXT } from '@adapter/ui/render/help';
+import { manualSections } from '@features/help/manual-find';
+import {
+  openManualWindow,
+  MANUAL_WINDOW_TITLE,
+} from '@adapter/platform/manual-window';
 import { appNoticeStore } from '@adapter/platform/notice-store';
 import { NOTICES } from '@features/notice/notice-log';
 import { applyTheme, chooseTheme, initialTheme, isTheme } from '@adapter/ui/render/theme';
@@ -361,6 +366,49 @@ function openViewTile(
      */
     openInPane: (v) => openView(dispatcher, v),
     fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
+  });
+}
+
+/**
+ * 🔴 **マニュアルを独立した窓で開く**(#645。user 要望 2026-08-31)。
+ *
+ * > 「**ヘルプの中からマニュアルをアプリとして出してください**」
+ *
+ * ⚠ **`openViewTile` を通さない** ── あちらは PKC をもう 1 枚読み込む
+ *   (実測 +29.6MB / プロセス +1)。しかもその窓でもマニュアルは
+ *   `max-height: 60vh` の箱のままで、**読みにくさが 1 ミリも変わらない**。
+ * ⚠ ここも**配線だけ** ── 組み立てと文言は `manual-window.ts` /
+ *   `features/help/manual-doc.ts` に在る(この file はどの test からも
+ *   実行されない ── CLAUDE.md §2)。
+ */
+function openManualTile(
+  dispatcher: Dispatcher,
+  markdown: { render(text: string, opts?: { currentContainerId?: string }): Promise<string> },
+  /**
+   * 一時の知らせ。⚠ **既に開いていた回に何か言う**ため ── `focus()` が窓を手前へ
+   * 出せるかはブラウザ次第で、出せなかった回は「押しても何も起きない」に見える。
+   */
+  notify: (text: string) => void,
+): Promise<unknown> {
+  return openManualWindow({
+    title: MANUAL_WINDOW_TITLE,
+    version: versionText(),
+    text: MANUAL_TEXT,
+    sections: manualSections(MANUAL_TEXT),
+    render: (text) => markdown.render(text),
+  }).then((win) => {
+    // 🔴 **開けなかったら理由を出す**(押しても何も起きないボタンにしない)
+    if (win === null) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: 'マニュアルのウィンドウを開けませんでした。ブラウザのポップアップの許可を出してください',
+      });
+      return win;
+    }
+    // 🔑 **既に開いていた回も、押した手応えを返す**(前へ出せたか分からないので言う)
+    if (win.reused)
+      notify('マニュアルのウィンドウを前に出しました(見えないときは、ウィンドウを切り替えてください)');
+    return win;
   });
 }
 
@@ -2115,6 +2163,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       center.render(dispatcher.getState());
       showStatus('目次を見せる許可を取り消しました');
     },
+    /**
+     * 🔴 **ヘルプの中の「マニュアルを別のウィンドウで開く」**(#645)。
+     * ⚠ タイル(`builtin:manual`)と**同じ 1 本**へ落とす ── 2 通りに書くと、
+     *   片方だけ直した日に「ヘルプからは開くがタイルからは開かない」になる(§7)。
+     */
+    openManualWindow: () => void openManualTile(dispatcher, markdown, showStatus),
     openTile: (lid) => {
       const tile = dispatcher.getState().launcherTiles?.find((t) => t.lid === lid);
       if (!tile) return;
@@ -2153,6 +2207,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         //    左の列のタブへ引っ越したので、別窓で開く組み込みタイルではなくなった。
         //    絞りは `launch-tile.ts` の `openView: (view: 'dual') => void` が型で守る
         openView: (view) => void openViewTile(dispatcher, cid, view),
+        openManual: () => void openManualTile(dispatcher, markdown, showStatus),
         // ⚠ **聞かない。憶えているものを確かめるだけ**(上の granted と同じ判定を
         //    通す ── ここで別の式を書くと、片方だけ直した日に食い違う)
         confirmSameOrigin: async () => granted,
@@ -2218,6 +2273,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             // 🔴 **別窓で開く**(#300 段③)。⚠ 判断と文言は `view-window.ts` に在る
             //    ── 上と同じ配線(§7:依存の実体を 1 つに保つ)
             openView: (view) => void openViewTile(dispatcher, cid, view),
+            // ⚠ 添付起動の経路に組み込みタイルは来ない(kind は 'app' 固定)── それでも
+            //    渡すのは、型が**落とせない形**にしてあるからである(§配線を落とすと静かに死ぬ)
+            openManual: () => void openManualTile(dispatcher, markdown, showStatus),
             confirmSameOrigin: async (title) => {
               /**
                * 🔴 **「アプリとして登録済みか」で憶え方が変わる**(#301。user 裁定 2026-08-21)。

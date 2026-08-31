@@ -175,8 +175,15 @@ describe('封印 ── 畳んであるが、壊してはいない', () => {
     expect(dual, 'アプリの一覧に 2 ペインが出ない').toBeDefined();
     // ⚠ 組み込みは entry を持たない(存在しない lid を選択に入れない)
     expect(tileSelectsEntry(dualTile())).toBe(false);
-    // 🔴 **引っ越した 2 つは、もうタイルに居ない**(同じものが 2 か所に無い)
-    expect(tiles.map((t) => t.kind), '引っ越した面がタイルに残っている').toEqual(['dual']);
+    /**
+     * 🔴 **引っ越した 2 つは、もうタイルに居ない**(同じものが 2 か所に無い)。
+     * ⚠ `manual`(#645)は**引っ越した面ではない** ── ノートの見方ではなく、
+     *   閉じても失うのがマニュアルだけの「アプリ」である(`tiles.ts` の見分け方)。
+     */
+    expect(tiles.map((t) => t.kind), '引っ越した面がタイルに残っている').toEqual([
+      'dual',
+      'manual',
+    ]);
   });
 
   /**

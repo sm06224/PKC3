@@ -285,6 +285,42 @@ export class HelpRenderer {
     body.append(mh);
 
     /**
+     * 🔴 **アプリとして開く口**(#645。user 要望 2026-08-31)。
+     *
+     * > 「**ヘルプの中からマニュアルをアプリとして出してください。
+     * > ちっとも改善していません**」
+     *
+     * ⚠ 直前の #636 で足したのは**探す欄**だけで、マニュアルは
+     *   `max-height: 60vh` の箱に入ったままだった ── 3599 行を画面の 6 割の
+     *   高さから覗く形は 1 ミリも変わっていない。ここが**その箱を出る道**である。
+     * ⚠ **見出しのすぐ下**に置く ── 箱の中に入れると `drawManual` の
+     *   `innerHTML = …` で消える(探す欄と同じ理由)。
+     * ⚠ **`built` ガードの内側**で 1 度だけ組む(`render()` は毎回走る)。
+     * ⚠ **`<h3>` を足さない**(`help-pane.test.ts` が h3 の並びを等値 pin している)。
+     */
+    const openBar = document.createElement('div');
+    openBar.setAttribute('data-pkc-region', 'help-manual-open');
+    const openBtn = document.createElement('button');
+    openBtn.type = 'button';
+    /**
+     * 🔴 **押された所を受けるのは binder 1 か所**(#645)。
+     * ⚠ ここで直に listener を張ると、**出すかどうかの判定**(この file)と
+     *   **押されたときの口**(`binder.ts` の `openManualWindow`)が別々になる ──
+     *   片方だけ配線した日に、出ているのに何も起きないボタンになる(§7)。
+     * 🔑 だから**いつも出す**。受け手が居ない環境では binder が理由を言う。
+     */
+    openBtn.setAttribute('data-pkc-action', 'open-manual-window');
+    openBtn.textContent = 'マニュアルを別のウィンドウで開く';
+    openBtn.title =
+      'マニュアルだけのウィンドウを開きます(目次つき・窓いっぱい。Ctrl+F でブラウザの検索が使えます)';
+    const openNote = document.createElement('span');
+    openNote.setAttribute('data-pkc-field', 'settings-note');
+    // 🔑 **何が起きるか**を押す前に言う(この画面の本文は消えない)
+    openNote.textContent = '目次つきで、窓いっぱいに出ます。この画面はそのまま残ります';
+    openBar.append(openBtn, openNote);
+    body.append(openBar);
+
+    /**
      * 🔴 **探す欄は器の「外・直上」に置く**(#636)。
      *
      * ⚠ **器の中に入れてはいけない** ── `drawManual` は `host.innerHTML = …` で

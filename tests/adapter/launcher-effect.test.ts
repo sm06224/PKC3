@@ -15,7 +15,8 @@
 import { describe, expect, it } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects, type StorePort } from '../../src/adapter/state/store-effects';
-import { DUAL_TILE_LID, OFFICE_TILE_LID, type LauncherTile } from '../../src/features/launcher/tiles';
+import { DUAL_TILE_LID,
+  MANUAL_TILE_LID, OFFICE_TILE_LID, type LauncherTile } from '../../src/features/launcher/tiles';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 
 function meta(lid: string, archetype: string): EntryMeta {
@@ -110,7 +111,12 @@ describe('ランチャーのタイルを読む', () => {
     // 🔴 **カレンダー / カンバンはここから外れた**(#292 段⑤、2026-08-23)──
     //    あの 2 つは「アプリ」ではなく**ノートの見方**だったので、左の列の
     //    「予定」タブへ引っ越した
-    expect(dispatcher.getState().launcherTiles?.map((t) => t.kind)).toEqual(['dual', 'app']);
+    // ⚠ **マニュアル**(#645、2026-08-31)も常に居る ── 端末を選ばない組み込みである
+    expect(dispatcher.getState().launcherTiles?.map((t) => t.kind)).toEqual([
+      'dual',
+      'manual',
+      'app',
+    ]);
     off();
   });
 
@@ -184,6 +190,7 @@ describe('組み込み Office タイルの合流 (#148)', () => {
     expect(tiles[0]?.lid, '2 ペインが先頭でない').toBe(DUAL_TILE_LID);
     expect(tiles[1]?.kind).toBe('office');
     expect(tiles[1]?.lid).toBe(OFFICE_TILE_LID);
+    expect(tiles[2]?.lid, 'マニュアルが組み込みの最後に居ない').toBe(MANUAL_TILE_LID);
     // ⚠ entry 由来のタイルが**消えていない**こと(置き換えではなく合流)
     expect(tiles.some((t) => t.lid === 'a1')).toBe(true);
   });
@@ -192,7 +199,9 @@ describe('組み込み Office タイルの合流 (#148)', () => {
     const tiles = await tilesWith(false);
     expect(tiles.some((t) => t.kind === 'office')).toBe(false);
     expect(tiles[0]?.lid, 'Office の有無で 2 ペインの位置が動いた').toBe(DUAL_TILE_LID);
-    expect(tiles[1]?.lid, 'Office の有無で entry 由来の位置が動いた').toBe('a1');
+    // ⚠ **マニュアル**(#645)は Office の有無に依らず、組み込みの最後に居る
+    expect(tiles[1]?.lid, 'Office の有無でマニュアルの位置が動いた').toBe(MANUAL_TILE_LID);
+    expect(tiles[2]?.lid, 'Office の有無で entry 由来の位置が動いた').toBe('a1');
     expect(tiles.some((t) => t.lid === 'a1')).toBe(true);
   });
 });
