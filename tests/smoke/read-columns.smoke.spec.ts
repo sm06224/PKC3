@@ -359,9 +359,19 @@ test('🔴 狭い画面では自動で 1 段に戻り、編集に入っても段
       timeout: 5_000,
     })
     .toBe(true);
+  /**
+   * ⚠ **段は印の 1 コマ後に組まれる** ── 印(`data-pkc-columns-on`)が立った直後に
+   *   数えると、編集の面の子がまだ置かれておらず 0 本と出る(2026-09-02、CI で 1 回。
+   *   手元では 2 ブラウザとも通った)。主張は変えず、**同じ 5 秒の中で待つ**。
+   */
+  await expect
+    .poll(async () => (await editGeom(page)).lefts, {
+      message: '印は在るのに段が 1 本しかない(空振り)',
+      timeout: 5_000,
+    })
+    .toBeGreaterThanOrEqual(2);
   const inEdit = await editGeom(page);
   expect(inEdit.host, '段組みの器が編集の面になっていない').toBe('editor-live');
-  expect(inEdit.lefts, '印は在るのに段が 1 本しかない(空振り)').toBeGreaterThanOrEqual(2);
   // 対照群 ── 読む面へ戻しても段のまま(戻す道が壊れていないこと)
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   await expect

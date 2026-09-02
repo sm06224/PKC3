@@ -19,6 +19,34 @@ test.beforeEach(async ({ page }) => {
  * 🔑 そして**本文が 1 度も消えない**ことも、ここでしか見られない ──
  * これが user 指示①(「もう一つ PKC が開いて混乱する」)への答えである。
  */
+/**
+ * 🔴 **固定の日を書かない**(2026-09-02、月をまたいだ初日に CI が赤くなった ── main も同じ)。
+ *
+ * ⚠ 2026-08 の日付を直書きしていたので、9 月に入った瞬間に**小さな月の升目**
+ *   (`[data-pkc-drop-date]` は表示中の月にしか無い)が見つからず、3 件が落ちた。
+ *   この file の下の方(繰り返しの test)には既に「固定の日を書くと理由の分からない
+ *   赤になる」と書いてあった ── 同じ file の中で守られていなかった。
+ * 🔑 **今月の中の日**で組む。基点は 22 日まで ── `BASE + 6 ≤ 28` なので、
+ *   どの月(2 月も)でも升目が在り、月末に走っても月をまたがない。
+ *   過ぎた日でも札は出る(`agenda.ts` は単発の予定を `overdue` として残す)。
+ */
+const AT = new Date();
+const BASE_DAY = Math.min(AT.getDate(), 22);
+/** 今月の `day` 日の鍵(`YYYY-MM-DD`)。 */
+function inMonth(day: number): string {
+  const d = new Date(AT.getFullYear(), AT.getMonth(), day);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+/** 札の「いつまでか」の字(`MM/DD`)。 */
+function mmdd(key: string): string {
+  return key.slice(5).replace('-', '/');
+}
+const D0 = inMonth(BASE_DAY); // 8/25 に当たる日
+const D2 = inMonth(BASE_DAY + 2); // 8/27
+const D3 = inMonth(BASE_DAY + 3); // 8/28
+const D5 = inMonth(BASE_DAY + 5); // 8/30
+const D6 = inMonth(BASE_DAY + 6); // 8/31
+
 test('🔴 予定のタブで札を掴んで日へ落とすと、本文の日付が変わる', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -26,7 +54,7 @@ test('🔴 予定のタブで札を掴んで日へ落とすと、本文の日付
 
   await createEntry(page, 'text');
   const ta = page.locator('[data-pkc-field="editor-body"]');
-  await ta.fill('- [ ] 見積を送る @2026-08-25\n- [ ] 体裁のチェック');
+  await ta.fill(`- [ ] 見積を送る @${D0}\n- [ ] 体裁のチェック`);
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
   // ① 予定のタブへ(⚠ アプリの一覧ではない ── 左の列のタブである)
@@ -67,8 +95,8 @@ test('🔴 予定のタブで札を掴んで日へ落とすと、本文の日付
   );
   await expect(card, '記法が札の字に残っている').toContainText('見積を送る');
 
-  // ③ 🔴 **本物の drag** ── 8/25 の札を掴んで 8/28 の升目へ落とす
-  const target = pane.locator('[data-pkc-drop-date="2026-08-28"]');
+  // ③ 🔴 **本物の drag** ── D0 の札を掴んで 3 日後(D3)の升目へ落とす
+  const target = pane.locator(`[data-pkc-drop-date="${D3}"]`);
   await expect(target, '落とし先の升目が無い').toBeVisible();
   const from = await card.boundingBox();
   const to = await target.boundingBox();
@@ -88,13 +116,13 @@ test('🔴 予定のタブで札を掴んで日へ落とすと、本文の日付
   // ④ 🔴 **本文が書き替わった**(画面だけ動いて本文は元のまま、を作らない)
   await clickReal(page, '[data-pkc-action="start-edit"]');
   await expect(ta, '本文の日付が書き替わっていない').toHaveValue(
-    '- [ ] 見積を送る @2026-08-28\n- [ ] 体裁のチェック',
+    `- [ ] 見積を送る @${D3}\n- [ ] 体裁のチェック`,
   );
   await clickReal(page, '[data-pkc-action="cancel-edit"]');
 
   // ⑤ 札も新しい日の束に居る(本文だけ直って画面が古い、を作らない)
   await expect(
-    pane.locator('[data-pkc-region="schedule-group"][data-pkc-drop-date="2026-08-28"] [data-pkc-entry]'),
+    pane.locator(`[data-pkc-region="schedule-group"][data-pkc-drop-date="${D3}"] [data-pkc-entry]`),
     '札が新しい日へ移っていない',
   ).toHaveCount(1);
 
@@ -132,7 +160,7 @@ test('🔴 予定のある日とない日で、小さな月の升目の高さが
   await page
     .locator('[data-pkc-field="editor-body"]')
     .fill(
-      ['- [ ] 予定 A @2026-08-25', '- [ ] 予定 B @2026-08-25 09:00', '- [ ] 予定 C @2026-08-25 14:00'].join(
+      [`- [ ] 予定 A @${D0}`, `- [ ] 予定 B @${D0} 09:00`, `- [ ] 予定 C @${D0} 14:00`].join(
         '\n',
       ),
     );
@@ -140,7 +168,7 @@ test('🔴 予定のある日とない日で、小さな月の升目の高さが
   await clickReal(page, '[data-pkc-browse="schedule"]');
 
   // ⚠ **前提** ── 点が付いた日が実在する(付いていなければ何も検めていない)
-  const dotted = page.locator('[data-pkc-drop-date="2026-08-25"][data-pkc-has]');
+  const dotted = page.locator(`[data-pkc-drop-date="${D0}"][data-pkc-has]`);
   await expect(dotted, '予定のある日に点が付いていない(前提が崩れている)').toBeVisible({
     timeout: 20_000,
   });
@@ -182,7 +210,7 @@ test('🔴 期間の札を掴んでずらすと、長さを保ったまま本文
 
   await createEntry(page, 'text');
   const ta = page.locator('[data-pkc-field="editor-body"]');
-  await ta.fill('- [ ] 大阪出張 @2026-08-25..2026-08-28');
+  await ta.fill(`- [ ] 大阪出張 @${D0}..${D3}`);
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
   await clickReal(page, '[data-pkc-browse="schedule"]');
@@ -220,14 +248,14 @@ test('🔴 期間の札を掴んでずらすと、長さを保ったまま本文
   // ⚠ 札は「いつまでか」を出す(束の見出しには終わりが出ないため)
   await expect(
     pane.locator('[data-pkc-region="schedule-cards"] > [data-pkc-task-range]').first(),
-  ).toContainText('〜08/28');
+  ).toContainText(`〜${mmdd(D3)}`);
 
-  // ② 🔴 3 日目(8/27)の札を掴んで、8/30 の升目へ落とす = +3 日
+  // ② 🔴 3 日目(D2)の札を掴んで、D5 の升目へ落とす = +3 日
   const grabbed = pane.locator(
-    '[data-pkc-region="schedule-group"][data-pkc-drop-date="2026-08-27"] [data-pkc-entry]',
+    `[data-pkc-region="schedule-group"][data-pkc-drop-date="${D2}"] [data-pkc-entry]`,
   );
-  await expect(grabbed, '8/27 の札が無い').toHaveCount(1);
-  const target = pane.locator('[data-pkc-drop-date="2026-08-30"]');
+  await expect(grabbed, '3 日目の札が無い').toHaveCount(1);
+  const target = pane.locator(`[data-pkc-drop-date="${D5}"]`);
   const from = await grabbed.boundingBox();
   const to = await target.boundingBox();
   expect(from, '札の位置が取れない').not.toBeNull();
@@ -241,7 +269,7 @@ test('🔴 期間の札を掴んでずらすと、長さを保ったまま本文
   // ③ 🔴 **長さは 4 日のまま**、掴んだ日が落とした日に来ている
   await clickReal(page, '[data-pkc-action="start-edit"]');
   await expect(ta, '期間が長さを保ったままずれていない').toHaveValue(
-    '- [ ] 大阪出張 @2026-08-28..2026-08-31',
+    `- [ ] 大阪出張 @${D3}..${D6}`,
   );
   await clickReal(page, '[data-pkc-action="cancel-edit"]');
 
