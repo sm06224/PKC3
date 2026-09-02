@@ -5978,13 +5978,17 @@ export function bindActions(
         const ready = dispatcher.getState().phase === 'ready';
         if (ready && services.attachFiles) {
           services.attachFiles([...files]);
-          // ⚠ **行き先まで言い切らない**(#666 で `attachFiles` が開いていた
-          //   ノートの本文へも入れるようになった)── ここで「添付にしました」と
-          //   言い切ると、実際には本文へ入った回に **user がもう一度貼って 2 行**
-          //   になる。🔑 どこへ入ったかは `asset-into-note.ts` が 1 行で言う。
+          /**
+           * ⚠ **行き先はここで言わない**(#666 の着地前レビュー D9)。
+           * `attachFiles` が「本文に入れました」/「添付にしました(理由)」を
+           * **必ず 1 行言う**ようになったので、ここでも言うと**同じ 1 行に
+           * 2 回**出る(`main.ts` は知らせとエラーを ` — ` で繋ぐ)。
+           * 🔑 ここが言えるのは**あちらが言えないこと**だけ ── 「打っていた所へは
+           *   差せなかった」。どこへ入ったかは、その次に続く 1 行が言う。
+           */
           dispatcher.dispatch({
             type: 'OP_FAILED',
-            error: '編集欄が閉じたため、貼り付けた画像は取り込みました',
+            error: '編集欄が閉じたため、貼り付けた画像は打っていた所へは差せませんでした',
           });
         } else {
           dispatcher.dispatch({

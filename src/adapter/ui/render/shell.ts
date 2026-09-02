@@ -452,7 +452,9 @@ export function buildShell(root: HTMLElement): ShellRegions {
   today.title = '今日の日付のノートを開きます(無ければ作ります)';
 
   const attach = iconButton('attach-file', '添付');
-  attach.title = 'ファイルを取り込んで添付にします';
+  // ⚠ **`ENTRY_ACTION_HINTS['attach-file']` と同じ意味にする**(#666)── 同じ操作に
+  //    2 通りの説明を作らない(スマホの `⋯` から選んだときに出る字と揃える)
+  attach.title = 'ファイルを取り込んで、開いているノートの本文に入れます';
   /**
    * 🔴 **録音・画面収録**(#413。user 要望 2026-07-16
    * 「録音と画面収録を…これで、会議メモをうまく残せるはず」)。

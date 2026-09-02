@@ -1182,6 +1182,13 @@ test('🔴 目次を見せて起動すると、アプリがノートの一覧を
     mimeType: 'text/html',
     buffer: Buffer.from(EXT_APP, 'utf-8'),
   });
+  /**
+   * 🔴 **取り込んだ添付を開き直す**(user 裁定 2026-09-02、#666)。
+   * ⚠ 直す前は取り込んだ物が**勝手に開いた**が、いまは**読んでいたノートが
+   *   開いたまま**で、本文の末尾に参照が 1 行入るだけである ── 開き直さないと
+   *   詳細画面はノートのままなので、起動の口はどこにも出ない。
+   */
+  await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]:has-text("toc.html")');
   const extBtn = page.locator('[data-pkc-action="launch-asset-extension"]');
   await expect(extBtn, '「目次を見せて起動」が詳細画面に無い').toBeVisible({ timeout: 15000 });
 
