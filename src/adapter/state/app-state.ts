@@ -19,7 +19,7 @@ import type { SnippetScan } from '@features/snippet/snippet-table';
 import {
   normalizeSplitLids,
   pinSplitLid,
-  SPLIT_PINNED_MAX,
+  STACK_MAX,
   unpinSplitLid,
 } from '@features/split-frames';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
@@ -4050,12 +4050,16 @@ function reduceCore(
         };
       const pinned = pinSplitLid(state.splitLids, action.lid);
       if (pinned === state.splitLids) {
-        // ⚠ 「既に在る」と「満杯」を分ける ── 前者は黙ってよいが、後者は言う
-        if (state.splitLids.includes(action.lid)) return { state, events: [] };
+        /**
+         * ⚠ 「**もう一番上に在る**」と「**満杯**」を分ける ── 前者は黙ってよいが、後者は言う。
+         * 🔑 直す前は「既に在る」を黙っていたが、いまは**載せ直すと先頭へ上がる**ので、
+         *   黙るのは**もう先頭に在るとき**だけである(#633 段①)。
+         */
+        if (state.splitLids[0] === action.lid) return { state, events: [] };
         return {
           state: {
             ...state,
-            notice: `横に並べられるのは ${SPLIT_PINNED_MAX} 件までです`,
+            notice: `スタックに載せられるのは ${String(STACK_MAX)} 件までです(1 つ降ろしてから載せてください)`,
           },
           events: [],
         };

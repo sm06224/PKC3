@@ -18,6 +18,7 @@ import {
   SPLIT_PINNED_CHROME_PX,
   SPLIT_FRAME_MAX,
   SPLIT_PINNED_MAX,
+  STACK_MAX,
   unpinSplitLid,
 } from '@features/split-frames';
 import {
@@ -34,26 +35,53 @@ describe('留める / 外す(双方向)', () => {
     expect(pinSplitLid([], 'a')).toEqual(['a']);
   });
 
+  /**
+   * 🔴 **先頭が一番上**(#633 段①。user 裁定 2026-09-02 ②「新しく載せた物が
+   * 本文のすぐ隣に来て、それまで隣に在った物は右へずれる」)。
+   *
+   * ⚠ 直す前は**末尾に足して**いたので、この test の期待値は `['a','b']` だった ──
+   *   **裁定で向きが裏返った**ので、期待値も裏返す(古い向きを守り続けない)。
+   */
   it('🔴 外せる ── 置けるなら外せる(user 指示 2026-08-23)', () => {
     const pinned = pinSplitLid(pinSplitLid([], 'a'), 'b');
-    expect(pinned).toEqual(['a', 'b']);
+    expect(pinned, '新しく載せた物が先頭に来ていない').toEqual(['b', 'a']);
     expect(unpinSplitLid(pinned, 'a')).toEqual(['b']);
   });
 
-  it('同じ物を 2 度留めても増えず、並びも動かない', () => {
-    const cur = ['a', 'b'];
-    expect(pinSplitLid(cur, 'a')).toBe(cur); // 参照ごと同じ = 指紋が動かない
+  /**
+   * 🔴 **既に在る物を載せ直すと、一番上へ上がる**(#633 裁定④)。
+   * ⚠ 直す前は**何も起きなかった**(押しても無反応)。
+   * 🔑 **件数は増えない** ── 上げるだけである(対照群として同じ it で見る)。
+   */
+  it('🔴 既に在る物を載せ直すと一番上へ上がる(件数は増えない)', () => {
+    const cur = ['a', 'b', 'c'];
+    const after = pinSplitLid(cur, 'c');
+    expect(after, '一番上へ上がっていない').toEqual(['c', 'a', 'b']);
+    expect(after, '件数が増えた(載せ直しで 2 枚になった)').toHaveLength(3);
+    // ⚠ **もう一番上なら 1 バイトも触らない**(描き直しの指紋を動かさない)
+    expect(pinSplitLid(after, 'c'), '一番上なのに配列を作り直した').toBe(after);
   });
 
   it('⚠ 上限に達したら足さない(古い物を黙って落とさない)', () => {
     let cur: readonly string[] = [];
-    for (let i = 0; i < SPLIT_PINNED_MAX; i += 1) cur = pinSplitLid(cur, `p${i}`);
-    expect(cur).toHaveLength(SPLIT_PINNED_MAX);
+    for (let i = 0; i < STACK_MAX; i += 1) cur = pinSplitLid(cur, `p${i}`);
+    expect(cur).toHaveLength(STACK_MAX);
     const after = pinSplitLid(cur, 'over');
     expect(after).toBe(cur);
     expect(after).not.toContain('over');
     // ⚠ 前提: 満杯だったこと(空振りで通っていない)
-    expect(cur).toContain(`p${SPLIT_PINNED_MAX - 1}`);
+    expect(cur).toContain(`p${STACK_MAX - 1}`);
+  });
+
+  /**
+   * 🔑 **積める数と、横に出せる数は別物**(#633 段①)── 直す前は同じ数だったので、
+   *   4 件目を載せようとすると「横に並べられるのは 3 件までです」と断られていた。
+   */
+  it('🔑 積める数(20)は、横に出せる数(3)より多い', () => {
+    expect(STACK_MAX, '積める数が横に出せる数のままである').toBeGreaterThan(SPLIT_PINNED_MAX);
+    let cur: readonly string[] = [];
+    for (let i = 0; i < SPLIT_PINNED_MAX + 1; i += 1) cur = pinSplitLid(cur, `q${i}`);
+    expect(cur, '横に出せる数で切られている').toHaveLength(SPLIT_PINNED_MAX + 1);
   });
 
   it('居ない物を外しても、配列は同じ参照のまま', () => {
@@ -67,8 +95,9 @@ describe('留める / 外す(双方向)', () => {
   });
 
   it('重複は畳まれ、上限で切られる', () => {
-    const many = Array.from({ length: SPLIT_PINNED_MAX + 5 }, (_, i) => `x${i}`);
-    expect(normalizeSplitLids([...many, ...many])).toHaveLength(SPLIT_PINNED_MAX);
+    // ⚠ 切るのは**積める上限**(横に出せる数で切ると、帯に残すはずの札まで捨てる)
+    const many = Array.from({ length: STACK_MAX + 5 }, (_, i) => `x${i}`);
+    expect(normalizeSplitLids([...many, ...many])).toHaveLength(STACK_MAX);
   });
 });
 

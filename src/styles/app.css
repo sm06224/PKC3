@@ -5337,8 +5337,51 @@ li[data-pkc-row-slot] {
 [data-pkc-region='split-frame-bar'] {
   display: flex;
   justify-content: flex-end;
+  gap: var(--s3);
 }
 [data-pkc-region='split-frame-bar'] button {
   color: var(--muted);
   font-size: 12px;
+}
+
+/* 🔴 **スタックの帯**(#633 段①。user 裁定 2026-09-02 ②「帯は本文の上」)。
+ *
+ * ⚠ **何も載せていなければ器ごと DOM に無い**(`split-view.ts` が置かない)ので、
+ *    この規則は 1 つも当たらない ── 版面を 1 行も食わない。
+ * 🔑 **1 行に収める**(横に溢れたら帯の中でスクロール)── 折り返すと本文が
+ *    段ごと下がり、載せるたびに版面が動く。
+ * ⚠ 高さは中身で決める(固定丈にしない)── 文字の大きさの設定に付いていく。 */
+[data-pkc-region='stack-bar'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  overflow-x: auto;
+  /* ⚠ 縦は縮ませない ── flex の親(面)の中で 1 行を守る */
+  flex: 0 0 auto;
+  padding-bottom: var(--s2);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--s3);
+}
+[data-pkc-field='stack-card'] {
+  display: inline-flex;
+  align-items: center;
+  /* ⚠ 札は縮めない ── 縮むと名前が読めず、どれを降ろすのか決められない */
+  flex: 0 0 auto;
+  gap: var(--s2);
+  padding: 0 var(--s2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-size: 12px;
+}
+/* 🔑 **いま横に出ている物には印** ── 押しても画面が変わらない札との差が読める */
+[data-pkc-field='stack-card'][data-pkc-shown] {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+[data-pkc-field='stack-card'] button {
+  color: inherit;
+  font-size: inherit;
+  /* ⚠ 押し所は名前の分だけ ── 札の中で 2 つのボタンが重ならないようにする */
+  padding: 2px 0;
 }

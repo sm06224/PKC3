@@ -98,7 +98,10 @@ const OBJECT_LONE: readonly string[] = [
   'move-entry',
   'navigate-entry-ref',
   'open-alarm',
-  'pin-split',
+  /**
+   * 🟢 **`pin-split` は 2026-09-02 に 2 本目の道ができた**(#633 段①)──
+   *   本文の上の**スタックの帯**の札から押せる(= 一番上へ上げる)。
+   */
   'rename-attachment',
   'retry-persist',
   'set-entry-date',
@@ -106,6 +109,18 @@ const OBJECT_LONE: readonly string[] = [
   'storage-profile',
   'toggle-app-tile',
   'unschedule-task',
+  /**
+   * ⚠ **この計器は「出口の数」を file で数える**(`scripts/action-outlets.mjs` の
+   *   `where = 相対 path`)。`unsplit-entry` は 2026-09-02 に
+   *   **本文の上のスタックの帯**にも口ができたが、⚠ 帯も枠も同じ
+   *   `split-view.ts` なので、**この表からは 1 か所のまま**に見える。
+   *
+   * 🟢 **user から見た片道は #633 段①で閉じている** ── 直す前は「× 降ろす」が
+   *   **枠の中にしか無かった**ので、幅で枠が畳まれると**降ろす口が画面から消えて**
+   *   いた(#584)。帯の札の × は**枠が 1 つも出ていなくても**押せる。
+   * 🔑 だから行は残す(計器の定義に嘘をつかない)が、**残っている理由は
+   *   「まだ片道だから」ではない** ── 次に読む人がそう読まないように書いておく。
+   */
   'unsplit-entry',
   'untag-entry',
 ];

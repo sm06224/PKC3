@@ -4354,8 +4354,18 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ **断り文はここに書かない** ── 満杯・フォルダの理由は reducer が 1 か所で
    * 出す(2 か所に規則を置かない。CLAUDE.md §7)。
    */
-  'pin-split': (dispatcher) => {
-    const lid = dispatcher.getState().selectedLid;
+  'pin-split': (dispatcher, target) => {
+    /**
+     * 🔴 **押した物が身元を持っていれば、それを載せる**(#633 段①)。
+     *
+     * ⚠ 直す前は**いつでも `selectedLid`** だったので、帯の札を押しても
+     *   「いま選んでいるノート」が載っていた ── 札の名前と起きることが食い違う。
+     * 🔑 帯の札は**もう載っている物を一番上へ上げる**ために押す(裁定④)。
+     * ⚠ 本文の右クリックから来たときは身元を持たないので、今までどおり
+     *   `selectedLid` に落ちる(**同じ受け手 1 つ**のまま ── §7)。
+     */
+    const own = target.closest<HTMLElement>('[data-pkc-lid]')?.getAttribute('data-pkc-lid');
+    const lid = own !== null && own !== undefined && own !== '' ? own : dispatcher.getState().selectedLid;
     if (lid === null) return;
     dispatcher.dispatch({ type: 'PIN_SPLIT_ENTRY', lid });
   },
