@@ -71,6 +71,61 @@ test('🔴 行を右クリックすると、その行にできることが出る
 });
 
 /**
+ * 🔴 **メニューの下に、指している項目の説明が出る**(#587 C-3。user 裁定 2026-08-30
+ * 「一度推奨で入れて、使用感をテストしたい」)。
+ * ⚠ unit では原理的に届かない 2 つ:① 欄が**本当に 2 行の高さ**に収まっているか
+ *   (happy-dom は採寸しない)② 実際のマウスの移動で `mouseover` が届くか。
+ */
+test('🔴 メニューの下に、指している項目の説明が出る(乗せても、キーで選んでも) (#587 C-3)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-body"]').fill('説明の的\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  const row = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').first();
+  await row.click({ button: 'right' });
+  const menu = page.locator(MENU);
+  await expect(menu).toBeVisible();
+  const hint = menu.locator('[data-pkc-field="context-menu-hint"]');
+  await expect(hint, '説明の欄が無い').toBeVisible();
+
+  // 開いた直後は先頭(焦点)の項目の説明
+  const items = menu.locator('button[data-pkc-action]');
+  const firstHint = (await items.first().getAttribute('data-pkc-hint')) ?? '';
+  expect(firstHint, '先頭の項目に説明が無い(前提が崩れている)').not.toBe('');
+  await expect(hint).toHaveText(firstHint);
+
+  // 乗せると、その項目の説明に変わる
+  const del = menu.locator('button[data-pkc-action="delete-entry"]');
+  await del.hover();
+  await expect(hint, '乗せた項目の説明に変わらない').toContainText('ゴミ箱');
+  // ⚠ tooltip は付けない(1 秒待つと下の項目に重なる箱 ── C-1 の欠点)
+  expect(await del.getAttribute('title')).toBeNull();
+
+  // 🔴 2 行に収まっている(3 行目が出て下へ伸びない)
+  const fits = await hint.evaluate((el) => {
+    const cs = getComputedStyle(el);
+    const lines = parseFloat(cs.lineHeight) * 2;
+    const pad = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+    return { h: el.getBoundingClientRect().height, max: lines + pad + 1 };
+  });
+  expect(fits.h, `欄が 2 行を超えている(${fits.h}px > ${fits.max}px)`).toBeLessThanOrEqual(fits.max);
+
+  // キーで焦点を移しても変わる(マウスを持たない人にも届く)
+  await page.keyboard.press('Tab');
+  const secondHint = (await items.nth(1).getAttribute('data-pkc-hint')) ?? '';
+  expect(secondHint).not.toBe(firstHint);
+  await expect(hint, 'キーで選んだ項目の説明に変わらない').toHaveText(secondHint);
+
+  await page.keyboard.press('Escape');
+  await expect(page.locator(MENU)).toHaveCount(0);
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
  * 🔴 **押した項目が実際に動く**(配線が繋がっている)。
  *
  * ⚠ 観測点は**メニューの外**にする ── メニューが閉じただけでは

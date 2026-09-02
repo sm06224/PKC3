@@ -24,6 +24,7 @@ import {
   BODY_MENU_ACTIONS,
   bodyMenuActions,
   ENTRY_ACTION_HINTS,
+  ENTRY_ACTION_HINT_MAX,
   ENTRY_ACTION_LABELS,
   ENTRY_MENU_ACTIONS,
   entryActionHint,
@@ -213,6 +214,21 @@ describe('条件つきの操作(#500 案 C)', () => {
  *   ここは**配られた側**(`entryMenuActions` の返り値)で、**中身が空でない**ことを見る。
  */
 describe('右クリックの説明(#587 C-1)', () => {
+  /**
+   * 🔴 **説明は 2 行に収める**(#587 C-3)。メニューの下の欄は 2 行固定なので、
+   *   超えた分は**切れて読めない**(欄の幅 22rem = 全角 28 字 × 2 行 = 56 字)。
+   * ⚠ 上限は `ENTRY_ACTION_HINT_MAX` 1 か所(CSS の幅と対で読む)。
+   */
+  it('🔴 説明はどれも 2 行に収まる長さ(ENTRY_ACTION_HINT_MAX 以下)', () => {
+    const over = Object.entries(ENTRY_ACTION_HINTS)
+      .filter(([, h]) => h.length > ENTRY_ACTION_HINT_MAX)
+      .map(([k, h]) => `${k}: ${h.length} 字`);
+    expect(Object.keys(ENTRY_ACTION_HINTS).length, '表が空(空振り)').toBeGreaterThan(5);
+    expect(over, '欄からはみ出す説明がある').toEqual([]);
+    // ⚠ 上限そのものが緩んでいない(3 行分にすると CSS の 2 行固定で切れる)
+    expect(ENTRY_ACTION_HINT_MAX).toBe(56);
+  });
+
   /** ⚠ 条件つきの 2 つも出る文脈 ── これを使わないと 2 行が**一度も検められない**。 */
   const ALL = { archetype: 'folder', linkedFile: 'メモ.md' } as const;
 
