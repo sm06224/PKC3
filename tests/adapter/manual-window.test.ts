@@ -230,9 +230,15 @@ describe('マニュアルの窓 — 開き方', () => {
     // ⚠ **対照群** ── 1 回目は「前へ出しただけ」ではない(規則そのものが生きている)
     expect(opened?.reused, '1 回目から「前へ出しただけ」と言っている').toBe(false);
 
+    /**
+     * ⚠ **1 回目でも前へ出す**(#649 の着地後レビュー ②で 3 経路に揃えた)──
+     *   直す前は再利用の経路だけが `focus()` を呼んでいた。
+     */
+    expect(focused, '組んだ回に前へ出していない').toBe(1);
+
     const again = await openManualWindow(deps);
     expect(rendered, '2 回目に描き直している(ワーカーを無駄に起こす)').toBe(1);
-    expect(focused, '前へ出していない').toBe(1);
+    expect(focused, '前へ出していない').toBe(2);
     /**
      * 🔴 **「前へ出しただけ」を呼び側へ返す** ── `focus()` が手前へ出せるかは
      * ブラウザ次第なので、返さないと**押しても何も起きない**回が生まれる。
@@ -368,6 +374,41 @@ describe('マニュアルの窓 — 焼いた page へ移す(段②)', () => {
     const got = await openManualWindow({ ...parts, render: async () => HTML, open: () => win });
     expect(got?.reused).toBe(false);
     expect(win.replaced).toEqual([parts.pageUrl]);
+  });
+
+  /**
+   * 🔴 **入れ替えた回も窓を前へ出す**(#649 の着地後レビュー ②)。
+   *
+   * ⚠ 直す前は `focus()` が**再利用の経路にしか無かった**ので、
+   *   「マニュアルが新しくなったので、ウィンドウを入れ替えました」と言った回は
+   *   **入れ替わった窓が後ろに居たまま**だった ── user が見ているのはアプリの画面なので、
+   *   言われたものが画面のどこにも無い。
+   * 🔑 3 経路(再利用 / 入れ替え / 組む)を `bringToFront` 1 本へ寄せた(§7)。
+   */
+  it('🔴 入れ替えた回も窓を前へ出す(言ったものが画面に出る)', async () => {
+    const win = fakeWin();
+    let focused = 0;
+    (win as unknown as { focus: () => void }).focus = () => {
+      focused += 1;
+    };
+    win.document.body.setAttribute('data-pkc-manual-version', manualBuildTag('pkc3 v1.0.0', TEXT));
+    const got = await openManualWindow({ ...parts, render: async () => HTML, open: () => win });
+    // ⚠ 前提 ── 入れ替えの経路を本当に通っている(再利用なら見たいものが無い)
+    expect(got?.swapped, '前提が崩れている: 入れ替えの経路を通っていない').toBe(true);
+    expect(focused, '入れ替えたのに窓を前へ出していない').toBe(1);
+  });
+
+  /**
+   * ⚠ **前へ出せない環境でも落ちない** ── `focus()` が投げるブラウザが在る。
+   *   呼び側が「見えないときは切り替えてください」と知らせるので、ここでは黙ってよい。
+   */
+  it('⚠ focus() が投げても、開くこと自体は成り立つ', async () => {
+    const win = fakeWin();
+    (win as unknown as { focus: () => void }).focus = () => {
+      throw new Error('前へ出せない');
+    };
+    const got = await openManualWindow({ ...parts, render: async () => HTML, open: () => win });
+    expect(got, 'focus() の例外で開くこと自体が壊れた').not.toBeNull();
   });
 
   /**
