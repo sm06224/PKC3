@@ -37,20 +37,37 @@ test('🔴 スマホの縦で、編集中の「保存」が本当に押せる (#
    * ⚠ **お知らせは畳まない**(#588 の条件を再現する)── 起動直後のカードが
    *   縦を 3 割取った状態で、なお保存が押せることが主張である。
    */
-  const save = page.locator(`${REGION('detail')} [data-pkc-action="commit-edit"]`).first();
-  await expect(save, '編集の「保存」が画面に無い').toBeVisible();
-  const hit = await save.evaluate((el) => {
-    const r = el.getBoundingClientRect();
-    const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
-    return {
-      w: Math.round(r.width),
-      h: Math.round(r.height),
-      action: at?.closest('[data-pkc-action]')?.getAttribute('data-pkc-action') ?? null,
-    };
-  });
-  expect(hit.w, '保存が潰れている').toBeGreaterThan(8);
-  expect(hit.h, '保存が潰れている').toBeGreaterThan(8);
-  expect(hit.action, '保存の上に別の物が重なっている(押しても保存されない)').toBe('commit-edit');
+  /**
+   * 🔴 **`commit-edit` を全数走査する**(#588 が書いた「直ったと言える条件」そのもの)。
+   *
+   * ⚠ この画面には「保存」が **2 個**在る(中央の帯と追記欄の場所 ── マニュアルが
+   *   「どちらを押しても結果は同じ」と約束している)。#588 の発見が遅れた理由は
+   *   **1 個目だけを測った**ことなので、ここで `.first()` を使ってはいけない。
+   * 🔑 条件は「**どれも自分に当たる**、または**押せない物は DOM に出ていない**」。
+   *   ⚠ `toBeVisible()` では見えない ── 覆われていても通る。
+   */
+  const saves = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-pkc-action="commit-edit"]')].map((el) => {
+      const r = el.getBoundingClientRect();
+      const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      return {
+        where: el.closest('[data-pkc-region]')?.getAttribute('data-pkc-region') ?? '?',
+        hidden: (el as HTMLElement).offsetParent === null && r.width === 0 && r.height === 0,
+        w: Math.round(r.width),
+        h: Math.round(r.height),
+        hit: at?.closest('[data-pkc-action]')?.getAttribute('data-pkc-action') ?? null,
+      };
+    }),
+  );
+  expect(saves.length, '「保存」が 1 つも無い(台の空振り)').toBeGreaterThan(0);
+  // ⚠ 2 個在ることまで前提にしない(片方を畳む直し方でも条件は満たせる)が、
+  //    出ている物は**全部**押せなければならない
+  for (const s of saves) {
+    if (s.hidden) continue;
+    expect(s.w, `${s.where} の保存が潰れている`).toBeGreaterThan(8);
+    expect(s.h, `${s.where} の保存が潰れている`).toBeGreaterThan(8);
+    expect(s.hit, `${s.where} の保存が覆われている(押しても保存されない)`).toBe('commit-edit');
+  }
   expect(errors, '例外が出た').toEqual([]);
 });
 
