@@ -1,0 +1,284 @@
+# スマホ用画面の設計(#632)── 720px 以下は「一覧 / ノート / 情報」を 1 面ずつ、同じ DOM・同じ描画経路
+
+> **user 裁定 2026-08-30(逐語)**:「**A1. スマホの幅なら、スマホ用画面に切り替える。それ以下なら対応外とする。スマホ用画面がないなら、作る**」「**A2.(#582 / #609)前問と同じ。スマホ用画面とする**」「**A4.(#586 / #587)スマホ用画面にしろ**」
+
+> ⚠ 本 doc は **doc-first** の設計案(実装していない)。3 つの角度(user の動線 / 実装最小 / 互換とリスク)で並列に出した案を、src と調査 doc(`docs/development/survey-2026-09-02-mobile-stack.md`)の事実で突き合わせて 1 つに統合したもの。**§4 の設問に user の裁定が出るまで実装に入らない。**
+
+## 0. 決まっていること / この doc が決めること
+
+| | |
+|---|---|
+| ✅ 裁定済み | スマホの幅ならスマホ用画面へ切り替える / それ以下は対応外 / 無いなら作る(着手 go) |
+| ⬜ この doc が決める(§2) | 境目の px / 切替の軸 / 面の構成 / 戻る / 縦の予算 / 畳みの永続の扱い / 機構(同じ描画経路で器だけ差し替え)/ 段階導入 |
+| 🔴 user の裁定(§4) | 見え方・言葉の設問だけ |
+
+⚠ 前提(2026-09-02 時点): PKC3 に phone / touch の実装は 0 件(`pointer: coarse` 0、幅の `@media` は 1100 / 900 / 720 の 3 本)。#588 の縦潰れは「幅」ではなく**縦**(脇の 3 面が各 30vh)が原因。実測は全部 fine pointer の 480px。
+
+## 1. 要約(3 案の食い違いと、どの事実で決めたか)
+
+1. 3 案が一致した所はそのまま採る:境目 720px(app.css:4584 の 1 列版面を丸ごと置き換える)/ 軸は幅だけ(裁定逐語)/ 戻る = 既存 reducer `DESELECT_ENTRY`(app-state.ts:3272)/ `pkc3.panes` の畳みはスマホでは読まない / 打つ欄 16px でピンチは奪わない / hover でしか出ない 2 ボタンを触る端末では常時表示。
+2. 食い違い①「対応外の下限 320(案1)vs 360(案2/3)」→ **360**。案1 の根拠 app.css:3939-3945 は「30vh が 96px を切る = 高さ 320」の話で(実測 H=260)、幅の話ではない。
+3. 食い違い②「非表示面を `display:none`(案1/2)vs `visibility:hidden`+`inert`(案3)」→ **visibility**。mermaid-hydrate.ts:99 `parentElement.clientWidth || … || 640` は幅 0 で 640 に落ちて鍵が変わり焼き直す/ center.ts:60-80 の「短い面で scrollTop が 0 に丸められる」と同型で display:none は scrollTop を失う。
+4. 食い違い③「flex(案1)vs 同じ grid セル `detail` に重ねる(案2/3)」→ **grid**。announce.test.ts:583-600 が「宣言した grid-area は基準の版面に在る」を pin し、版面ごとの帯 7 行の検査(:553-566)を phone 版面にも効かせられる(版面数 9 → 8)。
+5. 食い違い④「flag(案1)/ 無し(案2)/ 無し + 設定(案3)」→ **無し**。flags.ts:49「既定は今の挙動」なので flag では畳むまで全スマホが本文 0px のまま + 1 列版面を並走維持(§7)。設定「切り替えない」は 720 以下の 2 列という**今日どこにも無い版面**を配ることになるので既定では出さず、Q1 の答えで決める。
+6. 食い違い⑤「720 を CSS `@media`(案1/2)vs TS `matchMedia`(案3)」→ **TS**。360 の対応外は JS が要り(status は唯一のエラー出口 shell.ts:668-678)、`applyPaneVisibility` の「スマホでは書かない」ガードも JS が要る。数字は features/phone-layout.ts の定数 2 つに閉じ、CSS は属性だけ読む。flags.test.ts:258 の QUERY_READ は `location.*` だけなので抜け穴検査に当たらない。
+7. 食い違い⑥「本文ページの ⋯(案3)vs 情報ページで足りる(案1/2)」→ **⋯ が要る**。timer.ts:115-119 は `selectedLid` 無しで断り、capture.ts:162 は `selectedLid` へ参照を入れ、パレットの口は sidebar の子(shell.ts:514/549)── 戻る = DESELECT なので一覧ページからは「開いているノート」が居なくなる(円環の dead click)。iOS は contextmenu も飛ばない。⋯ の中身は既存の登記(entryMenuActions)+ 名指しの小さな表(NOTE_TOOL_ACTIONS、create-bar と parity pin)+ open-palette で、受け手は 1 つも増やさない。
+8. 「一覧を出したまま選択を保つ runtime bit」案は検討して棄却:dispatcher.ts:36-53 は state が変わったときだけ通知し action の hook が無いので、同じ行をもう一度押したとき(reducer app-state.ts:1881-1896 は同じ state を返す)bit を倒せず dead tap になる。ページは **state + 情報 bit 1 つ**の純関数にする。
+9. 編集中の ← / 情報:disabled(案2/3)ではなく**押したら理由を出す**(案1)── 触る端末は `title` を読めないので disabled は無言の dead click になる。
+10. お知らせの丈(30 / 25 / 20)・帯の並び・対応外の伝え方は見え方なので user 設問へ。落ちる test は 3 案の和集合を grep で実在確認し 12 件に整理(下記)。
+
+## 2. 決めたこと(推薦 1 つ + 理由 + 覆る条件)
+
+### 2-1. 「スマホの幅」の上限は何 px か
+
+- **推薦**: 720px(`PHONE_MAX_PX = 720`)。app.css:4584-4655 の `@media (max-width: 720px)` ブロックは**削除**してスマホ用画面で置き換える(版面は 3 列 / ≤1100 の 2 列 / スマホ の 3 つに減る)
+- **理由**: app.css:4584 が既に「1 列に折る」境目で、その 1 列版面(`minmax(0,1fr)` 本文 + sidebar 30vh :4652)が #588 / #609 / #586 の現場。同じ数字で置き換えれば版面が増えない。721px の 2 列版面は sidebar `minmax(180px,22vw)` + 帯 8px(app.css:4507)で本文 ≈533px ≥ 1 段の下限 448px(features/read-columns.ts:84)。PKC2 の 640 を採ると 641〜720 に壊れた 1 列版面が残る。実測 #588 コメント(2026-08-30)では 720×600 でも保存が覆われており 720 以下は既に壊れている
+- **これが分かったら覆る**: 段⓪の計器で 721×800 / 768×1024 の 2 列版面で「保存」「編集」が elementFromPoint で当たらない(本文 <50%)なら、境目を上げるのではなく 2 列版面に本文の下限を足す別 issue を立てて会話で確かめる(そちらは user が『継ぎ足すな』と言った側)
+
+### 2-2. 「対応外」の下限は何 px か
+
+- **推薦**: 360px(`PHONE_MIN_PX = 360`)。同じスマホ用画面のまま描き、操作も塞がない
+- **理由**: 案1 の 320 は app.css:3939-3945 を根拠にしていたが、そこは「30vh が約 96px を切る = viewport **高さ** 320 以下(実測 H=260)」の話で幅ではない。現行 Android の最小 CSS 幅は 360、iPhone は 375。#588 コメントの 360×800 実測は本文 228px で全部押せた。smoke の最狭は 480(layout:145 / pane-resize:253 / timer:39,96)なので 360 の smoke を新設する
+- **これが分かったら覆る**: user が 360 未満の端末を持っている / 段⓪の 360×640 で編集帯が押せない
+
+### 2-3. 切替の軸は幅だけか、指(pointer:coarse)も条件にするか
+
+- **推薦**: 幅だけ。触る端末の手当ては `@media (hover: none)`(hover でしか出ないボタン)と `@media (hover: none) and (pointer: coarse)`(打つ欄 16px)の**別軸**で、スマホ用画面と独立に効かせる
+- **理由**: 裁定 A1 逐語「スマホの幅なら」。#586 / #588 / #609 の実測は全部 fine pointer 480px(調査 doc 批評「調査どうしの食い違い」4 点目)── PKC2 の `(pointer: coarse) and (max-width: 640px)` を流用すると行き止まりが PC 版面に残り、裁定の前提と両立しない。hover の欠落は iPad 横(1024px)でも起きるので幅に紐づけない(app.css:1978-2020 の `opacity: 0` は `:hover, :focus-within` でしか戻らない)。iOS の自動ズームも幅ではなく端末の性質なので、16px は phone 属性ではなく `(hover:none) and (pointer:coarse)` に置く(iPad 縦 744〜768 は 2 列版面のままでもズームは起きる)
+- **これが分かったら覆る**: cowork 実機で「PC の窓を細くしたらスマホの画面になった」が不便と報告されたら(= Q1 の B)、`phoneLayoutOf` の判定に `matchMedia('(pointer: coarse)')` を 1 行足す ── 判定は同じ純関数のまま
+
+### 2-4. 判定(スマホかどうか / どのページか)をどこに置くか
+
+- **推薦**: TS 1 モジュール。`src/features/phone-layout.ts`(pure:`PHONE_MAX_PX` / `PHONE_MIN_PX` / `phonePageOf(state, infoShown)`)+ `src/adapter/ui/render/phone-layout.ts`(`matchMedia('(max-width: 720px)')` と `'(max-width: 359px)'` の change を各 1 本購読し、shell に `data-pkc-layout='phone'` と `data-pkc-page=list|note|info` を書く。情報 bit と `phoneReveal(face)` の seam もここ)。**CSS は `@media` を持たず属性で描く**。unit が「app.css に `720px` / `359px` の字面が無い」を pin する
+- **理由**: 360 の対応外は status に出す = JS が要る(status は「エラーの唯一の出口」shell.ts:668-678)。`applyPaneVisibility`(render/pane-visibility.ts:64-101、画面へ写す唯一の口)が「スマホなら書かない」を知るにも JS 側の印が要る。CSS にも 720 を書くと数字が 2 か所になり片方だけ変えた日に JS と CSS が別の幅で切り替わる(§7)。src に幅を読む `matchMedia` は 0 件で白紙(調査 layout #25)、theme.ts:85-90 が render 層で matchMedia を読む前例。tests/features/flags.test.ts:258 の QUERY_READ は `location.search|href|hash|URLSearchParams` だけなので matchMedia は当たらない。shell は JS が組む(shell.ts:248-779)ので JS 前の版面は不要
+- **これが分かったら覆る**: boot 失敗の素テキスト画面にもスマホ版面が要ると分かったら、その 1 画面だけ `@media` を許し、数字は build 時に TS から CSS へ焼く
+
+### 2-5. スマホ用画面の構造 ── 別の DOM を作るか、器だけ差し替えるか
+
+- **推薦**: 同じ DOM・同じ renderer。ページは 3 つ + 既存の面:`list`(sidebar が全画面)/ `note`(center = 本文 + 追記欄、上に「ページの帯」)/ `info`(inspector が全画面、帯は「← ノート | 題名」)。viewMode≠detail(設定・集計・フラグ・ヘルプ・2 ペイン)は center がそのまま出て既存の pane-bar「× 閉じる」(center.ts:133-143)が戻る口 ── 帯は出さない。3 面は**同じ grid セル(`grid-area: detail`)に重ね**、現在ページでない面は `visibility: hidden` + `inert`(`display: none` にしない)。grid-template-areas は 1 つ(`detail` + 帯 7 行)
+- **理由**: shell は grid 1 枚で 12 子(shell.ts:752-765)、CenterRouter は 6 面を hidden 常駐(center.ts:117-131)── 器を足す必要が無く、PKC2 が子窓に inline style/script を複製して作った Gap を作らない。`display:none` を避ける根拠:mermaid-hydrate.ts:98-101 `widthOf` は `parentElement.clientWidth || host.clientWidth || 640` で**幅 0 → 640 に落ちて鍵が変わり焼き直す**(段組み read-columns.ts:287 と横並べ split-view.ts:71-86 / 211-217 は 0 幅で「減らさない」に落ちるが mermaid だけ落ちない)。display:none は scrollTop も失う(center.ts:60-80 が「短い面で 0 に丸められる」を実測しており、user 指示のスクロール記憶と衝突)。`visibility` なら ResizeObserver 3 本(read-columns.ts:441 / split-view.ts:151 / mermaid-hydrate.ts:345)は鳴らない。area 名を `detail` にするのは announce.test.ts:583-600「宣言した grid-area は基準の版面に在る」を落とさないため(app.css:109-112 のコメントも同じ名前を使う理由を書いている)
+- **これが分かったら覆る**: 重ねた面が `visibility:hidden` でも min-content で行を押し広げるなら、非表示面に `position:absolute; inset:0` を足す(同じセルに重ねる形は変えない)。`inert` は Chrome 102+ / Safari 15.5+ ── それ以前は焦点が隠れた面へ入りうる(tab 順の話でデータは壊れない)
+
+### 2-6. 「戻る」をどう持つか(PWA standalone にブラウザの戻るは無い)
+
+- **推薦**: アプリ内の 3 本:本文ページの **← 一覧** = 新受け手 `phone-page`(data-pkc-page=list)→ 既存 reducer `DESELECT_ENTRY` / 情報ページの **← ノート** = 情報 bit を倒す / 面の **× 閉じる** = 既存 `close-pane`。編集中に ← 一覧 / 情報 を押したら `OP_FAILED`「保存するか取り消してから戻ってください」(disabled にしない)。ブラウザ履歴は使わない
+- **理由**: `DESELECT_ENTRY` は reducer に在り ready 限定で黙る(app-state.ts:3272-3281)、binder に撃つ口は 0(`clear-selection` :2613 は複数選択の印で別物)。ページを state から導出すると一覧の行を押す(`select-entry` → `selectEntryOrExplain` binder.ts:1531-1548)だけで本文ページへ進むので進む側の配線が 0 行。「一覧を出したまま選択を保つ bit」は棄却:dispatcher.ts:36-53 は `changed` のときだけ state listener を呼び action の hook が無いので、同じ行をもう一度押したとき(app-state.ts:1881-1896 が同じ state を返す)bit を倒せない = dead tap。編集中を disabled にしないのは、触る端末では `title` が読めず無言の dead click になるから(既存 `selectEntryOrExplain` と同じく binder が理由を出し、reducer のガードは写さない)。selection-history.ts:4-6「ブラウザの履歴は使わない」、manifest.webmanifest:7 `standalone`
+- **これが分かったら覆る**: cowork 実機で Android の戻るキーがアプリを閉じるのが実害と報告されたら、本文/情報ページに入るとき `history.pushState(null,'',location.href)` を積む段を別 issue にする(`location` を読む file は flags.test.ts:231-247 に閉じているので**読まずに積む**だけにし、user に見せてから)。user が「一覧へ戻っても本文を憶えていてほしい」と言えば bit 方式へ ── その場合は同じ行の dead tap を帯の「ノートへ →」で補う
+
+### 2-7. 本文ページで届かなくなる操作をどう埋めるか
+
+- **推薦**: 帯の右端に **⋯**(受け手 `phone-menu`)。押すと既存 `openContextMenu` で ①`entryMenuActions(lid)`(行の右クリックと同じ 11 項目 + #587 C-3 の説明欄)②`NOTE_TOOL_ACTIONS`(entry-actions.ts に置く名指しの表:`start-timer` / `start-audio-capture` / `start-screen-capture` / `attach-file`)③`open-palette` を出す。新しい受け手は 1 つも作らない。段①は ①③、段③で ②
+- **理由**: timer.ts:115-119 は `selectedLid` が無いと「ノートを開いてから押してください」と断り、capture.ts:161-163 は `selectedLid` のノートへ参照を入れる ── どちらも置き場は sidebar の create-bar(shell.ts:281)。戻る = DESELECT なので一覧ページでは「開いているノート」が居ない = 円環の dead click。パレットの口は `collectionBar` = sidebar の子(shell.ts:514/549)。iOS Safari は長押しで contextmenu を撃たないので行の 11 項目も帯から要る(情報ページにも同じ 11 個が在る inspector.ts:1129-1210 / inspector-titles.test.ts:168 だが、それは本文の右クリック 3 項目・見出し 3 項目の代わりにはならない)。context-menu.ts は実行の口を持たない(調査 menus)ので項目を足しても判定は増えない。②を段③に分けるのは create-bar との parity pin(「`selectedLid` を読む create-bar の受け手は全部 ⋯ に在る」)を先に書くため
+- **これが分かったら覆る**: #582 の操作表に scope 列が入り「entry scope の操作は本文ページの ⋯ に自動で射影する」と決まったら `NOTE_TOOL_ACTIONS` は手書きせず表から引く
+
+### 2-8. 情報(右の列)をスマホでどう出すか、開閉をどこに持つか
+
+- **推薦**: 全画面のページ(帯「← ノート | 題名」)。開閉は render/phone-layout.ts の runtime bit 1 つ(`infoShown: boolean`、保存しない)。`selectedLid` が変わる / viewMode≠detail になる / 削除で後継に移る、で自動的に閉じる(閉じる code を書かず `phonePageOf` の判定に含める)。情報ページの目次を押したら `toc-jump` が `phoneReveal('note')` を呼んで本文ページへ戻る
+- **理由**: ≤1100 の「情報を本文の下へ回す max-height:30vh」(app.css:4571-4580)が #588 の縦潰れ 3 要因の 1 つ ── 同時に出さなければ本文が必ず主面を取る。情報ペインは目次 / タグ / 関係 / 参照元 / 操作 11 個を持つ(inspector.ts:261-1210)ので幅も丈も要る。pane-visibility が AppState に持たない前例(render/pane-visibility.ts:1-17)に倣うが、あれは端末の見え方なので永続しこちらは一時の文脈なので保存しない ── 保存形式を 1 つも増やさない。container には 1 バイトも書かないので旧ビルドが core record を読んでも何も変わらない
+- **これが分かったら覆る**: user が「情報は本文と同時に見たい」と言えば(Q2 の B)、情報を下半分のシートにする ── CSS だけの差で判定は同じ
+
+### 2-9. 永続した畳み(`pkc3.panes`)と幅(`pkc3.pane-sizes`)をスマホで読むか
+
+- **推薦**: 読まない。`applyPaneVisibility` が shell の `data-pkc-layout='phone'` を見て**属性を書かない**(1 か所のガード)+ phone の CSS は `data-pkc-hidden-panes` / `--pkc-pane-sidebar|inspector` を参照しない(unit で pin)。値は消さない ── PC の幅に戻れば効く。左右の掴む帯は出さない、追記欄の横帯と畳みは今までどおり効く
+- **理由**: #609 の行き止まりは「畳んだ事実が永続(pane-visibility.ts:17)+ ≤720 で戻す口 0(app.css:4591)」で成立していた ── 列そのものが無ければ起きない。書き手は `applyPaneVisibility` 1 か所(呼び元 7 か所は全部ここを通る、調査 layout #30)なのでガードもそこ 1 つ。追記欄は「閲覧メインで消したい」(#497、app.css:168-173)の道でスマホでも当たり、横帯が center の中に残る(shell.ts:654-662 / app.css:211-217)。#607 で踏んだ詳細度の罠(app.css:4526-4535)は、JS が書かない + CSS が参照しない、の 2 重で避ける
+- **これが分かったら覆る**: 無し(データは触らない)。⚠ 副作用:スマホで `Alt+[` / パレット「左のペインを畳む」を押すと保存値だけ動き画面は変わらない ── risks とマニュアルに書く(SHORTCUT_BUTTON の dry binder.ts:1796 を「描かれているか」にすると ≤1100 で生きている `Alt+]` を殺すので触らない)
+
+### 2-10. 切替は自動か、user が選べるか / flag で段階導入するか
+
+- **推薦**: 自動のみ。flag も設定も**既定では足さない**。試す道は窓を 720 以下に狭めること + `/dev/` 配布(委任済み 2026-08-19)
+- **理由**: flags.ts:49「既定は必ず今の挙動」── flag にすると畳むまで全スマホが本文 0px のまま(#588 が続く)うえ、削除するはずの 1 列版面を並走維持する(§7「面が 2 系統に分かれると片方だけ直る」)。設定「切り替えない」(案3)は「720 以下で 2 列」という今日どこにも無い版面を配ることになる(1 列版面は削除するので)── user が求めていない見え方を先回りしない。9 枠空いている(flags.ts:146-238)が枠が空いていることは着手理由にならない。本番は tag/dispatch で user 示唆が要る(CLAUDE.md)ので段階導入は `/dev/` が担う
+- **これが分かったら覆る**: Q1 で user が「PC で細くしたときは今の画面のまま」を選んだら、flag ではなく**設定**「画面のならび:自動 / いつも PC の形」を足す(settings-file の PORTABLE_KEYS へ、docs-parity の EXPECTED_OPTIONS と manual に載せる)。「本番の版で完成前に試したい」と言われたら flag `layout.phone`(default false / needsRestart 無し / foldWhen「実機 1 巡で既定にしたら畳む」)を 1 枠
+
+### 2-11. 縦の予算(固定丈の帯・カード・追記欄と本文の取り分)
+
+- **推薦**: phone 属性の中でだけ:ページのセルは `1fr`(3 面が重なるので脇の面は 0)/ 追記欄の打つ欄 `max-height: 30vh; 30dvh`(clamp の 60vh を上書き)/ 帯は 44px 以下 1 本 / タイマー・収録・予定の帯は 1 件 1 行に折る(横スクロールをやめる)/ お知らせの丈は Q3 の裁定まで 30vh のまま / 合計が画面を超えたら document が縦スクロール(本文を潰さない)。`dvh` は新しい規則にだけ書き `vh` を先に置く。既存の `height:100%` 連鎖(app.css:28-30 / 53-59)は触らない
+- **理由**: #588 実測:480×800 カード開で本文 18〜74px(一覧 30vh + 情報 30vh + お知らせ 30vh が先に取る)。1 面ずつなら脇 2 面は 0 で、残る固定丈は帯 + 追記欄 + お知らせだけ。追記欄は user が 60vh まで広げられる(pane-size.ts:139-142 の clamp)ので phone では上限を下げる。#586 の残り(2 本目の「止める」x=595、app.css:4047-4065 の `overflow-x:auto` + `nowrap`)は折り返しで消え、「縦に伸びると本文が押し下がる」理由は面が 1 つなら弱い。`html/body/root/shell` の `height:100%` は iOS のツールバー追随で `dvh` 相当なので、`100vh` 直書き 3 か所(app.css:1226 / 1230 / 2816 = 段組みの `--pkc-col-h` fallback と pdf)だけが対象で、phone では触らない
+- **これが分かったら覆る**: 段⓪の計器で 360×640・カード開・編集中に編集帯の保存が elementFromPoint で当たらないなら、追記欄の上限を 20dvh へ下げる(値は好みなので画面の言葉で 1 度見せる)
+
+### 2-12. iOS の入力ズーム(既定 13px の打つ欄に触れると画面が拡大する)
+
+- **推薦**: `@media (hover: none) and (pointer: coarse)` で `input, textarea, select, [contenteditable]` を `font-size: max(16px, 1em)`。viewport meta(index.html:5)は変えない(`maximum-scale` を書かない = ピンチ拡大は残す)
+- **理由**: index.html:5 は `width=device-width, initial-scale=1` のみ、既定 13px(app.css:47 / text-scale.ts:51-56)。16px 未満の欄への focus が iOS の自動ズームの発火条件。PKC2 の `maximum-scale=1,user-scalable=no` は user が失う物(図の拡大)が在り PKC2 では user の言葉で決まった ── PKC3 では出ていない裁定なので持ち込まない。文字の大きさ設定 17px は `max()` で両立
+- **これが分かったら覆る**: Q4 で user が「PKC2 と同じくズーム禁止」を選ぶ / 16px でも `select` でズームが起きると実機で出る
+
+### 2-13. hover でしか出ない 2 ボタン(コードのコピー / 原文⇄描画)を触りでどう出すか
+
+- **推薦**: `@media (hover: none)` で `.pkc-render-toggle` / `.pkc-md-copy-btn` を `opacity: 1`(app.css:1978-2020 の 3 選択子)。スマホ用画面と独立
+- **理由**: 幅の block に入れると desktop 幅の触るタブレットで死んだまま。`hover: none` は「hover できるか」そのものの media feature で、`pointer: coarse`(案1)より主張に合う。PKC2 R5 と同じ形
+- **これが分かったら覆る**: Q5 で user が「常時 2 個並ぶのは詰まって見える」と言えば長押しで出す形へ(段⑤の実機報告後)
+
+### 2-14. 「対応外」(幅 <360px)を画面でどう伝えるか
+
+- **推薦**: 状態の行(status)に **1 セッション 1 度だけ** `OP_FAILED`「この幅(N px)には対応していません ── 360px 以上でお使いください」。画面は変えない、操作も塞がない。判定は render/phone-layout.ts の 2 本目の matchMedia
+- **理由**: 裁定「それ以下なら対応外 / 画面でどう伝えるかは別途」。status はどの版面でも消えない唯一の出口(shell.ts:668-678)。CSS の `::before`(案2)は 2 か所目の数字を CSS に生やす。塞ぐ(モーダル)とその幅で開いた user がノートを取り出せない
+- **これが分かったら覆る**: Q6 で user が「何も言わなくてよい」と言えば行を出さない(定数は残し計器だけが読む)
+
+### 2-15. 本文ページで sidebar にしか無い操作(絞り込み欄・タグ札の絞り込み・目次からの飛び)の行き先
+
+- **推薦**: seam を 1 つ:render/phone-layout.ts の `phoneReveal(face: 'list'|'note')`。`focus-search`(binder.ts:1758-1780)と `filter-by-tag`(:2140-2150)の既存「畳んでいたら戻してから」の分岐がそれを呼び、スマホでは **一覧ページへ移る**(= DESELECT。押した user の意図は「探したい」)。`toc-jump`(:2130)は `phoneReveal('note')` を呼び情報ページから本文へ戻る。呼び元は 3 か所、判定は `phonePageOf` 1 つ(呼び元の数を unit で pin)
+- **理由**: 既存の 3 ハンドラは既に「畳んだ列を戻してから効かせる」形(#583)で、押した結果が見える所を開くのが規約。スマホでは列が無いので「戻す」= ページを移すこと。案2 の「◀ 一覧 で見られます」の通知は 1 手増えるだけで判定は同じ
+- **これが分かったら覆る**: cowork 実機で「タグを押したらノートが閉じた」が不便と報告されたら、ページを移さず通知に切り替える(seam の中身 1 行)
+
+### 2-16. 横に留めた枠(#505 / #649)・段組み・2 ペイン編集のプレビュー・2 ペインファイラ
+
+- **推薦**: 変えない:横並べ枠は `fittingSplitFrames` が 929px 未満で 1 枠(split-frames.ts:144-155)、段組みは 912px 未満で 1 段(read-columns.ts:136-142)、プレビュー列は ≤900 規則(app.css:4678-4685)のまま。「幅が足りないので N 枚畳みました」の帯だけスマホでは黙る(`noteFoldState` 1 か所)。2 ペインファイラは phone 属性で `dual-body` を 1 列(app.css:4150-4157)にし「写す / 移す」ボタン(dual-filer.ts:128-136)はそのまま
+- **理由**: 3 つとも器の幅で自動判定する機構が既に在り何も足さなくて済む。留めた並びは PR #649 で `pkc3.split-lids` に残るので PC で戻る。帯は毎回出ると雑音(#604 と同型)。#633 のスタック表示は別設計
+- **これが分かったら覆る**: #633 で「一番上が横の表示対象」をスマホでも意味を持たせると決まれば本文ページに「次の枠へ」を足す
+
+### 2-17. 印刷との順序
+
+- **推薦**: phone の規則は `@media` を持たないので順序は効かないが、印刷中は `matchMedia('(max-width:720px)')` が紙幅で真になりうる(A5 559px)。`@media print` ブロック(app.css:5067)に `[data-pkc-layout='phone'] [data-pkc-region='center'] { visibility: visible }` を 1 行足し、print.smoke に 559px の腕を 1 本足す
+- **理由**: app.css:5055-5064 が「狭幅ブロックが display を持った瞬間に順序が効き始める。末尾から動かさない」と予告。visibility を面に当てるので、page=list のまま印刷すると本文が紙に出ない事故が起きうる
+- **これが分かったら覆る**: 無し
+
+## 3. 捨てるもの / 出さないものと、代わりに何ができるか
+
+> 🔑 検算: 行ごとに「代わり」が書けている(書けない行 = 動線を 1 つ減らしている)。
+
+| 出さない / 捨てる | 代わりに何ができるか |
+|---|---|
+| 3 列(一覧・本文・情報)を同時に見る | 1 度に 1 面。一覧 → 行を押す → 本文 / 本文 → 情報 → ← ノート / ← 一覧。面の中身・ボタンは 1 つも減らない(sidebar 28 操作子・inspector 11 操作がそのまま全画面)。情報ページの目次を押すと本文ページへ戻ってその見出しへ飛ぶ |
+| 左右の掴む帯(列を畳む / 幅を変える) | 畳む対象(列)そのものが無い。← 一覧 / 情報 で同じ 3 面を 1 手で行き来する。追記欄の横帯は残り、追記欄だけは今までどおり畳める・高さを変えられる(上限 30dvh)。PC の幅に戻れば `pkc3.panes` / `pkc3.pane-sizes` の値がそのまま効く |
+| 永続した畳み `pkc3.panes` を読む | 読まない。480px で一覧を畳んで二度と戻れない(#609)が起きる余地が無い。⚠ スマホで `Alt+[` / パレット「左のペインを畳む」を押すと保存値だけ動き画面は変わらない ── マニュアルに 1 行(PC に戻ったとき畳まれている) |
+| 集中モード(`Mod+Alt+\`) | 本文ページそのものが集中モード(本文 + 追記欄しか無い)。押しても画面が変わらないので押した理由を状態の行に出す(dead click にしない)── 上と同じ 1 行で言う |
+| 行の右クリック 11 項目(iOS Safari は長押しで出ない) | 本文ページの帯の ⋯ が同じ `entryMenuActions` を同じ説明欄(#587 C-3)つきで出す。情報ページの操作帯にも同じ 11 個(inspector-titles.test.ts:168 で parity 済)。Android Chrome の長押しは今までどおり効く(受け口 binder.ts:6320 は 1 つ) |
+| 本文の右クリック 3 項目(段組み / 横に留める / 外部画像を取り込む) | 外部画像 = 情報ページのボタン `adopt-external-images`(inspector.ts)。段組み = 設定「本文の段組み」(≤720 では 2 段の下限 912px を満たさないので押しても 1 段のまま、帯は黙る)。横に留める = 2 枠 929px 要なので 720 以下では今日も枠が 1 枚も入らない ── 留めた並びは `pkc3.split-lids` に残り広い窓で戻る(#649) |
+| 見出しの右クリック 3 項目(ここから編集 / ここに追記 / 畳む・出す) | 畳む・出す = 見出しの ▸ ボタン(heading-fold.ts:62-64 `toggle-heading-fold`、右クリック無しで押せる)。ここに追記 = 追記欄の入り先 `<select>`(append-box.ts:93-96)。ここから編集 = 「編集」→ その段落を触る(ライブエディタは触った塊だけ開く) |
+| Ctrl+クリック / Alt+クリック(修飾キーが無い) | 上と同じ 2 本目の道(入り先 select / 編集 → 段落を触る)。判定は同じ `pickAppendTarget` |
+| サイドバーの create-bar に在る、開いているノートに効く 4 操作(添付 / 録音 / 画面収録 / 計測)── 本文ページには sidebar が無く、一覧ページでは ← で選択が外れている | ⋯ の中に `NOTE_TOOL_ACTIONS` として同じ 4 つ(受け手は既存の `attach-file` / `start-audio-capture` / `start-screen-capture` / `start-timer`)。create-bar との parity を unit で pin。「今日」(`open-today`)は選択が要らないので一覧ページの create-bar から今までどおり |
+| 「操作を探す」ボタン(一覧の中)── 本文ページでは見えない | ⋯ の末尾に「操作を探す」(受け手 `open-palette` はそのまま)。一覧ページでは今までどおり左下 |
+| 本文ページで絞り込み欄(Ctrl+F)・タグ札の絞り込みの結果を見る | 押した瞬間に一覧ページへ移る(絞り込みは state の `filterQuery` に在るので消えない)。開いていたノートは行を押せば戻る。ノートを閉じずに絞りたいときは ← 一覧 → 絞り込み欄 |
+| hover でしか出ない 2 つのボタン(コードのコピー / 原文⇄描画)── 触る端末では一度も出ない | `@media (hover: none)` で常に出す(スマホ用画面と独立)。マウスの端末は今までどおり乗せたときだけ |
+| `title` のツールチップ(帯・情報ペインのボタン)── 触る端末では読めない | メニューは #587 C-3 の説明欄(⋯ からも同じ欄)。ボタンは字で名乗っている(`iconButton` は label 必須)。⚠ C-3 の指す手が `mouseover` / `focusin` だけなら iOS のタップは焦点を与えない ── C-3 の PR で `pointerdown` を 3 本目の手として足す(段②で確かめる) |
+| タイマー 2 本目以降の「止める」が帯の横スクロールの中(#586 残り) | スマホでは帯を 1 件 1 行に折り、全部の「止める / 捨てる」が画面の中(elementFromPoint で pin)。PC は今のまま |
+| ≤720px の 1 列版面(app.css:4584-4655)そのもの | スマホ用画面が置き換える(#588 の縦潰れ・#609 の行き止まり・#586 の残りが「起きる余地」ごと消える)。721〜1100 の 2 列版面と、PC 幅で自分で畳んだときの残り(1280 でパレット 0)は裁定の外 ── #609 / #587 に「消えたもの / 残るもの」を記帳 |
+| 横に留めた枠 2 枚以上 / 段組み 2 段以上 / 2 ペイン編集のプレビュー列 | 既存の自動判定で 1 枠 / 1 段 / 原文のみ(設定と留めた並びは変えないので PC で戻る)。帯「畳みました」はスマホでは黙る |
+| 2 ペインファイラの左右並び(`dual-body` 1fr 1fr) | 上下に積む。「写す / 移す」ボタン(dual-filer.ts:128-136)と ◀▶ はそのまま。フォルダ画面の「移す」select(filer.ts:473)と「上へ / 下へ」(filer.ts:509-510)も在る |
+| HTML5 ドラッグ&ドロップ(行をフォルダへ / ファイルを落とす)── 触りでは起きない | フォルダへ移す = 情報ペイン / 2 ペイン / フォルダ画面の「移す」。ファイル = ⋯ の「添付」(`<input type=file>`)。板の付箋は pointer events(place-drag.ts:129)なので指で動く |
+| キーボード近道全般(Alt+1〜6 / Alt+[ ] \ / Ctrl+F …)── ソフトキーボードでは打てない | 全部ボタンから届く:集計・設定・フラグ・ヘルプ・操作を探す = 一覧ページの左下 / 本文へ = 行を押す / 追記欄 = 横帯 / 戻る = ← / 面を閉じる = ×。物理キーを繋いだ端末では今までどおり効く |
+| 編集中に一覧・情報を見る | 保存 / キャンセル(本文の上と追記欄の側の 2 か所)を押してから。← 一覧 / 情報 を押すと理由が状態の行に出る(無言にしない) |
+| お知らせカードが本文と同時に全部読める | 今までどおり最大 30vh で中を流し、閉じる / 次へ / 今後出さない の行は流さず常に押せる(Q3 で 25% に下げるかを user が決める) |
+| 幅 360px 未満 | 対応外。同じスマホ用画面のまま動き、状態の行に 1 度だけ理由が出る。操作は塞がない |
+| Office(LibreOffice wasm)の動作保証 | タイル・別窓の口は消さない(押せば新しいタブ)。落ちる端末では既存の「Office が停止したとき」の帯が理由と初期化の口を出す。マニュアルに「スマホでは保証外」と書き、書き出し(情報ページ)を案内 |
+
+## 4. 🔴 user に決めていただきたいこと(画面の言葉)
+
+⚠ 調べれば決まるものは §2 で決めた。ここに残るのは**見え方・言葉・好み**だけ。
+
+### 設問 1: 窓(画面)の幅が 720px 以下になると、一覧か本文か情報の**どれか 1 枚だけ**を見せる「スマホ用画面」に変わります。iPhone(縦 375〜430px)はスマホ用、iPad mini 縦(744px)は今の PC 向けのままです。**PC で窓を細くしたときも同じくスマホ用画面**になります。それでよいですか
+
+- (①) A. 720px 以下なら PC で細くしても常にスマホ用画面(推薦)
+- (②) B. 指で触る端末だけスマホ用画面。PC で細くしたときは今の画面のまま(480px で保存が押せない・一覧を畳むと戻れない、はそのまま残ります)
+- (③) C. A にしたうえで、設定に「画面のならび:自動 / いつも PC の形」を足す(PC で細くするのが嫌な人が戻せる。ただし 720 以下の PC の形は左に一覧・右に本文がそれぞれ小さくなる、今日どこにも無い並びです)
+
+**推薦**: A ── 裁定の字が「スマホの幅なら」で、今日の行き止まり(#588 / #609)は全部 PC のマウスで 480px を測って出たもの。B だとそれが残ります。C は求められてから足せます(設定 1 つで済む)
+
+### 設問 2: 本文ページの**いちばん上に高さ 36px の帯**が 1 本付きます。左から **← 一覧** / **ノートの題名**(長ければ …)/ **情報**(押すと画面全体がタグ・目次・関係・書き出す等に変わり、← ノート で戻る)/ **⋯**(右クリックと同じ 11 項目 + 添付・録音・画面収録・計測 + 操作を探す)。編集中に ← や 情報 を押すと「保存するか取り消してから」と下の行に出ます。この並びでよいですか
+
+- (①) A. この並び(推薦)。情報は画面全体に切り替わる
+- (②) B. 帯は同じで、情報は画面の**下半分**にせり上がる(本文の上半分は見えたまま)
+- (③) C. 帯を画面の**下**に置く(親指に近い。状態の行・お知らせはその上に積む)
+
+**推薦**: A ── 同じものが常に同じ場所(左端 = 戻る、右端 = この画面でできること)。情報を全画面にすると #588 の縦の取り分の問題が起きない。B は見え方の好みなので、そちらが良ければ CSS だけで変えられます
+
+### 設問 3: 起動直後のお知らせカードは、いま画面の縦 3 割まで広がります(閉じるまで本文はその分短い)。スマホ用画面では画面の **1/4 まで**にしてよいですか(それ以上は中でスクロール、閉じる / 次へ / 今後出さない は常に見える)
+
+- (①) A. 1/4 まで(推薦)── 本文が半分以上を取りやすい
+- (②) B. 今のまま 3 割
+- (③) C. スマホでは最初は畳んで「お知らせが 1 件あります」の 1 行だけ(押すと広がる)
+
+**推薦**: A ── ただし段⓪の計器で 360×640・カード開・編集中に保存が押せるなら B のままでも困らないので、その表を添えて改めて聞きます(見え方の変更は user のもの)
+
+### 設問 4: iPhone では、字が 16px より小さい**打つ欄に触れると画面が勝手に拡大**します(いまの字は 13px)。指で触る端末では**打つ欄(絞り込み・題名・本文の原文・追記欄)の字だけ 16px** にして拡大を防ぎますか。本文の読む字は設定のまま(13px)です
+
+- (①) A. 打つ欄の字だけ 16px にする(推薦)── ピンチで図や本文を拡大できる
+- (②) B. ページの拡大そのものをアプリが禁止する(PKC2 と同じ)── 打つ欄の字は変わらないが、図を指で拡大できなくなる
+- (③) C. 何もしない ── 打つ欄に触れるたび画面が拡大し、打ち終わっても戻らない
+
+**推薦**: A ── 見え方の変更が打つ欄に限られ、user が失うもの(図の拡大)が無い。文字の大きさは設定「文字の大きさ」で既に選べます
+
+### 設問 5: マウスを乗せたときだけ出るボタンが 2 つあります(コードの右上の**コピー**と、図の右上の**原文⇄描画**)。指で触る端末では一度も出ません。触る端末では**常に出す**ようにしてよいですか(マウスの端末は今までどおり乗せたときだけ)
+
+- (①) A. 触る端末では常に出す(推薦)── コードの右上に小さなボタンが 2 つ見え続ける
+- (②) B. 今のまま ── 触る端末ではコードのコピーと原文の切替が押せない
+
+**推薦**: A ── 「押せない物を押せるようにする」修理ですが、画面に出る物が増えるので 1 度お見せします
+
+### 設問 6: 幅が **360px より狭い**画面で開いたとき、画面のいちばん下の行に **1 度だけ**「この幅(N px)には対応していません ── 360px 以上でお使いください」と出します。画面は変えず、操作も止めません。この伝え方でよいですか
+
+- (①) A. 下の行に 1 度だけ出す(推薦)
+- (②) B. 何も言わない(対応外のまま黙って描く。壊れて見えても理由が分からない)
+- (③) C. 画面全体に断りを出して操作を止める(⚠ その幅で開いた人がノートを取り出せなくなるので薦めません)
+
+**推薦**: A ── 今のエラーの出口(状態の行)を使い、塞がない。文言はこの通りでよければそのまま入れます
+
+## 5. 段(単独で着地・計測できる順)
+
+| 段 | 大きさ | 単独で着地 | 単独で測る観測点 |
+|---|---|---|---|
+| 段⓪ 計器を先に作る ── `scripts/phone-probe.mjs`(pane-escape-probe.mjs:1-25 の型:先にノートを 1 件作る / 面へスコープ / 対照群が崩れたら結果を読まない):360×640 / 375×667 / 390×844 / 480×800 / 720×600 / 721×800 / 768×1024 / 800×600 / 844×390 の 9 窓 × (お知らせ開/閉) × (閲覧/編集) で、面ごとの高さ・本文の割合・保存 / 編集 / 止める全数の elementFromPoint・戻す口の数を表にする。両ブラウザで回す | S | ✅ | 直す前の main で採った表(対照群:1440×900 は全部押せる / 480×800 カード開・編集で本文 18px)が #632 に載る。721×800 と 768×1024 の結果が境目 720 の裁定(Q1)を確定させる材料。844×390(横向き)の結果が別 issue の要否を決める |
+| 段① 骨組み ── `features/phone-layout.ts`(定数 2 つ + `phonePageOf`)/ `render/phone-layout.ts`(matchMedia 2 本、属性 2 つ、情報 bit、`phoneReveal` seam)/ `applyPaneVisibility` のスマホ・ガード 1 行 / center の先頭子に「ページの帯」(← 一覧 ｜ 題名 ｜ 情報 ｜ ⋯ = entryMenuActions + open-palette)/ 受け手 `phone-page` / `phone-menu` / app.css の ≤720 ブロックを削除し `[data-pkc-layout='phone'][data-pkc-page=…]` の規則へ(同一セル重ね + visibility + inert / 追記欄 30dvh / 掴む帯非表示 / 横帯は残す)/ print に visibility 戻し 1 行 / unit(`phonePageOf` 全状態・CSS 構文 pin:phone 規則に `data-pkc-hidden-panes` 0 件・app.css に `720px` 0 件・呼び元 3 か所)/ 落ちる test の書き換え / smoke `tests/smoke/phone.smoke.spec.ts`(390×844 hasTouch + 360×640:一覧 → 行 → 本文 → 情報 → ← → ← / 編集中に ← で理由 / `pkc3.panes` を仕込んでも一覧が出る / 保存が elementFromPoint で当たる)/ お知らせ 1 行 + CHANGELOG | L | ✅ | 段⓪の計器で:① 360×640・カード開・編集中に `commit-edit` / `start-edit` 全数が elementFromPoint で自分に当たる(#588 の検査条件そのまま)② 480×800 の 3 ページ全部で戻る口 ≥1(#609 の行き止まりが存在しない)③ `pkc3.panes` に `sidebar inspector` を仕込んで開いても一覧ページに行が出る ④ list⇄note を 5 往復して mermaid のラスタ IDB 書込が増えない(visibility の効き)⑤ 1440 / 1100 / 900 の既存 smoke が緑のまま(PC は 1px も変わらない)。⚠ 共有面(shell / CSS)を触るので着地前にフル smoke を両ブラウザで 1 回 |
+| 段② 触る端末の手当て(スマホ用画面と独立)── `@media (hover: none)` で隠れボタン 2 つを常時表示 / `(hover:none) and (pointer:coarse)` で打つ欄 16px / タイマー・収録・予定の帯を phone で 1 件 1 行に折る / 帯のボタン最小丈 / #587 C-3 の指す手に `pointerdown` | S | ✅ | hasTouch の smoke で `.pkc-md-copy-btn` の computed opacity = 1 かつ tap で写る(対照群:1280 + hover では 0 のまま)/ 探す欄の computed font-size ≥ 16px / 480×800 でタイマー 2 本の「止める」が両方 elementFromPoint で当たる(timer.smoke:115-120 の #588 回避を assert に裏返す)/ ⋯ → メニューをタップした瞬間に説明欄が空でない |
+| 段③ 面の残り ── ⋯ に `NOTE_TOOL_ACTIONS`(添付 / 録音 / 画面収録 / 計測)+ create-bar との parity pin / 対応外(<360)の 1 行 / `focus-search` `filter-by-tag` `toc-jump` が `phoneReveal` を呼ぶ / 2 ペインを上下に / fold-notify はスマホで黙る / print.smoke に 559px の腕 | M | ✅ | probe:本文ページで sidebar にしか無かった note-scoped 4 つ + パレット + 右クリック 11 = 16 種が ⋯ から届く(名前で等値 pin)/ 390×844 で本文のタグ札を tap → 一覧ページが絞られた状態で出る / 情報ページの目次を押すと本文ページに戻り見出しが画面内 / 340px で状態の行に対応外の 1 行が 1 度だけ / 375×667 で 2 ペインの「移す」が両ペインで押せる |
+| 段④ 届ける ── マニュアル §4 に「スマホで使う」節(ページ 3 つ・帯・⋯・鍵は画面に効かない・対応外・Office は保証外)/ §4-0「帯は残る」をスマホの例外つきに / お知らせ / CHANGELOG / #609 に「スマホ用画面で消えたもの / 広い窓で残るもの」を記帳し #588 #586 を閉じる | S | ✅ | docs-parity 緑(set-view 等値はそのまま / CHANGELOG 等値)/ #609 のコメントに 2 列の表(消えた 3 件 / 残る:721〜1100 の右の掴む帯なし・1280 で畳むとパレット 0) |
+| 段⑤ 実機 ── cowork へ指示プロンプト 1 本(どのビルドかの確定手順を先頭に / iOS Safari:欄に触れてズームするか・キーボードが出ても保存が押せるか・standalone で ← だけで往復できるか / Android Chrome:長押しでメニューが出るか・戻るキーでアプリが閉じるか)→ 直し → Android の戻るキー(pushState、URL は変えない)は実害が出たら別 issue | S | ✅ | cowork 報告の表 5 行が全部「主張どおり」/ nightly が 2 ブラウザとも緑。戻るキーの pushState は `selection-history.ts:4` と擦れるので user に見せてから |
+
+## 6. 落ちる test(実装前に持っておく一覧)
+
+- tests/adapter/announce.test.ts:552 `expect(layouts).toHaveLength(9)` ── 720 ブロックの grid-template-areas 2 つ(4613 / 4640)が消え phone の 1 つが増えて **8** になる。数を直す(版面を触った人が気づく tripwire)。:553-566 の版面ごとの帯 7 行の走査は phone 版面にも効くので、phone の areas に capture〜status を置く。:583-600 の「宣言した grid-area は基準の版面に在る」は area 名 `detail` を使い回すので落とさない(新しい名前を作ると落ちる = 設計違反の合図)
+- tests/adapter/pane-resize.test.ts:179 / :215 ── `mediaBlock(css(), '(max-width: 720px)')` で版面を引くので、720 ブロックを削除した瞬間「720px の版面を引けていない(空振り)」で落ちる → phone 属性の規則を引く形へ(主張は同じ:横向きの帯は消さない / 左右の帯は消す)
+- tests/adapter/pane-visibility.test.ts:281-296 ── 錨 `[data-pkc-region='pane-grip']:not([data-pkc-axis='y'])` が「@media の外に無く、CSS のどこかに実在」を要求。720 ブロックを消し phone 規則を top-level に置くと、同じ選択子を含む長い選択子(`[shell][layout=phone] …`)が top-level に現れる ── `rulesFor` は丸ごと一致なので `[]` は保つが「実在」側の `toContain` が部分一致なら通り、選択子リスト一致なら落ちる。段①で実走し、錨を印刷ブロックにしか無い選択子へ差し替える
+- tests/smoke/layout.smoke.spec.ts:143-161(480×800「1 カラムへ折る」)── sidebar と detail の両方の boundingBox と inspector が detail の下に在ることを要求 → 3 面が同時に見えないので落ちる → 「選択なし = 一覧が全幅 / 行を押す = 本文が全幅 / 情報 = 情報が全幅 / ← で戻る」の物語に書き換え
+- tests/smoke/layout.smoke.spec.ts:838-850 ── 幅 [1440,1024,900,700] で export-entry / show-history / delete-entry が toBeVisible → 700 は本文ページで inspector が visibility:hidden → 落ちる → 700 の腕は「情報」を押してから見る
+- tests/smoke/timer.smoke.spec.ts:39 / :96(480×800)── ノートを作った直後は本文ページで sidebar が隠れるため create-bar の `[data-pkc-field="start-timer"]` が押せない → 段③の ⋯ から押す形へ(段①〜②の間は `test.fixme` で名指しし段③で戻す)。:115-120「保存は追記欄の側を押す(#588 の回避)」は直ったら外して中央の保存を elementFromPoint で押す assert に戻す
+- tests/smoke/pane-resize.smoke.spec.ts:251-284(480×900 #607)── `Alt+[` で `data-pkc-hidden-panes` が付くことを前提にしているが、スマホでは `applyPaneVisibility` が書かない → 属性 assert(:25)で落ちる → 主張を「スマホでは `Alt+[` を押しても一覧ページが消えず本文ページの幅も変わらない」に書き換え。:317-347(`Alt+\` で追記欄)は viewport 次第で要実走
+- tests/smoke/read-columns.smoke.spec.ts:1080-1110(700px で段組みが畳まれ理由が帯に出る)── ノート選択済みなので本文ページに居て通る見込みだが、段③で fold-notify を**スマホでは黙らせる**と落ちる → 700 の腕は「黙る」側の対照群に書き換える(段③で)
+- tests/smoke/print.smoke.spec.ts ── A4 794px は 720 を超えるので今日は落ちないが、印刷中に `matchMedia('(max-width:720px)')` が紙幅で真になる紙(A5 559px)では本文が visibility:hidden のまま紙に出ない事故が起きうる → print ブロックに戻し 1 行 + 559px の腕を段③で足す
+- tests/docs-parity.test.ts:1187-1195(お知らせ登記表 = CHANGELOG 等値)── 段①でお知らせを 1 件足すとき CHANGELOG を同 commit で書く。:102-125 `set-view` 等値と :699-710 左の列の表は**落とさない**(左の列にボタンを足さない設計)。:150-160 EXPECTED_OPTIONS は設定を足さない限り不変(Q1 で C なら「自動 / いつも PC の形」を pin とマニュアルへ)
+- tests/repo-hygiene.test.ts:172-208(画面に書いた `data-pkc-action` に受け手が全部いる)── 新 action `phone-page` / `phone-menu` の受け手を同 PR で binder に足す(出口を先に作り受け手を後に足す順にしない)。tests/action-outlets.test.ts の OBJECT_LONE / UNRESOLVED は対象なしの action なので顔ぶれは変わらない(変わったら表を直す)
+- tests/features/flags.test.ts:226-260(`location` を読む file の全数)/ tests/flag-budget.test.ts / tests/adapter/help-pane.test.ts:14,518(ASIDE の 2 表)── **触らない**(matchMedia は QUERY_READ の外、flag を足さない、ViewMode を足さない)。落ちたら設計違反の合図
+- 新設:tests/features/phone-layout.test.ts(`phonePageOf` の全分岐 + 対照群「選択なし → list」「editing + infoShown → note」)/ tests/adapter/phone-layout.test.ts(属性の付け替え / 情報 bit が lid 変化で倒れる / 編集中に ← で OP_FAILED / `applyPaneVisibility` がスマホで書かない / `phoneReveal` の呼び元 3 か所 / ⋯ と create-bar の parity)/ tests/smoke/phone.smoke.spec.ts(390×844 hasTouch + 360×640。tests/smoke/playwright.config.ts に hasTouch / devices は 0 件なので spec 内 `test.use` で足す)
+
+## 7. リスク
+
+- 🔴 iOS Safari(WebKit)は CI に 0 件 ── 入力ズーム・dvh・standalone の戻る・長押し・`inert` の効きは実機でしか分からない。段⑤の cowork 依頼を「どのビルドを見ているか」の確定手順から書く(.claude/skills/cowork-verification/)
+- 🔴 横向きのスマホ(844×390 / 667×375)は幅が 720 を超えるので 2 列版面に落ち、縦 30vh の帯で本文が 1 割になる型(#588)がそのまま残る ── 裁定は「幅」なので設計では触らない。段⓪の計器で数字を出し、壊れていれば「高さでも切るか / 2 列版面の本文に下限を置くか」を画面の言葉で 1 問出す
+- ⚠ `visibility:hidden` の面が row の min-content を主張してセルを押し広げる可能性(sidebar は max-height 無し)── 段①で実測し、要るなら非表示面に `position:absolute; inset:0`。`inert` は Chrome 102+ / Safari 15.5+
+- ⚠ 詳細度の罠(#607 で踏んだ):頭の畳み規則は (0,2,0)/(0,3,0)。phone 規則は `[shell][layout=phone][page=…] [region]` = (0,4,0) を file 末尾(print の前)に置き、かつ JS が hidden-panes を書かないので 2 重に守る ── unit で「phone 規則に `data-pkc-hidden-panes` を含む選択子が 0」を pin し、smoke で Alt+[ を押しても一覧ページが消えないことを見る
+- ⚠ `DESELECT_ENTRY` で一覧へ戻ると選択が外れる ── 窓を広げて PC 向けに戻ったとき本文が空。PKC2 と同じ挙動だが user の好みの側なので decisions の flips_if に書いた(bit 方式へ倒すなら同じ行の dead tap を帯の「ノートへ →」で補う)
+- ⚠ スマホで `Alt+[` / `Alt+]` / 集中モード / パレット「畳む」を押すと `pkc3.panes` だけ動き画面は変わらない(見えない状態変化。PC に戻ったとき畳まれている)── SHORTCUT_BUTTON の dry(binder.ts:1796)を「描かれているか」にすると ≤1100 で生きている `Alt+]` を殺すので触らない → マニュアルに 1 行 + 状態の行に理由(段④)
+- ⚠ ⋯ の `NOTE_TOOL_ACTIONS` は名指しの表 ── create-bar に「開いているノートに効く」ボタンを足した人が ⋯ に足し忘れる。parity pin は「create-bar の受け手のうち `selectedLid` を読むもの」を機械的に数えられないので、既知リスト等値(KNOWN_DEAD 型)で pin し、足したら落ちる形にする
+- ⚠ 印刷:phone 規則は `@media` を持たないが、印刷中は matchMedia が紙幅で評価されうる ── A5 以下で page=list のまま本文が紙に出ない事故を print ブロックの 1 行 + 559px の腕で塞ぐ(app.css:5055 の予告どおり順序が効き始める日)
+- ⚠ 落ちる smoke 4 本の 480px の主張を書き換える ── 「直っていない物を直ったことにする」型を避けるため、書き換え前後で同じ観測点(elementFromPoint / boundingBox)を使い、段①の PR で変異試験(phone 規則を消す / `phone-page` の受け手を消す / `applyPaneVisibility` のガードを外す / `visibility` を `display:none` に変える の 4 変異)を回して KILLED を確かめる(4 つ目は mermaid の焼き直し回数で殺す)
+- ⚠ 段①は共有面(shell / CSS / boot)を触るので**必ずフル smoke を両ブラウザで 1 回**(手元 8〜9 分)。push 1 回 = フル smoke 1 回なので手元で緑にしてから 1 回
+- ⚠ タブレット縦(721〜1100px)は今の 2 列版面のまま ── #588 コメントが未測と明記。段⓪で 768×1024 を測り、壊れていれば 2 列版面に本文の下限を足す別 issue(境目を上げない、user が『継ぎ足すな』と言った側なので会話で確かめる)
+- ⚠ Office(LO wasm)はスマホのメモリで落ちうるが口は消さない ── 既存の失敗の帯が出ることを実機で 1 度見る。マニュアルに保証外と書く
+- ⚠ #587 C-3(PR 準備中)の説明欄の指す手が `mouseover` / `focusin` だけだと iOS のタップで説明が出ない ── C-3 の PR に `pointerdown` を足す条件を段②で確かめる(main には C-3 の実体がまだ無いので、着地後に grep する)
+- ⚠ 3 か所に同時に書く(マニュアル / お知らせ / CHANGELOG)── PKC2 は phone シェルをマニュアルに 1 行も書かず「届いていた」の三点のうち 1 点を落とした。段④で docs-parity の pin と一緒に入れる(manual.md に「スマホ」の節は 0 件:870 / 1754 / 2951 は携帯参照・vCard・写真の話)
+
+## 8. 根拠(file:line)
+
+- #632 本文(user 裁定 A1 / A2 / A4 逐語)/ #609 コメント 2026-08-30 22:12(PC 幅で自分で畳んだ場合は裁定の外)/ #588 コメント 2026-08-30 14:17(480×800 開 18px / 閉 258px / 360×800 228px で全部押せた、720×600 でも覆われる)/ #586(2 本目の止める x=595)/ PR #649(splitLids の永続)/ #587 C-3 PR 準備中 / #596 PR #650
+- scratchpad/survey-2026-09-02-mobile-stack.md ── layout #2/#5/#8/#12/#17/#21/#25/#26/#30/#33/#39/#45、narrow-defects #1〜#6、批評「設計者にまだ足りない材料」9 項目 / 「調査どうしの食い違い」(PKC2 の門 指 AND 幅 vs 裁定 幅)/ 「#632 に効く事実 3 つ」
+- src/styles/app.css:4584-4655 ── ≤720 の 1 列版面(grid-template-areas 2 つ :4613 / :4640、`pane-grip:not([axis=y])` display:none :4591-4593、sidebar 30vh :4652-4654)= 削除して置き換える対象 / :4503-4582 ≤1100 の 2 列(sidebar `minmax(180px,22vw)` :4507、inspector grip display:none :4567-4569、inspector row + 30vh :4571-4580)/ :107-121(center は `grid-area: detail` で flex column、コメント「画面幅の上書き 3 か所が同じ名前」)/ :164-173(hidden-panes の display:none、詳細度 (0,2,0))/ :3929-3945(announce 30vh。「viewport 320px 以下」は**高さ**の話、実測 H=260)/ :4047-4065(timer-list overflow-x + nowrap)/ :4150-4157(dual-body 1fr 1fr)/ :4678-4685(editor-preview ≤900)/ :862-864(append-input height = `--pkc-pane-append`)/ :1226 :1230 :2816(100vh 直書き 3 か所)/ :1978-2020(render-toggle / md-copy-btn opacity 0)/ :211-217(append[hidden] で横帯も消す `:has`)/ :5055-5075(print は末尾、狭幅ブロックが display を持ったら順序が効く)/ :28-30 :53-59(html/body/root の height:100% 連鎖)
+- src/adapter/ui/render/mermaid-hydrate.ts:98-101(`parentElement.clientWidth || host.clientWidth || 640` ── 幅 0 で 640 に落ちる)/ :345-361(親の ResizeObserver)/ src/adapter/ui/render/read-columns.ts:287-301(`host.clientWidth || before.width`、0 なら noteFoldState で畳む)/ :439-454(ResizeObserver)/ src/adapter/ui/render/split-view.ts:71-86(measure は 0 幅で null)/ :211-217(測れなければ減らさない)/ src/adapter/ui/render/center.ts:60-80(短い面で scrollTop が 0 に丸められる実測)/ :117-143(6 面 hidden 常駐、pane-bar × 閉じる)
+- src/adapter/state/dispatcher.ts:36-53(`changed` のときだけ state listener、action の hook 無し)/ src/adapter/state/app-state.ts:1868-1896(SELECT_ENTRY:editing で遷移しない、同一 lid は同じ state を返す)/ :3272-3281(DESELECT_ENTRY:ready 限定、selectedLid/openBody を捨てる)
+- src/adapter/ui/actions/binder.ts:1531-1548(`selectEntryOrExplain`:binder が理由を出し reducer のガードを写さない)/ :2104-2107(select-entry)/ :2613(`clear-selection` は CLEAR_SELECTION で別物)/ :3542-3549(attach-file → hidden input)/ :3560-3566(capture)/ :3576-3579(start-timer)/ :2404-2418(open-today は選択不要)/ :4863-4870(close-pane → SET_VIEW_MODE detail)/ :1758-1780(focus-search「畳んでいるなら戻してから」)/ :2130-2150(toc-jump / filter-by-tag の同型分岐)/ :1783-1800(SHORTCUT_BUTTON の dry は disabled しか見ない)/ :6314-6326 付近(contextmenu の受け口)
+- src/adapter/ui/actions/timer.ts:115-119(`selectedLid === null` → 「ノートを開いてから押してください」)/ src/adapter/ui/actions/capture.ts:161-163(`into = state.selectedLid`)/ src/adapter/ui/actions/attach.ts:272(attachFiles)
+- src/adapter/ui/render/shell.ts:248-779(buildShell 12 子)/ :275-300(find-bar / create-bar)/ :281(create-bar の 5 操作)/ :514 :549(open-palette は collectionBar = sidebar の子)/ :568-580(掴む帯 2 本 COLUMN_PANES)/ :654-662(追記欄の横帯 data-pkc-axis=y)/ :668-678(status は既定 hidden、エラーの唯一の出口)
+- src/adapter/ui/render/pane-visibility.ts:17(`pkc3.panes`)/ :64-101(applyPaneVisibility = 画面へ写す 1 か所、呼び元 7)/ src/features/pane-visibility.ts:14 :26(PANES / COLUMN_PANES)/ src/features/pane-size.ts:139-142(clamp 45vw / 60vh)/ src/adapter/ui/actions/binder.ts:2134-2140(toggle-pane)
+- src/features/flags.ts:45(FLAG_BUDGET 15)/ :49(既定は今の挙動)/ :146-238(6 件)/ tests/features/flags.test.ts:231-258(location を読める file の全数、QUERY_READ = `location.search|href|hash|URLSearchParams|searchParams`)/ src/adapter/ui/render/theme.ts:85-90(render 層の matchMedia 前例)/ src/adapter/platform/deep-link.ts:82-93(replaceState は断片の掃除のみ)
+- index.html:5(viewport = width=device-width, initial-scale=1 のみ)/ public/manifest.webmanifest:7(display: standalone)/ src/features/nav/selection-history.ts:4-6(ブラウザ履歴を使わない)/ src/features/text-scale.ts:51-56(12/13/15/17px)
+- src/features/entry-actions.ts:73(entryMenuActions)/ :96(ENTRY_MENU_ACTIONS)/ :181 :229(BODY)/ :283 :309(HEADING)/ :326 :343 :395(LABELS / HINTS)/ src/adapter/ui/render/inspector.ts:1129-1210(操作 11 個 + adopt-external-images)/ tests/adapter/inspector-titles.test.ts:168(行と情報ペインの parity ≥8)/ src/adapter/ui/render/context-menu.ts(hint の指す手は main では未着地 = C-3 PR 準備中)
+- src/adapter/ui/render/heading-fold.ts:62-64(`toggle-heading-fold` ボタン)/ src/adapter/ui/render/append-box.ts:40-49(appendModeOf)/ :93-96(入り先 select)/ src/adapter/ui/render/dual-filer.ts:128-136(写す / 移す)/ src/adapter/ui/render/filer.ts:473(move-entry select)/ :509-510(上へ / 下へ)/ src/adapter/ui/render/place-drag.ts:129(pointerdown)/ src/features/split-frames.ts:144-155(2 枠 929px)/ src/features/read-columns.ts:84 :136-142
+- tests/adapter/announce.test.ts:552(版面 9 の pin)/ :553-566(版面ごとの帯 7 行)/ :583-600(grid-area 宣言は基準の版面に在る)/ tests/adapter/pane-resize.test.ts:179 :215(mediaBlock '(max-width: 720px)')/ tests/helpers/css-blocks.ts:63(mediaBlock)/ tests/adapter/pane-visibility.test.ts:281-296(MEDIA_ONLY の錨)/ :143-164(戻すボタンは shell の直下)
+- tests/smoke/layout.smoke.spec.ts:143-161 :838-850 / tests/smoke/timer.smoke.spec.ts:35-60 :96-125 / tests/smoke/pane-resize.smoke.spec.ts:251-284 :317-347 / tests/smoke/read-columns.smoke.spec.ts:1080-1110 / tests/smoke/print.smoke.spec.ts:17-23 :38(A4 794×1123)/ tests/smoke の ≤720 viewport 全数(480 ×3 spec、700 ×1、794 ×2)/ tests/smoke/playwright.config.ts:48(hasTouch / devices 0 件)
+- tests/docs-parity.test.ts:102-125(set-view / set-browse 等値)/ :150-160(EXPECTED_OPTIONS)/ :699-710(左の列の導線とマニュアルの表)/ :1187-1195(お知らせ = CHANGELOG)/ tests/repo-hygiene.test.ts:172-208(受け手の全数)/ tests/action-outlets.test.ts:80-100(OBJECT_LONE)/ tests/flag-budget.test.ts:10-20 / tests/adapter/help-pane.test.ts:14 :518(ASIDE 2 表)
+- scripts/pane-escape-probe.mjs:1-25(戻る口を数える計器:先にノートを作る / 面へスコープ)/ docs/manual.md:1003-1023(§4-0 帯は残る)/ 「スマホ」の言及 :870 :1754 :2951 は別の意味(phone 節 0)/ CHANGELOG.md:1-8(お知らせの原本)/ src/features/notice/notice-log.ts:134-153(直近のお知らせ)
+- CLAUDE.md:面は映すだけにしない・片道を作らない(2026-08-23)/ 見え方を変える判断は user のもの(2026-08-28)/ 推薦を出したら決めるところまでやる(2026-08-19)/ 判定を 1 か所へ(§7)/ 検証の規律 §1・§2(落ちる test を先に持つ / 一度も通っていない経路)/ URL クエリはフラグ(2026-08-07)/ 配る量は気にしない・効くのは定常(2026-08-03)/ 委任の境界:dev は自分で・本番は user(2026-08-19)
+
+## 9. 関連
+
+- Issue **#632**(本体)/ #587 / #588 / #586 / #609 / #582 / #604
+- 調査: `docs/development/survey-2026-09-02-mobile-stack.md`(8 本 + 批評)
+- PKC2 のモバイル資産(read-only 参照): `PKC2:src/styles/base.css:11224-11746`(push/pop シェル)── **実装形は再現しない**(子窓への複製で同じ穴を作った)
