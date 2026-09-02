@@ -20,6 +20,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { initialState, type AppState } from '../../src/adapter/state/app-state';
+import { appPanes } from '../../src/adapter/ui/render/pane-visibility';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 
@@ -268,6 +269,32 @@ describe('#495 Alt+クリックで、追記の入り先を指す', () => {
     const r = rig(SECT_HTML, SECT_BODY, SLUGS);
     r.click('#h2', { altKey: true });
     expect(r.target.value).toBe('決定事項');
+  });
+
+  /**
+   * 🔴 **畳んだ追記欄は開き、打つ欄にカーソルが入る**(user 裁定 2026-08-30
+   * 「…Alt+クリックも同じ」)。⚠ 右クリック経路と**同じ 1 本**(`pickAppendTarget`)を
+   * 通ることの確認でもある ── 片方だけ直った日は、ここが赤くなる。
+   */
+  it('🔴 Alt+クリックでも、畳んだ追記欄が開いて打つ欄にカーソルが入る', () => {
+    const r = rig(SECT_HTML, SECT_BODY, SLUGS);
+    const shell = document.createElement('div');
+    shell.setAttribute('data-pkc-region', 'shell');
+    shell.setAttribute('data-pkc-hidden-panes', 'append');
+    const input = document.createElement('textarea');
+    input.setAttribute('data-pkc-field', 'append-input');
+    shell.append(input);
+    r.root.append(shell);
+    appPanes.setHidden(['append']);
+    try {
+      r.click('#pb', { altKey: true });
+      expect(r.target.value, '入り先が動いていない(前提が崩れている)').toBe('決定事項');
+      expect(appPanes.getHidden(), '畳んだままになっている').not.toContain('append');
+      expect(shell.hasAttribute('data-pkc-hidden-panes'), '画面へ写っていない').toBe(false);
+      expect(document.activeElement, '打つ欄にカーソルが入っていない').toBe(input);
+    } finally {
+      appPanes.setHidden([]);
+    }
   });
 
   /**

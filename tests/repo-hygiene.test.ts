@@ -930,11 +930,12 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     // ⚠ 2026-09-02: 同 spec に F5 / 配色 / 印刷 / 当て直しの 4 件 + `portable-html` に
     //    about:blank の経路 1 件(#645 段②)で +5 件
     // ⚠ 2026-09-02: `split-frames` に「開き直しても留まったまま」1 件(#505 段② の hotfix)で +1 件
+    // ⚠ 2026-09-02: `mod-click` に「畳んだ追記欄を開いてカーソル」1 件(#596 A/③)で +1 件
     expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(77);
     expect(
       counts.reduce((a, b) => a + b, 0),
       'smoke の test が増減した(足したらこの数を直す)',
-    ).toBe(374);
+    ).toBe(375);
   });
 });
 

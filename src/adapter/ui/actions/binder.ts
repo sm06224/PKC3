@@ -1491,10 +1491,41 @@ function pickAppendTarget(dispatcher: Dispatcher, root: HTMLElement, line: numbe
     return;
   }
   sel.value = sec.slug;
+  /**
+   * 🔴 **畳んだ追記欄は開き、打つ欄にカーソルを入れる**(#596 A / 設問③ C。
+   *   user 裁定 2026-08-30「**推奨通り、畳んでいれば開き、打つ欄にカーソルが入る。
+   *   Alt+クリックも同じ**」)。
+   *
+   * ⚠ 直す前:畳むのは CSS だけ(`[data-pkc-hidden-panes~='append']`)で `<select>` は
+   *   DOM に残るので、ここは**畳まれた `<select>` を掴んで値を入れ**、「〜にしました」と
+   *   言って終わっていた ── user から見れば**打つ所が画面のどこにも無い**。
+   * 🔑 右クリック(`append-at-heading`)と `Alt`+クリックは**この 1 本**を通るので、
+   *   ここに置けば 2 経路が同時に揃う(片方だけ直る日を作らない ── CLAUDE.md §7)。
+   * ⚠ 開くのは**追記欄だけ**(左右の列には触らない)── 頼まれたのは「追記する場所」であって
+   *   版面の組み直しではない。
+   * ⚠ focus は**開いた後**に当てる ── 畳んだままの `display: none` には focus が乗らない。
+   */
+  const opened = revealAppendPane(root);
+  root.querySelector<HTMLTextAreaElement>('[data-pkc-field="append-input"]')?.focus();
   dispatcher.dispatch({
     type: 'OP_NOTICE',
-    message: `追記の入り先を「${sec.text}」にしました`,
+    message: `追記の入り先を「${sec.text}」にしました${opened ? '(追記欄を開きました)' : ''}`,
   });
+}
+
+/**
+ * 追記欄を畳んでいたら戻す。戻したら `true`(呼び側が一言添える)。
+ * ⚠ **判定と適用は `pane-visibility` の 1 組**(`appPanes` / `applyPaneVisibility`)──
+ *   `toggle-pane` と同じ口を使い、畳み状態の 2 本目の台帳を作らない。
+ */
+function revealAppendPane(root: HTMLElement): boolean {
+  const hidden = appPanes.getHidden();
+  if (!hidden.includes('append')) return false;
+  applyPaneVisibility(
+    root,
+    appPanes.setHidden(hidden.filter((p) => p !== 'append')),
+  );
+  return true;
 }
 
 function selectEntryOrExplain(dispatcher: Dispatcher, lid: string, what: string): boolean {
