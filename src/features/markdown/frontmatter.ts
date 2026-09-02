@@ -230,7 +230,7 @@ function frontmatterRunLength(lines: readonly string[]): number {
       continue;
     }
     // ② ブロック配列の項目。⚠ 字下げの有無を問わない(`parseFlatYaml` と同じ)
-    if (inBlock && /^\s*-\s+/.test(line)) {
+    if (inBlock && isBlockItemLine(line)) {
       last = i;
       continue;
     }
@@ -294,6 +294,36 @@ function topLevelKeyLines(lines: readonly string[]): boolean[] {
 }
 
 /**
+ * 🔴 **同じ鍵が 2 本以上書かれている行を探す**(#641 ①)。
+ *
+ * ⚠ `parseFlatYaml` は同じ鍵を**後勝ち**で上書きするので、user が `tags:` を
+ *   2 行書くと**先に書いたタグが黙って消える** ── `duplicate_key` という警告の型は
+ *   最初から在ったのに、**積む場所が repo 全体で 0 件**だった(型宣言だけ)。
+ *
+ * 🔑 数えるのは **`topLevelKeyLines` が `true` を付けた行だけ**(= 書き換えが
+ *   当たる行と同じ集合)。⚠ `parseFlatYaml` の見方で数えると、
+ *   `vars:` の子 `  status: open` が**トップレベルの `status`** としても読まれるので、
+ *   `vars` を使った健全な文書で**必ず誤報が出る**(常在する警告は本物を隠す)。
+ */
+function duplicateTopLevelKeys(lines: readonly string[]): string[] {
+  const flags = topLevelKeyLines(lines);
+  const seen = new Set<string>();
+  const dup: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (flags[i] !== true) continue;
+    const line = stripTrailingComment(lines[i] ?? '', lines[i + 1]);
+    const colon = findKeyColon(line);
+    if (colon <= 0) continue;
+    const key = line.slice(0, colon).trim();
+    if (!/^[A-Za-z_][\w.-]*$/.test(key)) continue;
+    if (seen.has(key)) {
+      if (!dup.includes(key)) dup.push(key);
+    } else seen.add(key);
+  }
+  return dup;
+}
+
+/**
  * 🔴 **文書の情報にまつわる「言うべきこと」**(#284 / #318)。無ければ `null`。
  *
  * ## なぜ要るか
@@ -331,8 +361,16 @@ function topLevelKeyLines(lines: readonly string[]): boolean[] {
  *   書くと、`kind` を足したとき片方だけ拾う。
  */
 export interface FrontmatterProblem {
-  /** `unreadable` = 1 本目が読めない / `trailing` = 1 本目は読めるが、本文の先頭にもう 1 組ある。 */
-  kind: 'unreadable' | 'trailing';
+  /**
+   * `unreadable` = 1 本目が読めない / `trailing` = 1 本目は読めるが、本文の先頭にもう 1 組ある /
+   * `overridden` = 読めてはいるが、同じ鍵が 2 本あって片方が無視されている(#641 ①)。
+   *
+   * ⚠ **読めているかどうかで 2 つに割れる** ── `unreadable` だけが「読めていない」側で、
+   *   残りは「読めているが、言うべきことが在る」側である。呼び側は
+   *   **`kind === 'unreadable'` で判定する**(`!== 'trailing'` と書くと、
+   *   種別を足したときに読めている物まで「読めなくなりました」と言う)。
+   */
+  kind: 'unreadable' | 'trailing' | 'overridden';
   /** 画面にそのまま出す 1 行。⚠ **user の言葉**で書く(内部語を出さない)。 */
   detail: string;
 }
@@ -365,6 +403,12 @@ export function frontmatterProblem(body: string): FrontmatterProblem | null {
       detail: 'この文書の情報が大きすぎて読み取れませんでした(減らすと読めるようになります)',
     };
   }
+  /**
+   * 🔴 **後勝ちで消えた行を画面へ出す**(#641 ①)。⚠ `meta` は読めているので
+   *   `unreadable` ではない ── 出すのは「**書いたのに効いていない行が在る**」という事実。
+   */
+  const dup = r.warnings.find((x) => x.kind === 'duplicate_key');
+  if (dup !== undefined) return { kind: 'overridden', detail: dup.detail };
   /**
    * 🔴 **既に二重 fence になっている本文も拾う**(#318 の「対で塞ぐもの」)。
    * ⚠ 二重 fence は 1 本目が正しく読めてしまうため `warnings` が **0 件**になる。
@@ -468,6 +512,17 @@ export function parseFrontmatter(body: string): FrontmatterResult {
   }
 
   const meta = parseFlatYaml(yamlLines);
+  /**
+   * 🔴 **後勝ちで消えた行を、黙って通さない**(#641 ①、spec §07.3 silent fail 禁止)。
+   * ⚠ user から見ると「タグを 2 行に分けて書いたら、上の行のタグが全部消えた」である。
+   */
+  const dup = duplicateTopLevelKeys(yamlLines);
+  if (dup.length > 0) {
+    warnings.push({
+      kind: 'duplicate_key',
+      detail: `同じ鍵が 2 回以上書かれています(${dup.join(' / ')})── 後の行だけが読まれ、先に書いた行は無視されます`,
+    });
+  }
   const remainder = lines.slice(closeIdx + 1).join('\n');
   return {
     meta,
@@ -607,11 +662,10 @@ function parseFlatYaml(lines: readonly string[]): Record<string, FrontmatterValu
     if (valuePart === '') {
       // Could be a block-style array on subsequent indented lines.
       const arr: Array<string | number | boolean | null> = [];
-      while (i < lines.length) {
-        const next = lines[i] ?? '';
-        const m = /^\s*-\s+(.*)$/u.exec(next);
-        if (!m) break;
-        arr.push(parseScalar(m[1]!.trim()));
+      // ⚠ 項目かどうかの判定は `isBlockItemLine` 1 つ(§7)── 走・書き換えと同じ規則
+      while (i < lines.length && isBlockItemLine(lines[i] ?? '')) {
+        const m = /^\s*-\s+(.*)$/u.exec((lines[i] ?? '').replace(/\r?\n$/, ''));
+        arr.push(parseScalar((m?.[1] ?? '').trim()));
         i += 1;
       }
       out[key] = arr;
@@ -626,6 +680,41 @@ function parseFlatYaml(lines: readonly string[]): Record<string, FrontmatterValu
     out[key] = parseScalar(valuePart);
   }
   return out;
+}
+
+/**
+ * 🔴 **ブロック配列の項目行か**(#641 ②)。⚠ **判定はここ 1 か所**(§7)──
+ * 同じ問いに 3 人が答えていた:`parseFlatYaml` の走査 /
+ * `frontmatterRunLength` の走 / `spliceFrontmatterKeys` の子行の範囲。
+ * 綴りが割れると「**走だけが飲み込んで、読み手は 1 件も読まない**」型の
+ * 非対称ができる(3 巡目レビュー 1-A で実際に踏んだ)。
+ *
+ * ⚠ **行末記号を落としてから見る** ── `\s` は改行も食うので、剥がないと
+ *   裸の `-`(項目ではない)が `-\s+` に当たる。
+ */
+function isBlockItemLine(line: string): boolean {
+  return /^\s*-\s+/u.test(line.replace(/\r?\n$/, ''));
+}
+
+/**
+ * `keyIdx` の行が「**値の無い key**」なら、その直後に続くブロック配列の
+ * 項目行の本数を返す(それ以外は 0)。
+ *
+ * 🔑 `spliceFrontmatterKeys` が「この key の値はどこまでか」を訊く口である ──
+ *   `parseFlatYaml` が同じ規則で読むので、**書き換えと読み取りの範囲が一致する**。
+ */
+function blockItemRun(lines: readonly string[], keyIdx: number): number {
+  const head = stripTrailingComment(
+    (lines[keyIdx] ?? '').replace(/\r?\n$/, ''),
+    (lines[keyIdx + 1] ?? '').replace(/\r?\n$/, ''),
+  );
+  const colon = findKeyColon(head);
+  if (colon <= 0) return 0;
+  if (!/^[A-Za-z_][\w.-]*$/.test(head.slice(0, colon).trim())) return 0;
+  if (head.slice(colon + 1).trim() !== '') return 0;
+  let n = 0;
+  while (isBlockItemLine(lines[keyIdx + 1 + n] ?? '')) n += 1;
+  return n;
 }
 
 function findKeyColon(line: string): number {
@@ -994,8 +1083,14 @@ export function spliceFrontmatterKeys(
   }
 
   const fmParts = parts.slice(0, closeAt);
-  const writable = topLevelKeyLines(fmParts);
   for (const [key, value] of entries) {
+    /**
+     * ⚠ **走ごとに採り直す**(#641 ②)── 下でブロック配列の子行ごと `splice` すると
+     *   添字がずれる。⚠ 直す前は輪の外で 1 度だけ採っていたので、
+     *   **2 つ目以降の key を書くとき `writable` が 1 行ずれた本文を指していた**
+     *   (1 つ目が行を消す操作だったときに効く)。
+     */
+    const writable = topLevelKeyLines(fmParts);
     /**
      * ⚠ **字下げも見る**(2 巡目レビュー B-3)── 走は `line.slice(0, colon).trim()`
      *   なので字下げした key を frontmatter に入れるのに、書き換えは行頭固定だった。
@@ -1012,8 +1107,25 @@ export function spliceFrontmatterKeys(
     }
     const line = lineFor([key, value]);
     if (at >= 0) {
+      /**
+       * 🔴 **その key の値がブロック配列なら、`- item` の行も一緒に差し替える**
+       * (#641 ②)。
+       *
+       * ⚠ 直す前は key の行だけを差し替えたので、`tags:` +
+       *   `  - 買い物` / `  - 家事` に 1 つ足すと
+       *   `tags: [買い物, 家事, 掃除]` の**下に元の 2 行が残った** ──
+       *   読むと結果は正しいので**誰も気づかない**。
+       * 🔴 効いてくるのはその後である ── user が inline の `tags:` 行を消すと、
+       *   残っていた 2 行が**復活する**(消したはずのタグが戻る)。
+       *   `tests/features/frontmatter-malformed.test.ts` の不変量
+       *   「**隠した行は、必ず誰かが読んでいる**」に照らして不合格だった。
+       * 🔑 範囲は `blockItemRun`(= `parseFlatYaml` が読む範囲そのもの)で採る ──
+       *   書き換えと読み取りが同じ規則で動く(§7)。
+       * ⚠ **消す操作でも一緒に消す**(値の一部なので、片方だけ残さない)。
+       */
+      const kids = blockItemRun(fmParts, at);
       if (line === null) {
-        fmParts.splice(at, 1);
+        fmParts.splice(at, 1 + kids);
       } else {
         // 既存行の行末記号を保持して差し替え
         const term = fmParts[at]!.match(/\r?\n$/)?.[0] ?? eol;
@@ -1024,6 +1136,7 @@ export function spliceFrontmatterKeys(
          */
         const indent = /^\s*/.exec(fmParts[at]!)?.[0] ?? '';
         fmParts[at] = indent + line + term;
+        if (kids > 0) fmParts.splice(at + 1, kids);
       }
     } else if (line !== null) {
       fmParts.push(line + eol);
