@@ -1276,6 +1276,58 @@ describe('条件の欄で複数のタグ(#637)', () => {
     expect(asked(m.seen), '1 つの条件にまとめられた').toEqual(['請求', '未払']);
   });
 
+  /**
+   * 🔴 **打ち終えて Enter を押したら足せる**(#639)。
+   *
+   * ⚠ タグを打つ欄は 3 つ在るのに、**Enter が効くのは情報ペインの欄だけ**だった ──
+   *   この欄では**無音で捨てられて**いた(押しても何も起きず、理由も出ない)。
+   * 🔑 いまは欄と操作の対を `TAG_INPUT_ADD` 1 か所が持つ(候補の口も同じ表から引く)。
+   */
+  it('🔴 Enter でも条件を足せる(#639)', () => {
+    const m = mountCond();
+    const box = m.region.querySelector<HTMLInputElement>('[data-pkc-field="smart-cond"]')!;
+    box.value = '#請求';
+    box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(asked(m.seen), 'Enter が無音で捨てられている').toEqual(['請求']);
+  });
+
+  /**
+   * ⚠ **変換中の Enter では撃たない** ── 日本語のタグを打つ人は毎回踏む。
+   * 🔑 対照群は上の test(変換中でない Enter は通る)。守りは `binder` の入口の
+   *   1 行なので、**振る舞いで留める**(門の在り処が変わっても主張は変わらない)。
+   */
+  it('🔴 変換中の Enter では条件を足さない(#639)', () => {
+    const m = mountCond();
+    // ⚠ **前提を確かめる** ── 台が変換中を運べないなら、この test は空振り
+    const probe = new KeyboardEvent('keydown', { key: 'Enter', isComposing: true });
+    expect(probe.isComposing, '台が変換中を再現できていない(この test は空振り)').toBe(true);
+    const box = m.region.querySelector<HTMLInputElement>('[data-pkc-field="smart-cond"]')!;
+    box.value = 'せいきゅう';
+    box.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, isComposing: true }),
+    );
+    expect(asked(m.seen), '変換中に確定してしまった').toEqual([]);
+  });
+
+  /**
+   * 🔴 **この欄にも候補を集めさせる**(#639 ②)。
+   *
+   * ⚠ 器は `list="pkc-tag-candidates"` を**張ってあった**のに、候補を頼む口が
+   *   `tag-add-input` と `bulk-tag` しか見ていなかった ──
+   *   **繋いだつもりで、片側が繋がっていない**(§7)。器の側の test
+   *   (「条件の欄に、使っているタグの候補が出る」)は `list` 属性しか見ないので、
+   *   **属性が在るのに空のまま**という形を原理的に見られなかった。
+   */
+  it('🔴 条件の欄に触ると、候補を集める頼みが飛ぶ(#639)', () => {
+    const m = mountCond();
+    const box = m.region.querySelector<HTMLInputElement>('[data-pkc-field="smart-cond"]')!;
+    box.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+    expect(
+      m.seen.filter((e) => e.type === 'REQUEST_TAG_SUGGESTIONS'),
+      '候補を集める頼みが飛んでいない(属性は在るのに空のまま)',
+    ).toHaveLength(1);
+  });
+
   it('🔴 対照群: 井桁が無ければ空白入りの 1 つ(意図した名前を割らない)', () => {
     const m = mountCond();
     const box = m.region.querySelector<HTMLInputElement>('[data-pkc-field="smart-cond"]')!;

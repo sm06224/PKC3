@@ -147,6 +147,77 @@ describe('#402 ① まとめてタグを付ける', () => {
 });
 
 /**
+ * 🔴 **打ち終えて Enter を押したら足せる**(#639)。
+ *
+ * ⚠ タグを打つ欄は 3 つあるのに、**Enter が効くのは情報ペインの欄だけ**だった ──
+ *   帯の欄と条件の欄では**無音で捨てられて**いた(押しても何も起きず理由も出ない)。
+ * 🔑 いまは欄と操作の対を `TAG_INPUT_ADD` 1 か所が持つ(候補の口も同じ表から引く)。
+ */
+describe('タグの欄で Enter(#639)', () => {
+  it('🔴 まとめて付ける帯の欄で Enter を押すと、disk まで届く', async () => {
+    const s = setup({ e1: 'あ\n', e2: 'い\n' });
+    mark(s, ['e1', 'e2']);
+    await tick();
+    const input = s.q<HTMLInputElement>('[data-pkc-field="bulk-tag"]')!;
+    input.value = '請求済';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await tick();
+    expect(readTags(s.disk['e1']!), 'Enter で届いていない').toEqual(['請求済']);
+    expect(readTags(s.disk['e2']!), '選んだ全部に届いていない').toEqual(['請求済']);
+    // 🔑 通ったら欄は空になる(押したときと同じ作法 ── 次の 1 つをすぐ打てる)
+    expect(input.value, '通ったのに欄が残っている').toBe('');
+  });
+
+  /**
+   * ⚠ **変換中の Enter では撃たない** ── 日本語のタグを打つ人は毎回踏む。
+   * 🔑 対照群は上の test(変換中でない Enter は通る)。
+   * ⚠ 守っているのは `binder` の入口の 1 行(`if (ke.isComposing) return;`)なので、
+   *   **振る舞いで留める**(門の在り処が変わっても主張は変わらない)。
+   */
+  it('🔴 変換中の Enter では撃たない', async () => {
+    const s = setup({ e1: 'あ\n', e2: 'い\n' });
+    mark(s, ['e1', 'e2']);
+    await tick();
+    // ⚠ **前提を確かめる** ── 台が `isComposing` を運べないなら、この test は空振り
+    const probe = new KeyboardEvent('keydown', { key: 'Enter', isComposing: true });
+    expect(probe.isComposing, '台が変換中を再現できていない(この test は空振り)').toBe(true);
+    const input = s.q<HTMLInputElement>('[data-pkc-field="bulk-tag"]')!;
+    input.value = 'せいきゅう';
+    input.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, isComposing: true }),
+    );
+    await tick();
+    expect(readTags(s.disk['e1']!), '変換中に確定してしまった').toEqual([]);
+  });
+
+  /**
+   * ⚠ **対照群** ── 帯の欄の候補は**前から出ていた**(壊れていたのは条件の欄で、
+   *   そちらは `tests/adapter/smart-folder.test.ts` が見る)。
+   * 🔑 ここが守るのは「**表へ寄せたときに、前から在ったものを落としていない**」
+   *   ことである ── 判定を 1 か所へ寄せる直しは、寄せ損ねると静かに機能が減る。
+   */
+  it('⚠ 対照群: 帯の欄に触ると、候補を集める頼みが飛ぶ(前から在った)', async () => {
+    const s = setup({ e1: '---\ntags: [請求済]\n---\nあ\n', e2: 'い\n' });
+    mark(s, ['e1', 'e2']);
+    await tick();
+    /**
+     * ⚠ **前提を assert する**(§1)── まだ集めていない印は `null` である。
+     *   ここが最初から埋まっていたら、この test は何も見ていない。
+     */
+    expect(s.d.getState().tagSuggestions, '前提が崩れている: 最初から集まっている').toBeNull();
+    const input = s.q<HTMLInputElement>('[data-pkc-field="bulk-tag"]')!;
+    input.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+    await tick();
+    /**
+     * 🔑 触った結果、**答えを持った**(`null` = まだ集めていない、から動いた)。
+     * ⚠ 中身の件数までは見ない ── この台の store は本文の走査を持たないので、
+     *   答えは空でよい。見たいのは「**頼みが飛んで、答えを憶えた**」ことである。
+     */
+    expect(s.d.getState().tagSuggestions, '候補を集めていない(頼みが飛んでいない)').not.toBeNull();
+  });
+});
+
+/**
  * 🔴 **上限で入らなかったノートに「既に付いていました」と言わない**(#640)。
  *
  * ⚠ 直す前は効果層が 1 タグずつ `applyBodyRewrite` を呼び、返る **`null`** を
