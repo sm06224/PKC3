@@ -270,6 +270,102 @@ test('🔴 狭い窓では枠が畳まれ、押しても入れ替わらない (#
 });
 
 /**
+ * 🔴 **「畳みました」は幅の話のときだけ言う**(#633 段①)。
+ *
+ * ⚠ スタックは 20 件まで積めるが、**横に出るのはもともと 3 枠まで**である ──
+ *   総数から引いて数えると、広い窓で 5 件載せただけで「**2 枚畳みました**」と
+ *   出てしまう(帯に札で出ているので、user は何も失っていない)。
+ * ⚠ **unit では原理的に届かない** ── happy-dom は採寸しないので枠が 1 枚も畳まれず、
+ *   どちらの数え方でも 0 になる(変異試験 M6 が unit で生き延びて教えた)。
+ */
+test('🔴 広い窓で横に出せる数を超えて載せても、「畳みました」とは言わない (#633 段①)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  /**
+   * ⚠ **3 枠が本当に入る幅にする** ── 1 枠の下限は全角 34 文字ぶん(約 448px)なので、
+   *   主 + 留め 3 = 4 枠には面の中身が約 1840px 要る。⚠ 1600px の窓では
+   *   **1 枠しか入らず**、この test は「幅が足りない」側の話になってしまう
+   *   (実測:留め 5 件で 1600px → 1 枠 / 2400px → 2 枠 / 3000px → 3 枠)。
+   * ⚠ **幅が足りない側に落ちると、この test は「幅の話」を見てしまう** ──
+   *   だから前提として「横に 3 枠出ている」を先に assert する。
+   */
+  await page.setViewportSize({ width: 3000, height: 900 });
+  await gotoApp(page);
+
+  for (let i = 0; i < 5; i += 1) {
+    await createEntry(page, 'text');
+    await writeBody(page, `# 資料 ${String(i)}\n\n${LONG}`);
+    await page.locator('[data-pkc-field="detail-body"] p').first().click({ button: 'right' });
+    await expect(page.locator(MENU), 'メニューが出ない').toBeVisible();
+    await page.locator(`${MENU} button[data-pkc-action="pin-split"]`).click();
+  }
+
+  // ⚠ **前提** ── 横に出せる数(3)を本当に超えて載せている
+  await expect(
+    page.locator('[data-pkc-field="stack-card"]'),
+    '前提が崩れている: 5 件載っていない',
+  ).toHaveCount(5);
+  // 🔑 横に出ているのは 3 枠まで(器の側の規約は変えていない)── ここが前提でもある
+  await expect(page.locator('[data-pkc-split-lid]'), '横に出る数が変わった').toHaveCount(3);
+
+  // 🔴 幅は足りているので、畳んだとは言わない
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '幅は足りているのに「畳みました」と言った',
+  ).not.toContainText('幅が足りないので');
+
+  expect(errors, 'ページ例外 0 件').toEqual([]);
+});
+
+/**
+ * 🔴 **幅で枠が畳まれても、帯から降ろせる**(#584 が閉じる。#633 段①)。
+ *
+ * ⚠ 直す前は「× 外す」が**枠の中にしか無かった**ので、窓を狭めて枠が畳まれると
+ *   **降ろす口が画面のどこにも無くなって**いた ── 窓を広げるまで戻せない片道。
+ * 🔴 しかも PR #649 で並びが憶えられるようになったので、**開き直しても
+ *   毎回同じ行き止まりから始まる**状態だった(「復活」だけ先に配ったため)。
+ * 🔑 これは **unit では原理的に届かない** ── happy-dom は採寸しないので
+ *   「幅で畳まれた」状態そのものが作れない(`measure` が `null` を返す)。
+ */
+test('🔴 幅で枠が畳まれても、帯の × で降ろせる (#584 / #633 段①)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await gotoApp(page);
+
+  await createEntry(page, 'text');
+  await writeBody(page, `# 資料 A\n\n${LONG}`);
+  await createEntry(page, 'text');
+  await writeBody(page, `# 資料 B\n\n${LONG}`);
+  await page.locator('[data-pkc-field="detail-body"] p').first().click({ button: 'right' });
+  await expect(page.locator(MENU), 'メニューが出ない').toBeVisible();
+  await page.locator(`${MENU} button[data-pkc-action="pin-split"]`).click();
+  await expect(page.locator('[data-pkc-split-lid]'), '留められていない').toHaveCount(1);
+
+  // 🔴 **窓を狭めて畳ませる** ── ここが #584 の当の状態である
+  await page.setViewportSize({ width: 900, height: 900 });
+  await expect(page.locator('[data-pkc-split-lid]'), '狭めても枠が畳まれない(前提が崩れている)')
+    .toHaveCount(0);
+
+  // 🔑 帯は残っている ── 枠が 1 つも出ていなくても、載せた物が読める
+  const band = page.locator('[data-pkc-region="stack-bar"]');
+  await expect(band, '枠が畳まれたら帯まで消えた').toBeVisible();
+  await expect(band.locator('[data-pkc-field="stack-card"]'), '帯に札が無い').toHaveCount(1);
+
+  // 🔴 **降ろせる**(直す前は、押す物が画面に 1 つも無かった)
+  await band.locator('[data-pkc-action="unsplit-entry"]').click();
+  await expect(band, '降ろしたのに帯が残っている').toHaveCount(0);
+  // ⚠ 端末の記憶からも消える(次に開いても行き止まりへ戻らない)
+  await expect
+    .poll(async () => page.evaluate(() => localStorage.getItem('pkc3.split-lids') ?? ''), {
+      message: '降ろしたのに憶えたまま(開き直すと戻る)',
+    })
+    .toBe('');
+
+  expect(errors, 'ページ例外 0 件').toEqual([]);
+});
+
+/**
  * 🔴 **留めた並びは、開き直しても残る**(#505 段②「憶える」── 2026-09-02、#633 の調査で
  * **一度も成立していなかった**と判明)。
  *

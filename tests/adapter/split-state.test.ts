@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
-import { SPLIT_PINNED_MAX } from '../../src/features/split-frames';
+import { SPLIT_PINNED_MAX, STACK_MAX } from '../../src/features/split-frames';
 
 /** 起動まで進めた dispatcher。⚠ `new Dispatcher()` は `initializing` である。 */
 function booted(n = 3): Dispatcher {
@@ -104,17 +104,36 @@ describe('留める', () => {
     expect(d.getState().notice).toBeNull();
   });
 
+  /**
+   * 🔴 **満杯は「積める上限」(20)であって、横に出せる数(3)ではない**
+   * (#633 段①。user 裁定 2026-09-02)。
+   * ⚠ 直す前は同じ数だったので、**4 件目を載せようとすると断られて**いた。
+   */
   it('🔴 満杯なら足さず、理由を言う(古い物を黙って落とさない)', () => {
-    const d = booted(SPLIT_PINNED_MAX + 2);
-    for (let i = 0; i < SPLIT_PINNED_MAX; i += 1)
+    const d = booted(STACK_MAX + 2);
+    for (let i = 0; i < STACK_MAX; i += 1)
       d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: `n${i + 1}` });
     // ⚠ 前提: 満杯であること(空振りで通っていない)
-    expect(d.getState().splitLids).toHaveLength(SPLIT_PINNED_MAX);
-    const first = d.getState().splitLids[0];
-    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: `n${SPLIT_PINNED_MAX + 1}` });
-    expect(d.getState().splitLids).toHaveLength(SPLIT_PINNED_MAX);
-    expect(d.getState().splitLids[0]).toBe(first);
-    expect(d.getState().notice).toContain(String(SPLIT_PINNED_MAX));
+    expect(d.getState().splitLids).toHaveLength(STACK_MAX);
+    const top = d.getState().splitLids[0];
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: `n${STACK_MAX + 1}` });
+    expect(d.getState().splitLids).toHaveLength(STACK_MAX);
+    expect(d.getState().splitLids[0], '満杯なのに並びが動いた').toBe(top);
+    expect(d.getState().notice).toContain(String(STACK_MAX));
+  });
+
+  /**
+   * 🔑 **横に出せる数を超えても載せられる**(#633 裁定④)── 出ないぶんは帯の札で残る。
+   * ⚠ 直す前はここで「横に並べられるのは 3 件までです」と断っていた。
+   */
+  it('🔑 横に出せる数(3)を超えても載せられる(帯に残る)', () => {
+    const d = booted(SPLIT_PINNED_MAX + 2);
+    for (let i = 0; i < SPLIT_PINNED_MAX + 1; i += 1)
+      d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: `n${i + 1}` });
+    expect(d.getState().splitLids, '横に出せる数で断られた').toHaveLength(SPLIT_PINNED_MAX + 1);
+    expect(d.getState().notice, '載せられたのに断り文を出した').toBeNull();
+    // 🔑 新しく載せた物が先頭(= 本文のすぐ隣)
+    expect(d.getState().splitLids[0]).toBe(`n${SPLIT_PINNED_MAX + 1}`);
   });
 });
 

@@ -47,8 +47,20 @@ import { READ_COLUMN_GAP_PX, readColumnMinPx } from './read-columns';
  */
 export const SPLIT_FRAME_MAX = 4;
 
-/** 留められる数(= 総数 − 主 1)。 */
+/** **横に出せる**数(= 総数 − 主 1)。⚠ 積める数(`STACK_MAX`)とは別物である。 */
 export const SPLIT_PINNED_MAX = SPLIT_FRAME_MAX - 1;
+
+/**
+ * 🔴 **スタックに積める数**(#633 段①。user 裁定 2026-09-02「4 問とも A」)。
+ *
+ * ⚠ **横に出せる数(`SPLIT_PINNED_MAX` = 3)と分ける** ── 直す前は同じ数だったので、
+ *   4 件目を載せようとすると「横に並べられるのは 3 件までです」と断られていた。
+ *   🔑 裁定④「新しく載せた物が本文のすぐ隣に来る」= **載せるのはいつでも通り、
+ *   横に出るのは先頭から入るぶんだけ**である(出ない物は帯に札で残る)。
+ * ⚠ それでも上限は要る ── 無限に積むと帯が読めなくなり、端末の保存も膨らむ。
+ *   20 は「帯 1 行に札が並ぶ現実的な数」であって、測って決めた数ではない。
+ */
+export const STACK_MAX = 20;
 
 /**
  * 枠と枠のすき間(px)。
@@ -88,21 +100,31 @@ export function normalizeSplitLids(lids: readonly string[]): readonly string[] {
     if (typeof lid !== 'string' || lid === '') continue;
     if (out.includes(lid)) continue;
     out.push(lid);
-    if (out.length >= SPLIT_PINNED_MAX) break;
+    // ⚠ 切るのは**積める上限**(`STACK_MAX`)── 横に出せる数で切ると、
+    //    帯に残すはずの札まで捨てる(#633 段①)
+    if (out.length >= STACK_MAX) break;
   }
   return out;
 }
 
 /**
- * 留める。⚠ **既に在るなら並びを変えない**(押し直しで場所が飛ばない)。
- * ⚠ 上限に達していたら**足さない** ── いちばん古いものを黙って落とすと、
- * 「押したのに増えず、別の物が消えた」になる(呼び側が満杯を user に言う)。
+ * 🔴 **スタックに載せる ── 先頭が一番上**(#633 段①。user 裁定 2026-09-02 ②④)。
+ *
+ * ⚠ 直す前は**末尾に足し**、既に在れば**並びを変えなかった**。裁定は
+ *   「**新しく載せた物が本文のすぐ隣に来て、それまで隣に在った物は右へずれる**」
+ *   なので、**先頭へ入れる**。既に在る物を載せ直したときは**先頭へ上げる**
+ *   (押したのに何も起きない、を作らない ── 直す前は無反応だった)。
+ * ⚠ **件数は増えない**(上げるだけ)── 対照群として test に置く。
+ * ⚠ 上限(`STACK_MAX`)に達していたら**足さない** ── いちばん古いものを黙って
+ *   落とすと「押したのに増えず、別の物が消えた」になる(呼び側が満杯を user に言う)。
  */
 export function pinSplitLid(cur: readonly string[], lid: string): readonly string[] {
   if (lid === '') return cur;
-  if (cur.includes(lid)) return cur;
-  if (cur.length >= SPLIT_PINNED_MAX) return cur;
-  return normalizeSplitLids([...cur, lid]);
+  // 🔑 既に一番上なら**同じ配列をそのまま返す**(描き直しの指紋を動かさない)
+  if (cur[0] === lid) return cur;
+  if (cur.includes(lid)) return normalizeSplitLids([lid, ...cur]);
+  if (cur.length >= STACK_MAX) return cur;
+  return normalizeSplitLids([lid, ...cur]);
 }
 
 /** 外す。⚠ 居なければ**同じ配列をそのまま返す**(描き直しの指紋を動かさない)。 */

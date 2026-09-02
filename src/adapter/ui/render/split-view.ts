@@ -32,7 +32,11 @@
  */
 import type { AppState } from '@adapter/state/app-state';
 import type { DetailRenderer } from './detail';
-import { fittingSplitFrames, knownSplitLids } from '@features/split-frames';
+import {
+  fittingSplitFrames,
+  knownSplitLids,
+  SPLIT_PINNED_MAX,
+} from '@features/split-frames';
 import { READ_COLUMN_BASE_FONT_PX } from '@features/read-columns';
 import { sayFolded } from './fold-notify';
 
@@ -112,6 +116,18 @@ export class SplitView {
   private lastState: AppState | null = null;
   /** 直前に置けると判定した枠数。⚠ **変わったときだけ**描き直す(振動させない)。 */
   private lastFit = 0;
+  /**
+   * 🔴 **スタックの帯**(#633 段①。user 裁定 2026-09-02 ②)── 本文の**上**に 1 行。
+   *
+   * ⚠ **何も載せていなければ DOM に置かない**(既存の「既定は 1 枠」と同じ作法)──
+   *   置くと、何もしていない user の版面が 1 行ぶん縮む。
+   * ⚠ 置き場は**面(`pane`)の兄ではなく、面の先頭** ── 面の中に置くと
+   *   `read-columns` が面の高さを段の高さに使い、段が溢れる(設計 doc §7 のリスク)。
+   *   🔑 だから `row` の**前**に入れて、面の高さは帯 + 器で分け合う。
+   */
+  private band: HTMLElement | null = null;
+  /** 直前に帯へ描いた並びと印。⚠ 同じなら 1 バイトも触らない(押し所が飛ばない)。 */
+  private bandKey = '';
   /** 見張りを外す口。⚠ 面と同じ寿命なので普段は呼ばないが、test が使う。 */
   private stopWatch: (() => void) | null = null;
 
@@ -201,9 +217,16 @@ export class SplitView {
     const fit = this.fitCount(want.length + 1);
     this.lastFit = fit;
     // ⚠ 減らすのは**後ろから**(先に留めた物が残る ── `split-frames.ts` の規約)
+    /**
+     * ⚠ **減らすのは後ろから** ── 先頭が一番上なので、**後に載せた物が残る**
+     *   (#633 裁定②「新しく載せた物が本文のすぐ隣」)。
+     * ⚠ 直す前のコメントは「先に留めた物が残る」だった ── 並びの向きを裏返したので
+     *   **同じ 1 行の意味が反転している**(字を直さないと、次に読む人が逆に読む)。
+     */
     const show = want.slice(0, Math.max(fit - 1, 0));
     this.sayIfDropped(want.length, show.length);
     this.sync(show);
+    this.renderBand(want, show, state);
     this.main.render(state);
     for (const lid of show) this.frames.get(lid)?.renderer.render(state);
   }
@@ -216,8 +239,16 @@ export class SplitView {
     return fittingSplitFrames(m.width, wanted, m.fontPx);
   }
 
+  /**
+   * 🔴 **数えるのは「幅で減ったぶん」だけ**(#633 段①)。
+   *
+   * ⚠ スタックは 20 件まで積めるが、**横に出るのはもともと 3 枠まで**である。
+   *   載せた総数から引くと「17 枚畳みました」と毎回言うことになる ──
+   *   それは**幅の話ではない**(帯に札で出ているので、user は失っていない)。
+   * 🔑 だから**表示上限(`SPLIT_PINNED_MAX`)を上限として数える**。
+   */
   private sayIfDropped(wanted: number, shown: number): void {
-    const dropped = wanted - shown;
+    const dropped = Math.min(wanted, SPLIT_PINNED_MAX) - shown;
     if (dropped === this.lastDropped) return;
     this.lastDropped = dropped;
     /**
@@ -226,6 +257,73 @@ export class SplitView {
      *   (test だけが自分で渡していた = CLAUDE.md §7)。
      */
     if (dropped > 0) sayFolded(`幅が足りないので、横に並べる枠を ${dropped} 枚畳みました`);
+  }
+
+  /**
+   * 🔴 **スタックの帯を描く**(#633 段①。user 裁定 2026-09-02)。
+   *
+   * ```
+   * [ 議事録 × ][ 資料 B × ][ 去年の稟議 × ]        (載せた順に左から = 上から)
+   *   ↑ 横に出ている物には印(data-pkc-shown)
+   * ```
+   *
+   * - **札を押すと一番上へ上がる**(= 本文のすぐ隣に来る)── 裁定④
+   * - **× で降ろす** ── 🔴 **枠が幅で畳まれていても降ろせる**(#584 が閉じるのはここ)。
+   *   ⚠ 直す前は「× 外す」が**枠の中にしか無かった**ので、狭い窓で畳まれると
+   *   **外す口が画面から消えて**いた(しかも PR #649 で並びが憶えられるように
+   *   なったので、開き直しても同じ行き止まりから始まる状態だった)
+   * - ⚠ **何も載せていなければ器ごと置かない**(版面を 1 行も食わない)
+   */
+  private renderBand(
+    want: readonly string[],
+    show: readonly string[],
+    state: AppState,
+  ): void {
+    if (want.length === 0) {
+      this.band?.remove();
+      this.band = null;
+      this.bandKey = '';
+      return;
+    }
+    const doc = this.pane.ownerDocument;
+    /**
+     * ⚠ **指紋で早く返る** ── 題名まで含める(改名に追随する)。
+     * 🔑 含めないと、載せたノートの名前を変えても帯が古い字のまま残る。
+     */
+    const key = want
+      .map((lid) => `${lid}\u0001${state.entryMetas.get(lid)?.title ?? ''}\u0001${show.includes(lid) ? '1' : '0'}`)
+      .join('\u0002');
+    if (this.band !== null && key === this.bandKey) return;
+    this.bandKey = key;
+    if (this.band === null) {
+      const el = doc.createElement('div');
+      el.setAttribute('data-pkc-region', 'stack-bar');
+      // ⚠ **面の先頭へ**(器 `row` の前)── 本文の上に 1 行、が裁定②である
+      this.pane.insertBefore(el, this.row);
+      this.band = el;
+    }
+    const band = this.band;
+    band.textContent = '';
+    for (const lid of want) {
+      const card = doc.createElement('span');
+      card.setAttribute('data-pkc-field', 'stack-card');
+      card.setAttribute('data-pkc-lid', lid);
+      // 🔑 **いま横に出ている物には印** ── 押しても画面が変わらない札との差が読める
+      if (show.includes(lid)) card.setAttribute('data-pkc-shown', '');
+      const up = doc.createElement('button');
+      up.type = 'button';
+      up.setAttribute('data-pkc-action', 'pin-split');
+      /** ⚠ 名前は `entryMetas` から引く ── 改名に追随する(保存した字を貼らない)。 */
+      up.textContent = state.entryMetas.get(lid)?.title ?? '(消えたノート)';
+      up.title = '一番上へ上げる(本文のすぐ隣に出ます)';
+      const off = doc.createElement('button');
+      off.type = 'button';
+      off.setAttribute('data-pkc-action', 'unsplit-entry');
+      off.textContent = '×';
+      off.title = 'スタックから降ろす(ノートは消えません)';
+      card.append(up, off);
+      band.append(card);
+    }
   }
 
   /** 器を並びへ合わせる。⚠ **同じなら 1 バイトも触らない**(scroll と図が生き残る)。 */
@@ -283,9 +381,24 @@ export class SplitView {
     off.setAttribute('data-pkc-action', 'unsplit-entry');
     off.setAttribute('data-pkc-lid', lid);
     // ⚠ 記号だけにしない ── 何が外れるのか読めない
-    off.textContent = '× 外す';
-    off.title = '横に並べるのをやめる(ノートは消えません)';
-    bar.append(off);
+    // 🔑 字は「降ろす」へ(#633 裁定③ ── 載せる / 降ろす で対にする)
+    off.textContent = '× 降ろす';
+    off.title = 'スタックから降ろす(ノートは消えません)';
+    /**
+     * 🔴 **この枠を主で開く**(#633 段①)。
+     *
+     * ⚠ 直す前は、留めた枠から**その物を主で開く道が無かった** ── 一覧へ戻って
+     *   同じノートを探し直すしかなく、⚠ 一覧を畳んでいる人には道が 1 本も無い。
+     * 🔑 `select-entry` は身元を**自分の属性**(`data-pkc-entry`)で持つので、
+     *   一覧の行と**同じ受け手**が使える(2 本目を書かない ── §7)。
+     */
+    const open = doc.createElement('button');
+    open.type = 'button';
+    open.setAttribute('data-pkc-action', 'select-entry');
+    open.setAttribute('data-pkc-entry', lid);
+    open.textContent = '← 左で開く';
+    open.title = 'このノートを主の枠(左)で開く';
+    bar.append(open, off);
     host.append(bar);
     this.row.append(host);
     return host;

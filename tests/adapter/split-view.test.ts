@@ -12,12 +12,17 @@ import { describe, expect, it } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { CenterRouter } from '../../src/adapter/ui/render/center';
 import { setFoldNotify } from '../../src/adapter/ui/render/fold-notify';
+import { SPLIT_PINNED_MAX } from '../../src/features/split-frames';
+import { bindActions } from '../../src/adapter/ui/actions/binder';
 
 async function settle(): Promise<void> {
   for (let i = 0; i < 12; i += 1) await Promise.resolve();
 }
 
-function boot(): { root: HTMLElement; d: Dispatcher; center: CenterRouter; said: string[] } {
+function boot(
+  /** ⚠ 既定は 2 件。⚠ 「横に出せる数(3)を超えた」を見る test は増やして呼ぶ。 */
+  extra: readonly string[] = [],
+): { root: HTMLElement; d: Dispatcher; center: CenterRouter; said: string[] } {
   const root = document.createElement('div');
   root.setAttribute('data-pkc-region', 'detail');
   document.body.append(root);
@@ -40,6 +45,7 @@ function boot(): { root: HTMLElement; d: Dispatcher; center: CenterRouter; said:
     metas: [
       { lid: 'a', title: '資料 A', archetype: 'text' },
       { lid: 'b', title: '資料 B', archetype: 'text' },
+      ...extra.map((lid) => ({ lid, title: `資料 ${lid}`, archetype: 'text' })),
     ] as never,
     relations: [],
   });
@@ -53,6 +59,169 @@ function fieldsIn(el: Element): string[] {
     (n) => n.getAttribute('data-pkc-field') ?? '',
   );
 }
+
+/**
+ * 🔴 **スタックの帯**(#633 段①。user 裁定 2026-09-02 ②④)。
+ *
+ * ⚠ ここが守るのは **#584 の片道が閉じたこと**である ── 直す前は「× 降ろす」が
+ *   **枠の中にしか無かった**ので、幅で枠が畳まれると**降ろす口が画面から消えて**いた。
+ *   🔴 しかも PR #649 で並びが憶えられるようになったので、開き直しても
+ *   **毎回同じ行き止まりから始まる**状態だった。
+ */
+describe('スタックの帯(#633 段①)', () => {
+  /** 帯に出ている札の名前(押す側のボタンの字)。 */
+  const cards = (root: HTMLElement): string[] =>
+    [...root.querySelectorAll('[data-pkc-field="stack-card"] [data-pkc-action="pin-split"]')].map(
+      (n) => n.textContent ?? '',
+    );
+
+  it('🔴 何も載せていなければ、帯は DOM に置かない(版面を食わない)', async () => {
+    const { root } = boot();
+    await settle();
+    expect(
+      root.querySelectorAll('[data-pkc-region="stack-bar"]'),
+      '何も載せていないのに帯を置いている',
+    ).toHaveLength(0);
+  });
+
+  it('🔴 新しく載せた物が一番上(帯の左端)に来る', async () => {
+    const { root, d } = boot();
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'b' });
+    await settle();
+    expect(cards(root), '載せた順が逆(古い物が隣に残っている)').toEqual(['資料 B', '資料 A']);
+  });
+
+  it('🔴 札を押すと一番上へ上がる(件数は増えない)', async () => {
+    const { root, d } = boot();
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'b' });
+    await settle();
+    // ⚠ 前提: いま一番上は「資料 B」(でなければ、押しても何も変わらず空振り)
+    expect(cards(root)[0], '前提が崩れている').toBe('資料 B');
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'a' });
+    await settle();
+    expect(cards(root), '押しても上がらない / 増えた').toEqual(['資料 A', '資料 B']);
+  });
+
+  /**
+   * 🔴 **これが #584 の当の経路** ── 帯の × は、**枠が 1 つも出ていなくても**押せる。
+   * ⚠ 台は `measure` が `null` を返す(happy-dom)ので枠は畳まれないが、
+   *   **帯が枠と別の場所に在る**ことは見られる ── 畳まれた状態そのものは
+   *   smoke(実ブラウザ)が見る。
+   */
+  it('🔴 帯の × は枠の外に在る(枠が畳まれても降ろせる)', async () => {
+    const { root, d } = boot();
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'b' });
+    await settle();
+    const band = root.querySelector('[data-pkc-region="stack-bar"]');
+    expect(band, '帯が無い').not.toBeNull();
+    /**
+     * 🔴 **帯は「枠の器」の外に在る** ── 器(`split-row`)の中に入れると、
+     *   幅で枠が畳まれたときに**帯まで横へ並んで潰れる / 一緒に消える**。
+     * ⚠ 変異試験 M4(`row.append(el)`)が生き延びて教えた ── 1 稿目は
+     *   `split-frame` の中かどうかしか見ておらず、**器の中は素通り**だった。
+     */
+    expect(
+      band!.closest('[data-pkc-region="split-row"]'),
+      '帯が枠の器の中に在る(畳むと一緒に消える)',
+    ).toBeNull();
+    expect(
+      band!.closest('[data-pkc-region="split-frame"]'),
+      '帯が枠の中に在る(枠が消えると一緒に消える)',
+    ).toBeNull();
+    // 🔑 置き場は**器の直前**(= 本文の上の 1 行)
+    expect(
+      band!.nextElementSibling?.getAttribute('data-pkc-region'),
+      '帯が本文の上に無い',
+    ).toBe('split-row');
+    const off = band!.querySelector('[data-pkc-action="unsplit-entry"]');
+    expect(off, '帯に降ろす口が無い').not.toBeNull();
+    expect(off!.closest('[data-pkc-lid]')?.getAttribute('data-pkc-lid')).toBe('b');
+  });
+
+  /**
+   * 🔴 **いま横に出ている札には印が付く**(#633 段①)。
+   * ⚠ 台(happy-dom)は採寸しないので**全部が出ている**扱いになる ── ここで見るのは
+   *   「**印そのものが在るか**」である(出ている物と出ていない物の差は smoke が見る)。
+   * ⚠ 変異試験 M5(印を付けない)が生き延びて教えた。
+   */
+  it('🔴 横に出ている札には印が付く', async () => {
+    const { root, d } = boot();
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'b' });
+    await settle();
+    const card = root.querySelector('[data-pkc-field="stack-card"]');
+    expect(card, '札が無い').not.toBeNull();
+    expect(
+      card!.hasAttribute('data-pkc-shown'),
+      '出ているのに印が無い(押しても画面が変わらない札と見分けが付かない)',
+    ).toBe(true);
+  });
+
+  /**
+   * 🔴 **札を押したら「その札の物」が上がる**(#633 裁定④)。
+   *
+   * ⚠ **配線の test である** ── 帯は `split-view.ts` が描き、身元を読むのは
+   *   `binder.ts` の受け手なので、**どちらの test にも書けない**(§7)。
+   * ⚠ 変異試験 M7(身元を無視して `selectedLid` を載せる)が生き延びて教えた ──
+   *   直す前の受け手は**いつでも `selectedLid`** だったので、札の名前と
+   *   起きることが食い違う(別のノートが上がる)。
+   */
+  it('🔴 札を押すと、その札のノートが上がる(選んでいるノートではない)', async () => {
+    const { root, d } = boot();
+    bindActions(root, d, {});
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'b' });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'b' });
+    await settle();
+    // ⚠ 前提 ── 一番上は「資料 B」で、選んでいるのも 'b'(押す札とは別の物)
+    expect(d.getState().splitLids[0], '前提が崩れている').toBe('b');
+    expect(d.getState().selectedLid, '前提が崩れている').toBe('b');
+    const cardA = root.querySelector<HTMLElement>(
+      '[data-pkc-field="stack-card"][data-pkc-lid="a"] [data-pkc-action="pin-split"]',
+    );
+    expect(cardA, '「資料 A」の札が無い').not.toBeNull();
+    cardA!.click();
+    await settle();
+    expect(
+      d.getState().splitLids[0],
+      '押した札ではなく、選んでいるノートが上がった',
+    ).toBe('a');
+  });
+
+  it('🔴 名前は entryMetas から引く(改名に追随する)', async () => {
+    const { root, d } = boot();
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'b' });
+    await settle();
+    expect(cards(root)).toEqual(['資料 B']);
+    d.dispatch({ type: 'RENAME_ENTRY_TITLE', lid: 'b', title: '資料 B(改)' });
+    await settle();
+    expect(cards(root), '帯が古い名前のまま').toEqual(['資料 B(改)']);
+  });
+
+  /**
+   * 🔴 **「畳みました」は幅の話のときだけ言う**(#633 段①)。
+   * ⚠ スタックは 20 件まで積めるが、横に出るのはもともと 3 枠まで ──
+   *   総数から引くと「17 枚畳みました」と毎回言うことになる(帯に札で出ているので
+   *   user は失っていない)。
+   */
+  it('🔴 横に出せる数を超えて載せても、「畳みました」とは言わない', async () => {
+    const { d, said, root } = boot(['c', 'd', 'e']);
+    for (const lid of ['a', 'b', 'c', 'd', 'e']) d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid });
+    await settle();
+    /**
+     * ⚠ **前提を assert する**(§1)── 横に出せる数(3)を**本当に超えて**いること。
+     *   超えていなければ、この test は「畳んだと言わない」を**当たり前に**通す(空振り)。
+     *   ⚠ 変異試験 M6(総数で数える)が生き延びて教えた ── 1 稿目は 2 件しか載せて
+     *   いなかったので、総数で数えても差が出なかった。
+     */
+    expect(
+      root.querySelectorAll('[data-pkc-field="stack-card"]').length,
+      '前提が崩れている: 横に出せる数を超えていない',
+    ).toBeGreaterThan(SPLIT_PINNED_MAX);
+    expect(said, '幅の話でないのに畳んだと言った').toEqual([]);
+  });
+});
 
 describe('既定は 1 枠 ── 何も留めなければ画面は変わらない', () => {
   /**
@@ -139,13 +308,29 @@ describe('留めると横に並ぶ', () => {
     expect(main.querySelector('[data-pkc-action="start-edit"]')).not.toBeNull();
   });
 
-  it('🔴 外す口が在る(置けるなら外せる)', async () => {
+  /**
+   * 🔴 **降ろす口は 2 つある**(#633 段①)── 枠の帯と、本文の上のスタックの帯。
+   *
+   * ⚠ 直す前は**枠の中の 1 か所だけ**だったので、幅で枠が畳まれると
+   *   **降ろす口が画面から消えて**いた(#584 の片道)。
+   * 🔑 どちらの口も、身元は**近い先祖の `data-pkc-lid`** が持つ(受け手は 1 つ)。
+   */
+  it('🔴 降ろす口が在る(置けるなら外せる)', async () => {
     const { root, d } = boot();
     d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'b' });
     await settle();
-    const off = root.querySelector('[data-pkc-action="unsplit-entry"]');
-    expect(off).not.toBeNull();
-    expect(off!.getAttribute('data-pkc-lid')).toBe('b');
+    const offs = [...root.querySelectorAll('[data-pkc-action="unsplit-entry"]')];
+    expect(offs.length, '降ろす口が無い').toBeGreaterThan(0);
+    for (const off of offs)
+      expect(
+        off.closest('[data-pkc-lid]')?.getAttribute('data-pkc-lid'),
+        '降ろす口が身元を持っていない(押しても何が降りるか決まらない)',
+      ).toBe('b');
+    // 🔑 **枠の外(帯)にも 1 つ在る** ── 幅で枠が畳まれても降ろせる(#584)
+    const inBand = root.querySelectorAll(
+      '[data-pkc-region="stack-bar"] [data-pkc-action="unsplit-entry"]',
+    );
+    expect(inBand.length, '帯に降ろす口が無い(畳まれたら降ろせない)').toBe(1);
   });
 
   it('🔴 外すと枠ごと消え、器も畳まれる', async () => {
