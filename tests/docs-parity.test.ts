@@ -1211,6 +1211,8 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     // ⚠ 上限 10 を超えたので 2026-09-02 に落とした(原本は CHANGELOG)
+    '見出しを右クリックすると、その章にできることが出ます',
+    // ⚠ 上限 10 を超えたので 2026-09-02 に落とした(原本は CHANGELOG)
     '板の付箋が、PowerPoint でも置いたとおりの場所に出ます',
     // ⚠ 上限 10 を超えたので 2026-08-31 に落とした(原本は CHANGELOG)
     '画面が狭いときの横ずれと、一覧を畳んだときの Ctrl+F を直しました',
@@ -1594,5 +1596,33 @@ describe('近道の押し先が画面に在る', () => {
     expect(smartCondError('limit'), '断り文が上限を言っていない').toContain(
       String(MAX_SMART_TAGS),
     );
+  });
+});
+
+/**
+ * 🔴 **マニュアルだけの窓の節(§4-4)は、起きないことを書かない**(2026-09-02 hotfix、#648 の
+ * 着地前レビューが拾った)。1 稿目は「窓で F5 を押しても同じです」と書いていたが、F5 は
+ * 読んでいた所を**保たない**(節の印があればその節の頭、無ければ先頭)。user はその行を読んで
+ * F5 を押し、読んでいた所を失う。
+ * ⚠ 変異試験で SURVIVED になった(M8)ので pin を置く ── 節に**閉じて**見る(file 全体だと
+ *   別の面の「同じです」に満たされる ── CLAUDE.md §1「面へスコープする」)。
+ */
+describe('マニュアルだけの窓の節(§4-4)の主張', () => {
+  const from = MANUAL.indexOf('#### 🔴 マニュアルだけのウィンドウで読む');
+  const to = MANUAL.indexOf('#### マニュアルの中を探す');
+  const section = from >= 0 && to > from ? MANUAL.slice(from, to) : '';
+
+  it('🔴 F5 で読んでいた所が残るとは言わない(残らない)', () => {
+    expect(section.length, '節が見つからない(空振り)').toBeGreaterThan(500);
+    expect(section, 'F5 を「同じ」と言っている(読んでいた所は保たない)').not.toMatch(
+      /F5\*{0,2} を押しても同じ/,
+    );
+    expect(section, 'F5 で読んでいた所へ戻らないことを書いていない').toContain(
+      '読んでいた所を保ちません',
+    );
+  });
+
+  it('「入れ替えました」の説明は 1 か所(同じことを 2 度書かない)', () => {
+    expect(section.split('入れ替えました').length - 1).toBe(1);
   });
 });

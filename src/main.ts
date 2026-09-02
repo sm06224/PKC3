@@ -9,7 +9,8 @@ import { bindEditLockRelease } from '@adapter/state/edit-lock-release';
 import { connectStoreEffects, type StoreEffects } from '@adapter/state/store-effects';
 import { tileSelectsEntry } from '@features/launcher/tiles';
 import { appEditorMode } from '@adapter/ui/render/editor-mode';
-import { applyTextScale, initialTextScale } from '@adapter/ui/render/text-scale';
+import { applyTextScale, chosenTextScale, initialTextScale } from '@adapter/ui/render/text-scale';
+import { textScaleSpec } from '@features/text-scale';
 import { applyColumnRule, initialColumnRule } from '@adapter/ui/render/column-rule';
 import { applyTagBadge, initialTagBadge } from '@adapter/ui/render/tag-badge';
 import {
@@ -385,16 +386,22 @@ function openViewTile(
  */
 /**
  * いまアプリが出している見え方(配色 / 文字の大きさ / 地と字の色)。
- * ⚠ **設定の保存ではなく、画面に効いている値**を読む ── OS に従っている人の
+ * ⚠ 配色と地の色は**設定の保存ではなく、画面に効いている値**を読む ── OS に従っている人の
  *   配色は保存されていない(`theme.ts` の M-7)ので、属性から取る。
+ * 🔴 **文字の大きさだけは保存から読む**(2026-09-02 hotfix)── 画面に効いている値は
+ *   選んでいなくても既定の 13px だが、焼いたマニュアルは**選んでいなければ 14px のまま**
+ *   (`manual-page.ts` の boot script は保存が無ければ触らない)。効いている値を渡すと、
+ *   **何も変えずにもう一度押しただけで窓の字が 14px → 13px に縮む**(着地前レビューが
+ *   拾った)。boot と同じ門(`chosenTextScale`)で読めば、2 回目は 1px も動かない。
  */
 function currentAppearance(): ManualAppearance {
   const root = document.documentElement;
   const computed = getComputedStyle(root);
   const nonEmpty = (v: string): string | null => (v.trim() === '' ? null : v.trim());
+  const chosen = chosenTextScale();
   return {
     theme: root.getAttribute('data-pkc-theme'),
-    textSize: nonEmpty(root.style.getPropertyValue('--pkc-text-size')),
+    textSize: chosen === null ? null : textScaleSpec(chosen).size,
     bg: nonEmpty(computed.getPropertyValue('--bg')),
     fg: nonEmpty(computed.getPropertyValue('--fg')),
   };
@@ -843,21 +850,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   // 🔑 追記欄は**本文とは別の器**(P8 段⑧)── 本文は追記のたびに書き換わって
   // 再描画されるので、同じ器に入れると打ちかけの文字も focus も消える
   const appendBox = new AppendBoxRenderer(regions.append);
-  /**
-   * 🔴 **横に並べた並びを憶える**(#505 段②)。
-   * ⚠ **変わったときだけ**書く ── 毎 state で書くと、打鍵のたびに localStorage を叩く。
-   */
-  let lastSplit: readonly string[] = [];
   dispatcher.onState((state) => {
     browse.render(state, browseMode);
     center.render(state);
     appendBox.render(state);
     inspector.render(state);
     markView(state.viewMode);
-    if (state.splitLids !== lastSplit) {
-      lastSplit = state.splitLids;
-      saveSplitLids(state.splitLids);
-    }
   });
   // status: provenance + エラーの可視化(review B-1 ── 無言の操作拒否を作らない)
   // 🔑 常時見えるのは**版だけ**(P8)。`opfs-sahpool` のような開発者語は
@@ -2937,6 +2935,23 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   if (restoredSplit.length > 0) {
     dispatcher.dispatch({ type: 'SPLIT_RESTORED', lids: restoredSplit });
   }
+  /**
+   * 🔴 **憶えるのは、復元の後から**(2026-09-02 hotfix。#633 の調査で「一度も成立して
+   *   いなかった」と判明 ── `tests/smoke/split-frames.smoke.spec.ts`「開き直しても
+   *   留まったまま」が直す前の dist で赤)。
+   * ⚠ 直す前は描画の購読(`browse.render` の隣)の中で書いていた。購読は復元より
+   *   **前**に張られるので、boot の最初の state(まだ空)を「変わった」と読んで **'' を
+   *   書き**、そのあと上の `loadSplitLids()` が空を読んでいた ── 「次に開いても同じ枠が
+   *   出ます」と配っていたのに、開き直すと毎回外れていた。
+   * 🔑 だから**復元した後の state を起点**にして張る。⚠ **変わったときだけ**書く ──
+   *   毎 state で書くと、打鍵のたびに localStorage を叩く。空でも書く(「全部外した」を憶える)。
+   */
+  let lastSplit = dispatcher.getState().splitLids;
+  dispatcher.onState((state) => {
+    if (state.splitLids === lastSplit) return;
+    lastSplit = state.splitLids;
+    saveSplitLids(state.splitLids);
+  });
   /**
    * 🔑 **覚えている探し方が「予定」なら、起動でそのまま集める**(#292 段⑤)。
    *

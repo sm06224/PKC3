@@ -38,14 +38,29 @@ function readStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
   }
 }
 
-/** 保存されている値(起動時の初期値)。⚠ 読めなければ既定。 */
-export function initialTextScale(): TextScale {
+/**
+ * 🔴 **user が選んで保存した大きさ。選んでいなければ `null`**(2026-09-02 hotfix、#648)。
+ *
+ * ⚠ 「いま効いている値」ではない ── アプリは選んでいなくても既定(13px)を当てているが、
+ *   焼いたマニュアル(`features/help/manual-page.ts` の boot script)は**選んでいなければ
+ *   触らない**(読み物なので CSS の 14px のまま)。マニュアルの窓へ当て直す側が
+ *   「効いている 13px」を渡すと、**何も変えずにもう一度押しただけで字が縮む**
+ *   (着地前レビューが拾った ── `main.ts` の `currentAppearance`)。
+ * 🔑 boot script と**同じ門**(保存が在り、知っている id)で読む ── 2 つの読み手が
+ *   同じ答えを出すことが、当て直しを冪等にする条件である。
+ */
+export function chosenTextScale(): TextScale | null {
   try {
     const v = readStorage()?.getItem(TEXT_SCALE_STORAGE_KEY);
-    return v !== null && v !== undefined && isTextScale(v) ? v : DEFAULT_TEXT_SCALE;
+    return v !== null && v !== undefined && isTextScale(v) ? v : null;
   } catch {
-    return DEFAULT_TEXT_SCALE;
+    return null;
   }
+}
+
+/** 保存されている値(起動時の初期値)。⚠ 読めなければ既定。 */
+export function initialTextScale(): TextScale {
+  return chosenTextScale() ?? DEFAULT_TEXT_SCALE;
 }
 
 /**

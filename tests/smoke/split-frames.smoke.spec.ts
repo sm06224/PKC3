@@ -268,3 +268,60 @@ test('🔴 狭い窓では枠が畳まれ、押しても入れ替わらない (#
 
   expect(errors, 'ページ例外 0 件').toEqual([]);
 });
+
+/**
+ * 🔴 **留めた並びは、開き直しても残る**(#505 段②「憶える」── 2026-09-02、#633 の調査で
+ * **一度も成立していなかった**と判明)。
+ *
+ * ⚠ 直す前:起動直後の描画の購読が、復元より**前**に空の並びを localStorage へ書いていた。
+ *   お知らせ(2026-08-31)もマニュアル(§「横に並べて読む」)も「次に開いても同じ枠が
+ *   出ます」と書いていたのに、開き直すと**毎回外れていた**。
+ * ⚠ unit では原理的に届かない ── `main.ts` の**購読と復元の順番**の話で、`main.ts` は
+ *   どの test からも実行されない(原文 pin は `bootstrap-wiring.test.ts`)。
+ * 🔑 R1: 直す前の dist でこの test が赤いことを見てから直した(2026-09-02 実測)。
+ */
+test('🔴 横に留めた枠は、開き直しても留まったまま出る (#505 段②)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await gotoApp(page);
+
+  await createEntry(page, 'text');
+  await writeBody(page, `# 資料 A\n\n${LONG}`);
+  await createEntry(page, 'text');
+  await writeBody(page, `# 資料 B\n\n${LONG}`);
+  await page.locator('[data-pkc-field="detail-body"] p').first().click({ button: 'right' });
+  const menu = page.locator(MENU);
+  await expect(menu, '本文で右クリックしてもメニューが出ない').toBeVisible();
+  await menu.locator('button[data-pkc-action="pin-split"]').click();
+  await expect(page.locator('[data-pkc-split-lid]')).toHaveCount(1);
+  const lid = await page.locator('[data-pkc-split-lid]').first().getAttribute('data-pkc-split-lid');
+  expect(lid, '留めた枠に lid が無い(前提が崩れている)').toBeTruthy();
+  // ⚠ 前提:憶えた(ここが空なら、以降の「戻った」は何も言わない)
+  await expect
+    .poll(async () => page.evaluate(() => localStorage.getItem('pkc3.split-lids')), {
+      message: '留めたのに憶えていない',
+    })
+    .toContain(lid!);
+
+  // 🔴 開き直す ── 直す前はここで空を書いてから読んでいたので、枠が外れていた
+  await page.reload();
+  await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
+  await expect(page.locator('[data-pkc-split-lid]'), '開き直したら枠が外れた').toHaveCount(1);
+  await expect(page.locator('[data-pkc-split-lid]').first()).toHaveAttribute(
+    'data-pkc-split-lid',
+    lid!,
+  );
+  await expect(
+    page.locator('[data-pkc-split-lid] [data-pkc-field="split-body"] h1').first(),
+    '枠は戻ったが中身が入っていない',
+  ).toContainText('資料 B');
+
+  // 対照群:外して開き直せば、外れたまま(「全部外した」も憶える ── 片道にしない)
+  await clickReal(page, '[data-pkc-action="unsplit-entry"]');
+  await expect(page.locator('[data-pkc-split-lid]')).toHaveCount(0);
+  await page.reload();
+  await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
+  await expect(page.locator('[data-pkc-split-lid]'), '外したのに開き直したら戻った').toHaveCount(0);
+
+  expect(errors, 'ページ例外 0 件').toEqual([]);
+});

@@ -445,3 +445,30 @@ describe('取込の衝突検査の配線(#328)', () => {
     expect(existingLidsWiring(), 'state を捨てている').toContain('entryMetas.keys()');
   });
 });
+
+/**
+ * 🔴 **横に留めた並びは、復元の後から憶える**(2026-09-02 hotfix。#633 の調査で
+ * 「一度も成立していなかった」と判明)。
+ *
+ * ⚠ 直す前は描画の購読の中で書いていた ── 購読は復元より**前**に張られるので、boot の
+ *   最初の state(空)を '' として書き、そのあと `loadSplitLids()` が空を読んでいた。
+ *   実ブラウザの観測点は `tests/smoke/split-frames.smoke.spec.ts`「開き直しても留まったまま」
+ *   (直す前の dist で赤)。ここは原文 pin ── 弱いと自覚して使う。
+ */
+describe('横に留めた並びの憶え方(#505 段②)', () => {
+  const code = MAIN.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+
+  it('🔴 憶える購読(saveSplitLids)は、復元(loadSplitLids)の後に張る', () => {
+    const load = code.indexOf('loadSplitLids()');
+    const save = code.indexOf('saveSplitLids(');
+    expect(load, '復元が無い').toBeGreaterThan(-1);
+    expect(save, '憶える口が無い').toBeGreaterThan(-1);
+    expect(save, '復元より前に憶え始めている(boot の空の並びで上書きしてから読む)').toBeGreaterThan(
+      load,
+    );
+  });
+
+  it('🔴 起点は復元した後の state(最初の state を「変わった」と読まない)', () => {
+    expect(code).toMatch(/let lastSplit = dispatcher\.getState\(\)\.splitLids;/);
+  });
+});

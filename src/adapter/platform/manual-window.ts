@@ -100,9 +100,16 @@ export interface OpenManualWindowDeps {
 export interface ManualAppearance {
   /** `data-pkc-theme` の値(無ければ触らない)。 */
   readonly theme: string | null;
-  /** `--pkc-text-size` の値(無ければ既定へ戻す)。 */
+  /**
+   * user が**選んだ**大きさ(`text-scale.ts` の `chosenTextScale` を px にしたもの)。
+   * ⚠ `null` = 選んでいない → 外して CSS の既定へ戻す(焼いた page の boot script と同じ門。
+   *   「効いている 13px」を渡すと、何も変えずに押しただけで 14px から縮む ── 2026-09-02 hotfix)。
+   */
   readonly textSize: string | null;
-  /** 地と字の色(`--bg` / `--fg` の computed 値)。無ければ UA の色のまま。 */
+  /**
+   * 地と字の色(`--bg` / `--fg` の computed 値)。無ければ UA の色のまま。
+   * ⚠ 使うのは**焼いた page へ移す経路だけ**(`about:blank` に組む経路には配色の規則が無い)。
+   */
   readonly bg: string | null;
   readonly fg: string | null;
 }
@@ -216,20 +223,24 @@ export async function openManualWindow(
     doc.title = deps.title;
     // ⚠ **開いた瞬間に「待っている」と分かる形にする**(白紙を見せない)
     doc.body.textContent = 'マニュアルを開いています…';
-    /**
-     * 🔑 **その一瞬も、選んだ配色の地で出す**(I5)── 素の `about:blank` は白いので、
-     *   暗い配色の user には 1100×900 の白い窓が光ってから暗い page に変わっていた。
-     * ⚠ `<style>` ではなく inline の 2 宣言 ── この document は直後に捨てる(移す)か
-     *   `fillManualWindow` が `head` ごと組み直すので、残らない。
-     */
-    if (deps.appearance?.bg) doc.documentElement.style.background = deps.appearance.bg;
-    if (deps.appearance?.fg) doc.documentElement.style.color = deps.appearance.fg;
   } catch {
     // 触れない窓(user が別の origin へ動かした)── 書けないが、移すことはできる
     doc = null;
   }
 
   if (deps.pageUrl !== null) {
+    /**
+     * 🔑 **移るまでの一瞬も、選んだ配色の地で出す**(I5)── 素の `about:blank` は白いので、
+     *   暗い配色の user には 1100×900 の白い窓が光ってから暗い page に変わっていた。
+     * 🔴 **この経路だけ**に置く(2026-09-02 hotfix)── `about:blank` に組む経路には
+     *   配色の規則が無く(`fillManualWindow` は UA の色で組む)、そこへ暗い地を先に置くと
+     *   **組み上がった瞬間に暗 → 明へ裏返る**(避けたかった「光る」が向きを変えて残る)。
+     * ⚠ `<style>` ではなく inline の 2 宣言 ── この document は直後に捨てられる(移す)。
+     */
+    if (doc !== null) {
+      if (deps.appearance?.bg) doc.documentElement.style.background = deps.appearance.bg;
+      if (deps.appearance?.fg) doc.documentElement.style.color = deps.appearance.fg;
+    }
     /**
      * 🔴 **焼いた 1 枚へ移す ── 組まない**(段②)。
      * ⚠ `replace` にする ── `href =` だと `about:blank` が履歴に残り、
@@ -296,9 +307,6 @@ export function fillManualWindow(
   //    (先に入れると、組み直した窓の題名が空になる ── unit が落ちて気づいた)
   doc.head.textContent = '';
   doc.title = parts.title;
-  // ⚠ 「開いています…」の一瞬に置いた地の色を外す ── 残すと器の規則(`--bg`)より勝つ
-  doc.documentElement.style.removeProperty('background');
-  doc.documentElement.style.removeProperty('color');
   const style = doc.createElement('style');
   style.textContent = `${BODY_CSS}\n${MANUAL_CHROME_CSS}`;
   doc.head.append(style);
