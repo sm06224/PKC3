@@ -143,6 +143,30 @@ describe('条件を書く(#421 段①)', () => {
     expect(okSpec(withSmartTag(full, 't0', 'remove')).tags).not.toContain('t0');
   });
 
+  /**
+   * 🔴 **どのタグの話かを言う**(#640)。
+   *
+   * ⚠ 押した所は**打った字を即座に消す**ので、`#請求 #未払 #今月` と打って
+   *   3 つ目だけ上限に当たった user には「条件は 8 つまでです」としか出ず、
+   *   **どれが入らなかったのか 1 文字も分からないまま打ち直し**になっていた。
+   */
+  it('🔴 断り文に、入らなかったタグの名前が出る(#640)', () => {
+    const why = smartCondError('limit', '今月') ?? '';
+    expect(why, 'どのタグか言っていない').toContain('今月');
+    expect(why, '何個で止まるのかを言っていない').toContain(String(MAX_SMART_TAGS));
+    expect(why, '次の一手を言っていない').toContain('外してから');
+    // ⚠ 名前は**打った字**のまま(正規化した綴りだと、打った字と読み合わせられない)
+    expect(smartCondError('invalid', '#長すぎ') ?? '', '打った字と違う').toContain('#長すぎ');
+    /**
+     * ⚠ **対照群 2 つ** ── ①名前が無いときは今までどおりの字(呼び側が渡さない
+     *   経路が在る:列で引く条件)②黙ってよいものは黙る
+     */
+    expect(smartCondError('limit'), '名前が無い呼びで壊れた').toBe(
+      `条件は ${String(MAX_SMART_TAGS)} つまでです(1 つ外してから足してください)`,
+    );
+    expect(smartCondError('unchanged', '買い物'), '黙ってよいのに言った').toBeNull();
+  });
+
   it('🔴 タグとして受けられないものは invalid で、理由が出る', () => {
     expect(withSmartTag(EMPTY_SMART, '   ', 'add')).toEqual({ ok: false, reason: 'invalid' });
     expect(withSmartTag(EMPTY_SMART, 'x'.repeat(MAX_TAG_CHARS + 1), 'add')).toEqual({

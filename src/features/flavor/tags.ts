@@ -121,22 +121,48 @@ export function normalizeTag(raw: string): string {
  *
  * @returns 変わらないときは `null`(呼び側が「書かない」を選べる)
  */
+export type TagChange =
+  | { readonly ok: true; readonly tags: string[] }
+  | { readonly ok: false; readonly reason: 'unchanged' | 'limit' | 'invalid' };
+
+/**
+ * 🔴 **なぜ変わらなかったのかも返す**(#640)。
+ *
+ * ⚠ 直す前は「既に在る」も「上限に当たった」も**同じ `null`** だったので、
+ *   画面には「**0 件に付けました / 1 件は既に付いていました**」という
+ *   **事実と違う字**が出ていた(付いていないのに「既に付いていました」)。
+ * 🔑 `withSmartTag`(`smart/smart-spec.ts`)は最初からこの形で分けている ──
+ *   **同じ問いの答え方を 2 つ持たない**(§7)。
+ */
+export function withTagResult(
+  tags: readonly string[],
+  tag: string,
+  mode: 'add' | 'remove',
+): TagChange {
+  const t = normalize(tag);
+  if (t === '' || [...t].length > MAX_TAG_CHARS) return { ok: false, reason: 'invalid' };
+  const has = tags.some((x) => sameTag(x, t));
+  if (mode === 'add') {
+    if (has) return { ok: false, reason: 'unchanged' };
+    // ⚠ 上限に当たったら**足さない**(黙って古い方を落とさない)
+    if (tags.length >= MAX_TAGS) return { ok: false, reason: 'limit' };
+    return { ok: true, tags: [...tags, t] };
+  }
+  if (!has) return { ok: false, reason: 'unchanged' };
+  return { ok: true, tags: tags.filter((x) => !sameTag(x, t)) };
+}
+
+/**
+ * 🔑 上の**薄い包み** ── 理由の要らない呼び側のため。
+ * ⚠ 判定そのものは `withTagResult` 1 つだけである(2 本目の規則を書かない)。
+ */
 export function withTag(
   tags: readonly string[],
   tag: string,
   mode: 'add' | 'remove',
 ): string[] | null {
-  const t = normalize(tag);
-  if (t === '' || [...t].length > MAX_TAG_CHARS) return null;
-  const has = tags.some((x) => sameTag(x, t));
-  if (mode === 'add') {
-    if (has) return null;
-    // ⚠ 上限に当たったら**足さない**(黙って古い方を落とさない)
-    if (tags.length >= MAX_TAGS) return null;
-    return [...tags, t];
-  }
-  if (!has) return null;
-  return tags.filter((x) => !sameTag(x, t));
+  const r = withTagResult(tags, tag, mode);
+  return r.ok ? r.tags : null;
 }
 
 /** 同じタグか(表示は原文、突き合わせは大小無視)。 */

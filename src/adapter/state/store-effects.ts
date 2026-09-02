@@ -17,7 +17,7 @@ import {
   insertedLines,
   resolveAppendAt,
 } from '@features/markdown/append-target';
-import { applyBodyRewrite } from '@features/markdown/body-rewrite';
+import { applyBodyRewrite, applyTagsToBody } from '@features/markdown/body-rewrite';
 import { clipPreview } from '@features/relation/dual-pane';
 import {
   EMPTY_SMART,
@@ -43,7 +43,7 @@ import type {
 // ⚠ 「未設定」の綴りは features 側の 1 か所(`''`)── ここで書き写さない(§7)
 import { TAGS_KEY, UNSET as QUERY_UNSET } from '@features/query/group-by';
 import { collectEntryTags } from '@features/flavor/entry-tags';
-import { sameTag } from '@features/flavor/tags';
+import { MAX_TAGS, sameTag } from '@features/flavor/tags';
 import type { TaskScan } from '@features/schedule/task-cards';
 import type { ContactScan } from '@features/contact/contact-card';
 import type { SnippetScan } from '@features/snippet/snippet-table';
@@ -394,6 +394,8 @@ export function connectStoreEffects(
   const writeSmartCond = (
     t: { lid: string; title: string; archetype: string; entryOrder: number },
     apply: (spec: SmartSpec) => SmartCondResult,
+    /** ⚠ 断り文に出す**打った字**(#640)。列で引く条件(タグではない)では渡さない。 */
+    tag?: string,
   ): void => {
     enqueue(async () => {
       if (disposed) return;
@@ -402,7 +404,7 @@ export function connectStoreEffects(
         if (disposed || body === null) return;
         const res = apply(readSmartSpec(body));
         if (!res.ok) {
-          const why = smartCondError(res.reason);
+          const why = smartCondError(res.reason, tag);
           if (why !== null) dispatcher.dispatch({ type: 'OP_FAILED', error: why });
           else dispatcher.dispatch({ type: 'SMART_RESCAN', lid: t.lid });
           return;
@@ -564,7 +566,7 @@ export function connectStoreEffects(
         const t = ev.target;
         const tag = ev.tag;
         const mode = ev.mode;
-        writeSmartCond(t, (spec) => withSmartTag(spec, tag, mode));
+        writeSmartCond(t, (spec) => withSmartTag(spec, tag, mode), tag);
         break;
       }
       /**
@@ -1255,6 +1257,8 @@ export function connectStoreEffects(
            */
           const wroteBy = new Map<string, number>();
           const skippedBy = new Map<string, number>();
+          /** 🔴 **上限で入らなかった数**(#640)── `skippedBy` と混ぜると嘘になる。 */
+          const limitBy = new Map<string, number>();
           const bump = (m: Map<string, number>, tag: string): void => {
             m.set(tag, (m.get(tag) ?? 0) + 1);
           };
@@ -1285,17 +1289,20 @@ export function connectStoreEffects(
                * ⚠ **`null` は失敗ではない** ── 「既に付いている / 元から無い」も
                *   ここへ来る。名前ごとに数だけ分けて、赤い帯にしない。
                */
-              let newBody = body;
-              for (const tag of ev.tags) {
-                const next = applyBodyRewrite(newBody, { kind: 'tag', tags: [tag], mode: ev.mode });
-                if (next === null) {
-                  bump(skippedBy, tag);
-                  continue;
-                }
-                newBody = next;
-                bump(wroteBy, tag);
+              /**
+               * 🔴 **「既に付いている」と「上限で付かない」を言い分ける**(#640)。
+               * ⚠ 直す前は 1 タグずつ `applyBodyRewrite` を呼び、**同じ `null`** を
+               *   数えていたので、上限で入らなかったノートにも
+               *   「**既に付いていました**」という**事実と違う字**が出ていた。
+               */
+              const applied = applyTagsToBody(body, ev.tags, ev.mode);
+              for (const [tag, why] of applied.outcomes) {
+                if (why === 'wrote') bump(wroteBy, tag);
+                else if (why === 'limit') bump(limitBy, tag);
+                else bump(skippedBy, tag);
               }
-              if (newBody === body) continue;
+              if (applied.body === null) continue;
+              const newBody = applied.body;
               // ⚠ 外した**後の本文**にまだ残っているか(= 本文の行に書いてある)
               if (ev.mode === 'remove') {
                 const inBody = collectEntryTags(newBody).inBody;
@@ -1357,6 +1364,16 @@ export function connectStoreEffects(
             // ⚠ 1 つのときは 0 件でも言う(押した手応えを消さない)
             if (w > 0 || one) parts.push(`${label(tag)}${w} 件に${verb}`);
             if (k > 0) parts.push(`${label(tag)}${k} 件は${already}`);
+            /**
+             * 🔴 **上限は別の字で言う**(#640)── 「既に付いていました」に混ぜると、
+             *   **付いていないのに付いていると言う**ことになる。
+             * ⚠ 何をすれば入るかまで言う(手詰まりにしない)。
+             */
+            const lim = limitBy.get(tag) ?? 0;
+            if (lim > 0)
+              parts.push(
+                `${label(tag)}${lim} 件はタグが ${String(MAX_TAGS)} 個に達していて付きませんでした(1 つ外してから足してください)`,
+              );
           }
           if (failed > 0) parts.push(`${failed} 件は書けませんでした(別のウィンドウが書き替えた可能性があります)`);
           /**

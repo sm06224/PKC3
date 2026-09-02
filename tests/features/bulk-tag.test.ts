@@ -8,8 +8,14 @@
  * 付けるだけだと、12 件に間違えて付けたものを **12 回開いて消す**ことになる。
  */
 import { describe, expect, it } from 'vitest';
-import { MAX_TAGS, normalizeTag, readTags, withTag } from '../../src/features/flavor/tags';
-import { applyBodyRewrite } from '../../src/features/markdown/body-rewrite';
+import {
+  MAX_TAGS,
+  normalizeTag,
+  readTags,
+  withTag,
+  withTagResult,
+} from '../../src/features/flavor/tags';
+import { applyBodyRewrite, applyTagsToBody } from '../../src/features/markdown/body-rewrite';
 
 const doc = (tags: string): string => `---\n${tags}\n---\n本文\n`;
 
@@ -93,5 +99,64 @@ describe('本文への当て方(書換の 1 本を通る)', () => {
     const body = doc('tags: [家事]') + '2 行目\n';
     const out = add(body, '請求済')!;
     expect(out.split('---\n')[2], '本文が書き換わった').toBe(body.split('---\n')[2]);
+  });
+});
+
+/**
+ * 🔴 **なぜ変わらなかったのかを言い分ける**(#640)。
+ *
+ * ⚠ 直す前は「既に付いている」も「上限に当たった」も**同じ `null`** だったので、
+ *   画面には「**0 件に付けました / 1 件は既に付いていました**」という
+ *   **事実と違う字**が出ていた ── 付いていないのに「既に付いていました」。
+ */
+describe('タグが変わらなかった理由(#640)', () => {
+  const full = Array.from({ length: MAX_TAGS }, (_, i) => `t${String(i)}`);
+
+  it('🔴 「既に在る」と「上限」と「そもそも書けない」を別の答えで返す', () => {
+    expect(withTagResult(['買い物'], '買い物', 'add'), '既に在るのに上限と言った').toEqual({
+      ok: false,
+      reason: 'unchanged',
+    });
+    expect(withTagResult(full, '新しい', 'add'), '上限なのに「既に在る」と言った').toEqual({
+      ok: false,
+      reason: 'limit',
+    });
+    expect(withTagResult([], '   ', 'add')).toEqual({ ok: false, reason: 'invalid' });
+    // ⚠ **対照群** ── 通る形は通る(規則そのものが生きている)
+    expect(withTagResult(['家事'], '買い物', 'add')).toEqual({
+      ok: true,
+      tags: ['家事', '買い物'],
+    });
+    // 🔑 薄い包み(`withTag`)は今までどおり ── 判定を 2 つ持っていない
+    expect(withTag(full, '新しい', 'add'), '包みの答えが変わった').toBeNull();
+    expect(withTag(['家事'], '買い物', 'add')).toEqual(['家事', '買い物']);
+  });
+
+  it('🔴 本文へ当てる口も、打った字ごとの理由を返す', () => {
+    const body = `---\ntags: [${full.join(', ')}]\n---\n本文\n`;
+    // ⚠ 前提: この本文は上限に達している(達していなければ何も検めていない)
+    expect(readTags(body).length, '前提が崩れている: 上限に達していない').toBe(MAX_TAGS);
+    const r = applyTagsToBody(body, ['t0', '新しい'], 'add');
+    expect(r.body, '1 つも動いていないのに本文を書いた').toBeNull();
+    expect(r.outcomes.get('t0'), '既に在るものを上限と言った').toBe('unchanged');
+    expect(r.outcomes.get('新しい'), '上限を「既に在る」と言った').toBe('limit');
+
+    // ⚠ **対照群** ── 空きが在れば書けて、理由も `wrote` になる
+    const room = applyTagsToBody('---\ntags: [家事]\n---\n本文\n', ['買い物'], 'add');
+    expect(room.outcomes.get('買い物')).toBe('wrote');
+    expect(readTags(room.body ?? ''), '書けていない').toEqual(['家事', '買い物']);
+
+    /**
+     * 🔑 **書く形と数える形が同じ 1 本であること**(§7)── `applyBodyRewrite` は
+     *   この口へ委ねているので、答えは 1 バイトも違わない。
+     */
+    expect(
+      applyBodyRewrite('---\ntags: [家事]\n---\n本文\n', {
+        kind: 'tag',
+        tags: ['買い物'],
+        mode: 'add',
+      }),
+      '2 本目の規則が生えている',
+    ).toBe(room.body);
   });
 });
