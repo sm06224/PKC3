@@ -168,6 +168,25 @@ function builtVersion(win: Window): string | null {
  * ⚠ **描画に失敗しても窓は残す** ── 素の原文を出す。閉じてしまうと
  *   「押したのに何も出なかった」と見分けが付かない。
  */
+
+/**
+ * 🔴 **開いた窓を手前へ出す**(#649 の着地後レビュー ②)。⚠ **判定は 1 か所**(§7)──
+ * 直す前は**再利用の経路だけ**が `focus()` を呼んでいたので、
+ * 「マニュアルが新しくなったので、ウィンドウを入れ替えました」と言った回は
+ * **入れ替わった窓が後ろに居たまま**だった(user が見ているのはアプリの画面なので、
+ * 言われたものが画面のどこにも無い)。
+ *
+ * ⚠ **前へ出せない環境が在る** ── 例外は飲む(呼び側が「見えないときは切り替えて
+ * ください」と知らせるので、ここで言うことは無い)。
+ */
+function bringToFront(win: Window): void {
+  try {
+    win.focus();
+  } catch {
+    // 前へ出せない環境が在る ── 呼び側が知らせを出すので、ここでは黙ってよい
+  }
+}
+
 export async function openManualWindow(
   deps: OpenManualWindowDeps,
 ): Promise<ManualWindowHandle | null> {
@@ -208,11 +227,7 @@ export async function openManualWindow(
      *   変えたあとに押した回は、読み直さずに(読んでいた所のまま)新しい見え方になる。
      */
     applyAppearance(win, deps.appearance);
-    try {
-      win.focus();
-    } catch {
-      // 前へ出せない環境が在る ── 呼び側が知らせを出すので、ここでは黙ってよい
-    }
+    bringToFront(win);
     return { close: () => closeQuietly(win), reused: true, swapped: false };
   }
   // 🔑 古い印の窓が在った = 入れ替える(user は読んでいた所を失う ── 呼び側が一言出す)
@@ -247,6 +262,7 @@ export async function openManualWindow(
      *   「戻る」で白紙へ戻れてしまう。
      */
     win.location.replace(deps.pageUrl);
+    bringToFront(win);
     return { close: () => closeQuietly(win), reused: false, swapped };
   }
   // ⚠ 触れない窓には組めない ── `null` で呼び側に理由を出させる(無言で終えない)
@@ -270,6 +286,7 @@ export async function openManualWindow(
   });
   // 🔑 組んだ窓にも字の大きさを当てる(この経路には配色の規則が無いので、効くのは大きさだけ)
   applyAppearance(win, deps.appearance);
+  bringToFront(win);
   return { close: () => closeQuietly(win), reused: false, swapped };
 }
 
