@@ -1106,17 +1106,11 @@ function notWhileEditing(dispatcher: Dispatcher, refusal: string): () => string 
  *   入れていません」と言い(= **録ってから知らされる**)、**添付は黙って
  *   file を選ばせて**いた。
  *   ⚠ どれも「押した時点では止めてくれない」ので、user は**やり直しになる**。
+ * 🔑 **4 つとも「開いているノートに入れる道具」である**(user 裁定 2026-09-02、#666
+ *   ── 添付だけ本文に入らず画面ごと持っていく形だったのを、録音と同じに揃えた)。
+ *   だから断る理由は 4 つに共通して真である。
  * 🔑 判定は `NOTE_TOOL_ACTIONS` **1 か所**から引くので、5 つ目の道具を足した日に
  *   ここへ書き足す必要は無い。
- *
- * 🔴 **理由を書き添えない**(2026-09-02 の着地前レビュー 2 本が同じ 1 件を挙げた)。
- *   ⚠ 1 稿目は「(**入れ先のノートが決まりません**)」と添えたが、**添付には
- *   成り立たない** ── `attach.ts` は `CREATE_ENTRY` を撃つだけで、`selectedLid` も
- *   `formatAssetRef` も **1 件も読んでいない**(独立した添付ノートを作る)。
- *   🔑 4 つに共通して真なのは「**ノートを開いてから押す**」だけなので、そこで止める。
- * ⚠ **添付だけ振る舞いが揃っていないこと自体**は別に扱う ── 録音は開いていた
- *   ノートへ選択を返し、本文へ参照を入れる(`capture.ts`)。揃えるかどうかは
- *   **見え方が変わる**判断なので、この PR では字を実装に合わせるに留める。
  * ⚠ 貼り付け / 差し込みの経路(`services.attachFiles` を直に呼ぶ 2 か所)は
  *   **通さない** ── あちらは「この file をここへ置く」という指し示しつきの操作で、
  *   断ると**いま在る動線を 1 つ失う**(user 裁定 2026-08-07)。
@@ -1132,7 +1126,7 @@ function refuseWithoutNote(action: string, dispatcher: Dispatcher): boolean {
   //   4 つが同じ字だと、user は自分がどれを押して断られたのか分からない
   dispatcher.dispatch({
     type: 'OP_FAILED',
-    error: `「${label}」はノートを開いてから押してください`,
+    error: `「${label}」はノートを開いてから押してください(入れ先のノートが決まりません)`,
   });
   return true;
 }
@@ -5984,9 +5978,13 @@ export function bindActions(
         const ready = dispatcher.getState().phase === 'ready';
         if (ready && services.attachFiles) {
           services.attachFiles([...files]);
+          // ⚠ **行き先まで言い切らない**(#666 で `attachFiles` が開いていた
+          //   ノートの本文へも入れるようになった)── ここで「添付にしました」と
+          //   言い切ると、実際には本文へ入った回に **user がもう一度貼って 2 行**
+          //   になる。🔑 どこへ入ったかは `asset-into-note.ts` が 1 行で言う。
           dispatcher.dispatch({
             type: 'OP_FAILED',
-            error: '編集欄が閉じたため、貼り付けた画像は添付にしました',
+            error: '編集欄が閉じたため、貼り付けた画像は取り込みました',
           });
         } else {
           dispatcher.dispatch({

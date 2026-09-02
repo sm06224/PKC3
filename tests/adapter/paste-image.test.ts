@@ -250,8 +250,14 @@ describe('スクショの貼付(#250)', () => {
     // ⚠ 編集そのものが閉じた ── 差す先がどこにも無い
     root.querySelector('[data-pkc-region="detail"]')!.remove();
     await vi.waitFor(() => expect(calls.attach, '貼った画像を捨てている').toHaveLength(1));
-    // 🔑 行き先を**言う**(黙って添付にすると「貼ったのに出ない」に見える)
-    expect(dispatcher.getState().error).toContain('添付にしました');
+    /**
+     * 🔑 **起きたことを言う**(黙って回すと「貼ったのに出ない」に見える)。
+     * ⚠ **行き先までは言い切らない**(#666)── `attachFiles` は開いていた
+     *   ノートの本文へも入れるので、「添付にしました」と言い切ると、
+     *   本文へ入った回に **user がもう一度貼って 2 行**になる。
+     *   どこへ入ったかは `asset-into-note.ts` が別の 1 行で言う。
+     */
+    expect(dispatcher.getState().error).toContain('取り込みました');
   });
 
   it('🔴 まだ編集中なら添付にはせず、**やり直せる形で断る**', async () => {

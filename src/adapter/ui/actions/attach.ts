@@ -15,6 +15,8 @@
  *   ── PKC2 は走査が 500MB データで boot OOM を誘発した)
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
+import { noteToPutInto, putAssetIntoNote } from './asset-into-note';
+import { createWritableQueue } from './writable-queue';
 import { attachmentBody } from '@features/flavor/attachment-flavor';
 import { identifyAsset, assetKeyFromHash } from '@adapter/platform/storage/asset-key';
 import { shrinkPlan, shrinkQuestion } from '@features/asset/image-shrink';
@@ -291,6 +293,20 @@ export async function attachFiles(
     (await deps.listMetas().catch(() => [])).map((m) => m.key),
   );
 
+  /**
+   * 🔴 **入れ先は「押した時点で開いているノート」を先に控える**(user 裁定
+   * 2026-09-02、#666「読んでいたノートの本文に入る」)。
+   *
+   * ⚠ 輪の**外**で採る ── 中で採ると、1 枚目の添付が `selectedLid` を奪った後に
+   *   2 枚目が**添付自身**を入れ先だと読む(20 枚落とすと 19 枚が迷子になる)。
+   * 🔑 選択を返す / 本文へ入れる / 書けないなら預かるは `asset-into-note.ts`
+   *   **1 か所** ── 録音・画面録画と同じ口である(CLAUDE.md §7)。
+   */
+  const into = noteToPutInto(dispatcher);
+  const queue = createWritableQueue(dispatcher);
+  const notify = (text: string): void =>
+    dispatcher.dispatch({ type: 'OP_NOTICE', message: text });
+
   for (const file of files) {
     try {
       const item = await maybeShrink(deps, {
@@ -299,7 +315,20 @@ export async function attachFiles(
         size: file.size,
         blob: file,
       });
-      await attachOne(dispatcher, deps, item, known);
+      const attached = await attachOne(dispatcher, deps, item, known);
+      // ⚠ `null` は `attachOne` が既に理由を出している(二重に言わない)
+      if (attached === null) continue;
+      putAssetIntoNote({
+        dispatcher,
+        queue,
+        notify,
+        into,
+        attachedLid: attached.lid,
+        assetKey: attached.assetKey,
+        name: item.name,
+        mime: attached.mime,
+        why: '',
+      });
     } catch (e) {
       dispatcher.dispatch({
         type: 'OP_FAILED',

@@ -558,6 +558,21 @@ test('🔴 大きな画像は縮めるか聞き、断れば原寸のまま入る
   await clickReal(page, '[data-pkc-field="dialog-ok"]');
   await expect(dialog).toBeHidden();
   await expect(rows, '縮めたものが取り込まれていない').toHaveCount(2);
+  /**
+   * 🔴 **2 枚目を開いてから測る**(user 裁定 2026-09-02、#666 でここが変わった)。
+   *
+   * ⚠ 直す前は「取り込んだものが**勝手に開く**」ことに寄りかかっていた。いまは
+   *   **読んでいたものが開いたまま**なので(1 枚目の添付が開いている)、開き直さずに
+   *   測ると **1 枚目の大きさを 2 枚目のものとして読む** ── 数字は出るが、
+   *   別の物を指している(CLAUDE.md §4「計器の名前が範囲より広い」と同じ形)。
+   * 🔑 だから**中身の行そのもの**(`もう一枚.jpg — image/jpeg`)を待つ ──
+   *   題名だけ待つと、本文が「読み込んでいます…」の間に測ってしまう。
+   */
+  await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]:has-text("もう一枚.jpg")');
+  await expect(
+    page.locator('[data-pkc-region="detail"]'),
+    '2 枚目の本文が出ない',
+  ).toContainText('もう一枚.jpg — image/jpeg', { timeout: 15_000 });
   const shrunkSize = await sizeOf();
   expect(shrunkSize, '受けたのに縮んでいない').toBeLessThan(keptSize);
   // 🔑 **十分小さい**(採用の閾値 85% を満たしている)
