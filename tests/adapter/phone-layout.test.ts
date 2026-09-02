@@ -20,7 +20,7 @@ import { appPhone } from '../../src/adapter/ui/render/phone-layout';
 import { appPanes, applyPaneVisibility } from '../../src/adapter/ui/render/pane-visibility';
 import { PHONE_MAX_PX, PHONE_MIN_PX } from '../../src/features/phone-layout';
 import { ENTRY_MENU_ACTIONS, NOTE_TOOL_ACTIONS } from '../../src/features/entry-actions';
-import { blocksFor, stripComments, withoutMedia } from '../helpers/css-blocks';
+import { blocksFor, decl, mediaBlock, stripComments, withoutMedia } from '../helpers/css-blocks';
 
 /** 幅の見張りの替え玉。⚠ `matches` を手で動かして `change` を撃つ。 */
 class FakeMedia {
@@ -78,6 +78,7 @@ function setup(phone: boolean) {
     appPhone.render({
       selectedLid: st.selectedLid,
       viewMode: st.viewMode,
+      editing: st.phase === 'editing',
       title: st.selectedLid === null ? '' : (st.entryMetas.get(st.selectedLid)?.title ?? ''),
     });
   };
@@ -144,11 +145,43 @@ describe('版面の切り替え(属性)', () => {
     expect(has('center') || has('sidebar') || has('inspector'), 'PC でも inert が残る').toBe(false);
   });
 
+  /**
+   * 🔴 **面(設定・ヘルプ・2 ペイン・集計)のページを、どの test も触っていなかった**
+   *   (着地前レビュー 4)。⚠ `FACE.pane` を `'sidebar'` に変える変異は
+   *   **CSS が center を出したまま center に `inert` を付ける**ので、
+   *   設定の中も「× 閉じる」も押せない**完全な行き止まり**になるのに、
+   *   落ちる test が 1 つも無かった。
+   */
+  it('🔴 面のページでは、その面が押せて「× 閉じる」で戻れる', () => {
+    const s = setup(true);
+    s.open('n1');
+    s.d.dispatch({ type: 'SET_VIEW_MODE', mode: 'settings' });
+    expect(s.page()).toBe('pane');
+    const inertOf = (region: string) =>
+      s.shell.querySelector(`[data-pkc-region="${region}"]`)!.hasAttribute('inert');
+    expect(inertOf('center'), '面を出しているのに中央が inert(何も押せない)').toBe(false);
+    expect(inertOf('sidebar'), '一覧が inert でない').toBe(true);
+    expect(inertOf('inspector'), '情報が inert でない').toBe(true);
+    /**
+     * 🔴 **戻る口が本当に効く**。⚠ 実物の「× 閉じる」は `CenterRouter` の帯が持つ
+     *   (`center.ts` の `pane-bar`)ので、この台(shell だけ)には居ない ──
+     *   **中央の面の中に**同じ受け手を置いて、`inert` の内側でないことごと見る。
+     */
+    const close = s.root.ownerDocument.createElement('button');
+    close.setAttribute('data-pkc-action', 'close-pane');
+    s.root.querySelector('[data-pkc-region="center"]')!.append(close);
+    close.click();
+    expect(s.d.getState().viewMode, '面から戻れない(行き止まり)').toBe('detail');
+    expect(s.page()).toBe('note');
+  });
+
   it('🔴 幅が戻れば印も消える(狭めたまま広げて版面が壊れない)', () => {
     const s = setup(true);
     s.open('n1');
     s.media.set(false);
     expect(s.layout()).toBeNull();
+    // ⚠ ページの印も消す ── `layout` だけ見ていると片方を残す変異が生き延びる
+    expect(s.page(), 'ページの印が残っている').toBeNull();
     expect(s.bar().hidden).toBe(true);
     s.media.set(true);
     expect(s.layout()).toBe('phone');
@@ -333,6 +366,59 @@ describe('⋯ と左の列の等値(次に足した人が気づく)', () => {
       expect(acts, `${a} まで ⋯ に出ている`).not.toContain(a);
   });
 
+  /**
+   * 🔴 **「在る」ではなく「押して効く」まで見る**(着地前レビュー 欠陥 1。2026-09-02)。
+   *
+   * ⚠ 上の test は題名に「押せる」と書きながら、**メニューに項目が在るか**しか
+   *   見ていなかった ── だから `attach-file` が**押しても無反応**なまま緑だった。
+   * 🔴 原因は `⋯` のメニューが **root の直下**に出ること(`context-menu.ts` が
+   *   自分でそう戒めている)── 受け手が `target.closest('…shell…')` を辿ると
+   *   **必ず null** になり、`?.` が例外ごと飲むので**理由も出ない**。
+   * ⚠ 他の 3 つは `target` を読まないので通る ── **3 つ通ったから 4 つ通った**と
+   *   読める形だった(§1「別の物に満たされる」の顔違い)。
+   */
+  it('🔴 ⋯ の「添付」を押すと、ファイルを選ぶ口が実際に開く', () => {
+    const s = setup(true);
+    s.open('n1');
+    const input = s.root.querySelector<HTMLInputElement>('[data-pkc-field="attach-input"]')!;
+    expect(input, '常設の hidden input が無い(台の前提が崩れた)').not.toBeNull();
+    let opened = 0;
+    input.addEventListener('click', () => {
+      opened += 1;
+    });
+    // 対照群: 左の列から押すと開く(器の外から押したときだけ壊れる、を見分ける)
+    s.root
+      .querySelector<HTMLElement>('[data-pkc-region="create-bar"] [data-pkc-action="attach-file"]')!
+      .click();
+    expect(opened, '左の列からも開かない(この test は何も見ていない)').toBe(1);
+
+    s.field('phone-menu').click();
+    s.menu()!
+      .querySelector<HTMLElement>('[data-pkc-action="attach-file"]')!
+      .click();
+    expect(opened, '⋯ から押してもファイルを選ぶ口が開かない(無言の dead click)').toBe(2);
+  });
+
+  /**
+   * 🔴 **危ない物はいちばん下**(着地前レビュー 欠陥 7)。
+   * ⚠ `entry-actions.ts` が「**消す物をいちばん下**に置く ── 上から順に押していく人が、
+   *   勢いで `削除` に当たらないため」と明記しているのに、⋯ は道具 5 つを**後ろへ**
+   *   足したので、削除が**真ん中**へ来ていた(行の丈は 26px、隙間 1px)。
+   */
+  it('🔴 ⋯ でも「削除」はいちばん下に在る', () => {
+    const s = setup(true);
+    s.open('n1');
+    s.field('phone-menu').click();
+    const acts = [...s.menu()!.querySelectorAll('button')].map((b) =>
+      b.getAttribute('data-pkc-action'),
+    );
+    expect(acts, '削除がメニューに無い(台の前提が崩れた)').toContain('delete-entry');
+    expect(acts[acts.length - 1], '削除がいちばん下ではない').toBe('delete-entry');
+    // ⚠ 空振り防止 ── 道具も操作を探すも、ちゃんと同じメニューに載っている
+    expect(acts).toContain('attach-file');
+    expect(acts).toContain('open-palette');
+  });
+
   it('🔴 表と実物の綴りが合っている(受け手を新しく作っていない)', () => {
     const s = setup(false);
     for (const a of NOTE_TOOL_ACTIONS)
@@ -381,6 +467,31 @@ describe('探す・絞る・目次(隠れた面へ送らない)', () => {
     ).toBe('entry-filter');
   });
 
+  /**
+   * 🔴 **面(設定・ヘルプ・2 ペイン・集計)を開いている間も、一覧まで出す**
+   *   (着地前レビュー 3。⚠ 変異試験 N5 が SURVIVED で「直したのに test が無い」と教えた)。
+   *
+   * ⚠ 直す前は `DESELECT_ENTRY` だけ撃っていた ── 面が開いたままだと
+   *   `phonePageOf` は `pane` を返し続けるので**一覧は画面に出ない**。
+   *   結果は「**選択だけ黙って消えて、焦点も入らない**」で、
+   *   #583 で直した無言の dead key が**選択の消失つきで**戻る形だった。
+   */
+  it('🔴 設定を開いたまま探す鍵を押しても、一覧ページまで出る', () => {
+    const s = setup(true);
+    s.open('n1');
+    s.d.dispatch({ type: 'SET_VIEW_MODE', mode: 'settings' });
+    expect(s.page(), '台が面を開けていない(前提が崩れた)').toBe('pane');
+    s.root.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true, cancelable: true }),
+    );
+    expect(s.page(), '面が開いたままなので一覧が画面に出ていない').toBe('list');
+    expect(s.d.getState().viewMode, '面を閉じていない').toBe('detail');
+    expect(
+      s.root.ownerDocument.activeElement?.getAttribute('data-pkc-field'),
+      '探す欄に焦点が入っていない(隠れた欄へ入れている)',
+    ).toBe('entry-filter');
+  });
+
   it('🔴 編集中は理由を出して断る(黙って何も起きない、にしない)', () => {
     const s = setup(true);
     s.open('n1');
@@ -390,6 +501,25 @@ describe('探す・絞る・目次(隠れた面へ送らない)', () => {
     );
     expect(s.d.getState().error).toContain('保存するか取り消してから');
     expect(s.page(), '編集中に一覧へ飛んだ').toBe('note');
+  });
+
+  /**
+   * 🔴 **断ったなら、絞り込みも起こさない**(着地前レビュー 欠陥 6)。
+   * ⚠ 直す前は `SET_ENTRY_FILTER` を**先に**撃ってから断っていた ── PC では
+   *   左の列ですぐ見えるので食い違わないが、スマホは一覧が画面に無いので
+   *   **「できません」と言われたのに、後で見ると絞られている**。
+   */
+  it('🔴 編集中にタグ札を押したら、絞り込みも起きない', () => {
+    const s = setup(true);
+    s.open('n1');
+    s.d.dispatch({ type: 'START_EDIT' });
+    const badge = s.root.ownerDocument.createElement('button');
+    badge.setAttribute('data-pkc-action', 'filter-by-tag');
+    badge.setAttribute('data-pkc-tag', '買い物');
+    s.root.querySelector('[data-pkc-region="detail"]')!.append(badge);
+    badge.click();
+    expect(s.d.getState().error, '断っていない').toContain('保存するか取り消してから');
+    expect(s.d.getState().filterQuery, '断ったのに絞り込みは起きている').toBe('');
   });
 
   it('🔴 本文のタグ札を押すと、絞った一覧が出る', () => {
@@ -423,6 +553,42 @@ describe('畳んだ列をスマホでは写さない(#609)', () => {
     const s = setup(true);
     appPanes.setHidden(['sidebar', 'inspector', 'append']);
     applyPaneVisibility(s.root, appPanes.getHidden());
+    expect(s.shell.getAttribute('data-pkc-hidden-panes')).toBe('append');
+  });
+
+  /**
+   * 🔴 **押しても何も起きない、を残さない**(着地前レビュー 欠陥 3)。
+   *
+   * ⚠ 直す前、スマホで `Alt+[` やパレットの「左のペインを畳む / 戻す」を押すと
+   *   **画面は 1px も動かず、理由も出ず、保存値だけ黙って動いて**いた ──
+   *   PC へ戻したときに畳まれている、という**見えない状態変化**まで付いていた。
+   * 🔑 断って、保存値も動かさない(次に広げたとき驚かない)。
+   * ⚠ 追記欄(`append`)は**スマホでも効く**ので、そちらは断らない。
+   */
+  it('🔴 スマホで列を畳む鍵を押すと、理由が出て保存値も動かない', () => {
+    const s = setup(true);
+    appPanes.setHidden([]);
+    s.root.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: '[',
+        altKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(s.d.getState().error, '押しても理由が出ない(無言の dead click)').toContain(
+      'スマホの画面では',
+    );
+    expect(appPanes.getHidden(), '見えないのに保存値が動いた').toEqual([]);
+  });
+
+  it('🔴 追記欄の畳みはスマホでも効く(まとめて断っていない)', () => {
+    const s = setup(true);
+    appPanes.setHidden([]);
+    s.root
+      .querySelector<HTMLElement>('[data-pkc-action="toggle-pane"][data-pkc-pane="append"]')!
+      .click();
+    expect(appPanes.getHidden(), '追記欄まで断っている').toEqual(['append']);
     expect(s.shell.getAttribute('data-pkc-hidden-panes')).toBe('append');
   });
 
@@ -540,11 +706,17 @@ describe('CSS(構文で読む)', () => {
     expect(shell, '帯の丈を shell に置いていない(面が継げない)').toContain('--pkc-phone-bar:');
   });
 
+  /**
+   * ⚠ **選択子と宣言を、同じ規則の中で結びつける**(着地前レビュー 9)。
+   *   直す前は `slice` した塊に対して 2 つの `toContain` を別々に当てていたので、
+   *   **その規則を別の選択子へ移し、中央側を別の宣言に替える**変異が両方緑で通った。
+   */
   it('🔴 スマホのまま印刷しても本文が紙に出る(A5 は 720 を切る)', () => {
-    const printBlock = bare().slice(bare().indexOf('@media print'));
-    expect(printBlock, '印刷で中央の visibility を戻していない').toContain(
+    const body = blocksFor(
+      mediaBlock(bare(), 'print').body,
       `${PHONE} [data-pkc-region='center']`,
-    );
-    expect(printBlock).toContain('visibility: visible');
+    ).join(' ');
+    expect(body, '印刷で中央の visibility を戻す規則が無い').not.toBe('');
+    expect(body, '戻していない').toMatch(decl('visibility', 'visible'));
   });
 });

@@ -100,6 +100,23 @@ test('🔴 3 ページのどこからでも戻れる(行き止まりが無い)',
   await clickReal(page, '[data-pkc-field="phone-info"]');
   await expect(page.locator(REGION('inspector'))).toBeVisible();
   await expect(page.locator(REGION('phone-bar')), '情報ページで帯が消えた').toBeVisible();
+  /**
+   * 🔴 **情報ページは画面いっぱいを使う**(着地前レビューの記録)。
+   * ⚠ スマホの規則から `max-height: none` を落とすと、`@media (max-width: 1100px)` の
+   *   `30vh` が当たって**画面の 3 割で切れ、残り 7 割が空白**になる ── そこを見る
+   *   検査が 1 つも無かった(消しても全部緑だった)。
+   */
+  const info = (await page.locator(REGION('inspector')).boundingBox())!;
+  /**
+   * ⚠ **切られた姿(30vh)と、いまの姿を確実に分ける値にする**。実測は
+   *   **69.0%**(502px / 727px。残りはお知らせと状態の行)で、切られると **30%** ──
+   *   50% はその真ん中である。⚠ 実測ぎりぎりの 70% にすると、帯を 1 本足した日に
+   *   **製品は正しいのにここが落ちる**(観測点ではなく閾値の問題になる)。
+   */
+  expect(
+    info.height / page.viewportSize()!.height,
+    `情報ページの丈が 30vh で切られている(${Math.round(info.height)}px)`,
+  ).toBeGreaterThan(0.5);
   expect(await pressable('[data-pkc-field="phone-back"]'), '情報ページの戻る口が押せない').toBe(
     'phone-page',
   );

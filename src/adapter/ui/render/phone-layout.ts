@@ -20,10 +20,12 @@
  *
  * ## この段で作っていないもの(段③)
  *
- * ⚠ **`PHONE_MIN_PX` の 2 本目の `matchMedia`**(対応外の 1 行)と
- *   **`phoneReveal` の 3 つの呼び元**(`focus-search` / `filter-by-tag` / `toc-jump`)は
- *   **まだ無い**。使う所と一緒に足す ── 使い道のない seam を先に置くと、
- *   次に読む人が「配線されている」と読む(#69 の壊れたポインタの逆向き)。
+ * ⚠ **`PHONE_MIN_PX` の 2 本目の `matchMedia`**(対応外の 1 行)だけが**まだ無い**。
+ *   使う所と一緒に足す ── 使い道のない seam を先に置くと、次に読む人が
+ *   「配線されている」と読む(#69 の壊れたポインタの逆向き)。
+ * 🔑 **`reveal` の 3 つの呼び元は段① へ前倒した**(`focus-search` / `filter-by-tag` /
+ *   `toc-jump`。設計 doc §4-b)── 一覧は DOM から消えないので、直さないと
+ *   #583 で直した無言の dead click がそのまま戻るためである。
  */
 import {
   PHONE_MAX_PX,
@@ -43,6 +45,9 @@ export const PHONE_PAGE_ATTR = 'data-pkc-page';
  * 重ねる 3 面と、それを出すページ。⚠ **`pane` も center を出す** ──
  * 設定・ヘルプ等は center の中の面なので、器としては本文と同じである
  * (違うのは帯を出すかだけ)。
+ * ⚠ **面を開いても情報 bit は残る** ── 面を閉じると情報ページへ戻る。
+ *   `phonePageOf` が面を優先するのは「**見せない**」であって「畳む」ではない
+ *   (2026-09-02 の着地前レビューで言葉を直した)。
  */
 const FACE: Readonly<Record<PhonePage, string>> = {
   list: 'sidebar',
@@ -144,7 +149,7 @@ export class PhoneLayout {
   /** いま出ているページ。⚠ スマホでなければ `null`。 */
   page(): PhonePage | null {
     if (!this.isPhone()) return null;
-    return phonePageOf(this.last ?? { selectedLid: null, viewMode: 'detail' }, this.infoFor);
+    return phonePageOf(this.last ?? { selectedLid: null, viewMode: 'detail', editing: false }, this.infoFor);
   }
 
   /** 情報ページを開く。⚠ **どのノートで開いたか**を憶える(別のノートへ移ると閉じる)。 */
@@ -202,7 +207,7 @@ export class PhoneLayout {
      *   (立っていないと、畳んだ列がスマホでも復元されてしまう)。
      *   その時点で選ばれているノートは無いので、既定は一覧ページである。
      */
-    const st: PhoneRenderState = this.last ?? { selectedLid: null, viewMode: 'detail', title: '' };
+    const st: PhoneRenderState = this.last ?? { selectedLid: null, viewMode: 'detail', editing: false, title: '' };
 
     if (!this.isPhone()) {
       shell.removeAttribute(PHONE_LAYOUT_ATTR);

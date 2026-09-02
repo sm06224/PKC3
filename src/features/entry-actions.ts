@@ -257,6 +257,32 @@ export function bodyMenuActions(
 }
 
 /**
+ * 🔴 **取り消しにくい操作**(#632 段① の着地前レビュー 欠陥 7)。
+ *
+ * ⚠ `ENTRY_MENU_ACTIONS` は「**消す物をいちばん下**に置く ── 上から順に押していく人が、
+ *   勢いで `削除` に当たらないため」と決めてある。ところが**後ろに項目を足すと、
+ *   その規則は黙って壊れる** ── スマホの `⋯` は道具 4 つ + 操作を探すを足したので、
+ *   削除が**真ん中**(行の丈 26px・隙間 1px)へ来ていた。
+ * 🔑 だから「末尾に置く物」を**表で名指し**して、並べ替えても末尾を保てるようにする。
+ *   ⚠ 増やすときは「取り消せるか」で決める ── `削除` はごみ箱へ入るので戻せるが、
+ *   **勢いで押すと作業が止まる**(確認の窓が出て、戻す手順を踏むことになる)。
+ */
+export const TRAILING_ACTIONS: ReadonlySet<string> = new Set(['delete-entry']);
+
+/**
+ * 危ない物を末尾へ回して並べ直す。⚠ **並びは変えない** ── 抜いて末尾へ付けるだけ
+ * (残った物の順番が動くと「同じものが常に同じ場所にある」に反する)。
+ */
+export function withTrailingLast<T extends { readonly action: string }>(
+  items: readonly T[],
+  extra: readonly T[],
+): readonly T[] {
+  const tail = items.filter((a) => TRAILING_ACTIONS.has(a.action));
+  const head = items.filter((a) => !TRAILING_ACTIONS.has(a.action));
+  return [...head, ...extra, ...tail];
+}
+
+/**
  * 🔴 **「いま開いているノート」に効く、左の列の道具 4 つ**(#632 段①)。
  *
  * ## なぜ表が要るか

@@ -20,6 +20,7 @@ import { VIEW_MODES, type ViewMode } from '../../src/adapter/state/app-state';
 const at = (over: Partial<PhoneShape> = {}): PhoneShape => ({
   selectedLid: 'a',
   viewMode: 'detail',
+  editing: false,
   ...over,
 });
 
@@ -41,6 +42,20 @@ describe('phonePageOf ── いま出す 1 枚', () => {
 
   it('🔴 ノートを選んでいれば本文', () => {
     expect(phonePageOf(at(), null)).toBe('note');
+  });
+
+  /**
+   * 🔴 **編集中は必ず本文の面**(着地前レビュー 5)。
+   * ⚠ 直す前は情報ページで編集を始めると `info` のままだったので、
+   *   中央が隠れたまま **打てているのに何も見えない**状態が作れた
+   *   (しかも「← 一覧」は編集中なので断られる = 出口も無い)。
+   */
+  it('🔴 編集中は情報ページを出さない(打っている物が見えなくならない)', () => {
+    expect(phonePageOf(at({ editing: true }), 'a'), '編集中なのに情報ページ').toBe('note');
+    // 対照群: 編集を抜ければ同じ入力で info になる
+    expect(phonePageOf(at({ editing: false }), 'a')).toBe('info');
+    // ⚠ 一覧の判定より弱い(選んでいなければ編集中もありえない)
+    expect(phonePageOf(at({ editing: true, selectedLid: null }), null)).toBe('list');
   });
 
   it('🔴 情報は「開いたノート」でだけ出る', () => {

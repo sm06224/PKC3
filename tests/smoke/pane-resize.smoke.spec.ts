@@ -283,6 +283,17 @@ test('🔴 狭い窓でペインを畳んでも、本文は狭くならない (#
     ['inspector', 'Alt+BracketRight'],
   ] as const) {
     await page.keyboard.press(chord);
+    /**
+     * 🔴 **「鍵が届いた」を先に見る**(2026-09-02 の着地前レビュー 7)。
+     * ⚠ 直す前の腕は `not.toHaveAttribute` だけだったので、**`Alt+[` が何も
+     *   しなくても全部緑**だった ── 旧版は「畳めた」で鍵の到達を兼ねていたのに、
+     *   裏返したときにその足場ごと落としていた(CLAUDE.md §1 の逆向き)。
+     * 🔑 いまは断り文が出るので、それが**鍵が受け手まで届いた証拠**になる。
+     */
+    await expect(
+      page.locator('[data-pkc-region="status"]'),
+      `${pane}: 鍵が受け手まで届いていない(この腕は何も見ていない)`,
+    ).toContainText('スマホの画面では');
     // 🔴 スマホでは畳みを**画面へ写さない** ── 写すと一覧ページが真っ白になる
     await expect(
       page.locator(SHELL),
@@ -290,7 +301,12 @@ test('🔴 狭い窓でペインを畳んでも、本文は狭くならない (#
     ).not.toHaveAttribute('data-pkc-hidden-panes', new RegExp(pane));
     const after = await detail();
     expect(after, `${pane} を押したら本文の幅が動いた: ${before} → ${after}`).toBe(before);
-    await page.keyboard.press(chord); // 保存値を戻す(次の腕を独立させる)
+    // 🔴 保存値も動いていない(PC へ戻したとき身に覚えのない畳みが残らない)
+    expect(
+      // ⚠ 一度も書いていなければ `null` ── 「動いていない」の正しい姿なので '' に潰す
+      await page.evaluate(() => localStorage.getItem('pkc3.panes') ?? ''),
+      `${pane}: 見えないのに保存値が動いた`,
+    ).not.toContain(pane);
   }
 
   /**
@@ -298,7 +314,6 @@ test('🔴 狭い窓でペインを畳んでも、本文は狭くならない (#
    * ⚠ 上の 2 回の押下で保存値には `sidebar` が入りうる ── それでも
    *   ← 一覧 で一覧が出ること、が守りたい当のことである。
    */
-  await page.keyboard.press('Alt+BracketLeft');
   await clickReal(page, '[data-pkc-field="phone-back"]');
   await expect(
     page.locator('[data-pkc-region="sidebar"]'),

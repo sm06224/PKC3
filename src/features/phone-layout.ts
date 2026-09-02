@@ -10,7 +10,8 @@
  * 2 属性だけで、幅を見るのは `adapter/ui/render/phone-layout.ts` の
  * `matchMedia` 2 本である。⚠ 両方に数字を書くと、片方だけ変えた日に
  * **JS と CSS が別の幅で切り替わる**(誰も気づけない形で版面が 2 つに割れる)。
- * `tests/features/phone-layout.test.ts` が「app.css に `720px` が 0 件」を pin する。
+ * `tests/adapter/phone-layout.test.ts` が「app.css に `720px` が 0 件」を pin する
+ * (CSS を読む検査は adapter 側に在る ── この file の test は判定だけを見る)。
  *
  * ⚠ **この file はブラウザの API を 1 つも呼ばない** ── 呼ぶと unit で
  * 全分岐を通せなくなる(画面を作らないと判定が走らない形になる)。
@@ -32,6 +33,9 @@ export const PHONE_MAX_PX = 720;
  * 🔴 **対応外の下限**(設計 doc §2-2)。⚠ **画面は変えないし、操作も塞がない** ──
  *   状態の行に 1 度だけ理由を出すだけである(塞ぐと、その幅で開いた user が
  *   自分のノートを取り出せなくなる)。判定を使うのは段③。
+ * ⚠ **いまはどこからも読まれていない** ── 使い道のない seam を先に置かない規律と
+ *   わずかに擦れるが、**数字の正本を割らない**ためにここへ置く(段③ で CSS でも
+ *   `matchMedia` でもなく、この定数から `359px` を組む)。
  */
 export const PHONE_MIN_PX = 360;
 
@@ -55,6 +59,15 @@ export type PhonePage = 'list' | 'note' | 'info' | 'pane';
 export interface PhoneShape {
   readonly selectedLid: string | null;
   readonly viewMode: ViewMode;
+  /**
+   * 🔴 **編集中か**(着地前レビュー 5。2026-09-02 に足した)。
+   *
+   * ⚠ これが無いと、**情報ページで編集を始めると画面が 1 ドットも動かない** ──
+   *   中央は `visibility: hidden` のままなので、**打てているのに何も見えない**。
+   *   しかも「← 一覧」は編集中なので断られる = 出口も無い。
+   * 🔑 編集中は**必ず本文の面を出す**(打っている物が見えない状態を作らない)。
+   */
+  readonly editing: boolean;
 }
 
 /**
@@ -78,6 +91,8 @@ export function phonePageOf(st: PhoneShape, infoFor: string | null): PhonePage {
   // 中央が自分の面を出している ── 戻る口はその面の帯の「× 閉じる」
   if (st.viewMode !== 'detail') return 'pane';
   if (st.selectedLid === null) return 'list';
+  // 🔴 打っている物が見えない状態を作らない(上の `editing` の docstring)
+  if (st.editing) return 'note';
   if (infoFor !== null && infoFor === st.selectedLid) return 'info';
   return 'note';
 }

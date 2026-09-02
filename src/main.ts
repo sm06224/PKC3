@@ -716,9 +716,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   /**
    * 🔴 **スマホ用画面の見張りを張る**(#632 段①)。
-   * ⚠ **畳んだペインの復元より前**に張る ── `applyPaneVisibility` は
-   *   `appPhone.isPhone()` を読んで列の畳みを写さないので、後に張ると
-   *   **起動の 1 回だけ**畳まれた列がスマホでも復元される(#609 の行き止まり)。
+   *
+   * ⚠ ここには「**畳んだペインの復元より前**に張らないと、起動の 1 回だけ
+   *   畳まれた列がスマホでも復元される」と書いてあったが、**成り立っていなかった**
+   *   (2026-09-02 の着地前レビュー)── `install` は `wasPhone` を `null` から始めるので
+   *   **必ず 1 回 `onToggle` を撃つ**。つまり下の 1 行は入れ替えても消しても最終の DOM は
+   *   同じで、順序は何も守っていなかった(CLAUDE.md §1 の no-op)。
+   * 🔑 守っているのは `applyPaneVisibility` の中の `appPhone.isPhone()` **1 か所**である。
+   *   下の呼びを残すのは、**boot の読み手に「畳みを復元している」を見せるため**であって、
+   *   順序のためではない。
    * ⚠ 外さない(アプリと同寿命)── `applyPaneVisibility` と同じ。
    */
   appPhone.install(root, undefined, () => applyPaneVisibility(root, appPanes.getHidden()));
@@ -878,6 +884,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     appPhone.render({
       selectedLid: state.selectedLid,
       viewMode: state.viewMode,
+      // 🔴 打っている物が見えない状態を作らない(`features/phone-layout.ts` の docstring)
+      editing: state.phase === 'editing',
       title: state.selectedLid === null ? '' : (state.entryMetas.get(state.selectedLid)?.title ?? ''),
     });
   });

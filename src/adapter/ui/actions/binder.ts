@@ -132,6 +132,7 @@ import {
   entryMenuActions,
   headingMenuActions,
   noteToolActions,
+  withTrailingLast,
 } from '@features/entry-actions';
 import {
   closeContextMenu,
@@ -1418,6 +1419,17 @@ function phoneShowList(dispatcher: Dispatcher): boolean {
     });
     return false;
   }
+  /**
+   * 🔴 **面(設定・ヘルプ・2 ペイン・集計)を開いている間も、一覧まで出す**
+   *   (着地前レビュー 3)。
+   *
+   * ⚠ 直す前は `DESELECT_ENTRY` だけ撃っていた ── 面が開いたままだと
+   *   `phonePageOf` は `pane` を返し続けるので、**一覧は画面に出ない**。
+   *   結果は「**選択だけ黙って消えて、焦点も入らない**」= #583 で直した
+   *   無言の dead key が、選択の消失つきで戻る形だった。
+   */
+  if (dispatcher.getState().viewMode !== 'detail')
+    dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
   dispatcher.dispatch({ type: 'DESELECT_ENTRY' });
   return true;
 }
@@ -1837,15 +1849,21 @@ export function runGlobalCommand(
      *   断ると user は自分でペインを戻す手を探すことになり、**手数が増えるだけ**である。
      * 🔑 これで `dry` の `true` が**嘘でなくなる** ── どの状態でも実際に効く。
      */
-    const hidden = appPanes.getHidden();
-    if (hidden.includes('sidebar')) {
-      applyPaneVisibility(
-        root,
-        appPanes.setHidden(hidden.filter((x) => x !== 'sidebar')),
-      );
-    }
-    // 🔴 スマホは列ではなくページ ── 一覧ページへ移らないと欄は隠れたまま
-    if (!phoneShowList(dispatcher)) return true;
+    /**
+     * 🔴 **スマホでは列の保存値を触らない**(着地前レビュー 6)。
+     * ⚠ スマホに列は無いので**戻す理由が無い**のに、直す前は `pkc3.panes` から
+     *   `sidebar` を消していた ── PC で一覧を畳んでいる user がスマホで 1 回
+     *   「探す」を押すと、**PC へ戻ったとき一覧が勝手に開いている**。
+     */
+    if (!appPhone.isPhone()) {
+      const hidden = appPanes.getHidden();
+      if (hidden.includes('sidebar')) {
+        applyPaneVisibility(
+          root,
+          appPanes.setHidden(hidden.filter((x) => x !== 'sidebar')),
+        );
+      }
+    } else if (!phoneShowList(dispatcher)) return true;
     input.focus();
     input.select();
     return true;
@@ -2215,9 +2233,17 @@ const ACTIONS: Record<string, ActionHandler> = {
   'filter-by-tag': (dispatcher, target) => {
     const tag = target.getAttribute('data-pkc-tag');
     if (!tag) return;
-    dispatcher.dispatch({ type: 'SET_ENTRY_FILTER', query: tag });
-    // 🔴 スマホは列ではなくページ ── 絞ったのに一覧が見えないと無言の dead click
+    /**
+     * 🔴 **断るなら、絞り込みも起こさない**(着地前レビュー 欠陥 6)。
+     * ⚠ 直す前は `SET_ENTRY_FILTER` を**先に**撃っていた ── PC では左の列で
+     *   すぐ見えるので食い違わないが、スマホは一覧が画面に無いので
+     *   **「できません」と言われたのに、後で見ると絞られている**。
+     *   起きたことと言われたことが逆になる形は、無言の dead click より悪い。
+     */
     if (!phoneShowList(dispatcher)) return;
+    dispatcher.dispatch({ type: 'SET_ENTRY_FILTER', query: tag });
+    // 🔴 スマホでは列の保存値を触らない(上の `focus-search` と同じ理由)
+    if (appPhone.isPhone()) return;
     const hidden = appPanes.getHidden();
     if (!hidden.includes('sidebar')) return;
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
@@ -2235,9 +2261,29 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 見え方であって、ノートのデータでも container の状態でもない(`editor-mode` と
    * 同じ扱い)。畳んだ状態は保存され、次に開いたときも同じ配置になる。
    */
-  'toggle-pane': (_dispatcher, target) => {
+  'toggle-pane': (dispatcher, target) => {
     const id = target.getAttribute('data-pkc-pane');
     if (id === null || !isPaneId(id)) return;
+    /**
+     * 🔴 **スマホでは列そのものが無いので、押しても何も起きない**(#632 段① の
+     *   着地前レビュー 欠陥 3)。
+     *
+     * ⚠ 直す前は**画面が 1px も動かず、理由も出ず、保存値だけ黙って動いて**いた ──
+     *   しかも「操作を探す」は `disabled` を見るだけなので「**押せます**」と出す。
+     *   同じ file の `focus-search` に「パレットは『押せる』と嘘をついていた」と
+     *   書いてあるのと**同じ嘘**を、新しい入口(`⋯` → 操作を探す)の先に置いていた。
+     * 🔑 断って、**保存値も動かさない** ── 動かすと、PC の幅へ戻したときに
+     *   身に覚えのない畳みが残る(見えない状態変化)。
+     * ⚠ 追記欄(`append`)は**スマホでも効く**(本文との境目は縦に残っている)ので
+     *   ここでは断らない ── まとめて断ると、user 指示 2026-08-27 の道が死ぬ。
+     */
+    if (appPhone.isPhone() && (COLUMN_PANES as readonly string[]).includes(id)) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: 'スマホの画面では一覧・本文・情報を 1 枚ずつ出しているので、列は畳めません',
+      });
+      return;
+    }
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
     applyPaneVisibility(root, appPanes.toggle(id));
   },
@@ -2398,23 +2444,27 @@ const ACTIONS: Record<string, ActionHandler> = {
     openContextMenu(
       root,
       { x: rect.left, y: rect.bottom },
-      [
-        ...entryMenuActions({
+      /**
+       * 🔴 **足すのは真ん中**(着地前レビュー 欠陥 7)── 末尾へ足すと、
+       *   `ENTRY_MENU_ACTIONS` が守っている「**消す物をいちばん下**」が黙って壊れる。
+       * ⚠ 足す 5 つ:左の列にしか無い道具 4 つ(添付 / 録音 / 画面録画 / 時間を計る)と
+       *   操作を探す。4 つとも `selectedLid` を要るのに押し口は一覧の中にしか無く、
+       *   スマホでは**戻ると対象が消える**(円環の dead click)。
+       */
+      withTrailingLast(
+        entryMenuActions({
           archetype: st.entryMetas.get(lid)?.archetype ?? null,
           linkedFile: st.linkedFiles.get(lid) ?? null,
         }),
-        /**
-         * 🔴 **左の列にしか無い道具 4 つ**(添付 / 録音 / 画面録画 / 時間を計る)。
-         * ⚠ 4 つとも `selectedLid` を要るのに、押し口は一覧の中にしか無い ──
-         *   スマホでは一覧と本文が同時に出ないので、**戻ると対象が消える**。
-         */
-        ...noteToolActions(),
-        {
-          action: 'open-palette',
-          label: '操作を探す',
-          hint: 'できる操作を名前で絞り込んで、その場で実行します',
-        },
-      ],
+        [
+          ...noteToolActions(),
+          {
+            action: 'open-palette',
+            label: '操作を探す',
+            hint: 'できる操作を名前で絞り込んで、その場で実行します',
+          },
+        ],
+      ),
       root.ownerDocument.activeElement,
       { [MENU_LID_ATTR]: lid },
     );
@@ -3687,13 +3737,20 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'move-order-up': (dispatcher, target) => moveOrder(dispatcher, target, 'up'),
   'move-order-down': (dispatcher, target) => moveOrder(dispatcher, target, 'down'),
-  'attach-file': (_dispatcher, target) => {
+  'attach-file': (_dispatcher, _target, _services, root) => {
     // 常設の hidden input を開く(動的生成にしない ── smoke の setInputFiles と
     // ブラウザの user-gesture 要件の両方に効く)
-    target
-      .closest('[data-pkc-region="shell"]')
-      ?.querySelector<HTMLInputElement>('[data-pkc-field="attach-input"]')
-      ?.click();
+    /**
+     * 🔴 **押した物から辿らない**(#632 段① の着地前レビュー 欠陥 1)。
+     *
+     * ⚠ 直す前は `target.closest('[data-pkc-region="shell"]')` だったので、
+     *   **`⋯` のメニューから押すと必ず null** になり、`?.` が全部飲んで
+     *   **無反応・理由なし**だった(スマホには添付の道が他に 1 本も無い)。
+     *   メニューの器は **root の直下**に出るので、押したボタンは shell の中に居ない
+     *   ── `context-menu.ts` が自分でそう戒めている当の罠である。
+     * 🔑 束ねた `root` から引けば、どこから押しても同じ入力欄に届く。
+     */
+    root.querySelector<HTMLInputElement>('[data-pkc-field="attach-input"]')?.click();
   },
   /**
    * 🔴 **録音・画面収録**(#413)。⚠ 段取り(帯 / 添付 / 本文への参照)は
