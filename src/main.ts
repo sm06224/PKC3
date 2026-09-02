@@ -48,7 +48,7 @@ import {
 } from '@adapter/platform/storage/store-port';
 import { acquireWriterLease } from '@adapter/platform/storage/writer-lease';
 import { bundleChannelName, bundleLockName } from '@features/portable/bundle';
-import { resolvePortableStart, type PortableStart } from '@adapter/platform/portable-boot';
+import { readBundle, resolvePortableStart, type PortableStart } from '@adapter/platform/portable-boot';
 import { restoreEmbeddedAssets } from '@adapter/platform/portable-assets';
 import { exportPortable } from '@adapter/ui/actions/export-portable';
 import {
@@ -80,6 +80,7 @@ import { createUpdatePrompt } from '@adapter/ui/render/update-card';
 import { createAnnounce, announceServices } from '@adapter/ui/render/announce';
 import { versionText, MANUAL_TEXT } from '@adapter/ui/render/help';
 import { manualSections } from '@features/help/manual-find';
+import { MANUAL_PAGE_FILE } from '@features/help/manual-page';
 import {
   openManualWindow,
   MANUAL_WINDOW_TITLE,
@@ -396,6 +397,14 @@ function openManualTile(
     text: MANUAL_TEXT,
     sections: manualSections(MANUAL_TEXT),
     render: (text) => markdown.render(text),
+    /**
+     * 🔴 焼いた 1 枚(`manual.html`)は **build の生成物の隣**に在る(段②)。
+     * ⚠ 持ち歩ける 1 枚(portable = この document 自身が bundle を抱えている)には
+     *   隣に無いので `null` → `about:blank` に組む経路へ落ちる。
+     * ⚠ `document.baseURI` から引く ── Pages の `/` と `/dev/` の両方で同じビルドが
+     *   動く(`base: './'`)ので、絶対 path を書かない。
+     */
+    pageUrl: readBundle(document) === null ? new URL(MANUAL_PAGE_FILE, document.baseURI).href : null,
   }).then((win) => {
     // 🔴 **開けなかったら理由を出す**(押しても何も起きないボタンにしない)
     if (win === null) {

@@ -4,14 +4,22 @@
  * > 「**ヘルプの中からマニュアルをアプリとして出してください。
  * > ちっとも改善していません。少しはこちらの要望を尊重してください**」
  *
- * ## 作りは `asset-window.ts` と同じ ── `about:blank` を開いて**こちらで組む**
+ * ## 段②(2026-09-02):窓の中身は build 時に焼いた **`manual.html`**
+ *
+ * 段①は `about:blank` を開いて opener 側から DOM を組んでいた(`asset-window.ts` と同じ作法)。
+ * それは 2 つが**原理的に**できなかった ── **F5 で白紙**になる / **設定で選んだ配色が届かない**
+ * (表は `features/help/manual-page.ts`)。いまは:
+ *
+ * 1. `window.open('', name)` で窓を**同期で**掴む(user の操作の中で ── ポップアップ阻止を避ける)
+ * 2. 既に**同じ版**で組んであれば、触らずに前へ出す(読んでいた所を失わない)
+ * 3. `manual.html` が隣に在る(`pageUrl`)なら **`location.replace` でそこへ移す** ── 組まない
+ * 4. 隣に無い(持ち歩ける 1 枚 = portable)なら、段①のとおり `about:blank` に組む
  *
  * 🔑 **PKC をもう 1 枚読み込まない。** `view-window.ts` は面を別窓で開くが、
  *   それは #292 で否定された形(「**ユーザーはもう一つ PKC が開いて混乱すると
  *   思う**」)であり、しかも開いた先でもマニュアルは `60vh` の箱のままである。
- * 🔑 **inline の script を 1 行も書かない。** 中身は opener 側から DOM API で組む
- *   ので、CSP に触れない(`asset-window.ts` と同じ作法)。目次はただの
- *   `<a href="#m-3">` なので、**script 無しで飛ぶ**。
+ * 🔑 器の見た目・帯の字・版の属性は `features/help/manual-page.ts` が正本 ──
+ *   焼いた page と `about:blank` の窓で**同じ値**を使う(経路ごとに増やさない)。
  *
  * ## 🔴 開くのは同期、中身は後から
  *
@@ -27,24 +35,18 @@
 import BODY_CSS from 'virtual:pkc-body-css';
 import { buildManualDoc, type ManualTocItem } from '@features/help/manual-doc';
 import type { ManualSection } from '@features/help/manual-find';
+import {
+  MANUAL_BUILT_ATTR,
+  MANUAL_CHROME_CSS,
+  MANUAL_TIP,
+  MANUAL_WINDOW_TITLE,
+} from '@features/help/manual-page';
+
+// ⚠ 正本は `features/help/manual-page.ts`。既存の import 先を壊さないために再 export する
+export { MANUAL_BUILT_ATTR, MANUAL_WINDOW_TITLE };
 
 /** 窓の名前。⚠ **固定する** ── 2 回押しても 2 枚目を積まず、その窓が前へ出る。 */
 export const MANUAL_WINDOW_NAME = 'pkc3-manual';
-
-/**
- * 窓の題名。⚠ **1 か所で持つ** ── タイルの字(`tiles.ts` の `manualTile`)と
- * 揃っているかは `tests/features/manual-doc.test.ts` が見る。
- */
-export const MANUAL_WINDOW_TITLE = 'PKC3 マニュアル';
-
-/**
- * 🔴 **どの版で組んだ窓か**(#645)。
- *
- * ⚠ **版で見分ける** ── 「組んであるか」だけで見ると、**アプリが新しくなっても
- *   古い本文の窓が前に出続ける**(user は直したはずのマニュアルを読み続ける)。
- * ⚠ 帯の字ではなく属性で持つ ── 文言を直した日に判定が壊れないようにする。
- */
-export const MANUAL_BUILT_ATTR = 'data-pkc-manual-version';
 
 /**
  * 開いた直後の大きさ。⚠ `popup` と寸法を渡さないと**別タブ**になるブラウザが在る
@@ -52,69 +54,6 @@ export const MANUAL_BUILT_ATTR = 'data-pkc-manual-version';
  * 🔑 マニュアルは**読み物**なので、目次(左)と本文(右)が並ぶ幅を取る。
  */
 const SIZE = { width: 1100, height: 900 };
-
-/**
- * 窓の器の見た目。⚠ 本文の見た目は `BODY_CSS`(app.css から抜いた正本)が持つ。
- *
- * 🔴 **地は `color-scheme` に任せる ── 自分で色を置かない**(2026-08-31、着地前の
- * 実地調査が拾った)。⚠ 1 稿目は `background: var(--bg, #fff)` と書いていたが、
- * **`--bg` は `BODY_CSS` に入っていない**(実測: 定義されている変数 30 個のうち
- * `--fg` / `--border` / `--surface-2` は在り、`--bg` は**無い**)── つまり地は
- * 常に `#fff` に固定される一方、字は `--fg` で環境に追従するので、
- * **暗い環境では白地に白い字**になる。
- * 🔑 書き出す HTML(`pkc3-html.ts` の `:root{color-scheme:light dark}`)と
- *   **同じ倒し方**にする ── 地は UA が塗り、字は `--fg` が追う。
- */
-const CHROME_CSS = [
-  ':root{color-scheme:light dark}',
-  'html,body{margin:0;height:100%}',
-  'body{display:grid;grid-template-rows:auto 1fr;font:14px system-ui,sans-serif;',
-  'color:var(--fg,CanvasText)}',
-  // 帯 ── 題名と版だけ。⚠ 地は無彩色(不可侵指示)
-  '[data-pkc-field="manual-window-head"]{display:flex;gap:12px;align-items:baseline;',
-  'padding:8px 16px;border-bottom:1px solid var(--border,#8884)}',
-  '[data-pkc-field="manual-window-head"] strong{font-size:15px}',
-  '[data-pkc-field="manual-window-head"] span{opacity:.7;font-size:12px}',
-  // 目次(左)と本文(右)
-  '[data-pkc-region="manual-window-body"]{display:grid;grid-template-columns:280px 1fr;',
-  'min-height:0}',
-  '[data-pkc-region="manual-window-toc"]{overflow:auto;padding:12px 8px;',
-  'border-right:1px solid var(--border,#8884);min-height:0}',
-  '[data-pkc-region="manual-window-toc"] button{display:block;width:100%;text-align:left;',
-  'padding:2px 6px;border:0;background:0;font:inherit;color:inherit;cursor:pointer;',
-  'border-radius:3px;line-height:1.5}',
-  '[data-pkc-region="manual-window-toc"] button:hover{background:var(--surface-2,#8882)}',
-  '[data-pkc-region="manual-window-toc"] button:focus-visible{outline:2px solid currentColor}',
-  // 🔑 段付けは `#` の数から(見出しの深さがそのまま読める)
-  '[data-pkc-region="manual-window-toc"] button[data-pkc-level="1"]{font-weight:700}',
-  '[data-pkc-region="manual-window-toc"] button[data-pkc-level="2"]{padding-left:14px}',
-  '[data-pkc-region="manual-window-toc"] button[data-pkc-level="3"]{padding-left:28px;opacity:.9}',
-  '[data-pkc-region="manual-window-toc"] button[data-pkc-level="4"]{padding-left:42px;opacity:.85}',
-  '[data-pkc-region="manual-window-toc"] button[data-pkc-level="5"]{padding-left:56px;opacity:.8}',
-  '[data-pkc-region="manual-window-toc"] button[data-pkc-level="6"]{padding-left:70px;opacity:.8}',
-  // 🔴 **本文は窓いっぱい**(ヘルプ面の 60vh の箱がこの窓に来ないようにする)
-  '[data-pkc-region="manual-window-main"]{overflow:auto;padding:16px 24px 64px;min-height:0}',
-  /**
-   * 🔴 **行を長くしすぎない**(着地前の設計レビューが拾った)。
-   * ⚠ 窓を最大化すると、器いっぱい = **1 行が 2000px を超える**ことがある ──
-   *   「大きく出す」ために開いた窓が、**かえって読みにくく**なる。
-   * 🔑 上限は **76rem**(≒1216px)── 既定の窓(1100px から目次 280px を引いた
-   *   820px)では**当たらない**ので、いまの見え方は 1 ドットも変わらない。
-   *   効くのは「広げすぎたとき」だけである。
-   * ⚠ 器そのものは器いっぱいのまま(送るのは器)── 中身の幅だけを抑える。
-   */
-  '[data-pkc-region="manual-window-main"] > *{max-width:76rem}',
-  /**
-   * 🔑 **飛んだ見出しが帯の下に隠れない** ── `scroll-margin-top` を置く。
-   * ⚠ 置かないと、目次から飛んだとき見出しが**器の上端ぴったり**に来て、
-   *   直前の段落と見分けにくい。
-   */
-  '[data-pkc-region="manual-window-main"] :is(h1,h2,h3,h4,h5,h6){scroll-margin-top:8px}',
-  // 狭い窓では目次を上へ畳む(横に潰さない)
-  '@media (max-width:760px){[data-pkc-region="manual-window-body"]{grid-template-columns:1fr;',
-  'grid-template-rows:minmax(0,32vh) 1fr}',
-  '[data-pkc-region="manual-window-toc"]{border-right:0;border-bottom:1px solid var(--border,#8884)}}',
-].join('');
 
 export interface OpenManualWindowDeps {
   /** 窓の題名。 */
@@ -127,6 +66,15 @@ export interface OpenManualWindowDeps {
   readonly sections: readonly ManualSection[];
   /** 本文を描く口。⚠ **失敗したら素の原文**を出す(白紙にしない)。 */
   readonly render: (text: string) => Promise<string>;
+  /**
+   * 🔴 焼いた 1 枚(`manual.html`)の URL。**`null` = 隣に無い**(持ち歩ける 1 枚)。
+   *
+   * ⚠ 在るなら**組まずにそこへ移す** ── F5 で読み直せて、設定の配色が効く。
+   * ⚠ 呼び側が決める(ここでは fetch しない)── 「隣に在るか」は build の形で
+   *   決まっており、実行時に探ると dev の SPA fallback(`index.html` が 200 で返る)に
+   *   騙されて **PKC をもう 1 枚**開く。
+   */
+  readonly pageUrl: string | null;
   /** 素の別窓を開く(既定 `window.open`)。⚠ test が差せる。 */
   readonly open?: (url: string, target: string, features: string) => Window | null;
 }
@@ -142,6 +90,19 @@ export interface ManualWindowHandle {
    *   ⚠ ここでは判断しない(この module は文言を持たない)。
    */
   readonly reused: boolean;
+}
+
+/**
+ * その窓が**どの版で**組まれているか。無ければ `null`。
+ * ⚠ user が窓を別の origin へ動かしていると `document` に触れない ── 例外を
+ *   「組まれていない」に畳む(次の 1 手 = 移す / 組む、で正しい状態へ戻る)。
+ */
+function builtVersion(win: Window): string | null {
+  try {
+    return win.document.body?.getAttribute(MANUAL_BUILT_ATTR) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -168,19 +129,21 @@ export async function openManualWindow(
    *
    * 🔑 空の URL は「**navigate しない**」の意である(HTML 仕様)。新しく開くときは
    *   どのみち `about:blank` になるので、失うものは無い。
+   * ⚠ 段②でも `pageUrl` を**ここに渡さない** ── 渡すと 2 回目に押すたび page を読み直し、
+   *   読んでいた所を失う。移すのは「同じ版で組まれていない」と分かってからである。
    */
   const win = open('', MANUAL_WINDOW_NAME, `popup,width=${SIZE.width},height=${SIZE.height}`);
   if (!win) return null;
-  const doc = win.document;
   /**
    * 🔴 **2 回目は、読んでいた所のまま前に出す**(着地前の設計レビューが拾った)。
    *
    * ⚠ 窓の名前は固定なので `window.open` は**同じ窓を返す** ── そこで無条件に
    *   組み直すと、**読んでいた場所が毎回いちばん上へ戻る**(user から見れば
    *   「押したら読んでいた所を見失った」である)。
-   * 🔑 既に組んであるなら**触らずに前へ出すだけ**にする。
+   * 🔑 既に組んであるなら**触らずに前へ出すだけ**にする。焼いた page も
+   *   `<body>` に同じ属性を持つので、**同じ式**で見分けられる。
    */
-  if (doc.body?.getAttribute(MANUAL_BUILT_ATTR) === deps.version) {
+  if (builtVersion(win) === deps.version) {
     try {
       win.focus();
     } catch {
@@ -188,9 +151,28 @@ export async function openManualWindow(
     }
     return { close: () => closeQuietly(win), reused: true };
   }
-  doc.title = deps.title;
-  // ⚠ **開いた瞬間に「待っている」と分かる形にする**(白紙を見せない)
-  doc.body.textContent = 'マニュアルを開いています…';
+  let doc: Document | null;
+  try {
+    doc = win.document;
+    doc.title = deps.title;
+    // ⚠ **開いた瞬間に「待っている」と分かる形にする**(白紙を見せない)
+    doc.body.textContent = 'マニュアルを開いています…';
+  } catch {
+    // 触れない窓(user が別の origin へ動かした)── 書けないが、移すことはできる
+    doc = null;
+  }
+
+  if (deps.pageUrl !== null) {
+    /**
+     * 🔴 **焼いた 1 枚へ移す ── 組まない**(段②)。
+     * ⚠ `replace` にする ── `href =` だと `about:blank` が履歴に残り、
+     *   「戻る」で白紙へ戻れてしまう。
+     */
+    win.location.replace(deps.pageUrl);
+    return { close: () => closeQuietly(win), reused: false };
+  }
+  // ⚠ 触れない窓には組めない ── `null` で呼び側に理由を出させる(無言で終えない)
+  if (doc === null) return null;
 
   let html: string;
   try {
@@ -220,9 +202,11 @@ function closeQuietly(win: Window): void {
 }
 
 /**
- * 窓の中身を組む。
+ * 窓の中身を組む(`about:blank` の経路 = 持ち歩ける 1 枚)。
  * ⚠ **`export` している**のは test がこの 1 手だけを見られるようにするため
  *   (窓を開かずに、組み上がった document を検められる)。
+ * ⚠ 焼いた page(`manual-page.ts`)と**同じ名前の面**(`manual-window-*`)を作る ──
+ *   smoke / 呼び側は経路を区別せずに同じ selector で見る。
  */
 export function fillManualWindow(
   doc: Document,
@@ -241,7 +225,7 @@ export function fillManualWindow(
   doc.head.textContent = '';
   doc.title = parts.title;
   const style = doc.createElement('style');
-  style.textContent = `${BODY_CSS}\n${CHROME_CSS}`;
+  style.textContent = `${BODY_CSS}\n${MANUAL_CHROME_CSS}`;
   doc.head.append(style);
 
   doc.body.textContent = '';
@@ -254,8 +238,7 @@ export function fillManualWindow(
   const ver = doc.createElement('span');
   ver.textContent = parts.version;
   const tip = doc.createElement('span');
-  // 🔑 **この窓の取り分をその場で言う**(#636 で Ctrl+F を返した意味がここで効く)
-  tip.textContent = 'Ctrl+F(Mac は ⌘+F)で、ブラウザの検索がそのまま使えます';
+  tip.textContent = MANUAL_TIP;
   head.append(name, ver, tip);
   doc.body.append(head);
 
@@ -289,7 +272,7 @@ export function fillManualWindow(
 }
 
 /**
- * 目次の 1 行。
+ * 目次の 1 行(`about:blank` の経路)。
  *
  * 🔴 **`<a href="#…">` にしない**(2026-08-31、実ブラウザの probe で判明)。
  * ⚠ この窓は `about:blank` なので、**開いた側の base URL を引き継ぐ** ──
@@ -298,6 +281,7 @@ export function fillManualWindow(
  *   (実測)。⚠ しかも「PKC がもう 1 枚」という、この窓が避けている当の形になる。
  * 🔑 `<button>` なら**そもそも navigate しない**。鍵でも辿れる(この repo の
  *   ヘルプの探した結果と同じ流儀 ── `help.ts` の `findRow`)。
+ * ⚠ 焼いた page(実 URL)では断片が page の中で解決するので、そちらは `<a>` でよい。
  */
 function tocButton(doc: Document, main: HTMLElement, item: ManualTocItem): HTMLButtonElement {
   const b = doc.createElement('button');

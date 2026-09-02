@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 import { clickReal, collectPageErrors, gotoApp } from './helpers';
 
 /**
@@ -7,19 +8,34 @@ import { clickReal, collectPageErrors, gotoApp } from './helpers';
  * > 「**ヘルプの中からマニュアルをアプリとして出してください。
  * > ちっとも改善していません。少しはこちらの要望を尊重してください**」
  *
+ * ## 段②(2026-09-02):窓の中身は build 時に焼いた `manual.html`
+ *
+ * 段①は `about:blank` を opener が組んでいた。実 URL を持たないので **F5 で白紙**、
+ * **設定の配色が届かない** ── いまは `window.open` で掴んだ窓を `manual.html` へ移す。
+ *
  * ## ここでしか確かめられないこと
  *
- * unit は「組み上がった DOM」までしか見られない。実ブラウザでしか分からないのは:
- * - **本当に窓が開くか**(`window.open` の `popup` 指定は happy-dom に無い)
- * - 🔴 **本文が窓いっぱいに出るか** ── これが user の苦情そのものである。
- *   ヘルプ面の中では `max-height: 60vh` の箱に入っていた
- * - **目次を押したら、その見出しへ実際にスクロールするか**
- *   (`href="#m-3"` は script 無しで飛ぶが、飛んだかは実ブラウザでしか測れない)
+ * unit は「組み上がった HTML」までしか見られない。実ブラウザでしか分からないのは:
+ * - **本当に窓が開いて、`manual.html` へ移るか**(`window.open` の `popup` は happy-dom に無い)
+ * - 🔴 **本文が窓いっぱいに出るか** ── これが user の苦情そのものである
+ * - **目次を押したら、その見出しへ実際にスクロールするか**(断片は実 URL の中で解決する)
+ * - 🔴 **F5 で消えないか / 設定の配色が届くか**(段②の当の点。preview が配る `dist/` でしか見えない)
  * - **元の画面が残っているか**(#300 の裁定「主の作業領域を奪わない」)
  */
 const HEAD = '[data-pkc-field="manual-window-head"]';
 const TOC = '[data-pkc-region="manual-window-toc"]';
 const MAIN = '[data-pkc-region="manual-window-main"]';
+const PAGE = /\/manual\.html$/u;
+
+/** 開いた窓が `manual.html` に着くまで待つ(about:blank → replace の 2 段を跨ぐ)。 */
+async function openManual(page: import('@playwright/test').Page, context: import('@playwright/test').BrowserContext) {
+  const popup = context.waitForEvent('page');
+  await clickReal(page, '[data-pkc-action="open-manual-window"]');
+  const win = await popup;
+  await win.waitForURL((u) => PAGE.test(u.pathname));
+  await expect(win.locator(MAIN)).toBeVisible();
+  return win;
+}
 
 test('🔴 ヘルプからマニュアルの窓が開き、窓いっぱいに出る (#645)', async ({ page, context }) => {
   const errors = collectPageErrors(page);
@@ -38,16 +54,13 @@ test('🔴 ヘルプからマニュアルの窓が開き、窓いっぱいに出
   expect(boxed, 'マニュアルの箱が見えない(前提が崩れている)').not.toBeNull();
   expect(boxed!.height, '前提が崩れている(ヘルプ面の中で既に窓いっぱい)').toBeLessThan(900 * 0.7);
 
-  // ② 「マニュアルを別のウィンドウで開く」を押す
-  const popup = context.waitForEvent('page');
-  await clickReal(page, '[data-pkc-action="open-manual-window"]');
-  const win = await popup;
-  await win.waitForLoadState('domcontentloaded');
+  // ② 「マニュアルを別のウィンドウで開く」を押す → 焼いた 1 枚へ移る
+  const win = await openManual(page, context);
 
   // ③ 帯・目次・本文が出る
   await expect(win.locator(HEAD)).toContainText('PKC3 マニュアル');
-  await expect(win.locator(`${TOC} button`).first()).toBeVisible();
-  const links = await win.locator(`${TOC} button`).count();
+  await expect(win.locator(`${TOC} a`).first()).toBeVisible();
+  const links = await win.locator(`${TOC} a`).count();
   expect(links, '目次が空').toBeGreaterThan(100);
 
   /**
@@ -69,24 +82,27 @@ test('🔴 ヘルプからマニュアルの窓が開き、窓いっぱいに出
 /**
  * 🔴 **暗い環境で読める**(2026-08-31、着地前の実地調査が拾った defect の回帰)。
  *
- * ⚠ 1 稿目は `background: var(--bg, #fff)` と書いていたが、**`--bg` は
- * `BODY_CSS` に焼かれていない**(実測: 変数 30 個のうち `--fg` は在り `--bg` は無い)
- * ── 地は `#fff` 固定、字は `--fg` で環境に追従するので、**暗い環境では
- * 白地に白い字**になり、窓の中が 1 文字も読めなかった。
- * 🔑 観測点は**字面ではなく実際の色** ── 「`color-scheme` と書いてあるか」を見ると、
+ * ⚠ 段①の 1 稿目は `background: var(--bg, #fff)` と書いていたが、**`--bg` は
+ * `BODY_CSS` に焼かれていない** ── 地は `#fff` 固定、字は `--fg` で環境に追従するので、
+ * **暗い環境では白地に白い字**になり、窓の中が 1 文字も読めなかった。
+ * 🔑 段②では保存が無ければ **OS の明暗で配色を決める**(`dark` が立つ)。
+ *   観測点は**字面ではなく実際の色** ── 「`color-scheme` と書いてあるか」を見ると、
  *   書いてあるのに効かない形(器に地を置き直す等)を素通りする。
  */
+test.describe('暗い環境', () => {
+  /**
+   * 🔴 **context ごと暗くする**(2026-09-02 実測)。⚠ `page.emulateMedia` は**その page だけ**に
+   *   効き、`manual.html` へ移った別窓には届かない ── 段①(about:blank)では通っていたが、
+   *   実 URL へ navigate した窓では `prefers-color-scheme` が light のまま(`light` が立った)。
+   *   `test.use({ colorScheme })` は context の設定なので、開いた窓にも効く。
+   */
+  test.use({ colorScheme: 'dark' });
+
 test('🔴 暗い環境でも、地と字の明暗が逆転しない (#645)', async ({ page, context }) => {
-  // ⚠ 別窓は**この page から開く**ので、`page` 側に当てれば開いた窓にも効く
-  await page.emulateMedia({ colorScheme: 'dark' });
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="help"]');
-  const popup = context.waitForEvent('page');
-  await clickReal(page, '[data-pkc-action="open-manual-window"]');
-  const win = await popup;
-  await win.waitForLoadState('domcontentloaded');
-  await expect(win.locator(MAIN)).toBeVisible();
+  const win = await openManual(page, context);
 
   /** `rgb(...)` を明るさ(0〜255)へ。⚠ 単純平均でよい ── 見たいのは**向き**である。 */
   const lum = (css: string): number => {
@@ -98,8 +114,15 @@ test('🔴 暗い環境でも、地と字の明暗が逆転しない (#645)', as
     const body = getComputedStyle(document.body);
     // ⚠ 器が透明なら、実際に塗っているのは `html` である ── 両方見る
     const root = getComputedStyle(document.documentElement);
-    return { fg: body.color, bg: body.backgroundColor, rootBg: root.backgroundColor };
+    return {
+      fg: body.color,
+      bg: body.backgroundColor,
+      rootBg: root.backgroundColor,
+      theme: document.documentElement.getAttribute('data-pkc-theme'),
+    };
   });
+  // 🔑 保存が無ければ OS に従う ── 暗い環境なら dark が立つ(段②の script)
+  expect(seen.theme, '暗い環境なのに dark の配色が立っていない').toBe('dark');
   const fg = lum(seen.fg);
   const bg = Math.max(lum(seen.bg), lum(seen.rootBg));
   expect(fg, '字の色を読めない(観測点が壊れている)').toBeGreaterThanOrEqual(0);
@@ -107,17 +130,15 @@ test('🔴 暗い環境でも、地と字の明暗が逆転しない (#645)', as
   expect(fg, `暗い環境で地(${bg})より字(${fg})が暗い ── 読めない`).toBeGreaterThan(bg);
   await win.close();
 });
+});
 
 test('🔴 目次を押すと、その見出しまで送られる (#645)', async ({ page, context }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="help"]');
-  const popup = context.waitForEvent('page');
-  await clickReal(page, '[data-pkc-action="open-manual-window"]');
-  const win = await popup;
-  await win.waitForLoadState('domcontentloaded');
-  await expect(win.locator(`${TOC} button`).first()).toBeVisible();
+  const win = await openManual(page, context);
+  await expect(win.locator(`${TOC} a`).first()).toBeVisible();
 
   /**
    * ⚠ **対照群を先に置く** ── 押す前は先頭に居ること。
@@ -127,20 +148,24 @@ test('🔴 目次を押すと、その見出しまで送られる (#645)', async
   expect(before, '押す前から送られている(前提が崩れている)').toBe(0);
 
   // ⚠ 深い所の行を押す(先頭付近だと「動いた」が誤差に埋もれる)
-  const n = await win.locator(`${TOC} button`).count();
-  const target = win.locator(`${TOC} button`).nth(Math.floor(n * 0.7));
-  const id = await target.getAttribute('data-pkc-target');
+  const n = await win.locator(`${TOC} a`).count();
+  const target = win.locator(`${TOC} a`).nth(Math.floor(n * 0.7));
+  const id = (await target.getAttribute('href'))!.slice(1);
   await target.click();
 
   const after = await win.locator(MAIN).evaluate((el) => el.scrollTop);
   expect(after, '目次を押しても送られていない').toBeGreaterThan(0);
 
   /**
-   * 🔴 **窓がアプリへ飛んでいない**(2026-08-31 の probe で実際に踏んだ)。
-   * ⚠ `<a href="#m-100">` だと `about:blank` が base を引き継いで
+   * 🔴 **窓がアプリへ飛んでいない**(2026-08-31 の probe で実際に踏んだ形)。
+   * ⚠ 段①の `about:blank` では `<a href="#m-100">` が base を引き継いで
    *   `http://…/#m-100` へ navigate し、**マニュアルが丸ごと消えた**。
+   *   段②は実 URL なので、断片は **この page の中**で解決する ── URL は
+   *   `manual.html#m-N` のまま(= 節ごとに控えられる)。
    */
-  expect(win.url(), '窓がアプリへ飛んだ').toBe('about:blank');
+  const url = new URL(win.url());
+  expect(url.pathname, '窓がアプリへ飛んだ').toMatch(PAGE);
+  expect(url.hash, '断片が URL に付いていない(控えられない)').toBe(`#${id}`);
 
   /**
    * 🔴 **「動いた」だけでは足りない** ── その見出しが**画面に居る**ことまで見る
@@ -151,7 +176,7 @@ test('🔴 目次を押すと、その見出しまで送られる (#645)', async
     if (!el) return null;
     const box = el.getBoundingClientRect();
     return { top: box.top, h: window.innerHeight };
-  }, id!);
+  }, id);
   expect(seen, '目次の飛び先が本文に無い').not.toBeNull();
   expect(seen!.top).toBeGreaterThanOrEqual(0);
   expect(seen!.top, '飛んだ見出しが画面の外に居る').toBeLessThan(seen!.h);
@@ -164,19 +189,16 @@ test('🔴 目次を押すと、その見出しまで送られる (#645)', async
  * 🔴 **2 回目に押しても、読んでいた所を失わない**(#645。着地前の設計レビューが
  * 拾った ── 直す前は毎回組み直していたので、押すたび先頭へ戻っていた)。
  *
- * ⚠ unit は「組み直していない」までしか見られない ── **同じ窓が返るか**は
+ * ⚠ unit は「移し直していない」までしか見られない ── **同じ窓が返るか**は
  *   ブラウザ(窓の名前の解決)の仕事なので、ここでしか確かめられない。
+ * ⚠ 段②では「読み直し(navigate)」が起きても先頭へ戻る ── URL が変わらないことも見る。
  */
 test('🔴 もう一度押すと、同じ窓が読んでいた所のまま前に出る (#645)', async ({ page, context }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="help"]');
-  const popup = context.waitForEvent('page');
-  await clickReal(page, '[data-pkc-action="open-manual-window"]');
-  const win = await popup;
-  await win.waitForLoadState('domcontentloaded');
-  await expect(win.locator(MAIN)).toBeVisible();
+  const win = await openManual(page, context);
 
   // ⚠ **対照群** ── 送る前は 0(0 のままなら、以降の「保たれた」は何も言わない)
   expect(await win.locator(MAIN).evaluate((el) => el.scrollTop)).toBe(0);
@@ -202,4 +224,61 @@ test('🔴 もう一度押すと、同じ窓が読んでいた所のまま前に
 
   await win.close();
   expect(errors, `console/pageerror: ${errors.join(' | ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **F5 で白紙にならない**(#645 段②。段①の窓で実際に起きていた ── マニュアルにも
+ * 「白紙になります」と書いていた)。
+ * ⚠ ここは `dist/` を配る preview でしか見えない ── unit は `manual.html` が
+ *   **配られているか**を原理的に見られない(§8「届いたか」)。
+ */
+test('🔴 窓で F5 を押しても、マニュアルはそのまま読み直せる (#645 段②)', async ({ page, context }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="help"]');
+  const win = await openManual(page, context);
+  const before = await win.locator(`${TOC} a`).count();
+  expect(before, '前提が崩れている(目次が空)').toBeGreaterThan(100);
+
+  await win.reload();
+  await expect(win.locator(MAIN), 'F5 で白紙になった').toBeVisible();
+  expect(await win.locator(`${TOC} a`).count()).toBe(before);
+  expect(new URL(win.url()).pathname).toMatch(PAGE);
+
+  await win.close();
+  expect(errors, `console/pageerror: ${errors.join(' | ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **設定で選んだ配色が、この窓にも届く**(#645 段②。段①の窓には 2 種しか無く、
+ * マニュアルにも「この窓にはまだ届きません」と書いていた)。
+ * 🔑 観測点は**実際に塗られた地の色** ── `tokens.css` の当の配色の `--bg` と一致すること。
+ *   属性(`data-pkc-theme`)だけ見ると、属性は立つのに CSS が入っていない形を素通りする。
+ */
+test('🔴 設定で選んだ配色(Dracula)が、窓の地の色になる (#645 段②)', async ({ page, context }) => {
+  // 🔑 期待値は tokens.css から読む(綴りを写さない)
+  const tokens = readFileSync(new URL('../../src/styles/tokens.css', import.meta.url), 'utf8');
+  const block = tokens.slice(tokens.indexOf(":root[data-pkc-theme='dracula']"));
+  const hex = /--bg:\s*#([0-9a-f]{6})/iu.exec(block)![1]!;
+  const rgb = `rgb(${parseInt(hex.slice(0, 2), 16)}, ${parseInt(hex.slice(2, 4), 16)}, ${parseInt(hex.slice(4, 6), 16)})`;
+
+  // user が設定で Dracula を選んでいる状態(保存の鍵は theme.ts と同じ)
+  await page.addInitScript(() => localStorage.setItem('pkc3.theme', 'dracula'));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  // ⚠ 対照群 ── アプリ本体にその配色が効いている(効いていなければ「窓に届いた」は何も言わない)
+  expect(await page.evaluate(() => document.documentElement.getAttribute('data-pkc-theme'))).toBe(
+    'dracula',
+  );
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="help"]');
+  const win = await openManual(page, context);
+
+  const seen = await win.evaluate(() => ({
+    theme: document.documentElement.getAttribute('data-pkc-theme'),
+    bg: getComputedStyle(document.body).backgroundColor,
+  }));
+  expect(seen.theme).toBe('dracula');
+  expect(seen.bg, '選んだ配色の地の色になっていない').toBe(rgb);
+  await win.close();
 });

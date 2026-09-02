@@ -27,6 +27,8 @@ type Input = {
   /** 「持ち歩ける 1 枚」の雛形だけの予算(#400 段④)。⚠ 雛形が在るのに欠けたら鳴る。 */
   sidecarCapKb?: number;
   sidecarFloorKb?: number;
+  /** 焼いたマニュアル(`manual.html`)の下限(#645 段②)。⚠ 渡さなければ鳴る。 */
+  manualFloorKb?: number;
   files: File[];
   text: Map<string, string>;
 };
@@ -37,6 +39,7 @@ const ENTRY = 'assets/index-AAAAAAAA.js';
 const WORKER = 'assets/storage-worker-BBBBBBBB.js';
 const WASM = 'assets/sqlite3-CCCCCCCC.wasm';
 const CSS = 'assets/style-DDDDDDDD.css';
+const MANUAL = 'manual.html';
 
 /**
  * index.html。実物と同じ癖を**わざと混ぜる**:
@@ -64,6 +67,8 @@ function healthy(kind: 'product' | 'dev' = 'product'): Input {
     { path: WORKER, bytes: 230_000 },
     { path: WASM, bytes: 860_000 },
     { path: CSS, bytes: 20_000 },
+    // 焼いたマニュアル(#645 段②)── アプリの一部。precache に載り、cap の内で数える
+    { path: MANUAL, bytes: 350_000 },
   ];
   const text = new Map<string, string>([
     ['index.html', INDEX_HTML],
@@ -72,7 +77,7 @@ function healthy(kind: 'product' | 'dev' = 'product'): Input {
       'sw.js',
       // ⚠ 実物と同じ形(検品はここを読む)。**生成物と一致していること**が規則
       `const PRECACHE = ${JSON.stringify(
-        ['index.html', 'manifest.webmanifest', 'icon.svg', ENTRY, WORKER, WASM, CSS].map(
+        ['index.html', 'manifest.webmanifest', 'icon.svg', ENTRY, WORKER, WASM, CSS, MANUAL].map(
           (p) => `./${p}`,
         ),
       )};\nself.addEventListener("fetch", () => {});`,
@@ -101,7 +106,7 @@ function healthy(kind: 'product' | 'dev' = 'product'): Input {
     files.push({ path: `${ENTRY}.map`, bytes: 1_400_000 });
     text.set(ENTRY, `${text.get(ENTRY)!}\n//# sourceMappingURL=index-AAAAAAAA.js.map`);
   }
-  return { kind, capKb: 2400, floorKb: 1200, files, text };
+  return { kind, capKb: 2400, floorKb: 1200, manualFloorKb: 100, files, text };
 }
 
 describe('生成物の検品 — 健全なとき', () => {
@@ -316,6 +321,43 @@ describe('🔴 縮む方向の事故 ── cap は上限しか見ない', () =>
   });
 });
 
+describe('🔴 焼いたマニュアル(manual.html)── 届いたかを出力の側で見る(#645 段②)', () => {
+  const without = (kind: 'product' | 'dev'): Input => {
+    const i = healthy(kind);
+    i.files = i.files.filter((f) => f.path !== MANUAL);
+    // ⚠ precache も揃えて落とす ── 「載っていない」の門ではなく**この門**が鳴ることを見る
+    i.text.set('sw.js', i.text.get('sw.js')!.replace(`,"./${MANUAL}"`, ''));
+    return i;
+  };
+
+  it('🔴 dev に無ければ鳴る(plugin が emit していない / 順番が変わった)', () => {
+    expect(run(without('dev')).join('\n')).toContain(`dist に ${MANUAL} が無い`);
+  });
+
+  it('⚠ product は無くても鳴らない(過去に release した zip も検品するため)', () => {
+    expect(run(without('product'))).toEqual([]);
+  });
+
+  it('🔴 在るが下限を割ったら鳴る(描画が空振りした page)', () => {
+    const i = healthy();
+    i.files = i.files.map((f) => (f.path === MANUAL ? { ...f, bytes: 50_000 } : f));
+    const out = run(i).join('\n');
+    expect(out).toContain(`${MANUAL} が下限を`);
+    // ⚠ 対照群 ── 下限の上なら鳴らない(規則そのものが生きている)
+    expect(run(healthy())).toEqual([]);
+  });
+
+  it('🔴 予算が渡っていなければ鳴る(呼び側が落としても門ごと消えない)', () => {
+    const i = healthy();
+    delete i.manualFloorKb;
+    expect(run(i).join('\n')).toContain(`${MANUAL} の予算が渡っていない`);
+  });
+
+  it('報告の行に大きさが出る', () => {
+    expect(inspect(healthy()).lines.join('\n')).toMatch(new RegExp(`${MANUAL} 341\\.8 KB`));
+  });
+});
+
 describe('map の扱い', () => {
   it('🔴 product に外部 map が 1 件でもあれば鳴る', () => {
     const i = healthy();
@@ -399,7 +441,7 @@ describe('配る量の tripwire', () => {
 
   it('ファイル数と map の件数を報告する(CI ログで人が読む数字)', () => {
     const out = inspect(healthy('dev')).lines.join('\n');
-    expect(out).toContain('[dev] ファイル 9 件 / うち map 1 件');
+    expect(out).toContain('[dev] ファイル 10 件 / うち map 1 件');
     expect(out).toContain('map: 1367.2 KB');
   });
 });

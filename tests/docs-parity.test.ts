@@ -1210,6 +1210,8 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    // ⚠ 上限 10 を超えたので 2026-09-02 に落とした(原本は CHANGELOG)
+    '板の付箋が、PowerPoint でも置いたとおりの場所に出ます',
     // ⚠ 上限 10 を超えたので 2026-08-31 に落とした(原本は CHANGELOG)
     '画面が狭いときの横ずれと、一覧を畳んだときの Ctrl+F を直しました',
     // ⚠ 上限 10 を超えたので 2026-08-31 に落とした(原本は CHANGELOG)

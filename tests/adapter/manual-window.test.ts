@@ -28,11 +28,18 @@ function blankDoc(): Document {
 }
 
 /** 窓の代わり。⚠ `closed` を動かせるようにする(閉じられた回を見る)。 */
-function fakeWin(): Window & { closed: boolean } {
+type FakeWin = Window & { closed: boolean; replaced: string[] };
+function fakeWin(): FakeWin {
   const doc = blankDoc();
-  return { document: doc, closed: false, close: () => {} } as unknown as Window & {
-    closed: boolean;
-  };
+  const replaced: string[] = [];
+  return {
+    document: doc,
+    closed: false,
+    replaced,
+    close: () => {},
+    // ⚠ 焼いた page へ移す口(段②)。呼ばれた URL を控える
+    location: { replace: (u: string) => replaced.push(u) },
+  } as unknown as FakeWin;
 }
 
 describe('マニュアルの窓 — 組み上がった中身', () => {
@@ -137,6 +144,8 @@ describe('マニュアルの窓 — 開き方', () => {
     version: 'v',
     text: TEXT,
     sections: manualSections(TEXT),
+    // ⚠ ここは about:blank に組む経路(持ち歩ける 1 枚)── 焼いた page は下の describe
+    pageUrl: null as string | null,
   };
 
   it('🔴 塞がれたら null(呼び側が理由を言える)。描画も呼ばない', async () => {
@@ -279,6 +288,110 @@ describe('マニュアルの窓 — 開き方', () => {
     expect(win.document.querySelector('[data-pkc-field="manual-window-raw"]')?.textContent).toBe(
       TEXT,
     );
+  });
+});
+
+/**
+ * 🔴 **焼いた 1 枚(`manual.html`)へ移す**(#645 段②)。
+ *
+ * 段①の窓は `about:blank` に組むので **F5 で白紙**になり、**設定の配色が届かなかった**。
+ * 隣に `manual.html` が在るなら、組まずに **`location.replace` でそこへ移す**。
+ * ⚠ 移す前に「同じ版で組んであるか」を見る ── 焼いた page も `<body>` に同じ属性を
+ *   持つので、2 回目は読み直さず前へ出す(読んでいた所を失わない)。
+ */
+describe('マニュアルの窓 — 焼いた page へ移す(段②)', () => {
+  const parts = {
+    title: MANUAL_WINDOW_TITLE,
+    version: 'pkc3 v9.9.9',
+    text: TEXT,
+    sections: manualSections(TEXT),
+    pageUrl: 'https://example.test/dev/manual.html',
+  };
+
+  it('🔴 pageUrl が在れば、組まずに移す(描画も呼ばない)', async () => {
+    const win = fakeWin();
+    const render = vi.fn(async () => HTML);
+    const seen: string[] = [];
+    const got = await openManualWindow({
+      ...parts,
+      render,
+      open: (url) => {
+        seen.push(url);
+        return win;
+      },
+    });
+    expect(got?.reused).toBe(false);
+    expect(win.replaced).toEqual([parts.pageUrl]);
+    // ⚠ 開く URL は空のまま(2 回目に押したとき navigate しないため)── page は replace で移す
+    expect(seen).toEqual(['']);
+    expect(render, '移すのに描いている(ワーカーを無駄に起こす)').not.toHaveBeenCalled();
+    expect(
+      win.document.querySelector('[data-pkc-region="manual-window-main"]'),
+      '移すのに組んでいる',
+    ).toBeNull();
+  });
+
+  it('移す前に「開いています」と出す(移るまでの白紙を見せない)', async () => {
+    const win = fakeWin();
+    let atReplace = '';
+    (win as unknown as { location: { replace: (u: string) => void } }).location.replace = () => {
+      atReplace = win.document.body.textContent ?? '';
+    };
+    await openManualWindow({ ...parts, render: async () => HTML, open: () => win });
+    expect(atReplace).toContain('マニュアルを開いています');
+  });
+
+  it('🔴 同じ版の page が既に出ていれば、移さずに前へ出す(読んでいた所を失わない)', async () => {
+    const win = fakeWin();
+    let focused = 0;
+    (win as unknown as { focus: () => void }).focus = () => {
+      focused += 1;
+    };
+    // 焼いた page が出ている状態 ── `<body>` に版が刻まれている
+    win.document.body.setAttribute('data-pkc-manual-version', parts.version);
+    const got = await openManualWindow({ ...parts, render: async () => HTML, open: () => win });
+    expect(got?.reused).toBe(true);
+    expect(focused).toBe(1);
+    expect(win.replaced, '読み直している(読んでいた所が先頭へ戻る)').toEqual([]);
+  });
+
+  it('🔴 対照群 ── 版が違えば移し直す(古い本文の窓を出し続けない)', async () => {
+    const win = fakeWin();
+    (win as unknown as { focus: () => void }).focus = () => {};
+    win.document.body.setAttribute('data-pkc-manual-version', 'pkc3 v1.0.0');
+    const got = await openManualWindow({ ...parts, render: async () => HTML, open: () => win });
+    expect(got?.reused).toBe(false);
+    expect(win.replaced).toEqual([parts.pageUrl]);
+  });
+
+  it('⚠ pageUrl が無ければ(持ち歩ける 1 枚)、これまでどおり組む ── 移さない', async () => {
+    const win = fakeWin();
+    const render = vi.fn(async () => HTML);
+    await openManualWindow({ ...parts, pageUrl: null, render, open: () => win });
+    expect(win.replaced).toEqual([]);
+    expect(render).toHaveBeenCalledTimes(1);
+    expect(win.document.querySelector('[data-pkc-region="manual-window-main"]')).not.toBeNull();
+  });
+
+  it('⚠ 窓の document に触れなくても(別 origin へ動かされた)、移す側へ倒れる', async () => {
+    const win = fakeWin();
+    Object.defineProperty(win, 'document', {
+      get() {
+        throw new Error('SecurityError');
+      },
+    });
+    // ⚠ 題名や待ちの字は書けないが、移すことはできる ── 落とさない
+    const got = await openManualWindow({ ...parts, render: async () => HTML, open: () => win });
+    expect(got?.reused).toBe(false);
+    expect(win.replaced).toEqual([parts.pageUrl]);
+    // ⚠ 対照群 ── 組む経路(pageUrl 無し)では組めないので null(呼び側が理由を出す)
+    const none = await openManualWindow({
+      ...parts,
+      pageUrl: null,
+      render: async () => HTML,
+      open: () => win,
+    });
+    expect(none).toBeNull();
   });
 });
 

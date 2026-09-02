@@ -86,12 +86,21 @@ function resolveFrom(referrer, ref) {
  */
 export const PORTABLE_TEMPLATE = 'portable-template.html';
 
+/**
+ * 焼いたマニュアル(#645 段②)。`build/manual-page-plugin.ts` が `generateBundle` で emit する。
+ * ⚠ アプリの一部(オフラインでも読む)── precache に**載る**し、配る量にも**数える**
+ *   (雛形とは逆)。綴りは `features/help/manual-page.ts` の `MANUAL_PAGE_FILE` と同じ
+ *   (`tests/dist-inspect.test.ts` が突き合わせる)。
+ */
+export const MANUAL_PAGE = 'manual.html';
+
 export function inspectDist({
   kind,
   capKb,
   floorKb,
   sidecarCapKb,
   sidecarFloorKb,
+  manualFloorKb,
   files,
   text,
 }) {
@@ -294,6 +303,36 @@ export function inspectDist({
       errors.push(
         `${PORTABLE_TEMPLATE} が下限を ${kb(sidecarFloorKb * 1024 - bytes)} KB 下回る` +
           `(下限 ${sidecarFloorKb} KB)── 空 / 途中で切れた雛形を配ろうとしている`,
+      );
+    }
+  }
+
+  // ── ⑥ 焼いたマニュアル(#645 段②)── **届いたか**を出力の側で見る
+  /**
+   * 🔴 plugin の下限(見出しの本数)は**入力の側**の門である ── emit が落ちても、
+   *   plugin の順が変わって precache から漏れても、そこは鳴らない。
+   *   「直した所」ではなく「直した結果が届いたか」に tripwire を置く(CLAUDE.md §8)。
+   * ⚠ `dev` だけ**在ること**を要求する ── `product` は**過去に release した zip**も
+   *   検品する(Pages の `/`)ので、段②より前の版(v3.2.0)に在るはずが無い。
+   *   在るときの下限は両方で見る(空 / 途中で切れた page を配らない)。
+   * ⚠ 予算が渡っていなければ黙って通さない(雛形と同じ作法)。
+   */
+  const manual = files.find((f) => f.path === MANUAL_PAGE);
+  if (manualFloorKb === undefined) {
+    errors.push(`${MANUAL_PAGE} の予算が渡っていない ── 呼び側が \`manualFloorKb\` を渡していない(門が消えている)`);
+  } else if (manual === undefined) {
+    if (kind === 'dev') {
+      errors.push(
+        `dist に ${MANUAL_PAGE} が無い ── マニュアルの窓が SPA fallback で PKC をもう 1 枚開く` +
+          '(plugin が emit していないか、順番が変わった)',
+      );
+    }
+  } else {
+    lines.push(`  マニュアル: ${MANUAL_PAGE} ${kb(manual.bytes)} KB(precache に載る / cap の内)`);
+    if (manual.bytes < manualFloorKb * 1024) {
+      errors.push(
+        `${MANUAL_PAGE} が下限を ${kb(manualFloorKb * 1024 - manual.bytes)} KB 下回る` +
+          `(下限 ${manualFloorKb} KB)── 描画が空振りした page を配ろうとしている`,
       );
     }
   }
