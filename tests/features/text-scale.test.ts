@@ -9,7 +9,7 @@
  * ③ 🔴 **当てるだけでは保存しない**(起動時の適用が「選んでいないのに固定」を作らない)
  * ④ 保存が読めない環境でも落ちない
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { initialState } from '../../src/adapter/state/app-state';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
@@ -24,6 +24,7 @@ import {
 import {
   applyTextScale,
   chooseTextScale,
+  chosenTextScale,
   currentTextScale,
   initialTextScale,
   TEXT_SCALE_ATTR,
@@ -193,5 +194,54 @@ describe('main.ts の配線(原文 pin)', () => {
     expect(code, '起動時に当てていない(選んでも次の起動で戻る)').toMatch(
       /applyTextScale\(document\.documentElement,\s*initialTextScale\(\)\)/,
     );
+  });
+});
+
+/**
+ * 🔴 **「選んだか」と「効いているか」は別の問い**(2026-09-02 hotfix、#648)。
+ *
+ * 焼いたマニュアル(`manual-page.ts` の boot script)は**選んでいなければ触らない**
+ * (読み物なので 14px のまま)。窓へ当て直す側(`main.ts` の `currentAppearance`)が
+ * 「効いている既定 13px」を渡すと、**何も変えずにもう一度押しただけで字が縮む**。
+ * 🔑 だから当て直す側は boot script と同じ門(`chosenTextScale`)で読む。
+ */
+describe('選んだ大きさ(chosenTextScale)', () => {
+  afterEach(() => {
+    localStorage.clear();
+    document.documentElement.removeAttribute('data-pkc-text-scale');
+    document.documentElement.style.removeProperty('--pkc-text-size');
+  });
+
+  it('🔴 選んでいなければ null(効いている既定を「選んだ」と読まない)', () => {
+    applyTextScale(document.documentElement, 'standard');
+    expect(chosenTextScale(), '当てただけで「選んだ」になっている').toBeNull();
+    // 対照群 ── 選べば id が返る
+    chooseTextScale(document.documentElement, 'large');
+    expect(chosenTextScale()).toBe('large');
+  });
+
+  it('保存が壊れていれば null(boot script も同じ値では触らない)', () => {
+    localStorage.setItem('pkc3.text-scale', 'ばかでかい');
+    expect(chosenTextScale()).toBeNull();
+    expect(initialTextScale(), '起動側は既定へ落ちる').toBe('standard');
+  });
+
+  /**
+   * ⚠ 原文 pin(`main.ts` はどの test からも実行されない)。見るのは 1 点 ──
+   *   マニュアルの窓へ渡す大きさを、**効いている値**ではなく**保存**から読んでいること。
+   */
+  it('🔴 main.ts はマニュアルの窓へ渡す大きさを保存(chosenTextScale)から読む', () => {
+    const main = readFileSync('src/main.ts', 'utf8');
+    const code = main.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+    const from = code.indexOf('function currentAppearance(');
+    const to = code.indexOf('function openManualTile(');
+    expect(from, 'currentAppearance が無い(空振り)').toBeGreaterThan(-1);
+    expect(to, 'openManualTile が無い(空振り)').toBeGreaterThan(from);
+    const fn = code.slice(from, to);
+    expect(fn).toMatch(/chosenTextScale\(\)/);
+    expect(
+      fn,
+      '効いている値(root.style)を渡している ── 何も変えずに押しただけで 14px → 13px に縮む',
+    ).not.toMatch(/getPropertyValue\(\s*['"]--pkc-text-size['"]\s*\)/);
   });
 });

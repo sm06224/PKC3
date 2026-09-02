@@ -207,6 +207,14 @@ test('🔴 もう一度押すと、同じ窓が読んでいた所のまま前に
   });
   const before = await win.locator(MAIN).evaluate((el) => el.scrollTop);
   expect(before, '送れていない(前提が崩れている)').toBeGreaterThan(0);
+  /**
+   * 🔴 **対照群 ── 何も変えずにもう一度押しても、字の大きさは動かない**(2026-09-02 hotfix)。
+   * ⚠ 直す前は 14px → 13px に縮んでいた ── 文字の大きさを選んでいない user に、
+   *   アプリで「効いている既定 13px」を渡していた(焼いた page は選んでいなければ
+   *   読み物の 14px のまま)。
+   */
+  const fontBefore = await win.evaluate(() => getComputedStyle(document.body).fontSize);
+  expect(fontBefore, '前提:何も選んでいないので読み物の既定 14px').toBe('14px');
 
   /**
    * 🔴 **2 枚目が開いたら赤**。⚠ `waitForEvent('page')` を張ると「開くのを待つ」
@@ -221,6 +229,10 @@ test('🔴 もう一度押すと、同じ窓が読んでいた所のまま前に
     await win.locator(MAIN).evaluate((el) => el.scrollTop),
     '読んでいた所が先頭へ戻った',
   ).toBe(before);
+  expect(
+    await win.evaluate(() => getComputedStyle(document.body).fontSize),
+    '何も変えていないのに字の大きさが動いた(当て直しが冪等でない)',
+  ).toBe(fontBefore);
 
   await win.close();
   expect(errors, `console/pageerror: ${errors.join(' | ')}`).toEqual([]);

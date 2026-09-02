@@ -492,20 +492,61 @@ describe('マニュアルの窓 — 見え方の当て直し(I1 / I3 / I5)', () 
     expect(atReplace!.fg).toBe('rgb(248, 248, 242)');
   });
 
-  it('about:blank に組む経路では、一瞬の地の色を外してから組み、字の大きさは当てる', async () => {
+  /**
+   * 🔴 **`about:blank` に組む経路には、一瞬の地の色を置かない**(2026-09-02 hotfix)。
+   * ⚠ 直す前は置いてから `fillManualWindow` が外していた ── この経路には配色の規則が無い
+   *   (UA の色で組む)ので、暗い配色の user には**暗い地 → 組み上がった瞬間に明るい地**へ
+   *   裏返っていた(避けたかった「光る」が向きを変えて残る)。
+   * 🔑 見るのは**描いている最中**(「開いています…」が出ている間)── 組んだ後だけ見ると、
+   *   置いてから外す形でも通る。
+   */
+  it('🔴 about:blank に組む経路では、一瞬の地の色を置かない(置くと組んだ瞬間に裏返る)', async () => {
     const win = fakeWin();
+    let duringRender: { bg: string; fg: string } | null = null;
     await openManualWindow({
       ...parts,
       pageUrl: null,
       appearance: dark,
+      render: async () => {
+        const st = win.document.documentElement.style;
+        duringRender = { bg: st.background, fg: st.color };
+        return HTML;
+      },
+      open: () => win,
+    });
+    expect(duringRender, '描画が呼ばれていない(空振り)').not.toBeNull();
+    expect(duringRender!.bg, '一瞬の地の色を置いている(組んだ瞬間に裏返る)').toBe('');
+    expect(duringRender!.fg).toBe('');
+    const st = win.document.documentElement.style;
+    expect(st.background).toBe('');
+    // 字の大きさは当てる(この経路に効くのは大きさだけ)
+    expect(st.getPropertyValue('--pkc-text-size')).toBe('17px');
+    expect(win.document.querySelector('[data-pkc-region="manual-window-main"]')).not.toBeNull();
+  });
+
+  it('🔴 about:blank に組む経路でも、古い印の窓を入れ替えた回は swapped(初回は false)', async () => {
+    const win = fakeWin();
+    const first = await openManualWindow({
+      ...parts,
+      pageUrl: null,
       render: async () => HTML,
       open: () => win,
     });
-    const st = win.document.documentElement.style;
-    // ⚠ 残すと器の規則(`--bg`)より inline が勝ち、配色の規則が効かない
-    expect(st.background, '一瞬の地の色が残っている').toBe('');
-    expect(st.getPropertyValue('--pkc-text-size')).toBe('17px');
-    expect(win.document.querySelector('[data-pkc-region="manual-window-main"]')).not.toBeNull();
+    expect(first?.swapped, '初めて組んだ回に「入れ替えた」と言っている').toBe(false);
+    // 昨日組んだ窓(印が古い)
+    win.document.body.setAttribute('data-pkc-manual-version', manualBuildTag('pkc3 v1.0.0', TEXT));
+    const again = await openManualWindow({
+      ...parts,
+      pageUrl: null,
+      render: async () => HTML,
+      open: () => win,
+    });
+    expect(again?.reused).toBe(false);
+    expect(again?.swapped, '入れ替えたのに言えない(呼び側が「先頭から出ます」と言えない)').toBe(true);
+    // 組み直されている(古い本文の窓を出し続けない)
+    expect(win.document.body.getAttribute('data-pkc-manual-version')).toBe(
+      manualBuildTag(parts.version, TEXT),
+    );
   });
 
   it('見え方を渡さなくても壊れない(呼び側が省略できる)', async () => {

@@ -27,6 +27,7 @@ import { MANUAL_TEXT } from '../../src/adapter/ui/render/help';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import { initialTheme, THEMES, THEME_STORAGE_KEY } from '../../src/adapter/ui/render/theme';
 import {
+  chosenTextScale,
   initialTextScale,
   TEXT_SCALE_STORAGE_KEY,
 } from '../../src/adapter/ui/render/text-scale';
@@ -241,12 +242,17 @@ describe('焼いたマニュアル — 配色', () => {
         expect(run(), t.id).toBe(textScaleSpec(t.id).size);
         // ⚠ アプリ側の読み(`initialTextScale`)と同じ id に解決している
         expect(initialTextScale()).toBe(t.id);
+        // ⚠ 窓へ当て直す側(`chosenTextScale`)も同じ id ── 2 回目に押しても 1px も動かない
+        expect(chosenTextScale()).toBe(t.id);
       }
       expect(TEXT_SCALES.length, '段が 4 未満(表が空振り)').toBeGreaterThanOrEqual(4);
     });
 
     it('選んでいなければ触らない(CSS の既定 14px のまま)', () => {
       expect(run()).toBe('');
+      // 🔴 当て直す側も「選んでいない」と読む ── ここが食い違うと、何も変えずに押しただけで
+      //    14px → 13px に縮む(2026-09-02 hotfix)
+      expect(chosenTextScale(), 'boot script は触らないのに、当て直す側は「選んだ」と読む').toBeNull();
     });
 
     it('⚠ 知らない値(壊れた保存)は触らない', () => {
