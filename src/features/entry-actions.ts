@@ -402,8 +402,33 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
  * ⚠ `write-back-file` を静的な字にすると、**どのファイルへ書き戻すのかが読めない**
  *   ── 押す前に確かめられない(上書きは取り消せない)。
  */
+/**
+ * 🔴 **長い名前は真ん中を省く**(#587 C-3 の着地後レビュー)。
+ *
+ * ⚠ 頭だけ残すと**拡張子が消える**(`.docx` なのか `.md` なのかが読めない)。
+ * ⚠ 尻だけ残すと**どの文書か分からない**。だから両端を残す。
+ */
+function middleEllipsis(name: string, max: number): string {
+  if (max <= 1 || name.length <= max) return name;
+  const head = Math.ceil((max - 1) / 2);
+  return `${name.slice(0, head)}…${name.slice(name.length - (max - 1 - head))}`;
+}
+
+/** `write-back-file` の説明のうち、ファイル名以外の固定部分(字数を数えるため空で組む)。 */
+const WRITE_BACK_FRAME = '開いた元のファイル()を、このノートの内容で上書きします';
+
 export function entryActionHint(action: string, ctx: EntryMenuContext): string {
-  if (action === 'write-back-file')
-    return `開いた元のファイル(${ctx.linkedFile ?? ''})を、このノートの内容で上書きします`;
+  if (action === 'write-back-file') {
+    /**
+     * 🔴 **この 1 件だけ上限の門の外に在った**(#587 C-3 の着地後レビュー)。
+     * ⚠ 表(`ENTRY_ACTION_HINTS`)に無く**その場で組む**ので、全数の上限検査に
+     *   一度も当たっていなかった。固定部分が 28 字なので、**名前が 28 字を超えると
+     *   3 行目**に落ち、`-webkit-line-clamp: 2` で切れる ── 切れるのは末尾、つまり
+     *   「**上書きします**」という、**取り消せない操作だと言っている当の部分**である。
+     * 🔑 だから名前のほうを縮める(頭と尻を残す)── 言うべきことは必ず残る。
+     */
+    const room = ENTRY_ACTION_HINT_MAX - WRITE_BACK_FRAME.length;
+    return `開いた元のファイル(${middleEllipsis(ctx.linkedFile ?? '', room)})を、このノートの内容で上書きします`;
+  }
   return ENTRY_ACTION_HINTS[action] ?? '';
 }

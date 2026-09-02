@@ -818,7 +818,9 @@ describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
     ['2026-09-02-tags-two-lines', '75bdfbfd'],
-    ['2026-09-02-menu-hint-box', 'dc6a8e05'],
+    // ⚠ 訂正(2026-09-02): 「本文のメニューには説明が無い」が事実と違ったので 1 行だけ直した
+    //    ── 届かなくてよい変更(配ったときの字は CHANGELOG に残っている)
+    ['2026-09-02-menu-hint-box', 'c7278482'],
     ['2026-09-02-append-opens', '9d60ff45'],
     ['2026-09-02-split-restore', '568986a9'],
     ['2026-09-02-manual-page', 'eefd976e'],

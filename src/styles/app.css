@@ -478,8 +478,15 @@ select:focus-visible {
   white-space: normal;
   cursor: default;
   /* 🔑 **常に 2 行ぶんの高さを取る** ── 指す項目で高さが変わると、メニューが上下に踊って
-   *    次の項目を押し損ねる。3 行目以降は切る(字数は `ENTRY_ACTION_HINT_MAX` が止める)。 */
-  height: calc(1.4em * 2);
+   *    次の項目を押し損ねる。3 行目以降は切る(字数は `ENTRY_ACTION_HINT_MAX` が止める)。
+   * 🔴 **padding と border を足す**(#587 C-3 の着地後レビュー)── 全域が
+   *    `box-sizing: border-box`(この file の冒頭)なので、`calc(1.4em * 2)` = 33.6px は
+   *    **枠込みの高さ**である。内容領域は `33.6 − (4+3) − 1 = 25.6px` しか残らず、
+   *    「2 行ぶん」と書いてあるのに **2 行目の下半分が切れていた**(11 件中 10 件が 2 行)。
+   * ⚠ smoke の上限の式(`lineHeight*2 + padding + border`)が**正しい目標高**で、
+   *    直す前の CSS はそれより**ちょうど 8px 低い**。⚠ 検査は `<=` の片側だけだったので
+   *    **縮む方向は素通り**していた(CLAUDE.md §1「tripwire は上限だけでなく下限も」)。 */
+  height: calc(1.4em * 2 + 8px);
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 2;
