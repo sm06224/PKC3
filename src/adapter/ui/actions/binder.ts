@@ -1104,11 +1104,19 @@ function notWhileEditing(dispatcher: Dispatcher, refusal: string): () => string 
  * ⚠ 直す前は 4 つがばらばらだった:計測だけが `timer.ts` の中で断り、
  *   **録音 / 画面録画は録り終わってから**「ノートを開いていないので本文には
  *   入れていません」と言い(= **録ってから知らされる**)、**添付は黙って
- *   file を選ばせて**単独の添付ノートを作っていた。
+ *   file を選ばせて**いた。
  *   ⚠ どれも「押した時点では止めてくれない」ので、user は**やり直しになる**。
- * 🔑 **一覧に居る間はこの 4 つに入れ先が無い**(スマホでは戻ると対象が消えるので
- *   なおさら)── 判定は `NOTE_TOOL_ACTIONS` **1 か所**から引くので、5 つ目の
- *   道具を足した日にここへ書き足す必要は無い。
+ * 🔑 判定は `NOTE_TOOL_ACTIONS` **1 か所**から引くので、5 つ目の道具を足した日に
+ *   ここへ書き足す必要は無い。
+ *
+ * 🔴 **理由を書き添えない**(2026-09-02 の着地前レビュー 2 本が同じ 1 件を挙げた)。
+ *   ⚠ 1 稿目は「(**入れ先のノートが決まりません**)」と添えたが、**添付には
+ *   成り立たない** ── `attach.ts` は `CREATE_ENTRY` を撃つだけで、`selectedLid` も
+ *   `formatAssetRef` も **1 件も読んでいない**(独立した添付ノートを作る)。
+ *   🔑 4 つに共通して真なのは「**ノートを開いてから押す**」だけなので、そこで止める。
+ * ⚠ **添付だけ振る舞いが揃っていないこと自体**は別に扱う ── 録音は開いていた
+ *   ノートへ選択を返し、本文へ参照を入れる(`capture.ts`)。揃えるかどうかは
+ *   **見え方が変わる**判断なので、この PR では字を実装に合わせるに留める。
  * ⚠ 貼り付け / 差し込みの経路(`services.attachFiles` を直に呼ぶ 2 か所)は
  *   **通さない** ── あちらは「この file をここへ置く」という指し示しつきの操作で、
  *   断ると**いま在る動線を 1 つ失う**(user 裁定 2026-08-07)。
@@ -1124,7 +1132,7 @@ function refuseWithoutNote(action: string, dispatcher: Dispatcher): boolean {
   //   4 つが同じ字だと、user は自分がどれを押して断られたのか分からない
   dispatcher.dispatch({
     type: 'OP_FAILED',
-    error: `「${label}」はノートを開いてから押してください(入れ先のノートが決まりません)`,
+    error: `「${label}」はノートを開いてから押してください`,
   });
   return true;
 }
@@ -1444,7 +1452,12 @@ const MENU_LINE_ATTR = 'data-pkc-menu-line';
  * @returns `false` = 断った(呼び側はそこで止める)。
  */
 function phoneShowList(dispatcher: Dispatcher): boolean {
-  // ⚠ PC は 1 バイトも触らない(一覧は最初から出ている)
+  /**
+   * ⚠ **PC は 1 バイトも触らない**(一覧は最初から出ている)。
+   * 🔑 この 1 行が守るのは **PC で編集中にタグ札を押したとき** ── 外すと下の
+   *   `phase !== 'ready'` に落ちて、列が両方見えているのに
+   *   「一覧で探してください」というスマホ用の字が出る(着地前レビュー 3)。
+   */
   if (!appPhone.isPhone()) return true;
   if (dispatcher.getState().phase !== 'ready') {
     dispatcher.dispatch({

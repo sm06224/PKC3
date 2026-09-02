@@ -284,6 +284,12 @@ describe('情報ページ(#609 の行き止まりを作らない)', () => {
     expect(back.hidden, '本文を見ている間に出ている').toBe(true);
     s.field('phone-back').click();
     expect(back.hidden, '一覧に戻る口が無い').toBe(false);
+    /**
+     * 🔴 **字も pin する**(着地前レビュー 5)。⚠ 直す前は題名しか見ておらず、
+     *   「ノートへ →」を空文字にしても緑だった ── 一覧の頭に**灰色の題名が
+     *   1 行出るだけ**になり、押せることもどこへ行くかも読めない。
+     */
+    expect(back.textContent, 'どこへ行く行なのか字が無い').toContain('ノートへ');
     expect(s.field('phone-return-title').textContent).toBe('買い物');
     back.click();
     expect(s.page(), '「ノートへ →」で戻れない').toBe('note');
@@ -323,6 +329,25 @@ describe('情報ページ(#609 の行き止まりを作らない)', () => {
     const s = setup(true);
     expect(s.page()).toBe('list');
     expect(s.field('phone-return').hidden).toBe(true);
+  });
+
+  /**
+   * 🔴 **列のいちばん上に在る**(着地前レビュー 6)。
+   *
+   * ⚠ `shell.ts` は「戻る口は探す前に見える場所に在るべきで、一覧を下へ流しても
+   *   隠れない」と主張しているのに、**置き場を見る検査が 1 つも無かった** ──
+   *   一覧の下端へ動かしても unit は `hidden` と字しか見ず、smoke の `clickReal` は
+   *   `scrollIntoViewIfNeeded` を呼ぶので緑になる。
+   * 🔴 壊れる形:ノートが 50 件ある人は**戻る行が流れて見えない**(この裁定の主題
+   *   そのものが消える)。
+   */
+  it('🔴 「ノートへ →」は左の列のいちばん上に在る(下へ流れない)', () => {
+    const s = setup(true);
+    const sidebar = s.shell.querySelector('[data-pkc-region="sidebar"]')!;
+    expect(
+      sidebar.firstElementChild?.getAttribute('data-pkc-region'),
+      '戻る行が列の先頭に無い(一覧を流すと隠れる)',
+    ).toBe('phone-return');
   });
 
   /** ⚠ PC の版面では 1px も場所を取らない。 */
@@ -548,6 +573,32 @@ describe('⋯ と左の列の等値(次に足した人が気づく)', () => {
  *   当の症状が、面を重ねた瞬間に戻る)。
  */
 describe('探す・絞る・目次(隠れた面へ送らない)', () => {
+  /**
+   * 🔴 **PC は 1 バイトも触らない**(着地前レビュー 3)。
+   *
+   * ⚠ `phoneShowList` の `isPhone()` の早期 return を外しても、既存の test は
+   *   1 つも落ちなかった ── `focus-search` は `isPhone()` のときしか呼ばず、
+   *   `filter-by-tag` を **PC で編集中に**押す test が 1 件も無かったためである。
+   * 🔴 壊れる形:PC で編集中に情報ペインのタグ札を押すと、**列は両方見えているのに**
+   *   絞り込みが効かず「保存するか取り消してから、**一覧で探してください**」という
+   *   スマホ用の字が出る(いまは絞り込める)。
+   */
+  it('🔴 PC では編集中でもタグ札で絞れる(スマホの断りを持ち込まない)', () => {
+    const s = setup(false);
+    s.open('n1');
+    s.d.dispatch({ type: 'START_EDIT' });
+    expect(s.d.getState().phase, '台が編集に入っていない(前提が崩れた)').toBe('editing');
+    const chip = s.root.ownerDocument.createElement('button');
+    chip.setAttribute('data-pkc-action', 'filter-by-tag');
+    chip.setAttribute('data-pkc-tag', '買い物');
+    s.root.append(chip);
+    chip.click();
+    expect(s.d.getState().filterQuery, 'PC なのに絞り込まれていない').toBe('買い物');
+    expect(s.d.getState().error ?? '', 'PC にスマホ用の断りが出ている').not.toContain(
+      '一覧で探してください',
+    );
+  });
+
   it('🔴 探す鍵を押すと一覧ページへ移り、欄に焦点が入る', () => {
     const s = setup(true);
     s.open('n1');

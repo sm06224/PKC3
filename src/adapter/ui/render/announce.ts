@@ -167,7 +167,16 @@ export function createAnnounce(
 
     const where = document.createElement('p');
     where.setAttribute('data-pkc-field', 'announce-where');
-    where.textContent = '過去のお知らせは、左の列の「ヘルプ」からいつでも読めます。';
+    /**
+     * ⚠ **場所の言い方をしない**(2026-09-02 の動線レビュー)── 直す前は
+     *   「**左の列の**「ヘルプ」から」と書いていたが、スマホ用画面には**列が無い**
+     *   (一覧・本文・情報を 1 枚ずつ出す)。⚠ この 1 行は「閉じても大丈夫」の
+     *   **唯一の根拠**なので、指す先が無いと user は閉じるのをためらう。
+     * ⚠ 「今後は出さない」の戻し道も**字で**書く ── いまは `title` にしか無く、
+     *   指で触る端末では `title` は**一度も出ない**。
+     */
+    where.textContent =
+      '過去のお知らせは「ヘルプ」からいつでも読めます。「今後は出さない」は設定の「表示」から戻せます。';
 
     const mute = document.createElement('button');
     mute.type = 'button';

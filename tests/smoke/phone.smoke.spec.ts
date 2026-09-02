@@ -336,12 +336,17 @@ test('🔴 本文⇄情報を往復しても、図を焼き直さない', async 
  * 全画面にした以上、**畳めなければアプリごと行き止まり**になる(起動のたびに
  * 同じカードが画面を覆う)。裁定の後半「不要ならみんな設定するでしょ」は
  * **「今後は出さない」が本当に効く**ことを前提にしているのに、
- * ⚠ それを端から端まで見る検査は 1 つも無かった ── unit は
- * `muteAnnounce` が**呼ばれた**ことしか見ておらず、
- * 「押した → 読み直しても出ない」は**誰も守っていなかった**。
+ * ⚠ **実ブラウザで端から端まで通す検査は無かった** ── `announce.test.ts` は
+ * store の状態(恒久オフ + 既読)まで見ているが、**押して読み直す**所までは
+ * 誰も通していない。
  *
- * 🔑 観測点は 3 つ:①**覆っている**(高さの割合)②**押せる**(`elementFromPoint` ──
- * `toBeVisible()` では覆われていても通る)③**読み直しても出ない**。
+ * 🔴 **「出ない」だけでは足りない**(2026-09-02 の着地前レビュー 8)。`mute()` は
+ * `markSeen` と `setEnabled(false)` の**2 つ**をするので、⚠ 恒久オフを消す変異でも
+ * **既読になったぶんだけ「出ない」は成り立つ** ── だから設定そのものも見る。
+ *
+ * 🔑 観測点は 4 つ:①**覆っている**(高さの割合)②**押せる**(`elementFromPoint` ──
+ * `toBeVisible()` では覆われていても通る)③**読み直しても出ない**
+ * ④**恒久オフの設定が残っている**。
  */
 test('🔴 お知らせは画面いっぱいに出て、「今後は出さない」で二度と出ない', async ({ page }) => {
   const errors = collectPageErrors(page);
@@ -431,6 +436,13 @@ test('🔴 お知らせは画面いっぱいに出て、「今後は出さない
   await expect(band, '「今後は出さない」が次の起動で効いていない').toBeHidden();
   // ⚠ 空振り防止 ── アプリ自体は起動しており、一覧が出ている
   await expect(page.locator(REGION('sidebar')), '起動していない(何も測っていない)').toBeVisible();
+  /**
+   * 🔴 **恒久オフそのものを見る**(上の docstring の④)。⚠ 綴りは実測した
+   *   (`notice-store.ts` の `OFF_KEY`)。これが無いと、`setEnabled(false)` を
+   *   落とす変異が**既読に救われて**生き延びる。
+   */
+  const off = await page.evaluate(() => localStorage.getItem('pkc3.notices.off'));
+  expect(off, '恒久オフが保存されていない(既読になっただけ)').toBe('1');
 
   expect(errors).toEqual([]);
 });
@@ -466,4 +478,24 @@ test('🔴 ← 一覧 で戻っても、「ノートへ →」で読んでいた
   await clickReal(page, '[data-pkc-field="phone-return"]');
   await expect(page.locator(REGION('center')), '「ノートへ →」で本文へ帰れない').toBeVisible();
   await expect(back, '本文に帰ったのに行が残っている').toBeHidden();
+
+  /**
+   * 🔴 **一覧の「実物の行」でも帰れる**(2026-09-02 の着地前レビュー 9)。
+   *
+   * ⚠ この裁定でいちばん難しい主張(**同じ行をもう一度押しても本文へ戻る** ──
+   *   設計 doc §2-6 が bit を一度棄却した当の理由)を守っていたのは、
+   *   unit が **手で組んだ `<button>`** を押す 1 本だけだった。
+   * 🔴 行の markup が内側の `<span>` へ移った日、`select-entry` の受け手は
+   *   `closest` せずに `data-pkc-entry` を読むので **lid が null になって無反応**
+   *   ── 実機の dead tap が戻るのに unit は緑である。だから**実物を押す**。
+   */
+  await clickReal(page, '[data-pkc-field="phone-back"]');
+  await expect(page.locator(REGION('sidebar'))).toBeVisible();
+  const row = page.locator(`${REGION('sidebar')} [data-pkc-action="select-entry"][data-pkc-entry]`).first();
+  await expect(row, '一覧に行が 1 つも出ていない(台の前提が崩れた)').toBeVisible();
+  await clickReal(page, row);
+  await expect(
+    page.locator(REGION('center')),
+    '一覧の行を押しても本文へ戻らない(dead tap)',
+  ).toBeVisible();
 });

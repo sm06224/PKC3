@@ -289,7 +289,7 @@ export function withTrailingLast<T extends { readonly action: string }>(
  *
  * この 4 つの押し口は**左の列(`create-bar`)にしか無い**。ところがスマホ用画面では
  * 一覧と本文が**同時に出ない**ので、本文を開いている間はどれも押せない ──
- * しかも 4 つとも `selectedLid` を必要とするので、**一覧へ戻ると今度は対象が居ない**
+ * しかも 3 つは `selectedLid` を必要とし(添付だけは独立したノートを作る)、押し口は一覧の中にしかない
  * (円環の dead click)。🔑 だから本文ページの **⋯** から同じ受け手を呼ぶ。
  *
  * ⚠ **新しい受け手は 1 つも作らない** ── 綴りは `create-bar` のボタンと同じで、
@@ -409,7 +409,7 @@ export const ENTRY_ACTION_HINT_MAX = 56;
 export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
   // 🔴 **左の列の道具 4 つ**(#632 段①)。⚠ 字は `shell.ts` のボタンの `title` と
   //    **同じ意味**にする ── 同じ操作に 2 通りの説明を作らない
-  'attach-file': 'ファイルを取り込んで、このノートの添付にします',
+  'attach-file': 'ファイルを取り込んで添付にします(独立した添付のノートになります)',
   'start-audio-capture': 'マイクで録音して、このノートに入れます',
   'start-screen-capture': '画面を録画して、このノートに入れます',
   'start-timer': 'このノートの作業時間を計ります(止めると本文に書きます)',
