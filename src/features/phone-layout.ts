@@ -71,30 +71,61 @@ export interface PhoneShape {
 }
 
 /**
+ * 🔴 **本文の代わりに、いま何を見せているか**(設計 doc §2-8 / user 裁定 2026-09-02)。
+ *
+ * 🔑 **1 つの field に畳む**のが肝である。1 稿目は情報用と一覧用の 2 つを別々に
+ *   持っていたが、⚠ それだと「**両方立っている**」状態が型として作れてしまい、
+ *   どちらを優先するかという**判定が 1 つ増える** ── しかも普段はどちらか一方しか
+ *   立たないので、優先順を取り違えても**test は緑のまま**である(CLAUDE.md §1
+ *   「救い手が同じ式のもう一方の項」)。1 つにすれば**順番そのものが消える**。
+ *
+ * 🔑 **真偽値ではなく lid を持つ**(設計 doc §2-8)。「`selectedLid` が変わる /
+ *   削除で後継に移る、で**自動的に閉じる**(閉じる code を書かず判定に含める)」を
+ *   `open.lid !== selectedLid` の 1 行で満たす ── 閉じる副作用を別の場所に書くと、
+ *   書き忘れた日に「別のノートを開いたのに前のノートの情報が出たまま」になる。
+ */
+export type PhoneOpen = { readonly kind: 'info' | 'list'; readonly lid: string } | null;
+
+/**
  * 🔴 **いま出すページ**(設計 doc §2-5 / §2-8)。
  *
- * @param infoFor 情報ページを**どのノートで**開いたか(開いていなければ `null`)。
+ * @param open いま本文の代わりに見せている物(見せていなければ `null`)。
  *
- * 🔑 **真偽値ではなく lid を持つ**のが肝である。設計 doc §2-8 は
- *   「`selectedLid` が変わる / `viewMode` が本文以外になる / 削除で後継に移る、で
- *   **自動的に閉じる**(閉じる code を書かず判定に含める)」と決めたが、
- *   真偽値では**選んでいるノートが変わったことをこの関数から見られない** ──
- *   閉じる副作用を別の場所に書くことになり、書き忘れると
- *   「別のノートを開いたのに、前のノートの情報が出たまま」になる。
- *   lid で持てば `infoFor !== selectedLid` が**そのまま「閉じる」**になる。
+ * 🔑 **一覧も同じ器で持つ**(user 裁定 2026-09-02「**開いたままにし、一覧の上に
+ *   「ノートへ →」を出す**」)── 設計 doc §2-6 は「一覧を出したまま選択を保つ bit」を
+ *   **一度は棄却**していたが、棄却の理由は *同じ行をもう一度押したときに倒せない*
+ *   (`dispatcher` は state が変わったときしか鳴らない)であって、bit そのものでは
+ *   なかった。⚠ その dead tap は **binder が押された時に直に倒す**ことで消える。
+ *   同じ doc が「その場合は帯の『ノートへ →』で補う」と**覆る条件まで書いていた**。
  *
  * ⚠ **順番に意味がある**:本文以外の面(設定・フラグ・ヘルプ・2 ペイン・集計)は
  *   情報ページより**強い** ── 面を開いた瞬間に情報は畳む(面と情報が同じセルに
  *   重なっているので、両方見せる場所が無い)。
  */
-export function phonePageOf(st: PhoneShape, infoFor: string | null): PhonePage {
+export function phonePageOf(st: PhoneShape, open: PhoneOpen): PhonePage {
   // 中央が自分の面を出している ── 戻る口はその面の帯の「× 閉じる」
   if (st.viewMode !== 'detail') return 'pane';
   if (st.selectedLid === null) return 'list';
   // 🔴 打っている物が見えない状態を作らない(上の `editing` の docstring)
   if (st.editing) return 'note';
-  if (infoFor !== null && infoFor === st.selectedLid) return 'info';
+  if (open !== null && open.lid === st.selectedLid) return open.kind;
   return 'note';
+}
+
+/**
+ * 🔴 **一覧の上に「ノートへ →」を出すか**(user 裁定 2026-09-02)。
+ *
+ * 🔑 **判定を書き直さない ── `phonePageOf` に聞く**(CLAUDE.md §7)。
+ *   `phonePageOf` が **ノートを開いたまま `'list'` を返す**のは
+ *   `open.kind === 'list'` の枝**だけ**である(`selectedLid === null` の枝は
+ *   その名のとおり開いているノートが無い)── だから
+ *   「**開いているノートが在って、いま一覧を見ている**」がそのまま条件になり、
+ *   `open` の中身をここでもう一度読む必要が無い。
+ * ⚠ もう一度読むと、削除で `selectedLid` が消えた回に **`open` が古いまま**
+ *   残って「無いノートへ戻る行」を出す(実際 1 稿目でその形を書いた)。
+ */
+export function phoneReturnShown(st: PhoneShape, open: PhoneOpen): boolean {
+  return st.selectedLid !== null && phonePageOf(st, open) === 'list';
 }
 
 /**

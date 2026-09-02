@@ -81,6 +81,27 @@ const KNOWN_CONSOLE_NOISE: readonly string[] = [
   'console.error: opfs-wl: Error initializing OPFS asyncer: Event',
 ];
 
+/**
+ * 🔴 **スマホの幅ではお知らせが画面いっぱいに出る**(user 裁定 2026-09-02
+ * 「**全画面でだせばいいじゃん。不要ならみんな設定するでしょ？**」)。
+ *
+ * ⚠ だから 720px 以下の spec は、**先に畳まないと他の面に 1 つも触れない**
+ *   (押し口は在るが、カードの下である)。`gotoApp` の直後に呼ぶ。
+ * 🔑 全画面そのものと「今後は出さない」で出なくなることは
+ *   `phone.smoke.spec.ts` の専用 test が見る ── ここで畳むのは
+ *   **それ以外の主張を測るため**であって、カードを試験から隠すためではない。
+ * ⚠ **出ていることを先に確かめる** ── 出ていない回に黙って通すと、
+ *   「畳んだから触れた」のか「最初から出ていない」のか読めなくなる。
+ */
+export async function dismissAnnounce(page: Page): Promise<void> {
+  const band = page.locator('[data-pkc-region="announce"]');
+  await expect(band, '起動時にお知らせが出ていない(台の前提が崩れた)').toBeVisible({
+    timeout: 10_000,
+  });
+  await clickReal(page, '[data-pkc-action="dismiss-announce"]');
+  await expect(band, '閉じても残っている').toBeHidden();
+}
+
 export function collectPageErrors(page: Page): string[] {
   const errors: string[] = [];
   /**

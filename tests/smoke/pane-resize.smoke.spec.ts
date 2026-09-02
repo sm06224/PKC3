@@ -18,7 +18,13 @@
  *   「変数は書いたが CSS が読んでいない」を素通りする(§4「計器の名前が範囲より広い」)。
  */
 import { test, expect, type Page } from '@playwright/test';
-import { gotoApp, collectPageErrors, createEntry, clickReal } from './helpers';
+import {
+  clickReal,
+  collectPageErrors,
+  createEntry,
+  dismissAnnounce,
+  gotoApp,
+} from './helpers';
 
 const SHELL = '[data-pkc-region="shell"]';
 const grip = (pane: string) => `[data-pkc-region="pane-grip"][data-pkc-pane="${pane}"]`;
@@ -265,6 +271,8 @@ test('🔴 狭い窓でペインを畳んでも、本文は狭くならない (#
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 480, height: 900 });
   await gotoApp(page);
+  // ⚠ スマホの幅ではお知らせが画面いっぱい(user 裁定 2026-09-02)── 先に畳む
+  await dismissAnnounce(page);
   await createEntry(page, 'text');
   // ⚠ 作った直後は編集中 ── ← は断られるので、先に保存して閲覧へ出る
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');

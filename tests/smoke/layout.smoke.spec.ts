@@ -1,6 +1,16 @@
 import { test, expect } from '@playwright/test';
 import { BROWSE_TABS } from '../../src/adapter/ui/render/browse';
-import { answerAppDialog, gotoApp, clickReal, createEntry, collectPageErrors, expectReachable, useSplitEditor, useListBrowse } from './helpers';
+import {
+  answerAppDialog,
+  clickReal,
+  collectPageErrors,
+  createEntry,
+  dismissAnnounce,
+  expectReachable,
+  gotoApp,
+  useListBrowse,
+  useSplitEditor,
+} from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -156,6 +166,8 @@ test('🔴 枠が組めている(3 列 / 重なりなし)', async ({ page }) => 
 test('🔴 スマホの幅では 1 枚ずつ出る(一覧 → 本文 → 情報 → 戻る)', async ({ page }) => {
   await page.setViewportSize({ width: 480, height: 800 });
   await gotoApp(page);
+  // ⚠ スマホの幅ではお知らせが画面いっぱいに出る(user 裁定 2026-09-02)── 先に畳む
+  await dismissAnnounce(page);
   const sidebar = page.locator('[data-pkc-region="sidebar"]');
   const center = page.locator('[data-pkc-region="center"]');
   const inspector = page.locator('[data-pkc-region="inspector"]');
@@ -861,6 +873,12 @@ test('🔴 狭い画面でも「書き出す / 履歴 / 削除」に手が届く
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 800 });
   await gotoApp(page);
+  /**
+   * ⚠ **先に畳む** ── この test は途中で 700px まで狭めるが、そこでは
+   *   お知らせが画面いっぱいに出る(user 裁定 2026-09-02)ので、残したままだと
+   *   「情報」を押す口ごと覆われる。
+   */
+  await dismissAnnounce(page);
   await createEntry(page, 'text');
   await page.locator('[data-pkc-field="editor-title"]').fill('狭い画面');
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');

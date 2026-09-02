@@ -257,7 +257,9 @@ describe('右クリックの説明(#587 C-1)', () => {
       ['show-history', '2511b05b'],
       ['delete-entry', '661f5844'],
       // 🔴 **左の列の道具 4 つ**(#632 段①)── 本文ページの ⋯ から押せるようにした
-      ['attach-file', 'f08e69a5'],
+      [// ⚠ 2026-09-02: 「このノートの添付にします」は**嘘**だった(`attach.ts` は
+    //    `selectedLid` を 1 度も読まず、独立した添付のノートを作る)ので事実へ直した
+    'attach-file', '02ac704c'],
       ['start-audio-capture', '6313fe2e'],
       ['start-screen-capture', 'ec055655'],
       ['start-timer', '97214aee'],

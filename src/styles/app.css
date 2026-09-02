@@ -5117,6 +5117,35 @@ li[data-pkc-row-slot] {
 [data-pkc-region='shell'][data-pkc-layout='phone'][data-pkc-page='info'] [data-pkc-region='inspector'] {
   padding-top: var(--pkc-phone-bar);
 }
+/**
+ * 🔴 **一覧の上の「ノートへ →(題名)」**(user 裁定 2026-09-02)。
+ *
+ * ⚠ **出し入れは JS が `hidden` で持つ**(`paintReturn`)── ここで
+ *   `data-pkc-page` から出し分けると、判定が CSS と JS の 2 か所になる
+ *   (CLAUDE.md §7)。この規則は**見た目だけ**である。
+ * ⚠ 題名は長いので**省略記号で切る** ── 折り返すと行の丈が変わり、
+ *   一覧の頭が押し下がる。
+ */
+[data-pkc-region='phone-return'] {
+  display: flex;
+  gap: var(--s2);
+  align-items: baseline;
+  width: 100%;
+  padding: var(--s2) var(--s3);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+[data-pkc-field='phone-return-title'] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
 /* ⚠ 情報は列ではなくなるので、≤1100 の「横に寝かせる」を戻す(1 枚の面として縦に読む) */
 [data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='inspector'] {
   flex-direction: column;
@@ -5130,6 +5159,29 @@ li[data-pkc-row-slot] {
  * `max-height: 30vh` を一覧に付ける規則は CSS 全体で 1 本も無い(≤1100 が付けるのは
  * 情報ペイン、≤720 の 1 本はこの PR で消した)。⚠ 「戻す」と書いた規則は **no-op** で、
  * 外しても何も変わらなかった(CLAUDE.md §1「これが無いと壊れる、と書いた規則が no-op」)。 */
+/**
+ * 🔴 **お知らせはスマホでは画面いっぱいに出す**(user 裁定 2026-09-02)。
+ *
+ * > 「**全画面でだせばいいじゃん。不要ならみんな設定するでしょ？**」
+ *
+ * ⚠ 直す前は `max-height: 30vh` の帯だったので、**縦 844px の端末でも 253px** ──
+ *   お知らせは箇条書き数行 + 「前の版」への導線を持つので、**中でスクロールしないと
+ *   読めない**うえ、その 253px は本文から引かれていた(#588 の縦潰れの 3 要因の 1 つ)。
+ * 🔑 裁定は「**縦 1/4 に切り詰める**」を退けて逆へ振った ── 読む物は読める大きさで
+ *   出し、要らない人は「今後は出さない」で消す。⚠ だから**その 1 本が唯一の逃げ道**に
+ *   なるので、押した設定が再起動後も効くことを検査で留めてある
+ *   (`tests/smoke/help-announce.smoke.spec.ts`)。
+ * ⚠ 区画は `detail` を使い回して**重ねる**(新しい区画を作らない)── `z-index` は
+ *   ページの帯(1)より上。⚠ 地を不透明にする ── 透けると後ろの一覧と字が重なる。
+ * ⚠ 帯 3 本(収録 / タイマー / 予定)と状態の行は**覆わない** ── 録音を止める口と
+ *   エラーの出口を、お知らせが隠してはいけない。
+ */
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='announce'] {
+  grid-area: detail;
+  z-index: 2;
+  max-height: none;
+  background: var(--surface);
+}
 /**
  * ⚠ **左右の掴む帯は出さない**(境目が無いので押しても何も起きない)。
  * 🔴 **横向きの帯(追記欄)は残す** ── 本文と追記欄の境目は縦に残っており、

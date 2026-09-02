@@ -115,12 +115,15 @@ export function createTimerService(deps: TimerServiceDeps): TimerService {
     start() {
       const st = deps.dispatcher.getState();
       const lid = st.selectedLid;
-      if (lid === null) {
-        fail('ノートを開いてから押してください(何を計るのか決まりません)');
-        return;
-      }
-      const meta = st.entryMetas.get(lid);
-      if (meta === undefined) {
+      const meta = lid === null ? undefined : st.entryMetas.get(lid);
+      /**
+       * ⚠ **「ノートを開いていない」をここで数え直さない**(user 裁定 2026-09-02)。
+       *   押した時点で `binder` の `NOTE_TOOL_ACTIONS` の門が断っている ──
+       *   4 つの道具で断り方が食い違わないよう、判定は**そちら 1 か所**である
+       *   (CLAUDE.md §7「同じ問いに答える口を 2 つ作らない」)。
+       *   ここまで届くのは「選ばれているのに読めない」= データ側の異常だけ。
+       */
+      if (lid === null || meta === undefined) {
         fail('開いているノートが読めないので計れません');
         return;
       }

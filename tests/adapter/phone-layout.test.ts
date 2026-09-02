@@ -100,6 +100,18 @@ function setup(phone: boolean) {
       d.dispatch({ type: 'SELECT_ENTRY', lid });
       d.dispatch({ type: 'BODY_LOADED', lid, body: '本文' });
     },
+    /**
+     * 一覧の行と**同じ押し口**(`select-entry` + `data-pkc-entry`)。
+     * ⚠ renderer はこの台に居ないので手で置く ── 綴りは `binder.ts` の受け手が
+     *   読む 2 つと同じにする(違えば押しても何も起きず、test が空振りする)。
+     */
+    row: (lid: string) => {
+      const b = document.createElement('button');
+      b.setAttribute('data-pkc-action', 'select-entry');
+      b.setAttribute('data-pkc-entry', lid);
+      root.append(b);
+      return b;
+    },
   };
 }
 
@@ -247,12 +259,105 @@ describe('情報ページ(#609 の行き止まりを作らない)', () => {
     expect(s.field('phone-title').textContent).toBe('日記');
   });
 
-  it('🔴 ← 一覧 で選択が外れ、一覧ページへ戻る', () => {
+  /**
+   * 🔴 **← 一覧 でノートは開いたまま**(user 裁定 2026-09-02)。
+   *
+   * ⚠ 直す前は `DESELECT_ENTRY` を撃っていたので、**戻った瞬間に
+   *   「さっきまで読んでいた物」が消えていた**。
+   */
+  it('🔴 ← 一覧 で一覧へ戻るが、ノートは開いたまま', () => {
     const s = setup(true);
     s.open('n1');
     s.field('phone-back').click();
-    expect(s.d.getState().selectedLid).toBeNull();
     expect(s.page()).toBe('list');
+    expect(s.d.getState().selectedLid, '選択まで外れた').toBe('n1');
+  });
+
+  /**
+   * 🔴 **一覧の上に「ノートへ →(題名)」が出る**(user 裁定 2026-09-02)。
+   * ⚠ **題名まで見る** ── 字が空だと、user はどのノートへ戻るのか読めない。
+   */
+  it('🔴 一覧の上に「ノートへ →」が題名つきで出て、押すと本文へ戻る', () => {
+    const s = setup(true);
+    s.open('n1');
+    const back = s.field('phone-return');
+    expect(back.hidden, '本文を見ている間に出ている').toBe(true);
+    s.field('phone-back').click();
+    expect(back.hidden, '一覧に戻る口が無い').toBe(false);
+    /**
+     * 🔴 **字も pin する**(着地前レビュー 5)。⚠ 直す前は題名しか見ておらず、
+     *   「ノートへ →」を空文字にしても緑だった ── 一覧の頭に**灰色の題名が
+     *   1 行出るだけ**になり、押せることもどこへ行くかも読めない。
+     */
+    expect(back.textContent, 'どこへ行く行なのか字が無い').toContain('ノートへ');
+    expect(s.field('phone-return-title').textContent).toBe('買い物');
+    back.click();
+    expect(s.page(), '「ノートへ →」で戻れない').toBe('note');
+    expect(back.hidden, '本文に戻ったのに行が残っている').toBe(true);
+  });
+
+  /**
+   * 🔴 **同じ行をもう一度押しても本文へ戻る**(user 裁定 2026-09-02 の肝)。
+   *
+   * ⚠ ここが設計 doc §2-6 が「一覧を出したまま選択を保つ bit」を**一度棄却した
+   *   理由**である ── `SELECT_ENTRY` は同じ lid なら同じ state を返し、
+   *   `dispatcher` は `changed` のときだけ listener を呼ぶので、
+   *   **`render` が走らず一覧に留まる dead tap** になる。
+   * 🔑 だから `selectEntryOrExplain` が**押された側で直に**畳む。
+   * ⚠ **対照群を同じ it に置く**(別のノートの行)── 置かないと
+   *   「別のノートなら動く(= state が動いたから)」だけを見て通してしまう。
+   */
+  it('🔴 一覧で「いま開いているノート」の行を押しても本文へ戻る(dead tap を作らない)', () => {
+    const s = setup(true);
+    s.open('n1');
+    s.field('phone-back').click();
+    expect(s.page()).toBe('list');
+    expect(s.d.getState().selectedLid).toBe('n1');
+    // ⚠ 一覧の行と同じ押し口を作る(renderer は台に居ないので手で置く)
+    s.row('n1').click();
+    expect(s.page(), '同じ行を押しても一覧のまま = dead tap').toBe('note');
+    // 対照群: 別のノートの行でも同じく本文へ出る
+    s.field('phone-back').click();
+    expect(s.page()).toBe('list');
+    s.row('n2').click();
+    expect(s.page()).toBe('note');
+    expect(s.d.getState().selectedLid).toBe('n2');
+  });
+
+  /** ⚠ 起動直後(何も開いていない)の一覧には出さない ── 押す先が無い行になる。 */
+  it('🔴 何も開いていない一覧には「ノートへ →」を出さない', () => {
+    const s = setup(true);
+    expect(s.page()).toBe('list');
+    expect(s.field('phone-return').hidden).toBe(true);
+  });
+
+  /**
+   * 🔴 **列のいちばん上に在る**(着地前レビュー 6)。
+   *
+   * ⚠ `shell.ts` は「戻る口は探す前に見える場所に在るべきで、一覧を下へ流しても
+   *   隠れない」と主張しているのに、**置き場を見る検査が 1 つも無かった** ──
+   *   一覧の下端へ動かしても unit は `hidden` と字しか見ず、smoke の `clickReal` は
+   *   `scrollIntoViewIfNeeded` を呼ぶので緑になる。
+   * 🔴 壊れる形:ノートが 50 件ある人は**戻る行が流れて見えない**(この裁定の主題
+   *   そのものが消える)。
+   */
+  it('🔴 「ノートへ →」は左の列のいちばん上に在る(下へ流れない)', () => {
+    const s = setup(true);
+    const sidebar = s.shell.querySelector('[data-pkc-region="sidebar"]')!;
+    expect(
+      sidebar.firstElementChild?.getAttribute('data-pkc-region'),
+      '戻る行が列の先頭に無い(一覧を流すと隠れる)',
+    ).toBe('phone-return');
+  });
+
+  /** ⚠ PC の版面では 1px も場所を取らない。 */
+  it('🔴 PC の幅では「ノートへ →」は出ない', () => {
+    const s = setup(true);
+    s.open('n1');
+    s.field('phone-back').click();
+    expect(s.field('phone-return').hidden).toBe(false);
+    s.media.set(false);
+    expect(s.field('phone-return').hidden, 'PC の版面に残っている').toBe(true);
   });
 });
 
@@ -419,6 +524,36 @@ describe('⋯ と左の列の等値(次に足した人が気づく)', () => {
     expect(acts).toContain('open-palette');
   });
 
+  /**
+   * 🔴 **毎日使うものを上へ**(user 裁定 2026-09-02)。
+   *
+   * ⚠ 直す前は右クリックの 11 項目(印を付ける / 複製 / 書き出す…)が先頭を占め、
+   *   **添付・録音・画面録画・計測が下**だった ── スマホでこの 4 つに届く道は
+   *   ⋯ **しか無い**のに、いちばん遠い所に置いていた。
+   * ⚠ **並びごと等値で pin する** ── 「含まれている」だけ見ると、順番を壊す変異が
+   *   生き延びる(この test の主張はまさに順番である)。
+   */
+  it('🔴 ⋯ の先頭は、毎日使う 4 つ(添付 / 録音 / 画面録画 / 時間を計る)', () => {
+    const s = setup(true);
+    s.open('n1');
+    s.field('phone-menu').click();
+    const acts = [...s.menu()!.querySelectorAll('button')].map((b) =>
+      b.getAttribute('data-pkc-action'),
+    );
+    expect(acts.slice(0, NOTE_TOOL_ACTIONS.length), '毎日使う道具が先頭に無い').toEqual(
+      NOTE_TOOL_ACTIONS.map((a) => a.action),
+    );
+    /**
+     * ⚠ **対照群 2 つ** ── 頭へ寄せたせいで、後ろの決まりが崩れていないこと:
+     *   ① 右クリックの項目はその**次**に続く ② 危ない物といちばん下は不動。
+     */
+    expect(acts[NOTE_TOOL_ACTIONS.length], '右クリックの項目が続いていない').toBe(
+      ENTRY_MENU_ACTIONS.filter((a) => a.when === undefined)[0]!.action,
+    );
+    expect(acts[acts.length - 1], '削除がいちばん下ではない').toBe('delete-entry');
+    expect(acts[acts.length - 2], '操作を探す が削除の直前ではない').toBe('open-palette');
+  });
+
   it('🔴 表と実物の綴りが合っている(受け手を新しく作っていない)', () => {
     const s = setup(false);
     for (const a of NOTE_TOOL_ACTIONS)
@@ -438,6 +573,32 @@ describe('⋯ と左の列の等値(次に足した人が気づく)', () => {
  *   当の症状が、面を重ねた瞬間に戻る)。
  */
 describe('探す・絞る・目次(隠れた面へ送らない)', () => {
+  /**
+   * 🔴 **PC は 1 バイトも触らない**(着地前レビュー 3)。
+   *
+   * ⚠ `phoneShowList` の `isPhone()` の早期 return を外しても、既存の test は
+   *   1 つも落ちなかった ── `focus-search` は `isPhone()` のときしか呼ばず、
+   *   `filter-by-tag` を **PC で編集中に**押す test が 1 件も無かったためである。
+   * 🔴 壊れる形:PC で編集中に情報ペインのタグ札を押すと、**列は両方見えているのに**
+   *   絞り込みが効かず「保存するか取り消してから、**一覧で探してください**」という
+   *   スマホ用の字が出る(いまは絞り込める)。
+   */
+  it('🔴 PC では編集中でもタグ札で絞れる(スマホの断りを持ち込まない)', () => {
+    const s = setup(false);
+    s.open('n1');
+    s.d.dispatch({ type: 'START_EDIT' });
+    expect(s.d.getState().phase, '台が編集に入っていない(前提が崩れた)').toBe('editing');
+    const chip = s.root.ownerDocument.createElement('button');
+    chip.setAttribute('data-pkc-action', 'filter-by-tag');
+    chip.setAttribute('data-pkc-tag', '買い物');
+    s.root.append(chip);
+    chip.click();
+    expect(s.d.getState().filterQuery, 'PC なのに絞り込まれていない').toBe('買い物');
+    expect(s.d.getState().error ?? '', 'PC にスマホ用の断りが出ている').not.toContain(
+      '一覧で探してください',
+    );
+  });
+
   it('🔴 探す鍵を押すと一覧ページへ移り、欄に焦点が入る', () => {
     const s = setup(true);
     s.open('n1');
