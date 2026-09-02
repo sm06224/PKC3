@@ -69,6 +69,15 @@ export interface LaunchDeps {
    */
   openView: (view: 'dual') => void;
   /**
+   * 🔴 **マニュアルを独立した窓で開く**(#645。user 要望 2026-08-31)。
+   *
+   * ⚠ **`openView` と分ける** ── あちらは **PKC をもう 1 枚**開く
+   *   (実測 +29.6MB / プロセス +1)。マニュアルの窓は PKC を読み込まない
+   *   独立した document なので、通る道が違う。
+   * ⚠ **同期に呼べること**(`window.open` は click の gesture の中でしか通らない)。
+   */
+  openManual: () => void;
+  /**
    * 🔴 **素のまま(同一オリジン)で開く前の確認**(P10)。
    *
    * `false` を返したら**開かない**(fail closed)。呼び側がセッション中の
@@ -185,6 +194,12 @@ export async function launchTile(
     //      (「アプリ」ではなく**ノートの見方**だったので、左の列のタブへ)。
     //    ⚠ `await` より前に呼ぶ ── `window.open` は gesture の中でしか通らない
     deps.openView(tile.kind);
+    return;
+  }
+  if (tile.kind === 'manual') {
+    // 🔑 組み込み(#645)── **PKC をもう 1 枚開かない**。窓の中はマニュアルだけである
+    //    (`platform/manual-window.ts`)。⚠ `await` より前に呼ぶ(gesture を切らない)
+    deps.openManual();
     return;
   }
   if (tile.kind === 'office') {

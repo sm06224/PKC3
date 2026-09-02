@@ -36,9 +36,9 @@ export interface LauncherTile {
   icon?: string;
   /**
    * 起動の仕方。⚠ `url` は外部サイト、`app` は同梱 HTML、
-   * `office` / `dual` は**組み込み**(entry を持たない ── #148 / #241)。
+   * `office` / `dual` / `manual` は**組み込み**(entry を持たない ── #148 / #241 / #645)。
    */
-  kind: 'app' | 'url' | 'office' | 'dual';
+  kind: 'app' | 'url' | 'office' | 'dual' | 'manual';
   /** `kind === 'url'` のときの飛び先。 */
   url?: string;
   /** `kind === 'app'` のときの実体(IDB Blob の鍵)。 */
@@ -179,6 +179,23 @@ export function dualTile(): LauncherTile {
 }
 
 /**
+ * 🔴 **マニュアルの組み込みタイル**(#645。user 要望 2026-08-31
+ * 「**ヘルプの中からマニュアルをアプリとして出してください**」)。
+ *
+ * ⚠ **これは「ノートの見方」ではない**ので、#292 でカレンダーを外した判定
+ * (下の `withBuiltinTiles` の「閉じたとき user が失うものは何か」)に照らして
+ * **アプリで正しい** ── マニュアルの窓を閉じて失うのはマニュアルだけである。
+ *
+ * 🔑 開く先は **PKC をもう 1 枚ではない**(`kind: 'dual'` との違い)──
+ * `platform/manual-window.ts` が独立した document を組む。
+ */
+export const MANUAL_TILE_LID = 'builtin:manual';
+
+export function manualTile(): LauncherTile {
+  return { lid: MANUAL_TILE_LID, title: 'マニュアル', group: '', kind: 'manual' };
+}
+
+/**
  * 🔴 **カレンダーの組み込みタイル**(#276。封印の解除。user 指示 2026-08-19
  * 「かつて無くしたカレンダーとカンバンはここで生きてきます / 発想を変え、
  * frontmatter でのカレンダー情報付与や…で復活させるのです」)。
@@ -212,8 +229,13 @@ export function withBuiltinTiles(
    *   Office が消えるだけだが、**カレンダーを閉じて自分のノートが見えなくなるのは
    *   おかしい**。引っ越し先は左の列の「予定」タブ。
    */
+  /**
+   * ⚠ **マニュアルは最後に置く**(#645)── 2 ペインと Office は「作業する所」で、
+   *   マニュアルは「読む所」である。作業の口の位置を、読み物で動かさない。
+   */
   const builtin: LauncherTile[] = [dualTile()];
   if (opts.office) builtin.push(officeTile());
+  builtin.push(manualTile());
   return [...builtin, ...tiles];
 }
 
@@ -234,4 +256,5 @@ export function tileSelectsEntry(tile: LauncherTile): boolean {
 export const BUILTIN_KINDS: ReadonlySet<LauncherTile['kind']> = new Set([
   'office',
   'dual',
+  'manual',
 ]);

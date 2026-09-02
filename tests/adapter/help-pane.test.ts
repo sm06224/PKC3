@@ -15,6 +15,7 @@
  *   `ASIDE`)── 片方だけに足すと「押しても本文が出る」。両方を**振る舞いで**突合する
  */
 import { describe, expect, it, beforeEach } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import { HelpRenderer, MANUAL_TEXT, versionText } from '../../src/adapter/ui/render/help';
 import { CenterRouter } from '../../src/adapter/ui/render/center';
@@ -147,6 +148,38 @@ describe('ヘルプの面', () => {
     const li = region.querySelector('[data-pkc-help-notice] li')!;
     expect(li.children.length, 'HTML として描いている').toBe(0);
     expect(li.textContent, '原文が消えている').toContain('<b>太字</b>');
+  });
+
+  /**
+   * 🔴 **マニュアルの箱を出る道が、ヘルプの中に在る**(#645。user 要望 2026-08-31
+   * 「**ヘルプの中からマニュアルをアプリとして出してください**」)。
+   *
+   * ⚠ **箱の直上**に置く ── 下に置くと、60vh の箱をスクロールし切らないと
+   *   見つからない(= 「在るのに届かない」を作り直すことになる)。
+   */
+  it('🔴 「マニュアルを別のウィンドウで開く」がマニュアルの箱の直上に在る', () => {
+    new HelpRenderer(region).render();
+    const btn = region.querySelector('[data-pkc-action="open-manual-window"]');
+    expect(btn, 'ヘルプの中に、窓を開く口が無い').not.toBeNull();
+    expect(btn!.textContent).toBe('マニュアルを別のウィンドウで開く');
+    /**
+     * ⚠ **並び順まで見る** ── 「在る」だけだと、箱の下に落ちても緑になる。
+     * `compareDocumentPosition` で「ボタンが箱より前」を直に見る。
+     */
+    const box = region.querySelector('[data-pkc-region="help-manual"]')!;
+    const before = btn!.compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING;
+    expect(before, 'マニュアルの箱より後ろに置かれている').toBeTruthy();
+  });
+
+  /**
+   * 🔴 **押した所を受けるのは binder 1 か所**(#645)── ここで直に listener を
+   * 張ると、出す判定(help.ts)と押されたときの口(binder)が別々になる。
+   */
+  it('🔴 窓を開く口は data-pkc-action で出す(自前の listener を張らない)', () => {
+    const src = readFileSync('src/adapter/ui/render/help.ts', 'utf-8');
+    expect(src).toContain("'open-manual-window'");
+    // ⚠ この file が window を開いてはいけない(adapter/platform の仕事である)
+    expect(src, 'ヘルプの面が窓を開いている').not.toContain('window.open');
   });
 
   /** ⚠ 見出しが無いと、版の行とお知らせが地続きに見える。 */

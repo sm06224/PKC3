@@ -440,6 +440,15 @@ describe('本文の器の全数(印の付け忘れを数で止める)', () => {
       prose: false,
       why: 'アプリの文書であって user の文書ではない(設計 doc の表)',
     },
+    'src/adapter/platform/manual-window.ts': {
+      host: /className = 'pkc-md-rendered'/g,
+      prose: false,
+      /**
+       * ⚠ `help.ts` と**同じ理由** ── これは**アプリの文書**(マニュアル)であって
+       *   user が書いた文書ではない。読み幅は user の紙面設定に従わない。
+       */
+      why: 'アプリの文書であって user の文書ではない(ヘルプと同じ)',
+    },
     'src/features/export/pkc3-html.ts': {
       host: /b pkc-md-rendered/g,
       prose: true,

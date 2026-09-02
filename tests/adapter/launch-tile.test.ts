@@ -50,6 +50,8 @@ interface Harness {
   officeOpens: { n: number };
   /** `openDual` が呼ばれた回数(#241 の観測点)。 */
   dualOpens: { n: number };
+  /** `openManual` が呼ばれた回数(#645 の観測点)。 */
+  manualOpens: { n: number };
   /** ⚠ どの面へ切り替えたか(#276 で口が 1 本になった)。 */
   viewOpens: string[];
   closeWindow: () => void;
@@ -67,6 +69,7 @@ function harness(
   const seedFor: string[] = [];
   const officeOpens = { n: 0 };
   const dualOpens = { n: 0 };
+  const manualOpens = { n: 0 };
   const viewOpens: string[] = [];
   const win = fakeWindow();
   let release: (() => void) | null = null;
@@ -80,6 +83,7 @@ function harness(
     seedFor,
     officeOpens,
     dualOpens,
+    manualOpens,
     viewOpens,
     closeWindow: () => {
       win.closed = true;
@@ -113,6 +117,9 @@ function harness(
       openView: (view) => {
         viewOpens.push(view);
         if (view === 'dual') dualOpens.n += 1;
+      },
+      openManual: () => {
+        manualOpens.n += 1;
       },
     },
   };
@@ -461,5 +468,30 @@ describe('main.ts の配線(原文 pin ── #174)', () => {
     const h = harness(null);
     void launchTile({ lid: 'builtin:dual', title: 'd', group: '', kind: 'dual' }, h.deps);
     expect(h.viewOpens, 'await をまたいでから開いている(Safari で塞がれる)').toEqual(['dual']);
+  });
+
+  /**
+   * 🔴 **マニュアルは別の口へ行く**(#645。user 要望 2026-08-31)。
+   *
+   * ⚠ **`openView` と混ぜない** ── あちらは PKC をもう 1 枚読み込む(実測
+   *   +29.6MB / プロセス +1)。マニュアルの窓は PKC を読み込まない別 document で、
+   *   通る道が違う。⚠ 分岐を足し忘れると **tsc は 1 行も文句を言わず**、
+   *   押しても何も起きないタイルになる ── だからここで名指しで見る。
+   */
+  it('🔴 マニュアルのタイルは、マニュアルの窓の口へ行く', () => {
+    const h = harness(null);
+    void launchTile({ lid: 'builtin:manual', title: 'マニュアル', group: '', kind: 'manual' }, h.deps);
+    expect(h.manualOpens.n, 'マニュアルの口へ行かない(無言の dead click)').toBe(1);
+    // ⚠ **対照群** ── 別の口へ漏れていないこと(混ざると 2 枚目の PKC が開く)
+    expect(h.viewOpens, '面の別窓の口へ流れている').toEqual([]);
+    expect(h.opened, 'ここで直に窓を開いてはいけない').toEqual([]);
+    expect(h.failures, '理由が出た').toEqual([]);
+  });
+
+  /** ⚠ こちらも `await` をまたがない(`window.open` は gesture の中だけ)。 */
+  it('🔴 マニュアルのタイルも同期に口を叩く', () => {
+    const h = harness(null);
+    void launchTile({ lid: 'builtin:manual', title: 'm', group: '', kind: 'manual' }, h.deps);
+    expect(h.manualOpens.n, 'await をまたいでから開いている').toBe(1);
   });
 });

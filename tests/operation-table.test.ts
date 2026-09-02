@@ -105,12 +105,13 @@ describe('操作の全数台帳(#582 段①)', () => {
       outsideActionsTable: x.outsideActionsTable.length,
       unregistered: x.unregistered,
     }).toEqual({
-      total: 225,
-      receivers: 184,
+      // ⚠ 2026-08-31: `open-manual-window`(#645)で 1 増えた
+      total: 226,
+      receivers: 185,
       registered: 71,
       both: 30,
       outsideActionsTable: 41,
-      unregistered: 154,
+      unregistered: 155,
     });
   });
 

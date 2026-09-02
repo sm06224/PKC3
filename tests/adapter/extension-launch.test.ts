@@ -56,6 +56,7 @@ function harness(opts: { granted?: boolean; answer?: boolean } = {}) {
     fail: () => {},
     openOffice: () => {},
     openView: () => {},
+    openManual: () => {},
     ext: {
       granted: (key) => granted.has(key ?? ''),
       grant: (key) => {
