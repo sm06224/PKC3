@@ -40,6 +40,7 @@ import {
   MANUAL_CHROME_CSS,
   MANUAL_TIP,
   MANUAL_WINDOW_TITLE,
+  manualBuildTag,
 } from '@features/help/manual-page';
 
 // ⚠ 正本は `features/help/manual-page.ts`。既存の import 先を壊さないために再 export する
@@ -58,10 +59,16 @@ const SIZE = { width: 1100, height: 900 };
 export interface OpenManualWindowDeps {
   /** 窓の題名。 */
   readonly title: string;
-  /** 帯に出す版の行(`versionText()`)。 */
+  /** 帯に出す版の行(`versionText()`)。⚠ 入れ替えの判定には使わない(下の `tag`)。 */
   readonly version: string;
   /** マニュアルの源文。 */
   readonly text: string;
+  /**
+   * 🔴 **窓に刻む印**(`manualBuildTag(version, text)`)。同じ印の窓は前へ出すだけ、
+   * 違えば入れ替える。⚠ 版の行そのものを使わない ── `/dev/` では版の字が変わらない
+   * (`manual-page.ts` の `manualBuildTag` の注記)。省略時はここで組む。
+   */
+  readonly tag?: string;
   /** 源文の節(`manualSections(text)`)。 */
   readonly sections: readonly ManualSection[];
   /** 本文を描く口。⚠ **失敗したら素の原文**を出す(白紙にしない)。 */
@@ -115,6 +122,7 @@ export async function openManualWindow(
   deps: OpenManualWindowDeps,
 ): Promise<ManualWindowHandle | null> {
   const open = deps.open ?? ((u, t, f) => globalThis.open?.(u, t, f) ?? null);
+  const tag = deps.tag ?? manualBuildTag(deps.version, deps.text);
   /**
    * 🔴 **URL は空にする ── `'about:blank'` を渡してはいけない**(2026-08-31、実測)。
    *
@@ -143,7 +151,7 @@ export async function openManualWindow(
    * 🔑 既に組んであるなら**触らずに前へ出すだけ**にする。焼いた page も
    *   `<body>` に同じ属性を持つので、**同じ式**で見分けられる。
    */
-  if (builtVersion(win) === deps.version) {
+  if (builtVersion(win) === tag) {
     try {
       win.focus();
     } catch {
@@ -185,6 +193,7 @@ export async function openManualWindow(
   fillManualWindow(doc, {
     title: deps.title,
     version: deps.version,
+    tag,
     html,
     text: deps.text,
     sections: deps.sections,
@@ -213,6 +222,8 @@ export function fillManualWindow(
   parts: {
     title: string;
     version: string;
+    /** `<body>` に刻む印(`manualBuildTag`)。⚠ 焼いた page と同じ属性に同じ印。 */
+    tag: string;
     /** 描けた本文の HTML。⚠ 空なら素の原文へ落ちる。 */
     html: string;
     text: string;
@@ -230,7 +241,7 @@ export function fillManualWindow(
 
   doc.body.textContent = '';
   // 🔑 **組んだ版を刻む** ── 2 回目に押したとき、組み直すかどうかがこれで決まる
-  doc.body.setAttribute(MANUAL_BUILT_ATTR, parts.version);
+  doc.body.setAttribute(MANUAL_BUILT_ATTR, parts.tag);
   const head = doc.createElement('div');
   head.setAttribute('data-pkc-field', 'manual-window-head');
   const name = doc.createElement('strong');

@@ -240,11 +240,49 @@ test('🔴 窓で F5 を押しても、マニュアルはそのまま読み直�
   const win = await openManual(page, context);
   const before = await win.locator(`${TOC} a`).count();
   expect(before, '前提が崩れている(目次が空)').toBeGreaterThan(100);
+  // 目次を押しておく ── URL に節の印が付く(F5 のあと**その節へ戻る**ことまで見る)
+  const target = win.locator(`${TOC} a`).nth(Math.floor(before * 0.6));
+  const id = (await target.getAttribute('href'))!.slice(1);
+  await target.click();
+  expect(new URL(win.url()).hash).toBe(`#${id}`);
 
   await win.reload();
   await expect(win.locator(MAIN), 'F5 で白紙になった').toBeVisible();
   expect(await win.locator(`${TOC} a`).count()).toBe(before);
-  expect(new URL(win.url()).pathname).toMatch(PAGE);
+  const url = new URL(win.url());
+  expect(url.pathname).toMatch(PAGE);
+  expect(url.hash, 'F5 で節の印が消えた').toBe(`#${id}`);
+  /**
+   * 🔴 **F5 のあと、その節に居る**(マニュアル §4-4 がそう書いている)。
+   * ⚠ 本文はスクロール箱の中に居るので、ブラウザは位置を復元しない ── 戻れるのは
+   *   URL の断片が効くからである。断片が効いていなければ先頭に戻る = ここで落ちる。
+   */
+  const seen = await win.evaluate((wanted) => {
+    const el = document.getElementById(wanted);
+    if (!el) return null;
+    const box = el.getBoundingClientRect();
+    return { top: box.top, h: window.innerHeight };
+  }, id);
+  expect(seen, '飛び先が本文に無い').not.toBeNull();
+  expect(seen!.top, 'F5 のあと、その節に戻っていない').toBeGreaterThanOrEqual(0);
+  expect(seen!.top).toBeLessThan(seen!.h);
+
+  /**
+   * 🔴 **ブックマークから開いても、その節に着く**(マニュアル §4-4「その節から開けます」)。
+   * ⚠ 再読み込みとは別の経路(新しい navigation)── 別の節の印で開き直して見る。
+   */
+  const other = (await win.locator(`${TOC} a`).nth(Math.floor(before * 0.3)).getAttribute('href'))!.slice(1);
+  await win.goto(`${url.origin}${url.pathname}#${other}`);
+  await expect(win.locator(MAIN)).toBeVisible();
+  const landed = await win.evaluate((wanted) => {
+    const el = document.getElementById(wanted);
+    if (!el) return null;
+    const box = el.getBoundingClientRect();
+    return { top: box.top, h: window.innerHeight };
+  }, other);
+  expect(landed, 'ブックマークの飛び先が本文に無い').not.toBeNull();
+  expect(landed!.top, 'ブックマークから開いても、その節に着いていない').toBeGreaterThanOrEqual(0);
+  expect(landed!.top).toBeLessThan(landed!.h);
 
   await win.close();
   expect(errors, `console/pageerror: ${errors.join(' | ')}`).toEqual([]);
@@ -263,8 +301,11 @@ test('🔴 設定で選んだ配色(Dracula)が、窓の地の色になる (#645
   const hex = /--bg:\s*#([0-9a-f]{6})/iu.exec(block)![1]!;
   const rgb = `rgb(${parseInt(hex.slice(0, 2), 16)}, ${parseInt(hex.slice(2, 4), 16)}, ${parseInt(hex.slice(4, 6), 16)})`;
 
-  // user が設定で Dracula を選んでいる状態(保存の鍵は theme.ts と同じ)
-  await page.addInitScript(() => localStorage.setItem('pkc3.theme', 'dracula'));
+  // user が設定で Dracula と「特大」を選んでいる状態(保存の鍵は theme.ts / text-scale.ts と同じ)
+  await page.addInitScript(() => {
+    localStorage.setItem('pkc3.theme', 'dracula');
+    localStorage.setItem('pkc3.text-scale', 'xlarge');
+  });
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
   // ⚠ 対照群 ── アプリ本体にその配色が効いている(効いていなければ「窓に届いた」は何も言わない)
@@ -277,8 +318,35 @@ test('🔴 設定で選んだ配色(Dracula)が、窓の地の色になる (#645
   const seen = await win.evaluate(() => ({
     theme: document.documentElement.getAttribute('data-pkc-theme'),
     bg: getComputedStyle(document.body).backgroundColor,
+    fontSize: getComputedStyle(document.body).fontSize,
   }));
   expect(seen.theme).toBe('dracula');
   expect(seen.bg, '選んだ配色の地の色になっていない').toBe(rgb);
+  /**
+   * 🔴 **字の大きさの設定も届く**(動線レビュー D3 ── 「特大」の user の窓だけ 14px だった)。
+   * 🔑 期待値は `features/text-scale.ts` の表から読む(綴りを写さない)
+   */
+  const xl = readFileSync(new URL('../../src/features/text-scale.ts', import.meta.url), 'utf8');
+  const px = /id: 'xlarge'[^}]*size: '(\d+px)'/u.exec(xl)![1]!;
+  expect(seen.fontSize, '「特大」が窓に届いていない').toBe(px);
+  await win.close();
+});
+
+/**
+ * 🔴 **Ctrl+P で本文が全部の頁に出る**(動線レビュー D6 ── 本文は `overflow:auto` の
+ * スクロール箱に居るので、印刷の規則が無いと**見えている 1 頁ぶんしか出ない**。
+ * アプリ本体が `app.css` で同じ形を踏んで直した)。
+ * 🔑 観測点は **PDF の頁数** ── 「規則が焼かれているか」は unit が見るが、
+ *   ブラウザが本当に箱をほどいて頁を割ったかは、紙(PDF)でしか分からない。
+ */
+test('🔴 窓で印刷すると、本文が全部の頁に出る (#645 段②)', async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="help"]');
+  const win = await openManual(page, context);
+  const pdf = await win.pdf({ format: 'A4' });
+  // ⚠ `/Type /Page`(`/Pages` を除く)の数 = 頁数。マニュアル 3600 行なら数十頁になる
+  const pages = (pdf.toString('latin1').match(/\/Type\s*\/Page[^s]/gu) ?? []).length;
+  expect(pages, `印刷が ${pages} 頁 ── スクロール箱がほどけていない`).toBeGreaterThan(10);
   await win.close();
 });

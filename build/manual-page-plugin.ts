@@ -88,12 +88,13 @@ export async function bakeManualPage(
   root: string,
   kind: string | undefined,
 ): Promise<BakedManual> {
-  const [md, help, find, page, theme] = await Promise.all([
+  const [md, help, find, page, theme, textScale] = await Promise.all([
     loader.ssrLoadModule('/src/features/markdown/markdown-render.ts'),
     loader.ssrLoadModule('/src/adapter/ui/render/help.ts'),
     loader.ssrLoadModule('/src/features/help/manual-find.ts'),
     loader.ssrLoadModule('/src/features/help/manual-page.ts'),
     loader.ssrLoadModule('/src/adapter/ui/render/theme.ts'),
+    loader.ssrLoadModule('/src/adapter/ui/render/text-scale.ts'),
   ]);
   const renderMarkdown = md['renderMarkdown'] as (text: string, opts: object) => string;
   const versionText = help['versionText'] as (kind?: string) => string;
@@ -105,17 +106,22 @@ export async function bakeManualPage(
     toc: number;
   };
   const fileName = page['MANUAL_PAGE_FILE'] as string;
+  const manualBuildTag = page['manualBuildTag'] as (version: string, text: string) => string;
   const tokensCss = readFileSync(join(root, 'src/styles/tokens.css'), 'utf8');
   const appCss = readFileSync(join(root, 'src/styles/app.css'), 'utf8');
+  // ⚠ kind を**明示で**渡す ── 既定引数(`BUILD_KIND`)は SSR の env に依る
+  const version = versionText(kind ?? 'dev');
   const built = buildManualPage({
     title: page['MANUAL_WINDOW_TITLE'],
-    // ⚠ kind を**明示で**渡す ── 既定引数(`BUILD_KIND`)は SSR の env に依る
-    version: versionText(kind ?? 'dev'),
+    version,
+    // 🔑 opener(`main.ts`)と同じ関数・同じ材料 ── 印が食い違うと毎回読み直す
+    tag: manualBuildTag(version, text),
     html: renderMarkdown(text, {}),
     sections: manualSections(text),
     tokensCss,
     bodyCss: extractBodyCss(appCss, tokensCss).css,
     themeStorageKey: theme['THEME_STORAGE_KEY'],
+    textScaleStorageKey: textScale['TEXT_SCALE_STORAGE_KEY'],
   });
   return { fileName, ...built };
 }

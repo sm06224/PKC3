@@ -15,7 +15,11 @@ import {
   type TextScale,
 } from '@features/text-scale';
 
-const KEY = 'pkc3.text-scale';
+/**
+ * 🔑 **export している**のは、焼いたマニュアル(`features/help/manual-page.ts` の
+ *   inline script)が**同じ鍵**を読むため(`theme.ts` の `THEME_STORAGE_KEY` と同じ理由)。
+ */
+export const TEXT_SCALE_STORAGE_KEY = 'pkc3.text-scale';
 
 /**
  * 🔴 **当てる先の印**。⚠ `data-` 属性も置く ── CSS 変数だけだと
@@ -37,7 +41,7 @@ function readStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
 /** 保存されている値(起動時の初期値)。⚠ 読めなければ既定。 */
 export function initialTextScale(): TextScale {
   try {
-    const v = readStorage()?.getItem(KEY);
+    const v = readStorage()?.getItem(TEXT_SCALE_STORAGE_KEY);
     return v !== null && v !== undefined && isTextScale(v) ? v : DEFAULT_TEXT_SCALE;
   } catch {
     return DEFAULT_TEXT_SCALE;
@@ -71,7 +75,7 @@ export function applyTextScale(target: HTMLElement, scale: TextScale): void {
 export function chooseTextScale(target: HTMLElement, scale: TextScale): void {
   applyTextScale(target, scale);
   try {
-    readStorage()?.setItem(KEY, scale);
+    readStorage()?.setItem(TEXT_SCALE_STORAGE_KEY, scale);
   } catch {
     // 保存できないだけ ── この session では効いている
   }

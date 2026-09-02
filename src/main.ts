@@ -80,7 +80,7 @@ import { createUpdatePrompt } from '@adapter/ui/render/update-card';
 import { createAnnounce, announceServices } from '@adapter/ui/render/announce';
 import { versionText, MANUAL_TEXT } from '@adapter/ui/render/help';
 import { manualSections } from '@features/help/manual-find';
-import { MANUAL_PAGE_FILE } from '@features/help/manual-page';
+import { MANUAL_PAGE_FILE, manualBuildTag } from '@features/help/manual-page';
 import {
   openManualWindow,
   MANUAL_WINDOW_TITLE,
@@ -405,6 +405,8 @@ function openManualTile(
      *   動く(`base: './'`)ので、絶対 path を書かない。
      */
     pageUrl: readBundle(document) === null ? new URL(MANUAL_PAGE_FILE, document.baseURI).href : null,
+    // 🔑 焼いた page と同じ関数で同じ印を組む(`/dev/` でも原文が変われば入れ替わる)
+    tag: manualBuildTag(versionText(), MANUAL_TEXT),
   }).then((win) => {
     // 🔴 **開けなかったら理由を出す**(押しても何も起きないボタンにしない)
     if (win === null) {

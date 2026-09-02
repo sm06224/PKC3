@@ -32,6 +32,7 @@
  */
 import { buildManualDoc } from './manual-doc';
 import type { ManualSection } from './manual-find';
+import { TEXT_SCALES } from '../text-scale';
 
 /** 焼く file の名前。⚠ `dist/` 直下(`index.html` の隣)。SW の precache に載る。 */
 export const MANUAL_PAGE_FILE = 'manual.html';
@@ -52,6 +53,28 @@ export const MANUAL_WINDOW_TITLE = 'PKC3 マニュアル';
  *   焼いた page の窓を**同じ式**で見分ける(経路ごとに判定を増やさない)。
  */
 export const MANUAL_BUILT_ATTR = 'data-pkc-manual-version';
+
+/**
+ * 🔴 **窓に刻む「どの版で組んだか」の印**(2026-09-02、着地前の動線レビュー D2 が拾った)。
+ *
+ * ⚠ 版の行(`versionText()`)だけでは足りない ── `/dev/` は merge のたびに新しくなるのに
+ *   `APP_VERSION` は手書きのリテラル(`release-meta.ts`)なので、**版の字が 1 文字も
+ *   変わらない**。「PKC3 を新しくしたら新しいマニュアルに入れ替わる」が `/dev/` では起きず、
+ *   **古い本文の窓が前に出続ける**(段①が避けようとした当の形)。
+ * 🔑 だから印は **版の行 + マニュアルの原文の hash** ── 原文が 1 字でも変われば別の印になり、
+ *   次に押したとき入れ替わる。build 時(焼く側)と実行時(opener)が**同じ関数**で
+ *   同じ材料から作るので、食い違いようがない。
+ * ⚠ hash は FNV-1a 32bit ── 237 KB の原文で 1 ms 前後。暗号用ではない(衝突しても
+ *   「入れ替わらない」だけで、データは壊れない)。
+ */
+export function manualBuildTag(version: string, text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return `${version} #${h.toString(16).padStart(8, '0')}`;
+}
 
 /** 帯に出す取り分の字(#636 で Ctrl+F を返した意味がここで効く)。 */
 export const MANUAL_TIP = 'Ctrl+F(Mac は ⌘+F)で、ブラウザの検索がそのまま使えます';
@@ -80,8 +103,10 @@ const HOST_CLASS = 'pkc-md-rendered';
 export const MANUAL_CHROME_CSS = [
   ':root{color-scheme:light dark}',
   'html,body{margin:0;height:100%}',
-  'body{display:grid;grid-template-rows:auto 1fr;font:14px system-ui,sans-serif;',
-  'color:var(--fg,CanvasText);background:var(--bg,Canvas)}',
+  // 🔑 字の大きさは設定(`pkc3.text-scale`)が効く ── 選んでいなければ 14px のまま
+  //    (2026-09-02、動線レビュー D3: 「特大」を選んだ user の窓だけ 14px に戻っていた)
+  'body{display:grid;grid-template-rows:auto 1fr;font-family:system-ui,sans-serif;',
+  'font-size:var(--pkc-text-size,14px);color:var(--fg,CanvasText);background:var(--bg,Canvas)}',
   // 帯 ── 題名と版だけ。⚠ 地は無彩色(不可侵指示)
   '[data-pkc-field="manual-window-head"]{display:flex;gap:12px;align-items:baseline;',
   'padding:8px 16px;border-bottom:1px solid var(--border,#8884)}',
@@ -129,6 +154,18 @@ export const MANUAL_CHROME_CSS = [
   '@media (max-width:760px){[data-pkc-region="manual-window-body"]{grid-template-columns:1fr;',
   'grid-template-rows:minmax(0,32vh) 1fr}',
   '[data-pkc-region="manual-window-toc"]{border-right:0;border-bottom:1px solid var(--border,#8884)}}',
+  /**
+   * 🔴 **紙に出すときは器をほどく**(2026-09-02、動線レビュー D6 が拾った)。
+   * ⚠ 本文は `overflow:auto` のスクロール箱に居るので、そのまま Ctrl+P すると
+   *   **見えている 1 頁ぶんしか出ない**(アプリ本体が `app.css` の `@media print` で
+   *   同じ形を踏んで直した ── 「残り約 90% が黙って落ちていた」)。
+   * 🔑 grid と 100% と overflow を外し、帯と目次は紙に要らないので落とす。
+   *   `tests/smoke/manual-window.smoke.spec.ts` が PDF の頁数で見る。
+   */
+  '@media print{html,body{height:auto}body{display:block}',
+  '[data-pkc-field="manual-window-head"],[data-pkc-region="manual-window-toc"]{display:none}',
+  '[data-pkc-region="manual-window-body"]{display:block}',
+  '[data-pkc-region="manual-window-main"]{overflow:visible;height:auto;padding:0}}',
 ].join('');
 
 /**
@@ -153,22 +190,58 @@ export function themeIdsIn(tokensCss: string): string[] {
  * ⚠ 保存されている値が CSS に無い配色(古い / 壊れた値)なら OS に落ちる ──
  *   `theme.ts` の `isTheme` と同じ門。
  */
-export function themeBootScript(themeIds: readonly string[], storageKey: string): string {
+export function themeBootScript(
+  themeIds: readonly string[],
+  storageKey: string,
+  textScale?: { readonly storageKey: string; readonly sizes: Readonly<Record<string, string>> },
+): string {
+  /**
+   * 🔑 字の大きさも同じ倒し方で当てる(`text-scale.ts` の `initialTextScale` と同じ門:
+   *   保存が在り、知っている id なら その大きさ / それ以外は触らない = CSS の既定 14px)。
+   * ⚠ 対応表(id → px)は `features/text-scale.ts` の `TEXT_SCALES` から焼く ── 写さない。
+   */
+  const size = textScale
+    ? 'var s=null;try{s=localStorage.getItem(' +
+      JSON.stringify(textScale.storageKey) +
+      ')}catch(e){}var m=' +
+      JSON.stringify(textScale.sizes) +
+      ';if(s!==null&&Object.prototype.hasOwnProperty.call(m,s))document.documentElement.style.setProperty("--pkc-text-size",m[s]);'
+    : '';
   return (
     '(function(){var ok=' +
     JSON.stringify([...themeIds]) +
     ',t=null;try{t=localStorage.getItem(' +
     JSON.stringify(storageKey) +
     ')}catch(e){}if(ok.indexOf(t)<0){t="light";try{if(matchMedia("(prefers-color-scheme: dark)").matches)t="dark"}catch(e){}}' +
-    'document.documentElement.setAttribute("data-pkc-theme",t)})();'
+    'document.documentElement.setAttribute("data-pkc-theme",t);' +
+    size +
+    /**
+     * 🔑 **URL の節の印(`#m-N`)へ、読み込みの後に自分で送る**(2026-09-02 実測)。
+     * ⚠ 再読み込み(F5)では、ブラウザは断片へ送らない ── 印は URL に残るのに見出しが
+     *   画面の外(実測 top = 43718px)。`history.scrollRestoration = 'manual'` にしても
+     *   変わらなかった(本文がスクロール箱の中に居るため、断片の送りが箱に届かない)。
+     *   だから DOMContentLoaded で `scrollIntoView` する。⚠ これは「配色を立てる」に次ぐ
+     *   2 つ目の振る舞いだが、**目次の `<a>` が押されたときと同じ送り**を再読み込みと
+     *   ブックマークにも効かせるだけである(新しい操作は増えない)。
+     */
+    'addEventListener("DOMContentLoaded",function(){var h=location.hash.slice(1);' +
+    'if(!h)return;var e=document.getElementById(h);if(e)e.scrollIntoView({block:"start"})});' +
+    '})();'
   );
+}
+
+/** `TEXT_SCALES` を script に焼く形(id → px)。 */
+export function textScaleSizes(): Readonly<Record<string, string>> {
+  return Object.fromEntries(TEXT_SCALES.map((t) => [t.id, t.size]));
 }
 
 export interface ManualPageInput {
   /** 窓の題名(`MANUAL_WINDOW_TITLE`)。 */
   readonly title: string;
-  /** 帯に出す版の行(`versionText()`)。⚠ `<body>` の属性にも刻む。 */
+  /** 帯に出す版の行(`versionText()`)。 */
   readonly version: string;
+  /** `<body>` に刻む印(`manualBuildTag(version, text)`)。⚠ opener はこれで入れ替えを決める。 */
+  readonly tag: string;
   /** 描いた本文の HTML(`renderMarkdown(MANUAL_TEXT)`)。⚠ 空は受けない(build を止める側の仕事)。 */
   readonly html: string;
   /** 源文の節(`manualSections(text)`)。 */
@@ -179,6 +252,8 @@ export interface ManualPageInput {
   readonly bodyCss: string;
   /** 配色の保存の鍵(`theme.ts` の `THEME_STORAGE_KEY`)。 */
   readonly themeStorageKey: string;
+  /** 字の大きさの保存の鍵(`text-scale.ts` の `TEXT_SCALE_STORAGE_KEY`)。 */
+  readonly textScaleStorageKey: string;
 }
 
 export interface ManualPage {
@@ -218,7 +293,10 @@ function compactCss(css: string): string {
 export function buildManualPage(input: ManualPageInput): ManualPage {
   const built = buildManualDoc(input.html, input.sections);
   const css = `${compactCss(input.tokensCss)}\n${input.bodyCss}\n${MANUAL_CHROME_CSS}`;
-  const boot = themeBootScript(themeIdsIn(input.tokensCss), input.themeStorageKey);
+  const boot = themeBootScript(themeIdsIn(input.tokensCss), input.themeStorageKey, {
+    storageKey: input.textScaleStorageKey,
+    sizes: textScaleSizes(),
+  });
   const toc = built.toc
     .map(
       (t) =>
@@ -236,7 +314,7 @@ export function buildManualPage(input: ManualPageInput): ManualPage {
     // ⚠ `<body>` より前 ── 最初の描画の前に配色の属性が立つ
     `<script>${boot}</script>`,
     '</head>',
-    `<body ${MANUAL_BUILT_ATTR}="${escapeHtml(input.version)}">`,
+    `<body ${MANUAL_BUILT_ATTR}="${escapeHtml(input.tag)}">`,
     '<div data-pkc-field="manual-window-head">',
     `<strong>${escapeHtml(input.title)}</strong>`,
     `<span>${escapeHtml(input.version)}</span>`,

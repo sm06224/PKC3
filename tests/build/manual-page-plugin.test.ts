@@ -23,6 +23,7 @@ import * as help from '../../src/adapter/ui/render/help';
 import * as find from '../../src/features/help/manual-find';
 import * as page from '../../src/features/help/manual-page';
 import * as theme from '../../src/adapter/ui/render/theme';
+import * as textScale from '../../src/adapter/ui/render/text-scale';
 
 /**
  * Vite の loader の代役 ── **実物の module を、実物の綴りで**返す。
@@ -35,6 +36,7 @@ function realLoader(): ModuleLoader & { asked: string[] } {
     '/src/features/help/manual-find.ts': find,
     '/src/features/help/manual-page.ts': page,
     '/src/adapter/ui/render/theme.ts': theme,
+    '/src/adapter/ui/render/text-scale.ts': textScale,
   };
   const asked: string[] = [];
   return {
@@ -63,6 +65,11 @@ describe('焼き(bakeManualPage)', () => {
     expect(got.fileName).toBe(page.MANUAL_PAGE_FILE);
     expect(got.html).toContain(`<title>${page.MANUAL_WINDOW_TITLE}</title>`);
     expect(got.html).toContain(JSON.stringify(theme.THEME_STORAGE_KEY));
+    expect(got.html).toContain(JSON.stringify(textScale.TEXT_SCALE_STORAGE_KEY));
+    // 🔴 印は opener(`main.ts`)と同じ関数・同じ材料 ── 食い違うと毎回読み直す
+    expect(got.html).toContain(
+      `data-pkc-manual-version="${page.manualBuildTag(help.versionText('dev'), help.MANUAL_TEXT)}"`,
+    );
     expect(got.headings, '実物のマニュアルで下限を割っている').toBeGreaterThanOrEqual(
       MANUAL_MIN_HEADINGS,
     );

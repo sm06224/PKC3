@@ -17,13 +17,20 @@ import {
   MANUAL_PAGE_FILE,
   MANUAL_TIP,
   MANUAL_WINDOW_TITLE,
+  manualBuildTag,
+  textScaleSizes,
   themeBootScript,
   themeIdsIn,
 } from '../../src/features/help/manual-page';
 import { manualSections } from '../../src/features/help/manual-find';
 import { MANUAL_TEXT } from '../../src/adapter/ui/render/help';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
-import { THEMES, THEME_STORAGE_KEY } from '../../src/adapter/ui/render/theme';
+import { initialTheme, THEMES, THEME_STORAGE_KEY } from '../../src/adapter/ui/render/theme';
+import {
+  initialTextScale,
+  TEXT_SCALE_STORAGE_KEY,
+} from '../../src/adapter/ui/render/text-scale';
+import { TEXT_SCALES, textScaleSpec } from '../../src/features/text-scale';
 import { extractBodyCss } from '../../build/body-css';
 // @ts-expect-error -- 検品規則は素の .mjs(ビルド対象外の CI script 群)
 import { MANUAL_PAGE } from '../../scripts/dist-inspect.mjs';
@@ -36,11 +43,13 @@ function bake(over: Partial<Parameters<typeof buildManualPage>[0]> = {}) {
   return buildManualPage({
     title: MANUAL_WINDOW_TITLE,
     version: 'pkc3 v9.9.9',
+    tag: 'pkc3 v9.9.9 #deadbeef',
     html: RENDERED,
     sections: manualSections(MANUAL_TEXT),
     tokensCss: TOKENS,
     bodyCss: extractBodyCss(APP, TOKENS).css,
     themeStorageKey: THEME_STORAGE_KEY,
+    textScaleStorageKey: TEXT_SCALE_STORAGE_KEY,
     ...over,
   });
 }
@@ -88,13 +97,35 @@ describe('焼いたマニュアル — 目次と本文', () => {
     expect(head.textContent).toContain('pkc3 v9.9.9');
     expect(head.textContent).toContain(MANUAL_TIP);
     expect(doc.title).toBe(MANUAL_WINDOW_TITLE);
-    // 🔑 opener は**この属性**で「同じ版で組んであるか」を見る(段①の窓と同じ式)
-    expect(doc.body.getAttribute(MANUAL_BUILT_ATTR)).toBe('pkc3 v9.9.9');
+    // 🔑 opener は**この属性**で「同じ印で組んであるか」を見る(段①の窓と同じ式)
+    //    ⚠ 刻むのは版の行ではなく**印**(`tag`)── 版の行は帯に出るだけ
+    expect(doc.body.getAttribute(MANUAL_BUILT_ATTR)).toBe('pkc3 v9.9.9 #deadbeef');
   });
 
-  it('⚠ 版や題名の `"` `<` を escape する(属性が壊れて版の判定が外れない)', () => {
-    const doc = parse(bake({ version: 'v"1<2' }).html);
+  it('⚠ 印や題名の `"` `<` を escape する(属性が壊れて印の判定が外れない)', () => {
+    const doc = parse(bake({ tag: 'v"1<2' }).html);
     expect(doc.body.getAttribute(MANUAL_BUILT_ATTR)).toBe('v"1<2');
+  });
+});
+
+/**
+ * 🔴 **窓に刻む印**(動線レビュー D2 が拾った ── `/dev/` では版の字が merge をまたいでも
+ * 変わらないので、版だけで見分けると古い本文の窓が前に出続ける)。
+ */
+describe('焼いたマニュアル — 入れ替えの印(manualBuildTag)', () => {
+  it('同じ版・同じ原文なら同じ印(build 側と opener 側が同じ材料から組む)', () => {
+    expect(manualBuildTag('pkc3 v3.2.0(開発版)', MANUAL_TEXT)).toBe(
+      manualBuildTag('pkc3 v3.2.0(開発版)', MANUAL_TEXT),
+    );
+  });
+
+  it('🔴 原文が 1 字でも変われば別の印(版の字が同じでも入れ替わる)', () => {
+    const a = manualBuildTag('pkc3 v3.2.0(開発版)', MANUAL_TEXT);
+    const b = manualBuildTag('pkc3 v3.2.0(開発版)', `${MANUAL_TEXT}\n追記`);
+    expect(a).not.toBe(b);
+    // ⚠ 版が変わっても別の印(対照群 ── 版の字が印に入っている)
+    expect(manualBuildTag('pkc3 v3.2.1', MANUAL_TEXT)).not.toBe(a);
+    expect(a.startsWith('pkc3 v3.2.0(開発版) #')).toBe(true);
   });
 });
 
@@ -163,6 +194,73 @@ describe('焼いたマニュアル — 配色', () => {
       );
       expect(bake().html).toContain(JSON.stringify(THEME_STORAGE_KEY));
     });
+
+    /**
+     * 🔴 **アプリの「最初の配色」と同じ答えを出す**(着地前レビュー ⚠-3 ── 規則が
+     * `initialTheme()` と script の 2 か所に生えたので、突き合わせる場所を 1 つ置く)。
+     * ⚠ 片側だけ変えた日(既定を変える / 保存形式を変える)に、アプリと窓の配色が
+     *   食い違ったまま全部緑、を作らない。
+     */
+    it('🔴 アプリの initialTheme() と同じ答え(保存 3 通り × OS 2 通り)', () => {
+      for (const stored of [null, 'dracula', 'bogus']) {
+        for (const dark of [true, false]) {
+          localStorage.clear();
+          if (stored !== null) localStorage.setItem(THEME_STORAGE_KEY, stored);
+          vi.stubGlobal('matchMedia', () => ({ matches: dark }));
+          expect(run(), `stored=${stored} dark=${dark}`).toBe(initialTheme(dark));
+          document.documentElement.removeAttribute('data-pkc-theme');
+        }
+      }
+    });
+  });
+
+  /**
+   * 🔴 **字の大きさの設定も届く**(動線レビュー D3 ── 「特大」を選んだ user の窓だけ
+   * 14px に戻っていた)。倒し方は `text-scale.ts` の `initialTextScale()` と同じ。
+   */
+  describe('起動時に字の大きさを当てる script', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      localStorage.clear();
+      document.documentElement.style.removeProperty('--pkc-text-size');
+      document.documentElement.removeAttribute('data-pkc-theme');
+    });
+    const run = (): string => {
+      new Function(
+        themeBootScript(themeIdsIn(TOKENS), THEME_STORAGE_KEY, {
+          storageKey: TEXT_SCALE_STORAGE_KEY,
+          sizes: textScaleSizes(),
+        }),
+      )();
+      return document.documentElement.style.getPropertyValue('--pkc-text-size');
+    };
+
+    it('🔴 選んだ大きさを当てる(4 段全部 ── 表は features/text-scale.ts から焼く)', () => {
+      for (const t of TEXT_SCALES) {
+        localStorage.setItem(TEXT_SCALE_STORAGE_KEY, t.id);
+        expect(run(), t.id).toBe(textScaleSpec(t.id).size);
+        // ⚠ アプリ側の読み(`initialTextScale`)と同じ id に解決している
+        expect(initialTextScale()).toBe(t.id);
+      }
+      expect(TEXT_SCALES.length, '段が 4 未満(表が空振り)').toBeGreaterThanOrEqual(4);
+    });
+
+    it('選んでいなければ触らない(CSS の既定 14px のまま)', () => {
+      expect(run()).toBe('');
+    });
+
+    it('⚠ 知らない値(壊れた保存)は触らない', () => {
+      localStorage.setItem(TEXT_SCALE_STORAGE_KEY, 'huge');
+      expect(run()).toBe('');
+      // ⚠ prototype の名前でも触らない(`hasOwnProperty` で見る)
+      localStorage.setItem(TEXT_SCALE_STORAGE_KEY, 'constructor');
+      expect(run()).toBe('');
+    });
+
+    it('🔴 器の CSS が `--pkc-text-size` を読む(script が立てても CSS が見なければ効かない)', () => {
+      expect(MANUAL_CHROME_CSS).toContain('font-size:var(--pkc-text-size,14px)');
+      expect(bake().html).toContain(JSON.stringify(TEXT_SCALE_STORAGE_KEY));
+    });
   });
 });
 
@@ -177,6 +275,18 @@ describe('焼いたマニュアル — 1 枚で完結する', () => {
     expect(html.indexOf('<script>')).toBeLessThan(html.indexOf('<body'));
     // ⚠ 外の資源を 1 つも指さない(オフラインで 1 枚だけで読める)
     expect(html).not.toMatch(/<link\b/u);
+  });
+
+  /**
+   * 🔴 **紙に出すときは器をほどく**(動線レビュー D6)。⚠ 頁数そのものは実ブラウザ
+   * (`manual-window.smoke.spec.ts` の PDF)で見る ── ここは規則が焼かれていることだけ。
+   */
+  it('🔴 印刷の規則が焼かれている(スクロール箱をほどき、目次と帯を落とす)', () => {
+    const html = bake().html;
+    const print = html.slice(html.indexOf('@media print{html,body{height:auto}'));
+    expect(print, '印刷の規則が無い').not.toBe('');
+    expect(print).toContain('[data-pkc-region="manual-window-main"]{overflow:visible;height:auto');
+    expect(print).toContain('[data-pkc-region="manual-window-toc"]{display:none}');
   });
 
   it('🔴 file 名の綴りが検品(dist-inspect.mjs)と同じ', () => {
