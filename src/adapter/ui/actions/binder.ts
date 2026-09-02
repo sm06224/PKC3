@@ -895,6 +895,31 @@ function runBulkTag(
   if (field) field.value = '';
 }
 
+/**
+ * 🔴 **タグを打つ欄は 3 つ。作法を 1 つにする**(#639)。
+ *
+ * ⚠ 直す前は**欄ごとに作法が違っていた**:
+ *
+ * | 欄 | Enter | 候補 |
+ * |---|---|---|
+ * | 情報ペインの **タグ** | 🟢 効く | 🟢 出る |
+ * | フォルダの **タグを付ける** の帯 | 🔴 **無反応** | 🟢 出る |
+ * | スマートフォルダの **条件** | 🔴 **無反応** | 🔴 **出ない** |
+ *
+ * ⚠ 打ち終えて Enter を押す人がいちばん多く、押しても**何も起きず理由も出ない**
+ *   (無音の dead key)。⚠ 条件の欄は 1 文字違うと **0 件のスマートフォルダ**が
+ *   静かに残る場所なので、候補が出ないのがいちばん効く。
+ *
+ * 🔑 **欄 → その欄の「足す」操作**の表を 1 つ持ち、**Enter の受け口と候補の口が
+ *   同じ表から引く**(§7)── 直す前は `binder.ts` の 2 か所に**別々の条件**が
+ *   書いてあり、片方だけ欄を足すと静かに食い違った(実際そうなっていた)。
+ */
+const TAG_INPUT_ADD: ReadonlyMap<string, string> = new Map([
+  ['tag-add-input', 'add-tag'],
+  ['bulk-tag', 'bulk-tag-add'],
+  ['smart-cond', 'smart-cond-add'],
+]);
+
 const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'start-edit',
   // 🔑 **右クリックから入る編集も同じ門**(#426 段②。着地前レビュー 🔴1)──
@@ -5503,10 +5528,17 @@ export function bindActions(
      *   守りは `tests/adapter/inspector-tag-input.test.ts` が**振る舞いで**留めている。
      * ⚠ 欄の中だけ ── 画面全体の近道にしない(`append-input` と同じ作法)。
      */
-    if (field === 'tag-add-input') {
+    /**
+     * 🔴 **3 つの欄とも Enter で足せる**(#639)── 欄と操作の対は `TAG_INPUT_ADD`
+     *   1 か所だけが持つ(候補の口も同じ表から引く)。
+     * ⚠ 直す前はこの `if` が `tag-add-input` を**直書き**していたので、
+     *   帯の欄と条件の欄では **Enter が無音で捨てられて**いた。
+     */
+    const tagAdd = field === null ? undefined : TAG_INPUT_ADD.get(field);
+    if (tagAdd !== undefined) {
       if (ke.key === 'Enter' && !ke.shiftKey && !ke.ctrlKey && !ke.metaKey) {
         ke.preventDefault();
-        run('add-tag', ke.target as HTMLElement);
+        run(tagAdd, ke.target as HTMLElement);
       }
       return;
     }
@@ -7253,7 +7285,7 @@ export function bindActions(
   const onTagFocusIn = (ev: Event): void => {
     const el = (ev.target as HTMLElement | null)?.closest<HTMLElement>('[data-pkc-field]');
     const field = el?.getAttribute('data-pkc-field');
-    if (field !== 'tag-add-input' && field !== 'bulk-tag') return;
+    if (field === null || field === undefined || !TAG_INPUT_ADD.has(field)) return;
     dispatcher.dispatch({ type: 'ASK_TAG_SUGGESTIONS' });
   };
   root.addEventListener('focusin', onTagFocusIn);

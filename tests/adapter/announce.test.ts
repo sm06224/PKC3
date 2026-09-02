@@ -817,6 +817,7 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
+    ['2026-09-02-tag-enter', '0bdca4c1'],
     ['2026-09-02-tag-limit-reason', '1be07723'],
     ['2026-09-02-manual-window-front', 'eb88cc24'],
     ['2026-09-02-tags-two-lines', '75bdfbfd'],
@@ -828,7 +829,6 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-09-02-manual-page', 'eefd976e'],
     ['2026-08-31-manual-window', '40e6b4dc'],
     ['2026-08-31-manual-repair', 'b7f8accc'],
-    ['2026-08-31-help-find', '50fa4347'],
     // ⚠ 落とした entry の注記(訂正の経緯)は CHANGELOG と git の履歴に在る ── ここには残さない
   ];
 
