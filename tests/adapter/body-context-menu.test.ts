@@ -17,7 +17,8 @@
  * ⚠ つまりリンク・図・入力欄・選択範囲で**既定を残す**ことは、
  * いままで「行の判定がどのみち先に返す」に救われていた。**もう救われない。**
  */
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { appPanes } from '../../src/adapter/ui/render/pane-visibility';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { bindActions, type BinderServices } from '../../src/adapter/ui/actions/binder';
 import { BODY_MENU_ACTIONS, ENTRY_ACTION_HINTS } from '../../src/features/entry-actions';
@@ -698,6 +699,67 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     expect(r.sel.value, '押した見出しではない所が入り先になった').toBe(
       sectionAt(HEAD_BODY, 4)?.slug ?? '',
     );
+  });
+
+  /**
+   * 🔴 **畳んだ追記欄は開き、打つ欄にカーソルが入る**(#596 A / 設問③ C。
+   * user 裁定 2026-08-30「推奨通り、畳んでいれば開き、打つ欄にカーソルが入る」)。
+   * ⚠ 直す前は畳まれた `<select>` に値だけ入れて「〜にしました」と言い、
+   *   **打つ所が画面のどこにも無かった**。
+   */
+  describe('畳んだ追記欄を開く(#596 A / ③ C)', () => {
+    afterEach(() => {
+      appPanes.setHidden([]);
+    });
+    /** 本物の器(`shell.ts`)と同じ印で、畳み状態の属性と打つ欄を足す。 */
+    function withAppendPane(r: ReturnType<typeof rig>, folded: boolean) {
+      const shell = document.createElement('div');
+      shell.setAttribute('data-pkc-region', 'shell');
+      const input = document.createElement('textarea');
+      input.setAttribute('data-pkc-field', 'append-input');
+      shell.append(input);
+      r.root.append(shell);
+      appPanes.setHidden(folded ? ['append'] : []);
+      if (folded) shell.setAttribute('data-pkc-hidden-panes', 'append');
+      return { shell, input };
+    }
+
+    it('🔴 畳んでいれば開いて、打つ欄にカーソルが入る(右クリック経路)', () => {
+      const r = rig();
+      const { shell, input } = withAppendPane(r, true);
+      rightClick(r.head);
+      r.press('append-at-heading');
+      expect(r.sel.value, '入り先が動いていない(前提が崩れている)').toBe(
+        sectionAt(HEAD_BODY, 0)?.slug ?? '',
+      );
+      expect(appPanes.getHidden(), '畳んだままになっている').not.toContain('append');
+      expect(shell.getAttribute('data-pkc-hidden-panes') ?? '', '画面へ写っていない').not.toContain(
+        'append',
+      );
+      expect(document.activeElement, '打つ欄にカーソルが入っていない').toBe(input);
+      expect(r.d.getState().notice ?? '', '開いたことを言っていない').toContain('追記欄を開きました');
+    });
+
+    it('対照群 ── 畳んでいなければ、開く動作は起きず、カーソルだけ入る', () => {
+      const r = rig();
+      const { shell, input } = withAppendPane(r, false);
+      rightClick(r.head);
+      r.press('append-at-heading');
+      expect(shell.hasAttribute('data-pkc-hidden-panes')).toBe(false);
+      expect(document.activeElement).toBe(input);
+      expect(r.d.getState().notice ?? '').not.toContain('追記欄を開きました');
+    });
+
+    it('⚠ 追記欄だけを開く(左右の列の畳みには触らない)', () => {
+      const r = rig();
+      const { shell } = withAppendPane(r, true);
+      appPanes.setHidden(['sidebar', 'append']);
+      shell.setAttribute('data-pkc-hidden-panes', 'sidebar append');
+      rightClick(r.head);
+      r.press('append-at-heading');
+      expect(appPanes.getHidden()).toEqual(['sidebar']);
+      expect(shell.getAttribute('data-pkc-hidden-panes')).toBe('sidebar');
+    });
   });
 });
 

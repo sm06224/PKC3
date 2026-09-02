@@ -147,6 +147,66 @@ test('🔴 読む面: Alt+クリックで、追記の入り先がその節にな
 });
 
 /**
+ * 🔴 **畳んだ追記欄は開き、打つ欄にカーソルが入る**(#596 A / 設問③ C。
+ * user 裁定 2026-08-30「**推奨通り、畳んでいれば開き、打つ欄にカーソルが入る。
+ * Alt+クリックも同じ**」)。
+ *
+ * ⚠ 直す前:追記欄を畳んでいると、「ここに追記する」も Alt+クリックも
+ *   **畳まれた `<select>` に値を入れて「〜にしました」と言うだけ**で、打つ所が画面に無かった。
+ * 🔴 unit では原理的に届かない 2 つを見る:① `display: none` から戻した欄に**本当に
+ *   焦点が乗る**か(happy-dom は描画しない)② 右クリックの経路では**メニューが消える
+ *   順番**が焦点に効く(`onCloseMenu` → 委譲の handler、の順で焦点が残るか)。
+ */
+test('🔴 読む面: 追記欄を畳んでいても、Alt+クリック / 右クリックで開いて打つ欄にカーソルが入る (#596)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await makeNote(page);
+
+  const body = page.locator('[data-pkc-field="detail-body"]');
+  const shell = page.locator('[data-pkc-region="shell"]');
+  const input = page.locator('[data-pkc-field="append-input"]');
+  const target = page.locator('[data-pkc-field="append-target"]');
+  const grip = '[data-pkc-action="toggle-pane"][data-pkc-pane="append"]';
+
+  // 畳む(掴む帯を押す)── ⚠ 前提:本当に畳まれた(打つ欄が見えない)
+  await clickReal(page, grip);
+  await expect(shell).toHaveAttribute('data-pkc-hidden-panes', /append/);
+  await expect(input, '畳めていない(前提が崩れている)').toBeHidden();
+
+  // ① Alt+クリック → 開いて、入り先がその節になり、打つ欄にカーソルが入る
+  await altClickReal(page, body.locator('p', { hasText: 'A を採用する。' }));
+  await expect(input, '追記欄が開いていない').toBeVisible();
+  await expect(input, '打つ欄にカーソルが入っていない').toBeFocused();
+  await expect(target.locator('option:checked')).toHaveText(/決定事項/);
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('追記欄を開きました');
+  // 🔑 そのまま打てる(2 手目を探させない)
+  await page.keyboard.type('B も採用する。');
+  await clickReal(page, '[data-pkc-action="append-entry"]');
+  await expect(body, '追記が本文に届いていない').toContainText('B も採用する。');
+
+  // ② もう一度畳んで、右クリック →「ここに追記する」でも同じ
+  await clickReal(page, grip);
+  await expect(input).toBeHidden();
+  await body.locator('h2', { hasText: '出席' }).click({ button: 'right' });
+  const menu = page.locator('[data-pkc-region="context-menu"]');
+  await expect(menu, '見出しの右クリックでメニューが出ない').toBeVisible();
+  await menu.locator('button[data-pkc-action="append-at-heading"]').click();
+  await expect(input, '右クリック経路で追記欄が開いていない').toBeVisible();
+  await expect(input, '右クリック経路で打つ欄にカーソルが入っていない').toBeFocused();
+  await expect(target.locator('option:checked')).toHaveText(/出席/);
+
+  // ③ 対照群 ── 畳んでいないときは「開きました」とは言わず、カーソルだけ入る
+  await altClickReal(page, body.locator('p', { hasText: 'A を採用する。' }));
+  await expect(input).toBeFocused();
+  await expect(page.locator('[data-pkc-region="status"]')).not.toContainText('追記欄を開きました');
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
  * 🔴 **1 面編集: ドラッグで字を選んでも、選択が消えて編集に化けない**(#495)。
  *
  * ⚠ **これが user の実害だった** ── 「見出し全体クリック判定はあまり良い挙動
