@@ -282,10 +282,16 @@ describe('条件つきの操作が、右クリックから走る(#500 案 C)', (
      *   (下の「説明を持たない項目には title を付けない」は、この項目が出ない
      *   fixture なので**この沈黙を pin していない**)。
      */
-    expect(
-      menu!.querySelector('[data-pkc-action="adopt-external-images"]')?.getAttribute('title'),
-      '外へ通信することが押す前に読めない',
-    ).toBe(ENTRY_ACTION_HINTS['adopt-external-images']);
+    const adopt = menu!.querySelector<HTMLElement>('[data-pkc-action="adopt-external-images"]')!;
+    expect(adopt.getAttribute('data-pkc-hint'), '外へ通信することが押す前に読めない').toBe(
+      ENTRY_ACTION_HINTS['adopt-external-images'],
+    );
+    // 🔑 指せば、下の欄にその字が出る(#587 C-3 ── tooltip ではなく欄)
+    adopt.focus();
+    expect(menu!.querySelector('[data-pkc-field="context-menu-hint"]')?.textContent).toBe(
+      ENTRY_ACTION_HINTS['adopt-external-images'],
+    );
+    expect(adopt.getAttribute('title'), 'tooltip が残っている(下の項目に重なる箱)').toBeNull();
 
     menu!.querySelector<HTMLElement>('[data-pkc-action="adopt-external-images"]')!.click();
     /**
@@ -927,7 +933,7 @@ describe('右クリックの説明(#587 C-1)', () => {
     // ⚠ 空振り防止 ── 出ていないのに「全部持っている」が真になる形を潰す
     expect(items.length, 'メニューが出ていない(台の空振り)').toBeGreaterThanOrEqual(9);
     const silent = items
-      .filter((b) => (b.getAttribute('title') ?? '') === '')
+      .filter((b) => (b.getAttribute('data-pkc-hint') ?? '') === '')
       .map((b) => b.getAttribute('data-pkc-action'));
     expect(silent, '説明の無い項目が出ている').toEqual([]);
   });
@@ -936,17 +942,17 @@ describe('右クリックの説明(#587 C-1)', () => {
     const { root } = setup();
     rightClick(root.querySelector('[data-pkc-entry="n1"]')!);
     const del = root.querySelector<HTMLElement>(`${MENU} [data-pkc-action="delete-entry"]`);
-    expect(del?.getAttribute('title')).toBe(ENTRY_ACTION_HINTS['delete-entry']);
+    expect(del?.getAttribute('data-pkc-hint')).toBe(ENTRY_ACTION_HINTS['delete-entry']);
   });
 
-  it('⚠ **対照群** ── 説明を持たない項目には `title` を付けない(空の属性を生やさない)', () => {
+  it('⚠ **対照群** ── 説明を持たない項目には `data-pkc-hint` を付けない(空の属性を生やさない)', () => {
     const { root } = setup();
     rightClick(root.querySelector('[data-pkc-field="para"]')!);
     const items = [...root.querySelectorAll<HTMLElement>(`${MENU} button`)];
     expect(items.length, '本文のメニューが出ていない(台の空振り)').toBeGreaterThanOrEqual(2);
     expect(
-      items.filter((b) => b.hasAttribute('title')).map((b) => b.getAttribute('data-pkc-action')),
-      '説明を持たないのに空の title が生えている',
+      items.filter((b) => b.hasAttribute('data-pkc-hint')).map((b) => b.getAttribute('data-pkc-action')),
+      '説明を持たないのに空の data-pkc-hint が生えている',
     ).toEqual([]);
   });
 });
@@ -962,7 +968,7 @@ describe('右クリックの説明(#587 C-1)', () => {
  *   規則が効く**唯一の場面**(空文字)をここで作る。
  */
 describe('メニューの説明の出し分け(#587 C-1)', () => {
-  it('🔴 空の説明には `title` 属性そのものを生やさない(対照群つき)', () => {
+  it('🔴 空の説明には `data-pkc-hint` 属性そのものを生やさない(対照群つき)', () => {
     document.body.textContent = '';
     const root = document.createElement('div');
     root.setAttribute('data-pkc-slot', 'root');
@@ -979,9 +985,70 @@ describe('メニューの説明の出し分け(#587 C-1)', () => {
     );
     const at = (n: string): HTMLElement =>
       root.querySelector<HTMLElement>(`${MENU} [data-pkc-action="${n}"]`)!;
-    expect(at('a').hasAttribute('title'), '空の説明で title が生えている').toBe(false);
-    expect(at('c').hasAttribute('title'), '説明を渡していないのに title が生えている').toBe(false);
+    expect(at('a').hasAttribute('data-pkc-hint'), '空の説明で data-pkc-hint が生えている').toBe(false);
+    expect(at('c').hasAttribute('data-pkc-hint'), '説明を渡していないのに data-pkc-hint が生えている').toBe(false);
     // ⚠ 対照群 ── これが無いと「何も付けない」実装でも緑になる
-    expect(at('b').getAttribute('title'), '説明が付いていない(台の空振り)').toBe('説明');
+    expect(at('b').getAttribute('data-pkc-hint'), '説明が付いていない(台の空振り)').toBe('説明');
+  });
+});
+
+/**
+ * 🔴 **メニューの下の説明欄**(#587 C-3。user 裁定 2026-08-30「一度推奨で入れて、
+ * 使用感をテストしたい」)。指している項目の説明だけを、いちばん下の欄に出す。
+ * ⚠ 指す手は 2 つ(乗せる / キーで焦点を移す)── 片方だけ効く形を作らない。
+ */
+describe('メニューの下の説明欄(#587 C-3)', () => {
+  const HINT = '[data-pkc-field="context-menu-hint"]';
+  function openRowMenu() {
+    const s = setup();
+    rightClick(s.root.querySelector('[data-pkc-entry="n1"]')!);
+    const menu = s.menu();
+    expect(menu, '行の右クリックでメニューが出ない(前提が崩れている)').not.toBeNull();
+    const buttons = [...menu!.querySelectorAll<HTMLElement>('button[data-pkc-action]')];
+    expect(buttons.length, '項目が無い(空振り)').toBeGreaterThan(2);
+    return { s, menu: menu!, buttons, box: (): string => menu!.querySelector(HINT)?.textContent ?? '' };
+  }
+
+  it('🔴 開いた直後は、先頭(焦点)の項目の説明が出ている', () => {
+    const r = openRowMenu();
+    const first = r.buttons[0]!;
+    expect(first.getAttribute('data-pkc-hint') ?? '', '先頭に説明が無い(前提が崩れている)').not.toBe('');
+    expect(document.activeElement, '焦点が先頭に無い(前提が崩れている)').toBe(first);
+    expect(r.box()).toBe(first.getAttribute('data-pkc-hint'));
+  });
+
+  it('🔴 乗せると、その項目の説明に変わる', () => {
+    const r = openRowMenu();
+    const del = r.buttons.find((b) => b.getAttribute('data-pkc-action') === 'delete-entry')!;
+    del.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    expect(r.box()).toBe(ENTRY_ACTION_HINTS['delete-entry']);
+    // 外れたら、焦点の項目(先頭)へ戻る
+    r.menu.dispatchEvent(new MouseEvent('mouseleave'));
+    expect(r.box()).toBe(r.buttons[0]!.getAttribute('data-pkc-hint'));
+  });
+
+  it('🔴 キーで焦点を移しても変わる(マウスを持たない人にも届く)', () => {
+    const r = openRowMenu();
+    const second = r.buttons[1]!;
+    second.focus();
+    expect(r.box()).toBe(second.getAttribute('data-pkc-hint'));
+    expect(r.box(), '2 つ目の説明が先頭と同じ(区別できない)').not.toBe(
+      r.buttons[0]!.getAttribute('data-pkc-hint'),
+    );
+  });
+
+  it('⚠ tooltip(title)は 1 つも付けない(乗せて 1 秒待つ箱を残さない)', () => {
+    const r = openRowMenu();
+    expect(r.buttons.filter((b) => b.hasAttribute('title'))).toEqual([]);
+  });
+
+  it('⚠ 説明を持たないメニュー(見出し)には欄を出さない', () => {
+    const s = setup();
+    // 本文の右クリック(段組み / 横に留める)は説明を持たない ── 欄も無い
+    rightClick(s.para);
+    const menu = s.menu();
+    expect(menu).not.toBeNull();
+    expect(menu!.querySelector(HINT), '説明の無いメニューに空の欄が出ている').toBeNull();
+    expect(menu!.hasAttribute('data-pkc-with-hint')).toBe(false);
   });
 });

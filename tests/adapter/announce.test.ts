@@ -817,6 +817,7 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
+    ['2026-09-02-menu-hint-box', 'dc6a8e05'],
     ['2026-09-02-append-opens', '9d60ff45'],
     ['2026-09-02-split-restore', '568986a9'],
     ['2026-09-02-manual-page', 'eefd976e'],
@@ -826,7 +827,6 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-08-31-codeblock-naming', 'e4f9bb7f'],
     ['2026-08-31-multi-tags', '134f7823'],
     ['2026-08-31-office-settings-reset', '410c0a00'],
-    ['2026-08-30-plain-japanese', '6b3b32cc'],
     // ⚠ 落とした entry の注記(訂正の経緯)は CHANGELOG と git の履歴に在る ── ここには残さない
   ];
 

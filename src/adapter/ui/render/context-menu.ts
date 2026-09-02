@@ -53,6 +53,9 @@ export interface OpenMenu {
  * @param restoreTo 閉じたときに焦点を返す先
  * @param carry 押した物の身元(全ボタンへ属性として写す)。{@link OpenMenu} の説明を読む
  */
+/** 説明の欄の印(`data-pkc-field`)。⚠ smoke / unit はこの印で見る。 */
+export const MENU_HINT_FIELD = 'context-menu-hint';
+
 export function openContextMenu(
   root: HTMLElement,
   at: { x: number; y: number },
@@ -72,9 +75,15 @@ export function openContextMenu(
     b.setAttribute('role', 'menuitem');
     b.type = 'button';
     b.textContent = it.label;
-    // ⚠ 空の `title` を付けない ── 空文字でも属性は生えるので、
-    //    「説明が在る / 無い」を数える検査が**全件在る**と読んでしまう
-    if (it.hint !== undefined && it.hint !== '') b.title = it.hint;
+    /**
+     * 🔴 **説明は `title`(tooltip)ではなく、下の欄へ出す**(#587 C-1 → C-3。
+     *   user 裁定 2026-08-30「一度推奨で入れて、使用感をテストしたい」)。
+     * ⚠ C-1 の tooltip は「乗せて 1 秒待つと灰色の箱が**下の項目に重なる**」うえ、
+     *   マウスを持たない人(キーだけ / 触る画面)には**1 文字も届かなかった**。
+     * ⚠ 空なら属性を付けない ── 「説明が在る / 無い」を数える検査が全件在ると読まないように。
+     * 🔑 戻すときは `data-pkc-hint` を `title` に戻し、下の `withHint` の塊と CSS を外す(1 組)。
+     */
+    if (it.hint !== undefined && it.hint !== '') b.setAttribute('data-pkc-hint', it.hint);
     /**
      * 🔴 **押した物の身元をボタンへ写す**(#426 段②)。
      *
@@ -104,8 +113,46 @@ export function openContextMenu(
   el.style.left = `${x}px`;
   el.style.top = `${y}px`;
 
+  /**
+   * 🔴 **指している項目の説明を、メニューのいちばん下の欄に出す**(#587 C-3)。
+   *
+   * ⚠ 出るのは**説明を 1 つでも持つメニュー**だけ(見出し・本文のメニューは持たないので、
+   *   いままでどおり何も足さない)。
+   * 🔑 指す手は 2 つ ── **マウスを乗せる**(`mouseover`)と**キーで焦点を移す**(`focusin`)。
+   *   どちらも同じ 1 本(`show`)へ落とす。乗せた手が外れたら(`mouseleave`)、焦点の項目へ戻す。
+   * ⚠ 欄の高さは CSS が **2 行ぶん固定**で取る ── 指す項目で高さが変わると、メニューが
+   *   上下に踊って次の項目を押し損ねる。
+   */
+  const withHint = items.some((it) => it.hint !== undefined && it.hint !== '');
+  if (withHint) {
+    el.setAttribute('data-pkc-with-hint', '');
+    const box = root.ownerDocument.createElement('div');
+    box.setAttribute('data-pkc-field', MENU_HINT_FIELD);
+    box.setAttribute('aria-live', 'polite');
+    el.append(box);
+    const show = (btn: Element | null): void => {
+      box.textContent = btn?.getAttribute('data-pkc-hint') ?? '';
+    };
+    const buttonOf = (t: EventTarget | null): Element | null =>
+      t instanceof Element ? t.closest('button[data-pkc-action]') : null;
+    el.addEventListener('mouseover', (ev) => {
+      const b = buttonOf(ev.target);
+      if (b !== null) show(b);
+    });
+    el.addEventListener('focusin', (ev) => {
+      const b = buttonOf(ev.target);
+      if (b !== null) show(b);
+    });
+    el.addEventListener('mouseleave', () => {
+      const active = root.ownerDocument.activeElement;
+      show(active !== null && el.contains(active) ? buttonOf(active) : null);
+    });
+  }
+
   // ⚠ 焦点を先頭へ ── 鍵だけで使う人が、開いた直後に何もできないのを防ぐ
   const first = el.querySelector('button');
+  // 🔑 開いた直後の欄は、この `focus()` が同期で出す `focusin` が先頭の説明で埋める
+  //    (明示の呼びは no-op だった ── 変異試験 H4 が SURVIVED で教えた。2 か所に書かない)
   if (first instanceof HTMLElement) first.focus();
 
   const close = (): void => {
