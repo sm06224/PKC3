@@ -280,13 +280,22 @@ describe('CSS(畳んだ列が本当に消えるか)', () => {
 
   it('🔴 @media の中の規則は読まない(狭い版面で画面の規則を消しても緑、を作らない)', () => {
     /**
-     * 錨は `@media (max-width: 720px)` の中に**しか無い**もの。
+     * 錨は `@media` の中に**しか無い**もの。
      *
      * ⚠ 1 稿目は `[data-pkc-pane='inspector']` を錨にしたが、それは
      *   **top-level にも在った**(`grid-area: gripr`)ので、この test 自身が
      *   落ちて教えてくれた ── 「中にしか無い」を確かめずに錨を選んでいた。
+     * 🔴 **2026-09-02 に錨を差し替えた**(#632 段①)。前の錨
+     *   (`[data-pkc-region='pane-grip']:not([data-pkc-axis='y'])`)は
+     *   `@media (max-width: 720px)` の中に在ったが、その版面は**スマホ用画面へ
+     *   置き換えて消えた** ── 同じ綴りは top-level のスマホ規則の中に
+     *   **より長い選択子の一部として**残るので、`rulesFor` は丸ごと一致で
+     *   `[]` を返し続ける。⚠ つまり**錨が死んでも緑のまま**で、
+     *   「@media を読み始めた」を二度と検出できなくなっていた(§1 の空振り)。
+     * 🔑 いまの錨は**印刷の中にしかない**もの(全数で確かめた ── 画面の規則に
+     *   同じ綴りは 1 つも無い)。
      */
-    const MEDIA_ONLY = "[data-pkc-region='pane-grip']:not([data-pkc-axis='y'])";
+    const MEDIA_ONLY = '.pkc-csv-shape';
     expect(rulesFor(MEDIA_ONLY), '@media の中まで読んでいる').toEqual([]);
     // ⚠ 空振り防止 ── その選択子が CSS のどこかには実在すること
     expect(

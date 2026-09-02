@@ -140,24 +140,55 @@ test('🔴 枠が組めている(3 列 / 重なりなし)', async ({ page }) => 
   expect(cells, '表の列数がヘッダと合っていない').toBe(heads);
 });
 
-test('🔴 狭い画面では 1 カラムへ折る(横に潰れない)', async ({ page }) => {
-  // ⚠ 折らないと、サイドバーの最小幅 180px が本文を圧迫して読めなくなる
+/**
+ * 🔴 **2026-09-02 に主張を書き換えた**(#632 段①)。
+ *
+ * 直す前の主張は「狭い画面では 3 面を**縦に積む**」だったが、実測(#588)では
+ * 480×800 でお知らせを開くと**本文が 18px** になっていた ── 一覧 30vh + 情報 30vh +
+ * お知らせ 30vh が先に取るからで、「積む」こと自体が原因だった。
+ *
+ * 🔑 新しい主張:**1 枚ずつ出す**(一覧 / 本文 / 情報)。
+ *   ⚠ 観測点は**同じ**(`boundingBox` と「見えているか」)── 主張だけ変えて、
+ *   検出力は落とさない(「直っていない物を直ったことにする」を避ける)。
+ * ⚠ そして**行き止まりを作らない**ことまで見る ── 3 ページのどこからでも
+ *   帯の ← で戻れる(#609 の型を作らない)。
+ */
+test('🔴 スマホの幅では 1 枚ずつ出る(一覧 → 本文 → 情報 → 戻る)', async ({ page }) => {
   await page.setViewportSize({ width: 480, height: 800 });
   await gotoApp(page);
-  const sidebar = (await page.locator('[data-pkc-region="sidebar"]').boundingBox())!;
-  const detail = (await page.locator('[data-pkc-region="detail"]').boundingBox())!;
-  // 縦に積まれる = サイドバーの下端が本文の上端以下
-  expect(sidebar.y + sidebar.height).toBeLessThanOrEqual(detail.y + 1);
-  // 本文が画面幅いっぱいを使う(480px 画面なので、余白を引いた分)
-  expect(detail.width).toBeGreaterThan(440);
-  // 🔴 情報ペインは**消さず、下へ回す**(P8 段⑱。レビュー H)。
-  //    かつては `display:none` にしていたので、その面が持つ
-  //    「書き出す / 履歴 / 削除」に到達する導線が画面から消えていた。
-  //    ⚠ 狭い画面で**横に 3 列にはしない**(本文が読めなくなる)ので、
-  //    「消えていない」かつ「本文の下」の両方を見る
-  const inspector = (await page.locator('[data-pkc-region="inspector"]').boundingBox())!;
-  expect(inspector, '情報ペインが消えている(操作に手が届かない)').not.toBeNull();
-  expect(inspector.y, '横に並べている(本文が潰れる)').toBeGreaterThanOrEqual(detail.y);
+  const sidebar = page.locator('[data-pkc-region="sidebar"]');
+  const center = page.locator('[data-pkc-region="center"]');
+  const inspector = page.locator('[data-pkc-region="inspector"]');
+
+  // ① 何も選んでいなければ一覧が全幅の 1 枚
+  await expect(sidebar, '一覧が出ていない').toBeVisible();
+  await expect(center, '本文が同時に出ている(1 枚ずつではない)').not.toBeVisible();
+  await expect(inspector, '情報が同時に出ている').not.toBeVisible();
+  expect((await sidebar.boundingBox())!.width, '一覧が全幅を使っていない').toBeGreaterThan(440);
+
+  // ② ノートを作ると本文ページへ進む(進む配線は state から導かれる)
+  await createEntry(page, 'text');
+  await expect(center, '本文ページへ進んでいない').toBeVisible();
+  // ⚠ 作った直後は**編集中** ── そのままでは ← も 情報 も断られる(それが正しい)
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await expect(sidebar, '一覧が残っている(本文が狭くなる)').not.toBeVisible();
+  const body = (await center.boundingBox())!;
+  expect(body.width, '本文が全幅を使っていない').toBeGreaterThan(440);
+  // 🔑 #588 の実害の逆側 ── 本文に画面の半分以上が残る
+  expect(body.height, '本文の丈が半分も無い(#588 の潰れが戻っている)').toBeGreaterThan(400);
+
+  // ③ 情報は消していない ── 全幅の 1 枚として出す(操作に手が届く)
+  await clickReal(page, '[data-pkc-field="phone-info"]');
+  await expect(inspector, '情報ページが出ない(書き出す / 履歴 / 削除に届かない)').toBeVisible();
+  await expect(center, '本文と情報が重なって出ている').not.toBeVisible();
+  // 🔴 帯は情報ページでも残る(残らないと戻る口が無い = 行き止まり)
+  await expect(page.locator('[data-pkc-region="phone-bar"]')).toBeVisible();
+
+  // ④ ← で 2 段戻れる
+  await clickReal(page, '[data-pkc-field="phone-back"]');
+  await expect(center, '情報から本文へ戻れない').toBeVisible();
+  await clickReal(page, '[data-pkc-field="phone-back"]');
+  await expect(sidebar, '本文から一覧へ戻れない').toBeVisible();
 });
 
 /**
@@ -838,6 +869,14 @@ test('🔴 狭い画面でも「書き出す / 履歴 / 削除」に手が届く
   for (const width of [1440, 1024, 900, 700]) {
     await page.setViewportSize({ width, height: 800 });
     await page.waitForTimeout(120);
+    /**
+     * 🔴 **700px は「情報」を押してから見る**(#632 段①)。
+     * ⚠ スマホ用画面では 1 枚ずつ出すので、情報の面は**押すまで出ない** ──
+     *   だが主張は 1 文字も変わっていない:**その 3 つに手が届くこと**である。
+     *   届き方が「同じ画面に見えている」から「1 回押せば出る」に変わっただけで、
+     *   ⚠ 押しても出ないなら**ここで落ちる**(押す口も観測点に入っている)。
+     */
+    if (width <= 720) await clickReal(page, '[data-pkc-field="phone-info"]');
     for (const a of ACTIONS) {
       const el = page.locator(`[data-pkc-action="${a}"]`).first();
       await expect(el, `${width}px で ${a} が画面から消えた`).toBeVisible();

@@ -8,11 +8,17 @@
  */
 import { fitColumnHeight } from './read-columns';
 import {
+  COLUMN_PANES,
   decodeHidden,
   encodeHidden,
   togglePane,
+  type ColumnPaneId,
   type PaneId,
 } from '@features/pane-visibility';
+import { appPhone } from './phone-layout';
+
+/** ⚠ 列の畳みだけをスマホで落とす ── 表は `features` 側の 1 本を引く。 */
+const COLUMN_SET: ReadonlySet<PaneId> = new Set<ColumnPaneId>(COLUMN_PANES);
 
 const KEY = 'pkc3.panes';
 
@@ -73,13 +79,30 @@ export const appPanes = new PaneVisibilityStore();
 export function applyPaneVisibility(root: HTMLElement, hidden: readonly PaneId[]): void {
   const shell = root.querySelector<HTMLElement>('[data-pkc-region="shell"]');
   if (!shell) return;
-  const value = encodeHidden(hidden);
+  /**
+   * 🔴 **スマホ用画面では「列を畳んだ」を画面へ写さない**(#632 段①、設計 doc §2-9)。
+   *
+   * ⚠ スマホには**列が無い**(一覧 / 本文 / 情報が同じセルに重なって 1 枚ずつ出る)ので、
+   *   畳む対象がそもそも居ない。それでも属性を書くと、`[hidden-panes~='sidebar']` の
+   *   `display: none` が当たって**一覧ページが真っ白になる** ── #609 の行き止まり
+   *   (畳んだ事実は保存に残るのに、狭い窓には戻す口が 1 つも無い)がそのまま再演する。
+   * 🔑 **消さずに写さないだけ** ── 保存値(`pkc3.panes`)は触らないので、
+   *   窓を広げて PC の版面へ戻れば畳んだ状態はそのまま効く。
+   * 🔑 **追記欄(`append`)だけは通す** ── あれは中央の**中**の上下の畳みで、
+   *   スマホでも境目が縦に残っている(掴む帯も出したままなので、戻す口がある)。
+   *   ⚠ ここで一緒に落とすと、user 指示 2026-08-27「閲覧メインで使う時は消したい」の
+   *   道がスマホでだけ死ぬ。
+   * ⚠ 判定は `appPhone` **1 か所**を読む ── shell の属性を読む形にすると、
+   *   boot で属性を書く前にここが走った回だけ列が畳まれる(順番で守る形になる)。
+   */
+  const shown = appPhone.isPhone() ? hidden.filter((id) => !COLUMN_SET.has(id)) : hidden;
+  const value = encodeHidden(shown);
   if (value === '') shell.removeAttribute('data-pkc-hidden-panes');
   else shell.setAttribute('data-pkc-hidden-panes', value);
   for (const btn of root.querySelectorAll<HTMLElement>('[data-pkc-action="toggle-pane"]')) {
     const id = btn.getAttribute('data-pkc-pane');
     if (id === null) continue;
-    btn.setAttribute('aria-pressed', hidden.includes(id as PaneId) ? 'false' : 'true');
+    btn.setAttribute('aria-pressed', shown.includes(id as PaneId) ? 'false' : 'true');
   }
   /**
    * 🔴 **畳んだら段組みを採り直す**(#525。2026-08-28)。

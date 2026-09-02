@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { gotoApp, clickReal, createEntry, collectPageErrors } from './helpers';
 import { withStateOnFail } from './state-dump';
 
@@ -34,13 +34,27 @@ import { withStateOnFail } from './state-dump';
  * 🔑 観測点は **`elementFromPoint`** にする ── `toBeVisible()` は
  *   「窓の外に出ている」も「他の帯と重なって押せない」も**通してしまう**。
  */
+/**
+ * 🔴 **スマホ用画面では「時間を計る」は ⋯ の中に在る**(#632 段①)。
+ *
+ * ⚠ 押し口(`create-bar`)は**左の列の中**なので、スマホでは本文を開いている間
+ *   見えていない ── しかも一覧へ戻ると `selectedLid` が消えるので、
+ *   **戻ってから押す**という逃げ道も無い(円環の dead click)。
+ * 🔑 だから本文ページの **⋯** から同じ受け手を呼ぶ。⚠ この関数は
+ *   **狭い窓でだけ**使う ── 広い窓では今までどおり左の列を押す(経路を変えない)。
+ */
+async function startTimerOnPhone(page: Page): Promise<void> {
+  await clickReal(page, '[data-pkc-field="phone-menu"]');
+  await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="start-timer"]');
+}
+
 test('🔴 狭い窓でも、止める口が画面の中に在って押せる (#582)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 480, height: 800 });
   await gotoApp(page);
   await createEntry(page, 'text');
 
-  await clickReal(page, '[data-pkc-field="start-timer"]');
+  await startTimerOnPhone(page);
   const bar = page.locator('[data-pkc-region="timer-bar"]');
   await expect(bar, '押しても帯が出ない').toBeVisible();
 
@@ -112,16 +126,21 @@ test('🔴 狭い窓でタイマーを 2 本走らせても、画面が横に広
   /**
    * ⚠ **計るのは「いま開いているノート」1 件につき 1 本**なので、2 本走らせるには
    *   ノートを 2 件作り、**そのつど編集から出る**必要がある。
-   * ⚠ **保存は追記欄の側を押す** ── 編集の帯の側は狭い窓で**追記欄に覆われていて
-   *   押せない**(#588)。⚠ ここを `.first()` で掴むと、この台は静かに空振りする。
+   *
+   * 🔴 **2026-09-02 に「中央の保存」へ戻した**(#632 段①)。
+   * ⚠ 直す前はここに「保存は追記欄の側を押す ── 編集の帯の側は狭い窓で追記欄に
+   *   覆われていて押せない(#588)」と書いてあった。スマホ用画面で**その覆いが
+   *   無くなった**ので、回避を残すと**直った物を直っていないことにする**。
+   *   ⚠ 覆いが戻ったらここで落ちる(それが正しい)── 押せることは
+   *   `phone.smoke.spec.ts` が `elementFromPoint` で別に見ている。
+   * ⚠ 2 件目を作るには**一覧ページへ戻る**(スマホでは左の列が同時に出ない)。
    */
-  const saveInAppend = page
-    .locator('[data-pkc-region="append"] [data-pkc-action="commit-edit"]')
-    .first();
+  const save = page.locator('[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
   for (let i = 0; i < 2; i += 1) {
+    if (i > 0) await clickReal(page, '[data-pkc-field="phone-back"]');
     await createEntry(page, 'text');
-    if ((await saveInAppend.count()) > 0) await clickReal(page, saveInAppend);
-    await clickReal(page, '[data-pkc-field="start-timer"]');
+    await clickReal(page, save);
+    await startTimerOnPhone(page);
     await expect(stops, `${i + 1} 本目が始まらない(台の空振り)`).toHaveCount(i + 1);
   }
 

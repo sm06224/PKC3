@@ -14,6 +14,7 @@ import { HINT_BASE, HINT_COMMAND, hintTitle } from './shortcut-hint';
 import { COLLECTION_COMMANDS } from './commands';
 import { BROWSE_ICONS, iconButton, iconSpan } from './icons';
 import { COLUMN_PANES, PANE_LABELS } from '@features/pane-visibility';
+import { PHONE_BAR_REGION } from './phone-layout';
 import { BROWSE_TABS } from './browse';
 import {
   timerBarLabel,
@@ -660,6 +661,47 @@ export function buildShell(root: HTMLElement): ShellRegions {
   appendGrip.setAttribute('aria-pressed', 'true');
   appendGrip.setAttribute('aria-label', `${PANE_LABELS.append}`);
   appendGrip.title = `${PANE_LABELS.append}を畳む・戻す(上下にドラッグすると高さが変わります。矢印キーでも動かせます)`;
+  /**
+   * 🔴 **スマホ用画面の「ページの帯」**(#632 段①)。
+   *
+   * ⚠ **中央のいちばん上**に置く ── ここが「いま開いているノート」の面であり、
+   *   スマホでは一覧も情報も見えていないので、**戻る口はこの帯にしか置けない**。
+   * ⚠ **器は 1 度だけ組む**(`replaceBar` と同じ理由)── 描き直すと、押している
+   *   最中のボタンが指の下から消える。中身を書くのは
+   *   `render/phone-layout.ts` の `paintBar` **1 か所**である。
+   * ⚠ 既定は `hidden` ── PC の幅では 1px も場所を取らない。
+   */
+  const phoneBar = document.createElement('div');
+  phoneBar.setAttribute('data-pkc-region', PHONE_BAR_REGION);
+  phoneBar.hidden = true;
+  const phoneBack = document.createElement('button');
+  phoneBack.type = 'button';
+  phoneBack.setAttribute('data-pkc-action', 'phone-page');
+  phoneBack.setAttribute('data-pkc-field', 'phone-back');
+  // ⚠ 行き先(`data-pkc-page`)と字は `paintBar` が page ごとに書き換える
+  phoneBack.setAttribute('data-pkc-page', 'list');
+  phoneBack.textContent = '← 一覧';
+  const phoneTitle = document.createElement('span');
+  phoneTitle.setAttribute('data-pkc-field', 'phone-title');
+  const phoneInfo = document.createElement('button');
+  phoneInfo.type = 'button';
+  phoneInfo.setAttribute('data-pkc-action', 'phone-page');
+  phoneInfo.setAttribute('data-pkc-field', 'phone-info');
+  phoneInfo.setAttribute('data-pkc-page', 'info');
+  phoneInfo.textContent = '情報';
+  phoneInfo.title = 'タグ・目次・関係・書き出す(← ノート で戻ります)';
+  /**
+   * 🔴 **左の列にしか無い操作への入口**(設計 doc §2-7)。⚠ スマホでは
+   *   一覧が見えていないので、**右クリックの項目も「操作を探す」もここからしか届かない**
+   *   ── iOS Safari は長押しで `contextmenu` を撃たないので、行の右クリックも当てにできない。
+   */
+  const phoneMenu = document.createElement('button');
+  phoneMenu.type = 'button';
+  phoneMenu.setAttribute('data-pkc-action', 'phone-menu');
+  phoneMenu.setAttribute('data-pkc-field', 'phone-menu');
+  phoneMenu.textContent = '⋯';
+  phoneMenu.title = 'このノートにできること・操作を探す';
+  phoneBar.append(phoneBack, phoneTitle, phoneInfo, phoneMenu);
   center.append(replaceBar, detail, appendGrip, append);
 
   // ── 右(付随情報)────────────────────────────────
@@ -750,6 +792,20 @@ export function buildShell(root: HTMLElement): ShellRegions {
    * 面と面の**あいだ**に置く。畳んでも残るのはここが shell の列だからである。
    */
   shell.append(
+    /**
+     * 🔴 **ページの帯は shell の子**(#632 段①。2026-09-02 に center から移した)。
+     *
+     * ⚠ 1 稿目は center の先頭子にしたが、**情報ページで消えた** ── スマホは
+     *   一覧 / 本文 / 情報を同じマスに重ねて 1 枚ずつ出すので、情報ページでは
+     *   center ごと `visibility: hidden` になる。帯はその中に居たので、
+     *   **「← ノート」が画面から消えて情報ページが行き止まりになった**
+     *   (#609 と同じ型を、直しているその場で作っていた)。
+     * 🔑 帯は「いま開いているノートの持ち物」ではなく **画面(ページ)の持ち物**
+     *   である ── だから面の外、shell の子に置く。
+     * ⚠ **並びの先頭**に置く(Tab がまず戻る口に当たる)。重なりは
+     *   `z-index` で解く ── DOM の並びを描画順のために歪めない。
+     */
+    phoneBar,
     sidebar,
     grips.sidebar!,
     center,

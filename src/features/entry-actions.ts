@@ -257,6 +257,36 @@ export function bodyMenuActions(
 }
 
 /**
+ * 🔴 **「いま開いているノート」に効く、左の列の道具 4 つ**(#632 段①)。
+ *
+ * ## なぜ表が要るか
+ *
+ * この 4 つの押し口は**左の列(`create-bar`)にしか無い**。ところがスマホ用画面では
+ * 一覧と本文が**同時に出ない**ので、本文を開いている間はどれも押せない ──
+ * しかも 4 つとも `selectedLid` を必要とするので、**一覧へ戻ると今度は対象が居ない**
+ * (円環の dead click)。🔑 だから本文ページの **⋯** から同じ受け手を呼ぶ。
+ *
+ * ⚠ **新しい受け手は 1 つも作らない** ── 綴りは `create-bar` のボタンと同じで、
+ *   `binder` の同じ ACTIONS が受ける。ここに在るのは**字と並び**だけである。
+ * ⚠ **手で並べた表なので、`create-bar` に 5 つ目を足した人はここを忘れる** ──
+ *   `tests/features/entry-actions.test.ts` が create-bar の受け手と等値で pin する
+ *   (足したら落ちる形。`KNOWN_DEAD` と同じ作法)。
+ */
+export const NOTE_TOOL_ACTIONS: readonly EntryAction[] = [
+  { action: 'attach-file', label: '添付' },
+  { action: 'start-audio-capture', label: '録音' },
+  { action: 'start-screen-capture', label: '画面録画' },
+  { action: 'start-timer', label: '時間を計る' },
+];
+
+/**
+ * ⚠ 説明は `ENTRY_ACTION_HINTS` から引く(字の出どころは 1 か所)。
+ */
+export function noteToolActions(): readonly (EntryAction & { readonly hint: string })[] {
+  return NOTE_TOOL_ACTIONS.map((a) => ({ ...a, hint: ENTRY_ACTION_HINTS[a.action] ?? '' }));
+}
+
+/**
  * 🔴 **見出しを右クリックしたときに増える 3 つ**(#426 段② の残り)。
  *
  * ## ⚠ なぜ「増える」であって「差し替える」ではないか
@@ -351,6 +381,12 @@ export const ENTRY_ACTION_LABELS: Readonly<Record<string, string>> = Object.from
 export const ENTRY_ACTION_HINT_MAX = 56;
 
 export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
+  // 🔴 **左の列の道具 4 つ**(#632 段①)。⚠ 字は `shell.ts` のボタンの `title` と
+  //    **同じ意味**にする ── 同じ操作に 2 通りの説明を作らない
+  'attach-file': 'ファイルを取り込んで、このノートの添付にします',
+  'start-audio-capture': 'マイクで録音して、このノートに入れます',
+  'start-screen-capture': '画面を録画して、このノートに入れます',
+  'start-timer': 'このノートの作業時間を計ります(止めると本文に書きます)',
   'export-entry': 'このノートだけをバックアップ形式(.pkc3.zip)で保存します。取り込み直せます',
   // 🔴 **`export-entry` との違いを説明で言い切る**(#400 段④ と同じ作法)──
   //    どちらも「1 ノートを 1 file にする」ので、**何が違うか**を書かないと選べない

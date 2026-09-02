@@ -4612,80 +4612,6 @@ li[data-pkc-row-slot] {
   }
 }
 
-/* 狭い画面では 1 カラムへ折る */
-@media (max-width: 720px) {
-  /* ⚠ 縦に畳むので**境目が無い** ── 掴む帯は出さない(押せない導線を残さない)。
-   * 🔴 **ただし横向きの帯(追記欄)は残す**(2026-08-29)── 1 列に折れても
-   *   本文と追記欄の境目は**縦に残っている**ので、上の理由が当たらない。
-   * ⚠ 消していたせいで**畳んだまま窓を狭めると二度と戻せなかった**:
-   *   追記欄には鍵が無く(`KEY_COMMANDS` に `toggle-append` は無い)、
-   *   畳んだ事実は `pkc3.panes` に残るので、**窓を広げるまで永久に戻らない**。 */
-  [data-pkc-region='pane-grip']:not([data-pkc-axis='y']) {
-    display: none;
-  }
-  [data-pkc-region='shell'] {
-    /**
-     * 🔴 **`minmax(0, 1fr)` にする**(#586。2026-08-29 に実測で確定)。
-     *
-     * ⚠ 素の `1fr` は **`minmax(auto, 1fr)`** なので、**中身の最小幅が列を押し広げる**。
-     *   480px の窓でタイマーを **2 本**走らせると版面が **571px** へ広がり、
-     *   横スクロールが出て**「止める」が画面の外**へ出ていた(3 本で 845px)。
-     * 🔑 直した①(帯を版面に戻す)と**同じ実害**が、**本数を増やすと戻る**形である
-     *   ── 1 本では起きないので、1 本しか出さない計器では見えない。
-     *
-     * ## ⚠ 確かめ方(1 度これで外した)
-     *
-     * 実物で 2 本走らせ、実行時に `minmax(0, 1fr)` を当てたら
-     * **571 → 480 に戻り、中ではみ出す子は 0 件**だった。
-     * ⚠ 最初は `white-space: nowrap` の子を差し込む**合成の台**で測ったが、
-     *   それは**列を留めても自分が溢れる**ので、直す前も後も同じように落ちた
-     *   ── **台が測っていたのは別の物**だった(合成で代用しない)。
-     */
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas:
-      'sidebar'
-      'detail'
-      'inspector'
-      /* 🔴 上の 1100px と同じ理由 ── 3 本の帯を版面に戻す(2026-08-29) */
-      'capture'
-      'timers'
-      'alarms'
-      'announce'
-      'update'
-      'notices'
-      'status';
-    /* ⚠ 10 区画(P11 でお知らせが 1 つ / #413 で帯が 3 つ増えた)── 本文だけが伸びる */
-    grid-template-rows: auto 1fr auto auto auto auto auto auto auto auto;
-  }
-  /**
-   * 🔴 **1 列の版面は、畳んでいても 1 列である**(#607)。
-   *
-   * ⚠ 上の帯と同じ理由 ── 頭の畳み規則が (0,2,0) / (0,3,0) で、
-   *   この `@media` の (0,1,0) に勝ってしまう。
-   * 🔑 ここでは**列を増やさない**のが答えなので、3 通りを 1 つにまとめられる
-   *   (畳んだ面は `display: none` なので、行は自然に潰れる)。
-   */
-  [data-pkc-region='shell'][data-pkc-hidden-panes~='sidebar'],
-  [data-pkc-region='shell'][data-pkc-hidden-panes~='inspector'],
-  [data-pkc-region='shell'][data-pkc-hidden-panes~='sidebar'][data-pkc-hidden-panes~='inspector'] {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas:
-      'sidebar'
-      'detail'
-      'inspector'
-      'capture'
-      'timers'
-      'alarms'
-      'announce'
-      'update'
-      'notices'
-      'status';
-  }
-  [data-pkc-region='sidebar'] {
-    max-height: 30vh;
-  }
-}
-
 /* 中央が狭いときはプレビューを畳む(原文が読めなくなるほうが困る) */
 /**
  * 🔴 **左タブの狭い幅の手当ては、幅で分けるのをやめた**(2026-08-27)。
@@ -5076,6 +5002,178 @@ li[data-pkc-row-slot] {
   font-weight: 600;
 }
 
+/* ── スマホ用画面(#632 段①)────────────────────────────
+ * 設計 doc: `docs/development/mobile-screen-design-2026-09.md`
+ *
+ * 🔴 **この節に幅の数字は 1 つも無い**。切り替えるのは
+ *   `adapter/ui/render/phone-layout.ts` の `matchMedia` **1 本**で、ここが読むのは
+ *   `data-pkc-layout='phone'` / `data-pkc-page` の 2 属性だけである。
+ *   ⚠ ここに `@media (max-width: …)` を書くと数字が 2 か所になり、片方だけ変えた日に
+ *   **JS と CSS が別の幅で切り替わる**。`tests/adapter/phone-layout.test.ts` が
+ *   「この file に `PHONE_MAX_PX` の字面が 0 件」を pin する(落ちたら設計違反の合図)
+ *   ── ⚠ その検査は**コメントを剥いでから**見る(2026-08-13 に 5 度踏んだ罠:
+ *   自分の解説文が検査を満たす / 落とす)。
+ *
+ * 🔴 **`@media` ではないので、詳細度で勝たなければならない**。頭の畳み規則
+ *   (`[shell][data-pkc-hidden-panes~='sidebar']` = (0,2,0) / 両方畳む = (0,3,0))に
+ *   勝つため、ここは **(0,2,0) 以上を file 末尾**(印刷の前)に置く。
+ *   ⚠ #607 で踏んだ罠と同じ形である ── そのうえ JS 側でも
+ *   `applyPaneVisibility` が列の畳みを写さないので、**2 重に守っている**。
+ */
+
+/**
+ * 🔴 **1 列・1 マス**。一覧 / 本文 / 情報は**同じ `detail` のセルに重なる**。
+ *
+ * ⚠ 区画名は `detail` を使い回す ── 新しい名前を作ると
+ *   `announce.test.ts` の「宣言した grid-area は基準の版面に在る」が落ちる
+ *   (落ちること自体が「面を増やした」= 設計違反の合図である)。
+ * ⚠ 先頭の行は **`minmax(0, 1fr)`** ── 素の `1fr` は `minmax(auto, 1fr)` なので、
+ *   重なった 3 面のうち**いちばん背の高い面の min-content が行を押し広げる**
+ *   (見えていない面が本文を画面外へ押し出す形。#586 の列版と同じ罠)。
+ */
+[data-pkc-region='shell'][data-pkc-layout='phone'] {
+  /**
+   * 🔑 **帯の丈は 1 か所**(#632 段①)。帯自身の `height` と、帯が重なる面の
+   *   `padding-top` が**同じ値**を読む ── 2 か所に数字を置くと、片方だけ変えた日に
+   *   **本文の頭が帯の下へ潜る**(user からは「1 行目が読めない」に見える)。
+   * ⚠ **shell に置く**(帯に置くと、面は継げない ── カスタムプロパティは
+   *   宣言した要素の**子孫**にしか降りない。1 稿目で踏んだ)。
+   */
+  --pkc-phone-bar: 36px;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    'detail'
+    /* 🔴 収録 / タイマー / 予定の 3 本は版面に置く(2026-08-29 の #586 と同じ理由)──
+     * 区画名の無い `grid-area` は暗黙のトラックへ落ち、「止める」が画面の外へ出る */
+    'capture'
+    'timers'
+    'alarms'
+    'announce'
+    'update'
+    'notices'
+    'status';
+  /* ⚠ **`grid-template-areas` の直後に置く** ── `announce.test.ts` は
+   *   「区画の行数と丈の数が合う / 伸びる行が `detail`」をこの並びで読む。 */
+  grid-template-rows: minmax(0, 1fr) auto auto auto auto auto auto auto;
+}
+/**
+ * 🔴 **3 面を重ね、いま出ていない面は `visibility: hidden` + `inert`**。
+ *
+ * ⚠ **`display: none` にしない**(設計 doc §2-5)── ①mermaid の `widthOf` が
+ *   幅 0 で 640 に落ちて鍵が変わり、**戻るたびに図を焼き直す** ②短い面では
+ *   `scrollTop` が 0 に丸められ、**戻しても読んでいた場所へ帰れない**。
+ * ⚠ `inert` は JS が付ける(属性)── CSS だけでは焦点が隠れた面へ入りうる。
+ */
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='sidebar'],
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='center'],
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='inspector'] {
+  grid-area: detail;
+  /* ⚠ 重ねた面が互いの高さを主張しないように、セルいっぱいに敷く */
+  min-width: 0;
+  min-height: 0;
+  visibility: hidden;
+}
+[data-pkc-region='shell'][data-pkc-layout='phone'][data-pkc-page='list'] [data-pkc-region='sidebar'],
+[data-pkc-region='shell'][data-pkc-layout='phone'][data-pkc-page='note'] [data-pkc-region='center'],
+[data-pkc-region='shell'][data-pkc-layout='phone'][data-pkc-page='pane'] [data-pkc-region='center'],
+[data-pkc-region='shell'][data-pkc-layout='phone'][data-pkc-page='info'] [data-pkc-region='inspector'] {
+  visibility: visible;
+}
+/**
+ * 🔴 **ページの帯は面と同じマスに、上端へ寄せて重ねる**(#632 段①)。
+ *
+ * ⚠ 帯を面の**中**に置くと、その面が隠れるページで**帯ごと消える**
+ *   (情報ページの「← ノート」が消えて行き止まりになる ── 実装して踏んだ)。
+ * 🔑 区画名は `detail` を使い回す ── 新しい区画を作ると版面を 1 つ増やすことになる。
+ * ⚠ `align-self: start` で**自分の高さだけ**取る(マス全体を覆わない)。
+ * ⚠ 重なりは `z-index` で解く ── DOM の並びを描画順のために歪めない
+ *   (帯は shell の先頭 = Tab がまず戻る口に当たる)。
+ */
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='phone-bar'] {
+  grid-area: detail;
+  align-self: start;
+  position: relative;
+  z-index: 1;
+}
+/**
+ * 🔴 **帯のぶんだけ、出ている面の頭を空ける**(重ねた帯が中身を隠さないため)。
+ *
+ * ⚠ 空けるのは**帯が出るページだけ** ── `pane`(設定・ヘルプ・2 ペイン等)は
+ *   自分の帯を持つのでページの帯を出さない。ここで一緒に空けると
+ *   **理由の無い 36px の隙間**になる。
+ * 🔑 丈は `--pkc-phone-bar` **1 か所**から取る(帯の `min-height` と同じ値)──
+ *   2 か所に数字を置くと、片方だけ変えた日に**中身が帯の下へ潜る**。
+ */
+[data-pkc-region='shell'][data-pkc-layout='phone'][data-pkc-page='note'] [data-pkc-region='center'],
+[data-pkc-region='shell'][data-pkc-layout='phone'][data-pkc-page='info'] [data-pkc-region='inspector'] {
+  padding-top: var(--pkc-phone-bar);
+}
+/* ⚠ 情報は列ではなくなるので、≤1100 の「横に寝かせる」を戻す(1 枚の面として縦に読む) */
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='inspector'] {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  max-height: none;
+  overflow-y: auto;
+  border-top: none;
+}
+/* ⚠ 一覧は「1 枚の面」なので丈を切らない(≤1100 / ≤720 の 30vh を戻す) */
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='sidebar'] {
+  max-height: none;
+}
+/**
+ * ⚠ **左右の掴む帯は出さない**(境目が無いので押しても何も起きない)。
+ * 🔴 **横向きの帯(追記欄)は残す** ── 本文と追記欄の境目は縦に残っており、
+ *   消すと**畳んだまま二度と戻せない**(追記欄には鍵が無い。2026-08-29 に踏んだ)。
+ */
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='pane-grip']:not([data-pkc-axis='y']) {
+  display: none;
+}
+/**
+ * 🔴 **追記欄の上限を下げる**(設計 doc §2-11)。user は追記欄を 60vh まで
+ * 広げられる(`pane-size.ts` の clamp)が、1 枚しか出ないスマホでそれをやると
+ * **本文の取り分が 4 割を切る**。⚠ `dvh` は新しい規則にだけ書き、`vh` を先に置く
+ * (対応していないブラウザは `vh` に落ちる)。
+ */
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='append'] textarea {
+  max-height: 30vh;
+  max-height: 30dvh;
+}
+
+/**
+ * 🔴 **ページの帯**(← 一覧 ｜ 題名 ｜ 情報 ｜ ⋯)。⚠ **1 本だけ・44px 以下**
+ * (縦の予算。設計 doc §2-11)。既定は `hidden` なので PC では 1px も取らない。
+ */
+[data-pkc-region='phone-bar'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex: 0 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: var(--pkc-phone-bar);
+  height: var(--pkc-phone-bar);
+  padding: 0 var(--s2);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+/* ⚠ 題名は**縮む側**(両端のボタンを押せなくしない) */
+[data-pkc-field='phone-title'] {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+[data-pkc-region='phone-bar'] button {
+  flex: 0 0 auto;
+  /* ⚠ 指で押す所は狭くしない(段② で触る端末の最小丈をまとめて見る) */
+  min-height: 32px;
+  padding: 0 var(--s2);
+}
+
+
 /* ── 印刷(2026-08-07)────────────────────────────────
  *
  * 🔴 **直す前は画面から印刷すると 1 頁しか出なかった**(実測)。本文の器
@@ -5113,6 +5211,23 @@ li[data-pkc-row-slot] {
     height: auto;
     max-height: none;
     background: none;
+  }
+  /**
+   * 🔴 **スマホ用画面のまま印刷しても、本文が紙に出る**(#632 段①、設計 doc §2-17)。
+   *
+   * ⚠ 印刷中の版面幅は**紙の幅**なので、A5(559px)のような狭い紙では
+   *   `matchMedia` が真になり、**一覧ページのまま**紙へ行くことがある ──
+   *   そのとき中央は `visibility: hidden` なので、**本文が 1 文字も出ない**。
+   * 🔑 一覧と付随情報は下の②が `display: none` で落とすので、戻すのは中央だけでよい。
+   * ⚠ この 1 行は「上の狭幅ブロックが `display` を触らないから今日は等価」という
+   *   予告(この節の docstring)が**終わった**ことを意味する ── いま順序は効いている。
+   */
+  [data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='center'] {
+    visibility: visible;
+  }
+  /* ⚠ ページの帯は紙に要らない(押せる物が無い ── 下の②と同じ理由) */
+  [data-pkc-region='phone-bar'] {
+    display: none;
   }
   /* ② 紙に要らない面と操作子を落とす。
    *    ⚠ 一覧と付随情報は**紙では消してよい** ── 画面で畳むのを禁じている

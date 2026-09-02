@@ -248,11 +248,26 @@ test('🔴 shell に変数が書かれ、CSS がそれを読んでいる (#497)'
  *
  * 🔑 観測点は**本文の実寸** ── 版面の字面ではなく、user が見る幅を測る。
  */
+/**
+ * 🔴 **2026-09-02 に主張を書き換えた**(#632 段①)。
+ *
+ * ⚠ 直す前の主張は「480px で畳んでも本文が狭くならない」で、`Alt+[` が
+ *   `data-pkc-hidden-panes` を**書くこと**を台の前提にしていた。スマホ用画面では
+ *   `applyPaneVisibility` が**列の畳みを画面へ写さない**(列そのものが無い)ので、
+ *   この前提は成り立たない ── そこで落ちるのは**正しい**。
+ * 🔑 主張は同じ向きへ書き換える:**スマホでは畳む鍵を押しても本文が動かない**
+ *   (押しても一覧ページが消えず、幅も変わらない)。⚠ 観測点は変えない
+ *   ── 本文の実寸と、横にはみ出していないこと。
+ * ⚠ **#607 そのものは 721px 以上の 2 列版面で見る**(下の腕)── あちらは
+ *   いまも `@media (max-width: 1100px)` と頭の畳み規則が競う場所である。
+ */
 test('🔴 狭い窓でペインを畳んでも、本文は狭くならない (#607)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 480, height: 900 });
   await gotoApp(page);
   await createEntry(page, 'text');
+  // ⚠ 作った直後は編集中 ── ← は断られるので、先に保存して閲覧へ出る
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
 
   const detail = async (): Promise<number> => widthOf(page, 'center');
 
@@ -268,29 +283,29 @@ test('🔴 狭い窓でペインを畳んでも、本文は狭くならない (#
     ['inspector', 'Alt+BracketRight'],
   ] as const) {
     await page.keyboard.press(chord);
+    // 🔴 スマホでは畳みを**画面へ写さない** ── 写すと一覧ページが真っ白になる
     await expect(
       page.locator(SHELL),
-      `${pane} が畳まれていない(台の前提)`,
-    ).toHaveAttribute('data-pkc-hidden-panes', new RegExp(pane));
+      `${pane}: スマホなのに畳みを画面へ写している(一覧ページが消える)`,
+    ).not.toHaveAttribute('data-pkc-hidden-panes', new RegExp(pane));
     const after = await detail();
-    // 🔴 **狭くならない** ── #607 は 480 → 241 / 261 だった
-    expect(after, `${pane} を畳んだら本文が狭くなった: ${before} → ${after}`).toBeGreaterThanOrEqual(
-      before,
-    );
-    await page.keyboard.press(chord); // 戻す(次の腕を独立させる)
-    await expect(page.locator(SHELL)).not.toHaveAttribute(
-      'data-pkc-hidden-panes',
-      new RegExp(pane),
-    );
+    expect(after, `${pane} を押したら本文の幅が動いた: ${before} → ${after}`).toBe(before);
+    await page.keyboard.press(chord); // 保存値を戻す(次の腕を独立させる)
   }
 
-  // 🔴 **両方畳んでも同じ**(3 属性の選択子を書き忘れると、ここだけ元に戻る)
+  /**
+   * 🔴 **一覧ページはちゃんと出る**(#609 の行き止まりが戻っていない)。
+   * ⚠ 上の 2 回の押下で保存値には `sidebar` が入りうる ── それでも
+   *   ← 一覧 で一覧が出ること、が守りたい当のことである。
+   */
   await page.keyboard.press('Alt+BracketLeft');
-  await page.keyboard.press('Alt+BracketRight');
-  await expect(page.locator(SHELL)).toHaveAttribute('data-pkc-hidden-panes', /sidebar/);
-  await expect(page.locator(SHELL)).toHaveAttribute('data-pkc-hidden-panes', /inspector/);
+  await clickReal(page, '[data-pkc-field="phone-back"]');
+  await expect(
+    page.locator('[data-pkc-region="sidebar"]'),
+    '畳む鍵を押した後、一覧ページが出てこない',
+  ).toBeVisible();
   const both = await detail();
-  expect(both, `両方畳んだら本文が狭くなった: ${before} → ${both}`).toBeGreaterThanOrEqual(before);
+  expect(both, `本文の幅が動いた: ${before} → ${both}`).toBe(before);
 
   /**
    * 🔴 **画面から溢れていない**(#586 と同じ実害の裏取り)。

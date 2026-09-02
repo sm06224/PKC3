@@ -28,7 +28,7 @@ import { AppendBoxRenderer } from '../../src/adapter/ui/render/append-box';
 import { appPaneSizes } from '../../src/adapter/ui/render/pane-size';
 import { appPanes, applyPaneVisibility } from '../../src/adapter/ui/render/pane-visibility';
 import { readFileSync } from 'node:fs';
-import { blocksFor, decl, mediaBlock, stripComments } from '../helpers/css-blocks';
+import { blocksFor, decl, stripComments, withoutMedia } from '../helpers/css-blocks';
 
 let detach: (() => void) | null = null;
 
@@ -176,10 +176,25 @@ describe('🔴 狭い版面でも戻し口が残る(2026-08-29)', () => {
   const css = (): string =>
     stripComments(readFileSync('src/styles/app.css', 'utf-8'));
 
-  it('🔴 720px 以下でも、横向きの掴む帯(追記欄)は消さない', () => {
-    const narrow = mediaBlock(css(), '(max-width: 720px)').body;
+  /**
+   * 🔴 **2026-09-02 に引く先を変えた**(#632 段①)── `@media (max-width: 720px)` は
+   *   **消えた**(スマホ用画面へ置き換えた)ので、`mediaBlock` で引くと
+   *   「版面を引けていない」で落ちる = **主張ごと消える**。
+   * 🔑 主張は 1 文字も変えない:**スマホでも追記欄の戻し口は残る**。
+   *   引く先だけ「`data-pkc-layout='phone'` を含む規則」へ移す。
+   * ⚠ `@media` の中は読まない(印刷や別の幅の規則で満たされない)。
+   */
+  const phoneCss = (): string => {
+    const rules = [...withoutMedia(css()).matchAll(/([^{}]+)\{[^{}]*\}/g)].filter((m) =>
+      m[1]!.includes("data-pkc-layout='phone'"),
+    );
+    return rules.map((m) => m[0]!).join('\n');
+  };
+
+  it('🔴 スマホ用画面でも、横向きの掴む帯(追記欄)は消さない', () => {
+    const narrow = phoneCss();
     // 空振り防止 ── 版面ごと引けていないのに緑にならない
-    expect(narrow, '720px の版面を引けていない(空振り)').toContain('grid-template-areas');
+    expect(narrow, 'スマホの版面を引けていない(空振り)').toContain('grid-template-areas');
     /**
      * ⚠ **「消す規則が在るか」ではなく「何を消しているか」を見る** ──
      *   面を名指ししない `pane-grip` が 1 つでも `display: none` なら、
@@ -212,9 +227,12 @@ describe('🔴 狭い版面でも戻し口が残る(2026-08-29)', () => {
    * 🔴 **対照群** ── 左右の帯は 720px 以下で消えてよい(縦に折れて境目が無い)。
    * ⚠ これが無いと「全部消さない」へ倒した変異を見分けられない。
    */
-  it('🔴 左右の帯は 720px 以下で畳む(縦に折れて境目が無いので)', () => {
-    const narrow = mediaBlock(css(), '(max-width: 720px)').body;
-    const scoped = blocksFor(narrow, "[data-pkc-region='pane-grip']:not([data-pkc-axis='y'])");
+  it('🔴 左右の帯はスマホ用画面で畳む(1 枚ずつ出るので境目が無い)', () => {
+    const narrow = phoneCss();
+    const scoped = blocksFor(
+      narrow,
+      "[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='pane-grip']:not([data-pkc-axis='y'])",
+    );
     expect(scoped.length, '左右の帯を畳む規則が無い').toBeGreaterThan(0);
     expect(
       scoped.some((b) => decl('display', 'none').test(b)),

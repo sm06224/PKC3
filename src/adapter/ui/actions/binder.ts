@@ -122,11 +122,17 @@ import {
   type DualSide,
 } from '@features/relation/dual-pane';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
+import { appPhone } from '@adapter/ui/render/phone-layout';
 import { appKeymap, type KeymapStore } from '@adapter/ui/render/keymap';
 import { appOpenInEdit, OpenInEditStore } from '@adapter/ui/render/open-in-edit';
 import { chordOf, findCommand, isMac, typesCharacter, KEY_COMMANDS } from '@features/keymap';
 import { paletteRows } from '@features/palette/palette-rows';
-import { bodyMenuActions, entryMenuActions, headingMenuActions } from '@features/entry-actions';
+import {
+  bodyMenuActions,
+  entryMenuActions,
+  headingMenuActions,
+  noteToolActions,
+} from '@features/entry-actions';
 import {
   closeContextMenu,
   contextMenuOpen,
@@ -1394,6 +1400,13 @@ const MENU_LINE_ATTR = 'data-pkc-menu-line';
 const MENU_LID_ATTR = 'data-pkc-menu-lid';
 
 /**
+ * 🔴 **クリックでメニューを開く受け手**(#632 段①)。⚠ ここに載せ忘れると、
+ * その受け手は**押しても無反応**になる(同じクリックで片づけ役が閉じる)。
+ * ⚠ 右クリック(`contextmenu`)で開く経路はここに載らない ── あちらは別の event。
+ */
+const MENU_OPENERS: ReadonlySet<string> = new Set(['phone-menu']);
+
+/**
  * メニューが出た時のノートと、いま開いているノートが同じか。
  * ⚠ 印を持たない押し(見出しの頭のボタン等)は**素通し** ── そちらは押した物の
  *   中に居るので、そもそも取り違えようがない。
@@ -2296,6 +2309,81 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ ここは**共有の割当**(`appKeymap`)を読む。test が差した割当は鍵の側にだけ
    *   効くが、割当は**鍵の字を出すためだけ**に使うので**動きは変わらない**。
    */
+  /**
+   * 🔴 **スマホ用画面のページを移る**(#632 段①)。行き先は押したボタンが持つ
+   *   (`data-pkc-page`)── ここで推測しない。
+   *
+   * ⚠ **編集中に本文ページから出るのは断る**(設計 doc §2-6)。`disabled` にしない
+   *   のは、触る画面では `title` が読めず**無言の dead click**になるからである
+   *   (`selectEntryOrExplain` と同じ形 ── 押させて、理由を画面に出す)。
+   * ⚠ 断るのは**出るとき**だけ ── 情報ページから本文へ戻るのは止めない
+   *   (戻り先が編集中の本文なので、閉じ込めることになる)。
+   */
+  'phone-page': (dispatcher, target) => {
+    const page = target.getAttribute('data-pkc-page');
+    if (page === 'note') {
+      appPhone.closeInfo();
+      return;
+    }
+    if (dispatcher.getState().phase !== 'ready') {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '保存するか取り消してから戻ってください',
+      });
+      return;
+    }
+    if (page === 'info') {
+      appPhone.openInfo(dispatcher.getState().selectedLid);
+      return;
+    }
+    if (page === 'list') {
+      // ⚠ 情報 bit も倒す ── 倒さないと、次に同じノートを開いたとき情報ページが出る
+      appPhone.closeInfo();
+      dispatcher.dispatch({ type: 'DESELECT_ENTRY' });
+    }
+  },
+  /**
+   * 🔴 **左の列にしか無い操作を、本文ページから出す**(#632 段①、設計 doc §2-7)。
+   *
+   * ⚠ **受け手を 1 つも増やさない** ── 出すのは既存の登記
+   *   (`entryMenuActions` = 行の右クリックと同じ字)と `open-palette` だけである。
+   *   ⚠ 添付 / 録音 / 画面収録 / 計測(左の列の create-bar に在る 4 つ)は**段③**で足す
+   *   ── create-bar との等値 pin を先に書かないと、片方に足した日に静かにずれる。
+   */
+  'phone-menu': (dispatcher, target, _services, root) => {
+    // ⚠ 2 度目の ⋯ は閉じる(片道の操作を作らない ── user 指示 2026-08-23)
+    if (contextMenuOpen(root)) {
+      closeContextMenu(root);
+      return;
+    }
+    const st = dispatcher.getState();
+    const lid = st.selectedLid;
+    if (lid === null) return;
+    const rect = target.getBoundingClientRect();
+    openContextMenu(
+      root,
+      { x: rect.left, y: rect.bottom },
+      [
+        ...entryMenuActions({
+          archetype: st.entryMetas.get(lid)?.archetype ?? null,
+          linkedFile: st.linkedFiles.get(lid) ?? null,
+        }),
+        /**
+         * 🔴 **左の列にしか無い道具 4 つ**(添付 / 録音 / 画面録画 / 時間を計る)。
+         * ⚠ 4 つとも `selectedLid` を要るのに、押し口は一覧の中にしか無い ──
+         *   スマホでは一覧と本文が同時に出ないので、**戻ると対象が消える**。
+         */
+        ...noteToolActions(),
+        {
+          action: 'open-palette',
+          label: '操作を探す',
+          hint: 'できる操作を名前で絞り込んで、その場で実行します',
+        },
+      ],
+      root.ownerDocument.activeElement,
+      { [MENU_LID_ATTR]: lid },
+    );
+  },
   'open-palette': (dispatcher, _target, services, root) =>
     openPaletteFor(root, dispatcher, appKeymap, (t) => services.showStatus?.(t)),
   'nav-back': (dispatcher) => dispatcher.dispatch({ type: 'NAV_HISTORY', dir: 'back' }),
@@ -6569,7 +6657,22 @@ export function bindActions(
    *   閉じるまでの間に押せてしまう窓が開く)。
    * ⚠ **登録の順が意味を持つ**ので、下の `addEventListener` を並べ替えないこと。
    */
-  const onCloseMenu = (): void => {
+  const onCloseMenu = (ev: Event): void => {
+    /**
+     * 🔴 **押した物がメニューを開くボタンなら、閉じない**(#632 段①)。
+     *
+     * ⚠ 直す前、⋯ は**押しても何も出なかった** ── メニューはこれまで
+     *   `contextmenu` からしか開かなかったので、`click` で開く口は
+     *   **同じ 1 回のクリックで、上の `onClick` が開き、ここが閉じる**。
+     *   ⚠ 症状は「押しても無反応」で、**開いていること自体を誰も見られない**。
+     * ⚠ `queueMicrotask` で遅らせても直らない ── microtask の checkpoint は
+     *   listener 1 本ごとに走るので、ここより**先**に片づけが来る
+     *   (2026-08-27 に `onCloseMenu` を作ったときの docstring と同じ罠)。
+     * 🔑 開く側は自分で toggle するので、2 度目の ⋯ は閉じる。
+     */
+    const el = (ev.target as HTMLElement | null)?.closest<HTMLElement>('[data-pkc-action]');
+    if (el !== null && el !== undefined && MENU_OPENERS.has(el.getAttribute('data-pkc-action') ?? ''))
+      return;
     closeContextMenu(root);
   };
   const onMenuKey = (ev: KeyboardEvent): void => {
