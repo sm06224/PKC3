@@ -1397,6 +1397,31 @@ const MENU_LINE_ATTR = 'data-pkc-menu-line';
  * 🔑 **到達できるかを数え上げるより、行と一緒に身元を運ぶ** ── 受け手は
  *   自分の身元を確かめてから動く(状態の購読を増やさないので、束ねる側の台も壊さない)。
  */
+/**
+ * 🔴 **スマホで「一覧を見せてから効かせる」**(#632 段①、設計 doc §2-15)。
+ *
+ * ⚠ スマホでは一覧と本文が**同時に出ない**ので、#583 で直した
+ *   「畳んでいたら戻してから効かせる」が**そのままでは効かない** ──
+ *   隠れた欄に焦点を入れて無反応、という当の症状が戻る。
+ * 🔑 判定は `appPhone.reveal` **1 か所**(呼び元 3 つで数え方を変えない)。
+ * ⚠ 編集中は**理由を出して断る** ── 黙って何も起きないのが直したい当のことなので、
+ *   ここで無言に戻してはいけない。
+ *
+ * @returns `false` = 断った(呼び側はそこで止める)。
+ */
+function phoneShowList(dispatcher: Dispatcher): boolean {
+  if (appPhone.reveal('list') !== 'deselect') return true;
+  if (dispatcher.getState().phase !== 'ready') {
+    dispatcher.dispatch({
+      type: 'OP_FAILED',
+      error: '保存するか取り消してから、一覧で探してください',
+    });
+    return false;
+  }
+  dispatcher.dispatch({ type: 'DESELECT_ENTRY' });
+  return true;
+}
+
 const MENU_LID_ATTR = 'data-pkc-menu-lid';
 
 /**
@@ -1819,6 +1844,8 @@ export function runGlobalCommand(
         appPanes.setHidden(hidden.filter((x) => x !== 'sidebar')),
       );
     }
+    // 🔴 スマホは列ではなくページ ── 一覧ページへ移らないと欄は隠れたまま
+    if (!phoneShowList(dispatcher)) return true;
     input.focus();
     input.select();
     return true;
@@ -2168,6 +2195,12 @@ const ACTIONS: Record<string, ActionHandler> = {
   'toc-jump': (dispatcher, target) => {
     const slug = target.getAttribute('data-pkc-toc-slug') ?? '';
     if (slug === '') return;
+    /**
+     * 🔴 **情報ページの目次を押したら、本文ページへ戻る**(#632 段①)。
+     * ⚠ 目次は情報ペインの中に在るので、スマホでは**押した先が見えていない** ──
+     *   送ってはいるのに画面が動かない(無言の dead click)。
+     */
+    appPhone.reveal('note');
     void tocJump(dispatcher, target, slug);
   },
   /**
@@ -2183,6 +2216,8 @@ const ACTIONS: Record<string, ActionHandler> = {
     const tag = target.getAttribute('data-pkc-tag');
     if (!tag) return;
     dispatcher.dispatch({ type: 'SET_ENTRY_FILTER', query: tag });
+    // 🔴 スマホは列ではなくページ ── 絞ったのに一覧が見えないと無言の dead click
+    if (!phoneShowList(dispatcher)) return;
     const hidden = appPanes.getHidden();
     if (!hidden.includes('sidebar')) return;
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;

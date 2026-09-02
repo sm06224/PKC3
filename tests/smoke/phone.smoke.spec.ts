@@ -164,6 +164,41 @@ test('🔴 編集中に ← を押すと理由が出る(黙って何も起きな
 });
 
 /**
+ * 🔴 **隠した面は「場所を持ったまま」隠す**(`visibility` であって `display: none` ではない)。
+ *
+ * ⚠ **この 1 件は変異試験が要求して足した**(2026-09-02)── `visibility: hidden` を
+ *   `display: none` へ変える変異が、下の「図を焼き直さない」だけでは **SURVIVED**
+ *   だった。図の焼き直しは**描く順**(面の属性より先に本文を描く)に左右されるので、
+ *   毎回は起きない ── つまり**あの test は、選んだ隠し方を守っていなかった**。
+ * 🔑 だから**仕組みそのものを pin する**:隠れている面が**大きさを持ち続ける**こと。
+ *   これが `display: none` との唯一の機械的な差であり、
+ *   mermaid の `widthOf`(`parentElement.clientWidth || … || 640`)も
+ *   スクロール位置の保存も、**全部ここに乗っている**。
+ * ⚠ 観測点は `boundingBox()` ── `display: none` の要素では **null** が返る。
+ */
+test('🔴 隠れている面も大きさを持ち続ける(display:none で隠していない)', async ({ page }) => {
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await clickReal(page, `${REGION('detail')} [data-pkc-action="commit-edit"]`);
+
+  // いまは本文ページ ── 一覧と情報は隠れている
+  await expect(page.locator(REGION('center'))).toBeVisible();
+  for (const region of ['sidebar', 'inspector']) {
+    const box = await page.locator(REGION(region)).boundingBox();
+    expect(box, `${region}: 隠れた面が場所ごと消えている(display:none で隠している)`).not.toBeNull();
+    expect(box!.width, `${region}: 隠れた面の幅が 0`).toBeGreaterThan(100);
+    expect(box!.height, `${region}: 隠れた面の丈が 0`).toBeGreaterThan(100);
+  }
+
+  // 一覧ページへ移ると、こんどは本文が隠れる ── そちらも場所は残る
+  await clickReal(page, '[data-pkc-field="phone-back"]');
+  await expect(page.locator(REGION('sidebar'))).toBeVisible();
+  const body = await page.locator(REGION('center')).boundingBox();
+  expect(body, '隠れた本文が場所ごと消えている(図の焼き直しと読んでいた場所の消失を招く)').not.toBeNull();
+  expect(body!.width, '隠れた本文の幅が 0(mermaid の widthOf が 640 に落ちる)').toBeGreaterThan(100);
+});
+
+/**
  * 🔴 **図の焼き直しを起こさない**(`display: none` にしていないことの実測)。
  *
  * ⚠ `visibility` を `display: none` に変えると、`mermaid-hydrate.ts` の `widthOf` が
@@ -173,10 +208,16 @@ test('🔴 編集中に ← を押すと理由が出る(黙って何も起きな
  * ⚠ **`<img>` の `src` を見てはいけない**(1 稿目で踏んだ)── ObjectURL は
  *   表示の寿命ごとに作り直されるので、**焼き直していなくても毎回変わる**
  *   (CLAUDE.md §4「観測点が放っておいても変わるなら、変化は証拠にならない」)。
- * 🔑 鍵には**幅**が入る ── `display: none` にすると `widthOf` が 0 → 640 に落ち、
- *   **別の鍵で 2 枚目が焼かれる**。だから鍵が 1 本のままなら焼き直していない。
+ *
+ * 🔴 **往復する先は「情報」である**(2 稿目。変異試験 M4 が SURVIVED で教えた)。
+ * ⚠ 一覧へ戻る道では **`display: none` に変えても鍵が増えなかった** ── 一覧へ
+ *   戻ると選択が外れて**本文の器ごと作り直される**ので、図は次に開いたとき
+ *   **見えている幅で**焼かれる。つまりその往復は 2 つの実装を分けない。
+ * 🔑 情報ページなら選択は変わらないので**器は生きたまま**で、中央だけが隠れる ──
+ *   `display: none` だと親の箱が 0 になって `ResizeObserver` が鳴り、
+ *   `widthOf` の逃げ道 640 で**別の鍵の 2 枚目が焼かれる**。
  */
-test('🔴 一覧⇄本文を往復しても、図を焼き直さない', async ({ page }) => {
+test('🔴 本文⇄情報を往復しても、図を焼き直さない', async ({ page }) => {
   // ⚠ 全文の textarea を入力の道具に使うので、既定(live)ではなく split を明示する
   await useSplitEditor(page);
   await gotoApp(page);
@@ -213,12 +254,15 @@ test('🔴 一覧⇄本文を往復しても、図を焼き直さない', async 
   expect(before, '図が 1 枚も焼けていない(台の空振り)').toBeGreaterThan(0);
 
   for (let i = 0; i < 3; i += 1) {
+    await clickReal(page, '[data-pkc-field="phone-info"]');
+    await expect(page.locator(REGION('inspector'))).toBeVisible();
+    // ⚠ 隠れている間に焼き直しが走る ── 戻る前に一拍置いて、走らせてから数える
+    await page.waitForTimeout(400);
     await clickReal(page, '[data-pkc-field="phone-back"]');
-    await expect(page.locator(REGION('sidebar'))).toBeVisible();
-    await clickReal(page, '[data-pkc-entry]');
     await expect(page.locator(REGION('center'))).toBeVisible();
     await expect(host).toHaveAttribute('data-pkc-mermaid-state', 'ready', { timeout: 30000 });
   }
+  await page.waitForTimeout(400);
   expect(
     await bakedKeys(),
     '往復のたびに図を焼き直している(面を display:none で隠して幅が 0 になっている)',

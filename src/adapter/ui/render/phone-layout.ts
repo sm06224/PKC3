@@ -159,6 +159,27 @@ export class PhoneLayout {
     this.paint();
   }
 
+  /**
+   * 🔴 **その面を出すために、こちら側でできることをやる**(#632 段①、設計 doc §2-15)。
+   *
+   * ⚠ これが無いと **#583 で直した無言の dead click が、スマホでそのまま戻る** ──
+   *   一覧は DOM から消えず `visibility` で隠れるだけなので、`focus-search` の
+   *   `querySelector` は**見つけてしまい**、隠れた欄に焦点を入れて何も起きない。
+   *   🔴 しかも鍵は食われている(`prevent()` が先)。
+   * 🔑 押した user の意図は「**探したい**」であって「本文を開いたままにしたい」では
+   *   ない ── #583 が「畳んでいたら戻してから効かせる」を選んだのと同じ理由で、
+   *   スマホでは**ページを移す**。
+   *
+   * @returns `'deselect'` = 呼び側が `DESELECT_ENTRY` を撃つ必要がある。
+   *   ⚠ **ここでは dispatch しない**(renderer は state を動かさない ── 層規約)。
+   */
+  reveal(face: 'list' | 'note'): 'deselect' | 'none' {
+    this.infoFor = null;
+    this.paint();
+    if (face === 'note') return 'none';
+    return this.isPhone() && this.page() !== 'list' ? 'deselect' : 'none';
+  }
+
   /** state が動いたら描き直す。⚠ 呼び元は `main.ts` の `onState` 1 か所。 */
   render(st: PhoneRenderState): void {
     this.last = st;

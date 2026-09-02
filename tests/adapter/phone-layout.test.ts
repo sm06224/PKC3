@@ -343,6 +343,81 @@ describe('⋯ と左の列の等値(次に足した人が気づく)', () => {
   });
 });
 
+/**
+ * 🔴 **押した結果が見える所を開く**(#583 のスマホ版。設計 doc §2-15)。
+ *
+ * ⚠ スマホでは一覧が DOM から消えず `visibility` で隠れるだけなので、
+ *   `focus-search` の `querySelector` は**隠れた欄を見つけてしまう** ──
+ *   焦点は入らず、鍵は食われ、画面は 1 ドットも動かない(#583 で直した
+ *   当の症状が、面を重ねた瞬間に戻る)。
+ */
+describe('探す・絞る・目次(隠れた面へ送らない)', () => {
+  it('🔴 探す鍵を押すと一覧ページへ移り、欄に焦点が入る', () => {
+    const s = setup(true);
+    s.open('n1');
+    expect(s.page()).toBe('note');
+    s.root.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true, cancelable: true }),
+    );
+    expect(s.page(), '本文ページのまま(隠れた欄に焦点を入れている)').toBe('list');
+    expect(
+      s.root.ownerDocument.activeElement?.getAttribute('data-pkc-field'),
+      '探す欄に焦点が入っていない',
+    ).toBe('entry-filter');
+  });
+
+  /** ⚠ **対照群** ── PC の幅では今までどおり(ページを移さない)。 */
+  it('PC の幅では一覧を閉じない(ページという概念が無い)', () => {
+    const s = setup(false);
+    s.open('n1');
+    s.root.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true, cancelable: true }),
+    );
+    expect(s.d.getState().selectedLid, 'PC なのに選択を外した').toBe('n1');
+    // ⚠ **鍵が届いたことまで見る** ── 届いていなければ「移さなかった」は空振りである
+    expect(
+      s.root.ownerDocument.activeElement?.getAttribute('data-pkc-field'),
+      '鍵が 1 度も届いていない(この対照群は何も見ていない)',
+    ).toBe('entry-filter');
+  });
+
+  it('🔴 編集中は理由を出して断る(黙って何も起きない、にしない)', () => {
+    const s = setup(true);
+    s.open('n1');
+    s.d.dispatch({ type: 'START_EDIT' });
+    s.root.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true, cancelable: true }),
+    );
+    expect(s.d.getState().error).toContain('保存するか取り消してから');
+    expect(s.page(), '編集中に一覧へ飛んだ').toBe('note');
+  });
+
+  it('🔴 本文のタグ札を押すと、絞った一覧が出る', () => {
+    const s = setup(true);
+    s.open('n1');
+    const badge = s.root.ownerDocument.createElement('button');
+    badge.setAttribute('data-pkc-action', 'filter-by-tag');
+    badge.setAttribute('data-pkc-tag', '買い物');
+    s.root.querySelector('[data-pkc-region="detail"]')!.append(badge);
+    badge.click();
+    expect(s.d.getState().filterQuery, '絞れていない').toBe('買い物');
+    expect(s.page(), '絞ったのに一覧が見えない(無言の dead click)').toBe('list');
+  });
+
+  it('🔴 情報ページの目次を押すと、本文ページへ戻る', () => {
+    const s = setup(true);
+    s.open('n1');
+    s.field('phone-info').click();
+    expect(s.page()).toBe('info');
+    const link = s.root.ownerDocument.createElement('button');
+    link.setAttribute('data-pkc-action', 'toc-jump');
+    link.setAttribute('data-pkc-toc-slug', 'midashi');
+    s.root.querySelector('[data-pkc-region="inspector"]')!.append(link);
+    link.click();
+    expect(s.page(), '送ったのに情報ページのまま(飛び先が見えない)').toBe('note');
+  });
+});
+
 describe('畳んだ列をスマホでは写さない(#609)', () => {
   it('🔴 列の畳みは写さない / 追記欄の畳みは写す', () => {
     const s = setup(true);
