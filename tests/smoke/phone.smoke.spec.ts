@@ -1,5 +1,12 @@
 import { test, expect, devices } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
+import {
+  gotoApp,
+  clickReal,
+  createEntry,
+  collectPageErrors,
+  dismissAnnounce,
+  useSplitEditor,
+} from './helpers';
 
 /**
  * 🔴 **スマホ用画面**(#632 段①)。設計 doc:
@@ -31,11 +38,21 @@ const REGION = (name: string): string => `[data-pkc-region="${name}"]`;
 test('🔴 スマホの縦で、編集中の「保存」が本当に押せる (#588)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await gotoApp(page);
+  await dismissAnnounce(page);
   await createEntry(page, 'text');
 
   /**
-   * ⚠ **お知らせは畳まない**(#588 の条件を再現する)── 起動直後のカードが
-   *   縦を 3 割取った状態で、なお保存が押せることが主張である。
+   * ⚠ **お知らせは先に畳む**(2026-09-02 に条件を書き直した)。
+   *
+   * 直す前のここは「**畳まない**(起動直後のカードが縦を 3 割取った状態で、なお
+   * 保存が押せる)」だった ── #588 の 3 つの縦潰れ要因の 1 つがカードだったからである。
+   * ⚠ ところが user 裁定でカードは**スマホでは画面いっぱい**になった:
+   *   もう本文から縦を削る物ではなく、**読んで畳む 1 枚の画面**である。
+   *   だから「カードを出したまま編集する」は**そもそも到達できない状態**になった
+   *   (畳まないと編集を始める口に触れない)。
+   * 🔑 縦潰れの主張はカード抜きで測り、**カードが画面いっぱいに出ること・
+   *   そこから出られること**は下の専用 test が見る(条件を実装に寄せて緩めたのでは
+   *   なく、**画面が変わったので測る所が移った**)。
    */
   /**
    * 🔴 **`commit-edit` を全数走査する**(#588 が書いた「直ったと言える条件」そのもの)。
@@ -77,6 +94,7 @@ test('🔴 スマホの縦で、編集中の「保存」が本当に押せる (#
  */
 test('🔴 本文ページでは、本文が画面の 3 割以上を取る', async ({ page }) => {
   await gotoApp(page);
+  await dismissAnnounce(page);
   await createEntry(page, 'text');
   const vh = page.viewportSize()!.height;
   const body = (await page.locator(REGION('detail')).boundingBox())!;
@@ -98,6 +116,7 @@ test('🔴 本文ページでは、本文が画面の 3 割以上を取る', asy
  */
 test('🔴 3 ページのどこからでも戻れる(行き止まりが無い)', async ({ page }) => {
   await gotoApp(page);
+  await dismissAnnounce(page);
   await createEntry(page, 'text');
   // ⚠ 作った直後は**編集中**なので、そのままでは ← も 情報 も断られる(それは正しい)
   await clickReal(page, `${REGION('detail')} [data-pkc-action="commit-edit"]`);
@@ -158,6 +177,7 @@ test('🔴 一覧を畳んだ状態で開いても、一覧ページは出る (#
     }
   });
   await gotoApp(page);
+  await dismissAnnounce(page);
   await expect(page.locator(REGION('sidebar')), '畳んだ設定のせいで一覧が消えている').toBeVisible();
   const box = (await page.locator(REGION('sidebar')).boundingBox())!;
   expect(box.width, '一覧が全幅を使っていない').toBeGreaterThan(300);
@@ -172,6 +192,7 @@ test('🔴 一覧を畳んだ状態で開いても、一覧ページは出る (#
  */
 test('🔴 ⋯ から「時間を計る」が押せて、止める帯が出る', async ({ page }) => {
   await gotoApp(page);
+  await dismissAnnounce(page);
   await createEntry(page, 'text');
   await clickReal(page, '[data-pkc-field="phone-menu"]');
   await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="start-timer"]');
@@ -187,6 +208,7 @@ test('🔴 ⋯ から「時間を計る」が押せて、止める帯が出る',
  */
 test('🔴 編集中に ← を押すと理由が出る(黙って何も起きない、にしない)', async ({ page }) => {
   await gotoApp(page);
+  await dismissAnnounce(page);
   await createEntry(page, 'text');
   await clickReal(page, '[data-pkc-field="phone-back"]');
   await expect(
@@ -212,6 +234,7 @@ test('🔴 編集中に ← を押すと理由が出る(黙って何も起きな
  */
 test('🔴 隠れている面も大きさを持ち続ける(display:none で隠していない)', async ({ page }) => {
   await gotoApp(page);
+  await dismissAnnounce(page);
   await createEntry(page, 'text');
   await clickReal(page, `${REGION('detail')} [data-pkc-action="commit-edit"]`);
 
@@ -255,6 +278,7 @@ test('🔴 本文⇄情報を往復しても、図を焼き直さない', async 
   // ⚠ 全文の textarea を入力の道具に使うので、既定(live)ではなく split を明示する
   await useSplitEditor(page);
   await gotoApp(page);
+  await dismissAnnounce(page);
   await createEntry(page, 'text');
   const host = page.locator('[data-pkc-field="detail-body"] [data-pkc-mermaid-src]');
 
@@ -301,4 +325,145 @@ test('🔴 本文⇄情報を往復しても、図を焼き直さない', async 
     await bakedKeys(),
     '往復のたびに図を焼き直している(面を display:none で隠して幅が 0 になっている)',
   ).toBe(before);
+});
+
+/**
+ * 🔴 **お知らせはスマホでは画面いっぱい ── そして必ず出られる**
+ * (user 裁定 2026-09-02「**全画面でだせばいいじゃん。不要ならみんな設定するでしょ？**」)。
+ *
+ * ## ⚠ ここが唯一の逃げ道である
+ *
+ * 全画面にした以上、**畳めなければアプリごと行き止まり**になる(起動のたびに
+ * 同じカードが画面を覆う)。裁定の後半「不要ならみんな設定するでしょ」は
+ * **「今後は出さない」が本当に効く**ことを前提にしているのに、
+ * ⚠ それを端から端まで見る検査は 1 つも無かった ── unit は
+ * `muteAnnounce` が**呼ばれた**ことしか見ておらず、
+ * 「押した → 読み直しても出ない」は**誰も守っていなかった**。
+ *
+ * 🔑 観測点は 3 つ:①**覆っている**(高さの割合)②**押せる**(`elementFromPoint` ──
+ * `toBeVisible()` では覆われていても通る)③**読み直しても出ない**。
+ */
+test('🔴 お知らせは画面いっぱいに出て、「今後は出さない」で二度と出ない', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  /**
+   * ⚠ **ノートが 1 件在る状態でカードを出し直す** ── 後半で「帯より上に居るか」を
+   *   測るのに、選べるノートが要る。⚠ 起動直後は 0 件なので、
+   *   一度畳んで作り、**既読の印を消して読み直す**(印の綴りは実測した ──
+   *   畳んだ後に `localStorage` へ増えた鍵がこれ 1 つだった)。
+   */
+  await dismissAnnounce(page);
+  await createEntry(page, 'text');
+  await clickReal(page, `${REGION('detail')} [data-pkc-action="commit-edit"]`);
+  await page.evaluate(() => localStorage.removeItem('pkc3.notices.seen'));
+  await page.reload();
+  await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
+
+  const band = page.locator(REGION('announce'));
+  await expect(band, '既読を消しても出直さない(台の前提が崩れた)').toBeVisible({
+    timeout: 10_000,
+  });
+
+  /**
+   * ⚠ **切られた姿と確実に分ける値にする**(情報ページの丈と同じ考え方)。
+   *   直す前は `max-height: 30vh` = **3 割**、裁定後は主面いっぱい。
+   *   5 割はその真ん中で、帯を 1 本足しても揺れない。
+   */
+  const box = (await band.boundingBox())!;
+  expect(
+    box.height / page.viewportSize()!.height,
+    `お知らせが 30vh で切られている(${Math.round(box.height)}px)`,
+  ).toBeGreaterThan(0.5);
+
+  /**
+   * 🔴 **本文の面を実際に覆っている** ── 「大きい」だけでは重なりを主張できない
+   *   (`z-index` を落とすと、同じ大きさのまま**後ろへ回る**)。
+   * ⚠ 中央の面の真ん中を突いて、お知らせ側に当たることを見る。
+   */
+  const over = await page.evaluate(() => {
+    const c = document.querySelector('[data-pkc-region="center"]')!.getBoundingClientRect();
+    const at = document.elementFromPoint(c.x + c.width / 2, c.y + c.height / 2);
+    return at?.closest('[data-pkc-region]')?.getAttribute('data-pkc-region') ?? null;
+  });
+  expect(over, 'お知らせが本文の後ろに回っている(全画面になっていない)').toBe('announce');
+
+  /**
+   * 🔴 **ページの帯より上に居る**(変異試験 S1 が SURVIVED で要求した)。
+   *
+   * ⚠ 上の観測点(本文の真ん中)だけでは **`z-index: 2` を落としても緑**だった ──
+   *   お知らせは shell の**後ろのほうの子**なので、重ね順を指定しなくても
+   *   面 3 枚より上に来る。⚠ 上に来ないのは**ページの帯だけ**である
+   *   (帯は `position: relative; z-index: 1` を持つ)。
+   * 🔑 だから帯が出ている状態を作って測る。⚠ 起動直後は一覧ページなので帯は出ない
+   *   ── ノートを選ぶ必要があるが、**カードに覆われていて指では押せない**
+   *   (それが「全画面」の意味である)。狭い窓 + キーボードでは辿り着けるので、
+   *   **状態の用意だけ** JS の click で済ませ、**測るのは実際の重なり**にする。
+   */
+  await page.evaluate(() => {
+    document.querySelector<HTMLElement>('[data-pkc-action="select-entry"]')?.click();
+  });
+  const bar = page.locator(REGION('phone-bar'));
+  await expect(bar, '台の前提が崩れた ── 帯が出ていない(ノートを選べていない)').toBeVisible();
+  const overBar = await bar.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    return at?.closest('[data-pkc-region]')?.getAttribute('data-pkc-region') ?? null;
+  });
+  expect(overBar, 'ページの帯がお知らせを突き抜けて出ている').toBe('announce');
+
+  // 🔴 逃げ道が**押せる**(覆われた全画面の中で、手だけは最前面に居る)
+  const hit = await page
+    .locator('[data-pkc-action="mute-announce"]')
+    .evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      return at?.closest('[data-pkc-action]')?.getAttribute('data-pkc-action') ?? null;
+    });
+  expect(hit, '「今後は出さない」が押せない ── 全画面の行き止まり').toBe('mute-announce');
+
+  await clickReal(page, '[data-pkc-action="mute-announce"]');
+  await expect(band, '押しても消えない').toBeHidden();
+
+  // 🔴 **読み直しても出ない**(ここが裁定の前提そのもの)
+  await page.reload();
+  await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
+  await expect(band, '「今後は出さない」が次の起動で効いていない').toBeHidden();
+  // ⚠ 空振り防止 ── アプリ自体は起動しており、一覧が出ている
+  await expect(page.locator(REGION('sidebar')), '起動していない(何も測っていない)').toBeVisible();
+
+  expect(errors).toEqual([]);
+});
+
+/**
+ * 🔴 **一覧へ戻っても、読んでいたノートは開いたまま**(user 裁定 2026-09-02
+ * 「**開いたままにし、一覧の上に「ノートへ →」を出す**」)。
+ *
+ * ## user の物語
+ *
+ * 買い物メモを読んでいる → 別のメモを探そうと **← 一覧** → 一覧が出る →
+ * やっぱり戻りたい → 🔴 いままでは**戻り道が無かった**(選択ごと消えていた)。
+ *
+ * ## ⚠ ここでしか見られないもの
+ *
+ * 「行が**押せる**」= 一覧の面がいま最前面に居ること。`elementFromPoint` は
+ * happy-dom では答えられない(CSS を組まない)。
+ */
+test('🔴 ← 一覧 で戻っても、「ノートへ →」で読んでいた所へ帰れる', async ({ page }) => {
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  await createEntry(page, 'text');
+  await clickReal(page, `${REGION('detail')} [data-pkc-action="commit-edit"]`);
+
+  const back = page.locator('[data-pkc-field="phone-return"]');
+  await expect(back, '本文を読んでいる間から「ノートへ →」が出ている').toBeHidden();
+
+  await clickReal(page, '[data-pkc-field="phone-back"]');
+  await expect(page.locator(REGION('sidebar')), '一覧に出られない').toBeVisible();
+  await expect(back, '一覧に戻る口が出ていない').toBeVisible();
+
+  // 🔴 **押せる**(一覧の面の中で、実際に最前面に居る)
+  await clickReal(page, '[data-pkc-field="phone-return"]');
+  await expect(page.locator(REGION('center')), '「ノートへ →」で本文へ帰れない').toBeVisible();
+  await expect(back, '本文に帰ったのに行が残っている').toBeHidden();
 });

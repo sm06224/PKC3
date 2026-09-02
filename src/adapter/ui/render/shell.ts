@@ -14,7 +14,7 @@ import { HINT_BASE, HINT_COMMAND, hintTitle } from './shortcut-hint';
 import { COLLECTION_COMMANDS } from './commands';
 import { BROWSE_ICONS, iconButton, iconSpan } from './icons';
 import { COLUMN_PANES, PANE_LABELS } from '@features/pane-visibility';
-import { PHONE_BAR_REGION } from './phone-layout';
+import { PHONE_BAR_REGION, PHONE_RETURN_REGION } from './phone-layout';
 import { BROWSE_TABS } from './browse';
 import {
   timerBarLabel,
@@ -546,8 +546,33 @@ export function buildShell(root: HTMLElement): ShellRegions {
   const browseHost = document.createElement('div');
   browseHost.setAttribute('data-pkc-region', 'browse-host');
   browseHost.append(list);
+  /**
+   * 🔴 **一覧の上の「ノートへ →(題名)」**(user 裁定 2026-09-02)。
+   *
+   * ⚠ スマホで「← 一覧」を押しても**ノートは開いたまま**なので、戻る道が要る。
+   *   ⚠ 一覧の行をもう一度押しても戻れる**はず**だが、同じノートを選び直すと
+   *   state が動かず `dispatcher` は鳴らない ── 押した瞬間に `binder` が
+   *   直に畳んでいる(設計 doc §2-6 が bit を一度棄却した理由がこれである)。
+   * 🔑 **列のいちばん上に置く**(タブや探す欄より上)── 戻る口は探す前に見える
+   *   場所に在るべきで、一覧を下へ流しても隠れない。
+   * ⚠ 既定は `hidden`。中身と出し入れは `render/phone-layout.ts` の `paintReturn`
+   *   **1 か所**が書く(帯と同じ作法 ── 器は 1 度だけ組む)。
+   */
+  const phoneReturn = document.createElement('button');
+  phoneReturn.type = 'button';
+  phoneReturn.setAttribute('data-pkc-region', PHONE_RETURN_REGION);
+  phoneReturn.setAttribute('data-pkc-action', 'phone-page');
+  phoneReturn.setAttribute('data-pkc-field', 'phone-return');
+  phoneReturn.setAttribute('data-pkc-page', 'note');
+  phoneReturn.hidden = true;
+  phoneReturn.title = '読んでいたノートへ戻ります';
+  const phoneReturnLead = document.createElement('span');
+  phoneReturnLead.textContent = 'ノートへ →';
+  const phoneReturnTitle = document.createElement('span');
+  phoneReturnTitle.setAttribute('data-pkc-field', 'phone-return-title');
+  phoneReturn.append(phoneReturnLead, phoneReturnTitle);
   // ⚠ 一覧は createBar の**外**(下)── 中に入れると 1 行に混ざって折り返す
-  sidebar.append(tabs, findBar, kindBar, createBar, menu, browseHost, collectionBar);
+  sidebar.append(phoneReturn, tabs, findBar, kindBar, createBar, menu, browseHost, collectionBar);
 
   // ── 中央(いま開いているもの)────────────────────────
   // 🔑 本文と**追記欄は別の器**にする(P8 段⑧)。本文は書き換わるたびに作り直すので、

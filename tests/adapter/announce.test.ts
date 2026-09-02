@@ -850,6 +850,7 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
+    ['2026-09-02-phone-return', 'ed84f7ed'],
     ['2026-09-02-phone-layout', '9a7ce84e'],
     ['2026-09-02-stack-bar', 'b34b851c'],
     ['2026-09-02-tag-enter', '0bdca4c1'],
@@ -861,7 +862,6 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-09-02-menu-hint-box', '01c9c818'],
     ['2026-09-02-append-opens', '9d60ff45'],
     ['2026-09-02-split-restore', '568986a9'],
-    ['2026-09-02-manual-page', 'eefd976e'],
     // ⚠ 落とした entry の注記(訂正の経緯)は CHANGELOG と git の履歴に在る ── ここには残さない
   ];
 

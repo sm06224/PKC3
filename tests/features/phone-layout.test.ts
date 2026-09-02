@@ -6,6 +6,8 @@
  * 2. 本文以外の面(設定・フラグ・ヘルプ・2 ペイン・集計)は**情報より強い**
  * 3. 情報ページは**開いたノートでだけ**開く ── 別のノートへ移ると**自分で閉じる**
  * 4. 帯(← 一覧 ｜ 題名 ｜ 情報 ｜ ⋯)を出すのは**本文を開いているとき**だけ
+ * 5. 🔴 **一覧を出しても、開いているノートは残る**(user 裁定 2026-09-02)──
+ *    そのとき、そのときだけ「ノートへ →」が出る
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -13,6 +15,8 @@ import {
   PHONE_MIN_PX,
   phoneBandShown,
   phonePageOf,
+  phoneReturnShown,
+  type PhoneOpen,
   type PhoneShape,
 } from '../../src/features/phone-layout';
 import { VIEW_MODES, type ViewMode } from '../../src/adapter/state/app-state';
@@ -23,6 +27,10 @@ const at = (over: Partial<PhoneShape> = {}): PhoneShape => ({
   editing: false,
   ...over,
 });
+
+/** ⚠ 綴りを毎回書かない ── `{ kind, lid }` の取り違えは型で止まるが、読みにくい。 */
+const info = (lid: string): PhoneOpen => ({ kind: 'info', lid });
+const list = (lid: string): PhoneOpen => ({ kind: 'list', lid });
 
 describe('スマホ用画面の境目', () => {
   it('🔴 上限 720 / 下限 360 ── 数字はこの file にしか無い', () => {
@@ -37,7 +45,7 @@ describe('phonePageOf ── いま出す 1 枚', () => {
   it('🔴 何も選んでいなければ一覧', () => {
     expect(phonePageOf(at({ selectedLid: null }), null)).toBe('list');
     // ⚠ 情報を開いた状態で選択が外れても一覧へ戻る(情報だけ残らない)
-    expect(phonePageOf(at({ selectedLid: null }), 'a')).toBe('list');
+    expect(phonePageOf(at({ selectedLid: null }), info('a'))).toBe('list');
   });
 
   it('🔴 ノートを選んでいれば本文', () => {
@@ -51,17 +59,17 @@ describe('phonePageOf ── いま出す 1 枚', () => {
    *   (しかも「← 一覧」は編集中なので断られる = 出口も無い)。
    */
   it('🔴 編集中は情報ページを出さない(打っている物が見えなくならない)', () => {
-    expect(phonePageOf(at({ editing: true }), 'a'), '編集中なのに情報ページ').toBe('note');
+    expect(phonePageOf(at({ editing: true }), info('a')), '編集中なのに情報ページ').toBe('note');
     // 対照群: 編集を抜ければ同じ入力で info になる
-    expect(phonePageOf(at({ editing: false }), 'a')).toBe('info');
+    expect(phonePageOf(at({ editing: false }), info('a'))).toBe('info');
     // ⚠ 一覧の判定より弱い(選んでいなければ編集中もありえない)
     expect(phonePageOf(at({ editing: true, selectedLid: null }), null)).toBe('list');
   });
 
   it('🔴 情報は「開いたノート」でだけ出る', () => {
-    expect(phonePageOf(at({ selectedLid: 'a' }), 'a')).toBe('info');
+    expect(phonePageOf(at({ selectedLid: 'a' }), info('a'))).toBe('info');
     // 🔑 別のノートへ移ったら閉じる ── 閉じる code はどこにも書いていない
-    expect(phonePageOf(at({ selectedLid: 'b' }), 'a')).toBe('note');
+    expect(phonePageOf(at({ selectedLid: 'b' }), info('a'))).toBe('note');
   });
 
   /**
@@ -72,11 +80,27 @@ describe('phonePageOf ── いま出す 1 枚', () => {
    */
   it('🔴 本文以外の面は情報より強い ── 面を開くと情報は畳む', () => {
     for (const view of VIEW_MODES.filter((v) => v !== 'detail')) {
-      expect(phonePageOf(at({ viewMode: view }), 'a'), view).toBe('pane');
+      expect(phonePageOf(at({ viewMode: view }), info('a')), view).toBe('pane');
       expect(phonePageOf(at({ viewMode: view, selectedLid: null }), null), view).toBe('pane');
     }
     // 対照群: 本文の面では同じ入力が info になる
-    expect(phonePageOf(at({ viewMode: 'detail' }), 'a')).toBe('info');
+    expect(phonePageOf(at({ viewMode: 'detail' }), info('a'))).toBe('info');
+  });
+
+  /**
+   * 🔴 **一覧を出しても、開いているノートは残る**(user 裁定 2026-09-02
+   * 「**開いたままにし、一覧の上に「ノートへ →」を出す**」)。
+   *
+   * ⚠ **対照群を同じ it に置く** ── `open.kind` をそのまま返す 1 行を
+   *   `'info'` 固定に壊す変異は、情報だけ見ていると殺せない(逆も同じ)。
+   */
+  it('🔴 一覧を出しても選択は残る ── 同じ入力で kind だけが効く', () => {
+    expect(phonePageOf(at({ selectedLid: 'a' }), list('a')), '一覧を出したのに本文').toBe('list');
+    expect(phonePageOf(at({ selectedLid: 'a' }), info('a')), '同じ入力で情報にならない').toBe('info');
+    // 🔑 別のノートへ移ったら畳む(情報と同じ規則 ── 閉じる code はどこにも無い)
+    expect(phonePageOf(at({ selectedLid: 'b' }), list('a'))).toBe('note');
+    // ⚠ 編集を始めたら本文が勝つ(打っている物が見えなくならない)
+    expect(phonePageOf(at({ selectedLid: 'a', editing: true }), list('a'))).toBe('note');
   });
 
   /** ⚠ 面の一覧が増えたらここが数える(`detail` 以外は全部「中央が自分の面を出す」)。 */
@@ -89,8 +113,8 @@ describe('phonePageOf ── いま出す 1 枚', () => {
 });
 
 describe('phoneBandShown ── 帯を出すか', () => {
-  const band = (st: PhoneShape, infoFor: string | null = null): boolean =>
-    phoneBandShown(phonePageOf(st, infoFor));
+  const band = (st: PhoneShape, open: PhoneOpen = null): boolean =>
+    phoneBandShown(phonePageOf(st, open));
 
   it('🔴 本文を開いているときだけ出す', () => {
     expect(band(at())).toBe(true);
@@ -110,14 +134,41 @@ describe('phoneBandShown ── 帯を出すか', () => {
    */
   it('🔴 情報ページには必ず帯がある(行き止まりを作らない)', () => {
     const st = at({ selectedLid: 'a' });
-    expect(phonePageOf(st, 'a')).toBe('info');
-    expect(band(st, 'a')).toBe(true);
+    expect(phonePageOf(st, info('a'))).toBe('info');
+    expect(band(st, info('a'))).toBe(true);
   });
 
   /** ⚠ 全 4 ページを当てる(page を足した人がここで気づく)。 */
   it('🔴 帯を出すのは note と info の 2 つだけ', () => {
     const on = (['list', 'note', 'info', 'pane'] as const).filter((p) => phoneBandShown(p));
     expect([...on]).toEqual(['note', 'info']);
+  });
+});
+
+describe('phoneReturnShown ── 一覧の上の「ノートへ →」', () => {
+  it('🔴 ノートを開いたまま一覧を見ているときだけ出す', () => {
+    expect(phoneReturnShown(at({ selectedLid: 'a' }), list('a')), '出ていない').toBe(true);
+    // ⚠ 本文を見ているときは出さない(一覧に居ないので、そもそも場所が無い)
+    expect(phoneReturnShown(at({ selectedLid: 'a' }), null)).toBe(false);
+    expect(phoneReturnShown(at({ selectedLid: 'a' }), info('a'))).toBe(false);
+  });
+
+  /**
+   * 🔴 **開いているノートが無い一覧では出さない** ── 押す先が無い行である。
+   * ⚠ ここが**古い `open` に救われる**形を実際に 1 稿目で書いた:`open.kind` を
+   *   直に読む書き方だと、削除で `selectedLid` が消えても
+   *   `{ kind:'list', lid:'a' }` が残り、**消えたノートへ戻る行**を出していた。
+   */
+  it('🔴 起動直後(何も選んでいない)の一覧には出さない', () => {
+    expect(phoneReturnShown(at({ selectedLid: null }), null)).toBe(false);
+    // 削除で選択が消えた回 ── `open` は古いままでも出さない
+    expect(phoneReturnShown(at({ selectedLid: null }), list('a')), '消えたノートへの行').toBe(false);
+  });
+
+  /** ⚠ 面(設定・ヘルプ等)を出している間は一覧ではないので出さない。 */
+  it('🔴 面を開いている間は出さない', () => {
+    for (const view of VIEW_MODES.filter((v) => v !== 'detail'))
+      expect(phoneReturnShown(at({ viewMode: view }), list('a')), view).toBe(false);
   });
 });
 

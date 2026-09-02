@@ -1,5 +1,11 @@
 import { test, expect, type Page } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors } from './helpers';
+import {
+  clickReal,
+  collectPageErrors,
+  createEntry,
+  dismissAnnounce,
+  gotoApp,
+} from './helpers';
 import { withStateOnFail } from './state-dump';
 
 /**
@@ -38,8 +44,9 @@ import { withStateOnFail } from './state-dump';
  * 🔴 **スマホ用画面では「時間を計る」は ⋯ の中に在る**(#632 段①)。
  *
  * ⚠ 押し口(`create-bar`)は**左の列の中**なので、スマホでは本文を開いている間
- *   見えていない ── しかも一覧へ戻ると `selectedLid` が消えるので、
- *   **戻ってから押す**という逃げ道も無い(円環の dead click)。
+ *   見えていない。⚠ しかも一覧では**押しても断られる**(user 裁定 2026-09-02
+ *   「4 つとも先に断る」)── 計る相手が決まらないからで、
+ *   **戻ってから押す**という逃げ道は無い。
  * 🔑 だから本文ページの **⋯** から同じ受け手を呼ぶ。⚠ この関数は
  *   **狭い窓でだけ**使う ── 広い窓では今までどおり左の列を押す(経路を変えない)。
  */
@@ -52,6 +59,8 @@ test('🔴 狭い窓でも、止める口が画面の中に在って押せる (#
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 480, height: 800 });
   await gotoApp(page);
+  // ⚠ スマホの幅ではお知らせが画面いっぱい(user 裁定 2026-09-02)── 先に畳む
+  await dismissAnnounce(page);
   await createEntry(page, 'text');
 
   await startTimerOnPhone(page);

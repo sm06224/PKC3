@@ -145,11 +145,20 @@ describe('タイマー(#279)', () => {
     );
   });
 
-  it('🔴 ② ノートを開いていなければ、始める前に断る', () => {
+  /**
+   * 🔴 **「ノートを開いていない」の断りは `binder` へ移した**(user 裁定 2026-09-02
+   * 「**4 つとも先に断る**」)── 添付 / 録音 / 画面録画 / 計測で断り方が食い違わない
+   * よう、判定は `NOTE_TOOL_ACTIONS` の門 1 か所である
+   * (文言の pin は `tests/adapter/note-tools-guard.test.ts`)。
+   *
+   * ⚠ ここで守るのは**残りの半分** ── 門を素通りしても
+   *   **計り始めない**(時間の行き先が無いまま数え始めない)。
+   */
+  it('🔴 ② ノートが読めないときは計り始めない', () => {
     const b = bench({ select: false });
     b.service.start();
     expect(b.service.runs(), '計り始めてしまった').toHaveLength(0);
-    expect(b.errors()).toContain('ノートを開いてから');
+    expect(b.errors()).toContain('読めない');
   });
 
   it('🔴 ② 追記できない種類は、始める前に断る(止めてからでは遅い)', () => {

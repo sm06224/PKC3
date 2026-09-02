@@ -31,12 +31,19 @@ import {
   PHONE_MAX_PX,
   phoneBandShown,
   phonePageOf,
+  phoneReturnShown,
+  type PhoneOpen,
   type PhonePage,
   type PhoneShape,
 } from '@features/phone-layout';
 
 /** 器の印。⚠ unit / smoke はこの印で見る。 */
 export const PHONE_BAR_REGION = 'phone-bar';
+/**
+ * 🔴 **一覧の上の「ノートへ →」**(user 裁定 2026-09-02)。⚠ 器は `shell.ts` が
+ *   1 度だけ組み、中身を書くのは `paintReturn` **1 か所**である(帯と同じ作法)。
+ */
+export const PHONE_RETURN_REGION = 'phone-return';
 /** shell に書く属性 2 つ。⚠ CSS が読むのはこの 2 つだけ。 */
 export const PHONE_LAYOUT_ATTR = 'data-pkc-layout';
 export const PHONE_PAGE_ATTR = 'data-pkc-page';
@@ -45,7 +52,7 @@ export const PHONE_PAGE_ATTR = 'data-pkc-page';
  * 重ねる 3 面と、それを出すページ。⚠ **`pane` も center を出す** ──
  * 設定・ヘルプ等は center の中の面なので、器としては本文と同じである
  * (違うのは帯を出すかだけ)。
- * ⚠ **面を開いても情報 bit は残る** ── 面を閉じると情報ページへ戻る。
+ * ⚠ **面を開いても `open` は残る** ── 面を閉じると、情報ページ / 一覧へ戻る。
  *   `phonePageOf` が面を優先するのは「**見せない**」であって「畳む」ではない
  *   (2026-09-02 の着地前レビューで言葉を直した)。
  */
@@ -71,17 +78,20 @@ type MediaLike = {
 /**
  * 🔴 **スマホ用画面の器**(アプリに 1 個)。
  *
- * ⚠ **情報ページの開閉を `AppState` に持たない** ── 端末の見え方であって
+ * ⚠ **どの面を見ているかを `AppState` に持たない** ── 端末の見え方であって
  *   ノートのデータではない(`pane-visibility` と同じ分け方)。⚠ ただしあちらと違い
- *   **保存もしない** ── 「いまこのノートの情報を見ている」は一時の文脈であり、
- *   次に起動したときに引き継ぐと user が頼んでいない画面から始まる。
+ *   **保存もしない** ── 「いまこのノートの情報を見ている」「一覧を見ている」は
+ *   一時の文脈であり、次に起動したときに引き継ぐと user が頼んでいない画面から始まる。
  */
 export class PhoneLayout {
   private root: HTMLElement | null = null;
   private media: MediaLike | null = null;
   private onChange: (() => void) | null = null;
-  /** 🔑 情報ページを**どのノートで**開いたか。判定の理由は features 側の docstring。 */
-  private infoFor: string | null = null;
+  /**
+   * 🔑 **本文の代わりに見せている物**(`{ kind, lid }`)。理由は features 側の
+   *   `PhoneOpen` の docstring(情報と一覧を 2 つの field に分けない)。
+   */
+  private open: PhoneOpen = null;
   /** 最後に描いた材料。⚠ 帯を押したときは state が動かないので、ここから描き直す。 */
   private last: PhoneRenderState | null = null;
   /**
@@ -114,12 +124,12 @@ export class PhoneLayout {
     this.onToggle = onToggle ?? null;
     this.wasPhone = null;
     /**
-     * ⚠ **開いていた情報ページは持ち越さない** ── `install` は新しい器に張り直す
-     *   ことなので、前の器で開いていた文脈は消える。⚠ 消し忘れると unit で
-     *   **1 つ前の test の情報 bit の上で走る**(実際に踏んだ:2 件目の test だけ
+     * ⚠ **開いていた情報 / 一覧のページは持ち越さない** ── `install` は新しい器に
+     *   張り直すことなので、前の器で開いていた文脈は消える。⚠ 消し忘れると unit で
+     *   **1 つ前の test の状態の上で走る**(実際に踏んだ:2 件目の test だけ
      *   「← 一覧」が「← ノート」になっていた)。
      */
-    this.infoFor = null;
+    this.open = null;
     this.last = null;
     const make =
       mm ?? ((q: string) => (globalThis as { matchMedia?: (q: string) => MediaLike }).matchMedia?.(q));
@@ -149,18 +159,33 @@ export class PhoneLayout {
   /** いま出ているページ。⚠ スマホでなければ `null`。 */
   page(): PhonePage | null {
     if (!this.isPhone()) return null;
-    return phonePageOf(this.last ?? { selectedLid: null, viewMode: 'detail', editing: false }, this.infoFor);
+    return phonePageOf(this.last ?? { selectedLid: null, viewMode: 'detail', editing: false }, this.open);
   }
 
   /** 情報ページを開く。⚠ **どのノートで開いたか**を憶える(別のノートへ移ると閉じる)。 */
-  openInfo(lid: string | null): void {
-    this.infoFor = lid;
+  showInfo(lid: string | null): void {
+    this.open = lid === null ? null : { kind: 'info', lid };
     this.paint();
   }
 
-  /** 情報ページを閉じる(= 本文ページへ戻る)。 */
-  closeInfo(): void {
-    this.infoFor = null;
+  /**
+   * 🔴 **ノートを開いたまま一覧を見せる**(user 裁定 2026-09-02)。
+   *
+   * ⚠ **選択は外さない** ── 直す前は `DESELECT_ENTRY` を撃っていたので、
+   *   一覧へ戻ると**読んでいたノートが分からなくなる**(戻り道は「もう一度探す」
+   *   しかない)。裁定は「**開いたままにし、一覧の上に「ノートへ →」を出す**」。
+   * ⚠ 開いているノートが無ければ**何も憶えない** ── 憶えると、削除された
+   *   ノートへ戻る行が一覧に残る。
+   */
+  showList(): void {
+    const lid = this.last?.selectedLid ?? null;
+    this.open = lid === null ? null : { kind: 'list', lid };
+    this.paint();
+  }
+
+  /** 本文ページへ戻る(情報も一覧も畳む)。 */
+  showNote(): void {
+    this.open = null;
     this.paint();
   }
 
@@ -175,14 +200,17 @@ export class PhoneLayout {
    *   ない ── #583 が「畳んでいたら戻してから効かせる」を選んだのと同じ理由で、
    *   スマホでは**ページを移す**。
    *
-   * @returns `'deselect'` = 呼び側が `DESELECT_ENTRY` を撃つ必要がある。
-   *   ⚠ **ここでは dispatch しない**(renderer は state を動かさない ── 層規約)。
+   * @returns `'needs-detail'` = 一覧まで**まだ届いていない**(中央が設定・ヘルプ等の
+   *   面を出している)。⚠ **ここでは dispatch しない**(renderer は state を動かさない
+   *   ── 層規約)ので、呼び側が `SET_VIEW_MODE` を撃つ。
    */
-  reveal(face: 'list' | 'note'): 'deselect' | 'none' {
-    this.infoFor = null;
-    this.paint();
-    if (face === 'note') return 'none';
-    return this.isPhone() && this.page() !== 'list' ? 'deselect' : 'none';
+  reveal(face: 'list' | 'note'): 'needs-detail' | 'none' {
+    if (face === 'note') {
+      this.showNote();
+      return 'none';
+    }
+    this.showList();
+    return this.isPhone() && this.page() !== 'list' ? 'needs-detail' : 'none';
   }
 
   /** state が動いたら描き直す。⚠ 呼び元は `main.ts` の `onState` 1 か所。 */
@@ -201,6 +229,7 @@ export class PhoneLayout {
     const shell = root.querySelector<HTMLElement>('[data-pkc-region="shell"]');
     if (shell === null) return;
     const bar = root.querySelector<HTMLElement>(`[data-pkc-region="${PHONE_BAR_REGION}"]`);
+    const back = root.querySelector<HTMLElement>(`[data-pkc-region="${PHONE_RETURN_REGION}"]`);
     /**
      * ⚠ **state が来る前でも描く** ── `install()` は boot の早い所で走り、
      *   `applyPaneVisibility` の復元より**前**に印を立てる必要がある
@@ -215,11 +244,13 @@ export class PhoneLayout {
       for (const region of Object.values(FACE))
         shell.querySelector(`[data-pkc-region="${region}"]`)?.removeAttribute('inert');
       if (bar) bar.hidden = true;
+      // ⚠ PC では 1px も場所を取らせない(スマホでしか意味の無い行である)
+      if (back) back.hidden = true;
       this.notifyToggle();
       return;
     }
 
-    const page = phonePageOf(st, this.infoFor);
+    const page = phonePageOf(st, this.open);
     shell.setAttribute(PHONE_LAYOUT_ATTR, 'phone');
     shell.setAttribute(PHONE_PAGE_ATTR, page);
     const live = FACE[page];
@@ -230,6 +261,7 @@ export class PhoneLayout {
       else el.setAttribute('inert', '');
     }
     if (bar) this.paintBar(bar, st, page);
+    if (back) this.paintReturn(back, st);
     this.notifyToggle();
   }
 
@@ -265,6 +297,24 @@ export class PhoneLayout {
     }
     // ⚠ 情報ページでは「情報」を出さない ── いま居る場所へ行くボタンは dead click
     if (info) info.hidden = page === 'info';
+    if (title) title.textContent = st.title;
+  }
+
+  /**
+   * 🔴 **一覧の上の「ノートへ →(題名)」**(user 裁定 2026-09-02
+   * 「**開いたままにし、一覧の上に「ノートへ →」を出す**」)。
+   *
+   * ⚠ **出るのは「ノートを開いたまま一覧を見ている」ときだけ** ── 起動直後の
+   *   ような、そもそも開いているノートが無い一覧では出さない(押す先が無い)。
+   *   判定は `phoneReturnShown` = `phonePageOf` に聞く 1 か所である。
+   * ⚠ **器は作り直さない**(帯と同じ) ── 一覧は state のたびに組み直されるが、
+   *   この行は `shell.ts` が sidebar の**先頭子**として 1 度だけ作る。
+   */
+  private paintReturn(back: HTMLElement, st: PhoneRenderState): void {
+    const shown = phoneReturnShown(st, this.open);
+    back.hidden = !shown;
+    if (!shown) return;
+    const title = back.querySelector<HTMLElement>('[data-pkc-field="phone-return-title"]');
     if (title) title.textContent = st.title;
   }
 }

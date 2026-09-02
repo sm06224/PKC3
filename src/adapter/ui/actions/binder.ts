@@ -131,6 +131,7 @@ import {
   bodyMenuActions,
   entryMenuActions,
   headingMenuActions,
+  NOTE_TOOL_ACTIONS,
   noteToolActions,
   withTrailingLast,
 } from '@features/entry-actions';
@@ -1096,6 +1097,38 @@ function notWhileEditing(dispatcher: Dispatcher, refusal: string): () => string 
   return () => (dispatcher.getState().phase === 'ready' ? null : refusal);
 }
 
+/**
+ * 🔴 **開いているノートが要る道具は、押す前に断る**(user 裁定 2026-09-02
+ * 「**4 つとも先に断る**」── PC も同じ)。
+ *
+ * ⚠ 直す前は 4 つがばらばらだった:計測だけが `timer.ts` の中で断り、
+ *   **録音 / 画面録画は録り終わってから**「ノートを開いていないので本文には
+ *   入れていません」と言い(= **録ってから知らされる**)、**添付は黙って
+ *   file を選ばせて**単独の添付ノートを作っていた。
+ *   ⚠ どれも「押した時点では止めてくれない」ので、user は**やり直しになる**。
+ * 🔑 **一覧に居る間はこの 4 つに入れ先が無い**(スマホでは戻ると対象が消えるので
+ *   なおさら)── 判定は `NOTE_TOOL_ACTIONS` **1 か所**から引くので、5 つ目の
+ *   道具を足した日にここへ書き足す必要は無い。
+ * ⚠ 貼り付け / 差し込みの経路(`services.attachFiles` を直に呼ぶ 2 か所)は
+ *   **通さない** ── あちらは「この file をここへ置く」という指し示しつきの操作で、
+ *   断ると**いま在る動線を 1 つ失う**(user 裁定 2026-08-07)。
+ */
+const NOTE_SCOPED_ACTIONS: ReadonlyMap<string, string> = new Map(
+  NOTE_TOOL_ACTIONS.map((a) => [a.action, a.label]),
+);
+
+function refuseWithoutNote(action: string, dispatcher: Dispatcher): boolean {
+  const label = NOTE_SCOPED_ACTIONS.get(action);
+  if (label === undefined || dispatcher.getState().selectedLid !== null) return false;
+  // ⚠ **押した物の名前を入れる**(CLAUDE.md「文言は押した場所と対で pin する」)──
+  //   4 つが同じ字だと、user は自分がどれを押して断られたのか分からない
+  dispatcher.dispatch({
+    type: 'OP_FAILED',
+    error: `「${label}」はノートを開いてから押してください(入れ先のノートが決まりません)`,
+  });
+  return true;
+}
+
 function refuseWhileBusy(
   action: string,
   dispatcher: Dispatcher,
@@ -1411,7 +1444,8 @@ const MENU_LINE_ATTR = 'data-pkc-menu-line';
  * @returns `false` = 断った(呼び側はそこで止める)。
  */
 function phoneShowList(dispatcher: Dispatcher): boolean {
-  if (appPhone.reveal('list') !== 'deselect') return true;
+  // ⚠ PC は 1 バイトも触らない(一覧は最初から出ている)
+  if (!appPhone.isPhone()) return true;
   if (dispatcher.getState().phase !== 'ready') {
     dispatcher.dispatch({
       type: 'OP_FAILED',
@@ -1419,18 +1453,15 @@ function phoneShowList(dispatcher: Dispatcher): boolean {
     });
     return false;
   }
-  /**
-   * 🔴 **面(設定・ヘルプ・2 ペイン・集計)を開いている間も、一覧まで出す**
-   *   (着地前レビュー 3)。
-   *
-   * ⚠ 直す前は `DESELECT_ENTRY` だけ撃っていた ── 面が開いたままだと
-   *   `phonePageOf` は `pane` を返し続けるので、**一覧は画面に出ない**。
-   *   結果は「**選択だけ黙って消えて、焦点も入らない**」= #583 で直した
-   *   無言の dead key が、選択の消失つきで戻る形だった。
-   */
-  if (dispatcher.getState().viewMode !== 'detail')
+  if (appPhone.reveal('list') === 'needs-detail') {
+    /**
+     * 🔴 **面(設定・ヘルプ・2 ペイン・集計)を開いている間も、一覧まで出す**
+     *   (着地前レビュー 3)。⚠ 面が開いたままだと `phonePageOf` は `pane` を
+     *   返し続けるので、**一覧は画面に出ない** ── 結果は「焦点も入らない」=
+     *   #583 で直した無言の dead key がそのまま戻る形だった。
+     */
     dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
-  dispatcher.dispatch({ type: 'DESELECT_ENTRY' });
+  }
   return true;
 }
 
@@ -1619,6 +1650,18 @@ function selectEntryOrExplain(dispatcher: Dispatcher, lid: string, what: string)
     return false;
   }
   dispatcher.dispatch({ type: 'SELECT_ENTRY', lid });
+  /**
+   * 🔴 **開いたら本文ページへ出る**(user 裁定 2026-09-02)。
+   *
+   * ⚠ **`dispatcher` に任せられない。** 一覧に**いま開いているノートの行**が
+   *   並んでいるので、user がその行をもう一度押すことがある ── そのとき
+   *   `SELECT_ENTRY` は同じ state を返し、`dispatcher` は `changed` の
+   *   ときだけ listener を呼ぶので `render` が走らない = **一覧に留まる
+   *   dead tap** になる(設計 doc §2-6 が「一覧を出したまま選択を保つ bit」を
+   *   一度棄却した、まさにその理由である)。
+   * 🔑 **押された側で直に畳む**と、選び直しでも別のノートでも同じ 1 行で済む。
+   */
+  appPhone.showNote();
   return true;
 }
 
@@ -2403,7 +2446,7 @@ const ACTIONS: Record<string, ActionHandler> = {
   'phone-page': (dispatcher, target) => {
     const page = target.getAttribute('data-pkc-page');
     if (page === 'note') {
-      appPhone.closeInfo();
+      appPhone.showNote();
       return;
     }
     if (dispatcher.getState().phase !== 'ready') {
@@ -2414,14 +2457,19 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     if (page === 'info') {
-      appPhone.openInfo(dispatcher.getState().selectedLid);
+      appPhone.showInfo(dispatcher.getState().selectedLid);
       return;
     }
-    if (page === 'list') {
-      // ⚠ 情報 bit も倒す ── 倒さないと、次に同じノートを開いたとき情報ページが出る
-      appPhone.closeInfo();
-      dispatcher.dispatch({ type: 'DESELECT_ENTRY' });
-    }
+    /**
+     * 🔴 **一覧へ戻っても、読んでいたノートは開いたまま**(user 裁定 2026-09-02)。
+     *
+     * ⚠ 直す前は `DESELECT_ENTRY` を撃っていたので、⚠ **戻った瞬間に
+     *   「さっきまで読んでいた物」が消えていた** ── 帰り道は「もう一度探す」しか
+     *   無く、それは CLAUDE.md の「欠陥の多くは**さっきまでやっていたことが消える**
+     *   形で出る」そのものである。裁定は「開いたままにし、一覧の上に
+     *   **ノートへ →** を出す」(その行は `paintReturn` が描く)。
+     */
+    if (page === 'list') appPhone.showList();
   },
   /**
    * 🔴 **左の列にしか無い操作を、本文ページから出す**(#632 段①、設計 doc §2-7)。
@@ -2452,12 +2500,23 @@ const ACTIONS: Record<string, ActionHandler> = {
        *   スマホでは**戻ると対象が消える**(円環の dead click)。
        */
       withTrailingLast(
-        entryMenuActions({
-          archetype: st.entryMetas.get(lid)?.archetype ?? null,
-          linkedFile: st.linkedFiles.get(lid) ?? null,
-        }),
         [
+          /**
+           * 🔴 **毎日使うものを上へ**(user 裁定 2026-09-02)。
+           *
+           * ⚠ 直す前は右クリックの 11 項目(印を付ける / 複製 / 書き出す…)が
+           *   先頭を占めていて、**添付・録音・画面録画・計測が下**だった ──
+           *   スマホでこの 4 つに届く道は ⋯ **しか無い**のに、いちばん遠い。
+           * 🔑 並べる順は**使う頻度**であって、実装の由来(既存の登記 → 足した物)
+           *   ではない。
+           */
           ...noteToolActions(),
+          ...entryMenuActions({
+            archetype: st.entryMetas.get(lid)?.archetype ?? null,
+            linkedFile: st.linkedFiles.get(lid) ?? null,
+          }),
+        ],
+        [
           {
             action: 'open-palette',
             label: '操作を探す',
@@ -5343,6 +5402,7 @@ export function bindActions(
     const handler = ACTIONS[action];
     if (!handler) return;
     if (refuseWhileBusy(action, dispatcher, services)) return;
+    if (refuseWithoutNote(action, dispatcher)) return;
     handler(dispatcher, el, services, root);
     if (DUAL_REBUILDS_CLICKED.has(action)) {
       const side = dualSide(el);
