@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import { swPlugin } from './build/sw-plugin.ts';
 import { bodyCssPlugin } from './build/body-css-plugin.ts';
+import { manualPagePlugin } from './build/manual-page-plugin.ts';
 import { COI_HEADERS as SHARED_COI_HEADERS } from './src/adapter/platform/sw/coi-headers.ts';
 
 /**
@@ -38,7 +39,10 @@ export default defineConfig({
   // ⚠ bodyCssPlugin は `apply` を付けない ── dev / build / **vitest** の 3 つで
   //    同じものを配る必要がある(test だけ virtual module が解決できないと、
   //    書き出し HTML の検査が丸ごと動かない)
-  plugins: [swPlugin(buildIdFor), bodyCssPlugin()],
+  // 🔴 manualPagePlugin は **swPlugin より前**(#645 段②)── `generateBundle` で emit した
+  //    `manual.html` を swPlugin の precache 一覧が拾うには、先に bundle に載っている必要がある。
+  //    順番は `tests/build/manual-page-plugin.test.ts` がこの字面で pin する
+  plugins: [manualPagePlugin(), swPlugin(buildIdFor), bodyCssPlugin()],
   // 🔴 **crossOriginIsolated を成立させる**(#88 O2 の前提)。
   //
   // Office(LibreOffice wasm)は `-pthread` = SharedArrayBuffer を要求し、

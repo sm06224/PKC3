@@ -927,11 +927,13 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     // 空振り防止 ── 数え方が壊れて 0 件になったら気づけない
     expect(counts.filter((n) => n === 0), 'test を 1 件も引けない spec がある').toEqual([]);
     // ⚠ 2026-08-31: `manual-window.smoke.spec.ts`(#645)で +1 file / +2 件
+    // ⚠ 2026-09-02: 同 spec に F5 / 配色 / 印刷 / 当て直しの 4 件 + `portable-html` に
+    //    about:blank の経路 1 件(#645 段②)で +5 件
     expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(77);
     expect(
       counts.reduce((a, b) => a + b, 0),
       'smoke の test が増減した(足したらこの数を直す)',
-    ).toBe(368);
+    ).toBe(373);
   });
 });
 

@@ -48,7 +48,7 @@ import {
 } from '@adapter/platform/storage/store-port';
 import { acquireWriterLease } from '@adapter/platform/storage/writer-lease';
 import { bundleChannelName, bundleLockName } from '@features/portable/bundle';
-import { resolvePortableStart, type PortableStart } from '@adapter/platform/portable-boot';
+import { readBundle, resolvePortableStart, type PortableStart } from '@adapter/platform/portable-boot';
 import { restoreEmbeddedAssets } from '@adapter/platform/portable-assets';
 import { exportPortable } from '@adapter/ui/actions/export-portable';
 import {
@@ -80,9 +80,11 @@ import { createUpdatePrompt } from '@adapter/ui/render/update-card';
 import { createAnnounce, announceServices } from '@adapter/ui/render/announce';
 import { versionText, MANUAL_TEXT } from '@adapter/ui/render/help';
 import { manualSections } from '@features/help/manual-find';
+import { MANUAL_PAGE_FILE, manualBuildTag } from '@features/help/manual-page';
 import {
   openManualWindow,
   MANUAL_WINDOW_TITLE,
+  type ManualAppearance,
 } from '@adapter/platform/manual-window';
 import { appNoticeStore } from '@adapter/platform/notice-store';
 import { NOTICES } from '@features/notice/notice-log';
@@ -381,6 +383,23 @@ function openViewTile(
  *   `features/help/manual-doc.ts` に在る(この file はどの test からも
  *   実行されない ── CLAUDE.md §2)。
  */
+/**
+ * いまアプリが出している見え方(配色 / 文字の大きさ / 地と字の色)。
+ * ⚠ **設定の保存ではなく、画面に効いている値**を読む ── OS に従っている人の
+ *   配色は保存されていない(`theme.ts` の M-7)ので、属性から取る。
+ */
+function currentAppearance(): ManualAppearance {
+  const root = document.documentElement;
+  const computed = getComputedStyle(root);
+  const nonEmpty = (v: string): string | null => (v.trim() === '' ? null : v.trim());
+  return {
+    theme: root.getAttribute('data-pkc-theme'),
+    textSize: nonEmpty(root.style.getPropertyValue('--pkc-text-size')),
+    bg: nonEmpty(computed.getPropertyValue('--bg')),
+    fg: nonEmpty(computed.getPropertyValue('--fg')),
+  };
+}
+
 function openManualTile(
   dispatcher: Dispatcher,
   markdown: { render(text: string, opts?: { currentContainerId?: string }): Promise<string> },
@@ -396,6 +415,17 @@ function openManualTile(
     text: MANUAL_TEXT,
     sections: manualSections(MANUAL_TEXT),
     render: (text) => markdown.render(text),
+    /**
+     * 🔴 焼いた 1 枚(`manual.html`)は **build の生成物の隣**に在る(段②)。
+     * ⚠ 持ち歩ける 1 枚(portable = この document 自身が bundle を抱えている)には
+     *   隣に無いので `null` → `about:blank` に組む経路へ落ちる。
+     * ⚠ `document.baseURI` から引く ── Pages の `/` と `/dev/` の両方で同じビルドが
+     *   動く(`base: './'`)ので、絶対 path を書かない。
+     */
+    pageUrl: readBundle(document) === null ? new URL(MANUAL_PAGE_FILE, document.baseURI).href : null,
+    // 🔑 焼いた page と同じ関数で同じ印を組む(`/dev/` でも原文が変われば入れ替わる)
+    tag: manualBuildTag(versionText(), MANUAL_TEXT),
+    appearance: currentAppearance(),
   }).then((win) => {
     // 🔴 **開けなかったら理由を出す**(押しても何も起きないボタンにしない)
     if (win === null) {
@@ -408,6 +438,8 @@ function openManualTile(
     // 🔑 **既に開いていた回も、押した手応えを返す**(前へ出せたか分からないので言う)
     if (win.reused)
       notify('マニュアルのウィンドウを前に出しました(見えないときは、ウィンドウを切り替えてください)');
+    // 🔑 古い版の窓を入れ替えた回は、読んでいた所が先頭へ戻る ── 理由を言う(動線レビュー I3)
+    else if (win.swapped) notify('マニュアルが新しくなったので、ウィンドウを入れ替えました(先頭から出ます)');
     return win;
   });
 }

@@ -258,3 +258,56 @@ test('🔴 書き出した 1 枚が、そのまま PKC3 として開く (#400 �
   );
   await carried.close();
 });
+
+/**
+ * 🔴 **持ち歩ける 1 枚では、マニュアルの窓は `about:blank` に組む**(#645 段②。
+ * 着地前レビュー ⚠-2 が拾った ── 段②で smoke が全部 `manual.html` の経路へ移り、
+ * **`about:blank` の経路を実ブラウザで見る test が 0 件**になっていた。隣に
+ * `manual.html` が無い 1 枚では、いまもこの経路が user に届く)。
+ *
+ * 見るのは 3 つ ── ① 窓が `about:blank` のまま(`file:///…/manual.html` へ飛んで
+ * ERR_FILE_NOT_FOUND を出さない)② 目次が `<button>` で出る ③ 暗い環境で読める
+ * (2026-08-31 の「白地に白い字」の再発を、この経路でも見張る)。
+ */
+test.describe('暗い環境', () => {
+  test.use({ colorScheme: 'dark' });
+
+  test('🔴 持ち歩ける 1 枚でも、マニュアルの窓が about:blank に組まれて読める (#645 段②)', async ({
+    page,
+    context,
+  }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (e) => errors.push(String(e)));
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(pathToFileURL(HTML).href);
+    await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
+    await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="help"]');
+
+    const popup = context.waitForEvent('page');
+    await clickReal(page, '[data-pkc-action="open-manual-window"]');
+    const win = await popup;
+    const toc = win.locator('[data-pkc-region="manual-window-toc"] button');
+    await expect(toc.first(), '目次が出ない(about:blank に組めていない)').toBeVisible();
+    expect(await toc.count()).toBeGreaterThan(100);
+    // ① 実 URL へ飛んでいない(隣に manual.html は無い ── 飛べば ERR_FILE_NOT_FOUND)
+    expect(win.url(), '持ち歩ける 1 枚なのに manual.html へ飛んだ').toBe('about:blank');
+
+    // ③ 暗い環境で読める(`--bg` が無い経路なので、UA の Canvas に落ちて暗くなる)
+    const lum = (css: string): number => {
+      const m = css.match(/\d+/gu);
+      if (!m || m.length < 3) return -1;
+      return (Number(m[0]) + Number(m[1]) + Number(m[2])) / 3;
+    };
+    const seen = await win.evaluate(() => ({
+      fg: getComputedStyle(document.body).color,
+      bg: getComputedStyle(document.body).backgroundColor,
+      rootBg: getComputedStyle(document.documentElement).backgroundColor,
+    }));
+    const fg = lum(seen.fg);
+    const bg = Math.max(lum(seen.bg), lum(seen.rootBg));
+    expect(fg).toBeGreaterThanOrEqual(0);
+    expect(fg, `暗い環境で地(${bg})より字(${fg})が暗い ── 読めない`).toBeGreaterThan(bg);
+    await win.close();
+    expect(errors, `pageerror: ${errors.join(' | ')}`).toEqual([]);
+  });
+});

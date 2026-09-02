@@ -449,6 +449,12 @@ describe('本文の器の全数(印の付け忘れを数で止める)', () => {
        */
       why: 'アプリの文書であって user の文書ではない(ヘルプと同じ)',
     },
+    'src/features/help/manual-page.ts': {
+      host: /HOST_CLASS = 'pkc-md-rendered'/g,
+      prose: false,
+      // ⚠ `manual-window.ts` と**同じ物**を build 時に 1 枚へ焼く(#645 段②)── 同じ理由
+      why: 'アプリの文書であって user の文書ではない(マニュアルの窓と同じ)',
+    },
     'src/features/export/pkc3-html.ts': {
       host: /b pkc-md-rendered/g,
       prose: true,

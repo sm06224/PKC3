@@ -53,12 +53,16 @@ export function isTheme(v: string): v is Theme {
  * ① 壊れていても**既定へ落ちる**(読めない値で起動不能にしない)
  * ② **export に混ぜない**(書き出した HTML を渡した相手の設定を書き換えない)
  * ③ **user が戻せる**(消す導線か、既定へ戻す導線を必ず置く)
+ *
+ * 🔑 **export している**のは、焼いたマニュアル(`build/manual-page-plugin.ts` →
+ *   `features/help/manual-page.ts` の inline script)が**同じ鍵**を読むため ──
+ *   綴りを写すと、鍵を変えた日にマニュアルの窓だけ配色が戻る。
  */
-const KEY = 'pkc3.theme';
+export const THEME_STORAGE_KEY = 'pkc3.theme';
 
 function readStored(): Theme | null {
   try {
-    const v = localStorage.getItem(KEY);
+    const v = localStorage.getItem(THEME_STORAGE_KEY);
     return v !== null && isTheme(v) ? v : null;
   } catch {
     return null; // 使えない環境でも落ちない
@@ -67,7 +71,7 @@ function readStored(): Theme | null {
 
 function write(theme: Theme): void {
   try {
-    localStorage.setItem(KEY, theme);
+    localStorage.setItem(THEME_STORAGE_KEY, theme);
   } catch {
     // 保存できないだけ。この session では効いている
   }

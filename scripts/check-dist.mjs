@@ -16,7 +16,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { inspectDist, PORTABLE_TEMPLATE } from './dist-inspect.mjs';
+import { inspectDist, MANUAL_PAGE, PORTABLE_TEMPLATE } from './dist-inspect.mjs';
 
 /**
  * 検品する directory。既定は `dist/`。
@@ -56,8 +56,15 @@ const DIST = process.argv[3]
  * 「桁の事故」ではない(user 指示 2026-08-28「**前から言ってるけど、予算はあくまで
  * 何かの手違いを検出するために設定してる。引き上げで問題ない**」)。
  * 🔑 余裕は再び約 500 KB ── **誤取込 1 本(数百 KB〜MB)は今も止まる**。
+ *
+ * 🔴 **2026-09-02(#645 段②)に 7000 → 7500 KB へ引き上げた**。マニュアルを
+ * `manual.html` に焼いて配るようになり(**+334.9 KB**、実測)、残量が **116 KB(1.7%)**
+ * になった ── これは「重い dep の誤取込」ではなく、user 要望(マニュアルを F5 で読み直せる /
+ * 設定の配色が効く)の**通常の実装**である(user 指示 2026-08-28「予算はあくまで何かの
+ * 手違いを検出するために設定してる。引き上げで問題ない」)。
+ * 🔑 余裕は約 600 KB ── **誤取込 1 本(数百 KB〜MB)は今も止まる**。⚠ **撤廃はしない**。
  */
-const SHIPPED_CAP_KB = 7000;
+const SHIPPED_CAP_KB = 7500;
 
 /**
  * 配る量の下限。KB。⚠ **cap だけでは片側しか見ていない** ── entry chunk を
@@ -92,6 +99,15 @@ const SHIPPED_FLOOR_KB = { dev: 3500, product: 800 };
  */
 const PORTABLE_CAP_KB = 9000;
 const PORTABLE_FLOOR_KB = 3000;
+
+/**
+ * 🔴 **焼いたマニュアル(`manual.html`)の下限**(#645 段②)。
+ * ⚠ 上限は要らない(アプリの cap の内で数える)。下限だけ ── 描画が空振りして
+ *   見出し 0 本の page を配ろうとしたとき、plugin の門(見出しの本数)が**外された日**にも
+ *   ここが鳴る(入力の門と出力の門は別物 ── CLAUDE.md §8)。
+ * 🔑 実測 **334.9 KB**(2026-09-02)。下限はその 1/3 弱 ── 事故の桁だけを止める。
+ */
+const MANUAL_FLOOR_KB = 100;
 
 /** 中身を読む対象(テキストの生成物だけ。wasm は読まない)。 */
 const TEXTUAL = /\.(?:js|mjs|cjs|css|html|webmanifest|json)$/;
@@ -132,7 +148,7 @@ const text = new Map();
 for (const f of files) {
   // ⚠ **雛形は読まない**(7 MB の 1 枚)── 規則はこの file の中身を 1 つも見ないので、
   //    読むのは丸ごと無駄である(そして inline map の走査が誤検知しうる)
-  if (f.path === PORTABLE_TEMPLATE) continue;
+  if (f.path === PORTABLE_TEMPLATE || f.path === MANUAL_PAGE) continue; // 規則は中身を 1 つも見ない
   if (!f.path.endsWith('.map') && TEXTUAL.test(f.path)) {
     text.set(f.path, readFileSync(join(DIST, f.path), 'utf-8'));
   }
@@ -144,6 +160,7 @@ const { lines, errors } = inspectDist({
   floorKb: SHIPPED_FLOOR_KB[kind],
   sidecarCapKb: PORTABLE_CAP_KB,
   sidecarFloorKb: PORTABLE_FLOOR_KB,
+  manualFloorKb: MANUAL_FLOOR_KB,
   files,
   text,
 });
