@@ -82,8 +82,29 @@ export interface OpenManualWindowDeps {
    *   騙されて **PKC をもう 1 枚**開く。
    */
   readonly pageUrl: string | null;
+  /** いまアプリが出している見え方(2 回目に当て直す / 開く瞬間の地の色)。 */
+  readonly appearance?: ManualAppearance;
   /** 素の別窓を開く(既定 `window.open`)。⚠ test が差せる。 */
   readonly open?: (url: string, target: string, features: string) => Window | null;
+}
+
+/**
+ * 🔴 **いまアプリが出している見え方**(2026-09-02、動線レビュー I1 / I5。user 裁定「推奨で実装」)。
+ *
+ * ⚠ 焼いた page は開いたときに `localStorage` を読んで配色を立てるが、**開いている間に
+ *   設定を変えても窓は変わらない**。user が「変わらない」と読む前に、**もう一度押したとき**
+ *   ここで当て直す(読み直さないので、読んでいた所は失わない)。
+ * ⚠ `bg` / `fg` は「マニュアルを開いています…」の一瞬に使う ── 素の `about:blank` は白いので、
+ *   暗い配色の user には**白い窓が一瞬光る**(I5)。
+ */
+export interface ManualAppearance {
+  /** `data-pkc-theme` の値(無ければ触らない)。 */
+  readonly theme: string | null;
+  /** `--pkc-text-size` の値(無ければ既定へ戻す)。 */
+  readonly textSize: string | null;
+  /** 地と字の色(`--bg` / `--fg` の computed 値)。無ければ UA の色のまま。 */
+  readonly bg: string | null;
+  readonly fg: string | null;
 }
 
 /** 開いた 1 枚。⚠ 呼び側が閉じたいときのため(既定では誰も閉じない)。 */
@@ -97,6 +118,28 @@ export interface ManualWindowHandle {
    *   ⚠ ここでは判断しない(この module は文言を持たない)。
    */
   readonly reused: boolean;
+  /**
+   * 🔴 **古い印の窓を入れ替えたか**(動線レビュー I3)。`true` なら user は
+   * 読んでいた所を失っている ── 呼び側が「新しい版に入れ替えた」と一言出す。
+   * ⚠ 初めて開いた回は `false`(失ったものが無い)。
+   */
+  readonly swapped: boolean;
+}
+
+/**
+ * 見え方を窓へ当て直す。⚠ 触れない窓(別 origin)では黙る ── 当て直せないだけで、
+ * 前へ出すことはできる。
+ */
+function applyAppearance(win: Window, a: ManualAppearance | undefined): void {
+  if (a === undefined) return;
+  try {
+    const root = win.document.documentElement;
+    if (a.theme !== null) root.setAttribute('data-pkc-theme', a.theme);
+    if (a.textSize !== null) root.style.setProperty('--pkc-text-size', a.textSize);
+    else root.style.removeProperty('--pkc-text-size');
+  } catch {
+    // 触れない窓 ── 当て直せない
+  }
 }
 
 /**
@@ -151,20 +194,36 @@ export async function openManualWindow(
    * 🔑 既に組んであるなら**触らずに前へ出すだけ**にする。焼いた page も
    *   `<body>` に同じ属性を持つので、**同じ式**で見分けられる。
    */
-  if (builtVersion(win) === tag) {
+  const before = builtVersion(win);
+  if (before === tag) {
+    /**
+     * 🔑 **前へ出す前に、いまの見え方を当て直す**(I1)── 設定で配色や文字の大きさを
+     *   変えたあとに押した回は、読み直さずに(読んでいた所のまま)新しい見え方になる。
+     */
+    applyAppearance(win, deps.appearance);
     try {
       win.focus();
     } catch {
       // 前へ出せない環境が在る ── 呼び側が知らせを出すので、ここでは黙ってよい
     }
-    return { close: () => closeQuietly(win), reused: true };
+    return { close: () => closeQuietly(win), reused: true, swapped: false };
   }
+  // 🔑 古い印の窓が在った = 入れ替える(user は読んでいた所を失う ── 呼び側が一言出す)
+  const swapped = before !== null;
   let doc: Document | null;
   try {
     doc = win.document;
     doc.title = deps.title;
     // ⚠ **開いた瞬間に「待っている」と分かる形にする**(白紙を見せない)
     doc.body.textContent = 'マニュアルを開いています…';
+    /**
+     * 🔑 **その一瞬も、選んだ配色の地で出す**(I5)── 素の `about:blank` は白いので、
+     *   暗い配色の user には 1100×900 の白い窓が光ってから暗い page に変わっていた。
+     * ⚠ `<style>` ではなく inline の 2 宣言 ── この document は直後に捨てる(移す)か
+     *   `fillManualWindow` が `head` ごと組み直すので、残らない。
+     */
+    if (deps.appearance?.bg) doc.documentElement.style.background = deps.appearance.bg;
+    if (deps.appearance?.fg) doc.documentElement.style.color = deps.appearance.fg;
   } catch {
     // 触れない窓(user が別の origin へ動かした)── 書けないが、移すことはできる
     doc = null;
@@ -177,7 +236,7 @@ export async function openManualWindow(
      *   「戻る」で白紙へ戻れてしまう。
      */
     win.location.replace(deps.pageUrl);
-    return { close: () => closeQuietly(win), reused: false };
+    return { close: () => closeQuietly(win), reused: false, swapped };
   }
   // ⚠ 触れない窓には組めない ── `null` で呼び側に理由を出させる(無言で終えない)
   if (doc === null) return null;
@@ -198,7 +257,9 @@ export async function openManualWindow(
     text: deps.text,
     sections: deps.sections,
   });
-  return { close: () => closeQuietly(win), reused: false };
+  // 🔑 組んだ窓にも字の大きさを当てる(この経路には配色の規則が無いので、効くのは大きさだけ)
+  applyAppearance(win, deps.appearance);
+  return { close: () => closeQuietly(win), reused: false, swapped };
 }
 
 /** ⚠ 閉じられない窓(user が自分で開いた等)でも、例外で呼び側を落とさない。 */
@@ -235,6 +296,9 @@ export function fillManualWindow(
   //    (先に入れると、組み直した窓の題名が空になる ── unit が落ちて気づいた)
   doc.head.textContent = '';
   doc.title = parts.title;
+  // ⚠ 「開いています…」の一瞬に置いた地の色を外す ── 残すと器の規則(`--bg`)より勝つ
+  doc.documentElement.style.removeProperty('background');
+  doc.documentElement.style.removeProperty('color');
   const style = doc.createElement('style');
   style.textContent = `${BODY_CSS}\n${MANUAL_CHROME_CSS}`;
   doc.head.append(style);

@@ -419,6 +419,105 @@ describe('マニュアルの窓 — 焼いた page へ移す(段②)', () => {
 });
 
 /**
+ * 🔴 **設定を変えたあと、もう一度押すと新しい見え方で前に出る**(2026-09-02、
+ * 動線レビュー I1 / I3 / I5。user 裁定「推奨で実装を許可」)。
+ *
+ * ⚠ 焼いた page は開いたときに `localStorage` を読むだけなので、開いている間に配色や
+ *   文字の大きさを変えても窓は変わらなかった(F5 が要った)。2 回目に押した回は
+ *   **読み直さずに**(読んでいた所のまま)当て直す。
+ */
+describe('マニュアルの窓 — 見え方の当て直し(I1 / I3 / I5)', () => {
+  const parts = {
+    title: MANUAL_WINDOW_TITLE,
+    version: 'pkc3 v9.9.9',
+    text: TEXT,
+    sections: manualSections(TEXT),
+    pageUrl: 'https://example.test/dev/manual.html',
+  };
+  const dark = { theme: 'dracula', textSize: '17px', bg: 'rgb(40, 42, 54)', fg: 'rgb(248, 248, 242)' };
+
+  it('🔴 2 回目に押すと、読み直さずに配色と文字の大きさを当て直す', async () => {
+    const win = fakeWin();
+    (win as unknown as { focus: () => void }).focus = () => {};
+    win.document.body.setAttribute('data-pkc-manual-version', manualBuildTag(parts.version, TEXT));
+    // 開いたときは light / 標準だった
+    win.document.documentElement.setAttribute('data-pkc-theme', 'light');
+    const got = await openManualWindow({
+      ...parts,
+      appearance: dark,
+      render: async () => HTML,
+      open: () => win,
+    });
+    expect(got?.reused).toBe(true);
+    expect(win.replaced, '読み直している(読んでいた所が先頭へ戻る)').toEqual([]);
+    expect(win.document.documentElement.getAttribute('data-pkc-theme')).toBe('dracula');
+    expect(win.document.documentElement.style.getPropertyValue('--pkc-text-size')).toBe('17px');
+  });
+
+  it('文字の大きさを既定へ戻したら、窓も既定へ戻る(当て直しは片道ではない)', async () => {
+    const win = fakeWin();
+    (win as unknown as { focus: () => void }).focus = () => {};
+    win.document.body.setAttribute('data-pkc-manual-version', manualBuildTag(parts.version, TEXT));
+    win.document.documentElement.style.setProperty('--pkc-text-size', '17px');
+    await openManualWindow({
+      ...parts,
+      appearance: { ...dark, textSize: null },
+      render: async () => HTML,
+      open: () => win,
+    });
+    expect(win.document.documentElement.style.getPropertyValue('--pkc-text-size')).toBe('');
+  });
+
+  it('🔴 古い印の窓を入れ替えた回は swapped(呼び側が「入れ替えた」と言える)── 初回は false', async () => {
+    const win = fakeWin();
+    (win as unknown as { focus: () => void }).focus = () => {};
+    const first = await openManualWindow({ ...parts, render: async () => HTML, open: () => win });
+    expect(first?.swapped, '初めて開いた回に「入れ替えた」と言っている').toBe(false);
+    win.document.body.setAttribute('data-pkc-manual-version', manualBuildTag('pkc3 v1.0.0', TEXT));
+    const again = await openManualWindow({ ...parts, render: async () => HTML, open: () => win });
+    expect(again?.reused).toBe(false);
+    expect(again?.swapped).toBe(true);
+  });
+
+  it('🔴 「開いています…」の一瞬も選んだ配色の地で出す(白い窓を光らせない)', async () => {
+    const win = fakeWin();
+    let atReplace: { bg: string; fg: string } | null = null;
+    (win as unknown as { location: { replace: (u: string) => void } }).location.replace = () => {
+      const st = win.document.documentElement.style;
+      atReplace = { bg: st.background, fg: st.color };
+    };
+    await openManualWindow({ ...parts, appearance: dark, render: async () => HTML, open: () => win });
+    expect(atReplace).not.toBeNull();
+    expect(atReplace!.bg).toContain('rgb(40, 42, 54)');
+    expect(atReplace!.fg).toBe('rgb(248, 248, 242)');
+  });
+
+  it('about:blank に組む経路では、一瞬の地の色を外してから組み、字の大きさは当てる', async () => {
+    const win = fakeWin();
+    await openManualWindow({
+      ...parts,
+      pageUrl: null,
+      appearance: dark,
+      render: async () => HTML,
+      open: () => win,
+    });
+    const st = win.document.documentElement.style;
+    // ⚠ 残すと器の規則(`--bg`)より inline が勝ち、配色の規則が効かない
+    expect(st.background, '一瞬の地の色が残っている').toBe('');
+    expect(st.getPropertyValue('--pkc-text-size')).toBe('17px');
+    expect(win.document.querySelector('[data-pkc-region="manual-window-main"]')).not.toBeNull();
+  });
+
+  it('見え方を渡さなくても壊れない(呼び側が省略できる)', async () => {
+    const win = fakeWin();
+    (win as unknown as { focus: () => void }).focus = () => {};
+    win.document.body.setAttribute('data-pkc-manual-version', manualBuildTag(parts.version, TEXT));
+    const got = await openManualWindow({ ...parts, render: async () => HTML, open: () => win });
+    expect(got?.reused).toBe(true);
+  });
+});
+
+/**
  * 🔴 **ヘルプの中のボタンから、窓の口までが繋がっている**(#645)。
  *
  * ⚠ **ここが「A と B の合意」を見る唯一の場所**である(CLAUDE.md §7)──

@@ -333,6 +333,70 @@ test('🔴 設定で選んだ配色(Dracula)が、窓の地の色になる (#645
 });
 
 /**
+ * 🔴 **設定を変えたあと、もう一度押すと、読んでいた所のまま新しい見え方で前に出る**
+ * (2026-09-02、動線レビュー I1。user 裁定「推奨で実装を許可」)。
+ *
+ * ⚠ 段②のままだと、開いている窓は設定に追従せず「窓で F5」が要った。
+ * 🔑 観測点は 3 つ ── ①読み直していない(URL も送った位置もそのまま)
+ *   ②地の色が新しい配色 ③字の大きさが新しい設定。**設定画面の実物の <select>** で変える。
+ */
+test('🔴 設定で配色と文字の大きさを変えて、もう一度押すと窓が追いつく (#645 I1)', async ({
+  page,
+  context,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="help"]');
+  const win = await openManual(page, context);
+  const before = await win.evaluate(() => ({
+    theme: document.documentElement.getAttribute('data-pkc-theme'),
+    bg: getComputedStyle(document.body).backgroundColor,
+    fontSize: getComputedStyle(document.body).fontSize,
+    url: location.href,
+  }));
+  // ⚠ 対照群 ── まだ Dracula でも特大でもない(そうなら以降の「変わった」は何も言わない)
+  expect(before.theme).not.toBe('dracula');
+  expect(before.fontSize).not.toBe('17px');
+  await win.locator(MAIN).evaluate((el) => {
+    el.scrollTop = 700;
+  });
+  const scrolled = await win.locator(MAIN).evaluate((el) => el.scrollTop);
+  expect(scrolled, '送れていない(前提が崩れている)').toBeGreaterThan(0);
+
+  // 設定画面で実際に変える(保存の鍵を直に触らない)
+  await page.bringToFront();
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  await page.locator('[data-pkc-field="theme-select"]').selectOption('dracula');
+  await page.locator('[data-pkc-field="text-scale-select"]').selectOption('xlarge');
+  await expect(page.locator('html')).toHaveAttribute('data-pkc-theme', 'dracula');
+
+  // もう一度押す ── ヘルプへ戻らなくても、アプリの一覧のタイルでもよいが、ここは同じボタン
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="help"]');
+  const pagesBefore = context.pages().length;
+  await clickReal(page, '[data-pkc-action="open-manual-window"]');
+  await page.waitForTimeout(500);
+  expect(context.pages().length, '2 枚目が開いた').toBe(pagesBefore);
+
+  const after = await win.evaluate(() => ({
+    theme: document.documentElement.getAttribute('data-pkc-theme'),
+    bg: getComputedStyle(document.body).backgroundColor,
+    fontSize: getComputedStyle(document.body).fontSize,
+    url: location.href,
+  }));
+  expect(after.url, '読み直している').toBe(before.url);
+  expect(await win.locator(MAIN).evaluate((el) => el.scrollTop), '読んでいた所が先頭へ戻った').toBe(
+    scrolled,
+  );
+  expect(after.theme).toBe('dracula');
+  expect(after.bg, '地の色が新しい配色になっていない').not.toBe(before.bg);
+  expect(after.fontSize, '文字の大きさが新しい設定になっていない').toBe('17px');
+
+  await win.close();
+  expect(errors, `console/pageerror: ${errors.join(' | ')}`).toEqual([]);
+});
+
+/**
  * 🔴 **Ctrl+P で本文が全部の頁に出る**(動線レビュー D6 ── 本文は `overflow:auto` の
  * スクロール箱に居るので、印刷の規則が無いと**見えている 1 頁ぶんしか出ない**。
  * アプリ本体が `app.css` で同じ形を踏んで直した)。
