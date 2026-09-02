@@ -53,8 +53,11 @@ describe('介入しない場面', () => {
   /**
    * 🔴 **大きくても読む**(#492。user 指示 2026-08-27)。
    * ⚠ かつて 4MB(`PASTE_RTF_MAX`)を超えると 1 バイトも読まなかった。
+   * ⚠ **時間の予算を明示する**(2026-09-02)── 主張は「読む」であって「速い」ではない。
+   *   単独では file 全体で 3.4 秒だが、`npm test` の全量(4 worker 並列)では既定の 5 秒を
+   *   超えて落ちた(1 回目 timeout / 単独で緑)。予算を書かないと**並列度で赤緑が変わる**。
    */
-  it('🔴 4MB を超える RTF でも解析する(旧上限を撤廃した)', () => {
+  it('🔴 4MB を超える RTF でも解析する(旧上限を撤廃した)', { timeout: 20_000 }, () => {
     const OLD_CAP = 4 * 1024 * 1024; // ⚠ 旧 `PASTE_RTF_MAX`(いまは存在しない)
     const huge = rtf(String.raw`\b 見出し\b0\par ` + 'あ'.repeat(OLD_CAP));
     expect(huge.length, '入力が旧上限を超えていない(空振り)').toBeGreaterThan(OLD_CAP);
