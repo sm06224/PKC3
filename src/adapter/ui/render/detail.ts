@@ -1486,8 +1486,14 @@ export class DetailRenderer {
          *   ときや cap を超えたとき**に「更新しました」と言っていた。
          */
         const why = frontmatterProblem(body);
+        /**
+         * ⚠ **「読めなくなりました」と言ってよいのは `unreadable` だけ**(#641 ①)。
+         *   1 稿目は `!== 'trailing'` と書いていたので、種別を 1 つ足した瞬間に
+         *   **読めている文書へ「読めなくなりました」と嘘をつく**側へ倒れた
+         *   (CLAUDE.md「置き換えの作法」── 列挙する側は、足されたときに壊れる)。
+         */
         note.textContent =
-          why === null || why.kind === 'trailing'
+          why === null || why.kind !== 'unreadable'
             ? 'この文書の情報を更新しました'
             : `この文書の情報が読めなくなりました(${why.detail})── 書いた内容は本文に残っています`;
       });

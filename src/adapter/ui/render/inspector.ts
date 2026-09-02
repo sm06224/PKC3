@@ -328,7 +328,11 @@ export class InspectorRenderer {
        *   作っていたことになる。
        * 🔑 出せるものは出し、言うべきことは `title` に添える。
        */
-      if (problem !== null && problem.kind === 'trailing' && tags !== null) {
+      /**
+       * ⚠ **読めている側の種別を並べる**(#641 ①で `overridden` が増えた)──
+       *   タグは出したうえで、理由を `title` に添える。
+       */
+      if (problem !== null && problem.kind !== 'unreadable' && tags !== null) {
         if (tagRow) tagRow.title = problem.detail;
       }
       if (tags === null) {

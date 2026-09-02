@@ -693,6 +693,39 @@ describe('閉じを失った本文への書き込み(#318)', () => {
  * ⚠ 画面ごとに `warnings.some(...)` を書くと、`kind` を足したとき片方だけ拾う(§7)。
  */
 describe('frontmatterProblem ── 画面へ出す理由(#284 / #318)', () => {
+  /**
+   * 🔴 **同じ鍵が 2 本あると、先に書いた行が黙って消える**(#641 ①)。
+   * ⚠ `duplicate_key` という警告の型は最初から在ったのに、**積む場所が 0 件**だった。
+   */
+  it('🔴 同じ鍵が 2 本あると、無視されている行が在ることを言う(#641 ①)', () => {
+    const body = '---\ntags: [買い物]\ntags: [家事]\n---\n本文\n';
+    // ① 前提: 実際に先の行が消えている(後勝ち)
+    expect(parseFrontmatter(body).meta['tags'], '前提: 後勝ちになっていない').toEqual(['家事']);
+    // ② 黙らない
+    const w = parseFrontmatter(body).warnings.filter((x) => x.kind === 'duplicate_key');
+    expect(w, '警告が 0 件(黙って消えている)').toHaveLength(1);
+    expect(w[0]?.detail, 'どの鍵か言っていない').toContain('tags');
+    // ③ 画面へ出す口も、読めている側の種別で返す(タグは出したうえで理由を添える)
+    const p = frontmatterProblem(body);
+    expect(p?.kind, '読めているのに「読めていない」と言っている').toBe('overridden');
+  });
+
+  it('⚠ 対照群: 鍵が 1 本ずつなら黙る / `vars:` の子行では誤報しない(#641 ①)', () => {
+    // ① 普通の文書
+    expect(
+      parseFrontmatter('---\ntags: [買い物]\nstatus: open\n---\n本文\n').warnings,
+      '普通の文書で警告が出た',
+    ).toHaveLength(0);
+    /**
+     * 🔴 **`vars:` の子は数えない** ── `parseFlatYaml` は `  status: open` を
+     *   **トップレベルの `status`** としても読むので、その見方で数えると
+     *   `vars` を使った健全な文書で**必ず誤報**になる(常在する警告は本物を隠す)。
+     */
+    const vars = '---\nvars:\n  status: open\nstatus: done\n---\n進捗は {{vars.status}}\n';
+    expect(parseFrontmatter(vars).meta['status'], '前提: 後勝ちで done').toBe('done');
+    expect(frontmatterProblem(vars), 'vars の子行で誤報した').toBeNull();
+  });
+
   it('🔴 閉じを失った本文は理由を返す', () => {
     const r = frontmatterProblem('---\ntags: [あ]\n本文\n');
     expect(r?.kind, '種別が違う(1 組目が読めない)').toBe('unreadable');

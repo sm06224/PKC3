@@ -96,6 +96,76 @@ describe('spliceFrontmatterKeys(原文 splice ── P3-4 review #5 の規律)',
     );
   });
 
+  /**
+   * 🔴 **ブロック配列の key を書き換えたら、その key の `- item` 行も一緒に差し替える**
+   * (#641 ②)。
+   *
+   * ⚠ 直す前は key の行だけを差し替えたので、`- 買い物` / `- 家事` が
+   *   **閉じの内側に残ったまま、誰も読まない行**になっていた。
+   * 🔴 危ないのは**その後**である ── user が inline の `tags:` 行を消すと、
+   *   残っていた 2 行が**復活する**(消したはずのタグが戻る)。
+   * 🔑 範囲の採り方は `parseFlatYaml` のブロック配列の走査と**同じ規則**
+   *   (値の無い key の直後の、連続する `- item` 行。§7)。
+   */
+  it('🔴 ブロック配列の key を書き換えると、子の `- item` 行が孤児にならない(#641 ②)', () => {
+    const body = '---\ntags:\n  - 買い物\n  - 家事\n---\n本文\n';
+    const out = spliceFrontmatterKeys(body, { tags: ['買い物', '家事', '掃除'] });
+    expect(out, '子の - item 行が残った').toBe('---\ntags: [買い物, 家事, 掃除]\n---\n本文\n');
+    /**
+     * 🔑 **不変量で見る**(実装と同じ綴りで期待値を組まない ── CLAUDE.md §1):
+     *   「**隠した行は、必ず誰かが読んでいる**」── frontmatter の実のある行を
+     *   1 行消したら `meta` が変わるはずである。
+     */
+    const fm = out.split('---\n')[1] ?? '';
+    const kept = fm.split('\n').filter((l) => l.trim() !== '');
+    for (let i = 0; i < kept.length; i++) {
+      const without = ['---', ...kept.filter((_, j) => j !== i), '---', '本文', ''].join('\n');
+      expect(
+        JSON.stringify(parseFrontmatter(without).meta),
+        `誰も読んでいない行が残っている: ${kept[i]}`,
+      ).not.toBe(JSON.stringify(parseFrontmatter(out).meta));
+    }
+  });
+
+  it('🔴 消す操作でも、子の `- item` 行ごと消える(復活させない ── #641 ②)', () => {
+    const body = '---\ntags:\n  - 買い物\n  - 家事\n---\n本文\n';
+    // 最後の key を外したので、空の囲みごと畳む(#343)
+    expect(spliceFrontmatterKeys(body, { tags: undefined }), '孤児が残った').toBe('本文\n');
+    // 他の key が在れば囲みは残り、tags の 3 行だけが消える
+    const withOther = '---\ntitle: メモ\ntags:\n  - 買い物\n---\n本文\n';
+    expect(spliceFrontmatterKeys(withOther, { tags: undefined })).toBe(
+      '---\ntitle: メモ\n---\n本文\n',
+    );
+  });
+
+  it('字下げの無い `- item`(parseFlatYaml が読む形)も一緒に差し替える', () => {
+    const body = '---\ntags:\n- 牛乳\n- 卵\n---\n本文\n';
+    expect(parseFrontmatter(body).meta['tags'], '前提: この形は読めている').toEqual(['牛乳', '卵']);
+    expect(spliceFrontmatterKeys(body, { tags: ['牛乳'] })).toBe(
+      '---\ntags: [牛乳]\n---\n本文\n',
+    );
+  });
+
+  /**
+   * ⚠ **対照群 3 つ** ── 「一緒に消す」を広げすぎていないこと。
+   */
+  it('⚠ 対照群: 値のある key の後ろの `- item` / 空行で切れた先 / 他 key の子は触らない', () => {
+    // ① 値のある key の直後の `- 牛乳` は、その key の値ではない(誰も読んでいない)
+    const a = '---\ntags: [あ]\n- 牛乳\n---\n本文\n';
+    expect(spliceFrontmatterKeys(a, { tags: ['い'] })).toBe('---\ntags: [い]\n- 牛乳\n---\n本文\n');
+    // ② 空行でブロックは閉じる(parseFlatYaml と同じ)── 空行の先は触らない
+    const b = '---\ntags:\n  - 買い物\n\n  - 家事\n---\n本文\n';
+    expect(parseFrontmatter(b).meta['tags'], '前提: 空行で切れている').toEqual(['買い物']);
+    expect(spliceFrontmatterKeys(b, { tags: ['買い物'] })).toBe(
+      '---\ntags: [買い物]\n\n  - 家事\n---\n本文\n',
+    );
+    // ③ 別の key を書いても、tags の子行は 1 バイトも動かない
+    const c = '---\ntags:\n  - 買い物\nstatus: open\n---\n本文\n';
+    expect(spliceFrontmatterKeys(c, { status: 'done' })).toBe(
+      '---\ntags:\n  - 買い物\nstatus: done\n---\n本文\n',
+    );
+  });
+
   it('prefix が重なる key(date / date-done)を取り違えない', () => {
     const body = '---\ndate-done: 2026-01-01\ndate: 2026-08-01\n---\nx';
     const out = spliceFrontmatterKeys(body, { date: '2026-09-01' });

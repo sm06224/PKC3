@@ -780,6 +780,30 @@ describe('文書の情報(frontmatter)の扱い(#284)', () => {
   });
 
   /**
+   * 🔴 **読めている文書へ「読めなくなりました」と言わない**(#641 ①)。
+   *
+   * ⚠ 同じ鍵を 2 本書いた文書は **`meta` が読めている**ので、言うべきことは
+   *   「無視されている行が在る」であって「読めなくなった」ではない。
+   * ⚠ 直す前の判定は `why.kind === 'trailing'` という**種別の名指し**だったので、
+   *   種別を 1 つ足した瞬間に**読めている側へ嘘をつく**方へ倒れた
+   *   (CLAUDE.md「置き換えの作法」── 列挙する側は、足されたときに壊れる)。
+   */
+  it('🔴 同じ鍵が 2 本ある文書に「読めなくなりました」と言わない(#641 ①)', async () => {
+    setLive(true);
+    const r = rig(FM);
+    await settle();
+    const card = r.root.querySelector('[data-pkc-region="live-frontmatter"]')!;
+    card.querySelector<HTMLElement>('[data-pkc-field="fm-edit"]')!.click();
+    card.querySelector<HTMLTextAreaElement>('[data-pkc-field="fm-source"]')!.value =
+      '---\ntags: [あ]\ntags: [い]\n---';
+    card.querySelector<HTMLElement>('[data-pkc-field="fm-commit"]')!.click();
+    const note = r.root.querySelector('[data-pkc-field="row-note"]')!;
+    expect(note.textContent, '読めているのに「読めなくなりました」と言った').toBe(
+      'この文書の情報を更新しました',
+    );
+  });
+
+  /**
    * 🔴 **読めなくなったら、そう言う**(#284 の本題)。
    * ⚠ 本文は 1 文字も失われていない(原文に残る)が、**情報としては読めていない** ──
    *   ここで黙ると、user はタグが消えたことに気づけない。
