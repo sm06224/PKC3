@@ -474,12 +474,24 @@ export function smartFieldValue(spec: SmartSpec, field: SmartField): string {
 
 /**
  * 断り文。⚠ **押した場所の言葉で書く**(「条件」「タグ」)── 内部の語を出さない。
+ *
+ * 🔴 **どのタグの話かを必ず言う**(#640)。⚠ 直す前は名前を出しておらず、
+ *   しかも押した所は**打った字を即座に消す**ので、`#請求 #未払 #今月` と打って
+ *   3 つ目だけ上限に当たった user には「**条件は 8 つまでです**」としか出ず、
+ *   **どれが入らなかったのか 1 文字も分からないまま打ち直し**になっていた。
+ *
  * @returns 黙ってよいとき(`unchanged`)は `null`
  */
-export function smartCondError(reason: 'unchanged' | 'limit' | 'invalid'): string | null {
+export function smartCondError(
+  reason: 'unchanged' | 'limit' | 'invalid',
+  tag?: string,
+): string | null {
   if (reason === 'unchanged') return null;
-  if (reason === 'limit') return `条件は ${MAX_SMART_TAGS} つまでです(1 つ外してから足してください)`;
-  return `そのタグは条件にできません(空か、${MAX_TAG_CHARS} 文字を超えています)`;
+  // ⚠ 名前は**打った字**をそのまま出す(正規化した綴りだと、打った字と読み合わせられない)
+  const who = tag === undefined || tag === '' ? '' : `「${tag}」は足せませんでした ── `;
+  if (reason === 'limit')
+    return `${who}条件は ${MAX_SMART_TAGS} つまでです(1 つ外してから足してください)`;
+  return `${who}そのタグは条件にできません(空か、${MAX_TAG_CHARS} 文字を超えています)`;
 }
 
 /**

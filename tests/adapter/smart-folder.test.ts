@@ -839,6 +839,33 @@ describe('配線(effect 層まで)', () => {
   });
 
   /**
+   * 🔴 **上限で断るとき、どのタグの話かを画面へ届ける**(#640)。
+   *
+   * ⚠ **配線の test である** ── 断り文そのものは `smart-spec.test.ts` が見ているが、
+   *   **効果層がその名前を渡しているか**は誰も見ていなかった(変異試験 M6 が
+   *   「呼び側へ名前を渡さない」で**生き延びて**教えた)。
+   * 🔑 CLAUDE.md §7「**A と B が合意していることは、A の test にも B の test にも
+   *   書けない**」── 合意を見る場所を別に 1 つ置く。
+   */
+  it('🔴 上限で断るとき、入らなかったタグの名前が画面に出る(#640)', async () => {
+    const full = Array.from({ length: MAX_SMART_TAGS }, (_, i) => `t${String(i)}`);
+    const s = setup({
+      s1: `---\n${SMART_TAGS_KEY}: [${full.join(', ')}]\n---\n説明の文\n`,
+    });
+    // ⚠ 前提 ── 条件が上限に達している(達していなければ何も検めていない)
+    expect(readSmartSpec(s.disk.s1!).tags.length, '前提が崩れている: 上限に達していない').toBe(
+      MAX_SMART_TAGS,
+    );
+    s.d.dispatch({ type: 'SMART_COND', lid: 's1', tag: '今月', mode: 'add' });
+    await tick(30);
+    const err = s.d.getState().error ?? '';
+    expect(err, '断り文が出ていない').not.toBe('');
+    expect(err, 'どのタグが入らなかったのか言っていない').toContain('今月');
+    // ⚠ 本文は 1 バイトも動かない(黙って古い条件を落としていない)
+    expect(readSmartSpec(s.disk.s1!).tags.length, '上限を超えて書いた').toBe(MAX_SMART_TAGS);
+  });
+
+  /**
    * 🔴 **押しても同じだったときも、集め直す**(変異試験 S14b が教えた)。
    *
    * ⚠ 本文は変わらないが、**当たりのほうは古いかもしれない**(別の窓が

@@ -19,7 +19,7 @@ import { buildShell } from '../../src/adapter/ui/render/shell';
 import { FilerRenderer } from '../../src/adapter/ui/render/filer';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { stubRevisionOps } from '../helpers/revision-stub';
-import { readTags } from '../../src/features/flavor/tags';
+import { MAX_TAGS, readTags } from '../../src/features/flavor/tags';
 import { contentHash64Hex } from '../../src/adapter/platform/storage/content-hash';
 
 function meta(lid: string): EntryMeta {
@@ -143,6 +143,53 @@ describe('#402 ① まとめてタグを付ける', () => {
     expect(st.notice ?? '').toContain('1 件は既に付いていました');
     // 🔴 **赤い帯にしない**(成功の内訳である)
     expect(st.error, '既に付いていただけでエラーにした').toBeNull();
+  });
+});
+
+/**
+ * 🔴 **上限で入らなかったノートに「既に付いていました」と言わない**(#640)。
+ *
+ * ⚠ 直す前は効果層が 1 タグずつ `applyBodyRewrite` を呼び、返る **`null`** を
+ *   「既に付いている」として数えていた ── その `null` には
+ *   「**上限に当たって付かなかった**」も含まれるので、画面には
+ *   **付いていないのに「既に付いていました」**という字が出ていた。
+ */
+describe('タグの上限に当たったとき(#640)', () => {
+  const FULL = Array.from({ length: MAX_TAGS }, (_, i) => `t${String(i)}`).join(', ');
+
+  it('🔴 上限で付かなかったことを、別の字で言う', async () => {
+    // ⚠ 台は既存の test と同じ形にする ── 一括の帯は選んだものが在るときに出る
+    const s = setup({ e1: `---\ntags: [${FULL}]\n---\nあ\n`, e2: 'い\n' });
+    mark(s, ['e1', 'e2']);
+    await tick();
+    // ⚠ 前提 ── この本文は上限に達している(達していなければ何も検めていない)
+    expect(readTags(s.disk['e1']!).length, '前提が崩れている: 上限に達していない').toBe(MAX_TAGS);
+    press(s, '新しい', 'add');
+    await tick();
+    const msg = s.d.getState().notice ?? '';
+    expect(msg, '上限のことを言っていない').toContain('付きませんでした');
+    expect(msg, '何個で止まるのかを言っていない').toContain(String(MAX_TAGS));
+    // 🔴 **嘘を言わない** ── 付いていないのに「既に付いていました」と言わない
+    expect(msg, '付いていないのに「既に付いていました」と言った').not.toContain(
+      '既に付いていました',
+    );
+    // ⚠ 本文は 1 バイトも動かない(黙って古いタグを落としていない)
+    expect(readTags(s.disk['e1']!).length, '上限を超えて書いた').toBe(MAX_TAGS);
+  });
+
+  /**
+   * ⚠ **対照群** ── 「既に付いている」側の字は今までどおり出る
+   *   (上の `not.toContain` が、いつでも真になる形になっていないこと)。
+   */
+  it('⚠ 対照群: 既に付いているときは、これまでどおりの字が出る', async () => {
+    const s = setup({ e1: '---\ntags: [請求済]\n---\nあ\n', e2: 'い\n' });
+    mark(s, ['e1', 'e2']);
+    await tick();
+    press(s, '請求済', 'add');
+    await tick();
+    const msg = s.d.getState().notice ?? '';
+    expect(msg, '既に付いている話が消えた').toContain('既に付いていました');
+    expect(msg, '上限でもないのに上限と言った').not.toContain('付きませんでした');
   });
 });
 

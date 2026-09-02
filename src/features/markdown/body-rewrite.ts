@@ -18,7 +18,7 @@ import { isScheduleDate } from '../schedule/schedule-date';
 import type { RepeatUnit } from '../schedule/repeat';
 import { removeInsertedLines } from './append-target';
 import { movePlace } from './place-notation';
-import { readTags, withTag } from '../flavor/tags';
+import { readTags, withTagResult } from '../flavor/tags';
 import { acceptsExternalImage, rewriteAdopted } from '../asset/inline-url-adopt';
 import { DELIMITER, csvEscapeField, parseCsv, type CsvPositions } from './csv-table';
 import { parseRenderableFence } from './markdown-render';
@@ -213,6 +213,56 @@ export type BodyRewrite =
  */
 const TASK_LINE = /^((?:\s*>)*\s*(?:[-*+]|\d+[.)])\s+)\[([ xX])\](\s|$)/;
 
+/** タグ 1 つに何が起きたか(#640)。⚠ `wrote` 以外は**本文が変わっていない**。 */
+export type TagOutcome = 'wrote' | 'unchanged' | 'limit' | 'invalid';
+
+export interface TagsApplied {
+  /** 書き換えた本文。⚠ **1 つも動かなければ `null`**(同じ本文を書き直さない)。 */
+  readonly body: string | null;
+  /** 打った字ごとの結果。⚠ 鍵は**打った字そのもの**(正規化前 ── 画面に出すため)。 */
+  readonly outcomes: ReadonlyMap<string, TagOutcome>;
+}
+
+/**
+ * 🔴 **タグを並びのまま当て、1 つずつの理由も返す**(#640)。
+ *
+ * ⚠ 直す前は呼び側が `applyBodyRewrite` を 1 タグずつ呼び、返り値の `null` を
+ *   数えていた ── その `null` は「**既に付いている**」と「**上限で付かない**」の
+ *   両方なので、画面には「0 件に付けました / 1 件は**既に付いていました**」という
+ *   **事実と違う字**が出ていた(付いていないのに「既に付いていました」)。
+ *
+ * 🔑 だから理由を**通す**。⚠ 書く規則そのものは `withTagResult` 1 つで、
+ *   ここは並びを畳むだけである(§7 ── 2 本目の規則を書かない)。
+ * ⚠ **並びは畳む**(#637)── 途中の 1 つが動かなくても止めない。
+ *   1 つでも動いたら書く、1 つも動かなければ `null`。
+ */
+export function applyTagsToBody(
+  body: string,
+  tags: readonly string[],
+  mode: 'add' | 'remove',
+): TagsApplied {
+  let cur = readTags(body);
+  let moved = false;
+  const outcomes = new Map<string, TagOutcome>();
+  for (const tag of tags) {
+    const r = withTagResult(cur, tag, mode);
+    if (!r.ok) {
+      outcomes.set(tag, r.reason);
+      continue;
+    }
+    cur = r.tags;
+    moved = true;
+    outcomes.set(tag, 'wrote');
+  }
+  if (!moved) return { body: null, outcomes };
+  // ⚠ 空になったら **鍵ごと消す**(`tags: []` を残さない ── 読み手が
+  //    「空のタグが 1 つ在る」と読む形を作らない)
+  return {
+    body: spliceFrontmatterKeys(body, { tags: cur.length === 0 ? undefined : cur }),
+    outcomes,
+  };
+}
+
 /**
  * 書き換える。⚠ **できなければ `null`**(呼び側が「何も起きなかった」を
  * user に言えるようにする ── 黙って別の行を書き換えない)。
@@ -231,23 +281,8 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
      * ⚠ 変わらないとき(既に在る / 元から無い)は `null` ── 呼び側が
      *   「書かない」を選べる(同じ本文を書き直して更新日時だけ動かさない)。
      */
-    /**
-     * ⚠ **並びは畳む**(#637)── 途中の 1 つが `null`(既に在る / 元から無い)でも
-     *   止めない。1 つでも動いたら書く、1 つも動かなければ `null`。
-     */
-    let cur = readTags(body);
-    let moved = false;
-    for (const tag of rewrite.tags) {
-      const next = withTag(cur, tag, rewrite.mode);
-      if (next === null) continue;
-      cur = next;
-      moved = true;
-    }
-    if (!moved) return null;
-    const next = cur;
-    // ⚠ 空になったら **鍵ごと消す**(`tags: []` を残さない ── 読み手が
-    //    「空のタグが 1 つ在る」と読む形を作らない)
-    return spliceFrontmatterKeys(body, { tags: next.length === 0 ? undefined : next });
+    // 🔑 **書く形と、理由を数える形は同じ 1 本**(#640)── 下の `applyTagsToBody`
+    return applyTagsToBody(body, rewrite.tags, rewrite.mode).body;
   }
   if (rewrite.kind === 'repeat-done') return materializeRepeat(body, rewrite);
   if (rewrite.kind === 'place-move') return movePlace(body, rewrite);
