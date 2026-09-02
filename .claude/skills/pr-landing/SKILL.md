@@ -170,6 +170,35 @@ git push --force-with-lease origin <branch>
 git stash pop
 ```
 
+### 🔑 1 本の branch で主題を 2 つ以上並行させる ── **local branch に停めて、merge 後に載せ直す**(2026-09-02)
+
+PR #649(hotfix)の CI を待つ間に Q5 / Q6 を実装した日の形。**designated branch には
+open PR の commit しか置かない**(混ぜると PR の差分が別主題を抱える):
+
+```bash
+git stash push -u -m wip && git checkout -q -b q5-local && git stash pop   # 停める
+git add <名指し> && git commit -F msg.txt                                  # local に commit
+git checkout -q <designated>                                               # 元へ戻る(clean)
+# … 前の PR が merge されたら …
+git fetch --prune origin && git checkout -B <designated> origin/main
+git cherry-pick <q5-local の commit>                                       # 載せ直す
+git log --oneline -2                                                       # 🔴 載ったことを目で見る
+npm run typecheck && npm run lint && npm test                              # 載せ直した後に回す
+```
+
+⚠ **3 つ踏んだ**(同日):
+- 🔴 **`git cherry-pick -q` は無効な option** ── usage を出して**何も付けず**、
+  その後ろに `;` で繋いだ typecheck / lint / `npm test` は **main そのものに対して緑**を
+  返した。「載った」は `git log --oneline -2` で**目で見てから**検査を回す
+- 🔴 **`git add -A` が untracked の doc(230KB の調査 doc)を hotfix commit に巻き込んだ** ──
+  気づけたのは commit 直後の `git show --stat` だけ。**名指しで add する**か、
+  `git status --short` の `??` を commit の前に読む。⚠ 別主題の doc は**別の PR**である
+- ⚠ **この箱は Bash の cwd が `/home/user` へ戻ることがある**(同日 2 回)──
+  `git` が `not a git repository` を返し、その後ろの検査が exit 128 / 254 で空振りした。
+  git・npm を打つ命令は **`cd /home/user/PKC3 &&` を頭に置く**
+- ⚠ **local に停めた commit は push されていない** ── この箱は作り直される(下の節)。
+  停めるのは**次の merge を待つ間**に限り、merge が来たらすぐ載せ直して push する
+
 ### ⚠ **remote 追跡 ref も掃除する** ── `--force-with-lease` は**効かない**
 
 > 🔴 **2026-08-22 に 2 度目を踏んだ。** この節は**既に在った**のに、push の直前に
