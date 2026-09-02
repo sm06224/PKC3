@@ -62,6 +62,14 @@ test('🔴 行を右クリックすると、その行にできることが出る
   expect(box!.x, 'メニューが左へはみ出している').toBeGreaterThanOrEqual(0);
   expect(box!.y, 'メニューが上へはみ出している').toBeGreaterThanOrEqual(0);
   expect(box!.x + box!.width, 'メニューが右へはみ出している').toBeLessThanOrEqual(vp!.width + 1);
+  /**
+   * 🔴 **下辺も見る**(#587 C-3 の着地後レビュー)。⚠ 直す前は `x + width` だけを見ており、
+   *   **`y + height` を 1 度も見ていなかった** ── 説明欄を足して背が伸びた変更が
+   *   そのまま素通りした(CLAUDE.md §1「tripwire は上限だけでなく下限も」の縦版)。
+   */
+  expect(box!.y + box!.height, 'メニューが下へはみ出している').toBeLessThanOrEqual(
+    vp!.height + 1,
+  );
 
   // ⚠ Escape で閉じる
   await page.keyboard.press('Escape');
@@ -113,6 +121,15 @@ test('🔴 メニューの下に、指している項目の説明が出る(乗�
     return { h: el.getBoundingClientRect().height, max: lines + pad + 1 };
   });
   expect(fits.h, `欄が 2 行を超えている(${fits.h}px > ${fits.max}px)`).toBeLessThanOrEqual(fits.max);
+  /**
+   * 🔴 **下限も見る**(#587 C-3 の着地後レビュー)。⚠ 直す前は `<=` の片側だけだったので、
+   *   **縮む方向が素通り**していた ── `height: calc(1.4em * 2)` は `box-sizing: border-box`
+   *   のもとで padding 7px と border 1px を食い、内容領域は 1.5 行ぶんしか無かった
+   *   (2 行目の下半分が切れる)。🔑 上の `max` の式が**正しい目標高**である。
+   */
+  expect(fits.h, `欄に 2 行ぶんの高さが無い(${fits.h}px < ${fits.max}px)`).toBeGreaterThanOrEqual(
+    fits.max - 2,
+  );
 
   // キーで焦点を移しても変わる(マウスを持たない人にも届く)
   await page.keyboard.press('Tab');
@@ -133,6 +150,110 @@ test('🔴 メニューの下に、指している項目の説明が出る(乗�
  * 🔑 `履歴` を選ぶと**履歴の面が開く** ── これは root の委譲が
  *   `show-history` を実行しないと起きない。
  */
+/**
+ * 🔴 **画面の端で開いても、説明の欄まで画面の中に収まる**(#587 C-3 の着地後レビュー)。
+ *
+ * ⚠ この筋は**一度も通っていなかった** ── 既存の clamp の検査は
+ *   **左上の 1 行目**を右クリックするので、`Math.min` の分岐に入らない
+ *   (CLAUDE.md §2「経路が一度も通っていない」)。
+ * ⚠ unit では原理的に届かない(happy-dom の `getBoundingClientRect` は全部 0)。
+ *
+ * 🔑 **2 方向を別々に見る** ── 縦は「一覧のいちばん下の行」、横は
+ *   「右の情報ペインのボタン」で開く。⚠ 直す前は説明欄を足す**前**に採寸していたので、
+ *   横は 192px・縦は約 44px ぶん、画面の外へ出ていた。
+ */
+test('🔴 画面の下・右で右クリックしても、説明の欄まで画面の中に収まる (#587 C-3)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+  /**
+   * 🔑 **画面を低くする** ── 既定の 720px では一覧の下端が y≈418 までしか来ず、
+   *   メニュー(高さ約 285px)を出しても画面に収まってしまう = **clamp の分岐に入らない**
+   *   (実測して分かった。前提の assert が下に在る)。
+   */
+  await page.setViewportSize({ width: 1280, height: 500 });
+  // ⚠ 一覧を画面の下まで届かせる ── 1 件だけだと、行はいつも上端に居る(= 分岐に入らない)
+  for (let i = 0; i < 12; i++) {
+    await createEntry(page, 'text');
+    await page.locator('[data-pkc-field="editor-body"]').fill(`端の的 ${i}\n`);
+    await clickReal(page, '[data-pkc-action="commit-edit"]');
+  }
+  const vp = page.viewportSize()!;
+
+  // ── 縦: 一覧のいちばん下の行
+  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  const last = rows.last();
+  await last.scrollIntoViewIfNeeded();
+  const lastBox = (await last.boundingBox())!;
+  /**
+   * 🔑 **行の下端で押す** ── 押した座標がそのままメニューの出る位置なので、
+   *   行のどこを押すかで clamp が要るかどうかが変わる。
+   */
+  const clickY = lastBox.y + lastBox.height - 2;
+  await last.click({ button: 'right', position: { x: 6, y: lastBox.height - 2 } });
+  const menu = page.locator(MENU);
+  await expect(menu, '右クリックでメニューが出ない').toBeVisible();
+  // 🔑 空振り防止 ── 説明の欄が本当に載っていること(載っていなければ縦は伸びない)
+  await expect(
+    menu.locator('[data-pkc-field="context-menu-hint"]'),
+    '説明の欄が出ていない(この検査が見たいものが無い)',
+  ).toBeVisible();
+  const down = (await menu.boundingBox())!;
+  /**
+   * ⚠ **前提を assert する**(§1)── 押した所からそのまま出しても収まる位置なら、
+   *   この検査は clamp の分岐に**一度も入っていない**(空振り)。
+   * 🔑 だから前提は「**押した所 + メニューの高さが画面を超える**」である。
+   * ⚠ 「落ちた」ではなく「前提が崩れている」と読める文言にする ── 台が変わったとき、
+   *   製品の不具合と読み違えないため。
+   */
+  expect(
+    clickY + down.height,
+    `前提が崩れている: この位置なら clamp は要らない(押した y=${clickY} + 高さ ${down.height} <= 画面 ${vp.height})`,
+  ).toBeGreaterThan(vp.height);
+  expect(
+    down.y + down.height,
+    `メニューが下へはみ出している(下端 ${down.y + down.height} / 画面 ${vp.height})`,
+  ).toBeLessThanOrEqual(vp.height + 1);
+  await page.keyboard.press('Escape');
+  await expect(page.locator(MENU)).toHaveCount(0);
+
+  // ── 横: 右の情報ペインのボタン(行と同じ `data-pkc-entry` を持つ)
+  /**
+   * 🔑 **高さは戻す** ── 500px のままだと情報ペインの押し所が右クリックを受けない
+   *   (実測)。⚠ 縦と横は**別の主張**なので、それぞれ成り立つ台で見る。
+   */
+  await page.setViewportSize({ width: 1280, height: 720 });
+  const vpWide = page.viewportSize()!;
+  const rightSide = page
+    .locator('[data-pkc-region="inspector"] [data-pkc-entry]')
+    .first();
+  await expect(rightSide, '情報ペインに押し所が無い').toBeVisible();
+  const rBox = (await rightSide.boundingBox())!;
+  expect(
+    rBox.x,
+    `前提が崩れている: 情報ペインの押し所が画面の右半分に居ない(x=${rBox.x} / 画面 ${vpWide.width})`,
+  ).toBeGreaterThan(vpWide.width / 2);
+
+  await rightSide.click({ button: 'right' });
+  await expect(menu, '情報ペインの右クリックでメニューが出ない').toBeVisible();
+  const side = (await menu.boundingBox())!;
+  /**
+   * ⚠ **前提を assert する** ── 押した所からそのまま出しても収まる幅なら空振りである。
+   */
+  expect(
+    rBox.x + side.width,
+    `前提が崩れている: この位置なら clamp は要らない(押した x=${rBox.x} + 幅 ${side.width} <= 画面 ${vpWide.width})`,
+  ).toBeGreaterThan(vpWide.width);
+  expect(
+    side.x + side.width,
+    `メニューが右へはみ出している(右端 ${side.x + side.width} / 画面 ${vpWide.width})`,
+  ).toBeLessThanOrEqual(vpWide.width + 1);
+  await page.keyboard.press('Escape');
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
 test('🔴 メニューの項目を押すと、その操作が実際に走る', async ({ page }) => {
   const errors = collectPageErrors(page);
   await gotoApp(page);

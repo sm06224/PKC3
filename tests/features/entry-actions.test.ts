@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 /**
  * 🔴 **右クリックに出す操作が、押して動くこと**(#426 段①)。
  *
@@ -229,6 +230,53 @@ describe('右クリックの説明(#587 C-1)', () => {
     expect(ENTRY_ACTION_HINT_MAX).toBe(56);
   });
 
+  /**
+   * 🔴 **説明を取り違えても、いままで誰も鳴らなかった**(#587 C-3 の着地後レビュー)。
+   *
+   * ⚠ 上の上限の検査は**字数しか見ていない**。中身を見ている 2 か所も
+   *   **両辺が同じ表を読む同語反復**である(下の「すり替えない」/ `inspector-titles`)──
+   *   だから `copy-entry-ref` と `copy-plain-markdown` の説明を**入れ替えても全部緑**
+   *   だった。⚠ 実装のコメント自身が「字が同じ `copy-` が 2 つ並ぶので**書き分けないと
+   *   選べない**」と言っている当の 2 件である。
+   *
+   * 🔑 作法はお知らせの `KNOWN` 表と同じ ── **綴り → 説明の digest の等値表**を置く。
+   *   直したらここを書き換えないと落ちるので、**忘れられない**。
+   * ⚠ 「変えるな」ではない ── 変えてよい。**変えたことが記録に残る**のが目的である。
+   */
+  it('🔴 どの綴りにどの説明が付いているか(取り違えを殺す等値表)', () => {
+    const KNOWN: readonly [string, string][] = [
+      ['export-entry', '41c58db6'],
+      ['export-entry-html', '7f0a31b1'],
+      ['export-folder', '5636e4f5'],
+      ['export-entry-docx', 'e79a6f86'],
+      ['export-entry-pptx', '60bcb9ea'],
+      ['export-entry-pdf', 'c9838f51'],
+      ['adopt-external-images', '36c7974a'],
+      ['copy-entry-ref', '2614a326'],
+      ['copy-plain-markdown', '73e9b322'],
+      ['show-history', '2511b05b'],
+      ['delete-entry', '661f5844'],
+    ];
+    const digest = (h: string): string =>
+      createHash('sha256').update(h).digest('hex').slice(0, 8);
+    // ⚠ 空振り防止 ── 表と実装の件数が食い違ったまま「全部一致した」と言わない
+    expect(KNOWN.length, '表と実装の件数が違う(足したなら表にも 1 行足す)').toBe(
+      Object.keys(ENTRY_ACTION_HINTS).length,
+    );
+    const map = new Map(KNOWN);
+    const drift: string[] = [];
+    for (const [action, hint] of Object.entries(ENTRY_ACTION_HINTS)) {
+      const want = map.get(action);
+      if (want === undefined) {
+        drift.push(`${action}: 表に無い(足したなら ['${action}', '${digest(hint)}'] を足す)`);
+        continue;
+      }
+      if (want !== digest(hint))
+        drift.push(`${action}: 説明が変わっている(${want} → ${digest(hint)})`);
+    }
+    expect(drift, '説明の取り違え / 書き換えが記録に残っていない').toEqual([]);
+  });
+
   /** ⚠ 条件つきの 2 つも出る文脈 ── これを使わないと 2 行が**一度も検められない**。 */
   const ALL = { archetype: 'folder', linkedFile: 'メモ.md' } as const;
 
@@ -240,6 +288,34 @@ describe('右クリックの説明(#587 C-1)', () => {
     );
     const silent = rows.filter((a) => a.hint === '').map((a) => a.action);
     expect(silent, '説明が空のまま配られている項目がある').toEqual([]);
+  });
+
+  /**
+   * 🔴 **その場で組む 1 件も、上限の門の中に入れる**(#587 C-3 の着地後レビュー)。
+   *
+   * ⚠ `write-back-file` の説明は表に無く**その場で組む**ので、上の全数の上限検査に
+   *   一度も当たっていなかった。⚠ 固定部分が 28 字なので、**名前が 28 字を超えると
+   *   3 行目**に落ちて切れる ── 切れるのは末尾、つまり「**上書きします**」という、
+   *   取り消せない操作だと言っている当の部分である。
+   */
+  it('🔴 長いファイル名でも「上書きします」まで読める(その場で組む 1 件の上限)', () => {
+    const long = '2026年度第3四半期営業報告書_改訂版_確定_最終版.docx';
+    // ⚠ 前提: この名前は縮めなければ上限を超える(超えないなら何も検めていない)
+    expect(
+      `開いた元のファイル(${long})を、このノートの内容で上書きします`.length,
+      '前提が崩れている: この名前では上限を超えない',
+    ).toBeGreaterThan(ENTRY_ACTION_HINT_MAX);
+    const h = entryActionHint('write-back-file', { archetype: 'text', linkedFile: long });
+    expect(h.length, '2 行に収まらない').toBeLessThanOrEqual(ENTRY_ACTION_HINT_MAX);
+    expect(h, '取り消せないことを言う末尾が切れている').toContain('上書きします');
+    // 🔑 頭と尻の両方を残す ── 頭だけだと拡張子が消え、尻だけだとどの文書か分からない
+    expect(h, 'どの文書か分からない').toContain('2026年度');
+    expect(h, '拡張子が消えている').toContain('.docx');
+    // ⚠ **対照群** ── 短い名前は 1 字も縮めない
+    expect(
+      entryActionHint('write-back-file', { archetype: 'text', linkedFile: 'メモ.md' }),
+      '短い名前まで縮めている',
+    ).toBe('開いた元のファイル(メモ.md)を、このノートの内容で上書きします');
   });
 
   it('🔴 「書き戻す」だけは行き先を字に含める(押す前に確かめられる)', () => {

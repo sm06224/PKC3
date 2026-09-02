@@ -100,20 +100,6 @@ export function openContextMenu(
   root.append(el);
 
   /**
-   * ⚠ **画面からはみ出させない** ── はみ出すと下の項目に手が届かない。
-   * 🔑 載せてから測る(`getBoundingClientRect`)── 中身の数で高さが変わるので、
-   *   出す前には決められない。
-   */
-  const view = root.ownerDocument.defaultView;
-  const vw = view?.innerWidth ?? 0;
-  const vh = view?.innerHeight ?? 0;
-  const box = el.getBoundingClientRect();
-  const x = vw > 0 ? Math.max(0, Math.min(at.x, vw - box.width)) : at.x;
-  const y = vh > 0 ? Math.max(0, Math.min(at.y, vh - box.height)) : at.y;
-  el.style.left = `${x}px`;
-  el.style.top = `${y}px`;
-
-  /**
    * 🔴 **指している項目の説明を、メニューのいちばん下の欄に出す**(#587 C-3)。
    *
    * ⚠ 出るのは**説明を 1 つでも持つメニュー**だけ(見出し・本文のメニューは持たないので、
@@ -126,12 +112,12 @@ export function openContextMenu(
   const withHint = items.some((it) => it.hint !== undefined && it.hint !== '');
   if (withHint) {
     el.setAttribute('data-pkc-with-hint', '');
-    const box = root.ownerDocument.createElement('div');
-    box.setAttribute('data-pkc-field', MENU_HINT_FIELD);
-    box.setAttribute('aria-live', 'polite');
-    el.append(box);
+    const hintBox = root.ownerDocument.createElement('div');
+    hintBox.setAttribute('data-pkc-field', MENU_HINT_FIELD);
+    hintBox.setAttribute('aria-live', 'polite');
+    el.append(hintBox);
     const show = (btn: Element | null): void => {
-      box.textContent = btn?.getAttribute('data-pkc-hint') ?? '';
+      hintBox.textContent = btn?.getAttribute('data-pkc-hint') ?? '';
     };
     const buttonOf = (t: EventTarget | null): Element | null =>
       t instanceof Element ? t.closest('button[data-pkc-action]') : null;
@@ -148,6 +134,30 @@ export function openContextMenu(
       show(active !== null && el.contains(active) ? buttonOf(active) : null);
     });
   }
+
+  /**
+   * ⚠ **画面からはみ出させない** ── はみ出すと下の項目に手が届かない。
+   * 🔑 載せてから測る(`getBoundingClientRect`)── 中身の数で高さが変わるので、
+   *   出す前には決められない。
+   *
+   * 🔴 **測るのは、器が最終の姿になってから**(#587 C-3 の着地後レビュー)。
+   * ⚠ 直す前はこの採寸が**説明欄を足す前**に走っていたので、clamp が使った寸法が
+   *   実際より **192px 狭く・約 44px 低かった** ── `data-pkc-with-hint` が
+   *   `min-width` を 10rem(160px)から **22rem(352px)** へ広げ(`app.css:466-469`)、
+   *   欄そのものが 44px 積むためである。
+   * ⚠ 帰結は「**画面の右下で右クリックすると、足した説明欄が画面の外に出る**」──
+   *   user から見ると「出るときと出ないときがある」機能になっていた。
+   * 🔑 この注記(「載せてから測る」)は**そのとき既に在った** ── 破ったのは実装の側である。
+   *   だから直しは「順番を戻す」1 つで、見え方は 1px も変えない。
+   */
+  const view = root.ownerDocument.defaultView;
+  const vw = view?.innerWidth ?? 0;
+  const vh = view?.innerHeight ?? 0;
+  const box = el.getBoundingClientRect();
+  const x = vw > 0 ? Math.max(0, Math.min(at.x, vw - box.width)) : at.x;
+  const y = vh > 0 ? Math.max(0, Math.min(at.y, vh - box.height)) : at.y;
+  el.style.left = `${x}px`;
+  el.style.top = `${y}px`;
 
   // ⚠ 焦点を先頭へ ── 鍵だけで使う人が、開いた直後に何もできないのを防ぐ
   const first = el.querySelector('button');
