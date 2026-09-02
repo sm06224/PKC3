@@ -122,11 +122,18 @@ import {
   type DualSide,
 } from '@features/relation/dual-pane';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
+import { appPhone } from '@adapter/ui/render/phone-layout';
 import { appKeymap, type KeymapStore } from '@adapter/ui/render/keymap';
 import { appOpenInEdit, OpenInEditStore } from '@adapter/ui/render/open-in-edit';
 import { chordOf, findCommand, isMac, typesCharacter, KEY_COMMANDS } from '@features/keymap';
 import { paletteRows } from '@features/palette/palette-rows';
-import { bodyMenuActions, entryMenuActions, headingMenuActions } from '@features/entry-actions';
+import {
+  bodyMenuActions,
+  entryMenuActions,
+  headingMenuActions,
+  noteToolActions,
+  withTrailingLast,
+} from '@features/entry-actions';
 import {
   closeContextMenu,
   contextMenuOpen,
@@ -1391,7 +1398,50 @@ const MENU_LINE_ATTR = 'data-pkc-menu-line';
  * 🔑 **到達できるかを数え上げるより、行と一緒に身元を運ぶ** ── 受け手は
  *   自分の身元を確かめてから動く(状態の購読を増やさないので、束ねる側の台も壊さない)。
  */
+/**
+ * 🔴 **スマホで「一覧を見せてから効かせる」**(#632 段①、設計 doc §2-15)。
+ *
+ * ⚠ スマホでは一覧と本文が**同時に出ない**ので、#583 で直した
+ *   「畳んでいたら戻してから効かせる」が**そのままでは効かない** ──
+ *   隠れた欄に焦点を入れて無反応、という当の症状が戻る。
+ * 🔑 判定は `appPhone.reveal` **1 か所**(呼び元 3 つで数え方を変えない)。
+ * ⚠ 編集中は**理由を出して断る** ── 黙って何も起きないのが直したい当のことなので、
+ *   ここで無言に戻してはいけない。
+ *
+ * @returns `false` = 断った(呼び側はそこで止める)。
+ */
+function phoneShowList(dispatcher: Dispatcher): boolean {
+  if (appPhone.reveal('list') !== 'deselect') return true;
+  if (dispatcher.getState().phase !== 'ready') {
+    dispatcher.dispatch({
+      type: 'OP_FAILED',
+      error: '保存するか取り消してから、一覧で探してください',
+    });
+    return false;
+  }
+  /**
+   * 🔴 **面(設定・ヘルプ・2 ペイン・集計)を開いている間も、一覧まで出す**
+   *   (着地前レビュー 3)。
+   *
+   * ⚠ 直す前は `DESELECT_ENTRY` だけ撃っていた ── 面が開いたままだと
+   *   `phonePageOf` は `pane` を返し続けるので、**一覧は画面に出ない**。
+   *   結果は「**選択だけ黙って消えて、焦点も入らない**」= #583 で直した
+   *   無言の dead key が、選択の消失つきで戻る形だった。
+   */
+  if (dispatcher.getState().viewMode !== 'detail')
+    dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
+  dispatcher.dispatch({ type: 'DESELECT_ENTRY' });
+  return true;
+}
+
 const MENU_LID_ATTR = 'data-pkc-menu-lid';
+
+/**
+ * 🔴 **クリックでメニューを開く受け手**(#632 段①)。⚠ ここに載せ忘れると、
+ * その受け手は**押しても無反応**になる(同じクリックで片づけ役が閉じる)。
+ * ⚠ 右クリック(`contextmenu`)で開く経路はここに載らない ── あちらは別の event。
+ */
+const MENU_OPENERS: ReadonlySet<string> = new Set(['phone-menu']);
 
 /**
  * メニューが出た時のノートと、いま開いているノートが同じか。
@@ -1799,13 +1849,21 @@ export function runGlobalCommand(
      *   断ると user は自分でペインを戻す手を探すことになり、**手数が増えるだけ**である。
      * 🔑 これで `dry` の `true` が**嘘でなくなる** ── どの状態でも実際に効く。
      */
-    const hidden = appPanes.getHidden();
-    if (hidden.includes('sidebar')) {
-      applyPaneVisibility(
-        root,
-        appPanes.setHidden(hidden.filter((x) => x !== 'sidebar')),
-      );
-    }
+    /**
+     * 🔴 **スマホでは列の保存値を触らない**(着地前レビュー 6)。
+     * ⚠ スマホに列は無いので**戻す理由が無い**のに、直す前は `pkc3.panes` から
+     *   `sidebar` を消していた ── PC で一覧を畳んでいる user がスマホで 1 回
+     *   「探す」を押すと、**PC へ戻ったとき一覧が勝手に開いている**。
+     */
+    if (!appPhone.isPhone()) {
+      const hidden = appPanes.getHidden();
+      if (hidden.includes('sidebar')) {
+        applyPaneVisibility(
+          root,
+          appPanes.setHidden(hidden.filter((x) => x !== 'sidebar')),
+        );
+      }
+    } else if (!phoneShowList(dispatcher)) return true;
     input.focus();
     input.select();
     return true;
@@ -2155,6 +2213,12 @@ const ACTIONS: Record<string, ActionHandler> = {
   'toc-jump': (dispatcher, target) => {
     const slug = target.getAttribute('data-pkc-toc-slug') ?? '';
     if (slug === '') return;
+    /**
+     * 🔴 **情報ページの目次を押したら、本文ページへ戻る**(#632 段①)。
+     * ⚠ 目次は情報ペインの中に在るので、スマホでは**押した先が見えていない** ──
+     *   送ってはいるのに画面が動かない(無言の dead click)。
+     */
+    appPhone.reveal('note');
     void tocJump(dispatcher, target, slug);
   },
   /**
@@ -2169,7 +2233,17 @@ const ACTIONS: Record<string, ActionHandler> = {
   'filter-by-tag': (dispatcher, target) => {
     const tag = target.getAttribute('data-pkc-tag');
     if (!tag) return;
+    /**
+     * 🔴 **断るなら、絞り込みも起こさない**(着地前レビュー 欠陥 6)。
+     * ⚠ 直す前は `SET_ENTRY_FILTER` を**先に**撃っていた ── PC では左の列で
+     *   すぐ見えるので食い違わないが、スマホは一覧が画面に無いので
+     *   **「できません」と言われたのに、後で見ると絞られている**。
+     *   起きたことと言われたことが逆になる形は、無言の dead click より悪い。
+     */
+    if (!phoneShowList(dispatcher)) return;
     dispatcher.dispatch({ type: 'SET_ENTRY_FILTER', query: tag });
+    // 🔴 スマホでは列の保存値を触らない(上の `focus-search` と同じ理由)
+    if (appPhone.isPhone()) return;
     const hidden = appPanes.getHidden();
     if (!hidden.includes('sidebar')) return;
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
@@ -2187,9 +2261,29 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 見え方であって、ノートのデータでも container の状態でもない(`editor-mode` と
    * 同じ扱い)。畳んだ状態は保存され、次に開いたときも同じ配置になる。
    */
-  'toggle-pane': (_dispatcher, target) => {
+  'toggle-pane': (dispatcher, target) => {
     const id = target.getAttribute('data-pkc-pane');
     if (id === null || !isPaneId(id)) return;
+    /**
+     * 🔴 **スマホでは列そのものが無いので、押しても何も起きない**(#632 段① の
+     *   着地前レビュー 欠陥 3)。
+     *
+     * ⚠ 直す前は**画面が 1px も動かず、理由も出ず、保存値だけ黙って動いて**いた ──
+     *   しかも「操作を探す」は `disabled` を見るだけなので「**押せます**」と出す。
+     *   同じ file の `focus-search` に「パレットは『押せる』と嘘をついていた」と
+     *   書いてあるのと**同じ嘘**を、新しい入口(`⋯` → 操作を探す)の先に置いていた。
+     * 🔑 断って、**保存値も動かさない** ── 動かすと、PC の幅へ戻したときに
+     *   身に覚えのない畳みが残る(見えない状態変化)。
+     * ⚠ 追記欄(`append`)は**スマホでも効く**(本文との境目は縦に残っている)ので
+     *   ここでは断らない ── まとめて断ると、user 指示 2026-08-27 の道が死ぬ。
+     */
+    if (appPhone.isPhone() && (COLUMN_PANES as readonly string[]).includes(id)) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: 'スマホの画面では一覧・本文・情報を 1 枚ずつ出しているので、列は畳めません',
+      });
+      return;
+    }
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
     applyPaneVisibility(root, appPanes.toggle(id));
   },
@@ -2296,6 +2390,85 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ ここは**共有の割当**(`appKeymap`)を読む。test が差した割当は鍵の側にだけ
    *   効くが、割当は**鍵の字を出すためだけ**に使うので**動きは変わらない**。
    */
+  /**
+   * 🔴 **スマホ用画面のページを移る**(#632 段①)。行き先は押したボタンが持つ
+   *   (`data-pkc-page`)── ここで推測しない。
+   *
+   * ⚠ **編集中に本文ページから出るのは断る**(設計 doc §2-6)。`disabled` にしない
+   *   のは、触る画面では `title` が読めず**無言の dead click**になるからである
+   *   (`selectEntryOrExplain` と同じ形 ── 押させて、理由を画面に出す)。
+   * ⚠ 断るのは**出るとき**だけ ── 情報ページから本文へ戻るのは止めない
+   *   (戻り先が編集中の本文なので、閉じ込めることになる)。
+   */
+  'phone-page': (dispatcher, target) => {
+    const page = target.getAttribute('data-pkc-page');
+    if (page === 'note') {
+      appPhone.closeInfo();
+      return;
+    }
+    if (dispatcher.getState().phase !== 'ready') {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '保存するか取り消してから戻ってください',
+      });
+      return;
+    }
+    if (page === 'info') {
+      appPhone.openInfo(dispatcher.getState().selectedLid);
+      return;
+    }
+    if (page === 'list') {
+      // ⚠ 情報 bit も倒す ── 倒さないと、次に同じノートを開いたとき情報ページが出る
+      appPhone.closeInfo();
+      dispatcher.dispatch({ type: 'DESELECT_ENTRY' });
+    }
+  },
+  /**
+   * 🔴 **左の列にしか無い操作を、本文ページから出す**(#632 段①、設計 doc §2-7)。
+   *
+   * ⚠ **受け手を 1 つも増やさない** ── 出すのは既存の登記
+   *   (`entryMenuActions` = 行の右クリックと同じ字)と `open-palette` だけである。
+   *   ⚠ 添付 / 録音 / 画面収録 / 計測(左の列の create-bar に在る 4 つ)は**段③**で足す
+   *   ── create-bar との等値 pin を先に書かないと、片方に足した日に静かにずれる。
+   */
+  'phone-menu': (dispatcher, target, _services, root) => {
+    // ⚠ 2 度目の ⋯ は閉じる(片道の操作を作らない ── user 指示 2026-08-23)
+    if (contextMenuOpen(root)) {
+      closeContextMenu(root);
+      return;
+    }
+    const st = dispatcher.getState();
+    const lid = st.selectedLid;
+    if (lid === null) return;
+    const rect = target.getBoundingClientRect();
+    openContextMenu(
+      root,
+      { x: rect.left, y: rect.bottom },
+      /**
+       * 🔴 **足すのは真ん中**(着地前レビュー 欠陥 7)── 末尾へ足すと、
+       *   `ENTRY_MENU_ACTIONS` が守っている「**消す物をいちばん下**」が黙って壊れる。
+       * ⚠ 足す 5 つ:左の列にしか無い道具 4 つ(添付 / 録音 / 画面録画 / 時間を計る)と
+       *   操作を探す。4 つとも `selectedLid` を要るのに押し口は一覧の中にしか無く、
+       *   スマホでは**戻ると対象が消える**(円環の dead click)。
+       */
+      withTrailingLast(
+        entryMenuActions({
+          archetype: st.entryMetas.get(lid)?.archetype ?? null,
+          linkedFile: st.linkedFiles.get(lid) ?? null,
+        }),
+        [
+          ...noteToolActions(),
+          {
+            action: 'open-palette',
+            label: '操作を探す',
+            hint: 'できる操作を名前で絞り込んで、その場で実行します',
+          },
+        ],
+      ),
+      root.ownerDocument.activeElement,
+      { [MENU_LID_ATTR]: lid },
+    );
+  },
   'open-palette': (dispatcher, _target, services, root) =>
     openPaletteFor(root, dispatcher, appKeymap, (t) => services.showStatus?.(t)),
   'nav-back': (dispatcher) => dispatcher.dispatch({ type: 'NAV_HISTORY', dir: 'back' }),
@@ -3564,13 +3737,20 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'move-order-up': (dispatcher, target) => moveOrder(dispatcher, target, 'up'),
   'move-order-down': (dispatcher, target) => moveOrder(dispatcher, target, 'down'),
-  'attach-file': (_dispatcher, target) => {
+  'attach-file': (_dispatcher, _target, _services, root) => {
     // 常設の hidden input を開く(動的生成にしない ── smoke の setInputFiles と
     // ブラウザの user-gesture 要件の両方に効く)
-    target
-      .closest('[data-pkc-region="shell"]')
-      ?.querySelector<HTMLInputElement>('[data-pkc-field="attach-input"]')
-      ?.click();
+    /**
+     * 🔴 **押した物から辿らない**(#632 段① の着地前レビュー 欠陥 1)。
+     *
+     * ⚠ 直す前は `target.closest('[data-pkc-region="shell"]')` だったので、
+     *   **`⋯` のメニューから押すと必ず null** になり、`?.` が全部飲んで
+     *   **無反応・理由なし**だった(スマホには添付の道が他に 1 本も無い)。
+     *   メニューの器は **root の直下**に出るので、押したボタンは shell の中に居ない
+     *   ── `context-menu.ts` が自分でそう戒めている当の罠である。
+     * 🔑 束ねた `root` から引けば、どこから押しても同じ入力欄に届く。
+     */
+    root.querySelector<HTMLInputElement>('[data-pkc-field="attach-input"]')?.click();
   },
   /**
    * 🔴 **録音・画面収録**(#413)。⚠ 段取り(帯 / 添付 / 本文への参照)は
@@ -6569,7 +6749,22 @@ export function bindActions(
    *   閉じるまでの間に押せてしまう窓が開く)。
    * ⚠ **登録の順が意味を持つ**ので、下の `addEventListener` を並べ替えないこと。
    */
-  const onCloseMenu = (): void => {
+  const onCloseMenu = (ev: Event): void => {
+    /**
+     * 🔴 **押した物がメニューを開くボタンなら、閉じない**(#632 段①)。
+     *
+     * ⚠ 直す前、⋯ は**押しても何も出なかった** ── メニューはこれまで
+     *   `contextmenu` からしか開かなかったので、`click` で開く口は
+     *   **同じ 1 回のクリックで、上の `onClick` が開き、ここが閉じる**。
+     *   ⚠ 症状は「押しても無反応」で、**開いていること自体を誰も見られない**。
+     * ⚠ `queueMicrotask` で遅らせても直らない ── microtask の checkpoint は
+     *   listener 1 本ごとに走るので、ここより**先**に片づけが来る
+     *   (2026-08-27 に `onCloseMenu` を作ったときの docstring と同じ罠)。
+     * 🔑 開く側は自分で toggle するので、2 度目の ⋯ は閉じる。
+     */
+    const el = (ev.target as HTMLElement | null)?.closest<HTMLElement>('[data-pkc-action]');
+    if (el !== null && el !== undefined && MENU_OPENERS.has(el.getAttribute('data-pkc-action') ?? ''))
+      return;
     closeContextMenu(root);
   };
   const onMenuKey = (ev: KeyboardEvent): void => {

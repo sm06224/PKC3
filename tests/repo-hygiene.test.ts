@@ -938,11 +938,15 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     //    (#584 / #633 段① ── unit では原理的に届かない)で +1 件
     // ⚠ 2026-09-02: `split-frames` に「幅は足りているのに畳んだと言わない」1 件
     //    (#633 段① ── 数え方の差は実ブラウザでしか出ない)で +1 件
-    expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(77);
+    // ⚠ 2026-09-02: `phone` を新設(#632 段① ── スマホ用画面。重なった 3 面の
+    //    見え方・押せるか・図の焼き直しは、実ブラウザでしか測れない)で file +1 / test +7
+    // ⚠ 2026-09-02: 同 spec に「隠れた面も大きさを持ち続ける」1 件(変異試験が
+    //    `visibility` → `display:none` を SURVIVED にしたので足した)で +1 件
+    expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(78);
     expect(
       counts.reduce((a, b) => a + b, 0),
       'smoke の test が増減した(足したらこの数を直す)',
-    ).toBe(379);
+    ).toBe(387);
   });
 });
 

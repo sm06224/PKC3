@@ -23,6 +23,7 @@ import {
   applyPaneVisibility,
 } from '../../src/adapter/ui/render/pane-visibility';
 import { readFileSync } from 'node:fs';
+import { mediaBlock, stripComments } from '../helpers/css-blocks';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { bindActions, SHORTCUT_BUTTON } from '../../src/adapter/ui/actions/binder';
@@ -280,18 +281,38 @@ describe('CSS(畳んだ列が本当に消えるか)', () => {
 
   it('🔴 @media の中の規則は読まない(狭い版面で画面の規則を消しても緑、を作らない)', () => {
     /**
-     * 錨は `@media (max-width: 720px)` の中に**しか無い**もの。
+     * 錨は `@media` の中に**しか無い**もの。
      *
      * ⚠ 1 稿目は `[data-pkc-pane='inspector']` を錨にしたが、それは
      *   **top-level にも在った**(`grid-area: gripr`)ので、この test 自身が
      *   落ちて教えてくれた ── 「中にしか無い」を確かめずに錨を選んでいた。
+     * 🔴 **2026-09-02 に錨を差し替えた**(#632 段①)。前の錨
+     *   (`[data-pkc-region='pane-grip']:not([data-pkc-axis='y'])`)は
+     *   `@media (max-width: 720px)` の中に在ったが、その版面は**スマホ用画面へ
+     *   置き換えて消えた** ── 同じ綴りは top-level のスマホ規則の中に
+     *   **より長い選択子の一部として**残るので、`rulesFor` は丸ごと一致で
+     *   `[]` を返し続ける。⚠ つまり**錨が死んでも緑のまま**で、
+     *   「@media を読み始めた」を二度と検出できなくなっていた(§1 の空振り)。
+     * 🔑 いまの錨は**印刷の中にしかない**もの(全数で確かめた ── 画面の規則に
+     *   同じ綴りは 1 つも無い)。
      */
-    const MEDIA_ONLY = "[data-pkc-region='pane-grip']:not([data-pkc-axis='y'])";
+    const MEDIA_ONLY = '.pkc-csv-shape';
     expect(rulesFor(MEDIA_ONLY), '@media の中まで読んでいる').toEqual([]);
-    // ⚠ 空振り防止 ── その選択子が CSS のどこかには実在すること
+    /**
+     * ⚠ **空振り防止も「丸ごと一致」で取る**(2026-09-02 の着地前レビュー 8)。
+     *   直す前は `toContain`(部分一致)だったが、`.pkc-csv-shape` は top-level に
+     *   **`.pkc-md-rendered .pkc-csv-shape` の形で 7 本**在る ── つまり
+     *   **印刷から錨を消しても両方の assert が緑**で、「@media を読み始めた」を
+     *   二度と検出できなくなる(判定側は丸ごと一致なので、長い選択子は拾わない)。
+     * 🔑 印刷の中に**その綴りだけの規則**が在ることを、判定と同じ読み方で確かめる。
+     */
+    const inPrint = mediaBlock(stripComments(readFileSync('src/styles/app.css', 'utf-8')), 'print')
+      .body.match(/([^{}]+)\{[^{}]*\}/g)
+      ?.flatMap((r) => r.slice(0, r.indexOf('{')).split(','))
+      .map((sel) => sel.trim().replace(/\s+/g, ' '));
     expect(
-      readFileSync('src/styles/app.css', 'utf-8'),
-      '錨にした選択子が CSS から消えている(この test の前提が崩れた)',
+      inPrint,
+      '錨にした選択子が印刷の中に(その綴りのまま)無い ── この test の前提が崩れた',
     ).toContain(MEDIA_ONLY);
   });
 

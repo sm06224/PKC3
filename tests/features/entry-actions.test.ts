@@ -256,6 +256,11 @@ describe('右クリックの説明(#587 C-1)', () => {
       ['copy-plain-markdown', '73e9b322'],
       ['show-history', '2511b05b'],
       ['delete-entry', '661f5844'],
+      // 🔴 **左の列の道具 4 つ**(#632 段①)── 本文ページの ⋯ から押せるようにした
+      ['attach-file', 'f08e69a5'],
+      ['start-audio-capture', '6313fe2e'],
+      ['start-screen-capture', 'ec055655'],
+      ['start-timer', '97214aee'],
     ];
     const digest = (h: string): string =>
       createHash('sha256').update(h).digest('hex').slice(0, 8);

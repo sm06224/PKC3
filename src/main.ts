@@ -75,6 +75,7 @@ import {
   resolveContainerCompat,
 } from '@adapter/platform/storage/resolve-container-compat';
 import { buildShell, paintAlarmBar, paintCaptureBar, paintTimerBar } from '@adapter/ui/render/shell';
+import { appPhone } from '@adapter/ui/render/phone-layout';
 import { showNotices, clearNotices } from '@adapter/ui/render/notices';
 import { createImportUndo, importPanel } from '@adapter/ui/actions/import-undo';
 import { createUpdatePrompt } from '@adapter/ui/render/update-card';
@@ -713,6 +714,20 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * 成立せず、user 指示「同じものが常に同じ場所にある」に反する ── 畳んで閉じ、
    * 開き直すと全部戻っている、という画面になる。
    */
+  /**
+   * 🔴 **スマホ用画面の見張りを張る**(#632 段①)。
+   *
+   * ⚠ ここには「**畳んだペインの復元より前**に張らないと、起動の 1 回だけ
+   *   畳まれた列がスマホでも復元される」と書いてあったが、**成り立っていなかった**
+   *   (2026-09-02 の着地前レビュー)── `install` は `wasPhone` を `null` から始めるので
+   *   **必ず 1 回 `onToggle` を撃つ**。つまり下の 1 行は入れ替えても消しても最終の DOM は
+   *   同じで、順序は何も守っていなかった(CLAUDE.md §1 の no-op)。
+   * 🔑 守っているのは `applyPaneVisibility` の中の `appPhone.isPhone()` **1 か所**である。
+   *   下の呼びを残すのは、**boot の読み手に「畳みを復元している」を見せるため**であって、
+   *   順序のためではない。
+   * ⚠ 外さない(アプリと同寿命)── `applyPaneVisibility` と同じ。
+   */
+  appPhone.install(root, undefined, () => applyPaneVisibility(root, appPanes.getHidden()));
   applyPaneVisibility(root, appPanes.getHidden());
   /**
    * 🔴 **決めた大きさも起動時に戻す**(#497)。⚠ 畳んだ状態と**対**である ──
@@ -861,6 +876,18 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     appendBox.render(state);
     inspector.render(state);
     markView(state.viewMode);
+    /**
+     * 🔴 **スマホ用画面のページを決める**(#632 段①)。⚠ 描く順は**最後** ──
+     *   面の中身が揃ってから `visibility` を切り替える(先に切り替えると、
+     *   1 フレームだけ空の面が見える)。
+     */
+    appPhone.render({
+      selectedLid: state.selectedLid,
+      viewMode: state.viewMode,
+      // 🔴 打っている物が見えない状態を作らない(`features/phone-layout.ts` の docstring)
+      editing: state.phase === 'editing',
+      title: state.selectedLid === null ? '' : (state.entryMetas.get(state.selectedLid)?.title ?? ''),
+    });
   });
   // status: provenance + エラーの可視化(review B-1 ── 無言の操作拒否を作らない)
   // 🔑 常時見えるのは**版だけ**(P8)。`opfs-sahpool` のような開発者語は

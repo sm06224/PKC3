@@ -562,7 +562,13 @@ describe('🔴 帯の置き場', () => {
     const layouts = [...stripComments(css).matchAll(/grid-template-areas:\s*([^;]+);/g)].map(
       (m) => m[1] ?? '',
     );
-    expect(layouts, '版面を全部読めていない(空振り)').toHaveLength(9);
+    /**
+     * ⚠ **2026-09-02 に 9 → 8**(#632 段①)── `@media (max-width: 720px)` の
+     *   版面 2 つ(素の 1 列 / 畳んだ 1 列)が消え、スマホ用画面の 1 つが増えた。
+     *   スマホでは畳みを画面へ写さない(`applyPaneVisibility` のガード)ので、
+     *   「畳んだときの 1 列」という版面がそもそも要らなくなった。
+     */
+    expect(layouts, '版面を全部読めていない(空振り)').toHaveLength(8);
     /**
      * 🔑 **名前は手で並べず、いちばん広い版面から引く** ── 1 行を丸ごと
      *   占めている区画(全部のセルが同じ名前)が「全幅の帯」である。
@@ -615,12 +621,39 @@ describe('🔴 帯の置き場', () => {
       ),
     ];
     expect(withRows.length, '行の丈を宣言している版面を引けていない(空振り)').toBe(1);
+    /**
+     * ⚠ **括弧の中で切らない**(2026-09-02)── `minmax(0, 1fr)` は空白を含むので、
+     *   素の `split(/\s+/)` では **1 本の丈が 2 本に割れて**「丈の数と行数が合わない」で
+     *   落ちる。🔑 スマホ用画面は素の `1fr` ではなく `minmax(0, 1fr)` を使う
+     *   (素の `1fr` = `minmax(auto, 1fr)` なので、**重ねた 3 面のうち背の高い面の
+     *   min-content が行を押し広げ**、本文が画面の外へ出る)。
+     */
+    const tracksOf = (v: string): string[] => {
+      const out: string[] = [];
+      let depth = 0;
+      let cur = '';
+      for (const ch of v.trim()) {
+        if (ch === '(') depth++;
+        else if (ch === ')') depth--;
+        if (depth === 0 && /\s/.test(ch)) {
+          if (cur !== '') out.push(cur);
+          cur = '';
+        } else cur += ch;
+      }
+      if (cur !== '') out.push(cur);
+      return out;
+    };
     for (const m of withRows) {
       const rows = rowsOf(m[1] ?? '');
-      const tracks = (m[2] ?? '').trim().split(/\s+/);
+      const tracks = tracksOf(m[2] ?? '');
       expect(tracks.length, '丈の数と区画の行数が合っていない').toBe(rows.length);
+      // ⚠ 伸びる丈は **1 本だけ**(2 本あると「どちらが本文か」が読めない)
       expect(
-        tracks.indexOf('1fr'),
+        tracks.filter((t) => t.includes('1fr')).length,
+        '伸びる行が 1 本ではない',
+      ).toBe(1);
+      expect(
+        tracks.findIndex((t) => t.includes('1fr')),
         '伸びる行が本文(detail)ではない ── 狭い窓で本文が縮み、帯だけが伸びる',
       ).toBe(rows.findIndex((cells) => cells.includes('detail')));
     }
@@ -817,6 +850,7 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
+    ['2026-09-02-phone-layout', '9a7ce84e'],
     ['2026-09-02-stack-bar', 'b34b851c'],
     ['2026-09-02-tag-enter', '0bdca4c1'],
     ['2026-09-02-tag-limit-reason', '1be07723'],
@@ -828,7 +862,6 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-09-02-append-opens', '9d60ff45'],
     ['2026-09-02-split-restore', '568986a9'],
     ['2026-09-02-manual-page', 'eefd976e'],
-    ['2026-08-31-manual-window', '40e6b4dc'],
     // ⚠ 落とした entry の注記(訂正の経緯)は CHANGELOG と git の履歴に在る ── ここには残さない
   ];
 
@@ -908,8 +941,14 @@ describe('登記表と画面のずれ(#596 E)', () => {
      * 🔑 そして実際に落ちるのは「足した分」ではなく **いちばん古い既存の 1 件**である
      *   ── 足した人から見て**自分が押し出した物が見えない**のが、この欠陥の顔だった。
      */
+    /**
+     * ⚠ **日付は「いちばん新しい既存 entry より後」にする**(2026-09-02 に直した)。
+     *   `recentNotices` は id(= 日付が前置き)の降順で切るので、fixture が
+     *   古い日付だと**押し出されるのは fixture 自身**になり、この test は
+     *   「足した分が見えない」を主張してしまう(空振りではないが、**別の主張**)。
+     */
     const over = [
-      { id: '2026-09-01-over', title: '新しく足した分', items: ['先頭に足しました。'] },
+      { id: '2026-12-31-over', title: '新しく足した分', items: ['先頭に足しました。'] },
       ...NOTICES,
     ];
     const shown = new Set(recentNotices(over).map((n) => n.id));
