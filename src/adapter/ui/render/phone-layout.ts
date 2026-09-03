@@ -18,17 +18,21 @@
  *   古い実装では見えない面の中へ Tab が入りうる。⚠ 属性で書く(`el.inert` の
  *   プロパティは happy-dom に無い)。
  *
- * ## この段で作っていないもの(段③)
+ * ## 幅の見張りは 2 本(#632 段③ で 2 本目を足した)
  *
- * ⚠ **`PHONE_MIN_PX` の 2 本目の `matchMedia`**(対応外の 1 行)だけが**まだ無い**。
- *   使う所と一緒に足す ── 使い道のない seam を先に置くと、次に読む人が
- *   「配線されている」と読む(#69 の壊れたポインタの逆向き)。
- * 🔑 **`reveal` の 3 つの呼び元は段① へ前倒した**(`focus-search` / `filter-by-tag` /
- *   `toc-jump`。設計 doc §4-b)── 一覧は DOM から消えないので、直さないと
- *   #583 で直した無言の dead click がそのまま戻るためである。
+ * | 見張り | 何のため |
+ * |---|---|
+ * | `max-width: PHONE_MAX_PX` | スマホ用画面へ切り替える |
+ * | `max-width: PHONE_MIN_PX - 1` | **対応外の幅**を 1 度だけ知らせる(user 裁定 ⑥) |
+ *
+ * 🔴 **知らせる口はここが持たない** ── 帯の口(`showStatus`)は `main.ts` の
+ *   ずっと後で組まれるので、`install` の時点では存在しない。🔑 だから
+ *   **`onTooNarrow` で購読させる**(向きを 1 本にして、この file が
+ *   `fold-notify` を import しない ── 逆向きに import があるので輪になる)。
  */
 import {
   PHONE_MAX_PX,
+  PHONE_MIN_PX,
   phoneBandShown,
   phonePageOf,
   phoneReturnShown,
@@ -110,6 +114,16 @@ export class PhoneLayout {
   private wasPhone: boolean | null = null;
 
   /**
+   * 🔴 **対応外の幅の見張り**(#632 段③、user 裁定 ⑥)。
+   * ⚠ **1 度だけ**言う ── 窓を掴んで狭めると `change` は何度も鳴るので、
+   *   毎回言うと帯が知らせで埋まる(user にできることは 1 つも増えない)。
+   */
+  private narrow: MediaLike | null = null;
+  private onNarrowChange: (() => void) | null = null;
+  private narrowSubs: Array<() => void> = [];
+  private saidTooNarrow = false;
+
+  /**
    * 幅の見張りを張る。⚠ **戻り値で外せる**(unit が 1 件ずつ独立に張る)。
    * @param mm 差し替え口(unit / 別の窓)。既定は window の `matchMedia`。
    */
@@ -140,6 +154,26 @@ export class PhoneLayout {
       this.onChange = fn;
       media.addEventListener('change', fn);
     }
+    /**
+     * 🔴 **2 本目 ── 対応外の幅**(user 裁定 ⑥「画面は止めない」)。
+     * ⚠ `PHONE_MIN_PX` **未満**なので `- 1` する ── `min-width` で書くと
+     *   「対応している側」を数えることになり、境目がずれても気づけない。
+     */
+    const narrow = make(`(max-width: ${PHONE_MIN_PX - 1}px)`) ?? null;
+    this.narrow = narrow;
+    this.saidTooNarrow = false;
+    if (narrow?.addEventListener) {
+      const fn = (): void => this.tellTooNarrow();
+      this.onNarrowChange = fn;
+      narrow.addEventListener('change', fn);
+    }
+    /**
+     * ⚠ **ここでは鳴らさない**(#632 段③、変異試験 M7 が SURVIVED で教えた)。
+     *   `install` は `main.ts:730`、口を配る `setFoldNotify` は `:989` ── つまり
+     *   **この時点で聞いている人は 1 人も居ない**ので、呼んでも必ず素通りする。
+     * 🔑 鳴らすのは `onTooNarrow`(**繋いだ瞬間**)1 か所である ── 2 か所に置くと、
+     *   片方が no-op のまま「これが要る」という顔で残る。
+     */
     this.paint();
     return () => this.dispose();
   }
@@ -149,6 +183,43 @@ export class PhoneLayout {
       this.media.removeEventListener('change', this.onChange);
     this.media = null;
     this.onChange = null;
+    if (this.narrow?.removeEventListener && this.onNarrowChange)
+      this.narrow.removeEventListener('change', this.onNarrowChange);
+    this.narrow = null;
+    this.onNarrowChange = null;
+    this.narrowSubs = [];
+  }
+
+  /** いま**対応外の幅**か(`PHONE_MIN_PX` 未満)。 */
+  tooNarrow(): boolean {
+    return this.narrow?.matches === true;
+  }
+
+  /**
+   * 🔴 **対応外の幅になったことを 1 度だけ知らせる**購読口。
+   *
+   * ⚠ **口をここが持たない** ── 帯(`showStatus`)は `main.ts` の後ろで組まれるので、
+   *   `install` の時点では存在しない。🔑 購読された時点で**もう狭ければその場で**
+   *   1 度鳴らす(でないと「起動時から狭い」= いちばん普通の場合を落とす)。
+   * ⚠ 向きを 1 本にする ── この file は `fold-notify` を import しない
+   *   (あちらが `appPhone` を読むので、双方向にすると輪になる)。
+   */
+  onTooNarrow(cb: () => void): () => void {
+    this.narrowSubs.push(cb);
+    if (this.saidTooNarrow) return () => this.unsubTooNarrow(cb);
+    this.tellTooNarrow();
+    return () => this.unsubTooNarrow(cb);
+  }
+
+  private unsubTooNarrow(cb: () => void): void {
+    this.narrowSubs = this.narrowSubs.filter((f) => f !== cb);
+  }
+
+  /** ⚠ **1 度だけ**(掴んで狭めると `change` は何度も鳴る)。 */
+  private tellTooNarrow(): void {
+    if (this.saidTooNarrow || !this.tooNarrow() || this.narrowSubs.length === 0) return;
+    this.saidTooNarrow = true;
+    for (const cb of [...this.narrowSubs]) cb();
   }
 
   /** いまスマホ用画面か。⚠ `applyPaneVisibility` のガードもこれを読む。 */

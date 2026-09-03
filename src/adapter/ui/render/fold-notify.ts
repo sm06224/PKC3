@@ -26,17 +26,53 @@
  * **帯の口はまだ存在しない**。`read-columns` が setter 形なのは元々この理由で、
  * `main.ts:864-866` にそう書いてある。
  */
+import { appPhone } from './phone-layout';
+
 let notify: ((text: string) => void) | null = null;
 
-/** 帯へ出す口を配る(`main.ts` が起動時に 1 度だけ呼ぶ)。 */
+/**
+ * 帯へ出す口を配る(`main.ts` が起動時に 1 度だけ呼ぶ)。
+ *
+ * 🔴 **ここで対応外の幅も購読する**(#632 段③)。⚠ 別の配線点を作らない ──
+ *   #606 が直した欠陥は「**口が 2 つあって、片方を配線し忘れた**」であり、
+ *   ここへ足せば**忘れたときに畳みの知らせも同時に消える**(既に在る smoke が鳴る)。
+ * ⚠ **口を外すときは購読も外す**(`null` を渡す test が state を持ち越さない)。
+ */
+let unwatchNarrow: (() => void) | null = null;
 export function setFoldNotify(fn: ((text: string) => void) | null): void {
   notify = fn;
+  unwatchNarrow?.();
+  unwatchNarrow = null;
+  if (fn !== null) unwatchNarrow = appPhone.onTooNarrow(() => fn(TOO_NARROW_TEXT));
 }
 
 /**
  * 「幅が足りないので畳んだ」を言う。
  * ⚠ 口が配られていなければ**黙る**(test や別窓は帯を持たない)。
+ *
+ * 🔴 **スマホ用画面では黙る**(#632 段③)。
+ * ⚠ あの画面は**幅が足りないから畳んでいるのではなく、1 枚ずつ出すのが既定**である
+ *   ── 「幅が足りないので畳みました」は**起きていないことを言う**ことになる。
+ *   しかも**畳まない選択肢が無い**ので、user にできることが 1 つも無い知らせになる
+ *   (CLAUDE.md「手詰まりにしない」の裏)。
+ * 🔑 判定は `appPhone` **1 か所**から引く(幅の数字をここに書かない)。
  */
 export function sayFolded(text: string): void {
+  if (appPhone.isPhone()) return;
   if (notify !== null) notify(text);
 }
+
+/**
+ * 🔴 **「この幅には対応していません」の 1 行**(#632 段③、user 裁定 ⑥)。
+ *
+ * > 「幅 360px 未満は、下の行に **1 度だけ**『この幅には対応していません ──
+ * > 360px 以上で』と出し、**画面は止めない**」
+ *
+ * ⚠ **`sayFolded` とは黙る条件が逆である** ── あちらはスマホで黙り、こちらは
+ *   **スマホより狭いときにだけ**鳴る。🔑 それでも**帯の口は 1 つ**にする
+ *   (#606「口が 2 つある限り、片方を配線し忘れても誰も気づかない」)。
+ * 🔑 **1 度だけ**の数え方は `appPhone` が持つ ── 窓を掴んで狭めると `change` は
+ *   何度も鳴るので、鳴った数だけ言うと帯が知らせで埋まる。
+ */
+export const TOO_NARROW_TEXT =
+  'この幅には対応していません ── 360px 以上でお使いください(画面は止めません)';

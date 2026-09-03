@@ -73,7 +73,18 @@ function setup(phone: boolean) {
   });
   bindActions(root, d, { showStatus: (t) => said.push(t) });
   const media = new FakeMedia(phone);
-  appPhone.install(root, () => media, () => applyPaneVisibility(root, appPanes.getHidden()));
+  /**
+   * 🔴 **見張りは 2 本あるので、問い合わせごとに別の替え玉を返す**(#632 段③)。
+   *
+   * ⚠ 1 本しか返さないと、**スマホ幅にした瞬間に「対応外」も真**になる ──
+   *   360〜720px は**対応している幅**なので、それは製品と逆である。
+   * 🔑 `narrow` の既定は `false`(= 対応している幅)── 対応外を測る test だけが
+   *   `s.narrow.set(true)` で狭める。
+   */
+  const narrow = new FakeMedia(false);
+  const mm = (q: string): FakeMedia =>
+    q.includes(`${PHONE_MIN_PX - 1}px`) ? narrow : media;
+  appPhone.install(root, mm, () => applyPaneVisibility(root, appPanes.getHidden()));
   const push = (): void => {
     const st = d.getState();
     appPhone.render({
@@ -91,6 +102,7 @@ function setup(phone: boolean) {
     d,
     said,
     media,
+    narrow,
     shell,
     page: () => shell.getAttribute('data-pkc-page'),
     layout: () => shell.getAttribute('data-pkc-layout'),
@@ -826,6 +838,89 @@ describe('畳んだ列をスマホでは写さない(#609)', () => {
   });
 });
 
+/**
+ * 🔴 **対応外の幅(360px 未満)を 1 度だけ知らせる**(#632 段③、user 裁定 ⑥)。
+ *
+ * > 「幅 360px 未満は、下の行に **1 度だけ**『この幅には対応していません ──
+ * > 360px 以上で』と出し、**画面は止めない**」
+ *
+ * ⚠ **ここでしか測れないのが「1 度だけ」である** ── 帯は 1 行しか持たないので、
+ *   同じ字を 2 回書いても実ブラウザからは**同じ画面に見える**
+ *   (だから smoke には「出ること」と「止まらないこと」だけを持たせた)。
+ */
+describe('対応外の幅(1 度だけ)', () => {
+  it('🔴 何度狭めても、言うのは 1 度だけ', () => {
+    const s = setup(true);
+    const said: string[] = [];
+    appPhone.onTooNarrow(() => said.push('狭い'));
+    expect(said, '対応している幅なのに言った').toEqual([]);
+
+    s.narrow.set(true);
+    expect(said, '対応外になったのに言わない').toEqual(['狭い']);
+
+    // 🔴 掴んで広げ→狭めを繰り返しても増えない(帯が知らせで埋まらない)
+    s.narrow.set(false);
+    s.narrow.set(true);
+    s.narrow.set(false);
+    s.narrow.set(true);
+    expect(said, '狭めるたびに言っている(帯が埋まる)').toEqual(['狭い']);
+  });
+
+  /**
+   * 🔴 **いちばん普通の場合** ── 起動した時点でもう狭い。
+   * ⚠ 帯の口(`showStatus`)は `main.ts` のずっと後で組まれるので、
+   *   `install` の時点では誰も聞いていない ── **購読した瞬間に鳴らす**必要がある。
+   *   これが無いと、**細い端末では 1 度も出ない**(いちばん要る場面で黙る)。
+   */
+  it('🔴 起動した時点でもう狭ければ、口を繋いだ瞬間に言う', () => {
+    const s = setup(true);
+    s.narrow.set(true); // ⚠ まだ誰も聞いていない
+    const said: string[] = [];
+    appPhone.onTooNarrow(() => said.push('狭い'));
+    expect(said, '起動時から狭い端末で 1 度も言わない').toEqual(['狭い']);
+  });
+
+  /** ⚠ 対照群 ── 対応している幅では**繋いでも鳴らない**(常に言う実装を通さない)。 */
+  it('🔴 360px 以上では言わない', () => {
+    setup(true);
+    const said: string[] = [];
+    appPhone.onTooNarrow(() => said.push('狭い'));
+    expect(said, '対応している幅で言っている').toEqual([]);
+  });
+
+  it('🔴 口を外したら、そのあと狭めても言わない', () => {
+    const s = setup(true);
+    const said: string[] = [];
+    const off = appPhone.onTooNarrow(() => said.push('狭い'));
+    off();
+    s.narrow.set(true);
+    expect(said, '外した口へまだ流している').toEqual([]);
+  });
+
+  /**
+   * 🔴 **境目は `PHONE_MIN_PX` 未満**(`- 1` を落とすと 360px ちょうどが対応外になる)。
+   * ⚠ 数字ではなく**問い合わせた字**で見る ── 替え玉の `matches` を手で動かす台では、
+   *   実装がどの幅を聞いたかは**この記録にしか出ない**。
+   */
+  it('🔴 見張りは 2 本で、対応外は 360px 未満を聞いている', () => {
+    const asked: string[] = [];
+    const off = document.createElement('div');
+    off.setAttribute('data-pkc-slot', 'root');
+    document.body.append(off);
+    buildShell(off);
+    appPhone.install(off, (q) => {
+      asked.push(q);
+      return new FakeMedia(false);
+    });
+    expect(asked, '見張りの本数が違う').toEqual([
+      `(max-width: ${PHONE_MAX_PX}px)`,
+      `(max-width: ${PHONE_MIN_PX - 1}px)`,
+    ]);
+    // ⚠ 空振り防止 ── 2 本が**別の幅**を聞いている(同じ字なら片方は無意味である)
+    expect(asked[0], '2 本が同じ幅を聞いている').not.toBe(asked[1]);
+  });
+});
+
 describe('CSS(構文で読む)', () => {
   const css = (): string => readFileSync('src/styles/app.css', 'utf-8');
   /** ⚠ **注釈を剥いでから見る** ── 自分の解説文が検査を満たす / 落とす(§1 に 5 回の記録)。 */
@@ -947,6 +1042,38 @@ describe('CSS(構文で読む)', () => {
     // 🔑 丈の定義は 1 か所(shell)
     const shell = blocksFor(bareCss, PHONE).join(' ');
     expect(shell, '帯の丈を shell に置いていない(面が継げない)').toContain('--pkc-phone-bar:');
+  });
+
+  /**
+   * 🔴 **スマホでは 2 ペインを上下に積む**(#632 段③)。
+   *
+   * ⚠ 実測(375px の窓、直す前 / 直した後):
+   *
+   * | | ペインの幅 | 見出し帯 `scrollWidth`/`clientWidth` | パンくずの幅 |
+   * |---|---|---|---|
+   * | 直す前(横並び) | **184px** | **187 / 182**(はみ出す) | 🔴 **0px**(どこに居るか読めない) |
+   * | 直した後(上下) | **375px** | 373 / 373 | 182px |
+   *
+   * 🔑 実害は幅ではなく**パンくずが 0px になること** ── 2 ペインの操作は
+   *   「どちらの箱に居るか」を見て決めるので、そこが消えると**移す先が読めない**。
+   */
+  it('🔴 スマホの 2 ペインは上下に積む(横並びのままだと道が読めない)', () => {
+    const body = blocksFor(
+      withoutMedia(bare()),
+      `${PHONE} [data-pkc-region='dual-body']`,
+    ).join(' ');
+    expect(body, 'スマホで 2 ペインを積み直す規則が無い').not.toBe('');
+    expect(body, '列が 1 本になっていない(横並びのまま)').toMatch(
+      decl('grid-template-columns', '1fr'),
+    );
+    expect(body, '上下が半分ずつになっていない(どちらが元か見た目から消える)').toMatch(
+      decl('grid-template-rows', '1fr 1fr'),
+    );
+    // ⚠ 空振り防止 ── 広い窓の側は**横並びのまま**である(全部積んだのではない)
+    const wide = blocksFor(withoutMedia(bare()), `[data-pkc-region='dual-body']`).join(' ');
+    expect(wide, '広い窓の 2 ペインまで積んでいる').toMatch(
+      decl('grid-template-columns', '1fr 1fr'),
+    );
   });
 
   /**
