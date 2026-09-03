@@ -848,22 +848,43 @@ describe('畳んだ列をスマホでは写さない(#609)', () => {
  *   同じ字を 2 回書いても実ブラウザからは**同じ画面に見える**
  *   (だから smoke には「出ること」と「止まらないこと」だけを持たせた)。
  */
-describe('対応外の幅(1 度だけ)', () => {
-  it('🔴 何度狭めても、言うのは 1 度だけ', () => {
+describe('対応外の幅(変わったときだけ伝える)', () => {
+  /**
+   * 🔴 **同じ値を続けて伝えない**(user 裁定 ⑥「1 度だけ」)。
+   * ⚠ 着地前の動線レビューで「広げても消えない」を直したので、
+   *   いま配るのは**知らせ**ではなく**状態**である ── だから見るのは
+   *   「増えないこと」ではなく「**変わったときだけ配ること**」になった。
+   */
+  it('🔴 狭いまま何度知らせが来ても、伝えるのは 1 度だけ', () => {
     const s = setup(true);
-    const said: string[] = [];
-    appPhone.onTooNarrow(() => said.push('狭い'));
-    expect(said, '対応している幅なのに言った').toEqual([]);
+    const said: boolean[] = [];
+    appPhone.onTooNarrow((n) => said.push(n));
+    expect(said, '対応している幅なのに配った(帯の別の知らせを消す)').toEqual([]);
 
     s.narrow.set(true);
-    expect(said, '対応外になったのに言わない').toEqual(['狭い']);
+    expect(said, '対応外になったのに配らない').toEqual([true]);
 
-    // 🔴 掴んで広げ→狭めを繰り返しても増えない(帯が知らせで埋まらない)
-    s.narrow.set(false);
+    // 🔴 狭いままの `change` は何度来ても増えない(帯が知らせで埋まらない)
+    s.narrow.set(true);
+    s.narrow.set(true);
+    expect(said, '狭いままなのに配り直している').toEqual([true]);
+  });
+
+  /**
+   * 🔴 **広げたら「もう狭くない」と伝える**(着地前の動線レビュー)。
+   * ⚠ 伝えないと、対応している幅で「対応していません」と書いたままになる
+   *   ── 状態の行は 1 行しか無いので、本当に読ませたい文を押し出す。
+   */
+  it('🔴 広げたら、広くなったことを伝える', () => {
+    const s = setup(true);
+    const said: boolean[] = [];
+    appPhone.onTooNarrow((n) => said.push(n));
     s.narrow.set(true);
     s.narrow.set(false);
+    expect(said, '広げても何も伝えない(字が残る)').toEqual([true, false]);
+    // 🔑 もう一度狭めれば、また伝える(消したのに二度と出ない、を作らない)
     s.narrow.set(true);
-    expect(said, '狭めるたびに言っている(帯が埋まる)').toEqual(['狭い']);
+    expect(said, '一度消したら二度と出ない').toEqual([true, false, true]);
   });
 
   /**
@@ -875,23 +896,23 @@ describe('対応外の幅(1 度だけ)', () => {
   it('🔴 起動した時点でもう狭ければ、口を繋いだ瞬間に言う', () => {
     const s = setup(true);
     s.narrow.set(true); // ⚠ まだ誰も聞いていない
-    const said: string[] = [];
-    appPhone.onTooNarrow(() => said.push('狭い'));
-    expect(said, '起動時から狭い端末で 1 度も言わない').toEqual(['狭い']);
+    const said: boolean[] = [];
+    appPhone.onTooNarrow((n) => said.push(n));
+    expect(said, '起動時から狭い端末で 1 度も言わない').toEqual([true]);
   });
 
   /** ⚠ 対照群 ── 対応している幅では**繋いでも鳴らない**(常に言う実装を通さない)。 */
   it('🔴 360px 以上では言わない', () => {
     setup(true);
-    const said: string[] = [];
-    appPhone.onTooNarrow(() => said.push('狭い'));
+    const said: boolean[] = [];
+    appPhone.onTooNarrow((n) => said.push(n));
     expect(said, '対応している幅で言っている').toEqual([]);
   });
 
   it('🔴 口を外したら、そのあと狭めても言わない', () => {
     const s = setup(true);
-    const said: string[] = [];
-    const off = appPhone.onTooNarrow(() => said.push('狭い'));
+    const said: boolean[] = [];
+    const off = appPhone.onTooNarrow((n) => said.push(n));
     off();
     s.narrow.set(true);
     expect(said, '外した口へまだ流している').toEqual([]);
@@ -1057,22 +1078,33 @@ describe('CSS(構文で読む)', () => {
    * 🔑 実害は幅ではなく**パンくずが 0px になること** ── 2 ペインの操作は
    *   「どちらの箱に居るか」を見て決めるので、そこが消えると**移す先が読めない**。
    */
-  it('🔴 スマホの 2 ペインは上下に積む(横並びのままだと道が読めない)', () => {
-    const body = blocksFor(
-      withoutMedia(bare()),
-      `${PHONE} [data-pkc-region='dual-body']`,
-    ).join(' ');
-    expect(body, 'スマホで 2 ペインを積み直す規則が無い').not.toBe('');
+  it('🔴 縦に持ったスマホだけ 2 ペインを上下に積む(横では積まない)', () => {
+    /**
+     * ⚠ **`orientation` の `@media` の中から読む**(#632 段③ の着地前レビュー)──
+     *   横に持ったとき(667×375)は左右のままでもパンくずが 136px 出るのに、
+     *   積むと丈が 136px になり **6 行のうち 1 行しか出ない**(実測)。
+     */
+    const portrait = mediaBlock(bare(), '(orientation: portrait)').body;
+    const body = blocksFor(portrait, `${PHONE} [data-pkc-region='dual-body']`).join(' ');
+    expect(body, '縦のスマホで 2 ペインを積み直す規則が無い').not.toBe('');
+    /**
+     * 🔴 **`1fr` は `1fr 1fr` にも当たる**(着地前レビュー 1。再現つきで指摘された)──
+     *   `decl` は「値の頭」しか留めないので、**直す前の `1fr 1fr` へ戻す変異が
+     *   4 つの assert 全部を通り抜けた**。🔑 **末尾の `;` まで留める**。
+     */
     expect(body, '列が 1 本になっていない(横並びのまま)').toMatch(
-      decl('grid-template-columns', '1fr'),
+      decl('grid-template-columns', '1fr\\s*;'),
+    );
+    expect(body, '列が 2 本のまま(この検査は何も見ていない)').not.toMatch(
+      decl('grid-template-columns', '1fr\\s+1fr'),
     );
     expect(body, '上下が半分ずつになっていない(どちらが元か見た目から消える)').toMatch(
-      decl('grid-template-rows', '1fr 1fr'),
+      decl('grid-template-rows', '1fr\\s+1fr\\s*;'),
     );
-    // ⚠ 空振り防止 ── 広い窓の側は**横並びのまま**である(全部積んだのではない)
+    // ⚠ 空振り防止 ── 素の規則は**横並びのまま**である(全部積んだのではない)
     const wide = blocksFor(withoutMedia(bare()), `[data-pkc-region='dual-body']`).join(' ');
     expect(wide, '広い窓の 2 ペインまで積んでいる').toMatch(
-      decl('grid-template-columns', '1fr 1fr'),
+      decl('grid-template-columns', '1fr\\s+1fr'),
     );
   });
 

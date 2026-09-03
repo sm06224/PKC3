@@ -23,6 +23,7 @@ import {
 // ⚠ 綴りを写さない ── 見張る属性の正本は当てている側に在る(CLAUDE.md §7)
 import { TEXT_SCALE_ATTR } from './text-scale';
 import { sayFolded } from './fold-notify';
+import { appPhone } from './phone-layout';
 
 const KEY = 'pkc3.read-columns';
 
@@ -233,7 +234,22 @@ function noteFoldState(next: FoldState, say: (prev: FoldState) => string | null)
   foldState = next;
   if (prev === null || prev === next) return;
   const text = say(prev);
-  if (text !== null) sayFolded(text);
+  if (text === null) return;
+  /**
+   * 🔴 **スマホ用画面では言わない**(#632 段③)。
+   * ⚠ あの画面は**幅が足りないから 1 段なのではなく、1 枚ずつ出すのが既定**である
+   *   ── 「幅が足りないので段組みをやめました」は**起きていないことを言う**ことに
+   *   なり、しかも**畳まない選択肢が無い**ので user にできることが 1 つも無い。
+   * 🔑 **判断はここが持つ**(`sayFolded` に置かない)── 同じ口を通る
+   *   `split-view.ts` の「横に並べる枠を N 枚畳みました」は**本当に幅で落ちている**
+   *   ので、共有の口で黙らせると**押した操作が無言で効かない**形になる
+   *   (着地前レビューが拾った。理由は `fold-notify.ts` の docstring に表で在る)。
+   * ⚠ 黙っても行き止まりにはしない ── 設定の「本文の段組み」の下と、
+   *   パレットから回したときの知らせ(`sayColumnState`)は**この門を通らない**ので、
+   *   「いま何段で出ているか」と必要な幅は user から見える。
+   */
+  if (appPhone.isPhone()) return;
+  sayFolded(text);
 }
 
 export function fitColumnHeight(root: ParentNode, doc: Document = document): number | null {

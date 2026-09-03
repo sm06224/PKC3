@@ -67,27 +67,36 @@ describe('畳みの知らせ', () => {
     install(false);
     const said: string[] = [];
     setFoldNotify((t) => said.push(t));
-    sayFolded('幅が足りないので、横に並べる枠を 2 枚畳みました');
+    sayFolded('幅が足りないので段組みをやめました');
     expect(said, 'PC で畳みの理由を言わない(#606 が直した欠陥が戻っている)').toEqual([
-      '幅が足りないので、横に並べる枠を 2 枚畳みました',
+      '幅が足りないので段組みをやめました',
     ]);
   });
 
   /**
-   * 🔴 **スマホでは黙る**(#632 段③)。⚠ 対照群を**同じ it に置く** ── 置かないと
-   *   「口を配り忘れていて黙っていた」と区別が付かない(§1「別の理由で緑」)。
+   * 🔴 **この口はスマホでも黙らない**(#632 段③ の着地前レビューで直した)。
+   *
+   * ⚠ 1 稿目は `sayFolded` の中に `if (appPhone.isPhone()) return;` を置いたが、
+   *   **この口を通る知らせは 2 種類あって、黙ってよい理由が片方にしか無い**:
+   *   段組みは「1 枚ずつ出すのが既定」なので黙ってよいが、
+   *   **横に並べる枠は本当に幅で落ちている**(1 枚あたり約 448px 要る)。
+   * 🔴 黙らせると、user が押した「このノートを横に留める」が**無言で効かない**。
+   * 🔑 だから黙る判断は**呼び元**(`read-columns.ts`)が持ち、この口は素通しにした。
+   *   ⚠ ここでその形を pin しないと、共有の口へ門を戻す変異が**誰にも気づかれない**。
    */
-  it('🔴 スマホでは、畳んだ理由を言わない(起きていないことを言わない)', () => {
+  it('🔴 スマホでも、横に並べる枠を畳んだ理由は言う(押した操作を無言にしない)', () => {
     const s = install(true);
     const said: string[] = [];
     setFoldNotify((t) => said.push(t));
     sayFolded('幅が足りないので、横に並べる枠を 2 枚畳みました');
-    expect(said, 'スマホで畳みの理由を言っている').toEqual([]);
+    expect(said, 'スマホで枠の理由まで黙らせている(押しても何も起きない操作になる)').toEqual([
+      '幅が足りないので、横に並べる枠を 2 枚畳みました',
+    ]);
 
-    // 🔑 対照群 ── 同じ口・同じ文で、PC の幅に戻せば言う(口は生きている)
+    // 🔑 対照群 ── PC の幅でも同じく言う(スマホだけ特別扱いしていない)
     s.media.set(false);
     sayFolded('幅が足りないので、横に並べる枠を 2 枚畳みました');
-    expect(said, '口が死んでいた(上の空振りは黙ったからではない)').toHaveLength(1);
+    expect(said, 'PC で言わなくなった').toHaveLength(2);
   });
 
   it('⚠ 口が配られていなければ黙る(test や別の窓は帯を持たない)', () => {
@@ -110,6 +119,70 @@ describe('対応外の幅の 1 行', () => {
     expect(said, '対応している幅なのに言った').toEqual([]);
     s.narrow.set(true);
     expect(said, '対応外になっても言わない').toEqual([TOO_NARROW_TEXT]);
+  });
+
+  /**
+   * 🔴 **広げたら消える**(着地前の動線レビューで直した)。
+   *
+   * ⚠ 1 稿目は「狭くなった」しか伝えなかったので、**窓を広げても字が残った** ──
+   *   対応している幅で「対応していません」と書いてある = **画面が嘘をつく**うえ、
+   *   状態の行は 1 行しか無いので**本当に読ませたい文を押し出す**
+   *   (#300 段④ が常設バッジを外したのと同じ形)。
+   * ⚠ **空文字を配る**のが消し方である(`showStatus('')` が帯の枠を畳む)。
+   */
+  it('🔴 対応する幅へ戻したら、その行が消える', () => {
+    const s = install(true);
+    const said: string[] = [];
+    setFoldNotify((t) => said.push(t));
+    s.narrow.set(true);
+    expect(said, '前提が崩れた(狭くしても出ていない)').toEqual([TOO_NARROW_TEXT]);
+    s.narrow.set(false);
+    expect(said, '広げても消えない(対応している幅で「対応していません」と出たまま)').toEqual([
+      TOO_NARROW_TEXT,
+      '',
+    ]);
+  });
+
+  /**
+   * 🔴 **同じ値は続けて伝えない**(user 裁定 ⑥「1 度だけ」)。
+   * ⚠ 「消せるようにした」ことで**毎回言う**側へ倒れていないかを見る ──
+   *   狭いままの `change` は何度来ても 1 回しか言わない。
+   */
+  it('🔴 狭いまま何度知らせが来ても、字は 1 回しか出ない', () => {
+    const s = install(true);
+    const said: string[] = [];
+    setFoldNotify((t) => said.push(t));
+    s.narrow.set(true);
+    s.narrow.set(true);
+    s.narrow.set(true);
+    expect(said, '狭いままなのに繰り返し言っている(帯が知らせで埋まる)').toEqual([
+      TOO_NARROW_TEXT,
+    ]);
+  });
+
+  /** ⚠ 対照群 ── 広い窓で立ち上げた回に、**帯を勝手に消しに行かない**。 */
+  it('🔴 広い窓で口を繋いだだけでは、何も配らない', () => {
+    install(true);
+    const said: string[] = [];
+    setFoldNotify((t) => said.push(t));
+    expect(said, '何も言っていないのに帯を触っている(別の知らせを消す)').toEqual([]);
+  });
+
+  /**
+   * 🔴 **版面を張り直したら購読は捨てられる**(着地前レビュー 4)。
+   * ⚠ `install()` は先頭で `dispose()` を呼ぶので `narrowSubs` は空になる ──
+   *   つまり **`install` を `setFoldNotify` の後で呼ぶと、この 1 行は永久に死ぬ**。
+   *   いま呼び元は起動の 1 か所だけだが、順番を入れ替える変異を
+   *   unit でも殺せるようにここで pin する。
+   */
+  it('⚠ 版面を張り直すと購読は捨てられる(口を配り直すまで鳴らない)', () => {
+    install(true);
+    const said: string[] = [];
+    setFoldNotify((t) => said.push(t));
+    install(true, true); // 張り直す ── 前の購読は捨てられる
+    expect(said, '捨てたはずの購読へまだ流している').toEqual([]);
+    setFoldNotify((t) => said.push(t)); // 配り直せば鳴る(対照群)
+    expect(said, '配り直しても鳴らない').toEqual([TOO_NARROW_TEXT]);
   });
 
   it('🔴 起動した時点でもう狭ければ、口を繋いだ瞬間に出る', () => {
@@ -135,11 +208,24 @@ describe('対応外の幅の 1 行', () => {
     expect(now, '新しい口へ流れていない').toEqual([TOO_NARROW_TEXT]);
   });
 
-  it('⚠ 文言は「対応していない」と「360px 以上」を両方言う(何をすればよいか書く)', () => {
+  /**
+   * ⚠ **字の長さも主張である**(着地前レビュー)── 状態の行は `height: 20px` 固定で
+   *   `overflow` を持たないので、収まらない字は**画面の外へ落ちる**。
+   *   実測(340px・11px):「(画面は止めません)」を足すと `scrollHeight 25 / 20`、
+   *   外すと `20 / 20`。🔑 **いちばん狭い画面へ向けた字は、その画面で測る**
+   *   (実ブラウザの腕は `tests/smoke/phone.smoke.spec.ts` の 340px に在る)。
+   */
+  it('⚠ 文言は「対応していない」と「360px 以上」を言い、短く保つ', () => {
     expect(TOO_NARROW_TEXT, '何が起きているか書いていない').toContain('対応していません');
     expect(TOO_NARROW_TEXT, `${PHONE_MIN_PX}px 以上、と書いていない`).toContain(
       `${PHONE_MIN_PX}px`,
     );
-    expect(TOO_NARROW_TEXT, '画面を止めないことを書いていない').toContain('止めません');
+    /**
+     * ⚠ **実測した長さで留める** ── 340px・11px の帯で、**33 字は `20 / 20` で収まり、
+     *   43 字は `25 / 20` ではみ出した**。あいだは測っていないので、
+     *   通ったのを見た **33** を上限にする(伸ばすなら測り直してからにする)。
+     * 🔑 はみ出しそのものは実ブラウザで見る(`phone.smoke.spec.ts` の 340px の腕)。
+     */
+    expect(TOO_NARROW_TEXT.length, '長すぎて 340px の帯からはみ出す').toBeLessThanOrEqual(33);
   });
 });

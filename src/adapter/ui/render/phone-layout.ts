@@ -120,8 +120,13 @@ export class PhoneLayout {
    */
   private narrow: MediaLike | null = null;
   private onNarrowChange: (() => void) | null = null;
-  private narrowSubs: Array<() => void> = [];
-  private saidTooNarrow = false;
+  private narrowSubs: Array<(tooNarrow: boolean) => void> = [];
+  /**
+   * 🔴 **最後に伝えた値**。⚠ 初期は **`false`(広い)**にする ── 広い窓で
+   *   立ち上げた回に `cb(false)` を配ると、**帯に出ていた別の知らせを消す**
+   *   (このクラスは自分が何も言っていないときに帯を触ってはいけない)。
+   */
+  private lastTold = false;
 
   /**
    * 幅の見張りを張る。⚠ **戻り値で外せる**(unit が 1 件ずつ独立に張る)。
@@ -161,7 +166,7 @@ export class PhoneLayout {
      */
     const narrow = make(`(max-width: ${PHONE_MIN_PX - 1}px)`) ?? null;
     this.narrow = narrow;
-    this.saidTooNarrow = false;
+    this.lastTold = false;
     if (narrow?.addEventListener) {
       const fn = (): void => this.tellTooNarrow();
       this.onNarrowChange = fn;
@@ -169,10 +174,14 @@ export class PhoneLayout {
     }
     /**
      * ⚠ **ここでは鳴らさない**(#632 段③、変異試験 M7 が SURVIVED で教えた)。
-     *   `install` は `main.ts:730`、口を配る `setFoldNotify` は `:989` ── つまり
-     *   **この時点で聞いている人は 1 人も居ない**ので、呼んでも必ず素通りする。
+     *   `install` は `boot` の前半、口を配る `setFoldNotify` は後半で呼ばれるうえ、
+     *   ⚠ **`install` は先頭で `dispose()` を呼んで購読を空にする** ── つまり
+     *   **この時点で聞いている人は必ず 0 人**なので、呼んでも素通りする。
      * 🔑 鳴らすのは `onTooNarrow`(**繋いだ瞬間**)1 か所である ── 2 か所に置くと、
      *   片方が no-op のまま「これが要る」という顔で残る。
+     * ⚠ 帰結:**`install` を `setFoldNotify` の後で呼ぶと、対応外の 1 行は死ぬ**
+     *   (購読ごと捨てられる)。いま `install` の呼び元は `main.ts` の 1 か所だけで、
+     *   順番を入れ替える変異は `tests/smoke/phone.smoke.spec.ts` の 340px の腕が殺す。
      */
     this.paint();
     return () => this.dispose();
@@ -190,36 +199,52 @@ export class PhoneLayout {
     this.narrowSubs = [];
   }
 
-  /** いま**対応外の幅**か(`PHONE_MIN_PX` 未満)。 */
-  tooNarrow(): boolean {
+  /**
+   * いま**対応外の幅**か(`PHONE_MIN_PX` 未満)。
+   * ⚠ **外に消費者を作らない**(着地前レビュー)── 幅の判定を配ると、
+   *   「スマホか」と同じ問いに答える口が 2 つになる(CLAUDE.md §7)。
+   */
+  private tooNarrow(): boolean {
     return this.narrow?.matches === true;
   }
 
   /**
-   * 🔴 **対応外の幅になったことを 1 度だけ知らせる**購読口。
+   * 🔴 **対応外の幅かどうかが「変わったとき」に伝える**購読口。
    *
-   * ⚠ **口をここが持たない** ── 帯(`showStatus`)は `main.ts` の後ろで組まれるので、
-   *   `install` の時点では存在しない。🔑 購読された時点で**もう狭ければその場で**
-   *   1 度鳴らす(でないと「起動時から狭い」= いちばん普通の場合を落とす)。
+   * ⚠ **知らせではなく状態を配る**(着地前の動線レビューで直した)── 1 稿目は
+   *   「狭くなった」しか伝えず、**広げても帯の字が消えなかった**。状態の行は 1 行
+   *   しかないので、消えない字は**本当に読ませたい文を押し出す**うえ、
+   *   **対応している幅なのに「対応していません」と書いてある**= 画面が嘘をつく。
+   *   ⚠ これは #300 段④ が常設バッジを外したのと同じ形である(`main.ts` に理由が在る)。
+   * 🔑 だから `cb(true)` / `cb(false)` の**両方**を伝え、受け手が字を出し入れする。
+   * 🔑 「**1 度だけ**」は保つ ── 同じ値を続けて伝えない(`lastTold`)ので、
+   *   狭いあいだに何度呼ばれても字は 1 回しか出ない。
+   * ⚠ 口をここが持たない ── 帯(`showStatus`)は `main.ts` の後ろで組まれるので、
+   *   `install` の時点では存在しない。🔑 購読された時点で**もう狭ければその場で**伝える
+   *   (でないと「起動時から狭い」= いちばん普通の場合を落とす)。
    * ⚠ 向きを 1 本にする ── この file は `fold-notify` を import しない
    *   (あちらが `appPhone` を読むので、双方向にすると輪になる)。
    */
-  onTooNarrow(cb: () => void): () => void {
+  onTooNarrow(cb: (tooNarrow: boolean) => void): () => void {
     this.narrowSubs.push(cb);
-    if (this.saidTooNarrow) return () => this.unsubTooNarrow(cb);
     this.tellTooNarrow();
     return () => this.unsubTooNarrow(cb);
   }
 
-  private unsubTooNarrow(cb: () => void): void {
+  private unsubTooNarrow(cb: (tooNarrow: boolean) => void): void {
     this.narrowSubs = this.narrowSubs.filter((f) => f !== cb);
   }
 
-  /** ⚠ **1 度だけ**(掴んで狭めると `change` は何度も鳴る)。 */
+  /**
+   * ⚠ **変わったときだけ**伝える(掴んで動かすと `change` は何度も鳴る)。
+   * ⚠ 誰も聞いていなければ**伝えたことにしない** ── そうしないと、口を繋ぐ前に
+   *   狭くなった回が「伝え済み」になり、**起動時から狭い端末で 1 度も出ない**。
+   */
   private tellTooNarrow(): void {
-    if (this.saidTooNarrow || !this.tooNarrow() || this.narrowSubs.length === 0) return;
-    this.saidTooNarrow = true;
-    for (const cb of [...this.narrowSubs]) cb();
+    const now = this.tooNarrow();
+    if (now === this.lastTold || this.narrowSubs.length === 0) return;
+    this.lastTold = now;
+    for (const cb of [...this.narrowSubs]) cb(now);
   }
 
   /** いまスマホ用画面か。⚠ `applyPaneVisibility` のガードもこれを読む。 */

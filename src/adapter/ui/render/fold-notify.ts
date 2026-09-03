@@ -43,22 +43,31 @@ export function setFoldNotify(fn: ((text: string) => void) | null): void {
   notify = fn;
   unwatchNarrow?.();
   unwatchNarrow = null;
-  if (fn !== null) unwatchNarrow = appPhone.onTooNarrow(() => fn(TOO_NARROW_TEXT));
+  if (fn !== null)
+    unwatchNarrow = appPhone.onTooNarrow((tooNarrow) => fn(tooNarrow ? TOO_NARROW_TEXT : ''));
 }
 
 /**
  * 「幅が足りないので畳んだ」を言う。
  * ⚠ 口が配られていなければ**黙る**(test や別窓は帯を持たない)。
  *
- * 🔴 **スマホ用画面では黙る**(#632 段③)。
- * ⚠ あの画面は**幅が足りないから畳んでいるのではなく、1 枚ずつ出すのが既定**である
- *   ── 「幅が足りないので畳みました」は**起きていないことを言う**ことになる。
- *   しかも**畳まない選択肢が無い**ので、user にできることが 1 つも無い知らせになる
- *   (CLAUDE.md「手詰まりにしない」の裏)。
- * 🔑 判定は `appPhone` **1 か所**から引く(幅の数字をここに書かない)。
+ * 🔴 **ここでスマホを見ない**(#632 段③ の着地前レビューで直した)。
+ *
+ * ⚠ 1 稿目はここに `if (appPhone.isPhone()) return;` を置いたが、
+ *   **この口を通る知らせは 2 種類あって、黙ってよい理由が片方にしか無い**:
+ *
+ * | 呼び元 | 文言 | スマホで黙ってよいか |
+ * |---|---|---|
+ * | `read-columns.ts` | 「幅が足りないので段組みをやめました」 | ✅ あの画面は 1 枚ずつ出すのが既定 |
+ * | `split-view.ts` | 「幅が足りないので、横に並べる枠を N 枚畳みました」 | 🔴 **駄目** ── 本当に幅で落ちている |
+ *
+ * 🔴 後者を黙らせると、user が押した**「このノートを横に留める」が無言で効かない**
+ *   ── 実装を読むと `fittingSplitFrames` は 1 枚あたり約 448px を要求するので、
+ *   スマホの幅では **2 枚目が絶対に入らない**。理由を消したら、押したのに
+ *   何も起きない操作になる(#583 で直した無言の dead click と同じ形)。
+ * 🔑 だから**黙る判断は呼び元が持つ**(`read-columns.ts`)── 口は 1 つのまま。
  */
 export function sayFolded(text: string): void {
-  if (appPhone.isPhone()) return;
   if (notify !== null) notify(text);
 }
 
@@ -73,6 +82,18 @@ export function sayFolded(text: string): void {
  *   (#606「口が 2 つある限り、片方を配線し忘れても誰も気づかない」)。
  * 🔑 **1 度だけ**の数え方は `appPhone` が持つ ── 窓を掴んで狭めると `change` は
  *   何度も鳴るので、鳴った数だけ言うと帯が知らせで埋まる。
+ *   ⚠ **広げたら消す**のも `appPhone` が伝える(`onTooNarrow(false)`)── 消さないと
+ *   対応している幅で「対応していません」と書いたままになる。
+ *
+ * 🔴 **字は user 裁定の言葉そのままにする**(着地前レビューで戻した)。
+ * ⚠ 1 稿目は末尾に「(画面は止めません)」を足していたが、2 つ壊していた:
+ *   ① **打ち消しは疑いを生む**(user は画面が止まるとは思っていないので、
+ *      読んだ瞬間に「止まる場合があるのか」と読む)
+ *   ② 🔴 **状態の行に収まらない** ── 実測(340px・11px):
+ *      足した版は `scrollHeight 25 / clientHeight 20` で **2 行に折り返して
+ *      画面の外へはみ出し**、外した版は **20 / 20** でぴったり収まる。
+ *      ⚠ 帯は `height: 20px` 固定で `overflow` を持たないので、はみ出しても
+ *      画面には**切れた 1 行**しか出ない(いちばん狭い画面へ向けて、
+ *      その画面でいちばん長い字を出していた)。
  */
-export const TOO_NARROW_TEXT =
-  'この幅には対応していません ── 360px 以上でお使いください(画面は止めません)';
+export const TOO_NARROW_TEXT = 'この幅には対応していません ── 360px 以上でお使いください';

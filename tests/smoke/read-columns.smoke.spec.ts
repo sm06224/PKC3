@@ -1110,6 +1110,17 @@ test('🔴 窓を狭めて段組みが畳まれると、理由が帯に出る (#
    *   ── 下に**スマホ側の対照群**を置いて、両方向を 1 度ずつ通す。
    */
   await page.setViewportSize({ width: 800, height: 900 });
+  /**
+   * ⚠ **どちらの門が鳴ったか見分ける**(着地前レビュー 3)── この腕は
+   *   「畳まれたら言う」を守っているが、`PHONE_MAX_PX` を広げると
+   *   **製品が正しいのに落ちる**(スマホ用画面は黙るのが正しい)。
+   * 🔑 先に前提を assert すると、落ちたときの文言が
+   *   「言わない」ではなく「**幅を上げ直せ**」を指す。
+   */
+  await expect(
+    page.locator('[data-pkc-region="shell"]'),
+    'この幅がスマホ用画面に入った ── 台の幅を上げ直す(製品の欠陥ではない)',
+  ).not.toHaveAttribute('data-pkc-layout', 'phone');
   await expect(status, '畳まれたのに理由が出ない').toContainText('幅が足りないので段組みをやめました');
   await expect(
     page.locator('[data-pkc-view-pane="detail"]'),
