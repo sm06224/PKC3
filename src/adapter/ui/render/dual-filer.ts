@@ -55,8 +55,20 @@ const SEP = '\u0000';
 
 const SIDES: readonly DualSide[] = ['left', 'right'];
 
-/** 側の呼び名。⚠ **画面に出る字**なので features には置かない(層規約)。 */
+/**
+ * 側の呼び名。⚠ **画面に出る字**なので features には置かない(層規約)。
+ *
+ * 🔴 **置かれ方で呼び名が変わる**(#632 段③ の着地前レビュー)── 縦に持った
+ *   スマホでは 2 枚を**上下に積む**ので、「左のペイン」と読み上げると
+ *   **画面と逆のことを言う**。
+ * 🔑 判定は **DOM の実寸 1 か所**から採る(`stackedNow`)── CSS が積むかどうかを
+ *   決めているので、こちらで幅や向きを二度判定すると
+ *   **同じ問いに答える口が 2 つ**になる(CLAUDE.md §7)。
+ */
 const SIDE_LABEL: Readonly<Record<DualSide, string>> = { left: '左', right: '右' };
+const SIDE_LABEL_STACKED: Readonly<Record<DualSide, string>> = { left: '上', right: '下' };
+const sideLabel = (side: DualSide, stacked: boolean): string =>
+  (stacked ? SIDE_LABEL_STACKED : SIDE_LABEL)[side];
 
 /**
  * 🔴 **列の定義**(2026-08-19 の作り直し)。
@@ -183,8 +195,24 @@ const COMMAND_ITEMS: readonly {
   },
 ];
 
-const otherSideLabel = (side: DualSide): string =>
-  SIDE_LABEL[side === 'left' ? 'right' : 'left'];
+const otherSideLabel = (side: DualSide, stacked: boolean): string =>
+  sideLabel(side === 'left' ? 'right' : 'left', stacked);
+
+/**
+ * 🔴 **いま 2 枚が上下に積まれているか**を、**実寸**で見る。
+ *
+ * ⚠ `matchMedia` で聞き直さない ── 積むかどうかを決めているのは CSS
+ *   (`@media (orientation: portrait)` + スマホ用画面)なので、こちらで
+ *   同じ条件を書くと**片方を変えた日に静かにずれる**。
+ * ⚠ **採寸できない回は「積んでいない」と読む** ── 面が畳まれている / まだ
+ *   組まれていないときは両方 0 になり、「左端が同じ」が**常に真**になる。
+ */
+function stackedNow(left: HTMLElement, right: HTMLElement): boolean {
+  const a = left.getBoundingClientRect();
+  const b = right.getBoundingClientRect();
+  if (a.width <= 0 || b.width <= 0) return false;
+  return Math.abs(a.left - b.left) < 1 && b.top - a.top > 1;
+}
 
 /** 1 つのペインの部品(器は 1 度だけ作る)。 */
 interface PaneFrame {
@@ -342,6 +370,12 @@ export class DualFilerRenderer {
       this.renderPane(frame.panes[side], side, state, pane, rows, bookmarks);
     }
     /**
+     * 🔴 **置かれ方が変わったら呼び名を塗り直す**(#632 段③)。
+     * ⚠ `buildPane` は器を 1 度しか作らないので、ここで塗らないと
+     *   **上下に積んだ画面を「左のペイン」と読み上げ続ける**。
+     */
+    this.paintSideNames(frame);
+    /**
      * 🔴 **焦点の側は「移す向き」そのもの**なので、必ず画面に出す
      * (出さないと user は**どちらが元か分からないまま**押すことになる)。
      */
@@ -354,6 +388,24 @@ export class DualFilerRenderer {
       }
     }
     this.renderCommands(frame.commands, frame.panes[state.dual.focus], state);
+  }
+
+  /** 直前に塗った呼び名(⚠ 毎描画で属性を書き換えない)。 */
+  private lastStacked: boolean | null = null;
+
+  private paintSideNames(frame: NonNullable<DualFilerRenderer['frame']>): void {
+    const stacked = stackedNow(frame.panes.left.root, frame.panes.right.root);
+    if (stacked === this.lastStacked) return;
+    this.lastStacked = stacked;
+    for (const side of SIDES) {
+      const f = frame.panes[side];
+      const name = sideLabel(side, stacked);
+      f.root.setAttribute('aria-label', `${name}のペイン`);
+      f.crumbs.setAttribute('aria-label', `${name}のペインの現在地`);
+      f.filter.title = `${name}のペインだけを名前で絞ります`;
+    }
+    // ⚠ 呼び名が変われば操作の説明も作り直す(指紋を捨てる)
+    this.lastCommands = '';
   }
 
   private ensureFrame(): NonNullable<DualFilerRenderer['frame']> {
@@ -395,7 +447,7 @@ export class DualFilerRenderer {
     root.setAttribute('data-pkc-side', side);
     // 🔑 押した所へ焦点が移る ── 「移す元」を選ぶのに専用のボタンを作らない
     root.setAttribute('data-pkc-action', 'dual-focus');
-    root.setAttribute('aria-label', `${SIDE_LABEL[side]}のペイン`);
+    root.setAttribute('aria-label', `${SIDE_LABEL[side]}のペイン`); // ⚠ 置かれ方で塗り直す
     /**
      * 🔴 **器そのものを焦点の受け皿にする**(#273。実ブラウザ smoke で判明)。
      *
@@ -418,7 +470,7 @@ export class DualFilerRenderer {
     tabs.setAttribute('role', 'tablist');
     const crumbs = document.createElement('nav');
     crumbs.setAttribute('data-pkc-region', 'dual-crumbs');
-    crumbs.setAttribute('aria-label', `${SIDE_LABEL[side]}のペインの現在地`);
+    crumbs.setAttribute('aria-label', `${SIDE_LABEL[side]}のペインの現在地`); // ⚠ 同上
 
     /**
      * 🔴 **道具の帯**(#273 残件)── 戻る / 進む / 留める / 絞る。
@@ -445,7 +497,7 @@ export class DualFilerRenderer {
     filter.type = 'search';
     filter.setAttribute('data-pkc-field', 'dual-filter');
     filter.placeholder = '名前で絞る';
-    filter.title = `${SIDE_LABEL[side]}のペインだけを名前で絞ります`;
+    filter.title = `${SIDE_LABEL[side]}のペインだけを名前で絞ります`; // ⚠ 同上
     filter.setAttribute('aria-label', filter.title);
     head.append(back, forward, crumbs, filter, pin);
 
@@ -850,7 +902,7 @@ export class DualFilerRenderer {
       add.type = 'button';
       add.setAttribute('data-pkc-action', 'dual-tab-add');
       add.setAttribute('data-pkc-side', side);
-      add.setAttribute('aria-label', `${SIDE_LABEL[side]}にタブを足す`);
+      add.setAttribute('aria-label', `${sideLabel(side, this.lastStacked === true)}にタブを足す`);
       add.title = 'いまの場所を、もう 1 枚のタブで開きます';
       add.textContent = '+';
       host.append(add);
@@ -1070,7 +1122,8 @@ export class DualFilerRenderer {
     const sig = [from, String(count), state.dual.previewOn ? 'p' : '-', ...keys].join(SEP);
     if (sig === this.lastCommands) return;
     this.lastCommands = sig;
-    const to = otherSideLabel(from);
+    const stacked = this.lastStacked === true;
+    const to = otherSideLabel(from, stacked);
     host.textContent = '';
     COMMAND_ITEMS.forEach((it, i) => {
       const b = document.createElement('button');
@@ -1091,7 +1144,7 @@ export class DualFilerRenderer {
       b.title =
         it.empty !== null && count === 0
           ? it.empty
-          : `${it.hint(SIDE_LABEL[from], to)}${it.empty !== null ? `(いま ${count} 件)` : ''}`;
+          : `${it.hint(sideLabel(from, stacked), to)}${it.empty !== null ? `(いま ${count} 件)` : ''}`;
       // 🔑 出し入れの口は**押している状態**を出す(点いているか、字だけでは読めない)
       if (it.action === 'dual-preview-toggle')
         b.setAttribute('aria-pressed', state.dual.previewOn ? 'true' : 'false');

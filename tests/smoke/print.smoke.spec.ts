@@ -25,7 +25,7 @@
 import { test, expect } from '@playwright/test';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { gotoApp, clickReal, createEntry, useSplitEditor } from './helpers';
+import { gotoApp, clickReal, createEntry, dismissAnnounce, useSplitEditor } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -219,3 +219,94 @@ test('🔴 情報ペインの「PDF」を押すと印刷が始まる', async ({ 
     .poll(async () => page.evaluate(() => (globalThis as unknown as Record<string, number>).__printed))
     .toBeGreaterThan(0);
 });
+
+/**
+ * 🔴 **狭い紙(A5)に刷っても、本文が紙に出る**(#632 段③、設計 doc §2-17)。
+ *
+ * ## なぜ独立した腕が要るか
+ *
+ * 上の A4(794px)の腕は、**スマホ用画面をただの 1 度も通らない** ── 794px は
+ * `PHONE_MAX_PX`(720px)より広いからである。ところが 🔴 **印刷中の版面幅は
+ * 紙の幅**なので、A5 縦(**559px**)では `matchMedia` が真になり、
+ * **スマホ用画面のまま紙へ行く**。
+ *
+ * そのとき中央の面は `visibility: hidden` で重なっているので、
+ * ⚠ **本文が 1 文字も出ない**(一覧ページで刷ると、白紙が出る)。
+ * 🔑 だから `@media print` が中央を `visibility: visible` へ戻している ──
+ * この腕は**その 1 行が本当に効いているか**を、紙の側から見る。
+ *
+ * ## ⚠ いちばん危ない状態から測る
+ *
+ * **一覧ページに戻ってから**刷る ── 本文ページのまま刷ると中央は元から見えていて、
+ * 戻しの 1 行を消しても緑のままになる(§1「別の理由で成立している」)。
+ */
+test('🔴 A5(559px)の紙でも、一覧ページのまま刷って本文が出る', async ({ page }) => {
+  await page.setViewportSize({ width: 559, height: 794 });
+  await gotoApp(page);
+  // ⚠ この幅ではお知らせが**画面いっぱい**である(user 裁定 2026-09-02)── 畳まないと
+  //   作る口に触れない。⚠ 紙の主張とは無関係なので、ここは前提を整えるだけである。
+  await dismissAnnounce(page);
+  await createEntry(page, 'text');
+  const ta = page.locator('[data-pkc-field="editor-body"]');
+  await ta.click();
+  await ta.fill(
+    Array.from({ length: 60 }, (_, i) => `## 章 ${i}\n\n紙に出るはずの行 ${i}`).join('\n\n'),
+  );
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  // 🔴 **いちばん危ない状態**へ移る ── 一覧ページ(中央が隠れている)
+  await clickReal(page, '[data-pkc-field="phone-back"]');
+  const shell = page.locator('[data-pkc-region="shell"]');
+  await expect(shell, 'この幅でスマホ用画面になっていない(何も測っていない)').toHaveAttribute(
+    'data-pkc-layout',
+    'phone',
+  );
+  await expect(shell, '一覧ページに居ない(危ない状態を作れていない)').toHaveAttribute(
+    'data-pkc-page',
+    'list',
+  );
+  // ⚠ 空振り防止 ── 画面ではまだ中央は**隠れている**(戻しは印刷だけの話である)
+  const onScreen = await page.evaluate(
+    () =>
+      getComputedStyle(document.querySelector('[data-pkc-region="center"]')!).visibility,
+  );
+  expect(onScreen, '画面でも中央が見えている(この幅はスマホ用画面ではない)').toBe('hidden');
+
+  await page.emulateMedia({ media: 'print' });
+  const printed = await page.evaluate(() => {
+    const cs = (sel: string) => {
+      const el = document.querySelector(sel) as HTMLElement | null;
+      return el ? getComputedStyle(el) : null;
+    };
+    const body = document.querySelector('[data-pkc-field="detail-body"]') as HTMLElement | null;
+    return {
+      center: cs("[data-pkc-region='center']")?.visibility ?? '(無し)',
+      shell: cs("[data-pkc-region='shell']")?.display ?? '(無し)',
+      sidebar: cs("[data-pkc-region='sidebar']")?.display ?? '(無し)',
+      bar: cs("[data-pkc-region='phone-bar']")?.display ?? '(無し)',
+      // 🔴 「見える」だけでなく**箱が在る**ことを対で見る(この file の罠①)
+      boxes: body?.getClientRects().length ?? 0,
+      scrollH: body?.scrollHeight ?? 0,
+    };
+  });
+
+  expect(printed.center, '🔴 一覧ページのまま刷ると本文が 1 文字も出ない').toBe('visible');
+  expect(printed.boxes, '中央は見えているのに本文の箱が無い(罠①)').toBeGreaterThan(0);
+  expect(printed.scrollH, '本文が 1 行も組まれていない').toBeGreaterThan(2000);
+  // ⚠ 紙に押せない物は出さない(A4 の腕と同じ約束が、この幅でも成り立つ)
+  expect(printed.shell, '紙でも grid のまま(器がほどけていない)').toBe('block');
+  expect(printed.sidebar, '紙に一覧が出ている').toBe('none');
+  expect(printed.bar, '紙にページの帯が出ている(押せる物が無い)').toBe('none');
+
+  /**
+   * 🔴 **紙が本当に増えたことまで見る**(計算後の style は「指定した」だけ)。
+   * ⚠ `page.pdf()` は headless 限定 ── headed のときは飛ばす。
+   */
+  const pdf = await page.pdf({ format: 'A5' }).catch(() => null);
+  if (pdf) {
+    const pages = (pdf.toString('latin1').match(/\/Type\s*\/Page[^s]/g) ?? []).length;
+    expect(pages, `A5 の紙が 1 枚しか出ていない(本文が落ちている)。頁数=${pages}`)
+      .toBeGreaterThan(2);
+  }
+});
+

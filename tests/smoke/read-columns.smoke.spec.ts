@@ -1098,8 +1098,29 @@ test('🔴 窓を狭めて段組みが畳まれると、理由が帯に出る (#
   //   **別の口に満たされる**(CLAUDE.md §1「救い手が変わっただけ」)。
   await expect(status).not.toContainText('幅が足りないので段組みをやめました');
 
-  // 🔴 912px を割る幅へ縮める
-  await page.setViewportSize({ width: 700, height: 900 });
+  /**
+   * 🔴 912px を割る幅へ縮める。
+   *
+   * ⚠ **`PHONE_MAX_PX`(720px)より広い幅にする**(#632 段③ で書き換えた)──
+   *   直す前はここが **700px** で、いまはスマホ用画面に入る幅である。
+   *   あの画面では畳みの理由を**わざと黙らせた**(1 枚ずつ出すのが既定なので、
+   *   「幅が足りないので畳みました」は**起きていないことを言う**ことになる)ので、
+   *   700px のままだとこの test は**製品が正しいのに落ちる**。
+   * 🔑 800px なら器は 912px を割るが、版面はパソコンのままである
+   *   ── 下に**スマホ側の対照群**を置いて、両方向を 1 度ずつ通す。
+   */
+  await page.setViewportSize({ width: 800, height: 900 });
+  /**
+   * ⚠ **どちらの門が鳴ったか見分ける**(着地前レビュー 3)── この腕は
+   *   「畳まれたら言う」を守っているが、`PHONE_MAX_PX` を広げると
+   *   **製品が正しいのに落ちる**(スマホ用画面は黙るのが正しい)。
+   * 🔑 先に前提を assert すると、落ちたときの文言が
+   *   「言わない」ではなく「**幅を上げ直せ**」を指す。
+   */
+  await expect(
+    page.locator('[data-pkc-region="shell"]'),
+    'この幅がスマホ用画面に入った ── 台の幅を上げ直す(製品の欠陥ではない)',
+  ).not.toHaveAttribute('data-pkc-layout', 'phone');
   await expect(status, '畳まれたのに理由が出ない').toContainText('幅が足りないので段組みをやめました');
   await expect(
     page.locator('[data-pkc-view-pane="detail"]'),
@@ -1109,6 +1130,50 @@ test('🔴 窓を狭めて段組みが畳まれると、理由が帯に出る (#
   // 🔑 **戻る道も見る**(片道にしない)
   await page.setViewportSize({ width: 2560, height: 900 });
   await expect(status, '戻ったのに黙っている').toContainText('段組みに戻しました');
+
+  expect(errors, 'ページ例外が出ている').toEqual([]);
+});
+
+/**
+ * 🔴 **スマホ用画面では、畳んだ理由を言わない**(#632 段③)。
+ *
+ * ⚠ **上の test の対照群である** ── 同じ「畳まれる」でも、
+ *   スマホ用画面は**幅が足りないから畳んでいるのではない**。あの画面は
+ *   一覧・本文・情報を **1 枚ずつ出すのが既定**で、しかも**畳まない選択肢が無い**
+ *   ので、「幅が足りないので段組みをやめました」は
+ *   ①起きていないことを言い ②user にできることが 1 つも無い知らせになる。
+ *
+ * 🔑 **黙ることだけを見ると空振りする**(何も配線しなくても黙る)── だから
+ *   **本当に畳まれていること**を同じ it の中で assert する。
+ */
+test('🔴 スマホ用画面では、段組みを畳んでも理由を言わない (#632 段③)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 2560, height: 900 });
+  await gotoApp(page);
+  await writeNote(page);
+  await setColumns(page, '2');
+  await expect(
+    page.locator('[data-pkc-view-pane="detail"]'),
+    '前提が崩れた(そもそも段組みになっていない)',
+  ).toHaveAttribute('data-pkc-columns-on', '');
+
+  // 🔴 スマホ用画面の幅へ(`PHONE_MAX_PX` = 720px 以下)
+  await page.setViewportSize({ width: 700, height: 900 });
+  const shell = page.locator('[data-pkc-region="shell"]');
+  await expect(shell, 'この幅でスマホ用画面になっていない(何も測っていない)').toHaveAttribute(
+    'data-pkc-layout',
+    'phone',
+  );
+  // 🔑 空振り防止 ── **畳まれてはいる**(黙っているのは、畳んでいないからではない)
+  await expect(
+    page.locator('[data-pkc-view-pane="detail"]'),
+    '畳まれていない(この test は「黙る」を何も検めていない)',
+  ).not.toHaveAttribute('data-pkc-columns-on', '');
+
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    'スマホ用画面で「幅が足りない」と言っている(起きていないことを言っている)',
+  ).not.toContainText('幅が足りないので段組みをやめました');
 
   expect(errors, 'ページ例外が出ている').toEqual([]);
 });
