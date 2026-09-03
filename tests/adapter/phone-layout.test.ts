@@ -671,6 +671,64 @@ describe('探す・絞る・目次(隠れた面へ送らない)', () => {
     ).toBe('entry-filter');
   });
 
+  /**
+   * 🔴 **集中モードの鍵も、スマホでは断る**(#632 段④。実測で見つけた)。
+   *
+   * ⚠ 段① は `toggle-pane`(`Alt+[` / `Alt+]`)にだけ門を置き、**対称の反対側**である
+   *   この鍵(`Mod+Alt+\`)を取りこぼしていた。
+   * 🔴 実測(375×667):`pkc3.panes` が `null` → **`'sidebar inspector'`** に変わるのに、
+   *   画面は 1px も動かず状態の行も**空のまま**だった ── **見えない状態変化が保存される**
+   *   ので、PC の幅へ戻したときに**身に覚えのない畳み**が残る。
+   * 🔑 だから見るのは 2 つ:**理由が出ること**と、🔴 **保存値が動かないこと**。
+   *   ⚠ 後者を書かないと、「断り文を出してから畳む」実装が素通りする。
+   */
+  it('🔴 集中モードの鍵はスマホで断り、畳みの保存値も動かさない', () => {
+    const s = setup(true);
+    s.open('n1');
+    const before = appPanes.getHidden().join(' ');
+    s.root.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: '\\',
+        ctrlKey: true,
+        altKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(s.d.getState().error ?? '', 'スマホで集中モードを黙って受けている').toContain(
+      '列は畳めません',
+    );
+    expect(
+      appPanes.getHidden().join(' '),
+      '断ったのに保存値が動いた(PC へ戻すと身に覚えのない畳みが残る)',
+    ).toBe(before);
+  });
+
+  /**
+   * ⚠ **対照群** ── PC の幅では今までどおり両側を畳む。
+   * ⚠ 置かないと「いつでも断る」実装が上を素通りする(集中モードごと殺す変異)。
+   */
+  it('PC の幅では集中モードが効く(両側を畳む)', () => {
+    const s = setup(false);
+    s.open('n1');
+    appPanes.setHidden([]);
+    s.root.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: '\\',
+        ctrlKey: true,
+        altKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(appPanes.getHidden().slice().sort().join(' '), 'PC で集中モードが効かない').toBe(
+      'inspector sidebar',
+    );
+    expect(s.d.getState().error ?? '', 'PC にスマホ用の断りが出ている').not.toContain(
+      '列は畳めません',
+    );
+  });
+
   /** ⚠ **対照群** ── PC の幅では今までどおり(ページを移さない)。 */
   it('PC の幅では一覧を閉じない(ページという概念が無い)', () => {
     const s = setup(false);
