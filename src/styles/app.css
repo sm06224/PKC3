@@ -4076,8 +4076,19 @@ li[data-pkc-row-slot] {
   background: var(--surface);
   font-size: 12px;
 }
-/* ⚠ **横に並べて、あふれたら横に流す** ── 縦に積むと、3 本計った瞬間に
- * 本文が 3 行ぶん押し下がる(補助が主の領域を奪わない ── #300)。 */
+/**
+ * ⚠ **横に並べる** ── 入る限りは 1 行に収める(縦に積むと、3 本計った瞬間に
+ * 本文が 3 行ぶん押し下がる ── 補助が主の領域を奪わない、#300)。
+ *
+ * 🔴 **入りきらないときは折る**(#632 段② の着地前レビュー 欠陥 5)。
+ * ⚠ 1 稿目は `overflow-x: auto` で**横に流していた**が、流れた先は
+ *   **画面の外**である ── 実測:768px(iPad 縦)で 3 本走らせると
+ *   3 本目の「止める」は **右端 868px**、`elementFromPoint` は **null**
+ *   (押せない)。⚠ iOS では横スクロールバーが出ないので、**続きが在ることも
+ *   見えない**。🔑 止める口が見えないのは「押せない」と同じである。
+ * 🔑 **折るのは入りきらないときだけ**なので、広い窓の見え方は 1px も変わらない
+ *   (3 本でも 1 行に収まる)。
+ */
 [data-pkc-field='timer-list'] {
   display: flex;
   align-items: center;
@@ -4087,13 +4098,30 @@ li[data-pkc-row-slot] {
   margin: 0;
   padding: 0;
   list-style: none;
-  overflow-x: auto;
+  flex-wrap: wrap;
 }
-[data-pkc-field='timer-list'] > li {
+/**
+ * 🔴 **長い題名で、頁ごと横に広がらないようにする**(#632 段② の着地前レビュー B)。
+ *
+ * ⚠ 帯に出るのは **`<題名> <経過>`** = **user の題名そのまま**(`timer-run.ts`)。
+ *   `white-space: nowrap` なので、題名が長いと項目の min-content が窓を超える。
+ * ⚠ 直す前はそれを **list の `overflow-x: auto`** が受けていた ── 折る形にした
+ *   ぶん、受け皿が消える。🔑 **項目の側で省く**(`…`)ので、どちらの形でも
+ *   `document.scrollWidth` は窓を超えない(#586 の主張そのもの)。
+ */
+[data-pkc-field='timer-list'] > li,
+[data-pkc-field='alarm-list'] > li {
   display: flex;
   align-items: center;
   gap: var(--s1);
+  min-width: 0;
   white-space: nowrap;
+}
+[data-pkc-field='timer-list'] > li > span,
+[data-pkc-field='alarm-list'] > li > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 [data-pkc-field='timer-label'] {
   color: var(--muted);
@@ -4111,6 +4139,7 @@ li[data-pkc-row-slot] {
   background: var(--surface);
   font-size: 12px;
 }
+/* ⚠ タイマーの帯と**同じ形**にする(上の注記どおり、入りきらなければ折る)。 */
 [data-pkc-field='alarm-list'] {
   display: flex;
   align-items: center;
@@ -4120,14 +4149,9 @@ li[data-pkc-row-slot] {
   margin: 0;
   padding: 0;
   list-style: none;
-  overflow-x: auto;
+  flex-wrap: wrap;
 }
-[data-pkc-field='alarm-list'] > li {
-  display: flex;
-  align-items: center;
-  gap: var(--s1);
-  white-space: nowrap;
-}
+/* ⚠ 項目の形は timer と同じ規則にまとめた(上)── 2 か所に書かない(§7)。 */
 [data-pkc-field='alarm-label'] {
   color: var(--fg);
   font-weight: 600;
@@ -5249,8 +5273,12 @@ li[data-pkc-row-slot] {
  * > 「指で触る端末では、コードの右上の**コピー**と図の**原文⇄描画**を常に出す
  * > (いまは乗せたときだけ = 触る端末では**一度も出ない**)」
  *
- * ⚠ 指の端末に `:hover` は無いので、この 2 つは**存在しないのと同じ**だった
- *   (`opacity: 0` のまま押せる場所にも当たらない)。
+ * 🔴 ⚠ **`opacity: 0` の要素は、押せる場所には**残っている**(着地前レビュー K)。
+ *   `pointer-events: none` も `visibility: hidden` も付いていないので、直す前は
+ *   **見えないボタンが黙って押されていた** ── 指で囲みの右上に触ると
+ *   **勝手にコピーされ**、図の右上に触ると**絵が原文の字に化けた**。
+ *   🔑 つまりこの変更は「出す」だけでなく「**見えないのに反応する所を 1 つ消す**」
+ *   でもある(user から見た実害はこちらのほうが大きい)。
  * ⚠ **`(hover: none)` だけで切る**(`pointer` は見ない)── 判定を 2 つ重ねると、
  *   マウスを繋いだタブレットのように**片方だけ真**の端末で消える。
  */
@@ -5278,18 +5306,33 @@ li[data-pkc-row-slot] {
  *   ── 一括で当てると印が潰れる。
  */
 @media (hover: none) and (pointer: coarse) {
-  input:not([type='checkbox']):not([type='radio']),
-  textarea,
-  select {
+  /**
+   * ⚠ **器を 1 つ噛ませて詳細度を上げる**(#632 段② の着地前レビュー 欠陥 1)。
+   * 🔴 1 稿目は素の `textarea`(0,0,1)だったので、**本文を打つ 3 つの欄に負けていた**
+   *   ── `[data-pkc-field='row-source']` / `append-input` / `editor-body` は
+   *   どれも属性 1 つ (0,1,0) で `font-size: 12.5px` を当てている。
+   *   実測:触る端末で `editor-body` **12.5px** / `append-input` **12.5px**
+   *   (探す欄だけ 16px)= **ノートを書く欄では、直したはずの拡大がそのまま起きる**。
+   * 🔑 `[data-pkc-slot='root']` を噛ませると (0,1,1) になり、**field 名を並べずに**
+   *   勝てる ── 将来 field を足した人が、この表に書き足す必要も無い。
+   */
+  [data-pkc-slot='root'] input:not([type='checkbox']):not([type='radio']),
+  [data-pkc-slot='root'] textarea,
+  [data-pkc-slot='root'] select {
     font-size: max(16px, var(--pkc-text-size, 13px));
   }
 
   /**
    * 🔴 **帯のボタンに最小の丈**(#632 段②)。
-   * ⚠ 帯の字は 12px・詰めは 2px なので、押し所は **20px 弱**しかない ──
-   *   指では隣を押す。🔑 **ページの帯と同じ 32px** に揃える(`phone-bar button` が
-   *   既に 32px で、その注記が「段② で触る端末の最小丈をまとめて見る」と
-   *   ここを指している)── 端末の中で押し所の大きさを 2 種類作らない。
+   * ⚠ **直す前は 26px** である(着地前レビュー D で実測を訂正)── 素の
+   *   `button { height: var(--row-h) }`(この file の上のほう)+ `--row-h: 26px`
+   *   (`tokens.css`、再定義 0 件)。1 稿目は「字 12px + 詰め 2px = 20px 弱」と
+   *   **足し算で推定**して書いていたが、丈を決めているのは素の `button` である。
+   * 🔑 **ページの帯と同じ 32px** に揃える(`phone-bar button` が既に 32px で、
+   *   その注記が「段② で触る端末の最小丈をまとめて見る」と**ここを指している**)。
+   * ⚠ 揃うのは**指の端末**だけである ── `phone-bar button` は無条件なので、
+   *   マウスで窓を細くした人には 32px(ページの帯)と 26px(この帯)が同居する
+   *   (着地前レビュー L)。指で押す所を大きくするのが目的なので、そこは追わない。
    * ⚠ 縦の予算を食うので**帯の中のボタンだけ**に当てる ── 一覧の行や
    *   道具の列まで広げると、狭い画面で本文が押し出される(段⓪ の実測)。
    */
@@ -5303,21 +5346,33 @@ li[data-pkc-row-slot] {
 /**
  * 🔴 **走っている物の帯は、スマホでは 1 件 1 行に折る**(#632 段②)。
  *
- * ⚠ 直す前は `overflow-x: auto` で**横に流していた** ── 幅 596px 未満だと
- *   **2 本目の「止める」が横スクロールの中に隠れる**(#586 の残り)。
- *   止める口が見えないのは「押せない」と同じである。
+ * ⚠ 素の規則は「**入りきらなければ折る**」までで、狭い窓では
+ *   **1 件が横に収まってしまう**ことがある(2 本目が右端すれすれに並ぶ)。
+ *   🔑 スマホでは**必ず 1 件 1 行**にして、押し所を横に詰めない。
  * ⚠ 横に流す形を**広い窓では変えない** ── あちらは 3 本計っても本文が
  *   1 行しか下がらない(補助が主の領域を奪わない、#300)。狭い窓では
  *   そもそも横に並べきれないので、この取引が成り立たない。
  */
-[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-field='timer-list'],
-[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-field='alarm-list'] {
-  flex-wrap: wrap;
-  overflow-x: visible;
-}
 [data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-field='timer-list'] > li,
 [data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-field='alarm-list'] > li {
   flex: 1 0 100%;
+}
+/**
+ * 🔴 **帯が本文を 0 まで潰さないように、丈に上限を置く**
+ * (#632 段② の着地前レビュー F)。
+ *
+ * ⚠ 版面の本文の行は `minmax(0, 1fr)` なので**下限が 0** である ── 1 件 1 行に
+ *   折ると、走っている数だけ線形に本文を食い、**上限が無い**。
+ *   設計 doc は「合計が画面を超えたら document が縦スクロール(**本文を潰さない**)」と
+ *   書いているが、`minmax(0, 1fr)` は**本文を 0 にしてから**はみ出す ── 順番が逆である。
+ * 🔑 **帯の中で縦に送る**(3 件ぶんで頭打ち)── 止める口は 1 タップの送りで届く。
+ *   ⚠ 「隠す」のではない:横に流していた直す前は**続きが在ることも見えなかった**が、
+ *   縦の送りは指の届く向きで、掴む所も出る。
+ */
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-field='timer-list'],
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-field='alarm-list'] {
+  max-height: 25dvh;
+  overflow-y: auto;
 }
 
 

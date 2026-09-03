@@ -29,6 +29,25 @@ async function noteWithBlocks(page: Page): Promise<void> {
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 }
 
+/**
+ * いま画面に出ている**打つ欄**を全部数え、field 名と computed な字の大きさを返す。
+ * ⚠ `checkbox` / `radio` は除く(素の規則と同じ理由 ── 印は字を持たない)。
+ */
+async function measureFields(page: Page): Promise<Array<{ name: string; px: number }>> {
+  return page.evaluate(() =>
+    [
+      ...document.querySelectorAll<HTMLElement>(
+        'input:not([type="checkbox"]):not([type="radio"]), textarea, select',
+      ),
+    ]
+      .filter((el) => el.offsetParent !== null || el.getClientRects().length > 0)
+      .map((el) => ({
+        name: el.getAttribute('data-pkc-field') ?? el.tagName.toLowerCase(),
+        px: Number.parseFloat(getComputedStyle(el).fontSize),
+      })),
+  );
+}
+
 /** 器の computed な `opacity`(乗せずに読む ── 乗せると hover の規則が入る)。 */
 async function opacityOf(page: Page, sel: string): Promise<number> {
   return page.locator(sel).first().evaluate((el) => Number(getComputedStyle(el).opacity));
@@ -67,14 +86,68 @@ test.describe('指で触る端末', () => {
     await expectReachable(page, page.locator('.pkc-render-toggle').first());
   });
 
-  test('🔴 ④ 打つ欄の字が 16px を下回らない(iPhone の勝手な拡大を防ぐ)', async ({ page }) => {
+  /**
+   * 🔴 **打つ欄を全数走査する**(#632 段② の着地前レビュー A。**1 個だけ見ない**)。
+   *
+   * ⚠ 1 稿目は探す欄(`entry-filter`)**1 個だけ**を見ていて、**緑だった** ──
+   *   ところがその欄は **field 側に `font-size` を持たない唯一の類**で、
+   *   本文を打つ 4 つ(`editor-body` / `append-input` / `row-source` / `fm-source`)は
+   *   `[data-pkc-field='…']`(0,1,0)で 12.5px を当てており、素の `textarea`(0,0,1)に
+   *   **勝っていた**。実測:直す前は `editor-body` **12.5px** / `append-input` **12.5px**
+   *   ── つまり **ノートを書く欄では、直したはずの拡大がそのまま起きていた**。
+   * 🔑 これは #588 が名指しで戒めている「1 個目だけを見た」形そのものである。
+   */
+  test('🔴 ④ 打つ欄は全数、字が 16px を下回らない(iPhone の勝手な拡大を防ぐ)', async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 390, height: 844 });
+    await useSplitEditor(page);
     await gotoApp(page);
     await dismissAnnounce(page);
+    // ⚠ **打つ欄が出る状態を作る** ── 編集の欄・追記の欄まで含めて数える
+    await createEntry(page, 'text');
+    const seenEditing = await measureFields(page);
+    await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+    const seenReady = await measureFields(page);
+
+    const all = [...seenEditing, ...seenReady];
+    // ⚠ **空振り防止** ── 欄が数個しか出ていなければ、この test は何も見ていない
+    expect(all.length, '打つ欄がほとんど出ていない(台の空振り)').toBeGreaterThanOrEqual(6);
+    const small = all.filter((f) => f.px < 16);
+    expect(
+      small,
+      `16px を下回る欄がある(iOS が頁ごと拡大する): ${small.map((f) => `${f.name}=${f.px}`).join(' / ')}`,
+    ).toEqual([]);
+  });
+
+  /**
+   * 🔴 **下限であって、固定ではない**(#632 段② の着地前レビュー M1)。
+   * ⚠ `font-size: 16px` と書くと、設定で**特大(17px)**を選んだ user の欄だけ
+   *   **縮む** ── 頼まれていない縮小である(CLAUDE.md 2026-08-28)。
+   * ⚠ `>= 16` の検査だけでは、この変異が**緑のまま通る**。
+   */
+  test('🔴 ④ 字を大きくした user の欄は、縮まない(16px 固定にしていない)', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.addInitScript(() => {
+      try {
+        localStorage.setItem('pkc3.text-scale', 'xlarge');
+      } catch {
+        /* sandbox の frame ── アプリの設定とは無関係 */
+      }
+    });
+    await gotoApp(page);
+    await dismissAnnounce(page);
+    const body = await page.evaluate(
+      () => Number.parseFloat(getComputedStyle(document.body).fontSize),
+    );
+    // ⚠ **前提** ── 特大が本当に効いていること(効いていなければ何も見ていない)
+    expect(body, `特大が効いていない(地が ${body}px)`).toBeGreaterThan(16);
     const px = await page
       .locator('[data-pkc-field="entry-filter"]')
       .evaluate((el) => Number.parseFloat(getComputedStyle(el).fontSize));
-    expect(px, `探す欄が ${px}px(16 未満だと iOS が頁ごと拡大する)`).toBeGreaterThanOrEqual(16);
+    expect(px, `欄が ${px}px へ縮んだ(地は ${body}px)`).toBe(body);
   });
 
   /**

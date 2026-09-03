@@ -842,6 +842,42 @@ describe('CSS(構文で読む)', () => {
     );
   });
 
+  /**
+   * 🔴 **門を N 個置いたら、N 個目だけが鳴る場面を N 通り作る**
+   * (CLAUDE.md 2026-08-24。#632 段② の着地前レビュー G)。
+   *
+   * ⚠ 触る端末の丈は **3 本の帯**に、折る規則は **2 つのリスト**に置いたが、
+   *   実ブラウザの smoke が押しているのは **タイマーだけ**である ── 収録の帯を
+   *   選択子から落としても、予定の帯を落としても**緑のまま通る**。
+   *   ⚠ とくに収録の「止める」は**マイクを止める唯一の出口**なので、
+   *   そこだけ 26px に戻る形を黙って通してはいけない。
+   * 🔑 実ブラウザで 3 本とも走らせるのは高くつく(録音は許可が要る)ので、
+   *   **選択子の集合を構文で pin する** ── 落とした瞬間にここが落ちる。
+   */
+  it('🔴 触る端末の丈と、折る規則が、帯 3 本 / リスト 2 つ全部に当たっている', () => {
+    const touch = mediaBlock(bare(), '(hover: none) and (pointer: coarse)').body;
+    const bars = ['capture-bar', 'timer-bar', 'alarm-bar'].map(
+      (r) => `[data-pkc-region='${r}'] button`,
+    );
+    const hit = blocksFor(touch, bars[0]!);
+    expect(hit, '触る端末の丈の規則が無い(この検査は何も見ていない)').not.toHaveLength(0);
+    for (const sel of bars)
+      expect(
+        blocksFor(touch, sel),
+        `${sel} に丈が当たっていない(そこだけ 26px に戻る)`,
+      ).not.toHaveLength(0);
+    for (const b of blocksFor(touch, bars[0]!))
+      expect(b, '丈が 32px でない').toMatch(decl('min-height', '32px'));
+
+    // ⚠ 折るのは**幅**で切る側(`@media` の外)── 2 つのリスト両方に当たっているか
+    const plain = withoutMedia(bare());
+    for (const f of ['timer-list', 'alarm-list']) {
+      const one = blocksFor(plain, `${PHONE} [data-pkc-field='${f}'] > li`);
+      expect(one, `${f} が 1 件 1 行になっていない`).not.toHaveLength(0);
+      for (const b of one) expect(b, `${f} の項目が 1 行を占めていない`).toMatch(decl('flex', '1 0 100%'));
+    }
+  });
+
   it('🔴 スマホの規則は畳みの属性を読まない(判定を 2 か所に置かない)', () => {
     const rules = [...withoutMedia(bare()).matchAll(/([^{}]+)\{[^{}]*\}/g)]
       .map((m) => m[1]!.trim())

@@ -115,7 +115,7 @@ test('🔴 狭い窓でも、止める口が画面の中に在って押せる (#
  *   「列を留めても自分が溢れる」ので、**直す前も後も同じように落ちる**。
  *   実物の帯で測ること。
  */
-test('🔴 狭い窓でタイマーを 2 本走らせても、画面が横に広がらない (#586)', async ({ page }) => {
+test('🔴 狭い窓でタイマーを 3 本走らせても、画面が横に広がらない (#586)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 480, height: 800 });
   await gotoApp(page);
@@ -146,7 +146,13 @@ test('🔴 狭い窓でタイマーを 2 本走らせても、画面が横に広
    * ⚠ 2 件目を作るには**一覧ページへ戻る**(スマホでは左の列が同時に出ない)。
    */
   const save = page.locator('[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
-  for (let i = 0; i < 2; i += 1) {
+  /**
+   * 🔴 **3 本走らせる**(#632 段② の着地前レビュー E)。
+   * ⚠ この spec の注記自身が「実測: 1 本 480 → 2 本 571 → **3 本 845px**、
+   *   3 本目では**録音の「止める」まで画面の外**へ出ていた」と書いている ──
+   *   2 本で止めると、記録に在る**いちばん重い場面**を測っていない。
+   */
+  for (let i = 0; i < 3; i += 1) {
     if (i > 0) await clickReal(page, '[data-pkc-field="phone-back"]');
     await createEntry(page, 'text');
     await clickReal(page, save);
@@ -180,7 +186,7 @@ test('🔴 狭い窓でタイマーを 2 本走らせても、画面が横に広
       };
     }),
   );
-  expect(seen, '止める口が 2 本ぶん出ていない(台の空振り)').toHaveLength(2);
+  expect(seen, '止める口が 3 本ぶん出ていない(台の空振り)').toHaveLength(3);
   seen.forEach((m, i) => {
     expect(m.right, `${i + 1} 本目の止める口が窓からはみ出している(${m.right} / 窓 ${vw})`)
       .toBeLessThanOrEqual(vw);
@@ -189,6 +195,50 @@ test('🔴 狭い窓でタイマーを 2 本走らせても、画面が横に広
     );
   });
 
+  expect(errors, '例外が出た').toEqual([]);
+});
+
+/**
+ * 🔴 **タブレットの縦(768px)でも、止める口が全部画面に在る**
+ * (#632 段② の着地前レビュー 欠陥 5)。
+ *
+ * ⚠ **スマホ用画面の境目(720px)を超える幅**なので、「1 件 1 行に折る」規則は
+ *   当たらない ── 直す前はここが `overflow-x: auto` のままで、実測すると
+ *   **3 本目の右端が 868px(窓 768)/ `elementFromPoint` は `null`**、
+ *   つまり**押せない**。⚠ iOS では横スクロールバーが出ないので、
+ *   **続きが在ることも見えない**。
+ * 🔑 素の規則を「**入りきらなければ折る**」にしたので、幅に依らず全部画面に在る。
+ *   ⚠ 広い窓では 3 本でも 1 行に収まるので、見え方は 1px も変わらない。
+ */
+test('🔴 タブレットの縦(768px)でも、3 本ぶんの止める口が押せる (#586)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 768, height: 1024 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  const vw = page.viewportSize()!.width;
+  for (let i = 0; i < 3; i += 1) {
+    await createEntry(page, 'text');
+    await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+    await clickReal(page, '[data-pkc-field="start-timer"]');
+  }
+  const seen = await page
+    .locator('[data-pkc-action="stop-timer"]')
+    .evaluateAll((els) =>
+      els.map((el) => {
+        const r = el.getBoundingClientRect();
+        const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+        return {
+          right: Math.round(r.x + r.width),
+          hit: at?.closest('[data-pkc-action]')?.getAttribute('data-pkc-action') ?? null,
+        };
+      }),
+    );
+  expect(seen, '止める口が 3 本ぶん出ていない(台の空振り)').toHaveLength(3);
+  seen.forEach((m, i) => {
+    expect(m.right, `${i + 1} 本目が窓からはみ出している(${m.right} / 窓 ${vw})`)
+      .toBeLessThanOrEqual(vw);
+    expect(m.hit, `${i + 1} 本目の止める口が押せない`).toBe('stop-timer');
+  });
   expect(errors, '例外が出た').toEqual([]);
 });
 
