@@ -138,10 +138,33 @@ describe('OfficePackState の控え', () => {
     expect(n, '解除したら来ない').toBe(2);
   });
 
+  /**
+   * 🔴 **能力は実機から読む**(stub ではなく本物の読み手を通す)。
+   *
+   * ⚠ **「happy-dom には JSPI が無い」を前提にしない**(2026-09-03、CI で落ちて判明)。
+   *   1 稿目は `jspi` が `false` であることを直に assert していたが、これは
+   *   **走らせる node の性質**であって、この class の振る舞いではない ──
+   *   CI の Node 24 に `WebAssembly.Suspending` が入った日に**赤くなった**
+   *   (手元は Node 22 なので緑のまま。CLAUDE.md §5「CI と手元で別のものが動いている」)。
+   * 🔑 **主張の形で書き直す**:能力は**その場の実機から読む**(定数を返していない)。
+   *   だから **`Suspending` を付け外しして、答えが付いてくる**ことを見る ──
+   *   この検査は host に JSPI が在っても無くても同じ意味で成り立つ。
+   */
   it('能力は実機から読む(stub ではなく本物の読み手を通す)', () => {
     const a = new OfficePackState();
-    // happy-dom には JSPI も分離も無い ── **足りない**と答えるのが正しい
-    expect(a.capability().jspi).toBe(false);
+    const wasm = (globalThis as unknown as { WebAssembly: Record<string, unknown> })
+      .WebAssembly;
+    const had = wasm['Suspending'];
+    try {
+      delete wasm['Suspending'];
+      expect(a.capability().jspi, '無いのに「在る」と答えた(定数を返している)').toBe(false);
+      wasm['Suspending'] = function Suspending(): void {};
+      expect(a.capability().jspi, '在るのに「無い」と答えた(実機を読んでいない)').toBe(true);
+    } finally {
+      if (had === undefined) delete wasm['Suspending'];
+      else wasm['Suspending'] = had;
+    }
+    // ⚠ 対照群 ── 分離は node にも happy-dom にも無いので、こちらは false のまま
     expect(a.capability().crossOriginIsolated).toBe(false);
   });
 });
