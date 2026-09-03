@@ -380,6 +380,34 @@
 ⚠ 720px 以下の smoke は**先にカードを畳む**(`dismissAnnounce`)── 畳まないと
 他の面に 1 つも触れないので、4 spec が落ちた(それが正しい振る舞いである)。
 
+### 🔴 段② を実装して分かったこと(2026-09-03。記帳)
+
+**1. `hasTouch` だけで `(hover: none)` と `(pointer: coarse)` が両方真になる**(Playwright、実測)。
+`devices['Pixel 5']` のような preset は `defaultBrowserType` を持つので `describe` の中で
+`test.use` できない ── **`{ hasTouch: true }` だけ**渡せば、同じ file に**対照群**
+(マウスの端末)を並べられる。
+
+**2. 🔴 tap の test では `pointerdown` の口を守れない**(変異試験 D が SURVIVED)。
+Chromium は tap のときに `mouseover` を**合成する**ので、`mouseover` の口だけで欄が埋まる。
+🔑 だから **素の `pointerdown` を 1 つだけ投げる** test を別に置いた(`bubbles: true` を
+明示する ── 受け口は器に 1 本なので、上がらない event は誰にも届かない)。
+⚠ **2 つで 1 組**である:tap の test は「触れたら埋まる」という user の主張を、
+`pointerdown` の test は「iOS Safari のための口が在る」ことを守る。
+⚠ その口が要る理由は **CI に WebKit が 0 件**だからで、合成が来る保証が無い。
+
+**3. 🔴 変異試験のハーネスは `dist` も戻す。**
+source を `finally` で戻しても **`dist` は変異のまま残る** ── 次に回した smoke が
+「直っていない」と**嘘をついた**(実際に 1 往復溶かした)。
+🔑 CLAUDE.md §3「スイープの後にもう一度回してから commit する」の **dist 版**である。
+
+**4. 帯の丈は 32px にした** ── `phone-bar button` が既に 32px で、その注記が
+「段② で触る端末の最小丈をまとめて見る」と**ここを指していた**。端末の中で
+押し所の大きさを 2 種類作らない。
+
+**5. 「1 件 1 行に折る」は幅で切り、丈と常時表示は入力の種類で切る。**
+⚠ 判定を混ぜない ── 折るのは**画面が狭いから**(`data-pkc-layout='phone'`)、
+出しっぱなしにするのは**指だから**(`@media (hover: none)`)である。
+
 ## 5. 段(単独で着地・計測できる順)
 
 | 段 | 大きさ | 単独で着地 | 単独で測る観測点 |

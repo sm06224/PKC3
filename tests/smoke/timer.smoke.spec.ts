@@ -159,27 +159,35 @@ test('🔴 狭い窓でタイマーを 2 本走らせても、画面が横に広
   expect(wide, `画面が横に広がっている(${wide}px / 窓幅 ${vw})`).toBeLessThanOrEqual(vw);
 
   /**
-   * 🔴 **1 本目の「止める」は、いつでも画面の中に在って押せる**。
+   * 🔴 **走っている本数だけ、止める口が画面の中に在って押せる**(#586 の残り半分)。
    *
-   * ⚠ **2 本目以降はここでは見ません** ── 帯の中で横に流れる作りなので
-   *   (`app.css` の `overflow-x: auto`)、2 本目は **x=595** に置かれ、
-   *   **帯を横へ払わないと届きません**。
-   * 🔑 それを「良い」とするかは**動線の判断**であって、この修理の範囲外です
-   *   ── **#586 の残り半分**として起票してあります(#587 の改善 B「帯を 1 本に
-   *   まとめる」が答えの候補)。⚠ ここで assert すると、**直っていないものを
-   *   直ったことにする**か、**この spec が永久に赤**かのどちらかになります。
+   * ⚠ **直す前は 1 本目しか見ていませんでした** ── 帯の中で横に流れる作りなので
+   *   (`app.css` の `overflow-x: auto`)、2 本目は **x=595**(窓幅 480 の外)に置かれ、
+   *   **帯を横へ払わないと届かない**。この spec 自身が「ここでは見ません /
+   *   #586 の残り半分として起票してある」と書いていました。
+   * 🔴 **#632 段② で直したので、注記を assert に裏返します**(user 裁定 2026-09-02)──
+   *   スマホの版面では帯を **1 件 1 行に折る**ので、何本走っていても全部画面に在る。
+   * 🔑 **全数を見る**(1 本目だけ見ない)── これは #588 が名指しで戒めている形で、
+   *   「1 個目だけを見た」ことがまさに発見を遅らせた理由である。
    */
-  const first = await stops.first().evaluate((el) => {
-    const r = el.getBoundingClientRect();
-    const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
-    return {
-      right: Math.round(r.x + r.width),
-      hit: at?.closest('[data-pkc-action]')?.getAttribute('data-pkc-action') ?? null,
-    };
+  const seen = await stops.evaluateAll((els) =>
+    els.map((el) => {
+      const r = el.getBoundingClientRect();
+      const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      return {
+        right: Math.round(r.x + r.width),
+        hit: at?.closest('[data-pkc-action]')?.getAttribute('data-pkc-action') ?? null,
+      };
+    }),
+  );
+  expect(seen, '止める口が 2 本ぶん出ていない(台の空振り)').toHaveLength(2);
+  seen.forEach((m, i) => {
+    expect(m.right, `${i + 1} 本目の止める口が窓からはみ出している(${m.right} / 窓 ${vw})`)
+      .toBeLessThanOrEqual(vw);
+    expect(m.hit, `${i + 1} 本目の止める口が押せない(覆われているか画面の外)`).toBe(
+      'stop-timer',
+    );
   });
-  expect(first.right, `1 本目の止める口が窓からはみ出している(${first.right} / 窓 ${vw})`)
-    .toBeLessThanOrEqual(vw);
-  expect(first.hit, '1 本目の止める口の上に別の物が重なっている').toBe('stop-timer');
 
   expect(errors, '例外が出た').toEqual([]);
 });

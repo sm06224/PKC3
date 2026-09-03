@@ -5235,6 +5235,92 @@ li[data-pkc-row-slot] {
 }
 
 
+/**
+ * 🔴 **指で触る端末の手当て**(user 裁定 2026-09-02 の ④ ⑤。#632 段②)。
+ *
+ * ⚠ **スマホ用画面(幅で切り替える)とは別物である** ── こちらは**入力の種類**で
+ *   切り替える。指で触る大きな板(iPad)にも効き、細くしただけの PC には効かない。
+ * 🔑 だから判定を混ぜない ── `data-pkc-layout='phone'` は幅、ここは `hover` / `pointer`。
+ */
+
+/**
+ * 🔴 **⑤ 乗せたときだけ出る物を、常に出す**(user 裁定)。
+ *
+ * > 「指で触る端末では、コードの右上の**コピー**と図の**原文⇄描画**を常に出す
+ * > (いまは乗せたときだけ = 触る端末では**一度も出ない**)」
+ *
+ * ⚠ 指の端末に `:hover` は無いので、この 2 つは**存在しないのと同じ**だった
+ *   (`opacity: 0` のまま押せる場所にも当たらない)。
+ * ⚠ **`(hover: none)` だけで切る**(`pointer` は見ない)── 判定を 2 つ重ねると、
+ *   マウスを繋いだタブレットのように**片方だけ真**の端末で消える。
+ */
+@media (hover: none) {
+  .pkc-md-rendered .pkc-md-copy-btn,
+  .pkc-md-rendered .pkc-render-toggle {
+    opacity: 1;
+  }
+}
+
+/**
+ * 🔴 **④ 打つ欄の字だけ 16px**(user 裁定)。
+ *
+ * > 「指で触る端末では**打つ欄の字だけ 16px**(iPhone の勝手な拡大を防ぐ。
+ * > 読む字は設定のまま)」
+ *
+ * ⚠ iOS Safari は **16px 未満の欄に触れると頁ごと拡大する**。PKC3 の地の字は
+ *   `body { font-size: var(--pkc-text-size, 13px) }` で、欄は `font: inherit` なので
+ *   **既定のまま必ず拡大される**。
+ * 🔑 **`max()` で下限にする**(16px に固定しない)── 固定すると、字を大きくした
+ *   user の欄だけ**縮む**(CLAUDE.md 2026-08-28「見え方を変える判断は user のもの」/
+ *   「変えていないのに変えたと言わない」の裏返しで、**頼まれていない縮小**になる)。
+ * ⚠ **読む字は 1px も触らない** ── 当てるのは欄だけである(裁定の逐語)。
+ * ⚠ `checkbox` / `radio` を外すのは、素の規則(この file の上のほう)と同じ理由
+ *   ── 一括で当てると印が潰れる。
+ */
+@media (hover: none) and (pointer: coarse) {
+  input:not([type='checkbox']):not([type='radio']),
+  textarea,
+  select {
+    font-size: max(16px, var(--pkc-text-size, 13px));
+  }
+
+  /**
+   * 🔴 **帯のボタンに最小の丈**(#632 段②)。
+   * ⚠ 帯の字は 12px・詰めは 2px なので、押し所は **20px 弱**しかない ──
+   *   指では隣を押す。🔑 **ページの帯と同じ 32px** に揃える(`phone-bar button` が
+   *   既に 32px で、その注記が「段② で触る端末の最小丈をまとめて見る」と
+   *   ここを指している)── 端末の中で押し所の大きさを 2 種類作らない。
+   * ⚠ 縦の予算を食うので**帯の中のボタンだけ**に当てる ── 一覧の行や
+   *   道具の列まで広げると、狭い画面で本文が押し出される(段⓪ の実測)。
+   */
+  [data-pkc-region='capture-bar'] button,
+  [data-pkc-region='timer-bar'] button,
+  [data-pkc-region='alarm-bar'] button {
+    min-height: 32px;
+  }
+}
+
+/**
+ * 🔴 **走っている物の帯は、スマホでは 1 件 1 行に折る**(#632 段②)。
+ *
+ * ⚠ 直す前は `overflow-x: auto` で**横に流していた** ── 幅 596px 未満だと
+ *   **2 本目の「止める」が横スクロールの中に隠れる**(#586 の残り)。
+ *   止める口が見えないのは「押せない」と同じである。
+ * ⚠ 横に流す形を**広い窓では変えない** ── あちらは 3 本計っても本文が
+ *   1 行しか下がらない(補助が主の領域を奪わない、#300)。狭い窓では
+ *   そもそも横に並べきれないので、この取引が成り立たない。
+ */
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-field='timer-list'],
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-field='alarm-list'] {
+  flex-wrap: wrap;
+  overflow-x: visible;
+}
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-field='timer-list'] > li,
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-field='alarm-list'] > li {
+  flex: 1 0 100%;
+}
+
+
 /* ── 印刷(2026-08-07)────────────────────────────────
  *
  * 🔴 **直す前は画面から印刷すると 1 頁しか出なかった**(実測)。本文の器

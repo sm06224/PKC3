@@ -947,11 +947,14 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     //    `muteAnnounce` が呼ばれたことしか見ていなかった)で +1 件
     // ⚠ 2026-09-02: 同 spec に「← 一覧 で戻っても『ノートへ →』で帰れる」1 件
     //    (user 裁定。行が**押せる** = 一覧の面が最前面に居ることは実ブラウザでしか見えない)で +1 件
-    expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(78);
+    // ⚠ 2026-09-03: `touch` を新設(#632 段② ── 触る端末の手当て。
+    //    `@media (hover: none)` / `(pointer: coarse)` は happy-dom が評価しないので、
+    //    **本当に当たっているか**は実ブラウザでしか分からない)で file +1 / test +6
+    expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(79);
     expect(
       counts.reduce((a, b) => a + b, 0),
       'smoke の test が増減した(足したらこの数を直す)',
-    ).toBe(390);
+    ).toBe(396);
   });
 });
 
