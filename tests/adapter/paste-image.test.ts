@@ -67,9 +67,18 @@ function setup(over: Partial<BinderServices> = {}) {
     '<div data-pkc-region="append"><textarea data-pkc-field="append-input"></textarea></div>' +
     '<div data-pkc-region="entry-list"><input data-pkc-field="find" /></div>';
   document.body.append(root);
-  const calls = { paste: [] as (readonly File[])[], attach: [] as File[][] };
+  const calls = {
+    paste: [] as (readonly File[])[],
+    attach: [] as File[][],
+    /** ⚠ **事情も採る**(#666)── 行き先は `attachFiles` の側が言うので、
+     *   ここで見るのは「**事情がちゃんと渡っているか**」である。 */
+    why: [] as (string | undefined)[],
+  };
   const services: BinderServices = {
-    attachFiles: (files) => calls.attach.push(files),
+    attachFiles: (files, why) => {
+      calls.attach.push(files);
+      calls.why.push(why);
+    },
     pasteImages: async (files) => {
       calls.paste.push(files);
       return files.map((_, i) => `![ず](asset:k${i + 1})`);
@@ -250,8 +259,21 @@ describe('スクショの貼付(#250)', () => {
     // ⚠ 編集そのものが閉じた ── 差す先がどこにも無い
     root.querySelector('[data-pkc-region="detail"]')!.remove();
     await vi.waitFor(() => expect(calls.attach, '貼った画像を捨てている').toHaveLength(1));
-    // 🔑 行き先を**言う**(黙って添付にすると「貼ったのに出ない」に見える)
-    expect(dispatcher.getState().error).toContain('添付にしました');
+    /**
+     * 🔑 **起きたことを言う**(黙って回すと「貼ったのに出ない」に見える)。
+     *
+     * 🔴 **言い方は `OP_FAILED` ではなく `why`**(#666 の着地前レビュー 1)。
+     * ⚠ ここで `OP_FAILED` を撃っても **user は一度も読めない** ──
+     *   `attachFiles` は非同期なので、この行が出た**あと**に `CREATE_ENTRY` が走り、
+     *   その reducer が **`error: null`** を書いて消す(`capture.ts` の同じ注記が
+     *   既に戒めていた)。⚠ だから `error` を見る検査は**成り立たない条件**である。
+     * 🔑 いまは取込の知らせと**同じ 1 行**に出る ── ここでは
+     *   「事情が渡ったこと」だけを見て、1 行に出ることは
+     *   `attach-intake.test.ts` の ⑩(本物の `attachFiles`)が pin する。
+     */
+    expect(calls.why[0], '事情を渡していない(user は理由を読めない)').toBe(
+      '編集欄が閉じたため、打っていた所へは差せませんでした。',
+    );
   });
 
   it('🔴 まだ編集中なら添付にはせず、**やり直せる形で断る**', async () => {

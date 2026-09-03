@@ -10,7 +10,10 @@ import { attachFiles, resolveMime, type AttachDeps } from '../../src/adapter/ui/
 import { readAttachmentMeta } from '../../src/features/flavor/attachment-flavor';
 import { stubRevisionOps } from '../helpers/revision-stub';
 
-function harness(estimate?: AttachDeps['estimate']) {
+/** ⚠ 実物の効果層を差し替える口(遅い `getBody` で錠を握らせる等)。 */
+type StoreOver = { getBody?: () => Promise<string | null> };
+
+function harness(estimate?: AttachDeps['estimate'], over?: StoreOver) {
   const putBlobs: Array<{ key: string; size: number }> = [];
   const metas: Array<{ key: string; mime: string; size: number; hash: string | null }> =
     [];
@@ -28,7 +31,7 @@ function harness(estimate?: AttachDeps['estimate']) {
   const persisted: Array<{ lid: string; body: string }> = [];
   connectStoreEffects(d, {
     ...stubRevisionOps(),
-    getBody: async () => null,
+    getBody: over?.getBody ?? (async () => null),
     /**
      * ⚠ **題名だけの口**(#178)── 本物は本文に触らない。
      *   だから fake も本文を持たない(触らないものは持たない)。
@@ -44,11 +47,261 @@ function harness(estimate?: AttachDeps['estimate']) {
     deleteEntry: async () => {},
     setEntryParent: async () => {},
   });
+  /**
+   * 🔴 **本文へ入った参照を採る**(#666)。⚠ `APPEND_TO_ENTRY` の reducer が出す
+   *   `REQUEST_APPEND` を見る ── 「本文に入った」の観測点はここ 1 つである
+   *   (`persisted` は保存の側なので、入ったかどうかは読めない)。
+   */
+  d.onEvent((e) => {
+    if (e.type === 'REQUEST_APPEND') appendsSeen.push({ lid: e.lid, text: e.text });
+  });
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [], relations: [] });
   return { d, deps, putBlobs, metas, persisted };
 }
 
+/** ⚠ 各 it の頭で空にする(harness ごとに張り直すので溜まる)。 */
+const appendsSeen: Array<{ lid: string; text: string }> = [];
+
 const tick = () => new Promise((r) => setTimeout(r, 10));
+
+/**
+ * 🔴 **添付は、開いていたノートの本文へ入る**(user 裁定 2026-09-02、#666)。
+ *
+ * > 「読んでいたノートの本文に入る」
+ *
+ * ## 直す前に何が起きていたか(#666 の実測)
+ *
+ * `attachOne` は `CREATE_ENTRY archetype:'attachment'` を撃つだけで、reducer が
+ * `selectedLid` を**新しい添付へ移す** ── つまり写真を選ぶと
+ * **画面が「IMG_0421.jpg」に変わり、読んでいたノートは画面から消えて**、
+ * 本文には **1 文字も入らなかった**。⚠ 録音・画面録画は逆(選択を返し、参照を入れる)。
+ *
+ * ## この describe が守る主張
+ *
+ * ① 🔴 **開いていたノートへ選択が返る**(画面ごと持っていかれない)
+ * ② 🔴 **本文の末尾に参照が 1 行入る**
+ * ③ 🔴 **画像は `![…]`、それ以外は `[…]`**(画像は本文で描かれる)
+ * ④ 🔴 **入れ先は「押した時点で開いているノート」** ── 2 枚目以降も**同じノート**へ
+ *    入る(1 枚目の添付が選択を奪った後に、添付自身を入れ先だと読まない)
+ * ⑤ ⚠ **ノートを開いていなければ、そこまで言う**(黙って終わらない)
+ */
+describe('添付を開いていたノートへ入れる(#666)', () => {
+  /** ⚠ 入れ先になれるノートを 1 件作って開く(台の前提)。 */
+  function withOpenNote(over?: StoreOver) {
+    const h = harness(undefined, over);
+    h.d.dispatch({
+      type: 'CREATE_ENTRY',
+      archetype: 'text',
+      lid: 'n1',
+      title: '買い物メモ',
+      body: '# 買い物メモ',
+      edit: false,
+    });
+    h.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    h.d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '# 買い物メモ' });
+    expect(h.d.getState().selectedLid, '台が開けていない(前提が崩れた)').toBe('n1');
+    return h;
+  }
+
+  /** そのノートへ入った参照の行(`APPEND_TO_ENTRY` の text)。 */
+  function appended(d: Dispatcher): string[] {
+    return d.getState().entryMetas.has('n1')
+      ? appendsSeen.filter((a) => a.lid === 'n1').map((a) => a.text)
+      : [];
+  }
+
+  it('🔴 ① ② ③ 選択が返り、本文の末尾に参照が 1 行入る(画像は ![…])', async () => {
+    const h = withOpenNote();
+    appendsSeen.length = 0;
+    await attachFiles(h.d, h.deps, [
+      new File(['png bytes'], '猫.png', { type: 'image/png' }),
+    ]);
+    await tick();
+
+    expect(h.d.getState().selectedLid, '画面ごと添付へ持っていかれた').toBe('n1');
+    const lines = appended(h.d);
+    expect(lines, '本文に 1 行も入っていない').toHaveLength(1);
+    expect(lines[0], '画像なのに ![…] になっていない').toMatch(/^!\[猫\.png\]\(asset:/);
+  });
+
+  it('🔴 ③ 画像でなければ ![…] にしない(描けない物を描こうとしない)', async () => {
+    const h = withOpenNote();
+    appendsSeen.length = 0;
+    await attachFiles(h.d, h.deps, [
+      new File(['pdf bytes'], '資料.pdf', { type: 'application/pdf' }),
+    ]);
+    await tick();
+    const lines = appended(h.d);
+    expect(lines).toHaveLength(1);
+    expect(lines[0], 'PDF を画像として置いている').toMatch(/^\[資料\.pdf\]\(asset:/);
+  });
+
+  /**
+   * 🔴 **④ 2 枚目以降も同じノートへ入る。**
+   * ⚠ 入れ先を輪の**中**で採ると、1 枚目の `CREATE_ENTRY` が `selectedLid` を
+   *   奪った後なので、2 枚目は**添付自身**を入れ先だと読む(20 枚落とすと 19 枚が迷子)。
+   */
+  it('🔴 ④ 2 枚まとめて落としても、2 枚とも同じノートへ入る', async () => {
+    const h = withOpenNote();
+    appendsSeen.length = 0;
+    await attachFiles(h.d, h.deps, [
+      new File(['a'], 'a.png', { type: 'image/png' }),
+      new File(['b'], 'b.png', { type: 'image/png' }),
+    ]);
+    await tick();
+    expect(h.d.getState().selectedLid).toBe('n1');
+    expect(appended(h.d), '2 枚目が別のノートへ入った').toHaveLength(2);
+  });
+
+  /**
+   * 🔴 **⑦ 3 枚まとめて落としても、1 枚も落とさず、落とした順に入る。**
+   *
+   * ⚠ これは **`attachFiles` が本物の `writable-queue` を通していること**を見る
+   *   (CLAUDE.md §7「A と B が合意していることは、A の test にも B の test にも
+   *   書けない」)── `writable-queue.test.ts` は器を単体で見ているので、
+   *   **呼び側が本物を渡しているか**は誰も見ていなかった。配線を
+   *   「その場で走らせるだけの偽の器」に差し替えると、ここが落ちる。
+   * 🔑 台は **`getBody` を遅くして錠を握らせる**(実物では worker の往復が
+   *   これに当たる)── `APPEND_TO_ENTRY` は錠が立っている間の要求を**捨てる**ので、
+   *   預かりが効いていなければ 2 枚目以降が消える。
+   */
+  it('🔴 ⑦ 3 枚まとめて落としても、1 枚も落とさず順番どおり入る', async () => {
+    const h = withOpenNote({
+      getBody: async () => {
+        await new Promise((r) => setTimeout(r, 20));
+        return '# 買い物メモ';
+      },
+    });
+    appendsSeen.length = 0;
+    await attachFiles(h.d, h.deps, [
+      new File(['1'], 'a.png', { type: 'image/png' }),
+      new File(['2'], 'b.png', { type: 'image/png' }),
+      new File(['3'], 'c.png', { type: 'image/png' }),
+    ]);
+    // ⚠ 預かりが解けるのを待つ(錠は効果層の答えで解ける)
+    await new Promise((r) => setTimeout(r, 300));
+
+    const lines = appended(h.d);
+    expect(lines, '3 枚のうち何枚かが黙って消えた').toHaveLength(3);
+    expect(
+      lines.map((t) => /!\[([^\]]+)\]/.exec(t)?.[1]),
+      '落とした順と本文の並びが違う',
+    ).toEqual(['a.png', 'b.png', 'c.png']);
+  });
+
+  /**
+   * 🔴 **⑧ `file.type` が空でも、拡張子から画像だと分かる。**
+   *
+   * ⚠ OS が MIME を付けない経路が実在する(共有 / D&D / Office の窓から戻る bytes ──
+   *   `EXT_MIME` に Office 10 種を足したのはまさにこの形)。そこで `file.type` を
+   *   そのまま渡すと、`猫.png` が **ただのリンク**になって**絵が出ない** ──
+   *   お知らせ・マニュアル・CHANGELOG の 3 か所が「画像は絵が出る形で入ります」と
+   *   書いているので、そこが嘘になる。
+   */
+  it('🔴 ⑧ file.type が空でも、拡張子が画像なら絵として入る', async () => {
+    const h = withOpenNote();
+    appendsSeen.length = 0;
+    await attachFiles(h.d, h.deps, [new File(['png bytes'], '猫.png', { type: '' })]);
+    await tick();
+    const lines = appended(h.d);
+    expect(lines).toHaveLength(1);
+    expect(lines[0], '拡張子から画像だと解けていない(絵が出ない)').toMatch(
+      /^!\[猫\.png\]\(asset:/,
+    );
+  });
+
+  /**
+   * 🔴 **⑨ 何も開いていないまま 3 枚落としても、3 枚とも同じ理由で断る。**
+   *
+   * ⚠ ここが **`into` を輪の外で採ること**の**唯一の**観測点である
+   *   (#666 の着地前レビュー 2)── ノートを開いていれば `SELECT_ENTRY` が選択を
+   *   同期に返すので、輪の中で採っても結果は変わらない(実測で知らせの列まで一致)。
+   * 🔑 開いていないときだけ差が出る:輪の中で採ると 2 枚目以降が**1 枚目の添付**を
+   *   入れ先だと読み、理由が「ノートを開いていないので」から
+   *   「追記できない種類なので」へ**化ける** ── user は開いてもいないノートの
+   *   種類を理由に断られる。
+   */
+  it('🔴 ⑨ 開いていないまま 3 枚落としても、3 枚とも「開いていない」と言う', async () => {
+    const h = harness();
+    const notices: string[] = [];
+    h.d.onState(() => {
+      const n = h.d.getState().notice;
+      if (n !== null && notices[notices.length - 1] !== n) notices.push(n);
+    });
+    appendsSeen.length = 0;
+    await attachFiles(h.d, h.deps, [
+      new File(['1'], 'a.png', { type: 'image/png' }),
+      new File(['2'], 'b.png', { type: 'image/png' }),
+      new File(['3'], 'c.png', { type: 'image/png' }),
+    ]);
+    await tick();
+
+    expect(appendsSeen, '開いていないのに本文へ書いた').toHaveLength(0);
+    expect(notices, '3 枚ぶんの理由が出ていない(台の空振り)').toHaveLength(3);
+    for (const n of notices)
+      expect(n, `理由が化けている: ${n}`).toContain('ノートを開いていないので');
+  });
+
+  /**
+   * 🔴 **⑩ 事情(`why`)は、取込の知らせと同じ 1 行に出る。**
+   *
+   * ⚠ 呼び側が別の `OP_FAILED` で言うと **`CREATE_ENTRY` の reducer が
+   *   `error: null` を書く**ので、**添付を作った瞬間に消える**(user は一度も
+   *   読めない)── 貼り付けの落ち先が実際にそうなっていた(#666 レビュー 1)。
+   */
+  it('🔴 ⑩ 渡した事情が、取込の知らせの頭に付く', async () => {
+    const h = withOpenNote();
+    appendsSeen.length = 0;
+    await attachFiles(
+      h.d,
+      h.deps,
+      [new File(['x'], 'x.png', { type: 'image/png' })],
+      '編集欄が閉じたため、打っていた所へは差せませんでした。',
+    );
+    await tick();
+    expect(h.d.getState().notice ?? '', '事情が消えている').toBe(
+      '編集欄が閉じたため、打っていた所へは差せませんでした。「x.png」を本文に入れました',
+    );
+  });
+
+  /**
+   * 🔴 **⑥ 開いているのが「追記できない種類」なら、入れずに、そこへ戻って理由を言う。**
+   *
+   * ⚠ この枝は **実ブラウザ smoke が教えた**(#412 の spec が落ちた)── 添付を
+   *   開いたまま 2 枚目を足すと、**開いていた添付のほうへ戻る**ので、画面は
+   *   新しいほうを見せない。spec はそこを知らずに「取り込んだものが勝手に開く」に
+   *   寄りかかっており、**1 枚目の大きさを 2 枚目のものとして読んでいた**。
+   * 🔑 振る舞いは録音・画面録画と同じ(判定は `asset-into-note.ts` 1 か所)──
+   *   user 裁定の「**読んでいたものは開いたまま**」を、入れられない回でも守る。
+   */
+  it('🔴 ⑥ 開いているのが添付なら、本文へ入れず、開いていたほうへ戻る', async () => {
+    const h = harness();
+    await attachFiles(h.d, h.deps, [new File(['a'], '1枚目.png', { type: 'image/png' })]);
+    await tick();
+    const first = h.d.getState().selectedLid;
+    expect(first, '1 枚目が開いていない(台の前提が崩れた)').not.toBeNull();
+
+    appendsSeen.length = 0;
+    await attachFiles(h.d, h.deps, [new File(['b'], '2枚目.png', { type: 'image/png' })]);
+    await tick();
+
+    expect(appendsSeen, '追記できない種類なのに本文へ書いた').toHaveLength(0);
+    expect(h.d.getState().selectedLid, '開いていた添付へ戻っていない').toBe(first);
+    expect(h.d.getState().notice ?? '', '黙って終わっている').toContain('追記できない種類');
+  });
+
+  /** ⚠ ⑤ 対照群 ── 開いていなければ入れず、そのことを言う(黙って終わらない)。 */
+  it('🔴 ⑤ ノートを開いていなければ入れず、理由を言う', async () => {
+    const h = harness();
+    appendsSeen.length = 0;
+    await attachFiles(h.d, h.deps, [new File(['x'], 'x.png', { type: 'image/png' })]);
+    await tick();
+    expect(appendsSeen, '開いていないのに本文へ書いた').toHaveLength(0);
+    expect(h.d.getState().notice ?? '', '黙って終わっている').toContain(
+      'ノートを開いていない',
+    );
+  });
+});
 
 describe('attachFiles (P4a intake)', () => {
   it('Blob 直 put + meta(hash/size 同時)+ 非編集 entry 作成', async () => {

@@ -14,7 +14,7 @@
  * `crossOriginIsolated` が本当に立つかは**実ブラウザでしか分からない**。
  */
 import { test, expect } from '@playwright/test';
-import { gotoApp, collectPageErrors, clickReal } from './helpers';
+import { gotoApp, collectPageErrors, clickReal, useListBrowse } from './helpers';
 
 /** 中身は問わない ── 入口は MIME と拡張子で決まる(開くのは別窓の仕事)。 */
 const FAKE_DOCX = Buffer.from('PK\u0003\u0004 not a real docx', 'utf-8');
@@ -27,6 +27,11 @@ test('🔴 Office の添付には入口が必ず出る(押しても無言のボ�
   page,
 }) => {
   const errors = collectPageErrors(page);
+  /**
+   * ⚠ **一覧タブで開く**(#666)── 2 枚目の添付は**開いていたほうが開いたまま**に
+   *   なったので、対照群を見るには行を押して開き直す必要がある。
+   */
+  await useListBrowse(page);
   await gotoApp(page);
 
   /**
@@ -76,6 +81,13 @@ test('🔴 Office の添付には入口が必ず出る(押しても無言のボ�
     mimeType: 'image/png',
     buffer: PNG_1X1,
   });
+  /**
+   * 🔴 **開き直してから見る**(user 裁定 2026-09-02、#666)。
+   * ⚠ 直す前は「取り込んだものが**勝手に開く**」ことに寄りかかっていたが、いまは
+   *   **読んでいたもの(1 枚目の docx)が開いたまま**である ── 開き直さないと
+   *   `[data-pkc-office]` は **docx のほうの入口**を数え、対照群が対照群でなくなる。
+   */
+  await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]:has-text("dot.png")');
   await expect(page.locator('[data-pkc-field="attachment-media"]')).toBeVisible({
     timeout: 15000,
   });

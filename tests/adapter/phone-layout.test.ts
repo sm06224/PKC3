@@ -13,6 +13,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
@@ -561,6 +562,51 @@ describe('⋯ と左の列の等値(次に足した人が気づく)', () => {
         s.root.querySelector(`[data-pkc-region="create-bar"] [data-pkc-action="${a.action}"]`),
         `${a.action} が左の列に無い ── ⋯ 専用の受け手を作っている`,
       ).not.toBeNull();
+  });
+
+  /**
+   * 🔴 **同じ操作の説明が 2 か所にある ── 片方だけ直る形を止める**
+   * (#666 の着地前レビュー 6)。
+   *
+   * ⚠ 説明は**左の列のボタンの `title`**(`shell.ts`)と**`⋯` の説明欄**
+   *   (`ENTRY_ACTION_HINTS`)の 2 か所にある。⚠ 後者は digest で pin されて
+   *   いたが、**前者を指す検査は 1 件も無かった** ── だから #666 で「添付」の
+   *   説明を直したとき、`⋯` 側だけが直り、**左の列は古い字のまま**残った。
+   *
+   * 🔑 **字が違うのには理由がある。1 本に寄せない**:
+   *   左の列のボタンは**特定のノートを指していない**ので「**いま開いている
+   *   ノート**」、`⋯` は**その行を右クリックして開いた**メニューなので
+   *   「**このノート**」である。寄せるとどちらかが必ず嘘になる。
+   * 🔑 だから**対で pin する** ── どちらかを直すと落ちるので、
+   *   もう片方を見ずに済ませられない。
+   */
+  it('🔴 左の列の 4 つのボタンの説明が、⋯ の説明と対で管理されている', () => {
+    const KNOWN: ReadonlyArray<readonly [string, string]> = [
+      ['attach-file', 'a6636dfe'],
+      ['start-audio-capture', '482a19bc'],
+      ['start-screen-capture', '166e461a'],
+      ['start-timer', 'ef2332cc'],
+    ];
+    // ⚠ 空振り防止 ── 道具が増減したまま「全部一致した」と言わない
+    expect(KNOWN.length, '道具の数と表の行数が違う').toBe(NOTE_TOOL_ACTIONS.length);
+    const s = setup(false);
+    const digest = (h: string): string =>
+      createHash('sha256').update(h).digest('hex').slice(0, 8);
+    const drift: string[] = [];
+    for (const [action, want] of KNOWN) {
+      const b = s.root.querySelector<HTMLElement>(
+        `[data-pkc-region="create-bar"] [data-pkc-action="${action}"]`,
+      );
+      expect(b, `左の列に ${action} が無い`).not.toBeNull();
+      const title = b!.title;
+      expect(title.length, `${action}: 説明が空`).toBeGreaterThan(0);
+      const got = digest(title);
+      if (got !== want) drift.push(`${action}: ${want} → ${got}「${title}」`);
+    }
+    expect(
+      drift,
+      '左の列の説明が変わった ── `ENTRY_ACTION_HINTS` の同じ操作も見てから、この表を直す',
+    ).toEqual([]);
   });
 });
 

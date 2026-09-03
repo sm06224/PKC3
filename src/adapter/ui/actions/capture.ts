@@ -22,10 +22,9 @@
  * ⚠ **取り込み口は `attachOne` の 1 本**(`attach` として注入する)── 2 つ目を作らない。
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
-import { formatAssetRef } from '@features/asset/asset-ref-format';
 import { humanBytes } from '@features/human-bytes';
 import { captureBarLine, captureFileName, CAPTURE_LABEL } from '@features/asset/capture-text';
-import { isAppendable } from '@features/flavor/append-spec';
+import { noteToPutInto, putAssetIntoNote } from './asset-into-note';
 import {
   startCapture as startCaptureImpl,
   type CaptureDeps,
@@ -156,11 +155,12 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
    * 添付にして、開いていたノートの本文へ参照を入れる。
    * ⚠ **入れ先は「取り込む時点で開いているノート」**。添付を作ると選択が奪われる
    *   ので、**先に控える**(後から読むと添付自身を指す)。
+   * 🔑 選択を返す / 本文へ入れる / 書けないなら預かる、の 3 つは
+   *   **`asset-into-note.ts` 1 か所**が持つ ── 添付の取込(`attachFiles`)も
+   *   同じ口を通る(user 裁定 2026-09-02、#666)。
    */
   const ingest = async (blob: Blob, kind: CaptureKind, why: string): Promise<void> => {
-    const state = deps.dispatcher.getState();
-    const into = state.selectedLid;
-    const archetype = into === null ? undefined : state.entryMetas.get(into)?.archetype;
+    const into = noteToPutInto(deps.dispatcher);
     /**
      * ⚠ **`;codecs=opus` を落とす** ── 引数付きのまま持ち回ると、拡張子の逆引き
      *   (`EXT_MIME`)に当たらず書き出しの名前が `.bin` になる(#205 と同じ形)。
@@ -174,47 +174,17 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
       deps.notify(`${why}${CAPTURE_LABEL[kind]}を取り込めませんでした`);
       return;
     }
-
-    // 🔴 **開いていたノートへ戻す**(添付が奪った選択を返す)
-    if (into !== null && into !== attached.lid) {
-      deps.dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: into });
-    }
-
-    const ref = formatAssetRef(name, `asset:${attached.assetKey}`, false);
-    /**
-     * 🔴 **入れられない回は、そこまで言う**(黙って落とさない)。
-     * ⚠ どの場合も**収録は残っている** ── 「消えた」と読ませない。
-     */
-    if (into === null) {
-      deps.notify(`${why}「${name}」を添付にしました(ノートを開いていないので本文には入れていません)`);
-      return;
-    }
-    if (!isAppendable(archetype)) {
-      deps.notify(`${why}「${name}」を添付にしました(開いているのは追記できない種類なので本文には入れていません)`);
-      return;
-    }
-    /**
-     * 🔴 **書けないなら、捨てずに預かる**。
-     *
-     * ⚠ ここは `deps.attach()` を **await した後**である ── 待っている間に state は
-     *   動くので、**直前まで書けたのに戻ってきたら書けない**ことがある。
-     *   そこで捨てると「**録れているのに本文へ入らない**」が起きる(添付だけ残る)。
-     * ⚠ しかも `writeLock` は**一瞬しか立たない** ── effect 層が `ENTRY_APPENDED` を
-     *   返せば解ける。**数ミリ秒待てば書ける物を、捨てていた**。
-     *
-     * 🔑 `writable-queue` はまさにこのために在る(docstring:「書けないから失敗では
-     *   なく、**書けるようになるまで預かる**」)。`finish()` の手前の判定は
-     *   **既に預けて**おり、ここだけが捨てていた ── 片側だけ直っていない形である。
-     * 🔑 判定は `queue.push` の中の `canWriteBody` **1 か所**に任せる ──
-     *   ここで `phase` を数え直さない(その戒めは `writable-queue.ts` に書いてある)。
-     */
-    const held = queue.push(() => {
-      deps.dispatcher.dispatch({ type: 'APPEND_TO_ENTRY', lid: into, text: ref, heading: null, target: null });
-      deps.notify(`${why}「${name}」を本文に入れました`);
+    putAssetIntoNote({
+      dispatcher: deps.dispatcher,
+      queue,
+      notify: deps.notify,
+      into,
+      attachedLid: attached.lid,
+      assetKey: attached.assetKey,
+      name,
+      mime,
+      why,
     });
-    // ⚠ **預かった回も黙らない**(いつ入るのかを言う)
-    if (held)
-      deps.notify(`${why}「${name}」を添付にしました(いま本文を書けないので、書けるようになったら入れます)`);
   };
 
   /**

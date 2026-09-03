@@ -21,6 +21,64 @@ const PNG_1X1 = Buffer.from(
   'base64',
 );
 
+/**
+ * 🔴 **裁定 A の当のふるまいを、実ブラウザで 1 度通す**(user 裁定 2026-09-02、#666)。
+ *
+ * > 「読んでいたノートの本文に入る」
+ *
+ * ⚠ **unit では届かない**(#666 の着地前レビュー 8)── `attach-intake.test.ts` は
+ *   `REQUEST_APPEND` という **event** までしか見ていない。「本文に入った」は
+ *   ①効果層が disk へ書き ②画面が読み直して ③絵として描く、の 3 段を経るので、
+ *   event を見るだけでは **1 度も本文に届いていなくても緑**になる。
+ * 🔑 だから見るのは **user が見る所** ── 開いたままのノートの本文に、
+ *   その画像が**描かれている**こと。
+ */
+test('🔴 ノートを開いたまま添付すると、そのノートの本文に絵が入る (#666)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('買い物メモ');
+  const ta = page.locator('[data-pkc-field="editor-body"]');
+  await expect(ta).toBeVisible();
+  await ta.click();
+  await page.keyboard.type('# 買い物メモ');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  // ⚠ **前提** ── ここが開いていなければ、以降は何も見ていない
+  await expect(
+    page.locator('[data-pkc-field="detail-title"]').first(),
+    '台の前提: ノートが開いていない',
+  ).toHaveText('買い物メモ');
+
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: 'ねこ.png',
+    mimeType: 'image/png',
+    buffer: PNG_1X1,
+  });
+
+  // ① 🔴 **画面ごと持っていかれない** ── 読んでいたノートが開いたまま
+  await expect(
+    page.locator('[data-pkc-field="detail-title"]').first(),
+    '画面が添付へ移った(#666 の症状そのもの)',
+  ).toHaveText('買い物メモ', { timeout: 15_000 });
+
+  // ② 🔴 **本文に絵が入る** ── 参照が hydrate されて実際に描かれる
+  await expectImageRendered(page, '[data-pkc-region="detail"] img[data-pkc-asset-key]');
+
+  // ③ ⚠ 何が起きたかを言う(黙って終わらない)
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '入れたことを言っていない',
+  ).toContainText('「ねこ.png」を本文に入れました');
+
+  // ⚠ 対照群 ── 添付そのものは 1 件できている(ノートと合わせて 2 行)
+  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(2);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
 test('添付取込 → entry 出現 → image preview が可視高さを持つ', async ({ page }) => {
   const errors = collectPageErrors(page);
   await gotoApp(page);
@@ -558,6 +616,21 @@ test('🔴 大きな画像は縮めるか聞き、断れば原寸のまま入る
   await clickReal(page, '[data-pkc-field="dialog-ok"]');
   await expect(dialog).toBeHidden();
   await expect(rows, '縮めたものが取り込まれていない').toHaveCount(2);
+  /**
+   * 🔴 **2 枚目を開いてから測る**(user 裁定 2026-09-02、#666 でここが変わった)。
+   *
+   * ⚠ 直す前は「取り込んだものが**勝手に開く**」ことに寄りかかっていた。いまは
+   *   **読んでいたものが開いたまま**なので(1 枚目の添付が開いている)、開き直さずに
+   *   測ると **1 枚目の大きさを 2 枚目のものとして読む** ── 数字は出るが、
+   *   別の物を指している(CLAUDE.md §4「計器の名前が範囲より広い」と同じ形)。
+   * 🔑 だから**中身の行そのもの**(`もう一枚.jpg — image/jpeg`)を待つ ──
+   *   題名だけ待つと、本文が「読み込んでいます…」の間に測ってしまう。
+   */
+  await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]:has-text("もう一枚.jpg")');
+  await expect(
+    page.locator('[data-pkc-region="detail"]'),
+    '2 枚目の本文が出ない',
+  ).toContainText('もう一枚.jpg — image/jpeg', { timeout: 15_000 });
   const shrunkSize = await sizeOf();
   expect(shrunkSize, '受けたのに縮んでいない').toBeLessThan(keptSize);
   // 🔑 **十分小さい**(採用の閾値 85% を満たしている)

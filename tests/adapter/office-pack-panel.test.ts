@@ -112,12 +112,48 @@ describe('packStatusText', () => {
 });
 
 describe('設定の面(O6-a)', () => {
+  /**
+   * ⚠ **JSPI の有無は走らせる node で変わる**(2026-09-03、CI で落ちて判明)──
+   *   Node 24 には `WebAssembly.Suspending` が在り、Node 22 には無い。
+   *   この面が見たいのは「**足りないものを名指しするか**」なので、
+   *   足りない側へ**固定してから**測る(CLAUDE.md §5:観測点を環境差に強い側へ寄せる)。
+   */
+  function withJspi<T>(present: boolean, run: () => T): T {
+    const wasm = (globalThis as unknown as { WebAssembly: Record<string, unknown> })
+      .WebAssembly;
+    const had = wasm['Suspending'];
+    try {
+      if (present) wasm['Suspending'] = function Suspending(): void {};
+      else delete wasm['Suspending'];
+      return run();
+    } finally {
+      if (had === undefined) delete wasm['Suspending'];
+      else wasm['Suspending'] = had;
+    }
+  }
+
   it('🔴 いまの状態と、この環境で動くかを両方出す', () => {
-    const { q } = mount();
-    expect(q('office-pack-status')?.textContent).toBe('入っていません');
-    // happy-dom には JSPI も分離も無い ── 「動きません」と名指しで言う
-    const cap = q('office-pack-capability')?.textContent ?? '';
+    const cap = withJspi(false, () => {
+      const { q } = mount();
+      expect(q('office-pack-status')?.textContent).toBe('入っていません');
+      return q('office-pack-capability')?.textContent ?? '';
+    });
+    // JSPI も分離も無い ── 「動きません」と名指しで言う
     expect(cap, '足りないものを名指しする').toContain('JSPI');
+  });
+
+  /**
+   * ⚠ **対照群** ── 名指しは**能力に従っている**(定数の一覧を出していない)。
+   * 🔑 これが無いと「いつも JSPI と書く」実装が緑のまま通る(§1 の空振り)。
+   */
+  it('⚠ JSPI が在る環境では、JSPI を足りないものに数えない', () => {
+    const cap = withJspi(true, () => {
+      const { q } = mount();
+      return q('office-pack-capability')?.textContent ?? '';
+    });
+    expect(cap, '在るものを「足りない」と言っている').not.toContain('JSPI');
+    // ⚠ 分離は無いままなので、そちらは名指しされ続ける(空振り防止)
+    expect(cap, '足りないものが 1 つも出ていない(台の空振り)').toContain('分離');
   });
 
   it('🔴 入っていなければ削除は押せない(押しても何も起きないボタンを出さない)', () => {
