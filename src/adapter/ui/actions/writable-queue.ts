@@ -67,8 +67,7 @@ export function createWritableQueue(dispatcher: Dispatcher): WritableQueue {
    *   (1 枚目は即時、2・3 枚目が預かりへ積まれ、解けた瞬間に 2 本流れる)。
    */
   const pump = (): void => {
-    const run = pending[0];
-    if (run === undefined) return;
+    if (pending.length === 0) return;
     // ⚠ **1 段ずらす**(下の docstring)── 見張りの中で撃つと、その書込は
     //    まだ state に入っていない
     queueMicrotask(async () => {
@@ -78,13 +77,28 @@ export function createWritableQueue(dispatcher: Dispatcher): WritableQueue {
         watch();
         return;
       }
-      pending.shift();
+      /**
+       * 🔴 **掴むのは門を通ってから**(#666 の着地前レビュー 7)。
+       * ⚠ 1 稿目は `pending[0]` を **microtask の外**で読み、`shift()` を中でして
+       *   いた ── `pump()` が 2 本飛ぶと**両方が同じ 1 本を掴んで両方 `shift()` する**
+       *   ので、同じ預かりが 2 回走り、次の 1 本が**黙って落ちる**
+       *   (実物の module に当てて再現:走った順が `A,B,B`)。
+       * 🔑 掴みと取り出しを**1 手**にすれば、2 本飛んでも取り合いにならない。
+       */
+      const run = pending.shift();
+      if (run === undefined) return;
       await run();
       // ⚠ 残りは**また書けるようになってから** ── ここで続けて流すと元の穴に戻る
-      if (pending.length > 0) {
-        if (canWriteBody(dispatcher)) pump();
-        else watch();
+      if (pending.length === 0) return;
+      if (!canWriteBody(dispatcher)) {
+        watch();
+        return;
       }
+      // ⚠ **見張りを畳んでから次を撃つ** ── 畳まないと、`await` の最中に
+      //    `push` が張った見張りが生き残り、`pump()` が 2 本飛ぶ
+      unwatch?.();
+      unwatch = null;
+      pump();
     });
   };
 

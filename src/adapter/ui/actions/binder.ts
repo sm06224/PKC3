@@ -360,7 +360,12 @@ const moveEntries = (
 
 /** UI サービス面(storage 依存の操作は main が実体を注入。test は fake)。 */
 export interface BinderServices {
-  attachFiles?(files: File[]): void;
+  /**
+   * ⚠ `why` は**文頭に付ける事情** ── 取込の知らせと**同じ 1 行**に載る。
+   * 🔴 呼び側が別の `OP_FAILED` で言うと **`CREATE_ENTRY` が `error: null` を書いて
+   *   消す**(#666 の着地前レビュー 1)。
+   */
+  attachFiles?(files: File[], why?: string): void;
   /**
    * 🔴 **スクショ(画像)の貼付**(#250。user 指示 2026-08-18
    * 「PKC3 でスクショ貼付の導線がない。PKC2 と同様以上に実装してください」)。
@@ -5977,19 +5982,21 @@ export function bindActions(
         // ⚠ どちらも黙って終わらない ──「貼ったのに出ない」を作らない。
         const ready = dispatcher.getState().phase === 'ready';
         if (ready && services.attachFiles) {
-          services.attachFiles([...files]);
           /**
-           * ⚠ **行き先はここで言わない**(#666 の着地前レビュー D9)。
-           * `attachFiles` が「本文に入れました」/「添付にしました(理由)」を
-           * **必ず 1 行言う**ようになったので、ここでも言うと**同じ 1 行に
-           * 2 回**出る(`main.ts` は知らせとエラーを ` — ` で繋ぐ)。
-           * 🔑 ここが言えるのは**あちらが言えないこと**だけ ── 「打っていた所へは
-           *   差せなかった」。どこへ入ったかは、その次に続く 1 行が言う。
+           * 🔴 **事情は `why` として渡す**(#666 の着地前レビュー 1)。
+           *
+           * ⚠ 1 稿目はここで `OP_FAILED` を撃っていたが、**user は一度も読めなかった**
+           *   ── `attachFiles` は非同期なので、この行が出た**あと**に
+           *   `CREATE_ENTRY` が走り、その reducer が **`error: null`** を書く。
+           *   ⚠ `capture.ts` の同じ注記が既にこれを戒めている(踏み直した)。
+           * 🔑 いまは取込の知らせと**同じ 1 行**に出る ──
+           *   「編集欄が閉じたため、打っていた所へは差せませんでした。「猫.png」を
+           *   本文に入れました」。
            */
-          dispatcher.dispatch({
-            type: 'OP_FAILED',
-            error: '編集欄が閉じたため、貼り付けた画像は打っていた所へは差せませんでした',
-          });
+          services.attachFiles(
+            [...files],
+            '編集欄が閉じたため、打っていた所へは差せませんでした。',
+          );
         } else {
           dispatcher.dispatch({
             type: 'OP_FAILED',

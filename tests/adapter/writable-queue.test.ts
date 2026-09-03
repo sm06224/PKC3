@@ -84,6 +84,50 @@ describe('createWritableQueue', () => {
   });
 
   /**
+   * 🔴 **`pump` が 2 本飛んでも、同じ 1 本を 2 回走らせない**(#666 の着地前レビュー 7)。
+   *
+   * ⚠ 1 稿目は `pending[0]` を **microtask の外**で読み、`shift()` を中でしていた ──
+   *   2 本飛ぶと**両方が同じ物を掴んで両方 `shift()` する**ので、同じ預かりが 2 回走り、
+   *   次の 1 本が**黙って落ちる**(走った順が `A,B,B` になる)。
+   * ⚠ 2 本飛ぶ形:`await run()` の最中に `push` が見張りを張り直し、
+   *   その見張りと、走り終えた側の続きが**両方 `pump()` を呼ぶ**。
+   */
+  it('🔴 見張りと続きが同時に動いても、同じ預かりを 2 回走らせない', async () => {
+    const h = harness();
+    const order: string[] = [];
+    const slow =
+      (name: string) =>
+      async (): Promise<void> => {
+        order.push(name);
+        await Promise.resolve();
+      };
+    /**
+     * ⚠ **A の中で割り込ませる** ── `await run()` の最中に `push` が見張りを
+     *   張り直し、その見張りが鳴って `pump()` が 2 本目として飛ぶ形を作る。
+     *   ⚠ A が終わってから足すのでは**重ならない**(1 稿目はそれで空振りした)。
+     */
+    const first = async (): Promise<void> => {
+      order.push('A');
+      h.q.push(slow('C')); // 預かりへ積まれ、見張りが張り直される
+      h.unlock(); // その見張りが鳴って pump() が飛ぶ
+      await Promise.resolve();
+    };
+    h.q.push(h.append('lock')); // 錠を立てる(以降は預かりになる)
+    h.q.push(first);
+    h.q.push(slow('B'));
+    for (let i = 0; i < 6; i += 1) {
+      h.unlock();
+      await tick();
+    }
+    expect(order, '同じ預かりを 2 回走らせた(次の 1 本が落ちている)').toEqual([
+      'A',
+      'B',
+      'C',
+    ]);
+    expect(h.q.size()).toBe(0);
+  });
+
+  /**
    * 🔴 **順番を守る** ── 預かりが在るときは、書けても割り込ませない。
    * ⚠ 割り込ませると、落とした順と本文の並びが食い違う(3 枚落として 2 枚目が末尾)。
    */

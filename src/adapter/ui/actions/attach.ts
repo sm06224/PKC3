@@ -275,6 +275,17 @@ export async function attachFiles(
   dispatcher: Dispatcher,
   deps: AttachDeps,
   files: readonly File[],
+  /**
+   * 文頭に付ける事情(「編集欄が閉じたため、打っていた所へは差せませんでした。」)。
+   *
+   * 🔴 **呼び側が別の 1 行で言ってはいけない**(#666 の着地前レビュー 1)。
+   * ⚠ `OP_FAILED` に載せると **`CREATE_ENTRY` の reducer が `error: null` を書く**
+   *   ので、**添付を作った瞬間に消える** ── user は一度も読めない。
+   *   `capture.ts` の同じ注記が既にこれを戒めていた(そこを踏み直した)。
+   * 🔑 だから事情は**取込の知らせと同じ 1 行**に載せる ── 録音の
+   *   「共有が終わったので画面収録を止めました。」と同じ seam である。
+   */
+  why = '',
 ): Promise<void> {
   if (files.length === 0) return;
   // put の**前に**可視で止める ── ready 以外で進めると bytes だけ書かれて
@@ -297,8 +308,16 @@ export async function attachFiles(
    * 🔴 **入れ先は「押した時点で開いているノート」を先に控える**(user 裁定
    * 2026-09-02、#666「読んでいたノートの本文に入る」)。
    *
-   * ⚠ 輪の**外**で採る ── 中で採ると、1 枚目の添付が `selectedLid` を奪った後に
-   *   2 枚目が**添付自身**を入れ先だと読む(20 枚落とすと 19 枚が迷子になる)。
+   * ⚠ **輪の外で採る理由を、実測に合わせて書き直した**(#666 の着地前レビュー 2)──
+   *   1 稿目は「中で採ると 20 枚落として 19 枚が迷子になる」と書いたが、**それは
+   *   起きない**。`putAssetIntoNote` が `SELECT_ENTRY` で選択を**同期に返す**ので、
+   *   ノートを開いていれば次の周回でも同じノートが読める(変異試験で 5 枚落として
+   *   知らせの列まで完全に一致した ── CLAUDE.md §1「外して壊れるのを見る」)。
+   * 🔑 **本当に変わるのは「何も開いていないとき」だけ**である ── 中で採ると
+   *   2 枚目以降は**1 枚目の添付**を入れ先だと読み、断り文が
+   *   「ノートを開いていないので」から「追記できない種類なので」へ**化ける**
+   *   (user は開いてもいないノートの種類を理由に断られる)。
+   *   `attach-intake.test.ts` の「開いていないまま 3 枚」がそこを pin する。
    * 🔑 選択を返す / 本文へ入れる / 書けないなら預かるは `asset-into-note.ts`
    *   **1 か所** ── 録音・画面録画と同じ口である(CLAUDE.md §7)。
    */
@@ -326,8 +345,11 @@ export async function attachFiles(
         attachedLid: attached.lid,
         assetKey: attached.assetKey,
         name: item.name,
+        // 🔑 **拡張子から解いた mime を渡す**(`file.type` ではない)── OS が
+        //    MIME を付けない経路(共有 / D&D / Office の窓)でも、`猫.png` が
+        //    ちゃんと**絵として**入る(`attach-intake.test.ts` が pin)
         mime: attached.mime,
-        why: '',
+        why,
       });
     } catch (e) {
       dispatcher.dispatch({

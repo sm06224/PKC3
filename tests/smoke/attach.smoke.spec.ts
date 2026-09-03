@@ -21,6 +21,64 @@ const PNG_1X1 = Buffer.from(
   'base64',
 );
 
+/**
+ * 🔴 **裁定 A の当のふるまいを、実ブラウザで 1 度通す**(user 裁定 2026-09-02、#666)。
+ *
+ * > 「読んでいたノートの本文に入る」
+ *
+ * ⚠ **unit では届かない**(#666 の着地前レビュー 8)── `attach-intake.test.ts` は
+ *   `REQUEST_APPEND` という **event** までしか見ていない。「本文に入った」は
+ *   ①効果層が disk へ書き ②画面が読み直して ③絵として描く、の 3 段を経るので、
+ *   event を見るだけでは **1 度も本文に届いていなくても緑**になる。
+ * 🔑 だから見るのは **user が見る所** ── 開いたままのノートの本文に、
+ *   その画像が**描かれている**こと。
+ */
+test('🔴 ノートを開いたまま添付すると、そのノートの本文に絵が入る (#666)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('買い物メモ');
+  const ta = page.locator('[data-pkc-field="editor-body"]');
+  await expect(ta).toBeVisible();
+  await ta.click();
+  await page.keyboard.type('# 買い物メモ');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  // ⚠ **前提** ── ここが開いていなければ、以降は何も見ていない
+  await expect(
+    page.locator('[data-pkc-field="detail-title"]').first(),
+    '台の前提: ノートが開いていない',
+  ).toHaveText('買い物メモ');
+
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: 'ねこ.png',
+    mimeType: 'image/png',
+    buffer: PNG_1X1,
+  });
+
+  // ① 🔴 **画面ごと持っていかれない** ── 読んでいたノートが開いたまま
+  await expect(
+    page.locator('[data-pkc-field="detail-title"]').first(),
+    '画面が添付へ移った(#666 の症状そのもの)',
+  ).toHaveText('買い物メモ', { timeout: 15_000 });
+
+  // ② 🔴 **本文に絵が入る** ── 参照が hydrate されて実際に描かれる
+  await expectImageRendered(page, '[data-pkc-region="detail"] img[data-pkc-asset-key]');
+
+  // ③ ⚠ 何が起きたかを言う(黙って終わらない)
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '入れたことを言っていない',
+  ).toContainText('「ねこ.png」を本文に入れました');
+
+  // ⚠ 対照群 ── 添付そのものは 1 件できている(ノートと合わせて 2 行)
+  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(2);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
 test('添付取込 → entry 出現 → image preview が可視高さを持つ', async ({ page }) => {
   const errors = collectPageErrors(page);
   await gotoApp(page);
