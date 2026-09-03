@@ -104,8 +104,13 @@ export function openContextMenu(
    *
    * ⚠ 出るのは**説明を 1 つでも持つメニュー**だけ(見出し・本文のメニューは持たないので、
    *   いままでどおり何も足さない)。
-   * 🔑 指す手は 2 つ ── **マウスを乗せる**(`mouseover`)と**キーで焦点を移す**(`focusin`)。
-   *   どちらも同じ 1 本(`show`)へ落とす。乗せた手が外れたら(`mouseleave`)、焦点の項目へ戻す。
+   * 🔑 指す手は 3 つ ── **マウスを乗せる**(`mouseover`)、**キーで焦点を移す**
+   *   (`focusin`)、**指で触れる**(`pointerdown`)。どれも同じ 1 本(`show`)へ落とす。
+   *   乗せた手が外れたら(`mouseleave`)、焦点の項目へ戻す。
+   * 🔴 **`pointerdown` は指の端末のためである**(#632 段②)── 指には `:hover` が無く、
+   *   `mouseover` が来るかはブラウザ任せなので、**触れた瞬間に説明が出ない**ことがある
+   *   (欄は空のまま = 押す前に読めない)。⚠ 「乗せたときだけ出る物は、触る端末では
+   *   一度も出ない」という user 裁定 ⑤ と**同じ形の穴**である。
    * ⚠ 欄の高さは CSS が **2 行ぶん固定**で取る ── 指す項目で高さが変わると、メニューが
    *   上下に踊って次の項目を押し損ねる。
    */
@@ -126,6 +131,11 @@ export function openContextMenu(
       if (b !== null) show(b);
     });
     el.addEventListener('focusin', (ev) => {
+      const b = buttonOf(ev.target);
+      if (b !== null) show(b);
+    });
+    // ⚠ **触れた瞬間に出す**(指の端末)── `mouseover` の合成は当てにしない
+    el.addEventListener('pointerdown', (ev) => {
       const b = buttonOf(ev.target);
       if (b !== null) show(b);
     });
