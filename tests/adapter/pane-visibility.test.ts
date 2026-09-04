@@ -384,6 +384,36 @@ describe('CSS(畳んだ列が本当に消えるか)', () => {
     expect(hit.join(' ')).toContain('display: none');
   });
 
+  /**
+   * 🔴 **畳んでいても、編集中の出口(保存して解放 / 編集を破棄)は消えない**(#655 ④)。
+   *
+   * ⚠ マニュアル §5 は「編集中の出口は追記欄の場所にも出ます」と約束しているが、
+   *   畳む規則は器ごと `display: none` にするので、畳んだ人にはその出口が 1 度も
+   *   出なかった。🔑 器を出す条件は**理由と出口の帯が出ていること**
+   *   (`append-lock` が `hidden` でない)── 編集中と書込中がこれに当たる。
+   * ⚠ 見るのは 2 つ:①その規則が在って `display: block` を宣言している
+   *   ②畳む規則(`display: none`)も残っている(出口の規則だけ残して畳めなく
+   *   なった、を作らない)。
+   */
+  it('🔴 畳んでいても、編集中の出口の帯が出ているときは器を出す (#655 ④)', () => {
+    const fold = rulesFor(
+      "[data-pkc-region='shell'][data-pkc-hidden-panes~='append'] [data-pkc-region='append']",
+    );
+    expect(fold.length, '追記欄を畳む規則が無い').toBeGreaterThan(0);
+    expect(/(^|;)\s*display:\s*none/.test(fold.join(' ')), '畳む規則が display:none でない').toBe(
+      true,
+    );
+    const exit = rulesFor(
+      "[data-pkc-region='shell'][data-pkc-hidden-panes~='append']:has([data-pkc-field='append-lock']:not([hidden])) [data-pkc-region='append']",
+    );
+    expect(exit.length, '編集中の出口を出す規則が無い').toBeGreaterThan(0);
+    // ⚠ 宣言の形で見る(`display-x: block` のような別名に `toContain` は通る)
+    expect(
+      /(^|;)\s*display:\s*block/.test(exit.join(' ')),
+      '出口の規則が display:block を宣言していない',
+    ).toBe(true);
+  });
+
   it('🔴 畳んだぶん grid の列も減る(空の 1 列が残らない)', () => {
     for (const pane of ['sidebar', 'inspector']) {
       const hit = rulesFor(`[data-pkc-region='shell'][data-pkc-hidden-panes~='${pane}']`);

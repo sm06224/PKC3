@@ -1047,11 +1047,13 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     //    root の委譲は unit では届かない
     // ⚠ 2026-09-04(#655 ①): `append-ui` に「畳んだ追記欄を Alt+クリックで開いて送ると
     //    元どおり畳まれる」**+1 件**(`display: none` が実際に効くかは happy-dom では見えない)
+    // ⚠ 2026-09-04(#655 ④): 同じ file に「畳んでいても編集中は出口だけ見える」**+1 件**
+    //    (`:has()` が実ブラウザで効いて器が出ることは happy-dom では見えない)
     expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(80);
     expect(
       counts.reduce((a, b) => a + b, 0),
       'smoke の test が増減した(足したらこの数を直す)',
-    ).toBe(425);
+    ).toBe(427);
   });
 });
 

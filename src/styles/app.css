@@ -171,6 +171,22 @@ body {
 [data-pkc-region='shell'][data-pkc-hidden-panes~='append'] [data-pkc-region='append'] {
   display: none;
 }
+/* 🔴 **畳んでいても、編集中の出口は消えない**(#655 ④。user 裁定 2026-09-04)。
+ * ⚠ マニュアル §5 は「編集中の出口は追記欄の場所にも出ます」と約束しているのに、
+ *   上の 1 行が器ごと消すので、畳んだ人には**保存して解放 / 編集を破棄が 1 度も出なかった**
+ *   (中央の保存 / キャンセルだけになる ── 「2 本目の道」が畳みで死ぬ)。
+ * 🔑 器を出す条件は**理由と出口の帯が出ていること**(`append-lock` が `hidden` でない)──
+ *   編集中と書込中(強制解放)がこれに当たる。打つ欄の側(`append-form`)はそのとき
+ *   描画器が `hidden` を付けているので、器を出しても字を打つ所は出てこない
+ *   (`[hidden]` の規則が畳む ── ここで別に消す規則を書かない)。
+ * ⚠ **形を CSS 1 本にした理由**:出口の帯を append の器の外へ移すと、描画器 / shell /
+ *   main の 3 か所が動き、帯の見た目の規則(`append-lock`)も引っ越す。器を出す条件を
+ *   1 行足すほうが小さい。⚠ 副作用:編集中は帯(掴む部分)を押しても見え方が変わらない
+ *   (畳んでも出口だけは残るので)── 記録と `aria-pressed` は動き、編集を終えると効く。 */
+[data-pkc-region='shell'][data-pkc-hidden-panes~='append']:has([data-pkc-field='append-lock']:not([hidden]))
+  [data-pkc-region='append'] {
+  display: block;
+}
 
 /**
  * 🔴 **列の境目の掴む帯**(2026-08-15、user 指示「センターペインの上を潰しすぎ」)。
