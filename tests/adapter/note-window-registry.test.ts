@@ -52,10 +52,17 @@ function bus(): () => Broadcaster {
   };
 }
 
-function win(make: () => Broadcaster, id: string): { reg: NoteRegistry; raised: () => number } {
+function win(
+  make: () => Broadcaster,
+  id: string,
+  over: { now?: () => number; answerMs?: number } = {},
+): { reg: NoteRegistry; raised: () => number; crash: () => void } {
   let raised = 0;
-  const reg = createNoteRegistry({ channel: make(), id, onRaise: () => (raised += 1) });
-  return { reg, raised: () => raised };
+  const ch = make();
+  const reg = createNoteRegistry({ channel: ch, id, onRaise: () => (raised += 1), ...over });
+  // ⚠ **消える窓を模す** ── `close()` と違い、GONE を 1 通も出さずに居なくなる
+  //    (クラッシュ / OS kill / タブ破棄。`pagehide` は飛ばない)
+  return { reg, raised: () => raised, crash: () => ch.close() };
 }
 
 describe('付箋の台帳(#685、user 裁定 2026-09-04)', () => {
@@ -291,6 +298,49 @@ describe('付箋の台帳(#685、user 裁定 2026-09-04)', () => {
       expect(reg.whereIs('e1'), '早すぎる時点で外れている').toBe('other');
       clock += 2;
       expect(reg.whereIs('e1'), '時間が経っても外れない(二度と開けない)').toBe(null);
+    });
+  });
+
+  /**
+   * 🔴 **消えた窓のせいで、そのノートが二度と開けなくならない**
+   *   (#685 着地前レビュー、2026-09-04)。
+   *
+   * ⚠ 付箋の窓が `pagehide` を出さずに消えると(クラッシュ / OS kill / タブ破棄)、
+   *   台帳に行が残り続ける。⚠ そのとき `raise` は誰にも届かないので
+   *   **窓も出てこない** ── 断り文(「すでに別のウィンドウで開いています」)が
+   *   **嘘になる**うえ、逃げ道は本体の読み直しだけだった。
+   * 🔑 `raise` のときに点呼も打ち、答えが無ければ行を捨てる。
+   *   ⚠ **時計は回さない**(常駐の定期実行を作らない)── 次に聞かれたときに判る。
+   */
+  describe('消えた窓の後始末(着地前レビュー)', () => {
+    it('🔴 答えない窓の行は、次に聞かれたときに捨てる', () => {
+      const make = bus();
+      let clock = 1000;
+      const a = win(make, 'A', { now: () => clock, answerMs: 500 });
+      const b = win(make, 'B', { now: () => clock, answerMs: 500 });
+      b.reg.announce('e1');
+      expect(a.reg.whereIs('e1'), '前提が崩れた').toBe('other');
+      b.crash(); // ⚠ GONE を出さずに消える
+      a.reg.raise('e1'); // 押した ── ここで生死も聞く
+      expect(a.reg.whereIs('e1'), '聞いた直後に捨てている(生きている窓を消す)').toBe('other');
+      clock += 501;
+      expect(a.reg.whereIs('e1'), '消えた窓のせいで二度と開けない').toBe(null);
+    });
+
+    /**
+     * ⚠ **対照群** ── 生きている窓は答えるので、いつまでも `'other'` のまま。
+     * ⚠ これが無いと「時間が経てば全部捨てる」実装でも緑になる。
+     */
+    it('⚠ 生きている窓は、時間が経っても捨てない', () => {
+      const make = bus();
+      let clock = 1000;
+      const a = win(make, 'A', { now: () => clock, answerMs: 500 });
+      const b = win(make, 'B', { now: () => clock, answerMs: 500 });
+      b.reg.announce('e1');
+      a.reg.raise('e1');
+      expect(b.raised(), '前提が崩れた(頼めていない)').toBe(1);
+      clock += 5000;
+      expect(a.reg.whereIs('e1'), '生きている窓の行を捨てた(2 枚目が開く)').toBe('other');
     });
   });
 });

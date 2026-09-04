@@ -63,7 +63,16 @@ export interface NoteRegistryDeps {
   readonly now?: () => number;
   /** 見込みが自然に外れるまで(既定 `RESERVE_MS`)。 */
   readonly reserveMs?: number;
+  /** 点呼の答えを待つ時間(既定 `ANSWER_MS`)。 */
+  readonly answerMs?: number;
 }
+
+/**
+ * 点呼の答えを待つ時間。⚠ **同じ origin の窓が返すだけ**なので短くてよい
+ * (放送は 1 タスク先で届く)。⚠ 短すぎると生きている窓を消し、
+ * 長すぎると「消えた窓のせいで開けない」時間が延びる。
+ */
+export const ANSWER_MS = 1_500;
 
 /**
  * 見込みを持ち続ける時間。⚠ **窓が名乗るまで**の猶予である ──
@@ -109,7 +118,12 @@ export interface NoteRegistry {
   reserve(lid: string): void;
   /** 取っておいた 1 枚を外す(開けなかった)。 */
   release(lid: string): void;
-  /** その窓に「前に出て」と頼む。⚠ 居なければ何もしない。 */
+  /**
+   * その窓に「前に出て」と頼む。⚠ 居なければ何もしない。
+   * 🔑 **同時に点呼も打つ**(#685 着地前レビュー、2026-09-04)── 相手が
+   * `pagehide` を出さずに消えた(クラッシュ / OS kill / タブ破棄)ときの保険である。
+   * 答えが返らなければ、次に聞かれたときに行を捨てて**開けるようにする**。
+   */
   raise(lid: string): void;
   /**
    * 🔴 **窓を離れるときに呼ぶ**(台帳から自分を外す)。⚠ **放送路は閉じない**。
@@ -131,7 +145,7 @@ export interface NoteRegistry {
  * 先に居る付箋を知らないと「2 枚目を作らない」が効かない。
  */
 export function createNoteRegistry(raw: NoteRegistryDeps): NoteRegistry {
-  const deps = { now: () => Date.now(), reserveMs: RESERVE_MS, ...raw };
+  const deps = { now: () => Date.now(), reserveMs: RESERVE_MS, answerMs: ANSWER_MS, ...raw };
   /** `lid → 窓の id`。⚠ **自分は入れない**(自分の付箋は数えない)。 */
   const byLid = new Map<string, string>();
   let mine: string | null = null;
@@ -152,6 +166,18 @@ export function createNoteRegistry(raw: NoteRegistryDeps): NoteRegistry {
 
   /** これから開く 1 枚(合図が返るまでの見込み)。⚠ 値は外れる時刻。 */
   const pending = new Map<string, number>();
+  /**
+   * 🔴 **生死を聞いた窓と、聞いた時刻**(#685 着地前レビュー、2026-09-04)。
+   *
+   * ⚠ 付箋の窓が `pagehide` を出さずに消えると(クラッシュ / OS kill / タブ破棄)、
+   *   台帳に行が残り続け、**そのノートは二度と窓で開けなくなる** ── しかも
+   *   `raise` は誰にも届かないので**窓も出てこない**(= 断り文が嘘になる)。
+   *   逃げ道は本体の読み直しだけだった。
+   * 🔑 `raise` のときに点呼も打ち、`answerMs` 待って答えが無ければ行を捨てる。
+   *   ⚠ **時計を回さない**(常駐の定期実行を作らない)── 次に聞かれたときに判る。
+   * ⚠ 先例:`store-proxy.ts` が crash の保険に TTL を置いているのと同じ理屈。
+   */
+  const askedAt = new Map<string, number>();
   const alive = (lid: string): boolean => {
     const at = pending.get(lid);
     if (at === undefined) return false;
@@ -160,6 +186,18 @@ export function createNoteRegistry(raw: NoteRegistryDeps): NoteRegistry {
       return false;
     }
     return true;
+  };
+
+  /** その行の窓は、まだ答える気があるか(上の `askedAt` の理由)。 */
+  const answering = (lid: string): boolean => {
+    const who = byLid.get(lid);
+    if (who === undefined) return false;
+    const asked = askedAt.get(who);
+    if (asked === undefined || deps.now() < asked + deps.answerMs) return true;
+    // ⚠ 聞いたのに答えなかった ── 消えた窓である
+    askedAt.delete(who);
+    drop(who);
+    return false;
   };
 
   /** ⚠ 1 つの窓が出す付箋は 1 件 ── 前に載っていた行を必ず外す。 */
@@ -178,6 +216,8 @@ export function createNoteRegistry(raw: NoteRegistryDeps): NoteRegistry {
         return;
       }
       if (w.tag === NOTE_HERE && typeof w.lid === 'string') {
+        // ⚠ 答えたので生きている(聞いた記録を消す)
+        askedAt.delete(w.id);
         drop(w.id);
         byLid.set(w.lid, w.id);
         // ⚠ 本物が名乗ったので、見込みは要らない(以後は台帳が持つ)
@@ -200,12 +240,16 @@ export function createNoteRegistry(raw: NoteRegistryDeps): NoteRegistry {
       send(lid === null ? { tag: NOTE_GONE, id: deps.id } : { tag: NOTE_HERE, id: deps.id, lid });
     },
     whereIs: (lid) =>
-      mine === lid ? 'self' : byLid.has(lid) || alive(lid) ? 'other' : null,
+      mine === lid ? 'self' : answering(lid) || alive(lid) ? 'other' : null,
     reserve: (lid) => pending.set(lid, deps.now() + deps.reserveMs),
     release: (lid) => void pending.delete(lid),
     raise: (lid) => {
       const to = byLid.get(lid);
-      if (to !== undefined) send({ tag: NOTE_RAISE, id: deps.id, to });
+      if (to === undefined) return;
+      send({ tag: NOTE_RAISE, id: deps.id, to });
+      // 🔑 生死も聞く(上の docstring)── 答えが返らなければ `alive` が行を捨てる
+      askedAt.set(to, deps.now());
+      send({ tag: NOTE_ROLL_CALL, id: deps.id });
     },
     leave: () => {
       send({ tag: NOTE_GONE, id: deps.id });
@@ -217,6 +261,7 @@ export function createNoteRegistry(raw: NoteRegistryDeps): NoteRegistry {
       // ⚠ 閉じたら**答えも捨てる** ── 残すと、戻ってきた窓が古い台帳で断り続ける
       byLid.clear();
       pending.clear();
+      askedAt.clear();
       mine = null;
       deps.channel?.close();
     },
