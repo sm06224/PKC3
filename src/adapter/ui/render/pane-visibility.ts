@@ -35,13 +35,29 @@ export class PaneVisibilityStore {
   private fallback: PaneId[] = [];
   /** 🔴 この窓の畳みを端末の記録から切り離したか(下の `sessionOnly`)。 */
   private detached = false;
+  /**
+   * 🔴 **こちらが一時的に見せているペイン**(#655 ①)。端末の記録には触れない。
+   * ⚠ 1 枚だけ ── いま使うのは追記欄(`append`)で、同時に 2 枚を一時的に見せる
+   *   場面は無い(要るときに増やす。先に器だけ広げない)。
+   */
+  private peeking: PaneId | null = null;
 
   constructor(
     private readonly storage: Pick<Storage, 'getItem' | 'setItem'> | null = readStorage(),
   ) {}
 
-  /** ⚠ 読むたびに保存を見る(書き手が複数 ── UI と smoke の仕込み)。 */
+  /**
+   * いま畳んでいる物(= 画面に写す物)。⚠ 一時的に見せている物(`peeking`)は
+   * **記録に在っても外して返す** ── 読む側は「畳まれているか」を聞いているので、
+   * 見せているのに畳まれていると答えると、`toggle` が「戻す」側へ倒れる。
+   */
   getHidden(): PaneId[] {
+    const stored = this.storedHidden();
+    return this.peeking === null ? stored : stored.filter((id) => id !== this.peeking);
+  }
+
+  /** ⚠ 読むたびに保存を見る(書き手が複数 ── UI と smoke の仕込み)。 */
+  private storedHidden(): PaneId[] {
     if (this.detached) return this.fallback;
     try {
       return decodeHidden(this.storage?.getItem(KEY) ?? null);
@@ -50,16 +66,73 @@ export class PaneVisibilityStore {
     }
   }
 
+  /**
+   * @returns 画面に写す物(`getHidden` と同じ ── 一時的に見せている物は外してある)
+   */
   setHidden(hidden: readonly PaneId[]): PaneId[] {
-    const next = decodeHidden(encodeHidden(hidden));
-    this.fallback = next;
-    if (this.detached) return next;
-    try {
-      this.storage?.setItem(KEY, encodeHidden(next));
-    } catch {
-      // 保存できないだけ ── この session では効いている
+    /**
+     * 🔴 **一時的に見せている物は、記録では畳まれたまま**(#655 ①)。
+     *
+     * ⚠ 呼び側の一覧は `getHidden()`(見せている物を外した形)から組まれる ── そのまま
+     *   記録すると、**別のペインを 1 回畳んだだけで** user の畳みが記録から消える
+     *   (「探す」の近道が左を戻す / 集中モード / 帯の下限割れ、どれも同じ形)。
+     * 🔑 一覧に**その物が入っている**ときだけ「畳む頼み」と読み、一時表示を終える
+     *   ── 見せている欄の帯を押した人は、見えている物を畳みたいのである。
+     */
+    const peek = this.peeking;
+    let record: readonly PaneId[] = hidden;
+    if (peek !== null) {
+      if (hidden.includes(peek)) this.peeking = null;
+      else record = [...hidden, peek];
     }
-    return next;
+    const next = decodeHidden(encodeHidden(record));
+    this.fallback = next;
+    if (!this.detached) {
+      try {
+        this.storage?.setItem(KEY, encodeHidden(next));
+      } catch {
+        // 保存できないだけ ── この session では効いている
+      }
+    }
+    return this.peeking === null ? next : next.filter((id) => id !== this.peeking);
+  }
+
+  /**
+   * 🔴 **畳んであるペインを、一時的に見せる**(#655 ①。user 裁定 2026-09-04 案 B)。
+   *
+   * ## 物語
+   *
+   * 「閲覧メインだから」と追記欄を畳んでいる人が、本文を読んでいて「ここに追記する」を
+   * 押す。⚠ 直す前はここで `setHidden` を呼んでいたので、**user が自分で畳んだ設定を
+   * こちらが黙って上書きして永続していた** ── 1 行足したいだけだったのに、次に開いた
+   * ときも追記欄が出ている。
+   *
+   * 🔑 だから記録(`pkc3.panes`)には **1 byte も書かず**、見せるだけにする。
+   *   送り終えたら(または欄の外で 1 操作したら)`unpeek` で元どおり畳む。
+   * ⚠ 「無い環境の控え」「窓の切り離し」と**同じ器**に置く ── 畳みの台帳を 2 本にしない。
+   *
+   * @returns 新しく見せたら `true`(畳んでいなかった / もう見せているなら `false`)
+   */
+  peek(id: PaneId): boolean {
+    if (this.peeking === id || !this.storedHidden().includes(id)) return false;
+    this.peeking = id;
+    return true;
+  }
+
+  /** 一時的に何かを見せているか(`peek` の後、`unpeek` / 畳む前)。 */
+  isPeeking(): boolean {
+    return this.peeking !== null;
+  }
+
+  /**
+   * 一時的に見せていた物を、元どおり畳む。
+   * @returns 畳み直した後の一覧(呼び側はそのまま `applyPaneVisibility` へ渡す)。
+   *          何も見せていなければ `null`(画面に触る理由が無い)
+   */
+  unpeek(): PaneId[] | null {
+    if (this.peeking === null) return null;
+    this.peeking = null;
+    return this.getHidden();
   }
 
   /**
@@ -96,6 +169,26 @@ export class PaneVisibilityStore {
 
 /** アプリ共有の 1 個。⚠ 読む側は必ずこれを引く(`appFlags` と同じ規律)。 */
 export const appPanes = new PaneVisibilityStore();
+
+/**
+ * 🔴 **こちらが一時的に見せていたペインを、元どおり畳んで画面へ写す**(#655 ①)。
+ *
+ * ⚠ 呼び手は 2 つ ── 追記が**通った**とき(`append-box.ts`)と、欄の外で
+ *   **1 操作した**とき(`binder.ts` の `run`)。判定は `appPanes` の 1 か所、
+ *   適用は `applyPaneVisibility` の 1 か所で、ここは 2 つを繋ぐだけである。
+ * ⚠ `at` は shell の**中でも外でも**よい ── 追記欄の描画器は器の中に居るので
+ *   `closest` で shell へ登り、その親を `applyPaneVisibility` の root にする
+ *   (binder の `root` はもとより shell の外なので、そのまま使う)。
+ *
+ * @returns 畳み直したら `true`(何も見せていなければ `false` ── 画面には触らない)
+ */
+export function refoldPeeked(at: HTMLElement): boolean {
+  const hidden = appPanes.unpeek();
+  if (hidden === null) return false;
+  const shell = at.closest<HTMLElement>('[data-pkc-region="shell"]');
+  applyPaneVisibility(shell?.parentElement ?? at, hidden);
+  return true;
+}
 
 /**
  * 🔴 **畳んだ状態を画面へ写す**(器 1 か所)。CSS は

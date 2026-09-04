@@ -1045,11 +1045,13 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     // ⚠ 2026-09-04(#677): `context-menu.smoke.spec.ts` に「この章をコピー」で章の原文が
     //    閉じの `:::` まで clipboard に入る 1 件(**+1 件**)── 本物の clipboard と
     //    root の委譲は unit では届かない
+    // ⚠ 2026-09-04(#655 ①): `append-ui` に「畳んだ追記欄を Alt+クリックで開いて送ると
+    //    元どおり畳まれる」**+1 件**(`display: none` が実際に効くかは happy-dom では見えない)
     expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(80);
     expect(
       counts.reduce((a, b) => a + b, 0),
       'smoke の test が増減した(足したらこの数を直す)',
-    ).toBe(424);
+    ).toBe(425);
   });
 });
 

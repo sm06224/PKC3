@@ -102,6 +102,66 @@ describe('保存', () => {
     expect(() => s.toggle('sidebar')).not.toThrow();
     expect(s.getHidden(), 'この session でも効いていない').toEqual(['sidebar']);
   });
+
+  /**
+   * 🔴 **一時的に見せる(`peek`)は、記録に 1 byte も書かない**(#655 ①。
+   * user 裁定 2026-09-04 案 B)。⚠ 直す前の「ここに追記する」は `setHidden` で開いて
+   * いたので、user が自分で畳んだ設定を**こちらが黙って上書きして永続**していた。
+   */
+  describe('一時的に見せる(#655 ①)', () => {
+    it('🔴 peek は記録を変えず、getHidden からだけ外れる ── unpeek で戻る', () => {
+      const st = fakeStorage();
+      const s = new PaneVisibilityStore(st);
+      s.setHidden(['append']);
+      const before = st.map.get('pkc3.panes');
+      expect(s.peek('append'), '畳んであるのに見せられなかった').toBe(true);
+      expect(s.getHidden(), '見せているのに畳まれていると答えた').toEqual([]);
+      expect(s.isPeeking()).toBe(true);
+      expect(st.map.get('pkc3.panes'), '記録に書いた').toBe(before);
+      expect(s.unpeek(), '畳み直した一覧を返していない').toEqual(['append']);
+      expect(s.getHidden()).toEqual(['append']);
+      expect(s.isPeeking()).toBe(false);
+      // ⚠ 何も見せていないときの unpeek は null(画面に触る理由が無い)
+      expect(s.unpeek()).toBeNull();
+    });
+
+    it('⚠ 畳んでいない物 / もう見せている物は peek できない(対照群)', () => {
+      const s = new PaneVisibilityStore(fakeStorage());
+      expect(s.peek('append'), '畳んでいないのに「見せた」と言った').toBe(false);
+      s.setHidden(['append']);
+      expect(s.peek('append')).toBe(true);
+      expect(s.peek('append'), '2 度目も「新しく見せた」と言った').toBe(false);
+    });
+
+    /**
+     * 🔴 **見せている間に別のペインを畳んでも、記録の畳みは残る**。
+     * ⚠ 呼び側は `getHidden()`(見せている物を外した形)から一覧を組むので、
+     *   ここで守らないと **左を 1 回畳んだだけで追記欄の畳みが記録から消える**。
+     */
+    it('🔴 peek 中に別のペインを畳んでも、記録では見せている物が畳まれたまま', () => {
+      const st = fakeStorage();
+      const s = new PaneVisibilityStore(st);
+      s.setHidden(['append']);
+      s.peek('append');
+      const shown = s.toggle('inspector');
+      expect(shown, '画面用の一覧に見せている物が混ざった').toEqual(['inspector']);
+      expect(decodeHidden(st.map.get('pkc3.panes') ?? null), '記録から追記欄の畳みが消えた').toEqual([
+        'inspector',
+        'append',
+      ]);
+      expect(s.isPeeking(), '別のペインの操作で一時表示が終わった').toBe(true);
+    });
+
+    it('🔴 見せている物を畳む頼みが来たら、一時表示は終わる(帯を押した = 畳みたい)', () => {
+      const st = fakeStorage();
+      const s = new PaneVisibilityStore(st);
+      s.setHidden(['append']);
+      s.peek('append');
+      expect(s.toggle('append'), '帯を押したのに畳まれていない').toEqual(['append']);
+      expect(s.isPeeking()).toBe(false);
+      expect(decodeHidden(st.map.get('pkc3.panes') ?? null)).toEqual(['append']);
+    });
+  });
 });
 
 describe('画面への適用', () => {

@@ -293,6 +293,8 @@ describe('#495 Alt+クリックで、追記の入り先を指す', () => {
       expect(shell.hasAttribute('data-pkc-hidden-panes'), '画面へ写っていない').toBe(false);
       expect(document.activeElement, '打つ欄にカーソルが入っていない').toBe(input);
     } finally {
+      // ⚠ 一時表示(#655 ①)も終える(`body-context-menu.test.ts` の afterEach と同じ理由)
+      appPanes.unpeek();
       appPanes.setHidden([]);
     }
   });

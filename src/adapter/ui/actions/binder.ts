@@ -125,7 +125,7 @@ import {
   paneScope,
   type DualSide,
 } from '@features/relation/dual-pane';
-import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
+import { appPanes, applyPaneVisibility, refoldPeeked } from '@adapter/ui/render/pane-visibility';
 import { appPhone } from '@adapter/ui/render/phone-layout';
 import { appKeymap, type KeymapStore } from '@adapter/ui/render/keymap';
 import { appOpenInEdit, OpenInEditStore } from '@adapter/ui/render/open-in-edit';
@@ -1732,23 +1732,47 @@ function pickAppendTarget(dispatcher: Dispatcher, root: HTMLElement, line: numbe
   root.querySelector<HTMLTextAreaElement>('[data-pkc-field="append-input"]')?.focus();
   dispatcher.dispatch({
     type: 'OP_NOTICE',
-    message: `追記の入り先を「${sec.text}」にしました${opened ? '(追記欄を開きました)' : ''}`,
+    message: `追記の入り先を「${sec.text}」にしました${openedNote(opened)}`,
   });
 }
 
+/** 追記欄をこちらが開いた回に添える一言(#655 ①)── 畳み直すことまで言う。 */
+function openedNote(opened: boolean): string {
+  return opened ? '(追記欄を開きました ── 送ると元どおり畳みます)' : '';
+}
+
 /**
- * 追記欄を畳んでいたら戻す。戻したら `true`(呼び側が一言添える)。
+ * 追記欄を畳んでいたら**一時的に**見せる。見せたら `true`(呼び側が一言添える)。
+ *
+ * 🔴 **user の畳みの記録(`pkc3.panes`)には 1 byte も書かない**(#655 ①。
+ *   user 裁定 2026-09-04 案 B)。⚠ 直す前は `setHidden` で開いていたので、
+ *   「閲覧メインだから畳む」と決めた設定を**こちらが黙って上書きして永続**していた
+ *   ── 1 行足したいだけの人が、次に開いたときも追記欄を見ることになる。
+ * 🔑 元どおり畳むのは 2 つの契機:追記が**通った**(`append-box.ts`)/ 欄の外で
+ *   **1 操作した**(`run` の後ろ)。続けてもう 1 行足したい人は、もう一度開く(裁定 B)。
  * ⚠ **判定と適用は `pane-visibility` の 1 組**(`appPanes` / `applyPaneVisibility`)──
  *   `toggle-pane` と同じ口を使い、畳み状態の 2 本目の台帳を作らない。
  */
 function revealAppendPane(root: HTMLElement): boolean {
-  const hidden = appPanes.getHidden();
-  if (!hidden.includes('append')) return false;
-  applyPaneVisibility(
-    root,
-    appPanes.setHidden(hidden.filter((p) => p !== 'append')),
-  );
+  if (!appPanes.peek('append')) return false;
+  applyPaneVisibility(root, appPanes.getHidden());
   return true;
+}
+
+/**
+ * 🔴 **欄の外で 1 操作したら、こちらが開いた追記欄を畳み直す**(#655 ①)。
+ *
+ * ⚠ **打ちかけが在る間は畳まない** ── 「ここに追記する」で開いた欄に字を打ってから
+ *   別の所を押した人の字を、畳んで見えなくしない(この機構で一番やってはいけない
+ *   負け方は「押したら消えた」である。`append-box.ts` の規律と同じ向き)。
+ * ⚠ 欄の**中**の操作(送る / 元に戻す)は数えない ── 送るは通った時点で
+ *   `append-box.ts` が畳み、断られた回(空のまま押した等)は欄を出したままにする。
+ */
+function refoldAppendAfterAction(root: HTMLElement, pressed: Element): void {
+  if (pressed.closest('[data-pkc-region="append"]') !== null) return;
+  const input = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="append-input"]');
+  if (input !== null && input.value !== '') return;
+  refoldPeeked(root);
 }
 
 function selectEntryOrExplain(dispatcher: Dispatcher, lid: string, what: string): boolean {
@@ -5698,7 +5722,13 @@ export function bindActions(
     if (!handler) return;
     if (refuseWhileBusy(action, dispatcher, services)) return;
     if (refuseWithoutNote(action, dispatcher)) return;
+    /**
+     * 🔴 **押す前から**見せていたときだけ畳み直す(#655 ①)── `append-at-heading`
+     *   自身が開いた回に、その直後のここで畳んでしまわない(開いた瞬間に消える)。
+     */
+    const peekedBefore = appPanes.isPeeking();
     handler(dispatcher, el, services, root);
+    if (peekedBefore) refoldAppendAfterAction(root, el);
     if (DUAL_REBUILDS_CLICKED.has(action)) {
       const side = dualSide(el);
       if (side !== null) carryDualFocus(side);

@@ -146,3 +146,40 @@ test('⚠ 見出しが無いノートでは、リストの行ごと畳む (#496)
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **こちらが開いた追記欄は、送ったら元どおり畳む ── user の畳みの記録には書かない**
+ * (#655 ①。user 裁定 2026-09-04 案 B)。
+ *
+ * ⚠ unit(`append-peek.test.ts`)は属性と localStorage を見る。ここで見るのは
+ *   **欄が実際に見えなくなる / 見えるようになること**(`[data-pkc-hidden-panes~='append']`
+ *   の `display: none` が実ブラウザで効くか)と、実ブラウザの localStorage に
+ *   畳んだ記録がそのまま残ること。
+ */
+test('🔴 畳んだ追記欄を Alt+クリックで開いて送ると、元どおり畳まれる (#655 ①)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await makeNote(page, SHORT);
+
+  const input = page.locator('[data-pkc-field="append-input"]');
+  await clickReal(page, '[data-pkc-action="toggle-pane"][data-pkc-pane="append"]');
+  await expect(input, '前提: 帯で畳めていない').toBeHidden();
+  const folded = await page.evaluate(() => localStorage.getItem('pkc3.panes'));
+  expect(folded, '前提: 畳みが記録に無い').toContain('append');
+
+  await page.locator('[data-pkc-field="detail-body"] p').first().click({ modifiers: ['Alt'] });
+  await expect(input, 'Alt+クリックで開いていない').toBeVisible();
+  await input.fill('足した 1 行');
+  await clickReal(page, '[data-pkc-action="append-entry"]');
+  await expect(page.locator('[data-pkc-field="detail-body"]')).toContainText('足した 1 行');
+
+  // 🔴 送ったら畳み直す ── そして user の記録は 1 byte も変わっていない
+  await expect(input, '送ったのに畳み直していない').toBeHidden();
+  expect(
+    await page.evaluate(() => localStorage.getItem('pkc3.panes')),
+    '開いた / 畳み直したときに記録を書き換えた',
+  ).toBe(folded);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

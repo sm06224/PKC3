@@ -20,6 +20,7 @@ import { bodyLockOf } from '@adapter/state/app-state';
 import { isAppendable } from '@features/flavor/append-spec';
 import { listAppendTargets } from '@features/markdown/append-target';
 import { iconButton } from './icons';
+import { refoldPeeked } from './pane-visibility';
 import { hintTitle } from './shortcut-hint';
 
 /** 追記欄の見え方。⚠ ここが唯一の判定(描画側と binder で二重に持たない)。 */
@@ -302,9 +303,18 @@ export class AppendBoxRenderer {
     this.target.hidden = heads.length === 0;
   }
 
-  /** 追記が通ったら欄を空にして、続けて打てるようにする(連続追記)。 */
+  /**
+   * 追記が通ったら欄を空にして、続けて打てるようにする(連続追記)。
+   *
+   * 🔴 **こちらが一時的に開いた欄なら、通った時点で元どおり畳む**(#655 ①。
+   *   user 裁定 2026-09-04 案 B)。⚠ 畳み直すのは**通ったときだけ** ── 断られた /
+   *   強制解放の回は打った字が残るので、欄も出したままにする(隠すと「押したら
+   *   消えた」に見える)。
+   * ⚠ 畳んだ欄には焦点を戻さない(`display: none` に焦点は乗らない ── 乗せようとして
+   *   `body` へ落ちるより、押していた所に留める)。続けて足したい人はもう一度開く。
+   */
   clear(): void {
     this.input.value = '';
-    this.input.focus();
+    if (!refoldPeeked(this.region)) this.input.focus();
   }
 }
