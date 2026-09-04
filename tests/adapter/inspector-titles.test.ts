@@ -69,8 +69,8 @@ function actionButtons(root: HTMLElement): HTMLButtonElement[] {
  */
 const EXPECTED_ACTIONS: readonly string[] = [
   // 🔴 付箋(#685 段②、2026-09-04)── ⋯ と情報ペインの両方に出す
-  'open-note-window',
   'copy-entry-ref',
+  'open-note-window',
   'adopt-external-images',
   'export-entry',
   'export-entry-html',

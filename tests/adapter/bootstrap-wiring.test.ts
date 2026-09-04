@@ -51,9 +51,17 @@ describe('bootstrap の配線', () => {
     }
     expect(sites.length, '別窓の配線が無い ── この検査の前提が崩れている').toBeGreaterThanOrEqual(2);
     for (const [n, site] of sites.entries()) {
-      expect(site, `${n} 番目の呼び側が手で窓を開いている(noopener が落ちても誰も鳴らない)`).toContain(
-        'open: openViewWindowUrl',
-      );
+      /**
+       * ⚠ 口は 2 つある ── 面の窓は `openViewWindowUrl`、付箋は
+       *   **細い窓で出す** `openNoteWindowUrl`。
+       * 🔴 **どちらでもよい形に書かない**(2026-09-04、変異試験が SURVIVED で教えた)
+       *   ── `/open(View|Note)WindowUrl/` と書いたら、付箋を面の窓の口で開く変異が
+       *   素通りした(= 既定の大きさで 3 列が出る)。**呼び側ごとに決める。**
+       */
+      const wants = site.startsWith('openViewInWindow(null')
+        ? 'open: openNoteWindowUrl'
+        : 'open: openViewWindowUrl';
+      expect(site, `${n} 番目の呼び側が ${wants} を渡していない`).toContain(wants);
       expect(site, `${n} 番目の呼び側が理由を出さない(無言の dead click に戻る)`).toContain(
         "fail: (error) =>",
       );

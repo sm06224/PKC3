@@ -82,12 +82,67 @@ export const VIEW_WINDOW_OPEN = 'view-window-open';
 export const VIEW_WINDOW_FEATURES = 'noopener';
 
 /**
- * 🔴 **別窓を開く(既定の実装)。** ⚠ `main.ts` の 2 か所はこれを渡す ──
+ * 🔴 **別窓を開く(既定の実装)。** ⚠ `main.ts` の呼び側はこれを渡す ──
  * 手で `window.open` を書かない(上の理由)。
  * ⚠ 戻り値は捨てる ── `noopener` は**常に `null`** なので、開けたかは合図で見る。
  */
 export function openViewWindowUrl(url: string): void {
   window.open(url, '_blank', VIEW_WINDOW_FEATURES);
+}
+
+/**
+ * 🔴 **付箋は細い窓で出す**(#685、user 裁定 2026-09-04)。
+ *
+ * > 「**細い窓で出す**(幅 420 / 高さ 720 くらい)── 題名・本文・追記欄が
+ * > 縦に 1 枚で並び、そのまま追記欄に書ける」
+ *
+ * ⚠ 直す前は**大きさを 1 つも渡していなかった**ので、押すと
+ *   「もう 1 個の PKC」(一覧・本文・情報の 3 列)が既定の大きさで出ていた ──
+ *   付箋にするには「窓の端を掴んで 720px より細くする」という
+ *   **教わらないと絶対に分からない一手**が要った。
+ * 🔑 **`noopener` は失われない**(2026-09-04 実測)── 寸法を渡しても戻り値は
+ *   `null` のままで、別プロセス化と「閉じたら還る」は保たれる。
+ *   ⚠ 一方で**名前で使い回すことはできない**(同じ実測:`noopener` を付けると
+ *   名前が無視され、2 度目も新しい窓が開く)。
+ */
+export const NOTE_WINDOW_SIZE = { width: 420, height: 720 } as const;
+
+/** ずらす幅と、ずらしを一巡させる枚数。⚠ 3 枚目が 1 枚目に重ならないために要る。 */
+export const NOTE_WINDOW_STEP = 32;
+export const NOTE_WINDOW_RING = 8;
+
+/**
+ * 🔴 **n 枚目の付箋を、どこにどの大きさで出すか**。
+ *
+ * ⚠ **画面より大きくしない / 画面の外へ出さない** ── 小さな画面では
+ *   「開いたのに端が見えない」になる(掴んで動かす手が要る)。
+ * 🔑 純粋な関数にして unit で見る ── `main.ts` はどの test からも実行されない。
+ */
+export function noteWindowFeatures(
+  nth: number,
+  avail: { readonly width: number; readonly height: number },
+): string {
+  const width = Math.min(NOTE_WINDOW_SIZE.width, Math.max(1, avail.width));
+  const height = Math.min(NOTE_WINDOW_SIZE.height, Math.max(1, avail.height));
+  const step = (((nth % NOTE_WINDOW_RING) + NOTE_WINDOW_RING) % NOTE_WINDOW_RING) * NOTE_WINDOW_STEP;
+  const left = Math.max(0, Math.min(40 + step, avail.width - width));
+  const top = Math.max(0, Math.min(40 + step, avail.height - height));
+  return `${VIEW_WINDOW_FEATURES},width=${width},height=${height},left=${left},top=${top}`;
+}
+
+/** この窓がこれまでに開いた付箋の枚数。⚠ ずらす位置を決めるためだけに数える。 */
+let notesOpened = 0;
+
+/**
+ * 🔴 **付箋を開く(既定の実装)。** ⚠ `main.ts` はこれを渡す。
+ * ⚠ 画面の大きさが読めない箱では、`window.screen` を持たない前提へ落とす。
+ */
+export function openNoteWindowUrl(url: string): void {
+  const avail =
+    typeof screen === 'object' && screen !== null
+      ? { width: screen.availWidth, height: screen.availHeight }
+      : { width: NOTE_WINDOW_SIZE.width, height: NOTE_WINDOW_SIZE.height };
+  window.open(url, '_blank', noteWindowFeatures(notesOpened++, avail));
 }
 
 /** ⚠ 差し替えられるようにしておく(test は本物の放送を持たずに通す)。 */

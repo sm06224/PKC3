@@ -60,6 +60,23 @@ test('🔴 別の窓で開くと、その窓がそのノートを開いて立ち
   expect(win.url(), '面を指す断片で開いている(付箋ではない)').not.toContain('view=');
 
   /**
+   * ⓪-2 🔴 **最初から細い窓で出る**(user 裁定 2026-09-04)。
+   * ⚠ 直す前は大きさを 1 つも渡していなかったので、押すと「もう 1 個の PKC」
+   *   (3 列)が既定の大きさで出ていた ── 付箋にするには
+   *   「窓の端を掴んで 720px より細くする」という**教わらないと分からない一手**が要った。
+   * 🔑 **原文 pin ではなく実測で見る**(2026-09-04)── headless でも
+   *   `window.open` の寸法は効く(実測 420x720)。原文だけを見ていた 1 稿目は、
+   *   付箋を面の窓の口で開く変異を**素通りさせた**。
+   */
+  const outer = await win.evaluate(() => ({ w: window.outerWidth, h: window.outerHeight }));
+  expect(outer.w, `細い窓で出ていない(${outer.w}px)── 開いた瞬間に 3 列が出る`).toBeLessThanOrEqual(720);
+  // ⚠ **1 枚ずつの画面になっていること**まで見る(幅だけだと器の規則が壊れても緑)
+  await expect(
+    win.locator('[data-pkc-region="shell"][data-pkc-layout="phone"]'),
+    '細い窓なのに 1 枚ずつの画面になっていない',
+  ).toBeAttached();
+
+  /**
    * ① 🔴 **開いた窓が、そのノートを開いている**(段① と段② が繋がっている)。
    * ⚠ **題名で見る** ── 「何か開いた」では、先頭のノートが開いただけでも真になる。
    */
@@ -101,23 +118,45 @@ test('🔴 別の窓で開くと、その窓がそのノートを開いて立ち
   ).not.toContainText('複数タブ: このタブの保存は本体タブ経由です');
 
   /**
-   * ⑤ 🔴 **何枚でも開ける**(「マルチで付箋」)── 窓を使い回さない。
-   * ⚠ 1 稿目は `expect(win2).not.toBe(win)` と書いていたが、`popup2` は `win` が
-   *   生まれた**後**に張った待ちなので **原理的に `win` は返らない** =
-   *   何も検出していなかった(着地前レビュー ⚠6)。
-   * 🔑 だから見るのは「**2 枚とも生きていること**」にする ── 使い回すと
-   *   1 枚目が navigate で潰される。
+   * ⑤ 🔴 **同じノートの 2 枚目は作らない**(user 裁定 2026-09-04)。
+   * ⚠ データは安全だが、同じものが 2 枚並ぶと「操作をしくじった」と読まれる。
+   * 🔑 観測点は **窓が増えないこと + 理由が出ること**の 2 つ ── 片方だけだと、
+   *   「黙って何もしない」実装でも緑になる(無言の dead click)。
+   */
+  const pagesBefore = context.pages().length;
+  await page.bringToFront();
+  await clickReal(page, '[data-pkc-action="open-note-window"]');
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '2 枚目を止めた理由が出ていない(押しても何も起きないに見える)',
+  ).toContainText('別のウィンドウで開いています');
+  expect(context.pages().length, '同じノートの窓が 2 枚開いた').toBe(pagesBefore);
+
+  /**
+   * ⑥ 🔴 **違うノートなら今までどおり増える**(「マルチで付箋」)。
+   * ⚠ **対照群である** ── これが無いと、⑤ を「全部止める」実装で満たせてしまう。
    */
   const popup2 = context.waitForEvent('page');
-  await page.bringToFront();
+  await page
+    .locator('[data-pkc-region="filer-table"] [data-pkc-entry]')
+    .filter({ hasText: 'ひとつめ' })
+    .first()
+    .click();
+  await expect(
+    page.locator('[data-pkc-region="inspector"]'),
+    '前提が崩れた(別のノートを開いていない)',
+  ).toContainText('ひとつめ');
   await clickReal(page, '[data-pkc-action="open-note-window"]');
   const win2 = await popup2;
   await expect(win2.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
   await expect(
+    win2.locator('[data-pkc-region="inspector"]'),
+    '2 枚目が連れて行ったノートを開いていない',
+  ).toContainText('ひとつめ', { timeout: 20_000 });
+  await expect(
     win.locator('[data-pkc-region="inspector"]'),
     '1 枚目が 2 枚目に潰された(窓を使い回している)',
   ).toContainText('ふたつめ');
-  await expect(win2.locator('[data-pkc-region="inspector"]')).toContainText('ふたつめ');
 
   await win.close();
   await win2.close();

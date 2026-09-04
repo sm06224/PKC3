@@ -210,7 +210,12 @@ import {
 import { openView } from '@adapter/ui/render/open-view';
 import { noteRemoteChange } from '@adapter/state/remote-change';
 import {
+  NOTE_REGISTRY_CHANNEL,
+  createNoteRegistry,
+} from '@adapter/platform/note-window-registry';
+import {
   closeViewWindow,
+  openNoteWindowUrl,
   openViewInWindow,
   openViewWindowUrl,
   waitForViewWindow,
@@ -486,6 +491,27 @@ function openManualTile(
 function makeViewWindowToken(): string {
   const c = globalThis.crypto;
   return c && 'randomUUID' in c ? c.randomUUID() : `w-${Math.random().toString(36).slice(2)}`;
+}
+
+/**
+ * 🔴 **同じノートの付箋を 2 枚作らない台帳**(#685、user 裁定 2026-09-04)。
+ *
+ * ⚠ **`main.ts` は判断を持たない** ── 台帳の規則も便りの綴りも
+ *   `note-window-registry.ts` に在る(この file はどの test からも実行されない)。
+ * ⚠ 放送路が無い箱(古いブラウザ / test)では**常に空**になり、
+ *   今までどおり 2 枚目が開く(壊れる方向へは倒れない)。
+ */
+const noteRegistry = createNoteRegistry({
+  channel:
+    typeof BroadcastChannel === 'function' ? new BroadcastChannel(NOTE_REGISTRY_CHANNEL) : null,
+  id: makeViewWindowToken(),
+  // ⚠ 「前に出る」は実測できていない(headless では親子とも `hasFocus` が真)──
+  //    例外を投げないことだけ確かめてある。だから**画面の字では約束しない**
+  onRaise: () => window.focus(),
+});
+
+if (typeof window === 'object') {
+  window.addEventListener('pagehide', () => noteRegistry.close());
 }
 
 /** boot(設計メモ §1): lease → worker init(または #177 の proxy 接続)→ メタ一覧 → SYS_BOOTED。 */
@@ -1048,7 +1074,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     titleShown = next;
     document.title = next;
   };
-  dispatcher.onState(() => paintTitle());
+  /**
+   * 🔴 **この窓が出している付箋を、他の窓へ伝える**(#685、user 裁定 2026-09-04)。
+   * ⚠ 押した瞬間に**同期で**答えられるように、台帳は先に配っておく ──
+   *   押してから聞くと `window.open` が gesture の外へ落ちて遮断される。
+   */
+  const announceNote = (): void =>
+    noteRegistry.announce(heldNoteWindow ? dispatcher.getState().selectedLid : null);
+  dispatcher.onState(() => {
+    paintTitle();
+    announceNote();
+  });
   /**
    * ⚠ 起動のときに添付が読めなかったことは、**黙らせない**(#400 段④)。
    * 🔑 保存の状態(`persistState`)とは**別の欄**にする ── 同じ変数に載せると、
@@ -2827,11 +2863,26 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * ⚠ **押した行のノート**を連れて行く(`selectedLid` ではない)── ⋯ は
      *   行から開くので、選ばれている物と違うことがある。
      */
-    openNoteWindow: (lid) =>
+    openNoteWindow: (lid) => {
+      /**
+       * 🔴 **同じノートの 2 枚目は作らない**(user 裁定 2026-09-04)。
+       * ⚠ 判定は**同期**(台帳は放送で先に埋まっている)── ここで待つと
+       *   `window.open` が gesture の外へ落ちる。
+       * ⚠ 字で「前に出しました」とは**言わない** ── 前に出るかは実測できていない。
+       */
+      if (noteRegistry.has(lid)) {
+        noteRegistry.raise(lid);
+        dispatcher.dispatch({
+          type: 'OP_NOTICE',
+          message: 'このノートは別のウィンドウで開いています',
+        });
+        return;
+      }
       void openViewInWindow(null, {
-        // ⚠ `noopener` で開く ── 別プロセスになり、閉じれば常駐が還る
-        //    (口は `view-window.ts` の 1 つ ── 上の面の窓と同じ物を渡す)
-        open: openViewWindowUrl,
+        // ⚠ `noopener` で開く ── 別プロセスになり、閉じれば常駐が還る。
+        //    🔴 **付箋は細い窓で出す**(user 裁定 2026-09-04)── 口は
+        //       `view-window.ts` の 1 つで、寸法とずらす位置もそちらが持つ
+        open: openNoteWindowUrl,
         baseUrl: currentBaseUrl,
         selected: () => ({ containerId: cid, lid }),
         newToken: makeViewWindowToken,
@@ -2842,7 +2893,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         // 🔴 押した瞬間に返事をする(#685 動線レビュー 欠陥 7)── 付箋には
         //    退避先が無いので、塞がれた回は**無反応 2.5 秒だけ**が残る
         notify: (message) => dispatcher.dispatch({ type: 'OP_NOTICE', message }),
-      }),
+      });
+    },
     /** 🔴 このフォルダと配下をまとめて書き出す(#399 ①)。 */
     exportFolder: (lid) => void runExport({ entryLid: lid, as: 'folder' }),
     /**
@@ -3197,7 +3249,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     presentUpdate: (apply) => updatePrompt.present(apply),
     presentAnnounce: () => announce.present(),
     repaintStatus: () => paint(),
-    repaintWindowTitle: () => paintTitle(),
+    repaintWindowTitle: () => {
+      paintTitle();
+      announceNote();
+    },
     // 🔑 判断は `services.setBrowse` 1 か所 ── ここは呼ぶだけ
     //    ⚠ `BinderServices` では optional なので、無い配線では**何もしない**
     setBrowse: (mode) => services.setBrowse?.(mode),

@@ -34,6 +34,9 @@ import {
   VIEW_WINDOW_FEATURES,
   VIEW_WINDOW_OPEN,
   VIEW_WINDOW_OPENING,
+  NOTE_WINDOW_SIZE,
+  noteWindowFeatures,
+  openNoteWindowUrl,
   announceViewWindow,
   closeViewWindow,
   openViewInWindow,
@@ -580,5 +583,80 @@ describe('押した瞬間の返事(#685 動線レビュー 欠陥 7)', () => {
     await openViewInWindow(null, b.deps);
     expect(b.opened, '前提が崩れた(組めているのに開いていない)').toEqual([]);
     expect(b.notices, '開いていないのに「開いています…」と言った').toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **付箋は細い窓で出す**(#685、user 裁定 2026-09-04)。
+ *
+ * ⚠ 直す前は大きさを 1 つも渡していなかったので、押すと「もう 1 個の PKC」
+ *   (3 列)が既定の大きさで出ていた ── 付箋にするには
+ *   「窓の端を掴んで 720px より細くする」という**教わらないと分からない一手**が要った。
+ */
+describe('付箋の窓の大きさ(#685、user 裁定 2026-09-04)', () => {
+  const wide = { width: 1920, height: 1080 };
+  const read = (f: string): Record<string, string> =>
+    Object.fromEntries(
+      f
+        .split(',')
+        .map((kv) => kv.split('='))
+        .filter((kv) => kv.length === 2)
+        .map(([k, v]) => [k!.trim(), v!.trim()]),
+    );
+
+  it('🔴 720px 以下の細い窓で出す(そのまま 1 枚ずつの画面になる)', () => {
+    const f = read(noteWindowFeatures(0, wide));
+    expect(Number(f['width']), '細くない ── 開いた瞬間に 3 列が出る').toBeLessThanOrEqual(720);
+    expect(Number(f['width'])).toBe(NOTE_WINDOW_SIZE.width);
+    expect(Number(f['height'])).toBe(NOTE_WINDOW_SIZE.height);
+  });
+
+  it('🔴 `noopener` を落とさない(閉じたら常駐が還る)', () => {
+    expect(noteWindowFeatures(0, wide).startsWith('noopener')).toBe(true);
+  });
+
+  /** 🔴 **3 枚目が 1 枚目に重ならない** ── 「何枚でも」が売りなので、重なると数えられない。 */
+  it('🔴 続けて開くと少しずつずれる', () => {
+    const at = (n: number) => {
+      const f = read(noteWindowFeatures(n, wide));
+      return `${f['left']},${f['top']}`;
+    };
+    const places = [0, 1, 2].map(at);
+    expect(new Set(places).size, '同じ場所に重なって出る').toBe(3);
+  });
+
+  /** ⚠ **一巡したら戻る** ── 無限にずらすと画面の外へ出ていく。 */
+  it('⚠ ずらしは一巡して戻る', () => {
+    expect(noteWindowFeatures(8, wide)).toBe(noteWindowFeatures(0, wide));
+  });
+
+  /**
+   * 🔴 **画面より大きくしない / 外へ出さない**(小さな画面)。
+   * ⚠ 出すと「開いたのに端が見えない」になり、掴んで動かす手が要る。
+   */
+  it('🔴 画面が小さければ、その中に収める', () => {
+    const f = read(noteWindowFeatures(5, { width: 360, height: 640 }));
+    expect(Number(f['width']), '画面より広い窓を頼んでいる').toBeLessThanOrEqual(360);
+    expect(Number(f['height'])).toBeLessThanOrEqual(640);
+    expect(Number(f['left']) + Number(f['width']), '右がはみ出す').toBeLessThanOrEqual(360);
+    expect(Number(f['top']) + Number(f['height']), '下がはみ出す').toBeLessThanOrEqual(640);
+  });
+
+  it('🔴 実際に開くときも、その features を渡す', () => {
+    const calls: Array<string | undefined> = [];
+    const spy = vi
+      .spyOn(window, 'open')
+      .mockImplementation((_u?: string | URL, _n?: string, features?: string) => {
+        calls.push(features);
+        return null;
+      });
+    try {
+      openNoteWindowUrl('https://example.test/#pkc?container=c1&entry=e1');
+    } finally {
+      spy.mockRestore();
+    }
+    expect(calls, '窓を開いていない').toHaveLength(1);
+    expect(calls[0], '寸法を渡していない(既定の大きさで 3 列が出る)').toContain('width=');
+    expect(calls[0], '`noopener` が落ちている').toContain('noopener');
   });
 });

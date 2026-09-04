@@ -94,6 +94,7 @@ export function entryMenuActions(
  *   ここは「よく使う順」。🔑 **並びが違ってよい**のは、字が同じだからである。
  */
 export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
+  { action: 'copy-entry-ref', label: '参照をコピー' },
   /**
    * 🔴 **付箋のように何枚でも開ける**(#685 段②、user 裁定 2026-09-04)。
    *
@@ -101,11 +102,11 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    * > 使ってどんどんスクラップできてます / 付箋的に使えるのもいいですね /
    * > マルチで付箋開けるといいかもね**」(利用者の感想 2026-09-04)
    *
-   * ⚠ **いちばん上に置く** ── 「よく使う順」の並び(下の注記)で、これは
-   *   読んでいるノートに対していちばん先に取る行動である。
+   * ⚠ **先頭ではなく 2 番目に置く**(user 裁定 2026-09-04、動線レビュー 案 D-2)──
+   *   1 稿目は先頭に入れたので、**毎日使っている全項目が 1 つ下へずれた**。
+   *   新しい操作のために既存の並びを動かさない。
    */
   { action: 'open-note-window', label: '別の窓で開く' },
-  { action: 'copy-entry-ref', label: '参照をコピー' },
   { action: 'copy-plain-markdown', label: '素の Markdown' },
   { action: 'export-entry', label: '書き出す' },
   /**
@@ -206,6 +207,19 @@ export const BODY_MENU_ACTIONS: readonly EntryAction[] = [
    * (user 指示 2026-08-23)。
    */
   { action: 'pin-split', label: 'このノートを横に留める' },
+  /**
+   * 🔴 **読んでいるノートを、そのまま隅へ出す**(#685、user 裁定 2026-09-04。
+   *   動線レビュー 欠陥 6 / 案 E)。
+   *
+   * ## ⚠ なぜ本文の右クリックにも要るのか
+   *
+   * 一覧の行から開く道は在るが、本文を読みながら「これを隅に出したい」と思った人の
+   * 手は**まず本文の上へ行く**。そこには既に「横に留める」が在るので、
+   * 「似た機能はここに集まっている」と読む ── なのに付箋だけ無かった。
+   * 🔑 ここから開けば、**探し直しが 1 度も要らない**(行から開く道は
+   *   `MENU_PREV_LID_ATTR` で現在地を戻しているが、こちらはそもそも動かない)。
+   */
+  { action: 'open-note-window', label: '別の窓で開く' },
 ];
 
 /**

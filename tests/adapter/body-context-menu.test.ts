@@ -946,6 +946,12 @@ describe('右クリックの説明(#587 C-1)', () => {
     expect(del?.getAttribute('data-pkc-hint')).toBe(ENTRY_ACTION_HINTS['delete-entry']);
   });
 
+  /**
+   * ⚠ **対照群** ── 説明を持たない項目には `data-pkc-hint` を付けない(空の属性を生やさない)。
+   * 🔴 **名指しの等値にする**(2026-09-04)── 1 稿目は「本文のメニューは**全部**
+   *   説明を持たない」を主張しており、説明を持つ項目を足した日に落ちた。
+   *   ⚠ 守りたいのは「**空なら付けない**」であって「1 つも付けない」ではない。
+   */
   it('⚠ **対照群** ── 説明を持たない項目には `data-pkc-hint` を付けない(空の属性を生やさない)', () => {
     const { root } = setup();
     rightClick(root.querySelector('[data-pkc-field="para"]')!);
@@ -954,7 +960,7 @@ describe('右クリックの説明(#587 C-1)', () => {
     expect(
       items.filter((b) => b.hasAttribute('data-pkc-hint')).map((b) => b.getAttribute('data-pkc-action')),
       '説明を持たないのに空の data-pkc-hint が生えている',
-    ).toEqual([]);
+    ).toEqual(['open-note-window']);
   });
 });
 
@@ -1043,14 +1049,31 @@ describe('メニューの下の説明欄(#587 C-3)', () => {
     expect(r.buttons.filter((b) => b.hasAttribute('title'))).toEqual([]);
   });
 
-  it('⚠ 説明を持たないメニュー(見出し)には欄を出さない', () => {
-    const s = setup();
-    // 本文の右クリック(段組み / 横に留める)は説明を持たない ── 欄も無い
-    rightClick(s.para);
-    const menu = s.menu();
-    expect(menu).not.toBeNull();
+  /**
+   * ⚠ **説明が 1 つも無いメニューには欄を出さない**(空の帯を残さない)。
+   * 🔴 **台を作って見る**(2026-09-04)── 1 稿目は本文の右クリックを使っていたが、
+   *   `open-note-window` を足した時点で**本文のメニューは説明を持つ**ようになり、
+   *   この検査は「説明の無いメニュー」を 1 度も見なくなった(§2 の未実行)。
+   */
+  it('⚠ 説明が 1 つも無いメニューには欄を出さない', () => {
+    document.body.textContent = '';
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    document.body.append(root);
+    openContextMenu(root, { x: 0, y: 0 }, [{ action: 'a', label: 'あ' }], null);
+    const menu = root.querySelector(MENU);
+    expect(menu, '台が空振り(メニューが出ていない)').not.toBeNull();
     expect(menu!.querySelector(HINT), '説明の無いメニューに空の欄が出ている').toBeNull();
     expect(menu!.hasAttribute('data-pkc-with-hint')).toBe(false);
+  });
+
+  /** ⚠ **対照群** ── 説明が 1 つでもあれば欄は出る(上が「常に出さない」実装でも緑にならない)。 */
+  it('⚠ 説明を持つメニューには欄が出る', () => {
+    const s = setup();
+    rightClick(s.para);
+    const menu = s.menu();
+    expect(menu!.querySelector(HINT), '説明を持つのに欄が出ていない').not.toBeNull();
+    expect(menu!.hasAttribute('data-pkc-with-hint')).toBe(true);
   });
 
   /**

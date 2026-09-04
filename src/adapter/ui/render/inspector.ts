@@ -1156,8 +1156,10 @@ export class InspectorRenderer {
      *   この repo の作法である(`tests/features/entry-actions.test.ts` の
      *   「字は 1 か所から来る」が全数で見ている)。
      */
-    btn('open-note-window', ENTRY_ACTION_LABELS['open-note-window']!);
+    // ⚠ **並びは右クリックと揃える**(user 裁定 2026-09-04)── 毎日使う
+    //    「参照をコピー」を動かさない(1 稿目は付箋を先頭に置いて全部を 1 つ下げた)
     btn('copy-entry-ref', ENTRY_ACTION_LABELS['copy-entry-ref']!);
+    btn('open-note-window', ENTRY_ACTION_LABELS['open-note-window']!);
     /**
      * 🔴 **外部の画像を手元へ取り込む**(#264 段①)。
      *

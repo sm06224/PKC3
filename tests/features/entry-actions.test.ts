@@ -364,11 +364,22 @@ describe('右クリックの説明(#587 C-1)', () => {
     const rows = bodyMenuActions({ externalImages: 3 });
     const adopt = rows.find((a) => a.action === 'adopt-external-images');
     expect(adopt?.hint, '外へ通信することが説明に無い').toContain('通信します');
-    // ⚠ **対照群** ── 説明を持たない 2 つは空のまま(何にでも字を付ける作りではない)
+    /**
+     * ⚠ **対照群** ── 説明を持たない 2 つは空のまま(何にでも字を付ける作りではない)。
+     * 🔴 **名前で等値 pin する**(2026-09-04)── 1 稿目は
+     *   `BODY_MENU_ACTIONS.map(...)` と比べていたので「**本文のメニューは全部
+     *   説明を持たない**」を主張していた。⚠ 説明を持つ項目を 1 つ足した瞬間に
+     *   落ちる形で、**守りたいこと(説明が要る物には配る)と逆向き**だった。
+     */
     expect(
       rows.filter((a) => a.hint === '').map((a) => a.action),
       '説明を持たない項目の一覧が変わった',
-    ).toEqual(BODY_MENU_ACTIONS.map((a) => a.action));
+    ).toEqual(['cycle-read-columns', 'pin-split']);
+    // ⚠ **空振り防止** ── 名前で pin した 2 つが、いまも本文のメニューに居ること
+    expect(
+      BODY_MENU_ACTIONS.map((a) => a.action),
+      '本文のメニューの顔ぶれが変わった(上の名指しが古い)',
+    ).toEqual(['cycle-read-columns', 'pin-split', 'open-note-window']);
   });
 
   it('⚠ 知らない綴りには空を返す(呼び側が例外で落ちない)', () => {
