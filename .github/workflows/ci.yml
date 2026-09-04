@@ -45,16 +45,36 @@ permissions:
   contents: read
 jobs:
   # ── 速い lane: 型 / lint / unit / build / 生成物の検品 ─────────────────
-  # 🔴 **12 分にした**(2026-09-04)。⚠ **仕事は増やしていない** ── 伸びたのは
-  #    `npm ci` で、同じ日に **1m53s 〜 5m02s**(2.7 倍)まで揺れた。
-  #    実測の内訳(5 分かかった回):npm ci 5m02s / audit 2m05s / typecheck 12s /
-  #    lint 14s / test 2m04s で打ち切り ── **働いている時間は 4m30s ほど**である。
-  # 🔑 tripwire の目的は「**PR gate が長くなっていないか**」であって、
-  #    取り込みの揺れで赤を出すことではない(CLAUDE.md「CI を長くしない」)。
-  #    ⚠ 撤廃はしない ── 仕事そのものが伸びたら、ここで止まる。
+  # 🔴 **依存の検めは別の job にした**(2026-09-04)。
+  #
+  # ⚠ 直す前は `verify` の中に居たので、registry が遅い日に **2 分 05 秒**を食い、
+  #    `npm ci` の 5 分と合わせて **10 分の予算を使い切った**(実測で打ち切られた)。
+  # 🔑 **1 job = 1 主張**(CLAUDE.md「回すものの粒度」)── 分けると
+  #    ①並列なので**壁時計は伸びない** ②赤が出たとき「依存の話か、コードの話か」が
+  #    **job の名前で分かる**。⚠ 予算(10 分)は上げない。
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # 🔴 判定は script に置く(#675)── 素の `npm audit` は「脆弱がある」と
+      #    「registry が答えない」を**同じ exit 1** で返すので、赤の意味が読めない。
+      #    規則と全経路の test は scripts/audit-gate.mjs / tests/audit-gate.test.ts。
+      - name: Audit (prod deps, high+, blocking)
+        run: node scripts/audit-gate.mjs
+      # ⚠ 上と同じ理由で**時間を区切る** ── registry が答えない日に、参考の 1 行の
+      #    ために 5 分溶ける。
+      - name: Audit (full, informational)
+        run: timeout 60 npm audit --fetch-retries=1 --fetch-retry-maxtimeout=10000 || true
+
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:
@@ -74,15 +94,6 @@ jobs:
             exit 1
           fi
       - run: npm ci
-      # 🔴 判定は script に置く(#675)── 素の `npm audit` は「脆弱がある」と
-      #    「registry が答えない」を**同じ exit 1** で返すので、赤の意味が読めない。
-      #    規則と全経路の test は scripts/audit-gate.mjs / tests/audit-gate.test.ts。
-      - name: Audit (prod deps, high+, blocking)
-        run: node scripts/audit-gate.mjs
-      # ⚠ 上と同じ理由で**時間を区切る** ── registry が答えない日に、参考の 1 行の
-      #    ために 5 分溶ける(job の timeout は 10 分しかない)。
-      - name: Audit (full, informational)
-        run: timeout 60 npm audit --fetch-retries=1 --fetch-retry-maxtimeout=10000 || true
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
