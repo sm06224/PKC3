@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { clickReal, collectPageErrors } from './helpers';
+import { clickReal, collectPageErrors, createEntry, dismissAnnounce, gotoApp } from './helpers';
 
 /**
  * 🔴 **`#pkc?view=…` で開くと、その面で立ち上がる**(#300 段②)。
@@ -142,3 +142,102 @@ for (const name of ['calendar', 'kanban']) {
     expect(await page.evaluate(() => location.hash), '移した後も断片が残っている').toBe('');
   });
 }
+
+/**
+ * 🔴 **住所は、いま見ているノートへ追随する**(#689 案 B、2026-09-04)。
+ *
+ * ## user から見た物語(直す前)
+ *
+ * ノートへの直リンクで開いた窓で、そのまま別のノートを開いて 30 分作業する。
+ * `F5` を押す ⇒ **30 分前のノートへ引き戻される**。`Ctrl+D` の栞も同じ。
+ *
+ * ## ⚠ ここでしか測れないもの
+ *
+ * unit は的を差し替えて通すので、**`location` を実際に書き換える配線**
+ * (`windowDeepLinkTarget.setEntry` ← `main.ts` の購読)は 1 度も走らない。
+ * 🔑 ここが持つのは「**アドレスが本当に動き、読み直すとそこが出る**」である
+ * ── 両端(住所を組む所 / 選択を伝える所)が**繋がっている**ことは、
+ * どちらの unit にも書けない(CLAUDE.md §7)。
+ *
+ * ⚠ **直リンクは、アプリ自身に組ませる**(付箋の窓の URL がそれである)──
+ * 手で組むと、綴りが食い違っていても test の側だけ正しくなる(同じ盲点を共有しない)。
+ */
+test('🔴 直リンクの窓で別のノートを開くと、F5 でそのノートが出る (#689)', async ({
+  page,
+  context,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+
+  // ⚠ **2 件作る** ── 1 件だと「たまたま同じノートが出た」と区別が付かない
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('さいしょ');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('あとから');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  /** 一覧の行(題名 → lid)。⚠ 画面から採る ── 保存の綴りを推測しない。 */
+  const lidOf = async (title: string): Promise<string> =>
+    await page.evaluate((t) => {
+      const rows = [...document.querySelectorAll('[data-pkc-region="sidebar"] [data-pkc-entry]')];
+      const hit = rows.find((r) => (r.textContent ?? '').includes(t));
+      return hit?.getAttribute('data-pkc-entry') ?? '';
+    }, title);
+
+  const firstLid = await lidOf('さいしょ');
+  const secondLid = await lidOf('あとから');
+  expect(firstLid, '前提が崩れた(さいしょ の行が一覧に無い)').not.toBe('');
+  expect(secondLid, '前提が崩れた(あとから の行が一覧に無い)').not.toBe('');
+  expect(firstLid, '前提が崩れた(2 件が同じ行を指している)').not.toBe(secondLid);
+
+  // 🔑 直リンクの形は**付箋の窓の URL** を借りる(アプリが組んだ本物である)
+  await clickReal(page, `[data-pkc-entry="${firstLid}"]`);
+  const popup = context.waitForEvent('page');
+  await clickReal(page, '[data-pkc-action="open-note-window"]');
+  const win = await popup;
+  await expect(win.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
+  const link = win.url();
+  await win.close();
+  expect(link, '付箋の URL がそのノートを指していない(前提が崩れた)').toContain(
+    `entry=${firstLid}`,
+  );
+
+  // ⚠ その直リンクの窓として入り直す(`w=` は起動直後に外れる)
+  await page.goto(link);
+  await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
+  expect(
+    await page.evaluate(() => location.hash),
+    '前提が崩れた(直リンクの住所が残っていない)',
+  ).toContain(`entry=${firstLid}`);
+
+  // 🔴 その窓で別のノートを開く ⇒ 住所が付いてくる
+  await clickReal(page, `[data-pkc-entry="${secondLid}"]`);
+  await expect
+    .poll(async () => await page.evaluate(() => location.hash), {
+      message: '住所が古いノートを指したまま(F5 で引き戻される)',
+    })
+    .toContain(`entry=${secondLid}`);
+
+  /** 🔴 **読み直すと、いま見ているノートが出る**(この直しの当の主張)。 */
+  await page.reload();
+  await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
+  await expect(
+    page.locator('[data-pkc-region="inspector"]'),
+    '読み直したら別のノートが出た(住所が追随していない)',
+  ).toContainText('あとから');
+
+  /**
+   * 🔴 **履歴を積んでいない** ── 積むと「戻る」が同一文書内の断片移動になり、
+   *   画面が 1 ドットも動かない(user は「戻るが壊れている」と読む)。
+   */
+  await page.goBack();
+  expect(
+    new URL(page.url()).hash,
+    '住所の書き換えを history に積んだ(戻るで PKC から出られない)',
+  ).not.toContain(`entry=${firstLid}`);
+
+  expect(errors, 'pageerror / console.error が出ている').toEqual([]);
+});

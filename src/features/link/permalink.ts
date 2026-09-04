@@ -420,6 +420,42 @@ export function dropViewWindowToken(raw: string): string {
   return dropHashKeys(raw, ['w']);
 }
 
+/**
+ * 🔴 **住所を、いま見ているノートへ追随させる**(#689、2026-09-04)。
+ *
+ * ## ⚠ なぜ要るか ── 住所が黙って嘘になる
+ *
+ * `dropViewFromHash` は `container` / `entry` を**わざと残す**(すぐ上)。
+ * ところが残した後は**誰も更新していなかった**ので、その窓で別のノートを開いた
+ * 瞬間に「いまこのノートを見ている」という住所の主張が嘘になる ──
+ * ⚠ **`F5` で 30 分前のノートへ戻され、`Ctrl+D` の栞もそちらを指す**。
+ *
+ * 🔑 だから **`view` と同じ規律をノートにも当てる**:面は「離れたら消す」、
+ * ノートは**移った先へ書き換える**(#689 案 B)。消さないのは、
+ * ノートの住所は**離れたのではなく移っただけ**だからである。
+ *
+ * ## 🔴 名乗っていない断片に、住所を生やさない
+ *
+ * ⚠ いま `container`+`entry` を名指していない窓 ── ふつうに開いた本体のタブ ──
+ * では**何もしない**。生やすと、いままで素だったアドレスが
+ * **全 user の画面で操作のたびに伸びる**(誰も頼んでいない見え方の変更である)。
+ * 🔑 判定は `parseViewDeepLinkEntry` に借りる(同じ規則を書き写さない、§ 7)。
+ *
+ * @returns 書き換えた後の断片(先頭 `#` 付き)。⚠ 名乗っていなければ **`raw` のまま**
+ */
+export function setHashEntry(raw: string, lid: string): string {
+  if (typeof raw !== 'string') return '';
+  // ⚠ 綴りを検める ── 読む側(`parseViewDeepLinkEntry`)が受けない字を書き込むと、
+  //   アドレスは変わるのに `F5` では拾われない(いちばん気づけない壊れ方)
+  if (!TOKEN_RE.test(lid)) return raw;
+  if (parseViewDeepLinkEntry(raw) === null) return raw;
+  const idx = raw.indexOf(PKC_FRAGMENT_PREFIX);
+  const params = new URLSearchParams(raw.slice(idx + PKC_FRAGMENT_PREFIX.length));
+  // ⚠ `set` は**その場で置き換える**ので、`view` / `w` の並びは動かない
+  params.set('entry', lid);
+  return `${raw.slice(0, idx)}${PKC_FRAGMENT_PREFIX}${params.toString()}`;
+}
+
 function dropHashKeys(raw: string, keys: readonly string[]): string {
   if (typeof raw !== 'string') return '';
   const idx = raw.indexOf(PKC_FRAGMENT_PREFIX);

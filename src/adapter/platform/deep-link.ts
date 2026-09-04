@@ -30,6 +30,16 @@
  * - 見ている間 → アドレスにその字が在る(`Ctrl+D` がそのまま効く / `F5` で戻る)
  * - `× 閉じる` / タイル再押下 / `Alt+1` / 別の面へ → **その瞬間に静かに消す**
  *
+ * ## 🔴 ノート(`container`+`entry`)は消さない ── **移った先へ書き換える**(#689)
+ *
+ * ⚠ 面とノートで**向きが違う**。面は「離れた」が起きるが、ノートは
+ * **見ている物が移るだけ**で、離れることが無いからである(必ずどれかを見ている)。
+ * ⚠ 直す前は書き換えていなかったので、`Alt+1` で本文へ戻った後にノートを渡り歩くと、
+ * **`F5` が最初のノートへ引き戻し、`Ctrl+D` の栞もそちらを指していた**
+ * (住所が黙って嘘になる = 誰も気づけない)。
+ * ⚠ **名乗っていない断片には生やさない** ── ふつうに開いたタブのアドレスが
+ * 操作のたびに伸びるのは、誰も頼んでいない見え方の変更である。
+ *
  * ⚠ これで初稿が心配していた事故(「本文を読み始めた後の読み直しで面へ飛ぶ」)も
  * 起きない ── **飛ぶ元の字が、離れた時点でもう無い**。
  * ⚠ そして**初回訪問の分離のための読み直し**(`coi-reload.ts`。`main.ts` では
@@ -53,6 +63,7 @@ import {
   parseViewDeepLink,
   parseViewDeepLinkEntry,
   parseViewWindowToken,
+  setHashEntry,
 } from '../../features/link/permalink';
 import { announceViewWindow } from './view-window';
 
@@ -70,6 +81,15 @@ export interface DeepLinkTarget {
    * ⚠ `view` は残す ── 合図は放送した瞬間に用済みだが、面はまだ見ている。
    */
   readonly dropToken: () => void;
+  /**
+   * 🔴 **住所を、いま見ているノートへ書き換える**(#689 案 B、2026-09-04)。
+   *
+   * ⚠ **履歴を積まない**(`replaceState`)── 積むと、ノートを 10 件見た後の
+   *   `← 戻る` が **10 回押さないと前の頁へ帰れない**形になる。
+   * ⚠ いま住所を名乗っていない断片には**何も生やさない**
+   *   (判定は `setHashEntry` が持つ)。
+   */
+  readonly setEntry: (lid: string) => void;
 }
 
 /** 既定の的 ── 本物のアドレス。 */
@@ -95,6 +115,14 @@ export function windowDeepLinkTarget(): DeepLinkTarget {
         '',
         `${location.pathname}${location.search}${dropViewWindowToken(location.hash)}`,
       );
+    },
+    setEntry: (lid) => {
+      if (typeof history !== 'object' || typeof location !== 'object') return;
+      const next = setHashEntry(location.hash, lid);
+      // ⚠ **同じなら触らない** ── `replaceState` は履歴を積まないが、
+      //    呼ぶたびにアドレス欄が書き換わる(選択が動くたびに走る経路である)
+      if (next === location.hash) return;
+      history.replaceState(null, '', `${location.pathname}${location.search}${next}`);
     },
   };
 }
@@ -318,6 +346,16 @@ export interface DeepLinkWiring {
   readonly fail: (message: string) => void;
   /** いまの面が変わったら呼ばれる購読(返り値で解除)。 */
   readonly onViewChange: (fn: (view: ViewMode) => void) => () => void;
+  /**
+   * 🔴 **選んでいるノートが変わったら呼ばれる購読**(#689 案 B、2026-09-04)。
+   *
+   * ⚠ **面の `onViewChange` と非対称である** ── 面は「離れたら**消す**」、
+   *   ノートは「移った先へ**書き換える**」。理由は `setHashEntry` の docstring:
+   *   面から離れた人はもうその面を見ていないが、**ノートは見ている物が移っただけ**
+   *   なので、住所は消すのではなく正しくするのが `Ctrl+D` / `F5` の期待に合う。
+   * ⚠ 省略可 ── 渡さない配線(古い test)では**追随しないだけ**。
+   */
+  readonly onSelectedEntry?: (fn: (lid: string | null) => void) => () => void;
   /** アドレスの断片が変わったら呼ばれる購読(返り値で解除)。 */
   readonly onHashChange?: (fn: () => void) => () => void;
   readonly target?: DeepLinkTarget;
@@ -425,10 +463,24 @@ export function connectViewDeepLink(wiring: DeepLinkWiring): () => void {
     target.clearHash();
   });
   const offHash = wiring.onHashChange?.(() => apply());
+  /**
+   * 🔴 **住所を、いま見ているノートへ追随させる**(#689 案 B)。
+   *
+   * ⚠ **何も選んでいない回は触らない** ── boot の途中や削除の直後に
+   *   `null` が流れてくるが、そこで住所を消すと**栞ごと消える**。
+   *   住所が古いままでも `F5` は「居ない lid」として黙って捨てるだけである。
+   * 🔑 「そもそも住所を名乗っているか」の判定は `setHashEntry` が持つ
+   *   ── ここで二重に持たない(§ 7)。
+   */
+  const offSelect = wiring.onSelectedEntry?.((lid) => {
+    if (lid === null) return;
+    target.setEntry(lid);
+  });
 
   return () => {
     offView();
     offHash?.();
+    offSelect?.();
   };
 }
 
