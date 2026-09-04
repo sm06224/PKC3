@@ -129,6 +129,7 @@ import { chordOf, findCommand, isMac, typesCharacter, KEY_COMMANDS } from '@feat
 import { paletteRows } from '@features/palette/palette-rows';
 import {
   bodyMenuActions,
+  editingRowMenuActions,
   entryMenuActions,
   headingMenuActions,
   NOTE_TOOL_ACTIONS,
@@ -6886,6 +6887,37 @@ export function bindActions(
     }
 
     ev.preventDefault();
+    /**
+     * 🔴 **書いている最中でも、「別の窓で開く」だけは出す**(#690 ④ A′、
+     *   user 裁定 2026-09-04)。
+     *
+     * ⚠ 直す前は編集中の行の右クリックが**必ず断られ**(下の `selectEntryOrExplain`)、
+     *   右の情報のボタンも全部 `disabled` ── 書きながら別のノートを参照するには
+     *   **下書きを閉じるしか無かった**。付箋は中央を動かさないので、断る理由が無い。
+     * 🔑 **行は選ばない**(`SELECT_ENTRY` を撃たない)── 下書きも中央のノートも
+     *   動かさない。lid は**メニューのボタン自身に `data-pkc-entry` として載せる**ので、
+     *   受け手(`open-note-window`)は「押した行のノート」という**いつもの規則**で拾う
+     *   (規則を 2 本にしない ── §7)。
+     * ⚠ `MENU_PREV_LID_ATTR` は付けない ── 戻す相手が居ない(何も動かしていない)。
+     * ⚠ 情報ペインのボタンは**有効にしない** ── 編集中に選ばれているのは
+     *   書いているノート自身なので、押すと同じノートの窓がもう 1 枚出るだけである。
+     */
+    if (dispatcher.getState().phase === 'editing') {
+      if (!dispatcher.getState().entryMetas.has(lid)) {
+        // ⚠ 無言で終わらせない(`selectEntryOrExplain` と同じ字)
+        dispatcher.dispatch({ type: 'OP_FAILED', error: 'ノートが見つかりません' });
+        closeContextMenu(root);
+        return;
+      }
+      openContextMenu(
+        root,
+        { x: ev.clientX, y: ev.clientY },
+        editingRowMenuActions(),
+        root.ownerDocument.activeElement,
+        { 'data-pkc-entry': lid },
+      );
+      return;
+    }
     // 🔑 **選び直す前**の現在地を控える(`open-note-window` が戻す ── 上の
     //    `MENU_PREV_LID_ATTR`)。⚠ 順番が主張である:`selectEntryOrExplain` の
     //    後だと、控えるのは**押した行そのもの**になって何も戻らない

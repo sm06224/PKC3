@@ -385,3 +385,136 @@ test('🔴 立ち上がる前に 2 度押しても、窓は 1 枚 (#685)', async
   for (const w of opened) await w.close();
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **追記欄を畳んでいても、付箋は追記欄つきで開く**(#690 ② A′、user 裁定 2026-09-04)。
+ *
+ * ## 物語
+ *
+ * 本体の窓で「閲覧メインだから」と追記欄を畳んでいる人が、付箋を開く。
+ * 付箋の売りは「隅に置いて追記欄にどんどん書き足せる」なのに、直す前は端末の記録
+ * (`pkc3.panes`)が付箋にもそのまま効いて、**本文の下に 8px の帯だけ**が出ていた。
+ *
+ * ## ⚠ ここでしか測れないもの
+ *
+ * unit(`note-window-panes.test.ts`)は台帳と描画を別々に見る ── **付箋の旗が立った瞬間に
+ * 配線(`main.ts` の `enterNoteWindow`)が本当に呼ばれ、実物の CSS で欄が見える**ことは
+ * ここでしか分からない(`main.ts` はどの test からも実行されない ── CLAUDE.md §2)。
+ * 🔑 観測点は 3 つ:①付箋で打つ欄が**見える** ②帯を押すと**畳める・戻せる**(dead click で
+ * ない)③その間**端末の記録が 1 度も動かない**(2 回押した後に見る ── 1 回目は記録と
+ * 同じ値へ戻るので、書いても見分けが付かない)。
+ */
+test('🔴 追記欄を畳んでいても、付箋は追記欄つきで開き、畳んでも本体の記録は動かない (#690 ②)', async ({
+  page,
+  context,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('たたんだまま');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  // 🔑 **user と同じ手で畳む**(帯を押す)── 記録に直接書くと、書く側の経路を見ない
+  await clickReal(page, '[data-pkc-action="toggle-pane"][data-pkc-pane="append"]');
+  await expect(
+    page.locator('[data-pkc-region="shell"]'),
+    '前提が崩れた(本体の窓で追記欄が畳まれていない)',
+  ).toHaveAttribute('data-pkc-hidden-panes', /append/);
+  expect(
+    await page.evaluate(() => localStorage.getItem('pkc3.panes')),
+    '前提が崩れた(畳みが端末の記録に入っていない ── これでは検査にならない)',
+  ).toContain('append');
+
+  const popup = context.waitForEvent('page');
+  await clickReal(page, '[data-pkc-action="open-note-window"]');
+  const win = await popup;
+  const winErrors = collectPageErrors(win);
+  await expect(win.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
+  await expect(
+    win.locator('[data-pkc-region="inspector"]'),
+    '前提が崩れた(付箋がそのノートを開いていない)',
+  ).toContainText('たたんだまま', { timeout: 20_000 });
+
+  // ① 🔴 付箋では追記欄が出ている(記録が「畳む」でも)
+  await expect(
+    win.locator('[data-pkc-region="shell"]'),
+    '付箋なのに端末の記録どおり追記欄が畳まれている',
+  ).not.toHaveAttribute('data-pkc-hidden-panes', /append/);
+  await expect(
+    win.locator('[data-pkc-field="append-input"]'),
+    '付箋に追記欄の打つ欄が見えない(帯だけが出ている)',
+  ).toBeVisible();
+
+  // ② 🔴 帯は効く(dead click を作らない)── 畳めて、戻せる
+  await clickReal(win, '[data-pkc-action="toggle-pane"][data-pkc-pane="append"]');
+  await expect(
+    win.locator('[data-pkc-field="append-input"]'),
+    '付箋で帯を押しても追記欄が畳まれない(dead click)',
+  ).toBeHidden();
+  await clickReal(win, '[data-pkc-action="toggle-pane"][data-pkc-pane="append"]');
+  await expect(
+    win.locator('[data-pkc-field="append-input"]'),
+    '付箋で帯をもう一度押しても追記欄が戻らない',
+  ).toBeVisible();
+
+  // ③ 🔴 端末の記録は動いていない(書いていれば 2 回目で `append` が消えている)
+  expect(
+    await page.evaluate(() => localStorage.getItem('pkc3.panes')),
+    '付箋の畳みが端末の記録へ書かれた(本体の窓の見え方まで変わる)',
+  ).toContain('append');
+  // ⚠ 対照群 ── 本体の窓は畳まれたまま
+  await expect(
+    page.locator('[data-pkc-region="shell"]'),
+    '本体の窓の畳みが付箋の操作で変わった',
+  ).toHaveAttribute('data-pkc-hidden-panes', /append/);
+
+  await win.close();
+  expect(winErrors, `付箋で page error: ${winErrors.join(' / ')}`).toEqual([]);
+  expect(errors, `元の窓で page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **付箋を開いた直後、カーソルは追記欄に在る**(#690 I4、user 裁定 2026-09-04)。
+ *
+ * ⚠ 直す前は開いた直後の焦点が本文に在り、user は毎回打つ欄を 1 度押してから
+ *   書き始めていた ── 何枚も開く使い方では、その 1 手が枚数ぶん積まれる。
+ * 🔑 unit は「頼めば入る」を見る。ここが持つのは**付箋の旗から焦点まで配線が繋がって
+ *   いる**こと(`main.ts` の `enterNoteWindow` → `focusInputOnceReady`)と、
+ *   実物の CSS で `hidden` が解けた欄に**本当に焦点が乗る**ことである。
+ */
+test('🔴 付箋を開いた直後、カーソルは追記欄に在る (#690 I4)', async ({ page, context }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('かーそる');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  const popup = context.waitForEvent('page');
+  await clickReal(page, '[data-pkc-action="open-note-window"]');
+  const win = await popup;
+  const winErrors = collectPageErrors(win);
+  await expect(win.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
+  await expect(
+    win.locator('[data-pkc-region="inspector"]'),
+    '前提が崩れた(付箋がそのノートを開いていない)',
+  ).toContainText('かーそる', { timeout: 20_000 });
+
+  // 🔴 本文が届いた時点で、打つ欄に焦点が在る
+  await expect(
+    win.locator('[data-pkc-field="append-input"]'),
+    '付箋を開いた直後に追記欄へ焦点が入っていない(書き始めるのに 1 手余計に要る)',
+  ).toBeFocused({ timeout: 20_000 });
+  // ⚠ 対照群 ── 本体の窓では焦点を動かしていない
+  await expect(
+    page.locator('[data-pkc-field="append-input"]'),
+    '本体の窓でも追記欄へ焦点が入った(付箋だけの挙動のはず)',
+  ).not.toBeFocused();
+
+  await win.close();
+  expect(winErrors, `付箋で page error: ${winErrors.join(' / ')}`).toEqual([]);
+  expect(errors, `元の窓で page error: ${errors.join(' / ')}`).toEqual([]);
+});

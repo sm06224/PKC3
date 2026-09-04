@@ -269,6 +269,14 @@ export interface AppHandle {
    */
   repaintWindowTitle(): void;
   /**
+   * 🔴 **この窓を付箋として整える**(#690 ② A′ / I4、user 裁定 2026-09-04)。
+   * ⚠ 呼ぶのは配線が「付箋の旗」を立てた瞬間だけ ── ①追記欄を必ず出し、以後この窓の
+   *   畳みを端末の記録から切り離す(`PaneVisibilityStore.sessionOnly`)②本文が届いたら
+   *   1 回だけ打つ欄へ焦点を入れる(`AppendBoxRenderer.focusInputOnceReady`)。
+   * ⚠ 判断は 2 つとも向こうに在る ── この file はどの test からも実行されない(§2)。
+   */
+  enterNoteWindow(): void;
+  /**
    * 🔴 **探し方(左の列のタブ)を切り替える**(#292 段⑤)。
    * ⚠ 引っ越したディープリンク(`view=calendar` / `view=kanban`)を
    *   「予定」タブへ送るために要る ── boot の外から呼ぶので handle に出す。
@@ -3293,6 +3301,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       paintTitle();
       announceNote();
     },
+    enterNoteWindow: () => {
+      // ⚠ 追記欄を出してから焦点の約束をする ── 畳んだままの欄には焦点が乗らない
+      applyPaneVisibility(root, appPanes.sessionOnly('append'));
+      appendBox.focusInputOnceReady();
+    },
     // 🔑 判断は `services.setBrowse` 1 か所 ── ここは呼ぶだけ
     //    ⚠ `BinderServices` では optional なので、無い配線では**何もしない**
     setBrowse: (mode) => services.setBrowse?.(mode),
@@ -3408,6 +3421,8 @@ function bootstrap(): void {
           heldNoteWindow = holding && openedByUs;
           app.repaintStatus();
           app.repaintWindowTitle();
+          // 🔴 付箋なら追記欄を出し、本文が届いたら打つ欄へ焦点を入れる(#690 ② A′ / I4)
+          if (heldNoteWindow) app.enterNoteWindow();
         },
         fail: (error) => app.dispatcher.dispatch({ type: 'OP_FAILED', error }),
         // ⚠ 面が変わったら断片を消す(見ている間だけ残す)

@@ -33,6 +33,8 @@ function readStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
 export class PaneVisibilityStore {
   /** 保存が読めない環境の控え(この session では効いている)。 */
   private fallback: PaneId[] = [];
+  /** 🔴 この窓の畳みを端末の記録から切り離したか(下の `sessionOnly`)。 */
+  private detached = false;
 
   constructor(
     private readonly storage: Pick<Storage, 'getItem' | 'setItem'> | null = readStorage(),
@@ -40,6 +42,7 @@ export class PaneVisibilityStore {
 
   /** ⚠ 読むたびに保存を見る(書き手が複数 ── UI と smoke の仕込み)。 */
   getHidden(): PaneId[] {
+    if (this.detached) return this.fallback;
     try {
       return decodeHidden(this.storage?.getItem(KEY) ?? null);
     } catch {
@@ -50,12 +53,40 @@ export class PaneVisibilityStore {
   setHidden(hidden: readonly PaneId[]): PaneId[] {
     const next = decodeHidden(encodeHidden(hidden));
     this.fallback = next;
+    if (this.detached) return next;
     try {
       this.storage?.setItem(KEY, encodeHidden(next));
     } catch {
       // 保存できないだけ ── この session では効いている
     }
     return next;
+  }
+
+  /**
+   * 🔴 **この窓の畳みを、端末の記録から切り離す**(#690 ② A′、user 裁定 2026-09-04)。
+   *
+   * ## 物語
+   *
+   * 本体の窓で「閲覧メインだから」と追記欄を畳んでいる人が、付箋を開く。
+   * 付箋の売りは「隅に置いて追記欄にどんどん書き足せる」なのに、⚠ 直す前は
+   * **端末の記録が付箋にもそのまま効いて**、本文の下に 8px の帯だけが出ていた ──
+   * 追記したくて開いた窓に、打つ欄が無い。
+   *
+   * 🔑 だから付箋では `reveal`(追記欄)を**必ず出した状態で始める**。
+   * ⚠ その窓で帯を押して畳むことは**できる**(帯はこれまでどおり効く)── ただし
+   *   その畳みは**端末の記録へ書かない**(閉じると忘れる)。書くと、付箋で畳んだ
+   *   1 回が**本体の窓の見え方まで変える** ── 本体の畳み方には触らない。
+   * ⚠ 以後この窓では `getHidden` / `setHidden` とも**記憶だけ**を見る ── 記録を
+   *   読み続けると、本体の窓で畳み直した瞬間に付箋の追記欄も消える。
+   * ⚠ 「無い環境の控え」(`fallback`)と同じ器を使う ── 2 本目の台帳を作らない。
+   *
+   * @returns 切り離した時点の畳み(呼び側はそのまま `applyPaneVisibility` へ渡す)
+   */
+  sessionOnly(reveal: PaneId): PaneId[] {
+    const seed = this.getHidden().filter((id) => id !== reveal);
+    this.detached = true;
+    this.fallback = decodeHidden(encodeHidden(seed));
+    return this.fallback;
   }
 
   toggle(id: PaneId): PaneId[] {

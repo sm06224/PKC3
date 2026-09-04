@@ -86,6 +86,31 @@ export function entryMenuActions(
 }
 
 /**
+ * 🔴 **書いている最中の行に出す、ただ 1 つ**(#690 ④ A′、user 裁定 2026-09-04)。
+ *
+ * ## 物語
+ *
+ * 本文を書いている途中で、一覧の別のノートを**参照したく**なる。ところが編集中は
+ * 行を右クリックしても「編集を終了してからノートを開いてください」と断られ、
+ * 右の情報のボタンも全部 `disabled` ── **下書きを閉じるか、諦めるか**しか無かった。
+ * ⚠ 付箋(`open-note-window`)は**中央を動かさずに脇へ出す**ものなので、
+ *   下書きを壊す理由が 1 つも無い。断る側の理屈が当たらない唯一の操作である。
+ *
+ * 🔑 **出すのはこれ 1 つ** ── 他の項目(消す / 書き出す / 印を付ける)は
+ *   `selectEntryOrExplain` が行を選ぶことを前提にしており、編集中は選べない。
+ * ⚠ 字も説明も `ENTRY_MENU_ACTIONS` / `ENTRY_ACTION_HINTS` から**引く**
+ *   (ここに書き写さない ── 片方だけ直る日を作らない。§7)。
+ */
+export function editingRowMenuActions(): readonly (EntryAction & { readonly hint: string })[] {
+  // ⚠ 材料は要らない(`open-note-window` は `when` を持たない)── 空の文脈で引く
+  const ctx: EntryMenuContext = { archetype: null, linkedFile: null };
+  return ENTRY_MENU_ACTIONS.filter((a) => a.action === 'open-note-window').map((a) => ({
+    ...a,
+    hint: entryActionHint(a.action, ctx),
+  }));
+}
+
+/**
  * 🔴 **右クリックで出す順**。
  *
  * ⚠ **消す物をいちばん下**に置く ── 上から順に押していく人が、

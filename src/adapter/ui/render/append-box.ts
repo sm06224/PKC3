@@ -67,6 +67,8 @@ export class AppendBoxRenderer {
   private readonly release: HTMLElement;
   private last: AppendMode['kind'] | null = null;
   private lastLid: string | null = null;
+  /** 🔴 次に打てる状態で描いたとき、1 回だけ打つ欄へ焦点を入れる(下の `focusInputOnceReady`)。 */
+  private focusPending = false;
 
   constructor(region: HTMLElement) {
     this.region = region;
@@ -207,7 +209,11 @@ export class AppendBoxRenderer {
      */
     const canUndo = mode.kind === 'ready' && state.lastAppend?.lid === mode.lid;
     if (this.undo.hidden !== !canUndo) this.undo.hidden = !canUndo;
-    if (mode.kind === this.last) return; // 種類が同じなら DOM を触らない
+    if (mode.kind === this.last) {
+      // ⚠ 種類が同じなら DOM を触らない ── ただし焦点の約束は**器に触らずに**果たす
+      this.focusIfPending(mode);
+      return;
+    }
     this.last = mode.kind;
     this.region.hidden = mode.kind === 'hidden';
     this.form.hidden = mode.kind !== 'ready';
@@ -220,6 +226,42 @@ export class AppendBoxRenderer {
     } else if (mode.kind === 'writing') {
       this.lockText.textContent = '追記を書き込んでいます…(返ってこないときは強制解放)';
     }
+    // ⚠ **器を出した後**に当てる ── `hidden` のままの欄には焦点が乗らない
+    this.focusIfPending(mode);
+  }
+
+  /**
+   * 🔴 **開いた直後、カーソルは追記欄に在る**(#690 I4、user 裁定 2026-09-04)。
+   *
+   * ## 物語
+   *
+   * 付箋は「隅に置いて追記欄にどんどん書き足す」ための窓である。⚠ 直す前は
+   * 開いた直後の焦点が**本文**に在ったので、user は毎回**打つ欄を 1 度押してから**
+   * 書き始めていた ── 何枚も開く使い方では、その 1 手が枚数ぶん積まれる。
+   *
+   * 🔑 **次に打てる状態(`ready`)で描いたとき、1 回だけ**打つ欄へ焦点を入れる。
+   * ⚠ 本文が届く前に呼ばれる(付箋の旗が立つのは boot の後・本文の到着より前)ので、
+   *   その場で `focus()` しても**まだ `hidden` の欄**には乗らない ── だから約束にして、
+   *   描画が果たす。
+   * ⚠ **奪い返さない** ── 1 回果たしたら忘れる。user が既にどこかで打っている
+   *   (編集できる物に焦点が在る)なら、果たさずに忘れる。
+   */
+  focusInputOnceReady(): void {
+    this.focusPending = true;
+  }
+
+  private focusIfPending(mode: AppendMode): void {
+    if (!this.focusPending || mode.kind !== 'ready') return;
+    this.focusPending = false;
+    const active = this.region.ownerDocument.activeElement;
+    if (
+      active instanceof HTMLInputElement ||
+      active instanceof HTMLTextAreaElement ||
+      active instanceof HTMLSelectElement ||
+      (active instanceof HTMLElement && active.isContentEditable)
+    )
+      return;
+    this.input.focus();
   }
 
   /**
