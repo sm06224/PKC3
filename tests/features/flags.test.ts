@@ -340,6 +340,11 @@ describe('🔴 クエリパラメータの抜け穴を作らない', () => {
        *   ここではない ── 上の `URLSearchParams` の検査がそれを保つ。
        */
       "history.replaceState(null, '', `${location.pathname}${location.search}${next}`);",
+      /**
+       * ⚠ 目次・脚注で飛んだ後に小窓の住所を戻す口(#693 案 A)── `next` の口と同じ作法で
+       *   `search` をそのまま持ち越す(key の取り出しはしていない)。
+       */
+      "history.replaceState(null, '', `${location.pathname}${location.search}${hash}`);",
     ]);
   });
 
