@@ -10,7 +10,7 @@
  * |---|---|---|
  * | 再読み込み(F5) | 🔴 **白紙になる**(組んだ DOM は再読み込みで消える) | ✅ 同じ page が読み直される |
  * | 設定で選んだ配色 | 🔴 届かない(`--bg` 等の**テーマ 9 種**は BODY_CSS に無い) | ✅ `tokens.css` を丸ごと持ち、起動時に `localStorage` の配色を当てる |
- * | 目次 | `<button>` + `scrollIntoView`(`<a href="#…">` は base URL を引き継いで**アプリへ飛ぶ**) | ✅ 素の `<a href="#m-3">`(実 URL なので断片は**この page の中**で解決する) |
+ * | 目次 | `<button>` + `scrollIntoView`(`<a href="#…">` は base URL を引き継いで**アプリへ飛ぶ**) | ✅ 素の `<a href="#4-4-ヘルプ">`(実 URL なので断片は**この page の中**で解決する) |
  * | オフライン | opener が生きていれば描ける | ✅ SW の precache に載る(build の生成物なので自動) |
  *
  * 🔑 **1 枚に焼く**のは build 時(`build/manual-page-plugin.ts`)。ここは
@@ -235,16 +235,20 @@ export function themeBootScript(
     'document.documentElement.setAttribute("data-pkc-theme",t);' +
     size +
     /**
-     * 🔑 **URL の節の印(`#m-N`)へ、読み込みの後に自分で送る**(2026-09-02 実測)。
+     * 🔑 **URL の節の印(`#見出しの字`)へ、読み込みの後に自分で送る**(2026-09-02 実測)。
      * ⚠ 再読み込み(F5)では、ブラウザは断片へ送らない ── 印は URL に残るのに見出しが
      *   画面の外(実測 top = 43718px)。`history.scrollRestoration = 'manual'` にしても
      *   変わらなかった(本文がスクロール箱の中に居るため、断片の送りが箱に届かない)。
      *   だから DOMContentLoaded で `scrollIntoView` する。⚠ これは「配色を立てる」に次ぐ
      *   2 つ目の振る舞いだが、**目次の `<a>` が押されたときと同じ送り**を再読み込みと
      *   ブックマークにも効かせるだけである(新しい操作は増えない)。
+     * 🔴 **断片は percent-encode されて返る**(#648 D4 で印を見出しの字にしたので)──
+     *   `location.hash` は `#%E3%83%98…` の形。そのまま `getElementById` に渡すと
+     *   **必ず外れて先頭に戻る**ので、復号してから引く(壊れた綴りなら復号せず素で引く)。
      */
     'addEventListener("DOMContentLoaded",function(){var h=location.hash.slice(1);' +
-    'if(!h)return;var e=document.getElementById(h);if(e)e.scrollIntoView({block:"start"})});' +
+    'if(!h)return;try{h=decodeURIComponent(h)}catch(e){}' +
+    'var e=document.getElementById(h);if(e)e.scrollIntoView({block:"start"})});' +
     '})();'
   );
 }

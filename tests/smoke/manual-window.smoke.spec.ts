@@ -162,11 +162,14 @@ test('🔴 目次を押すと、その見出しまで送られる (#645)', async
    * ⚠ 段①の `about:blank` では `<a href="#m-100">` が base を引き継いで
    *   `http://…/#m-100` へ navigate し、**マニュアルが丸ごと消えた**。
    *   段②は実 URL なので、断片は **この page の中**で解決する ── URL は
-   *   `manual.html#m-N` のまま(= 節ごとに控えられる)。
+   *   `manual.html#<見出しの字>` のまま(= 節ごとに控えられる)。
+   * ⚠ 印は見出しの字(#648 D4)なので `url.hash` は percent-encode されて返る ── 復号して比べる。
    */
   const url = new URL(win.url());
   expect(url.pathname, '窓がアプリへ飛んだ').toMatch(PAGE);
-  expect(url.hash, '断片が URL に付いていない(控えられない)').toBe(`#${id}`);
+  expect(decodeURIComponent(url.hash), '断片が URL に付いていない(控えられない)').toBe(`#${id}`);
+  // 🔑 印が通し番号ではなく見出しの字(版をまたいで同じ節を指す ── D4 の当の点)
+  expect(id, '印が通し番号のまま(見出しが増えた版で隣を指す)').not.toMatch(/^m-\d+$/u);
 
   /**
    * 🔴 **「動いた」だけでは足りない** ── その見出しが**画面に居る**ことまで見る
@@ -261,14 +264,14 @@ test('🔴 窓で F5 を押しても、マニュアルはそのまま読み直�
   const target = win.locator(`${TOC} a`).nth(Math.floor(before * 0.6));
   const id = (await target.getAttribute('href'))!.slice(1);
   await target.click();
-  expect(new URL(win.url()).hash).toBe(`#${id}`);
+  expect(decodeURIComponent(new URL(win.url()).hash)).toBe(`#${id}`);
 
   await win.reload();
   await expect(win.locator(MAIN), 'F5 で白紙になった').toBeVisible();
   expect(await win.locator(`${TOC} a`).count()).toBe(before);
   const url = new URL(win.url());
   expect(url.pathname).toMatch(PAGE);
-  expect(url.hash, 'F5 で節の印が消えた').toBe(`#${id}`);
+  expect(decodeURIComponent(url.hash), 'F5 で節の印が消えた').toBe(`#${id}`);
   /**
    * 🔴 **F5 のあと、その節に居る**(マニュアル §4-4 がそう書いている)。
    * ⚠ 本文はスクロール箱の中に居るので、ブラウザは位置を復元しない ── 戻れるのは

@@ -272,6 +272,50 @@ describe('焼いたマニュアル — 配色', () => {
   });
 });
 
+/**
+ * 🔴 **URL の断片(見出しの字)へ、読み込みの後に送る**(#648 D4)。
+ * ⚠ 印を見出しの字にしたので `location.hash` は percent-encode されて返る ──
+ *   復号せずに `getElementById` へ渡すと**必ず外れて先頭に戻る**(F5 とブックマークの当の点)。
+ */
+describe('焼いたマニュアル — 断片へ送る script(D4)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    document.body.innerHTML = '';
+  });
+  const run = (hash: string): string[] => {
+    vi.stubGlobal('location', { hash });
+    // ⚠ 素の `addEventListener` は window に積み上がる(前の it の listener も鳴る)──
+    //    script が登録した handler を**掴んで直に呼ぶ**(1 本だけ登録されることも見る)
+    const handlers: Array<() => void> = [];
+    vi.stubGlobal('addEventListener', (_type: string, fn: () => void) => handlers.push(fn));
+    const landed: string[] = [];
+    for (const id of ['4-4-ヘルプ', 'm-3']) {
+      const h = document.createElement('h2');
+      h.id = id;
+      (h as unknown as { scrollIntoView: () => void }).scrollIntoView = () => landed.push(id);
+      document.body.append(h);
+    }
+    new Function(themeBootScript(themeIdsIn(TOKENS), THEME_STORAGE_KEY))();
+    expect(handlers, 'DOMContentLoaded の handler が 1 本でない').toHaveLength(1);
+    handlers[0]!();
+    return landed;
+  };
+
+  it('🔴 percent-encode された断片を復号して、その見出しへ送る', () => {
+    expect(run(`#${encodeURIComponent('4-4-ヘルプ')}`)).toEqual(['4-4-ヘルプ']);
+  });
+
+  it('素の断片(ASCII)もそのまま送る(対照群)', () => {
+    expect(run('#m-3')).toEqual(['m-3']);
+  });
+
+  it('断片が無い / 壊れた綴り / 無い id なら何もしない(先頭のまま。落ちない)', () => {
+    expect(run('')).toEqual([]);
+    expect(run('#%E3%81')).toEqual([]);
+    expect(run(`#${encodeURIComponent('無い節')}`)).toEqual([]);
+  });
+});
+
 describe('焼いたマニュアル — 1 枚で完結する', () => {
   it('完全な document で、script は 1 本、style は 1 本、配色は `<body>` の前に立つ', () => {
     const html = bake().html;

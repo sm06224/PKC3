@@ -5,7 +5,11 @@
  * ⚠ 「押しても何も起きない行」は、この repo がいちばん嫌う形である。
  */
 import { describe, expect, it } from 'vitest';
-import { buildManualDoc, MANUAL_HEADING_ID } from '../../src/features/help/manual-doc';
+import {
+  buildManualDoc,
+  MANUAL_HEADING_ID,
+  manualHeadingSlug,
+} from '../../src/features/help/manual-doc';
 import { manualSections } from '../../src/features/help/manual-find';
 import { MANUAL_TEXT } from '../../src/adapter/ui/render/help';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
@@ -101,16 +105,16 @@ describe('マニュアルの窓 — 組み立ての作法', () => {
   const secs = (levels: number[]) =>
     levels.map((level, index) => ({ title: `見出し${index}`, level, index, line: index }));
 
-  it('元から在る id は、番号で置き換える(2 つの規則を混ぜない)', () => {
+  it('元から在る id は、見出しの字から作った id で置き換える(2 つの規則を混ぜない)', () => {
     const built = buildManualDoc('<h2 id="old-slug" class="x">あ</h2>', secs([2]));
-    expect(built.html).toBe(`<h2 id="${MANUAL_HEADING_ID}0" class="x">あ</h2>`);
-    expect(built.toc[0]!.targetId).toBe(`${MANUAL_HEADING_ID}0`);
+    expect(built.html).toBe(`<h2 id="見出し0" class="x">あ</h2>`);
+    expect(built.toc[0]!.targetId).toBe('見出し0');
   });
 
   it('🔴 本文より節が多くても、飛び先の無い行は出さない', () => {
     const built = buildManualDoc('<h1>あ</h1>', secs([1, 2, 3]));
     expect(built.headings).toBe(1);
-    expect(built.toc.map((t) => t.targetId)).toEqual([`${MANUAL_HEADING_ID}0`]);
+    expect(built.toc.map((t) => t.targetId)).toEqual(['見出し0']);
   });
 
   it('見出しより前の節(番号を持たない)は目次に出さない', () => {
@@ -133,6 +137,79 @@ describe('マニュアルの窓 — 組み立ての作法', () => {
     // 描画は囲みの中を字として出す(`&lt;h1` でも `# 見出し` でもタグにならない)
     const built = buildManualDoc('<pre><code># 見出しの例\n</code></pre><h1>本物</h1>', secs([1]));
     expect(built.headings).toBe(1);
-    expect(built.html).toContain(`<h1 id="${MANUAL_HEADING_ID}0">本物</h1>`);
+    expect(built.html).toContain('<h1 id="見出し0">本物</h1>');
+  });
+});
+
+/**
+ * 🔴 **節の印は見出しの字から作る**(2026-09-04、#648 D4)。
+ *
+ * 段①②は通し番号(`m-12`)だったので、**見出しが 1 本増えた版ではブックマークが隣の節を
+ * 指した**。ここが守るのは 3 つ ── ①前に見出しが増えても同じ節を指す ②同じ字の見出しが
+ * 2 つ在っても飛び先が取り違えられない ③字が記号だけの見出しでも dead click にならない。
+ */
+describe('マニュアルの窓 — 節の印は見出しの字から(D4)', () => {
+  const sec = (title: string, index: number, level = 2) => ({ title, level, index, line: index });
+
+  it('🔴 前に見出しが増えても、同じ節は同じ印(通し番号ではない)', () => {
+    const before = buildManualDoc('<h2>a</h2><h2>b</h2>', [sec('4-4. ヘルプ', 0), sec('4-5. 設定', 1)]);
+    const after = buildManualDoc('<h2>x</h2><h2>a</h2><h2>b</h2>', [
+      sec('4-3. 新しい節', 0),
+      sec('4-4. ヘルプ', 1),
+      sec('4-5. 設定', 2),
+    ]);
+    const idOf = (d: ReturnType<typeof buildManualDoc>, label: string) =>
+      d.toc.find((t) => t.label === label)!.targetId;
+    expect(idOf(after, '4-4. ヘルプ'), '見出しが増えたら印が動いた(ブックマークが隣を指す)').toBe(
+      idOf(before, '4-4. ヘルプ'),
+    );
+    expect(idOf(after, '4-5. 設定')).toBe(idOf(before, '4-5. 設定'));
+    // 空振り防止 ── 印は字から出来ている(番号でも通る形の assert ではない)
+    expect(idOf(before, '4-4. ヘルプ')).toBe('4-4-ヘルプ');
+    // ⚠ 本文の id も同じ(目次と本文が同じ配列から出ている)
+    expect(idsIn(after.html).has('4-4-ヘルプ')).toBe(true);
+  });
+
+  it('見出しの字 → 印:記法・空白・記号を畳み、小文字にする(規則は 1 つ)', () => {
+    expect(manualHeadingSlug('4-4. ヘルプ')).toBe('4-4-ヘルプ');
+    expect(manualHeadingSlug('🔴 マニュアルだけのウィンドウで読む(アプリとして開く)')).toBe(
+      'マニュアルだけのウィンドウで読む-アプリとして開く',
+    );
+    expect(manualHeadingSlug('**強調**した `もの` / Ctrl+F')).toBe('強調した-もの-ctrl-f');
+    // 記号だけなら空(呼び側が通し番号へ落とす)
+    expect(manualHeadingSlug('🔴 ⚠')).toBe('');
+  });
+
+  it('🔴 同じ字の見出しが 2 つ在れば 2 つ目は `-2`(取り違えない / dead click にしない)', () => {
+    const built = buildManualDoc('<h2>a</h2><h3>b</h3><h2>c</h2><h3>d</h3>', [
+      sec('お知らせ', 0),
+      sec('そのほか', 1, 3),
+      sec('お知らせ', 2),
+      sec('そのほか', 3, 3),
+    ]);
+    expect(built.toc.map((t) => t.targetId)).toEqual(['お知らせ', 'そのほか', 'お知らせ-2', 'そのほか-2']);
+    const ids = idsIn(built.html);
+    expect(ids.size, '本文の id が重複して潰れている').toBe(4);
+    for (const t of built.toc) expect(ids.has(t.targetId), `${t.targetId} が本文に無い`).toBe(true);
+  });
+
+  it('⚠ 字が記号だけの見出しは通し番号へ落ちる(印が空にならない)', () => {
+    const built = buildManualDoc('<h2>a</h2><h2>b</h2>', [sec('🔴', 0), sec('注意', 1)]);
+    expect(built.toc.map((t) => t.targetId)).toEqual([`${MANUAL_HEADING_ID}0`, '注意']);
+    expect(built.html).toContain(`<h2 id="${MANUAL_HEADING_ID}0">a</h2>`);
+  });
+
+  it('⚠ 源文に無い番号の見出し(数が食い違ったとき)も通し番号へ落ちる', () => {
+    const built = buildManualDoc('<h2>a</h2><h2>b</h2>', [sec('先頭', 0)]);
+    expect(idsIn(built.html)).toEqual(new Set(['先頭', `${MANUAL_HEADING_ID}1`]));
+  });
+
+  it('🔴 実物のマニュアルで:印は全部一意で、通し番号へ落ちた見出しが無い', () => {
+    const built = buildManualDoc(renderMarkdown(MANUAL_TEXT, {}), manualSections(MANUAL_TEXT));
+    const ids = built.toc.map((t) => t.targetId);
+    expect(new Set(ids).size, '印が重複している').toBe(ids.length);
+    expect(ids.filter((id) => id.startsWith(MANUAL_HEADING_ID)), '字から印を作れない見出しが在る').toEqual([]);
+    // ⚠ 前提:重複の `-2` が実際に働いている次元がある(実測 2 組 ── 0 なら上の assert は何も言わない)
+    expect(ids.filter((id) => /-2$/u.test(id)).length, '重複の解決が 1 度も走っていない(測っていない次元)').toBeGreaterThan(0);
   });
 });
