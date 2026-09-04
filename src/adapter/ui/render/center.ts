@@ -16,11 +16,13 @@ import { HelpRenderer } from './help';
 import { QueryRenderer } from './query';
 import { ScrollMemory } from './scroll-memory';
 import { DualFilerRenderer } from './dual-filer';
+import { ScheduleRenderer } from './schedule';
 import type { MarkdownClient } from '@adapter/platform/render/markdown-client';
 
 type PaneView =
   | 'detail'
   | 'query'
+  | 'schedule'
   | 'dual'
   | 'settings'
   | 'flags'
@@ -36,14 +38,22 @@ type PaneView =
 const ASIDE: ReadonlySet<ViewMode> = new Set<ViewMode>(['settings', 'flags', 'help', 'dual']);
 
 /**
+ * 🔴 **ノートを映すが、自分の器を持つ面**(集計 #184 / 予定表 #673 段②)。
+ * aside ではない(一覧のノートを押した選択が**この面に留まる**)のに、本文へは
+ * 落ちない ── 2 つ目の表である。⚠ ここに足し忘れると `toPane` が本文へ落として
+ * 「開いたのに本文が出る」になる(`tests/adapter/help-pane.test.ts` が突合する)。
+ */
+const NOTE_PANES: ReadonlySet<ViewMode> = new Set<ViewMode>(['query', 'schedule']);
+
+/**
  * 🔑 中央は**常に「開いているノート」**(P8 段⑤)。
  * ⚠ フォルダとアプリは「探し方」なので**左の列**へ移した(`browse.ts`)──
  * 中央のビューではなくなったので、ここでは detail へ落ちる。
  */
 function toPane(view: ViewMode): PaneView {
-  // ⚠ 集計(#184)は**ノートを映す面**なので aside ではない ── 自分の器を
-  //    持ったまま選択が中に留まる
-  if (view === 'query') return view;
+  // ⚠ 集計(#184)/ 予定表(#673 段②)は**ノートを映す面**なので aside ではない
+  //    ── 自分の器を持ったまま選択が中に留まる
+  if (NOTE_PANES.has(view)) return view as PaneView;
   return ASIDE.has(view) ? (view as PaneView) : 'detail';
 }
 
@@ -59,6 +69,12 @@ export class CenterRouter {
   private readonly flags: FlagsRenderer;
   private readonly help: HelpRenderer;
   private readonly query: QueryRenderer;
+  /**
+   * 🔴 **予定表**(#673 段②)。⚠ 左の列(`browse.ts`)と**同じ class** ──
+   * 描き方を 2 つ作らない(PKC2 が「同じ markdown を 5 面が別経路で描く」で
+   * 構造的な Gap を抱えたのと同じ道になる)。器だけが違う。
+   */
+  private readonly schedule: ScheduleRenderer;
   private readonly dual: DualFilerRenderer;
   private lastPane: PaneView = 'detail';
   /**
@@ -124,6 +140,7 @@ export class CenterRouter {
     this.panes = {
       detail: pane('detail'),
       query: pane('query'),
+      schedule: pane('schedule'),
       dual: pane('dual'),
       settings: pane('settings'),
       flags: pane('flags'),
@@ -148,6 +165,8 @@ export class CenterRouter {
      *   (CLAUDE.md「『今年』は引数で渡す」)。
      */
     this.query = new QueryRenderer(this.panes.query);
+    // ⚠ `now` は左の列の予定と同じ口で渡す ── 「今日」を面ごとに読まない
+    this.schedule = new ScheduleRenderer(this.panes.schedule, now);
     this.dual = new DualFilerRenderer(this.panes.dual);
     this.settings = new SettingsRenderer(this.panes.settings);
     this.flags = new FlagsRenderer(this.panes.flags);
@@ -220,6 +239,7 @@ export class CenterRouter {
     this.bar.hidden = view === 'detail';
     if (view === 'detail') this.split.render(state);
     else if (view === 'query') this.query.render(state);
+    else if (view === 'schedule') this.schedule.render(state);
     else if (view === 'dual') this.dual.render(state);
     else if (view === 'settings') this.settings.render(state);
     else if (view === 'flags') this.flags.render();

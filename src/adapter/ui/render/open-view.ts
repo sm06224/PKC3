@@ -12,6 +12,7 @@
 import type { Dispatcher } from '../../state/dispatcher';
 import type { ViewMode } from '../../state/app-state';
 import { appQueryKey } from './query-key-store';
+import { homeTabOf, type BrowseMode } from './browse-mode';
 
 /**
  * 面を開く。⚠ **開けたときだけ**後始末をする(編集中は `SET_VIEW_MODE` が
@@ -37,5 +38,36 @@ export function openView(dispatcher: Dispatcher, mode: ViewMode): boolean {
     const remembered = appQueryKey.get();
     if (remembered !== null) dispatcher.dispatch({ type: 'SET_QUERY_KEY', key: remembered });
   }
+  /**
+   * 🔴 **予定表を開いたら、その場で集める**(#673 段②)。
+   * ⚠ 左の列の「予定」タブは `setBrowse` が集めを頼むが、中央の面(別窓の
+   *   ディープリンク / 退避)は**この関数しか通らない** ── 頼まないと別窓は
+   *   「集めています…」で**永久に止まる**。⚠ 開けたときだけ(編集中に断られた回に
+   *   走査だけ走らせない ── 上の集計と同じ理由)。
+   */
+  if (state.viewMode === 'schedule' && mode === 'schedule')
+    dispatcher.dispatch({ type: 'REFRESH_TASK_SCAN' });
   return state.viewMode === mode;
+}
+
+/**
+ * 🔴 **別窓が塞がれたときの退避先**(#673 段②)。
+ *
+ * ⚠ 予定表の退避は**中央の面ではなく左の列の「予定」タブ**へ ── 中央に開くと
+ *   本文が消える(#292 段⑤ で左へ移した当の理由)。同じものが在る場所へ送る。
+ * 🔑 「同じものが左に在るか」の判定は `browse-mode.ts` の `homeTabOf` 1 か所 ──
+ *   ここは**呼ぶだけ**。左に無い面(2 ペイン)は今までどおり中央の面へ。
+ * @returns 開けたか(左のタブは編集中でも開けるので、送れたら `true`)。
+ */
+export function openViewHere(
+  dispatcher: Dispatcher,
+  mode: ViewMode,
+  openBrowse: (tab: BrowseMode) => void,
+): boolean {
+  const tab = homeTabOf(mode);
+  if (tab !== null) {
+    openBrowse(tab);
+    return true;
+  }
+  return openView(dispatcher, mode);
 }

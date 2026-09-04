@@ -1052,11 +1052,14 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     // ⚠ 2026-09-04(#676 段①): `place-board.smoke.spec.ts` に **+2 件** ── ①右クリック
     //    「ここに板を置く」で押した座標が x= / y= になる(器の rect からの座標変換は実ブラウザ
     //    でしか見えない)②角を実マウスで掴むと w= / h= が書き戻る
+    // ⚠ 2026-09-04(#673 段②): `deep-link` に「`#pkc?view=schedule` で予定表が中央に出て
+    //    集めが終わる」1 件(別窓の boot で `REFRESH_TASK_SCAN` が worker まで届くかは
+    //    実ブラウザでしか見えない)で **+1 件**
     expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(80);
     expect(
       counts.reduce((a, b) => a + b, 0),
       'smoke の test が増減した(足したらこの数を直す)',
-    ).toBe(428);
+    ).toBe(429);
   });
 });
 

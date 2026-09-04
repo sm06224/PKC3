@@ -244,3 +244,48 @@ test('🔴 直リンクの窓で別のノートを開くと、F5 でそのノー
 
   expect(errors, 'pageerror / console.error が出ている').toEqual([]);
 });
+
+/**
+ * 🔴 **`#pkc?view=schedule` で、予定表が中央の面に出て、集めが終わる**(#673 段②。
+ * user 裁定 2026-09-04「予定表も連絡先も別窓、アプリの基本は別窓」)。
+ *
+ * ## unit では届かない層
+ *
+ * ① 本物のアドレスから読む配線(unit は的を差し替えている)
+ * ② **面が本当に見えているか** ── `[data-pkc-view-pane='schedule']` を選択子リストで
+ *    束ねた CSS と `hidden` の噛み合いは happy-dom では読めない
+ * ③ 🔴 **boot の経路で `REFRESH_TASK_SCAN` が worker まで届くか** ── unit は
+ *    event が飛んだことしか見ていない(`open-view.test.ts`)。届かなければ面は
+ *    「集めています…」で**永久に止まる**(別窓で開いた user が最初に見る画面である)。
+ *
+ * ⚠ ノートは作らない ── 0 件でも集めが**終わった**ことは字で分かる
+ *   (「集めています…」が別の字に変わる)。
+ */
+test('🔴 #pkc?view=schedule で開くと、予定表が中央に出て集めが終わる (#673 段②)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/#pkc?view=schedule');
+  await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
+
+  // ② 中央の面が見えていて、本文の面は畳まれている
+  const pane = page.locator('[data-pkc-view-pane="schedule"]');
+  await expect(pane, 'ディープリンクで指した予定表が開いていない').toBeVisible();
+  await expect(page.locator('[data-pkc-view-pane="detail"]'), '本文の面が畳まれていない').toBeHidden();
+  // 面の部品が中央の器に載っている(左の列と同じ描画器)
+  await expect(pane.locator('[data-pkc-field="schedule-quick-text"]'), '足す欄が無い').toBeVisible();
+  await expect(pane.locator('[data-pkc-field="schedule-month"]'), '月が無い').toBeVisible();
+
+  // ③ 🔴 集めが頼まれて終わる ── 「集めています…」のままなら boot の経路で走査が飛んでいない
+  await expect(
+    pane.locator('[data-pkc-field="schedule-note"]'),
+    '走査が頼まれていない(別窓は永久に「集めています…」)',
+  ).not.toContainText('集めています', { timeout: 10_000 });
+
+  // 🔑 帰り道は同じ帯の × ── 閉じれば本文へ戻る(別窓なら窓ごと閉じる。ここはタブ)
+  await clickReal(page, '[data-pkc-action="close-pane"]');
+  await expect(page.locator('[data-pkc-view-pane="detail"]')).toBeVisible();
+
+  expect(errors, 'pageerror / console.error が出ている').toEqual([]);
+});

@@ -212,7 +212,7 @@ import {
   windowDeepLinkTarget,
   windowTitleFor,
 } from '@adapter/platform/deep-link';
-import { openView } from '@adapter/ui/render/open-view';
+import { openView, openViewHere } from '@adapter/ui/render/open-view';
 import { noteRemoteChange } from '@adapter/state/remote-change';
 import {
   NOTE_REGISTRY_CHANNEL,
@@ -379,13 +379,21 @@ function openViewTile(
   dispatcher: Dispatcher,
   cid: string,
   /**
-   * ⚠ **`dual` だけになった**(#292 段⑤、2026-08-23)── カレンダーと
-   *   やることの板は**左の列の「予定」タブ**へ引っ越したので、別窓で開く
-   *   組み込みは 2 ペインだけである。
+   * ⚠ **`dual` だけ**だった期間がある(#292 段⑤、2026-08-23)── カレンダーと
+   *   やることの板は**左の列の「予定」タブ**へ引っ越したので。
+   * 🔴 **#673 段②(user 裁定 2026-09-04「アプリの基本は別窓」)で予定表が加わった**
+   *   ── 絞りは型で持たず、何が来るかは `tiles.ts` の組み込みタイルが決める
+   *   (`launch-tile.ts` が `isViewMode(kind)` で渡す)。
    * 🔑 別窓の仕掛け(ディープリンク / 一回限りの合図 / `script-closable` の判定 /
-   *   follower の帯)は**残す** ── Office と今後のアプリがそのまま使う土台である。
+   *   follower の帯)は**共通** ── Office と今後のアプリがそのまま使う土台である。
    */
-  view: 'dual',
+  view: ViewMode,
+  /**
+   * 🔴 **左の列のタブを開く口**(#673 段②)── 予定表の退避先は中央の面ではなく
+   *   **左の列の「予定」タブ**(本文を退かさない)。判定は `open-view.ts` の
+   *   `openViewHere` → `browse-mode.ts` の `homeTabOf` に在り、ここは口を渡すだけ。
+   */
+  openBrowse: (mode: BrowseMode) => void,
 ): Promise<unknown> {
   return openViewInWindow(view, {
     // ⚠ `noopener` で開く ── 別プロセスになり、閉じれば常駐が還る(段③ の実測)。
@@ -407,7 +415,9 @@ function openViewTile(
      *    「タイル再押下で閉じる」ための規則であって、退避は**開く**である。
      *    通すと、塞がれて無反応だからもう一度押した回に**開いた面を閉じる**。
      */
-    openInPane: (v) => openView(dispatcher, v),
+    // 🔴 **予定表は左の列の「予定」タブへ退避する**(#673 段②)── 中央に開くと
+    //    本文が消える(#292 段⑤ の理由)。振り分けは `openViewHere` の 1 か所
+    openInPane: (v) => openViewHere(dispatcher, v, openBrowse),
     fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
     // 🔴 押した瞬間に返事をする(#685 動線レビュー 欠陥 7)── 塞がれた回は
     //    2.5 秒まるごと無反応で、user は「効いていない」と読んでもう一度押す
@@ -2455,10 +2465,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         //    `view-window.ts` に在る ── この file はどの test からも実行されない
         //    ので、配線だけ置く。⚠ 窓が塞がれたときの退避は `openInPane`(段⑤)。
         //    そちらは `open-view.ts` を通す(開いた後の後始末を落とさない)
-        // ⚠ **残るのは 2 ペインだけ**(#292 段⑤)── カレンダー / やることの板は
-        //    左の列のタブへ引っ越したので、別窓で開く組み込みタイルではなくなった。
-        //    絞りは `launch-tile.ts` の `openView: (view: 'dual') => void` が型で守る
-        openView: (view) => void openViewTile(dispatcher, cid, view),
+        // ⚠ 2 ペインに**予定表が加わった**(#673 段②、user 裁定 2026-09-04)──
+        //    何が来るかは `tiles.ts` の組み込みタイルが決める(`isViewMode(kind)`)。
+        //    予定表の退避先は**左の列の「予定」タブ**(`openViewHere`)なので、
+        //    タブを開く口(`services.setBrowse`)を渡す
+        openView: (view) => void openViewTile(dispatcher, cid, view, (m) => services.setBrowse?.(m)),
         openManual: () => void openManualTile(dispatcher, markdown, showStatus),
         // ⚠ **聞かない。憶えているものを確かめるだけ**(上の granted と同じ判定を
         //    通す ── ここで別の式を書くと、片方だけ直した日に食い違う)
@@ -2524,7 +2535,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             openOffice: openOfficeTile,
             // 🔴 **別窓で開く**(#300 段③)。⚠ 判断と文言は `view-window.ts` に在る
             //    ── 上と同じ配線(§7:依存の実体を 1 つに保つ)
-            openView: (view) => void openViewTile(dispatcher, cid, view),
+            openView: (view) => void openViewTile(dispatcher, cid, view, (m) => services.setBrowse?.(m)),
             // ⚠ 添付起動の経路に組み込みタイルは来ない(kind は 'app' 固定)── それでも
             //    渡すのは、型が**落とせない形**にしてあるからである(§配線を落とすと静かに死ぬ)
             openManual: () => void openManualTile(dispatcher, markdown, showStatus),

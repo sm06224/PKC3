@@ -3220,8 +3220,13 @@ li[data-pkc-row-slot] {
  * 🔴 **左の列に置く**(user 指示「もう一つ PKC が開いて混乱する」)── 中央は
  *   本文のまま。⚠ 幅は `minmax(200px, 18vw)` = 1920 で 345px / 下限 200px。
  *   7 列の月は下限でも 28px/セルなので、**数字と点だけ**なら入る
- *   (升目の中に予定を並べるのは捨てた ── それは下の束が持つ)。 */
-[data-pkc-browse-pane='schedule'] {
+ *   (升目の中に予定を並べるのは捨てた ── それは下の束が持つ)。
+ * 🔴 **中央の面(別窓 / 退避)にも同じ規則**(#673 段②、user 裁定 2026-09-04)──
+ *   器の属性が違うだけで中身は同じ描画器なので、選択子リストで束ねる。
+ *   幅は `[data-pkc-region='detail'] > [data-pkc-view-pane]` の `flex: 1` が
+ *   中央いっぱいに広げる(ここでは触らない)。 */
+[data-pkc-browse-pane='schedule'],
+[data-pkc-view-pane='schedule'] {
   display: flex;
   flex-direction: column;
   gap: var(--s2);

@@ -194,6 +194,20 @@ type ActionHandler = (
   root: HTMLElement,
 ) => void;
 
+/**
+ * 🔴 **押されたボタンが載っている予定の面**(#673 段②)。
+ *
+ * ⚠ 予定の面は**同じ document に 2 つ在りうる** ── 左の列の「予定」タブと、
+ *   中央の面(別窓が塞がれた退避 / `#pkc?view=schedule`)。`root.querySelector` で
+ *   document 全体から欄を引くと、**左の列に描かれている空の欄**を先に拾い、中央で
+ *   打った字は読まれない(「やることを入力してください」と断られる)。
+ * 🔑 だから**押した所から `closest` で上がる**。印は `ScheduleRenderer.ensureFrame`
+ *   が器に焼く(`data-pkc-region="schedule"`)。
+ */
+function scheduleFaceOf(target: HTMLElement): HTMLElement | null {
+  return target.closest<HTMLElement>('[data-pkc-region="schedule"]');
+}
+
 
 /** 既定 title の種別ラベル(連番は同 archetype の現在数 + 1)。 */
 
@@ -2808,10 +2822,12 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔴 **その日の束から足す**(#402 ②)。⚠ **書かない** ── 上の 1 つの欄に
    *   日付を入れて焦点を移すだけである(打ちかけを束ごと失わないため)。
    */
-  'schedule-quick-here': (_dispatcher, target, _services, root) => {
+  'schedule-quick-here': (_dispatcher, target) => {
     const date = target.getAttribute('data-pkc-quick-date') ?? '';
-    const dateEl = root.querySelector<HTMLInputElement>('[data-pkc-field="schedule-quick-date"]');
-    const textEl = root.querySelector<HTMLInputElement>('[data-pkc-field="schedule-quick-text"]');
+    // 🔴 **押した面の欄**を読む(#673 段②)── 予定の面は 2 つ在りうる(下の注記)
+    const face = scheduleFaceOf(target);
+    const dateEl = face?.querySelector<HTMLInputElement>('[data-pkc-field="schedule-quick-date"]');
+    const textEl = face?.querySelector<HTMLInputElement>('[data-pkc-field="schedule-quick-text"]');
     if (dateEl) dateEl.value = date;
     textEl?.focus();
   },
@@ -2828,13 +2844,15 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 面は切り替えない ── user は予定を眺めたまま足したいのであって、
    *   本文へ飛ばされたいわけではない(#300「補助が主の作業領域を奪わない」)。
    */
-  'schedule-quick-add': (dispatcher, _target, services, root) => {
+  'schedule-quick-add': (dispatcher, target, services) => {
     const st = dispatcher.getState();
     if (st.phase !== 'ready') {
       dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから足してください' });
       return;
     }
-    const textEl = root.querySelector<HTMLInputElement>('[data-pkc-field="schedule-quick-text"]');
+    // 🔴 **押した面の欄**を読む(#673 段②)── `root` から引くと別の面の空欄を読む
+    const face = scheduleFaceOf(target);
+    const textEl = face?.querySelector<HTMLInputElement>('[data-pkc-field="schedule-quick-text"]');
     const text = (textEl?.value ?? '').trim();
     if (text === '') {
       // ⚠ **無言で終わらせない**(欄は出ているのに何も起きない dead click になる)
@@ -2842,7 +2860,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     const date =
-      root.querySelector<HTMLInputElement>('[data-pkc-field="schedule-quick-date"]')?.value ?? '';
+      face?.querySelector<HTMLInputElement>('[data-pkc-field="schedule-quick-date"]')?.value ?? '';
     // 🔑 日付の書き方は `line-date.ts` の 1 本(`@2026-08-28`)── ここで綴らない
     const line = `- [ ] ${text}${date === '' ? '' : ` ${formatLineDate(date)}`}`;
     const title = todayNoteTitle(new Date());
@@ -4023,11 +4041,12 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 束が無い日(予定 0 件)は**何も起きない** ── 空の束を作ると、
    *   押しても何も無い見出しが増える。
    */
-  'schedule-pick-day': (_dispatcher, target, _services, root) => {
+  'schedule-pick-day': (_dispatcher, target) => {
     const date = target.getAttribute('data-pkc-drop-date');
     if (date === null) return;
-    root
-      .querySelector(`[data-pkc-region="schedule-group"][data-pkc-drop-date="${date}"]`)
+    // 🔴 **押した面の束**へ送る(#673 段②)── 予定の面は 2 つ在りうる(`scheduleFaceOf`)
+    scheduleFaceOf(target)
+      ?.querySelector(`[data-pkc-region="schedule-group"][data-pkc-drop-date="${date}"]`)
       ?.scrollIntoView({ block: 'nearest' });
   },
   'retry-persist': (dispatcher) => dispatcher.dispatch({ type: 'RETRY_PERSIST' }),

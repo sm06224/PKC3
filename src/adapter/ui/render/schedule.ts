@@ -560,6 +560,17 @@ export class ScheduleRenderer {
     toggles.append(undated, done, archived);
     const groups = document.createElement('div');
     groups.setAttribute('data-pkc-region', 'schedule-groups');
+    /**
+     * 🔴 **この面であることの印**(#673 段②)。
+     * ⚠ 予定の面は**同じ document に 2 つ在りうる**(左の列の「予定」タブと、
+     *   別窓が塞がれて中央へ退避した面 / 中央に開いた面)。`binder.ts` の
+     *   `schedule-quick-add` 等は、押されたボタンから **`closest` でこの印まで
+     *   上がって**欄を読む ── `root.querySelector` で document 全体から引くと、
+     *   **先に描かれた左の面の空の欄**を読んで「やることを入力してください」になる。
+     * ⚠ 器は左の列(`data-pkc-browse-pane`)と中央(`data-pkc-view-pane`)で
+     *   属性が違うので、器の属性ではなく**描画器が自分の印を焼く**。
+     */
+    this.region.setAttribute('data-pkc-region', 'schedule');
     this.region.append(bar, quick, grid, note, toggles, groups);
     this.frame = { month, grid, note, undated, done, archived, groups };
     return this.frame;

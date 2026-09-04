@@ -137,6 +137,19 @@ export const VIEW_MODES = [
    */
   'query',
   /**
+   * 🔴 **予定表**(#673 段②。user 裁定 2026-09-04
+   * 「**予定表も連絡先も別窓、アプリの基本は別窓**」)。
+   *
+   * ⚠ 上の #292 段⑤ を**覆すのではない** ── 左の列の「予定」タブは**そのまま残る**。
+   *   ここに足すのは、同じ面を**組み込みアプリの別ウィンドウ**(`#pkc?view=schedule`)
+   *   でも開けるようにするためである(2 ペインと同じ道 ── `view-window.ts`)。
+   * ⚠ **aside ではない**(`ASIDE_PANES` に入れない)── 集計と同じく**ノートを映す面**
+   *   なので、札を押した選択はこの面に留まる。
+   * 🔑 描画器は左の列と**同じ `ScheduleRenderer`**(`center.ts`)── 面を 2 つ描いても
+   *   規則は 1 本である。
+   */
+  'schedule',
+  /**
    * 🔴 **2 ペインタブファイラ**(#241 段⑥。user 指示 2026-08-17
    * 「アプリに 2 ペインタブファイラを**組み込みで**提供すること」)。
    * ⚠ 裁定 6(`organize-pane-design-2026-08.md` §6)で**中央の面**と決まった
@@ -195,6 +208,7 @@ export function isAsidePane(view: ViewMode): boolean {
 const VIEW_LABELS: Record<ViewMode, string> = {
   detail: '本文',
   query: '集計',
+  schedule: '予定表',
   dual: '2 ペインで整理',
   settings: '設定',
   flags: 'フラグ',

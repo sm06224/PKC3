@@ -16,6 +16,7 @@
 import { buildLauncherAppShell, launcherAppBase } from '@features/launcher/app-shell';
 import { decodeHtml } from '@features/launcher/html-charset';
 import type { LauncherTile } from '@features/launcher/tiles';
+import { isViewMode, type ViewMode } from '@adapter/state/app-state';
 
 /** 外部サイトを開くときの窓の指定。⚠ 文言そのものが user への約束である。 */
 export const EXTERNAL_WINDOW_FEATURES = 'noopener,noreferrer';
@@ -66,8 +67,11 @@ export interface LaunchDeps {
    * ⚠ 面ごとに口を作らない(`openDual` から一般化 ── CLAUDE.md §7)。
    * 🔑 **`window.open` は gesture の中で撃つ必要がある**ので、この口は
    * `await` より前に呼ぶ(下の実装がそうなっている)。
+   * ⚠ **`'dual'` だけの絞りは外した**(#673 段②、user 裁定 2026-09-04
+   *   「アプリの基本は別窓」)── 予定表が加わり、以後も面が増える。
+   *   何が渡るかは `ViewMode` の綴りを持つ組み込みタイル(`tiles.ts`)で決まる。
    */
-  openView: (view: 'dual') => void;
+  openView: (view: ViewMode) => void;
   /**
    * 🔴 **マニュアルを独立した窓で開く**(#645。user 要望 2026-08-31)。
    *
@@ -188,10 +192,12 @@ export async function launchTile(
    *   という 1 つの変数にする(2 つの `if` に分けない ── §7)。
    */
   const extNonce = extOn && deps.ext !== undefined ? deps.ext.nonce() : null;
-  if (tile.kind === 'dual') {
-    // 🔑 組み込み(#241 / #300 段③)── **別窓で開く**。
-    //    ⚠ カレンダー / やることの板は #292 段⑤ でここから外れた
-    //      (「アプリ」ではなく**ノートの見方**だったので、左の列のタブへ)。
+  if (isViewMode(tile.kind)) {
+    // 🔑 組み込み(#241 / #300 段③ / #673 段②)── **別窓で開く**。
+    //    🔴 **名指しではなく `isViewMode`** ── 「面の名前を持つ組み込みタイルは
+    //      別窓で開く」が規則である(`view-window.test.ts` が同じ規則で全数を当てる)。
+    //      `tile.kind === 'dual'` と書くと、予定表を足した日にそこだけ下の
+    //      `assetKey === undefined` へ落ちて**無言の dead click** になる。
     //    ⚠ `await` より前に呼ぶ ── `window.open` は gesture の中でしか通らない
     deps.openView(tile.kind);
     return;
