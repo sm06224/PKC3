@@ -586,8 +586,20 @@ function middleEllipsis(name: string, max: number): string {
   return `${name.slice(0, head)}…${name.slice(name.length - (max - 1 - head))}`;
 }
 
-/** `write-back-file` の説明のうち、ファイル名以外の固定部分(字数を数えるため空で組む)。 */
-const WRITE_BACK_FRAME = '開いた元のファイル()を、このノートの内容で上書きします';
+/**
+ * `write-back-file` の説明のうち、ファイル名以外の固定部分(字数を数えるため空で組む)。
+ *
+ * 🔴 **「元の内容は戻せません(押すと確かめの窓が出ます)」を足した**(#587 改善 C 案 1)。
+ * ⚠ 直す前の「…上書きします」だけでは、**取り消せないこと**と**押した瞬間に上書きされる
+ *   わけではないこと**(確かめの窓が挟まる ── `main.ts` の `writeBackFile` が `ask` する)
+ *   の 2 つが読めなかった。押すのを怖がる人と、怖がらずに押す人の両方に要る字である。
+ * ⚠ 上限は 2 行 = `ENTRY_ACTION_HINT_MAX`(56 字)。裁定の字を「開いた元のファイル()を、
+ *   このノートの内容で」に足すと固定部分だけで 53 字になり、**ファイル名に 3 字しか残らない**
+ *   (`.docx` すら出ない)。🔑 だから頭を「元のファイル()を上書きします」へ縮めた ──
+ *   何を上書きするか(名前)と、戻せないこと、確かめの窓の 3 つが全部 2 行に収まる
+ *   (固定 40 字 / 名前に 16 字)。「このノートの内容で」は操作の名(書き戻す)が既に言っている。
+ */
+const WRITE_BACK_FRAME = '元のファイル()を上書きします。元の内容は戻せません(押すと確かめの窓が出ます)';
 
 export function entryActionHint(action: string, ctx: EntryMenuContext): string {
   if (action === 'write-back-file') {
@@ -600,7 +612,7 @@ export function entryActionHint(action: string, ctx: EntryMenuContext): string {
      * 🔑 だから名前のほうを縮める(頭と尻を残す)── 言うべきことは必ず残る。
      */
     const room = ENTRY_ACTION_HINT_MAX - WRITE_BACK_FRAME.length;
-    return `開いた元のファイル(${middleEllipsis(ctx.linkedFile ?? '', room)})を、このノートの内容で上書きします`;
+    return `元のファイル(${middleEllipsis(ctx.linkedFile ?? '', room)})を上書きします。元の内容は戻せません(押すと確かめの窓が出ます)`;
   }
   return ENTRY_ACTION_HINTS[action] ?? '';
 }

@@ -311,12 +311,15 @@ describe('右クリックの説明(#587 C-1)', () => {
     const long = '2026年度第3四半期営業報告書_改訂版_確定_最終版.docx';
     // ⚠ 前提: この名前は縮めなければ上限を超える(超えないなら何も検めていない)
     expect(
-      `開いた元のファイル(${long})を、このノートの内容で上書きします`.length,
+      `元のファイル(${long})を上書きします。元の内容は戻せません(押すと確かめの窓が出ます)`.length,
       '前提が崩れている: この名前では上限を超えない',
     ).toBeGreaterThan(ENTRY_ACTION_HINT_MAX);
     const h = entryActionHint('write-back-file', { archetype: 'text', linkedFile: long });
     expect(h.length, '2 行に収まらない').toBeLessThanOrEqual(ENTRY_ACTION_HINT_MAX);
-    expect(h, '取り消せないことを言う末尾が切れている').toContain('上書きします');
+    expect(h, '上書きだと言う所が切れている').toContain('上書きします');
+    // 🔴 #587 C 案 1 ── 取り消せないことと、確かめの窓が挟まることを言う(切れずに残る)
+    expect(h, '取り消せないことを言っていない').toContain('元の内容は戻せません');
+    expect(h, '確かめの窓が出ることを言っていない').toContain('(押すと確かめの窓が出ます)');
     // 🔑 頭と尻の両方を残す ── 頭だけだと拡張子が消え、尻だけだとどの文書か分からない
     expect(h, 'どの文書か分からない').toContain('2026年度');
     expect(h, '拡張子が消えている').toContain('.docx');
@@ -324,7 +327,7 @@ describe('右クリックの説明(#587 C-1)', () => {
     expect(
       entryActionHint('write-back-file', { archetype: 'text', linkedFile: 'メモ.md' }),
       '短い名前まで縮めている',
-    ).toBe('開いた元のファイル(メモ.md)を、このノートの内容で上書きします');
+    ).toBe('元のファイル(メモ.md)を上書きします。元の内容は戻せません(押すと確かめの窓が出ます)');
   });
 
   it('🔴 「書き戻す」だけは行き先を字に含める(押す前に確かめられる)', () => {
