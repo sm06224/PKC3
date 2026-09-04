@@ -8,6 +8,7 @@ import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { attachFiles, resolveMime, type AttachDeps } from '../../src/adapter/ui/actions/attach';
 import { readAttachmentMeta } from '../../src/features/flavor/attachment-flavor';
+import { removeInsertedLines } from '../../src/features/markdown/append-target';
 import { stubRevisionOps } from '../helpers/revision-stub';
 
 /** ⚠ 実物の効果層を差し替える口(遅い `getBody` で錠を握らせる等)。 */
@@ -329,6 +330,91 @@ describe('添付を開いていたノートへ入れる(#666)', () => {
     expect(st.selectedLid, '開いていたフォルダへ戻っていない').toBe('f1');
     h.d.dispatch({ type: 'SELECT_ENTRY', lid: st.noticeOpen! });
     expect(h.d.getState().selectedLid, '「開く」の身元を押しても添付が開かない').toBe(attached!.lid);
+  });
+
+  /**
+   * 🔴 **C: まとめて入れた回は「元に戻す」1 回でまとめて戻る**(#668 C)。
+   *
+   * ⚠ 直す前は `lastAppend` が**最後の 1 本**しか持たなかった ── 3 枚落として
+   *   「元に戻す」を押すと 3 枚目だけ消え、残り 2 枚は本文を開いて消すしかない
+   *   (user がやったことは 1 回なのに、戻すのは 1/3)。
+   * 🔑 台は **`getBody` が育つ**形にする ── 本物の worker と同じく、前の追記が
+   *   済んだ本文を次の追記の基底にする。固定の基底では 3 本の `inserted` が
+   *   全部同じ場所を指し、「継いだ行を 1 手で消せる」は**見られない**。
+   *
+   * 観測点は 2 つ:
+   * ① `removeInsertedLines(最終の本文, lastAppend.lines)` が**元の本文**へ戻る
+   *    (= 3 行が連続した 1 手として持たれている)
+   * ② 🔴 `UNDO_APPEND` を撃つと、実物の効果層が**元の本文を書き戻す**
+   */
+  function growingNote() {
+    let persistedRef: Array<{ lid: string; body: string }> = [];
+    const h = withOpenNote({
+      getBody: async () => {
+        await new Promise((r) => setTimeout(r, 20));
+        return persistedRef.filter((p) => p.lid === 'n1').at(-1)?.body ?? '# 買い物メモ';
+      },
+    });
+    persistedRef = h.persisted;
+    const bodyNow = (): string => h.persisted.filter((p) => p.lid === 'n1').at(-1)?.body ?? '';
+    return { h, bodyNow };
+  }
+
+  it('🔴 C 3 枚まとめて入れたら、「元に戻す」1 回で 3 行とも消える(#668)', async () => {
+    const { h, bodyNow } = growingNote();
+    appendsSeen.length = 0;
+    await attachFiles(h.d, h.deps, [
+      new File(['1'], 'a.png', { type: 'image/png' }),
+      new File(['2'], 'b.png', { type: 'image/png' }),
+      new File(['3'], 'c.png', { type: 'image/png' }),
+    ]);
+    await new Promise((r) => setTimeout(r, 400));
+
+    // 前提 ── 3 本とも本文に入っている(台が育っていなければここで止まる)
+    const full = bodyNow();
+    for (const n of ['a.png', 'b.png', 'c.png'])
+      expect(full, `前提が崩れた: ${n} が本文に無い`).toContain(`![${n}](asset:`);
+    const last = h.d.getState().lastAppend;
+    expect(last?.lid, '直前の追記が別のノートを指している').toBe('n1');
+    // ① 3 行が 1 手 ── 消すと元の本文へ戻る(最後の 1 枚しか持っていなければ 2 行残る)
+    expect(removeInsertedLines(full, last!.lines), '3 行が 1 手になっていない').toBe(
+      '# 買い物メモ',
+    );
+
+    // ② 実物の効果層で戻す ── user が「元に戻す」を押したのと同じ
+    h.d.dispatch({ type: 'UNDO_APPEND' });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(bodyNow(), '「元に戻す」で 3 行とも消えていない').toBe('# 買い物メモ');
+    expect(h.d.getState().lastAppend, '1 手で使い切っていない').toBeNull();
+  });
+
+  it('⚠ C 対照群 ── 1 枚なら、その 1 行だけが 1 手', async () => {
+    const { h, bodyNow } = growingNote();
+    await attachFiles(h.d, h.deps, [new File(['1'], 'solo.png', { type: 'image/png' })]);
+    await new Promise((r) => setTimeout(r, 200));
+    const last = h.d.getState().lastAppend;
+    expect(last?.lines.filter((l) => l.includes('](asset:')), '1 枚なのに複数の参照を持つ').toHaveLength(1);
+    expect(removeInsertedLines(bodyNow(), last!.lines)).toBe('# 買い物メモ');
+  });
+
+  /**
+   * ⚠ **C 対照群 ── 回の印が違えば継がない。** 間に手で足した追記(印なし)が入ると、
+   *   そこで手が切れる ── 「元に戻す」で、手で足した字だけが消える(写真まで巻き添えにしない)。
+   *   🔑 これが無いと「印を見ずに全部継ぐ」変異が素通りする。
+   */
+  it('⚠ C 対照群 ── 手で足した追記は、前の回に継がれない', async () => {
+    const { h, bodyNow } = growingNote();
+    await attachFiles(h.d, h.deps, [
+      new File(['1'], 'a.png', { type: 'image/png' }),
+      new File(['2'], 'b.png', { type: 'image/png' }),
+    ]);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(bodyNow(), '前提が崩れた').toContain('![b.png](asset:');
+    h.d.dispatch({ type: 'APPEND_TO_ENTRY', lid: 'n1', text: '手で足したメモ', heading: null, target: null });
+    await new Promise((r) => setTimeout(r, 200));
+    const last = h.d.getState().lastAppend;
+    expect(last?.lines.join('\n'), '手で足した追記が無い(前提が崩れた)').toContain('手で足したメモ');
+    expect(last?.lines.join('\n'), '前の回の写真まで 1 手に継がれている').not.toContain('](asset:');
   });
 
   it('⚠ A 対照群 ── 本文へ入れられた回は「開く」の身元を添えない', async () => {

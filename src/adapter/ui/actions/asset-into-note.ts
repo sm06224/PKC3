@@ -67,6 +67,11 @@ export interface PutAssetArgs {
    * ⚠ 添付のように事情が無いときは空文字。
    */
   readonly why: string;
+  /**
+   * 取り込みの回の印(#668 C)。同じ印で入れた行は「元に戻す」1 回でまとめて消える。
+   * ⚠ 省略 = 単独の 1 手(録音・画面録画は 1 回に 1 本なので付けない)。
+   */
+  readonly batch?: string;
 }
 
 /**
@@ -76,7 +81,7 @@ export interface PutAssetArgs {
  *   「消えた」と読ませないので、そこまで言う。
  */
 export function putAssetIntoNote(args: PutAssetArgs): void {
-  const { dispatcher, queue, notify, into, attachedLid, assetKey, name, mime, why } = args;
+  const { dispatcher, queue, notify, into, attachedLid, assetKey, name, mime, why, batch } = args;
 
   // 🔴 **開いていたノートへ戻す**(添付が奪った選択を返す)
   if (into.lid !== null && into.lid !== attachedLid) {
@@ -112,7 +117,14 @@ export function putAssetIntoNote(args: PutAssetArgs): void {
   const ref = formatAssetRef(name, `asset:${assetKey}`, isImageAssetMime(mime));
   const lid = into.lid;
   const held = queue.push(() => {
-    dispatcher.dispatch({ type: 'APPEND_TO_ENTRY', lid, text: ref, heading: null, target: null });
+    dispatcher.dispatch({
+      type: 'APPEND_TO_ENTRY',
+      lid,
+      text: ref,
+      heading: null,
+      target: null,
+      ...(batch === undefined ? {} : { batch }),
+    });
     notify(`${why}「${name}」を本文に入れました`);
   });
   // ⚠ **預かった回も黙らない**(いつ入るのかを言う)

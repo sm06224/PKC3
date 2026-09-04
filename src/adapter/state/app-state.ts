@@ -101,6 +101,34 @@ export interface SmartHitState {
 
 export type AppPhase = 'initializing' | 'ready' | 'editing' | 'error';
 /**
+ * 🔴 **直前の追記を、次の追記でどう持ち替えるか**(#395 段① / #668 C)。
+ *
+ * - 純粋な挿入でなかった回は `null` ── 前の材料を**残したままにしない**
+ *   (古い材料で消すと、別の所が消える)
+ * - 🔴 **同じ回(`batch`)の続きなら、行を継ぎ足して 1 手にする**(#668 C)──
+ *   3 枚まとめて落とした写真は「元に戻す」1 回で 3 行とも消える
+ * - それ以外は差し替え(直前の 1 手だけ)
+ *
+ * ⚠ 継ぐのは**同じノート・同じ回**のときだけ。間に手で足した追記(印なし)が
+ *   入れば、そこで切れる ── 回の途中で足した字まで巻き添えにしない。
+ * ⚠ 継いだ行は本文の中で**連続している**(同じ回の追記は全部末尾へ足すので)──
+ *   `removeInsertedLines` は連続した並びを探すので、1 手として消せる。
+ */
+function nextLastAppend(
+  prev: AppState['lastAppend'],
+  next: { lid: string; inserted: readonly string[] | null; batch?: string },
+): AppState['lastAppend'] {
+  if (next.inserted === null) return null;
+  const joined =
+    prev !== null && next.batch !== undefined && prev.batch === next.batch && prev.lid === next.lid;
+  return {
+    lid: next.lid,
+    lines: joined ? [...prev.lines, ...next.inserted] : next.inserted,
+    ...(next.batch === undefined ? {} : { batch: next.batch }),
+  };
+}
+
+/**
  * 🔴 **中央の面の全数**(#241 段⑥-b で 1 本に寄せた)。
  *
  * ⚠ 直す前は**同じ一覧が 2 か所**に在った ── 型の union(ここ)と、
@@ -750,8 +778,13 @@ export interface AppState {
    * ⚠ 持つのは**足した行そのもの**で、行番号ではない(取り消すまでに別の窓が
    *   上へ足していれば番号はずれる)。
    * ⚠ **1 手だけ**持つ ── 積むと「どれが消えるのか」が user から見えなくなる。
+   * 🔴 **「1 手」は 1 回の取り込みである**(#668 C)── 写真を 3 枚まとめて落とすと
+   *   追記は 3 本飛ぶが、user がやったことは 1 回である。だから同じ `batch` の
+   *   追記は**足した行を継ぎ足して 1 手にする**(「元に戻す」で 3 行が一緒に消える)。
+   *   ⚠ 直す前は最後の 1 枚しか戻らず、残り 2 枚は本文を開いて消すしかなかった。
+   *   `batch` は取り込みの回の印(`APPEND_TO_ENTRY.batch`)。手で足した追記には無い。
    */
-  lastAppend: { lid: string; lines: readonly string[] } | null;
+  lastAppend: { lid: string; lines: readonly string[]; batch?: string } | null;
   /**
    * 🔴 **編集に入った瞬間に開く行**(#395 段③)。`null` = どこも開かない(既定)。
    *
@@ -1074,6 +1107,11 @@ export type UserAction =
       heading: string | null;
       /** 入り先の印(#395 段①)。`null` = 末尾。 */
       target: string | null;
+      /**
+       * 取り込みの回の印(#668 C)。同じ印の追記は `lastAppend` で 1 手に継がれる。
+       * ⚠ 省略 = 単独の 1 手(手で足した追記)。
+       */
+      batch?: string;
     }
   /**
    * ランチャーのタイル設定(P8 段⑭)。
@@ -1435,6 +1473,8 @@ export type SystemCommand =
        *   番号はずれる。⚠ 純粋な挿入でなければ `null`(取り消しを出さない)。
        */
       inserted: readonly string[] | null;
+      /** 取り込みの回の印(#668 C)。`REQUEST_APPEND.batch` がそのまま返る。 */
+      batch?: string;
     }
   | {
       /** 追記が失敗した。⚠ **ロックは必ず解く**(失敗で握ったままにしない)。 */
@@ -1637,6 +1677,8 @@ export type DomainEvent =
        * ⚠ 解けなければ effect が**断る**(末尾へ落とさない)。
        */
       target: string | null;
+      /** 取り込みの回の印(#668 C)。effect が `ENTRY_APPENDED` へそのまま返す。 */
+      batch?: string;
     }
   | { type: 'REQUEST_DELETE'; lid: string }
   | {
@@ -2661,6 +2703,7 @@ function reduceCore(
             heading: action.heading,
             text: action.text,
             target: action.target,
+            ...(action.batch === undefined ? {} : { batch: action.batch }),
           },
         ],
       };
@@ -2749,10 +2792,7 @@ function reduceCore(
            * ⚠ 純粋な挿入でなかった回は `null` に落とす ── 前の追記の材料を
            *   **残したままにしない**(古い材料で消すと、別の所が消える)。
            */
-          lastAppend:
-            action.inserted === null
-              ? null
-              : { lid: action.lid, lines: action.inserted },
+          lastAppend: nextLastAppend(state.lastAppend, action),
         },
         events: [],
       };

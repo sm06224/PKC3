@@ -308,6 +308,11 @@ export async function attachFiles(
    */
   const into = noteToPutInto(dispatcher);
   const queue = createWritableQueue(dispatcher);
+  /**
+   * 🔴 **この 1 回の取り込みの印**(#668 C)── 同じ印で入れた行は「元に戻す」1 回で
+   *   まとめて消える(3 枚落としたら 3 行が 1 手)。⚠ 直す前は最後の 1 枚しか戻らなかった。
+   */
+  const batch = generateLid();
   // 🔑 `open` は「開く」の身元(#668 A)── state へ運ぶのはここ 1 か所
   const notify = (text: string, open?: string): void =>
     dispatcher.dispatch({ type: 'OP_NOTICE', message: text, ...(open === undefined ? {} : { open }) });
@@ -347,6 +352,7 @@ export async function attachFiles(
           //    ちゃんと**絵として**入る(`attach-intake.test.ts` が pin)
           mime: attached.mime,
           why,
+          batch,
         });
       } catch (e) {
         dispatcher.dispatch({

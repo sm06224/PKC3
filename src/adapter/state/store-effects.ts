@@ -1810,6 +1810,8 @@ export function connectStoreEffects(
                *   起きた回は読み直した側で、そこから導かないと取り消しが空振りする。
                */
               inserted: insertedLines(base, newBody),
+              // 🔑 取り込みの回の印(#668 C)── ここで読まず、reducer へそのまま返す
+              ...(ev.batch === undefined ? {} : { batch: ev.batch }),
             });
             stamp(ev.lid, stamps);
           } catch (e) {
