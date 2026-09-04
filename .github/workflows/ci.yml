@@ -67,10 +67,15 @@ jobs:
             exit 1
           fi
       - run: npm ci
+      # 🔴 判定は script に置く(#675)── 素の `npm audit` は「脆弱がある」と
+      #    「registry が答えない」を**同じ exit 1** で返すので、赤の意味が読めない。
+      #    規則と全経路の test は scripts/audit-gate.mjs / tests/audit-gate.test.ts。
       - name: Audit (prod deps, high+, blocking)
-        run: npm audit --audit-level=high --omit=dev
+        run: node scripts/audit-gate.mjs
+      # ⚠ 上と同じ理由で**時間を区切る** ── registry が答えない日に、参考の 1 行の
+      #    ために 5 分溶ける(job の timeout は 10 分しかない)。
       - name: Audit (full, informational)
-        run: npm audit || true
+        run: timeout 60 npm audit --fetch-retries=1 --fetch-retry-maxtimeout=10000 || true
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
