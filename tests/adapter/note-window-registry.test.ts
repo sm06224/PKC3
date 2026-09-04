@@ -52,27 +52,29 @@ describe('付箋の台帳(#685、user 裁定 2026-09-04)', () => {
     const make = bus();
     const a = win(make, 'A');
     const b = win(make, 'B');
-    expect(b.reg.has('e1'), '前提が崩れた(まだ誰も名乗っていない)').toBe(false);
+    expect(b.reg.whereIs('e1'), '前提が崩れた(まだ誰も名乗っていない)').toBe(null);
     a.reg.announce('e1');
-    expect(b.reg.has('e1'), '付箋が居るのに 2 枚目を開こうとする').toBe(true);
+    expect(b.reg.whereIs('e1'), '付箋が居るのに 2 枚目を開こうとする').toBe('other');
     // ⚠ **対照群** ── 名乗っていないノートは今までどおり開く
-    expect(b.reg.has('e2'), '違うノートまで止めている').toBe(false);
+    expect(b.reg.whereIs('e2'), '違うノートまで止めている').toBe(null);
   });
 
   /**
-   * 🔴 **自分の名乗りで自分を止めない** ── 止めると、付箋の中で
-   *   「別の窓で開く」を押したときに**何も起きない**(無言の dead click)。
+   * 🔴 **自分が出しているノートは `'self'`**(#685 動線レビュー 欠陥 3、2026-09-04)。
    *
-   * ⚠ **2 通りで見る**(2026-09-04、変異試験が SURVIVED で教えた):
-   *   ① 放送路は**自分には配らない**ので、ふつうに名乗っただけでは
-   *      `w.id === 自分` の枝を**1 度も通らない**(CLAUDE.md §2)
-   *   ② だから**自分の id を騙る便り**を外から流して、その枝を実際に走らせる
+   * ⚠ 直す前は「別の窓が居るか」だけを返していたので、**付箋の中から同じノートに
+   *   「別の窓で開く」を押すと 2 枚目が開いた** ── お知らせにもマニュアルにも
+   *   「2 枚目を作りません」と条件なしで書いたのに、押した場所で約束が変わっていた。
+   * 🔑 呼び側は `'self'` と `'other'` で**出す字を変える**(前に出す相手が居ないので)。
    */
-  it('🔴 自分の名乗りは自分を止めない(放送路は自分に配らない)', () => {
+  it('🔴 自分が出しているノートは self と答える', () => {
     const make = bus();
     const a = win(make, 'A');
+    expect(a.reg.whereIs('e1'), '前提が崩れた(まだ名乗っていない)').toBe(null);
     a.reg.announce('e1');
-    expect(a.reg.has('e1'), '自分の付箋で自分が止まっている').toBe(false);
+    expect(a.reg.whereIs('e1'), '自分の付箋を「どこにも無い」と答えた(2 枚目が開く)').toBe('self');
+    // ⚠ **対照群** ── 出していないノートは今までどおり開ける
+    expect(a.reg.whereIs('e2'), '違うノートまで止めている').toBe(null);
   });
 
   it('🔴 自分の id を騙る便りは数えない', () => {
@@ -80,10 +82,10 @@ describe('付箋の台帳(#685、user 裁定 2026-09-04)', () => {
     const a = win(make, 'A');
     const raw = make();
     raw.postMessage({ tag: 'note-window-here', id: 'A', lid: 'e1' });
-    expect(a.reg.has('e1'), '自分の id の便りで自分が止まっている').toBe(false);
+    expect(a.reg.whereIs('e1'), '自分の id の便りで自分が止まっている').toBe(null);
     // ⚠ **対照群** ── 別の id なら数える(「何も数えない」実装で緑にしない)
     raw.postMessage({ tag: 'note-window-here', id: 'Z', lid: 'e2' });
-    expect(a.reg.has('e2'), '別の窓の名乗りまで捨てている').toBe(true);
+    expect(a.reg.whereIs('e2'), '別の窓の名乗りまで捨てている').toBe('other');
   });
 
   /**
@@ -95,7 +97,7 @@ describe('付箋の台帳(#685、user 裁定 2026-09-04)', () => {
     const a = win(make, 'A');
     a.reg.announce('e1');
     const late = win(make, 'C');
-    expect(late.reg.has('e1'), '点呼していない(先に居る付箋が見えない)').toBe(true);
+    expect(late.reg.whereIs('e1'), '点呼していない(先に居る付箋が見えない)').toBe('other');
   });
 
   it('🔴 閉じたら台帳から消える(次は開ける)', () => {
@@ -103,9 +105,9 @@ describe('付箋の台帳(#685、user 裁定 2026-09-04)', () => {
     const a = win(make, 'A');
     const b = win(make, 'B');
     a.reg.announce('e1');
-    expect(b.reg.has('e1'), '前提が崩れた').toBe(true);
+    expect(b.reg.whereIs('e1'), '前提が崩れた').toBe('other');
     a.reg.close();
-    expect(b.reg.has('e1'), '閉じた付箋がいつまでも残る(二度と開けない)').toBe(false);
+    expect(b.reg.whereIs('e1'), '閉じた付箋がいつまでも残る(二度と開けない)').toBe(null);
   });
 
   it('🔴 付箋でなくなったら消える', () => {
@@ -114,7 +116,7 @@ describe('付箋の台帳(#685、user 裁定 2026-09-04)', () => {
     const b = win(make, 'B');
     a.reg.announce('e1');
     a.reg.announce(null);
-    expect(b.reg.has('e1'), '面へ移った窓が付箋のまま数えられている').toBe(false);
+    expect(b.reg.whereIs('e1'), '面へ移った窓が付箋のまま数えられている').toBe(null);
   });
 
   /** 🔴 **1 つの窓が出す付箋は 1 件** ── 前の行を外さないと、閉じたノートが残る。 */
@@ -124,8 +126,8 @@ describe('付箋の台帳(#685、user 裁定 2026-09-04)', () => {
     const b = win(make, 'B');
     a.reg.announce('e1');
     a.reg.announce('e2');
-    expect(b.reg.has('e1'), '前のノートが台帳に残っている').toBe(false);
-    expect(b.reg.has('e2'), '移った先が載っていない').toBe(true);
+    expect(b.reg.whereIs('e1'), '前のノートが台帳に残っている').toBe(null);
+    expect(b.reg.whereIs('e2'), '移った先が載っていない').toBe('other');
   });
 
   /** 🔴 **「前に出て」は当の窓だけに届く**(無関係な窓を手前に出さない)。 */
@@ -156,7 +158,10 @@ describe('付箋の台帳(#685、user 裁定 2026-09-04)', () => {
   it('⚠ 放送路が無ければ台帳は空(付箋は今までどおり開く)', () => {
     const reg = createNoteRegistry({ channel: null, id: 'A', onRaise: vi.fn() });
     reg.announce('e1');
-    expect(reg.has('e1')).toBe(false);
+    // ⚠ 自分が出している物は、放送路が無くても分かる(そこは台帳ではない)
+    expect(reg.whereIs('e1'), '自分の付箋すら分からなくなっている').toBe('self');
+    // 🔴 **別の窓のことは分からない** ── だから今までどおり 2 枚目が開く(壊れる方向ではない)
+    expect(reg.whereIs('e2')).toBe(null);
     expect(() => {
       reg.raise('e1');
       reg.close();
@@ -171,6 +176,6 @@ describe('付箋の台帳(#685、user 裁定 2026-09-04)', () => {
     raw.postMessage({ tag: 'なにか', id: 'Z', lid: 'e1' });
     raw.postMessage(null);
     raw.postMessage('文字列');
-    expect(a.reg.has('e1'), '知らない便りで台帳が埋まった').toBe(false);
+    expect(a.reg.whereIs('e1'), '知らない便りで台帳が埋まった').toBe(null);
   });
 });

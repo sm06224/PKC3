@@ -164,3 +164,110 @@ test('🔴 別の窓で開くと、その窓がそのノートを開いて立ち
   expect(winErrors, `別の窓で page error: ${winErrors.join(' / ')}`).toEqual([]);
   expect(errors, `元の窓で page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **初めて押した 1 回目が、お知らせで埋まらない**(#685 動線レビュー 欠陥 1、2026-09-04)。
+ *
+ * ## 物語
+ *
+ * user は起動直後のお知らせカードで「ノートを別のウィンドウで開けるようになりました」を
+ * 読む。**カードを閉じずに**、読んでいたノートを右クリックして「別の窓で開く」を押す。
+ * ⚠ 420px の窓は 1 枚ずつの画面なので、お知らせは `grid-area: detail; z-index: 2` で
+ * **面いっぱい**に出て、上の帯まで覆う ── **付箋の中身も戻る口も 1 つも見えない**。
+ *
+ * 🔑 **いちばん印象に残る回**である(新しい機能を初めて押した、その 1 回)。
+ * ⚠ 上の spec は `dismissAnnounce` を**先に**呼ぶので、この回を 1 度も通っていなかった。
+ */
+test('🔴 お知らせを閉じずに押しても、別の窓にはノートが出る (#685)', async ({ page, context }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('ふせんにする');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  /**
+   * 🔑 **お知らせを「未読」に戻す** ── 既読は `localStorage` に入るので、
+   *   これをしないと 2 枚目でも出ない(= この検査は**何も見ない**)。
+   */
+  await page.evaluate(() => {
+    try {
+      localStorage.removeItem('pkc3.notices.seen');
+    } catch {
+      /* 使えない箱では次の前提で落ちる */
+    }
+  });
+
+  const popup = context.waitForEvent('page');
+  await clickReal(page, '[data-pkc-action="open-note-window"]');
+  const win = await popup;
+  await expect(win.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
+
+  /**
+   * ⚠ **前提を先に確かめる** ── 未読に戻せていなければ、以下の「出ていない」は
+   *   何も証明しない(CLAUDE.md §1 の空振り)。本体の窓を読み直して出ることを見る。
+   */
+  const check = await context.newPage();
+  await gotoApp(check);
+  await expect(
+    check.locator('[data-pkc-region="announce"]'),
+    '前提が崩れた(未読に戻せていないので、この検査は空振りする)',
+  ).toBeVisible({ timeout: 20_000 });
+  await check.close();
+
+  // 🔴 **付箋の窓にはお知らせを出さない**(押した物が出る)
+  await expect(
+    win.locator('[data-pkc-region="announce"]'),
+    '付箋の窓がお知らせで埋まっている(押したのに、頼んだ物が出ない)',
+  ).toBeHidden();
+  await expect(
+    win.locator('[data-pkc-region="inspector"]'),
+    '付箋の窓がそのノートを開いていない',
+  ).toContainText('ふせんにする', { timeout: 20_000 });
+
+  await win.close();
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **付箋の中から同じノートを押しても、2 枚目は出ない**
+ *   (#685 動線レビュー 欠陥 3、2026-09-04)。
+ *
+ * ⚠ 直す前は台帳が**自分の名乗りを数えなかった**ので、A を出している窓にとって
+ *   A は「どこにも無い」だった ── お知らせにもマニュアルにも「2 枚目を作りません」と
+ *   **条件なしで**書いたのに、押した場所で約束が変わっていた。
+ * ⚠ そのうえ 2 枚並ぶと互いを台帳に載せるので、片方を閉じると **3 枚目も開けた**。
+ */
+test('🔴 付箋の中から同じノートを押しても 2 枚目は出ない (#685)', async ({ page, context }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('ひとりぼっち');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  const popup = context.waitForEvent('page');
+  await clickReal(page, '[data-pkc-action="open-note-window"]');
+  const win = await popup;
+  await expect(win.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
+  await expect(
+    win.locator('[data-pkc-region="inspector"]'),
+    '前提が崩れた(付箋がそのノートを開いていない)',
+  ).toContainText('ひとりぼっち', { timeout: 20_000 });
+
+  const before = context.pages().length;
+  await win.click('[data-pkc-action="phone-menu"]');
+  await win.click('[data-pkc-region="context-menu"] [data-pkc-action="open-note-window"]');
+  // 🔑 観測点は **窓が増えないこと + 理由が出ること**の 2 つ ── 片方だけだと
+  //    「黙って何もしない」実装でも緑になる(無言の dead click)
+  await expect(
+    win.locator('[data-pkc-region="status"]'),
+    '付箋の中から押したときに、いま見ているのがそれだと言っていない',
+  ).toContainText('いま見ているこのウィンドウ');
+  expect(context.pages().length, '付箋の中から押して 2 枚目が開いた').toBe(before);
+
+  await win.close();
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

@@ -204,6 +204,7 @@ import {
   announceOpenedWindow,
   connectViewDeepLink,
   currentBaseUrl,
+  isPurposeWindow,
   windowDeepLinkTarget,
   windowTitleFor,
 } from '@adapter/platform/deep-link';
@@ -2870,11 +2871,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
        *   `window.open` が gesture の外へ落ちる。
        * ⚠ 字で「前に出しました」とは**言わない** ── 前に出るかは実測できていない。
        */
-      if (noteRegistry.has(lid)) {
-        noteRegistry.raise(lid);
+      const where = noteRegistry.whereIs(lid);
+      if (where !== null) {
+        // ⚠ **この窓が出している**なら、前に出す相手が居ない(いま見ているのがそれ)
+        if (where === 'other') noteRegistry.raise(lid);
         dispatcher.dispatch({
           type: 'OP_NOTICE',
-          message: 'このノートは別のウィンドウで開いています',
+          message:
+            where === 'self'
+              ? 'このノートは、いま見ているこのウィンドウで開いています'
+              : 'このノートは、すでに別のウィンドウで開いています',
         });
         return;
       }
@@ -3377,7 +3383,14 @@ function bootstrap(): void {
        * 先に出すと、まだ何も映っていない画面に帯だけが立つ。
        * ⚠ `watchForUpdate` より前でよい(別の行なので重ならない)。
        */
-      app.presentAnnounce();
+      /**
+       * 🔴 **1 つの物のために開いた窓では出さない**(#685 動線レビュー 欠陥 1)。
+       * ⚠ 判断は `deep-link.ts` の `isPurposeWindow` に在る ── この file は
+       *   どの test からも実行されないので、条件をここへ書かない。
+       */
+      if (!isPurposeWindow({ view: heldViewWindow, note: heldNoteWindow })) {
+        app.presentAnnounce();
+      }
       // 🔄 更新の案内(P7 段⑤)。⚠ 自動では交代させない ── 交代は旧 build の
       // cache を消すので、user が押したときだけ・押したタブだけを再読込する
       const registered = registerSw();

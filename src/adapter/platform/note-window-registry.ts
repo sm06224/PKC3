@@ -67,8 +67,22 @@ export interface NoteRegistry {
    * ⚠ **変わったときだけ放送する**(選択が動くたびに撒かない)。
    */
   announce(lid: string | null): void;
-  /** そのノートを出している**別の**窓が居るか。⚠ 同期に答える(gesture を割らない)。 */
-  has(lid: string): boolean;
+  /**
+   * 🔴 **そのノートは、いまどこで開いているか**(#685 動線レビュー 欠陥 3、2026-09-04)。
+   *
+   * - `'self'` = **この窓**が出している
+   * - `'other'` = 別の窓が出している
+   * - `null` = どこにも無い(開いてよい)
+   *
+   * ⚠ 直す前は「別の窓が居るか」だけを返していたので、**付箋の中から
+   *   同じノートに「別の窓で開く」を押すと 2 枚目が開いた** ── お知らせにもマニュアルにも
+   *   「同じノートをもう一度押したときは、2 枚目を作りません」と**条件なしで**書いたのに、
+   *   押した場所によって約束が成り立ったり成り立たなかったりしていた。
+   * ⚠ そのうえ 2 枚並ぶと互いを台帳に載せるので、片方を閉じると本体の台帳から消えて
+   *   **3 枚目も開けた**。
+   * 🔑 同期に答える(gesture を割らない ── 待つと `window.open` が遮断される)。
+   */
+  whereIs(lid: string): 'self' | 'other' | null;
   /** その窓に「前に出て」と頼む。⚠ 居なければ何もしない。 */
   raise(lid: string): void;
   /** 窓を閉じるときに呼ぶ(台帳から自分を外す)。 */
@@ -121,7 +135,7 @@ export function createNoteRegistry(deps: NoteRegistryDeps): NoteRegistry {
       mine = lid;
       send(lid === null ? { tag: NOTE_GONE, id: deps.id } : { tag: NOTE_HERE, id: deps.id, lid });
     },
-    has: (lid) => byLid.has(lid),
+    whereIs: (lid) => (mine === lid ? 'self' : byLid.has(lid) ? 'other' : null),
     raise: (lid) => {
       const to = byLid.get(lid);
       if (to !== undefined) send({ tag: NOTE_RAISE, id: deps.id, to });
