@@ -11,7 +11,7 @@
  * 5. **面は 2 つの表に登録されている** ── 開いたら本文ではなくこの面が出る
  * 6. **編集中でも開ける**(場所を眺めるだけ。実際に移すのは断られる)
  */
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta, Relation } from '../../src/core/model/entry-meta';
 import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
 import { answerDialog, dialogMessage } from './dialog-helper';
@@ -24,6 +24,8 @@ import { KeymapStore } from '../../src/adapter/ui/render/keymap';
 import { MAX_TABS, paneOf, paneScope } from '../../src/features/relation/dual-pane';
 import { DUAL_TILE_LID, withBuiltinTiles } from '../../src/features/launcher/tiles';
 import { launchTile } from '../../src/adapter/ui/launch-tile';
+import { appPhone } from '../../src/adapter/ui/render/phone-layout';
+import { PHONE_MIN_PX } from '../../src/features/phone-layout';
 
 function meta(lid: string, order: number, title = 't-' + lid, archetype = 'text'): EntryMeta {
   return {
@@ -2121,5 +2123,88 @@ describe('2 ペインの掴んで落とす(#273 段⑤)', () => {
     pane('right').dispatchEvent(dragEv('drop', dtStub({ [PKC_DRAG_DUAL]: 'f1' })));
     await tick();
     expect(d.getState().error ?? '', '無言で捨てている').toContain('自分の中');
+  });
+});
+
+/**
+ * 🔴 **スマホの 2 ペイン ── 1 枚ずつ出しているときの残り**(#687。user 裁定 2026-09-04)。
+ *
+ * 相手のペインは**画面に居ない**。だから守る主張は「居ない相手のことを、
+ * この 1 枚がどれだけ言えるか」である:
+ *
+ * - A-1 行き先のボタンに**相手が開いているフォルダの名前**が出る
+ */
+describe('スマホの 2 ペイン(1 枚ずつ)(#687)', () => {
+  /** 幅の見張りの替え玉(`tests/adapter/too-narrow.test.ts` と同じ型)。 */
+  class FakeMedia {
+    matches: boolean;
+    constructor(matches: boolean) {
+      this.matches = matches;
+    }
+    addEventListener(): void {}
+    removeEventListener(): void {}
+  }
+  let region: HTMLElement;
+  /**
+   * 1 枚ずつ(スマホ)か、2 枚とも(PC)かを決めて器を建てる。
+   * ⚠ **問い合わせごとに別の替え玉**を返す ── 1 本だと「スマホ = 対応外」になる。
+   */
+  const setup = (phone: boolean): DualFilerRenderer => {
+    document.body.innerHTML = '';
+    const root = document.createElement('div');
+    document.body.append(root);
+    appPhone.install(root, (q) =>
+      q.includes(`${PHONE_MIN_PX - 1}px`) ? new FakeMedia(false) : new FakeMedia(phone),
+    );
+    region = document.createElement('div');
+    root.append(region);
+    return new DualFilerRenderer(region);
+  };
+  /** ⚠ 共有の 1 個を PC の版面へ戻す ── 残すと同じ file の他の test が phone のまま走る。 */
+  afterEach(() => {
+    appPhone.install(document.createElement('div'), () => new FakeMedia(false));
+  });
+  const switcher = (): HTMLElement =>
+    region.querySelector<HTMLElement>('[data-pkc-region="dual-switch"]')!;
+
+  /**
+   * 🔴 **A-1 行き先のボタンに、相手が開いているフォルダの名前が出る。**
+   * ⚠ 「右のペインへ」だけでは、押した先に何が在るか読めない(相手は画面に居ない)。
+   */
+  it('🔴 A-1 行き先のボタンに、相手のペインが開いているフォルダの名前が出る', () => {
+    const r = setup(true);
+    let s = booted();
+    r.render(s);
+    // 起動時は相手(右)もルート
+    expect(switcher().textContent, 'ルートの呼び名が無い').toBe('右のペインへ → ルート');
+    // 右を f1(はこ1)へ ── ⚠ 焦点は右へ移るので、左へ戻して「左から見た右」にする
+    s = reduce(s, { type: 'DUAL_SET_SCOPE', side: 'right', lid: 'f1' }).state;
+    s = reduce(s, { type: 'DUAL_FOCUS', side: 'left' }).state;
+    r.render(s);
+    expect(switcher().textContent, '相手のフォルダ名が出ていない').toBe('右のペインへ → はこ1');
+    expect(switcher().title, '説明にも名前が無い').toContain('右のペイン(はこ1)に切り替えます');
+    /**
+     * 🔴 **相手が動いただけの回も追従する**(指紋を側だけにする変異を殺す)。
+     * ⚠ 焦点は動かない(左のまま)ので、側だけの指紋だと**古い名前が残る**。
+     */
+    s = reduce(s, { type: 'DUAL_SET_SCOPE', side: 'right', lid: null }).state;
+    s = reduce(s, { type: 'DUAL_FOCUS', side: 'left' }).state;
+    r.render(s);
+    expect(switcher().textContent, '相手が動いたのに名前が古いまま').toBe('右のペインへ → ルート');
+    // 焦点を右へ ── 行き先は左(ルート)。矢印は行き先の向き、名前は末尾
+    s = reduce(s, { type: 'DUAL_SET_SCOPE', side: 'left', lid: 'f2' }).state;
+    s = reduce(s, { type: 'DUAL_FOCUS', side: 'right' }).state;
+    r.render(s);
+    expect(switcher().textContent).toBe('← 左のペインへ はこ2');
+  });
+
+  /** 対照群 ── PC でも字は同じ(出し入れは CSS だけが決める。JS は字を変えない)。 */
+  it('A-1 対照群: PC でも行き先の字は同じ(出し入れは CSS が決める)', () => {
+    const r = setup(false);
+    let s = reduce(booted(), { type: 'DUAL_SET_SCOPE', side: 'right', lid: 'f1' }).state;
+    s = reduce(s, { type: 'DUAL_FOCUS', side: 'left' }).state;
+    r.render(s);
+    expect(switcher().textContent).toBe('右のペインへ → はこ1');
+    expect(switcher().hasAttribute('hidden'), 'JS が hidden を触っている').toBe(false);
   });
 });

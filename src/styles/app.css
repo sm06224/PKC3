@@ -5474,6 +5474,11 @@ li[data-pkc-row-slot] {
   min-height: 32px;
   margin-bottom: var(--s2);
   text-align: center;
+  /* 🔴 相手のフォルダ名を末尾に出す(#687 A-1)── 長い題名は末尾から省く。
+   *   ⚠ 折り返させない ── 2 行になると押し所の丈が動き、下の表がずれる。 */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* 🔴 **操作の 7 つも 32px にする**(user 裁定 2026-09-04)。
  * 🔑 1 枚ずつにしたことで**丈が 282px → 571px** になったので、

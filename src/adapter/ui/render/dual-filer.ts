@@ -71,6 +71,14 @@ const SIDE_LABEL: Readonly<Record<DualSide, string>> = { left: '左', right: '�
 const otherSide = (side: DualSide): DualSide => (side === 'left' ? 'right' : 'left');
 
 /**
+ * 場所の呼び名(タブ / 行き先のボタンが同じ規則で出す)。
+ * ⚠ **1 か所に置く**(#687 A-1)── タブと行き先で別々に組むと、無題のノートの
+ *   呼び方が帯と押しボタンで食い違う(CLAUDE.md §7)。
+ */
+const scopeName = (lid: string | null, metas: AppState['entryMetas']): string =>
+  lid === null ? 'ルート' : (metas.get(lid)?.title ?? '(無題)');
+
+/**
  * 🔴 **列の定義**(2026-08-19 の作り直し)。
  *
  * ⚠ **名前の列にだけ幅を書かない** ── 残りを全部食わせる(Total Commander が
@@ -332,8 +340,7 @@ export class DualFilerRenderer {
      *   窓を細めただけの回(state は 1 バイトも動かない)に
      *   **行き先のボタンと操作の字が古いまま残る**。
      */
-    const soloChanged =
-      this.frame === null ? false : this.paintSwitch(this.frame, state.dual.focus);
+    const soloChanged = this.frame === null ? false : this.paintSwitch(this.frame, state);
     /**
      * 🔴 **入力が 1 つも変わっていないなら描かない**(着地前レビュー R4)。
      *
@@ -386,7 +393,7 @@ export class DualFilerRenderer {
      * ⚠ 初回は `ensureFrame` の直後がいちばん早い塗り所である
      *   (門の前では器がまだ無い)。2 回目以降は門の前で済んでいる。
      */
-    this.paintSwitch(frame, state.dual.focus);
+    this.paintSwitch(frame, state);
     /**
      * 🔴 **焦点の側は「移す向き」そのもの**なので、必ず画面に出す
      * (出さないと user は**どちらが元か分からないまま**押すことになる)。
@@ -421,7 +428,12 @@ export class DualFilerRenderer {
 
   /** 直前に塗った「1 枚だけか」と「行き先」(⚠ 毎描画で属性を書き換えない)。 */
   private lastSolo: boolean | null = null;
-  private lastSwitchTo: DualSide | null = null;
+  /**
+   * 行き先の指紋 = `側 + SEP + 相手のフォルダ名`(#687 A-1)。
+   * ⚠ **側だけにしない** ── 相手のペインが別のフォルダへ動いただけの回
+   *   (焦点は動かない)に、ボタンの名前が古いまま残る。
+   */
+  private lastSwitchTo: string | null = null;
 
   /**
    * 🔴 **行き先のボタンを塗る**(#671)。
@@ -438,19 +450,31 @@ export class DualFilerRenderer {
    */
   private paintSwitch(
     frame: NonNullable<DualFilerRenderer['frame']>,
-    focus: DualSide,
+    state: AppState,
   ): boolean {
     const solo = appPhone.isPhone();
+    const focus = state.dual.focus;
     const to = otherSide(focus);
-    if (solo === this.lastSolo && to === this.lastSwitchTo) return false;
+    /**
+     * 🔴 **相手のペインが開いているフォルダの名前も出す**(#687 A-1)。
+     * ⚠ 相手は画面に居ないので、「右のペインへ」だけでは**どこへ行くのか**
+     *   読めない ── 押す前に「2026 請求 へ写す」と分かるのは、この字だけである。
+     * 🔑 名前の規則はタブ帯と同じ `scopeName`(無題 / ルートの呼び方を揃える)。
+     */
+    const name = scopeName(paneScope(paneOf(state.dual, to)), state.entryMetas);
+    const key = `${to}${SEP}${name}`;
+    if (solo === this.lastSolo && key === this.lastSwitchTo) return false;
     this.lastSolo = solo;
-    this.lastSwitchTo = to;
+    this.lastSwitchTo = key;
     frame.switcher.setAttribute('data-pkc-side', to);
     // ⚠ 矢印は**行き先の向き**にする(右へ行くのに ← が出ると、押す前に迷う)
+    // ⚠ 名前は**末尾**に置く ── 長い題名は CSS が末尾から省くので、向きの字が残る
     frame.switcher.textContent =
-      to === 'right' ? `${SIDE_LABEL.right}のペインへ →` : `← ${SIDE_LABEL.left}のペインへ`;
+      to === 'right'
+        ? `${SIDE_LABEL.right}のペインへ → ${name}`
+        : `← ${SIDE_LABEL.left}のペインへ ${name}`;
     frame.switcher.title =
-      `${SIDE_LABEL[to]}のペインに切り替えます(いま見ているのは${SIDE_LABEL[focus]}のペインです)`;
+      `${SIDE_LABEL[to]}のペイン(${name})に切り替えます(いま見ているのは${SIDE_LABEL[focus]}のペインです)`;
     /**
      * 🔴 **隠した側へ焦点が入らないようにする**(着地前の動線レビュー C)。
      * ⚠ 1 枚ずつは `visibility: hidden` で作る(`display: none` にすると
@@ -930,9 +954,7 @@ export class DualFilerRenderer {
   }
 
   private renderTabs(host: HTMLElement, side: DualSide, state: AppState, pane: DualPaneState): void {
-    const names = pane.tabs.map((t) =>
-      t.scopeLid === null ? 'ルート' : (state.entryMetas.get(t.scopeLid)?.title ?? '(無題)'),
-    );
+    const names = pane.tabs.map((t) => scopeName(t.scopeLid, state.entryMetas));
     const sig = [String(pane.active), ...names].join(SEP);
     if (host.getAttribute('data-pkc-sig') === sig) return;
     host.setAttribute('data-pkc-sig', sig);

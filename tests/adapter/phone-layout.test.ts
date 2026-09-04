@@ -1222,6 +1222,19 @@ describe('CSS(構文で読む)', () => {
   });
 
   /**
+   * 🔴 **行き先のボタンは、長いフォルダ名を末尾から省く**(#687 A-1)。
+   * ⚠ 省かないと 375px で 2 行に折れ、押し所の丈が題名しだいで動く
+   *   (下の表が題名 1 つでずれる)。
+   */
+  it('🔴 行き先のボタンは、長い名前を 1 行に収めて末尾から省く', () => {
+    const css = withoutMedia(bare());
+    const phone = blocksFor(css, `${PHONE} [data-pkc-region='dual-switch']`).join(' ');
+    expect(phone, '末尾から省く規則が無い').toMatch(decl('text-overflow', 'ellipsis'));
+    expect(phone, '折り返しを止めていない(2 行になる)').toMatch(decl('white-space', 'nowrap'));
+    expect(phone, 'はみ出しを隠していない').toMatch(decl('overflow', 'hidden'));
+  });
+
+  /**
    * 🔴 **操作の 7 つも 32px**(user 裁定 2026-09-04、#671)。
    * ⚠ 1 枚ずつにしてペインの丈が 282px → 571px になったので、6px 増やしても
    *   表の行はほとんど減らない ── 端末の中の押し所を 1 種類に揃える。
