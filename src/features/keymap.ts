@@ -269,7 +269,8 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'dual-copy-to-other',
-    label: '反対のペインへ写す',
+    // ⚠ 「写す」ではなく「コピー」(#587 D-1)── 同じ操作に 3 通りの字が在った
+    label: '反対のペインへコピー',
     contexts: ['dual'],
     defaults: ['F5'],
     note: '元は残ります(印が無ければカーソルの行)',

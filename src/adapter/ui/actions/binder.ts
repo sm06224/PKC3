@@ -3336,7 +3336,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const side = dualSide(target) ?? dispatcher.getState().dual.focus;
     const st = dispatcher.getState();
     if (st.phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから写してください' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してからコピーしてください' });
       return;
     }
     const rows = dualPaneRows(st, side);
@@ -3349,13 +3349,13 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (lids.length === 0) {
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: '写すものを選んでください(行を押すと選べます)',
+        error: 'コピーするものを選んでください(行を押すと選べます)',
       });
       return;
     }
     const read = services.readBodies;
     if (!read) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この版では写せません' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この版ではコピーできません' });
       return;
     }
     const to = otherSide(side);
@@ -3405,11 +3405,11 @@ const ACTIONS: Record<string, ActionHandler> = {
           type: 'OP_FAILED',
           error:
             missing > 0
-              ? `${steps.length} 件を「${where}」へ写しました(うち ${missing} 件は本文を読めず、空で作りました)`
-              : `${steps.length} 件を「${where}」へ写しました`,
+              ? `${steps.length} 件を「${where}」へコピーしました(うち ${missing} 件は本文を読めず、空で作りました)`
+              : `${steps.length} 件を「${where}」へコピーしました`,
         });
       },
-      () => dispatcher.dispatch({ type: 'OP_FAILED', error: '写せませんでした(本文を読めません)' }),
+      () => dispatcher.dispatch({ type: 'OP_FAILED', error: 'コピーできませんでした(本文を読めません)' }),
     );
   },
   /** ⚠ 鍵(`Delete`)と**同じ実体**を押しボタンからも呼ぶ(規則を 2 つ作らない)。 */
@@ -4354,7 +4354,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     const plain = stripDialect(body);
     if (services.copyText === undefined) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この版では写せません' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この版ではコピーできません' });
       return;
     }
     /**

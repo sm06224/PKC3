@@ -419,7 +419,7 @@ test('🔴 2 ペインの押せる口に、無反応が 1 つも無い (#273)', 
   await expect(
     page.locator('[data-pkc-region="status"]'),
     '写した先の名前が出ていない(見えない場所へ物が飛ぶ)',
-  ).toContainText('「ルート」へ写しました');
+  ).toContainText('「ルート」へコピーしました');
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

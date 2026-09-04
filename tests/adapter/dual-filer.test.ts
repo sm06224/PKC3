@@ -21,6 +21,7 @@ import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { CenterRouter } from '../../src/adapter/ui/render/center';
 import { DualFilerRenderer } from '../../src/adapter/ui/render/dual-filer';
 import { KeymapStore } from '../../src/adapter/ui/render/keymap';
+import { findCommand } from '../../src/features/keymap';
 import { MAX_TABS, paneOf, paneScope } from '../../src/features/relation/dual-pane';
 import { DUAL_TILE_LID, withBuiltinTiles } from '../../src/features/launcher/tiles';
 import { launchTile } from '../../src/adapter/ui/launch-tile';
@@ -293,7 +294,7 @@ describe('2 ペインの面(描画)', () => {
         b.querySelector('[data-pkc-field="cmd-label"]')?.textContent,
       ]),
     ).toEqual([
-      ['dual-copy', 'F5', '写す'],
+      ['dual-copy', 'F5', 'コピー'],
       ['dual-move', 'F6', '移す'],
       ['dual-rename-begin', 'F2', '名前'],
       ['dual-mkdir', 'F7', 'フォルダ'],
@@ -304,6 +305,33 @@ describe('2 ペインの面(描画)', () => {
       // 🔴 **プレビュー**(#273 残件)── 開かずに中身を確かめる(印は要らない)
       ['dual-preview-toggle', 'F9', 'プレビュー'],
     ]);
+  });
+
+  /**
+   * 🔴 **同じ操作の字は「コピー」で揃う**(#587 D-1)。
+   *
+   * ⚠ 直す前は 1 つの操作に 3 通りの字が在った ── 操作行「写す」/ 鍵の一覧
+   *   「反対のペインへ写す」/ 情報ペイン「参照をコピー」。マニュアル §6 の説明は
+   *   「反対側の場所へ**コピー**します」だったので、ボタンの字だけが説明と違っていた。
+   * 🔑 3 つの面を**1 つの it で**見る ── 片方だけ戻す変異(鍵の一覧 / 印が無いときの
+   *   断り)が、上の並びの pin では素通りした(変異試験 T2 / T4 が SURVIVED で教えた)。
+   */
+  it('🔴 コピーの字は、操作行・印が無いときの説明・鍵の一覧の 3 面で揃う(#587 D-1)', () => {
+    const r = new DualFilerRenderer(region);
+    r.render(booted());
+    const copy = region.querySelector<HTMLElement>('[data-pkc-field="dual-copy"]')!;
+    expect(copy.querySelector('[data-pkc-field="cmd-label"]')?.textContent).toBe('コピー');
+    // 印が無いときの説明(title)── 「写すものを」ではない
+    expect(copy.title, '印が無いときの説明が「コピー」で書かれていない').toContain(
+      'コピーするものを選んでから押してください',
+    );
+    // 鍵の一覧(設定 / ヘルプ / マニュアル §10 の名前)
+    expect(findCommand('dual-copy-to-other')?.label, '鍵の一覧の名前が揃っていない').toBe(
+      '反対のペインへコピー',
+    );
+    // ⚠ 「写す」の字がこの操作に 1 つも残っていない
+    for (const text of [copy.textContent ?? '', copy.title, findCommand('dual-copy-to-other')?.label ?? ''])
+      expect(text, `「写す」の字が残っている: ${text}`).not.toContain('写');
   });
 
   it('🔴 タブの帯: 開いている 1 枚が分かり、最後の 1 枚には閉じる口を出さない', () => {
@@ -1594,14 +1622,14 @@ describe('2 ペインのキーボード操作(#273)', () => {
     d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' });
     const btn = region.querySelector<HTMLElement>('[data-pkc-field="dual-copy"]')!;
     btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    expect(d.getState().error ?? '').toContain('写せません');
+    expect(d.getState().error ?? '').toContain('コピーできません');
   });
 
   it('🔴 何も選ばずに写そうとしたら、理由が出る', () => {
     d.dispatch({ type: 'DUAL_CLEAR_SELECTION', side: 'left' });
     const btn = region.querySelector<HTMLElement>('[data-pkc-field="dual-copy"]')!;
     btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    expect(d.getState().error ?? '').toContain('写すものを選んでください');
+    expect(d.getState().error ?? '').toContain('コピーするものを選んでください');
   });
 
   /**
@@ -1772,7 +1800,7 @@ describe('2 ペインの写す(#273 段③)', () => {
     region.querySelector<HTMLElement>('[data-pkc-field="dual-copy"]')!.dispatchEvent(
       new MouseEvent('click', { bubbles: true, cancelable: true }),
     );
-    expect(d.getState().error ?? '', '画面に無い印まで写した').toContain('写すものを選んでください');
+    expect(d.getState().error ?? '', '画面に無い印まで写した').toContain('コピーするものを選んでください');
   });
 
   /**
