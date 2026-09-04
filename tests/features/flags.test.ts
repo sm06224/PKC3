@@ -327,11 +327,19 @@ describe('🔴 クエリパラメータの抜け穴を作らない', () => {
     ).toEqual([]);
     expect(
       code.filter((l) => l.includes('location.search')).map((l) => l.trim()),
-      'location.search が「断片を落とす」以外で使われている',
+      'location.search が「断片を組み直す」以外で使われている',
     ).toEqual([
       '`${location.pathname}${location.search}${dropViewFromHash(location.hash)}`,',
       // ⚠ 合図(`w`)だけを落とす口(#300 段③ の直し)── 同じ作法で `search` は残す
       '`${location.pathname}${location.search}${dropViewWindowToken(location.hash)}`,',
+      /**
+       * ⚠ 住所を書き換える口(#689 案 B)── **落とすのではなく書き換える**が、
+       *   `search` の扱いは同じ(そのまま持ち越す)。⚠ ここで `search` を落とすと、
+       *   `?pkc-flag=…` が消えて**次の読み直しで別の設定のアプリが立ち上がる**。
+       * 🔑 key を取り出しているのは `permalink.ts` の `setHashEntry` であって
+       *   ここではない ── 上の `URLSearchParams` の検査がそれを保つ。
+       */
+      "history.replaceState(null, '', `${location.pathname}${location.search}${next}`);",
     ]);
   });
 

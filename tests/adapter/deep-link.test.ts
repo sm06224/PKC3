@@ -34,7 +34,12 @@ import {
   noteOpenedByUs,
 } from '../../src/adapter/platform/deep-link';
 import { VIEW_MODES, type ViewMode } from '../../src/adapter/state/app-state';
-import { dropViewWindowToken, formatViewDeepLink } from '../../src/features/link/permalink';
+import {
+  dropViewFromHash,
+  dropViewWindowToken,
+  formatViewDeepLink,
+  setHashEntry,
+} from '../../src/features/link/permalink';
 
 /** 的 + 面の購読 + 断片の購読を 1 つにした試験台。 */
 function bench(hash: string) {
@@ -43,18 +48,35 @@ function bench(hash: string) {
   const actions: string[] = [];
   let viewListener: ((v: ViewMode) => void) | null = null;
   let hashListener: (() => void) | null = null;
+  /** 選んでいるノートが変わったことにする購読(#689 案 B)。 */
+  let selectListener: ((containerId: string | null, lid: string | null) => void) | null = null;
   /**
    * ⚠ **本物と同じ意味論にする**(CLAUDE.md §3)── 本物は getter で、
-   *   消した後は `view` の無い断片を返す。ここでは空に落として同じ形にする。
+   *   消した後は `view` / `w` を落とした断片を返す。
+   *
+   * 🔴 **実物の関数を通す**(#689 で直した)── 1 稿目は `''` に落としていたが、
+   *   本物の `clearHash` は **`container` / `entry` を残す**(`dropViewFromHash`)。
+   *   ⚠ この食い違いのせいで「`Alt+1` で本文へ戻った後も住所が残っている」という
+   *   #689 の物語そのものが、**この台では再現できなかった**
+   *   ── stub を本物より**強く**作ると、実装の欠陥が台の側で消える。
    */
   const target: DeepLinkTarget & { hash: string } = {
     hash,
     clearHash: () => {
       cleared += 1;
-      target.hash = '';
+      target.hash = dropViewFromHash(target.hash);
     },
     dropToken: () => {
       target.hash = dropViewWindowToken(target.hash);
+    },
+    /**
+     * ⚠ **本物と同じ意味論**(#689 案 B)── 本物は `setHashEntry` を通し、
+     *   結果が同じなら `replaceState` を呼ばない。ここでも**実物を通す**
+     *   ── 「名乗っていない断片には生やさない」を test 側で書き直すと、
+     *   実装と同じ盲点を共有する(CLAUDE.md § 1)。
+     */
+    setEntry: (containerId, lid) => {
+      target.hash = setHashEntry(target.hash, containerId, lid);
     },
   };
   let failed: string | null = null;
@@ -90,6 +112,12 @@ function bench(hash: string) {
         hashListener = null;
       };
     },
+    onSelectedEntry: (fn) => {
+      selectListener = fn;
+      return () => {
+        selectListener = null;
+      };
+    },
     target,
   });
   return {
@@ -105,7 +133,14 @@ function bench(hash: string) {
       target.hash = h;
       hashListener?.();
     },
-    subscribed: () => ({ view: viewListener !== null, hash: hashListener !== null }),
+    /** 選んでいるノートが変わったことにする(#689 案 B)。 */
+    selectBecomes: (lid: string | null, cid: string | null = 'c1') =>
+      selectListener?.(cid, lid),
+    subscribed: () => ({
+      view: viewListener !== null,
+      hash: hashListener !== null,
+      select: selectListener !== null,
+    }),
     selects,
     holds,
     noteHolds,
@@ -363,9 +398,13 @@ describe('起動時のディープリンク(#300 段②)', () => {
   /** ⚠ 配線を解いたら、購読が両方外れる(閉じたタブが state を掴み続けない)。 */
   it('⚠ 配線を解くと購読が外れる', () => {
     const b = bench('#pkc?view=help');
-    expect(b.subscribed()).toEqual({ view: true, hash: true });
+    expect(b.subscribed()).toEqual({ view: true, hash: true, select: true });
     b.off();
-    expect(b.subscribed(), '購読が残っている').toEqual({ view: false, hash: false });
+    expect(b.subscribed(), '購読が残っている').toEqual({
+      view: false,
+      hash: false,
+      select: false,
+    });
   });
 
   /**
@@ -390,6 +429,7 @@ describe('起動時のディープリンク(#300 段②)', () => {
       hash,
       clearHash: () => {},
       dropToken: () => {},
+      setEntry: () => {},
     });
     expect(readViewDeepLink(t('#pkc?view=help'))).toEqual({ view: 'help' });
     expect(readViewDeepLink(t('#pkc?view=zzz'))).toEqual({ unusable: true });
@@ -422,7 +462,13 @@ describe('起動時のディープリンク(#300 段②)', () => {
       openView: opened,
       fail,
       onViewChange: () => () => {},
-      target: { hash: '#pkc?view=query', clearHash: () => {}, dropToken: () => {} },
+      onSelectedEntry: () => () => {},
+      target: {
+        hash: '#pkc?view=query',
+        clearHash: () => {},
+        dropToken: () => {},
+        setEntry: () => {},
+      },
     });
     expect(opened).toHaveBeenCalledTimes(1);
     expect(fail, '同時に理由まで出している').not.toHaveBeenCalled();
@@ -459,6 +505,7 @@ describe('引っ越した面の栞(#292 段⑤)', () => {
     hash,
     clearHash: () => {},
     dropToken: () => {},
+    setEntry: () => {},
   });
 
   /**
@@ -576,6 +623,9 @@ describe('開いた窓の合図(#300 段③)', () => {
       },
       dropToken: () => {
         t.hash = dropViewWindowToken(t.hash);
+      },
+      setEntry: (containerId: string | null, lid: string) => {
+        t.hash = setHashEntry(t.hash, containerId, lid);
       },
     };
     return t;
@@ -765,5 +815,102 @@ describe('この窓はこちらが開いたものか(#685 着地前レビュー 
     };
     expect(() => noteOpenedByUs(true, throwing), '控えられない箱で落ちた').not.toThrow();
     expect(noteOpenedByUs(true, throwing)).toBe(true);
+  });
+});
+
+/**
+ * 🔴 **住所は、いま見ているノートへ追随する**(#689 案 B、2026-09-04)。
+ *
+ * ## user から見た物語(直す前)
+ *
+ * 1. 付箋を開く ⇒ アドレスは `#pkc?container=c1&entry=e1&w=…`
+ * 2. `Alt+1` で本文へ戻る ⇒ `#pkc?container=c1&entry=e1`(住所は**わざと残す**)
+ * 3. その窓で 30 分作業して、別のノートを開く ⇒ **アドレスは変わらない**
+ * 4. `F5` ⇒ **30 分前のノートへ戻される**。`Ctrl+D` の栞もそちらを指す
+ *
+ * 🔑 面は「離れたら消す」、ノートは「**移った先へ書き換える**」── 非対称なのは、
+ *   ノートには「離れる」が無いからである(必ずどれかを見ている)。
+ */
+describe('住所の追随(#689 案 B)', () => {
+  it('🔴 別のノートを選ぶと、アドレスがそのノートを指す', () => {
+    const b = bench('#pkc?container=c1&entry=e1');
+    expect(b.selects, '前提が崩れた(連れてきたノートを選んでいない)').toEqual([
+      { containerId: 'c1', lid: 'e1' },
+    ]);
+    b.selectBecomes('e2');
+    expect(b.hash(), '住所が古いノートを指したまま').toBe('#pkc?container=c1&entry=e2');
+    /**
+     * 🔴 **毎回動く**(#689 着地前レビュー SM3)── 1 回だけ追随して固まる変異は、
+     *   1 件しか押さない台では**生き延びる**。⚠ user から見た症状は
+     *   「2 件目までは付いてくるのに、3 件目から固まる」= **#689 が半分だけ戻る**。
+     */
+    b.selectBecomes('e3');
+    expect(b.hash(), '2 件目から住所が固まった').toBe('#pkc?container=c1&entry=e3');
+  });
+
+  /**
+   * 🔴 **別の PKC の入れ物なら、住所に触らない**(動線レビュー 欠陥 1)。
+   *
+   * ⚠ もらったリンクを開いたタブでは、読む側が `cid` 違いで**断る**ので
+   *   ノートは選ばれない。そこで自分のノートを選ぶと、1 稿目は住所を
+   *   `container=他人 & entry=自分の lid` という**どこも指さない形**にしていた。
+   * ⚠ しかも**もらったリンクの原文が上書きされて消える**ので、
+   *   「開かないんだけど」と送り主に返す材料まで失われる。
+   */
+  it('🔴 もらった別 PKC のリンクは、1 バイトも書き換えない', () => {
+    const b = bench('#pkc?container=other&entry=e1');
+    b.selectBecomes('mine', 'c1');
+    expect(b.hash(), 'よその入れ物の住所を書き換えた').toBe('#pkc?container=other&entry=e1');
+  });
+
+  /**
+   * ⚠ **対照群 1** ── 何も選んでいない回(boot の途中 / 削除の直後)は触らない。
+   *   ここで消すと**栞ごと消える**。
+   */
+  it('⚠ 何も選んでいない回は、住所を触らない', () => {
+    const b = bench('#pkc?container=c1&entry=e1');
+    b.selectBecomes(null);
+    expect(b.hash(), '選んでいないのに住所を書き換えた').toBe('#pkc?container=c1&entry=e1');
+  });
+
+  /**
+   * 🔴 **対照群 2** ── 名乗っていない窓(ふつうに開いた本体のタブ)には
+   *   住所を生やさない。生やすと**全 user のアドレスが操作のたびに伸びる**。
+   */
+  it('🔴 名乗っていない窓のアドレスは伸びない', () => {
+    const b = bench('');
+    b.selectBecomes('e2');
+    expect(b.hash(), '素のタブに住所が生えた').toBe('');
+  });
+
+  /**
+   * 🔴 **面の窓でも追随する** ── `view=` を持っていても、見ているノートが
+   *   移るのは同じである。⚠ 面の字は道連れにしない。
+   */
+  it('🔴 面の窓では、面を残したまま住所だけ動く', () => {
+    const b = bench('#pkc?container=c1&entry=e1&view=dual');
+    expect(b.actions, '前提が崩れた(面が開いていない)').toEqual(['select:e1', 'open:dual']);
+    b.selectBecomes('e2');
+    expect(b.hash()).toBe('#pkc?container=c1&entry=e2&view=dual');
+  });
+
+  /**
+   * ⚠ **面を離れた後も効く** ── `Alt+1` で本文へ戻ると `clearHash` が走って
+   *   `view` / `w` が落ちるが、住所は残る。⚠ #689 の物語はまさにこの後である。
+   */
+  it('⚠ 面を離れた後も、住所は追随し続ける', () => {
+    const b = bench('#pkc?container=c1&entry=e1&view=dual&w=tok1');
+    b.viewBecomes('detail');
+    expect(b.hash(), '前提が崩れた(面と合図が落ちていない)').toBe('#pkc?container=c1&entry=e1');
+    b.selectBecomes('e2');
+    expect(b.hash()).toBe('#pkc?container=c1&entry=e2');
+  });
+
+  /** ⚠ 配線を解いたら、住所も動かなくなる(閉じたタブが state を掴み続けない)。 */
+  it('⚠ 配線を解くと追随も止まる', () => {
+    const b = bench('#pkc?container=c1&entry=e1');
+    b.off();
+    b.selectBecomes('e2');
+    expect(b.hash(), '解いた後も住所を書き換えた').toBe('#pkc?container=c1&entry=e1');
   });
 });

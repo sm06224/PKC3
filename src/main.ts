@@ -3412,6 +3412,12 @@ function bootstrap(): void {
         fail: (error) => app.dispatcher.dispatch({ type: 'OP_FAILED', error }),
         // ⚠ 面が変わったら断片を消す(見ている間だけ残す)
         onViewChange: (fn) => app.dispatcher.onState((s) => fn(s.viewMode)),
+        /**
+         * 🔴 **住所を、いま見ているノートへ追随させる**(#689 案 B)。
+         * ⚠ 判断(名乗っている断片か / 履歴を積まないか)は `deep-link.ts` に在る
+         *   ── この file はどの test からも実行されない(CLAUDE.md § 2)。
+         */
+        onSelectedEntry: (fn) => app.dispatcher.onState((s) => fn(s.cid, s.selectedLid)),
         // ⚠ 開いたままのタブでアドレスへ足したときも効かせる
         onHashChange: (fn) => {
           window.addEventListener('hashchange', fn);

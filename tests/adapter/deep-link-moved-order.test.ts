@@ -40,7 +40,12 @@ const { readViewDeepLink, openableViewNames } = await import(
   '../../src/adapter/platform/deep-link'
 );
 
-const target = (hash: string) => ({ hash, clearHash: () => {}, dropToken: () => {} });
+const target = (hash: string) => ({
+  hash,
+  clearHash: () => {},
+  dropToken: () => {},
+  setEntry: () => {},
+});
 
 describe('引っ越しの表と、開ける面の表が両方当たるとき', () => {
   /**

@@ -191,6 +191,18 @@ describe('bootstrap の配線', () => {
     expect(wiring, '断片の購読が繋がっていない(開いたまま足しても効かない)').toContain(
       'hashchange',
     );
+    /**
+     * 🔴 **住所を追随させる購読が繋がっている**(#689 案 B、2026-09-04)。
+     *
+     * ⚠ ここが落ちると症状は「**`F5` で 30 分前のノートへ戻る**」だけになり、
+     *   `deep-link.ts` の unit は**全部緑のまま**である(配線が無いので
+     *   `onSelectedEntry` が 1 度も呼ばれない)。
+     * 🔑 見るのは**渡している値**まで ── `s.viewMode` を渡す取り違えを
+     *   「購読が在る」だけの検査では殺せない。
+     */
+    expect(wiring, '住所を追随させる購読が繋がっていない(F5 で古いノートへ戻る)').toContain(
+      'onSelectedEntry: (fn) => app.dispatcher.onState((s) => fn(s.cid, s.selectedLid))',
+    );
   });
 
   it('🔴 SW の登録を boot の成功側・失敗側の**両方**から呼ぶ', () => {

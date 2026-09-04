@@ -17,6 +17,7 @@ import {
   parseViewDeepLink,
   parseViewDeepLinkEntry,
   parseViewWindowToken,
+  setHashEntry,
 } from '../../src/features/link/permalink';
 
 describe('view のディープリンク(#300 段②)', () => {
@@ -222,6 +223,107 @@ describe('面を指さない断片(#685 段②)', () => {
     expect(formatViewDeepLink('https://x/', 'dual')).toBe('https://x/#pkc?view=dual');
     expect(formatViewDeepLink('https://x/', 'dual', { containerId: 'c1', entry: 'e 1' })).toBe(
       'https://x/#pkc?view=dual',
+    );
+  });
+});
+
+/**
+ * 🔴 **住所を、いま見ているノートへ追随させる**(#689 案 B、2026-09-04)。
+ *
+ * ⚠ 直す前は `dropViewFromHash` が `container` / `entry` を残すだけで、
+ *   **残した後に更新する口が 1 つも無かった** ── その窓で別のノートを開いた
+ *   瞬間に住所が嘘になり、`F5` が最初のノートへ引き戻していた。
+ */
+describe('住所の追随(#689 案 B)', () => {
+  it('🔴 名乗っている断片は、いまのノートへ書き換わる', () => {
+    expect(setHashEntry('#pkc?container=c1&entry=e1', 'c1', 'e2')).toBe('#pkc?container=c1&entry=e2');
+  });
+
+  /**
+   * 🔴 **併記された相手を巻き込まない** ── 面の窓(`view=`)でも
+   *   住所は追随する(見ているノートが移るのは面の中でも同じである)。
+   * ⚠ `URLSearchParams.set` は**その場で置き換える**ので、並びも動かない。
+   */
+  it('🔴 view / w は残り、並びも変わらない', () => {
+    expect(setHashEntry('#pkc?container=c1&entry=e1&view=dual&w=tok1', 'c1', 'e2')).toBe(
+      '#pkc?container=c1&entry=e2&view=dual&w=tok1',
+    );
+  });
+
+  /** 🔑 base 付きの丸ごとの URL でも、断片だけを書き換える。 */
+  it('🔑 base は触らない', () => {
+    expect(setHashEntry('https://例.test/pkc/?pkc-flag=x#pkc?container=c1&entry=e1', 'c1', 'e2')).toBe(
+      'https://例.test/pkc/?pkc-flag=x#pkc?container=c1&entry=e2',
+    );
+  });
+
+  /**
+   * 🔴 **名乗っていない断片には生やさない**(対照群つき)。
+   *
+   * ⚠ ここを緩めると、ふつうに開いたタブのアドレスが**操作のたびに伸びる** ──
+   *   誰も頼んでいない見え方の変更である(user 指示 2026-08-28)。
+   */
+  it.each([
+    ['断片が無い', 'https://例.test/pkc/'],
+    ['pkc の断片ではない', '#見出し'],
+    ['中身が無い', '#pkc?'],
+    ['container だけ', '#pkc?container=c1'],
+    ['entry だけ', '#pkc?entry=e1'],
+    ['面だけ', '#pkc?view=dual'],
+  ])('🔴 %s 断片は 1 バイトも変わらない', (_name, raw) => {
+    expect(setHashEntry(raw, 'c1', 'e2')).toBe(raw);
+  });
+
+  /**
+   * 🔴 **読む側が受けない字は書き込まない** ── 書き込むと
+   *   「アドレスは変わったのに `F5` では拾われない」といういちばん気づけない
+   *   壊れ方になる(`parseViewDeepLinkEntry` が `TOKEN_RE` で断るため)。
+   */
+  it.each([['空', ''], ['空白入り', 'e 2'], ['記号入り', 'e/2']])(
+    '🔴 %s の lid は書き込まない',
+    (_name, lid) => {
+      expect(setHashEntry('#pkc?container=c1&entry=e1', 'c1', lid)).toBe(
+        '#pkc?container=c1&entry=e1',
+      );
+    },
+  );
+
+  /**
+   * 🔑 **往復で閉じる**(空振り防止)── 書き換えた結果を読み直すと、
+   *   渡した lid がそのまま返る。⚠ これが無いと「書き換えたが読めない綴り」を
+   *   検出できない。
+   */
+  it('🔑 書き換えた断片は、そのまま読み直せる', () => {
+    const next = setHashEntry('#pkc?container=c1&entry=e1&view=dual', 'c1', 'e2');
+    expect(parseViewDeepLinkEntry(next)).toEqual({ containerId: 'c1', lid: 'e2' });
+    expect(parseViewDeepLink(next), '面を道連れにした').toBe('dual');
+  });
+
+  /**
+   * 🔴 **別の PKC の入れ物なら、1 バイトも触らない**(#689 動線レビュー 欠陥 1)。
+   *
+   * ⚠ 読む側の門は 2 段(綴り / `cid` の一致)だが、1 稿目の書く側は**綴りしか
+   *   見ていなかった** ── 他人の PKC のリンクを開いたタブで自分のノートを選ぶと、
+   *   住所が `container=他人 & entry=自分の lid` という**どこも指さない形**に化け、
+   *   `Ctrl+D` の栞は「開くがノートは 1 件も出ない」になった。
+   * ⚠ そのうえ**もらったリンクの原文まで上書きされて消える**(送り主に
+   *   「開かない」と返す材料が無くなる)。
+   */
+  it.each([
+    ['別の入れ物', 'other'],
+    ['まだ開いていない', null],
+  ])('🔴 %s なら住所を書き換えない', (_name, cid) => {
+    const raw = '#pkc?container=c1&entry=e1';
+    expect(setHashEntry(raw, cid, 'e2'), 'よその入れ物の住所を書き換えた').toBe(raw);
+  });
+
+  /**
+   * ⚠ **対照群** ── 一致していれば書き換わる(上の 2 件が「常に何もしない」
+   *   実装でも通ってしまうのを止める)。
+   */
+  it('⚠ 入れ物が一致していれば書き換わる(対照群)', () => {
+    expect(setHashEntry('#pkc?container=c1&entry=e1', 'c1', 'e2')).toBe(
+      '#pkc?container=c1&entry=e2',
     );
   });
 });

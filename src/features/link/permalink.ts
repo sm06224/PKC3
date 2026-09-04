@@ -420,6 +420,65 @@ export function dropViewWindowToken(raw: string): string {
   return dropHashKeys(raw, ['w']);
 }
 
+/**
+ * 🔴 **住所を、いま見ているノートへ追随させる**(#689、2026-09-04)。
+ *
+ * ## ⚠ なぜ要るか ── 住所が黙って嘘になる
+ *
+ * `dropViewFromHash` は `container` / `entry` を**わざと残す**(すぐ上)。
+ * ところが残した後は**誰も更新していなかった**ので、その窓で別のノートを開いた
+ * 瞬間に「いまこのノートを見ている」という住所の主張が嘘になる ──
+ * ⚠ **`F5` で 30 分前のノートへ戻され、`Ctrl+D` の栞もそちらを指す**。
+ *
+ * 🔑 だから **`view` と同じ規律をノートにも当てる**:面は「離れたら消す」、
+ * ノートは**移った先へ書き換える**(#689 案 B)。消さないのは、
+ * ノートの住所は**離れたのではなく移っただけ**だからである。
+ *
+ * ## 🔴 名乗っていない断片に、住所を生やさない
+ *
+ * ⚠ いま `container`+`entry` を名指していない窓 ── ふつうに開いた本体のタブ ──
+ * では**何もしない**。生やすと、いままで素だったアドレスが
+ * **全 user の画面で操作のたびに伸びる**(誰も頼んでいない見え方の変更である)。
+ *
+ * ## 🔴 **別の PKC の入れ物なら、1 バイトも触らない**(#689 動線レビュー 欠陥 1)
+ *
+ * ⚠ 読む側の門は **2 段**ある:①綴り(`parseViewDeepLinkEntry`)②**この PKC の
+ * 入れ物か**(`main.ts` の `cid !== containerId` で捨てる)。⚠ 1 稿目は
+ * **①しか検めていなかった**ので、他人の PKC のリンクを開いたタブで自分のノートを
+ * 選ぶと、住所が **`container=他人 & entry=自分の lid`** という
+ * **どこも指さない形**に化けた ── `Ctrl+D` すると「開くがノートは 1 件も出ない」
+ * 栞ができ、しかも**もらったリンクの原文まで上書きされて消える**。
+ * 🔑 **書く側の門を、読む側の 2 段と揃える**(CLAUDE.md § 7 ── 同じ問いに
+ * 答える口を 2 つ作らない)。⚠ 揃えないと、この file 自身が下で戒めている
+ * 「アドレスは変わるのに `F5` では拾われない」を**自分で作る**ことになる。
+ *
+ * @param containerId いまこの PKC が開いている入れ物(`AppState.cid`)。
+ *   ⚠ **`null`(まだ開いていない窓)では何もしない** ── 下の不一致で弾かれる
+ * @returns 書き換えた後の断片(先頭 `#` 付き)。⚠ 条件を満たさなければ **`raw` のまま**
+ */
+export function setHashEntry(raw: string, containerId: string | null, lid: string): string {
+  if (typeof raw !== 'string') return '';
+  // ⚠ 綴りを検める ── 読む側(`parseViewDeepLinkEntry`)が受けない字を書き込むと、
+  //   アドレスは変わるのに `F5` では拾われない(いちばん気づけない壊れ方)
+  if (!TOKEN_RE.test(lid)) return raw;
+  const here = parseViewDeepLinkEntry(raw);
+  /**
+   * 🔑 ①名乗っているか ②**この PKC の入れ物か** ── 読む側と同じ 2 段。
+   *
+   * ⚠ **`containerId === null` を別に書かない**(2026-09-04、変異試験 N2 が
+   *   SURVIVED で教えた)── 断片の `container` は必ず実のある綴りなので、
+   *   `null` は下の不一致で**必ず弾かれる**。1 稿目はここに `containerId === null ||`
+   *   と書いていたが、**外しても振る舞いは 1 ビットも変わらなかった** =
+   *   no-op である(CLAUDE.md「『これが無いと壊れる』と書く前に、外して壊れるのを見る」)。
+   */
+  if (here === null || here.containerId !== containerId) return raw;
+  const idx = raw.indexOf(PKC_FRAGMENT_PREFIX);
+  const params = new URLSearchParams(raw.slice(idx + PKC_FRAGMENT_PREFIX.length));
+  // ⚠ `set` は**その場で置き換える**ので、`view` / `w` の並びは動かない
+  params.set('entry', lid);
+  return `${raw.slice(0, idx)}${PKC_FRAGMENT_PREFIX}${params.toString()}`;
+}
+
 function dropHashKeys(raw: string, keys: readonly string[]): string {
   if (typeof raw !== 'string') return '';
   const idx = raw.indexOf(PKC_FRAGMENT_PREFIX);
