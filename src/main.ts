@@ -202,10 +202,12 @@ import { appExtensionGrants } from '@adapter/platform/extension-grants';
 import { appExtLinks } from '@adapter/platform/extension-links';
 import { connectExtension } from '@adapter/platform/extension-host';
 import {
+  NOTE_OPEN_HERE_MESSAGE,
   announceOpenedWindow,
   connectViewDeepLink,
   currentBaseUrl,
   isPurposeWindow,
+  noteOpenElsewhereMessage,
   noteOpenedByUs,
   windowDeepLinkTarget,
   windowTitleFor,
@@ -1165,6 +1167,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     text: regions.tooNarrowText,
     ok: regions.tooNarrowOk,
     onChange: () => repaintStatus(),
+    // 🔴 小窓 / アプリの窓なら「ウィンドウを広げると直ります」(#690 ③)── 判断は
+    //    `deep-link.ts` の `noteOpenedByUs`(`bootstrap` が `startApp` より先に決める)
+    popup: () => openedByUs,
   });
 
   /**
@@ -2920,12 +2925,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       if (where !== null) {
         // ⚠ **この窓が出している**なら、前に出す相手が居ない(いま見ているのがそれ)
         if (where === 'other') noteRegistry.raise(lid);
+        // 🔑 字は `deep-link.ts`(#690 I3 ── 別の窓なら**その窓の題名**を添える。
+        //    形は `windowTitleFor` と同じなので、タスクバーの字でそのまま探せる)
         dispatcher.dispatch({
           type: 'OP_NOTICE',
           message:
             where === 'self'
-              ? 'このノートは、いま見ているこのウィンドウで開いています'
-              : 'このノートは、すでに別のウィンドウで開いています',
+              ? NOTE_OPEN_HERE_MESSAGE
+              : noteOpenElsewhereMessage(
+                  CONTAINER_TITLE,
+                  dispatcher.getState().entryMetas.get(lid)?.title ?? null,
+                ),
         });
         return;
       }

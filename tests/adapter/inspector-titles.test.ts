@@ -68,8 +68,10 @@ function actionButtons(root: HTMLElement): HTMLButtonElement[] {
  *   ノートで描くとその 1 つを**一度も見ない**(未実行の経路になる)。
  */
 const EXPECTED_ACTIONS: readonly string[] = [
-  // 🔴 付箋(#685 段②、2026-09-04)── ⋯ と情報ペインの両方に出す
+  // 🔴 写す 2 つを隣に、その次に小窓(#690 I2、2026-09-04)── 右クリックと同じ並び
   'copy-entry-ref',
+  'copy-plain-markdown',
+  // 🔴 付箋(#685 段②、2026-09-04)── ⋯ と情報ペインの両方に出す
   'open-note-window',
   'adopt-external-images',
   'export-entry',
@@ -78,7 +80,6 @@ const EXPECTED_ACTIONS: readonly string[] = [
   'export-entry-docx',
   'export-entry-pptx',
   'export-entry-pdf',
-  'copy-plain-markdown',
   'show-history',
   'delete-entry',
 ];

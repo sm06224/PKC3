@@ -1159,6 +1159,22 @@ export class InspectorRenderer {
     // ⚠ **並びは右クリックと揃える**(user 裁定 2026-09-04)── 毎日使う
     //    「参照をコピー」を動かさない(1 稿目は付箋を先頭に置いて全部を 1 つ下げた)
     btn('copy-entry-ref', ENTRY_ACTION_LABELS['copy-entry-ref']!);
+    /**
+     * 🔴 **素の Markdown で写す**(#396)。
+     *
+     * > user 明示要望(PKC2 に記録):「方言記法されたエントリから
+     * > ベーシックなマークダウンだけを取り出す機能」
+     *
+     * ⚠ PKC2 では**押せる口がどこにも無かった**(拡張の RPC の option だけ)──
+     *   実装は在ったが**届いていなかった**。ここが PKC3 の動線である。
+     * ⚠ 書き出しの 4 つと違い、**file は落ちない**(clipboard へ写す)── 他のツールへ
+     *   そのまま貼るための物だからである。
+     * 🔑 **「参照をコピー」の真横に置く**(#690 I2、2026-09-04)── どちらも clipboard へ
+     *   写す物なので隣り合わせにし、右クリックの並び(参照をコピー / 素の Markdown /
+     *   別のウィンドウで開く)と揃える。⚠ 直す前は書き出しの群れの後ろ(10 番目)に
+     *   在り、右クリックとは並びが違っていた。
+     */
+    btn('copy-plain-markdown', ENTRY_ACTION_LABELS['copy-plain-markdown']!);
     btn('open-note-window', ENTRY_ACTION_LABELS['open-note-window']!);
     /**
      * 🔴 **外部の画像を手元へ取り込む**(#264 段①)。
@@ -1206,18 +1222,6 @@ export class InspectorRenderer {
      *   「PDF として保存」を選ぶ。⚠ だから文言に「保存します」と書かない。
      */
     btn('export-entry-pdf', ENTRY_ACTION_LABELS['export-entry-pdf']!);
-    /**
-     * 🔴 **素の Markdown で写す**(#396)。
-     *
-     * > user 明示要望(PKC2 に記録):「方言記法されたエントリから
-     * > ベーシックなマークダウンだけを取り出す機能」
-     *
-     * ⚠ PKC2 では**押せる口がどこにも無かった**(拡張の RPC の option だけ)──
-     *   実装は在ったが**届いていなかった**。ここが PKC3 の動線である。
-     * ⚠ 隣の 4 つと違い、**file は落ちない**(clipboard へ写す)── 他のツールへ
-     *   そのまま貼るための物だからである。
-     */
-    btn('copy-plain-markdown', ENTRY_ACTION_LABELS['copy-plain-markdown']!);
     if (shape === 'entry+link') btn('write-back-file', ENTRY_ACTION_LABELS['write-back-file']!);
     btn('show-history', ENTRY_ACTION_LABELS['show-history']!);
     btn('delete-entry', ENTRY_ACTION_LABELS['delete-entry']!);

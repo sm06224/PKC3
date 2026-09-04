@@ -22,7 +22,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   MOVED_MESSAGE,
+  NOTE_OPEN_HERE_MESSAGE,
   announceOpenedWindow,
+  noteOpenElsewhereMessage,
   connectViewDeepLink,
   currentBaseUrl,
   openableViewNames,
@@ -736,6 +738,35 @@ describe('currentBaseUrl(#300 段③)', () => {
  *   何枚開いても全部「PKC3」だった。付箋は「何枚でも開けます」が売りなので、
  *   この欠陥は**枚数に比例して効く**。
  */
+/**
+ * 🔴 **2 枚目を止めたときの字に、どの窓かを添える**(#690 I3、2026-09-04)。
+ *
+ * ⚠ 直す前は「すでに別のウィンドウで開いています」だけ ── 小窓を何枚も並べている人は
+ *   タスクバーのどれを探せばよいか分からない。🔑 窓の題名(`windowTitleFor` の形)を
+ *   添えれば、**タスクバーに出ている字と同じ字**で探せる。
+ */
+describe('2 枚目を止めたときの字(#690 I3)', () => {
+  it('🔴 別の窓なら、その窓の題名を『題名 — PKC3』の形で添える', () => {
+    const m = noteOpenElsewhereMessage('PKC3', 'ふたつめ');
+    expect(m, '止めた理由が無い').toContain('すでに別のウィンドウで開いています');
+    expect(m, 'どの窓か(題名)が無い').toContain('『ふたつめ — PKC3』');
+    // ⚠ 形は `windowTitleFor` と同じ(タスクバーの字でそのまま探せる)
+    expect(m).toContain(`『${windowTitleFor('PKC3', 'ふたつめ')}』`);
+  });
+
+  it('⚠ 題名の無いノートでは器の名前だけ(頭の欠けた字を出さない)', () => {
+    expect(noteOpenElsewhereMessage('PKC3', null)).toContain('『PKC3』');
+    expect(noteOpenElsewhereMessage('PKC3', '  ')).toContain('『PKC3』');
+    expect(noteOpenElsewhereMessage('PKC3', null), '頭の欠けた字').not.toContain('『 — ');
+  });
+
+  /** ⚠ 対照群 ── いま見ている窓がそれなら、探す相手が居ないので題名は添えない。 */
+  it('⚠ いま見ているこのウィンドウの字は題名を添えない', () => {
+    expect(NOTE_OPEN_HERE_MESSAGE).toBe('このノートは、いま見ているこのウィンドウで開いています');
+    expect(NOTE_OPEN_HERE_MESSAGE).not.toContain('『');
+  });
+});
+
 describe('窓の題名(#685 着地前レビュー ⚠3)', () => {
   it('🔴 名前があれば「名前 — PKC3」', () => {
     expect(windowTitleFor('PKC3', '買い物メモ')).toBe('買い物メモ — PKC3');

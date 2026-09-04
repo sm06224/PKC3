@@ -448,3 +448,69 @@ describe('記法を当てられる欄(#425 段②-b)', () => {
     expect(formatTargetOf(document.createElement('div'))).toBeNull();
   });
 });
+
+/**
+ * 🔴 **「別のウィンドウで開く」を名前で探せる**(#690 I5、2026-09-04)。
+ *
+ * ⚠ 直す前は「窓」「付箋」「ウィンドウ」と打っても **0 行**だった ── 一覧は
+ *   `KEY_COMMANDS` から出るので、鍵の無い操作は名前で探せない。右クリック / ⋯ /
+ *   右の情報にしか無い物は、置き場を知らない人には無いのと同じである。
+ * 🔑 呼び名の揺れ(ウィンドウ / 小窓 / 付箋)のどれで打っても当たること。
+ */
+describe('小窓を名前で探す(#690 I5)', () => {
+  const search = async (root: HTMLElement, q: string): Promise<void> => {
+    root.querySelector<HTMLElement>('[data-pkc-action="open-palette"]')!.click();
+    await tick();
+    filter().value = q;
+    filter().dispatchEvent(new Event('input', { bubbles: true }));
+  };
+
+  it('🔴 「ウィンドウ」「小窓」「付箋」のどれで打っても出る', async () => {
+    for (const q of ['ウィンドウ', '小窓', '付箋']) {
+      const { root } = setup();
+      await search(root, q);
+      expect(rowOf('open-note-window'), `「${q}」で別のウィンドウで開くが出ない`).toBeDefined();
+      expect(rowOf('open-note-window')!.textContent, '字が「別のウィンドウで開く」ではない').toContain(
+        '別のウィンドウで開く',
+      );
+    }
+  });
+
+  /**
+   * 🔴 **ノートを選んでいなければ「押せない」と言う**(嘘の「押せます」を出さない)。
+   * ⚠ 情報ペインはノートを選ぶまで操作の帯を持たない(`shape === 'empty'`)ので、
+   *   受け手のボタンが無い = 押せない、が正しい答えである。
+   */
+  it('🔴 情報ペインの帯が無ければ押せず、在れば押せる', async () => {
+    const { root } = setup();
+    await search(root, 'ウィンドウ');
+    expect(rowOf('open-note-window')!.disabled, '何も選んでいないのに押せると言う').toBe(true);
+    expect(whyOf('open-note-window'), '押せない理由が出ていない').toContain(NOT_READY_PREFIX);
+    dialog()?.close();
+    /**
+     * 対照群 ── 情報ペインの帯(ノートを選ぶと出る)に受け手のボタンが在れば押せる。
+     * ⚠ この台には描き手が居ないので、帯を手で建てる(`start-edit` の対照群と同じ作法)。
+     * 🔑 **帯の中に限る**(`SHORTCUT_BUTTON` の選択子)── 右クリックの同名ボタンは
+     *   押した行の lid を運ぶので、そちらを拾うと選んでいる物と違うノートが開く。
+     */
+    const band = document.createElement('div');
+    band.setAttribute('data-pkc-field', 'inspector-actions');
+    const btn = document.createElement('button');
+    btn.setAttribute('data-pkc-action', 'open-note-window');
+    band.append(btn);
+    root.append(band);
+    await search(root, 'ウィンドウ');
+    expect(rowOf('open-note-window')!.disabled, '帯が在るのに押せない').toBe(false);
+    expect(whyOf('open-note-window'), '押せるのに断り書きが付いている').not.toContain(NOT_READY_PREFIX);
+  });
+
+  /** ⚠ 帯の外の同名ボタン(右クリックのメニュー)は受け手に数えない。 */
+  it('⚠ 帯の外の同名ボタンでは押せることにしない', async () => {
+    const { root } = setup();
+    const stray = document.createElement('button');
+    stray.setAttribute('data-pkc-action', 'open-note-window');
+    root.append(stray);
+    await search(root, 'ウィンドウ');
+    expect(rowOf('open-note-window')!.disabled, '帯の外のボタンを受け手に数えた').toBe(true);
+  });
+});

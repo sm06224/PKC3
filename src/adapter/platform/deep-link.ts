@@ -239,6 +239,30 @@ export function windowTitleFor(base: string, label: string | null): string {
 }
 
 /**
+ * 🔴 **2 枚目を止めたときの字**(#685 段② / #690 I3、2026-09-04)。
+ *
+ * ⚠ 直す前は「すでに別のウィンドウで開いています」だけで、**どの窓か**が無かった
+ *   ── 小窓を 5 枚並べている人は、タスクバーのどれを探せばよいか分からない。
+ * 🔑 窓の題名(`windowTitleFor` の形そのまま)を添える ── タスクバーに出ている字と
+ *   **同じ字**なので、そのまま探せる。⚠ 形を写さず `windowTitleFor` を通す
+ *   (題名の体裁が変わった日に、ここだけ古い形で残らないように)。
+ * ⚠ 題名が無い(空)ノートでは器の名前(`PKC3`)だけになる ── それも
+ *   タスクバーと同じ字である。
+ *
+ * @param base 器の名前(`CONTAINER_TITLE`)
+ * @param title そのノートの題名(`entryMetas` から。無ければ `null`)
+ */
+export function noteOpenElsewhereMessage(base: string, title: string | null): string {
+  return `このノートは、すでに別のウィンドウで開いています(『${windowTitleFor(base, title)}』)`;
+}
+
+/**
+ * 小窓の中で同じノートを押したときの字。⚠ 題名は添えない ── **いま見ているのがそれ**なので、
+ * 探す相手が居ない。
+ */
+export const NOTE_OPEN_HERE_MESSAGE = 'このノートは、いま見ているこのウィンドウで開いています';
+
+/**
  * 🔴 **アドレスに書ける画面の名前**(user へ出す一覧はここ 1 つ)。
  * ⚠ 封印中の面は外す ── ボタンを畳んだのにアドレスからは開ける、を作らない。
  */

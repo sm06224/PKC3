@@ -5078,7 +5078,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       // 🔑 無言で終わらせない(押した人に理由が要る)
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: '別の窓で開くノートがありません(先にノートを開いてください)',
+        error: '別のウィンドウで開くノートがありません(先にノートを開いてください)',
       });
       return;
     }
@@ -5352,6 +5352,15 @@ export const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
   // 🔴 追記欄も同じ形で押す(#609)── 3 面で押し方を変えない
   'toggle-append': '[data-pkc-action="toggle-pane"][data-pkc-pane="append"]',
   'view-query': '[data-pkc-action="set-view"][data-pkc-view="query"]',
+  /**
+   * 🔴 **開いているノートを別のウィンドウで開く**(#690 I5)── 「操作を探す」と
+   *   近道の両方の受け手。⚠ **情報ペインのボタンに限る** ── 右クリック / ⋯ の
+   *   同名ボタンは押した行の lid を持つので、document 順で先に当たると
+   *   **選んでいる物と違うノート**が開く。
+   * ⚠ ノートを選んでいない間は情報ペインに帯が無い(`shape === 'empty'`)ので、
+   *   「操作を探す」は「いまこの操作のボタンが画面に出ていません」と正しく言う。
+   */
+  'open-note-window': '[data-pkc-field="inspector-actions"] [data-pkc-action="open-note-window"]',
   'open-settings': '[data-pkc-action="set-view"][data-pkc-view="settings"]',
   'open-flags': '[data-pkc-action="set-view"][data-pkc-view="flags"]',
   'open-help': '[data-pkc-action="set-view"][data-pkc-view="help"]',

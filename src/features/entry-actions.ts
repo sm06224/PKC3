@@ -120,6 +120,7 @@ export function editingRowMenuActions(): readonly (EntryAction & { readonly hint
  */
 export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
   { action: 'copy-entry-ref', label: '参照をコピー' },
+  { action: 'copy-plain-markdown', label: '素の Markdown' },
   /**
    * 🔴 **付箋のように何枚でも開ける**(#685 段②、user 裁定 2026-09-04)。
    *
@@ -127,12 +128,15 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    * > 使ってどんどんスクラップできてます / 付箋的に使えるのもいいですね /
    * > マルチで付箋開けるといいかもね**」(利用者の感想 2026-09-04)
    *
-   * ⚠ **先頭ではなく 2 番目に置く**(user 裁定 2026-09-04、動線レビュー 案 D-2)──
-   *   1 稿目は先頭に入れたので、**毎日使っている全項目が 1 つ下へずれた**。
-   *   新しい操作のために既存の並びを動かさない。
+   * ⚠ **先頭ではなく、写す 2 つの後に置く**(user 裁定 2026-09-04、動線レビュー 案 D-2
+   *   → #690 I2)── 1 稿目は先頭に入れたので、**毎日使っている全項目が 1 つ下へ
+   *   ずれた**。2 稿目は 2 番目に入れたので、**「参照をコピー」と「素の Markdown」
+   *   (どちらも clipboard へ写す)の間に割り込んでいた**。新しい操作のために
+   *   既存の並びを動かさない ── 写す 2 つを隣に戻し、その次に置く。
+   * 🔑 字は「別の**ウィンドウ**で開く」(#690 I1)── お知らせ・マニュアル・止めたときの
+   *   字(「すでに別のウィンドウで開いています」)が全部「ウィンドウ」なので揃える。
    */
-  { action: 'open-note-window', label: '別の窓で開く' },
-  { action: 'copy-plain-markdown', label: '素の Markdown' },
+  { action: 'open-note-window', label: '別のウィンドウで開く' },
   { action: 'export-entry', label: '書き出す' },
   /**
    * 🔴 **相手に渡せる 1 枚**(#491。user 報告 2026-08-27
@@ -244,7 +248,7 @@ export const BODY_MENU_ACTIONS: readonly EntryAction[] = [
    * 🔑 ここから開けば、**探し直しが 1 度も要らない**(行から開く道は
    *   `MENU_PREV_LID_ATTR` で現在地を戻しているが、こちらはそもそも動かない)。
    */
-  { action: 'open-note-window', label: '別の窓で開く' },
+  { action: 'open-note-window', label: '別のウィンドウで開く' },
 ];
 
 /**

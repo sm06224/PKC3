@@ -125,13 +125,16 @@ describe('操作の全数台帳(#582 段①)', () => {
   it('🔴 登記簿をまたぐ id は、名指しの 2 件だけ', () => {
     expect(s().sharedBooks).toEqual([
       { id: 'cycle-read-columns', books: ['key', 'body'] },
-      { id: 'open-note-window', books: ['entry', 'body'] },
+      // ⚠ 2026-09-04(#690 I5): 鍵(Alt+Shift+W)と「操作を探す」から届くように
+      //    `KEY_COMMANDS` にも登記した ── 受け手は情報ペインのボタン 1 つ(橋は `SHORTCUT_BUTTON`)
+      { id: 'open-note-window', books: ['key', 'entry', 'body'] },
     ]);
   });
 
   it('登記簿の内訳が動いたら鳴る', () => {
     // ⚠ 2026-09-04: 本文のメニューが 2 → 3(`open-note-window`)
-    expect(s().perBook).toEqual({ key: 52, entry: 12, body: 3, collection: 2, settings: 5 });
+    // ⚠ 2026-09-04(#690 I5): 鍵が 52 → 53(`open-note-window` を「操作を探す」に出すため)
+    expect(s().perBook).toEqual({ key: 53, entry: 12, body: 3, collection: 2, settings: 5 });
   });
 
   it('🔴 押し所へ辿れない登記を、身元で pin する', () => {

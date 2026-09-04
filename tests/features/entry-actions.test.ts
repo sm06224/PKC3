@@ -386,3 +386,32 @@ describe('右クリックの説明(#587 C-1)', () => {
     expect(entryActionHint('no-such-action', { archetype: null, linkedFile: null })).toBe('');
   });
 });
+
+/**
+ * 🔴 **小窓の字と並び**(#690 I1 / I2、2026-09-04)。
+ *
+ * ⚠ I1: ボタンだけ「別の窓で開く」で、お知らせ・マニュアル・止めたときの字は全部
+ *   「ウィンドウ」だった ── 同じ物に 2 つの呼び名を作らない。
+ * ⚠ I2: #685 の 2 稿目は「別の窓で開く」を 2 番目に入れたので、clipboard へ写す 2 つ
+ *   (参照をコピー / 素の Markdown)の**間に割り込んでいた**。写す 2 つを隣に戻し、
+ *   小窓はその次。⚠ 情報ペインの並びは `tests/adapter/inspector-titles.test.ts` が pin する。
+ */
+describe('小窓の字と並び(#690 I1 / I2)', () => {
+  it('🔴 字は「別のウィンドウで開く」(右クリックと本文のメニューの両方)', () => {
+    const labels = [...ENTRY_MENU_ACTIONS, ...BODY_MENU_ACTIONS]
+      .filter((a) => a.action === 'open-note-window')
+      .map((a) => a.label);
+    expect(labels, '2 つのメニューの両方に出ていない').toHaveLength(2);
+    expect(new Set(labels), '2 つのメニューで字が違う').toEqual(new Set(['別のウィンドウで開く']));
+    // ⚠ 「窓」の字に戻していない(お知らせ・マニュアルは「ウィンドウ」)
+    for (const l of labels) expect(l, '「別の窓で開く」に戻っている').not.toBe('別の窓で開く');
+  });
+
+  it('🔴 右クリックの並びは 参照をコピー / 素の Markdown / 別のウィンドウで開く', () => {
+    expect(ENTRY_MENU_ACTIONS.slice(0, 3).map((a) => a.action)).toEqual([
+      'copy-entry-ref',
+      'copy-plain-markdown',
+      'open-note-window',
+    ]);
+  });
+});

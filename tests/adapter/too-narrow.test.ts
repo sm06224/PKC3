@@ -16,7 +16,12 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { blocksFor, decl, stripComments, withoutMedia } from '../helpers/css-blocks';
-import { TOO_NARROW_OK, TOO_NARROW_TEXT, installTooNarrow } from '../../src/adapter/ui/render/too-narrow';
+import {
+  TOO_NARROW_OK,
+  TOO_NARROW_TEXT,
+  TOO_NARROW_TEXT_WINDOW,
+  installTooNarrow,
+} from '../../src/adapter/ui/render/too-narrow';
 import { appPhone } from '../../src/adapter/ui/render/phone-layout';
 import { PHONE_MIN_PX } from '../../src/features/phone-layout';
 
@@ -45,7 +50,7 @@ class FakeMedia {
  * ⚠ **問い合わせごとに別の替え玉**を返す ── 1 本しか返さないと
  *   「スマホ = 対応外」になり、360〜720px という**いちばん普通の幅**が測れない。
  */
-function setup(narrowNow = false) {
+function setup(narrowNow = false, popup = false) {
   const root = document.createElement('div');
   root.setAttribute('data-pkc-slot', 'root');
   document.body.append(root);
@@ -65,6 +70,9 @@ function setup(narrowNow = false) {
     text,
     ok,
     onChange: () => changes.push(!band.hidden),
+    // ⚠ 本物と同じく**出すたびに聞く**形 ── 起動時に 1 度読む stub にすると、
+    //    配線の順番で嘘をつく実装が台では見えない
+    popup: () => popup,
   });
   return { band, text, ok, changes, narrow, off };
 }
@@ -254,5 +262,71 @@ describe('字', () => {
   it('⚠ 短く保つ(340px の帯に押す口ごと収める)', () => {
     expect(TOO_NARROW_TEXT.length, '長すぎて 340px の帯からはみ出す').toBeLessThanOrEqual(33);
     expect(TOO_NARROW_OK, '押す口の字が長い(帯を押し広げる)').toHaveLength(2);
+  });
+});
+
+/**
+ * 🔴 **ポップアップの窓では「ウィンドウを広げると直ります」**(#690 ③、2026-09-04)。
+ *
+ * ## 物語
+ *
+ * 小窓(420px)を掴んで細くする → 360px を割ると断り書きが出る。⚠ 直す前の字は
+ * 「横向きにすると直ります」── **窓に横向きは無い**ので、読んだ user にできる一手が
+ * 書いていない(#671 が直した「対応していません」と同じ顔)。
+ * 🔑 窓ならできる一手は「広げる」なので、そう書く。スマホ(本体)は今までどおり。
+ */
+describe('窓の種類で一手が変わる(#690 ③)', () => {
+  it('🔴 ポップアップの窓なら「ウィンドウを広げると直ります」', () => {
+    const s = setup(true, true);
+    expect(s.band.hidden, '前提が崩れた(出ていない)').toBe(false);
+    expect(s.text.textContent, '窓なのに「横向き」と言っている').toBe(TOO_NARROW_TEXT_WINDOW);
+    expect(s.text.textContent, '窓に無い一手(横向き)を案内している').not.toContain('横向き');
+  });
+
+  /** ⚠ **対照群** ── スマホ(本体の窓)は今までどおり「横向き」。 */
+  it('⚠ ポップアップでなければ今までどおり「横向きにすると直ります」', () => {
+    const s = setup(true, false);
+    expect(s.text.textContent, 'スマホで「ウィンドウを広げる」と言っている').toBe(TOO_NARROW_TEXT);
+  });
+
+  /**
+   * 🔴 窓向けの字も**何が起きるかは同じ**で、変えるのは一手だけ。
+   * ⚠ 「対応していません」(できることが無い言い方)へ戻していない。
+   */
+  it('🔴 窓向けの字は、一手が「広げる」で、前半は同じ', () => {
+    expect(TOO_NARROW_TEXT_WINDOW, 'いまできる一手を書いていない').toContain('広げる');
+    expect(TOO_NARROW_TEXT_WINDOW).toContain('ウィンドウ');
+    expect(TOO_NARROW_TEXT_WINDOW, '前の字(できることが無い言い方)に戻っている').not.toContain(
+      '対応していません',
+    );
+    // ⚠ 何が起きるか(前半)は 2 つで同じ字 ── 片方だけ直しても気づけるように
+    const head = (s: string): string => s.slice(0, s.indexOf('。') + 1);
+    expect(head(TOO_NARROW_TEXT_WINDOW), '前半の字が本体の窓とずれた').toBe(head(TOO_NARROW_TEXT));
+  });
+
+  /**
+   * ⚠ **出すたびに聞く** ── 起動時に 1 度だけ読む実装だと、`popup` が後から決まる
+   *   配線で嘘の字が固まる。台は `popup` を途中で裏返して確かめる。
+   */
+  it('⚠ 窓かどうかは、出すたびに聞き直す', () => {
+    let popup = false;
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    document.body.append(root);
+    const narrow = new FakeMedia(false);
+    appPhone.install(root, (q) => (q.includes(`${PHONE_MIN_PX - 1}px`) ? narrow : new FakeMedia(true)));
+    const band = document.createElement('div');
+    band.hidden = true;
+    const text = document.createElement('span');
+    const ok = document.createElement('button');
+    band.append(text, ok);
+    root.append(band);
+    installTooNarrow({ band, text, ok, onChange: () => {}, popup: () => popup });
+    narrow.set(true);
+    expect(text.textContent).toBe(TOO_NARROW_TEXT);
+    narrow.set(false);
+    popup = true;
+    narrow.set(true);
+    expect(text.textContent, '配線した時点の答えを使い回している').toBe(TOO_NARROW_TEXT_WINDOW);
   });
 });

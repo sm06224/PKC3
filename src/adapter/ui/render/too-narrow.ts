@@ -47,6 +47,18 @@ import { appPhone } from './phone-layout';
 /** 🔴 **user 裁定の言葉そのまま。**⚠ 足さない(前回、足した 1 語で帯からはみ出した)。 */
 export const TOO_NARROW_TEXT =
   'この画面の幅では表示が崩れることがあります。横向きにすると直ります';
+/**
+ * 🔴 **ポップアップの窓(小窓 / アプリの窓)向けの字**(#690 ③、2026-09-04)。
+ *
+ * ⚠ 小窓は 420px で出るので、掴んで細くすると上の字が出る ── ところが
+ *   **窓に「横向き」は無い**。読んだ user にできる一手が書いていない
+ *   (上の字が直す前の「対応していません」と同じ顔になる)。
+ * 🔑 窓なら**いまできる一手は「広げる」**なので、そう書く。前半は同じ字にする
+ *   (何が起きるかは同じ ── 変えるのは一手の側だけ)。
+ * ⚠ 字の正本はこの 2 つで、選ぶのは下の `paint` 1 か所である。
+ */
+export const TOO_NARROW_TEXT_WINDOW =
+  'この画面の幅では表示が崩れることがあります。ウィンドウを広げると直ります';
 /** 消す口の字。⚠ user の言葉(「OK 押したらで」)。 */
 export const TOO_NARROW_OK = 'OK';
 
@@ -57,6 +69,14 @@ export interface TooNarrowDeps {
   readonly text: HTMLElement;
   /** 押す口。 */
   readonly ok: HTMLElement;
+  /**
+   * 🔴 **この窓は PKC 自身が開いたポップアップか**(#690 ③)── 真なら
+   *   「ウィンドウを広げると直ります」、偽なら「横向きにすると直ります」。
+   * ⚠ 判断は持ち込まない(`deep-link.ts` の `noteOpenedByUs` が正本)── ここは聞くだけ。
+   * ⚠ **出すたびに聞く**(起動時に 1 度だけ読まない)── 配線の順番に依らせない。
+   * ⚠ optional にしない ── 落とすと、小窓で「横向きにすると直ります」に黙って戻る。
+   */
+  readonly popup: () => boolean;
   /**
    * 出し入れが変わったら呼ぶ。
    * ⚠ 状態の行を畳むかどうかは `main.ts` の `paint` **1 か所**が決める ──
@@ -88,7 +108,8 @@ export function installTooNarrow(deps: TooNarrowDeps): () => void {
      * ⚠ **器は作り直さない**(字を入れ替えるだけ)── 作り直すと、押そうとした
      *   OK が指の下から消える。
      */
-    deps.text.textContent = show ? TOO_NARROW_TEXT : '';
+    // 🔑 一手は窓の種類で決まる(#690 ③)── 窓に「横向き」は無い
+    deps.text.textContent = show ? (deps.popup() ? TOO_NARROW_TEXT_WINDOW : TOO_NARROW_TEXT) : '';
     deps.ok.textContent = show ? TOO_NARROW_OK : '';
     deps.onChange();
   };
