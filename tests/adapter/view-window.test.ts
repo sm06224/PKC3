@@ -642,6 +642,44 @@ describe('付箋の窓の大きさ(#685、user 裁定 2026-09-04)', () => {
     expect(Number(f['top']) + Number(f['height']), '下がはみ出す').toBeLessThanOrEqual(640);
   });
 
+  /**
+   * 🔴 **実際に窓を出す口にも掛ける**(#685 着地前レビュー ⚠3、2026-09-04)。
+   *
+   * ⚠ `noteWindowFeatures` は丁寧に見ていたのに、**それを本番で呼ぶ
+   *   `openNoteWindowUrl`** の側は「`width=` と `noopener` が在る」しか見ていなかった。
+   *   ⚠ 変異 2 件がそのまま通った ── ①画面を読まない(常に既定 = `left` が**常に 0**で
+   *   **全部左上に重なる**)②枚数を数えない(**全部 (40,40)**)。
+   * ⚠ マニュアルは「**続けて開くと少しずつずらして出します(重なりません)**」と
+   *   約束している ── その継ぎ目に検査が 1 つも無かった(CLAUDE.md §7)。
+   */
+  it('🔴 続けて開くと、実際に違う場所へ出す', () => {
+    const seen: string[] = [];
+    const openSpy = vi
+      .spyOn(window, 'open')
+      .mockImplementation((_u?: string | URL, _n?: string, features?: string) => {
+        seen.push(features ?? '');
+        return null;
+      });
+    // 🔑 **画面の大きさを読んでいることも見る** ── 読まないと器が 420 になり、
+    //    `left` は `min(40+step, 420-420)` = **常に 0** に潰れる
+    const screenSpy = vi
+      .spyOn(window, 'screen', 'get')
+      .mockReturnValue({ availWidth: 3000, availHeight: 2000 } as Screen);
+    try {
+      openNoteWindowUrl('https://example.test/#a');
+      openNoteWindowUrl('https://example.test/#b');
+    } finally {
+      openSpy.mockRestore();
+      screenSpy.mockRestore();
+    }
+    expect(seen, '2 回開いていない').toHaveLength(2);
+    const pos = (f: string) => /left=(\d+),top=(\d+)/.exec(f)?.slice(1).join(',') ?? '';
+    expect(pos(seen[0]!), '位置を渡していない').not.toBe('');
+    expect(pos(seen[1]!), '2 枚目が 1 枚目に重なって出る').not.toBe(pos(seen[0]!));
+    // 🔴 画面を読んでいれば、広い画面では左上に潰れない
+    expect(pos(seen[0]!), '画面を読んでいない(器の大きさに潰れて左上に重なる)').not.toBe('0,0');
+  });
+
   it('🔴 実際に開くときも、その features を渡す', () => {
     const calls: Array<string | undefined> = [];
     const spy = vi

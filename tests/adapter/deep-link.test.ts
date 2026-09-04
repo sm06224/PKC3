@@ -30,6 +30,8 @@ import {
   unusableViewMessage,
   type DeepLinkTarget,
   windowTitleFor,
+  isPurposeWindow,
+  noteOpenedByUs,
 } from '../../src/adapter/platform/deep-link';
 import { VIEW_MODES, type ViewMode } from '../../src/adapter/state/app-state';
 import { dropViewWindowToken, formatViewDeepLink } from '../../src/features/link/permalink';
@@ -689,5 +691,79 @@ describe('窓の題名(#685 着地前レビュー ⚠3)', () => {
     ['空白だけ', '   '],
   ])('🔴 %s の題名では、頭の欠けた字を出さない', (_name, label) => {
     expect(windowTitleFor('PKC3', label)).toBe('PKC3');
+  });
+});
+
+/**
+ * 🔴 **起動したときのお知らせを、1 つの物のために開いた窓では出さない**
+ *   (#685 動線レビュー 欠陥 1 / 着地前レビュー ⚠4、2026-09-04)。
+ *
+ * ⚠ 切り出した理由は「`main.ts` に条件を書かない」ことなのに、
+ *   切り出した先で**誰も見ていなかった**(変異 2 件がそのまま通った)。
+ */
+describe('1 つの物のために開いた窓か(#685)', () => {
+  it('🔴 面を指した窓では出さない', () => {
+    expect(isPurposeWindow({ view: 'dual', note: false })).toBe(true);
+  });
+  it('🔴 付箋でも出さない', () => {
+    expect(isPurposeWindow({ view: null, note: true })).toBe(true);
+  });
+  /** ⚠ **対照群** ── ふつうの 1 枚目では今までどおり出す(「常に止める」実装で緑にしない)。 */
+  it('⚠ ふつうの窓では今までどおり出す', () => {
+    expect(isPurposeWindow({ view: null, note: false })).toBe(false);
+  });
+});
+
+/**
+ * 🔴 **「断片がノートを名指す」を「この窓は付箋だ」と読み替えない**
+ *   (#685 着地前レビュー 🔴1、2026-09-04)。
+ *
+ * ⚠ その形の URL は **user が写して開く**(マニュアルがやり方まで書いている)。
+ *   付箋扱いになると、そのタブでは「別の窓で開く」が**二度と効かない**。
+ * 🔑 見分ける印は `w=`(こちらが開いた窓にしか付かず、起動直後に外れる)。
+ */
+describe('この窓はこちらが開いたものか(#685 着地前レビュー 🔴1)', () => {
+  function store(seed: Record<string, string> = {}) {
+    const m = new Map(Object.entries(seed));
+    return {
+      getItem: (k: string) => m.get(k) ?? null,
+      setItem: (k: string, v: string) => void m.set(k, v),
+      seen: () => [...m.keys()],
+    };
+  }
+
+  it('🔴 合図を持って起動したら、こちらが開いた窓である', () => {
+    const s = store();
+    expect(noteOpenedByUs(true, s)).toBe(true);
+    expect(s.seen(), '控えていない(F5 で忘れる)').toEqual(['pkc3.opened-by-us']);
+  });
+
+  /** 🔴 **F5 を跨いでも保つ** ── 合図は起動直後にアドレスから外れる。 */
+  it('🔴 一度こちらが開いた窓なら、読み直しても付箋のまま', () => {
+    expect(noteOpenedByUs(false, store({ 'pkc3.opened-by-us': '1' }))).toBe(true);
+  });
+
+  /**
+   * 🔴 **user が写した URL は付箋ではない**(この検査が本体)。
+   * ⚠ 落ちると、そのタブで「別の窓で開く」が二度と効かなくなる。
+   */
+  it('🔴 写した URL で開いたふつうのタブは、付箋ではない', () => {
+    expect(noteOpenedByUs(false, store())).toBe(false);
+  });
+
+  /** ⚠ 使えない箱(privacy 設定 / file://)では、その回の合図だけで決める。 */
+  it('⚠ 控える場所が無くても落ちない', () => {
+    expect(noteOpenedByUs(true, null)).toBe(true);
+    expect(noteOpenedByUs(false, null)).toBe(false);
+    const throwing = {
+      getItem: () => {
+        throw new Error('使えない');
+      },
+      setItem: () => {
+        throw new Error('使えない');
+      },
+    };
+    expect(() => noteOpenedByUs(true, throwing), '控えられない箱で落ちた').not.toThrow();
+    expect(noteOpenedByUs(true, throwing)).toBe(true);
   });
 });

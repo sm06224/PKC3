@@ -509,4 +509,64 @@ describe('横に留めた並びの憶え方(#505 段②)', () => {
   it('🔴 起点は復元した後の state(最初の state を「変わった」と読まない)', () => {
     expect(code).toMatch(/let lastSplit = dispatcher\.getState\(\)\.splitLids;/);
   });
+
+  /**
+   * 🔴 **付箋の台帳は、可搬単一 HTML ではバンドルごとに切る**
+   *   (#685 着地前レビュー ⚠5、2026-09-04)。
+   *
+   * ⚠ 可搬単一 HTML は `file://` で開かれ **origin が全部 `file://` に潰れる**
+   *   (`store-proxy.ts` に実測つきで書いてある)。台帳の鍵は `lid` なので、
+   *   切らないと**別のバンドルの窓**が「すでに開いています」と断り、
+   *   `raise` が**別の HTML の窓**を手前に出す。
+   * ⚠ store proxy は既に `bundleChannelName` で切っている ── 片方だけ切らない。
+   */
+  it('🔴 付箋の台帳の放送路は、バンドルごとに切る', () => {
+    const at = MAIN.indexOf('createNoteRegistry({');
+    expect(at, '台帳の配線が無い').toBeGreaterThan(-1);
+    const site = MAIN.slice(Math.max(0, at - 600), at + 400);
+    expect(site, '放送路の名前をバンドルで切っていない(別の HTML の窓と混ざる)').toContain(
+      'portable.bundle.id',
+    );
+  });
+
+  /**
+   * 🔴 **`pagehide` では放送路を閉じない**(#685 着地前レビュー ⚠2)。
+   *
+   * ⚠ `pagehide` は **bfcache へ入るときにも飛ぶ**(この repo の実測 ──
+   *   `window-close.ts`。そこで不可逆な後始末をして**アプリが真っ白になった**事故が
+   *   記録されている)。⚠ 閉じると、戻ってきた窓は名乗れず、`postMessage` が
+   *   `InvalidStateError` を投げ、**state listener 経由で dispatch ごと落ちる**。
+   */
+  it('🔴 pagehide では名乗りを出すだけ(放送路は閉じない)', () => {
+    const at = MAIN.indexOf("addEventListener('pagehide', () => noteRegistry");
+    expect(at, '付箋の台帳の pagehide 配線が無い').toBeGreaterThan(-1);
+    expect(
+      MAIN.slice(at, at + 120),
+      'pagehide で放送路を閉じている(bfcache から戻ると壊れる)',
+    ).toContain('noteRegistry.leave()');
+  });
+
+  /**
+   * 🔴 **付箋の配線 2 つ**(#685 着地前レビュー、2026-09-04)。
+   * ⚠ **弱い pin だと自覚して使う** ── `main.ts` はどの unit からも実行されず、
+   *   どちらも smoke では**時間に依る**(塞がれた回を作れない / 合図が返る速さで
+   *   順番が入れ替わる)。振る舞いは `note-window-registry.test.ts` が見ている。
+   */
+  it('🔴 開けなかったら見込みを外す(塞がれたノートを二度と開けなくしない)', () => {
+    const at = MAIN.indexOf('noteRegistry.reserve(');
+    expect(at, '見込みを取る配線が無い').toBeGreaterThan(-1);
+    expect(
+      MAIN.slice(at, at + 1600),
+      '開けなかったときに見込みを外していない(そのノートは 10 秒開けなくなる)',
+    ).toContain('noteRegistry.release(');
+  });
+
+  it('🔴 消すのは自分が出した字のときだけ(2 度押しの理由を消さない)', () => {
+    const at = MAIN.indexOf('notify: (message) => {');
+    expect(at, '付箋の notify 配線が無い').toBeGreaterThan(-1);
+    expect(
+      MAIN.slice(at, at + 260),
+      '誰の字でも消している(1 枚目の成功が、2 度押しの理由を読む前に消す)',
+    ).toContain('VIEW_WINDOW_OPENING');
+  });
 });

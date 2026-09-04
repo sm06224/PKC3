@@ -129,7 +129,10 @@ test('🔴 別の窓で開くと、その窓がそのノートを開いて立ち
   await expect(
     page.locator('[data-pkc-region="status"]'),
     '2 枚目を止めた理由が出ていない(押しても何も起きないに見える)',
-  ).toContainText('別のウィンドウで開いています');
+    // 🔑 **「すでに」で pin する**(着地前レビュー 💭)── 1 稿目は
+    //    「別のウィンドウで開いています」で見ており、**押した瞬間の字**
+    //    (`VIEW_WINDOW_OPENING`)に満たされていた
+  ).toContainText('すでに別のウィンドウ');
   expect(context.pages().length, '同じノートの窓が 2 枚開いた').toBe(pagesBefore);
 
   /**
@@ -258,8 +261,10 @@ test('🔴 付箋の中から同じノートを押しても 2 枚目は出ない
   ).toContainText('ひとりぼっち', { timeout: 20_000 });
 
   const before = context.pages().length;
-  await win.click('[data-pkc-action="phone-menu"]');
-  await win.click('[data-pkc-region="context-menu"] [data-pkc-action="open-note-window"]');
+  // ⚠ **`clickReal` を通す**(着地前レビュー ⚠9)── 素の `page.click` は
+  //    dead click / 遮蔽 / 再描画のリトライを 1 つも通らない(同じ file の中で規則を 2 本にしない)
+  await clickReal(win, '[data-pkc-action="phone-menu"]');
+  await clickReal(win, '[data-pkc-region="context-menu"] [data-pkc-action="open-note-window"]');
   // 🔑 観測点は **窓が増えないこと + 理由が出ること**の 2 つ ── 片方だけだと
   //    「黙って何もしない」実装でも緑になる(無言の dead click)
   await expect(
@@ -269,5 +274,114 @@ test('🔴 付箋の中から同じノートを押しても 2 枚目は出ない
   expect(context.pages().length, '付箋の中から押して 2 枚目が開いた').toBe(before);
 
   await win.close();
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **写した URL で開いたふつうのタブでは、今までどおり付箋を開ける**
+ *   (#685 着地前レビュー 🔴1、2026-09-04)。
+ *
+ * ## 物語
+ *
+ * マニュアルは「**付箋のアドレス欄をコピーすると、そのノートを直接開くリンクになります**」と
+ * やり方まで書いている。user がそのとおりに URL を写して**ふつうのタブ**で開く。
+ * ⚠ 直す前は、`container`+`entry` が在るだけで**付箋の旗が立った**ので、
+ * その窓の台帳の `mine` が**選んでいるノートに追随**し ──
+ * **そのタブでは「別の窓で開く」が二度と効かなくなっていた**。
+ * 🔴 しかも出る字は「いま見ているこのウィンドウで開いています」という**説明の顔**なので、
+ * user は不具合だと気づけない(この repo がいちばん嫌う形)。
+ *
+ * 🔑 見分ける印は `w=` ── **こちらが開いた窓にしか付かず、起動直後に外れる**。
+ */
+test('🔴 写した URL のタブでも、付箋は今までどおり開ける (#685)', async ({ page, context }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('うつしたさき');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  // 🔑 **user と同じ手順で URL を作る** ── 付箋を開いて、そのアドレスを写す
+  const popup = context.waitForEvent('page');
+  await clickReal(page, '[data-pkc-action="open-note-window"]');
+  const first = await popup;
+  await expect(first.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
+  const copied = first.url();
+  await first.close();
+  expect(copied, '前提が崩れた(ノートを名指す断片になっていない)').toContain('entry=');
+  expect(copied, '前提が崩れた(合図がアドレスに残っている ── これでは検査にならない)').not.toContain(
+    'w=',
+  );
+
+  // ⚠ **ふつうのタブ**でその URL を開く(user が写して貼るのと同じ)
+  const pasted = await context.newPage();
+  await pasted.setViewportSize({ width: 1440, height: 900 });
+  await pasted.goto(copied);
+  await expect(pasted.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
+  // ⚠ お知らせは 1 枚目で閉じてある(既読は同じ入れ物で共有される)── ここでは出ない
+  await expect(
+    pasted.locator('[data-pkc-region="inspector"]'),
+    '前提が崩れた(写した URL でノートが開いていない)',
+  ).toContainText('うつしたさき', { timeout: 20_000 });
+
+  // 🔴 **そのタブでも付箋は開ける**(直す前はここで窓が出なかった)
+  const popup2 = context.waitForEvent('page');
+  await clickReal(pasted, '[data-pkc-action="open-note-window"]');
+  const win = await popup2;
+  await expect(win.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
+  await expect(
+    win.locator('[data-pkc-region="inspector"]'),
+    '別の窓がそのノートを開いていない',
+  ).toContainText('うつしたさき', { timeout: 20_000 });
+
+  await win.close();
+  await pasted.close();
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **立ち上がる前に 2 度押しても、窓は 1 枚**(#685 着地前レビュー ⚠7、2026-09-04)。
+ *
+ * ## 物語
+ *
+ * 押しても 2.5 秒は何も起きない(合図を待つ)ので、user は「効いていない」と思って
+ * **もう一度押す** ── まさに「押した瞬間の返事」を足した当の場面である。
+ * ⚠ 付箋が台帳に名乗るのは **`startApp` が終わってから**(storage の初期化・
+ * メタ一覧・shell の組み立ての後)なので、直す前はその間**台帳が空**で、
+ * **同じノートの窓が 2 枚開いた**。⚠ しかもその 2 枚は互いを台帳に載せるので、
+ * 片方を閉じると行が消えて **3 枚目も開けた**。
+ *
+ * 🔑 だから**開く側が見込みを先に載せる**(`reserve`)。
+ */
+test('🔴 立ち上がる前に 2 度押しても、窓は 1 枚 (#685)', async ({ page, context }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('にどおし');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  const opened: import('@playwright/test').Page[] = [];
+  const watch = (p: import('@playwright/test').Page) => void opened.push(p);
+  context.on('page', watch);
+  // ⚠ **待たずに 2 回押す** ── 1 枚目が名乗る前に 2 回目が来る形にする
+  await clickReal(page, '[data-pkc-action="open-note-window"]');
+  await clickReal(page, '[data-pkc-action="open-note-window"]');
+  /**
+   * ⚠ 合図の猶予(2.5 秒)を跨いで待つ ── ここで待たないと、
+   *   「まだ開いていないだけ」と「開かなかった」を区別できない。
+   */
+  await page.waitForTimeout(3500);
+  context.off('page', watch);
+
+  expect(opened.length, `立ち上がる前の 2 度押しで ${opened.length} 枚開いた`).toBe(1);
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '2 回目を止めた理由が出ていない',
+  ).toContainText('すでに別のウィンドウ');
+
+  for (const w of opened) await w.close();
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

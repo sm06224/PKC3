@@ -115,6 +115,10 @@ export const SKIPPED_KEYS: readonly { readonly key: string; readonly why: string
     key: 'pkc3.ext.port',
     why: '保存の鍵ではない ── 拡張とのやりとりに使う合図の名前',
   },
+  {
+    key: 'pkc3.opened-by-us',
+    why: '🔴 その窓 1 枚だけの事実(付箋として開いたか)── `sessionStorage` に在り、運ぶ物ではない',
+  },
 ];
 
 /** 書き出す形の目印。⚠ 版が変わっても**読めるところまでは読む**(下の注記)。 */

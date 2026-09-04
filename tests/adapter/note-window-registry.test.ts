@@ -26,12 +26,23 @@ import type { Broadcaster } from '../../src/adapter/platform/storage/store-proxy
 function bus(): () => Broadcaster {
   const live: Broadcaster[] = [];
   return () => {
+    let closed = false;
     const ch: Broadcaster = {
       onmessage: null,
       postMessage: (data) => {
+        /**
+         * 🔴 **閉じた後は投げる**(#685 着地前レビュー ⚠6、2026-09-04)。
+         * ⚠ 1 稿目は「自分には配らない」だけ真似ていたので、**閉じた後の意味論**が
+         *   本物より甘かった ── だから「閉じたのに配れる」も「閉じた後に名乗ると
+         *   落ちる」も、この台では**永久に見えなかった**(CLAUDE.md §3)。
+         * ⚠ 実物の `BroadcastChannel` は `close()` 後の `postMessage` で
+         *   `InvalidStateError` を投げる(Node でも同じ)。
+         */
+        if (closed) throw new DOMException('closed', 'InvalidStateError');
         for (const other of [...live]) if (other !== ch) other.onmessage?.({ data } as MessageEvent);
       },
       close: () => {
+        closed = true;
         const i = live.indexOf(ch);
         if (i >= 0) live.splice(i, 1);
       },
@@ -177,5 +188,109 @@ describe('付箋の台帳(#685、user 裁定 2026-09-04)', () => {
     raw.postMessage(null);
     raw.postMessage('文字列');
     expect(a.reg.whereIs('e1'), '知らない便りで台帳が埋まった').toBe(null);
+  });
+
+  /**
+   * 🔴 **閉じた路へ名乗っても落ちない**(#685 着地前レビュー ⚠2、2026-09-04)。
+   *
+   * ⚠ 台帳への名乗りは **state listener から呼ばれる**(`main.ts` の `announceNote`)。
+   *   `Dispatcher` の listener 呼び出しに try/catch は無いので、投げると
+   *   **その `dispatch` の `DomainEvent` が丸ごと落ちる**(= 保存の副作用が消える)。
+   * ⚠ `pagehide` は **bfcache へ入るときにも飛ぶ**(この repo の実測)ので、
+   *   閉じた後に名乗る場面は**実際に起こりうる**。
+   */
+  it('🔴 閉じた路へ名乗っても落ちない(dispatch を巻き込まない)', () => {
+    const make = bus();
+    const ch = make();
+    const reg = createNoteRegistry({ channel: ch, id: 'A', onRaise: vi.fn() });
+    reg.close();
+    // ⚠ **前提を確かめる** ── 台が本物と同じに投げること(甘い台なら以降は空振り)
+    expect(() => ch.postMessage({ tag: 'x', id: 'A' }), '台が本物より甘い(閉じても投げない)').toThrow();
+    expect(() => reg.announce('e1'), '閉じた路へ名乗って落ちた').not.toThrow();
+    expect(() => reg.raise('e1'), '閉じた路へ頼んで落ちた').not.toThrow();
+  });
+
+  /** 🔴 **閉じたら答えも捨てる** ── 残すと、戻ってきた窓が古い台帳で断り続ける。 */
+  it('🔴 閉じたら台帳の答えも捨てる', () => {
+    const make = bus();
+    const a = win(make, 'A');
+    const b = win(make, 'B');
+    a.reg.announce('e1');
+    expect(b.reg.whereIs('e1'), '前提が崩れた').toBe('other');
+    b.reg.close();
+    expect(b.reg.whereIs('e1'), '閉じた後も古い答えを返している').toBe(null);
+  });
+
+  /**
+   * 🔴 **離れるときは放送路を閉じない**(bfcache で戻ってくる)。
+   * ⚠ 閉じてしまうと、戻ってきた窓は名乗れず、以後ずっと台帳に載らない。
+   */
+  it('🔴 leave の後も、戻ってきたら名乗り直せる', () => {
+    const make = bus();
+    const a = win(make, 'A');
+    const b = win(make, 'B');
+    a.reg.announce('e1');
+    a.reg.leave();
+    expect(b.reg.whereIs('e1'), '離れたのに台帳に残っている').toBe(null);
+    // 🔑 戻ってきた(bfcache 復帰)── 同じ lid でも名乗り直せる
+    a.reg.announce('e1');
+    expect(b.reg.whereIs('e1'), '戻ってきたのに名乗れない(放送路を閉じている)').toBe('other');
+  });
+
+  /**
+   * 🔴 **これから開く 1 枚を先に取っておく**(#685 着地前レビュー ⚠7)。
+   * ⚠ 付箋が名乗るのは boot の後なので、**押した直後の数百 ms は台帳が空**である。
+   *   塞がれたと思って 2 度押すと、同じノートの窓が 2 枚開いていた。
+   */
+  describe('これから開く 1 枚(着地前レビュー ⚠7)', () => {
+    it('🔴 取っておくと、2 度目は開かない', () => {
+      const make = bus();
+      const a = win(make, 'A');
+      expect(a.reg.whereIs('e1'), '前提が崩れた').toBe(null);
+      a.reg.reserve('e1');
+      expect(a.reg.whereIs('e1'), '2 度押しで 2 枚開く').toBe('other');
+    });
+
+    it('🔴 開けなかったら外す(次の 1 押しで開ける)', () => {
+      const make = bus();
+      const a = win(make, 'A');
+      a.reg.reserve('e1');
+      a.reg.release('e1');
+      expect(a.reg.whereIs('e1'), '開けなかったのに取ったまま').toBe(null);
+    });
+
+    it('🔴 本物が名乗ったら、見込みは台帳に置き換わる', () => {
+      const make = bus();
+      const a = win(make, 'A');
+      const b = win(make, 'B');
+      a.reg.reserve('e1');
+      b.reg.announce('e1');
+      expect(a.reg.whereIs('e1')).toBe('other');
+      // 🔑 その窓が閉じたら、見込みごと消えて開けるようになる
+      b.reg.leave();
+      expect(a.reg.whereIs('e1'), '窓が閉じたのに見込みが残っている(二度と開けない)').toBe(null);
+    });
+
+    /**
+     * 🔴 **どちらも呼ばれなかったときは、時間で外れる**(crash の保険)。
+     * ⚠ 外れないと、そのノートは**二度と窓で開けない**。
+     */
+    it('🔴 時間が経てば見込みは自然に外れる', () => {
+      const make = bus();
+      let clock = 1000;
+      const reg = createNoteRegistry({
+        channel: make(),
+        id: 'A',
+        onRaise: vi.fn(),
+        now: () => clock,
+        reserveMs: 500,
+      });
+      reg.reserve('e1');
+      expect(reg.whereIs('e1'), '前提が崩れた').toBe('other');
+      clock += 499;
+      expect(reg.whereIs('e1'), '早すぎる時点で外れている').toBe('other');
+      clock += 2;
+      expect(reg.whereIs('e1'), '時間が経っても外れない(二度と開けない)').toBe(null);
+    });
   });
 });

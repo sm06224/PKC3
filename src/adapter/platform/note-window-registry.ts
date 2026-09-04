@@ -59,7 +59,18 @@ export interface NoteRegistryDeps {
   readonly id: string;
   /** 「前に出て」と頼まれたときに呼ばれる。 */
   readonly onRaise: () => void;
+  /** いまの時刻。⚠ test が動かせるように口にする(既定は `Date.now`)。 */
+  readonly now?: () => number;
+  /** 見込みが自然に外れるまで(既定 `RESERVE_MS`)。 */
+  readonly reserveMs?: number;
 }
+
+/**
+ * 見込みを持ち続ける時間。⚠ **窓が名乗るまで**の猶予である ──
+ * `startApp`(storage 初期化 + メタ一覧 + shell)が終わるまでを見込む。
+ * ⚠ 長すぎると「閉じたのに開けない」、短すぎると「2 度押しで 2 枚」になる。
+ */
+export const RESERVE_MS = 10_000;
 
 export interface NoteRegistry {
   /**
@@ -83,9 +94,35 @@ export interface NoteRegistry {
    * 🔑 同期に答える(gesture を割らない ── 待つと `window.open` が遮断される)。
    */
   whereIs(lid: string): 'self' | 'other' | null;
+  /**
+   * 🔴 **これから開く 1 枚を、先に取っておく**(#685 着地前レビュー ⚠7、2026-09-04)。
+   *
+   * ⚠ 付箋が名乗るのは **`startApp` が終わってから**(storage の初期化・メタ一覧・
+   *   shell の組み立ての後)なので、**押した直後の数百 ms は台帳が空**である。
+   *   塞がれたと思って 2 度押すと ── まさに「押した瞬間の返事」を足した当の場面 ──
+   *   **同じノートの窓が 2 枚開く**。⚠ しかもその 2 枚は互いを台帳に載せるので、
+   *   片方を閉じると行が消えて **3 枚目も開ける**。
+   * 🔑 だから**開く側が見込みを先に載せる**。⚠ 開けなかったら `release` で外す。
+   * ⚠ 万一どちらも呼ばれなかったときのために `ttlMs` で自然に外れる
+   *   (`store-proxy.ts` が crash の保険に TTL を置いているのと同じ理屈)。
+   */
+  reserve(lid: string): void;
+  /** 取っておいた 1 枚を外す(開けなかった)。 */
+  release(lid: string): void;
   /** その窓に「前に出て」と頼む。⚠ 居なければ何もしない。 */
   raise(lid: string): void;
-  /** 窓を閉じるときに呼ぶ(台帳から自分を外す)。 */
+  /**
+   * 🔴 **窓を離れるときに呼ぶ**(台帳から自分を外す)。⚠ **放送路は閉じない**。
+   *
+   * ⚠ `pagehide` は **bfcache へ入るときにも飛ぶ**(この repo の実測 ──
+   *   `window-close.ts`。そこで不可逆な後始末をして**アプリが真っ白になった**事故が
+   *   記録されている)。⚠ 閉じてしまうと、戻ってきた窓は名乗れず、
+   *   `postMessage` が `InvalidStateError` を投げる。
+   * 🔑 `store-proxy.ts` と同じ形にする ── **便りを 1 通出すだけ**にして、
+   *   誤発火しても壊れないようにする。
+   */
+  leave(): void;
+  /** 配線を解く(放送路も閉じる)。⚠ `pagehide` では呼ばない ── 上の理由。 */
   close(): void;
 }
 
@@ -93,12 +130,37 @@ export interface NoteRegistry {
  * 🔴 **台帳を建てる。** ⚠ 建てた瞬間に**点呼**する ── 後から開いた窓が、
  * 先に居る付箋を知らないと「2 枚目を作らない」が効かない。
  */
-export function createNoteRegistry(deps: NoteRegistryDeps): NoteRegistry {
+export function createNoteRegistry(raw: NoteRegistryDeps): NoteRegistry {
+  const deps = { now: () => Date.now(), reserveMs: RESERVE_MS, ...raw };
   /** `lid → 窓の id`。⚠ **自分は入れない**(自分の付箋は数えない)。 */
   const byLid = new Map<string, string>();
   let mine: string | null = null;
 
-  const send = (w: Wire): void => deps.channel?.postMessage(w);
+  /**
+   * ⚠ **閉じた路への `postMessage` は `InvalidStateError` を投げる**(実測)。
+   * 🔴 ここは state listener(`main.ts` の `announceNote`)から呼ばれるので、
+   *   投げると **`dispatch` ごと落ちて `DomainEvent` が丸ごと消える**
+   *   (`dispatcher.ts` の listener 呼び出しに try/catch は無い ── 保存の副作用が落ちる)。
+   */
+  const send = (w: Wire): void => {
+    try {
+      deps.channel?.postMessage(w);
+    } catch {
+      /* 閉じた路 ── 名乗る相手が居ない */
+    }
+  };
+
+  /** これから開く 1 枚(合図が返るまでの見込み)。⚠ 値は外れる時刻。 */
+  const pending = new Map<string, number>();
+  const alive = (lid: string): boolean => {
+    const at = pending.get(lid);
+    if (at === undefined) return false;
+    if (deps.now() >= at) {
+      pending.delete(lid);
+      return false;
+    }
+    return true;
+  };
 
   /** ⚠ 1 つの窓が出す付箋は 1 件 ── 前に載っていた行を必ず外す。 */
   const drop = (id: string): void => {
@@ -118,6 +180,8 @@ export function createNoteRegistry(deps: NoteRegistryDeps): NoteRegistry {
       if (w.tag === NOTE_HERE && typeof w.lid === 'string') {
         drop(w.id);
         byLid.set(w.lid, w.id);
+        // ⚠ 本物が名乗ったので、見込みは要らない(以後は台帳が持つ)
+        pending.delete(w.lid);
         return;
       }
       if (w.tag === NOTE_GONE) {
@@ -135,13 +199,25 @@ export function createNoteRegistry(deps: NoteRegistryDeps): NoteRegistry {
       mine = lid;
       send(lid === null ? { tag: NOTE_GONE, id: deps.id } : { tag: NOTE_HERE, id: deps.id, lid });
     },
-    whereIs: (lid) => (mine === lid ? 'self' : byLid.has(lid) ? 'other' : null),
+    whereIs: (lid) =>
+      mine === lid ? 'self' : byLid.has(lid) || alive(lid) ? 'other' : null,
+    reserve: (lid) => pending.set(lid, deps.now() + deps.reserveMs),
+    release: (lid) => void pending.delete(lid),
     raise: (lid) => {
       const to = byLid.get(lid);
       if (to !== undefined) send({ tag: NOTE_RAISE, id: deps.id, to });
     },
+    leave: () => {
+      send({ tag: NOTE_GONE, id: deps.id });
+      // ⚠ **自分の名乗りだけ捨てる** ── 戻ってきたら `announce` が撃ち直せるように
+      mine = null;
+    },
     close: () => {
       send({ tag: NOTE_GONE, id: deps.id });
+      // ⚠ 閉じたら**答えも捨てる** ── 残すと、戻ってきた窓が古い台帳で断り続ける
+      byLid.clear();
+      pending.clear();
+      mine = null;
       deps.channel?.close();
     },
   };

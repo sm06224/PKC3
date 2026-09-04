@@ -122,6 +122,46 @@ export function announceOpenedWindow(
 }
 
 /**
+ * 🔴 **この窓は「PKC 自身が開いた窓」か**を憶える鍵(#685 着地前レビュー 🔴1、2026-09-04)。
+ *
+ * ⚠ `sessionStorage` は **browsing context ごと**である ── `noopener` の窓は
+ *   新しい群なので**継承されない**。だから「この窓だけ」を憶えるのにちょうど良い。
+ */
+export const OPENED_BY_US_KEY = 'pkc3.opened-by-us';
+
+/**
+ * 🔴 **「断片がノートを名指す」を「この窓は付箋だ」と読み替えない**
+ *   (#685 着地前レビュー 🔴1、2026-09-04)。
+ *
+ * ⚠ 直す前は `container`+`entry` が在るだけで付箋の旗が立っていた。⚠ ところが
+ *   **その形の URL は user が写して開く**(マニュアルが「付箋のアドレス欄をコピーすると
+ *   そのノートを直接開くリンクになります」と**やり方まで書いている**)。
+ * 🔴 そのふつうのタブが付箋扱いになると、台帳の `mine` が**選んでいるノートに追随する**ので、
+ *   **そのタブでは「別の窓で開く」が二度と効かない** ── しかも出るのは
+ *   「いま見ているこのウィンドウで開いています」という**説明の顔をした字**なので、
+ *   user は不具合だと気づけない(この repo がいちばん嫌う形)。
+ * 🔑 見分ける印は**既に在る**:`w=`(1 回限りの合図)は**こちらが開いた窓にしか付かず**、
+ *   起動直後に `dropToken()` でアドレスから外れる ── だから **user が写した URL には無い**。
+ * ⚠ F5 を跨いでも保つ必要があるので、`sessionStorage` に控える。
+ *
+ * @param opened `announceOpenedWindow()` の返り値(この起動で合図を持っていたか)
+ * @param store `sessionStorage`。⚠ 使えない箱では `null` を渡す(その回だけの判定になる)
+ */
+export function noteOpenedByUs(
+  opened: boolean,
+  store: Pick<Storage, 'getItem' | 'setItem'> | null,
+): boolean {
+  if (store === null) return opened;
+  try {
+    if (opened) store.setItem(OPENED_BY_US_KEY, '1');
+    return opened || store.getItem(OPENED_BY_US_KEY) === '1';
+  } catch {
+    // ⚠ 使えない箱(privacy 設定 / file://)では、その回の合図だけで決める
+    return opened;
+  }
+}
+
+/**
  * 🔴 **この窓は「特定の 1 つのために開かれた」か**(#685 動線レビュー 欠陥 1、2026-09-04)。
  *
  * ⚠ 直す前は、起動したときのお知らせが**どの窓でも無条件に出ていた**。
