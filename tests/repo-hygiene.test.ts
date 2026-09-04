@@ -1042,11 +1042,14 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     //    (「操作を探す」が指に当たる)②対照群 1280×720 はスマホ用画面にならない
     // ⚠ 2026-09-04(#528 案 B): `format-bar` に「図を押すと 5 種の一覧 / Esc / ↓ Enter」
     //    1 件(Enter が焦点のボタンを click にするのは実ブラウザだけ)で **+1 件**
+    // ⚠ 2026-09-04(#677): `context-menu.smoke.spec.ts` に「この章をコピー」で章の原文が
+    //    閉じの `:::` まで clipboard に入る 1 件(**+1 件**)── 本物の clipboard と
+    //    root の委譲は unit では届かない
     expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(80);
     expect(
       counts.reduce((a, b) => a + b, 0),
       'smoke の test が増減した(足したらこの数を直す)',
-    ).toBe(423);
+    ).toBe(424);
   });
 });
 

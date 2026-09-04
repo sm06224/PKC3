@@ -394,6 +394,12 @@ export const HEADING_MENU_ACTIONS: readonly EntryAction[] = [
   { action: 'edit-from-heading', label: 'ここから編集する' },
   { action: 'append-at-heading', label: 'ここに追記する' },
   { action: 'toggle-heading-fold', label: 'この見出しの中身を畳む' },
+  /**
+   * 🔴 **章をまるごと原文で写す**(#677。user 裁定 2026-09-04)。
+   * ⚠ 「章の参照をコピー」(上の注記)とは別物 ── こちらは**記法を増やさない**。
+   *   写るのは見出しから次の同段以上の見出しの直前までの **Markdown の原文**である。
+   */
+  { action: 'copy-chapter-md', label: 'この章をコピー' },
 ];
 
 /**
@@ -428,8 +434,29 @@ export function headingMenuActions(ctx: {
       action: 'toggle-heading-fold',
       label: ctx.folded ? 'この見出しの中身を出す' : 'この見出しの中身を畳む',
     });
+    /**
+     * 🔴 **章の範囲は畳みと同じ計算**(#677)── 「次の同段以上の見出しの手前まで」を
+     *   **本文の直下の塊の並び**で数える(`heading-fold.ts` の `sectionEnd` 1 本)。
+     *   だから畳めない見出し(引用や `:::` の中)では章も切り出せず、**同じ条件で畳む**
+     *   (出しても押して何も起きない口になる)。
+     */
+    out.push({ action: 'copy-chapter-md', label: 'この章をコピー' });
   }
   return out;
+}
+
+/**
+ * 🔴 **`:::` の塊の上で出す物**(#677)。
+ *
+ * ⚠ 板(`.pkc-place` の format 塊)は user の目には「付箋」なので、字を分ける ──
+ *   同じ操作(開き行から閉じの `:::` までを原文で写す)だが、「塊」では
+ *   自分が右クリックした物だと分からない。
+ * ⚠ 綴り(`copy-block-md`)は 1 つ ── 受け手は同じである。
+ *
+ * @param board 板の塊か(`place-notation.ts` の `isPlaceOpen` が決める)
+ */
+export function blockMenuActions(ctx: { readonly board: boolean }): readonly EntryAction[] {
+  return [{ action: 'copy-block-md', label: ctx.board ? 'この板をコピー' : 'この塊をコピー' }];
 }
 
 /** 綴り → 字。⚠ 情報ペインはこちらを引く(並びは向こうが決める)。 */

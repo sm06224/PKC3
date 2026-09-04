@@ -57,19 +57,70 @@ export interface FoldSpan {
 export function foldSpans(levels: HeadingLevels): readonly FoldSpan[] {
   const out: FoldSpan[] = [];
   for (let i = 0; i < levels.length; i += 1) {
-    const lvl = levels[i]!;
-    if (lvl === 0) continue;
-    let to = i + 1;
-    // ⚠ **同じ段も閉じる** ── `##` の次の `##` は別の節である
-    while (to < levels.length) {
-      const next = levels[to]!;
-      if (next > 0 && next <= lvl) break;
-      to += 1;
-    }
+    if (levels[i] === 0) continue;
+    const to = sectionEnd(levels, i);
     // ⚠ 配下が 1 つも無い見出しは畳む物が無い ── 器の側が押す口を出さないで済む
     if (to > i + 1) out.push({ heading: i, from: i + 1, to });
   }
   return out;
+}
+
+/**
+ * 見出し `i` の節が終わる位置(**含まない**)= 次の同段以上の見出し。無ければ末尾。
+ * 🔑 畳み(`foldSpans`)と章のコピー(`chapterSpan`)が**同じ 1 本**を引く ──
+ *   「どこまでが章か」を 2 か所で数えると、畳んだ範囲と写した範囲が食い違う日が来る。
+ */
+function sectionEnd(levels: HeadingLevels, i: number): number {
+  const lvl = levels[i]!;
+  let to = i + 1;
+  // ⚠ **同じ段も閉じる** ── `##` の次の `##` は別の節である
+  while (to < levels.length) {
+    const next = levels[to]!;
+    if (next > 0 && next <= lvl) break;
+    to += 1;
+  }
+  return to;
+}
+
+/** 章の原文の行範囲(0 始まり・**両端含む**)。 */
+export interface ChapterSpan {
+  readonly start: number;
+  readonly end: number;
+}
+
+/**
+ * 🔴 **章の原文の行範囲**(#677。右クリック「この章をコピー」の材料)。
+ *
+ * 見出しの行から、**次の同段以上の見出しの直前の行**まで。次が無ければ本文の末尾まで。
+ *
+ * ⚠ **終端を「配下の塊の `data-pkc-source-end` の最大」で取ってはいけない** ──
+ *   `:::` の囲みは開き行にしか刻印を持たない(閉じ側は属性を捨てる)ので、
+ *   章の最後が `:::` の塊だと**中身と閉じの `:::` が丸ごと落ちる**。
+ *   🔑 だから終端は**次の見出しの行 − 1**(見出しは必ず刻印を持つ)で取る。
+ * ⚠ 見出しの行は**その見出し自身の刻印**から取る(setext の `===` は `-end` 側に居るが、
+ *   次の見出しの `-line` − 1 で自然に含まれる)。
+ *
+ * @param levels 塊ごとの見出しの段(`foldSpans` と同じ配列)
+ * @param lines 塊ごとの原文の開き行(`data-pkc-source-line`。無い塊は `null`)
+ * @param heading 章にする見出しの位置
+ * @param lineCount 原文の総行数(末尾の章はここまで)
+ * @returns 見出しでない / 行が読めない位置なら `null`(当てずっぽうで写さない)
+ */
+export function chapterSpan(
+  levels: HeadingLevels,
+  lines: readonly (number | null)[],
+  heading: number,
+  lineCount: number,
+): ChapterSpan | null {
+  const lvl = levels[heading];
+  if (lvl === undefined || lvl === 0) return null;
+  const start = lines[heading];
+  if (start === null || start === undefined) return null;
+  const to = sectionEnd(levels, heading);
+  if (to >= levels.length) return start < lineCount ? { start, end: lineCount - 1 } : null;
+  const nextLine = lines[to];
+  if (nextLine === null || nextLine === undefined || nextLine <= start) return null;
+  return { start, end: nextLine - 1 };
 }
 
 /**

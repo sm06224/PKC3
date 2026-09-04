@@ -25,6 +25,9 @@ import { BODY_MENU_ACTIONS, ENTRY_ACTION_HINTS } from '../../src/features/entry-
 import { openContextMenu } from '../../src/adapter/ui/render/context-menu';
 import { sectionAt } from '../../src/features/markdown/append-target';
 import { applyHeadingFold } from '../../src/adapter/ui/render/heading-fold';
+import { applyPlaceLayout } from '../../src/adapter/ui/render/place-board';
+import { renderMarkdown } from '../../src/features/markdown/markdown-render';
+import { bodyBelowFrontmatter, frontmatterLineCount } from '../../src/features/markdown/frontmatter';
 
 const MENU = '[data-pkc-region="context-menu"]';
 
@@ -470,19 +473,21 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     const r = rig();
     rightClick(r.head);
     const acts = r.acts();
-    expect(acts.slice(0, 3), '見出しの 3 つが出ていない').toEqual([
+    // ⚠ 4 つ目「この章をコピー」は #677 で足した(既存の 3 つの**下**)
+    expect(acts.slice(0, 4), '見出しの 4 つが出ていない').toEqual([
       'edit-from-heading',
       'append-at-heading',
       'toggle-heading-fold',
+      'copy-chapter-md',
     ]);
     /**
      * 🔴 **差し替えていないことを、ここで見る。**
-     * ⚠ 「頭 3 つが正しい」だけでは、本文の分を落とす変異が生き延びる
+     * ⚠ 「頭 4 つが正しい」だけでは、本文の分を落とす変異が生き延びる
      *   ── 落ちるのは #522 で user が頼んだ段組み切替である。
      * 🔴 **条件つきの「取り込む」まで見る**(着地前レビュー 🔴3)── `BODY_MENU_ACTIONS`
      *   だけと突き合わせる変異は、fixture に外部画像が 0 枚だと素通りした。
      */
-    expect(acts.slice(3), '本文のメニューが消えている / 取り込みが見出しの枝だけ落ちた').toEqual([
+    expect(acts.slice(4), '本文のメニューが消えている / 取り込みが見出しの枝だけ落ちた').toEqual([
       ...BODY_MENU_ACTIONS.map((a) => a.action),
       'adopt-external-images',
     ]);
@@ -631,10 +636,11 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     const btn = r.host.querySelector<HTMLElement>('#h-a [data-pkc-field="heading-fold"]');
     expect(btn, '畳みのボタンが出ていない(fixture の前提が崩れている)').not.toBeNull();
     rightClick(btn!);
-    expect(r.acts().slice(0, 3), '帯の上で右クリックすると 3 つが消える').toEqual([
+    expect(r.acts().slice(0, 4), '帯の上で右クリックすると見出しの物が消える').toEqual([
       'edit-from-heading',
       'append-at-heading',
       'toggle-heading-fold',
+      'copy-chapter-md',
     ]);
     expect(new Set(r.lines()), '帯の上では行を運べていない').toEqual(new Set(['0']));
   });
@@ -660,6 +666,8 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     expect(acts, '入れ子で押しても何も起きない「畳む」を出した').not.toContain(
       'toggle-heading-fold',
     );
+    // ⚠ 章の範囲も畳みと同じ数え方(直下の並び)なので、入れ子では出さない(#677)
+    expect(acts, '入れ子で切り出せない「この章をコピー」を出した').not.toContain('copy-chapter-md');
   });
 
   /**
@@ -1110,5 +1118,241 @@ describe('メニューの下の説明欄(#587 C-3)', () => {
       const b = s.menu()!.querySelector('button[data-pkc-action="open-note-window"]');
       expect(b!.getAttribute('data-pkc-menu-prev-lid'), '要らない印が載っている').toBeNull();
     });
+  });
+});
+
+/**
+ * 🔴 **章 / `:::` の囲み / 板を、右クリックから原文の Markdown でまるごと写す**(#677)。
+ *
+ * ## なぜ本物の描画で台を組むか
+ *
+ * 上の rig は刻印を手で書いた。ここで守りたいのは「**`:::` の開きにしか刻印が無い**」
+ * という描画の性質に対する振る舞い(章末が `:::` なら閉じまで写す / 塊は原文で判定する /
+ * fence の中の `:::` を塊と読まない)なので、刻印は `renderMarkdown` に焼かせる ──
+ * 手で書くと、この test だけ都合のよい刻印を持って通る(CLAUDE.md §3「stub は本物の意味論を真似る」)。
+ *
+ * ## ⚠ frontmatter を持たせる
+ *
+ * 刻印は frontmatter を剥いだ本文の行番号 ── 全文 body で切る実装は、frontmatter が 0 行の
+ * fixture では**永久に緑**(測っていない次元)。期待値は**字面で書く**(実装と同じ切り方で
+ * 組んだ期待値は、同じ盲点を共有する ── CLAUDE.md §1)。
+ */
+describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () => {
+  /** fm.body の行番号を右に書く(刻印はこの座標)。 */
+  const FULL = [
+    '---',
+    'align: left',
+    '---',
+    '## 章', // 0
+    '', // 1
+    '中身', // 2
+    '', // 3
+    ':::note', // 4
+    '囲みの中', // 5
+    '', // 6
+    '```js', // 7
+    'const a = 1;', // 8
+    '```', // 9
+    '', // 10
+    ':::section', // 11
+    '入れ子の中', // 12
+    ':::', // 13
+    ':::', // 14
+    '', // 15
+    '## つぎ', // 16
+    '', // 17
+    ':::format{.pkc-place x=40 y=40 w=320 h=200 entry=n2}', // 18
+    '### 買い出し', // 19 ⚠ 板の中の見出し(host の直下ではない)
+    '- 牛乳', // 20
+    ':::', // 21
+    '', // 22
+    '段落', // 23
+    '', // 24
+  ].join('\n');
+  const CHAPTER_1 =
+    '## 章\n\n中身\n\n:::note\n囲みの中\n\n```js\nconst a = 1;\n```\n\n:::section\n入れ子の中\n:::\n:::\n';
+  const CHAPTER_2 =
+    '## つぎ\n\n:::format{.pkc-place x=40 y=40 w=320 h=200 entry=n2}\n### 買い出し\n- 牛乳\n:::\n\n段落\n';
+  const NOTE = ':::note\n囲みの中\n\n```js\nconst a = 1;\n```\n\n:::section\n入れ子の中\n:::\n:::';
+  const NESTED = ':::section\n入れ子の中\n:::';
+  const BOARD = ':::format{.pkc-place x=40 y=40 w=320 h=200 entry=n2}\n### 買い出し\n- 牛乳\n:::';
+
+  function rig(body = FULL) {
+    document.body.textContent = '';
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    const host = document.createElement('div');
+    host.setAttribute('data-pkc-field', 'detail-body');
+    // 🔑 読む面と同じ描き方(`detail.ts`): fm.body を anchors 付きで描き、畳み・板を当てる
+    host.innerHTML = renderMarkdown(bodyBelowFrontmatter(body), { sourceLineAnchors: true });
+    applyHeadingFold(host);
+    applyPlaceLayout(host, (l) => (l === 'n2' ? 'ノート 2' : null), frontmatterLineCount(body));
+    root.append(host);
+    document.body.append(root);
+    const copied: { text: string; done: string | undefined }[] = [];
+    const d = new Dispatcher();
+    bindActions(root, d, {
+      showStatus: () => 0,
+      copyText: (t, done) => {
+        copied.push({ text: t, done });
+      },
+    });
+    d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [
+        {
+          lid: 'n1',
+          title: '板の在るノート',
+          archetype: 'text',
+          created_at: null,
+          updated_at: null,
+          entry_order: 1,
+          status: null,
+          date: null,
+          archived: 0,
+        } as never,
+        {
+          lid: 'n2',
+          title: 'ノート 2',
+          archetype: 'text',
+          created_at: null,
+          updated_at: null,
+          entry_order: 2,
+          status: null,
+          date: null,
+          archived: 0,
+        } as never,
+      ],
+      relations: [],
+    });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body });
+    const q = (sel: string): Element => {
+      const el = host.querySelector(sel);
+      expect(el, `前提が崩れている: 台に ${sel} が無い`).not.toBeNull();
+      return el!;
+    };
+    return {
+      root,
+      d,
+      copied,
+      host,
+      q,
+      acts: (): string[] =>
+        [...root.querySelectorAll(`${MENU} button[data-pkc-action]`)].map(
+          (b) => b.getAttribute('data-pkc-action') ?? '',
+        ),
+      label: (action: string): string =>
+        root.querySelector(`${MENU} [data-pkc-action="${action}"]`)?.textContent ?? '',
+      press: (action: string): void => {
+        const b = root.querySelector<HTMLElement>(`${MENU} [data-pkc-action="${action}"]`);
+        expect(b, `メニューに ${action} が無い`).not.toBeNull();
+        b!.click();
+      },
+    };
+  }
+
+  it('🔴 見出しの右クリックに「この章をコピー」が在り、押すと章の原文が byte 一致で渡る', () => {
+    const r = rig();
+    rightClick(r.q('h2[id="章"]'));
+    expect(r.acts(), '「この章をコピー」が出ていない').toContain('copy-chapter-md');
+    expect(r.label('copy-chapter-md')).toBe('この章をコピー');
+    r.press('copy-chapter-md');
+    expect(r.copied, 'clipboard へ 1 回渡っていない').toHaveLength(1);
+    /**
+     * 🔴 **章末が `:::` の囲み** ── 終端を刻印(`-end`)の最大で取る実装は、ここで
+     *   `:::note` の開き行(4)までしか写さず、中身と閉じの `:::` が丸ごと落ちる。
+     */
+    expect(r.copied[0]!.text, '章の原文が丸ごと写っていない(閉じの ::: まで)').toBe(CHAPTER_1);
+    expect(r.copied[0]!.done, '写した合図の字が違う').toBe('章をコピーしました(Markdown の原文)');
+  });
+
+  it('末尾の章は本文の末尾まで(板の中の `###` は章を閉じない)', () => {
+    const r = rig();
+    rightClick(r.q('h2[id="つぎ"]'));
+    r.press('copy-chapter-md');
+    expect(r.copied.map((c) => c.text)).toEqual([CHAPTER_2]);
+  });
+
+  it('⚠ 段落の上では章も塊も出ない(対照群)', () => {
+    const r = rig();
+    rightClick(r.q('p[data-pkc-source-line="2"]'));
+    expect(r.acts()).not.toContain('copy-chapter-md');
+    expect(r.acts()).not.toContain('copy-block-md');
+    // ⚠ 本文のメニュー自体は出ている(出ないから含まない、ではない)
+    expect(r.acts()).toContain('cycle-read-columns');
+  });
+
+  it('🔴 `:::` の囲みの中で右クリックすると「この塊をコピー」── 開きから閉じまで', () => {
+    const r = rig();
+    rightClick(r.q('p[data-pkc-source-line="5"]'));
+    expect(r.acts(), '「この塊をコピー」が出ていない').toContain('copy-block-md');
+    expect(r.acts(), '段落の上なのに章の物が出た').not.toContain('copy-chapter-md');
+    expect(r.label('copy-block-md')).toBe('この塊をコピー');
+    r.press('copy-block-md');
+    expect(r.copied.map((c) => c.text)).toEqual([NOTE]);
+    expect(r.copied[0]!.done).toBe('塊をコピーしました(Markdown の原文)');
+  });
+
+  it('🔴 入れ子の内側で右クリックすると、**内側**の塊(外側を写さない)', () => {
+    const r = rig();
+    rightClick(r.q('p[data-pkc-source-line="12"]'));
+    r.press('copy-block-md');
+    expect(r.copied.map((c) => c.text)).toEqual([NESTED]);
+  });
+
+  it('🔴 囲みの中の fence の上で右クリックすると、fence ではなく囲みの塊(刻印を外へ辿る)', () => {
+    const r = rig();
+    /**
+     * ⚠ fence の中身に `:::` の字は置いていない ── `scanContainers` の深さ数えが囲みの中の
+     *   fence を追跡しない既存の穴(2026-09-04 実測)を、この test の主張と混ぜない。
+     */
+    rightClick(r.q('code[data-pkc-source-line="7"]'));
+    expect(r.acts(), 'fence の上で塊の口が消えた').toContain('copy-block-md');
+    r.press('copy-block-md');
+    expect(r.copied.map((c) => c.text), 'fence を塊と読んだ / 外側へ辿れていない').toEqual([NOTE]);
+  });
+
+  it('🔴 板の題名札の上で右クリックしても、行のメニューにならず「この板をコピー」が出る', () => {
+    const r = rig();
+    const card = r.q('[data-pkc-field="place-card"][data-pkc-entry="n2"]');
+    rightClick(card);
+    const acts = r.acts();
+    expect(acts, '別ノートの行メニューが出た(削除が載っている)').not.toContain('delete-entry');
+    expect(acts, '「この板をコピー」が出ていない').toContain('copy-block-md');
+    expect(r.label('copy-block-md'), '板なのに「塊」と書いてある').toBe('この板をコピー');
+    // 🔴 開いているノートが切り替わっていない(板が消えていない)
+    expect(r.d.getState().selectedLid, '題名札の右クリックで別ノートへ切り替わった').toBe('n1');
+    r.press('copy-block-md');
+    expect(r.copied.map((c) => c.text), '板の原文(座標つき)が写っていない').toEqual([BOARD]);
+    expect(r.copied[0]!.done).toBe('板をコピーしました(Markdown の原文)');
+  });
+
+  it('板の中の見出しでは、見出しの物と塊の物が**両方**出る(章は出ない)', () => {
+    const r = rig();
+    rightClick(r.q('h3[id="買い出し"]'));
+    const acts = r.acts();
+    expect(acts).toContain('edit-from-heading');
+    expect(acts).toContain('copy-block-md');
+    expect(acts, '直下でない見出しで章の口を出した').not.toContain('copy-chapter-md');
+  });
+
+  it('🔴 閉じていない囲みは写さずに理由を出す', () => {
+    const r = rig(':::note\nまだ書いている\n');
+    rightClick(r.q('p[data-pkc-source-line="1"]'));
+    expect(r.acts()).toContain('copy-block-md');
+    r.press('copy-block-md');
+    expect(r.copied, '閉じていない塊を写した').toHaveLength(0);
+    expect(r.d.getState().error ?? '', '断った理由が出ていない').toContain('閉じていない');
+  });
+
+  it('🔴 別のノートに切り替わったら、出ていたメニューの「この章をコピー」は効かない', () => {
+    const r = rig();
+    rightClick(r.q('h2[id="章"]'));
+    r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+    r.d.dispatch({ type: 'BODY_LOADED', lid: 'n2', body: '## 別\n\n別の中身\n' });
+    r.press('copy-chapter-md');
+    expect(r.copied, '別ノートの本文を写した').toHaveLength(0);
   });
 });

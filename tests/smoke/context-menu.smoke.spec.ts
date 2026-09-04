@@ -568,3 +568,47 @@ test('🔴 見出しを右クリックすると、その章を畳める (#426 �
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **見出しを右クリックして「この章をコピー」を押すと、章の原文が clipboard に入る**(#677)。
+ *
+ * ⚠ unit では原理的に届かない 2 つ:① **本物の `navigator.clipboard`** に届くか
+ *   (happy-dom は差し替え物)② 押した物が **root の委譲**を通って実際に動くか
+ *   (メニューは `data-pkc-action` を置くだけ ── 配線は実物でしか見えない)。
+ * 🔑 観測点は**アプリ自身の合図**(状態の行の文言)+ **clipboard の中身**の 2 つ ──
+ *   後者だけだと「1 つ前の内容」を読む濡れ衣が起きる(`copy-body.smoke.spec.ts` の注記)。
+ * ⚠ **章末が `:::` の囲み**である本文にする ── 閉じの `:::` まで入ることが、この機能の
+ *   当の主張(`:::` の刻印は開き行にしか無いので、終端の取り方を誤ると閉じが落ちる)。
+ */
+test('🔴 見出しを右クリックして「この章をコピー」を押すと、章の原文が閉じの ::: まで入る (#677)', async ({
+  page,
+  context,
+}) => {
+  const errors = collectPageErrors(page);
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page
+    .locator('[data-pkc-field="editor-body"]')
+    .fill('## 第 1 章\n\n:::note\n囲みの中\n:::\n\n## 第 2 章\n\n第 2 章の中身。\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  const h2 = page.locator('[data-pkc-field="detail-body"] h2').first();
+  await expect(h2, '本文が出ていない').toContainText('第 1 章');
+
+  await h2.click({ button: 'right' });
+  const menu = page.locator(MENU);
+  await expect(menu, '見出しで右クリックしてもメニューが出ない').toBeVisible();
+  await menu.locator('button[data-pkc-action="copy-chapter-md"]').click();
+  // ① アプリ自身の合図(状態の行)── メニューは押した瞬間に畳まれるので、光る合図は使えない
+  await expect(page.locator('[data-pkc-region="status"]'), '写した合図が出ない').toContainText(
+    '章をコピーしました',
+  );
+  await expect(page.locator(MENU), '押した後もメニューが残っている').toHaveCount(0);
+  // ② clipboard の中身 ── 見出しから次の見出しの直前まで、閉じの ::: を含めて原文のまま
+  const text = await page.evaluate(() => navigator.clipboard.readText());
+  expect(text, '章の原文が丸ごと入っていない(閉じの ::: まで)').toBe(
+    '## 第 1 章\n\n:::note\n囲みの中\n:::\n',
+  );
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

@@ -17,12 +17,15 @@ import { lidOfNode } from './lid-of-node';
 import { deliveredEntryOf, type ExtDeliveredEntry } from '@features/extension/ext-delivery';
 import { isLaunchableUrl } from '@features/launcher/tiles';
 import {
+  chapterSpanOf,
   headingAtSourceLine,
   headingLevel,
   isHeadingFolded,
   revealBlock,
   toggleHeadingFold,
 } from '../render/heading-fold';
+import { blockSpanAt, sliceLines } from '@features/markdown/source-blocks';
+import { isPlaceOpen } from '@features/markdown/place-notation';
 import { quoteOnEnter } from '@features/markdown/quote-assist';
 import { renumberLists } from '@features/markdown/list-renumber';
 import { stripDialect } from '@features/markdown/strip-dialect';
@@ -60,7 +63,7 @@ import { chooseColumnRule } from '@adapter/ui/render/column-rule';
 import { chooseTagBadge } from '@adapter/ui/render/tag-badge';
 import { chooseReadColumns, cycleReadColumns } from '@adapter/ui/render/read-columns';
 import { appendModeOf } from '@adapter/ui/render/append-box';
-import { frontmatterLineCount } from '@features/markdown/frontmatter';
+import { bodyBelowFrontmatter, frontmatterLineCount } from '@features/markdown/frontmatter';
 import {
   entryPickNote,
   entryPickRows,
@@ -129,6 +132,7 @@ import { appOpenInEdit, OpenInEditStore } from '@adapter/ui/render/open-in-edit'
 import { chordOf, findCommand, isMac, typesCharacter, KEY_COMMANDS } from '@features/keymap';
 import { paletteRows } from '@features/palette/palette-rows';
 import {
+  blockMenuActions,
   bodyMenuActions,
   editingRowMenuActions,
   entryMenuActions,
@@ -1501,6 +1505,12 @@ function phoneShowList(dispatcher: Dispatcher): boolean {
 }
 
 const MENU_LID_ATTR = 'data-pkc-menu-lid';
+/**
+ * 🔴 **右クリックした `:::` の塊の開き行**(#677)。`MENU_LINE_ATTR` とは**別の名前**で運ぶ
+ * ── 見出しが `:::` の中に居るときは**見出しの行と塊の開き行が両方要る**ので、
+ * 1 つの属性に載せると片方が消える。座標は同じ(frontmatter を剥いだ本文の行番号)。
+ */
+const MENU_BLOCK_ATTR = 'data-pkc-menu-block';
 
 /**
  * 🔴 **メニューを出す前に開いていたノート**(#685 動線レビュー 欠陥 2、2026-09-04)。
@@ -1554,10 +1564,67 @@ function refuseStaleMenu(dispatcher: Dispatcher, target: Element): boolean {
 }
 
 function menuCarriedLine(target: Element): number | null {
-  const raw = target.getAttribute(MENU_LINE_ATTR);
+  return menuCarriedAt(target, MENU_LINE_ATTR);
+}
+
+/** 右クリックのメニューが運んできた `:::` の塊の開き行(#677)。無ければ `null`。 */
+function menuCarriedBlock(target: Element): number | null {
+  return menuCarriedAt(target, MENU_BLOCK_ATTR);
+}
+
+/** 運ばれた行番号を 1 つ読む(読み方は 2 つの属性で同じ)。 */
+function menuCarriedAt(target: Element, attr: string): number | null {
+  const raw = target.getAttribute(attr);
   if (raw === null) return null;
   const line = Number(raw);
   return Number.isInteger(line) && line >= 0 ? line : null;
+}
+
+/**
+ * 🔴 **右クリックした所を包む `:::` の塊**(#677)。
+ *
+ * 押した所から刻印(`data-pkc-source-line`)を持つ祖先を**内側から外側へ**辿り、
+ * その刻印の行が `:::` の開きである**最初の物**を返す ── 入れ子なら内側が当たる。
+ * 段落・見出し・fence の刻印は素通りする(`blockSpanAt` が `null` を返す)。
+ *
+ * 🔑 塊かどうかは**原文**で決める(`blockSpanAt`)── DOM の class 名
+ *   (section / format / details / quote …)を並べると、描画が 1 つ増えた日に静かに漏れる。
+ * 🔑 板かどうかも原文で決める(`isPlaceOpen` = 描画が板と読む当の判定)。
+ *
+ * @param fmBody frontmatter を剥いだ本文(刻印と同じ座標系)
+ */
+function directiveBlockAt(
+  host: HTMLElement,
+  target: Element,
+  fmBody: string,
+): { line: number; board: boolean } | null {
+  let el: Element | null = target.closest('[data-pkc-source-line]');
+  while (el !== null && el !== host && host.contains(el)) {
+    const line = Number(el.getAttribute('data-pkc-source-line'));
+    if (Number.isInteger(line) && line >= 0 && blockSpanAt(fmBody, line) !== null) {
+      return { line, board: isPlaceOpen(fmBody.split('\n')[line] ?? '') };
+    }
+    el = el.parentElement?.closest('[data-pkc-source-line]') ?? null;
+  }
+  return null;
+}
+
+/**
+ * 原文の行範囲をクリップボードへ写す(章 / 塊のコピー共通。#677)。
+ * ⚠ 結果の字は `copyText` に渡す(押しても画面が変わらない操作なので、黙って終えない)。
+ */
+function copySourceLines(
+  dispatcher: Dispatcher,
+  services: BinderServices,
+  fmBody: string,
+  span: { readonly start: number; readonly end: number },
+  done: string,
+): void {
+  if (services.copyText === undefined) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: 'この版では写せません' });
+    return;
+  }
+  services.copyText(sliceLines(fmBody, span), done);
 }
 
 /**
@@ -4167,6 +4234,68 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (line === null || refuseStaleMenu(dispatcher, target)) return;
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
     pickAppendTarget(dispatcher, root, line);
+  },
+  /**
+   * 🔴 **その章を原文の Markdown でまるごと写す**(#677。user 裁定 2026-09-04)。
+   *
+   * 範囲は「見出しの行 〜 次の同段以上の見出しの直前」(`chapterSpanOf` ── 畳みと同じ
+   * 塊の数え方)。⚠ 写すのは **frontmatter を剥いだ本文**の行 ── 刻印がその座標なので、
+   *   全文 body で切ると frontmatter の行数ぶんずれた別の章を写す。
+   * ⚠ 見出しが引けなければ理由を出す(押した瞬間にメニューは畳まれるので、黙って
+   *   `return` すると dead click になる ── `refuseStaleMenu` と同じ理由)。
+   */
+  'copy-chapter-md': (dispatcher, target, services) => {
+    const line = menuCarriedLine(target);
+    if (line === null || refuseStaleMenu(dispatcher, target)) return;
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    const host = root.querySelector<HTMLElement>('[data-pkc-field="detail-body"]');
+    const heading = host === null ? null : headingAtSourceLine(host, line);
+    const ob = dispatcher.getState().openBody;
+    if (host === null || heading === null || ob === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '章の範囲を読めませんでした(本文を開き直してください)' });
+      return;
+    }
+    const fmBody = bodyBelowFrontmatter(ob.body);
+    const span = chapterSpanOf(host, heading, fmBody.split('\n').length);
+    if (span === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '章の範囲を読めませんでした(本文を開き直してください)' });
+      return;
+    }
+    copySourceLines(dispatcher, services, fmBody, span, '章をコピーしました(Markdown の原文)');
+  },
+  /**
+   * 🔴 **`:::` の塊(囲み / 板)を原文の Markdown でまるごと写す**(#677)。
+   *
+   * 範囲は「開きの `:::` 〜 閉じの `:::`」(`blockSpanAt`)。板なら座標(`x=` / `y=`)も
+   * 開き行に載っているので、そのまま貼れば同じ場所に置かれる。
+   * ⚠ 閉じていない塊は**写さずに断る** ── 末尾まで飲んでいるので「塊」の範囲が無い。
+   *   理由を出す(user はそこで閉じ忘れに気づける)。
+   */
+  'copy-block-md': (dispatcher, target, services) => {
+    const line = menuCarriedBlock(target);
+    if (line === null || refuseStaleMenu(dispatcher, target)) return;
+    const ob = dispatcher.getState().openBody;
+    const fmBody = ob === null ? null : bodyBelowFrontmatter(ob.body);
+    const span = fmBody === null ? null : blockSpanAt(fmBody, line);
+    if (fmBody === null || span === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '塊の範囲を読めませんでした(本文を開き直してください)' });
+      return;
+    }
+    if (span.open) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: 'この塊は閉じていないのでコピーできません(閉じの ::: を足してください)',
+      });
+      return;
+    }
+    const board = isPlaceOpen(fmBody.split('\n')[line] ?? '');
+    copySourceLines(
+      dispatcher,
+      services,
+      fmBody,
+      span,
+      board ? '板をコピーしました(Markdown の原文)' : '塊をコピーしました(Markdown の原文)',
+    );
   },
   /**
    * 🔴 **よく開くサイトをアプリ一覧に足す**(#401 ①)。
@@ -6880,7 +7009,16 @@ export function bindActions(
       if (range.intersectsNode(target)) return;
     }
 
-    const row = target.closest('[data-pkc-entry]');
+    /**
+     * 🔴 **読む本文の中の `[data-pkc-entry]` は「行」ではない**(#677)。
+     *
+     * ⚠ 板の題名札(`place-board.ts` の `ensureCard`)は `select-entry` のために lid を
+     *   持っている。ここで行と読むと `selectEntryOrExplain` が**そのノートへ切り替えて**
+     *   板が消え、出るのは**別ノートの行メニュー**になる(押した物と効く先が食い違う)。
+     * 🔑 読む本文の中の物は下の本文の枝で受ける(板の上なら「この板をコピー」が出る)。
+     */
+    const hit = target.closest('[data-pkc-entry]');
+    const row = hit !== null && hit.closest('[data-pkc-field="detail-body"]') !== null ? null : hit;
     const lid = row?.getAttribute('data-pkc-entry') ?? null;
     if (row === null || lid === null || lid === '') {
       /**
@@ -6961,33 +7099,37 @@ export function bindActions(
        *   `####` 以下で出すと**押した見出しではなく上の `###`** が入り先になる。
        */
       const level = heading === null ? 0 : headingLevel(heading);
-      openContextMenu(
-        root,
-        { x: ev.clientX, y: ev.clientY },
-        heading === null || line === null
-          ? body
-          : [
-              ...headingMenuActions({
-                folded: isHeadingFolded(heading),
-                foldable: heading.parentElement === host,
-                appendable: level >= 1 && level <= 3 && appendModeOf(dispatcher.getState()).kind === 'ready',
-              }),
-              ...body,
-            ],
-        root.ownerDocument.activeElement,
-        /**
-         * 🔴 **身元は常に運ぶ**(着地前レビュー ⚠5)。⚠ 1 稿目は見出しのときだけ
-         * 積んでいたので、**本文を右クリックしたときは lid を運んでいなかった** ──
-         * そこに載る `adopt-external-images` は**外へ通信して本文を書き換える**ので、
-         * 取り違えの実害がいちばん大きい。行は見出しのときだけでよい。
-         */
-        line === null
-          ? { [MENU_LID_ATTR]: dispatcher.getState().openBody?.lid ?? '' }
-          : {
-              [MENU_LINE_ATTR]: String(line),
-              [MENU_LID_ATTR]: dispatcher.getState().openBody?.lid ?? '',
-            },
-      );
+      /**
+       * 🔴 **`:::` の塊の上なら「この塊をコピー」を足す**(#677)。
+       *
+       * ⚠ 見出しと**排他にしない** ── `:::` の中の見出しを右クリックしたら、見出しの物と
+       *   塊の物が**両方**要る(どちらかを落とすと、その場所でだけ動線が 1 つ消える)。
+       * ⚠ 判定は原文で行う(`directiveBlockAt`)── 座標は刻印と同じ「frontmatter を
+       *   剥いだ本文」なので、全文 body ではなく `bodyBelowFrontmatter` を渡す。
+       */
+      const block =
+        host === null || ob === null ? null : directiveBlockAt(host, target, bodyBelowFrontmatter(ob.body));
+      const items = [
+        ...(heading === null || line === null
+          ? []
+          : headingMenuActions({
+              folded: isHeadingFolded(heading),
+              foldable: heading.parentElement === host,
+              appendable: level >= 1 && level <= 3 && appendModeOf(dispatcher.getState()).kind === 'ready',
+            })),
+        ...(block === null ? [] : blockMenuActions({ board: block.board })),
+        ...body,
+      ];
+      /**
+       * 🔴 **身元は常に運ぶ**(着地前レビュー ⚠5)。⚠ 1 稿目は見出しのときだけ
+       * 積んでいたので、**本文を右クリックしたときは lid を運んでいなかった** ──
+       * そこに載る `adopt-external-images` は**外へ通信して本文を書き換える**ので、
+       * 取り違えの実害がいちばん大きい。行は見出しのときだけ、塊の開き行は塊のときだけ。
+       */
+      const carry: Record<string, string> = { [MENU_LID_ATTR]: ob?.lid ?? '' };
+      if (line !== null) carry[MENU_LINE_ATTR] = String(line);
+      if (block !== null) carry[MENU_BLOCK_ATTR] = String(block.line);
+      openContextMenu(root, { x: ev.clientX, y: ev.clientY }, items, root.ownerDocument.activeElement, carry);
       return;
     }
 
