@@ -201,7 +201,7 @@ describe('bootstrap の配線', () => {
      *   「購読が在る」だけの検査では殺せない。
      */
     expect(wiring, '住所を追随させる購読が繋がっていない(F5 で古いノートへ戻る)').toContain(
-      'onSelectedEntry: (fn) => app.dispatcher.onState((s) => fn(s.selectedLid))',
+      'onSelectedEntry: (fn) => app.dispatcher.onState((s) => fn(s.cid, s.selectedLid))',
     );
   });
 

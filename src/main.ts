@@ -3417,7 +3417,7 @@ function bootstrap(): void {
          * ⚠ 判断(名乗っている断片か / 履歴を積まないか)は `deep-link.ts` に在る
          *   ── この file はどの test からも実行されない(CLAUDE.md § 2)。
          */
-        onSelectedEntry: (fn) => app.dispatcher.onState((s) => fn(s.selectedLid)),
+        onSelectedEntry: (fn) => app.dispatcher.onState((s) => fn(s.cid, s.selectedLid)),
         // ⚠ 開いたままのタブでアドレスへ足したときも効かせる
         onHashChange: (fn) => {
           window.addEventListener('hashchange', fn);

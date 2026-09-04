@@ -22,7 +22,7 @@ beforeEach(() => {
 describe('本物のアドレスへの書き戻し(#689 案 B)', () => {
   it('🔴 住所が、いま見ているノートへ書き換わる', () => {
     history.replaceState(null, '', '/pkc/#pkc?container=c1&entry=e1');
-    windowDeepLinkTarget().setEntry('e2');
+    windowDeepLinkTarget().setEntry('c1', 'e2');
     expect(location.hash, '住所が古いノートを指したまま').toBe('#pkc?container=c1&entry=e2');
   });
 
@@ -42,9 +42,9 @@ describe('本物のアドレスへの書き戻し(#689 案 B)', () => {
     const push = vi.spyOn(history, 'pushState');
     const before = history.length;
     const t = windowDeepLinkTarget();
-    t.setEntry('e2');
-    t.setEntry('e3');
-    t.setEntry('e4');
+    t.setEntry('c1', 'e2');
+    t.setEntry('c1', 'e3');
+    t.setEntry('c1', 'e4');
     expect(location.hash, '前提が崩れた(そもそも書き換わっていない)').toBe(
       '#pkc?container=c1&entry=e4',
     );
@@ -60,7 +60,7 @@ describe('本物のアドレスへの書き戻し(#689 案 B)', () => {
   it('⚠ 同じノートなら、書き戻し自体を呼ばない', () => {
     history.replaceState(null, '', '/pkc/#pkc?container=c1&entry=e1');
     const replace = vi.spyOn(history, 'replaceState');
-    windowDeepLinkTarget().setEntry('e1');
+    windowDeepLinkTarget().setEntry('c1', 'e1');
     expect(replace, '同じ住所で書き戻した').not.toHaveBeenCalled();
     replace.mockRestore();
   });
@@ -72,7 +72,7 @@ describe('本物のアドレスへの書き戻し(#689 案 B)', () => {
   it('🔴 素のアドレスに住所を生やさない', () => {
     history.replaceState(null, '', '/pkc/');
     const replace = vi.spyOn(history, 'replaceState');
-    windowDeepLinkTarget().setEntry('e2');
+    windowDeepLinkTarget().setEntry('c1', 'e2');
     expect(replace, '素のタブで書き戻した').not.toHaveBeenCalled();
     expect(location.hash).toBe('');
     replace.mockRestore();
@@ -84,9 +84,18 @@ describe('本物のアドレスへの書き戻し(#689 案 B)', () => {
    */
   it('🔴 `?pkc-flag=…` は残る', () => {
     history.replaceState(null, '', '/pkc/?pkc-flag=x#pkc?container=c1&entry=e1&view=dual');
-    windowDeepLinkTarget().setEntry('e2');
+    windowDeepLinkTarget().setEntry('c1', 'e2');
     expect(location.search, 'flag のクエリを落とした').toBe('?pkc-flag=x');
     expect(location.hash, '面を道連れにした').toBe('#pkc?container=c1&entry=e2&view=dual');
-    expect(location.pathname, '置き場所ごと動かした').toBe('/pkc/');
+    /**
+     * ⚠ **これは対照群ではない**(#689 着地前レビュー ⚠2、実測で判明)。
+     *   `replaceState` に渡しているのは**相対 URL** なので、実装から
+     *   `${location.pathname}` を丸ごと落としても解決結果は 1 文字も変わらない
+     *   (深い path `/pkc/dev/index.html` でも同じ)。
+     * 🔑 だから**ここで守れているのは `search` の行だけ**である ──
+     *   この行は「読んだ人が path の心配をしなくてよい」ことを示す記録として残す。
+     *   ⚠ 「これが無いと壊れる」とは書かない(CLAUDE.md § 1)。
+     */
+    expect(location.pathname, '前提が崩れた(台が別の場所を見ている)').toBe('/pkc/');
   });
 });

@@ -236,7 +236,7 @@ describe('面を指さない断片(#685 段②)', () => {
  */
 describe('住所の追随(#689 案 B)', () => {
   it('🔴 名乗っている断片は、いまのノートへ書き換わる', () => {
-    expect(setHashEntry('#pkc?container=c1&entry=e1', 'e2')).toBe('#pkc?container=c1&entry=e2');
+    expect(setHashEntry('#pkc?container=c1&entry=e1', 'c1', 'e2')).toBe('#pkc?container=c1&entry=e2');
   });
 
   /**
@@ -245,14 +245,14 @@ describe('住所の追随(#689 案 B)', () => {
    * ⚠ `URLSearchParams.set` は**その場で置き換える**ので、並びも動かない。
    */
   it('🔴 view / w は残り、並びも変わらない', () => {
-    expect(setHashEntry('#pkc?container=c1&entry=e1&view=dual&w=tok1', 'e2')).toBe(
+    expect(setHashEntry('#pkc?container=c1&entry=e1&view=dual&w=tok1', 'c1', 'e2')).toBe(
       '#pkc?container=c1&entry=e2&view=dual&w=tok1',
     );
   });
 
   /** 🔑 base 付きの丸ごとの URL でも、断片だけを書き換える。 */
   it('🔑 base は触らない', () => {
-    expect(setHashEntry('https://例.test/pkc/?pkc-flag=x#pkc?container=c1&entry=e1', 'e2')).toBe(
+    expect(setHashEntry('https://例.test/pkc/?pkc-flag=x#pkc?container=c1&entry=e1', 'c1', 'e2')).toBe(
       'https://例.test/pkc/?pkc-flag=x#pkc?container=c1&entry=e2',
     );
   });
@@ -271,7 +271,7 @@ describe('住所の追随(#689 案 B)', () => {
     ['entry だけ', '#pkc?entry=e1'],
     ['面だけ', '#pkc?view=dual'],
   ])('🔴 %s 断片は 1 バイトも変わらない', (_name, raw) => {
-    expect(setHashEntry(raw, 'e2')).toBe(raw);
+    expect(setHashEntry(raw, 'c1', 'e2')).toBe(raw);
   });
 
   /**
@@ -282,7 +282,9 @@ describe('住所の追随(#689 案 B)', () => {
   it.each([['空', ''], ['空白入り', 'e 2'], ['記号入り', 'e/2']])(
     '🔴 %s の lid は書き込まない',
     (_name, lid) => {
-      expect(setHashEntry('#pkc?container=c1&entry=e1', lid)).toBe('#pkc?container=c1&entry=e1');
+      expect(setHashEntry('#pkc?container=c1&entry=e1', 'c1', lid)).toBe(
+        '#pkc?container=c1&entry=e1',
+      );
     },
   );
 
@@ -292,8 +294,36 @@ describe('住所の追随(#689 案 B)', () => {
    *   検出できない。
    */
   it('🔑 書き換えた断片は、そのまま読み直せる', () => {
-    const next = setHashEntry('#pkc?container=c1&entry=e1&view=dual', 'e2');
+    const next = setHashEntry('#pkc?container=c1&entry=e1&view=dual', 'c1', 'e2');
     expect(parseViewDeepLinkEntry(next)).toEqual({ containerId: 'c1', lid: 'e2' });
     expect(parseViewDeepLink(next), '面を道連れにした').toBe('dual');
+  });
+
+  /**
+   * 🔴 **別の PKC の入れ物なら、1 バイトも触らない**(#689 動線レビュー 欠陥 1)。
+   *
+   * ⚠ 読む側の門は 2 段(綴り / `cid` の一致)だが、1 稿目の書く側は**綴りしか
+   *   見ていなかった** ── 他人の PKC のリンクを開いたタブで自分のノートを選ぶと、
+   *   住所が `container=他人 & entry=自分の lid` という**どこも指さない形**に化け、
+   *   `Ctrl+D` の栞は「開くがノートは 1 件も出ない」になった。
+   * ⚠ そのうえ**もらったリンクの原文まで上書きされて消える**(送り主に
+   *   「開かない」と返す材料が無くなる)。
+   */
+  it.each([
+    ['別の入れ物', 'other'],
+    ['まだ開いていない', null],
+  ])('🔴 %s なら住所を書き換えない', (_name, cid) => {
+    const raw = '#pkc?container=c1&entry=e1';
+    expect(setHashEntry(raw, cid, 'e2'), 'よその入れ物の住所を書き換えた').toBe(raw);
+  });
+
+  /**
+   * ⚠ **対照群** ── 一致していれば書き換わる(上の 2 件が「常に何もしない」
+   *   実装でも通ってしまうのを止める)。
+   */
+  it('⚠ 入れ物が一致していれば書き換わる(対照群)', () => {
+    expect(setHashEntry('#pkc?container=c1&entry=e1', 'c1', 'e2')).toBe(
+      '#pkc?container=c1&entry=e2',
+    );
   });
 });

@@ -49,7 +49,7 @@ function bench(hash: string) {
   let viewListener: ((v: ViewMode) => void) | null = null;
   let hashListener: (() => void) | null = null;
   /** 選んでいるノートが変わったことにする購読(#689 案 B)。 */
-  let selectListener: ((lid: string | null) => void) | null = null;
+  let selectListener: ((containerId: string | null, lid: string | null) => void) | null = null;
   /**
    * ⚠ **本物と同じ意味論にする**(CLAUDE.md §3)── 本物は getter で、
    *   消した後は `view` / `w` を落とした断片を返す。
@@ -75,8 +75,8 @@ function bench(hash: string) {
      *   ── 「名乗っていない断片には生やさない」を test 側で書き直すと、
      *   実装と同じ盲点を共有する(CLAUDE.md § 1)。
      */
-    setEntry: (lid) => {
-      target.hash = setHashEntry(target.hash, lid);
+    setEntry: (containerId, lid) => {
+      target.hash = setHashEntry(target.hash, containerId, lid);
     },
   };
   let failed: string | null = null;
@@ -134,7 +134,8 @@ function bench(hash: string) {
       hashListener?.();
     },
     /** 選んでいるノートが変わったことにする(#689 案 B)。 */
-    selectBecomes: (lid: string | null) => selectListener?.(lid),
+    selectBecomes: (lid: string | null, cid: string | null = 'c1') =>
+      selectListener?.(cid, lid),
     subscribed: () => ({
       view: viewListener !== null,
       hash: hashListener !== null,
@@ -461,6 +462,7 @@ describe('起動時のディープリンク(#300 段②)', () => {
       openView: opened,
       fail,
       onViewChange: () => () => {},
+      onSelectedEntry: () => () => {},
       target: {
         hash: '#pkc?view=query',
         clearHash: () => {},
@@ -622,8 +624,8 @@ describe('開いた窓の合図(#300 段③)', () => {
       dropToken: () => {
         t.hash = dropViewWindowToken(t.hash);
       },
-      setEntry: (lid: string) => {
-        t.hash = setHashEntry(t.hash, lid);
+      setEntry: (containerId: string | null, lid: string) => {
+        t.hash = setHashEntry(t.hash, containerId, lid);
       },
     };
     return t;
@@ -837,6 +839,28 @@ describe('住所の追随(#689 案 B)', () => {
     ]);
     b.selectBecomes('e2');
     expect(b.hash(), '住所が古いノートを指したまま').toBe('#pkc?container=c1&entry=e2');
+    /**
+     * 🔴 **毎回動く**(#689 着地前レビュー SM3)── 1 回だけ追随して固まる変異は、
+     *   1 件しか押さない台では**生き延びる**。⚠ user から見た症状は
+     *   「2 件目までは付いてくるのに、3 件目から固まる」= **#689 が半分だけ戻る**。
+     */
+    b.selectBecomes('e3');
+    expect(b.hash(), '2 件目から住所が固まった').toBe('#pkc?container=c1&entry=e3');
+  });
+
+  /**
+   * 🔴 **別の PKC の入れ物なら、住所に触らない**(動線レビュー 欠陥 1)。
+   *
+   * ⚠ もらったリンクを開いたタブでは、読む側が `cid` 違いで**断る**ので
+   *   ノートは選ばれない。そこで自分のノートを選ぶと、1 稿目は住所を
+   *   `container=他人 & entry=自分の lid` という**どこも指さない形**にしていた。
+   * ⚠ しかも**もらったリンクの原文が上書きされて消える**ので、
+   *   「開かないんだけど」と送り主に返す材料まで失われる。
+   */
+  it('🔴 もらった別 PKC のリンクは、1 バイトも書き換えない', () => {
+    const b = bench('#pkc?container=other&entry=e1');
+    b.selectBecomes('mine', 'c1');
+    expect(b.hash(), 'よその入れ物の住所を書き換えた').toBe('#pkc?container=other&entry=e1');
   });
 
   /**

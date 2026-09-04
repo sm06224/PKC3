@@ -86,10 +86,10 @@ export interface DeepLinkTarget {
    *
    * ⚠ **履歴を積まない**(`replaceState`)── 積むと、ノートを 10 件見た後の
    *   `← 戻る` が **10 回押さないと前の頁へ帰れない**形になる。
-   * ⚠ いま住所を名乗っていない断片には**何も生やさない**
-   *   (判定は `setHashEntry` が持つ)。
+   * ⚠ いま住所を名乗っていない断片には**何も生やさない**、
+   *   **別の PKC の入れ物なら 1 バイトも触らない**(判定は `setHashEntry` が持つ)。
    */
-  readonly setEntry: (lid: string) => void;
+  readonly setEntry: (containerId: string | null, lid: string) => void;
 }
 
 /** 既定の的 ── 本物のアドレス。 */
@@ -116,9 +116,9 @@ export function windowDeepLinkTarget(): DeepLinkTarget {
         `${location.pathname}${location.search}${dropViewWindowToken(location.hash)}`,
       );
     },
-    setEntry: (lid) => {
+    setEntry: (containerId, lid) => {
       if (typeof history !== 'object' || typeof location !== 'object') return;
-      const next = setHashEntry(location.hash, lid);
+      const next = setHashEntry(location.hash, containerId, lid);
       // ⚠ **同じなら触らない** ── `replaceState` は履歴を積まないが、
       //    呼ぶたびにアドレス欄が書き換わる(選択が動くたびに走る経路である)
       if (next === location.hash) return;
@@ -353,9 +353,17 @@ export interface DeepLinkWiring {
    *   ノートは「移った先へ**書き換える**」。理由は `setHashEntry` の docstring:
    *   面から離れた人はもうその面を見ていないが、**ノートは見ている物が移っただけ**
    *   なので、住所は消すのではなく正しくするのが `Ctrl+D` / `F5` の期待に合う。
-   * ⚠ 省略可 ── 渡さない配線(古い test)では**追随しないだけ**。
+   * 🔴 **optional にしない**(#689 着地前レビュー ⚠3)── 配線を落としても
+   *   tsc が黙る形にすると、戻ってくる症状は「**`F5` で 30 分前のノートへ戻る**」
+   *   = #689 そのものである。⚠ いま守っているのは
+   *   `bootstrap-wiring.test.ts` の**字面 pin 1 本だけ**なので、型で受けさせる
+   *   (CLAUDE.md § 7「待ちの口は optional にしない」と同じ理屈)。
+   * ⚠ **入れ物も一緒に渡す**(#689 動線レビュー 欠陥 1)── 読む側は
+   *   「この PKC の入れ物か」まで検めるので、書く側も同じ 2 段を通す。
    */
-  readonly onSelectedEntry?: (fn: (lid: string | null) => void) => () => void;
+  readonly onSelectedEntry: (
+    fn: (containerId: string | null, lid: string | null) => void,
+  ) => () => void;
   /** アドレスの断片が変わったら呼ばれる購読(返り値で解除)。 */
   readonly onHashChange?: (fn: () => void) => () => void;
   readonly target?: DeepLinkTarget;
@@ -469,18 +477,18 @@ export function connectViewDeepLink(wiring: DeepLinkWiring): () => void {
    * ⚠ **何も選んでいない回は触らない** ── boot の途中や削除の直後に
    *   `null` が流れてくるが、そこで住所を消すと**栞ごと消える**。
    *   住所が古いままでも `F5` は「居ない lid」として黙って捨てるだけである。
-   * 🔑 「そもそも住所を名乗っているか」の判定は `setHashEntry` が持つ
-   *   ── ここで二重に持たない(§ 7)。
+   * 🔑 「そもそも住所を名乗っているか」「この PKC の入れ物か」の判定は
+   *   `setHashEntry` が持つ ── ここで二重に持たない(§ 7)。
    */
-  const offSelect = wiring.onSelectedEntry?.((lid) => {
+  const offSelect = wiring.onSelectedEntry((containerId, lid) => {
     if (lid === null) return;
-    target.setEntry(lid);
+    target.setEntry(containerId, lid);
   });
 
   return () => {
     offView();
     offHash?.();
-    offSelect?.();
+    offSelect();
   };
 }
 

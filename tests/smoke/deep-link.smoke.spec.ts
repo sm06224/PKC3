@@ -205,9 +205,12 @@ test('🔴 直リンクの窓で別のノートを開くと、F5 でそのノー
     `entry=${firstLid}`,
   );
 
-  // ⚠ その直リンクの窓として入り直す(`w=` は起動直後に外れる)
+  /**
+   * ⚠ **これは「入り直し」ではない**(#689 着地前レビュー ⚠4)── `link` の path は
+   *   いま開いている頁と同じなので、**読み直しは起きず** `hashchange` だけが飛ぶ。
+   * 🔑 起動時の経路(断片を読んでノートを選ぶ側)は、下の `page.reload()` が通す。
+   */
   await page.goto(link);
-  await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
   expect(
     await page.evaluate(() => location.hash),
     '前提が崩れた(直リンクの住所が残っていない)',
