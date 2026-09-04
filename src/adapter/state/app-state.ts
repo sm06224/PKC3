@@ -525,6 +525,17 @@ export interface AppState {
    * ⚠ 出す寿命は**次の知らせまで** ── 消す口を別に作らない。
    */
   notice: string | null;
+  /**
+   * 🔴 **押したのに入らなかったタグ**(#640 案 A。user 裁定 2026-09-04)── 欄へ戻して出す字。
+   *
+   * ⚠ タグを打つ欄は**押した瞬間に字を消す**(次の 1 つを打てるように)が、断りは
+   *   効果層から**後で**来る。`#請求 #未払 #今月` と打って 3 つ目だけ上限に当たった人は、
+   *   欄が空で理由の帯に名前が 1 つ出るだけだった ── 直すには打ち直しである。
+   * 🔑 だから入らなかった名前を**欄ごとに**持ち、描く側が欄へ戻す(`filer.ts`)。
+   *   全部通れば空のまま(これまでどおり)。押すたびに `CLEAR_REFUSED_TAGS` で 1 回ぶんへ戻す。
+   * ⚠ 欄の名前は `TAG_INPUT_FIELDS` ── binder の `TAG_INPUT_ADD`(#639)と同じ綴りである。
+   */
+  refusedTags: Readonly<Record<TagInputField, readonly string[]>>;
   /** ゴミ箱 panel(filer)。開いた時点のスナップショット + 明示更新。 */
   trashPanel: { items: readonly TrashItem[] } | null;
   /**
@@ -753,6 +764,13 @@ export interface BodyLock {
  * ⚠ 書込のほうを先に見る:書込中に編集へ入ることはできないので、両方立つことは
  * 無いが、順序を決めておかないと将来の変更で曖昧になる。
  */
+/**
+ * 🔴 **入らなかったタグを戻す欄**(#640)。⚠ 綴りは `data-pkc-field` そのもの ──
+ *   描く側(`filer.ts`)がこの名前で `<input>` を引く。
+ */
+export const TAG_INPUT_FIELDS = ['smart-cond', 'bulk-tag'] as const;
+export type TagInputField = (typeof TAG_INPUT_FIELDS)[number];
+
 export function bodyLockOf(state: AppState): BodyLock | null {
   if (state.writeLock) return { lid: state.writeLock.lid, holder: 'writing' };
   // ⚠ タイル設定の書込中も**書込中**として見せる(編集に入れないので、
@@ -808,6 +826,7 @@ export const initialState: AppState = {
   revisionPanel: null,
   revisionPreview: null,
   notice: null,
+  refusedTags: { 'smart-cond': [], 'bulk-tag': [] },
   trashPanel: null,
   linkedFiles: new Map(),
   writeLock: null,
@@ -1143,12 +1162,29 @@ export type UserAction =
    * ⚠ 相手は**いま表に出ている印**だけ(`delete-selected` と同じ規則 ── 画面に
    *   無いものを触らない)。呼び側がその集合を渡す。
    */
-  | { type: 'BULK_TAG'; lids: readonly string[]; tags: readonly string[]; mode: 'add' | 'remove' }
+  | {
+      type: 'BULK_TAG';
+      lids: readonly string[];
+      tags: readonly string[];
+      mode: 'add' | 'remove';
+      /**
+       * ⚠ **どの欄から来たか**(#640)── 入らなかった名前をその欄へ戻すため。
+       *   欄を持たない呼び手(札を外す `untag-entry` 等)は渡さない = 戻す先が無い。
+       */
+      field?: TagInputField;
+    }
   /**
    * 🔴 **一時の知らせ**(#402 ①)。⚠ `OP_FAILED` と混ぜない ── あちらは赤い帯で、
    *   こちらは成功の内訳である(「3 件は既に付いていました」を失敗にしない)。
    */
   | { type: 'OP_NOTICE'; message: string }
+  /**
+   * 🔴 **押したのに入らなかったタグ**(#640 案 A)── 効果層が断った名前を欄へ戻すために撃つ。
+   * ⚠ 足す(1 回の頼みの中で 1 つずつ届く ── スマートフォルダの条件は 1 タグ 1 往復)。
+   */
+  | { type: 'TAGS_REFUSED'; field: TagInputField; tags: readonly string[] }
+  /** 押すたびに 1 回ぶんへ戻す(#640)── 前の回の名前を次の回の字に混ぜない。 */
+  | { type: 'CLEAR_REFUSED_TAGS'; field: TagInputField }
   /**
    * 🔴 **タグの候補が要る**(#494 段②)。⚠ 欄に焦点が当たったときに撃つ ──
    * 既に持っていれば reducer が**何もしない**(押すたびに全走査しない)。
@@ -1592,6 +1628,8 @@ export type DomainEvent =
       /** ⚠ **並び**(#637)── 1 回の頼みを 2 通の知らせに割らない。 */
       tags: readonly string[];
       mode: 'add' | 'remove';
+      /** ⚠ 入らなかった名前を戻す欄(#640)。無ければ戻さない。 */
+      field?: TagInputField;
       targets: readonly {
         lid: string;
         title: string;
@@ -3640,7 +3678,15 @@ function reduceCore(
       if (targets.length === 0) return { state, events: [] };
       return {
         state,
-        events: [{ type: 'REQUEST_BULK_TAG', tags, mode: action.mode, targets }],
+        events: [
+          {
+            type: 'REQUEST_BULK_TAG',
+            tags,
+            mode: action.mode,
+            targets,
+            ...(action.field === undefined ? {} : { field: action.field }),
+          },
+        ],
       };
     }
     case 'SHOW_HISTORY': {
@@ -4261,6 +4307,27 @@ function reduceCore(
      */
     case 'SET_TAG_SUGGESTIONS':
       return { state: { ...state, tagSuggestions: action.tags }, events: [] };
+    /**
+     * 🔴 **入らなかったタグを欄ごとに積む**(#640 案 A)。⚠ 同じ名前は 1 度だけ ──
+     *   まとめて付ける経路は名前ごとに 1 回しか言わないが、二重に撃たれても欄に
+     *   `#今月 #今月` と出ないように、ここで留める。並びは**届いた順**(= 打った順)。
+     */
+    case 'TAGS_REFUSED': {
+      const had = state.refusedTags[action.field];
+      const add = action.tags.filter((t) => !had.includes(t));
+      if (add.length === 0) return { state, events: [] };
+      return {
+        state: { ...state, refusedTags: { ...state.refusedTags, [action.field]: [...had, ...add] } },
+        events: [],
+      };
+    }
+    case 'CLEAR_REFUSED_TAGS': {
+      if (state.refusedTags[action.field].length === 0) return { state, events: [] };
+      return {
+        state: { ...state, refusedTags: { ...state.refusedTags, [action.field]: [] } },
+        events: [],
+      };
+    }
     case 'OP_FAILED':
       // 非致命: 通知のみ。phase は動かさない(kanban 等の操作性を殺さない)
       return { state: { ...state, error: action.error }, events: [] };

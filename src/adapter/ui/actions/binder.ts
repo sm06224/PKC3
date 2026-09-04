@@ -927,7 +927,9 @@ function runBulkTag(
   // 🔑 **1 回の頼みは 1 回で撃つ**(#637 の着地前レビュー)── 1 つずつ撃つと、
   //   知らせが 1 通ずつ出て**後の 1 通が前を塗り潰す**(12 件に「請求」が付いたのに
   //   「0 件に付けました」と出る)。並びのまま渡せば、答えも 1 通で全部を語れる。
-  dispatcher.dispatch({ type: 'BULK_TAG', lids, tags, mode });
+  // 🔑 前の回に入らなかった名前は、この回の字に混ぜない(#640 案 A)
+  dispatcher.dispatch({ type: 'CLEAR_REFUSED_TAGS', field: 'bulk-tag' });
+  dispatcher.dispatch({ type: 'BULK_TAG', lids, tags, mode, field: 'bulk-tag' });
   // 🔑 通したら欄を空にする(次の 1 つを打てる)── ⚠ 断ったときは残す
   if (field) field.value = '';
 }
@@ -2957,8 +2959,12 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: '集める条件にするタグを入力してください' });
       return;
     }
+    // 🔑 前の回に入らなかった名前は、この回の字に混ぜない(#640 案 A)
+    dispatcher.dispatch({ type: 'CLEAR_REFUSED_TAGS', field: 'smart-cond' });
     for (const tag of tags) dispatcher.dispatch({ type: 'SMART_COND', lid, tag, mode: 'add' });
-    // 🔑 通したら欄を空にする(次の 1 つを打てる)── ⚠ 断ったときは残す
+    // 🔑 通したら欄を空にする(次の 1 つを打てる)── ⚠ 断ったときは残す。
+    //    ⚠ 断りは後から来る ── 入らなかった名前は効果層が `TAGS_REFUSED` で返し、
+    //    描く側(`filer.ts`)が欄へ戻す(#640 案 A)
     if (field) field.value = '';
   },
   /**

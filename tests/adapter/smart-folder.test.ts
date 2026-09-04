@@ -1363,3 +1363,104 @@ describe('条件を 2 つ打つと、2 つとも本文に着く(#637)', () => {
     expect(readSmartSpec(s.disk.s1!).tags).toEqual(['請求']);
   });
 });
+
+/**
+ * 🔴 **押したのに入らなかった条件のタグは、欄に残る**(#640 案 A。user 裁定 2026-09-04)。
+ *
+ * ⚠ スマートフォルダの条件は **1 タグ 1 往復**なので、断りは 1 つずつ後から来る ──
+ *   欄の字は state(`refusedTags`)から描く。観測点は**欄の字そのもの**。
+ * ⚠ 面(`FilerRenderer`)と effect の**両方**を載せる ── 面だけの `mountCond` では
+ *   断りが 1 度も来ない(誰も書かないので)。
+ */
+describe('入らなかった条件のタグは欄に残る(#640 案 A)', () => {
+  function mount(disk: Record<string, string>) {
+    document.body.textContent = '';
+    const s = setup(disk);
+    const root = document.createElement('div');
+    document.body.append(root);
+    buildShell(root);
+    const region = document.createElement('div');
+    root.append(region);
+    const r = new FilerRenderer(region);
+    s.d.onState((st) => r.render(st));
+    bindActions(root, s.d, {});
+    s.d.dispatch({ type: 'SET_SCOPE', lid: 's1' });
+    r.render(s.d.getState());
+    const field = (): HTMLInputElement =>
+      region.querySelector<HTMLInputElement>('[data-pkc-field="smart-cond"]')!;
+    const press = (text: string): void => {
+      field().value = text;
+      region.querySelector<HTMLElement>('[data-pkc-action="smart-cond-add"]')!.click();
+    };
+    return { ...s, region, field, press };
+  }
+  /** 条件を n 個持つスマートフォルダの本文。 */
+  const withTags = (n: number): string =>
+    `---\n${SMART_TAGS_KEY}: [${Array.from({ length: n }, (_, i) => `t${String(i)}`).join(', ')}]\n---\n説明\n`;
+
+  it('🔴 3 つ打って 3 つ目だけ上限に当たると、欄は `#今月` になる', async () => {
+    const m = mount({ s1: withTags(MAX_SMART_TAGS - 2) });
+    await tick();
+    m.press('#請求 #未払 #今月');
+    expect(m.field().value, '押した瞬間に欄が空になっていない').toBe('');
+    await tick(80);
+    const tags = readSmartSpec(m.disk.s1!).tags;
+    // ⚠ 前提 ── 2 つは入り、3 つ目だけ上限に当たった
+    expect(tags, '前提: 2 つが入っていない').toEqual(expect.arrayContaining(['請求', '未払']));
+    expect(tags, '前提: 上限を超えて書いた').not.toContain('今月');
+    expect(m.errors.join(' / '), '前提: 断りが出ていない').toContain('「今月」は足せませんでした');
+    expect(m.field().value, '入らなかった名前が欄に戻っていない').toBe('#今月');
+  });
+
+  it('🔴 全部通ったら欄は空のまま(これまでどおり)', async () => {
+    const m = mount({ s1: withTags(0) });
+    await tick();
+    m.press('#請求 #未払');
+    await tick(80);
+    expect(readSmartSpec(m.disk.s1!).tags, '前提: 入っていない').toEqual(['請求', '未払']);
+    expect(m.field().value, '通ったのに欄に字が残った').toBe('');
+  });
+
+  it('🔴 2 つ断られたら 2 つ、打った順に残る', async () => {
+    const m = mount({ s1: withTags(MAX_SMART_TAGS - 1) });
+    await tick();
+    m.press('#請求 #今月 #未払');
+    await tick(80);
+    expect(readSmartSpec(m.disk.s1!).tags, '前提: 1 つ目が入っていない').toContain('請求');
+    expect(m.field().value, '順序か個数が違う').toBe('#今月 #未払');
+  });
+
+  it('🔑 直して押し直すと、前の回の名前は混ざらない', async () => {
+    const m = mount({ s1: withTags(MAX_SMART_TAGS) });
+    await tick();
+    m.press('#今月');
+    await tick(80);
+    expect(m.field().value, '前提: 戻っていない').toBe('#今月');
+    m.press('#来月');
+    await tick(80);
+    expect(m.field().value, '前の回の名前が混ざった').toBe('#来月');
+  });
+
+  /**
+   * ⚠ reducer は**同じ名前を 1 度だけ**積む ── 二重に撃たれても欄に `#今月 #今月` と出ない。
+   *   並びは届いた順(= 打った順)。
+   */
+  it('⚠ 同じ名前は 1 度だけ積む / 押した回の始めに空へ戻す(reducer)', () => {
+    let st = reduce(initialState, { type: 'TAGS_REFUSED', field: 'smart-cond', tags: ['今月'] }).state;
+    st = reduce(st, { type: 'TAGS_REFUSED', field: 'smart-cond', tags: ['今月', '未払'] }).state;
+    expect(st.refusedTags['smart-cond'], '二重に積んだ / 順が違う').toEqual(['今月', '未払']);
+    // ⚠ 別の欄には混ざらない
+    expect(st.refusedTags['bulk-tag']).toEqual([]);
+    st = reduce(st, { type: 'CLEAR_REFUSED_TAGS', field: 'smart-cond' }).state;
+    expect(st.refusedTags['smart-cond']).toEqual([]);
+  });
+
+  it('⚠ 既に条件に在るタグ(黙ってよい断り)は欄へ戻さない', async () => {
+    const m = mount({ s1: `---\n${SMART_TAGS_KEY}: [請求]\n---\n説明\n` });
+    await tick();
+    m.press('#請求');
+    await tick(80);
+    expect(m.errors, '黙ってよい場面で赤い帯を出した').toEqual([]);
+    expect(m.field().value, '入っている名前を「入らなかった」として戻した').toBe('');
+  });
+});

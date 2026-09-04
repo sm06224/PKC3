@@ -424,3 +424,88 @@ describe('まとめて付ける帯で複数のタグ(#637)', () => {
     expect(readTags(s.disk['e1']!), '意図した空白入りの名前を割った').toEqual(['買い物 家事']);
   });
 });
+
+/**
+ * 🔴 **押したのに入らなかった名前は、欄に残る**(#640 案 A。user 裁定 2026-09-04)。
+ *
+ * > user の物語: `#請求 #未払 #今月` と打って押した。3 つ目だけ上限で付かなかった。
+ * > ⚠ 直す前は欄が**空**で、知らせに名前が出るだけ ── 直すには 3 つとも打ち直し。
+ *
+ * 🔑 観測点は**欄の字そのもの**(`<input>` の value)── 「知らせに名前が出る」は
+ *   #658 が既に見ている。ここは**押し直せる形で戻ること**を見る。
+ */
+describe('入らなかったタグは欄に残る(#640 案 A)', () => {
+  /** 上限まで埋めた本文。⚠ `keep` を先頭に含めて MAX_TAGS 個(既に付いている側の対照)。 */
+  function fullWith(keep: readonly string[]): string {
+    const rest = Array.from({ length: MAX_TAGS - keep.length }, (_, i) => `t${String(i)}`);
+    return `---\ntags: [${[...keep, ...rest].join(', ')}]\n---\nあ\n`;
+  }
+  const field = (s: ReturnType<typeof setup>): HTMLInputElement =>
+    s.q<HTMLInputElement>('[data-pkc-field="bulk-tag"]')!;
+
+  it('🔴 3 つ打って 3 つ目だけ上限で付かなかったら、欄は `#今月` になる', async () => {
+    const s = setup({ e1: fullWith(['請求', '未払']), e2: 'い\n' });
+    mark(s, ['e1', 'e2']);
+    await tick();
+    expect(readTags(s.disk['e1']!).length, '前提: 上限に達していない').toBe(MAX_TAGS);
+    press(s, '#請求 #未払 #今月', 'add');
+    expect(field(s).value, '押した瞬間に欄が空になっていない').toBe('');
+    await tick(40);
+    // ⚠ 前提 ── e2 には 3 つとも付き、e1 では「今月」だけが上限に当たった
+    expect(readTags(s.disk['e2']!), '前提: e2 に 3 つ付いていない').toEqual(['請求', '未払', '今月']);
+    expect(readTags(s.disk['e1']!), '前提: e1 に今月が入った').not.toContain('今月');
+    expect(field(s).value, '入らなかった名前が欄に戻っていない').toBe('#今月');
+  });
+
+  it('🔴 全部通ったら欄は空のまま(これまでどおり)', async () => {
+    const s = setup({ e1: 'あ\n', e2: 'い\n' });
+    mark(s, ['e1', 'e2']);
+    await tick();
+    press(s, '#請求 #未払', 'add');
+    await tick(40);
+    expect(readTags(s.disk['e1']!), '前提: 付いていない').toEqual(['請求', '未払']);
+    expect(field(s).value, '通ったのに欄に字が残った').toBe('');
+  });
+
+  it('🔴 2 つ断られたら 2 つ、打った順に残る', async () => {
+    const s = setup({ e1: fullWith(['請求']), e2: 'い\n' });
+    mark(s, ['e1', 'e2']);
+    await tick();
+    press(s, '#今月 #請求 #未払', 'add');
+    await tick(40);
+    expect(field(s).value, '順序か個数が違う').toBe('#今月 #未払');
+  });
+
+  it('🔑 直して押し直すと、前の回の名前は混ざらない', async () => {
+    const s = setup({ e1: fullWith(['請求']), e2: 'い\n' });
+    mark(s, ['e1', 'e2']);
+    await tick();
+    press(s, '#今月', 'add');
+    await tick(40);
+    expect(field(s).value, '前提: 戻っていない').toBe('#今月');
+    press(s, '#来月', 'add');
+    await tick(40);
+    expect(field(s).value, '前の回の名前が混ざった').toBe('#来月');
+  });
+
+  it('⚠ 断りが届く前に打ち始めていたら、その字を奪わない', async () => {
+    const s = setup({ e1: fullWith(['請求']), e2: 'い\n' });
+    mark(s, ['e1', 'e2']);
+    await tick();
+    press(s, '#今月', 'add');
+    field(s).value = '#来';
+    await tick(40);
+    expect(field(s).value, '打ちかけを上書きした').toBe('#来');
+  });
+
+  it('対照群 ── 欄を持たない呼び手(情報ペインの札を外す等)は欄へ戻さない', async () => {
+    const s = setup({ e1: fullWith(['請求']), e2: 'い\n' });
+    mark(s, ['e1', 'e2']);
+    await tick();
+    // ⚠ `field` を渡さない BULK_TAG(= 欄の無い経路)── 断られても欄は空のまま
+    s.d.dispatch({ type: 'BULK_TAG', lids: ['e1'], tags: ['今月'], mode: 'add' });
+    await tick(40);
+    expect(readTags(s.disk['e1']!), '前提: 上限に当たっていない').not.toContain('今月');
+    expect(field(s).value, '欄の無い経路の断りを欄へ戻した').toBe('');
+  });
+});

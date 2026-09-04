@@ -49,6 +49,7 @@ import type { ContactScan } from '@features/contact/contact-card';
 import type { SnippetScan } from '@features/snippet/snippet-table';
 import type { Relation } from '@core/model/entry-meta';
 import type { Dispatcher } from './dispatcher';
+import type { TagInputField } from './app-state';
 
 /**
  * effect 層が必要とする store 面(test では fake を注入)。
@@ -396,6 +397,8 @@ export function connectStoreEffects(
     apply: (spec: SmartSpec) => SmartCondResult,
     /** ⚠ 断り文に出す**打った字**(#640)。列で引く条件(タグではない)では渡さない。 */
     tag?: string,
+    /** ⚠ 断られた字を戻す欄(#640 案 A)。足すときだけ渡す(外すときは欄に字が無い)。 */
+    refusedInto?: TagInputField,
   ): void => {
     enqueue(async () => {
       if (disposed) return;
@@ -405,8 +408,17 @@ export function connectStoreEffects(
         const res = apply(readSmartSpec(body));
         if (!res.ok) {
           const why = smartCondError(res.reason, tag);
-          if (why !== null) dispatcher.dispatch({ type: 'OP_FAILED', error: why });
-          else dispatcher.dispatch({ type: 'SMART_RESCAN', lid: t.lid });
+          if (why !== null) {
+            dispatcher.dispatch({ type: 'OP_FAILED', error: why });
+            /**
+             * 🔴 **断った字は欄へ戻す**(#640 案 A)── 理由の帯に名前を出すだけでは、
+             *   3 つ打って 3 つ目だけ断られた人が**打ち直し**になる。欄に `#今月` が
+             *   残れば、そのまま直すか 1 つ外して押し直せる。
+             * ⚠ 黙ってよい断り(`unchanged`)は戻さない ── 入っているのだから。
+             */
+            if (refusedInto !== undefined && tag !== undefined && tag !== '')
+              dispatcher.dispatch({ type: 'TAGS_REFUSED', field: refusedInto, tags: [tag] });
+          } else dispatcher.dispatch({ type: 'SMART_RESCAN', lid: t.lid });
           return;
         }
         const newBody = writeSmartSpec(body, res.spec);
@@ -566,7 +578,12 @@ export function connectStoreEffects(
         const t = ev.target;
         const tag = ev.tag;
         const mode = ev.mode;
-        writeSmartCond(t, (spec) => withSmartTag(spec, tag, mode), tag);
+        writeSmartCond(
+          t,
+          (spec) => withSmartTag(spec, tag, mode),
+          tag,
+          mode === 'add' ? 'smart-cond' : undefined,
+        );
         break;
       }
       /**
@@ -1383,6 +1400,17 @@ export function connectStoreEffects(
           if (stillInBody > 0)
             parts.push(`${stillInBody} 件は本文の中にも書いてあるので、まだそのタグが付いています`);
           dispatcher.dispatch({ type: 'OP_NOTICE', message: parts.join(' / ') });
+          /**
+           * 🔴 **上限で入らなかった名前を欄へ戻す**(#640 案 A)── 知らせの字だけでは
+           *   打ち直しになる。⚠ 「既に付いていた」は戻さない(入っている)。
+           * ⚠ 1 件でも入らなかった名前は戻す ── 12 件のうち 1 件だけ上限だった名前も、
+           *   その 1 件に付けるにはもう一度押すことになるからである。
+           */
+          if (ev.field !== undefined) {
+            const left = ev.tags.filter((tag) => (limitBy.get(tag) ?? 0) > 0);
+            if (left.length > 0)
+              dispatcher.dispatch({ type: 'TAGS_REFUSED', field: ev.field, tags: left });
+          }
         });
         break;
       case 'REQUEST_REVISION_LIST':
