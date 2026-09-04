@@ -451,7 +451,8 @@ function currentAppearance(): ManualAppearance {
 
 /**
  * 🔴 持ち歩ける 1 枚に焼き込んだマニュアルの page(#648 段③)。⚠ document ごとに 1 つ ──
- *   `blob:` URL は最初に押したとき 1 回だけ作る(`portable-manual.ts` の「寿命」)。
+ *   `blob:` URL は窓 1 枚に 1 回(開いている間は同じ URL、閉じたら revoke して次は新しく作る
+ *   ── `portable-manual.ts` の「寿命」)。
  *   素の PKC3(焼き込みが無い)では `url()` が `null` を返すだけで、経路は変わらない。
  */
 const portableManual = portableManualPage(document);
@@ -496,6 +497,8 @@ function openManualTile(
       });
       return win;
     }
+    // 🔴 窓の寿命を見張る ── 閉じたら blob を返す(持ち歩ける 1 枚だけ。素の PKC3 では何もしない)
+    portableManual.watch(win.window);
     // 🔑 **既に開いていた回も、押した手応えを返す**(前へ出せたか分からないので言う)
     if (win.reused)
       notify('マニュアルのウィンドウを前に出しました(見えないときは、ウィンドウを切り替えてください)');

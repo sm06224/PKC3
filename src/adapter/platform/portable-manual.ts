@@ -22,15 +22,20 @@
  *   JS の文字列に持つと、押されもしないマニュアルが起動時から heap に載る。
  *   `takeEmbeddedManualPage` は取り出した瞬間に `<script>` を DOM から外す(DB 画像の
  *   `takeEmbeddedImage` と同じ作法)。
- * - `Blob` の bytes は heap ではなくブラウザの blob 置き場に居る。URL は**この document
- *   (opener)の寿命で 1 つだけ**作り、2 回目以降は同じ URL を返す ── 押すたび新しい blob を
- *   作ると、古い URL を握っている窓(F5 で読み直す)を壊してしまう。
- * - ⚠ **`revokeObjectURL` は呼ばない**。窓が閉じたことを opener は観測できない
- *   (`location.replace` の先の document に listener を張れない ── 張っても navigate で
- *   Window が入れ替わる)。ブラウザは **opener の document が unload されたとき**に
- *   blob URL を回収する(仕様どおり)ので、寿命の終端はそこである。
- *   帰結:**アプリの側を読み直した後は、開いたままの窓で F5 が効かない**(URL が死ぬ)。
- *   その場合は窓を閉じてもう一度押せばよい ── マニュアル §4-4 に書いてある。
+ * - `Blob` の bytes は heap ではなくブラウザの blob 置き場に居る。URL の寿命は
+ *   **窓 1 枚**である ── 窓が開いている間は同じ URL を返し(押すたび新しい blob を作ると、
+ *   古い URL を握っている窓の F5 が壊れる)、**窓が閉じたら `revokeObjectURL` して器を空にする**。
+ *   次に押したときは新しく作る。
+ * - 🔴 閉じたことは **`win.closed` を 1 秒間隔で見張って**知る(`watch`)。`location.replace`
+ *   の先の document には listener を張れない(navigate で Window が入れ替わる)ので、
+ *   見張りしか手が無い。⚠ 見張りは窓が閉じたら**必ず止める**(常駐を残さない)。
+ *   ⚠ 開いている間は revoke しない(F5 が効く、を壊さない)。
+ * - ⚠ 見張りが鳴る前(1 秒の内)に閉じて押し直した回のために、`url()` は先に見張りの
+ *   窓を検める ── 閉じていれば古い URL を返さず、その場で回収して新しく作る(そうしないと
+ *   新しい窓が古い URL で開き、1 秒後の見張りがそれを消す)。
+ * - 帰結:**アプリの側を読み直した後は、開いたままの窓で F5 が効かない**(ブラウザが
+ *   opener の unload で URL を回収する)。その場合は窓を閉じてもう一度押せばよい ──
+ *   マニュアル §4-4 に書いてある。
  *
  * ## 🔑 見え方は blob に**焼いてから**開く
  *
@@ -90,29 +95,77 @@ export function bakeAppearance(html: string, a: ManualAppearance | undefined): s
 export interface PortableManualPage {
   /**
    * 焼き込んだ page の `blob:` URL。**無ければ `null`**(焼き込みの無い 1 枚 = 段①へ)。
-   * ⚠ 最初の 1 回だけ作り、以後は同じ URL を返す(上の「寿命」)。
+   * ⚠ 窓が開いている間は同じ URL を返す(上の「寿命」)。閉じた後に呼べば新しく作る。
    */
   url(appearance?: ManualAppearance): string | null;
+  /**
+   * 🔴 窓を開いたら呼ぶ ── 閉じたら `revokeObjectURL` して器を空にする(見張りは 1 秒間隔)。
+   * ⚠ 同じ窓で何度呼んでも見張りは 1 本。URL を渡していない(素の PKC3)なら何もしない。
+   */
+  watch(win: { readonly closed: boolean }): void;
+}
+
+/** 見張りの間隔(ms)。⚠ 窓が閉じてから最長これだけ blob が残る ── 1 秒なら user には見えない。 */
+export const MANUAL_WINDOW_WATCH_MS = 1000;
+
+export interface PortableManualPageDeps {
+  /** `URL.createObjectURL`(test が差せる)。 */
+  readonly createUrl?: (blob: Blob) => string;
+  /** `URL.revokeObjectURL`(test が差せる)。 */
+  readonly revokeUrl?: (url: string) => void;
 }
 
 /**
  * opener の document ごとに 1 つ作る(`main.ts`)。
- * @param createUrl `URL.createObjectURL`(test が差せる)
+ * ⚠ 焼き込みは document に 1 つしか無いので、取り出した HTML は**器の中に控える**
+ *   (2 枚目の窓のために再び blob を作れるように)。控えるのは JS の文字列 1 本 = 約 400 KB
+ *   ── 最初に押すまでは DOM に置いたまま(上の「寿命」)。
  */
 export function portableManualPage(
   doc: Document,
-  createUrl: (blob: Blob) => string = (blob) => URL.createObjectURL(blob),
+  deps: PortableManualPageDeps = {},
 ): PortableManualPage {
+  const createUrl = deps.createUrl ?? ((blob) => URL.createObjectURL(blob));
+  const revokeUrl = deps.revokeUrl ?? ((u) => URL.revokeObjectURL(u));
+  /** 焼き込みの HTML(取り出したら控える。`undefined` = まだ取り出していない / `null` = 無い)。 */
+  let html: string | null | undefined;
   let url: string | null = null;
+  let watched: { readonly closed: boolean } | null = null;
+  let timer: ReturnType<typeof setInterval> | null = null;
+
+  const stopWatching = (): void => {
+    if (timer !== null) clearInterval(timer);
+    timer = null;
+    watched = null;
+  };
+  /** 窓の寿命が終わっていれば、URL を返して器を空にする。 */
+  const release = (): void => {
+    stopWatching();
+    if (url !== null) revokeUrl(url);
+    url = null;
+  };
+  /** 見張っている窓が既に閉じていれば、その場で回収する(見張りが鳴るのを待たない)。 */
+  const sweep = (): void => {
+    if (watched !== null && watched.closed) release();
+  };
+
   return {
     url(appearance) {
+      sweep();
       if (url !== null) return url;
-      const html = takeEmbeddedManualPage(doc);
+      if (html === undefined) html = takeEmbeddedManualPage(doc);
       if (html === null) return null;
       url = createUrl(
         new Blob([bakeAppearance(html, appearance)], { type: 'text/html;charset=utf-8' }),
       );
       return url;
+    },
+    watch(win) {
+      if (url === null) return;
+      if (watched === win && timer !== null) return;
+      stopWatching();
+      watched = win;
+      timer = setInterval(sweep, MANUAL_WINDOW_WATCH_MS);
     },
   };
 }

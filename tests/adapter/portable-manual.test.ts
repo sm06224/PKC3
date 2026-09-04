@@ -8,16 +8,19 @@
  *    本物の page で(CLAUDE.md §7「本物どうしを繋ぐ test を 1 本置く」。間に立つのは
  *    `DOMParser` だけで、封筒を 1 バイトも作らせない)
  * 2. 取り出したら DOM から外す(350 KB の字を document の寿命ぶん抱えない)
- * 3. `blob:` URL は document ごとに 1 回だけ作り、2 回目は同じ URL(F5 する窓を壊さない)
+ * 3. `blob:` URL の寿命は**窓 1 枚** ── 開いている間は同じ URL(F5 する窓を壊さない)、
+ *    閉じたら `revokeObjectURL` して器を空にし、次は新しく作る(不可侵指示「ObjectURL は
+ *    表示の寿命終端で revoke」)。見張りは閉じたら止まる(常駐を残さない)
  * 4. 見え方(配色 / 文字の大きさ)を blob に焼いてから開く(`file://` 由来の blob は
  *    保存に触れないことがある)── 焼いた属性を boot script が採ることは
  *    `tests/features/manual-page.test.ts` が見る
  */
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   bakeAppearance,
   MANUAL_PAGE_SELECTOR,
+  MANUAL_WINDOW_WATCH_MS,
   portableManualPage,
   takeEmbeddedManualPage,
 } from '../../src/adapter/platform/portable-manual';
@@ -150,15 +153,27 @@ describe('見え方を焼く(bakeAppearance)', () => {
 
 describe('blob: URL(portableManualPage)', () => {
   const made: Blob[] = [];
+  const revoked: string[] = [];
   const createUrl = (b: Blob): string => {
     made.push(b);
     return `blob:null/${made.length}`;
   };
-
-  it('🔴 1 回だけ作り、2 回目は同じ URL(F5 する窓の URL を殺さない)', async () => {
+  const revokeUrl = (u: string): void => {
+    revoked.push(u);
+  };
+  const fresh = (html = folded()) => {
     made.length = 0;
-    const page = portableManualPage(parse(folded()), createUrl);
-    const first = page.url({ theme: 'nord', textSize: null, bg: null, fg: null });
+    revoked.length = 0;
+    return portableManualPage(parse(html), { createUrl, revokeUrl });
+  };
+  const nord = { theme: 'nord', textSize: null, bg: null, fg: null };
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('🔴 開いている間は同じ URL(F5 する窓の URL を殺さない)', async () => {
+    const page = fresh();
+    const first = page.url(nord);
     expect(first).toBe('blob:null/1');
     // 見え方を変えて押しても作り直さない(読んでいた所を失わせない ── 当て直しは窓の側)
     expect(page.url({ theme: 'dracula', textSize: '17px', bg: null, fg: null })).toBe(first);
@@ -169,12 +184,91 @@ describe('blob: URL(portableManualPage)', () => {
     expect(html.length).toBeGreaterThan(100_000);
   });
 
-  it('焼き込みが無い 1 枚では null(段①の逃げ道へ。blob は作らない)', () => {
-    made.length = 0;
-    const page = portableManualPage(parse('<html><body></body></html>'), createUrl);
+  /**
+   * 🔴 **窓が閉じたら blob を返す**(不可侵指示「ObjectURL は表示の寿命終端で revoke」)。
+   * 見るのは 3 つ ── revoke が **1 回**呼ばれる / 見張りが**止まる**(その後いくら時間が
+   * 進んでも 2 度目は無い)/ 次の `url()` は**新しい blob**。
+   */
+  it('🔴 窓が閉じたら revoke が 1 回、見張りが止まり、次の url() は新しい blob', () => {
+    vi.useFakeTimers();
+    const page = fresh();
+    const win = { closed: false };
+    const first = page.url(nord);
+    page.watch(win);
+    win.closed = true;
+    vi.advanceTimersByTime(MANUAL_WINDOW_WATCH_MS);
+    expect(revoked, '閉じたのに revoke していない').toEqual([first]);
+    // 見張りが止まっている ── 時間を進めても 2 度目の revoke は無い
+    vi.advanceTimersByTime(MANUAL_WINDOW_WATCH_MS * 10);
+    expect(revoked).toHaveLength(1);
+    expect(vi.getTimerCount(), '見張りが残っている(常駐)').toBe(0);
+    // 次に押したら新しく作る(古い URL は死んでいる)
+    const second = page.url(nord);
+    expect(second).toBe('blob:null/2');
+    expect(second).not.toBe(first);
+    expect(made).toHaveLength(2);
+  });
+
+  it('🔴 対照群 ── 開いている間は、いくら時間が進んでも revoke されない', () => {
+    vi.useFakeTimers();
+    const page = fresh();
+    const win = { closed: false };
+    const first = page.url(nord);
+    page.watch(win);
+    vi.advanceTimersByTime(MANUAL_WINDOW_WATCH_MS * 60);
+    expect(revoked, '開いているのに revoke した(F5 が壊れる)').toEqual([]);
+    expect(page.url(nord)).toBe(first);
+    expect(made).toHaveLength(1);
+    // 見張りは 1 本だけ生きている
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it('同じ窓で watch を何度呼んでも(再利用の回)、見張りは 1 本のまま', () => {
+    vi.useFakeTimers();
+    const page = fresh();
+    const win = { closed: false };
+    page.url(nord);
+    page.watch(win);
+    page.watch(win);
+    page.watch(win);
+    expect(vi.getTimerCount()).toBe(1);
+    win.closed = true;
+    vi.advanceTimersByTime(MANUAL_WINDOW_WATCH_MS);
+    expect(revoked).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  /**
+   * ⚠ 閉じてから見張りが鳴る前(1 秒の内)に押し直した回 ── 古い URL を返すと、新しい窓が
+   *   その URL で開いた直後に見張りが鳴って**新しい窓の URL を消す**。`url()` は先に窓を検める。
+   */
+  it('🔴 閉じた直後(見張りが鳴る前)に押しても、古い URL を返さない', () => {
+    vi.useFakeTimers();
+    const page = fresh();
+    const win = { closed: false };
+    const first = page.url(nord);
+    page.watch(win);
+    win.closed = true;
+    // 見張りはまだ鳴っていない
+    const second = page.url(nord);
+    expect(second).not.toBe(first);
+    expect(revoked).toEqual([first]);
+    // 新しい窓を見張る ── 古い見張りは止まっている(新しい URL を消す見張りが残っていない)
+    const win2 = { closed: false };
+    page.watch(win2);
+    vi.advanceTimersByTime(MANUAL_WINDOW_WATCH_MS * 5);
+    expect(revoked, '新しい窓の URL を消した').toEqual([first]);
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it('焼き込みが無い 1 枚では null(段①の逃げ道へ。blob も見張りも作らない)', () => {
+    vi.useFakeTimers();
+    const page = fresh('<html><body></body></html>');
     expect(page.url()).toBeNull();
     expect(page.url()).toBeNull();
+    page.watch({ closed: false });
     expect(made).toHaveLength(0);
+    expect(vi.getTimerCount(), '素の PKC3 で見張りを作っている').toBe(0);
   });
 });
 
@@ -191,5 +285,7 @@ describe('main.ts の配線(原文 pin)', () => {
     expect(code, '1 枚では pageUrl に blob の口が繋がっていない').toMatch(
       /pageUrl:\s*readBundle\(document\) === null\s*\?[\s\S]{0,120}:\s*portableManual\.url\(appearance\)/,
     );
+    // 🔴 開いた窓を見張る(閉じたら blob を返す)── 配線が落ちると blob が opener の寿命まで残る
+    expect(code, '開いた窓を見張っていない').toMatch(/portableManual\.watch\(win\.window\)/);
   });
 });

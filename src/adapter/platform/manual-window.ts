@@ -122,6 +122,11 @@ export interface ManualAppearance {
 export interface ManualWindowHandle {
   close(): void;
   /**
+   * 開いた窓そのもの。⚠ 持ち歩ける 1 枚では `portable-manual.ts` が **`closed` を見張って
+   * blob を返す**(#648 段③)── 窓の寿命を知る口はこれしか無い。
+   */
+  readonly window: Window;
+  /**
    * 🔴 **既に開いていた窓を前へ出しただけか**(#645)。
    *
    * ⚠ 呼び側はこれを見て**知らせを出す** ── `focus()` が窓を手前へ出せるかは
@@ -232,7 +237,7 @@ export async function openManualWindow(
      */
     applyAppearance(win, deps.appearance);
     bringToFront(win);
-    return { close: () => closeQuietly(win), reused: true, swapped: false };
+    return { close: () => closeQuietly(win), window: win, reused: true, swapped: false };
   }
   // 🔑 古い印の窓が在った = 入れ替える(user は読んでいた所を失う ── 呼び側が一言出す)
   const swapped = before !== null;
@@ -267,7 +272,7 @@ export async function openManualWindow(
      */
     win.location.replace(deps.pageUrl);
     bringToFront(win);
-    return { close: () => closeQuietly(win), reused: false, swapped };
+    return { close: () => closeQuietly(win), window: win, reused: false, swapped };
   }
   // ⚠ 触れない窓には組めない ── `null` で呼び側に理由を出させる(無言で終えない)
   if (doc === null) return null;
@@ -291,7 +296,7 @@ export async function openManualWindow(
   // 🔑 組んだ窓にも字の大きさを当てる(この経路には配色の規則が無いので、効くのは大きさだけ)
   applyAppearance(win, deps.appearance);
   bringToFront(win);
-  return { close: () => closeQuietly(win), reused: false, swapped };
+  return { close: () => closeQuietly(win), window: win, reused: false, swapped };
 }
 
 /** ⚠ 閉じられない窓(user が自分で開いた等)でも、例外で呼び側を落とさない。 */
