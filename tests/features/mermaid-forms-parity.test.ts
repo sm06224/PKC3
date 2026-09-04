@@ -30,6 +30,24 @@ describe('図の記法 ── マニュアルと fixture(#528)', () => {
     expect(names, '代表の綴りが読めていない').toContain('graph TD');
   });
 
+  /**
+   * 🔴 **行数を名指しで pin する**(#528 (2)、2026-09-04)。
+   *
+   * ⚠ 上下の 2 つは**集合**で見る ── それは正しいが、**マニュアルの行と fixture を
+   *   同時に 1 つ消すと、集合は一致したまま**である(両側が同じ向きに縮む変異は
+   *   集合の検査では原理的に見えない ── CLAUDE.md §1「門を N 個置いたら、
+   *   N 個目だけが鳴る場面を作る」)。
+   * 🔑 だから数を**実数で**留める ── 種類を足したり減らしたりしたら**ここが落ちる**
+   *   = 意図した増減であることを、この数を直すことで宣言させる
+   *   (`repo-hygiene` の smoke 件数・`KNOWN_DEAD` と同じ作法)。
+   * ⚠ 上の `> 15` / `< 40` は**節の切り方が壊れていない**ことを見る門で、
+   *   増減を止める門ではない ── 役割が違うので両方置く。
+   */
+  it('🔴 マニュアルの表は 22 行、fixture も 22 種(増減したらこの数を直す)', () => {
+    expect(manualDiagramNames(manual()).length, 'マニュアルの表の行数が変わった').toBe(22);
+    expect(MERMAID_FORMS.length, 'fixture の種類の数が変わった').toBe(22);
+  });
+
   it('🔴 マニュアルに在る図は、全部 fixture を持っている(測っていない次元を作らない)', () => {
     const have = new Set(MERMAID_FORMS.map((f) => f.name));
     const missing = manualDiagramNames(manual()).filter((n) => !have.has(n));
