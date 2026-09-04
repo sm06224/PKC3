@@ -43,6 +43,7 @@ import { formatListDate } from '@features/datetime/stored-date';
 import { chordLabel, findCommand } from '@features/keymap';
 import { appKeymap, type KeymapStore } from './keymap';
 import { appDualPrefs, DualPrefsStore } from './dual-prefs';
+import { appPhone } from './phone-layout';
 import { ARCHETYPE_ICONS, iconSpan } from './icons';
 
 /**
@@ -58,17 +59,16 @@ const SIDES: readonly DualSide[] = ['left', 'right'];
 /**
  * 側の呼び名。⚠ **画面に出る字**なので features には置かない(層規約)。
  *
- * 🔴 **置かれ方で呼び名が変わる**(#632 段③ の着地前レビュー)── 縦に持った
- *   スマホでは 2 枚を**上下に積む**ので、「左のペイン」と読み上げると
- *   **画面と逆のことを言う**。
- * 🔑 判定は **DOM の実寸 1 か所**から採る(`stackedNow`)── CSS が積むかどうかを
- *   決めているので、こちらで幅や向きを二度判定すると
- *   **同じ問いに答える口が 2 つ**になる(CLAUDE.md §7)。
+ * 🔴 **上下に積む形は撤回した**(user 裁定 2026-09-04、#671)。⚠ 2026-09-02 に
+ *   「縦のスマホでは 2 枚を上下に積む」を入れ、呼び名も「上 / 下」へ塗り替えて
+ *   いたが、user の裁定は**積むこと自体をやめる**である ──
+ *   「**左ペイン表示と右ペイン表示に分けて、どちらかを開いている際は、
+ *   もう片方の行き先だけ示す**」。
+ * 🔑 積まないので**呼び名は常に「左 / 右」1 本**になり、実寸から向きを
+ *   採る仕掛け(`stackedNow`)ごと要らなくなった。
  */
 const SIDE_LABEL: Readonly<Record<DualSide, string>> = { left: '左', right: '右' };
-const SIDE_LABEL_STACKED: Readonly<Record<DualSide, string>> = { left: '上', right: '下' };
-const sideLabel = (side: DualSide, stacked: boolean): string =>
-  (stacked ? SIDE_LABEL_STACKED : SIDE_LABEL)[side];
+const otherSide = (side: DualSide): DualSide => (side === 'left' ? 'right' : 'left');
 
 /**
  * 🔴 **列の定義**(2026-08-19 の作り直し)。
@@ -126,6 +126,19 @@ const COMMAND_ITEMS: readonly {
   /** 説明。⚠ 「元」と「先」の呼び名は**焦点で入れ替わる**ので、関数で受ける。 */
   readonly hint: (from: string, to: string) => string;
   /**
+   * 🔴 **行き先を字に入れるか**(user 裁定 2026-09-04、#671)。
+   *
+   * > 「『写す』『移す』の字に**行き先**を入れる ── いま見ているのが左なら
+   * > 『**右へ写す / 右へ移す**』」
+   *
+   * ⚠ **入れるのは 1 枚だけ出しているとき(スマホ)に限る。** パソコンは
+   *   2 枚が同時に見えているので、向きは**焦点のある側の地色**が既に語って
+   *   いる ── そこへ字を足すと、焦点が移るたびに幅が変わって**端が揃わない**
+   *   (2026-08-19 に「→ 右へ移す」をやめた当の理由)。
+   * 🔑 1 枚だけのときは相手が**画面に居ない**ので、字が唯一の手がかりになる。
+   */
+  readonly directed: boolean;
+  /**
    * 印が 1 つも無いときの断り。`null` = 印を要らない操作。
    *
    * ⚠ **呼び名から機械的に組まない**(2026-08-19)── 1 稿目は
@@ -138,6 +151,7 @@ const COMMAND_ITEMS: readonly {
 }[] = [
   {
     action: 'dual-copy',
+    directed: true,
     command: 'dual-copy-to-other',
     label: '写す',
     hint: (from, to) => `${from}で選んだものを、${to}のペインへ写します(元は残ります)`,
@@ -145,6 +159,7 @@ const COMMAND_ITEMS: readonly {
   },
   {
     action: 'dual-move',
+    directed: true,
     command: 'dual-move-to-other',
     label: '移す',
     hint: (from, to) => `${from}で選んだものを、${to}のペインへ移します`,
@@ -152,6 +167,7 @@ const COMMAND_ITEMS: readonly {
   },
   {
     action: 'dual-rename-begin',
+    directed: false,
     command: 'dual-rename',
     label: '名前',
     hint: () => '選んだ 1 件の名前を、その場で打ち替えます',
@@ -159,6 +175,7 @@ const COMMAND_ITEMS: readonly {
   },
   {
     action: 'dual-mkdir',
+    directed: false,
     command: 'dual-new-folder',
     label: 'フォルダ',
     hint: (from) => `${from}のペインが開いている場所に、新しいフォルダを作ります`,
@@ -170,6 +187,7 @@ const COMMAND_ITEMS: readonly {
    */
   {
     action: 'dual-mknote',
+    directed: false,
     command: 'dual-new-note',
     label: 'ノート',
     hint: (from) => `${from}のペインが開いている場所に、新しいノートを作ります`,
@@ -177,6 +195,7 @@ const COMMAND_ITEMS: readonly {
   },
   {
     action: 'dual-delete',
+    directed: false,
     command: 'filer-trash',
     label: 'ゴミ箱',
     hint: (from) => `${from}で選んだものを、ゴミ箱へ入れます(あとで戻せます)`,
@@ -188,6 +207,7 @@ const COMMAND_ITEMS: readonly {
    */
   {
     action: 'dual-preview-toggle',
+    directed: false,
     command: 'dual-preview',
     label: 'プレビュー',
     hint: (from) => `${from}のペインで指している行の中身を、その場で数行だけ出します`,
@@ -195,24 +215,6 @@ const COMMAND_ITEMS: readonly {
   },
 ];
 
-const otherSideLabel = (side: DualSide, stacked: boolean): string =>
-  sideLabel(side === 'left' ? 'right' : 'left', stacked);
-
-/**
- * 🔴 **いま 2 枚が上下に積まれているか**を、**実寸**で見る。
- *
- * ⚠ `matchMedia` で聞き直さない ── 積むかどうかを決めているのは CSS
- *   (`@media (orientation: portrait)` + スマホ用画面)なので、こちらで
- *   同じ条件を書くと**片方を変えた日に静かにずれる**。
- * ⚠ **採寸できない回は「積んでいない」と読む** ── 面が畳まれている / まだ
- *   組まれていないときは両方 0 になり、「左端が同じ」が**常に真**になる。
- */
-function stackedNow(left: HTMLElement, right: HTMLElement): boolean {
-  const a = left.getBoundingClientRect();
-  const b = right.getBoundingClientRect();
-  if (a.width <= 0 || b.width <= 0) return false;
-  return Math.abs(a.left - b.left) < 1 && b.top - a.top > 1;
-}
 
 /** 1 つのペインの部品(器は 1 度だけ作る)。 */
 interface PaneFrame {
@@ -283,7 +285,9 @@ function barKey(id: string, keymap: KeymapStore): string {
 
 export class DualFilerRenderer {
   private readonly region: HTMLElement;
-  private frame: { panes: Record<DualSide, PaneFrame>; commands: HTMLElement } | null = null;
+  private frame:
+    | { panes: Record<DualSide, PaneFrame>; commands: HTMLElement; switcher: HTMLButtonElement }
+    | null = null;
   private lastFocus: DualSide | null = null;
   private lastCommands = '';
   /** 入力の断面(参照で見る)。⚠ 下の門の材料 ── 増やしたらここにも足す。 */
@@ -323,6 +327,14 @@ export class DualFilerRenderer {
      */
     const bookmarks = this.prefs.getBookmarks();
     /**
+     * 🔴 **窓の幅は state に居ない**(#671)── 1 枚だけ出すかどうかは
+     *   `appPhone` が決めるので、**門より前**で塗る。⚠ 門の後に置くと、
+     *   窓を細めただけの回(state は 1 バイトも動かない)に
+     *   **行き先のボタンと操作の字が古いまま残る**。
+     */
+    const soloChanged =
+      this.frame === null ? false : this.paintSwitch(this.frame, state.dual.focus);
+    /**
      * 🔴 **入力が 1 つも変わっていないなら描かない**(着地前レビュー R4)。
      *
      * ⚠ `main.ts` は state が動くたび**無条件に** `center.render(state)` を呼ぶので、
@@ -335,6 +347,7 @@ export class DualFilerRenderer {
      */
     if (
       this.frame !== null &&
+      !soloChanged &&
       state.dual === this.lastDual &&
       state.entryMetas === this.lastMetas &&
       state.relations === this.lastRelations &&
@@ -370,11 +383,10 @@ export class DualFilerRenderer {
       this.renderPane(frame.panes[side], side, state, pane, rows, bookmarks);
     }
     /**
-     * 🔴 **置かれ方が変わったら呼び名を塗り直す**(#632 段③)。
-     * ⚠ `buildPane` は器を 1 度しか作らないので、ここで塗らないと
-     *   **上下に積んだ画面を「左のペイン」と読み上げ続ける**。
+     * ⚠ 初回は `ensureFrame` の直後がいちばん早い塗り所である
+     *   (門の前では器がまだ無い)。2 回目以降は門の前で済んでいる。
      */
-    this.paintSideNames(frame);
+    this.paintSwitch(frame, state.dual.focus);
     /**
      * 🔴 **焦点の側は「移す向き」そのもの**なので、必ず画面に出す
      * (出さないと user は**どちらが元か分からないまま**押すことになる)。
@@ -390,22 +402,41 @@ export class DualFilerRenderer {
     this.renderCommands(frame.commands, frame.panes[state.dual.focus], state);
   }
 
-  /** 直前に塗った呼び名(⚠ 毎描画で属性を書き換えない)。 */
-  private lastStacked: boolean | null = null;
+  /** 直前に塗った「1 枚だけか」と「行き先」(⚠ 毎描画で属性を書き換えない)。 */
+  private lastSolo: boolean | null = null;
+  private lastSwitchTo: DualSide | null = null;
 
-  private paintSideNames(frame: NonNullable<DualFilerRenderer['frame']>): void {
-    const stacked = stackedNow(frame.panes.left.root, frame.panes.right.root);
-    if (stacked === this.lastStacked) return;
-    this.lastStacked = stacked;
-    for (const side of SIDES) {
-      const f = frame.panes[side];
-      const name = sideLabel(side, stacked);
-      f.root.setAttribute('aria-label', `${name}のペイン`);
-      f.crumbs.setAttribute('aria-label', `${name}のペインの現在地`);
-      f.filter.title = `${name}のペインだけを名前で絞ります`;
-    }
-    // ⚠ 呼び名が変われば操作の説明も作り直す(指紋を捨てる)
+  /**
+   * 🔴 **行き先のボタンを塗る**(#671)。
+   *
+   * ⚠ **`render` の門より前で呼ぶ** ── 1 枚だけになるかどうかは**窓の幅**で
+   *   決まるので、`state` は 1 バイトも変わらない。門の後で呼ぶと、
+   *   窓を細めただけの回は**操作の字が「写す」のまま**残る。
+   * 🔑 「1 枚だけか」は `appPhone` **1 か所**に聞く ── CSS が読む
+   *   `data-pkc-layout='phone'` を立てているのがそれなので、
+   *   これは 2 つ目の答えではなく**同じ答えの読み出し**である。
+   *
+   * @returns 塗り直したか(⚠ 真なら `render` の門を通す ── 通さないと
+   *   操作の字が古いまま残る)
+   */
+  private paintSwitch(
+    frame: NonNullable<DualFilerRenderer['frame']>,
+    focus: DualSide,
+  ): boolean {
+    const solo = appPhone.isPhone();
+    const to = otherSide(focus);
+    if (solo === this.lastSolo && to === this.lastSwitchTo) return false;
+    this.lastSolo = solo;
+    this.lastSwitchTo = to;
+    frame.switcher.setAttribute('data-pkc-side', to);
+    // ⚠ 矢印は**行き先の向き**にする(右へ行くのに ← が出ると、押す前に迷う)
+    frame.switcher.textContent =
+      to === 'right' ? `${SIDE_LABEL.right}のペインへ →` : `← ${SIDE_LABEL.left}のペインへ`;
+    frame.switcher.title =
+      `${SIDE_LABEL[to]}のペインに切り替えます(いま見ているのは${SIDE_LABEL[focus]}のペインです)`;
+    // ⚠ 1 枚だけかが変われば操作の字も作り直す(指紋を捨てる)
     this.lastCommands = '';
+    return true;
   }
 
   private ensureFrame(): NonNullable<DualFilerRenderer['frame']> {
@@ -436,8 +467,28 @@ export class DualFilerRenderer {
     body.append(left.root, right.root);
     const commands = document.createElement('div');
     commands.setAttribute('data-pkc-region', 'dual-commands');
-    this.region.append(title, body, commands);
-    this.frame = { panes: { left, right }, commands };
+    /**
+     * 🔴 **もう片方への行き先**(user 裁定 2026-09-04、#671)。
+     *
+     * > 「どちらかを開いている際は、**もう片方の行き先だけ示す**。
+     * > みたいな簡易 UI にすればよいのでは?」
+     *
+     * ⚠ **タブ 2 枚にしない** ── user の言葉は「行き先**だけ**」である。
+     *   ペインの中には既に場所のタブ帯(`dual-tabs`)が在るので、その上に
+     *   もう 1 段タブを重ねると**どちらの帯が何のタブか読めなくなる**。
+     * 🔑 **出し入れは CSS だけが決める**(`[data-pkc-layout='phone']`)──
+     *   ここで `hidden` を塗ると、判定が CSS と JS の 2 か所になる
+     *   (CLAUDE.md §7)。パソコンでは規則が `display: none` にする。
+     * ⚠ 焦点を動かす口は既に在る(`dual-focus`)ので**新しい action を作らない** ──
+     *   行き先は `data-pkc-side` で渡す(押した物から辿る、既存の作法)。
+     */
+    const switcher = document.createElement('button');
+    switcher.type = 'button';
+    switcher.setAttribute('data-pkc-region', 'dual-switch');
+    switcher.setAttribute('data-pkc-action', 'dual-focus');
+    switcher.setAttribute('data-pkc-field', 'dual-switch');
+    this.region.append(title, switcher, body, commands);
+    this.frame = { panes: { left, right }, commands, switcher };
     return this.frame;
   }
 
@@ -902,7 +953,7 @@ export class DualFilerRenderer {
       add.type = 'button';
       add.setAttribute('data-pkc-action', 'dual-tab-add');
       add.setAttribute('data-pkc-side', side);
-      add.setAttribute('aria-label', `${sideLabel(side, this.lastStacked === true)}にタブを足す`);
+      add.setAttribute('aria-label', `${SIDE_LABEL[side]}にタブを足す`);
       add.title = 'いまの場所を、もう 1 枚のタブで開きます';
       add.textContent = '+';
       host.append(add);
@@ -1122,8 +1173,8 @@ export class DualFilerRenderer {
     const sig = [from, String(count), state.dual.previewOn ? 'p' : '-', ...keys].join(SEP);
     if (sig === this.lastCommands) return;
     this.lastCommands = sig;
-    const stacked = this.lastStacked === true;
-    const to = otherSideLabel(from, stacked);
+    const solo = this.lastSolo === true;
+    const to = SIDE_LABEL[otherSide(from)];
     host.textContent = '';
     COMMAND_ITEMS.forEach((it, i) => {
       const b = document.createElement('button');
@@ -1139,12 +1190,17 @@ export class DualFilerRenderer {
       key.textContent = keys[i] ?? '';
       const label = document.createElement('span');
       label.setAttribute('data-pkc-field', 'cmd-label');
-      label.textContent = it.label;
+      /**
+       * 🔴 **1 枚だけ出しているときは、字に行き先を入れる**(user 裁定、#671)。
+       * ⚠ 相手のペインが**画面に居ない**ので、「写す」だけでは
+       *   どこへ行くのか読めない(パソコンは 2 枚見えているので入れない)。
+       */
+      label.textContent = solo && it.directed ? `${to}へ${it.label}` : it.label;
       b.append(key, label);
       b.title =
         it.empty !== null && count === 0
           ? it.empty
-          : `${it.hint(sideLabel(from, stacked), to)}${it.empty !== null ? `(いま ${count} 件)` : ''}`;
+          : `${it.hint(SIDE_LABEL[from], to)}${it.empty !== null ? `(いま ${count} 件)` : ''}`;
       // 🔑 出し入れの口は**押している状態**を出す(点いているか、字だけでは読めない)
       if (it.action === 'dual-preview-toggle')
         b.setAttribute('aria-pressed', state.dual.previewOn ? 'true' : 'false');

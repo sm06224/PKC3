@@ -1210,6 +1210,8 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    // ⚠ 上限 10 を超えたので 2026-09-04 に落とした(原本は CHANGELOG)
+    'マニュアルのウィンドウを入れ替えた回も、ウィンドウが前に出るようになりました',
     // ⚠ 上限 10 を超えたので 2026-09-03 に落とした(原本は CHANGELOG)
     'タグの行を 2 行書いたときに、消えたことが分かるようになりました',
     // ⚠ 上限 10 を超えたので 2026-09-03 に落とした(原本は CHANGELOG)

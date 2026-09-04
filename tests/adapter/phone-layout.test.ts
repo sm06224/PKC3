@@ -897,14 +897,15 @@ describe('畳んだ列をスマホでは写さない(#609)', () => {
 });
 
 /**
- * 🔴 **対応外の幅(360px 未満)を 1 度だけ知らせる**(#632 段③、user 裁定 ⑥)。
+ * 🔴 **対応外の幅(360px 未満)を、変わったときだけ知らせる**(#632 段③、user 裁定 ⑥)。
  *
- * > 「幅 360px 未満は、下の行に **1 度だけ**『この幅には対応していません ──
- * > 360px 以上で』と出し、**画面は止めない**」
+ * ⚠ ここが持つのは**知らせる仕組み**(`onTooNarrow`)だけである ── 何を出すか /
+ *   どう消すかは **#671 の裁定 2・3** で user が決め直し、
+ *   `src/adapter/ui/render/too-narrow.ts` へ移った(test は
+ *   `tests/adapter/too-narrow.test.ts`)。
  *
- * ⚠ **ここでしか測れないのが「1 度だけ」である** ── 帯は 1 行しか持たないので、
- *   同じ字を 2 回書いても実ブラウザからは**同じ画面に見える**
- *   (だから smoke には「出ること」と「止まらないこと」だけを持たせた)。
+ * ⚠ **ここでしか測れないのが「変わったときだけ」である** ── 帯は 1 行しか
+ *   持たないので、同じ字を 2 回書いても実ブラウザからは**同じ画面に見える**。
  */
 describe('対応外の幅(変わったときだけ伝える)', () => {
   /**
@@ -1124,31 +1125,28 @@ describe('CSS(構文で読む)', () => {
   });
 
   /**
-   * 🔴 **スマホでは 2 ペインを上下に積む**(#632 段③)。
+   * 🔴 **スマホでは 2 ペインを「1 枚ずつ」出す**(user 裁定 2026-09-04、#671)。
    *
-   * ⚠ 実測(375px の窓、直す前 / 直した後):
+   * ⚠ **これは 2026-09-02 に入れた「縦なら上下に積む」の撤回である。**
+   *   積む案は向きで得失が反転していた(実測):
    *
-   * | | ペインの幅 | 見出し帯 `scrollWidth`/`clientWidth` | パンくずの幅 |
-   * |---|---|---|---|
-   * | 直す前(横並び) | **184px** | **187 / 182**(はみ出す) | 🔴 **0px**(どこに居るか読めない) |
-   * | 直した後(上下) | **375px** | 373 / 373 | 182px |
+   * | 窓 | 並べ方 | 1 枚の寸法 | パンくず | 見える行 |
+   * |---|---|---|---|---|
+   * | 375×667(縦) | 左右 | 184×571 | 🔴 **0px** | 6 / 6 |
+   * | 375×667(縦) | 上下 | 375×282 | 182px | 6 / 6 |
+   * | 667×375(横) | 左右 | 330×279 | 136px | 6 / 6 |
+   * | 667×375(横) | 上下 | 667×136 | 474px | 🔴 **1 / 6** |
    *
-   * 🔑 実害は幅ではなく**パンくずが 0px になること** ── 2 ペインの操作は
-   *   「どちらの箱に居るか」を見て決めるので、そこが消えると**移す先が読めない**。
+   * 🔑 1 枚ずつなら**どちらの向きでも版面を丸ごと使う**ので、向きで分ける
+   *   理由が消える ── だから `@media (orientation: portrait)` ごと外した。
    */
-  it('🔴 縦に持ったスマホだけ 2 ペインを上下に積む(横では積まない)', () => {
+  it('🔴 スマホの 2 ペインは 1 枚だけ出す(焦点の無い側を畳む)', () => {
+    const css = withoutMedia(bare());
+    const body = blocksFor(css, `${PHONE} [data-pkc-region='dual-body']`).join(' ');
+    expect(body, 'スマホで列を 1 本にする規則が無い').not.toBe('');
     /**
-     * ⚠ **`orientation` の `@media` の中から読む**(#632 段③ の着地前レビュー)──
-     *   横に持ったとき(667×375)は左右のままでもパンくずが 136px 出るのに、
-     *   積むと丈が 136px になり **6 行のうち 1 行しか出ない**(実測)。
-     */
-    const portrait = mediaBlock(bare(), '(orientation: portrait)').body;
-    const body = blocksFor(portrait, `${PHONE} [data-pkc-region='dual-body']`).join(' ');
-    expect(body, '縦のスマホで 2 ペインを積み直す規則が無い').not.toBe('');
-    /**
-     * 🔴 **`1fr` は `1fr 1fr` にも当たる**(着地前レビュー 1。再現つきで指摘された)──
-     *   `decl` は「値の頭」しか留めないので、**直す前の `1fr 1fr` へ戻す変異が
-     *   4 つの assert 全部を通り抜けた**。🔑 **末尾の `;` まで留める**。
+     * 🔴 **`1fr` は `1fr 1fr` にも当たる**(#632 段③ の着地前レビュー 1)──
+     *   `decl` は「値の頭」しか留めないので、**末尾の `;` まで**留める。
      */
     expect(body, '列が 1 本になっていない(横並びのまま)').toMatch(
       decl('grid-template-columns', '1fr\\s*;'),
@@ -1156,14 +1154,71 @@ describe('CSS(構文で読む)', () => {
     expect(body, '列が 2 本のまま(この検査は何も見ていない)').not.toMatch(
       decl('grid-template-columns', '1fr\\s+1fr'),
     );
-    expect(body, '上下が半分ずつになっていない(どちらが元か見た目から消える)').toMatch(
-      decl('grid-template-rows', '1fr\\s+1fr\\s*;'),
+    /**
+     * 🔴 **列を 1 本にしただけでは「1 枚ずつ」にならない** ── 2 枚が縦に並ぶだけ
+     *   (それが撤回した案である)。**焦点の無い側を畳む**規則まで見る。
+     */
+    const off = blocksFor(
+      css,
+      `${PHONE} [data-pkc-region='dual-pane']:not([data-pkc-focused])`,
+    ).join(' ');
+    expect(off, '焦点の無い側を畳む規則が無い(2 枚が縦に並ぶ)').toMatch(
+      decl('display', 'none'),
     );
-    // ⚠ 空振り防止 ── 素の規則は**横並びのまま**である(全部積んだのではない)
-    const wide = blocksFor(withoutMedia(bare()), `[data-pkc-region='dual-body']`).join(' ');
-    expect(wide, '広い窓の 2 ペインまで積んでいる').toMatch(
+    // ⚠ 空振り防止 ── 素の規則は**横並びのまま**である(全部畳んだのではない)
+    const wide = blocksFor(css, `[data-pkc-region='dual-body']`).join(' ');
+    expect(wide, '広い窓の 2 ペインまで 1 本にしている').toMatch(
       decl('grid-template-columns', '1fr\\s+1fr'),
     );
+    const wideOff = blocksFor(css, `[data-pkc-region='dual-pane']`).join(' ');
+    expect(wideOff, '広い窓のペインまで畳んでいる').toMatch(decl('display', 'flex'));
+  });
+
+  /**
+   * 🔴 **向きで分ける規則を残さない**(#671)。
+   *
+   * ⚠ 撤回したのに規則が残っていると、**縦のスマホだけ 2 枚が縦に並ぶ**
+   *   (`grid-template-rows: 1fr 1fr` が生き残るため)── 上の test は
+   *   `withoutMedia` で読むので、**残っていても気づかない**。
+   */
+  it('🔴 2 ペインを向きで分ける規則は残っていない', () => {
+    const css = bare();
+    const at = css.indexOf('@media (orientation: portrait)');
+    expect(at, '向きで分ける @media が残っている(積む案は撤回した)').toBe(-1);
+  });
+
+  /**
+   * 🔴 **行き先のボタンはスマホでだけ出す**(#671)。
+   *
+   * ⚠ パソコンで出すと「押しても焦点が動くだけ」の、目的の読めないボタンになる
+   *   ── 2 枚とも見えているので切り替える先が無い。
+   * 🔑 出し入れは **CSS 1 か所**が決める(JS は `hidden` を触らない)。
+   */
+  it('🔴 行き先のボタンは、パソコンでは畳み、スマホでだけ出す', () => {
+    const css = withoutMedia(bare());
+    const base = blocksFor(css, `[data-pkc-region='dual-switch']`).join(' ');
+    expect(base, 'パソコンで畳む規則が無い').toMatch(decl('display', 'none'));
+    const phone = blocksFor(css, `${PHONE} [data-pkc-region='dual-switch']`).join(' ');
+    expect(phone, 'スマホで出す規則が無い').toMatch(decl('display', 'block'));
+    // 🔑 指で押す所の丈は 32px に揃える(user 裁定 2026-09-04)
+    expect(phone, '押し所が 32px に揃っていない').toMatch(decl('min-height', '32px'));
+  });
+
+  /**
+   * 🔴 **操作の 7 つも 32px**(user 裁定 2026-09-04、#671)。
+   * ⚠ 1 枚ずつにしてペインの丈が 282px → 571px になったので、6px 増やしても
+   *   表の行はほとんど減らない ── 端末の中の押し所を 1 種類に揃える。
+   */
+  it('🔴 スマホでは 2 ペインの操作も 32px', () => {
+    const css = withoutMedia(bare());
+    const phone = blocksFor(
+      css,
+      `${PHONE} [data-pkc-region='dual-commands'] button`,
+    ).join(' ');
+    expect(phone, '操作の押し所を 32px にしていない').toMatch(decl('min-height', '32px'));
+    // ⚠ 空振り防止 ── パソコン側には丈を足していない(1px も変えない)
+    const wide = blocksFor(css, `[data-pkc-region='dual-commands'] button`).join(' ');
+    expect(wide, 'パソコンの操作にも丈を足している').not.toMatch(decl('min-height', '32px'));
   });
 
   /**

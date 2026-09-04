@@ -20,6 +20,7 @@ import {
   installColumnWheel,
 } from '@adapter/ui/render/read-columns';
 import { setFoldNotify } from '@adapter/ui/render/fold-notify';
+import { installTooNarrow } from '@adapter/ui/render/too-narrow';
 import { appOpenInEdit } from '@adapter/ui/render/open-in-edit';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { appPaneSizes, applyPaneSizes } from '@adapter/ui/render/pane-size';
@@ -928,7 +929,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   // textContent の setter は同一文字列でも子ノードを全置換する ── 打鍵ごとの
   // state 変化で無駄な DOM 変異を起こさないよう、変わったときだけ書く
   let statusShown = statusBase;
-  regions.status.textContent = statusBase;
+  regions.statusText.textContent = statusBase;
   // 🔑 **空なら場所を取らない**(notices / update と同じ作法)
   regions.status.hidden = statusBase === '';
   /**
@@ -956,10 +957,18 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     const parts = [statusBase, sync, portableAssetNote, persistState, noticeLine, errorLine]
       .filter((t) => t !== '');
     const text = parts.join(' — ');
-    if (text === statusShown) return;
+    /**
+     * 🔴 **断り書きが出ている間は、字が空でも器を畳まない**(#671 の裁定 3)。
+     * ⚠ 畳むと **`OK` ごと画面から消える** ── 押す口が無いまま出しっぱなしに
+     *   なるのと同じで、user は消し方を持たない。
+     * 🔑 器を畳むかどうかを決めるのは**この 1 か所**である ──
+     *   `too-narrow.ts` は自分の `hidden` だけ触り、ここへ知らせる(§7)。
+     */
+    const keep = !regions.tooNarrow.hidden;
+    if (text === statusShown && regions.status.hidden === (text === '' && !keep)) return;
     statusShown = text;
-    regions.status.textContent = text;
-    regions.status.hidden = text === '';
+    regions.statusText.textContent = text;
+    regions.status.hidden = text === '' && !keep;
   };
   /** 🔑 ここで初めて `paint` に繋がる(それまでの `onState` は落としてよい)。 */
   repaintStatus = paint;
@@ -987,6 +996,18 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   委譲用の名前を残したら、台がそこを迂回して**欠陥の再導入を素通り**させた。
    */
   setFoldNotify(showStatus);
+
+  /**
+   * 🔴 **狭すぎる端末への断り書き**(user 裁定 2026-09-04、#671 の裁定 2・3)。
+   * ⚠ **`setFoldNotify` の後で配る** ── 器を畳むかどうかは `paint` が決めるので、
+   *   `repaintStatus` が `paint` に繋がった後でなければ、出しても畳んだままになる。
+   */
+  installTooNarrow({
+    band: regions.tooNarrow,
+    text: regions.tooNarrowText,
+    ok: regions.tooNarrowOk,
+    onChange: () => repaintStatus(),
+  });
 
   /**
    * 🔴 **外からの依頼を受ける口**(#189 / C-4 と #194 / C-3)。
