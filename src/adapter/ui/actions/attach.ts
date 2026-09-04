@@ -323,8 +323,9 @@ export async function attachFiles(
    */
   const into = noteToPutInto(dispatcher);
   const queue = createWritableQueue(dispatcher);
-  const notify = (text: string): void =>
-    dispatcher.dispatch({ type: 'OP_NOTICE', message: text });
+  // 🔑 `open` は「開く」の身元(#668 A)── state へ運ぶのはここ 1 か所
+  const notify = (text: string, open?: string): void =>
+    dispatcher.dispatch({ type: 'OP_NOTICE', message: text, ...(open === undefined ? {} : { open }) });
 
   for (const file of files) {
     try {

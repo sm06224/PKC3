@@ -557,6 +557,14 @@ export interface AppState {
    * ⚠ 欄の名前は `TAG_INPUT_FIELDS` ── binder の `TAG_INPUT_ADD`(#639)と同じ綴りである。
    */
   refusedTags: Readonly<Record<TagInputField, readonly string[]>>;
+   * 🔴 **その知らせの隣に「開く」で出す物**(#668 A)。`null` = 押す口を出さない。
+   *
+   * 添付を作ったのに本文へ入れなかった回(開いているのがフォルダ等)は、
+   * 読んでいた物を開いたまま「添付にしました」と言う ── そのとき**その添付へ行く
+   * 道が 1 つも無かった**(一覧は絞りで隠れていることがある)。
+   * ⚠ `notice` と**対で**書く(`OP_NOTICE` が両方を置く)── 次の知らせで消える。
+   */
+  noticeOpen: string | null;
   /** ゴミ箱 panel(filer)。開いた時点のスナップショット + 明示更新。 */
   trashPanel: { items: readonly TrashItem[] } | null;
   /**
@@ -848,6 +856,7 @@ export const initialState: AppState = {
   revisionPreview: null,
   notice: null,
   refusedTags: { 'smart-cond': [], 'bulk-tag': [] },
+  noticeOpen: null,
   trashPanel: null,
   linkedFiles: new Map(),
   writeLock: null,
@@ -1209,7 +1218,12 @@ export type UserAction =
    * 🔴 **一時の知らせ**(#402 ①)。⚠ `OP_FAILED` と混ぜない ── あちらは赤い帯で、
    *   こちらは成功の内訳である(「3 件は既に付いていました」を失敗にしない)。
    */
-  | { type: 'OP_NOTICE'; message: string }
+  | {
+      type: 'OP_NOTICE';
+      message: string;
+      /** 隣に「開く」で出す物の lid(#668 A)。省略 = 押す口を出さない。 */
+      open?: string;
+    }
   /**
    * 🔴 **押したのに入らなかったタグ**(#640 案 A)── 効果層が断った名前を欄へ戻すために撃つ。
    * ⚠ 足す(1 回の頼みの中で 1 つずつ届く ── スマートフォルダの条件は 1 タグ 1 往復)。
@@ -4309,7 +4323,11 @@ function reduceCore(
     case 'OP_NOTICE':
       // ⚠ **`error` を触らない** ── 知らせが出たからといって、出ているエラーを
       //    消してよい理由は無い(`main.ts` が別の行として組んでいる)
-      return { state: { ...state, notice: action.message }, events: [] };
+      // ⚠ 「開く」の身元は知らせと**対で**置く ── 添えない知らせが来たら消える
+      return {
+        state: { ...state, notice: action.message, noticeOpen: action.open ?? null },
+        events: [],
+      };
     /**
      * 🔴 **タグの候補が要る**(#494 段②)。
      *

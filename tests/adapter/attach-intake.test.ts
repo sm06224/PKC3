@@ -287,7 +287,57 @@ describe('添付を開いていたノートへ入れる(#666)', () => {
 
     expect(appendsSeen, '追記できない種類なのに本文へ書いた').toHaveLength(0);
     expect(h.d.getState().selectedLid, '開いていた添付へ戻っていない').toBe(first);
-    expect(h.d.getState().notice ?? '', '黙って終わっている').toContain('追記できない種類');
+    // ⚠ #668 A で字が変わった ── 「追記できない種類」ではなく、開いている物の種類を名指す
+    expect(h.d.getState().notice ?? '', '黙って終わっている').toContain('『添付』');
+  });
+
+  /**
+   * 🔴 **A: 入れられない回は、何を開いているか・何なら入るかを言い、「開く」を添える**
+   *   (#668 A。PR #667 の着地前レビュー)。
+   *
+   * ## 直す前に何が起きていたか
+   *
+   * 「追記できない種類なので本文には入れていません」── user は**開いている物の種類も、
+   * どれなら入るのかも、作られた添付がどこへ行ったのかも**読めなかった。
+   * 一覧は絞りで隠れていることがある(#668 D で添付の作成は絞りを外さなくなった)ので、
+   * 作られた物へ行く道が**画面のどこにも無い**。
+   *
+   * ## この it が守る主張
+   *
+   * ① 字に**開いている物の種類**(『フォルダ』)と**入れられる種類**(ノートとログ)が出る
+   * ② 🔴 **「開く」の身元**(`noticeOpen`)が**作られた添付**を指す ── 押すとそれが選ばれる
+   * ③ 対照群 ── 本文へ入れられた回は身元を添えない(押す口を出さない)
+   */
+  it('🔴 A 入れられない種類なら、種類の名前と入れられる種類を言い、「開く」の身元を添える(#668)', async () => {
+    const h = harness();
+    h.d.dispatch({ type: 'CREATE_ENTRY', archetype: 'folder', lid: 'f1', title: '資料', edit: false });
+    expect(h.d.getState().selectedLid, '台の前提: フォルダが開いていない').toBe('f1');
+    appendsSeen.length = 0;
+    await attachFiles(h.d, h.deps, [new File(['pdf'], '見積.pdf', { type: 'application/pdf' })]);
+    await tick();
+
+    const st = h.d.getState();
+    expect(appendsSeen, 'フォルダの本文へ書いた').toHaveLength(0);
+    // ① 字 ── 種類の名前は `archetypeLabel`、入れられる種類は `appendableKindsLabel` から来る
+    expect(st.notice).toBe(
+      '「見積.pdf」を添付にしました(開いているのは『フォルダ』なので、本文には入れていません。本文に入れられるのはノートとログだけです)',
+    );
+    // ② 身元 ── 作られた添付を指し、押すと選ばれる
+    const attached = [...st.entryMetas.values()].find((m) => m.archetype === 'attachment');
+    expect(attached, '添付が作られていない(台の前提が崩れた)').toBeDefined();
+    expect(st.noticeOpen, '「開く」の身元が添えられていない').toBe(attached!.lid);
+    expect(st.selectedLid, '開いていたフォルダへ戻っていない').toBe('f1');
+    h.d.dispatch({ type: 'SELECT_ENTRY', lid: st.noticeOpen! });
+    expect(h.d.getState().selectedLid, '「開く」の身元を押しても添付が開かない').toBe(attached!.lid);
+  });
+
+  it('⚠ A 対照群 ── 本文へ入れられた回は「開く」の身元を添えない', async () => {
+    const h = withOpenNote();
+    appendsSeen.length = 0;
+    await attachFiles(h.d, h.deps, [new File(['x'], 'x.png', { type: 'image/png' })]);
+    await tick();
+    expect(appended(h.d), '前提: 本文へ入っていない').toHaveLength(1);
+    expect(h.d.getState().noticeOpen, '入れたのに「開く」を出している').toBeNull();
   });
 
   /** ⚠ ⑤ 対照群 ── 開いていなければ入れず、そのことを言う(黙って終わらない)。 */

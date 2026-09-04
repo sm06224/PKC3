@@ -4270,6 +4270,14 @@ li[data-pkc-row-slot] {
   min-height: 32px;
   padding: 0 var(--s3);
 }
+/* 🔴 **知らせの隣の「開く」**(#668 A)。⚠ 出し入れは `status-open.ts` が `hidden` で持つ。
+ *   状態の行は 20px なので、OK と同じ 32px にはしない(帯を太らせない)。 */
+[data-pkc-field='status-open'] {
+  flex: 0 0 auto;
+  min-height: 18px;
+  padding: 0 var(--s2);
+  font-size: 11px;
+}
 
 [hidden] {
   display: none !important;

@@ -313,7 +313,8 @@ describe('🔴 ③ 入れられない回は黙らない(#413)', () => {
     b.service.stop();
     await tick();
     expect(appends(b.events), '追記できない種類の本文を書いた').toEqual([]);
-    expect(b.notices.join(''), '理由を言っていない').toMatch(/追記できない種類/);
+    // ⚠ #668 A で字が変わった ── 開いている物の種類を名指し、何なら入るかを言う
+    expect(b.notices.join(''), '理由を言っていない').toMatch(/『添付』なので、本文には入れていません/);
     expect(b.attached.length, '収録ごと捨てた').toBe(1);
   });
 

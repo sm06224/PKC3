@@ -21,6 +21,8 @@ import {
 } from '@adapter/ui/render/read-columns';
 import { setFoldNotify } from '@adapter/ui/render/fold-notify';
 import { appTooNarrowOk, installTooNarrow } from '@adapter/ui/render/too-narrow';
+import { installTooNarrow } from '@adapter/ui/render/too-narrow';
+import { paintStatusOpen } from '@adapter/ui/render/status-open';
 import { appOpenInEdit } from '@adapter/ui/render/open-in-edit';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { appPaneSizes, applyPaneSizes } from '@adapter/ui/render/pane-size';
@@ -1148,10 +1150,18 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   次の保存で「画像が出ない理由」が画面から消える。
    */
   if (syncLine !== '' || persistState !== '' || portableAssetNote !== '') paint();
+  /**
+   * 🔴 **知らせの隣の「開く」**(#668 A)── 判断は `status-open.ts`(test が届く所)。
+   * ⚠ `showStatus` からも撃つ ── 字だけの知らせ(コピーした等)が上書きしたら、
+   *   前の知らせに添えた「開く」は**その瞬間に**消えなければならない。
+   */
+  const paintOpen = (): void =>
+    paintStatusOpen(regions.statusOpen, dispatcher.getState(), noticeLine);
   /** 一時の知らせ(コピーした / 取り込んだ)。⚠ 状態変化では消えない。 */
   const showStatus = (text: string) => {
     noticeLine = text;
     paint();
+    paintOpen();
   };
 
   /**
@@ -1316,6 +1326,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       return; // `showStatus` が `paint` を呼ぶ
     }
     paint();
+    paintOpen(); // ⚠ 選択がその添付へ移ったら「開く」を畳む
   });
 
   /**
