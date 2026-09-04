@@ -332,7 +332,12 @@ export const MOVED_MESSAGE =
   'カレンダーとやることの板は、左の列の「予定」に移りました。そちらを開きました';
 
 export function unusableViewMessage(): string {
-  return `画面名は ${openableViewNames().join(' / ')} のどれかです`;
+  /**
+   * ⚠ 区切りは `/` だけ(2026-09-04、#278 段③ で連絡先が加わり 8 面になったとき、
+   *   ` / ` では状態の行の予算(幅 90)を 1 単位はみ出した ── `deep-link.test.ts`)。
+   *   並ぶのは**打つ字**なので、空白を挟まないほうが「そのまま打てる」向きでもある。
+   */
+  return `画面名は ${openableViewNames().join('/')} のどれかです`;
 }
 
 /** `connectViewDeepLink` の配線。⚠ 購読は**解除できる形**で渡す。 */

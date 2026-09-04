@@ -527,6 +527,8 @@ const ALL_VIEWS = [
   'query',
   // ⚠ 予定表(#673 段②、user 裁定 2026-09-04)── 左の列の「予定」と同じ描画器を中央にも
   'schedule',
+  // ⚠ 連絡先(#278 段③)── 予定表と同じ形
+  'contacts',
   'dual',
   'settings',
   'flags',
@@ -634,7 +636,8 @@ describe('🔴 中央の面の表が 2 つある(食い違いを落とす)', () 
        * ⚠ `center.ts` の `NOTE_PANES` と**同じ一覧を手で書く** ── 突合が目的なので
        *   向こうから import しない(食い違えばここで落ちる)。
        */
-      const expected = view === 'query' || view === 'schedule' ? view : 'detail';
+      const expected =
+        view === 'query' || view === 'schedule' || view === 'contacts' ? view : 'detail';
       expect(name, `${view} の落ち先が違う(app-state.ts の表に足し忘れ)`).toBe(expected);
     }
   });

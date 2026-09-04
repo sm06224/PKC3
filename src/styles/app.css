@@ -3146,8 +3146,11 @@ li[data-pkc-row-slot] {
 /* ══ 連絡先(#278 段①、2026-08-27)══════════════════════════════
  * 🔴 **左の列に置く**(#292 段⑤ の見分け方 ── 閉じても失う物が無い = ノートの見方)。
  * ⚠ 幅は `minmax(200px, 18vw)` なので、**名前と宛先を縦に積む** ──
- *   横に並べると 200px で電話番号が切れる。 */
-[data-pkc-browse-pane='contacts'] {
+ *   横に並べると 200px で電話番号が切れる。
+ * 🔴 **中央の面(別窓 / 退避)にも同じ規則**(#278 段③、user 裁定 2026-09-04)──
+ *   予定表と同じ形。幅は `[data-pkc-region='detail'] > [data-pkc-view-pane]` が広げる。 */
+[data-pkc-browse-pane='contacts'],
+[data-pkc-view-pane='contacts'] {
   display: flex;
   flex-direction: column;
   gap: var(--s2);

@@ -69,6 +69,8 @@ export function isBrowseMode(v: string): v is BrowseMode {
  */
 const HOME_TAB: Readonly<Partial<Record<ViewMode, BrowseMode>>> = {
   schedule: 'schedule',
+  // 🔴 連絡先も同じ形(#278 段③)── 左の「連絡先」タブが退避先
+  contacts: 'contacts',
 };
 
 export function homeTabOf(view: ViewMode): BrowseMode | null {

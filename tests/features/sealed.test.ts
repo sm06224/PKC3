@@ -189,6 +189,8 @@ describe('封印 ── 畳んであるが、壊してはいない', () => {
     expect(tiles.map((t) => t.kind), '引っ越した面がタイルに残っている').toEqual([
       'dual',
       'schedule',
+      // ⚠ 連絡先(#278 段③)も予定表と同じ 2 つ目の入口
+      'contacts',
       'manual',
     ]);
   });

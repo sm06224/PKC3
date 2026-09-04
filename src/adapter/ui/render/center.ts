@@ -17,12 +17,14 @@ import { QueryRenderer } from './query';
 import { ScrollMemory } from './scroll-memory';
 import { DualFilerRenderer } from './dual-filer';
 import { ScheduleRenderer } from './schedule';
+import { ContactsRenderer } from './contacts';
 import type { MarkdownClient } from '@adapter/platform/render/markdown-client';
 
 type PaneView =
   | 'detail'
   | 'query'
   | 'schedule'
+  | 'contacts'
   | 'dual'
   | 'settings'
   | 'flags'
@@ -43,7 +45,7 @@ const ASIDE: ReadonlySet<ViewMode> = new Set<ViewMode>(['settings', 'flags', 'he
  * 落ちない ── 2 つ目の表である。⚠ ここに足し忘れると `toPane` が本文へ落として
  * 「開いたのに本文が出る」になる(`tests/adapter/help-pane.test.ts` が突合する)。
  */
-const NOTE_PANES: ReadonlySet<ViewMode> = new Set<ViewMode>(['query', 'schedule']);
+const NOTE_PANES: ReadonlySet<ViewMode> = new Set<ViewMode>(['query', 'schedule', 'contacts']);
 
 /**
  * 🔑 中央は**常に「開いているノート」**(P8 段⑤)。
@@ -75,6 +77,8 @@ export class CenterRouter {
    * 構造的な Gap を抱えたのと同じ道になる)。器だけが違う。
    */
   private readonly schedule: ScheduleRenderer;
+  /** 🔴 **連絡先**(#278 段③)── 予定表と同じく、左の列と**同じ class**。 */
+  private readonly contacts: ContactsRenderer;
   private readonly dual: DualFilerRenderer;
   private lastPane: PaneView = 'detail';
   /**
@@ -141,6 +145,7 @@ export class CenterRouter {
       detail: pane('detail'),
       query: pane('query'),
       schedule: pane('schedule'),
+      contacts: pane('contacts'),
       dual: pane('dual'),
       settings: pane('settings'),
       flags: pane('flags'),
@@ -167,6 +172,7 @@ export class CenterRouter {
     this.query = new QueryRenderer(this.panes.query);
     // ⚠ `now` は左の列の予定と同じ口で渡す ── 「今日」を面ごとに読まない
     this.schedule = new ScheduleRenderer(this.panes.schedule, now);
+    this.contacts = new ContactsRenderer(this.panes.contacts);
     this.dual = new DualFilerRenderer(this.panes.dual);
     this.settings = new SettingsRenderer(this.panes.settings);
     this.flags = new FlagsRenderer(this.panes.flags);
@@ -240,6 +246,7 @@ export class CenterRouter {
     if (view === 'detail') this.split.render(state);
     else if (view === 'query') this.query.render(state);
     else if (view === 'schedule') this.schedule.render(state);
+    else if (view === 'contacts') this.contacts.render(state);
     else if (view === 'dual') this.dual.render(state);
     else if (view === 'settings') this.settings.render(state);
     else if (view === 'flags') this.flags.render();

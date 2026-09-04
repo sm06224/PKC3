@@ -3,13 +3,21 @@
  * 「office、ファイラ兼エクスプローラ、シェル、PDF エディタ…、**連絡先**、
  * タイマー、アラートは組み込みアプリでリリースしたい」)。
  *
- * ## どこに在るか ── **左の列のタブ**(中央の面にしない)
+ * ## どこに在るか ── **左の列のタブ**と、**別ウィンドウの面**の 2 か所
  *
  * `features/launcher/tiles.ts` が #292 段⑤ で確立した見分け方:
  * **「それを閉じたとき user が失うものは何か」**。⚠ 連絡先を閉じても
  * **失う物は無い**(連絡先は**ノート**である)── つまり道具ではなく
  * **ノートの見方**なので、`browse.ts` の表どおり**左**である
  * (中央の本文を退かす理由が無い ── #300 の user 指摘)。
+ * 🔴 **#278 段③(user 裁定 2026-09-04「予定表も連絡先も別窓」)で、同じ面を
+ * 組み込みアプリの別ウィンドウ**(`ViewMode` の `contacts`、`center.ts`)**でも
+ * 開けるようにした** ── 左のタブは残したまま、2 つ目の入口である。
+ * ⚠ だから**この描画器は同じ document に 2 つ生きうる**(左のタブ + 中央の面)。
+ *   器の印は器の側(`data-pkc-browse-pane` / `data-pkc-view-pane`)が持つので、
+ *   ここでは `data-pkc-region` を焼かない ── 焼くと同じ名前の region が 2 つ並び、
+ *   `querySelector` で引く人が**先に描かれた左の面**を掴む(読む人が居なかった
+ *   のを確かめて外した)。
  *
  * ## 何ができるか ── **見るだけの面にしない**
  *
@@ -39,7 +47,6 @@ export class ContactsRenderer {
 
   constructor(host: HTMLElement) {
     this.host = host;
-    this.host.setAttribute('data-pkc-region', 'contacts');
   }
 
   render(state: AppState): void {

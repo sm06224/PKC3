@@ -96,6 +96,22 @@ describe('予定表を開く(#673 段②)', () => {
     expect(seen).not.toContain('REQUEST_TASK_SCAN');
   });
 
+  /**
+   * 🔴 **連絡先も同じ流儀**(#278 段③)── 開いたら `REFRESH_CONTACT_SCAN`
+   *   (reducer で `REQUEST_CONTACT_SCAN`)。⚠ 予定の走査は**頼まない**(対照群 ──
+   *   片方の条件を写し間違えて両方走らせる形を落とす)。
+   */
+  it('🔴 contacts を開くと、連絡先の走査だけが頼まれる', () => {
+    const d = booted();
+    const seen = events(d);
+    expect(openView(d, 'contacts')).toBe(true);
+    expect(d.getState().viewMode).toBe('contacts');
+    expect(seen, '連絡先の走査が頼まれない(別窓は「集めています…」で止まる)').toContain(
+      'REQUEST_CONTACT_SCAN',
+    );
+    expect(seen, '連絡先を開いたのに予定の走査が走った').not.toContain('REQUEST_TASK_SCAN');
+  });
+
   /** 🔴 編集中に断られた回は、面も動かず走査も頼まない(開けたときだけの後始末)。 */
   it('🔴 編集中に断られたら走査も頼まない', () => {
     const d = booted();
@@ -120,6 +136,15 @@ describe('openViewHere ── 塞がれたときの退避先', () => {
     const tabs: string[] = [];
     expect(openViewHere(d, 'schedule', (t) => tabs.push(t))).toBe(true);
     expect(tabs, '左の「予定」タブが開かれない').toEqual(['schedule']);
+    expect(d.getState().viewMode, '中央の面を占有した(本文が消える)').toBe('detail');
+  });
+
+  /** 🔴 連絡先も同じ(#278 段③)── 左の「連絡先」タブへ。 */
+  it('🔴 連絡先は左の列の「連絡先」タブへ送り、中央の面を占有しない', () => {
+    const d = booted();
+    const tabs: string[] = [];
+    expect(openViewHere(d, 'contacts', (t) => tabs.push(t))).toBe(true);
+    expect(tabs, '左の「連絡先」タブが開かれない').toEqual(['contacts']);
     expect(d.getState().viewMode, '中央の面を占有した(本文が消える)').toBe('detail');
   });
 

@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { ContactsRenderer } from '../../src/adapter/ui/render/contacts';
+import { CenterRouter } from '../../src/adapter/ui/render/center';
 import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
 import { CONTACT_LIMITS, type ContactScan } from '../../src/features/contact/contact-card';
 import { BROWSE_MODES, isBrowseMode } from '../../src/adapter/ui/render/browse-mode';
@@ -45,6 +46,38 @@ const rows = (host: HTMLElement): HTMLElement[] =>
   [...host.querySelectorAll<HTMLElement>('[data-pkc-contact]')];
 
 describe('連絡先の面(#278)', () => {
+  /**
+   * 🔴 **中央の面にも同じ連絡先が出る**(#278 段③。user 裁定 2026-09-04
+   * 「予定表も連絡先も別窓」)── 別窓は `#pkc?view=contacts` でこの器を開く。
+   * ⚠ 器が違うだけで描画器は左の列と同じ 1 つ ── 「別窓だけ一覧が無い」を作らない。
+   * ⚠ 器の印(`data-pkc-region="contacts"`)は**描画器が焼かない** ── 左のタブと
+   *   中央で 2 つ生きるので、同じ名前の region を 2 つ並べない(器の属性で見分ける)。
+   */
+  it('🔴 中央の器(view=contacts)でも、左の列と同じ一覧が出る', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const router = new CenterRouter(host);
+    router.render({
+      ...initialState,
+      viewMode: 'contacts',
+      contactScan: scanOf([card('c1', '山田太郎', ['090-1234-5678'], [], '例の会社')]),
+    } as AppState);
+    const pane = host.querySelector<HTMLElement>('[data-pkc-view-pane="contacts"]');
+    expect(pane, '中央に連絡先の器が無い').not.toBeNull();
+    expect(pane!.hidden, '中央の連絡先が隠れている').toBe(false);
+    expect(rows(pane!), '一覧が出ていない').toHaveLength(1);
+    expect(pane!.querySelector('[data-pkc-field="contact-name"]')?.textContent).toContain(
+      '山田太郎',
+    );
+    expect(
+      pane!.querySelector('[data-pkc-field="contacts-export"]'),
+      '書き出しの口が中央では出ない',
+    ).not.toBeNull();
+    expect(host.querySelector<HTMLElement>('[data-pkc-view-pane="detail"]')!.hidden).toBe(true);
+    // 🔑 同じ名前の region を 2 つ並べない(器の属性で見分ける)
+    expect(host.querySelector('[data-pkc-region="contacts"]'), '描画器が region を焼いた').toBeNull();
+  });
+
   it('🔴 「まだ集めていない」と「集められなかった」を取り違えない', () => {
     // ⚠ 取り違えると、面が「集めています…」を出したまま**永久に止まって見える**
     expect(note(paint({ contactScan: null })), 'まだ集めていない').toContain('集めています');

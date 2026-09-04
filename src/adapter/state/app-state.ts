@@ -150,6 +150,12 @@ export const VIEW_MODES = [
    */
   'schedule',
   /**
+   * 🔴 **連絡先**(#278 段③。user 裁定 2026-09-04「予定表も連絡先も別窓」)。
+   * ⚠ 予定表と同じ形 ── 左の列の「連絡先」タブは残し、同じ `ContactsRenderer` を
+   *   中央の器(別窓)にも描く。aside ではない(名前を押した選択はこの面に留まる)。
+   */
+  'contacts',
+  /**
    * 🔴 **2 ペインタブファイラ**(#241 段⑥。user 指示 2026-08-17
    * 「アプリに 2 ペインタブファイラを**組み込みで**提供すること」)。
    * ⚠ 裁定 6(`organize-pane-design-2026-08.md` §6)で**中央の面**と決まった
@@ -209,6 +215,7 @@ const VIEW_LABELS: Record<ViewMode, string> = {
   detail: '本文',
   query: '集計',
   schedule: '予定表',
+  contacts: '連絡先',
   dual: '2 ペインで整理',
   settings: '設定',
   flags: 'フラグ',
