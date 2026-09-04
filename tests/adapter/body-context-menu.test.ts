@@ -28,6 +28,8 @@ import { applyHeadingFold } from '../../src/adapter/ui/render/heading-fold';
 import { applyPlaceLayout } from '../../src/adapter/ui/render/place-board';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import { bodyBelowFrontmatter, frontmatterLineCount } from '../../src/features/markdown/frontmatter';
+import type { DomainEvent } from '../../src/adapter/state/app-state';
+import { resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
 
 const MENU = '[data-pkc-region="context-menu"]';
 
@@ -132,7 +134,8 @@ describe('本文の右クリック(#426 段② / #522)', () => {
     const acts = [...s.menu()!.querySelectorAll('button[data-pkc-action]')].map((b) =>
       b.getAttribute('data-pkc-action'),
     );
-    expect(acts).toEqual(BODY_MENU_ACTIONS.map((a) => a.action));
+    // ⚠ 「ここに板を置く」(#676)は本文を書き換える物なので `BODY_MENU_ACTIONS` の外 ── 塊の並びの位置
+    expect(acts).toEqual(['add-place', ...BODY_MENU_ACTIONS.map((a) => a.action)]);
     /**
      * 🔴 **「削除」を出さない。**
      * ⚠ 本文を押したのに削除が出ると、消えるのは**選んでいるノート**である ──
@@ -488,6 +491,7 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
      *   だけと突き合わせる変異は、fixture に外部画像が 0 枚だと素通りした。
      */
     expect(acts.slice(4), '本文のメニューが消えている / 取り込みが見出しの枝だけ落ちた').toEqual([
+      'add-place',
       ...BODY_MENU_ACTIONS.map((a) => a.action),
       'adopt-external-images',
     ]);
@@ -497,6 +501,7 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     const r = rig();
     rightClick(r.para);
     expect(r.acts(), '段落の上でも見出しの物が出た').toEqual([
+      'add-place',
       ...BODY_MENU_ACTIONS.map((a) => a.action),
       'adopt-external-images',
     ]);
@@ -1357,5 +1362,102 @@ describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () =
     r.d.dispatch({ type: 'BODY_LOADED', lid: 'n2', body: '## 別\n\n別の中身\n' });
     r.press('copy-chapter-md');
     expect(r.copied, '別ノートの本文を写した').toHaveLength(0);
+  });
+
+  /**
+   * 🔴 **板を右クリックから置く・消す**(#676。user 裁定 2026-09-04)。
+   *
+   * ⚠ 見るのは**配線** ── メニューの字 → 押す → reducer → `REQUEST_BODY_REWRITE` の中身
+   *   (座標 / 生の body の行番号 / 開き行)。書換の規則そのものは
+   *   `tests/features/place-notation.test.ts` が守る。
+   * ⚠ 消すは確認を挟む ── 確認の枝を**押して通す**(#299 の目的 = 確認の枝が test から
+   *   見えない、を終わらせる)。
+   */
+  const BOARD_OPEN = ':::format{.pkc-place x=40 y=40 w=320 h=200 entry=n2}';
+  function asksOf(d: Dispatcher): DomainEvent[] {
+    const out: DomainEvent[] = [];
+    d.onEvent((e) => {
+      if (e.type === 'REQUEST_BODY_REWRITE') out.push(e);
+    });
+    return out;
+  }
+  function rightClickAt(el: Element, x: number, y: number): void {
+    el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x, clientY: y }));
+  }
+  /** 確認の答えが `.then` を伝わる分だけ待つ(⚠ `setTimeout` で待たない ── 時間でごまかさない)。 */
+  async function settle(): Promise<void> {
+    for (let i = 0; i < 6; i += 1) await Promise.resolve();
+  }
+
+  it('🔴 本文の上に「ここに板を置く」が出て、押すと押した座標で place-add の依頼になる', () => {
+    const r = rig();
+    const asks = asksOf(r.d);
+    // ⚠ happy-dom の器の rect は 0 なので、押した clientX/Y がそのまま器の座標になる
+    rightClickAt(r.q('p[data-pkc-source-line="2"]'), 37, 61);
+    expect(r.acts(), '「ここに板を置く」が出ていない').toContain('add-place');
+    expect(r.label('add-place')).toBe('ここに板を置く');
+    r.press('add-place');
+    expect(asks, '書換の依頼が 1 回出ていない').toHaveLength(1);
+    expect(asks[0]).toMatchObject({ lid: 'n1', rewrite: { kind: 'place-add', x: 37, y: 61 } });
+  });
+
+  it('板の無い段落だけのノートでも「ここに板を置く」は出る(1 枚目を置ける)', () => {
+    const r = rig('段落だけ\n');
+    rightClick(r.q('p[data-pkc-source-line="0"]'));
+    expect(r.acts()).toContain('add-place');
+    expect(r.acts(), '板が無いのに「この板を消す」が出た').not.toContain('remove-place');
+  });
+
+  it('🔴 板の上で「この板を消す」→ 確認で「消す」→ 生の body の行番号で place-remove の依頼になる', async () => {
+    resetAppDialogForTest();
+    const r = rig();
+    const asks = asksOf(r.d);
+    rightClick(r.q('[data-pkc-field="place-card"][data-pkc-entry="n2"]'));
+    expect(r.acts(), '「この板を消す」が出ていない').toContain('remove-place');
+    expect(r.label('remove-place')).toBe('この板を消す');
+    // ⚠ 消すは末尾(勢いで押さない ── コピーの下)
+    expect(r.acts().indexOf('remove-place')).toBeGreaterThan(r.acts().indexOf('copy-block-md'));
+    r.press('remove-place');
+    const ok = document.querySelector<HTMLButtonElement>('[data-pkc-field="dialog-ok"]');
+    expect(ok, '確認が出ていない').not.toBeNull();
+    expect(ok!.textContent, '受ける側の字が起きることを言っていない').toBe('消す');
+    expect(asks, '確認の前に書いた').toHaveLength(0);
+    ok!.click();
+    await settle();
+    expect(asks, '「消す」を押しても書換の依頼が出ない').toHaveLength(1);
+    // 🔑 刻印は frontmatter を剥いだ 18 行目、reducer が受けるのは生の body の 21 行目(fm 3 行)
+    expect(asks[0]).toMatchObject({ lid: 'n1', rewrite: { kind: 'place-remove', line: 21, openLine: BOARD_OPEN } });
+  });
+
+  it('確認で「やめる」を押せば、何も書かない', async () => {
+    resetAppDialogForTest();
+    const r = rig();
+    const asks = asksOf(r.d);
+    rightClick(r.q('[data-pkc-field="place-card"][data-pkc-entry="n2"]'));
+    r.press('remove-place');
+    document.querySelector<HTMLButtonElement>('[data-pkc-field="dialog-cancel"]')!.click();
+    await settle();
+    expect(asks).toHaveLength(0);
+  });
+
+  it('⚠ 段落・板でない囲みの上では「この板を消す」は出ない(対照群)', () => {
+    const r = rig();
+    rightClick(r.q('p[data-pkc-source-line="2"]'));
+    expect(r.acts()).not.toContain('remove-place');
+    rightClick(r.q('p[data-pkc-source-line="5"]'));
+    expect(r.acts(), '囲みの上に塊の物が無い(台の空振り)').toContain('copy-block-md');
+    expect(r.acts(), '板でない囲みで「この板を消す」が出た').not.toContain('remove-place');
+  });
+
+  it('🔴 編集中に「この板を消す」を押すと、確認を出さずに理由を出す', () => {
+    resetAppDialogForTest();
+    const r = rig();
+    const asks = asksOf(r.d);
+    rightClick(r.q('[data-pkc-field="place-card"][data-pkc-entry="n2"]'));
+    r.d.dispatch({ type: 'START_EDIT' });
+    r.press('remove-place');
+    expect(document.querySelector('[data-pkc-field="dialog-ok"]'), '編集中なのに確認が出た').toBeNull();
+    expect(r.d.getState().error ?? '', '理由が出ていない').toContain('編集を終了');
+    expect(asks).toHaveLength(0);
   });
 });

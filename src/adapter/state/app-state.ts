@@ -957,6 +957,15 @@ export type UserAction =
    */
   | { type: 'MOVE_PLACE'; lid: string; line: number; x: number; y: number }
   /**
+   * 🔴 **板を画面から作る・大きさを変える・消す**(#676。user 裁定 2026-09-04)。
+   * ⚠ 3 つとも `MOVE_PLACE` と**同じ門**(`placeRewrite`)を通る ── phase / 画面に出ている
+   *   本文 / 開き行の捕捉を、case ごとに書き直さない(§7)。
+   * ⚠ `ADD_PLACE` だけ行番号を持たない(足す先は常に末尾)。
+   */
+  | { type: 'RESIZE_PLACE'; lid: string; line: number; w: number; h: number }
+  | { type: 'REMOVE_PLACE'; lid: string; line: number }
+  | { type: 'ADD_PLACE'; lid: string; x: number; y: number }
+  /**
    * 🔴 **本文の 1 行の日付**(双方向。user 指示 2026-08-23)。
    * ⚠ `SET_ENTRY_DATE`(ノート 1 件が丸ごと予定)とは**単位が違う**。
    * ⚠ `date: null` は予定から外す。
@@ -2930,56 +2939,40 @@ function reduceCore(
       };
     }
     /**
-     * 🔴 **板の塊を動かす**(#283 P4-b)。
-     * ⚠ 編集中は**声に出して断る** ── 判定はここ 1 か所(`SET_VIEW_MODE` と同じ作法。
-     *   呼び側(掴む口)に配ると、口を足すたびに取りこぼす ── #516 の向き)。
-     * 🔑 掴んだ時点の開き行を `openBody` から捕える ── disk 側で byte 一致しなければ
-     *   `movePlace` が書かない(別の窓の書込を巻き戻さない)。
+     * 🔴 **板の塊を動かす**(#283 P4-b)。門(phase / 画面に出ている本文 / 開き行の捕捉)は
+     * `placeRewrite` 1 か所 ── 下の 3 つ(#676)と共有する。
      */
-    case 'MOVE_PLACE': {
-      if (state.phase !== 'ready')
-        return {
-          state: { ...state, error: '編集を終了してから、板の付箋を動かしてください' },
-          events: [],
-        };
-      const meta = state.entryMetas.get(action.lid);
-      if (!meta) return { state, events: [] };
-      /**
-       * 🔴 **画面に出ている本文は 1 つではない**(#281 検算 2026-08-30)。
-       * ⚠ 1 稿目は `openBody` だけを見ていたので、**横に留めた枠**の付箋は
-       *   ①主の枠が板でなければ黙って no-op ②主の枠も板なら**別のノートの
-       *   同じ行を書き換えうる**、の 2 つに落ちていた。
-       * 🔑 `screenBodyOf` が「その lid が、いま画面のどこに出ているか」を 1 か所で答える。
-       */
-      const shown = screenBodyOf(state, action.lid);
-      if (shown === null) return { state, events: [] };
-      if (!Number.isInteger(action.x) || !Number.isInteger(action.y)) return { state, events: [] };
-      if (action.x < 0 || action.y < 0) return { state, events: [] };
-      // 🔑 開き行は**この場で**捕捉する(描画が焼いた行番号 → 画面が見ている本文の字)。
-      //    disk 側とずれていれば movePlace が byte 一致で断る。
-      if (!Number.isInteger(action.line) || action.line < 0) return { state, events: [] };
-      const openLine = shown.split('\n')[action.line];
-      if (openLine === undefined || !isPlaceOpen(openLine)) return { state, events: [] };
-      return {
-        state,
-        events: [
-          {
-            type: 'REQUEST_BODY_REWRITE',
-            lid: meta.lid,
-            title: meta.title,
-            archetype: meta.archetype,
-            entryOrder: meta.entryOrder,
-            rewrite: {
-              kind: 'place-move',
-              line: action.line,
-              openLine,
-              x: action.x,
-              y: action.y,
-            },
-          },
-        ],
-      };
-    }
+    case 'MOVE_PLACE':
+      return placeRewrite(state, action.lid, '編集を終了してから、板の付箋を動かしてください', (shown) => {
+        if (!isPlaceCoord(action.x) || !isPlaceCoord(action.y)) return null;
+        const openLine = placeOpenLineOf(shown, action.line);
+        if (openLine === null) return null;
+        return { kind: 'place-move', line: action.line, openLine, x: action.x, y: action.y };
+      });
+    /**
+     * 🔴 **板を画面から作る・大きさを変える・消す**(#676)── 3 つとも `MOVE_PLACE` と
+     * 同じ門(`placeRewrite`)を通る。断り文だけが**押した場所と対**で違う
+     * (CLAUDE.md「文言は押した場所と対で pin する」)。
+     */
+    case 'RESIZE_PLACE':
+      return placeRewrite(state, action.lid, '編集を終了してから、板の大きさを変えてください', (shown) => {
+        if (!isPlaceCoord(action.w) || !isPlaceCoord(action.h)) return null;
+        const openLine = placeOpenLineOf(shown, action.line);
+        if (openLine === null) return null;
+        return { kind: 'place-size', line: action.line, openLine, w: action.w, h: action.h };
+      });
+    case 'REMOVE_PLACE':
+      return placeRewrite(state, action.lid, '編集を終了してから、板を消してください', (shown) => {
+        const openLine = placeOpenLineOf(shown, action.line);
+        if (openLine === null) return null;
+        return { kind: 'place-remove', line: action.line, openLine };
+      });
+    case 'ADD_PLACE':
+      return placeRewrite(state, action.lid, '編集を終了してから、板を置いてください', () =>
+        isPlaceCoord(action.x) && isPlaceCoord(action.y)
+          ? { kind: 'place-add', x: action.x, y: action.y }
+          : null,
+      );
     case 'SET_ENTRY_DATE': {
       // 🔴 **黙って捨てない**(#516)── 理由は上の `SET_TASK_DATE` に書いた
       const blocked = phaseBlockReason(state.phase);
@@ -4578,6 +4571,64 @@ function keepContacts(
 export function screenBodyOf(state: AppState, lid: string): string | null {
   if (state.openBody && state.openBody.lid === lid) return state.openBody.body;
   return state.splitBodies.get(lid) ?? null;
+}
+
+/**
+ * 🔴 **板の書換 4 つ(動かす / 大きさ / 消す / 置く)が共通で通る門**(#283 P4-b → #676)。
+ *
+ * ⚠ 編集中は**声に出して断る** ── 判定はここ 1 か所(`SET_VIEW_MODE` と同じ作法。
+ *   呼び側(掴む口・メニュー)に配ると、口を足すたびに取りこぼす ── #516 の向き)。
+ * 🔴 **画面に出ている本文は 1 つではない**(#281 検算 2026-08-30)。
+ * ⚠ 1 稿目は `openBody` だけを見ていたので、**横に留めた枠**の付箋は
+ *   ①主の枠が板でなければ黙って no-op ②主の枠も板なら**別のノートの
+ *   同じ行を書き換えうる**、の 2 つに落ちていた。
+ * 🔑 `screenBodyOf` が「その lid が、いま画面のどこに出ているか」を 1 か所で答える。
+ *
+ * @param refusal 編集中の断り文(押した場所と対で書く)
+ * @param build 画面が見ている本文から書換を組む。組めなければ `null` = 黙って no-op
+ *   (行が板でない / 値が壊れている ── どれも画面の操作からは起きない形)
+ */
+function placeRewrite(
+  state: AppState,
+  lid: string,
+  refusal: string,
+  build: (shown: string) => BodyRewrite | null,
+): ReduceResult {
+  if (state.phase !== 'ready') return { state: { ...state, error: refusal }, events: [] };
+  const meta = state.entryMetas.get(lid);
+  if (!meta) return { state, events: [] };
+  const shown = screenBodyOf(state, lid);
+  if (shown === null) return { state, events: [] };
+  const rewrite = build(shown);
+  if (rewrite === null) return { state, events: [] };
+  return {
+    state,
+    events: [
+      {
+        type: 'REQUEST_BODY_REWRITE',
+        lid: meta.lid,
+        title: meta.title,
+        archetype: meta.archetype,
+        entryOrder: meta.entryOrder,
+        rewrite,
+      },
+    ],
+  };
+}
+
+/**
+ * 🔑 開き行は**この場で**捕捉する(描画が焼いた行番号 → 画面が見ている本文の字)。
+ * disk 側とずれていれば `place-notation.ts` が byte 一致で断る。板の開き行でなければ `null`。
+ */
+function placeOpenLineOf(shown: string, line: number): string | null {
+  if (!Number.isInteger(line) || line < 0) return null;
+  const openLine = shown.split('\n')[line];
+  return openLine !== undefined && isPlaceOpen(openLine) ? openLine : null;
+}
+
+/** 板の座標・大きさの値 ── 整数で 0 以上だけ(描画も負の値は捨てる)。 */
+function isPlaceCoord(n: number): boolean {
+  return Number.isInteger(n) && n >= 0;
 }
 
 function dropSplitBody(

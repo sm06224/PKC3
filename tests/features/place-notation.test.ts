@@ -11,10 +11,21 @@
  *    書込を巻き戻さない ── `undo-append` と同じ作法)
  * 4. 🔑 値が変わらないときは **body をそのまま返す**(null = 断る、と区別する ──
  *    null に混ぜると、取りやめた drop に「開き直してください」の嘘の赤帯が出る)
+ * 5. 🔴 #676 の 3 操作(大きさ / 消す / 足す)も**同じ門**を通る ── 指定の札以外は
+ *    1 byte も変わらない / 閉じていない板は消さない(末尾まで消える事故) /
+ *    足した塊は**描画が板として描く綴り**である
  */
 import { describe, expect, it } from 'vitest';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
-import { isPlaceOpen, movePlace } from '../../src/features/markdown/place-notation';
+import {
+  addPlace,
+  isPlaceOpen,
+  movePlace,
+  NEW_PLACE_H,
+  NEW_PLACE_W,
+  removePlace,
+  resizePlace,
+} from '../../src/features/markdown/place-notation';
 
 const BOARD = [
   ':::format{#p1 .pkc-place x=120 y=40 w=320 h=200}',
@@ -185,5 +196,126 @@ describe('位置だけの書き換え(movePlace)', () => {
     // ``` を ~~~ が閉じることは無い ── fence は開いたまま = やはり書かない
     const crossed = ['```', '~~~', open].join('\n');
     expect(movePlace(crossed, { line: 2, openLine: open, x: 2, y: 3 })).toBeNull();
+  });
+});
+
+describe('大きさだけの書き換え(resizePlace)(#676)', () => {
+  const line0 = BOARD.split('\n')[0]!;
+
+  it('🔴 w= / h= だけが変わり、x= / y= も他の行も 1 byte も変わらない', () => {
+    const next = resizePlace(BOARD, { line: 0, openLine: line0, w: 400, h: 90 });
+    expect(next).not.toBeNull();
+    const lines = next!.split('\n');
+    expect(lines[0]).toBe(':::format{#p1 .pkc-place x=120 y=40 w=400 h=90}');
+    expect(lines.slice(1)).toEqual(BOARD.split('\n').slice(1));
+  });
+
+  it('w= / h= が無い塊には足す(x= / y= の後ろ)', () => {
+    const open = ':::format{#p2 .pkc-place entry=n2 x=460 y=40}';
+    const next = resizePlace(BOARD, { line: 5, openLine: open, w: 200, h: 120 });
+    expect(next!.split('\n')[5]).toBe(':::format{#p2 .pkc-place entry=n2 x=460 y=40 w=200 h=120}');
+  });
+
+  it('🔴 同じ門を通る ── byte 不一致 / fence の中 / 負・小数 は null、同じ値は body そのまま', () => {
+    expect(resizePlace(BOARD, { line: 0, openLine: ':::format{.pkc-place x=999}', w: 1, h: 2 })).toBeNull();
+    const open = ':::format{.pkc-place x=1 y=1 w=10 h=10}';
+    expect(resizePlace(['```', open, '```'].join('\n'), { line: 1, openLine: open, w: 5, h: 5 })).toBeNull();
+    expect(resizePlace(BOARD, { line: 0, openLine: line0, w: -1, h: 2 })).toBeNull();
+    expect(resizePlace(BOARD, { line: 0, openLine: line0, w: 1.5, h: 2 })).toBeNull();
+    expect(resizePlace(BOARD, { line: 0, openLine: line0, w: 320, h: 200 })).toBe(BOARD);
+  });
+});
+
+describe('板の塊を消す(removePlace)(#676)', () => {
+  const lines = BOARD.split('\n');
+
+  it('🔴 開き行から閉じの ::: まで + 後ろの空行 1 本が消え、次の板の開き行は 1 byte も動かない', () => {
+    const next = removePlace(BOARD, { line: 0, openLine: lines[0]! });
+    expect(next).toBe([lines[5], lines[6]].join('\n'));
+  });
+
+  it('末尾の板は、前の空行 1 本と一緒に消える(空行が 2 本並ばない)', () => {
+    const next = removePlace(BOARD, { line: 5, openLine: lines[5]! });
+    expect(next).toBe(lines.slice(0, 4).join('\n'));
+  });
+
+  it('空行は 1 本しか消さない(隣の段落の間隔まで詰めない)', () => {
+    const body = ['A', '', '', ':::format{.pkc-place x=1 y=1}', 'B', ':::', '', '', 'C'].join('\n');
+    expect(removePlace(body, { line: 3, openLine: ':::format{.pkc-place x=1 y=1}' })).toBe(
+      ['A', '', '', '', 'C'].join('\n'),
+    );
+  });
+
+  it('🔴 閉じていない板は消さない(消すと末尾まで丸ごと消える)', () => {
+    const open = ':::format{.pkc-place x=1 y=1}';
+    const body = [open, 'まだ書いている', '', '## 次の章', '本文'].join('\n');
+    expect(removePlace(body, { line: 0, openLine: open })).toBeNull();
+    // 対照群 ── 閉じを足せば消せる(門が閉じの有無を見ていることを見る)
+    const closed = [open, 'まだ書いている', ':::', '', '## 次の章', '本文'].join('\n');
+    expect(removePlace(closed, { line: 0, openLine: open })).toBe('## 次の章\n本文');
+  });
+
+  it('入れ子の内側の板は、内側だけ消える(外側の囲みは残る)', () => {
+    const open = ':::format{.pkc-place x=1 y=1}';
+    const body = [':::section', open, 'A', ':::', ':::'].join('\n');
+    expect(removePlace(body, { line: 1, openLine: open })).toBe(':::section\n:::');
+  });
+
+  it('🔴 frontmatter のあるノートでも、行番号は生の body 基準で当たる', () => {
+    const open = ':::format{.pkc-place x=1 y=1}';
+    const body = ['---', 'a: 1', '---', '', open, ':::', '', '段落'].join('\n');
+    expect(removePlace(body, { line: 4, openLine: open })).toBe('---\na: 1\n---\n\n段落');
+  });
+
+  it('同じ門 ── byte 不一致 / 板でない行 / fence の中 は null', () => {
+    expect(removePlace(BOARD, { line: 0, openLine: ':::format{.pkc-place x=999}' })).toBeNull();
+    expect(removePlace(BOARD, { line: 2, openLine: '- 牛乳' })).toBeNull();
+    const open = ':::format{.pkc-place x=1 y=1}';
+    expect(removePlace(['```', open, ':::', '```'].join('\n'), { line: 1, openLine: open })).toBeNull();
+  });
+});
+
+describe('板の塊を足す(addPlace)(#676)', () => {
+  it('🔴 末尾に空の塊が足され、元の行は 1 byte も動かない', () => {
+    const body = '# 題\n\n本文\n';
+    const next = addPlace(body, 30, 50);
+    expect(next).toBe(`# 題\n\n本文\n\n:::format{.pkc-place x=30 y=50 w=${NEW_PLACE_W} h=${NEW_PLACE_H}}\n\n:::\n`);
+    expect(next!.startsWith(body), '元の本文が変わった').toBe(true);
+  });
+
+  it('末尾に改行が無い本文でも、空行 1 本で区切って足す', () => {
+    expect(addPlace('本文', 0, 0)).toBe(`本文\n\n:::format{.pkc-place x=0 y=0 w=${NEW_PLACE_W} h=${NEW_PLACE_H}}\n\n:::\n`);
+    expect(addPlace('', 0, 0)).toBe(`:::format{.pkc-place x=0 y=0 w=${NEW_PLACE_W} h=${NEW_PLACE_H}}\n\n:::\n`);
+  });
+
+  /**
+   * 🔴 **描画との合意をここで見る** ── 足した綴りを実物の描画器に渡し、板の塊として
+   * **その座標で**描かれることを assert する(綴りが描画から外れたら、置いたのに画面に
+   * 出ないという最も静かな壊れ方になる)。
+   */
+  it('🔴 足した塊は、描画が板として(その座標で)描く', () => {
+    const next = addPlace('本文\n', 30, 50)!;
+    const html = renderMarkdown(next, { sourceLineAnchors: true } as never);
+    const m = /<div[^>]*class="[^"]*pkc-format-block[^"]*pkc-place[^"]*"[^>]*>/.exec(html);
+    expect(m, '板として描かれていない').not.toBeNull();
+    expect(m![0]).toContain('data-pkc-x="30"');
+    expect(m![0]).toContain('data-pkc-y="50"');
+    expect(m![0]).toContain(`data-pkc-w="${NEW_PLACE_W}"`);
+    // 開き行の行番号は、足した塊の開き行(2 行目 = 本文 / 空行 / 開き)
+    expect(m![0]).toContain('data-pkc-source-line="2"');
+    // ⚠ 開き行は isPlaceOpen が受ける(動かす / 消す の門を通れる)
+    expect(isPlaceOpen(next.split('\n')[2]!)).toBe(true);
+  });
+
+  it('🔴 末尾の囲いが閉じていなければ足さない(fence / ::: の中に書くと画面に出ない)', () => {
+    expect(addPlace('本文\n```js\nconst a = 1;\n', 1, 1)).toBeNull();
+    expect(addPlace(':::note\nまだ書いている\n', 1, 1)).toBeNull();
+    // 対照群 ── 閉じていれば足せる
+    expect(addPlace('本文\n```js\nconst a = 1;\n```\n', 1, 1)).not.toBeNull();
+  });
+
+  it('負・小数の座標は null', () => {
+    expect(addPlace('本文', -1, 0)).toBeNull();
+    expect(addPlace('本文', 0, 1.5)).toBeNull();
   });
 });

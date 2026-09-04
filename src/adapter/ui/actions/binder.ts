@@ -133,6 +133,7 @@ import { chordOf, findCommand, isMac, typesCharacter, KEY_COMMANDS } from '@feat
 import { paletteRows } from '@features/palette/palette-rows';
 import {
   blockMenuActions,
+  ADD_PLACE_ACTION,
   bodyMenuActions,
   editingRowMenuActions,
   entryMenuActions,
@@ -1513,6 +1514,14 @@ const MENU_LID_ATTR = 'data-pkc-menu-lid';
  * 1 つの属性に載せると片方が消える。座標は同じ(frontmatter を剥いだ本文の行番号)。
  */
 const MENU_BLOCK_ATTR = 'data-pkc-menu-block';
+/**
+ * 🔴 **右クリックした所の、本文の器の中での座標**(#676「ここに板を置く」)。
+ * 器(`detail-body`)の左上からの px ── 板の `x=` / `y=` と同じ座標系(絶対配置の基準は
+ * 器の padding box なので、`getBoundingClientRect` の左上から**枠線ぶん**(`clientLeft`)を
+ * 引き、器がスクロールしていればその分を足す)。
+ */
+const MENU_X_ATTR = 'data-pkc-menu-x';
+const MENU_Y_ATTR = 'data-pkc-menu-y';
 
 /**
  * 🔴 **メニューを出す前に開いていたノート**(#685 動線レビュー 欠陥 2、2026-09-04)。
@@ -4367,6 +4376,63 @@ const ACTIONS: Record<string, ActionHandler> = {
     );
   },
   /**
+   * 🔴 **右クリックした所に板を置く**(#676。user 裁定 2026-09-04)。
+   *
+   * 座標はメニューが運んできた物(`MENU_X_ATTR` / `MENU_Y_ATTR` = 本文の器の左上からの px)。
+   * 書くのは `ADD_PLACE` → reducer の門 → `REQUEST_BODY_REWRITE`(`place-add`)── 本文の末尾に
+   * 空の塊が足され、再描画でその座標に置かれる。編集中の断りは reducer が出す。
+   * ⚠ 座標が読めない形は画面からは起きない(運ぶのは同じ `onContextMenu`)が、
+   *   黙って何も起きないを作らない ── 理由を出す。
+   */
+  'add-place': (dispatcher, target) => {
+    if (refuseStaleMenu(dispatcher, target)) return;
+    const ob = dispatcher.getState().openBody;
+    const x = menuCarriedAt(target, MENU_X_ATTR);
+    const y = menuCarriedAt(target, MENU_Y_ATTR);
+    if (ob === null || x === null || y === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '置く位置を読めませんでした(本文を開き直してください)' });
+      return;
+    }
+    dispatcher.dispatch({ type: 'ADD_PLACE', lid: ob.lid, x, y });
+  },
+  /**
+   * 🔴 **右クリックした板を消す**(#676)── 置けるなら消せる(user 指示 2026-08-23)。
+   *
+   * ⚠ 取り消せない(板の書換は履歴を伸ばさない amend)ので**確認を挟む**(`delete-entry` と
+   *   同じ `confirmThen`)。⚠ confirm より**前**に編集中を断る ── 確認まで出してから黙って
+   *   捨てる形にしない(`delete-entry` と同じ理由)。
+   * ⚠ 行はメニューが運んだ塊の開き行(frontmatter を剥いだ座標)── reducer は生の body の
+   *   行番号を受けるので、`frontmatterLineCount` を足して渡す(`bodySourceLineAt` と同じ規律)。
+   */
+  'remove-place': (dispatcher, target, _services, root) => {
+    const line = menuCarriedBlock(target);
+    if (line === null || refuseStaleMenu(dispatcher, target)) return;
+    const st = dispatcher.getState();
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから、板を消してください' });
+      return;
+    }
+    const ob = st.openBody;
+    if (ob === null) return;
+    const lid = ob.lid;
+    confirmThen(
+      root,
+      'この板を本文から消しますか?(中に書いた字も消えます。取り消せません)',
+      { okLabel: '消す', danger: true },
+      dispatcher,
+      () => {
+        const now = dispatcher.getState();
+        if (now.phase !== 'ready') return '編集を終了してから、板を消してください';
+        if (now.openBody?.lid !== lid) return '別のノートに切り替わったので、板は消していません';
+        return null;
+      },
+      () => {
+        const body = dispatcher.getState().openBody?.body ?? '';
+        dispatcher.dispatch({ type: 'REMOVE_PLACE', lid, line: line + frontmatterLineCount(body) });
+      },
+    );
+  },
+  /**
    * 🔴 **よく開くサイトをアプリ一覧に足す**(#401 ①)。
    *
    * ⚠ PKC3 は URL タイルを**表示も起動もできた**のに(`tiles.ts` が
@@ -7193,6 +7259,8 @@ export function bindActions(
               appendable: level >= 1 && level <= 3 && appendModeOf(dispatcher.getState()).kind === 'ready',
             })),
         ...(block === null ? [] : blockMenuActions({ board: block.board })),
+        // 🔴 板を置く口は**いつも**出す(#676)── 押した座標は下の carry が運ぶ
+        ADD_PLACE_ACTION,
         ...body,
       ];
       /**
@@ -7204,6 +7272,13 @@ export function bindActions(
       const carry: Record<string, string> = { [MENU_LID_ATTR]: ob?.lid ?? '' };
       if (line !== null) carry[MENU_LINE_ATTR] = String(line);
       if (block !== null) carry[MENU_BLOCK_ATTR] = String(block.line);
+      if (host !== null) {
+        // 🔴 押した所を**器の座標**へ写して運ぶ(#676)── 受け手はメニューの器の中に居るので、
+        //    押した瞬間の座標はここでしか読めない。負は 0 で止める(描画は負を捨てる)
+        const r = host.getBoundingClientRect();
+        carry[MENU_X_ATTR] = String(Math.max(0, Math.round(ev.clientX - r.left - host.clientLeft + host.scrollLeft)));
+        carry[MENU_Y_ATTR] = String(Math.max(0, Math.round(ev.clientY - r.top - host.clientTop + host.scrollTop)));
+      }
       openContextMenu(root, { x: ev.clientX, y: ev.clientY }, items, root.ownerDocument.activeElement, carry);
       return;
     }

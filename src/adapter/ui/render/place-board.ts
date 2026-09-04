@@ -52,6 +52,25 @@ function ensureGrip(el: HTMLElement): void {
 }
 
 /**
+ * 🔴 **大きさを変える持ち手**を右下に 1 つ置く(#676。冪等)。
+ * 掴む口(`ensureGrip`)と同じ作法 ── `<button>` / 字は CSS / 文言は起きることで書く。
+ * 掴んだときの振る舞いは `place-drag.ts` の `mode: 'size'`。
+ */
+function ensureSizeHandle(el: HTMLElement): void {
+  let handle = el.querySelector<HTMLButtonElement>(':scope > [data-pkc-field="place-size"]');
+  if (handle === null) {
+    handle = el.ownerDocument.createElement('button');
+    handle.type = 'button';
+    handle.setAttribute('data-pkc-field', 'place-size');
+    handle.textContent = '';
+    el.append(handle);
+  }
+  const label = '角を掴んで大きさを変えます(離した大きさが本文に書かれます)';
+  handle.title = label;
+  handle.setAttribute('aria-label', label);
+}
+
+/**
  * `entry=` の塊に**題名の札**を出す(冪等)。
  * ⚠ 相手が消えていても**黙って空にしない**(関係の行と同じ向き)。
  */
@@ -138,6 +157,7 @@ export function applyPlaceLayout(
       el.removeAttribute('data-pkc-entry');
     }
     ensureGrip(el);
+    ensureSizeHandle(el);
     const lid = el.getAttribute('data-pkc-place-entry');
     if (lid !== null && lid !== '') ensureCard(el, lid, resolveTitle);
     bottom = Math.max(bottom, y + (h ?? 160));

@@ -2464,6 +2464,28 @@ li[data-pkc-row-slot] {
 .pkc-place > [data-pkc-field='place-grip']::before {
   content: '⠿';
 }
+/* 大きさを変える持ち手(#676)── 右下の角。印は CSS で出す(掴む口と同じ理由) */
+.pkc-place > [data-pkc-field='place-size'] {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: nwse-resize;
+  /* ⚠ 掴んだ指の動きをブラウザのスクロールに食わせない(touch で効く) */
+  touch-action: none;
+}
+.pkc-place > [data-pkc-field='place-size']::before {
+  content: '◢';
+  font-size: 10px;
+  line-height: 16px;
+}
+.pkc-place > [data-pkc-field='place-size']:hover,
+.pkc-place > [data-pkc-field='place-size']:focus-visible,
 .pkc-place > [data-pkc-field='place-grip']:hover,
 .pkc-place > [data-pkc-field='place-grip']:focus-visible {
   color: var(--fg);

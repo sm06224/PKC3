@@ -456,8 +456,28 @@ export function headingMenuActions(ctx: {
  * @param board 板の塊か(`place-notation.ts` の `isPlaceOpen` が決める)
  */
 export function blockMenuActions(ctx: { readonly board: boolean }): readonly EntryAction[] {
-  return [{ action: 'copy-block-md', label: ctx.board ? 'この板をコピー' : 'この塊をコピー' }];
+  if (!ctx.board) return [{ action: 'copy-block-md', label: 'この塊をコピー' }];
+  /**
+   * 🔴 **板だけの物**(#676。user 裁定 2026-09-04)── 置けるなら消せる(user 指示
+   *   2026-08-23「片道の操作を作らない」)。⚠ 消すは取り消せないので**確認を挟む**
+   *   (受け手 `remove-place` が `confirmThen` で聞く)── 一覧の末尾に置く。
+   */
+  return [
+    { action: 'copy-block-md', label: 'この板をコピー' },
+    { action: 'remove-place', label: 'この板を消す' },
+  ];
 }
+
+/**
+ * 🔴 **右クリックした場所に板を置く**(#676。user 裁定 2026-09-04)。
+ *
+ * ⚠ 本文の右クリックに**いつも**出す ── 板の無いノートにも置ける(1 枚目を置くと器が板になり、
+ *   付箋が本文の上に重なる ── マニュアルに書いた仕様)。座標はメニューが運ぶ
+ *   (`binder.ts` の `data-pkc-menu-x` / `-y`)。
+ * ⚠ `BODY_MENU_ACTIONS` には入れない ── あちらは「読んでいる見え方を変える」物の表で、
+ *   これは**本文を書き換える**物である(塊の物と同じ並びに置く)。
+ */
+export const ADD_PLACE_ACTION: EntryAction = { action: 'add-place', label: 'ここに板を置く' };
 
 /** 綴り → 字。⚠ 情報ペインはこちらを引く(並びは向こうが決める)。 */
 export const ENTRY_ACTION_LABELS: Readonly<Record<string, string>> = Object.fromEntries(

@@ -13,6 +13,9 @@
  * 5. 動かしていない(slop 未満)/ 元の位置へ戻した(取りやめ)なら書かない
  * 6. 🔴 塊の `data-pkc-entry` は名前を替えて外す ── 札の中のチェックを押したとき、
  *    `toggle-task` の closest が別ノートへ書かないため(レビュー実測 2026-08-28)
+ * 7. 🔴 #676: 大きさ / 消す / 置く も**同じ門**(`RESIZE_PLACE` / `REMOVE_PLACE` /
+ *    `ADD_PLACE` → 開き行を捕えた REQUEST_BODY_REWRITE。編集中は板の字で断る)。
+ *    右下の角を掴むと見た目の大きさだけ動き、離すと `place-size` が 1 回飛ぶ
  */
 import { readFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -269,6 +272,87 @@ describe('書換の門(MOVE_PLACE)', () => {
     d.dispatch({ type: 'MOVE_PLACE', lid: 'n1', line: -1, x: 1, y: 2 });
     expect(events.filter((e) => e.type === 'REQUEST_BODY_REWRITE')).toHaveLength(0);
   });
+
+  /**
+   * 🔴 **#676 の 3 つも同じ門を通る。** ⚠ 3 つとも**別の it** にする ── 1 つの it に
+   * 束ねると、1 つの case を丸ごと落とす変異が「他の 2 つが飛んだ」で緑になる。
+   */
+  it('🔴 RESIZE_PLACE ── 開き行を捕えた place-size の依頼になる', () => {
+    const { d, events } = booted();
+    d.dispatch({ type: 'RESIZE_PLACE', lid: 'n1', line: 0, w: 400, h: 90 });
+    const ev = events.find((e) => e.type === 'REQUEST_BODY_REWRITE');
+    expect(ev, '書換の依頼が出ていない').toBeDefined();
+    expect(ev).toMatchObject({
+      lid: 'n1',
+      rewrite: { kind: 'place-size', line: 0, openLine: BOARD.split('\n')[0], w: 400, h: 90 },
+    });
+  });
+
+  it('🔴 REMOVE_PLACE ── 開き行を捕えた place-remove の依頼になる', () => {
+    const { d, events } = booted();
+    d.dispatch({ type: 'REMOVE_PLACE', lid: 'n1', line: 5 });
+    const ev = events.find((e) => e.type === 'REQUEST_BODY_REWRITE');
+    expect(ev, '書換の依頼が出ていない').toBeDefined();
+    expect(ev).toMatchObject({
+      lid: 'n1',
+      rewrite: { kind: 'place-remove', line: 5, openLine: BOARD.split('\n')[5] },
+    });
+    // ⚠ 依頼に行番号と開き行**以外**の鍵が無い(x / y を持ち込む変異は別の kind と混ざる)
+    expect(Object.keys((ev as { rewrite: object }).rewrite).sort()).toEqual(['kind', 'line', 'openLine']);
+  });
+
+  it('🔴 ADD_PLACE ── 座標だけを持つ place-add の依頼になる(行番号を持たない)', () => {
+    const { d, events } = booted();
+    d.dispatch({ type: 'ADD_PLACE', lid: 'n1', x: 30, y: 50 });
+    const ev = events.find((e) => e.type === 'REQUEST_BODY_REWRITE');
+    expect(ev, '書換の依頼が出ていない').toBeDefined();
+    expect(ev).toMatchObject({ lid: 'n1', rewrite: { kind: 'place-add', x: 30, y: 50 } });
+  });
+
+  it('🔴 板ではないノートにも置ける(1 枚目 ── 器が板になる仕様)', () => {
+    const d = new Dispatcher();
+    const events: DomainEvent[] = [];
+    d.onEvent((e) => events.push(e));
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1', 'ふつうのノート')], relations: [] });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: 'ただの本文\n' });
+    events.length = 0;
+    d.dispatch({ type: 'ADD_PLACE', lid: 'n1', x: 1, y: 2 });
+    expect(events.find((e) => e.type === 'REQUEST_BODY_REWRITE')).toMatchObject({
+      rewrite: { kind: 'place-add', x: 1, y: 2 },
+    });
+  });
+
+  /**
+   * 🔴 **編集中は 3 つとも声に出して断る**(門は 1 か所)。⚠ 文言は**押した場所と対**
+   * (CLAUDE.md「文言は押した場所と対で pin する」)── 「動かして」の字が 3 つに配られると
+   * 大きさを変えようとした人が「動かしてなどいない」と読む。
+   */
+  it.each([
+    ['RESIZE_PLACE', { type: 'RESIZE_PLACE', lid: 'n1', line: 0, w: 1, h: 2 } as const, '大きさ'],
+    ['REMOVE_PLACE', { type: 'REMOVE_PLACE', lid: 'n1', line: 0 } as const, '消して'],
+    ['ADD_PLACE', { type: 'ADD_PLACE', lid: 'n1', x: 1, y: 2 } as const, '置いて'],
+  ])('🔴 編集中の %s は理由を出して書かない', (_name, action, word) => {
+    const { d, events } = booted();
+    d.dispatch({ type: 'START_EDIT' });
+    d.dispatch(action);
+    const error = d.getState().error ?? '';
+    expect(error, '理由が出ていない').toContain('編集を終了');
+    expect(error, '押した場所と文言が合っていない').toContain('板');
+    expect(error, '操作の名前が文言に無い').toContain(word);
+    expect(events.filter((e) => e.type === 'REQUEST_BODY_REWRITE')).toHaveLength(0);
+  });
+
+  it('負・小数の値 / 板でない行 / 開いていない lid では 3 つとも書かない', () => {
+    const { d, events } = booted();
+    d.dispatch({ type: 'RESIZE_PLACE', lid: 'n1', line: 0, w: -1, h: 2 });
+    d.dispatch({ type: 'RESIZE_PLACE', lid: 'n1', line: 2, w: 1, h: 2 });
+    d.dispatch({ type: 'REMOVE_PLACE', lid: 'n1', line: 2 });
+    d.dispatch({ type: 'REMOVE_PLACE', lid: 'n2', line: 5 });
+    d.dispatch({ type: 'ADD_PLACE', lid: 'n1', x: 1.5, y: 2 });
+    d.dispatch({ type: 'ADD_PLACE', lid: 'n2', x: 1, y: 2 });
+    expect(events.filter((e) => e.type === 'REQUEST_BODY_REWRITE')).toHaveLength(0);
+  });
 });
 
 describe('掴んで動かす(place-drag)', () => {
@@ -401,6 +485,101 @@ describe('掴んで動かす(place-drag)', () => {
     expect(block.style.left).toBe('170px');
     up(50, 50);
     off();
+  });
+
+  /**
+   * 🔴 **右下の角で大きさを変える**(#676)。掴む / 取りやめ / 離す の作法は位置と同じ。
+   */
+  describe('角を掴んで大きさを変える(#676)', () => {
+    function sizeHandle(host: HTMLElement, id: string): HTMLElement {
+      const h = host.querySelector<HTMLElement>(`#${id} [data-pkc-field="place-size"]`);
+      expect(h, `前提が崩れている: ${id} に大きさの持ち手が無い`).not.toBeNull();
+      return h!;
+    }
+
+    it('持ち手が板ごとに 1 つ出る(2 回当てても増えない・字は入れない)', () => {
+      const { host } = mounted();
+      applyPlaceLayout(host, () => null, 0);
+      const handles = host.querySelectorAll('[data-pkc-field="place-size"]');
+      expect(handles).toHaveLength(2);
+      expect(handles[0]!.textContent).toBe('');
+      expect(handles[0]!.getAttribute('aria-label') ?? '', '何が起きるかを言っていない').toContain('大きさ');
+    });
+
+    it('🔴 掴んでいる間は見た目の大きさだけ動き、離すと RESIZE_PLACE → place-size が 1 回飛ぶ', () => {
+      const { host, events, block, off } = mounted();
+      const handle = sizeHandle(host, 'p1');
+      down(handle);
+      move(40, 30);
+      expect(block.style.width).toBe('360px');
+      expect(block.style.height).toBe('230px');
+      // ⚠ 位置は動いていない(位置の掴みと配線を共有しているので、ここで見る)
+      expect(block.style.left).toBe('120px');
+      expect(events.filter((e) => e.type === 'REQUEST_BODY_REWRITE'), '離す前に書いた').toHaveLength(0);
+      up(40, 30);
+      const asks = events.filter((e) => e.type === 'REQUEST_BODY_REWRITE');
+      expect(asks).toHaveLength(1);
+      expect(asks[0]).toMatchObject({ rewrite: { kind: 'place-size', line: 0, w: 360, h: 230 } });
+      // ⚠ 見た目はいったん戻る(書けた大きさは再描画が当て直す)
+      expect(block.style.width).toBe('320px');
+      expect(block.style.height).toBe('200px');
+      off();
+    });
+
+    it('🔑 元の大きさへ戻して離す(取りやめ)── 何も書かず、見た目も戻る', () => {
+      const { host, events, block, off } = mounted();
+      const handle = sizeHandle(host, 'p1');
+      down(handle);
+      move(40, 30);
+      move(0, 0);
+      up(0, 0);
+      expect(events.filter((e) => e.type === 'REQUEST_BODY_REWRITE')).toHaveLength(0);
+      expect(block.style.width).toBe('320px');
+      off();
+    });
+
+    it('🔴 下限より小さくはできない ── 見た目も書く値も 120×40 で止まる(CSS の min と同じ)', () => {
+      const { host, events, block, off } = mounted();
+      const handle = sizeHandle(host, 'p1');
+      down(handle);
+      move(-1000, -1000);
+      expect(block.style.width).toBe('120px');
+      expect(block.style.height).toBe('40px');
+      up(-1000, -1000);
+      expect(events.find((e) => e.type === 'REQUEST_BODY_REWRITE')).toMatchObject({
+        rewrite: { kind: 'place-size', w: 120, h: 40 },
+      });
+      off();
+    });
+
+    it('w= / h= を持たない塊は実寸を基点にし、戻すときは style を外す', () => {
+      const { host, events, off } = mounted();
+      const block2 = host.querySelector<HTMLElement>('#p2')!;
+      expect(block2.style.width, '前提が崩れている: p2 に width が当たっている').toBe('');
+      const handle = sizeHandle(host, 'p2');
+      down(handle);
+      move(200, 100);
+      // happy-dom の offsetWidth は 0 なので、基点 0 + 200 = 200(下限 120 の上)、高さは 100
+      expect(block2.style.width).toBe('200px');
+      up(200, 100);
+      expect(events.find((e) => e.type === 'REQUEST_BODY_REWRITE')).toMatchObject({
+        rewrite: { kind: 'place-size', line: 5, w: 200, h: 100 },
+      });
+      expect(block2.style.width, '無かった width が残っている').toBe('');
+      expect(block2.style.height).toBe('');
+      off();
+    });
+
+    it('途中で切れたら(pointercancel)大きさを戻し、書かない', () => {
+      const { host, events, block, off } = mounted();
+      down(sizeHandle(host, 'p1'));
+      move(40, 30);
+      document.dispatchEvent(new PointerEvent('pointercancel', { ...opts }));
+      expect(block.style.width).toBe('320px');
+      up(40, 30);
+      expect(events.filter((e) => e.type === 'REQUEST_BODY_REWRITE')).toHaveLength(0);
+      off();
+    });
   });
 });
 
