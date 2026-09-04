@@ -241,6 +241,12 @@ interface PaneFrame {
   foot: HTMLElement;
   /** 🔴 **下見**(#273 残件)。⚠ 出していないときは `hidden`。 */
   preview: HTMLElement;
+  /**
+   * 🔴 **もう片方に残っている印の知らせ**(#687 C-1)。⚠ 1 枚ずつ(スマホ)で
+   *   焦点の側にだけ字が入る ── 相手は画面に居ないので、印が残っていることを
+   *   言う物がこれしか無い。出していないときは `hidden` **かつ字も空**。
+   */
+  otherMarks: HTMLElement;
   rows: Map<string, HTMLElement>;
   /**
    * 表の指紋 ── 変わったときだけ組み直す。
@@ -395,6 +401,22 @@ export class DualFilerRenderer {
      */
     this.paintSwitch(frame, state);
     /**
+     * 🔴 **もう片方に残っている印を言う**(#687 C-1)。
+     * ⚠ **両ペインを描いたループの後**で読む ── ループの中で相手の
+     *   `shownMarks` を読むと、相手がまだ前回の値である(左を描いている時点で
+     *   右はまだ描かれていない)。
+     * ⚠ 1 枚ずつ(`lastSolo`。直前の `paintSwitch` が塗った)のときだけ ──
+     *   パソコンは相手の印が見えているので、言う理由が無い。
+     */
+    for (const side of SIDES) {
+      const solo = this.lastSolo === true && side === state.dual.focus;
+      this.paintOtherMarks(
+        frame.panes[side],
+        otherSide(side),
+        solo ? frame.panes[otherSide(side)].shownMarks : 0,
+      );
+    }
+    /**
      * 🔴 **焦点の側は「移す向き」そのもの**なので、必ず画面に出す
      * (出さないと user は**どちらが元か分からないまま**押すことになる)。
      */
@@ -489,6 +511,25 @@ export class DualFilerRenderer {
     }
 
     return true;
+  }
+
+  /**
+   * 🔴 **「左のペインに N 件の印が残っています」を塗る**(#687 C-1)。
+   *
+   * ⚠ 写す / 移すの元は**焦点の側**である(`binder.ts` の `dual-copy` / `dual-move`)。
+   *   1 枚ずつのとき、相手に付けたままの印は**画面に無いのに数だけ在る** ──
+   *   言わないと「さっき 3 件選んだのに、押したら 0 件と断られた」になる。
+   * ⚠ `n === 0` では **`hidden` かつ字も空**にする(`too-narrow.ts` と同じ罠 ──
+   *   `hidden` は見た目にしか効かず、`textContent` を見る検査が隠れた字に満たされる)。
+   * ⚠ 器は作り直さない(字を入れ替えるだけ)。
+   */
+  private paintOtherMarks(frame: PaneFrame, other: DualSide, n: number): void {
+    const text =
+      n > 0
+        ? `${SIDE_LABEL[other]}のペインに ${String(n)} 件の印が残っています(ここで写す・移すを押しても、その印は動きません)`
+        : '';
+    if (frame.otherMarks.textContent !== text) frame.otherMarks.textContent = text;
+    if (frame.otherMarks.hidden !== (n === 0)) frame.otherMarks.hidden = n === 0;
   }
 
   private ensureFrame(): NonNullable<DualFilerRenderer['frame']> {
@@ -625,8 +666,11 @@ export class DualFilerRenderer {
     const preview = document.createElement('pre');
     preview.setAttribute('data-pkc-region', 'dual-preview');
     preview.hidden = true;
+    const otherMarks = document.createElement('div');
+    otherMarks.setAttribute('data-pkc-field', 'dual-other-marks');
+    otherMarks.hidden = true;
 
-    root.append(tabs, head, marksBar, table, preview, foot);
+    root.append(tabs, head, marksBar, table, preview, otherMarks, foot);
     return {
       root,
       tabs,
@@ -640,6 +684,7 @@ export class DualFilerRenderer {
       table,
       foot,
       preview,
+      otherMarks,
       rows: new Map(),
       signature: null,
       dates: null,

@@ -4540,6 +4540,15 @@ li[data-pkc-row-slot] {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* 🔴 **もう片方に残っている印**(#687 C-1)── 情報行と同じ見た目で、その上に置く。
+ *   ⚠ 字が入るのは 1 枚ずつ(スマホ)の焦点の側だけ(JS が `hidden` を塗る)。
+ *   ⚠ こちらは折り返す ── 「動きません」まで読めないと知らせの意味が無い。 */
+[data-pkc-field='dual-other-marks'] {
+  color: var(--muted);
+  font-size: 11px;
+  padding: var(--s1) var(--s2);
+  border-top: 1px solid var(--border);
+}
 /* 🔴 **操作行は最下段・全幅・等分割**(2026-08-19 の作り直し)。
  *
  * ⚠ 直す前は**左右ペインの間に縦積み**で、幅が文字数なりだったので

@@ -2134,6 +2134,7 @@ describe('2 ペインの掴んで落とす(#273 段⑤)', () => {
  *
  * - A-1 行き先のボタンに**相手が開いているフォルダの名前**が出る
  * - B-1 タブ帯の左端に**いま見ている側**(「左」/「右」)が出る
+ * - C-1 **相手に残っている印の数**を、焦点の側が言う(写す・移すの元は焦点の側なので)
  */
 describe('スマホの 2 ペイン(1 枚ずつ)(#687)', () => {
   /** 幅の見張りの替え玉(`tests/adapter/too-narrow.test.ts` と同じ型)。 */
@@ -2239,5 +2240,87 @@ describe('スマホの 2 ペイン(1 枚ずつ)(#687)', () => {
       'dual-side-mark',
     );
     expect(mark('left')?.textContent).toBe('左');
+  });
+
+  const otherMarks = (side: string): HTMLElement =>
+    region.querySelector<HTMLElement>(
+      `[data-pkc-region="dual-pane"][data-pkc-side="${side}"] [data-pkc-field="dual-other-marks"]`,
+    )!;
+
+  /**
+   * 🔴 **C-1 相手に残っている印を、焦点の側が言う。**
+   * ⚠ 写す / 移すの元は焦点の側なので、相手の印は**押しても動かない** ──
+   *   画面に無い印は、言わなければ「3 件選んだのに 0 件と断られた」になる。
+   */
+  it('🔴 C-1 左に印を残して右へ移ると、右が「左に 1 件」と言い、戻れば消える', () => {
+    const r = setup(true);
+    let s = reduce(booted(), { type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' }).state;
+    s = reduce(s, { type: 'DUAL_FOCUS', side: 'right' }).state;
+    r.render(s);
+    expect(otherMarks('right').hidden, '右が相手の印を言っていない').toBe(false);
+    expect(otherMarks('right').textContent).toBe(
+      '左のペインに 1 件の印が残っています(ここで写す・移すを押しても、その印は動きません)',
+    );
+    // ⚠ 焦点の無い側(左)は言わない ── 右には印が無い
+    expect(otherMarks('left').hidden).toBe(true);
+    expect(otherMarks('left').textContent).toBe('');
+    /**
+     * 🔴 **左へ戻ったら消える ── `hidden` だけでなく字も空**(`too-narrow.ts` と同じ罠。
+     *   隠れた字が残ると、状態を `textContent` で見る検査がそれに満たされる)。
+     */
+    s = reduce(s, { type: 'DUAL_FOCUS', side: 'left' }).state;
+    r.render(s);
+    expect(otherMarks('right').hidden, '戻ったのに知らせが残っている').toBe(true);
+    expect(otherMarks('right').textContent, '隠しただけで字が残っている').toBe('');
+    expect(otherMarks('left').hidden).toBe(true);
+    // 🔑 数も追従する(2 件にして右へ)
+    s = reduce(s, { type: 'DUAL_SELECT', side: 'left', lid: 'b', mode: 'toggle' }).state;
+    s = reduce(s, { type: 'DUAL_FOCUS', side: 'right' }).state;
+    r.render(s);
+    expect(otherMarks('right').textContent).toContain('左のペインに 2 件の印');
+    /**
+     * 🔴 **逆向き ── 右に印を置いて左へ戻る**(両ペインを描いた**後**で読む規律を突く)。
+     * ⚠ 描く順は左 → 右なので、ループの**中**で相手を読む実装は、左を描く時点で
+     *   右がまだ前回の値(印 0)── 「右に 1 件」と言えない。
+     */
+    s = reduce(s, { type: 'DUAL_SELECT', side: 'right', lid: 'c', mode: 'set' }).state;
+    s = reduce(s, { type: 'DUAL_FOCUS', side: 'left' }).state;
+    r.render(s);
+    expect(otherMarks('left').hidden, '左が右の印を言っていない(前回の値を読んだ)').toBe(false);
+    expect(otherMarks('left').textContent).toContain('右のペインに 1 件の印');
+    expect(otherMarks('right').hidden).toBe(true);
+  });
+
+  /**
+   * 🔴 **C-1 数えるのは画面に出ている印だけ**(`shownMarks` の規律)。
+   * ⚠ 絞り込みで印が表から消えたら、その印は写す・移すの相手にも入らない ──
+   *   「1 件残っています」と言いながら押すと 0 件、が最悪の形である。
+   */
+  it('🔴 C-1 絞り込みで相手の印が表から消えた回は、言わない', () => {
+    const r = setup(true);
+    let s = reduce(booted(), { type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' }).state;
+    /**
+     * 器の絞り込みで a が表から消える ── 印は state に残る。
+     * ⚠ ペイン自身の絞り(`DUAL_SET_FILTER`)は**印ごと落とす**ので、ここでは使えない
+     *   (1 稿目で使い、前提の assert が「印が無い」で止めた)。
+     */
+    s = reduce(s, { type: 'SET_ENTRY_FILTER', query: 'はこ' }).state;
+    s = reduce(s, { type: 'DUAL_FOCUS', side: 'right' }).state;
+    r.render(s);
+    // 前提 ── 印そのものは残っている(消したのではなく、見えていないだけ)
+    expect(paneOf(s.dual, 'left').selection, '前提が崩れている').toEqual(['a']);
+    expect(otherMarks('right').hidden, '画面に無い印を数えている').toBe(true);
+    expect(otherMarks('right').textContent).toBe('');
+  });
+
+  /** 対照群 ── PC では相手の印が見えているので、どちらも言わない。 */
+  it('C-1 対照群: PC では両側とも言わない', () => {
+    const r = setup(false);
+    let s = reduce(booted(), { type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' }).state;
+    s = reduce(s, { type: 'DUAL_FOCUS', side: 'right' }).state;
+    r.render(s);
+    expect(otherMarks('right').hidden, 'PC で相手の印を言っている').toBe(true);
+    expect(otherMarks('right').textContent).toBe('');
+    expect(otherMarks('left').hidden).toBe(true);
   });
 });

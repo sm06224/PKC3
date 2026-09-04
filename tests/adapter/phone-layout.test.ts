@@ -1246,6 +1246,14 @@ describe('CSS(構文で読む)', () => {
     expect(phone, 'スマホで出す規則が無い').toMatch(decl('display', 'inline'));
   });
 
+  /** 🔴 **もう片方の印の知らせは、情報行と同じ見た目**(#687 C-1)── 11px / muted。 */
+  it('🔴 もう片方の印の知らせは、情報行と同じ大きさと色で出る', () => {
+    const css = withoutMedia(bare());
+    const note = blocksFor(css, `[data-pkc-field='dual-other-marks']`).join(' ');
+    expect(note, '規則が無い').toMatch(decl('font-size', '11px'));
+    expect(note, '色が情報と同じでない').toMatch(decl('color', 'var\\(--muted\\)'));
+  });
+
   /**
    * 🔴 **操作の 7 つも 32px**(user 裁定 2026-09-04、#671)。
    * ⚠ 1 枚ずつにしてペインの丈が 282px → 571px になったので、6px 増やしても
