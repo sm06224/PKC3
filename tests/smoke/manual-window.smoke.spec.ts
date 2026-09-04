@@ -210,11 +210,15 @@ test('🔴 もう一度押すと、同じ窓が読んでいた所のまま前に
   /**
    * 🔴 **対照群 ── 何も変えずにもう一度押しても、字の大きさは動かない**(2026-09-02 hotfix)。
    * ⚠ 直す前は 14px → 13px に縮んでいた ── 文字の大きさを選んでいない user に、
-   *   アプリで「効いている既定 13px」を渡していた(焼いた page は選んでいなければ
+   *   アプリで「効いている既定 13px」を渡していた(当時、焼いた page は選んでいなければ
    *   読み物の 14px のまま)。
+   * 🔑 I6(#648)で窓の既定を**アプリと同じ 13px** に揃えた ── 期待値は
+   *   `features/text-scale.ts` の「標準」から読む(綴りを写さない)。
    */
+  const std = readFileSync(new URL('../../src/features/text-scale.ts', import.meta.url), 'utf8');
+  const stdPx = /id: 'standard'[^}]*size: '(\d+px)'/u.exec(std)![1]!;
   const fontBefore = await win.evaluate(() => getComputedStyle(document.body).fontSize);
-  expect(fontBefore, '前提:何も選んでいないので読み物の既定 14px').toBe('14px');
+  expect(fontBefore, '前提:何も選んでいないので、窓の字はアプリの既定と同じ').toBe(stdPx);
 
   /**
    * 🔴 **2 枚目が開いたら赤**。⚠ `waitForEvent('page')` を張ると「開くのを待つ」

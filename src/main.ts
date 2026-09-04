@@ -429,10 +429,11 @@ function openViewTile(
  * ⚠ 配色と地の色は**設定の保存ではなく、画面に効いている値**を読む ── OS に従っている人の
  *   配色は保存されていない(`theme.ts` の M-7)ので、属性から取る。
  * 🔴 **文字の大きさだけは保存から読む**(2026-09-02 hotfix)── 画面に効いている値は
- *   選んでいなくても既定の 13px だが、焼いたマニュアルは**選んでいなければ 14px のまま**
- *   (`manual-page.ts` の boot script は保存が無ければ触らない)。効いている値を渡すと、
- *   **何も変えずにもう一度押しただけで窓の字が 14px → 13px に縮む**(着地前レビューが
- *   拾った)。boot と同じ門(`chosenTextScale`)で読めば、2 回目は 1px も動かない。
+ *   選んでいなくても既定の 13px だが、焼いたマニュアルは**選んでいなければ触らない**
+ *   (`manual-page.ts` の boot script は保存が無ければ CSS の既定のまま。I6 で揃えるまで
+ *   それは 14px だった)。効いている値を渡すと、**何も変えずにもう一度押しただけで窓の字が
+ *   14px → 13px に縮んだ**(着地前レビューが拾った)。boot と同じ門(`chosenTextScale`)で
+ *   読めば、2 回目は 1px も動かない。
  */
 function currentAppearance(): ManualAppearance {
   const root = document.documentElement;

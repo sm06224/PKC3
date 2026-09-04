@@ -217,7 +217,7 @@ describe('焼いたマニュアル — 配色', () => {
 
   /**
    * 🔴 **字の大きさの設定も届く**(動線レビュー D3 ── 「特大」を選んだ user の窓だけ
-   * 14px に戻っていた)。倒し方は `text-scale.ts` の `initialTextScale()` と同じ。
+   * 14px に戻っていた ── 当時の窓の既定)。倒し方は `text-scale.ts` の `initialTextScale()` と同じ。
    */
   describe('起動時に字の大きさを当てる script', () => {
     afterEach(() => {
@@ -248,10 +248,10 @@ describe('焼いたマニュアル — 配色', () => {
       expect(TEXT_SCALES.length, '段が 4 未満(表が空振り)').toBeGreaterThanOrEqual(4);
     });
 
-    it('選んでいなければ触らない(CSS の既定 14px のまま)', () => {
+    it('選んでいなければ触らない(CSS の既定 = アプリと同じ「標準」のまま)', () => {
       expect(run()).toBe('');
       // 🔴 当て直す側も「選んでいない」と読む ── ここが食い違うと、何も変えずに押しただけで
-      //    14px → 13px に縮む(2026-09-02 hotfix)
+      //    字が動く(2026-09-02 hotfix。当時は 14px → 13px に縮んだ)
       expect(chosenTextScale(), 'boot script は触らないのに、当て直す側は「選んだ」と読む').toBeNull();
     });
 
@@ -264,7 +264,7 @@ describe('焼いたマニュアル — 配色', () => {
     });
 
     it('🔴 器の CSS が `--pkc-text-size` を読む(script が立てても CSS が見なければ効かない)', () => {
-      expect(MANUAL_CHROME_CSS).toContain('font-size:var(--pkc-text-size,14px)');
+      expect(MANUAL_CHROME_CSS).toContain('font-size:var(--pkc-text-size,');
       expect(bake().html).toContain(JSON.stringify(TEXT_SCALE_STORAGE_KEY));
     });
   });
@@ -305,5 +305,62 @@ describe('焼いたマニュアル — 1 枚で完結する', () => {
     expect(page.headings).toBeGreaterThan(100);
     // ⚠ 描画が空なら 0 ── build の門はこれを見る
     expect(bake({ html: '' }).headings).toBe(0);
+  });
+});
+
+/**
+ * 🔴 **窓の字はアプリと同じ書体・大きさ・行間**(2026-09-04、#648 I6)。
+ *
+ * ⚠ 段②までは `system-ui` / 14px / 行間 UA 任せで、**同じ本文がヘルプ面と窓で別の見え方**
+ *   だった。期待値は **`app.css` の `body` 規則から読む**(実装と同じ綴りを test に写すと、
+ *   両方を同時に変えても緑のまま ── CLAUDE.md §1「期待値は別の観測から」)。
+ * 🔑 `body { … }` は**実行する行**で拾う(コメントを落としてから、最初の `body {` の
+ *   宣言ブロックを取る ── `html, body {` の選択子リストは `body {` に当たらない)。
+ */
+describe('焼いたマニュアル — 字はアプリと同じ(I6)', () => {
+  /** `app.css` の `body { … }` の宣言(コメントを落としてから拾う)。 */
+  const appBody = (): string => {
+    const code = APP.replace(/\/\*[\s\S]*?\*\//gu, '');
+    const m = /(?:^|\})\s*body\s*\{([^}]*)\}/u.exec(code);
+    if (!m) throw new Error('app.css に body の規則が無い(前提が崩れている)');
+    return m[1]!;
+  };
+  /** 窓の器の `body{…}` の宣言(圧縮した 1 行の CSS から)。 */
+  const chromeBody = (): string => {
+    const m = /(?:^|\})body\{([^}]*)\}/u.exec(MANUAL_CHROME_CSS);
+    if (!m) throw new Error('MANUAL_CHROME_CSS に body の規則が無い(前提が崩れている)');
+    return m[1]!;
+  };
+  const decl = (block: string, name: string): string | null => {
+    const m = new RegExp(`(?:^|;)\\s*${name}\\s*:\\s*([^;]+)`, 'u').exec(block);
+    return m ? m[1]!.trim().replace(/\s+/gu, '') : null;
+  };
+
+  it('🔴 大きさの既定が app.css の body と同じ(選んでいない人の窓がアプリと 1px も違わない)', () => {
+    const app = decl(appBody(), 'font-size');
+    const win = decl(chromeBody(), 'font-size');
+    expect(app, 'app.css の body に font-size が無い').not.toBeNull();
+    // 前提 ── どちらも設定の変数を通している(片方だけ直書きなら「同じ」は偶然)
+    expect(app).toMatch(/^var\(--pkc-text-size,/u);
+    expect(win).toBe(app);
+    // 空振り防止 ── 既定は表の「標準」であり、段②の 14px ではない
+    expect(win).toContain(textScaleSpec('standard').size);
+    expect(win).not.toContain('14px');
+  });
+
+  it('🔴 行間が app.css の body と同じ', () => {
+    const app = decl(appBody(), 'line-height');
+    expect(app, 'app.css の body に line-height が無い').not.toBeNull();
+    expect(decl(chromeBody(), 'line-height')).toBe(app);
+  });
+
+  it('🔴 書体は同じトークン(--font)を読み、焼いた page にそのトークンが在る', () => {
+    const app = decl(appBody(), 'font-family');
+    expect(app).toBe('var(--font)');
+    expect(decl(chromeBody(), 'font-family'), '窓が --font を読んでいない').toMatch(/^var\(--font,/u);
+    // 🔑 「読む」だけでは足りない ── 焼いた page に定義が届いている(無ければ fallback へ落ちる)
+    expect(bake().html, '焼いた page に --font の定義が無い(system-ui へ落ちる)').toMatch(
+      /--font:/u,
+    );
   });
 });

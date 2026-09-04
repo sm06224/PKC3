@@ -103,7 +103,8 @@ export interface ManualAppearance {
   /**
    * user が**選んだ**大きさ(`text-scale.ts` の `chosenTextScale` を px にしたもの)。
    * ⚠ `null` = 選んでいない → 外して CSS の既定へ戻す(焼いた page の boot script と同じ門。
-   *   「効いている 13px」を渡すと、何も変えずに押しただけで 14px から縮む ── 2026-09-02 hotfix)。
+   *   窓の既定が 14px だった頃、「効いている 13px」を渡すと何も変えずに押しただけで
+   *   縮んだ ── 2026-09-02 hotfix。I6 で既定を揃えた今も、門は同じにしておく)。
    */
   readonly textSize: string | null;
   /**

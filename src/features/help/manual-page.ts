@@ -32,7 +32,7 @@
  */
 import { buildManualDoc } from './manual-doc';
 import type { ManualSection } from './manual-find';
-import { TEXT_SCALES } from '../text-scale';
+import { DEFAULT_TEXT_SCALE, TEXT_SCALES, textScaleSpec } from '../text-scale';
 
 /** 焼く file の名前。⚠ `dist/` 直下(`index.html` の隣)。SW の precache に載る。 */
 export const MANUAL_PAGE_FILE = 'manual.html';
@@ -103,10 +103,22 @@ const HOST_CLASS = 'pkc-md-rendered';
 export const MANUAL_CHROME_CSS = [
   ':root{color-scheme:light dark}',
   'html,body{margin:0;height:100%}',
-  // 🔑 字の大きさは設定(`pkc3.text-scale`)が効く ── 選んでいなければ 14px のまま
-  //    (2026-09-02、動線レビュー D3: 「特大」を選んだ user の窓だけ 14px に戻っていた)
-  'body{display:grid;grid-template-rows:auto 1fr;font-family:system-ui,sans-serif;',
-  'font-size:var(--pkc-text-size,14px);color:var(--fg,CanvasText);background:var(--bg,Canvas)}',
+  /**
+   * 🔴 **字はアプリと同じ書体・大きさ・行間**(2026-09-04、#648 I6)。
+   * ⚠ 段②までは `system-ui` / 14px / 行間は UA 任せで、**同じ本文がヘルプ面と窓で
+   *   別の見え方**だった。`app.css` の `body` と同じ 3 つ(`--font` / 標準の大きさ /
+   *   `line-height: 1.45`)にする ── 突き合わせは `tests/features/manual-page.test.ts`。
+   * ⚠ `--font` は `tokens.css` のトークン ── 焼いた page は tokens を丸ごと持つので
+   *   必ず解決するが、`about:blank` に組む逃げ道(`BODY_CSS` に `--font` は無い)では
+   *   `system-ui` に落ちる。落ちても読めなくはならない(段①と同じ見え方)。
+   * 🔑 字の大きさは設定(`pkc3.text-scale`)が効く ── 選んでいなければ**アプリと同じ
+   *   既定**(`TEXT_SCALES` の「標準」= 13px。数字を写さず表から取る)。
+   *   ⚠ 「標準」を選んだ人と選んでいない人が同じ見え方になる ── #656 ① の
+   *   「標準を選ぶと 14px → 13px に縮んで戻せない」は、既定が揃った時点で消える。
+   */
+  'body{display:grid;grid-template-rows:auto 1fr;font-family:var(--font,system-ui,sans-serif);',
+  `font-size:var(--pkc-text-size,${textScaleSpec(DEFAULT_TEXT_SCALE).size});line-height:1.45;` +
+    'color:var(--fg,CanvasText);background:var(--bg,Canvas)}',
   // 帯 ── 題名と版だけ。⚠ 地は無彩色(不可侵指示)
   '[data-pkc-field="manual-window-head"]{display:flex;gap:12px;align-items:baseline;',
   'padding:8px 16px;border-bottom:1px solid var(--border,#8884)}',
@@ -197,7 +209,8 @@ export function themeBootScript(
 ): string {
   /**
    * 🔑 字の大きさも同じ倒し方で当てる(`text-scale.ts` の `initialTextScale` と同じ門:
-   *   保存が在り、知っている id なら その大きさ / それ以外は触らない = CSS の既定 14px)。
+   *   保存が在り、知っている id なら その大きさ / それ以外は触らない = CSS の既定 =
+   *   アプリと同じ「標準」。I6 で揃えるまでは 14px だった)。
    * ⚠ 対応表(id → px)は `features/text-scale.ts` の `TEXT_SCALES` から焼く ── 写さない。
    */
   const size = textScale
