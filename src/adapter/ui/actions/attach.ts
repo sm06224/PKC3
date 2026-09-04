@@ -199,7 +199,7 @@ export async function storeAsset(
 /**
  * 🔴 **添付 1 件を取り込む。**(2026-08-16 に `attachFiles` から取り出した ── #205 で
  * Office の保存が同じ道を通るため。⚠ **`attachFiles` をそのまま呼ばせない**:
- * あちらは「編集中なら断る」「gate が断る」「選択を奪う」の 3 つを user のクリック
+ * あちらは「編集中なら預かる」「gate が断る」「選択を奪う」の 3 つを user のクリック
  * 前提で持っており、**別窓から非同期に届く保存**に当てると bytes ごと失われる)
  *
  * ⚠ `known` は content addressing の重複判定。**渡さなければ毎回 put する** ──
@@ -288,21 +288,6 @@ export async function attachFiles(
   why = '',
 ): Promise<void> {
   if (files.length === 0) return;
-  // put の**前に**可視で止める ── ready 以外で進めると bytes だけ書かれて
-  // CREATE_ENTRY が黙殺され、参照されない asset が残留する(P4a review #1)
-  if (dispatcher.getState().phase !== 'ready') {
-    dispatcher.dispatch({
-      type: 'OP_FAILED',
-      error: '編集を終了してから添付してください',
-    });
-    return;
-  }
-
-  // content addressing なので**台帳を引かない**。同じ bytes は同じ key に落ちる
-  // ので、既に持っているかは key の存在だけで決まる(batch 内の重複も自動で潰れる)
-  const known = new Set(
-    (await deps.listMetas().catch(() => [])).map((m) => m.key),
-  );
 
   /**
    * 🔴 **入れ先は「押した時点で開いているノート」を先に控える**(user 裁定
@@ -327,36 +312,80 @@ export async function attachFiles(
   const notify = (text: string, open?: string): void =>
     dispatcher.dispatch({ type: 'OP_NOTICE', message: text, ...(open === undefined ? {} : { open }) });
 
-  for (const file of files) {
-    try {
-      const item = await maybeShrink(deps, {
-        name: file.name,
-        type: file.type,
-        size: file.size,
-        blob: file,
-      });
-      const attached = await attachOne(dispatcher, deps, item, known);
-      // ⚠ `null` は `attachOne` が既に理由を出している(二重に言わない)
-      if (attached === null) continue;
-      putAssetIntoNote({
-        dispatcher,
-        queue,
-        notify,
-        into,
-        attachedLid: attached.lid,
-        assetKey: attached.assetKey,
-        name: item.name,
-        // 🔑 **拡張子から解いた mime を渡す**(`file.type` ではない)── OS が
-        //    MIME を付けない経路(共有 / D&D / Office の窓)でも、`猫.png` が
-        //    ちゃんと**絵として**入る(`attach-intake.test.ts` が pin)
-        mime: attached.mime,
-        why,
-      });
-    } catch (e) {
-      dispatcher.dispatch({
-        type: 'OP_FAILED',
-        error: `添付の取込に失敗しました(${file.name}): ${String(e)}`,
-      });
+  /**
+   * 取込の本体。⚠ **bytes を置くのもここから**(編集中は 1 バイトも書かない ──
+   *   `CREATE_ENTRY` が黙殺されて参照されない asset が残留する、を作らない。P4a review #1)。
+   */
+  const run = async (): Promise<void> => {
+    // content addressing なので**台帳を引かない**。同じ bytes は同じ key に落ちる
+    // ので、既に持っているかは key の存在だけで決まる(batch 内の重複も自動で潰れる)
+    const known = new Set(
+      (await deps.listMetas().catch(() => [])).map((m) => m.key),
+    );
+
+    for (const file of files) {
+      try {
+        const item = await maybeShrink(deps, {
+          name: file.name,
+          type: file.type,
+          size: file.size,
+          blob: file,
+        });
+        const attached = await attachOne(dispatcher, deps, item, known);
+        // ⚠ `null` は `attachOne` が既に理由を出している(二重に言わない)
+        if (attached === null) continue;
+        putAssetIntoNote({
+          dispatcher,
+          queue,
+          notify,
+          into,
+          attachedLid: attached.lid,
+          assetKey: attached.assetKey,
+          name: item.name,
+          // 🔑 **拡張子から解いた mime を渡す**(`file.type` ではない)── OS が
+          //    MIME を付けない経路(共有 / D&D / Office の窓)でも、`猫.png` が
+          //    ちゃんと**絵として**入る(`attach-intake.test.ts` が pin)
+          mime: attached.mime,
+          why,
+        });
+      } catch (e) {
+        dispatcher.dispatch({
+          type: 'OP_FAILED',
+          error: `添付の取込に失敗しました(${file.name}): ${String(e)}`,
+        });
+      }
     }
+  };
+
+  const phase = dispatcher.getState().phase;
+  if (phase === 'ready') {
+    // ⚠ **待ってから返す** ── 呼び側(`withAssetGate`)は取込と整理を排他している
+    await run();
+    return;
   }
+  /**
+   * 🔴 **編集中は断らず、預かる**(#668 B。PR #667 の着地前レビュー)。
+   *
+   * ⚠ 直す前は「編集を終了してから添付してください」と断っていた ── user は
+   *   ファイルの選択をやり直すことになる(選び直す間に、何を添えようとしたかを
+   *   忘れる)。録音・画面録画は**編集中に終わっても預かる**(`capture.ts`)のに、
+   *   同じ帯の隣の「添付」だけが断る、という釣り合いの崩れでもあった。
+   * 🔑 預かりの仕掛けは `writable-queue.ts` の **1 本**(録音と同じ口)──
+   *   編集が終わって書けるようになった瞬間に `run` が走る。
+   * ⚠ **`await` しない** ── 編集が終わるまで解けない約束を返すと、`withAssetGate`
+   *   の鎖が編集の間ずっと詰まり、整理(未参照 GC)まで待たされる。
+   * ⚠ 入れ先(`into`)は**押した時点**で控えてある ── 編集していたノートに入る。
+   * ⚠ `editing` 以外の `ready` でない相(起動前 / 致命エラー)は、これまでどおり断る
+   *   ── 「編集を終えたら」と言っても、その日は来ない。
+   */
+  if (phase !== 'editing') {
+    dispatcher.dispatch({
+      type: 'OP_FAILED',
+      error: '編集を終了してから添付してください',
+    });
+    return;
+  }
+  queue.push(run);
+  const what = files.length === 1 ? `「${files[0]!.name}」` : `${files.length} 件`;
+  notify(`${why}${what}を預かりました(編集を終えたら本文に入れます)`);
 }
