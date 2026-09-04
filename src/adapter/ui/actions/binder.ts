@@ -1671,10 +1671,30 @@ function pickAppendTarget(dispatcher: Dispatcher, root: HTMLElement, line: numbe
    *   1 稿目は「『はじめに』は追記の入り先に選べません」という
    *   **追記欄が 1 つも見えていない画面で、追記についての断り文**を出していた。
    * 🔑 判定は `appendModeOf` **1 か所**を引く(2 本目の規則を書かない。§7)。
-   * ⚠ ここは**黙って降りてよい** ── 読むだけの面なので、押した人は
-   *   「追記の入り先を選んだ」つもりが無い。
+   * ⚠ 追記欄そのものが無い面(`hidden`)は**黙って降りてよい** ── 読むだけの面なので、
+   *   押した人は「追記の入り先を選んだ」つもりが無い。
+   * 🔴 **書込中は黙らない**(#655 ②)── 追記欄は出ている(理由と出口の帯)のに
+   *   押しても何も起きないのは dead click である。理由を 1 行出す。
+   * ⚠ **編集中の枝は、いまの 2 つの入口からは届かない**(実装を読んで確かめた):
+   *   `Alt`+クリックは `bodySourceLineAt` が `phase !== 'ready'` で降りる(既定を
+   *   奪わないため ── `mod-click-edit.test.ts`「ready でない間は、既定を奪わない」)し、
+   *   右クリックの「ここに追記する」は `appendable` が `ready` のときしか並べない。
+   *   編集中の理由は追記欄の帯(「このノートは編集中です…」)が既に出している。
+   *   ここに字を置くのは、**3 つ目の入口が生えた日に黙らないため**であって、
+   *   いま user に見えている欠陥を直したのではない(#655 ② の前提の訂正)。
    */
-  if (appendModeOf(st).kind !== 'ready') return;
+  const mode = appendModeOf(st);
+  if (mode.kind === 'hidden') return;
+  if (mode.kind !== 'ready') {
+    dispatcher.dispatch({
+      type: 'OP_FAILED',
+      error:
+        mode.kind === 'editing'
+          ? '編集中は追記欄を使えません(保存するか、編集を破棄すると入り先を選べます)'
+          : '追記を書き込んでいる間は、入り先を変えられません',
+    });
+    return;
+  }
   const lid = st.selectedLid;
   const sel = root.querySelector<HTMLSelectElement>('[data-pkc-field="append-target"]');
   /**
@@ -1698,22 +1718,6 @@ function pickAppendTarget(dispatcher: Dispatcher, root: HTMLElement, line: numbe
    *   `frontmatterLineCount` 1 つ(`detail.ts` の `fmLines` と同じ規律)。
    */
   const sec = sectionAt(body, line + frontmatterLineCount(body));
-  if (sec === null) {
-    dispatcher.dispatch({
-      type: 'OP_NOTICE',
-      message: 'ここより上に見出しが無いので、入り先は変えていません',
-    });
-    return;
-  }
-  // ⚠ 一覧に無い印は選べない(見出しが 1 つも無いノートでは `<select>` は畳んである)
-  if (!Array.from(sel.options).some((o) => o.value === sec.slug)) {
-    dispatcher.dispatch({
-      type: 'OP_FAILED',
-      error: `「${sec.text}」は追記の入り先に選べません`,
-    });
-    return;
-  }
-  sel.value = sec.slug;
   /**
    * 🔴 **畳んだ追記欄は開き、打つ欄にカーソルを入れる**(#596 A / 設問③ C。
    *   user 裁定 2026-08-30「**推奨通り、畳んでいれば開き、打つ欄にカーソルが入る。
@@ -1727,13 +1731,48 @@ function pickAppendTarget(dispatcher: Dispatcher, root: HTMLElement, line: numbe
    * ⚠ 開くのは**追記欄だけ**(左右の列には触らない)── 頼まれたのは「追記する場所」であって
    *   版面の組み直しではない。
    * ⚠ focus は**開いた後**に当てる ── 畳んだままの `display: none` には focus が乗らない。
+   *
+   * 🔴 **断るときも、打つ所までは出す**(#655 ②。user 裁定 2026-09-04)。
+   * ⚠ 直す前は下の 2 つの断り(上に見出しが無い / 一覧に無い見出し)が**開く前に
+   *   返っていた**ので、マニュアルの「畳んでいても開いて、打つ欄にカーソルが入ります」が
+   *   その場面で嘘になっていた ── 見出しが 1 つも無いノートでは**必ず**この形になる。
+   * 🔑 押した人が欲しいのは「打つ所」である。入り先を変えられなくても、欄を開いて
+   *   カーソルを入れ、**いまの入り先がどこか**を添える(「末尾です」と言い切らない ──
+   *   直前に別の節を選んでいれば、そのままである)。
    */
   const opened = revealAppendPane(root);
   root.querySelector<HTMLTextAreaElement>('[data-pkc-field="append-input"]')?.focus();
+  if (sec === null) {
+    dispatcher.dispatch({
+      type: 'OP_NOTICE',
+      message: `ここより上に見出しが無いので、入り先は変えていません(いまの入り先は${targetNow(sel)}です)${openedNote(opened)}`,
+    });
+    return;
+  }
+  // ⚠ 一覧に無い印は選べない(見出しが 1 つも無いノートでは `<select>` は畳んである)
+  if (!Array.from(sel.options).some((o) => o.value === sec.slug)) {
+    dispatcher.dispatch({
+      type: 'OP_FAILED',
+      error: `「${sec.text}」は追記の入り先に選べません(いまの入り先は${targetNow(sel)}です)${openedNote(opened)}`,
+    });
+    return;
+  }
+  sel.value = sec.slug;
   dispatcher.dispatch({
     type: 'OP_NOTICE',
     message: `追記の入り先を「${sec.text}」にしました${openedNote(opened)}`,
   });
+}
+
+/**
+ * いま選ばれている入り先を、断り文に添える字で(#655 ②)。
+ * ⚠ 選択肢の字は深さを**字下げ**(全角空白)で見せている(`append-box.ts`)── 剥いで出す。
+ */
+function targetNow(sel: HTMLSelectElement): string {
+  if (sel.value === '') return '末尾';
+  const picked = Array.from(sel.options).find((o) => o.value === sel.value);
+  const text = picked?.textContent?.trim() ?? '';
+  return `「${text === '' ? sel.value : text}」`;
 }
 
 /** 追記欄をこちらが開いた回に添える一言(#655 ①)── 畳み直すことまで言う。 */
