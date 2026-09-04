@@ -125,7 +125,8 @@ export function putAssetIntoNote(args: PutAssetArgs): void {
       target: null,
       ...(batch === undefined ? {} : { batch }),
     });
-    notify(`${why}「${name}」を本文に入れました`);
+    // 🔑 **どこに入ったかを言う**(#668 F)── 画面は動かさないので、字で場所を指す
+    notify(`${why}「${name}」を本文のいちばん下に入れました`);
   });
   // ⚠ **預かった回も黙らない**(いつ入るのかを言う)
   if (held)

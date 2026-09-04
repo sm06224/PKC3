@@ -71,7 +71,7 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
   await expect(
     page.locator('[data-pkc-region="status"]'),
     '入れたことを言っていない',
-  ).toContainText('「ねこ.png」を本文に入れました');
+  ).toContainText('「ねこ.png」を本文のいちばん下に入れました');
 
   // ⚠ 対照群 ── 添付そのものは 1 件できている(ノートと合わせて 2 行)
   await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(2);
@@ -119,7 +119,7 @@ test('🔴 編集中に添付しても断らず、編集を終えると本文に
     '画面が添付へ移った',
   ).toHaveText('会議メモ', { timeout: 15_000 });
   await expectImageRendered(page, '[data-pkc-region="detail"] img[data-pkc-asset-key]');
-  await expect(status, '入れたことを言っていない').toContainText('「ねこ.png」を本文に入れました');
+  await expect(status, '入れたことを言っていない').toContainText('「ねこ.png」を本文のいちばん下に入れました');
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

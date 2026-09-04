@@ -242,7 +242,7 @@ describe('録音を止めると、開いていたノートに入る(#413)', () =
     ]);
     // ② 🔴 **本丸** ── 添付が奪った選択が戻っている
     expect(b.d.getState().selectedLid, '止めたら別の物が開いている').toBe('a');
-    expect(b.notices.some((n) => n.includes('本文に入れました')), '入れたことを言っていない').toBe(true);
+    expect(b.notices.some((n) => n.includes('本文のいちばん下に入れました')), '入れたことを言っていない').toBe(true);
   });
 
   it('⚠ 添付にも渡している(名前・種類・大きさ)', async () => {
@@ -366,7 +366,7 @@ describe('🔴 ③ 入れられない回は黙らない(#413)', () => {
 
     const landed = appends(b.events).filter((a) => a.text.includes('録音-'));
     expect(landed, '錠が解けても本文に入らない(預からずに捨てている)').toHaveLength(1);
-    expect(b.notices.join(''), '入れたことを言っていない').toMatch(/本文に入れました/);
+    expect(b.notices.join(''), '入れたことを言っていない').toMatch(/本文のいちばん下に入れました/);
   });
 
   it('⚠ 添付にできなかった回も、黙らない', async () => {
@@ -520,7 +520,7 @@ describe('🔴 黙って終わらない(#413)', () => {
     await tick();
     // 🔴 **理由と結果は同じ 1 行**(別々に出すと、後の 1 行が前の 1 行を消す)
     expect(b.notices.at(-1), '上限で止まった理由が出ていない').toMatch(/^録音が上限\(250\.0 MB\)に達したので止めました。/);
-    expect(b.notices.at(-1), '結果が同じ行に載っていない').toMatch(/本文に入れました$/);
+    expect(b.notices.at(-1), '結果が同じ行に載っていない').toMatch(/本文のいちばん下に入れました$/);
     expect(b.d.getState().error, '知らせをエラーの行に出した').toBeNull();
     // 🔴 **落ちて全損だけは繰り返さない** ── 添付にも本文にも入っている
     expect(b.attached.length, '上限で止まったら収録が消えた').toBe(1);
