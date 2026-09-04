@@ -130,3 +130,34 @@ describe('workflow の shell', () => {
     expect(offenders).toEqual([]);
   });
 });
+
+/**
+ * 🔴 **分割の数が、2 か所で食い違わない**(2026-09-04)。
+ *
+ * ⚠ smoke は `matrix.shard` の一覧と `--shard=<n>/<全体>` の**2 か所**に数を持つ。
+ *   片方だけ直すと **走らない spec が出る**のに、job は 3 つとも緑になる ──
+ *   「全量が通った」と読める形で、**確かめていない spec が残る**
+ *   (CLAUDE.md §7「同じ値が複数の場所にある」)。
+ * 🔑 実際に 2 → 3 へ増やした日に、この検査が無ければ片方を直し忘れていた。
+ */
+describe('🔴 smoke の分割は 1 つの数で決まる', () => {
+  const CI = readFileSync(join(DIR, 'ci.yml'), 'utf-8');
+
+  it('🔴 matrix の数と `--shard=n/N` の N が一致する', () => {
+    const matrix = /shard:\s*\[([^\]]*)\]/.exec(CI);
+    expect(matrix, 'smoke の matrix.shard が読めない(検査が空振りしている)').not.toBeNull();
+    const shards = matrix![1]!.split(',').map((x) => x.trim()).filter((x) => x !== '');
+    expect(shards.length, '分割が 1 つも読めない').toBeGreaterThan(1);
+    // ⚠ 番号は 1..N の連番であること(飛ぶと、その分の spec は誰も走らせない)
+    expect(shards, '分割の番号が 1..N の連番ではない').toEqual(
+      shards.map((_, i) => String(i + 1)),
+    );
+    const flags = [...CI.matchAll(/--shard=\$\{\{\s*matrix\.shard\s*\}\}\/(\d+)/g)].map(
+      (m) => Number(m[1]),
+    );
+    expect(flags.length, '`--shard=n/N` を渡している所が無い').toBe(1);
+    expect(flags[0], `matrix は ${shards.length} 分割なのに --shard は /${flags[0]}`).toBe(
+      shards.length,
+    );
+  });
+});

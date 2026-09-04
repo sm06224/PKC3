@@ -45,9 +45,16 @@ permissions:
   contents: read
 jobs:
   # ── 速い lane: 型 / lint / unit / build / 生成物の検品 ─────────────────
+  # 🔴 **12 分にした**(2026-09-04)。⚠ **仕事は増やしていない** ── 伸びたのは
+  #    `npm ci` で、同じ日に **1m53s 〜 5m02s**(2.7 倍)まで揺れた。
+  #    実測の内訳(5 分かかった回):npm ci 5m02s / audit 2m05s / typecheck 12s /
+  #    lint 14s / test 2m04s で打ち切り ── **働いている時間は 4m30s ほど**である。
+  # 🔑 tripwire の目的は「**PR gate が長くなっていないか**」であって、
+  #    取り込みの揺れで赤を出すことではない(CLAUDE.md「CI を長くしない」)。
+  #    ⚠ 撤廃はしない ── 仕事そのものが伸びたら、ここで止まる。
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v7
         with:
@@ -124,13 +131,19 @@ jobs:
   #   ⚠ `fail-fast: false` ── 片方が落ちても**もう片方を最後まで走らせる**
   #     (走らなかった shard は「確かめていない」であって「緑」ではない。
   #      2026-08-17 に nightly で踏んだ形)。
+  # 🔴 **3 分割にした**(2026-09-04)。⚠ 2 分割のままでは、`npm ci` が遅い日に
+  #    **時間切れで打ち切られる** ── 同じ run の 3 job が揃って `npm ci` に
+  #    **5 分 02 秒**を使った(前回は 1m53s〜2m38s)。test 自体はむしろ速く
+  #    なっている(shard 2 は 4m38s → 3m51s)ので、伸びたのは**取り込みだけ**。
+  # 🔑 分割を増やすと**壁時計は伸びない**(並列に走る)ので、10 分の
+  #    tripwire を弱めずに余裕を作れる。
   smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -143,6 +156,6 @@ jobs:
       - run: VITE_PKC_KIND=dev npm run build
       - run: npx playwright install chromium --with-deps
       # ⚠ 名前も実態に合わせる(「最小」ではない ── 上の訂正を参照)
-      # ⚠ 2 つ合わせて全量。どちらか片方だけ緑でも**全量が通ったことにはならない**
-      - name: Visual smoke (${{ matrix.shard }}/2 ── もう 1 つのブラウザは nightly)
-        run: npm run test:smoke -- --shard=${{ matrix.shard }}/2
+      # ⚠ 3 つ合わせて全量。1 つだけ緑でも**全量が通ったことにはならない**
+      - name: Visual smoke (${{ matrix.shard }}/3 ── もう 1 つのブラウザは nightly)
+        run: npm run test:smoke -- --shard=${{ matrix.shard }}/3
