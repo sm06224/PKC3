@@ -619,7 +619,13 @@ describe('2 ペインの面(描画)', () => {
     expect(move().title).toContain('1 件');
     s = reduce(s, { type: 'SET_ENTRY_FILTER', query: 'はこ' }).state; // a が消える
     r.render(s);
-    expect(move().title, '画面に無い印を数えている').toBe('移すものを選んでから押してください');
+    /**
+     * ⚠ **鍵は説明の頭に付く**(#671、2026-09-04)── スマホでは帯から鍵の字を
+     *   落とすので(語が 18px まで潰れる)、説明が唯一の残り場所になった。
+     */
+    expect(move().title, '画面に無い印を数えている').toBe(
+      '[F6] 移すものを選んでから押してください',
+    );
   });
 
   /**
@@ -716,26 +722,27 @@ describe('2 ペインの面(描画)', () => {
     const trash = () => region.querySelector<HTMLElement>('[data-pkc-field="dual-delete"]')!;
     expect(move().textContent, 'キーと語が違う').toBe('F6移す');
     expect(move().title, '選ぶ前の断りが向きの説明になっている').toBe(
-      '移すものを選んでから押してください',
+      '[F6] 移すものを選んでから押してください',
     );
     /**
      * ⚠ **断りは呼び名から機械的に組まない**(2026-08-19 に踏んだ)。
      *   `${label}ものを…` と書くと、ゴミ箱だけ
      *   「**ゴミ箱ものを選んでから押してください**」になる。
      */
+    // ⚠ 鍵が頭に付く(上と同じ理由 ── #671)
     expect(trash().title, '入れ物の名と動作の名が混ざっている').toBe(
-      'ゴミ箱へ入れるものを選んでから押してください',
+      '[F8] ゴミ箱へ入れるものを選んでから押してください',
     );
     s = reduce(s, { type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' }).state;
     r.render(s);
-    expect(move().title).toBe('左で選んだものを、右のペインへ移します(いま 1 件)');
+    expect(move().title).toBe('[F6] 左で選んだものを、右のペインへ移します(いま 1 件)');
 
     s = reduce(s, { type: 'DUAL_FOCUS', side: 'right' }).state;
     s = reduce(s, { type: 'DUAL_SELECT', side: 'right', lid: 'a', mode: 'set' }).state;
     r.render(s);
     expect(move().textContent, '焦点を変えたら操作の字が動いた').toBe('F6移す');
     expect(move().title, '焦点を変えても呼び名が反転しない').toBe(
-      '右で選んだものを、左のペインへ移します(いま 1 件)',
+      '[F6] 右で選んだものを、左のペインへ移します(いま 1 件)',
     );
     // ⚠ ペインの読み上げ名も同じ表から引く(呼び名の入れ替えを 1 か所で殺す)
     expect(

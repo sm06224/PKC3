@@ -699,6 +699,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   applyTagBadge(document.documentElement, initialTagBadge());
   const regions = buildShell(root);
   /**
+   * 🔴 **版面が入れ替わったときに面を描き直す口**(#671)。⚠ `center` はずっと後で
+   *   組まれるので、繋がるまでは何もしない口にしておく(`repaintStatus` と同じ形)。
+   */
+  let repaintOnLayout: () => void = () => undefined;
+  /**
    * 🔴 **縦のホイールを横送りへ読み替える**(#505)。⚠ これが無いと段組みは
    *   マウスだけでは読めない(実測: 縦ホイールで 1px も動かない)。
    * 🔑 器ごとではなく **shell に 1 本**(本文の器は開くたびに作り直される)。
@@ -728,7 +733,22 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   順序のためではない。
    * ⚠ 外さない(アプリと同寿命)── `applyPaneVisibility` と同じ。
    */
-  appPhone.install(root, undefined, () => applyPaneVisibility(root, appPanes.getHidden()));
+  /**
+   * 🔴 **スマホ⇄パソコンを跨いだら、面も描き直す**(#671 の着地前レビュー G、
+   *   2026-09-04 に実測)。
+   *
+   * ⚠ 直す前は `applyPaneVisibility` しか呼んでおらず、**面の描画は 1 度も
+   *   走らなかった** ── 2 ペインの操作の字は「1 枚だけか」で変わるのに、
+   *   窓の幅は `state` を 1 バイトも動かさないので `render` に届かない。
+   *   実測(375 → 1440 に広げた直後):**2 枚とも出ているのに字は「F6右へ移す」**
+   *   のまま(スマホ用の字が残る)。何か 1 つ触るまで直らなかった。
+   * 🔑 口は `repaintStatus` と同じ形にする ── `center` はここより後で組まれるので、
+   *   繋がるまでは何もしない口にしておく。
+   */
+  appPhone.install(root, undefined, () => {
+    applyPaneVisibility(root, appPanes.getHidden());
+    repaintOnLayout();
+  });
   applyPaneVisibility(root, appPanes.getHidden());
   /**
    * 🔴 **決めた大きさも起動時に戻す**(#497)。⚠ 畳んだ状態と**対**である ──
@@ -871,6 +891,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   // 🔑 追記欄は**本文とは別の器**(P8 段⑧)── 本文は追記のたびに書き換わって
   // 再描画されるので、同じ器に入れると打ちかけの文字も focus も消える
   const appendBox = new AppendBoxRenderer(regions.append);
+  /**
+   * 🔴 **ここで初めて繋がる**(#671)── 窓の幅がスマホ⇄パソコンを跨いだときに
+   *   呼ばれる。⚠ `state` は動いていないので、面の側が**幅を自分で読み直す**
+   *   (`dual-filer.ts` の `paintSwitch` が `appPhone` に聞く)。
+   */
+  repaintOnLayout = () => center.render(dispatcher.getState());
   dispatcher.onState((state) => {
     browse.render(state, browseMode);
     center.render(state);

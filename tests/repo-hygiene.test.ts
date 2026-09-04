@@ -925,12 +925,36 @@ describe('🔴 test が起こす子プロセスは stdio を明示する(#558)',
  */
 describe('🔴 状態の行は器ではなく字の所に書く(#671)', () => {
   it('🔴 `status` の器へ textContent を書いている所が無い', () => {
-    const files = textFiles('src').filter((f) => f.endsWith('.ts'));
+    /**
+     * ⚠ **`tests` も見る**(着地前レビュー B-3、2026-09-04)── 直す前は `src` だけを
+     *   走査していたので、`tests/smoke/layout.smoke.spec.ts` に**同じ書き方が
+     *   残っていた**(器を空にして子ごと消す)。CLAUDE.md「A を直した瞬間に
+     *   B はどうかを grep する」。
+     */
+    const files = [...textFiles('src'), ...textFiles('tests')].filter((f) => f.endsWith('.ts'));
     // 空振り防止 ── 走査が壊れて 0 件になったら気づけない
-    expect(files.length, 'src の .ts を 1 件も引けない').toBeGreaterThan(50);
-    const bad = files.filter((f) =>
-      /\bregions\.status\.(?:textContent|innerHTML)\s*=/.test(readFileSync(f, 'utf-8')),
-    );
+    expect(files.length, 'src / tests の .ts を 1 件も引けない').toBeGreaterThan(50);
+    /**
+     * 🔴 **窓で見る**(1 稿目は範囲が広すぎた ── CLAUDE.md §1)。
+     *
+     * ⚠ 1 稿目は「器の綴り … 120 字以内 … `.textContent =`」という 1 本の正規表現で、
+     *   `main.ts` の `regions.status.hidden = …` と、その **4 行下**の
+     *   `regions.statusText.textContent = text`(**正しい書き方**)を
+     *   1 つの一致として拾い、**直した当の file を不合格にした**。
+     * 🔑 だから**行で見て、直前 3 行だけを窓にする**。⚠ そして
+     *   **字の所を指す行は窓から外す**(`status-text` / `statusText` が正しい宛先)。
+     */
+    const HOLDER = /regions\.status\b|REGION\(['"]status['"]\)|\[data-pkc-region=["']status["']\]/;
+    const TEXT_OK = /status-text|statusText/;
+    const WRITE = /\.(?:textContent|innerHTML)\s*=/;
+    const bad = files.filter((f) => {
+      const lines = readFileSync(f, 'utf-8').split('\n');
+      return lines.some((line, i) => {
+        if (!WRITE.test(line)) return false;
+        const win = lines.slice(Math.max(0, i - 3), i + 1);
+        return win.some((l) => HOLDER.test(l)) && !win.some((l) => TEXT_OK.test(l));
+      });
+    });
     expect(bad, '器へ直接書いている(子の span と断り書きが消える)').toEqual([]);
   });
 });

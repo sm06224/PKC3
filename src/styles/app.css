@@ -5438,10 +5438,27 @@ li[data-pkc-row-slot] {
  */
 [data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='dual-body'] {
   grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+}
+/* 🔴 **2 枚を重ねる。畳まない。**(着地前の動線レビュー C、2026-09-04 に実測)
+ *
+ * ⚠ 1 稿目は `display: none` だったが、**見ていた場所が毎回いちばん上に戻る** ──
+ *   ペインの中の一覧(`dual-table`)は `overflow: auto` の**流れる箱**なので、
+ *   `display: none` にすると `scrollTop` が 0 に丸められる。
+ *   実測(375×667):左の器の中で流れる箱は `dual-table` と `dual-preview` の 2 つ。
+ * 🔴 帰結は user の物語そのもの ── 「右で 200 件を送って行き先を決める →
+ *   左へ戻って印を付ける → 右へ戻る」で**送り直しになる**。
+ * 🔑 **この repo は同じ罠を 3 面(一覧 / 本文 / 情報)では既に避けている** ──
+ *   `render/phone-layout.ts` の docstring に「`display: none` にしない …
+ *   短い面では `scrollTop` が 0 に丸められ、戻しても読んでいた場所へ帰れない」と
+ *   書いてある。同じ判断をここにも当てる。
+ * ⚠ `inert` は JS が付ける(CSS では焦点が隠れた面へ入りうる)── `dual-filer.ts`。 */
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='dual-pane'] {
+  grid-area: 1 / 1;
 }
 [data-pkc-region='shell'][data-pkc-layout='phone']
   [data-pkc-region='dual-pane']:not([data-pkc-focused]) {
-  display: none;
+  visibility: hidden;
 }
 /* 🔴 **行き先のボタンはスマホでだけ出す。**
  * ⚠ パソコンは 2 枚とも見えているので、切り替える意味が無い(押しても
@@ -5464,6 +5481,41 @@ li[data-pkc-row-slot] {
  *   これで端末の中の押し所が 1 種類(32px)に揃う。 */
 [data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='dual-commands'] button {
   min-height: 32px;
+}
+/* 🔴 **スマホでは 2 段に折る**(着地前の動線レビュー B、2026-09-04 に実測)。
+ *
+ * ⚠ 1 行 7 等分のままだと、375px で**語に使える幅が 15px**(全角 1 字)しか
+ *   残らない。実測した `scrollWidth / clientWidth`:
+ *
+ *   | 語 | 要る幅 | 空いている幅 |
+ *   |---|---|---|
+ *   | 右へ写す / 右へ移す / フォルダ | 53px | 🔴 **15px** |
+ *   | プレビュー | 66px | 🔴 15px |
+ *   | ゴミ箱 / ノート | 40px | 🔴 15px |
+ *   | 名前 | 26px | 🔴 15px |
+ *
+ * 🔴 **7 つ全部が切れていた**(この PR より前から ── ただし
+ *   「**行き先を字に入れる**」という user 裁定は、読めなければ**果たせない**)。
+ * ⚠ `cmd-label` は `text-overflow: ellipsis` なので、切れても**画面には
+ *   「右…」と出るだけ**で、`textContent` を見る検査は**素通りする**
+ *   (CLAUDE.md §1)── だから実ブラウザで `scrollWidth <= clientWidth` を見る。
+ * 🔑 4 列にすると 1 つ ≒ 94px になり、いちばん長い「プレビュー」(66px)も入る。 */
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='dual-commands'] {
+  grid-auto-flow: row;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+/* 🔴 **スマホでは鍵の字を出さない**(実測で決めた。2026-09-04)。
+ *
+ * ⚠ 4 列に折っても足りなかった ── **鍵の字の長さが操作ごとに違う**からである。
+ *   `barKey` は F キーが無い操作では**最初の割当をそのまま出す**ので、
+ *   「ノート」は `Ctrl+Shift+N` 相当の長い字になり、実測で
+ *   **語に残ったのは 18px**(要る 40px)だった。⚠ 4 列 + 詰めでも直らない。
+ * 🔑 **選ばされたら語を採る** ── 鍵は近道の案内、語は操作そのものである。
+ *   スマホ用画面(幅 720px 以下)は**キーボードを持たない端末**が主なので、
+ *   ここでは語だけを出す。⚠ 情報は捨てない ── 鍵は説明(`title`)に残す
+ *   (`dual-filer.ts` の `renderCommands`)。 */
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-field='cmd-key'] {
+  display: none;
 }
 
 

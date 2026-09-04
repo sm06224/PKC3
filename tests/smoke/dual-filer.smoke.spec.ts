@@ -408,7 +408,18 @@ test('🔴 2 ペインの押せる口に、無反応が 1 つも無い (#273)', 
     '行を押したのに印が付いていない',
   ).toHaveCount(1);
   await clickReal(page, '[data-pkc-field="dual-copy"]');
-  await expect(page.locator('[data-pkc-region="status"]')).toContainText('写しました');
+  /**
+   * 🔴 **行き先を名乗る**(#671 の着地前の動線レビュー A、2026-09-04)。
+   *
+   * ⚠ 直す前は「1 件を写しました」だけで、**どこへ行ったか 1 文字も出ていなかった** ──
+   *   隣の「移す」は「N 件を『◯◯』へ入れました」と名乗っている。
+   * 🔴 スマホでは相手のペインが**画面に居ない**ので、ここが唯一の手がかりである。
+   * 🔑 右のペインは触っていないのでルートに居る ── だから「ルート」と名乗るのが正しい。
+   */
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '写した先の名前が出ていない(見えない場所へ物が飛ぶ)',
+  ).toContainText('「ルート」へ写しました');
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

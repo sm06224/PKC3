@@ -573,8 +573,21 @@ test('🔴 340px では断り書きが出て、OK で消せて、それでも書
     bottom: Math.round(el.getBoundingClientRect().bottom),
     innerH: window.innerHeight,
   }));
-  expect(fit.scrollH, `断り書きが帯からはみ出している(${fit.scrollH} / ${fit.clientH})`)
-    .toBeLessThanOrEqual(fit.clientH);
+  /**
+   * 🔴 **主張を「はみ出していない」から「食う丈の上限」へ書き換えた**
+   * (着地前レビュー A-2、2026-09-04)。
+   *
+   * ⚠ 帯を `height: 20px` 固定から `min-height` + `flex-wrap` に変えた時点で、
+   *   **`scrollHeight <= clientHeight` は常に真**になった(内容に合わせて伸びるので)。
+   *   `bottom <= innerH` も、status の grid 行が `auto`・本文が `minmax(0,1fr)` なので
+   *   **帯が伸びると本文が縮むだけ**で常に真である ── 2 本とも鳴らなくなっていた。
+   * 🔑 いま守るべきは「**いちばん狭い画面で、帯が本文を食い過ぎない**」である。
+   *   ⚠ 上限は**実測で置く** ── 340px では **72px**(字が 2 行 + 押す口 32px が
+   *   その下に回り込む)。窓の丈 700px に対して約 10% で、しかも押せば消える。
+   *   🔑 **80 は「これ以上は増やさない」の線**であって、72 が理想という意味ではない
+   *   (増やすなら測り直して、なぜ増えたかを書く)。
+   */
+  expect(fit.clientH, `断り書きの帯が ${fit.clientH}px も食っている`).toBeLessThanOrEqual(80);
   // ⚠ 空振り防止 ── 帯そのものが画面の中に在る(0 高さで「収まった」ではない)
   expect(fit.clientH, '帯に高さが無い(何も測っていない)').toBeGreaterThan(0);
   expect(fit.bottom, '帯が画面の外に在る').toBeLessThanOrEqual(fit.innerH);
@@ -729,7 +742,13 @@ for (const [name, w, h] of [
           const head = p.querySelector('[data-pkc-region="dual-head"]') as HTMLElement | null;
           return {
             side: p.getAttribute('data-pkc-side'),
-            shown: r.width > 0 && r.height > 0,
+            /**
+             * 🔴 **`visibility` で見る**(着地前の動線レビュー C の直しに合わせた)。
+             * ⚠ 隠す側は `display: none` ではなく `visibility: hidden` なので、
+             *   **箱は在る**(`width > 0`)── 大きさで見ると「2 枚出ている」と読む。
+             */
+            shown: getComputedStyle(p).visibility !== 'hidden',
+            inert: p.hasAttribute('inert'),
             w: Math.round(r.width),
             h: Math.round(r.height),
             label: p.getAttribute('aria-label'),
@@ -755,6 +774,26 @@ for (const [name, w, h] of [
           moveLabel: (
             document.querySelector('[data-pkc-field="dual-move"]')?.textContent ?? ''
           ).trim(),
+          /**
+           * 🔴 **門を N 個置いたら、N 個目だけが鳴る場面を N 通り作る**
+           * (着地前レビュー M1、2026-09-04)。⚠ `dual-move` だけを見ていたので、
+           *   `it.directed` を落として**全部に行き先を付ける**変異が生き延びた
+           *   (「右へ名前」「右へゴミ箱」と出るのに緑)。
+           */
+          copyLabel: (
+            document.querySelector('[data-pkc-field="dual-copy"]')?.textContent ?? ''
+          ).trim(),
+          renameLabel: (
+            document.querySelector('[data-pkc-field="dual-rename-begin"]')?.textContent ?? ''
+          ).trim(),
+          /**
+           * 🔴 **字が切れていないか**(着地前の動線レビュー B、2026-09-04 に実測)。
+           * ⚠ `text-overflow: ellipsis` なので、切れても画面には「右…」と出るだけ ──
+           *   `textContent` を見る検査は**素通りする**(CLAUDE.md §1)。
+           */
+          cut: [...document.querySelectorAll('[data-pkc-field="cmd-label"]')]
+            .filter((el) => el.scrollWidth > el.clientWidth)
+            .map((el) => `${el.textContent}(${el.scrollWidth}/${el.clientWidth})`),
         };
       });
 
@@ -766,6 +805,9 @@ for (const [name, w, h] of [
     expect(shown.map((p) => p.side), '1 枚だけ出ていない').toEqual(['left']);
 
     const only = shown[0]!;
+    // ⚠ 隠した側は**焦点も受けない**(`visibility` だけでは Tab で入れる)
+    const hiddenSide = first.panes.find((p) => !p.shown)!;
+    expect(hiddenSide.inert, '隠した側に焦点が入る(Tab で見えないペインへ行ける)').toBe(true);
     // ② 🔴 **その 1 枚が版面を丸ごと使う**(直す前は 184px / 積むと丈 136px)
     expect(only.w, `ペインが窓より狭い(${only.w}px / 窓 ${first.innerW}px)`).toBeGreaterThan(
       first.innerW - 20,
@@ -795,6 +837,21 @@ for (const [name, w, h] of [
      *    「移す」だけではどこへ行くか読めない。
      */
     expect(first.moveLabel, '操作の字に行き先が入っていない').toContain('右へ移す');
+    /**
+     * 🔴 **その字が、その幅で本当に読める**(着地前の動線レビュー B)。
+     *
+     * ⚠ 直す前の実測(375×667、1 行 7 等分):**7 つ全部**が切れていた ──
+     *   「右へ写す」は **53px 必要 / 15px しか無い**(全角 1 字)。
+     * 🔑 「行き先を字に入れる」という user 裁定は、**読めなければ果たせない**。
+     */
+    expect(first.cut, `操作の字が切れている: ${first.cut.join(' / ')}`).toEqual([]);
+    // 🔑 **行き先が入るのは「写す」「移す」だけ**(2 件とも見る)
+    expect(first.copyLabel, '「写す」に行き先が入っていない').toContain('右へ写す');
+    /**
+     * 🔴 **対照群 ── 行き先を入れない側**。⚠ これが無いと、`it.directed` を
+     *   無視して**全部に行き先を付ける**変異が素通りする(「右へ名前」と出る)。
+     */
+    expect(first.renameLabel, '行き先の要らない操作にまで行き先を付けている').not.toContain('右へ');
 
     /**
      * ⑦ 🔴 **押したら本当に切り替わる**(押せるだけ、では帰り道にならない)。
@@ -829,6 +886,22 @@ for (const [name, w, h] of [
     // 🔑 操作の 7 つも 32px(user 裁定)
     expect(hit.h, `操作の押し所が ${hit.h}px(32px 未満)`).toBeGreaterThanOrEqual(32);
 
+    /**
+     * ⑨ 🔴 **切り替えたら、新しい側へ焦点が移る**(着地前レビュー B-5)。
+     *
+     * ⚠ 2 ペインの鍵(F5 / F6 / Tab …)は**焦点がペインの中に在るとき**しか効かない。
+     *   行き先のボタンはペインの外に在り、押した瞬間に元のペインは `inert` になるので、
+     *   焦点を移さないと `<body>` へ落ちて**鍵が 1 つも効かなくなる**
+     *   (720px 未満のノート PC で現実に届く)。
+     */
+    const focusIn = await page.evaluate(
+      () =>
+        document.activeElement?.closest('[data-pkc-region="dual-pane"]')?.getAttribute(
+          'data-pkc-side',
+        ) ?? null,
+    );
+    expect(focusIn, '切り替えた先へ焦点が移っていない(2 ペインの鍵が死ぬ)').toBe('right');
+
     // ⚠ 戻り道の対照群 ── もう一度押せば左へ帰る(往復できる)
     await clickReal(page, '[data-pkc-region="dual-switch"]');
     const back = await shape();
@@ -836,6 +909,29 @@ for (const [name, w, h] of [
       back.panes.filter((p) => p.shown).map((p) => p.side),
       '左のペインへ帰れない(片道になっている)',
     ).toEqual(['left']);
+
+    /**
+     * ⑩ 🔴 **窓の幅がパソコン側へ跨いだら、操作の字も戻る**(着地前レビュー B-1 / G。
+     *    2026-09-04 に実測して**壊れていることを確かめた**)。
+     *
+     * ⚠ 窓の幅は `state` を 1 バイトも動かさないので、`render` に届く経路が
+     *   `appPhone` の `onToggle` **1 本しか無い** ── 直す前はそこが
+     *   `applyPaneVisibility` しか呼んでおらず、実測(375 → 1440)で
+     *   **2 枚とも出ているのに字は「F6右へ移す」のまま**だった。
+     */
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect(page.locator(REGION('shell'))).not.toHaveAttribute(
+      'data-pkc-layout',
+      'phone',
+    );
+    const wide = await shape();
+    expect(wide.moveLabel, 'パソコンの幅にしても、スマホ用の字が残っている').not.toContain(
+      'へ移す',
+    );
+    expect(
+      wide.panes.filter((p) => p.shown).map((p) => p.side),
+      'パソコンの幅にしても 1 枚のまま',
+    ).toEqual(['left', 'right']);
 
     expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
   });

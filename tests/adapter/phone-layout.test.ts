@@ -1162,8 +1162,25 @@ describe('CSS(構文で読む)', () => {
       css,
       `${PHONE} [data-pkc-region='dual-pane']:not([data-pkc-focused])`,
     ).join(' ');
-    expect(off, '焦点の無い側を畳む規則が無い(2 枚が縦に並ぶ)').toMatch(
+    expect(off, '焦点の無い側を隠す規則が無い(2 枚が縦に並ぶ)').toMatch(
+      decl('visibility', 'hidden'),
+    );
+    /**
+     * 🔴 **`display: none` で隠さない**(着地前の動線レビュー C、2026-09-04 に実測)。
+     * ⚠ ペインの中の一覧(`dual-table`)は `overflow: auto` の**流れる箱**なので、
+     *   `display: none` にすると `scrollTop` が 0 に丸められ、**見ていた場所が
+     *   毎回いちばん上に戻る**。3 面(一覧 / 本文 / 情報)では既に避けている罠である。
+     */
+    expect(off, '畳んで隠している(見ていた場所が毎回いちばん上に戻る)').not.toMatch(
       decl('display', 'none'),
+    );
+    /**
+     * ⚠ 隠すだけでは**縦に 2 枚並ぶ** ── 同じマスへ重ねる規則まで見る
+     *   (`visibility: hidden` は場所を空けない)。
+     */
+    const stack = blocksFor(css, `${PHONE} [data-pkc-region='dual-pane']`).join(' ');
+    expect(stack, '2 枚を同じマスへ重ねていない(隠した側が場所を取る)').toMatch(
+      decl('grid-area', '1\\s*/\\s*1'),
     );
     // ⚠ 空振り防止 ── 素の規則は**横並びのまま**である(全部畳んだのではない)
     const wide = blocksFor(css, `[data-pkc-region='dual-body']`).join(' ');
@@ -1219,6 +1236,43 @@ describe('CSS(構文で読む)', () => {
     // ⚠ 空振り防止 ── パソコン側には丈を足していない(1px も変えない)
     const wide = blocksFor(css, `[data-pkc-region='dual-commands'] button`).join(' ');
     expect(wide, 'パソコンの操作にも丈を足している').not.toMatch(decl('min-height', '32px'));
+  });
+
+  /**
+   * 🔴 **スマホでは操作を 2 段に折る**(着地前の動線レビュー B、2026-09-04 に実測)。
+   *
+   * ⚠ 1 行 7 等分のままだと、375px で**語に使える幅が 15px**(全角 1 字)しか
+   *   残らない ── 実測した `scrollWidth / clientWidth`:
+   *   「右へ写す」53/15、「プレビュー」66/15、「名前」26/15 で **7 つ全部**が切れる。
+   * 🔴 `text-overflow: ellipsis` なので画面には「右…」と出るだけで、
+   *   `textContent` を見る検査は**素通りする**(CLAUDE.md §1)── 実際に切れる幅は
+   *   実ブラウザで測る(`tests/smoke/phone.smoke.spec.ts`)。ここは**規則が在ること**。
+   */
+  it('🔴 スマホでは 2 ペインの操作を 4 列に折る', () => {
+    const css = withoutMedia(bare());
+    const phone = blocksFor(css, `${PHONE} [data-pkc-region='dual-commands']`).join(' ');
+    expect(phone, 'スマホで列を切る規則が無い(1 行 7 等分のまま)').toMatch(
+      decl('grid-template-columns', 'repeat\\(4'),
+    );
+    expect(phone, '行送りにしていない(4 つ目で折り返さない)').toMatch(
+      decl('grid-auto-flow', 'row'),
+    );
+    // ⚠ 空振り防止 ── パソコンは 1 行のまま(端が揃う形を崩さない)
+    const wide = blocksFor(css, `[data-pkc-region='dual-commands']`).join(' ');
+    expect(wide, 'パソコンまで折り返している').toMatch(decl('grid-auto-flow', 'column'));
+    /**
+     * 🔴 **4 列に折っても足りなかったので、鍵の字は出さない**(実測)。
+     * ⚠ `barKey` は F キーの無い操作では**最初の割当をそのまま出す**ので、
+     *   「ノート」の鍵が長く、語に残ったのは **18px**(要る 40px)だった。
+     * 🔑 情報は捨てない ── 鍵は説明(`title`)に残す(`dual-filer.ts`)。
+     */
+    const key = blocksFor(css, `${PHONE} [data-pkc-field='cmd-key']`).join(' ');
+    expect(key, 'スマホで鍵の字を畳んでいない(語が 18px まで潰れる)').toMatch(
+      decl('display', 'none'),
+    );
+    // ⚠ 空振り防止 ── パソコンでは出したまま(近道の覚え書きを消していない)
+    const wideKey = blocksFor(css, `[data-pkc-field='cmd-key']`).join(' ');
+    expect(wideKey, 'パソコンの鍵まで畳んでいる').not.toMatch(decl('display', 'none'));
   });
 
   /**

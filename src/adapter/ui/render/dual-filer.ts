@@ -392,12 +392,29 @@ export class DualFilerRenderer {
      * (出さないと user は**どちらが元か分からないまま**押すことになる)。
      */
     if (state.dual.focus !== this.lastFocus) {
+      const first = this.lastFocus === null;
       this.lastFocus = state.dual.focus;
       for (const side of SIDES) {
         const el = frame.panes[side].root;
         if (side === state.dual.focus) el.setAttribute('data-pkc-focused', '');
         else el.removeAttribute('data-pkc-focused');
       }
+      /**
+       * 🔴 **1 枚ずつのときは、新しい側へ焦点も移す**(着地前レビュー B-5、2026-09-04)。
+       *
+       * ⚠ 2 ペインの鍵(F5 / F6 / Tab …)は**焦点がペインの中に在るとき**しか
+       *   効かない(`binder.ts` の `dualHost = el.closest('[data-pkc-region="dual-pane"]')`)。
+       * 🔴 行き先のボタンは**ペインの外**に在り、押した瞬間に元のペインは
+       *   `inert` になるので、焦点は `<body>` へ落ちる ──
+       *   **切り替えた直後は 2 ペインの鍵が 1 つも効かない**
+       *   (720px 未満のノート PC で現実に届く)。
+       * ⚠ **`data-pkc-focused` を塗った後で呼ぶ** ── 塗る前は新しい側がまだ
+       *   `visibility: hidden` で、`focus()` は**何も起きない**(実測で踏んだ)。
+       * ⚠ **起動の 1 回目は動かさない**(`first`)── 開いた瞬間に焦点を奪うと、
+       *   一覧から続けて打っていた人の入力先が変わる。
+       * ⚠ **1 枚のときだけ**(`solo`)── パソコンで勝手に焦点を奪わない。
+       */
+      if (!first && this.lastSolo === true) frame.panes[state.dual.focus].root.focus();
     }
     this.renderCommands(frame.commands, frame.panes[state.dual.focus], state);
   }
@@ -434,8 +451,19 @@ export class DualFilerRenderer {
       to === 'right' ? `${SIDE_LABEL.right}のペインへ →` : `← ${SIDE_LABEL.left}のペインへ`;
     frame.switcher.title =
       `${SIDE_LABEL[to]}のペインに切り替えます(いま見ているのは${SIDE_LABEL[focus]}のペインです)`;
-    // ⚠ 1 枚だけかが変われば操作の字も作り直す(指紋を捨てる)
-    this.lastCommands = '';
+    /**
+     * 🔴 **隠した側へ焦点が入らないようにする**(着地前の動線レビュー C)。
+     * ⚠ 1 枚ずつは `visibility: hidden` で作る(`display: none` にすると
+     *   **見ていた場所が毎回いちばん上に戻る** ── 中の一覧は流れる箱である)。
+     *   🔑 ただし `visibility` だけでは **Tab で隠れた側へ入れてしまう**ので、
+     *   `inert` を JS で付ける(CSS では付けられない ── 3 面の切替と同じ作法)。
+     */
+    for (const side of SIDES) {
+      const el = frame.panes[side].root;
+      if (solo && side !== focus) el.setAttribute('inert', '');
+      else el.removeAttribute('inert');
+    }
+
     return true;
   }
 
@@ -1170,10 +1198,19 @@ export class DualFilerRenderer {
      * ⚠ **下見の出し入れも指紋に入れる**(#273 残件)── 入れないと、押しても
      *   `aria-pressed` が古いまま残り、**点いているのに消えて見える**。
      */
-    const sig = [from, String(count), state.dual.previewOn ? 'p' : '-', ...keys].join(SEP);
+    /**
+     * 🔴 **「1 枚だけか」も指紋に入れる**(着地前レビュー M2'、2026-09-04)。
+     * ⚠ 直す前は `paintSwitch` が `lastCommands = ''` と**副作用で**伝えていたが、
+     *   その 1 行を消しても test が 1 件も落ちなかった(= 誰も守っていない)。
+     * 🔑 **判定を 1 か所へ寄せる** ── 変わったら描き直す材料は全部この式に載せる
+     *   (CLAUDE.md §7)。
+     */
+    const solo = this.lastSolo === true;
+    const sig = [from, solo ? 's' : '-', String(count), state.dual.previewOn ? 'p' : '-', ...keys].join(
+      SEP,
+    );
     if (sig === this.lastCommands) return;
     this.lastCommands = sig;
-    const solo = this.lastSolo === true;
     const to = SIDE_LABEL[otherSide(from)];
     host.textContent = '';
     COMMAND_ITEMS.forEach((it, i) => {
@@ -1185,9 +1222,9 @@ export class DualFilerRenderer {
        * ⚠ **キーと語は別の要素**にする ── CSS でキーだけ弱めるため。
        *   `textContent` で 1 本にすると、字の重みを分けられない。
        */
-      const key = document.createElement('span');
-      key.setAttribute('data-pkc-field', 'cmd-key');
-      key.textContent = keys[i] ?? '';
+      const keyEl = document.createElement('span');
+      keyEl.setAttribute('data-pkc-field', 'cmd-key');
+      keyEl.textContent = keys[i] ?? '';
       const label = document.createElement('span');
       label.setAttribute('data-pkc-field', 'cmd-label');
       /**
@@ -1196,11 +1233,18 @@ export class DualFilerRenderer {
        *   どこへ行くのか読めない(パソコンは 2 枚見えているので入れない)。
        */
       label.textContent = solo && it.directed ? `${to}へ${it.label}` : it.label;
-      b.append(key, label);
+      b.append(keyEl, label);
+      /**
+       * ⚠ **鍵は説明にも入れる**(2026-09-04)── スマホでは帯から鍵の字を
+       *   落とすので(`app.css`、語が 18px まで潰れるため)、ここが唯一の
+       *   残り場所になる。⚠ 落とすのは**見た目だけ**で、情報は捨てない。
+       */
+      const key = keys[i] ?? '';
+      const chord = key === '' ? '' : `[${key}] `;
       b.title =
         it.empty !== null && count === 0
-          ? it.empty
-          : `${it.hint(SIDE_LABEL[from], to)}${it.empty !== null ? `(いま ${count} 件)` : ''}`;
+          ? `${chord}${it.empty}`
+          : `${chord}${it.hint(SIDE_LABEL[from], to)}${it.empty !== null ? `(いま ${count} 件)` : ''}`;
       // 🔑 出し入れの口は**押している状態**を出す(点いているか、字だけでは読めない)
       if (it.action === 'dual-preview-toggle')
         b.setAttribute('aria-pressed', state.dual.previewOn ? 'true' : 'false');
