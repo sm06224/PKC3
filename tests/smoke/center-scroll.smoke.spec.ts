@@ -1,5 +1,13 @@
 import { test, expect } from '@playwright/test';
-import { clickReal, collectPageErrors, createEntry, gotoApp, openViewPane, useSplitEditor } from './helpers';
+import {
+  clickReal,
+  collectPageErrors,
+  createEntry,
+  dismissAnnounce,
+  gotoApp,
+  openViewPane,
+  useSplitEditor,
+} from './helpers';
 
 /**
  * 🔴 **面を開いて戻っても、読んでいた場所に戻る**(user 目線レビュー U-4、2026-08-22)。
@@ -81,5 +89,97 @@ test('🔴 短い面を開いて戻ると、読んでいた場所に戻る (U-4)
   await expect(page.locator('[data-pkc-view-pane="detail"]')).toBeVisible();
   await page.waitForTimeout(700);
   expect(await top(), '2 巡目で古い位置に固定された').toBe(2500);
+  expect(errors, 'page error が出た').toEqual([]);
+});
+
+/**
+ * 🔴 **別のノートを見てから戻ると、読んでいた場所から出る**(#690 ①。
+ * user 裁定 2026-09-04、案 A)。
+ *
+ * 直す前は「編集へ入る直前」しか憶えておらず、A を中ほどまで読んで一覧で B を
+ * 選び、A へ戻ると**必ず先頭**だった。unit(`detail-scroll.test.ts`)は器の値だけを
+ * 見るので、ここで見るのは**実レイアウトの丸め**を挟んでも戻ること ──
+ * B は短いので、B を見ている間は箱の `scrollTop` が実際に 0 へ丸められる。
+ *
+ * ⚠ 戻しは**本文がワーカーから届いた後**に走る(上の test と同じ)── 押した直後に
+ *   読むと、まだ中身が無くて 0 に見える。`data-pkc-painted` が A を指してから読む。
+ */
+test('🔴 別のノートを見てから戻ると、読んでいた場所から出る (#690 ①)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await useSplitEditor(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+
+  // ⚠ **2 件作る** ── A は長く(送れる)、B は短く(見ている間に丸められる)
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('ながい');
+  const long = Array.from({ length: 300 }, (_, i) => `${i} 行目の段落です。`).join('\n\n');
+  await page.evaluate((body) => {
+    const ta = document.querySelector<HTMLTextAreaElement>('[data-pkc-field="editor-body"]')!;
+    ta.value = body;
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+  }, long);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('みじかい');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  /** 一覧の行(題名 → lid)。⚠ 画面から採る ── 保存の綴りを推測しない。 */
+  const lidOf = async (title: string): Promise<string> =>
+    await page.evaluate((t) => {
+      const rows = [...document.querySelectorAll('[data-pkc-region="sidebar"] [data-pkc-entry]')];
+      const hit = rows.find((r) => (r.textContent ?? '').includes(t));
+      return hit?.getAttribute('data-pkc-entry') ?? '';
+    }, title);
+  const longLid = await lidOf('ながい');
+  const shortLid = await lidOf('みじかい');
+  expect(longLid, '前提が崩れた(ながい の行が一覧に無い)').not.toBe('');
+  expect(shortLid, '前提が崩れた(みじかい の行が一覧に無い)').not.toBe('');
+  expect(longLid, '前提が崩れた(2 件が同じ行を指している)').not.toBe(shortLid);
+
+  const box = '[data-pkc-region="detail"]';
+  const top = async (): Promise<number> =>
+    page.evaluate((sel) => (document.querySelector(sel) as HTMLElement).scrollTop, box);
+  /** その lid の本文が描けた印(`detail.ts` の `PAINTED_ATTR`)を待つ。 */
+  const painted = (lid: string) =>
+    page.locator(`[data-pkc-field="detail-body"][data-pkc-painted="${lid}"]`);
+
+  await clickReal(page, `[data-pkc-entry="${longLid}"]`);
+  await expect(painted(longLid)).toBeAttached();
+  const size = await page.evaluate((sel) => {
+    const el = document.querySelector(sel) as HTMLElement;
+    return { sh: el.scrollHeight, ch: el.clientHeight };
+  }, box);
+  // ⚠ **空振り防止** ── 送れる高さが無ければ、この test は何も確かめていない
+  expect(size.sh, 'スクロールできる高さが無い(fixture が短い)').toBeGreaterThan(size.ch * 3);
+  await page.evaluate((sel) => { (document.querySelector(sel) as HTMLElement).scrollTop = 1000; }, box);
+  await page.waitForTimeout(200);
+  expect(await top(), '位置を作れていない').toBe(1000);
+
+  // 別のノート(短い)へ ── ⚠ **対照群**: 初めて開くノートは先頭から。
+  //    短いので、直しが「B にも 1000 を持ち込む」形に壊れても丸めで 0 に見える ──
+  //    だから B 側は unit が守る(ここは A へ戻る側だけを主張する)
+  await clickReal(page, `[data-pkc-entry="${shortLid}"]`);
+  await expect(painted(shortLid)).toBeAttached();
+  expect(await top(), '初めてのノートが先頭から始まらない').toBe(0);
+
+  // 🔴 A へ戻る ⇒ 読んでいた場所から
+  await clickReal(page, `[data-pkc-entry="${longLid}"]`);
+  await expect(painted(longLid)).toBeAttached();
+  await expect
+    .poll(top, { message: '別のノートを見てから戻ると先頭へ飛ぶ', timeout: 3_000 })
+    .toBe(1000);
+
+  // ⚠ 2 巡目 ── 憶え直しが効く(1 回目の値に固定されない)
+  await page.evaluate((sel) => { (document.querySelector(sel) as HTMLElement).scrollTop = 2500; }, box);
+  await page.waitForTimeout(200);
+  await clickReal(page, `[data-pkc-entry="${shortLid}"]`);
+  await expect(painted(shortLid)).toBeAttached();
+  await clickReal(page, `[data-pkc-entry="${longLid}"]`);
+  await expect(painted(longLid)).toBeAttached();
+  await expect
+    .poll(top, { message: '2 巡目で古い位置に固定された', timeout: 3_000 })
+    .toBe(2500);
   expect(errors, 'page error が出た').toEqual([]);
 });
