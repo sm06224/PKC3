@@ -58,7 +58,8 @@ test('🔴 ヘルプからマニュアルの窓が開き、窓いっぱいに出
   const win = await openManual(page, context);
 
   // ③ 帯・目次・本文が出る
-  await expect(win.locator(HEAD)).toContainText('PKC3 マニュアル');
+  // ⚠ 並びは他の窓と同じ「<名前> — PKC3」(#648 I4)。頭が PKC3 の旧い字なら落ちる
+  await expect(win.locator(HEAD)).toContainText('マニュアル — PKC3');
   await expect(win.locator(`${TOC} a`).first()).toBeVisible();
   const links = await win.locator(`${TOC} a`).count();
   expect(links, '目次が空').toBeGreaterThan(100);

@@ -33,6 +33,8 @@ import {
 } from '../../src/adapter/ui/render/text-scale';
 import { TEXT_SCALES, textScaleSpec } from '../../src/features/text-scale';
 import { extractBodyCss } from '../../build/body-css';
+import { windowTitleFor } from '../../src/adapter/platform/deep-link';
+import { manualTile } from '../../src/features/launcher/tiles';
 // @ts-expect-error -- 検品規則は素の .mjs(ビルド対象外の CI script 群)
 import { MANUAL_PAGE } from '../../scripts/dist-inspect.mjs';
 
@@ -362,5 +364,21 @@ describe('焼いたマニュアル — 字はアプリと同じ(I6)', () => {
     expect(bake().html, '焼いた page に --font の定義が無い(system-ui へ落ちる)').toMatch(
       /--font:/u,
     );
+  });
+});
+
+/**
+ * 🔴 **窓の題名は他の窓と同じ並び**(2026-09-04、#648 I4)。
+ * ⚠ 段②までは「PKC3 マニュアル」── タスクバーに「2 ペインで整理 — PKC3」と並んだとき
+ *   この窓だけ頭が PKC3 で、名前で探す目が止まらなかった。
+ * 🔑 期待値は**形の正本**(`deep-link.ts` の `windowTitleFor`)と**タイルの字**から組む
+ *   ── 題名の綴りを test に写さない(片方だけ変えても緑、を作らない)。
+ */
+describe('マニュアルの窓 — 題名の並び(I4)', () => {
+  it('🔴 「<タイルの字> — PKC3」── 他の窓と同じ形で、タイルの字と揃っている', () => {
+    expect(MANUAL_WINDOW_TITLE).toBe(windowTitleFor('PKC3', manualTile().title));
+    // 空振り防止 ── 旧い並び(頭が PKC3)ではない
+    expect(MANUAL_WINDOW_TITLE).not.toMatch(/^PKC3/u);
+    expect(manualTile().title, 'タイルの字が空(空振り)').not.toBe('');
   });
 });

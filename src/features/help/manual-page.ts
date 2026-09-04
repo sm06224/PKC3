@@ -39,9 +39,15 @@ export const MANUAL_PAGE_FILE = 'manual.html';
 
 /**
  * 窓の題名。⚠ **1 か所で持つ** ── タイルの字(`tiles.ts` の `manualTile`)と
- * 揃っているかは `tests/features/manual-doc.test.ts` が見る。
+ * 揃っているかは `tests/features/manual-page.test.ts` が見る。
+ *
+ * 🔴 **並びは他の窓と同じ「<名前> — PKC3」**(2026-09-04、#648 I4)。
+ * ⚠ 段②までは「PKC3 マニュアル」で、タスクバーに「2 ペインで整理 — PKC3」と
+ *   並んだとき**この窓だけ頭が PKC3** だった(名前で探す目が止まらない)。
+ * ⚠ 形の正本は `adapter/platform/deep-link.ts` の `windowTitleFor` だが、ここは
+ *   features 層なので呼べない ── 同じ形であることは test が突き合わせる。
  */
-export const MANUAL_WINDOW_TITLE = 'PKC3 マニュアル';
+export const MANUAL_WINDOW_TITLE = 'マニュアル — PKC3';
 
 /**
  * 🔴 **どの版で組んだ窓か**(#645)。
