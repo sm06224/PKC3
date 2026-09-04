@@ -256,7 +256,30 @@ export function connectViewDeepLink(wiring: DeepLinkWiring): () => void {
 
   const apply = (): void => {
     const read = readViewDeepLink(target);
-    if (read === null) return;
+    if (read === null) {
+      /**
+       * 🔴 **面を指していなくても、ノートは開く**(#685 段①、2026-09-04)。
+       *
+       * ⚠ 直す前は `view` の無い断片で**何も起きなかった** ──
+       *   `#pkc?container=c1&entry=e1` は PKC Link の仕様(form 3、
+       *   External Permalink)の形なのに、**作る側も読む側も 0 件**だった
+       *   (`formatExternalPermalink` / `parseExternalPermalink` の呼び側は
+       *   `src/` に 1 件も無い)。
+       * 🔑 これが在って初めて「**このノートを別の窓で開く**」が組める ──
+       *   窓は URL でしか行き先を渡せない(#685 の裁定 A)。
+       *
+       * ⚠ **断片は消さない** ── 面(`view`)と違って、ここは「いまこのノートを
+       *   見ている」という**正しい住所**である。消すと栞にできない。
+       * ⚠ **`container` と `entry` の両方が要る**(`parseViewDeepLinkEntry` の規則)
+       *   ── 片方だけで拾うと、別の container の lid と**偶然一致して
+       *   無関係なノートを選ぶ**。
+       * ⚠ 居ない lid は呼び側(`main.ts` → `SELECT_ENTRY`)が黙って捨てる ──
+       *   判定をここへ写さない(CLAUDE.md §7)。
+       */
+      const here = parseViewDeepLinkEntry(target.hash);
+      if (here !== null) wiring.selectEntry?.(here.containerId, here.lid);
+      return;
+    }
     if ('view' in read) {
       hold(read.view);
       // 🔑 **ノートが先、面が後**(上の docstring の理由)

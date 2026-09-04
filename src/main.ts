@@ -2766,6 +2766,30 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     exportEntry: (lid) => void runExport({ entryLid: lid }),
     // 🔴 **このノートを、相手が開けるだけの 1 枚にする**(#491)
     exportEntryHtml: (lid) => void runExport({ entryLid: lid, as: 'html' }),
+    /**
+     * 🔴 **このノートを別の窓で開く**(#685 段②、user 裁定 2026-09-04)。
+     *
+     * 🔑 **`openViewTile` と同じ仕掛けに乗せる**(合図 / 退避 / `noopener`)──
+     *   2 か所に別々の「窓を開く作法」を作らない(CLAUDE.md §7)。違うのは
+     *   ①`view` を渡さない(面ではなくノートを開く)②退避先が無い
+     *   (そのノートは**もう画面に在る**ので、中央の面へ逃がす意味が無い)。
+     * ⚠ **押した行のノート**を連れて行く(`selectedLid` ではない)── ⋯ は
+     *   行から開くので、選ばれている物と違うことがある。
+     */
+    openNoteWindow: (lid) =>
+      void openViewInWindow(null, {
+        // ⚠ `noopener` で開く ── 別プロセスになり、閉じれば常駐が還る
+        open: (url) => {
+          window.open(url, '_blank', 'noopener');
+        },
+        baseUrl: currentBaseUrl,
+        selected: () => ({ containerId: cid, lid }),
+        newToken: makeViewWindowToken,
+        waitForOpen: waitForViewWindow,
+        // ⚠ 付箋に退避先は無い ── `view === null` のとき呼ばれない
+        openInPane: () => false,
+        fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
+      }),
     /** 🔴 このフォルダと配下をまとめて書き出す(#399 ①)。 */
     exportFolder: (lid) => void runExport({ entryLid: lid, as: 'folder' }),
     /**

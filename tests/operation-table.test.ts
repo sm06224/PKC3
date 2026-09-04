@@ -107,10 +107,10 @@ describe('操作の全数台帳(#582 段①)', () => {
     }).toEqual({
       // ⚠ 2026-08-31: `open-manual-window`(#645)で 1 増えた
       // ⚠ 2026-09-02: `phone-page` / `phone-menu`(#632 段①)で 2 増えた
-      total: 228,
-      receivers: 187,
-      registered: 71,
-      both: 30,
+      total: 229,
+      receivers: 188,
+      registered: 72,
+      both: 31,
       outsideActionsTable: 41,
       unregistered: 157,
     });
@@ -121,7 +121,7 @@ describe('操作の全数台帳(#582 段①)', () => {
   });
 
   it('登記簿の内訳が動いたら鳴る', () => {
-    expect(s().perBook).toEqual({ key: 52, entry: 11, body: 2, collection: 2, settings: 5 });
+    expect(s().perBook).toEqual({ key: 52, entry: 12, body: 2, collection: 2, settings: 5 });
   });
 
   it('🔴 押し所へ辿れない登記を、身元で pin する', () => {

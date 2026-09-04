@@ -416,3 +416,77 @@ describe('アプリの窓の × 閉じる', () => {
     expect(CLOSE_VIEW_WINDOW_REFUSED, '次に何をすればよいか書いていない').toContain('× で閉じてください');
   });
 });
+
+/**
+ * 🔴 **付箋の窓 ── 面ではなく「そのノート」を開く**(#685 段②、2026-09-04)。
+ *
+ * > 「**マルチで付箋開けるといいかもね**」(利用者の感想 2026-09-04)
+ *
+ * ⚠ **同じ仕掛けに乗せる**(合図 / 退避 / `noopener`)── 2 か所に別々の
+ *   「窓を開く作法」を作らない(CLAUDE.md §7)。違うのは 2 点だけ:
+ *   ① URL に `view=` を載せない ② **退避先が無い**(そのノートはもう画面に在る)。
+ */
+describe('付箋の窓(view を指さない)', () => {
+  it('🔴 読んでいたノートを載せた、面を指さない URL で開く', async () => {
+    const b = bench({ selected: { containerId: 'c1', lid: 'e1' } });
+    const where = await openViewInWindow(null, b.deps);
+    expect(where, '窓で開いていない').toBe('window');
+    expect(b.opened, '開いた URL が 1 つではない').toHaveLength(1);
+    const url = b.opened[0]!;
+    expect(url, 'ノートを連れて行っていない').toContain('container=c1&entry=e1');
+    expect(url, '面を指している(付箋なのに面が開く)').not.toContain('view=');
+    expect(url, '合図が載っていない(開いたか分からない)').toMatch(/[?&]w=/);
+  });
+
+  /**
+   * 🔴 **中央の面を触らない**(面のときと同じ ── user 要望の本体)。
+   */
+  it('🔴 開けたら中央の面を触らない', async () => {
+    const b = bench({ selected: { containerId: 'c1', lid: 'e1' } });
+    await openViewInWindow(null, b.deps);
+    expect(b.panes, '面を動かした(本文が消える)').toEqual([]);
+    expect(b.fails, '開けたのに理由を出した').toEqual([]);
+  });
+
+  /**
+   * 🔴 **塞がれたら、理由を出すだけ**(#685 段②)。
+   *
+   * ⚠ 面のときは「中央の面で開きました」と退避できるが、付箋が開こうとして
+   *   いるのは**いま読んでいるそのノート**である ── **もう画面に出ている**ので
+   *   退避先が無い。🔑 「この画面で開きました」と言うと**嘘**になる。
+   */
+  it('🔴 塞がれたら理由だけ出す(面へ退避しない・嘘を言わない)', async () => {
+    const b = bench({ answered: false, selected: { containerId: 'c1', lid: 'e1' } });
+    const where = await openViewInWindow(null, b.deps);
+    expect(where, '面へ退避した(付箋に退避先は無い)').toBe('pane');
+    expect(b.panes, '面を動かした').toEqual([]);
+    expect(b.fails, '理由を出していない').toHaveLength(1);
+    expect(b.fails[0], 'ポップアップの許可に触れていない').toContain('ポップアップ');
+    expect(b.fails[0], '開いてもいないのに「この画面で開きました」と言っている').not.toContain(
+      'この画面で開きました',
+    );
+  });
+
+  /**
+   * 🔴 **ノートが無ければ開かない**(対照群)。⚠ 組めてしまうと、開いた窓は
+   *   **何も選ばずに立ち上がる**(付箋のつもりが空の PKC になる)。
+   */
+  it('🔴 ノートを選んでいなければ、窓を開かずに理由を出す', async () => {
+    const b = bench({ selected: null });
+    const where = await openViewInWindow(null, b.deps);
+    expect(where, '窓を開いてしまった').toBe('pane');
+    expect(b.opened, '行き先の無い窓を開いた').toEqual([]);
+    expect(b.fails, '理由を出していない').toHaveLength(1);
+  });
+
+  /**
+   * ⚠ **対照群 ── 面のときは今までどおり退避する**(片方だけ直していない)。
+   */
+  it('⚠ 面のときは、塞がれたら中央の面で開く', async () => {
+    const b = bench({ answered: false });
+    const where = await openViewInWindow('dual', b.deps);
+    expect(where).toBe('pane');
+    expect(b.panes, '面へ退避していない').toEqual(['dual']);
+    expect(b.fails[0], '「この画面で開きました」と言っていない').toContain('この画面で開きました');
+  });
+});

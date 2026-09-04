@@ -672,6 +672,15 @@ export interface BinderServices {
    *   こちらは相手がブラウザで開くだけで読める片道の HTML である。
    */
   exportEntryHtml?(lid: string): void;
+  /**
+   * 🔴 **このノートを別の窓で開く**(#685 段②、user 裁定 2026-09-04)。
+   *
+   * > 「**マルチで付箋開けるといいかもね**」(利用者の感想 2026-09-04)
+   *
+   * ⚠ **同期に呼べること** ── `window.open` は click の gesture の中でしか通らない。
+   * 🔑 何枚でも開ける(窓を使い回さない)── 付箋である。
+   */
+  openNoteWindow?(lid: string): void;
   /** 🔴 **このフォルダと配下**をアーカイブとして書き出す(#399 ①)。 */
   exportFolder?(lid: string): void;
   /**
@@ -5032,6 +5041,26 @@ const ACTIONS: Record<string, ActionHandler> = {
       target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ??
       dispatcher.getState().selectedLid;
     if (lid) services.exportEntryHtml?.(lid);
+  },
+  /**
+   * 🔴 **このノートを別の窓で開く**(#685 段②)。
+   * ⚠ 解決規則は隣の `export-entry` / `delete-entry` と**同じ**にする ── 揃えないと
+   *   「A を書き出して B を開く」が成立する。
+   * ⚠ **同期に呼ぶ**(`window.open` は gesture の中でしか通らない)。
+   */
+  'open-note-window': (dispatcher, target, services) => {
+    const lid =
+      target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ??
+      dispatcher.getState().selectedLid;
+    if (lid === null) {
+      // 🔑 無言で終わらせない(押した人に理由が要る)
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '別の窓で開くノートがありません(先にノートを開いてください)',
+      });
+      return;
+    }
+    services.openNoteWindow?.(lid);
   },
   'export-folder': (dispatcher, target, services) => {
     // ⚠ 解決規則は隣の `export-entry` / `delete-entry` と**同じ**にする ── 揃えないと

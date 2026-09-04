@@ -245,6 +245,8 @@ describe('右クリックの説明(#587 C-1)', () => {
    */
   it('🔴 どの綴りにどの説明が付いているか(取り違えを殺す等値表)', () => {
     const KNOWN: readonly [string, string][] = [
+      // 🔴 付箋(#685 段②、2026-09-04)
+      ['open-note-window', 'a3a6b9d4'],
       ['export-entry', '41c58db6'],
       ['export-entry-html', '7f0a31b1'],
       ['export-folder', '5636e4f5'],

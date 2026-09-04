@@ -188,11 +188,83 @@ describe('起動時のディープリンク(#300 段②)', () => {
   });
 
   it('⚠ 対照群 ── ふつうの起動では何も撃たず、断片も触らない', () => {
-    for (const hash of ['', '#', '#pkc?container=c1&entry=e1', '#other?view=query']) {
+    /**
+     * ⚠ **`#pkc?container=…&entry=…` はこの一覧から外した**(#685 段①、2026-09-04)
+     *   ── いまはノートを開く(下の describe)。ここに残っていると
+     *   **「何も起きない」を守る検査**が、新しい動線と正面から食い違う。
+     */
+    for (const hash of ['', '#', '#pkc?container=c1', '#pkc?entry=e1', '#other?view=query']) {
       const b = bench(hash);
       expect(b.actions, `${JSON.stringify(hash)} で面を動かした`).toEqual([]);
       expect(b.cleared(), `${JSON.stringify(hash)} で断片を消した`).toBe(0);
     }
+  });
+
+  /**
+   * 🔴 **面を指していない断片でも、ノートは開く**(#685 段①、2026-09-04)。
+   *
+   * ⚠ 直す前は**何も起きなかった** ── `#pkc?container=c1&entry=e1` は
+   *   PKC Link の仕様(form 3)の形なのに、作る側も読む側も **0 件**だった。
+   * 🔑 これが在って初めて「このノートを別の窓で開く」(#685 の裁定 A)が組める ──
+   *   窓へ行き先を渡せるのは URL だけである。
+   */
+  describe('面を指さない断片(#685 段①)', () => {
+    it('🔴 container と entry が揃っていれば、そのノートを開く', () => {
+      const b = bench('#pkc?container=c1&entry=e1');
+      expect(b.actions, 'ノートを開いていない').toEqual(['select:e1']);
+      expect(b.selects, '連れてきたノートが違う').toEqual([
+        { containerId: 'c1', lid: 'e1' },
+      ]);
+    });
+
+    /**
+     * 🔴 **断片は消さない** ── 面(`view`)と違って、ここは「いまこのノートを
+     *   見ている」という**正しい住所**である。消すと栞にできない。
+     */
+    it('🔴 断片は消さない(栞にできる住所である)', () => {
+      const b = bench('#pkc?container=c1&entry=e1');
+      /**
+       * ⚠ **前提を先に確かめる**(R1 で空振りだと分かった、2026-09-04)──
+       *   「消していない」は**何も起きなかった回でも真**になる。開いたことを
+       *   見てから消えていないことを見る(CLAUDE.md §1)。
+       */
+      expect(b.actions, '前提が崩れた(そもそもノートを開いていない)').toEqual(['select:e1']);
+      expect(b.cleared(), 'ノートの住所まで消している').toBe(0);
+    });
+
+    /**
+     * ⚠ **面は動かさない** ── 開くのはノートだけで、いま見ている面はそのまま。
+     *   🔑 これが無いと「アドレスを開いたら面まで勝手に変わった」になる。
+     */
+    it('⚠ 面は動かさない(印も立てない)', () => {
+      const b = bench('#pkc?container=c1&entry=e1');
+      // ⚠ 上と同じ ── 「動かしていない」は何も起きなかった回でも真である
+      expect(b.actions, '前提が崩れた(そもそもノートを開いていない)').toEqual(['select:e1']);
+      expect(b.holds, '断片が面を指していることにしている').toEqual([]);
+    });
+
+    /**
+     * 🔴 **片方だけでは開かない**(対照群)。⚠ `container` を見ないと、
+     *   別の container の lid と**偶然一致して無関係なノートを選ぶ**。
+     */
+    it.each([
+      ['container だけ', '#pkc?container=c1'],
+      ['entry だけ', '#pkc?entry=e1'],
+      ['綴りが違う', '#pkc?container=c1&entry=e 1'],
+    ])('🔴 %s では開かない', (_name, hash) => {
+      expect(bench(hash).actions, '片方だけで開いた').toEqual([]);
+    });
+
+    /**
+     * ⚠ **面と併記したときは今までどおり**(ノートが先、面が後)── この段で
+     *   壊していないことを見る(上の describe の腕と対である)。
+     */
+    it('⚠ view と併記したときは、ノートの後に面を開く', () => {
+      expect(bench('#pkc?container=c1&entry=e1&view=dual').actions).toEqual([
+        'select:e1',
+        'open:dual',
+      ]);
+    });
   });
 
   /**

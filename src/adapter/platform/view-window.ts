@@ -124,7 +124,7 @@ export type ViewWindowResult = 'window' | 'pane';
  * タイルを押しても同じ(既にその面に居ると閉じる)。
  */
 export async function openViewInWindow(
-  view: ViewMode,
+  view: ViewMode | null,
   deps: ViewWindowDeps,
 ): Promise<ViewWindowResult> {
   const token = deps.newToken();
@@ -134,7 +134,11 @@ export async function openViewInWindow(
     token,
   });
   if (url === null) {
-    // ⚠ 組めないのは base に `#` が残っているとき ── **黙って本文で開かない**
+    /**
+     * ⚠ 組めないのは base に `#` が残っているとき ── **黙って本文で開かない**。
+     * 🔴 **付箋(`view === null`)のときは、ノートが渡っていない場合も来る**
+     *   (#685 段②)── そのときも同じで、理由を出して終わる。
+     */
     fallback(view, deps, '別のウィンドウを開けませんでした');
     return 'pane';
   }
@@ -152,7 +156,20 @@ export async function openViewInWindow(
  * ⚠ **文言は「実際に起きたこと」で分ける** ── 面が開かなかった回に
  * 「この画面で開きました」と言うと、user は**開いていない面を探す**。
  */
-function fallback(view: ViewMode, deps: ViewWindowDeps, why: string): void {
+function fallback(view: ViewMode | null, deps: ViewWindowDeps, why: string): void {
+  /**
+   * 🔴 **付箋には退避先が無い**(#685 段②、2026-09-04)。
+   *
+   * ⚠ 面(カレンダー等)は「窓が開かなかったら中央の面で開く」が退避になるが、
+   *   付箋が開こうとしているのは**いま読んでいるそのノート**である ──
+   *   **もう画面に出ている**ので、退避先が存在しない。
+   * 🔑 だから**理由だけ出す**。⚠ 「この画面で開きました」と言うと**嘘**になる
+   *   (何も開いていない)。
+   */
+  if (view === null) {
+    deps.fail(`${why}。別のウィンドウで開くには、ポップアップの許可を出してください`);
+    return;
+  }
   const landed = deps.openInPane(view);
   deps.fail(
     landed

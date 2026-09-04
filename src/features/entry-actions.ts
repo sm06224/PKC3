@@ -94,6 +94,17 @@ export function entryMenuActions(
  *   ここは「よく使う順」。🔑 **並びが違ってよい**のは、字が同じだからである。
  */
 export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
+  /**
+   * 🔴 **付箋のように何枚でも開ける**(#685 段②、user 裁定 2026-09-04)。
+   *
+   * > 「**スマホ用の幅狭画面はPCでも活躍してます!/ 画面の隅に表示したメモ追記を
+   * > 使ってどんどんスクラップできてます / 付箋的に使えるのもいいですね /
+   * > マルチで付箋開けるといいかもね**」(利用者の感想 2026-09-04)
+   *
+   * ⚠ **いちばん上に置く** ── 「よく使う順」の並び(下の注記)で、これは
+   *   読んでいるノートに対していちばん先に取る行動である。
+   */
+  { action: 'open-note-window', label: '別の窓で開く' },
   { action: 'copy-entry-ref', label: '参照をコピー' },
   { action: 'copy-plain-markdown', label: '素の Markdown' },
   { action: 'export-entry', label: '書き出す' },
@@ -407,6 +418,12 @@ export const ENTRY_ACTION_LABELS: Readonly<Record<string, string>> = Object.from
 export const ENTRY_ACTION_HINT_MAX = 56;
 
 export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
+  /**
+   * 🔴 **付箋**(#685 段②)。⚠ 「何枚でも」を書く ── 1 枚しか開けないと
+   *   思われると、押す前に諦める(user の要望は「マルチで」である)。
+   */
+  'open-note-window':
+    'このノートだけを別のウィンドウで開きます(何枚でも開けます。閉じれば消えます)',
   // 🔴 **左の列の道具 4 つ**(#632 段①)。⚠ 字は `shell.ts` のボタンの `title` と
   //    **同じ意味**にする ── 同じ操作に 2 通りの説明を作らない
   'attach-file': 'ファイルを取り込んで、開いているノートの本文に入れます',
