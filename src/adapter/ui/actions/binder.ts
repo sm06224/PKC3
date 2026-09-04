@@ -49,7 +49,7 @@ import {
 } from '@features/settings/settings-file';
 import { downloadBlob } from '@adapter/platform/download';
 import { visibleContacts } from '@features/contact/contact-card';
-import { buildVcf, isVcfFileName } from '@features/contact/vcard';
+import { buildVcf, isVcfFileName, vcfNoteOf } from '@features/contact/vcard';
 import { isMarkdownFileName } from '@features/import/plain-markdown';
 import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
 import { insertText, OWN_MEANING } from '@adapter/ui/render/row-swap';
@@ -1035,6 +1035,8 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'open-today',
   // ⚠ 今日のノートの本文を書く(#402 ②)── 取込・書出しの最中に走らせない
   'schedule-quick-add',
+  // 🔴 連絡先を 1 件作る(#278 段③)── `CREATE_ENTRY` は即永続なので同じ門(機械検査は repo-hygiene)
+  'contacts-quick-add',
   /**
    * 🔴 **予定から外すのも本文を書く**(#498)── 行の `@…` を剥がす
    *   (`SET_TASK_DATE`)か、frontmatter の `date:` を消す(`SET_ENTRY_DATE`)。
@@ -2888,6 +2890,80 @@ const ACTIONS: Record<string, ActionHandler> = {
     });
     if (textEl) textEl.value = '';
     void services;
+  },
+  /**
+   * 🔴 **連絡先の面から、その場で 1 件足す**(#278 段③。user 裁定 2026-09-04)。
+   *
+   * > user の物語: 連絡先タブを眺めている。名刺をもらった人を足したい。
+   * > いまは足す口が無い ── ノートを作る → 先頭に `---` / `tel:` … と手で書く → 戻る。
+   *
+   * 🔑 **書く形は取込と同じ 1 本**(`vcfNoteOf`)── frontmatter の鍵の綴りを
+   *   ここで 2 度目に書かない(§7)。名前だけなら囲みは書かれない(同じ規則)。
+   * ⚠ **電話・メールの妥当性は書く側で弾かない** ── 原値のまま書く。押せない宛先を
+   *   字のまま出す規則は `contacts.ts` が持つ(2 か所で判定しない)。
+   * ⚠ 欄は**押した面**から引く(`closest`)── 連絡先の面は左のタブと中央の 2 つ在りうる
+   *   (`root.querySelector` は先に描かれた左の空欄を読む ── 予定の `scheduleFaceOf` と同型)。
+   * ⚠ 面は切り替えない・編集にも入らない(眺めたまま足す ── #300)。
+   * 🔴 **一覧は「書込が着いてから」集め直す**(CLAUDE.md §7、2026-08-17 の実測)──
+   *   走査は書込の chain の**外**を通るので、待たずに頼むと作る前の一覧が返る。
+   */
+  'contacts-quick-add': (dispatcher, target, services) => {
+    const st = dispatcher.getState();
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから足してください' });
+      return;
+    }
+    const box = target.closest<HTMLElement>('[data-pkc-field="contacts-quick"]');
+    const field = (name: string): HTMLInputElement | null =>
+      box?.querySelector<HTMLInputElement>(`[data-pkc-field="contacts-quick-${name}"]`) ?? null;
+    const read = (name: string): string => (field(name)?.value ?? '').trim();
+    const name = read('name');
+    if (name === '') {
+      // ⚠ **無言で終わらせない**(欄は出ているのに何も起きない dead click になる)
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '名前を入力してください' });
+      return;
+    }
+    const tel = read('tel');
+    const email = read('email');
+    const org = read('org');
+    const { title, body } = vcfNoteOf({
+      name,
+      tels: tel === '' ? [] : [tel],
+      emails: email === '' ? [] : [email],
+      orgParts: org === '' ? [] : [org],
+      birthday: '',
+      notes: [],
+      others: [],
+    });
+    const lid = generateLid();
+    dispatcher.dispatch({
+      type: 'CREATE_ENTRY',
+      archetype: 'text',
+      lid,
+      title,
+      body,
+      parentLid: null,
+      relationId: generateLid(),
+      // ⚠ **編集に入らない**(連絡先を眺めたまま足したいので、面を奪わない)
+      edit: false,
+    });
+    // ⚠ 作れなかった回(lid 衝突 ── reducer が理由を立てる)は欄を消さない(打った字を失わせない)
+    if (!dispatcher.getState().entryMetas.has(lid)) return;
+    // ⚠ 連絡できない(電話もメールも無い)ノートはこの面に並ばない ── 黙らない
+    if (tel === '' && email === '')
+      dispatcher.dispatch({
+        type: 'OP_NOTICE',
+        message: `「${title}」を作りました(電話かメールを書くと連絡先に並びます)`,
+      });
+    for (const f of ['name', 'tel', 'email', 'org']) {
+      const el = field(f);
+      if (el) el.value = '';
+    }
+    field('name')?.focus();
+    // 🔑 一覧は走査の結果から出る ── 作っただけでは並ばないので、着いてから集め直す
+    void Promise.resolve(services.settle?.() ?? null).then(() =>
+      dispatcher.dispatch({ type: 'REFRESH_CONTACT_SCAN' }),
+    );
   },
   'open-today': (dispatcher, _target, services) => {
     const st = dispatcher.getState();

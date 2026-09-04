@@ -3218,6 +3218,26 @@ li[data-pkc-row-slot] {
   margin-top: var(--s2);
   align-self: flex-start;
 }
+/* その場で足す欄(#278 段③、2026-09-04)── 予定の `schedule-quick` と同じ 1 行の作法。
+ * ⚠ 左の列は下限 200px なので**折り返す**(4 つの欄 + ボタンを 1 行に固定すると
+ *   欄が 30px 幅に潰れる)。中央の面では 1 行に並ぶ。 */
+[data-pkc-field='contacts-quick'] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s1);
+}
+[data-pkc-field='contacts-quick'] input {
+  flex: 1 1 6em;
+  min-width: 0;
+}
+/* 一覧を描き直す器 ── 親(面)の縦積みと同じ間隔を中で持つ(欄と分けたぶんの器) */
+[data-pkc-field='contacts-body'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  min-height: 0;
+}
 
 /* ══ 予定(#292 段③、2026-08-23)══════════════════════════════════
  * 🔴 **左の列に置く**(user 指示「もう一つ PKC が開いて混乱する」)── 中央は

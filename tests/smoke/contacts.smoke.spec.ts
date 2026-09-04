@@ -271,3 +271,52 @@ test('🔴 取り込んだ直後に「取り消す」を押すと、入った分
 
   expect(errors, 'ページ例外が出ている').toEqual([]);
 });
+
+/**
+ * 🔴 **連絡先の面から、その場で 1 件足す**(#278 段③。user 裁定 2026-09-04)。
+ *
+ * ## unit では原理的に届かない層
+ *
+ * ① **作る → 実 sqlite に着く → worker の走査 → 面**の全段 ── unit は走査を stub で
+ *    置き換えている。「書込が着いてから集め直す」(`settle`)が**本物の worker で**効くかは
+ *    ここでしか見えない(CLAUDE.md §7「読みが書込を追い越す」を踏んでいれば、
+ *    押した直後の一覧に出ない)
+ * ② 実ブラウザの `href`(`tel:` / `mailto:`)── 書いた原値から押せる宛先になること
+ */
+test('🔴 「足す」で書いた人が一覧に並び、押せる宛先になる (#278 段③)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+
+  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="contacts"]');
+  const pane = page.locator('[data-pkc-browse-pane="contacts"]');
+  await expect(pane, '連絡先のタブが開かない').toBeVisible();
+  await expect(pane.locator('[data-pkc-contact]'), '前提: 0 件で始まる').toHaveCount(0);
+
+  await pane.locator('[data-pkc-field="contacts-quick-name"]').fill('鈴木花子');
+  await pane.locator('[data-pkc-field="contacts-quick-tel"]').fill('080-9876-5432');
+  await pane.locator('[data-pkc-field="contacts-quick-email"]').fill('hanako@example.com');
+  await pane.locator('[data-pkc-field="contacts-quick-org"]').fill('例の商店');
+  await clickReal(page, '[data-pkc-browse-pane="contacts"] [data-pkc-action="contacts-quick-add"]');
+
+  // ① 書込が着いてから集め直され、一覧に並ぶ
+  const row = pane.locator('[data-pkc-contact]');
+  await withStateOnFail(page, '足した連絡先が並ばない', async () => ({}), async () => {
+    await expect(row, '足したのに一覧に並ばない').toHaveCount(1, { timeout: 10_000 });
+  });
+  await expect(row.locator('[data-pkc-field="contact-name"]')).toContainText('鈴木花子');
+  await expect(row, '所属が出ていない').toContainText('例の商店');
+  // ② 押せる宛先になっている(字は書いたまま、href は原値から組む)
+  await expect(row.locator('[data-pkc-field="contact-tel"]')).toHaveAttribute('href', 'tel:08098765432');
+  await expect(row.locator('[data-pkc-field="contact-mail"]')).toHaveAttribute(
+    'href',
+    'mailto:hanako@example.com',
+  );
+  // 🔑 通ったら欄は空(続けて足せる)
+  await expect(pane.locator('[data-pkc-field="contacts-quick-name"]')).toHaveValue('');
+  // ⚠ 面は奪わない ── 中央は本文のまま、連絡先の面も消えない
+  await expect(page.locator('[data-pkc-view-pane="detail"]')).toBeVisible();
+  await expect(pane, '足したら連絡先の面が消えた').toBeVisible();
+
+  expect(errors, 'ページ例外が出ている').toEqual([]);
+});

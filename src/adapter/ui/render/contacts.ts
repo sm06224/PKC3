@@ -26,6 +26,7 @@
  * | 名前を押す | そのノートを中央に開く(面はそのまま) |
  * | 電話を押す | 端末の電話に渡す(`tel:`) |
  * | メールを押す | メールの下書きが開く(`mailto:`) |
+ * | 上の欄で **足す** | 名前を題名にしたノートを 1 件作る(先頭の囲みは取込と同じ形 ── #278 段③) |
  *
  * ⚠ **押せない宛先はボタンにしない** ── 数字が 1 桁も無い電話、`@` の無い
  *   メールは**字のまま**出す(押しても何も起きない口を作らない)。
@@ -44,12 +45,74 @@ export class ContactsRenderer {
   private readonly host: HTMLElement;
   /** 直前に描いた指紋。⚠ 同じなら触らない(押している最中に作り直さない)。 */
   private last = ' ';
+  /**
+   * 🔴 **一覧を描き直す器**(#278 段③)── 足す欄とは**別**にする。
+   * ⚠ 一覧は指紋が変わるたびに丸ごと作り直す(下の `textContent = ''`)。欄を同じ器に
+   *   置くと、走査が届いた瞬間に**打ちかけの字が消える**。だから欄は作り直さない親
+   *   (`host`)に 1 度だけ組み、一覧はこの `body` に描く
+   *   (`schedule.ts` の `ensureFrame` と同じ作法)。
+   */
+  private body: HTMLElement | null = null;
 
   constructor(host: HTMLElement) {
     this.host = host;
   }
 
+  /**
+   * 🔴 **その場で 1 件足す欄**(#278 段③。user 裁定 2026-09-04)。
+   *
+   * > user の物語: 連絡先タブを眺めている。名刺をもらった人を足したい。
+   * > いまは足す口が無い ── ノートを作る → 先頭に `---` / `tel:` … と手で書く → 戻る。
+   *
+   * 🔑 **正本は本文のまま**(user 指示 2026-08-23「面は映すだけにしない ── 双方向」)。
+   *   押した先(`binder.ts` の `contacts-quick-add`)は取込と**同じ 1 本**(`vcfNoteOf`)で
+   *   frontmatter を組む ── 鍵の綴りを 2 か所に書かない。
+   * ⚠ 必須は名前だけ。電話・メールの書き方は**ここでも binder でも検めない** ──
+   *   押せない宛先を字のまま出す規則は下の `way()` が既に持っている(2 か所で判定しない)。
+   * ⚠ 1 度だけ組む ── 一覧の描き直し(下)で欄を作り直さない(打ちかけを失わせない)。
+   */
+  private ensureFrame(): HTMLElement {
+    if (this.body !== null) return this.body;
+    const quick = document.createElement('div');
+    quick.setAttribute('data-pkc-field', 'contacts-quick');
+    const input = (
+      field: string,
+      placeholder: string,
+      label: string,
+      type: 'text' | 'tel' | 'email' = 'text',
+    ): HTMLInputElement => {
+      const el = document.createElement('input');
+      // ⚠ `tel` / `email` は端末の鍵盤を選ぶためだけ ── `<form>` の外なので検証は走らない
+      el.type = type;
+      el.setAttribute('data-pkc-field', `contacts-quick-${field}`);
+      el.placeholder = placeholder;
+      el.setAttribute('aria-label', label);
+      return el;
+    };
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.setAttribute('data-pkc-action', 'contacts-quick-add');
+    add.textContent = '足す';
+    // ⚠ **どこへ書くか**と**いつ並ぶか**を両方言う ── 「足したのに出てこない」を作らない
+    add.title =
+      '名前を題名にしたノートを作り、先頭の囲みに tel: / email: / org: を書きます(取り込みと同じ形)。電話かメールが 1 つ以上あると、ここに並びます';
+    quick.append(
+      input('name', '名前', '足す連絡先の名前(必須)'),
+      input('tel', '電話', '電話番号', 'tel'),
+      input('email', 'メール', 'メールアドレス', 'email'),
+      input('org', '所属', '所属'),
+      add,
+    );
+    const body = document.createElement('div');
+    body.setAttribute('data-pkc-field', 'contacts-body');
+    this.host.append(quick, body);
+    this.body = body;
+    return body;
+  }
+
   render(state: AppState): void {
+    // ⚠ 欄は指紋より先に組む ── 「まだ集めていない」回でも足す口は出ている
+    const body = this.ensureFrame();
     const scan = state.contactScan;
     const query = state.filterQuery;
     // 🔑 書き出し(binder の `export-vcards`)と**同じ 1 つ**の規則(§7)
@@ -81,11 +144,11 @@ export class ContactsRenderer {
     if (print === this.last) return;
     this.last = print;
 
-    this.host.textContent = '';
+    body.textContent = '';
     const note = document.createElement('p');
     note.setAttribute('data-pkc-field', 'contacts-note');
     note.textContent = this.noteText(state, cards.length);
-    this.host.append(note);
+    body.append(note);
     if (cards.length === 0) {
       /**
        * 🔴 **行き止まりを作らない**(#536 ②)。
@@ -106,7 +169,7 @@ export class ContactsRenderer {
         clear.setAttribute('data-pkc-field', 'contacts-clear-filter');
         clear.textContent = '絞りを外す';
         clear.title = '一覧の絞り込みを空にして、連絡先を全部出します。';
-        this.host.append(clear);
+        body.append(clear);
       }
       return;
     }
@@ -114,7 +177,7 @@ export class ContactsRenderer {
     const list = document.createElement('ul');
     list.setAttribute('data-pkc-field', 'contacts-list');
     for (const card of cards) list.append(this.row(card));
-    this.host.append(list);
+    body.append(list);
 
     /**
      * 🔴 **vCard の書き出し**(#278 段③)── 押した 1 回だけ、**見えている分**を
@@ -138,7 +201,7 @@ export class ContactsRenderer {
       'いま見えている連絡先を .vcf ファイル 1 つに書き出します(絞り込み中は絞った分だけ)。' +
       '出るのは名前・所属・電話・メール・誕生日です。' +
       '住所やメモなど、本文に書いた残りは出ません。';
-    this.host.append(exp);
+    body.append(exp);
   }
 
   /**
