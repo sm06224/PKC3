@@ -68,7 +68,9 @@ function actionButtons(root: HTMLElement): HTMLButtonElement[] {
  *   ノートで描くとその 1 つを**一度も見ない**(未実行の経路になる)。
  */
 const EXPECTED_ACTIONS: readonly string[] = [
+  // 🔴 付箋(#685 段②、2026-09-04)── ⋯ と情報ペインの両方に出す
   'copy-entry-ref',
+  'open-note-window',
   'adopt-external-images',
   'export-entry',
   'export-entry-html',

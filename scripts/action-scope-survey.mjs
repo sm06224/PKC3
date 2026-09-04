@@ -52,7 +52,7 @@ dual-bookmark-open dual-bookmark-remove dual-tab-activate unsplit-entry dual-cru
 /** 点を取るが、state の現在値(`selectedLid` / `dual.focus`)で代替できる。 */
 export const P2 = `select-entry delete-entry enter-folder toggle-todo move-entry move-order-up move-order-down
 adopt-external-images write-back-file export-entry export-entry-pdf export-entry-docx export-entry-pptx
-export-entry-html export-folder copy-entry-ref dual-row dual-focus dual-tab-add dual-tab-close
+export-entry-html export-folder copy-entry-ref open-note-window dual-row dual-focus dual-tab-add dual-tab-close
 dual-rename-begin dual-back dual-forward dual-bookmark dual-mkdir dual-mknote dual-copy dual-delete`
   .split(/\s+/);
 

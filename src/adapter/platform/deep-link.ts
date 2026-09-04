@@ -122,6 +122,79 @@ export function announceOpenedWindow(
 }
 
 /**
+ * 🔴 **この窓は「PKC 自身が開いた窓」か**を憶える鍵(#685 着地前レビュー 🔴1、2026-09-04)。
+ *
+ * ⚠ `sessionStorage` は **browsing context ごと**である ── `noopener` の窓は
+ *   新しい群なので**継承されない**。だから「この窓だけ」を憶えるのにちょうど良い。
+ */
+export const OPENED_BY_US_KEY = 'pkc3.opened-by-us';
+
+/**
+ * 🔴 **「断片がノートを名指す」を「この窓は付箋だ」と読み替えない**
+ *   (#685 着地前レビュー 🔴1、2026-09-04)。
+ *
+ * ⚠ 直す前は `container`+`entry` が在るだけで付箋の旗が立っていた。⚠ ところが
+ *   **その形の URL は user が写して開く**(マニュアルが「付箋のアドレス欄をコピーすると
+ *   そのノートを直接開くリンクになります」と**やり方まで書いている**)。
+ * 🔴 そのふつうのタブが付箋扱いになると、台帳の `mine` が**選んでいるノートに追随する**ので、
+ *   **そのタブでは「別の窓で開く」が二度と効かない** ── しかも出るのは
+ *   「いま見ているこのウィンドウで開いています」という**説明の顔をした字**なので、
+ *   user は不具合だと気づけない(この repo がいちばん嫌う形)。
+ * 🔑 見分ける印は**既に在る**:`w=`(1 回限りの合図)は**こちらが開いた窓にしか付かず**、
+ *   起動直後に `dropToken()` でアドレスから外れる ── だから **user が写した URL には無い**。
+ * ⚠ F5 を跨いでも保つ必要があるので、`sessionStorage` に控える。
+ *
+ * @param opened `announceOpenedWindow()` の返り値(この起動で合図を持っていたか)
+ * @param store `sessionStorage`。⚠ 使えない箱では `null` を渡す(その回だけの判定になる)
+ */
+export function noteOpenedByUs(
+  opened: boolean,
+  store: Pick<Storage, 'getItem' | 'setItem'> | null,
+): boolean {
+  if (store === null) return opened;
+  try {
+    if (opened) store.setItem(OPENED_BY_US_KEY, '1');
+    return opened || store.getItem(OPENED_BY_US_KEY) === '1';
+  } catch {
+    // ⚠ 使えない箱(privacy 設定 / file://)では、その回の合図だけで決める
+    return opened;
+  }
+}
+
+/**
+ * 🔴 **この窓は「特定の 1 つのために開かれた」か**(#685 動線レビュー 欠陥 1、2026-09-04)。
+ *
+ * ⚠ 直す前は、起動したときのお知らせが**どの窓でも無条件に出ていた**。
+ *   付箋は 420px = 1 枚ずつの画面なので、お知らせは `grid-area: detail; z-index: 2` で
+ *   **面いっぱい**に出て、上の帯まで覆う ── **押したのに、頼んだ物が 1 つも見えない**。
+ * 🔴 しかも当たるのは**新しい機能を初めて押した 1 回目**である
+ *   (お知らせを読んで押しに行くのだから、その時点でまだ未読)。
+ *   ⚠ いちばん印象に残る回が、まるごとこれになっていた。
+ * 🔑 判定は #300 段④(follower の帯)と**同じ理屈**である ── この窓は
+ *   **user が 1 つの物のために自分で開いた**ので、起動の案内を出す場所ではない。
+ *   本体の窓では今までどおり出る。
+ */
+export function isPurposeWindow(held: {
+  readonly view: ViewMode | null;
+  readonly note: boolean;
+}): boolean {
+  return held.view !== null || held.note;
+}
+
+/**
+ * 🔴 **窓の題名**(#300 段③ / #685 着地前レビュー ⚠3)。
+ *
+ * ⚠ **タスクバーで見分けるため**に在る ── 直す前は何枚開いても全部「PKC3」で、
+ *   どれがどれか押すまで分からなかった。
+ * 🔑 **形を 1 か所に持つ** ── 面の窓(面の名前)も付箋(ノートの題名)も同じ形にする。
+ *   ⚠ 2 か所に書くと、片方だけ体裁が変わっても誰も気づかない(CLAUDE.md §7)。
+ * ⚠ 空の題名は `null` と同じに扱う ── `` — PKC3`` という頭の欠けた字を出さない。
+ */
+export function windowTitleFor(base: string, label: string | null): string {
+  return label === null || label.trim() === '' ? base : `${label} — ${base}`;
+}
+
+/**
  * 🔴 **アドレスに書ける画面の名前**(user へ出す一覧はここ 1 つ)。
  * ⚠ 封印中の面は外す ── ボタンを畳んだのにアドレスからは開ける、を作らない。
  */
@@ -225,6 +298,22 @@ export interface DeepLinkWiring {
    * `× 閉じる` が**窓ごと閉じるか**もこれで分かれる。
    */
   readonly onHold?: (view: ViewMode | null) => void;
+  /**
+   * 🔴 **この窓が「付箋」であることを伝える**(#685 着地前レビュー 🔴1 / ⚠3、2026-09-04)。
+   *
+   * `true` = 断片が**面ではなくノート**を名指している(= `⋯ の「別の窓で開く」`
+   * で出た窓、または同じ形のリンクで開いた窓)。
+   *
+   * ⚠ **`onHold` では届かない** ── あちらは `view=` を指したときだけ呼ばれるので、
+   *   付箋の窓は `hold()` を 1 度も通らない。その結果 2 つが**同時に**壊れていた:
+   *   ① 題名が index.html の既定(`PKC3`)のまま ── **何枚開いても全部「PKC3」**で、
+   *      タスクバーで見分けられない(#300 段③ が解いた当の問題が「何枚でも」で戻る)
+   *   ② 「複数タブ: このタブの保存は本体タブ経由です」が**出っぱなし**になる ──
+   *      #300 段④ が消した理由(user が自分で開いた 2 枚目 / できることは無い /
+   *      状態の行 1 行を占めて読ませたい文を押し出す)が**そのまま当てはまる**。
+   * 🔑 だから旗を 1 つだけ増やし、**題名と帯の両方をこれで決める**。
+   */
+  readonly onHoldEntry?: (holding: boolean) => void;
   /** 使えない名前だったときの理由(画面の下に出す)。 */
   readonly fail: (message: string) => void;
   /** いまの面が変わったら呼ばれる購読(返り値で解除)。 */
@@ -248,17 +337,55 @@ export function connectViewDeepLink(wiring: DeepLinkWiring): () => void {
   /** いま「断片が指している面」。⚠ ここから離れたら断片を消す。 */
   let held: ViewMode | null = null;
 
+  /** いま「断片がノートを名指している」か。⚠ 面(`held`)とは**別の軸**である。 */
+  let heldEntry = false;
+
   const hold = (view: ViewMode | null): void => {
     if (held === view) return;
     held = view;
     wiring.onHold?.(view);
   };
 
+  /** ⚠ 変わったときだけ伝える(`apply` は面が変わるたび走る)。 */
+  const holdEntry = (on: boolean): void => {
+    if (heldEntry === on) return;
+    heldEntry = on;
+    wiring.onHoldEntry?.(on);
+  };
+
   const apply = (): void => {
     const read = readViewDeepLink(target);
-    if (read === null) return;
+    if (read === null) {
+      /**
+       * 🔴 **面を指していなくても、ノートは開く**(#685 段①、2026-09-04)。
+       *
+       * ⚠ 直す前は `view` の無い断片で**何も起きなかった** ──
+       *   `#pkc?container=c1&entry=e1` は PKC Link の仕様(form 3、
+       *   External Permalink)の形なのに、**作る側も読む側も 0 件**だった
+       *   (`formatExternalPermalink` / `parseExternalPermalink` の呼び側は
+       *   `src/` に 1 件も無い)。
+       * 🔑 これが在って初めて「**このノートを別の窓で開く**」が組める ──
+       *   窓は URL でしか行き先を渡せない(#685 の裁定 A)。
+       *
+       * ⚠ **断片は消さない** ── 面(`view`)と違って、ここは「いまこのノートを
+       *   見ている」という**正しい住所**である。消すと栞にできない。
+       * ⚠ **`container` と `entry` の両方が要る**(`parseViewDeepLinkEntry` の規則)
+       *   ── 片方だけで拾うと、別の container の lid と**偶然一致して
+       *   無関係なノートを選ぶ**。
+       * ⚠ 居ない lid は呼び側(`main.ts` → `SELECT_ENTRY`)が黙って捨てる ──
+       *   判定をここへ写さない(CLAUDE.md §7)。
+       */
+      const here = parseViewDeepLinkEntry(target.hash);
+      // 🔴 **この窓は付箋である**(上の `onHoldEntry` の docstring)── 題名と帯が
+      //    これで決まる。⚠ 面の窓(`view=`)は下の枝で `false` に戻す
+      holdEntry(here !== null);
+      if (here !== null) wiring.selectEntry?.(here.containerId, here.lid);
+      return;
+    }
     if ('view' in read) {
       hold(read.view);
+      // ⚠ 面を指しているなら付箋ではない(題名は `onHold` が面の名前で書く)
+      holdEntry(false);
       // 🔑 **ノートが先、面が後**(上の docstring の理由)
       const here = parseViewDeepLinkEntry(target.hash);
       if (here !== null) wiring.selectEntry?.(here.containerId, here.lid);
@@ -272,6 +399,7 @@ export function connectViewDeepLink(wiring: DeepLinkWiring): () => void {
        * ⚠ 断片は消す(残すと読み直しのたびに同じ案内が出る)。
        */
       hold(null);
+      holdEntry(false);
       const here = parseViewDeepLinkEntry(target.hash);
       if (here !== null) wiring.selectEntry?.(here.containerId, here.lid);
       target.clearHash();
@@ -282,6 +410,7 @@ export function connectViewDeepLink(wiring: DeepLinkWiring): () => void {
     // ⚠ 使えない名前は**残す意味が無い**ので、その場で消す
     //   (残すと読み直しのたびに同じ断り文が出る)
     hold(null);
+    holdEntry(false);
     target.clearHash();
     wiring.fail(unusableViewMessage());
   };
@@ -292,6 +421,7 @@ export function connectViewDeepLink(wiring: DeepLinkWiring): () => void {
     // ⚠ 自分が撃った `SET_VIEW_MODE` でも呼ばれる ── **同じ面なら何もしない**
     if (held === null || view === held) return;
     hold(null);
+    holdEntry(false);
     target.clearHash();
   });
   const offHash = wiring.onHashChange?.(() => apply());

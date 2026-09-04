@@ -29,6 +29,9 @@ import {
   readViewDeepLink,
   unusableViewMessage,
   type DeepLinkTarget,
+  windowTitleFor,
+  isPurposeWindow,
+  noteOpenedByUs,
 } from '../../src/adapter/platform/deep-link';
 import { VIEW_MODES, type ViewMode } from '../../src/adapter/state/app-state';
 import { dropViewWindowToken, formatViewDeepLink } from '../../src/features/link/permalink';
@@ -59,6 +62,8 @@ function bench(hash: string) {
   const selects: Array<{ containerId: string; lid: string }> = [];
   /** 断片が指している面の遷移(`null` = 離れた)。 */
   const holds: Array<ViewMode | null> = [];
+  /** 「この窓は付箋か」の遷移(#685 着地前レビュー 🔴1 / ⚠3)。 */
+  const noteHolds: boolean[] = [];
   const off = connectViewDeepLink({
     openView: (mode) => actions.push(`open:${mode}`),
     // 🔴 **引っ越した面の受け皿**(#292 段⑤)── 左の列のタブ
@@ -68,6 +73,7 @@ function bench(hash: string) {
       actions.push(`select:${lid}`);
     },
     onHold: (v) => holds.push(v),
+    onHoldEntry: (on) => noteHolds.push(on),
     fail: (m) => {
       failed = m;
       actions.push('fail');
@@ -102,6 +108,7 @@ function bench(hash: string) {
     subscribed: () => ({ view: viewListener !== null, hash: hashListener !== null }),
     selects,
     holds,
+    noteHolds,
   };
 }
 
@@ -188,11 +195,157 @@ describe('起動時のディープリンク(#300 段②)', () => {
   });
 
   it('⚠ 対照群 ── ふつうの起動では何も撃たず、断片も触らない', () => {
-    for (const hash of ['', '#', '#pkc?container=c1&entry=e1', '#other?view=query']) {
+    /**
+     * ⚠ **`#pkc?container=…&entry=…` はこの一覧から外した**(#685 段①、2026-09-04)
+     *   ── いまはノートを開く(下の describe)。ここに残っていると
+     *   **「何も起きない」を守る検査**が、新しい動線と正面から食い違う。
+     */
+    for (const hash of ['', '#', '#pkc?container=c1', '#pkc?entry=e1', '#other?view=query']) {
       const b = bench(hash);
       expect(b.actions, `${JSON.stringify(hash)} で面を動かした`).toEqual([]);
       expect(b.cleared(), `${JSON.stringify(hash)} で断片を消した`).toBe(0);
     }
+  });
+
+  /**
+   * 🔴 **面を指していない断片でも、ノートは開く**(#685 段①、2026-09-04)。
+   *
+   * ⚠ 直す前は**何も起きなかった** ── `#pkc?container=c1&entry=e1` は
+   *   PKC Link の仕様(form 3)の形なのに、作る側も読む側も **0 件**だった。
+   * 🔑 これが在って初めて「このノートを別の窓で開く」(#685 の裁定 A)が組める ──
+   *   窓へ行き先を渡せるのは URL だけである。
+   */
+  describe('面を指さない断片(#685 段①)', () => {
+    it('🔴 container と entry が揃っていれば、そのノートを開く', () => {
+      const b = bench('#pkc?container=c1&entry=e1');
+      expect(b.actions, 'ノートを開いていない').toEqual(['select:e1']);
+      expect(b.selects, '連れてきたノートが違う').toEqual([
+        { containerId: 'c1', lid: 'e1' },
+      ]);
+    });
+
+    /**
+     * 🔴 **断片は消さない** ── 面(`view`)と違って、ここは「いまこのノートを
+     *   見ている」という**正しい住所**である。消すと栞にできない。
+     */
+    it('🔴 断片は消さない(栞にできる住所である)', () => {
+      const b = bench('#pkc?container=c1&entry=e1');
+      /**
+       * ⚠ **前提を先に確かめる**(R1 で空振りだと分かった、2026-09-04)──
+       *   「消していない」は**何も起きなかった回でも真**になる。開いたことを
+       *   見てから消えていないことを見る(CLAUDE.md §1)。
+       */
+      expect(b.actions, '前提が崩れた(そもそもノートを開いていない)').toEqual(['select:e1']);
+      expect(b.cleared(), 'ノートの住所まで消している').toBe(0);
+    });
+
+    /**
+     * ⚠ **面は動かさない** ── 開くのはノートだけで、いま見ている面はそのまま。
+     *   🔑 これが無いと「アドレスを開いたら面まで勝手に変わった」になる。
+     */
+    it('⚠ 面は動かさない(印も立てない)', () => {
+      const b = bench('#pkc?container=c1&entry=e1');
+      // ⚠ 上と同じ ── 「動かしていない」は何も起きなかった回でも真である
+      expect(b.actions, '前提が崩れた(そもそもノートを開いていない)').toEqual(['select:e1']);
+      expect(b.holds, '断片が面を指していることにしている').toEqual([]);
+    });
+
+    /**
+     * 🔴 **片方だけでは開かない**(対照群)。⚠ `container` を見ないと、
+     *   別の container の lid と**偶然一致して無関係なノートを選ぶ**。
+     */
+    it.each([
+      ['container だけ', '#pkc?container=c1'],
+      ['entry だけ', '#pkc?entry=e1'],
+      ['綴りが違う', '#pkc?container=c1&entry=e 1'],
+    ])('🔴 %s では開かない', (_name, hash) => {
+      expect(bench(hash).actions, '片方だけで開いた').toEqual([]);
+    });
+
+    /**
+     * ⚠ **面と併記したときは今までどおり**(ノートが先、面が後)── この段で
+     *   壊していないことを見る(上の describe の腕と対である)。
+     */
+    it('⚠ view と併記したときは、ノートの後に面を開く', () => {
+      expect(bench('#pkc?container=c1&entry=e1&view=dual').actions).toEqual([
+        'select:e1',
+        'open:dual',
+      ]);
+    });
+  });
+
+  /**
+   * 🔴 **この窓が「付箋」であることを、窓の側が知る**(#685 着地前レビュー 🔴1 / ⚠3、
+   *   2026-09-04)。
+   *
+   * ⚠ 直す前は `onHold`(面を指したときだけ呼ばれる)しか無かったので、付箋の窓は
+   *   **自分が付箋だと知らないまま**立ち上がっていた。その結果 2 つが同時に壊れる:
+   *   ① 題名が「PKC3」のまま(何枚並べても見分けられない)
+   *   ② follower の帯(「保存は本体タブ経由です」)が出っぱなしで、
+   *      状態の行 1 行を占めて**読ませたい文を押し出す**。
+   */
+  describe('付箋の旗(#685 着地前レビュー)', () => {
+    it('🔴 ノートを名指した断片で開いた窓は、自分が付箋だと知る', () => {
+      const b = bench('#pkc?container=c1&entry=e1');
+      expect(b.actions, '前提が崩れた(ノートを開いていない)').toEqual(['select:e1']);
+      expect(b.noteHolds, '付箋だと伝わっていない(題名も帯も直らない)').toEqual([true]);
+    });
+
+    /** ⚠ **対照群** ── 面を指す窓は付箋ではない(題名は面の名前が入る)。 */
+    it('⚠ 面を指した窓は付箋ではない', () => {
+      const b = bench('#pkc?container=c1&entry=e1&view=dual');
+      expect(b.actions, '前提が崩れた').toEqual(['select:e1', 'open:dual']);
+      expect(b.holds, '面を握っていない').toEqual(['dual']);
+      expect(b.noteHolds, '面の窓を付箋と数えた').toEqual([]);
+    });
+
+    /** ⚠ **対照群 2** ── 断片が無い窓(ふつうの 1 枚目)も付箋ではない。 */
+    it('⚠ 断片の無い窓は付箋ではない', () => {
+      expect(bench('').noteHolds, '素の起動を付箋と数えた').toEqual([]);
+    });
+
+    /**
+     * 🔴 **面へ移ったら付箋ではなくなる** ── 帯も題名も戻る。
+     * ⚠ 変わったときだけ伝える(`apply` は面が変わるたび走るので、
+     *   毎回伝えると `main.ts` が題名を塗り直し続ける)。
+     */
+    it('🔴 面を指す断片へ書き換わると、付箋の旗が倒れる', () => {
+      const b = bench('#pkc?container=c1&entry=e1');
+      expect(b.noteHolds).toEqual([true]);
+      b.hashBecomes('#pkc?view=dual');
+      expect(b.noteHolds, '付箋の旗が立ったまま面を開いた').toEqual([true, false]);
+    });
+
+    it('⚠ 同じ断片で何度 apply しても 1 回しか伝えない', () => {
+      const b = bench('#pkc?container=c1&entry=e1');
+      b.hashBecomes('#pkc?container=c1&entry=e1');
+      expect(b.noteHolds, '同じ状態を繰り返し伝えている').toEqual([true]);
+    });
+  });
+
+  /**
+   * 🔴 **開いたままのタブでアドレスへ足しても開く**(#685 着地前レビュー M4、2026-09-04)。
+   *
+   * ⚠ `deep-link.ts` の冒頭が明記している動線(「マニュアルはアプリの中に在るので、
+   *   user は **PKC を開いたまま**アドレス欄へ足す」)が、段① の枝では
+   *   **1 度も走っていなかった** ── `hashBecomes` を使う既存の検査は 2 件とも
+   *   `view=` か `#slug` で、`container`+`entry` だけの形は 0 件だった。
+   */
+  describe('開いたまま貼り付ける(#685 着地前レビュー M4)', () => {
+    it('🔴 起動後にアドレスへ足しても、そのノートが開く', () => {
+      const b = bench('');
+      expect(b.actions, '前提が崩れた(何もしていない起動で撃っている)').toEqual([]);
+      b.hashBecomes('#pkc?container=c1&entry=e1');
+      expect(b.actions, 'アドレスに足しても何も起きない').toEqual(['select:e1']);
+    });
+
+    /** ⚠ **対照群** ── 見出しへ動いただけでは選び直さない(アドレスが動くたび戻される、を止める)。 */
+    it('⚠ `#slug` へ動いただけでは選び直さない', () => {
+      const b = bench('#pkc?container=c1&entry=e1');
+      expect(b.actions).toEqual(['select:e1']);
+      b.hashBecomes('#some-heading');
+      expect(b.actions, 'ノートを選び直した').toEqual(['select:e1']);
+    });
   });
 
   /**
@@ -509,5 +662,108 @@ describe('currentBaseUrl(#300 段③)', () => {
       'アプリの窓から次のアプリを開けない',
     ).toBe(`${base}#pkc?view=query`);
     location.hash = '';
+  });
+});
+
+/**
+ * 🔴 **窓の題名の形は 1 か所**(#300 段③ / #685 着地前レビュー ⚠3、2026-09-04)。
+ *
+ * ⚠ **タスクバーで見分けるため**に在る ── 直す前、付箋の窓は `onHold` を通らないので
+ *   何枚開いても全部「PKC3」だった。付箋は「何枚でも開けます」が売りなので、
+ *   この欠陥は**枚数に比例して効く**。
+ */
+describe('窓の題名(#685 着地前レビュー ⚠3)', () => {
+  it('🔴 名前があれば「名前 — PKC3」', () => {
+    expect(windowTitleFor('PKC3', '買い物メモ')).toBe('買い物メモ — PKC3');
+  });
+
+  /** ⚠ 名前が無いのは**ふつうの 1 枚目** ── 器の名前だけを出す。 */
+  it('⚠ 名前が無ければ器の名前だけ', () => {
+    expect(windowTitleFor('PKC3', null)).toBe('PKC3');
+  });
+
+  /**
+   * 🔴 **空の題名を `null` と同じに扱う** ── 題名の無いノートを付箋にすると
+   *   「 — PKC3」という**頭の欠けた字**がタスクバーに並ぶ。
+   */
+  it.each([
+    ['空', ''],
+    ['空白だけ', '   '],
+  ])('🔴 %s の題名では、頭の欠けた字を出さない', (_name, label) => {
+    expect(windowTitleFor('PKC3', label)).toBe('PKC3');
+  });
+});
+
+/**
+ * 🔴 **起動したときのお知らせを、1 つの物のために開いた窓では出さない**
+ *   (#685 動線レビュー 欠陥 1 / 着地前レビュー ⚠4、2026-09-04)。
+ *
+ * ⚠ 切り出した理由は「`main.ts` に条件を書かない」ことなのに、
+ *   切り出した先で**誰も見ていなかった**(変異 2 件がそのまま通った)。
+ */
+describe('1 つの物のために開いた窓か(#685)', () => {
+  it('🔴 面を指した窓では出さない', () => {
+    expect(isPurposeWindow({ view: 'dual', note: false })).toBe(true);
+  });
+  it('🔴 付箋でも出さない', () => {
+    expect(isPurposeWindow({ view: null, note: true })).toBe(true);
+  });
+  /** ⚠ **対照群** ── ふつうの 1 枚目では今までどおり出す(「常に止める」実装で緑にしない)。 */
+  it('⚠ ふつうの窓では今までどおり出す', () => {
+    expect(isPurposeWindow({ view: null, note: false })).toBe(false);
+  });
+});
+
+/**
+ * 🔴 **「断片がノートを名指す」を「この窓は付箋だ」と読み替えない**
+ *   (#685 着地前レビュー 🔴1、2026-09-04)。
+ *
+ * ⚠ その形の URL は **user が写して開く**(マニュアルがやり方まで書いている)。
+ *   付箋扱いになると、そのタブでは「別の窓で開く」が**二度と効かない**。
+ * 🔑 見分ける印は `w=`(こちらが開いた窓にしか付かず、起動直後に外れる)。
+ */
+describe('この窓はこちらが開いたものか(#685 着地前レビュー 🔴1)', () => {
+  function store(seed: Record<string, string> = {}) {
+    const m = new Map(Object.entries(seed));
+    return {
+      getItem: (k: string) => m.get(k) ?? null,
+      setItem: (k: string, v: string) => void m.set(k, v),
+      seen: () => [...m.keys()],
+    };
+  }
+
+  it('🔴 合図を持って起動したら、こちらが開いた窓である', () => {
+    const s = store();
+    expect(noteOpenedByUs(true, s)).toBe(true);
+    expect(s.seen(), '控えていない(F5 で忘れる)').toEqual(['pkc3.opened-by-us']);
+  });
+
+  /** 🔴 **F5 を跨いでも保つ** ── 合図は起動直後にアドレスから外れる。 */
+  it('🔴 一度こちらが開いた窓なら、読み直しても付箋のまま', () => {
+    expect(noteOpenedByUs(false, store({ 'pkc3.opened-by-us': '1' }))).toBe(true);
+  });
+
+  /**
+   * 🔴 **user が写した URL は付箋ではない**(この検査が本体)。
+   * ⚠ 落ちると、そのタブで「別の窓で開く」が二度と効かなくなる。
+   */
+  it('🔴 写した URL で開いたふつうのタブは、付箋ではない', () => {
+    expect(noteOpenedByUs(false, store())).toBe(false);
+  });
+
+  /** ⚠ 使えない箱(privacy 設定 / file://)では、その回の合図だけで決める。 */
+  it('⚠ 控える場所が無くても落ちない', () => {
+    expect(noteOpenedByUs(true, null)).toBe(true);
+    expect(noteOpenedByUs(false, null)).toBe(false);
+    const throwing = {
+      getItem: () => {
+        throw new Error('使えない');
+      },
+      setItem: () => {
+        throw new Error('使えない');
+      },
+    };
+    expect(() => noteOpenedByUs(true, throwing), '控えられない箱で落ちた').not.toThrow();
+    expect(noteOpenedByUs(true, throwing)).toBe(true);
   });
 });

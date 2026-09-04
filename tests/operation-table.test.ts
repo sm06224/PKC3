@@ -107,21 +107,31 @@ describe('操作の全数台帳(#582 段①)', () => {
     }).toEqual({
       // ⚠ 2026-08-31: `open-manual-window`(#645)で 1 増えた
       // ⚠ 2026-09-02: `phone-page` / `phone-menu`(#632 段①)で 2 増えた
-      total: 228,
-      receivers: 187,
-      registered: 71,
-      both: 30,
+      total: 229,
+      receivers: 188,
+      registered: 72,
+      both: 31,
       outsideActionsTable: 41,
       unregistered: 157,
     });
   });
 
-  it('🔴 5 つの登記簿は「分割」である ── またぐ id は 1 件だけ', () => {
-    expect(s().sharedBooks).toEqual([{ id: 'cycle-read-columns', books: ['key', 'body'] }]);
+  /**
+   * 🔴 **登記簿は「分割」である** ── 同じ id が 2 冊に載るのは、意図して
+   *   **同じ操作を 2 つの面から出している**ときだけ。
+   * ⚠ 2026-09-04: `open-note-window` が 2 件目になった(#685、user 裁定)──
+   *   行の右クリックと**本文の右クリック**の両方から出す。
+   */
+  it('🔴 登記簿をまたぐ id は、名指しの 2 件だけ', () => {
+    expect(s().sharedBooks).toEqual([
+      { id: 'cycle-read-columns', books: ['key', 'body'] },
+      { id: 'open-note-window', books: ['entry', 'body'] },
+    ]);
   });
 
   it('登記簿の内訳が動いたら鳴る', () => {
-    expect(s().perBook).toEqual({ key: 52, entry: 11, body: 2, collection: 2, settings: 5 });
+    // ⚠ 2026-09-04: 本文のメニューが 2 → 3(`open-note-window`)
+    expect(s().perBook).toEqual({ key: 52, entry: 12, body: 3, collection: 2, settings: 5 });
   });
 
   it('🔴 押し所へ辿れない登記を、身元で pin する', () => {

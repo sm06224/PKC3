@@ -204,13 +204,23 @@ import {
   announceOpenedWindow,
   connectViewDeepLink,
   currentBaseUrl,
+  isPurposeWindow,
+  noteOpenedByUs,
   windowDeepLinkTarget,
+  windowTitleFor,
 } from '@adapter/platform/deep-link';
 import { openView } from '@adapter/ui/render/open-view';
 import { noteRemoteChange } from '@adapter/state/remote-change';
 import {
+  NOTE_REGISTRY_CHANNEL,
+  createNoteRegistry,
+} from '@adapter/platform/note-window-registry';
+import {
   closeViewWindow,
+  openNoteWindowUrl,
   openViewInWindow,
+  openViewWindowUrl,
+  VIEW_WINDOW_OPENING,
   waitForViewWindow,
 } from '@adapter/platform/view-window';
 import {
@@ -250,6 +260,14 @@ export interface AppHandle {
    * 古い帯が残る(離れた瞬間に「本体タブ経由です」が戻るべきである)。
    */
   repaintStatus(): void;
+  /**
+   * 🔴 **窓の題名を塗り直し、台帳へ名乗り直す**(#685 着地前レビュー ⚠3)。
+   * ⚠ 状態の行とは**別に**要る ── 付箋の題名は**いま開いているノート**で決まるので、
+   * 旗が倒れた瞬間だけでなく**ノートが変わった / 改名された**ときにも塗り直す。
+   * ⚠ **名乗りも撃つ**(2026-09-04 に docstring を直した)── 題名だけの口だと
+   * 読み違える。付箋の台帳(「2 枚目を作らない」)はこの名乗りで埋まる。
+   */
+  repaintWindowTitle(): void;
   /**
    * 🔴 **探し方(左の列のタブ)を切り替える**(#292 段⑤)。
    * ⚠ 引っ越したディープリンク(`view=calendar` / `view=kanban`)を
@@ -329,6 +347,15 @@ let bootLease: { release(): void } | null = null;
 let heldViewWindow: ViewMode | null = null;
 
 /**
+ * 🔴 **この窓が「付箋」である間だけ真になる**(#685 着地前レビュー 🔴1 / ⚠3、2026-09-04)。
+ *
+ * ⚠ `heldViewWindow` と**別の軸**である ── あちらは `view=` を指しているとき、
+ *   こちらは**ノートを名指した断片**で開いた窓。判断は `deep-link.ts` の
+ *   `onHoldEntry` が持つ(この file はどの test からも実行されない)。
+ */
+let heldNoteWindow = false;
+
+/**
  * 🔴 **組み込みタイルは別窓で開く**(#300 段③、2026-08-22)。
  *
  * ⚠ ここは**配線だけ** ── 判断(窓が出たか)・文言・退避先は `view-window.ts` に在る。
@@ -350,10 +377,10 @@ function openViewTile(
   view: 'dual',
 ): Promise<unknown> {
   return openViewInWindow(view, {
-    // ⚠ `noopener` で開く ── 別プロセスになり、閉じれば常駐が還る(段③ の実測)
-    open: (url) => {
-      window.open(url, '_blank', 'noopener');
-    },
+    // ⚠ `noopener` で開く ── 別プロセスになり、閉じれば常駐が還る(段③ の実測)。
+    //    🔑 **口は `view-window.ts` の 1 つ**(着地前レビュー M2)── 手で書くと、
+    //       片方から `noopener` が落ちた日に誰も鳴らない
+    open: openViewWindowUrl,
     baseUrl: currentBaseUrl,
     // 🔴 **いま読んでいたノートを連れて行く**(段③ の直し)── 渡さないと、
     //    別窓のカレンダーは「ノートを選んでください」で立ち上がる
@@ -371,6 +398,9 @@ function openViewTile(
      */
     openInPane: (v) => openView(dispatcher, v),
     fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
+    // 🔴 押した瞬間に返事をする(#685 動線レビュー 欠陥 7)── 塞がれた回は
+    //    2.5 秒まるごと無反応で、user は「効いていない」と読んでもう一度押す
+    notify: (message) => dispatcher.dispatch({ type: 'OP_NOTICE', message }),
   });
 }
 
@@ -468,6 +498,14 @@ function makeViewWindowToken(): string {
   return c && 'randomUUID' in c ? c.randomUUID() : `w-${Math.random().toString(36).slice(2)}`;
 }
 
+/**
+ * 🔴 **この窓は PKC 自身が開いたものか**(#685 着地前レビュー 🔴1)。
+ * ⚠ 「断片がノートを名指す」だけでは足りない ── **user が写した URL** でも真になり、
+ *   そのふつうのタブで「別の窓で開く」が二度と効かなくなる。判断は
+ *   `deep-link.ts` の `noteOpenedByUs` に在る。
+ */
+let openedByUs = false;
+
 /** boot(設計メモ §1): lease → worker init(または #177 の proxy 接続)→ メタ一覧 → SYS_BOOTED。 */
 export async function startApp(root: HTMLElement): Promise<AppHandle> {
   /**
@@ -483,6 +521,34 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     portable ? bundleLockName(portable.bundle.id) : undefined,
   );
   const proxyDeps = portable ? { channel: bundleChannelName(portable.bundle.id) } : {};
+
+  /**
+   * 🔴 **同じノートの付箋を 2 枚作らない台帳**(#685、user 裁定 2026-09-04)。
+   *
+   * ⚠ **`main.ts` は判断を持たない** ── 台帳の規則も便りの綴りも
+   *   `note-window-registry.ts` に在る(この file はどの test からも実行されない)。
+   * ⚠ 放送路が無い箱(古いブラウザ / test)では**常に空**になり、
+   *   今までどおり 2 枚目が開く(壊れる方向へは倒れない)。
+   * 🔴 **`portable` が解けた後で建てる**(着地前レビュー ⚠5)── 可搬単一 HTML は
+   *   `file://` で開かれ **origin が全部 `file://` に潰れる**ので、放送路の名前を
+   *   バンドルごとに切らないと、**別のバンドルの窓**が「すでに開いています」と
+   *   断り、`raise` が**別の HTML の窓**を手前に出す(台帳の鍵は `lid` = 衝突する)。
+   */
+  const noteChannel = portable
+    ? `${NOTE_REGISTRY_CHANNEL}:${portable.bundle.id}`
+    : NOTE_REGISTRY_CHANNEL;
+  const noteRegistry = createNoteRegistry({
+    channel: typeof BroadcastChannel === 'function' ? new BroadcastChannel(noteChannel) : null,
+    id: makeViewWindowToken(),
+    // ⚠ 「前に出る」は実測できていない(headless では親子とも `hasFocus` が真)──
+    //    例外を投げないことだけ確かめてある。だから**画面の字では約束しない**
+    onRaise: () => window.focus(),
+  });
+  if (typeof window === 'object') {
+    // ⚠ **閉じない。名乗りを 1 通出すだけ**(着地前レビュー ⚠2)── `pagehide` は
+    //    bfcache へ入るときにも飛ぶので、ここで放送路を閉じると戻ってきた窓が壊れる
+    window.addEventListener('pagehide', () => noteRegistry.leave());
+  }
   bootLease = lease;
 
   /**
@@ -569,7 +635,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
        * handshake できるかの早い方で進む。⚠ lease を優先する ── handshake の相手が
        * 死んだ直後なら、こちらが本体になるのが正しい。
        */
-      root.textContent = '別のタブで開いています。そのタブを閉じると、ここで続きが開きます…';
+      root.textContent = '別のタブかウィンドウで開いています。そちらを閉じると、ここで続きが開きます…';
       let held = false;
       const heldP = lease.whenHeld.then(() => {
         held = true;
@@ -974,8 +1040,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   let noticeShown: string | null = null;
   const paint = () => {
     // ⚠ アプリの窓では常設バッジを畳む(上の理由)── `paint` は面が変わるたび
-    //    走るので、`onHold` が旗を倒した次の描画から消える
-    const sync = heldViewWindow === null ? syncLine : '';
+    //    走るので、`onHold` が旗を倒した次の描画から消える。
+    // 🔴 **付箋の窓も同じ**(#685 着地前レビュー 🔴1)── 上の理由 3 つが
+    //    そのまま当てはまる(user が自分で開いた 2 枚目 / できることは無い /
+    //    状態の行 1 行を占めて「別の窓の変更と重なりました」を押し出す)
+    const sync = heldViewWindow === null && !heldNoteWindow ? syncLine : '';
     /**
      * 🔴 **可搬単一 HTML の保存の状態**(#400 段③)。⚠ ふだんは空文字なので
      *   場所を取らない ── 出るのは「長く書けていない」か「書けなかった」ときだけ。
@@ -998,6 +1067,44 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   };
   /** 🔑 ここで初めて `paint` に繋がる(それまでの `onState` は落としてよい)。 */
   repaintStatus = paint;
+
+  /**
+   * 🔴 **窓の題名を塗る**(#300 段③ / #685 着地前レビュー ⚠3)。
+   *
+   * ⚠ **タスクバーで見分けるため**に在る ── 付箋は「何枚でも開けます」が売りなので、
+   *   この欠陥は**枚数に比例して効く**(3 枚並べると「PKC3」が 3 つ並ぶ)。
+   * 🔑 **面と付箋を 1 つの口で塗る** ── 直す前は `onHold` の中で `document.title` を
+   *   直に書いていたので、`onHold` を通らない付箋には**永久に届かなかった**。
+   * ⚠ 付箋の題名は**旗ではなく、いま開いているノート**で決まる ── だから
+   *   `onState` でも塗る(改名しても、別のノートへ移っても追う)。
+   * ⚠ 形(`题名 — PKC3`)は `deep-link.ts` の `windowTitleFor` が正本である。
+   */
+  let titleShown = document.title;
+  const paintTitle = (): void => {
+    const st = dispatcher.getState();
+    const label =
+      heldViewWindow !== null
+        ? viewModeLabel(heldViewWindow)
+        : !heldNoteWindow || st.selectedLid === null
+          ? null
+          : (st.entryMetas.get(st.selectedLid)?.title ?? null);
+    const next = windowTitleFor(CONTAINER_TITLE, label);
+    // ⚠ 同じ字を書かない(`document.title` の代入はタスクバーを触る)
+    if (next === titleShown) return;
+    titleShown = next;
+    document.title = next;
+  };
+  /**
+   * 🔴 **この窓が出している付箋を、他の窓へ伝える**(#685、user 裁定 2026-09-04)。
+   * ⚠ 押した瞬間に**同期で**答えられるように、台帳は先に配っておく ──
+   *   押してから聞くと `window.open` が gesture の外へ落ちて遮断される。
+   */
+  const announceNote = (): void =>
+    noteRegistry.announce(heldNoteWindow ? dispatcher.getState().selectedLid : null);
+  dispatcher.onState(() => {
+    paintTitle();
+    announceNote();
+  });
   /**
    * ⚠ 起動のときに添付が読めなかったことは、**黙らせない**(#400 段④)。
    * 🔑 保存の状態(`persistState`)とは**別の欄**にする ── 同じ変数に載せると、
@@ -1216,7 +1323,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       dispatcher.dispatch({
         type: 'OP_FAILED',
         error:
-          '本体タブの交代で、このノートの編集権を別のタブに取られました。' +
+          '本体タブの交代で、このノートの編集権を別のタブかウィンドウに取られました。' +
           'ここで保存すると相手の編集を上書きします ── 内容を控えてから編集を取り消してください',
       });
     });
@@ -2766,6 +2873,68 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     exportEntry: (lid) => void runExport({ entryLid: lid }),
     // 🔴 **このノートを、相手が開けるだけの 1 枚にする**(#491)
     exportEntryHtml: (lid) => void runExport({ entryLid: lid, as: 'html' }),
+    /**
+     * 🔴 **このノートを別の窓で開く**(#685 段②、user 裁定 2026-09-04)。
+     *
+     * 🔑 **`openViewTile` と同じ仕掛けに乗せる**(合図 / 退避 / `noopener`)──
+     *   2 か所に別々の「窓を開く作法」を作らない(CLAUDE.md §7)。違うのは
+     *   ①`view` を渡さない(面ではなくノートを開く)②退避先が無い
+     *   (そのノートは**もう画面に在る**ので、中央の面へ逃がす意味が無い)。
+     * ⚠ **押した行のノート**を連れて行く(`selectedLid` ではない)── ⋯ は
+     *   行から開くので、選ばれている物と違うことがある。
+     */
+    openNoteWindow: (lid) => {
+      /**
+       * 🔴 **同じノートの 2 枚目は作らない**(user 裁定 2026-09-04)。
+       * ⚠ 判定は**同期**(台帳は放送で先に埋まっている)── ここで待つと
+       *   `window.open` が gesture の外へ落ちる。
+       * ⚠ 字で「前に出しました」とは**言わない** ── 前に出るかは実測できていない。
+       */
+      const where = noteRegistry.whereIs(lid);
+      if (where !== null) {
+        // ⚠ **この窓が出している**なら、前に出す相手が居ない(いま見ているのがそれ)
+        if (where === 'other') noteRegistry.raise(lid);
+        dispatcher.dispatch({
+          type: 'OP_NOTICE',
+          message:
+            where === 'self'
+              ? 'このノートは、いま見ているこのウィンドウで開いています'
+              : 'このノートは、すでに別のウィンドウで開いています',
+        });
+        return;
+      }
+      // 🔴 **見込みを先に載せる**(着地前レビュー ⚠7)── 窓が名乗るのは boot の後なので、
+      //    2 度押しの間は台帳が空である
+      noteRegistry.reserve(lid);
+      void openViewInWindow(null, {
+        // ⚠ `noopener` で開く ── 別プロセスになり、閉じれば常駐が還る。
+        //    🔴 **付箋は細い窓で出す**(user 裁定 2026-09-04)── 口は
+        //       `view-window.ts` の 1 つで、寸法とずらす位置もそちらが持つ
+        open: openNoteWindowUrl,
+        baseUrl: currentBaseUrl,
+        selected: () => ({ containerId: cid, lid }),
+        newToken: makeViewWindowToken,
+        waitForOpen: waitForViewWindow,
+        // ⚠ 付箋に退避先は無い ── `view === null` のとき呼ばれない
+        openInPane: () => false,
+        fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
+        // 🔴 押した瞬間に返事をする(#685 動線レビュー 欠陥 7)── 付箋には
+        //    退避先が無いので、塞がれた回は**無反応 2.5 秒だけ**が残る
+        /**
+         * 🔴 **消すのは自分が出した字のときだけ**(2026-09-04、smoke が教えた)。
+         * ⚠ 直す前は、1 枚目が開けた瞬間の `notify('')` が、
+         *   **その間に 2 度押しで出た「すでに別のウィンドウで開いています」を消して**
+         *   いた ── user は理由を読む前に字が消える。
+         */
+        notify: (message) => {
+          if (message === '' && dispatcher.getState().notice !== VIEW_WINDOW_OPENING) return;
+          dispatcher.dispatch({ type: 'OP_NOTICE', message });
+        },
+        // ⚠ 開けなかったら見込みを外す(次の 1 押しで開けるように)
+      }).then((where) => {
+        if (where !== 'window') noteRegistry.release(lid);
+      });
+    },
     /** 🔴 このフォルダと配下をまとめて書き出す(#399 ①)。 */
     exportFolder: (lid) => void runExport({ entryLid: lid, as: 'folder' }),
     /**
@@ -3120,6 +3289,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     presentUpdate: (apply) => updatePrompt.present(apply),
     presentAnnounce: () => announce.present(),
     repaintStatus: () => paint(),
+    repaintWindowTitle: () => {
+      paintTitle();
+      announceNote();
+    },
     // 🔑 判断は `services.setBrowse` 1 か所 ── ここは呼ぶだけ
     //    ⚠ `BinderServices` では optional なので、無い配線では**何もしない**
     setBrowse: (mode) => services.setBrowse?.(mode),
@@ -3138,7 +3311,15 @@ function bootstrap(): void {
    *   user の苦情そのものの再現)。⚠ 判断・放送・アドレスの後始末は
    *   `deep-link.ts` / `view-window.ts` に在る。
    */
-  announceOpenedWindow();
+  /**
+   * 🔑 **返り値を捨てない**(着地前レビュー 🔴1)── 「この窓はこちらが開いたものか」は
+   *   ここでしか分からない(`w=` は直後にアドレスから外れる)。判断と保存は
+   *   `deep-link.ts` の `noteOpenedByUs` に在る。
+   */
+  openedByUs = noteOpenedByUs(
+    announceOpenedWindow(),
+    typeof sessionStorage === 'object' ? sessionStorage : null,
+  );
 
   /**
    * SW の登録。⚠ **boot と競わせない**(P7 段⑤ round-2 review L-6)。
@@ -3210,10 +3391,23 @@ function bootstrap(): void {
          */
         onHold: (view) => {
           heldViewWindow = view;
-          document.title = view === null ? CONTAINER_TITLE : `${viewModeLabel(view)} — ${CONTAINER_TITLE}`;
           // ⚠ **その場で塗り直す** ── 旗を倒しただけでは、次に何かが起きるまで
           //    古い帯が残る(離れた瞬間に「本体タブ経由です」が戻るべきである)
           app.repaintStatus();
+          // 🔑 題名の形は `paintTitle` 1 か所(直前は**ここに直書き**していたので、
+          //    `onHold` を通らない付箋には永久に届かなかった ── 着地前レビュー ⚠3)
+          app.repaintWindowTitle();
+        },
+        /**
+         * 🔴 **付箋の窓であることを、題名と帯に伝える**(#685 着地前レビュー 🔴1 / ⚠3)。
+         * ⚠ 判断(何をもって付箋か)は `deep-link.ts` に在る ── ここは旗を持つだけ。
+         */
+        onHoldEntry: (holding) => {
+          // 🔴 **こちらが開いた窓のときだけ付箋とみなす**(着地前レビュー 🔴1)──
+          //    user が写した URL で開いたふつうのタブを付箋扱いにしない
+          heldNoteWindow = holding && openedByUs;
+          app.repaintStatus();
+          app.repaintWindowTitle();
         },
         fail: (error) => app.dispatcher.dispatch({ type: 'OP_FAILED', error }),
         // ⚠ 面が変わったら断片を消す(見ている間だけ残す)
@@ -3233,7 +3427,14 @@ function bootstrap(): void {
        * 先に出すと、まだ何も映っていない画面に帯だけが立つ。
        * ⚠ `watchForUpdate` より前でよい(別の行なので重ならない)。
        */
-      app.presentAnnounce();
+      /**
+       * 🔴 **1 つの物のために開いた窓では出さない**(#685 動線レビュー 欠陥 1)。
+       * ⚠ 判断は `deep-link.ts` の `isPurposeWindow` に在る ── この file は
+       *   どの test からも実行されないので、条件をここへ書かない。
+       */
+      if (!isPurposeWindow({ view: heldViewWindow, note: heldNoteWindow })) {
+        app.presentAnnounce();
+      }
       // 🔄 更新の案内(P7 段⑤)。⚠ 自動では交代させない ── 交代は旧 build の
       // cache を消すので、user が押したときだけ・押したタブだけを再読込する
       const registered = registerSw();

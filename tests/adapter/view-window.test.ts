@@ -31,10 +31,16 @@ import {
   CLOSE_VIEW_WINDOW_REFUSED,
   VIEW_WINDOW_ANNOUNCE_MS,
   VIEW_WINDOW_CHANNEL,
+  VIEW_WINDOW_FEATURES,
   VIEW_WINDOW_OPEN,
+  VIEW_WINDOW_OPENING,
+  NOTE_WINDOW_SIZE,
+  noteWindowFeatures,
+  openNoteWindowUrl,
   announceViewWindow,
   closeViewWindow,
   openViewInWindow,
+  openViewWindowUrl,
   waitForViewWindow,
   type ViewWindowDeps,
 } from '../../src/adapter/platform/view-window';
@@ -61,6 +67,8 @@ function bench(opts: BenchOpts = {}) {
   /** 退避を頼まれた面(頼まれた順)。 */
   const panes: ViewMode[] = [];
   const fails: string[] = [];
+  /** 押した瞬間に出た字と、消した字(#685 動線レビュー 欠陥 7)。 */
+  const notices: string[] = [];
   /** `waitForOpen` に渡った猶予(⑤ の観測点)。 */
   const waits: Array<{ token: string; ms: number }> = [];
   /** ⚠ 「待つ前に開いたか」を見るための記録(④ の観測点)。 */
@@ -86,12 +94,14 @@ function bench(opts: BenchOpts = {}) {
       return true;
     },
     fail: (m) => fails.push(m),
+    notify: (m) => notices.push(m),
   };
   return {
     deps,
     opened,
     panes,
     fails,
+    notices,
     waits,
     mode: () => mode,
     openedBeforeWait: () => openedBeforeWait,
@@ -414,5 +424,277 @@ describe('アプリの窓の × 閉じる', () => {
       closeViewWindow({ holding: () => true, close: () => {}, isClosed: () => false }),
     ).toBe('refused');
     expect(CLOSE_VIEW_WINDOW_REFUSED, '次に何をすればよいか書いていない').toContain('× で閉じてください');
+  });
+});
+
+/**
+ * 🔴 **付箋の窓 ── 面ではなく「そのノート」を開く**(#685 段②、2026-09-04)。
+ *
+ * > 「**マルチで付箋開けるといいかもね**」(利用者の感想 2026-09-04)
+ *
+ * ⚠ **同じ仕掛けに乗せる**(合図 / 退避 / `noopener`)── 2 か所に別々の
+ *   「窓を開く作法」を作らない(CLAUDE.md §7)。違うのは 2 点だけ:
+ *   ① URL に `view=` を載せない ② **退避先が無い**(そのノートはもう画面に在る)。
+ */
+describe('付箋の窓(view を指さない)', () => {
+  it('🔴 読んでいたノートを載せた、面を指さない URL で開く', async () => {
+    const b = bench({ selected: { containerId: 'c1', lid: 'e1' } });
+    const where = await openViewInWindow(null, b.deps);
+    expect(where, '窓で開いていない').toBe('window');
+    expect(b.opened, '開いた URL が 1 つではない').toHaveLength(1);
+    const url = b.opened[0]!;
+    expect(url, 'ノートを連れて行っていない').toContain('container=c1&entry=e1');
+    expect(url, '面を指している(付箋なのに面が開く)').not.toContain('view=');
+    expect(url, '合図が載っていない(開いたか分からない)').toMatch(/[?&]w=/);
+  });
+
+  /**
+   * 🔴 **中央の面を触らない**(面のときと同じ ── user 要望の本体)。
+   */
+  it('🔴 開けたら中央の面を触らない', async () => {
+    const b = bench({ selected: { containerId: 'c1', lid: 'e1' } });
+    await openViewInWindow(null, b.deps);
+    expect(b.panes, '面を動かした(本文が消える)').toEqual([]);
+    expect(b.fails, '開けたのに理由を出した').toEqual([]);
+  });
+
+  /**
+   * 🔴 **塞がれたら、理由を出すだけ**(#685 段②)。
+   *
+   * ⚠ 面のときは「中央の面で開きました」と退避できるが、付箋が開こうとして
+   *   いるのは**いま読んでいるそのノート**である ── **もう画面に出ている**ので
+   *   退避先が無い。🔑 「この画面で開きました」と言うと**嘘**になる。
+   */
+  it('🔴 塞がれたら理由だけ出す(面へ退避しない・嘘を言わない)', async () => {
+    const b = bench({ answered: false, selected: { containerId: 'c1', lid: 'e1' } });
+    const where = await openViewInWindow(null, b.deps);
+    expect(where, '面へ退避した(付箋に退避先は無い)').toBe('pane');
+    expect(b.panes, '面を動かした').toEqual([]);
+    expect(b.fails, '理由を出していない').toHaveLength(1);
+    expect(b.fails[0], 'ポップアップの許可に触れていない').toContain('ポップアップ');
+    expect(b.fails[0], '開いてもいないのに「この画面で開きました」と言っている').not.toContain(
+      'この画面で開きました',
+    );
+  });
+
+  /**
+   * 🔴 **ノートが無ければ開かない**(対照群)。⚠ 組めてしまうと、開いた窓は
+   *   **何も選ばずに立ち上がる**(付箋のつもりが空の PKC になる)。
+   */
+  it('🔴 ノートを選んでいなければ、窓を開かずに理由を出す', async () => {
+    const b = bench({ selected: null });
+    const where = await openViewInWindow(null, b.deps);
+    expect(where, '窓を開いてしまった').toBe('pane');
+    expect(b.opened, '行き先の無い窓を開いた').toEqual([]);
+    expect(b.fails, '理由を出していない').toHaveLength(1);
+  });
+
+  /**
+   * ⚠ **対照群 ── 面のときは今までどおり退避する**(片方だけ直していない)。
+   */
+  it('⚠ 面のときは、塞がれたら中央の面で開く', async () => {
+    const b = bench({ answered: false });
+    const where = await openViewInWindow('dual', b.deps);
+    expect(where).toBe('pane');
+    expect(b.panes, '面へ退避していない').toEqual(['dual']);
+    expect(b.fails[0], '「この画面で開きました」と言っていない').toContain('この画面で開きました');
+  });
+});
+
+/**
+ * 🔴 **`noopener` で開くこと自体を守る**(#685 着地前レビュー M2、2026-09-04)。
+ *
+ * ⚠ 直す前、`tests/` に `noopener` は **1 件も無かった**(probe だけ ── あれは
+ *   CI で走らない)。開き方は `main.ts` の 2 か所に手で書かれていたので、
+ *   **片方から落としても全 test が緑**だった。
+ * 🔴 落ちたときの症状は**いちばん気づけない形**である ── 窓は開くので画面は
+ *   正しく見え、変わるのは「**閉じても常駐が還らない**」ことだけ
+ *   (この file 冒頭の実測表:−32.2 MB → **−4.6 MB**)。
+ *   マニュアルの「閉じたぶんのメモリも戻ります」が静かに嘘になる。
+ */
+describe('別窓の開き方(#685 着地前レビュー M2)', () => {
+  it('🔴 `noopener` を渡して開く', () => {
+    const calls: Array<[string, string, string | undefined]> = [];
+    const spy = vi
+      .spyOn(window, 'open')
+      .mockImplementation((url?: string | URL, name?: string, features?: string) => {
+        calls.push([String(url), String(name), features]);
+        return null;
+      });
+    try {
+      openViewWindowUrl('https://example.test/#pkc?container=c1&entry=e1');
+    } finally {
+      spy.mockRestore();
+    }
+    expect(calls, '窓を開いていない').toHaveLength(1);
+    expect(calls[0]![0]).toBe('https://example.test/#pkc?container=c1&entry=e1');
+    expect(calls[0]![1], '別窓ではなく同じ場所へ開いている').toBe('_blank');
+    expect(
+      calls[0]![2],
+      '`noopener` が落ちている ── 同じ renderer プロセスに残り、閉じても常駐が還らない',
+    ).toBe('noopener');
+  });
+
+  /** ⚠ **値そのものも pin する** ── 呼び側 2 つが同じ物を使うことの錨。 */
+  it('⚠ 開き方の値は 1 か所に在る', () => {
+    expect(VIEW_WINDOW_FEATURES).toBe('noopener');
+  });
+});
+
+/**
+ * 🔴 **押した瞬間に返事をする**(#685 動線レビュー 欠陥 7、2026-09-04)。
+ *
+ * ⚠ 直す前は、押してから **2.5 秒**(`VIEW_WINDOW_ANNOUNCE_MS`)画面が
+ *   1 ドットも動かなかった。ポップアップを止めている人には「効いていない」に
+ *   見えるので**もう一度押す** ⇒ 許可を出した後に**2 枚開く**。
+ * ⚠ 付箋には退避先が無いので、失敗した回に残るのは**無反応 2.5 秒だけ**である。
+ */
+describe('押した瞬間の返事(#685 動線レビュー 欠陥 7)', () => {
+  it('🔴 押したら「開いています…」が出て、開けたら消える', async () => {
+    const b = bench({ answered: true });
+    await openViewInWindow(null, { ...b.deps, selected: () => ({ containerId: 'c1', lid: 'e1' }) });
+    expect(b.notices, '押しても何も出ない(2.5 秒の無反応に戻っている)').toEqual([
+      VIEW_WINDOW_OPENING,
+      '',
+    ]);
+  });
+
+  /**
+   * 🔴 **塞がれた回も消す** ── 理由(`fail`)は別の行に出るので、
+   *   「開いています…」を残すと**2 つの文が並んで矛盾する**。
+   */
+  it('🔴 塞がれたら「開いています…」を消して、理由に譲る', async () => {
+    const b = bench({ answered: false });
+    await openViewInWindow(null, { ...b.deps, selected: () => ({ containerId: 'c1', lid: 'e1' }) });
+    expect(b.notices.at(-1), '「開いています…」が出たまま理由が出ている').toBe('');
+    expect(b.fails[0], '理由が出ていない').toContain('ポップアップの許可');
+  });
+
+  /** ⚠ **面の窓でも同じ** ── 無反応 2.5 秒は付箋だけの話ではない。 */
+  it('⚠ 面を別窓で開くときも返事をする', async () => {
+    const b = bench({ answered: true });
+    await openViewInWindow('dual', b.deps);
+    expect(b.notices).toEqual([VIEW_WINDOW_OPENING, '']);
+  });
+
+  /** ⚠ **URL が組めなかった回は出さない** ── 開こうとしていないので「開いています」は嘘。 */
+  it('⚠ 組めなかった回は「開いています…」を出さない', async () => {
+    const b = bench({ base: 'https://x.test/#already' });
+    await openViewInWindow(null, b.deps);
+    expect(b.opened, '前提が崩れた(組めているのに開いていない)').toEqual([]);
+    expect(b.notices, '開いていないのに「開いています…」と言った').toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **付箋は細い窓で出す**(#685、user 裁定 2026-09-04)。
+ *
+ * ⚠ 直す前は大きさを 1 つも渡していなかったので、押すと「もう 1 個の PKC」
+ *   (3 列)が既定の大きさで出ていた ── 付箋にするには
+ *   「窓の端を掴んで 720px より細くする」という**教わらないと分からない一手**が要った。
+ */
+describe('付箋の窓の大きさ(#685、user 裁定 2026-09-04)', () => {
+  const wide = { width: 1920, height: 1080 };
+  const read = (f: string): Record<string, string> =>
+    Object.fromEntries(
+      f
+        .split(',')
+        .map((kv) => kv.split('='))
+        .filter((kv) => kv.length === 2)
+        .map(([k, v]) => [k!.trim(), v!.trim()]),
+    );
+
+  it('🔴 720px 以下の細い窓で出す(そのまま 1 枚ずつの画面になる)', () => {
+    const f = read(noteWindowFeatures(0, wide));
+    expect(Number(f['width']), '細くない ── 開いた瞬間に 3 列が出る').toBeLessThanOrEqual(720);
+    expect(Number(f['width'])).toBe(NOTE_WINDOW_SIZE.width);
+    expect(Number(f['height'])).toBe(NOTE_WINDOW_SIZE.height);
+  });
+
+  it('🔴 `noopener` を落とさない(閉じたら常駐が還る)', () => {
+    expect(noteWindowFeatures(0, wide).startsWith('noopener')).toBe(true);
+  });
+
+  /** 🔴 **3 枚目が 1 枚目に重ならない** ── 「何枚でも」が売りなので、重なると数えられない。 */
+  it('🔴 続けて開くと少しずつずれる', () => {
+    const at = (n: number) => {
+      const f = read(noteWindowFeatures(n, wide));
+      return `${f['left']},${f['top']}`;
+    };
+    const places = [0, 1, 2].map(at);
+    expect(new Set(places).size, '同じ場所に重なって出る').toBe(3);
+  });
+
+  /** ⚠ **一巡したら戻る** ── 無限にずらすと画面の外へ出ていく。 */
+  it('⚠ ずらしは一巡して戻る', () => {
+    expect(noteWindowFeatures(8, wide)).toBe(noteWindowFeatures(0, wide));
+  });
+
+  /**
+   * 🔴 **画面より大きくしない / 外へ出さない**(小さな画面)。
+   * ⚠ 出すと「開いたのに端が見えない」になり、掴んで動かす手が要る。
+   */
+  it('🔴 画面が小さければ、その中に収める', () => {
+    const f = read(noteWindowFeatures(5, { width: 360, height: 640 }));
+    expect(Number(f['width']), '画面より広い窓を頼んでいる').toBeLessThanOrEqual(360);
+    expect(Number(f['height'])).toBeLessThanOrEqual(640);
+    expect(Number(f['left']) + Number(f['width']), '右がはみ出す').toBeLessThanOrEqual(360);
+    expect(Number(f['top']) + Number(f['height']), '下がはみ出す').toBeLessThanOrEqual(640);
+  });
+
+  /**
+   * 🔴 **実際に窓を出す口にも掛ける**(#685 着地前レビュー ⚠3、2026-09-04)。
+   *
+   * ⚠ `noteWindowFeatures` は丁寧に見ていたのに、**それを本番で呼ぶ
+   *   `openNoteWindowUrl`** の側は「`width=` と `noopener` が在る」しか見ていなかった。
+   *   ⚠ 変異 2 件がそのまま通った ── ①画面を読まない(常に既定 = `left` が**常に 0**で
+   *   **全部左上に重なる**)②枚数を数えない(**全部 (40,40)**)。
+   * ⚠ マニュアルは「**続けて開くと少しずつずらして出します(重なりません)**」と
+   *   約束している ── その継ぎ目に検査が 1 つも無かった(CLAUDE.md §7)。
+   */
+  it('🔴 続けて開くと、実際に違う場所へ出す', () => {
+    const seen: string[] = [];
+    const openSpy = vi
+      .spyOn(window, 'open')
+      .mockImplementation((_u?: string | URL, _n?: string, features?: string) => {
+        seen.push(features ?? '');
+        return null;
+      });
+    // 🔑 **画面の大きさを読んでいることも見る** ── 読まないと器が 420 になり、
+    //    `left` は `min(40+step, 420-420)` = **常に 0** に潰れる
+    const screenSpy = vi
+      .spyOn(window, 'screen', 'get')
+      .mockReturnValue({ availWidth: 3000, availHeight: 2000 } as Screen);
+    try {
+      openNoteWindowUrl('https://example.test/#a');
+      openNoteWindowUrl('https://example.test/#b');
+    } finally {
+      openSpy.mockRestore();
+      screenSpy.mockRestore();
+    }
+    expect(seen, '2 回開いていない').toHaveLength(2);
+    const pos = (f: string) => /left=(\d+),top=(\d+)/.exec(f)?.slice(1).join(',') ?? '';
+    expect(pos(seen[0]!), '位置を渡していない').not.toBe('');
+    expect(pos(seen[1]!), '2 枚目が 1 枚目に重なって出る').not.toBe(pos(seen[0]!));
+    // 🔴 画面を読んでいれば、広い画面では左上に潰れない
+    expect(pos(seen[0]!), '画面を読んでいない(器の大きさに潰れて左上に重なる)').not.toBe('0,0');
+  });
+
+  it('🔴 実際に開くときも、その features を渡す', () => {
+    const calls: Array<string | undefined> = [];
+    const spy = vi
+      .spyOn(window, 'open')
+      .mockImplementation((_u?: string | URL, _n?: string, features?: string) => {
+        calls.push(features);
+        return null;
+      });
+    try {
+      openNoteWindowUrl('https://example.test/#pkc?container=c1&entry=e1');
+    } finally {
+      spy.mockRestore();
+    }
+    expect(calls, '窓を開いていない').toHaveLength(1);
+    expect(calls[0], '寸法を渡していない(既定の大きさで 3 列が出る)').toContain('width=');
+    expect(calls[0], '`noopener` が落ちている').toContain('noopener');
   });
 });

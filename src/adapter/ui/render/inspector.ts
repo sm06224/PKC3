@@ -1148,7 +1148,18 @@ export class InspectorRenderer {
      * 🔑 **添付の「参照をコピー」と同じ形**にする ── 貼れる 1 行を
      *   `data-pkc-entry-ref` に載せ、binder はそれを渡すだけ(組み立て直さない)。
      */
+    /**
+     * 🔴 **このノートを別の窓で開く**(#685 段②、user 裁定 2026-09-04)。
+     *
+     * ⚠ **右クリックにだけ置かない** ── 字の正本は 1 つ
+     *   (`ENTRY_ACTION_LABELS`)で、**同じ操作は両方の面に出す**のが
+     *   この repo の作法である(`tests/features/entry-actions.test.ts` の
+     *   「字は 1 か所から来る」が全数で見ている)。
+     */
+    // ⚠ **並びは右クリックと揃える**(user 裁定 2026-09-04)── 毎日使う
+    //    「参照をコピー」を動かさない(1 稿目は付箋を先頭に置いて全部を 1 つ下げた)
     btn('copy-entry-ref', ENTRY_ACTION_LABELS['copy-entry-ref']!);
+    btn('open-note-window', ENTRY_ACTION_LABELS['open-note-window']!);
     /**
      * 🔴 **外部の画像を手元へ取り込む**(#264 段①)。
      *

@@ -179,3 +179,49 @@ describe('別窓へ渡すもの(#300 段③)', () => {
     );
   });
 });
+
+/**
+ * 🔴 **面を指さない断片も組める**(#685 段②、2026-09-04)。
+ *
+ * ⚠ 付箋の窓は「面」ではなく**ノートそのもの**を開くので、`view=` を載せない。
+ * 🔑 そのぶん **`container` + `entry` が必ず要る** ── 行き先の無い断片
+ *   (`#pkc?w=…` だけ)は、開いた窓が**何も選ばずに立ち上がる**だけである。
+ */
+describe('面を指さない断片(#685 段②)', () => {
+  it('🔴 view を null にすると、ノートだけの断片になる', () => {
+    expect(
+      formatViewDeepLink('https://x/', null, { containerId: 'c1', entry: 'e1' }),
+    ).toBe('https://x/#pkc?container=c1&entry=e1');
+  });
+
+  it('🔴 合図も載る(窓が開いたかを確かめるため)', () => {
+    expect(
+      formatViewDeepLink('https://x/', null, { containerId: 'c1', entry: 'e1', token: 'tok1' }),
+    ).toBe('https://x/#pkc?container=c1&entry=e1&w=tok1');
+  });
+
+  /**
+   * 🔴 **行き先が無ければ組まない**(対照群)。⚠ ここを緩めると
+   *   `#pkc?w=<合図>` だけの断片が出来て、付箋のつもりが**空の PKC** になる。
+   */
+  it.each([
+    ['何も渡さない', {}],
+    ['container だけ', { containerId: 'c1' }],
+    ['entry だけ', { entry: 'e1' }],
+    ['綴りが通らない', { containerId: 'c1', entry: 'e 1' }],
+    ['合図だけ', { token: 'tok1' }],
+  ])('🔴 %s なら null(空の窓を開かせない)', (_name, input) => {
+    expect(formatViewDeepLink('https://x/', null, input)).toBeNull();
+  });
+
+  /**
+   * ⚠ **面のときは今までどおり「落としてでも開く」**(対照群)── 面そのものは
+   *   開くべきなので、連れて行けないノートは黙って落とす。
+   */
+  it('⚠ 面を指すときは、ノートが無くても組める', () => {
+    expect(formatViewDeepLink('https://x/', 'dual')).toBe('https://x/#pkc?view=dual');
+    expect(formatViewDeepLink('https://x/', 'dual', { containerId: 'c1', entry: 'e 1' })).toBe(
+      'https://x/#pkc?view=dual',
+    );
+  });
+});

@@ -672,6 +672,15 @@ export interface BinderServices {
    *   こちらは相手がブラウザで開くだけで読める片道の HTML である。
    */
   exportEntryHtml?(lid: string): void;
+  /**
+   * 🔴 **このノートを別の窓で開く**(#685 段②、user 裁定 2026-09-04)。
+   *
+   * > 「**マルチで付箋開けるといいかもね**」(利用者の感想 2026-09-04)
+   *
+   * ⚠ **同期に呼べること** ── `window.open` は click の gesture の中でしか通らない。
+   * 🔑 何枚でも開ける(窓を使い回さない)── 付箋である。
+   */
+  openNoteWindow?(lid: string): void;
   /** 🔴 **このフォルダと配下**をアーカイブとして書き出す(#399 ①)。 */
   exportFolder?(lid: string): void;
   /**
@@ -1392,12 +1401,15 @@ function startEditAt(
   void (ready === null ? lock(lid) : ready.then(() => lock(lid))).then((grant) => {
     if (grant !== 'granted') {
       // ⚠ 文言は理由と対(§1 / レビュー M-7)── holder 不在を「別のタブで編集中」と
-      //    言うと、user は存在しない編集タブを探す
+      //    言うと、user は存在しない編集タブを探す。
+      // 🔴 **「タブ」だけと言わない**(#685 動線レビュー 欠陥 5、2026-09-04)── 付箋を
+      //    開いた人のブラウザには**タブが 1 枚しか無い**ことがあるので、「別のタブで
+      //    編集中」と言うと**存在しないタブを探しに行く**(上と同じ形の誤り)。
       dispatcher.dispatch({
         type: 'OP_FAILED',
         error:
           grant === 'denied'
-            ? 'このノートは別のタブで編集中です(そちらを閉じるか保存してください)'
+            ? 'このノートは別のタブかウィンドウで編集中です(そちらを閉じるか保存してください)'
             : '最初に開いた PKC のタブと通信できません(少し待ってもう一度お試しください)',
       });
       return;
@@ -1478,6 +1490,21 @@ function phoneShowList(dispatcher: Dispatcher): boolean {
 }
 
 const MENU_LID_ATTR = 'data-pkc-menu-lid';
+
+/**
+ * 🔴 **メニューを出す前に開いていたノート**(#685 動線レビュー 欠陥 2、2026-09-04)。
+ *
+ * ⚠ 行を右クリックすると `selectEntryOrExplain` が**その行を選ぶ**ので、中央の本文は
+ *   その時点で入れ替わる。ふつうの操作(消す / 書き出す)はそれで正しいが、
+ *   **付箋だけは正しくない** ── 付箋の売りは「本文を退かさない」で、
+ *   お知らせにも「開いても、いま読んでいる画面はそのままです」と書いた。
+ *   ⚠ いまの形だと、一覧の行から開いた回だけ**その文が嘘になる**
+ *   (読んでいた A が消え、同じ B が 2 枚並ぶ)。
+ * 🔑 だから**出す前の lid を持たせておき、付箋を開いたら戻す**。
+ * ⚠ 持たせるのは行のメニューだけ ── 本文のメニューと情報ペインのボタンは
+ *   **もともと開いているノート**を指すので、戻す相手が無い(属性も付かない)。
+ */
+const MENU_PREV_LID_ATTR = 'data-pkc-menu-prev-lid';
 
 /**
  * 🔴 **クリックでメニューを開く受け手**(#632 段①)。⚠ ここに載せ忘れると、
@@ -5033,6 +5060,36 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.getState().selectedLid;
     if (lid) services.exportEntryHtml?.(lid);
   },
+  /**
+   * 🔴 **このノートを別の窓で開く**(#685 段②)。
+   * ⚠ 解決規則は隣の `export-entry` / `delete-entry` と**同じ**にする ── 揃えないと
+   *   「A を書き出して B を開く」が成立する。
+   * ⚠ **同期に呼ぶ**(`window.open` は gesture の中でしか通らない)。
+   */
+  'open-note-window': (dispatcher, target, services) => {
+    const lid =
+      target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ??
+      dispatcher.getState().selectedLid;
+    if (lid === null) {
+      // 🔑 無言で終わらせない(押した人に理由が要る)
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '別の窓で開くノートがありません(先にノートを開いてください)',
+      });
+      return;
+    }
+    services.openNoteWindow?.(lid);
+    /**
+     * 🔴 **読んでいたノートへ戻す**(#685 動線レビュー 欠陥 2)。
+     * ⚠ **開いた後に撃つ** ── `window.open` は gesture の中でしか通らないので、
+     *   その前に別の仕事を挟まない。
+     * ⚠ 編集中の `SELECT_ENTRY` は reducer が落とす ── 下書きは巻き込まない。
+     */
+    const prev = target.getAttribute(MENU_PREV_LID_ATTR);
+    if (prev !== null && prev !== '' && prev !== lid) {
+      dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: prev });
+    }
+  },
   'export-folder': (dispatcher, target, services) => {
     // ⚠ 解決規則は隣の `export-entry` / `delete-entry` と**同じ**にする ── 揃えないと
     //    「A を書き出して B を削除する」が成立する(review M-3 と同じ形)
@@ -6829,6 +6886,10 @@ export function bindActions(
     }
 
     ev.preventDefault();
+    // 🔑 **選び直す前**の現在地を控える(`open-note-window` が戻す ── 上の
+    //    `MENU_PREV_LID_ATTR`)。⚠ 順番が主張である:`selectEntryOrExplain` の
+    //    後だと、控えるのは**押した行そのもの**になって何も戻らない
+    const prevLid = dispatcher.getState().selectedLid;
     // 🔴 選べなければ出さない(理由は `selectEntryOrExplain` が画面へ出している)
     if (!selectEntryOrExplain(dispatcher, lid, 'ノート')) {
       closeContextMenu(root);
@@ -6851,6 +6912,7 @@ export function bindActions(
         linkedFile: st.linkedFiles.get(lid) ?? null,
       }),
       root.ownerDocument.activeElement,
+      prevLid === null || prevLid === lid ? {} : { [MENU_PREV_LID_ATTR]: prevLid },
     );
   };
   /**

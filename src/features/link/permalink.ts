@@ -436,6 +436,11 @@ function dropHashKeys(raw: string, keys: readonly string[]): string {
  *
  * ⚠ `formatExternalPermalink` と同じ作法で、**`baseUrl` に `#` が残っていたら
  * 断る** ── 黙って剥がすと、古い断片が新しい URL の中に隠れる。
+ *
+ * 🔴 **`view` は `null` でもよい**(#685 段②、2026-09-04)── 付箋の窓は
+ *   「面」ではなく**ノートそのもの**を開くので、`view=` を載せない。
+ * ⚠ そのときは **`container` + `entry` が必ず要る** ── 行き先の無い断片
+ *   (`#pkc?w=…` だけ)は、開いた窓が**何も選ばずに立ち上がる**だけである。
  */
 export interface ViewDeepLinkInput {
   /** 見ていたノート。⚠ **`containerId` と対**でしか受けない(上の理由)。 */
@@ -447,24 +452,33 @@ export interface ViewDeepLinkInput {
 
 export function formatViewDeepLink(
   baseUrl: string,
-  view: string,
+  view: string | null,
   input: ViewDeepLinkInput = {},
 ): string | null {
   if (typeof baseUrl !== 'string' || baseUrl === '') return null;
   if (baseUrl.includes('#')) return null;
-  if (!TOKEN_RE.test(view)) return null;
+  if (view !== null && !TOKEN_RE.test(view)) return null;
   const parts: string[] = [];
   // ⚠ 並びは External Permalink と揃える(container → entry → …)
   const { containerId, entry, token } = input;
+  let carried = false;
   if (containerId !== undefined && entry !== undefined) {
     // ⚠ **綴りが通らないノートは黙って落とす** ── 面そのものは開けるべきである
     //    (「連れて行けなかった」だけで窓が開かないほうが困る)
     if (TOKEN_RE.test(containerId) && TOKEN_RE.test(entry)) {
       parts.push(`container=${encodeURIComponent(containerId)}`);
       parts.push(`entry=${encodeURIComponent(entry)}`);
+      carried = true;
     }
   }
-  parts.push(`view=${encodeURIComponent(view)}`);
+  /**
+   * 🔴 **面を指さないなら、ノートが要る**(#685 段②)。
+   * ⚠ ここを緩めると `#pkc?w=<合図>` だけの断片が組めてしまい、開いた窓は
+   *   **何も選ばずに立ち上がる**(付箋のつもりが空の PKC になる)。
+   *   🔑 面のときは今までどおり**落としてでも開く** ── 面そのものは開くべきなので。
+   */
+  if (view === null && !carried) return null;
+  if (view !== null) parts.push(`view=${encodeURIComponent(view)}`);
   if (token !== undefined && TOKEN_RE.test(token)) parts.push(`w=${encodeURIComponent(token)}`);
   return `${baseUrl}${PKC_FRAGMENT_PREFIX}${parts.join('&')}`;
 }

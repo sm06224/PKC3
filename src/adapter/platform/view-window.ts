@@ -67,6 +67,84 @@ export const VIEW_WINDOW_CHANNEL = 'pkc3-view-window';
 /** 合図の便りの種別。⚠ 名前を付ける ── 将来この路に別の便りが乗っても取り違えない。 */
 export const VIEW_WINDOW_OPEN = 'view-window-open';
 
+/**
+ * 🔴 **窓の開き方は 1 か所に持つ**(#685 着地前レビュー M2、2026-09-04)。
+ *
+ * ⚠ 直す前は `main.ts` の **2 か所**が別々に `'noopener'` と書いており、
+ *   **`tests/` に `noopener` は 1 件も無かった**(probe だけ ── あれは CI で走らない)。
+ *   つまり片方から落としても**全 test 緑のまま出荷される**。
+ * 🔴 落ちたときに戻ってくるのは、いちばん気づけない形である ── 窓は開くので
+ *   画面は正しく見え、変わるのは**閉じても常駐が還らない**ことだけ
+ *   (上の実測表:−32.2 MB → −4.6 MB)。マニュアルの
+ *   「閉じたぶんのメモリも戻ります」が**静かに嘘になる**。
+ * 🔑 だから**値と、それを使う口の両方**をここに置き、`main.ts` は呼ぶだけにする。
+ */
+export const VIEW_WINDOW_FEATURES = 'noopener';
+
+/**
+ * 🔴 **別窓を開く(既定の実装)。** ⚠ `main.ts` の呼び側はこれを渡す ──
+ * 手で `window.open` を書かない(上の理由)。
+ * ⚠ 戻り値は捨てる ── `noopener` は**常に `null`** なので、開けたかは合図で見る。
+ */
+export function openViewWindowUrl(url: string): void {
+  window.open(url, '_blank', VIEW_WINDOW_FEATURES);
+}
+
+/**
+ * 🔴 **付箋は細い窓で出す**(#685、user 裁定 2026-09-04)。
+ *
+ * > 「**細い窓で出す**(幅 420 / 高さ 720 くらい)── 題名・本文・追記欄が
+ * > 縦に 1 枚で並び、そのまま追記欄に書ける」
+ *
+ * ⚠ 直す前は**大きさを 1 つも渡していなかった**ので、押すと
+ *   「もう 1 個の PKC」(一覧・本文・情報の 3 列)が既定の大きさで出ていた ──
+ *   付箋にするには「窓の端を掴んで 720px より細くする」という
+ *   **教わらないと絶対に分からない一手**が要った。
+ * 🔑 **`noopener` は失われない**(2026-09-04 実測)── 寸法を渡しても戻り値は
+ *   `null` のままで、別プロセス化と「閉じたら還る」は保たれる。
+ *   ⚠ 一方で**名前で使い回すことはできない**(同じ実測:`noopener` を付けると
+ *   名前が無視され、2 度目も新しい窓が開く)。
+ */
+export const NOTE_WINDOW_SIZE = { width: 420, height: 720 } as const;
+
+/** ずらす幅と、ずらしを一巡させる枚数。⚠ 3 枚目が 1 枚目に重ならないために要る。 */
+export const NOTE_WINDOW_STEP = 32;
+export const NOTE_WINDOW_RING = 8;
+
+/**
+ * 🔴 **n 枚目の付箋を、どこにどの大きさで出すか**。
+ *
+ * ⚠ **画面より大きくしない / 画面の外へ出さない** ── 小さな画面では
+ *   「開いたのに端が見えない」になる(掴んで動かす手が要る)。
+ * 🔑 純粋な関数にして unit で見る ── `main.ts` はどの test からも実行されない。
+ */
+export function noteWindowFeatures(
+  nth: number,
+  avail: { readonly width: number; readonly height: number },
+): string {
+  const width = Math.min(NOTE_WINDOW_SIZE.width, Math.max(1, avail.width));
+  const height = Math.min(NOTE_WINDOW_SIZE.height, Math.max(1, avail.height));
+  const step = (((nth % NOTE_WINDOW_RING) + NOTE_WINDOW_RING) % NOTE_WINDOW_RING) * NOTE_WINDOW_STEP;
+  const left = Math.max(0, Math.min(40 + step, avail.width - width));
+  const top = Math.max(0, Math.min(40 + step, avail.height - height));
+  return `${VIEW_WINDOW_FEATURES},width=${width},height=${height},left=${left},top=${top}`;
+}
+
+/** この窓がこれまでに開いた付箋の枚数。⚠ ずらす位置を決めるためだけに数える。 */
+let notesOpened = 0;
+
+/**
+ * 🔴 **付箋を開く(既定の実装)。** ⚠ `main.ts` はこれを渡す。
+ * ⚠ 画面の大きさが読めない箱では、`window.screen` を持たない前提へ落とす。
+ */
+export function openNoteWindowUrl(url: string): void {
+  const avail =
+    typeof screen === 'object' && screen !== null
+      ? { width: screen.availWidth, height: screen.availHeight }
+      : { width: NOTE_WINDOW_SIZE.width, height: NOTE_WINDOW_SIZE.height };
+  window.open(url, '_blank', noteWindowFeatures(notesOpened++, avail));
+}
+
 /** ⚠ 差し替えられるようにしておく(test は本物の放送を持たずに通す)。 */
 export type MakeChannel = (name: string) => Broadcaster;
 
@@ -105,7 +183,29 @@ export interface ViewWindowDeps {
   readonly openInPane: (view: ViewMode) => boolean;
   /** 理由を画面へ出す。 */
   readonly fail: (message: string) => void;
+  /**
+   * 🔴 **押した瞬間に「開いています…」と出す口**(#685 動線レビュー 欠陥 7、2026-09-04)。
+   *
+   * ⚠ 直す前は、**押してから 2.5 秒**(`VIEW_WINDOW_ANNOUNCE_MS`)画面が
+   *   1 ドットも動かなかった ── ポップアップを止めている人には
+   *   「効いていない」に見えるので、**その間にもう一度押す**。許可を出した後で
+   *   **2 枚開く**(付箋には退避先が無いので、無反応 2.5 秒だけが残る)。
+   * 🔑 開けたら**その場で消す**(実測 90〜154ms なので、成功した回は一瞬だけ出る)。
+   * ⚠ 省略可 ── 渡さない配線(古い test)では今までどおり黙る。
+   */
+  readonly notify?: (message: string) => void;
 }
+
+/**
+ * 押した瞬間に出す字。⚠ **理由(`fail`)とは別の行**である(消える側)。
+ *
+ * 🔴 **「開いています」と言わない**(#685 動線レビュー 欠陥 4、2026-09-04)。
+ * ⚠ 2 枚目を止めたときの字(「このノートは、すでに別のウィンドウで開いています」)と
+ *   **同じ行に出る**ので、「で開いています」だと**もう在る**としか読めない ──
+ *   まだ何も開いていないのに、user は在りもしない窓を探しに行く。
+ * 🔑 こちらは**これから開く**側なので「**を開いています**」にする。
+ */
+export const VIEW_WINDOW_OPENING = '別のウィンドウを開いています…';
 
 /** どこで開いたか。⚠ 呼び側が数えるためではなく、**test の観測点**として返す。 */
 export type ViewWindowResult = 'window' | 'pane';
@@ -124,7 +224,7 @@ export type ViewWindowResult = 'window' | 'pane';
  * タイルを押しても同じ(既にその面に居ると閉じる)。
  */
 export async function openViewInWindow(
-  view: ViewMode,
+  view: ViewMode | null,
   deps: ViewWindowDeps,
 ): Promise<ViewWindowResult> {
   const token = deps.newToken();
@@ -134,14 +234,26 @@ export async function openViewInWindow(
     token,
   });
   if (url === null) {
-    // ⚠ 組めないのは base に `#` が残っているとき ── **黙って本文で開かない**
+    /**
+     * ⚠ 組めないのは base に `#` が残っているとき ── **黙って本文で開かない**。
+     * 🔴 **付箋(`view === null`)のときは、ノートが渡っていない場合も来る**
+     *   (#685 段②)── そのときも同じで、理由を出して終わる。
+     */
     fallback(view, deps, '別のウィンドウを開けませんでした');
     return 'pane';
   }
   // 🔑 **聞く耳を先に張ってから開く** ── 逆にすると、速い窓の合図を取りこぼす
   const answered = deps.waitForOpen(token, VIEW_WINDOW_ANNOUNCE_MS);
   deps.open(url);
-  if (await answered) return 'window';
+  // 🔴 **押したことを画面に返す**(上の `notify`)── 待つのは失敗した回だけだが、
+  //    その回は 2.5 秒まるごと無反応になる
+  deps.notify?.(VIEW_WINDOW_OPENING);
+  if (await answered) {
+    // ⚠ 開けたら消す ── 出しっぱなしにすると「まだ開いていない」と読まれる
+    deps.notify?.('');
+    return 'window';
+  }
+  deps.notify?.('');
   // 🔑 合図が返らなかった = 窓が出ていない。**ここで初めて**中央の面を使う
   fallback(view, deps, 'ブラウザが新しいウィンドウをブロックしたようです');
   return 'pane';
@@ -152,7 +264,20 @@ export async function openViewInWindow(
  * ⚠ **文言は「実際に起きたこと」で分ける** ── 面が開かなかった回に
  * 「この画面で開きました」と言うと、user は**開いていない面を探す**。
  */
-function fallback(view: ViewMode, deps: ViewWindowDeps, why: string): void {
+function fallback(view: ViewMode | null, deps: ViewWindowDeps, why: string): void {
+  /**
+   * 🔴 **付箋には退避先が無い**(#685 段②、2026-09-04)。
+   *
+   * ⚠ 面(カレンダー等)は「窓が開かなかったら中央の面で開く」が退避になるが、
+   *   付箋が開こうとしているのは**いま読んでいるそのノート**である ──
+   *   **もう画面に出ている**ので、退避先が存在しない。
+   * 🔑 だから**理由だけ出す**。⚠ 「この画面で開きました」と言うと**嘘**になる
+   *   (何も開いていない)。
+   */
+  if (view === null) {
+    deps.fail(`${why}。別のウィンドウで開くには、ポップアップの許可を出してください`);
+    return;
+  }
   const landed = deps.openInPane(view);
   deps.fail(
     landed

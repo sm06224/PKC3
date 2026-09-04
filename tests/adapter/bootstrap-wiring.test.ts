@@ -12,6 +12,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { codeOnly } from '../helpers/code-only';
 
 const MAIN = readFileSync('src/main.ts', 'utf-8');
 
@@ -32,13 +33,50 @@ describe('bootstrap の配線', () => {
    *   ── user 不可侵指示「効くのは定常 / もっさりだと嫌」と正面から逆になる。
    * 🔑 数字は test では見られないので、**書いてあること**を pin する。
    */
-  it('🔴 組み込みの窓は noopener で開く(別プロセスにする)', () => {
-    const at = MAIN.indexOf('openViewInWindow(view, {');
-    expect(at, '別窓の配線が無い').toBeGreaterThan(-1);
+  /**
+   * 🔴 **別窓の呼び側は、1 か所ずつ検める**(#685 着地前レビュー M2 / M3、2026-09-04)。
+   *
+   * ⚠ **直す前はこの検査が片方しか見ていなかった** ── `openViewInWindow(view, {` の
+   *   400 字だけを見ていたので、**付箋の側(`openViewInWindow(null, {`)は
+   *   誰も守っていなかった**。
+   * ⚠ そして**数えるだけでは足りない**(1 稿目で踏んだ)── `fail:` の綴りは
+   *   `main.ts` の他所にも 5 件あるので、file 全体で数えると**別の配線に救われる**
+   *   (CLAUDE.md §1「範囲が広すぎて無関係な散文に満たされる」)。
+   * 🔑 だから**呼び側ごとに切って**見る。
+   */
+  it('🔴 別窓の呼び側は、どれも共有の口で開き、理由の口を渡す', () => {
+    const sites: string[] = [];
+    for (let at = MAIN.indexOf('openViewInWindow('); at !== -1; at = MAIN.indexOf('openViewInWindow(', at + 1)) {
+      sites.push(MAIN.slice(at, at + 1200));
+    }
+    expect(sites.length, '別窓の配線が無い ── この検査の前提が崩れている').toBeGreaterThanOrEqual(2);
+    for (const [n, site] of sites.entries()) {
+      /**
+       * ⚠ 口は 2 つある ── 面の窓は `openViewWindowUrl`、付箋は
+       *   **細い窓で出す** `openNoteWindowUrl`。
+       * 🔴 **どちらでもよい形に書かない**(2026-09-04、変異試験が SURVIVED で教えた)
+       *   ── `/open(View|Note)WindowUrl/` と書いたら、付箋を面の窓の口で開く変異が
+       *   素通りした(= 既定の大きさで 3 列が出る)。**呼び側ごとに決める。**
+       */
+      const wants = site.startsWith('openViewInWindow(null')
+        ? 'open: openNoteWindowUrl'
+        : 'open: openViewWindowUrl';
+      expect(site, `${n} 番目の呼び側が ${wants} を渡していない`).toContain(wants);
+      expect(site, `${n} 番目の呼び側が理由を出さない(無言の dead click に戻る)`).toContain(
+        "fail: (error) =>",
+      );
+    }
+    /**
+     * ⚠ 対称の反対側:**手書きの `noopener`** が戻っていないこと。
+     * ⚠ `window.open` そのものは禁じない ── マニュアルと Office の窓は
+     *   **それぞれの module が持つ寸法つきの features** を渡す正当な呼び側で、
+     *   そちらは `office-window.test.ts` / `manual-window.test.ts` が見ている。
+     *   🔑 ここが止めたいのは「**別窓の作法を、呼び側がもう一度書く**」ことである。
+     */
     expect(
-      MAIN.slice(at, at + 400),
-      'noopener が付いていない(同じプロセスに残り、閉じても還らない)',
-    ).toContain(`window.open(url, '_blank', 'noopener')`);
+      codeOnly(MAIN),
+      "`'_blank', 'noopener'` を直に書いている ── 作法は view-window.ts の 1 か所に持つ",
+    ).not.toContain(`'_blank', 'noopener'`);
   });
 
   /**
@@ -470,5 +508,65 @@ describe('横に留めた並びの憶え方(#505 段②)', () => {
 
   it('🔴 起点は復元した後の state(最初の state を「変わった」と読まない)', () => {
     expect(code).toMatch(/let lastSplit = dispatcher\.getState\(\)\.splitLids;/);
+  });
+
+  /**
+   * 🔴 **付箋の台帳は、可搬単一 HTML ではバンドルごとに切る**
+   *   (#685 着地前レビュー ⚠5、2026-09-04)。
+   *
+   * ⚠ 可搬単一 HTML は `file://` で開かれ **origin が全部 `file://` に潰れる**
+   *   (`store-proxy.ts` に実測つきで書いてある)。台帳の鍵は `lid` なので、
+   *   切らないと**別のバンドルの窓**が「すでに開いています」と断り、
+   *   `raise` が**別の HTML の窓**を手前に出す。
+   * ⚠ store proxy は既に `bundleChannelName` で切っている ── 片方だけ切らない。
+   */
+  it('🔴 付箋の台帳の放送路は、バンドルごとに切る', () => {
+    const at = MAIN.indexOf('createNoteRegistry({');
+    expect(at, '台帳の配線が無い').toBeGreaterThan(-1);
+    const site = MAIN.slice(Math.max(0, at - 600), at + 400);
+    expect(site, '放送路の名前をバンドルで切っていない(別の HTML の窓と混ざる)').toContain(
+      'portable.bundle.id',
+    );
+  });
+
+  /**
+   * 🔴 **`pagehide` では放送路を閉じない**(#685 着地前レビュー ⚠2)。
+   *
+   * ⚠ `pagehide` は **bfcache へ入るときにも飛ぶ**(この repo の実測 ──
+   *   `window-close.ts`。そこで不可逆な後始末をして**アプリが真っ白になった**事故が
+   *   記録されている)。⚠ 閉じると、戻ってきた窓は名乗れず、`postMessage` が
+   *   `InvalidStateError` を投げ、**state listener 経由で dispatch ごと落ちる**。
+   */
+  it('🔴 pagehide では名乗りを出すだけ(放送路は閉じない)', () => {
+    const at = MAIN.indexOf("addEventListener('pagehide', () => noteRegistry");
+    expect(at, '付箋の台帳の pagehide 配線が無い').toBeGreaterThan(-1);
+    expect(
+      MAIN.slice(at, at + 120),
+      'pagehide で放送路を閉じている(bfcache から戻ると壊れる)',
+    ).toContain('noteRegistry.leave()');
+  });
+
+  /**
+   * 🔴 **付箋の配線 2 つ**(#685 着地前レビュー、2026-09-04)。
+   * ⚠ **弱い pin だと自覚して使う** ── `main.ts` はどの unit からも実行されず、
+   *   どちらも smoke では**時間に依る**(塞がれた回を作れない / 合図が返る速さで
+   *   順番が入れ替わる)。振る舞いは `note-window-registry.test.ts` が見ている。
+   */
+  it('🔴 開けなかったら見込みを外す(塞がれたノートを二度と開けなくしない)', () => {
+    const at = MAIN.indexOf('noteRegistry.reserve(');
+    expect(at, '見込みを取る配線が無い').toBeGreaterThan(-1);
+    expect(
+      MAIN.slice(at, at + 1600),
+      '開けなかったときに見込みを外していない(そのノートは 10 秒開けなくなる)',
+    ).toContain('noteRegistry.release(');
+  });
+
+  it('🔴 消すのは自分が出した字のときだけ(2 度押しの理由を消さない)', () => {
+    const at = MAIN.indexOf('notify: (message) => {');
+    expect(at, '付箋の notify 配線が無い').toBeGreaterThan(-1);
+    expect(
+      MAIN.slice(at, at + 260),
+      '誰の字でも消している(1 枚目の成功が、2 度押しの理由を読む前に消す)',
+    ).toContain('VIEW_WINDOW_OPENING');
   });
 });
