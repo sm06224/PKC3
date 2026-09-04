@@ -165,6 +165,7 @@ import {
 import { parseLinkTarget } from '@features/entry-ref/link-target';
 import { flashCopied, handleCopyMdBlock } from './copy-md-block';
 import { finishCopy, selectedMarkdown } from './copy-source';
+import { installLongPress, LONG_PRESS_TARGET } from './long-press';
 import { copyMarkdownAndHtml, copyPlainText } from '@adapter/platform/clipboard';
 import { cleanForClipboard } from '@features/export/clipboard-html';
 import {
@@ -235,6 +236,8 @@ const alreadyThere = (st: AppState, lid: string, parentLid: string | null): bool
  * ⚠ state の `focus` から推測しない ── 焦点の無いほうを押したときに
  *   **反対側が動く**(押した所と効く所が違う、いちばん気づけない形)。
  */
+/** 長押しを受ける行(#687 D-1)。⚠ `long-press.ts` の `LONG_PRESS_TARGET` と同じ綴り。 */
+const LONG_PRESS_ROW = LONG_PRESS_TARGET;
 const dualSide = (target: HTMLElement): DualSide | null => {
   const raw = target.closest('[data-pkc-side]')?.getAttribute('data-pkc-side');
   return raw === 'left' || raw === 'right' ? raw : null;
@@ -5519,6 +5522,19 @@ export function bindActions(
       if (side !== null) carryDualFocus(side);
     }
   };
+  /**
+   * 🔴 **長押しで印を足す**(#687 D-1)── 指だけの端末の Ctrl クリック。
+   * ⚠ 判定と時計は `long-press.ts` が持ち、ここは**撃つ物**と**捨てる物**だけを
+   *   決める:発火 = `DUAL_SELECT toggle`(Ctrl クリックと同じ action)、
+   *   直後の `click` / `contextmenu` / 待っている間の `dragstart` は下の 3 か所で捨てる。
+   * ⚠ 側と lid は**押した行から辿る**(`dualSide`)── 他の `dual-row` の経路と同じ。
+   */
+  const longPress = installLongPress(root, (row) => {
+    const side = dualSide(row);
+    const lid = row.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
+    if (side !== null && lid !== null)
+      dispatcher.dispatch({ type: 'DUAL_SELECT', side, lid, mode: 'toggle' });
+  });
   const onClick = (ev: Event) => {
     /**
      * 🔴 **読んでいる本文を、押した所から扱う 2 つの道**(#395 段③ / #495)。
@@ -5621,6 +5637,16 @@ export function bindActions(
      * ファイラだと思って触る)。
      * ⚠ 側は**押した行**から辿る(`dualSide`)── state の焦点から推測しない。
      */
+    /**
+     * 🔴 **長押しの直後の `click` は捨てる**(#687 D-1)。
+     * ⚠ 指を離すとブラウザは `click` を撃つ ── 下へ流すと `set` が走って
+     *   **足したばかりの印が 1 件に戻り**、さらに `maybeEnterFolder` が
+     *   「1 回目」を数えて、次のタップでフォルダへ入る。**両方を素通りさせない**。
+     */
+    if (el.getAttribute('data-pkc-action') === 'dual-row' && longPress.swallowsClick()) {
+      ev.preventDefault();
+      return;
+    }
     if (
       el.getAttribute('data-pkc-action') === 'dual-row' &&
       (me.ctrlKey || me.metaKey || me.shiftKey)
@@ -6557,6 +6583,19 @@ export function bindActions(
   const onDragStart = (e: Event): void => {
     const de = e as DragEvent;
     /**
+     * 🔴 **指で長押しを待っている行は、掴ませない**(#687 D-1)。
+     * ⚠ 行は `draggable` なので、指で押さえている間にブラウザが drag を始めると、
+     *   **印を足すつもりの指が行を運び出す**。⚠ Android の drag が 500ms より
+     *   先に始まるかは実機でしか決まらない ── 先なら止まり、後なら drag が勝つ
+     *   (そのときは印が付いた行を運ぶ形になる)。
+     * ⚠ マウスは時計が掛からない(`pendingTouch` は指だけ)ので、これまでどおり掴める。
+     */
+    const pressedRow = (de.target as HTMLElement | null)?.closest<HTMLElement>(LONG_PRESS_ROW);
+    if (pressedRow !== null && pressedRow !== undefined && longPress.pendingTouch(pressedRow)) {
+      e.preventDefault();
+      return;
+    }
+    /**
      * 🔴 **予定の札は別の荷物で運ぶ**(双方向)。
      * ⚠ 行番号は**中の印から引く** ── 札にも同じ属性を置くと、
      *   `[data-pkc-task-line=…]` を押す既存の経路が**札のほうに当たる**
@@ -6753,6 +6792,19 @@ export function bindActions(
   const onContextMenu = (ev: MouseEvent): void => {
     const target = ev.target;
     if (!(target instanceof Element)) return;
+    /**
+     * 🔴 **長押し中 / 直後の行では、メニューを出さない**(#687 D-1)。
+     * ⚠ Android は長押しで `contextmenu` を撃つ ── 既定を残すと **OS のメニュー**が、
+     *   下へ流すと**この面のメニュー**が、足したばかりの印の上に重なる。
+     *   長押しの意味は「印を足す」1 つにする(2 つ同時に起きる操作を作らない)。
+     * ⚠ マウスの右クリックは `pointerType === 'mouse'` なので時計が掛からず、
+     *   ここは通らない(これまでどおりメニューが出る)。
+     */
+    const pressed = target.closest(LONG_PRESS_ROW);
+    if (pressed !== null && longPress.holds(pressed)) {
+      ev.preventDefault();
+      return;
+    }
 
     /**
      * ⚠ 既定を残す場面 ── ここで返すと、ブラウザのメニューがそのまま出る。
@@ -7729,5 +7781,6 @@ export function bindActions(
     root.removeEventListener('focusout', onRenameBlur);
     doc.removeEventListener('keydown', onShortcut);
     root.removeEventListener('keydown', onKeydown);
+    longPress.dispose();
   };
 }

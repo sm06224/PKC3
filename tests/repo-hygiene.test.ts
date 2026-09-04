@@ -1033,11 +1033,14 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     // ⚠ 2026-09-04(#648 段③): `portable-html.smoke.spec.ts` に **+1 件**
     //    (持ち歩ける 1 枚で選んだ配色が blob: の窓の地の色になる ── `file://` 由来の
     //    blob が localStorage に触れなくても、焼いた属性で届くことは実機でしか見えない)
+    // ⚠ 2026-09-04(#687 D-1): `phone` に「行を 600ms 押し続けると印が 2 行」1 件
+    //    (実ブラウザが指の押下を pointerType: 'touch' で届け、離した後の click を
+    //    捨てるかは unit では見えない)で **+1 件**
     expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(80);
     expect(
       counts.reduce((a, b) => a + b, 0),
       'smoke の test が増減した(足したらこの数を直す)',
-    ).toBe(418);
+    ).toBe(419);
   });
 });
 

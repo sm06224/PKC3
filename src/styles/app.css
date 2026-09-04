@@ -5489,6 +5489,14 @@ li[data-pkc-row-slot] {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* 🔴 **長押しで印を足す**(#687 D-1)── 押している間に字が選ばれたり、
+ *   iOS の吹き出し(コピー / 共有)が出たりしないようにする。
+ *   ⚠ `touch-action` は**書かない** ── 書くと一覧のスクロールが死ぬ
+ *   (スクロールし始めたかは `long-press.ts` が `pointermove` の距離で見る)。 */
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='dual-table'] tbody tr {
+  user-select: none;
+  -webkit-touch-callout: none;
+}
 /* 🔴 **タブ帯の左端の「左」/「右」はスマホでだけ出す**(#687 B-1)。
  * ⚠ パソコンは 2 枚が並んでいるので、位置がそのまま側を言う ── 字を足すと
  *   帯が 1 語ぶん詰まるだけである。1 枚ずつのときは**これが唯一の側の印**。 */

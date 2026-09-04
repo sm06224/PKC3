@@ -1020,3 +1020,69 @@ test('🔴 スマホで集中モードの鍵を押すと理由が出て、畳み
   await page.keyboard.press('Alt+Backslash');
   await expect(box, '追記欄の鍵まで殺している').toBeVisible({ visible: !shown });
 });
+
+/**
+ * 🔴 **指で行を押し続けると印が足される**(#687 D-1。user 裁定 2026-09-04)。
+ *
+ * ⚠ unit(`tests/adapter/long-press.test.ts`)は `PointerEvent` を**手で撃つ**ので、
+ *   「実ブラウザが指の押下を `pointerType: 'touch'` の pointerdown として届け、
+ *   500ms の間 `pointerup` も `click` も撃たず、離した後の `click` が捨てられる」
+ *   という**ブラウザ側の順番**は見ていない。ここはそれだけを見る。
+ * ⚠ **ブラウザの長押し(`contextmenu` / drag)との取り合い**は headless の合成 touch で
+ *   は決まらない ── cowork の実機で確かめる(Android の drag が 500ms より先に
+ *   始まると、印ではなく行が動く)。
+ * 🔑 `page.touchscreen` は `tap` しか持たないので、CDP の `Input.dispatchTouchEvent`
+ *   で `touchStart` → 600ms 待つ → `touchEnd` を撃つ(`live-editor.smoke.spec.ts` が
+ *   CDP を使う型)。
+ */
+test('🔴 スマホで行を 600ms 押し続けると、印が 2 行になる (#687 D-1)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 375, height: 667 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  // ノートを 2 件作る(印を 2 行にするのに 2 行要る)
+  for (let i = 0; i < 2; i++) {
+    await createEntry(page, 'text');
+    await clickReal(page, '[data-pkc-action="commit-edit"]');
+    await clickReal(page, '[data-pkc-field="phone-back"]');
+  }
+  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await openViewPane(page, 'dual');
+  await expect(page.locator(REGION('shell'))).toHaveAttribute('data-pkc-layout', 'phone');
+
+  const rows = page.locator(
+    '[data-pkc-region="dual-pane"][data-pkc-side="left"] [data-pkc-region="dual-table"] tbody tr',
+  );
+  await expect(rows, '台の前提が崩れている(行が 2 つ無い)').toHaveCount(2);
+  const marked = () =>
+    page
+      .locator(
+        '[data-pkc-region="dual-pane"][data-pkc-side="left"] [data-pkc-region="dual-table"] tbody tr[data-pkc-marked]',
+      )
+      .count();
+
+  // ① 素のタップで 1 行目に印(前提 ── 1 件)
+  await rows.nth(0).tap();
+  expect(await marked(), 'タップで印が 1 件になっていない').toBe(1);
+
+  // ② 2 行目を 600ms 押し続ける
+  const box = await rows.nth(1).boundingBox();
+  expect(box, '2 行目の寸法が採れない').not.toBeNull();
+  const x = box!.x + box!.width / 2;
+  const y = box!.y + box!.height / 2;
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+  await page.waitForTimeout(600);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  // ⚠ 離した後の `click` が捨てられていれば 2 件のまま(`set` が走ると 1 件に戻る)
+  await page.waitForTimeout(100);
+  expect(await marked(), '長押しで印が足されていない(または直後の click で 1 件に戻った)').toBe(2);
+
+  // ③ 対照群 ── 短いタップ(100ms)は印を 1 件に付け替える(長押しが全タップを食っていない)
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+  await page.waitForTimeout(100);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await page.waitForTimeout(100);
+  expect(await marked(), '短いタップまで長押しになっている').toBe(1);
+  expect(errors, `console/pageerror: ${errors.join(' | ')}`).toEqual([]);
+});
