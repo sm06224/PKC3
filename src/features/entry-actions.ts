@@ -482,6 +482,33 @@ export function blockMenuActions(ctx: { readonly board: boolean }): readonly Ent
  */
 export const ADD_PLACE_ACTION: EntryAction = { action: 'add-place', label: 'ここに板を置く' };
 
+ * 🔴 **見出し・本文のメニューの項目に添える近道**(#587 改善 C 案 2)。
+ *
+ * ⚠ 行のメニューの 9 項目は説明欄(C-3)を持つが、見出しの 3 項目・本文の項目には何も
+ *   添えていなかった ──「ここから編集する」は `Ctrl`+クリック、「ここに追記する」は
+ *   `Alt`+クリックで同じことができる(マニュアル §7)のに、メニューからは知りようがない。
+ *   右クリックは「近道を知らない人の入口」なので、**そこで近道を教える**のがいちばん効く。
+ * 🔑 字はメニューの各項目の**右に薄く**出す(`context-menu.ts` の `data-pkc-shortcut`)。
+ *   説明欄(C-3)とは両立する ── 見出しのメニューに説明欄は出ないまま。
+ * ⚠ 綴りは `chordLabel` の作法に揃える(`Ctrl + N` / mac は `⌘`)。修飾キー + クリックは
+ *   鍵の割当ではないので `keymap` には無く、**ここで組む**。鍵の割当がある項目
+ *   (`cycle-read-columns`)は**いまの第 1 割当**を引く ── user が変えれば字も変わる
+ *   (`applyShortcutHints` と同じ向き。直書きすると mac と割当変更の 2 方向で嘘になる)。
+ *
+ * @param ctx.mac mac の綴り(`⌘` / `⌥`)にするか
+ * @param ctx.chord 命令 id → いまの第 1 割当の綴り(無ければ `null`)。adapter の
+ *   `chordHint` を渡す ── features 層は割当の台帳を持たない
+ * @returns 近道の字。⚠ 無いものは**空文字**(呼び側は属性を付けない ── 空の欄を出さない)
+ */
+export function menuShortcutFor(
+  action: string,
+  ctx: { readonly mac: boolean; readonly chord: (commandId: string) => string | null },
+): string {
+  if (action === 'edit-from-heading') return `${ctx.mac ? '⌘' : 'Ctrl'} + クリック`;
+  if (action === 'append-at-heading') return `${ctx.mac ? '⌥' : 'Alt'} + クリック`;
+  return ctx.chord(action) ?? '';
+}
+
 /** 綴り → 字。⚠ 情報ペインはこちらを引く(並びは向こうが決める)。 */
 export const ENTRY_ACTION_LABELS: Readonly<Record<string, string>> = Object.fromEntries(
   ENTRY_MENU_ACTIONS.map((a) => [a.action, a.label]),

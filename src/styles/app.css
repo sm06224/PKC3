@@ -476,6 +476,17 @@ select:focus-visible {
   background: var(--accent-dim);
   color: var(--accent-dim-fg);
 }
+/* 🔴 **近道の字を項目の右に薄く出す**(#587 改善 C 案 2)。字は属性(`data-pkc-shortcut`)に
+ *   持ち、`::after` で描く ── `textContent` を汚さない(項目の字を読む検査と読み上げは字だけ)。
+ *   ⚠ ボタンは `inline-flex`(上の `button` の規則)なので `margin-left: auto` で右に寄る。
+ *   色は `--muted`(近道は添え物 ── 地は無彩色、色は情報にだけ)。 */
+[data-pkc-region='context-menu'] button[data-pkc-shortcut]::after {
+  content: attr(data-pkc-shortcut);
+  margin-left: auto;
+  padding-left: 1.5em;
+  font-size: 11px;
+  color: var(--muted);
+}
 /* 🔴 **メニューの下の説明欄**(#587 C-3。user 裁定 2026-08-30「一度推奨で入れて、
  *   使用感をテストしたい」)。指している項目の説明だけをここへ出す(`context-menu.ts`)。
  * 🔑 戻すときは、この 2 規則と `context-menu.ts` の `withHint` の塊を外す(1 組)。 */

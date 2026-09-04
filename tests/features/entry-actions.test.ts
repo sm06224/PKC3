@@ -26,6 +26,7 @@ import {
   bodyMenuActions,
   ENTRY_ACTION_HINTS,
   ENTRY_ACTION_HINT_MAX,
+  menuShortcutFor,
   ENTRY_ACTION_LABELS,
   ENTRY_MENU_ACTIONS,
   entryActionHint,
@@ -214,6 +215,24 @@ describe('条件つきの操作(#500 案 C)', () => {
  * ⚠ **「鍵が在るか」だけを見ない**(§1)── 値が空文字でも鍵は在る。
  *   ここは**配られた側**(`entryMenuActions` の返り値)で、**中身が空でない**ことを見る。
  */
+describe('見出し・本文のメニューの近道(#587 C 案 2)', () => {
+  /** 割当の台帳の代わり ── 段組みだけ割当を持つ。 */
+  const chord = (id: string): string | null => (id === 'cycle-read-columns' ? 'Alt + C' : null);
+
+  it('🔴 修飾キー + クリックは、mac では ⌘ / ⌥ の綴りになる', () => {
+    expect(menuShortcutFor('edit-from-heading', { mac: false, chord })).toBe('Ctrl + クリック');
+    expect(menuShortcutFor('edit-from-heading', { mac: true, chord })).toBe('⌘ + クリック');
+    expect(menuShortcutFor('append-at-heading', { mac: false, chord })).toBe('Alt + クリック');
+    expect(menuShortcutFor('append-at-heading', { mac: true, chord })).toBe('⌥ + クリック');
+  });
+
+  it('鍵の割当がある項目はその字、無い項目は空(呼び側が属性を付けない)', () => {
+    expect(menuShortcutFor('cycle-read-columns', { mac: false, chord })).toBe('Alt + C');
+    expect(menuShortcutFor('pin-split', { mac: false, chord })).toBe('');
+    expect(menuShortcutFor('toggle-heading-fold', { mac: true, chord })).toBe('');
+  });
+});
+
 describe('右クリックの説明(#587 C-1)', () => {
   /**
    * 🔴 **説明は 2 行に収める**(#587 C-3)。メニューの下の欄は 2 行固定なので、

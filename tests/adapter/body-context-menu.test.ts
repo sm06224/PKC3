@@ -18,11 +18,14 @@
  * いままで「行の判定がどのみち先に返す」に救われていた。**もう救われない。**
  */
 import { afterEach, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { blocksFor, decl, stripComments, withoutMedia } from '../helpers/css-blocks';
 import { appPanes } from '../../src/adapter/ui/render/pane-visibility';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { bindActions, type BinderServices } from '../../src/adapter/ui/actions/binder';
 import { BODY_MENU_ACTIONS, ENTRY_ACTION_HINTS } from '../../src/features/entry-actions';
-import { openContextMenu } from '../../src/adapter/ui/render/context-menu';
+import { MENU_SHORTCUT_ATTR, openContextMenu } from '../../src/adapter/ui/render/context-menu';
+import { chordHint } from '../../src/adapter/ui/render/shortcut-hint';
 import { sectionAt } from '../../src/features/markdown/append-target';
 import { applyHeadingFold } from '../../src/adapter/ui/render/heading-fold';
 import { applyPlaceLayout } from '../../src/adapter/ui/render/place-board';
@@ -497,6 +500,37 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     ]);
   });
 
+  /**
+   * 🔴 **見出しのメニューの項目に、近道の字が右に付く**(#587 改善 C 案 2)。
+   *
+   * ⚠ 直す前は見出しの 3 項目・本文の項目に何も添えていなかった ──「ここから編集する」が
+   *   `Ctrl`+クリックでもできることを、メニューから知る道が無かった。
+   * 🔑 見るのは属性(`data-pkc-shortcut`)── CSS が右に薄く描く。`textContent` は
+   *   項目の字のまま(上の `acts()` を読む検査を汚していないことも見る)。
+   * ⚠ 鍵の割当がある項目(段組み)は**いまの割当**が付く ── 綴りを直書きせず、
+   *   実装と同じ口(`chordHint`)から引いて突き合わせる。
+   */
+  it('🔴 見出しのメニューの項目に、近道の字が右に付く(#587 C 案 2)', () => {
+    const r = rig();
+    rightClick(r.head);
+    const sc = (action: string): string | null =>
+      r.root.querySelector(`${MENU} [data-pkc-action="${action}"]`)!.getAttribute(MENU_SHORTCUT_ATTR);
+    expect(sc('edit-from-heading'), '「ここから編集する」に近道が無い').toBe('Ctrl + クリック');
+    expect(sc('append-at-heading'), '「ここに追記する」に近道が無い').toBe('Alt + クリック');
+    // 本文の項目でも、鍵の割当がある物には**いまの第 1 割当**が付く
+    const columns = chordHint('cycle-read-columns');
+    expect(columns, '前提: 段組みの切り替えに割当が無い').not.toBeNull();
+    expect(sc('cycle-read-columns'), '段組みの近道が割当と食い違う').toBe(columns);
+    // ⚠ 近道の無い項目には**付けない**(空の欄を右に出さない)
+    expect(sc('toggle-heading-fold'), '近道の無い項目に属性が生えている').toBeNull();
+    expect(sc('pin-split'), '近道の無い項目に属性が生えている').toBeNull();
+    // ⚠ 字は汚さない ── 近道は属性で持ち、CSS が描く
+    expect(
+      r.root.querySelector(`${MENU} [data-pkc-action="edit-from-heading"]`)!.textContent,
+      '近道が項目の字に混ざっている',
+    ).toBe('ここから編集する');
+  });
+
   it('🔴 **段落の上では増えない**(対照群 ── 見出しの物が常に出る作りではない)', () => {
     const r = rig();
     rightClick(r.para);
@@ -953,6 +987,19 @@ describe('右クリックの説明(#587 C-1)', () => {
       .filter((b) => (b.getAttribute('data-pkc-hint') ?? '') === '')
       .map((b) => b.getAttribute('data-pkc-action'));
     expect(silent, '説明の無い項目が出ている').toEqual([]);
+  });
+
+  /**
+   * ⚠ **対照群 ── 行のメニューには近道を付けない**(#587 C 案 2)。行の 9 項目は
+   *   説明欄(C-3)で説明する側で、鍵の近道を持つ物でもない ── 近道の字を全項目に
+   *   生やす変異が、上の見出しの検査だけでは素通りする。説明欄はそのまま出る。
+   */
+  it('⚠ 対照群 ── 行のメニューには近道が付かず、説明欄のまま(#587 C 案 2)', () => {
+    const s = setup();
+    rightClick(s.row('n1'));
+    const withShortcut = [...s.menu()!.querySelectorAll(`button[${MENU_SHORTCUT_ATTR}]`)];
+    expect(withShortcut.map((b) => b.getAttribute('data-pkc-action')), '行の項目に近道が生えた').toEqual([]);
+    expect(s.menu()!.querySelector('[data-pkc-field="context-menu-hint"]'), '説明欄が消えた').not.toBeNull();
   });
 
   it('🔴 字は情報ペインと同じ表から来る(片方だけ直る日を作らない)', () => {
@@ -1476,5 +1523,18 @@ describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () =
     expect(document.querySelector('[data-pkc-field="dialog-ok"]'), '編集中なのに確認が出た').toBeNull();
     expect(r.d.getState().error ?? '', '理由が出ていない').toContain('編集を終了');
     expect(asks).toHaveLength(0);
+ * 🔴 **近道の字は CSS が描く ── 規則が消えると、字は在っても見えない**(#587 C 案 2)。
+ *
+ * ⚠ 属性(`data-pkc-shortcut`)の有無は上の describe が見るが、user が見るのは
+ *   `::after` が描いた字である ── 規則が無ければ属性は在っても**画面には 1 字も出ない**。
+ * 🔑 CSS は構文で読む(`css-blocks.ts`。CLAUDE.md §1 で 5 回踏んだ罠の正本)。
+ */
+describe('近道の字の見え方(#587 C 案 2)', () => {
+  it('🔴 data-pkc-shortcut を項目の右に描く規則が在る', () => {
+    const css = withoutMedia(stripComments(readFileSync('src/styles/app.css', 'utf-8')));
+    const blocks = blocksFor(css, `[data-pkc-region='context-menu'] button[${MENU_SHORTCUT_ATTR}]::after`);
+    expect(blocks, '近道を描く規則が無い(属性は在っても画面に出ない)').toHaveLength(1);
+    expect(blocks[0], '属性の字を描いていない').toMatch(decl('content', `attr\\(${MENU_SHORTCUT_ATTR}\\)`));
+    expect(blocks[0], '右に寄せていない').toMatch(decl('margin-left', 'auto'));
   });
 });

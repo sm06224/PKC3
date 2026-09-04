@@ -138,6 +138,7 @@ import {
   editingRowMenuActions,
   entryMenuActions,
   headingMenuActions,
+  menuShortcutFor,
   NOTE_TOOL_ACTIONS,
   noteToolActions,
   withTrailingLast,
@@ -147,6 +148,7 @@ import {
   contextMenuOpen,
   openContextMenu,
 } from '../render/context-menu';
+import { chordHint } from '../render/shortcut-hint';
 import { structureText } from '@features/structure/structure-text';
 import {
   profileLineText,
@@ -7309,7 +7311,20 @@ export function bindActions(
        *   「右ペインには出るのにメニューには出ない」が静かに生まれる(§7)。
        */
       const ob = dispatcher.getState().openBody;
-      const body = bodyMenuActions({ externalImages: ob ? externalImageUrls(ob.body).length : 0 });
+      /**
+       * 🔴 **見出し・本文の項目に近道の字を添える**(#587 改善 C 案 2)。
+       * 🔑 何を添えるかは `menuShortcutFor` 1 か所 ── ここは mac かどうかと、
+       *   **いまの割当**(`appKeymap`)を渡すだけ(user が割当を変えれば字も変わる)。
+       */
+      const withShortcut = <T extends { readonly action: string }>(
+        a: T,
+      ): T & { readonly shortcut: string } => ({
+        ...a,
+        shortcut: menuShortcutFor(a.action, { mac: isMac(), chord: (id) => chordHint(id, appKeymap) }),
+      });
+      const body = bodyMenuActions({
+        externalImages: ob ? externalImageUrls(ob.body).length : 0,
+      }).map(withShortcut);
       /**
        * 🔴 **見出しの上なら、見出しの 3 つを頭へ足す**(#426 段② の残り)。
        *
@@ -7364,7 +7379,8 @@ export function bindActions(
               folded: isHeadingFolded(heading),
               foldable: heading.parentElement === host,
               appendable: level >= 1 && level <= 3 && appendModeOf(dispatcher.getState()).kind === 'ready',
-            })),
+              // 🔴 近道の字を右に添える(#587 C 案 2)── 見出しの項目だけ(塊 / 板 / 本文には無い)
+            }).map(withShortcut)),
         ...(block === null ? [] : blockMenuActions({ board: block.board })),
         // 🔴 板を置く口は**いつも**出す(#676)── 押した座標は下の carry が運ぶ
         ADD_PLACE_ACTION,
