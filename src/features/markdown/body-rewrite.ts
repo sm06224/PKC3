@@ -17,7 +17,7 @@ import { formatLineDate, insertionForLineDate, readLineDate } from '../schedule/
 import { isScheduleDate } from '../schedule/schedule-date';
 import type { RepeatUnit } from '../schedule/repeat';
 import { removeInsertedLines } from './append-target';
-import { addPlace, movePlace, removePlace, resizePlace } from './place-notation';
+import { addPlace, movePlace, raisePlace, removePlace, resizePlace } from './place-notation';
 import { readTags, withTagResult } from '../flavor/tags';
 import { acceptsExternalImage, rewriteAdopted } from '../asset/inline-url-adopt';
 import { DELIMITER, csvEscapeField, parseCsv, type CsvPositions } from './csv-table';
@@ -109,6 +109,15 @@ export type BodyRewrite =
        * ⚠ 閉じていない塊は `applyBodyRewrite` が `null` = 断る(末尾まで消さない)。
        */
       kind: 'place-remove';
+      line: number;
+      openLine: string;
+    }
+  | {
+      /**
+       * 🔴 **板を前へ出す**(#676 段②)── 他の板の z= の最大 + 1 を開き行の z= に書く。
+       * ⚠ 「後ろへ送る」は無い(負の z を描画が捨てるので、下げる向きは他の板の行を触ることになる)。
+       */
+      kind: 'place-raise';
       line: number;
       openLine: string;
     }
@@ -318,6 +327,7 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
   if (rewrite.kind === 'place-move') return movePlace(body, rewrite);
   if (rewrite.kind === 'place-size') return resizePlace(body, rewrite);
   if (rewrite.kind === 'place-remove') return removePlace(body, rewrite);
+  if (rewrite.kind === 'place-raise') return raisePlace(body, rewrite);
   if (rewrite.kind === 'place-add') return addPlace(body, rewrite.x, rewrite.y);
   if (rewrite.kind === 'csv-cell') return rewriteCsvCell(body, rewrite);
   if (rewrite.kind === 'csv-shape') return rewriteCsvShape(body, rewrite);

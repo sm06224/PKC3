@@ -60,23 +60,38 @@ export function isPlaceOpen(line: string): boolean {
 const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 
 /**
- * `line` 番目(生の body の行番号)が fence(```)の中か。
+ * 各行が fence(```)の中か(fence の開き・閉じの行そのものは「中」に数えない)。
  * ⚠ 閉じの規則は `scanContainers` と同じ(同じ種類・同じ長さ以上・後ろに字が無い)。
- * 🔑 描画の行番号は fence の中を指さないが、**行番号は掴んだ時点のもの**なので、
- *   別の窓の書込で同じ字面の行が fence の中へ移った形を最後の門で止める。
+ * 🔑 1 度の走査で全行ぶん出す ── 板を全部数える `raisePlace` が行ごとに走査し直すと
+ *   O(n²) になるので、`insideFence` もこれを引く(判定は 1 本)。
  */
-function insideFence(lines: readonly string[], from: number, line: number): boolean {
+function fenceMask(lines: readonly string[], from: number): boolean[] {
+  const mask: boolean[] = new Array<boolean>(lines.length).fill(false);
   let fence: string | null = null;
-  for (let i = from; i < line; i += 1) {
+  for (let i = from; i < lines.length; i += 1) {
     const f = FENCE.exec(lines[i]!);
-    if (f === null) continue;
+    if (f === null) {
+      mask[i] = fence !== null;
+      continue;
+    }
     if (fence === null) {
       fence = f[1]!;
     } else if (f[1]!.startsWith(fence[0]!) && f[1]!.length >= fence.length && f[2]!.trim() === '') {
       fence = null;
+    } else {
+      mask[i] = true; // 開いている fence の中の、別種の fence 記号(閉じない)
     }
   }
-  return fence !== null;
+  return mask;
+}
+
+/**
+ * `line` 番目(生の body の行番号)が fence(```)の中か。
+ * 🔑 描画の行番号は fence の中を指さないが、**行番号は掴んだ時点のもの**なので、
+ *   別の窓の書込で同じ字面の行が fence の中へ移った形を最後の門で止める。
+ */
+function insideFence(lines: readonly string[], from: number, line: number): boolean {
+  return fenceMask(lines, from)[line] === true;
 }
 
 /** 板の塊を指す ── 開き行の行番号と、掴んだ時点の開き行そのもの。 */
@@ -179,6 +194,39 @@ export function removePlace(body: string, target: PlaceTarget): string | null {
   else if (start > at.fm && lines[start - 1] === '') lines.splice(start - 1, end - start + 2);
   else lines.splice(start, end - start + 1);
   return lines.join('\n');
+}
+
+/**
+ * 🔴 **板を前へ出す**(#676 段②)── 他の板の z= の最大 + 1 を、この板の z= に書く。
+ *
+ * ⚠ 「後ろへ送る」は作らない ── 負の z は描画が捨てる(`place-board.ts` の `intAttr`)ので、
+ *   下げる向きは「他を全部上げる」しか無く、触っていない板の行まで書き換えることになる。
+ * ⚠ 数えるのは**fence の外の板の開き行だけ**(fence の中の `:::format{… z=99}` はコードの字)。
+ *   z= を持たない板は 0 と数える(描画は z 無し = `auto`、z=1 はその上に乗る)。
+ * 🔑 既に**独りで**いちばん前なら body をそのまま返す(書く物が無い ≠ 競合)。
+ *   同じ z が並んでいる(引き分け)なら 1 つ上げる ── 押した人は前に出したいのである。
+ */
+export function raisePlace(body: string, target: PlaceTarget): string | null {
+  const at = placeLinesAt(body, target);
+  if (at === null) return null;
+  const mask = fenceMask(at.lines, at.fm);
+  let maxOther = 0;
+  for (let i = at.fm; i < at.lines.length; i += 1) {
+    if (i === target.line || mask[i] === true) continue;
+    const attrs = placeOpenAttrs(at.lines[i]!);
+    if (attrs !== null) maxOther = Math.max(maxOther, zOf(attrs));
+  }
+  const self = placeOpenAttrs(at.lines[target.line]!);
+  if (self !== null && zOf(self) > maxOther) return body;
+  return spliceOpenLine(body, target, { z: maxOther + 1 });
+}
+
+/** 開き行の z=(整数 ≥0)。無い・読めないときは 0(描画の `intAttr` が捨てる値と同じ扱い)。 */
+function zOf(attrs: BlockDirectiveAttrs): number {
+  const raw = attrs.kvs.z;
+  if (typeof raw !== 'string') return 0;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 0 ? n : 0;
 }
 
 /** 置いたばかりの板の大きさ(px)。⚠ 中身が空でも掴める大きさにする(CSS の min は 120×40)。 */

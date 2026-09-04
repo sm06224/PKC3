@@ -4404,6 +4404,18 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 行はメニューが運んだ塊の開き行(frontmatter を剥いだ座標)── reducer は生の body の
    *   行番号を受けるので、`frontmatterLineCount` を足して渡す(`bodySourceLineAt` と同じ規律)。
    */
+  /**
+   * 🔴 **右クリックした板を前へ出す**(#676 段②)── 他の板の z= の最大 + 1 を書く。
+   * 確認は要らない(重なりの順が変わるだけで、もう一度別の板を前へ出せば戻る)。
+   * ⚠ 行の座標は `remove-place` と同じ(刻印 + frontmatter ぶん)。
+   */
+  'raise-place': (dispatcher, target) => {
+    const line = menuCarriedBlock(target);
+    if (line === null || refuseStaleMenu(dispatcher, target)) return;
+    const ob = dispatcher.getState().openBody;
+    if (ob === null) return;
+    dispatcher.dispatch({ type: 'RAISE_PLACE', lid: ob.lid, line: line + frontmatterLineCount(ob.body) });
+  },
   'remove-place': (dispatcher, target, _services, root) => {
     const line = menuCarriedBlock(target);
     if (line === null || refuseStaleMenu(dispatcher, target)) return;

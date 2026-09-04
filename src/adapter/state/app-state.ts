@@ -965,6 +965,8 @@ export type UserAction =
   | { type: 'RESIZE_PLACE'; lid: string; line: number; w: number; h: number }
   | { type: 'REMOVE_PLACE'; lid: string; line: number }
   | { type: 'ADD_PLACE'; lid: string; x: number; y: number }
+  /** 板を前へ出す(#676 段②)── 他の板の z= の最大 + 1 を書く。同じ門。 */
+  | { type: 'RAISE_PLACE'; lid: string; line: number }
   /**
    * 🔴 **本文の 1 行の日付**(双方向。user 指示 2026-08-23)。
    * ⚠ `SET_ENTRY_DATE`(ノート 1 件が丸ごと予定)とは**単位が違う**。
@@ -2973,6 +2975,12 @@ function reduceCore(
           ? { kind: 'place-add', x: action.x, y: action.y }
           : null,
       );
+    case 'RAISE_PLACE':
+      return placeRewrite(state, action.lid, '編集を終了してから、板を前へ出してください', (shown) => {
+        const openLine = placeOpenLineOf(shown, action.line);
+        if (openLine === null) return null;
+        return { kind: 'place-raise', line: action.line, openLine };
+      });
     case 'SET_ENTRY_DATE': {
       // 🔴 **黙って捨てない**(#516)── 理由は上の `SET_TASK_DATE` に書いた
       const blocked = phaseBlockReason(state.phase);

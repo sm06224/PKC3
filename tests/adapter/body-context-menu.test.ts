@@ -1429,6 +1429,23 @@ describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () =
     expect(asks[0]).toMatchObject({ lid: 'n1', rewrite: { kind: 'place-remove', line: 21, openLine: BOARD_OPEN } });
   });
 
+  it('🔴 板の上に「前へ出す」が出て(コピーと消すの間)、押すと生の body の行番号で place-raise の依頼になる', () => {
+    const r = rig();
+    const asks = asksOf(r.d);
+    rightClick(r.q('[data-pkc-field="place-card"][data-pkc-entry="n2"]'));
+    const acts = r.acts();
+    expect(acts, '「前へ出す」が出ていない').toContain('raise-place');
+    expect(r.label('raise-place')).toBe('前へ出す');
+    expect(acts.indexOf('raise-place')).toBeGreaterThan(acts.indexOf('copy-block-md'));
+    expect(acts.indexOf('raise-place'), '消すより下に居る(消すは末尾)').toBeLessThan(acts.indexOf('remove-place'));
+    r.press('raise-place');
+    expect(asks).toHaveLength(1);
+    expect(asks[0]).toMatchObject({ lid: 'n1', rewrite: { kind: 'place-raise', line: 21, openLine: BOARD_OPEN } });
+    // 対照群: 板でない囲みには出ない
+    rightClick(r.q('p[data-pkc-source-line="5"]'));
+    expect(r.acts()).not.toContain('raise-place');
+  });
+
   it('確認で「やめる」を押せば、何も書かない', async () => {
     resetAppDialogForTest();
     const r = rig();

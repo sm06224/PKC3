@@ -18,12 +18,12 @@
  *    右下の角を掴むと見た目の大きさだけ動き、離すと `place-size` が 1 回飛ぶ
  */
 import { readFileSync } from 'node:fs';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import type { DomainEvent } from '../../src/adapter/state/app-state';
-import { applyPlaceLayout } from '../../src/adapter/ui/render/place-board';
-import { installPlaceDrag } from '../../src/adapter/ui/render/place-drag';
+import { applyPlaceLayout, PLACE_FOCUS_ATTR } from '../../src/adapter/ui/render/place-board';
+import { installPlaceDrag, NUDGE_SETTLE_MS } from '../../src/adapter/ui/render/place-drag';
 import { blocksFor, stripComments, withoutMedia } from '../helpers/css-blocks';
 
 const BOARD = [
@@ -299,6 +299,20 @@ describe('書換の門(MOVE_PLACE)', () => {
     });
     // ⚠ 依頼に行番号と開き行**以外**の鍵が無い(x / y を持ち込む変異は別の kind と混ざる)
     expect(Object.keys((ev as { rewrite: object }).rewrite).sort()).toEqual(['kind', 'line', 'openLine']);
+  });
+
+  it('🔴 RAISE_PLACE ── 開き行を捕えた place-raise の依頼になる(#676 段②)', () => {
+    const { d, events } = booted();
+    d.dispatch({ type: 'RAISE_PLACE', lid: 'n1', line: 0 });
+    expect(events.find((e) => e.type === 'REQUEST_BODY_REWRITE')).toMatchObject({
+      lid: 'n1',
+      rewrite: { kind: 'place-raise', line: 0, openLine: BOARD.split('\n')[0] },
+    });
+    events.length = 0;
+    d.dispatch({ type: 'START_EDIT' });
+    d.dispatch({ type: 'RAISE_PLACE', lid: 'n1', line: 0 });
+    expect(d.getState().error ?? '').toContain('前へ');
+    expect(events.filter((e) => e.type === 'REQUEST_BODY_REWRITE')).toHaveLength(0);
   });
 
   it('🔴 ADD_PLACE ── 座標だけを持つ place-add の依頼になる(行番号を持たない)', () => {
@@ -578,6 +592,107 @@ describe('掴んで動かす(place-drag)', () => {
       expect(block.style.width).toBe('320px');
       up(40, 30);
       expect(events.filter((e) => e.type === 'REQUEST_BODY_REWRITE')).toHaveLength(0);
+      off();
+    });
+  });
+
+  /**
+   * 🔴 **矢印キーで動かす**(#676 段②)。守るのは 2 つ ── ①押している間は書かず、手が止まって
+   * `NUDGE_SETTLE_MS` で **1 回だけ**書く(1 押し 1 書込だと再描画で焦点が落ちて 2 押し目が
+   * 効かない)②再描画の後、同じ開き行の持ち手に焦点が戻る。
+   */
+  describe('矢印キーで動かす(#676 段②)', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    function key(el: HTMLElement, k: string, o: KeyboardEventInit = {}): KeyboardEvent {
+      const e = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...o });
+      el.dispatchEvent(e);
+      return e;
+    }
+
+    it('🔴 3 押しで見た目は 3 回動き、止まって 300ms で MOVE_PLACE が 1 回だけ飛ぶ', () => {
+      vi.useFakeTimers();
+      const { events, grip, block, off } = mounted();
+      grip.focus();
+      const e1 = key(grip, 'ArrowRight');
+      key(grip, 'ArrowRight');
+      key(grip, 'ArrowDown');
+      expect(e1.defaultPrevented, '画面が一緒に流れる(既定を止めていない)').toBe(true);
+      expect(block.style.left).toBe('122px');
+      expect(block.style.top).toBe('41px');
+      expect(events.filter((e) => e.type === 'REQUEST_BODY_REWRITE'), '手を止める前に書いた').toHaveLength(0);
+      vi.advanceTimersByTime(NUDGE_SETTLE_MS - 1);
+      expect(events.filter((e) => e.type === 'REQUEST_BODY_REWRITE'), '止まる前に書いた').toHaveLength(0);
+      vi.advanceTimersByTime(1);
+      const asks = events.filter((e) => e.type === 'REQUEST_BODY_REWRITE');
+      expect(asks, '1 回だけでない').toHaveLength(1);
+      expect(asks[0]).toMatchObject({ rewrite: { kind: 'place-move', line: 0, x: 122, y: 41 } });
+      // ⚠ 見た目はいったん戻る(掴みと同じ)。焦点を返す印が器に置かれている
+      expect(block.style.left).toBe('120px');
+      expect(block.parentElement!.getAttribute(PLACE_FOCUS_ATTR)).toBe('0');
+      off();
+    });
+
+    it('Shift で 10px、左上より外へは出ない', () => {
+      vi.useFakeTimers();
+      const { events, grip, block, off } = mounted();
+      key(grip, 'ArrowLeft', { shiftKey: true });
+      expect(block.style.left).toBe('110px');
+      for (let i = 0; i < 20; i += 1) key(grip, 'ArrowUp', { shiftKey: true });
+      expect(block.style.top).toBe('0px');
+      vi.advanceTimersByTime(NUDGE_SETTLE_MS);
+      expect(events.find((e) => e.type === 'REQUEST_BODY_REWRITE')).toMatchObject({
+        rewrite: { kind: 'place-move', x: 110, y: 0 },
+      });
+      off();
+    });
+
+    it('🔑 Esc で取りやめ ── 見た目が戻り、時間が経っても書かない', () => {
+      vi.useFakeTimers();
+      const { events, grip, block, off } = mounted();
+      key(grip, 'ArrowRight');
+      key(grip, 'ArrowRight');
+      key(grip, 'Escape');
+      expect(block.style.left).toBe('120px');
+      vi.advanceTimersByTime(NUDGE_SETTLE_MS * 2);
+      expect(events.filter((e) => e.type === 'REQUEST_BODY_REWRITE')).toHaveLength(0);
+      off();
+    });
+
+    it('持ち手の外(塊の本文・角の持ち手)で押した矢印は何もしない / Ctrl つきも無視', () => {
+      vi.useFakeTimers();
+      const { host, events, grip, block, off } = mounted();
+      const e = key(block, 'ArrowRight');
+      expect(e.defaultPrevented).toBe(false);
+      key(host.querySelector<HTMLElement>('#p1 [data-pkc-field="place-size"]')!, 'ArrowRight');
+      key(grip, 'ArrowRight', { ctrlKey: true });
+      expect(block.style.left).toBe('120px');
+      vi.advanceTimersByTime(NUDGE_SETTLE_MS);
+      expect(events.filter((e2) => e2.type === 'REQUEST_BODY_REWRITE')).toHaveLength(0);
+      off();
+    });
+
+    it('🔴 再描画(塊が差し替わる)の後、同じ開き行の持ち手に焦点が戻り、印は外れる', () => {
+      vi.useFakeTimers();
+      const { host, grip, off } = mounted();
+      grip.focus();
+      key(grip, 'ArrowRight');
+      vi.advanceTimersByTime(NUDGE_SETTLE_MS);
+      expect(host.getAttribute(PLACE_FOCUS_ATTR), '前提が崩れている: 印が無い').toBe('0');
+      // 再描画を模す ── 塊が x=121 で描き直され、掴む口も作り直される
+      host.innerHTML = RENDERED.replace('data-pkc-x="120"', 'data-pkc-x="121"');
+      expect(host.contains(grip), '前提が崩れている: 古い口が残っている').toBe(false);
+      applyPlaceLayout(host, () => null, 0);
+      const fresh = host.querySelector<HTMLElement>('#p1 [data-pkc-field="place-grip"]')!;
+      expect(document.activeElement, '焦点が同じ付箋の持ち手に戻っていない').toBe(fresh);
+      expect(host.hasAttribute(PLACE_FOCUS_ATTR), '印が残っている(次の無関係な再描画で焦点が跳ぶ)').toBe(false);
+      // 対照群: 印が無ければ、再描画は焦点を動かさない
+      fresh.blur();
+      host.innerHTML = RENDERED;
+      applyPlaceLayout(host, () => null, 0);
+      expect(document.activeElement).not.toBe(host.querySelector('#p1 [data-pkc-field="place-grip"]'));
       off();
     });
   });

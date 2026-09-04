@@ -22,6 +22,29 @@
 
 const PLACE_SELECTOR = '.pkc-format-block.pkc-place';
 
+/**
+ * 🔴 **矢印キーで動かした後、焦点を返す先**(#676 段②)── 器に焼く印(値 = 開き行の行番号)。
+ *
+ * ⚠ 本文へ書くと再描画で塊が差し替わり、掴む口も作り直されて**焦点が本文の外へ落ちる**
+ *   (`place-board.ts` 冒頭の「描画のたびに呼ぶ」の帰結)。1 押し = 1 回落ちる形では
+ *   矢印で動かし続けられない。
+ * 🔑 書く側(`place-drag.ts`)は器にこの印を置くだけ、返すのは `applyPlaceLayout`(= 口を
+ *   作り直す当の関数)── 「いつ口ができるか」を知っている側が返す。印は 1 度使ったら外す。
+ */
+export const PLACE_FOCUS_ATTR = 'data-pkc-place-focus';
+
+/** 印が在れば、その開き行の塊の掴む口へ焦点を返して印を外す。 */
+function restoreGripFocus(host: HTMLElement): void {
+  const line = host.getAttribute(PLACE_FOCUS_ATTR);
+  if (line === null) return;
+  host.removeAttribute(PLACE_FOCUS_ATTR);
+  host
+    .querySelector<HTMLElement>(
+      `${PLACE_SELECTOR}[data-pkc-place-line="${line}"] > [data-pkc-field="place-grip"]`,
+    )
+    ?.focus();
+}
+
 /** 属性の整数(0 以上)。⚠ 読めない値は「無い」扱い(黙って 0 にしない)。 */
 function intAttr(el: Element, name: string): number | null {
   const raw = el.getAttribute(name);
@@ -116,6 +139,7 @@ export function applyPlaceLayout(
   if (blocks.length === 0) {
     host.classList.remove('pkc-board-host');
     host.style.removeProperty('min-height');
+    host.removeAttribute(PLACE_FOCUS_ATTR); // 返す先が無い ── 印だけ残さない
     return 0;
   }
   host.classList.add('pkc-board-host');
@@ -164,5 +188,7 @@ export function applyPlaceLayout(
   }
   // ⚠ いちばん下の塊まで scroll で届く高さを器に持たせる(絶対配置は流れに乗らない)
   host.style.minHeight = `${bottom + 40}px`;
+  // 🔑 口を作り直した**後**に返す(前に返すと、返した先が次の行で差し替わる)
+  restoreGripFocus(host);
   return blocks.length;
 }

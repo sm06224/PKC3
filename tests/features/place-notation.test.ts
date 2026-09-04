@@ -23,6 +23,7 @@ import {
   movePlace,
   NEW_PLACE_H,
   NEW_PLACE_W,
+  raisePlace,
   removePlace,
   resizePlace,
 } from '../../src/features/markdown/place-notation';
@@ -317,5 +318,49 @@ describe('板の塊を足す(addPlace)(#676)', () => {
   it('負・小数の座標は null', () => {
     expect(addPlace('本文', -1, 0)).toBeNull();
     expect(addPlace('本文', 0, 1.5)).toBeNull();
+  });
+});
+
+describe('板を前へ出す(raisePlace)(#676 段②)', () => {
+  const A = ':::format{#a .pkc-place x=1 y=1 z=2}';
+  const B = ':::format{#b .pkc-place x=2 y=2}';
+  const C = ':::format{#c .pkc-place x=3 y=3 z=5}';
+  const FENCED = ':::format{#f .pkc-place x=9 y=9 z=99}';
+  // 0:A 1:::: 2:'' 3:B 4:::: 5:``` 6:FENCED 7:``` 8:C 9::::
+  const BODY = [A, ':::', '', B, ':::', '```', FENCED, '```', C, ':::'].join('\n');
+
+  it('🔴 他の板の z= の最大 + 1 を書く ── fence の中の板は数えない(99 ではなく 5 + 1)', () => {
+    const next = raisePlace(BODY, { line: 3, openLine: B });
+    expect(next).not.toBeNull();
+    const lines = next!.split('\n');
+    expect(lines[3]).toBe(':::format{#b .pkc-place x=2 y=2 z=6}');
+    // ⚠ 他の行は 1 byte も動かない(他の板の z を触って「後ろへ送る」形にしない)
+    expect([...lines.slice(0, 3), ...lines.slice(4)]).toEqual([...BODY.split('\n').slice(0, 3), ...BODY.split('\n').slice(4)]);
+  });
+
+  it('🔑 既に独りでいちばん前なら body をそのまま返す(書く物が無い ≠ 競合)', () => {
+    expect(raisePlace(BODY, { line: 8, openLine: C })).toBe(BODY);
+  });
+
+  it('同じ z が並ぶ(引き分け)なら 1 つ上げる', () => {
+    const tie = [C, ':::', '', C.replace('#c', '#d'), ':::'].join('\n');
+    const next = raisePlace(tie, { line: 0, openLine: C });
+    expect(next!.split('\n')[0]).toBe(':::format{#c .pkc-place x=3 y=3 z=6}');
+  });
+
+  it('z= を持たない板しか居なければ z=1(無し = auto の上に乗る)、括弧なしの Tier 1 形は括弧つきに整える', () => {
+    const lone = ':::.pkc-place\nA\n:::\n\n::: pkc-place\nB\n:::';
+    expect(raisePlace(lone, { line: 0, openLine: ':::.pkc-place' })!.split('\n')[0]).toBe('::: {.pkc-place z=1}');
+  });
+
+  it('🔴 fence の中の板を数えない ── 対照群: fence を外せば 99 + 1 になる', () => {
+    const open = [A, ':::', '', B, ':::', '', FENCED, ':::', '', C, ':::'].join('\n');
+    expect(raisePlace(open, { line: 3, openLine: B })!.split('\n')[3]).toBe(':::format{#b .pkc-place x=2 y=2 z=100}');
+  });
+
+  it('同じ門 ── byte 不一致 / 板でない行 / fence の中の行 は null', () => {
+    expect(raisePlace(BODY, { line: 3, openLine: A })).toBeNull();
+    expect(raisePlace(BODY, { line: 2, openLine: '' })).toBeNull();
+    expect(raisePlace(BODY, { line: 6, openLine: FENCED })).toBeNull();
   });
 });

@@ -464,6 +464,9 @@ export function blockMenuActions(ctx: { readonly board: boolean }): readonly Ent
    */
   return [
     { action: 'copy-block-md', label: 'この板をコピー' },
+    // 🔴 前へ出す(#676 段②)。⚠ 「後ろへ送る」は無い ── 負の z を描画が捨てるので、
+    //    下げる向きは触っていない板の行まで書き換えることになる
+    { action: 'raise-place', label: '前へ出す' },
     { action: 'remove-place', label: 'この板を消す' },
   ];
 }
