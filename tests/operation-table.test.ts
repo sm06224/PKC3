@@ -108,12 +108,12 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-08-31: `open-manual-window`(#645)で 1 増えた
       // ⚠ 2026-09-02: `phone-page` / `phone-menu`(#632 段①)で 2 増えた
       // ⚠ 2026-09-04: 小窓・板・章コピー・図の一覧・断り書きの設定など(#690 #677 #676 #528 #687)で 4 増えた
-      total: 233,
-      receivers: 192,
+      total: 236,
+      receivers: 195,
       registered: 72,
       both: 31,
       outsideActionsTable: 41,
-      unregistered: 161,
+      unregistered: 164,
     });
   });
 
