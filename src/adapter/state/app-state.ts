@@ -3451,6 +3451,19 @@ function reduceCore(
                 updatedAt: null,
               },
             ];
+      /**
+       * 🔴 **添付の作成は絞りを外さない**(#668 D)。
+       *
+       * 下の「絞り込みを解除する」の理由(review M-2 / #411)は「**作った物が絞りに
+       * 弾かれて一生一覧に出ない** → user が Esc で消してしまう」である ── ⚠ 添付には
+       * 当たらない。添付は**開いていたノートの本文に入る**(#666)ので一覧で見せる
+       * 必要が無く、編集に入らないので Esc の掃除も無い。
+       * ⚠ むしろ外すと害が出る:「探す」に打っていた字と種類の札が、写真を 1 枚
+       *   足しただけで**黙って消える**(user は絞りを打ち直す)。
+       * 🔑 判定は archetype 1 つ ── 添付を作る経路(取込 / 録音 / 画面録画 /
+       *   ランチャーのタイル)は全部ここを通る。
+       */
+      const keepFilter = action.archetype === 'attachment';
       // 作成 = 即永続(PKC2 と同じ)。この初回 PERSIST が失敗した場合、editing 中の
       // 無変更 commit は skip するが、行は upsert なので次の変更 commit が自己修復する
       // (二重故障窓のみ残る ── SYS_ERROR が可視。P3-7a 設計判断)
@@ -3467,7 +3480,7 @@ function reduceCore(
           // (実証: 保存しても出ず、「効かなかった」と思って Esc を押すと
           // 新規未編集 cancel の掃除で entry ごと消える)。
           // ⚠ 欄の文字も消える ── 書き戻しは sidebar が持つ
-          filterQuery: '',
+          filterQuery: keepFilter ? state.filterQuery : '',
           /**
            * 🔴 **種類の絞りも外す**(#411)── **同じ事故が軸を変えて戻ってくる**。
            * 「添付だけ」を出しているときに「ノート」を作ると、作った物は
@@ -3475,7 +3488,7 @@ function reduceCore(
            * Esc を押し、新規未編集 cancel の掃除で **entry ごと消える**
            * (review M-2 で `filterQuery` について実証済みの経路そのもの)。
            */
-          kindFilter: NO_KINDS,
+          kindFilter: keepFilter ? state.kindFilter : NO_KINDS,
           freshLid: wantsEdit ? action.lid : null, // 非編集作成は fresh 掃除の対象外
           error: null,
           openBody: {
