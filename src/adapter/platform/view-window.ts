@@ -67,6 +67,29 @@ export const VIEW_WINDOW_CHANNEL = 'pkc3-view-window';
 /** 合図の便りの種別。⚠ 名前を付ける ── 将来この路に別の便りが乗っても取り違えない。 */
 export const VIEW_WINDOW_OPEN = 'view-window-open';
 
+/**
+ * 🔴 **窓の開き方は 1 か所に持つ**(#685 着地前レビュー M2、2026-09-04)。
+ *
+ * ⚠ 直す前は `main.ts` の **2 か所**が別々に `'noopener'` と書いており、
+ *   **`tests/` に `noopener` は 1 件も無かった**(probe だけ ── あれは CI で走らない)。
+ *   つまり片方から落としても**全 test 緑のまま出荷される**。
+ * 🔴 落ちたときに戻ってくるのは、いちばん気づけない形である ── 窓は開くので
+ *   画面は正しく見え、変わるのは**閉じても常駐が還らない**ことだけ
+ *   (上の実測表:−32.2 MB → −4.6 MB)。マニュアルの
+ *   「閉じたぶんのメモリも戻ります」が**静かに嘘になる**。
+ * 🔑 だから**値と、それを使う口の両方**をここに置き、`main.ts` は呼ぶだけにする。
+ */
+export const VIEW_WINDOW_FEATURES = 'noopener';
+
+/**
+ * 🔴 **別窓を開く(既定の実装)。** ⚠ `main.ts` の 2 か所はこれを渡す ──
+ * 手で `window.open` を書かない(上の理由)。
+ * ⚠ 戻り値は捨てる ── `noopener` は**常に `null`** なので、開けたかは合図で見る。
+ */
+export function openViewWindowUrl(url: string): void {
+  window.open(url, '_blank', VIEW_WINDOW_FEATURES);
+}
+
 /** ⚠ 差し替えられるようにしておく(test は本物の放送を持たずに通す)。 */
 export type MakeChannel = (name: string) => Broadcaster;
 
@@ -105,7 +128,21 @@ export interface ViewWindowDeps {
   readonly openInPane: (view: ViewMode) => boolean;
   /** 理由を画面へ出す。 */
   readonly fail: (message: string) => void;
+  /**
+   * 🔴 **押した瞬間に「開いています…」と出す口**(#685 動線レビュー 欠陥 7、2026-09-04)。
+   *
+   * ⚠ 直す前は、**押してから 2.5 秒**(`VIEW_WINDOW_ANNOUNCE_MS`)画面が
+   *   1 ドットも動かなかった ── ポップアップを止めている人には
+   *   「効いていない」に見えるので、**その間にもう一度押す**。許可を出した後で
+   *   **2 枚開く**(付箋には退避先が無いので、無反応 2.5 秒だけが残る)。
+   * 🔑 開けたら**その場で消す**(実測 90〜154ms なので、成功した回は一瞬だけ出る)。
+   * ⚠ 省略可 ── 渡さない配線(古い test)では今までどおり黙る。
+   */
+  readonly notify?: (message: string) => void;
 }
+
+/** 押した瞬間に出す字。⚠ **理由(`fail`)とは別の行**である(消える側)。 */
+export const VIEW_WINDOW_OPENING = '別のウィンドウで開いています…';
 
 /** どこで開いたか。⚠ 呼び側が数えるためではなく、**test の観測点**として返す。 */
 export type ViewWindowResult = 'window' | 'pane';
@@ -145,7 +182,15 @@ export async function openViewInWindow(
   // 🔑 **聞く耳を先に張ってから開く** ── 逆にすると、速い窓の合図を取りこぼす
   const answered = deps.waitForOpen(token, VIEW_WINDOW_ANNOUNCE_MS);
   deps.open(url);
-  if (await answered) return 'window';
+  // 🔴 **押したことを画面に返す**(上の `notify`)── 待つのは失敗した回だけだが、
+  //    その回は 2.5 秒まるごと無反応になる
+  deps.notify?.(VIEW_WINDOW_OPENING);
+  if (await answered) {
+    // ⚠ 開けたら消す ── 出しっぱなしにすると「まだ開いていない」と読まれる
+    deps.notify?.('');
+    return 'window';
+  }
+  deps.notify?.('');
   // 🔑 合図が返らなかった = 窓が出ていない。**ここで初めて**中央の面を使う
   fallback(view, deps, 'ブラウザが新しいウィンドウをブロックしたようです');
   return 'pane';

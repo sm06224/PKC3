@@ -93,7 +93,7 @@ describe('start-edit の編集権ゲート(#177)', () => {
     await tick();
     expect(d.getState().phase).toBe('ready');
     // ⚠ 文言は押した場所と対(§1)── 「別のタブ」が理由だと分かる形
-    expect(d.getState().error).toContain('別のタブで編集中');
+    expect(d.getState().error).toContain('別のタブかウィンドウで編集中');
   });
 
   it('本体と話せないときは「編集中」と言わない(レビュー M-7 ── 文言の嘘)', async () => {

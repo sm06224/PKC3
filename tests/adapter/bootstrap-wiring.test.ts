@@ -12,6 +12,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { codeOnly } from '../helpers/code-only';
 
 const MAIN = readFileSync('src/main.ts', 'utf-8');
 
@@ -32,13 +33,42 @@ describe('bootstrap の配線', () => {
    *   ── user 不可侵指示「効くのは定常 / もっさりだと嫌」と正面から逆になる。
    * 🔑 数字は test では見られないので、**書いてあること**を pin する。
    */
-  it('🔴 組み込みの窓は noopener で開く(別プロセスにする)', () => {
-    const at = MAIN.indexOf('openViewInWindow(view, {');
-    expect(at, '別窓の配線が無い').toBeGreaterThan(-1);
+  /**
+   * 🔴 **別窓の呼び側は、1 か所ずつ検める**(#685 着地前レビュー M2 / M3、2026-09-04)。
+   *
+   * ⚠ **直す前はこの検査が片方しか見ていなかった** ── `openViewInWindow(view, {` の
+   *   400 字だけを見ていたので、**付箋の側(`openViewInWindow(null, {`)は
+   *   誰も守っていなかった**。
+   * ⚠ そして**数えるだけでは足りない**(1 稿目で踏んだ)── `fail:` の綴りは
+   *   `main.ts` の他所にも 5 件あるので、file 全体で数えると**別の配線に救われる**
+   *   (CLAUDE.md §1「範囲が広すぎて無関係な散文に満たされる」)。
+   * 🔑 だから**呼び側ごとに切って**見る。
+   */
+  it('🔴 別窓の呼び側は、どれも共有の口で開き、理由の口を渡す', () => {
+    const sites: string[] = [];
+    for (let at = MAIN.indexOf('openViewInWindow('); at !== -1; at = MAIN.indexOf('openViewInWindow(', at + 1)) {
+      sites.push(MAIN.slice(at, at + 1200));
+    }
+    expect(sites.length, '別窓の配線が無い ── この検査の前提が崩れている').toBeGreaterThanOrEqual(2);
+    for (const [n, site] of sites.entries()) {
+      expect(site, `${n} 番目の呼び側が手で窓を開いている(noopener が落ちても誰も鳴らない)`).toContain(
+        'open: openViewWindowUrl',
+      );
+      expect(site, `${n} 番目の呼び側が理由を出さない(無言の dead click に戻る)`).toContain(
+        "fail: (error) =>",
+      );
+    }
+    /**
+     * ⚠ 対称の反対側:**手書きの `noopener`** が戻っていないこと。
+     * ⚠ `window.open` そのものは禁じない ── マニュアルと Office の窓は
+     *   **それぞれの module が持つ寸法つきの features** を渡す正当な呼び側で、
+     *   そちらは `office-window.test.ts` / `manual-window.test.ts` が見ている。
+     *   🔑 ここが止めたいのは「**別窓の作法を、呼び側がもう一度書く**」ことである。
+     */
     expect(
-      MAIN.slice(at, at + 400),
-      'noopener が付いていない(同じプロセスに残り、閉じても還らない)',
-    ).toContain(`window.open(url, '_blank', 'noopener')`);
+      codeOnly(MAIN),
+      "`'_blank', 'noopener'` を直に書いている ── 作法は view-window.ts の 1 か所に持つ",
+    ).not.toContain(`'_blank', 'noopener'`);
   });
 
   /**

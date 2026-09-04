@@ -104,6 +104,7 @@ function setup(over: Partial<BinderServices> = {}) {
     said,
     dispatcher,
     para: root.querySelector('[data-pkc-field="para"]')!,
+    row: (lid: string) => root.querySelector(`[data-pkc-entry="${lid}"]`)!,
     link: root.querySelector('a')!,
     img: root.querySelector('img')!,
     jinou: root.querySelector('[data-pkc-region="jinou"]')!,
@@ -1050,5 +1051,41 @@ describe('メニューの下の説明欄(#587 C-3)', () => {
     expect(menu).not.toBeNull();
     expect(menu!.querySelector(HINT), '説明の無いメニューに空の欄が出ている').toBeNull();
     expect(menu!.hasAttribute('data-pkc-with-hint')).toBe(false);
+  });
+
+  /**
+   * 🔴 **行の右クリックは「出す前に開いていたノート」を持たせる**
+   *   (#685 動線レビュー 欠陥 2、2026-09-04)。
+   *
+   * ⚠ **順番そのものが主張である** ── `selectEntryOrExplain` は右クリックの時点で
+   *   **その行を選ぶ**ので、控えるのが後だと**押した行そのもの**が入り、
+   *   `open-note-window` は何も戻さない(= 読んでいた本文が退いたまま)。
+   * 🔑 受け側(戻すこと)は `note-window-wiring.test.ts` が見る ──
+   *   ここが見るのは**正しい値が載ること**である(両端の片方ずつ)。
+   */
+  describe('行の右クリックが持たせる「出す前のノート」(#685 欠陥 2)', () => {
+    it('🔴 選び直す前の lid が載る(選び直した後ではない)', () => {
+      const s = setup();
+      s.dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+      expect(s.dispatcher.getState().selectedLid, '前提が崩れた(n1 を開いていない)').toBe('n1');
+      rightClick(s.row('f1'));
+      const b = s.menu()!.querySelector('button[data-pkc-action="open-note-window"]');
+      expect(b, '別の窓で開くが一覧に無い').not.toBeNull();
+      expect(
+        b!.getAttribute('data-pkc-menu-prev-lid'),
+        '控えるのが `selectEntryOrExplain` より後になっている(押した行が載っている)',
+      ).toBe('n1');
+      // ⚠ 対照群:右クリックで実際に選択が動いていること(動かないなら上は空振り)
+      expect(s.dispatcher.getState().selectedLid, '右クリックで行が選ばれていない').toBe('f1');
+    });
+
+    /** ⚠ **対照群** ── 同じ行を右クリックした回は載せない(戻す相手が居ない)。 */
+    it('⚠ いま開いている行なら載せない', () => {
+      const s = setup();
+      s.dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+      rightClick(s.row('n1'));
+      const b = s.menu()!.querySelector('button[data-pkc-action="open-note-window"]');
+      expect(b!.getAttribute('data-pkc-menu-prev-lid'), '要らない印が載っている').toBeNull();
+    });
   });
 });

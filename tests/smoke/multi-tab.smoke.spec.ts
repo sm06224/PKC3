@@ -52,7 +52,7 @@ test('2 枚目のタブが本体経由で開き、別ノートは編集でき、
   await rowB.first().click();
   await clickReal(pageB, '[data-pkc-action="start-edit"]');
   await expect(pageB.locator('[data-pkc-region="status"]')).toContainText(
-    '別のタブで編集中',
+    '別のタブかウィンドウで編集中',
   );
   await expect(pageB.locator('[data-pkc-field="editor-body"]')).toHaveCount(0);
 
@@ -136,7 +136,7 @@ test('本体タブを閉じると、2 枚目がその場で本体に昇格する
   await rowC.first().click();
   await clickReal(pageC, '[data-pkc-action="start-edit"]');
   await expect(pageC.locator('[data-pkc-region="status"]')).toContainText(
-    '別のタブで編集中',
+    '別のタブかウィンドウで編集中',
   );
 
   // B が保存 → 🔴 昇格後の書込が C へ届く(localClient 包み + 名乗りの pin)

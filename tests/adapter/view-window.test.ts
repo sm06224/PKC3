@@ -31,10 +31,13 @@ import {
   CLOSE_VIEW_WINDOW_REFUSED,
   VIEW_WINDOW_ANNOUNCE_MS,
   VIEW_WINDOW_CHANNEL,
+  VIEW_WINDOW_FEATURES,
   VIEW_WINDOW_OPEN,
+  VIEW_WINDOW_OPENING,
   announceViewWindow,
   closeViewWindow,
   openViewInWindow,
+  openViewWindowUrl,
   waitForViewWindow,
   type ViewWindowDeps,
 } from '../../src/adapter/platform/view-window';
@@ -61,6 +64,8 @@ function bench(opts: BenchOpts = {}) {
   /** 退避を頼まれた面(頼まれた順)。 */
   const panes: ViewMode[] = [];
   const fails: string[] = [];
+  /** 押した瞬間に出た字と、消した字(#685 動線レビュー 欠陥 7)。 */
+  const notices: string[] = [];
   /** `waitForOpen` に渡った猶予(⑤ の観測点)。 */
   const waits: Array<{ token: string; ms: number }> = [];
   /** ⚠ 「待つ前に開いたか」を見るための記録(④ の観測点)。 */
@@ -86,12 +91,14 @@ function bench(opts: BenchOpts = {}) {
       return true;
     },
     fail: (m) => fails.push(m),
+    notify: (m) => notices.push(m),
   };
   return {
     deps,
     opened,
     panes,
     fails,
+    notices,
     waits,
     mode: () => mode,
     openedBeforeWait: () => openedBeforeWait,
@@ -488,5 +495,90 @@ describe('付箋の窓(view を指さない)', () => {
     expect(where).toBe('pane');
     expect(b.panes, '面へ退避していない').toEqual(['dual']);
     expect(b.fails[0], '「この画面で開きました」と言っていない').toContain('この画面で開きました');
+  });
+});
+
+/**
+ * 🔴 **`noopener` で開くこと自体を守る**(#685 着地前レビュー M2、2026-09-04)。
+ *
+ * ⚠ 直す前、`tests/` に `noopener` は **1 件も無かった**(probe だけ ── あれは
+ *   CI で走らない)。開き方は `main.ts` の 2 か所に手で書かれていたので、
+ *   **片方から落としても全 test が緑**だった。
+ * 🔴 落ちたときの症状は**いちばん気づけない形**である ── 窓は開くので画面は
+ *   正しく見え、変わるのは「**閉じても常駐が還らない**」ことだけ
+ *   (この file 冒頭の実測表:−32.2 MB → **−4.6 MB**)。
+ *   マニュアルの「閉じたぶんのメモリも戻ります」が静かに嘘になる。
+ */
+describe('別窓の開き方(#685 着地前レビュー M2)', () => {
+  it('🔴 `noopener` を渡して開く', () => {
+    const calls: Array<[string, string, string | undefined]> = [];
+    const spy = vi
+      .spyOn(window, 'open')
+      .mockImplementation((url?: string | URL, name?: string, features?: string) => {
+        calls.push([String(url), String(name), features]);
+        return null;
+      });
+    try {
+      openViewWindowUrl('https://example.test/#pkc?container=c1&entry=e1');
+    } finally {
+      spy.mockRestore();
+    }
+    expect(calls, '窓を開いていない').toHaveLength(1);
+    expect(calls[0]![0]).toBe('https://example.test/#pkc?container=c1&entry=e1');
+    expect(calls[0]![1], '別窓ではなく同じ場所へ開いている').toBe('_blank');
+    expect(
+      calls[0]![2],
+      '`noopener` が落ちている ── 同じ renderer プロセスに残り、閉じても常駐が還らない',
+    ).toBe('noopener');
+  });
+
+  /** ⚠ **値そのものも pin する** ── 呼び側 2 つが同じ物を使うことの錨。 */
+  it('⚠ 開き方の値は 1 か所に在る', () => {
+    expect(VIEW_WINDOW_FEATURES).toBe('noopener');
+  });
+});
+
+/**
+ * 🔴 **押した瞬間に返事をする**(#685 動線レビュー 欠陥 7、2026-09-04)。
+ *
+ * ⚠ 直す前は、押してから **2.5 秒**(`VIEW_WINDOW_ANNOUNCE_MS`)画面が
+ *   1 ドットも動かなかった。ポップアップを止めている人には「効いていない」に
+ *   見えるので**もう一度押す** ⇒ 許可を出した後に**2 枚開く**。
+ * ⚠ 付箋には退避先が無いので、失敗した回に残るのは**無反応 2.5 秒だけ**である。
+ */
+describe('押した瞬間の返事(#685 動線レビュー 欠陥 7)', () => {
+  it('🔴 押したら「開いています…」が出て、開けたら消える', async () => {
+    const b = bench({ answered: true });
+    await openViewInWindow(null, { ...b.deps, selected: () => ({ containerId: 'c1', lid: 'e1' }) });
+    expect(b.notices, '押しても何も出ない(2.5 秒の無反応に戻っている)').toEqual([
+      VIEW_WINDOW_OPENING,
+      '',
+    ]);
+  });
+
+  /**
+   * 🔴 **塞がれた回も消す** ── 理由(`fail`)は別の行に出るので、
+   *   「開いています…」を残すと**2 つの文が並んで矛盾する**。
+   */
+  it('🔴 塞がれたら「開いています…」を消して、理由に譲る', async () => {
+    const b = bench({ answered: false });
+    await openViewInWindow(null, { ...b.deps, selected: () => ({ containerId: 'c1', lid: 'e1' }) });
+    expect(b.notices.at(-1), '「開いています…」が出たまま理由が出ている').toBe('');
+    expect(b.fails[0], '理由が出ていない').toContain('ポップアップの許可');
+  });
+
+  /** ⚠ **面の窓でも同じ** ── 無反応 2.5 秒は付箋だけの話ではない。 */
+  it('⚠ 面を別窓で開くときも返事をする', async () => {
+    const b = bench({ answered: true });
+    await openViewInWindow('dual', b.deps);
+    expect(b.notices).toEqual([VIEW_WINDOW_OPENING, '']);
+  });
+
+  /** ⚠ **URL が組めなかった回は出さない** ── 開こうとしていないので「開いています」は嘘。 */
+  it('⚠ 組めなかった回は「開いています…」を出さない', async () => {
+    const b = bench({ base: 'https://x.test/#already' });
+    await openViewInWindow(null, b.deps);
+    expect(b.opened, '前提が崩れた(組めているのに開いていない)').toEqual([]);
+    expect(b.notices, '開いていないのに「開いています…」と言った').toEqual([]);
   });
 });
