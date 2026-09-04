@@ -89,6 +89,7 @@ import {
   MANUAL_WINDOW_TITLE,
   type ManualAppearance,
 } from '@adapter/platform/manual-window';
+import { portableManualPage } from '@adapter/platform/portable-manual';
 import { appNoticeStore } from '@adapter/platform/notice-store';
 import { NOTICES } from '@features/notice/notice-log';
 import { applyTheme, chooseTheme, initialTheme, isTheme } from '@adapter/ui/render/theme';
@@ -448,6 +449,13 @@ function currentAppearance(): ManualAppearance {
   };
 }
 
+/**
+ * 🔴 持ち歩ける 1 枚に焼き込んだマニュアルの page(#648 段③)。⚠ document ごとに 1 つ ──
+ *   `blob:` URL は最初に押したとき 1 回だけ作る(`portable-manual.ts` の「寿命」)。
+ *   素の PKC3(焼き込みが無い)では `url()` が `null` を返すだけで、経路は変わらない。
+ */
+const portableManual = portableManualPage(document);
+
 function openManualTile(
   dispatcher: Dispatcher,
   markdown: { render(text: string, opts?: { currentContainerId?: string }): Promise<string> },
@@ -457,6 +465,7 @@ function openManualTile(
    */
   notify: (text: string) => void,
 ): Promise<unknown> {
+  const appearance = currentAppearance();
   return openManualWindow({
     title: MANUAL_WINDOW_TITLE,
     version: versionText(),
@@ -466,14 +475,18 @@ function openManualTile(
     /**
      * 🔴 焼いた 1 枚(`manual.html`)は **build の生成物の隣**に在る(段②)。
      * ⚠ 持ち歩ける 1 枚(portable = この document 自身が bundle を抱えている)には
-     *   隣に無いので `null` → `about:blank` に組む経路へ落ちる。
+     *   隣に無い ── 1 枚の中に焼き込んだ同じ page を `blob:` URL で渡す(#648 段③)。
+     *   焼き込みの無い旧い 1 枚では `null` → `about:blank` に組む経路へ落ちる。
      * ⚠ `document.baseURI` から引く ── Pages の `/` と `/dev/` の両方で同じビルドが
      *   動く(`base: './'`)ので、絶対 path を書かない。
      */
-    pageUrl: readBundle(document) === null ? new URL(MANUAL_PAGE_FILE, document.baseURI).href : null,
+    pageUrl:
+      readBundle(document) === null
+        ? new URL(MANUAL_PAGE_FILE, document.baseURI).href
+        : portableManual.url(appearance),
     // 🔑 焼いた page と同じ関数で同じ印を組む(`/dev/` でも原文が変われば入れ替わる)
     tag: manualBuildTag(versionText(), MANUAL_TEXT),
-    appearance: currentAppearance(),
+    appearance,
   }).then((win) => {
     // 🔴 **開けなかったら理由を出す**(押しても何も起きないボタンにしない)
     if (win === null) {

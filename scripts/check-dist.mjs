@@ -96,6 +96,9 @@ const SHIPPED_FLOOR_KB = { dev: 3500, product: 800 };
  *   アプリ本体(6512.1 KB)を 1 枚へ inline するので、binary が base64 で膨らむぶん大きい。
  * ⚠ 余裕は約 1950 KB ── **誤取込 1 本(数百 KB〜MB)は止まる**。
  *   下限は「空 / 途中で切れた雛形」だけを狙う(実測の半分以下)。
+ * 🔑 2026-09-04(#648 段③)にマニュアルの page を 1 枚の中へ焼き込んだ ── 実測 **7613.5 KB**
+ *   (dev の kind で `npm run build:portable`。+562 KB = page 391 KB を JSON で逃がした分)。
+ *   cap 9000 KB の内に収まったので動かしていない(余裕は約 1390 KB ── 誤取込 1 本は今も止まる)。
  */
 const PORTABLE_CAP_KB = 9000;
 const PORTABLE_FLOOR_KB = 3000;

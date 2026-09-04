@@ -1030,11 +1030,14 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     //    ①追記欄を畳んでいても付箋は追記欄つきで開き、畳んでも本体の記録は動かない
     //    ②付箋を開いた直後、カーソルは追記欄に在る ── どちらも `main.ts` の配線
     //    (`enterNoteWindow`)が呼ばれることを見るので、unit では届かない
+    // ⚠ 2026-09-04(#648 段③): `portable-html.smoke.spec.ts` に **+1 件**
+    //    (持ち歩ける 1 枚で選んだ配色が blob: の窓の地の色になる ── `file://` 由来の
+    //    blob が localStorage に触れなくても、焼いた属性で届くことは実機でしか見えない)
     expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(80);
     expect(
       counts.reduce((a, b) => a + b, 0),
       'smoke の test が増減した(足したらこの数を直す)',
-    ).toBe(417);
+    ).toBe(418);
   });
 });
 

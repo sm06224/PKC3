@@ -199,6 +199,41 @@ describe('焼いたマニュアル — 配色', () => {
     });
 
     /**
+     * 🔴 **保存が読めなければ、`<html>` に焼かれた配色を採る**(#648 段③)。
+     * ⚠ 持ち歩ける 1 枚は `blob:` の document でこの page を開く ── `file://` 由来の blob は
+     *   `localStorage` に触れないことがある。opener が焼いた属性が無視されると、
+     *   選んだ配色が**開くたび OS の明暗へ戻る**。
+     */
+    it('🔴 保存が無ければ、<html> に焼かれた配色を採る(持ち歩ける 1 枚)', () => {
+      document.documentElement.setAttribute('data-pkc-theme', 'dracula');
+      vi.stubGlobal('matchMedia', () => ({ matches: true }));
+      expect(run()).toBe('dracula');
+    });
+
+    it('🔴 対照群 ── 保存が在れば保存が勝つ(http で開いた manual.html の答えを変えない)', () => {
+      document.documentElement.setAttribute('data-pkc-theme', 'dracula');
+      localStorage.setItem(THEME_STORAGE_KEY, 'nord');
+      expect(run()).toBe('nord');
+    });
+
+    it('⚠ 焼かれた配色が CSS に無い値なら OS へ落ちる(同じ門)', () => {
+      document.documentElement.setAttribute('data-pkc-theme', 'bogus');
+      vi.stubGlobal('matchMedia', () => ({ matches: true }));
+      expect(run()).toBe('dark');
+    });
+
+    it('🔴 保存が投げても焼かれた配色を採る(opaque origin の blob がまさにこれ)', () => {
+      document.documentElement.setAttribute('data-pkc-theme', 'solarized');
+      vi.stubGlobal('localStorage', {
+        getItem: () => {
+          throw new Error('denied');
+        },
+      });
+      vi.stubGlobal('matchMedia', () => ({ matches: true }));
+      expect(run()).toBe('solarized');
+    });
+
+    /**
      * 🔴 **アプリの「最初の配色」と同じ答えを出す**(着地前レビュー ⚠-3 ── 規則が
      * `initialTheme()` と script の 2 か所に生えたので、突き合わせる場所を 1 つ置く)。
      * ⚠ 片側だけ変えた日(既定を変える / 保存形式を変える)に、アプリと窓の配色が
@@ -281,6 +316,7 @@ describe('焼いたマニュアル — 断片へ送る script(D4)', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     document.body.innerHTML = '';
+    document.documentElement.removeAttribute('data-pkc-theme');
   });
   const run = (hash: string): string[] => {
     vi.stubGlobal('location', { hash });

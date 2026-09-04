@@ -17,7 +17,11 @@
  *   「材料を受け取って HTML 文字列を返す」だけ ── browser API を使わない
  *   (build でも test でも同じ関数が走る)。
  *
- * ## ⚠ 段①の窓は**残す**(持ち歩ける 1 枚 = portable では `manual.html` が隣に無い)
+ * ## ⚠ 持ち歩ける 1 枚(portable)は、この page を**1 枚の中に焼き込んで** `blob:` で開く(#648 段③)
+ *
+ * 隣に `manual.html` は無いが、`build/portable/fold.mjs` が同じ page を 1 枚の中へ焼き、
+ * `adapter/platform/portable-manual.ts` が `blob:` URL にして同じ経路で開く。
+ * 段①の `about:blank` に組む窓は**焼き込みの無い旧い 1 枚の逃げ道**としてだけ残る。
  *
  * 器の見た目(`MANUAL_CHROME_CSS`)・帯の字・窓の題名は**この file が正本**で、
  * `adapter/platform/manual-window.ts` はここから import する ── 2 つの経路で
@@ -226,12 +230,23 @@ export function themeBootScript(
       JSON.stringify(textScale.sizes) +
       ';if(s!==null&&Object.prototype.hasOwnProperty.call(m,s))document.documentElement.style.setProperty("--pkc-text-size",m[s]);'
     : '';
+  /**
+   * 🔑 **保存が読めなければ、`<html>` に焼かれている配色を採る**(#648 段③)。
+   * ⚠ 持ち歩ける 1 枚は `blob:` の document でこの page を開く ── `file://` 由来の blob は
+   *   `localStorage` に触れないことがある(opaque origin)。opener が開く前に
+   *   `data-pkc-theme` を焼いておくので(`portable-manual.ts` の `bakeAppearance`)、
+   *   保存 → 焼かれた属性 → OS の順で倒す。`manual.html` を http で開く経路では属性が無いので
+   *   これまでどおり 保存 → OS(`theme.ts` の `initialTheme` と同じ答え)。
+   * ⚠ 字の大きさは属性ではなく inline の `--pkc-text-size` で焼かれる ── 下の `size` は
+   *   「保存が在れば上書き、無ければ触らない」なので、焼かれた値がそのまま残る。
+   */
   return (
     '(function(){var ok=' +
     JSON.stringify([...themeIds]) +
     ',t=null;try{t=localStorage.getItem(' +
     JSON.stringify(storageKey) +
-    ')}catch(e){}if(ok.indexOf(t)<0){t="light";try{if(matchMedia("(prefers-color-scheme: dark)").matches)t="dark"}catch(e){}}' +
+    ')}catch(e){}if(ok.indexOf(t)<0){t=document.documentElement.getAttribute("data-pkc-theme");' +
+    'if(ok.indexOf(t)<0){t="light";try{if(matchMedia("(prefers-color-scheme: dark)").matches)t="dark"}catch(e){}}}' +
     'document.documentElement.setAttribute("data-pkc-theme",t);' +
     size +
     /**

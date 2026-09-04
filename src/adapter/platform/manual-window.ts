@@ -13,7 +13,9 @@
  * 1. `window.open('', name)` で窓を**同期で**掴む(user の操作の中で ── ポップアップ阻止を避ける)
  * 2. 既に**同じ版**で組んであれば、触らずに前へ出す(読んでいた所を失わない)
  * 3. `manual.html` が隣に在る(`pageUrl`)なら **`location.replace` でそこへ移す** ── 組まない
- * 4. 隣に無い(持ち歩ける 1 枚 = portable)なら、段①のとおり `about:blank` に組む
+ *    (持ち歩ける 1 枚では、1 枚の中に焼き込んだ同じ page の **`blob:` URL** が `pageUrl` に来る
+ *    ── #648 段③、`portable-manual.ts`。経路はここでは区別しない)
+ * 4. `pageUrl` が無い(焼き込みの無い旧い 1 枚)なら、段①のとおり `about:blank` に組む
  *
  * 🔑 **PKC をもう 1 枚読み込まない。** `view-window.ts` は面を別窓で開くが、
  *   それは #292 で否定された形(「**ユーザーはもう一つ PKC が開いて混乱すると
@@ -74,9 +76,10 @@ export interface OpenManualWindowDeps {
   /** 本文を描く口。⚠ **失敗したら素の原文**を出す(白紙にしない)。 */
   readonly render: (text: string) => Promise<string>;
   /**
-   * 🔴 焼いた 1 枚(`manual.html`)の URL。**`null` = 隣に無い**(持ち歩ける 1 枚)。
+   * 🔴 焼いた 1 枚(`manual.html`)の URL。**`null` = どこにも無い**(焼き込みの無い旧い 1 枚)。
    *
    * ⚠ 在るなら**組まずにそこへ移す** ── F5 で読み直せて、設定の配色が効く。
+   *   持ち歩ける 1 枚では、1 枚の中に焼き込んだ page の `blob:` URL が来る(#648 段③)。
    * ⚠ 呼び側が決める(ここでは fetch しない)── 「隣に在るか」は build の形で
    *   決まっており、実行時に探ると dev の SPA fallback(`index.html` が 200 で返る)に
    *   騙されて **PKC をもう 1 枚**開く。

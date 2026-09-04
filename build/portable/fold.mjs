@@ -28,9 +28,14 @@ import { join } from 'node:path';
 import {
   bundleTagCount,
   externalRefs,
+  manualPageTag,
+  manualPageTagCount,
   shellOf,
   PORTABLE_HEAD_SCAN,
 } from './shell-scan.mjs';
+// ⚠ 綴りは検品(`dist-inspect.mjs`)と同じ 1 つ(`features/help/manual-page.ts` の
+//    `MANUAL_PAGE_FILE` とも同じ ── `tests/features/manual-page.test.ts` が突き合わせる)
+import { MANUAL_PAGE } from '../../scripts/dist-inspect.mjs';
 
 const DIR = process.argv[2] ?? 'dist-portable';
 const OUT = process.argv[3] ?? join(DIR, 'pkc3.html');
@@ -127,6 +132,24 @@ const css = readFileSync(join(A, pick(/^index-.*\.css$/)), 'utf-8');
 let html = readFileSync(join(DIR, 'index.html'), 'utf-8');
 
 /**
+ * 🔴 **マニュアルの page も 1 枚へ焼き込む**(#648 段③)。
+ *
+ * `manual.html` は `build/manual-page-plugin.ts` が `dist-portable/` へ焼く(`portable.config.ts`
+ * に plugin を入れてある)。持ち歩ける 1 枚には隣が無いので、中身を JSON の `<script>` として
+ * 器の末尾に置き、アプリが `blob:` URL にして窓へ渡す(`adapter/platform/portable-manual.ts`)。
+ * ⚠ **無ければ落とす** ── 黙って畳むと、その 1 枚のマニュアルの窓は F5 で白紙に戻る
+ *   (段①のまま)。plugin が外れた日にここで止まる。
+ */
+let manualHtml;
+try {
+  manualHtml = readFileSync(join(DIR, MANUAL_PAGE), 'utf-8');
+} catch {
+  throw new Error(`畳む前にマニュアルの page が焼かれていない(${join(DIR, MANUAL_PAGE)} が無い)`);
+}
+if (manualHtml.length < 100_000)
+  throw new Error(`マニュアルの page が小さすぎる: ${manualHtml.length} バイト(描画が空振りしている)`);
+
+/**
  * 🔴 **器いじりは、中身を流し込む「前」に全部やる**(2 稿目。1 稿目で起動を壊した)。
  *
  * ⚠ 1 稿目は畳んだ後に `.replace('</head>', …)` していた ── ところが
@@ -151,6 +174,16 @@ html = html
   .replace('<head>', () => `<head>${BUNDLE_TAG}`);
 if (!html.includes(BUNDLE_TAG))
   throw new Error('可搬バンドルの印を差し込めなかった(<head> に当たらない)');
+
+/**
+ * 🔑 マニュアルの page は**器の `</body>` の直前**に置く(まだ中身を流し込む前なので、
+ *   `lastIndexOf` は必ず器のほうに当たる)。⚠ 書き出し(段④)は DB 画像を
+ *   **最後の `</body>` の前**に差し込むので、焼き込みはその**前**に来る ── 封筒の中に
+ *   `</body>` は 1 つも無い(`manualPageTag` が `<` を逃がす)ので、順番は崩れない。
+ */
+const bodyEnd = html.lastIndexOf('</body>');
+if (bodyEnd < 0) throw new Error('器に </body> が無い(マニュアルの page を置く所が無い)');
+html = html.slice(0, bodyEnd) + manualPageTag(manualHtml) + html.slice(bodyEnd);
 
 html = html
   .replace(/<script type="module"[^>]*><\/script>/, () => `<script type="module">${app}</script>`)
@@ -186,6 +219,19 @@ for (const mark of ['data-pkc-slot="root"', 'createObjectURL']) {
 const tags = bundleTagCount(shell);
 if (tags !== 1)
   throw new Error(`可搬バンドルの印が器に ${tags} 件(1 件でなければならない)`);
+/**
+ * 🔴 **マニュアルの page が器に 1 件、しかも読み戻せること**(#648 段③)。
+ * ⚠ 「在る」だけでは足りない ── 封筒の逃がし方が壊れていれば `JSON.parse` が落ちるか、
+ *   `</script>` で切れて中身が欠ける。読む側と同じ手順(JSON.parse)で**丸ごと戻る**ことを見る。
+ */
+const manualTags = manualPageTagCount(shell);
+if (manualTags !== 1)
+  throw new Error(`マニュアルの page の印が器に ${manualTags} 件(1 件でなければならない)`);
+{
+  const m = /<script type="application\/json" data-pkc-manual-page>([^<]*)<\/script>/.exec(html);
+  if (!m || JSON.parse(m[1]) !== manualHtml)
+    throw new Error('焼き込んだマニュアルの page が丸ごと読み戻せない(封筒の逃がし方が壊れている)');
+}
 /**
  * 🔴 **印が「頭」に在ること**(段④ の差し替えが見る範囲に収まっている)。
  * ⚠ ここが外れると、書き出しは**印を 1 件も見つけられずに落ちる** ──
