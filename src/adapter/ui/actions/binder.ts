@@ -1874,6 +1874,28 @@ export function runGlobalCommand(
      *   数えると、この鍵が**追記欄まで一緒に消す**ようになる(頼まれていない)。
      */
     if (dry) return true;
+    /**
+     * 🔴 **スマホ用画面では断る**(#632 段④。実測で見つけた)。
+     *
+     * ⚠ 段① は `toggle-pane`(`Alt+[` / `Alt+]`)にだけ門を置き、**対称の反対側**で
+     *   ある**この鍵を取りこぼしていた** ── CLAUDE.md「片側を直したら、対称の
+     *   反対側を必ず疑う」。
+     * 🔴 実測(375×667、`Ctrl+Alt+\`):`pkc3.panes` が `null` →
+     *   **`'sidebar inspector'`** に変わるのに、画面は 1px も動かず状態の行も**空のまま**。
+     *   ⚠ **見えない状態変化が保存される**ので、PC の幅へ戻したときに
+     *   **身に覚えのない畳み**が残る(`toggle-pane` の門のコメントが、
+     *   まさにこの害を名指しで戒めている)。
+     * 🔑 断り文は `toggle-pane` と**同じ字**にする ── 同じことを断るのに
+     *   2 通りの言い方をしない。
+     */
+    if (appPhone.isPhone()) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: 'スマホの画面では一覧・本文・情報を 1 枚ずつ出しているので、列は畳めません',
+      });
+      prevent();
+      return true;
+    }
     const hidden = appPanes.getHidden();
     const columnsHidden = COLUMN_PANES.filter((p) => hidden.includes(p));
     const next =

@@ -795,3 +795,43 @@ test('🔴 横に持ったスマホでは、2 ペインを積まずに左右の�
     '右のペイン',
   ]);
 });
+
+/**
+ * 🔴 **集中モードの鍵を押しても、見えない畳みが残らない**(#632 段④)。
+ *
+ * ## なぜ実ブラウザで見るか
+ *
+ * ⚠ 害の本体は **`localStorage` に残る**こと ── unit も台の `appPanes` は見られるが、
+ *   **本物の `localStorage` へ書かれるか**と**画面が本当に動かないか**は
+ *   実ブラウザにしか無い。
+ * 🔴 実測(直す前、375×667):`pkc3.panes` が `null` → **`'sidebar inspector'`**
+ *   に変わるのに、状態の行は**空のまま**で画面も 1px も動かなかった。
+ *   ⚠ PC の幅へ戻すと**身に覚えのない畳み**が残る。
+ */
+test('🔴 スマホで集中モードの鍵を押すと理由が出て、畳みの記録は残らない', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 667 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  await createEntry(page, 'text');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  const before = await page.evaluate(() => localStorage.getItem('pkc3.panes'));
+  await page.keyboard.press('Control+Alt+Backslash');
+
+  await expect(
+    page.locator(REGION('status')),
+    '黙って受けている(理由が出ていない)',
+  ).toContainText('列は畳めません');
+  const after = await page.evaluate(() => localStorage.getItem('pkc3.panes'));
+  expect(after, `畳みの記録が動いた(${String(before)} → ${String(after)})`).toBe(before);
+
+  /**
+   * 🔑 **対照群 ── 追記欄の鍵は効く**(まとめて断っていない)。
+   * ⚠ 置かないと「スマホでは畳む鍵を全部殺す」実装がこの test を素通りする
+   *   ── それは user 指示 2026-08-27 の道を 1 本殺すことになる。
+   */
+  const box = page.locator(REGION('append'));
+  const shown = await box.isVisible();
+  await page.keyboard.press('Alt+Backslash');
+  await expect(box, '追記欄の鍵まで殺している').toBeVisible({ visible: !shown });
+});
