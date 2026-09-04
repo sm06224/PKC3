@@ -30,7 +30,7 @@ export const TEXT_SCALE_ATTR = 'data-pkc-text-scale';
 /** `app.css` の `body { font-size: var(--pkc-text-size, 13px) }` と 1 対 1。 */
 export const TEXT_SIZE_VAR = '--pkc-text-size';
 
-function readStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
+function readStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null {
   try {
     return typeof localStorage !== 'undefined' ? localStorage : null;
   } catch {
@@ -86,11 +86,22 @@ export function applyTextScale(target: HTMLElement, scale: TextScale): void {
   target.style.setProperty(TEXT_SIZE_VAR, textScaleSpec(scale).size);
 }
 
-/** user が選んだ ── 当てて**保存する**。 */
+/**
+ * user が選んだ ── 当てて**保存する**。
+ *
+ * 🔴 **「標準」を選ぶ = 選んでいない状態へ戻す**(2026-09-04、#656 ①)。
+ * ⚠ 直す前は `'standard'` も `setItem` していた ── すると `chosenTextScale()` が
+ *   「選んだ」と読み、マニュアルの窓へ「標準の大きさ」を当て続ける。**鍵を消す道が
+ *   repo に 1 つも無かった**ので、一度「大」を試した人は二度と「選んでいない」に戻れなかった
+ *   (マニュアル §4-2 の「標準を選べば元に戻せます」が、窓については嘘だった)。
+ * 🔑 既定を選んだら鍵ごと消す ── `initialTextScale()` は鍵が無ければ既定へ落ちるので、
+ *   次の起動の見え方は 1px も変わらない。変わるのは「選んだか」の答えだけである。
+ */
 export function chooseTextScale(target: HTMLElement, scale: TextScale): void {
   applyTextScale(target, scale);
   try {
-    readStorage()?.setItem(TEXT_SCALE_STORAGE_KEY, scale);
+    if (scale === DEFAULT_TEXT_SCALE) readStorage()?.removeItem(TEXT_SCALE_STORAGE_KEY);
+    else readStorage()?.setItem(TEXT_SCALE_STORAGE_KEY, scale);
   } catch {
     // 保存できないだけ ── この session では効いている
   }

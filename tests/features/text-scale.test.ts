@@ -227,6 +227,40 @@ describe('選んだ大きさ(chosenTextScale)', () => {
   });
 
   /**
+   * 🔴 **「標準」を選ぶと鍵が消える**(#656 ①)。
+   * ⚠ 直す前は `'standard'` も保存していた ── 一度「大」を試すと、「標準」へ戻しても
+   *   `chosenTextScale()` が「選んだ」と読み続け、**選んでいない状態へ二度と戻れなかった**。
+   * 🔑 観測点は鍵そのもの(`localStorage`)── `chosenTextScale()` だけ見ると、
+   *   「`'standard'` を null に読み替える」実装でも通る(鍵は残る)。
+   */
+  it('🔴 「標準」を選ぶと鍵が消える(選んでいない状態へ戻る)', () => {
+    // 対照群 ── 「大」を選べば鍵が書かれる(規則そのものが生きている)
+    chooseTextScale(document.documentElement, 'large');
+    expect(localStorage.getItem('pkc3.text-scale'), '前提が崩れている(大を選んでも鍵が無い)').toBe(
+      'large',
+    );
+    chooseTextScale(document.documentElement, 'standard');
+    expect(localStorage.getItem('pkc3.text-scale'), '「標準」を選んだのに鍵が残っている').toBeNull();
+    expect(chosenTextScale(), '窓へ当て直す側が「選んだ」と読む').toBeNull();
+    // ⚠ 画面には当たっている(鍵を消しただけで、見え方は既定のまま)
+    expect(currentTextScale(document.documentElement)).toBe(DEFAULT_TEXT_SCALE);
+    expect(initialTextScale(), '次の起動は既定へ落ちる').toBe(DEFAULT_TEXT_SCALE);
+  });
+
+  it('保存できない環境でも「標準」を選べる(removeItem が投げても落ちない)', () => {
+    const orig = Storage.prototype.removeItem;
+    Storage.prototype.removeItem = () => {
+      throw new Error('denied');
+    };
+    try {
+      expect(() => chooseTextScale(document.documentElement, 'standard')).not.toThrow();
+      expect(currentTextScale(document.documentElement)).toBe('standard');
+    } finally {
+      Storage.prototype.removeItem = orig;
+    }
+  });
+
+  /**
    * ⚠ 原文 pin(`main.ts` はどの test からも実行されない)。見るのは 1 点 ──
    *   マニュアルの窓へ渡す大きさを、**効いている値**ではなく**保存**から読んでいること。
    */
