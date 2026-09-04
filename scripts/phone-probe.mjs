@@ -49,6 +49,8 @@ const exe = process.env.PKC3_CHROMIUM;
  *   **境目そのもの**を測るため。⚠ 768×1024(iPad 縦)は「境目の外側だが狭い」の代表で、
  *   ここが行き止まりなら境目の数字を見直す材料になる。
  * ⚠ 844×390 は**横向き**(高さが 390px しかない)── 縦の予算がいちばん厳しい形。
+ * ⚠ 800×400 / 1024×480 / 1280×500 は **#663 の境目**(`PHONE_MAX_HEIGHT_PX` = 480)の
+ *   内・内・外 ── 高さで切る判定が「幅 720 を超える窓」で効いているかを見る。
  */
 const VIEWPORTS = [
   [360, 640],
@@ -60,6 +62,9 @@ const VIEWPORTS = [
   [768, 1024],
   [800, 600],
   [844, 390],
+  [800, 400],
+  [1024, 480],
+  [1280, 500],
   // 🔑 **対照群** ── ここで押せない物が在るなら、結果は計器の話である
   [1440, 900],
 ];
@@ -183,8 +188,33 @@ for (const [width, height] of VIEWPORTS) {
    *   引っかかる。⚠ 「押せるか」を判定するのは下の `elementFromPoint` 1 か所であって、
    *   ここの押しではない(段取りで測ってしまうと、窓ごとに台が変わる)。
    */
+  const cardOpen = async () =>
+    (await page.locator('[data-pkc-region="announce"] [data-pkc-action="dismiss-announce"]').count()) > 0;
+  const closeCard = async () => {
+    await page.click('[data-pkc-region="announce"] [data-pkc-action="dismiss-announce"]', {
+      force: true,
+    });
+    await page.waitForTimeout(400);
+  };
+  /**
+   * 🔴 **スマホ用画面では、カードが一覧を覆う**(#632 段① の後、2026-09-04 に踏んだ)。
+   *
+   * ⚠ お知らせのカードは `grid-area: detail` で**一覧と同じセルに重なる**ので、
+   *   `create-pick` を force で押しても**指はカードに当たり**、作る menu は開かない
+   *   (probe ごと落ちて、13 窓の 1 つも採れなかった)。
+   * 🔑 menu が開かなければ**カードを閉じてから作る** ── その窓の「開」の行は
+   *   「開いたままではノートを作れない」として**判定不能を書く**(採れない物を
+   *   採れた顔にしない)。⚠ 判定は `elementFromPoint` 1 か所のまま(段取りで測らない)。
+   */
+  let closedForSetup = false;
+  const menuItem = page.locator('[data-pkc-region="create-menu"] [data-pkc-archetype="text"]');
   await page.click('[data-pkc-field="create-pick"]', { force: true });
-  await page.click('[data-pkc-region="create-menu"] [data-pkc-archetype="text"]', { force: true });
+  if (!(await menuItem.isVisible()) && (await cardOpen())) {
+    await closeCard();
+    closedForSetup = true;
+    await page.click('[data-pkc-field="create-pick"]', { force: true });
+  }
+  await menuItem.click({ force: true });
   await page.click('[data-pkc-field="create-run"]', { force: true });
   await page.waitForTimeout(800);
   // ⚠ 作った直後は編集に入っている ── 表の「閲覧」を作るために一度保存する
@@ -213,15 +243,17 @@ for (const [width, height] of VIEWPORTS) {
     });
   };
 
-  const cardOpen = async () =>
-    (await page.locator('[data-pkc-region="announce"] [data-pkc-action="dismiss-announce"]').count()) > 0;
-
   for (const カード of ['開', '閉']) {
-    if (カード === '閉' && (await cardOpen())) {
-      await page.click('[data-pkc-region="announce"] [data-pkc-action="dismiss-announce"]', {
-        force: true,
+    if (カード === '閉' && (await cardOpen())) await closeCard();
+    // ⚠ 段取りのために閉じた窓 ── 「開」の状態は製品に無い(カードが一覧を覆う)
+    if (カード === '開' && closedForSetup) {
+      rows.push({
+        窓: `${width}x${height}`,
+        カード,
+        画面: '—',
+        判定不能: 'カードが一覧を覆うので、開いたままではノートを作れない(スマホ用画面)',
       });
-      await page.waitForTimeout(400);
+      continue;
     }
     // ⚠ カードが最初から閉じている環境では「開」の行は採れない ── 採れないことを書く
     if (カード === '開' && !(await cardOpen())) {

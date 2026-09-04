@@ -19,7 +19,7 @@ import { buildShell } from '../../src/adapter/ui/render/shell';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { appPhone } from '../../src/adapter/ui/render/phone-layout';
 import { appPanes, applyPaneVisibility } from '../../src/adapter/ui/render/pane-visibility';
-import { PHONE_MAX_PX, PHONE_MIN_PX } from '../../src/features/phone-layout';
+import { PHONE_MAX_HEIGHT_PX, PHONE_MAX_PX, PHONE_MIN_PX } from '../../src/features/phone-layout';
 import { ENTRY_MENU_ACTIONS, NOTE_TOOL_ACTIONS } from '../../src/features/entry-actions';
 import { blocksFor, decl, mediaBlock, stripComments, withoutMedia } from '../helpers/css-blocks';
 
@@ -992,12 +992,54 @@ describe('対応外の幅(変わったときだけ伝える)', () => {
       asked.push(q);
       return new FakeMedia(false);
     });
+    /**
+     * 🔴 1 本目は **幅か高さ**(#663)── `,` は media query の OR。
+     * ⚠ 高さの項を落とす変異はここで落ちる(横向きのスマホが 2 列版面へ戻る)。
+     */
     expect(asked, '見張りの本数が違う').toEqual([
-      `(max-width: ${PHONE_MAX_PX}px)`,
+      `(max-width: ${PHONE_MAX_PX}px), (max-height: ${PHONE_MAX_HEIGHT_PX}px)`,
       `(max-width: ${PHONE_MIN_PX - 1}px)`,
     ]);
     // ⚠ 空振り防止 ── 2 本が**別の幅**を聞いている(同じ字なら片方は無意味である)
     expect(asked[0], '2 本が同じ幅を聞いている').not.toBe(asked[1]);
+  });
+});
+
+/**
+ * 🔴 **横に倒したスマホ(高さ 480px 以下)もスマホ用画面にする**(#663)。
+ *
+ * ⚠ 替え玉の台なので「幅 844 / 高さ 390」を直接は測れない ── 測れるのは
+ *   **高さの問い合わせが真になったとき、版面の属性が付くか**である
+ *   (実ブラウザの寸法は `tests/smoke/phone.smoke.spec.ts` の 844×390 の腕)。
+ * 🔑 替え玉は**問い合わせの字を読んで**答える ── 高さの項が query に無ければ
+ *   `false` を返すので、項を落とす変異はここでも落ちる(上の等値 pin と 2 重)。
+ */
+describe('高さでも切る(#663)', () => {
+  function install(answer: (q: string) => boolean) {
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    document.body.append(root);
+    buildShell(root);
+    appPhone.install(root, (q) => new FakeMedia(answer(q)));
+    appPhone.render({ selectedLid: null, viewMode: 'detail', editing: false, title: '' });
+    return root.querySelector<HTMLElement>('[data-pkc-region="shell"]')!;
+  }
+
+  it('🔴 高さ 480px 以下の問い合わせだけが真でも、スマホ用画面になる', () => {
+    const shell = install((q) => q.includes(`(max-height: ${PHONE_MAX_HEIGHT_PX}px)`));
+    expect(shell.getAttribute('data-pkc-layout'), '横向きのスマホが 2 列版面のまま').toBe('phone');
+  });
+
+  it('⚠ 対照群: 幅も高さも足りている(1280×720)ならスマホ用画面にならない', () => {
+    // 1280×720 = 幅 720 超・高さ 480 超なので、どの問い合わせも偽
+    const shell = install(() => false);
+    expect(shell.getAttribute('data-pkc-layout'), '広い窓なのにスマホ用画面').not.toBe('phone');
+  });
+
+  it('⚠ 対照群: 別の高さ(720px)を聞く替え玉では真にならない(項の字が違えば効かない)', () => {
+    // ⚠ 実装が `(max-height: 720px)` などへ書き換わったら、上の等値 pin と共にここも落ちる
+    const shell = install((q) => q.includes('(max-height: 720px)'));
+    expect(shell.getAttribute('data-pkc-layout'), '聞いていない高さで切り替わった').not.toBe('phone');
   });
 });
 
@@ -1011,6 +1053,8 @@ describe('CSS(構文で読む)', () => {
     const text = bare();
     expect(text, `CSS に ${PHONE_MAX_PX}px が在る`).not.toContain(`${PHONE_MAX_PX}px`);
     expect(text, `CSS に ${PHONE_MIN_PX - 1}px が在る`).not.toContain(`${PHONE_MIN_PX - 1}px`);
+    // #663 ── 高さの境目も同じ規律(CSS に書くと JS と別の高さで切り替わる)
+    expect(text, `CSS に ${PHONE_MAX_HEIGHT_PX}px が在る`).not.toContain(`${PHONE_MAX_HEIGHT_PX}px`);
     // ⚠ 空振り防止 ── 幅で切る `@media` そのものは残っている(1100 / 900)
     expect(text, '幅の @media が 1 つも無い(この検査は何も見ていない)').toContain(
       '@media (max-width: 1100px)',

@@ -698,6 +698,81 @@ test('🔴 360px ちょうどでは断り書きを出さない', async ({ page }
 });
 
 /**
+ * 🔴 **横に倒したスマホ(844×390)もスマホ用画面にする**(#663、推薦 ①)。
+ *
+ * ## なぜ要るか(`scripts/phone-probe.mjs` の実測、2026-09-04)
+ *
+ * 直す前は幅だけで切っていたので 844×390 は **2 列版面**に落ち、一覧 186px に
+ * 帯 4 本(タブ / 探す / 作る / まとめ)が折り返して一覧の丈を超え、はみ出した
+ * **「操作を探す」が、下に寝た情報ペインに覆われて押せなかった**
+ * (カード開 = announce に、閉 = inspector に覆われる ── 4 行とも)。
+ *
+ * ## ここで測るもの
+ *
+ * ① 高さ 390 で **スマホ用画面になっている**こと(unit は替え玉なので寸法を測れない)
+ * ② 一覧ページの **「操作を探す」が指に当たる**こと ── 判定は probe と同じ
+ *    `elementFromPoint`(`toBeVisible()` は覆われていても真になる)。
+ */
+test('🔴 横に倒したスマホ(844×390)でもスマホ用画面になり、「操作を探す」が押せる (#663)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 844, height: 390 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+
+  await expect(
+    page.locator(REGION('shell')),
+    '高さ 390px なのに 2 列版面のまま(幅だけで切っている)',
+  ).toHaveAttribute('data-pkc-layout', 'phone');
+
+  // 🔴 一覧ページ(ノートを開いていない)の「操作を探す」が、自分に当たる
+  const hit = await page.locator('[data-pkc-action="open-palette"]').first().evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    return {
+      w: Math.round(r.width),
+      h: Math.round(r.height),
+      bottom: Math.round(r.bottom),
+      innerH: window.innerHeight,
+      own: at === el || el.contains(at),
+      cover: at?.closest('[data-pkc-region]')?.getAttribute('data-pkc-region') ?? null,
+    };
+  });
+  // ⚠ 空振り防止 ── 面積を持って画面の中に在る(0×0 で「当たった」ではない)
+  expect(hit.w, '「操作を探す」に幅が無い(台の空振り)').toBeGreaterThan(0);
+  expect(hit.h, '「操作を探す」に高さが無い(台の空振り)').toBeGreaterThan(0);
+  expect(hit.bottom, '「操作を探す」が画面の外に在る').toBeLessThanOrEqual(hit.innerH);
+  expect(hit.own, `「操作を探す」が覆われている(覆っているのは ${hit.cover ?? '(なし)'})`).toBe(true);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * ⚠ **対照群 ── 幅も高さも足りている窓(1280×720)はスマホ用画面にならない**(#663)。
+ * 🔑 これが無いと、「いつでもスマホ用画面」にする実装が上を満たして通る。
+ *   ⚠ そして「操作を探す」はここでも押せる ── 押せないなら計器の話である
+ *   (`phone-probe.mjs` が対照群でやっているのと同じ検算)。
+ */
+test('⚠ 1280×720 はスマホ用画面にならず、「操作を探す」も押せる(対照群) (#663)', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  await expect(page.locator(REGION('shell')), '広い窓なのにスマホ用画面').not.toHaveAttribute(
+    'data-pkc-layout',
+    'phone',
+  );
+  const own = await page.locator('[data-pkc-action="open-palette"]').first().evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    return at === el || el.contains(at);
+  });
+  expect(own, '対照群で「操作を探す」が押せない(計器の話)').toBe(true);
+});
+
+/**
  * 🔴 **スマホでは 2 ペインを「1 枚ずつ」出す**(user 裁定 2026-09-04、#671)。
  *
  * > 「**左ペイン表示と右ペイン表示に分けて、どちらかを開いている際は、
