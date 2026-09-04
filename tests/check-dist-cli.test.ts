@@ -50,6 +50,35 @@ describe('検品 CLI', () => {
     }
   });
 
+  /**
+   * 🔴 **`--require-manual` が届く**(#648 💭)。観測点は**その門の文言** ── 旗を無視する
+   *   変異(位置引数の数え方を戻す等)は、同じ dir で「無い」の文言が出ないことで分かる。
+   */
+  it('🔴 --require-manual を渡すと、manual.html が無い product で鳴る(旗が届いている)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pkc3-check-'));
+    try {
+      writeFileSync(join(dir, 'index.html'), '<!doctype html>');
+      const withFlag = run(['product', dir, '--require-manual']);
+      expect(withFlag.code).toBe(1);
+      expect(withFlag.out).toContain('焼きたての product なのに dist に manual.html が無い');
+      // 対照群 ── 旗が無ければその門は鳴らない(他の理由では落ちるが、この文言は出ない)
+      const without = run(['product', dir]);
+      expect(without.code).toBe(1);
+      expect(without.out).not.toContain('焼きたての product');
+      // ⚠ 旗は dir の前に置いても届く(位置引数と混ざらない)
+      expect(run(['product', '--require-manual', dir]).out).toContain('焼きたての product');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('🔴 知らない旗は使い方を出して落ちる(綴りを間違えた旗で門が消えない)', () => {
+    const r = run(['product', '--require-manaul']);
+    expect(r.code).toBe(2);
+    expect(r.out).toContain('知らない旗');
+    expect(r.out).toContain('usage:');
+  });
+
   it('無い directory を渡したら理由を言って落ちる', () => {
     const r = run(['product', join(tmpdir(), 'pkc3-does-not-exist-xyz')]);
     expect(r.code).toBe(1);

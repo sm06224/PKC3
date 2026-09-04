@@ -4,6 +4,9 @@
  *
  *   node scripts/check-dist.mjs product   # map が 1 つでもあれば落とす + 配信量の tripwire
  *   node scripts/check-dist.mjs dev       # map が 1 つも無ければ落とす(調査手段の喪失)
+ *   node scripts/check-dist.mjs product --require-manual
+ *                                         # 焼きたての product(release / nightly)── manual.html の
+ *                                         # 実在も要求する。⚠ 過去の zip を検品する経路には付けない
  *
  * 🔑 **2 段構え**。`tests/build-config.test.ts` は「config がそう書いてあるか」しか
  * 見ない ── plugin が map を足す・`--sourcemap` が渡る、といった経路は config を
@@ -19,12 +22,22 @@ import { fileURLToPath } from 'node:url';
 import { inspectDist, MANUAL_PAGE, PORTABLE_TEMPLATE } from './dist-inspect.mjs';
 
 /**
+ * 🔴 **旗は名指しで受け、知らない旗は使い方を出して落とす**(#648 💭)。
+ * ⚠ 綴りを間違えた旗を黙って捨てると、「要求したつもり」で門が消える ── 呼び側が
+ *   `--require-manaul` と打った日に、release が manual.html 無しで通る。
+ */
+const KNOWN_FLAGS = new Set(['--require-manual']);
+const flags = process.argv.slice(2).filter((a) => a.startsWith('--'));
+const positional = process.argv.slice(2).filter((a) => !a.startsWith('--'));
+const unknownFlags = flags.filter((f) => !KNOWN_FLAGS.has(f));
+
+/**
  * 検品する directory。既定は `dist/`。
  * ⚠ 第 2 引数で差し替えられる ── Pages は **release の成果物を展開したもの**を
  * 配るので(P7 段⑧)、`dist/` 以外を検品する必要がある。
  */
-const DIST = process.argv[3]
-  ? resolve(process.argv[3])
+const DIST = positional[1]
+  ? resolve(positional[1])
   : fileURLToPath(new URL('../dist', import.meta.url));
 
 /**
@@ -127,9 +140,10 @@ function walk(dir) {
   return out;
 }
 
-const kind = process.argv[2];
-if (kind !== 'product' && kind !== 'dev') {
-  console.error('usage: node scripts/check-dist.mjs <product|dev> [dir]');
+const kind = positional[0];
+if ((kind !== 'product' && kind !== 'dev') || unknownFlags.length > 0) {
+  if (unknownFlags.length > 0) console.error(`知らない旗: ${unknownFlags.join(' ')}`);
+  console.error('usage: node scripts/check-dist.mjs <product|dev> [dir] [--require-manual]');
   process.exit(2);
 }
 
@@ -164,6 +178,8 @@ const { lines, errors } = inspectDist({
   sidecarCapKb: PORTABLE_CAP_KB,
   sidecarFloorKb: PORTABLE_FLOOR_KB,
   manualFloorKb: MANUAL_FLOOR_KB,
+  // 🔴 焼きたての product だけ manual.html の実在を要求する(release.yml / nightly.yml が渡す)
+  requireManual: flags.includes('--require-manual'),
   files,
   text,
 });
