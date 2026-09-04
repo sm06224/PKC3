@@ -318,6 +318,27 @@ export async function attachFiles(
     dispatcher.dispatch({ type: 'OP_NOTICE', message: text, ...(open === undefined ? {} : { open }) });
 
   /**
+   * 🔴 **まとめて入れた回は、件数で締める**(#668 E)──「3 件を本文に入れました(c.png ほか)」。
+   *
+   * ⚠ 知らせの行は 1 本なので、3 枚落とすと user が最後に読むのは **3 枚目の 1 行**だけ
+   *   である ── 1・2 枚目が入ったかは、本文を見に行かないと分からない。
+   * 🔑 `put` は**本文へ入った物**(`onPut`)、`expected` は**添付になった物**。入れ先
+   *   (`into`)は回の全件で同じなので、入るなら全件・入らないなら 0 件 ── 両者が揃うのは
+   *   **全部入ったとき**だけで、入れられない種類の回は締めない(件数が嘘にならない)。
+   *   ⚠ 「入れる予定か」を `putAssetIntoNote` に返させて数え分ける形は、差を作れない
+   *   冗長だった(変異試験 S2 が SURVIVED で教えた)── 無条件に数える。
+   * ⚠ 締めるのは**全部入ってから** ── 2 枚目以降は錠が解けるまで預かられるので、
+   *   輪を抜けた時点ではまだ入っていない(`intakeDone` と `put === expected` の両方を見る)。
+   * ⚠ 1 件だけの回は締めない(F の「本文のいちばん下に入れました」がそのまま残る)。
+   */
+  const tally = { expected: 0, put: 0, last: '' };
+  let intakeDone = false;
+  const summarize = (): void => {
+    if (!intakeDone || tally.expected < 2 || tally.put !== tally.expected) return;
+    notify(`${why}${tally.put} 件を本文に入れました(${tally.last} ほか)`);
+  };
+
+  /**
    * 取込の本体。⚠ **bytes を置くのもここから**(編集中は 1 バイトも書かない ──
    *   `CREATE_ENTRY` が黙殺されて参照されない asset が残留する、を作らない。P4a review #1)。
    */
@@ -353,7 +374,15 @@ export async function attachFiles(
           mime: attached.mime,
           why,
           batch,
+          onPut: (n) => {
+            tally.put += 1;
+            tally.last = n;
+            summarize();
+          },
         });
+        // ⚠ 1 枚目は `onPut` が**この行より先に**同期で走ることがある ── だから
+        //    `summarize` は `intakeDone` も見る(数え終わる前に締めない)
+        tally.expected += 1;
       } catch (e) {
         dispatcher.dispatch({
           type: 'OP_FAILED',
@@ -361,6 +390,8 @@ export async function attachFiles(
         });
       }
     }
+    intakeDone = true;
+    summarize();
   };
 
   const phase = dispatcher.getState().phase;

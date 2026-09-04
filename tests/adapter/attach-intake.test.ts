@@ -417,6 +417,86 @@ describe('添付を開いていたノートへ入れる(#666)', () => {
     expect(last?.lines.join('\n'), '前の回の写真まで 1 手に継がれている').not.toContain('](asset:');
   });
 
+  /**
+   * 🔴 **E: まとめて入れた回は、件数で締める**(#668 E)。
+   *
+   * ⚠ 知らせの行は 1 本なので、3 枚落とすと user が最後に読むのは 3 枚目の 1 行だけ ──
+   *   1・2 枚目が入ったかは本文を見に行かないと分からなかった。
+   * 🔑 締めは**全部入ってから**(2 枚目以降は錠が解けるまで預かられる)── 台は
+   *   `growingNote`(錠が実際に立つ)で、最後の知らせが件数の 1 行であることを見る。
+   */
+  it('🔴 E 3 枚まとめて入れると、最後の知らせは件数で締まる(#668)', async () => {
+    const { h, bodyNow } = growingNote();
+    const notices: string[] = [];
+    h.d.onState(() => {
+      const n = h.d.getState().notice;
+      if (n !== null && notices[notices.length - 1] !== n) notices.push(n);
+    });
+    await attachFiles(h.d, h.deps, [
+      new File(['1'], 'a.png', { type: 'image/png' }),
+      new File(['2'], 'b.png', { type: 'image/png' }),
+      new File(['3'], 'c.png', { type: 'image/png' }),
+    ]);
+    await new Promise((r) => setTimeout(r, 400));
+    expect(bodyNow(), '前提が崩れた: 3 枚とも入っていない').toContain('![c.png](asset:');
+    expect(notices.at(-1), '件数で締まっていない').toBe('3 件を本文に入れました(c.png ほか)');
+    // ⚠ 1 枚ずつの知らせも出ている(締めが**上書き**した ── 黙らせたのではない)
+    expect(notices, '1 枚ずつの知らせが消えている').toContain('「a.png」を本文のいちばん下に入れました');
+  });
+
+  /**
+   * ⚠ **E 対照群 ── 数え終わる前に締めない。** 3 枚目のハッシュが遅く、その間に 1・2 枚目が
+   *   入り切ると、`put === expected === 2` の瞬間が輪の途中に来る ── そこで締めると
+   *   「2 件を本文に入れました」が先に出て、user は 3 枚目が落ちたと読む。
+   * 🔑 台は **`hashBlob` を 3 枚目だけ遅くし、`getBody` は速く**する(錠がすぐ解ける)。
+   */
+  it('⚠ E 対照群 ── 数え終わる前に途中の件数で締めない', async () => {
+    const h = withOpenNote();
+    const deps: AttachDeps = {
+      ...h.deps,
+      hashBlob: async (blob) => {
+        if (blob.size >= 3) await new Promise((r) => setTimeout(r, 80));
+        return null;
+      },
+    };
+    const notices: string[] = [];
+    h.d.onState(() => {
+      const n = h.d.getState().notice;
+      if (n !== null && notices[notices.length - 1] !== n) notices.push(n);
+    });
+    await attachFiles(h.d, deps, [
+      new File(['1'], 'a.png', { type: 'image/png' }),
+      new File(['2'], 'b.png', { type: 'image/png' }),
+      new File(['333'], 'c.png', { type: 'image/png' }),
+    ]);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(notices.at(-1), '前提が崩れた: 3 枚で締まっていない').toBe('3 件を本文に入れました(c.png ほか)');
+    expect(notices, '数え終わる前に 2 件で締めた').not.toContain('2 件を本文に入れました(b.png ほか)');
+  });
+
+  it('⚠ E 対照群 ── 1 枚なら件数で締めない(場所を言う 1 行のまま)', async () => {
+    const { h } = growingNote();
+    await attachFiles(h.d, h.deps, [new File(['1'], 'solo.png', { type: 'image/png' })]);
+    await new Promise((r) => setTimeout(r, 200));
+    expect(h.d.getState().notice).toBe('「solo.png」を本文のいちばん下に入れました');
+  });
+
+  /**
+   * ⚠ **E 対照群 ── 入れなかった物は数えない。** 入れられない種類を開いたまま 2 枚落とすと、
+   *   2 枚とも「添付にしました(…入れていません)」で、「2 件を本文に入れました」とは言わない。
+   */
+  it('⚠ E 対照群 ── 本文へ入れなかった回は件数で締めない', async () => {
+    const h = harness();
+    h.d.dispatch({ type: 'CREATE_ENTRY', archetype: 'folder', lid: 'f1', title: '資料', edit: false });
+    await attachFiles(h.d, h.deps, [
+      new File(['1'], 'a.pdf', { type: 'application/pdf' }),
+      new File(['2'], 'b.pdf', { type: 'application/pdf' }),
+    ]);
+    await tick();
+    expect(h.d.getState().notice ?? '', '入れていないのに件数で締めた').not.toContain('件を本文に入れました');
+    expect(h.d.getState().notice ?? '').toContain('「b.pdf」を添付にしました');
+  });
+
   it('⚠ A 対照群 ── 本文へ入れられた回は「開く」の身元を添えない', async () => {
     const h = withOpenNote();
     appendsSeen.length = 0;

@@ -72,6 +72,12 @@ export interface PutAssetArgs {
    * ⚠ 省略 = 単独の 1 手(録音・画面録画は 1 回に 1 本なので付けない)。
    */
   readonly batch?: string;
+  /**
+   * 本文へ入ったら呼ぶ(#668 E。まとめて入れた回を件数で締めるために数える)。
+   * ⚠ 入れない枝(ノートが無い / 入れられない種類)では**呼ばない** ── 呼ぶと
+   *   「3 件を本文に入れました」の 3 に、入っていない物が数えられる。
+   */
+  readonly onPut?: (name: string) => void;
 }
 
 /**
@@ -81,7 +87,8 @@ export interface PutAssetArgs {
  *   「消えた」と読ませないので、そこまで言う。
  */
 export function putAssetIntoNote(args: PutAssetArgs): void {
-  const { dispatcher, queue, notify, into, attachedLid, assetKey, name, mime, why, batch } = args;
+  const { dispatcher, queue, notify, into, attachedLid, assetKey, name, mime, why, batch, onPut } =
+    args;
 
   // 🔴 **開いていたノートへ戻す**(添付が奪った選択を返す)
   if (into.lid !== null && into.lid !== attachedLid) {
@@ -127,6 +134,8 @@ export function putAssetIntoNote(args: PutAssetArgs): void {
     });
     // 🔑 **どこに入ったかを言う**(#668 F)── 画面は動かさないので、字で場所を指す
     notify(`${why}「${name}」を本文のいちばん下に入れました`);
+    // ⚠ 知らせの**後**に数える ── まとめた回の締め(件数)が、この 1 行を上書きする側
+    onPut?.(name);
   });
   // ⚠ **預かった回も黙らない**(いつ入るのかを言う)
   if (held)
