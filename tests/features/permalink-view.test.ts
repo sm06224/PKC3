@@ -13,6 +13,7 @@ import {
   dropViewFromHash,
   dropViewWindowToken,
   formatViewDeepLink,
+  isHeadingAnchor,
   parseExternalPermalink,
   parseViewDeepLink,
   parseViewDeepLinkEntry,
@@ -325,5 +326,33 @@ describe('住所の追随(#689 案 B)', () => {
     expect(setHashEntry('#pkc?container=c1&entry=e1', 'c1', 'e2')).toBe(
       '#pkc?container=c1&entry=e2',
     );
+  });
+});
+
+/**
+ * 🔴 **見出しの飛び先か**(#693 案 A、2026-09-04)。
+ *
+ * 目次(`:::toc`)と脚注のリンクは素の `<a href="#…">` なので、押すと断片が
+ * `#pkc?container=…&entry=…` から `#midashi-1` へ**丸ごと入れ替わる**。
+ * `deep-link.ts` はこれで「付箋の住所を戻すか」を分けるので、
+ * ⚠ **`#pkc?` を持つ断片を飛び先と読んではいけない**(読むと、面を指し直した
+ * 正しい書き換えまで巻き戻す)。
+ */
+describe('見出しの飛び先(#693)', () => {
+  it('🔴 `#<id>` は飛び先である', () => {
+    expect(isHeadingAnchor('#midashi-1')).toBe(true);
+    expect(isHeadingAnchor('#fn-1')).toBe(true);
+  });
+
+  it('🔴 PKC の断片は飛び先ではない(entry / view / 合図のどれでも)', () => {
+    expect(isHeadingAnchor('#pkc?container=c1&entry=e1')).toBe(false);
+    expect(isHeadingAnchor('#pkc?view=dual')).toBe(false);
+    expect(isHeadingAnchor('#pkc?w=tok')).toBe(false);
+  });
+
+  it('⚠ 空・`#` だけ・文字列でない物は飛び先ではない(「消した」と区別する)', () => {
+    expect(isHeadingAnchor('')).toBe(false);
+    expect(isHeadingAnchor('#')).toBe(false);
+    expect(isHeadingAnchor(undefined as unknown as string)).toBe(false);
   });
 });

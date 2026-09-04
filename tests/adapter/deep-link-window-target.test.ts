@@ -99,3 +99,35 @@ describe('本物のアドレスへの書き戻し(#689 案 B)', () => {
     expect(location.pathname, '前提が崩れた(台が別の場所を見ている)').toBe('/pkc/');
   });
 });
+
+/**
+ * 🔴 **見出しへ飛んだ後、住所を元へ戻す**(#693 案 A、2026-09-04)。
+ * ⚠ 本物の `history` / `location` に対して見る ── `deep-link.test.ts` の台は
+ *   `target.hash` を書くだけなので、`replaceState` の綴り(`pathname` + `search` +
+ *   断片)が壊れても向こうでは見えない。
+ */
+describe('見出しへ飛んだ後の書き戻し(#693 案 A)', () => {
+  it('🔴 断片を、名乗っていた住所へ丸ごと戻す', () => {
+    history.replaceState(null, '', '/pkc/#midashi-1');
+    windowDeepLinkTarget().restoreHash('#pkc?container=c1&entry=e1');
+    expect(location.hash, '住所が見出し id のまま').toBe('#pkc?container=c1&entry=e1');
+    expect(location.pathname, 'path を巻き込んだ').toBe('/pkc/');
+  });
+
+  it('🔴 履歴を積まない(← 戻るが 1 回で帰れる)', () => {
+    history.replaceState(null, '', '/pkc/#midashi-1');
+    const push = vi.spyOn(history, 'pushState');
+    const before = history.length;
+    windowDeepLinkTarget().restoreHash('#pkc?container=c1&entry=e1');
+    expect(push, '履歴を積んだ').not.toHaveBeenCalled();
+    expect(history.length, '履歴が伸びた').toBe(before);
+    push.mockRestore();
+  });
+
+  it('🔴 `?pkc-flag=…` は残る', () => {
+    history.replaceState(null, '', '/pkc/?pkc-flag=x#midashi-1');
+    windowDeepLinkTarget().restoreHash('#pkc?container=c1&entry=e1');
+    expect(location.search, 'flag のクエリを落とした').toBe('?pkc-flag=x');
+    expect(location.hash).toBe('#pkc?container=c1&entry=e1');
+  });
+});

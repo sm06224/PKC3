@@ -45,6 +45,7 @@ const target = (hash: string) => ({
   clearHash: () => {},
   dropToken: () => {},
   setEntry: () => {},
+  restoreHash: () => {},
 });
 
 describe('引っ越しの表と、開ける面の表が両方当たるとき', () => {

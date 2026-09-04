@@ -60,6 +60,7 @@ import { isSealedView } from '../../features/sealed';
 import {
   dropViewFromHash,
   dropViewWindowToken,
+  isHeadingAnchor,
   parseViewDeepLink,
   parseViewDeepLinkEntry,
   parseViewWindowToken,
@@ -90,6 +91,16 @@ export interface DeepLinkTarget {
    *   **別の PKC の入れ物なら 1 バイトも触らない**(判定は `setHashEntry` が持つ)。
    */
   readonly setEntry: (containerId: string | null, lid: string) => void;
+  /**
+   * 🔴 **見出しへ飛んだ後、住所を元へ戻す**(#693 案 A、2026-09-04)。
+   *
+   * ⚠ **履歴を積まない**(`replaceState`)── そして `replaceState` は
+   *   `hashchange` を撃たない(2026-09-04 実測)ので、戻したことで再入はしない。
+   * ⚠ **飛びは邪魔しない** ── `hashchange` が届く時点でブラウザの scroll は
+   *   済んでいる(2026-09-04 に chromium / headless_shell の両方で実測:
+   *   handler の中で `scrollTop` は既に飛び先、`replaceState` の後も動かない)。
+   */
+  readonly restoreHash: (hash: string) => void;
 }
 
 /** 既定の的 ── 本物のアドレス。 */
@@ -123,6 +134,11 @@ export function windowDeepLinkTarget(): DeepLinkTarget {
       //    呼ぶたびにアドレス欄が書き換わる(選択が動くたびに走る経路である)
       if (next === location.hash) return;
       history.replaceState(null, '', `${location.pathname}${location.search}${next}`);
+    },
+    restoreHash: (hash) => {
+      if (typeof history !== 'object' || typeof location !== 'object') return;
+      // ⚠ `search` は残す(flag のクエリを巻き込まない)── `clearHash` と同じ作法
+      history.replaceState(null, '', `${location.pathname}${location.search}${hash}`);
     },
   };
 }
@@ -399,6 +415,22 @@ export function connectViewDeepLink(wiring: DeepLinkWiring): () => void {
     wiring.onHoldEntry?.(on);
   };
 
+  /**
+   * 🔴 **付箋が名乗っていた住所**(`#pkc?container=…&entry=…`。#693 案 A)。
+   *
+   * ⚠ 目次(`:::toc`)と脚注のリンクは素の `<a href="#…">` なので、押すと
+   *   ブラウザが断片を **`#<見出し id>` に丸ごと入れ替える**。直す前はそれを
+   *   `apply` が「ノートを名指していない」と読んで `holdEntry(false)` を撃ち、
+   *   **題名が「PKC3」に戻る / 「複数タブ」の帯が復活する / 同じノートの 2 枚目が
+   *   開く / `F5` でノートが出ない / 住所の追随(#689)が止まる**が同時に起きていた。
+   * 🔑 だから**戻すための住所を控えておく**(ノートを名指した断片を読んだとき /
+   *   追随で書き換えたとき)── 見出しへ飛んだ後、ここへ戻す。
+   */
+  let entryHash: string | null = null;
+  const rememberEntryHash = (): void => {
+    if (parseViewDeepLinkEntry(target.hash) !== null) entryHash = target.hash;
+  };
+
   const apply = (): void => {
     const read = readViewDeepLink(target);
     if (read === null) {
@@ -425,7 +457,10 @@ export function connectViewDeepLink(wiring: DeepLinkWiring): () => void {
       // 🔴 **この窓は付箋である**(上の `onHoldEntry` の docstring)── 題名と帯が
       //    これで決まる。⚠ 面の窓(`view=`)は下の枝で `false` に戻す
       holdEntry(here !== null);
-      if (here !== null) wiring.selectEntry?.(here.containerId, here.lid);
+      if (here !== null) {
+        rememberEntryHash();
+        wiring.selectEntry?.(here.containerId, here.lid);
+      }
       return;
     }
     if ('view' in read) {
@@ -470,7 +505,24 @@ export function connectViewDeepLink(wiring: DeepLinkWiring): () => void {
     holdEntry(false);
     target.clearHash();
   });
-  const offHash = wiring.onHashChange?.(() => apply());
+  const offHash = wiring.onHashChange?.(() => {
+    /**
+     * 🔴 **付箋の中で見出しへ飛んだら、住所だけ元へ戻す**(#693 案 A)。
+     *
+     * ⚠ 飛びは邪魔しない ── `hashchange` が届く時点で scroll は済んでいる
+     *   (`restoreHash` の docstring の実測)。戻すのは**住所と身元**だけで、
+     *   `apply` は通さない(通すと `holdEntry(false)` = 旗が降りる)。
+     * ⚠ **本体の窓(付箋でない)では今までどおり** ── 見出し id のアンカー
+     *   リンク(#658)を壊さない。あちらは `apply` が `#slug` を読まずに返すだけ。
+     * ⚠ 戻す先が無い(`entryHash === null`)なら今までどおり `apply` へ落とす
+     *   ── ここで黙って握り続けると、旗と住所が食い違ったまま残る。
+     */
+    if (heldEntry && entryHash !== null && isHeadingAnchor(target.hash)) {
+      target.restoreHash(entryHash);
+      return;
+    }
+    apply();
+  });
   /**
    * 🔴 **住所を、いま見ているノートへ追随させる**(#689 案 B)。
    *
@@ -483,6 +535,9 @@ export function connectViewDeepLink(wiring: DeepLinkWiring): () => void {
   const offSelect = wiring.onSelectedEntry((containerId, lid) => {
     if (lid === null) return;
     target.setEntry(containerId, lid);
+    // 🔑 追随した先が、次に見出しへ飛んだときの「戻す先」になる(#693)──
+    //    控え直さないと、ノートを移った後の飛びで**最初のノートの住所**へ戻る
+    rememberEntryHash();
   });
 
   return () => {

@@ -1,5 +1,12 @@
 import { test, expect } from '@playwright/test';
-import { clickReal, collectPageErrors, createEntry, dismissAnnounce, gotoApp } from './helpers';
+import {
+  clickReal,
+  collectPageErrors,
+  createEntry,
+  dismissAnnounce,
+  gotoApp,
+  useSplitEditor,
+} from './helpers';
 
 /**
  * 🔴 **このノートを別の窓で開く ── 付箋**(#685 段②、user 裁定 2026-09-04)。
@@ -513,6 +520,88 @@ test('🔴 付箋を開いた直後、カーソルは追記欄に在る (#690 I4
     page.locator('[data-pkc-field="append-input"]'),
     '本体の窓でも追記欄へ焦点が入った(付箋だけの挙動のはず)',
   ).not.toBeFocused();
+
+  await win.close();
+  expect(winErrors, `付箋で page error: ${winErrors.join(' / ')}`).toEqual([]);
+  expect(errors, `元の窓で page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **付箋で目次を押しても、題名と住所が残る**(#693 案 A、2026-09-04)。
+ *
+ * ## 物語
+ *
+ * 付箋(`#pkc?container=…&entry=…`)で `:::toc` の見出しを押す。目次のリンクは
+ * 素の `<a href="#…">` なので、ブラウザが断片を `#<見出し id>` に丸ごと入れ替える。
+ * ⚠ 直す前はそれで付箋の旗が降り、**題名が「PKC3」に戻る / 「複数タブ」の帯が
+ * 復活する / `F5` でノートが出ない**が 1 度の押下で全部起きていた。
+ *
+ * ## ⚠ ここでしか測れないもの
+ *
+ * unit(`deep-link.test.ts`)は「`hashchange` が届いたら住所を戻す」まで。
+ * 🔑 ここが持つのは **本物のブラウザが断片を入れ替えて `hashchange` を撃ち、
+ * その後で見出しへ飛んだまま住所が戻っていること**(飛びを邪魔していないこと)。
+ */
+test('🔴 付箋で目次を押しても、題名と住所が残る (#693)', async ({ page, context }) => {
+  const errors = collectPageErrors(page);
+  await useSplitEditor(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('めじるし');
+  // ⚠ 見出しの間に十分な本文を挟む ── 短いと飛ばなくても見えてしまう
+  await page.locator('[data-pkc-field="editor-body"]').fill(
+    [
+      ':::toc',
+      '# 最初の章',
+      ...Array.from({ length: 60 }, (_, i) => `一行目の本文 ${i}`),
+      '## 途中の節',
+      ...Array.from({ length: 60 }, (_, i) => `二つ目の本文 ${i}`),
+    ].join('\n'),
+  );
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  const popup = context.waitForEvent('page');
+  await clickReal(page, '[data-pkc-action="open-note-window"]');
+  const win = await popup;
+  const winErrors = collectPageErrors(win);
+  await expect(win.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
+  await expect.poll(() => win.title(), { timeout: 15_000 }).toBe('めじるし — PKC3');
+  const before = win.url();
+  expect(before, '前提が崩れた(付箋の住所がノートを名指していない)').toContain('entry=');
+
+  const TOC_LINK = '[data-pkc-region="toc"] a[href^="#"]';
+  await expect(win.locator(TOC_LINK), '前提が崩れた(目次が出ていない)').toHaveCount(2);
+  const heading = win.locator('[data-pkc-region="detail"] h2[id]').first();
+  const beforeY = (await heading.boundingBox())?.y ?? 0;
+  expect(beforeY, '前提が崩れた(押す前から見出しが画面の上に在る)').toBeGreaterThan(600);
+
+  await clickReal(win, `${TOC_LINK} >> nth=1`);
+  await win.waitForTimeout(300);
+
+  // ① 🔴 **飛びは邪魔しない** ── 見出しが画面の上へ来ている
+  const box = await heading.boundingBox();
+  expect(box, '押した見出しが画面から消えた').not.toBeNull();
+  expect(box!.y, `見出しへ飛んでいない(${beforeY} → ${box!.y})`).toBeLessThan(300);
+
+  // ② 🔴 **住所は元へ戻っている**(`F5` でこのノートが出る / `Ctrl+D` が効く)
+  await expect.poll(() => win.url(), { timeout: 5_000 }).toBe(before);
+
+  // ③ 🔴 **身元は残っている** ── 題名は「PKC3」に戻らず、follower の帯も出ない
+  await expect.poll(() => win.title(), { timeout: 5_000 }).toBe('めじるし — PKC3');
+  await expect(
+    win.locator('[data-pkc-region="status"]'),
+    '目次を押しただけで「複数タブ」の帯が復活した(付箋の旗が降りた)',
+  ).not.toContainText('複数タブ');
+
+  /**
+   * ④ ⚠ **対照群** ── 本体の窓(付箋でない)では今までどおり住所が `#<id>` になる
+   *   (見出し id のアンカーリンク #658 を壊していない)。
+   */
+  await page.bringToFront();
+  await clickReal(page, `${TOC_LINK} >> nth=1`);
+  await expect.poll(() => new URL(page.url()).hash, { timeout: 5_000 }).toMatch(/^#(?!pkc\?).+/);
 
   await win.close();
   expect(winErrors, `付箋で page error: ${winErrors.join(' / ')}`).toEqual([]);

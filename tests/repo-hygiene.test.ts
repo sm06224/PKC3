@@ -1036,11 +1036,13 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     // ⚠ 2026-09-04(#687 D-1): `phone` に「行を 600ms 押し続けると印が 2 行」1 件
     //    (実ブラウザが指の押下を pointerType: 'touch' で届け、離した後の click を
     //    捨てるかは unit では見えない)で **+1 件**
+    // ⚠ 2026-09-04(#693 案 A): 同じ file に **+1 件** ── 付箋で目次を押しても題名と
+    //    住所が残る(本物のブラウザが断片を入れ替えて hashchange を撃つ所は unit で届かない)
     expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(80);
     expect(
       counts.reduce((a, b) => a + b, 0),
       'smoke の test が増減した(足したらこの数を直す)',
-    ).toBe(419);
+    ).toBe(420);
   });
 });
 
