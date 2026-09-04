@@ -100,6 +100,7 @@ import { convertPastedPermalink } from '@features/link/permalink';
 import { resolveMime } from './attach';
 import {
   applyFormat,
+  DIAGRAM_CHOICES,
   DIAGRAM_TEMPLATES,
   insertBlock,
   type FormatOp,
@@ -174,6 +175,7 @@ import {
   pickCommandInApp,
   pickEntryInApp,
   pickSnippetInApp,
+  pickDiagramInApp,
   isAppDialogOpen,
   type ConfirmOptions,
 } from '@adapter/ui/render/app-dialog';
@@ -3479,6 +3481,37 @@ const ACTIONS: Record<string, ActionHandler> = {
       writeBack(ta, insertSnippet(sel, item.body, new Date()));
     });
   },
+  /**
+   * 🔴 **図を入れる ── 押すと 5 種から選ぶ**(#528 案 B。user 裁定 2026-09-04)。
+   *
+   * ⚠ 直す前の「図」は `format-text`(`op: 'mermaid'`)で、**必ず `graph TD` が入った**
+   *   ── UML の雛形は在るのに、「図」を押した人はそこへ辿り着けなかった。
+   * ⚠ 作りは `insert-snippet` と同じ ── **caret を先に控え**、器(`pickDiagramInApp`)が
+   *   返ってから**欄を引き直し**、挿すのは既にある `insertBlock` に渡す(ここで組み立てない)。
+   * ⚠ 何が並ぶかは `DIAGRAM_CHOICES`(表が正本)── 表から消えた id は**黙って落とす**
+   *   (無い物を挿そうとして欄を空で書き戻すほうが悪い)。
+   */
+  'insert-diagram': (_dispatcher, _target, _services, root) => {
+    const opened = formatTarget(root);
+    if (opened === null) return;
+    const at = { start: opened.selectionStart, end: opened.selectionEnd };
+    void pickDiagramInApp(
+      root,
+      DIAGRAM_CHOICES.map((d) => ({ id: d.id, label: d.label })),
+    ).then((id) => {
+      if (id === null) return;
+      const tpl = DIAGRAM_CHOICES.find((d) => d.id === id);
+      if (tpl === undefined) return;
+      // ⚠ 欄は引き直す(開いている間に面が組み直されると、最初の節点は繋がっていない)
+      const ta = formatTarget(root);
+      if (ta === null) return;
+      ta.focus();
+      // ⚠ 範囲外は `setSelectionRange` が丸める(短くなっていても落ちない)
+      ta.setSelectionRange(at.start, at.end);
+      const sel = { text: ta.value, start: ta.selectionStart, end: ta.selectionEnd };
+      writeBack(ta, insertBlock(sel, tpl.block));
+    });
+  },
   'format-text': (_dispatcher, target, _services, root) => {
     const op = target.getAttribute('data-pkc-format') as FormatOp | null;
     // ⚠ live の 1 面では活性の行(`row-source`)に効く(`formatTarget` の注記)
@@ -5458,6 +5491,8 @@ export const CARET_TOOLS: ReadonlySet<string> = new Set([
   'insert-date',
   'insert-entry-link',
   'insert-snippet',
+  // ⚠ 2026-09-04(#528 案 B): 図の一覧 ── 同じく編集中の本文へ挿す
+  'insert-diagram',
   'renumber-lists',
 ]);
 

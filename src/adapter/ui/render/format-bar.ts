@@ -34,6 +34,17 @@ export function buildFormatBar(): HTMLElement {
     text.textContent = label;
     btn.append(text);
     bar.append(btn);
+    /**
+     * 🔴 **「図」は表の隣 ── これまでと同じ場所**(#528 案 B。user 裁定 2026-09-04)。
+     *
+     * ⚠ `FORMAT_OPS` の帯からは外した(`onBar: false`)── 押すと**先に聞く**
+     *   (フローチャート / クラス図 / シーケンス図 / 状態遷移図 / ER 図 の一覧)ので、
+     *   「その場で字を変える」表の並びには居られない(日付 / 雛形と同じ理由)。
+     * ⚠ ただし**置き場は変えない** ── 下の道具の列(日付 …)へ移すと、
+     *   表とコードブロックの間に在ったボタンが 1 つ右へ飛ぶ(業務画面の作法
+     *   「同じものが常に同じ場所にある」)。だから表の直後に差す。
+     */
+    if (op === 'table') bar.append(diagramButton());
   }
   /**
    * 🔴 **置換の切替はここ**(2026-08-15、user 指示「中央の上を潰しすぎ /
@@ -141,4 +152,23 @@ export function buildFormatBar(): HTMLElement {
   toggleReplace.append(label);
   bar.append(toggleReplace);
   return bar;
+}
+
+/**
+ * 🔴 **図を入れる ── 押すと 5 種から選ぶ**(#528 案 B)。
+ *
+ * ⚠ 鍵は付けない ── 帯の他の道具(日付 / 雛形)は既定の鍵を 1 つずつ食っている。
+ *   「図」はこれまで鍵を持っていなかったので、増やさない(15 枠の規律と同じ向き)。
+ * ⚠ 文言は**起きること**で書く(user 指示 2026-08-21)。
+ */
+function diagramButton(): HTMLButtonElement {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.setAttribute('data-pkc-action', 'insert-diagram');
+  btn.title = '図の雛形を入れます。押すと、フローチャート / クラス図 / シーケンス図 / 状態遷移図 / ER 図 から選べます';
+  const text = document.createElement('span');
+  text.setAttribute('data-pkc-field', 'label');
+  text.textContent = '図';
+  btn.append(text);
+  return btn;
 }

@@ -439,8 +439,19 @@ describe('マニュアルと実装の突合', () => {
      *   探してリンクを入れる。⚠ これも `FORMAT_OPS` には入れない
      *   (日付・雛形と同じく**先に聞く**)。
      */
+    /**
+     * 🔴 2026-09-04(#528 案 B)に **図** が `FORMAT_OPS` の帯から外れ、**表の隣に
+     *   同じ字で**戻った ── 押すと 5 種の一覧が出る(先に聞く)ので、日付・雛形と同じ側。
+     * ⚠ 置き場は変わっていない(表の直後)── ここで**位置ごと** pin する。
+     *   末尾へ足す形だと、表とコードブロックの間に在ったボタンが 1 つ右へ飛ぶ
+     *   (「同じものが常に同じ場所にある」を黙って崩す)。
+     */
+    const barLabels = BAR_FORMAT_OPS.map((o) => o.label);
+    const tableAt = barLabels.indexOf('表');
+    expect(tableAt, '帯に「表」が無い(前提が崩れている)').toBeGreaterThanOrEqual(0);
+    barLabels.splice(tableAt + 1, 0, '図');
     expect(labels).toEqual([
-      ...BAR_FORMAT_OPS.map((o) => o.label),
+      ...barLabels,
       '日付',
       'ノート',
       '雛形',

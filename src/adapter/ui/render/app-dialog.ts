@@ -400,35 +400,98 @@ export function pickSnippetInApp(
   choices: readonly SnippetChoice[],
   note: string,
 ): Promise<SnippetChoice | null> {
+  return pickRowInApp(host, {
+    title: '雛形を入れる',
+    field: 'pick-snippet',
+    indexAttr: 'data-pkc-snippet-index',
+    note,
+    /**
+     * ⚠ 字は「**題名**(短縮語)」── 短縮語を書いてある雛形は、ここで
+     *   **覚え直せる**(次からは `Tab` で呼べる)。組み込みには短縮語が無いので
+     *   題名だけ。
+     */
+    rows: choices.map((choice) => ({
+      label:
+        choice.kind === 'snippet' && choice.abbr !== ''
+          ? `${choice.title}(${choice.abbr})`
+          : choice.title,
+      value: choice,
+    })),
+  });
+}
+
+/**
+ * 🔴 **図の種類を選ぶ**(#528 案 B。user 裁定 2026-09-04)。
+ *
+ * ⚠ 器は雛形の一覧と**同じ 1 本**(`pickRowInApp`)── 「押した行がそのまま答え」
+ *   「`Escape` / やめる / 外を押すと `null`」「焦点を返す」が 2 つの一覧で
+ *   食い違わないようにする(CLAUDE.md §7)。
+ * ⚠ 何が並ぶかは `features/markdown/text-ops.ts` の `DIAGRAM_CHOICES` が正本 ──
+ *   ここは字と id を受け取って並べるだけ。
+ *
+ * @returns 選んだ雛形の id。`Escape` / 「やめる」/ 外なら `null`
+ */
+export function pickDiagramInApp(
+  host: HTMLElement,
+  choices: readonly { readonly id: string; readonly label: string }[],
+): Promise<string | null> {
+  return pickRowInApp(host, {
+    title: '図を入れる',
+    field: 'pick-diagram',
+    indexAttr: 'data-pkc-diagram-index',
+    note: '',
+    rows: choices.map((c) => ({ label: c.label, value: c.id })),
+  });
+}
+
+/** 「一覧から 1 行選ぶ」器の中身。⚠ `field` は行の `data-pkc-field`(test / smoke が見る)。 */
+interface PickRowsSpec<T> {
+  readonly title: string;
+  readonly field: string;
+  /** 行の何番目かを書く属性名(`data-pkc-…-index`)。 */
+  readonly indexAttr: string;
+  /** 一覧の上に出す 1 行。空なら出さない。 */
+  readonly note: string;
+  readonly rows: readonly { readonly label: string; readonly value: T }[];
+}
+
+/**
+ * 🔴 **一覧から 1 行選ぶ**(雛形 / 図 の共通の器)。
+ *
+ * ⚠ **押した行がそのまま答え** ── 確定のボタンは隠す(`pickSnippetInApp` の docstring)。
+ * ⚠ 閉じ方は器の 1 本を通す(`f.ok.click()` / `f.cancel.click()`)── どこから閉じても
+ *   **焦点を返す後始末が 1 か所**で走る(CLAUDE.md §10 ③)。
+ *
+ * 🔑 **`↑` `↓` で行を移れる**(#528 案 B)── 一覧は縦に読むものなので、
+ *   `Tab` だけだと「やめる」まで回ってから戻ることになる。近道であって主の口ではない
+ *   (マウスで押せば同じ)。⚠ `Enter` は書かない ── 焦点の在るボタンは
+ *   ブラウザが `click` にしてくれる(2 か所に書かない)。
+ * 🔑 **外(暗い地)を押したら「やめる」** ── 選ぶだけの器なので、外を押した人は
+ *   「やめたい」のである。⚠ 確認(`confirmInApp`)には付けない ── あちらは
+ *   **答えを要る**器で、押し損ねで削除の確認が消えると、頼んだ操作が黙って消える。
+ */
+function pickRowInApp<T>(host: HTMLElement, spec: PickRowsSpec<T>): Promise<T | null> {
   return enqueue(async () => {
     const f = ensureFrame(host);
-    f.title.textContent = '雛形を入れる';
+    f.title.textContent = spec.title;
     f.body.textContent = '';
-    if (note !== '') {
+    if (spec.note !== '') {
       const line = document.createElement('p');
-      line.setAttribute('data-pkc-field', 'pick-snippet-note');
-      line.textContent = note;
+      line.setAttribute('data-pkc-field', `${spec.field}-note`);
+      line.textContent = spec.note;
       f.body.append(line);
     }
 
-    let chosen: SnippetChoice | null = null;
+    let chosen: T | null = null;
     const rows: HTMLButtonElement[] = [];
-    for (const [index, choice] of choices.entries()) {
+    for (const [index, row] of spec.rows.entries()) {
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.setAttribute('data-pkc-field', 'pick-snippet');
-      btn.setAttribute('data-pkc-snippet-index', String(index));
-      /**
-       * ⚠ 字は「**題名**(短縮語)」── 短縮語を書いてある雛形は、ここで
-       *   **覚え直せる**(次からは `Tab` で呼べる)。組み込みには短縮語が無いので
-       *   題名だけ。
-       */
-      btn.textContent =
-        choice.kind === 'snippet' && choice.abbr !== ''
-          ? `${choice.title}(${choice.abbr})`
-          : choice.title;
+      btn.setAttribute('data-pkc-field', spec.field);
+      btn.setAttribute(spec.indexAttr, String(index));
+      btn.textContent = row.label;
       btn.addEventListener('click', () => {
-        chosen = choice;
+        chosen = row.value;
         // ⚠ 隠してあっても `click()` は届く(閉じ口を 1 本に保つための呼び方)
         f.ok.click();
       });
@@ -436,9 +499,27 @@ export function pickSnippetInApp(
       f.body.append(btn);
     }
 
+    // ⚠ 器(`f.dialog`)に付けて、閉じたら外す ── 器は使い回すので、外し忘れると
+    //   次の確認でも矢印が行を探しにいく
+    const onArrow = (ev: KeyboardEvent): void => {
+      if (ev.key !== 'ArrowDown' && ev.key !== 'ArrowUp') return;
+      const at = rows.findIndex((b) => b === f.dialog.ownerDocument.activeElement);
+      if (at < 0) return;
+      const next = rows[ev.key === 'ArrowDown' ? at + 1 : at - 1];
+      if (next === undefined) return;
+      ev.preventDefault();
+      next.focus();
+    };
+    const onOutside = (ev: MouseEvent): void => {
+      // 🔑 暗い地を押すと `target` は `<dialog>` 自身になる(中身を押せば中身が target)
+      if (ev.target === f.dialog) f.cancel.click();
+    };
+    f.dialog.addEventListener('keydown', onArrow);
+    f.dialog.addEventListener('click', onOutside);
+
     f.ok.textContent = '入れる';
     f.ok.removeAttribute('data-pkc-danger');
-    // 🔑 受ける側は**隠す**(上の docstring)── 消さずに隠す(器を捨てない)
+    // 🔑 受ける側は**隠す**(`pickSnippetInApp` の docstring)── 消さずに隠す(器を捨てない)
     f.ok.hidden = true;
     f.cancel.textContent = 'やめる';
     f.cancel.hidden = false;
@@ -447,6 +528,8 @@ export function pickSnippetInApp(
     // 🔑 焦点は**先頭の行**へ ── 開いた直後にやることは「選ぶ」だからである
     rows[0]?.focus();
     const answer = await answered;
+    f.dialog.removeEventListener('keydown', onArrow);
+    f.dialog.removeEventListener('click', onOutside);
     // ⚠ 隠したままにしない ── 器は使い回すので、次の確認で受ける側が消える
     f.ok.hidden = false;
     return answer === 'ok' ? chosen : null;
