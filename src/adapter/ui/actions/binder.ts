@@ -619,6 +619,11 @@ export interface BinderServices {
    */
   setNoticesEnabled?(on: boolean): void;
   /**
+   * 狭い画面の断り書きを出すか(#687 E-1)。⚠ **flag ではない**(正規設定)──
+   * 帯の「OK」で切れた user が戻せる**唯一の道**である(お知らせと同じ形)。
+   */
+  setTooNarrowEnabled?(on: boolean): void;
+  /**
    * 「開く」で編集に入るか(user 裁定 2026-08-18)。⚠ **flag ではない**(正規設定)。
    * ⚠ 読む側は `services` ではなく `openInEdit` を引く(下の `bindActions` の引数)──
    *   ここは**書き手**だけ。
@@ -4970,6 +4975,10 @@ const ACTIONS: Record<string, ActionHandler> = {
   'set-notices-enabled': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
     if (target instanceof HTMLInputElement) services.setNoticesEnabled?.(target.checked);
+  },
+  'set-too-narrow-enabled': (_dispatcher, target, services) => {
+    // ⚠ `set-notices-enabled` と同じ作法 ── checkbox の `checked` をそのまま渡す
+    if (target instanceof HTMLInputElement) services.setTooNarrowEnabled?.(target.checked);
   },
   'next-announce': (_dispatcher, _target, services) => {
     services.nextAnnounce?.();

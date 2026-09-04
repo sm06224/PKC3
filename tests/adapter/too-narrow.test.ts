@@ -12,6 +12,8 @@
  *    表示が崩れる」と出したままにしない(🔴 画面に嘘を出さない)
  * 3. **器を畳むかどうかは `main.ts` の `paint` が決める** ── ここは自分の
  *    `hidden` だけ触り、変わったときに知らせる(CLAUDE.md §7)
+ * 4. 🔴 **OK は端末に憶える**(#687 E-1、user 裁定 2026-09-04)── 次に開いても
+ *    出ない。戻す道は設定(下の「憶える」の describe)
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -20,10 +22,21 @@ import {
   TOO_NARROW_OK,
   TOO_NARROW_TEXT,
   TOO_NARROW_TEXT_WINDOW,
+  TooNarrowOkStore,
   installTooNarrow,
 } from '../../src/adapter/ui/render/too-narrow';
 import { appPhone } from '../../src/adapter/ui/render/phone-layout';
 import { PHONE_MIN_PX } from '../../src/features/phone-layout';
+
+/** 押した事実の置き場の替え玉。⚠ 既定の store は happy-dom の `localStorage` を掴む ── test を跨いで OK が残る。 */
+function fakeStorage() {
+  const map = new Map<string, string>();
+  return {
+    map,
+    getItem: (k: string) => map.get(k) ?? null,
+    setItem: (k: string, v: string) => void map.set(k, v),
+  };
+}
 
 /** 幅の見張りの替え玉。⚠ `matches` を手で動かして `change` を撃つ。 */
 class FakeMedia {
@@ -50,7 +63,11 @@ class FakeMedia {
  * ⚠ **問い合わせごとに別の替え玉**を返す ── 1 本しか返さないと
  *   「スマホ = 対応外」になり、360〜720px という**いちばん普通の幅**が測れない。
  */
-function setup(narrowNow = false, popup = false) {
+function setup(
+  narrowNow = false,
+  popup = false,
+  storage: Pick<Storage, 'getItem' | 'setItem'> | null = fakeStorage(),
+) {
   const root = document.createElement('div');
   root.setAttribute('data-pkc-slot', 'root');
   document.body.append(root);
@@ -65,16 +82,20 @@ function setup(narrowNow = false, popup = false) {
   band.append(text, ok);
   root.append(band);
   const changes: boolean[] = [];
-  const off = installTooNarrow({
-    band,
-    text,
-    ok,
-    onChange: () => changes.push(!band.hidden),
-    // ⚠ 本物と同じく**出すたびに聞く**形 ── 起動時に 1 度読む stub にすると、
-    //    配線の順番で嘘をつく実装が台では見えない
-    popup: () => popup,
-  });
-  return { band, text, ok, changes, narrow, off };
+  const store = new TooNarrowOkStore(storage);
+  const off = installTooNarrow(
+    {
+      band,
+      text,
+      ok,
+      onChange: () => changes.push(!band.hidden),
+      // ⚠ 本物と同じく**出すたびに聞く**形 ── 起動時に 1 度読む stub にすると、
+      //    配線の順番で嘘をつく実装が台では見えない
+      popup: () => popup,
+    },
+    store,
+  );
+  return { band, text, ok, changes, narrow, off, store, storage };
 }
 
 afterEach(() => {
@@ -210,6 +231,107 @@ describe('出る・消える', () => {
     s.off();
     s.narrow.set(true);
     expect(s.band.hidden, '解いたのに出た').toBe(true);
+  });
+});
+
+/**
+ * 🔴 **OK は端末に憶える**(#687 E-1、user 裁定 2026-09-04)。
+ *
+ * ⚠ 直す前は閉包変数だった ── 読み込み直すたびに同じ字が出て、同じ OK を押させていた。
+ * 🔑 「起動をまたぐ」は unit では **store を渡し直す**ことで再現する
+ *   (同じ storage に、新しい `installTooNarrow`)── 実ブラウザの `reload` は
+ *   `tests/smoke/phone.smoke.spec.ts` の 340px の腕が持つ。
+ */
+describe('憶える(#687 E-1)', () => {
+  const KEY = 'pkc3.too-narrow-ok';
+
+  it('🔴 OK を押すと pkc3.too-narrow-ok = "1" が書かれる', () => {
+    const st = fakeStorage();
+    const s = setup(true, false, st);
+    // ⚠ 対照群 ── 押す前は何も書かれていない(出しただけで憶える、ではない)
+    expect(st.map.has(KEY), '押す前から憶えている').toBe(false);
+    s.ok.click();
+    expect(st.getItem(KEY), 'OK を押したのに憶えていない').toBe('1');
+  });
+
+  it('🔴 憶えた状態で配線し直すと、狭くても出ない(起動をまたぐ)', () => {
+    const st = fakeStorage();
+    st.setItem(KEY, '1');
+    const s = setup(true, false, st);
+    expect(s.band.hidden, 'OK を憶えているのに、次の起動でまた出た').toBe(true);
+    expect(s.text.textContent, '畳んでいるのに字が入っている').toBe('');
+    s.narrow.set(false);
+    s.narrow.set(true);
+    expect(s.band.hidden, '憶えているのに、狭め直したら出た').toBe(true);
+  });
+
+  /**
+   * ⚠ 上の対照群 ── **憶えていなければ**、同じ台で出る。
+   * 🔑 これが無いと「いつでも出さない」実装が上を通る。
+   */
+  it('⚠ 憶えていなければ、同じ台で出る(対照群)', () => {
+    const s = setup(true, false, fakeStorage());
+    expect(s.band.hidden, '前提が崩れた(憶えていないのに出ない)').toBe(false);
+  });
+
+  /**
+   * 🔴 **設定で戻したら、その場で出る**(現に狭ければ)。
+   * ⚠ 「次の狭めまで出ない」だと、戻した user は**効いたかどうかを確かめられない**
+   *   (`setNoticesEnabled` が「戻す側もその場で効かせる」と直された型と同じ)。
+   */
+  it('🔴 設定で「出す」に戻すと、狭ければその場で出る', () => {
+    const st = fakeStorage();
+    st.setItem(KEY, '1');
+    const s = setup(true, false, st);
+    expect(s.band.hidden, '前提が崩れた(憶えているのに出ている)').toBe(true);
+    s.store.setEnabled(true);
+    expect(s.band.hidden, '戻したのに、その場では出ない').toBe(false);
+    expect(s.text.textContent, '出したのに字が入っていない').toBe(TOO_NARROW_TEXT);
+    expect(st.getItem(KEY), '戻したことが保存されていない').toBe('0');
+  });
+
+  it('🔴 設定で「出す」に戻した後、次に狭めたら出る(広い間は出ない)', () => {
+    const st = fakeStorage();
+    st.setItem(KEY, '1');
+    const s = setup(false, false, st);
+    s.store.setEnabled(true);
+    // ⚠ 対照群 ── 広い間は「出す」に戻しても出ない(幅の判定は生きている)
+    expect(s.band.hidden, '広いのに出た').toBe(true);
+    s.narrow.set(true);
+    expect(s.band.hidden, '戻したのに、次に狭めても出ない').toBe(false);
+  });
+
+  /**
+   * 🔴 **保存が読めない環境でも落ちず、この起動では効く**(プライベートモード等)。
+   * ⚠ `getItem` / `setItem` の**両方**が throw する台 ── 片方だけだと、
+   *   控えを持たない実装でも通ってしまう。
+   */
+  it('🔴 storage が throw しても落ちず、OK はこの起動の間は効く', () => {
+    const throwing = {
+      getItem: (): string | null => {
+        throw new Error('SecurityError');
+      },
+      setItem: (): void => {
+        throw new Error('SecurityError');
+      },
+    };
+    const s = setup(true, false, throwing);
+    expect(s.band.hidden, '読めない環境で出ない(既定が「出す」になっていない)').toBe(false);
+    s.ok.click();
+    expect(s.band.hidden, '保存できない環境で OK が効かない').toBe(true);
+    s.narrow.set(false);
+    s.narrow.set(true);
+    expect(s.band.hidden, '保存できないと、狭め直したときにまた出る(控えが無い)').toBe(true);
+  });
+
+  /** ⚠ 配線を解いたら、store を動かしても器を触らない(捨てた器を塗らない)。 */
+  it('⚠ 配線を解いたら、設定で戻しても出ない', () => {
+    const st = fakeStorage();
+    st.setItem(KEY, '1');
+    const s = setup(true, false, st);
+    s.off();
+    s.store.setEnabled(true);
+    expect(s.band.hidden, '解いたのに、設定の変化で出た').toBe(true);
   });
 });
 

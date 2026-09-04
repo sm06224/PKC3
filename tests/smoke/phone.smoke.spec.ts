@@ -631,6 +631,21 @@ test('🔴 340px では断り書きが出て、OK で消せて、それでも書
     '表示が崩れることがあります',
   );
 
+  /**
+   * 🔴 **押した後は、次に開いても出ない**(#687 E-1、user 裁定 2026-09-04)。
+   * ⚠ 直す前は閉包変数だったので、読み込み直すたびに同じ字が出て同じ OK を
+   *   押させていた。🔑 unit は store を渡し直して再現するが、**本物の `localStorage`
+   *   を跨いで残るか**は実ブラウザでしか読めない ── ここで `reload` する。
+   * ⚠ 空振り防止 ── 同じ test の冒頭で「押す前は出る」を見ている(= 憶えていなければ
+   *   この幅では必ず出る)ので、ここが hidden なら憶えたからである。
+   */
+  await page.reload();
+  await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
+  await expect(page.locator(REGION('shell')), '読み込み直しても版面が出ない').toBeAttached();
+  await expect(status, 'OK を押したのに、読み込み直したらまた出た').not.toContainText(
+    '表示が崩れることがあります',
+  );
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 

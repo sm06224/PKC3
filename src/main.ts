@@ -20,7 +20,7 @@ import {
   installColumnWheel,
 } from '@adapter/ui/render/read-columns';
 import { setFoldNotify } from '@adapter/ui/render/fold-notify';
-import { installTooNarrow } from '@adapter/ui/render/too-narrow';
+import { appTooNarrowOk, installTooNarrow } from '@adapter/ui/render/too-narrow';
 import { appOpenInEdit } from '@adapter/ui/render/open-in-edit';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { appPaneSizes, applyPaneSizes } from '@adapter/ui/render/pane-size';
@@ -2000,6 +2000,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     discardTimer: (lid) => timerService.discard(lid),
     // 🔴 アラート(#280)── 鳴った知らせを片付ける
     dismissAlarm: (key) => alarmService.dismiss(key),
+    /**
+     * 🔴 **狭い画面の断り書きを出すか**(#687 E-1)── 帯の OK で切れた user の戻し道。
+     * ⚠ 塗り直しは `installTooNarrow` が store を購読して受ける(ここで帯を触らない)。
+     */
+    setTooNarrowEnabled: (on) => appTooNarrowOk.setEnabled(on),
     /**
      * 🔴 **入にしたその場から効かせる**(#280)── 入にした user が
      *   「読み込み直すまで鳴らない」に気づく手段は無い。
