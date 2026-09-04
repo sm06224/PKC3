@@ -20,6 +20,7 @@ import {
   installColumnWheel,
 } from '@adapter/ui/render/read-columns';
 import { setFoldNotify } from '@adapter/ui/render/fold-notify';
+import { installTooNarrow } from '@adapter/ui/render/too-narrow';
 import { appOpenInEdit } from '@adapter/ui/render/open-in-edit';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { appPaneSizes, applyPaneSizes } from '@adapter/ui/render/pane-size';
@@ -698,6 +699,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   applyTagBadge(document.documentElement, initialTagBadge());
   const regions = buildShell(root);
   /**
+   * 🔴 **版面が入れ替わったときに面を描き直す口**(#671)。⚠ `center` はずっと後で
+   *   組まれるので、繋がるまでは何もしない口にしておく(`repaintStatus` と同じ形)。
+   */
+  let repaintOnLayout: () => void = () => undefined;
+  /**
    * 🔴 **縦のホイールを横送りへ読み替える**(#505)。⚠ これが無いと段組みは
    *   マウスだけでは読めない(実測: 縦ホイールで 1px も動かない)。
    * 🔑 器ごとではなく **shell に 1 本**(本文の器は開くたびに作り直される)。
@@ -727,7 +733,22 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   順序のためではない。
    * ⚠ 外さない(アプリと同寿命)── `applyPaneVisibility` と同じ。
    */
-  appPhone.install(root, undefined, () => applyPaneVisibility(root, appPanes.getHidden()));
+  /**
+   * 🔴 **スマホ⇄パソコンを跨いだら、面も描き直す**(#671 の着地前レビュー G、
+   *   2026-09-04 に実測)。
+   *
+   * ⚠ 直す前は `applyPaneVisibility` しか呼んでおらず、**面の描画は 1 度も
+   *   走らなかった** ── 2 ペインの操作の字は「1 枚だけか」で変わるのに、
+   *   窓の幅は `state` を 1 バイトも動かさないので `render` に届かない。
+   *   実測(375 → 1440 に広げた直後):**2 枚とも出ているのに字は「F6右へ移す」**
+   *   のまま(スマホ用の字が残る)。何か 1 つ触るまで直らなかった。
+   * 🔑 口は `repaintStatus` と同じ形にする ── `center` はここより後で組まれるので、
+   *   繋がるまでは何もしない口にしておく。
+   */
+  appPhone.install(root, undefined, () => {
+    applyPaneVisibility(root, appPanes.getHidden());
+    repaintOnLayout();
+  });
   applyPaneVisibility(root, appPanes.getHidden());
   /**
    * 🔴 **決めた大きさも起動時に戻す**(#497)。⚠ 畳んだ状態と**対**である ──
@@ -870,6 +891,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   // 🔑 追記欄は**本文とは別の器**(P8 段⑧)── 本文は追記のたびに書き換わって
   // 再描画されるので、同じ器に入れると打ちかけの文字も focus も消える
   const appendBox = new AppendBoxRenderer(regions.append);
+  /**
+   * 🔴 **ここで初めて繋がる**(#671)── 窓の幅がスマホ⇄パソコンを跨いだときに
+   *   呼ばれる。⚠ `state` は動いていないので、面の側が**幅を自分で読み直す**
+   *   (`dual-filer.ts` の `paintSwitch` が `appPhone` に聞く)。
+   */
+  repaintOnLayout = () => center.render(dispatcher.getState());
   dispatcher.onState((state) => {
     browse.render(state, browseMode);
     center.render(state);
@@ -928,7 +955,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   // textContent の setter は同一文字列でも子ノードを全置換する ── 打鍵ごとの
   // state 変化で無駄な DOM 変異を起こさないよう、変わったときだけ書く
   let statusShown = statusBase;
-  regions.status.textContent = statusBase;
+  regions.statusText.textContent = statusBase;
   // 🔑 **空なら場所を取らない**(notices / update と同じ作法)
   regions.status.hidden = statusBase === '';
   /**
@@ -956,10 +983,18 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     const parts = [statusBase, sync, portableAssetNote, persistState, noticeLine, errorLine]
       .filter((t) => t !== '');
     const text = parts.join(' — ');
-    if (text === statusShown) return;
+    /**
+     * 🔴 **断り書きが出ている間は、字が空でも器を畳まない**(#671 の裁定 3)。
+     * ⚠ 畳むと **`OK` ごと画面から消える** ── 押す口が無いまま出しっぱなしに
+     *   なるのと同じで、user は消し方を持たない。
+     * 🔑 器を畳むかどうかを決めるのは**この 1 か所**である ──
+     *   `too-narrow.ts` は自分の `hidden` だけ触り、ここへ知らせる(§7)。
+     */
+    const keep = !regions.tooNarrow.hidden;
+    if (text === statusShown && regions.status.hidden === (text === '' && !keep)) return;
     statusShown = text;
-    regions.status.textContent = text;
-    regions.status.hidden = text === '';
+    regions.statusText.textContent = text;
+    regions.status.hidden = text === '' && !keep;
   };
   /** 🔑 ここで初めて `paint` に繋がる(それまでの `onState` は落としてよい)。 */
   repaintStatus = paint;
@@ -987,6 +1022,18 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   委譲用の名前を残したら、台がそこを迂回して**欠陥の再導入を素通り**させた。
    */
   setFoldNotify(showStatus);
+
+  /**
+   * 🔴 **狭すぎる端末への断り書き**(user 裁定 2026-09-04、#671 の裁定 2・3)。
+   * ⚠ **`setFoldNotify` の後で配る** ── 器を畳むかどうかは `paint` が決めるので、
+   *   `repaintStatus` が `paint` に繋がった後でなければ、出しても畳んだままになる。
+   */
+  installTooNarrow({
+    band: regions.tooNarrow,
+    text: regions.tooNarrowText,
+    ok: regions.tooNarrowOk,
+    onChange: () => repaintStatus(),
+  });
 
   /**
    * 🔴 **外からの依頼を受ける口**(#189 / C-4 と #194 / C-3)。

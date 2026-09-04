@@ -4168,11 +4168,41 @@ li[data-pkc-row-slot] {
   display: flex;
   align-items: center;
   gap: var(--s3);
-  height: 20px;
+  /* 🔴 **`height` ではなく `min-height`**(#671 の裁定 3)。⚠ 固定丈のままだと、
+   *   同じ器に置いた断り書きの「OK」が**帯の外へ落ちて押せない**(いちばん狭い
+   *   画面ほど落ちる ── その画面のために出している字なのに)。
+   * ⚠ ふだんは 1 行なので**寸法は 20px のまま**である(見え方は変わらない)。 */
+  min-height: 20px;
   padding: 0 var(--s3);
   background: var(--surface-2);
   color: var(--muted);
   font-size: 11px;
+  /* ⚠ 断り書きが 2 行になる幅では折り返す(横へはみ出して切れない) */
+  flex-wrap: wrap;
+}
+/* 🔴 **狭すぎる端末への断り書き**(user 裁定 2026-09-04、#671 の裁定 2・3)。
+ *
+ * ⚠ **押す口を必ず横に置く** ── 字だけ出して消し方が無いのが直す前の形である。
+ * 🔑 出し入れは `too-narrow.ts` が `hidden` で持つ ── ここは見た目だけ。 */
+[data-pkc-region='too-narrow'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex: 1;
+  min-width: 0;
+  /* ⚠ 字が長い端末では折り返す(押す口を画面の外へ押し出さない) */
+  flex-wrap: wrap;
+  padding: var(--s1) 0;
+}
+[data-pkc-field='too-narrow-text'] {
+  /* 🔑 **色は情報にだけ使う**(founding)── ここは読ませたい字なので地の色で出す */
+  color: var(--fg);
+}
+[data-pkc-field='too-narrow-ok'] {
+  flex: 0 0 auto;
+  /* ⚠ 指で押す所は狭くしない(段② の 32px と揃える) */
+  min-height: 32px;
+  padding: 0 var(--s3);
 }
 
 [hidden] {
@@ -5376,37 +5406,116 @@ li[data-pkc-row-slot] {
 }
 
 /**
- * 🔴 **縦に持ったスマホでは 2 ペインを上下に積む**(#632 段③)。
+ * 🔴 **スマホでは 2 ペインを「1 枚ずつ」出す**(user 裁定 2026-09-04、#671)。
  *
- * ⚠ 実測(**規則を外して測り直した**):
+ * > 「**左ペイン表示と右ペイン表示に分けて、どちらかを開いている際は、
+ * > もう片方の行き先だけ示す。みたいな簡易 UI にすればよいのでは?
+ * > 意図した機能はフォルダ整理の体験向上なのだから、それでも良くないか?**」
  *
- * | 窓 | | ペイン | 見出し帯 `scrollWidth`/`clientWidth` | パンくず | 見える行 |
- * |---|---|---|---|---|---|
- * | 375×667(縦) | 直す前(`1fr 1fr`) | 184×571 | **187 / 182**(はみ出す) | 🔴 **0px** | 6 / 6 |
- * | 375×667(縦) | 直した後(上下) | 375×282 | 373 / 373 | **182px** | 6 / 6 |
- * | 667×375(横) | 左右のまま | 330×279 | ── | 136px | **6 / 6** |
- * | 667×375(横) | 上下にすると | 667×136 | ── | 474px | 🔴 **1 / 6** |
+ * ## ⚠ これは 2026-09-02 に入れた「縦なら上下に積む」を**撤回する**
  *
- * 🔴 **実害は幅ではなく、パンくずが 0px になること**である ── 2 ペインの操作は
- *   「いまどちらの箱に居るか」を見て決めるので、そこが 1px も見えないまま
- *   「移す」を押すことになる(押せはする ── だから**押せるかを見る検査では
- *   この欠陥は捕まらない**)。
- * 🔑 上下なら**幅を丸ごと使える**ので、パンくずも見出し帯も 1 行に収まる。
- * ⚠ 高さは半分ずつにする(`1fr 1fr`)── 片方を主にすると、
- *   「どちらが元でどちらが先か」が見た目から消える。
+ * 積んだときの実測(#632 段③ で採った値。撤回の根拠として残す):
  *
- * 🔴 **横に持ったときは積まない**(着地前レビューが指摘 → 実測で確定)。
- * ⚠ 667×375 では左右のままでもパンくずが **136px** 出ており、直す理由が無い。
- *   一方**積むと丈が 136px** になり、表に**6 行のうち 1 行しか出ない** ──
- *   「どこに居るか」を買って「何が在るか」を失う、正味で悪い取引である。
- * 🔑 条件は **`orientation`**(数字を 1 文字も書かない)── 幅の数字は TS の
- *   1 か所だけ、という決めごとを破らずに向きだけで切れる。
+ * | 窓 | 並べ方 | 1 枚の寸法 | パンくず | 見える行 |
+ * |---|---|---|---|---|
+ * | 375×667(縦) | 左右(`1fr 1fr`) | 184×571 | 🔴 **0px** | 6 / 6 |
+ * | 375×667(縦) | 上下に積む | 375×282 | 182px | 6 / 6 |
+ * | 667×375(横) | 左右 | 330×279 | 136px | 6 / 6 |
+ * | 667×375(横) | 上下に積む | 667×136 | 474px | 🔴 **1 / 6** |
+ *
+ * 🔑 **積む案は「縦なら得、横なら損」で、向きごとに分けるしかなかった。**
+ *   1 枚ずつなら**どちらの向きでも 1 枚が版面を丸ごと使う**ので、
+ *   パンくずも行数も同時に取れる ── 向きで分ける理由が消える。
+ * ⚠ だから `@media (orientation: portrait)` は**外した**(user 裁定の指示)。
+ *
+ * ## 🔑 出し分けは「焦点」1 つで決まる
+ *
+ * ⚠ **新しい旗を作らない**(CLAUDE.md §7)── どちらを見せるかは
+ *   「いま元になっている側」= `data-pkc-focused` そのものである。
+ *   切替の口(`dual-switch`)も `DUAL_FOCUS` を撃つだけでよい。
+ * ⚠ 詳細度: `[data-pkc-region='dual-pane']` は (0,1,0) なので、
+ *   ここは (0,4,0) で確実に勝つ(`app.css` 冒頭の順序の注記どおり)。
  */
-@media (orientation: portrait) {
-  [data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='dual-body'] {
-    grid-template-columns: 1fr;
-    grid-template-rows: 1fr 1fr;
-  }
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='dual-body'] {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+}
+/* 🔴 **2 枚を重ねる。畳まない。**(着地前の動線レビュー C、2026-09-04 に実測)
+ *
+ * ⚠ 1 稿目は `display: none` だったが、**見ていた場所が毎回いちばん上に戻る** ──
+ *   ペインの中の一覧(`dual-table`)は `overflow: auto` の**流れる箱**なので、
+ *   `display: none` にすると `scrollTop` が 0 に丸められる。
+ *   実測(375×667):左の器の中で流れる箱は `dual-table` と `dual-preview` の 2 つ。
+ * 🔴 帰結は user の物語そのもの ── 「右で 200 件を送って行き先を決める →
+ *   左へ戻って印を付ける → 右へ戻る」で**送り直しになる**。
+ * 🔑 **この repo は同じ罠を 3 面(一覧 / 本文 / 情報)では既に避けている** ──
+ *   `render/phone-layout.ts` の docstring に「`display: none` にしない …
+ *   短い面では `scrollTop` が 0 に丸められ、戻しても読んでいた場所へ帰れない」と
+ *   書いてある。同じ判断をここにも当てる。
+ * ⚠ `inert` は JS が付ける(CSS では焦点が隠れた面へ入りうる)── `dual-filer.ts`。 */
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='dual-pane'] {
+  grid-area: 1 / 1;
+}
+[data-pkc-region='shell'][data-pkc-layout='phone']
+  [data-pkc-region='dual-pane']:not([data-pkc-focused]) {
+  visibility: hidden;
+}
+/* 🔴 **行き先のボタンはスマホでだけ出す。**
+ * ⚠ パソコンは 2 枚とも見えているので、切り替える意味が無い(押しても
+ *   焦点が動くだけの、目的の読めないボタンになる)。
+ * 🔑 出し入れは**この規則 1 か所**が決める ── JS は `hidden` を触らない。 */
+[data-pkc-region='dual-switch'] {
+  display: none;
+}
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='dual-switch'] {
+  display: block;
+  width: 100%;
+  /* ⚠ 指で押す所の丈は他と揃える(段② の 32px)*/
+  min-height: 32px;
+  margin-bottom: var(--s2);
+  text-align: center;
+}
+/* 🔴 **操作の 7 つも 32px にする**(user 裁定 2026-09-04)。
+ * 🔑 1 枚ずつにしたことで**丈が 282px → 571px** になったので、
+ *   6px 増やしても表の行はほとんど減らない(実装後に実測して確かめる)。
+ *   これで端末の中の押し所が 1 種類(32px)に揃う。 */
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='dual-commands'] button {
+  min-height: 32px;
+}
+/* 🔴 **スマホでは 2 段に折る**(着地前の動線レビュー B、2026-09-04 に実測)。
+ *
+ * ⚠ 1 行 7 等分のままだと、375px で**語に使える幅が 15px**(全角 1 字)しか
+ *   残らない。実測した `scrollWidth / clientWidth`:
+ *
+ *   | 語 | 要る幅 | 空いている幅 |
+ *   |---|---|---|
+ *   | 右へ写す / 右へ移す / フォルダ | 53px | 🔴 **15px** |
+ *   | プレビュー | 66px | 🔴 15px |
+ *   | ゴミ箱 / ノート | 40px | 🔴 15px |
+ *   | 名前 | 26px | 🔴 15px |
+ *
+ * 🔴 **7 つ全部が切れていた**(この PR より前から ── ただし
+ *   「**行き先を字に入れる**」という user 裁定は、読めなければ**果たせない**)。
+ * ⚠ `cmd-label` は `text-overflow: ellipsis` なので、切れても**画面には
+ *   「右…」と出るだけ**で、`textContent` を見る検査は**素通りする**
+ *   (CLAUDE.md §1)── だから実ブラウザで `scrollWidth <= clientWidth` を見る。
+ * 🔑 4 列にすると 1 つ ≒ 94px になり、いちばん長い「プレビュー」(66px)も入る。 */
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='dual-commands'] {
+  grid-auto-flow: row;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+/* 🔴 **スマホでは鍵の字を出さない**(実測で決めた。2026-09-04)。
+ *
+ * ⚠ 4 列に折っても足りなかった ── **鍵の字の長さが操作ごとに違う**からである。
+ *   `barKey` は F キーが無い操作では**最初の割当をそのまま出す**ので、
+ *   「ノート」は `Ctrl+Shift+N` 相当の長い字になり、実測で
+ *   **語に残ったのは 18px**(要る 40px)だった。⚠ 4 列 + 詰めでも直らない。
+ * 🔑 **選ばされたら語を採る** ── 鍵は近道の案内、語は操作そのものである。
+ *   スマホ用画面(幅 720px 以下)は**キーボードを持たない端末**が主なので、
+ *   ここでは語だけを出す。⚠ 情報は捨てない ── 鍵は説明(`title`)に残す
+ *   (`dual-filer.ts` の `renderCommands`)。 */
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-field='cmd-key'] {
+  display: none;
 }
 
 

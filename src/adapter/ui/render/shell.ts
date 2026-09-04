@@ -40,6 +40,17 @@ export interface ShellRegions {
   inspector: HTMLElement;
   status: HTMLElement;
   /**
+   * 🔴 **状態の 1 行そのもの**(#671)。⚠ `status` は器で、字はこの子に書く ──
+   *   器へ書くと、同じ器に置いた断り書きの押しボタンが消える。
+   */
+  statusText: HTMLElement;
+  /** 🔴 **狭すぎる端末への断り書き**(#671)。中身は `too-narrow.ts` が出し入れする。 */
+  tooNarrow: HTMLElement;
+  /** その断り書きの字を置く所。 */
+  tooNarrowText: HTMLElement;
+  /** その断り書きを消す口(「OK」)。 */
+  tooNarrowOk: HTMLElement;
+  /**
    * 取込などの **複数件の注意**を全部見せる面(P6c review H-2)。
    *
    * ⚠ status footer は `textContent` 上書きの 1 行なので、**注意が N 件あっても
@@ -745,6 +756,36 @@ export function buildShell(root: HTMLElement): ShellRegions {
   const status = document.createElement('footer');
   status.setAttribute('data-pkc-region', 'status');
   status.hidden = true;
+  /**
+   * 🔴 **字は子の `<span>` に書く**(#671 の裁定 3)。
+   *
+   * ⚠ 直す前は `status.textContent = …` で**器ごと書き替えて**いたので、
+   *   ここに押しボタンを置くと**次の知らせで消える**。裁定 3 は
+   *   「**OK 押したら**消える」= 押せる物を要求するので、字と押し物を分ける。
+   * 🔑 読み側は変わらない ── `textContent` も `toContainText` も**子孫を含む**。
+   */
+  const statusText = document.createElement('span');
+  statusText.setAttribute('data-pkc-field', 'status-text');
+  /**
+   * 🔴 **狭すぎる端末への断り書き**(user 裁定 2026-09-04、#671)。
+   * ⚠ **器は 1 度だけ組む**(`too-narrow.ts` は `hidden` の付け外しだけ)──
+   *   作り直すと、押そうとした OK が指の下から消える(収録の帯と同じ理由)。
+   */
+  const tooNarrow = document.createElement('div');
+  tooNarrow.setAttribute('data-pkc-region', 'too-narrow');
+  tooNarrow.hidden = true;
+  /**
+   * ⚠ **字はここで入れない**(`too-narrow.ts` が出すときだけ書く)── `hidden` は
+   *   `textContent` に効かないので、置きっぱなしにすると「状態の行に何が出て
+   *   いるか」を見る検査が**隠れた字に満たされる**(CLAUDE.md §1)。
+   */
+  const tooNarrowText = document.createElement('span');
+  tooNarrowText.setAttribute('data-pkc-field', 'too-narrow-text');
+  const tooNarrowOk = document.createElement('button');
+  tooNarrowOk.type = 'button';
+  tooNarrowOk.setAttribute('data-pkc-field', 'too-narrow-ok');
+  tooNarrow.append(tooNarrowText, tooNarrowOk);
+  status.append(statusText, tooNarrow);
 
   /**
    * 🔴 **収録中の帯**(#413)── 経過 + 概算の大きさ + 止める / 捨てる。
@@ -855,6 +896,10 @@ export function buildShell(root: HTMLElement): ShellRegions {
     append,
     inspector,
     status,
+    statusText,
+    tooNarrow,
+    tooNarrowText,
+    tooNarrowOk,
     notices,
     update,
     announce,

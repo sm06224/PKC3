@@ -26,25 +26,22 @@
  * **帯の口はまだ存在しない**。`read-columns` が setter 形なのは元々この理由で、
  * `main.ts:864-866` にそう書いてある。
  */
-import { appPhone } from './phone-layout';
-
 let notify: ((text: string) => void) | null = null;
 
 /**
  * 帯へ出す口を配る(`main.ts` が起動時に 1 度だけ呼ぶ)。
  *
- * 🔴 **ここで対応外の幅も購読する**(#632 段③)。⚠ 別の配線点を作らない ──
- *   #606 が直した欠陥は「**口が 2 つあって、片方を配線し忘れた**」であり、
- *   ここへ足せば**忘れたときに畳みの知らせも同時に消える**(既に在る smoke が鳴る)。
- * ⚠ **口を外すときは購読も外す**(`null` を渡す test が state を持ち越さない)。
+ * 🔴 **対応外の幅の断り書きは、ここを通らない**(user 裁定 2026-09-04、#671)。
+ * ⚠ 2026-09-02 の段③ ではここで購読していたが、裁定 3 が
+ *   「**OK 押したら**消える」= **押せる物**を要求したので器から違う ──
+ *   この口は**字を流すだけ**で、押しボタンを持てない。
+ * 🔑 移した先は `too-narrow.ts`(状態の行の中に器を 1 つ持つ)。
+ *   ⚠ 移したぶんの門も置き直した ── `tests/smoke/phone.smoke.spec.ts` の
+ *   340px の腕が、配線が落ちれば鳴る(CLAUDE.md §7「除外したら、外したぶんの
+ *   門を置き直す」)。
  */
-let unwatchNarrow: (() => void) | null = null;
 export function setFoldNotify(fn: ((text: string) => void) | null): void {
   notify = fn;
-  unwatchNarrow?.();
-  unwatchNarrow = null;
-  if (fn !== null)
-    unwatchNarrow = appPhone.onTooNarrow((tooNarrow) => fn(tooNarrow ? TOO_NARROW_TEXT : ''));
 }
 
 /**
@@ -70,30 +67,3 @@ export function setFoldNotify(fn: ((text: string) => void) | null): void {
 export function sayFolded(text: string): void {
   if (notify !== null) notify(text);
 }
-
-/**
- * 🔴 **「この幅には対応していません」の 1 行**(#632 段③、user 裁定 ⑥)。
- *
- * > 「幅 360px 未満は、下の行に **1 度だけ**『この幅には対応していません ──
- * > 360px 以上で』と出し、**画面は止めない**」
- *
- * ⚠ **`sayFolded` とは黙る条件が逆である** ── あちらはスマホで黙り、こちらは
- *   **スマホより狭いときにだけ**鳴る。🔑 それでも**帯の口は 1 つ**にする
- *   (#606「口が 2 つある限り、片方を配線し忘れても誰も気づかない」)。
- * 🔑 **1 度だけ**の数え方は `appPhone` が持つ ── 窓を掴んで狭めると `change` は
- *   何度も鳴るので、鳴った数だけ言うと帯が知らせで埋まる。
- *   ⚠ **広げたら消す**のも `appPhone` が伝える(`onTooNarrow(false)`)── 消さないと
- *   対応している幅で「対応していません」と書いたままになる。
- *
- * 🔴 **字は user 裁定の言葉そのままにする**(着地前レビューで戻した)。
- * ⚠ 1 稿目は末尾に「(画面は止めません)」を足していたが、2 つ壊していた:
- *   ① **打ち消しは疑いを生む**(user は画面が止まるとは思っていないので、
- *      読んだ瞬間に「止まる場合があるのか」と読む)
- *   ② 🔴 **状態の行に収まらない** ── 実測(340px・11px):
- *      足した版は `scrollHeight 25 / clientHeight 20` で **2 行に折り返して
- *      画面の外へはみ出し**、外した版は **20 / 20** でぴったり収まる。
- *      ⚠ 帯は `height: 20px` 固定で `overflow` を持たないので、はみ出しても
- *      画面には**切れた 1 行**しか出ない(いちばん狭い画面へ向けて、
- *      その画面でいちばん長い字を出していた)。
- */
-export const TOO_NARROW_TEXT = 'この幅には対応していません ── 360px 以上でお使いください';

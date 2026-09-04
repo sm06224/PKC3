@@ -3106,12 +3106,30 @@ const ACTIONS: Record<string, ActionHandler> = {
             ...(body === undefined ? {} : { body }),
           });
         }
+        /**
+         * 🔴 **行き先を名乗る**(#671 の着地前の動線レビュー A、2026-09-04)。
+         *
+         * ⚠ 直す前は「N 件を写しました」だけで、**どこへ行ったか 1 文字も
+         *   出ていなかった** ── 隣の「移す」は
+         *   「N 件を『◯◯』へ入れました」と名乗っている(上の `moveEntries`)。
+         *   **隣り合う 2 つのボタンで扱いが違った。**
+         * 🔴 スマホでは相手のペインが**画面に居ない**ので、ここが唯一の
+         *   手がかりである ── 見えない場所へ物が飛び、飛んだ先の名前も
+         *   出ないと、探しに行けない。
+         * ⚠ 呼び名の作り方は `moveEntries` と**同じ規則**にする(2 か所で
+         *   別々の綴りを作らない ── CLAUDE.md §7)。
+         */
+        const toScope = paneScope(paneOf(st.dual, to));
+        const where =
+          toScope === null
+            ? 'ルート'
+            : (dispatcher.getState().entryMetas.get(toScope)?.title ?? 'フォルダ');
         dispatcher.dispatch({
           type: 'OP_FAILED',
           error:
             missing > 0
-              ? `${steps.length} 件を写しました(うち ${missing} 件は本文を読めず、空で作りました)`
-              : `${steps.length} 件を写しました`,
+              ? `${steps.length} 件を「${where}」へ写しました(うち ${missing} 件は本文を読めず、空で作りました)`
+              : `${steps.length} 件を「${where}」へ写しました`,
         });
       },
       () => dispatcher.dispatch({ type: 'OP_FAILED', error: '写せませんでした(本文を読めません)' }),

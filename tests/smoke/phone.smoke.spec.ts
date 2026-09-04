@@ -502,21 +502,25 @@ test('🔴 ← 一覧 で戻っても、「ノートへ →」で読んでいた
 });
 
 /**
- * 🔴 **360px 未満は「対応していません」と出し、画面は止めない**
- * (#632 段③、user 裁定 ⑥ 2026-08-30)。
+ * 🔴 **360px 未満は断り書きを出し、画面は止めない**(#632 段③ の裁定 ⑥ →
+ * **字と消し方は #671 で user が決め直した**、2026-09-04)。
  *
- * > 「幅 360px 未満は、下の行に **1 度だけ**『この幅には対応していません ──
- * > 360px 以上で』と出し、**画面は止めない**」
+ * > 「**この画面の幅では表示が崩れることがあります。横向きにすると直ります**」
+ * > 「**OK 押したらで**」
+ *
+ * ⚠ 前の字(「この幅には対応していません ── 360px 以上でお使いください」)は、
+ *   **スマホに窓が無い**ので「別の端末を使え」としか読めなかった ── 読んだ
+ *   user にできることが 0 件だった。🔑 新しい字は**いまできる一手**を名指しする。
  *
  * ## ⚠ ここで測るもの / 測らないもの
  *
- * 帯は **1 行しか持たない**ので、同じ字を 2 回書いても実ブラウザからは
- * **同じ画面に見える** ── 🔑 だから「**1 度だけ**」は
- * `tests/adapter/phone-layout.test.ts` が持ち(替え玉を何度も動かして数える)、
- * ここが持つのは実ブラウザにしか無い 2 つ:
- * ① 実際に `matchMedia` が真になって**帯へ届くか** ② **止まっていないか**。
+ * 「変わったときだけ伝える」は替え玉で数える側が持つ
+ * (`tests/adapter/too-narrow.test.ts`)。ここが持つのは実ブラウザにしか無い 3 つ:
+ * ① 実際に `matchMedia` が真になって**帯へ届くか** ② **止まっていないか**
+ * ③ 🔴 **「OK」が本当に押せる所に在るか**(いちばん狭い画面で、帯からも
+ *    画面からもはみ出していないか ── 押せない消し口は無いのと同じである)。
  */
-test('🔴 340px では「対応していません」と出て、それでも書ける', async ({ page }) => {
+test('🔴 340px では断り書きが出て、OK で消せて、それでも書ける (#671)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 340, height: 700 });
   await gotoApp(page);
@@ -527,8 +531,13 @@ test('🔴 340px では「対応していません」と出て、それでも書
    *   探すと、マニュアルやお知らせの散文に満たされて**常に真**になりうる。
    */
   const status = page.locator(REGION('status'));
-  await expect(status, '対応外の幅なのに何も言わない').toContainText('この幅には対応していません');
-  await expect(status, '何をすればよいか書いていない').toContainText('360px 以上');
+  await expect(status, '対応外の幅なのに何も言わない').toContainText('表示が崩れることがあります');
+  /**
+   * 🔴 **いまできる一手を名指しする**(user 裁定 2026-09-04、#671 の裁定 2)。
+   * ⚠ 前の字「360px 以上でお使いください」は、**スマホに窓が無い**ので
+   *   「別の端末を使え」としか読めなかった ── 読んだ user にできることが 0 件だった。
+   */
+  await expect(status, 'いまできる一手(横向き)を書いていない').toContainText('横向き');
 
   /**
    * 🔴 **止めない**(裁定の後半。ここが本題である)── 断り書きを出したあとも
@@ -546,14 +555,16 @@ test('🔴 340px では「対応していません」と出て、それでも書
   ).toContainText('細い端末のメモ');
 
   // ⚠ 断り書きは消えていない(書いたら流れる、では「1 度だけ」の意味が無い)
-  await expect(status, '書いたら断り書きが消えた').toContainText('この幅には対応していません');
+  await expect(status, '書いたら断り書きが消えた').toContainText('表示が崩れることがあります');
 
   /**
    * 🔴 **その字が、その幅の帯に収まっている**(着地前の動線レビューが突いた盲点)。
    *
-   * ⚠ `toContainText` は**画面の外へ落ちた字でも真になる** ── 状態の行は
-   *   `height: 20px` 固定で `overflow` を持たないので、長い字は 2 行に折り返して
-   *   **下half が窓の外**へ出る(実測:43 字の版で `scrollHeight 25 / clientHeight 20`)。
+   * ⚠ `toContainText` は**画面の外へ落ちた字でも真になる**(実測:43 字の版で
+   *   `scrollHeight 25 / clientHeight 20`)。
+   * 🔴 **いまは押す口(OK)が横に並ぶので、字だけのときより厳しい** ──
+   *   帯は `min-height` に変えて伸びるようにしたが、**伸びた結果が画面の外へ
+   *   出ていないか**は実ブラウザでしか読めない。
    * 🔑 いちばん狭い画面へ向けた字は、**その画面で測る**。
    */
   const fit = await status.evaluate((el) => ({
@@ -562,31 +573,94 @@ test('🔴 340px では「対応していません」と出て、それでも書
     bottom: Math.round(el.getBoundingClientRect().bottom),
     innerH: window.innerHeight,
   }));
-  expect(fit.scrollH, `断り書きが帯からはみ出している(${fit.scrollH} / ${fit.clientH})`)
-    .toBeLessThanOrEqual(fit.clientH);
+  /**
+   * 🔴 **主張を「はみ出していない」から「食う丈の上限」へ書き換えた**
+   * (着地前レビュー A-2、2026-09-04)。
+   *
+   * ⚠ 帯を `height: 20px` 固定から `min-height` + `flex-wrap` に変えた時点で、
+   *   **`scrollHeight <= clientHeight` は常に真**になった(内容に合わせて伸びるので)。
+   *   `bottom <= innerH` も、status の grid 行が `auto`・本文が `minmax(0,1fr)` なので
+   *   **帯が伸びると本文が縮むだけ**で常に真である ── 2 本とも鳴らなくなっていた。
+   * 🔑 いま守るべきは「**いちばん狭い画面で、帯が本文を食い過ぎない**」である。
+   *   ⚠ 上限は**実測で置く** ── 340px では **72px**(字が 2 行 + 押す口 32px が
+   *   その下に回り込む)。窓の丈 700px に対して約 10% で、しかも押せば消える。
+   *   🔑 **80 は「これ以上は増やさない」の線**であって、72 が理想という意味ではない
+   *   (増やすなら測り直して、なぜ増えたかを書く)。
+   */
+  expect(fit.clientH, `断り書きの帯が ${fit.clientH}px も食っている`).toBeLessThanOrEqual(80);
   // ⚠ 空振り防止 ── 帯そのものが画面の中に在る(0 高さで「収まった」ではない)
   expect(fit.clientH, '帯に高さが無い(何も測っていない)').toBeGreaterThan(0);
   expect(fit.bottom, '帯が画面の外に在る').toBeLessThanOrEqual(fit.innerH);
 
   /**
-   * 🔴 **広げたら消える**(着地前の動線レビュー ── いちばん重い指摘)。
+   * 🔴 **押す口が本当に押せる**(user 裁定 2026-09-04、#671 の裁定 3「OK 押したらで」)。
    *
-   * ⚠ 直す前は、窓を 800px に広げても字が残っていた ── **対応している幅で
-   *   「対応していません」と書いてある** = 画面が嘘をつく。しかも状態の行は
-   *   1 行しか無いので、**本当に読ませたい文を押し出す**(#300 段④ が
-   *   常設バッジを外したのと同じ形)。
+   * ⚠ 直す前は**押す口が 1 つも無かった** ── 読んだ user は消し方を持たない。
+   * ⚠ `toBeVisible()` では足りない(覆われていても真になる)ので、
+   *   `clickReal` で**実際に指が当たる**ことごと見る。
+   */
+  const ok = page.locator('[data-pkc-field="too-narrow-ok"]');
+  await expect(ok, '断り書きに押す口が無い(消し方が画面に無い)').toBeVisible();
+  const okBox = await ok.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    return {
+      h: Math.round(r.height),
+      bottom: Math.round(r.bottom),
+      innerH: window.innerHeight,
+      hit: at?.getAttribute('data-pkc-field') ?? null,
+    };
+  });
+  expect(okBox.hit, 'OK が覆われていて押せない').toBe('too-narrow-ok');
+  expect(okBox.h, `OK の押し所が ${okBox.h}px(32px 未満)`).toBeGreaterThanOrEqual(32);
+  expect(okBox.bottom, 'OK が画面の外に在る').toBeLessThanOrEqual(okBox.innerH);
+
+  await clickReal(page, '[data-pkc-field="too-narrow-ok"]');
+  await expect(status, 'OK を押しても断り書きが消えない').not.toContainText(
+    '表示が崩れることがあります',
+  );
+
+  /**
+   * 🔴 **押した後は、狭め直しても出てこない。**
+   * ⚠ 出るなら「押しても消えない」のと体験が同じである ── 窓を掴んでいる間じゅう
+   *   同じ字を消し続けることになる。
    */
   await page.setViewportSize({ width: 800, height: 700 });
-  await expect(status, '広げても「対応していません」が残っている').not.toContainText(
-    'この幅には対応していません',
-  );
-  // 🔑 戻せばまた出る(消したら二度と出ない、を作らない)
   await page.setViewportSize({ width: 340, height: 700 });
-  await expect(status, '狭め直しても出ない(一度消したら終わりになっている)').toContainText(
-    'この幅には対応していません',
+  await expect(status, 'OK を押したのにまた出てきた').not.toContainText(
+    '表示が崩れることがあります',
   );
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **押さずに広げたら畳む**(#671。上の test の**対照群**)。
+ *
+ * ⚠ 上だけだと「一度出たら二度と出ない」実装が素通りする ── そちらは
+ *   OK を押していない人にも二度と出ないので、別の欠陥である。
+ * 🔴 そして**広げたら畳む**のがここの主張である:1440px の画面で
+ *   「この画面の幅では表示が崩れる」と出したままにしない(画面に嘘を出さない)。
+ */
+test('🔴 押さずに広げたら畳み、狭め直せばまた出る (#671)', async ({ page }) => {
+  await page.setViewportSize({ width: 340, height: 700 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  const status = page.locator(REGION('status'));
+  await expect(status, '前提が崩れた(狭くしても出ていない)').toContainText(
+    '表示が崩れることがあります',
+  );
+
+  await page.setViewportSize({ width: 800, height: 700 });
+  await expect(status, '広げても出したまま(対応している幅で嘘をついている)').not.toContainText(
+    '表示が崩れることがあります',
+  );
+
+  // 🔑 押していないので、狭め直せばまた出る
+  await page.setViewportSize({ width: 340, height: 700 });
+  await expect(status, '押していないのに二度と出ない').toContainText(
+    '表示が崩れることがあります',
+  );
 });
 
 /**
@@ -596,7 +670,7 @@ test('🔴 340px では「対応していません」と出て、それでも書
  *   (境目を `PHONE_MIN_PX` 未満から `PHONE_MAX_PX` 以下へ広げる変異がまさにそれ)。
  * 🔑 幅は **`PHONE_MIN_PX` ちょうど**にする ── 境目の外側 1px で見る。
  */
-test('🔴 360px ちょうどでは「対応していません」と出さない', async ({ page }) => {
+test('🔴 360px ちょうどでは断り書きを出さない', async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 700 });
   await gotoApp(page);
   await dismissAnnounce(page);
@@ -604,196 +678,307 @@ test('🔴 360px ちょうどでは「対応していません」と出さない
   await expect(page.locator(REGION('shell'))).toHaveAttribute('data-pkc-layout', 'phone');
   await expect(
     page.locator(REGION('status')),
-    '対応している幅なのに「対応していません」と出ている',
-  ).not.toContainText('この幅には対応していません');
+    '対応している幅なのに断り書きが出ている',
+  ).not.toContainText('表示が崩れることがあります');
 });
 
 /**
- * 🔴 **スマホでは 2 ペインを上下に積む**(#632 段③)。
+ * 🔴 **スマホでは 2 ペインを「1 枚ずつ」出す**(user 裁定 2026-09-04、#671)。
+ *
+ * > 「**左ペイン表示と右ペイン表示に分けて、どちらかを開いている際は、
+ * > もう片方の行き先だけ示す。みたいな簡易 UI にすればよいのでは?**」
  *
  * ## user の物語
  *
- * 電車で写真をフォルダへ片づけたい → 2 ペインを開く → 🔴 直す前は
- * **左右が 184px ずつ**に割れ、**パンくずの幅が 0px** になっていた(実測)──
- * つまり「いまどの箱に居るか」が読めないまま「移す」を押すことになる。
+ * 電車で写真をフォルダへ片づけたい → 2 ペインを開く → **1 枚が版面を丸ごと使う**
+ * ので、どの箱に居るか(パンくず)も、何が在るか(行)も同時に読める。
+ * 移したくなったら「**右へ移す**」を押す ── 相手は画面に居ないが、字が行き先を言う。
  *
  * ## ⚠ ここでしか測れないもの
  *
- * `grid-template-columns` が実際に何 px に解けるかは happy-dom では読めない
+ * `display: none` が実際に効いて**箱が 1 つになる**ことは happy-dom では読めない
  * (unit が持つのは**規則が在ること**まで ── `tests/adapter/phone-layout.test.ts`)。
- * 🔑 ここが持つのは**解けた寸法**と、**押せるか**である。
+ * 🔑 ここが持つのは**解けた寸法**と、**押せるか**と、**切り替わるか**である。
  */
-test('🔴 スマホの 2 ペインは上下に積まれ、どちらの箱に居るかが読める', async ({ page }) => {
-  const errors = collectPageErrors(page);
-  await page.setViewportSize({ width: 375, height: 667 });
-  await gotoApp(page);
-  await dismissAnnounce(page);
+for (const [name, w, h] of [
+  ['縦', 375, 667],
+  ['横', 667, 375],
+] as const) {
+  /**
+   * 🔑 **向きの 2 本を同じ主張で回す** ── 撤回した「積む」案は向きで得失が
+   *   反転していた(縦は得・横は損)ので、向きごとに違う形を要求していた。
+   *   1 枚ずつなら**どちらでも同じ**になる ── それをここで確かめる。
+   */
+  test(`🔴 スマホ(${name})の 2 ペインは 1 枚だけ出し、行き先の字で移せる`, async ({ page }) => {
+    const errors = collectPageErrors(page);
+    await page.setViewportSize({ width: w, height: h });
+    await gotoApp(page);
+    await dismissAnnounce(page);
 
-  await createEntry(page, 'folder');
-  await page.locator('[data-pkc-field="editor-title"]').fill('はこ');
-  await clickReal(page, '[data-pkc-action="commit-edit"]');
-  await clickReal(page, '[data-pkc-field="phone-back"]');
-  await createEntry(page, 'text');
-  await clickReal(page, '[data-pkc-action="commit-edit"]');
-  await clickReal(page, '[data-pkc-field="phone-back"]');
+    await createEntry(page, 'folder');
+    await page.locator('[data-pkc-field="editor-title"]').fill('はこ');
+    await clickReal(page, '[data-pkc-action="commit-edit"]');
+    await clickReal(page, '[data-pkc-field="phone-back"]');
+    await createEntry(page, 'text');
+    await clickReal(page, '[data-pkc-action="commit-edit"]');
+    await clickReal(page, '[data-pkc-field="phone-back"]');
 
-  await clickReal(page, '[data-pkc-browse="launcher"]');
-  await openViewPane(page, 'dual');
+    await clickReal(page, '[data-pkc-browse="launcher"]');
+    await openViewPane(page, 'dual');
 
-  const shape = await page.evaluate(() => {
-    const panes = [
-      ...document.querySelectorAll('[data-pkc-region="dual-pane"]'),
-    ] as HTMLElement[];
-    const one = (p: HTMLElement) => {
-      const r = p.getBoundingClientRect();
-      const part = (name: string): [number, number] => {
-        const el = p.querySelector(`[data-pkc-region="${name}"]`) as HTMLElement | null;
-        return el ? [Math.round(el.scrollWidth), Math.round(el.clientWidth)] : [-1, -1];
-      };
-      return {
-        x: Math.round(r.x),
-        y: Math.round(r.y),
-        w: Math.round(r.width),
-        h: Math.round(r.height),
-        crumbs: part('dual-crumbs'),
-        head: part('dual-head'),
-      };
-    };
-    return { panes: panes.map(one), innerW: window.innerWidth };
-  });
+    // ⚠ 空振り防止 ── この幅でもスマホ用画面には**なっている**
+    await expect(page.locator(REGION('shell'))).toHaveAttribute('data-pkc-layout', 'phone');
 
-  expect(shape.panes, '2 ペインが揃っていない(台の前提が崩れた)').toHaveLength(2);
-  const [a, b] = shape.panes as [(typeof shape.panes)[0], (typeof shape.panes)[0]];
+    const shape = () =>
+      page.evaluate(() => {
+        const panes = [
+          ...document.querySelectorAll('[data-pkc-region="dual-pane"]'),
+        ] as HTMLElement[];
+        const box = (p: HTMLElement) => {
+          const r = p.getBoundingClientRect();
+          const crumbs = p.querySelector(
+            '[data-pkc-region="dual-crumbs"]',
+          ) as HTMLElement | null;
+          const head = p.querySelector('[data-pkc-region="dual-head"]') as HTMLElement | null;
+          return {
+            side: p.getAttribute('data-pkc-side'),
+            /**
+             * 🔴 **`visibility` で見る**(着地前の動線レビュー C の直しに合わせた)。
+             * ⚠ 隠す側は `display: none` ではなく `visibility: hidden` なので、
+             *   **箱は在る**(`width > 0`)── 大きさで見ると「2 枚出ている」と読む。
+             */
+            shown: getComputedStyle(p).visibility !== 'hidden',
+            inert: p.hasAttribute('inert'),
+            w: Math.round(r.width),
+            h: Math.round(r.height),
+            label: p.getAttribute('aria-label'),
+            crumbW: crumbs ? Math.round(crumbs.clientWidth) : -1,
+            headOver: head ? Math.round(head.scrollWidth) - Math.round(head.clientWidth) : -1,
+          };
+        };
+        const sw = document.querySelector(
+          '[data-pkc-region="dual-switch"]',
+        ) as HTMLElement | null;
+        return {
+          panes: panes.map(box),
+          innerW: window.innerWidth,
+          switcher:
+            sw === null
+              ? null
+              : {
+                  text: (sw.textContent ?? '').trim(),
+                  to: sw.getAttribute('data-pkc-side'),
+                  h: Math.round(sw.getBoundingClientRect().height),
+                  shown: sw.getBoundingClientRect().height > 0,
+                },
+          moveLabel: (
+            document.querySelector('[data-pkc-field="dual-move"]')?.textContent ?? ''
+          ).trim(),
+          /**
+           * 🔴 **門を N 個置いたら、N 個目だけが鳴る場面を N 通り作る**
+           * (着地前レビュー M1、2026-09-04)。⚠ `dual-move` だけを見ていたので、
+           *   `it.directed` を落として**全部に行き先を付ける**変異が生き延びた
+           *   (「右へ名前」「右へゴミ箱」と出るのに緑)。
+           */
+          copyLabel: (
+            document.querySelector('[data-pkc-field="dual-copy"]')?.textContent ?? ''
+          ).trim(),
+          renameLabel: (
+            document.querySelector('[data-pkc-field="dual-rename-begin"]')?.textContent ?? ''
+          ).trim(),
+          /**
+           * 🔴 **字が切れていないか**(着地前の動線レビュー B、2026-09-04 に実測)。
+           * ⚠ `text-overflow: ellipsis` なので、切れても画面には「右…」と出るだけ ──
+           *   `textContent` を見る検査は**素通りする**(CLAUDE.md §1)。
+           */
+          cut: [...document.querySelectorAll('[data-pkc-field="cmd-label"]')]
+            .filter((el) => el.scrollWidth > el.clientWidth)
+            .map((el) => `${el.textContent}(${el.scrollWidth}/${el.clientWidth})`),
+        };
+      });
 
-  // ① 🔴 **上下に積まれている**(同じ左端・違う上端)
-  expect(a.x, '左右に並んだまま(左端が揃っていない)').toBe(b.x);
-  // ⚠ **重なっていない**ことまで見る(上端が違うだけでは、半分被っていても真になる)
-  expect(b.y, '上下に積まれていない(2 枚目が 1 枚目の下端より上に居る)').toBeGreaterThanOrEqual(
-    a.y + a.h - 2,
-  );
+    const first = await shape();
+    expect(first.panes, '2 ペインが揃っていない(台の前提が崩れた)').toHaveLength(2);
 
-  // ② 🔴 **どちらも窓の幅を丸ごと使う**(直す前は 184px ずつだった)
-  for (const p of [a, b])
-    expect(p.w, `ペインが窓より狭い(${p.w}px / 窓 ${shape.innerW}px)`).toBeGreaterThan(
-      shape.innerW - 20,
+    // ① 🔴 **出ているのは 1 枚だけ**(積んだのでも、横に割ったのでもない)
+    const shown = first.panes.filter((p) => p.shown);
+    expect(shown.map((p) => p.side), '1 枚だけ出ていない').toEqual(['left']);
+
+    const only = shown[0]!;
+    // ⚠ 隠した側は**焦点も受けない**(`visibility` だけでは Tab で入れる)
+    const hiddenSide = first.panes.find((p) => !p.shown)!;
+    expect(hiddenSide.inert, '隠した側に焦点が入る(Tab で見えないペインへ行ける)').toBe(true);
+    // ② 🔴 **その 1 枚が版面を丸ごと使う**(直す前は 184px / 積むと丈 136px)
+    expect(only.w, `ペインが窓より狭い(${only.w}px / 窓 ${first.innerW}px)`).toBeGreaterThan(
+      first.innerW - 20,
     );
+    expect(only.h, `ペインの丈が足りない(${only.h}px)`).toBeGreaterThan(200);
+    /**
+     * ③ 🔴 **実害そのもの ── パンくずに幅が在る**。
+     * ⚠ 直す前の実測は `scrollWidth 41 / clientWidth 0` ── 字は在るのに 1px も見えない。
+     */
+    expect(only.crumbW, 'パンくずの幅が 0(どの箱に居るか読めない)').toBeGreaterThan(20);
+    expect(only.headOver, `見出し帯が横に ${only.headOver}px はみ出している`).toBeLessThanOrEqual(0);
+    // ④ ⚠ 呼び名は「左 / 右」のまま(積まないので「上 / 下」には戻らない)
+    expect(only.label, '呼び名が左右になっていない').toBe('左のペイン');
 
-  /**
-   * ③ 🔴 **実害そのもの ── パンくずに幅が在る**。
-   * ⚠ 直す前の実測は `scrollWidth 41 / clientWidth 0` ── 字は在るのに
-   *   **1px も見えない**。ここを見ないと、ペインを広げただけで満足してしまう。
-   */
-  for (const p of [a, b]) {
-    expect(p.crumbs[1], 'パンくずの幅が 0(どの箱に居るか読めない)').toBeGreaterThan(20);
-    expect(p.head[0], `見出し帯が横にはみ出している(${p.head[0]} > ${p.head[1]})`)
-      .toBeLessThanOrEqual(p.head[1]);
-  }
+    /**
+     * ⑤ 🔴 **行き先のボタンが出ていて、押し所が 32px 以上**(user 裁定)。
+     * ⚠ 相手が画面に居ないので、**これが唯一の帰り道**である ── 出ていなければ
+     *   右のペインへ二度と行けない(片道の操作を作らない、user 指示 2026-08-23)。
+     */
+    expect(first.switcher, '行き先のボタンが組まれていない').not.toBeNull();
+    expect(first.switcher!.shown, 'スマホなのに行き先のボタンが出ていない').toBe(true);
+    expect(first.switcher!.text, '行き先が字に出ていない').toContain('右のペイン');
+    expect(first.switcher!.h, `押し所が ${first.switcher!.h}px(32px 未満)`).toBeGreaterThanOrEqual(32);
 
-  /**
-   * ④ 🔴 **どちらの箱を選んでも「移す」が押せる**(片道の操作を作らない ──
-   *    user 指示 2026-08-23)。⚠ `toBeVisible()` では足りない ── 覆われていても
-   *    真になるので、`elementFromPoint` で**実際に指が当たる**ことを見る。
-   */
-  const hitMove = () =>
-    page.locator('[data-pkc-field="dual-move"]').evaluate((el) => {
-      const r = el.getBoundingClientRect();
-      const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
-      return at?.closest('[data-pkc-field]')?.getAttribute('data-pkc-field') ?? null;
-    });
-  for (const side of ['left', 'right'] as const) {
-    await clickReal(page, `[data-pkc-region="dual-pane"][data-pkc-side="${side}"]`);
-    await expect(
-      page.locator(`[data-pkc-region="dual-pane"][data-pkc-side="${side}"]`),
-      `${side} を押しても焦点が移らない`,
-    ).toHaveAttribute('data-pkc-focused', '');
-    expect(await hitMove(), `${side} を元にすると「移す」が押せない`).toBe('dual-move');
-  }
+    /**
+     * ⑥ 🔴 **操作の字に行き先が入る**(user 裁定)── 相手が画面に居ないので、
+     *    「移す」だけではどこへ行くか読めない。
+     */
+    expect(first.moveLabel, '操作の字に行き先が入っていない').toContain('右へ移す');
+    /**
+     * 🔴 **その字が、その幅で本当に読める**(着地前の動線レビュー B)。
+     *
+     * ⚠ 直す前の実測(375×667、1 行 7 等分):**7 つ全部**が切れていた ──
+     *   「右へ写す」は **53px 必要 / 15px しか無い**(全角 1 字)。
+     * 🔑 「行き先を字に入れる」という user 裁定は、**読めなければ果たせない**。
+     */
+    expect(first.cut, `操作の字が切れている: ${first.cut.join(' / ')}`).toEqual([]);
+    // 🔑 **行き先が入るのは「写す」「移す」だけ**(2 件とも見る)
+    expect(first.copyLabel, '「写す」に行き先が入っていない').toContain('右へ写す');
+    /**
+     * 🔴 **対照群 ── 行き先を入れない側**。⚠ これが無いと、`it.directed` を
+     *   無視して**全部に行き先を付ける**変異が素通りする(「右へ名前」と出る)。
+     */
+    expect(first.renameLabel, '行き先の要らない操作にまで行き先を付けている').not.toContain('右へ');
 
-  /**
-   * ⑤ 🔴 **読み上げる呼び名が、置かれ方と合っている**(着地前の動線レビュー)。
-   *
-   * ⚠ 直す前は上下に積んでも **「左のペイン」「右のペイン」**と読み上げていた ──
-   *   画面と逆のことを言っている。⚠ **変異試験 N9 が SURVIVED で教えた** ──
-   *   `stackedNow` を潰しても unit は 1 件も落ちない(happy-dom は採寸しないので、
-   *   実寸から採る判定は**実ブラウザでしか通らない**)。
-   */
-  const names = await page.evaluate(() =>
-    [...document.querySelectorAll('[data-pkc-region="dual-pane"]')].map((p) =>
-      p.getAttribute('aria-label'),
-    ),
-  );
-  expect(names, '上下に積んだのに「左 / 右」と読み上げている').toEqual([
-    '上のペイン',
-    '下のペイン',
-  ]);
+    /**
+     * ⑦ 🔴 **押したら本当に切り替わる**(押せるだけ、では帰り道にならない)。
+     * ⚠ `toBeVisible()` では足りない ── 覆われていても真になるので、
+     *   `clickReal` で**実際に指が当たる**ことごと見る。
+     */
+    await clickReal(page, '[data-pkc-region="dual-switch"]');
+    const after = await shape();
+    expect(
+      after.panes.filter((p) => p.shown).map((p) => p.side),
+      '押しても右のペインに切り替わらない',
+    ).toEqual(['right']);
+    // ⚠ **行き先も裏返る**(裏返らないと、左へ戻る道がその場で消える)
+    expect(after.switcher!.text, '行き先が左に裏返っていない').toContain('左のペイン');
+    expect(after.moveLabel, '操作の字が左向きに裏返っていない').toContain('左へ移す');
 
-  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
-});
+    /**
+     * ⑧ 🔴 **どちらの側でも「移す」が押せる**(片道の操作を作らない)。
+     * ⚠ `elementFromPoint` で見る ── 覆われていると `toBeVisible` は素通りする。
+     */
+    const hitMove = () =>
+      page.locator('[data-pkc-field="dual-move"]').evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+        return {
+          field: at?.closest('[data-pkc-field]')?.getAttribute('data-pkc-field') ?? null,
+          h: Math.round(r.height),
+        };
+      });
+    const hit = await hitMove();
+    expect(hit.field, '右を元にすると「移す」が押せない').toBe('dual-move');
+    // 🔑 操作の 7 つも 32px(user 裁定)
+    expect(hit.h, `操作の押し所が ${hit.h}px(32px 未満)`).toBeGreaterThanOrEqual(32);
+
+    /**
+     * ⑨ 🔴 **切り替えたら、新しい側へ焦点が移る**(着地前レビュー B-5)。
+     *
+     * ⚠ 2 ペインの鍵(F5 / F6 / Tab …)は**焦点がペインの中に在るとき**しか効かない。
+     *   行き先のボタンはペインの外に在り、押した瞬間に元のペインは `inert` になるので、
+     *   焦点を移さないと `<body>` へ落ちて**鍵が 1 つも効かなくなる**
+     *   (720px 未満のノート PC で現実に届く)。
+     */
+    const focusIn = await page.evaluate(
+      () =>
+        document.activeElement?.closest('[data-pkc-region="dual-pane"]')?.getAttribute(
+          'data-pkc-side',
+        ) ?? null,
+    );
+    expect(focusIn, '切り替えた先へ焦点が移っていない(2 ペインの鍵が死ぬ)').toBe('right');
+
+    // ⚠ 戻り道の対照群 ── もう一度押せば左へ帰る(往復できる)
+    await clickReal(page, '[data-pkc-region="dual-switch"]');
+    const back = await shape();
+    expect(
+      back.panes.filter((p) => p.shown).map((p) => p.side),
+      '左のペインへ帰れない(片道になっている)',
+    ).toEqual(['left']);
+
+    /**
+     * ⑩ 🔴 **窓の幅がパソコン側へ跨いだら、操作の字も戻る**(着地前レビュー B-1 / G。
+     *    2026-09-04 に実測して**壊れていることを確かめた**)。
+     *
+     * ⚠ 窓の幅は `state` を 1 バイトも動かさないので、`render` に届く経路が
+     *   `appPhone` の `onToggle` **1 本しか無い** ── 直す前はそこが
+     *   `applyPaneVisibility` しか呼んでおらず、実測(375 → 1440)で
+     *   **2 枚とも出ているのに字は「F6右へ移す」のまま**だった。
+     */
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect(page.locator(REGION('shell'))).not.toHaveAttribute(
+      'data-pkc-layout',
+      'phone',
+    );
+    const wide = await shape();
+    expect(wide.moveLabel, 'パソコンの幅にしても、スマホ用の字が残っている').not.toContain(
+      'へ移す',
+    );
+    expect(
+      wide.panes.filter((p) => p.shown).map((p) => p.side),
+      'パソコンの幅にしても 1 枚のまま',
+    ).toEqual(['left', 'right']);
+
+    expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+  });
+}
 
 /**
- * 🔴 **横に持ったときは積まない**(#632 段③ の着地前レビュー → 実測で確定)。
+ * 🔴 **パソコンは 1px も変えない**(user 裁定 2026-09-04)── 上の 2 本の**対照群**。
  *
- * ⚠ 上の test の**対照群**である。`orientation` で切らずに「スマホなら積む」と
- *   書くと、667×375(横に持ったスマホ)で**丈が 136px** になり、
- *   **6 行のうち 1 行しか出ない**(実測)── 「どこに居るか」を買って
- *   「何が在るか」を失う、正味で悪い取引になる。
- * 🔑 横のままなら左右で**パンくずが 136px** 出ているので、直す理由がそもそも無い。
+ * ⚠ これが無いと「いつも 1 枚だけ出す」実装が素通りする(スマホ側の主張は
+ *   全部通ってしまう)── CLAUDE.md §1「代替物で満たせない条件にする」。
  */
-test('🔴 横に持ったスマホでは、2 ペインを積まずに左右のまま出す', async ({ page }) => {
-  await page.setViewportSize({ width: 667, height: 375 });
+test('🔴 パソコンの 2 ペインは 2 枚とも出たまま、行き先のボタンは出ない (#671)', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
   await dismissAnnounce(page);
   await createEntry(page, 'text');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
-  await clickReal(page, '[data-pkc-field="phone-back"]');
   await clickReal(page, '[data-pkc-browse="launcher"]');
   await openViewPane(page, 'dual');
 
-  // ⚠ 空振り防止 ── この幅でもスマホ用画面には**なっている**
-  await expect(page.locator(REGION('shell'))).toHaveAttribute('data-pkc-layout', 'phone');
+  // ⚠ 空振り防止 ── この幅ではスマホ用画面に**なっていない**
+  await expect(page.locator(REGION('shell'))).not.toHaveAttribute('data-pkc-layout', 'phone');
 
-  const shape = await page.evaluate(() => {
+  const wide = await page.evaluate(() => {
     const panes = [
       ...document.querySelectorAll('[data-pkc-region="dual-pane"]'),
     ] as HTMLElement[];
-    return panes.map((p) => {
-      const r = p.getBoundingClientRect();
-      const c = p.querySelector('[data-pkc-region="dual-crumbs"]') as HTMLElement | null;
-      return {
-        x: Math.round(r.x),
-        y: Math.round(r.y),
-        w: Math.round(r.width),
-        h: Math.round(r.height),
-        crumbW: c ? Math.round(c.clientWidth) : -1,
-      };
-    });
+    const sw = document.querySelector('[data-pkc-region="dual-switch"]') as HTMLElement | null;
+    return {
+      shown: panes.filter((p) => p.getBoundingClientRect().width > 0).length,
+      labels: panes.map((p) => p.getAttribute('aria-label')),
+      switcherShown: sw !== null && sw.getBoundingClientRect().height > 0,
+      moveLabel: (
+        document.querySelector('[data-pkc-field="dual-move"]')?.textContent ?? ''
+      ).trim(),
+    };
   });
-  expect(shape, '2 ペインが揃っていない(台の前提が崩れた)').toHaveLength(2);
-  const [a, b] = shape as [(typeof shape)[0], (typeof shape)[0]];
-
-  // ① 🔴 **左右のまま**(積んでいない)
-  expect(b.x, '横に持っても上下に積んでいる').toBeGreaterThan(a.x + a.w - 1);
-  expect(Math.abs(a.y - b.y), '上端が揃っていない').toBeLessThan(2);
-  // ② 🔴 **丈を失っていない**(積むと 136px まで潰れて 1 行しか出なかった)
-  for (const p of [a, b])
-    expect(p.h, `ペインの丈が足りない(${p.h}px)`).toBeGreaterThan(200);
-  // ③ 🔑 この幅なら左右のままでもパンくずは読める(積む理由が無いことの根拠)
-  for (const p of [a, b])
-    expect(p.crumbW, 'パンくずの幅が 0(横でも積む理由が在ることになる)').toBeGreaterThan(20);
-
+  expect(wide.shown, 'パソコンでも 1 枚しか出ていない').toBe(2);
+  expect(wide.labels, '呼び名が左右になっていない').toEqual(['左のペイン', '右のペイン']);
+  expect(wide.switcherShown, 'パソコンに行き先のボタンが出ている').toBe(false);
   /**
-   * ④ ⚠ **呼び名の対照群** ── 左右のままなら「左 / 右」と読み上げる。
-   * 🔑 縦の腕と対で置く ── 片方だけだと「いつも上下と言う」実装が素通りする。
+   * 🔑 **字に行き先を入れない**(2026-08-19 の判断を守る)── 2 枚見えているので
+   *   向きは焦点の地色が語っており、字を足すと焦点が移るたびに幅が変わって端が揃わない。
    */
-  const names = await page.evaluate(() =>
-    [...document.querySelectorAll('[data-pkc-region="dual-pane"]')].map((p) =>
-      p.getAttribute('aria-label'),
-    ),
-  );
-  expect(names, '左右に並んでいるのに「上 / 下」と読み上げている').toEqual([
-    '左のペイン',
-    '右のペイン',
-  ]);
+  expect(wide.moveLabel, 'パソコンの操作にも行き先を入れている').not.toContain('へ移す');
 });
 
 /**

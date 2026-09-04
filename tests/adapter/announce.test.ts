@@ -850,6 +850,7 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
+    ['2026-09-04-phone-dual-one', 'e7b26a8e'],
     ['2026-09-03-phone-manual', '11e3d308'],
     ['2026-09-03-phone-narrow', '1fbb2b81'],
     ['2026-09-03-touch-devices', '6c59976f'],
@@ -862,9 +863,6 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-09-02-stack-bar', 'b34b851c'],
     ['2026-09-02-tag-enter', '0bdca4c1'],
     ['2026-09-02-tag-limit-reason', '1be07723'],
-    ['2026-09-02-manual-window-front', 'eb88cc24'],
-    // ⚠ 訂正 + 追記(2026-09-02): 「本文のメニューには説明が無い」が事実と違ったので直し、
-    //    画面の端で欄が外に出ていた件の直しを 1 行足した(配ったときの字は CHANGELOG に残る)
     // ⚠ 落とした entry の注記(訂正の経緯)は CHANGELOG と git の履歴に在る ── ここには残さない
   ];
 

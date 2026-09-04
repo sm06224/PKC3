@@ -566,7 +566,17 @@ describe('PR gate の形(2026-08-18)', () => {
   it('🔴 遅い `playwright install` は smoke 側だけに在る(速い lane の budget を食わない)', () => {
     const jobs = jobsOf(CI);
     // 空振り防止 ── 切り出しが壊れて 1 job も取れていない形で「一致 0 件」と言わない
-    expect([...jobs.keys()], 'job の切り出しが壊れている').toEqual(['verify', 'smoke']);
+    /**
+     * ⚠ **`audit` を足した**(2026-09-04)── registry が遅い日に 2 分 05 秒を食い、
+     *   `npm ci` の 5 分と合わせて `verify` の 10 分を使い切っていた。
+     *   🔑 分けると並列に走るので**壁時計は伸びず**、赤が出たときに
+     *   「依存の話か、コードの話か」が **job の名前で分かる**(1 job = 1 主張)。
+     */
+    expect([...jobs.keys()], 'job の切り出しが壊れている').toEqual([
+      'audit',
+      'verify',
+      'smoke',
+    ]);
     expect(jobs.get('smoke'), 'smoke に install が無い').toContain('playwright install');
     expect(jobs.get('verify'), '遅い install が速い lane へ戻っている').not.toContain(
       'playwright install',

@@ -363,12 +363,20 @@ test('🔴 2 ペインの押せる口に、無反応が 1 つも無い (#273)', 
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   await openDual(page);
 
-  /** 何も選ばずに押す ── **全部が理由を出す**(無言で終わらない)。 */
+  /**
+   * 何も選ばずに押す ── **全部が理由を出す**(無言で終わらない)。
+   *
+   * ⚠ **見るのは器ではなく字の所**(`status-text`。2026-09-04、#671)── 状態の行は
+   *   同じ器に**狭すぎる端末への断り書き**も持つようになったので、器を丸ごと
+   *   空にすると**その断り書きごと壊す**(実際に踏んだ:器の `textContent` を
+   *   空にした瞬間、字の span も押す口も DOM から消えた)。
+   */
+  const statusText = page.locator('[data-pkc-field="status-text"]');
   for (const field of ['dual-move', 'dual-copy', 'dual-rename-begin', 'dual-delete']) {
-    await page.locator('[data-pkc-region="status"]').evaluate((el) => (el.textContent = ''));
+    await statusText.evaluate((el) => (el.textContent = ''));
     await clickReal(page, `[data-pkc-field="${field}"]`);
     await expect(
-      page.locator('[data-pkc-region="status"]'),
+      statusText,
       `${field}: 何も選ばずに押したのに無言(dead click)`,
     ).not.toHaveText('');
   }
@@ -400,7 +408,18 @@ test('🔴 2 ペインの押せる口に、無反応が 1 つも無い (#273)', 
     '行を押したのに印が付いていない',
   ).toHaveCount(1);
   await clickReal(page, '[data-pkc-field="dual-copy"]');
-  await expect(page.locator('[data-pkc-region="status"]')).toContainText('写しました');
+  /**
+   * 🔴 **行き先を名乗る**(#671 の着地前の動線レビュー A、2026-09-04)。
+   *
+   * ⚠ 直す前は「1 件を写しました」だけで、**どこへ行ったか 1 文字も出ていなかった** ──
+   *   隣の「移す」は「N 件を『◯◯』へ入れました」と名乗っている。
+   * 🔴 スマホでは相手のペインが**画面に居ない**ので、ここが唯一の手がかりである。
+   * 🔑 右のペインは触っていないのでルートに居る ── だから「ルート」と名乗るのが正しい。
+   */
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '写した先の名前が出ていない(見えない場所へ物が飛ぶ)',
+  ).toContainText('「ルート」へ写しました');
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

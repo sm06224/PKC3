@@ -51,20 +51,22 @@ test('🔴 枠が組めている(3 列 / 重なりなし)', async ({ page }) => 
   const statusRegion = page.locator('[data-pkc-region="status"]');
   expect(await statusRegion.isVisible(), '言うことが無いのに下の帯が出ている').toBe(false);
   // 出したときの位置を見る(場所の契約はここでしか確かめられない)
-  await statusRegion.evaluate((el) => {
-    (el as HTMLElement).hidden = false;
-    el.textContent = '検査用';
-  });
+  /**
+   * ⚠ **器ではなく字の所に書く**(#671、2026-09-04)── 状態の行は
+   *   `status-text` の span と、狭すぎる端末への断り書き(押す口つき)を
+   *   子に持つようになった。器へ `textContent` を書くと**その子が丸ごと消える**。
+   */
+  const statusText = page.locator('[data-pkc-field="status-text"]');
+  await statusRegion.evaluate((el) => ((el as HTMLElement).hidden = false));
+  await statusText.evaluate((el) => (el.textContent = '検査用'));
   const status = await statusRegion.boundingBox();
   expect(status, '出しても場所を持たない').not.toBeNull();
   // ⚠ **本文を測り直す** ── 帯が出ると grid が組み替わって本文が縮むので、
   //    出す前に測った箱と比べると必ずずれる(実際に落ちた)
   const detailNow = await page.locator('[data-pkc-region="detail"]').boundingBox();
   expect(status!.y).toBeGreaterThanOrEqual(detailNow!.y + detailNow!.height - 1);
-  await statusRegion.evaluate((el) => {
-    (el as HTMLElement).hidden = true;
-    el.textContent = '';
-  });
+  await statusText.evaluate((el) => (el.textContent = ''));
+  await statusRegion.evaluate((el) => ((el as HTMLElement).hidden = true));
 
   // ③ 面(更新の案内 / 注意)は**既定で場所を取らない**
   //    ⚠ `hidden` が grid item に効かないと、空の箱が行を占めて本文が縮む
