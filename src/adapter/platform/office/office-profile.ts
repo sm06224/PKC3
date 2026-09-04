@@ -28,6 +28,15 @@ export interface ProfileStore {
   removeItem(key: string): void;
 }
 
+/**
+ * 🔴 窓が退避した **user のマクロ**(IndexedDB)を消す口(#431 ②)。
+ * 実体は `OfficePackStore.dropMacros`。⚠ optional にしない ── 渡し忘れを tsc が
+ * 黙って通すと、「設定を初期化」がマクロだけ残す形で静かに壊れる。
+ */
+export interface MacroStore {
+  dropMacros(): Promise<void>;
+}
+
 /** 退避されている設定の大きさ(バイト数の目安)。0 なら**まだ何も無い**。 */
 export function officeProfileBytes(store: ProfileStore): number {
   try {
@@ -55,13 +64,22 @@ export interface ResetResult {
  * ⚠ ただし**その窓を開き直させはしない** ── 生きている窓は書きかけを抱えている
  *    かもしれない。窓側は退避を止めて「開き直す」を出すだけにする(host.html)。
  */
-export function resetOfficeProfile(store: ProfileStore, announce?: () => void): ResetResult {
+export function resetOfficeProfile(
+  store: ProfileStore,
+  macros: MacroStore,
+  announce?: () => void,
+): ResetResult {
   const had = officeProfileBytes(store) > 0;
   try {
     store.removeItem(OFFICE_PROFILE_KEY);
   } catch {
     return { removed: false, message: 'Office の設定を消せませんでした(この端末では保存領域を触れません)。' };
   }
+  // 🔴 マクロも同じ出口で捨てる(#431 ②)。⚠ 非同期(IndexedDB)なので結果は待たない ──
+  //    消せなかった回は console に残す(設定のほうは消えているので、言うことは変えない)
+  void macros.dropMacros().catch((e: unknown) => {
+    console.warn('Office のマクロを消せませんでした', e);
+  });
   if (announce) {
     try {
       announce();
@@ -72,7 +90,7 @@ export function resetOfficeProfile(store: ProfileStore, announce?: () => void): 
   return had
     ? {
         removed: true,
-        message: 'Office の設定を初期状態に戻しました。次に Office を開いたときから素の状態で始まります。',
+        message: 'Office の設定を初期状態に戻しました(書いたマクロも消しました)。次に Office を開いたときから素の状態で始まります。',
       }
     : { removed: false, message: 'Office の設定はまだ保存されていません(すでに初期状態です)。' };
 }

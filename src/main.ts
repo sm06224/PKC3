@@ -2630,7 +2630,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   `showStatus` の 1 行で言う ── 押して無反応にしないのはそちらである。
      */
     resetOfficeProfile: () => {
-      showStatus(resetOfficeProfile(localStorage, announceOfficeProfileReset).message);
+      // ⚠ マクロ(IndexedDB)も同じ口で消す(#431 ②)── 実体は `OfficePackStore.dropMacros`
+      showStatus(resetOfficeProfile(localStorage, officePack, announceOfficeProfileReset).message);
     },
     // 🎨 配色(P7b 段⑨c、user 指示「最初はライトとダークのみに」)。
     // ⚠ 属性は **`<html>`** に付ける ── `:root` の変数を上書きするため

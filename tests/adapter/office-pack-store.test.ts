@@ -12,7 +12,7 @@
  *   **主張に必要な順序だけ**を再現する最小の偽物を差す(依存を増やさない)。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { OfficePackStore } from '../../src/adapter/platform/office/office-pack-store';
+import { OFFICE_MACROS_KEY, OfficePackStore } from '../../src/adapter/platform/office/office-pack-store';
 import { REQUIRED_PACK_FILES } from '../../src/adapter/platform/office/office-pack';
 
 type Handler = (() => void) | null;
@@ -239,6 +239,30 @@ describe('OfficePackStore', () => {
     await store.remove();
     expect(await store.isInstalled()).toBe(false);
     expect(fake.files.data.size).toBe(0);
+  });
+
+  /**
+   * 🔴 窓が退避した user のマクロ(#431 ②)。`meta` store の別 key に居るので、
+   * ① 一式の `remove()` では**消えない**(設定と同じ寿命)
+   * ② `dropMacros()` は**その key だけ**消す(一式には触らない)
+   */
+  it('🔴 マクロは remove では残り、dropMacros でだけ消える(一式は触らない)', async () => {
+    const fake = installFakeIdb('commit');
+    const store = new OfficePackStore();
+    await store.install(completePack(), { version: 'v1', source: 'file' });
+    // 窓が書いた形を再現(`host.html` の `saveMacros` と同じ値の形)
+    fake.meta.data.set(OFFICE_MACROS_KEY, { files: [{ path: '/instdir/user/basic/script.xlc', bytes: new Uint8Array(3) }], bytes: 3 });
+
+    await store.remove();
+    expect(fake.meta.data.has(OFFICE_MACROS_KEY), '一式の削除でマクロまで消えている').toBe(true);
+
+    await store.install(completePack(), { version: 'v1', source: 'file' });
+    const before = fake.files.data.size;
+    await store.dropMacros();
+    expect(fake.meta.data.has(OFFICE_MACROS_KEY), 'マクロが消えていない').toBe(false);
+    // ⚠ 巻き添えを出さない
+    expect(await store.isInstalled(), '一式まで消している').toBe(true);
+    expect(fake.files.data.size).toBe(before);
   });
 
   it('進捗は file 単位で最後まで刻まれる', async () => {

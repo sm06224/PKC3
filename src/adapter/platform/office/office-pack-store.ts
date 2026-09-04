@@ -39,8 +39,19 @@ import {
 const DB_NAME = 'pkc3-office-pack';
 const FILES = 'files';
 const META = 'meta';
-/** meta store の唯一の key。pack は 1 つしか持たない。 */
+/** meta store の key。pack は 1 つしか持たない。 */
 const META_KEY = 'pack';
+/**
+ * 🔴 窓(`host.html`)が **user のマクロ**(`/instdir/user/basic/**`)を退避する key
+ * (#431 ②)。同じ `meta` store に置く ── store を足すと DB の version を上げねば
+ * ならず、窓と本体の**両方**が `1` で開いている今、片方だけ上げると
+ * もう片方が VersionError で開けなくなる。
+ * ⚠ 綴りの正本は `public/office/office-macros.js` の `KEY` ──
+ *   `tests/adapter/office-macros.test.ts` が両者を突き合わせて pin する。
+ * ⚠ `remove()`(一式の削除)では消さない ── 設定(#634)と同じ寿命で、
+ *   消すのは「Office の設定を初期化」(`dropMacros`)だけ。
+ */
+export const OFFICE_MACROS_KEY = 'user-basic';
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -213,6 +224,19 @@ export class OfficePackStore {
     await write(db, [FILES, META], (t) => {
       t.objectStore(META).delete(META_KEY);
       t.objectStore(FILES).clear();
+    });
+  }
+
+  /**
+   * 🔴 窓が退避した **user のマクロ**を消す(#431 ②)。「Office の設定を初期化」の
+   * 出口 ── 設定(localStorage)と一緒に捨てる。⚠ 一式(`files` / `pack`)には触らない。
+   * ⚠ 窓が開いていれば窓も自分で消す(`host.html` の `dropProfile`)が、
+   *   **閉じているときは本体しか消せない** ── だからここに口が要る。
+   */
+  async dropMacros(): Promise<void> {
+    const db = await this.need();
+    await write(db, [META], (t) => {
+      t.objectStore(META).delete(OFFICE_MACROS_KEY);
     });
   }
 
