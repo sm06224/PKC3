@@ -959,6 +959,20 @@ export class DualFilerRenderer {
     if (host.getAttribute('data-pkc-sig') === sig) return;
     host.setAttribute('data-pkc-sig', sig);
     host.textContent = '';
+    /**
+     * 🔴 **帯の左端に「左」/「右」**(#687 B-1)。
+     * ⚠ 1 枚ずつ(スマホ)のときは、いま見ているのが**どちらのペインか**を
+     *   言う物が画面に 1 つも無い ── 帯の地色は相手が居なければ比べようがない。
+     * 🔑 読み上げは器の `aria-label`(「左のペイン」)が既に言うので `aria-hidden`
+     *   (2 度読ませない)。⚠ 出し入れは CSS だけが決める(PC では `display: none`)。
+     * ⚠ 帯は指紋が変わるたび組み直すので、**ここで毎回作る**(器に 1 度置くと
+     *   `textContent = ''` で消える)。
+     */
+    const mark = document.createElement('span');
+    mark.setAttribute('data-pkc-field', 'dual-side-mark');
+    mark.setAttribute('aria-hidden', 'true');
+    mark.textContent = SIDE_LABEL[side];
+    host.append(mark);
     names.forEach((name, i) => {
       const tab = document.createElement('span');
       tab.setAttribute('data-pkc-region', 'dual-tab');

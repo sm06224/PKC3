@@ -1235,6 +1235,18 @@ describe('CSS(構文で読む)', () => {
   });
 
   /**
+   * 🔴 **タブ帯の「左」/「右」は、パソコンでは畳み、スマホでだけ出す**(#687 B-1)。
+   * ⚠ DOM には常に在る(帯を組むたびに作る)ので、出し入れは CSS 1 か所が決める。
+   */
+  it('🔴 タブ帯の側の印は、パソコンでは畳み、スマホでだけ出す', () => {
+    const css = withoutMedia(bare());
+    const base = blocksFor(css, `[data-pkc-field='dual-side-mark']`).join(' ');
+    expect(base, 'パソコンで畳む規則が無い').toMatch(decl('display', 'none'));
+    const phone = blocksFor(css, `${PHONE} [data-pkc-field='dual-side-mark']`).join(' ');
+    expect(phone, 'スマホで出す規則が無い').toMatch(decl('display', 'inline'));
+  });
+
+  /**
    * 🔴 **操作の 7 つも 32px**(user 裁定 2026-09-04、#671)。
    * ⚠ 1 枚ずつにしてペインの丈が 282px → 571px になったので、6px 増やしても
    *   表の行はほとんど減らない ── 端末の中の押し所を 1 種類に揃える。

@@ -2133,6 +2133,7 @@ describe('2 ペインの掴んで落とす(#273 段⑤)', () => {
  * この 1 枚がどれだけ言えるか」である:
  *
  * - A-1 行き先のボタンに**相手が開いているフォルダの名前**が出る
+ * - B-1 タブ帯の左端に**いま見ている側**(「左」/「右」)が出る
  */
 describe('スマホの 2 ペイン(1 枚ずつ)(#687)', () => {
   /** 幅の見張りの替え玉(`tests/adapter/too-narrow.test.ts` と同じ型)。 */
@@ -2206,5 +2207,37 @@ describe('スマホの 2 ペイン(1 枚ずつ)(#687)', () => {
     r.render(s);
     expect(switcher().textContent).toBe('右のペインへ → はこ1');
     expect(switcher().hasAttribute('hidden'), 'JS が hidden を触っている').toBe(false);
+  });
+
+  const tabs = (side: string): HTMLElement =>
+    region.querySelector<HTMLElement>(
+      `[data-pkc-region="dual-pane"][data-pkc-side="${side}"] [data-pkc-region="dual-tabs"]`,
+    )!;
+
+  /**
+   * 🔴 **B-1 タブ帯の左端に、いま見ている側の字が出る。**
+   * ⚠ 1 枚ずつのとき、どちらのペインを見ているかを言う物は帯の地色しか無く、
+   *   相手が居なければ比べようがない。
+   */
+  it('🔴 B-1 タブ帯の先頭に「左」/「右」が在り、帯を組み直しても残る', () => {
+    const r = setup(true);
+    let s = booted();
+    r.render(s);
+    const mark = (side: string): Element | null => tabs(side).firstElementChild;
+    expect(mark('left')?.getAttribute('data-pkc-field'), '先頭が側の印でない').toBe(
+      'dual-side-mark',
+    );
+    expect(mark('left')?.textContent).toBe('左');
+    expect(mark('right')?.textContent, '右の帯が右と言っていない').toBe('右');
+    // ⚠ 読み上げは器の aria-label が言う ── 2 度読ませない
+    expect(mark('left')?.getAttribute('aria-hidden')).toBe('true');
+    // 🔴 タブを足すと帯は丸ごと組み直す ── そのときも先頭に残る
+    s = reduce(s, { type: 'DUAL_TAB_ADD', side: 'left' }).state;
+    r.render(s);
+    expect(paneOf(s.dual, 'left').tabs.length, '前提が崩れている(タブが増えていない)').toBe(2);
+    expect(mark('left')?.getAttribute('data-pkc-field'), '組み直したら印が消えた').toBe(
+      'dual-side-mark',
+    );
+    expect(mark('left')?.textContent).toBe('左');
   });
 });

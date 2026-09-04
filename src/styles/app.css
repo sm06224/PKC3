@@ -5480,6 +5480,17 @@ li[data-pkc-row-slot] {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* 🔴 **タブ帯の左端の「左」/「右」はスマホでだけ出す**(#687 B-1)。
+ * ⚠ パソコンは 2 枚が並んでいるので、位置がそのまま側を言う ── 字を足すと
+ *   帯が 1 語ぶん詰まるだけである。1 枚ずつのときは**これが唯一の側の印**。 */
+[data-pkc-field='dual-side-mark'] {
+  display: none;
+}
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-field='dual-side-mark'] {
+  display: inline;
+  font-weight: 600;
+  margin-inline-end: var(--s1);
+}
 /* 🔴 **操作の 7 つも 32px にする**(user 裁定 2026-09-04)。
  * 🔑 1 枚ずつにしたことで**丈が 282px → 571px** になったので、
  *   6px 増やしても表の行はほとんど減らない(実装後に実測して確かめる)。
