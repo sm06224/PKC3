@@ -1609,6 +1609,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   const attachDeps: AttachDeps = {
     putBlob: (key, blob) => blobs.put(cid, key, blob),
+    // 🔴 預かった取込は門の中で(#724 ⑤)。断らず待つ側 ── file は既に選ばれている
+    gate: (run) => withAssetGate.queued(run),
     putMeta: async (m) => {
       await client.request({
         op: 'putAssetMeta',

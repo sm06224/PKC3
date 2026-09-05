@@ -209,6 +209,23 @@ describe('こちらが開いた追記欄は、送ったら畳み直す(#655 ①)
     expect(localStorage.getItem(KEY)).toBe('append');
   });
 
+  it('🔴 見せている間に、右クリックの「ここに追記する」で入り先を選び直しても欄は消えない(#724 ①)', async () => {
+    const r = await setup(true);
+    r.altClick('pa'); // 「上の節」を入り先に ── ここで欄が見える(peek)
+    expect(r.hiddenAttr(), '前提: 開いていない').not.toContain('append');
+    // 右クリックのメニューの項目は root 直下に居る(追記欄の外)── その 1 押しで
+    // 「欄の外の 1 操作」と数えて畳んではいけない(欄を**使う**操作である)
+    const item = document.createElement('button');
+    item.setAttribute('data-pkc-action', 'append-at-heading');
+    item.setAttribute('data-pkc-menu-line', '4'); // 「決定事項」の見出しの行
+    item.setAttribute('data-pkc-menu-lid', 'n1');
+    r.root.append(item);
+    item.click();
+    expect(r.hiddenAttr(), '入り先を選び直したら欄が畳まれた').not.toContain('append');
+    expect(appPanes.isPeeking(), '見せている状態が終わっている').toBe(true);
+    expect(localStorage.getItem(KEY), '記録に書いた').toBe(encodeHidden(['append']));
+  });
+
   it('対照群 ── user が自分で開いていた欄は、送っても畳まない', async () => {
     const r = await setup(false);
     r.altClick('pb');

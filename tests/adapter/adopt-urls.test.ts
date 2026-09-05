@@ -27,6 +27,7 @@ const png = (size = 4): Blob => new Blob([new Uint8Array(size)], { type: 'image/
 function deps(over: Partial<AttachDeps> = {}) {
   const put: string[] = [];
   const attach: AttachDeps = {
+    gate: (run) => run(), // #724 ⑤: 単体では門を模さない(そのまま走らせる)
     putBlob: async (key) => void put.push(key),
     putMeta: async () => {},
     listMetas: async () => [],

@@ -24,6 +24,19 @@ import { generateLid } from './binder';
 
 export interface AttachDeps {
   putBlob(assetKey: string, blob: Blob): Promise<void>;
+  /**
+   * 🔴 **預かった取込を、資産の門(`withAssetGate`)の中で走らせる口**(#724 ⑤)。
+   *
+   * ⚠ 編集中に預かった `run` は、呼び側の `withAssetGate(() => attachFiles(...))` の
+   *   鎖が**解けた後**に `writable-queue` から走る ── そのとき `putBlob` → `CREATE_ENTRY`
+   *   の間(bytes はあるが参照が無い窓)を誰も排他していなかった。整理(未参照 GC)が
+   *   重なると取込中の bytes を消す(`asset-gate.ts` が禁じている当の窓)。
+   * 🔑 だから預かった `run` は**この口で包んで**走らせる。アプリは `withAssetGate.queued`
+   *   を渡す(user はもう file を選んでいるので、断る側ではなく待つ側)。
+   * ⚠ optional にしない ── 渡し忘れを tsc が黙ると、症状は「まれに添付が消える」という
+   *   いちばん気づけない形で戻る(CLAUDE.md §7「待ちの口は optional にしない」)。
+   */
+  gate(run: () => Promise<void>): Promise<void>;
   putMeta(meta: {
     key: string;
     mime: string;
@@ -422,7 +435,8 @@ export async function attachFiles(
     });
     return;
   }
-  queue.push(run);
+  // 🔴 門の中で走らせる(#724 ⑤)── `queue` が走らせる時点では呼び側の鎖は解けている
+  queue.push(() => deps.gate(run));
   const what = files.length === 1 ? `「${files[0]!.name}」` : `${files.length} 件`;
   notify(`${why}${what}を預かりました(編集を終えたら本文に入れます)`);
 }
