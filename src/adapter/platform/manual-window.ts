@@ -13,7 +13,9 @@
  * 1. `window.open('', name)` で窓を**同期で**掴む(user の操作の中で ── ポップアップ阻止を避ける)
  * 2. 既に**同じ版**で組んであれば、触らずに前へ出す(読んでいた所を失わない)
  * 3. `manual.html` が隣に在る(`pageUrl`)なら **`location.replace` でそこへ移す** ── 組まない
- * 4. 隣に無い(持ち歩ける 1 枚 = portable)なら、段①のとおり `about:blank` に組む
+ *    (持ち歩ける 1 枚では、1 枚の中に焼き込んだ同じ page の **`blob:` URL** が `pageUrl` に来る
+ *    ── #648 段③、`portable-manual.ts`。経路はここでは区別しない)
+ * 4. `pageUrl` が無い(焼き込みの無い旧い 1 枚)なら、段①のとおり `about:blank` に組む
  *
  * 🔑 **PKC をもう 1 枚読み込まない。** `view-window.ts` は面を別窓で開くが、
  *   それは #292 で否定された形(「**ユーザーはもう一つ PKC が開いて混乱すると
@@ -74,9 +76,10 @@ export interface OpenManualWindowDeps {
   /** 本文を描く口。⚠ **失敗したら素の原文**を出す(白紙にしない)。 */
   readonly render: (text: string) => Promise<string>;
   /**
-   * 🔴 焼いた 1 枚(`manual.html`)の URL。**`null` = 隣に無い**(持ち歩ける 1 枚)。
+   * 🔴 焼いた 1 枚(`manual.html`)の URL。**`null` = どこにも無い**(焼き込みの無い旧い 1 枚)。
    *
    * ⚠ 在るなら**組まずにそこへ移す** ── F5 で読み直せて、設定の配色が効く。
+   *   持ち歩ける 1 枚では、1 枚の中に焼き込んだ page の `blob:` URL が来る(#648 段③)。
    * ⚠ 呼び側が決める(ここでは fetch しない)── 「隣に在るか」は build の形で
    *   決まっており、実行時に探ると dev の SPA fallback(`index.html` が 200 で返る)に
    *   騙されて **PKC をもう 1 枚**開く。
@@ -103,7 +106,8 @@ export interface ManualAppearance {
   /**
    * user が**選んだ**大きさ(`text-scale.ts` の `chosenTextScale` を px にしたもの)。
    * ⚠ `null` = 選んでいない → 外して CSS の既定へ戻す(焼いた page の boot script と同じ門。
-   *   「効いている 13px」を渡すと、何も変えずに押しただけで 14px から縮む ── 2026-09-02 hotfix)。
+   *   窓の既定が 14px だった頃、「効いている 13px」を渡すと何も変えずに押しただけで
+   *   縮んだ ── 2026-09-02 hotfix。I6 で既定を揃えた今も、門は同じにしておく)。
    */
   readonly textSize: string | null;
   /**
@@ -117,6 +121,11 @@ export interface ManualAppearance {
 /** 開いた 1 枚。⚠ 呼び側が閉じたいときのため(既定では誰も閉じない)。 */
 export interface ManualWindowHandle {
   close(): void;
+  /**
+   * 開いた窓そのもの。⚠ 持ち歩ける 1 枚では `portable-manual.ts` が **`closed` を見張って
+   * blob を返す**(#648 段③)── 窓の寿命を知る口はこれしか無い。
+   */
+  readonly window: Window;
   /**
    * 🔴 **既に開いていた窓を前へ出しただけか**(#645)。
    *
@@ -228,7 +237,7 @@ export async function openManualWindow(
      */
     applyAppearance(win, deps.appearance);
     bringToFront(win);
-    return { close: () => closeQuietly(win), reused: true, swapped: false };
+    return { close: () => closeQuietly(win), window: win, reused: true, swapped: false };
   }
   // 🔑 古い印の窓が在った = 入れ替える(user は読んでいた所を失う ── 呼び側が一言出す)
   const swapped = before !== null;
@@ -263,7 +272,7 @@ export async function openManualWindow(
      */
     win.location.replace(deps.pageUrl);
     bringToFront(win);
-    return { close: () => closeQuietly(win), reused: false, swapped };
+    return { close: () => closeQuietly(win), window: win, reused: false, swapped };
   }
   // ⚠ 触れない窓には組めない ── `null` で呼び側に理由を出させる(無言で終えない)
   if (doc === null) return null;
@@ -287,7 +296,7 @@ export async function openManualWindow(
   // 🔑 組んだ窓にも字の大きさを当てる(この経路には配色の規則が無いので、効くのは大きさだけ)
   applyAppearance(win, deps.appearance);
   bringToFront(win);
-  return { close: () => closeQuietly(win), reused: false, swapped };
+  return { close: () => closeQuietly(win), window: win, reused: false, swapped };
 }
 
 /** ⚠ 閉じられない窓(user が自分で開いた等)でも、例外で呼び側を落とさない。 */

@@ -240,10 +240,10 @@ describe('🔴 クエリパラメータの抜け穴を作らない', () => {
     // ⚠ 読むのではなく**組み立てる**側(再起動 URL)。`location.href` を触るので
     //   検出語に掛かるが、値の解決はしていない
     'src/adapter/ui/render/flags.ts': '再起動 URL の組み立て(フラグ画面から)',
-    // ⚠ 焼いたマニュアル(`manual.html`)の inline script が、URL の断片(`#m-12`)の
-    //    見出しへ送る(#645 段②)。読むのは**断片だけ**で、切替ではない ──
-    //    user 指示の「パーマリンク / ディープリンク」の用途そのもの(その節から開く)
-    'src/features/help/manual-page.ts': 'マニュアルの page の断片(#m-N)へ送る ── ディープリンク',
+    // ⚠ 焼いたマニュアル(`manual.html`)の inline script が、URL の断片(`#4-4-ヘルプ` =
+    //    見出しの字。#648 D4)の見出しへ送る(#645 段②)。読むのは**断片だけ**で、切替ではない
+    //    ── user 指示の「パーマリンク / ディープリンク」の用途そのもの(その節から開く)
+    'src/features/help/manual-page.ts': 'マニュアルの page の断片(#見出しの字)へ送る ── ディープリンク',
   };
 
   /**
@@ -340,6 +340,11 @@ describe('🔴 クエリパラメータの抜け穴を作らない', () => {
        *   ここではない ── 上の `URLSearchParams` の検査がそれを保つ。
        */
       "history.replaceState(null, '', `${location.pathname}${location.search}${next}`);",
+      /**
+       * ⚠ 目次・脚注で飛んだ後に小窓の住所を戻す口(#693 案 A)── `next` の口と同じ作法で
+       *   `search` をそのまま持ち越す(key の取り出しはしていない)。
+       */
+      "history.replaceState(null, '', `${location.pathname}${location.search}${hash}`);",
     ]);
   });
 

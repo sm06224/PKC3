@@ -12,6 +12,7 @@ import {
   OFFICE_PROFILE_KEY,
   officeProfileBytes,
   resetOfficeProfile,
+  type MacroStore,
 } from '@adapter/platform/office/office-profile';
 
 function fakeStore(initial: Record<string, string>): {
@@ -30,10 +31,24 @@ function fakeStore(initial: Record<string, string>): {
   };
 }
 
+/** 窓が IndexedDB へ退避したマクロを消す口(#431 ②)の偽物 ── 呼ばれた回数を数える。 */
+function fakeMacros(outcome: 'ok' | 'fail' = 'ok'): { store: MacroStore; calls: () => number } {
+  let n = 0;
+  return {
+    calls: () => n,
+    store: {
+      dropMacros: () => {
+        n += 1;
+        return outcome === 'ok' ? Promise.resolve() : Promise.reject(new Error('idb closed'));
+      },
+    },
+  };
+}
+
 describe('Office の設定を初期化する(#634)', () => {
   it('退避が在れば消し、消したことを言う', () => {
     const { store, data } = fakeStore({ [OFFICE_PROFILE_KEY]: '<oor:items/>', other: 'keep' });
-    const r = resetOfficeProfile(store);
+    const r = resetOfficeProfile(store, fakeMacros().store);
     expect(r.removed).toBe(true);
     expect(r.message).toContain('初期状態に戻しました');
     expect(OFFICE_PROFILE_KEY in data).toBe(false);
@@ -43,7 +58,7 @@ describe('Office の設定を初期化する(#634)', () => {
 
   it('元から空でも「すでに初期状態です」と答える(無反応にしない)', () => {
     const { store } = fakeStore({});
-    const r = resetOfficeProfile(store);
+    const r = resetOfficeProfile(store, fakeMacros().store);
     expect(r.removed).toBe(false);
     expect(r.message).toContain('すでに初期状態');
   });
@@ -51,7 +66,7 @@ describe('Office の設定を初期化する(#634)', () => {
   it('🔴 開いている窓へ伝える ── 伝えないと閉じるときに書き戻る', () => {
     const { store } = fakeStore({ [OFFICE_PROFILE_KEY]: 'x' });
     let told = 0;
-    resetOfficeProfile(store, () => {
+    resetOfficeProfile(store, fakeMacros().store, () => {
       told += 1;
     });
     expect(told, '合図を送っていない(消したそばから復活する)').toBe(1);
@@ -59,7 +74,7 @@ describe('Office の設定を初期化する(#634)', () => {
 
   it('⚠ 合図が失敗しても、消したことは言う', () => {
     const { store, data } = fakeStore({ [OFFICE_PROFILE_KEY]: 'x' });
-    const r = resetOfficeProfile(store, () => {
+    const r = resetOfficeProfile(store, fakeMacros().store, () => {
       throw new Error('閉じた窓');
     });
     expect(r.removed).toBe(true);
@@ -74,6 +89,34 @@ describe('Office の設定を初期化する(#634)', () => {
       removeItem: (): void => {},
     };
     expect(officeProfileBytes(store)).toBe(0);
+  });
+
+  /**
+   * 🔴 **マクロも同じ出口で捨てる**(#431 ②)。⚠ 窓が閉じているときは本体しか
+   * 消せない ── ここで呼ばないと、「初期化しました」と言いながらマクロだけ残る。
+   */
+  it('🔴 設定と一緒に、退避したマクロ(IndexedDB)も消す', () => {
+    const { store } = fakeStore({ [OFFICE_PROFILE_KEY]: 'x' });
+    const macros = fakeMacros();
+    const r = resetOfficeProfile(store, macros.store);
+    expect(macros.calls(), 'マクロを消していない(設定だけ消して残している)').toBe(1);
+    expect(r.message, '捨てたものを言っていない').toContain('マクロ');
+  });
+
+  it('元から設定が無くても、マクロは消す(片方だけ残さない)', () => {
+    const { store } = fakeStore({});
+    const macros = fakeMacros();
+    resetOfficeProfile(store, macros.store);
+    expect(macros.calls()).toBe(1);
+  });
+
+  it('⚠ マクロが消せなくても、設定を消したことは言う(unhandled rejection にしない)', async () => {
+    const { store, data } = fakeStore({ [OFFICE_PROFILE_KEY]: 'x' });
+    const r = resetOfficeProfile(store, fakeMacros('fail').store);
+    expect(r.removed).toBe(true);
+    expect(OFFICE_PROFILE_KEY in data).toBe(false);
+    // reject が漏れていれば vitest が unhandled rejection で落とす ── 1 tick 待つ
+    await new Promise((resolve) => setTimeout(resolve, 0));
   });
 
   /**

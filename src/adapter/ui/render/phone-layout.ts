@@ -22,7 +22,7 @@
  *
  * | 見張り | 何のため |
  * |---|---|
- * | `max-width: PHONE_MAX_PX` | スマホ用画面へ切り替える |
+ * | `max-width: PHONE_MAX_PX` **, ** `max-height: PHONE_MAX_HEIGHT_PX` | スマホ用画面へ切り替える(幅か高さ ── #663 で高さを足した) |
  * | `max-width: PHONE_MIN_PX - 1` | **対応外の幅**を 1 度だけ知らせる(user 裁定 ⑥) |
  *
  * 🔴 **知らせる口はここが持たない** ── 帯の口(`showStatus`)は `main.ts` の
@@ -31,6 +31,7 @@
  *   `fold-notify` を import しない ── 逆向きに import があるので輪になる)。
  */
 import {
+  PHONE_MAX_HEIGHT_PX,
   PHONE_MAX_PX,
   PHONE_MIN_PX,
   phoneBandShown,
@@ -152,7 +153,13 @@ export class PhoneLayout {
     this.last = null;
     const make =
       mm ?? ((q: string) => (globalThis as { matchMedia?: (q: string) => MediaLike }).matchMedia?.(q));
-    const media = make(`(max-width: ${PHONE_MAX_PX}px)`) ?? null;
+    /**
+     * 🔴 **幅か高さ、どちらかで切る**(#663)── 横向きのスマホ(844×390)は幅 720 を
+     *   超えるが高さ 390 しか無い。`,` は media query の **OR**。
+     * ⚠ 見張りは 1 本のまま(2 本にすると `isPhone()` が 2 つの答えを合成する = §7)。
+     */
+    const media =
+      make(`(max-width: ${PHONE_MAX_PX}px), (max-height: ${PHONE_MAX_HEIGHT_PX}px)`) ?? null;
     this.media = media;
     if (media?.addEventListener) {
       const fn = (): void => this.paint();

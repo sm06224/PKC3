@@ -101,6 +101,34 @@ export interface SmartHitState {
 
 export type AppPhase = 'initializing' | 'ready' | 'editing' | 'error';
 /**
+ * 🔴 **直前の追記を、次の追記でどう持ち替えるか**(#395 段① / #668 C)。
+ *
+ * - 純粋な挿入でなかった回は `null` ── 前の材料を**残したままにしない**
+ *   (古い材料で消すと、別の所が消える)
+ * - 🔴 **同じ回(`batch`)の続きなら、行を継ぎ足して 1 手にする**(#668 C)──
+ *   3 枚まとめて落とした写真は「元に戻す」1 回で 3 行とも消える
+ * - それ以外は差し替え(直前の 1 手だけ)
+ *
+ * ⚠ 継ぐのは**同じノート・同じ回**のときだけ。間に手で足した追記(印なし)が
+ *   入れば、そこで切れる ── 回の途中で足した字まで巻き添えにしない。
+ * ⚠ 継いだ行は本文の中で**連続している**(同じ回の追記は全部末尾へ足すので)──
+ *   `removeInsertedLines` は連続した並びを探すので、1 手として消せる。
+ */
+function nextLastAppend(
+  prev: AppState['lastAppend'],
+  next: { lid: string; inserted: readonly string[] | null; batch?: string },
+): AppState['lastAppend'] {
+  if (next.inserted === null) return null;
+  const joined =
+    prev !== null && next.batch !== undefined && prev.batch === next.batch && prev.lid === next.lid;
+  return {
+    lid: next.lid,
+    lines: joined ? [...prev.lines, ...next.inserted] : next.inserted,
+    ...(next.batch === undefined ? {} : { batch: next.batch }),
+  };
+}
+
+/**
  * 🔴 **中央の面の全数**(#241 段⑥-b で 1 本に寄せた)。
  *
  * ⚠ 直す前は**同じ一覧が 2 か所**に在った ── 型の union(ここ)と、
@@ -136,6 +164,25 @@ export const VIEW_MODES = [
    * この面に留まる。
    */
   'query',
+  /**
+   * 🔴 **予定表**(#673 段②。user 裁定 2026-09-04
+   * 「**予定表も連絡先も別窓、アプリの基本は別窓**」)。
+   *
+   * ⚠ 上の #292 段⑤ を**覆すのではない** ── 左の列の「予定」タブは**そのまま残る**。
+   *   ここに足すのは、同じ面を**組み込みアプリの別ウィンドウ**(`#pkc?view=schedule`)
+   *   でも開けるようにするためである(2 ペインと同じ道 ── `view-window.ts`)。
+   * ⚠ **aside ではない**(`ASIDE_PANES` に入れない)── 集計と同じく**ノートを映す面**
+   *   なので、札を押した選択はこの面に留まる。
+   * 🔑 描画器は左の列と**同じ `ScheduleRenderer`**(`center.ts`)── 面を 2 つ描いても
+   *   規則は 1 本である。
+   */
+  'schedule',
+  /**
+   * 🔴 **連絡先**(#278 段③。user 裁定 2026-09-04「予定表も連絡先も別窓」)。
+   * ⚠ 予定表と同じ形 ── 左の列の「連絡先」タブは残し、同じ `ContactsRenderer` を
+   *   中央の器(別窓)にも描く。aside ではない(名前を押した選択はこの面に留まる)。
+   */
+  'contacts',
   /**
    * 🔴 **2 ペインタブファイラ**(#241 段⑥。user 指示 2026-08-17
    * 「アプリに 2 ペインタブファイラを**組み込みで**提供すること」)。
@@ -195,6 +242,8 @@ export function isAsidePane(view: ViewMode): boolean {
 const VIEW_LABELS: Record<ViewMode, string> = {
   detail: '本文',
   query: '集計',
+  schedule: '予定表',
+  contacts: '連絡先',
   dual: '2 ペインで整理',
   settings: '設定',
   flags: 'フラグ',
@@ -525,6 +574,26 @@ export interface AppState {
    * ⚠ 出す寿命は**次の知らせまで** ── 消す口を別に作らない。
    */
   notice: string | null;
+  /**
+   * 🔴 **押したのに入らなかったタグ**(#640 案 A。user 裁定 2026-09-04)── 欄へ戻して出す字。
+   *
+   * ⚠ タグを打つ欄は**押した瞬間に字を消す**(次の 1 つを打てるように)が、断りは
+   *   効果層から**後で**来る。`#請求 #未払 #今月` と打って 3 つ目だけ上限に当たった人は、
+   *   欄が空で理由の帯に名前が 1 つ出るだけだった ── 直すには打ち直しである。
+   * 🔑 だから入らなかった名前を**欄ごとに**持ち、描く側が欄へ戻す(`filer.ts`)。
+   *   全部通れば空のまま(これまでどおり)。押すたびに `CLEAR_REFUSED_TAGS` で 1 回ぶんへ戻す。
+   * ⚠ 欄の名前は `TAG_INPUT_FIELDS` ── binder の `TAG_INPUT_ADD`(#639)と同じ綴りである。
+   */
+  refusedTags: Readonly<Record<TagInputField, readonly string[]>>;
+  /**
+   * 🔴 **その知らせの隣に「開く」で出す物**(#668 A)。`null` = 押す口を出さない。
+   *
+   * 添付を作ったのに本文へ入れなかった回(開いているのがフォルダ等)は、
+   * 読んでいた物を開いたまま「添付にしました」と言う ── そのとき**その添付へ行く
+   * 道が 1 つも無かった**(一覧は絞りで隠れていることがある)。
+   * ⚠ `notice` と**対で**書く(`OP_NOTICE` が両方を置く)── 次の知らせで消える。
+   */
+  noticeOpen: string | null;
   /** ゴミ箱 panel(filer)。開いた時点のスナップショット + 明示更新。 */
   trashPanel: { items: readonly TrashItem[] } | null;
   /**
@@ -710,8 +779,13 @@ export interface AppState {
    * ⚠ 持つのは**足した行そのもの**で、行番号ではない(取り消すまでに別の窓が
    *   上へ足していれば番号はずれる)。
    * ⚠ **1 手だけ**持つ ── 積むと「どれが消えるのか」が user から見えなくなる。
+   * 🔴 **「1 手」は 1 回の取り込みである**(#668 C)── 写真を 3 枚まとめて落とすと
+   *   追記は 3 本飛ぶが、user がやったことは 1 回である。だから同じ `batch` の
+   *   追記は**足した行を継ぎ足して 1 手にする**(「元に戻す」で 3 行が一緒に消える)。
+   *   ⚠ 直す前は最後の 1 枚しか戻らず、残り 2 枚は本文を開いて消すしかなかった。
+   *   `batch` は取り込みの回の印(`APPEND_TO_ENTRY.batch`)。手で足した追記には無い。
    */
-  lastAppend: { lid: string; lines: readonly string[] } | null;
+  lastAppend: { lid: string; lines: readonly string[]; batch?: string } | null;
   /**
    * 🔴 **編集に入った瞬間に開く行**(#395 段③)。`null` = どこも開かない(既定)。
    *
@@ -753,6 +827,13 @@ export interface BodyLock {
  * ⚠ 書込のほうを先に見る:書込中に編集へ入ることはできないので、両方立つことは
  * 無いが、順序を決めておかないと将来の変更で曖昧になる。
  */
+/**
+ * 🔴 **入らなかったタグを戻す欄**(#640)。⚠ 綴りは `data-pkc-field` そのもの ──
+ *   描く側(`filer.ts`)がこの名前で `<input>` を引く。
+ */
+export const TAG_INPUT_FIELDS = ['smart-cond', 'bulk-tag'] as const;
+export type TagInputField = (typeof TAG_INPUT_FIELDS)[number];
+
 export function bodyLockOf(state: AppState): BodyLock | null {
   if (state.writeLock) return { lid: state.writeLock.lid, holder: 'writing' };
   // ⚠ タイル設定の書込中も**書込中**として見せる(編集に入れないので、
@@ -808,6 +889,8 @@ export const initialState: AppState = {
   revisionPanel: null,
   revisionPreview: null,
   notice: null,
+  refusedTags: { 'smart-cond': [], 'bulk-tag': [] },
+  noticeOpen: null,
   trashPanel: null,
   linkedFiles: new Map(),
   writeLock: null,
@@ -938,6 +1021,17 @@ export type UserAction =
    */
   | { type: 'MOVE_PLACE'; lid: string; line: number; x: number; y: number }
   /**
+   * 🔴 **板を画面から作る・大きさを変える・消す**(#676。user 裁定 2026-09-04)。
+   * ⚠ 3 つとも `MOVE_PLACE` と**同じ門**(`placeRewrite`)を通る ── phase / 画面に出ている
+   *   本文 / 開き行の捕捉を、case ごとに書き直さない(§7)。
+   * ⚠ `ADD_PLACE` だけ行番号を持たない(足す先は常に末尾)。
+   */
+  | { type: 'RESIZE_PLACE'; lid: string; line: number; w: number; h: number }
+  | { type: 'REMOVE_PLACE'; lid: string; line: number }
+  | { type: 'ADD_PLACE'; lid: string; x: number; y: number }
+  /** 板を前へ出す(#676 段②)── 他の板の z= の最大 + 1 を書く。同じ門。 */
+  | { type: 'RAISE_PLACE'; lid: string; line: number }
+  /**
    * 🔴 **本文の 1 行の日付**(双方向。user 指示 2026-08-23)。
    * ⚠ `SET_ENTRY_DATE`(ノート 1 件が丸ごと予定)とは**単位が違う**。
    * ⚠ `date: null` は予定から外す。
@@ -1014,6 +1108,11 @@ export type UserAction =
       heading: string | null;
       /** 入り先の印(#395 段①)。`null` = 末尾。 */
       target: string | null;
+      /**
+       * 取り込みの回の印(#668 C)。同じ印の追記は `lastAppend` で 1 手に継がれる。
+       * ⚠ 省略 = 単独の 1 手(手で足した追記)。
+       */
+      batch?: string;
     }
   /**
    * ランチャーのタイル設定(P8 段⑭)。
@@ -1143,12 +1242,34 @@ export type UserAction =
    * ⚠ 相手は**いま表に出ている印**だけ(`delete-selected` と同じ規則 ── 画面に
    *   無いものを触らない)。呼び側がその集合を渡す。
    */
-  | { type: 'BULK_TAG'; lids: readonly string[]; tags: readonly string[]; mode: 'add' | 'remove' }
+  | {
+      type: 'BULK_TAG';
+      lids: readonly string[];
+      tags: readonly string[];
+      mode: 'add' | 'remove';
+      /**
+       * ⚠ **どの欄から来たか**(#640)── 入らなかった名前をその欄へ戻すため。
+       *   欄を持たない呼び手(札を外す `untag-entry` 等)は渡さない = 戻す先が無い。
+       */
+      field?: TagInputField;
+    }
   /**
    * 🔴 **一時の知らせ**(#402 ①)。⚠ `OP_FAILED` と混ぜない ── あちらは赤い帯で、
    *   こちらは成功の内訳である(「3 件は既に付いていました」を失敗にしない)。
    */
-  | { type: 'OP_NOTICE'; message: string }
+  | {
+      type: 'OP_NOTICE';
+      message: string;
+      /** 隣に「開く」で出す物の lid(#668 A)。省略 = 押す口を出さない。 */
+      open?: string;
+    }
+  /**
+   * 🔴 **押したのに入らなかったタグ**(#640 案 A)── 効果層が断った名前を欄へ戻すために撃つ。
+   * ⚠ 足す(1 回の頼みの中で 1 つずつ届く ── スマートフォルダの条件は 1 タグ 1 往復)。
+   */
+  | { type: 'TAGS_REFUSED'; field: TagInputField; tags: readonly string[] }
+  /** 押すたびに 1 回ぶんへ戻す(#640)── 前の回の名前を次の回の字に混ぜない。 */
+  | { type: 'CLEAR_REFUSED_TAGS'; field: TagInputField }
   /**
    * 🔴 **タグの候補が要る**(#494 段②)。⚠ 欄に焦点が当たったときに撃つ ──
    * 既に持っていれば reducer が**何もしない**(押すたびに全走査しない)。
@@ -1353,6 +1474,8 @@ export type SystemCommand =
        *   番号はずれる。⚠ 純粋な挿入でなければ `null`(取り消しを出さない)。
        */
       inserted: readonly string[] | null;
+      /** 取り込みの回の印(#668 C)。`REQUEST_APPEND.batch` がそのまま返る。 */
+      batch?: string;
     }
   | {
       /** 追記が失敗した。⚠ **ロックは必ず解く**(失敗で握ったままにしない)。 */
@@ -1555,6 +1678,8 @@ export type DomainEvent =
        * ⚠ 解けなければ effect が**断る**(末尾へ落とさない)。
        */
       target: string | null;
+      /** 取り込みの回の印(#668 C)。effect が `ENTRY_APPENDED` へそのまま返す。 */
+      batch?: string;
     }
   | { type: 'REQUEST_DELETE'; lid: string }
   | {
@@ -1592,6 +1717,8 @@ export type DomainEvent =
       /** ⚠ **並び**(#637)── 1 回の頼みを 2 通の知らせに割らない。 */
       tags: readonly string[];
       mode: 'add' | 'remove';
+      /** ⚠ 入らなかった名前を戻す欄(#640)。無ければ戻さない。 */
+      field?: TagInputField;
       targets: readonly {
         lid: string;
         title: string;
@@ -2577,6 +2704,7 @@ function reduceCore(
             heading: action.heading,
             text: action.text,
             target: action.target,
+            ...(action.batch === undefined ? {} : { batch: action.batch }),
           },
         ],
       };
@@ -2665,10 +2793,7 @@ function reduceCore(
            * ⚠ 純粋な挿入でなかった回は `null` に落とす ── 前の追記の材料を
            *   **残したままにしない**(古い材料で消すと、別の所が消える)。
            */
-          lastAppend:
-            action.inserted === null
-              ? null
-              : { lid: action.lid, lines: action.inserted },
+          lastAppend: nextLastAppend(state.lastAppend, action),
         },
         events: [],
       };
@@ -2892,56 +3017,46 @@ function reduceCore(
       };
     }
     /**
-     * 🔴 **板の塊を動かす**(#283 P4-b)。
-     * ⚠ 編集中は**声に出して断る** ── 判定はここ 1 か所(`SET_VIEW_MODE` と同じ作法。
-     *   呼び側(掴む口)に配ると、口を足すたびに取りこぼす ── #516 の向き)。
-     * 🔑 掴んだ時点の開き行を `openBody` から捕える ── disk 側で byte 一致しなければ
-     *   `movePlace` が書かない(別の窓の書込を巻き戻さない)。
+     * 🔴 **板の塊を動かす**(#283 P4-b)。門(phase / 画面に出ている本文 / 開き行の捕捉)は
+     * `placeRewrite` 1 か所 ── 下の 3 つ(#676)と共有する。
      */
-    case 'MOVE_PLACE': {
-      if (state.phase !== 'ready')
-        return {
-          state: { ...state, error: '編集を終了してから、板の付箋を動かしてください' },
-          events: [],
-        };
-      const meta = state.entryMetas.get(action.lid);
-      if (!meta) return { state, events: [] };
-      /**
-       * 🔴 **画面に出ている本文は 1 つではない**(#281 検算 2026-08-30)。
-       * ⚠ 1 稿目は `openBody` だけを見ていたので、**横に留めた枠**の付箋は
-       *   ①主の枠が板でなければ黙って no-op ②主の枠も板なら**別のノートの
-       *   同じ行を書き換えうる**、の 2 つに落ちていた。
-       * 🔑 `screenBodyOf` が「その lid が、いま画面のどこに出ているか」を 1 か所で答える。
-       */
-      const shown = screenBodyOf(state, action.lid);
-      if (shown === null) return { state, events: [] };
-      if (!Number.isInteger(action.x) || !Number.isInteger(action.y)) return { state, events: [] };
-      if (action.x < 0 || action.y < 0) return { state, events: [] };
-      // 🔑 開き行は**この場で**捕捉する(描画が焼いた行番号 → 画面が見ている本文の字)。
-      //    disk 側とずれていれば movePlace が byte 一致で断る。
-      if (!Number.isInteger(action.line) || action.line < 0) return { state, events: [] };
-      const openLine = shown.split('\n')[action.line];
-      if (openLine === undefined || !isPlaceOpen(openLine)) return { state, events: [] };
-      return {
-        state,
-        events: [
-          {
-            type: 'REQUEST_BODY_REWRITE',
-            lid: meta.lid,
-            title: meta.title,
-            archetype: meta.archetype,
-            entryOrder: meta.entryOrder,
-            rewrite: {
-              kind: 'place-move',
-              line: action.line,
-              openLine,
-              x: action.x,
-              y: action.y,
-            },
-          },
-        ],
-      };
-    }
+    case 'MOVE_PLACE':
+      return placeRewrite(state, action.lid, '編集を終了してから、板の付箋を動かしてください', (shown) => {
+        if (!isPlaceCoord(action.x) || !isPlaceCoord(action.y)) return null;
+        const openLine = placeOpenLineOf(shown, action.line);
+        if (openLine === null) return null;
+        return { kind: 'place-move', line: action.line, openLine, x: action.x, y: action.y };
+      });
+    /**
+     * 🔴 **板を画面から作る・大きさを変える・消す**(#676)── 3 つとも `MOVE_PLACE` と
+     * 同じ門(`placeRewrite`)を通る。断り文だけが**押した場所と対**で違う
+     * (CLAUDE.md「文言は押した場所と対で pin する」)。
+     */
+    case 'RESIZE_PLACE':
+      return placeRewrite(state, action.lid, '編集を終了してから、板の大きさを変えてください', (shown) => {
+        if (!isPlaceCoord(action.w) || !isPlaceCoord(action.h)) return null;
+        const openLine = placeOpenLineOf(shown, action.line);
+        if (openLine === null) return null;
+        return { kind: 'place-size', line: action.line, openLine, w: action.w, h: action.h };
+      });
+    case 'REMOVE_PLACE':
+      return placeRewrite(state, action.lid, '編集を終了してから、板を消してください', (shown) => {
+        const openLine = placeOpenLineOf(shown, action.line);
+        if (openLine === null) return null;
+        return { kind: 'place-remove', line: action.line, openLine };
+      });
+    case 'ADD_PLACE':
+      return placeRewrite(state, action.lid, '編集を終了してから、板を置いてください', () =>
+        isPlaceCoord(action.x) && isPlaceCoord(action.y)
+          ? { kind: 'place-add', x: action.x, y: action.y }
+          : null,
+      );
+    case 'RAISE_PLACE':
+      return placeRewrite(state, action.lid, '編集を終了してから、板を前へ出してください', (shown) => {
+        const openLine = placeOpenLineOf(shown, action.line);
+        if (openLine === null) return null;
+        return { kind: 'place-raise', line: action.line, openLine };
+      });
     case 'SET_ENTRY_DATE': {
       // 🔴 **黙って捨てない**(#516)── 理由は上の `SET_TASK_DATE` に書いた
       const blocked = phaseBlockReason(state.phase);
@@ -3337,6 +3452,19 @@ function reduceCore(
                 updatedAt: null,
               },
             ];
+      /**
+       * 🔴 **添付の作成は絞りを外さない**(#668 D)。
+       *
+       * 下の「絞り込みを解除する」の理由(review M-2 / #411)は「**作った物が絞りに
+       * 弾かれて一生一覧に出ない** → user が Esc で消してしまう」である ── ⚠ 添付には
+       * 当たらない。添付は**開いていたノートの本文に入る**(#666)ので一覧で見せる
+       * 必要が無く、編集に入らないので Esc の掃除も無い。
+       * ⚠ むしろ外すと害が出る:「探す」に打っていた字と種類の札が、写真を 1 枚
+       *   足しただけで**黙って消える**(user は絞りを打ち直す)。
+       * 🔑 判定は archetype 1 つ ── 添付を作る経路(取込 / 録音 / 画面録画 /
+       *   ランチャーのタイル)は全部ここを通る。
+       */
+      const keepFilter = action.archetype === 'attachment';
       // 作成 = 即永続(PKC2 と同じ)。この初回 PERSIST が失敗した場合、editing 中の
       // 無変更 commit は skip するが、行は upsert なので次の変更 commit が自己修復する
       // (二重故障窓のみ残る ── SYS_ERROR が可視。P3-7a 設計判断)
@@ -3353,7 +3481,7 @@ function reduceCore(
           // (実証: 保存しても出ず、「効かなかった」と思って Esc を押すと
           // 新規未編集 cancel の掃除で entry ごと消える)。
           // ⚠ 欄の文字も消える ── 書き戻しは sidebar が持つ
-          filterQuery: '',
+          filterQuery: keepFilter ? state.filterQuery : '',
           /**
            * 🔴 **種類の絞りも外す**(#411)── **同じ事故が軸を変えて戻ってくる**。
            * 「添付だけ」を出しているときに「ノート」を作ると、作った物は
@@ -3361,7 +3489,7 @@ function reduceCore(
            * Esc を押し、新規未編集 cancel の掃除で **entry ごと消える**
            * (review M-2 で `filterQuery` について実証済みの経路そのもの)。
            */
-          kindFilter: NO_KINDS,
+          kindFilter: keepFilter ? state.kindFilter : NO_KINDS,
           freshLid: wantsEdit ? action.lid : null, // 非編集作成は fresh 掃除の対象外
           error: null,
           openBody: {
@@ -3640,7 +3768,15 @@ function reduceCore(
       if (targets.length === 0) return { state, events: [] };
       return {
         state,
-        events: [{ type: 'REQUEST_BULK_TAG', tags, mode: action.mode, targets }],
+        events: [
+          {
+            type: 'REQUEST_BULK_TAG',
+            tags,
+            mode: action.mode,
+            targets,
+            ...(action.field === undefined ? {} : { field: action.field }),
+          },
+        ],
       };
     }
     case 'SHOW_HISTORY': {
@@ -4241,7 +4377,11 @@ function reduceCore(
     case 'OP_NOTICE':
       // ⚠ **`error` を触らない** ── 知らせが出たからといって、出ているエラーを
       //    消してよい理由は無い(`main.ts` が別の行として組んでいる)
-      return { state: { ...state, notice: action.message }, events: [] };
+      // ⚠ 「開く」の身元は知らせと**対で**置く ── 添えない知らせが来たら消える
+      return {
+        state: { ...state, notice: action.message, noticeOpen: action.open ?? null },
+        events: [],
+      };
     /**
      * 🔴 **タグの候補が要る**(#494 段②)。
      *
@@ -4261,6 +4401,27 @@ function reduceCore(
      */
     case 'SET_TAG_SUGGESTIONS':
       return { state: { ...state, tagSuggestions: action.tags }, events: [] };
+    /**
+     * 🔴 **入らなかったタグを欄ごとに積む**(#640 案 A)。⚠ 同じ名前は 1 度だけ ──
+     *   まとめて付ける経路は名前ごとに 1 回しか言わないが、二重に撃たれても欄に
+     *   `#今月 #今月` と出ないように、ここで留める。並びは**届いた順**(= 打った順)。
+     */
+    case 'TAGS_REFUSED': {
+      const had = state.refusedTags[action.field];
+      const add = action.tags.filter((t) => !had.includes(t));
+      if (add.length === 0) return { state, events: [] };
+      return {
+        state: { ...state, refusedTags: { ...state.refusedTags, [action.field]: [...had, ...add] } },
+        events: [],
+      };
+    }
+    case 'CLEAR_REFUSED_TAGS': {
+      if (state.refusedTags[action.field].length === 0) return { state, events: [] };
+      return {
+        state: { ...state, refusedTags: { ...state.refusedTags, [action.field]: [] } },
+        events: [],
+      };
+    }
     case 'OP_FAILED':
       // 非致命: 通知のみ。phase は動かさない(kanban 等の操作性を殺さない)
       return { state: { ...state, error: action.error }, events: [] };
@@ -4511,6 +4672,64 @@ function keepContacts(
 export function screenBodyOf(state: AppState, lid: string): string | null {
   if (state.openBody && state.openBody.lid === lid) return state.openBody.body;
   return state.splitBodies.get(lid) ?? null;
+}
+
+/**
+ * 🔴 **板の書換 4 つ(動かす / 大きさ / 消す / 置く)が共通で通る門**(#283 P4-b → #676)。
+ *
+ * ⚠ 編集中は**声に出して断る** ── 判定はここ 1 か所(`SET_VIEW_MODE` と同じ作法。
+ *   呼び側(掴む口・メニュー)に配ると、口を足すたびに取りこぼす ── #516 の向き)。
+ * 🔴 **画面に出ている本文は 1 つではない**(#281 検算 2026-08-30)。
+ * ⚠ 1 稿目は `openBody` だけを見ていたので、**横に留めた枠**の付箋は
+ *   ①主の枠が板でなければ黙って no-op ②主の枠も板なら**別のノートの
+ *   同じ行を書き換えうる**、の 2 つに落ちていた。
+ * 🔑 `screenBodyOf` が「その lid が、いま画面のどこに出ているか」を 1 か所で答える。
+ *
+ * @param refusal 編集中の断り文(押した場所と対で書く)
+ * @param build 画面が見ている本文から書換を組む。組めなければ `null` = 黙って no-op
+ *   (行が板でない / 値が壊れている ── どれも画面の操作からは起きない形)
+ */
+function placeRewrite(
+  state: AppState,
+  lid: string,
+  refusal: string,
+  build: (shown: string) => BodyRewrite | null,
+): ReduceResult {
+  if (state.phase !== 'ready') return { state: { ...state, error: refusal }, events: [] };
+  const meta = state.entryMetas.get(lid);
+  if (!meta) return { state, events: [] };
+  const shown = screenBodyOf(state, lid);
+  if (shown === null) return { state, events: [] };
+  const rewrite = build(shown);
+  if (rewrite === null) return { state, events: [] };
+  return {
+    state,
+    events: [
+      {
+        type: 'REQUEST_BODY_REWRITE',
+        lid: meta.lid,
+        title: meta.title,
+        archetype: meta.archetype,
+        entryOrder: meta.entryOrder,
+        rewrite,
+      },
+    ],
+  };
+}
+
+/**
+ * 🔑 開き行は**この場で**捕捉する(描画が焼いた行番号 → 画面が見ている本文の字)。
+ * disk 側とずれていれば `place-notation.ts` が byte 一致で断る。板の開き行でなければ `null`。
+ */
+function placeOpenLineOf(shown: string, line: number): string | null {
+  if (!Number.isInteger(line) || line < 0) return null;
+  const openLine = shown.split('\n')[line];
+  return openLine !== undefined && isPlaceOpen(openLine) ? openLine : null;
+}
+
+/** 板の座標・大きさの値 ── 整数で 0 以上だけ(描画も負の値は捨てる)。 */
+function isPlaceCoord(n: number): boolean {
+  return Number.isInteger(n) && n >= 0;
 }
 
 function dropSplitBody(

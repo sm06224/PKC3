@@ -18,6 +18,9 @@ import {
   TABLE_BLOCK,
   CODE_BLOCK,
   MERMAID_BLOCK,
+  DIAGRAM_CHOICES,
+  DIAGRAM_TEMPLATES,
+  BAR_FORMAT_OPS,
   type FormatOp,
   type TextSelection,
 } from '../../src/features/markdown/text-ops';
@@ -201,6 +204,42 @@ describe('パネルの表', () => {
  * ③ **補わないときは `null`**(= ブラウザにそのまま打たせる)── ここで
  *    「空文字を挿す」を返すと、`execCommand` 経由になって undo の粒度が変わる
  */
+/**
+ * 🔴 **「図」を押したときに選べる表**(#528 案 B。user 裁定 2026-09-04)。
+ * ⚠ 繋がり(押す → 開く → 入る)は `tests/adapter/format-append.test.ts`。
+ *   ここは**表そのもの**の約束 ── 先頭がこれまでの「図」であること / 5 種 / 重複なし。
+ */
+describe('図の一覧の表(#528 案 B)', () => {
+  it('🔴 先頭はこれまでの「図」そのもの(MERMAID_BLOCK と同一の実体)', () => {
+    // ⚠ `toEqual` ではなく同一性 ── 写しを置くと、片方を直した日に食い違う
+    expect(DIAGRAM_CHOICES[0]!.block).toBe(MERMAID_BLOCK);
+    expect(DIAGRAM_CHOICES[0]!.label).toBe('フローチャート');
+    // 対照群 ── 中身は今までの「図」と 1 バイト違わない
+    expect(applyFormat({ text: '', start: 0, end: 0 }, 'mermaid').text).toBe(
+      DIAGRAM_CHOICES[0]!.block.text,
+    );
+  });
+
+  it('🔴 5 種 = フローチャート + UML の 4 種(表から引いていて、数も名指しで pin)', () => {
+    expect(DIAGRAM_CHOICES).toHaveLength(5);
+    expect(DIAGRAM_CHOICES.slice(1)).toEqual(DIAGRAM_TEMPLATES);
+    expect(new Set(DIAGRAM_CHOICES.map((d) => d.id)).size, 'id が重複').toBe(5);
+    expect(new Set(DIAGRAM_CHOICES.map((d) => d.label)).size, '字が重複').toBe(5);
+    // ⚠ 5 つとも mermaid の囲みで始まり、2 行目が種類の名前(空の枠を入れない)
+    for (const d of DIAGRAM_CHOICES) {
+      const lines = d.block.text.split('\n');
+      expect(lines[0], `${d.label} が mermaid の囲みで始まっていない`).toBe('```mermaid');
+      expect(lines[1]!.trim().length, `${d.label} の 1 行目(種類)が空`).toBeGreaterThan(0);
+    }
+  });
+
+  it('🔴 「図」は書式の帯の表からは外れている(押すと先に聞くため)', () => {
+    expect(BAR_FORMAT_OPS.map((o) => o.op)).not.toContain('mermaid');
+    // ⚠ op そのものは残っている(雛形の一覧と表の先頭が挿す口)
+    expect(FORMAT_OPS.map((o) => o.op)).toContain('mermaid');
+  });
+});
+
 describe('autoPairFor(auto pair の規則)', () => {
   const at = (text: string, start: number, end = start) => ({ text, start, end });
 

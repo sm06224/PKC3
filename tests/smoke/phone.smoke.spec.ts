@@ -631,6 +631,21 @@ test('🔴 340px では断り書きが出て、OK で消せて、それでも書
     '表示が崩れることがあります',
   );
 
+  /**
+   * 🔴 **押した後は、次に開いても出ない**(#687 E-1、user 裁定 2026-09-04)。
+   * ⚠ 直す前は閉包変数だったので、読み込み直すたびに同じ字が出て同じ OK を
+   *   押させていた。🔑 unit は store を渡し直して再現するが、**本物の `localStorage`
+   *   を跨いで残るか**は実ブラウザでしか読めない ── ここで `reload` する。
+   * ⚠ 空振り防止 ── 同じ test の冒頭で「押す前は出る」を見ている(= 憶えていなければ
+   *   この幅では必ず出る)ので、ここが hidden なら憶えたからである。
+   */
+  await page.reload();
+  await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
+  await expect(page.locator(REGION('shell')), '読み込み直しても版面が出ない').toBeAttached();
+  await expect(status, 'OK を押したのに、読み込み直したらまた出た').not.toContainText(
+    '表示が崩れることがあります',
+  );
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 
@@ -680,6 +695,81 @@ test('🔴 360px ちょうどでは断り書きを出さない', async ({ page }
     page.locator(REGION('status')),
     '対応している幅なのに断り書きが出ている',
   ).not.toContainText('表示が崩れることがあります');
+});
+
+/**
+ * 🔴 **横に倒したスマホ(844×390)もスマホ用画面にする**(#663、推薦 ①)。
+ *
+ * ## なぜ要るか(`scripts/phone-probe.mjs` の実測、2026-09-04)
+ *
+ * 直す前は幅だけで切っていたので 844×390 は **2 列版面**に落ち、一覧 186px に
+ * 帯 4 本(タブ / 探す / 作る / まとめ)が折り返して一覧の丈を超え、はみ出した
+ * **「操作を探す」が、下に寝た情報ペインに覆われて押せなかった**
+ * (カード開 = announce に、閉 = inspector に覆われる ── 4 行とも)。
+ *
+ * ## ここで測るもの
+ *
+ * ① 高さ 390 で **スマホ用画面になっている**こと(unit は替え玉なので寸法を測れない)
+ * ② 一覧ページの **「操作を探す」が指に当たる**こと ── 判定は probe と同じ
+ *    `elementFromPoint`(`toBeVisible()` は覆われていても真になる)。
+ */
+test('🔴 横に倒したスマホ(844×390)でもスマホ用画面になり、「操作を探す」が押せる (#663)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 844, height: 390 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+
+  await expect(
+    page.locator(REGION('shell')),
+    '高さ 390px なのに 2 列版面のまま(幅だけで切っている)',
+  ).toHaveAttribute('data-pkc-layout', 'phone');
+
+  // 🔴 一覧ページ(ノートを開いていない)の「操作を探す」が、自分に当たる
+  const hit = await page.locator('[data-pkc-action="open-palette"]').first().evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    return {
+      w: Math.round(r.width),
+      h: Math.round(r.height),
+      bottom: Math.round(r.bottom),
+      innerH: window.innerHeight,
+      own: at === el || el.contains(at),
+      cover: at?.closest('[data-pkc-region]')?.getAttribute('data-pkc-region') ?? null,
+    };
+  });
+  // ⚠ 空振り防止 ── 面積を持って画面の中に在る(0×0 で「当たった」ではない)
+  expect(hit.w, '「操作を探す」に幅が無い(台の空振り)').toBeGreaterThan(0);
+  expect(hit.h, '「操作を探す」に高さが無い(台の空振り)').toBeGreaterThan(0);
+  expect(hit.bottom, '「操作を探す」が画面の外に在る').toBeLessThanOrEqual(hit.innerH);
+  expect(hit.own, `「操作を探す」が覆われている(覆っているのは ${hit.cover ?? '(なし)'})`).toBe(true);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * ⚠ **対照群 ── 幅も高さも足りている窓(1280×720)はスマホ用画面にならない**(#663)。
+ * 🔑 これが無いと、「いつでもスマホ用画面」にする実装が上を満たして通る。
+ *   ⚠ そして「操作を探す」はここでも押せる ── 押せないなら計器の話である
+ *   (`phone-probe.mjs` が対照群でやっているのと同じ検算)。
+ */
+test('⚠ 1280×720 はスマホ用画面にならず、「操作を探す」も押せる(対照群) (#663)', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  await expect(page.locator(REGION('shell')), '広い窓なのにスマホ用画面').not.toHaveAttribute(
+    'data-pkc-layout',
+    'phone',
+  );
+  const own = await page.locator('[data-pkc-action="open-palette"]').first().evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    return at === el || el.contains(at);
+  });
+  expect(own, '対照群で「操作を探す」が押せない(計器の話)').toBe(true);
 });
 
 /**
@@ -845,8 +935,8 @@ for (const [name, w, h] of [
      * 🔑 「行き先を字に入れる」という user 裁定は、**読めなければ果たせない**。
      */
     expect(first.cut, `操作の字が切れている: ${first.cut.join(' / ')}`).toEqual([]);
-    // 🔑 **行き先が入るのは「写す」「移す」だけ**(2 件とも見る)
-    expect(first.copyLabel, '「写す」に行き先が入っていない').toContain('右へ写す');
+    // 🔑 **行き先が入るのは「コピー」「移す」だけ**(2 件とも見る。#587 D-1 で「写す」→「コピー」)
+    expect(first.copyLabel, '「コピー」に行き先が入っていない').toContain('右へコピー');
     /**
      * 🔴 **対照群 ── 行き先を入れない側**。⚠ これが無いと、`it.directed` を
      *   無視して**全部に行き先を付ける**変異が素通りする(「右へ名前」と出る)。
@@ -1019,4 +1109,80 @@ test('🔴 スマホで集中モードの鍵を押すと理由が出て、畳み
   const shown = await box.isVisible();
   await page.keyboard.press('Alt+Backslash');
   await expect(box, '追記欄の鍵まで殺している').toBeVisible({ visible: !shown });
+});
+
+/**
+ * 🔴 **指で行を押し続けると印が足される**(#687 D-1。user 裁定 2026-09-04)。
+ *
+ * ⚠ unit(`tests/adapter/long-press.test.ts`)は `PointerEvent` を**手で撃つ**ので、
+ *   「実ブラウザが指の押下を `pointerType: 'touch'` の pointerdown として届け、
+ *   500ms の間 `pointerup` も `click` も撃たず、離した後の `click` が捨てられる」
+ *   という**ブラウザ側の順番**は見ていない。ここはそれだけを見る。
+ * ⚠ **ブラウザの長押し(`contextmenu` / drag)との取り合い**は headless の合成 touch で
+ *   は決まらない ── cowork の実機で確かめる(Android の drag が 500ms より先に
+ *   始まると、印ではなく行が動く)。
+ * 🔑 `page.touchscreen` は `tap` しか持たないので、CDP の `Input.dispatchTouchEvent`
+ *   で `touchStart` → 600ms 待つ → `touchEnd` を撃つ(`live-editor.smoke.spec.ts` が
+ *   CDP を使う型)。
+ */
+test('🔴 スマホで行を 600ms 押し続けると、印が 2 行になる (#687 D-1)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 375, height: 667 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  // ノートを 2 件作る(印を 2 行にするのに 2 行要る)
+  for (let i = 0; i < 2; i++) {
+    await createEntry(page, 'text');
+    await clickReal(page, '[data-pkc-action="commit-edit"]');
+    await clickReal(page, '[data-pkc-field="phone-back"]');
+  }
+  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await openViewPane(page, 'dual');
+  await expect(page.locator(REGION('shell'))).toHaveAttribute('data-pkc-layout', 'phone');
+
+  const rows = page.locator(
+    '[data-pkc-region="dual-pane"][data-pkc-side="left"] [data-pkc-region="dual-table"] tbody tr',
+  );
+  await expect(rows, '台の前提が崩れている(行が 2 つ無い)').toHaveCount(2);
+  const marked = () =>
+    page
+      .locator(
+        '[data-pkc-region="dual-pane"][data-pkc-side="left"] [data-pkc-region="dual-table"] tbody tr[data-pkc-marked]',
+      )
+      .count();
+
+  // ① 素のタップで 1 行目に印(前提 ── 1 件)
+  await rows.nth(0).tap();
+  expect(await marked(), 'タップで印が 1 件になっていない').toBe(1);
+
+  // ② 2 行目を 600ms 押し続ける
+  const box = await rows.nth(1).boundingBox();
+  expect(box, '2 行目の寸法が採れない').not.toBeNull();
+  const x = box!.x + box!.width / 2;
+  const y = box!.y + box!.height / 2;
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+  await page.waitForTimeout(600);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  // ⚠ 離した後の `click` が捨てられていれば 2 件のまま(`set` が走ると 1 件に戻る)
+  await page.waitForTimeout(100);
+  expect(await marked(), '長押しで印が足されていない(または直後の click で 1 件に戻った)').toBe(2);
+
+  /**
+   * ③ 対照群 ── 短いタップ(100ms)は印を 1 件に付け替える(長押しが全タップを食っていない)。
+   *
+   * ⚠ ここは②の発火から **700ms 以内**(消費窓の内側)である ── 直す前はそこで
+   *   この `click` まで捨てられ、**押したのに何も起きなかった**(2026-09-05 に赤で判明。
+   *   CDP の `touchEnd` は `pointerup type=touch` を撃っており、時計は止まっていた)。
+   *   ⚠ ここに待ちを足して緑にしない ── 待ちを足すと、その穴がまた開いても鳴らない。
+   */
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+  await page.waitForTimeout(100);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await page.waitForTimeout(100);
+  expect(
+    await marked(),
+    '長押しの直後の短いタップが捨てられた(消費窓が次の押下の click まで食った、または短いタップが長押しになった)',
+  ).toBe(1);
+  expect(errors, `console/pageerror: ${errors.join(' | ')}`).toEqual([]);
 });

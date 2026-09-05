@@ -22,7 +22,16 @@ import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
-import { BAR_FORMAT_OPS, FORMAT_OPS } from '../../src/features/markdown/text-ops';
+import {
+  BAR_FORMAT_OPS,
+  DIAGRAM_CHOICES,
+  DIAGRAM_TEMPLATES,
+  FORMAT_OPS,
+  MERMAID_BLOCK,
+  applyFormat,
+  insertBlock,
+} from '../../src/features/markdown/text-ops';
+import { BUILTIN_SNIPPET_OPS } from '../../src/features/snippet/snippet-menu';
 import { stubRevisionOps } from '../helpers/revision-stub';
 import { resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
 import { answerDialog, openDialog } from './dialog-helper';
@@ -159,8 +168,16 @@ describe('書式パネル(P8 段⑥)', () => {
       )].map((m) => m[2]!),
     );
     expect(byKey.size, '鍵の表を読めていない(空振り)').toBeGreaterThan(2);
+    /**
+     * ⚠ 2026-09-04(#528 案 B): **図**(`mermaid`)は帯から外れた ── 帯の「図」は
+     *   `format-text` ではなく一覧を開く。`applyFormat('mermaid')` へ届く口は
+     *   **雛形の一覧の組み込み**(`BUILTIN_SNIPPET_OPS`)である。⚠ 3 つ目の集合として
+     *   数える ── ここに無ければ「表に在るのに誰も呼ばない op」になる。
+     */
+    const bySnippet = new Set<string>(BUILTIN_SNIPPET_OPS);
+    expect(bySnippet.has('mermaid'), '雛形の一覧から「図」が消えた(前提が崩れている)').toBe(true);
     const unreachable = FORMAT_OPS.map((o) => o.op).filter(
-      (op) => !onBar.has(op) && !byKey.has(op),
+      (op) => !onBar.has(op) && !byKey.has(op) && !bySnippet.has(op),
     );
     expect(unreachable, 'どこからも押せない記法が在る').toEqual([]);
   });
@@ -213,6 +230,216 @@ describe('書式パネル(P8 段⑥)', () => {
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
     await tick();
     expect(q('[data-pkc-region="format-bar"]')).toBeNull();
+  });
+});
+
+/**
+ * 🔴 **「図」を押すと 5 種から選べる**(#528 案 B。user 裁定 2026-09-04)。
+ *
+ * ⚠ 直す前は「図」= `format-text`(`op: 'mermaid'`)で、**必ず `graph TD` の 2 行**が
+ *   入った ── UML の雛形(`DIAGRAM_TEMPLATES`)は在るのに、「図」から辿れなかった。
+ * 🔴 見るのは繋がりである ── 押した所から一覧が開き、選んだ雛形が **caret の位置**に
+ *   入り、state まで届くか。何が並ぶか(表)は `tests/features/text-ops.test.ts`。
+ * ⚠ 観測点を textarea の `value` だけにしない ── state に届いていないと
+ *   **保存した瞬間に消える**(書式パネルと同じ罠)。
+ */
+describe('「図」を押すと 5 種から選ぶ(#528 案 B)', () => {
+  beforeEach(() => {
+    localStorage.setItem('pkc3.editor-mode', 'split');
+  });
+  afterEach(() => {
+    resetAppDialogForTest();
+  });
+
+  const rows = (): HTMLButtonElement[] => [
+    ...(openDialog()?.querySelectorAll<HTMLButtonElement>('[data-pkc-field="pick-diagram"]') ?? []),
+  ];
+
+  /** 編集に入って本文と caret を作り、帯の「図」を押して一覧を開く。 */
+  async function openPicker(body = '', caret = body.length) {
+    const s = setup([meta('a')], { a: body });
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    s.q('[data-pkc-action="start-edit"]')!.click();
+    await tick();
+    const ta = s.q<HTMLTextAreaElement>('[data-pkc-field="editor-body"]')!;
+    ta.setSelectionRange(caret, caret);
+    s.q('[data-pkc-action="insert-diagram"]')!.click();
+    await tick();
+    return { ...s, ta };
+  }
+
+  /**
+   * 🔴 **帯の「図」は表の直後に居て、`format-text` ではない。**
+   * ⚠ 位置ごと pin する ── 末尾へ足す実装だと、表とコードブロックの間に在った
+   *   ボタンが右へ飛ぶ(「同じものが常に同じ場所にある」)。
+   */
+  it('🔴 帯の「図」は表の隣に在り、一覧を開くボタンになっている', async () => {
+    const { d, q, root } = setup([meta('a')], { a: 'x' });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    q('[data-pkc-action="start-edit"]')!.click();
+    const buttons = [...root.querySelectorAll('[data-pkc-region="format-bar"] button')];
+    const labels = buttons.map((b) => b.querySelector('[data-pkc-field="label"]')?.textContent);
+    const at = labels.indexOf('図');
+    expect(at, '帯に「図」が無い').toBeGreaterThan(0);
+    expect(labels[at - 1], '「図」が表の隣に居ない').toBe('表');
+    expect(buttons[at]!.getAttribute('data-pkc-action')).toBe('insert-diagram');
+    expect(buttons[at]!.hasAttribute('data-pkc-format'), 'まだ format-text の口が残っている').toBe(false);
+    // ⚠ 対照群 ── `format-text` の側には `mermaid` のボタンが**居ない**
+    expect(root.querySelector('[data-pkc-format="mermaid"]')).toBeNull();
+  });
+
+  it('🔴 押しても編集欄から focus を奪わない(live の 1 面で無言 no-op にならない)', async () => {
+    const { d, q } = setup([meta('a')], { a: 'あ' });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    q('[data-pkc-action="start-edit"]')!.click();
+    const ev = new Event('mousedown', { bubbles: true, cancelable: true });
+    q('[data-pkc-action="insert-diagram"]')!.dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(true);
+  });
+
+  it('🔴 押すと 5 種の一覧が出て、並びは表のとおり(先頭はフローチャート)', async () => {
+    await openPicker();
+    expect(openDialog(), '図の一覧が開いていない').not.toBeNull();
+    const labels = rows().map((b) => b.textContent);
+    // ⚠ 数を名指しで pin する ── 表と同じ物を写しただけでは、表が縮んでも通る
+    expect(labels).toHaveLength(5);
+    expect(labels).toEqual(DIAGRAM_CHOICES.map((d) => d.label));
+    expect(labels[0]).toBe('フローチャート');
+    expect(labels, 'UML の 4 種が並んでいない').toEqual(
+      expect.arrayContaining(DIAGRAM_TEMPLATES.map((d) => d.label)),
+    );
+    // 🔑 焦点は先頭の行(鍵だけの人が、開いた直後に何もできないのを防ぐ)
+    expect(document.activeElement).toBe(rows()[0]);
+  });
+
+  /**
+   * 🔴 **対照群:フローチャートを選ぶと、今までの「図」と 1 バイト違わない。**
+   * ⚠ `applyFormat(sel, 'mermaid')` が直す前の「図」そのものである ── これと
+   *   等しくなければ、既存の user の手触りを変えている。
+   */
+  it('🔴 フローチャートを選ぶと、これまでの「図」と同じ 2 行が入る', async () => {
+    const { d, ta } = await openPicker('まえ\n', 3);
+    const before = applyFormat({ text: 'まえ\n', start: 3, end: 3 }, 'mermaid');
+    rows()[0]!.click();
+    await tick();
+    expect(ta.value).toBe(before.text);
+    expect(ta.value).toBe('まえ\n```mermaid\ngraph TD\n  A-->B\n```\n');
+    expect(d.getState().openBody?.body, 'state に届いていない(保存すると消える)').toBe(before.text);
+  });
+
+  it('🔴 クラス図を選ぶと、その雛形が caret の位置に入り、state もそろって変わる', async () => {
+    const { d, ta } = await openPicker('まえ\nうしろ', 3);
+    const cls = DIAGRAM_TEMPLATES.find((t) => t.id === 'class')!;
+    const want = insertBlock({ text: 'まえ\nうしろ', start: 3, end: 3 }, cls.block);
+    rows().find((b) => b.textContent === 'クラス図')!.click();
+    await tick();
+    expect(ta.value).toBe(want.text);
+    // ⚠ 0 行目は「まえ」、1 行目は fence の開き ── 種類の名前は 2 行目
+    expect(ta.value.split('\n')[2], 'クラス図の 1 行目が入っていない').toBe('classDiagram');
+    expect(ta.value.startsWith('まえ\n'), '先頭に入った(caret を控えていない)').toBe(true);
+    expect(d.getState().openBody?.body).toBe(want.text);
+    // ⚠ 対照群 ── フローチャートとは別の物が入った(同じ物なら一覧の意味が無い)
+    expect(ta.value).not.toBe(MERMAID_BLOCK.text);
+  });
+
+  it('🔴 それぞれの行が、表のその雛形を入れる(5 行とも別の物)', async () => {
+    const seen: string[] = [];
+    for (const [i, choice] of DIAGRAM_CHOICES.entries()) {
+      const { ta } = await openPicker();
+      rows()[i]!.click();
+      await tick();
+      expect(ta.value, `${choice.label} の雛形が入っていない`).toBe(choice.block.text);
+      seen.push(ta.value);
+      resetAppDialogForTest();
+      document.body.textContent = '';
+    }
+    expect(new Set(seen).size, '同じ雛形を入れる行が 2 つある').toBe(DIAGRAM_CHOICES.length);
+  });
+
+  it('🔴 Esc(やめる)なら何も入らず、state も動かない', async () => {
+    const { d, ta } = await openPicker('もと');
+    const state = d.getState().openBody?.body;
+    await answerDialog('cancel');
+    await tick();
+    expect(ta.value).toBe('もと');
+    expect(d.getState().openBody?.body).toBe(state);
+    expect(openDialog(), '一覧が閉じていない').toBeNull();
+  });
+
+  /**
+   * 🔴 **外(暗い地)を押したら閉じて、何も入らない**(#528 案 B の裁定の字)。
+   * ⚠ 暗い地を押すと `click` の `target` は `<dialog>` 自身になる ── 中身の行を
+   *   押したときは行が target なので、この経路には入らない(対照群を同じ it に置く)。
+   */
+  it('🔴 外を押すと閉じて、何も入らない', async () => {
+    const { ta } = await openPicker('もと');
+    const dialog = openDialog()!;
+    dialog.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await tick();
+    expect(openDialog(), '外を押しても閉じない').toBeNull();
+    expect(ta.value).toBe('もと');
+    // ⚠ 対照群 ── 行を押す経路は生きている(閉じ方を 1 本に寄せた副作用で死んでいない)
+    const again = await openPicker('もと');
+    rows()[0]!.click();
+    await tick();
+    expect(again.ta.value).not.toBe('もと');
+  });
+
+  /**
+   * 🔴 **caret の位置に入る**(`insert-date` が 2026-08-23 に実機で踏んだ罠)。
+   * ⚠ `<dialog>` は焦点を借りて返すが、**選択位置までは返さない** ── 控えていないと
+   *   本文の**先頭**に入る。実機の `showModal()` が起こすことを、ここで手で起こす。
+   */
+  it('🔴 一覧を開いている間に caret が 0 へ戻されても、元の位置に入る', async () => {
+    const { ta } = await openPicker('まえ\nうしろ', 3);
+    ta.setSelectionRange(0, 0);
+    rows()[0]!.click();
+    await tick();
+    expect(ta.value.startsWith('まえ\n```mermaid'), '本文の先頭に入った(caret を控えていない)').toBe(true);
+  });
+
+  /**
+   * 🔑 **↑↓ で行を移れる**(鍵は近道)。⚠ 端では止まる(回り込まない)。
+   */
+  it('↑↓ で行の焦点が動く(端では止まる)', async () => {
+    await openPicker();
+    const r = rows();
+    const key = (k: string): boolean => {
+      const ev = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true });
+      document.activeElement!.dispatchEvent(ev);
+      return ev.defaultPrevented;
+    };
+    expect(document.activeElement).toBe(r[0]);
+    expect(key('ArrowDown'), '矢印を握っていない(caret が動いて焦点が飛ぶ)').toBe(true);
+    expect(document.activeElement).toBe(r[1]);
+    key('ArrowUp');
+    expect(document.activeElement).toBe(r[0]);
+    // ⚠ 端では止まる ── 既定も止めない(握る理由が無い)
+    expect(key('ArrowUp')).toBe(false);
+    expect(document.activeElement).toBe(r[0]);
+  });
+
+  /**
+   * 🔴 **画面から降りた欄に書き込まない**(日付 / 雛形と同じ門)。
+   */
+  it('🔴 編集をやめた後に選んでも、画面から降りた欄に書き込まない', async () => {
+    const s = await openPicker('もと');
+    s.d.dispatch({ type: 'CANCEL_EDIT' });
+    await tick();
+    expect(s.ta.isConnected, '前提が崩れている(欄がまだ画面に在る)').toBe(false);
+    rows()[0]!.click();
+    await tick();
+    expect(s.ta.value, '画面に無い欄へ書き込んでいる').toBe('もと');
+  });
+
+  it('閲覧中は「図」のボタンが出ていない', async () => {
+    const s = setup([meta('a')], { a: 'x' });
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    expect(s.q('[data-pkc-action="insert-diagram"]')).toBeNull();
   });
 });
 

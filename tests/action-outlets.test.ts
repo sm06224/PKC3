@@ -88,7 +88,7 @@ const OBJECT_LONE: readonly string[] = [
   'dual-bookmark-open',
   'dual-bookmark-remove',
   'dual-crumb',
-  'dual-row',
+  // ⚠ `dual-row` は 2026-09-04(#687 D-1)に長押し(`long-press.ts`)が 2 つ目の出口になったので外した
   'edit-cell',
   'enter-folder',
   'insert-entry-link',

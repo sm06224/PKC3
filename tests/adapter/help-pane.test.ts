@@ -525,6 +525,10 @@ const ALL_VIEWS = [
   'detail',
   // ⚠ `calendar` / `kanban` は #292 段⑤ で中央の面ではなくなった(左の列のタブへ)
   'query',
+  // ⚠ 予定表(#673 段②、user 裁定 2026-09-04)── 左の列の「予定」と同じ描画器を中央にも
+  'schedule',
+  // ⚠ 連絡先(#278 段③)── 予定表と同じ形
+  'contacts',
   'dual',
   'settings',
   'flags',
@@ -626,11 +630,14 @@ describe('🔴 中央の面の表が 2 つある(食い違いを落とす)', () 
       ).not.toBeNull();
     } else {
       /**
-       * 🔑 **逆向きも見る。** 集計は自分の器、探し方(`filer` / `launcher` /
-       * `schedule`)は**本文へ落ちる**(探し方は左の列が持つ)。
+       * 🔑 **逆向きも見る。** 集計と予定表(#673 段②)は自分の器、探し方
+       * (`filer` / `launcher`)は**本文へ落ちる**(探し方は左の列が持つ)。
        * ⚠ ここを書かないと、`app-state.ts` の表にだけ足した面が素通りする。
+       * ⚠ `center.ts` の `NOTE_PANES` と**同じ一覧を手で書く** ── 突合が目的なので
+       *   向こうから import しない(食い違えばここで落ちる)。
        */
-      const expected = view === 'query' ? view : 'detail';
+      const expected =
+        view === 'query' || view === 'schedule' || view === 'contacts' ? view : 'detail';
       expect(name, `${view} の落ち先が違う(app-state.ts の表に足し忘れ)`).toBe(expected);
     }
   });

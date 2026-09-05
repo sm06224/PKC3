@@ -17,7 +17,7 @@
  *   とくに `Ctrl` / `⌘` は**リンクの「新しいタブで開く」**なので、そこを奪うと
  *   ブラウザの既定を丸ごと壊す。
  */
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { initialState, type AppState } from '../../src/adapter/state/app-state';
 import { appPanes } from '../../src/adapter/ui/render/pane-visibility';
@@ -63,6 +63,9 @@ function rig(html: string, body = 'a\n\nb\n\nc\n', slugs: readonly string[] = []
   for (const value of ['', ...slugs]) {
     const opt = document.createElement('option');
     opt.value = value;
+    // ⚠ 字も本物に合わせる(`append-box.ts` は見出しの字を option の中身に出す)──
+    //    断り文はその字を引く(#655 ②)ので、空のままだと test だけが別の形になる
+    opt.textContent = value === '' ? '末尾' : value;
     target.append(opt);
   }
   root.append(target);
@@ -293,6 +296,8 @@ describe('#495 Alt+クリックで、追記の入り先を指す', () => {
       expect(shell.hasAttribute('data-pkc-hidden-panes'), '画面へ写っていない').toBe(false);
       expect(document.activeElement, '打つ欄にカーソルが入っていない').toBe(input);
     } finally {
+      // ⚠ 一時表示(#655 ①)も終える(`body-context-menu.test.ts` の afterEach と同じ理由)
+      appPanes.unpeek();
       appPanes.setHidden([]);
     }
   });
@@ -354,6 +359,114 @@ describe('#495 Alt+クリックで、追記の入り先を指す', () => {
     r.d.dispatch({ type: 'CANCEL_EDIT' });
     r.click('#pb', { altKey: true });
     expect(r.target.value).toBe('決定事項');
+  });
+
+  /**
+   * 🔴 **断るときも、打つ所までは出す**(#655 ②。user 裁定 2026-09-04)。
+   *
+   * ⚠ 直す前は「上に見出しが無い」「一覧に無い見出し」の 2 つが**欄を開く前に返って**
+   *   いたので、マニュアルの「畳んでいても開いて、打つ欄にカーソルが入ります」が
+   *   その場面で嘘だった ── 見出しが 1 つも無いノートでは**毎回**そうなる。
+   * 🔑 見るのは 3 つ:欄が開く / カーソルが入る / 断りの字(いまの入り先つき)。
+   */
+  describe('断るときも打つ所までは出す(#655 ②)', () => {
+    function foldedPane(r: ReturnType<typeof rig>) {
+      const shell = document.createElement('div');
+      shell.setAttribute('data-pkc-region', 'shell');
+      shell.setAttribute('data-pkc-hidden-panes', 'append');
+      const input = document.createElement('textarea');
+      input.setAttribute('data-pkc-field', 'append-input');
+      shell.append(input);
+      r.root.append(shell);
+      appPanes.setHidden(['append']);
+      return { shell, input };
+    }
+    afterEach(() => {
+      appPanes.unpeek();
+      appPanes.setHidden([]);
+    });
+
+    it('🔴 上に見出しが無い所でも、欄は開いてカーソルが入る ── いまの入り先を添える', () => {
+      const html = '<p data-pkc-source-line="0" id="top">まえがき</p>' + SECT_HTML;
+      const r = rig(html, 'まえがき\n\n' + SECT_BODY, SLUGS);
+      const { shell, input } = foldedPane(r);
+      r.click('#top', { altKey: true });
+      expect(r.target.value, '入り先が動いた').toBe('');
+      expect(shell.hasAttribute('data-pkc-hidden-panes'), '断ったので欄を開かなかった').toBe(false);
+      expect(document.activeElement, '打つ欄にカーソルが入っていない').toBe(input);
+      const notice = r.state().notice ?? '';
+      expect(notice, '理由が出ていない').toContain('見出しが無い');
+      expect(notice, 'いまの入り先を言っていない').toContain('いまの入り先は末尾です');
+      expect(notice, '開いたことを言っていない').toContain('追記欄を開きました');
+    });
+
+    it('🔑 直前に選んだ節が在れば「末尾」とは言わない(嘘を書かない)', () => {
+      const html = '<p data-pkc-source-line="0" id="top">まえがき</p>' + SECT_HTML;
+      const r = rig(html, 'まえがき\n\n' + SECT_BODY, SLUGS);
+      r.click('#pb', { altKey: true });
+      expect(r.target.value, '前提: 入り先が選べていない').toBe('決定事項');
+      r.click('#top', { altKey: true });
+      expect(r.target.value, '入り先が動いた').toBe('決定事項');
+      expect(r.state().notice ?? '', '選んであった節を言っていない').toContain(
+        'いまの入り先は「決定事項」です',
+      );
+    });
+
+    it('🔴 一覧に無い節でも、欄は開いてカーソルが入る ── 理由にいまの入り先を添える', () => {
+      const r = rig(SECT_HTML, SECT_BODY, ['上の節']);
+      const { shell, input } = foldedPane(r);
+      r.click('#pb', { altKey: true });
+      expect(r.target.value, '一覧に無い印で末尾へ落ちた').toBe('');
+      expect(shell.hasAttribute('data-pkc-hidden-panes'), '断ったので欄を開かなかった').toBe(false);
+      expect(document.activeElement, '打つ欄にカーソルが入っていない').toBe(input);
+      const error = r.state().error ?? '';
+      expect(error, '理由が出ていない').toContain('「決定事項」は追記の入り先に選べません');
+      expect(error, 'いまの入り先を言っていない').toContain('いまの入り先は末尾です');
+    });
+
+    it('🔴 見出しが 1 つも無いノートでも、欄は開いてカーソルが入る', () => {
+      const html = '<p data-pkc-source-line="0" id="only">見出しの無い本文</p>';
+      const r = rig(html, '見出しの無い本文\n', []);
+      const { shell, input } = foldedPane(r);
+      r.click('#only', { altKey: true });
+      expect(shell.hasAttribute('data-pkc-hidden-panes'), '欄を開かなかった').toBe(false);
+      expect(document.activeElement, '打つ欄にカーソルが入っていない').toBe(input);
+      expect(r.state().notice ?? '', '理由が出ていない').toContain('見出しが無い');
+    });
+
+    /**
+     * 🔴 **書込中は理由を出す**(黙らない)。⚠ 「編集中」の枝は、いまの 2 つの入口
+     *   (`Alt`+クリック / 右クリック)からは届かない ── 前者は `bodySourceLineAt` が
+     *   `ready` でないと降り(上の「ready でない間は、既定を奪わない」)、後者は
+     *   編集中に並ばない。届く「ready でない」は**書込中**だけである。
+     */
+    it('🔴 書き込んでいる間は「入り先を変えられません」と理由を出す(黙らない)', () => {
+      const r = rig(SECT_HTML, SECT_BODY, SLUGS);
+      const { shell } = foldedPane(r);
+      // ⚠ この rig には効果層が無いので、追記を撃つと書込の錠が掛かったままになる
+      r.d.dispatch({ type: 'APPEND_TO_ENTRY', lid: 'n1', text: 'x', heading: null, target: null });
+      expect(r.state().writeLock?.lid, '前提: 書込中になっていない').toBe('n1');
+      r.click('#pb', { altKey: true });
+      expect(r.target.value, '書込中に入り先が動いた').toBe('');
+      expect(r.state().error ?? '', '書込中に黙った').toContain('入り先を変えられません');
+      // ⚠ 書込中は打つ欄が無い(理由と出口の帯だけ)ので、欄を開く動作は起こさない
+      expect(shell.getAttribute('data-pkc-hidden-panes'), '書込中に欄を開いた').toBe('append');
+    });
+
+    it('対照群 ── 追記欄そのものが無い種類(添付)では、断り文も出さない(既定を変えない)', () => {
+      const r = rig(SECT_HTML, SECT_BODY, SLUGS);
+      r.d.dispatch({
+        type: 'SYS_BOOTED',
+        cid: 'c1',
+        metas: [{ ...meta('n1'), archetype: 'attachment' }],
+        relations: [],
+      });
+      r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+      r.d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: SECT_BODY });
+      r.click('#pb', { altKey: true });
+      expect(r.state().error, '追記欄の無い面で追記の断り文を出した').toBeNull();
+      expect(r.state().notice ?? '').not.toContain('入り先');
+    });
   });
 
   it('🔴 素のクリックでは入り先は動かない', () => {

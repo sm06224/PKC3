@@ -26,6 +26,7 @@ import {
   bodyMenuActions,
   ENTRY_ACTION_HINTS,
   ENTRY_ACTION_HINT_MAX,
+  menuShortcutFor,
   ENTRY_ACTION_LABELS,
   ENTRY_MENU_ACTIONS,
   entryActionHint,
@@ -214,6 +215,24 @@ describe('条件つきの操作(#500 案 C)', () => {
  * ⚠ **「鍵が在るか」だけを見ない**(§1)── 値が空文字でも鍵は在る。
  *   ここは**配られた側**(`entryMenuActions` の返り値)で、**中身が空でない**ことを見る。
  */
+describe('見出し・本文のメニューの近道(#587 C 案 2)', () => {
+  /** 割当の台帳の代わり ── 段組みだけ割当を持つ。 */
+  const chord = (id: string): string | null => (id === 'cycle-read-columns' ? 'Alt + C' : null);
+
+  it('🔴 修飾キー + クリックは、mac では ⌘ / ⌥ の綴りになる', () => {
+    expect(menuShortcutFor('edit-from-heading', { mac: false, chord })).toBe('Ctrl + クリック');
+    expect(menuShortcutFor('edit-from-heading', { mac: true, chord })).toBe('⌘ + クリック');
+    expect(menuShortcutFor('append-at-heading', { mac: false, chord })).toBe('Alt + クリック');
+    expect(menuShortcutFor('append-at-heading', { mac: true, chord })).toBe('⌥ + クリック');
+  });
+
+  it('鍵の割当がある項目はその字、無い項目は空(呼び側が属性を付けない)', () => {
+    expect(menuShortcutFor('cycle-read-columns', { mac: false, chord })).toBe('Alt + C');
+    expect(menuShortcutFor('pin-split', { mac: false, chord })).toBe('');
+    expect(menuShortcutFor('toggle-heading-fold', { mac: true, chord })).toBe('');
+  });
+});
+
 describe('右クリックの説明(#587 C-1)', () => {
   /**
    * 🔴 **説明は 2 行に収める**(#587 C-3)。メニューの下の欄は 2 行固定なので、
@@ -311,12 +330,15 @@ describe('右クリックの説明(#587 C-1)', () => {
     const long = '2026年度第3四半期営業報告書_改訂版_確定_最終版.docx';
     // ⚠ 前提: この名前は縮めなければ上限を超える(超えないなら何も検めていない)
     expect(
-      `開いた元のファイル(${long})を、このノートの内容で上書きします`.length,
+      `元のファイル(${long})を上書きします。元の内容は戻せません(押すと確かめの窓が出ます)`.length,
       '前提が崩れている: この名前では上限を超えない',
     ).toBeGreaterThan(ENTRY_ACTION_HINT_MAX);
     const h = entryActionHint('write-back-file', { archetype: 'text', linkedFile: long });
     expect(h.length, '2 行に収まらない').toBeLessThanOrEqual(ENTRY_ACTION_HINT_MAX);
-    expect(h, '取り消せないことを言う末尾が切れている').toContain('上書きします');
+    expect(h, '上書きだと言う所が切れている').toContain('上書きします');
+    // 🔴 #587 C 案 1 ── 取り消せないことと、確かめの窓が挟まることを言う(切れずに残る)
+    expect(h, '取り消せないことを言っていない').toContain('元の内容は戻せません');
+    expect(h, '確かめの窓が出ることを言っていない').toContain('(押すと確かめの窓が出ます)');
     // 🔑 頭と尻の両方を残す ── 頭だけだと拡張子が消え、尻だけだとどの文書か分からない
     expect(h, 'どの文書か分からない').toContain('2026年度');
     expect(h, '拡張子が消えている').toContain('.docx');
@@ -324,7 +346,7 @@ describe('右クリックの説明(#587 C-1)', () => {
     expect(
       entryActionHint('write-back-file', { archetype: 'text', linkedFile: 'メモ.md' }),
       '短い名前まで縮めている',
-    ).toBe('開いた元のファイル(メモ.md)を、このノートの内容で上書きします');
+    ).toBe('元のファイル(メモ.md)を上書きします。元の内容は戻せません(押すと確かめの窓が出ます)');
   });
 
   it('🔴 「書き戻す」だけは行き先を字に含める(押す前に確かめられる)', () => {
@@ -384,5 +406,34 @@ describe('右クリックの説明(#587 C-1)', () => {
 
   it('⚠ 知らない綴りには空を返す(呼び側が例外で落ちない)', () => {
     expect(entryActionHint('no-such-action', { archetype: null, linkedFile: null })).toBe('');
+  });
+});
+
+/**
+ * 🔴 **小窓の字と並び**(#690 I1 / I2、2026-09-04)。
+ *
+ * ⚠ I1: ボタンだけ「別の窓で開く」で、お知らせ・マニュアル・止めたときの字は全部
+ *   「ウィンドウ」だった ── 同じ物に 2 つの呼び名を作らない。
+ * ⚠ I2: #685 の 2 稿目は「別の窓で開く」を 2 番目に入れたので、clipboard へ写す 2 つ
+ *   (参照をコピー / 素の Markdown)の**間に割り込んでいた**。写す 2 つを隣に戻し、
+ *   小窓はその次。⚠ 情報ペインの並びは `tests/adapter/inspector-titles.test.ts` が pin する。
+ */
+describe('小窓の字と並び(#690 I1 / I2)', () => {
+  it('🔴 字は「別のウィンドウで開く」(右クリックと本文のメニューの両方)', () => {
+    const labels = [...ENTRY_MENU_ACTIONS, ...BODY_MENU_ACTIONS]
+      .filter((a) => a.action === 'open-note-window')
+      .map((a) => a.label);
+    expect(labels, '2 つのメニューの両方に出ていない').toHaveLength(2);
+    expect(new Set(labels), '2 つのメニューで字が違う').toEqual(new Set(['別のウィンドウで開く']));
+    // ⚠ 「窓」の字に戻していない(お知らせ・マニュアルは「ウィンドウ」)
+    for (const l of labels) expect(l, '「別の窓で開く」に戻っている').not.toBe('別の窓で開く');
+  });
+
+  it('🔴 右クリックの並びは 参照をコピー / 素の Markdown / 別のウィンドウで開く', () => {
+    expect(ENTRY_MENU_ACTIONS.slice(0, 3).map((a) => a.action)).toEqual([
+      'copy-entry-ref',
+      'copy-plain-markdown',
+      'open-note-window',
+    ]);
   });
 });

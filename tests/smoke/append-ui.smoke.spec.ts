@@ -146,3 +146,78 @@ test('⚠ 見出しが無いノートでは、リストの行ごと畳む (#496)
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **こちらが開いた追記欄は、送ったら元どおり畳む ── user の畳みの記録には書かない**
+ * (#655 ①。user 裁定 2026-09-04 案 B)。
+ *
+ * ⚠ unit(`append-peek.test.ts`)は属性と localStorage を見る。ここで見るのは
+ *   **欄が実際に見えなくなる / 見えるようになること**(`[data-pkc-hidden-panes~='append']`
+ *   の `display: none` が実ブラウザで効くか)と、実ブラウザの localStorage に
+ *   畳んだ記録がそのまま残ること。
+ */
+test('🔴 畳んだ追記欄を Alt+クリックで開いて送ると、元どおり畳まれる (#655 ①)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await makeNote(page, SHORT);
+
+  const input = page.locator('[data-pkc-field="append-input"]');
+  await clickReal(page, '[data-pkc-action="toggle-pane"][data-pkc-pane="append"]');
+  await expect(input, '前提: 帯で畳めていない').toBeHidden();
+  const folded = await page.evaluate(() => localStorage.getItem('pkc3.panes'));
+  expect(folded, '前提: 畳みが記録に無い').toContain('append');
+
+  await page.locator('[data-pkc-field="detail-body"] p').first().click({ modifiers: ['Alt'] });
+  await expect(input, 'Alt+クリックで開いていない').toBeVisible();
+  await input.fill('足した 1 行');
+  await clickReal(page, '[data-pkc-action="append-entry"]');
+  await expect(page.locator('[data-pkc-field="detail-body"]')).toContainText('足した 1 行');
+
+  // 🔴 送ったら畳み直す ── そして user の記録は 1 byte も変わっていない
+  await expect(input, '送ったのに畳み直していない').toBeHidden();
+  expect(
+    await page.evaluate(() => localStorage.getItem('pkc3.panes')),
+    '開いた / 畳み直したときに記録を書き換えた',
+  ).toBe(folded);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **畳んでいても、編集中の出口(保存して解放 / 編集を破棄)は消えない**(#655 ④)。
+ *
+ * ⚠ unit は CSS を構文で読むだけ(`pane-visibility.test.ts`)。`:has()` が実ブラウザで
+ *   効いて、**畳んだ器の中の出口が本当に見える / 打つ欄は出ない**のはここでしか見えない。
+ */
+test('🔴 追記欄を畳んでいても、編集中は「保存して解放 / 編集を破棄」だけが見える (#655 ④)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await makeNote(page, SHORT);
+
+  const input = page.locator('[data-pkc-field="append-input"]');
+  const region = page.locator('[data-pkc-region="append"]');
+  await clickReal(page, '[data-pkc-action="toggle-pane"][data-pkc-pane="append"]');
+  await expect(region, '前提: 帯で畳めていない').toBeHidden();
+
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await expect(page.locator('[data-pkc-region="editor-live"]')).toBeVisible();
+  // 🔴 畳んでいても出口は見える ── 打つ欄は出ない
+  const exit = region.locator('[data-pkc-action="commit-edit"]');
+  await expect(exit, '畳んだせいで「保存して解放」が消えた').toBeVisible();
+  await expect(region.locator('[data-pkc-action="cancel-edit"]'), '「編集を破棄」が消えた').toBeVisible();
+  await expect(input, '編集中に打つ欄まで出た').toBeHidden();
+
+  // 🔑 その出口で編集を終えられる ── 終えたら畳んだ状態に戻る(器ごと消える)
+  await clickReal(page, '[data-pkc-region="append"] [data-pkc-action="commit-edit"]');
+  await expect(page.locator('[data-pkc-region="editor-live"]')).toBeHidden();
+  await expect(region, '編集を終えたのに畳みに戻らない').toBeHidden();
+  expect(await page.evaluate(() => localStorage.getItem('pkc3.panes')), '記録が動いた').toContain(
+    'append',
+  );
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

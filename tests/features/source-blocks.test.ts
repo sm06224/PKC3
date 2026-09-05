@@ -14,9 +14,11 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  blockSpanAt,
   containerAtLine,
   findOpenEnds,
   scanContainers,
+  sliceLines,
 } from '@features/markdown/source-blocks';
 
 const at = (text: string, line: number) => containerAtLine(scanContainers(text), line);
@@ -143,5 +145,83 @@ describe('開放終端(S5b の材料)', () => {
 
   it('複数行の中で、開いている行だけを出す', () => {
     expect(kinds('閉じた**太字**\nこれは`打ちかけ\n普通の行\n')).toEqual(['inline:コード@1']);
+  });
+});
+
+/**
+ * 🔴 **開き行から `:::` の塊の範囲を引く**(#677。右クリック「この塊をコピー」の材料)。
+ * ⚠ `scanContainers` は最上位しか返さない ── 入れ子の内側を頼まれたときに
+ *   **外側を返してしまう**変異(降りない)を、入れ子の fixture で殺す。
+ */
+describe('`:::` の塊の範囲(blockSpanAt) #677', () => {
+  const NESTED = [
+    '前', // 0
+    ':::note', // 1
+    '囲みの中', // 2
+    ':::section', // 3
+    '入れ子の中', // 4
+    ':::', // 5
+    ':::', // 6
+    '後', // 7
+  ].join('\n');
+
+  it('最上位の開き行 → 開きから閉じまで', () => {
+    expect(blockSpanAt(NESTED, 1)).toEqual({ start: 1, end: 6, open: false });
+  });
+
+  it('🔴 入れ子の内側の開き行 → **内側**の範囲(外側を返さない)', () => {
+    expect(blockSpanAt(NESTED, 3)).toEqual({ start: 3, end: 5, open: false });
+  });
+
+  it('`:::` の開きでない行は null(段落 / 閉じ / 範囲外)', () => {
+    expect(blockSpanAt(NESTED, 0)).toBeNull();
+    expect(blockSpanAt(NESTED, 2)).toBeNull();
+    expect(blockSpanAt(NESTED, 4)).toBeNull();
+    expect(blockSpanAt(NESTED, 6), '閉じの行を開きと読んだ').toBeNull();
+    expect(blockSpanAt(NESTED, 99)).toBeNull();
+    expect(blockSpanAt(NESTED, -1)).toBeNull();
+  });
+
+  it('🔴 fence の中の `:::` は塊ではない(コードの字である)', () => {
+    const t = '```md\n:::note\n中\n:::\n```\n';
+    expect(blockSpanAt(t, 1), 'fence の中の ::: を塊と読んだ').toBeNull();
+    // ⚠ 対照群 ── fence の**外**の同じ字面は塊
+    const u = '```md\nコード\n```\n:::note\n中\n:::\n';
+    expect(blockSpanAt(u, 3)).toEqual({ start: 3, end: 5, open: false });
+  });
+
+  it('🔴 `:::` の中の fence の開き行は塊ではない(降りる途中で fence を見る)', () => {
+    const t = ':::note\n```\nコード\n```\n:::\n';
+    expect(blockSpanAt(t, 1), '囲みの中の fence の開きを塊と読んだ').toBeNull();
+    expect(blockSpanAt(t, 0)).toEqual({ start: 0, end: 4, open: false });
+    /**
+     * ⚠ **守っていない形**(2026-09-04 に実測): 囲みの中の fence の**中**に `:::section` の
+     *   字が在ると、`scanContainers` の深さ数え(directive 分岐の内側ループ)が fence を
+     *   追跡していないので外側が `open: true` になる ── renderer は正しく閉じるので、
+     *   走査器と描画の食い違いである。ここでは pin しない(別の主題)。
+     */
+  });
+
+  it('閉じていなければ open:true(範囲は末尾まで)── 呼び側が断る材料', () => {
+    const t = '前\n:::note\nまだ書いている\n';
+    expect(blockSpanAt(t, 1)).toEqual({ start: 1, end: 3, open: true });
+  });
+
+  it('`:::toc` は自分の行(と直後の閉じ)だけ', () => {
+    expect(blockSpanAt(':::toc\n:::\n本文', 0)).toEqual({ start: 0, end: 1, open: false });
+  });
+
+  it('板(`:::format{.pkc-place …}`)も同じ規則で引ける', () => {
+    const t = '## 見出し\n\n:::format{.pkc-place x=40 y=40}\n### 買い出し\n- 牛乳\n:::\n';
+    expect(blockSpanAt(t, 2)).toEqual({ start: 2, end: 5, open: false });
+  });
+});
+
+describe('行範囲の切り出し(sliceLines) #677', () => {
+  it('両端含む行を、原文のまま繋ぐ(末尾の改行は付けない)', () => {
+    expect(sliceLines('a\nb\nc\nd', { start: 1, end: 2 })).toBe('b\nc');
+    expect(sliceLines('a\nb\nc\nd', { start: 0, end: 3 })).toBe('a\nb\nc\nd');
+    // 空行も 1 行として数える(落とすと貼った先で段落が繋がる)
+    expect(sliceLines('a\n\nb', { start: 0, end: 2 })).toBe('a\n\nb');
   });
 });

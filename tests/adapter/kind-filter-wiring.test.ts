@@ -85,6 +85,32 @@ describe('reducer', () => {
     s = reduce(s, { type: 'CREATE_ENTRY', archetype: 'text', lid: 'n', title: '新しい' }).state;
     expect(s.kindFilter.size, '作ったのに絞りが残っている ── 作った物が出ない').toBe(0);
   });
+
+  /**
+   * 🔴 **添付の作成だけは絞りを外さない**(#668 D)。
+   *
+   * 上の it の理由(作った物が絞りに弾かれて一生出ない → Esc で消える)は添付には
+   * 当たらない ── 添付は開いていたノートの本文に入り(#666)、編集にも入らない。
+   * ⚠ 逆に外すと「探す」の字と種類の札が、写真を 1 枚足しただけで黙って消える。
+   * 🔑 上の it が**対照群**である(普通のノートでは外れる)── 判定を archetype で
+   *   分けていることを、両側で見る。
+   */
+  it('🔴 添付を作っても「探す」の字と種類の札は残る(#668 D)', () => {
+    let s: AppState = { ...boot(SET), filterQuery: 'りんご' };
+    s = reduce(s, { type: 'TOGGLE_KIND_FILTER', archetype: 'text' }).state;
+    expect(s.kindFilter.size, '前提: 絞っている').toBe(1);
+    s = reduce(s, {
+      type: 'CREATE_ENTRY',
+      archetype: 'attachment',
+      lid: 'att',
+      title: '猫.png',
+      body: '---\nattachment.name: 猫.png\n---\n',
+      edit: false,
+    }).state;
+    expect(s.entryMetas.has('att'), '前提: 添付が作られていない').toBe(true);
+    expect([...s.kindFilter], '添付を作ったら種類の札が消えた').toEqual(['text']);
+    expect(s.filterQuery, '添付を作ったら「探す」の字が消えた').toBe('りんご');
+  });
 });
 
 /**

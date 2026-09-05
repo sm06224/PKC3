@@ -144,6 +144,13 @@ function selfContainerId(state: AppState): string {
  */
 export const PAINTED_ATTR = 'data-pkc-painted';
 
+/**
+ * 読んでいた場所を憶えておくノートの数(#690 ①)。
+ * ⚠ この窓の runtime だけの器なので、上限が無いと開いたノートの数だけ伸びる
+ *   (常駐メモリの主張が変わる)。古いものから忘れる。
+ */
+const READ_POSITION_CAP = 200;
+
 export class DetailRenderer {
   private readonly region: HTMLElement;
   private readonly assets: AssetLender | null;
@@ -264,6 +271,17 @@ export class DetailRenderer {
    * **戻ってきたら元の位置へ戻す** ── 保存しただけで先頭へ飛ぶのも同じ no-op。
    */
   private parkedScroll: { lid: string; top: number; left: number } | null = null;
+  /**
+   * **ノートごと**に読んでいた場所(#690 ①。user 裁定 2026-09-04、案 A)。
+   *
+   * 直す前は `parkedScroll`(編集へ入る直前)しか無く、A を中ほどまで読んで B を
+   * 選び、A へ戻ると**必ず先頭**だった。🔑 離れる瞬間に憶え、戻ったときに出す ──
+   * 付箋(別窓)に限らず、**すべてのノート切替**で効く。
+   * ⚠ 観測点は `parkedScroll` と**同じ**(`scroller.scrollTop` / `bodyHost.scrollLeft`)
+   *   ── 2 か所で別の要素を読むと、片方だけ効かない形になる。
+   * ⚠ Map は挿入順なので、書き直すときは**消してから入れる**(古い順を保つ)。
+   */
+  private readonly readPositions = new Map<string, { top: number; left: number }>();
   /**
    * 骨組みを組み直した直後に戻したい位置。
    * ⚠ **本文を入れてから**戻す ── 空の器に `scrollTop` を代入しても
@@ -503,6 +521,8 @@ export class DetailRenderer {
 
     const lid = this.pinnedLid ?? state.selectedLid;
     if (!lid) {
+      // ⚠ 何も選ばない状態を挟んでも、戻ったときに読んでいた場所へ出す(#690 ①)
+      if (this.skeletonLid !== null) this.rememberReadPosition(this.skeletonLid);
       this.disposeLends();
       this.region.textContent = '';
       this.dropSkeleton();
@@ -529,6 +549,11 @@ export class DetailRenderer {
     // 🔴 骨組みは**同じノートを見ている間は作り直さない**(scroll を殺さない)
     const fresh = this.skeletonLid !== lid || !this.bodyHost?.isConnected;
     if (fresh) {
+      // 🔴 **別のノートへ移る直前に、いまの場所を憶える**(#690 ①)。
+      //    ⚠ 器を空にする**前**に読む ── 後だと中身が無く 0 に丸められた値を憶える
+      //    (`scroll-memory.ts` の「順番が本体」と同じ罠)
+      if (this.skeletonLid !== null && this.skeletonLid !== lid)
+        this.rememberReadPosition(this.skeletonLid);
       this.disposeLends(); // 前の表示が借りた URL はここで寿命終端
       this.region.textContent = '';
       this.dropBarState(); // ⚠ slot ごと作り直すので、いま出している形も忘れる
@@ -554,12 +579,16 @@ export class DetailRenderer {
       this.skeletonLid = lid;
       this.bodyKind = null;
       this.bodyView = EMPTY_VIEW;
-      // ⚠ 別のノートへ移ったときだけ先頭から(そこは飛んで正しい)。
-      //    編集から戻ったときは**元の位置へ**。実際に戻すのは本文を入れた後
+      // ⚠ 編集から戻ったときは**元の位置へ**。それ以外は**そのノートで読んでいた
+      //    場所**(#690 ①)── 初めて開くノートだけ先頭から。実際に戻すのは本文を
+      //    入れた後。⚠ 憶えた物は写して渡す(器の値を後から書き換えない)
+      const remembered = this.readPositions.get(lid);
       this.pendingScroll =
         this.parkedScroll?.lid === lid
           ? { top: this.parkedScroll.top, left: this.parkedScroll.left }
-          : { top: 0, left: 0 };
+          : remembered !== undefined
+            ? { top: remembered.top, left: remembered.left }
+            : { top: 0, left: 0 };
       this.parkedScroll = null;
     }
     this.titleEl!.textContent = state.entryMetas.get(lid)?.title ?? '';
@@ -811,6 +840,28 @@ export class DetailRenderer {
     );
   }
 
+  /**
+   * いまの送り位置を **lid ごとの器**へ憶える(#690 ①)。読んだ値を返す。
+   * ⚠ 呼ぶのは**器を空にする前**(中身が無いと 0 に丸められる)。
+   * ⚠ NaN や負は書かない ── 戻すときに `scrollTop` へそのまま代入するので、
+   *   ここで 0 に落としておく(本文が短くなった分の clamp はブラウザに任せる)。
+   */
+  private rememberReadPosition(lid: string): { top: number; left: number } {
+    const sane = (v: number): number => (Number.isFinite(v) && v > 0 ? v : 0);
+    const pos = {
+      top: sane(this.scroller.scrollTop),
+      // 🔴 段組みでは送りが横(#505)── `parkedScroll` と同じく両方持つ
+      left: sane(this.bodyHost?.scrollLeft ?? 0),
+    };
+    this.readPositions.delete(lid); // 挿入順を「最後に触った順」に保つ
+    this.readPositions.set(lid, pos);
+    if (this.readPositions.size > READ_POSITION_CAP) {
+      const oldest = this.readPositions.keys().next().value;
+      if (oldest !== undefined) this.readPositions.delete(oldest);
+    }
+    return pos;
+  }
+
   /** 骨組みを組み直したときの位置戻し。⚠ **本文が入ってから**呼ぶ。 */
   private restoreScroll(): void {
     if (this.pendingScroll === null) return;
@@ -1052,13 +1103,14 @@ export class DetailRenderer {
     this.lastSelected = open.lid;
     this.lastBody = null;
 
-    // ⚠ 編集へ入る前の位置を覚える ── 保存して戻ったときに先頭へ飛ばさない
+    // ⚠ 編集へ入る前の位置を覚える ── 保存して戻ったときに先頭へ飛ばさない。
+    //    🔴 段組みでは送りが横 ── `left` を落とすと、編集から戻ると先頭へ飛ぶ(#505)。
+    //    同じ値を lid ごとの器にも入れる(#690 ①)── 編集に入ったまま別のノートへ
+    //    移る窓(`parkedScroll` が捨てられる)でも、次に戻ったときに出せる
     if (this.skeletonLid !== null)
       this.parkedScroll = {
         lid: this.skeletonLid,
-        top: this.scroller.scrollTop,
-        // 🔴 段組みでは送りが横 ── ここを落とすと、編集から戻ると先頭へ飛ぶ(#505)
-        left: this.bodyHost?.scrollLeft ?? 0,
+        ...this.rememberReadPosition(this.skeletonLid),
       };
     this.disposeLends();
     this.region.textContent = '';

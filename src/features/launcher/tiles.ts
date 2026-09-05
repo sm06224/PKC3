@@ -36,9 +36,12 @@ export interface LauncherTile {
   icon?: string;
   /**
    * 起動の仕方。⚠ `url` は外部サイト、`app` は同梱 HTML、
-   * `office` / `dual` / `manual` は**組み込み**(entry を持たない ── #148 / #241 / #645)。
+   * `office` / `dual` / `schedule` / `contacts` / `manual` は**組み込み**(entry を
+   * 持たない ── #148 / #241 / #673 / #278 / #645)。
+   * 🔑 **`ViewMode` と同じ綴りの種別は、PKC をもう 1 枚別窓で開く**
+   *   (`launch-tile.ts` が `isViewMode(kind)` で見分ける ── 名指しの `if` を並べない)。
    */
-  kind: 'app' | 'url' | 'office' | 'dual' | 'manual';
+  kind: 'app' | 'url' | 'office' | 'dual' | 'schedule' | 'contacts' | 'manual';
   /** `kind === 'url'` のときの飛び先。 */
   url?: string;
   /** `kind === 'app'` のときの実体(IDB Blob の鍵)。 */
@@ -179,6 +182,34 @@ export function dualTile(): LauncherTile {
 }
 
 /**
+ * 🔴 **予定表の組み込みタイル**(#673 段②。user 裁定 2026-09-04
+ * 「**予定表も連絡先も別窓、アプリの基本は別窓**」)。
+ *
+ * ⚠ #292 段⑤ で「カレンダー / やることの板はアプリではない」としてタイルから
+ *   外したが、user の裁定で**別窓の口を戻す**。⚠ **左の列の「予定」タブは残る** ──
+ *   これは引っ越しの取り消しではなく、同じ面に**2 つ目の入口**を付けるものである
+ *   (本文を退かさずに開く道と、別窓で広く使う道の両方を持つ)。
+ * 🔑 `kind` は `ViewMode` の綴り(`schedule`)と同じにする ── `launch-tile.ts` が
+ *   それを見て別窓へ渡す。
+ */
+export const SCHEDULE_TILE_LID = 'builtin:schedule';
+
+export function scheduleTile(): LauncherTile {
+  return { lid: SCHEDULE_TILE_LID, title: '予定表', group: '', kind: 'schedule' };
+}
+
+/**
+ * 🔴 **連絡先の組み込みタイル**(#278 段③。user 裁定 2026-09-04
+ * 「予定表も連絡先も別窓」)── 予定表と同じ形。左の列の「連絡先」タブは残し、
+ * 同じ面を別窓で開く 2 つ目の入口である。
+ */
+export const CONTACTS_TILE_LID = 'builtin:contacts';
+
+export function contactsTile(): LauncherTile {
+  return { lid: CONTACTS_TILE_LID, title: '連絡先', group: '', kind: 'contacts' };
+}
+
+/**
  * 🔴 **マニュアルの組み込みタイル**(#645。user 要望 2026-08-31
  * 「**ヘルプの中からマニュアルをアプリとして出してください**」)。
  *
@@ -233,7 +264,15 @@ export function withBuiltinTiles(
    * ⚠ **マニュアルは最後に置く**(#645)── 2 ペインと Office は「作業する所」で、
    *   マニュアルは「読む所」である。作業の口の位置を、読み物で動かさない。
    */
-  const builtin: LauncherTile[] = [dualTile()];
+  /**
+   * 🔴 **予定表は 2 ペインの次**(#673 段②。user 裁定 2026-09-04)。
+   * ⚠ 上の「外した」は**左の列へ移した経緯**として残す ── 戻したのは
+   *   **別窓の入口**であって、左のタブを消したのではない(`scheduleTile` の注記)。
+   * ⚠ アプリに最初から在るものを**先に**、端末次第の Office を**その後に**並べる
+   *   ── Office の有無で予定表の位置が動かない向き。
+   */
+  // ⚠ 連絡先(#278 段③)は予定表の次 ── 同じく「アプリに最初から在る」側
+  const builtin: LauncherTile[] = [dualTile(), scheduleTile(), contactsTile()];
   if (opts.office) builtin.push(officeTile());
   builtin.push(manualTile());
   return [...builtin, ...tiles];
@@ -256,5 +295,7 @@ export function tileSelectsEntry(tile: LauncherTile): boolean {
 export const BUILTIN_KINDS: ReadonlySet<LauncherTile['kind']> = new Set([
   'office',
   'dual',
+  'schedule',
+  'contacts',
   'manual',
 ]);

@@ -102,6 +102,66 @@ describe('保存', () => {
     expect(() => s.toggle('sidebar')).not.toThrow();
     expect(s.getHidden(), 'この session でも効いていない').toEqual(['sidebar']);
   });
+
+  /**
+   * 🔴 **一時的に見せる(`peek`)は、記録に 1 byte も書かない**(#655 ①。
+   * user 裁定 2026-09-04 案 B)。⚠ 直す前の「ここに追記する」は `setHidden` で開いて
+   * いたので、user が自分で畳んだ設定を**こちらが黙って上書きして永続**していた。
+   */
+  describe('一時的に見せる(#655 ①)', () => {
+    it('🔴 peek は記録を変えず、getHidden からだけ外れる ── unpeek で戻る', () => {
+      const st = fakeStorage();
+      const s = new PaneVisibilityStore(st);
+      s.setHidden(['append']);
+      const before = st.map.get('pkc3.panes');
+      expect(s.peek('append'), '畳んであるのに見せられなかった').toBe(true);
+      expect(s.getHidden(), '見せているのに畳まれていると答えた').toEqual([]);
+      expect(s.isPeeking()).toBe(true);
+      expect(st.map.get('pkc3.panes'), '記録に書いた').toBe(before);
+      expect(s.unpeek(), '畳み直した一覧を返していない').toEqual(['append']);
+      expect(s.getHidden()).toEqual(['append']);
+      expect(s.isPeeking()).toBe(false);
+      // ⚠ 何も見せていないときの unpeek は null(画面に触る理由が無い)
+      expect(s.unpeek()).toBeNull();
+    });
+
+    it('⚠ 畳んでいない物 / もう見せている物は peek できない(対照群)', () => {
+      const s = new PaneVisibilityStore(fakeStorage());
+      expect(s.peek('append'), '畳んでいないのに「見せた」と言った').toBe(false);
+      s.setHidden(['append']);
+      expect(s.peek('append')).toBe(true);
+      expect(s.peek('append'), '2 度目も「新しく見せた」と言った').toBe(false);
+    });
+
+    /**
+     * 🔴 **見せている間に別のペインを畳んでも、記録の畳みは残る**。
+     * ⚠ 呼び側は `getHidden()`(見せている物を外した形)から一覧を組むので、
+     *   ここで守らないと **左を 1 回畳んだだけで追記欄の畳みが記録から消える**。
+     */
+    it('🔴 peek 中に別のペインを畳んでも、記録では見せている物が畳まれたまま', () => {
+      const st = fakeStorage();
+      const s = new PaneVisibilityStore(st);
+      s.setHidden(['append']);
+      s.peek('append');
+      const shown = s.toggle('inspector');
+      expect(shown, '画面用の一覧に見せている物が混ざった').toEqual(['inspector']);
+      expect(decodeHidden(st.map.get('pkc3.panes') ?? null), '記録から追記欄の畳みが消えた').toEqual([
+        'inspector',
+        'append',
+      ]);
+      expect(s.isPeeking(), '別のペインの操作で一時表示が終わった').toBe(true);
+    });
+
+    it('🔴 見せている物を畳む頼みが来たら、一時表示は終わる(帯を押した = 畳みたい)', () => {
+      const st = fakeStorage();
+      const s = new PaneVisibilityStore(st);
+      s.setHidden(['append']);
+      s.peek('append');
+      expect(s.toggle('append'), '帯を押したのに畳まれていない').toEqual(['append']);
+      expect(s.isPeeking()).toBe(false);
+      expect(decodeHidden(st.map.get('pkc3.panes') ?? null)).toEqual(['append']);
+    });
+  });
 });
 
 describe('画面への適用', () => {
@@ -322,6 +382,36 @@ describe('CSS(畳んだ列が本当に消えるか)', () => {
     );
     expect(hit.length, '左を畳む規則が無い').toBeGreaterThan(0);
     expect(hit.join(' ')).toContain('display: none');
+  });
+
+  /**
+   * 🔴 **畳んでいても、編集中の出口(保存して解放 / 編集を破棄)は消えない**(#655 ④)。
+   *
+   * ⚠ マニュアル §5 は「編集中の出口は追記欄の場所にも出ます」と約束しているが、
+   *   畳む規則は器ごと `display: none` にするので、畳んだ人にはその出口が 1 度も
+   *   出なかった。🔑 器を出す条件は**理由と出口の帯が出ていること**
+   *   (`append-lock` が `hidden` でない)── 編集中と書込中がこれに当たる。
+   * ⚠ 見るのは 2 つ:①その規則が在って `display: block` を宣言している
+   *   ②畳む規則(`display: none`)も残っている(出口の規則だけ残して畳めなく
+   *   なった、を作らない)。
+   */
+  it('🔴 畳んでいても、編集中の出口の帯が出ているときは器を出す (#655 ④)', () => {
+    const fold = rulesFor(
+      "[data-pkc-region='shell'][data-pkc-hidden-panes~='append'] [data-pkc-region='append']",
+    );
+    expect(fold.length, '追記欄を畳む規則が無い').toBeGreaterThan(0);
+    expect(/(^|;)\s*display:\s*none/.test(fold.join(' ')), '畳む規則が display:none でない').toBe(
+      true,
+    );
+    const exit = rulesFor(
+      "[data-pkc-region='shell'][data-pkc-hidden-panes~='append']:has([data-pkc-field='append-lock']:not([hidden])) [data-pkc-region='append']",
+    );
+    expect(exit.length, '編集中の出口を出す規則が無い').toBeGreaterThan(0);
+    // ⚠ 宣言の形で見る(`display-x: block` のような別名に `toContain` は通る)
+    expect(
+      /(^|;)\s*display:\s*block/.test(exit.join(' ')),
+      '出口の規則が display:block を宣言していない',
+    ).toBe(true);
   });
 
   it('🔴 畳んだぶん grid の列も減る(空の 1 列が残らない)', () => {

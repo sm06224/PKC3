@@ -41,6 +41,7 @@ import { PASTE_SOURCES } from '@features/markdown/paste-source';
 import { appPasteSource, PasteSourceStore } from './paste-source';
 import { appJobMonitor, type JobMonitor } from '@adapter/platform/job-monitor';
 import { appNoticeStore, type NoticeStore } from '@adapter/platform/notice-store';
+import { appTooNarrowOk, TooNarrowOkStore } from './too-narrow';
 import { ScrollMemory } from './scroll-memory';
 import { buildOfficePackPanel, type OfficePackPanel } from './office-pack-panel';
 import { buildSettingsCommands } from './commands';
@@ -103,6 +104,11 @@ export class SettingsRenderer {
      *   **同じ型どうしなら黙って通る**)。
      */
     private readonly alarmEnabled: AlarmEnabledStore = appAlarmEnabled,
+    /**
+     * 🔴 **狭い画面の断り書きを出すか**(#687 E-1)。帯の OK で切れた user の
+     * **唯一の戻し道**である。⚠ **末尾に足す**(すぐ上の戒めのとおり)。
+     */
+    private readonly tooNarrowOk: TooNarrowOkStore = appTooNarrowOk,
   ) {}
 
   private sameOriginList: HTMLElement | null = null;
@@ -124,6 +130,7 @@ export class SettingsRenderer {
       this.syncExtensions(state);
       this.syncPersist(state);
       this.syncNotices();
+      this.syncTooNarrow();
       // 🔴 **隠れている間に来た変化をここで拾う**(2026-08-05、user 報告)。
       //    `refresh()` は面が hidden の間は捨てるので(下の説明)、再表示のときに
       //    誰かが呼び直さないと**表とログは初回ビルドの姿で凍る**。仕事は必ず
@@ -489,6 +496,31 @@ export class SettingsRenderer {
     dl.append(nt, nd);
 
     /**
+     * 🔴 **狭い画面の断り書き**(#687 E-1、user 裁定 2026-09-04)。
+     *
+     * 🔑 **ここが帯の「OK」の戻し道である。** OK は端末に憶えるので、帯にしか
+     *   導線が無いと一度押した user は二度と戻せない(お知らせと同じ形)。
+     * ⚠ **flag ではない**(正規設定)。開放先は user で、畳む予定も無い。
+     */
+    const wt = document.createElement('dt');
+    wt.textContent = '狭い画面の断り書き';
+    const wd = document.createElement('dd');
+    const wlabel = document.createElement('label');
+    const wcheck = document.createElement('input');
+    wcheck.type = 'checkbox';
+    wcheck.setAttribute('data-pkc-action', 'set-too-narrow-enabled');
+    wcheck.setAttribute('data-pkc-field', 'too-narrow-enabled');
+    wlabel.append(wcheck, document.createTextNode(' 狭い画面のときに断り書きを出す'));
+    wd.append(wlabel);
+    const wnote = document.createElement('p');
+    wnote.setAttribute('data-pkc-field', 'settings-note');
+    wnote.textContent =
+      '幅が 360px より狭いと、画面の下に「表示が崩れることがあります」と出ます。' +
+      'その「OK」を押すと切れ、次に開いても出ません ── ここで戻せます。';
+    wd.append(wnote);
+    dl.append(wt, wd);
+
+    /**
      * 🔴 **版はヘルプへ移した**(P11)。
      *
      * P10 では上下の帯の撤去先としてここに置いたが、設定は「**あなたが選ぶもの**」の
@@ -535,6 +567,7 @@ export class SettingsRenderer {
     this.syncExternalImages();
     this.syncPasteSource();
     this.syncNotices();
+    this.syncTooNarrow();
     this.refresh();
     void state;
   }
@@ -961,6 +994,15 @@ export class SettingsRenderer {
   private syncNotices(): void {
     const box = this.region.querySelector<HTMLInputElement>('[data-pkc-field="notices-enabled"]');
     if (box) box.checked = this.notices.enabled();
+  }
+
+  /**
+   * ⚠ 帯の「OK」は**この画面を開かずに**設定を切る(#687 E-1)── 映さないと、
+   * 次に設定を開いたとき「出す」のまま見える(CLAUDE.md「設定画面の値の同期」)。
+   */
+  private syncTooNarrow(): void {
+    const box = this.region.querySelector<HTMLInputElement>('[data-pkc-field="too-narrow-enabled"]');
+    if (box) box.checked = this.tooNarrowOk.enabled();
   }
 
   /**

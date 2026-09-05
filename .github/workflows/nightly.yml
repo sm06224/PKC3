@@ -111,7 +111,8 @@ jobs:
         if: ${{ !cancelled() && steps.setup_ok.outputs.ok == '1' }}
         run: |
           VITE_PKC_KIND=product npm run build
-          node scripts/check-dist.mjs product
+          # 🔴 焼きたてなので manual.html の実在も要求する(#648 💭)
+          node scripts/check-dist.mjs product --require-manual
           npm run test:smoke
       # Rust core: **出荷 .wasm を source から再ビルドして一致を見る**
       # (PR gate では cargo を走らせない ── 再ビルド漏れをここで捕まえる。

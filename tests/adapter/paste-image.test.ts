@@ -360,12 +360,17 @@ describe('スクショの貼付(#250)', () => {
  * 🔴 **fake ではなく本物の `attachFiles` を通す**(2026-08-18、着地前レビュー)。
  *
  * ⚠ 上の test 群の `attachFiles` は「呼ばれたか」しか見ない fake で、**本物より
- * 寛容**である ── 本物は `phase !== 'ready'` を**断る**(`attach.ts`)。
+ * 寛容**である ── 本物は `phase !== 'ready'` を**その場では取り込まない**(`attach.ts`)。
  * そのせいで「編集中に画像以外を落としたら添付になる」という**成り立たない主張**を
  * マニュアルに書いていた(CLAUDE.md §3「stub は本物の意味論を真似る」)。
+ *
+ * ⚠ 2026-09-04(#668 B)で本物の側が「断る」から「**預かる**」へ変わった ── この it も
+ *   それに合わせて書き換えた。守る物は同じ 2 つ:①編集中に bytes を置かない
+ *   ②黙らない(直す前は断りの字、いまは預かった旨)。⚠ 全量の unit を回して初めて
+ *   落ちた(B のとき触った test の一覧に、この file が無かった)。
  */
-describe('本物の添付を通したときの断り(#250)', () => {
-  it('🔴 編集中に画像以外を落とすと、**断りが出て何も置かれない**', async () => {
+describe('本物の添付を通したときの預かり(#250 → #668 B)', () => {
+  it('🔴 編集中に画像以外を落とすと、**預かって何も置かれない**(断らない)', async () => {
     document.body.textContent = '';
     const root = document.createElement('div');
     root.innerHTML =
@@ -393,9 +398,18 @@ describe('本物の添付を通したときの断り(#250)', () => {
     const pdf = new File([new Uint8Array([1])], 'a.pdf', { type: 'application/pdf' });
     ta.dispatchEvent(dragEvent('drop', [pdf]));
     await vi.waitFor(() =>
-      expect(dispatcher.getState().error, '断りが出ていない').toContain('編集を終了してから'),
+      expect(dispatcher.getState().notice, '預かった旨が出ていない').toContain('「a.pdf」を預かりました'),
     );
-    // 🔑 **bytes も置かれていない**(断ったのに書いていたら、参照の無い残骸になる)
-    expect(stored, '断ったのに bytes を書いた').toEqual([]);
+    // ⚠ 断っていない(直す前は「編集を終了してから添付してください」だった)
+    expect(dispatcher.getState().error, '断っている(直す前の症状)').toBeNull();
+    // ⚠ **1 拍待ってから見る** ── 預からずにその場で走らせる変異は、知らせを出した**後**に
+    //    非同期で bytes を書く(hash → put の順)。待たないと空のまま通る(変異試験 W1 が教えた)
+    await new Promise((r) => setTimeout(r, 30));
+    // 🔑 **bytes も置かれていない**(預かっている間に書いていたら、参照の無い残骸になる)
+    expect(stored, '預かっているのに bytes を書いた').toEqual([]);
+    // ⚠ その場で走らせると、`CREATE_ENTRY` が黙殺されるか、途中で落ちて**エラーの行**が出る
+    expect(dispatcher.getState().error, '預かるはずの回にエラーが出た').toBeNull();
+    expect(dispatcher.getState().entryMetas.size, '預かるはずの回に添付が作られた').toBe(1);
+    expect(dispatcher.getState().phase, '編集が壊れた').toBe('editing');
   });
 });

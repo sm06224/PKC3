@@ -44,6 +44,11 @@ export interface ShellRegions {
    *   器へ書くと、同じ器に置いた断り書きの押しボタンが消える。
    */
   statusText: HTMLElement;
+  /**
+   * 🔴 **知らせの隣の「開く」**(#668 A)。出し入れと身元は `status-open.ts` が書く。
+   * ⚠ 押した先は `select-entry` の受け手(`binder.ts`)── 実行の口を新しく作らない。
+   */
+  statusOpen: HTMLElement;
   /** 🔴 **狭すぎる端末への断り書き**(#671)。中身は `too-narrow.ts` が出し入れする。 */
   tooNarrow: HTMLElement;
   /** その断り書きの字を置く所。 */
@@ -767,6 +772,22 @@ export function buildShell(root: HTMLElement): ShellRegions {
   const statusText = document.createElement('span');
   statusText.setAttribute('data-pkc-field', 'status-text');
   /**
+   * 🔴 **知らせの隣の押し口「開く」**(#668 A)。
+   *
+   * 「添付にしました(…本文には入れていません)」の隣に置き、押すとその添付へ
+   * 切り替わる ── 直す前は、作られた添付へ行く道が**画面のどこにも無かった**
+   * (一覧は絞りで隠れていることがある)。
+   * ⚠ **常設で置いて、要るときだけ出す**(`status-open.ts` が `hidden` と
+   *   `data-pkc-entry` を書く)── 器を作り直さない理由は下の断り書きと同じ。
+   * 🔑 実行の口は新しく作らない ── `select-entry` の受け手がそのまま拾う(§7)。
+   */
+  const statusOpen = document.createElement('button');
+  statusOpen.type = 'button';
+  statusOpen.setAttribute('data-pkc-field', 'status-open');
+  statusOpen.setAttribute('data-pkc-action', 'select-entry');
+  statusOpen.textContent = '開く';
+  statusOpen.hidden = true;
+  /**
    * 🔴 **狭すぎる端末への断り書き**(user 裁定 2026-09-04、#671)。
    * ⚠ **器は 1 度だけ組む**(`too-narrow.ts` は `hidden` の付け外しだけ)──
    *   作り直すと、押そうとした OK が指の下から消える(収録の帯と同じ理由)。
@@ -785,7 +806,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   tooNarrowOk.type = 'button';
   tooNarrowOk.setAttribute('data-pkc-field', 'too-narrow-ok');
   tooNarrow.append(tooNarrowText, tooNarrowOk);
-  status.append(statusText, tooNarrow);
+  status.append(statusText, statusOpen, tooNarrow);
 
   /**
    * 🔴 **収録中の帯**(#413)── 経過 + 概算の大きさ + 止める / 捨てる。
@@ -897,6 +918,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
     inspector,
     status,
     statusText,
+    statusOpen,
     tooNarrow,
     tooNarrowText,
     tooNarrowOk,

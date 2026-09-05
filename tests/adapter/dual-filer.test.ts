@@ -11,7 +11,7 @@
  * 5. **面は 2 つの表に登録されている** ── 開いたら本文ではなくこの面が出る
  * 6. **編集中でも開ける**(場所を眺めるだけ。実際に移すのは断られる)
  */
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta, Relation } from '../../src/core/model/entry-meta';
 import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
 import { answerDialog, dialogMessage } from './dialog-helper';
@@ -21,9 +21,12 @@ import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { CenterRouter } from '../../src/adapter/ui/render/center';
 import { DualFilerRenderer } from '../../src/adapter/ui/render/dual-filer';
 import { KeymapStore } from '../../src/adapter/ui/render/keymap';
+import { findCommand } from '../../src/features/keymap';
 import { MAX_TABS, paneOf, paneScope } from '../../src/features/relation/dual-pane';
 import { DUAL_TILE_LID, withBuiltinTiles } from '../../src/features/launcher/tiles';
 import { launchTile } from '../../src/adapter/ui/launch-tile';
+import { appPhone } from '../../src/adapter/ui/render/phone-layout';
+import { PHONE_MIN_PX } from '../../src/features/phone-layout';
 
 function meta(lid: string, order: number, title = 't-' + lid, archetype = 'text'): EntryMeta {
   return {
@@ -291,7 +294,7 @@ describe('2 ペインの面(描画)', () => {
         b.querySelector('[data-pkc-field="cmd-label"]')?.textContent,
       ]),
     ).toEqual([
-      ['dual-copy', 'F5', '写す'],
+      ['dual-copy', 'F5', 'コピー'],
       ['dual-move', 'F6', '移す'],
       ['dual-rename-begin', 'F2', '名前'],
       ['dual-mkdir', 'F7', 'フォルダ'],
@@ -302,6 +305,33 @@ describe('2 ペインの面(描画)', () => {
       // 🔴 **プレビュー**(#273 残件)── 開かずに中身を確かめる(印は要らない)
       ['dual-preview-toggle', 'F9', 'プレビュー'],
     ]);
+  });
+
+  /**
+   * 🔴 **同じ操作の字は「コピー」で揃う**(#587 D-1)。
+   *
+   * ⚠ 直す前は 1 つの操作に 3 通りの字が在った ── 操作行「写す」/ 鍵の一覧
+   *   「反対のペインへ写す」/ 情報ペイン「参照をコピー」。マニュアル §6 の説明は
+   *   「反対側の場所へ**コピー**します」だったので、ボタンの字だけが説明と違っていた。
+   * 🔑 3 つの面を**1 つの it で**見る ── 片方だけ戻す変異(鍵の一覧 / 印が無いときの
+   *   断り)が、上の並びの pin では素通りした(変異試験 T2 / T4 が SURVIVED で教えた)。
+   */
+  it('🔴 コピーの字は、操作行・印が無いときの説明・鍵の一覧の 3 面で揃う(#587 D-1)', () => {
+    const r = new DualFilerRenderer(region);
+    r.render(booted());
+    const copy = region.querySelector<HTMLElement>('[data-pkc-field="dual-copy"]')!;
+    expect(copy.querySelector('[data-pkc-field="cmd-label"]')?.textContent).toBe('コピー');
+    // 印が無いときの説明(title)── 「写すものを」ではない
+    expect(copy.title, '印が無いときの説明が「コピー」で書かれていない').toContain(
+      'コピーするものを選んでから押してください',
+    );
+    // 鍵の一覧(設定 / ヘルプ / マニュアル §10 の名前)
+    expect(findCommand('dual-copy-to-other')?.label, '鍵の一覧の名前が揃っていない').toBe(
+      '反対のペインへコピー',
+    );
+    // ⚠ 「写す」の字がこの操作に 1 つも残っていない
+    for (const text of [copy.textContent ?? '', copy.title, findCommand('dual-copy-to-other')?.label ?? ''])
+      expect(text, `「写す」の字が残っている: ${text}`).not.toContain('写');
   });
 
   it('🔴 タブの帯: 開いている 1 枚が分かり、最後の 1 枚には閉じる口を出さない', () => {
@@ -1592,14 +1622,14 @@ describe('2 ペインのキーボード操作(#273)', () => {
     d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' });
     const btn = region.querySelector<HTMLElement>('[data-pkc-field="dual-copy"]')!;
     btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    expect(d.getState().error ?? '').toContain('写せません');
+    expect(d.getState().error ?? '').toContain('コピーできません');
   });
 
   it('🔴 何も選ばずに写そうとしたら、理由が出る', () => {
     d.dispatch({ type: 'DUAL_CLEAR_SELECTION', side: 'left' });
     const btn = region.querySelector<HTMLElement>('[data-pkc-field="dual-copy"]')!;
     btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    expect(d.getState().error ?? '').toContain('写すものを選んでください');
+    expect(d.getState().error ?? '').toContain('コピーするものを選んでください');
   });
 
   /**
@@ -1770,7 +1800,7 @@ describe('2 ペインの写す(#273 段③)', () => {
     region.querySelector<HTMLElement>('[data-pkc-field="dual-copy"]')!.dispatchEvent(
       new MouseEvent('click', { bubbles: true, cancelable: true }),
     );
-    expect(d.getState().error ?? '', '画面に無い印まで写した').toContain('写すものを選んでください');
+    expect(d.getState().error ?? '', '画面に無い印まで写した').toContain('コピーするものを選んでください');
   });
 
   /**
@@ -2121,5 +2151,204 @@ describe('2 ペインの掴んで落とす(#273 段⑤)', () => {
     pane('right').dispatchEvent(dragEv('drop', dtStub({ [PKC_DRAG_DUAL]: 'f1' })));
     await tick();
     expect(d.getState().error ?? '', '無言で捨てている').toContain('自分の中');
+  });
+});
+
+/**
+ * 🔴 **スマホの 2 ペイン ── 1 枚ずつ出しているときの残り**(#687。user 裁定 2026-09-04)。
+ *
+ * 相手のペインは**画面に居ない**。だから守る主張は「居ない相手のことを、
+ * この 1 枚がどれだけ言えるか」である:
+ *
+ * - A-1 行き先のボタンに**相手が開いているフォルダの名前**が出る
+ * - B-1 タブ帯の左端に**いま見ている側**(「左」/「右」)が出る
+ * - C-1 **相手に残っている印の数**を、焦点の側が言う(写す・移すの元は焦点の側なので)
+ */
+describe('スマホの 2 ペイン(1 枚ずつ)(#687)', () => {
+  /** 幅の見張りの替え玉(`tests/adapter/too-narrow.test.ts` と同じ型)。 */
+  class FakeMedia {
+    matches: boolean;
+    constructor(matches: boolean) {
+      this.matches = matches;
+    }
+    addEventListener(): void {}
+    removeEventListener(): void {}
+  }
+  let region: HTMLElement;
+  /**
+   * 1 枚ずつ(スマホ)か、2 枚とも(PC)かを決めて器を建てる。
+   * ⚠ **問い合わせごとに別の替え玉**を返す ── 1 本だと「スマホ = 対応外」になる。
+   */
+  const setup = (phone: boolean): DualFilerRenderer => {
+    document.body.innerHTML = '';
+    const root = document.createElement('div');
+    document.body.append(root);
+    appPhone.install(root, (q) =>
+      q.includes(`${PHONE_MIN_PX - 1}px`) ? new FakeMedia(false) : new FakeMedia(phone),
+    );
+    region = document.createElement('div');
+    root.append(region);
+    return new DualFilerRenderer(region);
+  };
+  /** ⚠ 共有の 1 個を PC の版面へ戻す ── 残すと同じ file の他の test が phone のまま走る。 */
+  afterEach(() => {
+    appPhone.install(document.createElement('div'), () => new FakeMedia(false));
+  });
+  const switcher = (): HTMLElement =>
+    region.querySelector<HTMLElement>('[data-pkc-region="dual-switch"]')!;
+
+  /**
+   * 🔴 **A-1 行き先のボタンに、相手が開いているフォルダの名前が出る。**
+   * ⚠ 「右のペインへ」だけでは、押した先に何が在るか読めない(相手は画面に居ない)。
+   */
+  it('🔴 A-1 行き先のボタンに、相手のペインが開いているフォルダの名前が出る', () => {
+    const r = setup(true);
+    let s = booted();
+    r.render(s);
+    // 起動時は相手(右)もルート
+    expect(switcher().textContent, 'ルートの呼び名が無い').toBe('右のペインへ → ルート');
+    // 右を f1(はこ1)へ ── ⚠ 焦点は右へ移るので、左へ戻して「左から見た右」にする
+    s = reduce(s, { type: 'DUAL_SET_SCOPE', side: 'right', lid: 'f1' }).state;
+    s = reduce(s, { type: 'DUAL_FOCUS', side: 'left' }).state;
+    r.render(s);
+    expect(switcher().textContent, '相手のフォルダ名が出ていない').toBe('右のペインへ → はこ1');
+    expect(switcher().title, '説明にも名前が無い').toContain('右のペイン(はこ1)に切り替えます');
+    /**
+     * 🔴 **相手が動いただけの回も追従する**(指紋を側だけにする変異を殺す)。
+     * ⚠ 焦点は動かない(左のまま)ので、側だけの指紋だと**古い名前が残る**。
+     */
+    s = reduce(s, { type: 'DUAL_SET_SCOPE', side: 'right', lid: null }).state;
+    s = reduce(s, { type: 'DUAL_FOCUS', side: 'left' }).state;
+    r.render(s);
+    expect(switcher().textContent, '相手が動いたのに名前が古いまま').toBe('右のペインへ → ルート');
+    // 焦点を右へ ── 行き先は左(ルート)。矢印は行き先の向き、名前は末尾
+    s = reduce(s, { type: 'DUAL_SET_SCOPE', side: 'left', lid: 'f2' }).state;
+    s = reduce(s, { type: 'DUAL_FOCUS', side: 'right' }).state;
+    r.render(s);
+    expect(switcher().textContent).toBe('← 左のペインへ はこ2');
+  });
+
+  /** 対照群 ── PC でも字は同じ(出し入れは CSS だけが決める。JS は字を変えない)。 */
+  it('A-1 対照群: PC でも行き先の字は同じ(出し入れは CSS が決める)', () => {
+    const r = setup(false);
+    let s = reduce(booted(), { type: 'DUAL_SET_SCOPE', side: 'right', lid: 'f1' }).state;
+    s = reduce(s, { type: 'DUAL_FOCUS', side: 'left' }).state;
+    r.render(s);
+    expect(switcher().textContent).toBe('右のペインへ → はこ1');
+    expect(switcher().hasAttribute('hidden'), 'JS が hidden を触っている').toBe(false);
+  });
+
+  const tabs = (side: string): HTMLElement =>
+    region.querySelector<HTMLElement>(
+      `[data-pkc-region="dual-pane"][data-pkc-side="${side}"] [data-pkc-region="dual-tabs"]`,
+    )!;
+
+  /**
+   * 🔴 **B-1 タブ帯の左端に、いま見ている側の字が出る。**
+   * ⚠ 1 枚ずつのとき、どちらのペインを見ているかを言う物は帯の地色しか無く、
+   *   相手が居なければ比べようがない。
+   */
+  it('🔴 B-1 タブ帯の先頭に「左」/「右」が在り、帯を組み直しても残る', () => {
+    const r = setup(true);
+    let s = booted();
+    r.render(s);
+    const mark = (side: string): Element | null => tabs(side).firstElementChild;
+    expect(mark('left')?.getAttribute('data-pkc-field'), '先頭が側の印でない').toBe(
+      'dual-side-mark',
+    );
+    expect(mark('left')?.textContent).toBe('左');
+    expect(mark('right')?.textContent, '右の帯が右と言っていない').toBe('右');
+    // ⚠ 読み上げは器の aria-label が言う ── 2 度読ませない
+    expect(mark('left')?.getAttribute('aria-hidden')).toBe('true');
+    // 🔴 タブを足すと帯は丸ごと組み直す ── そのときも先頭に残る
+    s = reduce(s, { type: 'DUAL_TAB_ADD', side: 'left' }).state;
+    r.render(s);
+    expect(paneOf(s.dual, 'left').tabs.length, '前提が崩れている(タブが増えていない)').toBe(2);
+    expect(mark('left')?.getAttribute('data-pkc-field'), '組み直したら印が消えた').toBe(
+      'dual-side-mark',
+    );
+    expect(mark('left')?.textContent).toBe('左');
+  });
+
+  const otherMarks = (side: string): HTMLElement =>
+    region.querySelector<HTMLElement>(
+      `[data-pkc-region="dual-pane"][data-pkc-side="${side}"] [data-pkc-field="dual-other-marks"]`,
+    )!;
+
+  /**
+   * 🔴 **C-1 相手に残っている印を、焦点の側が言う。**
+   * ⚠ 写す / 移すの元は焦点の側なので、相手の印は**押しても動かない** ──
+   *   画面に無い印は、言わなければ「3 件選んだのに 0 件と断られた」になる。
+   */
+  it('🔴 C-1 左に印を残して右へ移ると、右が「左に 1 件」と言い、戻れば消える', () => {
+    const r = setup(true);
+    let s = reduce(booted(), { type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' }).state;
+    s = reduce(s, { type: 'DUAL_FOCUS', side: 'right' }).state;
+    r.render(s);
+    expect(otherMarks('right').hidden, '右が相手の印を言っていない').toBe(false);
+    expect(otherMarks('right').textContent).toBe(
+      '左のペインに 1 件の印が残っています(ここで写す・移すを押しても、その印は動きません)',
+    );
+    // ⚠ 焦点の無い側(左)は言わない ── 右には印が無い
+    expect(otherMarks('left').hidden).toBe(true);
+    expect(otherMarks('left').textContent).toBe('');
+    /**
+     * 🔴 **左へ戻ったら消える ── `hidden` だけでなく字も空**(`too-narrow.ts` と同じ罠。
+     *   隠れた字が残ると、状態を `textContent` で見る検査がそれに満たされる)。
+     */
+    s = reduce(s, { type: 'DUAL_FOCUS', side: 'left' }).state;
+    r.render(s);
+    expect(otherMarks('right').hidden, '戻ったのに知らせが残っている').toBe(true);
+    expect(otherMarks('right').textContent, '隠しただけで字が残っている').toBe('');
+    expect(otherMarks('left').hidden).toBe(true);
+    // 🔑 数も追従する(2 件にして右へ)
+    s = reduce(s, { type: 'DUAL_SELECT', side: 'left', lid: 'b', mode: 'toggle' }).state;
+    s = reduce(s, { type: 'DUAL_FOCUS', side: 'right' }).state;
+    r.render(s);
+    expect(otherMarks('right').textContent).toContain('左のペインに 2 件の印');
+    /**
+     * 🔴 **逆向き ── 右に印を置いて左へ戻る**(両ペインを描いた**後**で読む規律を突く)。
+     * ⚠ 描く順は左 → 右なので、ループの**中**で相手を読む実装は、左を描く時点で
+     *   右がまだ前回の値(印 0)── 「右に 1 件」と言えない。
+     */
+    s = reduce(s, { type: 'DUAL_SELECT', side: 'right', lid: 'c', mode: 'set' }).state;
+    s = reduce(s, { type: 'DUAL_FOCUS', side: 'left' }).state;
+    r.render(s);
+    expect(otherMarks('left').hidden, '左が右の印を言っていない(前回の値を読んだ)').toBe(false);
+    expect(otherMarks('left').textContent).toContain('右のペインに 1 件の印');
+    expect(otherMarks('right').hidden).toBe(true);
+  });
+
+  /**
+   * 🔴 **C-1 数えるのは画面に出ている印だけ**(`shownMarks` の規律)。
+   * ⚠ 絞り込みで印が表から消えたら、その印は写す・移すの相手にも入らない ──
+   *   「1 件残っています」と言いながら押すと 0 件、が最悪の形である。
+   */
+  it('🔴 C-1 絞り込みで相手の印が表から消えた回は、言わない', () => {
+    const r = setup(true);
+    let s = reduce(booted(), { type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' }).state;
+    /**
+     * 器の絞り込みで a が表から消える ── 印は state に残る。
+     * ⚠ ペイン自身の絞り(`DUAL_SET_FILTER`)は**印ごと落とす**ので、ここでは使えない
+     *   (1 稿目で使い、前提の assert が「印が無い」で止めた)。
+     */
+    s = reduce(s, { type: 'SET_ENTRY_FILTER', query: 'はこ' }).state;
+    s = reduce(s, { type: 'DUAL_FOCUS', side: 'right' }).state;
+    r.render(s);
+    // 前提 ── 印そのものは残っている(消したのではなく、見えていないだけ)
+    expect(paneOf(s.dual, 'left').selection, '前提が崩れている').toEqual(['a']);
+    expect(otherMarks('right').hidden, '画面に無い印を数えている').toBe(true);
+    expect(otherMarks('right').textContent).toBe('');
+  });
+
+  /** 対照群 ── PC では相手の印が見えているので、どちらも言わない。 */
+  it('C-1 対照群: PC では両側とも言わない', () => {
+    const r = setup(false);
+    let s = reduce(booted(), { type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' }).state;
+    s = reduce(s, { type: 'DUAL_FOCUS', side: 'right' }).state;
+    r.render(s);
+    expect(otherMarks('right').hidden, 'PC で相手の印を言っている').toBe(true);
+    expect(otherMarks('right').textContent).toBe('');
+    expect(otherMarks('left').hidden).toBe(true);
   });
 });

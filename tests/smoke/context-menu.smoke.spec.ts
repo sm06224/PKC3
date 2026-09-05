@@ -312,14 +312,24 @@ test('🔴 本文のリンクの上では、自前のメニューを出さない
 });
 
 /**
- * 🔴 **編集中は出さない ── 出すと「別のノート」に効く**。
+ * 🔴 **編集中の行の右クリックは「別のウィンドウで開く」だけを出す**(#690 ④ A′、
+ *   user 裁定 2026-09-04)。
  *
- * ⚠ `delete-entry` などは「押した行」ではなく**選んでいるノート**に効く。
- * 編集中は行の選択が断られる(`selectEntryOrExplain`)ので、そこでメニューを出すと
- * **さっきまで選んでいた別のノートに効く**メニューになる ── 静かに間違った物を消す。
- * 🔑 だから**選べなかったら出さない**。⚠ 理由は画面に出ている(黙って何も起きない、にしない)。
+ * ⚠ 2026-09-05 までここは「編集中は出ない ── 理由は画面に出る」を主張していた。
+ *   `delete-entry` などは「押した行」ではなく**選んでいるノート**に効くので、選べない
+ *   編集中に全項目を出すと**さっきまで選んでいた別のノートに効く**メニューになる ──
+ *   その理由は今も生きている(だから全項目は出さない)。
+ * 🔑 変わったのは、付箋(`open-note-window`)は**中央を動かさずに脇へ出す**ものなので、
+ *   選ぶ必要が無い = 下書きを閉じさせる理由が無い、と裁定されたこと。だから **1 行だけ**出す。
+ * ⚠ unit(`tests/adapter/editing-row-context-menu.test.ts`)はメニューの中身と
+ *   「`SELECT_ENTRY` を撃たない」まで見ている。ここで見るのは実ブラウザでしか通らない 2 つ:
+ *   ① 押すと**本当に窓が開き**、その窓が**押した行のノート**を指している
+ *   ② その間、本体の**下書きも選ばれている行も 1 つも動かない**(編集の面が残る)
  */
-test('🔴 編集中に行を右クリックしても出ない ── 理由は画面に出る', async ({ page }) => {
+test('🔴 編集中に行を右クリックすると「別のウィンドウで開く」だけが出て、押しても下書きも選択も動かない (#690)', async ({
+  page,
+  context,
+}) => {
   const errors = collectPageErrors(page);
   await gotoApp(page);
   await createEntry(page, 'text');
@@ -334,29 +344,56 @@ test('🔴 編集中に行を右クリックしても出ない ── 理由は�
    * 🔴 **編集に入り切るのを待つ**(2026-08-27。フル走で 2 回再現した)。
    *
    * ⚠ `clickReal` は**押すだけ**で、面の入れ替えは非同期である。待たずに次の
-   *   右クリックへ進むと、**まだ編集中でない**ので**メニューは正しく出る** ──
+   *   右クリックへ進むと、**まだ編集中でない**ので**全項目のメニューが正しく出る** ──
    *   落ちるのは製品ではなく、この test が**前提を確かめていない**からである。
-   * ⚠ 直下の `status.isVisible()` は**待たない一読**なので、前提の代わりにならない
-   *   (編集に入っていても入っていなくても false で通る)。
    */
-  await expect(
-    page.locator('[data-pkc-field="editor-body"]'),
-    '編集に入っていない(前提が崩れた)',
-  ).toBeVisible();
+  const editor = page.locator('[data-pkc-field="editor-body"]');
+  await expect(editor, '編集に入っていない(前提が崩れた)').toBeVisible();
+  // 下書きに 1 行足す ── 「残る」を見るための印(保存していない字)
+  await editor.fill('2 件目\n書きかけ\n');
   const status = page.locator('[data-pkc-region="status"]');
   expect(await status.isVisible(), '前提: 編集に入った時点で既に理由が出ている').toBe(false);
 
-  await page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').last().click({
-    button: 'right',
-  });
-  // 🔴 出ない
+  // 🔑 押すのは**選ばれていない行**(選ばれている行なら、動かないのは当然で何も見ていない)
+  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  const selectedLid = await rows.locator('xpath=self::*[@data-pkc-selected]').first().getAttribute('data-pkc-entry');
+  const other = rows.locator('xpath=self::*[not(@data-pkc-selected)]').first();
+  const otherLid = await other.getAttribute('data-pkc-entry');
+  expect(selectedLid, '前提: 選ばれている行が読めない').not.toBeNull();
+  expect(otherLid, '前提: 選ばれていない行が無い').not.toBeNull();
+  expect(otherLid).not.toBe(selectedLid);
+
+  await other.click({ button: 'right' });
+  const menu = page.locator(MENU);
+  await expect(menu, '編集中の行の右クリックでメニューが出ない(#690 ④ が戻った)').toBeVisible();
+  // 🔴 **1 行だけ** ── 選べない編集中に全項目を出すと別のノートに効く
+  const items = menu.locator('button[data-pkc-action]');
+  await expect(items, '編集中なのに「別のウィンドウで開く」以外が出た').toHaveCount(1);
+  await expect(items.first()).toHaveAttribute('data-pkc-action', 'open-note-window');
+  await expect(items.first()).toContainText('別のウィンドウで開く');
+  // 🔑 lid はボタン自身が運ぶ(「押した行のノート」といういつもの規則 ── 選ばずに済む)
+  await expect(items.first(), 'ボタンが押した行の lid を運んでいない').toHaveAttribute(
+    'data-pkc-entry',
+    otherLid!,
+  );
+  // ⚠ 断り文(「編集を終了してから…」)は**もう出ない** ── 断っていないので
+  expect(await status.isVisible(), '出しているのに断り文が出ている').toBe(false);
+
+  // ① 押すと窓が開き、その窓は押した行のノートを指す
+  const popup = context.waitForEvent('page');
+  await items.first().click();
+  const win = await popup;
+  await expect(win.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
+  expect(win.url(), '開いた窓が押した行のノートを指していない').toContain(`entry=${otherLid}`);
+
+  // ② 本体は 1 つも動いていない ── 編集の面が残り、下書きの字が残り、選ばれている行が同じ
+  await expect(editor, '付箋を開いたら編集が終わった(下書きが消える)').toBeVisible();
+  await expect(editor).toHaveValue('2 件目\n書きかけ\n');
   await expect(
-    page.locator(MENU),
-    '編集中なのにメニューが出た(選べていないので別のノートに効く)',
-  ).toHaveCount(0);
-  // ⚠ **黙っていない**
-  await expect(status, '断ったのに理由が出ていない').toBeVisible();
-  await expect(status).toContainText('編集');
+    rows.locator('xpath=self::*[@data-pkc-selected]').first(),
+    '付箋を開いたら選ばれている行が動いた(`SELECT_ENTRY` が撃たれている)',
+  ).toHaveAttribute('data-pkc-entry', selectedLid!);
+  await win.close();
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
@@ -565,6 +602,50 @@ test('🔴 見出しを右クリックすると、その章を畳める (#426 �
   await expect(menu, '畳んでいるのに「畳む」と書いてある').toContainText('中身を出す');
   await menu.locator('button[data-pkc-action="toggle-heading-fold"]').click();
   await expect(inSection, '畳んだものを出せない').toBeVisible();
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **見出しを右クリックして「この章をコピー」を押すと、章の原文が clipboard に入る**(#677)。
+ *
+ * ⚠ unit では原理的に届かない 2 つ:① **本物の `navigator.clipboard`** に届くか
+ *   (happy-dom は差し替え物)② 押した物が **root の委譲**を通って実際に動くか
+ *   (メニューは `data-pkc-action` を置くだけ ── 配線は実物でしか見えない)。
+ * 🔑 観測点は**アプリ自身の合図**(状態の行の文言)+ **clipboard の中身**の 2 つ ──
+ *   後者だけだと「1 つ前の内容」を読む濡れ衣が起きる(`copy-body.smoke.spec.ts` の注記)。
+ * ⚠ **章末が `:::` の囲み**である本文にする ── 閉じの `:::` まで入ることが、この機能の
+ *   当の主張(`:::` の刻印は開き行にしか無いので、終端の取り方を誤ると閉じが落ちる)。
+ */
+test('🔴 見出しを右クリックして「この章をコピー」を押すと、章の原文が閉じの ::: まで入る (#677)', async ({
+  page,
+  context,
+}) => {
+  const errors = collectPageErrors(page);
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page
+    .locator('[data-pkc-field="editor-body"]')
+    .fill('## 第 1 章\n\n:::note\n囲みの中\n:::\n\n## 第 2 章\n\n第 2 章の中身。\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  const h2 = page.locator('[data-pkc-field="detail-body"] h2').first();
+  await expect(h2, '本文が出ていない').toContainText('第 1 章');
+
+  await h2.click({ button: 'right' });
+  const menu = page.locator(MENU);
+  await expect(menu, '見出しで右クリックしてもメニューが出ない').toBeVisible();
+  await menu.locator('button[data-pkc-action="copy-chapter-md"]').click();
+  // ① アプリ自身の合図(状態の行)── メニューは押した瞬間に畳まれるので、光る合図は使えない
+  await expect(page.locator('[data-pkc-region="status"]'), '写した合図が出ない').toContainText(
+    '章をコピーしました',
+  );
+  await expect(page.locator(MENU), '押した後もメニューが残っている').toHaveCount(0);
+  // ② clipboard の中身 ── 見出しから次の見出しの直前まで、閉じの ::: を含めて原文のまま
+  const text = await page.evaluate(() => navigator.clipboard.readText());
+  expect(text, '章の原文が丸ごと入っていない(閉じの ::: まで)').toBe(
+    '## 第 1 章\n\n:::note\n囲みの中\n:::\n',
+  );
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

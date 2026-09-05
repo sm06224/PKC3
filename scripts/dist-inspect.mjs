@@ -94,6 +94,13 @@ export const PORTABLE_TEMPLATE = 'portable-template.html';
  */
 export const MANUAL_PAGE = 'manual.html';
 
+/**
+ * @param {{kind: 'product'|'dev', capKb: number, floorKb: number,
+ *          sidecarCapKb?: number, sidecarFloorKb?: number, manualFloorKb?: number,
+ *          requireManual?: boolean,
+ *          files: {path: string, bytes: number}[],
+ *          text: Map<string, string>}} input
+ */
 export function inspectDist({
   kind,
   capKb,
@@ -101,6 +108,7 @@ export function inspectDist({
   sidecarCapKb,
   sidecarFloorKb,
   manualFloorKb,
+  requireManual = false,
   files,
   text,
 }) {
@@ -315,6 +323,11 @@ export function inspectDist({
    * ⚠ `dev` だけ**在ること**を要求する ── `product` は**過去に release した zip**も
    *   検品する(Pages の `/`)ので、段②より前の版(v3.2.0)に在るはずが無い。
    *   在るときの下限は両方で見る(空 / 途中で切れた page を配らない)。
+   * 🔴 ただし**焼きたての product**(`release.yml` / `nightly.yml` が build 直後に検品する
+   *   経路)では `requireManual` で在ることを要求する(#648 💭、2026-09-04)── これが無いと
+   *   plugin が外れた版を**そのまま release できた**(dev の検品は PR gate で鳴るが、
+   *   product は別成果物で、鳴る計器が 1 つも無かった)。
+   *   ⚠ 過去の zip を検品する `pages.yml` の経路には**渡さない**(v3.2.0 は落ちて当然になる)。
    * ⚠ 予算が渡っていなければ黙って通さない(雛形と同じ作法)。
    */
   const manual = files.find((f) => f.path === MANUAL_PAGE);
@@ -325,6 +338,12 @@ export function inspectDist({
       errors.push(
         `dist に ${MANUAL_PAGE} が無い ── マニュアルの窓が SPA fallback で PKC をもう 1 枚開く` +
           '(plugin が emit していないか、順番が変わった)',
+      );
+    } else if (requireManual) {
+      errors.push(
+        `焼きたての product なのに dist に ${MANUAL_PAGE} が無い ── マニュアルの窓が SPA fallback で` +
+          ' PKC をもう 1 枚開く(plugin が emit していないか、順番が変わった。' +
+          '過去の zip を検品しているなら --require-manual を外す)',
       );
     }
   } else {

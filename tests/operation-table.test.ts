@@ -107,12 +107,13 @@ describe('操作の全数台帳(#582 段①)', () => {
     }).toEqual({
       // ⚠ 2026-08-31: `open-manual-window`(#645)で 1 増えた
       // ⚠ 2026-09-02: `phone-page` / `phone-menu`(#632 段①)で 2 増えた
-      total: 229,
-      receivers: 188,
+      // ⚠ 2026-09-04: 小窓・板・章コピー・図の一覧・断り書きの設定など(#690 #677 #676 #528 #687)で 4 増えた
+      total: 237,
+      receivers: 196,
       registered: 72,
       both: 31,
       outsideActionsTable: 41,
-      unregistered: 157,
+      unregistered: 165,
     });
   });
 
@@ -125,13 +126,16 @@ describe('操作の全数台帳(#582 段①)', () => {
   it('🔴 登記簿をまたぐ id は、名指しの 2 件だけ', () => {
     expect(s().sharedBooks).toEqual([
       { id: 'cycle-read-columns', books: ['key', 'body'] },
-      { id: 'open-note-window', books: ['entry', 'body'] },
+      // ⚠ 2026-09-04(#690 I5): 鍵(Alt+Shift+W)と「操作を探す」から届くように
+      //    `KEY_COMMANDS` にも登記した ── 受け手は情報ペインのボタン 1 つ(橋は `SHORTCUT_BUTTON`)
+      { id: 'open-note-window', books: ['key', 'entry', 'body'] },
     ]);
   });
 
   it('登記簿の内訳が動いたら鳴る', () => {
     // ⚠ 2026-09-04: 本文のメニューが 2 → 3(`open-note-window`)
-    expect(s().perBook).toEqual({ key: 52, entry: 12, body: 3, collection: 2, settings: 5 });
+    // ⚠ 2026-09-04(#690 I5): 鍵が 52 → 53(`open-note-window` を「操作を探す」に出すため)
+    expect(s().perBook).toEqual({ key: 53, entry: 12, body: 3, collection: 2, settings: 5 });
   });
 
   it('🔴 押し所へ辿れない登記を、身元で pin する', () => {

@@ -17,12 +17,15 @@ import { lidOfNode } from './lid-of-node';
 import { deliveredEntryOf, type ExtDeliveredEntry } from '@features/extension/ext-delivery';
 import { isLaunchableUrl } from '@features/launcher/tiles';
 import {
+  chapterSpanOf,
   headingAtSourceLine,
   headingLevel,
   isHeadingFolded,
   revealBlock,
   toggleHeadingFold,
 } from '../render/heading-fold';
+import { blockSpanAt, sliceLines } from '@features/markdown/source-blocks';
+import { isPlaceOpen } from '@features/markdown/place-notation';
 import { quoteOnEnter } from '@features/markdown/quote-assist';
 import { renumberLists } from '@features/markdown/list-renumber';
 import { stripDialect } from '@features/markdown/strip-dialect';
@@ -46,7 +49,7 @@ import {
 } from '@features/settings/settings-file';
 import { downloadBlob } from '@adapter/platform/download';
 import { visibleContacts } from '@features/contact/contact-card';
-import { buildVcf, isVcfFileName } from '@features/contact/vcard';
+import { buildVcf, isVcfFileName, vcfNoteOf } from '@features/contact/vcard';
 import { isMarkdownFileName } from '@features/import/plain-markdown';
 import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
 import { insertText, OWN_MEANING } from '@adapter/ui/render/row-swap';
@@ -60,7 +63,7 @@ import { chooseColumnRule } from '@adapter/ui/render/column-rule';
 import { chooseTagBadge } from '@adapter/ui/render/tag-badge';
 import { chooseReadColumns, cycleReadColumns } from '@adapter/ui/render/read-columns';
 import { appendModeOf } from '@adapter/ui/render/append-box';
-import { frontmatterLineCount } from '@features/markdown/frontmatter';
+import { bodyBelowFrontmatter, frontmatterLineCount } from '@features/markdown/frontmatter';
 import {
   entryPickNote,
   entryPickRows,
@@ -100,6 +103,7 @@ import { convertPastedPermalink } from '@features/link/permalink';
 import { resolveMime } from './attach';
 import {
   applyFormat,
+  DIAGRAM_CHOICES,
   DIAGRAM_TEMPLATES,
   insertBlock,
   type FormatOp,
@@ -121,16 +125,20 @@ import {
   paneScope,
   type DualSide,
 } from '@features/relation/dual-pane';
-import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
+import { appPanes, applyPaneVisibility, refoldPeeked } from '@adapter/ui/render/pane-visibility';
 import { appPhone } from '@adapter/ui/render/phone-layout';
 import { appKeymap, type KeymapStore } from '@adapter/ui/render/keymap';
 import { appOpenInEdit, OpenInEditStore } from '@adapter/ui/render/open-in-edit';
 import { chordOf, findCommand, isMac, typesCharacter, KEY_COMMANDS } from '@features/keymap';
 import { paletteRows } from '@features/palette/palette-rows';
 import {
+  blockMenuActions,
+  ADD_PLACE_ACTION,
   bodyMenuActions,
+  editingRowMenuActions,
   entryMenuActions,
   headingMenuActions,
+  menuShortcutFor,
   NOTE_TOOL_ACTIONS,
   noteToolActions,
   withTrailingLast,
@@ -140,6 +148,7 @@ import {
   contextMenuOpen,
   openContextMenu,
 } from '../render/context-menu';
+import { chordHint } from '../render/shortcut-hint';
 import { structureText } from '@features/structure/structure-text';
 import {
   profileLineText,
@@ -164,6 +173,7 @@ import {
 import { parseLinkTarget } from '@features/entry-ref/link-target';
 import { flashCopied, handleCopyMdBlock } from './copy-md-block';
 import { finishCopy, selectedMarkdown } from './copy-source';
+import { installLongPress, LONG_PRESS_TARGET } from './long-press';
 import { copyMarkdownAndHtml, copyPlainText } from '@adapter/platform/clipboard';
 import { cleanForClipboard } from '@features/export/clipboard-html';
 import {
@@ -172,6 +182,7 @@ import {
   pickCommandInApp,
   pickEntryInApp,
   pickSnippetInApp,
+  pickDiagramInApp,
   isAppDialogOpen,
   type ConfirmOptions,
 } from '@adapter/ui/render/app-dialog';
@@ -184,6 +195,20 @@ type ActionHandler = (
    *  START_EDIT で detail を描き直すので、target は既に外れている */
   root: HTMLElement,
 ) => void;
+
+/**
+ * 🔴 **押されたボタンが載っている予定の面**(#673 段②)。
+ *
+ * ⚠ 予定の面は**同じ document に 2 つ在りうる** ── 左の列の「予定」タブと、
+ *   中央の面(別窓が塞がれた退避 / `#pkc?view=schedule`)。`root.querySelector` で
+ *   document 全体から欄を引くと、**左の列に描かれている空の欄**を先に拾い、中央で
+ *   打った字は読まれない(「やることを入力してください」と断られる)。
+ * 🔑 だから**押した所から `closest` で上がる**。印は `ScheduleRenderer.ensureFrame`
+ *   が器に焼く(`data-pkc-region="schedule"`)。
+ */
+function scheduleFaceOf(target: HTMLElement): HTMLElement | null {
+  return target.closest<HTMLElement>('[data-pkc-region="schedule"]');
+}
 
 
 /** 既定 title の種別ラベル(連番は同 archetype の現在数 + 1)。 */
@@ -234,6 +259,8 @@ const alreadyThere = (st: AppState, lid: string, parentLid: string | null): bool
  * ⚠ state の `focus` から推測しない ── 焦点の無いほうを押したときに
  *   **反対側が動く**(押した所と効く所が違う、いちばん気づけない形)。
  */
+/** 長押しを受ける行(#687 D-1)。⚠ `long-press.ts` の `LONG_PRESS_TARGET` と同じ綴り。 */
+const LONG_PRESS_ROW = LONG_PRESS_TARGET;
 const dualSide = (target: HTMLElement): DualSide | null => {
   const raw = target.closest('[data-pkc-side]')?.getAttribute('data-pkc-side');
   return raw === 'left' || raw === 'right' ? raw : null;
@@ -615,6 +642,11 @@ export interface BinderServices {
    */
   setNoticesEnabled?(on: boolean): void;
   /**
+   * 狭い画面の断り書きを出すか(#687 E-1)。⚠ **flag ではない**(正規設定)──
+   * 帯の「OK」で切れた user が戻せる**唯一の道**である(お知らせと同じ形)。
+   */
+  setTooNarrowEnabled?(on: boolean): void;
+  /**
    * 「開く」で編集に入るか(user 裁定 2026-08-18)。⚠ **flag ではない**(正規設定)。
    * ⚠ 読む側は `services` ではなく `openInEdit` を引く(下の `bindActions` の引数)──
    *   ここは**書き手**だけ。
@@ -912,7 +944,9 @@ function runBulkTag(
   // 🔑 **1 回の頼みは 1 回で撃つ**(#637 の着地前レビュー)── 1 つずつ撃つと、
   //   知らせが 1 通ずつ出て**後の 1 通が前を塗り潰す**(12 件に「請求」が付いたのに
   //   「0 件に付けました」と出る)。並びのまま渡せば、答えも 1 通で全部を語れる。
-  dispatcher.dispatch({ type: 'BULK_TAG', lids, tags, mode });
+  // 🔑 前の回に入らなかった名前は、この回の字に混ぜない(#640 案 A)
+  dispatcher.dispatch({ type: 'CLEAR_REFUSED_TAGS', field: 'bulk-tag' });
+  dispatcher.dispatch({ type: 'BULK_TAG', lids, tags, mode, field: 'bulk-tag' });
   // 🔑 通したら欄を空にする(次の 1 つを打てる)── ⚠ 断ったときは残す
   if (field) field.value = '';
 }
@@ -1003,6 +1037,8 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'open-today',
   // ⚠ 今日のノートの本文を書く(#402 ②)── 取込・書出しの最中に走らせない
   'schedule-quick-add',
+  // 🔴 連絡先を 1 件作る(#278 段③)── `CREATE_ENTRY` は即永続なので同じ門(機械検査は repo-hygiene)
+  'contacts-quick-add',
   /**
    * 🔴 **予定から外すのも本文を書く**(#498)── 行の `@…` を剥がす
    *   (`SET_TASK_DATE`)か、frontmatter の `date:` を消す(`SET_ENTRY_DATE`)。
@@ -1490,6 +1526,20 @@ function phoneShowList(dispatcher: Dispatcher): boolean {
 }
 
 const MENU_LID_ATTR = 'data-pkc-menu-lid';
+/**
+ * 🔴 **右クリックした `:::` の塊の開き行**(#677)。`MENU_LINE_ATTR` とは**別の名前**で運ぶ
+ * ── 見出しが `:::` の中に居るときは**見出しの行と塊の開き行が両方要る**ので、
+ * 1 つの属性に載せると片方が消える。座標は同じ(frontmatter を剥いだ本文の行番号)。
+ */
+const MENU_BLOCK_ATTR = 'data-pkc-menu-block';
+/**
+ * 🔴 **右クリックした所の、本文の器の中での座標**(#676「ここに板を置く」)。
+ * 器(`detail-body`)の左上からの px ── 板の `x=` / `y=` と同じ座標系(絶対配置の基準は
+ * 器の padding box なので、`getBoundingClientRect` の左上から**枠線ぶん**(`clientLeft`)を
+ * 引き、器がスクロールしていればその分を足す)。
+ */
+const MENU_X_ATTR = 'data-pkc-menu-x';
+const MENU_Y_ATTR = 'data-pkc-menu-y';
 
 /**
  * 🔴 **メニューを出す前に開いていたノート**(#685 動線レビュー 欠陥 2、2026-09-04)。
@@ -1543,10 +1593,67 @@ function refuseStaleMenu(dispatcher: Dispatcher, target: Element): boolean {
 }
 
 function menuCarriedLine(target: Element): number | null {
-  const raw = target.getAttribute(MENU_LINE_ATTR);
+  return menuCarriedAt(target, MENU_LINE_ATTR);
+}
+
+/** 右クリックのメニューが運んできた `:::` の塊の開き行(#677)。無ければ `null`。 */
+function menuCarriedBlock(target: Element): number | null {
+  return menuCarriedAt(target, MENU_BLOCK_ATTR);
+}
+
+/** 運ばれた行番号を 1 つ読む(読み方は 2 つの属性で同じ)。 */
+function menuCarriedAt(target: Element, attr: string): number | null {
+  const raw = target.getAttribute(attr);
   if (raw === null) return null;
   const line = Number(raw);
   return Number.isInteger(line) && line >= 0 ? line : null;
+}
+
+/**
+ * 🔴 **右クリックした所を包む `:::` の塊**(#677)。
+ *
+ * 押した所から刻印(`data-pkc-source-line`)を持つ祖先を**内側から外側へ**辿り、
+ * その刻印の行が `:::` の開きである**最初の物**を返す ── 入れ子なら内側が当たる。
+ * 段落・見出し・fence の刻印は素通りする(`blockSpanAt` が `null` を返す)。
+ *
+ * 🔑 塊かどうかは**原文**で決める(`blockSpanAt`)── DOM の class 名
+ *   (section / format / details / quote …)を並べると、描画が 1 つ増えた日に静かに漏れる。
+ * 🔑 板かどうかも原文で決める(`isPlaceOpen` = 描画が板と読む当の判定)。
+ *
+ * @param fmBody frontmatter を剥いだ本文(刻印と同じ座標系)
+ */
+function directiveBlockAt(
+  host: HTMLElement,
+  target: Element,
+  fmBody: string,
+): { line: number; board: boolean } | null {
+  let el: Element | null = target.closest('[data-pkc-source-line]');
+  while (el !== null && el !== host && host.contains(el)) {
+    const line = Number(el.getAttribute('data-pkc-source-line'));
+    if (Number.isInteger(line) && line >= 0 && blockSpanAt(fmBody, line) !== null) {
+      return { line, board: isPlaceOpen(fmBody.split('\n')[line] ?? '') };
+    }
+    el = el.parentElement?.closest('[data-pkc-source-line]') ?? null;
+  }
+  return null;
+}
+
+/**
+ * 原文の行範囲をクリップボードへ写す(章 / 塊のコピー共通。#677)。
+ * ⚠ 結果の字は `copyText` に渡す(押しても画面が変わらない操作なので、黙って終えない)。
+ */
+function copySourceLines(
+  dispatcher: Dispatcher,
+  services: BinderServices,
+  fmBody: string,
+  span: { readonly start: number; readonly end: number },
+  done: string,
+): void {
+  if (services.copyText === undefined) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: 'この版では写せません' });
+    return;
+  }
+  services.copyText(sliceLines(fmBody, span), done);
 }
 
 /**
@@ -1593,10 +1700,30 @@ function pickAppendTarget(dispatcher: Dispatcher, root: HTMLElement, line: numbe
    *   1 稿目は「『はじめに』は追記の入り先に選べません」という
    *   **追記欄が 1 つも見えていない画面で、追記についての断り文**を出していた。
    * 🔑 判定は `appendModeOf` **1 か所**を引く(2 本目の規則を書かない。§7)。
-   * ⚠ ここは**黙って降りてよい** ── 読むだけの面なので、押した人は
-   *   「追記の入り先を選んだ」つもりが無い。
+   * ⚠ 追記欄そのものが無い面(`hidden`)は**黙って降りてよい** ── 読むだけの面なので、
+   *   押した人は「追記の入り先を選んだ」つもりが無い。
+   * 🔴 **書込中は黙らない**(#655 ②)── 追記欄は出ている(理由と出口の帯)のに
+   *   押しても何も起きないのは dead click である。理由を 1 行出す。
+   * ⚠ **編集中の枝は、いまの 2 つの入口からは届かない**(実装を読んで確かめた):
+   *   `Alt`+クリックは `bodySourceLineAt` が `phase !== 'ready'` で降りる(既定を
+   *   奪わないため ── `mod-click-edit.test.ts`「ready でない間は、既定を奪わない」)し、
+   *   右クリックの「ここに追記する」は `appendable` が `ready` のときしか並べない。
+   *   編集中の理由は追記欄の帯(「このノートは編集中です…」)が既に出している。
+   *   ここに字を置くのは、**3 つ目の入口が生えた日に黙らないため**であって、
+   *   いま user に見えている欠陥を直したのではない(#655 ② の前提の訂正)。
    */
-  if (appendModeOf(st).kind !== 'ready') return;
+  const mode = appendModeOf(st);
+  if (mode.kind === 'hidden') return;
+  if (mode.kind !== 'ready') {
+    dispatcher.dispatch({
+      type: 'OP_FAILED',
+      error:
+        mode.kind === 'editing'
+          ? '編集中は追記欄を使えません(保存するか、編集を破棄すると入り先を選べます)'
+          : '追記を書き込んでいる間は、入り先を変えられません',
+    });
+    return;
+  }
   const lid = st.selectedLid;
   const sel = root.querySelector<HTMLSelectElement>('[data-pkc-field="append-target"]');
   /**
@@ -1620,22 +1747,6 @@ function pickAppendTarget(dispatcher: Dispatcher, root: HTMLElement, line: numbe
    *   `frontmatterLineCount` 1 つ(`detail.ts` の `fmLines` と同じ規律)。
    */
   const sec = sectionAt(body, line + frontmatterLineCount(body));
-  if (sec === null) {
-    dispatcher.dispatch({
-      type: 'OP_NOTICE',
-      message: 'ここより上に見出しが無いので、入り先は変えていません',
-    });
-    return;
-  }
-  // ⚠ 一覧に無い印は選べない(見出しが 1 つも無いノートでは `<select>` は畳んである)
-  if (!Array.from(sel.options).some((o) => o.value === sec.slug)) {
-    dispatcher.dispatch({
-      type: 'OP_FAILED',
-      error: `「${sec.text}」は追記の入り先に選べません`,
-    });
-    return;
-  }
-  sel.value = sec.slug;
   /**
    * 🔴 **畳んだ追記欄は開き、打つ欄にカーソルを入れる**(#596 A / 設問③ C。
    *   user 裁定 2026-08-30「**推奨通り、畳んでいれば開き、打つ欄にカーソルが入る。
@@ -1649,28 +1760,87 @@ function pickAppendTarget(dispatcher: Dispatcher, root: HTMLElement, line: numbe
    * ⚠ 開くのは**追記欄だけ**(左右の列には触らない)── 頼まれたのは「追記する場所」であって
    *   版面の組み直しではない。
    * ⚠ focus は**開いた後**に当てる ── 畳んだままの `display: none` には focus が乗らない。
+   *
+   * 🔴 **断るときも、打つ所までは出す**(#655 ②。user 裁定 2026-09-04)。
+   * ⚠ 直す前は下の 2 つの断り(上に見出しが無い / 一覧に無い見出し)が**開く前に
+   *   返っていた**ので、マニュアルの「畳んでいても開いて、打つ欄にカーソルが入ります」が
+   *   その場面で嘘になっていた ── 見出しが 1 つも無いノートでは**必ず**この形になる。
+   * 🔑 押した人が欲しいのは「打つ所」である。入り先を変えられなくても、欄を開いて
+   *   カーソルを入れ、**いまの入り先がどこか**を添える(「末尾です」と言い切らない ──
+   *   直前に別の節を選んでいれば、そのままである)。
    */
   const opened = revealAppendPane(root);
   root.querySelector<HTMLTextAreaElement>('[data-pkc-field="append-input"]')?.focus();
+  if (sec === null) {
+    dispatcher.dispatch({
+      type: 'OP_NOTICE',
+      message: `ここより上に見出しが無いので、入り先は変えていません(いまの入り先は${targetNow(sel)}です)${openedNote(opened)}`,
+    });
+    return;
+  }
+  // ⚠ 一覧に無い印は選べない(見出しが 1 つも無いノートでは `<select>` は畳んである)
+  if (!Array.from(sel.options).some((o) => o.value === sec.slug)) {
+    dispatcher.dispatch({
+      type: 'OP_FAILED',
+      error: `「${sec.text}」は追記の入り先に選べません(いまの入り先は${targetNow(sel)}です)${openedNote(opened)}`,
+    });
+    return;
+  }
+  sel.value = sec.slug;
   dispatcher.dispatch({
     type: 'OP_NOTICE',
-    message: `追記の入り先を「${sec.text}」にしました${opened ? '(追記欄を開きました)' : ''}`,
+    message: `追記の入り先を「${sec.text}」にしました${openedNote(opened)}`,
   });
 }
 
 /**
- * 追記欄を畳んでいたら戻す。戻したら `true`(呼び側が一言添える)。
+ * いま選ばれている入り先を、断り文に添える字で(#655 ②)。
+ * ⚠ 選択肢の字は深さを**字下げ**(全角空白)で見せている(`append-box.ts`)── 剥いで出す。
+ */
+function targetNow(sel: HTMLSelectElement): string {
+  if (sel.value === '') return '末尾';
+  const picked = Array.from(sel.options).find((o) => o.value === sel.value);
+  const text = picked?.textContent?.trim() ?? '';
+  return `「${text === '' ? sel.value : text}」`;
+}
+
+/** 追記欄をこちらが開いた回に添える一言(#655 ①)── 畳み直すことまで言う。 */
+function openedNote(opened: boolean): string {
+  return opened ? '(追記欄を開きました ── 送ると元どおり畳みます)' : '';
+}
+
+/**
+ * 追記欄を畳んでいたら**一時的に**見せる。見せたら `true`(呼び側が一言添える)。
+ *
+ * 🔴 **user の畳みの記録(`pkc3.panes`)には 1 byte も書かない**(#655 ①。
+ *   user 裁定 2026-09-04 案 B)。⚠ 直す前は `setHidden` で開いていたので、
+ *   「閲覧メインだから畳む」と決めた設定を**こちらが黙って上書きして永続**していた
+ *   ── 1 行足したいだけの人が、次に開いたときも追記欄を見ることになる。
+ * 🔑 元どおり畳むのは 2 つの契機:追記が**通った**(`append-box.ts`)/ 欄の外で
+ *   **1 操作した**(`run` の後ろ)。続けてもう 1 行足したい人は、もう一度開く(裁定 B)。
  * ⚠ **判定と適用は `pane-visibility` の 1 組**(`appPanes` / `applyPaneVisibility`)──
  *   `toggle-pane` と同じ口を使い、畳み状態の 2 本目の台帳を作らない。
  */
 function revealAppendPane(root: HTMLElement): boolean {
-  const hidden = appPanes.getHidden();
-  if (!hidden.includes('append')) return false;
-  applyPaneVisibility(
-    root,
-    appPanes.setHidden(hidden.filter((p) => p !== 'append')),
-  );
+  if (!appPanes.peek('append')) return false;
+  applyPaneVisibility(root, appPanes.getHidden());
   return true;
+}
+
+/**
+ * 🔴 **欄の外で 1 操作したら、こちらが開いた追記欄を畳み直す**(#655 ①)。
+ *
+ * ⚠ **打ちかけが在る間は畳まない** ── 「ここに追記する」で開いた欄に字を打ってから
+ *   別の所を押した人の字を、畳んで見えなくしない(この機構で一番やってはいけない
+ *   負け方は「押したら消えた」である。`append-box.ts` の規律と同じ向き)。
+ * ⚠ 欄の**中**の操作(送る / 元に戻す)は数えない ── 送るは通った時点で
+ *   `append-box.ts` が畳み、断られた回(空のまま押した等)は欄を出したままにする。
+ */
+function refoldAppendAfterAction(root: HTMLElement, pressed: Element): void {
+  if (pressed.closest('[data-pkc-region="append"]') !== null) return;
+  const input = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="append-input"]');
+  if (input !== null && input.value !== '') return;
+  refoldPeeked(root);
 }
 
 function selectEntryOrExplain(dispatcher: Dispatcher, lid: string, what: string): boolean {
@@ -2656,10 +2826,12 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔴 **その日の束から足す**(#402 ②)。⚠ **書かない** ── 上の 1 つの欄に
    *   日付を入れて焦点を移すだけである(打ちかけを束ごと失わないため)。
    */
-  'schedule-quick-here': (_dispatcher, target, _services, root) => {
+  'schedule-quick-here': (_dispatcher, target) => {
     const date = target.getAttribute('data-pkc-quick-date') ?? '';
-    const dateEl = root.querySelector<HTMLInputElement>('[data-pkc-field="schedule-quick-date"]');
-    const textEl = root.querySelector<HTMLInputElement>('[data-pkc-field="schedule-quick-text"]');
+    // 🔴 **押した面の欄**を読む(#673 段②)── 予定の面は 2 つ在りうる(下の注記)
+    const face = scheduleFaceOf(target);
+    const dateEl = face?.querySelector<HTMLInputElement>('[data-pkc-field="schedule-quick-date"]');
+    const textEl = face?.querySelector<HTMLInputElement>('[data-pkc-field="schedule-quick-text"]');
     if (dateEl) dateEl.value = date;
     textEl?.focus();
   },
@@ -2676,13 +2848,15 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 面は切り替えない ── user は予定を眺めたまま足したいのであって、
    *   本文へ飛ばされたいわけではない(#300「補助が主の作業領域を奪わない」)。
    */
-  'schedule-quick-add': (dispatcher, _target, services, root) => {
+  'schedule-quick-add': (dispatcher, target, services) => {
     const st = dispatcher.getState();
     if (st.phase !== 'ready') {
       dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから足してください' });
       return;
     }
-    const textEl = root.querySelector<HTMLInputElement>('[data-pkc-field="schedule-quick-text"]');
+    // 🔴 **押した面の欄**を読む(#673 段②)── `root` から引くと別の面の空欄を読む
+    const face = scheduleFaceOf(target);
+    const textEl = face?.querySelector<HTMLInputElement>('[data-pkc-field="schedule-quick-text"]');
     const text = (textEl?.value ?? '').trim();
     if (text === '') {
       // ⚠ **無言で終わらせない**(欄は出ているのに何も起きない dead click になる)
@@ -2690,7 +2864,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     const date =
-      root.querySelector<HTMLInputElement>('[data-pkc-field="schedule-quick-date"]')?.value ?? '';
+      face?.querySelector<HTMLInputElement>('[data-pkc-field="schedule-quick-date"]')?.value ?? '';
     // 🔑 日付の書き方は `line-date.ts` の 1 本(`@2026-08-28`)── ここで綴らない
     const line = `- [ ] ${text}${date === '' ? '' : ` ${formatLineDate(date)}`}`;
     const title = todayNoteTitle(new Date());
@@ -2718,6 +2892,80 @@ const ACTIONS: Record<string, ActionHandler> = {
     });
     if (textEl) textEl.value = '';
     void services;
+  },
+  /**
+   * 🔴 **連絡先の面から、その場で 1 件足す**(#278 段③。user 裁定 2026-09-04)。
+   *
+   * > user の物語: 連絡先タブを眺めている。名刺をもらった人を足したい。
+   * > いまは足す口が無い ── ノートを作る → 先頭に `---` / `tel:` … と手で書く → 戻る。
+   *
+   * 🔑 **書く形は取込と同じ 1 本**(`vcfNoteOf`)── frontmatter の鍵の綴りを
+   *   ここで 2 度目に書かない(§7)。名前だけなら囲みは書かれない(同じ規則)。
+   * ⚠ **電話・メールの妥当性は書く側で弾かない** ── 原値のまま書く。押せない宛先を
+   *   字のまま出す規則は `contacts.ts` が持つ(2 か所で判定しない)。
+   * ⚠ 欄は**押した面**から引く(`closest`)── 連絡先の面は左のタブと中央の 2 つ在りうる
+   *   (`root.querySelector` は先に描かれた左の空欄を読む ── 予定の `scheduleFaceOf` と同型)。
+   * ⚠ 面は切り替えない・編集にも入らない(眺めたまま足す ── #300)。
+   * 🔴 **一覧は「書込が着いてから」集め直す**(CLAUDE.md §7、2026-08-17 の実測)──
+   *   走査は書込の chain の**外**を通るので、待たずに頼むと作る前の一覧が返る。
+   */
+  'contacts-quick-add': (dispatcher, target, services) => {
+    const st = dispatcher.getState();
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから足してください' });
+      return;
+    }
+    const box = target.closest<HTMLElement>('[data-pkc-field="contacts-quick"]');
+    const field = (name: string): HTMLInputElement | null =>
+      box?.querySelector<HTMLInputElement>(`[data-pkc-field="contacts-quick-${name}"]`) ?? null;
+    const read = (name: string): string => (field(name)?.value ?? '').trim();
+    const name = read('name');
+    if (name === '') {
+      // ⚠ **無言で終わらせない**(欄は出ているのに何も起きない dead click になる)
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '名前を入力してください' });
+      return;
+    }
+    const tel = read('tel');
+    const email = read('email');
+    const org = read('org');
+    const { title, body } = vcfNoteOf({
+      name,
+      tels: tel === '' ? [] : [tel],
+      emails: email === '' ? [] : [email],
+      orgParts: org === '' ? [] : [org],
+      birthday: '',
+      notes: [],
+      others: [],
+    });
+    const lid = generateLid();
+    dispatcher.dispatch({
+      type: 'CREATE_ENTRY',
+      archetype: 'text',
+      lid,
+      title,
+      body,
+      parentLid: null,
+      relationId: generateLid(),
+      // ⚠ **編集に入らない**(連絡先を眺めたまま足したいので、面を奪わない)
+      edit: false,
+    });
+    // ⚠ 作れなかった回(lid 衝突 ── reducer が理由を立てる)は欄を消さない(打った字を失わせない)
+    if (!dispatcher.getState().entryMetas.has(lid)) return;
+    // ⚠ 連絡できない(電話もメールも無い)ノートはこの面に並ばない ── 黙らない
+    if (tel === '' && email === '')
+      dispatcher.dispatch({
+        type: 'OP_NOTICE',
+        message: `「${title}」を作りました(電話かメールを書くと連絡先に並びます)`,
+      });
+    for (const f of ['name', 'tel', 'email', 'org']) {
+      const el = field(f);
+      if (el) el.value = '';
+    }
+    field('name')?.focus();
+    // 🔑 一覧は走査の結果から出る ── 作っただけでは並ばないので、着いてから集め直す
+    void Promise.resolve(services.settle?.() ?? null).then(() =>
+      dispatcher.dispatch({ type: 'REFRESH_CONTACT_SCAN' }),
+    );
   },
   'open-today': (dispatcher, _target, services) => {
     const st = dispatcher.getState();
@@ -2816,8 +3064,12 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: '集める条件にするタグを入力してください' });
       return;
     }
+    // 🔑 前の回に入らなかった名前は、この回の字に混ぜない(#640 案 A)
+    dispatcher.dispatch({ type: 'CLEAR_REFUSED_TAGS', field: 'smart-cond' });
     for (const tag of tags) dispatcher.dispatch({ type: 'SMART_COND', lid, tag, mode: 'add' });
-    // 🔑 通したら欄を空にする(次の 1 つを打てる)── ⚠ 断ったときは残す
+    // 🔑 通したら欄を空にする(次の 1 つを打てる)── ⚠ 断ったときは残す。
+    //    ⚠ 断りは後から来る ── 入らなかった名前は効果層が `TAGS_REFUSED` で返し、
+    //    描く側(`filer.ts`)が欄へ戻す(#640 案 A)
     if (field) field.value = '';
   },
   /**
@@ -3086,7 +3338,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const side = dualSide(target) ?? dispatcher.getState().dual.focus;
     const st = dispatcher.getState();
     if (st.phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから写してください' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してからコピーしてください' });
       return;
     }
     const rows = dualPaneRows(st, side);
@@ -3099,13 +3351,13 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (lids.length === 0) {
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: '写すものを選んでください(行を押すと選べます)',
+        error: 'コピーするものを選んでください(行を押すと選べます)',
       });
       return;
     }
     const read = services.readBodies;
     if (!read) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この版では写せません' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この版ではコピーできません' });
       return;
     }
     const to = otherSide(side);
@@ -3155,11 +3407,11 @@ const ACTIONS: Record<string, ActionHandler> = {
           type: 'OP_FAILED',
           error:
             missing > 0
-              ? `${steps.length} 件を「${where}」へ写しました(うち ${missing} 件は本文を読めず、空で作りました)`
-              : `${steps.length} 件を「${where}」へ写しました`,
+              ? `${steps.length} 件を「${where}」へコピーしました(うち ${missing} 件は本文を読めず、空で作りました)`
+              : `${steps.length} 件を「${where}」へコピーしました`,
         });
       },
-      () => dispatcher.dispatch({ type: 'OP_FAILED', error: '写せませんでした(本文を読めません)' }),
+      () => dispatcher.dispatch({ type: 'OP_FAILED', error: 'コピーできませんでした(本文を読めません)' }),
     );
   },
   /** ⚠ 鍵(`Delete`)と**同じ実体**を押しボタンからも呼ぶ(規則を 2 つ作らない)。 */
@@ -3468,6 +3720,37 @@ const ACTIONS: Record<string, ActionHandler> = {
       const item = items.find((s) => s.lid === picked.lid);
       if (item === undefined) return;
       writeBack(ta, insertSnippet(sel, item.body, new Date()));
+    });
+  },
+  /**
+   * 🔴 **図を入れる ── 押すと 5 種から選ぶ**(#528 案 B。user 裁定 2026-09-04)。
+   *
+   * ⚠ 直す前の「図」は `format-text`(`op: 'mermaid'`)で、**必ず `graph TD` が入った**
+   *   ── UML の雛形は在るのに、「図」を押した人はそこへ辿り着けなかった。
+   * ⚠ 作りは `insert-snippet` と同じ ── **caret を先に控え**、器(`pickDiagramInApp`)が
+   *   返ってから**欄を引き直し**、挿すのは既にある `insertBlock` に渡す(ここで組み立てない)。
+   * ⚠ 何が並ぶかは `DIAGRAM_CHOICES`(表が正本)── 表から消えた id は**黙って落とす**
+   *   (無い物を挿そうとして欄を空で書き戻すほうが悪い)。
+   */
+  'insert-diagram': (_dispatcher, _target, _services, root) => {
+    const opened = formatTarget(root);
+    if (opened === null) return;
+    const at = { start: opened.selectionStart, end: opened.selectionEnd };
+    void pickDiagramInApp(
+      root,
+      DIAGRAM_CHOICES.map((d) => ({ id: d.id, label: d.label })),
+    ).then((id) => {
+      if (id === null) return;
+      const tpl = DIAGRAM_CHOICES.find((d) => d.id === id);
+      if (tpl === undefined) return;
+      // ⚠ 欄は引き直す(開いている間に面が組み直されると、最初の節点は繋がっていない)
+      const ta = formatTarget(root);
+      if (ta === null) return;
+      ta.focus();
+      // ⚠ 範囲外は `setSelectionRange` が丸める(短くなっていても落ちない)
+      ta.setSelectionRange(at.start, at.end);
+      const sel = { text: ta.value, start: ta.selectionStart, end: ta.selectionEnd };
+      writeBack(ta, insertBlock(sel, tpl.block));
     });
   },
   'format-text': (_dispatcher, target, _services, root) => {
@@ -3836,11 +4119,12 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 束が無い日(予定 0 件)は**何も起きない** ── 空の束を作ると、
    *   押しても何も無い見出しが増える。
    */
-  'schedule-pick-day': (_dispatcher, target, _services, root) => {
+  'schedule-pick-day': (_dispatcher, target) => {
     const date = target.getAttribute('data-pkc-drop-date');
     if (date === null) return;
-    root
-      .querySelector(`[data-pkc-region="schedule-group"][data-pkc-drop-date="${date}"]`)
+    // 🔴 **押した面の束**へ送る(#673 段②)── 予定の面は 2 つ在りうる(`scheduleFaceOf`)
+    scheduleFaceOf(target)
+      ?.querySelector(`[data-pkc-region="schedule-group"][data-pkc-drop-date="${date}"]`)
       ?.scrollIntoView({ block: 'nearest' });
   },
   'retry-persist': (dispatcher) => dispatcher.dispatch({ type: 'RETRY_PERSIST' }),
@@ -4072,7 +4356,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     const plain = stripDialect(body);
     if (services.copyText === undefined) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この版では写せません' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この版ではコピーできません' });
       return;
     }
     /**
@@ -4125,6 +4409,137 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (line === null || refuseStaleMenu(dispatcher, target)) return;
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
     pickAppendTarget(dispatcher, root, line);
+  },
+  /**
+   * 🔴 **その章を原文の Markdown でまるごと写す**(#677。user 裁定 2026-09-04)。
+   *
+   * 範囲は「見出しの行 〜 次の同段以上の見出しの直前」(`chapterSpanOf` ── 畳みと同じ
+   * 塊の数え方)。⚠ 写すのは **frontmatter を剥いだ本文**の行 ── 刻印がその座標なので、
+   *   全文 body で切ると frontmatter の行数ぶんずれた別の章を写す。
+   * ⚠ 見出しが引けなければ理由を出す(押した瞬間にメニューは畳まれるので、黙って
+   *   `return` すると dead click になる ── `refuseStaleMenu` と同じ理由)。
+   */
+  'copy-chapter-md': (dispatcher, target, services) => {
+    const line = menuCarriedLine(target);
+    if (line === null || refuseStaleMenu(dispatcher, target)) return;
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    const host = root.querySelector<HTMLElement>('[data-pkc-field="detail-body"]');
+    const heading = host === null ? null : headingAtSourceLine(host, line);
+    const ob = dispatcher.getState().openBody;
+    if (host === null || heading === null || ob === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '章の範囲を読めませんでした(本文を開き直してください)' });
+      return;
+    }
+    const fmBody = bodyBelowFrontmatter(ob.body);
+    const span = chapterSpanOf(host, heading, fmBody.split('\n').length);
+    if (span === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '章の範囲を読めませんでした(本文を開き直してください)' });
+      return;
+    }
+    copySourceLines(dispatcher, services, fmBody, span, '章をコピーしました(Markdown の原文)');
+  },
+  /**
+   * 🔴 **`:::` の塊(囲み / 板)を原文の Markdown でまるごと写す**(#677)。
+   *
+   * 範囲は「開きの `:::` 〜 閉じの `:::`」(`blockSpanAt`)。板なら座標(`x=` / `y=`)も
+   * 開き行に載っているので、そのまま貼れば同じ場所に置かれる。
+   * ⚠ 閉じていない塊は**写さずに断る** ── 末尾まで飲んでいるので「塊」の範囲が無い。
+   *   理由を出す(user はそこで閉じ忘れに気づける)。
+   */
+  'copy-block-md': (dispatcher, target, services) => {
+    const line = menuCarriedBlock(target);
+    if (line === null || refuseStaleMenu(dispatcher, target)) return;
+    const ob = dispatcher.getState().openBody;
+    const fmBody = ob === null ? null : bodyBelowFrontmatter(ob.body);
+    const span = fmBody === null ? null : blockSpanAt(fmBody, line);
+    if (fmBody === null || span === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '塊の範囲を読めませんでした(本文を開き直してください)' });
+      return;
+    }
+    if (span.open) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: 'この塊は閉じていないのでコピーできません(閉じの ::: を足してください)',
+      });
+      return;
+    }
+    const board = isPlaceOpen(fmBody.split('\n')[line] ?? '');
+    copySourceLines(
+      dispatcher,
+      services,
+      fmBody,
+      span,
+      board ? '板をコピーしました(Markdown の原文)' : '塊をコピーしました(Markdown の原文)',
+    );
+  },
+  /**
+   * 🔴 **右クリックした所に板を置く**(#676。user 裁定 2026-09-04)。
+   *
+   * 座標はメニューが運んできた物(`MENU_X_ATTR` / `MENU_Y_ATTR` = 本文の器の左上からの px)。
+   * 書くのは `ADD_PLACE` → reducer の門 → `REQUEST_BODY_REWRITE`(`place-add`)── 本文の末尾に
+   * 空の塊が足され、再描画でその座標に置かれる。編集中の断りは reducer が出す。
+   * ⚠ 座標が読めない形は画面からは起きない(運ぶのは同じ `onContextMenu`)が、
+   *   黙って何も起きないを作らない ── 理由を出す。
+   */
+  'add-place': (dispatcher, target) => {
+    if (refuseStaleMenu(dispatcher, target)) return;
+    const ob = dispatcher.getState().openBody;
+    const x = menuCarriedAt(target, MENU_X_ATTR);
+    const y = menuCarriedAt(target, MENU_Y_ATTR);
+    if (ob === null || x === null || y === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '置く位置を読めませんでした(本文を開き直してください)' });
+      return;
+    }
+    dispatcher.dispatch({ type: 'ADD_PLACE', lid: ob.lid, x, y });
+  },
+  /**
+   * 🔴 **右クリックした板を消す**(#676)── 置けるなら消せる(user 指示 2026-08-23)。
+   *
+   * ⚠ 取り消せない(板の書換は履歴を伸ばさない amend)ので**確認を挟む**(`delete-entry` と
+   *   同じ `confirmThen`)。⚠ confirm より**前**に編集中を断る ── 確認まで出してから黙って
+   *   捨てる形にしない(`delete-entry` と同じ理由)。
+   * ⚠ 行はメニューが運んだ塊の開き行(frontmatter を剥いだ座標)── reducer は生の body の
+   *   行番号を受けるので、`frontmatterLineCount` を足して渡す(`bodySourceLineAt` と同じ規律)。
+   */
+  /**
+   * 🔴 **右クリックした板を前へ出す**(#676 段②)── 他の板の z= の最大 + 1 を書く。
+   * 確認は要らない(重なりの順が変わるだけで、もう一度別の板を前へ出せば戻る)。
+   * ⚠ 行の座標は `remove-place` と同じ(刻印 + frontmatter ぶん)。
+   */
+  'raise-place': (dispatcher, target) => {
+    const line = menuCarriedBlock(target);
+    if (line === null || refuseStaleMenu(dispatcher, target)) return;
+    const ob = dispatcher.getState().openBody;
+    if (ob === null) return;
+    dispatcher.dispatch({ type: 'RAISE_PLACE', lid: ob.lid, line: line + frontmatterLineCount(ob.body) });
+  },
+  'remove-place': (dispatcher, target, _services, root) => {
+    const line = menuCarriedBlock(target);
+    if (line === null || refuseStaleMenu(dispatcher, target)) return;
+    const st = dispatcher.getState();
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから、板を消してください' });
+      return;
+    }
+    const ob = st.openBody;
+    if (ob === null) return;
+    const lid = ob.lid;
+    confirmThen(
+      root,
+      'この板を本文から消しますか?(中に書いた字も消えます。取り消せません)',
+      { okLabel: '消す', danger: true },
+      dispatcher,
+      () => {
+        const now = dispatcher.getState();
+        if (now.phase !== 'ready') return '編集を終了してから、板を消してください';
+        if (now.openBody?.lid !== lid) return '別のノートに切り替わったので、板は消していません';
+        return null;
+      },
+      () => {
+        const body = dispatcher.getState().openBody?.body ?? '';
+        dispatcher.dispatch({ type: 'REMOVE_PLACE', lid, line: line + frontmatterLineCount(body) });
+      },
+    );
   },
   /**
    * 🔴 **よく開くサイトをアプリ一覧に足す**(#401 ①)。
@@ -4967,6 +5382,10 @@ const ACTIONS: Record<string, ActionHandler> = {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
     if (target instanceof HTMLInputElement) services.setNoticesEnabled?.(target.checked);
   },
+  'set-too-narrow-enabled': (_dispatcher, target, services) => {
+    // ⚠ `set-notices-enabled` と同じ作法 ── checkbox の `checked` をそのまま渡す
+    if (target instanceof HTMLInputElement) services.setTooNarrowEnabled?.(target.checked);
+  },
   'next-announce': (_dispatcher, _target, services) => {
     services.nextAnnounce?.();
   },
@@ -5074,7 +5493,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       // 🔑 無言で終わらせない(押した人に理由が要る)
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: '別の窓で開くノートがありません(先にノートを開いてください)',
+        error: '別のウィンドウで開くノートがありません(先にノートを開いてください)',
       });
       return;
     }
@@ -5348,6 +5767,15 @@ export const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
   // 🔴 追記欄も同じ形で押す(#609)── 3 面で押し方を変えない
   'toggle-append': '[data-pkc-action="toggle-pane"][data-pkc-pane="append"]',
   'view-query': '[data-pkc-action="set-view"][data-pkc-view="query"]',
+  /**
+   * 🔴 **開いているノートを別のウィンドウで開く**(#690 I5)── 「操作を探す」と
+   *   近道の両方の受け手。⚠ **情報ペインのボタンに限る** ── 右クリック / ⋯ の
+   *   同名ボタンは押した行の lid を持つので、document 順で先に当たると
+   *   **選んでいる物と違うノート**が開く。
+   * ⚠ ノートを選んでいない間は情報ペインに帯が無い(`shape === 'empty'`)ので、
+   *   「操作を探す」は「いまこの操作のボタンが画面に出ていません」と正しく言う。
+   */
+  'open-note-window': '[data-pkc-field="inspector-actions"] [data-pkc-action="open-note-window"]',
   'open-settings': '[data-pkc-action="set-view"][data-pkc-view="settings"]',
   'open-flags': '[data-pkc-action="set-view"][data-pkc-view="flags"]',
   'open-help': '[data-pkc-action="set-view"][data-pkc-view="help"]',
@@ -5436,6 +5864,8 @@ export const CARET_TOOLS: ReadonlySet<string> = new Set([
   'insert-date',
   'insert-entry-link',
   'insert-snippet',
+  // ⚠ 2026-09-04(#528 案 B): 図の一覧 ── 同じく編集中の本文へ挿す
+  'insert-diagram',
   'renumber-lists',
 ]);
 
@@ -5512,12 +5942,31 @@ export function bindActions(
     if (!handler) return;
     if (refuseWhileBusy(action, dispatcher, services)) return;
     if (refuseWithoutNote(action, dispatcher)) return;
+    /**
+     * 🔴 **押す前から**見せていたときだけ畳み直す(#655 ①)── `append-at-heading`
+     *   自身が開いた回に、その直後のここで畳んでしまわない(開いた瞬間に消える)。
+     */
+    const peekedBefore = appPanes.isPeeking();
     handler(dispatcher, el, services, root);
+    if (peekedBefore) refoldAppendAfterAction(root, el);
     if (DUAL_REBUILDS_CLICKED.has(action)) {
       const side = dualSide(el);
       if (side !== null) carryDualFocus(side);
     }
   };
+  /**
+   * 🔴 **長押しで印を足す**(#687 D-1)── 指だけの端末の Ctrl クリック。
+   * ⚠ 判定と時計は `long-press.ts` が持ち、ここは**撃つ物**と**捨てる物**だけを
+   *   決める:発火 = `DUAL_SELECT toggle`(Ctrl クリックと同じ action)、
+   *   直後の `click` / `contextmenu` / 待っている間の `dragstart` は下の 3 か所で捨てる。
+   * ⚠ 側と lid は**押した行から辿る**(`dualSide`)── 他の `dual-row` の経路と同じ。
+   */
+  const longPress = installLongPress(root, (row) => {
+    const side = dualSide(row);
+    const lid = row.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
+    if (side !== null && lid !== null)
+      dispatcher.dispatch({ type: 'DUAL_SELECT', side, lid, mode: 'toggle' });
+  });
   const onClick = (ev: Event) => {
     /**
      * 🔴 **読んでいる本文を、押した所から扱う 2 つの道**(#395 段③ / #495)。
@@ -5620,6 +6069,16 @@ export function bindActions(
      * ファイラだと思って触る)。
      * ⚠ 側は**押した行**から辿る(`dualSide`)── state の焦点から推測しない。
      */
+    /**
+     * 🔴 **長押しの直後の `click` は捨てる**(#687 D-1)。
+     * ⚠ 指を離すとブラウザは `click` を撃つ ── 下へ流すと `set` が走って
+     *   **足したばかりの印が 1 件に戻り**、さらに `maybeEnterFolder` が
+     *   「1 回目」を数えて、次のタップでフォルダへ入る。**両方を素通りさせない**。
+     */
+    if (el.getAttribute('data-pkc-action') === 'dual-row' && longPress.swallowsClick()) {
+      ev.preventDefault();
+      return;
+    }
     if (
       el.getAttribute('data-pkc-action') === 'dual-row' &&
       (me.ctrlKey || me.metaKey || me.shiftKey)
@@ -6088,7 +6547,7 @@ export function bindActions(
            *   ⚠ `capture.ts` の同じ注記が既にこれを戒めている(踏み直した)。
            * 🔑 いまは取込の知らせと**同じ 1 行**に出る ──
            *   「編集欄が閉じたため、打っていた所へは差せませんでした。「猫.png」を
-           *   本文に入れました」。
+           *   本文のいちばん下に入れました」。
            */
           services.attachFiles(
             [...files],
@@ -6556,6 +7015,19 @@ export function bindActions(
   const onDragStart = (e: Event): void => {
     const de = e as DragEvent;
     /**
+     * 🔴 **指で長押しを待っている行は、掴ませない**(#687 D-1)。
+     * ⚠ 行は `draggable` なので、指で押さえている間にブラウザが drag を始めると、
+     *   **印を足すつもりの指が行を運び出す**。⚠ Android の drag が 500ms より
+     *   先に始まるかは実機でしか決まらない ── 先なら止まり、後なら drag が勝つ
+     *   (そのときは印が付いた行を運ぶ形になる)。
+     * ⚠ マウスは時計が掛からない(`pendingTouch` は指だけ)ので、これまでどおり掴める。
+     */
+    const pressedRow = (de.target as HTMLElement | null)?.closest<HTMLElement>(LONG_PRESS_ROW);
+    if (pressedRow !== null && pressedRow !== undefined && longPress.pendingTouch(pressedRow)) {
+      e.preventDefault();
+      return;
+    }
+    /**
      * 🔴 **予定の札は別の荷物で運ぶ**(双方向)。
      * ⚠ 行番号は**中の印から引く** ── 札にも同じ属性を置くと、
      *   `[data-pkc-task-line=…]` を押す既存の経路が**札のほうに当たる**
@@ -6752,6 +7224,19 @@ export function bindActions(
   const onContextMenu = (ev: MouseEvent): void => {
     const target = ev.target;
     if (!(target instanceof Element)) return;
+    /**
+     * 🔴 **長押し中 / 直後の行では、メニューを出さない**(#687 D-1)。
+     * ⚠ Android は長押しで `contextmenu` を撃つ ── 既定を残すと **OS のメニュー**が、
+     *   下へ流すと**この面のメニュー**が、足したばかりの印の上に重なる。
+     *   長押しの意味は「印を足す」1 つにする(2 つ同時に起きる操作を作らない)。
+     * ⚠ マウスの右クリックは `pointerType === 'mouse'` なので時計が掛からず、
+     *   ここは通らない(これまでどおりメニューが出る)。
+     */
+    const pressed = target.closest(LONG_PRESS_ROW);
+    if (pressed !== null && longPress.holds(pressed)) {
+      ev.preventDefault();
+      return;
+    }
 
     /**
      * ⚠ 既定を残す場面 ── ここで返すと、ブラウザのメニューがそのまま出る。
@@ -6774,7 +7259,16 @@ export function bindActions(
       if (range.intersectsNode(target)) return;
     }
 
-    const row = target.closest('[data-pkc-entry]');
+    /**
+     * 🔴 **読む本文の中の `[data-pkc-entry]` は「行」ではない**(#677)。
+     *
+     * ⚠ 板の題名札(`place-board.ts` の `ensureCard`)は `select-entry` のために lid を
+     *   持っている。ここで行と読むと `selectEntryOrExplain` が**そのノートへ切り替えて**
+     *   板が消え、出るのは**別ノートの行メニュー**になる(押した物と効く先が食い違う)。
+     * 🔑 読む本文の中の物は下の本文の枝で受ける(板の上なら「この板をコピー」が出る)。
+     */
+    const hit = target.closest('[data-pkc-entry]');
+    const row = hit !== null && hit.closest('[data-pkc-field="detail-body"]') !== null ? null : hit;
     const lid = row?.getAttribute('data-pkc-entry') ?? null;
     if (row === null || lid === null || lid === '') {
       /**
@@ -6817,7 +7311,20 @@ export function bindActions(
        *   「右ペインには出るのにメニューには出ない」が静かに生まれる(§7)。
        */
       const ob = dispatcher.getState().openBody;
-      const body = bodyMenuActions({ externalImages: ob ? externalImageUrls(ob.body).length : 0 });
+      /**
+       * 🔴 **見出し・本文の項目に近道の字を添える**(#587 改善 C 案 2)。
+       * 🔑 何を添えるかは `menuShortcutFor` 1 か所 ── ここは mac かどうかと、
+       *   **いまの割当**(`appKeymap`)を渡すだけ(user が割当を変えれば字も変わる)。
+       */
+      const withShortcut = <T extends { readonly action: string }>(
+        a: T,
+      ): T & { readonly shortcut: string } => ({
+        ...a,
+        shortcut: menuShortcutFor(a.action, { mac: isMac(), chord: (id) => chordHint(id, appKeymap) }),
+      });
+      const body = bodyMenuActions({
+        externalImages: ob ? externalImageUrls(ob.body).length : 0,
+      }).map(withShortcut);
       /**
        * 🔴 **見出しの上なら、見出しの 3 つを頭へ足す**(#426 段② の残り)。
        *
@@ -6855,37 +7362,82 @@ export function bindActions(
        *   `####` 以下で出すと**押した見出しではなく上の `###`** が入り先になる。
        */
       const level = heading === null ? 0 : headingLevel(heading);
-      openContextMenu(
-        root,
-        { x: ev.clientX, y: ev.clientY },
-        heading === null || line === null
-          ? body
-          : [
-              ...headingMenuActions({
-                folded: isHeadingFolded(heading),
-                foldable: heading.parentElement === host,
-                appendable: level >= 1 && level <= 3 && appendModeOf(dispatcher.getState()).kind === 'ready',
-              }),
-              ...body,
-            ],
-        root.ownerDocument.activeElement,
-        /**
-         * 🔴 **身元は常に運ぶ**(着地前レビュー ⚠5)。⚠ 1 稿目は見出しのときだけ
-         * 積んでいたので、**本文を右クリックしたときは lid を運んでいなかった** ──
-         * そこに載る `adopt-external-images` は**外へ通信して本文を書き換える**ので、
-         * 取り違えの実害がいちばん大きい。行は見出しのときだけでよい。
-         */
-        line === null
-          ? { [MENU_LID_ATTR]: dispatcher.getState().openBody?.lid ?? '' }
-          : {
-              [MENU_LINE_ATTR]: String(line),
-              [MENU_LID_ATTR]: dispatcher.getState().openBody?.lid ?? '',
-            },
-      );
+      /**
+       * 🔴 **`:::` の塊の上なら「この塊をコピー」を足す**(#677)。
+       *
+       * ⚠ 見出しと**排他にしない** ── `:::` の中の見出しを右クリックしたら、見出しの物と
+       *   塊の物が**両方**要る(どちらかを落とすと、その場所でだけ動線が 1 つ消える)。
+       * ⚠ 判定は原文で行う(`directiveBlockAt`)── 座標は刻印と同じ「frontmatter を
+       *   剥いだ本文」なので、全文 body ではなく `bodyBelowFrontmatter` を渡す。
+       */
+      const block =
+        host === null || ob === null ? null : directiveBlockAt(host, target, bodyBelowFrontmatter(ob.body));
+      const items = [
+        ...(heading === null || line === null
+          ? []
+          : headingMenuActions({
+              folded: isHeadingFolded(heading),
+              foldable: heading.parentElement === host,
+              appendable: level >= 1 && level <= 3 && appendModeOf(dispatcher.getState()).kind === 'ready',
+              // 🔴 近道の字を右に添える(#587 C 案 2)── 見出しの項目だけ(塊 / 板 / 本文には無い)
+            }).map(withShortcut)),
+        ...(block === null ? [] : blockMenuActions({ board: block.board })),
+        // 🔴 板を置く口は**いつも**出す(#676)── 押した座標は下の carry が運ぶ
+        ADD_PLACE_ACTION,
+        ...body,
+      ];
+      /**
+       * 🔴 **身元は常に運ぶ**(着地前レビュー ⚠5)。⚠ 1 稿目は見出しのときだけ
+       * 積んでいたので、**本文を右クリックしたときは lid を運んでいなかった** ──
+       * そこに載る `adopt-external-images` は**外へ通信して本文を書き換える**ので、
+       * 取り違えの実害がいちばん大きい。行は見出しのときだけ、塊の開き行は塊のときだけ。
+       */
+      const carry: Record<string, string> = { [MENU_LID_ATTR]: ob?.lid ?? '' };
+      if (line !== null) carry[MENU_LINE_ATTR] = String(line);
+      if (block !== null) carry[MENU_BLOCK_ATTR] = String(block.line);
+      if (host !== null) {
+        // 🔴 押した所を**器の座標**へ写して運ぶ(#676)── 受け手はメニューの器の中に居るので、
+        //    押した瞬間の座標はここでしか読めない。負は 0 で止める(描画は負を捨てる)
+        const r = host.getBoundingClientRect();
+        carry[MENU_X_ATTR] = String(Math.max(0, Math.round(ev.clientX - r.left - host.clientLeft + host.scrollLeft)));
+        carry[MENU_Y_ATTR] = String(Math.max(0, Math.round(ev.clientY - r.top - host.clientTop + host.scrollTop)));
+      }
+      openContextMenu(root, { x: ev.clientX, y: ev.clientY }, items, root.ownerDocument.activeElement, carry);
       return;
     }
 
     ev.preventDefault();
+    /**
+     * 🔴 **書いている最中でも、「別の窓で開く」だけは出す**(#690 ④ A′、
+     *   user 裁定 2026-09-04)。
+     *
+     * ⚠ 直す前は編集中の行の右クリックが**必ず断られ**(下の `selectEntryOrExplain`)、
+     *   右の情報のボタンも全部 `disabled` ── 書きながら別のノートを参照するには
+     *   **下書きを閉じるしか無かった**。付箋は中央を動かさないので、断る理由が無い。
+     * 🔑 **行は選ばない**(`SELECT_ENTRY` を撃たない)── 下書きも中央のノートも
+     *   動かさない。lid は**メニューのボタン自身に `data-pkc-entry` として載せる**ので、
+     *   受け手(`open-note-window`)は「押した行のノート」という**いつもの規則**で拾う
+     *   (規則を 2 本にしない ── §7)。
+     * ⚠ `MENU_PREV_LID_ATTR` は付けない ── 戻す相手が居ない(何も動かしていない)。
+     * ⚠ 情報ペインのボタンは**有効にしない** ── 編集中に選ばれているのは
+     *   書いているノート自身なので、押すと同じノートの窓がもう 1 枚出るだけである。
+     */
+    if (dispatcher.getState().phase === 'editing') {
+      if (!dispatcher.getState().entryMetas.has(lid)) {
+        // ⚠ 無言で終わらせない(`selectEntryOrExplain` と同じ字)
+        dispatcher.dispatch({ type: 'OP_FAILED', error: 'ノートが見つかりません' });
+        closeContextMenu(root);
+        return;
+      }
+      openContextMenu(
+        root,
+        { x: ev.clientX, y: ev.clientY },
+        editingRowMenuActions(),
+        root.ownerDocument.activeElement,
+        { 'data-pkc-entry': lid },
+      );
+      return;
+    }
     // 🔑 **選び直す前**の現在地を控える(`open-note-window` が戻す ── 上の
     //    `MENU_PREV_LID_ATTR`)。⚠ 順番が主張である:`selectEntryOrExplain` の
     //    後だと、控えるのは**押した行そのもの**になって何も戻らない
@@ -7697,5 +8249,6 @@ export function bindActions(
     root.removeEventListener('focusout', onRenameBlur);
     doc.removeEventListener('keydown', onShortcut);
     root.removeEventListener('keydown', onKeydown);
+    longPress.dispose();
   };
 }

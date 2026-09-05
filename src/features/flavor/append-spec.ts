@@ -13,6 +13,7 @@
  * 「ボタンは出るが何も起きない」/「押せないが機構はある」がすぐ生える。
  */
 import { formatHeadingTimestamp } from './textlog-flavor';
+import { archetypeLabel } from './archetype-label';
 
 /**
  * 追記の導線を出す archetype。
@@ -23,6 +24,18 @@ export const APPENDABLE_ARCHETYPES: ReadonlySet<string> = new Set(['text', 'text
 
 export function isAppendable(archetype: string | undefined): boolean {
   return archetype !== undefined && APPENDABLE_ARCHETYPES.has(archetype);
+}
+
+/**
+ * 🔴 **本文に入れられる種類を、user の言葉で**(#668 A)──「ノートとログ」。
+ *
+ * ⚠ 断り文に「追記できない種類」とだけ書くと、user は**どれなら入るのか**を
+ *   知りようがない(開いているのが何なのかも言っていなかった)。
+ * 🔑 一覧は `APPENDABLE_ARCHETYPES` から組む ── 種類を足したら字も一緒に変わる
+ *   (綴りを 2 か所に持たない。§7)。名前は `archetype-label.ts` の 1 か所から引く。
+ */
+export function appendableKindsLabel(): string {
+  return [...APPENDABLE_ARCHETYPES].map(archetypeLabel).join('と');
 }
 
 /**

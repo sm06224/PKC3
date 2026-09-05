@@ -19,7 +19,7 @@ import { buildShell } from '../../src/adapter/ui/render/shell';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { appPhone } from '../../src/adapter/ui/render/phone-layout';
 import { appPanes, applyPaneVisibility } from '../../src/adapter/ui/render/pane-visibility';
-import { PHONE_MAX_PX, PHONE_MIN_PX } from '../../src/features/phone-layout';
+import { PHONE_MAX_HEIGHT_PX, PHONE_MAX_PX, PHONE_MIN_PX } from '../../src/features/phone-layout';
 import { ENTRY_MENU_ACTIONS, NOTE_TOOL_ACTIONS } from '../../src/features/entry-actions';
 import { blocksFor, decl, mediaBlock, stripComments, withoutMedia } from '../helpers/css-blocks';
 
@@ -992,12 +992,54 @@ describe('対応外の幅(変わったときだけ伝える)', () => {
       asked.push(q);
       return new FakeMedia(false);
     });
+    /**
+     * 🔴 1 本目は **幅か高さ**(#663)── `,` は media query の OR。
+     * ⚠ 高さの項を落とす変異はここで落ちる(横向きのスマホが 2 列版面へ戻る)。
+     */
     expect(asked, '見張りの本数が違う').toEqual([
-      `(max-width: ${PHONE_MAX_PX}px)`,
+      `(max-width: ${PHONE_MAX_PX}px), (max-height: ${PHONE_MAX_HEIGHT_PX}px)`,
       `(max-width: ${PHONE_MIN_PX - 1}px)`,
     ]);
     // ⚠ 空振り防止 ── 2 本が**別の幅**を聞いている(同じ字なら片方は無意味である)
     expect(asked[0], '2 本が同じ幅を聞いている').not.toBe(asked[1]);
+  });
+});
+
+/**
+ * 🔴 **横に倒したスマホ(高さ 480px 以下)もスマホ用画面にする**(#663)。
+ *
+ * ⚠ 替え玉の台なので「幅 844 / 高さ 390」を直接は測れない ── 測れるのは
+ *   **高さの問い合わせが真になったとき、版面の属性が付くか**である
+ *   (実ブラウザの寸法は `tests/smoke/phone.smoke.spec.ts` の 844×390 の腕)。
+ * 🔑 替え玉は**問い合わせの字を読んで**答える ── 高さの項が query に無ければ
+ *   `false` を返すので、項を落とす変異はここでも落ちる(上の等値 pin と 2 重)。
+ */
+describe('高さでも切る(#663)', () => {
+  function install(answer: (q: string) => boolean) {
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    document.body.append(root);
+    buildShell(root);
+    appPhone.install(root, (q) => new FakeMedia(answer(q)));
+    appPhone.render({ selectedLid: null, viewMode: 'detail', editing: false, title: '' });
+    return root.querySelector<HTMLElement>('[data-pkc-region="shell"]')!;
+  }
+
+  it('🔴 高さ 480px 以下の問い合わせだけが真でも、スマホ用画面になる', () => {
+    const shell = install((q) => q.includes(`(max-height: ${PHONE_MAX_HEIGHT_PX}px)`));
+    expect(shell.getAttribute('data-pkc-layout'), '横向きのスマホが 2 列版面のまま').toBe('phone');
+  });
+
+  it('⚠ 対照群: 幅も高さも足りている(1280×720)ならスマホ用画面にならない', () => {
+    // 1280×720 = 幅 720 超・高さ 480 超なので、どの問い合わせも偽
+    const shell = install(() => false);
+    expect(shell.getAttribute('data-pkc-layout'), '広い窓なのにスマホ用画面').not.toBe('phone');
+  });
+
+  it('⚠ 対照群: 別の高さ(720px)を聞く替え玉では真にならない(項の字が違えば効かない)', () => {
+    // ⚠ 実装が `(max-height: 720px)` などへ書き換わったら、上の等値 pin と共にここも落ちる
+    const shell = install((q) => q.includes('(max-height: 720px)'));
+    expect(shell.getAttribute('data-pkc-layout'), '聞いていない高さで切り替わった').not.toBe('phone');
   });
 });
 
@@ -1011,6 +1053,8 @@ describe('CSS(構文で読む)', () => {
     const text = bare();
     expect(text, `CSS に ${PHONE_MAX_PX}px が在る`).not.toContain(`${PHONE_MAX_PX}px`);
     expect(text, `CSS に ${PHONE_MIN_PX - 1}px が在る`).not.toContain(`${PHONE_MIN_PX - 1}px`);
+    // #663 ── 高さの境目も同じ規律(CSS に書くと JS と別の高さで切り替わる)
+    expect(text, `CSS に ${PHONE_MAX_HEIGHT_PX}px が在る`).not.toContain(`${PHONE_MAX_HEIGHT_PX}px`);
     // ⚠ 空振り防止 ── 幅で切る `@media` そのものは残っている(1100 / 900)
     expect(text, '幅の @media が 1 つも無い(この検査は何も見ていない)').toContain(
       '@media (max-width: 1100px)',
@@ -1219,6 +1263,39 @@ describe('CSS(構文で読む)', () => {
     expect(phone, 'スマホで出す規則が無い').toMatch(decl('display', 'block'));
     // 🔑 指で押す所の丈は 32px に揃える(user 裁定 2026-09-04)
     expect(phone, '押し所が 32px に揃っていない').toMatch(decl('min-height', '32px'));
+  });
+
+  /**
+   * 🔴 **行き先のボタンは、長いフォルダ名を末尾から省く**(#687 A-1)。
+   * ⚠ 省かないと 375px で 2 行に折れ、押し所の丈が題名しだいで動く
+   *   (下の表が題名 1 つでずれる)。
+   */
+  it('🔴 行き先のボタンは、長い名前を 1 行に収めて末尾から省く', () => {
+    const css = withoutMedia(bare());
+    const phone = blocksFor(css, `${PHONE} [data-pkc-region='dual-switch']`).join(' ');
+    expect(phone, '末尾から省く規則が無い').toMatch(decl('text-overflow', 'ellipsis'));
+    expect(phone, '折り返しを止めていない(2 行になる)').toMatch(decl('white-space', 'nowrap'));
+    expect(phone, 'はみ出しを隠していない').toMatch(decl('overflow', 'hidden'));
+  });
+
+  /**
+   * 🔴 **タブ帯の「左」/「右」は、パソコンでは畳み、スマホでだけ出す**(#687 B-1)。
+   * ⚠ DOM には常に在る(帯を組むたびに作る)ので、出し入れは CSS 1 か所が決める。
+   */
+  it('🔴 タブ帯の側の印は、パソコンでは畳み、スマホでだけ出す', () => {
+    const css = withoutMedia(bare());
+    const base = blocksFor(css, `[data-pkc-field='dual-side-mark']`).join(' ');
+    expect(base, 'パソコンで畳む規則が無い').toMatch(decl('display', 'none'));
+    const phone = blocksFor(css, `${PHONE} [data-pkc-field='dual-side-mark']`).join(' ');
+    expect(phone, 'スマホで出す規則が無い').toMatch(decl('display', 'inline'));
+  });
+
+  /** 🔴 **もう片方の印の知らせは、情報行と同じ見た目**(#687 C-1)── 11px / muted。 */
+  it('🔴 もう片方の印の知らせは、情報行と同じ大きさと色で出る', () => {
+    const css = withoutMedia(bare());
+    const note = blocksFor(css, `[data-pkc-field='dual-other-marks']`).join(' ');
+    expect(note, '規則が無い').toMatch(decl('font-size', '11px'));
+    expect(note, '色が情報と同じでない').toMatch(decl('color', 'var\\(--muted\\)'));
   });
 
   /**

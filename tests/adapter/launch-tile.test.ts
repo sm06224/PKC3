@@ -12,7 +12,8 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { launchTile, EXTERNAL_WINDOW_FEATURES } from '../../src/adapter/ui/launch-tile';
 import { LAUNCHER_APP_SANDBOX } from '../../src/features/launcher/app-shell';
-import { officeTile, type LauncherTile } from '../../src/features/launcher/tiles';
+import { officeTile, withBuiltinTiles, type LauncherTile } from '../../src/features/launcher/tiles';
+import { isViewMode } from '../../src/adapter/state/app-state';
 
 interface FakeWin {
   closed: boolean;
@@ -426,7 +427,8 @@ describe('main.ts の配線(原文 pin ── #174)', () => {
      *   (ここは原文 pin なので、**弱いと自覚して**使う)。
      */
     expect(
-      MAIN.includes('openInPane: (v) => openView(dispatcher, v)'),
+      // ⚠ #673 段②: 退避は `openViewHere`(予定表は左の「予定」タブへ、他は中央の面へ)
+      MAIN.includes('openInPane: (v) => openViewHere(dispatcher, v, openBrowse)'),
       '退避が「開く」になっていない',
     ).toBe(true);
     expect(
@@ -457,6 +459,30 @@ describe('main.ts の配線(原文 pin ── #174)', () => {
     expect(h.viewOpens, '別窓の口へ行かない(無言の dead click)').toEqual(['dual']);
     expect(h.opened, 'ここで直に窓を開いてはいけない(判断は view-window)').toEqual([]);
     expect(h.failures, '理由が出た').toEqual([]);
+  });
+
+  /**
+   * 🔴 **面の名前を持つ組み込みは、どれも別窓の口へ行く**(#673 段②、全数)。
+   *
+   * ⚠ 上の it は `dual` 1 枚しか渡していない ── `if (tile.kind === 'dual')` と名指しに
+   *   戻す変異は**上だけでは生き延びる**(予定表が `assetKey === undefined` へ落ちて
+   *   **無言の dead click** になるのに、緑のまま)。
+   * 🔑 `view-window.test.ts` と同じ規則(`isViewMode(kind)`)で組み込みを全数当てる ──
+   *   名指しの一覧を書かない(面を足した日に、ここが自動で追随する)。
+   */
+  it('🔴 面の名前を持つ組み込みは、どれも別窓の口へ行く(全数)', () => {
+    const views = withBuiltinTiles([], { office: true }).filter((t) => isViewMode(t.kind));
+    // ⚠ 空振り防止 ── 予定表が加わったので 2 枚以上
+    expect(views.length, '面の名前を持つ組み込みが 2 枚未満(空振り)').toBeGreaterThanOrEqual(2);
+    for (const tile of views) {
+      const h = harness(null);
+      void launchTile(tile, h.deps);
+      expect(h.viewOpens, `${tile.kind} が別窓の口へ行かない(無言の dead click)`).toEqual([
+        tile.kind,
+      ]);
+      expect(h.opened, `${tile.kind} がここで直に窓を開いた`).toEqual([]);
+      expect(h.failures, `${tile.kind} で理由が出た`).toEqual([]);
+    }
   });
 
   /**

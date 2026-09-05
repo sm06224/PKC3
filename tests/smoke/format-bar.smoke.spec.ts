@@ -282,3 +282,55 @@ test('🔴 日付の道具が実機で開き、選んだ日付が本文に入る
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **「図」を押すと 5 種から選べる**(#528 案 B。user 裁定 2026-09-04)。
+ *
+ * 🔴 unit(`tests/adapter/format-append.test.ts`)は繋がりを見ている。
+ * **ここが見るのは実ブラウザでしか通らない 2 つ** ── ① `Enter` が焦点のあるボタンを
+ * `click` にする(happy-dom は合成しない)= **鍵だけで選べる** ② `showModal()` が
+ * 実際に焦点を奪ったあとでも **caret の位置**に入る(unit は手で再現しているだけ)。
+ * ⚠ 先に `Escape` の側を通す ── 「閉じて何も入らない」が通ってから「選ぶと入る」を
+ *   見ないと、後者が「何かの理由で常に入る」実装でも緑になる。
+ */
+test('🔴 「図」を押すと 5 種の一覧が出て、Esc なら入らず、↓ Enter で選んだ雛形が入る', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+
+  const ta = page.locator('[data-pkc-field="editor-body"]');
+  await ta.fill('まえ\nうしろ');
+  await ta.evaluate((el) => {
+    (el as HTMLTextAreaElement).setSelectionRange(3, 3);
+  });
+
+  // ① 押すと一覧(5 行)。先頭がフローチャート
+  await clickReal(page, '[data-pkc-action="insert-diagram"]');
+  const rows = page.locator('[data-pkc-field="pick-diagram"]');
+  await expect(rows, '図の一覧が 5 行出ていない').toHaveCount(5);
+  await expect(rows.first()).toHaveText('フローチャート');
+  await expect(rows.first(), '焦点が先頭の行に無い(鍵だけで選べない)').toBeFocused();
+
+  // ② Esc で閉じて、何も入らない
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-pkc-region="app-dialog"]')).toBeHidden();
+  await expect(ta, 'Esc で閉じたのに何か入った').toHaveValue('まえ\nうしろ');
+
+  // ③ もう一度開き、↓ で 2 行目(クラス図)へ移って Enter ── 鍵だけで選ぶ
+  await clickReal(page, '[data-pkc-action="insert-diagram"]');
+  await expect(rows.first()).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(rows.nth(1), '↓ で焦点が 2 行目へ移らない').toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-pkc-region="app-dialog"]')).toBeHidden();
+  // 🔴 caret の位置に、クラス図の雛形が入る。⚠ 後ろに字が続くので `insertBlock` が
+  //    閉じの後に**改行を 1 つ足す**(段落の途中に fence が生えると壊れる)── だから
+  //    閉じとうしろの間は空行 1 つ。⚠ 1 稿目はここを `\n` 1 つで書いて外していた
+  //    (走らせずに書いた regex を node で検算して判明。2026-09-04)
+  await expect(ta, 'クラス図の雛形が caret の位置に入っていない').toHaveValue(
+    /^まえ\n```mermaid\nclassDiagram\n[\s\S]*```\n\nうしろ$/,
+  );
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

@@ -334,6 +334,8 @@ describe('マニュアルの窓 — 焼いた page へ移す(段②)', () => {
     });
     expect(got?.reused).toBe(false);
     expect(win.replaced).toEqual([parts.pageUrl]);
+    // 🔑 開いた窓そのものを返す ── 持ち歩ける 1 枚では `closed` を見張って blob を返す(#648 段③)
+    expect(got?.window).toBe(win);
     // ⚠ 開く URL は空のまま(2 回目に押したとき navigate しないため)── page は replace で移す
     expect(seen).toEqual(['']);
     expect(render, '移すのに描いている(ワーカーを無駄に起こす)').not.toHaveBeenCalled();

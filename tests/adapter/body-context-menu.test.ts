@@ -18,13 +18,21 @@
  * いままで「行の判定がどのみち先に返す」に救われていた。**もう救われない。**
  */
 import { afterEach, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { blocksFor, decl, stripComments, withoutMedia } from '../helpers/css-blocks';
 import { appPanes } from '../../src/adapter/ui/render/pane-visibility';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { bindActions, type BinderServices } from '../../src/adapter/ui/actions/binder';
 import { BODY_MENU_ACTIONS, ENTRY_ACTION_HINTS } from '../../src/features/entry-actions';
-import { openContextMenu } from '../../src/adapter/ui/render/context-menu';
+import { MENU_SHORTCUT_ATTR, openContextMenu } from '../../src/adapter/ui/render/context-menu';
+import { chordHint } from '../../src/adapter/ui/render/shortcut-hint';
 import { sectionAt } from '../../src/features/markdown/append-target';
 import { applyHeadingFold } from '../../src/adapter/ui/render/heading-fold';
+import { applyPlaceLayout } from '../../src/adapter/ui/render/place-board';
+import { renderMarkdown } from '../../src/features/markdown/markdown-render';
+import { bodyBelowFrontmatter, frontmatterLineCount } from '../../src/features/markdown/frontmatter';
+import type { DomainEvent } from '../../src/adapter/state/app-state';
+import { resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
 
 const MENU = '[data-pkc-region="context-menu"]';
 
@@ -129,7 +137,8 @@ describe('本文の右クリック(#426 段② / #522)', () => {
     const acts = [...s.menu()!.querySelectorAll('button[data-pkc-action]')].map((b) =>
       b.getAttribute('data-pkc-action'),
     );
-    expect(acts).toEqual(BODY_MENU_ACTIONS.map((a) => a.action));
+    // ⚠ 「ここに板を置く」(#676)は本文を書き換える物なので `BODY_MENU_ACTIONS` の外 ── 塊の並びの位置
+    expect(acts).toEqual(['add-place', ...BODY_MENU_ACTIONS.map((a) => a.action)]);
     /**
      * 🔴 **「削除」を出さない。**
      * ⚠ 本文を押したのに削除が出ると、消えるのは**選んでいるノート**である ──
@@ -470,28 +479,63 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     const r = rig();
     rightClick(r.head);
     const acts = r.acts();
-    expect(acts.slice(0, 3), '見出しの 3 つが出ていない').toEqual([
+    // ⚠ 4 つ目「この章をコピー」は #677 で足した(既存の 3 つの**下**)
+    expect(acts.slice(0, 4), '見出しの 4 つが出ていない').toEqual([
       'edit-from-heading',
       'append-at-heading',
       'toggle-heading-fold',
+      'copy-chapter-md',
     ]);
     /**
      * 🔴 **差し替えていないことを、ここで見る。**
-     * ⚠ 「頭 3 つが正しい」だけでは、本文の分を落とす変異が生き延びる
+     * ⚠ 「頭 4 つが正しい」だけでは、本文の分を落とす変異が生き延びる
      *   ── 落ちるのは #522 で user が頼んだ段組み切替である。
      * 🔴 **条件つきの「取り込む」まで見る**(着地前レビュー 🔴3)── `BODY_MENU_ACTIONS`
      *   だけと突き合わせる変異は、fixture に外部画像が 0 枚だと素通りした。
      */
-    expect(acts.slice(3), '本文のメニューが消えている / 取り込みが見出しの枝だけ落ちた').toEqual([
+    expect(acts.slice(4), '本文のメニューが消えている / 取り込みが見出しの枝だけ落ちた').toEqual([
+      'add-place',
       ...BODY_MENU_ACTIONS.map((a) => a.action),
       'adopt-external-images',
     ]);
+  });
+
+  /**
+   * 🔴 **見出しのメニューの項目に、近道の字が右に付く**(#587 改善 C 案 2)。
+   *
+   * ⚠ 直す前は見出しの 3 項目・本文の項目に何も添えていなかった ──「ここから編集する」が
+   *   `Ctrl`+クリックでもできることを、メニューから知る道が無かった。
+   * 🔑 見るのは属性(`data-pkc-shortcut`)── CSS が右に薄く描く。`textContent` は
+   *   項目の字のまま(上の `acts()` を読む検査を汚していないことも見る)。
+   * ⚠ 鍵の割当がある項目(段組み)は**いまの割当**が付く ── 綴りを直書きせず、
+   *   実装と同じ口(`chordHint`)から引いて突き合わせる。
+   */
+  it('🔴 見出しのメニューの項目に、近道の字が右に付く(#587 C 案 2)', () => {
+    const r = rig();
+    rightClick(r.head);
+    const sc = (action: string): string | null =>
+      r.root.querySelector(`${MENU} [data-pkc-action="${action}"]`)!.getAttribute(MENU_SHORTCUT_ATTR);
+    expect(sc('edit-from-heading'), '「ここから編集する」に近道が無い').toBe('Ctrl + クリック');
+    expect(sc('append-at-heading'), '「ここに追記する」に近道が無い').toBe('Alt + クリック');
+    // 本文の項目でも、鍵の割当がある物には**いまの第 1 割当**が付く
+    const columns = chordHint('cycle-read-columns');
+    expect(columns, '前提: 段組みの切り替えに割当が無い').not.toBeNull();
+    expect(sc('cycle-read-columns'), '段組みの近道が割当と食い違う').toBe(columns);
+    // ⚠ 近道の無い項目には**付けない**(空の欄を右に出さない)
+    expect(sc('toggle-heading-fold'), '近道の無い項目に属性が生えている').toBeNull();
+    expect(sc('pin-split'), '近道の無い項目に属性が生えている').toBeNull();
+    // ⚠ 字は汚さない ── 近道は属性で持ち、CSS が描く
+    expect(
+      r.root.querySelector(`${MENU} [data-pkc-action="edit-from-heading"]`)!.textContent,
+      '近道が項目の字に混ざっている',
+    ).toBe('ここから編集する');
   });
 
   it('🔴 **段落の上では増えない**(対照群 ── 見出しの物が常に出る作りではない)', () => {
     const r = rig();
     rightClick(r.para);
     expect(r.acts(), '段落の上でも見出しの物が出た').toEqual([
+      'add-place',
       ...BODY_MENU_ACTIONS.map((a) => a.action),
       'adopt-external-images',
     ]);
@@ -631,10 +675,11 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     const btn = r.host.querySelector<HTMLElement>('#h-a [data-pkc-field="heading-fold"]');
     expect(btn, '畳みのボタンが出ていない(fixture の前提が崩れている)').not.toBeNull();
     rightClick(btn!);
-    expect(r.acts().slice(0, 3), '帯の上で右クリックすると 3 つが消える').toEqual([
+    expect(r.acts().slice(0, 4), '帯の上で右クリックすると見出しの物が消える').toEqual([
       'edit-from-heading',
       'append-at-heading',
       'toggle-heading-fold',
+      'copy-chapter-md',
     ]);
     expect(new Set(r.lines()), '帯の上では行を運べていない').toEqual(new Set(['0']));
   });
@@ -660,6 +705,8 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     expect(acts, '入れ子で押しても何も起きない「畳む」を出した').not.toContain(
       'toggle-heading-fold',
     );
+    // ⚠ 章の範囲も畳みと同じ数え方(直下の並び)なので、入れ子では出さない(#677)
+    expect(acts, '入れ子で切り出せない「この章をコピー」を出した').not.toContain('copy-chapter-md');
   });
 
   /**
@@ -716,6 +763,9 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
    */
   describe('畳んだ追記欄を開く(#596 A / ③ C)', () => {
     afterEach(() => {
+      // ⚠ 一時表示(#655 ①)も終える ── `setHidden([])` だけでは見せている物が
+      //    記録に畳まれたまま残り、次の test の `run` が「押す前から見せていた」と読む
+      appPanes.unpeek();
       appPanes.setHidden([]);
     });
     /** 本物の器(`shell.ts`)と同じ印で、畳み状態の属性と打つ欄を足す。 */
@@ -939,6 +989,19 @@ describe('右クリックの説明(#587 C-1)', () => {
     expect(silent, '説明の無い項目が出ている').toEqual([]);
   });
 
+  /**
+   * ⚠ **対照群 ── 行のメニューには近道を付けない**(#587 C 案 2)。行の 9 項目は
+   *   説明欄(C-3)で説明する側で、鍵の近道を持つ物でもない ── 近道の字を全項目に
+   *   生やす変異が、上の見出しの検査だけでは素通りする。説明欄はそのまま出る。
+   */
+  it('⚠ 対照群 ── 行のメニューには近道が付かず、説明欄のまま(#587 C 案 2)', () => {
+    const s = setup();
+    rightClick(s.row('n1'));
+    const withShortcut = [...s.menu()!.querySelectorAll(`button[${MENU_SHORTCUT_ATTR}]`)];
+    expect(withShortcut.map((b) => b.getAttribute('data-pkc-action')), '行の項目に近道が生えた').toEqual([]);
+    expect(s.menu()!.querySelector('[data-pkc-field="context-menu-hint"]'), '説明欄が消えた').not.toBeNull();
+  });
+
   it('🔴 字は情報ペインと同じ表から来る(片方だけ直る日を作らない)', () => {
     const { root } = setup();
     rightClick(root.querySelector('[data-pkc-entry="n1"]')!);
@@ -1110,5 +1173,372 @@ describe('メニューの下の説明欄(#587 C-3)', () => {
       const b = s.menu()!.querySelector('button[data-pkc-action="open-note-window"]');
       expect(b!.getAttribute('data-pkc-menu-prev-lid'), '要らない印が載っている').toBeNull();
     });
+  });
+});
+
+/**
+ * 🔴 **章 / `:::` の囲み / 板を、右クリックから原文の Markdown でまるごと写す**(#677)。
+ *
+ * ## なぜ本物の描画で台を組むか
+ *
+ * 上の rig は刻印を手で書いた。ここで守りたいのは「**`:::` の開きにしか刻印が無い**」
+ * という描画の性質に対する振る舞い(章末が `:::` なら閉じまで写す / 塊は原文で判定する /
+ * fence の中の `:::` を塊と読まない)なので、刻印は `renderMarkdown` に焼かせる ──
+ * 手で書くと、この test だけ都合のよい刻印を持って通る(CLAUDE.md §3「stub は本物の意味論を真似る」)。
+ *
+ * ## ⚠ frontmatter を持たせる
+ *
+ * 刻印は frontmatter を剥いだ本文の行番号 ── 全文 body で切る実装は、frontmatter が 0 行の
+ * fixture では**永久に緑**(測っていない次元)。期待値は**字面で書く**(実装と同じ切り方で
+ * 組んだ期待値は、同じ盲点を共有する ── CLAUDE.md §1)。
+ */
+describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () => {
+  /** fm.body の行番号を右に書く(刻印はこの座標)。 */
+  const FULL = [
+    '---',
+    'align: left',
+    '---',
+    '## 章', // 0
+    '', // 1
+    '中身', // 2
+    '', // 3
+    ':::note', // 4
+    '囲みの中', // 5
+    '', // 6
+    '```js', // 7
+    'const a = 1;', // 8
+    '```', // 9
+    '', // 10
+    ':::section', // 11
+    '入れ子の中', // 12
+    ':::', // 13
+    ':::', // 14
+    '', // 15
+    '## つぎ', // 16
+    '', // 17
+    ':::format{.pkc-place x=40 y=40 w=320 h=200 entry=n2}', // 18
+    '### 買い出し', // 19 ⚠ 板の中の見出し(host の直下ではない)
+    '- 牛乳', // 20
+    ':::', // 21
+    '', // 22
+    '段落', // 23
+    '', // 24
+  ].join('\n');
+  const CHAPTER_1 =
+    '## 章\n\n中身\n\n:::note\n囲みの中\n\n```js\nconst a = 1;\n```\n\n:::section\n入れ子の中\n:::\n:::\n';
+  const CHAPTER_2 =
+    '## つぎ\n\n:::format{.pkc-place x=40 y=40 w=320 h=200 entry=n2}\n### 買い出し\n- 牛乳\n:::\n\n段落\n';
+  const NOTE = ':::note\n囲みの中\n\n```js\nconst a = 1;\n```\n\n:::section\n入れ子の中\n:::\n:::';
+  const NESTED = ':::section\n入れ子の中\n:::';
+  const BOARD = ':::format{.pkc-place x=40 y=40 w=320 h=200 entry=n2}\n### 買い出し\n- 牛乳\n:::';
+
+  function rig(body = FULL) {
+    document.body.textContent = '';
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    const host = document.createElement('div');
+    host.setAttribute('data-pkc-field', 'detail-body');
+    // 🔑 読む面と同じ描き方(`detail.ts`): fm.body を anchors 付きで描き、畳み・板を当てる
+    host.innerHTML = renderMarkdown(bodyBelowFrontmatter(body), { sourceLineAnchors: true });
+    applyHeadingFold(host);
+    applyPlaceLayout(host, (l) => (l === 'n2' ? 'ノート 2' : null), frontmatterLineCount(body));
+    root.append(host);
+    document.body.append(root);
+    const copied: { text: string; done: string | undefined }[] = [];
+    const d = new Dispatcher();
+    bindActions(root, d, {
+      showStatus: () => 0,
+      copyText: (t, done) => {
+        copied.push({ text: t, done });
+      },
+    });
+    d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [
+        {
+          lid: 'n1',
+          title: '板の在るノート',
+          archetype: 'text',
+          created_at: null,
+          updated_at: null,
+          entry_order: 1,
+          status: null,
+          date: null,
+          archived: 0,
+        } as never,
+        {
+          lid: 'n2',
+          title: 'ノート 2',
+          archetype: 'text',
+          created_at: null,
+          updated_at: null,
+          entry_order: 2,
+          status: null,
+          date: null,
+          archived: 0,
+        } as never,
+      ],
+      relations: [],
+    });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body });
+    const q = (sel: string): Element => {
+      const el = host.querySelector(sel);
+      expect(el, `前提が崩れている: 台に ${sel} が無い`).not.toBeNull();
+      return el!;
+    };
+    return {
+      root,
+      d,
+      copied,
+      host,
+      q,
+      acts: (): string[] =>
+        [...root.querySelectorAll(`${MENU} button[data-pkc-action]`)].map(
+          (b) => b.getAttribute('data-pkc-action') ?? '',
+        ),
+      label: (action: string): string =>
+        root.querySelector(`${MENU} [data-pkc-action="${action}"]`)?.textContent ?? '',
+      press: (action: string): void => {
+        const b = root.querySelector<HTMLElement>(`${MENU} [data-pkc-action="${action}"]`);
+        expect(b, `メニューに ${action} が無い`).not.toBeNull();
+        b!.click();
+      },
+    };
+  }
+
+  it('🔴 見出しの右クリックに「この章をコピー」が在り、押すと章の原文が byte 一致で渡る', () => {
+    const r = rig();
+    rightClick(r.q('h2[id="章"]'));
+    expect(r.acts(), '「この章をコピー」が出ていない').toContain('copy-chapter-md');
+    expect(r.label('copy-chapter-md')).toBe('この章をコピー');
+    r.press('copy-chapter-md');
+    expect(r.copied, 'clipboard へ 1 回渡っていない').toHaveLength(1);
+    /**
+     * 🔴 **章末が `:::` の囲み** ── 終端を刻印(`-end`)の最大で取る実装は、ここで
+     *   `:::note` の開き行(4)までしか写さず、中身と閉じの `:::` が丸ごと落ちる。
+     */
+    expect(r.copied[0]!.text, '章の原文が丸ごと写っていない(閉じの ::: まで)').toBe(CHAPTER_1);
+    expect(r.copied[0]!.done, '写した合図の字が違う').toBe('章をコピーしました(Markdown の原文)');
+  });
+
+  it('末尾の章は本文の末尾まで(板の中の `###` は章を閉じない)', () => {
+    const r = rig();
+    rightClick(r.q('h2[id="つぎ"]'));
+    r.press('copy-chapter-md');
+    expect(r.copied.map((c) => c.text)).toEqual([CHAPTER_2]);
+  });
+
+  it('⚠ 段落の上では章も塊も出ない(対照群)', () => {
+    const r = rig();
+    rightClick(r.q('p[data-pkc-source-line="2"]'));
+    expect(r.acts()).not.toContain('copy-chapter-md');
+    expect(r.acts()).not.toContain('copy-block-md');
+    // ⚠ 本文のメニュー自体は出ている(出ないから含まない、ではない)
+    expect(r.acts()).toContain('cycle-read-columns');
+  });
+
+  it('🔴 `:::` の囲みの中で右クリックすると「この塊をコピー」── 開きから閉じまで', () => {
+    const r = rig();
+    rightClick(r.q('p[data-pkc-source-line="5"]'));
+    expect(r.acts(), '「この塊をコピー」が出ていない').toContain('copy-block-md');
+    expect(r.acts(), '段落の上なのに章の物が出た').not.toContain('copy-chapter-md');
+    expect(r.label('copy-block-md')).toBe('この塊をコピー');
+    r.press('copy-block-md');
+    expect(r.copied.map((c) => c.text)).toEqual([NOTE]);
+    expect(r.copied[0]!.done).toBe('塊をコピーしました(Markdown の原文)');
+  });
+
+  it('🔴 入れ子の内側で右クリックすると、**内側**の塊(外側を写さない)', () => {
+    const r = rig();
+    rightClick(r.q('p[data-pkc-source-line="12"]'));
+    r.press('copy-block-md');
+    expect(r.copied.map((c) => c.text)).toEqual([NESTED]);
+  });
+
+  it('🔴 囲みの中の fence の上で右クリックすると、fence ではなく囲みの塊(刻印を外へ辿る)', () => {
+    const r = rig();
+    /**
+     * ⚠ fence の中身に `:::` の字は置いていない ── `scanContainers` の深さ数えが囲みの中の
+     *   fence を追跡しない既存の穴(2026-09-04 実測)を、この test の主張と混ぜない。
+     */
+    rightClick(r.q('code[data-pkc-source-line="7"]'));
+    expect(r.acts(), 'fence の上で塊の口が消えた').toContain('copy-block-md');
+    r.press('copy-block-md');
+    expect(r.copied.map((c) => c.text), 'fence を塊と読んだ / 外側へ辿れていない').toEqual([NOTE]);
+  });
+
+  it('🔴 板の題名札の上で右クリックしても、行のメニューにならず「この板をコピー」が出る', () => {
+    const r = rig();
+    const card = r.q('[data-pkc-field="place-card"][data-pkc-entry="n2"]');
+    rightClick(card);
+    const acts = r.acts();
+    expect(acts, '別ノートの行メニューが出た(削除が載っている)').not.toContain('delete-entry');
+    expect(acts, '「この板をコピー」が出ていない').toContain('copy-block-md');
+    expect(r.label('copy-block-md'), '板なのに「塊」と書いてある').toBe('この板をコピー');
+    // 🔴 開いているノートが切り替わっていない(板が消えていない)
+    expect(r.d.getState().selectedLid, '題名札の右クリックで別ノートへ切り替わった').toBe('n1');
+    r.press('copy-block-md');
+    expect(r.copied.map((c) => c.text), '板の原文(座標つき)が写っていない').toEqual([BOARD]);
+    expect(r.copied[0]!.done).toBe('板をコピーしました(Markdown の原文)');
+  });
+
+  it('板の中の見出しでは、見出しの物と塊の物が**両方**出る(章は出ない)', () => {
+    const r = rig();
+    rightClick(r.q('h3[id="買い出し"]'));
+    const acts = r.acts();
+    expect(acts).toContain('edit-from-heading');
+    expect(acts).toContain('copy-block-md');
+    expect(acts, '直下でない見出しで章の口を出した').not.toContain('copy-chapter-md');
+  });
+
+  it('🔴 閉じていない囲みは写さずに理由を出す', () => {
+    const r = rig(':::note\nまだ書いている\n');
+    rightClick(r.q('p[data-pkc-source-line="1"]'));
+    expect(r.acts()).toContain('copy-block-md');
+    r.press('copy-block-md');
+    expect(r.copied, '閉じていない塊を写した').toHaveLength(0);
+    expect(r.d.getState().error ?? '', '断った理由が出ていない').toContain('閉じていない');
+  });
+
+  it('🔴 別のノートに切り替わったら、出ていたメニューの「この章をコピー」は効かない', () => {
+    const r = rig();
+    rightClick(r.q('h2[id="章"]'));
+    r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+    r.d.dispatch({ type: 'BODY_LOADED', lid: 'n2', body: '## 別\n\n別の中身\n' });
+    r.press('copy-chapter-md');
+    expect(r.copied, '別ノートの本文を写した').toHaveLength(0);
+  });
+
+  /**
+   * 🔴 **板を右クリックから置く・消す**(#676。user 裁定 2026-09-04)。
+   *
+   * ⚠ 見るのは**配線** ── メニューの字 → 押す → reducer → `REQUEST_BODY_REWRITE` の中身
+   *   (座標 / 生の body の行番号 / 開き行)。書換の規則そのものは
+   *   `tests/features/place-notation.test.ts` が守る。
+   * ⚠ 消すは確認を挟む ── 確認の枝を**押して通す**(#299 の目的 = 確認の枝が test から
+   *   見えない、を終わらせる)。
+   */
+  const BOARD_OPEN = ':::format{.pkc-place x=40 y=40 w=320 h=200 entry=n2}';
+  function asksOf(d: Dispatcher): DomainEvent[] {
+    const out: DomainEvent[] = [];
+    d.onEvent((e) => {
+      if (e.type === 'REQUEST_BODY_REWRITE') out.push(e);
+    });
+    return out;
+  }
+  function rightClickAt(el: Element, x: number, y: number): void {
+    el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x, clientY: y }));
+  }
+  /** 確認の答えが `.then` を伝わる分だけ待つ(⚠ `setTimeout` で待たない ── 時間でごまかさない)。 */
+  async function settle(): Promise<void> {
+    for (let i = 0; i < 6; i += 1) await Promise.resolve();
+  }
+
+  it('🔴 本文の上に「ここに板を置く」が出て、押すと押した座標で place-add の依頼になる', () => {
+    const r = rig();
+    const asks = asksOf(r.d);
+    // ⚠ happy-dom の器の rect は 0 なので、押した clientX/Y がそのまま器の座標になる
+    rightClickAt(r.q('p[data-pkc-source-line="2"]'), 37, 61);
+    expect(r.acts(), '「ここに板を置く」が出ていない').toContain('add-place');
+    expect(r.label('add-place')).toBe('ここに板を置く');
+    r.press('add-place');
+    expect(asks, '書換の依頼が 1 回出ていない').toHaveLength(1);
+    expect(asks[0]).toMatchObject({ lid: 'n1', rewrite: { kind: 'place-add', x: 37, y: 61 } });
+  });
+
+  it('板の無い段落だけのノートでも「ここに板を置く」は出る(1 枚目を置ける)', () => {
+    const r = rig('段落だけ\n');
+    rightClick(r.q('p[data-pkc-source-line="0"]'));
+    expect(r.acts()).toContain('add-place');
+    expect(r.acts(), '板が無いのに「この板を消す」が出た').not.toContain('remove-place');
+  });
+
+  it('🔴 板の上で「この板を消す」→ 確認で「消す」→ 生の body の行番号で place-remove の依頼になる', async () => {
+    resetAppDialogForTest();
+    const r = rig();
+    const asks = asksOf(r.d);
+    rightClick(r.q('[data-pkc-field="place-card"][data-pkc-entry="n2"]'));
+    expect(r.acts(), '「この板を消す」が出ていない').toContain('remove-place');
+    expect(r.label('remove-place')).toBe('この板を消す');
+    // ⚠ 消すは末尾(勢いで押さない ── コピーの下)
+    expect(r.acts().indexOf('remove-place')).toBeGreaterThan(r.acts().indexOf('copy-block-md'));
+    r.press('remove-place');
+    const ok = document.querySelector<HTMLButtonElement>('[data-pkc-field="dialog-ok"]');
+    expect(ok, '確認が出ていない').not.toBeNull();
+    expect(ok!.textContent, '受ける側の字が起きることを言っていない').toBe('消す');
+    expect(asks, '確認の前に書いた').toHaveLength(0);
+    ok!.click();
+    await settle();
+    expect(asks, '「消す」を押しても書換の依頼が出ない').toHaveLength(1);
+    // 🔑 刻印は frontmatter を剥いだ 18 行目、reducer が受けるのは生の body の 21 行目(fm 3 行)
+    expect(asks[0]).toMatchObject({ lid: 'n1', rewrite: { kind: 'place-remove', line: 21, openLine: BOARD_OPEN } });
+  });
+
+  it('🔴 板の上に「前へ出す」が出て(コピーと消すの間)、押すと生の body の行番号で place-raise の依頼になる', () => {
+    const r = rig();
+    const asks = asksOf(r.d);
+    rightClick(r.q('[data-pkc-field="place-card"][data-pkc-entry="n2"]'));
+    const acts = r.acts();
+    expect(acts, '「前へ出す」が出ていない').toContain('raise-place');
+    expect(r.label('raise-place')).toBe('前へ出す');
+    expect(acts.indexOf('raise-place')).toBeGreaterThan(acts.indexOf('copy-block-md'));
+    expect(acts.indexOf('raise-place'), '消すより下に居る(消すは末尾)').toBeLessThan(acts.indexOf('remove-place'));
+    r.press('raise-place');
+    expect(asks).toHaveLength(1);
+    expect(asks[0]).toMatchObject({ lid: 'n1', rewrite: { kind: 'place-raise', line: 21, openLine: BOARD_OPEN } });
+    // 対照群: 板でない囲みには出ない
+    rightClick(r.q('p[data-pkc-source-line="5"]'));
+    expect(r.acts()).not.toContain('raise-place');
+  });
+
+  it('確認で「やめる」を押せば、何も書かない', async () => {
+    resetAppDialogForTest();
+    const r = rig();
+    const asks = asksOf(r.d);
+    rightClick(r.q('[data-pkc-field="place-card"][data-pkc-entry="n2"]'));
+    r.press('remove-place');
+    document.querySelector<HTMLButtonElement>('[data-pkc-field="dialog-cancel"]')!.click();
+    await settle();
+    expect(asks).toHaveLength(0);
+  });
+
+  it('⚠ 段落・板でない囲みの上では「この板を消す」は出ない(対照群)', () => {
+    const r = rig();
+    rightClick(r.q('p[data-pkc-source-line="2"]'));
+    expect(r.acts()).not.toContain('remove-place');
+    rightClick(r.q('p[data-pkc-source-line="5"]'));
+    expect(r.acts(), '囲みの上に塊の物が無い(台の空振り)').toContain('copy-block-md');
+    expect(r.acts(), '板でない囲みで「この板を消す」が出た').not.toContain('remove-place');
+  });
+
+  it('🔴 編集中に「この板を消す」を押すと、確認を出さずに理由を出す', () => {
+    resetAppDialogForTest();
+    const r = rig();
+    const asks = asksOf(r.d);
+    rightClick(r.q('[data-pkc-field="place-card"][data-pkc-entry="n2"]'));
+    r.d.dispatch({ type: 'START_EDIT' });
+    r.press('remove-place');
+    expect(document.querySelector('[data-pkc-field="dialog-ok"]'), '編集中なのに確認が出た').toBeNull();
+    expect(r.d.getState().error ?? '', '理由が出ていない').toContain('編集を終了');
+    expect(asks).toHaveLength(0);
+  });
+});
+
+/**
+ * 🔴 **近道の字は CSS が描く ── 規則が消えると、字は在っても見えない**(#587 C 案 2)。
+ *
+ * ⚠ 属性(`data-pkc-shortcut`)の有無は上の describe が見るが、user が見るのは
+ *   `::after` が描いた字である ── 規則が無ければ属性は在っても**画面には 1 字も出ない**。
+ * 🔑 CSS は構文で読む(`css-blocks.ts`。CLAUDE.md §1 で 5 回踏んだ罠の正本)。
+ */
+describe('近道の字の見え方(#587 C 案 2)', () => {
+  it('🔴 data-pkc-shortcut を項目の右に描く規則が在る', () => {
+    const css = withoutMedia(stripComments(readFileSync('src/styles/app.css', 'utf-8')));
+    const blocks = blocksFor(css, `[data-pkc-region='context-menu'] button[${MENU_SHORTCUT_ATTR}]::after`);
+    expect(blocks, '近道を描く規則が無い(属性は在っても画面に出ない)').toHaveLength(1);
+    expect(blocks[0], '属性の字を描いていない').toMatch(decl('content', `attr\\(${MENU_SHORTCUT_ATTR}\\)`));
+    expect(blocks[0], '右に寄せていない').toMatch(decl('margin-left', 'auto'));
   });
 });

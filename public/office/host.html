@@ -103,6 +103,7 @@
 <script src="office-save-watch.js"></script>
 <script src="office-save-stage.js"></script>
 <script src="office-restart-watch.js"></script>
+<script src="office-macros.js"></script>
 <script src="office-format.js"></script>
 <script>
 (function () {
@@ -214,6 +215,8 @@
      */
     var fresh = document.createElement('button');
     fresh.textContent = '設定を初期化して開き直す';
+    // ⚠ **失うものを押す前に言う**(#431 ②)── マクロも同じ出口で消える
+    fresh.title = 'Office の中で変えた設定と、書いたマクロを消して開き直します';
     fresh.addEventListener('click', resetProfileAndReload);
     msgEl.appendChild(head);
     msgEl.appendChild(why);
@@ -259,6 +262,8 @@
     //    設定が原因のことがあり、読み込み直すだけでは同じ所へ戻る
     var fresh = document.createElement('button');
     fresh.textContent = '設定を初期化して開き直す';
+    // ⚠ **失うものを押す前に言う**(#431 ②)── マクロも同じ出口で消える
+    fresh.title = 'Office の中で変えた設定と、書いたマクロを消して開き直します';
     fresh.addEventListener('click', resetProfileAndReload);
     warnEl.appendChild(what);
     warnEl.appendChild(again);
@@ -558,6 +563,27 @@
       r.onsuccess = function () { resolve(r.result); };
       r.onerror = function () { reject(r.error || new Error('idb get failed')); };
     });
+  }
+  /**
+   * 書き / 消し の 1 トランザクション(マクロの退避 #431 ②)。
+   * ⚠ **`oncomplete` まで待つ** ── request の success は commit の前に起きるので、
+   *    そこで resolve すると「書けた」と言った直後に quota で abort しうる
+   *    (本体の `office-pack-store.ts` の `write` と同じ罠)。
+   */
+  function idbWrite(db, store, run) {
+    return new Promise(function (resolve, reject) {
+      var t = db.transaction(store, 'readwrite');
+      t.oncomplete = function () { resolve(); };
+      t.onerror = function () { reject(t.error || new Error('idb write failed')); };
+      t.onabort = function () { reject(t.error || new Error('idb transaction aborted')); };
+      try { run(t.objectStore(store)); } catch (e) { reject(e); }
+    });
+  }
+  function idbPut(db, store, key, value) {
+    return idbWrite(db, store, function (s) { s.put(value, key); });
+  }
+  function idbDel(db, store, key) {
+    return idbWrite(db, store, function (s) { s.delete(key); });
   }
 
   /** gz の Blob を、解きながら Response にする(148MB を heap に載せない)。 */
@@ -976,12 +1002,25 @@
     profileReset = true;
     try { localStorage.removeItem(PROFILE_KEY); } catch (e) { /* 触れない端末 */ }
     lastSavedProfile = null;
+    // 🔴 マクロも同じ出口で捨てる(#431 ②)── 設定だけ消してマクロを残すと、
+    //    落ちる原因がマクロ側だったとき出られない(設定と同じ形)
+    return dropMacros();
   }
 
-  /** 停止・不調の帯から押したとき。⚠ **もう編集は続けられない**ので即座に開き直す。 */
+  /**
+   * 停止・不調の帯から押したとき。⚠ **もう編集は続けられない**ので開き直す。
+   * ⚠ ただし**マクロの削除(IndexedDB、非同期)が終わってから** ── 先に reload すると
+   *    削除が届かず、次の起動で書き戻って「初期化したのに戻ってくる」になる。
+   *    ⚠ 上限を置く(5 秒)── IDB が返らなくてもボタンを死なせない。
+   */
   function resetProfileAndReload() {
-    dropProfile();
-    location.reload();
+    settleWrite(dropProfile()).then(function () { location.reload(); });
+  }
+
+  /** IDB の書き / 消しを待つ。⚠ 5 秒で見切る(IDB が返らなくてもボタンを死なせない)。 */
+  function settleWrite(p) {
+    var cap = new Promise(function (resolve) { setTimeout(resolve, 5000); });
+    return Promise.race([Promise.resolve(p), cap]);
   }
 
   /**
@@ -999,8 +1038,8 @@
     restartEl.textContent = '';
     var what = document.createElement('span');
     // ⚠ **失うものを先に書く**(`showRestartBand` と同じ向き)
-    what.textContent = 'Office の設定を初期化しました。ウィンドウを開き直すと素の状態で始まります。'
-      + ' ⚠ 保存していない変更は失われます。';
+    what.textContent = 'Office の設定を初期化しました(書いたマクロも消えます)。'
+      + 'ウィンドウを開き直すと素の状態で始まります。 ⚠ 保存していない変更は失われます。';
     var again = document.createElement('button');
     again.textContent = '開き直す';
     // 🔴 ここでは退避しない ── 退避すると、消したばかりの設定が戻る
@@ -1134,6 +1173,76 @@
   }
 
   /**
+   * 🔴 **user が書いたマクロ(`/instdir/user/basic/**`)の永続化**(#431 ②)。
+   *
+   * 設定 file(#159)と同じ寿命・同じ呼び時(30 秒ごと + pagehide)だが、置き場は
+   * **IndexedDB**(`meta` store の `user-basic`)── localStorage は 1MB を設定 file と
+   * 奪い合うので使わない。bytes は Uint8Array のまま入れる(base64 にしない)。
+   * ⚠ 判断(走査・上限・書き戻し)は `office-macros.js` に在る ── ここは DB と
+   *    timer を繋ぐだけ(unit はあちらに届く)。
+   * ⚠ `macroDb` は `main()` が一式を開いた handle を置く(起動前は null = 退避しない)。
+   */
+  var macroDb = null;
+  var lastSavedMacros = null;
+
+  function saveMacros(FS) {
+    try {
+      var M = window.PKC3OfficeMacros;
+      if (!FS || !macroDb || !M) return;
+      // 🔴 捨てると決めた後は**書き戻さない**(設定と同じ門 #634)
+      if (profileReset) return;
+      var p = M.plan(FS, M.DIR, lastSavedMacros, M.MAX_BYTES);
+      if (p.kind === 'same') return;
+      lastSavedMacros = p.signature;
+      if (p.kind === 'too-big') {
+        console.warn('マクロが大きすぎるので退避しません(' + p.bytes + ' bytes > ' + M.MAX_BYTES + ')');
+        return;
+      }
+      var done = p.kind === 'empty'
+        ? idbDel(macroDb, 'meta', M.KEY)
+        : idbPut(macroDb, 'meta', M.KEY, { files: p.files, bytes: p.bytes });
+      // ⚠ 呼び側が「書き終わってから開き直す」ために返す(必ず解決する)
+      return done.catch(function (e) {
+        // ⚠ 書けなかった回は「前回」を捨てる ── 次の回でもう一度試みる
+        lastSavedMacros = null;
+        console.warn('マクロを退避できませんでした', e);
+      });
+    } catch (e) {
+      // 走査できない ── 退避できないだけで、動作は続ける
+    }
+    return Promise.resolve();
+  }
+
+  /**
+   * 起動前に MEMFS へ書き戻す(`seedWindowSize` と同じ場所 = `callMain` より前)。
+   * ⚠ 書き戻しに失敗しても起動は落とさない(マクロが無いほうが、開かないよりまし)。
+   * 🔑 書き戻した直後の姿を「前回」に据える ── 起動直後に同じ中身をまた退避しない。
+   */
+  function restoreMacros(FS, saved) {
+    var M = window.PKC3OfficeMacros;
+    if (!M) return;
+    try {
+      if (saved && Array.isArray(saved.files)) M.restore(FS, M.DIR, saved.files);
+    } catch (e) {
+      console.warn('退避したマクロを書き戻せませんでした(素で始めます)', e);
+    }
+    try { lastSavedMacros = M.signature(M.scan(FS, M.DIR)); } catch (e) { lastSavedMacros = null; }
+  }
+
+  /**
+   * 退避したマクロを消す(`dropProfile` から)。返す Promise は**必ず解決する**。
+   * ⚠ `macroDb` に頼らない ── 本体からの `reset-profile` は起動の途中にも来る。
+   */
+  function dropMacros() {
+    lastSavedMacros = null;
+    var M = window.PKC3OfficeMacros;
+    if (!M) return Promise.resolve();
+    return openDb()
+      .then(function (db) { return idbDel(db, 'meta', M.KEY); })
+      .catch(function (e) { console.warn('退避したマクロを消せませんでした', e); });
+  }
+
+  /**
    * 🔴 **「開き直せば反映される」を、こちらから言う**(#160)。
    *
    * UI 言語を変えると LO は再起動ダイアログを出すが、`すぐに再起動` は
@@ -1205,7 +1314,8 @@
       // 🔴 **開き直す前に必ず退避する。** ここで書かないと変えた設定ごと消えて、
       //    「開き直したのに変わらない」という**いちばん悪い形**になる(#159 の逆流)
       saveProfile(FS);
-      location.reload();
+      // ⚠ マクロは IDB(非同期)── 書き終わってから開き直す(#431 ②)
+      settleWrite(saveMacros(FS)).then(function () { location.reload(); });
     });
     restartEl.appendChild(what);
     restartEl.appendChild(again);
@@ -1305,6 +1415,12 @@
       var fb = await idbGet(db, 'files', fontNames[j]);
       if (fb) fonts.push([fontNames[j].slice('fonts/'.length), new Uint8Array(await fb.arrayBuffer())]);
     }
+    // 🔴 退避したマクロ(#431 ②)。⚠ **ここで読み終えておく** ── IDB は非同期なので、
+    //    起動の後ろに置くと `callMain` に間に合わない(設定 file の localStorage は同期
+    //    だったので順を気にせず済んだ)。書き戻すのは FS が出来た後(`seedWindowSize` の隣)。
+    var savedMacros = null;
+    try { savedMacros = await idbGet(db, 'meta', window.PKC3OfficeMacros.KEY); } catch (e) { savedMacros = null; }
+    macroDb = db;
 
     // emscripten は `soffice.data.js.metadata` を **自分で fetch する**。
     // ObjectURL では相対解決できないので、`locateFile` で差し替える。
@@ -1432,9 +1548,13 @@
       // ⚠ 書き終わったら手放す(MEMFS が持っている ── こちらの配列は二重持ち)
       fonts.length = 0;
       seedWindowSize(FS);
-      // 🔴 設定の退避(#159)── pagehide + 30 秒ごと(変化時のみ)。
+      // 🔴 マクロの書き戻し(#431 ②)── 設定と同じく **`callMain` より前**。
+      //    ⚠ 書き終わったら手放す(MEMFS が持っている ── こちらは二重持ち)
+      restoreMacros(FS, savedMacros);
+      savedMacros = null;
+      // 🔴 設定・マクロの退避(#159 / #431 ②)── pagehide + 30 秒ごと(変化時のみ)。
       //    ⚠ crash では pagehide が当てにならないので間隔の側が保険になる
-      var profTimer = setInterval(function () { saveProfile(FS); }, 30000);
+      var profTimer = setInterval(function () { saveProfile(FS); saveMacros(FS); }, 30000);
       // 🔴 言語を変えたことに気づく(#160)。⚠ **退避の 30 秒とは別の timer** に
       //    する ── user は「すぐに再起動」を押した直後に何も起きないのを見ており、
       //    そこから 30 秒待たせたら「やはり壊れている」で終わる(1 timer = 1 仕事)。
@@ -1450,6 +1570,9 @@
         clearInterval(profTimer);
         if (restTimer) clearInterval(restTimer);
         saveProfile(FS);
+        // ⚠ IDB への put は非同期だが、閉じる前に発行した transaction は接続を閉じる
+        //    ときに完了を待たれる(IDB spec の close pending)── 30 秒の側が保険
+        saveMacros(FS);
       });
       // 🔴 **UI を日本語で開く**(#158)。⚠ 一式に翻訳を詰めただけでは英語のままで、
       //    **選ばせる 1 手**が要る(`desktop/source/app/cmdlineargs.cxx` の `--language`)。

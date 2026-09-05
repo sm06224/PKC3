@@ -152,9 +152,11 @@ describe('bootstrap の配線', () => {
      *   やめて**別窓を開く**(`openViewTile`)。中央の面はその**退避先**として
      *   `openViewTile` の中から 1 回だけ通る。
      *   残る 3 か所 = 退避 / わきの面を畳む / ディープリンク。
+     * ⚠ 退避は #673 段②で `openViewHere`(予定表 / 連絡先は左のタブへ、他は中央の面へ)
+     *   になった ── それも `open-view.ts` の口なので同じ数に数える。
      */
     expect(
-      [...MAIN.matchAll(/openView\([\w.]*[Dd]ispatcher/g)].length,
+      [...MAIN.matchAll(/openView(?:Here)?\([\w.]*[Dd]ispatcher/g)].length,
       '面を開く配線が足りない',
     ).toBe(3);
   });

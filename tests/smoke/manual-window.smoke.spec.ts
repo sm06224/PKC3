@@ -58,7 +58,8 @@ test('🔴 ヘルプからマニュアルの窓が開き、窓いっぱいに出
   const win = await openManual(page, context);
 
   // ③ 帯・目次・本文が出る
-  await expect(win.locator(HEAD)).toContainText('PKC3 マニュアル');
+  // ⚠ 並びは他の窓と同じ「<名前> — PKC3」(#648 I4)。頭が PKC3 の旧い字なら落ちる
+  await expect(win.locator(HEAD)).toContainText('マニュアル — PKC3');
   await expect(win.locator(`${TOC} a`).first()).toBeVisible();
   const links = await win.locator(`${TOC} a`).count();
   expect(links, '目次が空').toBeGreaterThan(100);
@@ -161,11 +162,14 @@ test('🔴 目次を押すと、その見出しまで送られる (#645)', async
    * ⚠ 段①の `about:blank` では `<a href="#m-100">` が base を引き継いで
    *   `http://…/#m-100` へ navigate し、**マニュアルが丸ごと消えた**。
    *   段②は実 URL なので、断片は **この page の中**で解決する ── URL は
-   *   `manual.html#m-N` のまま(= 節ごとに控えられる)。
+   *   `manual.html#<見出しの字>` のまま(= 節ごとに控えられる)。
+   * ⚠ 印は見出しの字(#648 D4)なので `url.hash` は percent-encode されて返る ── 復号して比べる。
    */
   const url = new URL(win.url());
   expect(url.pathname, '窓がアプリへ飛んだ').toMatch(PAGE);
-  expect(url.hash, '断片が URL に付いていない(控えられない)').toBe(`#${id}`);
+  expect(decodeURIComponent(url.hash), '断片が URL に付いていない(控えられない)').toBe(`#${id}`);
+  // 🔑 印が通し番号ではなく見出しの字(版をまたいで同じ節を指す ── D4 の当の点)
+  expect(id, '印が通し番号のまま(見出しが増えた版で隣を指す)').not.toMatch(/^m-\d+$/u);
 
   /**
    * 🔴 **「動いた」だけでは足りない** ── その見出しが**画面に居る**ことまで見る
@@ -210,11 +214,15 @@ test('🔴 もう一度押すと、同じ窓が読んでいた所のまま前に
   /**
    * 🔴 **対照群 ── 何も変えずにもう一度押しても、字の大きさは動かない**(2026-09-02 hotfix)。
    * ⚠ 直す前は 14px → 13px に縮んでいた ── 文字の大きさを選んでいない user に、
-   *   アプリで「効いている既定 13px」を渡していた(焼いた page は選んでいなければ
+   *   アプリで「効いている既定 13px」を渡していた(当時、焼いた page は選んでいなければ
    *   読み物の 14px のまま)。
+   * 🔑 I6(#648)で窓の既定を**アプリと同じ 13px** に揃えた ── 期待値は
+   *   `features/text-scale.ts` の「標準」から読む(綴りを写さない)。
    */
+  const std = readFileSync(new URL('../../src/features/text-scale.ts', import.meta.url), 'utf8');
+  const stdPx = /id: 'standard'[^}]*size: '(\d+px)'/u.exec(std)![1]!;
   const fontBefore = await win.evaluate(() => getComputedStyle(document.body).fontSize);
-  expect(fontBefore, '前提:何も選んでいないので読み物の既定 14px').toBe('14px');
+  expect(fontBefore, '前提:何も選んでいないので、窓の字はアプリの既定と同じ').toBe(stdPx);
 
   /**
    * 🔴 **2 枚目が開いたら赤**。⚠ `waitForEvent('page')` を張ると「開くのを待つ」
@@ -256,14 +264,14 @@ test('🔴 窓で F5 を押しても、マニュアルはそのまま読み直�
   const target = win.locator(`${TOC} a`).nth(Math.floor(before * 0.6));
   const id = (await target.getAttribute('href'))!.slice(1);
   await target.click();
-  expect(new URL(win.url()).hash).toBe(`#${id}`);
+  expect(decodeURIComponent(new URL(win.url()).hash)).toBe(`#${id}`);
 
   await win.reload();
   await expect(win.locator(MAIN), 'F5 で白紙になった').toBeVisible();
   expect(await win.locator(`${TOC} a`).count()).toBe(before);
   const url = new URL(win.url());
   expect(url.pathname).toMatch(PAGE);
-  expect(url.hash, 'F5 で節の印が消えた').toBe(`#${id}`);
+  expect(decodeURIComponent(url.hash), 'F5 で節の印が消えた').toBe(`#${id}`);
   /**
    * 🔴 **F5 のあと、その節に居る**(マニュアル §4-4 がそう書いている)。
    * ⚠ 本文はスクロール箱の中に居るので、ブラウザは位置を復元しない ── 戻れるのは

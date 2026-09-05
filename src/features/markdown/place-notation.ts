@@ -1,6 +1,7 @@
 /**
- * 🔴 **自由配置の板の記法**(#283 P4)── `.pkc-place` を持つ format 塊の
- * 開き行の位置(x= / y=)だけを書き換える。
+ * 🔴 **自由配置の板の記法**(#283 P4 / #676)── `.pkc-place` を持つ format 塊の
+ * 開き行の札(x= / y= / w= / h= / z=)だけを書き換える。#676 で**塊を足す・消す**も
+ * ここに持つ ── 「その行が板の塊か」の判定と門は 1 本で、操作ごとに増やさない。
  *
  * ## 位置の正本は本文である(裁定 2026-08-19 Q1)
  *
@@ -33,6 +34,7 @@
 import type { BlockDirectiveAttrs } from './block-directive-attrs';
 import { parseBlockDirectiveOpen, parseTier1FormatOpen } from './block-directive-attrs';
 import { frontmatterLineCount } from './frontmatter';
+import { blockSpanAt, scanContainers } from './source-blocks';
 
 /**
  * 開き行が板の塊なら、その属性(描画と同じパース結果)。違えば null。
@@ -58,32 +60,79 @@ export function isPlaceOpen(line: string): boolean {
 const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 
 /**
- * `line` 番目(生の body の行番号)が fence(```)の中か。
+ * 各行が fence(```)の中か(fence の開き・閉じの行そのものは「中」に数えない)。
  * ⚠ 閉じの規則は `scanContainers` と同じ(同じ種類・同じ長さ以上・後ろに字が無い)。
- * 🔑 描画の行番号は fence の中を指さないが、**行番号は掴んだ時点のもの**なので、
- *   別の窓の書込で同じ字面の行が fence の中へ移った形を最後の門で止める。
+ * 🔑 1 度の走査で全行ぶん出す ── 板を全部数える `raisePlace` が行ごとに走査し直すと
+ *   O(n²) になるので、`insideFence` もこれを引く(判定は 1 本)。
  */
-function insideFence(lines: readonly string[], from: number, line: number): boolean {
+function fenceMask(lines: readonly string[], from: number): boolean[] {
+  const mask: boolean[] = new Array<boolean>(lines.length).fill(false);
   let fence: string | null = null;
-  for (let i = from; i < line; i += 1) {
+  for (let i = from; i < lines.length; i += 1) {
     const f = FENCE.exec(lines[i]!);
-    if (f === null) continue;
+    if (f === null) {
+      mask[i] = fence !== null;
+      continue;
+    }
     if (fence === null) {
       fence = f[1]!;
     } else if (f[1]!.startsWith(fence[0]!) && f[1]!.length >= fence.length && f[2]!.trim() === '') {
       fence = null;
+    } else {
+      mask[i] = true; // 開いている fence の中の、別種の fence 記号(閉じない)
     }
   }
-  return fence !== null;
+  return mask;
 }
 
-export interface PlaceMove {
+/**
+ * `line` 番目(生の body の行番号)が fence(```)の中か。
+ * 🔑 描画の行番号は fence の中を指さないが、**行番号は掴んだ時点のもの**なので、
+ *   別の窓の書込で同じ字面の行が fence の中へ移った形を最後の門で止める。
+ */
+function insideFence(lines: readonly string[], from: number, line: number): boolean {
+  return fenceMask(lines, from)[line] === true;
+}
+
+/** 板の塊を指す ── 開き行の行番号と、掴んだ時点の開き行そのもの。 */
+export interface PlaceTarget {
   /** 開き行の行番号(**生の body** の 0 始まり。描画の source-line + frontmatter ぶん)。 */
   readonly line: number;
   /** 掴んだ時点の開き行そのもの ── disk 側と一致しなければ書かない。 */
   readonly openLine: string;
+}
+
+export interface PlaceMove extends PlaceTarget {
   readonly x: number;
   readonly y: number;
+}
+
+export interface PlaceResize extends PlaceTarget {
+  readonly w: number;
+  readonly h: number;
+}
+
+/**
+ * 🔴 **板の書換が共通で通る門**(#676 で 1 本に寄せた)。
+ *
+ * `line` 番目の行が `openLine` と **byte 一致**し、板の開き行であり、frontmatter の外で
+ * fence の中でないときだけ、行の並びを返す。ずれていれば null = 断る(店じまいは呼び側)。
+ * ⚠ 操作ごとに門を書き直さない ── 1 つが緩むと、その操作だけ**別の塊に効く**(§7)。
+ */
+function placeLinesAt(body: string, target: PlaceTarget): { lines: string[]; fm: number } | null {
+  const fm = frontmatterLineCount(body);
+  if (!Number.isInteger(target.line) || target.line < fm) return null;
+  const lines = body.split('\n');
+  const line = lines[target.line];
+  if (line === undefined || line !== target.openLine) return null;
+  if (!isPlaceOpen(line)) return null;
+  if (insideFence(lines, fm, target.line)) return null;
+  return { lines, fm };
+}
+
+/** 整数で 0 以上か(座標・大きさ・重なりの値はどれもこの形だけを受ける)。 */
+function isCoord(n: number): boolean {
+  return Number.isInteger(n) && n >= 0;
 }
 
 /**
@@ -97,43 +146,139 @@ export interface PlaceMove {
  *   (`store-effects`)が、取りやめた drop に嘘の赤帯を出さないため。
  */
 export function movePlace(body: string, move: PlaceMove): string | null {
-  if (!Number.isInteger(move.x) || !Number.isInteger(move.y)) return null;
-  if (move.x < 0 || move.y < 0) return null;
-  const fm = frontmatterLineCount(body);
-  if (!Number.isInteger(move.line) || move.line < fm) return null;
-  const lines = body.split('\n');
-  const line = lines[move.line];
-  if (line === undefined || line !== move.openLine) return null;
-  if (!isPlaceOpen(line)) return null;
-  if (insideFence(lines, fm, move.line)) return null;
-  const next = spliceXY(line, move.x, move.y);
+  if (!isCoord(move.x) || !isCoord(move.y)) return null;
+  return spliceOpenLine(body, move, { x: move.x, y: move.y });
+}
+
+/**
+ * 🔴 板の塊の大きさを変える(#676)── 開き行の w= / h= **だけ**を書き換える。
+ * 門も「変わらなければ body をそのまま返す」も `movePlace` と同じ。
+ */
+export function resizePlace(body: string, resize: PlaceResize): string | null {
+  if (!isCoord(resize.w) || !isCoord(resize.h)) return null;
+  return spliceOpenLine(body, resize, { w: resize.w, h: resize.h });
+}
+
+/** 門を通してから開き行の札を差し替える(動かす / 大きさを変える の共通部)。 */
+function spliceOpenLine(body: string, target: PlaceTarget, tokens: PlaceTokens): string | null {
+  const at = placeLinesAt(body, target);
+  if (at === null) return null;
+  const line = at.lines[target.line]!;
+  const next = spliceTokens(line, tokens);
   if (next === null) return null;
   if (next === line) return body;
-  lines[move.line] = next;
+  at.lines[target.line] = next;
+  return at.lines.join('\n');
+}
+
+/**
+ * 🔴 **板の塊を消す**(#676)── 開き行から閉じの `:::` までと、隣の空行 1 本を消す。
+ *
+ * ⚠ 範囲は `blockSpanAt`(= 「この塊をコピー」が写す当の範囲)で取る ── ここで `:::` を
+ *   数え直さない(§7)。⚠ **閉じていない塊は null で断る** ── 末尾まで飲んでいるので、
+ *   消すと**その下の本文が丸ごと消える**。
+ * 🔑 空行は**後ろを優先して 1 本**だけ消す(無ければ前の 1 本)── 板の前後は空行で
+ *   区切って書くのが普通なので、消した後に空行が 2 本並ばないようにする。
+ *   ⚠ 2 本以上は消さない ── 隣の段落の間隔まで詰めると、触っていない所が変わって見える。
+ */
+export function removePlace(body: string, target: PlaceTarget): string | null {
+  const at = placeLinesAt(body, target);
+  if (at === null) return null;
+  // ⚠ 範囲は frontmatter を剥いだ座標で取る(`directiveBlockAt` と同じ座標系)
+  const span = blockSpanAt(at.lines.slice(at.fm).join('\n'), target.line - at.fm);
+  if (span === null || span.open) return null;
+  const start = target.line;
+  const end = span.end + at.fm;
+  const lines = at.lines;
+  if (end + 1 < lines.length && lines[end + 1] === '') lines.splice(start, end - start + 2);
+  else if (start > at.fm && lines[start - 1] === '') lines.splice(start - 1, end - start + 2);
+  else lines.splice(start, end - start + 1);
   return lines.join('\n');
 }
 
 /**
- * 開き行の x= / y= を書き換える。
+ * 🔴 **板を前へ出す**(#676 段②)── 他の板の z= の最大 + 1 を、この板の z= に書く。
+ *
+ * ⚠ 「後ろへ送る」は作らない ── 負の z は描画が捨てる(`place-board.ts` の `intAttr`)ので、
+ *   下げる向きは「他を全部上げる」しか無く、触っていない板の行まで書き換えることになる。
+ * ⚠ 数えるのは**fence の外の板の開き行だけ**(fence の中の `:::format{… z=99}` はコードの字)。
+ *   z= を持たない板は 0 と数える(描画は z 無し = `auto`、z=1 はその上に乗る)。
+ * 🔑 既に**独りで**いちばん前なら body をそのまま返す(書く物が無い ≠ 競合)。
+ *   同じ z が並んでいる(引き分け)なら 1 つ上げる ── 押した人は前に出したいのである。
+ */
+export function raisePlace(body: string, target: PlaceTarget): string | null {
+  const at = placeLinesAt(body, target);
+  if (at === null) return null;
+  const mask = fenceMask(at.lines, at.fm);
+  let maxOther = 0;
+  for (let i = at.fm; i < at.lines.length; i += 1) {
+    if (i === target.line || mask[i] === true) continue;
+    const attrs = placeOpenAttrs(at.lines[i]!);
+    if (attrs !== null) maxOther = Math.max(maxOther, zOf(attrs));
+  }
+  const self = placeOpenAttrs(at.lines[target.line]!);
+  if (self !== null && zOf(self) > maxOther) return body;
+  return spliceOpenLine(body, target, { z: maxOther + 1 });
+}
+
+/** 開き行の z=(整数 ≥0)。無い・読めないときは 0(描画の `intAttr` が捨てる値と同じ扱い)。 */
+function zOf(attrs: BlockDirectiveAttrs): number {
+  const raw = attrs.kvs.z;
+  if (typeof raw !== 'string') return 0;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 0 ? n : 0;
+}
+
+/** 置いたばかりの板の大きさ(px)。⚠ 中身が空でも掴める大きさにする(CSS の min は 120×40)。 */
+export const NEW_PLACE_W = 240;
+export const NEW_PLACE_H = 120;
+
+/**
+ * 🔴 **板の塊を 1 つ足す**(#676)── 本文の末尾に、空の塊を書く。
+ *
+ * ⚠ **行番号を持たない** ── 足す先は常に末尾で、他の行は 1 byte も動かない。
+ * 🔑 綴りはマニュアルが教える正式形(`:::format{.pkc-place x= y= w= h=}`)── 描画は
+ *   中身が空でも `<div class="pkc-format-block pkc-place">` として描く(実測 2026-09-04)。
+ * ⚠ 末尾の囲い(fence / `:::`)が閉じていなければ null で断る ── その中に書くと、
+ *   板ではなく**コードの字**(または別の塊の中身)になって画面に出ない。
+ */
+export function addPlace(body: string, x: number, y: number): string | null {
+  if (!isCoord(x) || !isCoord(y)) return null;
+  const spans = scanContainers(body);
+  const last = spans[spans.length - 1];
+  if (last !== undefined && last.open) return null;
+  const block = `:::format{.pkc-place x=${x} y=${y} w=${NEW_PLACE_W} h=${NEW_PLACE_H}}\n\n:::\n`;
+  if (body === '') return block;
+  return body + (body.endsWith('\n') ? '\n' : '\n\n') + block;
+}
+
+/** 開き行に書ける札。⚠ `entry=` は書かない(題名の札は user が書く物)。 */
+type PlaceKey = 'x' | 'y' | 'w' | 'h' | 'z';
+type PlaceTokens = Partial<Record<PlaceKey, number>>;
+const PLACE_KEYS: readonly PlaceKey[] = ['x', 'y', 'w', 'h', 'z'];
+
+/**
+ * 開き行の札(x= y= w= h= z= のうち渡された物)を書き換える。
  * - `{}` を持つ形(`:::format{…}` / `::: {…}`)── 括弧の中の札だけ差し替える
  * - `{}` を持たない Tier 1 形(`:::.pkc-place` / `::: pkc-place`)── 座標を
  *   書ける場所が無いので、**同義の括弧つき形へ整える**(`::: {.pkc-place x=… y=…}`。
  *   描画は同じ塊として描く ── 実測 2026-08-28)
  */
-function spliceXY(line: string, x: number, y: number): string | null {
+function spliceTokens(line: string, tokens: PlaceTokens): string | null {
   const attrs = placeOpenAttrs(line);
   if (attrs === null) return null;
+  const keys = PLACE_KEYS.filter((k) => tokens[k] !== undefined);
   const open = line.indexOf('{');
   const close = line.lastIndexOf('}');
   if (open !== -1 && close > open) {
     let inner = line.slice(open + 1, close);
-    inner = setToken(inner, 'x', x);
-    inner = setToken(inner, 'y', y);
+    for (const k of keys) inner = setToken(inner, k, tokens[k]!);
     return line.slice(0, open + 1) + inner + line.slice(close);
   }
-  const tokens = attrs.classes.map((c) => `.${c}`);
-  if (attrs.id !== undefined) tokens.push(`#${attrs.id}`);
-  return `::: {${tokens.join(' ')} x=${x} y=${y}}`;
+  const parts = attrs.classes.map((c) => `.${c}`);
+  if (attrs.id !== undefined) parts.push(`#${attrs.id}`);
+  for (const k of keys) parts.push(`${k}=${tokens[k]!}`);
+  return `::: {${parts.join(' ')}}`;
 }
 
 /**
@@ -142,7 +287,7 @@ function spliceXY(line: string, x: number, y: number): string | null {
  *   数字だけを狙うと、変な値の隣に **2 つ目の x=** を作る(そちらの害が大きい。
  *   描画は属性を数として読むだけなので、引用なしの整数へ揃えて同じに描ける)。
  */
-function setToken(attrs: string, key: 'x' | 'y', value: number): string {
+function setToken(attrs: string, key: PlaceKey, value: number): string {
   const re = new RegExp(`(^|\\s)${key}=(?:"[^"]*"|\\S*)`);
   if (re.test(attrs)) return attrs.replace(re, `$1${key}=${value}`);
   return attrs === '' ? `${key}=${value}` : `${attrs} ${key}=${value}`;

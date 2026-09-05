@@ -171,6 +171,22 @@ body {
 [data-pkc-region='shell'][data-pkc-hidden-panes~='append'] [data-pkc-region='append'] {
   display: none;
 }
+/* 🔴 **畳んでいても、編集中の出口は消えない**(#655 ④。user 裁定 2026-09-04)。
+ * ⚠ マニュアル §5 は「編集中の出口は追記欄の場所にも出ます」と約束しているのに、
+ *   上の 1 行が器ごと消すので、畳んだ人には**保存して解放 / 編集を破棄が 1 度も出なかった**
+ *   (中央の保存 / キャンセルだけになる ── 「2 本目の道」が畳みで死ぬ)。
+ * 🔑 器を出す条件は**理由と出口の帯が出ていること**(`append-lock` が `hidden` でない)──
+ *   編集中と書込中(強制解放)がこれに当たる。打つ欄の側(`append-form`)はそのとき
+ *   描画器が `hidden` を付けているので、器を出しても字を打つ所は出てこない
+ *   (`[hidden]` の規則が畳む ── ここで別に消す規則を書かない)。
+ * ⚠ **形を CSS 1 本にした理由**:出口の帯を append の器の外へ移すと、描画器 / shell /
+ *   main の 3 か所が動き、帯の見た目の規則(`append-lock`)も引っ越す。器を出す条件を
+ *   1 行足すほうが小さい。⚠ 副作用:編集中は帯(掴む部分)を押しても見え方が変わらない
+ *   (畳んでも出口だけは残るので)── 記録と `aria-pressed` は動き、編集を終えると効く。 */
+[data-pkc-region='shell'][data-pkc-hidden-panes~='append']:has([data-pkc-field='append-lock']:not([hidden]))
+  [data-pkc-region='append'] {
+  display: block;
+}
 
 /**
  * 🔴 **列の境目の掴む帯**(2026-08-15、user 指示「センターペインの上を潰しすぎ」)。
@@ -459,6 +475,17 @@ select:focus-visible {
 [data-pkc-region='context-menu'] button:focus-visible {
   background: var(--accent-dim);
   color: var(--accent-dim-fg);
+}
+/* 🔴 **近道の字を項目の右に薄く出す**(#587 改善 C 案 2)。字は属性(`data-pkc-shortcut`)に
+ *   持ち、`::after` で描く ── `textContent` を汚さない(項目の字を読む検査と読み上げは字だけ)。
+ *   ⚠ ボタンは `inline-flex`(上の `button` の規則)なので `margin-left: auto` で右に寄る。
+ *   色は `--muted`(近道は添え物 ── 地は無彩色、色は情報にだけ)。 */
+[data-pkc-region='context-menu'] button[data-pkc-shortcut]::after {
+  content: attr(data-pkc-shortcut);
+  margin-left: auto;
+  padding-left: 1.5em;
+  font-size: 11px;
+  color: var(--muted);
 }
 /* 🔴 **メニューの下の説明欄**(#587 C-3。user 裁定 2026-08-30「一度推奨で入れて、
  *   使用感をテストしたい」)。指している項目の説明だけをここへ出す(`context-menu.ts`)。
@@ -2448,6 +2475,28 @@ li[data-pkc-row-slot] {
 .pkc-place > [data-pkc-field='place-grip']::before {
   content: '⠿';
 }
+/* 大きさを変える持ち手(#676)── 右下の角。印は CSS で出す(掴む口と同じ理由) */
+.pkc-place > [data-pkc-field='place-size'] {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: nwse-resize;
+  /* ⚠ 掴んだ指の動きをブラウザのスクロールに食わせない(touch で効く) */
+  touch-action: none;
+}
+.pkc-place > [data-pkc-field='place-size']::before {
+  content: '◢';
+  font-size: 10px;
+  line-height: 16px;
+}
+.pkc-place > [data-pkc-field='place-size']:hover,
+.pkc-place > [data-pkc-field='place-size']:focus-visible,
 .pkc-place > [data-pkc-field='place-grip']:hover,
 .pkc-place > [data-pkc-field='place-grip']:focus-visible {
   color: var(--fg);
@@ -3108,8 +3157,11 @@ li[data-pkc-row-slot] {
 /* ══ 連絡先(#278 段①、2026-08-27)══════════════════════════════
  * 🔴 **左の列に置く**(#292 段⑤ の見分け方 ── 閉じても失う物が無い = ノートの見方)。
  * ⚠ 幅は `minmax(200px, 18vw)` なので、**名前と宛先を縦に積む** ──
- *   横に並べると 200px で電話番号が切れる。 */
-[data-pkc-browse-pane='contacts'] {
+ *   横に並べると 200px で電話番号が切れる。
+ * 🔴 **中央の面(別窓 / 退避)にも同じ規則**(#278 段③、user 裁定 2026-09-04)──
+ *   予定表と同じ形。幅は `[data-pkc-region='detail'] > [data-pkc-view-pane]` が広げる。 */
+[data-pkc-browse-pane='contacts'],
+[data-pkc-view-pane='contacts'] {
   display: flex;
   flex-direction: column;
   gap: var(--s2);
@@ -3177,13 +3229,38 @@ li[data-pkc-row-slot] {
   margin-top: var(--s2);
   align-self: flex-start;
 }
+/* その場で足す欄(#278 段③、2026-09-04)── 予定の `schedule-quick` と同じ 1 行の作法。
+ * ⚠ 左の列は下限 200px なので**折り返す**(4 つの欄 + ボタンを 1 行に固定すると
+ *   欄が 30px 幅に潰れる)。中央の面では 1 行に並ぶ。 */
+[data-pkc-field='contacts-quick'] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s1);
+}
+[data-pkc-field='contacts-quick'] input {
+  flex: 1 1 6em;
+  min-width: 0;
+}
+/* 一覧を描き直す器 ── 親(面)の縦積みと同じ間隔を中で持つ(欄と分けたぶんの器) */
+[data-pkc-field='contacts-body'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  min-height: 0;
+}
 
 /* ══ 予定(#292 段③、2026-08-23)══════════════════════════════════
  * 🔴 **左の列に置く**(user 指示「もう一つ PKC が開いて混乱する」)── 中央は
  *   本文のまま。⚠ 幅は `minmax(200px, 18vw)` = 1920 で 345px / 下限 200px。
  *   7 列の月は下限でも 28px/セルなので、**数字と点だけ**なら入る
- *   (升目の中に予定を並べるのは捨てた ── それは下の束が持つ)。 */
-[data-pkc-browse-pane='schedule'] {
+ *   (升目の中に予定を並べるのは捨てた ── それは下の束が持つ)。
+ * 🔴 **中央の面(別窓 / 退避)にも同じ規則**(#673 段②、user 裁定 2026-09-04)──
+ *   器の属性が違うだけで中身は同じ描画器なので、選択子リストで束ねる。
+ *   幅は `[data-pkc-region='detail'] > [data-pkc-view-pane]` の `flex: 1` が
+ *   中央いっぱいに広げる(ここでは触らない)。 */
+[data-pkc-browse-pane='schedule'],
+[data-pkc-view-pane='schedule'] {
   display: flex;
   flex-direction: column;
   gap: var(--s2);
@@ -4204,6 +4281,14 @@ li[data-pkc-row-slot] {
   min-height: 32px;
   padding: 0 var(--s3);
 }
+/* 🔴 **知らせの隣の「開く」**(#668 A)。⚠ 出し入れは `status-open.ts` が `hidden` で持つ。
+ *   状態の行は 20px なので、OK と同じ 32px にはしない(帯を太らせない)。 */
+[data-pkc-field='status-open'] {
+  flex: 0 0 auto;
+  min-height: 18px;
+  padding: 0 var(--s2);
+  font-size: 11px;
+}
 
 [hidden] {
   display: none !important;
@@ -4539,6 +4624,15 @@ li[data-pkc-row-slot] {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* 🔴 **もう片方に残っている印**(#687 C-1)── 情報行と同じ見た目で、その上に置く。
+ *   ⚠ 字が入るのは 1 枚ずつ(スマホ)の焦点の側だけ(JS が `hidden` を塗る)。
+ *   ⚠ こちらは折り返す ── 「動きません」まで読めないと知らせの意味が無い。 */
+[data-pkc-field='dual-other-marks'] {
+  color: var(--muted);
+  font-size: 11px;
+  padding: var(--s1) var(--s2);
+  border-top: 1px solid var(--border);
 }
 /* 🔴 **操作行は最下段・全幅・等分割**(2026-08-19 の作り直し)。
  *
@@ -5474,6 +5568,30 @@ li[data-pkc-row-slot] {
   min-height: 32px;
   margin-bottom: var(--s2);
   text-align: center;
+  /* 🔴 相手のフォルダ名を末尾に出す(#687 A-1)── 長い題名は末尾から省く。
+   *   ⚠ 折り返させない ── 2 行になると押し所の丈が動き、下の表がずれる。 */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 🔴 **長押しで印を足す**(#687 D-1)── 押している間に字が選ばれたり、
+ *   iOS の吹き出し(コピー / 共有)が出たりしないようにする。
+ *   ⚠ `touch-action` は**書かない** ── 書くと一覧のスクロールが死ぬ
+ *   (スクロールし始めたかは `long-press.ts` が `pointermove` の距離で見る)。 */
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='dual-table'] tbody tr {
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+/* 🔴 **タブ帯の左端の「左」/「右」はスマホでだけ出す**(#687 B-1)。
+ * ⚠ パソコンは 2 枚が並んでいるので、位置がそのまま側を言う ── 字を足すと
+ *   帯が 1 語ぶん詰まるだけである。1 枚ずつのときは**これが唯一の側の印**。 */
+[data-pkc-field='dual-side-mark'] {
+  display: none;
+}
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-field='dual-side-mark'] {
+  display: inline;
+  font-weight: 600;
+  margin-inline-end: var(--s1);
 }
 /* 🔴 **操作の 7 つも 32px にする**(user 裁定 2026-09-04)。
  * 🔑 1 枚ずつにしたことで**丈が 282px → 571px** になったので、

@@ -19,6 +19,8 @@ import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { ScheduleRenderer } from '../../src/adapter/ui/render/schedule';
+import { CenterRouter } from '../../src/adapter/ui/render/center';
+import { todayNoteTitle } from '../../src/features/schedule/today-note';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { stubRevisionOps } from '../helpers/revision-stub';
 import { taskCardsOf } from '../../src/features/schedule/task-cards';
@@ -816,5 +818,136 @@ describe('予定から外す(#498)', () => {
     const card = cardsOf(s.root, '2026-08-23')[0]!;
     expect(card.textContent ?? '', '印が札の字に混ざっている').not.toContain('×');
     expect(card.textContent ?? '', '字が出ていない(空振り)').toContain('見積を送る');
+  });
+});
+
+/**
+ * 🔴 **予定表を中央の面にも描く**(#673 段②。user 裁定 2026-09-04
+ * 「予定表も連絡先も別窓、アプリの基本は別窓」)。
+ *
+ * ## この describe が守るもの
+ *
+ * ① 中央の器(`data-pkc-view-pane="schedule"`)でも**左の列と同じ部品**が出る
+ *    ── 描画器が 1 つなので「別窓だけ欄が無い」を作らない
+ * ② 🔴 **予定の面が 2 つ在るとき、「足す」は押した面の欄を読む** ── 直す前の
+ *    `binder.ts` は `root.querySelector` で document 全体から欄を引いていたので、
+ *    左の列に「予定」タブが描かれている窓では、中央で打った字ではなく
+ *    **左の空の欄**を読んで「やることを入力してください」と断っていた
+ * ③ 束の `+`(その日を欄に入れる)も押した面の欄に入る
+ *
+ * ⚠ ②③は **document 順で左の面が先**であることを前提に置く(前提を assert する)──
+ *   崩れていたら「一致しなかった」ではなく「前提が崩れた」で落ちる。
+ */
+describe('予定表を中央の面に描く(#673 段②)', () => {
+  const TODAY_TITLE = todayNoteTitle(new Date());
+
+  function twoFaces(bodies: Record<string, string>) {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const d = new Dispatcher();
+    const regions = buildShell(root);
+    // 左の列の「予定」タブ(browse.ts と同じ器の属性)── document 順で**先**
+    const left = document.createElement('div');
+    left.setAttribute('data-pkc-browse-pane', 'schedule');
+    regions.browseHost.append(left);
+    const leftView = new ScheduleRenderer(left, () => TODAY);
+    const center = new CenterRouter(regions.detail, () => TODAY);
+    d.onState((s) => {
+      leftView.render(s);
+      center.render(s);
+    });
+    bindActions(root, d);
+    const disk: Record<string, string> = { ...bodies };
+    connectStoreEffects(d, {
+      ...stubRevisionOps(),
+      getBody: async (lid) => disk[lid] ?? null,
+      deleteEntry: async () => {},
+      setEntryParent: async () => {},
+      renameEntry: async () => stubStamps(),
+      replaceAssetRefs: () => Promise.reject(new Error('使わない')),
+      reorderEntry: async () => stubStamps(),
+      persistEntry: async (e) => {
+        disk[e.lid] = e.body;
+        return stubStamps();
+      },
+    });
+    d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      // ⚠ 今日のノートを先に置く(quick-add の行き先。無ければ作る経路は別の test が見る)
+      metas: Object.keys(bodies).map((lid) => meta(lid, { title: TODAY_TITLE })),
+      relations: [],
+    });
+    const cards = Object.entries(bodies).flatMap(([lid, body]) => taskCardsOf(lid, body));
+    d.dispatch({
+      type: 'SET_TASK_SCAN',
+      scan: { cards, totalNotes: 1, scannedNotes: 1, truncated: false },
+    });
+    d.dispatch({ type: 'SET_VIEW_MODE', mode: 'schedule' });
+    const centerPane = root.querySelector<HTMLElement>('[data-pkc-view-pane="schedule"]')!;
+    const q = <T extends HTMLElement>(host: HTMLElement, sel: string): T =>
+      host.querySelector<T>(sel)!;
+    // 🔴 **前提**: 欄は 2 つ在り、document 全体から引くと**左**の欄が先に当たる
+    const all = [...root.querySelectorAll('[data-pkc-field="schedule-quick-text"]')];
+    expect(all, '前提が崩れた(欄が 2 つ描かれていない)').toHaveLength(2);
+    expect(left.contains(all[0]!), '前提が崩れた(document 順で左が先ではない)').toBe(true);
+    return { root, d, disk, left, centerPane, q };
+  }
+
+  it('🔴 中央の器でも、左の列と同じ部品(欄・月・束・札)が出る', () => {
+    const { left, centerPane, root } = twoFaces({ t1: '- [ ] 見積を送る @2026-08-23\n' });
+    expect(centerPane.hidden, '中央の予定表が隠れている').toBe(false);
+    expect(root.querySelector<HTMLElement>('[data-pkc-view-pane="detail"]')!.hidden).toBe(true);
+    for (const sel of [
+      '[data-pkc-field="schedule-quick"]',
+      '[data-pkc-field="schedule-month"]',
+      '[data-pkc-field="schedule-grid"]',
+      '[data-pkc-region="schedule-group"][data-pkc-drop-date="2026-08-23"] [data-pkc-entry]',
+    ]) {
+      expect(centerPane.querySelector(sel), `中央に ${sel} が無い`).not.toBeNull();
+      // ⚠ 対照群: 左にも同じ物が在る(同じ描画器)
+      expect(left.querySelector(sel), `左に ${sel} が無い(空振り)`).not.toBeNull();
+    }
+    // 🔑 面の印は器ごとに焼かれている(binder の `closest` の足場)
+    expect(centerPane.getAttribute('data-pkc-region')).toBe('schedule');
+    expect(left.getAttribute('data-pkc-region')).toBe('schedule');
+  });
+
+  it('🔴 2 面あるとき、「足す」は押した面(中央)の欄を読む', async () => {
+    const s = twoFaces({ t1: 'メモ\n' });
+    await tick();
+    // 左の欄は空のまま、中央の欄にだけ打つ
+    s.q<HTMLInputElement>(s.centerPane, '[data-pkc-field="schedule-quick-text"]').value =
+      '中央から足す';
+    s.q<HTMLInputElement>(s.centerPane, '[data-pkc-field="schedule-quick-date"]').value =
+      '2026-08-28';
+    s.q(s.centerPane, '[data-pkc-action="schedule-quick-add"]').click();
+    await tick();
+    expect(s.d.getState().error ?? '', '左の空欄を読んで断った').toBe('');
+    expect(s.disk['t1'], '中央で打った字が disk に届いていない').toContain(
+      '- [ ] 中央から足す @2026-08-28',
+    );
+    // 🔑 対照群: 左の面から足しても左の欄を読む(面ごとに正しい欄)
+    s.q<HTMLInputElement>(s.left, '[data-pkc-field="schedule-quick-text"]').value = '左から足す';
+    s.q<HTMLInputElement>(s.left, '[data-pkc-field="schedule-quick-date"]').value = '';
+    s.q(s.left, '[data-pkc-action="schedule-quick-add"]').click();
+    await tick();
+    expect(s.disk['t1']).toContain('- [ ] 左から足す');
+  });
+
+  it('🔴 束の「+」も、押した面の欄に日付を入れる', async () => {
+    const s = twoFaces({ t1: '- [ ] さきの予定 @2026-09-10\n' });
+    await tick(50);
+    const plus = s.centerPane.querySelector<HTMLElement>('[data-pkc-action="schedule-quick-here"]');
+    expect(plus, '前提が崩れた(中央の束に「+」が無い)').not.toBeNull();
+    plus!.click();
+    expect(
+      s.q<HTMLInputElement>(s.centerPane, '[data-pkc-field="schedule-quick-date"]').value,
+      '押した面の欄に入っていない',
+    ).toBe('2026-09-10');
+    // ⚠ 左の欄は今日のまま(別の面の欄を書き換えていない)
+    expect(s.q<HTMLInputElement>(s.left, '[data-pkc-field="schedule-quick-date"]').value).toBe(
+      '2026-08-23',
+    );
   });
 });

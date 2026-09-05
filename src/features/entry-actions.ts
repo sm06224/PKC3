@@ -86,6 +86,31 @@ export function entryMenuActions(
 }
 
 /**
+ * 🔴 **書いている最中の行に出す、ただ 1 つ**(#690 ④ A′、user 裁定 2026-09-04)。
+ *
+ * ## 物語
+ *
+ * 本文を書いている途中で、一覧の別のノートを**参照したく**なる。ところが編集中は
+ * 行を右クリックしても「編集を終了してからノートを開いてください」と断られ、
+ * 右の情報のボタンも全部 `disabled` ── **下書きを閉じるか、諦めるか**しか無かった。
+ * ⚠ 付箋(`open-note-window`)は**中央を動かさずに脇へ出す**ものなので、
+ *   下書きを壊す理由が 1 つも無い。断る側の理屈が当たらない唯一の操作である。
+ *
+ * 🔑 **出すのはこれ 1 つ** ── 他の項目(消す / 書き出す / 印を付ける)は
+ *   `selectEntryOrExplain` が行を選ぶことを前提にしており、編集中は選べない。
+ * ⚠ 字も説明も `ENTRY_MENU_ACTIONS` / `ENTRY_ACTION_HINTS` から**引く**
+ *   (ここに書き写さない ── 片方だけ直る日を作らない。§7)。
+ */
+export function editingRowMenuActions(): readonly (EntryAction & { readonly hint: string })[] {
+  // ⚠ 材料は要らない(`open-note-window` は `when` を持たない)── 空の文脈で引く
+  const ctx: EntryMenuContext = { archetype: null, linkedFile: null };
+  return ENTRY_MENU_ACTIONS.filter((a) => a.action === 'open-note-window').map((a) => ({
+    ...a,
+    hint: entryActionHint(a.action, ctx),
+  }));
+}
+
+/**
  * 🔴 **右クリックで出す順**。
  *
  * ⚠ **消す物をいちばん下**に置く ── 上から順に押していく人が、
@@ -95,6 +120,7 @@ export function entryMenuActions(
  */
 export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
   { action: 'copy-entry-ref', label: '参照をコピー' },
+  { action: 'copy-plain-markdown', label: '素の Markdown' },
   /**
    * 🔴 **付箋のように何枚でも開ける**(#685 段②、user 裁定 2026-09-04)。
    *
@@ -102,12 +128,15 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    * > 使ってどんどんスクラップできてます / 付箋的に使えるのもいいですね /
    * > マルチで付箋開けるといいかもね**」(利用者の感想 2026-09-04)
    *
-   * ⚠ **先頭ではなく 2 番目に置く**(user 裁定 2026-09-04、動線レビュー 案 D-2)──
-   *   1 稿目は先頭に入れたので、**毎日使っている全項目が 1 つ下へずれた**。
-   *   新しい操作のために既存の並びを動かさない。
+   * ⚠ **先頭ではなく、写す 2 つの後に置く**(user 裁定 2026-09-04、動線レビュー 案 D-2
+   *   → #690 I2)── 1 稿目は先頭に入れたので、**毎日使っている全項目が 1 つ下へ
+   *   ずれた**。2 稿目は 2 番目に入れたので、**「参照をコピー」と「素の Markdown」
+   *   (どちらも clipboard へ写す)の間に割り込んでいた**。新しい操作のために
+   *   既存の並びを動かさない ── 写す 2 つを隣に戻し、その次に置く。
+   * 🔑 字は「別の**ウィンドウ**で開く」(#690 I1)── お知らせ・マニュアル・止めたときの
+   *   字(「すでに別のウィンドウで開いています」)が全部「ウィンドウ」なので揃える。
    */
-  { action: 'open-note-window', label: '別の窓で開く' },
-  { action: 'copy-plain-markdown', label: '素の Markdown' },
+  { action: 'open-note-window', label: '別のウィンドウで開く' },
   { action: 'export-entry', label: '書き出す' },
   /**
    * 🔴 **相手に渡せる 1 枚**(#491。user 報告 2026-08-27
@@ -219,7 +248,7 @@ export const BODY_MENU_ACTIONS: readonly EntryAction[] = [
    * 🔑 ここから開けば、**探し直しが 1 度も要らない**(行から開く道は
    *   `MENU_PREV_LID_ATTR` で現在地を戻しているが、こちらはそもそも動かない)。
    */
-  { action: 'open-note-window', label: '別の窓で開く' },
+  { action: 'open-note-window', label: '別のウィンドウで開く' },
 ];
 
 /**
@@ -365,6 +394,12 @@ export const HEADING_MENU_ACTIONS: readonly EntryAction[] = [
   { action: 'edit-from-heading', label: 'ここから編集する' },
   { action: 'append-at-heading', label: 'ここに追記する' },
   { action: 'toggle-heading-fold', label: 'この見出しの中身を畳む' },
+  /**
+   * 🔴 **章をまるごと原文で写す**(#677。user 裁定 2026-09-04)。
+   * ⚠ 「章の参照をコピー」(上の注記)とは別物 ── こちらは**記法を増やさない**。
+   *   写るのは見出しから次の同段以上の見出しの直前までの **Markdown の原文**である。
+   */
+  { action: 'copy-chapter-md', label: 'この章をコピー' },
 ];
 
 /**
@@ -399,8 +434,80 @@ export function headingMenuActions(ctx: {
       action: 'toggle-heading-fold',
       label: ctx.folded ? 'この見出しの中身を出す' : 'この見出しの中身を畳む',
     });
+    /**
+     * 🔴 **章の範囲は畳みと同じ計算**(#677)── 「次の同段以上の見出しの手前まで」を
+     *   **本文の直下の塊の並び**で数える(`heading-fold.ts` の `sectionEnd` 1 本)。
+     *   だから畳めない見出し(引用や `:::` の中)では章も切り出せず、**同じ条件で畳む**
+     *   (出しても押して何も起きない口になる)。
+     */
+    out.push({ action: 'copy-chapter-md', label: 'この章をコピー' });
   }
   return out;
+}
+
+/**
+ * 🔴 **`:::` の塊の上で出す物**(#677)。
+ *
+ * ⚠ 板(`.pkc-place` の format 塊)は user の目には「付箋」なので、字を分ける ──
+ *   同じ操作(開き行から閉じの `:::` までを原文で写す)だが、「塊」では
+ *   自分が右クリックした物だと分からない。
+ * ⚠ 綴り(`copy-block-md`)は 1 つ ── 受け手は同じである。
+ *
+ * @param board 板の塊か(`place-notation.ts` の `isPlaceOpen` が決める)
+ */
+export function blockMenuActions(ctx: { readonly board: boolean }): readonly EntryAction[] {
+  if (!ctx.board) return [{ action: 'copy-block-md', label: 'この塊をコピー' }];
+  /**
+   * 🔴 **板だけの物**(#676。user 裁定 2026-09-04)── 置けるなら消せる(user 指示
+   *   2026-08-23「片道の操作を作らない」)。⚠ 消すは取り消せないので**確認を挟む**
+   *   (受け手 `remove-place` が `confirmThen` で聞く)── 一覧の末尾に置く。
+   */
+  return [
+    { action: 'copy-block-md', label: 'この板をコピー' },
+    // 🔴 前へ出す(#676 段②)。⚠ 「後ろへ送る」は無い ── 負の z を描画が捨てるので、
+    //    下げる向きは触っていない板の行まで書き換えることになる
+    { action: 'raise-place', label: '前へ出す' },
+    { action: 'remove-place', label: 'この板を消す' },
+  ];
+}
+
+/**
+ * 🔴 **右クリックした場所に板を置く**(#676。user 裁定 2026-09-04)。
+ *
+ * ⚠ 本文の右クリックに**いつも**出す ── 板の無いノートにも置ける(1 枚目を置くと器が板になり、
+ *   付箋が本文の上に重なる ── マニュアルに書いた仕様)。座標はメニューが運ぶ
+ *   (`binder.ts` の `data-pkc-menu-x` / `-y`)。
+ * ⚠ `BODY_MENU_ACTIONS` には入れない ── あちらは「読んでいる見え方を変える」物の表で、
+ *   これは**本文を書き換える**物である(塊の物と同じ並びに置く)。
+ */
+export const ADD_PLACE_ACTION: EntryAction = { action: 'add-place', label: 'ここに板を置く' };
+
+/**
+ * 🔴 **見出し・本文のメニューの項目に添える近道**(#587 改善 C 案 2)。
+ *
+ * ⚠ 行のメニューの 9 項目は説明欄(C-3)を持つが、見出しの 3 項目・本文の項目には何も
+ *   添えていなかった ──「ここから編集する」は `Ctrl`+クリック、「ここに追記する」は
+ *   `Alt`+クリックで同じことができる(マニュアル §7)のに、メニューからは知りようがない。
+ *   右クリックは「近道を知らない人の入口」なので、**そこで近道を教える**のがいちばん効く。
+ * 🔑 字はメニューの各項目の**右に薄く**出す(`context-menu.ts` の `data-pkc-shortcut`)。
+ *   説明欄(C-3)とは両立する ── 見出しのメニューに説明欄は出ないまま。
+ * ⚠ 綴りは `chordLabel` の作法に揃える(`Ctrl + N` / mac は `⌘`)。修飾キー + クリックは
+ *   鍵の割当ではないので `keymap` には無く、**ここで組む**。鍵の割当がある項目
+ *   (`cycle-read-columns`)は**いまの第 1 割当**を引く ── user が変えれば字も変わる
+ *   (`applyShortcutHints` と同じ向き。直書きすると mac と割当変更の 2 方向で嘘になる)。
+ *
+ * @param ctx.mac mac の綴り(`⌘` / `⌥`)にするか
+ * @param ctx.chord 命令 id → いまの第 1 割当の綴り(無ければ `null`)。adapter の
+ *   `chordHint` を渡す ── features 層は割当の台帳を持たない
+ * @returns 近道の字。⚠ 無いものは**空文字**(呼び側は属性を付けない ── 空の欄を出さない)
+ */
+export function menuShortcutFor(
+  action: string,
+  ctx: { readonly mac: boolean; readonly chord: (commandId: string) => string | null },
+): string {
+  if (action === 'edit-from-heading') return `${ctx.mac ? '⌘' : 'Ctrl'} + クリック`;
+  if (action === 'append-at-heading') return `${ctx.mac ? '⌥' : 'Alt'} + クリック`;
+  return ctx.chord(action) ?? '';
 }
 
 /** 綴り → 字。⚠ 情報ペインはこちらを引く(並びは向こうが決める)。 */
@@ -507,8 +614,20 @@ function middleEllipsis(name: string, max: number): string {
   return `${name.slice(0, head)}…${name.slice(name.length - (max - 1 - head))}`;
 }
 
-/** `write-back-file` の説明のうち、ファイル名以外の固定部分(字数を数えるため空で組む)。 */
-const WRITE_BACK_FRAME = '開いた元のファイル()を、このノートの内容で上書きします';
+/**
+ * `write-back-file` の説明のうち、ファイル名以外の固定部分(字数を数えるため空で組む)。
+ *
+ * 🔴 **「元の内容は戻せません(押すと確かめの窓が出ます)」を足した**(#587 改善 C 案 1)。
+ * ⚠ 直す前の「…上書きします」だけでは、**取り消せないこと**と**押した瞬間に上書きされる
+ *   わけではないこと**(確かめの窓が挟まる ── `main.ts` の `writeBackFile` が `ask` する)
+ *   の 2 つが読めなかった。押すのを怖がる人と、怖がらずに押す人の両方に要る字である。
+ * ⚠ 上限は 2 行 = `ENTRY_ACTION_HINT_MAX`(56 字)。裁定の字を「開いた元のファイル()を、
+ *   このノートの内容で」に足すと固定部分だけで 53 字になり、**ファイル名に 3 字しか残らない**
+ *   (`.docx` すら出ない)。🔑 だから頭を「元のファイル()を上書きします」へ縮めた ──
+ *   何を上書きするか(名前)と、戻せないこと、確かめの窓の 3 つが全部 2 行に収まる
+ *   (固定 40 字 / 名前に 16 字)。「このノートの内容で」は操作の名(書き戻す)が既に言っている。
+ */
+const WRITE_BACK_FRAME = '元のファイル()を上書きします。元の内容は戻せません(押すと確かめの窓が出ます)';
 
 export function entryActionHint(action: string, ctx: EntryMenuContext): string {
   if (action === 'write-back-file') {
@@ -521,7 +640,7 @@ export function entryActionHint(action: string, ctx: EntryMenuContext): string {
      * 🔑 だから名前のほうを縮める(頭と尻を残す)── 言うべきことは必ず残る。
      */
     const room = ENTRY_ACTION_HINT_MAX - WRITE_BACK_FRAME.length;
-    return `開いた元のファイル(${middleEllipsis(ctx.linkedFile ?? '', room)})を、このノートの内容で上書きします`;
+    return `元のファイル(${middleEllipsis(ctx.linkedFile ?? '', room)})を上書きします。元の内容は戻せません(押すと確かめの窓が出ます)`;
   }
   return ENTRY_ACTION_HINTS[action] ?? '';
 }

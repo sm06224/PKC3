@@ -71,6 +71,14 @@ const SIDE_LABEL: Readonly<Record<DualSide, string>> = { left: '左', right: '�
 const otherSide = (side: DualSide): DualSide => (side === 'left' ? 'right' : 'left');
 
 /**
+ * 場所の呼び名(タブ / 行き先のボタンが同じ規則で出す)。
+ * ⚠ **1 か所に置く**(#687 A-1)── タブと行き先で別々に組むと、無題のノートの
+ *   呼び方が帯と押しボタンで食い違う(CLAUDE.md §7)。
+ */
+const scopeName = (lid: string | null, metas: AppState['entryMetas']): string =>
+  lid === null ? 'ルート' : (metas.get(lid)?.title ?? '(無題)');
+
+/**
  * 🔴 **列の定義**(2026-08-19 の作り直し)。
  *
  * ⚠ **名前の列にだけ幅を書かない** ── 残りを全部食わせる(Total Commander が
@@ -153,9 +161,17 @@ const COMMAND_ITEMS: readonly {
     action: 'dual-copy',
     directed: true,
     command: 'dual-copy-to-other',
-    label: '写す',
-    hint: (from, to) => `${from}で選んだものを、${to}のペインへ写します(元は残ります)`,
-    empty: '写すものを選んでから押してください',
+    /**
+     * 🔴 **「コピー」に寄せた**(#587 D-1)。⚠ 直す前は 1 つの操作に 3 通りの字が在った
+     *   ── ここ「写す」/ 情報ペインの「参照をコピー」/ 鍵の一覧「反対のペインへ写す」。
+     *   user の語は「コピー」である(マニュアル §6 も「反対側の場所へ**コピー**します」と
+     *   説明していた ── 説明の語とボタンの字が違うのは、探させる向きに働く)。
+     * ⚠ スマホでは行き先が付いて「右へコピー」になる(5 字。「プレビュー」と同じ幅で、
+     *   4 列の 1 マス ≒ 94px に入る)。
+     */
+    label: 'コピー',
+    hint: (from, to) => `${from}で選んだものを、${to}のペインへコピーします(元は残ります)`,
+    empty: 'コピーするものを選んでから押してください',
   },
   {
     action: 'dual-move',
@@ -233,6 +249,12 @@ interface PaneFrame {
   foot: HTMLElement;
   /** 🔴 **下見**(#273 残件)。⚠ 出していないときは `hidden`。 */
   preview: HTMLElement;
+  /**
+   * 🔴 **もう片方に残っている印の知らせ**(#687 C-1)。⚠ 1 枚ずつ(スマホ)で
+   *   焦点の側にだけ字が入る ── 相手は画面に居ないので、印が残っていることを
+   *   言う物がこれしか無い。出していないときは `hidden` **かつ字も空**。
+   */
+  otherMarks: HTMLElement;
   rows: Map<string, HTMLElement>;
   /**
    * 表の指紋 ── 変わったときだけ組み直す。
@@ -332,8 +354,7 @@ export class DualFilerRenderer {
      *   窓を細めただけの回(state は 1 バイトも動かない)に
      *   **行き先のボタンと操作の字が古いまま残る**。
      */
-    const soloChanged =
-      this.frame === null ? false : this.paintSwitch(this.frame, state.dual.focus);
+    const soloChanged = this.frame === null ? false : this.paintSwitch(this.frame, state);
     /**
      * 🔴 **入力が 1 つも変わっていないなら描かない**(着地前レビュー R4)。
      *
@@ -386,7 +407,23 @@ export class DualFilerRenderer {
      * ⚠ 初回は `ensureFrame` の直後がいちばん早い塗り所である
      *   (門の前では器がまだ無い)。2 回目以降は門の前で済んでいる。
      */
-    this.paintSwitch(frame, state.dual.focus);
+    this.paintSwitch(frame, state);
+    /**
+     * 🔴 **もう片方に残っている印を言う**(#687 C-1)。
+     * ⚠ **両ペインを描いたループの後**で読む ── ループの中で相手の
+     *   `shownMarks` を読むと、相手がまだ前回の値である(左を描いている時点で
+     *   右はまだ描かれていない)。
+     * ⚠ 1 枚ずつ(`lastSolo`。直前の `paintSwitch` が塗った)のときだけ ──
+     *   パソコンは相手の印が見えているので、言う理由が無い。
+     */
+    for (const side of SIDES) {
+      const solo = this.lastSolo === true && side === state.dual.focus;
+      this.paintOtherMarks(
+        frame.panes[side],
+        otherSide(side),
+        solo ? frame.panes[otherSide(side)].shownMarks : 0,
+      );
+    }
     /**
      * 🔴 **焦点の側は「移す向き」そのもの**なので、必ず画面に出す
      * (出さないと user は**どちらが元か分からないまま**押すことになる)。
@@ -421,7 +458,12 @@ export class DualFilerRenderer {
 
   /** 直前に塗った「1 枚だけか」と「行き先」(⚠ 毎描画で属性を書き換えない)。 */
   private lastSolo: boolean | null = null;
-  private lastSwitchTo: DualSide | null = null;
+  /**
+   * 行き先の指紋 = `側 + SEP + 相手のフォルダ名`(#687 A-1)。
+   * ⚠ **側だけにしない** ── 相手のペインが別のフォルダへ動いただけの回
+   *   (焦点は動かない)に、ボタンの名前が古いまま残る。
+   */
+  private lastSwitchTo: string | null = null;
 
   /**
    * 🔴 **行き先のボタンを塗る**(#671)。
@@ -438,19 +480,31 @@ export class DualFilerRenderer {
    */
   private paintSwitch(
     frame: NonNullable<DualFilerRenderer['frame']>,
-    focus: DualSide,
+    state: AppState,
   ): boolean {
     const solo = appPhone.isPhone();
+    const focus = state.dual.focus;
     const to = otherSide(focus);
-    if (solo === this.lastSolo && to === this.lastSwitchTo) return false;
+    /**
+     * 🔴 **相手のペインが開いているフォルダの名前も出す**(#687 A-1)。
+     * ⚠ 相手は画面に居ないので、「右のペインへ」だけでは**どこへ行くのか**
+     *   読めない ── 押す前に「2026 請求 へ写す」と分かるのは、この字だけである。
+     * 🔑 名前の規則はタブ帯と同じ `scopeName`(無題 / ルートの呼び方を揃える)。
+     */
+    const name = scopeName(paneScope(paneOf(state.dual, to)), state.entryMetas);
+    const key = `${to}${SEP}${name}`;
+    if (solo === this.lastSolo && key === this.lastSwitchTo) return false;
     this.lastSolo = solo;
-    this.lastSwitchTo = to;
+    this.lastSwitchTo = key;
     frame.switcher.setAttribute('data-pkc-side', to);
     // ⚠ 矢印は**行き先の向き**にする(右へ行くのに ← が出ると、押す前に迷う)
+    // ⚠ 名前は**末尾**に置く ── 長い題名は CSS が末尾から省くので、向きの字が残る
     frame.switcher.textContent =
-      to === 'right' ? `${SIDE_LABEL.right}のペインへ →` : `← ${SIDE_LABEL.left}のペインへ`;
+      to === 'right'
+        ? `${SIDE_LABEL.right}のペインへ → ${name}`
+        : `← ${SIDE_LABEL.left}のペインへ ${name}`;
     frame.switcher.title =
-      `${SIDE_LABEL[to]}のペインに切り替えます(いま見ているのは${SIDE_LABEL[focus]}のペインです)`;
+      `${SIDE_LABEL[to]}のペイン(${name})に切り替えます(いま見ているのは${SIDE_LABEL[focus]}のペインです)`;
     /**
      * 🔴 **隠した側へ焦点が入らないようにする**(着地前の動線レビュー C)。
      * ⚠ 1 枚ずつは `visibility: hidden` で作る(`display: none` にすると
@@ -465,6 +519,25 @@ export class DualFilerRenderer {
     }
 
     return true;
+  }
+
+  /**
+   * 🔴 **「左のペインに N 件の印が残っています」を塗る**(#687 C-1)。
+   *
+   * ⚠ 写す / 移すの元は**焦点の側**である(`binder.ts` の `dual-copy` / `dual-move`)。
+   *   1 枚ずつのとき、相手に付けたままの印は**画面に無いのに数だけ在る** ──
+   *   言わないと「さっき 3 件選んだのに、押したら 0 件と断られた」になる。
+   * ⚠ `n === 0` では **`hidden` かつ字も空**にする(`too-narrow.ts` と同じ罠 ──
+   *   `hidden` は見た目にしか効かず、`textContent` を見る検査が隠れた字に満たされる)。
+   * ⚠ 器は作り直さない(字を入れ替えるだけ)。
+   */
+  private paintOtherMarks(frame: PaneFrame, other: DualSide, n: number): void {
+    const text =
+      n > 0
+        ? `${SIDE_LABEL[other]}のペインに ${String(n)} 件の印が残っています(ここで写す・移すを押しても、その印は動きません)`
+        : '';
+    if (frame.otherMarks.textContent !== text) frame.otherMarks.textContent = text;
+    if (frame.otherMarks.hidden !== (n === 0)) frame.otherMarks.hidden = n === 0;
   }
 
   private ensureFrame(): NonNullable<DualFilerRenderer['frame']> {
@@ -601,8 +674,11 @@ export class DualFilerRenderer {
     const preview = document.createElement('pre');
     preview.setAttribute('data-pkc-region', 'dual-preview');
     preview.hidden = true;
+    const otherMarks = document.createElement('div');
+    otherMarks.setAttribute('data-pkc-field', 'dual-other-marks');
+    otherMarks.hidden = true;
 
-    root.append(tabs, head, marksBar, table, preview, foot);
+    root.append(tabs, head, marksBar, table, preview, otherMarks, foot);
     return {
       root,
       tabs,
@@ -616,6 +692,7 @@ export class DualFilerRenderer {
       table,
       foot,
       preview,
+      otherMarks,
       rows: new Map(),
       signature: null,
       dates: null,
@@ -930,13 +1007,25 @@ export class DualFilerRenderer {
   }
 
   private renderTabs(host: HTMLElement, side: DualSide, state: AppState, pane: DualPaneState): void {
-    const names = pane.tabs.map((t) =>
-      t.scopeLid === null ? 'ルート' : (state.entryMetas.get(t.scopeLid)?.title ?? '(無題)'),
-    );
+    const names = pane.tabs.map((t) => scopeName(t.scopeLid, state.entryMetas));
     const sig = [String(pane.active), ...names].join(SEP);
     if (host.getAttribute('data-pkc-sig') === sig) return;
     host.setAttribute('data-pkc-sig', sig);
     host.textContent = '';
+    /**
+     * 🔴 **帯の左端に「左」/「右」**(#687 B-1)。
+     * ⚠ 1 枚ずつ(スマホ)のときは、いま見ているのが**どちらのペインか**を
+     *   言う物が画面に 1 つも無い ── 帯の地色は相手が居なければ比べようがない。
+     * 🔑 読み上げは器の `aria-label`(「左のペイン」)が既に言うので `aria-hidden`
+     *   (2 度読ませない)。⚠ 出し入れは CSS だけが決める(PC では `display: none`)。
+     * ⚠ 帯は指紋が変わるたび組み直すので、**ここで毎回作る**(器に 1 度置くと
+     *   `textContent = ''` で消える)。
+     */
+    const mark = document.createElement('span');
+    mark.setAttribute('data-pkc-field', 'dual-side-mark');
+    mark.setAttribute('aria-hidden', 'true');
+    mark.textContent = SIDE_LABEL[side];
+    host.append(mark);
     names.forEach((name, i) => {
       const tab = document.createElement('span');
       tab.setAttribute('data-pkc-region', 'dual-tab');

@@ -281,8 +281,28 @@ async function seedFakePack(
         var bad = ${JSON.stringify(badFont ?? '__none__')};
         return {
           FS: {
-            mkdirTree: function (p) { made[p] = true; },
+            // ⚠ mkdirTree は途中の親も作る(本物と同じ)── readdir が木として辿れる
+            mkdirTree: function (p) {
+              var parts = p.split('/').filter(Boolean);
+              var cur = '';
+              for (var i = 0; i < parts.length; i += 1) { cur += '/' + parts[i]; made[cur] = true; }
+            },
             mkdir: function (p) { made[p] = true; },
+            // マクロの退避(#431 ②)が走査に使う 2 つ。⚠ readdir は . と .. を含む
+            //   (⚠ この中は template literal ── バッククォートを書かない)
+            readdir: function (p) {
+              if (!made[p]) throw new Error('ENOENT: ' + p);
+              var names = ['.', '..'];
+              var seen = {};
+              var all = Object.keys(made).concat(Object.keys(window.__files || {}));
+              for (var i = 0; i < all.length; i += 1) {
+                if (all[i].indexOf(p + '/') !== 0) continue;
+                var head = all[i].slice(p.length + 1).split('/')[0];
+                if (head && !seen[head]) { seen[head] = 1; names.push(head); }
+              }
+              return names;
+            },
+            isDir: function (mode) { return (mode & 61440) === 16384; },
             writeFile: function (p, data) {
               var dir = p.slice(0, p.lastIndexOf('/'));
               if (!made[dir]) throw new Error('ENOENT: no such directory, ' + dir);
@@ -297,6 +317,8 @@ async function seedFakePack(
                 window.__xcu = String(data);
                 window.__order.push('xcu');
               }
+              // マクロの書き戻し(#431 ②)── 起動(callMain)より前かを順で見る
+              if (p.indexOf('/instdir/user/basic/') === 0) window.__order.push('macro');
             },
             // ⚠ **stub は本物の意味論を真似る**: 無い file は throw(#159 の退避が
             //    「file がまだ無い」を静かに飛ばせることを、本物と同じ形で確かめる)
@@ -325,10 +347,12 @@ async function seedFakePack(
             },
             stat: function (p) {
               window.__files = window.__files || {};
+              // ⚠ ディレクトリも stat できる(mode で見分ける ── 本物と同じ)
+              if (made[p] && !(p in window.__files)) return { mode: 16877, size: 4096, mtime: new Date(1) };
               if (!(p in window.__files)) throw new Error('ENOENT: ' + p);
               var bytes = new TextEncoder().encode(window.__files[p]);
               window.__mtimes = window.__mtimes || {};
-              return { size: bytes.length, mtime: new Date(window.__mtimes[p] || 1) };
+              return { mode: 33188, size: bytes.length, mtime: new Date(window.__mtimes[p] || 1) };
             },
             rename: function (a, b) {
               window.__files[b] = window.__files[a];
@@ -1907,4 +1931,107 @@ test('🔴 停止の帯から設定を初期化して開き直せる(#634)', asy
     await page.evaluate(() => localStorage.getItem('pkc3-office-profile')),
     '停止の帯から初期化したのに、退避が残っている',
   ).toBeNull();
+});
+
+/**
+ * 🔴 **書いたマクロが、ウィンドウを閉じても残る**(#431 ②)。
+ *
+ * LO の「My Macros」は `/instdir/user/basic/**`(MEMFS)に在り、閉じると消える ──
+ * host が IndexedDB(`pkc3-office-pack` / `meta` / `user-basic`)へ退避し、
+ * 次の起動で **`callMain` より前**に書き戻す。
+ *
+ * ⚠ 観測点は「IDB の中身」と「書き戻った FS の中身」と「順」── 「呼んだ」では、
+ *   起動の後ろに置いて一覧に並ばない形が通ってしまう。
+ * ⚠ 判断(走査・上限・path の検め)は `office-macros.test.ts` の unit が守る。
+ *   ここは**実ブラウザの IDB を跨いで往復する**ことだけを見る。
+ */
+const MACRO_DIR = '/instdir/user/basic';
+async function readMacroRecord(page: import('@playwright/test').Page): Promise<string[] | null> {
+  return page.evaluate(
+    (key) =>
+      new Promise<string[] | null>((res, rej) => {
+        const r = indexedDB.open('pkc3-office-pack', 1);
+        r.onsuccess = (): void => {
+          const g = r.result.transaction('meta', 'readonly').objectStore('meta').get(key);
+          g.onsuccess = (): void => {
+            const v = g.result as { files?: { path: string }[] } | undefined;
+            r.result.close();
+            res(v && Array.isArray(v.files) ? v.files.map((f) => f.path) : null);
+          };
+          g.onerror = (): void => rej(g.error);
+        };
+        r.onerror = (): void => rej(r.error);
+      }),
+    'user-basic',
+  );
+}
+
+test('🔴 書いたマクロが IDB へ退避され、開き直すと起動前に書き戻る(#431 ②)', async ({ page }) => {
+  await page.goto('/office/host.html');
+  await seedFakePack(page);
+  await page.reload();
+  await expect(page.locator('#status')).toContainText('表示中', { timeout: 15_000 });
+  // 空振り防止 ── まだ何も退避されていない
+  expect(await readMacroRecord(page), '書く前から退避が在る = この test は何も測っていない').toBeNull();
+
+  await page.evaluate((dir) => {
+    const w = window as unknown as {
+      __lo: { FS: { mkdirTree: (p: string) => void; writeFile: (p: string, d: string) => void } };
+    };
+    // LO が「My Macros」を書いたことを再現(目録 + Standard/ の本体)
+    w.__lo.FS.mkdirTree(dir + '/Standard');
+    w.__lo.FS.writeFile(dir + '/script.xlc', '<library-container/>');
+    w.__lo.FS.writeFile(dir + '/Standard/Module1.xba', 'Sub Main\nPKC3_MACRO_MARKER\nEnd Sub');
+    window.dispatchEvent(new Event('pagehide'));
+  }, MACRO_DIR);
+  // ⚠ IDB への put は非同期 ── 載ったことを IDB そのもので確かめる
+  await expect.poll(() => readMacroRecord(page), { timeout: 5_000 }).toEqual([
+    MACRO_DIR + '/Standard/Module1.xba',
+    MACRO_DIR + '/script.xlc',
+  ]);
+
+  await page.reload();
+  await expect(page.locator('#status')).toContainText('表示中', { timeout: 15_000 });
+  const seen = await page.evaluate(() => {
+    const w = window as unknown as { __files: Record<string, string>; __order: string[] };
+    return { files: w.__files, order: w.__order };
+  });
+  // ① 中身が戻っている
+  expect(seen.files[MACRO_DIR + '/Standard/Module1.xba'] ?? '', 'マクロが書き戻っていない').toContain('PKC3_MACRO_MARKER');
+  expect(seen.files[MACRO_DIR + '/script.xlc'] ?? '').toContain('library-container');
+  // ② 🔴 起動(callMain)より前に書いている ── 後ろだと一覧に並ばない
+  expect(seen.order.filter((o) => o === 'macro'), '書き戻した数').toHaveLength(2);
+  expect(seen.order.indexOf('callMain'), '起動より後に書き戻している').toBeGreaterThan(seen.order.lastIndexOf('macro'));
+  // ③ 書き戻した直後の同じ中身を、閉じるときにまた退避しない(空回りしない)── 中身は同じまま
+  await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+  await expect.poll(() => readMacroRecord(page)).toHaveLength(2);
+});
+
+test('🔴 「設定を初期化」で退避したマクロも消え、閉じるときに戻ってこない(#431 ②)', async ({ page }) => {
+  await page.goto('/office/host.html');
+  await seedFakePack(page);
+  await page.reload();
+  await expect(page.locator('#status')).toContainText('表示中', { timeout: 15_000 });
+  await page.evaluate((dir) => {
+    const w = window as unknown as {
+      __lo: { FS: { mkdirTree: (p: string) => void; writeFile: (p: string, d: string) => void } };
+    };
+    w.__lo.FS.mkdirTree(dir);
+    w.__lo.FS.writeFile(dir + '/script.xlc', '<library-container/>');
+    window.dispatchEvent(new Event('pagehide'));
+  }, MACRO_DIR);
+  await expect.poll(() => readMacroRecord(page), { timeout: 5_000 }).toEqual([MACRO_DIR + '/script.xlc']);
+
+  // 本体の設定画面が投げる合図と**同じもの**
+  await page.evaluate(() => {
+    const ch = new BroadcastChannel('pkc3-office');
+    ch.postMessage({ pkc3Office: 'reset-profile', payload: {} });
+    ch.close();
+  });
+  await expect(page.locator('#restart')).toContainText('書いたマクロも消えます');
+  await expect.poll(() => readMacroRecord(page), { timeout: 5_000 }).toBeNull();
+  // 🔴 **消えたままであること** ── 閉じるときの退避が書き戻さない(設定と同じ門)
+  await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+  await page.waitForTimeout(300);
+  expect(await readMacroRecord(page), '閉じるときの退避が、消したマクロを書き戻している').toBeNull();
 });

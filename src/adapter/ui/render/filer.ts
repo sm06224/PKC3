@@ -17,7 +17,7 @@
  * は P6 import で平置き大 container が現実になった時に計測してから入れる。
  */
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
-import type { AppState } from '@adapter/state/app-state';
+import { TAG_INPUT_FIELDS, type AppState, type TagInputField } from '@adapter/state/app-state';
 import {
   getAncestorFolders,
   resolveCanonicalParents,
@@ -82,6 +82,13 @@ export class FilerRenderer {
     focused: string | null;
     caret: number | null;
   } | null = null;
+  /**
+   * 🔴 欄へ戻した「入らなかった字」そのもの(欄ごと。#640 案 A)。
+   * ⚠ 欄の字が**これと同じか空**のときだけ書き換える ── 違えば user が打っている
+   *   (奪い返さない)。スマートフォルダの条件は 1 タグずつ断られて来るので、
+   *   2 つ目が届いた時点の欄には**こちらが書いた 1 つ目**が在る ── それは打ちかけではない。
+   */
+  private paintedRefused: Record<TagInputField, string> = { 'smart-cond': '', 'bulk-tag': '' };
 
   constructor(region: HTMLElement) {
     this.region = region;
@@ -453,6 +460,8 @@ export class FilerRenderer {
     }
 
     this.restoreBarInputs(host);
+    // ⚠ 組み直した直後にも当てる ── 断りが届いた回に欄が無かった(帯が出る前)形を拾う
+    this.paintRefusedTags(state);
 
     const moving = state.selectedLid ? (state.entryMetas.get(state.selectedLid) ?? null) : null;
     if (!moving) {
@@ -591,7 +600,38 @@ export class FilerRenderer {
     this.lastDates = this.dateSignature(state);
   }
 
+  /**
+   * 🔴 **押したのに入らなかったタグを、欄へ戻す**(#640 案 A。user 裁定 2026-09-04)。
+   *
+   * > user の物語: `#請求 #未払 #今月` と打って押した。3 つ目だけ「条件は 8 つまで」で
+   * > 断られた。⚠ 直す前は欄が**空**で、理由の帯に名前が出るだけ ── 直すには打ち直し。
+   *
+   * 🔑 断りは効果層から**後で**来るので、欄の字は state(`refusedTags`)から描く。
+   *   全部通れば空のまま(これまでどおり)。
+   * ⚠ **奪い返さない**:欄の字が「こちらが最後に書いた字」でも空でもなければ、user が
+   *   打ち始めている(断りは ms 単位で遅れて来る)── 触らない。
+   * ⚠ 下の `render` の早期 return より**前**に呼ぶ ── `refusedTags` は面の指紋に
+   *   入っていない(入れると帯ごと組み直す)ので、門の後ろでは 1 度も走らない。
+   */
+  private paintRefusedTags(state: AppState): void {
+    const host = this.moveBar;
+    if (host === null) return;
+    for (const field of TAG_INPUT_FIELDS) {
+      // 🔑 打った字と同じ形(`#` 区切り)で戻す ── そのまま押し直せる(`splitTags` が読む)
+      const text = state.refusedTags[field].map((t) => `#${t}`).join(' ');
+      const was = this.paintedRefused[field];
+      if (text === was) continue;
+      const el = host.querySelector<HTMLInputElement>(`input[data-pkc-field="${field}"]`);
+      // ⚠ 欄が無い回は控えを進めない ── 帯が出た次の描画で戻す
+      if (el === null) continue;
+      this.paintedRefused[field] = text;
+      if (el.value !== '' && el.value !== was) continue;
+      el.value = text;
+    }
+  }
+
   render(state: AppState): void {
+    this.paintRefusedTags(state);
     /**
      * 🔴 **参照が変わっただけで作り直さない**(2026-08-06)。
      *

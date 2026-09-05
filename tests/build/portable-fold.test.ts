@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 // @ts-expect-error -- build script(型定義を持たない .mjs)を実際に走らせて見る
-import { bundleTagCount, externalRefs, shellOf } from '../../build/portable/shell-scan.mjs';
+import { bundleTagCount, externalRefs, manualPageTag, manualPageTagCount, shellOf } from '../../build/portable/shell-scan.mjs';
 
 const FOLD = readFileSync('build/portable/fold.mjs', 'utf-8');
 const CONFIG = readFileSync('build/portable.config.ts', 'utf-8');
@@ -31,6 +31,47 @@ describe('畳む前提(ビルド設定)', () => {
 
   it('🔴 worker は iife(classic の blob worker に載せるため)', () => {
     expect(CONFIG).toContain("worker: { format: 'iife' }");
+  });
+
+  it('🔴 manual.html も焼く(#648 段③ ── 1 枚の中へ焼き込む材料)', () => {
+    expect(CONFIG, 'portable の build に manualPagePlugin が無い').toMatch(/plugins:\s*\[\s*manualPagePlugin\(\)/u);
+  });
+});
+
+/**
+ * 🔴 **マニュアルの page を 1 枚へ焼き込む**(#648 段③)。
+ * ⚠ 門は原文 pin だが、封筒(`manualPageTag`)と器の走査(`manualPageTagCount`)は
+ *   **実際に走らせる**(読む側との往復は `tests/adapter/portable-manual.test.ts`)。
+ */
+describe('🔴 マニュアルの page の焼き込み(#648 段③)', () => {
+  it('manual.html が無ければ落とす(黙って段①のまま畳まない)', () => {
+    expect(FOLD).toContain('畳む前にマニュアルの page が焼かれていない');
+    expect(FOLD, '検品と同じ綴り(MANUAL_PAGE)を使っていない').toContain("import { MANUAL_PAGE } from '../../scripts/dist-inspect.mjs'");
+  });
+
+  it('小さすぎる page(描画の空振り)を通さない', () => {
+    expect(FOLD).toContain('マニュアルの page が小さすぎる');
+  });
+
+  it('🔴 器に 1 件、しかも丸ごと読み戻せることを見る(在るだけでは足りない)', () => {
+    expect(FOLD).toContain('マニュアルの page の印が器に');
+    expect(FOLD).toContain('丸ごと読み戻せない');
+  });
+
+  it('🔴 封筒は `</script>` でも `</body>` でも切れない(`<` を 1 つも残さない)', () => {
+    const page = '<html><body><script>var a="</script>";</script></body></html>';
+    const tag: string = manualPageTag(page);
+    const inner = tag.slice(tag.indexOf('>') + 1, tag.lastIndexOf('</script>'));
+    expect(inner).not.toContain('<');
+    expect(JSON.parse(inner)).toBe(page);
+  });
+
+  it('器の印は 1 件と数え、JS の中の同じ綴りは数えない', () => {
+    const html =
+      `<html><head><script type="module">var u='data-pkc-manual-page';</script></head>` +
+      `<body><div data-pkc-slot="root"></div>${manualPageTag('<html></html>')}</body></html>`;
+    expect(manualPageTagCount(shellOf(html))).toBe(1);
+    expect(manualPageTagCount(shellOf(html.replace(manualPageTag('<html></html>'), '')))).toBe(0);
   });
 });
 

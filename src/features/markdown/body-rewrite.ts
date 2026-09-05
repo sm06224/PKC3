@@ -17,7 +17,7 @@ import { formatLineDate, insertionForLineDate, readLineDate } from '../schedule/
 import { isScheduleDate } from '../schedule/schedule-date';
 import type { RepeatUnit } from '../schedule/repeat';
 import { removeInsertedLines } from './append-target';
-import { movePlace } from './place-notation';
+import { addPlace, movePlace, raisePlace, removePlace, resizePlace } from './place-notation';
 import { readTags, withTagResult } from '../flavor/tags';
 import { acceptsExternalImage, rewriteAdopted } from '../asset/inline-url-adopt';
 import { DELIMITER, csvEscapeField, parseCsv, type CsvPositions } from './csv-table';
@@ -88,6 +88,45 @@ export type BodyRewrite =
       kind: 'place-move';
       line: number;
       openLine: string;
+      x: number;
+      y: number;
+    }
+  | {
+      /**
+       * 🔴 **板の塊の大きさを変える**(#676)── 開き行の w= / h= だけ。
+       * `line` / `openLine` の意味と門は `place-move` と同じ(`place-notation.ts` の 1 本)。
+       */
+      kind: 'place-size';
+      line: number;
+      openLine: string;
+      w: number;
+      h: number;
+    }
+  | {
+      /**
+       * 🔴 **板の塊を消す**(#676。user 指示 2026-08-23「片道の操作を作らない」──
+       * 置けるなら消せる)。開き行から閉じの `:::` までと隣の空行 1 本が消える。
+       * ⚠ 閉じていない塊は `applyBodyRewrite` が `null` = 断る(末尾まで消さない)。
+       */
+      kind: 'place-remove';
+      line: number;
+      openLine: string;
+    }
+  | {
+      /**
+       * 🔴 **板を前へ出す**(#676 段②)── 他の板の z= の最大 + 1 を開き行の z= に書く。
+       * ⚠ 「後ろへ送る」は無い(負の z を描画が捨てるので、下げる向きは他の板の行を触ることになる)。
+       */
+      kind: 'place-raise';
+      line: number;
+      openLine: string;
+    }
+  | {
+      /**
+       * 🔴 **板の塊を 1 つ足す**(#676)── 本文の末尾に空の塊を書く。
+       * ⚠ **行番号を持たない**(足す先は常に末尾。別の窓が上へ足していてもずれない)。
+       */
+      kind: 'place-add';
       x: number;
       y: number;
     }
@@ -286,6 +325,10 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
   }
   if (rewrite.kind === 'repeat-done') return materializeRepeat(body, rewrite);
   if (rewrite.kind === 'place-move') return movePlace(body, rewrite);
+  if (rewrite.kind === 'place-size') return resizePlace(body, rewrite);
+  if (rewrite.kind === 'place-remove') return removePlace(body, rewrite);
+  if (rewrite.kind === 'place-raise') return raisePlace(body, rewrite);
+  if (rewrite.kind === 'place-add') return addPlace(body, rewrite.x, rewrite.y);
   if (rewrite.kind === 'csv-cell') return rewriteCsvCell(body, rewrite);
   if (rewrite.kind === 'csv-shape') return rewriteCsvShape(body, rewrite);
   if (rewrite.kind === 'adopt-images') {

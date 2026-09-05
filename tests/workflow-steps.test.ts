@@ -658,6 +658,41 @@ describe('PR gate の形(2026-08-18)', () => {
  * ⚠ そして**両方の配り先**を見る ── 片方だけだと
  *   「dev では書き出せるのに本番では 404」という、いちばん気づけない形になる。
  */
+/**
+ * 🔴 **焼きたての product だけ `manual.html` の実在を要求する**(#648 💭)。
+ *
+ * ⚠ `release.yml` / `nightly.yml` は build 直後の dist を検品する ── ここに旗が無いと、
+ *   plugin が外れた版をそのまま release できる(product は PR gate が触らない別成果物)。
+ * ⚠ `pages.yml` の product の検品は**過去の release の zip** ── ここに旗が付くと、
+ *   段②より前の版(v3.2.0)が落ちて `/dev/` の更新まで止まる(2026-08-29 と同じ形)。
+ * 🔑 見るのは**実行する行**(`check-dist.mjs product` を含む行)── コメントに満たされない。
+ */
+describe('#648 💭 ── manual.html の実在を要求する経路', () => {
+  const productLines = (file: string): string[] =>
+    readFileSync(join(DIR, file), 'utf-8')
+      .split('\n')
+      .filter((l) => !l.trim().startsWith('#') && l.includes('check-dist.mjs product'));
+
+  for (const file of ['release.yml', 'nightly.yml']) {
+    it(`${file}: 焼きたての product の検品に --require-manual が付いている`, () => {
+      const lines = productLines(file);
+      expect(lines, `${file} に product の検品が無い(空振り)`).toHaveLength(1);
+      expect(lines[0], '旗が無い(plugin が外れた版を release できる)').toContain('--require-manual');
+    });
+  }
+
+  it('pages.yml: 過去の zip の検品には付いていない(v3.2.0 を落とさない)', () => {
+    const lines = productLines('pages.yml');
+    expect(lines, 'pages.yml に product の検品が無い(空振り)').toHaveLength(1);
+    expect(lines[0]).not.toContain('--require-manual');
+  });
+
+  it('🔴 旗の綴りが check-dist.mjs の受け口と同じ', () => {
+    const cli = readFileSync('scripts/check-dist.mjs', 'utf-8');
+    expect(cli).toContain("'--require-manual'");
+  });
+});
+
 describe('#400 段④ ── 雛形を置く順番', () => {
   const cases = [
     { file: 'pages.yml', check: 'check-dist.mjs dev' },

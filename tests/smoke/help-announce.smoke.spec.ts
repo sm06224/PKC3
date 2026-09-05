@@ -445,55 +445,84 @@ test('🔴 お知らせの中を送っても、閉じるはそこから動かな
  * **画面の外**、`documentElement.scrollHeight` が 284 > 260 ──
  * **1 画面で完結する**(不可侵の「業務画面」)が崩れていた。
  * ⚠ 拡大表示で普通に届く高さである(900px の画面を 300% にすると 300px)。
+ *
+ * ## ⚠ 2026-09-04(#663)から、この高さは**スマホ用画面**である
+ *
+ * 高さ 480px 以下は幅に依らずスマホ用画面へ切り替わる(`PHONE_MAX_HEIGHT_PX`)。
+ * お知らせは `grid-area: detail` で**本文のセルいっぱい**に出る(`max-height: none`)ので、
+ * 主張の中身が変わった:「帯が版面を押し出さない」ではなく
+ * **「低い PC 窓でもスマホ用画面で溢れない ── 流れるのは本文だけで、
+ * 『閉じる』も『今後は出さない』も送らずに届く」**である。
+ *
+ * 🔑 実測(2026-09-04、chromium / headless_shell で 1px も違わない):
+ *
+ * | 高さ | 帯 `scrollH / clientH` | 本文 `scrollH / clientH` | 「今後は出さない」の下端 |
+ * |---|---|---|---|
+ * | 220 | 213 / 213(溢れない) | 123 / 123(溢れない) | 191 |
+ * | 200 | 193 / 193 | 123 / **117** | 185 |
+ * | **180** | 173 / 173 | 123 / **97** | **165** |
+ * | 140 | 133 / 133 | 123 / **57** | 125 |
+ *
+ * ⚠ **帯そのものは溢れない**(本文のセルいっぱいに伸びる)── だから直す前の
+ *   空振り防止「帯が溢れている」は**この版面では成り立たない条件**になった
+ *   (220 で回して正しく止まった)。流れるのは `announce-body`(`app.css` の
+ *   「流すのは本文だけ / 畳む手を切ってはいけない」)なので、空振り防止も本文で採る。
+ * 🔑 分かれ目(200、溢れ 6px)は脆いので **180**(溢れ 26px)で見る。
  */
 test('🔴 低い画面でも、お知らせの帯が画面ごとスクロールさせない', async ({ page }) => {
   const errors = collectPageErrors(page);
-  /**
-   * ⚠ **入りきらなくなる高さは 260 → 240 へ下がった**(#475、2026-08-27)。
-   *   案内文と「今後は出さない」を 1 行に畳んだぶん、帯が要る最小の高さが
-   *   26px 減ったためである(実測: H=260 では `scrollH 78 = clientH 78` で
-   *   **溢れない** ── そこで測ると下の空振り防止が正しく止める)。
-   * 🔑 分かれ目のすぐ隣(240、溢れ 4px)は脆いので **220** で見る
-   *   (実測 `scrollH 76 > clientH 66`、かつ「今後は出さない」は
-   *   帯の下端より下 = 逃げ場が無いと**到達できない**)。
-   */
-  await page.setViewportSize({ width: 1280, height: 220 });
+  await page.setViewportSize({ width: 1280, height: 180 });
   await gotoApp(page);
+  // 🔴 前提 ── 180px は高さの境目(480)の内側なので、スマホ用画面になっている(#663)
+  await expect(
+    page.locator('[data-pkc-region="shell"]'),
+    '高さ 180px なのにスマホ用画面になっていない(前提が崩れた ── 別の版面を測っている)',
+  ).toHaveAttribute('data-pkc-layout', 'phone');
   await expect(page.locator('[data-pkc-region="announce"]')).toBeVisible({ timeout: 10_000 });
 
   const m = await page.evaluate(() => {
     const band = document.querySelector('[data-pkc-region="announce"]');
+    const body = document.querySelector('[data-pkc-field="announce-body"]');
+    const mute = document.querySelector('[data-pkc-action="mute-announce"]');
     const bandBox = band?.getBoundingClientRect();
     return {
       doc: document.documentElement.scrollHeight,
       view: window.innerHeight,
       bandBottom: bandBox ? bandBox.bottom : Number.POSITIVE_INFINITY,
-      // ⚠ 空振り防止 ── 帯の中身が実際に入りきっていないこと(入るなら検査にならない)
-      bandOverflows: band instanceof HTMLElement ? band.scrollHeight > band.clientHeight : false,
+      // ⚠ 空振り防止 ── **本文**が実際に入りきっていないこと(入るなら検査にならない)
+      bodyOverflows: body instanceof HTMLElement ? body.scrollHeight > body.clientHeight : false,
+      muteBottom: mute ? mute.getBoundingClientRect().bottom : Number.POSITIVE_INFINITY,
     };
   });
-  expect(m.bandOverflows, '帯の中身が入りきっている ── この高さでは検査にならない').toBe(true);
+  expect(m.bodyOverflows, '本文が入りきっている ── この高さでは検査にならない').toBe(true);
   // 🔑 **帯の外形が画面に収まっている**(落ちたとき原因が名前で分かる側)
   expect(m.bandBottom, `帯が画面からはみ出している(${m.bandBottom} > ${m.view})`)
     .toBeLessThanOrEqual(m.view + 1);
   // ⚠ 版面全体 ── 帯以外の回帰でも鳴りうるので、上の 1 行と対で読む
   expect(m.doc, `版面が画面を押し出している(${m.doc} > ${m.view})`).toBeLessThanOrEqual(m.view + 1);
+  /**
+   * 🔴 **「今後は出さない」は送らなくても届く**(#663 で主張が強くなった側)。
+   * ⚠ 直す前の 2 列版面では帯の下端より下に落ち、送らないと到達できなかった ──
+   *   スマホ用画面では本文だけが縮むので、**唯一の逃げ道が最初から画面の中に在る**。
+   */
+  expect(m.muteBottom, `「今後は出さない」が画面の外に在る(${m.muteBottom} > ${m.view})`)
+    .toBeLessThanOrEqual(m.view + 1);
 
   /**
    * 🔴 **逃げ場が「効く」ことを見る**(レビュー 2026-08-14)。
    * ⚠ `overflow` が `visible` でないことだけ見ていたが、それは **`hidden` でも真** ──
-   * その状態では「今後は出さない」へ**永久に到達できない**のに緑だった。
-   * 🔑 実際にホイールを回し、送れたうえで**閉じるが画面に残る**ことまで見る
+   * その状態では本文の末尾へ**永久に到達できない**のに緑だった。
+   * 🔑 実際にホイールを回し、**本文が送れた**うえで**閉じるが画面に残る**ことまで見る
    * (`docs/manual.md` §8 の「どれだけ送っても画面から出ません」の実体)。
    */
-  const band = page.locator('[data-pkc-region="announce"]');
-  const bb = await band.boundingBox();
-  expect(bb, '帯が画面に出ていない').not.toBeNull();
+  const body = page.locator('[data-pkc-field="announce-body"]');
+  const bb = await body.boundingBox();
+  expect(bb, '本文が画面に出ていない').not.toBeNull();
   await page.mouse.move(bb!.x + bb!.width / 2, bb!.y + bb!.height / 2);
   await page.mouse.wheel(0, 200);
   await expect
-    .poll(() => band.evaluate((el) => el.scrollTop), {
-      message: '帯に逃げ場が無い ── 「今後は出さない」へ到達できない',
+    .poll(() => body.evaluate((el) => el.scrollTop), {
+      message: '本文に逃げ場が無い ── 末尾へ到達できない',
     })
     .toBeGreaterThan(0);
   const closeBox = await page.locator('[data-pkc-action="dismiss-announce"]').boundingBox();

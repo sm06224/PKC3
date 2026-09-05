@@ -12,10 +12,10 @@ import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 const at = (text: string, start: number, end: number) => ({ text, start, end });
 
 describe('帯に出さない記法(#425 段②-a)', () => {
-  it('🔴 帯の表と全体の表が違う ── 4 つだけ落ちている', () => {
+  it('🔴 帯の表と全体の表が違う ── 5 つだけ落ちている(mermaid は #528 案 B で「先に聞く」側へ)', () => {
     const off = FORMAT_OPS.filter((o) => o.onBar === false).map((o) => o.op);
-    expect(off).toEqual(['highlight', 'ruby', 'emdot', 'strike']);
-    // ⚠ 空振り防止 ── 帯の側にその 4 つが 1 つも居ないこと
+    expect(off).toEqual(['mermaid', 'highlight', 'ruby', 'emdot', 'strike']);
+    // ⚠ 空振り防止 ── 帯の側にその 5 つが 1 つも居ないこと
     const bar = new Set(BAR_FORMAT_OPS.map((o) => o.op));
     expect(off.filter((o) => bar.has(o)), '帯にも出てしまっている').toEqual([]);
     expect(BAR_FORMAT_OPS.length, '帯が空になった').toBeGreaterThan(10);

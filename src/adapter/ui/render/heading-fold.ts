@@ -23,7 +23,12 @@
  * ⚠ ただし塊が差し替わるとボタンは消えるので、**描画のたびに呼び直す**。
  */
 
-import { foldSpans, hiddenByFolds } from '@features/markdown/heading-fold';
+import {
+  chapterSpan,
+  foldSpans,
+  hiddenByFolds,
+  type ChapterSpan,
+} from '@features/markdown/heading-fold';
 
 /** 畳んでいる印。⚠ 見出しそのものに付ける(配下ではない)。 */
 const FOLDED = 'data-pkc-folded';
@@ -127,6 +132,35 @@ export function headingAtSourceLine(host: HTMLElement, line: number): Element | 
     if (el.getAttribute('data-pkc-source-line') === String(line)) return el;
   }
   return null;
+}
+
+/** 塊の刻印(`data-pkc-source-line`)を読む。無い / 読めない塊は `null`。 */
+function sourceLineOf(el: Element): number | null {
+  const raw = el.getAttribute('data-pkc-source-line');
+  if (raw === null) return null;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 0 ? n : null;
+}
+
+/**
+ * 🔴 **その見出しの章が、原文のどこからどこまでか**(#677)。規則は
+ * `features/markdown/heading-fold.ts` の `chapterSpan`(pure)── ここは
+ * **DOM から材料(段と刻印の並び)を作って渡すだけ**。
+ *
+ * ⚠ **`host` の直下だけを数える** ── `applyHeadingFold` と**同じ塊の数え方**である
+ *   (畳んだ範囲と写す範囲を食い違わせない)。直下に居ない見出しは `null`。
+ *
+ * @param lineCount 原文(frontmatter を剥いだ本文)の総行数
+ */
+export function chapterSpanOf(
+  host: HTMLElement,
+  heading: Element,
+  lineCount: number,
+): ChapterSpan | null {
+  const blocks = [...host.children];
+  const idx = blocks.indexOf(heading);
+  if (idx < 0) return null;
+  return chapterSpan(blocks.map(headingLevel), blocks.map(sourceLineOf), idx, lineCount);
 }
 
 /**

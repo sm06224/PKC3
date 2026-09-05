@@ -20,7 +20,8 @@ import {
   installColumnWheel,
 } from '@adapter/ui/render/read-columns';
 import { setFoldNotify } from '@adapter/ui/render/fold-notify';
-import { installTooNarrow } from '@adapter/ui/render/too-narrow';
+import { appTooNarrowOk, installTooNarrow } from '@adapter/ui/render/too-narrow';
+import { paintStatusOpen } from '@adapter/ui/render/status-open';
 import { appOpenInEdit } from '@adapter/ui/render/open-in-edit';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { appPaneSizes, applyPaneSizes } from '@adapter/ui/render/pane-size';
@@ -89,6 +90,7 @@ import {
   MANUAL_WINDOW_TITLE,
   type ManualAppearance,
 } from '@adapter/platform/manual-window';
+import { portableManualPage } from '@adapter/platform/portable-manual';
 import { appNoticeStore } from '@adapter/platform/notice-store';
 import { NOTICES } from '@features/notice/notice-log';
 import { applyTheme, chooseTheme, initialTheme, isTheme } from '@adapter/ui/render/theme';
@@ -201,15 +203,17 @@ import { appExtensionGrants } from '@adapter/platform/extension-grants';
 import { appExtLinks } from '@adapter/platform/extension-links';
 import { connectExtension } from '@adapter/platform/extension-host';
 import {
+  NOTE_OPEN_HERE_MESSAGE,
   announceOpenedWindow,
   connectViewDeepLink,
   currentBaseUrl,
   isPurposeWindow,
+  noteOpenElsewhereMessage,
   noteOpenedByUs,
   windowDeepLinkTarget,
   windowTitleFor,
 } from '@adapter/platform/deep-link';
-import { openView } from '@adapter/ui/render/open-view';
+import { openView, openViewHere } from '@adapter/ui/render/open-view';
 import { noteRemoteChange } from '@adapter/state/remote-change';
 import {
   NOTE_REGISTRY_CHANNEL,
@@ -268,6 +272,14 @@ export interface AppHandle {
    * 読み違える。付箋の台帳(「2 枚目を作らない」)はこの名乗りで埋まる。
    */
   repaintWindowTitle(): void;
+  /**
+   * 🔴 **この窓を付箋として整える**(#690 ② A′ / I4、user 裁定 2026-09-04)。
+   * ⚠ 呼ぶのは配線が「付箋の旗」を立てた瞬間だけ ── ①追記欄を必ず出し、以後この窓の
+   *   畳みを端末の記録から切り離す(`PaneVisibilityStore.sessionOnly`)②本文が届いたら
+   *   1 回だけ打つ欄へ焦点を入れる(`AppendBoxRenderer.focusInputOnceReady`)。
+   * ⚠ 判断は 2 つとも向こうに在る ── この file はどの test からも実行されない(§2)。
+   */
+  enterNoteWindow(): void;
   /**
    * 🔴 **探し方(左の列のタブ)を切り替える**(#292 段⑤)。
    * ⚠ 引っ越したディープリンク(`view=calendar` / `view=kanban`)を
@@ -368,13 +380,21 @@ function openViewTile(
   dispatcher: Dispatcher,
   cid: string,
   /**
-   * ⚠ **`dual` だけになった**(#292 段⑤、2026-08-23)── カレンダーと
-   *   やることの板は**左の列の「予定」タブ**へ引っ越したので、別窓で開く
-   *   組み込みは 2 ペインだけである。
+   * ⚠ **`dual` だけ**だった期間がある(#292 段⑤、2026-08-23)── カレンダーと
+   *   やることの板は**左の列の「予定」タブ**へ引っ越したので。
+   * 🔴 **#673 段②(user 裁定 2026-09-04「アプリの基本は別窓」)で予定表が加わった**
+   *   ── 絞りは型で持たず、何が来るかは `tiles.ts` の組み込みタイルが決める
+   *   (`launch-tile.ts` が `isViewMode(kind)` で渡す)。
    * 🔑 別窓の仕掛け(ディープリンク / 一回限りの合図 / `script-closable` の判定 /
-   *   follower の帯)は**残す** ── Office と今後のアプリがそのまま使う土台である。
+   *   follower の帯)は**共通** ── Office と今後のアプリがそのまま使う土台である。
    */
-  view: 'dual',
+  view: ViewMode,
+  /**
+   * 🔴 **左の列のタブを開く口**(#673 段②)── 予定表の退避先は中央の面ではなく
+   *   **左の列の「予定」タブ**(本文を退かさない)。判定は `open-view.ts` の
+   *   `openViewHere` → `browse-mode.ts` の `homeTabOf` に在り、ここは口を渡すだけ。
+   */
+  openBrowse: (mode: BrowseMode) => void,
 ): Promise<unknown> {
   return openViewInWindow(view, {
     // ⚠ `noopener` で開く ── 別プロセスになり、閉じれば常駐が還る(段③ の実測)。
@@ -396,7 +416,9 @@ function openViewTile(
      *    「タイル再押下で閉じる」ための規則であって、退避は**開く**である。
      *    通すと、塞がれて無反応だからもう一度押した回に**開いた面を閉じる**。
      */
-    openInPane: (v) => openView(dispatcher, v),
+    // 🔴 **予定表は左の列の「予定」タブへ退避する**(#673 段②)── 中央に開くと
+    //    本文が消える(#292 段⑤ の理由)。振り分けは `openViewHere` の 1 か所
+    openInPane: (v) => openViewHere(dispatcher, v, openBrowse),
     fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
     // 🔴 押した瞬間に返事をする(#685 動線レビュー 欠陥 7)── 塞がれた回は
     //    2.5 秒まるごと無反応で、user は「効いていない」と読んでもう一度押す
@@ -421,10 +443,11 @@ function openViewTile(
  * ⚠ 配色と地の色は**設定の保存ではなく、画面に効いている値**を読む ── OS に従っている人の
  *   配色は保存されていない(`theme.ts` の M-7)ので、属性から取る。
  * 🔴 **文字の大きさだけは保存から読む**(2026-09-02 hotfix)── 画面に効いている値は
- *   選んでいなくても既定の 13px だが、焼いたマニュアルは**選んでいなければ 14px のまま**
- *   (`manual-page.ts` の boot script は保存が無ければ触らない)。効いている値を渡すと、
- *   **何も変えずにもう一度押しただけで窓の字が 14px → 13px に縮む**(着地前レビューが
- *   拾った)。boot と同じ門(`chosenTextScale`)で読めば、2 回目は 1px も動かない。
+ *   選んでいなくても既定の 13px だが、焼いたマニュアルは**選んでいなければ触らない**
+ *   (`manual-page.ts` の boot script は保存が無ければ CSS の既定のまま。I6 で揃えるまで
+ *   それは 14px だった)。効いている値を渡すと、**何も変えずにもう一度押しただけで窓の字が
+ *   14px → 13px に縮んだ**(着地前レビューが拾った)。boot と同じ門(`chosenTextScale`)で
+ *   読めば、2 回目は 1px も動かない。
  */
 function currentAppearance(): ManualAppearance {
   const root = document.documentElement;
@@ -439,6 +462,14 @@ function currentAppearance(): ManualAppearance {
   };
 }
 
+/**
+ * 🔴 持ち歩ける 1 枚に焼き込んだマニュアルの page(#648 段③)。⚠ document ごとに 1 つ ──
+ *   `blob:` URL は窓 1 枚に 1 回(開いている間は同じ URL、閉じたら revoke して次は新しく作る
+ *   ── `portable-manual.ts` の「寿命」)。
+ *   素の PKC3(焼き込みが無い)では `url()` が `null` を返すだけで、経路は変わらない。
+ */
+const portableManual = portableManualPage(document);
+
 function openManualTile(
   dispatcher: Dispatcher,
   markdown: { render(text: string, opts?: { currentContainerId?: string }): Promise<string> },
@@ -448,6 +479,7 @@ function openManualTile(
    */
   notify: (text: string) => void,
 ): Promise<unknown> {
+  const appearance = currentAppearance();
   return openManualWindow({
     title: MANUAL_WINDOW_TITLE,
     version: versionText(),
@@ -457,14 +489,18 @@ function openManualTile(
     /**
      * 🔴 焼いた 1 枚(`manual.html`)は **build の生成物の隣**に在る(段②)。
      * ⚠ 持ち歩ける 1 枚(portable = この document 自身が bundle を抱えている)には
-     *   隣に無いので `null` → `about:blank` に組む経路へ落ちる。
+     *   隣に無い ── 1 枚の中に焼き込んだ同じ page を `blob:` URL で渡す(#648 段③)。
+     *   焼き込みの無い旧い 1 枚では `null` → `about:blank` に組む経路へ落ちる。
      * ⚠ `document.baseURI` から引く ── Pages の `/` と `/dev/` の両方で同じビルドが
      *   動く(`base: './'`)ので、絶対 path を書かない。
      */
-    pageUrl: readBundle(document) === null ? new URL(MANUAL_PAGE_FILE, document.baseURI).href : null,
+    pageUrl:
+      readBundle(document) === null
+        ? new URL(MANUAL_PAGE_FILE, document.baseURI).href
+        : portableManual.url(appearance),
     // 🔑 焼いた page と同じ関数で同じ印を組む(`/dev/` でも原文が変われば入れ替わる)
     tag: manualBuildTag(versionText(), MANUAL_TEXT),
-    appearance: currentAppearance(),
+    appearance,
   }).then((win) => {
     // 🔴 **開けなかったら理由を出す**(押しても何も起きないボタンにしない)
     if (win === null) {
@@ -474,6 +510,8 @@ function openManualTile(
       });
       return win;
     }
+    // 🔴 窓の寿命を見張る ── 閉じたら blob を返す(持ち歩ける 1 枚だけ。素の PKC3 では何もしない)
+    portableManual.watch(win.window);
     // 🔑 **既に開いていた回も、押した手応えを返す**(前へ出せたか分からないので言う)
     if (win.reused)
       notify('マニュアルのウィンドウを前に出しました(見えないときは、ウィンドウを切り替えてください)');
@@ -1111,10 +1149,18 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   次の保存で「画像が出ない理由」が画面から消える。
    */
   if (syncLine !== '' || persistState !== '' || portableAssetNote !== '') paint();
+  /**
+   * 🔴 **知らせの隣の「開く」**(#668 A)── 判断は `status-open.ts`(test が届く所)。
+   * ⚠ `showStatus` からも撃つ ── 字だけの知らせ(コピーした等)が上書きしたら、
+   *   前の知らせに添えた「開く」は**その瞬間に**消えなければならない。
+   */
+  const paintOpen = (): void =>
+    paintStatusOpen(regions.statusOpen, dispatcher.getState(), noticeLine);
   /** 一時の知らせ(コピーした / 取り込んだ)。⚠ 状態変化では消えない。 */
   const showStatus = (text: string) => {
     noticeLine = text;
     paint();
+    paintOpen();
   };
 
   /**
@@ -1140,6 +1186,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     text: regions.tooNarrowText,
     ok: regions.tooNarrowOk,
     onChange: () => repaintStatus(),
+    // 🔴 小窓 / アプリの窓なら「ウィンドウを広げると直ります」(#690 ③)── 判断は
+    //    `deep-link.ts` の `noteOpenedByUs`(`bootstrap` が `startApp` より先に決める)
+    popup: () => openedByUs,
   });
 
   /**
@@ -1276,6 +1325,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       return; // `showStatus` が `paint` を呼ぶ
     }
     paint();
+    paintOpen(); // ⚠ 選択がその添付へ移ったら「開く」を畳む
   });
 
   /**
@@ -1971,6 +2021,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // 🔴 アラート(#280)── 鳴った知らせを片付ける
     dismissAlarm: (key) => alarmService.dismiss(key),
     /**
+     * 🔴 **狭い画面の断り書きを出すか**(#687 E-1)── 帯の OK で切れた user の戻し道。
+     * ⚠ 塗り直しは `installTooNarrow` が store を購読して受ける(ここで帯を触らない)。
+     */
+    setTooNarrowEnabled: (on) => appTooNarrowOk.setEnabled(on),
+    /**
      * 🔴 **入にしたその場から効かせる**(#280)── 入にした user が
      *   「読み込み直すまで鳴らない」に気づく手段は無い。
      * ⚠ 切にしたら**鳴っている知らせも畳む** ── 切ったのに残っていると、
@@ -2420,10 +2475,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         //    `view-window.ts` に在る ── この file はどの test からも実行されない
         //    ので、配線だけ置く。⚠ 窓が塞がれたときの退避は `openInPane`(段⑤)。
         //    そちらは `open-view.ts` を通す(開いた後の後始末を落とさない)
-        // ⚠ **残るのは 2 ペインだけ**(#292 段⑤)── カレンダー / やることの板は
-        //    左の列のタブへ引っ越したので、別窓で開く組み込みタイルではなくなった。
-        //    絞りは `launch-tile.ts` の `openView: (view: 'dual') => void` が型で守る
-        openView: (view) => void openViewTile(dispatcher, cid, view),
+        // ⚠ 2 ペインに**予定表が加わった**(#673 段②、user 裁定 2026-09-04)──
+        //    何が来るかは `tiles.ts` の組み込みタイルが決める(`isViewMode(kind)`)。
+        //    予定表の退避先は**左の列の「予定」タブ**(`openViewHere`)なので、
+        //    タブを開く口(`services.setBrowse`)を渡す
+        openView: (view) => void openViewTile(dispatcher, cid, view, (m) => services.setBrowse?.(m)),
         openManual: () => void openManualTile(dispatcher, markdown, showStatus),
         // ⚠ **聞かない。憶えているものを確かめるだけ**(上の granted と同じ判定を
         //    通す ── ここで別の式を書くと、片方だけ直した日に食い違う)
@@ -2489,7 +2545,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             openOffice: openOfficeTile,
             // 🔴 **別窓で開く**(#300 段③)。⚠ 判断と文言は `view-window.ts` に在る
             //    ── 上と同じ配線(§7:依存の実体を 1 つに保つ)
-            openView: (view) => void openViewTile(dispatcher, cid, view),
+            openView: (view) => void openViewTile(dispatcher, cid, view, (m) => services.setBrowse?.(m)),
             // ⚠ 添付起動の経路に組み込みタイルは来ない(kind は 'app' 固定)── それでも
             //    渡すのは、型が**落とせない形**にしてあるからである(§配線を落とすと静かに死ぬ)
             openManual: () => void openManualTile(dispatcher, markdown, showStatus),
@@ -2622,7 +2678,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   `showStatus` の 1 行で言う ── 押して無反応にしないのはそちらである。
      */
     resetOfficeProfile: () => {
-      showStatus(resetOfficeProfile(localStorage, announceOfficeProfileReset).message);
+      // ⚠ マクロ(IndexedDB)も同じ口で消す(#431 ②)── 実体は `OfficePackStore.dropMacros`
+      showStatus(resetOfficeProfile(localStorage, officePack, announceOfficeProfileReset).message);
     },
     // 🎨 配色(P7b 段⑨c、user 指示「最初はライトとダークのみに」)。
     // ⚠ 属性は **`<html>`** に付ける ── `:root` の変数を上書きするため
@@ -2894,12 +2951,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       if (where !== null) {
         // ⚠ **この窓が出している**なら、前に出す相手が居ない(いま見ているのがそれ)
         if (where === 'other') noteRegistry.raise(lid);
+        // 🔑 字は `deep-link.ts`(#690 I3 ── 別の窓なら**その窓の題名**を添える。
+        //    形は `windowTitleFor` と同じなので、タスクバーの字でそのまま探せる)
         dispatcher.dispatch({
           type: 'OP_NOTICE',
           message:
             where === 'self'
-              ? 'このノートは、いま見ているこのウィンドウで開いています'
-              : 'このノートは、すでに別のウィンドウで開いています',
+              ? NOTE_OPEN_HERE_MESSAGE
+              : noteOpenElsewhereMessage(
+                  CONTAINER_TITLE,
+                  dispatcher.getState().entryMetas.get(lid)?.title ?? null,
+                ),
         });
         return;
       }
@@ -3293,6 +3355,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       paintTitle();
       announceNote();
     },
+    enterNoteWindow: () => {
+      // ⚠ 追記欄を出してから焦点の約束をする ── 畳んだままの欄には焦点が乗らない
+      applyPaneVisibility(root, appPanes.sessionOnly('append'));
+      appendBox.focusInputOnceReady();
+    },
     // 🔑 判断は `services.setBrowse` 1 か所 ── ここは呼ぶだけ
     //    ⚠ `BinderServices` では optional なので、無い配線では**何もしない**
     setBrowse: (mode) => services.setBrowse?.(mode),
@@ -3408,6 +3475,8 @@ function bootstrap(): void {
           heldNoteWindow = holding && openedByUs;
           app.repaintStatus();
           app.repaintWindowTitle();
+          // 🔴 付箋なら追記欄を出し、本文が届いたら打つ欄へ焦点を入れる(#690 ② A′ / I4)
+          if (heldNoteWindow) app.enterNoteWindow();
         },
         fail: (error) => app.dispatcher.dispatch({ type: 'OP_FAILED', error }),
         // ⚠ 面が変わったら断片を消す(見ている間だけ残す)

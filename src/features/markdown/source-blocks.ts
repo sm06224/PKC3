@@ -180,6 +180,54 @@ export function containerAtLine(spans: readonly ContainerSpan[], line: number): 
   return null;
 }
 
+/** `:::` の塊の原文の行範囲(0 始まり・**両端含む**)。 */
+export interface BlockSpan {
+  readonly start: number;
+  readonly end: number;
+  /** 閉じの `:::` が来ていない(= 末尾まで飲んでいる)。呼び側は**写さずに断る**。 */
+  readonly open: boolean;
+}
+
+/**
+ * 🔴 **`openLine` 番目の行が開く `:::` の塊の範囲**(#677。右クリック「この塊をコピー」の材料)。
+ *
+ * `scanContainers` は**最上位**しか返さないので、入れ子の内側を頼まれたときは
+ * 外側の囲いの**中身だけ**を切り出して走査し直す(外側 → 内側へ降りる)。
+ * 🔑 走査の規則は `scanContainers` **1 本**のまま ── ここで `:::` を数え直さない。
+ *
+ * ⚠ **fence の中の `:::` は塊ではない**(コードの字である)── 降りる途中で
+ *   その行を fence が飲んでいたら `null`。⚠ 「開き行から後ろだけを切って走査する」形だと
+ *   fence の文脈が落ちて `:::` を塊と読んでしまうので、**必ず先頭から降りる**。
+ * ⚠ 閉じていない塊は `open: true` で返す(範囲は末尾まで)── 断り文を出すのは呼び側。
+ *
+ * @returns その行が `:::` の開きでなければ `null`
+ */
+export function blockSpanAt(body: string, openLine: number): BlockSpan | null {
+  const lines = body.split('\n');
+  if (openLine < 0 || openLine >= lines.length) return null;
+  let from = 0;
+  let to = lines.length - 1;
+  for (;;) {
+    const spans = scanContainers(lines.slice(from, to + 1).join('\n'));
+    const hit = containerAtLine(spans, openLine - from);
+    if (hit === null || hit.kind === 'fence') return null;
+    if (hit.start === openLine - from) {
+      return { start: openLine, end: from + hit.end, open: hit.open };
+    }
+    // 入れ子の内側に居る ── 外側の中身(開き行の次 〜 閉じの手前)へ降りる
+    const innerFrom = from + hit.start + 1;
+    const innerTo = hit.open ? from + hit.end : from + hit.end - 1;
+    if (innerFrom > openLine || innerTo < openLine) return null;
+    from = innerFrom;
+    to = innerTo;
+  }
+}
+
+/** 行範囲(両端含む)を原文のまま切り出す。⚠ 末尾の改行は付けない(行の並びそのもの)。 */
+export function sliceLines(body: string, span: { readonly start: number; readonly end: number }): string {
+  return body.split('\n').slice(span.start, span.end + 1).join('\n');
+}
+
 /** 行内の対になる記号。⚠ **fence の中では数えない**(コードの `**` は装飾ではない)。 */
 const INLINE_PAIRS: readonly { open: string; close: string; name: string }[] = [
   { open: '**', close: '**', name: '太字' },

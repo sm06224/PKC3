@@ -206,7 +206,7 @@ export function buildOfficePackPanel(state: OfficePackState = appOfficePack): Of
   );
   resetProfile.title =
     'Office の中で変えた設定(ツールバーの形・表示言語など)を消して、次に開くときは素の状態から始めます。'
-    + 'ノートも一式も消えません';
+    + '⚠ Office で書いたマクロも消えます。ノートも一式も消えません';
   row.append(fromUrl, fromFile, remove, resetProfile, input);
   root.append(row);
 

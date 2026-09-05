@@ -51,3 +51,29 @@ export function bundleTagCount(shell) {
  *   **両方を import して等値で**見る(片方だけ変えられない)。
  */
 export const PORTABLE_HEAD_SCAN = 4096;
+
+/**
+ * 🔴 **マニュアルの page を 1 枚へ焼き込む封筒**(#648 段③)。
+ *
+ * ⚠ HTML 全文(`manual.html`)には `</script>` も `</body>` も**必ず在る** ── 素のまま
+ *   `<script>` に入れると最初の `</script>` で切れ、`</body>` は書き出し側の
+ *   `lastIndexOf('</body>')`(`portable-bundle.ts`)を**JS の中へ**当ててしまう。
+ * 🔑 だから JSON 文字列にして `<` を `\u003c` に逃がす ── 中身に `<` が 1 つも残らない
+ *   ので、どちらの罠にも当たらない。読む側(`adapter/platform/portable-manual.ts`)は
+ *   `JSON.parse` するだけ。⚠ 属性名は読む側の selector と同じ綴り ── 突き合わせは
+ *   `tests/adapter/portable-manual.test.ts`(封筒を組む実物 → 読む実物、で往復する)。
+ */
+export const MANUAL_PAGE_ATTR = 'data-pkc-manual-page';
+
+export function manualPageTag(html) {
+  return (
+    `<script type="application/json" ${MANUAL_PAGE_ATTR}>` +
+    JSON.stringify(html).replace(/</g, '\\u003c') +
+    `</script>`
+  );
+}
+
+/** 器に在るマニュアルの page の印の数。⚠ **1 件でなければならない**(`bundleTagCount` と同じ作法)。 */
+export function manualPageTagCount(shell) {
+  return [...shell.matchAll(new RegExp(MANUAL_PAGE_ATTR, 'g'))].length;
+}

@@ -166,7 +166,10 @@ function template(withCaret: string): TemplateBlock {
 
 /** 表の雛形(2 列)。カーソルは最初のセル。 */
 export const TABLE_BLOCK = template(`| 項目 | 値 |\n|---|---|\n| ${CARET} |  |\n`);
-/** 図の雛形(mermaid)。⚠ 「図」のボタンが入れるのはこれ ── **変えない**。 */
+/**
+ * 図の雛形(mermaid = フローチャート)。⚠ **変えない** ── 「図」で「フローチャート」を
+ * 選んだとき(#528 案 B)と、雛形の一覧の「図」が入れるのはこれ。
+ */
 export const MERMAID_BLOCK = template('```mermaid\ngraph TD\n  A-->B\n```\n');
 
 /**
@@ -184,6 +187,10 @@ export const MERMAID_BLOCK = template('```mermaid\ngraph TD\n  A-->B\n```\n');
  *   `onBar: false` の 4 つは**既定の鍵を 1 つずつ食う**(`Alt+Shift+…`)。
  *   入口は**既にある「雛形を入れる」の一覧**にする ── そこは
  *   「入れたい塊を選ぶ」用事そのもので、押し所も鍵も 1 つも増えない。
+ *   🔑 **段②(#528 案 B。user 裁定 2026-09-04)で入口がもう 1 つ増えた** ──
+ *   帯の「図」そのもの(`DIAGRAM_CHOICES`)。ボタンの数は変わらない
+ *   (同じボタンが**先に聞く**ようになっただけ)。「図」を押した人が UML に
+ *   辿り着けないままだったので、そこに置いた。
  * ⚠ **22 種を全部は並べない。** 一覧は user 自身の雛形を探す場所でもあるので、
  *   組み込みが 26 行になると本業を埋める。user が名指しした **UML の 4 種**に絞り、
  *   残りは**マニュアルの全数表**が受け持つ(そちらは 1 行目の名前で引ける)。
@@ -231,6 +238,24 @@ export const DIAGRAM_TEMPLATES: readonly DiagramTemplate[] = [
         '  注文 ||--|{ 明細 : "含む"\n```\n',
     ),
   },
+];
+
+/**
+ * 🔴 **帯の「図」を押したときに選べる一覧**(#528 案 B。user 裁定 2026-09-04
+ * 「全部推薦で」)。
+ *
+ * ⚠ 直す前は「図」= `graph TD` の 2 行が**必ず**入る形だった ── UML の 4 種は
+ *   `DIAGRAM_TEMPLATES` に在るのに、入口は「雛形」の一覧だけで、
+ *   **「図」を押した人はそこに辿り着けなかった**。
+ * 🔑 1 手増える(押す → 選ぶ)。それが裁定 B である ── 代わりに、5 種のどれも
+ *   **マウスだけで**入る。
+ * ⚠ **先頭はこれまでのフローチャート**(`MERMAID_BLOCK` そのもの)── 今までの
+ *   user の手触り(「図」→ Enter で `graph TD`)を変えない。
+ * ⚠ 字は `DIAGRAM_TEMPLATES` から引く(**表が正本**)── ここで打ち直さない。
+ */
+export const DIAGRAM_CHOICES: readonly DiagramTemplate[] = [
+  { id: 'flowchart', label: 'フローチャート', block: MERMAID_BLOCK },
+  ...DIAGRAM_TEMPLATES,
 ];
 /** コードブロックの雛形。カーソルは中。 */
 export const CODE_BLOCK = template(`\`\`\`\n${CARET}\n\`\`\`\n`);
@@ -350,7 +375,15 @@ export const FORMAT_OPS: readonly { op: FormatOp; label: string; onBar?: false }
   { op: 'quote', label: '引用' },
   { op: 'link', label: 'リンク' },
   { op: 'table', label: '表' },
-  { op: 'mermaid', label: '図' },
+  /**
+   * 🔴 **「図」は帯に**この表からは**出さない**(#528 案 B。user 裁定 2026-09-04)。
+   * ⚠ 帯の「図」は**先に聞く**(5 種の一覧 `DIAGRAM_CHOICES`)ので、
+   *   「その場で字を変える」この表の並びには居られない ── 日付 / 雛形と同じ理由。
+   *   ボタンそのものは `format-bar.ts` が**同じ場所**(表の隣)に置く。
+   * ⚠ `op` は消さない ── 雛形の一覧の「図」(`BUILTIN_SNIPPET_OPS`)と
+   *   一覧の先頭(フローチャート)が `MERMAID_BLOCK` を挿す口として使う。
+   */
+  { op: 'mermaid', label: '図', onBar: false },
   { op: 'codeblock', label: 'コードブロック' },
   /**
    * 🔴 **帯には出さない**(`onBar: false`)。⚠ **表は 1 つのまま**にしてある ──

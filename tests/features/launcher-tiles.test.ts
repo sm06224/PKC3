@@ -13,11 +13,15 @@ import {
   isLaunchableUrl,
   officeTile,
   OFFICE_TILE_LID,
+  scheduleTile,
   sortTiles,
   tileFrom,
   tileSelectsEntry,
   withBuiltinTiles,
   MANUAL_TILE_LID,
+  SCHEDULE_TILE_LID,
+  CONTACTS_TILE_LID,
+  contactsTile,
   manualTile,
   type LauncherTile,
 } from '../../src/features/launcher/tiles';
@@ -145,7 +149,7 @@ describe('組み込みタイルの合流 (#148)', () => {
    * ⚠ 2 ペインは**アプリに最初から在る**ので先頭、Office は**入れた端末だけ**なので
    *   その次 ── 入れたり消したりで 2 ペインの位置が動かない向きに並べる。
    */
-  it('組み込みは 2 ペイン → Office → マニュアルの順で、既定グループの先頭に付く', () => {
+  it('組み込みは 2 ペイン → 予定表 → Office → マニュアルの順で、既定グループの先頭に付く', () => {
     const merged = withBuiltinTiles(entryTiles, { office: true });
     expect(merged[0]).toEqual({
       lid: DUAL_TILE_LID,
@@ -156,9 +160,25 @@ describe('組み込みタイルの合流 (#148)', () => {
     /**
      * ⚠ **カレンダー / やることの板は #292 段⑤ でここから外れた**(2026-08-23)──
      *   あの 2 つは「アプリ」ではなく**ノートの見方**だったので、左の列の
-     *   「予定」タブへ引っ越した。⚠ 残るのは**幅が本当に要る** 2 ペインだけ。
+     *   「予定」タブへ引っ越した。
+     * 🔴 **予定表は #673 段②(user 裁定 2026-09-04「アプリの基本は別窓」)で
+     *   別窓の入口として戻った** ── 左のタブは残したまま、2 つ目の入口である。
+     *   Office より前(アプリに最初から在るものを先に ── Office の有無で位置が動かない)。
      */
     expect(merged[1]).toEqual({
+      lid: SCHEDULE_TILE_LID,
+      title: '予定表',
+      group: '',
+      kind: 'schedule',
+    });
+    // ⚠ 連絡先(#278 段③)は予定表の次 ── 同じく「アプリに最初から在る」側
+    expect(merged[2]).toEqual({
+      lid: CONTACTS_TILE_LID,
+      title: '連絡先',
+      group: '',
+      kind: 'contacts',
+    });
+    expect(merged[3]).toEqual({
       lid: OFFICE_TILE_LID,
       title: 'Office',
       group: '',
@@ -169,21 +189,23 @@ describe('組み込みタイルの合流 (#148)', () => {
      *   「作業する所」で、マニュアルは「読む所」である。読み物の有無で
      *   作業の口の位置を動かさない(上の「位置が動かない向きに並べる」と同じ判断)。
      */
-    expect(merged[2]).toEqual({
+    expect(merged[4]).toEqual({
       lid: MANUAL_TILE_LID,
       title: 'マニュアル',
       group: '',
       kind: 'manual',
     });
     // ⚠ entry 由来の並びには触らない(合流は前置だけ)
-    expect(merged.slice(3)).toEqual(entryTiles);
+    expect(merged.slice(5)).toEqual(entryTiles);
   });
 
   it('🔴 Office が入っていなくても、最初から在るものは出る(位置も動かない)', () => {
     const merged = withBuiltinTiles(entryTiles, { office: false });
     expect(merged[0]?.lid, 'Office の有無で 2 ペインの位置が動いた').toBe(DUAL_TILE_LID);
-    expect(merged[1]?.lid, 'Office の有無でマニュアルの位置が動いた').toBe(MANUAL_TILE_LID);
-    expect(merged.slice(2)).toEqual(entryTiles);
+    expect(merged[1]?.lid, 'Office の有無で予定表の位置が動いた').toBe(SCHEDULE_TILE_LID);
+    expect(merged[2]?.lid, 'Office の有無で連絡先の位置が動いた').toBe(CONTACTS_TILE_LID);
+    expect(merged[3]?.lid, 'Office の有無でマニュアルの位置が動いた').toBe(MANUAL_TILE_LID);
+    expect(merged.slice(4)).toEqual(entryTiles);
     // ⚠ 「同じ長さ」だけでは足して 1 枚消す実装と区別がつかない ── kind で見る
     expect(merged.some((t) => t.kind === 'office')).toBe(false);
   });
@@ -203,9 +225,15 @@ describe('組み込みタイルの合流 (#148)', () => {
 
   it('entry が 0 件でも組み込みだけで面が成立する', () => {
     const merged = withBuiltinTiles([], { office: true });
-    expect(merged.map((t) => t.kind)).toEqual(['dual', 'office', 'manual']);
+    // ⚠ 予定表(#673 段②)は 2 ペインの次、連絡先(#278 段③)はその次
+    expect(merged.map((t) => t.kind)).toEqual(['dual', 'schedule', 'contacts', 'office', 'manual']);
     // ⚠ Office を入れていない端末でも、面は空にならない
-    expect(withBuiltinTiles([], { office: false }).map((t) => t.kind)).toEqual(['dual', 'manual']);
+    expect(withBuiltinTiles([], { office: false }).map((t) => t.kind)).toEqual([
+      'dual',
+      'schedule',
+      'contacts',
+      'manual',
+    ]);
   });
 
   /**
@@ -214,6 +242,9 @@ describe('組み込みタイルの合流 (#148)', () => {
    */
   it('🔴 組み込みタイルは entry の選択を立てない', () => {
     expect(tileSelectsEntry(dualTile()), '2 ペインで選択が立つ').toBe(false);
+    // ⚠ 予定表(#673 段②)── `BUILTIN_KINDS` に足し忘れると、右の列が「見つからない」になる
+    expect(tileSelectsEntry(scheduleTile()), '予定表で選択が立つ').toBe(false);
+    expect(tileSelectsEntry(contactsTile()), '連絡先で選択が立つ').toBe(false);
     expect(tileSelectsEntry(officeTile())).toBe(false);
     expect(tileSelectsEntry(entryTiles[0]!), 'entry 由来まで立たなくなった').toBe(true);
   });

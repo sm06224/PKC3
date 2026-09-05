@@ -104,6 +104,10 @@ export const SKIPPED_KEYS: readonly { readonly key: string; readonly why: string
     why: 'お知らせを止めたかどうかは、その端末での選択である',
   },
   {
+    key: 'pkc3.too-narrow-ok',
+    why: '狭い画面の断り書きに OK を押したのは、その端末の画面幅を見て押した事実 ── 別の端末では幅が違う(#687 E-1)',
+  },
+  {
     key: 'pkc3.dual-bookmarks',
     why: '🔴 lid を持つ ── 別の端末では別のノートを指す(あるいはどこも指さない)',
   },

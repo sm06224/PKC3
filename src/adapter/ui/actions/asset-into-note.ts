@@ -25,7 +25,8 @@
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import type { WritableQueue } from './writable-queue';
 import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
-import { isAppendable } from '@features/flavor/append-spec';
+import { appendableKindsLabel, isAppendable } from '@features/flavor/append-spec';
+import { archetypeLabel } from '@features/flavor/archetype-label';
 
 /**
  * 取り込む時点で開いていたノート。
@@ -48,8 +49,12 @@ export function noteToPutInto(dispatcher: Dispatcher): NoteToPutInto {
 export interface PutAssetArgs {
   readonly dispatcher: Dispatcher;
   readonly queue: WritableQueue;
-  /** 画面の下へ 1 行出す口。⚠ **どの枝でも必ず 1 行言う**(黙って終わらない)。 */
-  readonly notify: (text: string) => void;
+  /**
+   * 画面の下へ 1 行出す口。⚠ **どの枝でも必ず 1 行言う**(黙って終わらない)。
+   * `open` = その知らせの隣に「開く」で出す物の lid(#668 A)。⚠ 受け側が
+   *   2 つ目を読まなくてもよい(`capture.ts` の `showStatus` は字だけ出す)。
+   */
+  readonly notify: (text: string, open?: string) => void;
   /** `noteToPutInto` で**先に**控えたもの。 */
   readonly into: NoteToPutInto;
   /** 出来た添付の lid(選択を返すときに、同じものなら撃たない)。 */
@@ -62,6 +67,17 @@ export interface PutAssetArgs {
    * ⚠ 添付のように事情が無いときは空文字。
    */
   readonly why: string;
+  /**
+   * 取り込みの回の印(#668 C)。同じ印で入れた行は「元に戻す」1 回でまとめて消える。
+   * ⚠ 省略 = 単独の 1 手(録音・画面録画は 1 回に 1 本なので付けない)。
+   */
+  readonly batch?: string;
+  /**
+   * 本文へ入ったら呼ぶ(#668 E。まとめて入れた回を件数で締めるために数える)。
+   * ⚠ 入れない枝(ノートが無い / 入れられない種類)では**呼ばない** ── 呼ぶと
+   *   「3 件を本文に入れました」の 3 に、入っていない物が数えられる。
+   */
+  readonly onPut?: (name: string) => void;
 }
 
 /**
@@ -71,7 +87,8 @@ export interface PutAssetArgs {
  *   「消えた」と読ませないので、そこまで言う。
  */
 export function putAssetIntoNote(args: PutAssetArgs): void {
-  const { dispatcher, queue, notify, into, attachedLid, assetKey, name, mime, why } = args;
+  const { dispatcher, queue, notify, into, attachedLid, assetKey, name, mime, why, batch, onPut } =
+    args;
 
   // 🔴 **開いていたノートへ戻す**(添付が奪った選択を返す)
   if (into.lid !== null && into.lid !== attachedLid) {
@@ -83,7 +100,20 @@ export function putAssetIntoNote(args: PutAssetArgs): void {
     return;
   }
   if (!isAppendable(into.archetype)) {
-    notify(`${why}「${name}」を添付にしました(開いているのは追記できない種類なので本文には入れていません)`);
+    /**
+     * 🔴 **何を開いているのか・何なら入るのかを言い、その添付へ行く口を添える**
+     *   (#668 A。PR #667 の着地前レビュー)。
+     * ⚠ 直す前は「追記できない種類なので」だけで、user は**開いている物の種類も、
+     *   どれなら入るのかも、作られた添付がどこに在るのかも**読めなかった
+     *   (一覧は絞りで隠れていることがある ── 押して行ける口が 1 つも無い)。
+     * ⚠ 種類の名前が引けない回(meta が消えた)だけ、元の言い方に落ちる。
+     */
+    const kind =
+      into.archetype === undefined ? '追記できない種類' : `『${archetypeLabel(into.archetype)}』`;
+    notify(
+      `${why}「${name}」を添付にしました(開いているのは${kind}なので、本文には入れていません。本文に入れられるのは${appendableKindsLabel()}だけです)`,
+      attachedLid,
+    );
     return;
   }
 
@@ -94,8 +124,18 @@ export function putAssetIntoNote(args: PutAssetArgs): void {
   const ref = formatAssetRef(name, `asset:${assetKey}`, isImageAssetMime(mime));
   const lid = into.lid;
   const held = queue.push(() => {
-    dispatcher.dispatch({ type: 'APPEND_TO_ENTRY', lid, text: ref, heading: null, target: null });
-    notify(`${why}「${name}」を本文に入れました`);
+    dispatcher.dispatch({
+      type: 'APPEND_TO_ENTRY',
+      lid,
+      text: ref,
+      heading: null,
+      target: null,
+      ...(batch === undefined ? {} : { batch }),
+    });
+    // 🔑 **どこに入ったかを言う**(#668 F)── 画面は動かさないので、字で場所を指す
+    notify(`${why}「${name}」を本文のいちばん下に入れました`);
+    // ⚠ 知らせの**後**に数える ── まとめた回の締め(件数)が、この 1 行を上書きする側
+    onPut?.(name);
   });
   // ⚠ **預かった回も黙らない**(いつ入るのかを言う)
   if (held)

@@ -10,14 +10,18 @@
  * |---|---|---|
  * | 再読み込み(F5) | 🔴 **白紙になる**(組んだ DOM は再読み込みで消える) | ✅ 同じ page が読み直される |
  * | 設定で選んだ配色 | 🔴 届かない(`--bg` 等の**テーマ 9 種**は BODY_CSS に無い) | ✅ `tokens.css` を丸ごと持ち、起動時に `localStorage` の配色を当てる |
- * | 目次 | `<button>` + `scrollIntoView`(`<a href="#…">` は base URL を引き継いで**アプリへ飛ぶ**) | ✅ 素の `<a href="#m-3">`(実 URL なので断片は**この page の中**で解決する) |
+ * | 目次 | `<button>` + `scrollIntoView`(`<a href="#…">` は base URL を引き継いで**アプリへ飛ぶ**) | ✅ 素の `<a href="#4-4-ヘルプ">`(実 URL なので断片は**この page の中**で解決する) |
  * | オフライン | opener が生きていれば描ける | ✅ SW の precache に載る(build の生成物なので自動) |
  *
  * 🔑 **1 枚に焼く**のは build 時(`build/manual-page-plugin.ts`)。ここは
  *   「材料を受け取って HTML 文字列を返す」だけ ── browser API を使わない
  *   (build でも test でも同じ関数が走る)。
  *
- * ## ⚠ 段①の窓は**残す**(持ち歩ける 1 枚 = portable では `manual.html` が隣に無い)
+ * ## ⚠ 持ち歩ける 1 枚(portable)は、この page を**1 枚の中に焼き込んで** `blob:` で開く(#648 段③)
+ *
+ * 隣に `manual.html` は無いが、`build/portable/fold.mjs` が同じ page を 1 枚の中へ焼き、
+ * `adapter/platform/portable-manual.ts` が `blob:` URL にして同じ経路で開く。
+ * 段①の `about:blank` に組む窓は**焼き込みの無い旧い 1 枚の逃げ道**としてだけ残る。
  *
  * 器の見た目(`MANUAL_CHROME_CSS`)・帯の字・窓の題名は**この file が正本**で、
  * `adapter/platform/manual-window.ts` はここから import する ── 2 つの経路で
@@ -32,16 +36,22 @@
  */
 import { buildManualDoc } from './manual-doc';
 import type { ManualSection } from './manual-find';
-import { TEXT_SCALES } from '../text-scale';
+import { DEFAULT_TEXT_SCALE, TEXT_SCALES, textScaleSpec } from '../text-scale';
 
 /** 焼く file の名前。⚠ `dist/` 直下(`index.html` の隣)。SW の precache に載る。 */
 export const MANUAL_PAGE_FILE = 'manual.html';
 
 /**
  * 窓の題名。⚠ **1 か所で持つ** ── タイルの字(`tiles.ts` の `manualTile`)と
- * 揃っているかは `tests/features/manual-doc.test.ts` が見る。
+ * 揃っているかは `tests/features/manual-page.test.ts` が見る。
+ *
+ * 🔴 **並びは他の窓と同じ「<名前> — PKC3」**(2026-09-04、#648 I4)。
+ * ⚠ 段②までは「PKC3 マニュアル」で、タスクバーに「2 ペインで整理 — PKC3」と
+ *   並んだとき**この窓だけ頭が PKC3** だった(名前で探す目が止まらない)。
+ * ⚠ 形の正本は `adapter/platform/deep-link.ts` の `windowTitleFor` だが、ここは
+ *   features 層なので呼べない ── 同じ形であることは test が突き合わせる。
  */
-export const MANUAL_WINDOW_TITLE = 'PKC3 マニュアル';
+export const MANUAL_WINDOW_TITLE = 'マニュアル — PKC3';
 
 /**
  * 🔴 **どの版で組んだ窓か**(#645)。
@@ -103,10 +113,22 @@ const HOST_CLASS = 'pkc-md-rendered';
 export const MANUAL_CHROME_CSS = [
   ':root{color-scheme:light dark}',
   'html,body{margin:0;height:100%}',
-  // 🔑 字の大きさは設定(`pkc3.text-scale`)が効く ── 選んでいなければ 14px のまま
-  //    (2026-09-02、動線レビュー D3: 「特大」を選んだ user の窓だけ 14px に戻っていた)
-  'body{display:grid;grid-template-rows:auto 1fr;font-family:system-ui,sans-serif;',
-  'font-size:var(--pkc-text-size,14px);color:var(--fg,CanvasText);background:var(--bg,Canvas)}',
+  /**
+   * 🔴 **字はアプリと同じ書体・大きさ・行間**(2026-09-04、#648 I6)。
+   * ⚠ 段②までは `system-ui` / 14px / 行間は UA 任せで、**同じ本文がヘルプ面と窓で
+   *   別の見え方**だった。`app.css` の `body` と同じ 3 つ(`--font` / 標準の大きさ /
+   *   `line-height: 1.45`)にする ── 突き合わせは `tests/features/manual-page.test.ts`。
+   * ⚠ `--font` は `tokens.css` のトークン ── 焼いた page は tokens を丸ごと持つので
+   *   必ず解決するが、`about:blank` に組む逃げ道(`BODY_CSS` に `--font` は無い)では
+   *   `system-ui` に落ちる。落ちても読めなくはならない(段①と同じ見え方)。
+   * 🔑 字の大きさは設定(`pkc3.text-scale`)が効く ── 選んでいなければ**アプリと同じ
+   *   既定**(`TEXT_SCALES` の「標準」= 13px。数字を写さず表から取る)。
+   *   ⚠ 「標準」を選んだ人と選んでいない人が同じ見え方になる ── #656 ① の
+   *   「標準を選ぶと 14px → 13px に縮んで戻せない」は、既定が揃った時点で消える。
+   */
+  'body{display:grid;grid-template-rows:auto 1fr;font-family:var(--font,system-ui,sans-serif);',
+  `font-size:var(--pkc-text-size,${textScaleSpec(DEFAULT_TEXT_SCALE).size});line-height:1.45;` +
+    'color:var(--fg,CanvasText);background:var(--bg,Canvas)}',
   // 帯 ── 題名と版だけ。⚠ 地は無彩色(不可侵指示)
   '[data-pkc-field="manual-window-head"]{display:flex;gap:12px;align-items:baseline;',
   'padding:8px 16px;border-bottom:1px solid var(--border,#8884)}',
@@ -197,7 +219,8 @@ export function themeBootScript(
 ): string {
   /**
    * 🔑 字の大きさも同じ倒し方で当てる(`text-scale.ts` の `initialTextScale` と同じ門:
-   *   保存が在り、知っている id なら その大きさ / それ以外は触らない = CSS の既定 14px)。
+   *   保存が在り、知っている id なら その大きさ / それ以外は触らない = CSS の既定 =
+   *   アプリと同じ「標準」。I6 で揃えるまでは 14px だった)。
    * ⚠ 対応表(id → px)は `features/text-scale.ts` の `TEXT_SCALES` から焼く ── 写さない。
    */
   const size = textScale
@@ -207,25 +230,67 @@ export function themeBootScript(
       JSON.stringify(textScale.sizes) +
       ';if(s!==null&&Object.prototype.hasOwnProperty.call(m,s))document.documentElement.style.setProperty("--pkc-text-size",m[s]);'
     : '';
+  /**
+   * 🔑 **保存が読めなければ、`<html>` に焼かれている配色を採る**(#648 段③)。
+   * ⚠ 持ち歩ける 1 枚は `blob:` の document でこの page を開く ── `file://` 由来の blob は
+   *   `localStorage` に触れないことがある(opaque origin)。opener が開く前に
+   *   `data-pkc-theme` を焼いておくので(`portable-manual.ts` の `bakeAppearance`)、
+   *   保存 → 焼かれた属性 → OS の順で倒す。`manual.html` を http で開く経路では属性が無いので
+   *   これまでどおり 保存 → OS(`theme.ts` の `initialTheme` と同じ答え)。
+   * ⚠ 字の大きさは属性ではなく inline の `--pkc-text-size` で焼かれる ── 下の `size` は
+   *   「保存が在れば上書き、無ければ触らない」なので、焼かれた値がそのまま残る。
+   */
   return (
     '(function(){var ok=' +
     JSON.stringify([...themeIds]) +
     ',t=null;try{t=localStorage.getItem(' +
     JSON.stringify(storageKey) +
-    ')}catch(e){}if(ok.indexOf(t)<0){t="light";try{if(matchMedia("(prefers-color-scheme: dark)").matches)t="dark"}catch(e){}}' +
+    ')}catch(e){}if(ok.indexOf(t)<0){t=document.documentElement.getAttribute("data-pkc-theme");' +
+    'if(ok.indexOf(t)<0){t="light";try{if(matchMedia("(prefers-color-scheme: dark)").matches)t="dark"}catch(e){}}}' +
     'document.documentElement.setAttribute("data-pkc-theme",t);' +
     size +
     /**
-     * 🔑 **URL の節の印(`#m-N`)へ、読み込みの後に自分で送る**(2026-09-02 実測)。
+     * 🔑 **URL の節の印(`#見出しの字`)へ、読み込みの後に自分で送る**(2026-09-02 実測)。
      * ⚠ 再読み込み(F5)では、ブラウザは断片へ送らない ── 印は URL に残るのに見出しが
      *   画面の外(実測 top = 43718px)。`history.scrollRestoration = 'manual'` にしても
      *   変わらなかった(本文がスクロール箱の中に居るため、断片の送りが箱に届かない)。
      *   だから DOMContentLoaded で `scrollIntoView` する。⚠ これは「配色を立てる」に次ぐ
      *   2 つ目の振る舞いだが、**目次の `<a>` が押されたときと同じ送り**を再読み込みと
      *   ブックマークにも効かせるだけである(新しい操作は増えない)。
+     * 🔴 **断片は percent-encode されて返る**(#648 D4 で印を見出しの字にしたので)──
+     *   `location.hash` は `#%E3%83%98…` の形。そのまま `getElementById` に渡すと
+     *   **必ず外れて先頭に戻る**ので、復号してから引く(壊れた綴りなら復号せず素で引く)。
      */
-    'addEventListener("DOMContentLoaded",function(){var h=location.hash.slice(1);' +
-    'if(!h)return;var e=document.getElementById(h);if(e)e.scrollIntoView({block:"start"})});' +
+    'function g(h){if(!h)return;try{h=decodeURIComponent(h)}catch(e){}' +
+    'var e=document.getElementById(h);if(e)e.scrollIntoView({block:"start"})}' +
+    'function j(){g(location.hash.slice(1))}' +
+    'addEventListener("DOMContentLoaded",j);' +
+    /**
+     * 🔴 **`blob:null/` の document では、断片への navigate をブラウザが止める**
+     * (#648 段③、2026-09-05 実測 ── `chromium` / `headless_shell` の両方)。
+     * ⚠ 持ち歩ける 1 枚を `file://` で開くと opener の origin は opaque なので、blob の URL は
+     *   `blob:null/…` になる。そこで目次の `<a href="#…">` を押すと Chromium は
+     *   `Not allowed to load local resource: blob:null/…#…` を出して**何もしない** ──
+     *   `location.hash` も動かず、見出しへも送られない(目次が丸ごと dead click)。
+     *   `location.hash = …` / `location.href = …` も同じく止まる。
+     * 🔑 **`history.pushState` は止まらない**(同じ実測)。だからこの origin では
+     *   `<a href="#…">` の既定を自分で肩代わりする ── URL の断片を `pushState` で書き、
+     *   上の `j` で見出しへ送る(= `<a>` が本来やること 2 つ。新しい操作は増えない)。
+     *   F5 は URL の断片を保つので、読み直しの後は DOMContentLoaded の `j` が同じ節へ戻す。
+     * ⚠ **`http:` の `manual.html` では触らない**(`origin` が `"null"` でない)── そちらは
+     *   ブラウザの断片 navigate がそのまま効いており、Ctrl+click(別タブで開く)や
+     *   `:target` の意味論を肩代わりで変えない。
+     * ⚠ 戻る / 進むで断片が変わった回(`popstate`)も `j` で送る ── `pushState` で積んだ履歴は
+     *   ブラウザが送ってくれないので、`<a>` の履歴と同じ動きをここで揃える。
+     * ⚠ 修飾キー付き・左以外のボタンは触らない(既定に任せる ── 止められるが、それは
+     *   ブラウザの判断であってこの script が別の意味を与える所ではない)。
+     */
+    'if(location.origin==="null"){addEventListener("click",function(ev){' +
+    'if(ev.defaultPrevented||ev.button!==0||ev.metaKey||ev.ctrlKey||ev.shiftKey||ev.altKey)return;' +
+    'var t=ev.target,a=t&&t.closest?t.closest(\'a[href^="#"]\'):null;if(!a)return;' +
+    'var h=a.getAttribute("href");ev.preventDefault();' +
+    'try{history.pushState(null,"",h)}catch(e){}g(h.slice(1))});' +
+    'addEventListener("popstate",j)}' +
     '})();'
   );
 }

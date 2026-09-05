@@ -36,7 +36,18 @@ export interface MenuItem {
    * 🔑 字も説明も出所は `features/entry-actions.ts` の 1 か所である(§7)。
    */
   readonly hint?: string;
+  /**
+   * 🔴 **近道の字**(#587 改善 C 案 2)。⚠ 空なら**付けない**。
+   *
+   * 項目の**右に薄く**出す(CSS の `::after` が `data-pkc-shortcut` を描く)──
+   * `textContent` は項目の字のまま(字を読む検査・読み上げを汚さない)。
+   * 🔑 字の組み立ては `features/entry-actions.ts` の `menuShortcutFor` 1 か所。
+   */
+  readonly shortcut?: string;
 }
+
+/** 近道の字を持つ属性(`data-pkc-shortcut`)。⚠ CSS と unit はこの名前で見る。 */
+export const MENU_SHORTCUT_ATTR = 'data-pkc-shortcut';
 
 export interface OpenMenu {
   /** 閉じる。⚠ **焦点を返す**(開く前に居た所へ)。 */
@@ -84,6 +95,8 @@ export function openContextMenu(
      * 🔑 戻すときは `data-pkc-hint` を `title` に戻し、下の `withHint` の塊と CSS を外す(1 組)。
      */
     if (it.hint !== undefined && it.hint !== '') b.setAttribute('data-pkc-hint', it.hint);
+    // 🔴 近道は右に薄く(#587 C 案 2)。⚠ 空なら付けない ── 属性の有無を数える検査を汚さない
+    if (it.shortcut !== undefined && it.shortcut !== '') b.setAttribute(MENU_SHORTCUT_ATTR, it.shortcut);
     /**
      * 🔴 **押した物の身元をボタンへ写す**(#426 段②)。
      *

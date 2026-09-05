@@ -44,6 +44,7 @@ describe('封印中の面(#300 段②)', () => {
       clearHash: () => {},
       dropToken: () => {},
       setEntry: () => {},
+      restoreHash: () => {},
     };
     expect(readViewDeepLink(target), '封印した面がアドレスから開ける').toEqual({
       unusable: true,
@@ -54,6 +55,7 @@ describe('封印中の面(#300 段②)', () => {
         clearHash: () => {},
         dropToken: () => {},
         setEntry: () => {},
+        restoreHash: () => {},
       })).toEqual({
       view: 'dual',
     });

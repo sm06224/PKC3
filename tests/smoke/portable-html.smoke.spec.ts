@@ -260,19 +260,20 @@ test('🔴 書き出した 1 枚が、そのまま PKC3 として開く (#400 �
 });
 
 /**
- * 🔴 **持ち歩ける 1 枚では、マニュアルの窓は `about:blank` に組む**(#645 段②。
- * 着地前レビュー ⚠-2 が拾った ── 段②で smoke が全部 `manual.html` の経路へ移り、
- * **`about:blank` の経路を実ブラウザで見る test が 0 件**になっていた。隣に
- * `manual.html` が無い 1 枚では、いまもこの経路が user に届く)。
+ * 🔴 **持ち歩ける 1 枚でも、マニュアルの窓は 1 枚に焼き込んだ page を `blob:` で開く**
+ * (#648 段③。段②までは隣に `manual.html` が無いので `about:blank` に組んでいた ──
+ * **F5 で白紙** / 配色は明暗の 2 種だけ、が 1 枚ではそのままだった)。
  *
- * 見るのは 3 つ ── ① 窓が `about:blank` のまま(`file:///…/manual.html` へ飛んで
- * ERR_FILE_NOT_FOUND を出さない)② 目次が `<button>` で出る ③ 暗い環境で読める
- * (2026-08-31 の「白地に白い字」の再発を、この経路でも見張る)。
+ * ここでしか確かめられないのは 4 つ ── ① `file://` の opener が作った `blob:` へ
+ * 本当に navigate できるか(top-level の `data:` はブラウザが止める) ② `file://` 由来の
+ * blob で **F5 が効くか**(blob URL が生きている間は読み直せる) ③ 暗い環境で読めるか
+ * ④ opener が焼いた配色が届くか(`file://` 由来の blob は `localStorage` に触れないことが
+ * ある ── 属性で焼く道が効いていること)。
  */
 test.describe('暗い環境', () => {
   test.use({ colorScheme: 'dark' });
 
-  test('🔴 持ち歩ける 1 枚でも、マニュアルの窓が about:blank に組まれて読める (#645 段②)', async ({
+  test('🔴 持ち歩ける 1 枚でも、マニュアルの窓が blob: の page で開き、F5 で消えない (#648 段③)', async ({
     page,
     context,
   }) => {
@@ -286,13 +287,16 @@ test.describe('暗い環境', () => {
     const popup = context.waitForEvent('page');
     await clickReal(page, '[data-pkc-action="open-manual-window"]');
     const win = await popup;
-    const toc = win.locator('[data-pkc-region="manual-window-toc"] button');
-    await expect(toc.first(), '目次が出ない(about:blank に組めていない)').toBeVisible();
-    expect(await toc.count()).toBeGreaterThan(100);
-    // ① 実 URL へ飛んでいない(隣に manual.html は無い ── 飛べば ERR_FILE_NOT_FOUND)
-    expect(win.url(), '持ち歩ける 1 枚なのに manual.html へ飛んだ').toBe('about:blank');
+    // ① 焼き込んだ page へ移る(about:blank のままなら段①の逃げ道へ落ちている)
+    await win.waitForURL((u) => u.protocol === 'blob:');
+    const toc = win.locator('[data-pkc-region="manual-window-toc"] a');
+    await expect(toc.first(), '目次が出ない(page に移れていない)').toBeVisible();
+    const links = await toc.count();
+    expect(links, '目次が空').toBeGreaterThan(100);
+    // ⚠ 段①の印(`<button>` の目次)ではない
+    expect(await win.locator('[data-pkc-region="manual-window-toc"] button').count()).toBe(0);
 
-    // ③ 暗い環境で読める(`--bg` が無い経路なので、UA の Canvas に落ちて暗くなる)
+    // ③ 暗い環境で読める(tokens の配色が効いている)
     const lum = (css: string): number => {
       const m = css.match(/\d+/gu);
       if (!m || m.length < 3) return -1;
@@ -302,12 +306,96 @@ test.describe('暗い環境', () => {
       fg: getComputedStyle(document.body).color,
       bg: getComputedStyle(document.body).backgroundColor,
       rootBg: getComputedStyle(document.documentElement).backgroundColor,
+      theme: document.documentElement.getAttribute('data-pkc-theme'),
     }));
+    expect(seen.theme, '配色の属性が立っていない').toBe('dark');
     const fg = lum(seen.fg);
     const bg = Math.max(lum(seen.bg), lum(seen.rootBg));
     expect(fg).toBeGreaterThanOrEqual(0);
     expect(fg, `暗い環境で地(${bg})より字(${fg})が暗い ── 読めない`).toBeGreaterThan(bg);
+
+    // ② 🔴 目次を押して、F5 ── 白紙にならず、その節に居る(段①では白紙になっていた)
+    const target = toc.nth(Math.floor(links * 0.6));
+    const id = (await target.getAttribute('href'))!.slice(1);
+    await target.click();
+    /**
+     * 🔴 **押した直後に、その節へ飛んでいる**(2026-09-05 実測で足した)。
+     * ⚠ `blob:null/`(`file://` 由来の blob)では Chromium が `<a href="#…">` の navigate を
+     *   `Not allowed to load local resource` で止める ── 断片も付かず、見出しへも送られず、
+     *   **目次が丸ごと dead click** だった。それを boot script が `pushState` で肩代わりする
+     *   (`manual-page.ts`)。F5 の後だけ見ると「印が消えた」に見えるが、本体はここである。
+     */
+    expect(decodeURIComponent(new URL(win.url()).hash), '目次を押しても節の印が付かない').toBe(
+      `#${id}`,
+    );
+    const jumped = await win.evaluate((wanted) => {
+      const el = document.getElementById(wanted);
+      if (!el) return null;
+      const box = el.getBoundingClientRect();
+      return { top: box.top, h: window.innerHeight };
+    }, id);
+    expect(jumped, '飛び先が本文に無い').not.toBeNull();
+    expect(jumped!.top, '目次を押しても、その節へ飛ばない(dead click)').toBeGreaterThanOrEqual(0);
+    expect(jumped!.top).toBeLessThan(jumped!.h);
+    await win.reload();
+    await expect(win.locator('[data-pkc-region="manual-window-main"]'), 'F5 で白紙になった').toBeVisible();
+    expect(await toc.count()).toBe(links);
+    expect(decodeURIComponent(new URL(win.url()).hash), 'F5 で節の印が消えた').toBe(`#${id}`);
+    const landed = await win.evaluate((wanted) => {
+      const el = document.getElementById(wanted);
+      if (!el) return null;
+      const box = el.getBoundingClientRect();
+      return { top: box.top, h: window.innerHeight };
+    }, id);
+    expect(landed, '飛び先が本文に無い').not.toBeNull();
+    expect(landed!.top, 'F5 のあと、その節に戻っていない').toBeGreaterThanOrEqual(0);
+    expect(landed!.top).toBeLessThan(landed!.h);
+
+    // ⑤ もう一度押しても 2 枚目が開かない(同じ窓が前に出る)
+    const pagesBefore = context.pages().length;
+    await page.bringToFront();
+    await clickReal(page, '[data-pkc-action="open-manual-window"]');
+    await page.waitForTimeout(700);
+    expect(context.pages().length, '2 枚目が開いた').toBe(pagesBefore);
+
     await win.close();
     expect(errors, `pageerror: ${errors.join(' | ')}`).toEqual([]);
   });
+});
+
+/**
+ * 🔴 **④ opener が焼いた配色が届く**(#648 段③)。`file://` 由来の `blob:` は
+ * `localStorage` に触れないことがある ── そのとき boot script は `<html>` に焼かれた
+ * 属性を採る(`portable-manual.ts` の `bakeAppearance`)。観測点は**実際に塗られた地の色**。
+ */
+test('🔴 持ち歩ける 1 枚で選んだ配色(Dracula)が、blob: の窓の地の色になる (#648 段③)', async ({
+  page,
+  context,
+}) => {
+  const tokens = readFileSync(new URL('../../src/styles/tokens.css', import.meta.url), 'utf8');
+  const block = tokens.slice(tokens.indexOf(":root[data-pkc-theme='dracula']"));
+  const hex = /--bg:\s*#([0-9a-f]{6})/iu.exec(block)![1]!;
+  const rgb = `rgb(${parseInt(hex.slice(0, 2), 16)}, ${parseInt(hex.slice(2, 4), 16)}, ${parseInt(hex.slice(4, 6), 16)})`;
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(pathToFileURL(HTML).href);
+  await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
+  // 設定画面の実物の <select> で選ぶ(保存の鍵を直に触らない)
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  await page.locator('[data-pkc-field="theme-select"]').selectOption('dracula');
+  await expect(page.locator('html')).toHaveAttribute('data-pkc-theme', 'dracula');
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="help"]');
+
+  const popup = context.waitForEvent('page');
+  await clickReal(page, '[data-pkc-action="open-manual-window"]');
+  const win = await popup;
+  await win.waitForURL((u) => u.protocol === 'blob:');
+  await expect(win.locator('[data-pkc-region="manual-window-main"]')).toBeVisible();
+  const seen = await win.evaluate(() => ({
+    theme: document.documentElement.getAttribute('data-pkc-theme'),
+    bg: getComputedStyle(document.body).backgroundColor,
+  }));
+  expect(seen.theme).toBe('dracula');
+  expect(seen.bg, '選んだ配色の地の色になっていない').toBe(rgb);
+  await win.close();
 });

@@ -85,8 +85,10 @@ jobs:
       - run: npm test
       - run: VITE_PKC_KIND=product npm run build
       # 出荷物に map が混ざっていないか(P7 段①)。ここが release の最終関門
-      - name: dist の検品(product に map が無いこと)
-        run: node scripts/check-dist.mjs product
+      # 🔴 焼きたてなので manual.html の実在も要求する(#648 💭)── 過去の zip を検品する
+      #    pages.yml の経路には付けない(段②より前の版には無くて当然)
+      - name: dist の検品(product に map が無いこと / manual.html が在ること)
+        run: node scripts/check-dist.mjs product --require-manual
       - name: SBOM (CycloneDX)
         run: npm sbom --sbom-format=cyclonedx --omit=dev > pkc3-sbom.cdx.json
       - name: 可搬単一 HTML の雛形(#400 段④)

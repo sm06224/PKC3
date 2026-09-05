@@ -22,6 +22,8 @@
  *   `isBrowseMode` が弾くので**面が切り替わらない**(押しても何も起きない)。
  * 🔑 だから**一覧から型も判定も導く** ── 足し忘れようがない形にする(§7)。
  */
+import type { ViewMode } from '@adapter/state/app-state';
+
 export const BROWSE_MODES = ['list', 'filer', 'launcher', 'schedule', 'contacts'] as const;
 
 export type BrowseMode = (typeof BROWSE_MODES)[number];
@@ -52,6 +54,27 @@ export function kindFilterApplies(mode: BrowseMode): boolean {
 
 export function isBrowseMode(v: string): v is BrowseMode {
   return (BROWSE_MODES as readonly string[]).includes(v);
+}
+
+/**
+ * 🔴 **中央の面と同じものが在る、左の列のタブ**(#673 段②)。
+ *
+ * 予定表は**左の列の「予定」タブ**と**別窓の面**(`ViewMode` の `schedule`)の
+ * 2 か所に在る(user 裁定 2026-09-04「アプリの基本は別窓」/ #292 段⑤ の
+ * 「本文を退かさない」は残す)。別窓が塞がれたときの退避は、中央に開いて本文を
+ * 消すのではなく**こちらへ送る** ── その対応表がここである。
+ * ⚠ 左に無い面(2 ペイン等)は `null` ── 呼び側が中央の面へ退避する。
+ * ⚠ 綴りが同じでも**名前空間は別**(`ViewMode` と `BrowseMode`)なので、
+ *   「同じ字なら同じ」とは書かない ── 表で名指しする。
+ */
+const HOME_TAB: Readonly<Partial<Record<ViewMode, BrowseMode>>> = {
+  schedule: 'schedule',
+  // 🔴 連絡先も同じ形(#278 段③)── 左の「連絡先」タブが退避先
+  contacts: 'contacts',
+};
+
+export function homeTabOf(view: ViewMode): BrowseMode | null {
+  return HOME_TAB[view] ?? null;
 }
 
 const KEY = 'pkc3.browse';

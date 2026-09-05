@@ -33,6 +33,8 @@ import {
 } from '../../src/adapter/ui/render/text-scale';
 import { TEXT_SCALES, textScaleSpec } from '../../src/features/text-scale';
 import { extractBodyCss } from '../../build/body-css';
+import { windowTitleFor } from '../../src/adapter/platform/deep-link';
+import { manualTile } from '../../src/features/launcher/tiles';
 // @ts-expect-error -- 検品規則は素の .mjs(ビルド対象外の CI script 群)
 import { MANUAL_PAGE } from '../../scripts/dist-inspect.mjs';
 
@@ -197,6 +199,41 @@ describe('焼いたマニュアル — 配色', () => {
     });
 
     /**
+     * 🔴 **保存が読めなければ、`<html>` に焼かれた配色を採る**(#648 段③)。
+     * ⚠ 持ち歩ける 1 枚は `blob:` の document でこの page を開く ── `file://` 由来の blob は
+     *   `localStorage` に触れないことがある。opener が焼いた属性が無視されると、
+     *   選んだ配色が**開くたび OS の明暗へ戻る**。
+     */
+    it('🔴 保存が無ければ、<html> に焼かれた配色を採る(持ち歩ける 1 枚)', () => {
+      document.documentElement.setAttribute('data-pkc-theme', 'dracula');
+      vi.stubGlobal('matchMedia', () => ({ matches: true }));
+      expect(run()).toBe('dracula');
+    });
+
+    it('🔴 対照群 ── 保存が在れば保存が勝つ(http で開いた manual.html の答えを変えない)', () => {
+      document.documentElement.setAttribute('data-pkc-theme', 'dracula');
+      localStorage.setItem(THEME_STORAGE_KEY, 'nord');
+      expect(run()).toBe('nord');
+    });
+
+    it('⚠ 焼かれた配色が CSS に無い値なら OS へ落ちる(同じ門)', () => {
+      document.documentElement.setAttribute('data-pkc-theme', 'bogus');
+      vi.stubGlobal('matchMedia', () => ({ matches: true }));
+      expect(run()).toBe('dark');
+    });
+
+    it('🔴 保存が投げても焼かれた配色を採る(opaque origin の blob がまさにこれ)', () => {
+      document.documentElement.setAttribute('data-pkc-theme', 'solarized');
+      vi.stubGlobal('localStorage', {
+        getItem: () => {
+          throw new Error('denied');
+        },
+      });
+      vi.stubGlobal('matchMedia', () => ({ matches: true }));
+      expect(run()).toBe('solarized');
+    });
+
+    /**
      * 🔴 **アプリの「最初の配色」と同じ答えを出す**(着地前レビュー ⚠-3 ── 規則が
      * `initialTheme()` と script の 2 か所に生えたので、突き合わせる場所を 1 つ置く)。
      * ⚠ 片側だけ変えた日(既定を変える / 保存形式を変える)に、アプリと窓の配色が
@@ -217,7 +254,7 @@ describe('焼いたマニュアル — 配色', () => {
 
   /**
    * 🔴 **字の大きさの設定も届く**(動線レビュー D3 ── 「特大」を選んだ user の窓だけ
-   * 14px に戻っていた)。倒し方は `text-scale.ts` の `initialTextScale()` と同じ。
+   * 14px に戻っていた ── 当時の窓の既定)。倒し方は `text-scale.ts` の `initialTextScale()` と同じ。
    */
   describe('起動時に字の大きさを当てる script', () => {
     afterEach(() => {
@@ -248,10 +285,10 @@ describe('焼いたマニュアル — 配色', () => {
       expect(TEXT_SCALES.length, '段が 4 未満(表が空振り)').toBeGreaterThanOrEqual(4);
     });
 
-    it('選んでいなければ触らない(CSS の既定 14px のまま)', () => {
+    it('選んでいなければ触らない(CSS の既定 = アプリと同じ「標準」のまま)', () => {
       expect(run()).toBe('');
       // 🔴 当て直す側も「選んでいない」と読む ── ここが食い違うと、何も変えずに押しただけで
-      //    14px → 13px に縮む(2026-09-02 hotfix)
+      //    字が動く(2026-09-02 hotfix。当時は 14px → 13px に縮んだ)
       expect(chosenTextScale(), 'boot script は触らないのに、当て直す側は「選んだ」と読む').toBeNull();
     });
 
@@ -264,9 +301,199 @@ describe('焼いたマニュアル — 配色', () => {
     });
 
     it('🔴 器の CSS が `--pkc-text-size` を読む(script が立てても CSS が見なければ効かない)', () => {
-      expect(MANUAL_CHROME_CSS).toContain('font-size:var(--pkc-text-size,14px)');
+      expect(MANUAL_CHROME_CSS).toContain('font-size:var(--pkc-text-size,');
       expect(bake().html).toContain(JSON.stringify(TEXT_SCALE_STORAGE_KEY));
     });
+  });
+});
+
+/**
+ * 🔴 **URL の断片(見出しの字)へ、読み込みの後に送る**(#648 D4)。
+ * ⚠ 印を見出しの字にしたので `location.hash` は percent-encode されて返る ──
+ *   復号せずに `getElementById` へ渡すと**必ず外れて先頭に戻る**(F5 とブックマークの当の点)。
+ */
+describe('焼いたマニュアル — 断片へ送る script(D4)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    document.body.innerHTML = '';
+    document.documentElement.removeAttribute('data-pkc-theme');
+  });
+  const run = (hash: string): string[] => {
+    vi.stubGlobal('location', { hash });
+    // ⚠ 素の `addEventListener` は window に積み上がる(前の it の listener も鳴る)──
+    //    script が登録した handler を**掴んで直に呼ぶ**(1 本だけ登録されることも見る)
+    const handlers: Array<() => void> = [];
+    vi.stubGlobal('addEventListener', (_type: string, fn: () => void) => handlers.push(fn));
+    const landed: string[] = [];
+    for (const id of ['4-4-ヘルプ', 'm-3']) {
+      const h = document.createElement('h2');
+      h.id = id;
+      (h as unknown as { scrollIntoView: () => void }).scrollIntoView = () => landed.push(id);
+      document.body.append(h);
+    }
+    new Function(themeBootScript(themeIdsIn(TOKENS), THEME_STORAGE_KEY))();
+    expect(handlers, 'DOMContentLoaded の handler が 1 本でない').toHaveLength(1);
+    handlers[0]!();
+    return landed;
+  };
+
+  it('🔴 percent-encode された断片を復号して、その見出しへ送る', () => {
+    expect(run(`#${encodeURIComponent('4-4-ヘルプ')}`)).toEqual(['4-4-ヘルプ']);
+  });
+
+  it('素の断片(ASCII)もそのまま送る(対照群)', () => {
+    expect(run('#m-3')).toEqual(['m-3']);
+  });
+
+  it('断片が無い / 壊れた綴り / 無い id なら何もしない(先頭のまま。落ちない)', () => {
+    expect(run('')).toEqual([]);
+    expect(run('#%E3%81')).toEqual([]);
+    expect(run(`#${encodeURIComponent('無い節')}`)).toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **`blob:null/` の document では、目次の `<a href="#…">` を boot script が肩代わりする**
+ * (#648 段③、2026-09-05 実測)。持ち歩ける 1 枚を `file://` で開くと blob の URL は
+ * `blob:null/…` になり、Chromium は断片への navigate を `Not allowed to load local resource`
+ * で止める ── 目次が丸ごと dead click だった(F5 で「印が消えた」に見えていたのは、
+ * そもそも押しても印が付いていなかったため)。
+ * ⚠ ブラウザが止める当の挙動は happy-dom では再現しない ── ここで守るのは**肩代わりの配線**:
+ *   ① origin が `"null"` のときだけ click / popstate を握る(http の page は 1 バイトも変えない)
+ *   ② 断片を `history.pushState` で書く(`<a>` が本来やること)③ 見出しへ送る
+ *   ④ 修飾キー付き / 左以外 / 断片でないリンクは触らない。実物は `portable-html.smoke.spec.ts`。
+ */
+describe('焼いたマニュアル — blob:null では目次の <a> を肩代わりする(#648 段③)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    document.body.innerHTML = '';
+    document.documentElement.removeAttribute('data-pkc-theme');
+  });
+  type Handler = (ev?: unknown) => void;
+  interface Rig {
+    readonly handlers: Map<string, Handler[]>;
+    readonly landed: string[];
+    readonly pushed: string[];
+    readonly loc: { hash: string; origin: string };
+  }
+  const rig = (origin: string, pushState?: (url: string) => void): Rig => {
+    const loc = { hash: '', origin };
+    vi.stubGlobal('location', loc);
+    const pushed: string[] = [];
+    vi.stubGlobal('history', {
+      pushState: (_s: unknown, _t: string, url: string) => {
+        if (pushState) pushState(url);
+        pushed.push(url);
+        // ⚠ 本物の `location.hash` は percent-encode されて返る(D4 と同じ形にする)
+        loc.hash = `#${encodeURIComponent(url.slice(1))}`;
+      },
+    });
+    const handlers = new Map<string, Handler[]>();
+    vi.stubGlobal('addEventListener', (type: string, fn: Handler) => {
+      handlers.set(type, [...(handlers.get(type) ?? []), fn]);
+    });
+    const landed: string[] = [];
+    for (const id of ['4-4-ヘルプ', 'm-3']) {
+      const h = document.createElement('h2');
+      h.id = id;
+      (h as unknown as { scrollIntoView: () => void }).scrollIntoView = () => landed.push(id);
+      document.body.append(h);
+    }
+    new Function(themeBootScript(themeIdsIn(TOKENS), THEME_STORAGE_KEY))();
+    return { handlers, landed, pushed, loc };
+  };
+  const anchor = (href: string): HTMLAnchorElement => {
+    const a = document.createElement('a');
+    a.setAttribute('href', href);
+    a.textContent = '目次の行';
+    document.body.append(a);
+    return a;
+  };
+  /** 合成の click を script の handler へ渡し、既定を止めたかを返す。 */
+  const click = (r: Rig, target: Element, mods: Record<string, unknown> = {}): boolean => {
+    let prevented = false;
+    const ev = {
+      target,
+      button: 0,
+      metaKey: false,
+      ctrlKey: false,
+      shiftKey: false,
+      altKey: false,
+      defaultPrevented: false,
+      ...mods,
+      preventDefault: () => {
+        prevented = true;
+      },
+    };
+    for (const fn of r.handlers.get('click') ?? []) fn(ev);
+    return prevented;
+  };
+
+  it('🔴 origin が "null" なら、目次の <a href="#…"> を握って pushState し、見出しへ送る', () => {
+    const r = rig('null');
+    expect(r.handlers.get('click'), 'click の handler が 1 本でない').toHaveLength(1);
+    const a = anchor('#4-4-ヘルプ');
+    expect(click(r, a), '既定(止められる navigate)を止めていない').toBe(true);
+    expect(r.pushed, 'URL の断片が pushState されていない').toEqual(['#4-4-ヘルプ']);
+    expect(r.landed, '見出しへ送られていない').toEqual(['4-4-ヘルプ']);
+  });
+
+  it('<a> の中の子要素を押しても同じ(target が <span> でも closest で拾う)', () => {
+    const r = rig('null');
+    const a = anchor('#m-3');
+    const span = document.createElement('span');
+    a.textContent = '';
+    a.append(span);
+    expect(click(r, span)).toBe(true);
+    expect(r.pushed).toEqual(['#m-3']);
+    expect(r.landed).toEqual(['m-3']);
+  });
+
+  it('🔴 対照群: http の page(origin が "null" でない)では click / popstate を 1 本も握らない', () => {
+    const r = rig('http://localhost:5173');
+    expect(r.handlers.get('click')).toBeUndefined();
+    expect(r.handlers.get('popstate')).toBeUndefined();
+    // ⚠ D4 の DOMContentLoaded だけは変わらず 1 本
+    expect(r.handlers.get('DOMContentLoaded')).toHaveLength(1);
+  });
+
+  it('修飾キー付き / 左以外のボタン / 断片でないリンク / <a> の外 は触らない', () => {
+    const r = rig('null');
+    const a = anchor('#4-4-ヘルプ');
+    expect(click(r, a, { ctrlKey: true })).toBe(false);
+    expect(click(r, a, { metaKey: true })).toBe(false);
+    expect(click(r, a, { shiftKey: true })).toBe(false);
+    expect(click(r, a, { altKey: true })).toBe(false);
+    expect(click(r, a, { button: 1 })).toBe(false);
+    expect(click(r, a, { defaultPrevented: true })).toBe(false);
+    expect(click(r, anchor('https://example.test/'))).toBe(false);
+    expect(click(r, document.createElement('div'))).toBe(false);
+    expect(r.pushed).toEqual([]);
+    expect(r.landed).toEqual([]);
+  });
+
+  it('戻る / 進む(popstate)でも、URL の断片の見出しへ送る', () => {
+    const r = rig('null');
+    expect(r.handlers.get('popstate'), 'popstate の handler が 1 本でない').toHaveLength(1);
+    r.loc.hash = `#${encodeURIComponent('m-3')}`;
+    for (const fn of r.handlers.get('popstate')!) fn();
+    expect(r.landed).toEqual(['m-3']);
+  });
+
+  it('pushState が投げても、見出しへは送る(断片の記録と送りは独立)', () => {
+    const r = rig('null', () => {
+      throw new Error('SecurityError');
+    });
+    const a = anchor('#4-4-ヘルプ');
+    expect(click(r, a)).toBe(true);
+    expect(r.landed).toEqual(['4-4-ヘルプ']);
+  });
+
+  it('無い id の <a> は既定だけ止める(落ちない・どこへも送らない)', () => {
+    const r = rig('null');
+    expect(click(r, anchor('#無い節'))).toBe(true);
+    expect(r.pushed).toEqual(['#無い節']);
+    expect(r.landed).toEqual([]);
   });
 });
 
@@ -305,5 +532,78 @@ describe('焼いたマニュアル — 1 枚で完結する', () => {
     expect(page.headings).toBeGreaterThan(100);
     // ⚠ 描画が空なら 0 ── build の門はこれを見る
     expect(bake({ html: '' }).headings).toBe(0);
+  });
+});
+
+/**
+ * 🔴 **窓の字はアプリと同じ書体・大きさ・行間**(2026-09-04、#648 I6)。
+ *
+ * ⚠ 段②までは `system-ui` / 14px / 行間 UA 任せで、**同じ本文がヘルプ面と窓で別の見え方**
+ *   だった。期待値は **`app.css` の `body` 規則から読む**(実装と同じ綴りを test に写すと、
+ *   両方を同時に変えても緑のまま ── CLAUDE.md §1「期待値は別の観測から」)。
+ * 🔑 `body { … }` は**実行する行**で拾う(コメントを落としてから、最初の `body {` の
+ *   宣言ブロックを取る ── `html, body {` の選択子リストは `body {` に当たらない)。
+ */
+describe('焼いたマニュアル — 字はアプリと同じ(I6)', () => {
+  /** `app.css` の `body { … }` の宣言(コメントを落としてから拾う)。 */
+  const appBody = (): string => {
+    const code = APP.replace(/\/\*[\s\S]*?\*\//gu, '');
+    const m = /(?:^|\})\s*body\s*\{([^}]*)\}/u.exec(code);
+    if (!m) throw new Error('app.css に body の規則が無い(前提が崩れている)');
+    return m[1]!;
+  };
+  /** 窓の器の `body{…}` の宣言(圧縮した 1 行の CSS から)。 */
+  const chromeBody = (): string => {
+    const m = /(?:^|\})body\{([^}]*)\}/u.exec(MANUAL_CHROME_CSS);
+    if (!m) throw new Error('MANUAL_CHROME_CSS に body の規則が無い(前提が崩れている)');
+    return m[1]!;
+  };
+  const decl = (block: string, name: string): string | null => {
+    const m = new RegExp(`(?:^|;)\\s*${name}\\s*:\\s*([^;]+)`, 'u').exec(block);
+    return m ? m[1]!.trim().replace(/\s+/gu, '') : null;
+  };
+
+  it('🔴 大きさの既定が app.css の body と同じ(選んでいない人の窓がアプリと 1px も違わない)', () => {
+    const app = decl(appBody(), 'font-size');
+    const win = decl(chromeBody(), 'font-size');
+    expect(app, 'app.css の body に font-size が無い').not.toBeNull();
+    // 前提 ── どちらも設定の変数を通している(片方だけ直書きなら「同じ」は偶然)
+    expect(app).toMatch(/^var\(--pkc-text-size,/u);
+    expect(win).toBe(app);
+    // 空振り防止 ── 既定は表の「標準」であり、段②の 14px ではない
+    expect(win).toContain(textScaleSpec('standard').size);
+    expect(win).not.toContain('14px');
+  });
+
+  it('🔴 行間が app.css の body と同じ', () => {
+    const app = decl(appBody(), 'line-height');
+    expect(app, 'app.css の body に line-height が無い').not.toBeNull();
+    expect(decl(chromeBody(), 'line-height')).toBe(app);
+  });
+
+  it('🔴 書体は同じトークン(--font)を読み、焼いた page にそのトークンが在る', () => {
+    const app = decl(appBody(), 'font-family');
+    expect(app).toBe('var(--font)');
+    expect(decl(chromeBody(), 'font-family'), '窓が --font を読んでいない').toMatch(/^var\(--font,/u);
+    // 🔑 「読む」だけでは足りない ── 焼いた page に定義が届いている(無ければ fallback へ落ちる)
+    expect(bake().html, '焼いた page に --font の定義が無い(system-ui へ落ちる)').toMatch(
+      /--font:/u,
+    );
+  });
+});
+
+/**
+ * 🔴 **窓の題名は他の窓と同じ並び**(2026-09-04、#648 I4)。
+ * ⚠ 段②までは「PKC3 マニュアル」── タスクバーに「2 ペインで整理 — PKC3」と並んだとき
+ *   この窓だけ頭が PKC3 で、名前で探す目が止まらなかった。
+ * 🔑 期待値は**形の正本**(`deep-link.ts` の `windowTitleFor`)と**タイルの字**から組む
+ *   ── 題名の綴りを test に写さない(片方だけ変えても緑、を作らない)。
+ */
+describe('マニュアルの窓 — 題名の並び(I4)', () => {
+  it('🔴 「<タイルの字> — PKC3」── 他の窓と同じ形で、タイルの字と揃っている', () => {
+    expect(MANUAL_WINDOW_TITLE).toBe(windowTitleFor('PKC3', manualTile().title));
+    // 空振り防止 ── 旧い並び(頭が PKC3)ではない
+    expect(MANUAL_WINDOW_TITLE).not.toMatch(/^PKC3/u);
+    expect(manualTile().title, 'タイルの字が空(空振り)').not.toBe('');
   });
 });

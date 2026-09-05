@@ -23,7 +23,9 @@ import { buildShell } from '../../src/adapter/ui/render/shell';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
 import { AppendBoxRenderer } from '../../src/adapter/ui/render/append-box';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
+import { appPanes } from '../../src/adapter/ui/render/pane-visibility';
 import { stubRevisionOps } from '../helpers/revision-stub';
+import { answerDialog, dialogMessage } from './dialog-helper';
 
 function meta(lid: string, archetype: string): EntryMeta {
   return {
@@ -414,5 +416,80 @@ describe('🔴 打ちかけの追記(user 目線レビュー U-1)', () => {
     s.d.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
     await tick();
     expect(draft(s), '隠れている間に移ったのに持ち越された').toBe('');
+  });
+});
+
+/**
+ * 🔴 **追記欄を畳んでいても、書込が返らないときの最後の出口(強制解放)は押せる所に出る**
+ * (#609。user 裁定 2026-09-04)。
+ *
+ * ## 物語
+ *
+ * 追記を送った直後に「閲覧に戻ろう」と帯を押して欄を畳む(または `Alt+\`)。
+ * その書込が返ってこない ── 畳む規則は器ごと `display: none` にするので、帯の中の
+ * 「強制解放」も一緒に消えると、**追記できない状態から抜ける口が 0 になる**
+ * (#609 の「畳むと入口が 0 になる操作」の 1 つ。⚠ 強制解放には鍵もパレットの行も
+ * 無いので、この帯が**唯一の入口**である)。⚠ 同じ `writing` はタイル設定の書込
+ * (`tileWrite`)でも立つので、追記欄を 1 度も触っていない人にも起きる。
+ *
+ * ## 何を見るか
+ *
+ * いまこれが成り立っているのは #655 ④ の CSS(`append-lock` が `hidden` でなければ
+ * 畳んでいても器を出す)のおかげで、その規則の**条件**を満たすのは描画器の側である。
+ * 規則そのものは `pane-visibility.test.ts` が pin するので、ここでは
+ * ①書込中に条件が立つこと(帯と強制解放が `hidden` でない)②畳みの記録は動かない
+ * (`hidden-panes` に `append` が残る)③押した先が同じ action で、打った字が残ること、
+ * を実 UI で見る。⚠ happy-dom は `:has()` を正しく評価しない(`hidden` でも一致する
+ * ── 実測)ので、規則を `matches` で当てずに条件の部品を見る。
+ * ⚠ 対照群 ── 普通(`ready`)のときは帯が `hidden` なので条件は立たず、畳んだままである
+ *   (これが無いと「帯を常に出す」変異と区別がつかない)。
+ */
+describe('🔴 畳んでいても最後の出口は消えない(#609)', () => {
+  it('🔴 追記欄を畳んだまま書込が返らないとき、強制解放が出る条件が立ち、押すと同じ action が飛ぶ', async () => {
+    const s = setup([meta('log', 'textlog')], { log: '元' });
+    // ⚠ `toggle-pane` は `closest('[data-pkc-slot="root"]')` で器を探す ── 無いと
+    //    `document.body` に落ち、**前の it が残した別の shell** に属性を書く
+    s.root.setAttribute('data-pkc-slot', 'root');
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log' });
+    await tick();
+    const shell = s.q('[data-pkc-region="shell"]')!;
+    const lockBar = s.q('[data-pkc-field="append-lock"]')!;
+    const grip = s.q<HTMLButtonElement>('[data-pkc-action="toggle-pane"][data-pkc-pane="append"]')!;
+    try {
+      // 送る → 書込が飛んだまま返らない
+      s.hold();
+      type(s.q, '追記');
+      s.q('[data-pkc-action="append-entry"]')!.click();
+      await tick();
+      expect(s.d.getState().writeLock?.lid, '前提: 書込中になっていない').toBe('log');
+
+      // その間に帯を押して畳む(実 UI と同じ口)
+      grip.click();
+      expect(shell.getAttribute('data-pkc-hidden-panes'), '前提: 畳めていない').toBe('append');
+
+      // ① 条件が立つ ── 帯も強制解放も `hidden` でない(CSS が器を出す)
+      expect(lockBar.hidden, '書込中なのに出口の帯が hidden').toBe(false);
+      const release = s.q<HTMLButtonElement>('[data-pkc-action="force-release"]')!;
+      expect(release.hidden, '書込中なのに強制解放が hidden').toBe(false);
+      // ⚠ 帯の**中**に在ること ── 外へ出すと CSS の条件(帯が出ている)と器が別物になる
+      expect(release.closest('[data-pkc-field="append-lock"]')).toBe(lockBar);
+      // ② 畳みの記録は動いていない(黙って開いて済ませる形にしない)
+      expect(appPanes.getHidden()).toEqual(['append']);
+
+      // ③ 押す → 確認 → 同じ action(`FORCE_RELEASE_LOCK`)で解ける。打った字は残る
+      release.click();
+      expect(dialogMessage()).toContain('強制的に打ち切ります');
+      await answerDialog('ok');
+      await tick();
+      expect(s.d.getState().writeLock, '強制解放が届いていない').toBeNull();
+      expect(s.q<HTMLTextAreaElement>('[data-pkc-field="append-input"]')!.value).toBe('追記');
+
+      // 対照群 ── 解けて `ready` に戻ったら帯は hidden(条件は立たず、畳んだまま)
+      expect(lockBar.hidden, 'ready なのに帯が出ている(常に出す形になっている)').toBe(true);
+      expect(shell.getAttribute('data-pkc-hidden-panes')).toBe('append');
+    } finally {
+      // ⚠ `appPanes` は file 内で共有 ── 畳みを残すと後の it が別の理由で落ちる
+      appPanes.setHidden([]);
+    }
   });
 });

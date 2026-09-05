@@ -29,6 +29,8 @@ type Input = {
   sidecarFloorKb?: number;
   /** 焼いたマニュアル(`manual.html`)の下限(#645 段②)。⚠ 渡さなければ鳴る。 */
   manualFloorKb?: number;
+  /** 焼きたての product で `manual.html` の実在を要求する(#648 💭)。 */
+  requireManual?: boolean;
   files: File[];
   text: Map<string, string>;
 };
@@ -336,6 +338,29 @@ describe('🔴 焼いたマニュアル(manual.html)── 届いたかを出力
 
   it('⚠ product は無くても鳴らない(過去に release した zip も検品するため)', () => {
     expect(run(without('product'))).toEqual([]);
+  });
+
+  /**
+   * 🔴 **焼きたての product では在ることを要求する**(#648 💭)。
+   * ⚠ これが無いと、plugin が外れた版を**そのまま release できた** ── dev の検品は
+   *   PR gate で鳴るが、product は別成果物で、鳴る計器が 1 つも無かった。
+   * 🔑 どの門が鳴ったかを文言で見る(「無い」の門であって、下限や precache の門ではない)。
+   */
+  it('🔴 product でも --require-manual なら、無ければ鳴る(焼きたての release / nightly)', () => {
+    const i = without('product');
+    i.requireManual = true;
+    const out = run(i).join('\n');
+    expect(out).toContain(`焼きたての product なのに dist に ${MANUAL} が無い`);
+    // 対照群 ── 在れば鳴らない(要求そのものが「在ること」を見ている)
+    const ok = healthy('product');
+    ok.requireManual = true;
+    expect(run(ok)).toEqual([]);
+  });
+
+  it('dev は要求の有無に依らず、無ければ鳴る(dev の門は前からある)', () => {
+    const i = without('dev');
+    i.requireManual = true;
+    expect(run(i).join('\n')).toContain(`dist に ${MANUAL} が無い`);
   });
 
   it('🔴 在るが下限を割ったら鳴る(描画が空振りした page)', () => {

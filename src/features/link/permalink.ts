@@ -337,6 +337,21 @@ function hashParams(raw: string): URLSearchParams | null {
 }
 
 /**
+ * 🔴 **本文の見出しへの飛び先か**(`#<id>`。#693、2026-09-04)。
+ *
+ * ⚠ 目次(`:::toc`)と脚注のリンクは素の `<a href="#…">` なので、押すと
+ * ブラウザが**断片を丸ごと入れ替える** ── `#pkc?container=…&entry=…` が
+ * `#midashi-1` になる。それを「PKC の断片が消えた」と読む側と、
+ * 「見出しへ飛んだだけ」と読む側を分けるための判定である。
+ * 🔑 **`#pkc?` を持たない、空でない断片**が見出しの飛び先である
+ * (`#` だけの断片は「消した」であって飛び先ではない)。
+ */
+export function isHeadingAnchor(raw: string): boolean {
+  if (typeof raw !== 'string') return false;
+  return raw.length > 1 && raw.startsWith('#') && !raw.includes(PKC_FRAGMENT_PREFIX);
+}
+
+/**
  * 🔴 **どのノートを見ていたか**(#300 段③ の直し、2026-08-22)。
  *
  * ⚠ 直す前は、別窓のカレンダーが **`selectedLid === null` で立ち上がっていた** ──

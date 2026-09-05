@@ -850,19 +850,16 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
-    ['2026-09-04-note-window', '414d41ba'],
-    ['2026-09-04-address-follows-note', '0b1c4653'],
-    ['2026-09-04-phone-dual-one', 'e7b26a8e'],
-    ['2026-09-03-phone-manual', '11e3d308'],
-    ['2026-09-03-phone-narrow', '1fbb2b81'],
-    ['2026-09-03-touch-devices', '6c59976f'],
-    ['2026-09-02-attach-into-note', '746c7136'],
-    // ⚠ 着地前レビューで 2 行直した(まだ 1 度も配っていないので、字を直してよい)──
-    //   ①「⋯」は PC に無いので「スマホでは」を足した ②「添付は単独の添付が出来ていた」は
-    //   **いまも出来る**(`attach.ts` は本文に入れない)ので、事実へ書き直した
-    ['2026-09-02-phone-return', '02db51b2'],
-    ['2026-09-02-phone-layout', '9a7ce84e'],
-    ['2026-09-02-stack-bar', 'b34b851c'],
+    ['2026-09-05-note-window-polish', '431fe10e'],
+    ['2026-09-05-apps-in-windows', '2b5dc69f'],
+    ['2026-09-05-phone-dual-polish', '8815c548'],
+    ['2026-09-05-attach-polish', '52c8e543'],
+    ['2026-09-05-blocks-and-boards', 'cec7cdf8'],
+    ['2026-09-05-manual-window-polish', '26cabf2f'],
+    ['2026-09-05-office-macros-keep', 'c4dd292d'],
+    ['2026-09-05-diagram-picker', '3b467985'],
+    ['2026-09-05-append-refold-and-tags', 'bb24b81b'],
+    ['2026-09-05-copy-wording', '99b02b17'],
     // ⚠ 落とした entry の注記(訂正の経緯)は CHANGELOG と git の履歴に在る ── ここには残さない
   ];
 

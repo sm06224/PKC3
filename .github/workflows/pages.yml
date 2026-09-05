@@ -102,6 +102,8 @@ jobs:
             # (round-3 review M-2)── `SHIPPED_FLOOR_KB` を上げる等の「製品が
             # 育てば当然起きる変更」で、無傷の release に対して job が赤になり
             # `/dev/` の更新まで止まる。定数を動かすときはここを思い出すこと
+            # ⚠ `--require-manual` は**付けない**(#648 💭)── ここは過去の release の
+            #    zip で、段②より前の版に manual.html は無い(付けると v3.2.0 が落ちる)
             node scripts/check-dist.mjs product /tmp/product/site
             cp -r /tmp/product/site/. _site/
           fi

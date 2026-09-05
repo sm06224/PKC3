@@ -22,7 +22,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   MOVED_MESSAGE,
+  NOTE_OPEN_HERE_MESSAGE,
   announceOpenedWindow,
+  noteOpenElsewhereMessage,
   connectViewDeepLink,
   currentBaseUrl,
   openableViewNames,
@@ -60,6 +62,8 @@ function bench(hash: string) {
    *   #689 の物語そのものが、**この台では再現できなかった**
    *   ── stub を本物より**強く**作ると、実装の欠陥が台の側で消える。
    */
+  /** 住所を元へ戻した回数(#693)。 */
+  let restored = 0;
   const target: DeepLinkTarget & { hash: string } = {
     hash,
     clearHash: () => {
@@ -77,6 +81,11 @@ function bench(hash: string) {
      */
     setEntry: (containerId, lid) => {
       target.hash = setHashEntry(target.hash, containerId, lid);
+    },
+    /** 本物は `replaceState` で断片を丸ごと差し替える(#693)── ここも同じ意味論。 */
+    restoreHash: (h) => {
+      restored += 1;
+      target.hash = h;
     },
   };
   let failed: string | null = null;
@@ -125,6 +134,7 @@ function bench(hash: string) {
     failed: () => failed,
     off,
     cleared: () => cleared,
+    restored: () => restored,
     hash: () => target.hash,
     /** 面が変わったことにする(アプリ側の購読が呼ぶのと同じ)。 */
     viewBecomes: (v: ViewMode) => viewListener?.(v),
@@ -430,6 +440,7 @@ describe('起動時のディープリンク(#300 段②)', () => {
       clearHash: () => {},
       dropToken: () => {},
       setEntry: () => {},
+      restoreHash: () => {},
     });
     expect(readViewDeepLink(t('#pkc?view=help'))).toEqual({ view: 'help' });
     expect(readViewDeepLink(t('#pkc?view=zzz'))).toEqual({ unusable: true });
@@ -468,6 +479,7 @@ describe('起動時のディープリンク(#300 段②)', () => {
         clearHash: () => {},
         dropToken: () => {},
         setEntry: () => {},
+        restoreHash: () => {},
       },
     });
     expect(opened).toHaveBeenCalledTimes(1);
@@ -506,6 +518,7 @@ describe('引っ越した面の栞(#292 段⑤)', () => {
     clearHash: () => {},
     dropToken: () => {},
     setEntry: () => {},
+    restoreHash: () => {},
   });
 
   /**
@@ -627,6 +640,9 @@ describe('開いた窓の合図(#300 段③)', () => {
       setEntry: (containerId: string | null, lid: string) => {
         t.hash = setHashEntry(t.hash, containerId, lid);
       },
+      restoreHash: (h: string) => {
+        t.hash = h;
+      },
     };
     return t;
   }
@@ -722,6 +738,35 @@ describe('currentBaseUrl(#300 段③)', () => {
  *   何枚開いても全部「PKC3」だった。付箋は「何枚でも開けます」が売りなので、
  *   この欠陥は**枚数に比例して効く**。
  */
+/**
+ * 🔴 **2 枚目を止めたときの字に、どの窓かを添える**(#690 I3、2026-09-04)。
+ *
+ * ⚠ 直す前は「すでに別のウィンドウで開いています」だけ ── 小窓を何枚も並べている人は
+ *   タスクバーのどれを探せばよいか分からない。🔑 窓の題名(`windowTitleFor` の形)を
+ *   添えれば、**タスクバーに出ている字と同じ字**で探せる。
+ */
+describe('2 枚目を止めたときの字(#690 I3)', () => {
+  it('🔴 別の窓なら、その窓の題名を『題名 — PKC3』の形で添える', () => {
+    const m = noteOpenElsewhereMessage('PKC3', 'ふたつめ');
+    expect(m, '止めた理由が無い').toContain('すでに別のウィンドウで開いています');
+    expect(m, 'どの窓か(題名)が無い').toContain('『ふたつめ — PKC3』');
+    // ⚠ 形は `windowTitleFor` と同じ(タスクバーの字でそのまま探せる)
+    expect(m).toContain(`『${windowTitleFor('PKC3', 'ふたつめ')}』`);
+  });
+
+  it('⚠ 題名の無いノートでは器の名前だけ(頭の欠けた字を出さない)', () => {
+    expect(noteOpenElsewhereMessage('PKC3', null)).toContain('『PKC3』');
+    expect(noteOpenElsewhereMessage('PKC3', '  ')).toContain('『PKC3』');
+    expect(noteOpenElsewhereMessage('PKC3', null), '頭の欠けた字').not.toContain('『 — ');
+  });
+
+  /** ⚠ 対照群 ── いま見ている窓がそれなら、探す相手が居ないので題名は添えない。 */
+  it('⚠ いま見ているこのウィンドウの字は題名を添えない', () => {
+    expect(NOTE_OPEN_HERE_MESSAGE).toBe('このノートは、いま見ているこのウィンドウで開いています');
+    expect(NOTE_OPEN_HERE_MESSAGE).not.toContain('『');
+  });
+});
+
 describe('窓の題名(#685 着地前レビュー ⚠3)', () => {
   it('🔴 名前があれば「名前 — PKC3」', () => {
     expect(windowTitleFor('PKC3', '買い物メモ')).toBe('買い物メモ — PKC3');
@@ -912,5 +957,118 @@ describe('住所の追随(#689 案 B)', () => {
     b.off();
     b.selectBecomes('e2');
     expect(b.hash(), '解いた後も住所を書き換えた').toBe('#pkc?container=c1&entry=e1');
+  });
+});
+
+/**
+ * 🔴 **目次・脚注で飛んでも、付箋の住所と身元を残す**(#693 案 A、2026-09-04)。
+ *
+ * ## 物語
+ *
+ * 付箋(`#pkc?container=…&entry=…` で開いた窓)で `:::toc` の見出しや脚注の数字を
+ * 押す。目次・脚注のリンクは素の `<a href="#…">` なので、ブラウザが断片を
+ * **`#midashi-1` に丸ごと入れ替える** → `hashchange`。
+ * ⚠ 直す前はここで `apply` が「ノートを名指していない」と読んで
+ * `holdEntry(false)` を撃ち、**題名が「PKC3」に戻る / 「複数タブ」の帯が復活する /
+ * 同じノートの 2 枚目が開く / `F5` でノートが出ない / 住所の追随が止まる**が
+ * 1 度の押下で全部起きていた。
+ *
+ * 🔑 直した後:飛びはそのまま、**飛んだ後で住所だけ元へ戻し、旗は降ろさない**。
+ * ⚠ 本体の窓(付箋でない)では今までどおり(見出し id のアンカー #658 を壊さない)。
+ */
+describe('目次・脚注で飛んでも住所と身元を残す(#693 案 A)', () => {
+  it('🔴 付箋で見出しへ飛んでも、旗は降りず住所は元へ戻る', () => {
+    const b = bench('#pkc?container=c1&entry=e1');
+    expect(b.noteHolds, '前提が崩れた(付箋の旗が立っていない)').toEqual([true]);
+    b.hashBecomes('#midashi-1');
+    expect(b.noteHolds, '見出しへ飛んだだけで付箋の旗が降りた(題名と帯が壊れる)').toEqual([true]);
+    expect(b.hash(), '住所が見出し id のまま(F5 でノートが出ない)').toBe(
+      '#pkc?container=c1&entry=e1',
+    );
+    expect(b.restored(), '戻す口を通っていない(別の理由で住所が合っている)').toBe(1);
+    // ⚠ 飛びの後に `apply` を通していない ── 通すと選び直しが走る(#685 M4 の対照群と同じ)
+    expect(b.actions, '見出しへ飛んだだけでノートを選び直した').toEqual(['select:e1']);
+  });
+
+  /**
+   * 🔴 **戻す先は「いま見ているノート」**(#689 の追随と繋がっていること)。
+   * ⚠ 開いたときの住所を戻すと、ノートを移った後の飛びで**最初のノート**へ
+   *   住所が巻き戻る ── `F5` が 30 分前のノートへ戻る #689 の再来になる。
+   */
+  it('🔴 ノートを移った後に飛んだら、戻る先は移った先の住所', () => {
+    const b = bench('#pkc?container=c1&entry=e1');
+    b.selectBecomes('e2');
+    expect(b.hash(), '前提が崩れた(追随していない)').toBe('#pkc?container=c1&entry=e2');
+    b.hashBecomes('#midashi-1');
+    expect(b.hash(), '最初のノートの住所へ巻き戻った').toBe('#pkc?container=c1&entry=e2');
+    expect(b.noteHolds).toEqual([true]);
+  });
+
+  /** ⚠ 2 度目・3 度目も同じ(1 回だけ戻して固まる変異を殺す)。 */
+  it('⚠ 何度飛んでも毎回戻る', () => {
+    const b = bench('#pkc?container=c1&entry=e1');
+    b.hashBecomes('#midashi-1');
+    b.hashBecomes('#midashi-2');
+    b.hashBecomes('#fn-1');
+    expect(b.restored(), '2 回目から戻らなくなった').toBe(3);
+    expect(b.hash()).toBe('#pkc?container=c1&entry=e1');
+    expect(b.noteHolds).toEqual([true]);
+  });
+
+  /**
+   * ⚠ **対照群 1** ── 付箋でない窓(断片の無い本体のタブ)では今までどおり。
+   *   見出し id のアンカーリンク(#658)を壊さない ── 住所は `#midashi-1` のまま。
+   */
+  it('⚠ 本体の窓では住所を触らない(見出しのアンカーは今までどおり)', () => {
+    const b = bench('');
+    b.hashBecomes('#midashi-1');
+    expect(b.hash(), '付箋でないのに住所を書き換えた').toBe('#midashi-1');
+    expect(b.restored()).toBe(0);
+    expect(b.noteHolds, '素の窓で付箋の旗が動いた').toEqual([]);
+  });
+
+  /**
+   * ⚠ **対照群 2** ── PKC の断片へ書き換わったときは、今までどおり `apply` を通す
+   *   (面を指し直せば旗が倒れる ── 「付箋の旗」の describe と同じ主張)。
+   *   ⚠ ここを「戻す」に巻き込むと、**面へ移る正しい書き換えまで巻き戻す**。
+   */
+  it('⚠ 面を指す断片へ書き換わったら、戻さずに面へ移る', () => {
+    const b = bench('#pkc?container=c1&entry=e1');
+    b.hashBecomes('#pkc?view=dual');
+    expect(b.restored(), '面への書き換えを巻き戻した').toBe(0);
+    expect(b.noteHolds, '面を指したのに付箋の旗が立ったまま').toEqual([true, false]);
+    expect(b.actions).toEqual(['select:e1', 'open:dual']);
+  });
+
+  /**
+   * ⚠ **対照群 3** ── 旗が倒れた後(面を指し直した後)の飛びは戻さない。
+   *   戻す先は控えてあるが、**もう付箋ではない**(#685 の「面を指す断片へ書き換わると
+   *   付箋の旗が倒れる」)。⚠ この 1 件が無いと、`heldEntry` の門を外す変異が生き延びる
+   *   (2026-09-04 の変異試験 M1 で実測 ── 本体の窓は `entryHash === null` に救われていた)。
+   */
+  it('⚠ 付箋でなくなった後の飛びは戻さない(旗が倒れたら住所も握らない)', () => {
+    const b = bench('#pkc?container=c1&entry=e1');
+    b.hashBecomes('#pkc?view=dual');
+    expect(b.noteHolds, '前提が崩れた(面を指しても旗が倒れていない)').toEqual([true, false]);
+    b.hashBecomes('#midashi-1');
+    expect(b.hash(), '付箋でなくなった窓で古い住所へ巻き戻した').toBe('#midashi-1');
+    expect(b.restored()).toBe(0);
+  });
+
+  /** ⚠ 空の断片(user が消した)は「飛び先」ではないので、戻さず今までどおり旗が倒れる。 */
+  it('⚠ 断片を空にしたら戻さない(飛びではなく「消した」)', () => {
+    const b = bench('#pkc?container=c1&entry=e1');
+    b.hashBecomes('');
+    expect(b.restored()).toBe(0);
+    expect(b.noteHolds).toEqual([true, false]);
+  });
+
+  /** ⚠ 配線を解いた後の `hashchange` は誰も受けない(閉じたタブが住所を書かない)。 */
+  it('⚠ 配線を解いたら戻さない', () => {
+    const b = bench('#pkc?container=c1&entry=e1');
+    b.off();
+    b.hashBecomes('#midashi-1');
+    expect(b.hash()).toBe('#midashi-1');
+    expect(b.restored()).toBe(0);
   });
 });

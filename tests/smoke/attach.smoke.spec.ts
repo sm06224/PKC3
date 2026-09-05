@@ -71,10 +71,55 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
   await expect(
     page.locator('[data-pkc-region="status"]'),
     '入れたことを言っていない',
-  ).toContainText('「ねこ.png」を本文に入れました');
+  ).toContainText('「ねこ.png」を本文のいちばん下に入れました');
 
   // ⚠ 対照群 ── 添付そのものは 1 件できている(ノートと合わせて 2 行)
   await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(2);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **編集中に添付しても断らず、預かって、編集を終えると本文に入る**(#668 B)。
+ *
+ * ⚠ 直す前は「編集を終了してから添付してください」と断り、user はファイルを
+ *   選び直すことになった。録音・画面録画は編集中に終わっても預かるのに、隣の
+ *   「添付」だけが断っていた。
+ * 🔑 見るのは user が見る所 ── 押した直後の帯(預かりました)と、編集を終えた後の
+ *   本文(絵が描かれている)。⚠ 預かりの仕掛けは unit(`attach-intake.test.ts` の B)
+ *   が見るが、**編集を終える操作 → 錠が解けて流れる**は実物の効果層でしか通らない。
+ */
+test('🔴 編集中に添付しても断らず、編集を終えると本文に入る (#668 B)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('会議メモ');
+  const ta = page.locator('[data-pkc-field="editor-body"]');
+  await expect(ta).toBeVisible();
+  await ta.click();
+  await page.keyboard.type('# 会議メモ');
+
+  // ⚠ **編集中のまま**添付を渡す(ここで断られるのが直す前の症状)
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: 'ねこ.png',
+    mimeType: 'image/png',
+    buffer: PNG_1X1,
+  });
+  const status = page.locator('[data-pkc-region="status"]');
+  await expect(status, '預かったことを言っていない').toContainText('「ねこ.png」を預かりました');
+  await expect(status, '断っている(直す前の症状)').not.toContainText('編集を終了してから');
+  // 預かっている間、打っていた本文は無傷
+  await expect(ta).toHaveValue('# 会議メモ');
+
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  // 編集を終えると、そのノートは開いたままで、本文に絵が入る
+  await expect(
+    page.locator('[data-pkc-field="detail-title"]').first(),
+    '画面が添付へ移った',
+  ).toHaveText('会議メモ', { timeout: 15_000 });
+  await expectImageRendered(page, '[data-pkc-region="detail"] img[data-pkc-asset-key]');
+  await expect(status, '入れたことを言っていない').toContainText('「ねこ.png」を本文のいちばん下に入れました');
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

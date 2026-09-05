@@ -72,6 +72,8 @@ function stateOf(metas: EntryMeta[], over: Partial<AppState> = {}): AppState {
     // #505 段②: 横に並べた枠。⚠ 上と同じ理由で**明示で置く**(読む面が毎回読む)
     splitLids: [],
     splitBodies: new Map<string, string>(),
+    // #640 案 A: 入らなかったタグ。⚠ 上と同じ理由で**明示で置く**(帯の描画が毎回読む)
+    refusedTags: { 'smart-cond': [], 'bulk-tag': [] },
     ...over,
   } as unknown as AppState;
 }

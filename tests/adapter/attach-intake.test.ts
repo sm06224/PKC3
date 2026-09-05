@@ -8,6 +8,7 @@ import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { attachFiles, resolveMime, type AttachDeps } from '../../src/adapter/ui/actions/attach';
 import { readAttachmentMeta } from '../../src/features/flavor/attachment-flavor';
+import { removeInsertedLines } from '../../src/features/markdown/append-target';
 import { stubRevisionOps } from '../helpers/revision-stub';
 
 /** ⚠ 実物の効果層を差し替える口(遅い `getBody` で錠を握らせる等)。 */
@@ -260,7 +261,7 @@ describe('添付を開いていたノートへ入れる(#666)', () => {
     );
     await tick();
     expect(h.d.getState().notice ?? '', '事情が消えている').toBe(
-      '編集欄が閉じたため、打っていた所へは差せませんでした。「x.png」を本文に入れました',
+      '編集欄が閉じたため、打っていた所へは差せませんでした。「x.png」を本文のいちばん下に入れました',
     );
   });
 
@@ -287,7 +288,222 @@ describe('添付を開いていたノートへ入れる(#666)', () => {
 
     expect(appendsSeen, '追記できない種類なのに本文へ書いた').toHaveLength(0);
     expect(h.d.getState().selectedLid, '開いていた添付へ戻っていない').toBe(first);
-    expect(h.d.getState().notice ?? '', '黙って終わっている').toContain('追記できない種類');
+    // ⚠ #668 A で字が変わった ── 「追記できない種類」ではなく、開いている物の種類を名指す
+    expect(h.d.getState().notice ?? '', '黙って終わっている').toContain('『添付』');
+  });
+
+  /**
+   * 🔴 **A: 入れられない回は、何を開いているか・何なら入るかを言い、「開く」を添える**
+   *   (#668 A。PR #667 の着地前レビュー)。
+   *
+   * ## 直す前に何が起きていたか
+   *
+   * 「追記できない種類なので本文には入れていません」── user は**開いている物の種類も、
+   * どれなら入るのかも、作られた添付がどこへ行ったのかも**読めなかった。
+   * 一覧は絞りで隠れていることがある(#668 D で添付の作成は絞りを外さなくなった)ので、
+   * 作られた物へ行く道が**画面のどこにも無い**。
+   *
+   * ## この it が守る主張
+   *
+   * ① 字に**開いている物の種類**(『フォルダ』)と**入れられる種類**(ノートとログ)が出る
+   * ② 🔴 **「開く」の身元**(`noticeOpen`)が**作られた添付**を指す ── 押すとそれが選ばれる
+   * ③ 対照群 ── 本文へ入れられた回は身元を添えない(押す口を出さない)
+   */
+  it('🔴 A 入れられない種類なら、種類の名前と入れられる種類を言い、「開く」の身元を添える(#668)', async () => {
+    const h = harness();
+    h.d.dispatch({ type: 'CREATE_ENTRY', archetype: 'folder', lid: 'f1', title: '資料', edit: false });
+    expect(h.d.getState().selectedLid, '台の前提: フォルダが開いていない').toBe('f1');
+    appendsSeen.length = 0;
+    await attachFiles(h.d, h.deps, [new File(['pdf'], '見積.pdf', { type: 'application/pdf' })]);
+    await tick();
+
+    const st = h.d.getState();
+    expect(appendsSeen, 'フォルダの本文へ書いた').toHaveLength(0);
+    // ① 字 ── 種類の名前は `archetypeLabel`、入れられる種類は `appendableKindsLabel` から来る
+    expect(st.notice).toBe(
+      '「見積.pdf」を添付にしました(開いているのは『フォルダ』なので、本文には入れていません。本文に入れられるのはノートとログだけです)',
+    );
+    // ② 身元 ── 作られた添付を指し、押すと選ばれる
+    const attached = [...st.entryMetas.values()].find((m) => m.archetype === 'attachment');
+    expect(attached, '添付が作られていない(台の前提が崩れた)').toBeDefined();
+    expect(st.noticeOpen, '「開く」の身元が添えられていない').toBe(attached!.lid);
+    expect(st.selectedLid, '開いていたフォルダへ戻っていない').toBe('f1');
+    h.d.dispatch({ type: 'SELECT_ENTRY', lid: st.noticeOpen! });
+    expect(h.d.getState().selectedLid, '「開く」の身元を押しても添付が開かない').toBe(attached!.lid);
+  });
+
+  /**
+   * 🔴 **C: まとめて入れた回は「元に戻す」1 回でまとめて戻る**(#668 C)。
+   *
+   * ⚠ 直す前は `lastAppend` が**最後の 1 本**しか持たなかった ── 3 枚落として
+   *   「元に戻す」を押すと 3 枚目だけ消え、残り 2 枚は本文を開いて消すしかない
+   *   (user がやったことは 1 回なのに、戻すのは 1/3)。
+   * 🔑 台は **`getBody` が育つ**形にする ── 本物の worker と同じく、前の追記が
+   *   済んだ本文を次の追記の基底にする。固定の基底では 3 本の `inserted` が
+   *   全部同じ場所を指し、「継いだ行を 1 手で消せる」は**見られない**。
+   *
+   * 観測点は 2 つ:
+   * ① `removeInsertedLines(最終の本文, lastAppend.lines)` が**元の本文**へ戻る
+   *    (= 3 行が連続した 1 手として持たれている)
+   * ② 🔴 `UNDO_APPEND` を撃つと、実物の効果層が**元の本文を書き戻す**
+   */
+  function growingNote() {
+    let persistedRef: Array<{ lid: string; body: string }> = [];
+    const h = withOpenNote({
+      getBody: async () => {
+        await new Promise((r) => setTimeout(r, 20));
+        return persistedRef.filter((p) => p.lid === 'n1').at(-1)?.body ?? '# 買い物メモ';
+      },
+    });
+    persistedRef = h.persisted;
+    const bodyNow = (): string => h.persisted.filter((p) => p.lid === 'n1').at(-1)?.body ?? '';
+    return { h, bodyNow };
+  }
+
+  it('🔴 C 3 枚まとめて入れたら、「元に戻す」1 回で 3 行とも消える(#668)', async () => {
+    const { h, bodyNow } = growingNote();
+    appendsSeen.length = 0;
+    await attachFiles(h.d, h.deps, [
+      new File(['1'], 'a.png', { type: 'image/png' }),
+      new File(['2'], 'b.png', { type: 'image/png' }),
+      new File(['3'], 'c.png', { type: 'image/png' }),
+    ]);
+    await new Promise((r) => setTimeout(r, 400));
+
+    // 前提 ── 3 本とも本文に入っている(台が育っていなければここで止まる)
+    const full = bodyNow();
+    for (const n of ['a.png', 'b.png', 'c.png'])
+      expect(full, `前提が崩れた: ${n} が本文に無い`).toContain(`![${n}](asset:`);
+    const last = h.d.getState().lastAppend;
+    expect(last?.lid, '直前の追記が別のノートを指している').toBe('n1');
+    // ① 3 行が 1 手 ── 消すと元の本文へ戻る(最後の 1 枚しか持っていなければ 2 行残る)
+    expect(removeInsertedLines(full, last!.lines), '3 行が 1 手になっていない').toBe(
+      '# 買い物メモ',
+    );
+
+    // ② 実物の効果層で戻す ── user が「元に戻す」を押したのと同じ
+    h.d.dispatch({ type: 'UNDO_APPEND' });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(bodyNow(), '「元に戻す」で 3 行とも消えていない').toBe('# 買い物メモ');
+    expect(h.d.getState().lastAppend, '1 手で使い切っていない').toBeNull();
+  });
+
+  it('⚠ C 対照群 ── 1 枚なら、その 1 行だけが 1 手', async () => {
+    const { h, bodyNow } = growingNote();
+    await attachFiles(h.d, h.deps, [new File(['1'], 'solo.png', { type: 'image/png' })]);
+    await new Promise((r) => setTimeout(r, 200));
+    const last = h.d.getState().lastAppend;
+    expect(last?.lines.filter((l) => l.includes('](asset:')), '1 枚なのに複数の参照を持つ').toHaveLength(1);
+    expect(removeInsertedLines(bodyNow(), last!.lines)).toBe('# 買い物メモ');
+  });
+
+  /**
+   * ⚠ **C 対照群 ── 回の印が違えば継がない。** 間に手で足した追記(印なし)が入ると、
+   *   そこで手が切れる ── 「元に戻す」で、手で足した字だけが消える(写真まで巻き添えにしない)。
+   *   🔑 これが無いと「印を見ずに全部継ぐ」変異が素通りする。
+   */
+  it('⚠ C 対照群 ── 手で足した追記は、前の回に継がれない', async () => {
+    const { h, bodyNow } = growingNote();
+    await attachFiles(h.d, h.deps, [
+      new File(['1'], 'a.png', { type: 'image/png' }),
+      new File(['2'], 'b.png', { type: 'image/png' }),
+    ]);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(bodyNow(), '前提が崩れた').toContain('![b.png](asset:');
+    h.d.dispatch({ type: 'APPEND_TO_ENTRY', lid: 'n1', text: '手で足したメモ', heading: null, target: null });
+    await new Promise((r) => setTimeout(r, 200));
+    const last = h.d.getState().lastAppend;
+    expect(last?.lines.join('\n'), '手で足した追記が無い(前提が崩れた)').toContain('手で足したメモ');
+    expect(last?.lines.join('\n'), '前の回の写真まで 1 手に継がれている').not.toContain('](asset:');
+  });
+
+  /**
+   * 🔴 **E: まとめて入れた回は、件数で締める**(#668 E)。
+   *
+   * ⚠ 知らせの行は 1 本なので、3 枚落とすと user が最後に読むのは 3 枚目の 1 行だけ ──
+   *   1・2 枚目が入ったかは本文を見に行かないと分からなかった。
+   * 🔑 締めは**全部入ってから**(2 枚目以降は錠が解けるまで預かられる)── 台は
+   *   `growingNote`(錠が実際に立つ)で、最後の知らせが件数の 1 行であることを見る。
+   */
+  it('🔴 E 3 枚まとめて入れると、最後の知らせは件数で締まる(#668)', async () => {
+    const { h, bodyNow } = growingNote();
+    const notices: string[] = [];
+    h.d.onState(() => {
+      const n = h.d.getState().notice;
+      if (n !== null && notices[notices.length - 1] !== n) notices.push(n);
+    });
+    await attachFiles(h.d, h.deps, [
+      new File(['1'], 'a.png', { type: 'image/png' }),
+      new File(['2'], 'b.png', { type: 'image/png' }),
+      new File(['3'], 'c.png', { type: 'image/png' }),
+    ]);
+    await new Promise((r) => setTimeout(r, 400));
+    expect(bodyNow(), '前提が崩れた: 3 枚とも入っていない').toContain('![c.png](asset:');
+    expect(notices.at(-1), '件数で締まっていない').toBe('3 件を本文に入れました(c.png ほか)');
+    // ⚠ 1 枚ずつの知らせも出ている(締めが**上書き**した ── 黙らせたのではない)
+    expect(notices, '1 枚ずつの知らせが消えている').toContain('「a.png」を本文のいちばん下に入れました');
+  });
+
+  /**
+   * ⚠ **E 対照群 ── 数え終わる前に締めない。** 3 枚目のハッシュが遅く、その間に 1・2 枚目が
+   *   入り切ると、`put === expected === 2` の瞬間が輪の途中に来る ── そこで締めると
+   *   「2 件を本文に入れました」が先に出て、user は 3 枚目が落ちたと読む。
+   * 🔑 台は **`hashBlob` を 3 枚目だけ遅くし、`getBody` は速く**する(錠がすぐ解ける)。
+   */
+  it('⚠ E 対照群 ── 数え終わる前に途中の件数で締めない', async () => {
+    const h = withOpenNote();
+    const deps: AttachDeps = {
+      ...h.deps,
+      hashBlob: async (blob) => {
+        if (blob.size >= 3) await new Promise((r) => setTimeout(r, 80));
+        return null;
+      },
+    };
+    const notices: string[] = [];
+    h.d.onState(() => {
+      const n = h.d.getState().notice;
+      if (n !== null && notices[notices.length - 1] !== n) notices.push(n);
+    });
+    await attachFiles(h.d, deps, [
+      new File(['1'], 'a.png', { type: 'image/png' }),
+      new File(['2'], 'b.png', { type: 'image/png' }),
+      new File(['333'], 'c.png', { type: 'image/png' }),
+    ]);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(notices.at(-1), '前提が崩れた: 3 枚で締まっていない').toBe('3 件を本文に入れました(c.png ほか)');
+    expect(notices, '数え終わる前に 2 件で締めた').not.toContain('2 件を本文に入れました(b.png ほか)');
+  });
+
+  it('⚠ E 対照群 ── 1 枚なら件数で締めない(場所を言う 1 行のまま)', async () => {
+    const { h } = growingNote();
+    await attachFiles(h.d, h.deps, [new File(['1'], 'solo.png', { type: 'image/png' })]);
+    await new Promise((r) => setTimeout(r, 200));
+    expect(h.d.getState().notice).toBe('「solo.png」を本文のいちばん下に入れました');
+  });
+
+  /**
+   * ⚠ **E 対照群 ── 入れなかった物は数えない。** 入れられない種類を開いたまま 2 枚落とすと、
+   *   2 枚とも「添付にしました(…入れていません)」で、「2 件を本文に入れました」とは言わない。
+   */
+  it('⚠ E 対照群 ── 本文へ入れなかった回は件数で締めない', async () => {
+    const h = harness();
+    h.d.dispatch({ type: 'CREATE_ENTRY', archetype: 'folder', lid: 'f1', title: '資料', edit: false });
+    await attachFiles(h.d, h.deps, [
+      new File(['1'], 'a.pdf', { type: 'application/pdf' }),
+      new File(['2'], 'b.pdf', { type: 'application/pdf' }),
+    ]);
+    await tick();
+    expect(h.d.getState().notice ?? '', '入れていないのに件数で締めた').not.toContain('件を本文に入れました');
+    expect(h.d.getState().notice ?? '').toContain('「b.pdf」を添付にしました');
+  });
+
+  it('⚠ A 対照群 ── 本文へ入れられた回は「開く」の身元を添えない', async () => {
+    const h = withOpenNote();
+    appendsSeen.length = 0;
+    await attachFiles(h.d, h.deps, [new File(['x'], 'x.png', { type: 'image/png' })]);
+    await tick();
+    expect(appended(h.d), '前提: 本文へ入っていない').toHaveLength(1);
+    expect(h.d.getState().noticeOpen, '入れたのに「開く」を出している').toBeNull();
   });
 
   /** ⚠ ⑤ 対照群 ── 開いていなければ入れず、そのことを言う(黙って終わらない)。 */
@@ -349,20 +565,72 @@ describe('attachFiles (P4a intake)', () => {
     expect(d.getState().phase).toBe('ready'); // 非致命
   });
 
-  it('編集中(phase!==ready)は put 前に可視ブロック ── bytes も entry も作らない', async () => {
+  /**
+   * 🔴 **B: 編集中に添付しても断らず、預かって、編集を終えたら入る**(#668 B)。
+   *
+   * ⚠ 直す前(P4a review #1)は「編集を終了してから添付してください」と断っていた ──
+   *   この it はその test を**書き換えた**もの。守るものは 3 つ:
+   *   ① 編集中は **bytes を 1 バイトも書かない**(orphan asset を作らない ── 元の主張)
+   *   ② 🔴 **断らない**(`error` は立てず、「預かりました」と言う)
+   *   ③ 🔴 **編集を終えると、編集していたノートの本文に入る**(選択もそのノートのまま)
+   * 🔑 ①は直す前と同じ主張である ── 預かりは `run` ごと(台帳を引く前から)なので、
+   *   編集中に put が走る形にはならない。
+   */
+  it('🔴 B 編集中は断らず預かり、編集を終えると本文に入る(#668)', async () => {
     const { d, deps, putBlobs, metas } = harness();
     d.dispatch({ type: 'CREATE_ENTRY', archetype: 'text', lid: 'lid-editing', title: 'draft' });
     expect(d.getState().phase).toBe('editing');
+    appendsSeen.length = 0;
 
     await attachFiles(d, deps, [new File(['x'], 'late.txt', { type: 'text/plain' })]);
     await tick();
 
-    // put の前に止まる ── orphan asset(bytes だけ書かれ entry 黙殺)を作らない
+    // ① 預かっている間は bytes も entry も作らない(orphan asset を作らない)
     expect(putBlobs).toHaveLength(0);
     expect(metas).toHaveLength(0);
-    expect(d.getState().entryMetas.size).toBe(1); // draft entry のみ、添付 entry は増えない
-    expect(d.getState().error).toMatch(/編集を終了/); // 無言拒否にしない(可視)
+    expect(d.getState().entryMetas.size).toBe(1);
+    // ② 断らない ── 預かったことを言う
+    expect(d.getState().error, '断っている(直す前の症状)').toBeNull();
+    expect(d.getState().notice ?? '', '預かったことを言っていない').toBe(
+      '「late.txt」を預かりました(編集を終えたら本文に入れます)',
+    );
     expect(d.getState().phase).toBe('editing'); // draft は無傷
+
+    // ③ 編集を終えると入る ── 本文は変えていないので commit は書込を起こさず ready へ戻る
+    d.dispatch({ type: 'COMMIT_EDIT' });
+    expect(d.getState().phase, '台の前提: 編集が終わっていない').toBe('ready');
+    await tick();
+    await tick();
+    expect(putBlobs, '編集を終えても取り込まれない(預かりが捨てられた)').toHaveLength(1);
+    expect(d.getState().entryMetas.size, '添付が作られていない').toBe(2);
+    const lines = appendsSeen.filter((a) => a.lid === 'lid-editing').map((a) => a.text);
+    expect(lines, '編集していたノートの本文に入っていない').toHaveLength(1);
+    expect(lines[0]).toMatch(/^\[late\.txt\]\(asset:/);
+    expect(d.getState().selectedLid, '画面が添付へ移った').toBe('lid-editing');
+  });
+
+  /**
+   * ⚠ **B 対照群 ── 編集していなければ、約束は取込が済んでから解ける。**
+   * 🔑 `withAssetGate` は取込と整理(未参照 GC)を**この約束で**排他している ──
+   *   預かりを足すときに ready 側まで `void run()` にすると、bytes を書いている最中に
+   *   整理が走れる(tick を挟まずに見るのが要 ── 挟むと差が消える)。
+   */
+  it('⚠ B 対照群 ── 編集中でなければ、attachFiles は取込が済んでから返る', async () => {
+    const { d, deps, putBlobs } = harness();
+    await attachFiles(d, deps, [new File(['x'], 'now.txt', { type: 'text/plain' })]);
+    expect(putBlobs, '約束が bytes を書く前に解けている').toHaveLength(1);
+    expect(d.getState().entryMetas.size).toBe(1);
+  });
+
+  it('⚠ B 対照群 ── 2 件まとめて預かると件数で言う', async () => {
+    const { d, deps } = harness();
+    d.dispatch({ type: 'CREATE_ENTRY', archetype: 'text', lid: 'lid-editing', title: 'draft' });
+    await attachFiles(d, deps, [
+      new File(['1'], 'a.png', { type: 'image/png' }),
+      new File(['2'], 'b.png', { type: 'image/png' }),
+    ]);
+    await tick();
+    expect(d.getState().notice ?? '').toBe('2 件を預かりました(編集を終えたら本文に入れます)');
   });
 
   it('mime fallback: file.type 空は拡張子から解決(PKC2 の欠落 hack を作らない)', () => {
