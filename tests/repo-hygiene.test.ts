@@ -1091,6 +1091,9 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     // ⚠ 2026-09-05(#722 P2-13): `phone` に「390px の空の PKC で、一覧に『作る』と
     //    『取り込む』が出て押せる」**+1 件** ── 重ねた 3 面の前後関係(覆われていないか)は
     //    happy-dom では原理的に測れない
+    // ⚠ 2026-09-05(#722 P2-12): `touch` に「追記の欄に押せない鍵の名前が出ない」**+1 件**
+    //    ── `matchMedia('(hover: none) and (pointer: coarse)')` に本物のブラウザが
+    //    どう答えるかは、happy-dom では見えない(対照群はマウスの端末の既存 test に足した)
     expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(85);
     expect(
       counts.reduce((a, b) => a + b, 0),
