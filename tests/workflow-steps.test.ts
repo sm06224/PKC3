@@ -182,12 +182,19 @@ describe('workflow の step', () => {
  * (`editor` は同じ空振り検定を持っており、走っていれば同じ日に露見していた)。
  * 🔑 CLAUDE.md「回すものの粒度: **1 job = 1 主張**。落ちたとき何が壊れたか、
  * 名前で言える形にする」。文言では 2 度目を止められないので機械で止める。
+ *
+ * 🔴 **2026-09-05(#695)、その「1 主張」を job の粒度でやり直した。**
+ * `heavy` 1 本が 30 分の門に当たって **cancelled** になると、末尾に置いていた
+ * 台帳 step の `if: !cancelled()` が偽 = **skip** ── つまり **赤い晩ほど台帳に
+ * 出ない**。#221 で直したはずの「赤いまま放置される導線」が、timeout の形で
+ * 戻っていた(run #38 / #40 で実測)。だから台帳は**別 job**(`needs` +
+ * `if: always()`)にし、ここの pin も **job の形**で書き直す。
  */
-describe('nightly の step', () => {
+describe('nightly の job と step', () => {
   const YML = join(DIR, 'nightly.yml');
   /** 前が落ちても走る印。 */
   const GUARD = '!cancelled()';
-  /** 仕込みが揃った晩だけ走る印(⚠ 台帳の step は**これを持たない**)。 */
+  /** 仕込みが揃った晩だけ走る印。 */
   const SETUP_GATE = "steps.setup_ok.outputs.ok == '1'";
 
   interface NightlyStep {
@@ -197,35 +204,79 @@ describe('nightly の step', () => {
     ifExpr: string;
     run: string;
   }
+  interface NightlyJob {
+    line: number;
+    name: string;
+    ifExpr: string;
+    timeout: string | null;
+    needs: string[];
+    steps: NightlyStep[];
+  }
 
   /**
-   * `heavy` job の step を切り出す(この repo に YAML parser は入っていない)。
+   * `jobs:` 配下を job ごとに切り出す(この repo に YAML parser は入っていない)。
    *
-   * 🔴 初稿は head を `- (name|uses):` で採っていたので、**`- run:` 始まりの step
-   * (`npm ci` など 3 本)を 1 つも見ていなかった**。しかも空振り防止の側が
-   * **同じ正規表現**だったので `16 === 16` で必ず一致し、**見えていないことを
-   * 検出できなかった** ── 40 行上の `collect()` は素の grep 側を**緩く**書いて
-   * それを避けている(片側だけ直っていなかった。CLAUDE.md §1)。
+   * 🔴 初稿(job が 1 本だった頃)は head を `- (name|uses):` で採っていたので、
+   * **`- run:` 始まりの step を 1 つも見ていなかった**。しかも空振り防止の側が
+   * **同じ正規表現**だったので必ず一致し、**見えていないことを検出できなかった**
+   * ── 下の空振り防止は**わざと緩い規則**で数える(CLAUDE.md §1)。
+   *
+   * ⚠ **コメント行と空行は読まない** ── 「実行する行だけを見る」(CLAUDE.md §1
+   *   の 5 度目)。job の間に置いた列 0 のコメントを本文と数えると、そこで
+   *   `jobs:` を抜けたと誤読して**以降の job が丸ごと見えなくなる**。
+   * ⚠ `needs:` は **inline 形**(`[a, b]`)だけを読む ── block 形へ書き換えると
+   *   ここが空になるが、下の「ledger の needs に全 job が在る」が落ちて気づく。
    */
-  function nightlySteps(): NightlyStep[] {
+  function nightlyJobs(): NightlyJob[] {
     const lines = readFileSync(YML, 'utf-8').split('\n');
-    const out: NightlyStep[] = [];
-    let inSteps = false;
+    const jobs: NightlyJob[] = [];
+    let job: NightlyJob | null = null;
     let cur: NightlyStep | null = null;
+    let inJobs = false;
+    const closeStep = (): void => {
+      if (job && cur) job.steps.push(cur);
+      cur = null;
+    };
     for (const [n, line] of lines.entries()) {
-      if (/^ {4}steps:\s*$/.test(line)) {
-        inSteps = true;
+      if (/^\s*(#|$)/.test(line)) continue; // コメント・空行
+      if (/^jobs:\s*$/.test(line)) {
+        inJobs = true;
         continue;
       }
-      if (!inSteps) continue;
-      if (/^ {0,4}\S/.test(line) && line.trim() !== '') break; // job の外へ出た
-      const head = /^ {6}- ([\w-]+): (.+?)\s*$/.exec(line);
+      if (!inJobs) continue;
+      if (/^\S/.test(line)) {
+        closeStep();
+        inJobs = false; // jobs: と同じ深さの別キーへ抜けた
+        continue;
+      }
+      const head = /^ {2}([A-Za-z_][\w-]*):\s*$/.exec(line);
       if (head) {
-        if (cur) out.push(cur);
+        closeStep();
+        job = { line: n + 1, name: head[1]!, ifExpr: '', timeout: null, needs: [], steps: [] };
+        jobs.push(job);
+        continue;
+      }
+      if (!job) continue;
+      const jobKey = /^ {4}([\w-]+):(?: (.+?))?\s*$/.exec(line);
+      if (jobKey) {
+        const v = jobKey[2] ?? '';
+        if (jobKey[1] === 'timeout-minutes') job.timeout = v;
+        if (jobKey[1] === 'if') job.ifExpr = v;
+        if (jobKey[1] === 'needs')
+          job.needs = v
+            .replace(/[[\]]/g, '')
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
+        continue;
+      }
+      const stepHead = /^ {6}- ([\w-]+): (.+?)\s*$/.exec(line);
+      if (stepHead) {
+        closeStep();
         cur = { line: n + 1, name: '', id: null, ifExpr: '', run: '' };
-        if (head[1] === 'name') cur.name = head[2]!;
-        if (head[1] === 'id') cur.id = head[2]!;
-        if (head[1] === 'run') cur.run = head[2]!;
+        if (stepHead[1] === 'name') cur.name = stepHead[2]!;
+        if (stepHead[1] === 'id') cur.id = stepHead[2]!;
+        if (stepHead[1] === 'run') cur.run = stepHead[2]!;
         continue;
       }
       if (!cur) continue;
@@ -239,32 +290,61 @@ describe('nightly の step', () => {
       if (run) cur.run = run[1]!;
       if (/^ {10}\S/.test(line)) cur.run += `\n${line.trim()}`; // run: | の本体
     }
-    if (cur) out.push(cur);
-    return out;
+    closeStep();
+    return jobs;
   }
 
-  const steps = nightlySteps();
-  const at = (id: string) => steps.findIndex((s) => s.id === id);
+  const jobs = nightlyJobs();
+  const allSteps = jobs.flatMap((j) => j.steps.map((s) => ({ ...s, job: j.name })));
+  const ledger = jobs.find((j) =>
+    j.steps.some((s) => s.run.includes('scripts/nightly-red.mjs')),
+  );
+
+  it('🔴 切り出しが job を取りこぼしていない(素の grep と件数が一致する)', () => {
+    // ⚠ 空振り防止は**別の(緩い)規則**で数える ── 切り出しと同じ regex で数えると
+    //    「見えていない job」がある状態でも必ず一致してしまう
+    const lines = readFileSync(YML, 'utf-8').split('\n');
+    const start = lines.findIndex((l) => /^jobs:\s*$/.test(l));
+    expect(start, '`jobs:` が無い').toBeGreaterThan(-1);
+    const raw = lines
+      .slice(start + 1)
+      .filter((l) => /^ {2}\S+:\s*$/.test(l) && !/^\s*#/.test(l)).length;
+    expect(raw, 'job を 1 つも見つけられていない').toBeGreaterThanOrEqual(5);
+    expect(jobs.length).toBe(raw);
+  });
 
   it('🔴 切り出しが step を取りこぼしていない(素の grep と件数が一致する)', () => {
-    // ⚠ 空振り防止は**別の(緩い)規則**で数える ── 切り出しと同じ regex で数えると
-    //    「見えていない step」がある状態でも必ず一致してしまう(初稿の欠陥)
     const raw = readFileSync(YML, 'utf-8')
       .split('\n')
       .filter((l) => /^ {6}- \S/.test(l)).length;
     expect(raw).toBeGreaterThan(15);
-    expect(steps.length).toBe(raw);
+    expect(allSteps.length).toBe(raw);
   });
 
-  it('🔴 全 step が id を持つ(id が無い step は台帳から見えない)', () => {
-    // `steps` context に入るのは id を宣言した step だけ ── id を落とすと、その
-    // step の失敗も skip も `unmetSteps` から**構造上見えない**(緑と誤報しうる)
-    const offenders = steps.filter((s) => !s.id).map((s) => `${YML}:${s.line} ${s.name || s.run}`);
+  it('🔴 全 step が id を持つ', () => {
+    // ⚠ 台帳が読むのは **job の結果**になった(#695)が、id はまだ 2 つの役に立つ:
+    //    ① `setup_ok` の gate は `steps` context を読むので、id が無いと成立しない
+    //    ② run を開いた人が step を名前で指せる
+    const offenders = allSteps
+      .filter((s) => !s.id)
+      .map((s) => `${YML}:${s.line} ${s.job} / ${s.name || s.run}`);
     expect(offenders).toEqual([]);
   });
 
+  it('🔴 各 job に timeout-minutes が在り、15 分を超えない', () => {
+    // 🚫 **上げて誤魔化さない**(user 指示 2026-07-30「CI を長くしない」)──
+    //    #695 の直しは「30 分の門を上げる」ではなく「並べて 15 分に収める」である。
+    //    ⚠ 門を伸ばすと tripwire が鈍り、次に本当に遅くなった晩に鳴らない。
+    const missing = jobs.filter((j) => !j.timeout).map((j) => `${YML}:${j.line} ${j.name}`);
+    expect(missing, 'timeout-minutes を持たない job が在る').toEqual([]);
+    const tooLong = jobs
+      .filter((j) => Number(j.timeout) > 15)
+      .map((j) => `${YML}:${j.line} ${j.name} = ${j.timeout}`);
+    expect(tooLong, 'timeout を伸ばして誤魔化している').toEqual([]);
+  });
+
   it('🔴 probe の step は全部「前が落ちても走る」(13 晩 skip された形を止める)', () => {
-    const probes = steps.filter((s) => s.name.startsWith('Probe —'));
+    const probes = allSteps.filter((s) => s.name.startsWith('Probe —'));
     // 空振り防止 ── probe を 1 つも見つけられていないなら検査になっていない
     expect(probes.length, 'probe の step を見つけられていない').toBeGreaterThanOrEqual(5);
     const offenders = probes
@@ -273,36 +353,60 @@ describe('nightly の step', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('🔴 仕込みの後ろの step は全部 guard を持ち、仕込みが落ちた晩は走らない', () => {
-    const gate = at('setup_ok');
-    expect(gate, '仕込みの gate(id: setup_ok)が無い').toBeGreaterThan(0);
-    const ledger = steps.findIndex((s) => s.run.includes('scripts/nightly-red.mjs'));
-    const after = steps.slice(gate + 1);
-    expect(after.length, 'gate の後ろに step が無い').toBeGreaterThan(5);
-    const noGuard = after.filter((s) => !s.ifExpr.includes(GUARD)).map((s) => `${YML}:${s.line}`);
-    expect(noGuard, 'guard を持たない step が gate の後ろに在る').toEqual([]);
-    // ⚠ 台帳だけは仕込みの gate を**持たない**(仕込みが落ちた晩こそ記録が要る)
-    const noSetupGate = after
-      .filter((s, i) => gate + 1 + i !== ledger && !s.ifExpr.includes(SETUP_GATE))
-      .map((s) => `${YML}:${s.line} ${s.name}`);
-    expect(noSetupGate, '仕込みが落ちても走ってしまう検証 step が在る').toEqual([]);
-    expect(steps[ledger]!.ifExpr, '台帳が仕込みの gate に縛られている').not.toContain(SETUP_GATE);
+  it('🔴 仕込みの gate を持つ job では、後ろの step が全部 guard を持つ', () => {
+    // 🔑 検証 step が 2 本以上ある job は、1 本落ちても残りを走らせる(#221)。
+    //    ⚠ ただし**仕込みが落ちた晩は走らせない** ── 走らせても「確かめていない」を
+    //    「落ちた」と読ませるだけで、本当の原因(npm ci)が名前で出なくなる。
+    const gated = jobs.filter((j) => j.steps.some((s) => s.id === 'setup_ok'));
+    expect(gated.length, '仕込みの gate を持つ job が 1 つも無い').toBeGreaterThanOrEqual(1);
+    for (const j of gated) {
+      const at = j.steps.findIndex((s) => s.id === 'setup_ok');
+      const after = j.steps.slice(at + 1);
+      expect(after.length, `${j.name}: gate の後ろに step が無い`).toBeGreaterThan(0);
+      const noGuard = after
+        .filter((s) => !s.ifExpr.includes(GUARD))
+        .map((s) => `${YML}:${s.line} ${j.name} / ${s.name}`);
+      expect(noGuard, 'guard を持たない step が gate の後ろに在る').toEqual([]);
+      const noSetupGate = after
+        .filter((s) => !s.ifExpr.includes(SETUP_GATE))
+        .map((s) => `${YML}:${s.line} ${j.name} / ${s.name}`);
+      expect(noSetupGate, '仕込みが落ちても走ってしまう検証 step が在る').toEqual([]);
+    }
   });
 
-  it('🔴 台帳へ出す step は**最後**に在り、判定を workflow に書いていない', () => {
-    const ledger = steps.findIndex((s) => s.run.includes('scripts/nightly-red.mjs'));
-    expect(ledger, '夜の結果を台帳へ出す step が無い').toBeGreaterThan(-1);
-    // 🔴 `steps` context は「そこまでの step」しか持たない ── 後ろに検証 step を
-    //    足すと、その赤は**永久に台帳へ出ない**
-    expect(ledger, '台帳の後ろに step が在る').toBe(steps.length - 1);
-    expect(steps[ledger]!.ifExpr, '台帳が skip されうる').toContain(GUARD);
-    // 🔴 何を赤と数えるかは script 側(test が通る側)に置く ── workflow に
-    //    `outcome === "failure"` と書くと、skipped を緑と読む判定が**誰にも守られない**
-    expect(steps[ledger]!.run, '判定が workflow の中に書かれている').not.toContain('outcome');
+  it('🔴 台帳の job は、検証 job を 1 つ残らず needs に持つ', () => {
+    expect(ledger, '夜の結果を台帳へ出す job が無い').toBeDefined();
+    const others = jobs
+      .filter((j) => j.name !== ledger!.name)
+      .map((j) => j.name)
+      .sort();
+    // 空振り防止 ── 検証 job を 1 つも見つけられていないなら検査になっていない
+    expect(others.length, '検証 job を見つけられていない').toBeGreaterThanOrEqual(4);
+    // 🔴 needs から漏れた job の赤は**永久に台帳へ出ない**(step 版の
+    //    「台帳は最後に置く」と同じ罠)。集合で突き合わせる ── 件数だけだと
+    //    1 つ足して 1 つ落とす取り違えが通る
+    expect([...ledger!.needs].sort(), 'needs と検証 job が食い違っている').toEqual(others);
+  });
+
+  it('🔴 台帳の job は cancel の晩も走り、判定を workflow に書いていない', () => {
+    // 🔴 `!cancelled()` ではなく `always()` ── job が timeout で切られると
+    //    **その job は cancelled** になるので、`!cancelled()` だと台帳ごと skip され、
+    //    **いちばん記録が要る晩に何も書かない**(#695 の当の症状)
+    expect(ledger!.ifExpr, '台帳が cancel の晩に skip される').toContain('always()');
+    expect(ledger!.ifExpr, '台帳が cancel の晩に skip される').not.toContain(GUARD);
     const yml = readFileSync(YML, 'utf-8');
-    expect(yml, 'steps を渡していない').toContain('PKC3_NIGHTLY_STEPS: ${{ toJSON(steps) }}');
+    // 🔴 渡すのは **needs**(job の結果)── `steps` に戻すと、台帳 job は
+    //    **自分の step しか見えない**ので「毎晩 ✅ 全部緑」になる
+    expect(yml, 'needs を渡していない').toContain('PKC3_NIGHTLY_STEPS: ${{ toJSON(needs) }}');
+    expect(yml, 'steps を渡す形へ戻っている').not.toContain('toJSON(steps)');
+    // 🔴 何を赤と数えるかは script 側(test が通る側)に置く ── workflow に
+    //    `result === "failure"` と書くと、skipped / cancelled を緑と読む判定が
+    //    **誰にも守られない**
+    const run = ledger!.steps.find((s) => s.run.includes('scripts/nightly-red.mjs'))!.run;
+    expect(run, '判定が workflow の中に書かれている').not.toContain('outcome');
+    expect(run, '判定が workflow の中に書かれている').not.toContain('result');
     // ⚠ 権限が無いと API が 403 を返す ── script は例外で落ちるので静かではないが、
-    //   「毎晩 1 つ余計に赤い step」が常態化する。宣言のほうを縛る
+    //   「毎晩 1 つ余計に赤い job」が常態化する。宣言のほうを縛る
     const perms = /^permissions:\n((?:[ #].*\n)+)/m.exec(yml);
     expect(perms, 'permissions が読めない').not.toBeNull();
     expect(perms![1], 'issues: write が無い').toContain('issues: write');
