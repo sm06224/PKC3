@@ -571,7 +571,7 @@ test('🔴 付箋で目次を押しても、題名と住所が残る (#693)', as
   const before = win.url();
   expect(before, '前提が崩れた(付箋の住所がノートを名指していない)').toContain('entry=');
 
-  const TOC_LINK = '[data-pkc-region="toc"] a[href^="#"]';
+  const TOC_LINK = '[data-pkc-region="toc-formal"] a[href^="#"]';
   await expect(win.locator(TOC_LINK), '前提が崩れた(目次が出ていない)').toHaveCount(2);
   const heading = win.locator('[data-pkc-region="detail"] h2[id]').first();
   const beforeY = (await heading.boundingBox())?.y ?? 0;
