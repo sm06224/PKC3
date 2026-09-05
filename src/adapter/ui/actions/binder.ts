@@ -4172,6 +4172,39 @@ const ACTIONS: Record<string, ActionHandler> = {
       },
     );
   },
+  /**
+   * 🔴 **列を飛ばして本題へ行く近道**(#720)。器は `shell.ts` の `skip-links`。
+   *
+   * ⚠ **hash を書き換えない** ── `<a href="#…">` にすると、PKC3 がディープリンクに
+   *   使っているアドレスの断片(`#pkc?entry=…`)が上書きされ、**読み込み直すと別の
+   *   ものが開く**。だから押し所は `<button>` で、行き先は `data-pkc-skip` で運ぶ。
+   * 🔑 **畳まれている列へは、畳み帯の同じボタンを押して開けてから移る** ──
+   *   ここで畳みの規則を書き直すと、判定が 2 か所になる(§7)。押すのは
+   *   user が押すのと同じ器である。
+   * ⚠ 行き先が無い(面が入れ替わっている)ときは**何もしない** ── 焦点をどこか
+   *   別の所へ飛ばすと、user は自分がどこに居るのか分からなくなる。
+   */
+  'skip-to': (_dispatcher, target, _services, root) => {
+    const name = target.getAttribute('data-pkc-skip') ?? '';
+    if (name === '') return;
+    const region = root.querySelector<HTMLElement>(`[data-pkc-region="${name}"]`);
+    if (region === null) return;
+    /**
+     * ⚠ 畳みは shell の属性が正本(`pane-visibility`)── `offsetParent` で見ない。
+     *   happy-dom は版面を組まないので、そちらだと**unit では必ず「畳んでいる」**に
+     *   なり、押すたびに畳み帯を叩く別物になる。
+     */
+    const hidden = (
+      root
+        .querySelector('[data-pkc-region="shell"]')
+        ?.getAttribute('data-pkc-hidden-panes') ?? ''
+    ).split(' ');
+    if (hidden.includes(name))
+      root
+        .querySelector<HTMLElement>(`[data-pkc-action="toggle-pane"][data-pkc-pane="${name}"]`)
+        ?.click();
+    region.focus();
+  },
   /** 左の列の**探し方**を切り替える(P8 段⑤)。⚠ 中央のビューとは別の軸。 */
   'set-browse': (_dispatcher, target, services) => {
     const mode = target.closest('[data-pkc-browse]')?.getAttribute('data-pkc-browse');

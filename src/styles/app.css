@@ -574,6 +574,33 @@ select:focus-visible {
   color: color-mix(in oklab, var(--muted) 60%, var(--surface));
 }
 
+/* ── 鍵だけで使う人の近道(#720)─────────────────────
+ * 🔴 **既定では見えない。焦点が来たときだけ出る。**
+ * ⚠ `display: none` / `visibility: hidden` にしてはいけない ── どちらも
+ *   **焦点を受けられなくなる**ので、そもそも `:focus` にならない(近道が死ぬ)。
+ * 🔑 だから「画面の外へ 1px で追い出す」形にする ── 器は生きているので
+ *   Tab で当たり、当たった瞬間に下の `:focus-within` が画面へ引き戻す。
+ * ⚠ 版面を 1 ドットも動かさない ── `position: fixed` で流れから外す。 */
+[data-pkc-region='skip-links'] {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 100;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+[data-pkc-region='skip-links']:focus-within {
+  width: auto;
+  height: auto;
+  display: flex;
+  gap: var(--s2);
+  padding: var(--s2);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0 0 4px 0;
+}
+
 /* ── 左の列: 探し方のタブ ───────────────────────────
  * 🔑 **その列が扱うものの操作は、その列が持つ**(P8 段⑤)── 上の帯と左で
  * 同じものが出ていた「かぶり」の解消。フォルダもアプリも「探し方」なのでここ。 */

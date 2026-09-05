@@ -147,6 +147,8 @@ import { applyIsolationReload } from '@adapter/platform/sw/coi-reload';
 import { applyBootRecovery } from '@adapter/platform/sw/boot-recovery';
 import { InspectorRenderer } from '@adapter/ui/render/inspector';
 import { BrowseRouter, type BrowseMode } from '@adapter/ui/render/browse';
+// 🔴 探し方のタブの印(見た目 + 読み上げ)は 1 か所へ寄せた(#720)
+import { markBrowseTabs } from '@adapter/ui/render/tabs-a11y';
 import { CenterRouter } from '@adapter/ui/render/center';
 import { AppendBoxRenderer } from '@adapter/ui/render/append-box';
 import {
@@ -1000,13 +1002,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     markedView = view;
   };
   markView('detail');
-  // 探し方のタブ(左の列)。⚠ **中央のビューとは別の軸**なので印も別に持つ
+  /**
+   * 探し方のタブ(左の列)。⚠ **中央のビューとは別の軸**なので印も別に持つ。
+   * 🔴 印の付け方は `markBrowseTabs` **1 か所**へ寄せた(#720)── 見た目の印
+   *   (`data-pkc-active`)と読み上げの印(`aria-selected`)を同じ 1 回で書く。
+   *   ⚠ ここに直書きすると、この file は**どの test からも実行されない**ので
+   *   耳側だけ落としても誰も気づけない(CLAUDE.md §2)。
+   */
   const markBrowse = (mode: BrowseMode) => {
-    for (const btn of regions.sidebar.querySelectorAll('[data-pkc-browse]')) {
-      if (btn.getAttribute('data-pkc-browse') === mode)
-        btn.setAttribute('data-pkc-active', '');
-      else btn.removeAttribute('data-pkc-active');
-    }
+    markBrowseTabs(regions.sidebar, mode);
   };
   markBrowse(browseMode);
   // 🔑 追記欄は**本文とは別の器**(P8 段⑧)── 本文は追記のたびに書き換わって
