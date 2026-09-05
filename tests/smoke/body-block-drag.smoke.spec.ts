@@ -107,3 +107,50 @@ test('🔴 段落の字はドラッグで選べる(塊そのものは掴めな�
   expect(await order(page)).toEqual(['題', '段落 A', '章 B', '本文 B', '章 C', '本文 C']);
   expect(errors, 'pageerror が出た').toEqual([]);
 });
+
+/**
+ * 🔴 **一覧の行を本文へ落とすとリンクになる**(#684 段②)。
+ * ⚠ unit は合成 event で `insert-lines` が飛ぶ所まで ── 本物の D&D で一覧の行(`draggable`)が
+ *   本文の面まで運ばれ、保存 → 再描画で **押せるリンク**として出ることは実ブラウザでしか見えない。
+ */
+test('🔴 一覧の行を本文へ落とすと、そのノートへのリンクが本文に入る (#684 段②)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await gotoApp(page);
+
+  // 相手のノートを先に作り、次に落とし先のノートを作って開いたままにする
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', '相手のノート');
+  await page.fill('[data-pkc-field="editor-body"]', '中身\n');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', '受け取るノート');
+  await page.fill('[data-pkc-field="editor-body"]', BODY);
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  await expect(page.locator(`${HOST}[data-pkc-painted]`)).toBeAttached();
+
+  // 左の一覧(フォルダ面)の「相手のノート」の行を掴む
+  const row = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]', { hasText: '相手のノート' }).first();
+  await expect(row, '掴む行が無い(前提が崩れた)').toBeVisible();
+  const from = (await row.boundingBox())!;
+  const target = page.locator(`${HOST} > p`).first(); // 段落 A
+  const t = (await target.boundingBox())!;
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(from.x + 30, from.y + 30, { steps: 4 });
+  await page.mouse.move(t.x + t.width / 2, t.y + t.height * 0.8, { steps: 8 });
+  await expect(target, '本文の上で「後」の線が出ない').toHaveAttribute('data-pkc-drop-edge', 'after');
+  await page.mouse.up();
+
+  // 🔴 観測点: 本文から描き直された**押せるリンク**(段落 A の直後に入る)
+  const link = page.locator(`${HOST} a`, { hasText: '相手のノート' });
+  await expect(link, 'リンクが本文に入っていない').toBeVisible({ timeout: 5000 });
+  await expect
+    .poll(() => order(page), { timeout: 5000 })
+    .toEqual(['題', '段落 A', '相手のノート', '章 B', '本文 B', '章 C', '本文 C']);
+  // 対照群 ── 掴んだ行は一覧から消えていない(移していない)
+  await expect(row).toBeVisible();
+  expect(errors, 'pageerror が出た').toEqual([]);
+});

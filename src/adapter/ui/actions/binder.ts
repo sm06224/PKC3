@@ -6910,6 +6910,18 @@ export function bindActions(
     if (de.dataTransfer?.types?.includes(PKC_DRAG) === true) {
       const drop = dropTargetOf(de.target);
       if (drop === undefined) {
+        /**
+         * 🔴 **一覧の行を本文へ落とすとリンクになる**(#684 段②)── フォルダの行でも
+         *   パンくずでもない所なら、読んでいる本文の塊の前 / 後を落とし先にする(段①と同じ線)。
+         * ⚠ `copy` ── 元のノートは動かない(移す操作ではない)。掴んだ側の印もそのまま。
+         */
+        const body = bodyDropAt(de);
+        if (body !== null) {
+          e.preventDefault();
+          de.dataTransfer.dropEffect = 'copy';
+          markDropTarget(body.el, DROP_EDGE_ATTR, body.edge);
+          return;
+        }
         // ⚠ **光ったままにしない**(着地前レビュー 5)── フォルダの上を通ってから
         //    別の行で離すと、user は「そこへ入った」と読む(実際は何も動かない)
         clearDropTarget();
@@ -7049,7 +7061,26 @@ export function bindActions(
     if (de.dataTransfer?.types?.includes(PKC_DRAG) === true) {
       const drop = dropTargetOf(de.target);
       clearDropTarget();
-      if (drop === undefined) return;
+      if (drop === undefined) {
+        /**
+         * 🔴 **本文へ落としたら、その行のリンクが入る**(#684 段②)。
+         * ⚠ 字は `formatEntryLink` 1 本(手で書くリンクと同じ綴り)。複数の行は改行区切りの
+         *   1 塊 ── 「元に戻す」は無いが、入った物は本文の 1 塊なので ⠿ で掴んで動かせる。
+         * ⚠ 題名が無い(消えた)lid は入れない ── 押せない字を本文に残さない。
+         * ⚠ 掴んだ側の印(一覧 / 2 ペインの選択)は触らない ── 移していないので外す理由が無い。
+         */
+        const at = bodyDropAt(de);
+        if (at === null) return;
+        e.preventDefault();
+        const metas = dispatcher.getState().entryMetas;
+        const lines = (de.dataTransfer.getData(PKC_DRAG) || '')
+          .split(' ')
+          .filter((x) => x !== '' && metas.has(x))
+          .map((x) => formatEntryLink(metas.get(x)!.title, x));
+        if (lines.length === 0) return;
+        dispatcher.dispatch({ type: 'INSERT_LINES', lid: at.lid, toBefore: at.toBefore, lines });
+        return;
+      }
       e.preventDefault();
       const lids = (de.dataTransfer.getData(PKC_DRAG) || '').split(' ').filter((x) => x !== '');
       /**

@@ -482,6 +482,109 @@ describe('元に戻す(UNDO_MOVE)', () => {
 });
 
 /**
+ * 🔴 **一覧の行を本文へ落とすとリンクになる**(#684 段②)。
+ *
+ * 守る主張:
+ * 1. 🔴 本文の上では `copy` で受け、段①と同じ「前 / 後」の線が出る
+ * 2. 🔴 落とすと `REQUEST_BODY_REWRITE { kind: 'insert-lines' }` ── 字は `formatEntryLink` の綴り
+ * 3. 🔴 複数の行は改行区切りの 1 塊 / 2 ペインの行も同じ経路
+ * 4. 🔴 落とした後も掴んだ側の印(選択)は残る(移していない)
+ * 5. 編集中は声に出して断る / 題名の無い lid は入れない
+ */
+describe('一覧の行を本文へ落とすとリンクになる(#684 段②)', () => {
+  const PKC_LIDS = 'application/x-pkc-lids';
+
+  it('🔴 本文の上は copy で受け、前 / 後の線が出る。落とすと insert-lines になる', () => {
+    const s = setup();
+    teardown = s.unbind;
+    const dt = dtStub({ [PKC_LIDS]: 'n2' });
+    const target = s.block(19); // ## 章 C(生 22)
+    rect(target, 500, 40);
+    const over = dragEv('dragover', dt, 505);
+    target.dispatchEvent(over);
+    expect(over.defaultPrevented, '本文の上で受けていない').toBe(true);
+    expect(dt.dropEffect, '移す顔(move)になっている').toBe('copy');
+    expect(target.getAttribute('data-pkc-drop-edge')).toBe('before');
+    target.dispatchEvent(dragEv('drop', dt, 505));
+    const ev = s.events.find((e) => e.type === 'REQUEST_BODY_REWRITE');
+    expect(ev, '書換の依頼が出ていない').toBeDefined();
+    expect(ev).toMatchObject({
+      lid: 'n1',
+      rewrite: { kind: 'insert-lines', toBefore: 22, lines: ['[相手](entry:n2)'] },
+    });
+    expect(s.root.querySelectorAll('[data-pkc-drop-edge]'), '落とした後に印が残っている').toHaveLength(0);
+  });
+
+  it('🔴 複数の行は 1 塊(改行区切り)。題名の無い lid は入れない', () => {
+    const s = setup();
+    teardown = s.unbind;
+    const dt = dtStub({ [PKC_LIDS]: 'n2 ghost n1' });
+    const target = s.block(2);
+    rect(target, 100, 20);
+    target.dispatchEvent(dragEv('drop', dt, 115));
+    const ev = s.events.find((e) => e.type === 'REQUEST_BODY_REWRITE');
+    expect(ev).toMatchObject({
+      rewrite: { kind: 'insert-lines', toBefore: 6, lines: ['[相手](entry:n2)', '[本](entry:n1)'] },
+    });
+  });
+
+  it('🔴 2 ペインの行から掴んでも同じ経路で入り、掴んだ側の選択は残る', () => {
+    const s = setup();
+    teardown = s.unbind;
+    // 2 ペインの行(左)── 掴む側は `data-pkc-entry` の行で、面は dual-pane
+    const pane = document.createElement('div');
+    pane.setAttribute('data-pkc-region', 'dual-pane');
+    pane.setAttribute('data-pkc-side', 'left');
+    pane.innerHTML =
+      '<table data-pkc-region="dual-table"><tr data-pkc-entry="n2" draggable="true"><td>相手</td></tr></table>';
+    s.root.append(pane);
+    const before = s.d.getState().selection;
+    expect(before, '前提: 一覧の選択が在る').toEqual(['n1']);
+    const dt = dtStub();
+    pane.querySelector('[data-pkc-entry="n2"]')!.dispatchEvent(dragEv('dragstart', dt));
+    expect(dt.getData(PKC_LIDS), '2 ペインの行が荷物にならない').toBe('n2');
+    const target = s.block(19);
+    rect(target, 500, 40);
+    target.dispatchEvent(dragEv('drop', dt, 535));
+    const ev = s.events.find((e) => e.type === 'REQUEST_BODY_REWRITE');
+    expect(ev).toMatchObject({ lid: 'n1', rewrite: { kind: 'insert-lines', toBefore: 23 } });
+    expect(s.d.getState().selection, '落としたら選択が消えた(移していないのに)').toEqual(before);
+    // 移す経路は走っていない ── 関係(親子)が 1 つも変わっていない
+    expect(s.d.getState().relations, '本文へ落としたのにノートが移った').toEqual([]);
+  });
+
+  it('🔴 編集中は声に出して断る(押した場所と文言が対)', () => {
+    const s = setup();
+    teardown = s.unbind;
+    s.d.dispatch({ type: 'START_EDIT' });
+    s.events.length = 0;
+    const dt = dtStub({ [PKC_LIDS]: 'n2' });
+    const target = s.block(19);
+    rect(target, 500, 40);
+    target.dispatchEvent(dragEv('drop', dt, 505));
+    expect(s.d.getState().error ?? '').toContain('編集を終了');
+    expect(s.d.getState().error ?? '', '押した場所と文言が合っていない').toContain('一覧の行');
+    expect(s.events.filter((e) => e.type === 'REQUEST_BODY_REWRITE')).toHaveLength(0);
+  });
+
+  it('フォルダの行の上では、これまでどおり移す(本文の線は出ない)', () => {
+    const s = setup();
+    teardown = s.unbind;
+    const folder = document.createElement('div');
+    folder.setAttribute('data-pkc-drop', 'folder');
+    folder.setAttribute('data-pkc-entry', 'n1');
+    s.root.append(folder);
+    const dt = dtStub({ [PKC_LIDS]: 'n2' });
+    const over = dragEv('dragover', dt, 5);
+    folder.dispatchEvent(over);
+    expect(over.defaultPrevented).toBe(true);
+    expect(dt.dropEffect).toBe('move');
+    expect(folder.hasAttribute('data-pkc-dropping')).toBe(true);
+    expect(s.root.querySelectorAll('[data-pkc-drop-edge]')).toHaveLength(0);
+  });
+});
+
+/**
  * 🔴 見え方の規則(happy-dom は描画しないので構文で読む ── `css-blocks` の作法)。
  * ⚠ 線は `box-shadow: inset` で出す ── border だと塊の高さが変わり、狙いがずれる。
  * ⚠ 口の置き場は `position: relative` ── 無いと口が面の左上に固まる。
