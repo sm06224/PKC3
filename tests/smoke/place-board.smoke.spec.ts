@@ -133,6 +133,17 @@ test('🔴 本文を右クリックして「ここに板を置く」と、押し
   await page.waitForSelector('[data-pkc-action="start-edit"]');
 
   const host = page.locator('[data-pkc-field="detail-body"]');
+  /**
+   * 🔴 **描き終わるまで待つ**(2026-09-05、CI で 2 回だけ落ちて実測した)。
+   *
+   * ⚠ 「編集」のボタンが出た時点では、本文はまだ worker 越しに描かれている途中で、
+   *   **塊が差し替わる**。差し替わる瞬間に右クリックすると、押した節点がその場で
+   *   消えるので `contextmenu` が**誰にも届かない** ── 症状は「メニューが出る回と
+   *   出ない回がある」という間欠で、**製品ではなく台の書き方の問題**である
+   *   (同じ罠を `split-frames.smoke.spec.ts` の `writeBody` が既に踏んで直してある)。
+   * 🔑 `detail.ts` は描けたら `data-pkc-painted` にその lid を焼く ── それを待つ。
+   */
+  await expect(page.locator('[data-pkc-field="detail-body"][data-pkc-painted]').first()).toBeVisible();
   const hb = (await host.boundingBox())!;
   /**
    * 🔴 **押すのは整数の画面座標**(2026-09-05 に落ちて実測した)。
