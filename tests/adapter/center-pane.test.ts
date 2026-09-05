@@ -228,6 +228,76 @@ describe('チェックの印(#277)', () => {
     expect(store['n1'], '本文が変わった').toBe(BODY);
     expect(d.getState().error ?? '', '無言で終わった').toContain('反映できません');
   });
+
+  /**
+   * 🔴 **指で触る端末では、行の字を押しても印が変わる**(#706 ①)。
+   *
+   * ⚠ 印の箱は 13×13 で指より小さい ── 字を押しても何も起きないのは、user から見ると
+   *   「押したのに反応しない」である。
+   * 🔑 `click` の `pointerType` で指かどうかを見る(Chromium の `click` は `PointerEvent`)。
+   *   happy-dom の `MouseEvent` は `pointerType` を持たないので、`defineProperty` で載せる
+   *   ── 綴りは実物と同じ(`'touch'` / `'mouse'`)。
+   */
+  const tapText = (el: Element, pointerType: string): void => {
+    const ev = new MouseEvent('click', { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, 'pointerType', { value: pointerType });
+    el.dispatchEvent(ev);
+  };
+
+  it('🔴 指で行の字を押すと、その行の印が反転して保存まで届く (#706)', async () => {
+    const { d, q, persisted, store } = setup([meta('n1', { archetype: 'text', status: null })], {
+      n1: BODY,
+    });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    await tick(20);
+    const li = q<HTMLElement>('li.pkc-task-item')!;
+    expect(li, 'チェックの行が描かれていない(台の空振り)').not.toBeNull();
+    // ⚠ 押すのは**箱ではなく字**(箱を押せば直す前から効く ── それでは何も見ていない)
+    const text = [...li.childNodes].find((n) => n.nodeType === Node.TEXT_NODE && n.textContent?.includes('牛乳'));
+    const span = document.createElement('span');
+    span.textContent = '牛乳';
+    if (text) text.replaceWith(span);
+    else li.append(span);
+    tapText(span, 'touch');
+    await tick(20);
+    expect(persisted, '字を押しても印が届かない').toHaveLength(1);
+    expect(store['n1']!.split('\n')[2], '押した行の印が反転していない').toBe('- [x] 牛乳');
+    expect(store['n1']!.split('\n')[3], '押していない行まで変わった').toBe('- [x] 卵');
+  });
+
+  it('⚠ 対照群: マウスで行の字を押しても印は動かない(字を選べなくしない)', async () => {
+    const { d, q, persisted, store } = setup([meta('n1', { archetype: 'text', status: null })], {
+      n1: BODY,
+    });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    await tick(20);
+    const li = q<HTMLElement>('li.pkc-task-item')!;
+    const span = document.createElement('span');
+    span.textContent = '牛乳';
+    li.append(span);
+    tapText(span, 'mouse');
+    await tick(20);
+    expect(persisted, 'マウスの click で印が動いた').toHaveLength(0);
+    expect(store['n1']).toBe(BODY);
+  });
+
+  it('⚠ 対照群: 行の中のリンクを指で押しても、印は動かない(リンクの押下を奪わない)', async () => {
+    const { d, q, persisted } = setup([meta('n1', { archetype: 'text', status: null })], {
+      n1: BODY,
+    });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    await tick(20);
+    const li = q<HTMLElement>('li.pkc-task-item')!;
+    const a = document.createElement('a');
+    a.href = 'https://example.com/';
+    a.textContent = '店';
+    // ⚠ 遷移させない(happy-dom はリンクの click で location を動かす)
+    a.addEventListener('click', (e) => e.preventDefault());
+    li.append(a);
+    tapText(a, 'touch');
+    await tick(20);
+    expect(persisted, 'リンクを押したのに印が動いた').toHaveLength(0);
+  });
 });
 
 

@@ -1960,6 +1960,61 @@ function refoldAppendAfterAction(root: HTMLElement, pressed: Element): void {
   refoldPeeked(root);
 }
 
+/**
+ * 🔴 **指で触る端末では、チェックリストの行の字を押しても印が変わる**(#706 ①)。
+ *
+ * ## 物語
+ *
+ * スマホで買い物リストを開き、「牛乳」の行を押す。⚠ 直す前は**印の箱(13×13)を
+ * 正確に押さないと何も起きなかった** ── 字を押しても印は変わらず、箱は指より小さい。
+ * 🔑 だから**行の字も押し所にする**(箱そのものは CSS が 20px にする)。
+ *
+ * ⚠ **指の端末だけ**である ── マウスでは字を選ぶ(ドラッグ)の終わりに `click` が来るので、
+ *   行のどこを押しても印が動く形にすると**字が選べなくなる**。判定は `pointerType`
+ *   (Chromium の `click` は `PointerEvent`)、持たないブラウザでは `(pointer: coarse)`。
+ * ⚠ **自分で受ける物には触らない** ── リンク・ボタン・欄・印そのもの・`data-pkc-action` を
+ *   持つ物(かんばんの札など)は、押した先が自分で決める。ここで奪うと「リンクを押したのに
+ *   印が動いた」になる。
+ * ⚠ 印を返すのは**その行の直下の箱**だけ ── 入れ子の子リストの字を押しても親の印は動かさない
+ *   (`closest('li')` が子の `li` を返すので、それが task の行でなければ何もしない)。
+ *
+ * @returns 押すべき印(`toggle-task` を受ける `<input>`)。当たらなければ `null`
+ */
+function touchTaskBoxAt(ev: Event, root: HTMLElement): HTMLInputElement | null {
+  const t = ev.target;
+  if (!(t instanceof Element)) return null;
+  if (t.closest('a, button, input, select, textarea, label, summary, [data-pkc-action]') !== null)
+    return null;
+  const li = t.closest('li');
+  if (li === null || !li.classList.contains('pkc-task-item') || !root.contains(li)) return null;
+  const box = li.querySelector<HTMLInputElement>(
+    '.pkc-task-checkbox[data-pkc-action="toggle-task"]',
+  );
+  if (box === null) return null;
+  // ⚠ 直下(`li > input` か `li > p:first-child > input`)だけ ── 子リストの印を親の行で押さない
+  const parent = box.parentElement;
+  const direct =
+    parent === li || (parent !== null && parent.tagName === 'P' && parent === li.firstElementChild);
+  if (!direct) return null;
+  if (!isTouchClick(ev)) return null;
+  // ⚠ 字を選んでいる最中は数えない(選び終えた瞬間の `click` で印が動くと、選び直せない)
+  const sel = li.ownerDocument.getSelection?.();
+  if (sel !== null && sel !== undefined && !sel.isCollapsed) return null;
+  return box;
+}
+
+/**
+ * この `click` は指(かペン)か。⚠ `pointerType` を持たない実装(古い WebKit)では
+ * `(pointer: coarse)` に落とす ── 判定を 2 つ持つのは、片方しか無い端末が在るから
+ * (`long-press.ts` が「`pointerType` が空なら指として扱う」としているのと同じ向き)。
+ */
+function isTouchClick(ev: Event): boolean {
+  const pt = (ev as { pointerType?: string }).pointerType;
+  if (pt !== undefined && pt !== '') return pt !== 'mouse';
+  const mm = (globalThis as { matchMedia?: (q: string) => { matches: boolean } }).matchMedia;
+  return typeof mm === 'function' && mm('(pointer: coarse)').matches;
+}
+
 function selectEntryOrExplain(dispatcher: Dispatcher, lid: string, what: string): boolean {
   const state = dispatcher.getState();
   if (state.phase === 'editing') {
@@ -6484,6 +6539,16 @@ export function bindActions(
      */
     if (ev.target instanceof HTMLInputElement && ev.target.matches('[data-pkc-field="row-rename"]'))
       return;
+    /**
+     * 🔴 **指で触る端末では、チェックリストの行の字も印を動かす**(#706 ①)。
+     * ⚠ `[data-pkc-action]` の解決より**前**に置く ── 行の字は action を持たないので、
+     *   後ろに置くと `!el` で捨てられる。判定は `touchTaskBoxAt` 1 か所。
+     */
+    const taskBox = touchTaskBoxAt(ev, root);
+    if (taskBox !== null) {
+      run('toggle-task', taskBox);
+      return;
+    }
     const el = (ev.target as HTMLElement | null)?.closest<HTMLElement>(
       '[data-pkc-action]',
     );

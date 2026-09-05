@@ -853,6 +853,18 @@ for (const [name, w, h] of [
         return {
           panes: panes.map(box),
           innerW: window.innerWidth,
+          /**
+           * 🔴 **丈は器(`dual-body`)との比で見る**(2026-09-05、#706 で踏んだ)。
+           * ⚠ 直す前は `> 200px` の実数だった ── 指の端末で行を 34px にした日に、
+           *   横向き(667×375)の 2 ペインは器ごと縮んで **189px** になり、
+           *   **積んでもいないのに落ちた**(主張は「1 枚が版面を丸ごと使う」であって
+           *   「200px 以上ある」ではない)。積むと 1 枚は器の**半分**(136/272)になるので、
+           *   比で見れば 2 つの状態は離れたまま分かれる。
+           */
+          bodyH: Math.round(
+            document.querySelector('[data-pkc-region="dual-body"]')?.getBoundingClientRect()
+              .height ?? 0,
+          ),
           switcher:
             sw === null
               ? null
@@ -903,7 +915,12 @@ for (const [name, w, h] of [
     expect(only.w, `ペインが窓より狭い(${only.w}px / 窓 ${first.innerW}px)`).toBeGreaterThan(
       first.innerW - 20,
     );
-    expect(only.h, `ペインの丈が足りない(${only.h}px)`).toBeGreaterThan(200);
+    // ⚠ 空振り防止 ── 器そのものが潰れているなら、比で見ても何も言っていない
+    expect(first.bodyH, `2 ペインの器が潰れている(${first.bodyH}px)`).toBeGreaterThan(100);
+    expect(
+      only.h,
+      `ペインが器を丸ごと使っていない(${only.h}px / 器 ${first.bodyH}px ── 積んでいる形)`,
+    ).toBeGreaterThan(first.bodyH * 0.9);
     /**
      * ③ 🔴 **実害そのもの ── パンくずに幅が在る**。
      * ⚠ 直す前の実測は `scrollWidth 41 / clientWidth 0` ── 字は在るのに 1px も見えない。

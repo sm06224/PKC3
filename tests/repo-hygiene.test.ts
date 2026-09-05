@@ -1072,11 +1072,13 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     // ⚠ 2026-09-05(#699 / #704): `table-width` と `inspector-fit` の 2 file を足した
     //    (狭い器での折れ方と、実寸の当たり判定は unit では見えない)
     // ⚠ 2026-09-05(#705 / #700): `phone` に 2 件・`context-menu` に 1 件・`inspector-fit` の中身
-    expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(83);
+    // ⚠ 2026-09-05(#706): `touch-targets.smoke.spec.ts` を新設(+1 file / +3 件)──
+    //    指の端末で押し所が全数 24px 以上 / 行の字を tap して印が付く / 対照群(マウスは不変)
+    expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(84);
     expect(
       counts.reduce((a, b) => a + b, 0),
       'smoke の test が増減した(足したらこの数を直す)',
-    ).toBe(444);
+    ).toBe(447);
   });
 });
 

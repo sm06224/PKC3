@@ -5683,6 +5683,90 @@ li[data-pkc-row-slot] {
   [data-pkc-region='alarm-bar'] button {
     min-height: 32px;
   }
+
+  /**
+   * 🔴 **指で触る端末では、押し所を 24px より小さくしない**(#706。2026-09-05)。
+   *
+   * ⚠ 実測(360×640 / 390×844 / 768×1024、`hasTouch`)で 24px に届かなかったのは
+   *   9 種類 ── ⋯ 23×32 / 見出しを畳む帯 16〜18×26 / チェックの箱 13×13 /
+   *   囲みのコピー ⧉ 22×20 / ‹ › 18×26 / ▾ 24×26 / 目次の行 12〜15px /
+   *   設定の箱 13×13 / 追記欄の帯 8px(帯は `#701` の節で広げる)。
+   * 🔑 **見え方を変えるのは指の端末だけ**(`hover: none` + `pointer: coarse`)──
+   *   マウスの端末は 1px も変えない(user 指示 2026-08-28「見え方を変える判断は
+   *   user のもの」の裏返しで、頼まれていない変更をマウスの画面に入れない)。
+   * ⚠ 24px は WCAG 2.2 の「Target Size (Minimum)」の値 ── 44px(AAA)にしないのは、
+   *   一覧の 1 画面に入る行数が 3 割減るから(縦の予算)。
+   */
+  /**
+   * ⑦ **行の高さを 34px に**。素の `button` / `input` / 一覧の行は `--row-h` から
+   *    丈を取るので、この 1 本で 26 → 34 に揃う(⋯ / ▾ / ‹ › / タブ / 札の全部)。
+   *    ⚠ `[data-pkc-slot='root']` に置く ── `:root` に置くと `tokens.css` と同じ詳細度で
+   *    **読み込み順に依存する**。子孫に置けば順序に関係なく勝つ。
+   *    ⚠ 一覧の 1 画面に入る行数は **390×844 で 24 → 18 行**(実測は PR の報告に在る)。
+   */
+  [data-pkc-slot='root'] {
+    --row-h: 34px;
+  }
+  /* ⑥ **‹ ›**:幅 18 → 24、字は `--muted`(4.1:1)から `--fg` へ ── 色ではなく濃さで読ませる。
+   *    ⚠ 丈は上の `--row-h` が 34 にする(ここで `height` を書かない ── 2 か所にしない)。 */
+  button[data-pkc-glyph] {
+    min-width: 24px;
+    color: var(--fg);
+  }
+  /* ③ **⋯**:23 → 32(帯の他のボタンと同じ幅の下限)。▾(種類を選ぶ)も 23.6 → 28。 */
+  [data-pkc-field='phone-menu'] {
+    min-width: 32px;
+  }
+  /* ⚠ `create-bar button` の `min-width: max-content`(0,1,1)に勝つため器を噛ませる */
+  [data-pkc-region='create-bar'] [data-pkc-field='create-pick'] {
+    min-width: 28px;
+  }
+  /* ① **チェックの箱**:13 → 24(本文のチェックリストと設定の箱、両方)。
+   *    ⚠ issue #706 は 20px を挙げていたが、smoke の主張「押し所は**全数** 24px 以上」と
+   *    食い違うので 24 に揃えた(箱を名指しで除くと、検査が名指しの表に戻る)。
+   *    ⚠ 箱が大きくなるぶん、チェックリストの行は字の頭を右へ寄せ、行の丈も箱に合わせる。
+   *    行の**字を押しても印が変わる**のは `binder.ts` の click(`li.pkc-task-item`)が受ける。 */
+  [data-pkc-slot='root'] input[type='checkbox'] {
+    width: 24px;
+    height: 24px;
+  }
+  .pkc-md-rendered li.pkc-task-item {
+    padding-left: 2.2em;
+    min-height: 24px;
+  }
+  .pkc-md-rendered li.pkc-task-item > .pkc-task-checkbox,
+  .pkc-md-rendered li.pkc-task-item > p:first-child > .pkc-task-checkbox:first-child {
+    top: 0;
+  }
+  /* ② **見出しを畳む帯**:押し所を 24px に(見えるのは帯 3px のまま ── 字の頭 1 文字ぶんが
+   *    押し所に入る。ボタンは地を持たないので、その字は透けて読める)。
+   *    ⚠ `[data-pkc-slot='root']` を噛ませる ── 素の規則(この file の**後ろ**、見出しの畳みの節)
+   *    が同じ (0,1,0) なので、`@media` の中でも**後ろの素の規則に負ける**(実測で踏んだ:
+   *    幅 18px のまま)。`@media` は詳細度を上げない。 */
+  [data-pkc-slot='root'] [data-pkc-field='heading-fold'] {
+    width: 24px;
+  }
+  /* ⑤ **囲みのコピー ⧉ / 図の切替**:22×20 → 24×24。切替はコピーの左に並ぶので、
+   *    コピーの幅が増えたぶん右の余白も 26 → 28 にずらす(重ねない)。 */
+  .pkc-md-rendered .pkc-md-copy-btn {
+    width: 24px;
+    height: 24px;
+  }
+  .pkc-md-rendered .pkc-render-toggle {
+    right: 28px;
+    min-width: 24px;
+    line-height: 22px;
+  }
+  /* ④ **目次の行**:情報ペインの目次(12px)と本文の `:::toc`(15px)を 24px に。
+   *    ⚠ 本文側は行間を広げるのではなく、リンクを行ボックスにして丈を持たせる。 */
+  [data-pkc-field='inspector-toc-link'] {
+    min-height: 24px;
+  }
+  .pkc-md-rendered .pkc-toc-link {
+    display: inline-block;
+    min-height: 24px;
+    line-height: 24px;
+  }
 }
 
 /**
