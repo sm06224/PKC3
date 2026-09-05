@@ -232,7 +232,14 @@ describe('右クリックで表の形を変える(#708 段②)', () => {
     ack(csv, { kind: 'table-format', line: 2, to: 'csv' } as BodyRewrite);
     const note = s.d.getState().notice ?? '';
     expect(note, '何が起きたか出ていない').toContain('CSV の表');
-    expect(note, 'できるようになったことを言っていない').toContain('押すと');
+    /**
+     * 🔴 **できるようになったことを言う**(#708 段④ で字を直した)。
+     * ⚠ それまでは「升を押して打てます」と言っていたが、段④ で**markdown の表の升も
+     *   押せる**ようになったので、その字は**両方で真 = 何も伝えていない**。
+     *   いま形で変わるのは**行・列の ＋ ×** と**式**である。
+     */
+    expect(note, '形で何が変わるかを言っていない').toContain('行と列');
+    expect(note, '式のことを言っていない').toContain('式');
     expect(note, '帰り道を言っていない').toContain('右クリック');
 
     // 対照群 ── 別の書換では、この字は出ない(何にでも出る字ではない)
