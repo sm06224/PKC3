@@ -88,7 +88,7 @@ test('🔴 本文を右クリックして横に留めると、2 つの枠が並�
   await createEntry(page, 'text');
   await writeBody(page, `# 資料 B\n\n${LONG}`);
 
-  // ③ 本文を右クリック → 「このノートを横に留める」
+  // ③ 本文を右クリック → 「このノートをスタックに載せる」(字は #633 段① で揃えた)
   // ⚠ **段落の上で押す**(器の中央は余白に当たる ── context-menu smoke と同じ作法)
   await page.locator('[data-pkc-field="detail-body"] p').first().click({ button: 'right' });
   const menu = page.locator(MENU);

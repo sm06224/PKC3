@@ -980,7 +980,12 @@ export type UserAction =
    * ── 置けるのに外せないと、間違えて留めた物を戻す道が無い。
    */
   | { type: 'PIN_SPLIT_ENTRY'; lid: string }
-  | { type: 'UNPIN_SPLIT_ENTRY'; lid: string }
+  /**
+   * `gone: true` = **ノートが消えていたので降ろす**(効果層の自己修復。#633 段①)。
+   * ⚠ user が × を押したときは付けない ── 付けると「消えた」と嘘を言う。
+   *   付いていれば reducer が 1 行知らせる(黙って降ろすと dead click に見える)。
+   */
+  | { type: 'UNPIN_SPLIT_ENTRY'; lid: string; gone?: true }
   | { type: 'SELECT_ENTRY'; lid: string }
   | { type: 'SET_VIEW_MODE'; mode: ViewMode }
   /**
@@ -4484,7 +4489,20 @@ function reduceCore(
       const rest = unpinSplitLid(state.splitLids, action.lid);
       if (rest === state.splitLids) return { state, events: [] };
       return {
-        state: { ...state, splitLids: rest, splitBodies: dropSplitBody(state.splitBodies, action.lid) },
+        state: {
+          ...state,
+          splitLids: rest,
+          splitBodies: dropSplitBody(state.splitBodies, action.lid),
+          /**
+           * 🔴 **消えたので降ろしたときだけ 1 行言う**(#633 段①)。
+           * ⚠ 直す前は無言だった ── user から見ると「札が勝手に消えた」である。
+           * ⚠ 題名は**降ろす前の `entryMetas`** から引く(別タブで消された直後は
+           *   まだ残っていることが多い。無ければ「消えたノート」)。
+           */
+          ...(action.gone === true
+            ? { notice: goneFromStackNotice(state.entryMetas.get(action.lid)?.title) }
+            : {}),
+        },
         events: [],
       };
     }
@@ -4879,6 +4897,10 @@ function removeEntryFromState(
        */
       splitLids: unpinSplitLid(state.splitLids, lid),
       splitBodies: dropSplitBody(state.splitBodies, lid),
+      // 🔑 載せていた物を消したなら、降ろしたことを言う(#633 段① ── 効果層の自己修復と同じ字)
+      ...(state.splitLids.includes(lid)
+        ? { notice: goneFromStackNotice(state.entryMetas.get(lid)?.title) }
+        : {}),
     },
     events,
   };
@@ -5007,6 +5029,14 @@ function placeOpenLineOf(shown: string, line: number): string | null {
 /** 板の座標・大きさの値 ── 整数で 0 以上だけ(描画も負の値は捨てる)。 */
 function isPlaceCoord(n: number): boolean {
   return Number.isInteger(n) && n >= 0;
+}
+
+/**
+ * 🔴 **消えたノートをスタックから降ろしたときの 1 行**(#633 段①)── 字はここ 1 か所。
+ * ⚠ 呼び手は 2 つ(削除 / 効果層の本文 null)── 別々に書くと片方だけ直る(§7)。
+ */
+function goneFromStackNotice(title: string | undefined): string {
+  return `「${title ?? '消えたノート'}」は消えたのでスタックから降ろしました`;
 }
 
 function dropSplitBody(

@@ -1022,10 +1022,11 @@ describe('右クリックの説明(#587 C-1)', () => {
     rightClick(root.querySelector('[data-pkc-field="para"]')!);
     const items = [...root.querySelectorAll<HTMLElement>(`${MENU} button`)];
     expect(items.length, '本文のメニューが出ていない(台の空振り)').toBeGreaterThanOrEqual(2);
+    // ⚠ 2026-09-05(#633 段①): `pin-split` も説明を持った(帯の札の話を押す前に読める)
     expect(
       items.filter((b) => b.hasAttribute('data-pkc-hint')).map((b) => b.getAttribute('data-pkc-action')),
       '説明を持たないのに空の data-pkc-hint が生えている',
-    ).toEqual(['open-note-window']);
+    ).toEqual(['pin-split', 'open-note-window']);
   });
 });
 

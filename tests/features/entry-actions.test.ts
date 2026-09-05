@@ -275,6 +275,8 @@ describe('右クリックの説明(#587 C-1)', () => {
       ['adopt-external-images', '36c7974a'],
       ['copy-entry-ref', '2614a326'],
       ['copy-plain-markdown', '73e9b322'],
+      // 🔴 スタックに載せる(#633 段①、2026-09-05)── 帯の名前と押す字を同じ語にし、説明を持たせた
+      ['pin-split', '1621a667'],
       ['show-history', '2511b05b'],
       ['delete-entry', '661f5844'],
       // 🔴 **左の列の道具 4 つ**(#632 段①)── 本文ページの ⋯ から押せるようにした
@@ -391,16 +393,22 @@ describe('右クリックの説明(#587 C-1)', () => {
     const adopt = rows.find((a) => a.action === 'adopt-external-images');
     expect(adopt?.hint, '外へ通信することが説明に無い').toContain('通信します');
     /**
-     * ⚠ **対照群** ── 説明を持たない 2 つは空のまま(何にでも字を付ける作りではない)。
+     * ⚠ **対照群** ── 説明を持たない 1 つは空のまま(何にでも字を付ける作りではない)。
      * 🔴 **名前で等値 pin する**(2026-09-04)── 1 稿目は
      *   `BODY_MENU_ACTIONS.map(...)` と比べていたので「**本文のメニューは全部
      *   説明を持たない**」を主張していた。⚠ 説明を持つ項目を 1 つ足した瞬間に
      *   落ちる形で、**守りたいこと(説明が要る物には配る)と逆向き**だった。
+     * ⚠ 2026-09-05(#633 段①): `pin-split` は説明を持った(帯の札の話を押す前に読める)ので、
+     *   残るのは段組みだけ。
      */
     expect(
       rows.filter((a) => a.hint === '').map((a) => a.action),
       '説明を持たない項目の一覧が変わった',
-    ).toEqual(['cycle-read-columns', 'pin-split']);
+    ).toEqual(['cycle-read-columns']);
+    expect(
+      rows.find((a) => a.action === 'pin-split')?.hint ?? '',
+      'スタックに載せる の説明が帯の話をしていない',
+    ).toContain('帯');
     // ⚠ **空振り防止** ── 名前で pin した 2 つが、いまも本文のメニューに居ること
     expect(
       BODY_MENU_ACTIONS.map((a) => a.action),
@@ -471,6 +479,26 @@ describe('行の右クリックからの整理(#215)', () => {
     expect(ENTRY_ACTION_LABELS['rename-entry-begin']).toBe('名前を変える');
     expect(ENTRY_ACTION_LABELS['move-to-folder']).toBe('移す…');
     expect(ENTRY_ACTION_LABELS['create-in-folder']).toBe('この中に新しいノートを作る');
+  });
+});
+
+/**
+ * 🔴 **スタックの字は 1 つの語**(#633 段①。user 裁定 2026-09-02 設問 3 = A)。
+ *
+ * ⚠ 段① の着地時、右クリックの字だけ「このノートを横に留める」のまま残っていた ──
+ *   帯の名前は「スタック」、枠の字は「× 降ろす」、マニュアルは同じ節で
+ *   「横に留める」と「スタックに載せる」の 2 つの名前を使っていた。
+ *   帯に並んだ物と押した物の対応が読めない形である。
+ * 🔑 押す字とマニュアルの字を**同じ文字列**で pin する(片方だけ直る日を作らない)。
+ */
+describe('スタックの字(#633 段①)', () => {
+  it('🔴 本文のメニューの字は「このノートをスタックに載せる」で、マニュアルも同じ字を使う', () => {
+    const label = BODY_MENU_ACTIONS.find((a) => a.action === 'pin-split')?.label;
+    expect(label).toBe('このノートをスタックに載せる');
+    const manual = readFileSync('docs/manual.md', 'utf-8');
+    expect(manual, 'マニュアルに押す字が無い').toContain(`**${label}**`);
+    // ⚠ 古い字が 1 つでも残ると、同じ節に 2 つの名前が並ぶ(直す前の姿)
+    expect(manual, 'マニュアルに古い字「横に留める」が残っている').not.toContain('横に留める');
   });
 });
 

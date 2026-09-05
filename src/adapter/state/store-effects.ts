@@ -914,7 +914,8 @@ export function connectStoreEffects(
              * 🔑 `SPLIT_RESTORED` が知らない lid を落とさないのは、ここが拾うからである。
              */
             if (body === null) {
-              dispatcher.dispatch({ type: 'UNPIN_SPLIT_ENTRY', lid: ev.lid });
+              // 🔑 `gone` を添える ── reducer が「消えたので降ろした」と 1 行言う(#633 段①)
+              dispatcher.dispatch({ type: 'UNPIN_SPLIT_ENTRY', lid: ev.lid, gone: true });
               return;
             }
             dispatcher.dispatch({ type: 'SPLIT_BODY_LOADED', lid: ev.lid, body });
