@@ -288,6 +288,28 @@ button[data-pkc-glyph]:disabled {
   background: var(--bg);
   opacity: 0.7;
 }
+/**
+ * 🔴 **低い窓でこちらが畳んだ追記欄は、取っ手を「ここに追記する」の帯 1 行にする**(#701。
+ * user 裁定 2026-09-04 案 A)。
+ *
+ * ⚠ 印は shell の属性 `data-pkc-append-autofold` ── 書き手は `applyPaneVisibility` の 1 か所で、
+ *   **こちらが畳んだ回だけ**立つ(user が自分で畳んだ回は 8px の取っ手のまま)。
+ * ⚠ 数字(何 px の窓か)はここに書かない ── `append-autofold.ts` の `matchMedia` が持つ。
+ * 🔑 帯は取っ手そのもの(`pane-grip`)である ── 押す先も鍵(`Alt+\`)も掴んで広げるのも今までどおり。
+ *   字は `::after`(`⋮` を差し替える)── ボタンに字を入れると `aria-label` と二重になる。
+ */
+[data-pkc-region='shell'][data-pkc-append-autofold] [data-pkc-region='pane-grip'][data-pkc-axis='y'] {
+  height: 28px;
+  opacity: 1;
+  background: var(--surface-2);
+  color: var(--fg);
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  cursor: pointer;
+}
+[data-pkc-region='shell'][data-pkc-append-autofold] [data-pkc-region='pane-grip'][data-pkc-axis='y']::after {
+  content: 'ここに追記する';
+}
 
 /* 置換の帯(#191)。⚠ 器は 1 度しか組まないので、打ちかけの語は描き直しで消えない */
 [data-pkc-region='replace-bar'] {
@@ -5697,6 +5719,21 @@ li[data-pkc-row-slot] {
    * ⚠ 24px は WCAG 2.2 の「Target Size (Minimum)」の値 ── 44px(AAA)にしないのは、
    *   一覧の 1 画面に入る行数が 3 割減るから(縦の予算)。
    */
+  /**
+   * **追記欄の取っ手**(#701 C):見た目は 8px のまま、押し所を上下 8px ずつ広げて 24px にする。
+   * ⚠ `::before` は取っ手の一部なので、そこを押しても掴んでも取っ手として扱われる
+   *    (`boundingBox` には出ない ── smoke は `elementFromPoint` で見る)。
+   * ⚠ 上 8px は本文の末尾、下 8px は追記欄の頭に重なる ── 指の端末だけにする理由がこれである
+   *    (マウスでは 8px の取っ手を正確に指せるので、隣を奪う代償を払わない)。
+   */
+  [data-pkc-region='pane-grip'][data-pkc-axis='y'] {
+    position: relative;
+  }
+  [data-pkc-region='pane-grip'][data-pkc-axis='y']::before {
+    content: '';
+    position: absolute;
+    inset: -8px 0;
+  }
   /**
    * ⑦ **行の高さを 34px に**。素の `button` / `input` / 一覧の行は `--row-h` から
    *    丈を取るので、この 1 本で 26 → 34 に揃う(⋯ / ▾ / ‹ › / タブ / 札の全部)。

@@ -24,6 +24,7 @@ import { appTooNarrowOk, installTooNarrow } from '@adapter/ui/render/too-narrow'
 import { paintStatusOpen, paintStatusUndo } from '@adapter/ui/render/status-open';
 import { appOpenInEdit } from '@adapter/ui/render/open-in-edit';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
+import { installAppendAutofold } from '@adapter/ui/render/append-autofold';
 import { appPaneSizes, applyPaneSizes } from '@adapter/ui/render/pane-size';
 import { installPaneResize } from '@adapter/ui/render/pane-resize';
 import { installPlaceDrag } from '@adapter/ui/render/place-drag';
@@ -864,6 +865,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     repaintOnLayout();
   });
   applyPaneVisibility(root, appPanes.getHidden());
+  /**
+   * 🔴 **低い窓では追記欄を最初から畳む**(#701)。⚠ 畳みの復元の**後**に張る ──
+   *   こちらの畳みは記録の上に重ねるだけなので順序で壊れはしないが、読み手に
+   *   「記録 → こちらの畳み」の順で見せる。⚠ 外さない(アプリと同寿命)。
+   */
+  installAppendAutofold(root);
   /**
    * 🔴 **決めた大きさも起動時に戻す**(#497)。⚠ 畳んだ状態と**対**である ──
    * 片方だけ戻すと「畳んだのは覚えているのに幅は既定」という半端な画面になる。

@@ -750,6 +750,100 @@ test('🔴 横に倒したスマホ(844×390)でもスマホ用画面になり�
 });
 
 /**
+ * 🔴 **低い窓では、追記欄を最初から畳んで本文を 300px 以上に**(#701。user 裁定 2026-09-04 案 A)。
+ *
+ * ## 直す前(2026-09-05 実測、844×390・ノート 1 件開いた直後)
+ *
+ * 本文の器 **230px** / 追記欄 107px / ページの帯 36px ── 7〜8 行しか読めず、
+ * 畳む取っ手は 8px で、⋯ にも「追記欄を畳む」が無かった。
+ *
+ * ## ここで見るもの
+ *
+ * ① 開いた直後に本文の器が 300px 以上 ② 畳んだ所に「ここに追記する」の帯(1 行、押せる)
+ * ③ 帯を押すと欄が出て、送ると元どおり畳む(`peek` の作法)④ 記録(`pkc3.panes`)は動かない
+ */
+test('🔴 横に倒したスマホ(844×390)では追記欄が畳まれて本文が 300px 以上、帯から追記して戻る (#701)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 844, height: 390 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  await createEntry(page, 'text');
+  await clickReal(page, `${REGION('detail')} [data-pkc-action="commit-edit"]`);
+
+  const detail = page.locator(REGION('detail'));
+  const append = page.locator(REGION('append'));
+  const grip = page.locator('[data-pkc-region="pane-grip"][data-pkc-axis="y"]');
+  await expect(append, '低い窓なのに追記欄が開いている').toBeHidden();
+  const body = (await detail.boundingBox())!;
+  expect(body.height, `本文の器が 300px に届かない(${Math.round(body.height)}px)`).toBeGreaterThanOrEqual(300);
+
+  // ② 帯 ── 字は `::after`(button の字に入れると aria-label と二重になる)
+  const band = await grip.evaluate((el) => ({
+    text: getComputedStyle(el, '::after').content,
+    h: Math.round(el.getBoundingClientRect().height),
+  }));
+  expect(band.text, '帯の字が「ここに追記する」でない').toContain('ここに追記する');
+  expect(band.h, `帯が 1 行の丈を持たない(${band.h}px)`).toBeGreaterThanOrEqual(24);
+
+  // ③ 押すと欄が出る → 打って送る → 元どおり畳む
+  await clickReal(page, grip);
+  await expect(append, '帯を押しても欄が出ない').toBeVisible();
+  await page.locator('[data-pkc-field="append-input"]').fill('横向きで 1 行');
+  await clickReal(page, '[data-pkc-action="append-entry"]');
+  await expect(detail, '追記が本文に入っていない').toContainText('横向きで 1 行');
+  await expect(append, '送った後に畳み直されていない').toBeHidden();
+
+  // ④ 記録は 1 byte も動いていない
+  const saved = await page.evaluate(() => localStorage.getItem('pkc3.panes'));
+  expect(saved ?? '', 'こちらの畳みが記録に書かれた(PC の見え方まで変わる)').not.toContain('append');
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * ⚠ **対照群 ── 縦のスマホ(360×640)では追記欄は出たまま**(本文は 480px 取れる)。
+ * 🔑 そして取っ手は見た目 8px のまま、**指の押し所は 24px 以上**(#701 C)──
+ *   `boundingBox` には出ないので `elementFromPoint` で上下 ±10px を突く。
+ */
+test('⚠ 縦のスマホ(360×640)では追記欄は畳まず、取っ手は 8px のまま 24px 以上で押せる (#701)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 360, height: 640 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  await createEntry(page, 'text');
+  await clickReal(page, `${REGION('detail')} [data-pkc-action="commit-edit"]`);
+
+  await expect(page.locator(REGION('append')), '縦の窓なのに追記欄が畳まれた').toBeVisible();
+  const hit = await page
+    .locator('[data-pkc-region="pane-grip"][data-pkc-axis="y"]')
+    .evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const cx = r.x + r.width / 2;
+      const own = (dy: number): boolean => {
+        const at = document.elementFromPoint(cx, r.y + r.height / 2 + dy);
+        return at === el || el.contains(at);
+      };
+      return { h: Math.round(r.height), above: own(-10), on: own(0), below: own(10) };
+    });
+  expect(hit.h, '取っ手の見た目が 8px でない').toBe(8);
+  expect(hit.on, '取っ手そのものが押せない').toBe(true);
+  expect(hit.above && hit.below, '取っ手の押し所が 24px に広がっていない(上下 ±10px で当たらない)').toBe(
+    true,
+  );
+  // ⚠ 記録が無いのだから、帯の字は出ない(user が畳んだ回と同じ 8px の取っ手)
+  const text = await page
+    .locator('[data-pkc-region="pane-grip"][data-pkc-axis="y"]')
+    .evaluate((el) => getComputedStyle(el, '::after').content);
+  expect(text, '畳んでいないのに「ここに追記する」が出ている').not.toContain('ここに追記する');
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
  * ⚠ **対照群 ── 幅も高さも足りている窓(1280×720)はスマホ用画面にならない**(#663)。
  * 🔑 これが無いと、「いつでもスマホ用画面」にする実装が上を満たして通る。
  *   ⚠ そして「操作を探す」はここでも押せる ── 押せないなら計器の話である

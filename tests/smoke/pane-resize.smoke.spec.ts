@@ -164,6 +164,40 @@ test('🔴 広げた後で画面を狭めても、本文は残る (#497)', async
  * 開いていない回に帯だけ浮いていると、押しても何も起きない導線になる。
  * 🔑 `:has()` で決めているので、**実ブラウザでしか確かめられない**。
  */
+/**
+ * ⚠ **対照群(#701)── 高い窓・マウスの端末では、追記欄も取っ手も 1px も変わらない。**
+ * 🔑 低い窓で追記欄を最初から畳む変更は、高い窓では**何もしない**ことをここで留める:
+ *   追記欄は出たまま / 取っ手は 8px で字は `⋮` / 押し所も 8px のまま(上下 ±10px は別の物)。
+ */
+test('⚠ 1440×900 では追記欄は出たままで、取っ手は 8px の「⋮」のまま (#701 対照群)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await expect(page.locator('[data-pkc-region="append"]'), '高い窓で追記欄が畳まれた').toBeVisible();
+  const g = await page.locator(grip('append')).evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const cx = r.x + r.width / 2;
+    const own = (dy: number): boolean => {
+      const at = document.elementFromPoint(cx, r.y + r.height / 2 + dy);
+      return at === el || el.contains(at);
+    };
+    return {
+      h: Math.round(r.height),
+      after: getComputedStyle(el, '::after').content,
+      autofold: el.closest('[data-pkc-region="shell"]')!.hasAttribute('data-pkc-append-autofold'),
+      above: own(-10),
+      below: own(10),
+    };
+  });
+  expect(g.h, '取っ手の丈が 8px でない').toBe(8);
+  expect(g.after, '取っ手の字が ⋮ でない').toContain('⋮');
+  expect(g.autofold, '高い窓に「ここに追記する」の印が付いた').toBe(false);
+  expect(g.above || g.below, 'マウスの端末で取っ手の押し所が広がった(隣を奪う)').toBe(false);
+  expect(errors, 'pageerror が出た').toEqual([]);
+});
+
 test('🔴 追記欄の帯は、ノートを開いたときだけ出る (#497)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1400, height: 900 });

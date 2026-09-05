@@ -166,6 +166,7 @@ import {
   withTrailingLast,
 } from '@features/entry-actions';
 import {
+  type MenuItem,
   closeContextMenu,
   contextMenuOpen,
   openContextMenu,
@@ -2801,6 +2802,17 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    /**
+     * 🔴 **低い窓でこちらが畳んだ追記欄は、押すと「一時的に」出る**(#701)。
+     * ⚠ `toggle` で戻すと、その窓ではもう畳まれない(記録には書かないが、窓の高さが
+     *   変わるまで開いたまま)── 裁定は「開いたら**送った後は自分で畳み直す**」なので、
+     *   `peek` と同じ道を通す(送る / 欄の外で 1 操作 → `refoldPeeked` が畳む)。
+     * ⚠ user が自分で畳んだ回(記録に在る)は今までどおり `toggle` ── あちらは
+     *   「戻す」を押した人の意図が「出しておきたい」だからである。
+     */
+    if (id === 'append' && appPanes.isAutoFolded('append') && appPanes.getHidden().includes('append')) {
+      if (revealAppendPane(root)) return;
+    }
     applyPaneVisibility(root, appPanes.toggle(id));
   },
   /**
@@ -2972,7 +2984,8 @@ const ACTIONS: Record<string, ActionHandler> = {
        *   操作を探す。4 つとも `selectedLid` を要るのに押し口は一覧の中にしか無く、
        *   スマホでは**戻ると対象が消える**(円環の dead click)。
        */
-      withTrailingLast(
+      // ⚠ `MenuItem` で型を留める ── 追記欄の項目だけが持つ `attrs` を通すため
+      withTrailingLast<MenuItem>(
         [
           /**
            * 🔴 **毎日使うものを上へ**(user 裁定 2026-09-02)。
@@ -2990,6 +3003,26 @@ const ACTIONS: Record<string, ActionHandler> = {
           }),
         ],
         [
+          /**
+           * 🔴 **追記欄を畳む / 戻す**(#701 C)。⚠ スマホには取っ手が 8px しか無く、
+           *   畳めることを知る口が無かった ── この面の道具の中で ⋯ に無いのはこれだけだった。
+           *   受け手は `toggle-pane`(新しい受け手を作らない)、`data-pkc-pane` は
+           *   **この項目だけ**に付ける(`attrs`)。置き場は「操作を探す」の直前 ──
+           *   先頭 4 つ(毎日使う道具)と右クリックの並びを崩さない(unit が順番を pin する)。
+           * ⚠ 追記欄の出ない種類(フォルダ・添付)では出さない ── 押しても何も起きない。
+           */
+          ...(isAppendable(st.entryMetas.get(lid)?.archetype)
+            ? [
+                {
+                  action: 'toggle-pane',
+                  label: appPanes.getHidden().includes('append') ? '追記欄を戻す' : '追記欄を畳む',
+                  hint: appPanes.getHidden().includes('append')
+                    ? '本文の下に追記欄を出します'
+                    : '本文の下の追記欄を畳んで、本文を広く読みます(もう一度で戻ります)',
+                  attrs: { 'data-pkc-pane': 'append' },
+                },
+              ]
+            : []),
           {
             action: 'open-palette',
             label: '操作を探す',

@@ -567,6 +567,39 @@ describe('⋯ と左の列の等値(次に足した人が気づく)', () => {
     expect(acts[acts.length - 2], '操作を探す が削除の直前ではない').toBe('open-palette');
   });
 
+  /**
+   * 🔴 **⋯ から追記欄を畳める / 戻せる**(#701 C)。
+   * ⚠ スマホの取っ手は 8px で、⋯ の 15 項目にも無かった ── 畳めることを知る口が 1 つも無い。
+   * 🔑 受け手は `toggle-pane`(新しい受け手を作らない)、押した結果は shell の属性で見る。
+   */
+  it('🔴 ⋯ に「追記欄を畳む」が在り、押すと畳まれ、次は「追記欄を戻す」になる (#701)', () => {
+    const s = setup(true);
+    s.open('n1');
+    s.field('phone-menu').click();
+    const item = s.menu()!.querySelector<HTMLElement>('button[data-pkc-action="toggle-pane"]');
+    expect(item, '⋯ に追記欄の項目が無い').not.toBeNull();
+    expect(item!.textContent).toBe('追記欄を畳む');
+    expect(item!.getAttribute('data-pkc-pane'), '受け手が読む面の名前が無い(押しても何も起きない)').toBe('append');
+    item!.click();
+    expect(s.shell.getAttribute('data-pkc-hidden-panes') ?? '', '押しても畳まれない').toContain('append');
+    s.field('phone-menu').click();
+    expect(
+      s.menu()!.querySelector('button[data-pkc-action="toggle-pane"]')!.textContent,
+      '畳んだ後の字が「戻す」になっていない(片道に見える)',
+    ).toBe('追記欄を戻す');
+    // ⚠ 置き場は「操作を探す」の直前(先頭 4 つと右クリックの並びは崩さない)
+    const acts = [...s.menu()!.querySelectorAll('button')].map((b) => b.getAttribute('data-pkc-action'));
+    expect(acts[acts.length - 3], '「操作を探す」の直前に無い').toBe('toggle-pane');
+  });
+
+  it('⚠ 追記欄の出ない種類(フォルダ)では ⋯ に出さない', () => {
+    const s = setup(true);
+    s.d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [META('f1', '箱', 'folder')], relations: [] });
+    s.open('f1');
+    s.field('phone-menu').click();
+    expect(s.menu()!.querySelector('button[data-pkc-action="toggle-pane"]'), 'フォルダで追記欄の項目が出た').toBeNull();
+  });
+
   it('🔴 表と実物の綴りが合っている(受け手を新しく作っていない)', () => {
     const s = setup(false);
     for (const a of NOTE_TOOL_ACTIONS)

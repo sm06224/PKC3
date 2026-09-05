@@ -41,6 +41,12 @@ export class PaneVisibilityStore {
    *   場面は無い(要るときに増やす。先に器だけ広げない)。
    */
   private peeking: PaneId | null = null;
+  /**
+   * 🔴 **窓が低いあいだ、こちらが畳んでいるペイン**(#701。user 裁定 2026-09-04 案 A)。
+   * ⚠ 端末の記録には**書かない**(`peek` と同じ作法)── 窓を高くすれば何も無かったように出る。
+   * ⚠ 1 枚だけ(いま使うのは追記欄)。書き手は `append-autofold.ts` の 1 か所。
+   */
+  private auto: PaneId | null = null;
 
   constructor(
     private readonly storage: Pick<Storage, 'getItem' | 'setItem'> | null = readStorage(),
@@ -58,7 +64,13 @@ export class PaneVisibilityStore {
 
   /** ⚠ 読むたびに保存を見る(書き手が複数 ── UI と smoke の仕込み)。 */
   private storedHidden(): PaneId[] {
-    if (this.detached) return this.fallback;
+    const base = this.detached ? this.fallback : this.readRecord();
+    // 🔑 こちらの畳み(`auto`)は記録の**上に重ねて**読む ── 記録そのものには無い
+    if (this.auto === null || base.includes(this.auto)) return base;
+    return decodeHidden(encodeHidden([...base, this.auto]));
+  }
+
+  private readRecord(): PaneId[] {
     try {
       return decodeHidden(this.storage?.getItem(KEY) ?? null);
     } catch {
@@ -84,6 +96,16 @@ export class PaneVisibilityStore {
     if (peek !== null) {
       if (hidden.includes(peek)) this.peeking = null;
       else record = [...hidden, peek];
+    }
+    /**
+     * 🔴 **こちらが畳んでいる物は記録に書かない**(#701)── 一覧に**入っていない**なら
+     *   user が「戻す」を押した(掴んで広げた)ので、こちらの畳みは終わる。入っているなら
+     *   記録からは外して書く(スマホを横に倒した 1 回が PC の見え方を変えない)。
+     */
+    const auto = this.auto;
+    if (auto !== null) {
+      if (!hidden.includes(auto)) this.auto = null;
+      else record = record.filter((id) => id !== auto);
     }
     const next = decodeHidden(encodeHidden(record));
     this.fallback = next;
@@ -125,6 +147,31 @@ export class PaneVisibilityStore {
   }
 
   /**
+   * 🔴 **窓の高さに合わせて、こちらが畳む / 畳みをやめる**(#701)。書き手は
+   *   `append-autofold.ts` の 1 か所。`null` で「こちらの畳みは無し」。
+   * ⚠ 小窓(`sessionOnly` の後)では**何もしない** ── 追記のための窓に打つ欄が無い、を作らない。
+   * ⚠ 見せている物(`peeking`)がその物なら、畳みをやめた時点で一時表示も終える
+   *   (見せる理由が無くなるので ── 残すと、次の `unpeek` が畳んでいない物を畳む)。
+   */
+  setAutoFold(id: PaneId | null): void {
+    if (this.detached) return;
+    this.auto = id;
+    if (id === null && this.peeking !== null && !this.storedHidden().includes(this.peeking))
+      this.peeking = null;
+  }
+
+  /**
+   * **こちらが**畳んでいる物か(帯の字「ここに追記する」を出す / 押したら一時表示にする判定)。
+   * ⚠ user が自分でも畳んでいる(記録に在る)なら `false` ── その畳みは user の物なので、
+   *   帯の字も出さず、押せば今までどおり「戻す」(記録から外す)。
+   */
+  isAutoFolded(id: PaneId): boolean {
+    if (this.auto !== id) return false;
+    const record = this.detached ? this.fallback : this.readRecord();
+    return !record.includes(id);
+  }
+
+  /**
    * 一時的に見せていた物を、元どおり畳む。
    * @returns 畳み直した後の一覧(呼び側はそのまま `applyPaneVisibility` へ渡す)。
    *          何も見せていなければ `null`(画面に触る理由が無い)
@@ -156,6 +203,8 @@ export class PaneVisibilityStore {
    * @returns 切り離した時点の畳み(呼び側はそのまま `applyPaneVisibility` へ渡す)
    */
   sessionOnly(reveal: PaneId): PaneId[] {
+    // ⚠ こちらの畳み(#701)も外す ── 小窓は追記欄を必ず出す(以後 `setAutoFold` は効かない)
+    if (this.auto === reveal) this.auto = null;
     const seed = this.getHidden().filter((id) => id !== reveal);
     this.detached = true;
     this.fallback = decodeHidden(encodeHidden(seed));
@@ -223,6 +272,15 @@ export function applyPaneVisibility(root: HTMLElement, hidden: readonly PaneId[]
   const value = encodeHidden(shown);
   if (value === '') shell.removeAttribute('data-pkc-hidden-panes');
   else shell.setAttribute('data-pkc-hidden-panes', value);
+  /**
+   * 🔴 **こちらが畳んでいる追記欄には、「ここに追記する」の帯を出す**(#701)。
+   * ⚠ user が自分で畳んだ回には出さない ── あれは「閲覧メインだから消したい」で、
+   *   帯の字を毎回見せるのは頼まれていない。こちらが黙って畳んだ回だけ、戻す口を字で示す。
+   * ⚠ 印は shell の属性 1 つ ── CSS はこれを読んで取っ手を 1 行の帯に変える。
+   */
+  const autoBand = appPanes.isAutoFolded('append') && shown.includes('append');
+  if (autoBand) shell.setAttribute('data-pkc-append-autofold', '');
+  else shell.removeAttribute('data-pkc-append-autofold');
   for (const btn of root.querySelectorAll<HTMLElement>('[data-pkc-action="toggle-pane"]')) {
     const id = btn.getAttribute('data-pkc-pane');
     if (id === null) continue;

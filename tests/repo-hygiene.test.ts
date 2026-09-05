@@ -1074,11 +1074,17 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     // ⚠ 2026-09-05(#705 / #700): `phone` に 2 件・`context-menu` に 1 件・`inspector-fit` の中身
     // ⚠ 2026-09-05(#706): `touch-targets.smoke.spec.ts` を新設(+1 file / +3 件)──
     //    指の端末で押し所が全数 24px 以上 / 行の字を tap して印が付く / 対照群(マウスは不変)
+    // ⚠ 2026-09-05(#706): `touch-targets.smoke.spec.ts` を**新設**(+1 file / **+3 件**)──
+    //    指の端末で押し所が全数 24px 以上 / 行の字を tap して印が付く / 対照群(マウスは不変)。
+    //    `@media (pointer: coarse)` の規則が何 px になるかは実ブラウザでしか測れない
+    // ⚠ 2026-09-05(#701): `phone` に **+2 件**(844×390 で追記欄が畳まれて本文 ≥ 300px・帯から
+    //    追記して戻る / 対照群 360×640 は畳まず取っ手の押し所 24px)、`pane-resize` に **+1 件**
+    //    (対照群 1440×900 は 1px も変わらない)── 実寸と `elementFromPoint` は実ブラウザだけ
     expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(84);
     expect(
       counts.reduce((a, b) => a + b, 0),
       'smoke の test が増減した(足したらこの数を直す)',
-    ).toBe(447);
+    ).toBe(450);
   });
 });
 
