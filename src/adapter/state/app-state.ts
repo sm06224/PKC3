@@ -13,6 +13,7 @@ import { resolveCanonicalParents, reorderSibling } from '@features/relation/tree
 import { extractMeta, seedBodyFor } from '@features/flavor';
 import { applyBodyRewrite, type BodyRewrite } from '@features/markdown/body-rewrite';
 import { isPlaceOpen } from '@features/markdown/place-notation';
+import { moveLinesWithInverse, type MoveLines } from '@features/markdown/line-move';
 import { replaceTaskCards, type TaskScan } from '@features/schedule/task-cards';
 import type { ContactScan } from '@features/contact/contact-card';
 import type { SnippetScan } from '@features/snippet/snippet-table';
@@ -787,6 +788,16 @@ export interface AppState {
    */
   lastAppend: { lid: string; lines: readonly string[]; batch?: string } | null;
   /**
+   * 🔴 **直前の塊の移動を、逆向きに撃つ指示**(#684 段①)── 「元に戻す」の材料。
+   *
+   * ⚠ `lastAppend` と違って**位置**を持つ(行の並びは同じ字が何度も出るので、字だけでは
+   *   戻す先が決まらない)。だから**行がずれうる事は全部ここを捨てる** ── 編集に入る
+   *   (`START_EDIT`)/ 同じノートへの別の書換(`BODY_REWRITTEN`)。戻すときは
+   *   `line-move.ts` が掴んだ行そのものと byte 一致を検めるので、ずれていれば断る。
+   * ⚠ **1 手だけ**持つ(`lastAppend` と同じ)。
+   */
+  lastMove: ({ lid: string } & MoveLines) | null;
+  /**
    * 🔴 **編集に入った瞬間に開く行**(#395 段③)。`null` = どこも開かない(既定)。
    *
    * > 読んでいる本文の「この行」を直したい ── 修飾キー + クリックで入る。
@@ -895,6 +906,7 @@ export const initialState: AppState = {
   linkedFiles: new Map(),
   writeLock: null,
   lastAppend: null,
+  lastMove: null,
   editOpenAt: null,
   tileWrite: null,
   lockGen: 0,
@@ -1022,7 +1034,7 @@ export type UserAction =
   | { type: 'MOVE_PLACE'; lid: string; line: number; x: number; y: number }
   /**
    * 🔴 **板を画面から作る・大きさを変える・消す**(#676。user 裁定 2026-09-04)。
-   * ⚠ 3 つとも `MOVE_PLACE` と**同じ門**(`placeRewrite`)を通る ── phase / 画面に出ている
+   * ⚠ 3 つとも `MOVE_PLACE` と**同じ門**(`bodyRewriteGate`)を通る ── phase / 画面に出ている
    *   本文 / 開き行の捕捉を、case ごとに書き直さない(§7)。
    * ⚠ `ADD_PLACE` だけ行番号を持たない(足す先は常に末尾)。
    */
@@ -1031,6 +1043,24 @@ export type UserAction =
   | { type: 'ADD_PLACE'; lid: string; x: number; y: number }
   /** 板を前へ出す(#676 段②)── 他の板の z= の最大 + 1 を書く。同じ門。 */
   | { type: 'RAISE_PLACE'; lid: string; line: number }
+  /**
+   * 🔴 **本文の塊を、本文の中で掴んで並べ替える**(#684 段①。user 要望 2026-09-03)。
+   * `start..end` の行(**生の body** の行番号 = 描画の刻印 + frontmatter)を `toBefore` の
+   * 前へ動かす。掴んだ時点の行そのものは reducer が画面の本文から捕える(呼び側に
+   * 本文を持たせない ── `MOVE_PLACE` の開き行と同じ作法)。門は板の 5 つと**同じ**
+   * (`bodyRewriteGate`)。
+   */
+  | { type: 'MOVE_BLOCK'; lid: string; start: number; end: number; toBefore: number }
+  /**
+   * 🔴 **行の並びを本文へ差し込む**(#684 段②)── 一覧の行を本文へ落とすとリンクになる。
+   * ⚠ 何を入れるか(リンクの字)は binder が組んで渡す(`formatEntryLink` 1 本)。
+   */
+  | { type: 'INSERT_LINES'; lid: string; toBefore: number; lines: readonly string[] }
+  /**
+   * 🔴 **直前の塊の移動を元に戻す**(#684 段①。user 指示 2026-08-23「片道の操作を作らない」)。
+   * ⚠ `UNDO_APPEND` と同じ形 ── 独自の書込経路を作らず `REQUEST_BODY_REWRITE` を通る。
+   */
+  | { type: 'UNDO_MOVE' }
   /**
    * 🔴 **本文の 1 行の日付**(双方向。user 指示 2026-08-23)。
    * ⚠ `SET_ENTRY_DATE`(ノート 1 件が丸ごと予定)とは**単位が違う**。
@@ -2474,6 +2504,8 @@ function reduceCore(
            *   「編集」を押しただけで**前に押した行が開く**。
            */
           editOpenAt: action.atLine ?? null,
+          // ⚠ 編集は行をずらすので「元に戻す」の材料は捨てる(#684 段①。`lastMove` の注記)
+          lastMove: null,
         },
         /**
          * 🔴 **編集に入るたびに雛形を集め直す**(#196 / B-2)。
@@ -3018,10 +3050,10 @@ function reduceCore(
     }
     /**
      * 🔴 **板の塊を動かす**(#283 P4-b)。門(phase / 画面に出ている本文 / 開き行の捕捉)は
-     * `placeRewrite` 1 か所 ── 下の 3 つ(#676)と共有する。
+     * `bodyRewriteGate` 1 か所 ── 下の 3 つ(#676)と共有する。
      */
     case 'MOVE_PLACE':
-      return placeRewrite(state, action.lid, '編集を終了してから、板の付箋を動かしてください', (shown) => {
+      return bodyRewriteGate(state, action.lid, '編集を終了してから、板の付箋を動かしてください', (shown) => {
         if (!isPlaceCoord(action.x) || !isPlaceCoord(action.y)) return null;
         const openLine = placeOpenLineOf(shown, action.line);
         if (openLine === null) return null;
@@ -3029,34 +3061,86 @@ function reduceCore(
       });
     /**
      * 🔴 **板を画面から作る・大きさを変える・消す**(#676)── 3 つとも `MOVE_PLACE` と
-     * 同じ門(`placeRewrite`)を通る。断り文だけが**押した場所と対**で違う
+     * 同じ門(`bodyRewriteGate`)を通る。断り文だけが**押した場所と対**で違う
      * (CLAUDE.md「文言は押した場所と対で pin する」)。
      */
     case 'RESIZE_PLACE':
-      return placeRewrite(state, action.lid, '編集を終了してから、板の大きさを変えてください', (shown) => {
+      return bodyRewriteGate(state, action.lid, '編集を終了してから、板の大きさを変えてください', (shown) => {
         if (!isPlaceCoord(action.w) || !isPlaceCoord(action.h)) return null;
         const openLine = placeOpenLineOf(shown, action.line);
         if (openLine === null) return null;
         return { kind: 'place-size', line: action.line, openLine, w: action.w, h: action.h };
       });
     case 'REMOVE_PLACE':
-      return placeRewrite(state, action.lid, '編集を終了してから、板を消してください', (shown) => {
+      return bodyRewriteGate(state, action.lid, '編集を終了してから、板を消してください', (shown) => {
         const openLine = placeOpenLineOf(shown, action.line);
         if (openLine === null) return null;
         return { kind: 'place-remove', line: action.line, openLine };
       });
     case 'ADD_PLACE':
-      return placeRewrite(state, action.lid, '編集を終了してから、板を置いてください', () =>
+      return bodyRewriteGate(state, action.lid, '編集を終了してから、板を置いてください', () =>
         isPlaceCoord(action.x) && isPlaceCoord(action.y)
           ? { kind: 'place-add', x: action.x, y: action.y }
           : null,
       );
     case 'RAISE_PLACE':
-      return placeRewrite(state, action.lid, '編集を終了してから、板を前へ出してください', (shown) => {
+      return bodyRewriteGate(state, action.lid, '編集を終了してから、板を前へ出してください', (shown) => {
         const openLine = placeOpenLineOf(shown, action.line);
         if (openLine === null) return null;
         return { kind: 'place-raise', line: action.line, openLine };
       });
+    /**
+     * 🔴 **本文の塊を掴んで並べ替える**(#684 段①)── 板と**同じ門**。
+     * 🔑 掴んだ時点の行そのものは**ここで**画面の本文から捕える(`placeOpenLineOf` と同じ
+     *   向き)── disk 側とずれていれば `line-move.ts` が byte 一致で断る。
+     * ⚠ `dragstart` では phase を見ない(掴むのは自由)── 落としたときにここで断る。
+     */
+    case 'MOVE_BLOCK':
+      return bodyRewriteGate(state, action.lid, '編集を終了してから、本文の塊を動かしてください', (shown) => {
+        const { start, end, toBefore } = action;
+        if (!Number.isInteger(start) || !Number.isInteger(end) || !Number.isInteger(toBefore)) return null;
+        const lines = shown.split('\n');
+        if (start < 0 || end < start || end >= lines.length) return null;
+        return { kind: 'move-lines', start, end, toBefore, lines: lines.slice(start, end + 1) };
+      });
+    /** 🔴 **一覧の行を本文へ落とすとリンクになる**(#684 段②)── 同じ門。空の並びは撃たない。 */
+    case 'INSERT_LINES':
+      return bodyRewriteGate(state, action.lid, '編集を終了してから、一覧の行を本文へ落としてください', () =>
+        Number.isInteger(action.toBefore) && action.lines.length > 0
+          ? { kind: 'insert-lines', toBefore: action.toBefore, lines: action.lines }
+          : null,
+      );
+    /**
+     * 🔴 **直前の塊の移動を元に戻す**(#684 段①)── `UNDO_APPEND` と同じ形。
+     * ⚠ **1 手で使い切る**(`lastMove` を落とす)。戻した結果も `BODY_REWRITTEN` が
+     *   `move-lines` として届くので、そこでまた「戻す」の材料が入る(= 押し直せる)。
+     */
+    case 'UNDO_MOVE': {
+      if (state.phase !== 'ready') return { state, events: [] };
+      const last = state.lastMove;
+      if (!last) return { state, events: [] };
+      const meta = state.entryMetas.get(last.lid);
+      if (!meta) return { state: { ...state, lastMove: null }, events: [] };
+      return {
+        state: { ...state, lastMove: null },
+        events: [
+          {
+            type: 'REQUEST_BODY_REWRITE',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            rewrite: {
+              kind: 'move-lines',
+              start: last.start,
+              end: last.end,
+              toBefore: last.toBefore,
+              lines: last.lines,
+            },
+          },
+        ],
+      };
+    }
     case 'SET_ENTRY_DATE': {
       // 🔴 **黙って捨てない**(#516)── 理由は上の `SET_TASK_DATE` に書いた
       const blocked = phaseBlockReason(state.phase);
@@ -3170,6 +3254,34 @@ function reduceCore(
        */
       const taskScan = refreshTaskCards(state.taskScan, action.lid, action.body);
       /**
+       * 🔴 **塊を動かした回は「元に戻す」の材料を入れ、知らせを出す**(#684 段①)。
+       *
+       * 逆向きの指示は、動かす**前**の本文(この ack が届く前に画面が持っていた本文)から
+       * 計算する。⚠ その本文から同じ結果(`action.body`)が出ないとき(= 画面が古かった)は
+       * 材料を入れない ── 当てずっぽうの位置へ戻さない(`undo-append` の「見つからなければ
+       * 断る」と同じ向き)。
+       * ⚠ 同じノートへの**別の**書換は、行がずれうるので材料を捨てる(`lastMove` は位置を持つ)。
+       * 🔑 知らせは `OP_NOTICE` と同じ 2 つ(`notice` / `noticeOpen`)を書く ── 「開く」の
+       *   身元は添えないので `null`(次の知らせで消える作法のまま)。
+       */
+      let lastMove = state.lastMove;
+      let notice = state.notice;
+      let noticeOpen = state.noticeOpen;
+      if (action.rewrite.kind === 'move-lines') {
+        const before = screenBodyOf(state, action.lid);
+        const moved = before === null ? null : moveLinesWithInverse(before, action.rewrite);
+        lastMove =
+          moved !== null && moved.body === action.body && moved.inverse !== null
+            ? { lid: action.lid, ...moved.inverse }
+            : null;
+        if (lastMove !== null) {
+          notice = '本文の塊を動かしました';
+          noticeOpen = null;
+        }
+      } else if (lastMove !== null && lastMove.lid === action.lid) {
+        lastMove = null;
+      }
+      /**
        * 🔑 **タグを付けたら、開いている入れ物にその場で落ちる**(user 要望 2026-08-26)。
        * ⚠ ここは**まとめてタグを付ける**経路でもある(`REQUEST_BULK_TAG` が 1 件ずつ
        *   ack を撃つ)── worker に頼み直す形だと 100 件で 100 回の全件走査になる。
@@ -3185,7 +3297,17 @@ function reduceCore(
       const tagSuggestions =
         action.rewrite.kind === 'tag' ? null : state.tagSuggestions;
       return {
-        state: { ...state, entryMetas, openBody, taskScan, smartHits, tagSuggestions },
+        state: {
+          ...state,
+          entryMetas,
+          openBody,
+          taskScan,
+          smartHits,
+          tagSuggestions,
+          lastMove,
+          notice,
+          noticeOpen,
+        },
         events: [],
       };
     }
@@ -4675,8 +4797,11 @@ export function screenBodyOf(state: AppState, lid: string): string | null {
 }
 
 /**
- * 🔴 **板の書換 4 つ(動かす / 大きさ / 消す / 置く)が共通で通る門**(#283 P4-b → #676)。
+ * 🔴 **画面の本文から組む書換が共通で通る門**(#283 P4-b → #676 → #684)。
  *
+ * 板の 5 つ(動かす / 大きさ / 消す / 置く / 前へ)と、本文の塊の並べ替え・差し込みが通る。
+ * ⚠ #684 で `placeRewrite` から改名した ── 板向きの名前のまま本文の塊が通ると、
+ *   次に読む人が「板の門」と読んで別の門を書き足す(§7)。
  * ⚠ 編集中は**声に出して断る** ── 判定はここ 1 か所(`SET_VIEW_MODE` と同じ作法。
  *   呼び側(掴む口・メニュー)に配ると、口を足すたびに取りこぼす ── #516 の向き)。
  * 🔴 **画面に出ている本文は 1 つではない**(#281 検算 2026-08-30)。
@@ -4689,7 +4814,7 @@ export function screenBodyOf(state: AppState, lid: string): string | null {
  * @param build 画面が見ている本文から書換を組む。組めなければ `null` = 黙って no-op
  *   (行が板でない / 値が壊れている ── どれも画面の操作からは起きない形)
  */
-function placeRewrite(
+function bodyRewriteGate(
   state: AppState,
   lid: string,
   refusal: string,

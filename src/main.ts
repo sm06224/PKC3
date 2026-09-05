@@ -21,7 +21,7 @@ import {
 } from '@adapter/ui/render/read-columns';
 import { setFoldNotify } from '@adapter/ui/render/fold-notify';
 import { appTooNarrowOk, installTooNarrow } from '@adapter/ui/render/too-narrow';
-import { paintStatusOpen } from '@adapter/ui/render/status-open';
+import { paintStatusOpen, paintStatusUndo } from '@adapter/ui/render/status-open';
 import { appOpenInEdit } from '@adapter/ui/render/open-in-edit';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { appPaneSizes, applyPaneSizes } from '@adapter/ui/render/pane-size';
@@ -1154,8 +1154,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * ⚠ `showStatus` からも撃つ ── 字だけの知らせ(コピーした等)が上書きしたら、
    *   前の知らせに添えた「開く」は**その瞬間に**消えなければならない。
    */
-  const paintOpen = (): void =>
+  const paintOpen = (): void => {
     paintStatusOpen(regions.statusOpen, dispatcher.getState(), noticeLine);
+    // 🔴 塊を動かした直後の「元に戻す」も同じ口で出し入れする(#684 段①)
+    paintStatusUndo(regions.statusUndo, dispatcher.getState(), noticeLine);
+  };
   /** 一時の知らせ(コピーした / 取り込んだ)。⚠ 状態変化では消えない。 */
   const showStatus = (text: string) => {
     noticeLine = text;

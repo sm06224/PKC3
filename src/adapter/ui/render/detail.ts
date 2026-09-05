@@ -26,6 +26,7 @@ import { hydrateChart } from './chart-raster';
 import { readFenceAssetText } from '@features/asset/fence-asset-read';
 import { applyHeadingFold } from './heading-fold';
 import { applyPlaceLayout } from './place-board';
+import { installBlockGrip } from './block-grip';
 
 /**
  * 🔴 **図とグラフは同じ面に出る**(#188)── 器を埋める呼び出しを 1 つに束ねる。
@@ -800,6 +801,12 @@ export class DetailRenderer {
          *   消えるため(見出しの畳みと同じ理由)。
          */
         applyPlaceLayout(host, (l) => state.entryMetas.get(l)?.title ?? null, frontmatterLineCount(body));
+        /**
+         * 🔴 **本文の塊を掴む口**(#684 段①)── 面に 1 個だけ置き、乗せた塊の横へ移す。
+         * ⚠ 描画のたびに呼ぶ(いま描いてある本文を差し替える)。板の面では出ない。
+         * ⚠ 添付の説明(`renderAttachment`)は**別経路**なので、ここを通らない = 口は出ない。
+         */
+        installBlockGrip(this.region, host, lid, body);
         // ⚠ 帯は**本文が入ってから**組む(数えるものが DOM に無いと 0 件になる)
         this.renderExternalImageBar(lid, host);
         this.restoreScroll();

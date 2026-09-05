@@ -53,3 +53,27 @@ export function paintStatusOpen(
   // ⚠ 同じ値を書き直さない(状態の行は打鍵ごとに描き直される)
   if (btn.hidden !== !show) btn.hidden = !show;
 }
+
+export interface StatusUndoState {
+  /** 直前の塊の移動を戻す材料(`lastMove`)。`null` = 戻す物が無い。 */
+  readonly lastMove: object | null;
+  readonly notice: string | null;
+}
+
+/**
+ * 🔴 **知らせの隣の「元に戻す」を出し入れする**(#684 段①)。
+ *
+ * 本文の塊を掴んで動かした直後、「本文の塊を動かしました」の隣に出る。
+ * 畳む条件は 2 つ(どちらか 1 つでも当たれば畳む)── 「開く」と同じ作法:
+ *
+ * | 条件 | なぜ |
+ * |---|---|
+ * | 戻す材料が無い(`lastMove === null`) | 押しても何も起きない口を残さない(編集に入る / 別の書換で材料は捨てられる) |
+ * | **字が別の知らせに上書きされた** | 「コピーしました」の隣に「元に戻す」が残ると、user は**コピーが戻る**と読む |
+ *
+ * 🔑 押した先は `undo-move` の受け手(`binder.ts`)── 書くのは `hidden` だけ。
+ */
+export function paintStatusUndo(btn: HTMLElement, state: StatusUndoState, shownLine: string): void {
+  const show = state.lastMove !== null && state.notice === shownLine;
+  if (btn.hidden !== !show) btn.hidden = !show;
+}

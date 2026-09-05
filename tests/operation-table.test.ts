@@ -108,12 +108,13 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-08-31: `open-manual-window`(#645)で 1 増えた
       // ⚠ 2026-09-02: `phone-page` / `phone-menu`(#632 段①)で 2 増えた
       // ⚠ 2026-09-04: 小窓・板・章コピー・図の一覧・断り書きの設定など(#690 #677 #676 #528 #687 #278)で 8 増えた(229 → 237。別 worktree の合算 ── #724 ③で実測に合わせた)
-      total: 237,
-      receivers: 196,
+      // ⚠ 2026-09-05: 塊の移動の「元に戻す」`undo-move`(#684 段①)で受け手が 1 増えた
+      total: 238,
+      receivers: 197,
       registered: 72,
       both: 31,
       outsideActionsTable: 41,
-      unregistered: 165,
+      unregistered: 166,
     });
   });
 

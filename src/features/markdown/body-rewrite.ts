@@ -23,6 +23,7 @@ import { acceptsExternalImage, rewriteAdopted } from '../asset/inline-url-adopt'
 import { DELIMITER, csvEscapeField, parseCsv, type CsvPositions } from './csv-table';
 import { parseRenderableFence } from './markdown-render';
 import { scanContainers } from './source-blocks';
+import { insertLines, moveLines } from './line-move';
 
 /** 何をするか。⚠ **やり直せる形で持つ**(未達 commit との合流に要る)。 */
 export type BodyRewrite =
@@ -229,6 +230,30 @@ export type BodyRewrite =
       kind: 'adopt-images';
       /** ⚠ `Map` ではなく素の record ── event に載るので、比べやすい形にする。 */
       adopted: Readonly<Record<string, string>>;
+    }
+  | {
+      /**
+       * 🔴 **行の並びを差し込む**(#684 段②)── 一覧の行を本文へ落とすとリンクになる。
+       * ⚠ `toBefore` は**生の body の行番号**(0 始まり。この行の前へ入れる。行数で末尾)。
+       *   fence / `:::` の中・frontmatter へは `applyBodyRewrite` が `null` = 断る。
+       *   規則の実体は `line-move.ts`(pure)。
+       */
+      kind: 'insert-lines';
+      toBefore: number;
+      lines: readonly string[];
+    }
+  | {
+      /**
+       * 🔴 **本文の塊を動かす**(#684 段①)── `start..end` の行を `toBefore` の前へ。
+       * ⚠ 座標は**生の body**(`task` と同じ)。掴んだ時点の行そのもの(`lines`)を添え、
+       *   disk 側で byte 一致しなければ書かない(`place-move` の `openLine` と同じ作法)。
+       * 🔑 落とし先が自分の中なら **body をそのまま返す**(取りやめ ≠ 競合)。
+       */
+      kind: 'move-lines';
+      start: number;
+      end: number;
+      toBefore: number;
+      lines: readonly string[];
     };
 
 /**
@@ -331,6 +356,9 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
   if (rewrite.kind === 'place-add') return addPlace(body, rewrite.x, rewrite.y);
   if (rewrite.kind === 'csv-cell') return rewriteCsvCell(body, rewrite);
   if (rewrite.kind === 'csv-shape') return rewriteCsvShape(body, rewrite);
+  // 🔑 塊の移動と差し込みは `line-move.ts` の 1 本(#684)── 取りやめは body をそのまま返す
+  if (rewrite.kind === 'move-lines') return moveLines(body, rewrite);
+  if (rewrite.kind === 'insert-lines') return insertLines(body, rewrite.toBefore, rewrite.lines);
   if (rewrite.kind === 'adopt-images') {
     /**
      * ⚠ **規則を書き直さない** ── 拾う側(`externalImageUrls`)と当てる側は

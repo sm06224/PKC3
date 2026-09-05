@@ -4306,6 +4306,14 @@ li[data-pkc-row-slot] {
   padding: 0 var(--s2);
   font-size: 11px;
 }
+/* 🔴 **知らせの隣の「元に戻す」**(#684 段①。塊を動かした直後)── 「開く」と同じ寸法。
+ *   ⚠ 出し入れは `status-open.ts` が `hidden` で持つ。 */
+[data-pkc-field='status-undo'] {
+  flex: 0 0 auto;
+  min-height: 18px;
+  padding: 0 var(--s2);
+  font-size: 11px;
+}
 
 [hidden] {
   display: none !important;
@@ -4885,6 +4893,15 @@ li[data-pkc-row-slot] {
 [data-pkc-drop][data-pkc-dropping] {
   outline: 2px dashed var(--accent);
   outline-offset: -2px;
+}
+/* 🔴 **本文の塊の落とし先**(#684)── 塊の上辺 / 下辺に線を 1 本。
+ * ⚠ 枠を光らせない(塊全体が光ると「中へ入る」に見える)。`box-shadow: inset` なので
+ *   塊の高さは変わらない(ずれると狙えない ── 上の `data-pkc-dropping` と同じ理由)。 */
+[data-pkc-drop-edge='before'] {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+[data-pkc-drop-edge='after'] {
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 [data-pkc-field='filer-bulk'] {
   display: flex;
@@ -5875,6 +5892,44 @@ li[data-pkc-row-slot] {
   color: var(--muted, inherit);
   font-size: 0.8em;
   line-height: 1.6;
+}
+
+/**
+ * 🔴 **本文の塊を掴む口(⠿)**(#684 段①)。面に 1 個だけ在り、乗せた塊の左余白へ移る
+ * (`block-grip.ts`)。
+ * ⚠ 口の置き場(本文の面 / 留めた枠)を `position: relative` にする ── 口は面からの相対で
+ *   置く。`[data-pkc-split-main]` は何も留めていない間 `display: contents` で箱を持たないので、
+ *   置き場にしない(`gripAnchorOf`)。
+ * ⚠ `width` は `block-grip.ts` の `GRIP_WIDTH` と同じ値(左余白へ寄せる計算に使う)。
+ * ⚠ 地は無彩色、色は情報にだけ ── 口は `--muted` で、乗せたときだけ字の色になる。
+ */
+[data-pkc-view-pane='detail'],
+[data-pkc-region='split-frame'] {
+  position: relative;
+}
+[data-pkc-field='block-grip'] {
+  position: absolute;
+  width: 18px;
+  height: 1.6em;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted, inherit);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: center;
+  cursor: grab;
+  opacity: 0.7;
+  z-index: 1;
+}
+[data-pkc-field='block-grip']:hover,
+[data-pkc-field='block-grip']:focus-visible {
+  color: var(--fg);
+  opacity: 1;
+}
+[data-pkc-field='block-grip']:active {
+  cursor: grabbing;
 }
 
 /**

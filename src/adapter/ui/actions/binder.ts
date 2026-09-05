@@ -26,10 +26,24 @@ import {
 } from '../render/heading-fold';
 import { blockSpanAt, sliceLines } from '@features/markdown/source-blocks';
 import { isPlaceOpen } from '@features/markdown/place-notation';
+import { insertionBlocked } from '@features/markdown/line-move';
+import {
+  BLOCK_END_ATTR,
+  BLOCK_GRIP_FIELD,
+  BLOCK_LID_ATTR,
+  BLOCK_START_ATTR,
+  grippedBlock,
+} from '../render/block-grip';
 import { quoteOnEnter } from '@features/markdown/quote-assist';
 import { renumberLists } from '@features/markdown/list-renumber';
 import { stripDialect } from '@features/markdown/strip-dialect';
-import { isViewMode, nextViewMode, type AppState, type ViewMode } from '@adapter/state/app-state';
+import {
+  isViewMode,
+  nextViewMode,
+  screenBodyOf,
+  type AppState,
+  type ViewMode,
+} from '@adapter/state/app-state';
 import type { EntryMeta } from '@core/model/entry-meta';
 import {
   filerRows,
@@ -1004,6 +1018,8 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'apply-plan',
   // ⚠ 追記と**同じ経路**(`REQUEST_BODY_REWRITE`)を撃つので、同じ門をくぐらせる
   'undo-append',
+  // ⚠ 塊の移動の「元に戻す」も同じ経路(#684 段①)
+  'undo-move',
   /**
    * 🔴 **外部の画像を取り込むのも本文を書く**(#264 段①)── 同じ
    *   `REQUEST_BODY_REWRITE` を撃つので、同じ門をくぐらせる。
@@ -3778,6 +3794,13 @@ const ACTIONS: Record<string, ActionHandler> = {
   'undo-append': (dispatcher) => {
     dispatcher.dispatch({ type: 'UNDO_APPEND' });
   },
+  /**
+   * 🔴 **直前の塊の移動を元に戻す**(#684 段①。「片道の操作を作らない」)。
+   * ⚠ 口は状態の行の知らせの隣(`shell.ts` の `status-undo`)── 出し入れは `status-open.ts`。
+   */
+  'undo-move': (dispatcher) => {
+    dispatcher.dispatch({ type: 'UNDO_MOVE' });
+  },
   'append-entry': (dispatcher, _target, _services, root) => {
     const s = dispatcher.getState();
     const lid = s.selectedLid;
@@ -5721,6 +5744,19 @@ const ACTIONS: Record<string, ActionHandler> = {
  */
 const PKC_DRAG = 'application/x-pkc-lids';
 /**
+ * 🔴 **本文の塊を運ぶ**(#684 段①)。⚠ `PKC_DRAG` とは別の型 ── あちらは「ノートを
+ *   フォルダへ移す」、こちらは「**同じノートの中で行を並べ替える**」。混ぜると、塊を
+ *   フォルダの行へ落としたときにノートを移そうとする(予定の札と同じ理由)。
+ * 荷物は `lid start end`(生の body の行番号)。掴んだ行そのものは reducer が画面の本文から
+ * 捕える(`MOVE_PLACE` の開き行と同じ ── 呼び側に本文を持たせない)。
+ */
+const PKC_BLOCK_DRAG = 'application/x-pkc-block';
+/**
+ * 本文の塊の落とし先の印(#684)── 塊の**上辺 / 下辺**に線を出す(`app.css`)。
+ * ⚠ `data-pkc-dropping`(枠を光らせる)とは別 ── 塊全体が光ると「中へ入る」に見える。
+ */
+const DROP_EDGE_ATTR = 'data-pkc-drop-edge';
+/**
  * 🔴 **予定の札を運ぶ**(双方向。user 指示 2026-08-23)。
  *
  * ⚠ **`PKC_DRAG` とは別の型**にする ── あちらは「ノートをフォルダへ移す」で、
@@ -6834,6 +6870,29 @@ export function bindActions(
       return;
     }
     cancelTabHover();
+    /**
+     * 🔴 **本文の塊**(#684 段①)── 落とし先は**同じノートの本文**の塊の前 / 後。
+     * ⚠ 自分の中(`start..end+1`)へは受けない(`dropEffect` は既定の `none` のまま = 印も
+     *   出ない)── 落としても 1 byte も変わらない所に「入る」と見せない。
+     * ⚠ 別のノートの本文へも受けない ── 段①は「本文の中で並べ替える」である。
+     * ⚠ `getData` は dragover では読めない(ブラウザの保護)── 掴んだ物は `blockDrag` で持つ。
+     */
+    if (de.dataTransfer?.types?.includes(PKC_BLOCK_DRAG) === true) {
+      const drop = bodyDropAt(de);
+      if (
+        drop === null ||
+        blockDrag === null ||
+        drop.lid !== blockDrag.lid ||
+        (drop.toBefore >= blockDrag.start && drop.toBefore <= blockDrag.end + 1)
+      ) {
+        clearDropTarget();
+        return;
+      }
+      e.preventDefault();
+      de.dataTransfer.dropEffect = 'move';
+      markDropTarget(drop.el, DROP_EDGE_ATTR, drop.edge);
+      return;
+    }
     // 🔴 **予定の札**(双方向)── 落とし先は日の升目 / 束の見出し
     if (de.dataTransfer?.types?.includes(PKC_TASK_DRAG) === true) {
       const drop = dateTargetOf(de.target);
@@ -6873,6 +6932,25 @@ export function bindActions(
   let dragFromSide: DualSide | null = null;
   const onDrop = (e: Event): void => {
     const de = e as DragEvent;
+    /**
+     * 🔴 **本文の塊を落としたら、その塊が動く**(#684 段①)。
+     * ⚠ 書くのは reducer(`MOVE_BLOCK`)→ `line-move.ts` ── ここは座標を渡すだけ。
+     *   編集中の断りも reducer が声に出す(落とすまで phase を見ない)。
+     * ⚠ 荷物の lid と落とし先の lid が違えば何もしない(dragover が受けていないので
+     *   普段はここへ来ない ── 来ても別のノートを書かない)。
+     */
+    if (de.dataTransfer?.types?.includes(PKC_BLOCK_DRAG) === true) {
+      const drop = bodyDropAt(de);
+      clearDropTarget();
+      if (drop === null) return;
+      e.preventDefault();
+      const [lid, rawStart, rawEnd] = (de.dataTransfer.getData(PKC_BLOCK_DRAG) || '').split(' ');
+      const start = Number(rawStart);
+      const end = Number(rawEnd);
+      if (lid === undefined || lid !== drop.lid || !Number.isInteger(start) || !Number.isInteger(end)) return;
+      dispatcher.dispatch({ type: 'MOVE_BLOCK', lid, start, end, toBefore: drop.toBefore });
+      return;
+    }
     /**
      * 🔴 **落としたら、その行の日付が変わる**(双方向の出口)。
      * ⚠ 空文字の落とし先は「日付なし」= **外す**(消すのではない)。
@@ -7036,6 +7114,34 @@ export function bindActions(
       return;
     }
     /**
+     * 🔴 **本文の塊の口(⠿)を掴んだ**(#684 段①)── 荷物は `lid start end`(生の body)。
+     * ⚠ 範囲は口が原文で決めて載せている(`block-grip.ts`)── ここで数え直さない。
+     * ⚠ `blockDrag` は dragover が「自分の中か」を見るために持つ(`getData` は dragover で
+     *   読めない)。⚠ 掴むたびに決め直す(古い掴みを残さない ── `dragFromSide` と同じ)。
+     * 🔑 drag 像は**塊そのもの**にする ── 口だけが飛ぶと、何を運んでいるか読めない。
+     */
+    const grip = (de.target as HTMLElement | null)?.closest<HTMLElement>(
+      `[data-pkc-field="${BLOCK_GRIP_FIELD}"]`,
+    );
+    blockDrag = null;
+    if (grip !== null && grip !== undefined && de.dataTransfer) {
+      const lid = grip.getAttribute(BLOCK_LID_ATTR);
+      const start = Number(grip.getAttribute(BLOCK_START_ATTR));
+      const end = Number(grip.getAttribute(BLOCK_END_ATTR));
+      if (lid === null || lid === '' || !Number.isInteger(start) || !Number.isInteger(end)) {
+        e.preventDefault(); // 指す物が無い口は掴ませない(空の荷物でノートの行を運ぶ経路へ落とさない)
+        return;
+      }
+      blockDrag = { lid, start, end };
+      dragFromSide = null;
+      de.dataTransfer.setData(PKC_BLOCK_DRAG, `${lid} ${String(start)} ${String(end)}`);
+      de.dataTransfer.effectAllowed = 'move';
+      const block = grippedBlock(grip);
+      if (block !== null && typeof de.dataTransfer.setDragImage === 'function')
+        de.dataTransfer.setDragImage(block, 0, 0);
+      return;
+    }
+    /**
      * 🔴 **予定の札は別の荷物で運ぶ**(双方向)。
      * ⚠ 行番号は**中の印から引く** ── 札にも同じ属性を置くと、
      *   `[data-pkc-task-line=…]` を押す既存の経路が**札のほうに当たる**
@@ -7114,6 +7220,7 @@ export function bindActions(
     //    user から見て「勝手に画面が動いた」になる
     cancelTabHover();
     clearDropTarget();
+    blockDrag = null;
   };
   /**
    * 予定の落とし先(日の升目 / 束の見出し)。`null` = 落とせない場所。
@@ -7138,15 +7245,93 @@ export function bindActions(
     // ⚠ パンくずのルートは `data-pkc-entry` を持たない = 出す先(ルート)
     return { el, lid: el.getAttribute('data-pkc-entry') };
   };
-  let dropMark: HTMLElement | null = null;
-  const markDropTarget = (el: HTMLElement): void => {
-    if (dropMark === el) return;
+  /**
+   * 🔴 **本文の上の落とし先**(#684)── 乗せている塊の**上半分なら前、下半分なら後**。
+   *
+   * ⚠ 受ける器は**読む面の本文**(`detail-body` / `split-body`)だけ。
+   *   添付の説明も `detail-body` を名乗るが、描けた印(`PAINTED_ATTR`)を持たないので外れる。
+   *   板の面(`.pkc-board-host`)も外す ── 板は自分の掴みを持つ。
+   * ⚠ 本文の下の地(面の余白)に落としたら**最後の塊の後**。塊の間の余白なら縦の位置で近い塊。
+   * 🔑 「前 / 後」を原文の行へ写す規則は 1 つ:前 = その塊の開き行、後 = その塊の終わり + 1。
+   *   ⚠ `:::` の塊の `-end` は開き行なので、終わりは `blockSpanAt` で取る(囲みの中へ入れない)。
+   * 🔑 fence / `:::` の中・frontmatter へは受けない ── 判定は書く側と**同じ 1 本**
+   *   (`insertionBlocked`)。
+   *
+   * @returns `null` = 本文の上ではない / 受けない所
+   */
+  const BODY_DROP_HOST = '[data-pkc-field="detail-body"], [data-pkc-field="split-body"]';
+  const bodyDropAt = (
+    de: DragEvent,
+  ): { host: HTMLElement; lid: string; el: HTMLElement; edge: 'before' | 'after'; toBefore: number } | null => {
+    const target = de.target as HTMLElement | null;
+    if (target === null || !root.contains(target)) return null;
+    let host = target.closest<HTMLElement>(BODY_DROP_HOST);
+    let ground = false;
+    if (host === null) {
+      // 面の地 ── その面の本文の器の**下**なら、最後の塊の後として受ける
+      const pane = target.closest<HTMLElement>(
+        '[data-pkc-region="split-frame"], [data-pkc-view-pane="detail"]',
+      );
+      host = pane?.querySelector<HTMLElement>(BODY_DROP_HOST) ?? null;
+      if (host === null || de.clientY < host.getBoundingClientRect().bottom) return null;
+      ground = true;
+    }
+    if (!host.hasAttribute(PAINTED_ATTR) || host.classList.contains('pkc-board-host')) return null;
+    const st = dispatcher.getState();
+    const lid = lidOfNode(host, st.openBody?.lid ?? st.selectedLid);
+    const body = lid === null ? null : screenBodyOf(st, lid);
+    if (lid === null || body === null) return null;
+    const blocks = [...host.children].filter(
+      (c): c is HTMLElement => c instanceof HTMLElement && !c.hidden && c.hasAttribute('data-pkc-source-line'),
+    );
+    if (blocks.length === 0) return null;
+    let el: HTMLElement;
+    let edge: 'before' | 'after' = 'after';
+    if (ground) {
+      el = blocks[blocks.length - 1]!;
+    } else if (target === host) {
+      // 塊の間の余白 ── 縦の位置で最初に「下端がまだ下」の塊を採る。無ければ最後の塊の後
+      el = blocks.find((b) => de.clientY < b.getBoundingClientRect().bottom) ?? blocks[blocks.length - 1]!;
+      const r = el.getBoundingClientRect();
+      edge = de.clientY < r.top + r.height / 2 ? 'before' : 'after';
+    } else {
+      let cur: Element | null = target;
+      while (cur !== null && cur.parentElement !== host) cur = cur.parentElement;
+      if (!(cur instanceof HTMLElement) || !blocks.includes(cur)) return null;
+      el = cur;
+      const r = el.getBoundingClientRect();
+      edge = de.clientY < r.top + r.height / 2 ? 'before' : 'after';
+    }
+    const line = Number(el.getAttribute('data-pkc-source-line'));
+    if (!Number.isInteger(line) || line < 0) return null;
+    const fm = frontmatterLineCount(body);
+    let toBefore = line;
+    if (edge === 'after') {
+      const span = blockSpanAt(bodyBelowFrontmatter(body), line);
+      const end = span !== null ? span.end : Number(el.getAttribute('data-pkc-source-end'));
+      toBefore = (Number.isInteger(end) && end >= line ? end : line) + 1;
+    }
+    toBefore += fm;
+    if (insertionBlocked(body, toBefore)) return null;
+    return { host, lid, el, edge, toBefore };
+  };
+  /** 掴んでいる本文の塊(`dragstart` で決め、`dragend` で捨てる)。`null` = 塊は掴んでいない。 */
+  let blockDrag: { lid: string; start: number; end: number } | null = null;
+  /**
+   * 落とし先の印。⚠ **属性名と値まで**持つ(#684)── 塊の前 / 後は同じ要素に別の値で出る
+   * (`data-pkc-drop-edge="before"|"after"`)ので、要素だけ見て早期 return すると
+   * 上半分から下半分へ動いても線が動かない。関数は 1 組のまま(2 つ目を書かない)。
+   */
+  let dropMark: { el: HTMLElement; attr: string; value: string } | null = null;
+  const markDropTarget = (el: HTMLElement, attr = 'data-pkc-dropping', value = ''): void => {
+    if (dropMark !== null && dropMark.el === el && dropMark.attr === attr && dropMark.value === value)
+      return;
     clearDropTarget();
-    dropMark = el;
-    el.setAttribute('data-pkc-dropping', '');
+    dropMark = { el, attr, value };
+    el.setAttribute(attr, value);
   };
   const clearDropTarget = (): void => {
-    dropMark?.removeAttribute('data-pkc-dropping');
+    dropMark?.el.removeAttribute(dropMark.attr);
     dropMark = null;
   };
   /**

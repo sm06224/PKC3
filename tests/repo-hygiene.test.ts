@@ -1055,11 +1055,14 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     // ⚠ 2026-09-04(#673 段②): `deep-link` に「`#pkc?view=schedule` で予定表が中央に出て
     //    集めが終わる」1 件(別窓の boot で `REFRESH_TASK_SCAN` が worker まで届くかは
     //    実ブラウザでしか見えない)で **+1 件**
-    expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(80);
+    // ⚠ 2026-09-05(#684 段①): `body-block-drag.smoke.spec.ts` を足して **+1 file / +2 件** ──
+    //    ①実マウスで ⠿ を掴んで落とすと刻印の並びが書き替わり「元に戻す」で戻る
+    //    ②段落の字はドラッグで選べる(本物の D&D と選択の判定は happy-dom に無い)
+    expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(81);
     expect(
       counts.reduce((a, b) => a + b, 0),
       'smoke の test が増減した(足したらこの数を直す)',
-    ).toBe(431);
+    ).toBe(433);
   });
 });
 
