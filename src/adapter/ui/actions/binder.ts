@@ -4127,7 +4127,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 返ってこない書込で**永久に追記できなくなる**のを防ぐ最後の出口。
    * ⚠ 押した人が結果を分かっていること ── 確認を出す(確認の無い環境は通す)。
    */
-  'force-release': (dispatcher, _target, _services, root) => {
+  'force-release': (dispatcher, _target, services, root) => {
     confirmThen(
       root,
       '追記の書き込みを強制的に打ち切ります。書き込みが実際には進んでいた場合、' +
@@ -4140,7 +4140,36 @@ const ACTIONS: Record<string, ActionHandler> = {
        * ⚠ 「念のため」で `phase` を見ないこと ── 実害の実測が無いまま塞がない。
        */
       () => null,
-      () => dispatcher.dispatch({ type: 'FORCE_RELEASE_LOCK', discardDraft: false }),
+      () => {
+        /**
+         * 🔴 **打ち切ったことを、画面と console の両方に残す**(#723)。
+         *
+         * ⚠ ここは**最後の脱出口**である ── 押されたということは、その前に
+         *   「返ってこない書込」が起きている。⚠ 直す前は**何も残らなかった**ので、
+         *   cowork が「編集を終えられなくなった」を 1 回観測しても、
+         *   **user がこれを押して抜けたのかどうかすら分からなかった**。
+         * 🔑 画面には**何が打ち切られたか**を出す(user が古い表示に気づける)。
+         *   console には**そのときの state** を出す(次の報告に貼ってもらう)。
+         * ⚠ `OP_FAILED` には載せない ── 失敗ではなく、user が意図して行った操作である
+         *   (赤いエラー欄に出すと、押した本人が「壊れた」と読む)。
+         */
+        const s = dispatcher.getState();
+        const lid = s.writeLock?.lid ?? null;
+        const title = lid === null ? null : (s.entryMetas.get(lid)?.title ?? null);
+        const what = title === null ? '待っている書き込みはありませんでした' : `対象: ${title}`;
+        // ⚠ 次の報告に貼ってもらうための計器(#723)。smoke が拾うのは `error` だけなので
+        //    `warn` は赤にならない(`tests/smoke/helpers.ts` の `msg.type() !== 'error'`)
+        console.warn('[pkc3] 追記の書き込みを強制的に打ち切りました', {
+          phase: s.phase,
+          writeLockLid: lid,
+          lockGen: s.lockGen,
+          editingLid: s.openBody?.lid ?? null,
+        });
+        services.showStatus?.(
+          `追記の書き込みを打ち切りました(${what})。表示が実際の中身より古いことがあります ── 開き直すと直ります`,
+        );
+        dispatcher.dispatch({ type: 'FORCE_RELEASE_LOCK', discardDraft: false });
+      },
     );
   },
   /** 左の列の**探し方**を切り替える(P8 段⑤)。⚠ 中央のビューとは別の軸。 */

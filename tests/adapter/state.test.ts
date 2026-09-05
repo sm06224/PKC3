@@ -194,6 +194,56 @@ describe('reducer: lean aggregate', () => {
     ).toBe('# A');
   });
 
+  /**
+   * 🔴 **編集を終える操作を、黙って捨てない**(#723。cowork が 1 回だけ観測した
+   * 「編集を終えられなくなった」に**計器を置く**)。
+   *
+   * ⚠ 直す前は `events: []` で**無言**だったので、起きた瞬間 user の画面には
+   *   何も出ない ── 押しても 1 ドットも動かないので「固まった」としか読めず、
+   *   こちらにも手掛かりが 1 つも残らない(再現しなかったのはそのためでもある)。
+   * 🔑 原因が分かっていなくても、**何が崩れていたか**を出せば次の 1 回で報告が返る。
+   */
+  it('🔴 編集中でないのに保存 / 取り消しが来たら、理由を出す(#723)', () => {
+    // ⚠ 前提の検算 ── この state は本当に「編集中でない」か(台が崩れていたら
+    //    「一致しなかった」ではなく、ここで落ちてほしい)
+    const ready = loadedA();
+    expect(ready.phase, '台が編集中になっている').toBe('ready');
+    expect(ready.error, '台がもう理由を持っている').toBeNull();
+
+    const c = reduce(ready, { type: 'COMMIT_EDIT' });
+    expect(c.state.error, '黙って捨てている(無言の dead click)').toBe(
+      '保存できませんでした: いま編集中ではありません(この画面は編集を終えています)',
+    );
+    // ⚠ 捨てること自体は正しい ── 書き込みは 1 件も起こさない
+    expect(c.events, '編集中でないのに書き込みが走った').toEqual([]);
+    expect(c.state.phase).toBe('ready');
+
+    const x = reduce(ready, { type: 'CANCEL_EDIT' });
+    expect(x.state.error, '取り消しだけ黙っている').toBe(
+      '取り消しできませんでした: いま編集中ではありません(この画面は編集を終えています)',
+    );
+    expect(x.events).toEqual([]);
+
+    /**
+     * 🔴 **2 つ目の枝 ── 編集中なのに開いている本文が無い**(あってはならない形)。
+     * ⚠ 1 つ目と**違う字**を出す ── 同じ字にすると、どちらが崩れたのか報告から
+     *   読めない(CLAUDE.md「門を N 個置いたら、N 個目だけが鳴る場面を N 通り作る」)。
+     */
+    const editing = reduce(ready, { type: 'START_EDIT' }).state;
+    expect(editing.phase, '台が編集中になっていない').toBe('editing');
+    const broken = { ...editing, openBody: null };
+    expect(reduce(broken, { type: 'COMMIT_EDIT' }).state.error).toBe(
+      '保存できませんでした: 開いている本文が見つかりません(読み込み直すと直ります)',
+    );
+
+    /**
+     * 🔑 **対照群** ── 前提が揃っているときは断り文を出さない
+     *   (常在する断り文を作らない。出しっぱなしだと user は読まなくなる)。
+     */
+    expect(reduce(editing, { type: 'COMMIT_EDIT' }).state.error, '正常な保存で断られた').toBeNull();
+    expect(reduce(editing, { type: 'CANCEL_EDIT' }).state.error, '正常な取り消しで断られた').toBeNull();
+  });
+
   it('COMMIT_EDIT emits PERSIST_ENTRY with the full row, and skips when unchanged', () => {
     let s = loadedA();
     s = reduce(s, { type: 'START_EDIT' }).state;

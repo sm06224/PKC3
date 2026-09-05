@@ -1112,6 +1112,8 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     //    `test.skip(!HEAVY, …)` / `test.skip(!jspi, …)` を test と数えていた 2 件)。
     //    さらに `coi` に「JSPI が無い環境では読み直さない」の対照群を足して **+1 件**
     //    ── 上の test が `test.skip` をやめたぶん、その枝を別の test が受け持つ
+    // ⚠ 2026-09-05(#723): `palette` に「外から閉じた後でも編集を保存できる」で **+1 件**
+    //    (本物の `showModal()` / `close()` の意味論は実ブラウザにしか無い)
     expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(85);
     expect(
       counts.reduce((a, b) => a + b, 0),

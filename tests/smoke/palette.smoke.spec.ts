@@ -306,3 +306,61 @@ test('🔴 選んでからパレットで記法を入れると、選んだ範囲
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **器を外から閉じても、編集を終えられる**(#723)。
+ *
+ * ## 何を守っているか
+ *
+ * cowork が 1 回だけ「**編集を終えられなくなった**」を観測した(再現せず)。
+ * ⚠ 自前の `<dialog>` は **1 本の鎖**(`app-dialog.ts` の `enqueue`)に並ぶので、
+ *   1 枚が**解決しないまま**残ると以後の確認が 1 枚も開かない ── 確認を経由する
+ *   操作が丸ごと無反応になる、という形で同じ症状になりうる。
+ * 🔑 だから「押し所を経由せずに閉じられた」形をわざと作って、**その後で編集を
+ *   終えられるか**を見る。⚠ unit にも同じ形の pin を置いたが、**本物の
+ *   `showModal()` / `close()` の意味論**は実ブラウザにしか無い(happy-dom は
+ *   `returnValue` の扱いが実機と違う、と `app-dialog.ts` が実測している)。
+ */
+test('🔴 パレットを外から閉じた後でも、編集を保存できる (#723)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await useSplitEditor(page);
+  await gotoApp(page);
+
+  const dialog = page.locator('[data-pkc-region="app-dialog"]');
+  await page.keyboard.press('Control+Shift+P');
+  await expect(dialog, 'パレットが開かない(台が崩れている)').toBeVisible();
+
+  /**
+   * ⚠ **押し所を経由せず、器を直に閉じる。** `Escape` ではこの形にならない
+   *   (`Escape` も `close` を出すが、それは器が自分で閉じる道である)。
+   */
+  await page.evaluate(() => {
+    document.querySelector<HTMLDialogElement>('[data-pkc-region="app-dialog"]')?.close();
+  });
+  await expect(dialog, '外から閉じても器が残っている').toBeHidden();
+
+  // 🔑 **鎖が詰まっていないこと** ── もう 1 枚開けるか(詰まっていれば永久に出ない)
+  await page.keyboard.press('Control+Shift+P');
+  await expect(dialog, '外から閉じた後、次のダイアログが開かない(列が詰まった)').toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+
+  // 🔴 本題 ── ここから編集して、**終えられる**
+  await createEntry(page, 'text');
+  const ta = page.locator('[data-pkc-field="editor-body"]');
+  await ta.fill('パレットを外から閉じた後の本文');
+  await page.keyboard.press('Control+s');
+
+  // 保存できた = 編集の面から出ている(読む形の本文が出ている)
+  await expect(
+    page.locator('[data-pkc-field="detail-body"]'),
+    '保存しても編集の面から出られない(#723 の症状)',
+  ).toContainText('パレットを外から閉じた後の本文');
+  // ⚠ 断り文が出ていないこと(黙って捨てられていない ── #723 の計器)
+  await expect(page.locator('[data-pkc-region="status"]')).not.toContainText(
+    '保存できませんでした',
+  );
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
