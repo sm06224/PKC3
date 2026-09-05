@@ -134,6 +134,35 @@ export function handlers() {
   return out;
 }
 
+/**
+ * 🔴 **コメントを落としてから数える**(2026-09-05、#738)。
+ *
+ * ⚠ 直す前は原文をそのまま読んでいたので、**docstring に
+ *   `data-pkc-action="…"` と書いただけで、その file が出口として数えられた** ──
+ *   #735 の直しで「csv の升にはこの印が付く」と**説明を書いた**瞬間に、
+ *   `tests/action-outlets.test.ts` が実際に赤くなった(説明が台帳を動かした)。
+ * 🔑 出口は「**実行する字**」だけである(CLAUDE.md §1「コメントに満たされる」)。
+ *
+ * ⚠ **行単位でしか落とさない** ── `/* … *\/` を字面で剥ぐと、
+ *   文字列の中(HTML の生成)に同じ並びが在る日に**本物の出口まで消える**。
+ *   行頭が `//` / `*` / `/*` / `*\/` の行だけを空にする(docstring はこの形)。
+ * ⚠ 行末に付けたコメント(`foo(); // data-pkc-action="x"`)は残る ── 数えたい
+ *   のは「説明で数が動かないこと」で、そこまで削ると文字列を巻き込む。
+ *
+ * 実測(2026-09-05):落とすと変わったのは **1 件だけ**
+ *   (`copy-md-block` の出口 4 → 3 ── 自分の file の docstring を数えていた)。
+ *   ⚠ 台帳の一覧(`OBJECT_LONE` / `unresolved`)は 1 つも動かない。
+ */
+export function codeOnlyForScan(text) {
+  return text
+    .split('\n')
+    .map((line) => {
+      const t = line.trim();
+      return t.startsWith('//') || t.startsWith('*') || t.startsWith('/*') ? '' : line;
+    })
+    .join('\n');
+}
+
 /** 画面に出している所。⚠ 上の①②だけ。③は追えない(docstring)。 */
 export function outlets(names) {
   const known = new Set(names);
@@ -145,7 +174,7 @@ export function outlets(names) {
   };
   for (const f of walk('src')) {
     if (f === 'src/adapter/ui/actions/binder.ts') continue; // 受け手の表は出口ではない
-    const t = rd(f);
+    const t = codeOnlyForScan(rd(f));
     const where = relative('src', f).split(sep).join('/');
     for (const re of [
       /data-pkc-action['"]?\s*,\s*['"]([a-z0-9-]+)['"]/g,

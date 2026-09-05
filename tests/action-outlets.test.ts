@@ -24,7 +24,7 @@
  */
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error -- CI script は素の .mjs(ビルド対象外)
-import { handlers, receivers, report } from '../scripts/action-outlets.mjs';
+import { codeOnlyForScan, handlers, receivers, report } from '../scripts/action-outlets.mjs';
 
 interface Row { action: string; screens: string[]; key: boolean }
 interface Report { receivers: number; withScreen: number; unresolved: string[]; rows: Row[] }
@@ -156,6 +156,38 @@ describe('操作 → 出口の対応表(#582)', () => {
     expect(new Set(got).size, '受け手の名前が重複している(終端の切り方が壊れた)').toBe(got.length);
     // 🔑 本文も同じ数だけ切れている(片方だけ壊れるのを防ぐ)
     expect(bodies().size, '本文の切り出しが受け手と揃っていない').toBe(got.length);
+  });
+
+  /**
+   * 🔴 **コメントは出口ではない**(2026-09-05、#738)。
+   *
+   * ⚠ 直す前は原文をそのまま読んでいたので、**docstring に
+   *   `data-pkc-action` の綴りを書いただけで、その file が出口として数えられた** ──
+   *   #735 の直しで「csv の升にはこの印が付く」と**説明を書いた**瞬間に、下の
+   *   「出口が 1 か所」の一覧が動いて赤くなった(**説明が台帳を動かした**)。
+   * 🔑 見るのは 2 つ:①落とす規則が docstring を空にすること
+   *   ②**実物で**、説明しか書いていない file が出口に数えられていないこと。
+   * ⚠ ②が本体である ── ①だけだと「規則は在るが呼ばれていない」を見逃す。
+   */
+  it('🔴 コメントに書いた印を、出口として数えない (#738)', () => {
+    // ① 規則そのもの(docstring の 3 つの書き出しを全部空にする)
+    expect(
+      codeOnlyForScan(['/**', ' * data-pkc-action="x"', ' */', '// data-pkc-action="y"'].join('\n')).trim(),
+      'docstring を落とせていない',
+    ).toBe('');
+    // ⚠ 実行する字は残す(落としすぎると本物の出口が消える)
+    expect(codeOnlyForScan('el.setAttribute("data-pkc-action", "z");')).toContain('data-pkc-action');
+    /**
+     * ② 実物 ── `copy-md-block.ts` は**自分の名前の説明**を docstring に持つが、
+     *    そこから出口を作ってはいない(押す口を作るのは `markdown-render.ts` 側)。
+     */
+    const where = r().rows.find((x) => x.action === 'copy-md-block')?.screens ?? [];
+    // 空振り防止 ── 出口が 1 つも読めていないなら、下は何も見ていない
+    expect(where.length, 'copy-md-block の出口が 1 つも読めていない').toBeGreaterThan(0);
+    expect(
+      where,
+      'コメントしか無い file を出口に数えている(説明を書くと台帳が動く)',
+    ).not.toContain('adapter/ui/actions/copy-md-block.ts');
   });
 
   it('🔴 静的に追えない出口の顔ぶれが変わっていない', () => {
