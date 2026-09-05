@@ -699,3 +699,52 @@ test('🔴 見出しを右クリックして「この章をコピー」を押す
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **まだ何も指していない説明欄には案内が出る**(#705 ③、user 裁定 案 A)。
+ *
+ * 本文のメニューは先頭の項目(段組み)に説明が無いので、開いた直後の欄が**空の灰色の箱**
+ * だった。⚠ 字は CSS(`:empty::before`)が描くので `textContent` は空のまま ──
+ * だから見るのは `getComputedStyle(el, '::before').content` である(user が見る字そのもの)。
+ * ⚠ 説明の在る項目に乗せたら案内は消え、その説明だけが出る(対照群)。
+ */
+test('🔴 本文のメニューを開いた直後、説明欄に「項目に乗せると説明が出ます」と薄く出る (#705 ③)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-body"]').fill('案内の的\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(page.locator('[data-pkc-field="detail-body"]')).toBeVisible();
+
+  await page.locator('[data-pkc-field="detail-body"] p').first().click({ button: 'right' });
+  const menu = page.locator(MENU);
+  await expect(menu, '本文で右クリックしてもメニューが出ない').toBeVisible();
+  const hint = menu.locator('[data-pkc-field="context-menu-hint"]');
+  await expect(hint, '説明の欄が無い(本文のメニューに説明を持つ項目が 1 つも無い ── 前提が崩れている)').toBeVisible();
+  // 🔑 前提: 焦点の在る先頭の項目には説明が無い(これが「乗せる前」の姿を作る)
+  const first = menu.locator('button[data-pkc-action]').first();
+  expect(await first.getAttribute('data-pkc-hint'), '先頭の項目に説明が在る(空の欄が作れない ── 前提が崩れている)').toBeNull();
+
+  const before = await hint.evaluate((el) => ({
+    text: el.textContent ?? '',
+    guide: getComputedStyle(el, '::before').content,
+  }));
+  expect(before.text, '欄に字が入っている(案内は CSS で出す設計と違う)').toBe('');
+  expect(before.guide, '空の欄に案内が出ていない(何のための箱か読めない)').toContain('項目に乗せると説明が出ます');
+
+  // 対照群: 説明の在る項目に乗せると、案内は消えて説明だけが出る
+  const withHint = menu.locator('button[data-pkc-hint]').first();
+  const expected = (await withHint.getAttribute('data-pkc-hint')) ?? '';
+  expect(expected, '説明を持つ項目が無い(前提が崩れている)').not.toBe('');
+  await withHint.hover();
+  await expect(hint, '乗せた項目の説明に変わらない').toHaveText(expected);
+  expect(await hint.evaluate((el) => getComputedStyle(el, '::before').content), '説明の上に案内が重なっている').toBe(
+    'none',
+  );
+
+  await page.keyboard.press('Escape');
+  await expect(page.locator(MENU)).toHaveCount(0);
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

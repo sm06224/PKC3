@@ -1,4 +1,5 @@
 import { test, expect, devices } from '@playwright/test';
+import { inflateSync } from 'node:zlib';
 import {
   gotoApp,
   clickReal,
@@ -1186,3 +1187,140 @@ test('🔴 スマホで行を 600ms 押し続けると、印が 2 行になる (
   ).toBe(1);
   expect(errors, `console/pageerror: ${errors.join(' | ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **スマホでは本文の上の題名を出さない ── 帯の題名だけ**(#705 ①、user 裁定 案 A)。
+ *
+ * ⚠ 直す前は帯の題名と本文の `h2` が**2 段重ね**で、本文ページの縦を 27px 食っていた。
+ * 🔑 観測点は 2 つで 1 組:①本文の題名が**場所ごと消えている**(`boundingBox()` が null)
+ *   ②**同じ題名が帯に在る**(消しただけで読めなくなっていない ── 対照群)。
+ */
+test('🔴 本文ページで題名は帯にだけ出る(本文の上には出ない) (#705 ①)', async ({ page }) => {
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  await createEntry(page, 'text');
+  await clickReal(page, `${REGION('detail')} [data-pkc-action="commit-edit"]`);
+  await expect(page.locator(REGION('center'))).toBeVisible();
+
+  // ⚠ 題名は情報ペイン(隠れているが DOM には在る)から読む ── 帯と別の口で同じ値を採る
+  const title = (await page.locator('[data-pkc-field="inspector-title"]').textContent())?.trim() ?? '';
+  expect(title, '題名が採れない(台の空振り)').not.toBe('');
+  await expect(page.locator(REGION('phone-bar')), '帯に題名が無い(消しただけで読めなくなった)').toContainText(
+    title,
+  );
+  const h2 = page.locator(`${REGION('center')} [data-pkc-field="detail-title"]`);
+  expect(await h2.count(), '本文の題名の要素そのものが無い(DOM から消している ── CSS で消す設計と違う)').toBe(1);
+  expect(await h2.boundingBox(), '本文の上に題名が出ている(帯と 2 段重ね)').toBeNull();
+});
+
+/**
+ * 🔴 **書式バーの余りが、何段に折れても灰色にならない**(#705 ②、user 裁定 案 A)。
+ *
+ * ⚠ 直す前は `gap: 1px` + 下地 `--border` で線を作り、余りを `::after` で塗っていた ──
+ *   `::after` は最後の段にしか居ないので、スマホで 2 段以上に折れると**上の段の余りが
+ *   線色のベタ塗り**になった。
+ * 🔑 観測点は**画素**である(`page.screenshot` を `scale: 'css'` で撮り、PNG を自前で読む)。
+ *   CSS の字面は `tests/adapter/button-bars-css.test.ts` が持つ ── ここは user が見る色だけ。
+ *   ⚠ 参照値は同じ画像から採る(ボタンの地 = 面の地 / ボタンの間 = 線)── 色の綴りを
+ *   test に貼らない(テーマで変わる)。
+ */
+test('🔴 書式バーが 2 段以上に折れても、上の段の余りは地の色 ── 区切りの線は残る (#705 ②)', async ({
+  page,
+}) => {
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  await createEntry(page, 'text'); // 作った直後は編集中 ── 書式バーが出ている
+  const bar = page.locator(REGION('format-bar'));
+  await expect(bar).toBeVisible();
+
+  const geo = await bar.evaluate((el) => {
+    const box = el.getBoundingClientRect();
+    const btns = [...el.querySelectorAll('button')].map((b) => b.getBoundingClientRect());
+    // 段ごとに分ける(top が同じ物が 1 段)
+    const rows = new Map<number, DOMRect[]>();
+    for (const r of btns) rows.set(Math.round(r.top), [...(rows.get(Math.round(r.top)) ?? []), r]);
+    const ordered = [...rows.entries()].sort((a, b) => a[0] - b[0]).map(([, rs]) => rs.sort((a, b) => a.left - b.left));
+    return {
+      box: { x: box.left, y: box.top, w: box.width, h: box.height },
+      rows: ordered.map((rs) => ({
+        mid: (rs[0]!.top + rs[0]!.bottom) / 2,
+        firstLeft: rs[0]!.left,
+        gapX: rs.length > 1 ? (rs[0]!.right + rs[1]!.left) / 2 : null,
+        lastRight: rs[rs.length - 1]!.right,
+      })),
+    };
+  });
+  // 🔑 前提: 2 段以上に折れている(1 段なら「上の段の余り」が存在しない ── この検査は何も主張しない)
+  expect(geo.rows.length, `書式バーが折れていない(${geo.rows.length} 段)── 前提が崩れている`).toBeGreaterThan(1);
+  // 余りがいちばん広い「最後でない段」を測る(最後の段は直す前も地の色だった)
+  const upper = geo.rows.slice(0, -1).map((r) => ({ ...r, rest: geo.box.x + geo.box.w - r.lastRight }));
+  const row = upper.sort((a, b) => b.rest - a.rest)[0]!;
+  expect(row.rest, `上の段の余りが ${row.rest.toFixed(1)}px しか無い(測れない)`).toBeGreaterThan(6);
+  expect(row.gapX, '段に 2 つ目のボタンが無い(線の対照群が採れない)').not.toBeNull();
+
+  const png = await page.screenshot({
+    clip: { x: geo.box.x, y: geo.box.y, width: geo.box.w, height: geo.box.h },
+    scale: 'css',
+  });
+  const at = (x: number, y: number): string => rgbAt(png, Math.floor(x - geo.box.x), Math.floor(y - geo.box.y)).join(',');
+  const ground = at(row.firstLeft + 2, row.mid); // ボタンの地(左の余白 ── 図案に当たらない)
+  const line = at(row.gapX!, row.mid); // ボタンとボタンの間の 1px = 区切りの線
+  const rest = at(row.lastRight + 4, row.mid); // 段の余り
+  expect(line, '区切りの線が消えている(ボタンがくっついて 1 枚に見える)').not.toBe(ground);
+  expect(rest, `上の段の余り(${rest})がボタンの地(${ground})と違う ── 線色のベタ塗りが残っている`).toBe(ground);
+});
+
+/**
+ * PNG(8bit / 非インターレース / RGB か RGBA)の 1 画素を読む。
+ * ⚠ 依存を足さない(pngjs は無い)── IDAT を inflate して行のフィルタ 5 種を戻すだけ。
+ */
+function rgbAt(png: Buffer, x: number, y: number): [number, number, number] {
+  let off = 8;
+  let w = 0;
+  let h = 0;
+  let bpp = 0;
+  const idat: Buffer[] = [];
+  while (off < png.length) {
+    const len = png.readUInt32BE(off);
+    const type = png.toString('ascii', off + 4, off + 8);
+    const data = png.subarray(off + 8, off + 8 + len);
+    if (type === 'IHDR') {
+      w = data.readUInt32BE(0);
+      h = data.readUInt32BE(4);
+      if (data[8] !== 8 || data[12] !== 0) throw new Error(`読めない PNG(depth ${data[8]} / interlace ${data[12]})`);
+      bpp = data[9] === 6 ? 4 : data[9] === 2 ? 3 : 0;
+      if (bpp === 0) throw new Error(`読めない PNG(colorType ${data[9]})`);
+    } else if (type === 'IDAT') idat.push(data);
+    off += 12 + len;
+  }
+  if (x < 0 || y < 0 || x >= w || y >= h) throw new Error(`画素 (${x},${y}) が画像 ${w}x${h} の外`);
+  const raw = inflateSync(Buffer.concat(idat));
+  const stride = w * bpp;
+  const out = Buffer.alloc(h * stride);
+  for (let r = 0; r < h; r++) {
+    const f = raw[r * (stride + 1)]!;
+    const src = r * (stride + 1) + 1;
+    const dst = r * stride;
+    for (let i = 0; i < stride; i++) {
+      const a = i >= bpp ? out[dst + i - bpp]! : 0;
+      const b = r > 0 ? out[dst - stride + i]! : 0;
+      const c = r > 0 && i >= bpp ? out[dst - stride + i - bpp]! : 0;
+      const v = raw[src + i]!;
+      let p: number;
+      if (f === 0) p = v;
+      else if (f === 1) p = v + a;
+      else if (f === 2) p = v + b;
+      else if (f === 3) p = v + ((a + b) >> 1);
+      else {
+        const q = a + b - c;
+        const pa = Math.abs(q - a);
+        const pb = Math.abs(q - b);
+        const pc = Math.abs(q - c);
+        p = v + (pa <= pb && pa <= pc ? a : pb <= pc ? b : c);
+      }
+      out[dst + i] = p & 255;
+    }
+  }
+  const o = y * stride + x * bpp;
+  return [out[o]!, out[o + 1]!, out[o + 2]!];
+}

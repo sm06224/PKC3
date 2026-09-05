@@ -1108,6 +1108,25 @@ describe('CSS(構文で読む)', () => {
       );
   });
 
+  /**
+   * 🔴 **スマホでは本文の上の題名を出さない**(#705 ①)── 帯が同じ題名を持つので 2 段重ねだった。
+   * ⚠ 消すのは本文の面(`center`)の題名だけ ── 編集中の題名の欄は打つ物なので残る。
+   *   実ブラウザで「消えていて、帯に題名が在る」は `phone.smoke.spec.ts` が見る。
+   */
+  it('🔴 スマホでは本文の上の題名(detail-title)を出さない ── 帯の題名だけ', () => {
+    const text = withoutMedia(bare());
+    const b = blocksFor(text, `${PHONE} [data-pkc-region='center'] [data-pkc-field='detail-title']`);
+    expect(b.length, '題名を消す規則が無い(帯と本文で題名が 2 段重ねになる)').toBeGreaterThan(0);
+    expect(b.join('\n'), '題名が消えていない').toMatch(decl('display', 'none'));
+    // ⚠ 編集中の題名の欄まで消していない(打つ物)
+    expect(
+      blocksFor(text, `${PHONE} [data-pkc-region='center'] [data-pkc-field='editor-title']`).join('\n'),
+      '編集中の題名の欄まで消している',
+    ).not.toMatch(decl('display', 'none'));
+    // ⚠ 対照群: PC(スマホの印が無い)には当てない ── 規則が phone の印を条件に持つことで担保
+    expect(blocksFor(text, "[data-pkc-region='center'] [data-pkc-field='detail-title']"), 'PC でも題名を消している').toHaveLength(0);
+  });
+
   it('🔴 3 面は同じセルに重なり、出ていない面は visibility で消す', () => {
     const body = blocksFor(withoutMedia(bare()), `${PHONE} [data-pkc-region='sidebar']`).join(' ');
     expect(body, '一覧を重ねる規則が無い').toContain('grid-area: detail');

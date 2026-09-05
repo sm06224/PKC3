@@ -531,6 +531,19 @@ select:focus-visible {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
+/**
+ * 🔴 **まだ何も指していない欄には、薄い字で案内を出す**(#705 ③、user 裁定 案 A)。
+ *
+ * 本文のメニューは先頭の項目に説明が無いので、開いた直後の欄が**空の灰色の箱**だった
+ * (2 行ぶんの高さだけが在って、何のための場所か読めない)。
+ * 🔑 CSS の `:empty::before` で出す ── `textContent` は空のまま(説明を読む検査と
+ *   読み上げの中身を変えない)。字は説明より一段薄く ── 案内は説明ではない。
+ * ⚠ スマホの ⋯ メニューは先頭の項目に説明が在るので、この字は出ない(触らない)。
+ */
+[data-pkc-field='context-menu-hint']:empty::before {
+  content: '項目に乗せると説明が出ます';
+  color: color-mix(in oklab, var(--muted) 60%, var(--surface));
+}
 
 /* ── 左の列: 探し方のタブ ───────────────────────────
  * 🔑 **その列が扱うものの操作は、その列が持つ**(P8 段⑤)── 上の帯と左で
@@ -1151,18 +1164,32 @@ select:focus-visible {
  * `gap: 1px` の**共有の線**で作る(user 指示 2026-08-03「境界線は全て共有」と同じ向き)。
  * ⚠ 押せることは消さない ── 指した時・焦点が来た時に色が付く。
  */
-[data-pkc-field='detail-toolbar'] {
+/**
+ * 🔴 **帯 2 本(本文の帯 / 書式パネル)の下地は地の色、区切りはボタンの輪**(#705 ②)。
+ *
+ * ⚠ 直す前は `gap: 1px` + 下地 `--border` で線を作り、余りを `::after` の伸びる空要素で
+ *   地の色に塗っていた ── だが `::after` は**最後の段にしか居ない**ので、ボタンが
+ *   2 段以上に折れると(スマホ・狭い窓)**上の段の余りが線色のベタ塗り**になった。
+ * 🔑 下地を地の色にし、線は**各ボタンの外側 1px の輪**(`outline`)で描く ── 隣り合う輪は
+ *   `gap: 1px` の 1 画素に重なって 1 本の線になる。区切りの見た目は変わらず、
+ *   余りは**どの段でも**地の色である。
+ * ⚠ `:focus-visible` の輪(共通の 2px accent)は殺さない ── 焦点の在処は情報である。
+ * ⚠ 2 本を 1 つの規則に寄せる(CLAUDE.md §7 ── 片方だけ直る日を作らない)。
+ */
+[data-pkc-field='detail-toolbar'],
+[data-pkc-region='format-bar'] {
   display: flex;
   flex-wrap: wrap;
   gap: 1px;
-  background: var(--border);
-  margin-bottom: var(--s3);
-}
-/* ⚠ 余りは**地の色**で埋める(format-bar と同じ ── 線色のベタ塗りにしない) */
-[data-pkc-field='detail-toolbar']::after {
-  content: '';
-  flex: 1 1 auto;
   background: var(--surface);
+}
+[data-pkc-field='detail-toolbar'] button:not(:focus-visible),
+[data-pkc-region='format-bar'] button:not(:focus-visible) {
+  outline: 1px solid var(--border);
+  outline-offset: 0;
+}
+[data-pkc-field='detail-toolbar'] {
+  margin-bottom: var(--s3);
 }
 [data-pkc-field='detail-toolbar'] button {
   border: none;
@@ -1338,24 +1365,12 @@ select:focus-visible {
  * 🔑 **編集欄のすぐ上**に、共有の 1 本線で貼り付ける(段④ の規約:境界線は共有、
  * ギャップは置かない)。14 個入るので狭いときは折り返す ── 畳まない
  * (user 指示「主要な導線を畳まない」)。 */
+/* ⚠ 並べ方・下地・区切りは本文の帯と共有(`[data-pkc-field='detail-toolbar']` の規則)。
+ *    ここは書式パネルだけの枠 ── 下は編集欄の枠が担うので `border-bottom` を持たない */
 [data-pkc-region='format-bar'] {
-  display: flex;
-  flex-wrap: wrap;
-  /* 線そのものを gap で作る ── ボタン同士がくっついた 1 枚の帯に見える */
-  gap: 1px;
-  background: var(--border);
   border: 1px solid var(--border);
   border-bottom: none;
   margin-bottom: 0;
-}
-/* ⚠ **余りを地の色で埋める**(P9 段②)。この帯は `gap: 1px` で区切り線を作るため
- * 背景が**線の色**になっている ── ボタンが埋まらない残り(Full HD で 50.8%)が
- * そのまま線色のベタ塗りになって「作りかけ」に見えていた。
- * 伸びる空要素を 1 つ置いて、そこだけ地の色にする(DOM は増やさない) */
-[data-pkc-region='format-bar']::after {
-  content: '';
-  flex: 1 1 auto;
-  background: var(--surface);
 }
 [data-pkc-region='format-bar'] button {
   border: none;
@@ -5418,6 +5433,17 @@ li[data-pkc-row-slot] {
 [data-pkc-region='shell'][data-pkc-layout='phone'][data-pkc-page='pane'] [data-pkc-region='center'],
 [data-pkc-region='shell'][data-pkc-layout='phone'][data-pkc-page='info'] [data-pkc-region='inspector'] {
   visibility: visible;
+}
+/**
+ * 🔴 **スマホでは本文の上の題名を出さない**(#705 ①、user 裁定 案 A)。
+ *
+ * 帯(`phone-bar`)が同じ題名を持っているので、本文ページでは題名が**2 段重ね**で
+ * 縦を食っていた(実測 27px)。帯の題名だけにする ── 長い題名の全文は「情報」で読める。
+ * ⚠ 消すのは**本文の面の題名だけ**(`center` の `detail-title`)── 編集中の題名の欄
+ *   (`editor-title`)は打つ物なので残す。
+ */
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='center'] [data-pkc-field='detail-title'] {
+  display: none;
 }
 /**
  * 🔴 **ページの帯は面と同じマスに、上端へ寄せて重ねる**(#632 段①)。

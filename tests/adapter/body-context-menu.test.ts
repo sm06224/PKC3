@@ -24,7 +24,7 @@ import { appPanes } from '../../src/adapter/ui/render/pane-visibility';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { bindActions, type BinderServices } from '../../src/adapter/ui/actions/binder';
 import { BODY_MENU_ACTIONS, ENTRY_ACTION_HINTS } from '../../src/features/entry-actions';
-import { MENU_SHORTCUT_ATTR, openContextMenu } from '../../src/adapter/ui/render/context-menu';
+import { MENU_HINT_FIELD, MENU_SHORTCUT_ATTR, openContextMenu } from '../../src/adapter/ui/render/context-menu';
 import { chordHint } from '../../src/adapter/ui/render/shortcut-hint';
 import { sectionAt } from '../../src/features/markdown/append-target';
 import { applyHeadingFold } from '../../src/adapter/ui/render/heading-fold';
@@ -1594,5 +1594,19 @@ describe('近道の字の見え方(#587 C 案 2)', () => {
     expect(blocks, '近道を描く規則が無い(属性は在っても画面に出ない)').toHaveLength(1);
     expect(blocks[0], '属性の字を描いていない').toMatch(decl('content', `attr\\(${MENU_SHORTCUT_ATTR}\\)`));
     expect(blocks[0], '右に寄せていない').toMatch(decl('margin-left', 'auto'));
+  });
+
+  /**
+   * 🔴 **何も指していない説明欄には案内を出す**(#705 ③)。本文のメニューは先頭に説明が
+   *   無いので、開いた直後の欄が**空の箱**だった。⚠ 字は CSS(`:empty::before`)が描く ──
+   *   `textContent` は空のまま(上の describe が「説明が空」を読む検査と両立する)。
+   */
+  it('🔴 空の説明欄に「項目に乗せると説明が出ます」を描く規則が在る', () => {
+    const css = withoutMedia(stripComments(readFileSync('src/styles/app.css', 'utf-8')));
+    const blocks = blocksFor(css, `[data-pkc-field='${MENU_HINT_FIELD}']:empty::before`);
+    expect(blocks, '空の欄に案内を描く規則が無い(何のための箱か読めない)').toHaveLength(1);
+    expect(blocks[0], '案内の字が違う').toMatch(decl('content', "'項目に乗せると説明が出ます'"));
+    // 案内は説明より薄く(説明と同じ濃さだと「説明」に読める)
+    expect(blocks[0], '案内が説明と同じ濃さ').toMatch(decl('color', 'color-mix\\('));
   });
 });
