@@ -103,6 +103,30 @@ describe('extractMdBlockPlainText / stripTableChromeForCopy', () => {
     );
   });
 
+  /**
+   * 🔴 **⧉ で表をコピーすると、押せないボタンが一緒に貼られた**(#735)。
+   *
+   * ⚠ 落とす一覧が **PKC2 由来の 4 つ**(並べ替え / 絞り込みの飾り)だけで、
+   *   #418 が足した csv の**升をいじるボタン**を 1 つも落としていなかった。
+   * 🔑 いまは「操作子とは何か」を `clipboard-html.ts` の 1 か所から借りる(§7)。
+   */
+  it('🔴 csv の表を ⧉ でコピーしても、押せないボタンが混ざらない(#735)', () => {
+    const host = el(
+      `<div>${renderMarkdown('```csv\n名前,数\nあ,1\n```', { interactiveCells: true })}</div>`,
+    );
+    const table = host.querySelector('table')!;
+    // 空振り防止 ── 口が本当に出ている
+    expect(table.querySelectorAll('button').length, '口が出ていない(台が古い)').toBeGreaterThan(0);
+    const clean = stripTableChromeForCopy(table);
+    expect(clean.querySelectorAll('button').length, '押せないボタンが貼られる').toBe(0);
+    expect(clean.querySelectorAll('td,th').length, '升まで消えた').toBe(
+      table.querySelectorAll('td,th').length,
+    );
+    expect(clean.outerHTML, '内部の印が貼られる').not.toContain('data-pkc-');
+    // ⚠ 画面の DOM は無傷(コピーしたら画面が変わった、を作らない)
+    expect(table.querySelectorAll('button').length, '画面の表を壊した').toBeGreaterThan(0);
+  });
+
   it('table chrome(行番号 / 並べ替え / 絞り込み)は clone から除去、表示 DOM は無傷', () => {
     const table = el(
       '<table><tr><th class="pkc-md-table-rownum">#</th><th>名前<button class="pkc-md-table-sort">↕</button></th></tr></table>',

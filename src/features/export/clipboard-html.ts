@@ -27,8 +27,44 @@ export interface CleanResult {
   removed: number;
 }
 
+/**
+ * 🔴 **「画面の都合でしか無い物」の定義は、ここ 1 つ**(2026-09-05、#735)。
+ *
+ * ⚠ 直す前は塊のコピー(`copy-md-block.ts`)が**自前の一覧**を持っており、
+ *   そちらは **PKC2 由来の 4 つ**(並べ替え / 絞り込みの飾り)しか落とさなかった ──
+ *   #418 が足した csv の**升をいじるボタン**(`edit-cell` の印 /
+ *   `.pkc-csv-shape`)は素通りし、⧉ で表をコピーすると**押せないボタンが貼られた**。
+ * 🔑 だから**判定を寄せる**(CLAUDE.md §7)── 塊のコピーもこの選択子を通す。
+ */
+export const COPY_CHROME_SELECTOR = '[data-pkc-action]';
+
+/**
+ * 🔴 **「押すためだけの器」のタグ**(2026-09-05、#735 の実装中に実測して判明)。
+ *
+ * ⚠ `data-pkc-action` は**押せる器だけに付いているのではない** ── csv の表は
+ *   **升そのもの**(`td` / `th`)に `edit-cell` を付ける(`csv-table.ts`)。
+ * 🔴 だから「`[data-pkc-action]` を要素ごと消す」は、**表の中身を丸ごと消す**。
+ *   実測(読む面と同じ `interactiveCells: true` で描いた csv の表):
+ *   掃除の前 **升 4 個** → 後 **0 個**。つまり「ノートを HTML でコピー」すると
+ *   **升の無い表**が貼られていた(pasted 側でしか見えないので、誰も気づかない形)。
+ * 🔑 だから**タグで見分ける** ── 押す器は消し、中身を持つ要素は**残して属性だけ落とす**
+ *   (属性は下の ④ が全部落とす)。
+ * ⚠ 実測した読む面の `[data-pkc-action]` は **`button` と `td` / `th` の 2 種類だけ**だった。
+ */
+export const COPY_CONTROL_TAGS: ReadonlySet<string> = new Set([
+  'button',
+  'input',
+  'select',
+  'textarea',
+]);
+
+/** その要素は「押すためだけの器」か(= 消してよいか)。 */
+export function isCopyControl(el: Element): boolean {
+  return COPY_CONTROL_TAGS.has(el.tagName.toLowerCase());
+}
+
 /** 画面の都合でしか無い器(貼り先には要らない)。 */
-const JUNK_CLASSES = [
+export const COPY_JUNK_CLASSES = [
   'pkc-mermaid-source',
   'pkc-chart-source',
   'pkc-render-source',
@@ -50,13 +86,15 @@ export function cleanForClipboard(
   let removed = 0;
   let droppedImages = 0;
 
-  // ① 操作子を落とす(押せないボタンを本文に混ぜない)
-  for (const el of [...root.querySelectorAll('[data-pkc-action]')]) {
+  // ① 操作子を落とす(押せないボタンを本文に混ぜない)。⚠ 綴りは上の 1 か所
+  //    🔴 **押す器だけ**を消す ── 中身を持つ要素(csv の升)は残す(上の註記)
+  for (const el of [...root.querySelectorAll(COPY_CHROME_SELECTOR)]) {
+    if (!isCopyControl(el)) continue;
     el.remove();
     removed += 1;
   }
   // ② 隠してあるものを落とす。⚠ **CSS で隠れているだけ**なので、貼り先では出る
-  for (const cls of JUNK_CLASSES) {
+  for (const cls of COPY_JUNK_CLASSES) {
     for (const el of [...root.querySelectorAll(`.${cls}`)]) {
       el.remove();
       removed += 1;

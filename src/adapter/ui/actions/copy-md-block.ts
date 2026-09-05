@@ -11,6 +11,7 @@
  * スタイル導入(P3-7)後に outerHTML 素通しでは足りないと分かってから持ち込む。
  */
 import { copyMarkdownAndHtml, copyPlainText } from '@adapter/platform/clipboard';
+import { COPY_CHROME_SELECTOR, isCopyControl } from '@features/export/clipboard-html';
 import {
   TABLE_COPY_CHOICES,
   tableToCsv,
@@ -63,14 +64,48 @@ export function findMdBlockTable(block: HTMLElement): HTMLElement | null {
  * 貼り付ける回帰(PKC2 で実際に起きた「Excel 見出しが name↕⌕」)を先に封じる。
  * 表示中の DOM は壊さず、clone から装飾ノードだけ除く。
  */
-const TABLE_CHROME_SELECTOR =
-  '.pkc-md-table-rownum, .pkc-md-table-filter-row, .pkc-md-table-sort, .pkc-md-table-filter-toggle';
+/**
+ * 🔴 **落とす物の定義を寄せた**(2026-09-05、#735)。
+ *
+ * ⚠ 直す前はここに **PKC2 由来の 4 つ**(並べ替え / 絞り込みの飾り)しか無く、
+ *   #418 が足した csv の**升をいじるボタン**(`edit-cell` の印 /
+ *   `.pkc-csv-shape`)を落とさなかった ── csv の表を ⧉ でコピーして Word や
+ *   メールへ貼ると、**押せない小さなボタンが一緒に貼られた**。
+ * 🔑 `COPY_CHROME_SELECTOR`(読む面のリッチコピーが使う定義)を**借りる** ──
+ *   「操作子とは何か」を 2 か所で決めない(CLAUDE.md §7)。
+ * ⚠ PKC2 由来の 4 つは**残す** ── あちらは `data-pkc-action` を持たない**飾り**で、
+ *   注入されたときに黙って貼られるのを止めるために置いた物である。
+ */
+const TABLE_CHROME_SELECTOR = [
+  COPY_CHROME_SELECTOR,
+  '.pkc-md-table-rownum',
+  '.pkc-md-table-filter-row',
+  '.pkc-md-table-sort',
+  '.pkc-md-table-filter-toggle',
+].join(', ');
+
+/**
+ * 🔴 **消してよいのは「押す器」だけ**(`isCopyControl`)。
+ * ⚠ csv の表は**升そのもの**に `edit-cell` の印を付けるので、
+ *   選択子に当たった要素を何でも消すと**表の中身が丸ごと消える**。
+ * ⚠ PKC2 由来の飾り(行番号 / 並べ替え / 絞り込み)は `data-pkc-action` を
+ *   持たないので、**そちらは要素ごと消す**(押す器ではないが、貼り先には要らない)。
+ */
+function isTableChrome(el: Element): boolean {
+  return el.hasAttribute('data-pkc-action') ? isCopyControl(el) : true;
+}
 
 export function stripTableChromeForCopy(inner: HTMLElement): HTMLElement {
   if (inner.tagName.toLowerCase() !== 'table') return inner;
   if (!inner.querySelector(TABLE_CHROME_SELECTOR)) return inner;
   const clone = inner.cloneNode(true) as HTMLElement;
-  for (const el of clone.querySelectorAll(TABLE_CHROME_SELECTOR)) el.remove();
+  for (const el of clone.querySelectorAll(TABLE_CHROME_SELECTOR)) {
+    if (isTableChrome(el)) el.remove();
+    // ⚠ 残す要素の内部属性は落とす(貼り先で意味を持たない印を延々と付けない)
+    else for (const name of el.getAttributeNames()) {
+      if (name.startsWith('data-pkc-')) el.removeAttribute(name);
+    }
+  }
   return clone;
 }
 
