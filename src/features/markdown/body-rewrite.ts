@@ -24,6 +24,7 @@ import { DELIMITER, csvEscapeField, parseCsv, type CsvPositions } from './csv-ta
 import { parseRenderableFence } from './markdown-render';
 import { scanContainers } from './source-blocks';
 import { insertLines, moveLines } from './line-move';
+import { convertTable, tableAt, tableConvertRefusal, type TableFormat } from './table-convert';
 
 /** 何をするか。⚠ **やり直せる形で持つ**(未達 commit との合流に要る)。 */
 export type BodyRewrite =
@@ -270,6 +271,21 @@ export type BodyRewrite =
       line: number;
       openLine: string;
       dir: 'up' | 'down';
+    }
+  | {
+      /**
+       * 🔴 **表の形を変える**(#708 段②)── markdown の表 ⇄ csv の囲み。
+       *
+       * ⚠ `line` は**原文の行番号**(0 始まり)。押した表のどの行でもよい ──
+       *   範囲は `table-convert.ts` が原文から引き直す(`csv-shape` と同じ作法で、
+       *   **その表の行だけ**を差し替える。同じノートに表が 3 つ在っても他は動かない)。
+       * 🔴 **式が在る csv は markdown にしない**(user 裁定 2026-09-04)── ここでも
+       *   断る(`null`)。⚠ 理由は押した時に binder が既に出しているが、**読んで
+       *   から書くまでの間に別の窓が式を書いた**ら、判定できるのはここだけである。
+       */
+      kind: 'table-format';
+      line: number;
+      to: TableFormat;
     };
 
 /**
@@ -406,6 +422,7 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
   if (rewrite.kind === 'link-move') return moveLinkLine(body, rewrite);
   if (rewrite.kind === 'csv-cell') return rewriteCsvCell(body, rewrite);
   if (rewrite.kind === 'csv-shape') return rewriteCsvShape(body, rewrite);
+  if (rewrite.kind === 'table-format') return rewriteTableFormat(body, rewrite);
   // 🔑 塊の移動と差し込みは `line-move.ts` の 1 本(#684)── 取りやめは body をそのまま返す
   if (rewrite.kind === 'move-lines') return moveLines(body, rewrite);
   if (rewrite.kind === 'insert-lines') return insertLines(body, rewrite.toBefore, rewrite.lines);
@@ -594,6 +611,32 @@ function rewriteCsvCell(
   const next = csvEscapeField(rewrite.value, delimiter);
   if (line.slice(span.start, span.end) === next) return null;
   lines[rewrite.line] = line.slice(0, span.start) + next + line.slice(span.end);
+  return lines.join('\n');
+}
+
+/**
+ * 🔴 **表の形を変える**(#708 段②)── markdown の表 ⇄ csv の囲み。
+ *
+ * 🔑 **その表の行範囲だけを差し替える**(`csv-shape` と同じ作法)── 範囲も升も
+ *   `table-convert.ts` が原文から引くので、同じノートの**別の表は 1 バイトも動かない**。
+ *
+ * ⚠ **断る条件**(`null` を返す ── 当てずっぽうで別の行を書き換えない):
+ *   - その行に表が無い(押した後に別の窓が本文を動かした)
+ *   - **もうその形**である(押した時点とは別の本文になっている)
+ *   - **式 / 升の中の改行**が在って markdown にできない(`tableConvertRefusal`)
+ *   - 組み立てが空(升が 1 つも無い)
+ */
+function rewriteTableFormat(
+  body: string,
+  rewrite: { line: number; to: TableFormat },
+): string | null {
+  const at = tableAt(body, rewrite.line);
+  if (at === null) return null;
+  if (tableConvertRefusal(at, rewrite.to) !== null) return null;
+  const text = convertTable(at, rewrite.to);
+  if (text === null) return null;
+  const lines = body.split('\n');
+  lines.splice(at.start, at.end - at.start + 1, ...text.split('\n'));
   return lines.join('\n');
 }
 

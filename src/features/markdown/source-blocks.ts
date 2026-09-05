@@ -66,6 +66,21 @@ const DIRECTIVE_OPEN = /^:::([A-Za-z][\w-]*)/;
 const DIRECTIVE_CLOSE = /^:::\s*$/;
 
 /**
+ * 🔴 **囲みの開き行から見出しを丸ごと読む**(#708 段②)。
+ *
+ * ⚠ {@link ContainerSpan.name} は**1 語目しか持たない**(`csv`)ので、後ろに付く旗
+ *   (` ```csv noheader `)はそこからは読めない ── かといって呼び側で柵を数え直すと、
+ *   **字下げした囲み**(`  ```csv noheader`)で走査と食い違う口が 2 つになる(§7)。
+ * 🔑 だから**走査と同じ 1 本の正規表現**でここから返す。
+ *
+ * @returns 見出し(前後の空白を落とした字。無ければ空文字)。開き行でなければ `null`。
+ */
+export function fenceInfo(openLine: string): string | null {
+  const m = FENCE_OPEN.exec(openLine);
+  return m === null ? null : (m[3] ?? '').trim();
+}
+
+/**
  * 🔴 **開きかどうかは `directive-open.ts` が決める**(2026-08-07)。
  *
  * 直す前はここが `:::name` を**一律に囲いと見なして**いた。ところが renderer が

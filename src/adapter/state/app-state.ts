@@ -12,6 +12,7 @@ import { DEFAULT_ENTRY_SORT, NATURAL_DESC, type EntrySort } from '@features/filt
 import { resolveCanonicalParents, reorderSibling } from '@features/relation/tree';
 import { extractMeta, seedBodyFor } from '@features/flavor';
 import { applyBodyRewrite, type BodyRewrite } from '@features/markdown/body-rewrite';
+import type { TableFormat } from '@features/markdown/table-convert';
 import { isPlaceOpen } from '@features/markdown/place-notation';
 import { moveLinesWithInverse, type MoveLines } from '@features/markdown/line-move';
 import { replaceTaskCards, type TaskScan } from '@features/schedule/task-cards';
@@ -1216,6 +1217,12 @@ export type UserAction =
       what: 'row' | 'col';
       mode: 'add' | 'remove';
     }
+  /**
+   * 🔴 **表の形を変える**(#708 段②)。⚠ `SET_CSV_CELL` と同じ形。
+   * ⚠ `line` は**原文の行番号**(押した表のどの行でもよい)── 書き換える範囲は
+   *   `table-convert.ts` が原文から引く(呼び手に範囲を決めさせない)。
+   */
+  | { type: 'SET_TABLE_FORMAT'; lid: string; line: number; to: TableFormat }
   /**
    * 🔴 **繰り返しの「その回」を済ませる**(#344 段②)。
    * ⚠ `TOGGLE_TASK` と**単位が違う** ── 規則の行の印は動かさず、
@@ -3213,6 +3220,29 @@ function reduceCore(
         ],
       };
     }
+    /**
+     * 🔴 **表の形を変える**(#708 段②)。⚠ `SET_CSV_SHAPE` と同じ形 ── 書換は
+     *   1 本(`REQUEST_BODY_REWRITE`)を通り、面が独自の書込経路を持たない(§7)。
+     */
+    case 'SET_TABLE_FORMAT': {
+      // ready 限定(編集中の裏書換を作らない)。未知 lid は no-op
+      if (state.phase !== 'ready') return { state, events: [] };
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta) return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_BODY_REWRITE',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            rewrite: { kind: 'table-format', line: action.line, to: action.to },
+          },
+        ],
+      };
+    }
     case 'TOGGLE_TASK': {
       // ready 限定(編集中の裏書換を作らない)。未知 lid は no-op
       if (state.phase !== 'ready') return { state, events: [] };
@@ -3488,6 +3518,23 @@ function reduceCore(
         }
       } else if (lastMove !== null && lastMove.lid === action.lid) {
         lastMove = null;
+      }
+      /**
+       * 🔴 **表の形を変えたら、変えたと言う**(#708 段②、着地前レビュー・動線 ①)。
+       *
+       * ⚠ 直す前は**完全に無言**だった ── 本文が丸ごと書き換わるのに、画面に出る
+       *   変化は「表の幅が変わる」だけで、user には**壊れたように見える**。
+       * 🔑 言うのは**できるようになったこと**である(幅ではなく用途)── csv にしたら
+       *   「升を押して打てる」、markdown にしたら「よそへ貼れる字になった」。
+       * ⚠ **戻し方も同じ 1 行で言う** ── 帰り道を知っているのは実装した本人だけ、
+       *   という形にしない(#300 の実害と同じ型)。
+       */
+      if (action.rewrite.kind === 'table-format') {
+        notice =
+          action.rewrite.to === 'csv'
+            ? '表を CSV の表にしました ── 升を押すとその場で打てます(戻すにはもう一度右クリック)'
+            : '表を Markdown の表にしました(戻すにはもう一度右クリック)';
+        noticeOpen = null;
       }
       /**
        * 🔑 **タグを付けたら、開いている入れ物にその場で落ちる**(user 要望 2026-08-26)。

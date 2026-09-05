@@ -132,12 +132,15 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-09-05(#633 段④): 入れ物の中の「上へ / 下へ」(`stack-link-up` / `stack-link-down`)で
       //    受け手 +2(登記は増えない ── 押した行が要る P1 なので、名前だけでは呼べない)
       // ⚠ 2026-09-05(#720): スキップリンク `skip-to` の受け手で +1
-      total: 253,
-      receivers: 206,
+      // ⚠ 2026-09-05(#708 段②): 表の形を変える 2 つ(`table-to-markdown` / `table-to-csv`)で
+      //    受け手 +2 ── 登記は増えない(本文の右クリックにだけ出る。`BODY_MENU_ACTIONS` には
+      //    入れていない ── あちらは「読んでいる見え方を変える」物の表である)
+      total: 255,
+      receivers: 208,
       registered: 82,
       both: 35,
       outsideActionsTable: 47,
-      unregistered: 171,
+      unregistered: 173,
     });
   });
 
