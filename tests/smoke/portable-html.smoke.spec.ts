@@ -318,6 +318,25 @@ test.describe('暗い環境', () => {
     const target = toc.nth(Math.floor(links * 0.6));
     const id = (await target.getAttribute('href'))!.slice(1);
     await target.click();
+    /**
+     * 🔴 **押した直後に、その節へ飛んでいる**(2026-09-05 実測で足した)。
+     * ⚠ `blob:null/`(`file://` 由来の blob)では Chromium が `<a href="#…">` の navigate を
+     *   `Not allowed to load local resource` で止める ── 断片も付かず、見出しへも送られず、
+     *   **目次が丸ごと dead click** だった。それを boot script が `pushState` で肩代わりする
+     *   (`manual-page.ts`)。F5 の後だけ見ると「印が消えた」に見えるが、本体はここである。
+     */
+    expect(decodeURIComponent(new URL(win.url()).hash), '目次を押しても節の印が付かない').toBe(
+      `#${id}`,
+    );
+    const jumped = await win.evaluate((wanted) => {
+      const el = document.getElementById(wanted);
+      if (!el) return null;
+      const box = el.getBoundingClientRect();
+      return { top: box.top, h: window.innerHeight };
+    }, id);
+    expect(jumped, '飛び先が本文に無い').not.toBeNull();
+    expect(jumped!.top, '目次を押しても、その節へ飛ばない(dead click)').toBeGreaterThanOrEqual(0);
+    expect(jumped!.top).toBeLessThan(jumped!.h);
     await win.reload();
     await expect(win.locator('[data-pkc-region="manual-window-main"]'), 'F5 で白紙になった').toBeVisible();
     expect(await toc.count()).toBe(links);

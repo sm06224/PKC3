@@ -261,9 +261,36 @@ export function themeBootScript(
      *   `location.hash` は `#%E3%83%98…` の形。そのまま `getElementById` に渡すと
      *   **必ず外れて先頭に戻る**ので、復号してから引く(壊れた綴りなら復号せず素で引く)。
      */
-    'addEventListener("DOMContentLoaded",function(){var h=location.hash.slice(1);' +
-    'if(!h)return;try{h=decodeURIComponent(h)}catch(e){}' +
-    'var e=document.getElementById(h);if(e)e.scrollIntoView({block:"start"})});' +
+    'function g(h){if(!h)return;try{h=decodeURIComponent(h)}catch(e){}' +
+    'var e=document.getElementById(h);if(e)e.scrollIntoView({block:"start"})}' +
+    'function j(){g(location.hash.slice(1))}' +
+    'addEventListener("DOMContentLoaded",j);' +
+    /**
+     * 🔴 **`blob:null/` の document では、断片への navigate をブラウザが止める**
+     * (#648 段③、2026-09-05 実測 ── `chromium` / `headless_shell` の両方)。
+     * ⚠ 持ち歩ける 1 枚を `file://` で開くと opener の origin は opaque なので、blob の URL は
+     *   `blob:null/…` になる。そこで目次の `<a href="#…">` を押すと Chromium は
+     *   `Not allowed to load local resource: blob:null/…#…` を出して**何もしない** ──
+     *   `location.hash` も動かず、見出しへも送られない(目次が丸ごと dead click)。
+     *   `location.hash = …` / `location.href = …` も同じく止まる。
+     * 🔑 **`history.pushState` は止まらない**(同じ実測)。だからこの origin では
+     *   `<a href="#…">` の既定を自分で肩代わりする ── URL の断片を `pushState` で書き、
+     *   上の `j` で見出しへ送る(= `<a>` が本来やること 2 つ。新しい操作は増えない)。
+     *   F5 は URL の断片を保つので、読み直しの後は DOMContentLoaded の `j` が同じ節へ戻す。
+     * ⚠ **`http:` の `manual.html` では触らない**(`origin` が `"null"` でない)── そちらは
+     *   ブラウザの断片 navigate がそのまま効いており、Ctrl+click(別タブで開く)や
+     *   `:target` の意味論を肩代わりで変えない。
+     * ⚠ 戻る / 進むで断片が変わった回(`popstate`)も `j` で送る ── `pushState` で積んだ履歴は
+     *   ブラウザが送ってくれないので、`<a>` の履歴と同じ動きをここで揃える。
+     * ⚠ 修飾キー付き・左以外のボタンは触らない(既定に任せる ── 止められるが、それは
+     *   ブラウザの判断であってこの script が別の意味を与える所ではない)。
+     */
+    'if(location.origin==="null"){addEventListener("click",function(ev){' +
+    'if(ev.defaultPrevented||ev.button!==0||ev.metaKey||ev.ctrlKey||ev.shiftKey||ev.altKey)return;' +
+    'var t=ev.target,a=t&&t.closest?t.closest(\'a[href^="#"]\'):null;if(!a)return;' +
+    'var h=a.getAttribute("href");ev.preventDefault();' +
+    'try{history.pushState(null,"",h)}catch(e){}g(h.slice(1))});' +
+    'addEventListener("popstate",j)}' +
     '})();'
   );
 }

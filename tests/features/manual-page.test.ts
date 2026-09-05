@@ -352,6 +352,151 @@ describe('焼いたマニュアル — 断片へ送る script(D4)', () => {
   });
 });
 
+/**
+ * 🔴 **`blob:null/` の document では、目次の `<a href="#…">` を boot script が肩代わりする**
+ * (#648 段③、2026-09-05 実測)。持ち歩ける 1 枚を `file://` で開くと blob の URL は
+ * `blob:null/…` になり、Chromium は断片への navigate を `Not allowed to load local resource`
+ * で止める ── 目次が丸ごと dead click だった(F5 で「印が消えた」に見えていたのは、
+ * そもそも押しても印が付いていなかったため)。
+ * ⚠ ブラウザが止める当の挙動は happy-dom では再現しない ── ここで守るのは**肩代わりの配線**:
+ *   ① origin が `"null"` のときだけ click / popstate を握る(http の page は 1 バイトも変えない)
+ *   ② 断片を `history.pushState` で書く(`<a>` が本来やること)③ 見出しへ送る
+ *   ④ 修飾キー付き / 左以外 / 断片でないリンクは触らない。実物は `portable-html.smoke.spec.ts`。
+ */
+describe('焼いたマニュアル — blob:null では目次の <a> を肩代わりする(#648 段③)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    document.body.innerHTML = '';
+    document.documentElement.removeAttribute('data-pkc-theme');
+  });
+  type Handler = (ev?: unknown) => void;
+  interface Rig {
+    readonly handlers: Map<string, Handler[]>;
+    readonly landed: string[];
+    readonly pushed: string[];
+    readonly loc: { hash: string; origin: string };
+  }
+  const rig = (origin: string, pushState?: (url: string) => void): Rig => {
+    const loc = { hash: '', origin };
+    vi.stubGlobal('location', loc);
+    const pushed: string[] = [];
+    vi.stubGlobal('history', {
+      pushState: (_s: unknown, _t: string, url: string) => {
+        if (pushState) pushState(url);
+        pushed.push(url);
+        // ⚠ 本物の `location.hash` は percent-encode されて返る(D4 と同じ形にする)
+        loc.hash = `#${encodeURIComponent(url.slice(1))}`;
+      },
+    });
+    const handlers = new Map<string, Handler[]>();
+    vi.stubGlobal('addEventListener', (type: string, fn: Handler) => {
+      handlers.set(type, [...(handlers.get(type) ?? []), fn]);
+    });
+    const landed: string[] = [];
+    for (const id of ['4-4-ヘルプ', 'm-3']) {
+      const h = document.createElement('h2');
+      h.id = id;
+      (h as unknown as { scrollIntoView: () => void }).scrollIntoView = () => landed.push(id);
+      document.body.append(h);
+    }
+    new Function(themeBootScript(themeIdsIn(TOKENS), THEME_STORAGE_KEY))();
+    return { handlers, landed, pushed, loc };
+  };
+  const anchor = (href: string): HTMLAnchorElement => {
+    const a = document.createElement('a');
+    a.setAttribute('href', href);
+    a.textContent = '目次の行';
+    document.body.append(a);
+    return a;
+  };
+  /** 合成の click を script の handler へ渡し、既定を止めたかを返す。 */
+  const click = (r: Rig, target: Element, mods: Record<string, unknown> = {}): boolean => {
+    let prevented = false;
+    const ev = {
+      target,
+      button: 0,
+      metaKey: false,
+      ctrlKey: false,
+      shiftKey: false,
+      altKey: false,
+      defaultPrevented: false,
+      ...mods,
+      preventDefault: () => {
+        prevented = true;
+      },
+    };
+    for (const fn of r.handlers.get('click') ?? []) fn(ev);
+    return prevented;
+  };
+
+  it('🔴 origin が "null" なら、目次の <a href="#…"> を握って pushState し、見出しへ送る', () => {
+    const r = rig('null');
+    expect(r.handlers.get('click'), 'click の handler が 1 本でない').toHaveLength(1);
+    const a = anchor('#4-4-ヘルプ');
+    expect(click(r, a), '既定(止められる navigate)を止めていない').toBe(true);
+    expect(r.pushed, 'URL の断片が pushState されていない').toEqual(['#4-4-ヘルプ']);
+    expect(r.landed, '見出しへ送られていない').toEqual(['4-4-ヘルプ']);
+  });
+
+  it('<a> の中の子要素を押しても同じ(target が <span> でも closest で拾う)', () => {
+    const r = rig('null');
+    const a = anchor('#m-3');
+    const span = document.createElement('span');
+    a.textContent = '';
+    a.append(span);
+    expect(click(r, span)).toBe(true);
+    expect(r.pushed).toEqual(['#m-3']);
+    expect(r.landed).toEqual(['m-3']);
+  });
+
+  it('🔴 対照群: http の page(origin が "null" でない)では click / popstate を 1 本も握らない', () => {
+    const r = rig('http://localhost:5173');
+    expect(r.handlers.get('click')).toBeUndefined();
+    expect(r.handlers.get('popstate')).toBeUndefined();
+    // ⚠ D4 の DOMContentLoaded だけは変わらず 1 本
+    expect(r.handlers.get('DOMContentLoaded')).toHaveLength(1);
+  });
+
+  it('修飾キー付き / 左以外のボタン / 断片でないリンク / <a> の外 は触らない', () => {
+    const r = rig('null');
+    const a = anchor('#4-4-ヘルプ');
+    expect(click(r, a, { ctrlKey: true })).toBe(false);
+    expect(click(r, a, { metaKey: true })).toBe(false);
+    expect(click(r, a, { shiftKey: true })).toBe(false);
+    expect(click(r, a, { altKey: true })).toBe(false);
+    expect(click(r, a, { button: 1 })).toBe(false);
+    expect(click(r, a, { defaultPrevented: true })).toBe(false);
+    expect(click(r, anchor('https://example.test/'))).toBe(false);
+    expect(click(r, document.createElement('div'))).toBe(false);
+    expect(r.pushed).toEqual([]);
+    expect(r.landed).toEqual([]);
+  });
+
+  it('戻る / 進む(popstate)でも、URL の断片の見出しへ送る', () => {
+    const r = rig('null');
+    expect(r.handlers.get('popstate'), 'popstate の handler が 1 本でない').toHaveLength(1);
+    r.loc.hash = `#${encodeURIComponent('m-3')}`;
+    for (const fn of r.handlers.get('popstate')!) fn();
+    expect(r.landed).toEqual(['m-3']);
+  });
+
+  it('pushState が投げても、見出しへは送る(断片の記録と送りは独立)', () => {
+    const r = rig('null', () => {
+      throw new Error('SecurityError');
+    });
+    const a = anchor('#4-4-ヘルプ');
+    expect(click(r, a)).toBe(true);
+    expect(r.landed).toEqual(['4-4-ヘルプ']);
+  });
+
+  it('無い id の <a> は既定だけ止める(落ちない・どこへも送らない)', () => {
+    const r = rig('null');
+    expect(click(r, anchor('#無い節'))).toBe(true);
+    expect(r.pushed).toEqual(['#無い節']);
+    expect(r.landed).toEqual([]);
+  });
+});
+
 describe('焼いたマニュアル — 1 枚で完結する', () => {
   it('完全な document で、script は 1 本、style は 1 本、配色は `<body>` の前に立つ', () => {
     const html = bake().html;
