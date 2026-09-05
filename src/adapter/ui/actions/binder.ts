@@ -84,6 +84,7 @@ import {
   entryPickTotal,
 } from '@features/entry-ref/entry-pick';
 import { formatEntryLink, formatSectionLink } from '@features/entry-ref/entry-ref-format';
+import { knownSplitLids } from '@features/split-frames';
 import { insertionForLineDate } from '@features/schedule/line-date';
 import { addDays, dayStamp, daysBetween } from '@features/datetime/date-math';
 import {
@@ -2263,6 +2264,66 @@ export function runGlobalCommand(
     if (dry) return true;
     prevent();
     openPaletteFor(root, dispatcher, keymap, notify);
+    return true;
+  }
+  /**
+   * 🔴 **スタックの 3 手**(#633 段②)── 押しボタンを持たないので、`view-dual` と同じく
+   *   ここで直に投げる。⚠ 断り文は**ここに書かない**ものと**ここで言うもの**を分ける:
+   *   満杯・フォルダの断りは reducer が 1 か所で出す(`PIN_SPLIT_ENTRY`)。
+   *   ここで言うのは「**対象そのものが無い**」ときだけ ── reducer は lid の無い action を
+   *   受け取れないので、ここでしか言えない(`dry` では `false` = パレットが
+   *   「いまは押せません ── <note>」を出す)。
+   */
+  if (cmd === 'stack-push') {
+    const lid = dispatcher.getState().selectedLid;
+    if (lid === null) {
+      if (dry) return false;
+      prevent();
+      notify('スタックに載せるノートがありません(先にノートを開いてください)');
+      return true;
+    }
+    if (dry) return true;
+    prevent();
+    dispatcher.dispatch({ type: 'PIN_SPLIT_ENTRY', lid });
+    return true;
+  }
+  if (cmd === 'stack-open' || cmd === 'stack-clear') {
+    const st = dispatcher.getState();
+    // 🔑 数えるのは帯と同じ口(`knownSplitLids`)── 消えた lid を「載せてある」と数えない
+    const stack = knownSplitLids(st.splitLids, st.entryMetas);
+    if (stack.length === 0) {
+      if (dry) return false;
+      prevent();
+      notify('スタックに載せてあるノートがありません');
+      return true;
+    }
+    if (dry) return true;
+    prevent();
+    if (cmd === 'stack-clear') {
+      dispatcher.dispatch({ type: 'CLEAR_SPLIT' });
+      notify(`スタックから ${String(stack.length)} 件を降ろしました(ノートは消えていません)`);
+      return true;
+    }
+    /**
+     * 🔑 **一覧は「載せてある順」= 一番上から**(帯と同じ並び)。`entryPickRows` に
+     *   `order` としてスタックを渡す ── 題名で絞る規則と切ったときの断りを**書き直さない**。
+     * ⚠ 自分自身は除かない(`selfLid: null`)── 主と同じノートを載せる形は許している
+     *   (`split-frames.ts` の `normalizeSplitLids`)。
+     * ⚠ 開いている間に別のタブが降ろしても、打つたびに引き直すので一覧は追随する。
+     */
+    void pickEntryInApp(
+      root,
+      (query) => {
+        const now = dispatcher.getState();
+        const lids = knownSplitLids(now.splitLids, now.entryMetas);
+        const items = entryPickRows(now.entryMetas, lids, query, null);
+        return { items, note: entryPickNote(items.length, entryPickTotal(now.entryMetas, lids, query, null)) };
+      },
+      { title: 'スタックから開く(選んだ物が一番上に来ます)' },
+    ).then((lid) => {
+      if (lid === null) return;
+      dispatcher.dispatch({ type: 'PIN_SPLIT_ENTRY', lid });
+    });
     return true;
   }
   const sel = SHORTCUT_BUTTON[cmd];

@@ -986,6 +986,11 @@ export type UserAction =
    *   付いていれば reducer が 1 行知らせる(黙って降ろすと dead click に見える)。
    */
   | { type: 'UNPIN_SPLIT_ENTRY'; lid: string; gone?: true }
+  /**
+   * 🔴 **全部降ろす**(#633 段②)。⚠ 確認は要らない ── 降ろすだけでノートは消えない
+   *   (入れ替えたい人は「全部降ろす → 載せる」の 2 手で作れる。設計 doc §2-8)。
+   */
+  | { type: 'CLEAR_SPLIT' }
   | { type: 'SELECT_ENTRY'; lid: string }
   | { type: 'SET_VIEW_MODE'; mode: ViewMode }
   /**
@@ -4503,6 +4508,14 @@ function reduceCore(
             ? { notice: goneFromStackNotice(state.entryMetas.get(action.lid)?.title) }
             : {}),
         },
+        events: [],
+      };
+    }
+    case 'CLEAR_SPLIT': {
+      // ⚠ 空なら**同じ state**を返す(描き直しの指紋を動かさない ── `UNPIN` と同じ作法)
+      if (state.splitLids.length === 0) return { state, events: [] };
+      return {
+        state: { ...state, splitLids: [], splitBodies: new Map<string, string>() },
         events: [],
       };
     }
