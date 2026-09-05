@@ -1124,6 +1124,70 @@ describe('移行ガイドと実装の突合', () => {
     expect(MIGRATION).toContain('片道');
     expect(MIGRATION).toContain('pkc3-archive');
   });
+
+  /**
+   * 🔴 **複数タブと「持ち歩ける 1 枚」の主張が現況と合う**(#696)。
+   *
+   * ⚠ 「書き込みは 1 タブ(2 枚目は待つ)」は #177 で本体タブ経由になった後も
+   *   1 か月残っていた ── 移行を迷っている人が読む doc なので、古い制限は
+   *   **移行しない理由**になる。可逆の 1 枚(`.pkc3.html`)も同じ理由で載せる。
+   */
+  it('🔴 複数タブは「本体タブ経由」で、可逆の「持ち歩ける HTML 1 枚」が載っている', () => {
+    expect(MIGRATION).toContain('本体タブ経由');
+    expect(MIGRATION, '古い制限が残っている').not.toContain('2 枚目は待つ');
+    expect(MIGRATION).toContain('持ち歩ける HTML 1 枚');
+    // ⚠ 注意書きは**要約せずに引く**(依頼者の指示)── マニュアルの 2 行が両方にそのまま在る
+    for (const line of [
+      '**1 枚ごとに別の入れ物**です。2 枚書き出して両方に書くと、**中身は混ざりません**が、',
+      '**配られた 1 枚からは、さらに「持ち歩ける HTML 1 枚」を書き出せません**',
+    ]) {
+      expect(MIGRATION, `注意書き「${line}」が移行ガイドに無い`).toContain(line);
+      expect(MANUAL, `引用元の「${line}」がマニュアルから消えた`).toContain(line);
+    }
+  });
+});
+
+/**
+ * 🔴 **README の主張を、それが写している実体と突き合わせる**(#696)。
+ *
+ * README は「v3.0.0 を 2026-08-03 に公開済み」「job は verify と smoke の 2 つ」
+ * 「probe 6 本(…かんばん)」と、**1 か月前の実態**を書いたままだった ── 版は
+ * `package.json`、job は `ci.yml`、probe は `nightly.yml` の step 名が正本なので、
+ * そこから出して README に在ることを見る。
+ */
+describe('README と実体の突合(#696)', () => {
+  const README = readFileSync('README.md', 'utf-8');
+  const CI = readFileSync('.github/workflows/ci.yml', 'utf-8');
+  const NIGHTLY = readFileSync('.github/workflows/nightly.yml', 'utf-8');
+
+  it('🔴 README の「現況」の版が package.json と同じ', () => {
+    const pkg = JSON.parse(readFileSync('package.json', 'utf-8')) as { version: string };
+    expect(pkg.version).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(README, 'README の版が package.json から離れた').toContain(`v${pkg.version} を`);
+  });
+
+  it('🔴 README の CI の表に、ci.yml の job が全部載っている', () => {
+    // jobs: の直下(2 字下げ)の key が job 名
+    const jobsAt = CI.indexOf('\njobs:\n');
+    expect(jobsAt, 'ci.yml に jobs: が無い(空振り)').toBeGreaterThan(0);
+    const jobs = [...CI.slice(jobsAt).matchAll(/^ {2}([a-z][a-z0-9-]*):$/gm)].map((m) => m[1]!);
+    expect(jobs.length, 'job を読めていない(空振り)').toBeGreaterThanOrEqual(3);
+    for (const j of jobs) {
+      expect(README, `README の CI の表に job「${j}」が無い`).toContain(`\`${j}\``);
+    }
+  });
+
+  it('🔴 README の nightly の行に、nightly.yml の Probe の step 名が全部載っている', () => {
+    const probes = [...NIGHTLY.matchAll(/^\s+- name: (Probe — [^(\n]+?)\s*(?:\(|$)/gm)].map((m) => m[1]!.trim());
+    expect(probes.length, 'Probe の step を読めていない(空振り)').toBeGreaterThanOrEqual(5);
+    for (const p of probes) {
+      expect(README, `README に「${p}」が無い`).toContain(`\`${p}\``);
+    }
+    expect(README, 'README が probe の本数を数えていない').toContain(`probe ${probes.length} 本`);
+    // 図の全数(nightly だけで回す重い検査)も README の nightly の行に在る
+    expect(NIGHTLY).toContain('図の全数');
+    expect(README).toContain('図の全数');
+  });
 });
 
 /**

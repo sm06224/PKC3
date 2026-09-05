@@ -12,7 +12,9 @@ description: PKC3 の実ブラウザ検証(tests/smoke、Playwright)を書く・
 # 🟢 既定はこちら ── **触った spec だけ**(4〜20 秒)
 npm run test:smoke -- tests/smoke/<触った>.smoke.spec.ts
 
-# 🔴 全量(33 spec)。**ここぞ**のときだけ ── 手元でも CI でも 4〜6 分かかる
+# 🔴 全量(80 spec / 431 test ── 2026-09-05 に `npx playwright test --list -c tests/smoke/playwright.config.ts`
+#    で数えた。実数は tests/repo-hygiene.test.ts が pin)。**ここぞ**のときだけ ──
+#    CI は 3 shard で 5〜7 分、手元は 8〜10 分かかる(2026-08-27 実測、CLAUDE.md §5)
 npm run test:smoke
 ```
 

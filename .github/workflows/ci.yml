@@ -4,6 +4,9 @@
 # main push / nightly / 手動 dispatch へ。timeout 10 分は速度予算の tripwire。
 #
 # 🔴 **job は 2 つに割ってある**(2026-08-18)。
+#   ⚠ 2026-09-05 注記: いまは **`audit` / `verify` / `smoke`(3 shard)** の 3 種 = 5 job。
+#     「2 つ」は 2026-08-18 時点の数で、下の経緯(verify と smoke を割った理由)は
+#     そのまま正しい。`audit` は #675、shard は 2026-08-28 / 09-04(smoke lane の注記)。
 #
 # ⚠ 直す前は smoke を `verify` に同居させており、その理由は
 # 「`npm ci` / build の二重払い(PKC2 のセットアップ税)を避けるため」と
@@ -111,7 +114,9 @@ jobs:
   # ── 実ブラウザ lane: smoke ────────────────────────────────────────────
   # ⚠ **2026-08-19 訂正**: ここは「最小 smoke(全量は nightly)」と書いてあったが
   #   **事実ではない** ── `npm run test:smoke` は `tests/smoke/**` を**全部**回す
-  #   (35 spec / 181 test。手元の実測 3.9〜4.2 分)。nightly が足すのは
+  #   (2026-08-19 時点で 35 spec / 181 test、手元の実測 3.9〜4.2 分。⚠ 2026-09-05 に
+  #   `npx playwright test --list -c tests/smoke/playwright.config.ts` で数え直すと
+  #   **80 spec / 431 test** ── 実数は `tests/repo-hygiene.test.ts` が pin する)。nightly が足すのは
   #   「もう 1 つのブラウザで回す」ことであって、件数ではない。
   # ⚠ 2026-08-19: `playwright install --with-deps` が **10 分の job timeout に
   #   当たって cancel** された(smoke は 1 件も走っていない)。この step は
