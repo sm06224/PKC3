@@ -814,6 +814,14 @@ select:focus-visible {
 [data-pkc-region='entry-list'] [data-pkc-entry]:hover {
   background: var(--surface-2);
 }
+/* 本文の当たりを 200 件で切ったときの字(#680)── 一覧の後ろに 1 行。
+ * 色は `--muted`(案内であって行ではない ── 地は無彩色、色は情報にだけ)。 */
+[data-pkc-field='entry-list-more'] {
+  margin: 0;
+  padding: var(--s2);
+  color: var(--muted);
+  font-size: 12px;
+}
 [data-pkc-selected] {
   background: var(--accent-dim) !important;
   color: var(--accent-dim-fg);

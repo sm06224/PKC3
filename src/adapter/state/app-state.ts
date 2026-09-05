@@ -656,6 +656,15 @@ export interface AppState {
    */
   searchHitsQuery: string;
   /**
+   * 🔴 **本文の当たりを上限(200 件)で切ったか**(#680)。⚠ worker は最初から
+   * 返していたが、配線(`store-port.ts`)が捨てていたので**左の列は一度も言えなかった**。
+   * 🔑 数は持たない ── worker は「切った」の真偽しか返さない(数え直しの 2 回目の
+   *   問い合わせをしない作法)。だから字も「200 件より多く」で止める。
+   * ⚠ `SET_ENTRY_FILTER` で `false` へ戻す ── 語を変えたのに前の語の「ほかにも
+   *   あります」が残ると、0 件の語で「ほかにもある」と読める。
+   */
+  searchHitsTruncated: boolean;
+  /**
    * 🔴 **集計の面**(#184)。⚠ どれも `null` = **まだ読んでいない**(0 件ではない)。
    *
    * ⚠ 中身は**束ねた結果だけ**で、本文は 1 バイトも入らない ── 束ねるのは worker で、
@@ -879,6 +888,7 @@ export const initialState: AppState = {
   entrySort: DEFAULT_ENTRY_SORT,
   entrySortDesc: NATURAL_DESC[DEFAULT_ENTRY_SORT],
   searchHitsQuery: '',
+  searchHitsTruncated: false,
   queryKey: null,
   smartHits: new Map<string, SmartHitState>(),
   queryKeys: null,
@@ -932,7 +942,7 @@ export type UserAction =
   | { type: 'SET_OPEN_EXTENSIONS'; open: readonly OpenExtension[] }
   | { type: 'SET_ENTRY_FILTER'; query: string }
   /** 本文の当たりが SQL から返った(#181)。⚠ `query` は**どの問い合わせの答えか**。 */
-  | { type: 'SET_SEARCH_HITS'; query: string; lids: string[] }
+  | { type: 'SET_SEARCH_HITS'; query: string; lids: string[]; truncated: boolean }
   /** 一覧の並び順を変える(#183)。⚠ 選択は消さない(絞り込みと同じ規約)。 */
   | {
       type: 'SET_ENTRY_SORT';
@@ -2131,7 +2141,14 @@ function reduceCore(
        * `REQUEST_SEARCH` を出し、返ってきたら `SET_SEARCH_HITS` で増やす。
        */
       return {
-        state: { ...state, filterQuery: action.query, searchHits: null, searchHitsQuery: '' },
+        state: {
+          ...state,
+          filterQuery: action.query,
+          searchHits: null,
+          searchHitsQuery: '',
+          // ⚠ 前の語の「ほかにもあります」を持ち越さない(#680)
+          searchHitsTruncated: false,
+        },
         events: [{ type: 'REQUEST_SEARCH', query: action.query }],
       };
     /**
@@ -2216,6 +2233,7 @@ function reduceCore(
           ...state,
           searchHits: new Set(action.lids),
           searchHitsQuery: action.query,
+          searchHitsTruncated: action.truncated,
         },
         events: [],
       };

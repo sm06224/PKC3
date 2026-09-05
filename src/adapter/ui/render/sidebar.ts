@@ -49,6 +49,15 @@ export class SidebarRenderer {
   private lastHistory: AppState['selectionHistory'] | null = null;
   /** 0 件のときの字と戻り道。⚠ 器の外に置く(行の数え方を壊さない)。 */
   private emptyNote: HTMLElement | null = null;
+  /**
+   * 🔴 **200 件で切ったことを言う字**(#680)。⚠ 器の外に置く(0 件の字と同じ理由)。
+   * ⚠ 指紋には**足していない** ── `searchHitsTruncated` を書く reducer の case は
+   *   2 つ(`SET_ENTRY_FILTER` / `SET_SEARCH_HITS`)で、どちらも同じ回に `searchHits` の
+   *   参照を変える。足しても外しても挙動が変わらない行は置かない(CLAUDE.md §1
+   *   「これが無いと壊れる」と書く前に外して壊れるのを見る)。⚠ 別の case が
+   *   `searchHitsTruncated` だけを書くようになったら、そのとき指紋へ足す。
+   */
+  private moreNote: HTMLElement | null = null;
   /** 種類の札(#411)。⚠ **器だけ** shell が持ち、中身はここが描く。 */
   private lastKinds: ReadonlySet<string> | null = null;
   /** 前回描いた札の姿。⚠ **数まで含めて**比べる(数だけ変わる回がある)。 */
@@ -192,6 +201,27 @@ export class SidebarRenderer {
       }
       this.list.after(box);
       this.emptyNote = box;
+    }
+
+    /**
+     * 🔴 **本文の当たりを 200 件で切ったら、そう言う**(#680 の先出し 1 行)。
+     *
+     * ⚠ worker は最初から `truncated` を返していたのに、配線が捨てていたので
+     *   **左の列は一度も言えなかった** ── 201 件目からのノートは user から見て
+     *   「無い」に読める(§1「無言の欠落」)。
+     * 🔑 数は出さない ── worker は真偽しか返さない(数え直しの 2 回目の問い合わせを
+     *   しない作法)。「200 件より多く」で止め、**次に何をすればよいか**(語を足す)を書く。
+     * ⚠ 一覧の**後ろ**に置く(先頭に置くと、行を探す目線の手前で毎回読ませることになる)。
+     */
+    this.moreNote?.remove();
+    this.moreNote = null;
+    if (state.searchHitsTruncated) {
+      const more = document.createElement('p');
+      more.setAttribute('data-pkc-field', 'entry-list-more');
+      more.textContent = '200 件より多く当たりました。語を足して絞ってください';
+      // ⚠ 0 件の字(`emptyNote`)より後ろ ── 両方出る回は無い(切れた = 当たりが在る)が、順は固定する
+      (this.emptyNote ?? this.list).after(more);
+      this.moreNote = more;
     }
 
     let cursor: ChildNode | null = this.list.firstChild;

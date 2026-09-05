@@ -11,6 +11,9 @@
  */
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { StorageRequest } from '../../src/adapter/platform/storage/protocol';
+import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
+import type { StoreClientLike } from '../../src/adapter/platform/storage/store-proxy';
+import { createStorePort } from '../../src/adapter/platform/storage/store-port';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -151,5 +154,70 @@ describe('全文検索(#181)', () => {
       (await search('ばなな')).lids,
       '消したはずの本文で当たる(索引に残骸が残っている)',
     ).toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **上限(200 件)で切ったことが、配線を通って主スレッドまで届く**(#680)。
+ *
+ * ⚠ ここは今まで **0 件の次元**だった ── fixture が 3〜5 件しか無いので `truncated` は
+ *   常に `false` で、worker の `limit + 1` も、store-port が `.lids` だけ返して
+ *   **`truncated` を捨てていた**ことも、どの test も見ていなかった。
+ * 🔑 2 段で見る:① worker が 201 件で `true` / 200 件で `false` を返す
+ *   ② **本物の `createStorePort`** を通しても `truncated` が落ちない
+ *   (fake の client は worker へ**そのまま流す通り道** ── 封筒を組ませない、§7)。
+ */
+describe('上限で切ったことを言う(#680)', () => {
+  const CID2 = 'c2';
+  /** `n` 件、全部に同じ語を持たせる。⚠ 題名ではなく**本文**に置く(FTS の経路を通す)。 */
+  const entries = (n: number, word: string): EntryUpsert[] =>
+    Array.from({ length: n }, (_, i) => ({
+      lid: `m${i}`,
+      title: `メモ ${i}`,
+      archetype: 'text',
+      body: `${word} について ${i} 番目\n`,
+      entryOrder: i,
+      status: null,
+      date: null,
+      archived: false,
+    }));
+  const client: StoreClientLike = {
+    request: (req) => call(req as StorageRequest) as never,
+    terminate: () => {},
+  };
+
+  beforeAll(async () => {
+    await call({ op: 'openContainer', cid: CID2, title: 't2' } as StorageRequest);
+    // 200 件は「切れない」語、201 件は「切れる」語 ── 同じ DB に両方置く
+    await call({ op: 'bulkUpsertEntries', cid: CID2, entries: entries(200, 'ちょうど') } as StorageRequest);
+    await call({
+      op: 'bulkUpsertEntries',
+      cid: CID2,
+      entries: entries(201, 'あふれる').map((e) => ({ ...e, lid: `o${e.lid}` })),
+    } as StorageRequest);
+  }, 30_000);
+
+  it('🔴 201 件当たると truncated: true、200 件は false(worker)', async () => {
+    const over = (await call({ op: 'searchEntries', cid: CID2, query: 'あふれる' } as StorageRequest)) as {
+      lids: string[];
+      truncated: boolean;
+    };
+    expect(over.lids, '上限で切っていない').toHaveLength(200);
+    expect(over.truncated, '切ったのに言っていない').toBe(true);
+    const exact = (await call({ op: 'searchEntries', cid: CID2, query: 'ちょうど' } as StorageRequest)) as {
+      lids: string[];
+      truncated: boolean;
+    };
+    expect(exact.lids, '前提が崩れた(200 件が入っていない)').toHaveLength(200);
+    expect(exact.truncated, 'ちょうど 200 件で「切った」と言っている').toBe(false);
+  });
+
+  it('🔴 本物の store-port を通しても truncated が落ちない', async () => {
+    const port = createStorePort(client, CID2);
+    const over = await port.searchEntries!('あふれる');
+    expect(over.truncated, 'store-port が truncated を捨てている(直す前の形)').toBe(true);
+    expect(over.lids).toHaveLength(200);
+    // ⚠ 対照群 ── 切れていないときに `true` を捏造していない
+    expect((await port.searchEntries!('ちょうど')).truncated).toBe(false);
   });
 });

@@ -63,8 +63,11 @@ export interface StorePort {
   /**
    * 本文の全文検索(#181)。⚠ **省略可** ── 検索を持たない環境(test の fake や
    * 旧い配線)では題名の絞り込みだけが効く(壊れるのではなく、機能が減るだけ)。
+   * ⚠ **`truncated` を捨てない**(#680)── worker は上限(200 件)で切ったことを
+   *   返しているのに、直す前はここで `.lids` だけ取って**黙って落としていた**。
+   *   user から見ると「201 件目からは無い」に読める(§1「無言の欠落」)。
    */
-  searchEntries?(query: string): Promise<string[]>;
+  searchEntries?(query: string): Promise<{ lids: string[]; truncated: boolean }>;
   /**
    * 🔴 このノートを参照しているノート(#348)。⚠ **optional** ── 古い worker が
    * service worker のキャッシュに残っている端末では未知の op になる。
@@ -472,9 +475,9 @@ export function connectStoreEffects(
         if (!search || ev.query.trim() === '') break;
         const q = ev.query;
         void search(q).then(
-          (lids) => {
+          ({ lids, truncated }) => {
             if (disposed) return;
-            dispatcher.dispatch({ type: 'SET_SEARCH_HITS', query: q, lids });
+            dispatcher.dispatch({ type: 'SET_SEARCH_HITS', query: q, lids, truncated });
           },
           () => {
             /* ⚠ 検索の失敗で帯を出さない ── 題名の絞り込みは効いたままで、

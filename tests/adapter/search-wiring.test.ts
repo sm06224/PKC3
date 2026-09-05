@@ -42,14 +42,18 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
 /** @param hitsFor 問い合わせ → 当たる lid。⚠ **問い合わせに応じる** stub にする
  *   ── どの語でも同じ結果を返す stub だと、語を変えた test が自分の仕込みを
  *   上書きして「消えた」に見える(実際に踏んだ)。 */
-function setup(hitsFor: (q: string) => string[] = () => []) {
+function setup(
+  hitsFor: (q: string) => string[] = () => [],
+  // ⚠ 切ったか(#680)── 既定は「切っていない」(直す前の全 test の前提そのまま)
+  truncatedFor: (q: string) => boolean = () => false,
+) {
   const root = document.createElement('div');
   document.body.append(root);
   const d = new Dispatcher();
   const regions = buildShell(root);
   const sidebar = new SidebarRenderer(regions.sidebar);
   d.onState((s) => sidebar.render(s));
-  const searchEntries = vi.fn(async (q: string) => hitsFor(q));
+  const searchEntries = vi.fn(async (q: string) => ({ lids: hitsFor(q), truncated: truncatedFor(q) }));
   connectStoreEffects(d, {
     ...stubRevisionOps(),
     getBody: async () => '',
@@ -76,7 +80,10 @@ function setup(hitsFor: (q: string) => string[] = () => []) {
     [...root.querySelectorAll('[data-pkc-region="entry-list"] [data-pkc-entry]')].map(
       (e) => e.getAttribute('data-pkc-entry'),
     );
-  return { d, rows, searchEntries };
+  // 「ほかにもあります」の字(#680)。⚠ 左の列(sidebar の器)に絞って読む
+  const more = () =>
+    regions.sidebar.querySelector('[data-pkc-field="entry-list-more"]')?.textContent ?? null;
+  return { d, rows, searchEntries, more };
 }
 
 beforeEach(() => {
@@ -111,7 +118,7 @@ describe('全文検索の配線(#181)', () => {
     d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'みかん' });
     d.dispatch({ type: 'SET_ENTRY_FILTER', query: '存在しない' });
     // 「みかん」の結果が遅れて返ってきた
-    d.dispatch({ type: 'SET_SEARCH_HITS', query: 'みかん', lids: ['n2'] });
+    d.dispatch({ type: 'SET_SEARCH_HITS', query: 'みかん', lids: ['n2'], truncated: false });
     await tick();
     expect(rows(), '別の語の当たりが混ざっている').toEqual([]);
   });
@@ -124,6 +131,38 @@ describe('全文検索の配線(#181)', () => {
     d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'ばなな' });
     await tick();
     expect(rows(), '前の語の当たりが残っている').toEqual([]);
+  });
+
+  /**
+   * 🔴 **200 件で切ったことが、state と一覧の字に届く**(#680)。
+   * ⚠ worker は最初から返していたが、`store-port.ts` が `.lids` だけ取って捨てていた ──
+   *   だから「届く」を端から端まで 1 本で見る(state だけ見ると配線の穴は見えない)。
+   */
+  it('🔴 200 件で切れたら、state に立ち「ほかにもあります」の字が一覧の後ろに出る', async () => {
+    const { d, more } = setup(() => ['n2'], () => true);
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'みかん' });
+    await tick();
+    expect(d.getState().searchHitsTruncated, 'state に届いていない(配線が捨てている)').toBe(true);
+    expect(more(), '切ったのに一覧が黙っている').toContain('200 件より多く');
+  });
+
+  it('⚠ 対照群 ── 切れていなければ字は出ない', async () => {
+    const { d, more } = setup(() => ['n2'], () => false);
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'みかん' });
+    await tick();
+    expect(d.getState().searchHitsTruncated).toBe(false);
+    expect(more(), '切れていないのに「ほかにもあります」が出た').toBeNull();
+  });
+
+  it('🔴 語を変えた瞬間に「ほかにもあります」は消える(前の語の断りを持ち越さない)', async () => {
+    const { d, more } = setup((q) => (q === 'みかん' ? ['n2'] : []), (q) => q === 'みかん');
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'みかん' });
+    await tick();
+    expect(more(), '前提が崩れた(切れた字が出ていない)').not.toBeNull();
+    // ⚠ await しない ── 結果が返る前に消えていること(返ってから消えるのでは、
+    //    0 件の語に「ほかにもある」が一瞬出る)
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'ばなな' });
+    expect(more(), '語を変えたのに前の語の「ほかにもあります」が残っている').toBeNull();
   });
 
   it('検索が失敗しても題名の絞り込みは生きる(操作を止めない)', async () => {
@@ -235,7 +274,7 @@ describe('本文の当たりと削除の後継', () => {
     });
     // 「りんご」で絞る ── n2 は**本文だけ**が当たっている
     d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'りんご' });
-    d.dispatch({ type: 'SET_SEARCH_HITS', query: 'りんご', lids: ['n2'] });
+    d.dispatch({ type: 'SET_SEARCH_HITS', query: 'りんご', lids: ['n2'], truncated: false });
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
     expect(d.getState().selectedLid).toBe('n2');
 
