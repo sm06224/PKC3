@@ -276,6 +276,8 @@ button[data-pkc-glyph]:focus-visible {
   background: var(--accent-dim);
   color: var(--accent-dim-fg);
 }
+/* ⚠ 汎用の `button:disabled`(.45、#715)より薄い ── 枠の無い 1 文字なので、
+ *   同じ .45 では押せる物との差が読みにくい。cursor は汎用の `not-allowed` を受ける */
 button[data-pkc-glyph]:disabled {
   opacity: 0.35;
 }
@@ -397,9 +399,19 @@ button {
   align-items: center;
   justify-content: center;
 }
-button:hover {
+button:hover:not(:disabled) {
   background: var(--surface-2);
   border-color: var(--muted);
+}
+/* 🔴 **押せないボタンは、見た目で押せないと分かる**(#715)。
+ * ⚠ 直す前は名指しの 4 か所(glyph / order-nudge / dual-head / dual-bookmark)にしか
+ *   `:disabled` の規則が無く、情報ペインの操作の帯 12 個は**編集中に `disabled` でも
+ *   見た目が同じ**だった ── 押しても何も起きないボタンを user が探す。
+ * 🔑 汎用に置く ── 個別に足すと、次に `disabled` を付けたボタンがまた素通りする。
+ *   値が違う所(glyph の .35 / dual の .4)は詳細度で勝つので、そのまま残る。 */
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 button:active {
   background: var(--accent-dim);
@@ -1591,6 +1603,14 @@ li[data-pkc-row-slot] {
 /* ⚠ 消す操作だけは**赤の字**を残す(枠は落とすが、危うさは落とさない) */
 [data-pkc-field='inspector-actions'] [data-pkc-action='delete-entry'] {
   color: var(--danger);
+}
+/* 🔴 **編集中だけ出る 1 行**(#715)── 操作の帯の直上。薄くなったボタンの理由と出口を、
+ * `title`(乗せないと読めない)ではなく画面に字で置く */
+[data-pkc-field='inspector-editing-note'] {
+  color: var(--muted);
+  margin: 0;
+  padding: 0 var(--s3);
+  font-size: 12px;
 }
 /**
  * 🔴 **目次の行**(#493)。⚠ **字下げは属性から**(字で空白を入れると読み上げが読む)。
@@ -3856,15 +3876,12 @@ li[data-pkc-row-slot] {
 }
 /* 🔴 **並べ替え**(2026-08-06。user 報告 2-10)。居場所の欄の**すぐ下**に
  * 置く ── 「どのフォルダか」と「その中の何番目か」は同じ話である。
- * ⚠ 端では `disabled`(押せないことが見た目に出る)。 */
+ * ⚠ 端では `disabled`(押せないことが見た目に出る ── 見た目は汎用の
+ *   `button:disabled` が持つ。#715 で名指しの規則を畳んだ)。 */
 [data-pkc-field='order-nudge'] {
   display: flex;
   gap: var(--s2);
   margin-top: var(--s1);
-}
-[data-pkc-field='order-nudge'] button[disabled] {
-  opacity: 0.45;
-  cursor: default;
 }
 [data-pkc-field='filer-move-empty'],
 [data-pkc-field='filer-create-target'] {
@@ -4429,6 +4446,8 @@ li[data-pkc-row-slot] {
   line-height: 20px;
   color: var(--muted);
 }
+/* ⚠ 値は汎用の `button:disabled`(.45、#715)と違うが、直す前からこの値 ──
+ *   見え方は user のものなので触っていない。cursor は汎用を受ける */
 [data-pkc-region='dual-head'] button:disabled {
   opacity: 0.4;
 }
@@ -4468,6 +4487,7 @@ li[data-pkc-row-slot] {
   color: inherit;
   line-height: 18px;
 }
+/* ⚠ 同上 ── 値は直す前のまま(#715) */
 [data-pkc-region='dual-bookmark'] button:disabled {
   opacity: 0.4;
 }

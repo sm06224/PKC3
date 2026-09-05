@@ -1016,6 +1016,25 @@ test('🔴 編集中は「書き出す / 履歴 / 削除」が押せない(見�
     // 理由が読める(押せない理由が分からないほうが困る)
     await expect(el).toHaveAttribute('title', /編集中は使えません/);
   }
+  /**
+   * 🔴 **見た目でも押せないと分かる**(#715)。`disabled` 属性は user には見えない ──
+   *   直す前は `:disabled` の見た目の規則が名指しの 4 か所にしか無く、この 12 個は
+   *   編集中でも押せるボタンと同じ顔だった。unit は CSS を構文で読むだけ
+   *   (`button-disabled-css.test.ts`)── **実際に薄いか**はここでしか見えない。
+   * ⚠ 観測点は computed style(`opacity` / `cursor`)と、帯の直上の 1 行の可視。
+   */
+  const del = page.locator('[data-pkc-region="inspector"] [data-pkc-action="delete-entry"]');
+  const look = () =>
+    del.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return { opacity: Number(s.opacity), cursor: s.cursor };
+    });
+  const dim = await look();
+  expect(dim.opacity, `編集中の「削除」が薄くなっていない(opacity ${dim.opacity})`).toBeLessThan(1);
+  expect(dim.cursor, '編集中の「削除」の cursor が not-allowed でない').toBe('not-allowed');
+  const note = page.locator('[data-pkc-field="inspector-editing-note"]');
+  await expect(note, '押せない理由の 1 行が出ていない').toBeVisible();
+  await expect(note).toHaveText(/保存するか、キャンセルすると戻ります/);
 
   // ③ 取り消すと戻る
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="cancel-edit"]');
@@ -1025,6 +1044,11 @@ test('🔴 編集中は「書き出す / 履歴 / 削除」が押せない(見�
       `編集をやめても ${a} が押せないまま`,
     ).toBeEnabled();
   }
+  // ⚠ 見た目も戻る(片道にしない)── 薄いまま残ると「押せるのに押せなさそう」になる
+  const back = await look();
+  expect(back.opacity, `編集をやめても「削除」が薄いまま(opacity ${back.opacity})`).toBe(1);
+  expect(back.cursor).not.toBe('not-allowed');
+  await expect(note, '編集をやめても理由の 1 行が残っている').toBeHidden();
 
   expect(errors).toEqual([]);
 });

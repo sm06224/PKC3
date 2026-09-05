@@ -61,6 +61,12 @@ import {
 
 /** 相手の候補に出す上限。⚠ 超えたぶんは**件数を書く**(黙って切らない)。 */
 export const RELATION_CANDIDATE_MAX = 200;
+/**
+ * 編集中に操作の帯の直上へ出す 1 行(#715)。
+ * ⚠ 出口は**ボタンの字**(保存 / キャンセル)で言う ── `phaseDisabledNote` の
+ *   「確定するか取り消して」は、画面のどのボタンの字とも一致しない。
+ */
+export const EDITING_NOTE = '編集中は使えません(保存するか、キャンセルすると戻ります)';
 import { getAncestorFolders } from '@features/relation/tree';
 import { BODY_LINK_KIND, renderRelationMap } from './relation-map';
 import { bodyLinkTargets } from '@features/entry-ref/body-links';
@@ -111,6 +117,8 @@ export class InspectorRenderer {
   } | null = null;
   /** タグを打つ欄の器(#494)。⚠ 打てない状況では**畳む**(押せない物を出さない)。 */
   private tagForm: HTMLElement | null = null;
+  /** 編集中だけ出る 1 行(#715)。操作の帯の直上 ── 薄くなった理由と出口を字で置く。 */
+  private editingNote: HTMLElement | null = null;
   /** 同じノートに戻ったら同じ位置へ(P8 段⑫。溢れるのは題名が長いときだけ)。 */
   private readonly scroll: ScrollMemory;
   /** いま出しているノート。⚠ **切り替わったときだけ**スクロールを触る。 */
@@ -784,6 +792,19 @@ export class InspectorRenderer {
       const shown = editing ? `${title}(${blockedNote})` : title;
       if (b.title !== shown) b.title = shown;
     }
+    /**
+     * 🔴 **押せない理由を、帯の直上に字で出す**(#715)。
+     * ⚠ 直す前は `disabled` と `title` だけだった ── 見た目は押せるボタンと同じで、
+     *   理由は**乗せないと読めない**。押しても何も起きないボタンを user が探していた。
+     * ⚠ 字は phase から導く(#516)── 保存に失敗した保護中に「編集中」と言わない。
+     *   編集中だけは、上の `blockedNote`(「確定するか取り消して」)ではなく
+     *   **ボタンの字**(保存 / キャンセル)で出口を言う。
+     */
+    if (this.editingNote) {
+      const noteText = state.phase === 'editing' ? EDITING_NOTE : blockedNote;
+      if (this.editingNote.textContent !== noteText) this.editingNote.textContent = noteText;
+      if (this.editingNote.hidden !== !editing) this.editingNote.hidden = !editing;
+    }
 
     // ⚠ **中身を入れ終わってから**戻す(空の器に書いても丸められる)。
     //    ⚠ 同じノートを描き直しただけのときは**触らない** ── 触ると、
@@ -923,6 +944,7 @@ export class InspectorRenderer {
     this.rows = new Map();
     this.buttons = new Map();
     this.relAdd = null;
+    this.editingNote = null;
 
     const head = document.createElement('div');
     head.setAttribute('data-pkc-field', 'pane-title');
@@ -1246,7 +1268,15 @@ export class InspectorRenderer {
     if (shape === 'entry+link') btn('write-back-file', ENTRY_ACTION_LABELS['write-back-file']!);
     btn('show-history', ENTRY_ACTION_LABELS['show-history']!);
     btn('delete-entry', ENTRY_ACTION_LABELS['delete-entry']!);
-    this.region.append(actions);
+    /**
+     * 🔴 **編集中だけ出る 1 行**(#715)── 操作の帯の**直上**に置く(帯と離すと
+     *   何の理由か読めない)。字と出し入れは `render` が phase から決める。
+     */
+    const note = document.createElement('p');
+    note.setAttribute('data-pkc-field', 'inspector-editing-note');
+    note.hidden = true;
+    this.editingNote = note;
+    this.region.append(note, actions);
   }
 }
 

@@ -11,12 +11,13 @@
  * 1. 編集中は口が **disabled** になり、**理由が title に出る**(帯と同じ答え)
  * 2. 🔴 それでも押された回(stale な DOM / 別経路)は**声に出して断り、打った字を残す**
  * 3. 編集を終えれば口は戻る(片道にしない)
+ * 4. 🔴 押せない理由が、操作の帯の**直上に字で**出る(#715 ── `title` は乗せないと読めない)
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
-import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
+import { EDITING_NOTE, InspectorRenderer } from '../../src/adapter/ui/render/inspector';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 
 function meta(lid: string, title: string, date: string | null = null): EntryMeta {
@@ -200,5 +201,57 @@ describe('編集中の右ペインの口(#513)', () => {
      * 🔑 書込が起きないことは `tests/adapter/state.test.ts` の reducer 側で
      *   **events が空であること**として見ている ── そちらが本物の観測点である。
      */
+  });
+});
+
+/**
+ * 🔴 **押せない理由は、操作の帯の直上に字で出る**(#715)。
+ *
+ * 直す前は `disabled` と `title` だけだった ── `:disabled` の見た目の規則は名指しの
+ * 4 か所にしか無く、情報ペインの 12 個は**編集中でも押せるボタンと同じ顔**だった。
+ * 見た目の側(薄さ・cursor)は CSS なので `button-disabled-css.test.ts` と実ブラウザ
+ * (`layout.smoke.spec.ts`)が見る。ここが見るのは**字と出し入れ**。
+ */
+describe('編集中の 1 行(#715)', () => {
+  const NOTE = '[data-pkc-field="inspector-editing-note"]';
+
+  it('⚠ 対照群 ── ready では出ない', () => {
+    const s = mounted();
+    expect(s.q<HTMLElement>(NOTE).hidden, '編集していないのに理由が出ている').toBe(true);
+  });
+
+  it('🔴 編集中は操作の帯の直上に出て、出口をボタンの字(保存 / キャンセル)で言う', () => {
+    const s = mounted();
+    s.d.dispatch({ type: 'START_EDIT' });
+    const note = s.q<HTMLElement>(NOTE);
+    expect(note.hidden, '編集中なのに理由が出ない').toBe(false);
+    // ⚠ 文言は**画面のボタンの字**と対で pin する ── 「確定 / 取り消し」はどのボタンの字でもない
+    expect(note.textContent).toBe(EDITING_NOTE);
+    expect(note.textContent).toContain('保存するか、キャンセルすると');
+    // 🔴 **直上** ── 帯と離れると何の理由か読めない
+    expect(
+      note.nextElementSibling?.getAttribute('data-pkc-field'),
+      '理由の 1 行が操作の帯の直上に無い',
+    ).toBe('inspector-actions');
+  });
+
+  it('編集を終えれば消える(片道にしない)', () => {
+    const s = mounted();
+    s.d.dispatch({ type: 'START_EDIT' });
+    s.d.dispatch({ type: 'CANCEL_EDIT' });
+    expect(s.q<HTMLElement>(NOTE).hidden, '編集をやめても理由が残っている').toBe(true);
+  });
+
+  it('🔴 保存に失敗しているときは「編集中」と言わない(#516 と同じ側に立つ)', () => {
+    const s = mounted();
+    s.d.dispatch({ type: 'START_EDIT' });
+    s.d.dispatch({ type: 'UPDATE_OPEN_BODY', body: '本文 2\n' });
+    s.d.dispatch({ type: 'COMMIT_EDIT' });
+    s.d.dispatch({ type: 'SYS_ERROR', error: 'disk' });
+    expect(s.d.getState().phase, '前提が崩れている(error phase になっていない)').toBe('error');
+    const note = s.q<HTMLElement>(NOTE);
+    expect(note.hidden, '保護中なのに理由が出ない').toBe(false);
+    expect(note.textContent, '編集していないのに「編集中」と言った').not.toContain('編集中');
+    expect(note.textContent, '理由を言っていない').toContain('保存に失敗している');
   });
 });

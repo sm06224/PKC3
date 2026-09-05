@@ -1231,6 +1231,7 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    '「ここに追記する」で開いた追記欄は、送ると元どおり畳まれるようになりました',
     // ⚠ 上限 10 を超えたので 2026-09-05 に落とした(原本は CHANGELOG)
     '「写す」と書いていた操作を、全部「コピー」に揃えました',
     // ⚠ 上限 10 を超えたので 2026-09-05 に落とした(原本は CHANGELOG)
