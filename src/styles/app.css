@@ -2767,7 +2767,11 @@ li[data-pkc-row-slot] {
 /* ── 🔴 **表のセルを押して打てる**(#418 段①)。
  *    ⚠ 出るのは押せる面だけ(`interactiveCells` を渡した面)なので、
  *    書き出した HTML・印刷では**この規則に当たる要素が 1 つも無い**。 */
-.pkc-md-rendered .pkc-md-rendered-csv [data-pkc-action='edit-cell'] {
+/* ⚠ **markdown の表の升も同じ見え方にする**(#708 段④)── 押せるのに
+ *    ただの字に見えると、user は押せることに気づかない(dead click の逆)。
+ *    🔑 印(`data-pkc-action`)で当てるので、csv と markdown で見え方が揃う。 */
+.pkc-md-rendered .pkc-md-rendered-csv [data-pkc-action='edit-cell'],
+.pkc-md-rendered .pkc-md-block[data-pkc-md-block-kind='table'] [data-pkc-action='edit-cell'] {
   cursor: text;
   position: relative;
 }

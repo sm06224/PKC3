@@ -29,6 +29,7 @@ import { MAX_TAGS, sameTag } from '../flavor/tags';
 // 部分 path は exports map から**消えた**(v14 では `@types/markdown-it` が
 // `lib/token.mjs` を生やしていた)。型は本入口から名前付きで取る。
 import type { Token } from 'markdown-it';
+import { gfmCellText } from './html-to-markdown';
 // PR-W18:HTML footnote plugin(`[^id]` → `<sup class="footnote-ref">`)。
 // CJS package だが exports map で `.mjs` を提供しているため ESM import OK。
 import footnotePlugin from 'markdown-it-footnote';
@@ -808,6 +809,77 @@ md.renderer.rules.table_open = function (tokens, idx, options, _env, self) {
 };
 md.renderer.rules.table_close = function (tokens, idx, options, _env, self) {
   return `${self.renderToken(tokens, idx, options)}</div>`;
+};
+
+/**
+ * 🔴 **markdown の表の升も、押してその場で打てるようにする**(#708 段④)。
+ *
+ * > user の物語(#708): 表を書いたあとで「これは升を押して打ちたい」と思っても、
+ * > csv の表にしか押せる升が無かった。
+ *
+ * ## ⚠ 焼くのは 3 つ、どれも読み手から引く
+ *
+ * | 印 | どこから引くか |
+ * |---|---|
+ * | `data-pkc-cell-line` | **囲んでいる `tr_open` の `map[0]`**(升の token は `map` を持たない) |
+ * | `data-pkc-cell-col` | その `tr_open` から数えた升の順番 |
+ * | `data-pkc-cell-raw` | **次の `inline` token の `content`** |
+ *
+ * 🔴 **原文は逃がし直して焼く。** 読み手は升の原文から **`\|` の逃がしだけ外して**
+ *   渡してくる(実測:`a\|b` → `a|b`)── そのまま焼くと、押した欄に `a|b` と出て、
+ *   確定した瞬間に**列の区切りとして読まれて表がずれる**。
+ *   ⚠ 逃がす規則は `gfmCellText` の 1 本を借りる(§7)。
+ *
+ * ⚠ **行番号は `toggle-task` と同じ 3 段**を通す(前処理後の行 → `lineMap` で原文へ
+ *   逆引き → `taskLineOffset` を足す)── 1 段でも飛ばすと**別の行を書き換える**。
+ * ⚠ 区切りの行(`|---|`)には印を焼かない ── そこは `tr` にならないので自然に外れる。
+ */
+function cellEditAttrs(
+  tokens: readonly Token[],
+  idx: number,
+  env: unknown,
+): string {
+  if ((env as { interactiveCells?: boolean } | undefined)?.interactiveCells !== true) return '';
+  // ⚠ 囲んでいる行を後ろ向きに探し、そこまでの升を数える(升は `map` を持たない)
+  let col = 0;
+  let rowLine: number | undefined;
+  for (let i = idx - 1; i >= 0; i -= 1) {
+    const t = tokens[i]!;
+    if (t.type === 'tr_open') {
+      rowLine = t.map?.[0] ?? undefined;
+      break;
+    }
+    if (t.type === 'td_open' || t.type === 'th_open') col += 1;
+  }
+  if (rowLine === undefined) return '';
+  const map = (env as { lineMap?: number[] } | undefined)?.lineMap;
+  const raw = map ? (map[rowLine] ?? rowLine) : rowLine;
+  const offset = (env as { taskLineOffset?: number } | undefined)?.taskLineOffset ?? 0;
+  // ⚠ 升の原文は**次の inline token**が持つ(`renderToken` はここでは中身を見ない)
+  const inline = tokens[idx + 1];
+  if (inline === undefined || inline.type !== 'inline') return '';
+  return (
+    ` data-pkc-action="edit-cell" data-pkc-cell-line="${raw + offset}"` +
+    ` data-pkc-cell-col="${col}" data-pkc-cell-raw="${md.utils.escapeHtml(gfmCellText(inline.content))}"`
+  );
+}
+
+const defaultTdOpen =
+  md.renderer.rules.td_open ??
+  ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
+md.renderer.rules.td_open = function (tokens, idx, options, env, self) {
+  const base = defaultTdOpen(tokens, idx, options, env, self);
+  const attrs = cellEditAttrs(tokens, idx, env);
+  return attrs === '' ? base : base.replace(/>$/, `${attrs}>`);
+};
+
+const defaultThOpen =
+  md.renderer.rules.th_open ??
+  ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
+md.renderer.rules.th_open = function (tokens, idx, options, env, self) {
+  const base = defaultThOpen(tokens, idx, options, env, self);
+  const attrs = cellEditAttrs(tokens, idx, env);
+  return attrs === '' ? base : base.replace(/>$/, `${attrs}>`);
 };
 
 /**
