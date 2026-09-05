@@ -1009,8 +1009,11 @@ function bareAllowed(key: string, commandId?: string): boolean {
  * 🔴 **横取りしてはいけない割当**(OS / ブラウザ側の意味が強すぎるもの)。
  * ⚠ `Mod+S` / `Mod+A` / `Mod+Z` は **PKC3 が既に横取りしている**(既定)ので入れない ──
  * 「入れたら既定が違反になる」条件を書かない(§1「成り立たない主張」の予防)。
+ * ⚠ export しているのは **マニュアル §10 の一覧と突き合わせる**ため(#697、
+ *   `tests/docs-parity.test.ts`)── 直す前は 6 つの字が手書きで、`Mod+R` / `Mod+P` を
+ *   足したときマニュアルが追随していなかった。
  */
-const REFUSED: readonly string[] = [
+export const REFUSED: readonly string[] = [
   'Mod+C',
   'Mod+V',
   'Mod+X',
@@ -1050,7 +1053,12 @@ export function validateBinding(
     };
   }
   if (REFUSED.some((r) => sameChord(r, norm))) {
-    return { kind: 'refused', message: 'これはコピー・貼り付けなどに使われる組み合わせです' };
+    // ⚠ 文言は一覧と対(#697)── `Mod+R` / `Mod+P` はコピーでも貼り付けでもないので、
+    //    「コピー・貼り付けなど」だけでは user が「なぜ R が駄目か」を読めない
+    return {
+      kind: 'refused',
+      message: 'これはコピー・貼り付け・再読込・印刷などに使われる組み合わせです',
+    };
   }
   const me = findCommand(commandId);
   if (me === null) return { kind: 'unreadable', message: '知らないコマンドです' };

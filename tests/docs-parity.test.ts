@@ -12,7 +12,15 @@
  * 「いま動くものだけを書く」と明記してある。
  */
 import { describe, expect, it } from 'vitest';
-import { KEY_COMMANDS, chordLabel } from '../src/features/keymap';
+import {
+  KEY_COMMANDS,
+  REFUSED,
+  chordFromString,
+  chordLabel,
+  typesCharacter,
+  validateBinding,
+} from '../src/features/keymap';
+import { SettingsRenderer } from '../src/adapter/ui/render/settings';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildShell } from '../src/adapter/ui/render/shell';
@@ -23,7 +31,7 @@ import {
 } from '../src/adapter/ui/render/commands';
 import { showUpdateCard } from '../src/adapter/ui/render/update-card';
 import { RENDERABLE_FENCE_LANGS } from '../src/features/markdown/markdown-render';
-import { viewModeLabel, type ViewMode } from '../src/adapter/state/app-state';
+import { initialState, viewModeLabel, type ViewMode } from '../src/adapter/state/app-state';
 import { openableViewNames } from '../src/adapter/platform/deep-link';
 import { NOTICES, NOTICE_KEEP_MAX } from '../src/features/notice/notice-log';
 import { PASTE_SOURCES } from '../src/features/markdown/paste-source';
@@ -900,6 +908,178 @@ describe('ショートカットとマニュアルの突合(#256)', () => {
     const section = MANUAL.slice(MANUAL.indexOf('## 10. ショートカットキー'));
     for (const word of ['割り当て', '既定に戻す', 'すべて既定に戻す']) {
       expect(section, `マニュアルに「${word}」の説明が無い`).toContain(word);
+    }
+  });
+
+  /**
+   * 🔴 **逆向き**(#697)── §10 の表に太字で書いた鍵は、全部いまの既定に在る。
+   *
+   * ⚠ 上の検査は「実装に在る鍵がマニュアルに載っているか」しか見ない。だから
+   *   **実装から外した鍵**(`Alt + ↓` / `Alt + ↑`、#524 で 2026-08-28 に外した)が
+   *   表に **1 週間残っていても緑**だった ── user は「押しても動かない鍵」を読む。
+   * ⚠ 読むのは**表の 1 列目**だけ(散文の `**Ctrl**` / `**Esc**` は鍵の綴りではない)。
+   * ⚠ 綴りは `chordLabel(…, false)` の**完全一致**(`Alt + \` が `Ctrl + Alt + \` の
+   *   尻に含まれる、という救われ方を作らない)。
+   */
+  it('🔴 §10 の表に書いた鍵は、全部いまの既定に在る(外した鍵が残らない)', () => {
+    const section = MANUAL.slice(MANUAL.indexOf('## 10. ショートカットキー'));
+    const defaults = new Set<string>();
+    for (const cmd of KEY_COMMANDS) {
+      for (const chord of cmd.defaults) defaults.add(chordLabel(chord, false));
+    }
+    const written: string[] = [];
+    for (const line of section.split('\n')) {
+      if (!line.startsWith('| **')) continue;
+      const cell = line.slice(1, line.indexOf('|', 1)).trim();
+      for (const m of cell.matchAll(/\*\*([^*]+)\*\*/g)) written.push(m[1]!);
+    }
+    // 空振り防止 ── 表から鍵を読めていないなら何も守っていない
+    expect(written.length, '§10 の表から鍵を 1 つも読めていない').toBeGreaterThan(30);
+    const stale = written.filter((k) => !defaults.has(k));
+    expect(stale, '既定に無い鍵がマニュアルの表に残っている').toEqual([]);
+  });
+
+  /**
+   * 🔴 **打鍵中に通る鍵は、門の判定から数える**(#697)。
+   *
+   * 門は `binder.ts`:コマンドが `whileTyping` を名乗り、**かつ**その和音が文字を
+   * 打たない(`typesCharacter` が偽)── の両方。マニュアルは「5 つだけ」と手で
+   * 書いていたが、数えると **14** あった(`Ctrl + ;` / `Ctrl + H` / `Ctrl + \` …)。
+   * 🔑 一覧も件数も実装から出し、**両向き**で見る(通らない鍵を「効く」と書かない)。
+   */
+  it('🔴 「打っている最中」に効く鍵の一覧と件数が、門の判定と一致する', () => {
+    const section = MANUAL.slice(MANUAL.indexOf('## 10. ショートカットキー'));
+    const from = section.indexOf('⚠ **打っている最中**');
+    const to = section.indexOf('⚠ 画面を開くキーは');
+    const para = from >= 0 && to > from ? section.slice(from, to) : '';
+    expect(para.length, '段落が見つからない(空振り)').toBeGreaterThan(100);
+    const passing: string[] = [];
+    for (const cmd of KEY_COMMANDS) {
+      if (cmd.whileTyping !== true) continue;
+      for (const chord of cmd.defaults) {
+        const c = chordFromString(chord);
+        if (c !== null && !typesCharacter(c)) passing.push(chordLabel(chord, false));
+      }
+    }
+    expect(passing.length, '門を通る既定が 1 つも無い(空振り)').toBeGreaterThan(0);
+    expect(para, '件数が実装と違う').toContain(`次の ${passing.length} 個です`);
+    for (const label of passing) {
+      expect(para, `打鍵中に効く「${label}」が段落に無い`).toContain(`**${label}**`);
+    }
+    // 逆向き ── 段落に太字で書いた鍵(`+` を含む / F キー)は、全部通る側に在る
+    const written = [...para.matchAll(/\*\*([^*]+)\*\*/g)]
+      .map((m) => m[1]!)
+      .filter((s) => s.includes('+') || /^F\d+$/.test(s));
+    expect(written.filter((k) => !passing.includes(k)), '通らない鍵を「効く」と書いている').toEqual([]);
+  });
+
+  /**
+   * 🔴 **割り当てられない組み合わせは `REFUSED` から出す**(#697)。
+   * ⚠ 手書きの 6 つは、`Mod+R` / `Mod+P` を足した日に追随していなかった。
+   *   断り文も対で見る ── 「コピー・貼り付けなど」だけでは R が断られる理由が読めない。
+   */
+  it('🔴 割り当てられない組み合わせの一覧と断り文が、REFUSED と一致する', () => {
+    const section = MANUAL.slice(MANUAL.indexOf('### 割り当てを変える'));
+    expect(section.length, '「割り当てを変える」の節が無い').toBeGreaterThan(200);
+    const letters = REFUSED.map((r) => {
+      expect(r.startsWith('Mod+'), `REFUSED に Mod+ 以外の形が入った(${r})── 表の書き方を直す`).toBe(true);
+      return r.slice('Mod+'.length);
+    });
+    expect(letters.length).toBeGreaterThan(6);
+    expect(section).toContain(`**Ctrl + ${letters.join(' / ')}**`);
+    const refused = validateBinding('create-entry', 'Mod+R', {});
+    expect(refused?.kind).toBe('refused');
+    for (const word of ['再読込', '印刷']) {
+      expect(refused?.message, `断り文が「${word}」に触れていない`).toContain(word);
+      expect(section, `マニュアルが「${word}」に触れていない`).toContain(word);
+    }
+  });
+});
+
+/**
+ * 🔴 **設定の画面の節・項目は、描いた物から数える**(#697)。
+ *
+ * マニュアルは「画面は 6 つに分かれています」と手で書いていたが、描くと **9** あった
+ * (「ノートを渡して開くことを許したアプリ」「目次を見せているアプリ」「貼り付け」が
+ * 後から足され、誰も数え直さなかった)。⚠ 数字は真っ先に腐る ── 器を組んで数える。
+ */
+describe('設定の画面の節とマニュアルの突合(#697)', () => {
+  const host = document.createElement('div');
+  const renderer = new SettingsRenderer(host);
+  renderer.render(initialState);
+  const h3s = [...host.querySelectorAll('h3')].map((h) => h.textContent ?? '');
+
+  it('⚠ 前提: 節を数えられていて、重複が無い(空振り防止)', () => {
+    expect(h3s.length).toBeGreaterThan(5);
+    expect(new Set(h3s).size).toBe(h3s.length);
+  });
+
+  it('🔴 節の見出しが全部マニュアルに太字で在り、「N つに分かれています」の N と一致する', () => {
+    for (const h of h3s) {
+      expect(MANUAL, `マニュアルに設定の節「${h}」が無い`).toContain(`**${h}**`);
+    }
+    expect(MANUAL, '節の数が実装と違う').toContain(`画面は ${h3s.length} つに分かれています`);
+  });
+
+  it('🔴 「表示」の項目(dt)が全部マニュアルに太字で在り、個数も一致する', () => {
+    const dts = [...host.querySelectorAll('[data-pkc-region="settings-user"] dt')].map(
+      (d) => d.textContent ?? '',
+    );
+    expect(dts.length, '表示の項目を読めていない(空振り)').toBeGreaterThan(5);
+    for (const d of dts) {
+      expect(MANUAL, `マニュアルに表示の項目「${d}」が無い`).toContain(`**${d}**`);
+    }
+    expect(MANUAL, '表示の項目数が実装と違う').toContain(`の ${dts.length} 個です`);
+  });
+});
+
+/**
+ * 🔴 **§9「困ったとき」の引用は、画面の字そのもの**(#697)。
+ *
+ * ⚠ 「別のタブで開いています」は #688 で「別のタブかウィンドウで…」に変わったのに、
+ *   §9 は 2 行とも古い字のままだった ── user は画面の字で表を探すので、
+ *   **字が 1 字違えば見つからない**。鉤括弧の中を抜き出して src を grep する。
+ * ⚠ `§N「…」` は**マニュアルの節への参照**なので除く(あれは画面の字ではない)。
+ */
+describe('§9「困ったとき」の引用が画面の字と一致する(#697)', () => {
+  const from = MANUAL.indexOf('## 9. 困ったとき');
+  const to = MANUAL.indexOf('## 10. ショートカットキー');
+  const section = from >= 0 && to > from ? MANUAL.slice(from, to) : '';
+  const SRC = srcFiles()
+    .map((f) => codeOnly(readFileSync(f, 'utf-8')))
+    .join('\n')
+    .replace(/`/g, '');
+
+  it('🔴 表の中の「…」は、全部 src のコードに在る', () => {
+    expect(section.length, '§9 が無い(空振り)').toBeGreaterThan(500);
+    const quotes: string[] = [];
+    for (const row of section.split('\n')) {
+      if (!row.startsWith('| ') || row.startsWith('| 症状') || row.startsWith('|---')) continue;
+      const noRefs = row.replace(/§\d+(?:-\d+)?「[^」]*」/g, '');
+      for (const m of noRefs.matchAll(/「([^」]+)」/g)) quotes.push(m[1]!.replace(/`/g, ''));
+    }
+    expect(quotes.length, '引用を 1 つも拾えていない(空振り)').toBeGreaterThan(3);
+    const missing = quotes.filter((q) => !SRC.includes(q));
+    expect(missing, '画面に無い字を §9 が引いている').toEqual([]);
+  });
+
+  /**
+   * 🔴 `⚠` で始まる status は **1 種類ではない**。マニュアルは「⚠ だけの警告 =
+   * 保存先を確保できていない」と 1 行で括っていたが、`main.ts` を grep すると
+   * ⚠ で始まる文は 5 つ(⚠ だけが 4 つ + 「⚠ エラー:」)── 種類の数だけ行を持つ。
+   */
+  it('🔴 ⚠ で始まる status の種類の数だけ、§9 に行がある', () => {
+    const main = codeOnly(readFileSync('src/main.ts', 'utf-8'));
+    const kinds = [...main.matchAll(/[`'"]⚠ /g)].length;
+    expect(kinds, 'main.ts の ⚠ で始まる status の種類が変わった(§9 の表を直す)').toBe(5);
+    for (const needle of [
+      '保存先を確保できていない',
+      '⚠ 本体への切り替えに失敗しました',
+      '⚠ 添付 N 件を読み込めませんでした',
+      '⚠ この端末に保存できませんでした',
+      '⚠ エラー: …',
+    ]) {
+      expect(section, `§9 に「${needle}」の行が無い`).toContain(needle);
     }
   });
 });
