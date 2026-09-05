@@ -378,6 +378,7 @@ describe('本物の添付を通したときの預かり(#250 → #668 B)', () =>
     document.body.append(root);
     const stored: string[] = [];
     const deps: AttachDeps = {
+      gate: (run) => run(), // #724 ⑤: 単体では門を模さない(そのまま走らせる)
       putBlob: async (key) => void stored.push(key),
       putMeta: async () => {},
       listMetas: async () => [],

@@ -21,6 +21,7 @@ const item = (over: Partial<AttachItem> = {}): AttachItem => ({
 /** 最小の deps ── 縮める口だけを差す(他は呼ばれない)。 */
 function deps(over: Partial<AttachDeps> = {}): AttachDeps {
   return {
+    gate: (run) => run(), // #724 ⑤: 単体では門を模さない(そのまま走らせる)
     putBlob: async () => {},
     putMeta: async () => {},
     listMetas: async () => [],

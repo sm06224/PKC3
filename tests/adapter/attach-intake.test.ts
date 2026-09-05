@@ -19,6 +19,7 @@ function harness(estimate?: AttachDeps['estimate'], over?: StoreOver) {
   const metas: Array<{ key: string; mime: string; size: number; hash: string | null }> =
     [];
   const deps: AttachDeps = {
+    gate: (run) => run(), // #724 ⑤: 単体では門を模さない(そのまま走らせる)
     putBlob: async (key, blob) => {
       putBlobs.push({ key, size: blob.size });
     },
@@ -578,6 +579,16 @@ describe('attachFiles (P4a intake)', () => {
    */
   it('🔴 B 編集中は断らず預かり、編集を終えると本文に入る(#668)', async () => {
     const { d, deps, putBlobs, metas } = harness();
+    /**
+     * 🔴 #724 ⑤: 預かった `run` は**門の中**で走る ── 門が呼ばれた時点で bytes は 0、
+     *   門が解けた時点で 1。⚠ 直す前は門を通らず(`gated` が空のまま)緑だった。
+     */
+    const gated: Array<{ before: number; after: number }> = [];
+    deps.gate = async (run) => {
+      const before = putBlobs.length;
+      await run();
+      gated.push({ before, after: putBlobs.length });
+    };
     d.dispatch({ type: 'CREATE_ENTRY', archetype: 'text', lid: 'lid-editing', title: 'draft' });
     expect(d.getState().phase).toBe('editing');
     appendsSeen.length = 0;
@@ -602,6 +613,7 @@ describe('attachFiles (P4a intake)', () => {
     await tick();
     await tick();
     expect(putBlobs, '編集を終えても取り込まれない(預かりが捨てられた)').toHaveLength(1);
+    expect(gated, '預かった取込が資産の門の外で走った(#724 ⑤)').toEqual([{ before: 0, after: 1 }]);
     expect(d.getState().entryMetas.size, '添付が作られていない').toBe(2);
     const lines = appendsSeen.filter((a) => a.lid === 'lid-editing').map((a) => a.text);
     expect(lines, '編集していたノートの本文に入っていない').toHaveLength(1);
