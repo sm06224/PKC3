@@ -617,6 +617,56 @@ test('🔴 見出しを右クリックすると、その章を畳める (#426 �
  * ⚠ **章末が `:::` の囲み**である本文にする ── 閉じの `:::` まで入ることが、この機能の
  *   当の主張(`:::` の刻印は開き行にしか無いので、終端の取り方を誤ると閉じが落ちる)。
  */
+/**
+ * 🔴 **章の参照をコピー → 貼って押すと、その見出しまで送られる**(#579)。
+ * ⚠ unit では原理的に届かない 2 つ:① 本物の clipboard を往復して**貼った字が記法として
+ *   成立する**か ② `scrollIntoView` で見出しが**本当に版面の中に来る**か(happy-dom は採寸しない)。
+ */
+test('🔴 見出しを右クリックして「章の参照をコピー」、貼って押すと見出しまで送られる (#579)', async ({
+  page,
+  context,
+}) => {
+  const errors = collectPageErrors(page);
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('相手');
+  // 🔑 第 2 章を**版面の外**まで押し下げる(送られていなければ画面に無い)
+  await page
+    .locator('[data-pkc-field="editor-body"]')
+    .fill(`## 第 1 章\n\n${'うめ\n\n'.repeat(60)}## 第 2 章\n\n第 2 章の中身。\n`);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  const h2 = page.locator('[data-pkc-field="detail-body"] h2', { hasText: '第 2 章' });
+  await h2.scrollIntoViewIfNeeded();
+  await h2.click({ button: 'right' });
+  await page.locator(MENU).locator('button[data-pkc-action="copy-section-ref"]').click();
+  await expect(page.locator('[data-pkc-region="status"]'), '写した合図が出ない').toContainText(
+    '章へのリンクをコピーしました',
+  );
+  const text = await page.evaluate(() => navigator.clipboard.readText());
+  // 🔴 貼れる 1 行 ── 題名 / 見出し、宛先は `entry:<lid>#h/<見出しの id>`(id は描画が刻んだ形)
+  expect(text, '貼れる 1 行になっていない').toMatch(/^\[相手 \/ 第 2 章\]\(entry:[A-Za-z0-9_-]+#h\/第-2-章\)$/);
+
+  // 貼って押す ── 相手が開き、第 2 章まで送られる
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-body"]').fill(`${text}\n`);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await clickReal(page, '[data-pkc-field="detail-body"] [data-pkc-action="navigate-entry-ref"]');
+  const target = page.locator('[data-pkc-field="detail-body"] h2', { hasText: '第 2 章' });
+  await expect(target, '相手が開いていない').toBeVisible();
+  const inView = await target.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const host = el.closest('[data-pkc-region="detail"]')!.getBoundingClientRect();
+    return r.top >= host.top - 1 && r.top < host.bottom;
+  });
+  expect(inView, '第 2 章まで送られていない(版面の外に居る)').toBe(true);
+  await expect(page.locator('[data-pkc-region="status"]'), '見つからないと言われた').not.toContainText(
+    '見出しが見つかりません',
+  );
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
 test('🔴 見出しを右クリックして「この章をコピー」を押すと、章の原文が閉じの ::: まで入る (#677)', async ({
   page,
   context,

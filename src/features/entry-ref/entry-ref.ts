@@ -9,6 +9,7 @@
  *   entry:<lid>#log/<a>..<b>
  *   entry:<lid>#day/<yyyy-mm-dd>
  *   entry:<lid>#log/<id>/<slug>
+ *   entry:<lid>#h/<heading-id>        (#579 ── 本文の見出し。id は描画が刻む物と同じ)
  *   entry:<lid>#<legacy-log-id>       (legacy, accepted but not emitted)
  *
  * Invariants:
@@ -32,6 +33,11 @@ export type ParsedEntryRef =
   | { kind: 'range'; lid: string; fromId: string; toId: string }
   | { kind: 'day'; lid: string; dateKey: string }
   | { kind: 'heading'; lid: string; logId: string; slug: string }
+  /**
+   * 🔴 **本文の見出しを指す**(#579)。`id` は描画が刻む見出しの id(`makeSlugCounter` の
+   * 出力)そのままで、**日本語を含みうる** ── textlog 用の `heading`(ASCII の slug)とは別の形。
+   */
+  | { kind: 'section'; lid: string; id: string }
   | { kind: 'legacy'; lid: string; logId: string }
   | { kind: 'invalid'; raw: string };
 
@@ -40,6 +46,37 @@ export const SCHEME = 'entry:';
 const TOKEN_RE = /^[A-Za-z0-9_-]+$/;
 const SLUG_RE = /^[A-Za-z0-9-]+$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** 見出しを指す断片の頭(#579)。⚠ `log/` / `day/` と同じ作法で 1 語で見分ける。 */
+const SECTION_PREFIX = 'h/';
+
+/**
+ * 🔴 **見出しを指す断片を解く**(#579)── `h/<見出しの id>` → id。
+ *
+ * ⚠ id は `SLUG_RE`(ASCII の textlog 用)とは**別の規則** ── 描画(`makeSlugCounter`)が
+ *   刻む id は日本語を含みうるので、「`/` と空白以外」を受ける。
+ * ⚠ **URL では percent-encode されて来る**(markdown-it が href を正規化するので、
+ *   `#h/見出し` と書いた本文は DOM では `#h/%E8%A6%8B…` になる)── decode してから検める。
+ *   読めない `%` の並びは**そのまま**受ける(捨てると、user が手で書いた id が消える)。
+ * 🔑 判定はここ 1 か所 ── `parseEntryRef` の 2 経路(`entry:` 付き / 断片だけ)と
+ *   `link-target.ts`(`pkc://` の断片)が同じ関数を呼ぶ(§7)。
+ *
+ * @param frag `#` を含んでも含まなくてもよい
+ * @returns 見出しの id。`h/` で始まらない / 空 / `/` や空白を含むなら `null`
+ */
+export function parseSectionFragment(frag: string): string | null {
+  const f = frag.startsWith('#') ? frag.slice(1) : frag;
+  if (!f.startsWith(SECTION_PREFIX)) return null;
+  const raw = f.slice(SECTION_PREFIX.length);
+  if (raw === '') return null;
+  let id = raw;
+  try {
+    id = decodeURIComponent(raw);
+  } catch {
+    // 読めない % の並び ── 手で書いた字として、そのまま受ける
+  }
+  if (id === '' || /[\s/]/.test(id)) return null;
+  return id;
+}
 
 /**
  * Parse an `entry:` reference string.
@@ -78,6 +115,12 @@ export function parseEntryRef(raw: string, opts: ParseEntryRefOptions = {}): Par
   if (!TOKEN_RE.test(lid)) return invalid(raw);
   if (frag === null) return { kind: 'entry', lid };
   if (frag === '') return invalid(raw);
+
+  // h/<見出しの id>(#579)
+  if (frag.startsWith(SECTION_PREFIX)) {
+    const id = parseSectionFragment(frag);
+    return id === null ? invalid(raw) : { kind: 'section', lid, id };
+  }
 
   // day/<yyyy-mm-dd>
   if (frag.startsWith('day/')) {
@@ -131,6 +174,11 @@ export function parseEntryRef(raw: string, opts: ParseEntryRefOptions = {}): Par
  */
 function parseFragmentWithLid(frag: string, lid: string, raw: string): ParsedEntryRef {
   if (frag === '') return invalid(raw);
+  // h/<見出しの id>(#579)── `entry:` 付きの経路と同じ 1 本で解く
+  if (frag.startsWith(SECTION_PREFIX)) {
+    const id = parseSectionFragment(frag);
+    return id === null ? invalid(raw) : { kind: 'section', lid, id };
+  }
   if (frag.startsWith('day/')) {
     const dateKey = frag.slice('day/'.length);
     if (!DATE_RE.test(dateKey) || !isRealDate(dateKey)) return invalid(raw);
@@ -186,6 +234,10 @@ export function formatEntryRef(ref: ParsedEntryRef): string {
       return `${SCHEME}${ref.lid}#day/${ref.dateKey}`;
     case 'heading':
       return `${SCHEME}${ref.lid}#log/${ref.logId}/${ref.slug}`;
+    // ⚠ id は**生のまま**書く(`entry:abc#h/見出し`)── 本文で読める形が正本。
+    //    URL へ載るときは markdown-it が percent-encode し、読む側が decode する(往復する)
+    case 'section':
+      return `${SCHEME}${ref.lid}#${SECTION_PREFIX}${ref.id}`;
     case 'legacy':
       return `${SCHEME}${ref.lid}#${ref.logId}`;
     case 'invalid':

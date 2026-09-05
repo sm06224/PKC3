@@ -480,11 +480,13 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     rightClick(r.head);
     const acts = r.acts();
     // ⚠ 4 つ目「この章をコピー」は #677 で足した(既存の 3 つの**下**)
-    expect(acts.slice(0, 4), '見出しの 4 つが出ていない').toEqual([
+    // ⚠ 5 つ目「章の参照をコピー」は #579 で足した(写す 2 つを隣に)
+    expect(acts.slice(0, 5), '見出しの 5 つが出ていない').toEqual([
       'edit-from-heading',
       'append-at-heading',
       'toggle-heading-fold',
       'copy-chapter-md',
+      'copy-section-ref',
     ]);
     /**
      * 🔴 **差し替えていないことを、ここで見る。**
@@ -493,7 +495,7 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
      * 🔴 **条件つきの「取り込む」まで見る**(着地前レビュー 🔴3)── `BODY_MENU_ACTIONS`
      *   だけと突き合わせる変異は、fixture に外部画像が 0 枚だと素通りした。
      */
-    expect(acts.slice(4), '本文のメニューが消えている / 取り込みが見出しの枝だけ落ちた').toEqual([
+    expect(acts.slice(5), '本文のメニューが消えている / 取り込みが見出しの枝だけ落ちた').toEqual([
       'add-place',
       ...BODY_MENU_ACTIONS.map((a) => a.action),
       'adopt-external-images',
@@ -1321,6 +1323,57 @@ describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () =
      */
     expect(r.copied[0]!.text, '章の原文が丸ごと写っていない(閉じの ::: まで)').toBe(CHAPTER_1);
     expect(r.copied[0]!.done, '写した合図の字が違う').toBe('章をコピーしました(Markdown の原文)');
+  });
+
+  /**
+   * 🔴 **章の参照をコピー**(#579)── `[題名 / 見出し](entry:<lid>#h/<見出しの id>)`。
+   * ⚠ id は描画が刻んだ物(`h.id`)をそのまま写す ── 自前で計算しない。
+   */
+  it('🔴 見出しの右クリックに「章の参照をコピー」が在り、押すと貼れる 1 行が渡る', () => {
+    const r = rig();
+    rightClick(r.q('h2[id="章"]'));
+    expect(r.acts(), '「章の参照をコピー」が出ていない').toContain('copy-section-ref');
+    expect(r.label('copy-section-ref')).toBe('章の参照をコピー');
+    // 🔑 「この章をコピー」の隣(どちらも clipboard へ写す)
+    const a = r.acts();
+    expect(a.indexOf('copy-section-ref')).toBe(a.indexOf('copy-chapter-md') + 1);
+    r.press('copy-section-ref');
+    expect(r.copied).toHaveLength(1);
+    expect(r.copied[0]!.text).toBe('[板の在るノート / 章](entry:n1#h/章)');
+    expect(r.copied[0]!.done).toBe('章へのリンクをコピーしました(本文に貼れます)');
+  });
+
+  it('🔴 入れ子の見出し(板の中の ###)でも章の参照は写せる(id は刻まれている)', () => {
+    const r = rig();
+    rightClick(r.q('h3[id="買い出し"]'));
+    // ⚠ 畳めない見出しなので「この章をコピー」は出ないが、参照は出る(id を持つ)
+    expect(r.acts()).not.toContain('copy-chapter-md');
+    expect(r.acts(), '入れ子の見出しで章の参照が消えた').toContain('copy-section-ref');
+    r.press('copy-section-ref');
+    expect(r.copied.map((c) => c.text)).toEqual(['[板の在るノート / 買い出し](entry:n1#h/買い出し)']);
+  });
+
+  /**
+   * 🔴 **写す id は描画が刻んだ物そのもの**(字から自前で計算しない)── 変異試験 S8 が
+   *   SURVIVED で教えた:上の fixture は見出しの字と id が同じ(`章` / `買い出し`)なので、
+   *   字を写す実装でも通っていた。空白を含む字と**同名 2 つ目の連番**で差を作る。
+   */
+  it('🔴 写す id は刻印そのもの(空白は `-`、同名の 2 つ目は `-1`)', () => {
+    const r = rig('## 第 1 章\n\n段落\n\n## 第 1 章\n\nもう 1 つ\n');
+    const second = [...r.host.querySelectorAll('h2')][1]!;
+    expect(second.id, '前提が崩れている: 2 つ目の見出しの id が連番になっていない').toBe('第-1-章-1');
+    rightClick(second);
+    r.press('copy-section-ref');
+    expect(r.copied.map((c) => c.text)).toEqual(['[板の在るノート / 第 1 章](entry:n1#h/第-1-章-1)']);
+  });
+
+  it('⚠ 対照群 ── id の無い見出し(####)では「章の参照をコピー」を出さない', () => {
+    const r = rig('## 章\n\n#### 深い\n\n段落\n');
+    const h4 = r.q('h4');
+    expect(h4.id, '前提が崩れている: #### に id が刻まれている').toBe('');
+    rightClick(h4);
+    expect(r.acts(), '本文のメニューが出ていない(台の空振り)').toContain('edit-from-heading');
+    expect(r.acts(), '指す先の無い見出しに章の参照を出した').not.toContain('copy-section-ref');
   });
 
   it('末尾の章は本文の末尾まで(板の中の `###` は章を閉じない)', () => {

@@ -83,7 +83,7 @@ import {
   entryPickRows,
   entryPickTotal,
 } from '@features/entry-ref/entry-pick';
-import { formatEntryLink } from '@features/entry-ref/entry-ref-format';
+import { formatEntryLink, formatSectionLink } from '@features/entry-ref/entry-ref-format';
 import { insertionForLineDate } from '@features/schedule/line-date';
 import { addDays, dayStamp, daysBetween } from '@features/datetime/date-math';
 import {
@@ -1313,7 +1313,7 @@ function moveOrder(
  * `SELECT_ENTRY` は編集中 / error / 未知 lid で**黙って何もしない**ので、
  * 素直に撃つと「押しても無言」が残る(直そうとしている当のものになる)。
  */
-function navigateToLink(dispatcher: Dispatcher, raw: string | null): void {
+function navigateToLink(dispatcher: Dispatcher, target: HTMLElement, raw: string | null): void {
   const t = parseLinkTarget(raw ?? '');
   if (t.kind === 'invalid') {
     dispatcher.dispatch({ type: 'OP_FAILED', error: 'リンクの書き方が読めません' });
@@ -1327,6 +1327,22 @@ function navigateToLink(dispatcher: Dispatcher, raw: string | null): void {
     return;
   }
   if (!selectEntryOrExplain(dispatcher, t.lid, 'リンク先のノート')) return;
+  /**
+   * 🔴 **`#h/<見出しの id>` が付いていれば、開いた後にその見出しへ飛ぶ**(#579)。
+   *
+   * 🔑 飛ぶ機構は目次と**同じ 1 本**(`tocJump`)── 描き直しを待って id で探し、畳んで
+   *   いれば開いてから送る。判定を 2 か所に生やさない(§7)。
+   * ⚠ 見出しが無ければ理由を出す(見出しの字を変えると id も変わる ── ノートは開けている
+   *   ので、user は本文の中で探し直せる)。
+   */
+  if (t.section !== null) {
+    void tocJump(
+      dispatcher,
+      target,
+      t.section,
+      '見出しが見つかりません(見出しの字が変わったのかもしれません)',
+    );
+  }
 }
 
 /**
@@ -2445,7 +2461,16 @@ async function waitPainted(
  * ⚠ detail に居るときは撃たない ── `SET_VIEW_MODE` は履歴・ゴミ箱の panel を畳む
  *   副作用を持つ(目次を押しただけで履歴が閉じる、を作らない)。
  */
-async function tocJump(dispatcher: Dispatcher, target: HTMLElement, slug: string): Promise<void> {
+/**
+ * @param notFound 見出しが無かったときの断り文(#579 ── 章のリンクは目次と事情が違う:
+ *   「まだ出ていない」ではなく「字が変わった」のかもしれない)。省けば目次の文言
+ */
+async function tocJump(
+  dispatcher: Dispatcher,
+  target: HTMLElement,
+  slug: string,
+  notFound?: string,
+): Promise<void> {
     if (dispatcher.getState().viewMode !== 'detail') {
       dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
     }
@@ -2477,7 +2502,8 @@ async function tocJump(dispatcher: Dispatcher, target: HTMLElement, slug: string
         error:
           dispatcher.getState().phase !== 'ready'
             ? '編集中は本文が表示されていないので移動できません(保存するか、2 ペインにしてください)'
-            : 'その見出しが本文の面にまだ出ていません(描き直しの途中かもしれません ── もう一度押してください)',
+            : (notFound ??
+              'その見出しが本文の面にまだ出ていません(描き直しの途中かもしれません ── もう一度押してください)'),
       });
       return;
     }
@@ -2513,14 +2539,14 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   あるので、いまは lid まで開く(`link-target.ts` に理由)。
    */
   'navigate-entry-ref': (dispatcher, target) => {
-    navigateToLink(dispatcher, target.getAttribute('data-pkc-entry-ref'));
+    navigateToLink(dispatcher, target, target.getAttribute('data-pkc-entry-ref'));
   },
   /**
    * `@[card](…)` の placeholder。⚠ **解決器は `entry:` と同じ 1 本**
    * (target は `entry:` か `pkc://<cid>/entry/<lid>` のどちらか)。
    */
   'navigate-card-ref': (dispatcher, target) => {
-    navigateToLink(dispatcher, target.getAttribute('data-pkc-card-target'));
+    navigateToLink(dispatcher, target, target.getAttribute('data-pkc-card-target'));
   },
   /**
    * `pkc://<自分>/asset/<key>` ── 添付の**所有ノートへ飛ぶ**(#100 段②)。
@@ -4645,6 +4671,61 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     copySourceLines(dispatcher, services, fmBody, span, '章をコピーしました(Markdown の原文)');
+  },
+  /**
+   * 🔴 **その章を指すリンクを写す**(#579。user 裁定 2026-09-04)。
+   *
+   * 貼れる 1 行は `[題名 / 見出し](entry:<lid>#h/<見出しの id>)`。押すと相手のノートを開いて
+   * その見出しまで送る(`navigateToLink` → `tocJump`)。
+   * ⚠ id は描画が刻んだ物(`h.id`)を**そのまま読む** ── 自前で slug を計算しない
+   *   (計算が 2 か所になると、同名見出しの連番 `-1` で食い違う)。
+   * ⚠ 見出しは**入れ子でも拾う**(引用や `:::` の中にも id は刻まれる)── `headingAtSourceLine`
+   *   は直下しか見ないので、外れたら刻印で深く探す。
+   * ⚠ id の無い見出し(`####` 以下)ではメニューに出ない(`linkable`)が、受け手でも理由を出す。
+   */
+  'copy-section-ref': (dispatcher, target, services) => {
+    const line = menuCarriedLine(target);
+    if (line === null || refuseStaleMenu(dispatcher, target)) return;
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    const host = root.querySelector<HTMLElement>('[data-pkc-field="detail-body"]');
+    const heading =
+      host === null
+        ? null
+        : (headingAtSourceLine(host, line) ??
+          [...host.querySelectorAll('h1,h2,h3,h4,h5,h6')].find(
+            (h) => h.getAttribute('data-pkc-source-line') === String(line),
+          ) ??
+          null);
+    const st = dispatcher.getState();
+    // ⚠ 相手は**開いている本文**(`copy-chapter-md` と同じ)── 見出しは openBody の描画である
+    const lid = target.getAttribute(MENU_LID_ATTR) || st.openBody?.lid;
+    if (heading === null || lid === undefined || lid === '') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '見出しを読めませんでした(本文を開き直してください)' });
+      return;
+    }
+    if (heading.id === '') {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: 'この見出しには参照の印が無いので、章の参照を作れません(# 〜 ### の見出しで使えます)',
+      });
+      return;
+    }
+    if (services.copyText === undefined) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この版ではコピーできません' });
+      return;
+    }
+    // ⚠ 見出しの字は畳みのボタンを除いて読む(`textContent` は `<button>` を含む)
+    const text = [...heading.childNodes]
+      .filter((n) => !(n instanceof Element && n.matches('button')))
+      .map((n) => n.textContent ?? '')
+      .join('')
+      .trim();
+    const title = st.entryMetas.get(lid)?.title ?? '';
+    const label = title === '' ? text : `${title} / ${text}`;
+    services.copyText(
+      formatSectionLink(label, lid, heading.id),
+      '章へのリンクをコピーしました(本文に貼れます)',
+    );
   },
   /**
    * 🔴 **`:::` の塊(囲み / 板)を原文の Markdown でまるごと写す**(#677)。
@@ -7927,6 +8008,8 @@ export function bindActions(
               folded: isHeadingFolded(heading),
               foldable: heading.parentElement === host,
               appendable: level >= 1 && level <= 3 && appendModeOf(dispatcher.getState()).kind === 'ready',
+              // 🔴 章の参照(#579)── 描画が id を刻んだ見出しだけ(`#`〜`###`)
+              linkable: heading.id !== '',
               // 🔴 近道の字を右に添える(#587 C 案 2)── 見出しの項目だけ(塊 / 板 / 本文には無い)
             }).map(withShortcut)),
         ...(block === null ? [] : blockMenuActions({ board: block.board })),

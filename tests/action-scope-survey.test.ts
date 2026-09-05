@@ -76,7 +76,9 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
     //   ── 材料は state の `lastMove`、押した所から何も要らない(`undo-append` と同じ)
     // ⚠ 2026-09-05(#215): 行の右クリックからの整理 3 つ(`rename-entry-begin` / `move-to-folder` /
     //   `create-in-folder`)で P2 が 29 → 32 ── 押した行が無ければ `selectedLid` に効く
-    expect(counts()).toEqual({ P1: 40, P2: 32, E: 19, V: 8, N: 101 });
+    // ⚠ 2026-09-05(#579): `copy-section-ref` で N が 101 → 102(`copy-chapter-md` と同じ仕分け ──
+    //   行番号はメニューが運ぶので、押した所からは何も要らない)
+    expect(counts()).toEqual({ P1: 40, P2: 32, E: 19, V: 8, N: 102 });
   });
 
   it('🔴 名指しの錨 ── 件数が同じまま入れ替わっても落ちる', () => {

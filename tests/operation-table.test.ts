@@ -117,12 +117,13 @@ describe('操作の全数台帳(#582 段①)', () => {
       //    `create-in-folder`)── 受け手 +3、`ENTRY_MENU_ACTIONS` にも載るので registered / both も +3
       // ⚠ 2026-09-05(#215): 鍵 `filer-rename` / `filer-move` / `filer-new-in-folder` で登記 +3
       //    (受け手の表の外 ── `runFilerKey` が `FILER_KEY_ACTION` で受ける)
-      total: 244,
-      receivers: 200,
+      // ⚠ 2026-09-05(#579): `copy-section-ref`(見出しの右クリック ── 登記簿の外の受け手)で +1
+      total: 245,
+      receivers: 201,
       registered: 78,
       both: 34,
       outsideActionsTable: 44,
-      unregistered: 166,
+      unregistered: 167,
     });
   });
 

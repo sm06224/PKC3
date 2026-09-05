@@ -21,7 +21,7 @@
  * ⚠ **pure module**。browser API を持たない。
  */
 import { formatMarkdownLink } from '../markdown/link-format';
-import { SCHEME } from './entry-ref';
+import { SCHEME, formatEntryRef } from './entry-ref';
 
 /**
  * そのノートを指す、本文へそのまま貼れる 1 行。
@@ -31,4 +31,15 @@ import { SCHEME } from './entry-ref';
  */
 export function formatEntryLink(title: string, lid: string): string {
   return formatMarkdownLink(title, `${SCHEME}${lid}`);
+}
+
+/**
+ * 🔴 **その章を指す、本文へそのまま貼れる 1 行**(#579)── `[ラベル](entry:<lid>#h/<見出しの id>)`。
+ *
+ * ⚠ `id` は描画が刻んだ見出しの id(`h.id`)を**そのまま**受ける ── ここで slug を計算し直さない
+ *   (同名見出しの連番 `-1` が食い違う)。綴りは `formatEntryRef` 1 本(読む側と同じ file)。
+ * ⚠ 見出しの字を変えると id も変わるので、貼った先は**消える**(マニュアルに書いてある)。
+ */
+export function formatSectionLink(label: string, lid: string, id: string): string {
+  return formatMarkdownLink(label, formatEntryRef({ kind: 'section', lid, id }));
 }

@@ -406,8 +406,9 @@ export function noteToolActions(): readonly (EntryAction & { readonly hint: stri
  *
  * 🔑 近道は**残す**(増やすだけ。#426「既存の操作を移さない」)。
  *
- * ⚠ **「章の参照をコピー」はここに入れない** ── 見出しを指す断片の形が
- * まだ無く、足すのは**記法を 1 つ増やす**ことなので、別に裁定を仰ぐ(#426)。
+ * ⚠ #426 の時点では「章の参照をコピー」を入れていなかった(見出しを指す断片の形が
+ * 無かった)。#579(user 裁定 2026-09-04)で `entry:<lid>#h/<見出しの id>` の形が
+ * 入ったので、ここにも出す(下の注記)。
  */
 export const HEADING_MENU_ACTIONS: readonly EntryAction[] = [
   { action: 'edit-from-heading', label: 'ここから編集する' },
@@ -415,10 +416,17 @@ export const HEADING_MENU_ACTIONS: readonly EntryAction[] = [
   { action: 'toggle-heading-fold', label: 'この見出しの中身を畳む' },
   /**
    * 🔴 **章をまるごと原文で写す**(#677。user 裁定 2026-09-04)。
-   * ⚠ 「章の参照をコピー」(上の注記)とは別物 ── こちらは**記法を増やさない**。
+   * ⚠ 下の「章の参照をコピー」とは別物 ── こちらは**記法を増やさない**。
    *   写るのは見出しから次の同段以上の見出しの直前までの **Markdown の原文**である。
    */
   { action: 'copy-chapter-md', label: 'この章をコピー' },
+  /**
+   * 🔴 **章を指すリンクを写す**(#579。user 裁定 2026-09-04)── `[題名 / 見出し](entry:<lid>#h/<id>)`。
+   * ⚠ 「この章をコピー」の隣 ── どちらも clipboard へ写す物なので並べる。
+   * ⚠ 出るのは**id を持つ見出しだけ**(`#`〜`###` ── 描画が id を刻む深さ)。
+   *   `####` 以下に出すと、押しても指す先が無い(`headingMenuActions` の `linkable`)。
+   */
+  { action: 'copy-section-ref', label: '章の参照をコピー' },
 ];
 
 /**
@@ -440,11 +448,14 @@ export const HEADING_MENU_ACTIONS: readonly EntryAction[] = [
  * @param appendable 追記の入り先にできるか ── 追記は `text` / `textlog` だけで、
  *   入り先の一覧は **`#` 〜 `###` しか数えない**(`append-target.ts`)。
  *   ⚠ `####` 以下で出すと、**押した見出しではなく上の `###`** が入り先になる
+ * @param linkable 章の参照を作れるか(#579)── その見出しが **id を持つ**とき
+ *   (描画は `#`〜`###` にだけ id を刻む)。無い見出しに出すと、押しても指す先が無い
  */
 export function headingMenuActions(ctx: {
   readonly folded: boolean;
   readonly foldable: boolean;
   readonly appendable: boolean;
+  readonly linkable: boolean;
 }): readonly EntryAction[] {
   const out: EntryAction[] = [{ action: 'edit-from-heading', label: 'ここから編集する' }];
   if (ctx.appendable) out.push({ action: 'append-at-heading', label: 'ここに追記する' });
@@ -461,6 +472,8 @@ export function headingMenuActions(ctx: {
      */
     out.push({ action: 'copy-chapter-md', label: 'この章をコピー' });
   }
+  // 🔴 章の参照(#579)── 畳めるかとは無関係(引用や `:::` の中の見出しにも id は刻まれる)
+  if (ctx.linkable) out.push({ action: 'copy-section-ref', label: '章の参照をコピー' });
   return out;
 }
 

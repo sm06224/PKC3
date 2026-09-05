@@ -32,7 +32,7 @@
  *
  * ⚠ **pure module**。DOM も dispatch も触らない。
  */
-import { parseEntryRef } from './entry-ref';
+import { parseEntryRef, parseSectionFragment } from './entry-ref';
 import { parsePortablePkcReference } from '@features/link/permalink';
 
 /** リンクが指す先。⚠ **fragment は「解けた文字列」ではなく生のまま**運ぶ。 */
@@ -40,18 +40,23 @@ export type LinkTarget =
   | {
       readonly kind: 'entry';
       readonly lid: string;
-      /** `#` を含む。無ければ空文字。⚠ いまは**使い道が無い**(下記)。 */
+      /** `#` を含む。無ければ空文字。⚠ `#h/` 以外はまだ**使い道が無い**(下記)。 */
       readonly fragment: string;
+      /**
+       * 🔴 **飛ぶ先の見出しの id**(#579)── `#h/<見出しの id>` のときだけ。他の形は `null`。
+       * ⚠ 解くのは `parseSectionFragment` 1 か所(`entry:` と `pkc://` で 2 本にしない)。
+       */
+      readonly section: string | null;
       /** 別のコンテナを指している(このアプリでは開けない)。 */
       readonly foreign: boolean;
     }
   | { readonly kind: 'invalid'; readonly raw: string };
 
 /**
- * 🔴 **fragment は運ぶが、まだ使わない。**
+ * 🔴 **fragment は運ぶ。使うのは `#h/`(見出し)だけ**(#579 で 1 形を使うようになった)。
  *
- * `parseEntryRef` は 7 形を解くが、**PKC3 の描画結果に飛び先が実在するのは
- * 2 形だけ**である(`entry` と ASCII の `legacy`)── `#log/…` `#day/…` が指す
+ * `parseEntryRef` は 8 形を解くが、**PKC3 の描画結果に飛び先が実在するのは
+ * `#h/<見出しの id>` だけ**である(`h1`〜`h3` に描画が刻む id)── `#log/…` `#day/…` が指す
  * `<article id="log-…">` / `<section id="day-…">` を出す実装は `src` に 0 件で、
  * textlog は markdown の節へ変換される作りだからである。
  *
@@ -71,6 +76,7 @@ export function parseLinkTarget(raw: string, selfContainerId = ''): LinkTarget {
       kind: 'entry',
       lid: p.targetId,
       fragment: p.fragment ?? '',
+      section: parseSectionFragment(p.fragment ?? ''),
       // ⚠ 自分のコンテナ id を渡されていないときは**外と見なさない**
       //   (既定で断ると全部断ることになる)。
       // 🔑 描画側は Issue #100 段① で cid を受け取ったので、
@@ -92,6 +98,7 @@ export function parseLinkTarget(raw: string, selfContainerId = ''): LinkTarget {
     kind: 'entry',
     lid: p.lid,
     fragment: hash === -1 ? '' : raw.slice(hash),
+    section: p.kind === 'section' ? p.id : null,
     foreign: false,
   };
 }

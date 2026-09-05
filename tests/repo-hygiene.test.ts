@@ -1064,12 +1064,14 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     //    当たる」1 件(別窓の boot で `searchDetail` が worker まで届くかは実ブラウザでしか
     //    見えない)で **+1 件**
     // ⚠ 2026-09-05(#215): `organize` に「行の上半分に落とすと前へ並べ替わる」**+1 件**
+    // ⚠ 2026-09-05(#579): `context-menu` に「章の参照をコピー → 貼って押すと見出しまで送られる」
+    //    **+1 件**(本物の clipboard の往復と、見出しが版面の中に来ることは unit では見えない)
     //    (実 HTML5 D&D と行の中の座標は unit では届かない)
     expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(81);
     expect(
       counts.reduce((a, b) => a + b, 0),
       'smoke の test が増減した(足したらこの数を直す)',
-    ).toBe(436);
+    ).toBe(437);
   });
 });
 
