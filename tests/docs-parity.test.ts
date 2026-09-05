@@ -879,7 +879,16 @@ describe('ショートカットとマニュアルの突合(#256)', () => {
       for (const chord of cmd.defaults) {
         // ⚠ 表示は `chordLabel`(win 表記)── user が読む形そのもので突き合わせる
         const label = chordLabel(chord, false);
-        if (!section.includes(label)) missing.push(`${cmd.id}: ${label}`);
+        /**
+         * 🔴 **太字の鍵 1 つとして探す**(#609。2026-09-04)。
+         *
+         * ⚠ 直す前は `section.includes(label)` で、**別の鍵の一部**に満たされていた ──
+         *   `Alt + \` は `**Ctrl + Alt + \**`(集中)の尻に含まれるので、追記欄の行が
+         *   §10 の表に**1 度も無いまま緑**だった(#615 はこの空振りで通っている。
+         *   CLAUDE.md §1「救い手が変わっただけ」)。
+         * 🔑 表の鍵は全部 `**Alt + [**` の形で書いてあるので、その形で丸ごと当てる。
+         */
+        if (!section.includes(`**${label}**`)) missing.push(`${cmd.id}: ${label}`);
       }
     }
     expect(missing, 'マニュアルに載っていない既定の割当がある').toEqual([]);
