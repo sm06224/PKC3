@@ -52,7 +52,12 @@ Status: ✅ **裁定済み(user 2026-08-07「オーケー / 続けてくださ�
 
 を見張っている。**1 個目の flag を宣言した瞬間に、この 4 つが実稼働する。**
 
-### ⚠ ヘルプ画面も無い
+### ⚠ ヘルプ画面も無い(**2026-08-07 当時の診断**)
+
+> 🔴 **いまは違う**(2026-09-05 に引き直した)── `help` は着地しており、
+> `VIEW_MODES` は **10 種**(`filer | launcher | detail | query | schedule | contacts |
+> dual | settings | flags | help`。`app-state.ts` の `VIEW_MODES`)。
+> ⚠ 以下は**この doc を書いた日の姿**であって、いまの姿ではない。
 
 `ViewMode` は `detail | calendar | kanban | filer | launcher | settings` の 6 つ
 (`app-state.ts:19`)。`help` / `about` の action も図案も無い。
@@ -208,6 +213,11 @@ P8 段⑲ で直した当のバグの再演になる(CLAUDE.md「片側を直し
 ```
 src/runtime/notices.ts   ← { id, title, items[] }[]  新しいものを先頭に
 ```
+
+> 🔴 **着地した先は違う**(2026-09-05 に引き直した)── `src/runtime/notices.ts` は
+> **存在しない**。実体は **`src/features/notice/notice-log.ts`**(登記表)/
+> `src/adapter/platform/notice-store.ts`(既読)/ `src/adapter/ui/render/notices.ts`(描画)の 3 つ。
+> ⚠ 登記表は pure module でなければならない(features 層)ので `runtime/` には置けなかった。
 
 - **表示は非モーダル**。この repo に**モーダルの前例は 0 件**(`showModal` / `<dialog>` /
   `aria-modal` すべて 0)。ここでモーダルを入れると**初めての系統**になる ── 入れない

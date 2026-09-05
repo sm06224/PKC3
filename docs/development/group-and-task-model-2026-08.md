@@ -30,10 +30,10 @@
 | 多重親は取込でだけ生まれ、`entryOrder` 最小で 1 つに潰される | `features/relation/tree.ts:26-51` | 取込済みデータでは「並べ替えで居場所が変わる」経路が理屈上ある |
 | タスクの材料は**既にある** | `entries` の `status` / `date` / `archived` + `idx_entries_status` / `idx_entries_date` | 封印した todo 由来。列は生きている |
 | ただし **text は抽出しない** | `features/flavor/text-flavor.ts` が `NO_EXTRACT` | ふつうのノートに `status:` と書いても、いまは列に入らない |
-| かんばん / カレンダーは `archetype !== 'todo'` を**最初に落とす** | `kanban-data.ts` / `calendar-data.ts` | 面に出すには、この 2 面の入口を作り替える必要がある |
+| ~~かんばん / カレンダーは `archetype !== 'todo'` を**最初に落とす**~~ 🔴 **この行は 2026-08-23 に無効になった**(#292 段⑤)── `kanban-data.ts` / `calendar-data.ts` は**存在しない**。予定の面は `features/schedule/`(frontmatter の `date` と本文の `- [ ]` の行)を読むので、**`archetype` で濾していない** | `features/schedule/agenda.ts` / `task-cards.ts` / `ui/render/schedule.ts` | 🔑 **入口を作り替える仕事は済んでいる** ── ふつうのノートも予定の面に出る |
 | `:::format{x=… y=…}` は**今日のビルドがそのまま `data-pkc-x` を吐く** | `markdown-render.ts:2714-2728`(allowlist 無し) | 座標の記法は**新設ゼロ**で足りる |
 | frontmatter の読み書きは揃っている | `frontmatter.ts`(parse / set / splice) | 記法側の実装コストが低い |
-| 🔴 **`group` という概念は実装に 1 件も無い** | `src/features/relation/` は 4 file | 今回が最初 |
+| 🔴 **`group` という概念は実装に 1 件も無い**(2026-09-05 に引き直しても `src/features/relation/` と `src/core/` で 0 件) | `src/features/relation/`(2026-08-19 は 4 file / **いま 7 file**) | 今回が最初 |
 
 ---
 
