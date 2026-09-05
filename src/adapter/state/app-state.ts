@@ -12,6 +12,7 @@ import { DEFAULT_ENTRY_SORT, NATURAL_DESC, type EntrySort } from '@features/filt
 import { resolveCanonicalParents, reorderSibling } from '@features/relation/tree';
 import { extractMeta, seedBodyFor } from '@features/flavor';
 import { applyBodyRewrite, type BodyRewrite } from '@features/markdown/body-rewrite';
+import type { TableFormat } from '@features/markdown/table-convert';
 import { isPlaceOpen } from '@features/markdown/place-notation';
 import { moveLinesWithInverse, type MoveLines } from '@features/markdown/line-move';
 import { replaceTaskCards, type TaskScan } from '@features/schedule/task-cards';
@@ -1216,6 +1217,12 @@ export type UserAction =
       what: 'row' | 'col';
       mode: 'add' | 'remove';
     }
+  /**
+   * 🔴 **表の形を変える**(#708 段②)。⚠ `SET_CSV_CELL` と同じ形。
+   * ⚠ `line` は**原文の行番号**(押した表のどの行でもよい)── 書き換える範囲は
+   *   `table-convert.ts` が原文から引く(呼び手に範囲を決めさせない)。
+   */
+  | { type: 'SET_TABLE_FORMAT'; lid: string; line: number; to: TableFormat }
   /**
    * 🔴 **繰り返しの「その回」を済ませる**(#344 段②)。
    * ⚠ `TOGGLE_TASK` と**単位が違う** ── 規則の行の印は動かさず、
@@ -3209,6 +3216,29 @@ function reduceCore(
               what: action.what,
               mode: action.mode,
             },
+          },
+        ],
+      };
+    }
+    /**
+     * 🔴 **表の形を変える**(#708 段②)。⚠ `SET_CSV_SHAPE` と同じ形 ── 書換は
+     *   1 本(`REQUEST_BODY_REWRITE`)を通り、面が独自の書込経路を持たない(§7)。
+     */
+    case 'SET_TABLE_FORMAT': {
+      // ready 限定(編集中の裏書換を作らない)。未知 lid は no-op
+      if (state.phase !== 'ready') return { state, events: [] };
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta) return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_BODY_REWRITE',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            rewrite: { kind: 'table-format', line: action.line, to: action.to },
           },
         ],
       };

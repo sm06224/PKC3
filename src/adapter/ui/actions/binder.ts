@@ -25,6 +25,7 @@ import {
   toggleHeadingFold,
 } from '../render/heading-fold';
 import { blockSpanAt, sliceLines } from '@features/markdown/source-blocks';
+import { tableAt, tableConvertRefusal, type TableFormat } from '@features/markdown/table-convert';
 import { isPlaceOpen } from '@features/markdown/place-notation';
 import { insertionBlocked } from '@features/markdown/line-move';
 import {
@@ -163,6 +164,7 @@ import {
   menuShortcutFor,
   NOTE_TOOL_ACTIONS,
   noteToolActions,
+  tableMenuActions,
   withTrailingLast,
 } from '@features/entry-actions';
 import {
@@ -1120,6 +1122,13 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   // ⚠ 行・列の足し引きも同じ `REQUEST_BODY_REWRITE` を撃つ(#418 段①)
   'shape-cell',
   /**
+   * 🔴 **表の形を変えるのも本文を書く**(#708 段②)── 同じ `REQUEST_BODY_REWRITE` を
+   *   撃つので、同じ門をくぐらせる。⚠ 書き換えるのは**表の行範囲まるごと**なので、
+   *   取込・書出しの総入れ替えの裏で走らせるといちばん読めない食い違いになる。
+   */
+  'table-to-markdown',
+  'table-to-csv',
+  /**
    * 🔴 **今日のノートは「作る」ことがある**(#348、2026-08-23)。
    * ⚠ 既に在れば選ぶだけだが、**無ければ `CREATE_ENTRY` を撃つ** ──
    *   取り込みが entry を総入れ替えしている裏で作らせない。
@@ -1648,6 +1657,32 @@ const MENU_BLOCK_ATTR = 'data-pkc-menu-block';
  */
 const MENU_X_ATTR = 'data-pkc-menu-x';
 const MENU_Y_ATTR = 'data-pkc-menu-y';
+/**
+ * 🔴 **右クリックした表の、原文の行番号**(#708 段②)。⚠ `MENU_LINE_ATTR`(見出し)/
+ * `MENU_BLOCK_ATTR`(`:::` の塊)とは**別の名前**で運ぶ ── 表が `:::` の中に在れば
+ * 3 つとも同時に要る(1 つの属性へ載せると、載せた順で片方が消える)。
+ * ⚠ 座標系は**生の body**(frontmatter 込み)── `csv-cell` / `task` と同じ。
+ */
+const MENU_TABLE_ATTR = 'data-pkc-menu-table';
+
+/**
+ * 🔴 **押した所の表が、原文の何行目から始まるか**(#708 段②)。表でなければ `null`。
+ *
+ * 🔑 引くのは**塊(`.pkc-md-block`)に焼かれた行**である ── 表の升から
+ *   `closest('[data-pkc-source-line]')` すると `<tr>` に当たり、**行ごとに違う番号**が
+ *   返る(csv の囲みは `<tr>` に焼いていないので、そちらだけ塊に当たる = 非対称)。
+ *   塊から引けば markdown の表も csv の囲みも**同じ 1 つの引き方**で済む(§7)。
+ * ⚠ 描画の行番号は **frontmatter を剥いだ本文**のものなので、その行数を足して
+ *   生の body の座標へ写す(`place-board.ts` の `lineOffset` と同じ規律)。
+ */
+function tableLineAt(target: Element, body: string | null): number | null {
+  if (body === null) return null;
+  const block = target.closest<HTMLElement>('.pkc-md-block[data-pkc-source-line]');
+  if (block === null) return null;
+  const at = Number(block.getAttribute('data-pkc-source-line'));
+  if (!Number.isInteger(at) || at < 0) return null;
+  return at + frontmatterLineCount(body);
+}
 
 /**
  * 🔴 **メニューを出す前に開いていたノート**(#685 動線レビュー 欠陥 2、2026-09-04)。
@@ -1709,6 +1744,43 @@ function moveStackLink(dispatcher: Dispatcher, target: HTMLElement, dir: 'up' | 
   const lid = lidOfNode(target, st.openBody?.lid ?? st.selectedLid);
   if (lid === null || lid === undefined) return;
   dispatcher.dispatch({ type: 'MOVE_STACK_LINK', lid, line, dir });
+}
+
+/**
+ * 🔴 **表の形を変える受け手の実体**(#708 段②)── 向きだけが違う 2 つを 1 本にする。
+ *
+ * ⚠ **黙って断らない**(user 裁定 2026-09-04)。断る形は 3 つあり、**理由を書き分ける**:
+ *   ①メニューを出した後にノートが替わった(`refuseStaleMenu` が言う)
+ *   ②押した所に表が無くなった(別の窓が本文を動かした)
+ *   ③**式 / 升の中の改行**が在って markdown にできない(`tableConvertRefusal`)。
+ * 🔑 ③の判定は `table-convert.ts` の 1 か所 ── 書く側(`body-rewrite.ts`)も
+ *   **同じ関数**で断るので、画面に出した理由と実際の振る舞いがずれない(§7)。
+ * ⚠ ただし**ここで通しても、書く側でもう一度検める** ── 読んでから書くまでの間に
+ *   別の窓が式を書いていれば、判定できるのはあちらだけである。
+ */
+function setTableFormat(dispatcher: Dispatcher, target: HTMLElement, to: TableFormat): void {
+  const line = menuCarriedAt(target, MENU_TABLE_ATTR);
+  if (line === null || refuseStaleMenu(dispatcher, target)) return;
+  const st = dispatcher.getState();
+  if (st.phase !== 'ready') {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから表の形を変えてください' });
+    return;
+  }
+  const ob = st.openBody;
+  const at = ob === null ? null : tableAt(ob.body, line);
+  if (ob === null || at === null) {
+    dispatcher.dispatch({
+      type: 'OP_FAILED',
+      error: '表の範囲を読めませんでした(本文を開き直してください)',
+    });
+    return;
+  }
+  const why = tableConvertRefusal(at, to);
+  if (why !== null) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: why });
+    return;
+  }
+  dispatcher.dispatch({ type: 'SET_TABLE_FORMAT', lid: ob.lid, line, to });
 }
 
 function menuCarriedLine(target: Element): number | null {
@@ -5063,6 +5135,15 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (ob === null) return;
     dispatcher.dispatch({ type: 'RAISE_PLACE', lid: ob.lid, line: line + frontmatterLineCount(ob.body) });
   },
+  /**
+   * 🔴 **右クリックした表の形を変える**(#708 段②。user 裁定 2026-09-04)。
+   *
+   * 🔑 **向きだけが違う 2 つを 1 本にする**(`moveStackLink` と同じ作法 ── §7)。
+   * ⚠ 何をするかの判断は `table-convert.ts` / `body-rewrite.ts` ── ここは
+   *   **押した所の行を渡し、断る理由が在れば画面に出す**だけである。
+   */
+  'table-to-markdown': (dispatcher, target) => setTableFormat(dispatcher, target, 'markdown'),
+  'table-to-csv': (dispatcher, target) => setTableFormat(dispatcher, target, 'csv'),
   'remove-place': (dispatcher, target, _services, root) => {
     const line = menuCarriedBlock(target);
     if (line === null || refuseStaleMenu(dispatcher, target)) return;
@@ -8361,6 +8442,18 @@ export function bindActions(
        */
       const block =
         host === null || ob === null ? null : directiveBlockAt(host, target, bodyBelowFrontmatter(ob.body));
+      /**
+       * 🔴 **表の上なら「形を変える」を足す**(#708 段②)。
+       *
+       * 🔑 **どの表かは押した塊から引く** ── 描画が塊へ焼いた `data-pkc-source-line`
+       *   (markdown の表なら見出しの行、csv なら囲みの柵の行)に frontmatter の行数を
+       *   足せば**原文の行番号**になる(`place-board.ts` の `lineOffset` と同じ規律)。
+       * ⚠ **形を決めるのは原文の側**(`tableAt`)── DOM の class で見分けると、
+       *   書き換える側(`body-rewrite.ts`)と**別の答えを持つ口が 2 つ**になる(§7)。
+       * ⚠ 表でなければ 1 つも足さない(押しても何も起きない口を作らない)。
+       */
+      const tableLine = tableLineAt(target, ob?.body ?? null);
+      const table = tableLine === null || ob === null ? null : tableAt(ob.body, tableLine);
       const items = [
         ...(heading === null || line === null
           ? []
@@ -8373,6 +8466,17 @@ export function bindActions(
               // 🔴 近道の字を右に添える(#587 C 案 2)── 見出しの項目だけ(塊 / 板 / 本文には無い)
             }).map(withShortcut)),
         ...(block === null ? [] : blockMenuActions({ board: block.board })),
+        /**
+         * 🔴 **表の形を変える**(#708 段②)。⚠ 行番号は**この項目にだけ**載せる
+         *   (`attrs`)── `carry` に混ぜると、表と関係の無い項目まで同じ属性を持ち、
+         *   受け手が取り違える(`context-menu.ts` の `attrs` の註記)。
+         */
+        ...(table === null || tableLine === null
+          ? []
+          : tableMenuActions({ from: table.format }).map((a) => ({
+              ...a,
+              attrs: { [MENU_TABLE_ATTR]: String(tableLine) },
+            }))),
         // 🔴 板を置く口は**いつも**出す(#676)── 押した座標は下の carry が運ぶ
         ADD_PLACE_ACTION,
         ...body,

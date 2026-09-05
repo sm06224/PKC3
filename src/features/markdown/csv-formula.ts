@@ -58,6 +58,20 @@ export function displayCell(
   return evaluateFormula(cell, rows);
 }
 
+/**
+ * 🔴 **字を「字のまま」の升にする**(#708 段②)── {@link displayCell} の逆。
+ *
+ * ⚠ markdown の表に `=B2*C2` と書いていた人がその表を csv の表に変えると、
+ *   その升は**式として評価されて数字になる** ── 打った字が画面から消える。
+ * 🔑 逃がし方は表計算と同じ `'` の作法(この file の冒頭の裁定)── `displayCell` が
+ *   剥がすので、**画面に出る字は 1 文字も変わらない**。
+ * ⚠ `'` で始まる字も逃がす ── 逃がさないと `'abc` が `abc` に見える
+ *   (剥がす側は「式ではない字」かどうかを見ていない)。
+ */
+export function csvLiteralCell(text: string): string {
+  return text.startsWith('=') || text.startsWith("'") ? `'${text}` : text;
+}
+
 type Value = number | string | boolean;
 
 class Fail extends Error {

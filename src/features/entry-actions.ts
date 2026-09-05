@@ -525,6 +525,36 @@ export function blockMenuActions(ctx: { readonly board: boolean }): readonly Ent
 export const ADD_PLACE_ACTION: EntryAction = { action: 'add-place', label: 'ここに板を置く' };
 
 /**
+ * 🔴 **右クリックした表の形を変える**(#708 段②。user 裁定 2026-09-04)。
+ *
+ * > user の物語(#708): 表を書いたあとで「これは升を押して打ちたい」と思っても、
+ * > markdown の `| a | b |` を csv の囲みに書き直す道が無かった(逆も同じ)。
+ *
+ * ⚠ **出るのは 1 つだけ** ── いまの形の**反対側**を出す(いまが markdown なら
+ *   「CSV の表にする」)。両方出すと、片方は押しても何も起きない口になる。
+ * ⚠ `BODY_MENU_ACTIONS` には入れない ── あちらは「読んでいる見え方を変える」物の表で、
+ *   これは**本文を書き換える**(`ADD_PLACE_ACTION` と同じ側)。
+ * 🔑 字は**画面で何が起きるか**で書く(user 指示 2026-08-21)── 内部の名前
+ *   (`csv fence`)を出さない。
+ */
+export function tableMenuActions(
+  ctx: { readonly from: 'markdown' | 'csv' },
+): readonly (EntryAction & { readonly hint: string })[] {
+  /**
+   * ⚠ **綴りと字を対で書く**(`action: 'x'` の形)── 計器
+   *   (`scripts/action-outlets.mjs`)は**その形**で「どの画面から押せるか」を数える。
+   *   ⚠ 組み立てて渡すと **「出口を静的に追えない」側**へ落ち、
+   *   `tests/action-outlets.test.ts` の等値 pin に載せる羽目になる(実際 1 度落ちた)。
+   */
+  const item: EntryAction =
+    ctx.from === 'markdown'
+      ? { action: 'table-to-csv', label: 'CSV の表にする' }
+      : { action: 'table-to-markdown', label: 'Markdown の表にする' };
+  // ⚠ 説明の出どころは `ENTRY_ACTION_HINTS` 1 か所(`bodyMenuActions` と同じ引き方)
+  return [{ ...item, hint: ENTRY_ACTION_HINTS[item.action] ?? '' }];
+}
+
+/**
  * 🔴 **見出し・本文のメニューの項目に添える近道**(#587 改善 C 案 2)。
  *
  * ⚠ 行のメニューの 9 項目は説明欄(C-3)を持つが、見出しの 3 項目・本文の項目には何も
@@ -644,6 +674,13 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
   //    **同じ名前で逆の操作**(選んだ物をゴミ箱へ入れる)が在る。
   //    🔑 字はマニュアル §6「左の列の **フォルダ** タブの中」に揃える。
   'delete-entry': 'ゴミ箱へ移します(左の列の「フォルダ」タブの中のゴミ箱から戻せます)',
+  /**
+   * 🔴 **表の形を変える 2 つ**(#708 段②)。⚠ **何が変わるか**を書く ──
+   *   csv の表は升を押して打てるが、markdown の表は本文の字をそのまま読める。
+   *   どちらが欲しいかは user が決めるので、**得る物**を 1 つずつ言う。
+   */
+  'table-to-csv': 'この表を升ごと押して打てる形にします(本文は csv の囲みになります)',
+  'table-to-markdown': 'この表を Markdown の表(| … |)にします。式は入れられません',
   // 🔴 **左の列の行からの整理 3 つ**(#215)。⚠ どれも**画面で起きること**で書く
   //    (user 指示 2026-08-21)── 「改名モードへ遷移」ではなく「入力欄が出る」
   'rename-entry-begin': '行の題名の所に入力欄が出ます。Enter で確定、Esc でやめます',
