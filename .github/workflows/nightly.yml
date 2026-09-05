@@ -127,19 +127,10 @@ jobs:
         env:
           PKC3_CHROMIUM: ${{ steps.pw.outputs.path }}
         run: npm run test:smoke
-      # 🔴 **重い検査は夜だけ**(#528、2026-08-29)。マニュアルは 22 種を
-      #    「そのまま書けます」と言うのに、焼けることを見ていたのは 5 種だけだった。
-      #    ⚠ 22 枚を焼くのは重いので PR gate には入れない(smoke lane は 2026-08-28 に
-      #    10 分の門へ実際にぶつかっている)。**名前が揃っているか**は unit が PR gate で見る。
-      # ⚠ **ここは headless_shell のまま**(`PKC3_CHROMIUM` を渡していない)──
-      #    #695 で job を割ったとき置き場としてここへ入れただけで、**何で焼いているかは
-      #    変えていない**(変えれば別の主張になる)。だから step の名前に書いておく。
-      - name: 図の全数 ── マニュアルの 22 種が焼けるか (headless_shell)
-        id: smoke_diagrams_all
-        if: ${{ !cancelled() && steps.setup_ok.outputs.ok == '1' }}
-        env:
-          PKC3_HEAVY: '1'
-        run: npm run test:smoke -- tests/smoke/mermaid-all.smoke.spec.ts
+      # 🔴 **図の全数(22 種)は 2026-09-05 から PR gate で走る** ── ここに別 step を
+      #    置かない。⚠ 置くと**同じ検査を夜に 2 度**走らせることになる(上の
+      #    「フル chromium」の step が全量を回すので、この spec もそこに入っている)。
+      #    実測の根拠と経緯は `tests/smoke/mermaid-all.smoke.spec.ts` の冒頭に在る。
 
   # 🔴 product bundle は **PR gate が一度もビルドしない別成果物**である
   # (`BUILD_KIND` が焼き込まれるので entry chunk の中身も content hash も
