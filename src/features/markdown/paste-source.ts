@@ -82,7 +82,7 @@ export function isPasteSource(v: string): v is PasteSource {
 }
 
 /** 実際に使った形。 */
-export type PasteUsed = 'permalink' | 'html' | 'html-fence' | 'rtf' | 'plain';
+export type PasteUsed = 'permalink' | 'html' | 'html-fence' | 'rtf' | 'plain-table' | 'plain';
 
 /** 見送った形と、その理由(⚠ **デバッグの本体**はここである)。 */
 export interface PasteSkip {
@@ -105,6 +105,7 @@ const LABEL: Record<PasteUsed, string> = {
   html: 'ウェブページの形',
   'html-fence': 'ウェブページの形(html のコードブロック)',
   rtf: 'リッチテキスト',
+  'plain-table': 'タブ区切りの表',
   plain: 'そのままの文字',
 };
 
@@ -135,6 +136,15 @@ export interface PasteConverters {
   /** 🔴 変換せず ` ```html ` の囲みにする(user 要望 2026-08-27)。 */
   readonly htmlFence: () => string | null;
   readonly rtf: () => string | null;
+  /**
+   * 🔴 **タブ区切りの平文を表の囲みにする**(#708 段③)。
+   *
+   * ⚠ **いちばん最後の手**である ── HTML も RTF も使えなかったときだけ試す。
+   *   Excel / Google スプレッドシートは `text/html` に `<table>` を載せるので、
+   *   そちらが先に当たる(こちらが要るのは**平文しか届かない出し手**である ──
+   *   端末・`.tsv` の中身・チャットのコードブロック)。
+   */
+  readonly plainTable: () => string | null;
 }
 
 /**
@@ -209,5 +219,18 @@ export function choosePaste(args: {
     if (text !== null) return done(kind, text);
     skipped.push({ kind, why: '変換しても得るものがありませんでした' });
   }
+
+  /**
+   * 🔴 **最後の手 ── タブ区切りの平文なら表にする**(#708 段③)。
+   *
+   * ⚠ **ここより上では試さない** ── HTML / RTF のほうが必ず忠実なので、
+   *   先に当てると Excel からの貼付を**わざわざ粗い形へ落とす**ことになる。
+   * ⚠ 設定「変換しない」(`plain`)では**ここまで来ない**(上で返している)──
+   *   来ると**設定の字が嘘になる**。
+   * ⚠ 「ウェブページの形をそのまま」(`html-fence`)でも来ない ── あちらは
+   *   「**そのまま残す**」を選んだ設定なので、こちらが勝手に組み立てない。
+   */
+  const table = convert.plainTable();
+  if (table !== null) return done('plain-table', table);
   return done('plain', null);
 }

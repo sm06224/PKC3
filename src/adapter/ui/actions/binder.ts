@@ -25,7 +25,12 @@ import {
   toggleHeadingFold,
 } from '../render/heading-fold';
 import { blockSpanAt, sliceLines } from '@features/markdown/source-blocks';
-import { tableAt, tableConvertRefusal, type TableFormat } from '@features/markdown/table-convert';
+import {
+  tableAt,
+  tableConvertRefusal,
+  tsvFenceFromPlain,
+  type TableFormat,
+} from '@features/markdown/table-convert';
 import { isPlaceOpen } from '@features/markdown/place-notation';
 import { insertionBlocked } from '@features/markdown/line-move';
 import {
@@ -7448,6 +7453,11 @@ export function bindActions(
         /** ⚠ 変換せず囲みにする(設定「ウェブページの形をそのまま」)。 */
         htmlFence: () => pastedHtmlFence(html),
         rtf: () => convertPastedRtf({ rtf, plain }),
+        /**
+         * ⚠ **最後の手**(#708 段③)── HTML も RTF も使えなかったときだけ、
+         *   タブ区切りの平文を表の囲みにする。判定は `table-convert.ts` の 1 か所。
+         */
+        plainTable: () => tsvFenceFromPlain(plain),
       },
     });
     /**

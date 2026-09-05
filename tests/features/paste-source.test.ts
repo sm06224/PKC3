@@ -35,6 +35,8 @@ function run(
     source,
     sizes,
     convert: {
+      /** ⚠ ここでは試さない ── 段③ の検査は `paste-plain-table.test.ts` が持つ。 */
+      plainTable: () => null,
       permalink: () => {
         called.push('permalink');
         return have.permalink ?? null;

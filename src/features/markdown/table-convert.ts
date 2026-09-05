@@ -329,7 +329,7 @@ export function tableConvertRefusal(at: TableAt, to: TableFormat): string | null
 }
 
 /** 柵の長さ。⚠ 升の字が ``` で始まると囲みが**そこで閉じる**ので、必ず 1 本長くする。 */
-function fenceMarkerFor(content: string): string {
+export function fenceMarkerFor(content: string): string {
   let longest = 0;
   for (const l of content.split('\n')) {
     const m = /^\s*(`+)/.exec(l);
@@ -359,4 +359,47 @@ export function convertTable(at: TableAt, to: TableFormat): string | null {
   const marker = fenceMarkerFor(body);
   // ⚠ 見出しの無い表は `noheader` を宣言する ── 宣言しないと 1 行目が見出しに化ける
   return `${marker}csv${at.rows[0]!.head ? '' : ' noheader'}\n${body}\n${marker}`;
+}
+
+/**
+ * 🔴 **タブ区切りの平文を、表の囲みにする**(#708 段③)。
+ *
+ * > user の物語(#708): 表を「いろんなところで楽」に行き来させたい。
+ *
+ * ## ⚠ 「Excel から貼ると表にならない」は**誤りだった**(2026-09-05 の検算)
+ *
+ * Excel / Google スプレッドシートは `text/html` に `<table>` を載せるので、
+ * 既定の設定なら**いまでも markdown の表になる**(`convertPastedHtml` →
+ * `gfmTable`)。残っていた穴は**タブ区切りの平文しか届かないとき**である ──
+ * 端末・`.tsv` の中身・チャットのコードブロックからのコピーがそれに当たる。
+ *
+ * ## 🔑 表と決めてよい条件は 3 つ全部そろったときだけ
+ *
+ * ⚠ ここは**貼ったものを勝手に組み替える**側なので、迷ったら**組まない**
+ *   (誤って組むと user の字が囲みの中へ入り、消したように見える)。
+ *
+ * | 条件 | なぜ |
+ * |---|---|
+ * | **2 行以上** | 1 行だけの「a\tb」は表ではなく、字下げや飾りのことがある |
+ * | **どの行もタブの数が同じ** | 表なら列数は揃う ── 揃わないなら、ただタブが混ざった文である |
+ * | **タブが 1 つ以上** | 0 個は普通の文章 |
+ *
+ * ⚠ **末尾の空行は数えない**(コピーの最後に改行が付くのは普通である)。
+ * ⚠ 中の空行は**数える** ── 空行が混ざる時点で「どの行も同じ列数」が崩れるので、
+ *   自然に組まない側へ倒れる。
+ *
+ * @returns 囲みの字。表と決められなければ `null`
+ */
+export function tsvFenceFromPlain(plain: string): string | null {
+  const lines = plain.replace(/\r\n?/g, '\n').split('\n');
+  // ⚠ 末尾の空行だけ落とす(先頭・途中の空行は残して判定に効かせる)
+  while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+  if (lines.length < 2) return null;
+  const tabs = (l: string): number => l.split('\t').length - 1;
+  const n = tabs(lines[0]!);
+  if (n < 1) return null;
+  if (!lines.every((l) => tabs(l) === n)) return null;
+  const body = lines.join('\n');
+  const marker = fenceMarkerFor(body);
+  return `${marker}tsv\n${body}\n${marker}`;
 }
