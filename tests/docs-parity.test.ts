@@ -1233,6 +1233,7 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    'Office で書いたマクロが、ウィンドウを閉じても残るようになりました',
     '書式バーの「図」を押すと、5 種類の図から選べるようになりました',
     '「ここに追記する」で開いた追記欄は、送ると元どおり畳まれるようになりました',
     // ⚠ 上限 10 を超えたので 2026-09-05 に落とした(原本は CHANGELOG)
