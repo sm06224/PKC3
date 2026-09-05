@@ -26,7 +26,8 @@ const ENTITIES: Readonly<Record<string, string>> = {
   gt: '>',
   quot: '"',
   apos: "'",
-  nbsp: ' ',
+  // ⚠ **escape で書く**(2026-09-05)── 生で置くと普通の空白と見分けが付かない
+  nbsp: '\u00a0',
 };
 
 /**

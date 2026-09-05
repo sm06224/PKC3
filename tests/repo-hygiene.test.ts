@@ -148,6 +148,65 @@ describe('リポジトリ衛生', () => {
   });
 
   /**
+   * 🔴 **見えない字の生バイトも止める**(2026-09-05、#708 段①の実装で踏んだ)。
+   *
+   * ⚠ 上の検査は **`U+0000`〜`U+001F` と `U+007F`** しか見ない ── ところが
+   *   編集ツールは `'\uFEFF'` と書いたつもりで**生バイト(EF BB BF)を埋める**ことがあり、
+   *   **U+FEFF は制御文字の範囲外**なので素通りした(`od -c` で見るまで気づけない)。
+   * 🔑 だから**見えない字**を名指しで足す ── どれも「あるのに見えない」ので、
+   *   混ざると**次に触る人が消したことに気づけない**(CLAUDE.md §9 の見えない字版)。
+   *
+   * | 字 | なぜ危ないか |
+   * |---|---|
+   * | `U+FEFF` | BOM / 幅ゼロの非改行空白。file の頭に付くと JSON の parse まで壊す |
+   * | `U+200B`〜`U+200D` | 幅ゼロ。識別子や文字列の中で**目に見えない差**を作る |
+   * | `U+2060` | 単語結合子(幅ゼロ) |
+   * | `U+00A0` | 改行しない空白。**普通の空白に見える**のに一致しない |
+   *
+   * ⚠ **`docs` は見ない** ── 散文には非改行空白を意図して置くことがありうるし、
+   *   壊れるのはコードのほうである(範囲を広げすぎると「衛生の赤」が日常になる)。
+   */
+  it('🔴 ソースに見えない字の生バイトが無い(BOM / 幅ゼロ / 非改行空白)', () => {
+    /** 名前つきで持つ ── 落ちたときに「何の字か」が読める。 */
+    const INVISIBLE: readonly [number, string][] = [
+      [0xfeff, 'BOM / 幅ゼロの非改行空白'],
+      [0x200b, '幅ゼロ空白'],
+      [0x200c, '幅ゼロ非結合子'],
+      [0x200d, '幅ゼロ結合子'],
+      [0x2060, '単語結合子'],
+      [0x00a0, '改行しない空白'],
+    ];
+    const named = new Map(INVISIBLE);
+    const offenders: string[] = [];
+    for (const f of [
+      ...textFiles('src'),
+      ...textFiles('tests'),
+      ...textFiles('scripts'),
+      ...textFiles('build'),
+    ]) {
+      let text: string;
+      try {
+        text = readFileSync(f, 'utf-8');
+      } catch {
+        continue;
+      }
+      for (let i = 0; i < text.length; i++) {
+        const c = text.charCodeAt(i);
+        const why = named.get(c);
+        if (why === undefined) continue;
+        const line = text.slice(0, i).split('\n').length;
+        offenders.push(`${f}:${line} = U+${c.toString(16).toUpperCase()}(${why})`);
+        break;
+      }
+    }
+    /**
+     * ⚠ **書けるのは escape だけ**(`'\uFEFF'`)── 生で置くと、次に触る人には
+     *   何も見えない。落ちたら `od -c <file> | grep -n 357\ 273\ 277` で位置が出る。
+     */
+    expect(offenders).toEqual([]);
+  });
+
+  /**
    * 🔴 **`data-pkc-action` を書いたのに受け手が無い = 無言の dead click**
    * (2026-08-08、P11 で 3 つ足したときに機械化した)。
    *
