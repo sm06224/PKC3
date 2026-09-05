@@ -58,7 +58,8 @@ describe('prelude を挿す場所', () => {
   });
 
   it('BOM・空白・コメントが前にあっても doctype を見つける', () => {
-    const out = insertPrelude('﻿\n<!-- c -->\n<!DOCTYPE HTML>\n<html>', '<P>');
+    // ⚠ BOM は **escape で書く**(2026-09-05)── 生で置くと、次に触る人に見えない
+    const out = insertPrelude('\uFEFF\n<!-- c -->\n<!DOCTYPE HTML>\n<html>', '<P>');
     expect(out).toContain('<!DOCTYPE HTML><P>');
     expect(out.indexOf('<P>')).toBeGreaterThan(out.indexOf('<!DOCTYPE HTML>'));
   });
