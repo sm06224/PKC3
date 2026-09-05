@@ -412,7 +412,8 @@ describe('main.ts の配線(原文 pin ── #174)', () => {
    *   `nextViewMode` は**退避先**(窓が塞がれたときだけ通る中央の面)に残っている。
    */
   it('🔴 組み込みタイルの押下が別窓へ行く(中央の面を占有しない)', () => {
-    const opens = [...MAIN.matchAll(/openView: \(view\) => void openViewTile\(/g)].length;
+    // ⚠ #680 で引数が増えて `=>` の後で折り返した ── 空白と改行を跨いで数える
+    const opens = [...MAIN.matchAll(/openView: \(view\) =>\s*void openViewTile\(/g)].length;
     expect(opens, 'タイルが別窓へ行っていない(中央の面を占有する)').toBe(2);
     /**
      * 🔴 **退避は「開く」であってトグルではない**(着地前レビュー 1、2026-08-22)。
@@ -428,7 +429,8 @@ describe('main.ts の配線(原文 pin ── #174)', () => {
      */
     expect(
       // ⚠ #673 段②: 退避は `openViewHere`(予定表は左の「予定」タブへ、他は中央の面へ)
-      MAIN.includes('openInPane: (v) => openViewHere(dispatcher, v, openBrowse)'),
+      // ⚠ #680: 探す面の退避先(左の欄へ焦点)も同じ 1 か所へ渡す
+      MAIN.includes('openInPane: (v) => openViewHere(dispatcher, v, openBrowse, focusSearch)'),
       '退避が「開く」になっていない',
     ).toBe(true);
     expect(

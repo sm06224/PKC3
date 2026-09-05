@@ -26,10 +26,24 @@ import {
 } from '../render/heading-fold';
 import { blockSpanAt, sliceLines } from '@features/markdown/source-blocks';
 import { isPlaceOpen } from '@features/markdown/place-notation';
+import { insertionBlocked } from '@features/markdown/line-move';
+import {
+  BLOCK_END_ATTR,
+  BLOCK_GRIP_FIELD,
+  BLOCK_LID_ATTR,
+  BLOCK_START_ATTR,
+  grippedBlock,
+} from '../render/block-grip';
 import { quoteOnEnter } from '@features/markdown/quote-assist';
 import { renumberLists } from '@features/markdown/list-renumber';
 import { stripDialect } from '@features/markdown/strip-dialect';
-import { isViewMode, nextViewMode, type AppState, type ViewMode } from '@adapter/state/app-state';
+import {
+  isViewMode,
+  nextViewMode,
+  screenBodyOf,
+  type AppState,
+  type ViewMode,
+} from '@adapter/state/app-state';
 import type { EntryMeta } from '@core/model/entry-meta';
 import {
   filerRows,
@@ -69,9 +83,11 @@ import {
   entryPickRows,
   entryPickTotal,
 } from '@features/entry-ref/entry-pick';
-import { formatEntryLink } from '@features/entry-ref/entry-ref-format';
+import { formatEntryLink, formatSectionLink } from '@features/entry-ref/entry-ref-format';
+import { knownSplitLids } from '@features/split-frames';
+import { STACK_ARCHETYPE, stackBody } from '@features/flavor/stack-flavor';
 import { insertionForLineDate } from '@features/schedule/line-date';
-import { addDays, daysBetween } from '@features/datetime/date-math';
+import { addDays, dayStamp, daysBetween } from '@features/datetime/date-math';
 import {
   DATE_SHORTCUTS,
   isDateShortcut,
@@ -116,7 +132,13 @@ import { splitTags } from '@features/flavor/tags';
 import { isEntrySort, NATURAL_DESC } from '@features/filter/entry-sort';
 import { COLUMN_PANES, isPaneId } from '@features/pane-visibility';
 import { STRUCTURAL, isRelationKind } from '@features/relation/kinds';
-import { canEnterScope, getAncestorFolders } from '@features/relation/tree';
+import {
+  canEnterScope,
+  getAncestorFolders,
+  listMoveTargets,
+  listSiblings,
+} from '@features/relation/tree';
+import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
 import { planCopy } from '@features/relation/copy-plan';
 import {
   otherSide,
@@ -144,6 +166,7 @@ import {
   withTrailingLast,
 } from '@features/entry-actions';
 import {
+  type MenuItem,
   closeContextMenu,
   contextMenuOpen,
   openContextMenu,
@@ -183,6 +206,7 @@ import {
   pickEntryInApp,
   pickSnippetInApp,
   pickDiagramInApp,
+  promptInApp,
   isAppDialogOpen,
   type ConfirmOptions,
 } from '@adapter/ui/render/app-dialog';
@@ -384,6 +408,47 @@ const moveEntries = (
       : (dispatcher.getState().entryMetas.get(parentLid)?.title ?? 'フォルダ');
   report?.(`${moved + same} 件を「${where}」へ入れました`);
 };
+
+/**
+ * 🔴 **作って、そのまま編集に入る ── 実体は 1 本**(#215)。
+ *
+ * ⚠ `create-entry`(左の列の「+ ノート」)と `create-in-folder`(行の右クリック)が
+ *   **同じ経路**を通る ── 別々に書くと、面の切替・編集権の取り方が片方だけ古くなる(§7)。
+ * ⚠ 非 detail view で作ると editor が出ない(PKC2 PR-Δ19 の罠)── 先に切替。
+ * ⚠ #177: 作成 → 即編集の編集権。lid は今生まれたばかりなので必ず取れる ──
+ *   「取れてから入る」順に直すと user gesture の同期性を失うだけで守るものが無い。
+ *   別タブは 'changed' でこの lid を知るため、登録が先に着けばよい。
+ */
+const createAndEdit = (
+  dispatcher: Dispatcher,
+  services: BinderServices,
+  archetype: string,
+  parentLid: string | null,
+): void => {
+  if (dispatcher.getState().viewMode !== 'detail')
+    dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
+  const lid = generateLid();
+  dispatcher.dispatch({
+    type: 'CREATE_ENTRY',
+    archetype,
+    lid,
+    title: defaultTitle(dispatcher, archetype),
+    parentLid,
+    relationId: generateLid(),
+  });
+  if (dispatcher.getState().phase === 'editing') void services.acquireEditLock?.(lid);
+};
+
+/**
+ * 押した物の行の lid。無ければ**いま選んでいるノート**(#215)。
+ *
+ * ⚠ 右クリックのメニューのボタンは行の中に居ない(器は root の直下)が、行のメニューは
+ *   開く前に `selectEntryOrExplain` でその行を選んでいるので `selectedLid` が押した行である。
+ *   情報ペインのボタンも同じ規則(選んでいるノートに効く)。
+ * ⚠ 鍵(`runFilerKey`)は焦点の行を target として渡すので、こちらは行から取れる。
+ */
+const rowLidOrSelected = (st: AppState, target: HTMLElement): string | null =>
+  target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? st.selectedLid;
 
 /** UI サービス面(storage 依存の操作は main が実体を注入。test は fake)。 */
 export interface BinderServices {
@@ -795,7 +860,8 @@ function cancelFromEditor(dispatcher: Dispatcher, root: HTMLElement): void {
  *
  * 🔴 **root から引く**(P8 段⑲。押したボタンから `closest` で辿らない)。
  * 直す前は `from.closest('[data-pkc-region="detail"]')` だったが、
- * 追記欄(`append` region)の **保存して解放 / 編集を破棄** は detail の
+ * 追記欄(`append` region)の **保存 / キャンセル**(#716 まで「保存して解放 /
+ * 編集を破棄」)は detail の
  * **兄弟**なので `closest` が null を返し、題名欄が 1 度も見つからなかった
  * ── その出口から保存すると**題名の変更が丸ごと捨てられて**いた。
  * 同じ「保存」なのに押す場所で結果が違う、という壊れ方である。
@@ -896,6 +962,20 @@ function writeBack(
  *   (CLAUDE.md §7。左の列と 2 ペインで `deleteFrom` を 1 本にしたのと同じ理由)。
  * ⚠ 通すのは `run` ── 書出し中などの門(`refuseWhileBusy`)も一緒に通す。
  */
+/**
+ * 🔴 **左の列(フォルダの表)の鍵 → 押しボタンの口**(#215)。
+ *
+ * 🔑 2 ペインの `DUAL_KEY_ACTION` と同じ作法 ── `F2` と右クリックの「名前を変える」は
+ *   **同じ受け手**を通す(断り方・欄の出し方が鍵とメニューで割れない)。
+ * ⚠ 鍵は 2 ペインの同じ操作と揃えてある(`F2` 改名 / `F6` 移す / `Shift+F4` 作る)──
+ *   同じ操作は同じ鍵(`keymap.ts` の注記)。
+ */
+const FILER_KEY_ACTION: Readonly<Record<string, string>> = {
+  'filer-rename': 'rename-entry-begin',
+  'filer-move': 'move-to-folder',
+  'filer-new-in-folder': 'create-in-folder',
+};
+
 const DUAL_KEY_ACTION: Readonly<Record<string, string>> = {
   'dual-copy-to-other': 'dual-copy',
   'dual-move-to-other': 'dual-move',
@@ -978,6 +1058,9 @@ const TAG_INPUT_ADD: ReadonlyMap<string, string> = new Map([
 
 const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'start-edit',
+  // 🔑 **行の右クリックからフォルダの中に作る**(#215)── `create-entry` と同じ
+  //    `CREATE_ENTRY` を撃つので、同じ門をくぐらせる
+  'create-in-folder',
   // 🔑 **右クリックから入る編集も同じ門**(#426 段②。着地前レビュー 🔴1)──
   //    載せ忘れると「取り込み中は帯からは断られ、メニューからは通る」になる
   'edit-from-heading',
@@ -1003,6 +1086,14 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'apply-plan',
   // ⚠ 追記と**同じ経路**(`REQUEST_BODY_REWRITE`)を撃つので、同じ門をくぐらせる
   'undo-append',
+  // ⚠ 塊の移動の「元に戻す」も同じ経路(#684 段①)
+  'undo-move',
+  // 🔑 スタックの保存はノートを 1 件**作る**(`CREATE_ENTRY`。#633 段③)── 取込・書出しの
+  //    最中に entry を足すと、総入れ替えの裏で 1 件増える形になるので同じ門をくぐらせる
+  'stack-save',
+  // 🔑 入れ物の中の並べ替えは本文を書く(`REQUEST_BODY_REWRITE`。#633 段④)
+  'stack-link-up',
+  'stack-link-down',
   /**
    * 🔴 **外部の画像を取り込むのも本文を書く**(#264 段①)── 同じ
    *   `REQUEST_BODY_REWRITE` を撃つので、同じ門をくぐらせる。
@@ -1232,7 +1323,7 @@ function moveOrder(
  * `SELECT_ENTRY` は編集中 / error / 未知 lid で**黙って何もしない**ので、
  * 素直に撃つと「押しても無言」が残る(直そうとしている当のものになる)。
  */
-function navigateToLink(dispatcher: Dispatcher, raw: string | null): void {
+function navigateToLink(dispatcher: Dispatcher, target: HTMLElement, raw: string | null): void {
   const t = parseLinkTarget(raw ?? '');
   if (t.kind === 'invalid') {
     dispatcher.dispatch({ type: 'OP_FAILED', error: 'リンクの書き方が読めません' });
@@ -1246,6 +1337,22 @@ function navigateToLink(dispatcher: Dispatcher, raw: string | null): void {
     return;
   }
   if (!selectEntryOrExplain(dispatcher, t.lid, 'リンク先のノート')) return;
+  /**
+   * 🔴 **`#h/<見出しの id>` が付いていれば、開いた後にその見出しへ飛ぶ**(#579)。
+   *
+   * 🔑 飛ぶ機構は目次と**同じ 1 本**(`tocJump`)── 描き直しを待って id で探し、畳んで
+   *   いれば開いてから送る。判定を 2 か所に生やさない(§7)。
+   * ⚠ 見出しが無ければ理由を出す(見出しの字を変えると id も変わる ── ノートは開けている
+   *   ので、user は本文の中で探し直せる)。
+   */
+  if (t.section !== null) {
+    void tocJump(
+      dispatcher,
+      target,
+      t.section,
+      '見出しが見つかりません(見出しの字が変わったのかもしれません)',
+    );
+  }
 }
 
 /**
@@ -1592,6 +1699,17 @@ function refuseStaleMenu(dispatcher: Dispatcher, target: Element): boolean {
   return true;
 }
 
+/** 「上へ / 下へ」の受け手の実体(向きだけが違う 2 つを 1 本にする ── §7)。 */
+function moveStackLink(dispatcher: Dispatcher, target: HTMLElement, dir: 'up' | 'down'): void {
+  const raw = target.getAttribute('data-pkc-line');
+  const line = Number(raw);
+  if (raw === null || !Number.isInteger(line) || line < 0) return;
+  const st = dispatcher.getState();
+  const lid = lidOfNode(target, st.openBody?.lid ?? st.selectedLid);
+  if (lid === null || lid === undefined) return;
+  dispatcher.dispatch({ type: 'MOVE_STACK_LINK', lid, line, dir });
+}
+
 function menuCarriedLine(target: Element): number | null {
   return menuCarriedAt(target, MENU_LINE_ATTR);
 }
@@ -1719,7 +1837,7 @@ function pickAppendTarget(dispatcher: Dispatcher, root: HTMLElement, line: numbe
       type: 'OP_FAILED',
       error:
         mode.kind === 'editing'
-          ? '編集中は追記欄を使えません(保存するか、編集を破棄すると入り先を選べます)'
+          ? '編集中は追記欄を使えません(保存するか、キャンセルすると入り先を選べます)'
           : '追記を書き込んでいる間は、入り先を変えられません',
     });
     return;
@@ -1841,6 +1959,61 @@ function refoldAppendAfterAction(root: HTMLElement, pressed: Element): void {
   const input = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="append-input"]');
   if (input !== null && input.value !== '') return;
   refoldPeeked(root);
+}
+
+/**
+ * 🔴 **指で触る端末では、チェックリストの行の字を押しても印が変わる**(#706 ①)。
+ *
+ * ## 物語
+ *
+ * スマホで買い物リストを開き、「牛乳」の行を押す。⚠ 直す前は**印の箱(13×13)を
+ * 正確に押さないと何も起きなかった** ── 字を押しても印は変わらず、箱は指より小さい。
+ * 🔑 だから**行の字も押し所にする**(箱そのものは CSS が 20px にする)。
+ *
+ * ⚠ **指の端末だけ**である ── マウスでは字を選ぶ(ドラッグ)の終わりに `click` が来るので、
+ *   行のどこを押しても印が動く形にすると**字が選べなくなる**。判定は `pointerType`
+ *   (Chromium の `click` は `PointerEvent`)、持たないブラウザでは `(pointer: coarse)`。
+ * ⚠ **自分で受ける物には触らない** ── リンク・ボタン・欄・印そのもの・`data-pkc-action` を
+ *   持つ物(かんばんの札など)は、押した先が自分で決める。ここで奪うと「リンクを押したのに
+ *   印が動いた」になる。
+ * ⚠ 印を返すのは**その行の直下の箱**だけ ── 入れ子の子リストの字を押しても親の印は動かさない
+ *   (`closest('li')` が子の `li` を返すので、それが task の行でなければ何もしない)。
+ *
+ * @returns 押すべき印(`toggle-task` を受ける `<input>`)。当たらなければ `null`
+ */
+function touchTaskBoxAt(ev: Event, root: HTMLElement): HTMLInputElement | null {
+  const t = ev.target;
+  if (!(t instanceof Element)) return null;
+  if (t.closest('a, button, input, select, textarea, label, summary, [data-pkc-action]') !== null)
+    return null;
+  const li = t.closest('li');
+  if (li === null || !li.classList.contains('pkc-task-item') || !root.contains(li)) return null;
+  const box = li.querySelector<HTMLInputElement>(
+    '.pkc-task-checkbox[data-pkc-action="toggle-task"]',
+  );
+  if (box === null) return null;
+  // ⚠ 直下(`li > input` か `li > p:first-child > input`)だけ ── 子リストの印を親の行で押さない
+  const parent = box.parentElement;
+  const direct =
+    parent === li || (parent !== null && parent.tagName === 'P' && parent === li.firstElementChild);
+  if (!direct) return null;
+  if (!isTouchClick(ev)) return null;
+  // ⚠ 字を選んでいる最中は数えない(選び終えた瞬間の `click` で印が動くと、選び直せない)
+  const sel = li.ownerDocument.getSelection?.();
+  if (sel !== null && sel !== undefined && !sel.isCollapsed) return null;
+  return box;
+}
+
+/**
+ * この `click` は指(かペン)か。⚠ `pointerType` を持たない実装(古い WebKit)では
+ * `(pointer: coarse)` に落とす ── 判定を 2 つ持つのは、片方しか無い端末が在るから
+ * (`long-press.ts` が「`pointerType` が空なら指として扱う」としているのと同じ向き)。
+ */
+function isTouchClick(ev: Event): boolean {
+  const pt = (ev as { pointerType?: string }).pointerType;
+  if (pt !== undefined && pt !== '') return pt !== 'mouse';
+  const mm = (globalThis as { matchMedia?: (q: string) => { matches: boolean } }).matchMedia;
+  return typeof mm === 'function' && mm('(pointer: coarse)').matches;
 }
 
 function selectEntryOrExplain(dispatcher: Dispatcher, lid: string, what: string): boolean {
@@ -2168,6 +2341,66 @@ export function runGlobalCommand(
     openPaletteFor(root, dispatcher, keymap, notify);
     return true;
   }
+  /**
+   * 🔴 **スタックの 3 手**(#633 段②)── 押しボタンを持たないので、`view-dual` と同じく
+   *   ここで直に投げる。⚠ 断り文は**ここに書かない**ものと**ここで言うもの**を分ける:
+   *   満杯・フォルダの断りは reducer が 1 か所で出す(`PIN_SPLIT_ENTRY`)。
+   *   ここで言うのは「**対象そのものが無い**」ときだけ ── reducer は lid の無い action を
+   *   受け取れないので、ここでしか言えない(`dry` では `false` = パレットが
+   *   「いまは押せません ── <note>」を出す)。
+   */
+  if (cmd === 'stack-push') {
+    const lid = dispatcher.getState().selectedLid;
+    if (lid === null) {
+      if (dry) return false;
+      prevent();
+      notify('スタックに載せるノートがありません(先にノートを開いてください)');
+      return true;
+    }
+    if (dry) return true;
+    prevent();
+    dispatcher.dispatch({ type: 'PIN_SPLIT_ENTRY', lid });
+    return true;
+  }
+  if (cmd === 'stack-open' || cmd === 'stack-clear') {
+    const st = dispatcher.getState();
+    // 🔑 数えるのは帯と同じ口(`knownSplitLids`)── 消えた lid を「載せてある」と数えない
+    const stack = knownSplitLids(st.splitLids, st.entryMetas);
+    if (stack.length === 0) {
+      if (dry) return false;
+      prevent();
+      notify('スタックに載せてあるノートがありません');
+      return true;
+    }
+    if (dry) return true;
+    prevent();
+    if (cmd === 'stack-clear') {
+      dispatcher.dispatch({ type: 'CLEAR_SPLIT' });
+      notify(`スタックから ${String(stack.length)} 件を降ろしました(ノートは消えていません)`);
+      return true;
+    }
+    /**
+     * 🔑 **一覧は「載せてある順」= 一番上から**(帯と同じ並び)。`entryPickRows` に
+     *   `order` としてスタックを渡す ── 題名で絞る規則と切ったときの断りを**書き直さない**。
+     * ⚠ 自分自身は除かない(`selfLid: null`)── 主と同じノートを載せる形は許している
+     *   (`split-frames.ts` の `normalizeSplitLids`)。
+     * ⚠ 開いている間に別のタブが降ろしても、打つたびに引き直すので一覧は追随する。
+     */
+    void pickEntryInApp(
+      root,
+      (query) => {
+        const now = dispatcher.getState();
+        const lids = knownSplitLids(now.splitLids, now.entryMetas);
+        const items = entryPickRows(now.entryMetas, lids, query, null);
+        return { items, note: entryPickNote(items.length, entryPickTotal(now.entryMetas, lids, query, null)) };
+      },
+      { title: 'スタックから開く(選んだ物が一番上に来ます)' },
+    ).then((lid) => {
+      if (lid === null) return;
+      dispatcher.dispatch({ type: 'PIN_SPLIT_ENTRY', lid });
+    });
+    return true;
+  }
   const sel = SHORTCUT_BUTTON[cmd];
   if (sel === undefined) return false;
   const btn = root.querySelector<HTMLElement>(sel);
@@ -2364,7 +2597,16 @@ async function waitPainted(
  * ⚠ detail に居るときは撃たない ── `SET_VIEW_MODE` は履歴・ゴミ箱の panel を畳む
  *   副作用を持つ(目次を押しただけで履歴が閉じる、を作らない)。
  */
-async function tocJump(dispatcher: Dispatcher, target: HTMLElement, slug: string): Promise<void> {
+/**
+ * @param notFound 見出しが無かったときの断り文(#579 ── 章のリンクは目次と事情が違う:
+ *   「まだ出ていない」ではなく「字が変わった」のかもしれない)。省けば目次の文言
+ */
+async function tocJump(
+  dispatcher: Dispatcher,
+  target: HTMLElement,
+  slug: string,
+  notFound?: string,
+): Promise<void> {
     if (dispatcher.getState().viewMode !== 'detail') {
       dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
     }
@@ -2396,7 +2638,8 @@ async function tocJump(dispatcher: Dispatcher, target: HTMLElement, slug: string
         error:
           dispatcher.getState().phase !== 'ready'
             ? '編集中は本文が表示されていないので移動できません(保存するか、2 ペインにしてください)'
-            : 'その見出しが本文の面にまだ出ていません(描き直しの途中かもしれません ── もう一度押してください)',
+            : (notFound ??
+              'その見出しが本文の面にまだ出ていません(描き直しの途中かもしれません ── もう一度押してください)'),
       });
       return;
     }
@@ -2432,14 +2675,14 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   あるので、いまは lid まで開く(`link-target.ts` に理由)。
    */
   'navigate-entry-ref': (dispatcher, target) => {
-    navigateToLink(dispatcher, target.getAttribute('data-pkc-entry-ref'));
+    navigateToLink(dispatcher, target, target.getAttribute('data-pkc-entry-ref'));
   },
   /**
    * `@[card](…)` の placeholder。⚠ **解決器は `entry:` と同じ 1 本**
    * (target は `entry:` か `pkc://<cid>/entry/<lid>` のどちらか)。
    */
   'navigate-card-ref': (dispatcher, target) => {
-    navigateToLink(dispatcher, target.getAttribute('data-pkc-card-target'));
+    navigateToLink(dispatcher, target, target.getAttribute('data-pkc-card-target'));
   },
   /**
    * `pkc://<自分>/asset/<key>` ── 添付の**所有ノートへ飛ぶ**(#100 段②)。
@@ -2559,6 +2802,17 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    /**
+     * 🔴 **低い窓でこちらが畳んだ追記欄は、押すと「一時的に」出る**(#701)。
+     * ⚠ `toggle` で戻すと、その窓ではもう畳まれない(記録には書かないが、窓の高さが
+     *   変わるまで開いたまま)── 裁定は「開いたら**送った後は自分で畳み直す**」なので、
+     *   `peek` と同じ道を通す(送る / 欄の外で 1 操作 → `refoldPeeked` が畳む)。
+     * ⚠ user が自分で畳んだ回(記録に在る)は今までどおり `toggle` ── あちらは
+     *   「戻す」を押した人の意図が「出しておきたい」だからである。
+     */
+    if (id === 'append' && appPanes.isAutoFolded('append') && appPanes.getHidden().includes('append')) {
+      if (revealAppendPane(root)) return;
+    }
     applyPaneVisibility(root, appPanes.toggle(id));
   },
   /**
@@ -2688,7 +2942,13 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     if (page === 'info') {
-      appPhone.showInfo(dispatcher.getState().selectedLid);
+      /**
+       * 🔴 **タブレットでは同じボタンで閉じる**(#703)── 情報を出している間も「情報」は
+       *   出たままなので、もう一度押したら本文へ戻す(片道の操作を作らない)。
+       * ⚠ スマホでは情報ページで「情報」そのものが消えるので、この枝には来ない。
+       */
+      if (appPhone.page() === 'info') appPhone.showNote();
+      else appPhone.showInfo(dispatcher.getState().selectedLid);
       return;
     }
     /**
@@ -2730,7 +2990,8 @@ const ACTIONS: Record<string, ActionHandler> = {
        *   操作を探す。4 つとも `selectedLid` を要るのに押し口は一覧の中にしか無く、
        *   スマホでは**戻ると対象が消える**(円環の dead click)。
        */
-      withTrailingLast(
+      // ⚠ `MenuItem` で型を留める ── 追記欄の項目だけが持つ `attrs` を通すため
+      withTrailingLast<MenuItem>(
         [
           /**
            * 🔴 **毎日使うものを上へ**(user 裁定 2026-09-02)。
@@ -2748,6 +3009,26 @@ const ACTIONS: Record<string, ActionHandler> = {
           }),
         ],
         [
+          /**
+           * 🔴 **追記欄を畳む / 戻す**(#701 C)。⚠ スマホには取っ手が 8px しか無く、
+           *   畳めることを知る口が無かった ── この面の道具の中で ⋯ に無いのはこれだけだった。
+           *   受け手は `toggle-pane`(新しい受け手を作らない)、`data-pkc-pane` は
+           *   **この項目だけ**に付ける(`attrs`)。置き場は「操作を探す」の直前 ──
+           *   先頭 4 つ(毎日使う道具)と右クリックの並びを崩さない(unit が順番を pin する)。
+           * ⚠ 追記欄の出ない種類(フォルダ・添付)では出さない ── 押しても何も起きない。
+           */
+          ...(isAppendable(st.entryMetas.get(lid)?.archetype)
+            ? [
+                {
+                  action: 'toggle-pane',
+                  label: appPanes.getHidden().includes('append') ? '追記欄を戻す' : '追記欄を畳む',
+                  hint: appPanes.getHidden().includes('append')
+                    ? '本文の下に追記欄を出します'
+                    : '本文の下の追記欄を畳んで、本文を広く読みます(もう一度で戻ります)',
+                  attrs: { 'data-pkc-pane': 'append' },
+                },
+              ]
+            : []),
           {
             action: 'open-palette',
             label: '操作を探す',
@@ -3015,21 +3296,39 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     const st = dispatcher.getState();
     const parent = st.scopeLid === null ? null : (st.entryMetas.get(st.scopeLid) ?? null);
-    // 非 detail view で作ると editor が出ない(PKC2 PR-Δ19 の罠)── 先に切替
-    if (st.viewMode !== 'detail') dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
-    const lid = generateLid();
-    dispatcher.dispatch({
-      type: 'CREATE_ENTRY',
-      archetype,
-      lid,
-      title: defaultTitle(dispatcher, archetype),
-      parentLid: parent?.lid ?? null,
-      relationId: generateLid(),
-    });
-    // #177: 作成 → 即編集の編集権。lid は今生まれたばかりなので必ず取れる ──
-    // 「取れてから入る」順に直すと user gesture の同期性を失うだけで守るものが無い。
-    // 別タブは 'changed' でこの lid を知るため、登録が先に着けばよい
-    if (dispatcher.getState().phase === 'editing') void services.acquireEditLock?.(lid);
+    // 🔑 面の切替・作成・編集権は `createAndEdit` 1 本(行の右クリックと同じ経路 ── #215)
+    createAndEdit(dispatcher, services, archetype, parent?.lid ?? null);
+  },
+  /**
+   * 🔴 **このフォルダの中に新しいノートを作る**(#215。行の右クリック / 情報ペイン / 鍵)。
+   *
+   * ⚠ `create-entry` との違いは**入れ先だけ** ── あちらは「いま見ているフォルダ」、
+   *   こちらは「押した行のフォルダ」(中へ入らずに 1 枚置ける)。種類は `text` に固定する
+   *   ── 字が「新しい**ノート**を作る」なので、帯の種類の `<select>` を読んで
+   *   フォルダやチェックリストができると押した字と食い違う。
+   * ⚠ 無言で断らない ── フォルダでない行 / 編集中は理由を出す(`when: 'folder'` で
+   *   メニューには出ないが、鍵と情報ペインからは来うる)。
+   */
+  'create-in-folder': (dispatcher, target, services) => {
+    const st = dispatcher.getState();
+    const lid = rowLidOrSelected(st, target);
+    const meta = lid === null ? undefined : st.entryMetas.get(lid);
+    if (meta === undefined) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'フォルダの行を選んでから押してください' });
+      return;
+    }
+    if (meta.archetype !== 'folder') {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: 'フォルダの行で押してください(ノートの中にはノートを作れません)',
+      });
+      return;
+    }
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してからノートを作ってください' });
+      return;
+    }
+    createAndEdit(dispatcher, services, 'text', meta.lid);
   },
   /**
    * 🔴 **まとめてゴミ箱へ**(#240 段③。user 指示 2026-08-17「まとめて消せない」)。
@@ -3777,6 +4076,13 @@ const ACTIONS: Record<string, ActionHandler> = {
   'undo-append': (dispatcher) => {
     dispatcher.dispatch({ type: 'UNDO_APPEND' });
   },
+  /**
+   * 🔴 **直前の塊の移動を元に戻す**(#684 段①。「片道の操作を作らない」)。
+   * ⚠ 口は状態の行の知らせの隣(`shell.ts` の `status-undo`)── 出し入れは `status-open.ts`。
+   */
+  'undo-move': (dispatcher) => {
+    dispatcher.dispatch({ type: 'UNDO_MOVE' });
+  },
   'append-entry': (dispatcher, _target, _services, root) => {
     const s = dispatcher.getState();
     const lid = s.selectedLid;
@@ -4154,6 +4460,108 @@ const ACTIONS: Record<string, ActionHandler> = {
     moveEntries(dispatcher, [lid], value === '' ? null : value, services.showStatus);
   },
   /**
+   * 🔴 **行の名前を、その場で打ち替え始める**(#215。行の右クリック / 情報ペイン / `F2`)。
+   *
+   * ⚠ 入力欄は **state 駆動**(`ROW_RENAME_BEGIN` → 面が行の題名の所に欄を描く)──
+   *   2 ペインの `dual-rename-begin` と同じ作法。確定は `RENAME_ENTRY_TITLE` 1 つ。
+   * ⚠ 欄を描くのは**左の列の一覧とフォルダの面だけ**である。予定・連絡先の行から
+   *   押した場合は欄が出ない ── だから**一覧の面へ切り替えて**出し、それでも出なければ
+   *   (絞り込みで行が消えている等)理由を出して畳む。黙って `renamingLid` を立てたまま
+   *   終わると、次にその行が出た瞬間に欄が現れる(押していないのに)。
+   */
+  'rename-entry-begin': (dispatcher, target, services, root) => {
+    const st = dispatcher.getState();
+    const lid = rowLidOrSelected(st, target);
+    if (lid === null || !st.entryMetas.has(lid)) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '名前を変えるノートを選んでください(行を押すと選べます)',
+      });
+      return;
+    }
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから名前を変えてください' });
+      return;
+    }
+    dispatcher.dispatch({ type: 'ROW_RENAME_BEGIN', lid });
+    const fieldShown = (): boolean =>
+      root.querySelector('[data-pkc-field="row-rename"]') !== null;
+    if (!fieldShown()) services.setBrowse?.('list');
+    if (!fieldShown()) {
+      dispatcher.dispatch({ type: 'ROW_RENAME_END' });
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '名前を変える欄は、左の列の一覧かフォルダのタブの行に出ます(絞り込みで隠れていないか確かめてください)',
+      });
+    }
+  },
+  /**
+   * 🔴 **入れ先のフォルダを一覧から選んで移す**(#215。行の右クリック / 情報ペイン / `F6`)。
+   *
+   * ⚠ 相手は **D&D と同じ規則** ── 押した行に印が付いていれば**印の全部**、
+   *   付いていなければその 1 件(「選んだつもりの物と動く物が違う」を作らない)。
+   *   題名にその件数が出るので、押す前に何件動くかが読める。
+   * ⚠ 候補は `listMoveTargets`(自分と自分の子孫を除いたフォルダ)を**全部の相手で
+   *   共通に**取る ── `canEnterScope` は使わない(スマートフォルダは中へ入れるが、
+   *   手で子を入れることはできない ── `tree.ts` の注記)。
+   * ⚠ ルートは**題名を打っていないときだけ**先頭に出す ── 打った後も先頭に居ると、
+   *   `Enter`(= 先頭を選ぶ)が打った名前のフォルダではなくルートへ出してしまう。
+   * 🔑 器は `pickEntryInApp`(題名で探して選ぶ)を**そのまま**使う ── user に 2 通りの
+   *   探し方を覚えさせない。実体は `moveEntries`(帯の `<select>` / D&D と同じ 1 本)。
+   */
+  'move-to-folder': (dispatcher, target, services, root) => {
+    const st = dispatcher.getState();
+    const lid = rowLidOrSelected(st, target);
+    if (lid === null || !st.entryMetas.has(lid)) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '移すノートを選んでください(行を押すと選べます)',
+      });
+      return;
+    }
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから動かしてください' });
+      return;
+    }
+    const marked = visibleSelection(visibleFilerRows(st), st.selection);
+    const lids = marked.includes(lid) ? marked : [lid];
+    const title =
+      lids.length === 1
+        ? `「${st.entryMetas.get(lid)?.title ?? ''}」を移す`
+        : `${lids.length} 件を移す`;
+    void pickEntryInApp(
+      root,
+      (query) => {
+        const now = dispatcher.getState();
+        const q = normalizeQuery(query);
+        const [first, ...others] = lids;
+        const base = first === undefined ? [] : listMoveTargets(first, now.entryMetas, now.relations);
+        const allowed = others.map(
+          (l) => new Set(listMoveTargets(l, now.entryMetas, now.relations).map((f) => f.lid)),
+        );
+        const folders = base.filter(
+          (f) => allowed.every((s) => s.has(f.lid)) && matchesTitle(f.title, q),
+        );
+        const items = [
+          ...(q === '' ? [{ lid: '', title: 'ルート(いちばん上)', kind: '' }] : []),
+          // 🔑 種類の列には**場所**(パンくずの形)を出す ── 同じ名前のフォルダを見分ける
+          ...folders.map((f) => ({ lid: f.lid, title: f.title, kind: f.path })),
+        ];
+        return {
+          items,
+          note:
+            folders.length === 0
+              ? 'あてはまるフォルダがありません(欄を空にするとルートへ出せます)'
+              : '',
+        };
+      },
+      { title },
+    ).then((to) => {
+      if (to === null) return;
+      moveEntries(dispatcher, lids, to === '' ? null : to, services.showStatus);
+    });
+  },
+  /**
    * 🔴 **並べ替え**(2026-08-06。user 報告 2-10)。⚠ 動かす当人は帯が持つ
    * (`move-entry` と同じ理由 ── 押した瞬間に選択が変わっていても取り違えない)。
    */
@@ -4439,6 +4847,61 @@ const ACTIONS: Record<string, ActionHandler> = {
     copySourceLines(dispatcher, services, fmBody, span, '章をコピーしました(Markdown の原文)');
   },
   /**
+   * 🔴 **その章を指すリンクを写す**(#579。user 裁定 2026-09-04)。
+   *
+   * 貼れる 1 行は `[題名 / 見出し](entry:<lid>#h/<見出しの id>)`。押すと相手のノートを開いて
+   * その見出しまで送る(`navigateToLink` → `tocJump`)。
+   * ⚠ id は描画が刻んだ物(`h.id`)を**そのまま読む** ── 自前で slug を計算しない
+   *   (計算が 2 か所になると、同名見出しの連番 `-1` で食い違う)。
+   * ⚠ 見出しは**入れ子でも拾う**(引用や `:::` の中にも id は刻まれる)── `headingAtSourceLine`
+   *   は直下しか見ないので、外れたら刻印で深く探す。
+   * ⚠ id の無い見出し(`####` 以下)ではメニューに出ない(`linkable`)が、受け手でも理由を出す。
+   */
+  'copy-section-ref': (dispatcher, target, services) => {
+    const line = menuCarriedLine(target);
+    if (line === null || refuseStaleMenu(dispatcher, target)) return;
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    const host = root.querySelector<HTMLElement>('[data-pkc-field="detail-body"]');
+    const heading =
+      host === null
+        ? null
+        : (headingAtSourceLine(host, line) ??
+          [...host.querySelectorAll('h1,h2,h3,h4,h5,h6')].find(
+            (h) => h.getAttribute('data-pkc-source-line') === String(line),
+          ) ??
+          null);
+    const st = dispatcher.getState();
+    // ⚠ 相手は**開いている本文**(`copy-chapter-md` と同じ)── 見出しは openBody の描画である
+    const lid = target.getAttribute(MENU_LID_ATTR) || st.openBody?.lid;
+    if (heading === null || lid === undefined || lid === '') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '見出しを読めませんでした(本文を開き直してください)' });
+      return;
+    }
+    if (heading.id === '') {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: 'この見出しには参照の印が無いので、章の参照を作れません(# 〜 ### の見出しで使えます)',
+      });
+      return;
+    }
+    if (services.copyText === undefined) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この版ではコピーできません' });
+      return;
+    }
+    // ⚠ 見出しの字は畳みのボタンを除いて読む(`textContent` は `<button>` を含む)
+    const text = [...heading.childNodes]
+      .filter((n) => !(n instanceof Element && n.matches('button')))
+      .map((n) => n.textContent ?? '')
+      .join('')
+      .trim();
+    const title = st.entryMetas.get(lid)?.title ?? '';
+    const label = title === '' ? text : `${title} / ${text}`;
+    services.copyText(
+      formatSectionLink(label, lid, heading.id),
+      '章へのリンクをコピーしました(本文に貼れます)',
+    );
+  },
+  /**
    * 🔴 **`:::` の塊(囲み / 板)を原文の Markdown でまるごと写す**(#677)。
    *
    * 範囲は「開きの `:::` 〜 閉じの `:::`」(`blockSpanAt`)。板なら座標(`x=` / `y=`)も
@@ -4698,7 +5161,9 @@ const ACTIONS: Record<string, ActionHandler> = {
       });
       return;
     }
-    const today = new Date().toISOString().slice(0, 10);
+    // 🔑 「今日」は**端末の暦日**(`dayStamp`)── `toISOString` は UTC なので、
+    //    日本の 0 時〜9 時に押すと前日の名前になっていた(#709)
+    const today = dayStamp(new Date());
     downloadBlob(
       settingsFileName(today),
       new Blob([JSON.stringify(file, null, 2)], { type: 'application/json' }),
@@ -4721,7 +5186,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: '書き出せる連絡先がありません' });
       return;
     }
-    const today = new Date().toISOString().slice(0, 10);
+    const today = dayStamp(new Date()); // 端末の暦日(export-settings と同じ 1 本)
     downloadBlob(
       `連絡先-${today}.vcf`,
       new Blob([buildVcf(cards)], { type: 'text/vcard' }),
@@ -5102,6 +5567,86 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (lid === null) return;
     dispatcher.dispatch({ type: 'PIN_SPLIT_ENTRY', lid });
   },
+  /**
+   * 🔴 **いまのスタックを「スタック」のノートとして保存する**(#633 段③。帯の「保存…」)。
+   *
+   * ⚠ 題名は聞く(`promptInApp`)── 既定は「スタック M/D」。⚠ 本文は**いまの並びの順**で
+   *   `stackBody` が組む(上から順 = 帯の左から)。
+   * 🔴 **読んでいる本文を退かさない** ── `CREATE_ENTRY` は既定で選択を新しい物へ動かすので、
+   *   `keepSelection: true` で作り、できた物へは知らせの「開く」で行ける(#668 A の口)。
+   * ⚠ 空のスタックは保存しない / 編集中は断る(帯のボタンも `disabled` だが、鍵からも来る)。
+   */
+  'stack-save': (dispatcher, _target, _services, root) => {
+    const st = dispatcher.getState();
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終えてから、スタックを保存してください' });
+      return;
+    }
+    const lids = knownSplitLids(st.splitLids, st.entryMetas);
+    if (lids.length === 0) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: 'スタックに載せてあるノートがありません(先に載せてください)',
+      });
+      return;
+    }
+    const now = new Date();
+    const initial = `スタック ${String(now.getMonth() + 1)}/${String(now.getDate())}`;
+    void promptInApp(root, {
+      title: 'スタックを保存する',
+      label: `${String(lids.length)} 件の並びを、リンクの箇条書きのノートとして保存します。題名:`,
+      initial,
+      okLabel: '保存する',
+    }).then((title) => {
+      if (title === null) return;
+      // ⚠ 開いている間に降ろされていることがある ── 保存するのは**押した時点ではなく決めた時点**の並び
+      const cur = dispatcher.getState();
+      const items = knownSplitLids(cur.splitLids, cur.entryMetas).map((lid) => ({
+        lid,
+        title: cur.entryMetas.get(lid)?.title ?? '',
+      }));
+      if (items.length === 0) {
+        dispatcher.dispatch({ type: 'OP_FAILED', error: 'スタックが空になったので保存しませんでした' });
+        return;
+      }
+      const lid = generateLid();
+      dispatcher.dispatch({
+        type: 'CREATE_ENTRY',
+        lid,
+        title,
+        archetype: STACK_ARCHETYPE,
+        body: stackBody(items),
+        edit: false,
+        keepSelection: true,
+      });
+      dispatcher.dispatch({
+        type: 'OP_NOTICE',
+        message: `「${title}」に ${String(items.length)} 件の並びを保存しました`,
+        open: lid,
+      });
+    });
+  },
+  /**
+   * 🔴 **保存したスタックを載せる**(#633 段③「このスタックを載せる」)。
+   * ⚠ 対象は押した行(情報ペインのボタンは `data-pkc-entry` を持つ)か、無ければ選んでいるノート。
+   *   積み方(上に積む・見つからない物を数える)は reducer(`LOAD_STACK`)が 1 か所で持つ。
+   */
+  'stack-load': (dispatcher, target) => {
+    const lid =
+      target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ??
+      dispatcher.getState().selectedLid;
+    if (lid === null) return;
+    dispatcher.dispatch({ type: 'LOAD_STACK', lid });
+  },
+  /**
+   * 🔴 **保存したスタックの中の 1 行を上 / 下へ**(#633 段④)。
+   *
+   * ⚠ どのノートの行かは**押した所から引く**(`lidOfNode` ── 横の枠なら `data-pkc-split-lid`、
+   *   主の枠なら開いているノート。`toggle-task` と同じ引き方)。行番号は押し所に焼いた
+   *   **原文の行**(`data-pkc-line`)。門(編集中 / byte 一致)は reducer と `body-rewrite.ts` が持つ。
+   */
+  'stack-link-up': (dispatcher, target) => moveStackLink(dispatcher, target, 'up'),
+  'stack-link-down': (dispatcher, target) => moveStackLink(dispatcher, target, 'down'),
   /** 🔴 **外す**(#505 段②)。⚠ 置けるなら外せる ── 枠の中の `× 外す` が押す。 */
   'unsplit-entry': (dispatcher, target) => {
     const lid = target.closest<HTMLElement>('[data-pkc-lid]')?.getAttribute('data-pkc-lid');
@@ -5718,6 +6263,19 @@ const ACTIONS: Record<string, ActionHandler> = {
  */
 const PKC_DRAG = 'application/x-pkc-lids';
 /**
+ * 🔴 **本文の塊を運ぶ**(#684 段①)。⚠ `PKC_DRAG` とは別の型 ── あちらは「ノートを
+ *   フォルダへ移す」、こちらは「**同じノートの中で行を並べ替える**」。混ぜると、塊を
+ *   フォルダの行へ落としたときにノートを移そうとする(予定の札と同じ理由)。
+ * 荷物は `lid start end`(生の body の行番号)。掴んだ行そのものは reducer が画面の本文から
+ * 捕える(`MOVE_PLACE` の開き行と同じ ── 呼び側に本文を持たせない)。
+ */
+const PKC_BLOCK_DRAG = 'application/x-pkc-block';
+/**
+ * 本文の塊の落とし先の印(#684)── 塊の**上辺 / 下辺**に線を出す(`app.css`)。
+ * ⚠ `data-pkc-dropping`(枠を光らせる)とは別 ── 塊全体が光ると「中へ入る」に見える。
+ */
+const DROP_EDGE_ATTR = 'data-pkc-drop-edge';
+/**
  * 🔴 **予定の札を運ぶ**(双方向。user 指示 2026-08-23)。
  *
  * ⚠ **`PKC_DRAG` とは別の型**にする ── あちらは「ノートをフォルダへ移す」で、
@@ -6013,6 +6571,23 @@ export function bindActions(
         return;
       }
     }
+    /**
+     * 🔴 **名前を打ち替えている欄の中のクリックは、行の押下に流さない**(#215)。
+     * ⚠ 欄は `select-entry` の行の中に在るので、流すと**2 回押し**に数えられて
+     *   フォルダの行では**中へ入ってしまう**(打っている最中に面が変わる)。
+     */
+    if (ev.target instanceof HTMLInputElement && ev.target.matches('[data-pkc-field="row-rename"]'))
+      return;
+    /**
+     * 🔴 **指で触る端末では、チェックリストの行の字も印を動かす**(#706 ①)。
+     * ⚠ `[data-pkc-action]` の解決より**前**に置く ── 行の字は action を持たないので、
+     *   後ろに置くと `!el` で捨てられる。判定は `touchTaskBoxAt` 1 か所。
+     */
+    const taskBox = touchTaskBoxAt(ev, root);
+    if (taskBox !== null) {
+      run('toggle-task', taskBox);
+      return;
+    }
     const el = (ev.target as HTMLElement | null)?.closest<HTMLElement>(
       '[data-pkc-action]',
     );
@@ -6168,6 +6743,18 @@ export function bindActions(
       el.getAttribute('data-pkc-field') === 'entry-filter'
     ) {
       dispatcher.dispatch({ type: 'SET_ENTRY_FILTER', query: el.value });
+      return;
+    }
+    /**
+     * 🔴 **探す面の欄**(#680)。⚠ 左の列の欄(`entry-filter`)とは**別の語**へ写す ──
+     *   面で打った語で本体の一覧が絞られると、別窓の面から本体が動いて驚く。
+     * ⚠ 打鍵ごとに写す(state が正)。worker を叩くのは effect が 300ms 止まってから。
+     */
+    if (
+      el instanceof HTMLInputElement &&
+      el.getAttribute('data-pkc-field') === 'search-page-input'
+    ) {
+      dispatcher.dispatch({ type: 'SET_SEARCH_PAGE_QUERY', query: el.value });
       return;
     }
     /**
@@ -6831,6 +7418,29 @@ export function bindActions(
       return;
     }
     cancelTabHover();
+    /**
+     * 🔴 **本文の塊**(#684 段①)── 落とし先は**同じノートの本文**の塊の前 / 後。
+     * ⚠ 自分の中(`start..end+1`)へは受けない(`dropEffect` は既定の `none` のまま = 印も
+     *   出ない)── 落としても 1 byte も変わらない所に「入る」と見せない。
+     * ⚠ 別のノートの本文へも受けない ── 段①は「本文の中で並べ替える」である。
+     * ⚠ `getData` は dragover では読めない(ブラウザの保護)── 掴んだ物は `blockDrag` で持つ。
+     */
+    if (de.dataTransfer?.types?.includes(PKC_BLOCK_DRAG) === true) {
+      const drop = bodyDropAt(de);
+      if (
+        drop === null ||
+        blockDrag === null ||
+        drop.lid !== blockDrag.lid ||
+        (drop.toBefore >= blockDrag.start && drop.toBefore <= blockDrag.end + 1)
+      ) {
+        clearDropTarget();
+        return;
+      }
+      e.preventDefault();
+      de.dataTransfer.dropEffect = 'move';
+      markDropTarget(drop.el, DROP_EDGE_ATTR, drop.edge);
+      return;
+    }
     // 🔴 **予定の札**(双方向)── 落とし先は日の升目 / 束の見出し
     if (de.dataTransfer?.types?.includes(PKC_TASK_DRAG) === true) {
       const drop = dateTargetOf(de.target);
@@ -6846,8 +7456,32 @@ export function bindActions(
     }
     // 🔴 **PKC の中の移動**(#240 段④)── OS からの file 受けとは**別の型**で見分ける
     if (de.dataTransfer?.types?.includes(PKC_DRAG) === true) {
+      /**
+       * 🔴 **行の上半分 / 下半分は「並べ替え」**(#215)── 落とす前に線で見せる。
+       * ⚠ フォルダの行の**真ん中**は今までどおり「中へ入れる」(下の `dropTargetOf`)──
+       *   判定は `reorderTargetOf` 1 か所(落とす側と同じ関数)。
+       */
+      const edge = reorderTargetOf(de);
+      if (edge !== null) {
+        e.preventDefault();
+        de.dataTransfer.dropEffect = 'move';
+        markDropEdge(edge.row, edge.edge);
+        return;
+      }
       const drop = dropTargetOf(de.target);
       if (drop === undefined) {
+        /**
+         * 🔴 **一覧の行を本文へ落とすとリンクになる**(#684 段②)── フォルダの行でも
+         *   パンくずでもない所なら、読んでいる本文の塊の前 / 後を落とし先にする(段①と同じ線)。
+         * ⚠ `copy` ── 元のノートは動かない(移す操作ではない)。掴んだ側の印もそのまま。
+         */
+        const body = bodyDropAt(de);
+        if (body !== null) {
+          e.preventDefault();
+          de.dataTransfer.dropEffect = 'copy';
+          markDropTarget(body.el, DROP_EDGE_ATTR, body.edge);
+          return;
+        }
         // ⚠ **光ったままにしない**(着地前レビュー 5)── フォルダの上を通ってから
         //    別の行で離すと、user は「そこへ入った」と読む(実際は何も動かない)
         clearDropTarget();
@@ -6870,6 +7504,25 @@ export function bindActions(
   let dragFromSide: DualSide | null = null;
   const onDrop = (e: Event): void => {
     const de = e as DragEvent;
+    /**
+     * 🔴 **本文の塊を落としたら、その塊が動く**(#684 段①)。
+     * ⚠ 書くのは reducer(`MOVE_BLOCK`)→ `line-move.ts` ── ここは座標を渡すだけ。
+     *   編集中の断りも reducer が声に出す(落とすまで phase を見ない)。
+     * ⚠ 荷物の lid と落とし先の lid が違えば何もしない(dragover が受けていないので
+     *   普段はここへ来ない ── 来ても別のノートを書かない)。
+     */
+    if (de.dataTransfer?.types?.includes(PKC_BLOCK_DRAG) === true) {
+      const drop = bodyDropAt(de);
+      clearDropTarget();
+      if (drop === null) return;
+      e.preventDefault();
+      const [lid, rawStart, rawEnd] = (de.dataTransfer.getData(PKC_BLOCK_DRAG) || '').split(' ');
+      const start = Number(rawStart);
+      const end = Number(rawEnd);
+      if (lid === undefined || lid !== drop.lid || !Number.isInteger(start) || !Number.isInteger(end)) return;
+      dispatcher.dispatch({ type: 'MOVE_BLOCK', lid, start, end, toBefore: drop.toBefore });
+      return;
+    }
     /**
      * 🔴 **落としたら、その行の日付が変わる**(双方向の出口)。
      * ⚠ 空文字の落とし先は「日付なし」= **外す**(消すのではない)。
@@ -6966,9 +7619,37 @@ export function bindActions(
       return;
     }
     if (de.dataTransfer?.types?.includes(PKC_DRAG) === true) {
+      // 🔴 行の上半分 / 下半分に落としたら**並べ替え**(#215)── 中へ入れるのではない
+      const edge = reorderTargetOf(de);
+      if (edge !== null) {
+        clearDropTarget();
+        e.preventDefault();
+        const dragged = (de.dataTransfer.getData(PKC_DRAG) || '').split(' ').filter((x) => x !== '');
+        reorderDropped(dragged, edge.row.getAttribute('data-pkc-entry') ?? '', edge.edge);
+        return;
+      }
       const drop = dropTargetOf(de.target);
       clearDropTarget();
-      if (drop === undefined) return;
+      if (drop === undefined) {
+        /**
+         * 🔴 **本文へ落としたら、その行のリンクが入る**(#684 段②)。
+         * ⚠ 字は `formatEntryLink` 1 本(手で書くリンクと同じ綴り)。複数の行は改行区切りの
+         *   1 塊 ── 「元に戻す」は無いが、入った物は本文の 1 塊なので ⠿ で掴んで動かせる。
+         * ⚠ 題名が無い(消えた)lid は入れない ── 押せない字を本文に残さない。
+         * ⚠ 掴んだ側の印(一覧 / 2 ペインの選択)は触らない ── 移していないので外す理由が無い。
+         */
+        const at = bodyDropAt(de);
+        if (at === null) return;
+        e.preventDefault();
+        const metas = dispatcher.getState().entryMetas;
+        const lines = (de.dataTransfer.getData(PKC_DRAG) || '')
+          .split(' ')
+          .filter((x) => x !== '' && metas.has(x))
+          .map((x) => formatEntryLink(metas.get(x)!.title, x));
+        if (lines.length === 0) return;
+        dispatcher.dispatch({ type: 'INSERT_LINES', lid: at.lid, toBefore: at.toBefore, lines });
+        return;
+      }
       e.preventDefault();
       const lids = (de.dataTransfer.getData(PKC_DRAG) || '').split(' ').filter((x) => x !== '');
       /**
@@ -7030,6 +7711,34 @@ export function bindActions(
     const pressedRow = (de.target as HTMLElement | null)?.closest<HTMLElement>(LONG_PRESS_ROW);
     if (pressedRow !== null && pressedRow !== undefined && longPress.pendingTouch(pressedRow)) {
       e.preventDefault();
+      return;
+    }
+    /**
+     * 🔴 **本文の塊の口(⠿)を掴んだ**(#684 段①)── 荷物は `lid start end`(生の body)。
+     * ⚠ 範囲は口が原文で決めて載せている(`block-grip.ts`)── ここで数え直さない。
+     * ⚠ `blockDrag` は dragover が「自分の中か」を見るために持つ(`getData` は dragover で
+     *   読めない)。⚠ 掴むたびに決め直す(古い掴みを残さない ── `dragFromSide` と同じ)。
+     * 🔑 drag 像は**塊そのもの**にする ── 口だけが飛ぶと、何を運んでいるか読めない。
+     */
+    const grip = (de.target as HTMLElement | null)?.closest<HTMLElement>(
+      `[data-pkc-field="${BLOCK_GRIP_FIELD}"]`,
+    );
+    blockDrag = null;
+    if (grip !== null && grip !== undefined && de.dataTransfer) {
+      const lid = grip.getAttribute(BLOCK_LID_ATTR);
+      const start = Number(grip.getAttribute(BLOCK_START_ATTR));
+      const end = Number(grip.getAttribute(BLOCK_END_ATTR));
+      if (lid === null || lid === '' || !Number.isInteger(start) || !Number.isInteger(end)) {
+        e.preventDefault(); // 指す物が無い口は掴ませない(空の荷物でノートの行を運ぶ経路へ落とさない)
+        return;
+      }
+      blockDrag = { lid, start, end };
+      dragFromSide = null;
+      de.dataTransfer.setData(PKC_BLOCK_DRAG, `${lid} ${String(start)} ${String(end)}`);
+      de.dataTransfer.effectAllowed = 'move';
+      const block = grippedBlock(grip);
+      if (block !== null && typeof de.dataTransfer.setDragImage === 'function')
+        de.dataTransfer.setDragImage(block, 0, 0);
       return;
     }
     /**
@@ -7104,13 +7813,23 @@ export function bindActions(
           );
     const lids = marked.includes(lid) ? marked : [lid];
     de.dataTransfer.setData(PKC_DRAG, lids.join(' '));
-    de.dataTransfer.effectAllowed = 'move';
+    /**
+     * 🔴 **`copyMove`**(#684 段②。実ブラウザの smoke が拾った)。
+     *
+     * ⚠ 直す前は `'move'` だけだった。本文の上は「リンクを写す」なので `dropEffect = 'copy'`
+     *   を返すが、HTML5 D&D は **`effectAllowed` に無い効果を返した drop を取り消す** ──
+     *   Chromium は `dragover` を受けて線まで出しておきながら、**`drop` を 1 度も撃たなかった**
+     *   (`dragend` だけ飛ぶ。unit の stub は効果の許しを検めないので緑だった)。
+     * 🔑 フォルダへ落とす側は `move` のまま許されるので、これまでの動きは変わらない。
+     */
+    de.dataTransfer.effectAllowed = 'copyMove';
   };
   const onDragEnd = (): void => {
     // ⚠ **待っている面の切替も畳む**(#402 ③)── 離した後に面が変わると、
     //    user から見て「勝手に画面が動いた」になる
     cancelTabHover();
     clearDropTarget();
+    blockDrag = null;
   };
   /**
    * 予定の落とし先(日の升目 / 束の見出し)。`null` = 落とせない場所。
@@ -7135,16 +7854,128 @@ export function bindActions(
     // ⚠ パンくずのルートは `data-pkc-entry` を持たない = 出す先(ルート)
     return { el, lid: el.getAttribute('data-pkc-entry') };
   };
-  let dropMark: HTMLElement | null = null;
-  const markDropTarget = (el: HTMLElement): void => {
-    if (dropMark === el) return;
-    clearDropTarget();
-    dropMark = el;
-    el.setAttribute('data-pkc-dropping', '');
+  /**
+   * 🔴 **本文の上の落とし先**(#684)── 乗せている塊の**上半分なら前、下半分なら後**。
+   *
+   * ⚠ 受ける器は**読む面の本文**(`detail-body` / `split-body`)だけ。
+   *   添付の説明も `detail-body` を名乗るが、描けた印(`PAINTED_ATTR`)を持たないので外れる。
+   *   板の面(`.pkc-board-host`)も外す ── 板は自分の掴みを持つ。
+   * ⚠ 本文の下の地(面の余白)に落としたら**最後の塊の後**。塊の間の余白なら縦の位置で近い塊。
+   * 🔑 「前 / 後」を原文の行へ写す規則は 1 つ:前 = その塊の開き行、後 = その塊の終わり + 1。
+   *   ⚠ `:::` の塊の `-end` は開き行なので、終わりは `blockSpanAt` で取る(囲みの中へ入れない)。
+   * 🔑 fence / `:::` の中・frontmatter へは受けない ── 判定は書く側と**同じ 1 本**
+   *   (`insertionBlocked`)。
+   *
+   * @returns `null` = 本文の上ではない / 受けない所
+   */
+  const BODY_DROP_HOST = '[data-pkc-field="detail-body"], [data-pkc-field="split-body"]';
+  const bodyDropAt = (
+    de: DragEvent,
+  ): { host: HTMLElement; lid: string; el: HTMLElement; edge: 'before' | 'after'; toBefore: number } | null => {
+    const target = de.target as HTMLElement | null;
+    if (target === null || !root.contains(target)) return null;
+    let host = target.closest<HTMLElement>(BODY_DROP_HOST);
+    let ground = false;
+    if (host === null) {
+      // 面の地 ── その面の本文の器の**下**なら、最後の塊の後として受ける
+      const pane = target.closest<HTMLElement>(
+        '[data-pkc-region="split-frame"], [data-pkc-view-pane="detail"]',
+      );
+      host = pane?.querySelector<HTMLElement>(BODY_DROP_HOST) ?? null;
+      if (host === null || de.clientY < host.getBoundingClientRect().bottom) return null;
+      ground = true;
+    }
+    if (!host.hasAttribute(PAINTED_ATTR) || host.classList.contains('pkc-board-host')) return null;
+    const st = dispatcher.getState();
+    const lid = lidOfNode(host, st.openBody?.lid ?? st.selectedLid);
+    const body = lid === null ? null : screenBodyOf(st, lid);
+    if (lid === null || body === null) return null;
+    const blocks = [...host.children].filter(
+      (c): c is HTMLElement => c instanceof HTMLElement && !c.hidden && c.hasAttribute('data-pkc-source-line'),
+    );
+    if (blocks.length === 0) return null;
+    let el: HTMLElement;
+    let edge: 'before' | 'after' = 'after';
+    if (ground) {
+      el = blocks[blocks.length - 1]!;
+    } else if (target === host) {
+      // 塊の間の余白 ── 縦の位置で最初に「下端がまだ下」の塊を採る。無ければ最後の塊の後
+      el = blocks.find((b) => de.clientY < b.getBoundingClientRect().bottom) ?? blocks[blocks.length - 1]!;
+      const r = el.getBoundingClientRect();
+      edge = de.clientY < r.top + r.height / 2 ? 'before' : 'after';
+    } else {
+      let cur: Element | null = target;
+      while (cur !== null && cur.parentElement !== host) cur = cur.parentElement;
+      if (!(cur instanceof HTMLElement) || !blocks.includes(cur)) return null;
+      el = cur;
+      const r = el.getBoundingClientRect();
+      edge = de.clientY < r.top + r.height / 2 ? 'before' : 'after';
+    }
+    const line = Number(el.getAttribute('data-pkc-source-line'));
+    if (!Number.isInteger(line) || line < 0) return null;
+    const fm = frontmatterLineCount(body);
+    let toBefore = line;
+    if (edge === 'after') {
+      const span = blockSpanAt(bodyBelowFrontmatter(body), line);
+      const end = span !== null ? span.end : Number(el.getAttribute('data-pkc-source-end'));
+      toBefore = (Number.isInteger(end) && end >= line ? end : line) + 1;
+    }
+    toBefore += fm;
+    if (insertionBlocked(body, toBefore)) return null;
+    return { host, lid, el, edge, toBefore };
   };
+  /** 掴んでいる本文の塊(`dragstart` で決め、`dragend` で捨てる)。`null` = 塊は掴んでいない。 */
+  let blockDrag: { lid: string; start: number; end: number } | null = null;
+  /**
+   * 落とし先の印。⚠ **属性名と値まで**持つ(#684)── 塊の前 / 後は同じ要素に別の値で出る
+   * (`data-pkc-drop-edge="before"|"after"`)ので、要素だけ見て早期 return すると
+   * 上半分から下半分へ動いても線が動かない。関数は 1 組のまま(2 つ目を書かない)。
+   */
+  let dropMark: { el: HTMLElement; attr: string; value: string } | null = null;
+  const markDropTarget = (el: HTMLElement, attr = 'data-pkc-dropping', value = ''): void => {
+    if (dropMark !== null && dropMark.el === el && dropMark.attr === attr && dropMark.value === value)
+      return;
+    clearDropTarget();
+    dropMark = { el, attr, value };
+    el.setAttribute(attr, value);
+  };
+  /**
+   * 並べ替えの落とし先の印(#215)。⚠ 属性名 `data-pkc-drop-edge` は本文の D&D(#684)と
+   * 同じ綴りを使う予定 ── CSS の規則はフォルダの表の行に限ってある(`app.css`)。
+   */
+  let edgeMark: HTMLElement | null = null;
+  const markDropEdge = (el: HTMLElement, edge: 'before' | 'after'): void => {
+    if (edgeMark === el && el.getAttribute('data-pkc-drop-edge') === edge) return;
+    clearDropTarget();
+    edgeMark = el;
+    el.setAttribute('data-pkc-drop-edge', edge);
+  };
+  // ⚠ 消すのは 1 本 ── 中へ入れる印と並べ替えの印を**別々に消し忘れない**
   const clearDropTarget = (): void => {
-    dropMark?.removeAttribute('data-pkc-dropping');
+    dropMark?.el.removeAttribute(dropMark.attr);
     dropMark = null;
+    edgeMark?.removeAttribute('data-pkc-drop-edge');
+    edgeMark = null;
+  };
+  /**
+   * 🔴 **並べ替えの落とし先**(#215)── フォルダの表の行の**上半分 / 下半分**。
+   *
+   * ⚠ フォルダ(とスマートフォルダ)の行は真ん中の帯(25〜75%)を「中へ入れる」に残す ──
+   *   端だけを並べ替えにする。ノートの行は上下 2 分。
+   * ⚠ 器の高さが測れない環境(happy-dom の素の要素)では `null` ── 「並べ替えの
+   *   つもりで中へ入れた」を作らない側へ倒す。
+   * 🔑 `dragover` と `drop` が**同じ関数**で判定する(光った所と落ちる所が食い違わない)。
+   */
+  const reorderTargetOf = (de: DragEvent): { row: HTMLElement; edge: 'before' | 'after' } | null => {
+    const row = (de.target as HTMLElement | null)?.closest<HTMLElement>(
+      '[data-pkc-region="filer-table"] tbody [data-pkc-entry]',
+    );
+    if (!row || !root.contains(row)) return null;
+    const r = row.getBoundingClientRect();
+    if (!(r.height > 0)) return null;
+    const y = (de.clientY - r.top) / r.height;
+    if (row.hasAttribute('data-pkc-drop') && y >= 0.25 && y <= 0.75) return null;
+    return { row, edge: y < 0.5 ? 'before' : 'after' };
   };
   /**
    * 落としたものを動かす。⚠ **断る理由を出す**(無言の操作拒否を作らない)──
@@ -7152,6 +7983,72 @@ export function bindActions(
    */
   const moveDropped = (lids: readonly string[], parentLid: string | null): void =>
     moveEntries(dispatcher, lids, parentLid, services.showStatus);
+  /**
+   * 🔴 **落とした行の前 / 後へ並べ替える**(#215)。
+   *
+   * 🔑 規則は既存の `MOVE_ENTRY_ORDER`(隣と入れ替える)を**着くまで撃つ** ── 並びの
+   *   規則(`reorderSibling` / `entryOrder` の交換)を 2 本にしない。1 段ごとに state を
+   *   読み直すので、同値の `entryOrder` でも着く(端で動かなければ抜ける)。
+   * ⚠ 動かせるのは**同じフォルダの中の行だけ**(帯の上へ / 下へと同じ規則)── 別の
+   *   フォルダの物が混じっていたら、その件数を言う(黙って捨てない)。
+   * ⚠ 「手動の順」で並べているときだけ ── 題名順などで見ているときに `entryOrder` を
+   *   動かしても**画面は 1 ドットも変わらない**(押したのに何も起きない、を作らない)。
+   * ⚠ 複数を落としたら**元の並びのまま**入れる ── 前へなら見えている順に 1 件ずつ
+   *   行き先の直前へ、後ろへなら逆順に直後へ。
+   */
+  const reorderDropped = (
+    lids: readonly string[],
+    targetLid: string,
+    edge: 'before' | 'after',
+  ): void => {
+    const st = dispatcher.getState();
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから並べ替えてください' });
+      return;
+    }
+    if (st.entrySort !== 'manual') {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '並べ替えは「手動の順」で並べているときだけ効きます(上の並び順を戻してください)',
+      });
+      return;
+    }
+    const siblings = listSiblings(targetLid, st.entryMetas, st.relations).map((m) => m.lid);
+    const movable = siblings.filter((l) => l !== targetLid && lids.includes(l));
+    if (movable.length === 0) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error:
+          '並べ替えられるのは同じフォルダの中の行だけです(別のフォルダへ動かすなら、フォルダの行の真ん中へ落としてください)',
+      });
+      return;
+    }
+    const seq = edge === 'before' ? movable : [...movable].reverse();
+    for (const lid of seq) stepTo(lid, targetLid, edge);
+    const skipped = lids.filter((l) => l !== targetLid && !movable.includes(l)).length;
+    if (skipped > 0) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: `${skipped} 件は別のフォルダの物なので並べ替えていません`,
+      });
+    }
+    services.showStatus?.(`${movable.length} 件を並べ替えました`);
+  };
+  /** 1 件を `targetLid` の直前 / 直後まで、隣との入れ替えで運ぶ。 */
+  const stepTo = (lid: string, targetLid: string, edge: 'before' | 'after'): void => {
+    // ⚠ 上限は兄弟の数 ── 端で動かなくなった回は state が変わらないので抜ける
+    for (let guard = 0; guard < 100000; guard += 1) {
+      const now = dispatcher.getState();
+      const sib = listSiblings(lid, now.entryMetas, now.relations).map((m) => m.lid);
+      const i = sib.indexOf(lid);
+      const j = sib.indexOf(targetLid);
+      if (i < 0 || j < 0) return;
+      const want = edge === 'before' ? (i < j ? j - 1 : j) : i < j ? j : j + 1;
+      if (i === want) return;
+      dispatcher.dispatch({ type: 'MOVE_ENTRY_ORDER', lid, direction: i < want ? 'down' : 'up' });
+      if (dispatcher.getState().entryMetas === now.entryMetas) return;
+    }
+  };
   /**
    * 🔴 **フォルダは 2 クリックで開く**(#240 段①。user 指示 2026-08-17
    * 「フォルダをダブルクリックで開くように変更」)。
@@ -7384,6 +8281,8 @@ export function bindActions(
               folded: isHeadingFolded(heading),
               foldable: heading.parentElement === host,
               appendable: level >= 1 && level <= 3 && appendModeOf(dispatcher.getState()).kind === 'ready',
+              // 🔴 章の参照(#579)── 描画が id を刻んだ見出しだけ(`#`〜`###`)
+              linkable: heading.id !== '',
               // 🔴 近道の字を右に添える(#587 C 案 2)── 見出しの項目だけ(塊 / 板 / 本文には無い)
             }).map(withShortcut)),
         ...(block === null ? [] : blockMenuActions({ board: block.board })),
@@ -7447,10 +8346,27 @@ export function bindActions(
     //    `MENU_PREV_LID_ATTR`)。⚠ 順番が主張である:`selectEntryOrExplain` の
     //    後だと、控えるのは**押した行そのもの**になって何も戻らない
     const prevLid = dispatcher.getState().selectedLid;
+    const marksBefore = dispatcher.getState().selection;
     // 🔴 選べなければ出さない(理由は `selectEntryOrExplain` が画面へ出している)
     if (!selectEntryOrExplain(dispatcher, lid, 'ノート')) {
       closeContextMenu(root);
       return;
+    }
+    /**
+     * 🔴 **印を付けた行を右クリックしても、印は消さない**(#215)。
+     *
+     * ⚠ `SELECT_ENTRY` は「これだけを相手にする」の意味で印を 1 件へ戻す(#240 段②)。
+     *   ところが右クリックは**選ぶ操作ではなく、できることを見る操作**である ── 3 件に印を
+     *   付けてから「移す…」を出そうと右クリックした瞬間に印が 1 件になると、
+     *   **押した数と動く数が食い違う**(OS のファイラは、選んだ物の上で右クリックしても
+     *   選択を崩さない)。
+     * 🔑 押した行が印の中に居るときだけ、他の印を戻す(印の外の行を右クリックしたら、
+     *   これまでどおりその 1 件になる ── `TOGGLE_SELECT` は既存の口、規則を増やさない)。
+     */
+    if (marksBefore.length > 1 && marksBefore.includes(lid)) {
+      for (const m of marksBefore) {
+        if (m !== lid) dispatcher.dispatch({ type: 'TOGGLE_SELECT', lid: m });
+      }
     }
     /**
      * 🔴 **条件つきの 2 つを、この 1 件で判定する**(#500 案 C)。
@@ -7617,6 +8533,26 @@ export function bindActions(
      *   将来この面に入力欄が増えたときのための備えとして置いている ── 「これが
      *   無いと壊れる」とは書かない(CLAUDE.md「外して壊れることを 1 度は見る」)。
      */
+    /**
+     * 🔴 **左の列の行で名前を打ち替えている欄の鍵は、ここで完結させる**(#215)。
+     * `Enter` で確定、`Esc` でやめる。⚠ それ以外の鍵は**入力へ通す**(打てなくなる)。
+     * ⚠ 下の `filer` の門より**前**に置く ── 欄はフォルダの表の中に在るので、`Enter` が
+     *   「開く」に、`Backspace` が「親へ」に化けると名前が打てない(2 ペインで踏んだ形)。
+     */
+    if (el instanceof HTMLInputElement && el.matches('[data-pkc-field="row-rename"]')) {
+      const lid = el.getAttribute('data-pkc-entry');
+      if (ke.key === 'Enter' && lid !== null) {
+        ke.preventDefault();
+        commitRowRename(lid, el.value);
+        return;
+      }
+      if (ke.key === 'Escape') {
+        ke.preventDefault();
+        dispatcher.dispatch({ type: 'ROW_RENAME_END' });
+        return;
+      }
+      return;
+    }
     if (!typing && el?.closest('[data-pkc-region="filer-table"]')) {
       const fcmd = keymap.match(ke, 'filer');
       if (fcmd !== null && runFilerKey(fcmd)) {
@@ -7963,6 +8899,11 @@ export function bindActions(
     dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid, title: value });
     dispatcher.dispatch({ type: 'DUAL_RENAME_END' });
   };
+  /** 左の列の行の版(#215)。⚠ 空白だけ / 変わっていない、の判定は reducer が持つ(上と同じ)。 */
+  const commitRowRename = (lid: string, value: string): void => {
+    dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid, title: value });
+    dispatcher.dispatch({ type: 'ROW_RENAME_END' });
+  };
 
   const runDualKey = (cmd: string, side: DualSide): boolean => {
     const st = dispatcher.getState();
@@ -8168,6 +9109,22 @@ export function bindActions(
       focusRow(lid);
       return true;
     }
+    /**
+     * 🔴 **F キーは押しボタンと同じ実体を呼ぶ**(#215。2 ペインの `DUAL_KEY_ACTION` と同型)。
+     * ⚠ 相手は**焦点の行**(無ければ選んでいるノート)── 受け手は `data-pkc-entry` を
+     *   `closest` で辿るので、行そのものを target として渡す。行が無ければ表を渡す
+     *   (受け手が `selectedLid` へ落とす)。
+     */
+    const viaRow = FILER_KEY_ACTION[cmd];
+    if (viaRow !== undefined) {
+      const lid = focusedRowLid() ?? st.selectedLid;
+      const host =
+        (lid === null ? null : rowEl(lid)) ??
+        root.querySelector<HTMLElement>('[data-pkc-region="filer-table"]');
+      if (host === null) return false;
+      run(viaRow, host);
+      return true;
+    }
     if (cmd === 'filer-open') {
       // ⚠ 焦点が先、印は次 ── 理由は `focusedRowLid` の注記
       const lid = focusedRowLid() ?? st.selectedLid;
@@ -8194,6 +9151,13 @@ export function bindActions(
    */
   const onRenameBlur = (ev: Event): void => {
     const el = ev.target;
+    // 🔴 左の列の行の欄も同じ作法(#215)── 他所を押したら確定する
+    if (el instanceof HTMLInputElement && el.matches('[data-pkc-field="row-rename"]')) {
+      if (dispatcher.getState().renamingLid === null) return;
+      const lid = el.getAttribute('data-pkc-entry');
+      if (lid !== null) commitRowRename(lid, el.value);
+      return;
+    }
     if (!(el instanceof HTMLInputElement) || !el.matches('[data-pkc-field="dual-rename"]')) return;
     if (dispatcher.getState().dual.renaming === null) return;
     const lid = el.getAttribute('data-pkc-entry');

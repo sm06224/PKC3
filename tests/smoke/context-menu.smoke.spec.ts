@@ -617,6 +617,56 @@ test('🔴 見出しを右クリックすると、その章を畳める (#426 �
  * ⚠ **章末が `:::` の囲み**である本文にする ── 閉じの `:::` まで入ることが、この機能の
  *   当の主張(`:::` の刻印は開き行にしか無いので、終端の取り方を誤ると閉じが落ちる)。
  */
+/**
+ * 🔴 **章の参照をコピー → 貼って押すと、その見出しまで送られる**(#579)。
+ * ⚠ unit では原理的に届かない 2 つ:① 本物の clipboard を往復して**貼った字が記法として
+ *   成立する**か ② `scrollIntoView` で見出しが**本当に版面の中に来る**か(happy-dom は採寸しない)。
+ */
+test('🔴 見出しを右クリックして「章の参照をコピー」、貼って押すと見出しまで送られる (#579)', async ({
+  page,
+  context,
+}) => {
+  const errors = collectPageErrors(page);
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('相手');
+  // 🔑 第 2 章を**版面の外**まで押し下げる(送られていなければ画面に無い)
+  await page
+    .locator('[data-pkc-field="editor-body"]')
+    .fill(`## 第 1 章\n\n${'うめ\n\n'.repeat(60)}## 第 2 章\n\n第 2 章の中身。\n`);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  const h2 = page.locator('[data-pkc-field="detail-body"] h2', { hasText: '第 2 章' });
+  await h2.scrollIntoViewIfNeeded();
+  await h2.click({ button: 'right' });
+  await page.locator(MENU).locator('button[data-pkc-action="copy-section-ref"]').click();
+  await expect(page.locator('[data-pkc-region="status"]'), '写した合図が出ない').toContainText(
+    '章へのリンクをコピーしました',
+  );
+  const text = await page.evaluate(() => navigator.clipboard.readText());
+  // 🔴 貼れる 1 行 ── 題名 / 見出し、宛先は `entry:<lid>#h/<見出しの id>`(id は描画が刻んだ形)
+  expect(text, '貼れる 1 行になっていない').toMatch(/^\[相手 \/ 第 2 章\]\(entry:[A-Za-z0-9_-]+#h\/第-2-章\)$/);
+
+  // 貼って押す ── 相手が開き、第 2 章まで送られる
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-body"]').fill(`${text}\n`);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await clickReal(page, '[data-pkc-field="detail-body"] [data-pkc-action="navigate-entry-ref"]');
+  const target = page.locator('[data-pkc-field="detail-body"] h2', { hasText: '第 2 章' });
+  await expect(target, '相手が開いていない').toBeVisible();
+  const inView = await target.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const host = el.closest('[data-pkc-region="detail"]')!.getBoundingClientRect();
+    return r.top >= host.top - 1 && r.top < host.bottom;
+  });
+  expect(inView, '第 2 章まで送られていない(版面の外に居る)').toBe(true);
+  await expect(page.locator('[data-pkc-region="status"]'), '見つからないと言われた').not.toContainText(
+    '見出しが見つかりません',
+  );
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
 test('🔴 見出しを右クリックして「この章をコピー」を押すと、章の原文が閉じの ::: まで入る (#677)', async ({
   page,
   context,
@@ -647,5 +697,54 @@ test('🔴 見出しを右クリックして「この章をコピー」を押す
     '## 第 1 章\n\n:::note\n囲みの中\n:::\n',
   );
 
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **まだ何も指していない説明欄には案内が出る**(#705 ③、user 裁定 案 A)。
+ *
+ * 本文のメニューは先頭の項目(段組み)に説明が無いので、開いた直後の欄が**空の灰色の箱**
+ * だった。⚠ 字は CSS(`:empty::before`)が描くので `textContent` は空のまま ──
+ * だから見るのは `getComputedStyle(el, '::before').content` である(user が見る字そのもの)。
+ * ⚠ 説明の在る項目に乗せたら案内は消え、その説明だけが出る(対照群)。
+ */
+test('🔴 本文のメニューを開いた直後、説明欄に「項目に乗せると説明が出ます」と薄く出る (#705 ③)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-body"]').fill('案内の的\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(page.locator('[data-pkc-field="detail-body"]')).toBeVisible();
+
+  await page.locator('[data-pkc-field="detail-body"] p').first().click({ button: 'right' });
+  const menu = page.locator(MENU);
+  await expect(menu, '本文で右クリックしてもメニューが出ない').toBeVisible();
+  const hint = menu.locator('[data-pkc-field="context-menu-hint"]');
+  await expect(hint, '説明の欄が無い(本文のメニューに説明を持つ項目が 1 つも無い ── 前提が崩れている)').toBeVisible();
+  // 🔑 前提: 焦点の在る先頭の項目には説明が無い(これが「乗せる前」の姿を作る)
+  const first = menu.locator('button[data-pkc-action]').first();
+  expect(await first.getAttribute('data-pkc-hint'), '先頭の項目に説明が在る(空の欄が作れない ── 前提が崩れている)').toBeNull();
+
+  const before = await hint.evaluate((el) => ({
+    text: el.textContent ?? '',
+    guide: getComputedStyle(el, '::before').content,
+  }));
+  expect(before.text, '欄に字が入っている(案内は CSS で出す設計と違う)').toBe('');
+  expect(before.guide, '空の欄に案内が出ていない(何のための箱か読めない)').toContain('項目に乗せると説明が出ます');
+
+  // 対照群: 説明の在る項目に乗せると、案内は消えて説明だけが出る
+  const withHint = menu.locator('button[data-pkc-hint]').first();
+  const expected = (await withHint.getAttribute('data-pkc-hint')) ?? '';
+  expect(expected, '説明を持つ項目が無い(前提が崩れている)').not.toBe('');
+  await withHint.hover();
+  await expect(hint, '乗せた項目の説明に変わらない').toHaveText(expected);
+  expect(await hint.evaluate((el) => getComputedStyle(el, '::before').content), '説明の上に案内が重なっている').toBe(
+    'none',
+  );
+
+  await page.keyboard.press('Escape');
+  await expect(page.locator(MENU)).toHaveCount(0);
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

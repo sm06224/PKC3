@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
+import { connectStoreEffects, type StorePort } from '../../src/adapter/state/store-effects';
 import { SPLIT_PINNED_MAX, STACK_MAX } from '../../src/features/split-frames';
 
 /** 起動まで進めた dispatcher。⚠ `new Dispatcher()` は `initializing` である。 */
@@ -188,6 +189,78 @@ describe('消したノートを留めたままにしない', () => {
     d.dispatch({ type: 'DELETE_ENTRIES', lids: ['n2'] });
     expect(d.getState().splitLids).toEqual([]);
     expect(d.getState().splitBodies.has('n2')).toBe(false);
+  });
+
+  /**
+   * 🔴 **降ろしたことを 1 行言う**(#633 段①)。直す前は無言だった ── user から見ると
+   *   「札が勝手に消えた」で、なぜ消えたのかがどこにも出ない(dead click の裏返し)。
+   * ⚠ 題名は**降ろす前の** `entryMetas` から引く(消した後では引けない)。
+   */
+  it('🔴 載せていたノートを消すと「消えたので降ろした」と題名つきで言う', () => {
+    const d = booted();
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'n2' });
+    // ⚠ 前提: いまは何も知らせていない(前の知らせに救われない)
+    expect(d.getState().notice).toBeNull();
+    d.dispatch({ type: 'DELETE_ENTRIES', lids: ['n2'] });
+    expect(d.getState().notice).toBe('「ノート 2」は消えたのでスタックから降ろしました');
+  });
+
+  it('⚠ 載せていないノートを消しても、スタックの話はしない(対照群)', () => {
+    const d = booted();
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'n2' });
+    d.dispatch({ type: 'DELETE_ENTRIES', lids: ['n3'] });
+    expect(d.getState().notice).toBeNull();
+    expect(d.getState().splitLids).toEqual(['n2']);
+  });
+
+  /**
+   * 🔴 **効果層の自己修復も同じ字で言う**(`store-effects.ts` が本文 `null` で撃つ形)。
+   * ⚠ 題名が引けないとき(別タブで消され `entryMetas` からも落ちた後)は「消えたノート」。
+   */
+  it('🔴 本文が無くて降ろす(gone)ときも言う ── 題名が引けなければ「消えたノート」', () => {
+    const d = booted();
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'n2' });
+    d.dispatch({ type: 'UNPIN_SPLIT_ENTRY', lid: 'n2', gone: true });
+    expect(d.getState().splitLids).toEqual([]);
+    expect(d.getState().notice).toBe('「ノート 2」は消えたのでスタックから降ろしました');
+    // 題名が引けない形: 先に metas から消えている lid を復元で載せてから降ろす
+    const e = booted();
+    e.dispatch({ type: 'SPLIT_RESTORED', lids: ['ghost'] });
+    expect(e.getState().splitLids, '前提: 知らない lid も復元は落とさない').toEqual(['ghost']);
+    e.dispatch({ type: 'UNPIN_SPLIT_ENTRY', lid: 'ghost', gone: true });
+    expect(e.getState().notice).toBe('「消えたノート」は消えたのでスタックから降ろしました');
+  });
+
+  /**
+   * 🔴 **効果層が本物の `gone` を添えているか**(`store-effects.ts` の本文 `null` の枝)。
+   * ⚠ 上の reducer の test だけでは、効果層が `gone` を落とす変異が生き延びる
+   *   (CLAUDE.md §7「両端が相手を模した stub と話していると、綴りの食い違いが緑のまま通る」)。
+   *   ここは**実物の効果層**に、本文の無い store を繋いで見る。
+   */
+  it('🔴 効果層: 本文が無いノートを載せると、降ろして「消えた」と言う(実物の配線)', async () => {
+    const d = booted();
+    const store = {
+      getBody: () => Promise.resolve(null),
+    } as unknown as StorePort;
+    const off = connectStoreEffects(d, store);
+    try {
+      d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'n2' });
+      // ⚠ 前提: 載った(reducer は metas に居る物を載せる)
+      expect(d.getState().splitLids).toEqual(['n2']);
+      for (let i = 0; i < 10 && d.getState().splitLids.length > 0; i += 1) await Promise.resolve();
+      expect(d.getState().splitLids, '本文が無いのに降りていない').toEqual([]);
+      expect(d.getState().notice).toBe('「ノート 2」は消えたのでスタックから降ろしました');
+    } finally {
+      off();
+    }
+  });
+
+  it('🔴 対照群: user が × で降ろしたときは何も言わない(消えたと嘘を言わない)', () => {
+    const d = booted();
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'n2' });
+    d.dispatch({ type: 'UNPIN_SPLIT_ENTRY', lid: 'n2' });
+    expect(d.getState().splitLids).toEqual([]);
+    expect(d.getState().notice).toBeNull();
   });
 });
 

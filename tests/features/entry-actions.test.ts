@@ -275,6 +275,10 @@ describe('右クリックの説明(#587 C-1)', () => {
       ['adopt-external-images', '36c7974a'],
       ['copy-entry-ref', '2614a326'],
       ['copy-plain-markdown', '73e9b322'],
+      // 🔴 スタックに載せる(#633 段①、2026-09-05)── 帯の名前と押す字を同じ語にし、説明を持たせた
+      ['pin-split', '1621a667'],
+      // 🔴 保存したスタックを載せる(#633 段③)
+      ['stack-load', 'd23f50ac'],
       ['show-history', '2511b05b'],
       ['delete-entry', '661f5844'],
       // 🔴 **左の列の道具 4 つ**(#632 段①)── 本文ページの ⋯ から押せるようにした
@@ -284,6 +288,10 @@ describe('右クリックの説明(#587 C-1)', () => {
       ['start-audio-capture', '6313fe2e'],
       ['start-screen-capture', 'ec055655'],
       ['start-timer', '97214aee'],
+      // 🔴 **左の列の行からの整理 3 つ**(#215、2026-09-05)
+      ['rename-entry-begin', 'c951ee45'],
+      ['move-to-folder', '4cc90354'],
+      ['create-in-folder', '80e07ad8'],
     ];
     const digest = (h: string): string =>
       createHash('sha256').update(h).digest('hex').slice(0, 8);
@@ -305,14 +313,20 @@ describe('右クリックの説明(#587 C-1)', () => {
     expect(drift, '説明の取り違え / 書き換えが記録に残っていない').toEqual([]);
   });
 
-  /** ⚠ 条件つきの 2 つも出る文脈 ── これを使わないと 2 行が**一度も検められない**。 */
+  /**
+   * ⚠ 条件つきの物も出る文脈 ── これを使わないと条件つきの行が**一度も検められない**。
+   * ⚠ 2026-09-05(#633 段③): 種類の条件が 2 つ(フォルダ / スタック)になり、1 つの文脈では
+   *   全部を出せない ── **2 つの文脈の和**で全数を見る。
+   */
   const ALL = { archetype: 'folder', linkedFile: 'メモ.md' } as const;
+  const ALL_STACK = { archetype: 'stack', linkedFile: 'メモ.md' } as const;
 
   it('🔴 出る項目は 1 つ残らず説明を持つ(足した人がここで気づく)', () => {
-    const rows = entryMenuActions(ALL);
-    // ⚠ 空振り防止 ── 条件つきの 2 つを含めて全部出ている
-    expect(rows.length, '条件つきの行が出ていない(台の前提が崩れている)').toBe(
-      ENTRY_MENU_ACTIONS.length,
+    const rows = [...entryMenuActions(ALL), ...entryMenuActions(ALL_STACK)];
+    const seen = new Set(rows.map((a) => a.action));
+    // ⚠ 空振り防止 ── 条件つきの行を含めて全部出ている
+    expect([...seen].sort(), '条件つきの行が出ていない(台の前提が崩れている)').toEqual(
+      ENTRY_MENU_ACTIONS.map((a) => a.action).sort(),
     );
     const silent = rows.filter((a) => a.hint === '').map((a) => a.action);
     expect(silent, '説明が空のまま配られている項目がある').toEqual([]);
@@ -387,16 +401,22 @@ describe('右クリックの説明(#587 C-1)', () => {
     const adopt = rows.find((a) => a.action === 'adopt-external-images');
     expect(adopt?.hint, '外へ通信することが説明に無い').toContain('通信します');
     /**
-     * ⚠ **対照群** ── 説明を持たない 2 つは空のまま(何にでも字を付ける作りではない)。
+     * ⚠ **対照群** ── 説明を持たない 1 つは空のまま(何にでも字を付ける作りではない)。
      * 🔴 **名前で等値 pin する**(2026-09-04)── 1 稿目は
      *   `BODY_MENU_ACTIONS.map(...)` と比べていたので「**本文のメニューは全部
      *   説明を持たない**」を主張していた。⚠ 説明を持つ項目を 1 つ足した瞬間に
      *   落ちる形で、**守りたいこと(説明が要る物には配る)と逆向き**だった。
+     * ⚠ 2026-09-05(#633 段①): `pin-split` は説明を持った(帯の札の話を押す前に読める)ので、
+     *   残るのは段組みだけ。
      */
     expect(
       rows.filter((a) => a.hint === '').map((a) => a.action),
       '説明を持たない項目の一覧が変わった',
-    ).toEqual(['cycle-read-columns', 'pin-split']);
+    ).toEqual(['cycle-read-columns']);
+    expect(
+      rows.find((a) => a.action === 'pin-split')?.hint ?? '',
+      'スタックに載せる の説明が帯の話をしていない',
+    ).toContain('帯');
     // ⚠ **空振り防止** ── 名前で pin した 2 つが、いまも本文のメニューに居ること
     expect(
       BODY_MENU_ACTIONS.map((a) => a.action),
@@ -418,6 +438,78 @@ describe('右クリックの説明(#587 C-1)', () => {
  *   (参照をコピー / 素の Markdown)の**間に割り込んでいた**。写す 2 つを隣に戻し、
  *   小窓はその次。⚠ 情報ペインの並びは `tests/adapter/inspector-titles.test.ts` が pin する。
  */
+/**
+ * 🔴 **左の列の行から整理ができる 3 つ**(#215)。
+ *
+ * ⚠ 直す前、行の右クリックでフォルダにできることは「フォルダを書き出す」の 1 件だけで、
+ *   改名は 2 ペインの `F2` にしか無かった(左の列には口が 1 つも無い)。
+ * 🔑 **既存の並びを動かさない**(user 裁定 2026-09-04)── だから履歴の下・削除の上。
+ */
+describe('行の右クリックからの整理(#215)', () => {
+  const acts = (ctx: { archetype: string | null; linkedFile: string | null }): string[] =>
+    entryMenuActions(ctx).map((a) => a.action);
+
+  it('🔴 「名前を変える」「移す…」はどの行にも出る', () => {
+    for (const ctx of [
+      { archetype: 'text', linkedFile: null },
+      { archetype: 'folder', linkedFile: null },
+      { archetype: null, linkedFile: null },
+    ]) {
+      expect(acts(ctx), `${JSON.stringify(ctx)} で改名が出ない`).toContain('rename-entry-begin');
+      expect(acts(ctx), `${JSON.stringify(ctx)} で移すが出ない`).toContain('move-to-folder');
+    }
+  });
+
+  it('🔴 「この中に新しいノートを作る」はフォルダのときだけ(ノートの中には作れない)', () => {
+    expect(acts({ archetype: 'folder', linkedFile: null })).toContain('create-in-folder');
+    expect(acts({ archetype: 'text', linkedFile: null })).not.toContain('create-in-folder');
+    // ⚠ 種類が分からないときは**出さない側**へ倒す(`export-folder` と同じ)
+    expect(acts({ archetype: null, linkedFile: null })).not.toContain('create-in-folder');
+  });
+
+  it('🔑 既存の並びを動かさない ── 3 つは履歴の下・削除の上に居る', () => {
+    const a = acts({ archetype: 'folder', linkedFile: 'memo.md' });
+    for (const x of ['rename-entry-begin', 'move-to-folder', 'create-in-folder']) {
+      expect(a.indexOf(x), `${x} が履歴より上に居る(既存の並びを動かした)`).toBeGreaterThan(
+        a.indexOf('show-history'),
+      );
+      expect(a.indexOf(x), `${x} が削除より下に居る`).toBeLessThan(a.indexOf('delete-entry'));
+    }
+    // ⚠ 3 つの中の並びも固定(改名 → 移す → 作る)── 面ごとに順が違うと探し直しになる
+    expect(a.slice(a.indexOf('rename-entry-begin'), a.indexOf('delete-entry'))).toEqual([
+      'rename-entry-begin',
+      'move-to-folder',
+      'create-in-folder',
+    ]);
+  });
+
+  it('字は画面で起きることで書いてある', () => {
+    expect(ENTRY_ACTION_LABELS['rename-entry-begin']).toBe('名前を変える');
+    expect(ENTRY_ACTION_LABELS['move-to-folder']).toBe('移す…');
+    expect(ENTRY_ACTION_LABELS['create-in-folder']).toBe('この中に新しいノートを作る');
+  });
+});
+
+/**
+ * 🔴 **スタックの字は 1 つの語**(#633 段①。user 裁定 2026-09-02 設問 3 = A)。
+ *
+ * ⚠ 段① の着地時、右クリックの字だけ「このノートを横に留める」のまま残っていた ──
+ *   帯の名前は「スタック」、枠の字は「× 降ろす」、マニュアルは同じ節で
+ *   「横に留める」と「スタックに載せる」の 2 つの名前を使っていた。
+ *   帯に並んだ物と押した物の対応が読めない形である。
+ * 🔑 押す字とマニュアルの字を**同じ文字列**で pin する(片方だけ直る日を作らない)。
+ */
+describe('スタックの字(#633 段①)', () => {
+  it('🔴 本文のメニューの字は「このノートをスタックに載せる」で、マニュアルも同じ字を使う', () => {
+    const label = BODY_MENU_ACTIONS.find((a) => a.action === 'pin-split')?.label;
+    expect(label).toBe('このノートをスタックに載せる');
+    const manual = readFileSync('docs/manual.md', 'utf-8');
+    expect(manual, 'マニュアルに押す字が無い').toContain(`**${label}**`);
+    // ⚠ 古い字が 1 つでも残ると、同じ節に 2 つの名前が並ぶ(直す前の姿)
+    expect(manual, 'マニュアルに古い字「横に留める」が残っている').not.toContain('横に留める');
+  });
+});
+
 describe('小窓の字と並び(#690 I1 / I2)', () => {
   it('🔴 字は「別のウィンドウで開く」(右クリックと本文のメニューの両方)', () => {
     const labels = [...ENTRY_MENU_ACTIONS, ...BODY_MENU_ACTIONS]

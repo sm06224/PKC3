@@ -47,6 +47,7 @@ import { MAX_TAGS, sameTag } from '@features/flavor/tags';
 import type { TaskScan } from '@features/schedule/task-cards';
 import type { ContactScan } from '@features/contact/contact-card';
 import type { SnippetScan } from '@features/snippet/snippet-table';
+import type { SearchDetailRow } from '@features/filter/search-snippet';
 import type { Relation } from '@core/model/entry-meta';
 import type { Dispatcher } from './dispatcher';
 import type { TagInputField } from './app-state';
@@ -63,8 +64,17 @@ export interface StorePort {
   /**
    * 本文の全文検索(#181)。⚠ **省略可** ── 検索を持たない環境(test の fake や
    * 旧い配線)では題名の絞り込みだけが効く(壊れるのではなく、機能が減るだけ)。
+   * ⚠ **`truncated` を捨てない**(#680)── worker は上限(200 件)で切ったことを
+   *   返しているのに、直す前はここで `.lids` だけ取って**黙って落としていた**。
+   *   user から見ると「201 件目からは無い」に読める(§1「無言の欠落」)。
    */
-  searchEntries?(query: string): Promise<string[]>;
+  searchEntries?(query: string): Promise<{ lids: string[]; truncated: boolean }>;
+  /**
+   * 探す面の検索(#680)── 題名 + 抜粋 + 関連度。⚠ **省略可**(古い worker が
+   * service worker のキャッシュに残っている端末では未知の op になる ── そのとき
+   * 面は「この版では探せません」と断るだけで、左の列の絞り込みは効いたまま)。
+   */
+  searchDetail?(query: string): Promise<{ rows: SearchDetailRow[]; truncated: boolean }>;
   /**
    * 🔴 このノートを参照しているノート(#348)。⚠ **optional** ── 古い worker が
    * service worker のキャッシュに残っている端末では未知の op になる。
@@ -277,6 +287,14 @@ export interface StoreEffects {
   run<T>(job: () => Promise<T>): Promise<T>;
 }
 
+/**
+ * 🔴 **探す面が打鍵の後、何 ms 止まってから worker を叩くか**(#680)。
+ * ⚠ 左の列の絞り込み(`REQUEST_SEARCH`)は打鍵ごとに叩く ── あちらは lid だけ返す
+ *   軽い問い合わせで、題名の当たりが同期に出るので待たせない。こちらは抜粋と
+ *   関連度を組むぶん重いので、**止まってから 1 回**にする。
+ */
+export const SEARCH_DETAIL_DEBOUNCE_MS = 300;
+
 /** `settled()` が待つ最大の巡回数(積まれ続ける相手で永久に待たないための上限)。 */
 const SETTLE_ROUNDS_MAX = 20;
 
@@ -300,6 +318,8 @@ export function connectStoreEffects(
 ): StoreEffects {
   let queue: Promise<void> = Promise.resolve();
   let disposed = false;
+  /** 探す面の debounce の手(#680)。⚠ 解くときに止める ── 解いた後に撃たない。 */
+  let detailTimer: ReturnType<typeof setTimeout> | null = null;
   const officeInstalled = opts.officeInstalled ?? ((): boolean => false);
   /**
    * 🔑 タイル一覧の**出口は 1 つ**(CLAUDE.md §7「同じ値を複数の経路へ渡すものは
@@ -472,15 +492,46 @@ export function connectStoreEffects(
         if (!search || ev.query.trim() === '') break;
         const q = ev.query;
         void search(q).then(
-          (lids) => {
+          ({ lids, truncated }) => {
             if (disposed) return;
-            dispatcher.dispatch({ type: 'SET_SEARCH_HITS', query: q, lids });
+            dispatcher.dispatch({ type: 'SET_SEARCH_HITS', query: q, lids, truncated });
           },
           () => {
             /* ⚠ 検索の失敗で帯を出さない ── 題名の絞り込みは効いたままで、
                user の操作は止まっていない(黙って減るのは「増えない」方向) */
           },
         );
+        break;
+      }
+      /**
+       * 🔴 **探す面の検索**(#680)。⚠ **直列 queue に載せない**(左の列の検索と同じ)。
+       * 🔑 **300ms 止まってから 1 回**叩く ── 打鍵ごとに来る依頼のうち、最後の 1 つだけを
+       *   生かす(前の手は止める)。遅れて返った結果は reducer が `query` で捨てる。
+       * ⚠ op を持たない store(古い worker)なら**その場で「探せない」を返す** ──
+       *   黙って何も返さないと、面は「探しています…」で永久に止まる。
+       */
+      case 'REQUEST_SEARCH_DETAIL': {
+        const ask = store.searchDetail;
+        if (detailTimer !== null) clearTimeout(detailTimer);
+        detailTimer = null;
+        const q = ev.query;
+        if (!ask) {
+          dispatcher.dispatch({ type: 'SEARCH_DETAIL_FAILED', query: q });
+          break;
+        }
+        detailTimer = setTimeout(() => {
+          detailTimer = null;
+          if (disposed) return;
+          void ask(q).then(
+            ({ rows, truncated }) => {
+              if (disposed) return;
+              dispatcher.dispatch({ type: 'SET_SEARCH_DETAIL', query: q, rows, truncated });
+            },
+            () => {
+              if (!disposed) dispatcher.dispatch({ type: 'SEARCH_DETAIL_FAILED', query: q });
+            },
+          );
+        }, SEARCH_DETAIL_DEBOUNCE_MS);
         break;
       }
       /**
@@ -863,12 +914,36 @@ export function connectStoreEffects(
              * 🔑 `SPLIT_RESTORED` が知らない lid を落とさないのは、ここが拾うからである。
              */
             if (body === null) {
-              dispatcher.dispatch({ type: 'UNPIN_SPLIT_ENTRY', lid: ev.lid });
+              // 🔑 `gone` を添える ── reducer が「消えたので降ろした」と 1 行言う(#633 段①)
+              dispatcher.dispatch({ type: 'UNPIN_SPLIT_ENTRY', lid: ev.lid, gone: true });
               return;
             }
             dispatcher.dispatch({ type: 'SPLIT_BODY_LOADED', lid: ev.lid, body });
           } catch {
             // ⚠ 読めなかっただけ ── 留めは外さない(次に開いたときにもう一度読む)
+          }
+        });
+        break;
+      /**
+       * 🔴 **保存したスタックの本文を読む**(#633 段③)── 画面に無いときだけ来る。
+       * ⚠ 読めなければ理由を言う(押しても無言、にしない)。読む口は同じ直列の列。
+       */
+      case 'REQUEST_STACK_BODY':
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            const body = await store.getBody(ev.lid);
+            if (disposed) return;
+            if (body === null) {
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: 'スタックの本文が読めませんでした(消えている可能性があります)',
+              });
+              return;
+            }
+            dispatcher.dispatch({ type: 'STACK_BODY_LOADED', lid: ev.lid, body });
+          } catch {
+            dispatcher.dispatch({ type: 'OP_FAILED', error: 'スタックの本文が読めませんでした' });
           }
         });
         break;
@@ -1920,6 +1995,9 @@ export function connectStoreEffects(
 
   const dispose: StoreEffects = (): void => {
     disposed = true;
+    // ⚠ 探す面の待ちの手も止める(解いた後に worker を叩かない)
+    if (detailTimer !== null) clearTimeout(detailTimer);
+    detailTimer = null;
     unsubscribe();
   };
   /**

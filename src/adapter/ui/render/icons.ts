@@ -140,6 +140,17 @@ const ICON_PATHS: Readonly<Record<string, readonly IconPath[]>> = {
     'M3 6.5h6.5l2.5 4H21V19.5H3z',
     { d: 'M12 12l1.2 2.5 2.8.4-2 2 .5 2.7-2.5-1.3-2.5 1.3.5-2.7-2-2 2.8-.4z', fill: 'solid' },
   ],
+  /**
+   * 🔴 **スタック**(#633 段③)── 重ねた 2 枚の札に**星**を重ねる。
+   * ⚠ フォルダとも普通のノートとも**見分けが付く**ことが要件 ── 中へは入れない・
+   *   手で子を入れる物ではない(本文の参照の並び)ので、同じ絵にすると「壊れている」と読まれる。
+   *   星はスマートフォルダと同じ「参照で集める入れ物」の印。
+   */
+  stack: [
+    'M5 8.5h11v9H5z',
+    'M8 5.5h11v9',
+    { d: 'M10.5 11l1.1 2.2 2.4.4-1.7 1.7.4 2.4-2.2-1.2-2.2 1.2.4-2.4-1.7-1.7 2.4-.4z', fill: 'solid' },
+  ],
   /** アプリ ── 4 枚の板。⚠ 塗る(中空だと 16px で泥になる) */
   apps: [
     { d: 'M4 4h6.5v6.5H4z', fill: 'solid' },
@@ -304,6 +315,7 @@ export const ARCHETYPE_ICONS: Readonly<Record<string, IconName>> = {
   spreadsheet: 'grid',
   folder: 'folder',
   smart: 'folder-smart',
+  stack: 'stack',
   attachment: 'clip',
   todo: 'check-box',
   form: 'form',
@@ -360,6 +372,15 @@ export function iconSpan(name: IconName): HTMLSpanElement {
 export function setIcon(span: Element, name: IconName): void {
   span.replaceChildren(svgIcon(name));
 }
+
+/**
+ * 🔴 **編集の出口 2 つの説明**(#716)。中央の帯(`detail.ts`)と追記欄(`append-box.ts`)の
+ * 両方に同じ action のボタンが在り、字は「保存 / キャンセル」で揃えた ── 説明も
+ * ここ 1 か所から引く(2 か所に書くと、片方だけ直る)。
+ * ⚠ 文言は**起きること**で書く(user 指示 2026-08-21)。
+ */
+export const COMMIT_EDIT_HINT = '本文を保存して編集を終えます';
+export const CANCEL_EDIT_HINT = '変更を捨てて編集を終えます';
 
 /**
  * 図案つきボタンを作る。⚠ **中身の構造を 1 か所に固定する** ── ばらばらに組むと

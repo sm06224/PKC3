@@ -25,6 +25,8 @@
  * ⚠ **pure module**。browser API を持たない。
  */
 
+import { STACK_ARCHETYPE } from './flavor/stack-flavor';
+
 /** 操作 1 つ。`action` は `data-pkc-action` の値と**同じ綴り**である。 */
 export interface EntryAction {
   readonly action: string;
@@ -40,7 +42,7 @@ export interface EntryAction {
    *   本文を読まないと決まらない条件をここへ入れると、右クリックした瞬間に
    *   worker を叩く経路がもう 1 本増える(§7)。
    */
-  readonly when?: 'folder' | 'linked';
+  readonly when?: 'folder' | 'linked' | 'stack';
 }
 
 /**
@@ -62,6 +64,8 @@ const WHEN: Readonly<
 > = {
   folder: (ctx) => ctx.archetype === 'folder',
   linked: (ctx) => ctx.linkedFile !== null,
+  // 🔴 保存したスタック(#633 段③)── 綴りは flavor の 1 か所から引く
+  stack: (ctx) => ctx.archetype === STACK_ARCHETYPE,
 };
 
 /**
@@ -137,6 +141,12 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    *   字(「すでに別のウィンドウで開いています」)が全部「ウィンドウ」なので揃える。
    */
   { action: 'open-note-window', label: '別のウィンドウで開く' },
+  /**
+   * 🔴 **保存したスタックを、いまのスタックの上に積む**(#633 段③。user 裁定 2026-08-30)。
+   * ⚠ スタックの入れ物にだけ出す(`when: 'stack'`)── 他のノートで押しても積む物が無い。
+   * ⚠ 開いただけでは横の枠は変わらない(設計 doc §2-8)── 押した瞬間に積まれる。
+   */
+  { action: 'stack-load', label: 'このスタックを載せる', when: 'stack' },
   { action: 'export-entry', label: '書き出す' },
   /**
    * 🔴 **相手に渡せる 1 枚**(#491。user 報告 2026-08-27
@@ -194,6 +204,25 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    */
   { action: 'write-back-file', label: '書き戻す', when: 'linked' },
   { action: 'show-history', label: '履歴' },
+  /**
+   * 🔴 **左の列の行から、整理ができる 3 つ**(#215。user 裁定 2026-09-04「全部推薦で」)。
+   *
+   * ## 直す前に無かったもの
+   *
+   * フォルダの整理は**帯**(居場所の `<select>` / 上へ・下へ)と D&D に在ったが、
+   * **行を右クリックしても**フォルダにできることは「フォルダを書き出す」の 1 件だけだった。
+   * 改名は 2 ペインの `F2` にしか無く、**左の列には口が 1 つも無かった**。
+   *
+   * ⚠ **既存の並びは動かさない**(user 裁定 2026-09-04、#690 I2 ── 新しい操作のために
+   *   毎日使う項目を 1 つ下へずらさない)。だから**履歴の下・削除の上**に足す。
+   *   削除は `TRAILING_ACTIONS` が常に末尾へ回す。
+   * 🔑 受け手は既存の実体を呼ぶ ── 改名は `RENAME_ENTRY_TITLE`、移すは D&D と同じ
+   *   `moveEntries`、作るは `create-entry` と同じ経路(規則を 2 本にしない。§7)。
+   * ⚠ 「移す…」は**印が複数あれば印の全部**を動かす(D&D と同じ)── 題名にその件数が出る。
+   */
+  { action: 'rename-entry-begin', label: '名前を変える' },
+  { action: 'move-to-folder', label: '移す…' },
+  { action: 'create-in-folder', label: 'この中に新しいノートを作る', when: 'folder' },
   { action: 'delete-entry', label: '削除' },
 ];
 
@@ -212,7 +241,7 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
  * #426 自身が「**入口を増やすのは安いが、中身が育つと畳めなくなる**」と書いている。
  * ⚠ だから**黙って増やさない** ── 1 行ごとに、なぜここでなければならないかを書く。
  * いま在るのは 3 つで、理由はそれぞれ下に書いてある(段組み = user の依頼 #522 /
- * 横に留める = 行から留めると同じ物が 2 枚並ぶ / 取り込み = **本文が開いている
+ * スタックに載せる = 行から載せると同じ物が 2 枚並ぶ / 取り込み = **本文が開いている
  * ときにしか数えられない**)。
  *
  * ⚠ **既定を奪う場面は増やさない** ── リンク・図・入力欄・選択範囲の上では
@@ -235,7 +264,7 @@ export const BODY_MENU_ACTIONS: readonly EntryAction[] = [
    * ⚠ 外す口は**枠の中の `× 外す`** に在る ── 置けるなら外せる
    * (user 指示 2026-08-23)。
    */
-  { action: 'pin-split', label: 'このノートを横に留める' },
+  { action: 'pin-split', label: 'このノートをスタックに載せる' },
   /**
    * 🔴 **読んでいるノートを、そのまま隅へ出す**(#685、user 裁定 2026-09-04。
    *   動線レビュー 欠陥 6 / 案 E)。
@@ -243,7 +272,7 @@ export const BODY_MENU_ACTIONS: readonly EntryAction[] = [
    * ## ⚠ なぜ本文の右クリックにも要るのか
    *
    * 一覧の行から開く道は在るが、本文を読みながら「これを隅に出したい」と思った人の
-   * 手は**まず本文の上へ行く**。そこには既に「横に留める」が在るので、
+   * 手は**まず本文の上へ行く**。そこには既に「スタックに載せる」が在るので、
    * 「似た機能はここに集まっている」と読む ── なのに付箋だけ無かった。
    * 🔑 ここから開けば、**探し直しが 1 度も要らない**(行から開く道は
    *   `MENU_PREV_LID_ATTR` で現在地を戻しているが、こちらはそもそも動かない)。
@@ -295,8 +324,8 @@ export function bodyMenuActions(
    *
    * ⚠ 字は新しく書かない。`ENTRY_ACTION_HINTS` に**既に在る**(情報ペインで出ている)
    *   ものを、同じ操作の別の面へ配るだけである。
-   * ⚠ 説明を持たない 2 つ(段組み / 横に留める)は `''` のまま ──
-   *   `openContextMenu` が空を落とすので、**空の `title` は生えない**。
+   * ⚠ 説明を持たない 1 つ(段組み)は `''` のまま ── `openContextMenu` が空を落とすので、
+   *   **空の `title` は生えない**(「スタックに載せる」は #633 段① で説明を持った)。
    */
   const withHint = (a: EntryAction): EntryAction & { readonly hint: string } => ({
     ...a,
@@ -372,7 +401,7 @@ export function noteToolActions(): readonly (EntryAction & { readonly hint: stri
  * ## ⚠ なぜ「増える」であって「差し替える」ではないか
  *
  * 見出しは**本文の中**に在るので、いまも右クリックすれば本文のメニューが出る
- * (段組みを切り替える / 横に留める / 取り込む)。🔴 見出し用に**差し替える**と、
+ * (段組みを切り替える / スタックに載せる / 取り込む)。🔴 見出し用に**差し替える**と、
  * 見出しの上でだけ段組みが切り替えられなくなる ── **いま在る動線を 1 つ失う**
  * (user 裁定 2026-08-07「記法を減らすことは、user の動線を減らすことである」の向き)。
  * 🔑 だから**頭へ足す**。押した物に近い順に並ぶので、読む順も素直である。
@@ -387,8 +416,9 @@ export function noteToolActions(): readonly (EntryAction & { readonly hint: stri
  *
  * 🔑 近道は**残す**(増やすだけ。#426「既存の操作を移さない」)。
  *
- * ⚠ **「章の参照をコピー」はここに入れない** ── 見出しを指す断片の形が
- * まだ無く、足すのは**記法を 1 つ増やす**ことなので、別に裁定を仰ぐ(#426)。
+ * ⚠ #426 の時点では「章の参照をコピー」を入れていなかった(見出しを指す断片の形が
+ * 無かった)。#579(user 裁定 2026-09-04)で `entry:<lid>#h/<見出しの id>` の形が
+ * 入ったので、ここにも出す(下の注記)。
  */
 export const HEADING_MENU_ACTIONS: readonly EntryAction[] = [
   { action: 'edit-from-heading', label: 'ここから編集する' },
@@ -396,10 +426,17 @@ export const HEADING_MENU_ACTIONS: readonly EntryAction[] = [
   { action: 'toggle-heading-fold', label: 'この見出しの中身を畳む' },
   /**
    * 🔴 **章をまるごと原文で写す**(#677。user 裁定 2026-09-04)。
-   * ⚠ 「章の参照をコピー」(上の注記)とは別物 ── こちらは**記法を増やさない**。
+   * ⚠ 下の「章の参照をコピー」とは別物 ── こちらは**記法を増やさない**。
    *   写るのは見出しから次の同段以上の見出しの直前までの **Markdown の原文**である。
    */
   { action: 'copy-chapter-md', label: 'この章をコピー' },
+  /**
+   * 🔴 **章を指すリンクを写す**(#579。user 裁定 2026-09-04)── `[題名 / 見出し](entry:<lid>#h/<id>)`。
+   * ⚠ 「この章をコピー」の隣 ── どちらも clipboard へ写す物なので並べる。
+   * ⚠ 出るのは**id を持つ見出しだけ**(`#`〜`###` ── 描画が id を刻む深さ)。
+   *   `####` 以下に出すと、押しても指す先が無い(`headingMenuActions` の `linkable`)。
+   */
+  { action: 'copy-section-ref', label: '章の参照をコピー' },
 ];
 
 /**
@@ -421,11 +458,14 @@ export const HEADING_MENU_ACTIONS: readonly EntryAction[] = [
  * @param appendable 追記の入り先にできるか ── 追記は `text` / `textlog` だけで、
  *   入り先の一覧は **`#` 〜 `###` しか数えない**(`append-target.ts`)。
  *   ⚠ `####` 以下で出すと、**押した見出しではなく上の `###`** が入り先になる
+ * @param linkable 章の参照を作れるか(#579)── その見出しが **id を持つ**とき
+ *   (描画は `#`〜`###` にだけ id を刻む)。無い見出しに出すと、押しても指す先が無い
  */
 export function headingMenuActions(ctx: {
   readonly folded: boolean;
   readonly foldable: boolean;
   readonly appendable: boolean;
+  readonly linkable: boolean;
 }): readonly EntryAction[] {
   const out: EntryAction[] = [{ action: 'edit-from-heading', label: 'ここから編集する' }];
   if (ctx.appendable) out.push({ action: 'append-at-heading', label: 'ここに追記する' });
@@ -442,6 +482,8 @@ export function headingMenuActions(ctx: {
      */
     out.push({ action: 'copy-chapter-md', label: 'この章をコピー' });
   }
+  // 🔴 章の参照(#579)── 畳めるかとは無関係(引用や `:::` の中の見出しにも id は刻まれる)
+  if (ctx.linkable) out.push({ action: 'copy-section-ref', label: '章の参照をコピー' });
   return out;
 }
 
@@ -586,6 +628,14 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
     'このノートへのリンクをコピーします。別のノートの本文に貼ると、押して飛べます',
   'copy-plain-markdown':
     'PKC3 独自の記法を外した素の Markdown としてコピーします。他のツールへ貼るための形です',
+  /**
+   * 🔴 **スタックに載せる**(#633 段①。user 裁定 2026-09-02 設問 3 = A)。
+   * ⚠ 帯の名前(スタック)と押す字を**同じ語**にする ── 違うと、帯に並んだ物と
+   *   押した物の対応が読めない。説明は**押した後に画面で起きること**で書く。
+   */
+  'pin-split': '一番上に載って横の枠に出ます。上の帯に並び、押せば一番上へ戻せます',
+  // 🔴 保存したスタックを載せる(#633 段③)── 積む(入れ替えない)ことと、消えた物の扱いを先に言う
+  'stack-load': 'このノートに並んだリンク先を、いま横に出ている物の上に積みます(消えた物は数えて言います)',
   'show-history': '過去の版を一覧します',
   // ⚠ **行き先は画面に在る名前で書く**(2026-08-29 の動線レビュー)── 直す前は
   //    「フォルダ画面」と書いていたが、**その名前の画面は無い**(タブの字は「フォルダ」で、
@@ -594,6 +644,11 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
   //    **同じ名前で逆の操作**(選んだ物をゴミ箱へ入れる)が在る。
   //    🔑 字はマニュアル §6「左の列の **フォルダ** タブの中」に揃える。
   'delete-entry': 'ゴミ箱へ移します(左の列の「フォルダ」タブの中のゴミ箱から戻せます)',
+  // 🔴 **左の列の行からの整理 3 つ**(#215)。⚠ どれも**画面で起きること**で書く
+  //    (user 指示 2026-08-21)── 「改名モードへ遷移」ではなく「入力欄が出る」
+  'rename-entry-begin': '行の題名の所に入力欄が出ます。Enter で確定、Esc でやめます',
+  'move-to-folder': 'フォルダの一覧から入れ先を選びます。印が複数あれば、その全部を移します',
+  'create-in-folder': 'このフォルダの中に新しいノートを作って、そのまま編集に入ります',
 };
 
 /**

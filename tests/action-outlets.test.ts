@@ -118,6 +118,13 @@ const OBJECT_LONE: readonly string[] = [
   'retry-persist',
   'set-entry-date',
   'shape-cell',
+  /**
+   * 🔴 **スタックの「保存…」は帯にしか無い**(#633 段③)── 帯は載せているときだけ出る
+   *   本文の上の 1 行で、保存の対象(いまの並び)もそこにしか見えない。⚠ 鍵の口は
+   *   置いていない(載せる / 開く / 全部降ろす の 3 手は #633 段②)。増やすなら
+   *   `KEY_COMMANDS` へ ── 増えた日にここが落ちて気づく。
+   */
+  'stack-save',
   'storage-profile',
   'toggle-app-tile',
   'unschedule-task',

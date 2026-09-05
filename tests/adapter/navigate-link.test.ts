@@ -19,8 +19,9 @@
  * - 🔴 **キーボードで押せる** ── `@card` の placeholder は `role="link"
  *   tabindex="0"` なのに、Enter が効かなかった
  */
-import { describe, expect, it, beforeEach } from 'vitest';
+import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
+import { PAINTED_ATTR } from '../../src/adapter/ui/render/detail';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import type { AppState, Dispatchable } from '../../src/adapter/state/app-state';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
@@ -207,6 +208,83 @@ describe('🔴 断るときは理由を出す', () => {
  * ので開けるようにしたが、**別のノートへ移るのは下書きを捨てること**である ──
  * 止めるのは正しく、無言なのが間違いだった。
  */
+/**
+ * 🔴 **`#h/<見出しの id>` のリンクは、開いた後にその見出しへ飛ぶ**(#579)。
+ *
+ * ⚠ 飛ぶ機構は目次と同じ `tocJump` ── ここで見るのは**配線**(リンク → 開く → 飛ぶ)。
+ *   描き直しの完了は `PAINTED_ATTR` が lid を刻むこと(台では「描けている」を先に置く)。
+ * ⚠ happy-dom に `scrollIntoView` は無いので、見出しに stub を植えて「飛んだ」を数える
+ *   (`inspector-toc.test.ts` と同じ作法)。
+ */
+describe('🔴 章を指すリンク(#579)', () => {
+  /** 本文の面。`lid` の本文が描けている印を刻み、`ids` の見出しを置く。 */
+  function plantBody(lid: string, ids: readonly string[]): Record<string, HTMLElement> {
+    const detail = document.createElement('div');
+    detail.setAttribute('data-pkc-region', 'detail');
+    const host = document.createElement('div');
+    host.setAttribute('data-pkc-field', 'detail-body');
+    host.setAttribute(PAINTED_ATTR, lid);
+    const out: Record<string, HTMLElement> = {};
+    for (const id of ids) {
+      const h = document.createElement('h2');
+      h.id = id;
+      h.textContent = id;
+      h.scrollIntoView = vi.fn();
+      host.append(h);
+      out[id] = h;
+    }
+    detail.append(host);
+    root.append(detail);
+    return out;
+  }
+  const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 20));
+
+  it('🔴 開いて、その見出しへ飛ぶ(日本語の id。URL の形で届く)', async () => {
+    const { dispatcher, lastError } = makeDispatcher();
+    stop = bindActions(root, dispatcher);
+    const hs = plantBody('b', ['ほか', '見出し']);
+    // ⚠ markdown-it が href を percent-encode するので、DOM に載る形で押す
+    entryLink('entry:b#h/%E8%A6%8B%E5%87%BA%E3%81%97').click();
+    await settle();
+    expect(dispatcher.getState().selectedLid, '開いていない').toBe('b');
+    expect(hs['見出し']!.scrollIntoView, '見出しへ飛んでいない').toHaveBeenCalled();
+    expect(hs['ほか']!.scrollIntoView, '別の見出しへ飛んだ').not.toHaveBeenCalled();
+    expect(lastError(), '飛べたのに理由が出ている').toBeNull();
+  });
+
+  it('🔴 見出しが無ければ、ノートは開いたうえで理由を出す(字が変わったのかもしれない)', async () => {
+    const { dispatcher, lastError } = makeDispatcher();
+    stop = bindActions(root, dispatcher);
+    plantBody('b', ['ほか']);
+    entryLink('entry:b#h/消えた見出し').click();
+    await settle();
+    expect(dispatcher.getState().selectedLid, 'ノートまで開いていない').toBe('b');
+    expect(lastError() ?? '', '無言で終わった').toContain('見出しが見つかりません');
+    expect(lastError() ?? '').toContain('字が変わった');
+  });
+
+  it('⚠ 対照群 ── `#h/` の無いリンクは、これまでどおり開くだけ(飛ばない)', async () => {
+    const { dispatcher, lastError } = makeDispatcher();
+    stop = bindActions(root, dispatcher);
+    const hs = plantBody('b', ['見出し']);
+    entryLink('entry:b').click();
+    await settle();
+    expect(dispatcher.getState().selectedLid).toBe('b');
+    expect(hs['見出し']!.scrollIntoView, '断片が無いのに飛んだ').not.toHaveBeenCalled();
+    expect(lastError()).toBeNull();
+  });
+
+  it('⚠ 対照群 ── `#log/…` は lid だけで開き、見出しは探さない', async () => {
+    const { dispatcher, lastError } = makeDispatcher();
+    stop = bindActions(root, dispatcher);
+    plantBody('b', ['見出し']);
+    entryLink('entry:b#log/01H').click();
+    await settle();
+    expect(dispatcher.getState().selectedLid).toBe('b');
+    expect(lastError(), '見出しを探して断った(1 段目の約束を壊した)').toBeNull();
+  });
+});
+
 describe('🔴 一覧のノートを押したとき', () => {
   /** 4 面が同じ action を出すので、受け手 1 か所で 4 面とも直る。 */
   function row(lid: string): HTMLElement {

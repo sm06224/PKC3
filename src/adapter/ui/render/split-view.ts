@@ -290,9 +290,11 @@ export class SplitView {
      * ⚠ **指紋で早く返る** ── 題名まで含める(改名に追随する)。
      * 🔑 含めないと、載せたノートの名前を変えても帯が古い字のまま残る。
      */
-    const key = want
-      .map((lid) => `${lid}\u0001${state.entryMetas.get(lid)?.title ?? ''}\u0001${show.includes(lid) ? '1' : '0'}`)
-      .join('\u0002');
+    // ⚠ 編集中かも指紋に入れる ── 「保存…」の押せる / 押せないが切り替わる
+    const key =
+      want
+        .map((lid) => `${lid}\u0001${state.entryMetas.get(lid)?.title ?? ''}\u0001${show.includes(lid) ? '1' : '0'}`)
+        .join('\u0002') + (state.phase === 'editing' ? '\u0003e' : '');
     if (this.band !== null && key === this.bandKey) return;
     this.bandKey = key;
     if (this.band === null) {
@@ -324,6 +326,25 @@ export class SplitView {
       card.append(up, off);
       band.append(card);
     }
+    /**
+     * 🔴 **いまの並びを入れ物(ノート)として保存する**(#633 段③。user 裁定 2026-08-30
+     * 「スタックをグループとして参照のみのフォルダとして保存する機能もつけろ」)。
+     *
+     * ⚠ 右端に 1 つ。押すと題名を聞く小さい窓が出て、本文がリンクの箇条書きのノートが
+     *   できる(受け手は `binder.ts` の `stack-save`)。⚠ 読んでいる本文は退かさない。
+     * ⚠ 編集中は押せない(`disabled` + 理由)── 押せるのに無言、を作らない(#513)。
+     */
+    const save = doc.createElement('button');
+    save.type = 'button';
+    save.setAttribute('data-pkc-action', 'stack-save');
+    save.textContent = '保存…';
+    if (state.phase === 'editing') {
+      save.disabled = true;
+      save.title = '編集を終えてから保存できます';
+    } else {
+      save.title = 'いまの並びを「スタック」のノートとして保存します(開いている本文はそのままです)';
+    }
+    band.append(save);
   }
 
   /** 器を並びへ合わせる。⚠ **同じなら 1 バイトも触らない**(scroll と図が生き残る)。 */

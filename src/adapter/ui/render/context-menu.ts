@@ -44,6 +44,12 @@ export interface MenuItem {
    * 🔑 字の組み立ては `features/entry-actions.ts` の `menuShortcutFor` 1 か所。
    */
   readonly shortcut?: string;
+  /**
+   * その項目だけに付ける属性(#701)。⚠ `carry` は**全項目**に写す物(押した物の身元)なので、
+   *   受け手が項目ごとに読む値(`data-pkc-pane` など)はこちらに書く ── `carry` に混ぜると
+   *   関係の無い項目まで同じ属性を持ち、読み手が取り違える。
+   */
+  readonly attrs?: Readonly<Record<string, string>>;
 }
 
 /** 近道の字を持つ属性(`data-pkc-shortcut`)。⚠ CSS と unit はこの名前で見る。 */
@@ -108,6 +114,7 @@ export function openContextMenu(
      * 🔑 だから開くときに写す ── 受け手は**自分の属性**を読めばよい。
      */
     for (const [k, v] of Object.entries(carry)) b.setAttribute(k, v);
+    for (const [k, v] of Object.entries(it.attrs ?? {})) b.setAttribute(k, v);
     el.append(b);
   }
   root.append(el);

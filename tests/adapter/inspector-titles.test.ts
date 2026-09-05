@@ -73,6 +73,8 @@ const EXPECTED_ACTIONS: readonly string[] = [
   'copy-plain-markdown',
   // 🔴 付箋(#685 段②、2026-09-04)── ⋯ と情報ペインの両方に出す
   'open-note-window',
+  // 🔴 保存したスタックを載せる(#633 段③)── スタックの入れ物のときだけ出る(他では hidden)
+  'stack-load',
   'adopt-external-images',
   'export-entry',
   'export-entry-html',
@@ -81,6 +83,10 @@ const EXPECTED_ACTIONS: readonly string[] = [
   'export-entry-pptx',
   'export-entry-pdf',
   'show-history',
+  // 🔴 左の列の整理 3 つ(#215)── 右クリックと同じ並び(履歴の下・削除の上)
+  'rename-entry-begin',
+  'move-to-folder',
+  'create-in-folder',
   'delete-entry',
 ];
 

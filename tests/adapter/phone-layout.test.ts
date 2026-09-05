@@ -19,7 +19,12 @@ import { buildShell } from '../../src/adapter/ui/render/shell';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { appPhone } from '../../src/adapter/ui/render/phone-layout';
 import { appPanes, applyPaneVisibility } from '../../src/adapter/ui/render/pane-visibility';
-import { PHONE_MAX_HEIGHT_PX, PHONE_MAX_PX, PHONE_MIN_PX } from '../../src/features/phone-layout';
+import {
+  PHONE_MAX_HEIGHT_PX,
+  PHONE_MAX_PX,
+  PHONE_MIN_PX,
+  TABLET_MAX_PX,
+} from '../../src/features/phone-layout';
 import { ENTRY_MENU_ACTIONS, NOTE_TOOL_ACTIONS } from '../../src/features/entry-actions';
 import { blocksFor, decl, mediaBlock, stripComments, withoutMedia } from '../helpers/css-blocks';
 
@@ -82,8 +87,10 @@ function setup(phone: boolean) {
    *   `s.narrow.set(true)` で狭める。
    */
   const narrow = new FakeMedia(false);
+  /** タブレットの見張り(#703)。⚠ 問いは `min-width` を持つ唯一の 1 本 ── 既定は `false`。 */
+  const tablet = new FakeMedia(false);
   const mm = (q: string): FakeMedia =>
-    q.includes(`${PHONE_MIN_PX - 1}px`) ? narrow : media;
+    q.includes(`${PHONE_MIN_PX - 1}px`) ? narrow : q.includes('min-width') ? tablet : media;
   appPhone.install(root, mm, () => applyPaneVisibility(root, appPanes.getHidden()));
   const push = (): void => {
     const st = d.getState();
@@ -103,6 +110,7 @@ function setup(phone: boolean) {
     said,
     media,
     narrow,
+    tablet,
     shell,
     page: () => shell.getAttribute('data-pkc-page'),
     layout: () => shell.getAttribute('data-pkc-layout'),
@@ -211,6 +219,123 @@ describe('版面の切り替え(属性)', () => {
     s.media.set(true);
     expect(s.layout()).toBe('phone');
     expect(s.page()).toBe('note');
+  });
+});
+
+/**
+ * 🔴 **タブレット(721〜1100px)は情報を畳んだ状態で開き、「情報」で重ねて出す**(#703。
+ * user 裁定 2026-09-04 案 A)。
+ *
+ * ⚠ 判定はスマホと**同じ 1 本**(`phonePageOf` + `open`)── 別の bit を生やしていないことを、
+ *   同じ `page()` / 同じ受け手(`phone-page`)で見る。寸法(本文が 6 割・重なる)は
+ *   `tests/smoke/layout.smoke.spec.ts` が実ブラウザで見る。
+ */
+describe('タブレットの版面(#703)', () => {
+  const tabletUp = () => {
+    const s = setup(false);
+    s.tablet.set(true);
+    return s;
+  };
+
+  it('🔴 layout=tablet になり、何も選んでいなければ帯は出ない', () => {
+    const s = tabletUp();
+    expect(s.layout()).toBe('tablet');
+    expect(s.bar().hidden, '何も開いていないのに帯が出た').toBe(true);
+    // ⚠ 3 面のどれも inert にしない(一覧は列のまま押せる)
+    for (const r of ['sidebar', 'center', 'inspector'])
+      expect(s.shell.querySelector(`[data-pkc-region="${r}"]`)!.hasAttribute('inert'), `${r} が inert`).toBe(false);
+  });
+
+  it('🔴 ノートを開くと帯は「題名 ｜ 情報」だけ ── ← 一覧 と ⋯ は出ない', () => {
+    const s = tabletUp();
+    s.open('n1');
+    expect(s.page()).toBe('note');
+    expect(s.bar().hidden).toBe(false);
+    expect(s.field('phone-title').textContent).toBe('買い物');
+    expect(s.field('phone-back').hidden, '一覧が列で出ているのに「← 一覧」が出た').toBe(true);
+    expect(s.field('phone-menu').hidden, '⋯ が出た(中身は左の列から届く)').toBe(true);
+    expect(s.field('phone-info').hidden).toBe(false);
+    expect(s.field('phone-info').getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('🔴 「情報」を押すと page=info、もう一度押すと note に戻る(同じボタンで閉じる)', () => {
+    const s = tabletUp();
+    s.open('n1');
+    s.field('phone-info').click();
+    expect(s.page()).toBe('info');
+    expect(s.field('phone-info').hidden, '情報を出したら「情報」が消えた(閉じる口が無い)').toBe(false);
+    expect(s.field('phone-info').getAttribute('aria-pressed')).toBe('true');
+    s.field('phone-info').click();
+    expect(s.page(), 'もう一度押しても閉じない(片道)').toBe('note');
+    expect(s.field('phone-info').getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('🔴 別のノートへ移ると情報は自分で閉じる(スマホと同じ判定 1 本)', () => {
+    const s = tabletUp();
+    s.open('n1');
+    s.field('phone-info').click();
+    expect(s.page()).toBe('info');
+    s.open('n2');
+    expect(s.page()).toBe('note');
+  });
+
+  it('🔴 編集中に「情報」を押すと理由が出て、ページは動かない', () => {
+    const s = tabletUp();
+    s.open('n1');
+    s.d.dispatch({ type: 'START_EDIT' });
+    s.field('phone-info').click();
+    expect(s.page()).toBe('note');
+    expect(s.said.join(' ') + (s.d.getState().error ?? ''), '無言で断った').toContain('保存するか取り消してから');
+  });
+
+  it('🔴 PC の幅へ広げれば印も帯も消える / スマホが優先(両方真ならスマホ)', () => {
+    const s = tabletUp();
+    s.open('n1');
+    s.tablet.set(false);
+    expect(s.layout()).toBeNull();
+    expect(s.page()).toBeNull();
+    expect(s.bar().hidden).toBe(true);
+    s.tablet.set(true);
+    s.media.set(true);
+    expect(s.layout(), 'スマホとタブレットが両方真ならスマホ').toBe('phone');
+  });
+
+  it('⚠ 対照群: スマホの「情報」の動きは変わっていない(情報ページで「情報」は消える)', () => {
+    const s = setup(true);
+    s.open('n1');
+    s.field('phone-info').click();
+    expect(s.page()).toBe('info');
+    expect(s.field('phone-info').hidden).toBe(true);
+    expect(s.field('phone-info').hasAttribute('aria-pressed'), 'スマホの「情報」にトグルの印が付いた').toBe(false);
+  });
+
+  it('🔴 TABLET_MAX_PX は CSS の 2 列の版面の境目(@media max-width)と同じ数字', () => {
+    const css = stripComments(readFileSync('src/styles/app.css', 'utf-8'));
+    const widths = [...css.matchAll(/@media \(max-width: (\d+)px\)/g)].map((m) => Number(m[1]));
+    expect(widths, '幅の @media が読めていない(空振り)').not.toHaveLength(0);
+    expect(Math.max(...widths), 'TS の境目と CSS の 2 列の境目がずれている').toBe(TABLET_MAX_PX);
+  });
+
+  it('🔴 CSS: タブレットでは情報を display:none にし、page=info で本文のマス(detail)に重ねて出す', () => {
+    const bareCss = withoutMedia(stripComments(readFileSync('src/styles/app.css', 'utf-8')));
+    const TABLET = "[data-pkc-region='shell'][data-pkc-layout='tablet']";
+    const folded = blocksFor(bareCss, `${TABLET} [data-pkc-region='inspector']`).join(' ');
+    expect(folded, '畳んだ状態で開く規則が無い').toMatch(decl('display', 'none'));
+    const shown = blocksFor(bareCss, `${TABLET}[data-pkc-page='info'] [data-pkc-region='inspector']`).join(' ');
+    expect(shown, '重ねて出す規則が無い').toContain('grid-area: detail');
+    expect(shown, '出す側が display を戻していない').toMatch(decl('display', 'flex'));
+    // 帯は本文のマスの上端(スマホと同じ)、丈は 1 か所の変数から
+    const bar = blocksFor(bareCss, `${TABLET} [data-pkc-region='phone-bar']`).join(' ');
+    expect(bar).toContain('grid-area: detail');
+    expect(bar).toContain('align-self: start');
+    expect(shown, '帯のぶんを空けていない').toContain('padding-top: var(--pkc-phone-bar)');
+    // ⚠ 数字を CSS に書いていない(`TABLET_MAX_PX` は @media の既存の 1 本にだけ在る)
+    const tabletRules = [...bareCss.matchAll(/([^{}]+)\{[^{}]*\}/g)]
+      .map((m) => m[1]!.trim())
+      .filter((sel) => sel.includes("data-pkc-layout='tablet'"));
+    expect(tabletRules.length).toBeGreaterThan(2);
+    for (const sel of tabletRules)
+      expect(sel, `タブレットの規則が畳みの属性を読んでいる: ${sel}`).not.toContain('data-pkc-hidden-panes');
   });
 });
 
@@ -565,6 +690,39 @@ describe('⋯ と左の列の等値(次に足した人が気づく)', () => {
     );
     expect(acts[acts.length - 1], '削除がいちばん下ではない').toBe('delete-entry');
     expect(acts[acts.length - 2], '操作を探す が削除の直前ではない').toBe('open-palette');
+  });
+
+  /**
+   * 🔴 **⋯ から追記欄を畳める / 戻せる**(#701 C)。
+   * ⚠ スマホの取っ手は 8px で、⋯ の 15 項目にも無かった ── 畳めることを知る口が 1 つも無い。
+   * 🔑 受け手は `toggle-pane`(新しい受け手を作らない)、押した結果は shell の属性で見る。
+   */
+  it('🔴 ⋯ に「追記欄を畳む」が在り、押すと畳まれ、次は「追記欄を戻す」になる (#701)', () => {
+    const s = setup(true);
+    s.open('n1');
+    s.field('phone-menu').click();
+    const item = s.menu()!.querySelector<HTMLElement>('button[data-pkc-action="toggle-pane"]');
+    expect(item, '⋯ に追記欄の項目が無い').not.toBeNull();
+    expect(item!.textContent).toBe('追記欄を畳む');
+    expect(item!.getAttribute('data-pkc-pane'), '受け手が読む面の名前が無い(押しても何も起きない)').toBe('append');
+    item!.click();
+    expect(s.shell.getAttribute('data-pkc-hidden-panes') ?? '', '押しても畳まれない').toContain('append');
+    s.field('phone-menu').click();
+    expect(
+      s.menu()!.querySelector('button[data-pkc-action="toggle-pane"]')!.textContent,
+      '畳んだ後の字が「戻す」になっていない(片道に見える)',
+    ).toBe('追記欄を戻す');
+    // ⚠ 置き場は「操作を探す」の直前(先頭 4 つと右クリックの並びは崩さない)
+    const acts = [...s.menu()!.querySelectorAll('button')].map((b) => b.getAttribute('data-pkc-action'));
+    expect(acts[acts.length - 3], '「操作を探す」の直前に無い').toBe('toggle-pane');
+  });
+
+  it('⚠ 追記欄の出ない種類(フォルダ)では ⋯ に出さない', () => {
+    const s = setup(true);
+    s.d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [META('f1', '箱', 'folder')], relations: [] });
+    s.open('f1');
+    s.field('phone-menu').click();
+    expect(s.menu()!.querySelector('button[data-pkc-action="toggle-pane"]'), 'フォルダで追記欄の項目が出た').toBeNull();
   });
 
   it('🔴 表と実物の綴りが合っている(受け手を新しく作っていない)', () => {
@@ -982,7 +1140,7 @@ describe('対応外の幅(変わったときだけ伝える)', () => {
    * ⚠ 数字ではなく**問い合わせた字**で見る ── 替え玉の `matches` を手で動かす台では、
    *   実装がどの幅を聞いたかは**この記録にしか出ない**。
    */
-  it('🔴 見張りは 2 本で、対応外は 360px 未満を聞いている', () => {
+  it('🔴 見張りは 3 本で、対応外は 360px 未満を聞いている', () => {
     const asked: string[] = [];
     const off = document.createElement('div');
     off.setAttribute('data-pkc-slot', 'root');
@@ -998,10 +1156,13 @@ describe('対応外の幅(変わったときだけ伝える)', () => {
      */
     expect(asked, '見張りの本数が違う').toEqual([
       `(max-width: ${PHONE_MAX_PX}px), (max-height: ${PHONE_MAX_HEIGHT_PX}px)`,
+      // ⚠ 2 本目はタブレット(#703)── スマホの外側で、幅が `TABLET_MAX_PX` まで、
+      //    かつ高さがスマホの上限より大きい(横向きのスマホは 1 本目が拾う)
+      `(min-width: ${PHONE_MAX_PX + 1}px) and (max-width: ${TABLET_MAX_PX}px) and (min-height: ${PHONE_MAX_HEIGHT_PX + 1}px)`,
       `(max-width: ${PHONE_MIN_PX - 1}px)`,
     ]);
-    // ⚠ 空振り防止 ── 2 本が**別の幅**を聞いている(同じ字なら片方は無意味である)
-    expect(asked[0], '2 本が同じ幅を聞いている').not.toBe(asked[1]);
+    // ⚠ 空振り防止 ── 3 本が**別の幅**を聞いている(同じ字なら 1 本は無意味である)
+    expect(new Set(asked).size, '同じ幅を 2 回聞いている').toBe(3);
   });
 });
 
@@ -1108,6 +1269,25 @@ describe('CSS(構文で読む)', () => {
       );
   });
 
+  /**
+   * 🔴 **スマホでは本文の上の題名を出さない**(#705 ①)── 帯が同じ題名を持つので 2 段重ねだった。
+   * ⚠ 消すのは本文の面(`center`)の題名だけ ── 編集中の題名の欄は打つ物なので残る。
+   *   実ブラウザで「消えていて、帯に題名が在る」は `phone.smoke.spec.ts` が見る。
+   */
+  it('🔴 スマホでは本文の上の題名(detail-title)を出さない ── 帯の題名だけ', () => {
+    const text = withoutMedia(bare());
+    const b = blocksFor(text, `${PHONE} [data-pkc-region='center'] [data-pkc-field='detail-title']`);
+    expect(b.length, '題名を消す規則が無い(帯と本文で題名が 2 段重ねになる)').toBeGreaterThan(0);
+    expect(b.join('\n'), '題名が消えていない').toMatch(decl('display', 'none'));
+    // ⚠ 編集中の題名の欄まで消していない(打つ物)
+    expect(
+      blocksFor(text, `${PHONE} [data-pkc-region='center'] [data-pkc-field='editor-title']`).join('\n'),
+      '編集中の題名の欄まで消している',
+    ).not.toMatch(decl('display', 'none'));
+    // ⚠ 対照群: PC(スマホの印が無い)には当てない ── 規則が phone の印を条件に持つことで担保
+    expect(blocksFor(text, "[data-pkc-region='center'] [data-pkc-field='detail-title']"), 'PC でも題名を消している').toHaveLength(0);
+  });
+
   it('🔴 3 面は同じセルに重なり、出ていない面は visibility で消す', () => {
     const body = blocksFor(withoutMedia(bare()), `${PHONE} [data-pkc-region='sidebar']`).join(' ');
     expect(body, '一覧を重ねる規則が無い').toContain('grid-area: detail');
@@ -1164,7 +1344,8 @@ describe('CSS(構文で読む)', () => {
     const pane = blocksFor(bareCss, `${PHONE}[data-pkc-page='pane'] [data-pkc-region='center']`);
     expect(pane.join(' '), '帯の出ないページにも隙間を空けている').not.toContain('padding-top');
     // 🔑 丈の定義は 1 か所(shell)
-    const shell = blocksFor(bareCss, PHONE).join(' ');
+    // ⚠ #703 でタブレットにも帯が出るので、置き場は「版面の印を持つ shell」(`[data-pkc-layout]`)
+    const shell = blocksFor(bareCss, "[data-pkc-region='shell'][data-pkc-layout]").join(' ');
     expect(shell, '帯の丈を shell に置いていない(面が継げない)').toContain('--pkc-phone-bar:');
   });
 

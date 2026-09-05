@@ -896,7 +896,14 @@ test('🔴 狭い画面でも「書き出す / 履歴 / 削除」に手が届く
      *   届き方が「同じ画面に見えている」から「1 回押せば出る」に変わっただけで、
      *   ⚠ 押しても出ないなら**ここで落ちる**(押す口も観測点に入っている)。
      */
-    if (width <= 720) await clickReal(page, '[data-pkc-field="phone-info"]');
+    /**
+     * 🔴 **1100px 以下は「情報」を押してから見る**(#703。2026-09-05)── タブレットの幅でも
+     *   情報は畳んだ状態で開き、本文の上の「情報」で本文に重ねて出す。主張は変わらない:
+     *   **その 3 つに手が届くこと**。⚠ 既に出ている回(スマホへ狭めたときに `open` が
+     *   引き継がれる)は押さない ── 押すとタブレットでは閉じる(トグル)。
+     */
+    if (width <= 1100 && !(await page.locator('[data-pkc-region="inspector"]').isVisible()))
+      await clickReal(page, '[data-pkc-field="phone-info"]');
     for (const a of ACTIONS) {
       const el = page.locator(`[data-pkc-action="${a}"]`).first();
       await expect(el, `${width}px で ${a} が画面から消えた`).toBeVisible();
@@ -909,6 +916,99 @@ test('🔴 狭い画面でも「書き出す / 履歴 / 削除」に手が届く
   }
 
   expect(errors).toEqual([]);
+});
+
+/**
+ * 🔴 **タブレットの幅(721〜1100px)では、情報は畳んだ状態で開き、押すと本文に重なる**
+ * (#703。user 裁定 2026-09-04 案 A)。
+ *
+ * ## 直す前(2026-09-05 実測)
+ *
+ * 情報ペインが本文の下に寝て 30vh を常に取り、768×1024 で本文 592px(58%)/ 1024×768 で
+ * 424px(55%)。1024×768 では「探す」欄が並び順の選択に押されて **56px**(「:」1 字ぶん)。
+ *
+ * ## ここで見るもの(2 つの窓で同じ主張)
+ *
+ * ① 開いた直後、本文の器が窓の高さの 60% 以上・情報は出ていない
+ * ② 「情報」を押すと情報が**本文のマスに重なって**出る(x が本文の列、幅が本文と同じ)
+ * ③ もう一度押すと閉じる(片道にしない)
+ * ④ 「探す」欄に 8 字打って全部見える(`scrollWidth <= clientWidth`)
+ */
+for (const [w, h] of [
+  [768, 1024],
+  [1024, 768],
+] as const) {
+  test(`🔴 タブレット ${w}×${h}: 情報は畳んで開き、「情報」で本文に重なり、もう一度で閉じる (#703)`, async ({
+    page,
+  }) => {
+    const errors = collectPageErrors(page);
+    await page.setViewportSize({ width: w, height: h });
+    await gotoApp(page);
+    await dismissAnnounce(page);
+    await createEntry(page, 'text');
+    await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+
+    await expect(page.locator('[data-pkc-region="shell"]'), 'タブレットの版面になっていない').toHaveAttribute(
+      'data-pkc-layout',
+      'tablet',
+    );
+    const inspector = page.locator('[data-pkc-region="inspector"]');
+    await expect(inspector, '開いた直後から情報が出ている(本文の下に寝ている)').toBeHidden();
+    const body = (await page.locator('[data-pkc-region="detail"]').boundingBox())!;
+    expect(
+      body.height / h,
+      `本文の器が窓の 6 割に届かない(${Math.round(body.height)}px / ${h}px)`,
+    ).toBeGreaterThanOrEqual(0.6);
+
+    // ② 押すと本文のマスに重なる
+    await clickReal(page, '[data-pkc-field="phone-info"]');
+    await expect(inspector, '「情報」を押しても出ない').toBeVisible();
+    const center = (await page.locator('[data-pkc-region="center"]').boundingBox())!;
+    const info = (await inspector.boundingBox())!;
+    expect(Math.abs(info.x - center.x), `情報が本文の列に重なっていない(x ${info.x} / 本文 ${center.x})`).toBeLessThan(2);
+    expect(Math.abs(info.width - center.width), '情報の幅が本文と違う').toBeLessThan(2);
+    expect(info.height / h, '情報が画面の半分も無い(30vh の帯のまま)').toBeGreaterThan(0.5);
+    // 情報の中の操作に手が届く(押せる場所に居る)
+    await expect(page.locator('[data-pkc-region="inspector"] [data-pkc-action="export-entry"]')).toBeVisible();
+
+    // ③ もう一度で閉じる ── 「情報」は出したまま(居る場所へ行くボタンではなく、閉じる口)
+    await clickReal(page, '[data-pkc-field="phone-info"]');
+    await expect(inspector, 'もう一度押しても閉じない(片道)').toBeHidden();
+
+    // ④ 探す欄に 8 字
+    const filter = page.locator('[data-pkc-field="entry-filter"]');
+    await filter.fill('12345678');
+    const fits = await filter.evaluate((el) => ({
+      fits: el.scrollWidth <= el.clientWidth,
+      w: Math.round(el.getBoundingClientRect().width),
+    }));
+    expect(fits.fits, `探す欄に 8 字が入らない(幅 ${fits.w}px)`).toBe(true);
+
+    expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+  });
+}
+
+/**
+ * ⚠ **対照群(#703)── 1440×900 は 3 列のまま**:情報は右の列に出ていて、帯は出ない。
+ * 🔑 これが無いと「いつでも畳んで開く」実装が上を満たして通る。
+ */
+test('⚠ 1440×900 では情報は右の列に出たままで、帯は出ない (#703 対照群)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  await createEntry(page, 'text');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  expect(
+    await page.locator('[data-pkc-region="shell"]').getAttribute('data-pkc-layout'),
+    '広い窓に版面の印が付いた',
+  ).toBeNull();
+  const info = (await page.locator('[data-pkc-region="inspector"]').boundingBox())!;
+  const center = (await page.locator('[data-pkc-region="center"]').boundingBox())!;
+  expect(info.width, '情報が出ていない').toBeGreaterThan(100);
+  expect(info.x, '情報が本文の右に居ない').toBeGreaterThanOrEqual(center.x + center.width);
+  await expect(page.locator('[data-pkc-region="phone-bar"]'), '広い窓に帯が出ている').toBeHidden();
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 
 /**
@@ -1016,6 +1116,25 @@ test('🔴 編集中は「書き出す / 履歴 / 削除」が押せない(見�
     // 理由が読める(押せない理由が分からないほうが困る)
     await expect(el).toHaveAttribute('title', /編集中は使えません/);
   }
+  /**
+   * 🔴 **見た目でも押せないと分かる**(#715)。`disabled` 属性は user には見えない ──
+   *   直す前は `:disabled` の見た目の規則が名指しの 4 か所にしか無く、この 12 個は
+   *   編集中でも押せるボタンと同じ顔だった。unit は CSS を構文で読むだけ
+   *   (`button-disabled-css.test.ts`)── **実際に薄いか**はここでしか見えない。
+   * ⚠ 観測点は computed style(`opacity` / `cursor`)と、帯の直上の 1 行の可視。
+   */
+  const del = page.locator('[data-pkc-region="inspector"] [data-pkc-action="delete-entry"]');
+  const look = () =>
+    del.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return { opacity: Number(s.opacity), cursor: s.cursor };
+    });
+  const dim = await look();
+  expect(dim.opacity, `編集中の「削除」が薄くなっていない(opacity ${dim.opacity})`).toBeLessThan(1);
+  expect(dim.cursor, '編集中の「削除」の cursor が not-allowed でない').toBe('not-allowed');
+  const note = page.locator('[data-pkc-field="inspector-editing-note"]');
+  await expect(note, '押せない理由の 1 行が出ていない').toBeVisible();
+  await expect(note).toHaveText(/保存するか、キャンセルすると戻ります/);
 
   // ③ 取り消すと戻る
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="cancel-edit"]');
@@ -1025,6 +1144,11 @@ test('🔴 編集中は「書き出す / 履歴 / 削除」が押せない(見�
       `編集をやめても ${a} が押せないまま`,
     ).toBeEnabled();
   }
+  // ⚠ 見た目も戻る(片道にしない)── 薄いまま残ると「押せるのに押せなさそう」になる
+  const back = await look();
+  expect(back.opacity, `編集をやめても「削除」が薄いまま(opacity ${back.opacity})`).toBe(1);
+  expect(back.cursor).not.toBe('not-allowed');
+  await expect(note, '編集をやめても理由の 1 行が残っている').toBeHidden();
 
   expect(errors).toEqual([]);
 });

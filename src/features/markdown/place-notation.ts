@@ -90,7 +90,7 @@ function fenceMask(lines: readonly string[], from: number): boolean[] {
  * 🔑 描画の行番号は fence の中を指さないが、**行番号は掴んだ時点のもの**なので、
  *   別の窓の書込で同じ字面の行が fence の中へ移った形を最後の門で止める。
  */
-function insideFence(lines: readonly string[], from: number, line: number): boolean {
+export function insideFence(lines: readonly string[], from: number, line: number): boolean {
   return fenceMask(lines, from)[line] === true;
 }
 

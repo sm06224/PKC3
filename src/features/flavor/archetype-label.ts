@@ -27,6 +27,8 @@ export const ARCHETYPE_LABELS: readonly (readonly [string, string])[] = [
   ['spreadsheet', '表'],
   ['folder', 'フォルダ'],
   ['smart', 'スマートフォルダ'],
+  // 🔴 スタックを保存した入れ物(#633 段③)── 順序つきの参照だけを持つ
+  ['stack', 'スタック'],
   ['attachment', '添付'],
   ['snippet', '雛形'],
   ['todo', 'Todo'],

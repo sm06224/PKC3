@@ -59,6 +59,41 @@ describe('リンクの解決(entry:)', () => {
   });
 });
 
+/**
+ * 🔴 **`#h/<見出しの id>` は、lid に加えて飛ぶ先(`section`)を運ぶ**(#579)。
+ * ⚠ 他の断片(`#log/` / `#day/` / legacy)は `section: null` のまま ── lid まで開く 1 段目の約束は変わらない。
+ */
+describe('章を指す参照の解決(#579)', () => {
+  it('🔴 `#h/…` は section に見出しの id が載る(URL の形からも同じ id)', () => {
+    for (const raw of ['entry:abc#h/見出し', 'entry:abc#h/%E8%A6%8B%E5%87%BA%E3%81%97']) {
+      const t = parseLinkTarget(raw);
+      expect(t.kind).toBe('entry');
+      if (t.kind !== 'entry') return;
+      expect(t.lid).toBe('abc');
+      expect(t.section, `${raw} の見出しが解けていない`).toBe('見出し');
+    }
+  });
+
+  it('⚠ 対照群 ── 他の断片は section を持たない(lid だけで開く)', () => {
+    for (const raw of ['entry:abc', 'entry:abc#log/01H', 'entry:abc#day/2026-08-08', 'entry:abc#x1']) {
+      const t = parseLinkTarget(raw);
+      expect(t.kind === 'entry' && t.section, `${raw} に section が付いた`).toBeNull();
+    }
+  });
+
+  it('🔴 携帯参照(pkc://)の断片も同じ 1 本で解く', () => {
+    const t = parseLinkTarget('pkc://c1/entry/e9#h/%E7%AB%A0');
+    expect(t.kind === 'entry' && t.section).toBe('章');
+    const none = parseLinkTarget('pkc://c1/entry/e9#log/9');
+    expect(none.kind === 'entry' && none.section).toBeNull();
+  });
+
+  it('⚠ 壊れた `#h/`(空 / スラッシュ入り)は断る', () => {
+    expect(parseLinkTarget('entry:abc#h/').kind).toBe('invalid');
+    expect(parseLinkTarget('entry:abc#h/a/b').kind).toBe('invalid');
+  });
+});
+
 describe('リンクの解決(pkc:// の携帯参照)', () => {
   it('entry の携帯参照は開ける', () => {
     const t = parseLinkTarget('pkc://c1/entry/e9#log/9');

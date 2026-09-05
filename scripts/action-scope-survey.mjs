@@ -47,13 +47,15 @@ remove-relation untag-entry smart-cond-remove filter-by-tag
 download-asset view-asset open-office copy-asset-ref navigate-asset-ref revoke-same-origin revoke-extension
 preview-revision restore-revision restore-trash stop-timer discard-timer open-alarm dismiss-alarm
 open-tile deliver-to-extension navigate-entry-ref navigate-card-ref
-dual-bookmark-open dual-bookmark-remove dual-tab-activate unsplit-entry dual-crumb`.split(/\s+/);
+dual-bookmark-open dual-bookmark-remove dual-tab-activate unsplit-entry dual-crumb
+stack-link-up stack-link-down`.split(/\s+/);
 
 /** 点を取るが、state の現在値(`selectedLid` / `dual.focus`)で代替できる。 */
 export const P2 = `select-entry delete-entry enter-folder toggle-todo move-entry move-order-up move-order-down
 adopt-external-images write-back-file export-entry export-entry-pdf export-entry-docx export-entry-pptx
-export-entry-html export-folder copy-entry-ref open-note-window dual-row dual-focus dual-tab-add dual-tab-close
-dual-rename-begin dual-back dual-forward dual-bookmark dual-mkdir dual-mknote dual-copy dual-delete`
+export-entry-html export-folder copy-entry-ref open-note-window stack-load dual-row dual-focus dual-tab-add dual-tab-close
+dual-rename-begin dual-back dual-forward dual-bookmark dual-mkdir dual-mknote dual-copy dual-delete
+rename-entry-begin move-to-folder create-in-folder`
   .split(/\s+/);
 
 /** 閉じた選択肢から 1 つ ── パレットには**値ごとに 1 行**出せる。 */

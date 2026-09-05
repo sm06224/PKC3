@@ -168,6 +168,60 @@ export function confirmInApp(
 }
 
 /**
+ * 🔴 **1 行の字を聞く**(`window.prompt` の置き換え。#633 段③ ── スタックの題名)。
+ *
+ * ⚠ `confirmInApp` と同じ器・同じ列(重なったら順番に出す)。
+ * ⚠ 空のまま受けたら **`initial` へ落とす**(空の題名のノートを作らない)── ただし
+ *   `initial` も空なら空を返す(呼び手が決める)。
+ * ⚠ `Enter` で受ける ── 1 行の欄なので、打ち終わって Enter は「決めた」の意味である
+ *   (`isComposing` の間は拾わない ── 変換確定の Enter で決めてしまう)。
+ *
+ * @returns 打った字(前後の空白は落とす)。`Escape` / 「やめる」なら `null`
+ */
+export function promptInApp(
+  host: HTMLElement,
+  opts: {
+    readonly title: string;
+    /** 欄の上に出す 1 行(何を聞いているか)。 */
+    readonly label: string;
+    readonly initial?: string;
+    readonly okLabel?: string;
+  },
+): Promise<string | null> {
+  return enqueue(async () => {
+    const f = ensureFrame(host);
+    f.title.textContent = opts.title;
+    f.body.textContent = '';
+    const label = document.createElement('label');
+    label.setAttribute('data-pkc-field', 'prompt-label');
+    label.textContent = opts.label;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.setAttribute('data-pkc-field', 'prompt-input');
+    input.value = opts.initial ?? '';
+    label.append(input);
+    f.body.append(label);
+    input.addEventListener('keydown', (ev: KeyboardEvent) => {
+      if (ev.key !== 'Enter' || ev.isComposing) return;
+      ev.preventDefault();
+      f.ok.click();
+    });
+    f.ok.textContent = opts.okLabel ?? '決める';
+    f.ok.removeAttribute('data-pkc-danger');
+    f.ok.hidden = false;
+    f.cancel.textContent = 'やめる';
+    f.cancel.hidden = false;
+    const answered = open(f, 'cancel');
+    input.focus();
+    input.select();
+    const answer = await answered;
+    if (answer !== 'ok') return null;
+    const typed = input.value.trim();
+    return typed === '' ? (opts.initial ?? '') : typed;
+  });
+}
+
+/**
  * 知らせるだけ(`window.alert` の置き換え)。
  * ⚠ ボタンは 1 つ ── 取り消す先が無いのに「やめる」を出さない。
  * 🔴 **知らせるものは絶対に捨てない** ── 断りの理由(「他のタブで編集中です」等)は
@@ -683,15 +737,19 @@ export function pickCommandInApp(
  *
  * @param rows 探し語を受けて「一覧」と「下に出す 1 行」を返す関数。
  *   ⚠ **打つたびに呼ぶ**(開いた瞬間で固めない)
+ * @param opts.title 器の題名。⚠ 省けば「ノートへのリンクを入れる」── 同じ器を
+ *   「移す…」(#215)が入れ先のフォルダを選ぶのに、スタック(#633 段②)が開く 1 枚を選ぶのに
+ *   使うので、**何を選んでいるか**を題名で言う(題は押した物の名前でなければ user は別の操作を開いたと思う)
  * @returns 選んだノートの lid。`Escape` / 「やめる」なら `null`
  */
 export function pickEntryInApp(
   host: HTMLElement,
   rows: (query: string) => { readonly items: readonly EntryPickRow[]; readonly note: string },
+  opts: { readonly title?: string } = {},
 ): Promise<string | null> {
   return enqueue(async () => {
     const f = ensureFrame(host);
-    f.title.textContent = 'ノートへのリンクを入れる';
+    f.title.textContent = opts.title ?? 'ノートへのリンクを入れる';
     f.body.textContent = '';
 
     const input = document.createElement('input');

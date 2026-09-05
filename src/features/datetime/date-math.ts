@@ -28,9 +28,18 @@
 import { storedDateParts } from './stored-date';
 import { pad2 } from './datetime-format';
 
-/** `Date` → `YYYY-MM-DD`。⚠ 桁の詰め方は `pad2` 1 か所。 */
-function stamp(at: Date): string {
-  return `${at.getFullYear()}-${pad2(at.getMonth() + 1)}-${pad2(at.getDate())}`;
+/**
+ * `Date` → **端末の暦日**(`YYYY-MM-DD`。`sep` で区切りを変える ── file 名は `''`)。
+ * ⚠ 桁の詰め方は `pad2` 1 か所。
+ *
+ * 🔴 **書き出す file 名の「今日」もここ 1 つ**(#709)。直す前は 2 系統あり、
+ *   設定 / 連絡先の書き出しは `toISOString().slice(0, 10)`(= **UTC の暦日**)、
+ *   バックアップ / 持ち歩ける 1 枚は端末の暦日だった ── 日本の 0 時〜9 時に押すと
+ *   **同じ日に落とした 2 つの file の日付が食い違う**。⚠ `toISOString` は UTC なので
+ *   「今日」には使わない(`tests/features/date-math.test.ts` が変異で確かめてある)。
+ */
+export function dayStamp(at: Date, sep = '-'): string {
+  return `${at.getFullYear()}${sep}${pad2(at.getMonth() + 1)}${sep}${pad2(at.getDate())}`;
 }
 
 /**
@@ -40,7 +49,7 @@ function stamp(at: Date): string {
 export function addDays(date: string, days: number): string | null {
   const p = storedDateParts(date);
   if (p === null) return null;
-  return stamp(new Date(Number(p.year), Number(p.month) - 1, Number(p.day) + days));
+  return dayStamp(new Date(Number(p.year), Number(p.month) - 1, Number(p.day) + days));
 }
 
 /**

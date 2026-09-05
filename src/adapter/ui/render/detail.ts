@@ -26,6 +26,9 @@ import { hydrateChart } from './chart-raster';
 import { readFenceAssetText } from '@features/asset/fence-asset-read';
 import { applyHeadingFold } from './heading-fold';
 import { applyPlaceLayout } from './place-board';
+import { installBlockGrip } from './block-grip';
+import { applyStackControls } from './stack-controls';
+import { STACK_ARCHETYPE } from '@features/flavor/stack-flavor';
 
 /**
  * 🔴 **図とグラフは同じ面に出る**(#188)── 器を埋める呼び出しを 1 つに束ねる。
@@ -47,7 +50,7 @@ import {
   stepFor,
   undo,
 } from '@features/markdown/edit-journal';
-import { iconButton } from './icons';
+import { CANCEL_EDIT_HINT, COMMIT_EDIT_HINT, iconButton } from './icons';
 import { buildFormatBar } from './format-bar';
 import { hasSourceSelection } from '../actions/copy-source';
 import {
@@ -800,6 +803,18 @@ export class DetailRenderer {
          *   消えるため(見出しの畳みと同じ理由)。
          */
         applyPlaceLayout(host, (l) => state.entryMetas.get(l)?.title ?? null, frontmatterLineCount(body));
+        /**
+         * 🔴 **本文の塊を掴む口**(#684 段①)── 面に 1 個だけ置き、乗せた塊の横へ移す。
+         * ⚠ 描画のたびに呼ぶ(いま描いてある本文を差し替える)。板の面では出ない。
+         * ⚠ 添付の説明(`renderAttachment`)は**別経路**なので、ここを通らない = 口は出ない。
+         */
+        installBlockGrip(this.region, host, lid, body);
+        /**
+         * 🔴 **保存したスタックの中は、読む面から並べ替えられる**(#633 段④)── 各行に「上へ / 下へ」。
+         * ⚠ 描画のたびに呼ぶ(冪等)── 塊が差し替わると押し所が消えるため(畳み・板と同じ理由)。
+         * ⚠ 入れ物(`stack`)だけ ── 普通のノートの箇条書きのリンクに生やさない。
+         */
+        if (meta?.archetype === STACK_ARCHETYPE) applyStackControls(host, frontmatterLineCount(body));
         // ⚠ 帯は**本文が入ってから**組む(数えるものが DOM に無いと 0 件になる)
         this.renderExternalImageBar(lid, host);
         this.restoreScroll();
@@ -1133,6 +1148,9 @@ export class DetailRenderer {
     bar.setAttribute('data-pkc-field', 'detail-toolbar');
     const commit = iconButton('commit-edit', '保存');
     const cancel = iconButton('cancel-edit', 'キャンセル');
+    // ⚠ 説明は追記欄の同じ出口と**同じ字**(#716)── 正本は `icons.ts` の 2 定数
+    commit.title = COMMIT_EDIT_HINT;
+    cancel.title = CANCEL_EDIT_HINT;
     bar.append(commit, cancel);
     this.region.append(bar);
     // 🔑 **書式パネル**(P8 段⑥)。編集欄のすぐ上 ── 押す物と効く先を離さない

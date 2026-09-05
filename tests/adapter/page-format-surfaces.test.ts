@@ -43,10 +43,24 @@ const READ_WIDTH_RULES = ((): {
    * いまは **2 本**:① 本文ブロックの allow-list ② ライブエディタで生になった行
    * (印が付いたときだけ掛かる。2026-08-08 に ① から切り出した ── 一緒にすると
    *  表・コードを押した編集欄まで散文の幅へ縮む)。ここが見たいのは ①。
+   * ⚠ 2026-09-05 に **3 本目**が増えた:③ csv の表の器(#704、裁定 案 A「読み幅の中で
+   *  器いっぱい」)。③は散文ではないので**この file の対象外**だが、数だけで縛ると
+   *  ③を足した日にここが割れる ── 🔑 **名指しの既知リスト**にする(数ではなく身元)。
+   *  ⚠ ③が `--pkc-prose-block` を立てていないことは `table-width-css.test.ts` が見る
+   *  (立てると、ここで守っている「表の編集欄は縮めない」が csv で破れる)。
    */
-  if (hits.length !== 2) throw new Error(`本文の読み幅の規則が ${hits.length} 本(2 本のはず)`);
-  const block = hits.find((r) => r.selector.includes(':is('));
-  const row = hits.find((r) => r.selector.includes('data-pkc-row-slot'));
+  const OTHER_READ_WIDTH_RULES: readonly string[] = [
+    ".pkc-md-rendered[data-pkc-prose] > .pkc-md-block[data-pkc-render-lang='csv']",
+  ];
+  const prose = hits.filter((r) => !OTHER_READ_WIDTH_RULES.includes(r.selector));
+  if (prose.length !== 2)
+    throw new Error(
+      `本文の読み幅の規則が ${prose.length} 本(2 本のはず): ${prose.map((r) => r.selector).join(' / ')}`,
+    );
+  for (const sel of OTHER_READ_WIDTH_RULES)
+    if (!hits.some((r) => r.selector === sel)) throw new Error(`既知リストの規則が無い: ${sel}`);
+  const block = prose.find((r) => r.selector.includes(':is('));
+  const row = prose.find((r) => r.selector.includes('data-pkc-row-slot'));
   if (block === undefined) throw new Error('本文ブロックの allow-list が見つからない');
   if (row === undefined) throw new Error('生の行の読み幅の規則が見つからない');
   return {

@@ -1,4 +1,5 @@
 import { test, expect, devices } from '@playwright/test';
+import { inflateSync } from 'node:zlib';
 import {
   gotoApp,
   clickReal,
@@ -749,6 +750,100 @@ test('🔴 横に倒したスマホ(844×390)でもスマホ用画面になり�
 });
 
 /**
+ * 🔴 **低い窓では、追記欄を最初から畳んで本文を 300px 以上に**(#701。user 裁定 2026-09-04 案 A)。
+ *
+ * ## 直す前(2026-09-05 実測、844×390・ノート 1 件開いた直後)
+ *
+ * 本文の器 **230px** / 追記欄 107px / ページの帯 36px ── 7〜8 行しか読めず、
+ * 畳む取っ手は 8px で、⋯ にも「追記欄を畳む」が無かった。
+ *
+ * ## ここで見るもの
+ *
+ * ① 開いた直後に本文の器が 300px 以上 ② 畳んだ所に「ここに追記する」の帯(1 行、押せる)
+ * ③ 帯を押すと欄が出て、送ると元どおり畳む(`peek` の作法)④ 記録(`pkc3.panes`)は動かない
+ */
+test('🔴 横に倒したスマホ(844×390)では追記欄が畳まれて本文が 300px 以上、帯から追記して戻る (#701)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 844, height: 390 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  await createEntry(page, 'text');
+  await clickReal(page, `${REGION('detail')} [data-pkc-action="commit-edit"]`);
+
+  const detail = page.locator(REGION('detail'));
+  const append = page.locator(REGION('append'));
+  const grip = page.locator('[data-pkc-region="pane-grip"][data-pkc-axis="y"]');
+  await expect(append, '低い窓なのに追記欄が開いている').toBeHidden();
+  const body = (await detail.boundingBox())!;
+  expect(body.height, `本文の器が 300px に届かない(${Math.round(body.height)}px)`).toBeGreaterThanOrEqual(300);
+
+  // ② 帯 ── 字は `::after`(button の字に入れると aria-label と二重になる)
+  const band = await grip.evaluate((el) => ({
+    text: getComputedStyle(el, '::after').content,
+    h: Math.round(el.getBoundingClientRect().height),
+  }));
+  expect(band.text, '帯の字が「ここに追記する」でない').toContain('ここに追記する');
+  expect(band.h, `帯が 1 行の丈を持たない(${band.h}px)`).toBeGreaterThanOrEqual(24);
+
+  // ③ 押すと欄が出る → 打って送る → 元どおり畳む
+  await clickReal(page, grip);
+  await expect(append, '帯を押しても欄が出ない').toBeVisible();
+  await page.locator('[data-pkc-field="append-input"]').fill('横向きで 1 行');
+  await clickReal(page, '[data-pkc-action="append-entry"]');
+  await expect(detail, '追記が本文に入っていない').toContainText('横向きで 1 行');
+  await expect(append, '送った後に畳み直されていない').toBeHidden();
+
+  // ④ 記録は 1 byte も動いていない
+  const saved = await page.evaluate(() => localStorage.getItem('pkc3.panes'));
+  expect(saved ?? '', 'こちらの畳みが記録に書かれた(PC の見え方まで変わる)').not.toContain('append');
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * ⚠ **対照群 ── 縦のスマホ(360×640)では追記欄は出たまま**(本文は 480px 取れる)。
+ * 🔑 そして取っ手は見た目 8px のまま、**指の押し所は 24px 以上**(#701 C)──
+ *   `boundingBox` には出ないので `elementFromPoint` で上下 ±10px を突く。
+ */
+test('⚠ 縦のスマホ(360×640)では追記欄は畳まず、取っ手は 8px のまま 24px 以上で押せる (#701)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 360, height: 640 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  await createEntry(page, 'text');
+  await clickReal(page, `${REGION('detail')} [data-pkc-action="commit-edit"]`);
+
+  await expect(page.locator(REGION('append')), '縦の窓なのに追記欄が畳まれた').toBeVisible();
+  const hit = await page
+    .locator('[data-pkc-region="pane-grip"][data-pkc-axis="y"]')
+    .evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const cx = r.x + r.width / 2;
+      const own = (dy: number): boolean => {
+        const at = document.elementFromPoint(cx, r.y + r.height / 2 + dy);
+        return at === el || el.contains(at);
+      };
+      return { h: Math.round(r.height), above: own(-10), on: own(0), below: own(10) };
+    });
+  expect(hit.h, '取っ手の見た目が 8px でない').toBe(8);
+  expect(hit.on, '取っ手そのものが押せない').toBe(true);
+  expect(hit.above && hit.below, '取っ手の押し所が 24px に広がっていない(上下 ±10px で当たらない)').toBe(
+    true,
+  );
+  // ⚠ 記録が無いのだから、帯の字は出ない(user が畳んだ回と同じ 8px の取っ手)
+  const text = await page
+    .locator('[data-pkc-region="pane-grip"][data-pkc-axis="y"]')
+    .evaluate((el) => getComputedStyle(el, '::after').content);
+  expect(text, '畳んでいないのに「ここに追記する」が出ている').not.toContain('ここに追記する');
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
  * ⚠ **対照群 ── 幅も高さも足りている窓(1280×720)はスマホ用画面にならない**(#663)。
  * 🔑 これが無いと、「いつでもスマホ用画面」にする実装が上を満たして通る。
  *   ⚠ そして「操作を探す」はここでも押せる ── 押せないなら計器の話である
@@ -852,6 +947,18 @@ for (const [name, w, h] of [
         return {
           panes: panes.map(box),
           innerW: window.innerWidth,
+          /**
+           * 🔴 **丈は器(`dual-body`)との比で見る**(2026-09-05、#706 で踏んだ)。
+           * ⚠ 直す前は `> 200px` の実数だった ── 指の端末で行を 34px にした日に、
+           *   横向き(667×375)の 2 ペインは器ごと縮んで **189px** になり、
+           *   **積んでもいないのに落ちた**(主張は「1 枚が版面を丸ごと使う」であって
+           *   「200px 以上ある」ではない)。積むと 1 枚は器の**半分**(136/272)になるので、
+           *   比で見れば 2 つの状態は離れたまま分かれる。
+           */
+          bodyH: Math.round(
+            document.querySelector('[data-pkc-region="dual-body"]')?.getBoundingClientRect()
+              .height ?? 0,
+          ),
           switcher:
             sw === null
               ? null
@@ -902,7 +1009,12 @@ for (const [name, w, h] of [
     expect(only.w, `ペインが窓より狭い(${only.w}px / 窓 ${first.innerW}px)`).toBeGreaterThan(
       first.innerW - 20,
     );
-    expect(only.h, `ペインの丈が足りない(${only.h}px)`).toBeGreaterThan(200);
+    // ⚠ 空振り防止 ── 器そのものが潰れているなら、比で見ても何も言っていない
+    expect(first.bodyH, `2 ペインの器が潰れている(${first.bodyH}px)`).toBeGreaterThan(100);
+    expect(
+      only.h,
+      `ペインが器を丸ごと使っていない(${only.h}px / 器 ${first.bodyH}px ── 積んでいる形)`,
+    ).toBeGreaterThan(first.bodyH * 0.9);
     /**
      * ③ 🔴 **実害そのもの ── パンくずに幅が在る**。
      * ⚠ 直す前の実測は `scrollWidth 41 / clientWidth 0` ── 字は在るのに 1px も見えない。
@@ -1186,3 +1298,140 @@ test('🔴 スマホで行を 600ms 押し続けると、印が 2 行になる (
   ).toBe(1);
   expect(errors, `console/pageerror: ${errors.join(' | ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **スマホでは本文の上の題名を出さない ── 帯の題名だけ**(#705 ①、user 裁定 案 A)。
+ *
+ * ⚠ 直す前は帯の題名と本文の `h2` が**2 段重ね**で、本文ページの縦を 27px 食っていた。
+ * 🔑 観測点は 2 つで 1 組:①本文の題名が**場所ごと消えている**(`boundingBox()` が null)
+ *   ②**同じ題名が帯に在る**(消しただけで読めなくなっていない ── 対照群)。
+ */
+test('🔴 本文ページで題名は帯にだけ出る(本文の上には出ない) (#705 ①)', async ({ page }) => {
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  await createEntry(page, 'text');
+  await clickReal(page, `${REGION('detail')} [data-pkc-action="commit-edit"]`);
+  await expect(page.locator(REGION('center'))).toBeVisible();
+
+  // ⚠ 題名は情報ペイン(隠れているが DOM には在る)から読む ── 帯と別の口で同じ値を採る
+  const title = (await page.locator('[data-pkc-field="inspector-title"]').textContent())?.trim() ?? '';
+  expect(title, '題名が採れない(台の空振り)').not.toBe('');
+  await expect(page.locator(REGION('phone-bar')), '帯に題名が無い(消しただけで読めなくなった)').toContainText(
+    title,
+  );
+  const h2 = page.locator(`${REGION('center')} [data-pkc-field="detail-title"]`);
+  expect(await h2.count(), '本文の題名の要素そのものが無い(DOM から消している ── CSS で消す設計と違う)').toBe(1);
+  expect(await h2.boundingBox(), '本文の上に題名が出ている(帯と 2 段重ね)').toBeNull();
+});
+
+/**
+ * 🔴 **書式バーの余りが、何段に折れても灰色にならない**(#705 ②、user 裁定 案 A)。
+ *
+ * ⚠ 直す前は `gap: 1px` + 下地 `--border` で線を作り、余りを `::after` で塗っていた ──
+ *   `::after` は最後の段にしか居ないので、スマホで 2 段以上に折れると**上の段の余りが
+ *   線色のベタ塗り**になった。
+ * 🔑 観測点は**画素**である(`page.screenshot` を `scale: 'css'` で撮り、PNG を自前で読む)。
+ *   CSS の字面は `tests/adapter/button-bars-css.test.ts` が持つ ── ここは user が見る色だけ。
+ *   ⚠ 参照値は同じ画像から採る(ボタンの地 = 面の地 / ボタンの間 = 線)── 色の綴りを
+ *   test に貼らない(テーマで変わる)。
+ */
+test('🔴 書式バーが 2 段以上に折れても、上の段の余りは地の色 ── 区切りの線は残る (#705 ②)', async ({
+  page,
+}) => {
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  await createEntry(page, 'text'); // 作った直後は編集中 ── 書式バーが出ている
+  const bar = page.locator(REGION('format-bar'));
+  await expect(bar).toBeVisible();
+
+  const geo = await bar.evaluate((el) => {
+    const box = el.getBoundingClientRect();
+    const btns = [...el.querySelectorAll('button')].map((b) => b.getBoundingClientRect());
+    // 段ごとに分ける(top が同じ物が 1 段)
+    const rows = new Map<number, DOMRect[]>();
+    for (const r of btns) rows.set(Math.round(r.top), [...(rows.get(Math.round(r.top)) ?? []), r]);
+    const ordered = [...rows.entries()].sort((a, b) => a[0] - b[0]).map(([, rs]) => rs.sort((a, b) => a.left - b.left));
+    return {
+      box: { x: box.left, y: box.top, w: box.width, h: box.height },
+      rows: ordered.map((rs) => ({
+        mid: (rs[0]!.top + rs[0]!.bottom) / 2,
+        firstLeft: rs[0]!.left,
+        gapX: rs.length > 1 ? (rs[0]!.right + rs[1]!.left) / 2 : null,
+        lastRight: rs[rs.length - 1]!.right,
+      })),
+    };
+  });
+  // 🔑 前提: 2 段以上に折れている(1 段なら「上の段の余り」が存在しない ── この検査は何も主張しない)
+  expect(geo.rows.length, `書式バーが折れていない(${geo.rows.length} 段)── 前提が崩れている`).toBeGreaterThan(1);
+  // 余りがいちばん広い「最後でない段」を測る(最後の段は直す前も地の色だった)
+  const upper = geo.rows.slice(0, -1).map((r) => ({ ...r, rest: geo.box.x + geo.box.w - r.lastRight }));
+  const row = upper.sort((a, b) => b.rest - a.rest)[0]!;
+  expect(row.rest, `上の段の余りが ${row.rest.toFixed(1)}px しか無い(測れない)`).toBeGreaterThan(6);
+  expect(row.gapX, '段に 2 つ目のボタンが無い(線の対照群が採れない)').not.toBeNull();
+
+  const png = await page.screenshot({
+    clip: { x: geo.box.x, y: geo.box.y, width: geo.box.w, height: geo.box.h },
+    scale: 'css',
+  });
+  const at = (x: number, y: number): string => rgbAt(png, Math.floor(x - geo.box.x), Math.floor(y - geo.box.y)).join(',');
+  const ground = at(row.firstLeft + 2, row.mid); // ボタンの地(左の余白 ── 図案に当たらない)
+  const line = at(row.gapX!, row.mid); // ボタンとボタンの間の 1px = 区切りの線
+  const rest = at(row.lastRight + 4, row.mid); // 段の余り
+  expect(line, '区切りの線が消えている(ボタンがくっついて 1 枚に見える)').not.toBe(ground);
+  expect(rest, `上の段の余り(${rest})がボタンの地(${ground})と違う ── 線色のベタ塗りが残っている`).toBe(ground);
+});
+
+/**
+ * PNG(8bit / 非インターレース / RGB か RGBA)の 1 画素を読む。
+ * ⚠ 依存を足さない(pngjs は無い)── IDAT を inflate して行のフィルタ 5 種を戻すだけ。
+ */
+function rgbAt(png: Buffer, x: number, y: number): [number, number, number] {
+  let off = 8;
+  let w = 0;
+  let h = 0;
+  let bpp = 0;
+  const idat: Buffer[] = [];
+  while (off < png.length) {
+    const len = png.readUInt32BE(off);
+    const type = png.toString('ascii', off + 4, off + 8);
+    const data = png.subarray(off + 8, off + 8 + len);
+    if (type === 'IHDR') {
+      w = data.readUInt32BE(0);
+      h = data.readUInt32BE(4);
+      if (data[8] !== 8 || data[12] !== 0) throw new Error(`読めない PNG(depth ${data[8]} / interlace ${data[12]})`);
+      bpp = data[9] === 6 ? 4 : data[9] === 2 ? 3 : 0;
+      if (bpp === 0) throw new Error(`読めない PNG(colorType ${data[9]})`);
+    } else if (type === 'IDAT') idat.push(data);
+    off += 12 + len;
+  }
+  if (x < 0 || y < 0 || x >= w || y >= h) throw new Error(`画素 (${x},${y}) が画像 ${w}x${h} の外`);
+  const raw = inflateSync(Buffer.concat(idat));
+  const stride = w * bpp;
+  const out = Buffer.alloc(h * stride);
+  for (let r = 0; r < h; r++) {
+    const f = raw[r * (stride + 1)]!;
+    const src = r * (stride + 1) + 1;
+    const dst = r * stride;
+    for (let i = 0; i < stride; i++) {
+      const a = i >= bpp ? out[dst + i - bpp]! : 0;
+      const b = r > 0 ? out[dst - stride + i]! : 0;
+      const c = r > 0 && i >= bpp ? out[dst - stride + i - bpp]! : 0;
+      const v = raw[src + i]!;
+      let p: number;
+      if (f === 0) p = v;
+      else if (f === 1) p = v + a;
+      else if (f === 2) p = v + b;
+      else if (f === 3) p = v + ((a + b) >> 1);
+      else {
+        const q = a + b - c;
+        const pa = Math.abs(q - a);
+        const pb = Math.abs(q - b);
+        const pc = Math.abs(q - c);
+        p = v + (pa <= pb && pa <= pc ? a : pb <= pc ? b : c);
+      }
+      out[dst + i] = p & 255;
+    }
+  }
+  const o = y * stride + x * bpp;
+  return [out[o]!, out[o + 1]!, out[o + 2]!];
+}

@@ -192,7 +192,7 @@ describe('archetype', () => {
   // `generic` / `opaque` は一級の archetype だがフレーバーは text にフォールバック
   // するので、「登録されているか」で判定すると**自分の md ZIP export を
   // 取り込み直したときにフォルダがノートに化ける**
-  it.each(['text', 'todo', 'textlog', 'form', 'spreadsheet', 'snippet', 'folder', 'generic', 'opaque'])(
+  it.each(['text', 'todo', 'textlog', 'form', 'spreadsheet', 'snippet', 'stack', 'folder', 'generic', 'opaque'])(
     '%s は受ける',
     (archetype) => {
       const r = readPlainMarkdown(`---\narchetype: ${archetype}\n---\n`, 'f.md');

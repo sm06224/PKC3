@@ -45,7 +45,7 @@ import { formatEntryLink } from '@features/entry-ref/entry-ref-format';
 import { iconButton } from './icons';
 // ⚠ 日付の切り方は `features/datetime/stored-date` が正本(一覧の行と共有)。
 //    ここで独自に parse していた頃は、一覧に日付を出すときに規則が 2 つに増えた
-import { formatStoredDate } from '@features/datetime/stored-date';
+import { formatStoredDate, storedInstantIso } from '@features/datetime/stored-date';
 // 居場所の解決は `features/relation/tree` が正本(ファイラの帯・パンくずと共有)
 import { readTags, sameTag } from '@features/flavor/tags';
 import { collectEntryTags } from '@features/flavor/entry-tags';
@@ -61,6 +61,12 @@ import {
 
 /** 相手の候補に出す上限。⚠ 超えたぶんは**件数を書く**(黙って切らない)。 */
 export const RELATION_CANDIDATE_MAX = 200;
+/**
+ * 編集中に操作の帯の直上へ出す 1 行(#715)。
+ * ⚠ 出口は**ボタンの字**(保存 / キャンセル)で言う ── `phaseDisabledNote` の
+ *   「確定するか取り消して」は、画面のどのボタンの字とも一致しない。
+ */
+export const EDITING_NOTE = '編集中は使えません(保存するか、キャンセルすると戻ります)';
 import { getAncestorFolders } from '@features/relation/tree';
 import { BODY_LINK_KIND, renderRelationMap } from './relation-map';
 import { bodyLinkTargets } from '@features/entry-ref/body-links';
@@ -70,6 +76,7 @@ import {
   ENTRY_ACTION_LABELS,
   entryActionHint,
 } from '@features/entry-actions';
+import { STACK_ARCHETYPE } from '@features/flavor/stack-flavor';
 
 /** 素性の行(`data-pkc-field` → 値を入れる `<dd>`)。 */
 type Rows = Map<string, HTMLElement>;
@@ -111,6 +118,8 @@ export class InspectorRenderer {
   } | null = null;
   /** タグを打つ欄の器(#494)。⚠ 打てない状況では**畳む**(押せない物を出さない)。 */
   private tagForm: HTMLElement | null = null;
+  /** 編集中だけ出る 1 行(#715)。操作の帯の直上 ── 薄くなった理由と出口を字で置く。 */
+  private editingNote: HTMLElement | null = null;
   /** 同じノートに戻ったら同じ位置へ(P8 段⑫。溢れるのは題名が長いときだけ)。 */
   private readonly scroll: ScrollMemory;
   /** いま出しているノート。⚠ **切り替わったときだけ**スクロールを触る。 */
@@ -731,8 +740,9 @@ export class InspectorRenderer {
         this.tagCandidates.append(opt);
       }
     }
-    this.setRow('inspector-created', formatStoredDate(meta.createdAt));
-    this.setRow('inspector-updated', formatStoredDate(meta.updatedAt));
+    // 🔑 字は端末の暦日、`datetime` 属性は UTC の瞬間(機械可読・読み上げ向け。#709)
+    this.setTimeRow('inspector-created', meta.createdAt);
+    this.setTimeRow('inspector-updated', meta.updatedAt);
     this.paintDate(meta, editing, blockedNote);
     this.paintRelationAdd(editing, blockedNote);
     // 🔴 **どのファイルから来たか**を出す(2026-08-05)── 出さないと、書き戻しが
@@ -757,6 +767,12 @@ export class InspectorRenderer {
      */
     const folderBtn = this.buttons.get('export-folder');
     if (folderBtn) folderBtn.hidden = meta.archetype !== 'folder';
+    // 🔴 「この中に新しいノートを作る」も同じ門(#215)── 入れ物でなければ畳む
+    const inFolderBtn = this.buttons.get('create-in-folder');
+    if (inFolderBtn) inFolderBtn.hidden = meta.archetype !== 'folder';
+    // 🔴 保存したスタックにだけ出す(#633 段③)── `export-folder` と同じ作法(消さずに畳む)
+    const stackBtn = this.buttons.get('stack-load');
+    if (stackBtn) stackBtn.hidden = meta.archetype !== STACK_ARCHETYPE;
     this.paintAdoptImages(state, meta.lid);
     for (const [action, b] of this.buttons) {
       /**
@@ -782,6 +798,19 @@ export class InspectorRenderer {
       if (b.disabled !== editing) b.disabled = editing;
       const shown = editing ? `${title}(${blockedNote})` : title;
       if (b.title !== shown) b.title = shown;
+    }
+    /**
+     * 🔴 **押せない理由を、帯の直上に字で出す**(#715)。
+     * ⚠ 直す前は `disabled` と `title` だけだった ── 見た目は押せるボタンと同じで、
+     *   理由は**乗せないと読めない**。押しても何も起きないボタンを user が探していた。
+     * ⚠ 字は phase から導く(#516)── 保存に失敗した保護中に「編集中」と言わない。
+     *   編集中だけは、上の `blockedNote`(「確定するか取り消して」)ではなく
+     *   **ボタンの字**(保存 / キャンセル)で出口を言う。
+     */
+    if (this.editingNote) {
+      const noteText = state.phase === 'editing' ? EDITING_NOTE : blockedNote;
+      if (this.editingNote.textContent !== noteText) this.editingNote.textContent = noteText;
+      if (this.editingNote.hidden !== !editing) this.editingNote.hidden = !editing;
     }
 
     // ⚠ **中身を入れ終わってから**戻す(空の器に書いても丸められる)。
@@ -836,6 +865,26 @@ export class InspectorRenderer {
   private setRow(field: string, value: string): void {
     const dd = this.rows.get(field);
     if (dd) setText(dd, value);
+  }
+
+  /**
+   * 時刻の行(作成 / 更新)。字は `formatStoredDate`(端末の暦日)、
+   * `<time datetime>` に UTC の瞬間を置く(#709。cowork 推薦 ── 読み上げにも効く)。
+   * ⚠ `<time>` は 1 度作って使い回す(`setRow` の textContent 差し替えは子を消す)。
+   * ⚠ 瞬間として読めない値(`—` / 形の違う字)は属性を**外す** ── 古い値を残さない。
+   */
+  private setTimeRow(field: string, value: string | null | undefined): void {
+    const dd = this.rows.get(field);
+    if (!dd) return;
+    let t = dd.querySelector<HTMLTimeElement>('time');
+    if (t === null) {
+      t = document.createElement('time');
+      dd.append(t);
+    }
+    setText(t, formatStoredDate(value));
+    const iso = storedInstantIso(value);
+    if (iso === null) t.removeAttribute('datetime');
+    else setAttr(t, 'datetime', iso);
   }
 
   /**
@@ -902,6 +951,7 @@ export class InspectorRenderer {
     this.rows = new Map();
     this.buttons = new Map();
     this.relAdd = null;
+    this.editingNote = null;
 
     const head = document.createElement('div');
     head.setAttribute('data-pkc-field', 'pane-title');
@@ -1177,6 +1227,11 @@ export class InspectorRenderer {
     btn('copy-plain-markdown', ENTRY_ACTION_LABELS['copy-plain-markdown']!);
     btn('open-note-window', ENTRY_ACTION_LABELS['open-note-window']!);
     /**
+     * 🔴 **保存したスタックを載せる**(#633 段③)。⚠ スタックの入れ物のときだけ出す
+     *   (`render` で `hidden` を付け外し ── `export-folder` と同じ作法)。
+     */
+    btn('stack-load', ENTRY_ACTION_LABELS['stack-load']!);
+    /**
      * 🔴 **外部の画像を手元へ取り込む**(#264 段①)。
      *
      * ⚠ **1 枚も無いときは畳む**(`paintAdoptImages`)── `export-folder` と同じ作法。
@@ -1224,8 +1279,25 @@ export class InspectorRenderer {
     btn('export-entry-pdf', ENTRY_ACTION_LABELS['export-entry-pdf']!);
     if (shape === 'entry+link') btn('write-back-file', ENTRY_ACTION_LABELS['write-back-file']!);
     btn('show-history', ENTRY_ACTION_LABELS['show-history']!);
+    /**
+     * 🔴 **左の列の整理 3 つ**(#215)── 右クリックと**同じ表**から出す(字は 1 か所)。
+     * ⚠ `create-in-folder` は**フォルダのときだけ**(`render` で `hidden` を付け外しする ──
+     *   `export-folder` と同じ作法。ノートで押すと必ず断られる物を常設しない)。
+     * ⚠ 並びは右クリックと揃える(履歴の下・削除の上)。
+     */
+    btn('rename-entry-begin', ENTRY_ACTION_LABELS['rename-entry-begin']!);
+    btn('move-to-folder', ENTRY_ACTION_LABELS['move-to-folder']!);
+    btn('create-in-folder', ENTRY_ACTION_LABELS['create-in-folder']!);
     btn('delete-entry', ENTRY_ACTION_LABELS['delete-entry']!);
-    this.region.append(actions);
+    /**
+     * 🔴 **編集中だけ出る 1 行**(#715)── 操作の帯の**直上**に置く(帯と離すと
+     *   何の理由か読めない)。字と出し入れは `render` が phase から決める。
+     */
+    const note = document.createElement('p');
+    note.setAttribute('data-pkc-field', 'inspector-editing-note');
+    note.hidden = true;
+    this.editingNote = note;
+    this.region.append(note, actions);
   }
 }
 

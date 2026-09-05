@@ -83,7 +83,8 @@ Firefox / Safari では**一度も走らせていない**からです。
 
 ## 開発
 
-- **現況**: v3.0.0 を 2026-08-03 に公開済み。以降は P8 以降の是正・機能追加を
+- **現況**: v3.2.0 を 2026-08-29 に公開済み(`package.json` の版と同じ。tag は
+  `v3.0.0` 2026-08-03 / `v3.1.0` 2026-08-19 / `v3.2.0` 2026-08-29)。以降の是正・機能追加は
   `main` へ積んでいます(**製品版のタグと `main` は離れます** ── 上の表を参照)
 - **設計 doc(founding doc)**: [`docs/development/pkc3-major-upgrade-design-2026-07.md`](./docs/development/pkc3-major-upgrade-design-2026-07.md)
 - **残件の台帳は GitHub Issues** ── doc に「やることの一覧」は置きません
@@ -95,6 +96,7 @@ npm run dev        # Vite dev server
 npm run build      # Vite build → dist/
 npm test           # vitest run
 npm run test:smoke # playwright(実ビルドを preview して検品)
+npm run build:portable # 持ち歩ける HTML 1 枚の雛形(dist-portable/pkc3.html)
 npm run typecheck  # tsc --noEmit
 npm run lint       # eslint src tests build scripts
 ```
@@ -103,6 +105,6 @@ npm run lint       # eslint src tests build scripts
 
 | いつ | 何を |
 |---|---|
-| PR / main push | `verify`(型 / lint / unit / build / 生成物の検品)と `smoke`(実ブラウザ)を**並列**に。どちらも 10 分の timeout が速度予算の tripwire |
-| nightly | smoke を**2 つの Chromium ビルド**で / product ビルドの検品と smoke(PR gate が触らない成果物)/ Rust wasm の再ビルド一致 / probe 6 本(store・sahpool・15k 行の DOM・1 面編集・2 列編集・かんばん)/ 赤い間は issue に積む |
-| tag(`v*`)| release(SBOM / provenance / `pkc3-dist.zip`)→ Pages の `/` が入れ替わる |
+| PR / main push | `audit`(依存の脆弱性監査 ── prod 依存の high 以上で止める)/ `verify`(型 / lint / unit / build / 生成物の検品)/ `smoke`(実ブラウザ。spec を 3 つの shard に割って並列)── 3 種を**並列**に。どれも 10 分の timeout が速度予算の tripwire |
+| nightly | smoke を**2 つの Chromium ビルド**で / 図の全数(マニュアルの 22 種が焼けるか)/ product ビルドの検品と smoke(PR gate が触らない成果物)/ Rust wasm の再ビルド一致 / probe 6 本(`Probe — store` / `Probe — sahpool` / `Probe — sidebar` / `Probe — editor / live` / `Probe — editor / split` / `Probe — schedule`)/ 赤い間は issue に積む |
+| tag(`v*`)または `workflow_dispatch` | release(SBOM / provenance / `pkc3-dist.zip` ── 中に `portable-template.html` も入る)→ Pages の `/` が入れ替わる |

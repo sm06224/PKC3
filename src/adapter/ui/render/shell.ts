@@ -49,6 +49,11 @@ export interface ShellRegions {
    * ⚠ 押した先は `select-entry` の受け手(`binder.ts`)── 実行の口を新しく作らない。
    */
   statusOpen: HTMLElement;
+  /**
+   * 🔴 **知らせの隣の「元に戻す」**(#684 段①)── 本文の塊を動かした直後だけ出る。
+   * ⚠ 押した先は `undo-move` の受け手(`binder.ts`)。出し入れは `status-open.ts`。
+   */
+  statusUndo: HTMLElement;
   /** 🔴 **狭すぎる端末への断り書き**(#671)。中身は `too-narrow.ts` が出し入れする。 */
   tooNarrow: HTMLElement;
   /** その断り書きの字を置く所。 */
@@ -788,6 +793,18 @@ export function buildShell(root: HTMLElement): ShellRegions {
   statusOpen.textContent = '開く';
   statusOpen.hidden = true;
   /**
+   * 🔴 **知らせの隣の「元に戻す」**(#684 段①。user 指示 2026-08-23「片道の操作を作らない」)。
+   * 本文の塊を掴んで動かした直後、「本文の塊を動かしました」の隣に置く。
+   * ⚠ 「開く」と同じ作法 ── 常設で置いて要るときだけ出す(`status-open.ts` が `hidden` を書く)。
+   * 🔑 実行の口は `undo-move` の受け手 1 つ(`binder.ts`)── ここに listener を張らない。
+   */
+  const statusUndo = document.createElement('button');
+  statusUndo.type = 'button';
+  statusUndo.setAttribute('data-pkc-field', 'status-undo');
+  statusUndo.setAttribute('data-pkc-action', 'undo-move');
+  statusUndo.textContent = '元に戻す';
+  statusUndo.hidden = true;
+  /**
    * 🔴 **狭すぎる端末への断り書き**(user 裁定 2026-09-04、#671)。
    * ⚠ **器は 1 度だけ組む**(`too-narrow.ts` は `hidden` の付け外しだけ)──
    *   作り直すと、押そうとした OK が指の下から消える(収録の帯と同じ理由)。
@@ -806,7 +823,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   tooNarrowOk.type = 'button';
   tooNarrowOk.setAttribute('data-pkc-field', 'too-narrow-ok');
   tooNarrow.append(tooNarrowText, tooNarrowOk);
-  status.append(statusText, statusOpen, tooNarrow);
+  status.append(statusText, statusOpen, statusUndo, tooNarrow);
 
   /**
    * 🔴 **収録中の帯**(#413)── 経過 + 概算の大きさ + 止める / 捨てる。
@@ -919,6 +936,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
     status,
     statusText,
     statusOpen,
+    statusUndo,
     tooNarrow,
     tooNarrowText,
     tooNarrowOk,

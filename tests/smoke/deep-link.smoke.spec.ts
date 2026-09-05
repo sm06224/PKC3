@@ -289,3 +289,61 @@ test('🔴 #pkc?view=schedule で開くと、予定表が中央に出て集め�
 
   expect(errors, 'pageerror / console.error が出ている').toEqual([]);
 });
+
+/**
+ * 🔴 **`#pkc?view=search` で、探す面が中央に出て、打つと本文の当たりが並ぶ**(#680)。
+ *
+ * ## unit では届かない層
+ *
+ * ① 本物のアドレスから読む配線
+ * ② **面が本当に見えているか**(`[data-pkc-view-pane='search']` の CSS と `hidden`)
+ * ③ 🔴 **boot の経路で `searchDetail` が worker まで届くか** ── unit は fake の口で
+ *    答えている。届かなければ面は「探しています…」で止まるか「探せません」と言う
+ *    (別窓で開いた user が最初に見る画面である)。
+ *
+ * ⚠ ノートは 1 件作り、本文に**題名には無い語**を書く ── 題名検索では当たらない形で、
+ *   本文の索引まで通っていることを見る。
+ * ⚠ 書いただけで走らせていない(2026-09-05)── 手元で回すときは
+ *   `npm run test:smoke -- tests/smoke/deep-link.smoke.spec.ts`。
+ */
+test('🔴 #pkc?view=search で開くと、探す面が中央に出て本文の語で当たる (#680)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  // 本文に、題名には無い語を書いて保存する(作法は `append-ui.smoke.spec.ts` の `makeNote`)
+  await createEntry(page, 'text');
+  const live = page.locator('[data-pkc-region="editor-live"]');
+  await expect(live).toBeVisible();
+  await clickReal(page, '[data-pkc-region="editor-live"]');
+  await live.locator('[data-pkc-field="row-source"]').fill('探す面の本文に書いた けんさくご という語');
+  await page.keyboard.press('Tab');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  // ⚠ 追記の入り先(`append-target`)は見出しの無い本文では畳まれる ── 描けた印で待つ
+  await expect(page.locator('[data-pkc-field="detail-body"][data-pkc-painted]').first()).toBeVisible();
+
+  await page.goto('/#pkc?view=search');
+  await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
+
+  // ② 中央の面が見えていて、本文の面は畳まれている
+  const pane = page.locator('[data-pkc-view-pane="search"]');
+  await expect(pane, 'ディープリンクで指した探す面が開いていない').toBeVisible();
+  await expect(page.locator('[data-pkc-view-pane="detail"]'), '本文の面が畳まれていない').toBeHidden();
+  const input = pane.locator('[data-pkc-field="search-page-input"]');
+  await expect(input, '打つ欄が無い').toBeVisible();
+  await expect(input, '開いたのに欄へ焦点が入っていない').toBeFocused();
+
+  // ③ 🔴 打つと worker まで届き、本文の語で行が出る(題名には無い語)
+  await input.fill('けんさくご');
+  const row = pane.locator('[data-pkc-search-row]');
+  await expect(row, '本文の語で行が出ない(searchDetail が worker まで届いていない)').toHaveCount(1, {
+    timeout: 10_000,
+  });
+  await expect(row.locator('mark'), '当たった語に印が無い').toHaveText('けんさくご');
+  // ⚠ 面の語で左の一覧は絞られない(別のもの)
+  await expect(page.locator('[data-pkc-field="entry-filter"]')).toHaveValue('');
+
+  expect(errors, 'pageerror / console.error が出ている').toEqual([]);
+});

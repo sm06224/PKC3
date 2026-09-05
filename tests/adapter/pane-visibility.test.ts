@@ -164,6 +164,75 @@ describe('保存', () => {
   });
 });
 
+/**
+ * 🔴 **こちらの畳み(`setAutoFold`)は、記録の上に重ねるだけ**(#701)。
+ * ⚠ 画面との配線(matchMedia / 帯の印)は `append-autofold.test.ts` が見る ── ここは台帳の意味論だけ。
+ */
+describe('こちらが畳む(#701)', () => {
+  // ⚠ 上の describe の中の物は見えないので同じ形をここにも置く(保存の替え玉)
+  function fakeStorage() {
+    const map = new Map<string, string>();
+    return {
+      getItem: (k: string) => map.get(k) ?? null,
+      setItem: (k: string, v: string) => void map.set(k, v),
+      map,
+    };
+  }
+
+  it('🔴 setAutoFold は getHidden に効くが、記録には 1 byte も書かない', () => {
+    const st = fakeStorage();
+    const s = new PaneVisibilityStore(st);
+    s.setAutoFold('append');
+    expect(s.getHidden()).toEqual(['append']);
+    expect(s.isAutoFolded('append')).toBe(true);
+    expect(st.map.has('pkc3.panes'), '記録に書いた').toBe(false);
+    s.setAutoFold(null);
+    expect(s.getHidden()).toEqual([]);
+  });
+
+  it('🔴 こちらが畳んでいる間に別の面を畳んでも、記録にこちらの畳みは混ざらない', () => {
+    const st = fakeStorage();
+    const s = new PaneVisibilityStore(st);
+    s.setAutoFold('append');
+    s.toggle('sidebar');
+    expect(s.getHidden()).toEqual(['sidebar', 'append']);
+    expect(decodeHidden(st.map.get('pkc3.panes') ?? null), 'こちらの畳みが記録に混ざった').toEqual(['sidebar']);
+  });
+
+  it('🔴 user が「戻す」(toggle)と、こちらの畳みは終わる ── 記録は書かれても append を持たない', () => {
+    const st = fakeStorage();
+    const s = new PaneVisibilityStore(st);
+    s.setAutoFold('append');
+    expect(s.toggle('append')).toEqual([]);
+    expect(s.isAutoFolded('append'), 'user が戻したのに、こちらの畳みが生きている').toBe(false);
+    expect(decodeHidden(st.map.get('pkc3.panes') ?? null)).toEqual([]);
+  });
+
+  it('🔴 こちらの畳みも peek できて、unpeek で畳み直る(送ったら畳む道が使える)', () => {
+    const s = new PaneVisibilityStore(fakeStorage());
+    s.setAutoFold('append');
+    expect(s.peek('append')).toBe(true);
+    expect(s.getHidden()).toEqual([]);
+    expect(s.unpeek()).toEqual(['append']);
+  });
+
+  it('⚠ 記録にも在る面は「こちらの畳み」ではない(帯の字を出さない側)', () => {
+    const s = new PaneVisibilityStore(fakeStorage());
+    s.setHidden(['append']);
+    s.setAutoFold('append');
+    expect(s.getHidden()).toEqual(['append']);
+    expect(s.isAutoFolded('append')).toBe(false);
+  });
+
+  it('🔴 sessionOnly(小窓)はこちらの畳みを外し、以後の setAutoFold を受け付けない', () => {
+    const s = new PaneVisibilityStore(fakeStorage());
+    s.setAutoFold('append');
+    expect(s.sessionOnly('append')).toEqual([]);
+    s.setAutoFold('append');
+    expect(s.getHidden(), '小窓で畳まれた').toEqual([]);
+  });
+});
+
 describe('画面への適用', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
@@ -385,7 +454,7 @@ describe('CSS(畳んだ列が本当に消えるか)', () => {
   });
 
   /**
-   * 🔴 **畳んでいても、編集中の出口(保存して解放 / 編集を破棄)は消えない**(#655 ④)。
+   * 🔴 **畳んでいても、編集中の出口(追記欄側の保存 / キャンセル)は消えない**(#655 ④)。
    *
    * ⚠ マニュアル §5 は「編集中の出口は追記欄の場所にも出ます」と約束しているが、
    *   畳む規則は器ごと `display: none` にするので、畳んだ人にはその出口が 1 度も

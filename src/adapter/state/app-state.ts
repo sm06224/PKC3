@@ -13,15 +13,18 @@ import { resolveCanonicalParents, reorderSibling } from '@features/relation/tree
 import { extractMeta, seedBodyFor } from '@features/flavor';
 import { applyBodyRewrite, type BodyRewrite } from '@features/markdown/body-rewrite';
 import { isPlaceOpen } from '@features/markdown/place-notation';
+import { moveLinesWithInverse, type MoveLines } from '@features/markdown/line-move';
 import { replaceTaskCards, type TaskScan } from '@features/schedule/task-cards';
 import type { ContactScan } from '@features/contact/contact-card';
 import type { SnippetScan } from '@features/snippet/snippet-table';
+import type { SearchDetailRow } from '@features/filter/search-snippet';
 import {
   normalizeSplitLids,
   pinSplitLid,
   STACK_MAX,
   unpinSplitLid,
 } from '@features/split-frames';
+import { STACK_ARCHETYPE, stackLids } from '@features/flavor/stack-flavor';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import type { PersistState } from '@adapter/platform/storage-persist';
 import type { OpenExtension } from '@adapter/platform/extension-links';
@@ -100,6 +103,15 @@ export interface SmartHitState {
 }
 
 export type AppPhase = 'initializing' | 'ready' | 'editing' | 'error';
+
+/** 探す面の state(#680)。中身の意味は `AppState.searchPage` の注記。 */
+export interface SearchPageState {
+  readonly query: string;
+  readonly rows: readonly SearchDetailRow[];
+  readonly rowsQuery: string;
+  readonly truncated: boolean;
+  readonly failed: boolean;
+}
 /**
  * 🔴 **直前の追記を、次の追記でどう持ち替えるか**(#395 段① / #668 C)。
  *
@@ -184,6 +196,20 @@ export const VIEW_MODES = [
    */
   'contacts',
   /**
+   * 🔴 **探す面**(#680。user 要望「検索専用の組み込みアプリ」/ 裁定 2026-09-04
+   * 「アプリの基本は別窓」)。
+   *
+   * 左の列の欄は**一覧を絞る**(並びは変えない・当たりは lid だけ)。この面は
+   * **見つける**ためのもの ── 題名 + 本文の抜粋 + 関連度順で並べ、行を押すと
+   * そのノートを**小窓**で開く(いま読んでいる本文は退かさない)。
+   * ⚠ **左の欄と語を共有しない**(`searchPage.query` は `filterQuery` と別)──
+   *   面で打った語で左の一覧が絞られると、別窓の面から本体の一覧が動いて驚く。
+   * ⚠ **aside ではない**(`ASIDE_PANES` に入れない)── 左の一覧を押した選択は
+   *   この面に留まる(集計と同じ)。⚠ 左の列に同じものは無い(`homeTabOf` は null)
+   *   ── 塞がれたときの退避は**左の欄に焦点**(`open-view.ts`)。
+   */
+  'search',
+  /**
    * 🔴 **2 ペインタブファイラ**(#241 段⑥。user 指示 2026-08-17
    * 「アプリに 2 ペインタブファイラを**組み込みで**提供すること」)。
    * ⚠ 裁定 6(`organize-pane-design-2026-08.md` §6)で**中央の面**と決まった
@@ -244,6 +270,7 @@ const VIEW_LABELS: Record<ViewMode, string> = {
   query: '集計',
   schedule: '予定表',
   contacts: '連絡先',
+  search: '探す',
   dual: '2 ペインで整理',
   settings: '設定',
   flags: 'フラグ',
@@ -460,6 +487,16 @@ export interface AppState {
    */
   scopeLid: string | null;
   /**
+   * 🔴 **左の列の行で、名前を打ち替えている lid**(#215)。`null` = 打ち替えていない。
+   *
+   * ⚠ **state 駆動**で入力欄を出す(2 ペインの `dual.renaming` と同じ作法)── DOM を
+   *   直に差し替えると、別タブの保存が届いて面が組み直された瞬間に**打っている最中の
+   *   入力が消える**。⚠ 確定は既存の `RENAME_ENTRY_TITLE` を撃つ(改名の規則を 2 つ作らない)。
+   * ⚠ 消えた lid は指し続けない(`removeEntryFromState` が畳む ── 確定した瞬間に
+   *   どこにも無い lid へ改名が飛ぶのを止める)。
+   */
+  renamingLid: string | null;
+  /**
    * 🔴 **2 ペインタブファイラの持ち物**(#241 段⑥)。
    *
    * ⚠ 上の `scopeLid` / `selection` は**左の列(探し方)のもの**で、こちらは
@@ -655,6 +692,27 @@ export interface AppState {
    */
   searchHitsQuery: string;
   /**
+   * 🔴 **本文の当たりを上限(200 件)で切ったか**(#680)。⚠ worker は最初から
+   * 返していたが、配線(`store-port.ts`)が捨てていたので**左の列は一度も言えなかった**。
+   * 🔑 数は持たない ── worker は「切った」の真偽しか返さない(数え直しの 2 回目の
+   *   問い合わせをしない作法)。だから字も「200 件より多く」で止める。
+   * ⚠ `SET_ENTRY_FILTER` で `false` へ戻す ── 語を変えたのに前の語の「ほかにも
+   *   あります」が残ると、0 件の語で「ほかにもある」と読める。
+   */
+  searchHitsTruncated: boolean;
+  /**
+   * 🔴 **探す面**(#680)。⚠ `filterQuery` と**別に持つ** ── 面の語で左の一覧を絞らない。
+   *
+   * - `query`: 欄に打った語(打鍵ごとに写す ── renderer は DOM から読まない)
+   * - `rows` / `rowsQuery`: 届いている結果と、**それがどの語の答えか**。
+   *   `rowsQuery !== query` = まだ返っていない(その間も前の行は消さない ──
+   *   打つたびに一覧が消えるとちらつく)。⚠ `searchHitsQuery` と同じ理由
+   * - `truncated`: 200 件で切ったか(`searchHitsTruncated` と同じ作法)
+   * - `failed`: 探せなかった(古い worker で op が無い / DB のエラー)── 「まだ」と
+   *   区別しないと「探しています…」で永久に止まる(連絡先の `contactScanFailed` と同じ)
+   */
+  searchPage: SearchPageState;
+  /**
    * 🔴 **集計の面**(#184)。⚠ どれも `null` = **まだ読んでいない**(0 件ではない)。
    *
    * ⚠ 中身は**束ねた結果だけ**で、本文は 1 バイトも入らない ── 束ねるのは worker で、
@@ -787,6 +845,16 @@ export interface AppState {
    */
   lastAppend: { lid: string; lines: readonly string[]; batch?: string } | null;
   /**
+   * 🔴 **直前の塊の移動を、逆向きに撃つ指示**(#684 段①)── 「元に戻す」の材料。
+   *
+   * ⚠ `lastAppend` と違って**位置**を持つ(行の並びは同じ字が何度も出るので、字だけでは
+   *   戻す先が決まらない)。だから**行がずれうる事は全部ここを捨てる** ── 編集に入る
+   *   (`START_EDIT`)/ 同じノートへの別の書換(`BODY_REWRITTEN`)。戻すときは
+   *   `line-move.ts` が掴んだ行そのものと byte 一致を検めるので、ずれていれば断る。
+   * ⚠ **1 手だけ**持つ(`lastAppend` と同じ)。
+   */
+  lastMove: ({ lid: string } & MoveLines) | null;
+  /**
    * 🔴 **編集に入った瞬間に開く行**(#395 段③)。`null` = どこも開かない(既定)。
    *
    * > 読んでいる本文の「この行」を直したい ── 修飾キー + クリックで入る。
@@ -853,6 +921,7 @@ export const initialState: AppState = {
   openBody: null,
   selectedLid: null,
   scopeLid: null,
+  renamingLid: null,
   dual: initialDual,
   selection: [],
   selectionAnchor: null,
@@ -868,6 +937,8 @@ export const initialState: AppState = {
   entrySort: DEFAULT_ENTRY_SORT,
   entrySortDesc: NATURAL_DESC[DEFAULT_ENTRY_SORT],
   searchHitsQuery: '',
+  searchHitsTruncated: false,
+  searchPage: { query: '', rows: [], rowsQuery: '', truncated: false, failed: false },
   queryKey: null,
   smartHits: new Map<string, SmartHitState>(),
   queryKeys: null,
@@ -895,6 +966,7 @@ export const initialState: AppState = {
   linkedFiles: new Map(),
   writeLock: null,
   lastAppend: null,
+  lastMove: null,
   editOpenAt: null,
   tileWrite: null,
   lockGen: 0,
@@ -909,7 +981,28 @@ export type UserAction =
    * ── 置けるのに外せないと、間違えて留めた物を戻す道が無い。
    */
   | { type: 'PIN_SPLIT_ENTRY'; lid: string }
-  | { type: 'UNPIN_SPLIT_ENTRY'; lid: string }
+  /**
+   * `gone: true` = **ノートが消えていたので降ろす**(効果層の自己修復。#633 段①)。
+   * ⚠ user が × を押したときは付けない ── 付けると「消えた」と嘘を言う。
+   *   付いていれば reducer が 1 行知らせる(黙って降ろすと dead click に見える)。
+   */
+  | { type: 'UNPIN_SPLIT_ENTRY'; lid: string; gone?: true }
+  /**
+   * 🔴 **全部降ろす**(#633 段②)。⚠ 確認は要らない ── 降ろすだけでノートは消えない
+   *   (入れ替えたい人は「全部降ろす → 載せる」の 2 手で作れる。設計 doc §2-8)。
+   */
+  | { type: 'CLEAR_SPLIT' }
+  /**
+   * 🔴 **保存したスタック(入れ物)を載せ直す**(#633 段③「このスタックを載せる」)。
+   * 本文の並びを**上に積む**(全置換にしない ── 保存していない並びを黙って失う片道になる。
+   * 設計 doc §2-8)。本文が画面に無ければ効果層が読む(`REQUEST_STACK_BODY`)。
+   */
+  | { type: 'LOAD_STACK'; lid: string }
+  /**
+   * 🔴 **保存したスタックの中の 1 行を上 / 下へ**(#633 段④)。`line` は**原文の行番号**。
+   * 書換は `REQUEST_BODY_REWRITE`(`link-move`)の 1 本 ── 押した時点の行を添えて byte 一致で門をくぐる。
+   */
+  | { type: 'MOVE_STACK_LINK'; lid: string; line: number; dir: 'up' | 'down' }
   | { type: 'SELECT_ENTRY'; lid: string }
   | { type: 'SET_VIEW_MODE'; mode: ViewMode }
   /**
@@ -919,8 +1012,10 @@ export type UserAction =
    */
   | { type: 'SET_OPEN_EXTENSIONS'; open: readonly OpenExtension[] }
   | { type: 'SET_ENTRY_FILTER'; query: string }
+  /** 探す面の欄に打った(#680)。⚠ 左の列の絞り込み(`SET_ENTRY_FILTER`)とは別の語。 */
+  | { type: 'SET_SEARCH_PAGE_QUERY'; query: string }
   /** 本文の当たりが SQL から返った(#181)。⚠ `query` は**どの問い合わせの答えか**。 */
-  | { type: 'SET_SEARCH_HITS'; query: string; lids: string[] }
+  | { type: 'SET_SEARCH_HITS'; query: string; lids: string[]; truncated: boolean }
   /** 一覧の並び順を変える(#183)。⚠ 選択は消さない(絞り込みと同じ規約)。 */
   | {
       type: 'SET_ENTRY_SORT';
@@ -1022,7 +1117,7 @@ export type UserAction =
   | { type: 'MOVE_PLACE'; lid: string; line: number; x: number; y: number }
   /**
    * 🔴 **板を画面から作る・大きさを変える・消す**(#676。user 裁定 2026-09-04)。
-   * ⚠ 3 つとも `MOVE_PLACE` と**同じ門**(`placeRewrite`)を通る ── phase / 画面に出ている
+   * ⚠ 3 つとも `MOVE_PLACE` と**同じ門**(`bodyRewriteGate`)を通る ── phase / 画面に出ている
    *   本文 / 開き行の捕捉を、case ごとに書き直さない(§7)。
    * ⚠ `ADD_PLACE` だけ行番号を持たない(足す先は常に末尾)。
    */
@@ -1031,6 +1126,24 @@ export type UserAction =
   | { type: 'ADD_PLACE'; lid: string; x: number; y: number }
   /** 板を前へ出す(#676 段②)── 他の板の z= の最大 + 1 を書く。同じ門。 */
   | { type: 'RAISE_PLACE'; lid: string; line: number }
+  /**
+   * 🔴 **本文の塊を、本文の中で掴んで並べ替える**(#684 段①。user 要望 2026-09-03)。
+   * `start..end` の行(**生の body** の行番号 = 描画の刻印 + frontmatter)を `toBefore` の
+   * 前へ動かす。掴んだ時点の行そのものは reducer が画面の本文から捕える(呼び側に
+   * 本文を持たせない ── `MOVE_PLACE` の開き行と同じ作法)。門は板の 5 つと**同じ**
+   * (`bodyRewriteGate`)。
+   */
+  | { type: 'MOVE_BLOCK'; lid: string; start: number; end: number; toBefore: number }
+  /**
+   * 🔴 **行の並びを本文へ差し込む**(#684 段②)── 一覧の行を本文へ落とすとリンクになる。
+   * ⚠ 何を入れるか(リンクの字)は binder が組んで渡す(`formatEntryLink` 1 本)。
+   */
+  | { type: 'INSERT_LINES'; lid: string; toBefore: number; lines: readonly string[] }
+  /**
+   * 🔴 **直前の塊の移動を元に戻す**(#684 段①。user 指示 2026-08-23「片道の操作を作らない」)。
+   * ⚠ `UNDO_APPEND` と同じ形 ── 独自の書込経路を作らず `REQUEST_BODY_REWRITE` を通る。
+   */
+  | { type: 'UNDO_MOVE' }
   /**
    * 🔴 **本文の 1 行の日付**(双方向。user 指示 2026-08-23)。
    * ⚠ `SET_ENTRY_DATE`(ノート 1 件が丸ごと予定)とは**単位が違う**。
@@ -1192,6 +1305,14 @@ export type UserAction =
        *  ⚠ `relationId` も一緒に渡す ── 片方だけでは辺を作れない。 */
       parentLid?: string | null;
       relationId?: string;
+      /**
+       * 🔴 **作っても中央の本文を退かさない**(#633 段③ ── 帯の「保存…」)。
+       * ⚠ 既定の `CREATE_ENTRY` は選択を新しい物へ動かし、絞りも外す。スタックの保存は
+       *   「読んでいる最中に、いまの並びを取っておく」操作なので、**さっきまで読んでいた本文が
+       *   消える**のは #300 の型である(補助的な物が主の作業領域を奪う)。
+       * 🔑 `true` なら選択・開いている本文・絞りを動かさず、編集にも入らない(`edit` より強い)。
+       */
+      keepSelection?: boolean;
     }
   | { type: 'DESELECT_ENTRY' }
   /**
@@ -1325,6 +1446,12 @@ export type UserAction =
    */
   | { type: 'DUAL_RENAME_BEGIN'; side: DualSide; lid: string }
   | { type: 'DUAL_RENAME_END' }
+  /**
+   * 🔴 **左の列の行の名前を打ち替え始める / やめる**(#215)。2 ペインの `DUAL_RENAME_*` と
+   *   対 ── 面が違うだけで、確定は同じ `RENAME_ENTRY_TITLE` である。
+   */
+  | { type: 'ROW_RENAME_BEGIN'; lid: string }
+  | { type: 'ROW_RENAME_END' }
   /** 🔴 **このペインだけの絞り込み**(#273 残件)。 */
   | { type: 'TOGGLE_KIND_FILTER'; archetype: string }
   | { type: 'CLEAR_KIND_FILTER' }
@@ -1369,6 +1496,20 @@ export type UserAction =
 
 export type SystemCommand =
   | { type: 'SYS_BOOTED'; cid: string; metas: EntryMeta[]; relations: Relation[] }
+  /**
+   * 探す面の結果が返った(#680)。⚠ `query` は**どの語の答えか**(遅れて返った古い
+   * 結果を捨てる ── 打鍵は結果より速い)。
+   */
+  | {
+      type: 'SET_SEARCH_DETAIL';
+      query: string;
+      rows: readonly SearchDetailRow[];
+      truncated: boolean;
+    }
+  /** 探せなかった(#680)。⚠ 「まだ」と区別する ── 区別しないと永久に「探しています…」。 */
+  | { type: 'SEARCH_DETAIL_FAILED'; query: string }
+  /** 効果層が読んだ入れ物の本文(#633 段③)── `LOAD_STACK` の続き。 */
+  | { type: 'STACK_BODY_LOADED'; lid: string; body: string }
   | { type: 'BODY_LOADED'; lid: string; body: string }
   /**
    * 留めた枠の本文が読めた(#505 段②)。⚠ `BODY_LOADED` と**別の口**である ──
@@ -1506,6 +1647,8 @@ export type DomainEvent =
    *   別経路で読むと、並んでいる書込を追い越す(2026-08-17 に踏んだ形)。
    */
   | { type: 'REQUEST_DUAL_PREVIEW'; lid: string }
+  /** 入れ物の本文を読んで `STACK_BODY_LOADED` で返す(#633 段③)。読む口は同じ直列の列。 */
+  | { type: 'REQUEST_STACK_BODY'; lid: string }
   /**
    * 🔴 **留めた枠の本文を読む**(#505 段②)。
    *
@@ -1562,6 +1705,11 @@ export type DomainEvent =
    * 空文字は「絞り込み無し」── 受け手は問い合わせずに黙って終える。
    */
   | { type: 'REQUEST_SEARCH'; query: string }
+  /**
+   * 探す面の検索を頼む(#680)。⚠ 受け手(effect)が **300ms 止まってから**叩く ──
+   * 打鍵ごとに worker を叩かない。空文字は来ない(reducer が出さない)。
+   */
+  | { type: 'REQUEST_SEARCH_DETAIL'; query: string }
   /**
    * 集計を頼む(#184)。⚠ 検索と同じ理由で **SQL 側の仕事** ── 本文は常駐していない。
    * ⚠ **目録と表を 1 回の走査で頼む**(`key` が `null` なら目録だけ)── 別々に
@@ -2101,7 +2249,14 @@ function reduceCore(
        * `REQUEST_SEARCH` を出し、返ってきたら `SET_SEARCH_HITS` で増やす。
        */
       return {
-        state: { ...state, filterQuery: action.query, searchHits: null, searchHitsQuery: '' },
+        state: {
+          ...state,
+          filterQuery: action.query,
+          searchHits: null,
+          searchHitsQuery: '',
+          // ⚠ 前の語の「ほかにもあります」を持ち越さない(#680)
+          searchHitsTruncated: false,
+        },
         events: [{ type: 'REQUEST_SEARCH', query: action.query }],
       };
     /**
@@ -2186,7 +2341,53 @@ function reduceCore(
           ...state,
           searchHits: new Set(action.lids),
           searchHitsQuery: action.query,
+          searchHitsTruncated: action.truncated,
         },
+        events: [],
+      };
+    /**
+     * 🔴 **探す面の欄に打った**(#680)。⚠ 左の一覧(`filterQuery`)には触らない。
+     * ⚠ 前の行は**消さない**(`rowsQuery` が古いまま = まだ返っていない、と読める)──
+     *   打つたびに一覧が空になるとちらつく。空にしたら結果も空にする(頼まない)。
+     */
+    case 'SET_SEARCH_PAGE_QUERY': {
+      const page = state.searchPage;
+      if (page.query === action.query) return { state, events: [] };
+      if (action.query.trim() === '') {
+        return {
+          state: {
+            ...state,
+            searchPage: { query: action.query, rows: [], rowsQuery: action.query, truncated: false, failed: false },
+          },
+          events: [],
+        };
+      }
+      return {
+        state: { ...state, searchPage: { ...page, query: action.query, failed: false } },
+        events: [{ type: 'REQUEST_SEARCH_DETAIL', query: action.query }],
+      };
+    }
+    case 'SET_SEARCH_DETAIL':
+      // ⚠ **遅れて返った古い結果を捨てる**(`SET_SEARCH_HITS` と同じ)
+      if (action.query !== state.searchPage.query) return { state, events: [] };
+      return {
+        state: {
+          ...state,
+          searchPage: {
+            query: action.query,
+            rows: action.rows,
+            rowsQuery: action.query,
+            truncated: action.truncated,
+            failed: false,
+          },
+        },
+        events: [],
+      };
+    case 'SEARCH_DETAIL_FAILED':
+      if (action.query !== state.searchPage.query) return { state, events: [] };
+      // ⚠ 前の行は残す(消すと「失敗して空になった」に見える)── 印だけ立てる
+      return {
+        state: { ...state, searchPage: { ...state.searchPage, rowsQuery: action.query, failed: true } },
         events: [],
       };
     case 'SET_OPEN_EXTENSIONS':
@@ -2474,6 +2675,8 @@ function reduceCore(
            *   「編集」を押しただけで**前に押した行が開く**。
            */
           editOpenAt: action.atLine ?? null,
+          // ⚠ 編集は行をずらすので「元に戻す」の材料は捨てる(#684 段①。`lastMove` の注記)
+          lastMove: null,
         },
         /**
          * 🔴 **編集に入るたびに雛形を集め直す**(#196 / B-2)。
@@ -3018,10 +3221,10 @@ function reduceCore(
     }
     /**
      * 🔴 **板の塊を動かす**(#283 P4-b)。門(phase / 画面に出ている本文 / 開き行の捕捉)は
-     * `placeRewrite` 1 か所 ── 下の 3 つ(#676)と共有する。
+     * `bodyRewriteGate` 1 か所 ── 下の 3 つ(#676)と共有する。
      */
     case 'MOVE_PLACE':
-      return placeRewrite(state, action.lid, '編集を終了してから、板の付箋を動かしてください', (shown) => {
+      return bodyRewriteGate(state, action.lid, '編集を終了してから、板の付箋を動かしてください', (shown) => {
         if (!isPlaceCoord(action.x) || !isPlaceCoord(action.y)) return null;
         const openLine = placeOpenLineOf(shown, action.line);
         if (openLine === null) return null;
@@ -3029,34 +3232,86 @@ function reduceCore(
       });
     /**
      * 🔴 **板を画面から作る・大きさを変える・消す**(#676)── 3 つとも `MOVE_PLACE` と
-     * 同じ門(`placeRewrite`)を通る。断り文だけが**押した場所と対**で違う
+     * 同じ門(`bodyRewriteGate`)を通る。断り文だけが**押した場所と対**で違う
      * (CLAUDE.md「文言は押した場所と対で pin する」)。
      */
     case 'RESIZE_PLACE':
-      return placeRewrite(state, action.lid, '編集を終了してから、板の大きさを変えてください', (shown) => {
+      return bodyRewriteGate(state, action.lid, '編集を終了してから、板の大きさを変えてください', (shown) => {
         if (!isPlaceCoord(action.w) || !isPlaceCoord(action.h)) return null;
         const openLine = placeOpenLineOf(shown, action.line);
         if (openLine === null) return null;
         return { kind: 'place-size', line: action.line, openLine, w: action.w, h: action.h };
       });
     case 'REMOVE_PLACE':
-      return placeRewrite(state, action.lid, '編集を終了してから、板を消してください', (shown) => {
+      return bodyRewriteGate(state, action.lid, '編集を終了してから、板を消してください', (shown) => {
         const openLine = placeOpenLineOf(shown, action.line);
         if (openLine === null) return null;
         return { kind: 'place-remove', line: action.line, openLine };
       });
     case 'ADD_PLACE':
-      return placeRewrite(state, action.lid, '編集を終了してから、板を置いてください', () =>
+      return bodyRewriteGate(state, action.lid, '編集を終了してから、板を置いてください', () =>
         isPlaceCoord(action.x) && isPlaceCoord(action.y)
           ? { kind: 'place-add', x: action.x, y: action.y }
           : null,
       );
     case 'RAISE_PLACE':
-      return placeRewrite(state, action.lid, '編集を終了してから、板を前へ出してください', (shown) => {
+      return bodyRewriteGate(state, action.lid, '編集を終了してから、板を前へ出してください', (shown) => {
         const openLine = placeOpenLineOf(shown, action.line);
         if (openLine === null) return null;
         return { kind: 'place-raise', line: action.line, openLine };
       });
+    /**
+     * 🔴 **本文の塊を掴んで並べ替える**(#684 段①)── 板と**同じ門**。
+     * 🔑 掴んだ時点の行そのものは**ここで**画面の本文から捕える(`placeOpenLineOf` と同じ
+     *   向き)── disk 側とずれていれば `line-move.ts` が byte 一致で断る。
+     * ⚠ `dragstart` では phase を見ない(掴むのは自由)── 落としたときにここで断る。
+     */
+    case 'MOVE_BLOCK':
+      return bodyRewriteGate(state, action.lid, '編集を終了してから、本文の塊を動かしてください', (shown) => {
+        const { start, end, toBefore } = action;
+        if (!Number.isInteger(start) || !Number.isInteger(end) || !Number.isInteger(toBefore)) return null;
+        const lines = shown.split('\n');
+        if (start < 0 || end < start || end >= lines.length) return null;
+        return { kind: 'move-lines', start, end, toBefore, lines: lines.slice(start, end + 1) };
+      });
+    /** 🔴 **一覧の行を本文へ落とすとリンクになる**(#684 段②)── 同じ門。空の並びは撃たない。 */
+    case 'INSERT_LINES':
+      return bodyRewriteGate(state, action.lid, '編集を終了してから、一覧の行を本文へ落としてください', () =>
+        Number.isInteger(action.toBefore) && action.lines.length > 0
+          ? { kind: 'insert-lines', toBefore: action.toBefore, lines: action.lines }
+          : null,
+      );
+    /**
+     * 🔴 **直前の塊の移動を元に戻す**(#684 段①)── `UNDO_APPEND` と同じ形。
+     * ⚠ **1 手で使い切る**(`lastMove` を落とす)。戻した結果も `BODY_REWRITTEN` が
+     *   `move-lines` として届くので、そこでまた「戻す」の材料が入る(= 押し直せる)。
+     */
+    case 'UNDO_MOVE': {
+      if (state.phase !== 'ready') return { state, events: [] };
+      const last = state.lastMove;
+      if (!last) return { state, events: [] };
+      const meta = state.entryMetas.get(last.lid);
+      if (!meta) return { state: { ...state, lastMove: null }, events: [] };
+      return {
+        state: { ...state, lastMove: null },
+        events: [
+          {
+            type: 'REQUEST_BODY_REWRITE',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            rewrite: {
+              kind: 'move-lines',
+              start: last.start,
+              end: last.end,
+              toBefore: last.toBefore,
+              lines: last.lines,
+            },
+          },
+        ],
+      };
+    }
     case 'SET_ENTRY_DATE': {
       // 🔴 **黙って捨てない**(#516)── 理由は上の `SET_TASK_DATE` に書いた
       const blocked = phaseBlockReason(state.phase);
@@ -3170,6 +3425,34 @@ function reduceCore(
        */
       const taskScan = refreshTaskCards(state.taskScan, action.lid, action.body);
       /**
+       * 🔴 **塊を動かした回は「元に戻す」の材料を入れ、知らせを出す**(#684 段①)。
+       *
+       * 逆向きの指示は、動かす**前**の本文(この ack が届く前に画面が持っていた本文)から
+       * 計算する。⚠ その本文から同じ結果(`action.body`)が出ないとき(= 画面が古かった)は
+       * 材料を入れない ── 当てずっぽうの位置へ戻さない(`undo-append` の「見つからなければ
+       * 断る」と同じ向き)。
+       * ⚠ 同じノートへの**別の**書換は、行がずれうるので材料を捨てる(`lastMove` は位置を持つ)。
+       * 🔑 知らせは `OP_NOTICE` と同じ 2 つ(`notice` / `noticeOpen`)を書く ── 「開く」の
+       *   身元は添えないので `null`(次の知らせで消える作法のまま)。
+       */
+      let lastMove = state.lastMove;
+      let notice = state.notice;
+      let noticeOpen = state.noticeOpen;
+      if (action.rewrite.kind === 'move-lines') {
+        const before = screenBodyOf(state, action.lid);
+        const moved = before === null ? null : moveLinesWithInverse(before, action.rewrite);
+        lastMove =
+          moved !== null && moved.body === action.body && moved.inverse !== null
+            ? { lid: action.lid, ...moved.inverse }
+            : null;
+        if (lastMove !== null) {
+          notice = '本文の塊を動かしました';
+          noticeOpen = null;
+        }
+      } else if (lastMove !== null && lastMove.lid === action.lid) {
+        lastMove = null;
+      }
+      /**
        * 🔑 **タグを付けたら、開いている入れ物にその場で落ちる**(user 要望 2026-08-26)。
        * ⚠ ここは**まとめてタグを付ける**経路でもある(`REQUEST_BULK_TAG` が 1 件ずつ
        *   ack を撃つ)── worker に頼み直す形だと 100 件で 100 回の全件走査になる。
@@ -3185,7 +3468,17 @@ function reduceCore(
       const tagSuggestions =
         action.rewrite.kind === 'tag' ? null : state.tagSuggestions;
       return {
-        state: { ...state, entryMetas, openBody, taskScan, smartHits, tagSuggestions },
+        state: {
+          ...state,
+          entryMetas,
+          openBody,
+          taskScan,
+          smartHits,
+          tagSuggestions,
+          lastMove,
+          notice,
+          noticeOpen,
+        },
         events: [],
       };
     }
@@ -3404,7 +3697,9 @@ function reduceCore(
         };
       }
       const body = action.body ?? seedBodyFor(action.archetype);
-      const wantsEdit = action.edit !== false;
+      // 🔑 `keepSelection` は「読んでいる物を退かさない」なので、編集にも入らない
+      const keep = action.keepSelection === true;
+      const wantsEdit = action.edit !== false && !keep;
       const ext = extractMeta(action.archetype, body);
       const lastLid = state.order[state.order.length - 1];
       const entryOrder = lastLid
@@ -3475,13 +3770,13 @@ function reduceCore(
           phase: wantsEdit ? 'editing' : 'ready', // 既定は作成 → 即編集(PKC2 の遷移)
           entryMetas: new Map(state.entryMetas).set(action.lid, meta),
           order: [...state.order, action.lid],
-          selectedLid: action.lid,
+          selectedLid: keep ? state.selectedLid : action.lid,
           // 🔴 **絞り込みを解除する**(review M-2)。既定題名は絞り込み語に一致
           // しないので、絞り込み中に作ると **一生一覧に出ない** entry ができていた
           // (実証: 保存しても出ず、「効かなかった」と思って Esc を押すと
           // 新規未編集 cancel の掃除で entry ごと消える)。
           // ⚠ 欄の文字も消える ── 書き戻しは sidebar が持つ
-          filterQuery: keepFilter ? state.filterQuery : '',
+          filterQuery: keepFilter || keep ? state.filterQuery : '',
           /**
            * 🔴 **種類の絞りも外す**(#411)── **同じ事故が軸を変えて戻ってくる**。
            * 「添付だけ」を出しているときに「ノート」を作ると、作った物は
@@ -3489,16 +3784,19 @@ function reduceCore(
            * Esc を押し、新規未編集 cancel の掃除で **entry ごと消える**
            * (review M-2 で `filterQuery` について実証済みの経路そのもの)。
            */
-          kindFilter: keepFilter ? state.kindFilter : NO_KINDS,
+          kindFilter: keepFilter || keep ? state.kindFilter : NO_KINDS,
           freshLid: wantsEdit ? action.lid : null, // 非編集作成は fresh 掃除の対象外
           error: null,
-          openBody: {
-            lid: action.lid,
-            body,
-            baseline: body,
-            persisted: body, // 楽観(ack 前)── 上記コメントの範囲で許容
-            diskAhead: false,
-          },
+          // ⚠ 退かさない作成では、開いている本文もそのまま(新しい物は選ばれていないので持たない)
+          openBody: keep
+            ? state.openBody
+            : {
+                lid: action.lid,
+                body,
+                baseline: body,
+                persisted: body, // 楽観(ack 前)── 上記コメントの範囲で許容
+                diskAhead: false,
+              },
         },
         events: [
           {
@@ -4040,6 +4338,19 @@ function reduceCore(
       if (state.dual.renaming === null) return { state, events: [] };
       return { state: { ...state, dual: { ...state.dual, renaming: null } }, events: [] };
     }
+    case 'ROW_RENAME_BEGIN': {
+      // ⚠ 編集中は打たせない(`RENAME_ENTRY_TITLE` 自体は editing でも通るが、
+      //    その入力欄は 2 ペインの編集画面の題名欄であって、左の列の行ではない)
+      if (state.phase !== 'ready') return { state, events: [] };
+      // ⚠ 実在しない行の名前は打てない(消えた行の入力欄を出さない)
+      if (!state.entryMetas.has(action.lid)) return { state, events: [] };
+      if (state.renamingLid === action.lid) return { state, events: [] };
+      return { state: { ...state, renamingLid: action.lid }, events: [] };
+    }
+    case 'ROW_RENAME_END': {
+      if (state.renamingLid === null) return { state, events: [] };
+      return { state: { ...state, renamingLid: null }, events: [] };
+    }
     case 'DUAL_SET_FILTER': {
       const pane = withPaneFilter(paneOf(state.dual, action.side), action.filter);
       if (pane === paneOf(state.dual, action.side)) return { state, events: [] };
@@ -4212,9 +4523,56 @@ function reduceCore(
       const rest = unpinSplitLid(state.splitLids, action.lid);
       if (rest === state.splitLids) return { state, events: [] };
       return {
-        state: { ...state, splitLids: rest, splitBodies: dropSplitBody(state.splitBodies, action.lid) },
+        state: {
+          ...state,
+          splitLids: rest,
+          splitBodies: dropSplitBody(state.splitBodies, action.lid),
+          /**
+           * 🔴 **消えたので降ろしたときだけ 1 行言う**(#633 段①)。
+           * ⚠ 直す前は無言だった ── user から見ると「札が勝手に消えた」である。
+           * ⚠ 題名は**降ろす前の `entryMetas`** から引く(別タブで消された直後は
+           *   まだ残っていることが多い。無ければ「消えたノート」)。
+           */
+          ...(action.gone === true
+            ? { notice: goneFromStackNotice(state.entryMetas.get(action.lid)?.title) }
+            : {}),
+        },
         events: [],
       };
+    }
+    case 'CLEAR_SPLIT': {
+      // ⚠ 空なら**同じ state**を返す(描き直しの指紋を動かさない ── `UNPIN` と同じ作法)
+      if (state.splitLids.length === 0) return { state, events: [] };
+      return {
+        state: { ...state, splitLids: [], splitBodies: new Map<string, string>() },
+        events: [],
+      };
+    }
+    case 'LOAD_STACK': {
+      const meta = state.entryMetas.get(action.lid);
+      if (meta === undefined || meta.archetype !== STACK_ARCHETYPE) return { state, events: [] };
+      /**
+       * 🔑 本文が画面に在ればその場で積む(`screenBodyOf` ── 主の枠か横の枠)。
+       *   無ければ効果層に読ませる(押した瞬間に何も起きない、を作らない)。
+       */
+      const shown = screenBodyOf(state, action.lid);
+      if (shown === null) return { state, events: [{ type: 'REQUEST_STACK_BODY', lid: action.lid }] };
+      return loadStackFromBody(state, shown);
+    }
+    case 'STACK_BODY_LOADED': {
+      const meta = state.entryMetas.get(action.lid);
+      if (meta === undefined || meta.archetype !== STACK_ARCHETYPE) return { state, events: [] };
+      return loadStackFromBody(state, action.body);
+    }
+    case 'MOVE_STACK_LINK': {
+      // ⚠ 入れ物以外では何もしない(押し所はスタックの入れ物にしか生えない ── 綴りの取り違えの防波堤)
+      if (state.entryMetas.get(action.lid)?.archetype !== STACK_ARCHETYPE) return { state, events: [] };
+      // 🔑 門と event の組み立ては板の書換と**同じ 1 本**(`bodyRewriteGate`(#684 で `placeRewrite` から改名))── 編集中は声に出して断る
+      return bodyRewriteGate(state, action.lid, '編集を終えてから、並べ替えてください', (shown) => {
+        const openLine = shown.split('\n')[action.line];
+        if (openLine === undefined) return null;
+        return { kind: 'link-move', line: action.line, openLine, dir: action.dir };
+      });
     }
     case 'SPLIT_BODY_LOADED': {
       /**
@@ -4569,6 +4927,8 @@ function removeEntryFromState(
        * (しかもそこで「作る」と、消えた親の子として生まれる)。
        */
       scopeLid: state.scopeLid === lid ? null : state.scopeLid,
+      // ⚠ 打ち替え中の相手が消えたら、打つのもやめる(#215 ── 2 ペインの `renaming` と同じ)
+      renamingLid: state.renamingLid === lid ? null : state.renamingLid,
       // ⚠ 消えたものを印に残さない(#240 段②)── まとめて削除が**居ないもの**を数える
       selection: state.selection.includes(lid)
         ? state.selection.filter((l) => l !== lid)
@@ -4605,6 +4965,10 @@ function removeEntryFromState(
        */
       splitLids: unpinSplitLid(state.splitLids, lid),
       splitBodies: dropSplitBody(state.splitBodies, lid),
+      // 🔑 載せていた物を消したなら、降ろしたことを言う(#633 段① ── 効果層の自己修復と同じ字)
+      ...(state.splitLids.includes(lid)
+        ? { notice: goneFromStackNotice(state.entryMetas.get(lid)?.title) }
+        : {}),
     },
     events,
   };
@@ -4675,8 +5039,11 @@ export function screenBodyOf(state: AppState, lid: string): string | null {
 }
 
 /**
- * 🔴 **板の書換 4 つ(動かす / 大きさ / 消す / 置く)が共通で通る門**(#283 P4-b → #676)。
+ * 🔴 **画面の本文から組む書換が共通で通る門**(#283 P4-b → #676 → #684)。
  *
+ * 板の 5 つ(動かす / 大きさ / 消す / 置く / 前へ)と、本文の塊の並べ替え・差し込みが通る。
+ * ⚠ #684 で `placeRewrite` から改名した ── 板向きの名前のまま本文の塊が通ると、
+ *   次に読む人が「板の門」と読んで別の門を書き足す(§7)。
  * ⚠ 編集中は**声に出して断る** ── 判定はここ 1 か所(`SET_VIEW_MODE` と同じ作法。
  *   呼び側(掴む口・メニュー)に配ると、口を足すたびに取りこぼす ── #516 の向き)。
  * 🔴 **画面に出ている本文は 1 つではない**(#281 検算 2026-08-30)。
@@ -4689,7 +5056,7 @@ export function screenBodyOf(state: AppState, lid: string): string | null {
  * @param build 画面が見ている本文から書換を組む。組めなければ `null` = 黙って no-op
  *   (行が板でない / 値が壊れている ── どれも画面の操作からは起きない形)
  */
-function placeRewrite(
+function bodyRewriteGate(
   state: AppState,
   lid: string,
   refusal: string,
@@ -4730,6 +5097,45 @@ function placeOpenLineOf(shown: string, line: number): string | null {
 /** 板の座標・大きさの値 ── 整数で 0 以上だけ(描画も負の値は捨てる)。 */
 function isPlaceCoord(n: number): boolean {
   return Number.isInteger(n) && n >= 0;
+}
+
+/**
+ * 🔴 **保存したスタックの本文を、いまのスタックの上に積む**(#633 段③)。
+ *
+ * ⚠ **先頭が一番上**なので、本文を**下から順に** `pinSplitLid` する ── 上から積むと
+ *   並びが裏返る(本文の 1 行目が一番下に来る)。
+ * ⚠ 消えたノートの行は残っている(参照のみ)── 載せられない件数を**数えて言う**。
+ *   上限(`STACK_MAX`)で入らなかった件数も別に言う(黙って落とさない)。
+ * 🔑 載せた後の本文の読みは `REQUEST_SPLIT_BODY`(帯の札と同じ 1 本)── まだ持っていない物だけ。
+ */
+function loadStackFromBody(state: AppState, body: string): ReduceResult {
+  const wanted = stackLids(body);
+  const present = wanted.filter((l) => state.entryMetas.has(l));
+  const missing = wanted.length - present.length;
+  let lids = state.splitLids;
+  for (let i = present.length - 1; i >= 0; i -= 1) lids = pinSplitLid(lids, present[i]!);
+  const added = lids.filter((l) => !state.splitLids.includes(l));
+  const refused = present.filter((l) => !lids.includes(l)).length;
+  const parts: string[] = [];
+  if (present.length === 0) parts.push('載せられるノートがありません');
+  else parts.push(`${String(present.length - refused)} 件を載せました`);
+  if (missing > 0) parts.push(`${String(missing)} 件は見つかりません`);
+  if (refused > 0) parts.push(`上限 ${String(STACK_MAX)} 件で ${String(refused)} 件は載せられませんでした`);
+  const notice = parts.length === 1 ? parts[0]! : `${parts[0]!}(${parts.slice(1).join(' / ')})`;
+  return {
+    state: { ...state, splitLids: lids, notice },
+    events: added
+      .filter((l) => !state.splitBodies.has(l))
+      .map((l) => ({ type: 'REQUEST_SPLIT_BODY', lid: l })),
+  };
+}
+
+/**
+ * 🔴 **消えたノートをスタックから降ろしたときの 1 行**(#633 段①)── 字はここ 1 か所。
+ * ⚠ 呼び手は 2 つ(削除 / 効果層の本文 null)── 別々に書くと片方だけ直る(§7)。
+ */
+function goneFromStackNotice(title: string | undefined): string {
+  return `「${title ?? '消えたノート'}」は消えたのでスタックから降ろしました`;
 }
 
 function dropSplitBody(

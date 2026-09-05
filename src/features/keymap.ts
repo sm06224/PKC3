@@ -253,6 +253,36 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     defaults: ['Shift+ArrowUp'],
   },
   /**
+   * 🔴 **左の列の行からの整理 3 つの鍵**(#215)。
+   *
+   * ⚠ 文脈は `filer` **だけ** ── 2 ペインには同じ操作の鍵が既に在る(`dual-rename` F2 /
+   *   `dual-move-to-other` F6 / `dual-new-note` Shift+F4)。**同じ操作は同じ鍵**にする
+   *   (押す面が違っても、指が覚えた鍵をそのまま使える)。文脈が重ならないので
+   *   割当の衝突にはならない(`contextsOverlap`)。
+   * 🔑 実体は右クリックの項目と**同じ受け手**(`binder.ts` の `FILER_KEY_ACTION`)。
+   */
+  {
+    id: 'filer-rename',
+    label: '名前を変える(行の題名の所で打ち替える)',
+    contexts: ['filer'],
+    defaults: ['F2'],
+    note: 'Enter で確定、Esc でやめます',
+  },
+  {
+    id: 'filer-move',
+    label: '移す…(入れ先のフォルダを選ぶ)',
+    contexts: ['filer'],
+    defaults: ['F6'],
+    note: '印があれば、その全部を移します',
+  },
+  {
+    id: 'filer-new-in-folder',
+    label: 'この中に新しいノートを作る',
+    contexts: ['filer'],
+    defaults: ['Shift+F4'],
+    note: 'フォルダの行で押します(作ってそのまま編集に入ります)',
+  },
+  /**
    * 🔴 **2 ペインだけの鍵**(2026-08-19 の作り直し。設計 doc §3-3)。
    *
    * ⚠ 割当は古典 4 実装(Total Commander / Double Commander / FAR / Krusader)で
@@ -423,6 +453,42 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['global'],
     defaults: ['Alt+Shift+W'],
     note: '開いているノートだけを別のウィンドウ(小窓)で開きます。付箋のように何枚でも並べられます',
+  },
+  /**
+   * 🔴 **スタックを鍵とパレットから呼ぶ**(#633 段②。user 裁定 2026-08-30
+   * 「**スタックからすぐ呼び出せるようにしろ**」)。
+   *
+   * ⚠ 直す前、スタックを触る口は**本文の上の帯の札だけ**だった ── 帯は載せていないと
+   *   出ないので、「いま読んでいるノートを載せる」は右クリックまで行くしか無かった。
+   * 🔑 3 つとも `Alt+Shift+<字>` に揃える ── 隣の `Alt+Shift+W`(小窓)と**同じ族**である
+   *   (読んでいるノートを別の所に出す手)。⚠ `Alt+数字` は使わない ── 打鍵中に止まるうえ、
+   *   面の切替(`Alt+1`〜`6`)の並びに紛れる。
+   * ⚠ 受け手は `binder.ts` の `runGlobalCommand`(押しボタンを持たないので直に投げる ──
+   *   `view-dual` と同じ形)。
+   */
+  {
+    id: 'stack-push',
+    label: 'いま読んでいるノートをスタックに載せる',
+    contexts: ['global'],
+    // 🔑 S = Stack。小窓の W の隣
+    defaults: ['Alt+Shift+S'],
+    note: '一番上に載って本文のすぐ隣に出ます(ノートを開いているときだけ効きます)',
+  },
+  {
+    id: 'stack-open',
+    label: 'スタックから開く',
+    contexts: ['global'],
+    // 🔑 O = Open。載せてある物を題名で選んで一番上へ
+    defaults: ['Alt+Shift+O'],
+    note: '載せてあるノートを一覧から選び、一番上へ上げます(載せてあるときだけ効きます)',
+  },
+  {
+    id: 'stack-clear',
+    label: 'スタックを全部降ろす',
+    contexts: ['global'],
+    // 🔑 D = Drop(降ろす)。⚠ 確認は挟まない ── 降ろすだけでノートは消えない
+    defaults: ['Alt+Shift+D'],
+    note: '載せてある物を全部降ろします(ノートは消えません。載せてあるときだけ効きます)',
   },
   /**
    * ⚠ **番号は末尾に足す**(#241 段⑥-a)。集計と設定の間へ差し込むと、
@@ -943,8 +1009,11 @@ function bareAllowed(key: string, commandId?: string): boolean {
  * 🔴 **横取りしてはいけない割当**(OS / ブラウザ側の意味が強すぎるもの)。
  * ⚠ `Mod+S` / `Mod+A` / `Mod+Z` は **PKC3 が既に横取りしている**(既定)ので入れない ──
  * 「入れたら既定が違反になる」条件を書かない(§1「成り立たない主張」の予防)。
+ * ⚠ export しているのは **マニュアル §10 の一覧と突き合わせる**ため(#697、
+ *   `tests/docs-parity.test.ts`)── 直す前は 6 つの字が手書きで、`Mod+R` / `Mod+P` を
+ *   足したときマニュアルが追随していなかった。
  */
-const REFUSED: readonly string[] = [
+export const REFUSED: readonly string[] = [
   'Mod+C',
   'Mod+V',
   'Mod+X',
@@ -984,7 +1053,12 @@ export function validateBinding(
     };
   }
   if (REFUSED.some((r) => sameChord(r, norm))) {
-    return { kind: 'refused', message: 'これはコピー・貼り付けなどに使われる組み合わせです' };
+    // ⚠ 文言は一覧と対(#697)── `Mod+R` / `Mod+P` はコピーでも貼り付けでもないので、
+    //    「コピー・貼り付けなど」だけでは user が「なぜ R が駄目か」を読めない
+    return {
+      kind: 'refused',
+      message: 'これはコピー・貼り付け・再読込・印刷などに使われる組み合わせです',
+    };
   }
   const me = findCommand(commandId);
   if (me === null) return { kind: 'unreadable', message: '知らないコマンドです' };

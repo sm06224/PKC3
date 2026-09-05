@@ -62,3 +62,24 @@ export function decodeHidden(raw: string | null | undefined): PaneId[] {
   const seen = new Set(raw.split(/\s+/).filter(isPaneId));
   return PANES.filter((p) => seen.has(p));
 }
+
+/**
+ * 🔴 **窓がこの高さ以下なら、追記欄を最初から畳んで開く**(#701。user 裁定 2026-09-04 案 A)。
+ *
+ * ## 実測(2026-09-05、ノートを 1 件開いた直後・お知らせ閉)
+ *
+ * | 窓 | 本文の器 | 追記欄 |
+ * |---|---|---|
+ * | 844×390(横向きのスマホ) | **230px** | 107px |
+ * | 360×640 | 480px | 107px |
+ * | 1024×768 | 424px | 96px |
+ *
+ * 目安は「本文の器が 300px を切るとき」── 高さ 480 以下がそれに当たり、640 は当たらない。
+ * ⚠ **スマホ用画面の高さの境目(`PHONE_MAX_HEIGHT_PX`)と同じ数字**だが、別の定数として
+ *   持つ ── 片方だけ動かす理由が出たとき(例: 帯を 1 本足して本文が縮んだ)に、
+ *   スマホ用画面の境目を巻き込まずに直せる。⚠ 等値は test が pin する(ずれたら気づく)。
+ * ⚠ 読むのは `adapter/ui/render/append-autofold.ts` の `matchMedia` 1 本 ── CSS には書かない
+ *   (`phone-layout.ts` と同じ規律:数字が 2 か所に割れると別の高さで切り替わる)。
+ * ⚠ 本文の器の**実寸**で判定しない ── 畳むと器が伸びて条件が外れ、戻すと縮む(振動する)。
+ */
+export const APPEND_AUTOFOLD_MAX_HEIGHT_PX = 480;

@@ -18,6 +18,7 @@ import { ScrollMemory } from './scroll-memory';
 import { DualFilerRenderer } from './dual-filer';
 import { ScheduleRenderer } from './schedule';
 import { ContactsRenderer } from './contacts';
+import { SearchRenderer } from './search';
 import type { MarkdownClient } from '@adapter/platform/render/markdown-client';
 
 type PaneView =
@@ -25,6 +26,7 @@ type PaneView =
   | 'query'
   | 'schedule'
   | 'contacts'
+  | 'search'
   | 'dual'
   | 'settings'
   | 'flags'
@@ -45,7 +47,13 @@ const ASIDE: ReadonlySet<ViewMode> = new Set<ViewMode>(['settings', 'flags', 'he
  * 落ちない ── 2 つ目の表である。⚠ ここに足し忘れると `toPane` が本文へ落として
  * 「開いたのに本文が出る」になる(`tests/adapter/help-pane.test.ts` が突合する)。
  */
-const NOTE_PANES: ReadonlySet<ViewMode> = new Set<ViewMode>(['query', 'schedule', 'contacts']);
+// ⚠ 探す面(#680)もここ ── 左の一覧を押した選択はこの面に留まる(行を押すと小窓が開く)
+const NOTE_PANES: ReadonlySet<ViewMode> = new Set<ViewMode>([
+  'query',
+  'schedule',
+  'contacts',
+  'search',
+]);
 
 /**
  * 🔑 中央は**常に「開いているノート」**(P8 段⑤)。
@@ -79,6 +87,8 @@ export class CenterRouter {
   private readonly schedule: ScheduleRenderer;
   /** 🔴 **連絡先**(#278 段③)── 予定表と同じく、左の列と**同じ class**。 */
   private readonly contacts: ContactsRenderer;
+  /** 🔴 **探す面**(#680)── 左の列に同じものは無い(この器だけ)。 */
+  private readonly search: SearchRenderer;
   private readonly dual: DualFilerRenderer;
   private lastPane: PaneView = 'detail';
   /**
@@ -146,6 +156,7 @@ export class CenterRouter {
       query: pane('query'),
       schedule: pane('schedule'),
       contacts: pane('contacts'),
+      search: pane('search'),
       dual: pane('dual'),
       settings: pane('settings'),
       flags: pane('flags'),
@@ -173,6 +184,7 @@ export class CenterRouter {
     // ⚠ `now` は左の列の予定と同じ口で渡す ── 「今日」を面ごとに読まない
     this.schedule = new ScheduleRenderer(this.panes.schedule, now);
     this.contacts = new ContactsRenderer(this.panes.contacts);
+    this.search = new SearchRenderer(this.panes.search);
     this.dual = new DualFilerRenderer(this.panes.dual);
     this.settings = new SettingsRenderer(this.panes.settings);
     this.flags = new FlagsRenderer(this.panes.flags);
@@ -247,6 +259,7 @@ export class CenterRouter {
     else if (view === 'query') this.query.render(state);
     else if (view === 'schedule') this.schedule.render(state);
     else if (view === 'contacts') this.contacts.render(state);
+    else if (view === 'search') this.search.render(state);
     else if (view === 'dual') this.dual.render(state);
     else if (view === 'settings') this.settings.render(state);
     else if (view === 'flags') this.flags.render();

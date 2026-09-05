@@ -51,9 +51,16 @@ export function createStorePort(client: StoreClientLike, cid: string): StorePort
     /**
      * 本文の全文検索(#181)。⚠ ここは**渡すだけ** ── 引き方(FTS / LIKE)の規則は
      * `features/filter/search-query.ts` が 1 か所で持ち、実行は worker がする。
+     * ⚠ **そのまま返す**(#680)── 直す前は `.lids` だけ取り、worker が返す
+     *   `truncated`(200 件で切った)を**ここで捨てていた**。左の列が「ほかにも
+     *   あります」と言えなかった唯一の理由がこの 1 行である。
      */
-    searchEntries: async (query) =>
-      (await client.request({ op: 'searchEntries', cid, query })).lids,
+    searchEntries: (query) => client.request({ op: 'searchEntries', cid, query }),
+    /**
+     * 探す面の検索(#680)。⚠ ここも**渡すだけ** ── 抜粋の作り方と並びは worker、
+     * 印の綴りは `features/filter/search-snippet.ts` が持つ。
+     */
+    searchDetail: (query) => client.request({ op: 'searchDetail', cid, query }),
     /**
      * 🔴 **このノートを参照しているのはどれか**(#348)。⚠ ここも**渡すだけ** ──
      * 探し方(`entry:<lid>` を LIKE で当てる)の規則は worker が 1 か所で持つ。

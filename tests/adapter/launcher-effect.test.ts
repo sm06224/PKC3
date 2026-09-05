@@ -114,10 +114,12 @@ describe('ランチャーのタイルを読む', () => {
     // ⚠ **マニュアル**(#645、2026-08-31)も常に居る ── 端末を選ばない組み込みである
     // ⚠ **予定表**(#673 段②、user 裁定 2026-09-04)── 左の「予定」タブを残したまま、
     //    同じ面を別窓で開く 2 つ目の入口として戻った
+    // ⚠ **探す**(#680)── 連絡先の次。左に同じ面は無い(欄だけ)、別窓で開く組み込み
     expect(dispatcher.getState().launcherTiles?.map((t) => t.kind)).toEqual([
       'dual',
       'schedule',
       'contacts',
+      'search',
       'manual',
       'app',
     ]);
@@ -195,9 +197,11 @@ describe('組み込み Office タイルの合流 (#148)', () => {
     // ⚠ 予定表(#673 段②)は Office より前 ── アプリに最初から在るものを先に
     expect(tiles[1]?.lid, '予定表が 2 ペインの次に居ない').toBe(SCHEDULE_TILE_LID);
     expect(tiles[2]?.lid, '連絡先が予定表の次に居ない').toBe(CONTACTS_TILE_LID);
-    expect(tiles[3]?.kind).toBe('office');
-    expect(tiles[3]?.lid).toBe(OFFICE_TILE_LID);
-    expect(tiles[4]?.lid, 'マニュアルが組み込みの最後に居ない').toBe(MANUAL_TILE_LID);
+    // ⚠ 探す(#680)は連絡先の次 ── Office より前(アプリに最初から在る側)
+    expect(tiles[3]?.kind, '探すが連絡先の次に居ない').toBe('search');
+    expect(tiles[4]?.kind).toBe('office');
+    expect(tiles[4]?.lid).toBe(OFFICE_TILE_LID);
+    expect(tiles[5]?.lid, 'マニュアルが組み込みの最後に居ない').toBe(MANUAL_TILE_LID);
     // ⚠ entry 由来のタイルが**消えていない**こと(置き換えではなく合流)
     expect(tiles.some((t) => t.lid === 'a1')).toBe(true);
   });
@@ -208,9 +212,10 @@ describe('組み込み Office タイルの合流 (#148)', () => {
     expect(tiles[0]?.lid, 'Office の有無で 2 ペインの位置が動いた').toBe(DUAL_TILE_LID);
     expect(tiles[1]?.lid, 'Office の有無で予定表の位置が動いた').toBe(SCHEDULE_TILE_LID);
     expect(tiles[2]?.lid, 'Office の有無で連絡先の位置が動いた').toBe(CONTACTS_TILE_LID);
+    expect(tiles[3]?.kind, 'Office の有無で探すの位置が動いた').toBe('search');
     // ⚠ **マニュアル**(#645)は Office の有無に依らず、組み込みの最後に居る
-    expect(tiles[3]?.lid, 'Office の有無でマニュアルの位置が動いた').toBe(MANUAL_TILE_LID);
-    expect(tiles[4]?.lid, 'Office の有無で entry 由来の位置が動いた').toBe('a1');
+    expect(tiles[4]?.lid, 'Office の有無でマニュアルの位置が動いた').toBe(MANUAL_TILE_LID);
+    expect(tiles[5]?.lid, 'Office の有無で entry 由来の位置が動いた').toBe('a1');
     expect(tiles.some((t) => t.lid === 'a1')).toBe(true);
   });
 });

@@ -24,7 +24,7 @@ import { appPanes } from '../../src/adapter/ui/render/pane-visibility';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { bindActions, type BinderServices } from '../../src/adapter/ui/actions/binder';
 import { BODY_MENU_ACTIONS, ENTRY_ACTION_HINTS } from '../../src/features/entry-actions';
-import { MENU_SHORTCUT_ATTR, openContextMenu } from '../../src/adapter/ui/render/context-menu';
+import { MENU_HINT_FIELD, MENU_SHORTCUT_ATTR, openContextMenu } from '../../src/adapter/ui/render/context-menu';
 import { chordHint } from '../../src/adapter/ui/render/shortcut-hint';
 import { sectionAt } from '../../src/features/markdown/append-target';
 import { applyHeadingFold } from '../../src/adapter/ui/render/heading-fold';
@@ -480,11 +480,13 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     rightClick(r.head);
     const acts = r.acts();
     // ⚠ 4 つ目「この章をコピー」は #677 で足した(既存の 3 つの**下**)
-    expect(acts.slice(0, 4), '見出しの 4 つが出ていない').toEqual([
+    // ⚠ 5 つ目「章の参照をコピー」は #579 で足した(写す 2 つを隣に)
+    expect(acts.slice(0, 5), '見出しの 5 つが出ていない').toEqual([
       'edit-from-heading',
       'append-at-heading',
       'toggle-heading-fold',
       'copy-chapter-md',
+      'copy-section-ref',
     ]);
     /**
      * 🔴 **差し替えていないことを、ここで見る。**
@@ -493,7 +495,7 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
      * 🔴 **条件つきの「取り込む」まで見る**(着地前レビュー 🔴3)── `BODY_MENU_ACTIONS`
      *   だけと突き合わせる変異は、fixture に外部画像が 0 枚だと素通りした。
      */
-    expect(acts.slice(4), '本文のメニューが消えている / 取り込みが見出しの枝だけ落ちた').toEqual([
+    expect(acts.slice(5), '本文のメニューが消えている / 取り込みが見出しの枝だけ落ちた').toEqual([
       'add-place',
       ...BODY_MENU_ACTIONS.map((a) => a.action),
       'adopt-external-images',
@@ -1020,10 +1022,11 @@ describe('右クリックの説明(#587 C-1)', () => {
     rightClick(root.querySelector('[data-pkc-field="para"]')!);
     const items = [...root.querySelectorAll<HTMLElement>(`${MENU} button`)];
     expect(items.length, '本文のメニューが出ていない(台の空振り)').toBeGreaterThanOrEqual(2);
+    // ⚠ 2026-09-05(#633 段①): `pin-split` も説明を持った(帯の札の話を押す前に読める)
     expect(
       items.filter((b) => b.hasAttribute('data-pkc-hint')).map((b) => b.getAttribute('data-pkc-action')),
       '説明を持たないのに空の data-pkc-hint が生えている',
-    ).toEqual(['open-note-window']);
+    ).toEqual(['pin-split', 'open-note-window']);
   });
 });
 
@@ -1323,6 +1326,57 @@ describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () =
     expect(r.copied[0]!.done, '写した合図の字が違う').toBe('章をコピーしました(Markdown の原文)');
   });
 
+  /**
+   * 🔴 **章の参照をコピー**(#579)── `[題名 / 見出し](entry:<lid>#h/<見出しの id>)`。
+   * ⚠ id は描画が刻んだ物(`h.id`)をそのまま写す ── 自前で計算しない。
+   */
+  it('🔴 見出しの右クリックに「章の参照をコピー」が在り、押すと貼れる 1 行が渡る', () => {
+    const r = rig();
+    rightClick(r.q('h2[id="章"]'));
+    expect(r.acts(), '「章の参照をコピー」が出ていない').toContain('copy-section-ref');
+    expect(r.label('copy-section-ref')).toBe('章の参照をコピー');
+    // 🔑 「この章をコピー」の隣(どちらも clipboard へ写す)
+    const a = r.acts();
+    expect(a.indexOf('copy-section-ref')).toBe(a.indexOf('copy-chapter-md') + 1);
+    r.press('copy-section-ref');
+    expect(r.copied).toHaveLength(1);
+    expect(r.copied[0]!.text).toBe('[板の在るノート / 章](entry:n1#h/章)');
+    expect(r.copied[0]!.done).toBe('章へのリンクをコピーしました(本文に貼れます)');
+  });
+
+  it('🔴 入れ子の見出し(板の中の ###)でも章の参照は写せる(id は刻まれている)', () => {
+    const r = rig();
+    rightClick(r.q('h3[id="買い出し"]'));
+    // ⚠ 畳めない見出しなので「この章をコピー」は出ないが、参照は出る(id を持つ)
+    expect(r.acts()).not.toContain('copy-chapter-md');
+    expect(r.acts(), '入れ子の見出しで章の参照が消えた').toContain('copy-section-ref');
+    r.press('copy-section-ref');
+    expect(r.copied.map((c) => c.text)).toEqual(['[板の在るノート / 買い出し](entry:n1#h/買い出し)']);
+  });
+
+  /**
+   * 🔴 **写す id は描画が刻んだ物そのもの**(字から自前で計算しない)── 変異試験 S8 が
+   *   SURVIVED で教えた:上の fixture は見出しの字と id が同じ(`章` / `買い出し`)なので、
+   *   字を写す実装でも通っていた。空白を含む字と**同名 2 つ目の連番**で差を作る。
+   */
+  it('🔴 写す id は刻印そのもの(空白は `-`、同名の 2 つ目は `-1`)', () => {
+    const r = rig('## 第 1 章\n\n段落\n\n## 第 1 章\n\nもう 1 つ\n');
+    const second = [...r.host.querySelectorAll('h2')][1]!;
+    expect(second.id, '前提が崩れている: 2 つ目の見出しの id が連番になっていない').toBe('第-1-章-1');
+    rightClick(second);
+    r.press('copy-section-ref');
+    expect(r.copied.map((c) => c.text)).toEqual(['[板の在るノート / 第 1 章](entry:n1#h/第-1-章-1)']);
+  });
+
+  it('⚠ 対照群 ── id の無い見出し(####)では「章の参照をコピー」を出さない', () => {
+    const r = rig('## 章\n\n#### 深い\n\n段落\n');
+    const h4 = r.q('h4');
+    expect(h4.id, '前提が崩れている: #### に id が刻まれている').toBe('');
+    rightClick(h4);
+    expect(r.acts(), '本文のメニューが出ていない(台の空振り)').toContain('edit-from-heading');
+    expect(r.acts(), '指す先の無い見出しに章の参照を出した').not.toContain('copy-section-ref');
+  });
+
   it('末尾の章は本文の末尾まで(板の中の `###` は章を閉じない)', () => {
     const r = rig();
     rightClick(r.q('h2[id="つぎ"]'));
@@ -1540,5 +1594,19 @@ describe('近道の字の見え方(#587 C 案 2)', () => {
     expect(blocks, '近道を描く規則が無い(属性は在っても画面に出ない)').toHaveLength(1);
     expect(blocks[0], '属性の字を描いていない').toMatch(decl('content', `attr\\(${MENU_SHORTCUT_ATTR}\\)`));
     expect(blocks[0], '右に寄せていない').toMatch(decl('margin-left', 'auto'));
+  });
+
+  /**
+   * 🔴 **何も指していない説明欄には案内を出す**(#705 ③)。本文のメニューは先頭に説明が
+   *   無いので、開いた直後の欄が**空の箱**だった。⚠ 字は CSS(`:empty::before`)が描く ──
+   *   `textContent` は空のまま(上の describe が「説明が空」を読む検査と両立する)。
+   */
+  it('🔴 空の説明欄に「項目に乗せると説明が出ます」を描く規則が在る', () => {
+    const css = withoutMedia(stripComments(readFileSync('src/styles/app.css', 'utf-8')));
+    const blocks = blocksFor(css, `[data-pkc-field='${MENU_HINT_FIELD}']:empty::before`);
+    expect(blocks, '空の欄に案内を描く規則が無い(何のための箱か読めない)').toHaveLength(1);
+    expect(blocks[0], '案内の字が違う').toMatch(decl('content', "'項目に乗せると説明が出ます'"));
+    // 案内は説明より薄く(説明と同じ濃さだと「説明」に読める)
+    expect(blocks[0], '案内が説明と同じ濃さ').toMatch(decl('color', 'color-mix\\('));
   });
 });

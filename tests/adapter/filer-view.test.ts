@@ -300,7 +300,7 @@ describe('フォルダ面が描き直る材料(指紋)', () => {
     // 題名には無い語で絞る ── 当たりが返るまでは 0 行
     d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'なかみ' });
     expect(rows()).toEqual([]);
-    d.dispatch({ type: 'SET_SEARCH_HITS', query: 'なかみ', lids: ['b'] });
+    d.dispatch({ type: 'SET_SEARCH_HITS', query: 'なかみ', lids: ['b'], truncated: false });
     expect(rows(), '本文の当たりがフォルダ面に届いていない').toEqual(['b']);
   });
 });

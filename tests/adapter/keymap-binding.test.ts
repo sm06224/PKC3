@@ -880,6 +880,13 @@ describe('近道の受け手と、打鍵中の免除(等値で pin する)', () 
        *   **設定は残って広い画面で効く**ので、押せなくはしない(#526 の裁定と対)。
        */
       'cycle-read-columns',
+      /**
+       * ⚠ 2026-09-05 に足した(#633 段②)── スタックの 3 手は押しボタンを持たない
+       *   (帯は載せていないと出ない)ので、`view-dual` と同じく特例で直に投げる。
+       */
+      'stack-push',
+      'stack-open',
+      'stack-clear',
     ];
     for (const id of special) {
       expect(src, `${id} の特例が消えた`).toContain(`cmd === '${id}'`);

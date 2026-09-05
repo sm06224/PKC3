@@ -28,6 +28,7 @@ import { folderSource } from '@features/export/folder-source';
 import { parseFrontmatter, extractVars } from '@features/markdown/frontmatter';
 import { extractHeadingNumberConfig } from '@features/markdown/document-globals';
 import { safeName } from '@features/export/file-name';
+import { dayStamp } from '@features/datetime/date-math';
 
 export interface ExportDeps {
   source: ArchiveSource;
@@ -100,9 +101,8 @@ export interface ExportDeps {
   pageFormat?: PageFormat;
 }
 
-
-const stamp = (d: Date): string =>
-  `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+// 🔑 file 名の「今日」は `dayStamp`(端末の暦日)1 本 ── ここに私的な stamp を持たない(#709)
+const stamp = (d: Date): string => dayStamp(d, '');
 
 /** 書き出す形式。⚠ **可逆なのはアーカイブだけ**(UI でそう言う)。 */
 export type ExportKind = 'archive' | 'html' | 'markdown';

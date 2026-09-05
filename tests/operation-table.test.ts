@@ -76,6 +76,10 @@ const UNBRIDGED: readonly string[] = [
   'dual-preview',
   'dual-rename',
   'edit-all',
+  // ⚠ 2026-09-05(#215): 左の列の行の鍵 3 つ ── `runFilerKey` の `FILER_KEY_ACTION` で受ける
+  'filer-rename',
+  'filer-move',
+  'filer-new-in-folder',
   'filer-extend-down',
   'filer-extend-up',
   'filer-open',
@@ -88,6 +92,13 @@ const UNBRIDGED: readonly string[] = [
   'redo',
   'row-cancel',
   'row-commit',
+  /**
+   * ⚠ 2026-09-05(#633 段②): スタックの 3 手。押しボタンを持たない(帯は載せていないと
+   *   出ない)ので `runGlobalCommand` の特例で受ける ── `view-dual` と同じ「辿れない」形。
+   */
+  'stack-clear',
+  'stack-open',
+  'stack-push',
   'toggle-focus-mode',
   'undo',
   'view-detail',
@@ -108,12 +119,24 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-08-31: `open-manual-window`(#645)で 1 増えた
       // ⚠ 2026-09-02: `phone-page` / `phone-menu`(#632 段①)で 2 増えた
       // ⚠ 2026-09-04: 小窓・板・章コピー・図の一覧・断り書きの設定など(#690 #677 #676 #528 #687 #278)で 8 増えた(229 → 237。別 worktree の合算 ── #724 ③で実測に合わせた)
-      total: 237,
-      receivers: 196,
-      registered: 72,
-      both: 31,
-      outsideActionsTable: 41,
-      unregistered: 165,
+      // ⚠ 2026-09-05: 塊の移動の「元に戻す」`undo-move`(#684 段①)で受け手が 1 増えた
+      // ⚠ 2026-09-05(#215): 行の右クリックからの整理 3 つ(`rename-entry-begin` / `move-to-folder` /
+      //    `create-in-folder`)── 受け手 +3、`ENTRY_MENU_ACTIONS` にも載るので registered / both も +3
+      // ⚠ 2026-09-05(#215): 鍵 `filer-rename` / `filer-move` / `filer-new-in-folder` で登記 +3
+      //    (受け手の表の外 ── `runFilerKey` が `FILER_KEY_ACTION` で受ける)
+      // ⚠ 2026-09-05(#579): `copy-section-ref`(見出しの右クリック ── 登記簿の外の受け手)で +1
+      // ⚠ 2026-09-05(#633 段②): スタックの鍵 3 件(`stack-push` / `stack-open` / `stack-clear`)で
+      //    登記が 3 増えた(受け手は増えない ── `runGlobalCommand` の特例で受ける)
+      // ⚠ 2026-09-05(#633 段③): 保存したスタック ── 受け手 `stack-save`(帯の「保存…」)と
+      //    `stack-load`(行のメニュー / 情報ペイン、登記あり)で受け手 +2 / 登記 +1
+      // ⚠ 2026-09-05(#633 段④): 入れ物の中の「上へ / 下へ」(`stack-link-up` / `stack-link-down`)で
+      //    受け手 +2(登記は増えない ── 押した行が要る P1 なので、名前だけでは呼べない)
+      total: 252,
+      receivers: 205,
+      registered: 82,
+      both: 35,
+      outsideActionsTable: 47,
+      unregistered: 170,
     });
   });
 
@@ -135,7 +158,11 @@ describe('操作の全数台帳(#582 段①)', () => {
   it('登記簿の内訳が動いたら鳴る', () => {
     // ⚠ 2026-09-04: 本文のメニューが 2 → 3(`open-note-window`)
     // ⚠ 2026-09-04(#690 I5): 鍵が 52 → 53(`open-note-window` を「操作を探す」に出すため)
-    expect(s().perBook).toEqual({ key: 53, entry: 12, body: 3, collection: 2, settings: 5 });
+    // ⚠ 2026-09-05(#215): 行の右クリックが 12 → 15(名前を変える / 移す… / この中に新しいノートを作る)
+    // ⚠ 2026-09-05(#215): 鍵が 53 → 56(左の列の行の F2 / F6 / Shift+F4)
+    // ⚠ 2026-09-05(#633 段②): 鍵が 56 → 59(スタックの 3 手)
+    // ⚠ 2026-09-05(#633 段③): 行のメニューが 15 → 16(`stack-load`)
+    expect(s().perBook).toEqual({ key: 59, entry: 16, body: 3, collection: 2, settings: 5 });
   });
 
   it('🔴 押し所へ辿れない登記を、身元で pin する', () => {

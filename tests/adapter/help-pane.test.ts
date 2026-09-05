@@ -529,6 +529,8 @@ const ALL_VIEWS = [
   'schedule',
   // ⚠ 連絡先(#278 段③)── 予定表と同じ形
   'contacts',
+  // ⚠ 探す面(#680)── ノートを映す面(行を押すと小窓)。左に同じ面は無い
+  'search',
   'dual',
   'settings',
   'flags',
@@ -637,7 +639,9 @@ describe('🔴 中央の面の表が 2 つある(食い違いを落とす)', () 
        *   向こうから import しない(食い違えばここで落ちる)。
        */
       const expected =
-        view === 'query' || view === 'schedule' || view === 'contacts' ? view : 'detail';
+        view === 'query' || view === 'schedule' || view === 'contacts' || view === 'search'
+          ? view
+          : 'detail';
       expect(name, `${view} の落ち先が違う(app-state.ts の表に足し忘れ)`).toBe(expected);
     }
   });
