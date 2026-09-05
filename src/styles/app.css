@@ -311,7 +311,7 @@ button[data-pkc-glyph]:disabled {
   background: var(--surface-2);
   color: var(--fg);
   border-top: 1px solid var(--border);
-  font-size: 12px;
+  font-size: var(--btn-fs-bar);
   cursor: pointer;
 }
 [data-pkc-region='shell'][data-pkc-append-autofold] [data-pkc-region='pane-grip'][data-pkc-axis='y']::after {
@@ -6429,7 +6429,7 @@ li[data-pkc-row-slot] {
 }
 [data-pkc-field='stack-link-move'] button {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--btn-fs-bar);
   line-height: 1;
   padding: 0 var(--s1);
 }
