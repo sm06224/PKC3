@@ -222,7 +222,12 @@ export type IconName = keyof typeof ICON_PATHS;
  */
 export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'set-view:query': 'list',
-  'set-view:dual': 'folder',
+  /**
+   * ⚠ **`set-view:dual` は置かない**(2026-09-05 に落とした)── 2 ペインは上の帯
+   * (`VIEW_BUTTONS`)ではなく**アプリのタイル**から開くので、この鍵を引く者が
+   * どこにも居なかった。上の「生きている鍵だけ置く」の実例。
+   * 🔑 等値 pin は `tests/adapter/icons.test.ts`(シェルが実際に描く面と突き合わせる)。
+   */
   'set-view:settings': 'settings',
   'set-view:flags': 'flag',
   'set-view:help': 'help',

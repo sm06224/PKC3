@@ -99,27 +99,8 @@ git fetch origin main && git checkout main && git pull origin main
 
 ### ⚠ CI の結論は **MCP の github tool で見る**(curl で見ない)
 
-このセッションから **`https://api.github.com` への直 curl は塞がっている** ──
-`GH_TOKEN` は env に在るのに、返るのは
-`{"message": "GitHub access is not enabled for this session. …"}` である。
-`gh` CLI も無い。**`mcp__github__actions_list` / `pull_request_read` を使う。**
-
-🔴 **その curl を poll ループに入れて 6 分捨てた**(2026-08-13)。
-書いたのはこういう形:
-
-```bash
-st=$(curl … | python3 -c "…print(d.get('status'), d.get('conclusion'))")
-case "$st" in
-  "completed "*) echo "CI 完了"; exit 0 ;;
-  poll-error)    echo "poll-error" ;;      # ← ここに来ない
-esac
-```
-
-エラー JSON にも `status` キーが**無いだけで parse は通る**ので、
-`None None` が出て**どの case にも当たらず、黙って次の周回へ行く**。
-⚠ **「何も鳴らない」が「まだ走っている」と見分けられない。**
-🔑 poll ループは **想定外の応答を必ず 1 行吐かせる**(`*) echo "想定外: $st" ;;`)。
-「成功の合図だけを grep する監視は、crash と hang に対して沈黙する」の同型である。
+直 curl は塞がれ、`gh` CLI も無い。**道具立てと、監視ループが沈黙する罠**は
+`.claude/skills/github-tools/SKILL.md`(2026-09-05 にこの skill から切り出した)。
 
 ### 🔴 merge の `502` は「失敗」ではない ── **PR の状態ではなく main を見る**
 
@@ -255,53 +236,14 @@ stop hook が「未 push の commit がある」と鳴く ── **鳴ったら�
 
 ### ⚠ この箱は作り直される ── **push していないものは消える**
 
-2026-08-13 に**セッション中 4 回**、コンテナごと作り直された:
-**作業ツリーが古い commit へ巻き戻り**、`node_modules` も scratchpad の
-中身も消えていた(⚠ 直前に作った file だけが残る、という中途半端な消え方をする)。
+⚠ **区切りごとに push する。** 箱の性質(作り直し / ディスクの枠 / cwd が戻る /
+戻し方)は `.claude/skills/sandbox-hygiene/SKILL.md`(2026-09-05 にこの skill から
+切り出した ── **PR の着地とは別の主題**である)。
 
-🔑 **区切りごとに push する。** 手元にしか無いものは、いつでも消えるものとして扱う。
-🔑 **使い捨てのスクリプトを scratchpad に置いたまま育てない** ── 動いたら
-**repo の中の道具へ畳む**(2026-08-13 に探検スクリプトを 1 本失った)。
-🔑 **測った数字は、その場で issue / PR へ書く。** 手元の JSON は消える ──
-実際 2026-08-13 に対照群の `steady.json` を失ったが、**PR に転記済みだったので
-損失ゼロ**だった。次のビルドで tag が上書きされる類の物はとくに。
+### ⚠ issue を触るときの罠
 
-#### 🔴 作り直しの引き金は**ディスク**らしい ── 落としたら消す
-
-4 回目の直後に測ったら **`/tmp` に 11 GB** 溜まっていた(過去のビルド試行の
-`qt-host` 2.2G / `lo-core` 2.0G / `emsdk` 1.4G / `qt-wasm` 986M …、加えて
-LO の一式 4 本)。この箱の書き込み領域は**セッションごとの固定枠**で、
-`df` は「Used 19G / Avail 19G」= **枠の半分**を示していた。掃除して
-**8.3 GB 解放(51% → 29%)**。
-
-⚠ **`df` の見かけに騙されない** ── 「252G 中 19G 使用」に見えても、
-効いているのは**枠**のほうである。
-
-🔑 規律: **一式(数百 MB)は「落とす → 測る → 消す」を 1 セットにする。**
-測り終えた `/tmp/lo-*` を残さない。ビルド木(`lo-core` / `qt-*` / `emsdk`)も
-用が済んだら消す ── **次に要るときは取り直せる**。
-
-戻し方:
-
-```bash
-git fetch --prune origin
-git checkout -B <branch> origin/<branch>
-ls node_modules/.bin/vitest >/dev/null 2>&1 || npm ci
-```
-
-### ⚠ issue にコメントするつもりで**本文を上書きしない**
-
-`issue_write` の `method: "update"` に `body` を渡すと、**本文がまるごと置き換わる**。
-2026-08-13 に #134 の症状表を消した(復元済み)。
-🔑 コメントは **`add_issue_comment`**。`update` を使うのは題名を変えるときと、
-**本文そのものを書き直すと決めたとき**だけである。
-
-🔴 **同じ日に 2 度目 ── 踏むのは「閉じるとき」である**(#145)。
-`state: "closed"` を渡すのに `issue_write` を使うので、**ついでに結末も `body` へ
-書きたくなる**。そこが罠で、調査の記録がまるごと消える。
-🔑 **閉じるのは 2 手に分ける**: ①結末を `add_issue_comment` ②`issue_write` で
-`state` **だけ**(`body` を渡さない)。⚠ 1 回目の教訓を書いた本人が踏んだので、
-「気をつける」ではなく**手順を 2 手に割る**ことで止める。
+閉じるついでに本文を消す型の事故は `.claude/skills/github-tools/SKILL.md`
+(2026-09-05 にこの skill から切り出した)。
 
 ## 5. 🔴 止めて裁定を仰ぐ条件
 

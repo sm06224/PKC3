@@ -192,6 +192,81 @@ function tsFiles(dir: string, out: string[] = []): string[] {
   return out;
 }
 
+/**
+ * 🔴 **登記だけ在って誰も呼ばない図案を溜めない**(#712 (b))。
+ *
+ * `icons.ts` は自分で「⚠ **生きている鍵だけ置く**。前の版は 22 件のうち **9 件が
+ * 死んでいた** … 死んだ表は『在るのに効かない』ので、次に触る人を惑わせる」と
+ * 書いているが、**それを守る test が無かった** ── 実際 `set-view:dual` が
+ * 死んだまま残っていた(2 ペインは上の帯ではなく**アプリのタイル**から開くので、
+ * この鍵を引く者はどこにも居ない)。
+ *
+ * ⚠ **消してよいのは「誰も呼ばないから」ではなく「呼ばれる道が無いから」である。**
+ *   畳んであるだけの図案(封印中の `todo` の枠)は**残す** ── 解くときに要る
+ *   (`features/sealed.ts`「消すのではなく畳む」)。だから下は**等値 pin**にして、
+ *   増えたら落ちる形にしてある。
+ */
+describe('図案の登記に死んだ行を残さない', () => {
+  it('🔴 `set-view:*` の鍵は、シェルが実際に描く面と等値', () => {
+    const root = document.createElement('div');
+    buildShell(root);
+    const drawn = [...root.querySelectorAll('[data-pkc-action="set-view"]')]
+      .map((el) => el.getAttribute('data-pkc-view') ?? '')
+      .sort();
+    // ⚠ 空振り防止 ── 1 つも描けていないと「等値」が 0 対 0 で成立する
+    expect(drawn.length, '面の切替ボタンが 1 つも描かれていない(前提が崩れている)').toBeGreaterThanOrEqual(3);
+
+    const registered = Object.keys(ACTION_ICONS)
+      .filter((k) => k.startsWith('set-view:'))
+      .map((k) => k.slice('set-view:'.length))
+      .sort();
+    // 🔑 **等値**で見る ── 片側だけだと「余った鍵」か「図案の無いボタン」の
+    //   どちらかを見逃す(2026-09-05 に余っていたのは前者)
+    expect(registered, '`set-view:*` の登記と、実際に描かれる面が食い違っている').toEqual(drawn);
+  });
+
+  it('🔴 どの表からも指されない図案は、畳んであると名指しした物だけ', () => {
+    /**
+     * ⚠ **畳んである図案**(呼ぶ道はいま無いが、消すと戻せなくなる物)。
+     *   `box` = 封印中の `todo` の「未完了」の枠。対になる `check-box` は
+     *   `ARCHETYPE_ICONS.todo` が使っており、**状態を切り替える押し口が
+     *   2026-08-19 に無くなった**(`sealed.ts`)ぶんだけ、こちらが浮いている。
+     */
+    const FOLDED = ['box'];
+
+    const src = readFileSync('src/adapter/ui/render/icons.ts', 'utf-8');
+    const bare = (t: string): string => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+    const between = (text: string, from: string, to: string): string => {
+      const a = text.indexOf(from);
+      expect(a, `icons.ts に ${from} が無い(形が変わった)`).toBeGreaterThanOrEqual(0);
+      const b = text.indexOf(to, a);
+      expect(b, `icons.ts の ${from} が閉じていない`).toBeGreaterThan(a);
+      return text.slice(a, b);
+    };
+
+    // ⚠ 図案の key は**引用符なし**(`settings: [`)── 引用符ありで探すと 0 件になる
+    const names = [
+      ...bare(between(src, 'const ICON_PATHS', '\nexport type IconName')).matchAll(/^ {2}'?([a-z0-9-]+)'?:/gm),
+    ].map((m) => m[1] as string);
+    expect(names.length, '図案を拾えていない(空振り)').toBeGreaterThan(10);
+
+    // どこかから指されているか ── 3 つの表の値、または src の字面(icons.ts 以外)
+    const pointed = new Set<string>([
+      ...Object.values(ACTION_ICONS),
+      ...Object.values(ARCHETYPE_ICONS),
+      ...Object.values(BROWSE_ICONS),
+    ]);
+    const literals = new Set<string>();
+    for (const f of tsFiles('src')) {
+      if (f.endsWith('render/icons.ts')) continue;
+      for (const m of bare(readFileSync(f, 'utf-8')).matchAll(/'([a-z0-9-]+)'/g))
+        literals.add(m[1] as string);
+    }
+    const unpointed = names.filter((n) => !pointed.has(n) && !literals.has(n));
+    expect(unpointed, '誰も指さない図案が増えた ── 呼ぶ道を作るか、落とすか、畳むと書く').toEqual(FOLDED);
+  });
+});
+
 describe('絵文字を UI に置かない', () => {
   /**
    * 🔴 **絵文字が戻ってこないための網**。図案の表を 1 つに寄せても、
