@@ -72,7 +72,7 @@ import { visibleContacts } from '@features/contact/contact-card';
 import { buildVcf, isVcfFileName, vcfNoteOf } from '@features/contact/vcard';
 import { isMarkdownFileName } from '@features/import/plain-markdown';
 import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
-import { insertText, OWN_MEANING } from '@adapter/ui/render/row-swap';
+import { insertBlockText, insertText, OWN_MEANING } from '@adapter/ui/render/row-swap';
 import { resolveAppendAt, sectionAt } from '@features/markdown/append-target';
 import { isTextScale } from '@features/text-scale';
 import { chooseTextScale } from '@adapter/ui/render/text-scale';
@@ -7476,7 +7476,8 @@ export function bindActions(
     if (converted === null && urls.length === 0) return false;
     // ⚠ 逃がすものが無い(= 資産にする口が無い環境も含む)ときは、その場で差す
     if (urls.length === 0) {
-      insertText(target, text);
+      // ⚠ 囲みは行頭から差す(行の途中だと柵が柵として読まれない ── #708 段③)
+      insertBlockText(target, text);
       return true;
     }
 
@@ -7496,7 +7497,7 @@ export function bindActions(
         return;
       }
       into.focus();
-      insertText(into, r.text);
+      insertBlockText(into, r.text);
       /**
        * 🔴 **断りは 1 本にまとめる**(検算で判明)。`state.error` は **1 枠**なので、
        * 理由(空き容量)を先に出しても、件数の総括で**上書きされて消える**。

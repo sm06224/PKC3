@@ -29,7 +29,7 @@
  * 🔑 **pure module**。browser API を使わない。
  */
 import { csvLiteralCell, displayCell, isFormula } from './csv-formula';
-import { DELIMITER, isHeaderDisabled, parseCsv } from './csv-table';
+import { csvEscapeField, DELIMITER, isHeaderDisabled, parseCsv } from './csv-table';
 import { frontmatterLineCount } from './frontmatter';
 import { parseRenderableFence } from './markdown-render';
 import { fenceInfo, scanContainers } from './source-blocks';
@@ -362,6 +362,18 @@ export function convertTable(at: TableAt, to: TableFormat): string | null {
 }
 
 /**
+ * markdown の塊の書き出し(見出し / 箇条書き / 引用 / 表)。
+ * ⚠ 1 行でも当たったら、その平文は**表ではなく markdown の原文**として扱う。
+ *
+ * ⚠ **柵(``` / ~~~)はここに入れない。** 入れると「柵で始まる行は組まない」に
+ *   なるので、囲みの柵を伸ばす門(`fenceMarkerFor`)が**到達しなくなる** ──
+ *   no-op の規則を残すことになる(CLAUDE.md §1「外して壊れるのを見る」)。
+ * 🔑 役割が違う:ここは**書いた人の意図**(markdown の原文か)を見る門、
+ *   `fenceMarkerFor` は**囲みが途中で閉じない**ことを保つ門である。
+ */
+const BLOCK_MARK = /^ {0,3}(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|>|\|)/;
+
+/**
  * 🔴 **タブ区切りの平文を、表の囲みにする**(#708 段③)。
  *
  * > user の物語(#708): 表を「いろんなところで楽」に行き来させたい。
@@ -399,7 +411,56 @@ export function tsvFenceFromPlain(plain: string): string | null {
   const n = tabs(lines[0]!);
   if (n < 1) return null;
   if (!lines.every((l) => tabs(l) === n)) return null;
-  const body = lines.join('\n');
+  /**
+   * 🔴 **行頭がタブなら、それは字下げであって列ではない**(着地前レビュー ⚠3)。
+   *
+   * ⚠ 「タブの数が同じ」だけだと、**タブで字下げしたコード**(Makefile のレシピ /
+   *   Go / C)が「1 列目が空の表」になる。⚠ 原文は `‹/›` で戻せるので消えては
+   *   いないが、「貼ったら知らない表になった」は user の物語として不合格である。
+   * 🔑 **1 列目が全部空**が、字下げと本物の TSV を分ける唯一の合図。
+   */
+  if (lines.every((l) => l.startsWith('\t'))) return null;
+  /**
+   * 🔴 **markdown の原文は、原文のまま入れる**(着地前レビュー ⚠4)。
+   *
+   * ⚠ `convertPastedHtml` は「平文が markdown に見えるなら**わざと降りる**」
+   *   (`plainLooksLikeMarkdown`)── マニュアルの「コピー元が markdown 原文を
+   *   渡してきたときは原文をそのまま入れます」がそれである。
+   * ⚠ ところが `choosePaste` から見ると、その `null` は「変換しても得るものが
+   *   無かった」と**見分けが付かない**ので、最後の手が拾ってしまう。
+   * 🔑 だから**こちらで断る** ── 判定を `choosePaste` に足すと「経路ごとに挙動が
+   *   違う」形になる(§7)。⚠ 表の升に `#` や `- ` が来る形は失うが、
+   *   この module の既定(**迷ったら組まない**)に沿う。
+   */
+  if (lines.some((l) => BLOCK_MARK.test(l))) return null;
+  /**
+   * 🔴 **升の字を逃がす**(着地前レビュー 🔴1。**貼った行が画面から消えていた**)。
+   *
+   * ⚠ 読み手(`parseCsv`)は RFC4180 の引用符を解釈し、描く側は `'` を剥がして
+   *   `=` で始まる升を**式として評価する**。逃がさないと実測でこうなった:
+   *
+   *   | 貼った字 | 画面に出た升 |
+   *   |---|---|
+   *   | `太郎⇥5" ディスク` + 次の行 | 🔴 **次の行ごと 1 升に飲まれて消える** |
+   *   | `太郎⇥say "hi"` | `say hi`(引用符が消える) |
+   *   | `=1+1⇥x` | 🔴 **`2`**(式として計算される) |
+   *   | `'quoted⇥x` | `quoted`(先頭の `'` が消える) |
+   *
+   * 🔑 逃がす規則は**兄弟と同じ 2 本**(`csvLiteralCell` → `csvEscapeField`)──
+   *   `convertTable` が既に通している道であり、ここに 3 本目を書かない(§7)。
+   * ⚠ 代償:Excel が `text/plain` に載せる TSV は**既に引用されている**ので、
+   *   この道を通ると二重に逃がされる。⚠ ただし Excel は `text/html` が先に勝つ
+   *   ので、ここへ来るのは**逃がしを知らない出し手**(端末 / `.tsv` / チャット)
+   *   である ── そちらへ寄せるのが正しい。
+   */
+  const body = lines
+    .map((l) =>
+      l
+        .split('\t')
+        .map((c) => csvEscapeField(csvLiteralCell(c), '\t'))
+        .join('\t'),
+    )
+    .join('\n');
   const marker = fenceMarkerFor(body);
   return `${marker}tsv\n${body}\n${marker}`;
 }

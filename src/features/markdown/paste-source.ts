@@ -86,7 +86,7 @@ export type PasteUsed = 'permalink' | 'html' | 'html-fence' | 'rtf' | 'plain-tab
 
 /** 見送った形と、その理由(⚠ **デバッグの本体**はここである)。 */
 export interface PasteSkip {
-  readonly kind: 'html' | 'rtf' | 'permalink';
+  readonly kind: 'html' | 'rtf' | 'permalink' | 'plain-table';
   readonly why: string;
 }
 
@@ -232,5 +232,15 @@ export function choosePaste(args: {
    */
   const table = convert.plainTable();
   if (table !== null) return done('plain-table', table);
+  /**
+   * ⚠ **見送った理由を残す**(着地前レビュー ⚠6)── この file 自身が上で
+   *   「黙って落とすと、フラグを点けても**なぜ使われなかったか**が分からない」と
+   *   書いているのに、最後の手だけ何も積んでいなかった。
+   */
+  if (sizes.plain > 0)
+    skipped.push({
+      kind: 'plain-table',
+      why: '2 行以上・どの行もタブの数が同じ・タブが 1 つ以上、のどれかを満たしていません',
+    });
   return done('plain', null);
 }

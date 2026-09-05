@@ -17,7 +17,11 @@
  */
 import { describe, expect, it } from 'vitest';
 import { tsvFenceFromPlain } from '../../src/features/markdown/table-convert';
-import { choosePaste, type PasteConverters } from '../../src/features/markdown/paste-source';
+import {
+  choosePaste,
+  describePaste,
+  type PasteConverters,
+} from '../../src/features/markdown/paste-source';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 
 /** 描いた表の升(⚠ **実物の読み手**で見る ── 字面の一致では「表になった」と言えない)。 */
@@ -91,13 +95,95 @@ describe('タブ区切りの平文を表にする(#708 段③)', () => {
         ['```', ''],
         ['あ', 'い'],
       ]);
+      /**
+       * ⚠ **行頭に空白が付いた柵でも閉じる**(変異試験 M17 が SURVIVED で教えた)──
+       *   閉じの柵は 3 個までの字下げを許すので、`fenceMarkerFor` の `^\s*` を
+       *   落とすと**この形だけ**囲みが途中で閉じ、1 行目が丸ごと消える。
+       */
+      const indented = tsvFenceFromPlain('  ```\t\nあ\tい\n')!;
+      // ⚠ `grid()` は升の字を trim するので、行頭の空白は落ちる(閉じていないことが要点)
+      expect(grid(indented), '字下げした柵で囲みが閉じた').toEqual([
+        ['```', ''],
+        ['あ', 'い'],
+      ]);
     });
 
+    /**
+     * 🔴 **貼った字が、そのまま升に出る**(着地前レビュー 🔴1。**行が消えていた**)。
+     *
+     * ⚠ 直す前は逃がさずに囲みへ入れていたので、読み手(`parseCsv` = RFC4180)と
+     *   描く側(`'` を剥がし `=` を式として評価する)に食われていた。実測:
+     *   `太郎⇥5" ディスク` の**次の行ごと 1 升に飲まれて消えた**。
+     * 🔑 観測点は**描いた升**(囲みの字面ではなく、user が見る物)。
+     */
+    it.each([
+      ['引用符が奇数個 ── 次の行を飲み込まない', '名前\t寸法\n太郎\t5" ディスク\n次郎\tok\n', [['名前', '寸法'], ['太郎', '5" ディスク'], ['次郎', 'ok']]],
+      ['先頭の = ── 式として計算されない', '=1+1\tx\nあ\tい\n', [['=1+1', 'x'], ['あ', 'い']]],
+      ["先頭の ' ── 消えない", "'quoted\tx\nあ\tい\n", [["'quoted", 'x'], ['あ', 'い']]],
+    ])('🔴 %s', (_name, plain, want) => {
+      const out = tsvFenceFromPlain(plain);
+      expect(out, '組んでいない(前提が崩れている)').not.toBeNull();
+      expect(grid(out!), '貼った字と升が違う').toEqual(want);
+    });
+
+    /**
+     * 🔴 **タブ字下げのコードは表ではない**(着地前レビュー ⚠3)。
+     * ⚠ 「タブの数が同じ」だけだと Makefile のレシピや Go / C の 2 行が
+     *   「1 列目が空の表」になる ── 貼ったら知らない表になった、を作らない。
+     */
+    it('🔴 行頭のタブは列ではなく字下げ(コードを表にしない)', () => {
+      expect(tsvFenceFromPlain('\tif (x) {\n\treturn;\n'), '字下げを表にした').toBeNull();
+      // 対照群 ── 1 列目に字が在れば、いままでどおり表になる
+      expect(tsvFenceFromPlain('a\tif (x) {\nb\treturn;\n')).not.toBeNull();
+    });
+
+    /**
+     * 🔴 **markdown の原文は原文のまま**(着地前レビュー ⚠4)。
+     * ⚠ `convertPastedHtml` は「平文が markdown に見えるならわざと降りる」ので、
+     *   その `null` を最後の手が拾うと**マニュアルの約束を上書きする**。
+     */
+    it.each([['見出し', '## 見出し\tA\n本文\tB\n'], ['箇条書き', '- 項目\tA\n- 項目\tB\n'], ['表', '| a | b |\tx\n| c | d |\ty\n']])(
+      '🔴 %s で始まる行が在れば組まない(原文のまま入れる)',
+      (_n, plain) => {
+        expect(tsvFenceFromPlain(plain), 'markdown の原文を囲みへ入れた').toBeNull();
+      },
+    );
+
     it('⚠ CRLF でも同じに読む(Windows からのコピー)', () => {
-      expect(grid(tsvFenceFromPlain('a\tb\r\nc\td\r\n')!)).toEqual([
+      const out = tsvFenceFromPlain('a\tb\r\nc\td\r\n')!;
+      expect(grid(out)).toEqual([
         ['a', 'b'],
         ['c', 'd'],
       ]);
+      /**
+       * ⚠ **升の一致だけでは、正規化を守っていない**(変異試験 M3 が SURVIVED で
+       *   教えた)── `parseCsv` が自分で `\r\n?` を潰すので、こちらが正規化を
+       *   落としても升は揃う(§1「救い手が変わっただけ」)。
+       * 🔑 だから**本文に `\r` を残していないこと**を直接見る。
+       */
+      expect(out, '本文に CR が残っている').not.toContain('\r');
+      /**
+       * ⚠ **`\r` だけの改行(古い Mac)も 2 行と数える** ── `/\r\n?/` は
+       *   単独の `\r` にも当たるので、正規化を外すと**1 行と数えて組まなくなる**。
+       *   🔑 こちらが「正規化が効いている」ことの本当の観測点である。
+       */
+      expect(grid(tsvFenceFromPlain('a\tb\rc\td\r')!), 'CR だけの改行を読めていない').toEqual([
+        ['a', 'b'],
+        ['c', 'd'],
+      ]);
+    });
+
+    /**
+     * 🔴 **1 行目は見出しになる**(変異試験 M2 が SURVIVED で教えた)。
+     * ⚠ `grid()` は `th` と `td` を区別しないので、`noheader` を付ける変異が
+     *   生き延びていた ── **どちらを既定にするか**は user に見える選択なので、
+     *   いまの選択を等値で pin しておく(変えるなら、この検査が落ちて気づく)。
+     */
+    it('🔴 貼った表の 1 行目は見出しになる(いまの既定を pin する)', () => {
+      const host = document.createElement('div');
+      host.innerHTML = renderMarkdown(tsvFenceFromPlain('品名\t数\nりんご\t3\n')!, {});
+      expect(host.querySelectorAll('th').length, '見出しの升が無い').toBe(2);
+      expect(host.querySelectorAll('td').length, '中身の升が無い').toBe(2);
     });
   });
 
@@ -126,6 +212,17 @@ describe('タブ区切りの平文を表にする(#708 段③)', () => {
       expect(r.attempt.used, 'HTML を差し置いてタブ区切りを使った').toBe('html');
     });
 
+    /**
+     * ⚠ **「ウェブページの形だけ」「リッチテキストを優先」でも組む**(着地前レビュー ⚠5)。
+     * 🔑 この 2 つは**どのリッチな形を読むか**の設定なので、平文の扱いは変えない ──
+     *   マニュアルにもそう書いてある。⚠ 変えるなら user に見える字が変わるので、
+     *   いまの選択をここで pin する。
+     */
+    it.each([['html'], ['rtf']] as const)('⚠ 設定「%s」でも、平文が表になる', (source) => {
+      const r = choosePaste({ source, sizes: sizes(10), convert: withTable });
+      expect(r.attempt.used).toBe('plain-table');
+    });
+
     it('🔴 設定「変換しない」では組まない(設定の字が嘘になる)', () => {
       const r = choosePaste({ source: 'plain', sizes: sizes(10), convert: withTable });
       expect(r.attempt.used).toBe('plain');
@@ -142,6 +239,25 @@ describe('タブ区切りの平文を表にする(#708 段③)', () => {
       const r = choosePaste({ source: 'auto', sizes: sizes(10), convert: NONE });
       expect(r.attempt.used).toBe('plain');
       expect(r.text).toBeNull();
+    });
+
+    /**
+     * 🔴 **見送った理由が残る**(着地前レビュー ⚠6)。
+     * ⚠ `paste.inspect` を点けても「そのままの文字を使いました」としか出ないと、
+     *   **3 条件のどれで外れたか**が読めない ── この file の上の註記どおり、
+     *   切替だけだと当てずっぽうになる。
+     */
+    it('🔴 組まなかった理由が、フラグの 1 行に出る', () => {
+      const r = choosePaste({ source: 'auto', sizes: sizes(10), convert: NONE });
+      const line = describePaste(r.attempt);
+      expect(line, '見送った理由が出ていない').toContain('タブ');
+      // ⚠ 名前も出る(変異試験 M13 ── 呼び名を空にしても緑だった)
+      expect(line, '見送った物の呼び名が出ていない').toContain('タブ区切りの表');
+      // 対照群 ── 平文が 1 文字も届いていない回は、言うことが無いので積まない
+      const none = choosePaste({ source: 'auto', sizes: sizes(0), convert: NONE });
+      expect(describePaste(none.attempt), '何も届いていないのに理由を出した').not.toContain(
+        'タブ区切りの表',
+      );
     });
   });
 });
