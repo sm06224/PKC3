@@ -1168,11 +1168,21 @@ test('🔴 スマホで行を 600ms 押し続けると、印が 2 行になる (
   await page.waitForTimeout(100);
   expect(await marked(), '長押しで印が足されていない(または直後の click で 1 件に戻った)').toBe(2);
 
-  // ③ 対照群 ── 短いタップ(100ms)は印を 1 件に付け替える(長押しが全タップを食っていない)
+  /**
+   * ③ 対照群 ── 短いタップ(100ms)は印を 1 件に付け替える(長押しが全タップを食っていない)。
+   *
+   * ⚠ ここは②の発火から **700ms 以内**(消費窓の内側)である ── 直す前はそこで
+   *   この `click` まで捨てられ、**押したのに何も起きなかった**(2026-09-05 に赤で判明。
+   *   CDP の `touchEnd` は `pointerup type=touch` を撃っており、時計は止まっていた)。
+   *   ⚠ ここに待ちを足して緑にしない ── 待ちを足すと、その穴がまた開いても鳴らない。
+   */
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
   await page.waitForTimeout(100);
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   await page.waitForTimeout(100);
-  expect(await marked(), '短いタップまで長押しになっている').toBe(1);
+  expect(
+    await marked(),
+    '長押しの直後の短いタップが捨てられた(消費窓が次の押下の click まで食った、または短いタップが長押しになった)',
+  ).toBe(1);
   expect(errors, `console/pageerror: ${errors.join(' | ')}`).toEqual([]);
 });

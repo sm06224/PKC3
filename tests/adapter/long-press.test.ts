@@ -232,6 +232,34 @@ describe('長押しで印を足す(#687 D-1)', () => {
     expect(ds2.defaultPrevented, '待っていない行まで掴ませない').toBe(false);
   });
 
+  /**
+   * 🔴 **⑦ 長押しの直後に別の行を素早くタップしても、そのタップは捨てない。**
+   *
+   * ⚠ 実ブラウザの smoke(`phone.smoke.spec.ts` #687 D-1 の対照群)が赤で教えた:
+   *   消費窓は**発火から** 700ms なので、500ms で発火 → 600ms で離す → 800ms に
+   *   次のタップの `click`、という指の速さで**2 つ目のタップが黙って消えていた**
+   *   (印が 2 件のまま ── user には「押したのに何も起きない」)。
+   * 🔑 捨ててよいのは**同じ押下**が離れたときの `click` だけ ── 次の `pointerdown` が
+   *   来たら、それは**新しい押下**なので窓を閉じる。
+   */
+  it('🔴 ⑦ 長押しの直後の別のタップは捨てない(次の pointerdown で消費窓を閉じる)', () => {
+    click(row('left', 'a'));
+    pressFor(row('left', 'b'), LONG_PRESS_MS);
+    expect(marks('left'), '前提が崩れている').toEqual(['a', 'b']);
+    vi.advanceTimersByTime(100);
+    pointer(row('left', 'b'), 'pointerup', 'touch');
+    click(row('left', 'b')); // 同じ押下の click ── これは捨てる
+    expect(marks('left'), '離した直後の click を捨てていない').toEqual(['a', 'b']);
+    vi.advanceTimersByTime(100);
+    // ⚠ ここは発火から 200ms ── 消費窓(700ms)の内側で、次の押下が始まる
+    pointer(row('left', 'a'), 'pointerdown', 'touch');
+    vi.advanceTimersByTime(100);
+    pointer(row('left', 'a'), 'pointerup', 'touch');
+    const ev = click(row('left', 'a'));
+    expect(ev.defaultPrevented, '次の押下の click まで止めた').toBe(false);
+    expect(marks('left'), '長押しの直後のタップが捨てられた(set が走っていない)').toEqual(['a']);
+  });
+
   it('配線を解いたら、長押しは何も撃たない(leak を残さない)', () => {
     detach();
     detach = () => {};
