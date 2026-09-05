@@ -718,6 +718,23 @@ export function connectStoreEffects(
         });
         break;
       }
+      /**
+       * 🔴 **面のために集める走査は、必ず `enqueue` の列に載せる**(2026-09-05 実測)。
+       *
+       * ⚠ 直す前は `void ask()` を列の外で呼んでいたので、**並んでいる書込を
+       *   追い越して保存前の DB を集めていた**(CLAUDE.md §7「直列化されているのは
+       *   片側だけかもしれない」の 2 度目)。実測(`vite preview` + 実ブラウザ、
+       *   書込の postMessage だけ 400ms 遅らせた対照群):`taskScan` が
+       *   `upsertEntry` より **195ms 先に**飛び、予定の面は **0 枚のまま**だった
+       *   (遅らせない群は 1 枚)。
+       * 🔴 **そして戻らない** ── これらの走査は「面を開いたとき 1 回」しか走らないので、
+       *   古い答えがそのまま居座る。user から見ると「**保存したのに予定に出てこない**」で、
+       *   もう一度その面を開き直すまで直らない。
+       * 🔑 だから**載せる**(`REQUEST_SMART_SCAN` / `REQUEST_LAUNCHER_TILES` と同じ)。
+       * ⚠ **打鍵で走るもの**(`REQUEST_SEARCH` / `REQUEST_SEARCH_DETAIL` /
+       *   `REQUEST_BACKLINKS`)は載せない ── あちらは撃ち直しが常に来るので
+       *   古い答えは次の 1 手で消える。載せると保存がその後ろに詰まる。
+       */
       case 'REQUEST_QUERY_SCAN': {
         const ask = store.queryScan;
         /**
@@ -731,17 +748,17 @@ export function connectStoreEffects(
           break;
         }
         const key = ev.key;
-        void ask(key).then(
-          (out) => {
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            const out = await ask(key);
             if (disposed) return;
             // ⚠ どの束ね方の答えかを載せる ── reducer が古い結果を捨てる
             dispatcher.dispatch({ type: 'SET_QUERY_SCAN', key, keys: out.keys, groups: out.groups });
-          },
-          () => {
-            if (disposed) return;
-            dispatcher.dispatch({ type: 'QUERY_FAILED' });
-          },
-        );
+          } catch {
+            if (!disposed) dispatcher.dispatch({ type: 'QUERY_FAILED' });
+          }
+        });
         break;
       }
       /**
@@ -760,9 +777,16 @@ export function connectStoreEffects(
           dispatcher.dispatch({ type: 'SET_TAG_SUGGESTIONS', tags: [] });
           break;
         }
+        /**
+         * ⚠ **ここも列に載せる**(上の docstring)── 候補は
+         *   「タグを書いたら捨てて、次に焦点が当たったとき 1 回」しか集め直さないので、
+         *   書込を追い越すと**付けたばかりのタグが候補に出ない**まま居座る。
+         */
         // 🔑 綴りは `TAGS_KEY` 1 か所(#550 段④ ── 候補と集計が同じ組を見る)
-        void ask(TAGS_KEY).then(
-          (out) => {
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            const out = await ask(TAGS_KEY);
             if (disposed) return;
             /**
              * ⚠ **「未設定」の組を捨てる** ── `createQueryScan` は tags を持たない
@@ -781,12 +805,10 @@ export function connectStoreEffects(
              *   候補は**近道**であって、打てる語の一覧ではない。
              */
             dispatcher.dispatch({ type: 'SET_TAG_SUGGESTIONS', tags });
-          },
-          () => {
-            if (disposed) return;
-            dispatcher.dispatch({ type: 'SET_TAG_SUGGESTIONS', tags: [] });
-          },
-        );
+          } catch {
+            if (!disposed) dispatcher.dispatch({ type: 'SET_TAG_SUGGESTIONS', tags: [] });
+          }
+        });
         break;
       }
       case 'REQUEST_TASK_SCAN': {
@@ -799,16 +821,17 @@ export function connectStoreEffects(
           dispatcher.dispatch({ type: 'TASK_SCAN_FAILED' });
           break;
         }
-        void ask().then(
-          (scan) => {
+        // 🔑 **列に載せる**(上の docstring ── この面がまさに 0 枚で止まった)
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            const scan = await ask();
             if (disposed) return;
             dispatcher.dispatch({ type: 'SET_TASK_SCAN', scan });
-          },
-          () => {
-            if (disposed) return;
-            dispatcher.dispatch({ type: 'TASK_SCAN_FAILED' });
-          },
-        );
+          } catch {
+            if (!disposed) dispatcher.dispatch({ type: 'TASK_SCAN_FAILED' });
+          }
+        });
         break;
       }
       /**
@@ -822,16 +845,17 @@ export function connectStoreEffects(
           dispatcher.dispatch({ type: 'CONTACT_SCAN_FAILED' });
           break;
         }
-        void ask().then(
-          (scan) => {
+        // 🔑 **列に載せる**(予定と同じ ── 上の docstring)
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            const scan = await ask();
             if (disposed) return;
             dispatcher.dispatch({ type: 'SET_CONTACT_SCAN', scan });
-          },
-          () => {
-            if (disposed) return;
-            dispatcher.dispatch({ type: 'CONTACT_SCAN_FAILED' });
-          },
-        );
+          } catch {
+            if (!disposed) dispatcher.dispatch({ type: 'CONTACT_SCAN_FAILED' });
+          }
+        });
         break;
       }
       /**
@@ -845,16 +869,17 @@ export function connectStoreEffects(
           dispatcher.dispatch({ type: 'SET_SNIPPET_SCAN', scan: null });
           break;
         }
-        void askSnippets().then(
-          (scan) => {
+        // 🔑 **列に載せる**(予定と同じ ── 上の docstring)
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            const scan = await askSnippets();
             if (disposed) return;
             dispatcher.dispatch({ type: 'SET_SNIPPET_SCAN', scan });
-          },
-          () => {
-            if (disposed) return;
-            dispatcher.dispatch({ type: 'SET_SNIPPET_SCAN', scan: null });
-          },
-        );
+          } catch {
+            if (!disposed) dispatcher.dispatch({ type: 'SET_SNIPPET_SCAN', scan: null });
+          }
+        });
         break;
       }
       case 'REQUEST_BODY':
