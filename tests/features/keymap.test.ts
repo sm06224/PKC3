@@ -292,14 +292,49 @@ describe('🔴 わきの面の鍵(user 目線レビュー U-8)', () => {
   });
 
   /**
-   * ⚠ **対照群** ── ノートを並べる面(カレンダー等)は名乗らない。
-   *   名乗らせると「編集中に押したら本文が消える」を鍵からも作ることになる。
+   * 🔴 **ノートを映す面で打鍵中に名乗ってよいのは、断る門が在るものだけ**
+   * (#721 で書き直した)。
+   *
+   * ## ⚠ 直す前のこの検査は、ほぼ空振りだった
+   *
+   * 対照群は `['view-calendar', 'view-kanban', 'view-query']` を回していたが、
+   * 🔴 **`view-calendar` / `view-kanban` という命令は存在しない**(#292 段⑤ で
+   * 中央の面から降りた)── `if (!cmd) continue` で素通りするので、実際に見ていたのは
+   * **`view-query` 1 件だけ**だった。
+   * ⚠ そのうえ主張(「名乗らせると編集中に本文が消える」)は**成り立たない** ──
+   *   `SET_VIEW_MODE` の reducer が編集中の `query` を**声に出して断る**ので本文は
+   *   消えない(`tests/adapter/state.test.ts`「編集中は集計を開けません」が門を pin)。
+   *   CLAUDE.md §1「主張そのものが成り立たない条件」。
+   *
+   * 🔑 だから見る物を変えた:**ノートを映す面(`isAsidePane` でない)のうち、
+   *   打鍵中に名乗っているのはどれか**を身元で pin する。
+   * ⚠ ここは**面の性質**だけを見る ── 一覧が黙って動かないことは
+   *   `tests/adapter/keymap-binding.test.ts` が全数で見る(2 つの検査で役割を分ける)。
    */
-  it('⚠ ノートを映す面は名乗らない(編集していたものを画面から消さない)', () => {
-    for (const id of ['view-calendar', 'view-kanban', 'view-query']) {
-      const cmd = findCommand(id);
-      if (!cmd) continue; // ⚠ 命令が無い面はここでは判定しない
-      expect(cmd.whileTyping ?? false, `${id} が打鍵中に効くと、本文が消える`).toBe(false);
-    }
+  it('🔴 ノートを映す面で打鍵中に名乗るのは、本文へ戻る道と集計だけ', () => {
+    /**
+     * 中央の面を開く命令 → その面。⚠ わきの面は上の表(`ASIDE_COMMANDS`)を**裏返して**
+     * 使う ── 同じ対応を 2 度書かない(CLAUDE.md §7)。
+     */
+    const VIEW_COMMANDS: Record<string, ViewMode> = {
+      ...Object.fromEntries(Object.entries(ASIDE_COMMANDS).map(([view, id]) => [id, view])),
+      'view-detail': 'detail',
+      'view-query': 'query',
+    };
+    // 空振り防止 ── 表が実在しない命令を並べていたら(旧版がそうだった)ここで落ちる
+    for (const id of Object.keys(VIEW_COMMANDS))
+      expect(findCommand(id), `${id} という命令が無い(表が古い)`).toBeDefined();
+    const noteFacing = Object.entries(VIEW_COMMANDS)
+      .filter(([id, view]) => !isAsidePane(view) && findCommand(id)?.whileTyping === true)
+      .map(([id]) => id);
+    /**
+     * 🔑 **2 つだけ**。どちらも「押しても打ちかけが消えない」ことが実装で保証されている:
+     *   `view-detail` … 編集の面**そのもの**へ戻る(reducer の「本文へ戻る道は塞がない」)
+     *   `view-query`  … 編集中は reducer が**声に出して断る**(面は動かない)
+     * ⚠ ここへ 3 つ目を足すなら、**その面にも断る門が在るか**を先に確かめること。
+     */
+    expect([...noteFacing].sort(), 'ノートを映す面が、断る門なしに打鍵中を名乗っている').toEqual(
+      ['view-detail', 'view-query'],
+    );
   });
 });
