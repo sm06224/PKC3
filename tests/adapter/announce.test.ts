@@ -850,7 +850,7 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
-    ['2026-09-05-editing-buttons-and-labels', '836d7a1e'],
+    ['2026-09-05-editing-buttons-and-labels', 'aa8435bd'],
     ['2026-09-05-local-dates', '264b389c'],
     ['2026-09-05-note-window-polish', '431fe10e'],
     ['2026-09-05-apps-in-windows', '2b5dc69f'],

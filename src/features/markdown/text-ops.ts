@@ -361,20 +361,29 @@ export type FormatOp =
  * 書式パネルの中身(**並び順もここが正本**)。
  * ⚠ 文言は「何になるか」で書く ── 「H1」ではなく「見出し1」。
  * 図案は付けない:14 個も絵文字が並ぶと、かえって読めなくなる(高さは CSS が揃える)。
+ * 🔴 `hint` は帯のボタンの説明(`title`)になる(#717)。⚠ 直す前は 14 個とも説明が無く、
+ *   「番号」「表」の 1 語で何が起きるか読めなかった ── **起きること**を 1 文で書く
+ *   (user 指示 2026-08-21)。鍵が割り当たっている op は描く側(`format-bar.ts`)が
+ *   `hintTitle` で鍵を併記する ── ここには鍵の綴りを書かない(割当は user が変えられる)。
  */
-export const FORMAT_OPS: readonly { op: FormatOp; label: string; onBar?: false }[] = [
-  { op: 'h1', label: '見出し1' },
-  { op: 'h2', label: '見出し2' },
-  { op: 'h3', label: '見出し3' },
-  { op: 'bold', label: '太字' },
-  { op: 'italic', label: '斜体' },
-  { op: 'code', label: 'コード' },
-  { op: 'ul', label: '箇条書き' },
-  { op: 'ol', label: '番号' },
-  { op: 'task', label: 'チェック' },
-  { op: 'quote', label: '引用' },
-  { op: 'link', label: 'リンク' },
-  { op: 'table', label: '表' },
+export const FORMAT_OPS: readonly {
+  op: FormatOp;
+  label: string;
+  hint: string;
+  onBar?: false;
+}[] = [
+  { op: 'h1', label: '見出し1', hint: 'この行を見出し1にします(もう一度押すと外れます)' },
+  { op: 'h2', label: '見出し2', hint: 'この行を見出し2にします(もう一度押すと外れます)' },
+  { op: 'h3', label: '見出し3', hint: 'この行を見出し3にします(もう一度押すと外れます)' },
+  { op: 'bold', label: '太字', hint: '選んだ範囲を太字にします(もう一度押すと外れます)' },
+  { op: 'italic', label: '斜体', hint: '選んだ範囲を斜体にします(もう一度押すと外れます)' },
+  { op: 'code', label: 'コード', hint: '選んだ範囲をコードにします(もう一度押すと外れます)' },
+  { op: 'ul', label: '箇条書き', hint: 'この行を箇条書きにします(もう一度押すと外れます)' },
+  { op: 'ol', label: '番号', hint: 'この行を番号付きリストにします(もう一度押すと外れます)' },
+  { op: 'task', label: 'チェック', hint: 'この行をチェック項目にします(もう一度押すと外れます)' },
+  { op: 'quote', label: '引用', hint: 'この行を引用にします(もう一度押すと外れます)' },
+  { op: 'link', label: 'リンク', hint: 'リンクの形を入れて、URL の所を選んだ状態にします' },
+  { op: 'table', label: '表', hint: '2 列の表の雛形を差し込みます' },
   /**
    * 🔴 **「図」は帯に**この表からは**出さない**(#528 案 B。user 裁定 2026-09-04)。
    * ⚠ 帯の「図」は**先に聞く**(5 種の一覧 `DIAGRAM_CHOICES`)ので、
@@ -383,22 +392,22 @@ export const FORMAT_OPS: readonly { op: FormatOp; label: string; onBar?: false }
    * ⚠ `op` は消さない ── 雛形の一覧の「図」(`BUILTIN_SNIPPET_OPS`)と
    *   一覧の先頭(フローチャート)が `MERMAID_BLOCK` を挿す口として使う。
    */
-  { op: 'mermaid', label: '図', onBar: false },
-  { op: 'codeblock', label: 'コードブロック' },
+  { op: 'mermaid', label: '図', hint: '図の雛形を差し込みます', onBar: false },
+  { op: 'codeblock', label: 'コードブロック', hint: 'コードブロックの雛形を差し込みます' },
   /**
    * 🔴 **帯には出さない**(`onBar: false`)。⚠ **表は 1 つのまま**にしてある ──
    * 「書式の操作は何があるか」と「帯に何を並べるか」を別の表に分けると、
    * 片方だけ増えて食い違う(CLAUDE.md §7)。帯を描く側がこの印で絞る。
    * 🔑 名前はパレットとショートカット画面に出るので、**知る口はある**。
    */
-  { op: 'highlight', label: 'ハイライト', onBar: false },
-  { op: 'ruby', label: 'ルビ', onBar: false },
-  { op: 'emdot', label: '圏点', onBar: false },
-  { op: 'strike', label: '打ち消し', onBar: false },
+  { op: 'highlight', label: 'ハイライト', hint: '選んだ範囲をハイライトします', onBar: false },
+  { op: 'ruby', label: 'ルビ', hint: '選んだ字にルビを付けます', onBar: false },
+  { op: 'emdot', label: '圏点', hint: '選んだ字に圏点を打ちます', onBar: false },
+  { op: 'strike', label: '打ち消し', hint: '選んだ範囲に打ち消し線を引きます', onBar: false },
 ] as const;
 
 /** 帯に並べるもの。⚠ **絞るのはここ 1 か所**(描く側が自分で絞らない)。 */
-export const BAR_FORMAT_OPS: readonly { op: FormatOp; label: string }[] =
+export const BAR_FORMAT_OPS: readonly { op: FormatOp; label: string; hint: string }[] =
   FORMAT_OPS.filter((f) => f.onBar !== false);
 
 const LINE_OPS: ReadonlySet<string> = new Set(Object.keys(LINE_MARKS));

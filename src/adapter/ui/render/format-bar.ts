@@ -13,6 +13,7 @@
  * ちらつく ── 選択位置そのものは focus を失っても残るので、壊れはしない。
  */
 import { BAR_FORMAT_OPS } from '@features/markdown/text-ops';
+import { findCommand } from '@features/keymap';
 import { HINT_BASE, HINT_COMMAND, hintTitle } from './shortcut-hint';
 
 /** 書式パネルを組む。⚠ 押した所は `data-pkc-format` で分かる(binder が読む)。 */
@@ -23,11 +24,27 @@ export function buildFormatBar(): HTMLElement {
    * ⚠ **帯に出すものだけ**(#425 段②-a)── 絞る規則は `BAR_FORMAT_OPS` が持つ。
    *   ここで `filter` を書くと、表と描き手の 2 か所に規則が生える(§7)。
    */
-  for (const { op, label } of BAR_FORMAT_OPS) {
+  for (const { op, label, hint } of BAR_FORMAT_OPS) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.setAttribute('data-pkc-action', 'format-text');
     btn.setAttribute('data-pkc-format', op);
+    /**
+     * 🔴 **説明(`title`)を付ける**(#717)。⚠ 直す前は 14 個とも無く、「表」「番号」の
+     *   1 語で何が起きるか読めなかった。字は表(`FORMAT_OPS.hint`)から引く。
+     * 🔑 鍵が割り当たっている op(`format-<op>` が `KEY_COMMANDS` に在る ── 太字 / 斜体 /
+     *   リンク)は `hintTitle` で**いまの割当**を併記し、`HINT_*` を名乗って
+     *   割当が変わったら `applyShortcutHints` が書き直す(下の「置換」と同じ作法)。
+     *   無い op は素の説明だけ ── 空の `()` を出さない。
+     */
+    const command = `format-${op}`;
+    if (findCommand(command) !== null) {
+      btn.setAttribute(HINT_BASE, hint);
+      btn.setAttribute(HINT_COMMAND, command);
+      btn.title = hintTitle(hint, command);
+    } else {
+      btn.title = hint;
+    }
     // ⚠ 文字は `label` span に入れる(段④ の規約 ── 文言の突合がここを読む)
     const text = document.createElement('span');
     text.setAttribute('data-pkc-field', 'label');
@@ -135,7 +152,12 @@ export function buildFormatBar(): HTMLElement {
   renumber.title = '番号付きリストの番号を、上から順に振り直します';
   const renumberLabel = document.createElement('span');
   renumberLabel.setAttribute('data-pkc-field', 'label');
-  renumberLabel.textContent = '番号';
+  /**
+   * 🔴 字は「番号を振り直す」(#717)。⚠ 直す前は「番号」で、同じ帯の左に在る
+   *   「番号」(番号付きリストにする)と**同じ字が 2 つ並んでいた** ── どちらを押すと
+   *   何が起きるか、押すまで分からない。⚠ 「番号」の側は変えない(表の記法の名前)。
+   */
+  renumberLabel.textContent = '番号を振り直す';
   renumber.append(renumberLabel);
   bar.append(renumber);
 
