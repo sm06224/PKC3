@@ -175,6 +175,9 @@ test('🔴 読む面: 追記欄を畳んでいても、Alt+クリック / 右ク
   await clickReal(page, grip);
   await expect(shell).toHaveAttribute('data-pkc-hidden-panes', /append/);
   await expect(input, '畳めていない(前提が崩れている)').toBeHidden();
+  const stored = () => page.evaluate(() => localStorage.getItem('pkc3.panes') ?? '');
+  const storedBefore = await stored();
+  expect(storedBefore, '前提: 畳みが記録されていない').toContain('append');
 
   // ① Alt+クリック → 開いて、入り先がその節になり、打つ欄にカーソルが入る
   await altClickReal(page, body.locator('p', { hasText: 'A を採用する。' }));
@@ -187,9 +190,26 @@ test('🔴 読む面: 追記欄を畳んでいても、Alt+クリック / 右ク
   await clickReal(page, '[data-pkc-action="append-entry"]');
   await expect(body, '追記が本文に届いていない').toContainText('B も採用する。');
 
-  // ② もう一度畳んで、右クリック →「ここに追記する」でも同じ
-  await clickReal(page, grip);
-  await expect(input).toBeHidden();
+  /**
+   * 🔴 **こちらが開いた欄は、送ると自分で畳み直す**(#655 ①。user 裁定 2026-09-04 案 B)。
+   *
+   * ⚠ 直す前は `setHidden` で開いていたので、「閲覧メインだから畳む」と決めた記録を
+   *   **こちらが黙って上書きして永続**していた ── 1 行足したいだけの人が、次に開いた
+   *   ときも追記欄を見る。2026-09-05 までこの spec はここで「もう一度畳む」と grip を押して
+   *   いたが、いまは**既に畳まれている**ので、押すと逆に開いてしまう(だから落ちた)。
+   * 🔑 これが #655 ① の**実ブラウザでの唯一の観測**である ── 守るのは 3 つ:
+   *   送った直後に印が戻る / 打つ欄が消える / 記録(`pkc3.panes`)は 1 byte も動いていない。
+   */
+  await expect(shell, '送ったのに畳み戻っていない(印が無い)').toHaveAttribute(
+    'data-pkc-hidden-panes',
+    /append/,
+  );
+  await expect(input, '送ったのに打つ欄が出たままである').toBeHidden();
+  expect(await stored(), 'こちらが開いたときに記録へ書いている(user の畳みが上書きされた)').toBe(
+    storedBefore,
+  );
+
+  // ② 畳まれたまま、右クリック →「ここに追記する」でも同じ(⚠ grip は押さない ── 既に畳まれている)
   await body.locator('h2', { hasText: '出席' }).click({ button: 'right' });
   const menu = page.locator('[data-pkc-region="context-menu"]');
   await expect(menu, '見出しの右クリックでメニューが出ない').toBeVisible();
@@ -198,9 +218,10 @@ test('🔴 読む面: 追記欄を畳んでいても、Alt+クリック / 右ク
   await expect(input, '右クリック経路で打つ欄にカーソルが入っていない').toBeFocused();
   await expect(target.locator('option:checked')).toHaveText(/出席/);
 
-  // ③ 対照群 ── 畳んでいないときは「開きました」とは言わず、カーソルだけ入る
+  // ③ 対照群 ── もう開いているときは「開きました」とは言わず、カーソルだけ入る(欄は消えない)
   await altClickReal(page, body.locator('p', { hasText: 'A を採用する。' }));
   await expect(input).toBeFocused();
+  await expect(input, '開いている欄に Alt+クリックしたら消えた').toBeVisible();
   await expect(page.locator('[data-pkc-region="status"]')).not.toContainText('追記欄を開きました');
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);

@@ -312,14 +312,24 @@ test('🔴 本文のリンクの上では、自前のメニューを出さない
 });
 
 /**
- * 🔴 **編集中は出さない ── 出すと「別のノート」に効く**。
+ * 🔴 **編集中の行の右クリックは「別のウィンドウで開く」だけを出す**(#690 ④ A′、
+ *   user 裁定 2026-09-04)。
  *
- * ⚠ `delete-entry` などは「押した行」ではなく**選んでいるノート**に効く。
- * 編集中は行の選択が断られる(`selectEntryOrExplain`)ので、そこでメニューを出すと
- * **さっきまで選んでいた別のノートに効く**メニューになる ── 静かに間違った物を消す。
- * 🔑 だから**選べなかったら出さない**。⚠ 理由は画面に出ている(黙って何も起きない、にしない)。
+ * ⚠ 2026-09-05 までここは「編集中は出ない ── 理由は画面に出る」を主張していた。
+ *   `delete-entry` などは「押した行」ではなく**選んでいるノート**に効くので、選べない
+ *   編集中に全項目を出すと**さっきまで選んでいた別のノートに効く**メニューになる ──
+ *   その理由は今も生きている(だから全項目は出さない)。
+ * 🔑 変わったのは、付箋(`open-note-window`)は**中央を動かさずに脇へ出す**ものなので、
+ *   選ぶ必要が無い = 下書きを閉じさせる理由が無い、と裁定されたこと。だから **1 行だけ**出す。
+ * ⚠ unit(`tests/adapter/editing-row-context-menu.test.ts`)はメニューの中身と
+ *   「`SELECT_ENTRY` を撃たない」まで見ている。ここで見るのは実ブラウザでしか通らない 2 つ:
+ *   ① 押すと**本当に窓が開き**、その窓が**押した行のノート**を指している
+ *   ② その間、本体の**下書きも選ばれている行も 1 つも動かない**(編集の面が残る)
  */
-test('🔴 編集中に行を右クリックしても出ない ── 理由は画面に出る', async ({ page }) => {
+test('🔴 編集中に行を右クリックすると「別のウィンドウで開く」だけが出て、押しても下書きも選択も動かない (#690)', async ({
+  page,
+  context,
+}) => {
   const errors = collectPageErrors(page);
   await gotoApp(page);
   await createEntry(page, 'text');
@@ -334,29 +344,56 @@ test('🔴 編集中に行を右クリックしても出ない ── 理由は�
    * 🔴 **編集に入り切るのを待つ**(2026-08-27。フル走で 2 回再現した)。
    *
    * ⚠ `clickReal` は**押すだけ**で、面の入れ替えは非同期である。待たずに次の
-   *   右クリックへ進むと、**まだ編集中でない**ので**メニューは正しく出る** ──
+   *   右クリックへ進むと、**まだ編集中でない**ので**全項目のメニューが正しく出る** ──
    *   落ちるのは製品ではなく、この test が**前提を確かめていない**からである。
-   * ⚠ 直下の `status.isVisible()` は**待たない一読**なので、前提の代わりにならない
-   *   (編集に入っていても入っていなくても false で通る)。
    */
-  await expect(
-    page.locator('[data-pkc-field="editor-body"]'),
-    '編集に入っていない(前提が崩れた)',
-  ).toBeVisible();
+  const editor = page.locator('[data-pkc-field="editor-body"]');
+  await expect(editor, '編集に入っていない(前提が崩れた)').toBeVisible();
+  // 下書きに 1 行足す ── 「残る」を見るための印(保存していない字)
+  await editor.fill('2 件目\n書きかけ\n');
   const status = page.locator('[data-pkc-region="status"]');
   expect(await status.isVisible(), '前提: 編集に入った時点で既に理由が出ている').toBe(false);
 
-  await page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').last().click({
-    button: 'right',
-  });
-  // 🔴 出ない
+  // 🔑 押すのは**選ばれていない行**(選ばれている行なら、動かないのは当然で何も見ていない)
+  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  const selectedLid = await rows.locator('xpath=self::*[@data-pkc-selected]').first().getAttribute('data-pkc-entry');
+  const other = rows.locator('xpath=self::*[not(@data-pkc-selected)]').first();
+  const otherLid = await other.getAttribute('data-pkc-entry');
+  expect(selectedLid, '前提: 選ばれている行が読めない').not.toBeNull();
+  expect(otherLid, '前提: 選ばれていない行が無い').not.toBeNull();
+  expect(otherLid).not.toBe(selectedLid);
+
+  await other.click({ button: 'right' });
+  const menu = page.locator(MENU);
+  await expect(menu, '編集中の行の右クリックでメニューが出ない(#690 ④ が戻った)').toBeVisible();
+  // 🔴 **1 行だけ** ── 選べない編集中に全項目を出すと別のノートに効く
+  const items = menu.locator('button[data-pkc-action]');
+  await expect(items, '編集中なのに「別のウィンドウで開く」以外が出た').toHaveCount(1);
+  await expect(items.first()).toHaveAttribute('data-pkc-action', 'open-note-window');
+  await expect(items.first()).toContainText('別のウィンドウで開く');
+  // 🔑 lid はボタン自身が運ぶ(「押した行のノート」といういつもの規則 ── 選ばずに済む)
+  await expect(items.first(), 'ボタンが押した行の lid を運んでいない').toHaveAttribute(
+    'data-pkc-entry',
+    otherLid!,
+  );
+  // ⚠ 断り文(「編集を終了してから…」)は**もう出ない** ── 断っていないので
+  expect(await status.isVisible(), '出しているのに断り文が出ている').toBe(false);
+
+  // ① 押すと窓が開き、その窓は押した行のノートを指す
+  const popup = context.waitForEvent('page');
+  await items.first().click();
+  const win = await popup;
+  await expect(win.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
+  expect(win.url(), '開いた窓が押した行のノートを指していない').toContain(`entry=${otherLid}`);
+
+  // ② 本体は 1 つも動いていない ── 編集の面が残り、下書きの字が残り、選ばれている行が同じ
+  await expect(editor, '付箋を開いたら編集が終わった(下書きが消える)').toBeVisible();
+  await expect(editor).toHaveValue('2 件目\n書きかけ\n');
   await expect(
-    page.locator(MENU),
-    '編集中なのにメニューが出た(選べていないので別のノートに効く)',
-  ).toHaveCount(0);
-  // ⚠ **黙っていない**
-  await expect(status, '断ったのに理由が出ていない').toBeVisible();
-  await expect(status).toContainText('編集');
+    rows.locator('xpath=self::*[@data-pkc-selected]').first(),
+    '付箋を開いたら選ばれている行が動いた(`SELECT_ENTRY` が撃たれている)',
+  ).toHaveAttribute('data-pkc-entry', selectedLid!);
+  await win.close();
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

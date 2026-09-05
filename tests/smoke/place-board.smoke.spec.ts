@@ -134,8 +134,24 @@ test('🔴 本文を右クリックして「ここに板を置く」と、押し
 
   const host = page.locator('[data-pkc-field="detail-body"]');
   const hb = (await host.boundingBox())!;
-  // ⚠ 既存の 2 枚(x=120 / x=460、y=40〜)に当たらない空き地を押す
-  await page.mouse.click(hb.x + 60, hb.y + 100, { button: 'right' });
+  /**
+   * 🔴 **押すのは整数の画面座標**(2026-09-05 に落ちて実測した)。
+   *
+   * ⚠ 1 稿目は `hb.y + 100` で押していたが、器の上端は **76.75px** のような半端な
+   *   位置に来る(実測。上の面の高さは文字の寸法で決まる)。ブラウザは `MouseEvent.clientY`
+   *   を**整数に切り捨てる**ので、176.75 で押しても製品が受けるのは **176** ──
+   *   `176 − 76.75 = 99.25 → 99` になり、期待の 100 と 1px ずれた。
+   * 🔑 器の枠(`clientTop`)とスクロール(`scrollTop`)は**どちらも 0 と実測**した ──
+   *   製品の座標変換は正しい。ずれていたのは spec が**実マウスには無い半端な座標**で
+   *   押していたこと。だから整数で押し、期待値は「押した画面座標 − 器の上端」の丸めで書く
+   *   (器の半端に依らず、実マウスと同じ答えになる)。
+   * ⚠ 既存の 2 枚(x=120 / x=460、y=40〜)に当たらない空き地を押す
+   */
+  const px = Math.floor(hb.x) + 60;
+  const py = Math.floor(hb.y) + 100;
+  const expectX = String(Math.round(px - hb.x));
+  const expectY = String(Math.round(py - hb.y));
+  await page.mouse.click(px, py, { button: 'right' });
   const menu = page.locator('[data-pkc-region="context-menu"]');
   await expect(menu).toBeVisible();
   await menu.locator('[data-pkc-action="add-place"]').click();
@@ -143,11 +159,11 @@ test('🔴 本文を右クリックして「ここに板を置く」と、押し
   /**
    * 🔴 観測点は**本文から描き直された属性**(保存 → 再描画の往復の後の値)。
    * ⚠ 器の枠線ぶん(`clientLeft`)が 0 でなければそのぶんずれる ── 実測して落ちたら、
-   *   期待値ではなく `binder.ts` の座標変換を疑う。
+   *   期待値ではなく `binder.ts` の座標変換を疑う(上の注のとおり、いまは 0)。
    */
-  const added = page.locator('[data-pkc-field="detail-body"] .pkc-place[data-pkc-x="60"]');
-  await expect(added, '押した位置の x= で板が書かれていない').toHaveCount(1, { timeout: 5000 });
-  await expect(added).toHaveAttribute('data-pkc-y', '100');
+  const added = page.locator(`[data-pkc-field="detail-body"] .pkc-place[data-pkc-x="${expectX}"]`);
+  await expect(added, `押した位置の x=${expectX} で板が書かれていない`).toHaveCount(1, { timeout: 5000 });
+  await expect(added, `押した位置の y=${expectY} で板が書かれていない`).toHaveAttribute('data-pkc-y', expectY);
   // 対照群: 元の 2 枚は動いていない
   await expect(page.locator('[data-pkc-region="detail"] #p1')).toHaveAttribute('data-pkc-x', '120');
   await expect(page.locator('[data-pkc-region="detail"] #p2')).toHaveAttribute('data-pkc-x', '460');

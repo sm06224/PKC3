@@ -357,22 +357,68 @@ test('🔴 追記欄も鍵で畳めて、戻せる (#609)', async ({ page }) => 
   await gotoApp(page);
   await createEntry(page, 'text');
   const shell = page.locator(SHELL);
+  const append = page.locator('[data-pkc-region="append"]');
 
   // ⚠ 前提 ── 追記欄が出ていること(ノートを開いていないと器ごと無い)
-  await expect(page.locator('[data-pkc-region="append"]'), '追記欄が出ていない').toBeVisible();
+  await expect(append, '追記欄が出ていない').toBeVisible();
   await expect(shell, '最初から畳まれている(台の前提)').not.toHaveAttribute(
     'data-pkc-hidden-panes',
     /append/,
   );
 
+  /**
+   * ① 🔴 **編集中に畳むと、器は残って出口の帯だけが見える**(#655 ④。user 裁定 2026-09-04)。
+   *
+   * ⚠ `createEntry` の直後は**編集中**である(既定で編集に入る)。2026-09-05 までここは
+   *   「印が付いたら器ごと消える」を主張していたが、それは**マニュアル §5 の約束
+   *   (編集中の出口は追記欄の場所にも出る)を畳みが殺す**形だった ── 畳んだ人には
+   *   「保存して解放 / 編集を破棄」が 1 度も出なかった。
+   * 🔑 いまは `app.css` が `:has([data-pkc-field='append-lock']:not([hidden]))` で器を出す。
+   *   守るのは 2 つ:印は付く(記録は動く)/ 出口の帯とその 2 つのボタンは見えたまま。
+   * ⚠ 打つ欄(`append-form`)は**見ない** ── 編集中はロック(`append-box.ts` の
+   *   `mode.kind !== 'ready'`)が畳みと無関係に `hidden` にしているので、ここで
+   *   「消えた」を assert しても畳みの何も見ていない(1 稿目はそれで空振りしていた)。
+   *   打つ欄が畳みで消えることは、編集を終えた ② で見る。
+   */
+  const lock = append.locator('[data-pkc-field="append-lock"]');
+  await expect(lock, '前提: 編集中なのに出口の帯が出ていない').toBeVisible();
   await page.keyboard.press('Alt+Backslash');
   await expect(shell, '鍵で畳めていない').toHaveAttribute('data-pkc-hidden-panes', /append/);
-  await expect(page.locator('[data-pkc-region="append"]'), '印は付いたが消えていない').toBeHidden();
+  await expect(
+    lock,
+    '編集中に畳んだら出口の帯まで消えた(保存して解放 / 編集を破棄が押せない)',
+  ).toBeVisible();
+  await expect(append.locator('[data-pkc-action="commit-edit"]')).toBeVisible();
+  await expect(append.locator('[data-pkc-action="cancel-edit"]')).toBeVisible();
 
-  // 🔴 **片道の操作を作らない**(2026-08-23)── 同じ鍵で戻る
+  // 🔴 **片道の操作を作らない**(2026-08-23)── 同じ鍵で戻る(編集中でも記録は動く。見え方は同じ)
   await page.keyboard.press('Alt+Backslash');
   await expect(shell, '同じ鍵で戻らない').not.toHaveAttribute('data-pkc-hidden-panes', /append/);
-  await expect(page.locator('[data-pkc-region="append"]')).toBeVisible();
+  await expect(lock, '戻したら出口の帯が消えた').toBeVisible();
+
+  /**
+   * ② 🔴 **編集を終えてから畳むと、器ごと消える**(#609 の当の主張)。
+   * ⚠ ①だけだと「畳んでも何も消えない」実装(CSS の 1 行目を落とした形)を素通りする ──
+   *   出口の帯が無いとき(`append-lock` が `hidden`)に器が消えることを、ここで見る。
+   */
+  // ⚠ 既定(1 面)の編集 ── 余白を押して行の原文に打ち、Tab で抜けてから保存する
+  const live = page.locator('[data-pkc-region="editor-live"]');
+  await clickReal(page, '[data-pkc-region="editor-live"]');
+  await live.locator('[data-pkc-field="row-source"]').fill('本文');
+  await page.keyboard.press('Tab');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await expect(page.locator('[data-pkc-action="start-edit"]'), '編集を終えていない(前提が崩れた)').toBeVisible();
+  await expect(append.locator('[data-pkc-field="append-lock"]'), '前提: 編集を終えたのに出口の帯が残っている').toBeHidden();
+
+  await page.keyboard.press('Alt+Backslash');
+  await expect(shell, '鍵で畳めていない').toHaveAttribute('data-pkc-hidden-panes', /append/);
+  await expect(append, '印は付いたが消えていない').toBeHidden();
+
+  // 同じ鍵で戻る ── 器も打つ欄も戻る
+  await page.keyboard.press('Alt+Backslash');
+  await expect(shell, '同じ鍵で戻らない').not.toHaveAttribute('data-pkc-hidden-panes', /append/);
+  await expect(append).toBeVisible();
+  await expect(append.locator('[data-pkc-field="append-form"]'), '戻したのに打つ欄が出ない').toBeVisible();
 
   // 🔴 **掴む帯は畳んでも残る**(#197 ── 鍵を知らない user の戻し口)
   await page.keyboard.press('Alt+Backslash');
