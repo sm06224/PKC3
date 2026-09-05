@@ -5,6 +5,46 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#0f172a" />
     <title>PKC3</title>
+    <!--
+      配色を**最初の描画より前**に当てる(#718)。
+
+      ⚠ アプリ本体(`main.ts` の `applyTheme(…, initialTheme())`)は module script なので、
+        CSS を読み終えた**後**に走る ── その間の 1 フレームは `tokens.css` の素の `:root`
+        (= ライト)で描かれるので、OS がダークの端末では毎回**白い画面が瞬く**。
+      🔑 倒し方は `theme.ts` の `initialTheme()` と同じ:**保存されていれば それ、
+        無ければ OS**。保存が読めない環境(private mode)でも属性は必ず立つ。
+      🔴 **読むだけで書かない**(`theme.ts` の M-7)── ここで保存すると
+        「一度も選んでいないのに初回起動時の OS 設定で固定される」が再発する。
+      ⚠ 配色の id と保存の鍵は `theme.ts` の写しである。ずれたら
+        `tests/repo-hygiene.test.ts` が落とす(焼いたマニュアルの `themeBootScript` は
+        同じ倒し方を CSS から**生成**しているが、こちらは素の HTML なので写しになる)。
+    -->
+    <script>
+      (function () {
+        var ok = [
+          'light',
+          'dark',
+          'github',
+          'github-dark',
+          'solarized',
+          'solarized-dark',
+          'dracula',
+          'nord',
+          'terminal',
+        ];
+        var t = null;
+        try {
+          t = localStorage.getItem('pkc3.theme');
+        } catch (e) {}
+        if (ok.indexOf(t) < 0) {
+          t = 'light';
+          try {
+            if (matchMedia('(prefers-color-scheme: dark)').matches) t = 'dark';
+          } catch (e) {}
+        }
+        document.documentElement.setAttribute('data-pkc-theme', t);
+      })();
+    </script>
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icon.svg" type="image/svg+xml" />
   </head>
