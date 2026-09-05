@@ -13,6 +13,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { cleanForClipboard } from '../../src/features/export/clipboard-html';
+import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 
 function host(html: string): HTMLElement {
   const el = document.createElement('div');
@@ -91,6 +92,34 @@ describe('貼る用の掃除', () => {
     // ⚠ 呼び側が複製を渡す規約なので、ここでは**複製を作って**渡す
     cleanForClipboard(el.cloneNode(true) as HTMLElement);
     expect(el.innerHTML, '元の DOM を書き換えた').toBe(before);
+  });
+
+  /**
+   * 🔴 **押せる升を持つ表を、丸ごと消していた**(2026-09-05、#735 の実装中に実測)。
+   *
+   * ⚠ `data-pkc-action` は**押せる器だけに付いているのではない** ── csv の表は
+   *   **升そのもの**(`td` / `th`)に `edit-cell` を付ける。要素ごと消していたので、
+   *   実測で **升 4 個 → 0 個**、つまり「ノートを HTML でコピー」すると
+   *   **升の無い表**が貼られていた(pasted 側でしか見えない = 誰も気づかない形)。
+   * 🔑 台は**本物の描画**から作る(読む面と同じ `interactiveCells: true`)──
+   *   手で組んだ表では、この主張を 1 度も検めていないことになる。
+   */
+  it('🔴 押せる升を持つ表でも、升の中身が残る(#735)', () => {
+    const el = host(renderMarkdown('```csv\n名前,数\nあ,1\n```', { interactiveCells: true }));
+    // 空振り防止 ── 升に押せる印が本当に付いている(付いていなければ何も守っていない)
+    expect(
+      el.querySelectorAll('[data-pkc-action="edit-cell"]').length,
+      '升に押せる印が付いていない(台が古い)',
+    ).toBeGreaterThan(0);
+    const before = el.querySelectorAll('td,th').length;
+    const r = cleanForClipboard(el);
+    expect(el.querySelectorAll('td,th').length, `升が消えた(${before} → 0)`).toBe(before);
+    expect(r.html, '升の字が消えた').toContain('名前');
+    expect(r.html, '升の字が消えた').toContain('あ');
+    // ⚠ 押す器(行・列を足す ⌗)は落ちている
+    expect(r.html, '押せないボタンが貼られる').not.toContain('<button');
+    // ⚠ 内部の印は残さない(④ が落とす)
+    expect(r.html, '内部の印が貼られる').not.toContain('data-pkc-');
   });
 
   it('見出し・表・コードは残る(貼り先で意味を保つ)', () => {
