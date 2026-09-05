@@ -321,7 +321,8 @@ test('🔴 #pkc?view=search で開くと、探す面が中央に出て本文の�
   await live.locator('[data-pkc-field="row-source"]').fill('探す面の本文に書いた けんさくご という語');
   await page.keyboard.press('Tab');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
-  await expect(page.locator('[data-pkc-field="append-target"]')).toBeVisible();
+  // ⚠ 追記の入り先(`append-target`)は見出しの無い本文では畳まれる ── 描けた印で待つ
+  await expect(page.locator('[data-pkc-field="detail-body"][data-pkc-painted]').first()).toBeVisible();
 
   await page.goto('/#pkc?view=search');
   await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });

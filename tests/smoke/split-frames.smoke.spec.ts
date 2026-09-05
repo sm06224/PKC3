@@ -441,12 +441,20 @@ test('🔴 帯の「保存…」で星つきの入れ物ができ、載せ直す
   await createEntry(page, 'text');
   await writeBody(page, '# 資料 B\n\n本文 B');
 
+  // ⚠ 帯の札は**ノートの題名**(本文の `#` ではない)。一覧は作った順なので
+  //   1 行目 = 資料 A のノート、2 行目 = 資料 B のノート(いま開いている)
+  const titles = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry] [data-pkc-field="title"]');
+  await expect(titles).toHaveCount(2);
+  const titleA = (await titles.nth(0).textContent()) ?? '';
+  const titleB = (await titles.nth(1).textContent()) ?? '';
+  expect(titleA, '前提が崩れている(題名が引けない)').not.toBe('');
+  expect(titleA).not.toBe(titleB);
   // 資料 B(いま開いている)を載せ、次に資料 A を載せる → 一番上は A
   await page.keyboard.press('Alt+Shift+S');
-  await page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').last().click();
+  await page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').first().click();
   await page.keyboard.press('Alt+Shift+S');
   const cards = page.locator('[data-pkc-field="stack-card"] [data-pkc-action="pin-split"]');
-  await expect(cards).toHaveText(['資料 A', '資料 B']);
+  await expect(cards).toHaveText([titleA, titleB]);
 
   // 保存… → 題名を決める。読んでいる本文(資料 A)は退かない
   await clickReal(page, '[data-pkc-region="stack-bar"] [data-pkc-action="stack-save"]');
@@ -469,7 +477,7 @@ test('🔴 帯の「保存…」で星つきの入れ物ができ、載せ直す
   await row.click();
   await expect(page.locator('[data-pkc-field="detail-body"] a[href^="entry:"]')).toHaveCount(2);
   await clickReal(page, '[data-pkc-field="inspector-actions"] [data-pkc-action="stack-load"]');
-  await expect(cards).toHaveText(['資料 A', '資料 B']);
+  await expect(cards).toHaveText([titleA, titleB]);
 
   expect(errors, 'ページ例外 0 件').toEqual([]);
 });
