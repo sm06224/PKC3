@@ -18,6 +18,52 @@ export async function gotoApp(page: Page): Promise<void> {
 }
 
 /**
+ * 🔴 **store の往復を数える**(2026-09-05)。
+ *
+ * ⚠ **待ちを伸ばすための道具ではない。** 面のための走査は 2026-09-05 から
+ *   書込の列に載っている(`REQUEST_TASK_SCAN` ほか ── 保存を追い越して
+ *   保存前の中身を集めるのを止めた)。だから「編集を開いた**直後**に
+ *   雛形が届いている」は、もう成り立たない ── 届くのは
+ *   **並んでいる書込が着地した後**である(実測で 36ms 後)。
+ * 🔑 だから spec は**アプリ自身の合図**を待つ ── 「その走査が返ってきた」を
+ *   worker への往復そのもので見る(CLAUDE.md §4「観測点は配線そのもの」)。
+ * ⚠ **`gotoApp` の前に呼ぶ**(init script なので、後から仕掛けても間に合わない)。
+ * ⚠ 空振り防止に「1 度でも往復を見たか」を併せて見る ── 綴りが変われば
+ *   `waitFor` は**必ず時間切れになる**(黙って通らない)。
+ */
+export async function recordStoreOps(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const w = window as unknown as Record<string, unknown>;
+    if (w.__pkcStoreOps !== undefined) return;
+    const seen: string[] = [];
+    w.__pkcStoreOps = seen;
+    const orig = Worker.prototype.postMessage;
+    Worker.prototype.postMessage = function (this: Worker, msg: unknown, ...rest: unknown[]) {
+      const op = (msg as { req?: { op?: string } } | null)?.req?.op;
+      const id = (msg as { id?: unknown } | null)?.id;
+      if (typeof op === 'string')
+        this.addEventListener('message', (e: MessageEvent) => {
+          if ((e.data as { id?: unknown } | null)?.id === id) seen.push(op);
+        });
+      return (orig as (...a: unknown[]) => unknown).call(this, msg, ...(rest as []));
+    } as typeof Worker.prototype.postMessage;
+  });
+}
+
+/** `recordStoreOps` を仕掛けた頁で、その op が **n 回**返るまで待つ。 */
+export async function waitForStoreOp(page: Page, op: string, n = 1): Promise<void> {
+  await page.waitForFunction(
+    ([name, want]) => {
+      const seen = (window as unknown as { __pkcStoreOps?: string[] }).__pkcStoreOps;
+      if (seen === undefined) return false;
+      return seen.filter((o) => o === name).length >= (want as number);
+    },
+    [op, n] as [string, number],
+    { timeout: 15_000 },
+  );
+}
+
+/**
  * 🔑 2 ペイン(split)で開く仕込み(#104 第 2 弾で既定が live になった)。
  * 全文 textarea(`editor-body`)を**入力の道具**に使う spec は、最初の goto の
  * **前に**これを呼ぶ。⚠ ここで試すのは「設定として支持される構成」──

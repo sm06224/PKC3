@@ -1,5 +1,13 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
+import {
+  gotoApp,
+  clickReal,
+  createEntry,
+  collectPageErrors,
+  useSplitEditor,
+  recordStoreOps,
+  waitForStoreOp,
+} from './helpers';
 
 test.beforeEach(async ({ page }) => {
   await useSplitEditor(page);
@@ -19,6 +27,8 @@ test.beforeEach(async ({ page }) => {
 test('🔴 雛形を作って、短縮語 + Tab で本文に挿せる (#196)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
+  // ⚠ 仕掛けは goto の**前**(init script)
+  await recordStoreOps(page);
   await gotoApp(page);
 
   // ① 雛形を 1 件作る(⚠ user と同じ手順 ── 種類を選んでから本体を押す)
@@ -30,6 +40,16 @@ test('🔴 雛形を作って、短縮語 + Tab で本文に挿せる (#196)', a
 
   // ② 普通のノートを作って、短縮語を打つ
   await createEntry(page, 'text');
+  /**
+   * 🔴 **雛形が届くのを待つ**(2026-09-05)。⚠ **待ちを伸ばしたのではない** ──
+   *   走査が書込の列に載ったので、届くのは「編集を開いた瞬間」ではなく
+   *   **並んでいる書込が着地した後**になった(実測 36ms)。ここで待たないと、
+   *   `Tab` を**一覧が空のうちに**押すことになり、以後は何も起きない
+   *   (`Tab` は撃ち直しが無い ── 押した 1 回で決まる)。
+   * ⚠ 数えるのは **2 回目**である ── 1 回目は雛形のノートを作った瞬間に走っており、
+   *   そのときの本文はまだ空(短縮語が入っていない)。
+   */
+  await waitForStoreOp(page, 'snippetScan', 2);
   await ta.fill('addr');
   // ⚠ 末尾へカーソルを置く(短縮語は**カーソルの手前**で当たる)
   await ta.press('End');
@@ -91,6 +111,8 @@ test('🔴 短縮語が当たらない Tab は、これまでどおり次へ移�
 test('🔴 雛形を一覧から選ぶと、caret の位置に入る (#196)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
+  // ⚠ 仕掛けは goto の**前**(init script)
+  await recordStoreOps(page);
   await gotoApp(page);
 
   // ① 雛形を 1 件作る
@@ -102,6 +124,16 @@ test('🔴 雛形を一覧から選ぶと、caret の位置に入る (#196)', as
 
   // ② 普通のノートを作り、**行の途中**に caret を置く
   await createEntry(page, 'text');
+  /**
+   * 🔴 **雛形が届くのを待つ**(2026-09-05)。⚠ **待ちを伸ばしたのではない** ──
+   *   走査が書込の列に載ったので、届くのは「編集を開いた瞬間」ではなく
+   *   **並んでいる書込が着地した後**になった(実測 36ms)。ここで待たないと、
+   *   `Tab` を**一覧が空のうちに**押すことになり、以後は何も起きない
+   *   (`Tab` は撃ち直しが無い ── 押した 1 回で決まる)。
+   * ⚠ 数えるのは **2 回目**である ── 1 回目は雛形のノートを作った瞬間に走っており、
+   *   そのときの本文はまだ空(短縮語が入っていない)。
+   */
+  await waitForStoreOp(page, 'snippetScan', 2);
   await ta.fill('まえ\nうしろ');
   await ta.evaluate((el) => {
     (el as HTMLTextAreaElement).setSelectionRange(3, 3);
