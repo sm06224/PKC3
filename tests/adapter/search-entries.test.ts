@@ -352,6 +352,54 @@ describe('探す面の検索 searchDetail(#680)', () => {
     await expect(detail('AND OR "x*')).resolves.toBeTruthy();
   });
 
+  /**
+   * 🔴 **書き方は探す面だけ**(#680 commit 4)── 空白 = AND / `"…"` = フレーズ / `-語` = 除外。
+   * ⚠ 対照群: 左の列の `searchEntries` は**丸ごと 1 句**のまま(一覧の意味論は変えない)。
+   */
+  it('🔴 -語 で除外できる(FTS 側)', async () => {
+    const { rows } = await detail('全文検索 -りんご');
+    const lids = rows.map((r) => r.lid);
+    expect(lids, '除外が効いていない').not.toContain('b');
+    expect(lids, '除外で他まで消えた').toEqual(expect.arrayContaining(['a', 'e', 't']));
+  });
+
+  it('🔴 空白で区切ると AND(FTS 側)', async () => {
+    expect((await detail('全文検索 りんご')).rows.map((r) => r.lid)).toEqual(['b']);
+  });
+
+  it('🔴 "…" はフレーズ ── 語順を要求する', async () => {
+    const hit = (await detail('"今日は晴れ"')).rows.map((r) => r.lid);
+    expect(hit, 'フレーズが当たらない').toEqual(expect.arrayContaining(['a', 'b']));
+    expect((await detail('"晴れは今日"')).rows, '語順が違うのに当たった(フレーズになっていない)').toEqual([]);
+  });
+
+  it('🔴 3 字未満の項が混じれば LIKE 側でも AND / 除外が効く', async () => {
+    const ex = await detail('晴れ -りんご');
+    expect(ex.rows.map((r) => r.lid), 'LIKE 側で除外が効いていない').toEqual(['a']);
+    expect(ex.rows[0]!.snippet, 'LIKE 側の印が最初の正の項に付いていない').toContain(marked('晴れ'));
+    expect((await detail('晴れ りんご')).rows.map((r) => r.lid), 'LIKE 側で AND が効いていない').toEqual(['b']);
+    // ⚠ 除外側だけ短くても LIKE 側へ(trigram は 2 字を当てられず、除外が黙って効かない)
+    //    ── `だ` を持つのは b だけ(「りんごの話だ」)。FTS へ渡すと NOT が空振りして b が残る
+    const one = (await detail('全文検索 -だ')).rows.map((r) => r.lid);
+    expect(one, '1 字の除外が黙って効かなかった').not.toContain('b');
+    expect(one, '前提が崩れた(他の行まで消えた)').toEqual(expect.arrayContaining(['a', 'e', 't']));
+  });
+
+  it('⚠ 正の項が無ければ 0 件(全部から除く、は引かない)', async () => {
+    expect((await detail('-りんご')).rows).toEqual([]);
+  });
+
+  it('🔴 対照群: 左の列(searchEntries)は丸ごと 1 句のまま ── 書き方は効かない', async () => {
+    const plain = (await call({ op: 'searchEntries', cid: CID3, query: '全文検索 -りんご' } as StorageRequest)) as {
+      lids: string[];
+    };
+    expect(plain.lids, '左の列に探す面の書き方が漏れた').toEqual([]);
+    // ⚠ 空振り防止 ── 同じ口で 1 句なら当たる
+    expect(
+      ((await call({ op: 'searchEntries', cid: CID3, query: '全文検索' } as StorageRequest)) as { lids: string[] }).lids,
+    ).toEqual(expect.arrayContaining(['a', 'b']));
+  });
+
   it('🔴 本物の store-port を通しても行がそのまま届く', async () => {
     const client: StoreClientLike = {
       request: (req) => call(req as StorageRequest) as never,

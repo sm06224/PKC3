@@ -1861,7 +1861,13 @@ const handlers: Handlers = {
    * ⚠ 上限と「切った」の作法は `searchEntries` と同じ(`limit + 1`)。
    */
   searchDetail: (req) => {
-    const plan = planSearch(req.query);
+    /**
+     * 🔴 **書き方は探す面だけ**(`syntax: 'query'`── 空白 = AND / `"…"` = フレーズ /
+     * `-語` = 除外)。左の列(`searchEntries`)は `plain` のまま ── 一覧の意味論は変えない。
+     * ⚠ 3 字未満の項が 1 つでも混じれば `like-terms`(全項を LIKE で並べる)── trigram は
+     *   2 字を当てられず、除外側なら**黙って効かない**ので、FTS へは渡さない。
+     */
+    const plan = planSearch(req.query, { syntax: 'query' });
     if (plan.kind === 'none') return { rows: [], truncated: false };
     const limit = Math.max(1, Math.min(req.limit ?? SEARCH_LIMIT, SEARCH_LIMIT));
     if (plan.kind === 'fts') {
@@ -1885,18 +1891,40 @@ const handlers: Handlers = {
       ) as Array<{ lid: string; title: string; snippet: string; rank: number }>;
       return { rows: rows.slice(0, limit), truncated: rows.length > limit };
     }
+    /**
+     * LIKE 側 ── 項ごとに `(title LIKE ? OR body LIKE ?)` を AND で並べ、除外は `NOT (…)`。
+     * ⚠ `plain` の `like`(1 句)は `query` では来ないが、型の上では在るので 1 項として畳む。
+     * ⚠ 抜粋の印は**最初の正の項**に付ける(2 項目以降は当たっていても印が付かない ──
+     *   1 行の窓に全項は入らないので、先頭の項を優先する)。
+     */
+    const terms =
+      plan.kind === 'like-terms'
+        ? plan
+        : { include: [req.query.trim()], exclude: [] as string[] };
+    const clause = (i: number): string => `(title LIKE ?${i} ESCAPE '\\' OR body LIKE ?${i} ESCAPE '\\')`;
+    const bind: (string | number)[] = [req.cid];
+    const conds: string[] = [];
+    for (const t of terms.include) {
+      bind.push(toLikePattern(t));
+      conds.push(clause(bind.length));
+    }
+    for (const t of terms.exclude) {
+      bind.push(toLikePattern(t));
+      conds.push(`NOT ${clause(bind.length)}`);
+    }
+    bind.push(limit + 1);
     const rows = need().selectObjects(
       `SELECT lid, title, body FROM entries
-        WHERE cid = ?1 AND archived = 0
-          AND (title LIKE ?2 ESCAPE '\\' OR body LIKE ?2 ESCAPE '\\')
-        ORDER BY entry_order, lid LIMIT ?3`,
-      [req.cid, plan.pattern, limit + 1],
+        WHERE cid = ?1 AND archived = 0 AND ${conds.join(' AND ')}
+        ORDER BY entry_order, lid LIMIT ?${bind.length}`,
+      bind,
     ) as Array<{ lid: string; title: string; body: string }>;
+    const first = terms.include[0] ?? '';
     return {
       rows: rows.slice(0, limit).map((r) => ({
         lid: r.lid,
         title: r.title,
-        snippet: excerptAround(r.body, req.query),
+        snippet: excerptAround(r.body, first),
         rank: 0,
       })),
       truncated: rows.length > limit,
