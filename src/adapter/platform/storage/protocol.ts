@@ -13,6 +13,7 @@ import type {
 import type { TaskScan } from '@features/schedule/task-cards';
 import type { ContactScan } from '@features/contact/contact-card';
 import type { SnippetScan } from '@features/snippet/snippet-table';
+import type { SearchDetailRow } from '@features/filter/search-snippet';
 
 export type StorageRequest =
   /**
@@ -119,6 +120,13 @@ export type StorageRequest =
    * ── worker は決めない(2 か所に規則を生やさない)。
    */
   | { op: 'searchEntries'; cid: string; query: string; limit?: number }
+  /**
+   * 🔴 **探す面のための検索**(#680)── 題名 + 本文の抜粋 + 関連度を返す。
+   * ⚠ `searchEntries` と別の op なのは、返す物が違うからである(あちらは lid だけ ──
+   *   左の列の絞り込みは並びを変えない)。抜粋の印は `features/filter/search-snippet.ts`。
+   * ⚠ ゴミ箱の中は返さない(行を押すと小窓で開くので、一覧に無い物を開かせない)。
+   */
+  | { op: 'searchDetail'; cid: string; query: string; limit?: number }
   /**
    * 🔴 **このノートを参照しているのはどれか**(#348、user 裁定 2026-08-23)。
    * ⚠ 探すのは本文の `entry:<lid>` ── ノート間リンクの**唯一の形**である。
@@ -605,6 +613,12 @@ export interface ResultMap {
    * 一覧の並びが検索のたびに変わると、user は「どこへ行ったか」を見失う。
    */
   searchEntries: { lids: string[]; truncated: boolean };
+  /**
+   * 探す面の行(#680)。⚠ **並びは関連度**(`bm25` 昇順 = 良い順。LIKE 側は entry_order)
+   * ── 左の列(`searchEntries`)と違い、こちらは「見つける」ための面なので
+   * 並びが変わってよい。⚠ 切ったときは `truncated`。
+   */
+  searchDetail: { rows: SearchDetailRow[]; truncated: boolean };
   findBacklinks: { lids: string[]; truncated: boolean };
   /**
    * 集計(#184)── **1 回の走査で目録と表を同時に返す**。

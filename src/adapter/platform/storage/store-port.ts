@@ -57,6 +57,11 @@ export function createStorePort(client: StoreClientLike, cid: string): StorePort
      */
     searchEntries: (query) => client.request({ op: 'searchEntries', cid, query }),
     /**
+     * 探す面の検索(#680)。⚠ ここも**渡すだけ** ── 抜粋の作り方と並びは worker、
+     * 印の綴りは `features/filter/search-snippet.ts` が持つ。
+     */
+    searchDetail: (query) => client.request({ op: 'searchDetail', cid, query }),
+    /**
      * 🔴 **このノートを参照しているのはどれか**(#348)。⚠ ここも**渡すだけ** ──
      * 探し方(`entry:<lid>` を LIKE で当てる)の規則は worker が 1 か所で持つ。
      */

@@ -47,6 +47,7 @@ import { MAX_TAGS, sameTag } from '@features/flavor/tags';
 import type { TaskScan } from '@features/schedule/task-cards';
 import type { ContactScan } from '@features/contact/contact-card';
 import type { SnippetScan } from '@features/snippet/snippet-table';
+import type { SearchDetailRow } from '@features/filter/search-snippet';
 import type { Relation } from '@core/model/entry-meta';
 import type { Dispatcher } from './dispatcher';
 import type { TagInputField } from './app-state';
@@ -68,6 +69,12 @@ export interface StorePort {
    *   user から見ると「201 件目からは無い」に読める(§1「無言の欠落」)。
    */
   searchEntries?(query: string): Promise<{ lids: string[]; truncated: boolean }>;
+  /**
+   * 探す面の検索(#680)── 題名 + 抜粋 + 関連度。⚠ **省略可**(古い worker が
+   * service worker のキャッシュに残っている端末では未知の op になる ── そのとき
+   * 面は「この版では探せません」と断るだけで、左の列の絞り込みは効いたまま)。
+   */
+  searchDetail?(query: string): Promise<{ rows: SearchDetailRow[]; truncated: boolean }>;
   /**
    * 🔴 このノートを参照しているノート(#348)。⚠ **optional** ── 古い worker が
    * service worker のキャッシュに残っている端末では未知の op になる。
