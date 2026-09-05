@@ -8,7 +8,29 @@
 # ── 赤の意味が「サイドバーが壊れた」なのか「夜の検査が止まった」なのか名前で
 # 言えない状態で、CLAUDE.md「回すものの粒度: 1 job = 1 主張」に真正面から反していた。
 # 🔑 検証の step には `if: ${{ !cancelled() }}` を付け、**全部走らせてから**まとめて
-# 赤にする。落ちた step の名前は最後の step が台帳(issue)へ出す。
+# 赤にする。揃わなかったものの名前は最後の job(`ledger`)が台帳(issue)へ出す。
+#
+# 🔴 **1 本の `heavy` を、主張ごとの job へ割った**(#695、2026-09-05)。
+#
+# ⚠ 直す前は `heavy` 1 本 / `timeout-minutes: 30` で、**8 日で 20 分 → 28 分**へ
+#   伸びて門に当たり始めた。job が timeout で切られると job は **cancelled** に
+#   なるので、末尾に置いていた台帳 step の `if: ${{ !cancelled() }}` が偽 =
+#   **skip** される ── つまり **赤い晩ほど台帳に出ない**。実測: run #40
+#   (2026-09-03)は全部緑のまま時間切れ、run #38(2026-09-01)は smoke 3 本が
+#   赤のまま時間切れで、**`nightly-red` label の issue は 1 本も立っていない**。
+#   #221 で直した「赤いまま放置される導線」が、timeout の形で戻っていた。
+#
+# 🔑 直しは 2 つで 1 組:
+#   ① **1 job = 1 主張**(user 指示 2026-08-10)へ割って**並列**に走らせる ──
+#      壁時計が縮むので `timeout-minutes: 15` でも収まる。
+#      🚫 **timeout を上げない**(30 → 45)── 「CI を長くしない」(user 指示
+#      2026-07-30)と逆向きで、しかも tripwire が鈍る(次に本当に遅くなった晩に
+#      鳴らない)。⚠ smoke も **1 件も減らさない**(3 本はそれぞれ別の主張)。
+#   ② 台帳を**別の job** にして `needs` + `if: always()` で受ける ──
+#      `needs.<job>.result` は timeout で切られた job を **`cancelled`** として
+#      持ち、`always()` は cancel の回でも走るので、**時間切れの晩こそ記録が残る**。
+#      判定(何を赤と数えるか)は今までどおり `scripts/nightly-red.mjs` の
+#      `unmetSteps` 側にある ── workflow に判定を書かない。
 name: Nightly
 on:
   schedule:
@@ -16,18 +38,47 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
-  # 赤い夜を issue に出す(下の「台帳へ出す」step。#221 の 3 つ目 ──
+  # 赤い夜を issue に出す(下の `ledger` job。#221 の 3 つ目 ──
   # 「夜が赤いまま放置される導線」を直すのが目的で、書くのは issue 1 本だけ)
   issues: write
 jobs:
-  heavy:
+  # ── smoke は 2 つのブラウザ両方で回す ────────────────────────────────
+  # 🔴 CLAUDE.md「実ブラウザ依存の spec は両方で通してから push する」。PR gate は
+  # 速さのため headless_shell 片方だけなので、**両方を突き合わせる場所は nightly
+  # しかない**。だから 2 つを別 job に割った ── 落ちたとき、どちらのブラウザで
+  # 壊れたのかが **job の名前で分かる**。
+  #
+  # 🔑 **全 step に id を付ける**(2026-08-17 のレビュー 🔴-1)。台帳が読むのは
+  #   job の結果になったが、id は今も 2 つの役に立つ ── ① `setup_ok` の gate は
+  #   `steps` context を読むので、id が無いと成立しない ② run を開いた人が
+  #   step を名前で指せる。`tests/workflow-steps.test.ts` が pin する。
+  smoke_headless_shell:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
-      # 🔑 **全 step に id を付ける**(2026-08-17 のレビュー 🔴-1)。
-      #   `steps` context に入るのは **id を宣言した step だけ**なので、id が無い step の
-      #   失敗・skip は最後の「台帳へ出す」step から**見えない** ── 仕込みが落ちた晩に
-      #   「✅ 緑に戻りました」と誤報して issue を閉じうる。
+      - uses: actions/checkout@v7
+        id: checkout
+      - uses: actions/setup-node@v7
+        id: node
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+        id: npm_ci
+      # ⚠ smoke は `vite preview` で **`dist/` を配信する**ので build が要る
+      #   (source を書き換えただけでは smoke に一切届かない ── CLAUDE.md §3)
+      - run: npm run build
+        id: build
+      - run: npx playwright install chromium --with-deps
+        id: pw_install
+      - name: Visual smoke (headless_shell ── PR gate と同じ)
+        id: smoke
+        run: npm run test:smoke
+
+  smoke_chromium:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
       - uses: actions/checkout@v7
         id: checkout
       - uses: actions/setup-node@v7
@@ -41,23 +92,113 @@ jobs:
         id: build
       - run: npx playwright install chromium --with-deps
         id: pw_install
-      # 🔴 **probe 用の path を `$GITHUB_ENV` へ書かない**(2026-08-07)。
+      # 🔴 **path を `$GITHUB_ENV` へ書かない**(2026-08-07)。
       #
-      # 直す前はここで `PKC3_CHROMIUM` を `$GITHUB_ENV` へ書いていた ── これは
-      # **以降の全 step に効く**ので、`tests/smoke/playwright.config.ts` も同じ変数を
-      # 読み、**nightly の smoke だけフル chromium で走っていた**(PR gate は
-      # 未設定なので playwright 既定 = `chromium_headless_shell`)。
-      # つまり CLAUDE.md が「CI は headless_shell」と書いている前提が、nightly では
-      # 静かに破れていた ── `window.print()` / CSP / `<a download>` のように
-      # **2 つのビルドで実挙動が違う**ことが分かっている箇所が、lane ごとに別物を
-      # 検査していたことになる。
-      # ⚠ probe(`tests/probe/run-*.mjs`)は GitHub runner に `/opt/pw-browsers` が
-      #   無いので path を要る。だから **probe の step にだけ** `env:` で渡す。
+      # かつてここで `PKC3_CHROMIUM` を `$GITHUB_ENV` へ書いていた ── これは
+      # **以降の全 step に効く**ので、無関係な step の**検査対象まで変える**
+      # (当時は smoke まで巻き添えでフル chromium になり、「両方で通している」
+      #  つもりのまま片方しか検査していなかった)。
+      # ⚠ この job は smoke に**わざと**フル chromium を渡すが、渡す先は step の
+      #   `env:` で名指しする(下の「図の全数」は headless_shell のまま)。
       # 🔴 **`echo "$(…)"` は「取れなかった」を食べる**(2026-08-17 のレビュー ⚠-5。
-      #   CLAUDE.md §6 の顔違い)── 直す前は `node` が死んでも `echo` の終了コードが
-      #   勝つので step は緑で、`path=` が空のまま probe へ渡っていた。probe 側は
-      #   `?? 既定` なので**空文字は素通りする** = 「どのブラウザで測ったか分からない回」
-      #   が緑になる(nightly の存在理由そのものを静かに壊す向き)。
+      #   CLAUDE.md §6 の顔違い)── `node` が死んでも `echo` の終了コードが勝つので
+      #   step は緑で、`path=` が空のまま渡る。受け側は空文字を素通りする =
+      #   「どのブラウザで測ったか分からない回」が緑になる。
+      - name: Resolve chromium path
+        id: pw
+        run: |
+          P=$(node -e "const {chromium}=require('@playwright/test'); console.log(chromium.executablePath())")
+          if [ -z "$P" ]; then
+            echo "::error::chromium の path が取れない ── smoke がどのブラウザで走るか決まらない"
+            exit 1
+          fi
+          echo "path=$P" >> "$GITHUB_OUTPUT"
+      # 🔴 **仕込みと検証の間では止める**(2026-08-17 のレビュー ⚠-4)。
+      #   検証 step は `!cancelled()` を持つので、仕込みが落ちた晩でも**全部走って
+      #   全部落ちる** ── 赤が並び、**本当の原因(npm ci)が名前で出ない**。
+      # 🔑 この step は guard を持たない = 手前が落ちれば **skip** される。だから
+      #   `outputs.ok` が空になり、下の検証 step は 1 つも走らない。
+      - name: 仕込みが揃った
+        id: setup_ok
+        run: echo "ok=1" >> "$GITHUB_OUTPUT"
+      - name: Visual smoke (フル chromium ── 実挙動が違う箇所を突き合わせる)
+        id: smoke_chromium
+        if: ${{ !cancelled() && steps.setup_ok.outputs.ok == '1' }}
+        env:
+          PKC3_CHROMIUM: ${{ steps.pw.outputs.path }}
+        run: npm run test:smoke
+      # 🔴 **重い検査は夜だけ**(#528、2026-08-29)。マニュアルは 22 種を
+      #    「そのまま書けます」と言うのに、焼けることを見ていたのは 5 種だけだった。
+      #    ⚠ 22 枚を焼くのは重いので PR gate には入れない(smoke lane は 2026-08-28 に
+      #    10 分の門へ実際にぶつかっている)。**名前が揃っているか**は unit が PR gate で見る。
+      # ⚠ **ここは headless_shell のまま**(`PKC3_CHROMIUM` を渡していない)──
+      #    #695 で job を割ったとき置き場としてここへ入れただけで、**何で焼いているかは
+      #    変えていない**(変えれば別の主張になる)。だから step の名前に書いておく。
+      - name: 図の全数 ── マニュアルの 22 種が焼けるか (headless_shell)
+        id: smoke_diagrams_all
+        if: ${{ !cancelled() && steps.setup_ok.outputs.ok == '1' }}
+        env:
+          PKC3_HEAVY: '1'
+        run: npm run test:smoke -- tests/smoke/mermaid-all.smoke.spec.ts
+
+  # 🔴 product bundle は **PR gate が一度もビルドしない別成果物**である
+  # (`BUILD_KIND` が焼き込まれるので entry chunk の中身も content hash も
+  #  dev とは違う ── P7 段① レビュー M-1)。Pages の `/` に出るのはこちらなので、
+  # nightly で**ビルド → 検品 → smoke** まで通す。PR gate には足さない
+  # (CI を長くしない・user 指示 2026-07-30)
+  product:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        id: checkout
+      - uses: actions/setup-node@v7
+        id: node
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+        id: npm_ci
+      - run: npx playwright install chromium --with-deps
+        id: pw_install
+      # ⚠ **この 3 つには `!cancelled()` を付けない** ── 上の 2 job と違い、ここは
+      #   **順番に依存している**(検品は焼きたての dist を読み、smoke はその dist を
+      #   配る)。ビルドが落ちた回の「検品」は確かめたことにならないので、skip される
+      #   のが正しい。step を割ってあるのは、落ちたときに**ビルド / 検品 / smoke の
+      #   どれが壊れたか名前で分かる**ようにするためである。
+      - name: Product ビルド (PR gate が触らない成果物)
+        id: product_build
+        run: VITE_PKC_KIND=product npm run build
+      # 🔴 焼きたてなので manual.html の実在も要求する(#648 💭)
+      - name: Product 検品 (map の有無 / 参照の実在 / 配る量 / manual.html)
+        id: product_check
+        run: node scripts/check-dist.mjs product --require-manual
+      - name: Product smoke
+        id: product_smoke
+        run: npm run test:smoke
+
+  rust_and_probes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        id: checkout
+      - uses: actions/setup-node@v7
+        id: node
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+        id: npm_ci
+      # ⚠ probe は `vite`(dev)から読むので dist は要らないが、**外して壊れないことを
+      #   確かめる場が夜しかない**ので #695 の割り直しでは落とさなかった(実測 3 秒)。
+      - run: npm run build
+        id: build
+      - run: npx playwright install chromium --with-deps
+        id: pw_install
+      # ⚠ probe(`tests/probe/run-*.mjs`)は GitHub runner に `/opt/pw-browsers` が
+      #   無いので path を要る。だから **probe の step にだけ** `env:` で渡す
+      #   (`$GITHUB_ENV` へ書かない ── 上の job の注記と同じ理由)。
       - name: Resolve chromium path for probes
         id: pw
         run: |
@@ -67,53 +208,11 @@ jobs:
             exit 1
           fi
           echo "path=$P" >> "$GITHUB_OUTPUT"
-      # 🔴 **仕込みと検証の間では止める**(同レビュー ⚠-4)。
-      #   検証 step は `!cancelled()` を持つので、仕込みが落ちた晩でも**全部走って
-      #   全部落ちる** ── 11 個の赤が並び、**本当の原因(npm ci)が名前で出ない**。
-      # 🔑 この step は guard を持たない = 手前が落ちれば **skip** される。だから
-      #   `outputs.ok` が空になり、下の検証 step は 1 つも走らない(原因だけが赤くなる)。
-      #   ⚠ 台帳側は `skipped` も赤に数えるので、「走らなかった」ことは記録に残る。
+      # 🔑 仕込みと検証の境目(上の job と同じ)。この job は検証 step を 9 本
+      #   持っており、1 本落ちても残りを走らせたいので `!cancelled()` で回す。
       - name: 仕込みが揃った
         id: setup_ok
         run: echo "ok=1" >> "$GITHUB_OUTPUT"
-      # 🔴 **smoke は 2 つのブラウザ両方で回す**(CLAUDE.md「実ブラウザ依存の spec は
-      # 両方で通してから push する」)。PR gate は速さのため headless_shell 片方だけ
-      # なので、**両方を突き合わせる場所は nightly しかない**。
-      - name: Visual smoke (headless_shell ── PR gate と同じ)
-        id: smoke_headless_shell
-        if: ${{ !cancelled() && steps.setup_ok.outputs.ok == '1' }}
-        run: npm run test:smoke
-      # 🔴 **重い検査は夜だけ**(#528、2026-08-29)。マニュアルは 22 種を
-      #    「そのまま書けます」と言うのに、焼けることを見ていたのは 5 種だけだった。
-      #    ⚠ 22 枚を焼くのは重いので PR gate には入れない(smoke lane は 2026-08-28 に
-      #    10 分の門へ実際にぶつかっている)。**名前が揃っているか**は unit が PR gate で見る。
-      #    ⚠ guard は隣と同じ ── 1 つ落ちても止めないが、**仕込みが落ちた晩は走らない**
-      #    (走らせても「確かめていない」を「落ちた」と読ませるだけである)
-      - name: 図の全数 ── マニュアルの 22 種が焼けるか
-        id: smoke_diagrams_all
-        if: ${{ !cancelled() && steps.setup_ok.outputs.ok == '1' }}
-        env:
-          PKC3_HEAVY: '1'
-        run: npm run test:smoke -- tests/smoke/mermaid-all.smoke.spec.ts
-      - name: Visual smoke (フル chromium ── 実挙動が違う箇所を突き合わせる)
-        id: smoke_chromium
-        if: ${{ !cancelled() && steps.setup_ok.outputs.ok == '1' }}
-        env:
-          PKC3_CHROMIUM: ${{ steps.pw.outputs.path }}
-        run: npm run test:smoke
-      # 🔴 product bundle は **PR gate が一度もビルドしない別成果物**である
-      # (`BUILD_KIND` が焼き込まれるので entry chunk の中身も content hash も
-      #  dev とは違う ── P7 段① レビュー M-1)。Pages の `/` に出るのはこちらなので、
-      # nightly で**ビルド → 検品 → smoke** まで通す。PR gate には足さない
-      # (CI を長くしない・user 指示 2026-07-30)
-      - name: Product ビルド ── 検品 + smoke(PR gate が触らない成果物)
-        id: product_build
-        if: ${{ !cancelled() && steps.setup_ok.outputs.ok == '1' }}
-        run: |
-          VITE_PKC_KIND=product npm run build
-          # 🔴 焼きたてなので manual.html の実在も要求する(#648 💭)
-          node scripts/check-dist.mjs product --require-manual
-          npm run test:smoke
       # Rust core: **出荷 .wasm を source から再ビルドして一致を見る**
       # (PR gate では cargo を走らせない ── 再ビルド漏れをここで捕まえる。
       #  rust-toolchain.toml が rustc を pin しているのでバイト一致が期待値)
@@ -187,27 +286,42 @@ jobs:
         run: node tests/probe/run-schedule-probe.mjs
       # lease-probe(多重タブの writer 昇格)は SAH 解放待ちが最も flake しやすい
       # ため nightly には入れない ── リース周りを触る PR で手動実行する運用
-      #
-      # 🔴 **夜の結果を台帳へ出す**(#221 の 3 つ目)。赤いまま 13 晩放置されたのは、
-      # 気づく導線が「たまたま Actions を開く」しか無かったからである。
-      # ⚠ ここは**通知だけ**で、赤緑そのものは上の step が決める(この step が
-      #   落ちても、落ちた step の赤は消えない)。
-      # 🔴 **この step は最後に置く**(2026-08-17 のレビュー ⚠-6)── `steps` context は
-      #   「そこまでの step」しか持たないので、後ろに検証 step を足すと**その赤は
-      #   永久に台帳へ出ない**。`tests/workflow-steps.test.ts` が末尾であることを pin する。
-      # 🔴 **仕込みの gate を付けない** ── 仕込みが落ちた晩こそ記録が要る
-      #   (`!cancelled()` だけにする)。
-      # 🔑 **判定は workflow に書かない**(同レビュー 🔴-1)── 何を赤と数えるかは
-      #   `scripts/nightly-red.mjs` の `unmetSteps` に置き、test が全経路を通す。
-      #   直す前はここに `node -e '…outcome==="failure"…'` と書いていたので、
-      #   **`skipped` を緑と読む**うえ、その 1 行は**どの test からも実行されなかった**。
+
+  # 🔴 **夜の結果を台帳へ出す**(#221 の 3 つ目)。赤いまま 13 晩放置されたのは、
+  # 気づく導線が「たまたま Actions を開く」しか無かったからである。
+  # ⚠ ここは**通知だけ**で、赤緑そのものは上の job が決める(この job が落ちても、
+  #   落ちた job の赤は消えない)。
+  #
+  # 🔴 **step ではなく job にした**(#695)。step だった頃は、`heavy` が timeout で
+  #   切られた晩に **job ごと cancelled** になって `if: ${{ !cancelled() }}` が偽 =
+  #   **skip** ── **いちばん記録が要る晩に、何も書かなかった**。
+  # 🔑 `if: always()` は cancel の回でも走り、`needs.<job>.result` は timeout で
+  #   切られた job を `cancelled` として持つ。
+  # 🔴 **検証 job を足したら `needs` にも足す** ── 足し忘れた job の赤は
+  #   **永久に台帳へ出ない**(step 版の「台帳は最後に置く」と同じ罠)。
+  #   `tests/workflow-steps.test.ts` が「ledger 以外の全 job が needs に在る」を pin する。
+  # 🔴 **判定は workflow に書かない**(2026-08-17 のレビュー 🔴-1)── 何を赤と
+  #   数えるかは `scripts/nightly-red.mjs` の `unmetSteps` に置き、test が全経路を通す。
+  #   かつてここに `node -e '…outcome==="failure"…'` と書いていたので、
+  #   **`skipped` を緑と読む**うえ、その 1 行は**どの test からも実行されなかった**。
+  ledger:
+    needs: [smoke_headless_shell, smoke_chromium, product, rust_and_probes]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        id: checkout
+      - uses: actions/setup-node@v7
+        id: node
+        with:
+          node-version: 24
       - name: 夜の結果を台帳へ出す(赤なら issue、緑に戻ったら閉じる)
         id: ledger
-        if: ${{ !cancelled() }}
         env:
-          # `steps` は **id を付けた step だけ**が入る(だから全 step に id を付けた)。
-          # 名前ではなく id で出るので、id は「読んで分かる名前」にしてある
-          PKC3_NIGHTLY_STEPS: ${{ toJSON(steps) }}
+          # `needs` の各 job は `result`(success / failure / cancelled / skipped)を
+          # 持つ。⚠ **`cancelled` が要る** ── job の timeout はこの値で来る。
+          PKC3_NIGHTLY_STEPS: ${{ toJSON(needs) }}
           GITHUB_TOKEN: ${{ github.token }}
         # ⚠ **`| tee` に通さない**(CLAUDE.md §6)── パイプの終了コードは最後の命令の
         #   ものなので、script が例外で死んでも step が緑になる(通知が届かないのが

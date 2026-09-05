@@ -212,6 +212,44 @@ describe('揃わなかった step の数え方', () => {
     expect(unmetSteps(json({ a: { outcome: 'success' }, ledger: { outcome: '' } }))).toEqual([]);
   });
 
+  /**
+   * 🔴 **job を割った後の形**(#695、2026-09-05)。台帳は `toJSON(needs)` を受けるので、
+   * 各 job が持つのは `outcome` ではなく **`result`** である。
+   * ⚠ 直す前の実装は「`outcome` が文字列でなければ `''`」と畳んでいたので、
+   *   needs 形は **1 件も数えられず**「✅ 全部緑」と読んだ ── 割った瞬間から
+   *   **毎晩静かに緑**になる、いちばん気づけない壊れ方だった。
+   */
+  it('🔴 needs の形(result)を 4 値とも数える', () => {
+    expect(
+      unmetSteps(
+        json({
+          smoke_headless_shell: { result: 'success' },
+          smoke_chromium: { result: 'failure' },
+          product: { result: 'cancelled' },
+          rust_and_probes: { result: 'skipped' },
+        }),
+      ),
+    ).toEqual(['smoke_chromium:failure', 'product:cancelled', 'rust_and_probes:skipped']);
+  });
+
+  it('🔴 timeout で切られた job(cancelled)を緑にしない ── #695 の当の症状', () => {
+    // job の timeout は `result: cancelled` で来る。ここを緑と読むと、
+    // 「時間切れの晩ほど台帳に出ない」が script 側でもう一度起きる
+    expect(unmetSteps(json({ rust_and_probes: { result: 'cancelled' } }))).toEqual([
+      'rust_and_probes:cancelled',
+    ]);
+  });
+
+  it('needs の形で全部 success なら空(対照群 ── 常に投げる形にしていない)', () => {
+    expect(unmetSteps(json({ a: { result: 'success' }, b: { result: 'success' } }))).toEqual([]);
+  });
+
+  it('🔴 result も outcome も無ければ止まる(渡す形を取り違えたら鳴らす)', () => {
+    // ⚠ 空(`{}`)は「集計の故障」であって良い知らせではない ── 名前を出して落とす
+    expect(() => unmetSteps(json({ product: {} }))).toThrow('product');
+    expect(() => unmetSteps(json({ product: { conclusion: 'success' } }))).toThrow('result');
+  });
+
   it('🔴 空を「緑」と読まない(id を落とすと静かに空になる)', () => {
     expect(() => unmetSteps(json({}))).toThrow('空');
     expect(() => unmetSteps(undefined)).toThrow('空');

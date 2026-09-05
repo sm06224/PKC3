@@ -144,7 +144,15 @@ describe('reducer: lean aggregate', () => {
      *   `viewModeLabel` が `Record<ViewMode, string>` である(足し忘れは tsc が落とす)
      *   ことと、`tests/docs-parity.test.ts` §4-1 の等値 pin が守る。
      */
+    /**
+     * 🔴 **この門が、#721 の `whileTyping` を安全にしている**(2026-09-05)。
+     * 集計は打鍵中でも鍵(`Mod+Alt+2`)で呼べるようになったので、⚠ ここを外すと
+     * **編集中に押したら本文が画面から消える**(打ちかけの下書きは残るが、user は
+     * 消えたと読む)。名乗りの一覧は `tests/features/keymap.test.ts` が
+     * 「断る門が在る面だけ」として pin している。
+     */
     const refused = reduce(s, { type: 'SET_VIEW_MODE', mode: 'query' }).state;
+    expect(refused.viewMode, '編集中なのに集計が開いた').toBe('detail');
     expect(refused.error, '黙って捨てている(無言の dead click)').toBe(
       '編集中は集計を開けません(保存するか、取り消してください)',
     );

@@ -10,6 +10,8 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { codeOnly as stripComments } from './helpers/code-only';
+// ⚠ 配色の正本(#718)── `index.html` の inline script が持つ写しを突き合わせる
+import { THEMES, THEME_STORAGE_KEY, initialTheme } from '../src/adapter/ui/render/theme';
 
 /**
  * 追跡対象のテキスト file を集める(生成物・依存は見ない)。
@@ -1084,11 +1086,13 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     //    「情報」で本文に重なり、もう一度で閉じる・探す欄に 8 字 / 対照群 1440×900 は 3 列のまま)
     //    ⚠ 実測は +2 件(担当が止まった時点の作業を拾ったので、注記の 3 件と食い違う ──
     //    数えたのは実測のほう)
-    expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(84);
+    // ⚠ 2026-09-05(#718): `theme-boot.smoke.spec.ts` を足して **+1 file / +1 件**
+    //    (起動の一瞬だけ白くなる、は `dist` を配って実ブラウザでしか見えない)
+    expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(85);
     expect(
       counts.reduce((a, b) => a + b, 0),
       'smoke の test が増減した(足したらこの数を直す)',
-    ).toBe(452);
+    ).toBe(453);
   });
 });
 
@@ -1118,5 +1122,86 @@ describe('\u{1f534} 生成物を追跡しない(2026-08-29)', () => {
       junk,
       '中間生成物が commit されている ── .gitignore に入れて git rm -r --cached すること',
     ).toEqual([]);
+  });
+});
+
+/**
+ * \u{1f534} **起動より前に配色を当てる inline script**(#718)。
+ *
+ * ## なぜ「写し」を許して、その代わり検査を置くのか
+ *
+ * 焼いたマニュアル(`features/help/manual-page.ts` の `themeBootScript`)は同じ倒し方を
+ * **`tokens.css` から生成**しているので写しを持たない。⚠ `index.html` は vite が
+ * そのまま配る**素の HTML** なので生成の口が無く、配色の id と保存の鍵は
+ * `theme.ts` の写しになる。
+ *
+ * \u{1f511} **写しは、機械が突き合わせている所にだけ置いてよい**(CLAUDE.md §7)。
+ * ⚠ ずれたときの症状は「**その配色を選んだ人だけ、起動の一瞬だけ違う色**」なので、
+ *   人の目には永久に見つからない。
+ */
+describe('\u{1f534} 起動より前に配色を当てる(#718)', () => {
+  /** `<head>` の inline script の中身。⚠ **1 本しか無いこと**も併せて見る。 */
+  const bootScript = (): string => {
+    const found = [...readFileSync('index.html', 'utf-8').matchAll(/<script>([\s\S]*?)<\/script>/g)]
+      .map((m) => m[1]!);
+    expect(found.length, 'index.html の inline script が 1 本ではない').toBe(1);
+    return found[0]!;
+  };
+
+  it('\u{1f534} 保存の鍵と OS の問い合わせを、字で持っている', () => {
+    const s = bootScript();
+    // ⚠ 鍵は `theme.ts` の正本と**等値**で突き合わせる(字を書き写さない)
+    expect(s, '保存の鍵が theme.ts と違う').toContain(`'${THEME_STORAGE_KEY}'`);
+    expect(s, 'OS の配色を見ていない').toContain('prefers-color-scheme: dark');
+    expect(s, '属性を立てていない').toContain("setAttribute('data-pkc-theme'");
+  });
+
+  /**
+   * \u{1f534} **読むだけで書かない**(`theme.ts` の M-7)── ここで保存すると
+   *   「一度も選んでいないのに初回起動時の OS 設定で固定される」が再発する。
+   * ⚠ その壊れ方は **OS の設定を戻した日にしか現れない**ので、smoke では捕まらない。
+   */
+  it('\u{1f534} 読むだけで、保存しない', () => {
+    expect(bootScript(), 'inline script が localStorage へ書いている').not.toContain('setItem');
+  });
+
+  it('\u{1f534} 受ける配色の id が、theme.ts の一覧と 1 対 1', () => {
+    const list = /var ok = \[([\s\S]*?)\];/.exec(bootScript())?.[1] ?? '';
+    const ids = [...list.matchAll(/'([^']+)'/g)].map((m) => m[1]!);
+    // 空振り防止 ── 取り出しに失敗したら 0 件になり、下の比較が「両方空」で通る
+    expect(ids.length, '配色の id を 1 件も取り出せていない').toBeGreaterThan(0);
+    expect([...ids].sort()).toEqual(THEMES.map((t) => t.id).sort());
+  });
+
+  /**
+   * \u{1f534} **答えが `initialTheme()` と一致する**(字面ではなく**振る舞い**で見る)。
+   *
+   * ⚠ 上の 3 つは全部**字面**の検査なので、「それらしい字が在るのに答えが違う」を
+   *   見られない(CLAUDE.md §1「期待値は別の観測から作る」)。
+   * \u{1f511} だから script をそのまま走らせて、**実装の `initialTheme()` と突き合わせる**。
+   */
+  it('\u{1f534} 走らせた答えが initialTheme() と一致する(保存あり / 無し / 壊れた値)', () => {
+    const run = (stored: string | null, prefersDark: boolean): string => {
+      const attrs = new Map<string, string>();
+      const doc = {
+        documentElement: {
+          setAttribute: (k: string, v: string) => void attrs.set(k, v),
+        },
+      };
+      const store = new Map<string, string>();
+      if (stored !== null) store.set(THEME_STORAGE_KEY, stored);
+      new Function('localStorage', 'matchMedia', 'document', bootScript())(
+        { getItem: (k: string) => store.get(k) ?? null },
+        (q: string) => ({ matches: prefersDark && q.includes('dark') }),
+        doc,
+      );
+      return attrs.get('data-pkc-theme') ?? '';
+    };
+    for (const prefersDark of [true, false]) {
+      // ① 保存が無い ② 選んである ③ 壊れた値(= 知らない配色)
+      expect(run(null, prefersDark)).toBe(initialTheme(prefersDark));
+      expect(run('solarized', prefersDark)).toBe('solarized');
+      expect(run('nosuchtheme', prefersDark)).toBe(initialTheme(prefersDark));
+    }
   });
 });

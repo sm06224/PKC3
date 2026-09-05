@@ -370,6 +370,79 @@ describe('画面への配線', () => {
     expect(d.getState().viewMode).toBe('help');
   });
 
+  /**
+   * 🔴 **打っている最中でも面へ移れる 2 つ目の既定**(#721。cowork 評価レポート
+   * 「mac で ⌥+1 / ⌥+2 / ⌥+6 が字を打っている間に効かない」)。
+   *
+   * ⚠ 元の `Alt+<数字>` は**仕様どおり止まる**(mac では `⌥2` が記号を打つ)ので、
+   *   直すのは門ではなく**入口の数**である ── `Mod` を足した和音を別名で足した。
+   * 🔑 **対照群を同じ it に置く**(CLAUDE.md §1)── 「`Alt+2` は止まる」を併せて
+   *   見ないと、門ごと壊れた回と区別が付かない。
+   * ⚠ ここは**打鍵中(絞り込み欄などに打っている)** の話で、**本文の編集中**とは別。
+   *   編集中の集計は reducer が声に出して断る(`tests/adapter/state.test.ts`)。
+   */
+  it('🔴 打鍵中は Alt+数字 が止まり、Mod+Alt+数字 が通る(#721)', () => {
+    const { root, d } = mounted();
+    const ta = document.createElement('textarea');
+    // ⚠ 本文の編集欄ではなく**ただの打つ欄**にする ── 編集中かどうかは phase が持つ
+    ta.setAttribute('data-pkc-field', 'entry-filter');
+    root.append(ta);
+
+    // ① 既定のまま(`Alt+2`)── 打鍵中は止まる。これは仕様である
+    press('2', { code: 'Digit2', altKey: true }, ta);
+    expect(d.getState().viewMode, 'Alt+2 が打鍵中に通った(本文に記号が入る)').toBe('detail');
+
+    // ② 2 つ目の既定(`Mod+Alt+2`)── 打鍵中でも通る
+    press('2', { code: 'Digit2', altKey: true, ctrlKey: true }, ta);
+    expect(d.getState().viewMode, 'Mod+Alt+2 が打鍵中に効かない(#721 が直っていない)').toBe(
+      'query',
+    );
+
+    // ③ 本文へ戻る道も同じ(`Mod+Alt+1`)── 集計から打鍵中に帰れる
+    press('1', { code: 'Digit1', altKey: true, ctrlKey: true }, ta);
+    expect(d.getState().viewMode, 'Mod+Alt+1 で本文へ戻れない').toBe('detail');
+
+    // ④ 対照群 ── `Alt+1` は打鍵中に止まったまま(既定をずらしていない)
+    press('2', { code: 'Digit2', altKey: true, ctrlKey: true }, ta);
+    press('1', { code: 'Digit1', altKey: true }, ta);
+    expect(d.getState().viewMode, 'Alt+1 が打鍵中に通った').toBe('query');
+
+    /**
+     * 🔴 **⑤ 既定は「足した」のであって「置き換えた」のではない**(変異試験 N5)。
+     * ⚠ ここを見ないと、`defaults` を `['Mod+Alt+2']` へ**差し替える**変異が生き延びる
+     *   ── 体で覚えた `Alt+2` と、保存済みの割当が黙ってずれる(#241 段⑥-a)。
+     * 🔑 打っていないとき(欄の外)は、元の `Alt+<数字>` がこれまでどおり効く。
+     */
+    press('1', { code: 'Digit1', altKey: true, ctrlKey: true }, ta);
+    press('2', { code: 'Digit2', altKey: true }); // ⚠ 欄を渡さない = 打っていない
+    expect(d.getState().viewMode, 'Alt+2 が効かなくなった(既定を置き換えている)').toBe('query');
+  });
+
+  /**
+   * 🔴 **2 ペインも同じ形**(#721。変異試験 N4 が生き延びて足した)。
+   * ⚠ `view-dual` は元から `whileTyping` を名乗っていたが、既定の `Alt+6` は
+   *   文字を打つ鍵なので**門で止まっていた** ── 名乗りだけでは通らない、の実例。
+   */
+  it('🔴 打鍵中でも Mod+Alt+6 で 2 ペインが開く(#721)', () => {
+    const { root, d } = mounted();
+    const ta = document.createElement('textarea');
+    ta.setAttribute('data-pkc-field', 'entry-filter');
+    root.append(ta);
+
+    // 対照群 ── 元の `Alt+6` は打鍵中に止まる(仕様。既定はずらしていない)
+    press('6', { code: 'Digit6', altKey: true }, ta);
+    expect(d.getState().viewMode, 'Alt+6 が打鍵中に通った').toBe('detail');
+
+    press('6', { code: 'Digit6', altKey: true, ctrlKey: true }, ta);
+    expect(d.getState().viewMode, 'Mod+Alt+6 が打鍵中に効かない').toBe('dual');
+
+    // ⚠ 打っていないときの `Alt+6` は これまでどおり効く(置き換えていない)
+    press('6', { code: 'Digit6', altKey: true, ctrlKey: true }, ta); // 本文へ戻す
+    expect(d.getState().viewMode).toBe('detail');
+    press('6', { code: 'Digit6', altKey: true });
+    expect(d.getState().viewMode, 'Alt+6 が効かなくなった(既定を置き換えている)').toBe('dual');
+  });
+
   it('打鍵中でも効かせると名乗ったものは効く(F1 / ペインの開閉)', () => {
     const { root, d } = mounted();
     const ta = document.createElement('textarea');
@@ -947,6 +1020,18 @@ describe('近道の受け手と、打鍵中の免除(等値で pin する)', () 
       // ⚠ 2026-08-25 に足した(雛形の一覧 ── 同じく編集中の本文へ挿す)
       'insert-snippet',
       'toggle-replace',
+      /**
+       * ⚠ 2026-09-05 に足した(#721 ── cowork 評価レポート「mac で ⌥+1 / ⌥+2 が
+       *   字を打っている間に効かない」)。⚠ **別名(`Mod+Alt+1` / `Mod+Alt+2`)を
+       *   足すだけでは効かない** ── 門は「名乗る **かつ** 和音が文字を打たない」の
+       *   2 条件なので、名乗りが要る。
+       * 🔑 `view-detail` は**編集の面そのもの**へ戻る道(reducer の「本文へ戻る道は
+       *   塞がない」)/ `view-query` は**打鍵中 ≠ 編集中**(絞り込み欄に打っている
+       *   間は開いてよい。本文の編集中は reducer が声に出して断る ──
+       *   `tests/adapter/state.test.ts`「編集中は集計を開けません」)。
+       */
+      'view-detail',
+      'view-query',
       'open-settings',
       'open-flags',
       // ⚠ 2026-08-26 に足した(#425 段① ── **編集中こそ**操作を名前で呼びたい)

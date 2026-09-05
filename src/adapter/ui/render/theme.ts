@@ -109,6 +109,28 @@ export function otherTheme(theme: Theme): Theme {
  */
 export function applyTheme(target: HTMLElement, theme: Theme): void {
   target.setAttribute('data-pkc-theme', theme);
+  syncThemeColor(target);
+}
+
+/**
+ * 🔴 **ブラウザの枠の色を、いまの配色に合わせる**(#718)。
+ *
+ * ⚠ `index.html` の `<meta name="theme-color">` は **1 つの固定値**だった ──
+ *   ライト系の配色を選んでも、Android の Chrome / iOS の PWA では帯だけが暗いまま
+ *   残る(user から見ると**アプリの上端だけ色が違う**)。
+ * 🔑 **固定値を持たない** ── `tokens.css` の `--bg` を読んで写す。色の正本は
+ *   `tokens.css` 1 か所である、という規約をここでも破らない
+ *   (ここに 9 色の表を持つと、配色を足した日に**ここだけ古くなる**)。
+ * ⚠ 読むのは**属性を立てた後**(上の 1 行)── 前だと 1 つ前の配色の色を写す。
+ * ⚠ `<meta>` が無い document(test の素の器 / 焼いた HTML)では**何もしない** ──
+ *   器を新しく作らない(作ると、書き出した HTML に身に覚えのない `<meta>` が増える)。
+ */
+function syncThemeColor(target: HTMLElement): void {
+  const doc = target.ownerDocument;
+  const meta = doc.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+  if (meta === null) return;
+  const bg = doc.defaultView?.getComputedStyle(target).getPropertyValue('--bg').trim() ?? '';
+  if (bg !== '') meta.content = bg;
 }
 
 /**

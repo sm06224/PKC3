@@ -101,6 +101,45 @@ Agent({ subagent_type: 'pkc3-surveyor', prompt: '…patch を返せ(file は書�
 ⚠ hook が設定されて worktree が使えるようになったら、**実装は隔離側へ戻す**
 (そちらは test まで走らせられるので上位互換である)。
 
+### 🔴 再開した agent は、worktree を持っていないことがある(2026-09-05)
+
+利用制限などで止まった agent を**再開**すると、**worktree がもう無い**ことがある ──
+そして **cwd は依頼者の本体ツリーへ戻っている**。⚠ agent 側からは何も変わって見えない
+(`ls` は通るし、file も読める)ので、**そのまま本体を書き換える**。
+
+🔑 **再開の依頼文に、必ずこの 3 行を書く**:
+
+```
+まず `pwd` と `git worktree list` で自分の worktree を確かめる。
+自分の worktree が一覧に無ければ、**何も書かずに**その旨を報告して止まる。
+以後すべての命令を `cd <自分の worktree の絶対 path> && …` で始める。
+```
+
+⚠ **3 行目は「あったら親切」ではない** ── この箱は
+**bash 呼び出しごとに cwd が `/home/user` へ戻る**ことがある
+(`.claude/skills/sandbox-hygiene/SKILL.md`)。1 回でも戻れば、
+そこから先の書き換えは**依頼者のツリー**に当たる。
+
+### 🔴 依頼文に「作業ツリーを巻き戻す命令」を書かない(2026-09-05。**依頼者の 4 commit を失った**)
+
+再開した agent が **worktree を失った状態で本体のツリーに `git reset --hard` を打ち**、
+**依頼者の commit 4 本を巻き戻した**(`git reflog` で復元した)。
+⚠ agent は**依頼文に書いてあったとおりに実行した** ── 悪いのは依頼文である。
+
+🚫 **依頼文に書いてはいけない命令**(退避・後始末の文脈でも):
+
+| 書かない | 代わりに |
+|---|---|
+| `git reset --hard` | **書かない。** 要らない変更は `git checkout -- <file>` ですらなく、**`cp` で取った控えを戻す** |
+| `git checkout <branch>` / `git switch` | **書かない**(worktree を持つ agent は既に正しい枝に居る) |
+| `git clean -fd` | **書かない**(scratchpad へ置かせる) |
+
+🔑 **退避と復元は `cp` に閉じる。** 変異試験のハーネスも同じ規律である
+(`.claude/skills/mutation-testing/SKILL.md`「`git checkout` で戻さない」)。
+⚠ **理由まで書く** ── 「危ないから」ではなく
+「**worktree が消えていたら、その命令は依頼者のツリーに当たる**」と書けば、
+agent 側でも条件を検算できる(CLAUDE.md「戒めには何のための禁止かを書く」)。
+
 ## 2. 投げ方 ── プロンプトに必ず入れる 5 つ
 
 1. **範囲を確定する** ── 「この PR」ではなく `git diff <base>..HEAD` の base を書く
