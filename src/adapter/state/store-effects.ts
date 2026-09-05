@@ -340,6 +340,47 @@ export function connectStoreEffects(
   };
 
   /**
+   * 🔴 **いま飛んでいる書込の後ろで走らせる。ただし列には積まない**
+   *   (2026-09-05、着地前レビュー 2-A)。
+   *
+   * 面のための走査に要るのは「**頼んだ時点で飛んでいた書込より後に読む**」だけである。
+   * ⚠ `enqueue` に載せると、それ以上のものまで買ってしまう ── 走査が
+   *   **列の一員**になるので、
+   *   ① **後から積まれた保存が走査の後ろに固定される**
+   *   ② 🔴 **`settled()` が走査を待つ**(`settled` は chain 全体を待つ)。
+   *      `settled()` を待つのは書き出しだけではない ── **「編集」を押した瞬間**
+   *      (`binder.ts` の `beginEdit`)も待つので、「予定」タブを開いた直後に
+   *      「編集」を押すと、**全件走査 1 往復ぶん入力欄が出ない**。
+   * 🔑 だから**その時点の列の末尾だけを待って、列の外で走らせる**。
+   *   得られる保証は同じで、①②を買わずに済む。
+   * ⚠ **書込には使わない**(書込は順序そのものが要るので `enqueue`)。
+   */
+  const afterWrites = (op: () => Promise<void>): void => {
+    const tail = queue;
+    void tail.then(op, op);
+  };
+
+  /**
+   * 🔴 **同じ走査が待っているなら、積み増さない**(`REQUEST_SMART_SCAN` の
+   *   `queuedScans` と同じ作法 ── #421 段②)。
+   *
+   * ⚠ 連射する経路が実在する:別タブの書込は 300ms 束ねで `SYS_BOOTED` を撃ち、
+   *   そこで予定・連絡先・集計を**毎回**頼み直す(`app-state.ts`)。畳まないと
+   *   **全件走査が秒に何本も**飛ぶ。
+   * 🔑 **走り出したら鍵を外す** ── 走っている最中に届いた書込は、その走査が
+   *   読み逃しているので、次の 1 本は積む必要がある。
+   */
+  const pendingScans = new Set<string>();
+  const scanAfterWrites = (key: string, op: () => Promise<void>): void => {
+    if (pendingScans.has(key)) return;
+    pendingScans.add(key);
+    afterWrites(async () => {
+      pendingScans.delete(key);
+      await op();
+    });
+  };
+
+  /**
    * 🔑 **書込が返した時刻を state へ流す**(P9 段①)。
    *
    * ⚠ `persistEntry` を呼ぶ**すべての経路**がこれを通ること ── 通し忘れた経路だけ
@@ -546,15 +587,22 @@ export function connectStoreEffects(
         //    「参照しているノート」は付随情報で、操作は止まっていない
         if (!ask) break;
         const lid = ev.lid;
-        void ask(lid).then(
-          (r) => {
-            if (disposed) return;
-            dispatcher.dispatch({ type: 'BACKLINKS_LOADED', lid, ...r });
-          },
-          () => {
+        /**
+         * 🔴 **書込の後ろで走らせる**(2026-09-05、着地前レビュー ①-A)。
+         * ⚠ 直す前は列の外で撃っていたので、**保存の直後に別のノートを選ぶと、
+         *   いま書いた `[[…]]` が参照元に出なかった** ── しかも撃ち直しは
+         *   「選びが動いたとき」しか来ないので、**選び直すまで戻らない**。
+         * 🔑 畳み込みの鍵に lid を含める(A→B→A と押しても、A の 1 本は残す)。
+         */
+        scanAfterWrites(`backlinks:${lid}`, async () => {
+          if (disposed) return;
+          try {
+            const r = await ask(lid);
+            if (!disposed) dispatcher.dispatch({ type: 'BACKLINKS_LOADED', lid, ...r });
+          } catch {
             /* ⚠ 失敗しても黙る(付随情報なので、user の操作は止まっていない) */
-          },
-        );
+          }
+        });
         break;
       }
       /**
@@ -730,10 +778,19 @@ export function connectStoreEffects(
        * 🔴 **そして戻らない** ── これらの走査は「面を開いたとき 1 回」しか走らないので、
        *   古い答えがそのまま居座る。user から見ると「**保存したのに予定に出てこない**」で、
        *   もう一度その面を開き直すまで直らない。
-       * 🔑 だから**載せる**(`REQUEST_SMART_SCAN` / `REQUEST_LAUNCHER_TILES` と同じ)。
-       * ⚠ **打鍵で走るもの**(`REQUEST_SEARCH` / `REQUEST_SEARCH_DETAIL` /
-       *   `REQUEST_BACKLINKS`)は載せない ── あちらは撃ち直しが常に来るので
-       *   古い答えは次の 1 手で消える。載せると保存がその後ろに詰まる。
+       * 🔑 だから**書込の後ろで走らせる**(`scanAfterWrites`)。
+       * ⚠ **打鍵で走るもの**(`REQUEST_SEARCH` / `REQUEST_SEARCH_DETAIL`)は
+       *   そのまま列の外で撃つ ── あちらは**次の打鍵が撃ち直す**ので古い答えは
+       *   1 手で消える(`REQUEST_SEARCH` は 1 打ごと、`REQUEST_SEARCH_DETAIL` は
+       *   止まってから 1 回)。
+       * 🔴 ⚠ **`REQUEST_BACKLINKS` は「打鍵で走るもの」ではない**
+       *   (2026-09-05、着地前レビュー ①-A で判明。直す前はここに名前を並べていた)──
+       *   撃つのは **`SELECT_ENTRY` で選びが動いた 1 回だけ**(`app-state.ts`)で、
+       *   撃ち直しは来ない。⚠ しかも**同じ 1 回の選択で本文は `enqueue` に載っている**
+       *   ので、直す前は「本文は保存後・参照元は保存前」という食い違いが出ていた。
+       *   だから**これも書込の後ろで走らせる**。
+       * ⚠ 名前を並べただけの理由は、**次に読む人が検算しない**(「検討して外した」に
+       *   見える)── 分類を書くときは、その口を**誰が撃つか**を 1 度読む。
        */
       case 'REQUEST_QUERY_SCAN': {
         const ask = store.queryScan;
@@ -748,7 +805,7 @@ export function connectStoreEffects(
           break;
         }
         const key = ev.key;
-        enqueue(async () => {
+        scanAfterWrites(`query:${key}`, async () => {
           if (disposed) return;
           try {
             const out = await ask(key);
@@ -783,7 +840,7 @@ export function connectStoreEffects(
          *   書込を追い越すと**付けたばかりのタグが候補に出ない**まま居座る。
          */
         // 🔑 綴りは `TAGS_KEY` 1 か所(#550 段④ ── 候補と集計が同じ組を見る)
-        enqueue(async () => {
+        scanAfterWrites('tags', async () => {
           if (disposed) return;
           try {
             const out = await ask(TAGS_KEY);
@@ -821,8 +878,8 @@ export function connectStoreEffects(
           dispatcher.dispatch({ type: 'TASK_SCAN_FAILED' });
           break;
         }
-        // 🔑 **列に載せる**(上の docstring ── この面がまさに 0 枚で止まった)
-        enqueue(async () => {
+        // 🔑 **書込の後ろで走らせる**(上の docstring ── この面がまさに 0 枚で止まった)
+        scanAfterWrites('task', async () => {
           if (disposed) return;
           try {
             const scan = await ask();
@@ -845,8 +902,8 @@ export function connectStoreEffects(
           dispatcher.dispatch({ type: 'CONTACT_SCAN_FAILED' });
           break;
         }
-        // 🔑 **列に載せる**(予定と同じ ── 上の docstring)
-        enqueue(async () => {
+        // 🔑 **書込の後ろで走らせる**(予定と同じ ── 上の docstring)
+        scanAfterWrites('contact', async () => {
           if (disposed) return;
           try {
             const scan = await ask();
@@ -869,8 +926,8 @@ export function connectStoreEffects(
           dispatcher.dispatch({ type: 'SET_SNIPPET_SCAN', scan: null });
           break;
         }
-        // 🔑 **列に載せる**(予定と同じ ── 上の docstring)
-        enqueue(async () => {
+        // 🔑 **書込の後ろで走らせる**(予定と同じ ── 上の docstring)
+        scanAfterWrites('snippet', async () => {
           if (disposed) return;
           try {
             const scan = await askSnippets();

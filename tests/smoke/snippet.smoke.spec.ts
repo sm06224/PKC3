@@ -6,6 +6,7 @@ import {
   collectPageErrors,
   useSplitEditor,
   recordStoreOps,
+  resetStoreOps,
   waitForStoreOp,
 } from './helpers';
 
@@ -39,17 +40,18 @@ test('🔴 雛形を作って、短縮語 + Tab で本文に挿せる (#196)', a
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
   // ② 普通のノートを作って、短縮語を打つ
-  await createEntry(page, 'text');
   /**
    * 🔴 **雛形が届くのを待つ**(2026-09-05)。⚠ **待ちを伸ばしたのではない** ──
-   *   走査が書込の列に載ったので、届くのは「編集を開いた瞬間」ではなく
+   *   走査が書込の後ろで走るようになったので、届くのは「編集を開いた瞬間」ではなく
    *   **並んでいる書込が着地した後**になった(実測 36ms)。ここで待たないと、
    *   `Tab` を**一覧が空のうちに**押すことになり、以後は何も起きない
    *   (`Tab` は撃ち直しが無い ── 押した 1 回で決まる)。
-   * ⚠ 数えるのは **2 回目**である ── 1 回目は雛形のノートを作った瞬間に走っており、
-   *   そのときの本文はまだ空(短縮語が入っていない)。
+   * 🔑 **回数を当てない** ── 直前で記録を捨てて「この後 1 回」を待つ
+   *   (ここで走るのは、いま開いた編集ぶんの 1 本である)。
    */
-  await waitForStoreOp(page, 'snippetScan', 2);
+  await resetStoreOps(page);
+  await createEntry(page, 'text');
+  await waitForStoreOp(page, 'snippetScan', 1);
   await ta.fill('addr');
   // ⚠ 末尾へカーソルを置く(短縮語は**カーソルの手前**で当たる)
   await ta.press('End');
@@ -123,17 +125,18 @@ test('🔴 雛形を一覧から選ぶと、caret の位置に入る (#196)', as
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
   // ② 普通のノートを作り、**行の途中**に caret を置く
-  await createEntry(page, 'text');
   /**
    * 🔴 **雛形が届くのを待つ**(2026-09-05)。⚠ **待ちを伸ばしたのではない** ──
-   *   走査が書込の列に載ったので、届くのは「編集を開いた瞬間」ではなく
+   *   走査が書込の後ろで走るようになったので、届くのは「編集を開いた瞬間」ではなく
    *   **並んでいる書込が着地した後**になった(実測 36ms)。ここで待たないと、
    *   `Tab` を**一覧が空のうちに**押すことになり、以後は何も起きない
    *   (`Tab` は撃ち直しが無い ── 押した 1 回で決まる)。
-   * ⚠ 数えるのは **2 回目**である ── 1 回目は雛形のノートを作った瞬間に走っており、
-   *   そのときの本文はまだ空(短縮語が入っていない)。
+   * 🔑 **回数を当てない** ── 直前で記録を捨てて「この後 1 回」を待つ
+   *   (ここで走るのは、いま開いた編集ぶんの 1 本である)。
    */
-  await waitForStoreOp(page, 'snippetScan', 2);
+  await resetStoreOps(page);
+  await createEntry(page, 'text');
+  await waitForStoreOp(page, 'snippetScan', 1);
   await ta.fill('まえ\nうしろ');
   await ta.evaluate((el) => {
     (el as HTMLTextAreaElement).setSelectionRange(3, 3);

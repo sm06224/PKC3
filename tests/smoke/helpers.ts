@@ -41,12 +41,29 @@ export async function recordStoreOps(page: Page): Promise<void> {
     Worker.prototype.postMessage = function (this: Worker, msg: unknown, ...rest: unknown[]) {
       const op = (msg as { req?: { op?: string } } | null)?.req?.op;
       const id = (msg as { id?: unknown } | null)?.id;
-      if (typeof op === 'string')
-        this.addEventListener('message', (e: MessageEvent) => {
-          if ((e.data as { id?: unknown } | null)?.id === id) seen.push(op);
-        });
+      if (typeof op === 'string') {
+        // ⚠ 当たったら外す ── 外さないと応答 1 件ごとに全部走る(O(n²))
+        const onMsg = (e: MessageEvent): void => {
+          if ((e.data as { id?: unknown } | null)?.id !== id) return;
+          seen.push(op);
+          this.removeEventListener('message', onMsg);
+        };
+        this.addEventListener('message', onMsg);
+      }
       return (orig as (...a: unknown[]) => unknown).call(this, msg, ...(rest as []));
     } as typeof Worker.prototype.postMessage;
+  });
+}
+
+/**
+ * 🔑 **ここまでの記録を捨てる**(着地前レビュー 2-E)。
+ * ⚠ 「この後 1 回」を待つために使う ── **回数を当てない**。
+ *   `2` のような当て番号は、間に 1 回増えた日に**理由の読めない赤**になる。
+ */
+export async function resetStoreOps(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const seen = (window as unknown as { __pkcStoreOps?: string[] }).__pkcStoreOps;
+    if (seen !== undefined) seen.length = 0;
   });
 }
 
