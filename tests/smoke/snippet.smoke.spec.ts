@@ -1,5 +1,14 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
+import {
+  gotoApp,
+  clickReal,
+  createEntry,
+  collectPageErrors,
+  useSplitEditor,
+  recordStoreOps,
+  resetStoreOps,
+  waitForStoreOp,
+} from './helpers';
 
 test.beforeEach(async ({ page }) => {
   await useSplitEditor(page);
@@ -19,6 +28,8 @@ test.beforeEach(async ({ page }) => {
 test('🔴 雛形を作って、短縮語 + Tab で本文に挿せる (#196)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
+  // ⚠ 仕掛けは goto の**前**(init script)
+  await recordStoreOps(page);
   await gotoApp(page);
 
   // ① 雛形を 1 件作る(⚠ user と同じ手順 ── 種類を選んでから本体を押す)
@@ -29,7 +40,18 @@ test('🔴 雛形を作って、短縮語 + Tab で本文に挿せる (#196)', a
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
   // ② 普通のノートを作って、短縮語を打つ
+  /**
+   * 🔴 **雛形が届くのを待つ**(2026-09-05)。⚠ **待ちを伸ばしたのではない** ──
+   *   走査が書込の後ろで走るようになったので、届くのは「編集を開いた瞬間」ではなく
+   *   **並んでいる書込が着地した後**になった(実測 36ms)。ここで待たないと、
+   *   `Tab` を**一覧が空のうちに**押すことになり、以後は何も起きない
+   *   (`Tab` は撃ち直しが無い ── 押した 1 回で決まる)。
+   * 🔑 **回数を当てない** ── 直前で記録を捨てて「この後 1 回」を待つ
+   *   (ここで走るのは、いま開いた編集ぶんの 1 本である)。
+   */
+  await resetStoreOps(page);
   await createEntry(page, 'text');
+  await waitForStoreOp(page, 'snippetScan', 1);
   await ta.fill('addr');
   // ⚠ 末尾へカーソルを置く(短縮語は**カーソルの手前**で当たる)
   await ta.press('End');
@@ -91,6 +113,8 @@ test('🔴 短縮語が当たらない Tab は、これまでどおり次へ移�
 test('🔴 雛形を一覧から選ぶと、caret の位置に入る (#196)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
+  // ⚠ 仕掛けは goto の**前**(init script)
+  await recordStoreOps(page);
   await gotoApp(page);
 
   // ① 雛形を 1 件作る
@@ -101,7 +125,18 @@ test('🔴 雛形を一覧から選ぶと、caret の位置に入る (#196)', as
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
   // ② 普通のノートを作り、**行の途中**に caret を置く
+  /**
+   * 🔴 **雛形が届くのを待つ**(2026-09-05)。⚠ **待ちを伸ばしたのではない** ──
+   *   走査が書込の後ろで走るようになったので、届くのは「編集を開いた瞬間」ではなく
+   *   **並んでいる書込が着地した後**になった(実測 36ms)。ここで待たないと、
+   *   `Tab` を**一覧が空のうちに**押すことになり、以後は何も起きない
+   *   (`Tab` は撃ち直しが無い ── 押した 1 回で決まる)。
+   * 🔑 **回数を当てない** ── 直前で記録を捨てて「この後 1 回」を待つ
+   *   (ここで走るのは、いま開いた編集ぶんの 1 本である)。
+   */
+  await resetStoreOps(page);
   await createEntry(page, 'text');
+  await waitForStoreOp(page, 'snippetScan', 1);
   await ta.fill('まえ\nうしろ');
   await ta.evaluate((el) => {
     (el as HTMLTextAreaElement).setSelectionRange(3, 3);
