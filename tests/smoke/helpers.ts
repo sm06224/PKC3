@@ -35,17 +35,33 @@ export async function recordStoreOps(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const w = window as unknown as Record<string, unknown>;
     if (w.__pkcStoreOps !== undefined) return;
-    const seen: string[] = [];
+    /**
+     * 🔴 **頼んだ順番も採る**(2026-09-05、#708 段②の担当がフル走行で拾った)。
+     *
+     * ⚠ 直す前は**返ってきた op の名前だけ**を並べていた ── ところが走査は
+     *   書込の後ろで走るので、**前の場面で頼んだ走査が、いま捨てた記録の後に
+     *   返ってくる**ことがある。すると「この後 1 回」の待ちが**古い 1 本**で
+     *   満たされ、まだ届いていないのに先へ進む(CLAUDE.md §1 の「救い手が
+     *   別に居る」の時間版)。
+     * 🔑 だから**頼んだ時点の通し番号**を持たせ、`resetStoreOps` は
+     *   「ここまでに頼んだ分」を印にする ── 待つのは**印より後に頼まれた**往復だけ。
+     */
+    let asked = 0;
+    const seen: { op: string; seq: number }[] = [];
     w.__pkcStoreOps = seen;
+    w.__pkcStoreOpsMark = 0;
     const orig = Worker.prototype.postMessage;
     Worker.prototype.postMessage = function (this: Worker, msg: unknown, ...rest: unknown[]) {
       const op = (msg as { req?: { op?: string } } | null)?.req?.op;
       const id = (msg as { id?: unknown } | null)?.id;
       if (typeof op === 'string') {
+        asked += 1;
+        w.__pkcStoreOpsAsked = asked;
+        const seq = asked;
         // ⚠ 当たったら外す ── 外さないと応答 1 件ごとに全部走る(O(n²))
         const onMsg = (e: MessageEvent): void => {
           if ((e.data as { id?: unknown } | null)?.id !== id) return;
-          seen.push(op);
+          seen.push({ op, seq });
           this.removeEventListener('message', onMsg);
         };
         this.addEventListener('message', onMsg);
@@ -56,24 +72,35 @@ export async function recordStoreOps(page: Page): Promise<void> {
 }
 
 /**
- * 🔑 **ここまでの記録を捨てる**(着地前レビュー 2-E)。
+ * 🔑 **ここまでを印にする**(着地前レビュー 2-E / 2026-09-05 の追い直し)。
  * ⚠ 「この後 1 回」を待つために使う ── **回数を当てない**。
  *   `2` のような当て番号は、間に 1 回増えた日に**理由の読めない赤**になる。
+ * 🔴 ⚠ **記録を捨てるのではなく、頼んだ通し番号に印を付ける** ── 捨てるだけだと、
+ *   **印より前に頼まれた走査が後から返って**きたときに「この後 1 回」を満たしてしまう
+ *   (走査は書込の後ろで走るので、返りは遅れる)。
  */
 export async function resetStoreOps(page: Page): Promise<void> {
   await page.evaluate(() => {
-    const seen = (window as unknown as { __pkcStoreOps?: string[] }).__pkcStoreOps;
-    if (seen !== undefined) seen.length = 0;
+    const w = window as unknown as { __pkcStoreOpsAsked?: number; __pkcStoreOpsMark?: number };
+    w.__pkcStoreOpsMark = w.__pkcStoreOpsAsked ?? 0;
   });
 }
 
-/** `recordStoreOps` を仕掛けた頁で、その op が **n 回**返るまで待つ。 */
+/**
+ * `recordStoreOps` を仕掛けた頁で、その op が **n 回**返るまで待つ。
+ * ⚠ 数えるのは **`resetStoreOps` の印より後に頼まれた**往復だけ(上の註記)。
+ */
 export async function waitForStoreOp(page: Page, op: string, n = 1): Promise<void> {
   await page.waitForFunction(
     ([name, want]) => {
-      const seen = (window as unknown as { __pkcStoreOps?: string[] }).__pkcStoreOps;
+      const w = window as unknown as {
+        __pkcStoreOps?: { op: string; seq: number }[];
+        __pkcStoreOpsMark?: number;
+      };
+      const seen = w.__pkcStoreOps;
       if (seen === undefined) return false;
-      return seen.filter((o) => o === name).length >= (want as number);
+      const mark = w.__pkcStoreOpsMark ?? 0;
+      return seen.filter((o) => o.op === name && o.seq > mark).length >= (want as number);
     },
     [op, n] as [string, number],
     { timeout: 15_000 },
