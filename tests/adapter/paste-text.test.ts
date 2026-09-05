@@ -481,4 +481,59 @@ describe('貼付の切替(設定)と診断(フラグ)', () => {
     expect(seen, '止めたときに何も言っていない').toHaveLength(1);
     expect(seen[0]).toContain('変換しない');
   });
+
+  /**
+   * 🔴 **実物どうしが繋がっているか**(#708 段③、着地前レビュー 🔴2)。
+   *
+   * ⚠ `tests/features/paste-plain-table.test.ts` の順番の検査は**偽の変換器**を
+   *   渡しているので、`binder.ts` の配線を `() => null` に変えても 1 件も落ちない
+   *   (変異試験 M1 が SURVIVED で教えた)── CLAUDE.md §7
+   *   「**A と B が合意していることは、A の test にも B の test にも書けない**」。
+   * 🔑 だから**合意を見る場所をここに 1 つ作る** ── 実物の `choosePaste` +
+   *   実物の `tsvFenceFromPlain` を通し、**欄に入った字**まで見る。
+   */
+  it('🔴 タブ区切りの平文は、実物の配線を通って表の囲みで差さる', () => {
+    const { ta } = setup();
+    const e = pasteEvent({ 'text/plain': '品名\t数\nりんご\t3' });
+    ta.dispatchEvent(e);
+    expect(e.defaultPrevented, '横取りしていない').toBe(true);
+    expect(ta.value, '囲みになっていない').toBe('```tsv\n品名\t数\nりんご\t3\n```');
+  });
+
+  /**
+   * 🔴 **囲みは行頭から差す**(着地前レビュー ⚠8)。
+   *
+   * ⚠ 柵は行頭に無いと柵として読まれない ── `メモ: ` の続きに貼ると、画面には
+   *   `メモ: ```tsv` という 1 つの段落が出て、**閉じの柵が新しい囲みを開く**。
+   * ⚠ この形は `html-fence` の設定にも前から在ったが、平文の貼付は**行の途中で
+   *   起きやすい**ので、この段で当たる頻度が上がる。
+   */
+  it('🔴 行の途中に貼っても、囲みが柵として読まれる', () => {
+    const { ta } = setup();
+    ta.value = 'メモ: ';
+    ta.selectionStart = ta.value.length;
+    ta.selectionEnd = ta.value.length;
+    ta.dispatchEvent(pasteEvent({ 'text/plain': '品名\t数\nりんご\t3' }));
+    expect(ta.value, '柵が行の途中に露出している').toBe(
+      'メモ: \n```tsv\n品名\t数\nりんご\t3\n```',
+    );
+  });
+
+  it('⚠ 行頭に貼るときは、余計な改行を足さない', () => {
+    const { ta } = setup();
+    ta.dispatchEvent(pasteEvent({ 'text/plain': '品名\t数\nりんご\t3' }));
+    expect(ta.value.startsWith('```tsv'), '行頭なのに改行を足した').toBe(true);
+  });
+
+  /**
+   * ⚠ **対照群を同じ場面に置く** ── 置かないと「別の理由で差さった」を次に
+   *   見抜けない。タブの無い平文は**いままでどおり素通り**する。
+   */
+  it('⚠ タブの無い平文は横取りしない(素の貼付に任せる)', () => {
+    const { ta } = setup();
+    const e = pasteEvent({ 'text/plain': 'ふつうの文\nもう 1 行' });
+    ta.dispatchEvent(e);
+    expect(e.defaultPrevented, 'ふつうの文を横取りした').toBe(false);
+    expect(ta.value, '欄に勝手に字を入れた').toBe('');
+  });
 });

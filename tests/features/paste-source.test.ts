@@ -35,6 +35,8 @@ function run(
     source,
     sizes,
     convert: {
+      /** ⚠ ここでは試さない ── 段③ の検査は `paste-plain-table.test.ts` が持つ。 */
+      plainTable: () => null,
       permalink: () => {
         called.push('permalink');
         return have.permalink ?? null;
@@ -109,6 +111,11 @@ describe('自動(既定)', () => {
     expect(r.attempt.skipped).toEqual([
       { kind: 'html', why: '届いていません' },
       { kind: 'rtf', why: '届いていません' },
+      // ⚠ 最後の手(タブ区切りの表)も、外れた理由を残す(#708 段③)
+      {
+        kind: 'plain-table',
+        why: '2 行以上・どの行もタブの数が同じ・タブが 1 つ以上、のどれかを満たしていません',
+      },
     ]);
     expect(r.called).toEqual(['permalink']); // 🔑 1 つも解析していない
   });

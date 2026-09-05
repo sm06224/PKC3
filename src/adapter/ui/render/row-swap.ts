@@ -1408,6 +1408,23 @@ function shrinkTrailingBlank(body: string, start: number, end: number): number {
 }
 
 /** undo に載る形で挿す。⚠ `value` 直代入は取り消せない飾りになる。 */
+/**
+ * 🔴 **囲みは行頭から差す**(#708 段③、着地前レビュー ⚠8)。
+ *
+ * ⚠ 柵(``` / ~~~)は**行頭に無いと柵として読まれない** ── `メモ: ` の続きに
+ *   貼ると、画面には `メモ: ```tsv` という 1 つの段落が出て、**閉じの柵が新しい
+ *   囲みを開く**(実測:空のコードブロックが 1 つ増えた)。
+ * 🔑 だから**差す側で 1 行空ける** ── 判定を呼び側(`binder.ts`)に書くと
+ *   「経路ごとに挙動が違う」形になる(§7)。
+ * ⚠ 直すのは**柵で始まる字だけ** ── ふつうの貼付に改行を足さない。
+ */
+export function insertBlockText(ta: HTMLTextAreaElement, text: string): void {
+  const isFence = /^(?:`{3,}|~{3,})/.test(text);
+  const at = ta.selectionStart ?? ta.value.length;
+  const atLineStart = at === 0 || ta.value[at - 1] === '\n';
+  insertText(ta, isFence && !atLineStart ? `\n${text}` : text);
+}
+
 export function insertText(ta: HTMLTextAreaElement, text: string): void {
   const doc = ta.ownerDocument as Document & {
     execCommand?: (cmd: string, ui?: boolean, value?: string) => boolean;
