@@ -12,12 +12,12 @@
  * 🔑 **pure module**。ここは「どう書き換えるか」だけを決め、いつ・誰が書くかは
  *   effect 層が持つ。⚠ 純関数なので unit で全部試せる。
  */
-import { spliceFrontmatterKeys, type FrontmatterValue } from './frontmatter';
+import { frontmatterLineCount, spliceFrontmatterKeys, type FrontmatterValue } from './frontmatter';
 import { formatLineDate, insertionForLineDate, readLineDate } from '../schedule/line-date';
 import { isScheduleDate } from '../schedule/schedule-date';
 import type { RepeatUnit } from '../schedule/repeat';
 import { removeInsertedLines } from './append-target';
-import { addPlace, movePlace, raisePlace, removePlace, resizePlace } from './place-notation';
+import { addPlace, insideFence, movePlace, raisePlace, removePlace, resizePlace } from './place-notation';
 import { readTags, withTagResult } from '../flavor/tags';
 import { acceptsExternalImage, rewriteAdopted } from '../asset/inline-url-adopt';
 import { DELIMITER, csvEscapeField, parseCsv, type CsvPositions } from './csv-table';
@@ -254,7 +254,56 @@ export type BodyRewrite =
       end: number;
       toBefore: number;
       lines: readonly string[];
+    }
+  | {
+      /**
+       * 🔴 **保存したスタックの中の 1 行を、隣のリンク行と入れ替える**(#633 段④)。
+       *
+       * ⚠ `line` は**原文の行番号**(0 始まり)、`openLine` は**押した時点のその行そのもの** ──
+       *   disk 側と byte 一致しなければ書かない(`place-move` と同じ門。別の窓が行を足していれば
+       *   番号は別の行を指す)。
+       * ⚠ 入れ替える相手も**リンクの箇条書きの行**でなければ動かさない ── 見出しや空行と
+       *   入れ替えると入れ物の形が崩れる。端(上が無い / 下が無い)では**同じ本文を返す**
+       *   (`null` にすると効果層が「本文が変わっている」と嘘の理由を言う ── `place-move` と同じ)。
+       */
+      kind: 'link-move';
+      line: number;
+      openLine: string;
+      dir: 'up' | 'down';
     };
+
+/**
+ * 箇条書きの `entry:` リンクの行か(`- [題名](entry:<lid>)`)。
+ * ⚠ 番号つき(`1.`)も受ける ── 読む側(`bodyLinkTargets`)は印を見ないので、記法を狭めない。
+ */
+const LINK_LINE = /^\s*(?:[-*+]|\d+[.)])\s+\[[^\]]*\]\(entry:[A-Za-z0-9_-]+\)/;
+
+/**
+ * 🔴 **リンク行を隣と入れ替える**(#633 段④)── 2 行以外は 1 byte も動かさない。
+ *
+ * ⚠ 門は 4 つ:①行が原文の範囲に在る ②`openLine` と byte 一致 ③その行がリンク行
+ *   ④fence の中ではない。1 つでも外れれば `null` = 断る(当てずっぽうで別の行を書かない)。
+ * 🔑 端(相手が無い / 相手がリンク行でない)は **`body` をそのまま返す** ── 済んでいる。
+ */
+function moveLinkLine(
+  body: string,
+  rw: { line: number; openLine: string; dir: 'up' | 'down' },
+): string | null {
+  const fm = frontmatterLineCount(body);
+  if (!Number.isInteger(rw.line) || rw.line < fm) return null;
+  const lines = body.split('\n');
+  const cur = lines[rw.line];
+  if (cur === undefined || cur !== rw.openLine) return null;
+  if (!LINK_LINE.test(cur)) return null;
+  if (insideFence(lines, fm, rw.line)) return null;
+  const to = rw.dir === 'up' ? rw.line - 1 : rw.line + 1;
+  const other = lines[to];
+  if (to < fm || other === undefined) return body;
+  if (!LINK_LINE.test(other) || insideFence(lines, fm, to)) return body;
+  lines[rw.line] = other;
+  lines[to] = cur;
+  return lines.join('\n');
+}
 
 /**
  * チェック項目の行かどうか。
@@ -354,6 +403,7 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
   if (rewrite.kind === 'place-remove') return removePlace(body, rewrite);
   if (rewrite.kind === 'place-raise') return raisePlace(body, rewrite);
   if (rewrite.kind === 'place-add') return addPlace(body, rewrite.x, rewrite.y);
+  if (rewrite.kind === 'link-move') return moveLinkLine(body, rewrite);
   if (rewrite.kind === 'csv-cell') return rewriteCsvCell(body, rewrite);
   if (rewrite.kind === 'csv-shape') return rewriteCsvShape(body, rewrite);
   // 🔑 塊の移動と差し込みは `line-move.ts` の 1 本(#684)── 取りやめは body をそのまま返す

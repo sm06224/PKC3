@@ -47,7 +47,8 @@ remove-relation untag-entry smart-cond-remove filter-by-tag
 download-asset view-asset open-office copy-asset-ref navigate-asset-ref revoke-same-origin revoke-extension
 preview-revision restore-revision restore-trash stop-timer discard-timer open-alarm dismiss-alarm
 open-tile deliver-to-extension navigate-entry-ref navigate-card-ref
-dual-bookmark-open dual-bookmark-remove dual-tab-activate unsplit-entry dual-crumb`.split(/\s+/);
+dual-bookmark-open dual-bookmark-remove dual-tab-activate unsplit-entry dual-crumb
+stack-link-up stack-link-down`.split(/\s+/);
 
 /** 点を取るが、state の現在値(`selectedLid` / `dual.focus`)で代替できる。 */
 export const P2 = `select-entry delete-entry enter-folder toggle-todo move-entry move-order-up move-order-down

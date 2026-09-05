@@ -27,6 +27,8 @@ import { readFenceAssetText } from '@features/asset/fence-asset-read';
 import { applyHeadingFold } from './heading-fold';
 import { applyPlaceLayout } from './place-board';
 import { installBlockGrip } from './block-grip';
+import { applyStackControls } from './stack-controls';
+import { STACK_ARCHETYPE } from '@features/flavor/stack-flavor';
 
 /**
  * 🔴 **図とグラフは同じ面に出る**(#188)── 器を埋める呼び出しを 1 つに束ねる。
@@ -807,6 +809,12 @@ export class DetailRenderer {
          * ⚠ 添付の説明(`renderAttachment`)は**別経路**なので、ここを通らない = 口は出ない。
          */
         installBlockGrip(this.region, host, lid, body);
+        /**
+         * 🔴 **保存したスタックの中は、読む面から並べ替えられる**(#633 段④)── 各行に「上へ / 下へ」。
+         * ⚠ 描画のたびに呼ぶ(冪等)── 塊が差し替わると押し所が消えるため(畳み・板と同じ理由)。
+         * ⚠ 入れ物(`stack`)だけ ── 普通のノートの箇条書きのリンクに生やさない。
+         */
+        if (meta?.archetype === STACK_ARCHETYPE) applyStackControls(host, frontmatterLineCount(body));
         // ⚠ 帯は**本文が入ってから**組む(数えるものが DOM に無いと 0 件になる)
         this.renderExternalImageBar(lid, host);
         this.restoreScroll();

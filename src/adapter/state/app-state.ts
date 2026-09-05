@@ -998,6 +998,11 @@ export type UserAction =
    * 設計 doc §2-8)。本文が画面に無ければ効果層が読む(`REQUEST_STACK_BODY`)。
    */
   | { type: 'LOAD_STACK'; lid: string }
+  /**
+   * 🔴 **保存したスタックの中の 1 行を上 / 下へ**(#633 段④)。`line` は**原文の行番号**。
+   * 書換は `REQUEST_BODY_REWRITE`(`link-move`)の 1 本 ── 押した時点の行を添えて byte 一致で門をくぐる。
+   */
+  | { type: 'MOVE_STACK_LINK'; lid: string; line: number; dir: 'up' | 'down' }
   | { type: 'SELECT_ENTRY'; lid: string }
   | { type: 'SET_VIEW_MODE'; mode: ViewMode }
   /**
@@ -4558,6 +4563,16 @@ function reduceCore(
       const meta = state.entryMetas.get(action.lid);
       if (meta === undefined || meta.archetype !== STACK_ARCHETYPE) return { state, events: [] };
       return loadStackFromBody(state, action.body);
+    }
+    case 'MOVE_STACK_LINK': {
+      // ⚠ 入れ物以外では何もしない(押し所はスタックの入れ物にしか生えない ── 綴りの取り違えの防波堤)
+      if (state.entryMetas.get(action.lid)?.archetype !== STACK_ARCHETYPE) return { state, events: [] };
+      // 🔑 門と event の組み立ては板の書換と**同じ 1 本**(`bodyRewriteGate`(#684 で `placeRewrite` から改名))── 編集中は声に出して断る
+      return bodyRewriteGate(state, action.lid, '編集を終えてから、並べ替えてください', (shown) => {
+        const openLine = shown.split('\n')[action.line];
+        if (openLine === undefined) return null;
+        return { kind: 'link-move', line: action.line, openLine, dir: action.dir };
+      });
     }
     case 'SPLIT_BODY_LOADED': {
       /**

@@ -1090,6 +1090,9 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   // 🔑 スタックの保存はノートを 1 件**作る**(`CREATE_ENTRY`。#633 段③)── 取込・書出しの
   //    最中に entry を足すと、総入れ替えの裏で 1 件増える形になるので同じ門をくぐらせる
   'stack-save',
+  // 🔑 入れ物の中の並べ替えは本文を書く(`REQUEST_BODY_REWRITE`。#633 段④)
+  'stack-link-up',
+  'stack-link-down',
   /**
    * 🔴 **外部の画像を取り込むのも本文を書く**(#264 段①)── 同じ
    *   `REQUEST_BODY_REWRITE` を撃つので、同じ門をくぐらせる。
@@ -1693,6 +1696,17 @@ function refuseStaleMenu(dispatcher: Dispatcher, target: Element): boolean {
     message: '別のノートに切り替わったので、出ていたメニューは効きません',
   });
   return true;
+}
+
+/** 「上へ / 下へ」の受け手の実体(向きだけが違う 2 つを 1 本にする ── §7)。 */
+function moveStackLink(dispatcher: Dispatcher, target: HTMLElement, dir: 'up' | 'down'): void {
+  const raw = target.getAttribute('data-pkc-line');
+  const line = Number(raw);
+  if (raw === null || !Number.isInteger(line) || line < 0) return;
+  const st = dispatcher.getState();
+  const lid = lidOfNode(target, st.openBody?.lid ?? st.selectedLid);
+  if (lid === null || lid === undefined) return;
+  dispatcher.dispatch({ type: 'MOVE_STACK_LINK', lid, line, dir });
 }
 
 function menuCarriedLine(target: Element): number | null {
@@ -5530,6 +5544,15 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (lid === null) return;
     dispatcher.dispatch({ type: 'LOAD_STACK', lid });
   },
+  /**
+   * 🔴 **保存したスタックの中の 1 行を上 / 下へ**(#633 段④)。
+   *
+   * ⚠ どのノートの行かは**押した所から引く**(`lidOfNode` ── 横の枠なら `data-pkc-split-lid`、
+   *   主の枠なら開いているノート。`toggle-task` と同じ引き方)。行番号は押し所に焼いた
+   *   **原文の行**(`data-pkc-line`)。門(編集中 / byte 一致)は reducer と `body-rewrite.ts` が持つ。
+   */
+  'stack-link-up': (dispatcher, target) => moveStackLink(dispatcher, target, 'up'),
+  'stack-link-down': (dispatcher, target) => moveStackLink(dispatcher, target, 'down'),
   /** 🔴 **外す**(#505 段②)。⚠ 置けるなら外せる ── 枠の中の `× 外す` が押す。 */
   'unsplit-entry': (dispatcher, target) => {
     const lid = target.closest<HTMLElement>('[data-pkc-lid]')?.getAttribute('data-pkc-lid');

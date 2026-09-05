@@ -641,3 +641,72 @@ describe('本文へ行を差し込む(#684 段② insert-lines)', () => {
     expect(applyBodyRewrite('```\ncode\n', { kind: 'insert-lines', toBefore: 2, lines: LINK })).toBeNull();
   });
 });
+
+/**
+ * 🔴 **保存したスタックの中の 1 行を、隣のリンク行と入れ替える**(#633 段④)。
+ *
+ * 守る主張:①入れ替えた 2 行以外は 1 byte も動かない ②端では何もしない(同じ本文を返す ──
+ * `null` は「断った」の意味なので使わない)③押した時点の行と食い違えば断る(`null`)
+ * ④相手がリンク行でなければ動かさない ⑤fence の中の同じ字面は触らない。
+ */
+describe('保存したスタックの並べ替え(link-move、#633 段④)', () => {
+  const DOC = [
+    '---',
+    'date: 2026-09-05',
+    '---',
+    '# 今週の束',
+    '',
+    '- [議事録](entry:a1)',
+    '- [資料 B](entry:b2)',
+    '- [去年の稟議](entry:c3)',
+    '',
+    '```',
+    '- [偽物](entry:zz)',
+    '```',
+  ].join('\n');
+
+  it('🔴 下へ: 隣と入れ替わり、ほかの行は 1 byte も動かない', () => {
+    const out = applyBodyRewrite(DOC, { kind: 'link-move', line: 5, openLine: '- [議事録](entry:a1)', dir: 'down' })!;
+    const before = DOC.split('\n');
+    const after = out.split('\n');
+    expect(after[5]).toBe('- [資料 B](entry:b2)');
+    expect(after[6]).toBe('- [議事録](entry:a1)');
+    expect(after.filter((_, i) => i !== 5 && i !== 6)).toEqual(before.filter((_, i) => i !== 5 && i !== 6));
+  });
+
+  it('🔴 上へ: 3 行目が 2 行目と入れ替わる', () => {
+    const out = applyBodyRewrite(DOC, { kind: 'link-move', line: 7, openLine: '- [去年の稟議](entry:c3)', dir: 'up' })!;
+    expect(out.split('\n').slice(5, 8)).toEqual(['- [議事録](entry:a1)', '- [去年の稟議](entry:c3)', '- [資料 B](entry:b2)']);
+  });
+
+  it('🔴 端では何もしない ── 同じ本文をそのまま返す(null にしない)', () => {
+    // 一番上を上へ: 相手は空行(リンク行でない)
+    expect(applyBodyRewrite(DOC, { kind: 'link-move', line: 5, openLine: '- [議事録](entry:a1)', dir: 'up' })).toBe(DOC);
+    // 一番下を下へ: 相手は空行
+    expect(applyBodyRewrite(DOC, { kind: 'link-move', line: 7, openLine: '- [去年の稟議](entry:c3)', dir: 'down' })).toBe(DOC);
+    // 本文の末尾の行を下へ(相手が無い)
+    const tail = '- [a](entry:a)\n- [b](entry:b)';
+    expect(applyBodyRewrite(tail, { kind: 'link-move', line: 1, openLine: '- [b](entry:b)', dir: 'down' })).toBe(tail);
+  });
+
+  it('🔴 押した時点の行と食い違えば断る(別の窓が行を足していた形)', () => {
+    expect(applyBodyRewrite(DOC, { kind: 'link-move', line: 6, openLine: '- [議事録](entry:a1)', dir: 'down' })).toBeNull();
+    // frontmatter の中 / 範囲外も断る
+    expect(applyBodyRewrite(DOC, { kind: 'link-move', line: 1, openLine: 'date: 2026-09-05', dir: 'down' })).toBeNull();
+    expect(applyBodyRewrite(DOC, { kind: 'link-move', line: 99, openLine: 'x', dir: 'up' })).toBeNull();
+  });
+
+  it('🔴 fence の中の同じ字面は動かさない(対照群: 外の同じ行は動く)', () => {
+    // fence の中の行を掴んだ形 ── 断る
+    expect(applyBodyRewrite(DOC, { kind: 'link-move', line: 10, openLine: '- [偽物](entry:zz)', dir: 'up' })).toBeNull();
+    // リンク行でない行を掴んだ形 ── 断る
+    expect(applyBodyRewrite(DOC, { kind: 'link-move', line: 3, openLine: '# 今週の束', dir: 'down' })).toBeNull();
+  });
+
+  it('番号つきの箇条書きでも効く(記法を狭めない)', () => {
+    const src = '1. [a](entry:a)\n2. [b](entry:b)';
+    expect(applyBodyRewrite(src, { kind: 'link-move', line: 0, openLine: '1. [a](entry:a)', dir: 'down' })).toBe(
+      '2. [b](entry:b)\n1. [a](entry:a)',
+    );
+  });
+});

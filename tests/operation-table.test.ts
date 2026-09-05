@@ -129,12 +129,14 @@ describe('操作の全数台帳(#582 段①)', () => {
       //    登記が 3 増えた(受け手は増えない ── `runGlobalCommand` の特例で受ける)
       // ⚠ 2026-09-05(#633 段③): 保存したスタック ── 受け手 `stack-save`(帯の「保存…」)と
       //    `stack-load`(行のメニュー / 情報ペイン、登記あり)で受け手 +2 / 登記 +1
-      total: 250,
-      receivers: 203,
+      // ⚠ 2026-09-05(#633 段④): 入れ物の中の「上へ / 下へ」(`stack-link-up` / `stack-link-down`)で
+      //    受け手 +2(登記は増えない ── 押した行が要る P1 なので、名前だけでは呼べない)
+      total: 252,
+      receivers: 205,
       registered: 82,
       both: 35,
       outsideActionsTable: 47,
-      unregistered: 168,
+      unregistered: 170,
     });
   });
 

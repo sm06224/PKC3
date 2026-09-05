@@ -100,7 +100,8 @@ describe('押した所から lid を引く(#281 検算)', () => {
     ).toBeGreaterThan(5);
     // ⚠ 2026-09-05(#684 段②): 一覧の行を本文へ落とす `bodyDropAt` が 4 か所目(落とし先の
     //    本文の lid も同じ 1 本で引く ── 自前の closest を生やさない)
-    expect(src.split('lidOfNode(').length - 1, '本文へ書く 4 か所が寄っていない').toBe(4);
+    // ⚠ 2026-09-05(#633 段④): 入れ物の「↑ / ↓」(`moveStackLink`)も lidOfNode を通す → 4 → 5
+    expect(src.split('lidOfNode(').length - 1, '本文へ書く 5 か所が寄っていない').toBe(5);
     expect(
       readFileSync('src/adapter/ui/render/place-drag.ts', 'utf8'),
       '板の掴みが寄っていない',

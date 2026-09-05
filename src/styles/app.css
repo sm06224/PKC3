@@ -6131,3 +6131,20 @@ li[data-pkc-row-slot] {
   /* ⚠ 押し所は名前の分だけ ── 札の中で 2 つのボタンが重ならないようにする */
   padding: 2px 0;
 }
+/* 🔴 **保存したスタックの中の「上へ / 下へ」**(#633 段④)── 行の右に小さく。
+ * ⚠ 端の押せない側は薄くする(押しても何も起きない口を、押せる顔で出さない) */
+[data-pkc-field='stack-link-move'] {
+  display: inline-flex;
+  gap: var(--s1);
+  margin-left: var(--s3);
+  vertical-align: middle;
+}
+[data-pkc-field='stack-link-move'] button {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  padding: 0 var(--s1);
+}
+[data-pkc-field='stack-link-move'] button:disabled {
+  opacity: 0.35;
+}
