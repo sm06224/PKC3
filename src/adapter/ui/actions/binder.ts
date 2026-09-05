@@ -3812,8 +3812,12 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ **同じ action 名で 2 つの口**を受ける ── 名前を分けると、binder の居ない面
    *   (書き出した HTML / マニュアルの窓)が `copy-md-block` **だけ**を取り除くので、
    *   ▾ が沈黙する飾りとして焼き込まれる(`markdown-render.ts` の註記)。
-   * ⚠ 落とす file の名前はいま開いているノートの題名から作る ── 器(`safeName`)は
-   *   書き出し系と同じ 1 本。
+   * 🔴 **落とす file の名前は「押した表が載っているノート」の題名**(2026-09-05、
+   *   動線レビュー 欠陥 1)。⚠ 直す前は `selectedLid` を直に読んでいたので、
+   *   **横に留めた枠の表から保存すると、左の枠のノートの題名**が付いた
+   *   (#281 で 1 度直した罠の再発 ── 留めた枠は `data-pkc-entry` ではなく
+   *   `data-pkc-split-lid` を焼く)。引き方は `lidOfNode` 1 本。
+   * ⚠ 器(`safeName`)は書き出し系と同じ 1 本。
    */
   'copy-md-block': (dispatcher, target, _services, root) =>
     handleCopyMdBlock(target, {
@@ -3821,9 +3825,11 @@ const ACTIONS: Record<string, ActionHandler> = {
       download: downloadBlob,
       noteTitle: () => {
         const st = dispatcher.getState();
-        const lid = st.selectedLid;
+        const lid = lidOfNode(target, st.openBody?.lid ?? st.selectedLid);
         return lid === null ? '' : (st.entryMetas.get(lid)?.title ?? '');
       },
+      fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
+      saved: (message) => dispatcher.dispatch({ type: 'OP_NOTICE', message }),
     }),
   /**
    * 🔴 **読む面のコピー**(2026-08-08。user 裁定「markdown のテキストとしての

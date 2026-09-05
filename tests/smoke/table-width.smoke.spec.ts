@@ -176,7 +176,24 @@ test.describe('PC(1366 幅)', () => {
         csv: right(csvTable),
         csvBtn: right(csvBlock?.querySelector('.pkc-md-copy-btn')),
         csvToggle: right(csvBlock?.querySelector('.pkc-render-toggle')),
-        csvBtnLeft: csvBlock?.querySelector('.pkc-md-copy-btn')?.getBoundingClientRect().left ?? null,
+        /**
+         * 🔴 **右上に並ぶ操作子を「集合」で採る**(2026-09-05、着地前レビュー C-2)。
+         *
+         * ⚠ 直す前は `querySelector` = **最初の 1 個(⧉)**だけを採っていた ──
+         *   #708 段① で ⧉ と ‹/› の**間に ▾ が入った**ので、下の「重なっていない」は
+         *   **▾ をまたいで成立する**(▾ が ‹/› に食い込んでも緑)。
+         * 🔑 いちばん左の端で見る ── 名指しを増やすのではなく、
+         *   「右上に並ぶ物のうち最も左」を条件にすれば、次に 4 つ目が増えても効く。
+         */
+        csvBtnLeft: csvBlock
+          ? Math.min(
+              ...[...csvBlock.querySelectorAll('.pkc-md-copy-btn')].map(
+                (b) => b.getBoundingClientRect().left,
+              ),
+            )
+          : null,
+        /** ⚠ 空振り防止 ── ▾ が実在して 2 個数えられていること。 */
+        csvBtnCount: csvBlock?.querySelectorAll('.pkc-md-copy-btn').length ?? 0,
       };
     });
     // 🔑 前提: この幅では面が読み幅より広い(そうでなければ上限は何も主張しない)
@@ -189,7 +206,12 @@ test.describe('PC(1366 幅)', () => {
     expect(g.mdTable! - g.mdBtn!, 'markdown の表の ⧉ が表の右端から離れている').toBeLessThanOrEqual(4);
     expect(g.csv! - g.csvBtn!, `csv の表の ⧉(${g.csvBtn})が表の右端(${g.csv})から離れている`).toBeGreaterThanOrEqual(0);
     expect(g.csv! - g.csvBtn!, 'csv の表の ⧉ が表の右端から離れている').toBeLessThanOrEqual(4);
-    // ⚠ `</>` は ⧉ の左隣(重ならない)
-    expect(g.csvToggle!, '‹/› が ⧉ と重なっている').toBeLessThanOrEqual(Math.round(g.csvBtnLeft!));
+    // ⚠ 空振り防止 ── ⧉ と ▾ の 2 つが在ること(1 個しか採れていないなら下は何も見ていない)
+    expect(g.csvBtnCount, 'csv の表に ⧉ と ▾ が並んでいない(検査の前提が崩れている)').toBe(2);
+    // ⚠ `</>` は**右上に並ぶ物すべて**の左隣(重ならない)── ▾ をまたがない
+    expect(
+      g.csvToggle!,
+      `‹/›(右端 ${g.csvToggle})が右上のボタン(左端 ${g.csvBtnLeft})と重なっている`,
+    ).toBeLessThanOrEqual(Math.round(g.csvBtnLeft!));
   });
 });

@@ -24,8 +24,15 @@ function el(html: string): HTMLElement {
  */
 function deps(
   pick: string | null,
-  sink: { name?: string; blob?: Blob; asked?: readonly { id: string; label: string }[] } = {},
+  sink: {
+    name?: string;
+    blob?: Blob;
+    asked?: readonly { id: string; label: string }[];
+    /** 🔑 **言った字を全部採る** ── 「無言だった」を見分けるのに要る。 */
+    said?: string[];
+  } = {},
 ): CopyMdBlockDeps {
+  sink.said ??= [];
   return {
     pick: (choices) => {
       sink.asked = choices.map((c) => ({ id: c.id, label: c.label }));
@@ -36,6 +43,8 @@ function deps(
       sink.blob = blob;
     },
     noteTitle: () => '買い物メモ',
+    fail: (m) => sink.said?.push(`fail:${m}`),
+    saved: (m) => sink.said?.push(`saved:${m}`),
   };
 }
 
@@ -127,16 +136,23 @@ describe('handleCopyMdBlock', () => {
     block.remove();
   });
 
-  it('コピー失敗では flash を出さない', async () => {
+  /**
+   * 🔴 **渡らなかったら理由を出す**(2026-09-05、動線レビュー 欠陥 2)。
+   * ⚠ 直す前は「光らせないだけ」── user は「入ったが貼り先が悪い」と読んで
+   *   **別の場所を探しに行く**(実際には何も入っていない)。
+   */
+  it('🔴 コピー失敗では flash を出さず、理由を言う', async () => {
     vi.spyOn(clipboard, 'copyMarkdownAndHtml').mockResolvedValue(false);
     const block = el(
       '<div class="pkc-md-block"><button data-pkc-action="copy-md-block">⧉</button><pre>x</pre></div>',
     );
     document.body.append(block);
     const btn = block.querySelector('button')!;
-    handleCopyMdBlock(btn, NO_PICK);
+    const sink: { said?: string[] } = {};
+    handleCopyMdBlock(btn, deps(null, sink));
     await flush();
     expect(btn.hasAttribute('data-pkc-flash')).toBe(false);
+    expect(sink.said, '無言で終わった(⧉ の側)').toEqual(['fail:コピーできませんでした']);
     block.remove();
   });
 });
@@ -165,9 +181,19 @@ const plainBtn = (block: HTMLElement): HTMLElement =>
   block.querySelector<HTMLElement>('.pkc-md-copy-btn:not([data-pkc-copy-menu])')!;
 
 describe('readTableRows', () => {
-  it('升の中の tab / 改行は空白へ潰し、前後の空白は落とす', () => {
+  /**
+   * 🔴 **読む側は潰さない**(2026-09-05、着地前レビュー A-1 で裏返した主張)。
+   *
+   * ⚠ 直す前はここで tab / 改行を空白 1 個へ潰しており、**その 1 か所の都合が
+   *   3 形式ぜんぶに効いていた** ── `csv` の囲みは引用で囲めば升に改行を書けるのに、
+   *   `.csv` で保存すると `1 2` に変わっていた(user のデータが静かに別物になる)。
+   * 🔑 潰すのは**潰さないと壊れる形の側**(TSV / GFM の表)── `tests/features/table-copy.test.ts`
+   *   がその 2 つを別々に見る。ここが見るのは「**読んだ字をそのまま返す**」だけ。
+   * ⚠ 前後の空白は落とす(升の見た目の余白は data ではない)。
+   */
+  it('🔴 升は潰さずそのまま返す(前後の空白だけ落とす)', () => {
     const t = el('<table><tr><td>1\n2</td><td> a\tb </td></tr></table>');
-    expect(readTableRows(t)).toEqual([{ cells: ['1 2', 'a b'], head: false }]);
+    expect(readTableRows(t)).toEqual([{ cells: ['1\n2', 'a\tb'], head: false }]);
   });
 
   it('見出しの行(`th` だけ)を見分ける', () => {
@@ -277,7 +303,7 @@ describe('形を選ぶ口(▾)', () => {
    * 日本語の升を文字化けさせる(表計算で開くための file なのに開けない)。
    */
   it('🔴 .csv で保存: 題名から名前を作り、BOM 付きで渡す', async () => {
-    const sink: { name?: string; blob?: Blob } = {};
+    const sink: { name?: string; blob?: Blob; said?: string[] } = {};
     const block = blockOf(CSV_FENCE);
     handleCopyMdBlock(menuBtn(block), deps('csv-file', sink));
     await flush();
@@ -287,6 +313,76 @@ describe('形を選ぶ口(▾)', () => {
     const text = await sink.blob!.text();
     expect(text.charCodeAt(0), 'BOM が無い(Excel で文字化けする)').toBe(0xfeff);
     expect(text.slice(1)).toBe('名前,メモ\na|b,"x,y"');
+    /**
+     * 🔴 **保存は字で言う。光らせない**(2026-09-05、動線レビュー 欠陥 7)。
+     * ⚠ 光る合図は「**コピーが渡った**」の意味でこの製品に統一されているので、
+     *   保存に使い回すと**どちらが起きたか読めない**。しかも ▾ は普段は
+     *   見えない(触れたときだけ出る)ので、光っても気づけない。
+     */
+    expect(sink.said, '保存したのに何も言っていない').toEqual([
+      `saved:${sink.name} を保存しました`,
+    ]);
+  });
+
+  /**
+   * 🔴 **題名の無いノートでも、読める名前で落とす**(2026-09-05、着地前レビュー M3)。
+   * ⚠ 直す前はこの枝を 1 度も通っておらず、逃がし(「表」)を消しても緑だった ──
+   *   消すと `pkc3-2026-09-05.csv` になり、**何の表か名前から読めなくなる**。
+   */
+  it('🔴 題名が空でも「表」で落とす(名前が pkc3 にならない)', async () => {
+    const sink: { name?: string; blob?: Blob; said?: string[] } = {};
+    const block = blockOf(CSV_FENCE);
+    const base = deps('csv-file', sink);
+    handleCopyMdBlock(menuBtn(block), { ...base, noteTitle: () => '' });
+    await flush();
+    expect(sink.name, '題名が空のとき、user に読めない名前になっている').toMatch(
+      /^表-\d{4}-\d{2}-\d{2}\.csv$/,
+    );
+  });
+
+  it('🔴 保存では光らない(光る合図はコピーの意味)', async () => {
+    const sink: { name?: string; blob?: Blob; said?: string[] } = {};
+    const block = blockOf(CSV_FENCE);
+    const btn = menuBtn(block);
+    handleCopyMdBlock(btn, deps('csv-file', sink));
+    await flush();
+    expect(btn.hasAttribute('data-pkc-flash'), '保存なのにコピーの合図が出た').toBe(false);
+  });
+
+  /**
+   * 🔴 **選んだのに渡らなかったら、▾ の側でも理由を出す**(欠陥 2)。
+   * ⚠ 3 手かけて選んだ後の無反応は、⧉ の 1 押しより質が悪い。
+   */
+  it('🔴 形を選んで渡らなかったら、理由を言う', async () => {
+    vi.spyOn(clipboard, 'copyPlainText').mockResolvedValue(false);
+    const sink: { said?: string[] } = {};
+    const block = blockOf(MD_TABLE);
+    const btn = menuBtn(block);
+    handleCopyMdBlock(btn, deps('csv', sink));
+    await flush();
+    expect(btn.hasAttribute('data-pkc-flash')).toBe(false);
+    expect(sink.said).toEqual(['fail:コピーできませんでした']);
+  });
+
+  /**
+   * 🔴 **選んでいる間に面が組み直された回も、黙って終わらない**(欠陥 2 の 3 本目の道)。
+   * 🔑 台は「選び終えた瞬間に表を抜く」形にする ── `findMdBlockTable` が `null` を返す。
+   */
+  it('🔴 選んでいる間に表が消えたら、理由を言う', async () => {
+    const sink: { said?: string[] } = {};
+    const block = blockOf(MD_TABLE);
+    const btn = menuBtn(block);
+    const base = deps('csv', sink);
+    handleCopyMdBlock(btn, {
+      ...base,
+      pick: async (choices) => {
+        const id = await base.pick(choices);
+        for (const t of block.querySelectorAll('table')) t.remove();
+        return id;
+      },
+    });
+    await flush();
+    expect(sink.said, '表が消えたのに無言で終わった').toEqual(['fail:コピーできませんでした']);
   });
 
   it('やめたら何も入らず、合図も出さない', async () => {
@@ -294,11 +390,14 @@ describe('形を選ぶ口(▾)', () => {
     const plain = vi.spyOn(clipboard, 'copyPlainText').mockResolvedValue(true);
     const block = blockOf(MD_TABLE);
     const btn = menuBtn(block);
-    handleCopyMdBlock(btn, deps(null));
+    const sink: { said?: string[] } = {};
+    handleCopyMdBlock(btn, deps(null, sink));
     await flush();
     expect(spy).not.toHaveBeenCalled();
     expect(plain).not.toHaveBeenCalled();
     expect(btn.hasAttribute('data-pkc-flash'), 'コピーしていないのに光った').toBe(false);
+    // ⚠ **「やめた」は断らない** ── user が自分で閉じたので、伝えることは無い
+    expect(sink.said, 'やめただけなのに何か言っている').toEqual([]);
   });
 
   /**

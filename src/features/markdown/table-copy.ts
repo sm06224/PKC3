@@ -54,11 +54,14 @@ export const TABLE_COPY_CHOICES: readonly {
 /**
  * TSV(表計算に貼る形)。
  *
- * ⚠ 升の中の tab / 改行は**読む側(`copy-md-block.ts`)が既に空白へ潰している** ──
- *   ここで潰し直さない(潰す規則が 2 つに割れる)。
+ * 🔴 **ここで潰す**(2026-09-05、着地前レビュー A-1)。⚠ 直す前は「読む側が既に
+ *   潰している」と書いて任せていたが、その潰しは **CSV まで巻き添えにしていた**
+ *   ── `csv` の囲みは引用で囲めば升に改行を書けるのに、保存した `.csv` では
+ *   `1 2` に変わっていた。
+ * 🔑 **潰すのは、潰さないと壊れる形だけ** ── TSV は tab で列が、改行で行が割れる。
  */
 export function tableToTsv(rows: readonly TableCopyRow[]): string {
-  return rows.map((r) => r.cells.join('\t')).join('\n');
+  return rows.map((r) => r.cells.map((c) => c.replace(/[\t\n]+/g, ' ')).join('\t')).join('\n');
 }
 
 /**

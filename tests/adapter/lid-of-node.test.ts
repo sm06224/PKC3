@@ -101,7 +101,10 @@ describe('押した所から lid を引く(#281 検算)', () => {
     // ⚠ 2026-09-05(#684 段②): 一覧の行を本文へ落とす `bodyDropAt` が 4 か所目(落とし先の
     //    本文の lid も同じ 1 本で引く ── 自前の closest を生やさない)
     // ⚠ 2026-09-05(#633 段④): 入れ物の「↑ / ↓」(`moveStackLink`)も lidOfNode を通す → 4 → 5
-    expect(src.split('lidOfNode(').length - 1, '本文へ書く 5 か所が寄っていない').toBe(5);
+    // ⚠ 2026-09-05(#708 段①、動線レビュー 欠陥 1): 表を `.csv` で保存する名前も
+    //    ここから引く ── 直す前は `selectedLid` を直に読んでいたので、**横に留めた枠の
+    //    表から保存すると左の枠のノートの題名**が付いた(この file の冒頭の罠の再発)→ 5 → 6
+    expect(src.split('lidOfNode(').length - 1, '本文へ書く 6 か所が寄っていない').toBe(6);
     expect(
       readFileSync('src/adapter/ui/render/place-drag.ts', 'utf8'),
       '板の掴みが寄っていない',

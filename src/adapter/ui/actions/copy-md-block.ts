@@ -98,7 +98,20 @@ export function readTableRows(table: HTMLElement): TableCopyRow[] {
     });
     if (cells.length === 0) continue;
     rows.push({
-      cells: cells.map((cell) => (cell.textContent ?? '').replace(/[\t\r\n]+/g, ' ').trim()),
+      /**
+       * 🔴 **升は潰さずに返す**(2026-09-05、着地前レビュー A-1)。
+       *
+       * ⚠ 直す前は**ここで tab / 改行を空白 1 個へ潰していた** ── ところが
+       *   `csv` の囲みは **引用で囲めば升に改行を入れられる**(`csv-table.ts` の
+       *   仕様)ので、`"1\n2"` と書いた升が **`.csv` で保存した瞬間に `1 2` へ
+       *   変わっていた**(user のデータが静かに別物になる)。
+       * 🔑 **潰すのは、潰さないと壊れる形の側の仕事**である ── TSV は tab と改行で
+       *   表が崩れ、GFM の表は改行で行が切れるが、**CSV は `"…"` で包めば通る**。
+       *   1 か所の都合を 3 形式に使い回していたのが誤りだった(CLAUDE.md §7
+       *   「誤差の向きを決めて、両側に使い回さない」)。
+       * ⚠ 改行の綴りだけ揃える(`\r\n` / `\r` → `\n`)── 貼り先ごとに違う字が出ないように。
+       */
+      cells: cells.map((cell) => (cell.textContent ?? '').replace(/\r\n?/g, '\n').trim()),
       head: cells.every((c) => c.tagName.toLowerCase() === 'th'),
     });
   }
@@ -148,8 +161,26 @@ export interface CopyMdBlockDeps {
   ): Promise<string | null>;
   /** file を渡す(`platform/download.ts` の `downloadBlob`)。 */
   download(name: string, blob: Blob): void;
-  /** 落とす file の名前の素 ── いま開いているノートの題名(空でもよい)。 */
+  /** 落とす file の名前の素 ── **その表が載っているノート**の題名(空でもよい)。 */
   noteTitle(): string;
+  /**
+   * 🔴 **渡らなかったことを言う**(2026-09-05、動線レビュー 欠陥 2)。
+   *
+   * ⚠ 直す前は「光らせないだけ」だった ── ▾ は**小窓を開いて行を選んで閉じる
+   *   3 手**なので、それだけやって無反応だと user は「入ったが貼り先が悪い」と
+   *   読み、**別の場所を探しに行く**(実際には何も入っていない)。
+   * ⚠ **optional にしない**(この file の上の註記と同じ理由)。
+   * 🔑 文言は他のコピーと同じ(`copy-source.ts` の `finishCopy`)── 合図の形を
+   *   2 つ作らない。
+   */
+  fail(message: string): void;
+  /**
+   * 🔴 **保存したことを言う**(同 欠陥 7)。⚠ 光る合図は「**コピーが渡った**」の
+   *   意味でこの製品に統一されているので、**保存に使い回すと区別できない** ──
+   *   しかも ▾ は普段は見えない(触れたときだけ出る)ので、光っても気づけない。
+   * 🔑 他の 2 つの書き出し(設定の持ち出し / 連絡先)と同じく、画面の下へ 1 行出す。
+   */
+  saved(message: string): void;
 }
 
 /**
@@ -163,6 +194,9 @@ export interface CopyMdBlockDeps {
  *   消したことに気づけない。
  */
 const CSV_BOM = '\uFEFF';
+
+/** 渡らなかったときの字。⚠ 他のコピー(`copy-source.ts`)と**同じ 1 つ**にする。 */
+const COPY_FAILED = 'コピーできませんでした';
 
 /** 落とす file の名前。⚠ 名前の規則は `safeName` 1 本(`features/export/file-name.ts`)。 */
 function csvFileName(title: string): string {
@@ -198,10 +232,10 @@ async function putTable(
     case 'csv':
       return copyPlainText(tableToCsv(rows));
     case 'csv-file': {
-      deps.download(
-        csvFileName(deps.noteTitle()),
-        new Blob([CSV_BOM + tableToCsv(rows)], { type: 'text/csv;charset=utf-8' }),
-      );
+      const name = csvFileName(deps.noteTitle());
+      deps.download(name, new Blob([CSV_BOM + tableToCsv(rows)], { type: 'text/csv;charset=utf-8' }));
+      // ⚠ 名前を持っているのはここだけ ── 呼び側で組み直さない(§7)
+      deps.saved(`${name} を保存しました`);
       return true;
     }
   }
@@ -221,14 +255,32 @@ export function handleCopyMdBlock(target: HTMLElement, deps: CopyMdBlockDeps): v
 
   if (target.hasAttribute('data-pkc-copy-menu') && findMdBlockTable(block) !== null) {
     void deps.pick(TABLE_COPY_CHOICES).then(async (id) => {
+      // ⚠ 「やめた」は断り文を出さない ── user が自分で閉じたので、伝えることは無い
       if (id === null) return;
       // ⚠ 一覧から消えた id は黙って落とす(無い形で書き出すより何もしない方がよい)
       const chosen = TABLE_COPY_CHOICES.find((c) => c.id === id);
       if (chosen === undefined) return;
-      // ⚠ 表は引き直す ── 選んでいる間に描き直されると、掴んだ節点は外れている
+      /**
+       * ⚠ 表は引き直す。⚠ **これは再描画を守っていない**(2026-09-05 の着地前レビュー ⑤ で
+       *   判明 ── 掴んでいるのは `block` 自身なので、面が組み直されても
+       *   **剥がれた木の中の表**が返る)。ここが `null` になるのは
+       *   「▾ が在るのに表が無い塊」だけで、いまその塊は作られない。
+       * 🔑 それでも引き直しと断りは残す ── 将来そういう塊ができたとき、
+       *   **無言で終わらせない**ための門である(コメントのほうを実装に合わせた)。
+       */
       const again = findMdBlockTable(block);
-      if (again === null) return;
-      if (await putTable(chosen.id, stripTableChromeForCopy(again), deps)) flashCopied(target);
+      if (again === null) {
+        deps.fail(COPY_FAILED);
+        return;
+      }
+      const done = await putTable(chosen.id, stripTableChromeForCopy(again), deps);
+      if (!done) {
+        deps.fail(COPY_FAILED);
+        return;
+      }
+      // 🔑 **保存だけは字で言う**(上の `saved` の註記)── 光る合図はコピーの意味
+      if (chosen.id === 'csv-file') return;
+      flashCopied(target);
     });
     return;
   }
@@ -238,6 +290,9 @@ export function handleCopyMdBlock(target: HTMLElement, deps: CopyMdBlockDeps): v
   const source = stripTableChromeForCopy(inner);
   const plain = extractMdBlockPlainText(source);
   void copyMarkdownAndHtml(plain, source.outerHTML).then((ok) => {
+    // ⚠ ⧉ の側も同じ口へ寄せた(2026-09-05)── 直す前は**こちらも無言**で、
+    //   「光る方だけ成功」を user に読ませていた(この file の `flashCopied` の註記の裏)
     if (ok) flashCopied(target);
+    else deps.fail(COPY_FAILED);
   });
 }

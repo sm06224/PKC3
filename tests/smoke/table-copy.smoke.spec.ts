@@ -76,6 +76,8 @@ test('🔴 表の ▾ から形を選んでコピーでき、⧉ の 1 押しは
   await gotoApp(page);
 
   await createEntry(page, 'text');
+  // 🔑 題名を付ける ── 落とす file の名前が**このノート**から作られることを ⑥ で見る
+  await page.locator('[data-pkc-field="editor-title"]').fill('買い物メモ');
   await page.locator('[data-pkc-field="editor-body"]').fill(`${BODY}\n`);
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
   await expect(page.locator('[data-pkc-field="detail-body"] table')).toHaveCount(2, {
@@ -155,6 +157,42 @@ test('🔴 表の ▾ から形を選んでコピーでき、⧉ の 1 押しは
     await page.evaluate(() => navigator.clipboard.readText()),
     'やめたのに中身が書き換わった',
   ).toBe('名前,メモ\na|b,"x,y"');
+
+  /**
+   * ⑥ 🔴 **`.csv` で保存すると、file が本当に落ちてくる**(2026-09-05、着地前レビュー M1)。
+   *
+   * ⚠ 直す前は **5 つのうち index 4 を 1 度も押していなかった** ── だから
+   *   `download: downloadBlob` の配線を `() => {}` に変えても**全部緑**だった
+   *   (落とす口が死んでも、光る合図と「保存しました」だけが出る)。
+   * 🔑 観測点は**ブラウザが受け取った file**(名前と中身)── 呼んだかどうかではない。
+   */
+  const wait = page.waitForEvent('download');
+  await page.locator(menu).first().click();
+  await page.locator('[data-pkc-field="pick-copy-format"][data-pkc-copy-format-index="4"]').click();
+  const dl = await wait;
+  /**
+   * ⚠ **名前はここで見ない** ── この箱の headless Chromium は**非 ASCII の
+   *   `download` 名を丸ごと捨てて `"download"` にする**(CLAUDE.md §4)。
+   *   名前の規則は unit(`copy-md-block.test.ts`)が題名と空題名の 2 通りで見る。
+   * 🔑 ここでしか見られないのは「**ブラウザが本当に file を受け取ったか**」と
+   *   「**その中身**」である。
+   */
+  const chunks: Buffer[] = [];
+  for await (const c of (await dl.createReadStream())!) chunks.push(Buffer.from(c));
+  const body = Buffer.concat(chunks).toString('utf8');
+  expect(body.charCodeAt(0), 'BOM が無い(Excel で文字化けする)').toBe(0xfeff);
+  expect(body.slice(1), '落ちてきた中身が表になっていない').toBe('名前,メモ\na|b,"x,y"');
+  /**
+   * 🔴 **保存は字で言う**(光る合図はコピーの意味)── 画面の下に 1 行出る。
+   * 🔑 **名前の主張はここで見る**(着地前レビュー M2 / M3)── 落ちた file の名前は
+   *   この箱では読めないが、**知らせの字にはアプリが決めた名前がそのまま載る**。
+   *   ⚠ これが無いと、binder の `noteTitle` を `() => ''` にしても全部緑になる
+   *   (unit は自前の stub を渡すので、配線を 1 度も通らない)。
+   */
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '保存したのに何も言っていない / ノートの題名から名前を作っていない',
+  ).toContainText(/買い物メモ-\d{4}-\d{2}-\d{2}\.csv を保存しました/);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

@@ -5914,6 +5914,16 @@ li[data-pkc-row-slot] {
     min-width: 24px;
     line-height: 22px;
   }
+  /* 🔴 **表の囲みは右上に 3 つ並ぶ**(#708 段① / 2026-09-05 の着地前レビュー C-1)。
+   *    ⧉ と ▾ が **24px ずつ**になるので、素の 48px では ‹/› が **2px 食い込む**
+   *    (実測: ‹/› の右端 334 / ▾ の左端 332 ── 中心は空いているので
+   *    `expectReachable` も、⧉ しか採っていなかった `table-width.smoke` も鳴らなかった)。
+   *    ⚠ ▾ を細くして避けない ── 触る端末の押し所は 24px 以上、が先に在る規律である。
+   *    🔑 だから ‹/› のほうを 24 + 24 + 2 = **50px** へ寄せる。
+   *    守り: `touch-targets.smoke.spec.ts` が 3 つの矩形を**隣どうしで**突き合わせる。 */
+  .pkc-md-rendered .pkc-md-block:has(> .pkc-md-copy-menu-btn) > .pkc-render-toggle {
+    right: 50px;
+  }
   /* ④ **目次の行**:情報ペインの目次(12px)と本文の `:::toc`(15px)を 24px に。
    *    ⚠ 本文側は行間を広げるのではなく、リンクを行ボックスにして丈を持たせる。 */
   [data-pkc-field='inspector-toc-link'] {
