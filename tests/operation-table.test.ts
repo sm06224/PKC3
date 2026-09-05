@@ -127,12 +127,14 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-09-05(#579): `copy-section-ref`(見出しの右クリック ── 登記簿の外の受け手)で +1
       // ⚠ 2026-09-05(#633 段②): スタックの鍵 3 件(`stack-push` / `stack-open` / `stack-clear`)で
       //    登記が 3 増えた(受け手は増えない ── `runGlobalCommand` の特例で受ける)
-      total: 248,
-      receivers: 201,
-      registered: 81,
-      both: 34,
+      // ⚠ 2026-09-05(#633 段③): 保存したスタック ── 受け手 `stack-save`(帯の「保存…」)と
+      //    `stack-load`(行のメニュー / 情報ペイン、登記あり)で受け手 +2 / 登記 +1
+      total: 250,
+      receivers: 203,
+      registered: 82,
+      both: 35,
       outsideActionsTable: 47,
-      unregistered: 167,
+      unregistered: 168,
     });
   });
 
@@ -157,7 +159,8 @@ describe('操作の全数台帳(#582 段①)', () => {
     // ⚠ 2026-09-05(#215): 行の右クリックが 12 → 15(名前を変える / 移す… / この中に新しいノートを作る)
     // ⚠ 2026-09-05(#215): 鍵が 53 → 56(左の列の行の F2 / F6 / Shift+F4)
     // ⚠ 2026-09-05(#633 段②): 鍵が 56 → 59(スタックの 3 手)
-    expect(s().perBook).toEqual({ key: 59, entry: 15, body: 3, collection: 2, settings: 5 });
+    // ⚠ 2026-09-05(#633 段③): 行のメニューが 15 → 16(`stack-load`)
+    expect(s().perBook).toEqual({ key: 59, entry: 16, body: 3, collection: 2, settings: 5 });
   });
 
   it('🔴 押し所へ辿れない登記を、身元で pin する', () => {

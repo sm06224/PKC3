@@ -14,7 +14,8 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { archetypeLabel } from '../../src/adapter/ui/render/sidebar';
 
-const ARCHETYPES = ['text', 'textlog', 'spreadsheet', 'folder', 'attachment', 'todo', 'form'];
+// ⚠ 2026-09-05(#633 段③): 保存したスタック `stack` を足した
+const ARCHETYPES = ['text', 'textlog', 'spreadsheet', 'folder', 'stack', 'attachment', 'todo', 'form'];
 
 describe('種別の呼び名', () => {
   it('🔴 呼び名の表が 2 つ生えていない', () => {

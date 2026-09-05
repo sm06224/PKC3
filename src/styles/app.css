@@ -887,6 +887,11 @@ select:focus-visible {
 [data-pkc-chip='smart'] {
   color: color-mix(in oklab, var(--fg) 20%, #c26a12);
 }
+/* 🔴 **スタック**(#633 段③)── 参照で集める入れ物なのでスマートフォルダの系だが、
+ * 中へ入れない別物なので**別の色**にする(同じ色だと「開けない入れ物」に見える)。 */
+[data-pkc-chip='stack'] {
+  color: color-mix(in oklab, var(--fg) 25%, #3a7a9a);
+}
 [data-pkc-chip='attachment'] {
   color: color-mix(in oklab, var(--fg) 25%, #7a5ac2);
 }

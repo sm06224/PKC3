@@ -140,6 +140,17 @@ const ICON_PATHS: Readonly<Record<string, readonly IconPath[]>> = {
     'M3 6.5h6.5l2.5 4H21V19.5H3z',
     { d: 'M12 12l1.2 2.5 2.8.4-2 2 .5 2.7-2.5-1.3-2.5 1.3.5-2.7-2-2 2.8-.4z', fill: 'solid' },
   ],
+  /**
+   * 🔴 **スタック**(#633 段③)── 重ねた 2 枚の札に**星**を重ねる。
+   * ⚠ フォルダとも普通のノートとも**見分けが付く**ことが要件 ── 中へは入れない・
+   *   手で子を入れる物ではない(本文の参照の並び)ので、同じ絵にすると「壊れている」と読まれる。
+   *   星はスマートフォルダと同じ「参照で集める入れ物」の印。
+   */
+  stack: [
+    'M5 8.5h11v9H5z',
+    'M8 5.5h11v9',
+    { d: 'M10.5 11l1.1 2.2 2.4.4-1.7 1.7.4 2.4-2.2-1.2-2.2 1.2.4-2.4-1.7-1.7 2.4-.4z', fill: 'solid' },
+  ],
   /** アプリ ── 4 枚の板。⚠ 塗る(中空だと 16px で泥になる) */
   apps: [
     { d: 'M4 4h6.5v6.5H4z', fill: 'solid' },
@@ -304,6 +315,7 @@ export const ARCHETYPE_ICONS: Readonly<Record<string, IconName>> = {
   spreadsheet: 'grid',
   folder: 'folder',
   smart: 'folder-smart',
+  stack: 'stack',
   attachment: 'clip',
   todo: 'check-box',
   form: 'form',

@@ -168,6 +168,60 @@ export function confirmInApp(
 }
 
 /**
+ * 🔴 **1 行の字を聞く**(`window.prompt` の置き換え。#633 段③ ── スタックの題名)。
+ *
+ * ⚠ `confirmInApp` と同じ器・同じ列(重なったら順番に出す)。
+ * ⚠ 空のまま受けたら **`initial` へ落とす**(空の題名のノートを作らない)── ただし
+ *   `initial` も空なら空を返す(呼び手が決める)。
+ * ⚠ `Enter` で受ける ── 1 行の欄なので、打ち終わって Enter は「決めた」の意味である
+ *   (`isComposing` の間は拾わない ── 変換確定の Enter で決めてしまう)。
+ *
+ * @returns 打った字(前後の空白は落とす)。`Escape` / 「やめる」なら `null`
+ */
+export function promptInApp(
+  host: HTMLElement,
+  opts: {
+    readonly title: string;
+    /** 欄の上に出す 1 行(何を聞いているか)。 */
+    readonly label: string;
+    readonly initial?: string;
+    readonly okLabel?: string;
+  },
+): Promise<string | null> {
+  return enqueue(async () => {
+    const f = ensureFrame(host);
+    f.title.textContent = opts.title;
+    f.body.textContent = '';
+    const label = document.createElement('label');
+    label.setAttribute('data-pkc-field', 'prompt-label');
+    label.textContent = opts.label;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.setAttribute('data-pkc-field', 'prompt-input');
+    input.value = opts.initial ?? '';
+    label.append(input);
+    f.body.append(label);
+    input.addEventListener('keydown', (ev: KeyboardEvent) => {
+      if (ev.key !== 'Enter' || ev.isComposing) return;
+      ev.preventDefault();
+      f.ok.click();
+    });
+    f.ok.textContent = opts.okLabel ?? '決める';
+    f.ok.removeAttribute('data-pkc-danger');
+    f.ok.hidden = false;
+    f.cancel.textContent = 'やめる';
+    f.cancel.hidden = false;
+    const answered = open(f, 'cancel');
+    input.focus();
+    input.select();
+    const answer = await answered;
+    if (answer !== 'ok') return null;
+    const typed = input.value.trim();
+    return typed === '' ? (opts.initial ?? '') : typed;
+  });
+}
+
+/**
  * 知らせるだけ(`window.alert` の置き換え)。
  * ⚠ ボタンは 1 つ ── 取り消す先が無いのに「やめる」を出さない。
  * 🔴 **知らせるものは絶対に捨てない** ── 断りの理由(「他のタブで編集中です」等)は

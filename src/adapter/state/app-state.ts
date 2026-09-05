@@ -24,6 +24,7 @@ import {
   STACK_MAX,
   unpinSplitLid,
 } from '@features/split-frames';
+import { STACK_ARCHETYPE, stackLids } from '@features/flavor/stack-flavor';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import type { PersistState } from '@adapter/platform/storage-persist';
 import type { OpenExtension } from '@adapter/platform/extension-links';
@@ -991,6 +992,12 @@ export type UserAction =
    *   (入れ替えたい人は「全部降ろす → 載せる」の 2 手で作れる。設計 doc §2-8)。
    */
   | { type: 'CLEAR_SPLIT' }
+  /**
+   * 🔴 **保存したスタック(入れ物)を載せ直す**(#633 段③「このスタックを載せる」)。
+   * 本文の並びを**上に積む**(全置換にしない ── 保存していない並びを黙って失う片道になる。
+   * 設計 doc §2-8)。本文が画面に無ければ効果層が読む(`REQUEST_STACK_BODY`)。
+   */
+  | { type: 'LOAD_STACK'; lid: string }
   | { type: 'SELECT_ENTRY'; lid: string }
   | { type: 'SET_VIEW_MODE'; mode: ViewMode }
   /**
@@ -1293,6 +1300,14 @@ export type UserAction =
        *  ⚠ `relationId` も一緒に渡す ── 片方だけでは辺を作れない。 */
       parentLid?: string | null;
       relationId?: string;
+      /**
+       * 🔴 **作っても中央の本文を退かさない**(#633 段③ ── 帯の「保存…」)。
+       * ⚠ 既定の `CREATE_ENTRY` は選択を新しい物へ動かし、絞りも外す。スタックの保存は
+       *   「読んでいる最中に、いまの並びを取っておく」操作なので、**さっきまで読んでいた本文が
+       *   消える**のは #300 の型である(補助的な物が主の作業領域を奪う)。
+       * 🔑 `true` なら選択・開いている本文・絞りを動かさず、編集にも入らない(`edit` より強い)。
+       */
+      keepSelection?: boolean;
     }
   | { type: 'DESELECT_ENTRY' }
   /**
@@ -1488,6 +1503,8 @@ export type SystemCommand =
     }
   /** 探せなかった(#680)。⚠ 「まだ」と区別する ── 区別しないと永久に「探しています…」。 */
   | { type: 'SEARCH_DETAIL_FAILED'; query: string }
+  /** 効果層が読んだ入れ物の本文(#633 段③)── `LOAD_STACK` の続き。 */
+  | { type: 'STACK_BODY_LOADED'; lid: string; body: string }
   | { type: 'BODY_LOADED'; lid: string; body: string }
   /**
    * 留めた枠の本文が読めた(#505 段②)。⚠ `BODY_LOADED` と**別の口**である ──
@@ -1625,6 +1642,8 @@ export type DomainEvent =
    *   別経路で読むと、並んでいる書込を追い越す(2026-08-17 に踏んだ形)。
    */
   | { type: 'REQUEST_DUAL_PREVIEW'; lid: string }
+  /** 入れ物の本文を読んで `STACK_BODY_LOADED` で返す(#633 段③)。読む口は同じ直列の列。 */
+  | { type: 'REQUEST_STACK_BODY'; lid: string }
   /**
    * 🔴 **留めた枠の本文を読む**(#505 段②)。
    *
@@ -3673,7 +3692,9 @@ function reduceCore(
         };
       }
       const body = action.body ?? seedBodyFor(action.archetype);
-      const wantsEdit = action.edit !== false;
+      // 🔑 `keepSelection` は「読んでいる物を退かさない」なので、編集にも入らない
+      const keep = action.keepSelection === true;
+      const wantsEdit = action.edit !== false && !keep;
       const ext = extractMeta(action.archetype, body);
       const lastLid = state.order[state.order.length - 1];
       const entryOrder = lastLid
@@ -3744,13 +3765,13 @@ function reduceCore(
           phase: wantsEdit ? 'editing' : 'ready', // 既定は作成 → 即編集(PKC2 の遷移)
           entryMetas: new Map(state.entryMetas).set(action.lid, meta),
           order: [...state.order, action.lid],
-          selectedLid: action.lid,
+          selectedLid: keep ? state.selectedLid : action.lid,
           // 🔴 **絞り込みを解除する**(review M-2)。既定題名は絞り込み語に一致
           // しないので、絞り込み中に作ると **一生一覧に出ない** entry ができていた
           // (実証: 保存しても出ず、「効かなかった」と思って Esc を押すと
           // 新規未編集 cancel の掃除で entry ごと消える)。
           // ⚠ 欄の文字も消える ── 書き戻しは sidebar が持つ
-          filterQuery: keepFilter ? state.filterQuery : '',
+          filterQuery: keepFilter || keep ? state.filterQuery : '',
           /**
            * 🔴 **種類の絞りも外す**(#411)── **同じ事故が軸を変えて戻ってくる**。
            * 「添付だけ」を出しているときに「ノート」を作ると、作った物は
@@ -3758,16 +3779,19 @@ function reduceCore(
            * Esc を押し、新規未編集 cancel の掃除で **entry ごと消える**
            * (review M-2 で `filterQuery` について実証済みの経路そのもの)。
            */
-          kindFilter: keepFilter ? state.kindFilter : NO_KINDS,
+          kindFilter: keepFilter || keep ? state.kindFilter : NO_KINDS,
           freshLid: wantsEdit ? action.lid : null, // 非編集作成は fresh 掃除の対象外
           error: null,
-          openBody: {
-            lid: action.lid,
-            body,
-            baseline: body,
-            persisted: body, // 楽観(ack 前)── 上記コメントの範囲で許容
-            diskAhead: false,
-          },
+          // ⚠ 退かさない作成では、開いている本文もそのまま(新しい物は選ばれていないので持たない)
+          openBody: keep
+            ? state.openBody
+            : {
+                lid: action.lid,
+                body,
+                baseline: body,
+                persisted: body, // 楽観(ack 前)── 上記コメントの範囲で許容
+                diskAhead: false,
+              },
         },
         events: [
           {
@@ -4519,6 +4543,22 @@ function reduceCore(
         events: [],
       };
     }
+    case 'LOAD_STACK': {
+      const meta = state.entryMetas.get(action.lid);
+      if (meta === undefined || meta.archetype !== STACK_ARCHETYPE) return { state, events: [] };
+      /**
+       * 🔑 本文が画面に在ればその場で積む(`screenBodyOf` ── 主の枠か横の枠)。
+       *   無ければ効果層に読ませる(押した瞬間に何も起きない、を作らない)。
+       */
+      const shown = screenBodyOf(state, action.lid);
+      if (shown === null) return { state, events: [{ type: 'REQUEST_STACK_BODY', lid: action.lid }] };
+      return loadStackFromBody(state, shown);
+    }
+    case 'STACK_BODY_LOADED': {
+      const meta = state.entryMetas.get(action.lid);
+      if (meta === undefined || meta.archetype !== STACK_ARCHETYPE) return { state, events: [] };
+      return loadStackFromBody(state, action.body);
+    }
     case 'SPLIT_BODY_LOADED': {
       /**
        * ⚠ **追い越しを捨てる**(`DUAL_PREVIEW_LOADED` と同じ)── 読みは非同期なので、
@@ -5042,6 +5082,37 @@ function placeOpenLineOf(shown: string, line: number): string | null {
 /** 板の座標・大きさの値 ── 整数で 0 以上だけ(描画も負の値は捨てる)。 */
 function isPlaceCoord(n: number): boolean {
   return Number.isInteger(n) && n >= 0;
+}
+
+/**
+ * 🔴 **保存したスタックの本文を、いまのスタックの上に積む**(#633 段③)。
+ *
+ * ⚠ **先頭が一番上**なので、本文を**下から順に** `pinSplitLid` する ── 上から積むと
+ *   並びが裏返る(本文の 1 行目が一番下に来る)。
+ * ⚠ 消えたノートの行は残っている(参照のみ)── 載せられない件数を**数えて言う**。
+ *   上限(`STACK_MAX`)で入らなかった件数も別に言う(黙って落とさない)。
+ * 🔑 載せた後の本文の読みは `REQUEST_SPLIT_BODY`(帯の札と同じ 1 本)── まだ持っていない物だけ。
+ */
+function loadStackFromBody(state: AppState, body: string): ReduceResult {
+  const wanted = stackLids(body);
+  const present = wanted.filter((l) => state.entryMetas.has(l));
+  const missing = wanted.length - present.length;
+  let lids = state.splitLids;
+  for (let i = present.length - 1; i >= 0; i -= 1) lids = pinSplitLid(lids, present[i]!);
+  const added = lids.filter((l) => !state.splitLids.includes(l));
+  const refused = present.filter((l) => !lids.includes(l)).length;
+  const parts: string[] = [];
+  if (present.length === 0) parts.push('載せられるノートがありません');
+  else parts.push(`${String(present.length - refused)} 件を載せました`);
+  if (missing > 0) parts.push(`${String(missing)} 件は見つかりません`);
+  if (refused > 0) parts.push(`上限 ${String(STACK_MAX)} 件で ${String(refused)} 件は載せられませんでした`);
+  const notice = parts.length === 1 ? parts[0]! : `${parts[0]!}(${parts.slice(1).join(' / ')})`;
+  return {
+    state: { ...state, splitLids: lids, notice },
+    events: added
+      .filter((l) => !state.splitBodies.has(l))
+      .map((l) => ({ type: 'REQUEST_SPLIT_BODY', lid: l })),
+  };
 }
 
 /**

@@ -924,6 +924,29 @@ export function connectStoreEffects(
           }
         });
         break;
+      /**
+       * 🔴 **保存したスタックの本文を読む**(#633 段③)── 画面に無いときだけ来る。
+       * ⚠ 読めなければ理由を言う(押しても無言、にしない)。読む口は同じ直列の列。
+       */
+      case 'REQUEST_STACK_BODY':
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            const body = await store.getBody(ev.lid);
+            if (disposed) return;
+            if (body === null) {
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: 'スタックの本文が読めませんでした(消えている可能性があります)',
+              });
+              return;
+            }
+            dispatcher.dispatch({ type: 'STACK_BODY_LOADED', lid: ev.lid, body });
+          } catch {
+            dispatcher.dispatch({ type: 'OP_FAILED', error: 'スタックの本文が読めませんでした' });
+          }
+        });
+        break;
       case 'REQUEST_DUAL_PREVIEW':
         enqueue(async () => {
           if (disposed) return;

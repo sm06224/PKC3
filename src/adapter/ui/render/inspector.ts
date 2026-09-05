@@ -76,6 +76,7 @@ import {
   ENTRY_ACTION_LABELS,
   entryActionHint,
 } from '@features/entry-actions';
+import { STACK_ARCHETYPE } from '@features/flavor/stack-flavor';
 
 /** 素性の行(`data-pkc-field` → 値を入れる `<dd>`)。 */
 type Rows = Map<string, HTMLElement>;
@@ -769,6 +770,9 @@ export class InspectorRenderer {
     // 🔴 「この中に新しいノートを作る」も同じ門(#215)── 入れ物でなければ畳む
     const inFolderBtn = this.buttons.get('create-in-folder');
     if (inFolderBtn) inFolderBtn.hidden = meta.archetype !== 'folder';
+    // 🔴 保存したスタックにだけ出す(#633 段③)── `export-folder` と同じ作法(消さずに畳む)
+    const stackBtn = this.buttons.get('stack-load');
+    if (stackBtn) stackBtn.hidden = meta.archetype !== STACK_ARCHETYPE;
     this.paintAdoptImages(state, meta.lid);
     for (const [action, b] of this.buttons) {
       /**
@@ -1222,6 +1226,11 @@ export class InspectorRenderer {
      */
     btn('copy-plain-markdown', ENTRY_ACTION_LABELS['copy-plain-markdown']!);
     btn('open-note-window', ENTRY_ACTION_LABELS['open-note-window']!);
+    /**
+     * 🔴 **保存したスタックを載せる**(#633 段③)。⚠ スタックの入れ物のときだけ出す
+     *   (`render` で `hidden` を付け外し ── `export-folder` と同じ作法)。
+     */
+    btn('stack-load', ENTRY_ACTION_LABELS['stack-load']!);
     /**
      * 🔴 **外部の画像を手元へ取り込む**(#264 段①)。
      *

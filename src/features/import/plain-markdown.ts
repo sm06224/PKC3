@@ -43,6 +43,9 @@ const ACCEPTED_ARCHETYPES: ReadonlySet<string> = new Set([
   //    archetype に置いた理由そのものなので、ここを落とすとその理由が嘘になる。
   //    ⚠ 単一 md で完結する(bytes を持たない)ので `attachment` の理由は当たらない。
   'snippet',
+  // 🔴 **スタックも受ける**(#633 段③)── 受けないと、書き出した入れ物を取り込み直したとき
+  //    普通のノートに化ける(雛形と同じ理由。本文はリンクの箇条書きで単一 md に収まる)
+  'stack',
   'folder',
   'generic',
   'opaque',

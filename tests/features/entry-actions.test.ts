@@ -277,6 +277,8 @@ describe('右クリックの説明(#587 C-1)', () => {
       ['copy-plain-markdown', '73e9b322'],
       // 🔴 スタックに載せる(#633 段①、2026-09-05)── 帯の名前と押す字を同じ語にし、説明を持たせた
       ['pin-split', '1621a667'],
+      // 🔴 保存したスタックを載せる(#633 段③)
+      ['stack-load', 'd23f50ac'],
       ['show-history', '2511b05b'],
       ['delete-entry', '661f5844'],
       // 🔴 **左の列の道具 4 つ**(#632 段①)── 本文ページの ⋯ から押せるようにした
@@ -311,14 +313,20 @@ describe('右クリックの説明(#587 C-1)', () => {
     expect(drift, '説明の取り違え / 書き換えが記録に残っていない').toEqual([]);
   });
 
-  /** ⚠ 条件つきの 2 つも出る文脈 ── これを使わないと 2 行が**一度も検められない**。 */
+  /**
+   * ⚠ 条件つきの物も出る文脈 ── これを使わないと条件つきの行が**一度も検められない**。
+   * ⚠ 2026-09-05(#633 段③): 種類の条件が 2 つ(フォルダ / スタック)になり、1 つの文脈では
+   *   全部を出せない ── **2 つの文脈の和**で全数を見る。
+   */
   const ALL = { archetype: 'folder', linkedFile: 'メモ.md' } as const;
+  const ALL_STACK = { archetype: 'stack', linkedFile: 'メモ.md' } as const;
 
   it('🔴 出る項目は 1 つ残らず説明を持つ(足した人がここで気づく)', () => {
-    const rows = entryMenuActions(ALL);
-    // ⚠ 空振り防止 ── 条件つきの 2 つを含めて全部出ている
-    expect(rows.length, '条件つきの行が出ていない(台の前提が崩れている)').toBe(
-      ENTRY_MENU_ACTIONS.length,
+    const rows = [...entryMenuActions(ALL), ...entryMenuActions(ALL_STACK)];
+    const seen = new Set(rows.map((a) => a.action));
+    // ⚠ 空振り防止 ── 条件つきの行を含めて全部出ている
+    expect([...seen].sort(), '条件つきの行が出ていない(台の前提が崩れている)').toEqual(
+      ENTRY_MENU_ACTIONS.map((a) => a.action).sort(),
     );
     const silent = rows.filter((a) => a.hint === '').map((a) => a.action);
     expect(silent, '説明が空のまま配られている項目がある').toEqual([]);

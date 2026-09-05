@@ -25,6 +25,8 @@
  * ⚠ **pure module**。browser API を持たない。
  */
 
+import { STACK_ARCHETYPE } from './flavor/stack-flavor';
+
 /** 操作 1 つ。`action` は `data-pkc-action` の値と**同じ綴り**である。 */
 export interface EntryAction {
   readonly action: string;
@@ -40,7 +42,7 @@ export interface EntryAction {
    *   本文を読まないと決まらない条件をここへ入れると、右クリックした瞬間に
    *   worker を叩く経路がもう 1 本増える(§7)。
    */
-  readonly when?: 'folder' | 'linked';
+  readonly when?: 'folder' | 'linked' | 'stack';
 }
 
 /**
@@ -62,6 +64,8 @@ const WHEN: Readonly<
 > = {
   folder: (ctx) => ctx.archetype === 'folder',
   linked: (ctx) => ctx.linkedFile !== null,
+  // 🔴 保存したスタック(#633 段③)── 綴りは flavor の 1 か所から引く
+  stack: (ctx) => ctx.archetype === STACK_ARCHETYPE,
 };
 
 /**
@@ -137,6 +141,12 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    *   字(「すでに別のウィンドウで開いています」)が全部「ウィンドウ」なので揃える。
    */
   { action: 'open-note-window', label: '別のウィンドウで開く' },
+  /**
+   * 🔴 **保存したスタックを、いまのスタックの上に積む**(#633 段③。user 裁定 2026-08-30)。
+   * ⚠ スタックの入れ物にだけ出す(`when: 'stack'`)── 他のノートで押しても積む物が無い。
+   * ⚠ 開いただけでは横の枠は変わらない(設計 doc §2-8)── 押した瞬間に積まれる。
+   */
+  { action: 'stack-load', label: 'このスタックを載せる', when: 'stack' },
   { action: 'export-entry', label: '書き出す' },
   /**
    * 🔴 **相手に渡せる 1 枚**(#491。user 報告 2026-08-27
@@ -624,6 +634,8 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
    *   押した物の対応が読めない。説明は**押した後に画面で起きること**で書く。
    */
   'pin-split': '一番上に載って横の枠に出ます。上の帯に並び、押せば一番上へ戻せます',
+  // 🔴 保存したスタックを載せる(#633 段③)── 積む(入れ替えない)ことと、消えた物の扱いを先に言う
+  'stack-load': 'このノートに並んだリンク先を、いま横に出ている物の上に積みます(消えた物は数えて言います)',
   'show-history': '過去の版を一覧します',
   // ⚠ **行き先は画面に在る名前で書く**(2026-08-29 の動線レビュー)── 直す前は
   //    「フォルダ画面」と書いていたが、**その名前の画面は無い**(タブの字は「フォルダ」で、

@@ -421,3 +421,55 @@ test('🔴 横に留めた枠は、開き直しても留まったまま出る (#
 
   expect(errors, 'ページ例外 0 件').toEqual([]);
 });
+
+/**
+ * 🔴 **スタックを「参照のみのフォルダ」として保存し、載せ直せる**(#633 段③)。
+ *
+ * unit で届かない層:①帯の「保存…」→ 自前の窓 → 一覧に**星つきのチップ**で並ぶ(CSS と
+ * 図案は実ブラウザでしか見えない)②載せ直すと**同じ順**で帯に並ぶ(描き直しの流れごと)。
+ * ⚠ 本文は退かない(選んでいるノートがそのまま)── #300 の型を作っていないことを見る。
+ */
+test('🔴 帯の「保存…」で星つきの入れ物ができ、載せ直すと同じ順で帯に並ぶ (#633 段③)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await gotoApp(page);
+
+  await createEntry(page, 'text');
+  await writeBody(page, '# 資料 A\n\n本文 A');
+  await createEntry(page, 'text');
+  await writeBody(page, '# 資料 B\n\n本文 B');
+
+  // 資料 B(いま開いている)を載せ、次に資料 A を載せる → 一番上は A
+  await page.keyboard.press('Alt+Shift+S');
+  await page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').last().click();
+  await page.keyboard.press('Alt+Shift+S');
+  const cards = page.locator('[data-pkc-field="stack-card"] [data-pkc-action="pin-split"]');
+  await expect(cards).toHaveText(['資料 A', '資料 B']);
+
+  // 保存… → 題名を決める。読んでいる本文(資料 A)は退かない
+  await clickReal(page, '[data-pkc-region="stack-bar"] [data-pkc-action="stack-save"]');
+  const dialog = page.locator('[data-pkc-region="app-dialog"]');
+  await expect(dialog, '題名を聞く窓が出ない').toBeVisible();
+  await dialog.locator('[data-pkc-field="prompt-input"]').fill('今週の束');
+  await dialog.locator('[data-pkc-field="dialog-ok"]').click();
+  await expect(
+    page.locator('[data-pkc-split-main] [data-pkc-field="detail-body"] h1').first(),
+    '保存したら読んでいた本文が退いた',
+  ).toContainText('資料 A');
+  // 一覧に星つき(スタックのチップ)で並ぶ
+  const row = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]', { hasText: '今週の束' });
+  await expect(row, '保存した入れ物が一覧に無い').toHaveCount(1);
+  await expect(row.locator('[data-pkc-chip="stack"]'), 'スタックのチップが付いていない').toHaveCount(1);
+
+  // 全部降ろしてから、入れ物を開いて「このスタックを載せる」→ 同じ順で戻る
+  await page.keyboard.press('Alt+Shift+D');
+  await expect(page.locator('[data-pkc-region="stack-bar"]')).toHaveCount(0);
+  await row.click();
+  await expect(page.locator('[data-pkc-field="detail-body"] a[href^="entry:"]')).toHaveCount(2);
+  await clickReal(page, '[data-pkc-field="inspector-actions"] [data-pkc-action="stack-load"]');
+  await expect(cards).toHaveText(['資料 A', '資料 B']);
+
+  expect(errors, 'ページ例外 0 件').toEqual([]);
+});

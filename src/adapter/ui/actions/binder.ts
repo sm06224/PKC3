@@ -85,6 +85,7 @@ import {
 } from '@features/entry-ref/entry-pick';
 import { formatEntryLink, formatSectionLink } from '@features/entry-ref/entry-ref-format';
 import { knownSplitLids } from '@features/split-frames';
+import { STACK_ARCHETYPE, stackBody } from '@features/flavor/stack-flavor';
 import { insertionForLineDate } from '@features/schedule/line-date';
 import { addDays, dayStamp, daysBetween } from '@features/datetime/date-math';
 import {
@@ -204,6 +205,7 @@ import {
   pickEntryInApp,
   pickSnippetInApp,
   pickDiagramInApp,
+  promptInApp,
   isAppDialogOpen,
   type ConfirmOptions,
 } from '@adapter/ui/render/app-dialog';
@@ -1085,6 +1087,9 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'undo-append',
   // ⚠ 塊の移動の「元に戻す」も同じ経路(#684 段①)
   'undo-move',
+  // 🔑 スタックの保存はノートを 1 件**作る**(`CREATE_ENTRY`。#633 段③)── 取込・書出しの
+  //    最中に entry を足すと、総入れ替えの裏で 1 件増える形になるので同じ門をくぐらせる
+  'stack-save',
   /**
    * 🔴 **外部の画像を取り込むのも本文を書く**(#264 段①)── 同じ
    *   `REQUEST_BODY_REWRITE` を撃つので、同じ門をくぐらせる。
@@ -5453,6 +5458,77 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = own !== null && own !== undefined && own !== '' ? own : dispatcher.getState().selectedLid;
     if (lid === null) return;
     dispatcher.dispatch({ type: 'PIN_SPLIT_ENTRY', lid });
+  },
+  /**
+   * 🔴 **いまのスタックを「スタック」のノートとして保存する**(#633 段③。帯の「保存…」)。
+   *
+   * ⚠ 題名は聞く(`promptInApp`)── 既定は「スタック M/D」。⚠ 本文は**いまの並びの順**で
+   *   `stackBody` が組む(上から順 = 帯の左から)。
+   * 🔴 **読んでいる本文を退かさない** ── `CREATE_ENTRY` は既定で選択を新しい物へ動かすので、
+   *   `keepSelection: true` で作り、できた物へは知らせの「開く」で行ける(#668 A の口)。
+   * ⚠ 空のスタックは保存しない / 編集中は断る(帯のボタンも `disabled` だが、鍵からも来る)。
+   */
+  'stack-save': (dispatcher, _target, _services, root) => {
+    const st = dispatcher.getState();
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終えてから、スタックを保存してください' });
+      return;
+    }
+    const lids = knownSplitLids(st.splitLids, st.entryMetas);
+    if (lids.length === 0) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: 'スタックに載せてあるノートがありません(先に載せてください)',
+      });
+      return;
+    }
+    const now = new Date();
+    const initial = `スタック ${String(now.getMonth() + 1)}/${String(now.getDate())}`;
+    void promptInApp(root, {
+      title: 'スタックを保存する',
+      label: `${String(lids.length)} 件の並びを、リンクの箇条書きのノートとして保存します。題名:`,
+      initial,
+      okLabel: '保存する',
+    }).then((title) => {
+      if (title === null) return;
+      // ⚠ 開いている間に降ろされていることがある ── 保存するのは**押した時点ではなく決めた時点**の並び
+      const cur = dispatcher.getState();
+      const items = knownSplitLids(cur.splitLids, cur.entryMetas).map((lid) => ({
+        lid,
+        title: cur.entryMetas.get(lid)?.title ?? '',
+      }));
+      if (items.length === 0) {
+        dispatcher.dispatch({ type: 'OP_FAILED', error: 'スタックが空になったので保存しませんでした' });
+        return;
+      }
+      const lid = generateLid();
+      dispatcher.dispatch({
+        type: 'CREATE_ENTRY',
+        lid,
+        title,
+        archetype: STACK_ARCHETYPE,
+        body: stackBody(items),
+        edit: false,
+        keepSelection: true,
+      });
+      dispatcher.dispatch({
+        type: 'OP_NOTICE',
+        message: `「${title}」に ${String(items.length)} 件の並びを保存しました`,
+        open: lid,
+      });
+    });
+  },
+  /**
+   * 🔴 **保存したスタックを載せる**(#633 段③「このスタックを載せる」)。
+   * ⚠ 対象は押した行(情報ペインのボタンは `data-pkc-entry` を持つ)か、無ければ選んでいるノート。
+   *   積み方(上に積む・見つからない物を数える)は reducer(`LOAD_STACK`)が 1 か所で持つ。
+   */
+  'stack-load': (dispatcher, target) => {
+    const lid =
+      target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ??
+      dispatcher.getState().selectedLid;
+    if (lid === null) return;
+    dispatcher.dispatch({ type: 'LOAD_STACK', lid });
   },
   /** 🔴 **外す**(#505 段②)。⚠ 置けるなら外せる ── 枠の中の `× 外す` が押す。 */
   'unsplit-entry': (dispatcher, target) => {
