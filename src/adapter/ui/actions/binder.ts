@@ -71,7 +71,7 @@ import {
 } from '@features/entry-ref/entry-pick';
 import { formatEntryLink } from '@features/entry-ref/entry-ref-format';
 import { insertionForLineDate } from '@features/schedule/line-date';
-import { addDays, daysBetween } from '@features/datetime/date-math';
+import { addDays, dayStamp, daysBetween } from '@features/datetime/date-math';
 import {
   DATE_SHORTCUTS,
   isDateShortcut,
@@ -4698,7 +4698,9 @@ const ACTIONS: Record<string, ActionHandler> = {
       });
       return;
     }
-    const today = new Date().toISOString().slice(0, 10);
+    // 🔑 「今日」は**端末の暦日**(`dayStamp`)── `toISOString` は UTC なので、
+    //    日本の 0 時〜9 時に押すと前日の名前になっていた(#709)
+    const today = dayStamp(new Date());
     downloadBlob(
       settingsFileName(today),
       new Blob([JSON.stringify(file, null, 2)], { type: 'application/json' }),
@@ -4721,7 +4723,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: '書き出せる連絡先がありません' });
       return;
     }
-    const today = new Date().toISOString().slice(0, 10);
+    const today = dayStamp(new Date()); // 端末の暦日(export-settings と同じ 1 本)
     downloadBlob(
       `連絡先-${today}.vcf`,
       new Blob([buildVcf(cards)], { type: 'text/vcard' }),

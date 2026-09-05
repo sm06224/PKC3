@@ -161,7 +161,16 @@ describe('設定の持ち出しの配線(#414)', () => {
     root.querySelector<HTMLElement>('[data-pkc-action="export-settings"]')!.click();
     await tick();
     expect(clicks, '落ちていない').toHaveLength(1);
-    expect(clicks[0], '名前に日付が入っていない').toMatch(/^PKC3-settings-\d{4}-\d{2}-\d{2}\.json$/);
+    // 🔑 形だけでなく**実値**(端末の暦日)と一致させる(#709)── `\d{4}-\d{2}-\d{2}` は
+    //    UTC の日付でも満たされる。⚠ 期待値は実装と別の綴り(local の getter)で組む。
+    //    UTC と JST で答えが分かれる場面は `tests/adapter/export-day-stamp.test.ts`
+    const now = new Date();
+    const today = [
+      now.getFullYear(),
+      String(now.getMonth() + 1).padStart(2, '0'),
+      String(now.getDate()).padStart(2, '0'),
+    ].join('-');
+    expect(clicks[0], '名前の日付が端末の暦日でない').toBe(`PKC3-settings-${today}.json`);
     vi.restoreAllMocks();
   });
 });

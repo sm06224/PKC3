@@ -45,7 +45,7 @@ import { formatEntryLink } from '@features/entry-ref/entry-ref-format';
 import { iconButton } from './icons';
 // ⚠ 日付の切り方は `features/datetime/stored-date` が正本(一覧の行と共有)。
 //    ここで独自に parse していた頃は、一覧に日付を出すときに規則が 2 つに増えた
-import { formatStoredDate } from '@features/datetime/stored-date';
+import { formatStoredDate, storedInstantIso } from '@features/datetime/stored-date';
 // 居場所の解決は `features/relation/tree` が正本(ファイラの帯・パンくずと共有)
 import { readTags, sameTag } from '@features/flavor/tags';
 import { collectEntryTags } from '@features/flavor/entry-tags';
@@ -731,8 +731,9 @@ export class InspectorRenderer {
         this.tagCandidates.append(opt);
       }
     }
-    this.setRow('inspector-created', formatStoredDate(meta.createdAt));
-    this.setRow('inspector-updated', formatStoredDate(meta.updatedAt));
+    // 🔑 字は端末の暦日、`datetime` 属性は UTC の瞬間(機械可読・読み上げ向け。#709)
+    this.setTimeRow('inspector-created', meta.createdAt);
+    this.setTimeRow('inspector-updated', meta.updatedAt);
     this.paintDate(meta, editing, blockedNote);
     this.paintRelationAdd(editing, blockedNote);
     // 🔴 **どのファイルから来たか**を出す(2026-08-05)── 出さないと、書き戻しが
@@ -836,6 +837,26 @@ export class InspectorRenderer {
   private setRow(field: string, value: string): void {
     const dd = this.rows.get(field);
     if (dd) setText(dd, value);
+  }
+
+  /**
+   * 時刻の行(作成 / 更新)。字は `formatStoredDate`(端末の暦日)、
+   * `<time datetime>` に UTC の瞬間を置く(#709。cowork 推薦 ── 読み上げにも効く)。
+   * ⚠ `<time>` は 1 度作って使い回す(`setRow` の textContent 差し替えは子を消す)。
+   * ⚠ 瞬間として読めない値(`—` / 形の違う字)は属性を**外す** ── 古い値を残さない。
+   */
+  private setTimeRow(field: string, value: string | null | undefined): void {
+    const dd = this.rows.get(field);
+    if (!dd) return;
+    let t = dd.querySelector<HTMLTimeElement>('time');
+    if (t === null) {
+      t = document.createElement('time');
+      dd.append(t);
+    }
+    setText(t, formatStoredDate(value));
+    const iso = storedInstantIso(value);
+    if (iso === null) t.removeAttribute('datetime');
+    else setAttr(t, 'datetime', iso);
   }
 
   /**

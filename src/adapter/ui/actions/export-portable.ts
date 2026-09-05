@@ -19,6 +19,7 @@
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { safeName } from '@features/export/file-name';
+import { dayStamp } from '@features/datetime/date-math';
 import { writePortableBundle } from '@features/export/portable-bundle';
 import type { PortableBundle } from '@features/portable/bundle';
 
@@ -55,8 +56,8 @@ function defaultMintId(): string {
   return `pkcb-${Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')}`;
 }
 
-const stamp = (d: Date): string =>
-  `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+// 🔑 file 名の「今日」は `dayStamp`(端末の暦日)1 本 ── ここに私的な stamp を持たない(#709)
+const stamp = (d: Date): string => dayStamp(d, '');
 
 /**
  * 書き出して download させる。

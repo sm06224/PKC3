@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { addDays, daysBetween } from '../../src/features/datetime/date-math';
+import { addDays, dayStamp, daysBetween } from '../../src/features/datetime/date-math';
 
 /**
  * 🔴 **日付の加減算を 1 か所に寄せた**(#344 段①)。
@@ -56,7 +56,7 @@ describe('daysBetween ── 日そのものを数える', () => {
    *   この箱は UTC なので、切り替えないと**夏時間の行を 1 度も通らない**
    *   (CLAUDE.md §2「経路が一度も通っていない」)。
    *
-   * 🔑 **空振りでないことを変異で確かめてある**(2026-08-24)── `stamp()` を
+   * 🔑 **空振りでないことを変異で確かめてある**(2026-08-24)── `dayStamp()` を
    *   `at.toISOString().slice(0, 10)` に替える(**ありがちな書き方**)と、
    *   `TZ=Asia/Tokyo` で **3 件が落ちる**(local の 0 時が前日の 15:00Z になるため)。
    * ⚠ 逆に「UTC で組むこと」自体を殺す変異は**書けない**(上のとおり丸めが吸う)──
@@ -100,5 +100,39 @@ describe('daysBetween ── 日そのものを数える', () => {
   it('読めない字は null', () => {
     expect(daysBetween('2026-08-25', 'x')).toBeNull();
     expect(daysBetween('x', '2026-08-25')).toBeNull();
+  });
+});
+
+/**
+ * 🔴 **`dayStamp` は端末の暦日**(#709)。書き出す file 名の「今日」がここ 1 本に
+ *   寄ったので、UTC で組む書き方(`toISOString().slice(0, 10)`)に戻ると
+ *   **JST の 0 時〜9 時に落とした file が前日の名前になる**。
+ * 🔑 同じ瞬間を UTC と JST で見て、答えが分かれることを pin する。
+ */
+describe('dayStamp ── 端末の暦日', () => {
+  const AT = new Date('2026-08-04T23:30:00Z'); // JST では 8/5 08:30
+
+  const withTZ = <T,>(tz: string, fn: () => T): T => {
+    const before = process.env.TZ;
+    process.env.TZ = tz;
+    try {
+      return fn();
+    } finally {
+      if (before === undefined) delete process.env.TZ;
+      else process.env.TZ = before;
+    }
+  };
+
+  it('🔴 UTC の深夜は JST では翌日(UTC のままなら前日の名前になる)', () => {
+    expect(withTZ('Asia/Tokyo', () => dayStamp(AT))).toBe('2026-08-05');
+    expect(withTZ('UTC', () => dayStamp(AT))).toBe('2026-08-04');
+  });
+
+  it('区切りは引数(file 名は空)、桁は 2 桁に詰める', () => {
+    withTZ('UTC', () => {
+      expect(dayStamp(AT, '')).toBe('20260804');
+      expect(dayStamp(new Date('2026-01-05T12:00:00Z'))).toBe('2026-01-05');
+      expect(dayStamp(new Date('2026-01-05T12:00:00Z'), '/')).toBe('2026/01/05');
+    });
   });
 });
