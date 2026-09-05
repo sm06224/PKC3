@@ -1069,11 +1069,14 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     //    **+1 件**(本物の clipboard の往復と、見出しが版面の中に来ることは unit では見えない)
     // ⚠ 2026-09-05(#633 段③): `split-frames` に「保存 → 星つきで並ぶ → 載せ直すと同じ順」
     //    1 件(チップの図案と描き直しの流れは実ブラウザでしか見えない)で **+1 件**
-    expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(81);
+    // ⚠ 2026-09-05(#699 / #704): `table-width` と `inspector-fit` の 2 file を足した
+    //    (狭い器での折れ方と、実寸の当たり判定は unit では見えない)
+    // ⚠ 2026-09-05(#705 / #700): `phone` に 2 件・`context-menu` に 1 件・`inspector-fit` の中身
+    expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(83);
     expect(
       counts.reduce((a, b) => a + b, 0),
       'smoke の test が増減した(足したらこの数を直す)',
-    ).toBe(438);
+    ).toBe(444);
   });
 });
 
