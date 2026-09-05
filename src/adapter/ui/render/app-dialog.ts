@@ -519,6 +519,30 @@ export function pickDiagramInApp(
   });
 }
 
+/**
+ * 🔴 **表を持ち出す形を選ぶ**(#708 段①)。
+ *
+ * ⚠ 器は雛形・図の一覧と**同じ 1 本**(`pickRowInApp`)── 「押した行がそのまま答え」
+ *   「`Escape` / やめる / 外を押すと `null`」「焦点を返す」を 3 つの一覧で
+ *   食い違わせない(CLAUDE.md §7)。
+ * ⚠ 何が並ぶかは `features/markdown/table-copy.ts` の `TABLE_COPY_CHOICES` が正本 ──
+ *   ここは字と id を受け取って並べるだけ。
+ *
+ * @returns 選んだ形の id。`Escape` / 「やめる」/ 外なら `null`
+ */
+export function pickCopyFormatInApp(
+  host: HTMLElement,
+  choices: readonly { readonly id: string; readonly label: string }[],
+): Promise<string | null> {
+  return pickRowInApp(host, {
+    title: 'この表をコピー',
+    field: 'pick-copy-format',
+    indexAttr: 'data-pkc-copy-format-index',
+    note: '',
+    rows: choices.map((c) => ({ label: c.label, value: c.id })),
+  });
+}
+
 /** 「一覧から 1 行選ぶ」器の中身。⚠ `field` は行の `data-pkc-field`(test / smoke が見る)。 */
 interface PickRowsSpec<T> {
   readonly title: string;

@@ -34,7 +34,7 @@ import type { Token } from 'markdown-it';
 import footnotePlugin from 'markdown-it-footnote';
 import { makeSlugCounter } from './markdown-toc';
 import { highlightCode, isHighlightable } from './code-highlight';
-import { renderCsvFence } from './csv-table';
+import { detectCsvLang, renderCsvFence } from './csv-table';
 import { buildHtmlSandboxIframe } from './html-sandbox';
 import {
   EXTERNAL_IMAGE_ATTR,
@@ -415,6 +415,33 @@ function toggleKey(content: string, salt: string): string {
   return h.toString(36).padStart(7, '0');
 }
 
+/**
+ * 🔴 **表の持ち出し方を選ぶ口**(#708 段①)。
+ *
+ * > user の物語(#708): 「表計算に貼る」以外の形が欲しい ── markdown の表・
+ * > HTML・CSV、それに **`.csv` の file**。
+ *
+ * 🔴 **⧉ はそのまま残す。** 押した 1 手で今までどおり TSV + HTML が入る ──
+ *   ここは**隣に足す 2 つ目の口**である(いちばん多い用事を 2 手に増やさない。
+ *   CLAUDE.md「記法を減らすことは、user の動線を減らすことである」)。
+ * 🔴 **`data-pkc-action` は ⧉ と同じ**にする。⚠ 別名にすると、binder の居ない面
+ *   (書き出した HTML / マニュアルの窓)で**押しても何も起きない飾り**として
+ *   焼き込まれる ── あちらは `copy-md-block` を名指しで取り除いているので、
+ *   名前を分けた瞬間に**両方へ足しに行く**必要が出る(片方を忘れる型)。
+ *   どちらの口かは `data-pkc-copy-menu` で見分ける。
+ * ⚠ class も ⧉ と**同じものを重ねる**(`pkc-md-copy-btn` + 印) ── 大きさ・
+ *   触れたときに出る作法・押した合図(`data-pkc-flash`)を 2 組書かないため。
+ * ⚠ **表を出す囲みにだけ付ける** ── コード囲みや図に「CSV で保存」を出しても
+ *   選べる物が無い(押せるのに意味の無い口を作らない)。
+ */
+function copyMenuButtonHtml(): string {
+  return (
+    `<button class="pkc-md-copy-btn pkc-md-copy-menu-btn" data-pkc-action="copy-md-block"` +
+    ` data-pkc-copy-menu="table" type="button"` +
+    ` aria-label="コピーの形を選ぶ" title="コピーの形を選ぶ">▾</button>`
+  );
+}
+
 function buildRenderableBlockHtml(
   fence: RenderableFence,
   slotHtml: string,
@@ -442,6 +469,8 @@ function buildRenderableBlockHtml(
   const sourceHtml = `<pre class="pkc-render-source"><code class="language-${fence.lang}">${highlightCode(content, fence.lang)}</code></pre>`;
   return `<div class="pkc-md-block" data-pkc-md-block-kind="code" data-pkc-render-lang="${fence.lang}" data-pkc-render-mode="${fence.mode}"${sourceLineAttrs}>` +
     `<button class="pkc-md-copy-btn" data-pkc-action="copy-md-block" data-pkc-copy-kind="code" type="button" aria-label="コピー" title="コピー">⧉</button>` +
+    // ⚠ 表を出す囲み(csv / tsv / psv)だけ ── 図や HTML には選べる形が無い
+    (detectCsvLang(fence.lang) !== null ? copyMenuButtonHtml() : '') +
     toggleHtml +
     `<div class="pkc-render-slot">${slotHtml}</div>` +
     sourceHtml +
@@ -773,7 +802,9 @@ md.renderer.rules.table_open = function (tokens, idx, options, _env, self) {
   // the same source range.
   const token = tokens[idx]!;
   const sourceLineAttrs = collectSourceLineAttrs(token);
-  return `<div class="pkc-md-block" data-pkc-md-block-kind="table"${sourceLineAttrs}><button class="pkc-md-copy-btn" data-pkc-action="copy-md-block" data-pkc-copy-kind="table" type="button" aria-label="コピー" title="コピー">⧉</button>${self.renderToken(tokens, idx, options)}`;
+  // 🔴 **csv の表と同じ口を出す**(#708 段①)── 直す前は csv の囲みにしか
+  //    形を選ぶ道が無く、同じ「表」なのに持ち出し方が違っていた
+  return `<div class="pkc-md-block" data-pkc-md-block-kind="table"${sourceLineAttrs}><button class="pkc-md-copy-btn" data-pkc-action="copy-md-block" data-pkc-copy-kind="table" type="button" aria-label="コピー" title="コピー">⧉</button>${copyMenuButtonHtml()}${self.renderToken(tokens, idx, options)}`;
 };
 md.renderer.rules.table_close = function (tokens, idx, options, _env, self) {
   return `${self.renderToken(tokens, idx, options)}</div>`;

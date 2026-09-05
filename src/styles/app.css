@@ -2249,6 +2249,20 @@ li[data-pkc-row-slot] {
   cursor: pointer;
   opacity: 0;
 }
+/* 🔴 **コピーの形を選ぶ口**(#708 段①)。⧉ の**左隣**に置いて、2 つで 1 つの
+ * 操作子に見えるようにする ── ⧉ の 1 押し(表計算に貼る)は今までどおり残し、
+ * 形を選びたいときだけ ▾ を押す。⚠ 大きさと出方は ⧉ の規則を重ねて借りる
+ * (`pkc-md-copy-btn` を併記)── 触れたときに出る作法を 2 組書かない */
+.pkc-md-rendered .pkc-md-copy-menu-btn {
+  right: 26px;
+  width: 18px;
+}
+/* 表を出す囲みでは右上に ⧉ ▾ の 2 つが入るので、ソース切替をその左へ寄せる。
+ * ⚠ 言語名(csv / tsv / psv)を CSS に書かない ── その一覧は `csv-table.ts` の
+ *    1 本きりで、ここに写すと 2 か所目になる(片方だけ古くなる) */
+.pkc-md-rendered .pkc-md-block:has(> .pkc-md-copy-menu-btn) > .pkc-render-toggle {
+  right: 48px;
+}
 /* ⚠ 触れる / focus したときだけ出す(高密度な面に常時 2 個並べない)。
  *    focus-within を入れないとキーボードだけの user に見えない */
 /* 🔴 **押した結果が見える**(P8 段㉒)。`copy-md-block.ts` は 700ms だけ
@@ -5899,6 +5913,16 @@ li[data-pkc-row-slot] {
     right: 28px;
     min-width: 24px;
     line-height: 22px;
+  }
+  /* 🔴 **表の囲みは右上に 3 つ並ぶ**(#708 段① / 2026-09-05 の着地前レビュー C-1)。
+   *    ⧉ と ▾ が **24px ずつ**になるので、素の 48px では ‹/› が **2px 食い込む**
+   *    (実測: ‹/› の右端 334 / ▾ の左端 332 ── 中心は空いているので
+   *    `expectReachable` も、⧉ しか採っていなかった `table-width.smoke` も鳴らなかった)。
+   *    ⚠ ▾ を細くして避けない ── 触る端末の押し所は 24px 以上、が先に在る規律である。
+   *    🔑 だから ‹/› のほうを 24 + 24 + 2 = **50px** へ寄せる。
+   *    守り: `touch-targets.smoke.spec.ts` が 3 つの矩形を**隣どうしで**突き合わせる。 */
+  .pkc-md-rendered .pkc-md-block:has(> .pkc-md-copy-menu-btn) > .pkc-render-toggle {
+    right: 50px;
   }
   /* ④ **目次の行**:情報ペインの目次(12px)と本文の `:::toc`(15px)を 24px に。
    *    ⚠ 本文側は行間を広げるのではなく、リンクを行ボックスにして丈を持たせる。 */

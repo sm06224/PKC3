@@ -154,6 +154,54 @@ test.describe('指で触る端末(#706)', () => {
   });
 
   /**
+   * 🔴 **右上に並ぶ 3 つが、指の端末で重ならない**(2026-09-05、着地前レビュー C-1)。
+   *
+   * ⚠ `@media (hover: none) and (pointer: coarse)` は ⧉ を **24px** へ広げる。
+   *   #708 段① で ⧉ と ‹/› の間に ▾ が入ったので、**幅の見積もりを取り違えると
+   *   2px だけ食い込む** ── ⚠ 中心は空いたままなので `expectReachable` は通り、
+   *   `table-width.smoke` の「重なっていない」も(直す前は)⧉ しか採っていなかった。
+   * 🔑 だから**矩形どうしで**見る ── 名指しではなく「右上に並ぶ物を全部」採り、
+   *   隣り合う 2 つが 1px でも重なったら落とす。
+   * ⚠ 触る端末でしか出ない(素の規則では 18px なので重ならない)。
+   */
+  test('🔴 csv の表の右上(⧉ / ▾ / ‹/›)が、指の端末でも重ならない', async ({ page }) => {
+    const errors = collectPageErrors(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await useSplitEditor(page);
+    await useListBrowse(page);
+    await gotoApp(page);
+    await dismissAnnounce(page);
+    await createEntry(page, 'text');
+    await page
+      .locator('[data-pkc-field="editor-body"]')
+      .fill('```csv\n名前,メモ\na,b\n```\n');
+    await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+
+    const rects = await page.evaluate(() => {
+      const block = document
+        .querySelector('table.pkc-md-rendered-csv')
+        ?.closest('.pkc-md-block');
+      if (block === null || block === undefined) return null;
+      return [...block.querySelectorAll('.pkc-md-copy-btn, .pkc-render-toggle')]
+        .map((el) => {
+          const r = el.getBoundingClientRect();
+          return { name: el.className, left: r.left, right: r.right, w: r.width };
+        })
+        .sort((a, b) => a.left - b.left);
+    });
+    // 空振り防止 ── 3 つ揃っていなければ、下の重なり判定は何も見ていない
+    expect(rects, 'csv の塊が見つからない').not.toBeNull();
+    expect(rects!.length, `右上のボタンが 3 つ揃っていない(${JSON.stringify(rects)})`).toBe(3);
+    for (let i = 1; i < rects!.length; i += 1) {
+      expect(
+        rects![i]!.left,
+        `右上のボタンが重なっている(${JSON.stringify(rects)})`,
+      ).toBeGreaterThanOrEqual(rects![i - 1]!.right);
+    }
+    expect(errors, 'pageerror が出た').toEqual([]);
+  });
+
+  /**
    * 🔴 **行の字を押しても印が変わる**(#706 ①)。
    * ⚠ 箱を押す道は `task-checkbox.smoke` が守る ── ここは**字**を tap する。
    *   実タップ(`tap()`)なので、`click` の `pointerType` が `touch` になる経路そのものを通る。
