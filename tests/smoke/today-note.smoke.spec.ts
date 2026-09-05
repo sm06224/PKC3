@@ -6,9 +6,17 @@
  * **覆われていないか / 押せるか**は実ブラウザにしか無い。
  */
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal } from './helpers';
+import { gotoApp, clickReal, collectPageErrors } from './helpers';
 
 test('🔴 「今日」を押すと今日の日付のノートが開き、2 度目でも増えない', async ({ page }) => {
+  /**
+   * 🔴 **例外を 1 度も見ていなかった**(#713、2026-09-05)。
+   * ⚠ この spec はアプリを開いて 2 度押すのに、`pageerror` も `console.error` も
+   *   拾っていなかった ── **本文の作成が例外で落ちても、行が 1 件なら緑**である。
+   * 🔑 `collectPageErrors` は落ちた Promise も拾う(Chromium は unhandled rejection を
+   *   `pageerror` として上げる ── 2026-09-05 に実測)。
+   */
+  const errors = collectPageErrors(page);
   await gotoApp(page);
 
   const today = await page.evaluate(() => {
@@ -35,4 +43,6 @@ test('🔴 「今日」を押すと今日の日付のノートが開き、2 度�
    */
   const rows = page.locator(`[data-pkc-entry]`, { hasText: today });
   await expect(rows, '押すたびに増えている').toHaveCount(1);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

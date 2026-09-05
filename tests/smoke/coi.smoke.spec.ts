@@ -201,13 +201,36 @@ test('🔴 読み直しの輪を作らない(印が残り、二度と読み直�
   await booted(page);
 
   const jspi = await page.evaluate(() => typeof (WebAssembly as { Suspending?: unknown }).Suspending === 'function');
-  test.skip(!jspi, 'JSPI が無い = 自分では読み直さない環境なので、印も付かない');
-
-  await page.waitForFunction(() => window.crossOriginIsolated === true, undefined, {
-    timeout: 30_000,
-  });
-  // 印が在る = 1 度試したことを覚えている
-  expect(await page.evaluate(() => sessionStorage.getItem('pkc3:coi-reload-tried'))).toBe('1');
+  /**
+   * 🔴 **`test.skip` をやめた**(#713、2026-09-05)。
+   *
+   * ⚠ 直す前は `test.skip(!jspi, …)` で、JSPI の無い箱ではこの spec が
+   *   **1 つも assert せずに緑**になっていた ── 「走らなかった」は
+   *   「確かめていない」であって、緑ではない(CLAUDE.md「回さなすぎのほうが害が大きい」)。
+   *   ⚠ しかも `repo-hygiene` の件数はこの行を **1 件の test として数えていた**
+   *   (同じ #713 で直した)ので、台帳の上では「2 件走っている」ように見えていた。
+   * 🔑 環境で反転するのは**印が付くかどうか**だけなので、そこだけ分けて
+   *   **両方向を assert する**。⚠ 輪の検査(下)は**どちらでも同じ主張**なので、
+   *   分けずに必ず走らせる ── ここが「走らなかった」に落ちていた本体である。
+   * ⚠ 実測(2026-09-05、同梱の chromium):この箱の `WebAssembly.Suspending` は
+   *   `function` なので、下の `else` は**ここでは通らない** ── だから
+   *   **JSPI を消した対照群の test を別に置いた**(この file の次の test)。
+   */
+  if (jspi) {
+    await page.waitForFunction(() => window.crossOriginIsolated === true, undefined, {
+      timeout: 30_000,
+    });
+    // 印が在る = 1 度試したことを覚えている
+    expect(
+      await page.evaluate(() => sessionStorage.getItem('pkc3:coi-reload-tried')),
+      'JSPI が在るのに 1 度も読み直しを試みていない',
+    ).toBe('1');
+  } else {
+    expect(
+      await page.evaluate(() => sessionStorage.getItem('pkc3:coi-reload-tried')),
+      'JSPI が無いのに読み直しを試みている(効かない環境で読み直している)',
+    ).toBeNull();
+  }
 
   /**
    * 🔴 **ここが輪の検査である。** 分離した後にもう一度読み直しても、
@@ -224,5 +247,57 @@ test('🔴 読み直しの輪を作らない(印が残り、二度と読み直�
   expect(
     await page.evaluate(() => (window as unknown as { __stayed?: boolean }).__stayed === true),
     '読み直しの輪に入っている(文書が作り直された)',
+  ).toBe(true);
+});
+
+/**
+ * 🔴 **JSPI が無い環境では、1 度も読み直さない**(#713 の対照群、2026-09-05)。
+ *
+ * ⚠ `coi-reload.ts` の `if (!deps.jspi) return 'not-needed'` を守る検査は、
+ *   smoke にも unit にも「**実際に読み直さないこと**」の形では 1 つも無かった ──
+ *   上の test は `test.skip` でその枝を避けており、**この箱には JSPI が在る**
+ *   ので、素直に走らせても枝には入らない(実測: `typeof
+ *   WebAssembly.Suspending === 'function'`)。
+ * 🔑 だから**環境を待たずに作る** ── ページの script より先に `Suspending` を
+ *   外し、`'not-needed'` の枝を確実に通す。
+ * ⚠ **空振り防止**:外せたことを先に assert する(外せていない箱では、下の
+ *   「印が付かない」は JSPI が在る側の主張になってしまい、**何も守らない**)。
+ * ⚠ 主張は 2 つで 1 組 ── ①**印を置かない**(= 読み直しを試みていない)
+ *   ②**同じ文書に留まる**(= そもそも読み直していない)。①だけだと
+ *   「印を書き忘れたまま読み直す」という**いちばん悪い形**(無限読み直し)を通す。
+ */
+test('🔴 JSPI が無い環境では、読み直しを 1 度も試みない (#713)', async ({ page }, testInfo) => {
+  await page.addInitScript(() => {
+    try {
+      Object.defineProperty(WebAssembly, 'Suspending', {
+        value: undefined,
+        configurable: true,
+      });
+    } catch {
+      /* 外せない箱では下の空振り防止が落ちる ── 黙って通さない */
+    }
+  });
+  await page.goto(`${plainBase(testInfo)}/index.html`);
+  await booted(page);
+
+  expect(
+    await page.evaluate(() => typeof (WebAssembly as { Suspending?: unknown }).Suspending),
+    '台の空振り ── JSPI を外せていないので、この test は何も守っていない',
+  ).not.toBe('function');
+
+  // ① 「試した」印を置いていない = `'not-needed'` で抜けた
+  expect(
+    await page.evaluate(() => sessionStorage.getItem('pkc3:coi-reload-tried')),
+    'JSPI が無いのに読み直しを試みている',
+  ).toBeNull();
+
+  // ② 同じ文書のまま留まる(読み直していれば、この印は消える)
+  await page.evaluate(() => {
+    (window as unknown as { __stayed?: boolean }).__stayed = true;
+  });
+  await page.waitForTimeout(1500);
+  expect(
+    await page.evaluate(() => (window as unknown as { __stayed?: boolean }).__stayed === true),
+    '効かない環境で読み直している(文書が作り直された)',
   ).toBe(true);
 });

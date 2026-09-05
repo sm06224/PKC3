@@ -203,6 +203,16 @@ describe('nightly の job と step', () => {
     id: string | null;
     ifExpr: string;
     run: string;
+    /**
+     * 🔴 **step の `env:`**(#713、2026-09-05)。
+     *
+     * ⚠ 直す前は**採っていなかった**うえに、`env:` の中身(10 字下げ)が
+     *   `run: |` の本体と同じ規則で `run` へ流れ込んでいた ── そして直後の
+     *   `run:` 行が `cur.run` を**上書き**するので、結局どこにも残らなかった。
+     * 🔑 帰結:**`PKC3_HEAVY: '1'` を消しても、落ちる検査が 1 つも無い**
+     *   (= 22 種の焼きが夜に走らなくなっても、PR gate は緑のまま)。
+     */
+    env: string[];
   }
   interface NightlyJob {
     line: number;
@@ -237,6 +247,8 @@ describe('nightly の job と step', () => {
       if (job && cur) job.steps.push(cur);
       cur = null;
     };
+    /** いま 10 字下げの続きが何のものか(`env:` / `run: |` / どちらでもない)。 */
+    let block: 'env' | 'run' | null = null;
     for (const [n, line] of lines.entries()) {
       if (/^\s*(#|$)/.test(line)) continue; // コメント・空行
       if (/^jobs:\s*$/.test(line)) {
@@ -273,13 +285,24 @@ describe('nightly の job と step', () => {
       const stepHead = /^ {6}- ([\w-]+): (.+?)\s*$/.exec(line);
       if (stepHead) {
         closeStep();
-        cur = { line: n + 1, name: '', id: null, ifExpr: '', run: '' };
+        cur = { line: n + 1, name: '', id: null, ifExpr: '', run: '', env: [] };
+        block = null;
         if (stepHead[1] === 'name') cur.name = stepHead[2]!;
         if (stepHead[1] === 'id') cur.id = stepHead[2]!;
-        if (stepHead[1] === 'run') cur.run = stepHead[2]!;
+        if (stepHead[1] === 'run') {
+          cur.run = stepHead[2]!;
+          block = 'run';
+        }
         continue;
       }
       if (!cur) continue;
+      /**
+       * ⚠ **8 字下げの key が来たら、続きの持ち主を切り替える**(#713)。
+       *   これが無いと `env:` の中身が `run: |` の本体として読まれ、
+       *   直後の `run:` 行に**上書きされて消える**。
+       */
+      const key = /^ {8}([\w-]+):(.*)$/.exec(line);
+      if (key) block = key[1] === 'env' ? 'env' : key[1] === 'run' ? 'run' : null;
       const name = /^ {8}name: (.+?)\s*$/.exec(line);
       if (name) cur.name = name[1]!;
       const id = /^ {8}id: (\S+)\s*$/.exec(line);
@@ -288,7 +311,8 @@ describe('nightly の job と step', () => {
       if (ifExpr) cur.ifExpr = ifExpr[1]!;
       const run = /^ {8}run: (.+?)\s*$/.exec(line);
       if (run) cur.run = run[1]!;
-      if (/^ {10}\S/.test(line)) cur.run += `\n${line.trim()}`; // run: | の本体
+      if (/^ {10}\S/.test(line) && block === 'env') cur.env.push(line.trim());
+      else if (/^ {10}\S/.test(line) && block === 'run') cur.run += `\n${line.trim()}`;
     }
     closeStep();
     return jobs;
@@ -410,6 +434,38 @@ describe('nightly の job と step', () => {
     const perms = /^permissions:\n((?:[ #].*\n)+)/m.exec(yml);
     expect(perms, 'permissions が読めない').not.toBeNull();
     expect(perms![1], 'issues: write が無い').toContain('issues: write');
+  });
+
+  /**
+   * 🔴 **環境変数でしか走らない検査は、渡していることを pin する**(#713、2026-09-05)。
+   *
+   * `tests/smoke/mermaid-all.smoke.spec.ts` は `PKC3_HEAVY=1` のときだけ走る
+   * (22 種を焼くのは重いので PR gate に載せない)。⚠ ところが
+   * **その環境変数を落としても、落ちる検査が 1 つも無かった** ── PR gate では
+   * `test.skip` になって緑、夜は step が走るだけで中身は 0 件、という形になる。
+   * ⚠ 「走らなかった」は「確かめていない」であって緑ではない
+   * (CLAUDE.md「skipped も赤に数える」)。
+   *
+   * 🔑 だから**渡している側**を等値で留める ── 3 つで 1 組:
+   *   ① `env` に `PKC3_HEAVY: '1'` が在る ② その step が **その spec を名指し**して
+   *   いる ③ **spec 側が読む名前と同じ綴り**である(片方だけ改名したら落ちる)。
+   * ⚠ ③ が無いと、`PKC3_HEAVY` を `PKC3_HEAVY2` に改名しても両方緑のまま
+   *   すれ違う(CLAUDE.md §7「両端が別々に緑」)。
+   */
+  it('🔴 重い焼きの step が `PKC3_HEAVY=1` を渡し、spec が同じ名前を読む (#713)', () => {
+    const heavy = allSteps.find((s) => s.run.includes('mermaid-all.smoke.spec.ts'));
+    expect(heavy, '22 種を焼く step が nightly に無い').toBeDefined();
+    expect(heavy!.env, `${YML}:${heavy!.line} が PKC3_HEAVY を渡していない`).toContain(
+      "PKC3_HEAVY: '1'",
+    );
+    // ⚠ 空振り防止 ── `env` を 1 行も採れていないなら、上の toContain は
+    //    「採り方が壊れた」だけで落ちる。採れていることを別に見る
+    expect(heavy!.env.length, 'env を 1 行も採れていない(切り出しが壊れている)').toBeGreaterThan(
+      0,
+    );
+    // ③ spec 側の綴りと突き合わせる(片方だけ改名したら、ここで落ちる)
+    const spec = readFileSync('tests/smoke/mermaid-all.smoke.spec.ts', 'utf-8');
+    expect(spec, 'spec が PKC3_HEAVY を読んでいない').toContain("process.env['PKC3_HEAVY']");
   });
 });
 

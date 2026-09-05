@@ -966,9 +966,23 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     const files = readdirSync('tests/smoke')
       .filter((f) => f.endsWith('.spec.ts'))
       .sort();
+    /**
+     * 🔴 **題名(引用符)まで要求する**(#713、2026-09-05)。
+     *
+     * ⚠ 直す前は `^\s*test(?:\.skip)?\(` だけだったので、**test の中に書いた
+     *   `test.skip(条件, 理由)` を 1 件と数えていた** ── 実測で 2 件
+     *   (`mermaid-all` の `test.skip(!HEAVY, …)` / `coi` の `test.skip(!jspi, …)`)。
+     * 🔴 つまりこの計器は「**spec が黙って消えない**」と名乗りながら、
+     *   **spec ではない行**を数えていた(CLAUDE.md §1「数えている対象が名前と違う」)。
+     *   ⚠ 害は 2 つ:①合計が実際の spec より多い ②**中の skip 条件を消しただけで
+     *   件数が減り、「spec が消えた」という嘘の理由で落ちる**。
+     * 🔑 宣言は必ず**題名の文字列**から始まる(`test('…'` / `test.skip('…'`)ので、
+     *   引用符を要求すれば条件つきの `test.skip(!HEAVY, …)` は落ちる。
+     */
     const counts = files.map(
       (f) =>
-        (readFileSync(`tests/smoke/${f}`, 'utf-8').match(/^\s*test(?:\.skip)?\(/gm) ?? []).length,
+        (readFileSync(`tests/smoke/${f}`, 'utf-8').match(/^\s*test(?:\.skip)?\(\s*['"`]/gm) ?? [])
+          .length,
     );
     // 空振り防止 ── 数え方が壊れて 0 件になったら気づけない
     expect(counts.filter((n) => n === 0), 'test を 1 件も引けない spec がある').toEqual([]);
@@ -1094,6 +1108,10 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     // ⚠ 2026-09-05(#722 P2-12): `touch` に「追記の欄に押せない鍵の名前が出ない」**+1 件**
     //    ── `matchMedia('(hover: none) and (pointer: coarse)')` に本物のブラウザが
     //    どう答えるかは、happy-dom では見えない(対照群はマウスの端末の既存 test に足した)
+    // 🔴 2026-09-05(#713): 数え方を直して **431 → 429**(条件つきの
+    //    `test.skip(!HEAVY, …)` / `test.skip(!jspi, …)` を test と数えていた 2 件)。
+    //    さらに `coi` に「JSPI が無い環境では読み直さない」の対照群を足して **+1 件**
+    //    ── 上の test が `test.skip` をやめたぶん、その枝を別の test が受け持つ
     expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(85);
     expect(
       counts.reduce((a, b) => a + b, 0),

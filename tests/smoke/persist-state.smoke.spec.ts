@@ -14,9 +14,12 @@
  * user は何も分からないまま設定を閉じることになる。
  */
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal } from './helpers';
+import { gotoApp, clickReal, collectPageErrors } from './helpers';
 
 test('🔴 設定に「このアプリのデータ」の行が出て、空欄ではない', async ({ page }) => {
+  // 🔴 **例外を 1 度も見ていなかった**(#713、2026-09-05)── 設定の面は
+  //    boot の後半で組まれるので、そこで落ちても「行が在る」だけで緑になる
+  const errors = collectPageErrors(page);
   await gotoApp(page);
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
 
@@ -34,4 +37,6 @@ test('🔴 設定に「このアプリのデータ」の行が出て、空欄で
    */
   const dd = page.locator('[data-pkc-field-persist="persist-state"]').locator('xpath=..');
   expect(await dd.locator('button, input, select').count(), '押せるものを置いた').toBe(0);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
