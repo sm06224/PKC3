@@ -158,6 +158,7 @@ import {
   type BinderServices,
 } from '@adapter/ui/actions/binder';
 import { createCaptureService } from '@adapter/ui/actions/capture';
+import { writeBackEntry } from '@adapter/ui/actions/write-back';
 import { createTimerService } from '@adapter/ui/actions/timer';
 import { createAlarmService } from '@adapter/ui/actions/alarm';
 import { createChime } from '@adapter/platform/chime';
@@ -2373,22 +2374,29 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         fail('元のファイルとの紐づけがありません(この md をもう一度開いてください)');
         return;
       }
-      void (async () => {
-        const ok = await ask(
-          `「${name}」を、いまのノートの内容で上書きします。\n\n` +
-            'ファイルの元の内容は失われます(取り消せません)。よろしいですか?',
-          { okLabel: '上書きする', danger: true },
-        );
-        if (!ok) return;
-        const body = (await client.request({ op: 'getBody', cid, lid })) ?? null;
-        if (body === null) {
-          fail('本文が見つかりません(整理された可能性)');
-          return;
-        }
-        const result = await writeBackFile(handle, body);
-        if (result.ok) showStatus(`書き戻しました: ${name}`);
-        else fail(`${name}: ${result.reason}`);
-      })();
+      /**
+       * 🔴 **順番はここで組まない**(#732)── 確認 → **飛んでいる書込を待つ** →
+       *   disk の本文 → ファイルへ書く、の並びは `writeBackEntry` が持つ。
+       * ⚠ 直す前はここに直書きで、**待たずに読んでいた** ── 保存の直後に押すと
+       *   保存前の本文が user のファイルへ書かれる(取り消せない)。
+       *   `main.ts` はどの test からも実行されないので、誰も守れていなかった。
+       */
+      void writeBackEntry({
+        name,
+        settle: async () => {
+          await storeEffects?.settled();
+        },
+        confirm: () =>
+          ask(
+            `「${name}」を、いまのノートの内容で上書きします。\n\n` +
+              'ファイルの元の内容は失われます(取り消せません)。よろしいですか?',
+            { okLabel: '上書きする', danger: true },
+          ),
+        getBody: async () => (await client.request({ op: 'getBody', cid, lid })) ?? null,
+        write: (body) => writeBackFile(handle, body),
+        done: showStatus,
+        fail,
+      });
     },
     // 📥 取込(P6b: PKC2 の書出し / P7 段②: 素の Markdown)。asset gate の内側 ──
     // 取込は putBlob → entry 書込の間に「bytes はあるが参照が無い」窓を持つので、
