@@ -209,8 +209,10 @@ describe('nightly の job と step', () => {
      * ⚠ 直す前は**採っていなかった**うえに、`env:` の中身(10 字下げ)が
      *   `run: |` の本体と同じ規則で `run` へ流れ込んでいた ── そして直後の
      *   `run:` 行が `cur.run` を**上書き**するので、結局どこにも残らなかった。
-     * 🔑 帰結:**`PKC3_HEAVY: '1'` を消しても、落ちる検査が 1 つも無い**
-     *   (= 22 種の焼きが夜に走らなくなっても、PR gate は緑のまま)。
+     * 🔑 帰結:**step の `env` を消しても、落ちる検査が 1 つも無い**状態だった。
+     * ⚠ 2026-09-05 に図の全数は PR gate へ移したので `PKC3_HEAVY` 自体が消えたが、
+     *   **`env` を採る作りは残す** ── 次に「環境変数でしか走らない step」を足した日、
+     *   採れていなければ同じ穴がそのまま再現する。
      */
     env: string[];
   }
@@ -437,35 +439,46 @@ describe('nightly の job と step', () => {
   });
 
   /**
-   * 🔴 **環境変数でしか走らない検査は、渡していることを pin する**(#713、2026-09-05)。
+   * 🔴 **図の全数(22 種)は、環境変数の門で止まっていない**(2026-09-05)。
    *
-   * `tests/smoke/mermaid-all.smoke.spec.ts` は `PKC3_HEAVY=1` のときだけ走る
-   * (22 種を焼くのは重いので PR gate に載せない)。⚠ ところが
-   * **その環境変数を落としても、落ちる検査が 1 つも無かった** ── PR gate では
-   * `test.skip` になって緑、夜は step が走るだけで中身は 0 件、という形になる。
-   * ⚠ 「走らなかった」は「確かめていない」であって緑ではない
-   * (CLAUDE.md「skipped も赤に数える」)。
+   * ## 経緯
    *
-   * 🔑 だから**渡している側**を等値で留める ── 3 つで 1 組:
-   *   ① `env` に `PKC3_HEAVY: '1'` が在る ② その step が **その spec を名指し**して
-   *   いる ③ **spec 側が読む名前と同じ綴り**である(片方だけ改名したら落ちる)。
-   * ⚠ ③ が無いと、`PKC3_HEAVY` を `PKC3_HEAVY2` に改名しても両方緑のまま
-   *   すれ違う(CLAUDE.md §7「両端が別々に緑」)。
+   * 2026-08-29 から `PKC3_HEAVY=1` のときだけ走る形にしてあり、#713 でその
+   * 「渡していること」を pin していた。⚠ ところが **PR gate では毎回 `skipped`**
+   * になっており、CLAUDE.md「**`skipped` も赤に数える**(走らなかった =
+   * 確かめていない)」に照らすと、マニュアルが 22 種を「そのまま書けます」と
+   * 言っている主張は**配る前に 1 度も検められていなかった**。
+   *
+   * 🔑 実測(PR gate と同じ `chromium_headless_shell`):**5.4 秒**。
+   *   CI のフル smoke は 3 shard で各 3.5〜3.9 分(job timeout 10 分)なので、
+   *   増えるのは 1 shard に 8 秒 = **2% 未満**。「重い」は測っていない見積もりだった。
+   *
+   * ## ここが見るもの
+   *
+   * 🔑 **門を戻されたら落ちる**ようにする ── 速くしたい人が `test.skip` を 1 行
+   *   足すと、gate は緑のまま 22 種が**誰にも焼かれなくなる**(いちばん気づけない形)。
+   * ⚠ 3 つで 1 組:① spec が環境変数を読んでいない ② `test.skip` を持たない
+   *   ③ **repo のどこも `PKC3_HEAVY` を渡していない**(nightly に step が残ったまま
+   *   だと、同じ検査を夜に 2 度走らせることになる = 半端な移行を止める)。
    */
-  it('🔴 重い焼きの step が `PKC3_HEAVY=1` を渡し、spec が同じ名前を読む (#713)', () => {
-    const heavy = allSteps.find((s) => s.run.includes('mermaid-all.smoke.spec.ts'));
-    expect(heavy, '22 種を焼く step が nightly に無い').toBeDefined();
-    expect(heavy!.env, `${YML}:${heavy!.line} が PKC3_HEAVY を渡していない`).toContain(
-      "PKC3_HEAVY: '1'",
-    );
-    // ⚠ 空振り防止 ── `env` を 1 行も採れていないなら、上の toContain は
-    //    「採り方が壊れた」だけで落ちる。採れていることを別に見る
-    expect(heavy!.env.length, 'env を 1 行も採れていない(切り出しが壊れている)').toBeGreaterThan(
-      0,
-    );
-    // ③ spec 側の綴りと突き合わせる(片方だけ改名したら、ここで落ちる)
+  it('🔴 図の全数は PR gate で走る(環境変数の門を持たない)', () => {
     const spec = readFileSync('tests/smoke/mermaid-all.smoke.spec.ts', 'utf-8');
-    expect(spec, 'spec が PKC3_HEAVY を読んでいない').toContain("process.env['PKC3_HEAVY']");
+    // ⚠ 空振り防止 ── spec そのものが在って、22 種を焼く主張を持っていること
+    expect(spec, '図の全数の spec が読めない').toContain('MERMAID_FORMS');
+    expect(spec, 'spec が環境変数の門を持っている(PR gate で skip される)').not.toContain(
+      'process.env',
+    );
+    expect(spec, 'spec が test.skip を持っている(走らない = 確かめていない)').not.toContain(
+      'test.skip(',
+    );
+    // ③ 渡す側が残っていないか(半端な移行を止める)
+    expect(readFileSync(YML, 'utf-8'), `${YML} に PKC3_HEAVY が残っている`).not.toContain(
+      'PKC3_HEAVY',
+    );
+    expect(
+      readFileSync('.github/workflows/ci.yml', 'utf-8'),
+      'ci.yml に PKC3_HEAVY が残っている',
+    ).not.toContain('PKC3_HEAVY');
   });
 });
 

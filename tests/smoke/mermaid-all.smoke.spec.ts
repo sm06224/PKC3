@@ -8,19 +8,25 @@
  * ⚠ **残り 17 種は 1 つ壊れても誰も気づかない**(mermaid の版が上がった日に、
  * マニュアルが静かに嘘になる)。
  *
- * ⚠ ただし 22 枚を焼くのは**重い**。smoke lane は 2026-08-28 に
- * **10 分の門へ実際にぶつかっている**ので、PR gate には入れない
- * (プロセス指示「CI を長くしない」)。
- * 🔑 だから `PKC3_HEAVY=1` のときだけ走らせ、nightly がそれを渡す。
- * ⚠ **名前が揃っているか**は `tests/features/mermaid-forms-parity.test.ts` が
- * PR gate で見る ── マニュアルに行を足したのに fixture を足し忘れたら、
- * **その場で**落ちる(nightly まで待たない)。⚠ 行数(22)も同じ test が名指しで pin する
- * ── 両側を同時に 1 つ消す形は集合では見えない(2026-09-04、#528 (2))。
+ * 🔴 **2026-09-05: PR gate で走らせることにした**(それまでは `PKC3_HEAVY=1` の
+ * ときだけ = 夜だけ)。⚠ 「重い」という見積もりは**測っていなかった**。
  *
- * ⚠ 実測 2026-09-04(手元の箱、同梱のフル chromium、`PKC3_HEAVY=1` で 1 回):
- *   **22 枚で 5.5 秒**(spec 全体 7.6 秒)、22 / 22 が `ready` + blob の PNG。
- *   「重い」の見積もりはこの箱では当たっていない ── PR gate へ戻すかは、
- *   CI の headless_shell で測ってから決める(ここでは決めない)。
+ * 実測(2026-09-05、**PR gate と同じ `chromium_headless_shell`**):
+ *
+ * | | 実測 |
+ * |---|---|
+ * | この spec 単体 | **5.4 秒**(spec 全体 7.8 秒) |
+ * | CI のフル smoke(3 shard に分割) | 各 shard 3.5〜3.9 分 / job timeout **10 分** |
+ *
+ * 🔑 増えるのは 1 shard に **8 秒**(2% 未満)で、10 分の tripwire は鈍らない。
+ * ⚠ 一方、夜だけにしていた間の実害は「**PR gate に skip が 1 件常駐する**」
+ *   ことだった ── CLAUDE.md「**`skipped` も赤に数える**(走らなかった = 確かめていない)」。
+ *   マニュアルが 22 種を「そのまま書けます」と言っている以上、その主張は
+ *   **配る前**に検めるのが正しい。
+ * ⚠ **名前が揃っているか**は `tests/features/mermaid-forms-parity.test.ts` が見る
+ *   ── マニュアルに行を足したのに fixture を足し忘れたら、**焼く前**に落ちる。
+ *   ⚠ 行数(22)も同じ test が名指しで pin する ── 両側を同時に 1 つ消す形は
+ *   集合では見えない(2026-09-04、#528 (2))。
  *
  * ## ⚠ 観測点
  *
@@ -32,18 +38,11 @@ import { test, expect } from '@playwright/test';
 import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
 import { MERMAID_FORMS } from '../fixtures/mermaid-forms';
 
-/**
- * 🔴 **重い検査は頼まれたときだけ**。⚠ `skip` は「走らなかった」= 確かめていない
- *   なので、nightly 側は**渡し忘れたら気づけるように** step を分けてある。
- */
-const HEAVY = process.env['PKC3_HEAVY'] === '1';
-
 test.beforeEach(async ({ page }) => {
   await useSplitEditor(page);
 });
 
 test('🔴 マニュアルの 22 種が、どれも PNG まで焼ける (#528)', async ({ page }) => {
-  test.skip(!HEAVY, 'PKC3_HEAVY=1 のときだけ走る(22 枚は重い ── nightly で回す)');
   // ⚠ 22 枚ぶんの焼きを待つので、既定の 1 本ぶんでは足りない
   test.setTimeout(300_000);
 
