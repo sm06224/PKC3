@@ -72,7 +72,7 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
     // ⚠ 2026-09-04: 付箋の `open-note-window`(#685 段②)で N が 1 増えた
     //   ── 対象は押した行(無ければ選択中)で、押した所から引数は要らない
     // ⚠ 2026-09-04: `insert-diagram` / `copy-chapter-md` / `copy-block-md` / `set-too-narrow-enabled` 等で N が 92 → 96、#676 の板の 3 受け手で 99
-    expect(counts()).toEqual({ P1: 40, P2: 29, E: 19, V: 8, N: 99 });
+    expect(counts()).toEqual({ P1: 40, P2: 29, E: 19, V: 8, N: 100 });
   });
 
   it('🔴 名指しの錨 ── 件数が同じまま入れ替わっても落ちる', () => {
