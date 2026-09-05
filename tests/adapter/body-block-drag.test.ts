@@ -33,6 +33,7 @@ import {
   BLOCK_GRIP_FIELD,
   BLOCK_LID_ATTR,
   BLOCK_START_ATTR,
+  gripLeft,
   installBlockGrip,
 } from '../../src/adapter/ui/render/block-grip';
 import { PAINTED_ATTR } from '../../src/adapter/ui/render/detail';
@@ -112,10 +113,10 @@ function dragEv(type: string, dt: ReturnType<typeof dtStub>, clientY = 0): Mouse
   return e;
 }
 
-/** 塊の矩形を与える(happy-dom は layout を持たない)。 */
-function rect(el: Element, top: number, height: number): void {
+/** 塊の矩形を与える(happy-dom は layout を持たない)。既定は面と同じ左右(左余白 0)。 */
+function rect(el: Element, top: number, height: number, left = 40, right = 400): void {
   Object.defineProperty(el, 'getBoundingClientRect', {
-    value: () => ({ top, bottom: top + height, height, left: 40, right: 400, width: 360, x: 40, y: top }),
+    value: () => ({ top, bottom: top + height, height, left, right, width: right - left, x: left, y: top }),
     configurable: true,
   });
 }
@@ -229,6 +230,36 @@ describe('掴む口(block-grip)', () => {
     installBlockGrip(s.region, s.host, 'n1', RAW);
     installBlockGrip(s.region, s.host, 'n1', RAW);
     expect(s.pane.querySelectorAll(GRIP), '口が増えた').toHaveLength(1);
+  });
+
+  /**
+   * 🔴 **口を字の上に重ねない**(2026-09-05、実ブラウザの smoke が拾った)。
+   * 読む面の左余白は pane の padding 8px しか無い ── 1 稿目は `max(0, 左余白 − 18)` で
+   * 段落の先頭の字に 10px 重なり、先頭の字を押すと**選択ではなく掴み**になった。
+   */
+  it('🔴 左余白が無ければ口は塊の右へ(字の上に重ねない)。余白が在れば左へ', () => {
+    const s = setup();
+    teardown = s.unbind;
+    // 面 = 40..400。塊は 40..300(左余白 0・右は空いている)→ 右側(300 - 40 + 2 = 262)
+    rect(s.block(2), 100, 20, 40, 300);
+    s.hover(s.block(2));
+    expect(s.grip()!.style.left, '左余白が無いのに左へ置いた(字の上に重なる)').toBe('262px');
+    // 左余白が 30px 在る塊 → 左。⚠ 塊の左端との間に 5px 空ける(畳みの帯は左端から 3px 外へ
+    //    張り出している ── 口の右端を左端に揃えると帯に重なり、帯が押せなくなる。CI の
+    //    `heading-look` smoke が拾った)→ 30 - 18 - 5 = 7
+    rect(s.block(6), 200, 20, 70, 380);
+    s.hover(s.block(6));
+    expect(s.grip()!.style.left, '口の右端が塊の左端に貼り付いている(畳みの帯に重なる)').toBe('7px');
+    // 見出しで左余白が 22px(口 18 + あき 5 に足りない)→ 帯に重ねず右へ逃がす
+    rect(s.block(4), 250, 20, 62, 300);
+    s.hover(s.block(4));
+    expect(s.grip()!.style.left, '帯に重なる位置へ置いた').toBe('262px');
+    // 右にも左にも入らない(塊が面いっぱい)→ 左端に重ねる(面の外へ出さない)
+    rect(s.block(19), 300, 20, 40, 395);
+    s.hover(s.block(19));
+    expect(s.grip()!.style.left).toBe('0px');
+    expect(gripLeft({ left: 0, right: 100 }, { left: 0, right: 100 })).toBe(0);
+    expect(gripLeft({ left: 0, right: 1000 }, { left: 23, right: 500 }), '余白ちょうどなら左の端').toBe(0);
   });
 
   it('閉じていない ::: の塊には口を出さない(末尾まで飲んでいるので範囲が無い)', () => {
@@ -543,6 +574,13 @@ describe('一覧の行を本文へ落とすとリンクになる(#684 段②)', 
     const dt = dtStub();
     pane.querySelector('[data-pkc-entry="n2"]')!.dispatchEvent(dragEv('dragstart', dt));
     expect(dt.getData(PKC_LIDS), '2 ペインの行が荷物にならない').toBe('n2');
+    /**
+     * 🔴 **行の荷物は `copyMove` を許す**(2026-09-05、実ブラウザの smoke が拾った)。
+     * ⚠ `'move'` だけだと、本文の上で返す `dropEffect = 'copy'` が許されない効果になり、
+     *   ブラウザは **`drop` を撃たない**(線は出るのにリンクが入らない)。stub は効果の許しを
+     *   検めないので、この 1 行が無いと unit は永久に緑のまま製品が壊れている。
+     */
+    expect(dt.effectAllowed, '本文への copy を許していない(実ブラウザで drop が飛ばない)').toBe('copyMove');
     const target = s.block(19);
     rect(target, 500, 40);
     target.dispatchEvent(dragEv('drop', dt, 535));

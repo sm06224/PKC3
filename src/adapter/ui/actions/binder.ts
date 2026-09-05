@@ -7549,7 +7549,16 @@ export function bindActions(
           );
     const lids = marked.includes(lid) ? marked : [lid];
     de.dataTransfer.setData(PKC_DRAG, lids.join(' '));
-    de.dataTransfer.effectAllowed = 'move';
+    /**
+     * 🔴 **`copyMove`**(#684 段②。実ブラウザの smoke が拾った)。
+     *
+     * ⚠ 直す前は `'move'` だけだった。本文の上は「リンクを写す」なので `dropEffect = 'copy'`
+     *   を返すが、HTML5 D&D は **`effectAllowed` に無い効果を返した drop を取り消す** ──
+     *   Chromium は `dragover` を受けて線まで出しておきながら、**`drop` を 1 度も撃たなかった**
+     *   (`dragend` だけ飛ぶ。unit の stub は効果の許しを検めないので緑だった)。
+     * 🔑 フォルダへ落とす側は `move` のまま許されるので、これまでの動きは変わらない。
+     */
+    de.dataTransfer.effectAllowed = 'copyMove';
   };
   const onDragEnd = (): void => {
     // ⚠ **待っている面の切替も畳む**(#402 ③)── 離した後に面が変わると、

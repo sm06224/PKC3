@@ -144,13 +144,46 @@ function follow(anchor: HTMLElement, grip: HTMLElement, target: Element | null):
   const a = anchor.getBoundingClientRect();
   const b = block.getBoundingClientRect();
   grip.style.top = `${b.top - a.top + anchor.scrollTop}px`;
-  // ⚠ 左余白に置く。余白が無ければ塊の左端に重ねる(面の外へ出さない)
-  grip.style.left = `${Math.max(0, b.left - a.left + anchor.scrollLeft - GRIP_WIDTH)}px`;
+  grip.style.left = `${gripLeft(a, b) + anchor.scrollLeft}px`;
   if (grip.hidden) grip.hidden = false;
 }
 
 /** 口の幅(px)。⚠ CSS(`[data-pkc-field='block-grip']` の `width`)と同じ値。 */
 const GRIP_WIDTH = 18;
+
+/**
+ * 🔴 **口の横位置 ── 字の上に重ねない**(実ブラウザの smoke が拾った。2026-09-05)。
+ *
+ * ⚠ 1 稿目は「左余白、無ければ `max(0, …)` で塊の左端」だった。読む面の左余白は pane の
+ *   padding(8px)しか無いので、**口が段落の先頭の字の上に 10px 重なり**、先頭の字を押すと
+ *   選択ではなく掴みになった(字の選択を殺さない、という段①の約束の当の破れ)。
+ * 🔑 左に入らなければ**塊の右**(読み幅 672px の右は広い)。右にも入らなければ左端に重ねる
+ *   (面の外へ出すと scroller に切られて掴めない)。
+ * 🔴 **左へ置くときは、見出しの畳みの帯の外側に置く**(CI の `heading-look` smoke が拾った)。
+ *   帯(`heading-fold`)は見出しの左端から **3px 外**へ張り出している(`app.css` の
+ *   `inset-inline-start: -3px`)── 口の右端を塊の左端に揃えると帯に 3px 重なり、
+ *   **帯そのものが畳みのボタン**という既存の動線を口が塞ぐ(hover が口に取られる)。
+ *
+ * @param a 置き場(面)の矩形 @param b 塊の矩形 @returns 面の左からの位置(px。scroll は呼び側が足す)
+ */
+export function gripLeft(
+  a: { left: number; right: number },
+  b: { left: number; right: number },
+): number {
+  const leftRoom = b.left - a.left;
+  if (leftRoom >= GRIP_WIDTH + LEFT_CLEARANCE) return leftRoom - GRIP_WIDTH - LEFT_CLEARANCE;
+  const rightRoom = a.right - b.right;
+  if (rightRoom >= GRIP_WIDTH + GRIP_GAP) return b.right - a.left + GRIP_GAP;
+  return Math.max(0, leftRoom - GRIP_WIDTH);
+}
+
+/** 右へ置くときの、塊と口のあき(px)。 */
+const GRIP_GAP = 2;
+/**
+ * 左へ置くときの、塊の左端と口の右端のあき(px)= 畳みの帯の張り出し 3px + あき 2px。
+ * ⚠ 3 は `app.css` の `[data-pkc-field='heading-fold'] { inset-inline-start: -3px }` と同じ値。
+ */
+const LEFT_CLEARANCE = 5;
 
 /**
  * 読む面に掴む口を配線する。⚠ **描画のたびに呼ぶ**(冪等)── 面が持つ「いま描いてある物」
