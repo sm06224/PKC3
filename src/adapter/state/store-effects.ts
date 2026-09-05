@@ -287,6 +287,14 @@ export interface StoreEffects {
   run<T>(job: () => Promise<T>): Promise<T>;
 }
 
+/**
+ * 🔴 **探す面が打鍵の後、何 ms 止まってから worker を叩くか**(#680)。
+ * ⚠ 左の列の絞り込み(`REQUEST_SEARCH`)は打鍵ごとに叩く ── あちらは lid だけ返す
+ *   軽い問い合わせで、題名の当たりが同期に出るので待たせない。こちらは抜粋と
+ *   関連度を組むぶん重いので、**止まってから 1 回**にする。
+ */
+export const SEARCH_DETAIL_DEBOUNCE_MS = 300;
+
 /** `settled()` が待つ最大の巡回数(積まれ続ける相手で永久に待たないための上限)。 */
 const SETTLE_ROUNDS_MAX = 20;
 
@@ -310,6 +318,8 @@ export function connectStoreEffects(
 ): StoreEffects {
   let queue: Promise<void> = Promise.resolve();
   let disposed = false;
+  /** 探す面の debounce の手(#680)。⚠ 解くときに止める ── 解いた後に撃たない。 */
+  let detailTimer: ReturnType<typeof setTimeout> | null = null;
   const officeInstalled = opts.officeInstalled ?? ((): boolean => false);
   /**
    * 🔑 タイル一覧の**出口は 1 つ**(CLAUDE.md §7「同じ値を複数の経路へ渡すものは
@@ -491,6 +501,37 @@ export function connectStoreEffects(
                user の操作は止まっていない(黙って減るのは「増えない」方向) */
           },
         );
+        break;
+      }
+      /**
+       * 🔴 **探す面の検索**(#680)。⚠ **直列 queue に載せない**(左の列の検索と同じ)。
+       * 🔑 **300ms 止まってから 1 回**叩く ── 打鍵ごとに来る依頼のうち、最後の 1 つだけを
+       *   生かす(前の手は止める)。遅れて返った結果は reducer が `query` で捨てる。
+       * ⚠ op を持たない store(古い worker)なら**その場で「探せない」を返す** ──
+       *   黙って何も返さないと、面は「探しています…」で永久に止まる。
+       */
+      case 'REQUEST_SEARCH_DETAIL': {
+        const ask = store.searchDetail;
+        if (detailTimer !== null) clearTimeout(detailTimer);
+        detailTimer = null;
+        const q = ev.query;
+        if (!ask) {
+          dispatcher.dispatch({ type: 'SEARCH_DETAIL_FAILED', query: q });
+          break;
+        }
+        detailTimer = setTimeout(() => {
+          detailTimer = null;
+          if (disposed) return;
+          void ask(q).then(
+            ({ rows, truncated }) => {
+              if (disposed) return;
+              dispatcher.dispatch({ type: 'SET_SEARCH_DETAIL', query: q, rows, truncated });
+            },
+            () => {
+              if (!disposed) dispatcher.dispatch({ type: 'SEARCH_DETAIL_FAILED', query: q });
+            },
+          );
+        }, SEARCH_DETAIL_DEBOUNCE_MS);
         break;
       }
       /**
@@ -1930,6 +1971,9 @@ export function connectStoreEffects(
 
   const dispose: StoreEffects = (): void => {
     disposed = true;
+    // ⚠ 探す面の待ちの手も止める(解いた後に worker を叩かない)
+    if (detailTimer !== null) clearTimeout(detailTimer);
+    detailTimer = null;
     unsubscribe();
   };
   /**

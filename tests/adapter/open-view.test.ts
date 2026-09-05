@@ -134,7 +134,7 @@ describe('openViewHere ── 塞がれたときの退避先', () => {
   it('🔴 予定表は左の列の「予定」タブへ送り、中央の面を占有しない', () => {
     const d = booted();
     const tabs: string[] = [];
-    expect(openViewHere(d, 'schedule', (t) => tabs.push(t))).toBe(true);
+    expect(openViewHere(d, 'schedule', (t) => tabs.push(t), noFocus)).toBe(true);
     expect(tabs, '左の「予定」タブが開かれない').toEqual(['schedule']);
     expect(d.getState().viewMode, '中央の面を占有した(本文が消える)').toBe('detail');
   });
@@ -143,7 +143,7 @@ describe('openViewHere ── 塞がれたときの退避先', () => {
   it('🔴 連絡先は左の列の「連絡先」タブへ送り、中央の面を占有しない', () => {
     const d = booted();
     const tabs: string[] = [];
-    expect(openViewHere(d, 'contacts', (t) => tabs.push(t))).toBe(true);
+    expect(openViewHere(d, 'contacts', (t) => tabs.push(t), noFocus)).toBe(true);
     expect(tabs, '左の「連絡先」タブが開かれない').toEqual(['contacts']);
     expect(d.getState().viewMode, '中央の面を占有した(本文が消える)').toBe('detail');
   });
@@ -152,7 +152,7 @@ describe('openViewHere ── 塞がれたときの退避先', () => {
   it('⚠ 対照群: 2 ペインは中央の面へ(左のタブは開かない)', () => {
     const d = booted();
     const tabs: string[] = [];
-    expect(openViewHere(d, 'dual', (t) => tabs.push(t))).toBe(true);
+    expect(openViewHere(d, 'dual', (t) => tabs.push(t), noFocus)).toBe(true);
     expect(tabs, '左に無い面まで左へ送った').toEqual([]);
     expect(d.getState().viewMode).toBe('dual');
   });
@@ -168,9 +168,39 @@ describe('openViewHere ── 塞がれたときの退避先', () => {
     d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '本文' });
     d.dispatch({ type: 'START_EDIT' });
     const tabs: string[] = [];
-    expect(openViewHere(d, 'schedule', (t) => tabs.push(t))).toBe(true);
+    expect(openViewHere(d, 'schedule', (t) => tabs.push(t), noFocus)).toBe(true);
     expect(tabs).toEqual(['schedule']);
-    expect(openViewHere(d, 'query', (t) => tabs.push(t)), '編集中に集計が開いた').toBe(false);
+    expect(openViewHere(d, 'query', (t) => tabs.push(t), noFocus), '編集中に集計が開いた').toBe(false);
+    expect(d.getState().viewMode).toBe('detail');
+  });
+
+  /**
+   * 🔴 **探す面の退避は「左の列の欄に焦点」**(#680)── 左に同じ面は無いが、同じ仕事
+   * (語で探す)は左の欄でできる。中央に開くと本文が消える(#300 の実害)。
+   */
+  it('🔴 探す面は左の欄へ焦点を入れ、中央の面もタブも動かさない', () => {
+    const d = booted();
+    const tabs: string[] = [];
+    let focused = 0;
+    expect(
+      openViewHere(d, 'search', (t) => tabs.push(t), () => {
+        focused += 1;
+        return true;
+      }),
+    ).toBe(true);
+    expect(focused, '左の欄へ焦点を入れていない').toBe(1);
+    expect(tabs, '探す面を左のタブへ送った(そんなタブは無い)').toEqual([]);
+    expect(d.getState().viewMode, '中央の面を占有した(本文が消える)').toBe('detail');
+  });
+
+  it('⚠ 欄が無くて焦点を入れられなければ、その結果(false)をそのまま返す', () => {
+    const d = booted();
+    expect(openViewHere(d, 'search', () => {}, () => false)).toBe(false);
     expect(d.getState().viewMode).toBe('detail');
   });
 });
+
+/** 探す面の退避を持たない呼び側の既定(焦点は入れない)。 */
+function noFocus(): boolean {
+  return false;
+}

@@ -3278,6 +3278,76 @@ li[data-pkc-row-slot] {
   min-height: 0;
 }
 
+/* ══ 探す面(#680、2026-09-05)═════════════════════════════════════
+ * 🔴 **中央の面(別窓)だけ**── 左の列に同じ面は無い。作法は連絡先と同じ縦積み。
+ * 地は無彩色、色は当たった語(`<mark>`)にだけ使う(業務画面の作法)。 */
+[data-pkc-view-pane='search'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s2);
+  min-height: 0;
+  overflow: auto;
+}
+[data-pkc-field='search-page-head'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+[data-pkc-field='search-page-head'] [data-pkc-field='pane-title'] {
+  margin: 0;
+  font-size: 14px;
+}
+[data-pkc-field='search-page-input'] {
+  flex: 1;
+  min-width: 0;
+}
+[data-pkc-field='search-page-note'] {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+[data-pkc-field='search-page-list'] {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: var(--border);
+}
+/* ⚠ 行いっぱいを押せる場所にする(字だけを的にしない ── マウスだけで完結する) */
+[data-pkc-field='search-row'] {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  height: auto;
+  padding: var(--s2);
+  border: none;
+  background: var(--surface);
+  color: var(--fg);
+  text-align: left;
+}
+[data-pkc-field='search-row']:hover {
+  background: var(--surface-2);
+}
+[data-pkc-field='search-row-title'] {
+  font-weight: 600;
+}
+[data-pkc-field='search-row-snippet'] {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+/* 当たった語 ── 色はここにだけ(UA の黄色い `mark` はテーマの地と喧嘩する) */
+[data-pkc-field='search-row-snippet'] mark {
+  background: var(--accent-dim);
+  color: var(--accent-dim-fg);
+  border-radius: 2px;
+}
+
 /* ══ 予定(#292 段③、2026-08-23)══════════════════════════════════
  * 🔴 **左の列に置く**(user 指示「もう一つ PKC が開いて混乱する」)── 中央は
  *   本文のまま。⚠ 幅は `minmax(200px, 18vw)` = 1920 で 345px / 下限 200px。

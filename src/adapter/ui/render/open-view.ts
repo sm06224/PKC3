@@ -60,13 +60,23 @@ export function openView(dispatcher: Dispatcher, mode: ViewMode): boolean {
  *   本文が消える(#292 段⑤ で左へ移した当の理由)。同じものが在る場所へ送る。
  * 🔑 「同じものが左に在るか」の判定は `browse-mode.ts` の `homeTabOf` 1 か所 ──
  *   ここは**呼ぶだけ**。左に無い面(2 ペイン)は今までどおり中央の面へ。
+ * ⚠ 探す面(#680)だけは表に無い 3 つ目の退避 ── 左の**欄**へ焦点(下の引数)。
  * @returns 開けたか(左のタブは編集中でも開けるので、送れたら `true`)。
  */
 export function openViewHere(
   dispatcher: Dispatcher,
   mode: ViewMode,
   openBrowse: (tab: BrowseMode) => void,
+  /**
+   * 🔴 **探す面の退避先は「左の列の欄に焦点」**(#680)── 左に同じ面は無いが、
+   *   同じ**仕事**(語で探す)は左の欄でできる。中央に開くと本文が消える。
+   *   口は `binder.ts` の `focus-search`(畳んだ列を戻してから焦点を入れる)と同じ物を
+   *   渡す ── ここで `querySelector` を書き直さない(§7)。
+   * @returns 焦点を入れられたか(欄が無い面では `false` ── そのときは理由が出る)
+   */
+  focusSearch: () => boolean,
 ): boolean {
+  if (mode === 'search') return focusSearch();
   const tab = homeTabOf(mode);
   if (tab !== null) {
     openBrowse(tab);

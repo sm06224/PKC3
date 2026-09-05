@@ -36,12 +36,12 @@ export interface LauncherTile {
   icon?: string;
   /**
    * 起動の仕方。⚠ `url` は外部サイト、`app` は同梱 HTML、
-   * `office` / `dual` / `schedule` / `contacts` / `manual` は**組み込み**(entry を
-   * 持たない ── #148 / #241 / #673 / #278 / #645)。
+   * `office` / `dual` / `schedule` / `contacts` / `search` / `manual` は**組み込み**
+   * (entry を持たない ── #148 / #241 / #673 / #278 / #680 / #645)。
    * 🔑 **`ViewMode` と同じ綴りの種別は、PKC をもう 1 枚別窓で開く**
    *   (`launch-tile.ts` が `isViewMode(kind)` で見分ける ── 名指しの `if` を並べない)。
    */
-  kind: 'app' | 'url' | 'office' | 'dual' | 'schedule' | 'contacts' | 'manual';
+  kind: 'app' | 'url' | 'office' | 'dual' | 'schedule' | 'contacts' | 'search' | 'manual';
   /** `kind === 'url'` のときの飛び先。 */
   url?: string;
   /** `kind === 'app'` のときの実体(IDB Blob の鍵)。 */
@@ -210,6 +210,21 @@ export function contactsTile(): LauncherTile {
 }
 
 /**
+ * 🔴 **探す面の組み込みタイル**(#680。user 要望「検索専用の組み込みアプリ」/
+ * 裁定 2026-09-04「アプリの基本は別窓」)。
+ *
+ * ⚠ 左の列の欄は残る ── あちらは**一覧を絞る**、こちらは**見つける**(題名 + 抜粋 +
+ *   関連度順、行を押すと小窓)。「閉じたとき user が失うもの」は探した結果だけで、
+ *   ノートは 1 件も消えない ── アプリで正しい。
+ * 🔑 `kind` は `ViewMode` の綴り(`search`)── `launch-tile.ts` がそれを見て別窓へ渡す。
+ */
+export const SEARCH_TILE_LID = 'builtin:search';
+
+export function searchTile(): LauncherTile {
+  return { lid: SEARCH_TILE_LID, title: '探す', group: '', kind: 'search' };
+}
+
+/**
  * 🔴 **マニュアルの組み込みタイル**(#645。user 要望 2026-08-31
  * 「**ヘルプの中からマニュアルをアプリとして出してください**」)。
  *
@@ -271,8 +286,8 @@ export function withBuiltinTiles(
    * ⚠ アプリに最初から在るものを**先に**、端末次第の Office を**その後に**並べる
    *   ── Office の有無で予定表の位置が動かない向き。
    */
-  // ⚠ 連絡先(#278 段③)は予定表の次 ── 同じく「アプリに最初から在る」側
-  const builtin: LauncherTile[] = [dualTile(), scheduleTile(), contactsTile()];
+  // ⚠ 連絡先(#278 段③)は予定表の次、探す(#680)はその次 ── どれも「アプリに最初から在る」側
+  const builtin: LauncherTile[] = [dualTile(), scheduleTile(), contactsTile(), searchTile()];
   if (opts.office) builtin.push(officeTile());
   builtin.push(manualTile());
   return [...builtin, ...tiles];
@@ -297,5 +312,6 @@ export const BUILTIN_KINDS: ReadonlySet<LauncherTile['kind']> = new Set([
   'dual',
   'schedule',
   'contacts',
+  'search',
   'manual',
 ]);

@@ -17,6 +17,7 @@ import { moveLinesWithInverse, type MoveLines } from '@features/markdown/line-mo
 import { replaceTaskCards, type TaskScan } from '@features/schedule/task-cards';
 import type { ContactScan } from '@features/contact/contact-card';
 import type { SnippetScan } from '@features/snippet/snippet-table';
+import type { SearchDetailRow } from '@features/filter/search-snippet';
 import {
   normalizeSplitLids,
   pinSplitLid,
@@ -101,6 +102,15 @@ export interface SmartHitState {
 }
 
 export type AppPhase = 'initializing' | 'ready' | 'editing' | 'error';
+
+/** 探す面の state(#680)。中身の意味は `AppState.searchPage` の注記。 */
+export interface SearchPageState {
+  readonly query: string;
+  readonly rows: readonly SearchDetailRow[];
+  readonly rowsQuery: string;
+  readonly truncated: boolean;
+  readonly failed: boolean;
+}
 /**
  * 🔴 **直前の追記を、次の追記でどう持ち替えるか**(#395 段① / #668 C)。
  *
@@ -185,6 +195,20 @@ export const VIEW_MODES = [
    */
   'contacts',
   /**
+   * 🔴 **探す面**(#680。user 要望「検索専用の組み込みアプリ」/ 裁定 2026-09-04
+   * 「アプリの基本は別窓」)。
+   *
+   * 左の列の欄は**一覧を絞る**(並びは変えない・当たりは lid だけ)。この面は
+   * **見つける**ためのもの ── 題名 + 本文の抜粋 + 関連度順で並べ、行を押すと
+   * そのノートを**小窓**で開く(いま読んでいる本文は退かさない)。
+   * ⚠ **左の欄と語を共有しない**(`searchPage.query` は `filterQuery` と別)──
+   *   面で打った語で左の一覧が絞られると、別窓の面から本体の一覧が動いて驚く。
+   * ⚠ **aside ではない**(`ASIDE_PANES` に入れない)── 左の一覧を押した選択は
+   *   この面に留まる(集計と同じ)。⚠ 左の列に同じものは無い(`homeTabOf` は null)
+   *   ── 塞がれたときの退避は**左の欄に焦点**(`open-view.ts`)。
+   */
+  'search',
+  /**
    * 🔴 **2 ペインタブファイラ**(#241 段⑥。user 指示 2026-08-17
    * 「アプリに 2 ペインタブファイラを**組み込みで**提供すること」)。
    * ⚠ 裁定 6(`organize-pane-design-2026-08.md` §6)で**中央の面**と決まった
@@ -245,6 +269,7 @@ const VIEW_LABELS: Record<ViewMode, string> = {
   query: '集計',
   schedule: '予定表',
   contacts: '連絡先',
+  search: '探す',
   dual: '2 ペインで整理',
   settings: '設定',
   flags: 'フラグ',
@@ -665,6 +690,18 @@ export interface AppState {
    */
   searchHitsTruncated: boolean;
   /**
+   * 🔴 **探す面**(#680)。⚠ `filterQuery` と**別に持つ** ── 面の語で左の一覧を絞らない。
+   *
+   * - `query`: 欄に打った語(打鍵ごとに写す ── renderer は DOM から読まない)
+   * - `rows` / `rowsQuery`: 届いている結果と、**それがどの語の答えか**。
+   *   `rowsQuery !== query` = まだ返っていない(その間も前の行は消さない ──
+   *   打つたびに一覧が消えるとちらつく)。⚠ `searchHitsQuery` と同じ理由
+   * - `truncated`: 200 件で切ったか(`searchHitsTruncated` と同じ作法)
+   * - `failed`: 探せなかった(古い worker で op が無い / DB のエラー)── 「まだ」と
+   *   区別しないと「探しています…」で永久に止まる(連絡先の `contactScanFailed` と同じ)
+   */
+  searchPage: SearchPageState;
+  /**
    * 🔴 **集計の面**(#184)。⚠ どれも `null` = **まだ読んでいない**(0 件ではない)。
    *
    * ⚠ 中身は**束ねた結果だけ**で、本文は 1 バイトも入らない ── 束ねるのは worker で、
@@ -889,6 +926,7 @@ export const initialState: AppState = {
   entrySortDesc: NATURAL_DESC[DEFAULT_ENTRY_SORT],
   searchHitsQuery: '',
   searchHitsTruncated: false,
+  searchPage: { query: '', rows: [], rowsQuery: '', truncated: false, failed: false },
   queryKey: null,
   smartHits: new Map<string, SmartHitState>(),
   queryKeys: null,
@@ -941,6 +979,8 @@ export type UserAction =
    */
   | { type: 'SET_OPEN_EXTENSIONS'; open: readonly OpenExtension[] }
   | { type: 'SET_ENTRY_FILTER'; query: string }
+  /** 探す面の欄に打った(#680)。⚠ 左の列の絞り込み(`SET_ENTRY_FILTER`)とは別の語。 */
+  | { type: 'SET_SEARCH_PAGE_QUERY'; query: string }
   /** 本文の当たりが SQL から返った(#181)。⚠ `query` は**どの問い合わせの答えか**。 */
   | { type: 'SET_SEARCH_HITS'; query: string; lids: string[]; truncated: boolean }
   /** 一覧の並び順を変える(#183)。⚠ 選択は消さない(絞り込みと同じ規約)。 */
@@ -1409,6 +1449,18 @@ export type UserAction =
 
 export type SystemCommand =
   | { type: 'SYS_BOOTED'; cid: string; metas: EntryMeta[]; relations: Relation[] }
+  /**
+   * 探す面の結果が返った(#680)。⚠ `query` は**どの語の答えか**(遅れて返った古い
+   * 結果を捨てる ── 打鍵は結果より速い)。
+   */
+  | {
+      type: 'SET_SEARCH_DETAIL';
+      query: string;
+      rows: readonly SearchDetailRow[];
+      truncated: boolean;
+    }
+  /** 探せなかった(#680)。⚠ 「まだ」と区別する ── 区別しないと永久に「探しています…」。 */
+  | { type: 'SEARCH_DETAIL_FAILED'; query: string }
   | { type: 'BODY_LOADED'; lid: string; body: string }
   /**
    * 留めた枠の本文が読めた(#505 段②)。⚠ `BODY_LOADED` と**別の口**である ──
@@ -1602,6 +1654,11 @@ export type DomainEvent =
    * 空文字は「絞り込み無し」── 受け手は問い合わせずに黙って終える。
    */
   | { type: 'REQUEST_SEARCH'; query: string }
+  /**
+   * 探す面の検索を頼む(#680)。⚠ 受け手(effect)が **300ms 止まってから**叩く ──
+   * 打鍵ごとに worker を叩かない。空文字は来ない(reducer が出さない)。
+   */
+  | { type: 'REQUEST_SEARCH_DETAIL'; query: string }
   /**
    * 集計を頼む(#184)。⚠ 検索と同じ理由で **SQL 側の仕事** ── 本文は常駐していない。
    * ⚠ **目録と表を 1 回の走査で頼む**(`key` が `null` なら目録だけ)── 別々に
@@ -2235,6 +2292,51 @@ function reduceCore(
           searchHitsQuery: action.query,
           searchHitsTruncated: action.truncated,
         },
+        events: [],
+      };
+    /**
+     * 🔴 **探す面の欄に打った**(#680)。⚠ 左の一覧(`filterQuery`)には触らない。
+     * ⚠ 前の行は**消さない**(`rowsQuery` が古いまま = まだ返っていない、と読める)──
+     *   打つたびに一覧が空になるとちらつく。空にしたら結果も空にする(頼まない)。
+     */
+    case 'SET_SEARCH_PAGE_QUERY': {
+      const page = state.searchPage;
+      if (page.query === action.query) return { state, events: [] };
+      if (action.query.trim() === '') {
+        return {
+          state: {
+            ...state,
+            searchPage: { query: action.query, rows: [], rowsQuery: action.query, truncated: false, failed: false },
+          },
+          events: [],
+        };
+      }
+      return {
+        state: { ...state, searchPage: { ...page, query: action.query, failed: false } },
+        events: [{ type: 'REQUEST_SEARCH_DETAIL', query: action.query }],
+      };
+    }
+    case 'SET_SEARCH_DETAIL':
+      // ⚠ **遅れて返った古い結果を捨てる**(`SET_SEARCH_HITS` と同じ)
+      if (action.query !== state.searchPage.query) return { state, events: [] };
+      return {
+        state: {
+          ...state,
+          searchPage: {
+            query: action.query,
+            rows: action.rows,
+            rowsQuery: action.query,
+            truncated: action.truncated,
+            failed: false,
+          },
+        },
+        events: [],
+      };
+    case 'SEARCH_DETAIL_FAILED':
+      if (action.query !== state.searchPage.query) return { state, events: [] };
+      // ⚠ 前の行は残す(消すと「失敗して空になった」に見える)── 印だけ立てる
+      return {
+        state: { ...state, searchPage: { ...state.searchPage, rowsQuery: action.query, failed: true } },
         events: [],
       };
     case 'SET_OPEN_EXTENSIONS':

@@ -148,7 +148,12 @@ import { InspectorRenderer } from '@adapter/ui/render/inspector';
 import { BrowseRouter, type BrowseMode } from '@adapter/ui/render/browse';
 import { CenterRouter } from '@adapter/ui/render/center';
 import { AppendBoxRenderer } from '@adapter/ui/render/append-box';
-import { bindActions, generateLid, type BinderServices } from '@adapter/ui/actions/binder';
+import {
+  bindActions,
+  generateLid,
+  runGlobalCommand,
+  type BinderServices,
+} from '@adapter/ui/actions/binder';
 import { createCaptureService } from '@adapter/ui/actions/capture';
 import { createTimerService } from '@adapter/ui/actions/timer';
 import { createAlarmService } from '@adapter/ui/actions/alarm';
@@ -395,6 +400,11 @@ function openViewTile(
    *   `openViewHere` → `browse-mode.ts` の `homeTabOf` に在り、ここは口を渡すだけ。
    */
   openBrowse: (mode: BrowseMode) => void,
+  /**
+   * 🔴 **左の列の欄へ焦点を入れる口**(#680)── 探す面の退避先。判定は `openViewHere`、
+   *   実体は `binder.ts` の `focus-search`(畳んだ列を戻してから焦点を入れる)。
+   */
+  focusSearch: () => boolean,
 ): Promise<unknown> {
   return openViewInWindow(view, {
     // ⚠ `noopener` で開く ── 別プロセスになり、閉じれば常駐が還る(段③ の実測)。
@@ -418,7 +428,7 @@ function openViewTile(
      */
     // 🔴 **予定表は左の列の「予定」タブへ退避する**(#673 段②)── 中央に開くと
     //    本文が消える(#292 段⑤ の理由)。振り分けは `openViewHere` の 1 か所
-    openInPane: (v) => openViewHere(dispatcher, v, openBrowse),
+    openInPane: (v) => openViewHere(dispatcher, v, openBrowse, focusSearch),
     fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
     // 🔴 押した瞬間に返事をする(#685 動線レビュー 欠陥 7)── 塞がれた回は
     //    2.5 秒まるごと無反応で、user は「効いていない」と読んでもう一度押す
@@ -1165,6 +1175,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     paint();
     paintOpen();
   };
+  /**
+   * 🔴 **左の列の欄へ焦点を入れる**(#680)── 探す面の別窓が塞がれたときの退避先。
+   * 🔑 `Ctrl+F` と**同じ 1 本**(`runGlobalCommand('focus-search')`)を通す ── 畳んだ列を
+   *   戻してから焦点を入れる作法をここへ書き写さない(§7)。返り値は「入れられたか」。
+   */
+  const focusSearch = (): boolean =>
+    runGlobalCommand('focus-search', root, dispatcher, appKeymap, () => {}, showStatus);
 
   /**
    * 🔴 **幅が足りなくて畳んだら、帯で言う**(#551 / #606)。⚠ 起動時ではなく**ここ**で
@@ -2484,7 +2501,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         //    何が来るかは `tiles.ts` の組み込みタイルが決める(`isViewMode(kind)`)。
         //    予定表の退避先は**左の列の「予定」タブ**(`openViewHere`)なので、
         //    タブを開く口(`services.setBrowse`)を渡す
-        openView: (view) => void openViewTile(dispatcher, cid, view, (m) => services.setBrowse?.(m)),
+        openView: (view) =>
+          void openViewTile(dispatcher, cid, view, (m) => services.setBrowse?.(m), focusSearch),
         openManual: () => void openManualTile(dispatcher, markdown, showStatus),
         // ⚠ **聞かない。憶えているものを確かめるだけ**(上の granted と同じ判定を
         //    通す ── ここで別の式を書くと、片方だけ直した日に食い違う)
@@ -2550,7 +2568,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             openOffice: openOfficeTile,
             // 🔴 **別窓で開く**(#300 段③)。⚠ 判断と文言は `view-window.ts` に在る
             //    ── 上と同じ配線(§7:依存の実体を 1 つに保つ)
-            openView: (view) => void openViewTile(dispatcher, cid, view, (m) => services.setBrowse?.(m)),
+            openView: (view) =>
+              void openViewTile(dispatcher, cid, view, (m) => services.setBrowse?.(m), focusSearch),
             // ⚠ 添付起動の経路に組み込みタイルは来ない(kind は 'app' 固定)── それでも
             //    渡すのは、型が**落とせない形**にしてあるからである(§配線を落とすと静かに死ぬ)
             openManual: () => void openManualTile(dispatcher, markdown, showStatus),

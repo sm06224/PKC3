@@ -6210,6 +6210,18 @@ export function bindActions(
       return;
     }
     /**
+     * 🔴 **探す面の欄**(#680)。⚠ 左の列の欄(`entry-filter`)とは**別の語**へ写す ──
+     *   面で打った語で本体の一覧が絞られると、別窓の面から本体が動いて驚く。
+     * ⚠ 打鍵ごとに写す(state が正)。worker を叩くのは effect が 300ms 止まってから。
+     */
+    if (
+      el instanceof HTMLInputElement &&
+      el.getAttribute('data-pkc-field') === 'search-page-input'
+    ) {
+      dispatcher.dispatch({ type: 'SET_SEARCH_PAGE_QUERY', query: el.value });
+      return;
+    }
+    /**
      * 🔴 **そのペインだけの絞り込み**(#273 残件)。
      * ⚠ **打つそばから効かせる**(`change` を待たない)── 器の絞り込みと
      *   同じ手触りにする。⚠ 器のほうと**別の口**なのは、絞る相手が違うからである。
