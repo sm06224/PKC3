@@ -76,6 +76,10 @@ const UNBRIDGED: readonly string[] = [
   'dual-preview',
   'dual-rename',
   'edit-all',
+  // ⚠ 2026-09-05(#215): 左の列の行の鍵 3 つ ── `runFilerKey` の `FILER_KEY_ACTION` で受ける
+  'filer-rename',
+  'filer-move',
+  'filer-new-in-folder',
   'filer-extend-down',
   'filer-extend-up',
   'filer-open',
@@ -111,11 +115,13 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-09-05: 塊の移動の「元に戻す」`undo-move`(#684 段①)で受け手が 1 増えた
       // ⚠ 2026-09-05(#215): 行の右クリックからの整理 3 つ(`rename-entry-begin` / `move-to-folder` /
       //    `create-in-folder`)── 受け手 +3、`ENTRY_MENU_ACTIONS` にも載るので registered / both も +3
-      total: 241,
+      // ⚠ 2026-09-05(#215): 鍵 `filer-rename` / `filer-move` / `filer-new-in-folder` で登記 +3
+      //    (受け手の表の外 ── `runFilerKey` が `FILER_KEY_ACTION` で受ける)
+      total: 244,
       receivers: 200,
-      registered: 75,
+      registered: 78,
       both: 34,
-      outsideActionsTable: 41,
+      outsideActionsTable: 44,
       unregistered: 166,
     });
   });
@@ -139,7 +145,8 @@ describe('操作の全数台帳(#582 段①)', () => {
     // ⚠ 2026-09-04: 本文のメニューが 2 → 3(`open-note-window`)
     // ⚠ 2026-09-04(#690 I5): 鍵が 52 → 53(`open-note-window` を「操作を探す」に出すため)
     // ⚠ 2026-09-05(#215): 行の右クリックが 12 → 15(名前を変える / 移す… / この中に新しいノートを作る)
-    expect(s().perBook).toEqual({ key: 53, entry: 15, body: 3, collection: 2, settings: 5 });
+    // ⚠ 2026-09-05(#215): 鍵が 53 → 56(左の列の行の F2 / F6 / Shift+F4)
+    expect(s().perBook).toEqual({ key: 56, entry: 15, body: 3, collection: 2, settings: 5 });
   });
 
   it('🔴 押し所へ辿れない登記を、身元で pin する', () => {

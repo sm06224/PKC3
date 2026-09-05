@@ -4981,6 +4981,16 @@ li[data-pkc-row-slot] {
 [data-pkc-drop-edge='after'] {
   box-shadow: inset 0 -2px 0 var(--accent);
 }
+/* 🔴 並べ替えの落とし先(#215)── 行の上半分なら上辺、下半分なら下辺に線を引く。
+ * ⚠ 行の高さを変えない(`box-shadow` は版面を動かさない)。
+ * ⚠ フォルダの表の行は `tr` に印が付くが、`tr` の box-shadow は描かれないので **`td` に引く**
+ *   (本文の D&D(#684)は塊そのものに印が付くので上の規則で足りる)。 */
+[data-pkc-region='filer-table'] tbody tr[data-pkc-drop-edge='before'] td {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+[data-pkc-region='filer-table'] tbody tr[data-pkc-drop-edge='after'] td {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
 [data-pkc-field='filer-bulk'] {
   display: flex;
   flex-wrap: wrap;

@@ -130,7 +130,12 @@ import { splitTags } from '@features/flavor/tags';
 import { isEntrySort, NATURAL_DESC } from '@features/filter/entry-sort';
 import { COLUMN_PANES, isPaneId } from '@features/pane-visibility';
 import { STRUCTURAL, isRelationKind } from '@features/relation/kinds';
-import { canEnterScope, getAncestorFolders, listMoveTargets } from '@features/relation/tree';
+import {
+  canEnterScope,
+  getAncestorFolders,
+  listMoveTargets,
+  listSiblings,
+} from '@features/relation/tree';
 import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
 import { planCopy } from '@features/relation/copy-plan';
 import {
@@ -953,6 +958,20 @@ function writeBack(
  *   (CLAUDE.md §7。左の列と 2 ペインで `deleteFrom` を 1 本にしたのと同じ理由)。
  * ⚠ 通すのは `run` ── 書出し中などの門(`refuseWhileBusy`)も一緒に通す。
  */
+/**
+ * 🔴 **左の列(フォルダの表)の鍵 → 押しボタンの口**(#215)。
+ *
+ * 🔑 2 ペインの `DUAL_KEY_ACTION` と同じ作法 ── `F2` と右クリックの「名前を変える」は
+ *   **同じ受け手**を通す(断り方・欄の出し方が鍵とメニューで割れない)。
+ * ⚠ 鍵は 2 ペインの同じ操作と揃えてある(`F2` 改名 / `F6` 移す / `Shift+F4` 作る)──
+ *   同じ操作は同じ鍵(`keymap.ts` の注記)。
+ */
+const FILER_KEY_ACTION: Readonly<Record<string, string>> = {
+  'filer-rename': 'rename-entry-begin',
+  'filer-move': 'move-to-folder',
+  'filer-new-in-folder': 'create-in-folder',
+};
+
 const DUAL_KEY_ACTION: Readonly<Record<string, string>> = {
   'dual-copy-to-other': 'dual-copy',
   'dual-move-to-other': 'dual-move',
@@ -7092,6 +7111,18 @@ export function bindActions(
     }
     // 🔴 **PKC の中の移動**(#240 段④)── OS からの file 受けとは**別の型**で見分ける
     if (de.dataTransfer?.types?.includes(PKC_DRAG) === true) {
+      /**
+       * 🔴 **行の上半分 / 下半分は「並べ替え」**(#215)── 落とす前に線で見せる。
+       * ⚠ フォルダの行の**真ん中**は今までどおり「中へ入れる」(下の `dropTargetOf`)──
+       *   判定は `reorderTargetOf` 1 か所(落とす側と同じ関数)。
+       */
+      const edge = reorderTargetOf(de);
+      if (edge !== null) {
+        e.preventDefault();
+        de.dataTransfer.dropEffect = 'move';
+        markDropEdge(edge.row, edge.edge);
+        return;
+      }
       const drop = dropTargetOf(de.target);
       if (drop === undefined) {
         /**
@@ -7243,6 +7274,15 @@ export function bindActions(
       return;
     }
     if (de.dataTransfer?.types?.includes(PKC_DRAG) === true) {
+      // 🔴 行の上半分 / 下半分に落としたら**並べ替え**(#215)── 中へ入れるのではない
+      const edge = reorderTargetOf(de);
+      if (edge !== null) {
+        clearDropTarget();
+        e.preventDefault();
+        const dragged = (de.dataTransfer.getData(PKC_DRAG) || '').split(' ').filter((x) => x !== '');
+        reorderDropped(dragged, edge.row.getAttribute('data-pkc-entry') ?? '', edge.edge);
+        return;
+      }
       const drop = dropTargetOf(de.target);
       clearDropTarget();
       if (drop === undefined) {
@@ -7545,9 +7585,43 @@ export function bindActions(
     dropMark = { el, attr, value };
     el.setAttribute(attr, value);
   };
+  /**
+   * 並べ替えの落とし先の印(#215)。⚠ 属性名 `data-pkc-drop-edge` は本文の D&D(#684)と
+   * 同じ綴りを使う予定 ── CSS の規則はフォルダの表の行に限ってある(`app.css`)。
+   */
+  let edgeMark: HTMLElement | null = null;
+  const markDropEdge = (el: HTMLElement, edge: 'before' | 'after'): void => {
+    if (edgeMark === el && el.getAttribute('data-pkc-drop-edge') === edge) return;
+    clearDropTarget();
+    edgeMark = el;
+    el.setAttribute('data-pkc-drop-edge', edge);
+  };
+  // ⚠ 消すのは 1 本 ── 中へ入れる印と並べ替えの印を**別々に消し忘れない**
   const clearDropTarget = (): void => {
     dropMark?.el.removeAttribute(dropMark.attr);
     dropMark = null;
+    edgeMark?.removeAttribute('data-pkc-drop-edge');
+    edgeMark = null;
+  };
+  /**
+   * 🔴 **並べ替えの落とし先**(#215)── フォルダの表の行の**上半分 / 下半分**。
+   *
+   * ⚠ フォルダ(とスマートフォルダ)の行は真ん中の帯(25〜75%)を「中へ入れる」に残す ──
+   *   端だけを並べ替えにする。ノートの行は上下 2 分。
+   * ⚠ 器の高さが測れない環境(happy-dom の素の要素)では `null` ── 「並べ替えの
+   *   つもりで中へ入れた」を作らない側へ倒す。
+   * 🔑 `dragover` と `drop` が**同じ関数**で判定する(光った所と落ちる所が食い違わない)。
+   */
+  const reorderTargetOf = (de: DragEvent): { row: HTMLElement; edge: 'before' | 'after' } | null => {
+    const row = (de.target as HTMLElement | null)?.closest<HTMLElement>(
+      '[data-pkc-region="filer-table"] tbody [data-pkc-entry]',
+    );
+    if (!row || !root.contains(row)) return null;
+    const r = row.getBoundingClientRect();
+    if (!(r.height > 0)) return null;
+    const y = (de.clientY - r.top) / r.height;
+    if (row.hasAttribute('data-pkc-drop') && y >= 0.25 && y <= 0.75) return null;
+    return { row, edge: y < 0.5 ? 'before' : 'after' };
   };
   /**
    * 落としたものを動かす。⚠ **断る理由を出す**(無言の操作拒否を作らない)──
@@ -7555,6 +7629,72 @@ export function bindActions(
    */
   const moveDropped = (lids: readonly string[], parentLid: string | null): void =>
     moveEntries(dispatcher, lids, parentLid, services.showStatus);
+  /**
+   * 🔴 **落とした行の前 / 後へ並べ替える**(#215)。
+   *
+   * 🔑 規則は既存の `MOVE_ENTRY_ORDER`(隣と入れ替える)を**着くまで撃つ** ── 並びの
+   *   規則(`reorderSibling` / `entryOrder` の交換)を 2 本にしない。1 段ごとに state を
+   *   読み直すので、同値の `entryOrder` でも着く(端で動かなければ抜ける)。
+   * ⚠ 動かせるのは**同じフォルダの中の行だけ**(帯の上へ / 下へと同じ規則)── 別の
+   *   フォルダの物が混じっていたら、その件数を言う(黙って捨てない)。
+   * ⚠ 「手動の順」で並べているときだけ ── 題名順などで見ているときに `entryOrder` を
+   *   動かしても**画面は 1 ドットも変わらない**(押したのに何も起きない、を作らない)。
+   * ⚠ 複数を落としたら**元の並びのまま**入れる ── 前へなら見えている順に 1 件ずつ
+   *   行き先の直前へ、後ろへなら逆順に直後へ。
+   */
+  const reorderDropped = (
+    lids: readonly string[],
+    targetLid: string,
+    edge: 'before' | 'after',
+  ): void => {
+    const st = dispatcher.getState();
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから並べ替えてください' });
+      return;
+    }
+    if (st.entrySort !== 'manual') {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '並べ替えは「手動の順」で並べているときだけ効きます(上の並び順を戻してください)',
+      });
+      return;
+    }
+    const siblings = listSiblings(targetLid, st.entryMetas, st.relations).map((m) => m.lid);
+    const movable = siblings.filter((l) => l !== targetLid && lids.includes(l));
+    if (movable.length === 0) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error:
+          '並べ替えられるのは同じフォルダの中の行だけです(別のフォルダへ動かすなら、フォルダの行の真ん中へ落としてください)',
+      });
+      return;
+    }
+    const seq = edge === 'before' ? movable : [...movable].reverse();
+    for (const lid of seq) stepTo(lid, targetLid, edge);
+    const skipped = lids.filter((l) => l !== targetLid && !movable.includes(l)).length;
+    if (skipped > 0) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: `${skipped} 件は別のフォルダの物なので並べ替えていません`,
+      });
+    }
+    services.showStatus?.(`${movable.length} 件を並べ替えました`);
+  };
+  /** 1 件を `targetLid` の直前 / 直後まで、隣との入れ替えで運ぶ。 */
+  const stepTo = (lid: string, targetLid: string, edge: 'before' | 'after'): void => {
+    // ⚠ 上限は兄弟の数 ── 端で動かなくなった回は state が変わらないので抜ける
+    for (let guard = 0; guard < 100000; guard += 1) {
+      const now = dispatcher.getState();
+      const sib = listSiblings(lid, now.entryMetas, now.relations).map((m) => m.lid);
+      const i = sib.indexOf(lid);
+      const j = sib.indexOf(targetLid);
+      if (i < 0 || j < 0) return;
+      const want = edge === 'before' ? (i < j ? j - 1 : j) : i < j ? j : j + 1;
+      if (i === want) return;
+      dispatcher.dispatch({ type: 'MOVE_ENTRY_ORDER', lid, direction: i < want ? 'down' : 'up' });
+      if (dispatcher.getState().entryMetas === now.entryMetas) return;
+    }
+  };
   /**
    * 🔴 **フォルダは 2 クリックで開く**(#240 段①。user 指示 2026-08-17
    * 「フォルダをダブルクリックで開くように変更」)。
@@ -8611,6 +8751,22 @@ export function bindActions(
       }
       dispatcher.dispatch({ type: 'SELECT_RANGE', lid });
       focusRow(lid);
+      return true;
+    }
+    /**
+     * 🔴 **F キーは押しボタンと同じ実体を呼ぶ**(#215。2 ペインの `DUAL_KEY_ACTION` と同型)。
+     * ⚠ 相手は**焦点の行**(無ければ選んでいるノート)── 受け手は `data-pkc-entry` を
+     *   `closest` で辿るので、行そのものを target として渡す。行が無ければ表を渡す
+     *   (受け手が `selectedLid` へ落とす)。
+     */
+    const viaRow = FILER_KEY_ACTION[cmd];
+    if (viaRow !== undefined) {
+      const lid = focusedRowLid() ?? st.selectedLid;
+      const host =
+        (lid === null ? null : rowEl(lid)) ??
+        root.querySelector<HTMLElement>('[data-pkc-region="filer-table"]');
+      if (host === null) return false;
+      run(viaRow, host);
       return true;
     }
     if (cmd === 'filer-open') {

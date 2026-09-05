@@ -402,6 +402,44 @@ test('🔴 ↑↓ で行を送れて、Enter は読むところから始まる',
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 
+/**
+ * 🔴 **行の上半分に落とすと、その行の前へ並べ替わる**(#215)。
+ * ⚠ unit は行の**中の座標**(上半分 / 下半分)を持てない ── 実 HTML5 D&D の
+ *   `clientY` と `getBoundingClientRect` が本物で一致するかは、ここでしか見えない。
+ * ⚠ 題名ではなく **lid の並び**で見る(既定の編集の道具では題名を打てない回がある)。
+ */
+test('🔴 行を別の行の上半分に落とすと、その行の前へ並べ替わる (#215)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  for (let i = 0; i < 3; i += 1) {
+    await createEntry(page, 'text');
+    await clickReal(page, '[data-pkc-action="commit-edit"]');
+  }
+  const rows = page.locator('[data-pkc-region="filer-table"] tbody tr');
+  await expect(rows).toHaveCount(3);
+  const before = await rows.evaluateAll((els) => els.map((e) => e.getAttribute('data-pkc-entry')));
+  const box = await rows.nth(0).boundingBox();
+  expect(box, '1 行目に大きさが無い').not.toBeNull();
+  // 3 行目を掴んで、1 行目の**上端から 2px** へ落とす(= 上半分)
+  await page.dragAndDrop(
+    '[data-pkc-region="filer-table"] tbody tr:nth-child(3)',
+    '[data-pkc-region="filer-table"] tbody tr:nth-child(1)',
+    { targetPosition: { x: Math.round(box!.width / 2), y: 2 } },
+  );
+  // ① アプリ自身の合図を先に待つ(掴み損ねと並べ替えの不具合を見分ける)
+  await expect(page.locator('[data-pkc-region="status"]'), '並べ替えの合図が出ない').toContainText(
+    '1 件を並べ替えました',
+  );
+  // ② 並びが「3 行目 → 1 行目 → 2 行目」になっている
+  const after = await rows.evaluateAll((els) => els.map((e) => e.getAttribute('data-pkc-entry')));
+  expect(after, '前へ動いていない').toEqual([before[2], before[0], before[1]]);
+  // ③ 中へ入っていない(行数は 3 のまま)
+  await expect(rows).toHaveCount(3);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
 test('🔴 設定を入れると、Enter がそのまま編集に入る', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });

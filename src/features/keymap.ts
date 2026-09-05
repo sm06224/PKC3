@@ -253,6 +253,36 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     defaults: ['Shift+ArrowUp'],
   },
   /**
+   * 🔴 **左の列の行からの整理 3 つの鍵**(#215)。
+   *
+   * ⚠ 文脈は `filer` **だけ** ── 2 ペインには同じ操作の鍵が既に在る(`dual-rename` F2 /
+   *   `dual-move-to-other` F6 / `dual-new-note` Shift+F4)。**同じ操作は同じ鍵**にする
+   *   (押す面が違っても、指が覚えた鍵をそのまま使える)。文脈が重ならないので
+   *   割当の衝突にはならない(`contextsOverlap`)。
+   * 🔑 実体は右クリックの項目と**同じ受け手**(`binder.ts` の `FILER_KEY_ACTION`)。
+   */
+  {
+    id: 'filer-rename',
+    label: '名前を変える(行の題名の所で打ち替える)',
+    contexts: ['filer'],
+    defaults: ['F2'],
+    note: 'Enter で確定、Esc でやめます',
+  },
+  {
+    id: 'filer-move',
+    label: '移す…(入れ先のフォルダを選ぶ)',
+    contexts: ['filer'],
+    defaults: ['F6'],
+    note: '印があれば、その全部を移します',
+  },
+  {
+    id: 'filer-new-in-folder',
+    label: 'この中に新しいノートを作る',
+    contexts: ['filer'],
+    defaults: ['Shift+F4'],
+    note: 'フォルダの行で押します(作ってそのまま編集に入ります)',
+  },
+  /**
    * 🔴 **2 ペインだけの鍵**(2026-08-19 の作り直し。設計 doc §3-3)。
    *
    * ⚠ 割当は古典 4 実装(Total Commander / Double Commander / FAR / Krusader)で

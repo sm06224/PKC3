@@ -889,6 +889,114 @@ describe('掴んで落とす(#240 段④)', () => {
   });
 });
 
+/**
+ * 🔴 **並べ替えのドラッグ&ドロップ**(#215)。行を**別の行の上半分 / 下半分**に落とすと、
+ * 移動ではなく**並べ替え**になる(フォルダの行の真ん中は今までどおり「中へ入れる」)。
+ *
+ * ⚠ happy-dom は要素に大きさを持たないので、行の `getBoundingClientRect` を差して
+ *   「上半分 / 下半分 / 真ん中」を作る(実物の座標は smoke `organize` が見る)。
+ * ⚠ 規則は既存の `MOVE_ENTRY_ORDER`(隣と入れ替える)を着くまで撃つ形 ── だから
+ *   disk への要求(`reorderEntry`)も既存の口から出る。
+ */
+describe('行の上半分 / 下半分に落とすと並べ替え(#215)', () => {
+  const METAS = [meta('f1', 1, 'folder'), meta('f2', 2, 'folder'), meta('n1', 3), meta('n2', 4), meta('n3', 5), meta('n4', 6)];
+
+  beforeEach(() => {
+    document.body.textContent = '';
+  });
+
+  /** 行に大きさ(top 100 / 高さ 20)を持たせて、y の位置で落とす。 */
+  function edgeDrag(type: string, dt: ReturnType<typeof dataTransfer>, row: HTMLElement, clientY: number): void {
+    Object.defineProperty(row, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ top: 100, bottom: 120, height: 20, left: 0, right: 200, width: 200, x: 0, y: 100 }),
+    });
+    const e = dragEvent(type, dt);
+    Object.defineProperty(e, 'clientY', { value: clientY });
+    row.dispatchEvent(e);
+  }
+
+  it('🔴 上半分に落とすと、その行の前へ(disk への要求まで)', async () => {
+    const { q, rows, reordered, status } = setup(METAS, []);
+    expect(rows(), '前提が崩れている').toEqual(['f1', 'f2', 'n1', 'n2', 'n3', 'n4']);
+    edgeDrag('drop', dataTransfer({ [PKC_DRAG]: 'n3' }), q('tbody [data-pkc-entry="n1"]')!, 102);
+    await tick();
+    expect(rows(), '前へ動いていない').toEqual(['f1', 'f2', 'n3', 'n1', 'n2', 'n4']);
+    expect(reordered.length, 'disk への並べ替えの要求が出ていない').toBeGreaterThan(0);
+    expect(status.at(-1)).toBe('1 件を並べ替えました');
+  });
+
+  it('🔴 下半分に落とすと、その行の後ろへ', async () => {
+    const { q, rows } = setup(METAS, []);
+    edgeDrag('drop', dataTransfer({ [PKC_DRAG]: 'n1' }), q('tbody [data-pkc-entry="n3"]')!, 118);
+    await tick();
+    expect(rows(), '後ろへ動いていない').toEqual(['f1', 'f2', 'n2', 'n3', 'n1', 'n4']);
+  });
+
+  it('⚠ 対照群 ── フォルダの行の真ん中に落とすと、今までどおり中へ入る', async () => {
+    const { q, rows, parentCalls, reordered } = setup(METAS, []);
+    edgeDrag('drop', dataTransfer({ [PKC_DRAG]: 'n1' }), q('tbody [data-pkc-entry="f1"]')!, 110);
+    await tick();
+    expect(parentCalls.map((c) => c.lid), '中へ入っていない').toEqual(['n1']);
+    expect(reordered, '中へ入れたのに並べ替えが走った').toEqual([]);
+    expect(rows()).toEqual(['f1', 'f2', 'n2', 'n3', 'n4']);
+  });
+
+  it('🔴 フォルダの行でも、上端なら前へ並べ替え(中へは入らない)', async () => {
+    const { q, rows, parentCalls } = setup(METAS, []);
+    edgeDrag('drop', dataTransfer({ [PKC_DRAG]: 'n4' }), q('tbody [data-pkc-entry="f1"]')!, 101);
+    await tick();
+    expect(parentCalls, 'フォルダの端に落としたのに中へ入った').toEqual([]);
+    expect(rows()).toEqual(['n4', 'f1', 'f2', 'n1', 'n2', 'n3']);
+  });
+
+  it('🔴 印を付けた複数を落としても、元の並びのまま入る(前へ / 後ろへ)', async () => {
+    const { q, rows } = setup(METAS, []);
+    edgeDrag('drop', dataTransfer({ [PKC_DRAG]: 'n1 n2' }), q('tbody [data-pkc-entry="n4"]')!, 102);
+    await tick();
+    expect(rows()).toEqual(['f1', 'f2', 'n3', 'n1', 'n2', 'n4']);
+    edgeDrag('drop', dataTransfer({ [PKC_DRAG]: 'f1 f2' }), q('tbody [data-pkc-entry="n1"]')!, 118);
+    await tick();
+    expect(rows(), '後ろへ複数を落としたら並びが崩れた').toEqual(['n3', 'n1', 'f1', 'f2', 'n2', 'n4']);
+  });
+
+  it('🔴 掴んで通ると、落ちる側の辺に印が出る(真ん中へ移れば消える)', () => {
+    const { q } = setup(METAS, []);
+    const note = q<HTMLElement>('tbody [data-pkc-entry="n1"]')!;
+    const folder = q<HTMLElement>('tbody [data-pkc-entry="f1"]')!;
+    edgeDrag('dragover', dataTransfer({ [PKC_DRAG]: 'n2' }), note, 102);
+    expect(note.getAttribute('data-pkc-drop-edge')).toBe('before');
+    edgeDrag('dragover', dataTransfer({ [PKC_DRAG]: 'n2' }), note, 118);
+    expect(note.getAttribute('data-pkc-drop-edge')).toBe('after');
+    edgeDrag('dragover', dataTransfer({ [PKC_DRAG]: 'n2' }), folder, 110);
+    expect(note.hasAttribute('data-pkc-drop-edge'), '別の所へ移ったのに線が残っている').toBe(false);
+    expect(folder.hasAttribute('data-pkc-dropping'), 'フォルダの真ん中で光らない').toBe(true);
+    edgeDrag('dragover', dataTransfer({ [PKC_DRAG]: 'n2' }), folder, 102);
+    expect(folder.hasAttribute('data-pkc-dropping'), '端へ移ったのに中へ入れる印が残っている').toBe(false);
+    expect(folder.getAttribute('data-pkc-drop-edge')).toBe('before');
+  });
+
+  it('🔴 手動の順で見ていないときは断る(画面が 1 ドットも変わらない操作にしない)', async () => {
+    const { q, rows, d, reordered } = setup(METAS, []);
+    d.dispatch({ type: 'SET_ENTRY_SORT', sort: 'title' });
+    const before = rows();
+    edgeDrag('drop', dataTransfer({ [PKC_DRAG]: 'n3' }), q('tbody [data-pkc-entry="n1"]')!, 102);
+    await tick();
+    expect(d.getState().error ?? '', '無言で捨てた').toContain('手動の順');
+    expect(reordered).toEqual([]);
+    expect(rows()).toEqual(before);
+  });
+
+  it('🔴 別のフォルダの物は並べ替えない(理由を出す)', async () => {
+    const { q, d, reordered } = setup(METAS, [rel('r1', 'f1', 'n1')]);
+    // n1 は f1 の中。ルートに見えている n2 の上半分へ落とす
+    edgeDrag('drop', dataTransfer({ [PKC_DRAG]: 'n1' }), q('tbody [data-pkc-entry="n2"]')!, 102);
+    await tick();
+    expect(d.getState().error ?? '', '無言で捨てた').toContain('同じフォルダの中');
+    expect(reordered).toEqual([]);
+  });
+});
+
 describe('居場所を変える口は 1 本(着地前レビュー 7)', () => {
   const METAS = [meta('f1', 1, 'folder'), meta('n1', 2)];
 

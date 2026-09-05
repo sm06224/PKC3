@@ -420,6 +420,57 @@ describe('情報ペインの「この中に新しいノートを作る」(#215)'
   });
 });
 
+/**
+ * 🔴 **鍵は右クリックと同じ実体を呼ぶ**(#215 段②)── `F2` / `F6` / `Shift+F4`(2 ペインと同じ鍵)。
+ * ⚠ 効くのは**フォルダの表の行に焦点があるとき**だけ(`filer` 文脈)。
+ */
+describe('フォルダの表の行の鍵(#215)', () => {
+  const press = (row: HTMLElement, key: string, over: Partial<KeyboardEventInit> = {}): void => {
+    row.focus();
+    row.dispatchEvent(
+      new KeyboardEvent('keydown', { key, code: key, bubbles: true, cancelable: true, ...over }),
+    );
+  };
+
+  it('🔴 F2 で入力欄が出て、Enter で名前が変わる', () => {
+    const r = setup();
+    press(r.row('n1'), 'F2');
+    const input = r.renameInput();
+    expect(input, 'F2 で入力欄が出ていない').not.toBeNull();
+    expect(input!.value).toBe('t-n1');
+    input!.value = '鍵から';
+    key(input!, 'Enter');
+    expect(r.d.getState().entryMetas.get('n1')?.title).toBe('鍵から');
+  });
+
+  it('🔴 F6 で入れ先を選ぶ画面が出る(焦点の行が相手)', async () => {
+    const r = setup();
+    press(r.row('n2'), 'F6');
+    await tick();
+    const dialog = [...document.querySelectorAll<HTMLDialogElement>('dialog')].find((x) => x.open);
+    expect(dialog, 'F6 で入れ先を選ぶ画面が出ていない').toBeDefined();
+    expect(dialog!.querySelector('[data-pkc-field="dialog-title"]')?.textContent).toBe('「t-n2」を移す');
+  });
+
+  it('🔴 Shift+F4 でフォルダの中に作って編集に入る', async () => {
+    const r = setup();
+    press(r.row('f1'), 'F4', { shiftKey: true });
+    await tick();
+    const st = r.d.getState();
+    expect(st.phase, '編集に入っていない').toBe('editing');
+    expect(getStructuralChildren('f1', st.entryMetas, st.relations).map((m) => m.lid)).toEqual([st.freshLid]);
+  });
+
+  it('⚠ 対照群 ── 表の外(地)で F2 を押しても欄は出ない(面をまたいで効かない)', () => {
+    const r = setup();
+    r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    r.root.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'F2', code: 'F2', bubbles: true, cancelable: true }),
+    );
+    expect(r.renameInput(), '表の外の鍵で欄が出た').toBeNull();
+  });
+});
+
 describe('この中に新しいノートを作る(#215)', () => {
   it('🔴 押した行のフォルダの子として生まれ、そのまま編集に入る', async () => {
     const r = setup();

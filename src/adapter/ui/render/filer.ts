@@ -904,8 +904,8 @@ export class FilerRenderer {
       tr.setAttribute('data-pkc-archetype', m.archetype);
       /**
        * 🔴 **掴んで動かす**(#240 段④。user 指示 2026-08-17「D&D を導入すること」)。
-       * ⚠ 落とし先は**フォルダの行**と**パンくず**の 2 つだけ ── 行と行の隙間
-       * (並べ替え)は別の主題なので、この段では作らない(doc §6-3 の裁定)。
+       * ⚠ 落とし先は**フォルダの行**と**パンくず**の 2 つ ── 行の**上半分 / 下半分**に
+       * 落とすと並べ替えになる(#215。判定は `binder.ts` の `reorderTargetOf`)。
        * ⚠ `draggable` は行そのものに置く(セルに置くと掴む場所が読めない)。
        */
       tr.setAttribute('draggable', 'true');
