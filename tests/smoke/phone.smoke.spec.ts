@@ -1435,3 +1435,61 @@ function rgbAt(png: Buffer, x: number, y: number): [number, number, number] {
   const o = y * stride + x * bpp;
   return [out[o]!, out[o + 1]!, out[o + 2]!];
 }
+
+/**
+ * 🔴 **空の PKC に「次の一手」が出て、押すと本当にノートができる**(#722 P2-13)。
+ *
+ * ## ⚠ ここでしか見られないもの
+ *
+ * 案内は**本文の面**にも在るが、スマホ用画面では 3 面が重なっていて、
+ * ノートを 1 件も持たない user が見ているのは**一覧ページ 1 枚**である
+ * (`phonePageOf` は `selectedLid === null` で `'list'`)── つまり
+ * 「案内が画面の外に在る」という #722 の実害は、
+ * **重ねた面の前後関係が解けるここでしか測れない**。
+ *
+ * 🔑 押せるかの観測点は `elementFromPoint`(`toBeVisible()` は覆われていても真になる)。
+ */
+test('🔴 390px の空の PKC で、一覧に「作る」と「取り込む」が出て押せる (#722)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 390, height: 780 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+
+  // ⚠ 空振り防止 ── ノートが 1 件も無い(在ったら「次の一手」は出なくて正しい)
+  expect(
+    await page.locator('[data-pkc-browse-pane="filer"] [data-pkc-entry]').count(),
+    '台の前提が崩れている(空の PKC ではない)',
+  ).toBe(0);
+
+  const start = page.locator('[data-pkc-field="empty-start"]');
+  await expect(start, '空なのに次の一手が出ていない').toBeVisible();
+  await expect(start, '口が 2 つ揃っていない').toContainText('取り込む');
+
+  // 🔴 **指に当たる**(重なった別の面に覆われていない)
+  const hit = await start.locator('[data-pkc-field="empty-start-create"]').evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    return {
+      w: Math.round(r.width),
+      h: Math.round(r.height),
+      own: at === el || el.contains(at),
+      cover: at?.closest('[data-pkc-region]')?.getAttribute('data-pkc-region') ?? null,
+    };
+  });
+  expect(hit.w, '「作る」に幅が無い(台の空振り)').toBeGreaterThan(0);
+  expect(hit.h, '「作る」に高さが無い(台の空振り)').toBeGreaterThan(0);
+  expect(hit.own, `「作る」が覆われている(覆っているのは ${hit.cover ?? '(なし)'})`).toBe(true);
+
+  await clickReal(page, '[data-pkc-field="empty-start-create"]');
+  // 🔑 押した結果は**ノートが 1 件できたこと**で見る(器が消えたことではない)
+  await expect(
+    page.locator('[data-pkc-browse-pane="filer"] [data-pkc-entry]'),
+    '押してもノートができない(dead click)',
+  ).toHaveCount(1, { timeout: 10_000 });
+  // 🔑 できたら「次の一手」は引っ込む(空でなくなったので勧める物が変わる)
+  await expect(start, 'ノートができたのに「まだ何もありません」の口が残っている').toHaveCount(0);
+
+  expect(errors, `console/pageerror: ${errors.join(' | ')}`).toEqual([]);
+});
