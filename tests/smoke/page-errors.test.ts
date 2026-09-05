@@ -5,7 +5,7 @@
  *   実ブラウザでしか確かめられないと、間欠の赤でしか直せなくなる。
  */
 import { describe, expect, it } from 'vitest';
-import { consoleOrigin, firstAppFrame, rawFrame } from './page-errors';
+import { consoleOrigin, firstAppFrame, isAppOrigin, rawFrame } from './page-errors';
 
 /** 実 Chromium の stack(#387 の 2 度目の観測から形を写した)。 */
 const REAL = [
@@ -139,5 +139,26 @@ describe('名指しできない stack でも 1 行残す(#387)', () => {
     const stack = '    at fn (http://localhost:1/a.js:2:3)';
     expect(firstAppFrame(stack)).toBe(' @ /a.js:2:3');
     expect(rawFrame(stack)).not.toBe('');
+  });
+});
+
+describe('🔴 console の行が「アプリの束から出たか」 (#710)', () => {
+  it('🔴 配っている束(http)は数える', () => {
+    expect(isAppOrigin({ url: 'http://localhost:45732/assets/index-abc.js' })).toBe(true);
+    expect(isAppOrigin({ url: 'https://example.test/assets/markdown-worker.js' })).toBe(true);
+  });
+
+  it('🔴 箱の中(`about:srcdoc`)はアプリの主張ではない(#561)', () => {
+    // ⚠ ここを数えると、fixture が描く html / svg の警告で**製品が赤くなる**
+    expect(isAppOrigin({ url: 'about:srcdoc' })).toBe(false);
+    expect(isAppOrigin({ url: 'blob:null/1-2-3' })).toBe(false);
+    expect(isAppOrigin({ url: 'data:text/html,x' })).toBe(false);
+  });
+
+  it('⚠ 出所が読めない行は数えない(どこから出たか言えない物を責めない)', () => {
+    expect(isAppOrigin({ url: '' })).toBe(false);
+    expect(isAppOrigin({})).toBe(false);
+    expect(isAppOrigin(null)).toBe(false);
+    expect(isAppOrigin(undefined)).toBe(false);
   });
 });

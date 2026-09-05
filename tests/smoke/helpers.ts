@@ -4,9 +4,11 @@
  * - クリックは「その座標で実際に見えて・最前面にある」ことを elementFromPoint で
  *   確認してから実マウスで行う(happy-dom では検証できない層 ── visual parity 規約)
  * - pageerror / console.error は各 spec の最後に 0 件を assert する
+ *   (⚠ 2026-09-05 に **`console.info` / `console.log`** も数えるようにした ──
+ *    アプリの束から出たものだけ。理由は `collectPageErrors` の中に書いた)
  */
 import { expect, type Locator, type Page } from '@playwright/test';
-import { consoleOrigin, firstAppFrame, rawFrame } from './page-errors';
+import { consoleOrigin, firstAppFrame, isAppOrigin, rawFrame } from './page-errors';
 
 export async function gotoApp(page: Page): Promise<void> {
   await page.goto('/');
@@ -133,7 +135,32 @@ export function collectPageErrors(page: Page): string[] {
     errors.push(`pageerror: ${e.message}${where} (+${Date.now() - t0}ms)`);
   });
   page.on('console', (msg) => {
-    if (msg.type() !== 'error') return;
+    /**
+     * 🔴 **`info` / `log` も数える(アプリの束から出たものだけ)**(#710、2026-09-05)。
+     *
+     * ⚠ 直す前はここが `msg.type() !== 'error'` で**全部捨てて**いたので、
+     *   製品が `console.info` を**描画のたびに**出していても誰も気づけなかった ──
+     *   実測(smoke 全量 1 回・全種を採った):`[PKC2009]` **9 行** /
+     *   `[PKC2007]` **1 行**が `markdown-worker` の chunk から出ていた(#710 で出所を止めた)。
+     * 🔑 **`info` / `log` に製品の使い道は 1 つも無い**(`src` を全数 grep して 0 件)
+     *   ので、出たら赤にしてよい ── 「知らせる」なら画面の帯(`status`)が正しい出口である。
+     * ⚠ **`warn` は数えない。** 残っている 1 本(`Scripts may close only the windows
+     *   that were opened by them.`)は**ブラウザが出す**もので、`closeViewWindow` が
+     *   「閉じられる窓か」を**実際に閉じてみて**確かめる設計の副産物である
+     *   (`view-window.ts` に対照群つきの実測が在る)。⚠ ここで名指しの一覧へ足すと、
+     *   後から来た本物の warn まで黙る ── だから**種類ごと外す**。
+     * ⚠ 出所は **http(s) だけ**(`isAppOrigin`)── `about:srcdoc` の箱の中は
+     *   fixture が描く相手であって、アプリの主張ではない(#561)。
+     */
+    const kind = msg.type();
+    if (kind !== 'error') {
+      if (kind !== 'info' && kind !== 'log') return;
+      if (!isAppOrigin(msg.location())) return;
+      errors.push(
+        `console.${kind}: ${msg.text()}${consoleOrigin(msg.location())} (+${Date.now() - t0}ms)`,
+      );
+      return;
+    }
     const line = `console.error: ${msg.text()}`;
     // ⚠ **等値**で外す(部分一致にしない)── 部分一致にすると、同じ前置きを持つ
     //    別のエラーまで黙って消える
