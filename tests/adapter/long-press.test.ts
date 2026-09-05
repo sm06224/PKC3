@@ -260,6 +260,24 @@ describe('長押しで印を足す(#687 D-1)', () => {
     expect(marks('left'), '長押しの直後のタップが捨てられた(set が走っていない)').toEqual(['a']);
   });
 
+  it('🔴 ⑧ 長押しの直後の**マウス**の押下でも消費窓は閉じる(`fired = null` はマウス判定より前)', () => {
+    // #724 ④: 2-in-1 端末で指の長押しの直後(700ms 以内)にマウスで別の行を押す。
+    // ⚠ `fired = null` をマウスの早期 return の後ろへ動かすと、この click が飲まれる。
+    click(row('left', 'a'));
+    pressFor(row('left', 'b'), LONG_PRESS_MS);
+    expect(marks('left'), '前提が崩れている').toEqual(['a', 'b']);
+    vi.advanceTimersByTime(100);
+    pointer(row('left', 'b'), 'pointerup', 'touch');
+    click(row('left', 'b'));
+    vi.advanceTimersByTime(100);
+    pointer(row('left', 'a'), 'pointerdown', 'mouse');
+    vi.advanceTimersByTime(100);
+    pointer(row('left', 'a'), 'pointerup', 'mouse');
+    const ev = click(row('left', 'a'));
+    expect(ev.defaultPrevented, 'マウスの押下の click まで止めた').toBe(false);
+    expect(marks('left'), '長押しの直後のマウスのタップが捨てられた').toEqual(['a']);
+  });
+
   it('配線を解いたら、長押しは何も撃たない(leak を残さない)', () => {
     detach();
     detach = () => {};

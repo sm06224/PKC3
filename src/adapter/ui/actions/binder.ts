@@ -405,7 +405,7 @@ export interface BinderServices {
   pasteImages?(files: readonly File[]): Promise<readonly string[]>;
   /**
    * 🔴 **写す(コピー)のために本文をまとめて読む**(#273 段③)。
-   * ⚠ **省略可** ── 無い環境(test の fake / 旧い配線)では「この版では写せません」と
+   * ⚠ **省略可** ── 無い環境(test の fake / 旧い配線)では「この版ではコピーできません」と
    *   断るだけで、他は壊れない(落ち方は「機能が減る」側 ── `store-effects` と同じ規律)。
    * ⚠ 読めなかった lid は**返さない**(呼び側が件数で「落とした」と言える)。
    */
@@ -1650,7 +1650,7 @@ function copySourceLines(
   done: string,
 ): void {
   if (services.copyText === undefined) {
-    dispatcher.dispatch({ type: 'OP_FAILED', error: 'この版では写せません' });
+    dispatcher.dispatch({ type: 'OP_FAILED', error: 'この版ではコピーできません' });
     return;
   }
   services.copyText(sliceLines(fmBody, span), done);
@@ -5948,7 +5948,12 @@ export function bindActions(
      */
     const peekedBefore = appPanes.isPeeking();
     handler(dispatcher, el, services, root);
-    if (peekedBefore) refoldAppendAfterAction(root, el);
+    /**
+     * ⚠ 右クリックの「ここに追記する」(`append-at-heading`)は**欄を使う操作**である
+     *   (#724 ①)。メニューの項目は root 直下に居るので `refoldAppendAfterAction` の
+     *   「欄の外の 1 操作」に数えられ、入り先を選び直した**その瞬間に欄が消えて**いた。
+     */
+    if (peekedBefore && action !== 'append-at-heading') refoldAppendAfterAction(root, el);
     if (DUAL_REBUILDS_CLICKED.has(action)) {
       const side = dualSide(el);
       if (side !== null) carryDualFocus(side);

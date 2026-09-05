@@ -2287,7 +2287,7 @@ describe('スマホの 2 ペイン(1 枚ずつ)(#687)', () => {
     r.render(s);
     expect(otherMarks('right').hidden, '右が相手の印を言っていない').toBe(false);
     expect(otherMarks('right').textContent).toBe(
-      '左のペインに 1 件の印が残っています(ここで写す・移すを押しても、その印は動きません)',
+      '左のペインに 1 件の印が残っています(ここでコピー・移すを押しても、その印は動きません)',
     );
     // ⚠ 焦点の無い側(左)は言わない ── 右には印が無い
     expect(otherMarks('left').hidden).toBe(true);

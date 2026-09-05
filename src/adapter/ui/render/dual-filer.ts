@@ -534,7 +534,7 @@ export class DualFilerRenderer {
   private paintOtherMarks(frame: PaneFrame, other: DualSide, n: number): void {
     const text =
       n > 0
-        ? `${SIDE_LABEL[other]}のペインに ${String(n)} 件の印が残っています(ここで写す・移すを押しても、その印は動きません)`
+        ? `${SIDE_LABEL[other]}のペインに ${String(n)} 件の印が残っています(ここでコピー・移すを押しても、その印は動きません)`
         : '';
     if (frame.otherMarks.textContent !== text) frame.otherMarks.textContent = text;
     if (frame.otherMarks.hidden !== (n === 0)) frame.otherMarks.hidden = n === 0;
