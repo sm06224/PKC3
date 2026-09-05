@@ -3110,7 +3110,7 @@ li[data-pkc-row-slot] {
 [data-pkc-region='kanban-column'] > h3 > button {
   cursor: pointer;
 }
-[data-pkc-region='kanban-column'] > h3 > button:hover {
+[data-pkc-region='kanban-column'] > h3 > button:hover:not(:disabled) {
   background: var(--surface);
   color: var(--fg);
 }
@@ -3178,7 +3178,7 @@ li[data-pkc-row-slot] {
 [data-pkc-field='inspector-date'] [data-pkc-action='clear-entry-date'] {
   color: var(--muted);
 }
-[data-pkc-field='inspector-date'] button:hover {
+[data-pkc-field='inspector-date'] button:hover:not(:disabled) {
   border-bottom-color: var(--fg);
 }
 /* ⚠ 印の無い予定(ノート 1 件が丸ごと)は、印の列を**空けたまま**揃える */
@@ -3386,7 +3386,7 @@ li[data-pkc-row-slot] {
   border-radius: var(--radius);
   cursor: pointer;
 }
-[data-pkc-field='schedule-toolbar'] button:hover {
+[data-pkc-field='schedule-toolbar'] button:hover:not(:disabled) {
   color: var(--fg);
 }
 [data-pkc-field='schedule-month'] {
@@ -3419,7 +3419,7 @@ li[data-pkc-row-slot] {
   cursor: pointer;
   font-variant-numeric: tabular-nums;
 }
-[data-pkc-field='schedule-week'] > button:hover {
+[data-pkc-field='schedule-week'] > button:hover:not(:disabled) {
   background: var(--surface-2);
 }
 /* 🔑 **今日は線で示す**(地は無彩色、色は情報にだけ) */
