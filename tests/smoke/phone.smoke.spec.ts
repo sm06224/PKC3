@@ -1457,9 +1457,15 @@ test('🔴 390px の空の PKC で、一覧に「作る」と「取り込む」�
   await gotoApp(page);
   await dismissAnnounce(page);
 
-  // ⚠ 空振り防止 ── ノートが 1 件も無い(在ったら「次の一手」は出なくて正しい)
+  /**
+   * ⚠ 空振り防止 ── ノートが 1 件も無い(在ったら「次の一手」は出なくて正しい)。
+   * 🔴 **数えるのは表の行だけ**(`tbody` へ絞る)── ファイラの面には
+   *   居場所を変える帯やゴミ箱の項目にも `data-pkc-entry` が付くので、
+   *   面ごと数えると**ノート 1 件を作った直後に 4 件**と出る(1 稿目で実際に踏んだ。
+   *   CLAUDE.md §1「範囲が広すぎて無関係なものに満たされる」)。
+   */
   expect(
-    await page.locator('[data-pkc-browse-pane="filer"] [data-pkc-entry]').count(),
+    await page.locator('[data-pkc-browse-pane="filer"] tbody [data-pkc-entry]').count(),
     '台の前提が崩れている(空の PKC ではない)',
   ).toBe(0);
 
@@ -1485,7 +1491,7 @@ test('🔴 390px の空の PKC で、一覧に「作る」と「取り込む」�
   await clickReal(page, '[data-pkc-field="empty-start-create"]');
   // 🔑 押した結果は**ノートが 1 件できたこと**で見る(器が消えたことではない)
   await expect(
-    page.locator('[data-pkc-browse-pane="filer"] [data-pkc-entry]'),
+    page.locator('[data-pkc-browse-pane="filer"] tbody [data-pkc-entry]'),
     '押してもノートができない(dead click)',
   ).toHaveCount(1, { timeout: 10_000 });
   // 🔑 できたら「次の一手」は引っ込む(空でなくなったので勧める物が変わる)
