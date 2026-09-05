@@ -2023,6 +2023,17 @@ li[data-pkc-row-slot] {
    * `left` ではなく `start` にする(rtl では右が行頭)。
    * ⚠ 表の列指定(`:---:`)は markdown-it が inline style で出すのでこちらに勝つ。 */
   text-align: start;
+  /**
+   * 🔴 **セルの中では、語の途中で折らない**(#699)。
+   *
+   * ⚠ `.pkc-md-rendered` の `overflow-wrap: anywhere` は**セルにも継承**される。
+   *   `anywhere` は min-content を 1 文字まで縮めるので、狭い器(スマホ 390px)では
+   *   表が器に押し込まれ、**「120」が「12 / 0」に割れて**読めなかった(8 列の csv でも同じ)。
+   * 🔑 `break-word` は min-content を変えない ── 表は語の幅を守って器より広くなり、
+   *   そのぶんは器(`.pkc-md-block`)が横に流す(下の「表の器は横に流す」)。
+   *   段落の側は `anywhere` のまま(切れ目の無い URL を段落からはみ出させない保険)。
+   */
+  overflow-wrap: break-word;
 }
 .pkc-md-rendered th {
   background: var(--surface-2);
@@ -2062,6 +2073,19 @@ li[data-pkc-row-slot] {
 /* fence の描画 / 原文の切替。⚠ 既定(`-both`)は**描画だけ**を見せる */
 .pkc-md-rendered .pkc-md-block {
   position: relative;
+}
+/**
+ * 🔴 **表の器は横に流す**(#699)。
+ *
+ * セルが語の途中で折れなくなった(上の `td, th` の `break-word`)ぶん、列の多い表は
+ * 器より広くなる ── その超過は**表の器の中**で横スクロールにし、**面や画面を横に
+ * 広げない**(スマホで画面ごと横に動くのがいちばん困る)。
+ * ⚠ 当てるのは表の器 2 つだけ ── markdown の表(`kind='table'`)と csv の fence
+ *   (`render-lang='csv'`)。コード・図・グラフの器は今までどおり(それぞれ自分の流し方を持つ)。
+ */
+.pkc-md-rendered .pkc-md-block[data-pkc-md-block-kind='table'],
+.pkc-md-rendered .pkc-md-block[data-pkc-render-lang='csv'] {
+  overflow-x: auto;
 }
 .pkc-md-rendered .pkc-render-source {
   margin: 0;
