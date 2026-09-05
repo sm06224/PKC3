@@ -2942,7 +2942,13 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     if (page === 'info') {
-      appPhone.showInfo(dispatcher.getState().selectedLid);
+      /**
+       * 🔴 **タブレットでは同じボタンで閉じる**(#703)── 情報を出している間も「情報」は
+       *   出たままなので、もう一度押したら本文へ戻す(片道の操作を作らない)。
+       * ⚠ スマホでは情報ページで「情報」そのものが消えるので、この枝には来ない。
+       */
+      if (appPhone.page() === 'info') appPhone.showNote();
+      else appPhone.showInfo(dispatcher.getState().selectedLid);
       return;
     }
     /**

@@ -756,9 +756,18 @@ select:focus-visible {
    *   **950px が 2 段か 3 段か**を分けた(タブと同じ)。 */
   padding: 0 2px;
 }
+/**
+ * 🔴 **「探す」欄は 8 字より細くしない**(#703)。⚠ 直す前は `min-width: 0` で、1024×768
+ *   (左の列 225px)では並び順の `<select>`(内容依存幅)に押されて **56px**(「:」1 字ぶん)に
+ *   なっていた。🔑 縮むのは並び順のほう ── 選ぶ物は矢印が見えれば足りる(字は開けば読める)。
+ */
 [data-pkc-field='entry-filter'] {
   flex: 1;
-  min-width: 0;
+  min-width: 8em;
+}
+[data-pkc-field='entry-sort'] {
+  flex: 0 1 auto;
+  min-width: 2em;
 }
 
 /* 🔴 **種類で絞る札**(#411)。⚠ 地は無彩色、色は**押されている札にだけ**使う
@@ -5417,15 +5426,19 @@ li[data-pkc-row-slot] {
  *   重なった 3 面のうち**いちばん背の高い面の min-content が行を押し広げる**
  *   (見えていない面が本文を画面外へ押し出す形。#586 の列版と同じ罠)。
  */
-[data-pkc-region='shell'][data-pkc-layout='phone'] {
-  /**
-   * 🔑 **帯の丈は 1 か所**(#632 段①)。帯自身の `height` と、帯が重なる面の
-   *   `padding-top` が**同じ値**を読む ── 2 か所に数字を置くと、片方だけ変えた日に
-   *   **本文の頭が帯の下へ潜る**(user からは「1 行目が読めない」に見える)。
-   * ⚠ **shell に置く**(帯に置くと、面は継げない ── カスタムプロパティは
-   *   宣言した要素の**子孫**にしか降りない。1 稿目で踏んだ)。
-   */
+/**
+ * 🔑 **帯の丈は 1 か所**(#632 段①)。帯自身の `height` と、帯が重なる面の
+ *   `padding-top` が**同じ値**を読む ── 2 か所に数字を置くと、片方だけ変えた日に
+ *   **本文の頭が帯の下へ潜る**(user からは「1 行目が読めない」に見える)。
+ * ⚠ **shell に置く**(帯に置くと、面は継げない ── カスタムプロパティは
+ *   宣言した要素の**子孫**にしか降りない。1 稿目で踏んだ)。
+ * ⚠ #703 でタブレット(`data-pkc-layout='tablet'`)にも帯が出るようになったので、
+ *   版面の印を持つ shell 全部に置く(スマホとタブレットで別の数字を持たない)。
+ */
+[data-pkc-region='shell'][data-pkc-layout] {
   --pkc-phone-bar: 36px;
+}
+[data-pkc-region='shell'][data-pkc-layout='phone'] {
   grid-template-columns: minmax(0, 1fr);
   grid-template-areas:
     'detail'
@@ -5622,6 +5635,54 @@ li[data-pkc-row-slot] {
   padding: 0 var(--s2);
 }
 
+
+/* ── タブレットの版面(#703。user 裁定 2026-09-04 案 A)────────────────
+ * 721〜1100px(高さ 481 以上)では、右の情報ペインを**畳んだ状態で開く**。本文の上の帯の
+ * 「情報」を押すと**本文のマスに重ねて**出し、もう一度押すと閉じる。
+ *
+ * 🔴 **この節に幅の数字は無い** ── 切り替えるのは `render/phone-layout.ts` の `matchMedia`
+ *   1 本で、ここが読むのは `data-pkc-layout='tablet'` / `data-pkc-page` だけ(スマホの節と
+ *   同じ規律)。⚠ 上の `@media (max-width: 1100px)` の 2 列の版面はそのまま使う ── 情報の行
+ *   (`'inspector inspector inspector'`)は中身が `display: none` なので丈 0 になる。
+ * ⚠ 直す前は情報が本文の**下に寝て** `max-height: 30vh` を常に取っていた
+ *   (768×1024 で本文 58% / 1024×768 で 55%)。「消さない」(P8 段⑱ レビュー H)は
+ *   守っている ── 押せば出る(スマホの「情報」と同じ動き・同じ実装)。
+ * ⚠ 詳細度は (0,4,0) ── 畳みの `[shell][hidden-panes~='inspector'] [inspector]`(0,3,0)と
+ *   `@media` の中の `[inspector]`(0,1,0)に勝つ。user が情報を畳んでいても「情報」で出る。
+ */
+[data-pkc-region='shell'][data-pkc-layout='tablet'] [data-pkc-region='inspector'] {
+  display: none;
+}
+[data-pkc-region='shell'][data-pkc-layout='tablet'][data-pkc-page='info'] [data-pkc-region='inspector'] {
+  display: flex;
+  grid-area: detail;
+  position: relative;
+  z-index: 1;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  min-width: 0;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+  border-top: none;
+  border-left: none;
+  background: var(--surface);
+  /* ⚠ 帯のぶんだけ頭を空ける(スマホの情報ページと同じ) */
+  padding-top: var(--pkc-phone-bar);
+}
+/* 帯は本文のマスの上端に重ねる(スマホと同じ)。⚠ z は情報(1)より上 ── 押して閉じる口を隠さない */
+[data-pkc-region='shell'][data-pkc-layout='tablet'] [data-pkc-region='phone-bar'] {
+  grid-area: detail;
+  align-self: start;
+  position: relative;
+  z-index: 2;
+}
+/* 帯が出るページでは、本文の頭を帯の丈だけ空ける(帯が 1 行目を隠さない) */
+[data-pkc-region='shell'][data-pkc-layout='tablet'][data-pkc-page='note'] [data-pkc-region='center'],
+[data-pkc-region='shell'][data-pkc-layout='tablet'][data-pkc-page='info'] [data-pkc-region='center'] {
+  padding-top: var(--pkc-phone-bar);
+}
 
 /**
  * 🔴 **指で触る端末の手当て**(user 裁定 2026-09-02 の ④ ⑤。#632 段②)。

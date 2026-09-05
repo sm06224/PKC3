@@ -34,6 +34,7 @@ import {
   PHONE_MAX_HEIGHT_PX,
   PHONE_MAX_PX,
   PHONE_MIN_PX,
+  TABLET_MAX_PX,
   phoneBandShown,
   phonePageOf,
   phoneReturnShown,
@@ -92,6 +93,13 @@ export class PhoneLayout {
   private root: HTMLElement | null = null;
   private media: MediaLike | null = null;
   private onChange: (() => void) | null = null;
+  /**
+   * 🔴 **タブレットの版面の見張り**(#703)── 721〜1100px(高さは 481 以上)。
+   * ⚠ スマホの見張りとは別の 1 本だが、答えは `isTablet()` の 1 か所で合成する
+   *   (スマホが真ならタブレットではない ── 2 つが同時に真の幅は無いが、判定を 1 つにしておく)。
+   */
+  private tablet: MediaLike | null = null;
+  private onTabletChange: (() => void) | null = null;
   /**
    * 🔑 **本文の代わりに見せている物**(`{ kind, lid }`)。理由は features 側の
    *   `PhoneOpen` の docstring(情報と一覧を 2 つの field に分けない)。
@@ -167,6 +175,22 @@ export class PhoneLayout {
       media.addEventListener('change', fn);
     }
     /**
+     * 🔴 **タブレット**(#703)── スマホの外側で、幅が `TABLET_MAX_PX` まで。
+     * ⚠ `min-height` も付ける ── 高さ 480 以下は幅に依らずスマホ(#663)なので、
+     *   そこを外しておかないと 2 本の見張りが同時に真になる幅ができる(合成は `isTablet` が
+     *   スマホ優先で解くが、問いの側で重ならないようにしておく)。
+     */
+    const tablet =
+      make(
+        `(min-width: ${PHONE_MAX_PX + 1}px) and (max-width: ${TABLET_MAX_PX}px) and (min-height: ${PHONE_MAX_HEIGHT_PX + 1}px)`,
+      ) ?? null;
+    this.tablet = tablet;
+    if (tablet?.addEventListener) {
+      const fn = (): void => this.paint();
+      this.onTabletChange = fn;
+      tablet.addEventListener('change', fn);
+    }
+    /**
      * 🔴 **2 本目 ── 対応外の幅**(user 裁定 ⑥「画面は止めない」)。
      * ⚠ `PHONE_MIN_PX` **未満**なので `- 1` する ── `min-width` で書くと
      *   「対応している側」を数えることになり、境目がずれても気づけない。
@@ -199,6 +223,10 @@ export class PhoneLayout {
       this.media.removeEventListener('change', this.onChange);
     this.media = null;
     this.onChange = null;
+    if (this.tablet?.removeEventListener && this.onTabletChange)
+      this.tablet.removeEventListener('change', this.onTabletChange);
+    this.tablet = null;
+    this.onTabletChange = null;
     if (this.narrow?.removeEventListener && this.onNarrowChange)
       this.narrow.removeEventListener('change', this.onNarrowChange);
     this.narrow = null;
@@ -259,9 +287,18 @@ export class PhoneLayout {
     return this.media?.matches === true;
   }
 
-  /** いま出ているページ。⚠ スマホでなければ `null`。 */
+  /**
+   * いまタブレットの版面か(#703)。⚠ **スマホが優先** ── 2 本の見張りの答えを合成する
+   *   のはここ 1 か所(`applyPaneVisibility` の列の畳みはタブレットでは今までどおり効く ──
+   *   一覧は列のままなので、あちらは `isPhone()` だけを読む)。
+   */
+  isTablet(): boolean {
+    return !this.isPhone() && this.tablet?.matches === true;
+  }
+
+  /** いま出ているページ。⚠ スマホでもタブレットでもなければ `null`。 */
   page(): PhonePage | null {
-    if (!this.isPhone()) return null;
+    if (!this.isPhone() && !this.isTablet()) return null;
     return phonePageOf(this.last ?? { selectedLid: null, viewMode: 'detail', editing: false }, this.open);
   }
 
@@ -345,13 +382,32 @@ export class PhoneLayout {
     const st: PhoneRenderState = this.last ?? { selectedLid: null, viewMode: 'detail', editing: false, title: '' };
 
     if (!this.isPhone()) {
-      shell.removeAttribute(PHONE_LAYOUT_ATTR);
-      shell.removeAttribute(PHONE_PAGE_ATTR);
+      // ⚠ 面は 3 つとも出ている(タブレットの情報は CSS が重ねて出す)── `inert` は付けない
       for (const region of Object.values(FACE))
         shell.querySelector(`[data-pkc-region="${region}"]`)?.removeAttribute('inert');
-      if (bar) bar.hidden = true;
-      // ⚠ PC では 1px も場所を取らせない(スマホでしか意味の無い行である)
+      // ⚠ PC でもタブレットでも 1px も場所を取らせない(スマホでしか意味の無い行である)
       if (back) back.hidden = true;
+      if (!this.isTablet()) {
+        shell.removeAttribute(PHONE_LAYOUT_ATTR);
+        shell.removeAttribute(PHONE_PAGE_ATTR);
+        if (bar) bar.hidden = true;
+        this.notifyToggle();
+        return;
+      }
+      /**
+       * 🔴 **タブレット(721〜1100px)は情報を「畳んだ状態」で開く**(#703。user 裁定 案 A)。
+       *
+       * ⚠ 直す前は情報ペインが本文の下に寝て 30vh を常に取っていた(本文 55〜58%)。
+       * 🔑 判定は**スマホと同じ 1 本**(`phonePageOf` + `open`)── 帯の「情報」を押すと
+       *   `open = { kind: 'info' }` になり、CSS が `[data-pkc-layout='tablet'][data-pkc-page='info']`
+       *   で情報を本文のマスに重ねる。別の判定(タブレット用の bit)を生やさない。
+       * ⚠ `list` のページは無い(一覧は列のまま出ている)── `phonePageOf` が `list` を返すのは
+       *   何も選んでいないときで、そのとき帯は出ず、属性の値は読み手(CSS)に効かない。
+       */
+      const page = phonePageOf(st, this.open);
+      shell.setAttribute(PHONE_LAYOUT_ATTR, 'tablet');
+      shell.setAttribute(PHONE_PAGE_ATTR, page);
+      if (bar) this.paintBar(bar, st, page, true);
       this.notifyToggle();
       return;
     }
@@ -383,14 +439,33 @@ export class PhoneLayout {
    * 帯の中身。⚠ **器は作り直さない**(`shell.ts` が 1 度だけ組む)── 作り直すと
    * 押している最中のボタンが指の下から消える(収録の帯と同じ理由)。
    */
-  private paintBar(bar: HTMLElement, st: PhoneRenderState, page: PhonePage): void {
+  private paintBar(bar: HTMLElement, st: PhoneRenderState, page: PhonePage, tablet = false): void {
     const shown = phoneBandShown(page);
     bar.hidden = !shown;
     if (!shown) return;
     const back = bar.querySelector<HTMLElement>('[data-pkc-field="phone-back"]');
     const info = bar.querySelector<HTMLElement>('[data-pkc-field="phone-info"]');
+    const menu = bar.querySelector<HTMLElement>('[data-pkc-field="phone-menu"]');
     const title = bar.querySelector<HTMLElement>('[data-pkc-field="phone-title"]');
+    /**
+     * 🔴 **タブレットの帯は「題名 ｜ 情報」だけ**(#703)。⚠ 「← 一覧」は一覧が列で出ているので
+     *   押す先が無く、⋯ の中身(道具 4 つ / 右クリック / 操作を探す)は左の列から届く。
+     * 🔑 「情報」は**押し直すと閉じる**トグル ── 情報を出している間も消さず、`aria-pressed` で
+     *   状態を言う(スマホでは情報ページで消す ── 居る場所へ行くボタンは dead click)。
+     */
+    if (menu) menu.hidden = tablet;
+    if (tablet) {
+      if (back) back.hidden = true;
+      if (info) {
+        info.hidden = false;
+        info.setAttribute('aria-pressed', page === 'info' ? 'true' : 'false');
+      }
+      if (title) title.textContent = st.title;
+      return;
+    }
+    if (info) info.removeAttribute('aria-pressed');
     if (back) {
+      back.hidden = false;
       /**
        * 🔴 **戻る先はページで変わる**(設計 doc §2-6)── 本文からは一覧へ、
        *   情報からは本文へ。⚠ 字も一緒に変える ── 「← 一覧」のまま情報ページで
