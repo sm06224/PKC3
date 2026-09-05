@@ -66,6 +66,15 @@ import { parseFrontmatter, extractVars } from '../../src/features/markdown/front
  *      食い違っていた ── 釣り合いが崩れていたほうを直した形になる。
  *      動いた golden は `manual-ch12` の 1 セルだけ。
  *      🔑 スキーム付き(`https://…`)は今までどおりリンクになる。
+ *   6. **表の右上に「コピーの形を選ぶ」▾ を足した**(2026-09-05、#708 段①)。
+ *      PKC2 は ⧉ の 1 押し(表計算に貼る TSV + 書式付きの HTML)しか持たず、
+ *      **markdown の表 / HTML / CSV / `.csv` の file** として持ち出す道が無かった。
+ *      ⚠ しかも形を選ぶ口は **csv の囲みにしか無く**、同じ「表」なのに markdown の
+ *      表と揃っていなかった ── 両方に同じ口を出した。
+ *      🔑 **⧉ の 1 押しは 1 バイトも変えていない** ── 増えたのは口 1 つで、
+ *      いちばん多い用事(表計算に貼る)は今までどおり 1 手である。
+ *      動いた golden は `full-pkc-fixture` / `full-pkc-fixture-anchors` /
+ *      `manual-ch12` / `snippet-csv-fence` の 4 件(差は足した `<button>` だけ)。
  *
 
  * 🔴 **golden は「PKC2 と同じ」を守る道具であって、「正しい」を守る道具ではない。**
@@ -181,7 +190,7 @@ describe('PKC-Markdown golden parity vs PKC2 (25 cases)', () => {
    * 🔑 この test が守っているのは件数ではなく「**理由なしに golden を採り直せない**」こと ──
    * 実際、私は理由を書いて採り直したが、その理由が誤りだった。件数だけでは止められない。
    */
-  it('🔴 PKC2 と分岐した case は理由つきで 10 件だけ', () => {
+  it('🔴 PKC2 と分岐した case は理由つきで 11 件だけ', () => {
     const diverged = goldens.cases.filter((c) => c.pkc3Diverges);
     expect(diverged.map((c) => c.name).sort()).toEqual([
       'full-pkc-fixture',
@@ -198,6 +207,11 @@ describe('PKC-Markdown golden parity vs PKC2 (25 cases)', () => {
       'simple-notation-sample',
       'snippet-align-indent',
       'snippet-break-and-blank',
+      // 🔴 2026-09-05(#708 段①): 表の右上に「コピーの形を選ぶ」▾ が増えた。
+      //    PKC2 は ⧉ の 1 押ししか無く、markdown の表 / HTML / CSV / `.csv` の
+      //    file として持ち出す道が無かった。⚠ **⧉ の 1 押しは残してある**ので、
+      //    分岐は「口が 1 つ増えた」だけである(動線は減っていない)。
+      'snippet-csv-fence',
       'snippet-figure-ref',
       'snippet-html-fence',
       'snippet-task-and-footnote',

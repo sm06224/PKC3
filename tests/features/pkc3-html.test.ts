@@ -1257,14 +1257,23 @@ describe('可搬 HTML — 沈黙する操作子を残さない', () => {
     // ⚠ 空振り防止 ── **書き出しデータには在る**(描画はアプリと同じ関数だから)。
     //    ここが 0 件なら「消えている」ことは何も証明しない
     const d = await dataOf(out.blob);
+    // ⚠ 3 = 表の ⧉ + 表の ▾(#708 段①)+ コードの ⧉
     expect(
       (d.entries[0]!.html.match(/copy-md-block/g) ?? []).length,
       '描画データにコピーボタンが無い(この test は何も測っていない)',
-    ).toBe(2);
+    ).toBe(3);
+    expect(
+      (d.entries[0]!.html.match(/data-pkc-copy-menu/g) ?? []).length,
+      '形を選ぶ ▾ が描画データに無い(落ちたことを証明できない)',
+    ).toBe(1);
 
     await openDoc(out.blob);
     expect(document.querySelectorAll('#body [data-pkc-action]')).toHaveLength(0);
     expect(document.getElementById('body')!.textContent).not.toContain('⧉');
+    // 🔴 **形を選ぶ ▾ も残らない**(片方だけ落とすと、閲覧側に無言の口が残る)
+    expect(document.getElementById('body')!.textContent, '▾ が紙にも画面にも残った').not.toContain(
+      '▾',
+    );
     // 中身は消えていない(ボタンだけ取る ── 表とコードは残る)
     expect(document.querySelectorAll('#body table')).toHaveLength(1);
     expect(document.querySelectorAll('#body pre')).toHaveLength(1);

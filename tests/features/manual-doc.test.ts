@@ -83,8 +83,20 @@ describe('マニュアルの窓 — 押せない操作子を残さない', () =>
     const before = (html.match(/data-pkc-action="copy-md-block"/gu) ?? []).length;
     // ⚠ 空振り防止:落とす前に本当に在ること(0 件なら、この検査は何も言っていない)
     expect(before, '前提が崩れている(コピーのボタンが 1 つも無い)').toBeGreaterThan(50);
+    /**
+     * 🔴 **形を選ぶ ▾ も落ちる**(#708 段①)── 表の右上には ⧉ と ▾ の 2 つが
+     * 出るので、片方だけ落とすと**この窓に無言の口が残る**。
+     * ⚠ 空振り防止:落とす前に ▾ が本当に在ること。
+     */
+    expect(
+      (html.match(/data-pkc-copy-menu/gu) ?? []).length,
+      '前提が崩れている(▾ が 1 つも無い)',
+    ).toBeGreaterThan(0);
     const built = buildManualDoc(html, manualSections(MANUAL_TEXT));
     expect(built.html).not.toContain('copy-md-block');
+    expect(built.html, '形を選ぶ ▾ が残った(押しても何も起きない)').not.toContain(
+      'data-pkc-copy-menu',
+    );
     // ⚠ **落としすぎていない** ── 本文の中身は残る
     expect(built.html).toContain('<pre');
     expect(built.html).toContain('<table');

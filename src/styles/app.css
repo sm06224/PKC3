@@ -2249,6 +2249,20 @@ li[data-pkc-row-slot] {
   cursor: pointer;
   opacity: 0;
 }
+/* 🔴 **コピーの形を選ぶ口**(#708 段①)。⧉ の**左隣**に置いて、2 つで 1 つの
+ * 操作子に見えるようにする ── ⧉ の 1 押し(表計算に貼る)は今までどおり残し、
+ * 形を選びたいときだけ ▾ を押す。⚠ 大きさと出方は ⧉ の規則を重ねて借りる
+ * (`pkc-md-copy-btn` を併記)── 触れたときに出る作法を 2 組書かない */
+.pkc-md-rendered .pkc-md-copy-menu-btn {
+  right: 26px;
+  width: 18px;
+}
+/* 表を出す囲みでは右上に ⧉ ▾ の 2 つが入るので、ソース切替をその左へ寄せる。
+ * ⚠ 言語名(csv / tsv / psv)を CSS に書かない ── その一覧は `csv-table.ts` の
+ *    1 本きりで、ここに写すと 2 か所目になる(片方だけ古くなる) */
+.pkc-md-rendered .pkc-md-block:has(> .pkc-md-copy-menu-btn) > .pkc-render-toggle {
+  right: 48px;
+}
 /* ⚠ 触れる / focus したときだけ出す(高密度な面に常時 2 個並べない)。
  *    focus-within を入れないとキーボードだけの user に見えない */
 /* 🔴 **押した結果が見える**(P8 段㉒)。`copy-md-block.ts` は 700ms だけ

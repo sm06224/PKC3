@@ -365,9 +365,22 @@ function listBlock(el: Element, ordered: boolean): Block | null {
   return lines.length === 0 ? null : { text: lines.join('\n'), tight: false };
 }
 
+/**
+ * 升 1 つを GFM の表に置ける字にする ── `|` を逃がし、改行は空白へ
+ * (GFM の行は 1 行で閉じる)。
+ *
+ * 🔑 **DOM を取らない形で切り出してある**(#708 段①)── 表のコピー
+ * (`table-copy.ts`)は**既に字になった升**を渡してくるので、要素から読む
+ * `cellText` とは入口が違う。⚠ 逃げの規則そのものを 2 か所に書くと、
+ * 片方だけ `|` を逃がさないまま残る(貼った先で列がずれる = 静かに壊れる向き)。
+ */
+export function gfmCellText(text: string): string {
+  return text.replace(/\n+/g, ' ').replace(/\|/g, '\\|');
+}
+
 /** 表のセル 1 つ ── `|` を逃がし、改行は空白へ(GFM の行は 1 行で閉じる)。 */
 function cellText(el: Element): string {
-  return tidy(inlineChildren(el)).replace(/\n+/g, ' ').replace(/\|/g, '\\|');
+  return gfmCellText(tidy(inlineChildren(el)));
 }
 
 /**

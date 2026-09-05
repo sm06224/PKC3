@@ -10,7 +10,24 @@
  * rich-copy-transform(class → inline style 複製、Word 貼り付け品質)は未移植 ──
  * スタイル導入(P3-7)後に outerHTML 素通しでは足りないと分かってから持ち込む。
  */
-import { copyMarkdownAndHtml } from '@adapter/platform/clipboard';
+import { copyMarkdownAndHtml, copyPlainText } from '@adapter/platform/clipboard';
+import {
+  TABLE_COPY_CHOICES,
+  tableToCsv,
+  tableToMarkdown,
+  tableToTsv,
+  type TableCopyFormat,
+  type TableCopyRow,
+} from '@features/markdown/table-copy';
+import { safeName } from '@features/export/file-name';
+import { dayStamp } from '@features/datetime/date-math';
+
+/**
+ * この塊の**表**が在る場所。⚠ 選択子はここ 1 本 ── ⧉(見えている面)と
+ * ▾(この表)は**別の問い**だが、表の在り処という**同じ規約**を読む。
+ * 2 本書くと、fence の規約が変わったとき片方だけが追随する(§7)。
+ */
+const BLOCK_TABLE_SELECTOR = ':scope > .pkc-render-slot > table, :scope > table';
 
 /**
  * copy 元の面を選ぶ:
@@ -26,9 +43,18 @@ export function findMdBlockCopySource(block: HTMLElement): HTMLElement | null {
   if (toggle?.checked) {
     return block.querySelector<HTMLElement>(':scope > pre.pkc-render-source');
   }
-  return block.querySelector<HTMLElement>(
-    ':scope > .pkc-render-slot > table, :scope > pre, :scope > table',
-  );
+  return block.querySelector<HTMLElement>(`${BLOCK_TABLE_SELECTOR}, :scope > pre`);
+}
+
+/**
+ * 🔴 **この塊の表**(#708 段①)── ⧉ と違い、**ソース面に切り替えていても表を返す**。
+ *
+ * ⚠ ▾ は「**この表を**どの形で持ち出すか」を聞く口なので、原文を見ている間も
+ *   答えは同じ表である ── ここで `null` にすると、`‹/›` を押しただけで
+ *   形を選ぶ道が消える(押せるのに何も起きない口になる)。
+ */
+export function findMdBlockTable(block: HTMLElement): HTMLElement | null {
+  return block.querySelector<HTMLElement>(BLOCK_TABLE_SELECTOR);
 }
 
 /**
@@ -48,21 +74,42 @@ export function stripTableChromeForCopy(inner: HTMLElement): HTMLElement {
   return clone;
 }
 
+/**
+ * 🔴 **表の升を読むのはここ 1 か所**(#708 段①)。
+ *
+ * 🔑 形(TSV / markdown / CSV)ごとに読み方を書くと、**同じ表から違う升が出る** ──
+ *   読むのは 1 回、字にするのは `features/markdown/table-copy.ts` に任せる
+ *   (CLAUDE.md §7)。
+ * ⚠ **升の中の tab / 改行はここで空白へ潰す** ── TSV は tab で壊れ、markdown の表は
+ *   改行で行が切れる。潰す規則を形ごとに持つと、片方だけ潰し忘れる。
+ * ⚠ **自分の表の行だけ**を拾う(`closest('table')`)── 入れ子の表があると、
+ *   内側の行が外側の行としても出て**同じ中身が 2 回入る**
+ *   (`html-to-markdown.ts` の `tableBlocks` が実測で踏んだ罠)。
+ * ⚠ 升の**中に居るボタン**(行・列の口)は字を持たない決まりなので `textContent` に
+ *   混ざらない ── その決まりは `csv-table.ts` 側が持ち、ここでは前提にする。
+ */
+export function readTableRows(table: HTMLElement): TableCopyRow[] {
+  const rows: TableCopyRow[] = [];
+  for (const tr of table.querySelectorAll('tr')) {
+    if (tr.closest('table') !== table) continue;
+    const cells = [...tr.children].filter((c) => {
+      const t = c.tagName.toLowerCase();
+      return t === 'th' || t === 'td';
+    });
+    if (cells.length === 0) continue;
+    rows.push({
+      cells: cells.map((cell) => (cell.textContent ?? '').replace(/[\t\r\n]+/g, ' ').trim()),
+      head: cells.every((c) => c.tagName.toLowerCase() === 'th'),
+    });
+  }
+  return rows;
+}
+
 export function extractMdBlockPlainText(inner: HTMLElement): string {
   const tag = inner.tagName.toLowerCase();
   if (tag === 'pre') return inner.textContent ?? '';
-  if (tag === 'table') {
-    const rows: string[] = [];
-    for (const tr of inner.querySelectorAll('tr')) {
-      const cells: string[] = [];
-      for (const cell of tr.querySelectorAll('th, td')) {
-        // セル内の tab / 改行は TSV を壊す ── スペースに collapse
-        cells.push((cell.textContent ?? '').replace(/[\t\r\n]+/g, ' ').trim());
-      }
-      rows.push(cells.join('\t'));
-    }
-    return rows.join('\n');
-  }
+  // ⚠ 既定の 1 押しは TSV(表計算に貼る)── 形を選ぶ口(▾)が出来た後も変えない
+  if (tag === 'table') return tableToTsv(readTableRows(inner));
   return inner.textContent ?? '';
 }
 
@@ -87,10 +134,105 @@ export function flashCopied(target: HTMLElement): void {
   );
 }
 
-/** click handler 本体(binder の ACTIONS から呼ばれる)。 */
-export function handleCopyMdBlock(target: HTMLElement): void {
+/**
+ * 形を選ぶ口が要るもの。
+ *
+ * 🔴 **optional にしない**(CLAUDE.md §7)── 配線を落としても `tsc` が黙る形に
+ *   すると、戻ってくる症状は「▾ を押しても何も出ない」という**いちばん気づけない
+ *   dead click** である。
+ */
+export interface CopyMdBlockDeps {
+  /** 形を選ばせる(`app-dialog.ts` の `pickCopyFormatInApp`)。やめたら `null`。 */
+  pick(
+    choices: readonly { readonly id: string; readonly label: string }[],
+  ): Promise<string | null>;
+  /** file を渡す(`platform/download.ts` の `downloadBlob`)。 */
+  download(name: string, blob: Blob): void;
+  /** 落とす file の名前の素 ── いま開いているノートの題名(空でもよい)。 */
+  noteTitle(): string;
+}
+
+/**
+ * 🔴 **`.csv` は BOM 付きで渡す**(#708 段①)。
+ *
+ * ⚠ BOM が無いと、Windows の Excel は `.csv` を**その環境の既定の文字集合**で
+ *   読むので、日本語の升が**そのまま文字化けする** ── 「表計算で開く」ための
+ *   file なのに開けない、という形になる。
+ * ⚠ BOM は表計算・エディタ・`pandas` のいずれも読み飛ばす(`utf-8-sig`)。
+ * ⚠ **生バイトで書かない**(CLAUDE.md §9)── 見えない字なので、次に触る人が
+ *   消したことに気づけない。
+ */
+const CSV_BOM = '\uFEFF';
+
+/** 落とす file の名前。⚠ 名前の規則は `safeName` 1 本(`features/export/file-name.ts`)。 */
+function csvFileName(title: string): string {
+  const base = safeName(title === '' ? '表' : title);
+  return `${base}-${dayStamp(new Date())}.csv`;
+}
+
+/**
+ * 🔴 **選ばれた形で持ち出す**(#708 段①)。
+ *
+ * ⚠ 字を作るのは `table-copy.ts`、渡すのはここ ── 逆にしない
+ *   (features 層は clipboard も download も持たない)。
+ * @returns 渡せたか。⚠ `false` なら合図を出さない(黙って成功した顔をしない)
+ */
+async function putTable(
+  format: TableCopyFormat,
+  table: HTMLElement,
+  deps: CopyMdBlockDeps,
+): Promise<boolean> {
+  const rows = readTableRows(table);
+  switch (format) {
+    case 'tsv':
+      // ⚠ ⧉ の 1 押しと**同じ物**を渡す(text/plain = TSV、text/html = 表そのもの)
+      return copyMarkdownAndHtml(tableToTsv(rows), table.outerHTML);
+    case 'html':
+      // ⚠ 素の字としても HTML を渡す ── 「HTML が欲しい」人は原文を貼りたい
+      return copyMarkdownAndHtml(table.outerHTML, table.outerHTML);
+    case 'markdown': {
+      const md = tableToMarkdown(rows);
+      if (md === null) return false;
+      return copyPlainText(md);
+    }
+    case 'csv':
+      return copyPlainText(tableToCsv(rows));
+    case 'csv-file': {
+      deps.download(
+        csvFileName(deps.noteTitle()),
+        new Blob([CSV_BOM + tableToCsv(rows)], { type: 'text/csv;charset=utf-8' }),
+      );
+      return true;
+    }
+  }
+}
+
+/**
+ * click handler 本体(binder の ACTIONS から呼ばれる)。
+ *
+ * 🔴 **口は 2 つ、仕事は 1 つ**(#708 段①)── ⧉ は今までどおり 1 押しで
+ *   TSV + HTML、▾ は形を選んでから同じ道を通る。
+ * ⚠ 選んでいる間に面が組み直されることがあるので、**表は選び終えてから引き直す**
+ *   (`insert-snippet` が 2026-08-23 に実機で踏んだ罠と同じ形)。
+ */
+export function handleCopyMdBlock(target: HTMLElement, deps: CopyMdBlockDeps): void {
   const block = target.closest<HTMLElement>('.pkc-md-block');
   if (!block) return;
+
+  if (target.hasAttribute('data-pkc-copy-menu') && findMdBlockTable(block) !== null) {
+    void deps.pick(TABLE_COPY_CHOICES).then(async (id) => {
+      if (id === null) return;
+      // ⚠ 一覧から消えた id は黙って落とす(無い形で書き出すより何もしない方がよい)
+      const chosen = TABLE_COPY_CHOICES.find((c) => c.id === id);
+      if (chosen === undefined) return;
+      // ⚠ 表は引き直す ── 選んでいる間に描き直されると、掴んだ節点は外れている
+      const again = findMdBlockTable(block);
+      if (again === null) return;
+      if (await putTable(chosen.id, stripTableChromeForCopy(again), deps)) flashCopied(target);
+    });
+    return;
+  }
+
   const inner = findMdBlockCopySource(block);
   if (!inner) return;
   const source = stripTableChromeForCopy(inner);

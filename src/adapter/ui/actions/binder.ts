@@ -206,6 +206,7 @@ import {
   pickEntryInApp,
   pickSnippetInApp,
   pickDiagramInApp,
+  pickCopyFormatInApp,
   promptInApp,
   isAppDialogOpen,
   type ConfirmOptions,
@@ -3805,7 +3806,25 @@ const ACTIONS: Record<string, ActionHandler> = {
       () => dispatcher.dispatch({ type: 'DELETE_ENTRY', lid }),
     );
   },
-  'copy-md-block': (_dispatcher, target) => handleCopyMdBlock(target),
+  /**
+   * 🔴 **囲みのコピー ── ⧉ は 1 押し、▾ は形を選ぶ**(#708 段①)。
+   *
+   * ⚠ **同じ action 名で 2 つの口**を受ける ── 名前を分けると、binder の居ない面
+   *   (書き出した HTML / マニュアルの窓)が `copy-md-block` **だけ**を取り除くので、
+   *   ▾ が沈黙する飾りとして焼き込まれる(`markdown-render.ts` の註記)。
+   * ⚠ 落とす file の名前はいま開いているノートの題名から作る ── 器(`safeName`)は
+   *   書き出し系と同じ 1 本。
+   */
+  'copy-md-block': (dispatcher, target, _services, root) =>
+    handleCopyMdBlock(target, {
+      pick: (choices) => pickCopyFormatInApp(root, choices),
+      download: downloadBlob,
+      noteTitle: () => {
+        const st = dispatcher.getState();
+        const lid = st.selectedLid;
+        return lid === null ? '' : (st.entryMetas.get(lid)?.title ?? '');
+      },
+    }),
   /**
    * 🔴 **読む面のコピー**(2026-08-08。user 裁定「markdown のテキストとしての
    * コピーと HTML 書式ありのコピーの両方」)。押しても画面が変わらない操作なので、
