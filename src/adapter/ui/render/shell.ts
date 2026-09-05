@@ -16,6 +16,8 @@ import { BROWSE_ICONS, iconButton, iconSpan } from './icons';
 import { COLUMN_PANES, PANE_LABELS } from '@features/pane-visibility';
 import { PHONE_BAR_REGION, PHONE_RETURN_REGION } from './phone-layout';
 import { BROWSE_TABS } from './browse';
+// 🔴 タブの名乗りは 2 ペインと同じ関数(#720)── 綴りを 2 か所に書かない
+import { markTab, markTablist } from './tabs-a11y';
 import {
   timerBarLabel,
   timerEntryText,
@@ -276,16 +278,32 @@ export function buildShell(root: HTMLElement): ShellRegions {
   const sidebar = document.createElement('nav');
   sidebar.setAttribute('data-pkc-region', 'sidebar');
   /**
+   * 🔴 **面には名前を付ける**(#720)── `<nav>` / `<aside>` は読み上げの「地図」に
+   *   並ぶが、名前が無いと「ナビゲーション」「補足」としか読まれない。
+   * ⚠ 名前は**画面に出ている字**に寄せる ── 内部の名前(`sidebar` / `inspector`)を
+   *   渡すと、user は聞いた言葉を画面上で探せない。
+   */
+  sidebar.setAttribute('aria-label', '一覧');
+  /**
    * 🔑 **探し方のタブ**(P8 段⑤)。フォルダもアプリも「探し方」なので、
    * 中央のビューではなくここに置く ── 中央は常に「開いているノート」。
    */
   const tabs = document.createElement('div');
   tabs.setAttribute('data-pkc-region', 'browse-tabs');
+  // 🔴 読み上げにも「タブの列」として届ける(#720)── 綴りは 2 ペインと同じ関数
+  markTablist(tabs);
   for (const { mode, label } of BROWSE_TABS) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.setAttribute('data-pkc-action', 'set-browse');
     btn.setAttribute('data-pkc-browse', mode);
+    /**
+     * ⚠ **ここでは全部「選んでいない」で建てる** ── いま選んでいるものは
+     *   `markBrowseTabs` が書く(`main.ts` の `markBrowse` が boot 直後に 1 度、
+     *   以後タブを押すたびに呼ぶ)。⚠ ここで当てずっぽうに `true` を書くと、
+     *   既定の探し方を変えた日に**耳だけ古くなる**。
+     */
+    markTab(btn, false);
     // ⚠ 図案は `icons.ts` から取る(手組みの絵文字表を持たない ── P9 段③)
     const ic = iconSpan(BROWSE_ICONS[mode] ?? 'dot');
     const tx = document.createElement('span');
@@ -755,6 +773,13 @@ export function buildShell(root: HTMLElement): ShellRegions {
   // ── 右(付随情報)────────────────────────────────
   const inspector = document.createElement('aside');
   inspector.setAttribute('data-pkc-region', 'inspector');
+  // ⚠ 名前は画面の字と同じ(#720。上の `sidebar` と同じ理由)
+  inspector.setAttribute('aria-label', '情報');
+  /**
+   * ⚠ **焦点を受けられるようにする**(#720)── 近道(下の `skip-links`)の行き先。
+   * `-1` なので Tab の巡回には入らない(本文の `detail` と同じ作法)。
+   */
+  inspector.tabIndex = -1;
 
   /**
    * 🔴 **何か言うことがあるときだけ出る帯**(P10)。以前は常設で、99% の時間
@@ -925,6 +950,38 @@ export function buildShell(root: HTMLElement): ShellRegions {
     notices,
     status,
   );
+  /**
+   * 🔴 **鍵だけで使う人が、列を飛ばして本題へ行ける近道**(#720)。
+   *
+   * ⚠ 左の列には タブ 5 枚 + 戻る / 進む + 絞り込み + 並び + 作る… と押し所が並ぶので、
+   *   `Tab` だけで本文へ辿り着くには**十数回**押すことになる。読み上げで使う人は
+   *   これをページを開くたびに繰り返す。
+   * 🔑 **既定では見えない。焦点が来たときだけ出る**(規則は `app.css`)── 見た目を
+   *   1 ドットも増やさずに、鍵の動線だけを短くする。
+   *
+   * 🔴 **`<a href="#…">` にしない**(重要)。PKC3 はアドレスの断片(hash)を
+   *   **ディープリンク**に使っている(`deep-link.ts` が `#pkc?entry=…` を読む)ので、
+   *   `<a>` を踏むと**いま開いているノートの住所が上書きされる** ── 読み込み直すと
+   *   別のものが開く / 栞が壊れる、という「いちばん気づけない壊れ方」になる。
+   * 🔑 だから押し所は `data-pkc-action` の `<button>` にする(受け手は `binder.ts`)。
+   *
+   * ⚠ **並びの先頭**に置く ── `Tab` の 1 回目でここに当たらなければ近道の意味が無い。
+   *   ⚠ `phoneBar` は `shell` の子なので、この帯はさらに外(`root` の直下)である。
+   */
+  const skip = document.createElement('div');
+  skip.setAttribute('data-pkc-region', 'skip-links');
+  for (const [region, label] of [
+    ['detail', '本文へ'],
+    ['inspector', '情報へ'],
+  ] as const) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.setAttribute('data-pkc-action', 'skip-to');
+    btn.setAttribute('data-pkc-skip', region);
+    btn.textContent = label;
+    skip.append(btn);
+  }
+  root.append(skip);
   root.append(shell);
   return {
     browseHost,

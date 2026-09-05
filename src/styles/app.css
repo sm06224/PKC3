@@ -210,6 +210,13 @@ body {
   cursor: col-resize;
   /* ⚠ **これが無いと触りでは掴めない**(ブラウザがスクロールへ持っていく)。 */
   touch-action: none;
+  /**
+   * 🔴 **ボタンの字で 11px を下回る唯一の所**(#722 P2-10、2026-09-05)。
+   * ⚠ 読めない大きさなので普通は避けるが、ここが出しているのは**字ではなく印**
+   *   (下の `::after` の `⋮`)で、器は**幅 8px の縦帯**である ──
+   *   `--btn-fs-sm`(11px)にすると印が帯からはみ出す。
+   * 🔑 だからトークンに寄せず、**理由を添えて 10px のまま残す**。
+   */
   font-size: 10px;
   line-height: 1;
   writing-mode: vertical-rl;
@@ -268,7 +275,7 @@ button[data-pkc-glyph] {
   color: var(--muted);
   padding: 0 4px;
   min-width: 18px;
-  font-size: 13px;
+  font-size: var(--btn-fs);
   line-height: 1;
 }
 button[data-pkc-glyph]:hover:not(:disabled),
@@ -304,7 +311,7 @@ button[data-pkc-glyph]:disabled {
   background: var(--surface-2);
   color: var(--fg);
   border-top: 1px solid var(--border);
-  font-size: 12px;
+  font-size: var(--btn-fs-bar);
   cursor: pointer;
 }
 [data-pkc-region='shell'][data-pkc-append-autofold] [data-pkc-region='pane-grip'][data-pkc-axis='y']::after {
@@ -518,7 +525,7 @@ select:focus-visible {
   content: attr(data-pkc-shortcut);
   margin-left: auto;
   padding-left: 1.5em;
-  font-size: 11px;
+  font-size: var(--btn-fs-sm);
   color: var(--muted);
 }
 /* 🔴 **メニューの下の説明欄**(#587 C-3。user 裁定 2026-08-30「一度推奨で入れて、
@@ -565,6 +572,33 @@ select:focus-visible {
 [data-pkc-field='context-menu-hint']:empty::before {
   content: '項目に乗せると説明が出ます';
   color: color-mix(in oklab, var(--muted) 60%, var(--surface));
+}
+
+/* ── 鍵だけで使う人の近道(#720)─────────────────────
+ * 🔴 **既定では見えない。焦点が来たときだけ出る。**
+ * ⚠ `display: none` / `visibility: hidden` にしてはいけない ── どちらも
+ *   **焦点を受けられなくなる**ので、そもそも `:focus` にならない(近道が死ぬ)。
+ * 🔑 だから「画面の外へ 1px で追い出す」形にする ── 器は生きているので
+ *   Tab で当たり、当たった瞬間に下の `:focus-within` が画面へ引き戻す。
+ * ⚠ 版面を 1 ドットも動かさない ── `position: fixed` で流れから外す。 */
+[data-pkc-region='skip-links'] {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 100;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+[data-pkc-region='skip-links']:focus-within {
+  width: auto;
+  height: auto;
+  display: flex;
+  gap: var(--s2);
+  padding: var(--s2);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0 0 4px 0;
 }
 
 /* ── 左の列: 探し方のタブ ───────────────────────────
@@ -652,7 +686,7 @@ select:focus-visible {
   border: none;
   border-radius: 0;
   justify-content: flex-start;
-  font-size: 12px;
+  font-size: var(--btn-fs-bar);
   /* ⚠ 語が切れないことは `layout.smoke` の「左の列のボタンは、どの幅でも
    *   名前が器からはみ出さない」が**帯を名指しせず全数で**見ている(#476)。 */
   padding: 0 4px;
@@ -785,7 +819,7 @@ select:focus-visible {
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 1px 8px;
-  font-size: 11px;
+  font-size: var(--btn-fs-sm);
   line-height: 1.6;
   background: var(--surface);
   color: var(--muted);
@@ -829,7 +863,7 @@ select:focus-visible {
   border: none;
   border-radius: 0;
   justify-content: flex-start;
-  font-size: 12px;
+  font-size: var(--btn-fs-bar);
 }
 [data-pkc-field='create-kind'] {
   flex: 1;
@@ -1378,7 +1412,7 @@ select:focus-visible {
   position: absolute;
   top: 0;
   right: 0;
-  font-size: 11.5px;
+  font-size: var(--btn-fs-bar);
   padding: 0 var(--s2);
   /* 🔴 **opacity で薄めない**(P10)。0.35 にしていた頃は、1px の線が 35% の
    * 濃さになって**図案が事実上見えなかった**(枠も文字も一緒に薄まる)。
@@ -1407,7 +1441,7 @@ select:focus-visible {
   border: none;
   border-radius: 0;
   padding: 0 var(--s2);
-  font-size: 11.5px;
+  font-size: var(--btn-fs-bar);
 }
 /* ⚠ 編集欄は**残りの高さいっぱい**に伸ばす ── 固定高だと下に死に領域ができる
  * (実測: 1280x800 で textarea が 525px で止まり、下に 260px の空白が残っていた) */
@@ -2210,7 +2244,7 @@ li[data-pkc-row-slot] {
   border-radius: var(--radius);
   background: var(--surface);
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--btn-fs-bar);
   line-height: 1;
   cursor: pointer;
   opacity: 0;
@@ -3487,7 +3521,7 @@ li[data-pkc-row-slot] {
 [data-pkc-field='schedule-toolbar'] button {
   padding: 0 var(--s2);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--btn-fs-bar);
   color: var(--muted);
   background: none;
   border: 1px solid var(--border);
@@ -3518,7 +3552,7 @@ li[data-pkc-row-slot] {
   position: relative;
   padding: 2px 0;
   font: inherit;
-  font-size: 11px;
+  font-size: var(--btn-fs-sm);
   line-height: 1.4;
   color: var(--fg);
   background: none;
@@ -3676,7 +3710,7 @@ li[data-pkc-row-slot] {
   cursor: pointer;
   padding: 0 var(--s1);
   line-height: 1;
-  font-size: 14px;
+  font-size: var(--btn-fs);
   /* ⚠ 薄いが**見える** ── 地の色に沈めない(見つけられないのが元の訴えである) */
   opacity: 0.45;
 }
@@ -4036,6 +4070,17 @@ li[data-pkc-row-slot] {
 [data-pkc-field='filer-empty'] {
   color: var(--muted);
   padding: var(--s3) 0;
+}
+/* 🔴 **空の一覧に置く「次の一手」**(#722 P2-13)。
+ * ⚠ フォルダの面(上の `filer-empty`)と一覧タブ(`entry-list-empty`)で
+ *   **同じ器**を使うので、規則もここ 1 つに置く ── 面ごとに書くと片方だけ直る。
+ * ⚠ 幅で出し分けない ── 狭い画面では本文の面が別ページなので、
+ *   案内はここにしか出せない(#722 の指摘そのもの)。 */
+[data-pkc-field='empty-start'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  padding-block-end: var(--s3);
 }
 /* 🔴 **居場所を変える帯**(2026-08-05、user 報告「フォルダ整理のための導線がない」)。
  * パンくず(いま何処に居るか)の**すぐ下**に置く ── 「何処に居るか」と
@@ -4603,7 +4648,7 @@ li[data-pkc-row-slot] {
   border: none;
   background: none;
   padding: 0 var(--s1);
-  font-size: 12px;
+  font-size: var(--btn-fs-bar);
   color: inherit;
 }
 [data-pkc-region='dual-crumbs'] [data-pkc-action='dual-crumb']:hover {
@@ -4641,7 +4686,7 @@ li[data-pkc-row-slot] {
   background: var(--surface);
   border-radius: 3px;
   padding: 0 var(--s1);
-  font-size: 12px;
+  font-size: var(--btn-fs-bar);
   line-height: 20px;
   color: var(--muted);
 }
@@ -4681,7 +4726,7 @@ li[data-pkc-row-slot] {
 [data-pkc-region='dual-bookmark'] button {
   border: none;
   background: none;
-  font-size: 12px;
+  font-size: var(--btn-fs-bar);
   padding: 0 var(--s1);
   color: inherit;
   line-height: 18px;
@@ -6357,7 +6402,7 @@ li[data-pkc-row-slot] {
 }
 [data-pkc-region='split-frame-bar'] button {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--btn-fs-bar);
 }
 
 /* 🔴 **スタックの帯**(#633 段①。user 裁定 2026-09-02 ②「帯は本文の上」)。
@@ -6411,7 +6456,7 @@ li[data-pkc-row-slot] {
 }
 [data-pkc-field='stack-link-move'] button {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--btn-fs-bar);
   line-height: 1;
   padding: 0 var(--s1);
 }

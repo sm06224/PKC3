@@ -103,6 +103,53 @@ describe('アプリ自身の確認ダイアログ(#299)', () => {
     expect(await second, '前回の ok を持ち越している').toBe('cancel');
   });
 
+  /**
+   * 🔴 **外から `dialog.close()` されても、待ち行列が詰まらない**(#723)。
+   *
+   * ## なぜこれを名指しで pin するのか
+   *
+   * cowork が 1 回だけ「編集を終えられなくなった」を観測した(再現せず)。
+   * ⚠ この器が**永久に解決しない**と、症状はまさにその形になる ──
+   *   `enqueue` は 1 本の鎖なので、**1 つ待ったままだと以後のダイアログが 1 枚も
+   *   開かない**(確認を経由する操作が丸ごと無反応になる)。
+   * ⚠ 直上の `Escape` の test は「答えが `cancel` になる」ことしか見ておらず、
+   *   **鎖が進むか**は 1 ミリも見ていない ── 待ちが解けなくても、そのときの
+   *   `await` は返らないだけで assert には辿り着かない。
+   * 🔑 だから観測点は「**次の 1 枚が開くか**」にする。
+   */
+  it('🔴 外から dialog.close() で閉じたあと、次のダイアログが開く(#723)', async () => {
+    const first = confirmInApp(host, 'H');
+    expect(dialog().open, '台が開いていない').toBe(true);
+    // ⚠ 押し所を経由せず、器を**直に**閉じる(別のコードや拡張が閉じた形)
+    dialog().close();
+    expect(await first).toBe('cancel');
+
+    const second = confirmInApp(host, 'I');
+    expect(dialog().open, '前の待ちが解けず、次が 1 枚も開かない').toBe(true);
+    expect(bodyText()).toBe('I');
+    cancelBtn().click();
+    await second;
+  });
+
+  /**
+   * 🔴 **並んでいる 2 枚目も、外から閉じられた後に出てくる**(#723)。
+   * ⚠ 上は「閉じ切ってから次を頼む」形だが、こちらは**既に列に並んでいる**形 ──
+   *   `enqueue` の鎖が 1 か所で止まると、並んでいたほうは**永久に出ない**。
+   */
+  it('🔴 重なった 2 枚目は、1 枚目を外から閉じると出てくる(#723)', async () => {
+    const a = confirmInApp(host, 'J');
+    const b = confirmInApp(host, 'K'); // ⚠ 列に並ぶ(捨てない)
+    expect(bodyText(), '1 枚目が出ていない').toBe('J');
+    dialog().close();
+    expect(await a).toBe('cancel');
+    // ⚠ 2 枚目は鎖の**次の順番**で走る ── 1 拍進めてから見る(上の「順番に出す」と同じ)
+    await tick();
+    expect(dialog().open, '2 枚目が開いていない(列が詰まった)').toBe(true);
+    expect(bodyText(), '並んでいた 2 枚目が出てこない(列が詰まった)').toBe('K');
+    cancelBtn().click();
+    await b;
+  });
+
   /** ⚠ 器は**使い回す**(開くたびに作り直さない)。 */
   it('2 回開いても器は 1 つ', async () => {
     const a = confirmInApp(host, 'F');

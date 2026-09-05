@@ -299,6 +299,39 @@ export function phaseBlockReason(phase: AppPhase): string | null {
 }
 
 /**
+ * 🔴 **編集を終える操作(保存 / 取り消し)を捨てるときの断り文**(#723)。
+ *
+ * ## なぜ計器を置くのか
+ *
+ * cowork が **1 回だけ**「編集を終えられなくなった」を観測し、⚠ **再現しなかった**。
+ * `COMMIT_EDIT` / `CANCEL_EDIT` は前提が崩れていると `events: []` で**黙って捨てて**
+ * いたので、⚠ 起きた瞬間に user の画面には**何も出ない** ── 押しても 1 ドットも
+ * 動かないので「アプリが固まった」としか読めず、こちらにも手掛かりが 1 つも残らない。
+ *
+ * 🔑 直すのは症状ではなく**見えなさ**である ── 原因が分かっていなくても、
+ *   「何が崩れていたか」を画面に出せば、次の 1 回で報告が返ってくる。
+ * ⚠ **黙っている物を無差別に喋らせない。** ここで喋るのは
+ *   「**編集を終える 2 つの操作**」だけ ── どちらも user が明示的に押した操作なので、
+ *   捨てたなら必ず理由が要る(`UPDATE_OPEN_BODY` のような**連打で飛んでくる**物は
+ *   黙ったままでよい。喋らせると打鍵のたびに断り文が出る)。
+ *
+ * ## 分岐ごとに理由が違う
+ *
+ * | 崩れていたもの | user から見た状況 |
+ * |---|---|
+ * | `phase !== 'editing'` | もう編集は終わっている(保存済み / 二重に押した / 別のタブが先に終えた) |
+ * | `openBody` が無い | 編集中なのに開いている本文が消えている(**あってはならない**) |
+ *
+ * ⚠ **鍵の綴りを書かない**(`F5` はスマホに無い / mac では `Command+R`)──
+ *   起きることで書く(CLAUDE.md「お知らせに鍵の綴りを書かない」と同じ理由)。
+ */
+export function endEditRefusal(what: string, state: AppState): string {
+  if (state.phase !== 'editing')
+    return `${what}できませんでした: いま編集中ではありません(この画面は編集を終えています)`;
+  return `${what}できませんでした: 開いている本文が見つかりません(読み込み直すと直ります)`;
+}
+
+/**
  * 🔴 **押せないボタンの説明**(#516)。`ready` なら `null`。
  * ⚠ 上の `phaseBlockReason` と**問いが違う**(あちらは帯の断り文、こちらは
  *   ボタンに添える説明)。⚠ ただし**判定は同じ `phase`** なので、
@@ -2721,7 +2754,9 @@ function reduceCore(
       };
     }
     case 'COMMIT_EDIT': {
-      if (state.phase !== 'editing' || !state.openBody) return { state, events: [] };
+      // 🔴 捨てるなら**声に出して**捨てる(#723)── 下の `endEditRefusal` を見よ
+      if (state.phase !== 'editing' || !state.openBody)
+        return { state: { ...state, error: endEditRefusal('保存', state) }, events: [] };
       const { lid, body, baseline, persisted } = state.openBody;
       // baseline := body(最終 commit 内容)。disk 確認は persisted が別に持つので
       // これは楽観確定ではない(review E は persisted の導入で解消)
@@ -2849,7 +2884,9 @@ function reduceCore(
       };
     }
     case 'CANCEL_EDIT': {
-      if (state.phase !== 'editing' || !state.openBody) return { state, events: [] };
+      // 🔴 捨てるなら**声に出して**捨てる(#723)── 下の `endEditRefusal` を見よ
+      if (state.phase !== 'editing' || !state.openBody)
+        return { state: { ...state, error: endEditRefusal('取り消し', state) }, events: [] };
       const { lid, body, baseline, persisted, diskAhead } = state.openBody;
       // 新規作成直後の未編集 cancel は entry ごと掃除する ── PKC2 は掃除が無く
       // 「作成 → Esc」で既定 title の空 entry が堆積した(P3-7a)。draft を

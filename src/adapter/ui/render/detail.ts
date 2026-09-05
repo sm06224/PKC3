@@ -508,7 +508,8 @@ export class DetailRenderer {
   }
 
   private title(state: AppState, lid: string): HTMLElement {
-    const title = document.createElement('h2');
+    // 🔴 **段は h1**(#720)── 理由は下の `renderView` 側の注記を見よ
+    const title = document.createElement('h1');
     title.setAttribute('data-pkc-field', this.field('detail-title'));
     title.textContent = state.entryMetas.get(lid)?.title ?? '';
     return title;
@@ -560,7 +561,20 @@ export class DetailRenderer {
       this.disposeLends(); // 前の表示が借りた URL はここで寿命終端
       this.region.textContent = '';
       this.dropBarState(); // ⚠ slot ごと作り直すので、いま出している形も忘れる
-      this.titleEl = document.createElement('h2');
+      /**
+       * 🔴 **開いているノートの題名は `h1`**(#720。cowork 評価レポート)。
+       *
+       * ⚠ 直す前、アプリの document には **`h1` が 1 つも無かった**(`grep` で 0 件)──
+       *   読み上げで使う人は見出しの一覧から画面の骨格を掴むので、いちばん上の段が
+       *   欠けていると「**いま何を開いているのか**」が一覧から読めない。
+       * 🔑 本文の中の見出しは**そのまま**(`# 見出し` は `h1` のまま描く)── 本文は
+       *   user が書いた物なので、段をこちらで付け替えない(記法は動線である)。
+       * ⚠ **見た目は 1 ドットも変わらない** ── `[data-pkc-field='detail-title']` が
+       *   `font-size` と `margin` を明示しているので、UA の `h1` 既定は当たらない。
+       * ⚠ **書き出した HTML(`export/pkc3-html.ts`)は触らない** ── あちらは
+       *   `h1` = ノート束の題名 / `h2` = ノートの題名という別の骨格を既に持っている。
+       */
+      this.titleEl = document.createElement('h1');
       this.titleEl.setAttribute('data-pkc-field', this.field('detail-title'));
       this.barSlot = document.createElement('div');
       this.barSlot.setAttribute('data-pkc-field', this.field('detail-bar-slot'));

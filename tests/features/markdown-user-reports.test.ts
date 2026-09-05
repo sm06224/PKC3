@@ -439,10 +439,20 @@ describe('行頭アライン: 矢印の向きは意味を持たない(記法の�
         infos.push(a.map(String).join(' '));
       });
       try {
+        /**
+         * ⚠ **`silentHallucinationWarnings: false` を明示する**(#710、2026-09-05)。
+         *   既定は「書かない」へ変わった ── 明示しないと `infos` が空になり、
+         *   下の `toBeGreaterThanOrEqual(2)` が落ちる(= 既定が変わったことに
+         *   気づける形。黙って 0 件を通す書き方にはしない)。
+         */
         // ① inline 経路(段落の中に書いた `:align:{}`)
-        renderMarkdown('本文 :align:{position=center} の続き\n');
+        renderMarkdown('本文 :align:{position=center} の続き\n', {
+          silentHallucinationWarnings: false,
+        });
         // ② standalone 経路(行そのものが `:align:{}`)
-        renderMarkdown(':align:{position=center}\n\n次の段落\n');
+        renderMarkdown(':align:{position=center}\n\n次の段落\n', {
+          silentHallucinationWarnings: false,
+        });
       } finally {
         spy.mockRestore();
       }

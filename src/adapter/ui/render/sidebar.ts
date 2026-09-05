@@ -15,6 +15,8 @@ import { entryFilterOf, matchesEntry } from '@features/filter/title-filter';
 import { sortOrder } from '@features/filter/entry-sort';
 import { ARCHETYPE_ICONS, iconSpan, setIcon, type IconName } from './icons';
 import { formatListDate, formatStoredDate } from '@features/datetime/stored-date';
+// 🔑 空のときの「次の一手」はフォルダの面と**同じ部品**(#722 P2-13)── 2 か所で組まない
+import { emptyStartActions } from './empty-start';
 
 export class SidebarRenderer {
   private readonly list: HTMLElement;
@@ -183,20 +185,31 @@ export class SidebarRenderer {
      *   **自分が打っていない語**(タグの札を押した直後)が探す欄に入っているので、
      *   戻し方が画面から読み取れない。
      * 🔑 形は連絡先(#536 ②)と**同じ**にする ── 「絞りを外す」で、その場で戻れる。
-     * ⚠ 本当にノートが 0 件のときは出さない(外す物が無い ── dead click を作らない)。
+     *
+     * 🔴 **ノートが 1 件も無いときも出す**(#722 P2-13、2026-09-05)。
+     * ⚠ 直す前はここで**何も出さなかった** ── 理由は「外す物が無い(dead click を
+     *   作らない)」で、それは**戻り道の話としては正しい**。
+     * 🔑 ところが空の PKC で要るのは戻り道ではなく**次の一手**である ──
+     *   出す物が「絞りを外す」から「作る / 取り込む」に変わるだけで、
+     *   dead click にはならない(押せば本当にノートができる)。
+     * ⚠ 案内は本文の面にも在るが、狭い幅では本文が**別ページ**なので画面に無い。
      */
     this.emptyNote?.remove();
     this.emptyNote = null;
-    if (visible.length === 0 && alive.size > 0) {
+    if (visible.length === 0) {
       const box = document.createElement('div');
       box.setAttribute('data-pkc-field', 'entry-list-empty');
       const p = document.createElement('p');
       p.textContent =
-        state.filterQuery === ''
-          ? '絞り込みに一致するものがありません'
-          : `「${state.filterQuery}」に一致するものがありません`;
+        alive.size === 0
+          ? // ⚠ 字はフォルダの面と**同じ**(同じ状態を 2 通りの言い方で呼ばない)
+            'まだ何もありません'
+          : state.filterQuery === ''
+            ? '絞り込みに一致するものがありません'
+            : `「${state.filterQuery}」に一致するものがありません`;
       box.append(p);
-      if (state.filterQuery !== '' || state.kindFilter.size > 0) {
+      if (alive.size === 0) box.append(emptyStartActions());
+      else if (state.filterQuery !== '' || state.kindFilter.size > 0) {
         const clear = document.createElement('button');
         clear.type = 'button';
         clear.setAttribute('data-pkc-action', 'clear-entry-filter');

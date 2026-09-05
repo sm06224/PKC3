@@ -45,6 +45,8 @@ import { appKeymap, type KeymapStore } from './keymap';
 import { appDualPrefs, DualPrefsStore } from './dual-prefs';
 import { appPhone } from './phone-layout';
 import { ARCHETYPE_ICONS, iconSpan } from './icons';
+// 🔴 タブの名乗りは左の列と同じ関数(#720)
+import { markTab, markTablist } from './tabs-a11y';
 
 /**
  * 指紋の区切り。⚠ **題名に現れない字**でなければ、別々の行が同じ指紋になり
@@ -619,7 +621,8 @@ export class DualFilerRenderer {
 
     const tabs = document.createElement('div');
     tabs.setAttribute('data-pkc-region', 'dual-tabs');
-    tabs.setAttribute('role', 'tablist');
+    // ⚠ 綴りは左の列のタブと**同じ関数**(#720)── 片方だけ直す形にしない
+    markTablist(tabs);
     const crumbs = document.createElement('nav');
     crumbs.setAttribute('data-pkc-region', 'dual-crumbs');
     crumbs.setAttribute('aria-label', `${SIDE_LABEL[side]}のペインの現在地`); // ⚠ 同上
@@ -1034,8 +1037,9 @@ export class DualFilerRenderer {
       open.setAttribute('data-pkc-action', 'dual-tab-activate');
       open.setAttribute('data-pkc-side', side);
       open.setAttribute('data-pkc-tab', String(i));
-      open.setAttribute('role', 'tab');
-      open.setAttribute('aria-selected', i === pane.active ? 'true' : 'false');
+      markTab(open, i === pane.active);
+      // ⚠ 見た目の印は**包んでいる span** に付く(左の列はボタン自身)── 器が違うので
+      //    `markTab` には寄せない
       if (i === pane.active) tab.setAttribute('data-pkc-active', '');
       open.textContent = name;
       open.title = `${name} を開きます`;

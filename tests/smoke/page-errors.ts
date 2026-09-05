@@ -122,3 +122,30 @@ export function consoleOrigin(
   }
   return ` @ ${rest}${suffix}`;
 }
+
+/**
+ * 🔴 **その console の行が「アプリ自身の束から出たか」**(#710 / #713、2026-09-05)。
+ *
+ * ## なぜ要るか
+ *
+ * `collectPageErrors` は長らく **`console.error` しか見ていなかった**
+ * (`msg.type() !== 'error'` で return)。⚠ だから製品が
+ * `console.info` を**描画のたびに**出していても**誰も気づけない** ── 実測
+ * (2026-09-05、smoke を全量 1 回・全種を採った):`[PKC2009]` が **9 行**、
+ * `[PKC2007]` が **1 行**、どちらも `markdown-worker` の chunk から出ていた。
+ *
+ * ## 🔑 出所で切る(名指しの一覧にしない)
+ *
+ * ⚠ `page.on('console')` は **`about:srcdoc` の箱の中**も上げる(#561)。
+ *   そこは fixture が描く相手なので、アプリの主張ではない。
+ * 🔑 だから **http(s) = 配っている束から出た行だけ**を数える ──
+ *   「この文言は許す」という等値の一覧を増やすより、**主張の範囲を切る**ほうが
+ *   後から読める(CLAUDE.md §1「面へスコープする」の console 版)。
+ * ⚠ 出所が**読めない行**(`url` が空)は数えない ── 「どこから出たか言えない物を
+ *   アプリのせいにしない」(判定不能に結果を読まない、と同じ向き)。
+ */
+export function isAppOrigin(loc: { url?: string } | null | undefined): boolean {
+  const url = loc?.url;
+  if (url === undefined || url === '') return false;
+  return /^https?:/i.test(url);
+}

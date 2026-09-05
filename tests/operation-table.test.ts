@@ -131,12 +131,13 @@ describe('操作の全数台帳(#582 段①)', () => {
       //    `stack-load`(行のメニュー / 情報ペイン、登記あり)で受け手 +2 / 登記 +1
       // ⚠ 2026-09-05(#633 段④): 入れ物の中の「上へ / 下へ」(`stack-link-up` / `stack-link-down`)で
       //    受け手 +2(登記は増えない ── 押した行が要る P1 なので、名前だけでは呼べない)
-      total: 252,
-      receivers: 205,
+      // ⚠ 2026-09-05(#720): スキップリンク `skip-to` の受け手で +1
+      total: 253,
+      receivers: 206,
       registered: 82,
       both: 35,
       outsideActionsTable: 47,
-      unregistered: 170,
+      unregistered: 171,
     });
   });
 

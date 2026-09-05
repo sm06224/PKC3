@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   renderMarkdown,
   renderMarkdownInline,
@@ -138,13 +138,18 @@ const goldens = JSON.parse(
   inlineGolden: { input: string; html: string };
 };
 
-beforeAll(() => {
-  // 寛容 parse(PKC2005〜2011)の console 通知は仕様どおりの出力 ──
-  // stderr 0 行規律のため test 中は黙らせる(挙動には影響しない)
-  vi.spyOn(console, 'warn').mockImplementation(() => {});
-  vi.spyOn(console, 'info').mockImplementation(() => {});
-  vi.spyOn(console, 'log').mockImplementation(() => {});
-});
+/**
+ * 🔴 **黙らせるのをやめた**(#710、2026-09-05)。
+ *
+ * ⚠ ここには「寛容 parse(PKC2005〜2011)の console 通知を stderr 0 行規律のため
+ *   黙らせる」と書いてあったが、**それは製品が描画のたびに書いていたから**である。
+ *   出所を止めた(`renderMarkdown` の hint は既定で書かない)ので、この 3 本は
+ *   **no-op になった** ── 残すと「これが無いと汚れる」という嘘のコメントが残る
+ *   (CLAUDE.md §1「これが無いと壊れる、と書いた規則が no-op だった」)。
+ * 🔑 0 行であることを**主張として**見るのは
+ *   `tests/features/markdown-parse-hints.test.ts` の仕事である。
+ */
+// ⚠ 何も黙らせない ── 出れば vitest の出力に残り、その場で気づける
 
 describe('PKC-Markdown golden parity vs PKC2 (25 cases)', () => {
   for (const c of goldens.cases) {

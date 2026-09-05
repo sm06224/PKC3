@@ -254,6 +254,24 @@ test.describe('指で触る端末', () => {
       'pointerdown だけでは切り替わらない(iOS Safari で押す前に読めない)',
     ).toBe(want);
   });
+
+  /**
+   * 🔴 **押せない鍵の名前を、欄の説明に出さない**(#722 P2-12)。
+   *
+   * ⚠ **ここでしか測れない** ── 判定は `matchMedia('(hover: none) and (pointer: coarse)')`
+   *   で、happy-dom は media query を評価しないので unit は**差し替えた答え**しか見ていない。
+   *   本物のブラウザが触る端末としてどう答えるかは、ここでだけ分かる。
+   * 🔑 鍵そのものは殺していない(外付けキーボードでは効く)── 見るのは**字**だけ。
+   */
+  test('🔴 追記の欄に、押せない鍵の名前が出ない (#722)', async ({ page }) => {
+    await gotoApp(page);
+    await dismissAnnounce(page);
+    const ph =
+      (await page.locator('[data-pkc-field="append-input"]').getAttribute('placeholder')) ?? '';
+    // ⚠ 空振り防止 ── 欄そのものは在って、字も空ではない
+    expect(ph, '追記の欄に字が無い(台の空振り)').toContain('追記する内容');
+    expect(ph, `触る端末なのに鍵の名前が出ている: ${ph}`).not.toMatch(/Ctrl|⌘|Enter/);
+  });
 });
 
 test.describe('対照群 ── マウスの端末', () => {
@@ -271,5 +289,13 @@ test.describe('対照群 ── マウスの端末', () => {
       .locator('[data-pkc-field="entry-filter"]')
       .evaluate((el) => Number.parseFloat(getComputedStyle(el).fontSize));
     expect(px, `マウスの端末の欄まで太らせている(${px}px)`).toBeLessThan(16);
+
+    /**
+     * 🔴 **鍵の名前は、マウスの端末では今までどおり出る**(#722 P2-12 の対照群)。
+     * ⚠ これが無いと「いつでも鍵の字を消す」実装が、上の触る端末の腕を満たして通る。
+     */
+    const ph =
+      (await page.locator('[data-pkc-field="append-input"]').getAttribute('placeholder')) ?? '';
+    expect(ph, `マウスの端末で鍵の名前まで消した: ${ph}`).toMatch(/Ctrl|⌘/);
   });
 });

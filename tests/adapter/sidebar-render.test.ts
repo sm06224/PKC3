@@ -276,11 +276,20 @@ describe('🔴 一覧が 0 件のとき、理由と戻り道を出す(#550)', ()
     expect(d.getState().filterQuery, '語の絞りも空になっていない').toBe('');
   });
 
-  it('⚠ ノートが 1 件も無い器では出さない(外す物が無い)', () => {
+  /**
+   * ⚠ **2026-09-05(#722 P2-13)に観測点を絞った。** 直す前は「器ごと出ない」を
+   *   見ていたが、ノートが 1 件も無いときは**器を出して「次の一手」を置く**ように
+   *   なった(作る / 取り込む)。
+   * 🔑 **この test が守っているのは「外す物が無いのに『絞りを外す』を出さない」**
+   *   ── dead click の禁止であって、器の有無ではない。だから見るのはボタンの側。
+   */
+  it('⚠ ノートが 1 件も無い器では「絞りを外す」を出さない(外す物が無い)', () => {
     const root = document.createElement('div');
     const regions = buildShell(root);
     const sidebar = new SidebarRenderer(regions.sidebar);
     sidebar.render({ ...bootedState([]), filterQuery: 'x' });
-    expect(box(root), 'ノートが無いのに「絞りを外す」を出した(dead click)').toBeNull();
+    expect(clear(root), 'ノートが無いのに「絞りを外す」を出した(dead click)').toBeNull();
+    // ⚠ 空振り防止 ── 器ごと出ていないなら、この test は何も見ていない(#722 で器は出る)
+    expect(box(root), '0 件の器そのものが出ていない(次の一手も出ていない)').not.toBeNull();
   });
 });

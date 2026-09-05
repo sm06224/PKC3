@@ -55,6 +55,14 @@ export interface ConfirmOptions {
 /** この器が使う region 名。⚠ **test / smoke はここだけを見る**。 */
 export const DIALOG_REGION = 'app-dialog';
 
+/**
+ * 題名の `id`(#720)。`aria-labelledby` は **`id` しか受けない**ので、
+ * `data-pkc-field` とは別に 1 つ要る。
+ * ⚠ **前置きを付ける** ── user の本文の見出しにも `id` が振られるので、
+ *   素の字にすると同じ document で重複しうる(ヘルプの面が本文を描く)。
+ */
+export const DIALOG_TITLE_ID = 'pkc3-dialog-title';
+
 interface Frame {
   dialog: HTMLDialogElement;
   title: HTMLElement;
@@ -121,6 +129,19 @@ function ensureFrame(host: HTMLElement): Frame {
   dialog.setAttribute('data-pkc-region', DIALOG_REGION);
   const title = document.createElement('h2');
   title.setAttribute('data-pkc-field', 'dialog-title');
+  /**
+   * 🔴 **開いた瞬間に「何のダイアログか」を読み上げる**(#720)。
+   *
+   * ⚠ `showModal()` は焦点を器の中(取り消しのボタン)へ移すので、読み上げは
+   *   **「やめる、ボタン」から始まる** ── 題名を名乗らないと、user は
+   *   *何を*やめるのか分からないまま押すことになる(削除の確認でこれは危ない)。
+   * 🔑 器は**使い回す**(開くたびに作り直さない)ので、id もここで 1 度だけ振る。
+   * ⚠ id は `data-pkc-*` ではなく本物の `id` が要る ── `aria-labelledby` は
+   *   **id しか受けない**。⚠ 綴りは user の本文と衝突しない形にする
+   *   (`pkc3-` 前置き。本文の見出しの slug は素の字である)。
+   */
+  title.id = DIALOG_TITLE_ID;
+  dialog.setAttribute('aria-labelledby', DIALOG_TITLE_ID);
   const body = document.createElement('p');
   body.setAttribute('data-pkc-field', 'dialog-body');
   const row = document.createElement('div');

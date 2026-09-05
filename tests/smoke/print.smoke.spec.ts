@@ -25,7 +25,14 @@
 import { test, expect } from '@playwright/test';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { gotoApp, clickReal, createEntry, dismissAnnounce, useSplitEditor } from './helpers';
+import {
+  gotoApp,
+  clickReal,
+  collectPageErrors,
+  createEntry,
+  dismissAnnounce,
+  useSplitEditor,
+} from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -38,6 +45,14 @@ test.beforeEach(async ({ page }) => {
 const A4 = { width: 794, height: 1123 };
 
 test('🔴 画面から印刷すると全文が紙に乗り、+++ で改頁する', async ({ page }) => {
+  /**
+   * 🔴 **例外を 1 度も見ていなかった**(#713、2026-09-05)。
+   * ⚠ 印刷は **blob の寿命**を触る経路である ── CLAUDE.md §5 に
+   *   「`afterprint` の revoke が読み込み中の blob URL を消し、紙から画像が落ちた」
+   *   と記録が在るのに、この spec は `pageerror` も `console.error` も拾って
+   *   いなかった(= **同じ事故がもう一度起きても紙の中身が合えば緑**)。
+   */
+  const errors = collectPageErrors(page);
   await gotoApp(page);
   await createEntry(page, 'text');
   const ta = page.locator('[data-pkc-field="editor-body"]');
@@ -173,6 +188,8 @@ test('🔴 画面から印刷すると全文が紙に乗り、+++ で改頁す�
     expect(h.breakAfter, '配る HTML で kind=rule も改頁している').toBe('auto');
   }
   await viewer.close();
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 
 /**
@@ -192,6 +209,7 @@ test('🔴 画面から印刷すると全文が紙に乗り、+++ で改頁す�
  * `chromium_headless_shell-1194`(`PKC3_CHROMIUM` で差す)。どちらも 1 秒台。
  */
 test('🔴 情報ペインの「PDF」を押すと印刷が始まる', async ({ page }) => {
+  const errors = collectPageErrors(page);
   await gotoApp(page);
   await createEntry(page, 'text');
   const ta = page.locator('[data-pkc-field="editor-body"]');
@@ -218,6 +236,8 @@ test('🔴 情報ペインの「PDF」を押すと印刷が始まる', async ({ 
   await expect
     .poll(async () => page.evaluate(() => (globalThis as unknown as Record<string, number>).__printed))
     .toBeGreaterThan(0);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 
 /**
@@ -241,6 +261,7 @@ test('🔴 情報ペインの「PDF」を押すと印刷が始まる', async ({ 
  * 戻しの 1 行を消しても緑のままになる(§1「別の理由で成立している」)。
  */
 test('🔴 A5(559px)の紙でも、一覧ページのまま刷って本文が出る', async ({ page }) => {
+  const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 559, height: 794 });
   await gotoApp(page);
   // ⚠ この幅ではお知らせが**画面いっぱい**である(user 裁定 2026-09-02)── 畳まないと
@@ -308,5 +329,7 @@ test('🔴 A5(559px)の紙でも、一覧ページのまま刷って本文が出
     expect(pages, `A5 の紙が 1 枚しか出ていない(本文が落ちている)。頁数=${pages}`)
       .toBeGreaterThan(2);
   }
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 

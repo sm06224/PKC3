@@ -22,6 +22,8 @@ import { listAppendTargets } from '@features/markdown/append-target';
 import { CANCEL_EDIT_HINT, COMMIT_EDIT_HINT, iconButton } from './icons';
 import { refoldPeeked } from './pane-visibility';
 import { hintTitle } from './shortcut-hint';
+// 🔑 指で触るだけの端末かの判定は 1 か所(#722 P2-12)── 各面で `matchMedia` を書かない
+import { isTouchOnly } from './touch-device';
 
 /** 追記欄の見え方。⚠ ここが唯一の判定(描画側と binder で二重に持たない)。 */
 export type AppendMode =
@@ -83,7 +85,17 @@ export class AppendBoxRenderer {
     this.input.rows = 2;
     // ⚠ placeholder は `title` ではないので、`applyShortcutHints` の対象外 ──
     //    ここは組み立てた字をそのまま入れる(割当を変えたら次の描画で追いつく)
-    this.input.placeholder = hintTitle('追記する内容', 'append-send');
+    /**
+     * 🔴 **指で触るだけの端末では、鍵の名前を出さない**(#722 P2-12)。
+     *
+     * ⚠ スマホには `Ctrl` も `Enter` も無いので、`(Ctrl + Enter)` は
+     *   **押せない物の名前で欄の説明を半分埋めている**だけである。
+     * ⚠ **鍵そのものは殺していない** ── 外付けキーボードを繋げばこれまでどおり効く。
+     *   ここで変わるのは欄に出る字だけである。
+     */
+    this.input.placeholder = isTouchOnly()
+      ? '追記する内容'
+      : hintTitle('追記する内容', 'append-send');
     /**
      * 🔴 **入り先を選ぶ**(#395 段①)。
      *

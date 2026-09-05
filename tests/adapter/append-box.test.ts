@@ -62,7 +62,13 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>) {
     detail.render(s);
     box.render(s);
   });
-  bindActions(root, d);
+  /**
+   * ⚠ **一時の知らせを拾う口**(#723)。既定の `bindActions(root, d)` は
+   *   `services = {}` なので `showStatus?.()` が**何もしない** ── 出しているつもりの
+   *   1 行を、test からは 1 バイトも見られなかった。
+   */
+  const statuses: string[] = [];
+  bindActions(root, d, { showStatus: (t) => void statuses.push(t) });
   const persisted: EntryUpsert[] = [];
   const disk = { ...bodies };
   /** null = すぐ完了 / 関数 = その解決を待つ(窓を開ける)。 */
@@ -101,6 +107,7 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>) {
     persisted,
     disk,
     q,
+    statuses,
     /** 書込を止めて窓を開ける。返り値を呼ぶと通す / 落とす。 */
     hold(): { pass(): void; drop(): void } {
       gate = { release: () => undefined, fail: () => undefined };
@@ -490,6 +497,84 @@ describe('🔴 畳んでいても最後の出口は消えない(#609)', () => {
     } finally {
       // ⚠ `appPanes` は file 内で共有 ── 畳みを残すと後の it が別の理由で落ちる
       appPanes.setHidden([]);
+    }
+  });
+});
+
+/**
+ * 🔴 **最後の脱出口を押したことが、痕跡として残る**(#723)。
+ *
+ * cowork が 1 回だけ「編集を終えられなくなった」を観測し、⚠ **再現しなかった**。
+ * ⚠ 強制解放は**その状況でしか押されない**のに、押しても**何も残らなかった** ──
+ *   画面にも console にも 1 行も出ないので、user がここから抜けたのかどうかすら
+ *   分からない(だから次の報告にも何も乗らない)。
+ * 🔑 直すのは症状ではなく**見えなさ**である ── ①画面に「何が打ち切られたか」
+ *   ②console に「そのときの state」。
+ */
+describe('🔴 強制解放を押したら痕跡が残る(#723)', () => {
+  it('🔴 打ち切った対象を画面に 1 行出し、console にも state を残す', async () => {
+    const s = setup([meta('log', 'textlog')], { log: '元' });
+    const warns: unknown[][] = [];
+    const orig = console.warn;
+    console.warn = (...a: unknown[]) => void warns.push(a);
+    try {
+      s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log' });
+      await tick();
+      s.hold();
+      type(s.q, '追記');
+      s.q('[data-pkc-action="append-entry"]')!.click();
+      await tick();
+      expect(s.d.getState().writeLock?.lid, '前提: 書込中になっていない').toBe('log');
+      // ⚠ 押す前は何も出ていない(常在する行を作っていない)
+      expect(s.statuses, '押す前から知らせが出ている').toEqual([]);
+      expect(warns, '押す前から console に出ている').toEqual([]);
+
+      s.q<HTMLButtonElement>('[data-pkc-action="force-release"]')!.click();
+      await answerDialog('ok');
+      await tick();
+
+      // ① 画面 ── **何を**打ち切ったかが読める(題名で名指しする)
+      expect(s.statuses, '打ち切っても画面に 1 行も出ない').toHaveLength(1);
+      expect(s.statuses[0]).toContain('打ち切りました');
+      expect(s.statuses[0], '打ち切った対象が読めない').toContain('log');
+      expect(s.statuses[0], '直し方が書いていない').toContain('開き直すと直ります');
+
+      // ② console ── **次の報告に貼れる** state が載っている
+      expect(warns, 'console に何も残らない').toHaveLength(1);
+      expect(String(warns[0]![0])).toContain('強制的に打ち切りました');
+      expect(warns[0]![1], '打ち切ったときの state が載っていない').toMatchObject({
+        writeLockLid: 'log',
+        phase: 'ready',
+      });
+    } finally {
+      console.warn = orig;
+    }
+  });
+
+  /**
+   * 🔑 **対照群** ── 待っている書込が無いときは、名指しではなく**そう書く**。
+   * ⚠ ここが無いと「常に同じ字を出す」実装と区別が付かない。
+   */
+  it('待っている書き込みが無いときは、その旨を出す', async () => {
+    const s = setup([meta('log', 'textlog')], { log: '元' });
+    const orig = console.warn;
+    console.warn = () => undefined;
+    try {
+      s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log' });
+      await tick();
+      expect(s.d.getState().writeLock, '前提: 書込中になっている').toBeNull();
+      // ⚠ 器は書込中しか出さないので、受け手を直に呼ぶ(#308「門を足さない」出口)
+      const btn = document.createElement('button');
+      btn.setAttribute('data-pkc-action', 'force-release');
+      s.root.append(btn);
+      btn.click();
+      await answerDialog('ok');
+      await tick();
+      expect(s.statuses[0], '待っている書込が無いことを言わない').toContain(
+        '待っている書き込みはありませんでした',
+      );
+    } finally {
+      console.warn = orig;
     }
   });
 });

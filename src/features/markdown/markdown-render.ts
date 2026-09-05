@@ -2273,10 +2273,16 @@ export interface RenderMarkdownOptions {
    * editor preview turns it on. */
   readonly sourceLineAnchors?: boolean;
   /**
-   * reform-2026-05 Phase 2 PR-2K(2026-05-10):AI hallucination 形 directive
-   * 検出時の `console.warn` を抑止。vitest / Playwright で test 出力を汚さない
-   * 用途に opt-in。default false で、production / debug overlay では console
-   * へ流す(AI test runner / Playwright `page.on('console', …)` が拾える)。
+   * reform-2026-05 Phase 2 PR-2K(2026-05-10):寛容 parse(`:::note` /
+   * `:align:{…}` 等)を受理したときの hint を console へ書くか。
+   *
+   * 🔴 **既定は `true`(書かない)へ変えた**(#710、2026-09-05)。
+   * ⚠ 直す前の既定は「書く」で、**支えている記法を描くたびに** `console.info` が
+   *   出ていた(実測:smoke 全量で `[PKC2009]` / `[PKC2007]`)。書いても user に
+   *   直す所は無く、smoke の収集は `error` 以外を捨てるので**増えても見えない**。
+   * 🔑 **口は残す** ── 道具(hint を読む側)は `false` を明示して呼ぶ。
+   *   `tests/features/markdown-user-reports.test.ts` が両方向を pin している
+   *   (既定で 0 行 / 頼めば出る)。
    */
   readonly silentHallucinationWarnings?: boolean;
   /**
@@ -5136,10 +5142,28 @@ export function renderMarkdown(
   const tocResult = processTocDirective(text, lineMap);
   text = tocResult.transformed;
   lineMap = tocResult.lineMap;
+  /**
+   * 🔴 **描くたびに console へ書かない**(#710、2026-09-05)。
+   *
+   * ⚠ 既定は「書く」だった ── 実測(smoke を全量 1 回、`page.on('console')` を
+   *   全種で採った):`:::note` / `:::danger` / `:align:{position=…}` を含む本文を
+   *   描くと、**描画のたびに** `[PKC2009]` / `[PKC2007]` が
+   *   `markdown-worker` の chunk から出ていた。
+   * ⚠ これは**支えている記法**である(`:::note` は `layout.smoke` が地と罫まで
+   *   pin している)── それを「tolerant alias accepted」と毎回書くのは、
+   *   直す所の無い通知を積むだけである。
+   * 🔴 しかも smoke の収集は `msg.type() !== 'error'` で**捨てている**ので、
+   *   増えても誰にも見えない(`tests/smoke/helpers.ts`)── だから溜まった。
+   * 🔑 **口は残す**(道具のための hint 出力)── 頼まれたときだけ書く。
+   *   ⚠ 既に 2 つの test file が `vi.spyOn(console, …)` で黙らせていた
+   *   (`markdown-golden.test.ts` / `markdown-user-reports.test.ts`)= **回避が
+   *   先に生えていた**合図である。
+   */
+  const silentHints = opts.silentHallucinationWarnings ?? true;
   // reform-2026-05 Phase 2 PR-2O:standalone :align:{position=X} は次段落の
   // alignMap に register、行は strip(PR-2L hint chip より格上げ、actual align)。
   const tolerantAlignResult = processTolerantStandaloneAlign(
-    text, lineMap, opts.silentHallucinationWarnings,
+    text, lineMap, silentHints,
   );
   text = tolerantAlignResult.transformed;
   lineMap = tolerantAlignResult.lineMap;
@@ -5149,14 +5173,14 @@ export function renderMarkdown(
   // 注:standalone :align: は PR-2O で先に消費されるので、ここに到達する
   // :align: は inline form のみ(hint chip 経由、default 非表示)。
   const tolerantInlineResult = processTolerantInlineAliases(
-    text, lineMap, opts.silentHallucinationWarnings,
+    text, lineMap, silentHints,
   );
   text = tolerantInlineResult.transformed;
   lineMap = tolerantInlineResult.lineMap;
   // PR-2L:admonition alias(:::note / :::warning / :::callout / :::admonition)
   // を :::section{role=…} に rewrite。processSectionBlocks より先に走らせる。
   const admonitionResult = processAdmonitionAliases(
-    text, lineMap, opts.silentHallucinationWarnings,
+    text, lineMap, silentHints,
   );
   text = admonitionResult.transformed;
   lineMap = admonitionResult.lineMap;
@@ -5183,7 +5207,7 @@ export function renderMarkdown(
   lineMap = breakNormResult.lineMap;
   // PR-2K:less-critical block 3 件(:::toc / :::frontmatter / :::body)を
   // sentinel wrap + console.warn(PKC1010)。寛容 parse はせず literal 残し。
-  const hallResult = processHallucinatedDirectives(text, lineMap, opts.silentHallucinationWarnings);
+  const hallResult = processHallucinatedDirectives(text, lineMap, silentHints);
   text = hallResult.transformed;
   lineMap = hallResult.lineMap;
   // L-8:`_` / `_<N>` 空行マーカー(挿入あり、lineMap 更新)

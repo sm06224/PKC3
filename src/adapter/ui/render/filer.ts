@@ -41,6 +41,8 @@ import { archetypeLabel } from './sidebar';
 //    ここに 3 つ目の parse を置いていたので寄せた(規則は 1 つ ── CLAUDE.md)
 import { formatListDate, formatStoredDate } from '@features/datetime/stored-date';
 import { ARCHETYPE_ICONS, iconButton, iconSpan } from './icons';
+// 🔑 空のときの「次の一手」は一覧タブと**同じ部品**(#722 P2-13)── 2 か所で組まない
+import { emptyStartActions } from './empty-start';
 
 
 
@@ -986,6 +988,15 @@ export class FilerRenderer {
             ? 'このフォルダは空です'
             : 'まだ何もありません';
       this.region.append(empty);
+      /**
+       * 🔴 **本当に 1 件も無いときだけ、次の一手を出す**(#722 P2-13)。
+       *
+       * ⚠ 絞り込みで消えたとき(`q !== ''`)は出さない ── ノートは在るので
+       *   「作る」は的外れであり、要るのは絞りを外すことである。
+       * ⚠ フォルダの中(`scope`)でも出さない ── 空なのはこのフォルダだけで、
+       *   「取り込む」の行き先はここではない(既存の字がその 2 つを見分けている)。
+       */
+      if (q === '' && !scope) this.region.append(emptyStartActions());
     }
 
     // ── ゴミ箱(P5b)── filer の常設導線。一覧は明示ロード(SHOW_TRASH)

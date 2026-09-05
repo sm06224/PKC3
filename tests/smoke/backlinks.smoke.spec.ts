@@ -6,13 +6,19 @@
  * 押すと移れるか。⚠ worker(sqlite)を通るのは実ブラウザだけである。
  */
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, useSplitEditor } from './helpers';
+import { gotoApp, clickReal, collectPageErrors, createEntry, useSplitEditor } from './helpers';
 
 test.beforeEach(async ({ page }) => {
   await useSplitEditor(page);
 });
 
 test('🔴 本文のリンクが「参照元」に出て、押すと移れる', async ({ page }) => {
+  /**
+   * 🔴 **例外を 1 度も見ていなかった**(#713、2026-09-05)。⚠ ここは worker(sqlite)を
+   *   通す唯一の通し検査なのに、**その worker が投げても緑**だった ── 参照元が
+   *   出てさえいれば通るので、裏で落ちた Promise は 1 つも記録されない。
+   */
+  const errors = collectPageErrors(page);
   await gotoApp(page);
 
   // ① 的になるノート
@@ -56,4 +62,6 @@ test('🔴 本文のリンクが「参照元」に出て、押すと移れる', 
     page.locator('[data-pkc-field="detail-body"]'),
     '押しても移れない',
   ).toContainText('参照する');
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
