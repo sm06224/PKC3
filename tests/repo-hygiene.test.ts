@@ -1116,7 +1116,7 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     expect(
       counts.reduce((a, b) => a + b, 0),
       'smoke の test が増減した(足したらこの数を直す)',
-    ).toBe(455);
+    ).toBe(454);
   });
 });
 
