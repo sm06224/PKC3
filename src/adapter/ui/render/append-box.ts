@@ -19,7 +19,7 @@ import type { AppState } from '@adapter/state/app-state';
 import { bodyLockOf } from '@adapter/state/app-state';
 import { isAppendable } from '@features/flavor/append-spec';
 import { listAppendTargets } from '@features/markdown/append-target';
-import { iconButton } from './icons';
+import { CANCEL_EDIT_HINT, COMMIT_EDIT_HINT, iconButton } from './icons';
 import { refoldPeeked } from './pane-visibility';
 import { hintTitle } from './shortcut-hint';
 
@@ -132,9 +132,18 @@ export class AppendBoxRenderer {
     this.lockBar.setAttribute('data-pkc-field', 'append-lock');
     this.lockText = document.createElement('span');
     this.lockText.setAttribute('data-pkc-field', 'append-lock-reason');
-    // 編集が握っているとき ── **失わない出口を先に出す**
-    this.resolve = iconButton('commit-edit', '保存して解放');
-    this.discard = iconButton('cancel-edit', '編集を破棄');
+    /**
+     * 編集が握っているとき ── **失わない出口を先に出す**。
+     * 🔴 **字は中央の帯と同じ「保存 / キャンセル」**(#716)。⚠ 直す前は
+     *   「保存して解放 / 編集を破棄」で、同じ action なのに上下で字が違った ──
+     *   user は「別の操作か」と読む(押した結果は 1 バイトも違わない)。
+     *   説明(`title`)も中央と同じ字にする ── 正本は `detail.ts` と 2 か所だが、
+     *   `tests/adapter/action-labels.test.ts` が「同じ action は 1 種類の字」で縛る。
+     */
+    this.resolve = iconButton('commit-edit', '保存');
+    this.resolve.title = COMMIT_EDIT_HINT;
+    this.discard = iconButton('cancel-edit', 'キャンセル');
+    this.discard.title = CANCEL_EDIT_HINT;
     // 書込が返らないとき ── 最後の出口
     this.release = iconButton('force-release', '強制解放');
     this.lockBar.append(this.lockText, this.resolve, this.discard, this.release);
@@ -223,7 +232,7 @@ export class AppendBoxRenderer {
     this.discard.hidden = mode.kind !== 'editing';
     this.release.hidden = mode.kind !== 'writing';
     if (mode.kind === 'editing') {
-      this.lockText.textContent = 'このノートは編集中です。保存するか、編集を破棄すると追記できます。';
+      this.lockText.textContent = 'このノートは編集中です。保存するか、キャンセルすると追記できます。';
     } else if (mode.kind === 'writing') {
       this.lockText.textContent = '追記を書き込んでいます…(返ってこないときは強制解放)';
     }

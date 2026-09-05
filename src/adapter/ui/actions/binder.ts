@@ -795,7 +795,8 @@ function cancelFromEditor(dispatcher: Dispatcher, root: HTMLElement): void {
  *
  * 🔴 **root から引く**(P8 段⑲。押したボタンから `closest` で辿らない)。
  * 直す前は `from.closest('[data-pkc-region="detail"]')` だったが、
- * 追記欄(`append` region)の **保存して解放 / 編集を破棄** は detail の
+ * 追記欄(`append` region)の **保存 / キャンセル**(#716 まで「保存して解放 /
+ * 編集を破棄」)は detail の
  * **兄弟**なので `closest` が null を返し、題名欄が 1 度も見つからなかった
  * ── その出口から保存すると**題名の変更が丸ごと捨てられて**いた。
  * 同じ「保存」なのに押す場所で結果が違う、という壊れ方である。
@@ -1719,7 +1720,7 @@ function pickAppendTarget(dispatcher: Dispatcher, root: HTMLElement, line: numbe
       type: 'OP_FAILED',
       error:
         mode.kind === 'editing'
-          ? '編集中は追記欄を使えません(保存するか、編集を破棄すると入り先を選べます)'
+          ? '編集中は追記欄を使えません(保存するか、キャンセルすると入り先を選べます)'
           : '追記を書き込んでいる間は、入り先を変えられません',
     });
     return;

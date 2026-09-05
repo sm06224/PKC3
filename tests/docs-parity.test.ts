@@ -374,7 +374,8 @@ describe('マニュアルと実装の突合', () => {
     const box = readFileSync('src/adapter/ui/render/append-box.ts', 'utf-8');
     expect(box, '追記の導線が消えた').toContain("'追記'");
     // ⚠ ロックの出口も pin する ── 無くなると「永久に追記できない」が作れる
-    for (const label of ['保存して解放', '編集を破棄', '強制解放']) {
+    // 🔴 字は中央の帯と同じ「保存 / キャンセル」(#716 ── 直す前は「保存して解放 / 編集を破棄」)
+    for (const label of ['保存', 'キャンセル', '強制解放']) {
       expect(box, `ロックの出口「${label}」が消えた`).toContain(`'${label}'`);
       expect(MANUAL, `マニュアルに「${label}」が無い`).toContain(`**${label}**`);
     }

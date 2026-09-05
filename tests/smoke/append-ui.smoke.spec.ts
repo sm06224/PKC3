@@ -185,12 +185,13 @@ test('🔴 畳んだ追記欄を Alt+クリックで開いて送ると、元ど�
 });
 
 /**
- * 🔴 **畳んでいても、編集中の出口(保存して解放 / 編集を破棄)は消えない**(#655 ④)。
+ * 🔴 **畳んでいても、編集中の出口(追記欄側の保存 / キャンセル)は消えない**(#655 ④)。
+ * ⚠ 字は #716 で中央と揃えた(直す前は「保存して解放 / 編集を破棄」)。
  *
  * ⚠ unit は CSS を構文で読むだけ(`pane-visibility.test.ts`)。`:has()` が実ブラウザで
  *   効いて、**畳んだ器の中の出口が本当に見える / 打つ欄は出ない**のはここでしか見えない。
  */
-test('🔴 追記欄を畳んでいても、編集中は「保存して解放 / 編集を破棄」だけが見える (#655 ④)', async ({
+test('🔴 追記欄を畳んでいても、編集中は追記欄側の「保存 / キャンセル」だけが見える (#655 ④)', async ({
   page,
 }) => {
   const errors = collectPageErrors(page);
@@ -207,8 +208,8 @@ test('🔴 追記欄を畳んでいても、編集中は「保存して解放 / 
   await expect(page.locator('[data-pkc-region="editor-live"]')).toBeVisible();
   // 🔴 畳んでいても出口は見える ── 打つ欄は出ない
   const exit = region.locator('[data-pkc-action="commit-edit"]');
-  await expect(exit, '畳んだせいで「保存して解放」が消えた').toBeVisible();
-  await expect(region.locator('[data-pkc-action="cancel-edit"]'), '「編集を破棄」が消えた').toBeVisible();
+  await expect(exit, '畳んだせいで追記欄側の「保存」が消えた').toBeVisible();
+  await expect(region.locator('[data-pkc-action="cancel-edit"]'), '追記欄側の「キャンセル」が消えた').toBeVisible();
   await expect(input, '編集中に打つ欄まで出た').toBeHidden();
 
   // 🔑 その出口で編集を終えられる ── 終えたら畳んだ状態に戻る(器ごと消える)

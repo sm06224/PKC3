@@ -47,7 +47,7 @@ import {
   stepFor,
   undo,
 } from '@features/markdown/edit-journal';
-import { iconButton } from './icons';
+import { CANCEL_EDIT_HINT, COMMIT_EDIT_HINT, iconButton } from './icons';
 import { buildFormatBar } from './format-bar';
 import { hasSourceSelection } from '../actions/copy-source';
 import {
@@ -1133,6 +1133,9 @@ export class DetailRenderer {
     bar.setAttribute('data-pkc-field', 'detail-toolbar');
     const commit = iconButton('commit-edit', '保存');
     const cancel = iconButton('cancel-edit', 'キャンセル');
+    // ⚠ 説明は追記欄の同じ出口と**同じ字**(#716)── 正本は `icons.ts` の 2 定数
+    commit.title = COMMIT_EDIT_HINT;
+    cancel.title = CANCEL_EDIT_HINT;
     bar.append(commit, cancel);
     this.region.append(bar);
     // 🔑 **書式パネル**(P8 段⑥)。編集欄のすぐ上 ── 押す物と効く先を離さない

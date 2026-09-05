@@ -273,7 +273,7 @@ describe('🔴 競合ロック(P8 段⑧、user 指示 2026-08-03)', () => {
     expect(s.q('[data-pkc-field="append-form"]')!.hidden).toBe(true);
     expect(s.q('[data-pkc-field="append-lock"]')!.hidden).toBe(false);
     expect(s.q('[data-pkc-field="append-lock-reason"]')!.textContent).toContain('編集中');
-    // ⚠ **失わない出口が先**(保存して解放)── 破棄しか無い形にしない
+    // ⚠ **失わない出口が先**(追記欄側の「保存」)── キャンセルしか無い形にしない
     expect(s.q('[data-pkc-action="commit-edit"]')).not.toBeNull();
 
     // backstop: 直に投げても通らない

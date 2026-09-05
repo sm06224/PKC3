@@ -124,7 +124,7 @@ test('🔴 編集中は追記できず、理由と出口が画面に出る(競�
   // 欄ではなくロックの帯が出る ── **押せないだけ**にしない
   await expect(page.locator('[data-pkc-field="append-form"]')).toBeHidden();
   await expect(page.locator('[data-pkc-field="append-lock-reason"]')).toContainText('編集中');
-  // ⚠ 失わない出口が在る(帯の中の「保存して解放」)
+  // ⚠ 失わない出口が在る(帯の中の「保存」── #716 まで「保存して解放」)
   const resolve = page.locator('[data-pkc-field="append-lock"] [data-pkc-action="commit-edit"]');
   await expect(resolve).toBeVisible();
   await clickReal(page, '[data-pkc-field="append-lock"] [data-pkc-action="commit-edit"]');
