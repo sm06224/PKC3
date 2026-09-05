@@ -74,7 +74,9 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
     // ⚠ 2026-09-04: `insert-diagram` / `copy-chapter-md` / `copy-block-md` / `set-too-narrow-enabled` 等で N が 92 → 96、#676 の板の 3 受け手で 99、合流後の実測で 100(2026-09-05、#724 ③ ── 内訳の 1 件は数え直していない)
     // ⚠ 2026-09-05: 塊の移動の「元に戻す」`undo-move`(#684 段①)で N が 1 増えた
     //   ── 材料は state の `lastMove`、押した所から何も要らない(`undo-append` と同じ)
-    expect(counts()).toEqual({ P1: 40, P2: 29, E: 19, V: 8, N: 101 });
+    // ⚠ 2026-09-05(#215): 行の右クリックからの整理 3 つ(`rename-entry-begin` / `move-to-folder` /
+    //   `create-in-folder`)で P2 が 29 → 32 ── 押した行が無ければ `selectedLid` に効く
+    expect(counts()).toEqual({ P1: 40, P2: 32, E: 19, V: 8, N: 101 });
   });
 
   it('🔴 名指しの錨 ── 件数が同じまま入れ替わっても落ちる', () => {

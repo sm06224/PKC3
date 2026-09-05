@@ -81,6 +81,10 @@ const EXPECTED_ACTIONS: readonly string[] = [
   'export-entry-pptx',
   'export-entry-pdf',
   'show-history',
+  // 🔴 左の列の整理 3 つ(#215)── 右クリックと同じ並び(履歴の下・削除の上)
+  'rename-entry-begin',
+  'move-to-folder',
+  'create-in-folder',
   'delete-entry',
 ];
 

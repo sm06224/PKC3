@@ -109,10 +109,12 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-09-02: `phone-page` / `phone-menu`(#632 段①)で 2 増えた
       // ⚠ 2026-09-04: 小窓・板・章コピー・図の一覧・断り書きの設定など(#690 #677 #676 #528 #687 #278)で 8 増えた(229 → 237。別 worktree の合算 ── #724 ③で実測に合わせた)
       // ⚠ 2026-09-05: 塊の移動の「元に戻す」`undo-move`(#684 段①)で受け手が 1 増えた
-      total: 238,
-      receivers: 197,
-      registered: 72,
-      both: 31,
+      // ⚠ 2026-09-05(#215): 行の右クリックからの整理 3 つ(`rename-entry-begin` / `move-to-folder` /
+      //    `create-in-folder`)── 受け手 +3、`ENTRY_MENU_ACTIONS` にも載るので registered / both も +3
+      total: 241,
+      receivers: 200,
+      registered: 75,
+      both: 34,
       outsideActionsTable: 41,
       unregistered: 166,
     });
@@ -136,7 +138,8 @@ describe('操作の全数台帳(#582 段①)', () => {
   it('登記簿の内訳が動いたら鳴る', () => {
     // ⚠ 2026-09-04: 本文のメニューが 2 → 3(`open-note-window`)
     // ⚠ 2026-09-04(#690 I5): 鍵が 52 → 53(`open-note-window` を「操作を探す」に出すため)
-    expect(s().perBook).toEqual({ key: 53, entry: 12, body: 3, collection: 2, settings: 5 });
+    // ⚠ 2026-09-05(#215): 行の右クリックが 12 → 15(名前を変える / 移す… / この中に新しいノートを作る)
+    expect(s().perBook).toEqual({ key: 53, entry: 15, body: 3, collection: 2, settings: 5 });
   });
 
   it('🔴 押し所へ辿れない登記を、身元で pin する', () => {

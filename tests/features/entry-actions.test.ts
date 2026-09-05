@@ -284,6 +284,10 @@ describe('右クリックの説明(#587 C-1)', () => {
       ['start-audio-capture', '6313fe2e'],
       ['start-screen-capture', 'ec055655'],
       ['start-timer', '97214aee'],
+      // 🔴 **左の列の行からの整理 3 つ**(#215、2026-09-05)
+      ['rename-entry-begin', 'c951ee45'],
+      ['move-to-folder', '4cc90354'],
+      ['create-in-folder', '80e07ad8'],
     ];
     const digest = (h: string): string =>
       createHash('sha256').update(h).digest('hex').slice(0, 8);
@@ -418,6 +422,58 @@ describe('右クリックの説明(#587 C-1)', () => {
  *   (参照をコピー / 素の Markdown)の**間に割り込んでいた**。写す 2 つを隣に戻し、
  *   小窓はその次。⚠ 情報ペインの並びは `tests/adapter/inspector-titles.test.ts` が pin する。
  */
+/**
+ * 🔴 **左の列の行から整理ができる 3 つ**(#215)。
+ *
+ * ⚠ 直す前、行の右クリックでフォルダにできることは「フォルダを書き出す」の 1 件だけで、
+ *   改名は 2 ペインの `F2` にしか無かった(左の列には口が 1 つも無い)。
+ * 🔑 **既存の並びを動かさない**(user 裁定 2026-09-04)── だから履歴の下・削除の上。
+ */
+describe('行の右クリックからの整理(#215)', () => {
+  const acts = (ctx: { archetype: string | null; linkedFile: string | null }): string[] =>
+    entryMenuActions(ctx).map((a) => a.action);
+
+  it('🔴 「名前を変える」「移す…」はどの行にも出る', () => {
+    for (const ctx of [
+      { archetype: 'text', linkedFile: null },
+      { archetype: 'folder', linkedFile: null },
+      { archetype: null, linkedFile: null },
+    ]) {
+      expect(acts(ctx), `${JSON.stringify(ctx)} で改名が出ない`).toContain('rename-entry-begin');
+      expect(acts(ctx), `${JSON.stringify(ctx)} で移すが出ない`).toContain('move-to-folder');
+    }
+  });
+
+  it('🔴 「この中に新しいノートを作る」はフォルダのときだけ(ノートの中には作れない)', () => {
+    expect(acts({ archetype: 'folder', linkedFile: null })).toContain('create-in-folder');
+    expect(acts({ archetype: 'text', linkedFile: null })).not.toContain('create-in-folder');
+    // ⚠ 種類が分からないときは**出さない側**へ倒す(`export-folder` と同じ)
+    expect(acts({ archetype: null, linkedFile: null })).not.toContain('create-in-folder');
+  });
+
+  it('🔑 既存の並びを動かさない ── 3 つは履歴の下・削除の上に居る', () => {
+    const a = acts({ archetype: 'folder', linkedFile: 'memo.md' });
+    for (const x of ['rename-entry-begin', 'move-to-folder', 'create-in-folder']) {
+      expect(a.indexOf(x), `${x} が履歴より上に居る(既存の並びを動かした)`).toBeGreaterThan(
+        a.indexOf('show-history'),
+      );
+      expect(a.indexOf(x), `${x} が削除より下に居る`).toBeLessThan(a.indexOf('delete-entry'));
+    }
+    // ⚠ 3 つの中の並びも固定(改名 → 移す → 作る)── 面ごとに順が違うと探し直しになる
+    expect(a.slice(a.indexOf('rename-entry-begin'), a.indexOf('delete-entry'))).toEqual([
+      'rename-entry-begin',
+      'move-to-folder',
+      'create-in-folder',
+    ]);
+  });
+
+  it('字は画面で起きることで書いてある', () => {
+    expect(ENTRY_ACTION_LABELS['rename-entry-begin']).toBe('名前を変える');
+    expect(ENTRY_ACTION_LABELS['move-to-folder']).toBe('移す…');
+    expect(ENTRY_ACTION_LABELS['create-in-folder']).toBe('この中に新しいノートを作る');
+  });
+});
+
 describe('小窓の字と並び(#690 I1 / I2)', () => {
   it('🔴 字は「別のウィンドウで開く」(右クリックと本文のメニューの両方)', () => {
     const labels = [...ENTRY_MENU_ACTIONS, ...BODY_MENU_ACTIONS]

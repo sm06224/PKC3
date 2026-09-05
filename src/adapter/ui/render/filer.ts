@@ -60,6 +60,8 @@ export class FilerRenderer {
   private lastRelations: readonly Relation[] | null = null;
   private lastSelected: string | null = null;
   private lastScopeLid: string | null = null;
+  /** 名前を打ち替えている行(#215)。⚠ 指紋に入れる ── 入れないと入力欄が出ない。 */
+  private lastRenaming: string | null = null;
   /** 印(複数選択)の指紋。⚠ 参照ではなく**中身**で見る(配列は毎回作り直される)。 */
   private lastMarks = '';
   /** ⚠ 絞り込みも指紋の一部(review M-3 ── 絞り込み中にファイラだけ全件出ていた)。 */
@@ -680,6 +682,12 @@ export class FilerRenderer {
        *   この門が全部 false になる)。
        */
       state.smartHits !== this.lastSmartHits ||
+      /**
+       * 🔴 **名前の打ち替えも指紋**(#215)── 入力欄は行の中に描くので、始まりも終わりも
+       *   表ごと組み直す(2 ペインと同じ形)。⚠ 入れないと「名前を変える」を押しても
+       *   欄が出ない(state だけ動いて画面が嘘をつく ── `marksChanged` と同じ罠)。
+       */
+      state.renamingLid !== this.lastRenaming ||
       (state.entryMetas !== this.lastMetas && this.metaSignature(state) !== this.lastSignature);
     const selectionChanged = state.selectedLid !== this.lastSelected;
     // ⚠ 現在地は選択と**別に**変わる(#240 段①)── 指紋に入れないと、
@@ -765,6 +773,7 @@ export class FilerRenderer {
     this.lastSmartHits = state.smartHits;
     this.lastMarks = state.selection.join(' ');
     this.lastDates = this.dateSignature(state);
+    this.lastRenaming = state.renamingLid;
 
     /**
      * 🔴 **行を決めるのは `filerRows` 1 か所**(#240 段②)。
@@ -929,7 +938,23 @@ export class FilerRenderer {
       const chip = iconSpan(ARCHETYPE_ICONS[m.archetype] ?? 'dot');
       chip.setAttribute('data-pkc-chip', m.archetype);
       chip.title = archetypeLabel(m.archetype);
-      name.append(chip, document.createTextNode(m.title));
+      if (m.lid === state.renamingLid) {
+        /**
+         * 🔴 **その場で名前を打ち替える**(#215 ── 2 ペインの `dual-rename` を左の列へ写した)。
+         * ⚠ 綴り(`row-rename`)は一覧タブの行と**同じ** ── binder の鍵(Enter / Esc)と
+         *   focusout の受け手が 1 本で両方を拾う(面ごとに受け手を作らない。§7)。
+         * ⚠ 焦点と全選択は表を組み終えた後に当てる(`render` の末尾)。
+         */
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = m.title;
+        input.setAttribute('data-pkc-field', 'row-rename');
+        input.setAttribute('data-pkc-entry', m.lid);
+        input.setAttribute('aria-label', '新しい名前');
+        name.append(chip, input);
+      } else {
+        name.append(chip, document.createTextNode(m.title));
+      }
       const updated = document.createElement('td');
       // ⚠ 目印を付ける ── 日付だけの変化はここを差し替えて済ませる(#270)
       updated.setAttribute('data-pkc-field', 'updated');
@@ -1037,6 +1062,16 @@ export class FilerRenderer {
         firstRow ??
         this.region.querySelector<HTMLElement>('[data-pkc-region="filer-table"]');
       back?.focus();
+    }
+    /**
+     * ⚠ **描いた直後に焦点と全選択**(#215。2 ペインの `renderRows` と同じ)── これが無いと、
+     * 押した直後に user が自分でクリックし直す羽目になる(OS のファイラは打てる状態で出る)。
+     * ⚠ 上の焦点の戻しより**後**に置く ── 前に置くと、戻しが行へ焦点を奪い返す。
+     */
+    if (state.renamingLid !== null) {
+      const input = this.region.querySelector<HTMLInputElement>('[data-pkc-field="row-rename"]');
+      input?.focus();
+      input?.select();
     }
   }
 }

@@ -486,6 +486,16 @@ export interface AppState {
    */
   scopeLid: string | null;
   /**
+   * 🔴 **左の列の行で、名前を打ち替えている lid**(#215)。`null` = 打ち替えていない。
+   *
+   * ⚠ **state 駆動**で入力欄を出す(2 ペインの `dual.renaming` と同じ作法)── DOM を
+   *   直に差し替えると、別タブの保存が届いて面が組み直された瞬間に**打っている最中の
+   *   入力が消える**。⚠ 確定は既存の `RENAME_ENTRY_TITLE` を撃つ(改名の規則を 2 つ作らない)。
+   * ⚠ 消えた lid は指し続けない(`removeEntryFromState` が畳む ── 確定した瞬間に
+   *   どこにも無い lid へ改名が飛ぶのを止める)。
+   */
+  renamingLid: string | null;
+  /**
    * 🔴 **2 ペインタブファイラの持ち物**(#241 段⑥)。
    *
    * ⚠ 上の `scopeLid` / `selection` は**左の列(探し方)のもの**で、こちらは
@@ -910,6 +920,7 @@ export const initialState: AppState = {
   openBody: null,
   selectedLid: null,
   scopeLid: null,
+  renamingLid: null,
   dual: initialDual,
   selection: [],
   selectionAnchor: null,
@@ -1405,6 +1416,12 @@ export type UserAction =
    */
   | { type: 'DUAL_RENAME_BEGIN'; side: DualSide; lid: string }
   | { type: 'DUAL_RENAME_END' }
+  /**
+   * 🔴 **左の列の行の名前を打ち替え始める / やめる**(#215)。2 ペインの `DUAL_RENAME_*` と
+   *   対 ── 面が違うだけで、確定は同じ `RENAME_ENTRY_TITLE` である。
+   */
+  | { type: 'ROW_RENAME_BEGIN'; lid: string }
+  | { type: 'ROW_RENAME_END' }
   /** 🔴 **このペインだけの絞り込み**(#273 残件)。 */
   | { type: 'TOGGLE_KIND_FILTER'; archetype: string }
   | { type: 'CLEAR_KIND_FILTER' }
@@ -4282,6 +4299,19 @@ function reduceCore(
       if (state.dual.renaming === null) return { state, events: [] };
       return { state: { ...state, dual: { ...state.dual, renaming: null } }, events: [] };
     }
+    case 'ROW_RENAME_BEGIN': {
+      // ⚠ 編集中は打たせない(`RENAME_ENTRY_TITLE` 自体は editing でも通るが、
+      //    その入力欄は 2 ペインの編集画面の題名欄であって、左の列の行ではない)
+      if (state.phase !== 'ready') return { state, events: [] };
+      // ⚠ 実在しない行の名前は打てない(消えた行の入力欄を出さない)
+      if (!state.entryMetas.has(action.lid)) return { state, events: [] };
+      if (state.renamingLid === action.lid) return { state, events: [] };
+      return { state: { ...state, renamingLid: action.lid }, events: [] };
+    }
+    case 'ROW_RENAME_END': {
+      if (state.renamingLid === null) return { state, events: [] };
+      return { state: { ...state, renamingLid: null }, events: [] };
+    }
     case 'DUAL_SET_FILTER': {
       const pane = withPaneFilter(paneOf(state.dual, action.side), action.filter);
       if (pane === paneOf(state.dual, action.side)) return { state, events: [] };
@@ -4811,6 +4841,8 @@ function removeEntryFromState(
        * (しかもそこで「作る」と、消えた親の子として生まれる)。
        */
       scopeLid: state.scopeLid === lid ? null : state.scopeLid,
+      // ⚠ 打ち替え中の相手が消えたら、打つのもやめる(#215 ── 2 ペインの `renaming` と同じ)
+      renamingLid: state.renamingLid === lid ? null : state.renamingLid,
       // ⚠ 消えたものを印に残さない(#240 段②)── まとめて削除が**居ないもの**を数える
       selection: state.selection.includes(lid)
         ? state.selection.filter((l) => l !== lid)

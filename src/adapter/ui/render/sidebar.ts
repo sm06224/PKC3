@@ -42,6 +42,8 @@ export class SidebarRenderer {
   /** ⚠ 向きも指紋(入れないと ▲▼ を反転しても並びが変わらない)。 */
   private lastSortDesc = false;
   private lastFilter: string | null = null;
+  /** 名前を打ち替えている行(#215)。⚠ 指紋に入れる ── 入れないと入力欄が出ない。 */
+  private lastRenaming: string | null = null;
 
   /** 戻る・進む(#190)。⚠ **押せないときは殺す** ── dead click を作らない。 */
   private readonly navBack: HTMLButtonElement | null;
@@ -100,7 +102,9 @@ export class SidebarRenderer {
      * 「戻れないのにボタンが生きている」状態が残る(dead click の作り方そのもの)。
      */
     const historyChanged = state.selectionHistory !== this.lastHistory;
-    if (!listChanged && !selectionChanged && !historyChanged) return; // 指紋一致 ── DOM に触れない
+    // 🔴 名前の打ち替え(#215)も指紋 ── 入れないと「名前を変える」を押しても欄が出ない
+    const renamingChanged = state.renamingLid !== this.lastRenaming;
+    if (!listChanged && !selectionChanged && !historyChanged && !renamingChanged) return; // 指紋一致 ── DOM に触れない
 
     /**
      * 🔴 **欄の同期は、ここではなく `browse.ts` が持つ**(2026-08-29、#536 ② で判明)。
@@ -114,6 +118,8 @@ export class SidebarRenderer {
      */
 
     if (listChanged) this.reconcileRows(state);
+    // ⚠ 行を作り直した回も当て直す(作り直した行は素の題名で生まれる)
+    if (listChanged || renamingChanged) this.paintRenaming(state);
     if (listChanged || selectionChanged) this.patchSelection(state.selectedLid);
     if (historyChanged) {
       if (this.navBack) this.navBack.disabled = !canNavBack(state);
@@ -288,9 +294,52 @@ export class SidebarRenderer {
     else el.removeAttribute('title');
   }
 
+  /**
+   * 🔴 **その場で名前を打ち替える欄を、行の題名の所に出す**(#215)。
+   *
+   * ⚠ 綴り(`row-rename`)はフォルダの面の行と**同じ** ── binder の鍵(Enter / Esc)と
+   *   focusout の受け手が 1 本で両方を拾う(面ごとに受け手を作らない。§7)。
+   * ⚠ この面は行を**使い回す**ので、打ち替えをやめた行は題名の字へ戻す
+   *   (戻さないと、次にその行が使われたとき入力欄が残ったままになる)。
+   */
+  private paintRenaming(state: AppState): void {
+    const prev = this.lastRenaming;
+    this.lastRenaming = state.renamingLid;
+    if (prev !== null && prev !== state.renamingLid) {
+      const title = this.rows.get(prev)?.querySelector<HTMLElement>('[data-pkc-field="title"]');
+      const meta = state.entryMetas.get(prev);
+      if (title && meta) title.textContent = meta.title;
+    }
+    if (state.renamingLid === null) return;
+    const title = this.rows
+      .get(state.renamingLid)
+      ?.querySelector<HTMLElement>('[data-pkc-field="title"]');
+    const meta = state.entryMetas.get(state.renamingLid);
+    if (!title || !meta) return;
+    // ⚠ 既に欄が出ているなら触らない(打っている最中の字を消さない)
+    if (title.querySelector('[data-pkc-field="row-rename"]') !== null) return;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = meta.title;
+    input.setAttribute('data-pkc-field', 'row-rename');
+    input.setAttribute('data-pkc-entry', meta.lid);
+    input.setAttribute('aria-label', '新しい名前');
+    title.textContent = '';
+    title.append(input);
+    // ⚠ 描いた直後に焦点と全選択(OS のファイラは打てる状態で出る)
+    input.focus();
+    input.select();
+  }
+
   private patchRow(row: HTMLLIElement, meta: EntryMeta): void {
     const title = row.querySelector('[data-pkc-field="title"]');
-    if (title && title.textContent !== meta.title) title.textContent = meta.title;
+    // ⚠ 打ち替えの欄が出ている行は題名の字を書き戻さない(欄が消える)
+    if (
+      title &&
+      title.textContent !== meta.title &&
+      title.querySelector('[data-pkc-field="row-rename"]') === null
+    )
+      title.textContent = meta.title;
     // ⚠ **更新側にも書く** ── ここを忘れると、保存で時刻が動いても行は古いまま
     //    (作成側だけ直して「出た」と誤認する型の事故)
     const when = row.querySelector<HTMLElement>('[data-pkc-field="when"]');

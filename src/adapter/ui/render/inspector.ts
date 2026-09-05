@@ -766,6 +766,9 @@ export class InspectorRenderer {
      */
     const folderBtn = this.buttons.get('export-folder');
     if (folderBtn) folderBtn.hidden = meta.archetype !== 'folder';
+    // 🔴 「この中に新しいノートを作る」も同じ門(#215)── 入れ物でなければ畳む
+    const inFolderBtn = this.buttons.get('create-in-folder');
+    if (inFolderBtn) inFolderBtn.hidden = meta.archetype !== 'folder';
     this.paintAdoptImages(state, meta.lid);
     for (const [action, b] of this.buttons) {
       /**
@@ -1267,6 +1270,15 @@ export class InspectorRenderer {
     btn('export-entry-pdf', ENTRY_ACTION_LABELS['export-entry-pdf']!);
     if (shape === 'entry+link') btn('write-back-file', ENTRY_ACTION_LABELS['write-back-file']!);
     btn('show-history', ENTRY_ACTION_LABELS['show-history']!);
+    /**
+     * 🔴 **左の列の整理 3 つ**(#215)── 右クリックと**同じ表**から出す(字は 1 か所)。
+     * ⚠ `create-in-folder` は**フォルダのときだけ**(`render` で `hidden` を付け外しする ──
+     *   `export-folder` と同じ作法。ノートで押すと必ず断られる物を常設しない)。
+     * ⚠ 並びは右クリックと揃える(履歴の下・削除の上)。
+     */
+    btn('rename-entry-begin', ENTRY_ACTION_LABELS['rename-entry-begin']!);
+    btn('move-to-folder', ENTRY_ACTION_LABELS['move-to-folder']!);
+    btn('create-in-folder', ENTRY_ACTION_LABELS['create-in-folder']!);
     btn('delete-entry', ENTRY_ACTION_LABELS['delete-entry']!);
     /**
      * 🔴 **編集中だけ出る 1 行**(#715)── 操作の帯の**直上**に置く(帯と離すと

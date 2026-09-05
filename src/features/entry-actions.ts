@@ -194,6 +194,25 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    */
   { action: 'write-back-file', label: '書き戻す', when: 'linked' },
   { action: 'show-history', label: '履歴' },
+  /**
+   * 🔴 **左の列の行から、整理ができる 3 つ**(#215。user 裁定 2026-09-04「全部推薦で」)。
+   *
+   * ## 直す前に無かったもの
+   *
+   * フォルダの整理は**帯**(居場所の `<select>` / 上へ・下へ)と D&D に在ったが、
+   * **行を右クリックしても**フォルダにできることは「フォルダを書き出す」の 1 件だけだった。
+   * 改名は 2 ペインの `F2` にしか無く、**左の列には口が 1 つも無かった**。
+   *
+   * ⚠ **既存の並びは動かさない**(user 裁定 2026-09-04、#690 I2 ── 新しい操作のために
+   *   毎日使う項目を 1 つ下へずらさない)。だから**履歴の下・削除の上**に足す。
+   *   削除は `TRAILING_ACTIONS` が常に末尾へ回す。
+   * 🔑 受け手は既存の実体を呼ぶ ── 改名は `RENAME_ENTRY_TITLE`、移すは D&D と同じ
+   *   `moveEntries`、作るは `create-entry` と同じ経路(規則を 2 本にしない。§7)。
+   * ⚠ 「移す…」は**印が複数あれば印の全部**を動かす(D&D と同じ)── 題名にその件数が出る。
+   */
+  { action: 'rename-entry-begin', label: '名前を変える' },
+  { action: 'move-to-folder', label: '移す…' },
+  { action: 'create-in-folder', label: 'この中に新しいノートを作る', when: 'folder' },
   { action: 'delete-entry', label: '削除' },
 ];
 
@@ -594,6 +613,11 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
   //    **同じ名前で逆の操作**(選んだ物をゴミ箱へ入れる)が在る。
   //    🔑 字はマニュアル §6「左の列の **フォルダ** タブの中」に揃える。
   'delete-entry': 'ゴミ箱へ移します(左の列の「フォルダ」タブの中のゴミ箱から戻せます)',
+  // 🔴 **左の列の行からの整理 3 つ**(#215)。⚠ どれも**画面で起きること**で書く
+  //    (user 指示 2026-08-21)── 「改名モードへ遷移」ではなく「入力欄が出る」
+  'rename-entry-begin': '行の題名の所に入力欄が出ます。Enter で確定、Esc でやめます',
+  'move-to-folder': 'フォルダの一覧から入れ先を選びます。印が複数あれば、その全部を移します',
+  'create-in-folder': 'このフォルダの中に新しいノートを作って、そのまま編集に入ります',
 };
 
 /**

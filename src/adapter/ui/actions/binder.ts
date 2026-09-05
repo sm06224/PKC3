@@ -130,7 +130,8 @@ import { splitTags } from '@features/flavor/tags';
 import { isEntrySort, NATURAL_DESC } from '@features/filter/entry-sort';
 import { COLUMN_PANES, isPaneId } from '@features/pane-visibility';
 import { STRUCTURAL, isRelationKind } from '@features/relation/kinds';
-import { canEnterScope, getAncestorFolders } from '@features/relation/tree';
+import { canEnterScope, getAncestorFolders, listMoveTargets } from '@features/relation/tree';
+import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
 import { planCopy } from '@features/relation/copy-plan';
 import {
   otherSide,
@@ -398,6 +399,47 @@ const moveEntries = (
       : (dispatcher.getState().entryMetas.get(parentLid)?.title ?? 'フォルダ');
   report?.(`${moved + same} 件を「${where}」へ入れました`);
 };
+
+/**
+ * 🔴 **作って、そのまま編集に入る ── 実体は 1 本**(#215)。
+ *
+ * ⚠ `create-entry`(左の列の「+ ノート」)と `create-in-folder`(行の右クリック)が
+ *   **同じ経路**を通る ── 別々に書くと、面の切替・編集権の取り方が片方だけ古くなる(§7)。
+ * ⚠ 非 detail view で作ると editor が出ない(PKC2 PR-Δ19 の罠)── 先に切替。
+ * ⚠ #177: 作成 → 即編集の編集権。lid は今生まれたばかりなので必ず取れる ──
+ *   「取れてから入る」順に直すと user gesture の同期性を失うだけで守るものが無い。
+ *   別タブは 'changed' でこの lid を知るため、登録が先に着けばよい。
+ */
+const createAndEdit = (
+  dispatcher: Dispatcher,
+  services: BinderServices,
+  archetype: string,
+  parentLid: string | null,
+): void => {
+  if (dispatcher.getState().viewMode !== 'detail')
+    dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
+  const lid = generateLid();
+  dispatcher.dispatch({
+    type: 'CREATE_ENTRY',
+    archetype,
+    lid,
+    title: defaultTitle(dispatcher, archetype),
+    parentLid,
+    relationId: generateLid(),
+  });
+  if (dispatcher.getState().phase === 'editing') void services.acquireEditLock?.(lid);
+};
+
+/**
+ * 押した物の行の lid。無ければ**いま選んでいるノート**(#215)。
+ *
+ * ⚠ 右クリックのメニューのボタンは行の中に居ない(器は root の直下)が、行のメニューは
+ *   開く前に `selectEntryOrExplain` でその行を選んでいるので `selectedLid` が押した行である。
+ *   情報ペインのボタンも同じ規則(選んでいるノートに効く)。
+ * ⚠ 鍵(`runFilerKey`)は焦点の行を target として渡すので、こちらは行から取れる。
+ */
+const rowLidOrSelected = (st: AppState, target: HTMLElement): string | null =>
+  target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? st.selectedLid;
 
 /** UI サービス面(storage 依存の操作は main が実体を注入。test は fake)。 */
 export interface BinderServices {
@@ -993,6 +1035,9 @@ const TAG_INPUT_ADD: ReadonlyMap<string, string> = new Map([
 
 const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'start-edit',
+  // 🔑 **行の右クリックからフォルダの中に作る**(#215)── `create-entry` と同じ
+  //    `CREATE_ENTRY` を撃つので、同じ門をくぐらせる
+  'create-in-folder',
   // 🔑 **右クリックから入る編集も同じ門**(#426 段②。着地前レビュー 🔴1)──
   //    載せ忘れると「取り込み中は帯からは断られ、メニューからは通る」になる
   'edit-from-heading',
@@ -3032,21 +3077,39 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     const st = dispatcher.getState();
     const parent = st.scopeLid === null ? null : (st.entryMetas.get(st.scopeLid) ?? null);
-    // 非 detail view で作ると editor が出ない(PKC2 PR-Δ19 の罠)── 先に切替
-    if (st.viewMode !== 'detail') dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
-    const lid = generateLid();
-    dispatcher.dispatch({
-      type: 'CREATE_ENTRY',
-      archetype,
-      lid,
-      title: defaultTitle(dispatcher, archetype),
-      parentLid: parent?.lid ?? null,
-      relationId: generateLid(),
-    });
-    // #177: 作成 → 即編集の編集権。lid は今生まれたばかりなので必ず取れる ──
-    // 「取れてから入る」順に直すと user gesture の同期性を失うだけで守るものが無い。
-    // 別タブは 'changed' でこの lid を知るため、登録が先に着けばよい
-    if (dispatcher.getState().phase === 'editing') void services.acquireEditLock?.(lid);
+    // 🔑 面の切替・作成・編集権は `createAndEdit` 1 本(行の右クリックと同じ経路 ── #215)
+    createAndEdit(dispatcher, services, archetype, parent?.lid ?? null);
+  },
+  /**
+   * 🔴 **このフォルダの中に新しいノートを作る**(#215。行の右クリック / 情報ペイン / 鍵)。
+   *
+   * ⚠ `create-entry` との違いは**入れ先だけ** ── あちらは「いま見ているフォルダ」、
+   *   こちらは「押した行のフォルダ」(中へ入らずに 1 枚置ける)。種類は `text` に固定する
+   *   ── 字が「新しい**ノート**を作る」なので、帯の種類の `<select>` を読んで
+   *   フォルダやチェックリストができると押した字と食い違う。
+   * ⚠ 無言で断らない ── フォルダでない行 / 編集中は理由を出す(`when: 'folder'` で
+   *   メニューには出ないが、鍵と情報ペインからは来うる)。
+   */
+  'create-in-folder': (dispatcher, target, services) => {
+    const st = dispatcher.getState();
+    const lid = rowLidOrSelected(st, target);
+    const meta = lid === null ? undefined : st.entryMetas.get(lid);
+    if (meta === undefined) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'フォルダの行を選んでから押してください' });
+      return;
+    }
+    if (meta.archetype !== 'folder') {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: 'フォルダの行で押してください(ノートの中にはノートを作れません)',
+      });
+      return;
+    }
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してからノートを作ってください' });
+      return;
+    }
+    createAndEdit(dispatcher, services, 'text', meta.lid);
   },
   /**
    * 🔴 **まとめてゴミ箱へ**(#240 段③。user 指示 2026-08-17「まとめて消せない」)。
@@ -4176,6 +4239,108 @@ const ACTIONS: Record<string, ActionHandler> = {
     const value = target instanceof HTMLSelectElement ? target.value : '';
     // 🔴 実体は `moveEntries` 1 本(D&D と同じ ── 断り方も知らせ方も揃う)
     moveEntries(dispatcher, [lid], value === '' ? null : value, services.showStatus);
+  },
+  /**
+   * 🔴 **行の名前を、その場で打ち替え始める**(#215。行の右クリック / 情報ペイン / `F2`)。
+   *
+   * ⚠ 入力欄は **state 駆動**(`ROW_RENAME_BEGIN` → 面が行の題名の所に欄を描く)──
+   *   2 ペインの `dual-rename-begin` と同じ作法。確定は `RENAME_ENTRY_TITLE` 1 つ。
+   * ⚠ 欄を描くのは**左の列の一覧とフォルダの面だけ**である。予定・連絡先の行から
+   *   押した場合は欄が出ない ── だから**一覧の面へ切り替えて**出し、それでも出なければ
+   *   (絞り込みで行が消えている等)理由を出して畳む。黙って `renamingLid` を立てたまま
+   *   終わると、次にその行が出た瞬間に欄が現れる(押していないのに)。
+   */
+  'rename-entry-begin': (dispatcher, target, services, root) => {
+    const st = dispatcher.getState();
+    const lid = rowLidOrSelected(st, target);
+    if (lid === null || !st.entryMetas.has(lid)) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '名前を変えるノートを選んでください(行を押すと選べます)',
+      });
+      return;
+    }
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから名前を変えてください' });
+      return;
+    }
+    dispatcher.dispatch({ type: 'ROW_RENAME_BEGIN', lid });
+    const fieldShown = (): boolean =>
+      root.querySelector('[data-pkc-field="row-rename"]') !== null;
+    if (!fieldShown()) services.setBrowse?.('list');
+    if (!fieldShown()) {
+      dispatcher.dispatch({ type: 'ROW_RENAME_END' });
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '名前を変える欄は、左の列の一覧かフォルダのタブの行に出ます(絞り込みで隠れていないか確かめてください)',
+      });
+    }
+  },
+  /**
+   * 🔴 **入れ先のフォルダを一覧から選んで移す**(#215。行の右クリック / 情報ペイン / `F6`)。
+   *
+   * ⚠ 相手は **D&D と同じ規則** ── 押した行に印が付いていれば**印の全部**、
+   *   付いていなければその 1 件(「選んだつもりの物と動く物が違う」を作らない)。
+   *   題名にその件数が出るので、押す前に何件動くかが読める。
+   * ⚠ 候補は `listMoveTargets`(自分と自分の子孫を除いたフォルダ)を**全部の相手で
+   *   共通に**取る ── `canEnterScope` は使わない(スマートフォルダは中へ入れるが、
+   *   手で子を入れることはできない ── `tree.ts` の注記)。
+   * ⚠ ルートは**題名を打っていないときだけ**先頭に出す ── 打った後も先頭に居ると、
+   *   `Enter`(= 先頭を選ぶ)が打った名前のフォルダではなくルートへ出してしまう。
+   * 🔑 器は `pickEntryInApp`(題名で探して選ぶ)を**そのまま**使う ── user に 2 通りの
+   *   探し方を覚えさせない。実体は `moveEntries`(帯の `<select>` / D&D と同じ 1 本)。
+   */
+  'move-to-folder': (dispatcher, target, services, root) => {
+    const st = dispatcher.getState();
+    const lid = rowLidOrSelected(st, target);
+    if (lid === null || !st.entryMetas.has(lid)) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '移すノートを選んでください(行を押すと選べます)',
+      });
+      return;
+    }
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから動かしてください' });
+      return;
+    }
+    const marked = visibleSelection(visibleFilerRows(st), st.selection);
+    const lids = marked.includes(lid) ? marked : [lid];
+    const title =
+      lids.length === 1
+        ? `「${st.entryMetas.get(lid)?.title ?? ''}」を移す`
+        : `${lids.length} 件を移す`;
+    void pickEntryInApp(
+      root,
+      (query) => {
+        const now = dispatcher.getState();
+        const q = normalizeQuery(query);
+        const [first, ...others] = lids;
+        const base = first === undefined ? [] : listMoveTargets(first, now.entryMetas, now.relations);
+        const allowed = others.map(
+          (l) => new Set(listMoveTargets(l, now.entryMetas, now.relations).map((f) => f.lid)),
+        );
+        const folders = base.filter(
+          (f) => allowed.every((s) => s.has(f.lid)) && matchesTitle(f.title, q),
+        );
+        const items = [
+          ...(q === '' ? [{ lid: '', title: 'ルート(いちばん上)', kind: '' }] : []),
+          // 🔑 種類の列には**場所**(パンくずの形)を出す ── 同じ名前のフォルダを見分ける
+          ...folders.map((f) => ({ lid: f.lid, title: f.title, kind: f.path })),
+        ];
+        return {
+          items,
+          note:
+            folders.length === 0
+              ? 'あてはまるフォルダがありません(欄を空にするとルートへ出せます)'
+              : '',
+        };
+      },
+      { title },
+    ).then((to) => {
+      if (to === null) return;
+      moveEntries(dispatcher, lids, to === '' ? null : to, services.showStatus);
+    });
   },
   /**
    * 🔴 **並べ替え**(2026-08-06。user 報告 2-10)。⚠ 動かす当人は帯が持つ
@@ -6052,6 +6217,13 @@ export function bindActions(
         return;
       }
     }
+    /**
+     * 🔴 **名前を打ち替えている欄の中のクリックは、行の押下に流さない**(#215)。
+     * ⚠ 欄は `select-entry` の行の中に在るので、流すと**2 回押し**に数えられて
+     *   フォルダの行では**中へ入ってしまう**(打っている最中に面が変わる)。
+     */
+    if (ev.target instanceof HTMLInputElement && ev.target.matches('[data-pkc-field="row-rename"]'))
+      return;
     const el = (ev.target as HTMLElement | null)?.closest<HTMLElement>(
       '[data-pkc-action]',
     );
@@ -7678,10 +7850,27 @@ export function bindActions(
     //    `MENU_PREV_LID_ATTR`)。⚠ 順番が主張である:`selectEntryOrExplain` の
     //    後だと、控えるのは**押した行そのもの**になって何も戻らない
     const prevLid = dispatcher.getState().selectedLid;
+    const marksBefore = dispatcher.getState().selection;
     // 🔴 選べなければ出さない(理由は `selectEntryOrExplain` が画面へ出している)
     if (!selectEntryOrExplain(dispatcher, lid, 'ノート')) {
       closeContextMenu(root);
       return;
+    }
+    /**
+     * 🔴 **印を付けた行を右クリックしても、印は消さない**(#215)。
+     *
+     * ⚠ `SELECT_ENTRY` は「これだけを相手にする」の意味で印を 1 件へ戻す(#240 段②)。
+     *   ところが右クリックは**選ぶ操作ではなく、できることを見る操作**である ── 3 件に印を
+     *   付けてから「移す…」を出そうと右クリックした瞬間に印が 1 件になると、
+     *   **押した数と動く数が食い違う**(OS のファイラは、選んだ物の上で右クリックしても
+     *   選択を崩さない)。
+     * 🔑 押した行が印の中に居るときだけ、他の印を戻す(印の外の行を右クリックしたら、
+     *   これまでどおりその 1 件になる ── `TOGGLE_SELECT` は既存の口、規則を増やさない)。
+     */
+    if (marksBefore.length > 1 && marksBefore.includes(lid)) {
+      for (const m of marksBefore) {
+        if (m !== lid) dispatcher.dispatch({ type: 'TOGGLE_SELECT', lid: m });
+      }
     }
     /**
      * 🔴 **条件つきの 2 つを、この 1 件で判定する**(#500 案 C)。
@@ -7848,6 +8037,26 @@ export function bindActions(
      *   将来この面に入力欄が増えたときのための備えとして置いている ── 「これが
      *   無いと壊れる」とは書かない(CLAUDE.md「外して壊れることを 1 度は見る」)。
      */
+    /**
+     * 🔴 **左の列の行で名前を打ち替えている欄の鍵は、ここで完結させる**(#215)。
+     * `Enter` で確定、`Esc` でやめる。⚠ それ以外の鍵は**入力へ通す**(打てなくなる)。
+     * ⚠ 下の `filer` の門より**前**に置く ── 欄はフォルダの表の中に在るので、`Enter` が
+     *   「開く」に、`Backspace` が「親へ」に化けると名前が打てない(2 ペインで踏んだ形)。
+     */
+    if (el instanceof HTMLInputElement && el.matches('[data-pkc-field="row-rename"]')) {
+      const lid = el.getAttribute('data-pkc-entry');
+      if (ke.key === 'Enter' && lid !== null) {
+        ke.preventDefault();
+        commitRowRename(lid, el.value);
+        return;
+      }
+      if (ke.key === 'Escape') {
+        ke.preventDefault();
+        dispatcher.dispatch({ type: 'ROW_RENAME_END' });
+        return;
+      }
+      return;
+    }
     if (!typing && el?.closest('[data-pkc-region="filer-table"]')) {
       const fcmd = keymap.match(ke, 'filer');
       if (fcmd !== null && runFilerKey(fcmd)) {
@@ -8194,6 +8403,11 @@ export function bindActions(
     dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid, title: value });
     dispatcher.dispatch({ type: 'DUAL_RENAME_END' });
   };
+  /** 左の列の行の版(#215)。⚠ 空白だけ / 変わっていない、の判定は reducer が持つ(上と同じ)。 */
+  const commitRowRename = (lid: string, value: string): void => {
+    dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid, title: value });
+    dispatcher.dispatch({ type: 'ROW_RENAME_END' });
+  };
 
   const runDualKey = (cmd: string, side: DualSide): boolean => {
     const st = dispatcher.getState();
@@ -8425,6 +8639,13 @@ export function bindActions(
    */
   const onRenameBlur = (ev: Event): void => {
     const el = ev.target;
+    // 🔴 左の列の行の欄も同じ作法(#215)── 他所を押したら確定する
+    if (el instanceof HTMLInputElement && el.matches('[data-pkc-field="row-rename"]')) {
+      if (dispatcher.getState().renamingLid === null) return;
+      const lid = el.getAttribute('data-pkc-entry');
+      if (lid !== null) commitRowRename(lid, el.value);
+      return;
+    }
     if (!(el instanceof HTMLInputElement) || !el.matches('[data-pkc-field="dual-rename"]')) return;
     if (dispatcher.getState().dual.renaming === null) return;
     const lid = el.getAttribute('data-pkc-entry');
