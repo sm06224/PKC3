@@ -267,6 +267,32 @@ test('🔴 お知らせは 1 件ずつ出て、「次へ」で送れる', async 
  * 「見えている」は自明で、この test は何も守らない。
  */
 /**
+ * 🔴 **本文を台の側で長くする**(2026-09-05、CI で 3 件が落ちた)。
+ *
+ * ⚠ `shrinkUntilOverflow` は「登記表の中身に寄りかからない」ために版面を探す形に
+ *   したが、それでも**先頭のお知らせが 3 行(本文 67px)になった日に落ちた** ──
+ *   30vh の帯は 280px の版面でも 84px あるので、67px の本文はどの版面でも溢れない。
+ * 🔑 ここで見たい主張は「溢れた本文の隣で閉じるが押せる / 送っても閉じるが動かない /
+ *   帯が画面をスクロールさせない」であって、**お知らせの字の長さではない**。
+ *   だから台が本文の `ul` に行を足して、必ず溢れる状態を作る(登記表が何件でも同じ)。
+ * ⚠ 足すのは `li` の**素の文字**だけ(描画の規則は製品のまま)。
+ */
+async function padAnnounceBody(page: Page): Promise<void> {
+  const added = await page.evaluate(() => {
+    const ul = document.querySelector('[data-pkc-field="announce-body"] ul');
+    if (!(ul instanceof HTMLElement)) return 0;
+    for (let i = 0; i < 12; i++) {
+      const li = document.createElement('li');
+      li.setAttribute('data-pkc-smoke-pad', String(i));
+      li.textContent = `(台が足した行 ${i + 1}) 本文が溢れる状態を作るための字です。閉じるボタンがこの字に押し下げられないことを見ます。`;
+      ul.append(li);
+    }
+    return 12;
+  });
+  if (added !== 12) throw new Error('お知らせの本文の ul が見つからない ── 台の前提が崩れている');
+}
+
+/**
  * 🔴 **本文が「溢れているが、送れる」版面を探す**(2026-08-29)。
  *
  * ## なぜ要るか
@@ -324,6 +350,7 @@ test('🔴 お知らせが溢れていても、閉じるはスクロールせず
   await expect(band, '起動時にお知らせが出ていない').toBeVisible({ timeout: 10_000 });
 
   // ⚠ **溢れているか**を先に見る(この次元がゼロなら、以下は測っていないのと同じ)
+  await padAnnounceBody(page);
   await shrinkUntilOverflow(page);
 
   // 🔴 **スクロールさせずに**、その場で当たるか
@@ -413,6 +440,7 @@ test('🔴 お知らせの中を送っても、閉じるはそこから動かな
    * 取り違えたメッセージ**で落ちる ── 登記表が減っただけのときに、
    * CSS の欠陥だと読んでしまう。
    */
+  await padAnnounceBody(page);
   await shrinkUntilOverflow(page);
   const box = await body.boundingBox();
   expect(box, '流れる本文の箱が無い').not.toBeNull();
@@ -479,6 +507,7 @@ test('🔴 低い画面でも、お知らせの帯が画面ごとスクロール
     '高さ 180px なのにスマホ用画面になっていない(前提が崩れた ── 別の版面を測っている)',
   ).toHaveAttribute('data-pkc-layout', 'phone');
   await expect(page.locator('[data-pkc-region="announce"]')).toBeVisible({ timeout: 10_000 });
+  await padAnnounceBody(page);
 
   const m = await page.evaluate(() => {
     const band = document.querySelector('[data-pkc-region="announce"]');
