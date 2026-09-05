@@ -95,7 +95,7 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   const errors = collectPageErrors(page);
   await gotoApp(page);
 
-  await clickReal(page, '[data-pkc-action="import-file"]');
+  await clickReal(page, '[data-pkc-region="collection-bar"] [data-pkc-action="import-file"]');
   await page.locator('[data-pkc-field="import-input"]').setInputFiles({
     name: 'container.html',
     mimeType: 'text/html',

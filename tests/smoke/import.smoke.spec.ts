@@ -90,7 +90,7 @@ test('PKC2 HTML 取込 → entry 出現 → gzip 添付が blob: で描画され
   // ⚠ **ボタンを実際に押す**経路を通す(review mutation M21): hidden input へ
   // 直接 setInputFiles すると、ボタン → picker の導線が壊れていても緑になる
   const chooser = page.waitForEvent('filechooser');
-  await clickReal(page, '[data-pkc-action="import-file"]');
+  await clickReal(page, '[data-pkc-region="collection-bar"] [data-pkc-action="import-file"]');
   await (await chooser).setFiles(FILE());
 
   // 再読込(sqlite から引き直し)を経て 2 件が sidebar に現れる
@@ -719,7 +719,7 @@ test('🔴 P7 段②: 素の md を取り込む ── 宣言(file_handlers)と�
 
   // ⚠ **ボタンを実際に押す**経路を通す(hidden input へ直接入れると導線の断線を見逃す)
   const chooser = page.waitForEvent('filechooser');
-  await clickReal(page, '[data-pkc-action="import-file"]');
+  await clickReal(page, '[data-pkc-region="collection-bar"] [data-pkc-action="import-file"]');
   // ⚠ MIME は **空**で渡す ── OS のピッカーは `.md` に MIME を付けないことが多い。
   // ここを text/markdown で埋めると「MIME で振り分ける」実装でも緑になる
   await (await chooser).setFiles([

@@ -132,7 +132,10 @@ test('🔴 分離した状態で worker が読める(COEP は worker script に�
   // storage worker が生きている = ノートを 1 件作って左の列に出る
   // ⚠ 既定の面は**フォルダ**(#240 段⑤)── ここで見たいのは「worker が返事をした」
   //    ことなので、既定の面のまま数える(一覧タブへ切り替える必要は無い)
-  await page.locator('[data-pkc-action="create-entry"]').first().click();
+  // ⚠ **作る帯の口を名指しする**(2026-09-05、#722 P2-13)── 空の PKC では
+  //    一覧にも「+ ノートを作る」が出るので、`.first()` は**そちら**を掴む。
+  //    どちらを押しても 1 件できるが、この test が見たいのは作る帯の側である。
+  await page.locator('[data-pkc-field="create-run"]').click();
   await expect(page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]')).toHaveCount(1);
 });
 

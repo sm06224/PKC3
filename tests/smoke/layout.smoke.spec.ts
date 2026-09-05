@@ -523,11 +523,20 @@ test('🔴 主要な導線が畳まれず、その場で押せる', async ({ pag
   await gotoApp(page);
 
   expect(await page.locator('details').count(), '導線が畳まれている').toBe(0);
-  // 左の列に残るもの ── よく押す / 押せないと詰まるもの
+  /**
+   * 左の列に残るもの ── よく押す / 押せないと詰まるもの。
+   *
+   * 🔴 **見る先を「いちばん下の帯」へ絞る**(2026-09-05、#722 P2-13)。
+   * ⚠ 直す前は `[data-pkc-action="import-file"]` を器ごと探していたので、
+   *   **空の一覧に出る「取り込む」が 2 つ目の押し口**になった瞬間に
+   *   strict mode で落ちた ── 製品は正しく、**観測点が広すぎた**だけである
+   *   (CLAUDE.md §1「面へスコープする」)。
+   * 🔑 この test の主張は「**帯から畳まれていない**」なので、帯の中で見る。
+   */
   for (const action of ['import-file', 'export-archive']) {
     await expect(
-      page.locator(`[data-pkc-action="${action}"]`),
-      `${action} が見えていない`,
+      page.locator(`[data-pkc-region="collection-bar"] [data-pkc-action="${action}"]`),
+      `${action} が左の列の帯から消えている`,
     ).toBeVisible();
   }
   /**
