@@ -91,7 +91,8 @@ const OBJECT_LONE: readonly string[] = [
   'dual-bookmark-remove',
   'dual-crumb',
   // ⚠ `dual-row` は 2026-09-04(#687 D-1)に長押し(`long-press.ts`)が 2 つ目の出口になったので外した
-  'edit-cell',
+  // ⚠ `edit-cell` は 2026-09-05(#708 段④)に markdown の表の升(`markdown-render.ts`)が
+  //    2 つ目の出口になったので外した(csv の表は `csv-table.ts`)
   'enter-folder',
   'insert-entry-link',
   'launch-asset',
