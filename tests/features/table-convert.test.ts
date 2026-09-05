@@ -281,7 +281,24 @@ describe('表の形を変える(#708 段②)', () => {
     expect(grid(out!).length, '表の数が変わった').toBe(3);
   });
 
-  it('🔴 frontmatter の行を指しても表として読まない', () => {
+  /**
+   * 🔴 **frontmatter の中は見ない**(変異試験 S-3 が SURVIVED で教えた)。
+   *
+   * ⚠ 直す前の fixture は `tags: [a]` だけだったので、**門が在っても無くても `null`**
+   *   だった(§1「代替物で満たされている」)── 門を落とす変異が生き延びる。
+   * 🔑 だから fixture を**「frontmatter の中に、表として読める 2 行が在る」**形にする
+   *   ── 門を落とすと `1-3` が返って落ちる。
+   */
+  it('🔴 frontmatter の中に表の形の字が在っても、表として読まない', () => {
+    const body = '---\n| a | b |\n|---|---|\n| 1 | 2 |\n---\n\n本文\n';
+    // 空振り防止 ── 門が無ければ表として読めてしまう字であること
+    expect(tableAt(body.slice(4), 0), '前提: この 3 行は表として読める字ではない').not.toBeNull();
+    for (const line of [1, 2, 3]) {
+      expect(tableAt(body, line), `frontmatter の ${line} 行目を表として読んだ`).toBeNull();
+    }
+  });
+
+  it('🔴 frontmatter の下の表はふつうに読める(対照群)', () => {
     const body = '---\ntags: [a]\n---\n\n| a | b |\n|---|---|\n| 1 | 2 |\n';
     expect(tableAt(body, 1), 'frontmatter を表として読んだ').toBeNull();
     const at = tableAt(body, 4);
@@ -349,5 +366,136 @@ describe('表の形を変える(#708 段②)', () => {
     expect(convert(body, 2, 'csv'), '段落を表として書き換えた').toBeNull();
     expect(convert(body, 99, 'csv'), '存在しない行で書き換えた').toBeNull();
     expect(convert(body, -1, 'csv'), '負の行で書き換えた').toBeNull();
+  });
+
+  /**
+   * 🔴 **表が終わる所は、読み手が終える所と 1 行もずれない**(着地前レビューが
+   *   変異試験で拾った ── 終端の選択肢を 1 つずつ落とす 5 変異が**全部 SURVIVED**)。
+   *
+   * ⚠ 直す前の `SPAN_CASES` は空行と箇条書きしか押さえていなかったので、
+   *   終端を落としても緑のままだった(§2「fixture のゼロ件次元」)。
+   * 🔑 だから**終端を全数**並べ、期待値は**実装の綴りではなく描いた読み手**
+   *   (`data-pkc-source-end`)から採る(§1「期待値は別の観測から作る」)。
+   * ⚠ この形で回したら**本物の欠陥が 3 つ**出た ── 改頁(`+++`)・4 字下げ・tab の
+   *   字下げが終端に無く、**表の下の行を升へ飲んでいた**(`+++` は本文から消えた)。
+   */
+  const TABLE_ENDS = [
+    '段落',
+    '# 見出し',
+    '> 引用',
+    '- 箇条書き',
+    '1. 番号',
+    '```js',
+    '~~~',
+    ':::note',
+    '---',
+    '***',
+    '___',
+    '    const x = 1;',
+    '\tconst x = 1;',
+    '+++',
+    '+++ {role=page}',
+  ];
+
+  it('🔴 表の終わりが、終端どの形でも読み手と一致する', () => {
+    const bad: string[] = [];
+    for (const after of TABLE_ENDS) {
+      const body = `| a | b |\n|---|---|\n| 1 | 2 |\n${after}\n\nしっぽ\n`;
+      const first = blockSpans(body).find((b) => b.start === 0);
+      // 空振り防止 ── 表の塊が焼かれていない body で「一致した」と言わない
+      expect(first, `${JSON.stringify(after)}: 0 行目の塊が焼かれていない`).toBeDefined();
+      const at = tableAt(body, 0);
+      const mine = at === null ? 'none' : String(at.end);
+      if (String(first!.end) !== mine) {
+        bad.push(`${JSON.stringify(after)}: 読み手=${first!.end} tableAt=${mine}`);
+      }
+    }
+    expect(bad.join(' / '), '表の下の行を飲み込んでいる(または早く切っている)').toBe('');
+  });
+
+  /**
+   * 🔴 **改頁は本文から消えない**(上の一般形を、いちばん害の大きい 1 形で名指しする)。
+   * ⚠ 一般形の検査だけだと、落ちたときに「どの終端か」が読み取りにくい
+   *   (§1「どの門が鳴ったのかを文言で見分ける」)。
+   */
+  it('🔴 表の直後の改頁(+++)を、表の升へ飲み込まない', () => {
+    const body = '| a | b |\n|---|---|\n| 1 | 2 |\n+++\n\n次の頁\n';
+    const out = convert(body, 0, 'csv');
+    expect(out, '書き換えられなかった').not.toBeNull();
+    expect(out, '改頁が本文から消えた').toContain('+++');
+    expect(out, '改頁が表の升になった').not.toContain('+++,');
+  });
+
+  /**
+   * 🔴 **字下げした囲みでも、式は断る**(着地前レビューが UI 経路で再現した)。
+   *
+   * ⚠ 直す前は原文の行をそのまま `parseCsv` へ渡していたので、**先頭の升にだけ**
+   *   字下げが残り `isFormula`(`=` で始まるか)が false になった ── user 裁定
+   *   2026-09-04 の門が**空白 1 つで開き**、画面の `2` が `=1+1` に変わって
+   *   **計算が止まった**。
+   * 🔑 だから式は**1 列目**に置く(2 列目に置くと、字下げを剥がさない実装でも
+   *   断るので、この検査は何も見ていない)。
+   */
+  it('🔴 字下げした csv の囲みでも、1 列目の式を見落とさない', () => {
+    const body = '  ```csv\n  計,覚書\n  =1+1,ふたつ\n  ```\n';
+    const at = tableAt(body, 0);
+    expect(at, '字下げした囲みを読めていない').not.toBeNull();
+    // 空振り防止 ── 字下げが剥がれて升が原文どおりに読めていること
+    expect(at!.rows[1]!.cells[0], '字下げが升に残っている').toBe('=1+1');
+    const why = tableConvertRefusal(at!, 'markdown');
+    expect(why, '式が在るのに断らなかった(計算が止まる)').not.toBeNull();
+    expect(why, '断り文がどの升か言っていない').toContain('2 行目の 1 列目');
+  });
+
+  /**
+   * 🔴 **断り文は場所を言う**(着地前レビュー・動線 ⑤)。
+   * ⚠ 式は描くと**ただの数字に見え**、升の中の改行は**空白 1 個に見える**ので、
+   *   場所を言わないと user は升を 1 つずつ押して探すことになる。
+   */
+  it('🔴 断り文が、どの升かと代わりの道を言う', () => {
+    const csv = '```csv\nA,B\nx,=1+1\n```\n';
+    const why = tableConvertRefusal(tableAt(csv, 0)!, 'markdown');
+    expect(why, '場所を言っていない').toContain('2 行目の 2 列目');
+    expect(why, '式そのものを見せていない').toContain('=1+1');
+    expect(why, '代わりにできることを言っていない').toContain('Markdown の表');
+  });
+
+  /**
+   * 🔴 **わざとコードで見せている囲みは触らない**(着地前レビュー・動線 ⑥)。
+   * ⚠ 出すと、markdown にして戻したとき `csv`(= 表)になり、**二度とコード表示へ
+   *   戻せない**(片道の操作を作らない、user 指示 2026-08-23)。
+   */
+  it('🔴 csv-norender の囲みには出さない(表にするなと書いてある)', () => {
+    for (const line of [0, 1, 2, 3]) {
+      expect(
+        tableAt('```csv-norender\nA,B\n1,2\n```\n', line),
+        `${line} 行目で norender の囲みを表として読んだ`,
+      ).toBeNull();
+    }
+    // 対照群 ── 素の csv と `-render` は読める(norender だけを外している)
+    expect(tableAt('```csv\nA,B\n1,2\n```\n', 0), '素の csv を読めなくした').not.toBeNull();
+    expect(
+      tableAt('```csv-render\nA,B\n1,2\n```\n', 0),
+      'render の囲みを読めなくした',
+    ).not.toBeNull();
+  });
+
+  /**
+   * 🔴 **`:::` の板の中の表には出さない**(着地前レビュー・動線 ③ / 実装 S-6)。
+   *
+   * ⚠ 板の中の csv の囲みは `scanContainers`(最上位だけ)に出ないので、変換すると
+   *   **戻す項目も出ず、升も押して打てない** ── 片道の操作になる。
+   * ⚠ 板の中の ` ```txt ` に書いた表の形の字を読む穴も、同じ門で塞がる。
+   * 🔑 板の中でも扱えるようにする直しは **#743**。
+   */
+  it('🔴 ::: の板の中の表には出さない(戻れなくなるので)', () => {
+    const md = ':::note\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n:::\n';
+    // 空振り防止 ── 板の外に同じ表を置けば読めること(門だけが効いている)
+    expect(tableAt('| a | b |\n|---|---|\n| 1 | 2 |\n', 0), '前提: この表は読めない').not.toBeNull();
+    for (const line of [1, 2, 3, 4]) {
+      expect(tableAt(md, line), `板の中の ${line} 行目を表として読んだ`).toBeNull();
+    }
+    const nested = ':::note\n```txt\n| a | b |\n|---|---|\n| 1 | 2 |\n```\n:::\n';
+    expect(tableAt(nested, 2), '板の中のコードの字を表として読んだ').toBeNull();
   });
 });

@@ -850,7 +850,8 @@ describe('🔴 「今後は出さない」の戻し道(設定の「表示」)', 
 describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
-    ['2026-09-05-table-format-convert', '12eafba2'],
+    // ⚠ まだ配っていない(この PR で足した entry)ので、着地前に字を直して pin し直した
+    ['2026-09-05-table-format-convert', '4217fa47'],
     ['2026-09-05-table-copy-formats', 'e45026e1'],
     ['2026-09-05-write-back-fresh', '8af5b146'],
     ['2026-09-05-scan-after-save', 'ab86edfd'],

@@ -62,7 +62,11 @@ function setup(body: string, phase: AppState['phase'] = 'ready') {
     cid: 'c1',
     phase,
     selectedLid: 'n1',
-    entryMetas: metasOf(['n1']),
+    /**
+     * ⚠ **2 件持たせる** ── 「メニューを出したまま別のノートへ移る」を作るには
+     *   移り先が台帳に無いと `SELECT_ENTRY` が通らない(台が崩れる)。
+     */
+    entryMetas: metasOf(['n1', 'n2']),
     openBody: { lid: 'n1', body, baseline: body, persisted: body, diskAhead: false },
   });
   const events: DomainEvent[] = [];
@@ -180,5 +184,93 @@ describe('右クリックで表の形を変える(#708 段②)', () => {
     s.press('table-to-csv');
     expect(s.events, '編集中に書換を頼んだ').toEqual([]);
     expect(s.d.getState().error, '断りの理由が出ていない').toContain('編集');
+  });
+
+  /**
+   * 🔴 **門は 2 つ在るので、2 つ目だけが鳴る場面を作る**(変異試験 S-4 が SURVIVED
+   *   で教えた。CLAUDE.md §1「門を N 個置いたら N 通り作る」)。
+   *
+   * ⚠ 上の検査は binder 側の門(押す前に断る)しか通らないので、reducer 側の
+   *   `phase !== 'ready'` を落としても緑のままだった。
+   * 🔑 だから **reducer へ直に頼む** ── 別の経路から `SET_TABLE_FORMAT` が来た日に、
+   *   裏で本文を書き換えないことを見る。
+   */
+  it('🔴 編集中は、頼まれても reducer が受けない(門の 2 段目)', () => {
+    const s = setup(MD, 'editing');
+    s.d.dispatch({ type: 'SET_TABLE_FORMAT', lid: 'n1', line: 2, to: 'csv' } as never);
+    expect(s.events, '編集中なのに reducer が書換を頼んだ').toEqual([]);
+    // 対照群 ── ready なら同じ頼みが通る(前提が崩れていないこと)
+    const ok = setup(MD, 'ready');
+    ok.d.dispatch({ type: 'SET_TABLE_FORMAT', lid: 'n1', line: 2, to: 'csv' } as never);
+    expect(ok.events.length, 'ready でも受けていない(前提が崩れている)').toBeGreaterThan(0);
+  });
+
+  /**
+   * 🔴 **押した後、何が起きたかを字で言う**(着地前レビュー・動線 ①)。
+   *
+   * ⚠ 直す前は**完全に無言**だった ── 本文が丸ごと書き換わるのに、画面に出る変化は
+   *   「表の幅が変わる」だけで、user には**壊れたように見える**。
+   * 🔑 言うのは**できるようになったこと**と**帰り道**の 2 つ ── 帰り道を知っているのが
+   *   実装した本人だけ、という形にしない(#300 の実害と同じ型)。
+   * ⚠ 対照群を同じ it に置く ── 別の書換(タグ)では出ないこと(= この分岐が効いている
+   *   のであって、何にでも出る字ではない)。
+   */
+  it('🔴 表の形を変えた ack で、何ができるようになったかと戻し方が出る', () => {
+    const s = setup(MD, 'ready');
+    const csv = applyBodyRewrite(MD, { kind: 'table-format', line: 2, to: 'csv' } as BodyRewrite)!;
+    expect(csv, '前提: 書き換わっていない').not.toBe(MD);
+    const ack = (body: string, rewrite: BodyRewrite): void =>
+      s.d.dispatch({
+        type: 'BODY_REWRITTEN',
+        lid: 'n1',
+        body,
+        rewrite,
+        status: null,
+        date: null,
+        archived: false,
+      } as never);
+    ack(csv, { kind: 'table-format', line: 2, to: 'csv' } as BodyRewrite);
+    const note = s.d.getState().notice ?? '';
+    expect(note, '何が起きたか出ていない').toContain('CSV の表');
+    expect(note, 'できるようになったことを言っていない').toContain('押すと');
+    expect(note, '帰り道を言っていない').toContain('右クリック');
+
+    // 対照群 ── 別の書換では、この字は出ない(何にでも出る字ではない)
+    const s2 = setup(MD, 'ready');
+    s2.d.dispatch({
+      type: 'BODY_REWRITTEN',
+      lid: 'n1',
+      body: MD,
+      rewrite: { kind: 'tag', add: ['x'], remove: [] } as never,
+      status: null,
+      date: null,
+      archived: false,
+    } as never);
+    expect(s2.d.getState().notice ?? '', 'タグの書換でも表の字が出た').not.toContain('CSV の表');
+  });
+
+  /**
+   * 🔴 **メニューを出したまま別のノートを選んだら、書き換えない**(変異試験 S-2 が
+   *   SURVIVED で教えた)。
+   *
+   * ⚠ 行番号は**メニューを出したノートの座標**なので、そのまま通すと
+   *   **別のノートのその行**が書き換わる(#281 の再発形)。
+   * 🔑 `refuseStaleMenu` がその門で、押した所の身元と**いまの選択**を突き合わせる。
+   */
+  it('🔴 メニューを出したまま別のノートを選んだら、断って書き換えない', () => {
+    const s = setup(MD, 'ready');
+    s.rightClickAt('table td');
+    /**
+     * ⚠ 門が見ているのは `selectedLid` ではなく **`openBody.lid`** である
+     *   (`menuStillFits`)── だから台も**開いている本文を差し替える**。
+     *   選択だけ動かす形では、この門は 1 度も通らない。
+     */
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' } as never);
+    s.d.dispatch({ type: 'BODY_LOADED', lid: 'n2', body: MD } as never);
+    expect(s.d.getState().openBody?.lid, '前提: 開いている本文が替わっていない').toBe('n2');
+    s.events.length = 0;
+    s.press('table-to-csv');
+    expect(s.events, '別のノートの本文を書き換えようとした').toEqual([]);
+    expect(s.d.getState().notice, '断りの理由が出ていない').toContain('別のノート');
   });
 });

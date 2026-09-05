@@ -289,7 +289,7 @@ describe('右クリックの説明(#587 C-1)', () => {
       ['start-screen-capture', 'ec055655'],
       ['start-timer', '97214aee'],
       // 🔴 **表の形を変える 2 つ**(#708 段②、2026-09-05)
-      ['table-to-csv', 'b382dfb9'],
+      ['table-to-csv', '2658a59b'],
       ['table-to-markdown', '70082c4c'],
       // 🔴 **左の列の行からの整理 3 つ**(#215、2026-09-05)
       ['rename-entry-begin', 'c951ee45'],

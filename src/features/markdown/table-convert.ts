@@ -62,9 +62,33 @@ const ALIGN_CELL = /^:?-+:?$/;
 const TABLE_BREAK =
   /^ {0,3}(?:$|#{1,6}(?:\s|$)|>|(?:[-*+]|\d+[.)])\s|`{3,}|~{3,}|:::|(?:\*\s*){3,}$|(?:-\s*){3,}$|(?:_\s*){3,}$)/;
 
+/**
+ * 🔴 **字下げの塊**(4 個の空白 / tab)でも表は終わる(着地前レビューが実測で拾った)。
+ *
+ * ⚠ 表の行自体は 3 個までしか字下げできないので、4 個目からは**別の塊**である。
+ *   これが無いと、表の直後に字下げのコードを書いた人の行が**升へ吸われ、
+ *   字下げごと落ちる**(元に戻せない)。
+ */
+const TABLE_BREAK_INDENT = /^(?: {4}|\t)/;
+
+/**
+ * 🔴 **改頁(`+++`)でも表は終わる**(同上)。
+ *
+ * ⚠ 綴りは `markdown-render.ts` の `processSectionBreaks` と**同じ字**にしてある ──
+ *   ずれると、押した瞬間に**改頁が本文から消えて**表に `+++` の升が生える。
+ * 🔑 「読み手が終える所で終える」が唯一の正解なので、期待値は実装の綴りではなく
+ *   **描いた読み手の `data-pkc-source-end`** と突き合わせて守る(下の SPAN_CASES)。
+ */
+const TABLE_BREAK_SECTION = /^\s*\+\+\+\s*(?:\{[^}]*\}\s*)?$/;
+
 /** その行で表が終わるか(空行も含む)。 */
 function breaksTable(line: string): boolean {
-  return line.trim() === '' || TABLE_BREAK.test(line);
+  return (
+    line.trim() === '' ||
+    TABLE_BREAK.test(line) ||
+    TABLE_BREAK_INDENT.test(line) ||
+    TABLE_BREAK_SECTION.test(line)
+  );
 }
 
 /**
@@ -125,7 +149,9 @@ function tableRunFrom(lines: readonly string[], s: number): TableAt | null {
   if (breaksTable(header) || !header.includes('|')) return null;
   const head = splitRow(header);
   const cols = alignCount(delim);
-  if (cols === null || cols !== head.length || cols === 0) return null;
+  // ⚠ `cols === 0` は書かない ── `alignCount` が升 0 個で既に `null` を返すので
+  //    **到達しない条件**である(変異試験 S-5 が SURVIVED で教えた)。
+  if (cols === null || cols !== head.length) return null;
 
   let end = s + 1;
   const rows: TableCopyRow[] = [];
@@ -171,12 +197,35 @@ function csvFenceAt(
   if (span.open) return null;
   const parsed = parseRenderableFence(span.name);
   if (parsed === null) return null;
+  /**
+   * 🔴 **`-norender` の囲みは触らない**(着地前レビュー・動線 ⑥)。
+   *
+   * ⚠ user は「**表にするな**」と明示して書いている ── その明示を消す口を出さない。
+   *   出すと、markdown にした後で戻したとき `csv`(= 表)になり、
+   *   **二度とコード表示へ戻せない**(片道の操作を作らない、user 指示 2026-08-23)。
+   */
+  if (parsed.mode === 'norender') return null;
   const delimiter = (DELIMITER as Record<string, string | undefined>)[parsed.lang];
   if (delimiter === undefined) return null;
   // ⚠ 見出しの旗(`noheader`)は**開き行の丸ごと**から読む(`name` は 1 語目だけ)
   const info = fenceInfo(lines[span.start] ?? '');
   if (info === null) return null;
-  const rows = parseCsv(lines.slice(span.start + 1, span.end).join('\n'), delimiter);
+  /**
+   * 🔴 **読み手と同じく、囲みの字下げを剥がしてから読む**(着地前レビューが実測で拾った)。
+   *
+   * ⚠ 剥がさないと**先頭の升にだけ**空白が残り、`isFormula`(`=` で始まるか)が
+   *   **false** になる ── 式の在る csv を markdown にしない門(user 裁定 2026-09-04)が
+   *   字下げ 1 つで開き、画面の `2` が `=1+1` に変わって**計算が止まる**。
+   * ⚠ 剥がすのは**柵と同じ数まで**(CommonMark と同じ規則)── 多く剥がすと
+   *   升の中の意図した字下げが消える。
+   */
+  const indent = /^[ \t]*/.exec(lines[span.start] ?? '')![0]!.length;
+  const strip = (l: string): string => {
+    let n = 0;
+    while (n < indent && (l[n] === ' ' || l[n] === '\t')) n += 1;
+    return l.slice(n);
+  };
+  const rows = parseCsv(lines.slice(span.start + 1, span.end).map(strip).join('\n'), delimiter);
   if (rows === null) return null;
   const withHead = !isHeaderDisabled(info);
   return {
@@ -203,13 +252,22 @@ export function tableAt(body: string, line: number): TableAt | null {
    * ⚠ **囲みの中かどうかを先に見る** ── どんな行も表の行として読めてしまうので、
    *   ` ```js ` の中の `| a | b |` を markdown の表として書き換えかねない
    *   (`csvTableAt` の註記と同じ罠)。
-   * ⚠ `scanContainers` は最上位の囲いしか返さない ── `:::note` の中の csv の囲みは
-   *   ここに出ないので、セルを押す口(#418)と同じく変換の口も出ない。
    */
-  const fence = scanContainers(body).find(
-    (c) => c.kind === 'fence' && line >= c.start && line <= c.end,
-  );
-  if (fence !== undefined) return csvFenceAt(lines, fence);
+  const span = scanContainers(body).find((c) => line >= c.start && line <= c.end);
+  if (span !== undefined) {
+    /**
+     * 🔴 **`:::` の板の中の表には出さない**(着地前レビュー・動線 ③ / 実装 S-6)。
+     *
+     * ⚠ `scanContainers` は**最上位の囲いしか返さない**ので、板の中の csv の囲みは
+     *   ここにも `csvTableAt`(`body-rewrite.ts`)にも出ない。つまり板の中の
+     *   markdown の表を csv にすると、**戻す項目も出ず、升も押して打てない** ──
+     *   **片道の操作**になる(user 指示 2026-08-23「片道の操作を作らない」)。
+     * ⚠ 板の中の ` ```txt ` に書いた `| a | b |` を表として読む穴も、ここで塞がる。
+     * 🔑 板の中でも扱えるようにする直しは **#743**(`scanContainers` に入れ子を
+     *   返す口を足して、升を押す口・行列の口・ここの 3 つを寄せる)。
+     */
+    return span.kind === 'fence' ? csvFenceAt(lines, span) : null;
+  }
 
   /**
    * 🔑 **走の頭まで遡ってから当てる** ── 押した行が中身の行でも見出しから読み直す。
@@ -235,15 +293,27 @@ export function tableAt(body: string, line: number): TableAt | null {
 export function tableConvertRefusal(at: TableAt, to: TableFormat): string | null {
   if (at.format === to) return 'この表はもうその形です';
   if (to === 'csv') return null;
-  for (const row of at.rows) {
-    for (const cell of row.cells) {
+  /**
+   * 🔴 **どの升かを言う**(着地前レビュー・動線 ⑤)。
+   *
+   * ⚠ 「式を消してください」だけでは**直す場所が画面に出ていない** ── 式は描くとき
+   *   評価されて**ただの数字に見え**、升の中の改行は**空白 1 個に見える**ので、
+   *   user は升を 1 つずつ押して探すことになる。
+   * 🔑 判定はここで升を 1 つずつ見ているのだから、**そのとき行と列を持っている**。
+   * ⚠ 数え方は**画面に出ている表のまま**(見出しの行も 1 行目に数える)。
+   */
+  const where = (r: number, c: number): string => `${r + 1} 行目の ${c + 1} 列目`;
+  /** ⚠ 断るときは**代わりにできること**も言う ── 持ち出したいだけの人が居る。 */
+  const instead = '(表の右上の ▾ →「Markdown の表」ならコピーできます)';
+  for (const [r, row] of at.rows.entries()) {
+    for (const [c, cell] of row.cells.entries()) {
       /**
        * 🔴 **式が在る csv は markdown にしない**(user 裁定 2026-09-04)。
        * ⚠ markdown の表に式の概念は無いので、`=B2*C2` は**字**になる ── 表は
        *   見た目そのままなのに、**数字が更新されなくなる**(いちばん気づけない)。
        */
       if (isFormula(cell)) {
-        return '式(=…)が入っているので Markdown の表にできません(式が字になります)';
+        return `${where(r, c)}に式(${cell})が入っているので Markdown の表にできません${instead}`;
       }
       /**
        * ⚠ **升の中の改行も断る** ── markdown の表は 1 行 1 行なので、改行を含む升は
@@ -251,7 +321,7 @@ export function tableConvertRefusal(at: TableAt, to: TableFormat): string | null
        *   潰すと user の字が黙って変わるので、**断って user に決めさせる**。
        */
       if (cell.includes('\n')) {
-        return '升の中に改行があるので Markdown の表にできません(改行を消してください)';
+        return `${where(r, c)}の升に改行があるので Markdown の表にできません${instead}`;
       }
     }
   }
