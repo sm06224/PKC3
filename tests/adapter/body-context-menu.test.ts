@@ -1523,6 +1523,10 @@ describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () =
     expect(document.querySelector('[data-pkc-field="dialog-ok"]'), '編集中なのに確認が出た').toBeNull();
     expect(r.d.getState().error ?? '', '理由が出ていない').toContain('編集を終了');
     expect(asks).toHaveLength(0);
+  });
+});
+
+/**
  * 🔴 **近道の字は CSS が描く ── 規則が消えると、字は在っても見えない**(#587 C 案 2)。
  *
  * ⚠ 属性(`data-pkc-shortcut`)の有無は上の describe が見るが、user が見るのは

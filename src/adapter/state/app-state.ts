@@ -585,6 +585,7 @@ export interface AppState {
    * ⚠ 欄の名前は `TAG_INPUT_FIELDS` ── binder の `TAG_INPUT_ADD`(#639)と同じ綴りである。
    */
   refusedTags: Readonly<Record<TagInputField, readonly string[]>>;
+  /**
    * 🔴 **その知らせの隣に「開く」で出す物**(#668 A)。`null` = 押す口を出さない。
    *
    * 添付を作ったのに本文へ入れなかった回(開いているのがフォルダ等)は、

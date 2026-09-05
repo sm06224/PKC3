@@ -482,6 +482,7 @@ export function blockMenuActions(ctx: { readonly board: boolean }): readonly Ent
  */
 export const ADD_PLACE_ACTION: EntryAction = { action: 'add-place', label: 'ここに板を置く' };
 
+/**
  * 🔴 **見出し・本文のメニューの項目に添える近道**(#587 改善 C 案 2)。
  *
  * ⚠ 行のメニューの 9 項目は説明欄(C-3)を持つが、見出しの 3 項目・本文の項目には何も

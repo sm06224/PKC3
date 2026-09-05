@@ -21,7 +21,6 @@ import {
 } from '@adapter/ui/render/read-columns';
 import { setFoldNotify } from '@adapter/ui/render/fold-notify';
 import { appTooNarrowOk, installTooNarrow } from '@adapter/ui/render/too-narrow';
-import { installTooNarrow } from '@adapter/ui/render/too-narrow';
 import { paintStatusOpen } from '@adapter/ui/render/status-open';
 import { appOpenInEdit } from '@adapter/ui/render/open-in-edit';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
