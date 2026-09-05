@@ -98,7 +98,9 @@ describe('押した所から lid を引く(#281 検算)', () => {
       src.split("closest('[data-pkc-entry]')").length - 1,
       '一覧の行を引く closest まで消えている(この検査が何も見ていない)',
     ).toBeGreaterThan(5);
-    expect(src.split('lidOfNode(').length - 1, '本文へ書く 3 か所が寄っていない').toBe(3);
+    // ⚠ 2026-09-05(#684 段②): 一覧の行を本文へ落とす `bodyDropAt` が 4 か所目(落とし先の
+    //    本文の lid も同じ 1 本で引く ── 自前の closest を生やさない)
+    expect(src.split('lidOfNode(').length - 1, '本文へ書く 4 か所が寄っていない').toBe(4);
     expect(
       readFileSync('src/adapter/ui/render/place-drag.ts', 'utf8'),
       '板の掴みが寄っていない',
