@@ -136,3 +136,60 @@ test.describe('スマホ(390 幅・DPR 3)', () => {
     expect(flow.page, '画面が横に広がっている(表の超過が器の外へ漏れている)').toBeLessThanOrEqual(0);
   });
 });
+
+/**
+ * 🔴 **csv の表は読み幅の中で器いっぱい**(#704、user 裁定 案 A)。
+ *
+ * 1366 幅なら中央の面は約 860px、既定の読み幅(A4 縦 = 42rem)は 672px ──
+ * 直す前は csv の表が面いっぱい(段落より 190px 右へ)に伸びていた。
+ * 🔑 観測点は**段落の右端との一致**(段落こそ読み幅の正本)── 数字を貼らない。
+ * ⚠ ついで: コピーの ⧉ は**表の右上**(markdown の表 / csv の表とも)── 直す前は
+ *   markdown の表の ⧉ が、幅 129px の表から離れた**面の右端**に浮いていた。
+ */
+test.describe('PC(1366 幅)', () => {
+  test.use({ viewport: { width: 1366, height: 768 } });
+
+  test('🔴 csv の表の右端は段落の右端 ── コピーのボタンは表の右上に出る (#704)', async ({ page }) => {
+    await useSplitEditor(page);
+    await gotoApp(page);
+    await dismissAnnounce(page);
+    await createEntry(page, 'text');
+    await page
+      .locator('[data-pkc-field="editor-body"]')
+      .fill(['段落。'.repeat(60), '', '| あ | い |', '|---|---|', '| 1 | 2 |', '', '```csv', 'a,b,c', '1,2,3', '```', ''].join('\n'));
+    await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+    const csv = page.locator('[data-pkc-field="detail-body"] table.pkc-md-rendered-csv');
+    await expect(csv, 'csv の表が描かれていない(台の空振り)').toBeVisible({ timeout: 10_000 });
+
+    const g = await page.evaluate(() => {
+      const body = document.querySelector('[data-pkc-field="detail-body"]')!;
+      const right = (el: Element | null | undefined): number | null =>
+        el ? Math.round(el.getBoundingClientRect().right) : null;
+      const md = body.querySelector('.pkc-md-block[data-pkc-md-block-kind="table"]');
+      const csvTable = body.querySelector('table.pkc-md-rendered-csv');
+      const csvBlock = csvTable?.closest('.pkc-md-block');
+      return {
+        face: right(body),
+        p: right(body.querySelector('p')),
+        mdTable: right(md?.querySelector('table')),
+        mdBtn: right(md?.querySelector('.pkc-md-copy-btn')),
+        csv: right(csvTable),
+        csvBtn: right(csvBlock?.querySelector('.pkc-md-copy-btn')),
+        csvToggle: right(csvBlock?.querySelector('.pkc-render-toggle')),
+        csvBtnLeft: csvBlock?.querySelector('.pkc-md-copy-btn')?.getBoundingClientRect().left ?? null,
+      };
+    });
+    // 🔑 前提: この幅では面が読み幅より広い(そうでなければ上限は何も主張しない)
+    expect(g.p, '段落が無い(台の空振り)').not.toBeNull();
+    expect(g.face! - g.p!, '面が読み幅より広くない(前提が崩れている ── 上限が効く場面でない)').toBeGreaterThan(60);
+    // ── 裁定 A: csv の表は段落の右端まで(= 読み幅の中で器いっぱい)。数 px の丸めは許す
+    expect(Math.abs(g.csv! - g.p!), `csv の表の右端(${g.csv})が段落の右端(${g.p})と揃っていない`).toBeLessThanOrEqual(2);
+    // ── ついで: ⧉ は表の右上(器の右端ではなく)。⧉ は器の右端から 2px 内側に置かれる
+    expect(g.mdTable! - g.mdBtn!, `markdown の表の ⧉(${g.mdBtn})が表の右端(${g.mdTable})から離れている`).toBeGreaterThanOrEqual(0);
+    expect(g.mdTable! - g.mdBtn!, 'markdown の表の ⧉ が表の右端から離れている').toBeLessThanOrEqual(4);
+    expect(g.csv! - g.csvBtn!, `csv の表の ⧉(${g.csvBtn})が表の右端(${g.csv})から離れている`).toBeGreaterThanOrEqual(0);
+    expect(g.csv! - g.csvBtn!, 'csv の表の ⧉ が表の右端から離れている').toBeLessThanOrEqual(4);
+    // ⚠ `</>` は ⧉ の左隣(重ならない)
+    expect(g.csvToggle!, '‹/› が ⧉ と重なっている').toBeLessThanOrEqual(Math.round(g.csvBtnLeft!));
+  });
+});

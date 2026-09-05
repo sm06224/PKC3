@@ -2087,6 +2087,35 @@ li[data-pkc-row-slot] {
 .pkc-md-rendered .pkc-md-block[data-pkc-render-lang='csv'] {
   overflow-x: auto;
 }
+/**
+ * 🔴 **markdown の表の器は、表の幅に縮める**(#704 のついで)。
+ *
+ * 表(`<table>`)は中身の幅で出るのに、器(`.pkc-md-block`)は面いっぱいだった ──
+ * だからコピーの ⧉ が**表から離れた面の右端**に浮いていた(2560 幅で表から 1.2m 先)。
+ * 器を表の幅にすれば、右上の ⧉ は表の右上に来る(csv の表と同じ場所)。
+ * ⚠ `max-width: 100%` は上の横流しと対 ── 表が面より広い日は器が面いっぱいで止まり、
+ *   超過は器の中で流れる。
+ * ⚠ csv の器には当てない ── csv の表は `width: 100%` で**器いっぱいに広がる**ので、
+ *   器を中身の幅にすると循環して縮む(表が中身の幅になり、裁定 A に反する)。
+ */
+.pkc-md-rendered .pkc-md-block[data-pkc-md-block-kind='table'] {
+  width: fit-content;
+  max-width: 100%;
+}
+/**
+ * 🔴 **csv の表は、読み幅までで止める**(#704。user 裁定 案 A「読み幅の中で器いっぱい」)。
+ *
+ * `.pkc-md-rendered-csv { width: 100% }` が本文の器の全幅に伸び、2560 幅では
+ * 段落の読み幅(A4 縦 = 42rem)を 1000px 越えて右へ伸びていた。器いっぱいは残し、
+ * 上限だけ散文と同じ `--read-w` に揃える ── 「フル HD」(`--read-w: none`)の人は変わらず、
+ * 狭い窓(器 < 読み幅)も今のまま。
+ * ⚠ 起点は散文の allow-list と同じ `.pkc-md-rendered[data-pkc-prose] >`(書き出しにも焼かれる)。
+ * ⚠ `--pkc-prose-block` は立てない ── それは散文の印で、ライブエディタが「生にした行を
+ *   読み幅へ縮めるか」を読む(`row-swap.ts`)。表の編集欄は縮めない(#704 の範囲外)。
+ */
+.pkc-md-rendered[data-pkc-prose] > .pkc-md-block[data-pkc-render-lang='csv'] {
+  max-width: var(--read-w);
+}
 .pkc-md-rendered .pkc-render-source {
   margin: 0;
 }

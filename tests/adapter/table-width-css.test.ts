@@ -49,3 +49,36 @@ describe('表のセルは語の途中で折らない(#699)', () => {
     ).toHaveLength(0);
   });
 });
+
+/**
+ * 🔴 **csv の表は読み幅まで / markdown の表の器は表の幅**(#704、裁定 案 A)。
+ * ⚠ 組んだ寸法(csv の右端 = 段落の右端 / ⧉ が表の右上)は smoke が見る。
+ */
+describe('csv の表は読み幅の中で器いっぱい(#704)', () => {
+  const CSV_BLOCK = ".pkc-md-rendered[data-pkc-prose] > .pkc-md-block[data-pkc-render-lang='csv']";
+  it('🔴 csv の器の上限は散文と同じ --read-w ── 器いっぱい(width: 100%)は残す', () => {
+    const text = css();
+    const cap = blocksFor(text, CSV_BLOCK);
+    expect(cap.length, 'csv の器に読み幅の上限が無い(広い窓で段落の右へ伸びる)').toBeGreaterThan(0);
+    expect(cap.join('\n'), '上限が読み幅(--read-w)でない').toMatch(decl('max-width', 'var\\(--read-w\\)'));
+    // ⚠ 散文の印は立てない ── 立てると、ライブエディタが csv の編集欄まで読み幅へ縮める
+    expect(cap.join('\n'), 'csv の器が散文の印(--pkc-prose-block)を立てている').not.toContain(
+      '--pkc-prose-block',
+    );
+    const table = blocksFor(text, '.pkc-md-rendered .pkc-md-rendered-csv');
+    expect(table.join('\n'), 'csv の表が器いっぱいに広がらなくなった(裁定 A は「器いっぱい」)').toMatch(
+      decl('width', '100%'),
+    );
+  });
+
+  it('🔴 markdown の表の器は表の幅(⧉ が表の右上に来る)── ただし面より広くはならない', () => {
+    const b = blocksFor(css(), ".pkc-md-rendered .pkc-md-block[data-pkc-md-block-kind='table']").join('\n');
+    expect(b, '表の器が表の幅になっていない(⧉ が面の右端に浮く)').toMatch(decl('width', 'fit-content'));
+    expect(b, '表の器に上限が無い(広い表で器が面の外へ出る)').toMatch(decl('max-width', '100%'));
+    // ⚠ csv の器は fit-content にしない(width: 100% の表が循環して中身の幅へ縮む)
+    expect(
+      blocksFor(css(), ".pkc-md-rendered .pkc-md-block[data-pkc-render-lang='csv']").join('\n'),
+      'csv の器が fit-content になっている(表が器いっぱいに広がらない)',
+    ).not.toMatch(decl('width', 'fit-content'));
+  });
+});
