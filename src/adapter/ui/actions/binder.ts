@@ -73,7 +73,7 @@ import { buildVcf, isVcfFileName, vcfNoteOf } from '@features/contact/vcard';
 import { isMarkdownFileName } from '@features/import/plain-markdown';
 import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
 import { insertBlockText, insertText, OWN_MEANING } from '@adapter/ui/render/row-swap';
-import { HOLD_ATTR } from '@adapter/ui/render/cell-input';
+import { HOLD_ATTR, neighborCell, openCellAt } from '@adapter/ui/render/cell-input';
 import { resolveAppendAt, sectionAt } from '@features/markdown/append-target';
 import { isTextScale } from '@features/text-scale';
 import { chooseTextScale } from '@adapter/ui/render/text-scale';
@@ -4519,6 +4519,20 @@ const ACTIONS: Record<string, ActionHandler> = {
      *   器の規則の混入を止めている ── 実際にここで落ちて教わった)。
      */
     input.className = 'pkc-csv-cell-input';
+    /**
+     * 🔴 **欄を開いても、表の列幅を動かさない**(#750 I1 の実測で判明、2026-09-06)。
+     *
+     * ⚠ `<input>` の既定は `size="20"` = **20 字ぶんの幅を要求する** ので、
+     *   表の自動レイアウトが**その列を広げる**。CSS の `width: 100%` /
+     *   `min-width: 0` では効かない(効くのは最小幅で、列幅を決めるのは**最大幅**)。
+     * 🔴 実測(空の表で A2 の欄を開いた):その列が **317px** まで広がり、
+     *   隣の升が **115px → 88px** に縮んで、**その升の中心が「＋」ボタンになった**
+     *   ── 押すと欄が開かず、**列が増える**(#750 I1 で欄が開いたままになるので、
+     *   この食い違いが**普通の状態**になるところだった)。
+     * 🔑 `size = 1` にすると要求する幅が 1 字ぶんになり、列幅は開く前と同じままになる
+     *   (見える幅は CSS の `width: 100%` が升いっぱいにする)。
+     */
+    input.size = 1;
     input.setAttribute('aria-label', '表のセル');
     /**
      * ⚠ **確定は 1 回だけ**(`Enter` のあとに `blur` も来る)── 二重に撃つと、
@@ -4556,10 +4570,74 @@ const ACTIONS: Record<string, ActionHandler> = {
       if (value === before) return; // 変わっていなければ撃たない
       dispatcher.dispatch({ type: 'SET_CSV_CELL', lid, line, col, value });
     };
+    /**
+     * 🔴 **確定して、隣の升の欄をそのまま開く**(#750 I1。user 裁定 2026-09-06)。
+     *
+     * ⚠ 直す前は `Enter` で欄が閉じるだけだったので、**5 列 3 行を埋めるのに
+     *   15 回押し直す**ことになっていた ── 「原文のカンマを数えなくていい」ために
+     *   作った動線なのに、埋める作業では押す回数が字数と同じくらい要った。
+     * 🔑 `Tab` で**右**、`Shift`+`Tab` で**左**、`Enter` で**下**。
+     *   ⚠ 左と上を用意するのは「**片道の操作を作らない**」(user 指示 2026-08-23)──
+     *   行き過ぎたときに戻れないと、結局マウスへ手が戻る。
+     * ⚠ **行き先が無ければ、いままでどおり閉じる**(表の最後の升 / いちばん下の行)
+     *   ── 動かないのに欄だけ残ると「効かない鍵」に見える。
+     *
+     * ## ⚠ 隣は**すぐには開けない**
+     *
+     * 確定は `SET_CSV_CELL` → worker を往復 → `applyBlocks` が**表の塊ごと差し替える**
+     * ので、いま画面に在る隣の升は**数十ミリ秒後に捨てられる**(#745 と同じ経路)。
+     * 🔑 だから `cell-input.ts` に**予約**しておき、差し替えた後に開く。
+     * ⚠ ただし**字が変わっていない回は書き戻しが来ない**(`commit()` が撃たない)ので、
+     *   その回は**その場で開く** ── 予約だけして待つと、次の無関係な描き直しまで
+     *   何も起きない(押したのに動かない、に見える)。
+     */
+    const moveTo = (dir: 'right' | 'left' | 'down' | 'up'): void => {
+      const next = neighborCell(target, dir);
+      commit();
+      // ⚠ 行き先が無ければ、確定して閉じるだけ(動かない欄を残さない)
+      if (next !== null) openCellAt(target.closest<HTMLElement>('.pkc-md-block') ?? target, next);
+    };
     input.addEventListener('keydown', (ev) => {
+      /**
+       * 🔴 **変換中の鍵は IME のもの ── 1 つも横取りしない**
+       * (着地前レビュー・動線 D1、2026-09-06。**この PR でいちばん重い**)。
+       *
+       * ⚠ この欄だけが `isComposing` を見ていなかった ── 画面全体(`:7238`)も
+       *   小窓(`app-dialog.ts`)も鍵の一覧(`keymap-panel.ts`)も見ているのに。
+       *   🔑 `row-swap.ts` に実測が残っている:**変換中は Enter / Tab / Escape が
+       *   全部 `isComposing`** である。
+       * 🔴 **直す前より悪くなっていた**:`Enter` の横取りは前からだったが、
+       *   前は「欄が閉じて、続きの字がどこにも入らない」だったのに対し、いまは
+       *   「**下の升が開いて全選択**され、続きの字が**その升の中身を消して上書きする**」
+       *   ── 「打った字が消える」から「**別の升のデータが消える**」へ変わっていた。
+       * ⚠ 日本語で表を埋める人は**升 1 つにつき最低 1 回**変換を確定するので、
+       *   これは**毎升踏む**。しかも壊れるのは**まだ見ていない隣の升**である。
+       */
+      if (ev.isComposing) return;
       if (ev.key === 'Enter') {
         ev.preventDefault();
-        commit();
+        /**
+         * 🔴 **確定して、閉じる鍵を残す**(同 D2)。
+         * ⚠ `Enter` が「終わり」から「次へ」に変わったので、**1 升だけ直したい人**
+         *   (いちばん多い使い方)から**終わり方が消えていた** ── `Escape` は
+         *   打った字を捨てるので代わりにならない。
+         * 🔑 `Ctrl`(mac は `⌘`)+ `Enter` で、確定して閉じる。
+         */
+        if (ev.ctrlKey || ev.metaKey) commit();
+        else moveTo(ev.shiftKey ? 'up' : 'down');
+      } else if (ev.key === 'Tab') {
+        /**
+         * 🔴 **行き先が無いときは `Tab` を握らない**(着地前レビュー・動線 D2 / 実装 A4)。
+         *
+         * ⚠ 無条件に握ると、**表から `Tab` で出られなくなる** ── この binder の
+         *   別の場所(`onShortcut`)には既にその戒めが書いてある:
+         *   「どちらも当たらなければ `preventDefault()` しない ── 常に握ると
+         *   **編集欄から `Tab` で出られなくなる**(キーボードだけで使う人の動線を 1 つ殺す)」。
+         * 🔑 隣が在るときだけ握り、**表の最後の升では素の `Tab`** に戻す
+         *   ── 確定はする(下の `moveTo` が `commit()` する)ので、字は残る。
+         */
+        if (neighborCell(target, ev.shiftKey ? 'left' : 'right') !== null) ev.preventDefault();
+        moveTo(ev.shiftKey ? 'left' : 'right');
       } else if (ev.key === 'Escape') {
         ev.preventDefault();
         settled = true;

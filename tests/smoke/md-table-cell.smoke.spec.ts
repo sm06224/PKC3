@@ -242,3 +242,83 @@ test('🔴 打っている途中で書き戻しが届いても、Escape で消�
 
   expect(errors, `ページで例外が出た: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **`Tab` で右、`Enter` で下 ── 欄が開いたまま続けて打てる**(#750 I1。user 裁定 2026-09-06)。
+ *
+ * > user の物語:「新規」→「表」で作った空の表を埋める。直す前は 1 升ごとに
+ * > **押し直し**が要ったので、5 列 3 行で **15 回**押すことになった ──
+ * > 「原文のカンマを数えなくていい」ために作った動線なのに、埋める作業では
+ * > 押す回数が字数と同じくらい要った。
+ *
+ * 🔑 **unit では原理的に見えない** ── 隣を開けるのは `applyBlocks` が塊を
+ *   差し替えた**後**で、その経路は実物の描画でしか走らない(#745 と同じ理由)。
+ * ⚠ 観測点は「欄が開いた」ではなく **`disk` まで届いた字**にする ── 欄だけ見ると、
+ *   本文に入っていなくても緑になる(#708 段④ の smoke が同じ理由で reload している)。
+ */
+test('🔴 Tab で右、Enter で下へ、押し直さずに続けて打てる (#750 I1)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('在庫');
+  await page
+    .locator('[data-pkc-field="editor-body"]')
+    .fill('# 在庫\n\n| 品名 | 数 |\n|---|---|\n| a | b |\n| c | d |\n\n以上。\n');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+
+  const cells = page.locator(CELL);
+  await expect(cells, '押せる升の数が違う(前提が崩れた)').toHaveCount(6, { timeout: 15_000 });
+  const input = page.locator('[data-pkc-field="cell-input"]');
+
+  // ── 3 番目の升(1 行目の「a」)を 1 度だけ押す。ここから先は**鍵だけ**で進む
+  await cells.nth(2).click();
+  await expect(input, '升が欄にならない').toBeVisible();
+  await page.keyboard.press('Control+a');
+  await page.keyboard.type('りんご');
+
+  /**
+   * 🔴 **`Tab` の直後、間を置かずに打てる**(着地前レビュー・動線 D3)。
+   *
+   * ⚠ 1 稿目は書き戻しが届いてから隣を開いていたので、**50〜150ms のあいだ
+   *   焦点がどこにも無く**、そこで打った字は**どこにも入らず合図も出なかった**
+   *   (`Tab` で移る機能は**速く打つ人のため**なのに、その人だけが穴に落ちる)。
+   * 🔑 だからここは **`toBeVisible` で待たずに**打つ ── 待つと穴をまたいでしまう
+   *   (#745 の smoke が `locator.click()` の自動待ちで直す前も緑だったのと同じ型)。
+   */
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Control+a');
+  await page.keyboard.type('3');
+  await expect(input, 'Tab のあと欄が閉じた(押し直しが要る)').toBeVisible({ timeout: 10_000 });
+  await expect(input, '間を置かずに打った字が入っていない').toHaveValue('3');
+
+  // 🔴 Enter ── 同じ列の下の升へ(右ではない)
+  await page.keyboard.press('Enter');
+  await expect(input, 'Enter のあと欄が閉じた').toBeVisible({ timeout: 10_000 });
+  await expect(input, '下ではない升が開いた').toHaveValue('d');
+  // 🔴 Shift+Enter ── 同じ列の上へ戻れる(片道の操作を作らない)
+  await page.keyboard.press('Shift+Enter');
+  await expect(input, 'Shift+Enter で上へ戻れない').toHaveValue('3', { timeout: 10_000 });
+  await page.keyboard.press('Enter');
+  await expect(input, '下へ戻れない').toHaveValue('d', { timeout: 10_000 });
+  await page.keyboard.press('Control+a');
+  await page.keyboard.type('5');
+  await page.keyboard.press('Escape');
+
+  /**
+   * 🔴 **読み込み直しても残る**(disk まで届いた証拠)。
+   * ⚠ `Escape` で取り消した最後の 1 つ(`5`)は**入っていない**ことも見る ──
+   *   移る道を足したせいで「やめる」が効かなくなっていないか。
+   */
+  await page.reload();
+  await page.locator('[data-pkc-region="filer-table"] tbody tr').first().click();
+  const after = page.locator(CELL);
+  await expect(after.nth(2), 'Tab の前に打った字が届いていない').toHaveText('りんご', {
+    timeout: 15_000,
+  });
+  await expect(after.nth(3), 'Tab で移った先に打った字が届いていない').toHaveText('3');
+  await expect(after.nth(5), 'Escape で取り消した字が入ってしまった').toHaveText('d');
+  await expect(after, '列や行が増えた').toHaveCount(6);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
