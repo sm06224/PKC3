@@ -1,0 +1,204 @@
+/**
+ * 🔴 **数式の区切りの門**(#707)。
+ *
+ * ⚠ この test の主役は「数式が読めること」ではなく、**読んではいけない物を
+ *   読まないこと**である ── #707 のコメントに書いた門(`$` の直後が `{`)は
+ *   **開きしか塞いでおらず**、`${…}` の `$` が**閉じ**として効く穴が残っていた
+ *   (着地前調査 2026-09-06 で判明)。
+ */
+import { describe, expect, it } from 'vitest';
+import { closesMath, isEscaped, opensMath, readMathAt } from '../../src/features/markdown/math-delims';
+import { renderMarkdown } from '../../src/features/markdown/markdown-render';
+
+/** 先頭の `$` から 1 つ読む(読めなければ null)。 */
+const read = (s: string): string | null => {
+  const at = s.indexOf('$');
+  const m = at < 0 ? null : readMathAt(s, at, s.length);
+  return m === null ? null : s.slice(m.from, m.to);
+};
+
+describe('数式として読む(#707)', () => {
+  it('🔴 行の中の $…$ を読む', () => {
+    expect(read('式は $E = mc^2$ です')).toBe('E = mc^2');
+  });
+
+  it('🔴 段落の途中の $$…$$ も読む(行内へ降ろす)', () => {
+    const src = 'ここで $$x^2$$ と書く';
+    const m = readMathAt(src, src.indexOf('$'), src.length);
+    expect(m, '$$ を読めていない').not.toBeNull();
+    expect(m!.display, '$$ を行内の形として扱っている').toBe(true);
+  });
+
+  it('⚠ 逃がした \\$ は数式にしない', () => {
+    expect(read('値段は \\$100 と \\$200')).toBeNull();
+  });
+
+  it('⚠ \\\\$ は「逃がした \\」+「素の $」── $ は逃げていない', () => {
+    // ⚠ 直前 1 文字だけ見る実装だと、ここを取り違える
+    expect(isEscaped('a\\\\$x$', 3), '\\ を 2 つ書いたのに逃げていると読んだ').toBe(false);
+  });
+});
+
+describe('🔴 数式として読まない(門)', () => {
+  /**
+   * 🔴 **差し込みの記法を飲まない**(実測 2026-09-06、PKC の文書で 9 件)。
+   * ⚠ `${宛名}` は雛形が**わざと本文に残す印**なので、user の本文に実在する。
+   */
+  it('🔴 ${…} の開きを飲まない', () => {
+    expect(read('${date} は挿した日、${time} は時刻')).toBeNull();
+  });
+
+  /**
+   * 🔴 **ここが #707 のコメントで抜けていた穴**(着地前調査で判明)。
+   * ⚠ 門を「開きの直後が `{`」だけにすると、**`${…}` の `$` が閉じとして効く**:
+   *   `料金は $100 です。${宛名} 様。` → `100 です。` が数式になる。
+   */
+  it('🔴 ${…} の $ を「閉じ」にも使わせない', () => {
+    // ⚠ `$100` は開かない(数字)ので、そもそも開きが立たないこと
+    expect(read('料金は $100 です。${宛名} 様。')).toBeNull();
+    // ⚠ 開きが立つ形でも、`${` の `$` では閉じない
+    expect(read('残りは $x です。${宛名} 様。')).toBeNull();
+  });
+
+  it('🔴 金額を数式にしない($100 / $5 と $10)', () => {
+    expect(read('料金は $100 です')).toBeNull();
+    // ⚠ 閉じの直後が数字 ── ここを見ないと「5 と 」が数式になる
+    expect(read('$5 と $10')).toBeNull();
+  });
+
+  it('⚠ 区切りの内側の空白で断る', () => {
+    expect(read('a $ x$ b')).toBeNull();
+    expect(read('a $x $ b')).toBeNull();
+  });
+
+  it('⚠ 改行を跨がない', () => {
+    expect(read('$x\ny$')).toBeNull();
+  });
+
+  it('⚠ 中身が空なら読まない', () => {
+    expect(read('$$')).toBeNull();
+    expect(read('$$$$')).toBeNull();
+  });
+});
+
+describe('⚠ 開きと閉じは別の判定である', () => {
+  /**
+   * 🔴 **この 2 つを 1 つの関数に寄せると、`${…}` の穴が戻る。**
+   * ⚠ 「判定は 1 か所へ寄せる」は**同じ問い**についての戒めであって、
+   *   **違う問い**を 1 つにしてよいという意味ではない(CLAUDE.md §7)。
+   */
+  it('🔴 `{` は開きと閉じの両方を止める(片側だけだと穴が残る)', () => {
+    expect(opensMath('${x}', 0), '${ が開きになっている').toBe(false);
+    // 🔴 1 稿目はここが true だった ── だから `${宛名}` の $ が閉じとして効いた
+    expect(closesMath('a${x}', 1), '${ の $ が閉じとして使われている').toBe(false);
+  });
+
+  it('🔴 空白の条件は開きと閉じで向きが逆(ここが本当の非対称)', () => {
+    // 開き: **直後**の空白で断る / 閉じ: **直前**の空白で断る
+    //    ⚠ 同じ 1 文字を両方の観点で見て、答えが割れることを見る
+    expect(opensMath('a$ x$', 1), '直後が空白なのに開いた').toBe(false);
+    expect(closesMath('a$ x$', 1), '直前が空白でないのに閉じない').toBe(true);
+    expect(closesMath('$x $', 3), '直前が空白なのに閉じた').toBe(false);
+    // ⚠ 行頭の `$` は「直前が無い」= 空白と同じ扱い(閉じにはしない)
+    expect(closesMath('$x$', 0), '行頭の $ が閉じになっている').toBe(false);
+  });
+
+  it('🔴 数字は開きと閉じで見る向きが違う', () => {
+    expect(opensMath('$100', 0), '$100 が開きになっている').toBe(false);
+    expect(closesMath('x$100', 1), '$ の直後が数字なのに閉じになっている').toBe(false);
+    // ⚠ 対照群 ── 数字が前に在るだけなら閉じてよい(`$x_1$`)
+    expect(closesMath('$x_1$', 4), '数字の直後の $ が閉じられない').toBe(true);
+  });
+});
+
+/**
+ * 🔴 **`$` を「名前の頭」として使う書き方を飲まない**(着地前レビュー 2026-09-06・欠陥 1)。
+ *
+ * ⚠ 1 稿目は**5 形とも飲んでいた**(実測)── 本文を 1 文字も触っていない既存の
+ *   ノートで、昨日まで見えていた `$` が消えて字が斜体になる形だった。
+ * ⚠ そして私は調査の時点で「逆引用符の中は markdown-it が守る**見込み**」と書き、
+ *   **確かめずに通していた** ── 見込みは観測ではない。
+ */
+describe('🔴 `$` + 名前の書き方を飲まない(実測で壊れていた 5 形)', () => {
+  const cases: [string, string][] = [
+    ['コードの中の $ を閉じに使わない', '変数 $x と `$y` を比べる'],
+    // 🔴 **逆引用符の壁でしか止まらない形**(変異試験 M-backtick が SURVIVED で教えた)
+    //    ⚠ 閉じの直後が `` ` `` なので「語の字」の門は素通りする ──
+    //    走査が逆引用符で止まらなければ、`A と \`x` が数式になる
+    ['コードの閉じ引用符の直前の $', '合計 $A と `x$` の話'],
+    ['シェルの変数', 'PATH=$HOME/bin:$PATH を .bashrc に書く'],
+    ['環境変数を並べる', '環境変数 $PATH,$HOME を設定する'],
+    ['通貨の記号', 'レートは $USD で計算し、$EUR も見る'],
+    ['表計算のセル参照', 'Excel で =SUM($A$1:$A$9) と書く'],
+  ];
+  for (const [name, src] of cases)
+    it(`🔴 ${name}`, () => {
+      expect(read(src), `数式として飲んだ: ${src}`).toBeNull();
+    });
+});
+
+describe('⚠ それでも数式は読める(門を締めすぎていない)', () => {
+  it('🔴 閉じの直後が日本語なら数式のまま(空白を置かない書き方)', () => {
+    // ⚠ ここを ASCII 以外まで塞ぐと、日本語の user の普通の書き方が数式にならない
+    expect(read('$x$と書く')).toBe('x');
+  });
+
+  it('⚠ 閉じの直後が空白・括弧・句点・行末なら読める', () => {
+    expect(read('式は $E = mc^2$ です。')).toBe('E = mc^2');
+    expect(read('括弧の中 ($a+b$) も。')).toBe('a+b');
+    expect(read('行末の $x^2$')).toBe('x^2');
+  });
+
+  /**
+   * ⚠ **空振り防止** ── 上の 5 形が「そもそも開かない」から null なのではなく、
+   *   **閉じの門で止まっている**ことを見る(開きの門だけで止まっていると、
+   *   閉じの門を消しても緑のままになる)。
+   */
+  it('⚠ 5 形のうち 4 形は「開きは立つが、閉じが立たない」', () => {
+    for (const src of ['PATH=$HOME/bin:$PATH', '$PATH,$HOME', '$USD で計算し、$EUR', '変数 $x と `$y`']) {
+      const at = src.indexOf('$');
+      expect(opensMath(src, at), `前提が崩れている: 開きが立たない(${src})`).toBe(true);
+    }
+  });
+});
+
+/**
+ * 🔴 **器の属性は突き破られない**(着地前レビュー 2026-09-06・重大 1)。
+ *
+ * ⚠ `escapeHtml` **だけでは足りない** ── 未定義の `{{vars.x}}` は前処理で
+ *   PUA の sentinel になり、**描画の後に** HTML 全体が文字列置換されるので、
+ *   属性値の中でも展開されて `data-pkc-math-src="a <span class="` と突き破る。
+ * ⚠ そして goldens も CSS の代表入力も、数式に `<` も `"` も持っていない ──
+ *   **escape を落とす変異が全部素通りしていた**。
+ */
+describe('🔴 器の属性を突き破らせない', () => {
+  it('🔴 記号を含む式は escape される(属性も、器の中の字も)', () => {
+    const html = renderMarkdown('$a<b>"c$\n');
+    expect(html, '属性が escape されていない(属性が突き破られる)').toContain(
+      'data-pkc-math-src="a&lt;b&gt;&quot;c"',
+    );
+    /**
+     * 🔴 **器の中の字も見る**(変異試験 M-escape が SURVIVED で教えた)。
+     * ⚠ 属性だけ見ていると、**描く前に画面へ出る字**の escape を落とす変異が通る
+     *   ── 打った `<b>` が本物の太字になり、`<script>` なら script が生える。
+     */
+    expect(html, '器の中の字が escape されていない(打った記法が本物になる)').toContain(
+      '>$a&lt;b&gt;&quot;c$<',
+    );
+    expect(html, '生の < が器の中に出ている').not.toMatch(/>\$a<b>/);
+  });
+
+  it('🔴 未定義の変数を含む式でも、属性が閉じたまま', () => {
+    const html = renderMarkdown('$a {{vars.x}} b$\n');
+    // 🔴 属性の中に生の `<span` が出ていないこと(1 稿目はここが破れていた)
+    expect(html, '属性の中に生の HTML が出ている').not.toMatch(
+      /data-pkc-math-src="[^"]*<span/,
+    );
+    // ⚠ 空振り防止 ── 台が本当に sentinel を作っていること
+    expect(html, '前提が崩れている: 未定義変数のバッジが出ていない').toContain(
+      'pkc-variable-undefined',
+    );
+    // 🔑 属性は数値参照で逃がしてある(post 段の置換が当たらない)
+    expect(html, 'sentinel を逃がしていない').toMatch(/data-pkc-math-src="a &#x[0-9a-f]+;/);
+  });
+});

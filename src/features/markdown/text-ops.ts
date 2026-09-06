@@ -261,6 +261,16 @@ export const DIAGRAM_CHOICES: readonly DiagramTemplate[] = [
 export const CODE_BLOCK = template(`\`\`\`\n${CARET}\n\`\`\`\n`);
 
 /**
+ * 🔴 **数式の雛形**(#707。user 裁定 2026-09-06 =「書式パネルに『数式』を足す」)。
+ *
+ * ⚠ **前後に空行が要る** ── `$$` の塊は markdown-it の block token で、
+ *   段落を切る印を持たない(`markdown-render.ts` の `pkc_math_block`)。
+ *   段落の直後に置くと**字のまま出る**ので、雛形の側で空けておく。
+ *   🔑 `insertBlock` が行の途中なら改行を足すので、ここは**後ろの空行**を持つ。
+ */
+export const MATH_BLOCK = template(`$$\n${CARET}\n$$\n`);
+
+/**
  * 選択(または カーソル位置)に塊を差し込む。
  * ⚠ **行の途中なら改行してから**入れる ── 表や fence が段落の途中に生えると
  * markdown として壊れる。
@@ -346,6 +356,7 @@ export type FormatOp =
   | 'table'
   | 'mermaid'
   | 'codeblock'
+  | 'math'
   /**
    * 🔴 **帯に出さない 4 つ**(#425 段②-a)── 描き手は前から持っているのに、
    * **押して入れる口が 1 つも無かった**記法である(`markdown-render.ts:894-896`)。
@@ -395,6 +406,13 @@ export const FORMAT_OPS: readonly {
   { op: 'mermaid', label: '図', hint: '図の雛形を差し込みます', onBar: false },
   { op: 'codeblock', label: 'コードブロック', hint: 'コードブロックの雛形を差し込みます' },
   /**
+   * 🔴 **数式**(#707。user 裁定 2026-09-06)。⚠ 直す前は「数式が書ける」と知る道が
+   *   **起動時のお知らせ 1 回**か、ヘルプ → マニュアルの下のほうだけだった ──
+   *   同じ「囲って書く記法」でも、表・図・コードブロックには押す所が在るのに
+   *   数式だけ無い、という非対称だった(着地前レビュー・動線 4)。
+   */
+  { op: 'math', label: '数式', hint: '中央寄せの数式の雛形を差し込みます($$ で囲みます)' },
+  /**
    * 🔴 **帯には出さない**(`onBar: false`)。⚠ **表は 1 つのまま**にしてある ──
    * 「書式の操作は何があるか」と「帯に何を並べるか」を別の表に分けると、
    * 片方だけ増えて食い違う(CLAUDE.md §7)。帯を描く側がこの印で絞る。
@@ -430,6 +448,8 @@ export function applyFormat(sel: TextSelection, op: FormatOp): TextSelection {
       return insertBlock(sel, MERMAID_BLOCK);
     case 'codeblock':
       return insertBlock(sel, CODE_BLOCK);
+    case 'math':
+      return insertBlock(sel, MATH_BLOCK);
     /**
      * ⚠ **綴りは描き手から引いた**(`markdown-render.ts:894` / `:1001`)──
      * 圏点は**新形の `^^`** を使う(`[[em:…]]` は同じ意味の古い形で、

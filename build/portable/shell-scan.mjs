@@ -35,6 +35,23 @@ export function externalRefs(shell) {
   return [...shell.matchAll(/(?:src|href)="(?!data:|#)[^"]+"/g)].map((m) => m[0]);
 }
 
+/**
+ * 🔴 **畳んだ CSS の中の外部参照**(#707)。
+ *
+ * ⚠ `externalRefs` は **HTML 属性の `src=` / `href=` しか見ていない** ──
+ *   inline した `<style>` の中の `url(./KaTeX_Main-Regular-xxxx.woff2)` は
+ *   1 件も拾わなかった。帰結は「**1 枚を配ると数式だけ代替書体で出る**のに、
+ *   誰の計器も鳴らない」── この file 自身が「単一化は**参照が消えて縮む**方向に
+ *   壊れる」と書いているのに、その向きの穴が空いていた(着地前調査 2026-09-06)。
+ * 🔑 `shellOf` は `<style>` の中身を消すので、**畳む前の HTML を渡す**こと。
+ */
+export function cssUrlRefs(html) {
+  const out = [];
+  for (const m of html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/g))
+    out.push(...[...m[1].matchAll(/url\((?!['"]?data:)['"]?([^)'"]+)['"]?\)/g)].map((u) => u[0]));
+  return out;
+}
+
 /** 器に在る可搬バンドルの印の数。⚠ **1 件でなければならない**。 */
 export function bundleTagCount(shell) {
   return [...shell.matchAll(/data-pkc-bundle/g)].length;

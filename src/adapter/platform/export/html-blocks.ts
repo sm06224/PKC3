@@ -105,6 +105,18 @@ const FIGURE_ATTR: readonly [string, string][] = [
   ['data-pkc-chart-src', 'chart'],
 ];
 
+/**
+ * 数式の器の名前(#707)。⚠ **`FIGURE_ATTR` に足さない** ── あちらは
+ * 「呼び側が焼いて差し替える」預かりの一覧で、数式は焼かずに**字で書く**。
+ * 同じ表に混ぜると、呼び側が焼こうとして空の器を出す。
+ */
+const MATH_ATTR = 'data-pkc-math-src';
+
+/** 数式を Word へ書くときの字(⚠ 打った区切りごと残す)。 */
+function mathText(el: Element, src: string): string {
+  return el.getAttribute('data-pkc-math-display') === '1' ? `$$${src}$$` : `$${src}$`;
+}
+
 /** user に見せる呼び名(内部語を出さない)。 */
 const FIGURE_NAME: Record<string, string> = { mermaid: '図', chart: 'グラフ' };
 
@@ -169,6 +181,24 @@ export function htmlToDocxBlocks(doc: Document): {
         const alt = el.getAttribute('alt') || el.getAttribute('data-pkc-asset-name') || '画像';
         images.push({ at: blocks.length, assetKey, alt });
         blocks.push({ kind: 'skipped', what: `画像「${alt}」`, why: '取り出せませんでした' });
+        continue;
+      }
+      /**
+       * 🔴 **数式は「打った字」を書く**(#707)。
+       *
+       * ⚠ **中へ降りてはいけない** ── KaTeX の出力は
+       *   **MathML(CSS で隠す)と見た目用の span** の 2 本立てなので、
+       *   素直に走査すると **同じ式が 2 回、しかも 1 文字ずつ崩れて** Word に入る。
+       *   ⚠ しかも `skippedName` はこの形を知らないので**理由も出ない** ──
+       *   「黙って壊れる」側である(着地前調査 2026-09-06 で判明)。
+       * 🔑 器は原文(TeX)を持っているので、**それをそのまま書く**。
+       *   ⚠ 「写せませんでした」にしない ── 打った字が残るほうが損が小さく、
+       *   Word 側で式に組み直す材料にもなる(PKC2 の docx 書き出しと同じ判断)。
+       * ⚠ **属性の名前は 1 か所で持つ**(`FIGURE_ATTR` と同じ戒め)。
+       */
+      const mathSrc = el.getAttribute(MATH_ATTR);
+      if (mathSrc !== null && mathSrc !== '') {
+        pushRun(out, mathText(el, mathSrc), { ...style, mono: true });
         continue;
       }
       const gone = skippedName(el);
@@ -321,6 +351,16 @@ export function htmlToDocxBlocks(doc: Document): {
         const alt = el.getAttribute('alt') || el.getAttribute('data-pkc-asset-name') || '画像';
         images.push({ at: blocks.length, assetKey: bkey, alt });
         blocks.push({ kind: 'skipped', what: `画像「${alt}」`, why: '取り出せませんでした' });
+        continue;
+      }
+      /**
+       * 🔴 **塊の数式も「打った字」で書く**(#707)── 理由は上の走りと同じ
+       *   (KaTeX の 2 本立てを素通りさせると、同じ式が 2 回崩れて入る)。
+       * ⚠ **段落 1 つ**にする(中央寄せは Word 側の書式なので、ここでは持たない)。
+       */
+      const blockMath = el.getAttribute(MATH_ATTR);
+      if (blockMath !== null && blockMath !== '') {
+        blocks.push({ kind: 'p', runs: [{ text: mathText(el, blockMath), mono: true }] });
         continue;
       }
       const gone = skippedName(el);

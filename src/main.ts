@@ -1,6 +1,15 @@
 // 見た目(P7b 段⑨)。⚠ **ここから import する**のが唯一の入り口 ── index.html に
 // `<link>` を書くと Vite の hash 付き出力に乗らず、SW の precache 一覧からも外れる
 import './styles/app.css';
+/**
+ * 🔴 **数式の書体**(#707)。KaTeX の CSS は 20 書体の `@font-face` を持ち、
+ *   Vite が woff2 を生成物へ出して `url(...)` を書き換える。
+ * ⚠ **書体の file はブラウザが「使う字が出たときだけ」取りに行く** ──
+ *   数式を 1 つも書いていない user には 1 バイトも届かない(定常の側)。
+ * ⚠ KaTeX 本体(JS)は**ここには入らない** ── 描くのは
+ *   `platform/render/math-worker.ts` の中の遅延 import なので、主の塊に載らない。
+ */
+import 'katex/dist/katex.min.css';
 
 import { Dispatcher } from '@adapter/state/dispatcher';
 import { loadSplitLids, saveSplitLids } from '@adapter/platform/split-store';

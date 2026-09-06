@@ -64,6 +64,7 @@ import {
   classifyDirectiveOpen,
 } from './directive-open';
 import { parseInlineRoleAt, type InlineRoleMatch } from './inline-role-parser';
+import { readMathAt } from './math-delims';
 import {
   isCardPresentationLabel,
   parseCardPresentation,
@@ -1328,6 +1329,154 @@ function escapeHtmlAttr(s: string): string {
 }
 
 
+// ── L-8 (2026-09-06、#707):数式 `$…$` / `$$…$$` ──
+//
+// 🔴 **判定は `math-delims.ts` 1 か所**(開き・閉じの門)。ここは
+//    「見つけた範囲を器にする」だけを書く。
+//
+// ⚠ **前処理で置換してはいけない** ── code span / fence の中は markdown-it が
+//    code を先に tokenize するので inline rule は届かない(上の L-2 が
+//    「自然な escape」と呼んでいる守り)。前処理にすると、その守りを自分で捨てる。
+//
+// ⚠ **中を tokenize しない** ── 数式の中で `**bold**` を効かせたい要求は無く、
+//    効かせると TeX の `_` や `*` が壊れる(L-2 の highlight とは逆の判断)。
+//
+// 🔑 出す物は **器 + 原文**(mermaid / chart と同じ形)── 描くのは
+//    `src/adapter/ui/render/math-hydrate.ts`。⚠ 誰も埋めなかった面でも
+//    **原文がそのまま読める**(いま画面に出ている姿と 1 文字も変わらない)。
+
+/** 数式の器を組む。⚠ 原文は**区切りごと**入れる(埋まらなかった面で今までどおり読める)。 */
+function buildMathHtml(
+  tex: string,
+  display: boolean,
+  sourceLineAttrs = '',
+  /**
+   * 器の中に置く原文。⚠ **user が打った字をそのまま**入れる ── 区切りを
+   *   組み直すと、`$$x$$` と書いた行が `$x$` に見える(降格の副産物で
+   *   **打った字が変わったように見える**)。
+   */
+  rawText = display ? `$$${tex}$$` : `$${tex}$`,
+): string {
+  /**
+   * 🔴 **sentinel は数値参照へ逃がす**(着地前レビュー 2026-09-06・重大 1)。
+   *
+   * ⚠ `escapeHtml` **だけでは防げない** ── 未定義の `{{vars.x}}` は前処理で
+   *   PUA の sentinel になり、`postProcessVariableUndefined` が**描画の後に
+   *   HTML 全体を文字列置換する**ので、**属性値の中でも展開される**。
+   *   実測:`$a {{vars.x}} b$` が
+   *   `data-pkc-math-src="a <span class="` と**属性を突き破り**、
+   *   画面に生の HTML が字として出ていた。
+   * 🔴 **同じ罠を同じ日に `data-pkc-cell-raw` で踏んで直してある**
+   *   (この file の `cellEditAttrs` ── そこの戒めがこの形を名指ししている)。
+   *   CLAUDE.md「片側を直したら、対称の反対側を必ず疑う」の同日再演である。
+   * 🔑 数値参照なら post 段の正規表現は当たらず、`getAttribute` は元の字へ戻す。
+   * ⚠ **逃がすのは属性だけ**(`src`)── 器の中の字(`raw`)まで逃がすと、
+   *   post 段が戻せなくなって**画面に豆腐文字が出る**(1 稿目で実測)。
+   *   中の字はそのまま流し、いままでどおり「未定義変数」のバッジが出る。
+   * 🔑 帰結:**未定義の変数を含む式は数式にならず、バッジのまま残る** ──
+   *   属性には PUA が入るので KaTeX が読めず、`throwOnError` で打った字が残る。
+   *   ⚠ これは正しい向きである(値が決まっていない式は組みようがない)。
+   */
+  const src = md.utils
+    .escapeHtml(tex)
+    .replace(SENTINEL_RANGE, (c) => `&#x${c.codePointAt(0)!.toString(16)};`);
+  const raw = md.utils.escapeHtml(rawText);
+  const tag = display ? 'div' : 'span';
+  const cls = display ? 'pkc-math pkc-math-display' : 'pkc-math';
+  const kind = display ? ' data-pkc-md-block-kind="math"' : '';
+  return `<${tag} class="${cls}" data-pkc-math-src="${src}" data-pkc-math-display="${display ? '1' : '0'}"${kind}${sourceLineAttrs}>${raw}</${tag}>`;
+}
+
+md.inline.ruler.before('escape', 'pkc_math_inline', function mathInlineRule(state, silent) {
+  const span = readMathAt(state.src, state.pos, state.posMax);
+  if (span === null) return false;
+  const tex = state.src.slice(span.from, span.to);
+  if (!silent) {
+    /**
+     * 🔴 **段落の途中の `$$…$$` は行内へ降ろす**(#707。PKC2 と同じ判断 ──
+     *   `PKC2: decompose-pkc.ts` が `$$` を inline 走査で拾って降格させている)。
+     *
+     * ⚠ **降ろさないと HTML が壊れる** ── `<div>` を `<p>` の中に出すことになり、
+     *   ブラウザが段落を割る(実測: 1 稿目がそうなっていた)。
+     * ⚠ 中央寄せの塊にしたいときは**行頭に `$$` だけの行**を書く(block rule が拾う)。
+     * 🔑 **覆る条件**:配ったあと「段落の途中でも中央寄せにしてほしい」と言われたら、
+     *   段落を割る側へ倒す。
+     */
+    // ⚠ `html_inline` として押す ── 中身は自分で escape 済みである
+    const token = state.push('html_inline', '', 0);
+    token.content = buildMathHtml(tex, false, '', state.src.slice(state.pos, span.end));
+  }
+  // 🔴 **`silent` でも `pos` を進める**(`pkc_html_br` と同じ作法)──
+  //    進めないと、リンクのラベル走査などから来たときに数式が二重に読まれる
+  state.pos = span.end;
+  return true;
+});
+
+/**
+ * 🔴 **`$$` を「行の塊」として読む**(#707)。
+ *
+ * ⚠ **行を畳む前処理にしてはいけない** ── `source-blocks.ts` は
+ *   markdown-render とは**別の走査器**で、知っている囲いは fence と `:::` の
+ *   2 つだけである。`$$` を前処理で 1 行に畳むと `buildBlockPartition` が
+ *   「最上位の範囲が余った」で落ち、**行ごとの編集が開かなくなる**
+ *   ── 数式は正しく出るので**まったく無音**の壊れ方になる。
+ * 🔑 block token なら `token.map` が N 行を 1 個で持つので、`lineMap` も
+ *   `source-blocks.ts` も 1 行も触らない。
+ */
+md.block.ruler.before(
+  'fence',
+  'pkc_math_block',
+  function mathBlockRule(state, startLine, endLine, silent) {
+    const bs = state.bMarks[startLine]! + state.tShift[startLine]!;
+    const be = state.eMarks[startLine]!;
+    // ⚠ 4 字下げは code block なので手を出さない
+    if (state.sCount[startLine]! - state.blkIndent >= 4) return false;
+    const first = state.src.slice(bs, be);
+    if (!first.startsWith('$$')) return false;
+
+    const rest = first.slice(2).trimEnd();
+    // ① 1 行で閉じる形(`$$ x $$`)
+    if (rest.endsWith('$$') && rest.length > 2) {
+      if (silent) return true;
+      const token = state.push('pkc_math_block', '', 0);
+      token.content = rest.slice(0, -2).trim();
+      token.map = [startLine, startLine + 1];
+      token.markup = '$$';
+      state.line = startLine + 1;
+      return true;
+    }
+    // ⚠ 開いた行に中身が付いていてはいけない(`$$x` で始めて次の行で閉じる形は
+    //    受けない ── 受けると「閉じ忘れ」との見分けが付かなくなる)
+    if (rest.length > 0) return false;
+
+    // ② `$$` だけの行で開き、`$$` だけの行で閉じる
+    let line = startLine + 1;
+    for (; line < endLine; line++) {
+      const s2 = state.bMarks[line]! + state.tShift[line]!;
+      const e2 = state.eMarks[line]!;
+      if (state.src.slice(s2, e2).trim() === '$$') break;
+    }
+    if (line >= endLine) return false; // 閉じが無い ── 素の段落へ渡す
+    if (silent) return true;
+    const body: string[] = [];
+    for (let i = startLine + 1; i < line; i++)
+      body.push(state.src.slice(state.bMarks[i]! + state.tShift[i]!, state.eMarks[i]!));
+    const token = state.push('pkc_math_block', '', 0);
+    token.content = body.join('\n').trim();
+    token.map = [startLine, line + 1];
+    token.markup = '$$';
+    state.line = line + 1;
+    return true;
+  },
+);
+
+md.renderer.rules.pkc_math_block = function (tokens, idx) {
+  const token = tokens[idx]!;
+  // ⚠ **行の印を必ず載せる**(この file の「拡張時の source-line anchor 規約」)
+  //    ── 載せないと、ライブエディタがこの塊を見つけられない
+  return `${buildMathHtml(token.content, true, collectSourceLineAttrs(token))}\n`;
+};
+
 // ── L-2 (2026-05-07、wave-10-2 Phase 1):Inline 修飾 ──
 //
 // 3 つの新 inline syntax を markdown-it の inline ruler に登録:
@@ -2518,6 +2667,8 @@ const SOURCE_LINE_TOKEN_TYPES: ReadonlySet<string> = new Set([
   'tr_open',
   'hr',
   'html_block',
+  // 🔴 数式の塊(#707)── 足さないと、行を押しても数式の塊へ焦点が来ない
+  'pkc_math_block',
 ]);
 
 /**

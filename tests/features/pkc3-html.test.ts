@@ -847,6 +847,42 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
     expect(box.querySelector('[data-pkc-mermaid-src] pre'), '図の器が空のまま').not.toBeNull();
   });
 
+  /**
+   * 🔴 **数式も原文のまま見せる**(#707)── 閲覧側に KaTeX と 250 KB の書体を積まない。
+   * ⚠ ここを回し忘れると **1 文字も出ない空の器**が残る(図で 1 度踏んだ型 ──
+   *   `pkc3-html.ts` のコメントが「**両方を回す**」と戒めている当のもの)。
+   */
+  it('🔴 数式は原文が読める形で出る(空の器を残さない)', async () => {
+    await run(
+      (
+        await writePortableHtml(
+          source({
+            entries: [{ lid: 'n1', body: '行の中は $E = mc^2$ です。\n\n$$\nx^2 + y^2\n$$\n' }],
+          }),
+          NOW,
+        )
+      ).blob,
+    );
+    const box = document.getElementById('body')!;
+    /**
+     * 🔴 **打った字(区切りごと)が出る**(着地前レビュー 2026-09-06・欠陥 2)。
+     * ⚠ 1 稿目は図と同じ `<pre>` に入れており、`$` が付かなかった ──
+     *   マニュアルとお知らせは「打った字のまま」と約束しているのに、
+     *   **4 つの出口のうちここだけ**が違っていた。
+     */
+    expect(box.textContent, '行の中の数式に区切りが付いていない').toContain('$E = mc^2$');
+    expect(box.textContent, '塊の数式に区切りが付いていない').toContain('$$x^2 + y^2$$');
+    const hosts = box.querySelectorAll('[data-pkc-math-src]');
+    expect(hosts.length, '数式の器が 1 つも無い(空振り)').toBe(2);
+    /**
+     * 🔴 **文を割らない** ── 行の中の器は `<span>` なので、中にブロックの
+     *   `<pre>` を入れると段落が 3 行に割れる(実測でそうなっていた)。
+     */
+    const inline = box.querySelector('[data-pkc-math-display="0"]')!;
+    expect(inline.querySelector('pre'), '行の中の数式に塊が入っている(文が割れる)').toBeNull();
+    expect(inline.closest('p'), '前提が崩れている: 行の中の数式が段落の中に無い').not.toBeNull();
+  });
+
   it('一覧から選ぶと本文が入れ替わる(選択状態も動く)', async () => {
     await run(
       (

@@ -5497,6 +5497,39 @@ li[data-pkc-row-slot] {
   padding-inline-start: var(--s5);
   color: var(--muted);
 }
+/**
+ * 🔴 **数式**(#707。user 裁定 2026-09-06「入れる」)。
+ *
+ * ⚠ 描く前は**打った字がそのまま**出る(`$E=mc^2$`)── ワーカーが立たない /
+ *   KaTeX が読めない / 式が壊れている、のどれでも同じ姿に落ちる。
+ *   だから「描けなかった形」に別の見た目を作らない(画面が 2 通りに増えない)。
+ * ⚠ **横に流す** ── 長い式は読み幅を超える。器の外へはみ出させない
+ *   (表と同じ作法 ── `table-width-css.test.ts` の主張と揃える)。
+ */
+.pkc-md-rendered .pkc-math-display {
+  display: block;
+  text-align: center;
+  margin: var(--s3) 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+/* ⚠ 行の中の数式は**行の流れを乱さない**(高さで行間を押し広げない) */
+.pkc-md-rendered .pkc-math {
+  overflow-wrap: normal;
+}
+/**
+ * 🔴 **読めなかった式の断り**(#707。user 裁定 2026-09-06)。
+ * ⚠ 色は **`--danger`** を使う ── KaTeX 自身は `#cc0000` を inline style で焼くが、
+ *   それは暗い配色の地(`#14171a`)の上で沈む(概算 2.9:1)。PKC は配色ごとに
+ *   読める赤を持っているので、そちらに合わせる。
+ * ⚠ 打った字より**小さく**出す(主役は打った字のほう ── 直す手がかりである)。
+ */
+.pkc-md-rendered .pkc-math-error {
+  margin-inline-start: var(--s2);
+  font-size: 0.85em;
+  color: var(--danger);
+}
+
 /* 🔴 **これまでのお知らせは題名だけ並べる**(#719 案 A)── 直す前は 11 件の
    中身が全部開いたまま**面の先頭**に居て、マニュアルまで 5455px あった。 */
 [data-pkc-region='help-notices'] > details {

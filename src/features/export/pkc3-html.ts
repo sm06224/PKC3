@@ -512,6 +512,23 @@ try{
         p.textContent=s;el.appendChild(p);
       });
     });
+    // 数式も原文のまま見せる(#707)── 閲覧側に KaTeX と 250 KB の書体を積まない。
+    // ⚠ 器の中は KaTeX の 2 本立て(MathML + 見た目の span)なので、素通しすると
+    //    同じ式が 2 回、崩れて出る ── だから必ず原文へ戻す。
+    // 🔴 図と同じ pre にしてはいけない(着地前レビュー 2026-09-06・欠陥 2):
+    //    ① 行の中の数式の器は span なので、中にブロックの pre を入れると
+    //       文が 3 行に割れる(渡した側は自分の画面しか見ないので気づけない)
+    //    ② data-pkc-math-src は区切りを含まないので、区切りの付かない字が出る
+    //       ── マニュアルとお知らせは「打った字のまま」と約束しており、
+    //       4 つの出口のうちここだけが違っていた
+    // ⚠ この節は template literal の中なので、注記に逆引用符を書かない
+    //    (書くと器の文字列が閉じて build が壊れる ── 1 稿目で踏んだ)
+    // 🔑 打った字(区切りごと)を、素の文字として置く。
+    Array.prototype.forEach.call(box.querySelectorAll('[data-pkc-math-src]'),function(el){
+      var t=el.getAttribute('data-pkc-math-src')||'';
+      var d=el.getAttribute('data-pkc-math-display')==='1';
+      el.textContent=d?('$$'+t+'$$'):('$'+t+'$');
+    });
     // 本文の外(frontmatter)から参照している添付 ── 添付 entry はこちらだけを持つ。
     // ⚠ 本文に書かれていて**描画に現れなかった**参照(裸の asset:key など)も
     //    ここで拾う ── 黙って消さない

@@ -105,6 +105,23 @@ export function cleanForClipboard(
     removed += 1;
   }
 
+  /**
+   * 🔴 **数式は打った字に戻す**(#707)。
+   *
+   * ⚠ KaTeX の出力は **MathML(CSS で隠す)と見た目用の span** の 2 本立てである。
+   *   貼り先はこちらの CSS を持たないので、素通しすると
+   *   **同じ式が 2 回、しかも 1 文字ずつ崩れて**貼られる。
+   * ⚠ ②の「隠してあるものを落とす」では届かない ── KaTeX が隠すのは
+   *   `.katex-mathml` の中で、`[hidden]` でも `COPY_JUNK_CLASSES` でもない。
+   * 🔑 器が原文を持っているので、**中身をそれに置き換える**
+   *   (書き出した HTML / Word と同じ判断 ── 打った字が残るほうが損が小さい)。
+   */
+  for (const el of [...root.querySelectorAll('[data-pkc-math-src]')]) {
+    const tex = el.getAttribute('data-pkc-math-src') ?? '';
+    if (tex === '') continue;
+    el.textContent = el.getAttribute('data-pkc-math-display') === '1' ? `$$${tex}$$` : `$${tex}$`;
+  }
+
   // ③ 画像。⚠ `blob:` は**この document でしか有効でない**
   for (const img of [...root.querySelectorAll('img')]) {
     const src = img.getAttribute('src') ?? '';

@@ -68,6 +68,9 @@ const CORPUS: ReadonlyArray<readonly [string, string]> = [
   ['箇条書き', '- a\n  - b\n- c\n\n1. x\n2. y\n'],
   ['タスク', '- [ ] やること\n- [x] 済んだこと\n'],
   ['表', '| a | b |\n|:--|--:|\n| 1 | 2 |\n'],
+  // ⚠ 数式は**行の中**と**行頭の塊**で器が変わる(#707)── 片方だけだと、
+  //    もう片方の規則が「誰も出さない」ままになる
+  ['数式', '行の中は $E = mc^2$ です。\n\n$$\nx^2 + y^2 = z^2\n$$\n'],
   ['引用', '> 引用\n> > 入れ子\n'],
   ['コード', '```ts\nconst x = 1;\n```\n'],
   ['水平線と区切り', '---\n\n+++\n\n+++ {role=section}\n'],
@@ -191,6 +194,12 @@ function styled(): { classes: Set<string>; attrs: Set<string> } {
 const STYLED_ELSEWHERE: Readonly<Record<string, string>> = {
   // 表のセルを押したときに binder が差し込む入力欄(#418 段①)
   'pkc-csv-cell-input': 'src/adapter/ui/actions/binder.ts',
+  /**
+   * 読めなかった式の断り(#707。user 裁定 2026-09-06「打った字 + 式が読めません」)。
+   * ⚠ `renderMarkdown` は**器と原文**しか出さない ── 読めたかどうかは
+   *   KaTeX に投げてみるまで分からないので、断りは**描いた後に**差し込まれる。
+   */
+  'pkc-math-error': 'src/adapter/ui/render/math-hydrate.ts',
   /**
    * 本文の `[名前](asset:鍵)` の隣に置く再生機(#413 段②)。
    * ⚠ `renderMarkdown` はリンクまでしか作らない ── 中身(音か動画か)は
