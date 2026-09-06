@@ -49,6 +49,38 @@ beforeEach(() => {
   document.body.append(region);
 });
 
+/**
+ * 手で進められる時計(⚠ 実時間を待つ test は書けない)。
+ *
+ * 🔴 **1 つだけ置く**(着地前レビュー 2 巡目・[軽] 7)── 2 稿目が
+ *   `clear: () => { jobs.length = 0 }` という**本物より甘い**写しを作りかけた。
+ *   ⚠ handle を無視すると「**別の予約を消す**」変異を原理的に殺せない
+ *   (CLAUDE.md §3「stub は本物の意味論を真似る」)。
+ */
+function fakeTimers() {
+  const jobs: { fn: () => void; h: number }[] = [];
+  let next = 1;
+  return {
+    port: {
+      set: (fn: () => void) => {
+        const h = next++;
+        jobs.push({ fn, h });
+        return h;
+      },
+      clear: (h: unknown) => {
+        const i = jobs.findIndex((j) => j.h === h);
+        if (i >= 0) jobs.splice(i, 1);
+      },
+    },
+    /** 予約が何件待っているか(⚠ 「予約した」を数える対照群に使う)。 */
+    pending: () => jobs.length,
+    fire: () => {
+      const all = jobs.splice(0, jobs.length);
+      for (const j of all) j.fn();
+    },
+  };
+}
+
 describe('ヘルプの面', () => {
   it('題名と、版・お知らせ・マニュアルの 3 つが出る', () => {
     new HelpRenderer(region).render();
@@ -182,11 +214,75 @@ describe('ヘルプの面', () => {
     expect(src, 'ヘルプの面が窓を開いている').not.toContain('window.open');
   });
 
-  /** ⚠ 見出しが無いと、版の行とお知らせが地続きに見える。 */
-  it('⚠ 「これまでのお知らせ」と「マニュアル」の見出しが出る', () => {
+  /**
+   * ⚠ 見出しが無いと、版の行とお知らせが地続きに見える。
+   * 🔴 **並びは「マニュアル → ショートカット → お知らせ」**(#719。user 裁定
+   *   2026-09-06 = 案 A)── cowork 実測で「使い方を知りたい」で開いた人が最初に
+   *   読むのが**リリースノート 11 件**だった(本文 106,339 字 / 5455px)。
+   * ⚠ **等値で pin する** ── 「3 つ在る」だけだと、並びが戻っても落ちない。
+   */
+  it('🔴 見出しは「マニュアル → ショートカットキー → これまでのお知らせ」の順に出る', () => {
     new HelpRenderer(region).render();
     const heads = [...region.querySelectorAll('h3')].map((e) => e.textContent);
-    expect(heads, '見出しが足りない').toEqual(['これまでのお知らせ', 'ショートカットキー', 'マニュアル']);
+    expect(heads, '見出しの並びが違う').toEqual(['マニュアル', 'ショートカットキー', 'これまでのお知らせ']);
+    /**
+     * 🔑 **版は先頭のほうに在る**(下へ沈めない ── #719 の裁定)。
+     * ⚠ **1 つだけ**であることも見る ── 「上にも出す」形にすると同じ値が 2 経路に
+     *   なり、片方だけ直して食い違う(CLAUDE.md §7 / この面の元からの戒め)。
+     */
+    const vers = region.querySelectorAll('[data-pkc-field="help-version"]');
+    expect(vers.length, '版が 2 か所に出ている(または消えた)').toBe(1);
+    const order = [...region.querySelectorAll('[data-pkc-field="help-version"], h3')].map((e) =>
+      e.getAttribute('data-pkc-field') ?? e.textContent,
+    );
+    expect(order.slice(0, 2), '版がマニュアルの見出しの直後に無い').toEqual([
+      'マニュアル',
+      'help-version',
+    ]);
+  });
+
+  /**
+   * 🔴 **面の並びを丸ごと等値で pin する**(着地前レビュー・実装 ⚠-4)。
+   *
+   * ⚠ 上の `h3` の並びだけでは足りない ── 変異試験で **3 件**が生き延びた:
+   *   ①版をマニュアルの見出しの**上**へ戻す ②目次を別窓ボタンの**前**へ戻す
+   *   ③探す欄を目次の**後ろ**へ回す。⚠ どれも h3 は 3 つのまま動かないので、
+   *   「マニュアル → ショートカット → お知らせ」の pin は**1 つも鳴らない**。
+   * 🔑 だから**器の直下の子を全部、順番どおりに**留める ── #719 の裁定は
+   *   「何が在るか」ではなく「**開いた 1 画面に何がこの順で出るか**」だった。
+   * ⚠ 名前は `data-pkc-region` → `data-pkc-field` → `タグ:字` の順に採る。
+   * 🔴 **`settings-note` だけは字も留める**(着地前レビュー 2 巡目・[中] 2)──
+   *   器の直下に 2 つ在り(目次の断りと、キーの断り)、名前しか見ないと
+   *   ①**その 2 つを入れ替える** ②**字を空にする** が両方通る。
+   *   ⚠ ②は 1 巡目の**動線 3**(「読み上げには名前が届き、目で見ている人には
+   *   届かない」= 版の下に枠だけの箱)が丸ごと戻る形である。
+   */
+  it('🔴 ヘルプの面は、器の直下がこの順に並ぶ', () => {
+    new HelpRenderer(region).render();
+    const body = region.querySelector('[data-pkc-region="help-body"]');
+    expect(body, '前提が崩れている: ヘルプの器が無い').not.toBeNull();
+    const labels = [...body!.children].map((e) => {
+      const field = e.getAttribute('data-pkc-field');
+      // ⚠ 断りは**字そのものが仕事**なので、頭を留める(上の 2 つを落とす)
+      if (field === 'settings-note') return `settings-note:${(e.textContent ?? '').slice(0, 6)}`;
+      return (
+        e.getAttribute('data-pkc-region') ?? field ?? `${e.tagName}:${e.textContent ?? ''}`
+      );
+    });
+    expect(labels, 'ヘルプの面の並びが変わった(#719 の裁定と食い違う)').toEqual([
+      'H3:マニュアル',
+      'help-version',
+      'help-manual-open',
+      'help-find-bar',
+      'settings-note:目次 ── ',
+      'help-toc',
+      'help-manual',
+      'H3:ショートカットキー',
+      'settings-note:Ctrl は',
+      'help-keymap',
+      'H3:これまでのお知らせ',
+      'help-notices',
+    ]);
   });
 
   /**
@@ -295,31 +391,6 @@ describe('ヘルプのマニュアルを、しばらく開かなければ手放�
     region = document.createElement('div');
     document.body.append(region);
   });
-
-  /** 手で進められる時計(⚠ 実時間を待つ test は書けない)。 */
-  function fakeTimers() {
-    const jobs: { fn: () => void; h: number }[] = [];
-    let next = 1;
-    return {
-      port: {
-        set: (fn: () => void) => {
-          const h = next++;
-          jobs.push({ fn, h });
-          return h;
-        },
-        clear: (h: unknown) => {
-          const i = jobs.findIndex((j) => j.h === h);
-          if (i >= 0) jobs.splice(i, 1);
-        },
-      },
-      /** 予約が何件待っているか(⚠ 「予約した」を数える対照群に使う)。 */
-      pending: () => jobs.length,
-      fire: () => {
-        const all = jobs.splice(0, jobs.length);
-        for (const j of all) j.fn();
-      },
-    };
-  }
 
   const drawn = (): string => region.querySelector('[data-pkc-region="help-manual"]')!.innerHTML;
 
@@ -829,9 +900,223 @@ describe('マニュアルの中を探す(#636)', () => {
   it('⚠ 探す欄のために見出しを増やしていない', () => {
     new HelpRenderer(region).render();
     expect([...region.querySelectorAll('h3')].map((h) => h.textContent)).toEqual([
-      'これまでのお知らせ',
-      'ショートカットキー',
       'マニュアル',
+      'ショートカットキー',
+      'これまでのお知らせ',
     ]);
+  });
+});
+
+/**
+ * 🔴 **面の中の目次**(#719。user 裁定 2026-09-06 = 案 A)。
+ *
+ * cowork 実測 2026-09-05:「本文 **106,339 字 / `scrollHeight` 5455px**、
+ * **面の中のリンク 0 件**」── 10 万字を目次なしで探す形だった。
+ *
+ * ⚠ **飛び先が在る見出しだけ並べる**(無言の dead click を作らない)── 描画器が
+ *   `id` を焼くのは h1〜h3 だけなので、h4 以下は行にしない。
+ */
+describe('ヘルプの面の目次(#719)', () => {
+  it('🔴 目次の行が出て、押すとその見出しへ飛ぶ', async () => {
+    const r = new HelpRenderer(region, { render: async (t) => renderMarkdown(t) });
+    r.render();
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    const host = region.querySelector<HTMLElement>('[data-pkc-region="help-manual"]')!;
+    // ⚠ 空振り防止 ── 実物が描けていること
+    expect(
+      host.querySelectorAll('h1,h2,h3,h4,h5,h6').length,
+      'マニュアルが描けていない(台の空振り)',
+    ).toBeGreaterThan(50);
+
+    const rows = [...region.querySelectorAll<HTMLElement>('[data-pkc-field="help-toc-row"]')];
+    expect(rows.length, '目次の行が 1 つも出ていない').toBeGreaterThan(10);
+
+    /**
+     * 🔴 **行の数 = `id` を持つ見出しの数**(等値)。
+     * ⚠ 「1 つ以上」だと、**先頭 1 件だけ出す**実装でも緑になる。
+     */
+    const withId = [...host.querySelectorAll('h1[id], h2[id], h3[id]')];
+    expect(rows.length, '目次の行と、飛び先のある見出しの数が合わない').toBe(withId.length);
+    // ⚠ 対照群 ── `id` の無い見出しは行にしない(押しても飛べないので)
+    expect(
+      host.querySelectorAll('h4[id], h5[id], h6[id]').length,
+      '前提が崩れている: h4 以下に id が焼かれている(目次の切り方を見直す)',
+    ).toBe(0);
+
+    // 押すと、その見出しへ飛ぶ
+    const seen: HTMLElement[] = [];
+    for (const h of withId)
+      (h as HTMLElement).scrollIntoView = function (this: HTMLElement): void {
+        seen.push(this);
+      };
+    rows[3]!.click();
+    // ⚠ **押した後に待つ**(着地前レビュー・動線 2 の直しで、押した所は
+    //    `manualReady` を待ってから飛ぶようになった ── 待たないと空振りになる)
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    expect(seen, '押しても飛んでいない').toHaveLength(1);
+    expect(seen[0], '押した行と違う見出しへ飛んだ').toBe(withId[3]);
+
+    /**
+     * 🔴 **行の字と段を、見出しと 1 本ずつ突き合わせる**(着地前レビュー・実装 ⚠-5)。
+     * ⚠ 数だけ合わせていたので、変異試験で **3 件**が生き延びた:
+     *   ①行の字を空にする ②`data-pkc-level` を落とす ③段をいつも `'1'` にする。
+     *   ⚠ ①は「85 個の空のボタン」、②③は「85 行が平らな 1 枚の壁」になる
+     *   (どちらも CSS の段付けが当たる先を失う)が、**数は 85 のままである**。
+     */
+    expect(
+      rows.map((r) => r.textContent),
+      '目次の字が、見出しの字と違う',
+    ).toEqual(withId.map((h) => h.textContent));
+    expect(
+      rows.map((r) => r.getAttribute('data-pkc-level')),
+      '目次の段が、見出しの段と違う(段付けの当たる先が消える)',
+    ).toEqual(withId.map((h) => h.tagName.slice(1)));
+    // ⚠ 空振り防止 ── 段が 1 種類しか出ていないなら、上の等値は何も見ていない
+    expect(
+      new Set(rows.map((r) => r.getAttribute('data-pkc-level'))).size,
+      '前提が崩れている: 見出しの段が 1 種類しか無い(段付けを判定できない)',
+    ).toBeGreaterThan(1);
+
+    /**
+     * 🔴 **数字で始まる見出しでも飛ぶ**(着地前レビュー ⚠-7 / 2 巡目)。
+     *
+     * ⚠ マニュアルの見出しは **85 本のうち 30 本**が `1-はじめる` のように数字で
+     *   始まる。⚠ 1 稿目の実装は `` `#${CSS.escape(id)}` `` で選択子を組んでおり、
+     *   **happy-dom は escape 済みの選択子を解決しない**ので、この 35% は
+     *   **unit から 1 度も通せなかった**(守れるのは smoke 1 本だけ ── §2)。
+     * 🔑 2 巡目で実装を**列挙 + id の突き合わせ**へ変えた(選択子を組まない)ので、
+     *   ここで通せるようになった ── 壊れうる状態そのものが消えている(§7)。
+     * ⚠ 上の `rows[3]` は**英字始まり**なので、そこだけでは通らない穴である。
+     */
+    const digits = withId.filter((h) => /^[0-9]/.test(h.id));
+    expect(
+      digits.length,
+      '前提が崩れている: 数字で始まる見出しが 1 つも無い(この段は何も見ていない)',
+    ).toBeGreaterThan(10);
+    // ⚠ **いちばん後ろ**を採る ── 先頭は「上から 2 番目の見出し」で、
+    //    前置きが縮んだ日に別の理由で落ちる(着地前レビュー 2 巡目・[軽] 6)
+    const last = digits[digits.length - 1]!;
+    const digitAt = withId.indexOf(last);
+    seen.length = 0;
+    rows[digitAt]!.click();
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    expect(seen, '数字で始まる見出しへ飛べていない(選択子を組み直した?)').toHaveLength(1);
+    expect(seen[0], '数字で始まる行から別の見出しへ飛んだ').toBe(last);
+  });
+
+  /**
+   * 🔴 **入れ直しても目次は同じ本数**(着地前レビュー・実装 ⚠-6)。
+   *
+   * ⚠ 5 分使わないと `dropManual()` が**本文だけ**捨てる(目次の行は残る)。
+   *   開き直すと `drawManual` → `syncToc` が走るので、⚠ **前の 85 行を消さないと
+   *   170 行に増える**(同じ見出しが 2 度並び、後半は押しても飛べない)。
+   * ⚠ 既存の test は「1 度描いた直後」しか見ていないので、この経路を
+   *   **1 度も通っていなかった**(`nav.textContent = ''` を消す変異が生き延びた)。
+   */
+  it('🔴 手放して開き直しても、目次は同じ本数のまま', async () => {
+    // ⚠ **同じ時計を使う**(自前の甘い写しを作らない ── 上の docstring)
+    const t = fakeTimers();
+    const r = new HelpRenderer(
+      region,
+      { render: async (x) => renderMarkdown(x) },
+      undefined,
+      undefined,
+      t.port,
+      1000,
+    );
+    r.render('c1');
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    const count = (): number =>
+      region.querySelectorAll('[data-pkc-field="help-toc-row"]').length;
+    const first = count();
+    expect(first, '目次が出ていない(空振り)').toBeGreaterThan(10);
+
+    // 閉じて、しばらく開かないと本文だけ手放す
+    r.onHidden();
+    expect(t.pending(), '手放す予約をしていない(前提が崩れている)').toBe(1);
+    t.fire();
+    expect(
+      region.querySelector('[data-pkc-region="help-manual"]')!.querySelectorAll('h2').length,
+      '前提が崩れている: 本文を手放していない',
+    ).toBe(0);
+
+    /**
+     * 🔴 **開き直した直後に押しても飛ぶ**(着地前レビュー 2 巡目・[重大] 1)。
+     *
+     * ⚠ 1 巡目の**動線 2** で `await this.manualReady` を足したのに、
+     *   **その 1 行を守る検査が 1 つも無かった** ── 既存の目次 test は
+     *   描き終えてから押すので、`.then` を外しても同じ結果になる(§2「通っていない」)。
+     * 🔑 だから**描き終わる前に押す** ── 手放した直後の 250ms が、当の場面である。
+     *   ⚠ ここで tick を回してから押すと、既存の test と同じで何も見ていない。
+     */
+    const jumped: HTMLElement[] = [];
+    const orig = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = function (this: HTMLElement): void {
+      jumped.push(this);
+    };
+    try {
+      // 開き直す ── 目次は組み直されるが、**増えない**
+      r.render('c1');
+      // ⚠ 前提:この瞬間、本文はまだ空である(空でなければ、押しても当たり前に飛ぶ)
+      expect(
+        region.querySelector('[data-pkc-region="help-manual"]')!.querySelectorAll('h2').length,
+        '前提が崩れている: 押す前にもう描き終わっている(待ちを判定できない)',
+      ).toBe(0);
+      region.querySelectorAll<HTMLElement>('[data-pkc-field="help-toc-row"]')[3]!.click();
+      for (let i = 0; i < 8; i++) await Promise.resolve();
+      expect(count(), '開き直したら目次が増えた(同じ見出しが 2 度並ぶ)').toBe(first);
+      expect(
+        jumped,
+        '開き直した直後に押したら、どこへも飛ばなかった(無言の dead click)',
+      ).toHaveLength(1);
+    } finally {
+      HTMLElement.prototype.scrollIntoView = orig;
+    }
+  });
+
+  /**
+   * 🔴 **これまでのお知らせは題名だけ並ぶ**(#719 案 A)。
+   * ⚠ 直す前は 11 件の中身が全部開いたまま**面の先頭**に居た。
+   */
+  it('🔴 お知らせは畳まれて出て、押すと中身が開く', () => {
+    new HelpRenderer(region).render();
+    const items = [...region.querySelectorAll<HTMLDetailsElement>('[data-pkc-help-notice]')];
+    expect(items.length, 'お知らせが 1 件も出ていない(空振り)').toBeGreaterThan(0);
+    for (const it of items) {
+      expect(it.tagName, 'お知らせが畳める形になっていない').toBe('DETAILS');
+      expect(it.open, '最初から開いている(題名だけ並べる裁定に反する)').toBe(false);
+      expect(
+        it.querySelector('[data-pkc-field="notice-title"]')?.tagName,
+        '題名が summary になっていない(押しても開かない)',
+      ).toBe('SUMMARY');
+      // ⚠ 中身は**在る**(畳んだのであって、落としたのではない)
+      expect(it.querySelectorAll('li').length, 'お知らせの中身が落ちている').toBeGreaterThan(0);
+    }
+  });
+  /**
+   * 🔴 **押しても外側は動かさない**(着地前レビュー・動線 4、実測)。
+   * ⚠ `scrollIntoView` は**スクロールできる祖先を全部**動かすので、外側まで動くと
+   *   **目次が画面の外へ出る**(実測: 押す前 0 / 押した後 494)。
+   */
+  it('🔴 目次を押しても、外側の器はスクロールしない', async () => {
+    const outer = document.createElement('div');
+    outer.setAttribute('data-pkc-region', 'detail');
+    document.body.append(outer);
+    const host = document.createElement('div');
+    outer.append(host);
+    const r = new HelpRenderer(host, { render: async (t) => renderMarkdown(t) });
+    r.render();
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    const rows = [...host.querySelectorAll<HTMLElement>('[data-pkc-field="help-toc-row"]')];
+    expect(rows.length, '目次の行が出ていない(空振り)').toBeGreaterThan(3);
+    // 台: `scrollIntoView` が外側を動かす実物のふるまいを真似る
+    for (const h of host.querySelectorAll<HTMLElement>('h1[id], h2[id], h3[id]'))
+      h.scrollIntoView = function (this: HTMLElement): void {
+        outer.scrollTop = 494;
+      };
+    outer.scrollTop = 0;
+    rows[3]!.click();
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    expect(outer.scrollTop, '外側まで動いた(目次が画面の外へ出る)').toBe(0);
   });
 });

@@ -87,6 +87,8 @@ export const HELP_MANUAL_IDLE_MS = 5 * 60_000;
 export class HelpRenderer {
   private built = false;
   private manualHost: HTMLElement | null = null;
+  /** 面の中の目次(#719)。⚠ マニュアルを描いた**後**に埋める(id が要る)。 */
+  private tocHost: HTMLElement | null = null;
   /**
    * 🔴 **マニュアルを描いてあるか**(#531 H3)。⚠ `built`(器を組んだか)とは**別**
    *   である ── 器は捨てず、**中身だけ**を手放すので、2 つの状態が要る。
@@ -207,7 +209,22 @@ export class HelpRenderer {
     body.setAttribute('data-pkc-region', 'help-body');
     this.region.append(body);
 
-    // ── ① この版 ────────────────────────────────────────
+    // ── ① マニュアル(目次つき)────────────────────────────
+    /**
+     * 🔴 **先頭はマニュアル**(#719。user 裁定 2026-09-06 = 案 A)。
+     *
+     * cowork 実測 2026-09-05:「ヘルプを開くと、まず**これまでのお知らせが 11 件**
+     * 並び、その下にショートカット・マニュアルが続く。本文 **106,339 字 /
+     * `scrollHeight` 5455px**、面の中のリンク **0 件**」──
+     * **「使い方を知りたい」で開いた人が最初に読むのがリリースノート**だった。
+     *
+     * ⚠ **版はここへ移した**(下に節を残さない)── 理由は「**沈めない**」1 つである。
+     *   ⚠ 「§7(同じ値を 2 か所に描かない)」と書いていたが、**それは理由になっていない**
+     *   (着地前レビューの指摘)── repo の門(`docs-parity`)が守っているのは
+     *   「**`APP_VERSION` を組み立てる file が 1 つ**」= 出どころであって、
+     *   同じ `versionText()` の戻り値を 2 か所に描いても食い違いようがない。
+     *   🔑 それでも 1 つにしたのは、**2 つ目を下に置くと沈む**からである。
+     */
     /**
      * 🔴 **設定から移してきた**(P11)。設定は「あなたが選ぶもの」の場所で、
      * 版は選べない ── 困ったときに見る場所がここである。
@@ -216,73 +233,20 @@ export class HelpRenderer {
      * ⚠ 版の種別(検証版 / 開発版)は**文字で出す** ── 設定は hover の `title`
      *   にしか入れておらず、タッチ端末・キーボードだけの user には届かなかった。
      */
-    const ver = document.createElement('p');
-    ver.setAttribute('data-pkc-field', 'help-version');
-    ver.textContent = versionText();
-    body.append(ver);
-
-    // ── ② 過去のお知らせ ────────────────────────────────
-    const nh = document.createElement('h3');
-    nh.textContent = 'これまでのお知らせ';
-    body.append(nh);
-
-    const list = document.createElement('div');
-    list.setAttribute('data-pkc-region', 'help-notices');
-    // ⚠ **件数を切るのは `recentNotices` だけ**(面ごとに slice を書かない)
-    for (const n of recentNotices(this.notices)) {
-      const item = document.createElement('section');
-      /**
-       * ⚠ **`data-pkc-notice` は使わない** ── 取込の注意(`notices.ts`)が
-       * 既にその名前で、同じ document に居る。名前がかぶると、片方を数える
-       * 検査がもう片方まで拾う(CLAUDE.md「id らしく見える名前は id として扱われる」)。
-       */
-      item.setAttribute('data-pkc-help-notice', n.id);
-      const t = document.createElement('h4');
-      t.setAttribute('data-pkc-field', 'notice-title');
-      // ⚠ 日付は id から引く(field を二重に持たない)
-      t.textContent = `${noticeDate(n.id)} ${n.title}`;
-      const ul = document.createElement('ul');
-      for (const line of n.items) {
-        const li = document.createElement('li');
-        // ⚠ **素のテキスト**として出す(記法は書かない決まり。test が守る)
-        li.textContent = line;
-        ul.append(li);
-      }
-      item.append(t, ul);
-      list.append(item);
-    }
-    body.append(list);
-
-    // ── ③ ショートカットキー ────────────────────────────
-    /**
-     * 🔑 **いま効いている割当**を出す(user 指示 2026-08-18)。
-     * ⚠ 割り当て直す口は**設定の面 1 か所**にする ── 同じ操作を 2 か所に置くと、
-     *   どちらが正か user にも分からなくなる。ここは読む場所である。
-     * ⚠ 面は 1 度しか組まないので、割当が変わったら**この節だけ**描き直す
-     *   (器を捨てない ── 2026-08-07 の dead click の型)。
-     */
-    const kh = document.createElement('h3');
-    kh.textContent = 'ショートカットキー';
-    body.append(kh);
-    const kn = document.createElement('p');
-    kn.setAttribute('data-pkc-field', 'settings-note');
-    kn.textContent =
-      'Ctrl は Mac では ⌘ でも同じように効きます。割り当て直しは設定画面でできます。';
-    body.append(kn);
-    this.keys = document.createElement('div');
-    this.keys.setAttribute('data-pkc-region', 'help-keymap');
-    body.append(this.keys);
-    this.syncKeys();
-    // ⚠ 購読は器と同じ寿命(面は畳んでも捨てない)── 二重に張らないよう 1 度だけ
-    this.offKeymap?.();
-    this.offKeymap = this.keymap.onChange(() => {
-      this.syncKeys();
-    });
-
-    // ── ④ マニュアル ────────────────────────────────────
     const mh = document.createElement('h3');
     mh.textContent = 'マニュアル';
     body.append(mh);
+
+    const ver = document.createElement('p');
+    ver.setAttribute('data-pkc-field', 'help-version');
+    /**
+     * ⚠ **名前を付ける**(着地前レビュー・動線 7)。⚠ 面の先頭から「マニュアル」の
+     *   見出しの下へ移したので、裸の版番号は**マニュアルの版**と読める位置になった。
+     * 🔑 何のための数字かも書く ── 版を見る唯一の理由は**不具合の報告に添えること**である。
+     */
+    ver.textContent = `この版: ${versionText()}(不具合の報告に添えてください)`;
+    body.append(ver);
+
 
     /**
      * 🔴 **アプリとして開く口**(#645。user 要望 2026-08-31)。
@@ -293,8 +257,10 @@ export class HelpRenderer {
      * ⚠ 直前の #636 で足したのは**探す欄**だけで、マニュアルは
      *   `max-height: 60vh` の箱に入ったままだった ── 3599 行を画面の 6 割の
      *   高さから覗く形は 1 ミリも変わっていない。ここが**その箱を出る道**である。
-     * ⚠ **見出しのすぐ下**に置く ── 箱の中に入れると `drawManual` の
+     * ⚠ **マニュアルの箱の外**に置く ── 箱の中に入れると `drawManual` の
      *   `innerHTML = …` で消える(探す欄と同じ理由)。
+     *   ⚠ 「見出しのすぐ下」と書いてあったが、いまは **見出し → 版 → ここ → 探す欄 →
+     *   目次 → 本文** である(#719 で並べ替えた)。
      * ⚠ **`built` ガードの内側**で 1 度だけ組む(`render()` は毎回走る)。
      * ⚠ **`<h3>` を足さない**(`help-pane.test.ts` が h3 の並びを等値 pin している)。
      */
@@ -359,12 +325,119 @@ export class HelpRenderer {
     findBar.append(find, this.findCount, this.findHits);
     body.append(findBar);
 
+    /**
+     * 🔴 **面の中の目次**(#719 案 A)。⚠ 直す前は面の中のリンクが **0 件**で、
+     * 10 万字を目次なしで探す形だった(別窓のほうには #648 で目次が在る)。
+     *
+     * ⚠ **飛び先が在る見出しだけ並べる**(dead click を作らない)── 描画器が
+     *   `id` を焼くのは **h1〜h3 だけ**(`markdown-render.ts` の `heading_open`)なので、
+     *   h4 以下は**押せる物として出さない**。
+     * ⚠ **`data-pkc-action` を足さない** ── `operation-table.test.ts` が等値 pin
+     *   しており、足すと 5 つ鳴る。押した所は**ここで直に受ける**
+     *   (探す欄・`app-dialog` の `palette-filter` と同じ前例)。
+     * ⚠ **`<a href="#…">` にしない** ── 面は `hidden` で同一 document に常駐するので、
+     *   `#slug` は**先に作られた本文面の見出し**に当たる(この file の冒頭の戒め)。
+     *   だから `<button>` + 器の `scrollTop` で送る。
+     *
+     * 🔴 **置き場所は「別窓ボタンと探す欄の後ろ」**(着地前レビュー・動線 1、実測)。
+     *   ⚠ 目次の行は**素の `<button>` が 85 個**(描いた DOM の `h1[id],h2[id],h3[id]` を
+     *   数えた実数。⚠ 原文の `^#` を数えると 91 になるが、囲みの中の `#` が混ざる)なので、
+     *   前に置くと **`Tab` を 85 回押さないと**「別のウィンドウで開く」と
+     *   「マニュアルの中を探す」に届かない ── **目次を使わない人には壁**になる。
+     * ⚠ 副産物:目次はマニュアルを描き終えてから中身が入るので、前に置くと
+     *   **入った瞬間に下のボタンが 250px ほど飛ぶ**(押そうとした物が指の下から逃げる)。
+     */
+    /**
+     * 🔴 **見える名前を付ける**(着地前レビュー・動線 3)。⚠ 直す前は `aria-label` だけ
+     *   だったので、**読み上げには名前が届き、目で見ている人には届かない**という
+     *   逆転が起きていた ── 版のすぐ下に「枠だけの箱」が出る形だった。
+     * 🔑 **段数の断りも画面に出す** ── 出るのは h1〜h3 の **85 本**(実測)で、
+     *   h4 以下は出ない(飛び先が無いため)。⚠ その断りが**マニュアルの中にしか無い**のは、
+     *   探せない人に「マニュアルを読め」と言っているのと同じである。
+     */
+    const tocHead = document.createElement('p');
+    tocHead.setAttribute('data-pkc-field', 'settings-note');
+    tocHead.textContent =
+      '目次 ── 大きい見出しだけ出ます。細かい見出しは下の「マニュアルの中を探す」か、別のウィンドウの目次(全部出ます)から探してください';
+    body.append(tocHead);
+    this.tocHost = document.createElement('nav');
+    this.tocHost.setAttribute('data-pkc-region', 'help-toc');
+    this.tocHost.setAttribute('aria-label', 'マニュアルの目次');
+    body.append(this.tocHost);
+
     this.manualHost = document.createElement('div');
     this.manualHost.setAttribute('data-pkc-region', 'help-manual');
     this.manualHost.className = 'pkc-md-rendered';
     // ⚠ 描く前も**器は置く**(後から差し込むので、器が無いと入れ先が消える)
     this.manualHost.textContent = 'マニュアルを読み込んでいます…';
     body.append(this.manualHost);
+
+    // ── ② ショートカットキー ────────────────────────────
+    /**
+     * 🔑 **いま効いている割当**を出す(user 指示 2026-08-18)。
+     * ⚠ 割り当て直す口は**設定の面 1 か所**にする ── 同じ操作を 2 か所に置くと、
+     *   どちらが正か user にも分からなくなる。ここは読む場所である。
+     * ⚠ 面は 1 度しか組まないので、割当が変わったら**この節だけ**描き直す
+     *   (器を捨てない ── 2026-08-07 の dead click の型)。
+     */
+    const kh = document.createElement('h3');
+    kh.textContent = 'ショートカットキー';
+    body.append(kh);
+    const kn = document.createElement('p');
+    kn.setAttribute('data-pkc-field', 'settings-note');
+    kn.textContent =
+      'Ctrl は Mac では ⌘ でも同じように効きます。割り当て直しは設定画面でできます。';
+    body.append(kn);
+    this.keys = document.createElement('div');
+    this.keys.setAttribute('data-pkc-region', 'help-keymap');
+    body.append(this.keys);
+    this.syncKeys();
+    // ⚠ 購読は器と同じ寿命(面は畳んでも捨てない)── 二重に張らないよう 1 度だけ
+    this.offKeymap?.();
+    this.offKeymap = this.keymap.onChange(() => {
+      this.syncKeys();
+    });
+
+    // ── ③ これまでのお知らせ(畳む)──────────────────────
+    /**
+     * 🔴 **題名だけ並べ、押すと開く**(#719 案 A)。
+     * ⚠ 直す前は 11 件の中身が**全部開いたまま**先頭に居たので、
+     *   マニュアルまで 5455px スクロールする形だった。
+     * ⚠ **`<details>` を使う** ── この repo は「主要な導線を畳まない」を規律に
+     *   持ち、`shell` に `<details>` が 0 件であることを test で pin しているが、
+     *   ここは **shell ではなくヘルプの面**で、畳むのは**読み物**である
+     *   (押す導線ではない)。
+     */
+    const nh = document.createElement('h3');
+    nh.textContent = 'これまでのお知らせ';
+    body.append(nh);
+
+    const list = document.createElement('div');
+    list.setAttribute('data-pkc-region', 'help-notices');
+    // ⚠ **件数を切るのは `recentNotices` だけ**(面ごとに slice を書かない)
+    for (const n of recentNotices(this.notices)) {
+      const item = document.createElement('details');
+      /**
+       * ⚠ **`data-pkc-notice` は使わない** ── 取込の注意(`notices.ts`)が
+       * 既にその名前で、同じ document に居る。名前がかぶると、片方を数える
+       * 検査がもう片方まで拾う(CLAUDE.md「id らしく見える名前は id として扱われる」)。
+       */
+      item.setAttribute('data-pkc-help-notice', n.id);
+      const t = document.createElement('summary');
+      t.setAttribute('data-pkc-field', 'notice-title');
+      // ⚠ 日付は id から引く(field を二重に持たない)
+      t.textContent = `${noticeDate(n.id)} ${n.title}`;
+      const ul = document.createElement('ul');
+      for (const line of n.items) {
+        const li = document.createElement('li');
+        // ⚠ **素のテキスト**として出す(記法は書かない決まり。test が守る)
+        li.textContent = line;
+        ul.append(li);
+      }
+      item.append(t, ul);
+      list.append(item);
+    }
+    body.append(list);
 
     this.manualReady = this.drawManual(currentContainerId);
     void this.manualReady;
@@ -504,6 +577,80 @@ export class HelpRenderer {
       host.innerHTML = await this.markdown.render(MANUAL_TEXT, { currentContainerId });
     } catch {
       host.textContent = MANUAL_TEXT;
+    }
+    this.syncToc();
+  }
+
+  /**
+   * 目次を組む(#719)。⚠ **描いた DOM から拾う** ── 原文を別に走査すると、
+   * 描画器が id を焼く規則(h1〜h3 / 重複の連番)と**二重に持つ**ことになる(§7)。
+   *
+   * ⚠ **`id` を持つ見出しだけ**を行にする ── 持たない見出し(h4 以下)を出すと
+   *   押しても飛べない(無言の dead click)。
+   */
+  private syncToc(): void {
+    const nav = this.tocHost;
+    const host = this.manualHost;
+    if (nav === null || host === null) return;
+    nav.textContent = '';
+    const heads = [...host.querySelectorAll<HTMLElement>('h1[id], h2[id], h3[id]')];
+    for (const h of heads) {
+      const row = document.createElement('button');
+      row.type = 'button';
+      // ⚠ **id だけ控える**(要素を掴まない)── 掴むと `dropManual` の後も
+      //    外れた見出しノードが 85 個保持される(2026-07-27 の不可侵指示と逆向き)
+      const id = h.id;
+      row.setAttribute('data-pkc-field', 'help-toc-row');
+      row.setAttribute('data-pkc-level', h.tagName.slice(1));
+      row.textContent = h.textContent ?? '';
+      row.addEventListener('click', () => {
+        /**
+         * 🔴 **描き終わるのを待つ**(着地前レビュー・動線 2)。⚠ 5 分使わないと
+         *   `dropManual()` が**本文だけ**捨てる(目次の行は残る)ので、開き直した直後の
+         *   250ms ほどは `#id` が引けず、**押しても何も起きず理由も出ない**。
+         * 🔑 同じ file の探す欄(`jumpToSection`)は既に `await this.manualReady` している
+         *   ── 新しく足した目次だけ、その 1 行が無かった。
+         */
+        void this.manualReady?.then(() => {
+          // ⚠ **id で引き直す**(参照を持たない)── 描き直しで器が入れ替わっても迷子にならない
+          /**
+           * 🔴 **選択子を組まない**(着地前レビュー 2 巡目)。
+           *
+           * ⚠ 1 稿目は `` `#${CSS.escape(id)}` `` だった。動きは正しいが、
+           *   **escape を落とした日に 30 本が無言で死ぬ**(マニュアルの見出し
+           *   85 本のうち 30 本が `1-はじめる` のように数字で始まり、素の `#1-…` は
+           *   `SyntaxError` を投げる)── いちばん気づけない壊れ方である。
+           * 🔴 そして **happy-dom は escape 済みの選択子を解決しない**(実測:
+           *   `#\31 -はじめる` に `null` が返る)ので、**その 35% を unit から
+           *   1 度も通せなかった**(守れるのは smoke 1 本だけ ── CLAUDE.md §2)。
+           * 🔑 `syncToc` と**同じ列挙**で拾って id で突き合わせれば、構文解析が
+           *   要らなくなる ── 壊れうる状態そのものが消える(§7「検出するより
+           *   起こらなくする」)。⚠ 見出し以外は拾わないので、user が本文に
+           *   同じ id を書いても迷子にならない。
+           */
+          const target =
+            [...host.querySelectorAll<HTMLElement>('h1[id], h2[id], h3[id]')].find(
+              (h) => h.id === id,
+            ) ?? null;
+          if (target === null) return;
+          /**
+           * 🔴 **外側は動かさない**(着地前レビュー・動線 4、実測)。
+           * ⚠ `scrollIntoView` は**スクロールできる祖先を全部**動かすので、
+           *   外側(`[data-pkc-region='detail']`)まで動いて**目次が画面の外へ出る**
+           *   (実測: 押す前 `outerScrollTop 0` / 押した後 **494**、目次は見えなくなった)。
+           *   目次は「押して読んで、また押す」物なので、1 回で消えては使えない。
+           * 🔑 **送ってから外側だけ戻す** ── 描画の合間に戻すので、画面には
+           *   「内側だけ動いた」ように見える。⚠ 内側を自分で計算しない
+           *   (`getBoundingClientRect` は happy-dom で 0 なので、**unit から
+           *   飛び先を確かめられなくなる** ── 観測点を捨てないほうを採った)。
+           */
+          const outer = host.closest<HTMLElement>('[data-pkc-region="detail"]');
+          const keep = outer?.scrollTop ?? 0;
+          target.scrollIntoView({ block: 'start' });
+          if (outer !== null && outer !== undefined) outer.scrollTop = keep;
+        });
+      });
+      nav.append(row);
     }
   }
 }

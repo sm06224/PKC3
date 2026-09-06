@@ -644,10 +644,30 @@ select:focus-visible {
 [data-pkc-region='browse-tabs'] [data-pkc-icon] {
   display: none;
 }
+/**
+ * 🔴 **選んでいるタブの下線は「字の色」**(#720 ②。user 裁定 2026-09-06)。
+ *
+ * cowork 実測 2026-09-05:「5 つのタブに `role` も `aria-selected` も無く、
+ * 選択状態は **`background` と `color` だけ**」── ①で読み上げには届くようにしたが、
+ * **色が見分けにくい人には手がかりが 1 つも無い**ままだった。
+ *
+ * 🔑 **色ではなく濃さで示す** ── 下線を `--accent` から `--fg`(本文の字の色)へ。
+ *   ⚠ 線が乗るのは**タブ自身の地**(`--accent-dim`)なので、そことの比で測る:
+ *
+ *   | | `--fg` / 地 | `--accent` / 地 |
+ *   |---|---|---|
+ *   | 9 配色のうち **8 つ** | **6.66 〜 14.30** | 3.07 〜 5.68 |
+ *   | terminal だけ | 3.59 | 4.03 |
+ *
+ *   ⚠ **terminal では少し下がる**が、UI 部品の基準(3:1)は満たしている ──
+ *   残り 8 配色で**2〜4 倍**強くなるほうを採った(user 裁定)。
+ * ⚠ 地(`--accent-dim`)と太字は**残す** ── 手がかりを増やしたのであって、
+ *   置き換えたのではない。
+ */
 [data-pkc-region='browse-tabs'] [data-pkc-active] {
   background: var(--accent-dim);
   color: var(--accent-dim-fg);
-  box-shadow: inset 0 -2px 0 var(--accent);
+  box-shadow: inset 0 -2px 0 var(--fg);
   font-weight: 600;
 }
 /* 左の列の下端: **ノート全体**に対する操作 */
@@ -5419,6 +5439,74 @@ li[data-pkc-row-slot] {
  * 「同じものは同じ場所」を崩さないよう、器の padding は共有している(上)。
  * ⚠ マニュアルは本文と**同じ体裁**で出す(`.pkc-md-rendered` を付けてある)。
  */
+/**
+ * 🔴 **ヘルプの面の中の目次**(#719。user 裁定 2026-09-06 = 案 A)。
+ *
+ * cowork 実測 2026-09-05:「本文 **106,339 字 / `scrollHeight` 5455px**、
+ * 面の中のリンク **0 件**」── 10 万字を目次なしで探す形だった。
+ *
+ * ⚠ **高さを切って自分で流す** ── 切らないと目次だけで画面が埋まり、
+ *   「先頭にマニュアルを置いた」意味が消える(マニュアルの h1〜h3 は 100 行を超える)。
+ * ⚠ 段付けは**押し込みの深さ**だけ ── 色は情報にだけ使う(業務画面の作法)。
+ */
+[data-pkc-region='help-toc'] {
+  max-height: 30vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--s2);
+  margin-bottom: var(--s3);
+}
+/* ⚠ ボタンの既定(高さ固定・中央寄せ・枠)を**ここで外す** ── 目次の行は
+   読み物であって、押し所の粒ではない(字が折り返しても潰さない)。 */
+[data-pkc-region='help-toc'] [data-pkc-field='help-toc-row'] {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  justify-content: flex-start;
+  text-align: start;
+  border: none;
+  background: none;
+  padding: 2px var(--s2);
+  white-space: normal;
+  /* ⚠ **折り返しを許したら行間も戻す**(着地前レビュー 2 巡目・記録 2)──
+     素のボタンは 1 行しか出さないので `line-height: 1` だが、そのままだと
+     **2 行になった見出しが行間 0 で密着する**(マニュアルの見出しは 85 本中
+     4 本が 30 字超で、文字の大きさを上げるほど折り返す行が増える)。 */
+  line-height: 1.4;
+}
+[data-pkc-region='help-toc'] [data-pkc-field='help-toc-row']:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+/* 🔴 **段付けは行の名前ごと名指しする**(着地前レビュー 2 巡目・[中] 4)。
+   ⚠ 1 稿目は `[data-pkc-level='2']` だけで、行の規則の `padding: 2px var(--s2)`
+   (shorthand) と**詳細度が同じ (0,2,0)** だった ── 勝敗が「この file に書いた順」
+   だけで決まるので、3 規則を上へ動かすだけで **85 行が押し込みゼロの平らな壁**に
+   戻る(規則は在るままなので、字面を見る検査は全部緑)。
+   🔑 行の名前を足して (0,3,0) にした ── どこへ動かしても shorthand に負けない
+   (CLAUDE.md §7「衝突は検出するより起こらなくする」)。 */
+[data-pkc-region='help-toc'] [data-pkc-field='help-toc-row'][data-pkc-level='1'] {
+  font-weight: 600;
+}
+[data-pkc-region='help-toc'] [data-pkc-field='help-toc-row'][data-pkc-level='2'] {
+  padding-inline-start: var(--s4);
+}
+[data-pkc-region='help-toc'] [data-pkc-field='help-toc-row'][data-pkc-level='3'] {
+  padding-inline-start: var(--s5);
+  color: var(--muted);
+}
+/* 🔴 **これまでのお知らせは題名だけ並べる**(#719 案 A)── 直す前は 11 件の
+   中身が全部開いたまま**面の先頭**に居て、マニュアルまで 5455px あった。 */
+[data-pkc-region='help-notices'] > details {
+  margin: 0 0 var(--s3);
+}
+[data-pkc-region='help-notices'] > details > summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
 [data-pkc-region='help-notices'] section {
   margin: 0 0 var(--s4);
 }

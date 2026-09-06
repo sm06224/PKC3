@@ -71,6 +71,17 @@ const PAIRS: readonly { fg: string; bg: string; min: number; what: string }[] = 
   { fg: '--accent-dim-fg', bg: '--accent-dim', min: 4.5, what: '選択中の行' },
   { fg: '--danger', bg: '--surface', min: 4, what: '危険な操作' },
   { fg: '--accent', bg: '--surface', min: 3, what: 'リンク・強調' },
+  /**
+   * 🔴 **選んでいるタブの下線**(#720 ②。着地前レビュー・実装 1)。
+   * ⚠ この PR が**新しく作った重なり**である ── 線は `--fg`、乗る地は
+   *   タブ自身の `--accent-dim`(`app.css` の `browse-tabs [data-pkc-active]`)。
+   * ⚠ **名前を pin する検査では守れない** ── `shell-a11y.test.ts` は
+   *   `var(--fg)` という**綴り**しか見ないので、**名前が同じまま値が変わる**日に
+   *   何も鳴らない(CLAUDE.md §1「需要の数を見て供給を見ていない」の色版)。
+   * ⚠ terminal は余裕 0.59(3.59)で 9 配色中いちばん薄い ── 次にこの配色を
+   *   触る人が気づけるように、ここで下限を持つ。
+   */
+  { fg: '--fg', bg: '--accent-dim', min: 3, what: '選んでいるタブの下線' },
   { fg: '--border', bg: '--surface', min: 1.2, what: '枠(見えること)' },
   // コードの色は `pre`(= `--surface-2`)の上に載る。**本文と同じ 4.5:1** を課す
   // ── 「色が付いていれば読める」ではない(solarized の公式 green は 2.6:1)

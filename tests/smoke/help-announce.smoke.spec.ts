@@ -33,7 +33,124 @@ test('🔴 ヘルプの面が開き、マニュアルが描かれる', async ({ 
   // ① 版が**文字で**出る(hover の title ではない ── タッチ端末にも届く)
   const ver = page.locator('[data-pkc-field="help-version"]');
   await expect(ver).toBeVisible();
-  expect((await ver.textContent()) ?? '', '版が出ていない').toMatch(/^pkc3 v\d/);
+  // ⚠ **名前が付いた**(着地前レビュー・動線 7)── 「マニュアル」の見出しの下に
+  //    裸の版番号を置くと**マニュアルの版**と読める。何のための数字かも書く。
+  expect((await ver.textContent()) ?? '', '版が出ていない').toMatch(/^この版: pkc3 v\d/);
+  expect((await ver.textContent()) ?? '', '版を見る理由が書かれていない').toContain('不具合の報告');
+
+  /**
+   * ① b 🔴 **開いた直後の 1 画面に、マニュアルの目次と版が見える**
+   *      (#719。user 裁定 2026-09-06 = 案 A の「直ったと言える条件」そのもの)。
+   *
+   * ⚠ 直す前は**先頭がお知らせ 11 件**で、マニュアルは
+   *   `scrollHeight` 5455px の下だった ── **面の中のリンクは 0 件**。
+   * 🔑 観測点は**窓の中に見えているか** ── 「要素が在る」だけだと、下へ沈めた実装でも
+   *   緑になる(`toBeVisible` は窓の外でも真になりうる)。
+   * ⚠ **器の矩形と比べてはいけない**(1 稿目でそう外した)── `help-body` は
+   *   中身の高さそのままなので、**何を置いても「器の中」になる**。
+   */
+  const body = page.locator('[data-pkc-region="help-body"]');
+  const inFirstScreen = async (sel: string): Promise<boolean> =>
+    page.evaluate((q) => {
+      const el = document.querySelector(q);
+      if (el === null) throw new Error(`前提が崩れている: ${q} が無い`);
+      const r = el.getBoundingClientRect();
+      return r.top < window.innerHeight && r.bottom > 0;
+    }, sel);
+  await expect(body).toBeVisible();
+  await expect(page.locator('[data-pkc-field="help-toc-row"]').first()).toBeVisible({
+    timeout: 15_000,
+  });
+  expect(await inFirstScreen('[data-pkc-field="help-version"]'), '版が最初の画面に無い').toBe(true);
+  expect(await inFirstScreen('[data-pkc-field="help-toc-row"]'), '目次が最初の画面に無い').toBe(true);
+  // ⚠ **空振り防止** ── お知らせが**下にある**こと(上に居たら、上の 2 つは自明に成り立つ)
+  expect(
+    await inFirstScreen('[data-pkc-help-notice]'),
+    'お知らせがまだ先頭に居る(並べ替えが効いていない)',
+  ).toBe(false);
+  /**
+   * 🔑 **目次の行を押すと、その節へ送られる**。
+   * ⚠ 動くのは `help-body` ではなく**マニュアルの箱**(`help-manual` は
+   *   `max-height: 60vh; overflow: auto` の器)── 1 稿目は器を取り違えて、
+   *   「押しても動かない」と読んだ。
+   */
+  const manualBox = page.locator('[data-pkc-region="help-manual"]');
+  const outer = page.locator('[data-pkc-region="detail"]');
+  const before = await manualBox.evaluate((el) => el.scrollTop);
+  expect(before, '前提が崩れている: 開いた直後なのに既にスクロールしている').toBe(0);
+  expect(
+    await outer.evaluate((el) => el.scrollTop),
+    '前提が崩れている: 外側が既にスクロールしている',
+  ).toBe(0);
+  await page.locator('[data-pkc-field="help-toc-row"]').nth(8).click();
+  await expect.poll(async () => manualBox.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  /**
+   * 🔴 **外側は動かない**(着地前レビュー・動線 4、実測で見つかった)。
+   * ⚠ `scrollIntoView` は**スクロールできる祖先を全部**動かすので、放っておくと
+   *   外側まで動いて**目次が画面の外へ出る**(実測: 押す前 0 / 押した後 **494**)。
+   *   目次は「押して読んで、また押す」物なので、1 回で消えては使えない。
+   */
+  expect(
+    await outer.evaluate((el) => el.scrollTop),
+    '外側までスクロールした(目次が画面の外へ出る)',
+  ).toBe(0);
+  expect(
+    await inFirstScreen('[data-pkc-region="help-toc"]'),
+    '押した後、目次が画面から消えた',
+  ).toBe(true);
+
+  /**
+   * 🔴 **数字で始まる見出しの行でも飛ぶ**(着地前レビュー・実装 ⚠-7)。
+   *
+   * ⚠ マニュアルの見出しは **85 本のうち 30 本**が `1-はじめる` のように数字で
+   *   始まる。素の `#1-…` は `SyntaxError` を投げるので、`CSS.escape` を外すと
+   *   **目次の 35% が押しても何も起きず、理由も出ない**。
+   * 🔑 2 巡目で実装を**列挙 + id の突き合わせ**へ変えた(選択子を組まない)ので、
+   *   unit でも通せるようになった(`help-pane.test.ts` の目次の it)── ここは
+   *   **実ブラウザで本当に送られること**を見る側である。
+   * ⚠ 上の nth(8) が英字始まりなら、この穴は 1 度も通らない ──
+   *   数字始まりの行を**名指しで**選ぶ。
+   */
+  await manualBox.evaluate((el) => {
+    el.scrollTop = 0;
+  });
+  const digitAt = await page.evaluate(() => {
+    const host = document.querySelector('[data-pkc-region="help-manual"]');
+    if (host === null) throw new Error('前提が崩れている: マニュアルの箱が無い');
+    const ids = [...host.querySelectorAll('h1[id], h2[id], h3[id]')].map((h) => h.id);
+    // ⚠ **いちばん後ろ**を採る(着地前レビュー 2 巡目・[軽] 6)── 先頭の 1 件は
+    //    上から 2 番目の見出しで `scrollTop` の余裕がいちばん小さく、前置きが
+    //    縮んだ日に**この件と無関係な理由で**赤くなる(そして「数字始まりが壊れた」と読まれる)
+    return ids.map((id, i) => (/^[0-9]/.test(id) ? i : -1)).filter((i) => i >= 0).pop() ?? -1;
+  });
+  expect(digitAt, '前提が崩れている: 数字で始まる見出しが 1 つも無い').toBeGreaterThanOrEqual(0);
+  await page.locator('[data-pkc-field="help-toc-row"]').nth(digitAt).click();
+  await expect
+    .poll(async () => manualBox.evaluate((el) => el.scrollTop), { timeout: 5000 })
+    .toBeGreaterThan(0);
+
+  /**
+   * 🔴 **目次は「別のウィンドウで開く」と「探す欄」の後ろに在る**
+   * (着地前レビュー・動線 1)。⚠ 目次の行は**素の button が 85 個**(実測 ──
+   *   原文の `^#` を数えると 91 になるが、囲みの中の `#` が混ざる)なので、
+   *   前に置くと `Tab` を 85 回押さないとその 2 つに届かない。
+   * 🔑 DOM の並びで見る(`Tab` の順はこれで決まる)。
+   */
+  const tabOrder = await page.evaluate(() => {
+    const host = document.querySelector('[data-pkc-region="help-body"]');
+    if (host === null) throw new Error('前提が崩れている: ヘルプの器が無い');
+    const els = [...host.querySelectorAll('[data-pkc-action="open-manual-window"], [data-pkc-field="help-find"], [data-pkc-field="help-toc-row"]')];
+    return els.map((e) => e.getAttribute('data-pkc-action') ?? e.getAttribute('data-pkc-field') ?? '');
+  });
+  expect(tabOrder.slice(0, 2), '目次が別窓ボタン・探す欄より前に居る(Tab が 85 回になる)').toEqual([
+    'open-manual-window',
+    'help-find',
+  ]);
+  // ⚠ 空振り防止 ── 目次の行が本当に何十個も在ること
+  expect(
+    tabOrder.filter((x) => x === 'help-toc-row').length,
+    '目次の行が少なすぎる(この主張が意味を持たない)',
+  ).toBeGreaterThan(30);
 
   // ② 過去のお知らせが出る
   await expect(page.locator('[data-pkc-help-notice]').first()).toBeVisible();

@@ -42,6 +42,36 @@ test('🔴 最初はフォルダの面で開き、2 クリックで中へ入る'
   await expect(page.locator('[data-pkc-browse="filer"][data-pkc-active]')).toHaveCount(1);
   await expect(page.locator('[data-pkc-region="filer-table"]')).toBeVisible();
 
+  /**
+   * 🔴 **選んでいるタブに、色以外の手がかりがある**(#720 ②。user 裁定 2026-09-06)。
+   *
+   * ⚠ 直す前の手がかりは「地の色」と「下線の色(`--accent`)」だけで、
+   *   **色が見分けにくい人には何も残らなかった**。下線を**本文の字の色**にする。
+   * 🔑 観測点は**実際に組まれた影**(`box-shadow`)── 字面ではなくブラウザが解決した値を
+   *   見るので、トークンの張り替えで消えた日も落ちる。
+   * ⚠ **対照群**:選んでいないタブには影が無い(在ったら「選んでいる印」ではない)。
+   */
+  const shadows = await page.evaluate(() => {
+    const on = document.querySelector('[data-pkc-browse="filer"][data-pkc-active]');
+    const off = document.querySelector('[data-pkc-browse="list"]:not([data-pkc-active])');
+    if (on === null || off === null) throw new Error('前提が崩れている: タブが揃っていない');
+    return {
+      on: getComputedStyle(on).boxShadow,
+      off: getComputedStyle(off).boxShadow,
+      fg: getComputedStyle(document.documentElement).getPropertyValue('--fg').trim(),
+      bodyFg: getComputedStyle(document.body).color,
+    };
+  });
+  expect(shadows.on, `選んでいるタブに下線が無い(${shadows.on})`).toContain('inset');
+  expect(shadows.on, `下線が 2px でない(${shadows.on})`).toContain('-2px');
+  // 🔑 影の色 = 本文の字の色(トークンを張り替えても、色が一致していることで見る)
+  expect(
+    shadows.on.startsWith(shadows.bodyFg),
+    `下線が字の色でない(影 ${shadows.on} / 字 ${shadows.bodyFg})`,
+  ).toBe(true);
+  // ⚠ 対照群 ── 選んでいないタブには影が無い
+  expect(shadows.off, `選んでいないタブにも下線が出ている(${shadows.off})`).toBe('none');
+
   await makeFolder(page, 'はこ');
   await createEntry(page, 'text');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
