@@ -322,3 +322,83 @@ test('🔴 Tab で右、Enter で下へ、押し直さずに続けて打てる (
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **指で触る端末には、押せる升の印が常に出る**(#750 I2。user 裁定 2026-09-06)。
+ *
+ * ⚠ 直す前の合図は **`:hover` 1 つだけ**で、**指で触る端末に hover は無い** ──
+ *   押せることを知らせる物が 1 つも出ていなかった。
+ * ⚠ **unit では見られない** ── happy-dom は `@media` を組まないし、
+ *   `::after` の実寸も持たない。
+ * 🔑 観測点は **`::after` が実際に組まれたか**(規則が在るかではない)。
+ */
+test.describe('指で触る端末(#750 I2)', () => {
+  test.use({ hasTouch: true });
+
+  test('🔴 押せる升に、常に見える印が出る', async ({ page }) => {
+    const errors = collectPageErrors(page);
+    /**
+     * ⚠ **幅は広いまま**(タブレット / 触れる画面のノート)── `hover: none` は
+     *   幅ではなく**触れるかどうか**で決まるので、狭い画面にする必要は無い。
+     *   🔑 狭くすると本文が別ページになり、この件と無関係な理由で組めなくなる
+     *   (1 稿目は 390px にして `createEntry` の所で落ちた)。
+     */
+    await page.setViewportSize({ width: 1100, height: 900 });
+    await useSplitEditor(page);
+    await gotoApp(page);
+    await createEntry(page, 'text');
+    await page
+      .locator('[data-pkc-field="editor-body"]')
+      .fill('| 品 | 数 |\n|---|---|\n| りんご | 3 |\n');
+    await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+
+    const cell = page.locator(CELL).first();
+    await expect(cell, '押せる升が出ていない(空振り)').toBeVisible({ timeout: 15_000 });
+    const mark = await cell.evaluate((el) => {
+      const cs = getComputedStyle(el, '::after');
+      return { content: cs.content, w: cs.borderBottomWidth, color: cs.borderBottomColor };
+    });
+    expect(mark.content, '印が出ていない(指で触る端末で押せることが分からない)').not.toBe(
+      'none',
+    );
+    expect(mark.w, '印の大きさが 0(見えない)').not.toBe('0px');
+
+    /**
+     * ⚠ **空振り防止** ── 押せない升(見出しの区切りの行)には印を出さない。
+     *   出していると「押せる印」が意味を失う。
+     */
+    const dead = await page.evaluate(() => {
+      const t = document.querySelector('[data-pkc-md-block-kind="table"] table');
+      const th = t?.querySelector('th');
+      if (th === null || th === undefined) return 'no-th';
+      return th.hasAttribute('data-pkc-action') ? 'editable' : getComputedStyle(th, '::after').content;
+    });
+    expect(dead, '押せない升にも印が出ている').not.toBe('"\\"\\""');
+
+    expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **マウスのある端末は 1px も変わらない**(#750 I2 の対照群)。
+ * ⚠ これが無いと、`@media (hover: none)` の囲みを外す変異が**素通りする**
+ *   ── 上の test は印が「出ること」しか見ていないので、全端末に出しても緑になる。
+ */
+test('🔴 マウスのある端末には、升の印を出さない (#750 I2 の対照群)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1100, height: 900 });
+  await useSplitEditor(page);
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page
+    .locator('[data-pkc-field="editor-body"]')
+    .fill('| 品 | 数 |\n|---|---|\n| りんご | 3 |\n');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+
+  const cell = page.locator(CELL).first();
+  await expect(cell, '押せる升が出ていない(空振り)').toBeVisible({ timeout: 15_000 });
+  const content = await cell.evaluate((el) => getComputedStyle(el, '::after').content);
+  expect(content, 'マウスのある端末にも印が出ている(見え方を勝手に変えている)').toBe('none');
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
