@@ -549,11 +549,14 @@ export function pickCopyFormatInApp(
      *   出ないので、題名だけが約束を残すと user は「壊れている」か
      *   「自分の押し方が悪い」と読む ── **在る物だけを名乗る**。
      * 🔑 判定は**並べる行そのもの**から採る(別の口に聞かない ── §7)。
+     * ⚠ **「持ち出す」とは書かない**(user 裁定 2026-09-06)── マニュアルでの
+     *   「持ち出す」は **PKC3 ごと / 設定を外へ出す**ことに 8 回使われていて、
+     *   表 1 つには重すぎる(「書き出す」は 77 回)。しかも上の 5 つのうち 4 つは
+     *   **クリップボードへのコピー**であって、持ち出しでも書き出しでもない。
      */
-    title:
-      choices.some((c) => c.separatorBefore === true)
-        ? 'この表を持ち出す / 書き換える'
-        : 'この表をコピー',
+    title: choices.some((c) => c.separatorBefore === true)
+      ? 'この表をコピー / 書き換える'
+      : 'この表をコピー',
     field: 'pick-copy-format',
     indexAttr: 'data-pkc-copy-format-index',
     note: '',
