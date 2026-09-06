@@ -565,7 +565,18 @@ export function tableMenuActions(
  *   片方だけ逆になる形を作らない(`tests/features/entry-actions.test.ts` が対で見る)。
  */
 export function tableConvertPickLabel(from: 'markdown' | 'csv'): string {
-  return from === 'markdown' ? '本文を CSV の表に書き換える' : '本文を Markdown の表に書き換える';
+  /**
+   * 🔴 **押す前に「何ができて、何が使えなくなるか」を言う**(user 裁定 2026-09-06、
+   * 着地前レビュー・動線の「見てほしい点 3」への答え)。
+   *
+   * ⚠ 直す前は**押した後の 1 行**にしか書いていなかった ── 決める材料は
+   *   **押す前**に要る(「CSV の表」が何なのかは、この行だけでは分からない)。
+   * ⚠ そして逆向きは**損を 1 文字も言っていなかった** ── 片方だけ得を語る
+   *   非対称は、戻した user が「＋ × が消えた」と驚く形で表に出る。
+   */
+  return from === 'markdown'
+    ? '本文を CSV の表に書き換える(行と列を足せて、式も使えます)'
+    : '本文を Markdown の表に書き換える(よそへ貼りやすい形。行・列の ＋ × と式は使えなくなります)';
 }
 
 /**

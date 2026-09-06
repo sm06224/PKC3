@@ -246,7 +246,9 @@ test('🔴 ▾ の小窓から、本文の表を作り変えられる (#708 裁�
     page.locator('[data-pkc-field="pick-copy-format-sep"] ~ [data-pkc-field="pick-copy-format"]'),
     '区切りより下に在るのが、書き換える 1 行だけになっていない',
   ).toHaveCount(1);
-  await expect(rows.nth(5), '書き換える行の字が違う').toHaveText('本文を CSV の表に書き換える');
+  await expect(rows.nth(5), '書き換える行の字が違う').toHaveText(
+    '本文を CSV の表に書き換える(行と列を足せて、式も使えます)',
+  );
 
   await clickReal(page, '[data-pkc-field="pick-copy-format"][data-pkc-copy-format-index="5"]');
 
@@ -267,7 +269,9 @@ test('🔴 ▾ の小窓から、本文の表を作り変えられる (#708 裁�
   /** 🔴 **戻せる**(片道の操作を作らない ── user 指示 2026-08-23)。 */
   await clickReal(page, menu);
   await expect(rows, '作り変えた後に一覧が出ない').toHaveCount(6);
-  await expect(rows.nth(5), '戻す字が出ていない').toHaveText('本文を Markdown の表に書き換える');
+  await expect(rows.nth(5), '戻す字が出ていない').toHaveText(
+    '本文を Markdown の表に書き換える(よそへ貼りやすい形。行・列の ＋ × と式は使えなくなります)',
+  );
 
   expect(errors, `ページで例外が出た: ${errors.join(' / ')}`).toEqual([]);
 });
