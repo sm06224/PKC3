@@ -25,8 +25,16 @@ const BODY = ['# 買い物', '', '| 品名 | 数 |', '|---|---|', '| りんご |
 );
 
 const MENU = '[data-pkc-region="context-menu"]';
-/** 升が**押せる形**か ── csv の表になった証拠(markdown の表は押せない)。 */
+/** 押せる升(⚠ #708 段④ で **markdown の表にも出る**ので、これは形の証拠ではない)。 */
 const CELL = '[data-pkc-field="detail-body"] [data-pkc-action="edit-cell"]';
+/**
+ * 🔴 **csv の表になった証拠**(#708 段④ で観測点を差し替えた)。
+ *
+ * ⚠ 直す前は「升が押せるか」で形を見分けていたが、段④ で **markdown の表の升も
+ *   押せるようになった**ので、その印は**両方で真**になった ── 形を見分けられない。
+ * 🔑 いま形を分けるのは **行・列を足す ＋ ×**(`shape-cell`)である ── csv の表にしか出ない。
+ */
+const CSV_ONLY = '[data-pkc-field="detail-body"] [data-pkc-action="shape-cell"]';
 
 test('🔴 表を右クリックして形を変えると、保存された本文も変わる (#708 段②)', async ({
   page,
@@ -41,8 +49,8 @@ test('🔴 表を右クリックして形を変えると、保存された本文
 
   const table = page.locator('[data-pkc-field="detail-body"] table');
   await expect(table, '表が描かれていない').toHaveCount(1, { timeout: 15_000 });
-  // 🔑 **前提**:markdown の表なので升は押せない(これが user の不満そのもの)
-  await expect(page.locator(CELL), '前提: markdown の表の升が押せてしまっている').toHaveCount(0);
+  // 🔑 **前提**:まだ markdown の表である(行・列の ＋ × は出ていない)
+  await expect(page.locator(CSV_ONLY), '前提: もう csv の表になっている').toHaveCount(0);
 
   // ── ① 表を右クリックすると「CSV の表にする」が出る
   await table.locator('td').first().click({ button: 'right' });
@@ -53,9 +61,14 @@ test('🔴 表を右クリックして形を変えると、保存された本文
 
   // ── ② 押すと、升を押して打てる表に変わる
   await clickReal(page, toCsv);
-  await expect(page.locator(CELL).first(), '升が押せる形にならない').toBeVisible({
-    timeout: 15_000,
-  });
+  /**
+   * ⚠ **`toBeVisible` では見られない** ── ＋ × は行に乗せるまで `visibility: hidden`
+   *   である(`app.css`)。🔑 観測点は「**その印が焼かれているか**」にする。
+   */
+  await expect(
+    page.locator(CSV_ONLY),
+    'csv の表になっていない(行・列の ＋ × が焼かれていない)',
+  ).not.toHaveCount(0, { timeout: 15_000 });
   await expect(page.locator(CELL), '升の数が変わった(表が組み替わった)').toHaveCount(4);
   await expect(table, '表が消えた / 増えた').toHaveCount(1);
   await expect(
@@ -69,7 +82,7 @@ test('🔴 表を右クリックして形を変えると、保存された本文
    */
   await page.reload();
   await page.locator('[data-pkc-region="filer-table"] tbody tr').first().click();
-  await expect(page.locator(CELL).first(), '読み直したら markdown へ戻った').toBeVisible({
+  await expect(page.locator(CSV_ONLY), '読み直したら markdown へ戻った').not.toHaveCount(0, {
     timeout: 15_000,
   });
   await expect(page.locator(CELL).nth(2), '升の字が消えた').toHaveText(/りんご/);
@@ -82,9 +95,12 @@ test('🔴 表を右クリックして形を変えると、保存された本文
   const toMd = page.locator(`${MENU} [data-pkc-action="table-to-markdown"]`);
   await expect(toMd, '「Markdown の表にする」が出ていない').toHaveText('Markdown の表にする');
   await clickReal(page, toMd);
-  await expect(page.locator(CELL), 'markdown へ戻っていない(升がまだ押せる)').toHaveCount(0, {
-    timeout: 15_000,
-  });
+  await expect(page.locator(CSV_ONLY), 'markdown へ戻っていない(＋ × がまだ出ている)').toHaveCount(
+    0,
+    { timeout: 15_000 },
+  );
+  // 🔑 戻っても**升は押せるまま**(#708 段④)── 形は戻り、打ちやすさは残る
+  await expect(page.locator(CELL), '戻したら升が押せなくなった').toHaveCount(4);
   await expect(
     page.locator('[data-pkc-field="detail-body"] table'),
     '戻したら表が消えた',

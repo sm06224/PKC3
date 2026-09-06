@@ -24,7 +24,15 @@ import { DELIMITER, csvEscapeField, parseCsv, type CsvPositions } from './csv-ta
 import { parseRenderableFence } from './markdown-render';
 import { scanContainers } from './source-blocks';
 import { insertLines, moveLines } from './line-move';
-import { convertTable, tableAt, tableConvertRefusal, type TableFormat } from './table-convert';
+import { gfmCellText } from './html-to-markdown';
+import {
+  convertTable,
+  mdCellSpan,
+  mdTableAt,
+  tableAt,
+  tableConvertRefusal,
+  type TableFormat,
+} from './table-convert';
 
 /** 何をするか。⚠ **やり直せる形で持つ**(未達 commit との合流に要る)。 */
 export type BodyRewrite =
@@ -584,6 +592,36 @@ export function isTaskLine(body: string, line: number): boolean {
  *   - **そのセルが無い**(列が足りない)── 黙って足さない。列を増やすのは別の操作である
  *   - 書き換えても**同じ字**になる(呼び側が「書かない」を選べる)
  */
+/**
+ * 🔴 **markdown の表の升 1 つを差し替える**(#708 段④)。
+ *
+ * 🔑 **触る所だけを触る** ── 升の原文の範囲(`mdCellSpan`)だけを splice するので、
+ *   同じ行の他の升も、余白も、1 バイトも動かない(`csv-cell` と同じ作法)。
+ * 🔴 **書き戻すときに `|` を逃がし直す** ── 読み手(markdown-it)は升の原文から
+ *   **`\|` の逃がしだけ外して**渡してくる(実測:`a\|b` → `a|b`)ので、そのまま
+ *   書き戻すと**升の中の `|` が列の区切りとして読まれ、表がずれる**。
+ *   ⚠ 逃がす規則は `gfmCellText` の 1 本を借りる(§7)── ここに 2 本目を書かない。
+ */
+function rewriteMdCell(
+  lines: string[],
+  rewrite: { line: number; col: number; value: string },
+): string | null {
+  const body = lines.join('\n');
+  const at = mdTableAt(body, rewrite.line);
+  if (at === null) return null;
+  // ⚠ 区切りの行は表の骨格である(押せる印も焼いていない)
+  if (rewrite.line === at.start + 1) return null;
+  const line = lines[rewrite.line];
+  if (line === undefined) return null;
+  const span = mdCellSpan(line, rewrite.col);
+  if (span === null) return null;
+  const next = gfmCellText(rewrite.value);
+  // ⚠ 同じ字なら書かない(呼び側が「書かない」を選べる ── `csv-cell` と同じ)
+  if (line.slice(span.start, span.end) === next) return null;
+  lines[rewrite.line] = line.slice(0, span.start) + next + line.slice(span.end);
+  return lines.join('\n');
+}
+
 function rewriteCsvCell(
   body: string,
   rewrite: { line: number; col: number; value: string },
@@ -592,7 +630,17 @@ function rewriteCsvCell(
   const line = lines[rewrite.line];
   if (line === undefined) return null;
   const table = csvTableAt(body, rewrite.line);
-  if (table === null) return null;
+  /**
+   * 🔴 **markdown の表の升も、同じ口で打てる**(#708 段④)。
+   *
+   * ⚠ csv の囲みの中でなければ、**markdown の表かどうか**を原文から引き直す ──
+   *   「どんな行も表の行として読める」ので、`tableAt` を通さずに `|` で割ると
+   *   **段落の 1 行を表として書き換える**(`csvTableAt` の註記と同じ罠)。
+   * ⚠ **区切りの行(`|---|`)は触らない** ── そこを書き換えると表が表でなくなる。
+   * ⚠ 升の数が見出しより少ない行では、読み手が**原文を持たない空の升**で埋める ──
+   *   そこは `mdCellSpan` が `null` を返すので、無い物を書き換えない。
+   */
+  if (table === null) return rewriteMdCell(lines, rewrite);
   const { delimiter } = table;
   const out: CsvPositions = { rowLines: [], cellSpans: [] };
   const rows = parseCsv(line, delimiter, out);

@@ -92,18 +92,21 @@ function breaksTable(line: string): boolean {
 }
 
 /**
- * 1 行を升へ割る。
+ * 1 行を升へ割り、**原文の範囲も一緒に返す**(#708 段④)。
  *
  * ⚠ **markdown-it の `escapedSplit` と同じ規則**にしてある ── `\|` は升の中の `|` で
  *   あって区切りではない。ここが読み手とずれると、**升が 1 つずれた表**を書き戻す
  *   (いちばん静かなデータ破壊)。一致は parity 検査が守る。
- * ⚠ 前後の `|` は飾り(GFM では省ける)なので、空の端は落とす。
  */
-function splitRow(line: string): string[] {
+function splitRowSpans(line: string): { cells: string[]; spans: { start: number; end: number }[] } {
+  const lead = line.length - line.trimStart().length;
   const src = line.trim();
   const out: string[] = [];
+  /** ⚠ **原文の範囲**(区切りの `|` の間)── 升の字と**同じ添字**で並べる。 */
+  const raw: { start: number; end: number }[] = [];
   let cur = '';
   let last = 0;
+  let cellStart = 0;
   let escaped = false;
   for (let i = 0; i < src.length; i += 1) {
     const ch = src[i];
@@ -114,16 +117,68 @@ function splitRow(line: string): string[] {
         last = i;
       } else {
         out.push(cur + src.slice(last, i));
+        raw.push({ start: cellStart, end: i });
         cur = '';
         last = i + 1;
+        cellStart = i + 1;
       }
     }
     escaped = ch === '\\';
   }
   out.push(cur + src.slice(last));
-  if (out.length > 0 && out[0] === '') out.shift();
-  if (out.length > 0 && out[out.length - 1] === '') out.pop();
-  return out.map((c) => c.trim());
+  raw.push({ start: cellStart, end: src.length });
+  // ⚠ 前後の縦棒は飾り(GFM では省ける)なので、空の端は**升と範囲を揃えて**落とす
+  if (out.length > 0 && out[0] === '') {
+    out.shift();
+    raw.shift();
+  }
+  if (out.length > 0 && out[out.length - 1] === '') {
+    out.pop();
+    raw.pop();
+  }
+  /**
+   * ⚠ **範囲は「字の在る所」まで詰める** ── 前後の空白を含めたまま差し替えると、
+   *   `| a | b |` が `|x| b |` になって**升の余白が揃わなくなる**(user が書いた
+   *   見た目を、こちらの都合で崩さない)。
+   */
+  const spans = raw.map((r, i) => {
+    const seg = src.slice(r.start, r.end);
+    const head = seg.length - seg.trimStart().length;
+    const tail = seg.length - seg.trimEnd().length;
+    void i;
+    return { start: lead + r.start + head, end: lead + r.end - tail };
+  });
+  return { cells: out.map((c) => c.trim()), spans };
+}
+
+/**
+ * 1 行を升へ割る。
+ *
+ * ⚠ **markdown-it の `escapedSplit` と同じ規則**にしてある ── `\|` は升の中の `|` で
+ *   あって区切りではない。ここが読み手とずれると、**升が 1 つずれた表**を書き戻す
+ *   (いちばん静かなデータ破壊)。一致は parity 検査が守る。
+ * ⚠ 前後の `|` は飾り(GFM では省ける)なので、空の端は落とす。
+ * 🔑 **範囲を返す口と同じ 1 本**から作る(§7)── 別々に書くと、升の数だけ合って
+ *   位置がずれる形(いちばん見つけにくい)になる。
+ */
+function splitRow(line: string): string[] {
+  return splitRowSpans(line).cells;
+}
+
+/**
+ * 🔴 **markdown の表の升 1 つを、原文のどこで差し替えればよいか**(#708 段④)。
+ *
+ * ⚠ `col` は**描いた表の列番号**である ── 読み手(markdown-it)は見出しより多い升を
+ *   捨て、足りない分を**原文を持たない空の升**で埋めるので、そこは `null` を返す
+ *   (無い物を書き換えない)。
+ * ⚠ 区切りの行(`|---|`)は差し替えの対象にしない ── 呼び側が外す。
+ *
+ * @returns 原文の範囲(両端は字の在る所まで詰めてある)。升が無ければ `null`
+ */
+export function mdCellSpan(line: string, col: number): { start: number; end: number } | null {
+  if (!Number.isInteger(col) || col < 0) return null;
+  const { spans } = splitRowSpans(line);
+  return spans[col] ?? null;
 }
 
 /** 区切りの行なら列数、そうでなければ `null`。 */
@@ -274,6 +329,35 @@ export function tableAt(body: string, line: number): TableAt | null {
    * ⚠ 遡り先が段落の途中のことがある(表が段落に続いている形)ので、
    *   頭から押した行まで順に当て、**押した行を含む走**が出たところで採る。
    */
+  let top = line;
+  while (top > fm && !breaksTable(lines[top - 1] ?? '')) top -= 1;
+  for (let s = top; s <= line; s += 1) {
+    const run = tableRunFrom(lines, s);
+    if (run !== null && line >= run.start && line <= run.end) return run;
+  }
+  return null;
+}
+
+/**
+ * 🔴 **その行は markdown の表の行か**(#708 段④)。違えば `null`。
+ *
+ * ⚠ **`tableAt` とは問いが違う。** あちらは「**この表の形を作り変えられるか**」で、
+ *   `:::` の板の中を外している ── 作り変えると**戻す口が出ない片道**になるからである
+ *   (#743)。⚠ こちらは「**この升を打てるか**」なので、板の中でも成り立つ:
+ *   升を 1 つ打つのは**いつでも打ち直せる**ので、片道にならない。
+ * 🔑 だから門は 2 つだけ ── ①frontmatter の中は見ない ②**囲み(``` )の中は見ない**
+ *   (コードとして描かれるので押せる印も焼かれないが、別の窓から古い依頼が来た日に
+ *   囲みの中身を書き換えない)。
+ * ⚠ **区切りの行(`|---|`)は呼び側が外す** ── ここは走の範囲を返すだけである。
+ */
+export function mdTableAt(body: string, line: number): TableAt | null {
+  const lines = body.split('\n');
+  const fm = frontmatterLineCount(body);
+  if (!Number.isInteger(line) || line < fm || line >= lines.length) return null;
+  const fence = scanContainers(body).find(
+    (c) => c.kind === 'fence' && line >= c.start && line <= c.end,
+  );
+  if (fence !== undefined) return null;
   let top = line;
   while (top > fm && !breaksTable(lines[top - 1] ?? '')) top -= 1;
   for (let s = top; s <= line; s += 1) {

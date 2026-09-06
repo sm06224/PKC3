@@ -29,6 +29,7 @@ import { MAX_TAGS, sameTag } from '../flavor/tags';
 // 部分 path は exports map から**消えた**(v14 では `@types/markdown-it` が
 // `lib/token.mjs` を生やしていた)。型は本入口から名前付きで取る。
 import type { Token } from 'markdown-it';
+import { mdCellSpan } from './table-convert';
 // PR-W18:HTML footnote plugin(`[^id]` → `<sup class="footnote-ref">`)。
 // CJS package だが exports map で `.mjs` を提供しているため ESM import OK。
 import footnotePlugin from 'markdown-it-footnote';
@@ -808,6 +809,97 @@ md.renderer.rules.table_open = function (tokens, idx, options, _env, self) {
 };
 md.renderer.rules.table_close = function (tokens, idx, options, _env, self) {
   return `${self.renderToken(tokens, idx, options)}</div>`;
+};
+
+/**
+ * 🔴 **markdown の表の升も、押してその場で打てるようにする**(#708 段④)。
+ *
+ * > user の物語(#708): 表を書いたあとで「これは升を押して打ちたい」と思っても、
+ * > csv の表にしか押せる升が無かった。
+ *
+ * ## ⚠ 焼くのは 3 つ、どれも読み手から引く
+ *
+ * | 印 | どこから引くか |
+ * |---|---|
+ * | `data-pkc-cell-line` | **囲んでいる `tr_open` の `map[0]`**(升の token は `map` を持たない) |
+ * | `data-pkc-cell-col` | その `tr_open` から数えた升の順番 |
+ * | `data-pkc-cell-raw` | **次の `inline` token の `content`** |
+ *
+ * 🔴 **原文は逃がし直して焼く。** 読み手は升の原文から **`\|` の逃がしだけ外して**
+ *   渡してくる(実測:`a\|b` → `a|b`)── そのまま焼くと、押した欄に `a|b` と出て、
+ *   確定した瞬間に**列の区切りとして読まれて表がずれる**。
+ *   ⚠ 逃がす規則は `gfmCellText` の 1 本を借りる(§7)。
+ *
+ * ⚠ **行番号は `toggle-task` と同じ 3 段**を通す(前処理後の行 → `lineMap` で原文へ
+ *   逆引き → `taskLineOffset` を足す)── 1 段でも飛ばすと**別の行を書き換える**。
+ * ⚠ 区切りの行(`|---|`)には印を焼かない ── そこは `tr` にならないので自然に外れる。
+ */
+function cellEditAttrs(
+  tokens: readonly Token[],
+  idx: number,
+  env: unknown,
+): string {
+  if ((env as { interactiveCells?: boolean } | undefined)?.interactiveCells !== true) return '';
+  // ⚠ 囲んでいる行を後ろ向きに探し、そこまでの升を数える(升は `map` を持たない)
+  let col = 0;
+  let rowLine: number | undefined;
+  for (let i = idx - 1; i >= 0; i -= 1) {
+    const t = tokens[i]!;
+    if (t.type === 'tr_open') {
+      rowLine = t.map?.[0] ?? undefined;
+      break;
+    }
+    if (t.type === 'td_open' || t.type === 'th_open') col += 1;
+  }
+  if (rowLine === undefined) return '';
+  const map = (env as { lineMap?: number[] } | undefined)?.lineMap;
+  const raw = map ? (map[rowLine] ?? rowLine) : rowLine;
+  const offset = (env as { taskLineOffset?: number } | undefined)?.taskLineOffset ?? 0;
+  // ⚠ 升の原文は**次の inline token**が持つ(`renderToken` はここでは中身を見ない)
+  const inline = tokens[idx + 1];
+  if (inline === undefined || inline.type !== 'inline') return '';
+  /**
+   * 🔴 **原文に無い升には焼かない**(着地前レビュー・動線 ②)。
+   *
+   * ⚠ 読み手は**見出しの列数ぶん**升を作るので、`| 1 |` の行にも空の升が並ぶ ──
+   *   そこに印を焼くと、押せて、打てて、**「本文が変わっているため反映できません
+   *   でした」という起きていない理由**が出る(打った字は消える)。
+   * 🔑 判定は `mdCellSpan` の 1 本を借りる(§7)── 書く側と同じ物差しで見る。
+   */
+  const src = (env as { cellSourceLines?: readonly string[] } | undefined)?.cellSourceLines;
+  if (src !== undefined && mdCellSpan(src[rowLine] ?? '', col) === null) return '';
+  /**
+   * 🔴 **欄に出すのは「画面に出ている字」である**(着地前レビュー・動線 ①)。
+   *
+   * ⚠ 直す前は `gfmCellText`(= `|` を `\|` に逃がす)を通していたが、書き戻す側も
+   *   同じ規則で逃がすので、**押して確定するたびに `\` が 1 本ずつ増えた**
+   *   (実測:1 回目 `みかん\|橙` → 3 回目 `みかん\\\|橙`)。⚠ 2 回目までは画面が
+   *   正しいので、**壊れたことに気づけない**。しかもよそへ貼ると列が割れる。
+   * 🔑 **逃がすのは原文を作る側だけの仕事**である ── ここは読み手が渡してきた
+   *   「逃がしを外した字」をそのまま出す(csv の升と同じ手触りになる)。
+   */
+  return (
+    ` data-pkc-action="edit-cell" data-pkc-cell-line="${raw + offset}"` +
+    ` data-pkc-cell-col="${col}" data-pkc-cell-raw="${md.utils.escapeHtml(inline.content)}"`
+  );
+}
+
+const defaultTdOpen =
+  md.renderer.rules.td_open ??
+  ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
+md.renderer.rules.td_open = function (tokens, idx, options, env, self) {
+  const base = defaultTdOpen(tokens, idx, options, env, self);
+  const attrs = cellEditAttrs(tokens, idx, env);
+  return attrs === '' ? base : base.replace(/>$/, `${attrs}>`);
+};
+
+const defaultThOpen =
+  md.renderer.rules.th_open ??
+  ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
+md.renderer.rules.th_open = function (tokens, idx, options, env, self) {
+  const base = defaultThOpen(tokens, idx, options, env, self);
+  const attrs = cellEditAttrs(tokens, idx, env);
+  return attrs === '' ? base : base.replace(/>$/, `${attrs}>`);
 };
 
 /**
@@ -5294,7 +5386,13 @@ export function renderMarkdown(
     taskLineOffset: number;
     lineMap?: number[];
     fenceAssets?: Readonly<Record<string, string>>;
+    /**
+     * 🔴 **押せる升を決めるための原文**(#708 段④)。
+     * ⚠ 呼び側には足させない ── ここが `text` を持っているので、ここで載せる。
+     */
+    cellSourceLines?: readonly string[];
   } = {
+    cellSourceLines: text.split('\n'),
     // 🔴 添付から取った字(#444 段②)。⚠ 渡されないのが既定 = 器を置く
     ...(opts.fenceAssets !== undefined ? { fenceAssets: opts.fenceAssets } : {}),
     currentContainerId: opts.currentContainerId ?? '',

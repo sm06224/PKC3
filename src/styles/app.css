@@ -2767,9 +2767,21 @@ li[data-pkc-row-slot] {
 /* ── 🔴 **表のセルを押して打てる**(#418 段①)。
  *    ⚠ 出るのは押せる面だけ(`interactiveCells` を渡した面)なので、
  *    書き出した HTML・印刷では**この規則に当たる要素が 1 つも無い**。 */
-.pkc-md-rendered .pkc-md-rendered-csv [data-pkc-action='edit-cell'] {
+/* ⚠ **markdown の表の升も同じ見え方にする**(#708 段④)── 押せるのに
+ *    ただの字に見えると、user は押せることに気づかない(dead click の逆)。
+ *    🔑 印(`data-pkc-action`)で当てるので、csv と markdown で見え方が揃う。 */
+.pkc-md-rendered .pkc-md-rendered-csv [data-pkc-action='edit-cell'],
+.pkc-md-rendered .pkc-md-block[data-pkc-md-block-kind='table'] [data-pkc-action='edit-cell'] {
   cursor: text;
   position: relative;
+}
+/* 🔴 **押せることが見えるようにする**(#708 段④、着地前レビュー・動線 ⑦)。
+ *    ⚠ `cursor: text` は**字の上では既定と同じ**なので、合図になっていなかった ──
+ *    csv の表には ＋ × という合図が在るのに、markdown の表には何も無かった。
+ *    🔑 乗せた升だけをほんの少し濃くする(色は使わない ── 方針「地は無彩色」)。
+ *    ⚠ 押せる面だけに出る(`interactiveCells` を渡していない面には印が無い)。 */
+.pkc-md-rendered [data-pkc-action='edit-cell']:hover {
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
 }
 /* ⚠ **升の中いっぱいに開く** ── 小さい欄が升の中に浮くと、どの升を
  *    打っているのか分からなくなる(隣の升と重なって見える) */
