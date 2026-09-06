@@ -105,10 +105,11 @@ test('🔴 ヘルプの面が開き、マニュアルが描かれる', async ({ 
    * ⚠ マニュアルの見出しは **85 本のうち 30 本**が `1-はじめる` のように数字で
    *   始まる。素の `#1-…` は `SyntaxError` を投げるので、`CSS.escape` を外すと
    *   **目次の 35% が押しても何も起きず、理由も出ない**。
-   * ⚠ **unit では判定できない** ── happy-dom は escape 済みの選択子を解決しないので、
-   *   正しい実装のほうが落ちる(`help-pane.test.ts` に前提だけ残してある)。
-   * 🔑 だから**ここが唯一の観測点**である。⚠ 上の nth(8) が英字始まりなら、
-   *   この穴は 1 度も通らない ── 数字始まりの行を**名指しで**選ぶ。
+   * 🔑 2 巡目で実装を**列挙 + id の突き合わせ**へ変えた(選択子を組まない)ので、
+   *   unit でも通せるようになった(`help-pane.test.ts` の目次の it)── ここは
+   *   **実ブラウザで本当に送られること**を見る側である。
+   * ⚠ 上の nth(8) が英字始まりなら、この穴は 1 度も通らない ──
+   *   数字始まりの行を**名指しで**選ぶ。
    */
   await manualBox.evaluate((el) => {
     el.scrollTop = 0;
@@ -117,7 +118,10 @@ test('🔴 ヘルプの面が開き、マニュアルが描かれる', async ({ 
     const host = document.querySelector('[data-pkc-region="help-manual"]');
     if (host === null) throw new Error('前提が崩れている: マニュアルの箱が無い');
     const ids = [...host.querySelectorAll('h1[id], h2[id], h3[id]')].map((h) => h.id);
-    return ids.findIndex((id) => /^[0-9]/.test(id));
+    // ⚠ **いちばん後ろ**を採る(着地前レビュー 2 巡目・[軽] 6)── 先頭の 1 件は
+    //    上から 2 番目の見出しで `scrollTop` の余裕がいちばん小さく、前置きが
+    //    縮んだ日に**この件と無関係な理由で**赤くなる(そして「数字始まりが壊れた」と読まれる)
+    return ids.map((id, i) => (/^[0-9]/.test(id) ? i : -1)).filter((i) => i >= 0).pop() ?? -1;
   });
   expect(digitAt, '前提が崩れている: 数字で始まる見出しが 1 つも無い').toBeGreaterThanOrEqual(0);
   await page.locator('[data-pkc-field="help-toc-row"]').nth(digitAt).click();

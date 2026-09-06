@@ -48,11 +48,17 @@ describe('ヘルプの目次は高さを切って自分で流す(#719)', () => {
    */
   it('🔴 目次の行は、ボタンの既定(高さ固定・1 行)を外している', () => {
     const text = css();
-    // ⚠ 対照群:素のボタンが高さを固定している(外す理由が実在する)
+    /**
+     * ⚠ **対照群:素のボタンが高さを固定している**(外す理由が実在する)。
+     * 🔴 固定は **3 本立て**である(`height` / `min-height` / `max-height`)──
+     *   2 本外して `max-height` を残すと、**折り返した見出しだけが 26px に切られる**
+     *   (着地前レビュー 2 巡目・[中] 3。1 稿目は 2 本しか留めていなかった)。
+     */
     const base = blocksFor(text, 'button').join('\n');
-    expect(base, '前提が変わった: 素のボタンが高さを固定していない').toMatch(
-      decl('height', 'var\\(--row-h\\)'),
-    );
+    for (const prop of ['height', 'min-height', 'max-height'])
+      expect(base, `前提が変わった: 素のボタンの ${prop} 固定が消えた`).toMatch(
+        decl(prop, 'var\\(--row-h\\)'),
+      );
 
     const b = blocksFor(text, ROW);
     expect(b.length, '目次の行の規則が無い(空振り)').toBeGreaterThan(0);
@@ -61,11 +67,25 @@ describe('ヘルプの目次は高さを切って自分で流す(#719)', () => {
     expect(joined, 'min-height を外していない(2 行の見出しが押し込まれる)').toMatch(
       decl('min-height', '0'),
     );
+    expect(joined, 'max-height を外していない(折り返した見出しが 26px に切られる)').toMatch(
+      decl('max-height', 'none'),
+    );
     expect(joined, '折り返しを許していない(長い見出しが横に切れて読めない)').toMatch(
       decl('white-space', 'normal'),
     );
     expect(joined, '行が左揃えになっていない(目次が中央に並ぶ)').toMatch(
       decl('text-align', 'start'),
+    );
+    /**
+     * ⚠ **折り返しを許したら行間も戻す**(着地前レビュー 2 巡目・記録 2)。
+     * 素のボタンは 1 行しか出さないので `line-height: 1` ── そのままだと
+     * **2 行になった見出しが行間 0 で密着する**。
+     */
+    expect(base, '前提が変わった: 素のボタンの line-height: 1 が消えた').toMatch(
+      decl('line-height', '1;'),
+    );
+    expect(joined, '行間を戻していない(2 行の見出しが密着する)').toMatch(
+      decl('line-height', '1\\.4'),
     );
   });
 
@@ -76,14 +96,26 @@ describe('ヘルプの目次は高さを切って自分で流す(#719)', () => {
    */
   it('🔴 見出しの段が 3 つとも段付けされている', () => {
     const text = css();
+    /**
+     * 🔴 **選択子は「行の名前ごと」名指しであること**(着地前レビュー 2 巡目・[中] 4)。
+     * ⚠ `${TOC} [data-pkc-level='2']` は行の `padding` shorthand と**詳細度が同じ**なので、
+     *   勝敗が**書いた順**だけで決まる ── 3 規則を上へ動かすと段付けが丸ごと消えるのに、
+     *   宣言は在るままなので**字面を見る検査は全部緑**である。
+     * 🔑 だから**弱いほうの綴りが在ったら落とす**(順序ではなく詳細度で守る)。
+     */
+    for (const lv of ['1', '2', '3'])
+      expect(
+        blocksFor(text, `${TOC} [data-pkc-level='${lv}']`),
+        `段 ${lv} が行の名前で名指しされていない ── 書いた順しだいで段付けが消える`,
+      ).toHaveLength(0);
     // h1: 太さで出す
     expect(
-      blocksFor(text, `${TOC} [data-pkc-level='1']`).join('\n'),
+      blocksFor(text, `${ROW}[data-pkc-level='1']`).join('\n'),
       '大見出しが目立たない(段が平らになる)',
     ).toMatch(decl('font-weight', '600'));
     // h2 / h3: 押し込みの深さで出す(⚠ h3 のほうが深いこと)
-    const l2 = blocksFor(text, `${TOC} [data-pkc-level='2']`).join('\n');
-    const l3 = blocksFor(text, `${TOC} [data-pkc-level='3']`).join('\n');
+    const l2 = blocksFor(text, `${ROW}[data-pkc-level='2']`).join('\n');
+    const l3 = blocksFor(text, `${ROW}[data-pkc-level='3']`).join('\n');
     expect(l2, '中見出しが押し込まれていない').toMatch(decl('padding-inline-start', 'var'));
     expect(l3, '小見出しが押し込まれていない').toMatch(decl('padding-inline-start', 'var'));
     const s2 = Number(/--s(\d)/.exec(l2)![1]);

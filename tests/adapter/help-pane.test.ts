@@ -49,6 +49,38 @@ beforeEach(() => {
   document.body.append(region);
 });
 
+/**
+ * 手で進められる時計(⚠ 実時間を待つ test は書けない)。
+ *
+ * 🔴 **1 つだけ置く**(着地前レビュー 2 巡目・[軽] 7)── 2 稿目が
+ *   `clear: () => { jobs.length = 0 }` という**本物より甘い**写しを作りかけた。
+ *   ⚠ handle を無視すると「**別の予約を消す**」変異を原理的に殺せない
+ *   (CLAUDE.md §3「stub は本物の意味論を真似る」)。
+ */
+function fakeTimers() {
+  const jobs: { fn: () => void; h: number }[] = [];
+  let next = 1;
+  return {
+    port: {
+      set: (fn: () => void) => {
+        const h = next++;
+        jobs.push({ fn, h });
+        return h;
+      },
+      clear: (h: unknown) => {
+        const i = jobs.findIndex((j) => j.h === h);
+        if (i >= 0) jobs.splice(i, 1);
+      },
+    },
+    /** 予約が何件待っているか(⚠ 「予約した」を数える対照群に使う)。 */
+    pending: () => jobs.length,
+    fire: () => {
+      const all = jobs.splice(0, jobs.length);
+      for (const j of all) j.fn();
+    },
+  };
+}
+
 describe('ヘルプの面', () => {
   it('題名と、版・お知らせ・マニュアルの 3 つが出る', () => {
     new HelpRenderer(region).render();
@@ -218,29 +250,35 @@ describe('ヘルプの面', () => {
    *   「マニュアル → ショートカット → お知らせ」の pin は**1 つも鳴らない**。
    * 🔑 だから**器の直下の子を全部、順番どおりに**留める ── #719 の裁定は
    *   「何が在るか」ではなく「**開いた 1 画面に何がこの順で出るか**」だった。
-   * ⚠ 名前は `data-pkc-region` → `data-pkc-field` → `タグ:字` の順に採る
-   *   (`settings-note` が 2 つ在るのは正しい ── 目次の断りと、キーの断り)。
+   * ⚠ 名前は `data-pkc-region` → `data-pkc-field` → `タグ:字` の順に採る。
+   * 🔴 **`settings-note` だけは字も留める**(着地前レビュー 2 巡目・[中] 2)──
+   *   器の直下に 2 つ在り(目次の断りと、キーの断り)、名前しか見ないと
+   *   ①**その 2 つを入れ替える** ②**字を空にする** が両方通る。
+   *   ⚠ ②は 1 巡目の**動線 3**(「読み上げには名前が届き、目で見ている人には
+   *   届かない」= 版の下に枠だけの箱)が丸ごと戻る形である。
    */
   it('🔴 ヘルプの面は、器の直下がこの順に並ぶ', () => {
     new HelpRenderer(region).render();
     const body = region.querySelector('[data-pkc-region="help-body"]');
     expect(body, '前提が崩れている: ヘルプの器が無い').not.toBeNull();
-    const labels = [...body!.children].map(
-      (e) =>
-        e.getAttribute('data-pkc-region') ??
-        e.getAttribute('data-pkc-field') ??
-        `${e.tagName}:${e.textContent ?? ''}`,
-    );
+    const labels = [...body!.children].map((e) => {
+      const field = e.getAttribute('data-pkc-field');
+      // ⚠ 断りは**字そのものが仕事**なので、頭を留める(上の 2 つを落とす)
+      if (field === 'settings-note') return `settings-note:${(e.textContent ?? '').slice(0, 6)}`;
+      return (
+        e.getAttribute('data-pkc-region') ?? field ?? `${e.tagName}:${e.textContent ?? ''}`
+      );
+    });
     expect(labels, 'ヘルプの面の並びが変わった(#719 の裁定と食い違う)').toEqual([
       'H3:マニュアル',
       'help-version',
       'help-manual-open',
       'help-find-bar',
-      'settings-note',
+      'settings-note:目次 ── ',
       'help-toc',
       'help-manual',
       'H3:ショートカットキー',
-      'settings-note',
+      'settings-note:Ctrl は',
       'help-keymap',
       'H3:これまでのお知らせ',
       'help-notices',
@@ -353,31 +391,6 @@ describe('ヘルプのマニュアルを、しばらく開かなければ手放�
     region = document.createElement('div');
     document.body.append(region);
   });
-
-  /** 手で進められる時計(⚠ 実時間を待つ test は書けない)。 */
-  function fakeTimers() {
-    const jobs: { fn: () => void; h: number }[] = [];
-    let next = 1;
-    return {
-      port: {
-        set: (fn: () => void) => {
-          const h = next++;
-          jobs.push({ fn, h });
-          return h;
-        },
-        clear: (h: unknown) => {
-          const i = jobs.findIndex((j) => j.h === h);
-          if (i >= 0) jobs.splice(i, 1);
-        },
-      },
-      /** 予約が何件待っているか(⚠ 「予約した」を数える対照群に使う)。 */
-      pending: () => jobs.length,
-      fire: () => {
-        const all = jobs.splice(0, jobs.length);
-        for (const j of all) j.fn();
-      },
-    };
-  }
 
   const drawn = (): string => region.querySelector('[data-pkc-region="help-manual"]')!.innerHTML;
 
@@ -965,22 +978,30 @@ describe('ヘルプの面の目次(#719)', () => {
     ).toBeGreaterThan(1);
 
     /**
-     * 🔴 **数字で始まる見出しは、ここでは判定できない**(着地前レビュー・実装 ⚠-7)。
+     * 🔴 **数字で始まる見出しでも飛ぶ**(着地前レビュー ⚠-7 / 2 巡目)。
      *
-     * ⚠ マニュアルの見出しは **85 本のうち 30 本**が `1-はじめる` のように
-     *   数字で始まるので、`CSS.escape` を外すと `#1-…` が `SyntaxError` になり
-     *   **目次の 35% が無言で死ぬ**。⚠ ところが **happy-dom は escape 済みの
-     *   選択子(`#\\31 -はじめる`)を解決しない**(実測: `querySelector` が
-     *   `null` を返す)── つまりここでは**正しい実装のほうが落ちる**。
-     * 🔑 だから観測点は実ブラウザに置いた(`tests/smoke/help-announce.smoke.spec.ts`
-     *   の「数字で始まる見出しの行」)。⚠ ここに弱い代替(原文に `CSS.escape` が
-     *   在るかの grep)を置かない ── 字が在っても効いている証拠にならない。
-     * ⚠ 上の `rows[3]` は**英字始まり**なので、この穴を 1 度も通らない(§2)。
+     * ⚠ マニュアルの見出しは **85 本のうち 30 本**が `1-はじめる` のように数字で
+     *   始まる。⚠ 1 稿目の実装は `` `#${CSS.escape(id)}` `` で選択子を組んでおり、
+     *   **happy-dom は escape 済みの選択子を解決しない**ので、この 35% は
+     *   **unit から 1 度も通せなかった**(守れるのは smoke 1 本だけ ── §2)。
+     * 🔑 2 巡目で実装を**列挙 + id の突き合わせ**へ変えた(選択子を組まない)ので、
+     *   ここで通せるようになった ── 壊れうる状態そのものが消えている(§7)。
+     * ⚠ 上の `rows[3]` は**英字始まり**なので、そこだけでは通らない穴である。
      */
+    const digits = withId.filter((h) => /^[0-9]/.test(h.id));
     expect(
-      withId.filter((h) => /^[0-9]/.test(h.id)).length,
-      '前提が崩れている: 数字で始まる見出しが 1 つも無い(smoke 側の判定も無意味になる)',
+      digits.length,
+      '前提が崩れている: 数字で始まる見出しが 1 つも無い(この段は何も見ていない)',
     ).toBeGreaterThan(10);
+    // ⚠ **いちばん後ろ**を採る ── 先頭は「上から 2 番目の見出し」で、
+    //    前置きが縮んだ日に別の理由で落ちる(着地前レビュー 2 巡目・[軽] 6)
+    const last = digits[digits.length - 1]!;
+    const digitAt = withId.indexOf(last);
+    seen.length = 0;
+    rows[digitAt]!.click();
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    expect(seen, '数字で始まる見出しへ飛べていない(選択子を組み直した?)').toHaveLength(1);
+    expect(seen[0], '数字で始まる行から別の見出しへ飛んだ').toBe(last);
   });
 
   /**
@@ -993,21 +1014,14 @@ describe('ヘルプの面の目次(#719)', () => {
    *   **1 度も通っていなかった**(`nav.textContent = ''` を消す変異が生き延びた)。
    */
   it('🔴 手放して開き直しても、目次は同じ本数のまま', async () => {
-    const jobs: (() => void)[] = [];
+    // ⚠ **同じ時計を使う**(自前の甘い写しを作らない ── 上の docstring)
+    const t = fakeTimers();
     const r = new HelpRenderer(
       region,
-      { render: async (t) => renderMarkdown(t) },
+      { render: async (x) => renderMarkdown(x) },
       undefined,
       undefined,
-      {
-        set: (fn) => {
-          jobs.push(fn);
-          return jobs.length;
-        },
-        clear: () => {
-          jobs.length = 0;
-        },
-      },
+      t.port,
       1000,
     );
     r.render('c1');
@@ -1019,17 +1033,45 @@ describe('ヘルプの面の目次(#719)', () => {
 
     // 閉じて、しばらく開かないと本文だけ手放す
     r.onHidden();
-    expect(jobs.length, '手放す予約をしていない(前提が崩れている)').toBe(1);
-    jobs.splice(0, jobs.length).forEach((fn) => fn());
+    expect(t.pending(), '手放す予約をしていない(前提が崩れている)').toBe(1);
+    t.fire();
     expect(
       region.querySelector('[data-pkc-region="help-manual"]')!.querySelectorAll('h2').length,
       '前提が崩れている: 本文を手放していない',
     ).toBe(0);
 
-    // 開き直す ── 目次は組み直されるが、**増えない**
-    r.render('c1');
-    for (let i = 0; i < 8; i++) await Promise.resolve();
-    expect(count(), '開き直したら目次が増えた(同じ見出しが 2 度並ぶ)').toBe(first);
+    /**
+     * 🔴 **開き直した直後に押しても飛ぶ**(着地前レビュー 2 巡目・[重大] 1)。
+     *
+     * ⚠ 1 巡目の**動線 2** で `await this.manualReady` を足したのに、
+     *   **その 1 行を守る検査が 1 つも無かった** ── 既存の目次 test は
+     *   描き終えてから押すので、`.then` を外しても同じ結果になる(§2「通っていない」)。
+     * 🔑 だから**描き終わる前に押す** ── 手放した直後の 250ms が、当の場面である。
+     *   ⚠ ここで tick を回してから押すと、既存の test と同じで何も見ていない。
+     */
+    const jumped: HTMLElement[] = [];
+    const orig = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = function (this: HTMLElement): void {
+      jumped.push(this);
+    };
+    try {
+      // 開き直す ── 目次は組み直されるが、**増えない**
+      r.render('c1');
+      // ⚠ 前提:この瞬間、本文はまだ空である(空でなければ、押しても当たり前に飛ぶ)
+      expect(
+        region.querySelector('[data-pkc-region="help-manual"]')!.querySelectorAll('h2').length,
+        '前提が崩れている: 押す前にもう描き終わっている(待ちを判定できない)',
+      ).toBe(0);
+      region.querySelectorAll<HTMLElement>('[data-pkc-field="help-toc-row"]')[3]!.click();
+      for (let i = 0; i < 8; i++) await Promise.resolve();
+      expect(count(), '開き直したら目次が増えた(同じ見出しが 2 度並ぶ)').toBe(first);
+      expect(
+        jumped,
+        '開き直した直後に押したら、どこへも飛ばなかった(無言の dead click)',
+      ).toHaveLength(1);
+    } finally {
+      HTMLElement.prototype.scrollIntoView = orig;
+    }
   });
 
   /**
