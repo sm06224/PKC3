@@ -73,6 +73,7 @@ import { buildVcf, isVcfFileName, vcfNoteOf } from '@features/contact/vcard';
 import { isMarkdownFileName } from '@features/import/plain-markdown';
 import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
 import { insertBlockText, insertText, OWN_MEANING } from '@adapter/ui/render/row-swap';
+import { HOLD_ATTR } from '@adapter/ui/render/cell-input';
 import { resolveAppendAt, sectionAt } from '@features/markdown/append-target';
 import { isTextScale } from '@features/text-scale';
 import { chooseTextScale } from '@adapter/ui/render/text-scale';
@@ -4426,6 +4427,19 @@ const ACTIONS: Record<string, ActionHandler> = {
     };
     const commit = (): void => {
       if (settled) return;
+      /**
+       * 🔴 **塊の差し替えで壊されるだけのときは確定しない**(#745 の 2 巡目)。
+       *
+       * ⚠ `applyBlocks` が表の塊を差し替えると欄が壊れ、そのとき `blur` が飛ぶ。
+       *   そこで確定すると、**`Escape` を押しても打ちかけの字が数百ミリ秒後に
+       *   ひとりでに戻ってくる**(実測 2026-09-06)。
+       * 🔑 印を付けた側(`cell-input.ts`)が**同じ欄を開き直す**ので、
+       *   ここで確定させる理由はもう無い ── 打ちかけの字は欄ごと戻る。
+       */
+      if (input.hasAttribute(HOLD_ATTR)) {
+        settled = true;
+        return;
+      }
       settled = true;
       const value = input.value;
       restore();

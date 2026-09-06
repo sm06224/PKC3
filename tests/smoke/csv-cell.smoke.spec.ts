@@ -144,3 +144,66 @@ test('🔴 升に式を打つと結果が出て、押すと式が出る(#418 段
 
   expect(errors).toEqual([]);
 });
+
+/**
+ * 🔴 **csv の表でも、升を続けて 2 つ打てる**(#745)。
+ *
+ * ⚠ **升の口を焼く場所は 2 つ在る**(`csv-table.ts` と `markdown-render.ts`)。
+ *   `md-table-cell.smoke.spec.ts` は後者しか通らないので、こちらを 1 本置く ──
+ *   CLAUDE.md §7「同じ値を複数の描画経路へ渡すものは、経路ごとに pin する」。
+ * 🔑 この物語は **#418 の頃から在る穴**で、直したのは #745 である。
+ */
+test('🔴 csv の升も、打った直後に隣を押して続けて打てる (#745)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  await createEntry(page, 'spreadsheet');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+
+  const cells = page.locator(CELL);
+  await expect(cells.first(), '表の升が押せる形で出ていない').toBeVisible({ timeout: 10_000 });
+  expect(await cells.count(), '升の数が種と違う').toBe(15);
+
+  /**
+   * 🔴 **同じ tick で「確定 → 隣を押す → 打つ」を撃つ。**
+   * ⚠ `locator.click()` は要素が落ち着くのを待つので、待った回は書き戻しが先に届き
+   *   **この不具合をまたぐ**(#745 が今まで smoke で見えなかった理由)。
+   */
+  const opened = await page.evaluate(() => {
+    const sel = '[data-pkc-field="detail-body"] [data-pkc-action="edit-cell"]';
+    const q = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>(sel)];
+    q()[0]!.click();
+    const i1 = document.querySelector<HTMLInputElement>('[data-pkc-field="cell-input"]');
+    if (i1 === null) return 'i1 が開かない';
+    i1.value = '品名';
+    i1.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    q()[1]!.click();
+    const i2 = document.querySelector<HTMLInputElement>('[data-pkc-field="cell-input"]');
+    if (i2 === null) return 'i2 が開かない';
+    // 🔑 空振り防止の印 ── 壊されて開き直されたなら消える
+    i2.setAttribute('data-probe-mark', '1');
+    i2.value = 'すう';
+    return 'ok';
+  });
+  expect(opened, '前提が崩れた(欄が開いていない)').toBe('ok');
+
+  const input = page.locator('[data-pkc-field="cell-input"]');
+  await expect(cells.nth(0), '1 つ目の字が本文に入っていない').toHaveText('品名', {
+    timeout: 15_000,
+  });
+  await expect(input, '書き戻しが届いた瞬間に欄が消えた(#745)').toBeVisible();
+  await expect(input, '打ちかけの字が消えた(#745)').toHaveValue('すう');
+  await expect(input, '欄が壊されていない(競合の窓に入っていない)').not.toHaveAttribute(
+    'data-probe-mark',
+    '1',
+  );
+
+  // 🔴 続きを打てる(焦点が本文の外へ落ちていない)
+  await page.keyboard.type('りょう');
+  await page.keyboard.press('Enter');
+  await expect(cells.nth(1), '欄が消えて、続きが打てなくなった(#745)').toHaveText('すうりょう', {
+    timeout: 15_000,
+  });
+
+  expect(errors, `ページで例外が出た: ${errors.join(' / ')}`).toEqual([]);
+});

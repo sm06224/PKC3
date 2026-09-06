@@ -39,6 +39,7 @@ function hydrateFigures(root: ParentNode | readonly ParentNode[]): MermaidScope[
   return [hydrateMermaid(root), hydrateChart(root)];
 }
 import { applyBlocks, EMPTY_VIEW, type BlockView } from './apply-blocks';
+import { captureCellInput, reopenCellInput } from './cell-input';
 import { RowSwap } from './row-swap';
 import { diffCounts, diffRows, type DiffRow } from '@features/revision/diff-view';
 import type { RenderedWithRanges } from '@adapter/platform/render/markdown-client';
@@ -784,9 +785,20 @@ export class DetailRenderer {
         //    なるので、同一性の門だけで全部止まる)。読みやすさのために残している
         //    ── test で殺せないことを承知の上(変異試験 R16)
         if (this.bodyKind !== 'md' || this.bodyHost !== host) return; // 器が作り直された
+        /**
+         * 🔴 **開いている升の欄を控えてから当てる**(#745)。
+         *
+         * ⚠ 升を打って確定すると本文が変わるので、`applyBlocks` が**その表の塊を
+         *   差し替える** ── 続けて隣の升を押していると、開いたばかりの欄が
+         *   **打ちかけの字ごと黙って消える**(実測:+50ms は生きていて +150ms で消えた)。
+         * 🔑 留める(`pin`)のではなく**開き直す** ── 留めると、さっき確定した升の
+         *   新しい字が欄を閉じるまで画面に出ない(打ったのに古い字のまま見える)。
+         */
+        const keptCell = captureCellInput(host);
         // 🔑 **変わった塊だけ**当てる(P8 段⑩⑪)── scroll も図も生き残る
         const applied = applyBlocks(host, html, this.bodyView);
         this.bodyView = applied.view;
+        if (keptCell !== null) reopenCellInput(host, keptCell);
         // writing / direction / align / layout の属性契約(dir 込みで 1 箇所)
         applyDocumentGlobals(host, extractDocumentGlobals(body));
         // ⚠ 面倒を見るのは**新しく入った所だけ**(全体に掛け直すと、生きている

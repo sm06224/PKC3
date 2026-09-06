@@ -851,7 +851,7 @@ describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
     // ⚠ まだ配っていない(この PR で足した entry)
-    ['2026-09-06-table-cell-fixes', '8dc06233'],
+    ['2026-09-06-table-cell-fixes', '17f2c6be'],
     ['2026-09-05-md-table-cell', 'c0d4b294'],
     ['2026-09-05-paste-tsv-table', '359f45be'],
     // ⚠ まだ配っていない(この PR で足した entry)ので、着地前に字を直して pin し直した
