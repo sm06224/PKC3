@@ -163,3 +163,97 @@ export function reopenCellInput(host: HTMLElement, keep: OpenCell): void {
   /** ⚠ `focus` は `binder.ts` が既に撃っている ── ここは念のためで、no-op である。 */
   input.focus();
 }
+
+/** 隣の升を名指しするだけの座標(`data-pkc-cell-*` の生の字)。 */
+export interface CellMove {
+  readonly line: string;
+  readonly col: string;
+}
+
+/**
+ * 🔴 **確定したあと、隣の升の欄を開き直す予約**(#750 I1。user 裁定 2026-09-06)。
+ *
+ * ## なぜ「予約」が要るか
+ *
+ * `Tab` / `Enter` で確定すると `SET_CSV_CELL` → worker を往復 → `BODY_REWRITTEN` →
+ * `applyBlocks` が**表の塊ごと差し替える**。⚠ つまり**隣の升は、いま画面に在る物とは
+ * 別の要素になる** ── その場で `click()` しても、数十ミリ秒後に捨てられる
+ * (#745 で直したのと同じ経路である)。
+ * 🔑 だから**差し替えた後に開く**:ここに預けておき、`detail.ts` の描き直しが
+ *   {@link takeCellMove} で受け取って開く。
+ *
+ * ⚠ **1 回の描き直しでだけ有効**(`take` は読んだら捨てる)── 残しておくと、
+ *   無関係な描き直しで**押していない升が突然開く**。
+ * 🔑 **取り消しは「升を開いたとき」1 か所だけ**(`binder.ts` の `edit-cell` が
+ *   `requestCellMove(null)` を撃つ)── user が自分で別の升を押した回に、
+ *   後から届いた書き戻しで**預けていた升**が開くのを止める。
+ * ⚠ **`Escape` には置いていない。** 置きかけたが、外しても何も壊れなかった ──
+ *   予約を撃つのは確定の瞬間だけで、そのとき欄は閉じている。次に鍵を押せるのは
+ *   **升を開いた後**で、開いた時点で上の 1 か所が既に消している(到達しない)。
+ *   🔑 CLAUDE.md「『これが無いと壊れる』と書く前に、外して壊れることを見る」。
+ */
+let pendingMove: CellMove | null = null;
+
+export function requestCellMove(move: CellMove | null): void {
+  pendingMove = move;
+}
+
+export function takeCellMove(): CellMove | null {
+  const m = pendingMove;
+  pendingMove = null;
+  return m;
+}
+
+/**
+ * その升の欄を開く。開けたら `true`。
+ * ⚠ 開くのは `binder.ts` の `edit-cell` ── ここは押すだけ(§7。{@link reopenCellInput} と同じ)。
+ */
+export function openCellAt(host: HTMLElement, move: CellMove): boolean {
+  const cell = host.querySelector<HTMLElement>(cellSelector(move.line, move.col));
+  if (cell === null) return false;
+  cell.click();
+  return host.querySelector(INPUT) !== null;
+}
+
+/**
+ * 🔴 **隣の升を、画面に焼かれた印から引く**(#750 I1)。
+ *
+ * ⚠ **行番号と列番号の計算で出さない** ── 押せない升(見出しの区切りの行、
+ *   原文にその升が無い行)には印が焼かれないので、計算で出すと
+ *   **押しても何も起きない升**へ移ってしまう(#750 I4 がまさにその形)。
+ * 🔑 だから**同じ表の中の「印の在る升」だけ**を読み、その中で隣を選ぶ。
+ *
+ * - `right` / `left` … 画面の並び順で次 / 前(行の端では次 / 前の行へ回る)
+ * - `down` … **同じ列**の、行番号がいちばん近い下の升(無ければ `null`)
+ *
+ * ⚠ 探す範囲は**その表の塊の中だけ** ── 本文に表が 2 つ在るとき、
+ *   1 つ目の右端から 2 つ目へ飛び移らない。
+ */
+export function neighborCell(from: HTMLElement, dir: 'right' | 'left' | 'down'): CellMove | null {
+  const block = from.closest<HTMLElement>('.pkc-md-block');
+  if (block === null) return null;
+  const cells = [...block.querySelectorAll<HTMLElement>('[data-pkc-action="edit-cell"]')];
+  const at = cells.indexOf(from);
+  if (at < 0) return null;
+  const coord = (el: HTMLElement): CellMove | null => {
+    const line = el.getAttribute('data-pkc-cell-line');
+    const col = el.getAttribute('data-pkc-cell-col');
+    return line === null || col === null ? null : { line, col };
+  };
+  if (dir !== 'down') {
+    const next = cells[at + (dir === 'right' ? 1 : -1)];
+    return next === undefined ? null : coord(next);
+  }
+  const here = coord(from);
+  if (here === null) return null;
+  const line = Number(here.line);
+  if (!Number.isFinite(line)) return null;
+  let best: { el: HTMLElement; line: number } | null = null;
+  for (const el of cells) {
+    if (el.getAttribute('data-pkc-cell-col') !== here.col) continue;
+    const n = Number(el.getAttribute('data-pkc-cell-line'));
+    if (!Number.isFinite(n) || n <= line) continue;
+    if (best === null || n < best.line) best = { el, line: n };
+  }
+  return best === null ? null : coord(best.el);
+}

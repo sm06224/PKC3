@@ -37,6 +37,28 @@ test('🔴 「表」を作って、升に打てる ── 原文を数えなく�
   // ⚠ **原文の欄が出ていない**(これが user の不満そのものである)
   await expect(page.locator('[data-pkc-field="editor-body"]')).toHaveCount(0);
 
+  /**
+   * 🔴 **欄を開いても、隣の升の押し所が動かない**(#750 I1 の実測で判明、2026-09-06)。
+   *
+   * ⚠ `<input>` の既定は `size="20"` = **20 字ぶんの幅を要求する**ので、放っておくと
+   *   開いた升の列が **317px** まで広がり、隣の升が **115px → 88px** に縮む ──
+   *   空の升は中身が **＋ ×** だけなので、**その升の真ん中が「＋」ボタンになった**。
+   *   押すと欄が開かず、**列が増える**。
+   * ⚠ #750 I1 で `Enter` のあと欄が開いたままになるため、この食い違いが
+   *   **普通の状態**になるところだった(既存の検査が落ちて教えた)。
+   * 🔑 観測点は幅ではなく「**その升の真ん中に何が在るか**」── 幅は端末で変わるが、
+   *   「押したい物が押せるか」は変わらない。
+   * ⚠ **markdown の表では空振りする**(あちらに ＋ × は無い)ので、ここに置く。
+   */
+  const hitCenter = async (nth: number): Promise<string> =>
+    page.evaluate((i) => {
+      const cs = [...document.querySelectorAll('[data-pkc-field="detail-body"] [data-pkc-action="edit-cell"]')];
+      const r = cs[i]!.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return `${hit?.tagName}/${hit?.getAttribute('data-pkc-action') ?? ''}`;
+    }, nth);
+  expect(await hitCenter(1), '欄を開いたら、隣の升の真ん中が升でなくなった').toBe('TD/edit-cell');
+
   await page.keyboard.type('品名');
   await page.keyboard.press('Enter');
 

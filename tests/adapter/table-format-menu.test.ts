@@ -19,6 +19,7 @@ import { initialState, type AppState, type DomainEvent } from '../../src/adapter
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import { applyBodyRewrite, type BodyRewrite } from '../../src/features/markdown/body-rewrite';
 import { frontmatterLineCount, bodyBelowFrontmatter } from '../../src/features/markdown/frontmatter';
+import { requestCellMove, takeCellMove } from '../../src/adapter/ui/render/cell-input';
 
 const MENU = '[data-pkc-region="context-menu"]';
 
@@ -499,4 +500,101 @@ describe('表の升の中のリンク(#708 段④)', () => {
       'ふつうの升で欄が開かない',
     ).not.toBeNull();
   });
+});
+
+/**
+ * 🔴 **`Tab` / `Enter` で、確定して隣の升へ移る**(#750 I1。user 裁定 2026-09-06)。
+ *
+ * ⚠ ここは**受け口**を見る(押した鍵が、確定と行き先の予約になっているか)。
+ *   隣の選び方は `cell-input.test.ts`、打った字が本文へ入るところまでは
+ *   実ブラウザの smoke が見る。
+ */
+describe('表の升で Tab / Enter を押す(#750 I1)', () => {
+  /** 升の押し所(描画が焼いた順)。 */
+  const cells = (host: HTMLElement): HTMLElement[] => [
+    ...host.querySelectorAll<HTMLElement>('[data-pkc-action="edit-cell"]'),
+  ];
+  const openInput = (host: HTMLElement): HTMLInputElement | null =>
+    host.querySelector<HTMLInputElement>('[data-pkc-field="cell-input"]');
+
+  /** 升を開いて、打ちかけの字を入れ、鍵を押す。 */
+  function press(
+    host: HTMLElement,
+    nth: number,
+    value: string | null,
+    key: string,
+    shift = false,
+  ): void {
+    cells(host)[nth]!.click();
+    const input = openInput(host);
+    if (input === null) throw new Error('前提が崩れている: 欄が開いていない');
+    if (value !== null) input.value = value;
+    input.dispatchEvent(
+      new KeyboardEvent('keydown', { key, shiftKey: shift, bubbles: true, cancelable: true }),
+    );
+  }
+
+  it('🔴 字を変えて Tab を押すと、確定して「右の升」を予約する', () => {
+    requestCellMove(null);
+    const s = setup(MD);
+    press(s.host, 2, 'みかん', 'Tab'); // 2 = 「りんご」(見出しの 2 つの次)
+    // ① 確定した(本文の書換を頼んでいる)
+    expect(s.events, '確定していない(Tab で字が捨てられている)').toHaveLength(1);
+    // ② 行き先を預けた ── 実際に開くのは `detail.ts` が塊を差し替えた後
+    expect(takeCellMove(), '右の升を預けていない').toEqual({ line: '4', col: '1' });
+  });
+
+  it('🔴 Enter は「同じ列の下」を予約する(右ではない)', () => {
+    requestCellMove(null);
+    const s = setup(MD);
+    press(s.host, 0, 'しなもの', 'Enter'); // 0 = 見出しの「品名」
+    expect(s.events, '確定していない').toHaveLength(1);
+    expect(takeCellMove(), '下の升を預けていない').toEqual({ line: '4', col: '0' });
+  });
+
+  it('🔴 Shift+Tab は「左の升」(片道の操作を作らない)', () => {
+    requestCellMove(null);
+    const s = setup(MD);
+    press(s.host, 3, '5', 'Tab', true); // 3 = 「3」
+    expect(takeCellMove(), '左の升を預けていない').toEqual({ line: '4', col: '0' });
+  });
+
+  it('🔴 字が変わっていない回は、書き戻しを待たずにその場で隣を開く', () => {
+    /**
+     * ⚠ 変わっていなければ `SET_CSV_CELL` は撃たれない = **描き直しが来ない**ので、
+     *   予約だけして待つと**押したのに何も起きない**(次の無関係な描き直しまで)。
+     */
+    requestCellMove(null);
+    const s = setup(MD);
+    press(s.host, 2, null, 'Tab'); // 字はそのまま
+    expect(s.events, '変えていないのに書換を頼んだ').toEqual([]);
+    expect(takeCellMove(), '待つ必要が無いのに予約した').toBeNull();
+    // 🔑 その場で隣が開いている
+    expect(openInput(s.host)?.value, '隣の升の欄が開いていない').toBe('3');
+  });
+
+  it('🔴 自分で別の升を押したら、預けた行き先は捨てる', () => {
+    /**
+     * ⚠ 予約を残すと、**後から届いた書き戻し**で「押していない升」が開く ──
+     *   user は自分が押した升に打っているつもりなので、**打った字が別の升へ入る**。
+     * 🔑 だから**升を開いた時点**で捨てる(取り消しはその 1 か所だけ)。
+     * ⚠ 変異試験 M5 が SURVIVED で教えた ── 予約を捨てる行を消しても、
+     *   これを足すまでどの検査も鳴らなかった。
+     */
+    requestCellMove(null);
+    const s = setup(MD);
+    press(s.host, 2, 'みかん', 'Tab'); // ここで (4,1) を預ける
+    cells(s.host)[0]!.click(); // user が自分で別の升を押す
+    expect(takeCellMove(), '別の升を押したのに、前の行き先が残っている').toBeNull();
+  });
+
+  it('🔴 行き先が無ければ、いままでどおり閉じる(動かない欄を残さない)', () => {
+    requestCellMove(null);
+    const s = setup(MD);
+    press(s.host, 3, 'みかん', 'Tab'); // 3 = 最後の升
+    expect(s.events, '確定していない').toHaveLength(1);
+    expect(takeCellMove(), '行き先が無いのに預けた').toBeNull();
+    expect(openInput(s.host), '行き先が無いのに欄が残っている').toBeNull();
+  });
+
 });

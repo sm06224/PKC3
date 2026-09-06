@@ -73,7 +73,12 @@ import { buildVcf, isVcfFileName, vcfNoteOf } from '@features/contact/vcard';
 import { isMarkdownFileName } from '@features/import/plain-markdown';
 import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
 import { insertBlockText, insertText, OWN_MEANING } from '@adapter/ui/render/row-swap';
-import { HOLD_ATTR } from '@adapter/ui/render/cell-input';
+import {
+  HOLD_ATTR,
+  neighborCell,
+  openCellAt,
+  requestCellMove,
+} from '@adapter/ui/render/cell-input';
 import { resolveAppendAt, sectionAt } from '@features/markdown/append-target';
 import { isTextScale } from '@features/text-scale';
 import { chooseTextScale } from '@adapter/ui/render/text-scale';
@@ -4489,6 +4494,13 @@ const ACTIONS: Record<string, ActionHandler> = {
     // ⚠ 2 度押しで欄を作り直さない(打ちかけの字を捨てない)
     if (target.querySelector('[data-pkc-field="cell-input"]') !== null) return;
     /**
+     * ⚠ **押して開く回は、隣へ移る予約を捨てる**(#750 I1)── user が自分で別の升を
+     *   押したのに、その後の書き戻しで**予約していた升**が開くと、押した所と
+     *   開いた所が食い違う。⚠ `cell-input.ts` の {@link openCellAt} 経由でもここを通るが、
+     *   あちらは予約を**読み終えてから**押すので消して問題ない。
+     */
+    requestCellMove(null);
+    /**
      * 🔴 **字を選んでいる最中は開かない**(CLAUDE.md §10)。
      *
      * ⚠ 押せるようにする前、升は**ただの字**だった ── ドラッグで選んで
@@ -4519,6 +4531,20 @@ const ACTIONS: Record<string, ActionHandler> = {
      *   器の規則の混入を止めている ── 実際にここで落ちて教わった)。
      */
     input.className = 'pkc-csv-cell-input';
+    /**
+     * 🔴 **欄を開いても、表の列幅を動かさない**(#750 I1 の実測で判明、2026-09-06)。
+     *
+     * ⚠ `<input>` の既定は `size="20"` = **20 字ぶんの幅を要求する** ので、
+     *   表の自動レイアウトが**その列を広げる**。CSS の `width: 100%` /
+     *   `min-width: 0` では効かない(効くのは最小幅で、列幅を決めるのは**最大幅**)。
+     * 🔴 実測(空の表で A2 の欄を開いた):その列が **317px** まで広がり、
+     *   隣の升が **115px → 88px** に縮んで、**その升の中心が「＋」ボタンになった**
+     *   ── 押すと欄が開かず、**列が増える**(#750 I1 で欄が開いたままになるので、
+     *   この食い違いが**普通の状態**になるところだった)。
+     * 🔑 `size = 1` にすると要求する幅が 1 字ぶんになり、列幅は開く前と同じままになる
+     *   (見える幅は CSS の `width: 100%` が升いっぱいにする)。
+     */
+    input.size = 1;
     input.setAttribute('aria-label', '表のセル');
     /**
      * ⚠ **確定は 1 回だけ**(`Enter` のあとに `blur` も来る)── 二重に撃つと、
@@ -4556,10 +4582,42 @@ const ACTIONS: Record<string, ActionHandler> = {
       if (value === before) return; // 変わっていなければ撃たない
       dispatcher.dispatch({ type: 'SET_CSV_CELL', lid, line, col, value });
     };
+    /**
+     * 🔴 **確定して、隣の升の欄をそのまま開く**(#750 I1。user 裁定 2026-09-06)。
+     *
+     * ⚠ 直す前は `Enter` で欄が閉じるだけだったので、**5 列 3 行を埋めるのに
+     *   15 回押し直す**ことになっていた ── 「原文のカンマを数えなくていい」ために
+     *   作った動線なのに、埋める作業では押す回数が字数と同じくらい要った。
+     * 🔑 `Tab` で**右**、`Shift`+`Tab` で**左**、`Enter` で**下**。
+     *   ⚠ 左と上を用意するのは「**片道の操作を作らない**」(user 指示 2026-08-23)──
+     *   行き過ぎたときに戻れないと、結局マウスへ手が戻る。
+     * ⚠ **行き先が無ければ、いままでどおり閉じる**(表の最後の升 / いちばん下の行)
+     *   ── 動かないのに欄だけ残ると「効かない鍵」に見える。
+     *
+     * ## ⚠ 隣は**すぐには開けない**
+     *
+     * 確定は `SET_CSV_CELL` → worker を往復 → `applyBlocks` が**表の塊ごと差し替える**
+     * ので、いま画面に在る隣の升は**数十ミリ秒後に捨てられる**(#745 と同じ経路)。
+     * 🔑 だから `cell-input.ts` に**予約**しておき、差し替えた後に開く。
+     * ⚠ ただし**字が変わっていない回は書き戻しが来ない**(`commit()` が撃たない)ので、
+     *   その回は**その場で開く** ── 予約だけして待つと、次の無関係な描き直しまで
+     *   何も起きない(押したのに動かない、に見える)。
+     */
+    const moveTo = (dir: 'right' | 'left' | 'down'): void => {
+      const next = neighborCell(target, dir);
+      const changed = input.value !== before;
+      commit();
+      if (next === null) return;
+      if (changed) requestCellMove(next);
+      else openCellAt(target.closest<HTMLElement>('.pkc-md-block') ?? target, next);
+    };
     input.addEventListener('keydown', (ev) => {
       if (ev.key === 'Enter') {
         ev.preventDefault();
-        commit();
+        moveTo('down');
+      } else if (ev.key === 'Tab') {
+        ev.preventDefault();
+        moveTo(ev.shiftKey ? 'left' : 'right');
       } else if (ev.key === 'Escape') {
         ev.preventDefault();
         settled = true;
