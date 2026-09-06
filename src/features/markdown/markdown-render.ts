@@ -29,7 +29,7 @@ import { MAX_TAGS, sameTag } from '../flavor/tags';
 // 部分 path は exports map から**消えた**(v14 では `@types/markdown-it` が
 // `lib/token.mjs` を生やしていた)。型は本入口から名前付きで取る。
 import type { Token } from 'markdown-it';
-import { mdCellSpan } from './table-convert';
+import { mdCellGate, mdCellSpanAt, type MdCellGate } from './table-convert';
 // PR-W18:HTML footnote plugin(`[^id]` → `<sup class="footnote-ref">`)。
 // CJS package だが exports map で `.mjs` を提供しているため ESM import OK。
 import footnotePlugin from 'markdown-it-footnote';
@@ -864,23 +864,69 @@ function cellEditAttrs(
    * ⚠ 読み手は**見出しの列数ぶん**升を作るので、`| 1 |` の行にも空の升が並ぶ ──
    *   そこに印を焼くと、押せて、打てて、**「本文が変わっているため反映できません
    *   でした」という起きていない理由**が出る(打った字は消える)。
-   * 🔑 判定は `mdCellSpan` の 1 本を借りる(§7)── 書く側と同じ物差しで見る。
+   * 🔑 判定は `mdCellSpanAt` の 1 本を借りる(§7)── **書く側と同じ門**である
+   *   (#747-2。直す前はこちらだけ門が 1 つ少なく、引用の中の表が
+   *   「押せるのに書けない」形になっていた)。
    */
-  const src = (env as { cellSourceLines?: readonly string[] } | undefined)?.cellSourceLines;
-  if (src !== undefined && mdCellSpan(src[rowLine] ?? '', col) === null) return '';
+  const gate = (env as { cellGate?: MdCellGate } | undefined)?.cellGate;
   /**
-   * 🔴 **欄に出すのは「画面に出ている字」である**(着地前レビュー・動線 ①)。
+   * 🔴 **引くのは `raw`(原文の行番号)である**(#747-3)。
    *
-   * ⚠ 直す前は `gfmCellText`(= `|` を `\|` に逃がす)を通していたが、書き戻す側も
-   *   同じ規則で逃がすので、**押して確定するたびに `\` が 1 本ずつ増えた**
-   *   (実測:1 回目 `みかん\|橙` → 3 回目 `みかん\\\|橙`)。⚠ 2 回目までは画面が
-   *   正しいので、**壊れたことに気づけない**。しかもよそへ貼ると列が割れる。
-   * 🔑 **逃がすのは原文を作る側だけの仕事**である ── ここは読み手が渡してきた
-   *   「逃がしを外した字」をそのまま出す(csv の升と同じ手触りになる)。
+   * ⚠ 直す前は `rowLine`(= 前処理**後**の行番号)で原文を引いていた ──
+   *   `preprocessAlignPrefix` は寄せ・字下げの記号の前に**空行を挿す**ので、
+   *   そこから下は添字が丸ごとずれる。実測:`__字下げ` の下の表は
+   *   **最後の行の升が 1 つも押せず**、逆に**別の行の升**に印が焼かれていた。
    */
+  /**
+   * 🔴 **gate が無いときは焼かない**(着地前レビュー [記録] 1)。⚠ 直す前は
+   *   `inline.content` へ落ちていたが、それは**門が 1 つも通っていない字**である ──
+   *   将来 `cellGate` を載せ忘れた面が現れたら、#747-1(属性の突き破り)と
+   *   #747-2(押せるのに書けない)が**同時に再発するのに tsc は黙る**。
+   * ⚠ **いまは到達しない**(`cellGate` を載せるのは `renderMarkdown` の 1 か所だけ)。
+   *   実測でも、ここを元へ戻す変異は全 spec 緑のまま生き延びる ── つまりこれは
+   *   **鳴る検査を持たない防御**である。載せ忘れを止めるのは型ではなく、この 1 行。
+   */
+  if (gate === undefined) return '';
+  const span = mdCellSpanAt(gate, raw, col);
+  if (span === null) return '';
+  /**
+   * 🔴 **欄に出すのは「原文の升の字」である**(#747-1 / -4)。
+   *
+   * ⚠ 直す前は読み手が渡してきた字(`inline.content` = **前処理後**)を焼いていた。
+   *   帰結が 2 つあり、どちらも実測した:
+   *   ① `{{vars.v}}` / `[@f1]` は前処理で **PUA の sentinel** になり、描画の**後**に
+   *      文字列置換で HTML へ展開される ── 置換は属性値の中にも当たるので、
+   *      `data-pkc-cell-raw="<span class="` と**属性が突き破られ**、升に `"&gt;` と
+   *      重複した字が出ていた(`escapeHtml` では防げない。展開はその後だから)
+   *   ② その升を打ち直すと、原文の `{{vars.v}}` が**値に置き換わって消えた**
+   *      (`%%内緒%%` も同じ)── 打ち直しただけで記法が失われる
+   * 🔑 原文を出せば両方消える。**`**太字**` は既にそうなっている**ので一貫もする
+   *   (`tests/adapter/csv-cell-edit.test.ts`)。
+   *
+   * ⚠ ただし `\|` の逃がしだけは外す(着地前レビュー・動線 ①)── 書き戻す側が
+   *   `gfmCellText` で逃がし直すので、外さないと**確定するたびに `\` が 1 本ずつ増える**
+   *   (実測:1 回目 `みかん\|橙` → 3 回目 `みかん\\\|橙`)。
+   *   🔑 **逃がすのは原文を作る側だけの仕事**である。
+   */
+  const source = (gate.lines[raw] ?? '').slice(span.start, span.end).replace(/\\\|/g, '|');
+  /**
+   * 🔴 **sentinel は数値参照へ逃がす**(着地前レビューが実測で拾った)。
+   *
+   * ⚠ 原文の控えは `neutralizeSentinels` の**前**で取っている(書き戻す先と
+   *   同じ字にするため)ので、本文に PUA(U+E110〜U+E17F)を書いた user では
+   *   **生の sentinel が属性値に残る**。⚠ ところが `postProcessVariableUndefined`
+   *   などは**描画の後に HTML 全体を文字列置換する**ので、属性値の中でも展開され、
+   *   `data-pkc-cell-raw="<span class="` と**属性を突き破る**
+   *   (実測 2026-09-06:`td` に `pkc-variable-undefined` と `title` が生えた)。
+   * 🔑 数値参照なら post 段の正規表現は当たらず、`getAttribute` は元の字へ戻す ──
+   *   **原文はそのまま往復する**(`escapeHtml` だけでは防げない。展開はその後だから)。
+   */
+  const safe = md.utils
+    .escapeHtml(source)
+    .replace(SENTINEL_RANGE, (c) => `&#x${c.codePointAt(0)!.toString(16)};`);
   return (
     ` data-pkc-action="edit-cell" data-pkc-cell-line="${raw + offset}"` +
-    ` data-pkc-cell-col="${col}" data-pkc-cell-raw="${md.utils.escapeHtml(inline.content)}"`
+    ` data-pkc-cell-col="${col}" data-pkc-cell-raw="${safe}"`
   );
 }
 
@@ -5196,6 +5242,15 @@ export function renderMarkdown(
    * ⚠ goldens 25 件に PUA は **0 文字**なので、この正規化で出力は 1 バイトも動かない
    *   (実地確認)。
    */
+  /**
+   * 🔴 **升を打つための原文の控え**(#747-3)。⚠ ここでしか取れない ──
+   *   この下の前処理は行を挿したり字を sentinel へ写したりするので、
+   *   **書き戻す先(= user の本文)と同じ字**はここにしか無い。
+   * ⚠ 2026-08-07 に撤去した `originalText`(目次が原文を読み直していた)とは
+   *   目的が違う ── あちらは**描くために**2 度読んでいた(読み手が 2 つ在る形)。
+   *   こちらは**書き戻す先を指すため**で、描画には 1 バイトも使わない。
+   */
+  const originalLines = text.split('\n');
   text = neutralizeSentinels(text);
   // PKC3: IR migration scaffolding(markdown.use_ir)は持ち込まない ──
   // flag 予算(最大 15)と凍結方針(正本 doc §10)。legacy pipeline 一本。
@@ -5387,12 +5442,14 @@ export function renderMarkdown(
     lineMap?: number[];
     fenceAssets?: Readonly<Record<string, string>>;
     /**
-     * 🔴 **押せる升を決めるための原文**(#708 段④)。
+     * 🔴 **押せる升を決めるための原文と、その門**(#708 段④ / #747)。
      * ⚠ 呼び側には足させない ── ここが `text` を持っているので、ここで載せる。
+     * 🔴 **前処理の前の字**でなければならない ── 書き戻す先が原文だからである
+     *   (#747-3。`preprocessAlignPrefix` は行を挿すので、後の字では添字がずれる)。
      */
-    cellSourceLines?: readonly string[];
+    cellGate?: MdCellGate;
   } = {
-    cellSourceLines: text.split('\n'),
+    cellGate: mdCellGate(originalLines),
     // 🔴 添付から取った字(#444 段②)。⚠ 渡されないのが既定 = 器を置く
     ...(opts.fenceAssets !== undefined ? { fenceAssets: opts.fenceAssets } : {}),
     currentContainerId: opts.currentContainerId ?? '',

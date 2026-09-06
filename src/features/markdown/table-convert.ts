@@ -32,7 +32,13 @@ import { csvLiteralCell, displayCell, isFormula } from './csv-formula';
 import { csvEscapeField, DELIMITER, isHeaderDisabled, parseCsv } from './csv-table';
 import { frontmatterLineCount } from './frontmatter';
 import { parseRenderableFence } from './markdown-render';
-import { fenceInfo, scanContainers } from './source-blocks';
+import {
+  allFences,
+  containerAtLine,
+  fenceInfo,
+  scanContainers,
+  type ContainerSpan,
+} from './source-blocks';
 import { tableToCsv, tableToMarkdown, type TableCopyRow } from './table-copy';
 
 /** 表の形。⚠ 画面の字(「Markdown の表にする」)は `entry-actions.ts` が持つ。 */
@@ -146,7 +152,13 @@ function splitRowSpans(line: string): { cells: string[]; spans: { start: number;
     const head = seg.length - seg.trimStart().length;
     const tail = seg.length - seg.trimEnd().length;
     void i;
-    return { start: lead + r.start + head, end: lead + r.end - tail };
+    const start = lead + r.start + head;
+    /**
+     * ⚠ **空白だけの升では反転する**(#747-6。実測 `mdCellSpan('|     | 2 |', 0)`
+     *   = `{ start: 6, end: 1 }`)── `head + tail` が升の長さを超えるので、
+     *   差し替えが**挿入**になり `|     ZZZ     | 2 |` と余白が複製された。
+     */
+    return { start, end: Math.max(start, lead + r.end - tail) };
   });
   return { cells: out.map((c) => c.trim()), spans };
 }
@@ -347,17 +359,85 @@ export function tableAt(body: string, line: number): TableAt | null {
  *   升を 1 つ打つのは**いつでも打ち直せる**ので、片道にならない。
  * 🔑 だから門は 2 つだけ ── ①frontmatter の中は見ない ②**囲み(``` )の中は見ない**
  *   (コードとして描かれるので押せる印も焼かれないが、別の窓から古い依頼が来た日に
- *   囲みの中身を書き換えない)。
+ *   囲みの中身を書き換えない)。⚠ ②は**入れ子の深さを問わない**(#747-5)。
  * ⚠ **区切りの行(`|---|`)は呼び側が外す** ── ここは走の範囲を返すだけである。
  */
 export function mdTableAt(body: string, line: number): TableAt | null {
-  const lines = body.split('\n');
+  return mdTableRun(mdCellGate(body.split('\n')), line);
+}
+
+/**
+ * 🔴 **升を打つときの門を 1 本にまとめた入れ物**(#747)。
+ *
+ * ⚠ 焼く側(描画)と書く側(`body-rewrite`)が**別々に門を数えていた**ため、
+ *   引用の中・箇条書きの中の表は**押せるのに書けなかった**(打った字が消え、
+ *   「本文が変わっている」という起きていない理由が出る)。
+ * 🔑 だから両方が {@link mdCellSpanAt} だけを呼ぶ。**門を足すならここに足す。**
+ *
+ * ⚠ `runs` は**同じ表の行を何度も引き直さない**ための控えである(表 1 つにつき
+ *   `mdTableAt` は 1 回)── 無くても答えは同じ。
+ */
+export interface MdCellGate {
+  readonly lines: readonly string[];
+  readonly runs: Map<number, TableAt | null>;
+  /**
+   * ⚠ **1 回きり。**{@link mdCellSpanAt} が要るときに 1 度だけ組む ──
+   *   呼び側が `lines` を書き換えたら、gate を**作り直す**こと
+   *   (`rewriteMdCell` は答えを受け取った**後で** `lines` を書き換える)。
+   */
+  body?: string;
+  fm?: number;
+  fences?: readonly ContainerSpan[];
+}
+
+/** {@link mdCellSpanAt} に渡す入れ物を作る。 */
+export function mdCellGate(lines: readonly string[]): MdCellGate {
+  return { lines, runs: new Map() };
+}
+
+/**
+ * 🔴 **囲みの地図を、gate に 1 回だけ組む**(#747 の着地前レビュー)。
+ *
+ * ⚠ 直す前は表 1 つにつき `fenceAt` を呼び、その中で**本文を丸ごと走査**していた ──
+ *   実測で **表 160 個・3680 行の描画が 62ms → 262ms**(二次)になっていた。
+ * 🔴 **走査は frontmatter の下から始める。** ⚠ frontmatter の中の ` ``` ` は
+ *   YAML の字であって囲みの柵ではない ── 数えると、**閉じていない柵が 1 本在るだけで
+ *   本文の升が全部「押せるのに書けない」**になる(実測 96 形中 24 形)。
+ *   🔑 描く側は frontmatter を落とした本文を渡してくるので、ここで揃えないと
+ *   **同じ 1 本の門でも、見ている本文が違う**(§7)。
+ */
+function gateFences(gate: MdCellGate): readonly ContainerSpan[] {
+  gate.fences ??= fencesBelowFrontmatter(gate.body ?? gate.lines.join('\n'));
+  return gate.fences;
+}
+
+/**
+ * 🔴 **囲みは frontmatter の下から数える**(#747 の着地前レビュー)。
+ * 🔑 起点を決めるのはここ 1 か所 ── 升を打つ側(`mdCellSpanAt`)と
+ *   csv の側(`body-rewrite.ts` の `csvTableAt`)が同じ答えを持つ(§7)。
+ */
+export function fencesBelowFrontmatter(body: string): readonly ContainerSpan[] {
   const fm = frontmatterLineCount(body);
+  const below = fm === 0 ? body : body.split('\n').slice(fm).join('\n');
+  const found = allFences(below);
+  return fm === 0 ? found : found.map((f) => ({ ...f, start: f.start + fm, end: f.end + fm }));
+}
+
+function gateFm(gate: MdCellGate): number {
+  gate.body ??= gate.lines.join('\n');
+  gate.fm ??= frontmatterLineCount(gate.body);
+  return gate.fm;
+}
+
+/**
+ * 🔴 **その行は markdown の表の行か**(gate 版)。{@link mdTableAt} の中身である。
+ * 🔑 門を足すならここ 1 か所 ── 焼く側も書く側もここを通る。
+ */
+function mdTableRun(gate: MdCellGate, line: number): TableAt | null {
+  const fm = gateFm(gate);
+  const lines = gate.lines;
   if (!Number.isInteger(line) || line < fm || line >= lines.length) return null;
-  const fence = scanContainers(body).find(
-    (c) => c.kind === 'fence' && line >= c.start && line <= c.end,
-  );
-  if (fence !== undefined) return null;
+  if (containerAtLine(gateFences(gate), line) !== null) return null;
   let top = line;
   while (top > fm && !breaksTable(lines[top - 1] ?? '')) top -= 1;
   for (let s = top; s <= line; s += 1) {
@@ -365,6 +445,38 @@ export function mdTableAt(body: string, line: number): TableAt | null {
     if (run !== null && line >= run.start && line <= run.end) return run;
   }
   return null;
+}
+
+/**
+ * 🔴 **その升は打てるか。打てるなら原文のどこを差し替えるか**(#747)。
+ *
+ * 門は 3 つ ── ①その行が markdown の表の行か({@link mdTableAt}:frontmatter の中と
+ * 囲みの中を外す)②区切りの行(`|---|`)ではないか ③その列の升が**原文に在るか**
+ * ({@link mdCellSpan}:読み手が見出しの列数ぶん作る**空の升**は原文を持たない)。
+ *
+ * @param line **原文の**行番号(描画の行番号ではない ── 前処理が行を挿入する)
+ */
+export function mdCellSpanAt(
+  gate: MdCellGate,
+  line: number,
+  col: number,
+): { start: number; end: number } | null {
+  let at = gate.runs.get(line);
+  if (at === undefined) {
+    at = mdTableRun(gate, line);
+    gate.runs.set(line, at);
+    // 🔑 同じ走の行はまとめて控える(表 1 つにつき 1 回だけ数える)
+    // ⚠ **走の外へはみ出す変異は、いまの呼び側では観測できない**(実測:`end + 1` に
+    //    しても全 spec 緑)── td の印は必ず表の行に付くので、控えが 1 行多くても
+    //    誰も引かない。ここは**正しさのため**であって、鳴る検査は無い
+    if (at !== null) for (let i = at.start; i <= at.end; i += 1) gate.runs.set(i, at);
+  }
+  if (at === null) return null;
+  // ⚠ 区切りの行は表の骨格である(押せる印も焼かない)
+  if (line === at.start + 1) return null;
+  const src = gate.lines[line];
+  if (src === undefined) return null;
+  return mdCellSpan(src, col);
 }
 
 /**
