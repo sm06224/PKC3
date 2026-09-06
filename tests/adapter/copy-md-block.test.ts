@@ -308,6 +308,15 @@ describe('形を選ぶ口(▾)', () => {
       sink.asked?.map((c) => c.separatorBefore === true),
       '区切りの位置が違う',
     ).toEqual([false, false, false, false, false, true]);
+    /**
+     * 🔴 **id がコピーの 5 つと衝突していない**(着地前レビュー・実装 ⑦、2026-09-06)。
+     * ⚠ 衝突すると「押した行」と「効く行」が別になる ── コピーのつもりで
+     *   本文が書き換わる、という**この裁定がいちばん避けたい形**である。
+     * ⚠ 既存の検査は間接的に殺しはするが、**衝突そのものを見ている検査は無かった**。
+     */
+    const ids = sink.asked?.map((c) => c.id) ?? [];
+    expect(ids.length, '空振り(一覧を採れていない)').toBe(6);
+    expect(new Set(ids).size, '書き換える行の id が、コピーのどれかと同じ').toBe(ids.length);
   });
 
   it('🔴 押すと本文が書き換わる(コピーは走らない)', async () => {

@@ -1129,24 +1129,6 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   // ⚠ 行・列の足し引きも同じ `REQUEST_BODY_REWRITE` を撃つ(#418 段①)
   'shape-cell',
   /**
-   * 🔴 **表の形を変えるのも本文を書く**(#708 段②)── 同じ `REQUEST_BODY_REWRITE` を
-   *   撃つので、同じ門をくぐらせる。⚠ 書き換えるのは**表の行範囲まるごと**なので、
-   *   取込・書出しの総入れ替えの裏で走らせるといちばん読めない食い違いになる。
-   */
-  'table-to-markdown',
-  'table-to-csv',
-  /**
-   * 🔴 **「▾」の小窓からも同じ操作ができる**(#708 裁定②)── 上の 2 つと
-   *   **同じ `SET_TABLE_FORMAT`** を撃つので、同じ門をくぐらせる。
-   *   ⚠ この検査(`repo-hygiene` の「本文を書く導線は門に載っている」)が
-   *   足し忘れをその場で捕まえた ── 散文では守れない、の実例がもう 1 つ。
-   * ⚠ **巻き添えを正直に書く**:これでコピー(⧉ / ▾)も忙しい間は断られる。
-   *   🔑 それでよいと判断した ── ①断りは**可視**である(黙って落ちない)
-   *   ②同じ表の `edit-cell` / `shape-cell` は既に門に載っているので、
-   *   忙しい間その表はどのみち触れない ③取り込みの最中に表をコピーする形は稀。
-   */
-  'copy-md-block',
-  /**
    * 🔴 **今日のノートは「作る」ことがある**(#348、2026-08-23)。
    * ⚠ 既に在れば選ぶだけだが、**無ければ `CREATE_ENTRY` を撃つ** ──
    *   取り込みが entry を総入れ替えしている裏で作らせない。
@@ -1208,6 +1190,30 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'move-entry',
   // ⚠ user の**ファイル**を上書きする ── 取込・書出しの最中に走らせない
   'write-back-file',
+]);
+
+/**
+ * 🔴 **押した時点では書くか決まらない導線は、門を「書く瞬間」へ遅らせる**
+ * (着地前レビュー・動線 D3、2026-09-06)。
+ *
+ * ⚠ 上の `BODY_WRITE_ACTIONS` は **action の名前**で断るので、
+ *   **1 つの名前が複数の物を受けている**ときに巻き添えが出る ──
+ *   `copy-md-block` は表だけでなく**コードの囲み・mermaid / chart / html / svg**の
+ *   ⧉ も受けるので、名前で断ると**コピーが 1 つ残らず止まる**。
+ *   ⚠ しかも `busy` は**添付の取り込み**でも真になるので、写真を 1 枚入れた直後に
+ *   コードをコピーしようとして「書き出し / 取込が実行中です」と出る。
+ * 🔑 だから**この一覧に載せた action は、名前では断らない** ── 代わりに
+ *   本文を書く関数(`applyTableFormat`)が `services.busy` を検める。
+ * ⚠ **外すだけでは tripwire を 1 つ撤廃したのと同じ**なので、
+ *   `tests/repo-hygiene.test.ts` が「**この一覧の action から辿れる所で
+ *   `busy` を検めていること**」を機械で確かめる(名前の門と同じ強さを保つ)。
+ * ⚠ 右クリックの 2 つも同じ関数を通る ── 入口で書き分けると**片方だけ字が違う**
+ *   ことになるので、こちらへ寄せて**断り文も 1 つ**にする(§7)。
+ */
+const BODY_WRITE_DEFERRED: ReadonlySet<string> = new Set([
+  'copy-md-block',
+  'table-to-markdown',
+  'table-to-csv',
 ]);
 
 /**
@@ -1305,6 +1311,12 @@ function refuseWhileBusy(
   dispatcher: Dispatcher,
   services: BinderServices,
 ): boolean {
+  /**
+   * ⚠ **遅らせる門の action は、名前では断らない**(上の `BODY_WRITE_DEFERRED`)──
+   *   1 つの名前が複数の物を受けているので、ここで断ると**書かない操作まで巻き添え**に
+   *   なる。断るのは下流の書く関数(`applyTableFormat`)である。
+   */
+  if (BODY_WRITE_DEFERRED.has(action)) return false;
   if (!BODY_WRITE_ACTIONS.has(action) || services.busy?.() !== true) return false;
   // ⚠ **可視に断る**(無言の操作拒否を作らない)
   dispatcher.dispatch({
@@ -1776,10 +1788,15 @@ function moveStackLink(dispatcher: Dispatcher, target: HTMLElement, dir: 'up' | 
  * ⚠ ただし**ここで通しても、書く側でもう一度検める** ── 読んでから書くまでの間に
  *   別の窓が式を書いていれば、判定できるのはあちらだけである。
  */
-function setTableFormat(dispatcher: Dispatcher, target: HTMLElement, to: TableFormat): void {
+function setTableFormat(
+  dispatcher: Dispatcher,
+  target: HTMLElement,
+  to: TableFormat,
+  services: BinderServices,
+): void {
   const line = menuCarriedAt(target, MENU_TABLE_ATTR);
   if (line === null || refuseStaleMenu(dispatcher, target)) return;
-  applyTableFormat(dispatcher, line, to);
+  applyTableFormat(dispatcher, services, line, to);
 }
 
 /**
@@ -1790,10 +1807,40 @@ function setTableFormat(dispatcher: Dispatcher, target: HTMLElement, to: TableFo
  *   後者が**唯一の入口**である(user 裁定 2026-09-06)。
  * 🔑 断る理由も**ここ 1 か所**で言う ── 入口ごとに書くと、片方だけ黙る。
  */
-function applyTableFormat(dispatcher: Dispatcher, line: number, to: TableFormat): void {
+function applyTableFormat(
+  dispatcher: Dispatcher,
+  services: BinderServices,
+  line: number,
+  to: TableFormat,
+): void {
   const st = dispatcher.getState();
   if (st.phase !== 'ready') {
     dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから表の形を変えてください' });
+    return;
+  }
+  /**
+   * 🔴 **忙しい間の門は、action の名前ではなく「書く瞬間」に置く**
+   * (着地前レビュー・動線 D3、2026-09-06)。
+   *
+   * ⚠ 1 稿目は `copy-md-block` を `BODY_WRITE_ACTIONS` に載せた ── ところが
+   *   その action は表だけの受け手ではなく、**本文中のすべての ⧉**
+   *   (コードの囲み・mermaid / chart / html / svg・表)が同じ名前で受ける
+   *   (`markdown-render.ts` の 4 か所)。つまり**コピーが 1 つ残らず止まる**。
+   * ⚠ しかも `services.busy` は書き出し / 取込だけでなく
+   *   **添付の取り込みと整理**でも真になる(`main.ts` の `withAssetGate`)ので、
+   *   写真を 1 枚入れた直後にコードをコピーすると
+   *   「書き出し / 取込が実行中です」と出る ── **押した所と理由が食い違う**。
+   * 🔑 コピーは**読むだけ**なので止める理由が無い。止めるのは本文を書く
+   *   この 1 か所だけにし、字もその操作の言葉にする。
+   * ⚠ 名前の門から外したぶん、`tests/repo-hygiene.test.ts` は
+   *   **この関数が `busy` を検めていること**を機械で確かめる
+   *   (外すだけだと tripwire を 1 つ撤廃したのと同じになる)。
+   */
+  if (services.busy?.() === true) {
+    dispatcher.dispatch({
+      type: 'OP_FAILED',
+      error: '取り込みが終わってから、表の形を変えてください',
+    });
     return;
   }
   const ob = st.openBody;
@@ -3921,7 +3968,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   `data-pkc-split-lid` を焼く)。引き方は `lidOfNode` 1 本。
    * ⚠ 器(`safeName`)は書き出し系と同じ 1 本。
    */
-  'copy-md-block': (dispatcher, target, _services, root) =>
+  'copy-md-block': (dispatcher, target, services, root) =>
     handleCopyMdBlock(target, {
       pick: (choices) => pickCopyFormatInApp(root, choices),
       /**
@@ -3938,13 +3985,29 @@ const ACTIONS: Record<string, ActionHandler> = {
       convert: () => {
         const st = dispatcher.getState();
         const ob = st.openBody;
-        const line = tableLineAt(target, ob?.body ?? null);
-        const at = line === null || ob === null ? null : tableAt(ob.body, line);
+        /**
+         * 🔴 **押した所の持ち主が「開いている本文」でなければ、出さない**
+         * (着地前レビュー・実装 R1、2026-09-06。**実ブラウザで再現**した)。
+         *
+         * ⚠ 下の `noteTitle` は `lidOfNode` を通しているのに、**隣に足したこの口だけ
+         *   通っていなかった** ── `tableLineAt` も `tableAt` も `ob.body`
+         *   (= **主の枠**の本文)を読むので、**留めた枠**(`data-pkc-split-lid`)の
+         *   表で押すと、**押した物ではなく主の枠のノート**が書き換わる。
+         *   ⚠ 画面では留めた枠が変わらないので、user は自分の操作を疑わない
+         *   (押した物と壊れた物が別 ── いちばん気づけない形)。
+         * 🔑 右クリックは留めた枠では開かないので、**出さないほうが釣り合う**
+         *   (`refuseStaleMenu` に当たる門が ▾ 側には無い、の穴も同時に塞がる)。
+         * ⚠ ⧉ のコピーは DOM から読むので**留めた枠でも今までどおり効く** ──
+         *   消えるのは「本文を書き換える」1 行だけである。
+         */
+        if (ob === null || lidOfNode(target, ob.lid) !== ob.lid) return null;
+        const line = tableLineAt(target, ob.body);
+        const at = line === null ? null : tableAt(ob.body, line);
         if (at === null || line === null) return null;
         const to: TableFormat = at.format === 'markdown' ? 'csv' : 'markdown';
         return {
           label: tableConvertPickLabel(at.format),
-          run: () => applyTableFormat(dispatcher, line, to),
+          run: () => applyTableFormat(dispatcher, services, line, to),
         };
       },
       download: downloadBlob,
@@ -5208,8 +5271,10 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 何をするかの判断は `table-convert.ts` / `body-rewrite.ts` ── ここは
    *   **押した所の行を渡し、断る理由が在れば画面に出す**だけである。
    */
-  'table-to-markdown': (dispatcher, target) => setTableFormat(dispatcher, target, 'markdown'),
-  'table-to-csv': (dispatcher, target) => setTableFormat(dispatcher, target, 'csv'),
+  'table-to-markdown': (dispatcher, target, services) =>
+    setTableFormat(dispatcher, target, 'markdown', services),
+  'table-to-csv': (dispatcher, target, services) =>
+    setTableFormat(dispatcher, target, 'csv', services),
   'remove-place': (dispatcher, target, _services, root) => {
     const line = menuCarriedBlock(target);
     if (line === null || refuseStaleMenu(dispatcher, target)) return;

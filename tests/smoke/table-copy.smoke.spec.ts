@@ -236,6 +236,16 @@ test('🔴 ▾ の小窓から、本文の表を作り変えられる (#708 裁�
     page.locator('[data-pkc-field="pick-copy-format-sep"]'),
     '区切りが引かれていない(コピーと書き換えが地続きに見える)',
   ).toHaveCount(1);
+  /**
+   * 🔴 **線の「位置」まで見る**(着地前レビュー・実装 R4、2026-09-06)。
+   * ⚠ 本数だけを見ていたので、**線を一番下へ動かす変異が生き延びた** ──
+   *   そうなると書き換える行がコピーの 5 つと地続きになり、
+   *   この裁定が防ごうとした当のもの(コピーのつもりで本文が変わる)が戻る。
+   */
+  await expect(
+    page.locator('[data-pkc-field="pick-copy-format-sep"] ~ [data-pkc-field="pick-copy-format"]'),
+    '区切りより下に在るのが、書き換える 1 行だけになっていない',
+  ).toHaveCount(1);
   await expect(rows.nth(5), '書き換える行の字が違う').toHaveText('本文を CSV の表に書き換える');
 
   await clickReal(page, '[data-pkc-field="pick-copy-format"][data-pkc-copy-format-index="5"]');
@@ -298,6 +308,15 @@ test('🔴 ::: の囲みの中の表では、書き換える行を出さない (
   ).toHaveCount(0);
   // ⚠ 空振り防止 ── 一覧そのものはちゃんと出ている
   await expect(rows.first(), '一覧が出ていない').toHaveText('表計算に貼る(TSV)');
+  /**
+   * 🔴 **題名も「書き換える」を名乗らない**(着地前レビュー・動線 D5、2026-09-06)。
+   * ⚠ 行を出さないだけだと**題名だけが約束を残す** ── user は「壊れている」か
+   *   「自分の押し方が悪い」と読む(画面には理由が 1 文字も出ない)。
+   */
+  await expect(
+    page.locator('[data-pkc-field="dialog-title"]'),
+    '書き換える行が無いのに、題名が「書き換える」と名乗っている',
+  ).toHaveText('この表をコピー');
 
   expect(errors, `ページで例外が出た: ${errors.join(' / ')}`).toEqual([]);
 });

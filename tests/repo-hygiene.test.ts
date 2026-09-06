@@ -586,12 +586,90 @@ describe('本文を書く導線は、忙しい間の門に載っている', () =
     expect(handlerBodies().size, 'binder の表を読めていない').toBeGreaterThan(20);
   });
 
+  /** 名前の一覧(`new Set([...])`)を 1 つ読む。 */
+  const setNamed = (name: string): Set<string> =>
+    new Set(
+      [
+        ...(new RegExp(`const ${name}: ReadonlySet<string> = new Set\\(\\[([\\s\\S]*?)\\]\\)`)
+          .exec(BINDER)?.[1] ?? '').matchAll(/'([a-z0-9-]+)'/g),
+      ].map((m) => m[1]!),
+    );
+
+  /**
+   * 🔴 **helper を辿って本文をつなぐ**(深さつき)。
+   *
+   * ⚠ 上の漏れ検査は **1 段だけ**辿る(広げると §1「範囲が広すぎて無関係な散文に
+   *   満たされる」へ倒れる)が、下の「遅らせた門」の検査は
+   *   **`table-to-csv` → `setTableFormat` → `applyTableFormat`** と **2 段**要る。
+   * 🔑 だから**この検査だけ**深さを持たせる ── 対象が 3 つの action に限られており、
+   *   探す語(`busy`)も 1 つなので、飲み込みで偽陽性になる余地が小さい。
+   */
+  const withHelpers = (body: string, helpers: Map<string, string>, depth: number): string => {
+    const seen = new Set<string>();
+    let out = body;
+    let frontier = [body];
+    for (let d = 0; d < depth; d++) {
+      const next: string[] = [];
+      for (const part of frontier) {
+        for (const m of part.matchAll(/\b([A-Za-z_][\w]*)\s*\(/g)) {
+          const name = m[1]!;
+          if (seen.has(name)) continue;
+          const h = helpers.get(name);
+          if (h === undefined) continue;
+          seen.add(name);
+          out += h;
+          next.push(h);
+        }
+      }
+      frontier = next;
+    }
+    return out;
+  };
+
+  /**
+   * 🔴 **名前の門から外した action は、書く瞬間に `busy` を検めている**
+   * (着地前レビュー・動線 D3、2026-09-06)。
+   *
+   * ⚠ `copy-md-block` は表だけでなく**コードの囲み・図の ⧉** も受けるので、
+   *   名前で断ると**コピーが 1 つ残らず止まる**(しかも `busy` は添付の取り込みでも
+   *   真になるので、押した所と理由が食い違う)。だから門を下流へ移した。
+   * ⚠ **移しただけでは tripwire を 1 つ撤廃したのと同じ**である ──
+   *   移した先で検めなくなっても、名前の門から外れているので**誰も鳴らない**。
+   * 🔑 そこで「遅らせた」と宣言した action は、handler から辿れる所で
+   *   `busy` を読んでいることをここで確かめる。
+   */
+  it('🔴 名前の門から外した action は、書く瞬間に busy を検めている', () => {
+    const deferred = setNamed('BODY_WRITE_DEFERRED');
+    expect(deferred.size, '遅らせた門の一覧を読めていない(空振り)').toBeGreaterThan(0);
+    const handlers = handlerBodies();
+    const helpers = helperBodies();
+    const blind: string[] = [];
+    for (const action of deferred) {
+      const body = handlers.get(action);
+      expect(body, `${action} の handler を読めていない(空振り)`).toBeDefined();
+      /**
+       * ⚠ **コメントを落としてから、語ではなく「呼び出しの形」で当てる**
+       *   (着地前レビュー・実装 R5、2026-09-06。変異試験が SURVIVED で教えた)。
+       * ⚠ 1 稿目は `/\bbusy\b/` を**生の本文**に当てていたので、
+       *   `applyTableFormat` の docstring に「`services.busy`」と書いてある限り
+       *   **実行部を丸ごと消しても緑**だった ── 守っているつもりの検査が、
+       *   自分の解説文に満たされていた(CLAUDE.md §1「範囲が広すぎて散文に満たされる」)。
+       */
+      const code = stripComments(withHelpers(body ?? '', helpers, 3));
+      if (!/\bbusy\s*\??\.?\(/.test(code)) blind.push(action);
+    }
+    expect(blind, '名前の門から外したのに、書く瞬間に busy を検めていない').toEqual([]);
+  });
+
   it('🔴 本文を書く action が門から漏れていない', () => {
     const types = writingActionTypes();
-    const gate = new Set(
-      [...(/const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set\(\[([\s\S]*?)\]\)/
-        .exec(BINDER)?.[1] ?? '').matchAll(/'([a-z0-9-]+)'/g)].map((m) => m[1]!),
-    );
+    /**
+     * ⚠ **2 つの一覧の合併で見る**(2026-09-06)── 名前で断つ門
+     *   (`BODY_WRITE_ACTIONS`)と、書く瞬間へ遅らせた門(`BODY_WRITE_DEFERRED`)。
+     * 🔑 遅らせた側が**本当に検めているか**は、すぐ上の検査が別に見る ──
+     *   合併するだけだと「宣言すれば素通り」になる。
+     */
+    const gate = new Set([...setNamed('BODY_WRITE_ACTIONS'), ...setNamed('BODY_WRITE_DEFERRED')]);
     expect(gate.size, '門の一覧を読めていない(空振り)').toBeGreaterThan(5);
     const helpers = helperBodies();
     // ⚠ 空振り防止 ── helper を 1 つも読めていないなら、下の展開は何もしていない
