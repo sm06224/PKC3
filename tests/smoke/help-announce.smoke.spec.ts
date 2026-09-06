@@ -35,6 +35,48 @@ test('🔴 ヘルプの面が開き、マニュアルが描かれる', async ({ 
   await expect(ver).toBeVisible();
   expect((await ver.textContent()) ?? '', '版が出ていない').toMatch(/^pkc3 v\d/);
 
+  /**
+   * ① b 🔴 **開いた直後の 1 画面に、マニュアルの目次と版が見える**
+   *      (#719。user 裁定 2026-09-06 = 案 A の「直ったと言える条件」そのもの)。
+   *
+   * ⚠ 直す前は**先頭がお知らせ 11 件**で、マニュアルは
+   *   `scrollHeight` 5455px の下だった ── **面の中のリンクは 0 件**。
+   * 🔑 観測点は**窓の中に見えているか** ── 「要素が在る」だけだと、下へ沈めた実装でも
+   *   緑になる(`toBeVisible` は窓の外でも真になりうる)。
+   * ⚠ **器の矩形と比べてはいけない**(1 稿目でそう外した)── `help-body` は
+   *   中身の高さそのままなので、**何を置いても「器の中」になる**。
+   */
+  const body = page.locator('[data-pkc-region="help-body"]');
+  const inFirstScreen = async (sel: string): Promise<boolean> =>
+    page.evaluate((q) => {
+      const el = document.querySelector(q);
+      if (el === null) throw new Error(`前提が崩れている: ${q} が無い`);
+      const r = el.getBoundingClientRect();
+      return r.top < window.innerHeight && r.bottom > 0;
+    }, sel);
+  await expect(body).toBeVisible();
+  await expect(page.locator('[data-pkc-field="help-toc-row"]').first()).toBeVisible({
+    timeout: 15_000,
+  });
+  expect(await inFirstScreen('[data-pkc-field="help-version"]'), '版が最初の画面に無い').toBe(true);
+  expect(await inFirstScreen('[data-pkc-field="help-toc-row"]'), '目次が最初の画面に無い').toBe(true);
+  // ⚠ **空振り防止** ── お知らせが**下にある**こと(上に居たら、上の 2 つは自明に成り立つ)
+  expect(
+    await inFirstScreen('[data-pkc-help-notice]'),
+    'お知らせがまだ先頭に居る(並べ替えが効いていない)',
+  ).toBe(false);
+  /**
+   * 🔑 **目次の行を押すと、その節へ送られる**。
+   * ⚠ 動くのは `help-body` ではなく**マニュアルの箱**(`help-manual` は
+   *   `max-height: 60vh; overflow: auto` の器)── 1 稿目は器を取り違えて、
+   *   「押しても動かない」と読んだ。
+   */
+  const manualBox = page.locator('[data-pkc-region="help-manual"]');
+  const before = await manualBox.evaluate((el) => el.scrollTop);
+  expect(before, '前提が崩れている: 開いた直後なのに既にスクロールしている').toBe(0);
+  await page.locator('[data-pkc-field="help-toc-row"]').nth(8).click();
+  await expect.poll(async () => manualBox.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+
   // ② 過去のお知らせが出る
   await expect(page.locator('[data-pkc-help-notice]').first()).toBeVisible();
 
