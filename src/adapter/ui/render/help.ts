@@ -236,27 +236,14 @@ export class HelpRenderer {
 
     const ver = document.createElement('p');
     ver.setAttribute('data-pkc-field', 'help-version');
-    ver.textContent = versionText();
+    /**
+     * ⚠ **名前を付ける**(着地前レビュー・動線 7)。⚠ 面の先頭から「マニュアル」の
+     *   見出しの下へ移したので、裸の版番号は**マニュアルの版**と読める位置になった。
+     * 🔑 何のための数字かも書く ── 版を見る唯一の理由は**不具合の報告に添えること**である。
+     */
+    ver.textContent = `この版: ${versionText()}(不具合の報告に添えてください)`;
     body.append(ver);
 
-    /**
-     * 🔴 **面の中の目次**(#719 案 A)。⚠ 直す前は面の中のリンクが **0 件**で、
-     * 10 万字を目次なしで探す形だった(別窓のほうには #648 で目次が在る)。
-     *
-     * ⚠ **飛び先が在る見出しだけ並べる**(dead click を作らない)── 描画器が
-     *   `id` を焼くのは **h1〜h3 だけ**(`markdown-render.ts` の `heading_open`)なので、
-     *   h4 以下は**押せる物として出さない**。
-     * ⚠ **`data-pkc-action` を足さない** ── `operation-table.test.ts` が等値 pin
-     *   しており、足すと 5 つ鳴る。押した所は**ここで直に受ける**
-     *   (探す欄・`app-dialog` の `palette-filter` と同じ前例)。
-     * ⚠ **`<a href="#…">` にしない** ── 面は `hidden` で同一 document に常駐するので、
-     *   `#slug` は**先に作られた本文面の見出し**に当たる(この file の冒頭の戒め)。
-     *   だから `<button>` + `scrollIntoView` で飛ぶ。
-     */
-    this.tocHost = document.createElement('nav');
-    this.tocHost.setAttribute('data-pkc-region', 'help-toc');
-    this.tocHost.setAttribute('aria-label', 'マニュアルの目次');
-    body.append(this.tocHost);
 
     /**
      * 🔴 **アプリとして開く口**(#645。user 要望 2026-08-31)。
@@ -332,6 +319,45 @@ export class HelpRenderer {
     });
     findBar.append(find, this.findCount, this.findHits);
     body.append(findBar);
+
+    /**
+     * 🔴 **面の中の目次**(#719 案 A)。⚠ 直す前は面の中のリンクが **0 件**で、
+     * 10 万字を目次なしで探す形だった(別窓のほうには #648 で目次が在る)。
+     *
+     * ⚠ **飛び先が在る見出しだけ並べる**(dead click を作らない)── 描画器が
+     *   `id` を焼くのは **h1〜h3 だけ**(`markdown-render.ts` の `heading_open`)なので、
+     *   h4 以下は**押せる物として出さない**。
+     * ⚠ **`data-pkc-action` を足さない** ── `operation-table.test.ts` が等値 pin
+     *   しており、足すと 5 つ鳴る。押した所は**ここで直に受ける**
+     *   (探す欄・`app-dialog` の `palette-filter` と同じ前例)。
+     * ⚠ **`<a href="#…">` にしない** ── 面は `hidden` で同一 document に常駐するので、
+     *   `#slug` は**先に作られた本文面の見出し**に当たる(この file の冒頭の戒め)。
+     *   だから `<button>` + 器の `scrollTop` で送る。
+     *
+     * 🔴 **置き場所は「別窓ボタンと探す欄の後ろ」**(着地前レビュー・動線 1、実測)。
+     *   ⚠ 目次の行は**素の `<button>` が 91 個**(マニュアルの h1〜h3 を数えた実数)なので、
+     *   前に置くと **`Tab` を 91 回押さないと**「別のウィンドウで開く」と
+     *   「マニュアルの中を探す」に届かない ── **目次を使わない人には壁**になる。
+     * ⚠ 副産物:目次はマニュアルを描き終えてから中身が入るので、前に置くと
+     *   **入った瞬間に下のボタンが 250px ほど飛ぶ**(押そうとした物が指の下から逃げる)。
+     */
+    /**
+     * 🔴 **見える名前を付ける**(着地前レビュー・動線 3)。⚠ 直す前は `aria-label` だけ
+     *   だったので、**読み上げには名前が届き、目で見ている人には届かない**という
+     *   逆転が起きていた ── 版のすぐ下に「枠だけの箱」が出る形だった。
+     * 🔑 **段数の断りも画面に出す** ── 出るのは h1〜h3 の 91 本で、h4 以下の 102 本は
+     *   出ない(飛び先が無いため)。⚠ その断りが**マニュアルの中にしか無い**のは、
+     *   探せない人に「マニュアルを読め」と言っているのと同じである。
+     */
+    const tocHead = document.createElement('p');
+    tocHead.setAttribute('data-pkc-field', 'settings-note');
+    tocHead.textContent =
+      '目次 ── 大きい見出しだけ出ます。細かい見出しは下の「マニュアルの中を探す」か、別のウィンドウの目次(全部出ます)から探してください';
+    body.append(tocHead);
+    this.tocHost = document.createElement('nav');
+    this.tocHost.setAttribute('data-pkc-region', 'help-toc');
+    this.tocHost.setAttribute('aria-label', 'マニュアルの目次');
+    body.append(this.tocHost);
 
     this.manualHost = document.createElement('div');
     this.manualHost.setAttribute('data-pkc-region', 'help-manual');
@@ -569,9 +595,33 @@ export class HelpRenderer {
       row.setAttribute('data-pkc-level', h.tagName.slice(1));
       row.textContent = h.textContent ?? '';
       row.addEventListener('click', () => {
-        // ⚠ **id で引き直す**(参照を持たない)── 描き直しで器が入れ替わっても迷子にならない
-        const target = host.querySelector(`#${CSS.escape(h.id)}`);
-        target?.scrollIntoView({ block: 'start' });
+        /**
+         * 🔴 **描き終わるのを待つ**(着地前レビュー・動線 2)。⚠ 5 分使わないと
+         *   `dropManual()` が**本文だけ**捨てる(目次の行は残る)ので、開き直した直後の
+         *   250ms ほどは `#id` が引けず、**押しても何も起きず理由も出ない**。
+         * 🔑 同じ file の探す欄(`jumpToSection`)は既に `await this.manualReady` している
+         *   ── 新しく足した目次だけ、その 1 行が無かった。
+         */
+        void this.manualReady?.then(() => {
+          // ⚠ **id で引き直す**(参照を持たない)── 描き直しで器が入れ替わっても迷子にならない
+          const target = host.querySelector<HTMLElement>(`#${CSS.escape(h.id)}`);
+          if (target === null) return;
+          /**
+           * 🔴 **外側は動かさない**(着地前レビュー・動線 4、実測)。
+           * ⚠ `scrollIntoView` は**スクロールできる祖先を全部**動かすので、
+           *   外側(`[data-pkc-region='detail']`)まで動いて**目次が画面の外へ出る**
+           *   (実測: 押す前 `outerScrollTop 0` / 押した後 **494**、目次は見えなくなった)。
+           *   目次は「押して読んで、また押す」物なので、1 回で消えては使えない。
+           * 🔑 **送ってから外側だけ戻す** ── 描画の合間に戻すので、画面には
+           *   「内側だけ動いた」ように見える。⚠ 内側を自分で計算しない
+           *   (`getBoundingClientRect` は happy-dom で 0 なので、**unit から
+           *   飛び先を確かめられなくなる** ── 観測点を捨てないほうを採った)。
+           */
+          const outer = host.closest<HTMLElement>('[data-pkc-region="detail"]');
+          const keep = outer?.scrollTop ?? 0;
+          target.scrollIntoView({ block: 'start' });
+          if (outer !== null && outer !== undefined) outer.scrollTop = keep;
+        });
       });
       nav.append(row);
     }

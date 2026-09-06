@@ -899,6 +899,9 @@ describe('ヘルプの面の目次(#719)', () => {
         seen.push(this);
       };
     rows[3]!.click();
+    // ⚠ **押した後に待つ**(着地前レビュー・動線 2 の直しで、押した所は
+    //    `manualReady` を待ってから飛ぶようになった ── 待たないと空振りになる)
+    for (let i = 0; i < 8; i++) await Promise.resolve();
     expect(seen, '押しても飛んでいない').toHaveLength(1);
     expect(seen[0], '押した行と違う見出しへ飛んだ').toBe(withId[3]);
   });
@@ -921,5 +924,31 @@ describe('ヘルプの面の目次(#719)', () => {
       // ⚠ 中身は**在る**(畳んだのであって、落としたのではない)
       expect(it.querySelectorAll('li').length, 'お知らせの中身が落ちている').toBeGreaterThan(0);
     }
+  });
+  /**
+   * 🔴 **押しても外側は動かさない**(着地前レビュー・動線 4、実測)。
+   * ⚠ `scrollIntoView` は**スクロールできる祖先を全部**動かすので、外側まで動くと
+   *   **目次が画面の外へ出る**(実測: 押す前 0 / 押した後 494)。
+   */
+  it('🔴 目次を押しても、外側の器はスクロールしない', async () => {
+    const outer = document.createElement('div');
+    outer.setAttribute('data-pkc-region', 'detail');
+    document.body.append(outer);
+    const host = document.createElement('div');
+    outer.append(host);
+    const r = new HelpRenderer(host, { render: async (t) => renderMarkdown(t) });
+    r.render();
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    const rows = [...host.querySelectorAll<HTMLElement>('[data-pkc-field="help-toc-row"]')];
+    expect(rows.length, '目次の行が出ていない(空振り)').toBeGreaterThan(3);
+    // 台: `scrollIntoView` が外側を動かす実物のふるまいを真似る
+    for (const h of host.querySelectorAll<HTMLElement>('h1[id], h2[id], h3[id]'))
+      h.scrollIntoView = function (this: HTMLElement): void {
+        outer.scrollTop = 494;
+      };
+    outer.scrollTop = 0;
+    rows[3]!.click();
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    expect(outer.scrollTop, '外側まで動いた(目次が画面の外へ出る)').toBe(0);
   });
 });

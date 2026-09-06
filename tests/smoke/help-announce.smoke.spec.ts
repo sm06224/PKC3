@@ -33,7 +33,10 @@ test('🔴 ヘルプの面が開き、マニュアルが描かれる', async ({ 
   // ① 版が**文字で**出る(hover の title ではない ── タッチ端末にも届く)
   const ver = page.locator('[data-pkc-field="help-version"]');
   await expect(ver).toBeVisible();
-  expect((await ver.textContent()) ?? '', '版が出ていない').toMatch(/^pkc3 v\d/);
+  // ⚠ **名前が付いた**(着地前レビュー・動線 7)── 「マニュアル」の見出しの下に
+  //    裸の版番号を置くと**マニュアルの版**と読める。何のための数字かも書く。
+  expect((await ver.textContent()) ?? '', '版が出ていない').toMatch(/^この版: pkc3 v\d/);
+  expect((await ver.textContent()) ?? '', '版を見る理由が書かれていない').toContain('不具合の報告');
 
   /**
    * ① b 🔴 **開いた直後の 1 画面に、マニュアルの目次と版が見える**
@@ -72,10 +75,51 @@ test('🔴 ヘルプの面が開き、マニュアルが描かれる', async ({ 
    *   「押しても動かない」と読んだ。
    */
   const manualBox = page.locator('[data-pkc-region="help-manual"]');
+  const outer = page.locator('[data-pkc-region="detail"]');
   const before = await manualBox.evaluate((el) => el.scrollTop);
   expect(before, '前提が崩れている: 開いた直後なのに既にスクロールしている').toBe(0);
+  expect(
+    await outer.evaluate((el) => el.scrollTop),
+    '前提が崩れている: 外側が既にスクロールしている',
+  ).toBe(0);
   await page.locator('[data-pkc-field="help-toc-row"]').nth(8).click();
   await expect.poll(async () => manualBox.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  /**
+   * 🔴 **外側は動かない**(着地前レビュー・動線 4、実測で見つかった)。
+   * ⚠ `scrollIntoView` は**スクロールできる祖先を全部**動かすので、放っておくと
+   *   外側まで動いて**目次が画面の外へ出る**(実測: 押す前 0 / 押した後 **494**)。
+   *   目次は「押して読んで、また押す」物なので、1 回で消えては使えない。
+   */
+  expect(
+    await outer.evaluate((el) => el.scrollTop),
+    '外側までスクロールした(目次が画面の外へ出る)',
+  ).toBe(0);
+  expect(
+    await inFirstScreen('[data-pkc-region="help-toc"]'),
+    '押した後、目次が画面から消えた',
+  ).toBe(true);
+
+  /**
+   * 🔴 **目次は「別のウィンドウで開く」と「探す欄」の後ろに在る**
+   * (着地前レビュー・動線 1)。⚠ 目次の行は**素の button が 91 個**なので、
+   *   前に置くと `Tab` を 91 回押さないとその 2 つに届かない。
+   * 🔑 DOM の並びで見る(`Tab` の順はこれで決まる)。
+   */
+  const tabOrder = await page.evaluate(() => {
+    const host = document.querySelector('[data-pkc-region="help-body"]');
+    if (host === null) throw new Error('前提が崩れている: ヘルプの器が無い');
+    const els = [...host.querySelectorAll('[data-pkc-action="open-manual-window"], [data-pkc-field="help-find"], [data-pkc-field="help-toc-row"]')];
+    return els.map((e) => e.getAttribute('data-pkc-action') ?? e.getAttribute('data-pkc-field') ?? '');
+  });
+  expect(tabOrder.slice(0, 2), '目次が別窓ボタン・探す欄より前に居る(Tab が 91 回になる)').toEqual([
+    'open-manual-window',
+    'help-find',
+  ]);
+  // ⚠ 空振り防止 ── 目次の行が本当に何十個も在ること
+  expect(
+    tabOrder.filter((x) => x === 'help-toc-row').length,
+    '目次の行が少なすぎる(この主張が意味を持たない)',
+  ).toBeGreaterThan(30);
 
   // ② 過去のお知らせが出る
   await expect(page.locator('[data-pkc-help-notice]').first()).toBeVisible();
