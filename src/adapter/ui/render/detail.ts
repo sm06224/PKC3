@@ -21,6 +21,7 @@ import {
 } from '@features/markdown/frontmatter';
 import { lineStartOffset, scrollTopForLine } from '@features/markdown/line-offset';
 import { hydrateMermaid, type MermaidScope } from './mermaid-hydrate';
+import { hydrateMath } from './math-hydrate';
 import { markViewBig } from './view-big';
 import { hydrateChart } from './chart-raster';
 import { readFenceAssetText } from '@features/asset/fence-asset-read';
@@ -36,7 +37,9 @@ import { STACK_ARCHETYPE } from '@features/flavor/stack-flavor';
  *   (2026-08 に mermaid で実際に起きた「器が空のまま残る」の再演)。
  */
 function hydrateFigures(root: ParentNode | readonly ParentNode[]): MermaidScope[] {
-  return [hydrateMermaid(root), hydrateChart(root)];
+  // ⚠ **数式もここに束ねる**(#707)── 面は 6 か所あるので、別の口を作ると
+  //    そのうち 1 つで数式だけ字のまま残る(まさに mermaid が踏んだ形)。
+  return [hydrateMermaid(root), hydrateChart(root), hydrateMath(root)];
 }
 import { applyBlocks, EMPTY_VIEW, type BlockView } from './apply-blocks';
 import { captureCellInput, reopenCellInput } from './cell-input';
