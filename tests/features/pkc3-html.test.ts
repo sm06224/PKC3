@@ -864,12 +864,23 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
       ).blob,
     );
     const box = document.getElementById('body')!;
-    expect(box.textContent, '数式の原文が読めない').toContain('E = mc^2');
-    expect(box.textContent, '塊の数式の原文が読めない').toContain('x^2 + y^2');
+    /**
+     * 🔴 **打った字(区切りごと)が出る**(着地前レビュー 2026-09-06・欠陥 2)。
+     * ⚠ 1 稿目は図と同じ `<pre>` に入れており、`$` が付かなかった ──
+     *   マニュアルとお知らせは「打った字のまま」と約束しているのに、
+     *   **4 つの出口のうちここだけ**が違っていた。
+     */
+    expect(box.textContent, '行の中の数式に区切りが付いていない').toContain('$E = mc^2$');
+    expect(box.textContent, '塊の数式に区切りが付いていない').toContain('$$x^2 + y^2$$');
     const hosts = box.querySelectorAll('[data-pkc-math-src]');
     expect(hosts.length, '数式の器が 1 つも無い(空振り)').toBe(2);
-    for (const h of hosts)
-      expect(h.querySelector('pre'), '数式の器が空のまま').not.toBeNull();
+    /**
+     * 🔴 **文を割らない** ── 行の中の器は `<span>` なので、中にブロックの
+     *   `<pre>` を入れると段落が 3 行に割れる(実測でそうなっていた)。
+     */
+    const inline = box.querySelector('[data-pkc-math-display="0"]')!;
+    expect(inline.querySelector('pre'), '行の中の数式に塊が入っている(文が割れる)').toBeNull();
+    expect(inline.closest('p'), '前提が崩れている: 行の中の数式が段落の中に無い').not.toBeNull();
   });
 
   it('一覧から選ぶと本文が入れ替わる(選択状態も動く)', async () => {

@@ -42,8 +42,23 @@ ctx.onmessage = (ev): void => {
             ok: true,
             html: katex.renderToString(it.tex, {
               displayMode: it.display,
-              // 🔴 **投げさせない** ── 1 つの書き間違いで面が落ちない
-              throwOnError: false,
+              /**
+               * 🔴 **投げさせる**(着地前レビュー 2026-09-06・欠陥 3)。
+               *
+               * ⚠ 1 稿目は `throwOnError: false` だった。名前に反して
+               *   **「投げない」ではなく「赤い字の span を返す」**である
+               *   (`katex.mjs` の `makeSpan(['katex-error'])` + `color:#cc0000` の
+               *   inline style + `title` に**英語**のエラー)。
+               * 🔴 それは `ok: true` で返るので、呼び側が**打った字を捨てて**
+               *   赤字に差し替えていた ── `math-hydrate.ts` の docstring と
+               *   `app.css` の注記と マニュアルが揃って
+               *   「**式が壊れていても打った字が残る**」と書いているのに、
+               *   **実装だけが違うことをしていた**。
+               * 🔑 投げさせて `ok:false` で返せば、呼び側が原文を残す ──
+               *   3 つの記述と実装が同じことを言う形になる。
+               * ⚠ 面は落ちない(下の `catch` が 1 件ずつ受ける)。
+               */
+              throwOnError: true,
               // ⚠ 読み上げのために MathML も出す(KaTeX の既定)
               output: 'htmlAndMathml',
               strict: false,

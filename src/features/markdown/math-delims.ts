@@ -24,7 +24,8 @@
  * | | 数式にしない条件 |
  * |---|---|
  * | **開き `$`** | 直前が `\`(逃がし)/ 直後が空白 / 直後が数字(`$100`)/ 🔴 **直後が `{`**(`${date}`) |
- * | **閉じ `$`** | 直前が `\` / 直前が空白 / 直後が数字(`$5 と $10`)/ 🔴 **直後が `{`** |
+ * | **閉じ `$`** | 直前が `\` / 直前が空白 / 🔴 **直後が ASCII の語の字**(`$5 と $10` / `$HOME/bin:$PATH`)/ 🔴 **直後が `{`** |
+ * | 走査 | 🔴 **改行と逆引用符を跨がない** |
  * | 中身 | 空 / 改行を含む |
  *
  * ⚠ **`{` の門はこの repo 固有**である ── 差し込みの記法(`${…}`)が在るのは
@@ -46,6 +47,17 @@ function isSpace(ch: string | undefined): boolean {
 /** 数字か。 */
 function isDigit(ch: string | undefined): boolean {
   return ch !== undefined && ch >= '0' && ch <= '9';
+}
+
+/**
+ * 🔴 **ASCII の語の字**(英字 / 数字 / `_`)か。
+ *
+ * ⚠ **日本語は含めない。** 閉じの直後を「語の字なら閉じない」で塞ぐが、
+ *   日本語まで数えると `$x$と書く`(空白を置かない書き方)が数式にならなくなる ──
+ *   それは日本語の user の普通の書き方である。
+ */
+function isAsciiWord(ch: string | undefined): boolean {
+  return ch !== undefined && /[A-Za-z0-9_]/.test(ch);
 }
 
 /**
@@ -88,8 +100,25 @@ export function closesMath(src: string, i: number): boolean {
   //    ⚠ 開き側だけ塞いだ 1 稿目は `残りは $x です。${宛名} 様。` で
   //    `x です。` を数式にしていた ── **`${` の `$` は区切りではない**、が正しい。
   if (next === '{') return false;
-  // 金額(`$5 と $10`)の 2 つ目を閉じにしない
-  if (isDigit(next)) return false;
+  /**
+   * 🔴 **閉じの直後が ASCII の語の字なら閉じない**(着地前レビュー 2026-09-06・欠陥 1)。
+   *
+   * ⚠ これが無いと、`$` を**名前の頭**として使う書き方が軒並み飲まれる ──
+   *   実測で 5 形が壊れていた:
+   *
+   *   | 打った字 | 飲まれた範囲 |
+   *   |---|---|
+   *   | `PATH=$HOME/bin:$PATH` | `HOME/bin:` |
+   *   | `環境変数 $PATH,$HOME` | `PATH,` |
+   *   | `レートは $USD で計算し、$EUR` | `USD で計算し、` |
+   *   | `=SUM($A$1:$A$9)` | `A$1:` |
+   *   | ``変数 $x と `$y` `` | ``x と ` `` |
+   *
+   * 🔑 数式の閉じの後には**空白・句読点・括弧・行末**が来る(`$x$ です` / `($x$)`)。
+   *   英字が続くのは「`$` + 名前」の形である。
+   * ⚠ **日本語は数えない**(`$x$と書く` は数式のままにする ── 上の `isAsciiWord`)。
+   */
+  if (isAsciiWord(next)) return false;
   return true;
 }
 
@@ -128,6 +157,18 @@ export function readMathAt(src: string, start: number, posMax: number): MathSpan
   for (let i = from; i < posMax; i++) {
     const ch = src[i];
     if (ch === '\n') return null; // 改行を跨がない
+    /**
+     * 🔴 **逆引用符を跨がない**(着地前レビュー 2026-09-06・欠陥 1)。
+     *
+     * ⚠ 1 稿目は「コードの中は markdown-it が先に tokenize するので守られる」と
+     *   書いていたが、**それは開きが code span の外に在る場合を見ていなかった** ──
+     *   ``変数 $x と `$y` を比べる`` は、外の `$x` が **code span の中の `$`** を
+     *   閉じに使い、``x と ` `` を数式にしていた(実測)。
+     * ⚠ しかも マニュアルは「逆引用符で囲めば数式にならない」と**約束している** ──
+     *   その約束が守れていなかった。
+     * 🔑 走査を `` ` `` で止めれば、開きがどちら側に在っても跨げない。
+     */
+    if (ch === '`') return null;
     if (ch !== '$') continue;
     if (isEscaped(src, i)) continue;
     if (display) {
