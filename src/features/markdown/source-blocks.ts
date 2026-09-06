@@ -195,6 +195,41 @@ export function containerAtLine(spans: readonly ContainerSpan[], line: number): 
   return null;
 }
 
+/**
+ * 🔴 **その行を飲んでいる囲み(```)── 入れ子の深さを問わない**(#747 / #743)。
+ *
+ * ⚠ `scanContainers` は**最上位しか返さない**ので、`:::` の板の中の ` ```psv ` は
+ *   そこに出ない。それを「囲みではない」と読むと、**コードの字を表の行として
+ *   書き換える**(実測 2026-09-06:板の中の ` ```txt ` の `| a | b |` が
+ *   `| ZZZ | b |` に化けた)。
+ * 🔑 降り方は `blockSpanAt` と同じ ── **先頭から**外側 → 内側へ降りる
+ *   (開き行から後ろだけを切ると fence の文脈が落ちる)。
+ *
+ * ⚠ **`place-notation.ts` にも同じ問いに答える `insideFence` が在る**(§7)。
+ *   あちらは行を走査して mask を組む形で、`:::` を知らない代わりに軽い ──
+ *   **囲みの名前も範囲も要らない**呼び側はそちらでよい。ここは囲みそのものを
+ *   返すので、名前を分けて取り違えを防いでいる。
+ */
+export function fenceAt(body: string, line: number): ContainerSpan | null {
+  const lines = body.split('\n');
+  if (!Number.isInteger(line) || line < 0 || line >= lines.length) return null;
+  let from = 0;
+  let to = lines.length - 1;
+  for (;;) {
+    const hit = containerAtLine(scanContainers(lines.slice(from, to + 1).join('\n')), line - from);
+    if (hit === null) return null;
+    // 🔑 範囲は**原文の行番号**へ戻して返す(呼び側は原文を splice する)
+    if (hit.kind === 'fence') return { ...hit, start: from + hit.start, end: from + hit.end };
+    // `:::` の板 ── 中身(開きの次 〜 閉じの手前)へ降りる
+    const innerFrom = from + hit.start + 1;
+    const innerTo = hit.open ? from + hit.end : from + hit.end - 1;
+    if (innerFrom > line || innerTo < line) return null;
+    from = innerFrom;
+    to = innerTo;
+  }
+}
+
+
 /** `:::` の塊の原文の行範囲(0 始まり・**両端含む**)。 */
 export interface BlockSpan {
   readonly start: number;

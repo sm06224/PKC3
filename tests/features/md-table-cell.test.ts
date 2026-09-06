@@ -248,3 +248,189 @@ describe('markdown の表の升を打つ(#708 段④)', () => {
     expect(write(body, 2, 1, '9'), 'csv の升が打てなくなった').toContain('りんご,9');
   });
 });
+
+/**
+ * 🔴 **着地後レビューが出した 6 件**(#747。**#746 の test は 6 件とも素通りした**)。
+ *
+ * ⚠ CLAUDE.md「挙動を変えたのに、test が前も後も通るなら、それは守っていない」──
+ *   ここは**直す前の実装に戻すと落ちる**ことを確かめてから書いた(6 件とも実測)。
+ */
+describe('#747 焼いた升と、書ける升を揃える', () => {
+  /**
+   * 🔴 **これが本体の不変量である** ── 「**焼いた升は必ず書き換えられる**」。
+   *
+   * 🔑 期待値を実装の綴りから作らない(CLAUDE.md §1)── 見るのは
+   *   ①`applyBodyRewrite` が `null` を返さないこと(= 押した動線が死んでいない)
+   *   ②書いた後の**描いた表**で、その升だけが変わっていること(= 別の升を巻き込まない)。
+   * ⚠ corpus には**門が別々だと必ず割れる形**を入れてある ── 引用 / 箇条書き /
+   *   寄せ・字下げの記号の下 / `:::` の板の中 / 升の数が足りない行。
+   */
+  const CORPUS: readonly { name: string; body: string }[] = [
+    { name: 'ふつうの表', body: MD },
+    { name: '引用の中', body: '> | a | b |\n> |---|---|\n> | 1 | 2 |\n' },
+    // ⚠ **項目の続きとして字下げした形**にする ── `- | a |` を 3 行並べても
+    //   3 つの項目に割れて**表にならない**(空振りの corpus になる)
+    { name: '箇条書きの中', body: '- 覚書\n\n  | a | b |\n  |---|---|\n  | 1 | 2 |\n' },
+    { name: '4 字下げ(コード)', body: '文章\n\n    | a | b |\n    |---|---|\n    | 1 | 2 |\n' },
+    { name: '字下げの記号の下', body: '文章\n__字下げ\n| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n' },
+    { name: '中央寄せの記号の下', body: '文章\n||中央\n| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n' },
+    { name: '升の数が足りない行', body: '| a | b | c |\n|---|---|---|\n| 1 |\n| 2 | 3 | 4 |\n' },
+    { name: ':::の板の中', body: ':::note\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n:::\n' },
+    { name: '板の中の囲み', body: ':::note\n\n```psv\na|b\n-|-\n1|2\n```\n\n:::\n' },
+    { name: '囲みの中', body: '```txt\n| a | b |\n|---|---|\n| 1 | 2 |\n```\n' },
+    { name: 'frontmatter の下', body: '---\ntitle: あ\n---\n\n| a | b |\n|---|---|\n| 1 | 2 |\n' },
+  ];
+
+  it.each(CORPUS)('🔴 $name ── 焼いた升は必ず書き換えられる', ({ body }) => {
+    const m = marks(body);
+    const before = grid(body);
+    for (const cell of m) {
+      const out = write(body, cell.line, cell.col, 'ZQZ');
+      expect(out, `印が焼かれているのに書けない(行 ${cell.line} 列 ${cell.col})`).not.toBeNull();
+      const after = grid(out!);
+      const moved = after.flatMap((row, r) => row.map((v, c) => (v === before[r]?.[c] ? null : `${r}:${c}`))).filter((x) => x !== null);
+      expect(moved, `巻き込んだ升がある(行 ${cell.line} 列 ${cell.col})`).toHaveLength(1);
+    }
+  });
+
+  /**
+   * ⚠ **空振り防止** ── 上の `it.each` は印が 0 個でも緑になる。
+   * 🔑 だから「印が焼かれる形」と「1 つも焼かれない形」を**別々に名指しで pin する**
+   *   (どちらが崩れても鳴る)。
+   */
+  it('⚠ 印が焼かれる形と、焼かれない形を名指しで数える', () => {
+    const n = (name: string) => marks(CORPUS.find((c) => c.name === name)!.body).length;
+    expect(n('ふつうの表'), 'ふつうの表で印が焼かれていない').toBe(6);
+    expect(n(':::の板の中'), '板の中の表で印が焼かれていない').toBe(4);
+    expect(n('升の数が足りない行'), '空の升にまで焼いている').toBe(7);
+    expect(n('字下げの記号の下'), '記号の下で行がずれて焼き落としている').toBe(6);
+    // 🔴 **押せない形**(押せると「押せるのに書けない」= 打った字が消える動線になる)
+    expect(n('引用の中'), '書けないのに押せる').toBe(0);
+    // 🔑 字下げした表は**押せて書ける**(行頭の空白ぶんを詰めて書く ── 変異 R1)
+    expect(n('箇条書きの中'), '字下げした表の升が押せない').toBe(4);
+    expect(n('囲みの中'), 'コードの字を押せてしまう').toBe(0);
+    // 🔑 板の中の ` ```psv ` は**表**なので押せる(#743 で書けるようにした)──
+    //    押せるのに書けない形ではない(上の it.each がその往復を見ている)
+    expect(n('板の中の囲み'), '板の中の csv の升が押せない(#743)').toBe(6);
+  });
+
+  /**
+   * 🔴 **行の対応がずれない**(#747-3)。⚠ `preprocessAlignPrefix` は寄せ・字下げの
+   *   記号の前に**空行を挿す**ので、前処理**後**の行番号で原文を引くとずれる ──
+   *   直す前は最後の行の升が 1 つも押せず、逆に**別の行**の升に印が焼かれていた。
+   */
+  it('🔴 寄せの記号より下でも、印は原文の行を指す', () => {
+    const body = '文章\n__字下げ\n| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n';
+    const lines = body.split('\n');
+    for (const cell of marks(body)) {
+      expect(
+        lines[cell.line],
+        `印の行 ${cell.line} が表の行ではない(原文と食い違っている)`,
+      ).toMatch(/^\|/);
+      expect(lines[cell.line], `印の字が原文のその行に無い`).toContain(cell.raw);
+    }
+    expect(marks(body).filter((m) => m.line === 5), '最後の行が押せない').toHaveLength(2);
+  });
+
+  /**
+   * 🔴 **欄に出るのは原文の字**(#747-1 / -4)。
+   * ⚠ 直す前は前処理**後**の字を焼いていたので、①`{{vars.…}}` の升は
+   *   属性が `<span class="` で突き破られ、②打ち直すと原文の記法が消えた。
+   */
+  it('🔴 記法を書いた升は、原文の記法がそのまま欄に出る', () => {
+    for (const [src, head] of [
+      ['{{vars.v}}', '---\nvars:\n  v: X\n---\n\n'],
+      ['%%内緒%%', ''],
+      ['**太い**', ''],
+    ] as [string, string][]) {
+      const body = `${head}| a | b |\n|---|---|\n| ${src} | 2 |\n`;
+      // 🔑 行番号は**原文を数えて**採る(実装の綴りから作らない)
+      const row = body.split('\n').findIndex((l) => l.includes(src));
+      expect(row, `空振り(原文にその行が無い:${src})`).toBeGreaterThan(0);
+      const m = marks(body).find((x) => x.line === row && x.col === 0);
+      expect(m?.raw, `欄に出る字が原文ではない(${src})`).toBe(src);
+      // 🔴 **打ち直しても記法が残る**(= 打っただけで記法が消えない)
+      const out = write(body, row, 0, `${src}!`);
+      expect(out, `書けない(${src})`).toContain(`${src}!`);
+    }
+  });
+
+  /** 🔴 **属性を突き破らない**(#747-1 / 変異 R8)。 */
+  it('🔴 升に `"` や `<` を書いても、属性の外へ出ない', () => {
+    const body = '| a | b |\n|---|---|\n| "><b>わる | 2 |\n';
+    const host = document.createElement('div');
+    host.innerHTML = renderMarkdown(body, { interactiveCells: true });
+    const cells = [...host.querySelectorAll('[data-pkc-action="edit-cell"]')];
+    expect(cells, '空振り(印が焼かれていない)').toHaveLength(4);
+    expect(host.querySelector('b'), '升の字がタグとして生えた').toBeNull();
+    const td = cells[2]!;
+    expect(td.getAttribute('data-pkc-cell-raw')).toBe('"><b>わる');
+    // ⚠ 属性が割れると余計な属性が生える ── 数で見る(名前を数え上げない)
+    expect([...td.attributes].map((a) => a.name).sort()).toEqual([
+      'data-pkc-action',
+      'data-pkc-cell-col',
+      'data-pkc-cell-line',
+      'data-pkc-cell-raw',
+    ]);
+  });
+
+  /**
+   * 🔴 **字下げした表でも、打った字は升の側へ書かれる**(変異 R1)。
+   * ⚠ `splitRowSpans` の `lead`(行頭の空白の幅)を落とすと、打った字が
+   *   **字下げの空白の側**へ書かれる ── 全量 8440 件が緑のまま生き延びた変異である。
+   */
+  it('🔴 行頭に空白のある表でも、升の中が置き換わる', () => {
+    const body = '- 覚書\n\n  | a | b |\n  |---|---|\n  | 1 | 2 |\n';
+    const out = write(body, 4, 0, 'ZQZ');
+    expect(out, '書けない(前提が崩れた)').not.toBeNull();
+    expect(out!.split('\n')[4], '字下げの空白の側へ書いた').toBe('  | ZQZ | 2 |');
+  });
+
+  /**
+   * 🔴 **frontmatter の中の「表に見える行」へは書かない**(変異 R5)。
+   * ⚠ こちらも全量緑のまま生き延びた ── 囲みの門には test が在るのに、
+   *   **隣の門には 1 件も無かった**(CLAUDE.md「門を N 個置いたら、N 個目だけが鳴る
+   *   場面を N 通り作る」)。
+   */
+  it('🔴 frontmatter の中は書き換えない', () => {
+    const body = '---\n| a | b |\n|---|---|\n| 1 | 2 |\n---\n\n本文\n';
+    expect(frontmatterLineCount(body), '空振り(frontmatter と読まれていない)').toBeGreaterThan(3);
+    expect(write(body, 3, 0, 'ZQZ'), 'frontmatter の中へ書いた').toBeNull();
+    expect(marks(body), 'frontmatter の中に印を焼いた').toHaveLength(0);
+  });
+
+  /**
+   * 🔴 **空白だけの升で範囲が反転しない**(#747-6)。
+   * ⚠ 直す前は `start > end` になり、差し替えが**挿入**になって
+   *   `|     | 2 |` が `|     ZZZ     | 2 |` と余白ごと伸びた。
+   */
+  it('🔴 空白だけの升に打っても、余白が複製されない', () => {
+    const out = write('| a | b |\n|---|---|\n|     | 2 |\n', 2, 0, 'ZZZ');
+    expect(out, '書けない').not.toBeNull();
+    const row = out!.split('\n')[2]!;
+    expect(row.match(/ZZZ/g), '打った字が 2 つ以上入った').toHaveLength(1);
+    expect(grid(out!)[1], '別の升まで動いた').toEqual(['ZZZ', '2']);
+    // ⚠ 行が伸びるのは打った字のぶんだけ
+    expect(row.length).toBe('|     | 2 |'.length + 3);
+  });
+
+  /**
+   * 🔴 **板の中の囲みを書き換えない**(#747-5)。
+   * ⚠ `scanContainers` は最上位しか返さないので、直す前は板の中の ` ```psv ` の
+   *   升が**押せて、打つとコードの中身が化けた**(段④ の前は「断り」だった)。
+   */
+  it('🔴 `:::` の板の中の囲みは、csv の升として書く(markdown の表として読まない)', () => {
+    const body = ':::note\n\n```psv\na|b\n-|-\n1|2\n```\n\n:::\n';
+    const out = write(body, 3, 0, 'x|y');
+    // 🔴 **csv の作法で逃がす** ── markdown の表として書くと `x\|y` になり、
+    //    csv の読み手は `\` を字と読むので**列が 3 つに増えて表が壊れる**
+    expect(out, '板の中の囲みで升が打てない(#743)').toContain('"x|y"|b');
+    expect(out, 'markdown の表として書き換えた').not.toContain('x\\|y');
+    // ⚠ 対照群 ── 板の中の**素の表**は markdown の表として書ける
+    const ok = ':::note\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n:::\n';
+    expect(write(ok, 4, 0, 'ZQZ'), '板の中の表まで断った').toContain('| ZQZ | 2 |');
+    // 🔴 **コードの囲み(表ではない)は書き換えない**
+    const code = ':::note\n\n```txt\n| a | b |\n|---|---|\n| 1 | 2 |\n```\n\n:::\n';
+    expect(write(code, 3, 0, 'ZQZ'), 'コードの中身を書き換えた').toBeNull();
+  });
+});

@@ -22,13 +22,13 @@ import { readTags, withTagResult } from '../flavor/tags';
 import { acceptsExternalImage, rewriteAdopted } from '../asset/inline-url-adopt';
 import { DELIMITER, csvEscapeField, parseCsv, type CsvPositions } from './csv-table';
 import { parseRenderableFence } from './markdown-render';
-import { scanContainers } from './source-blocks';
+import { fenceAt } from './source-blocks';
 import { insertLines, moveLines } from './line-move';
 import { gfmCellText } from './html-to-markdown';
 import {
   convertTable,
-  mdCellSpan,
-  mdTableAt,
+  mdCellGate,
+  mdCellSpanAt,
   tableAt,
   tableConvertRefusal,
   type TableFormat,
@@ -606,15 +606,15 @@ function rewriteMdCell(
   lines: string[],
   rewrite: { line: number; col: number; value: string },
 ): string | null {
-  const body = lines.join('\n');
-  const at = mdTableAt(body, rewrite.line);
-  if (at === null) return null;
-  // ⚠ 区切りの行は表の骨格である(押せる印も焼いていない)
-  if (rewrite.line === at.start + 1) return null;
+  /**
+   * 🔑 **門は `mdCellSpanAt` の 1 本だけ**(#747)。⚠ ここに 2 本目を書かない ──
+   *   直す前は焼く側が `mdCellSpan` だけ、書く側がここで `mdTableAt` + 区切り行と
+   *   **数が違って**おり、引用の中の表は**押せるのに書けなかった**。
+   */
+  const span = mdCellSpanAt(mdCellGate(lines), rewrite.line, rewrite.col);
+  if (span === null) return null;
   const line = lines[rewrite.line];
   if (line === undefined) return null;
-  const span = mdCellSpan(line, rewrite.col);
-  if (span === null) return null;
   const next = gfmCellText(rewrite.value);
   // ⚠ 同じ字なら書かない(呼び側が「書かない」を選べる ── `csv-cell` と同じ)
   if (line.slice(span.start, span.end) === next) return null;
@@ -704,10 +704,13 @@ function csvTableAt(
   body: string,
   line: number,
 ): { first: number; last: number; delimiter: string } | null {
-  const fence = scanContainers(body).find(
-    (c) => c.kind === 'fence' && line > c.start && line < c.end,
-  );
-  if (fence === undefined) return null;
+  /**
+   * 🔴 **入れ子の深さを問わない**(#743)。⚠ 直す前は `scanContainers` の
+   *   **最上位しか見ていなかった**ので、`:::` の板の中の ` ```csv ` は
+   *   **升を押せるのに書けなかった**(打った字が消え、起きていない理由が出る)。
+   */
+  const fence = fenceAt(body, line);
+  if (fence === null || line <= fence.start || line >= fence.end) return null;
   const parsed = parseRenderableFence(fence.name);
   if (parsed === null) return null;
   const delimiter = (DELIMITER as Record<string, string | undefined>)[parsed.lang];
