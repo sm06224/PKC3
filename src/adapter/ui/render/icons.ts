@@ -393,6 +393,23 @@ export const CANCEL_EDIT_HINT = '変更を捨てて編集を終えます';
  * 「このボタンだけ高さが違う」が生まれる(それが user 指摘の中身)。
  * ⚠ **引数の並びを変えない**(`docs-parity` が「文言は第 2 引数」で突合している)。
  */
+export function iconButton(action: string, label: string, iconKey = action): HTMLButtonElement {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.setAttribute('data-pkc-action', action);
+  // ⚠ `archetype:<種別>` は種別の表から引く(分割ボタンが使う)── 表を 2 つ持たない
+  const name = iconKey.startsWith('archetype:')
+    ? (ARCHETYPE_ICONS[iconKey.slice('archetype:'.length)] ?? 'dot')
+    : ACTION_ICONS[iconKey];
+  // ⚠ 図案の無い action もある(追記 / 強制解放)── そこは器ごと出さない
+  if (name !== undefined) btn.append(iconSpan(name));
+  const text = document.createElement('span');
+  text.setAttribute('data-pkc-field', 'label');
+  text.textContent = label;
+  btn.append(text);
+  return btn;
+}
+
 /**
  * 🔴 **その面の「主の操作」の印**(#722 P2-10。user 裁定 2026-09-06 = 案 A)。
  *
@@ -411,23 +428,22 @@ export const PRIMARY_ATTR = 'data-pkc-primary';
 
 /** 主の操作にする。⚠ 返り値を使わなくてよい(その場で印が付く)。 */
 export function markPrimary(btn: HTMLButtonElement): HTMLButtonElement {
-  btn.setAttribute(PRIMARY_ATTR, '');
-  return btn;
+  return setPrimary(btn, true);
 }
 
-export function iconButton(action: string, label: string, iconKey = action): HTMLButtonElement {
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.setAttribute('data-pkc-action', action);
-  // ⚠ `archetype:<種別>` は種別の表から引く(分割ボタンが使う)── 表を 2 つ持たない
-  const name = iconKey.startsWith('archetype:')
-    ? (ARCHETYPE_ICONS[iconKey.slice('archetype:'.length)] ?? 'dot')
-    : ACTION_ICONS[iconKey];
-  // ⚠ 図案の無い action もある(追記 / 強制解放)── そこは器ごと出さない
-  if (name !== undefined) btn.append(iconSpan(name));
-  const text = document.createElement('span');
-  text.setAttribute('data-pkc-field', 'label');
-  text.textContent = label;
-  btn.append(text);
-  return btn;
+/**
+ * 印を**付け外し**する(状態で変わる面はこちらを使う)。
+ *
+ * 🔴 **押しても何も起きないボタンを、いちばん濃くしない**(着地前レビュー・動線 1、
+ * 2026-09-06)。⚠ 「+ ノート」は `CREATE_ENTRY` が `phase !== 'ready'` を
+ * **黙って捨てる**(`app-state.ts` の `CREATE_ENTRY`)ので、**編集中は押しても
+ * 1 ドットも動かない** ── そこを画面でいちばん濃くすると、
+ * 「濃い = 次に押す物」と教えた直後に嘘をつくことになる。
+ * ⚠ **押した結果は変えていない**(黙って捨てるのは前からの穴で、別に起票した)──
+ *   ここで直すのは**見え方**だけである。
+ */
+export function setPrimary(btn: HTMLElement, on: boolean): HTMLButtonElement {
+  if (on) btn.setAttribute(PRIMARY_ATTR, '');
+  else btn.removeAttribute(PRIMARY_ATTR);
+  return btn as HTMLButtonElement;
 }

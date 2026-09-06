@@ -1279,9 +1279,15 @@ select:focus-visible {
  * ⚠ **`--accent` は使わない** ── 緑 / 青は「いま選んでいるタブ」と「押している最中」が
  *   既に使っており、意味が 3 つ重なる。
  * ⚠ **図案は `currentColor`** なので、字と一緒に反転する(上の `[data-pkc-icon] > svg`)。
- * ⚠ `:hover` / `:active` を**書き足さないと外れる** ── `button:hover:not(:disabled)`
- *   (0,2,1)は `button[data-pkc-primary]`(0,1,1)より詳細度が高いので、
- *   **乗せただけだと地が普通のボタンへ戻る**。だから両方に印つきの規則を置く。
+ * ⚠ **状態の擬似クラスは 3 つとも書く** ── `button:hover:not(:disabled)`(0,2,1)や
+ *   `[data-pkc-field='detail-toolbar'] button:focus-visible`(0,3,1)は
+ *   `button[data-pkc-primary]`(0,1,1)より詳細度が高いので、
+ *   **乗せた / 焦点を当てただけで地が普通のボタンへ戻る**。
+ *   ⚠ **`color` も書き直す**(地だけ直すと、帯の `--accent-dim-fg` が残って
+ *   **濃い地に濃い緑の字**になる ── 実測でそうなった)。
+ *   ⚠ `:active` は事情が違う:`button:active`(0,1,1)は**この規則より前**に在るので
+ *   地は戻らない ── ここで書いているのは**押した手応え**(`opacity`)だけである
+ *   (着地前レビューの指摘で、コメントの側を事実に合わせた)。
  * 🔴 **置き場所は「器ごとの化粧の後」でなければならない**(実測で 1 度外した)。
  *   `[data-pkc-field='detail-toolbar'] button`(0,1,1)は `button[data-pkc-primary]`
  *   (0,1,1)と**詳細度が同じ**なので、前に置くと**後ろの器の化粧が勝つ** ──
@@ -1306,7 +1312,24 @@ button[data-pkc-primary]:hover:not(:disabled) {
   /* ⚠ 反転した地では「明るくする」が効かない ── 少し透かして「乗っている」を出す */
   opacity: 0.85;
 }
-button[data-pkc-primary]:active {
+/* 🔴 **焦点を当てても濃いまま**(着地前レビュー、実測)。⚠ 帯の `:focus-visible` は
+ * (0,3,1)なので、書かないと **`Tab` で触った瞬間に段が消える** ── 鍵で操作する人が
+ * 「主の操作」を見失う。⚠ 焦点の輪(`outline: 2px solid var(--accent)`)は別に出る。 */
+button[data-pkc-primary]:focus-visible {
+  background: var(--fg);
+  color: var(--surface);
+  border-color: var(--fg);
+}
+/**
+ * ⚠ ここは**押した手応えだけ**(地は前の規則で既に濃い ── 上の注記)。
+ * 🔴 **`:hover` と同じ詳細度にして、後ろに置く**(着地前レビュー・動線 6、実測)。
+ *   ⚠ マウスで押している間は `:hover` も同時に当たるので、
+ *   `button[data-pkc-primary]:active`(0,2,1)のままだと
+ *   `…:hover:not(:disabled)`(0,3,1)に負けて **`.85` が出続ける** ──
+ *   つまり**主のボタンだけ、マウスで押した手応えが返らない**
+ *   (普通のボタンは `--accent-dim` に変わるのに)。
+ */
+button[data-pkc-primary]:active:not(:disabled) {
   background: var(--fg);
   color: var(--surface);
   opacity: 0.72;

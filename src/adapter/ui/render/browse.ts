@@ -32,6 +32,7 @@ import { ContactsRenderer } from './contacts';
 export type { BrowseMode } from './browse-mode';
 import { DEFAULT_BROWSE_MODE, type BrowseMode } from './browse-mode';
 import { KindBarRenderer } from './kind-bar';
+import { setPrimary } from './icons';
 
 /**
  * タブ。⚠ 文言は「探し方」を表す(「詳細」のような場所の名前にしない)。
@@ -76,6 +77,8 @@ export class BrowseRouter {
   private readonly scroll: ScrollMemory;
   /** 探す欄(面の外に在る ── どの面でも見えている)。 */
   private readonly filterInput: HTMLInputElement | null;
+  /** 左の列の「+ ノート」(主の操作の印を phase で付け外しする)。 */
+  private readonly createRun: HTMLElement | null;
   private last: BrowseMode;
 
   /**
@@ -119,6 +122,12 @@ export class BrowseRouter {
     this.filterInput = sidebar.querySelector<HTMLInputElement>(
       '[data-pkc-field="entry-filter"]',
     );
+    /**
+     * 🔴 **「+ ノート」の濃さは phase で決まる**(#722 P2-10。着地前レビュー・動線 1)。
+     * ⚠ ここに置く理由は上の 2 つと同じ ── **面に関係なく**合わせる必要がある
+     *   (どの面を開いていても左の列に出ているボタンである)。
+     */
+    this.createRun = sidebar.querySelector<HTMLElement>('[data-pkc-field="create-run"]');
     this.list = new SidebarRenderer(sidebar);
     this.kindBar = new KindBarRenderer(sidebar);
     this.filer = new FilerRenderer(this.panes.filer);
@@ -145,6 +154,14 @@ export class BrowseRouter {
     // 🔴 **札の帯は面に関係なく描く**(#478)── 面の中の renderer に持たせると、
     //    その面を開いていない間は**古い DOM のまま**になり、押しても嘘をつく。
     this.kindBar.render(state, mode);
+    /**
+     * 🔴 **編集中は「+ ノート」を濃くしない**(#722 P2-10。着地前レビュー・動線 1)。
+     * ⚠ `CREATE_ENTRY` は `phase !== 'ready'` を**黙って捨てる**ので、編集中の
+     *   「+ ノート」は**押しても 1 ドットも動かない** ── 画面でいちばん濃い物が
+     *   無反応だと、user は「壊れた」か「自分の押し方が悪い」と読む。
+     * ⚠ 押した結果は**変えていない**(黙って捨てる穴は別に起票した)。
+     */
+    if (this.createRun !== null) setPrimary(this.createRun, state.phase === 'ready');
     /**
      * 🔴 **絞りの字も面に関係なく合わせる**(#536 ②)。
      * ⚠ 打鍵中は `value === filterQuery` なので書き戻しは起きない(caret を壊さない)。
