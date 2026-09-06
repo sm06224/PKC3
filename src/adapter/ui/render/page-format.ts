@@ -71,8 +71,11 @@ export function currentPageFormat(target: HTMLElement): PageFormat {
  * だけが持つ)。
  *
  * 🔑 **描き直しは要らない**。読み幅は `--read-w` の値が変わるだけで、HTML は
- * 1 文字も変わらない ── ブラウザが reflow する。⚠ ここで描き直すと、
- * **図が焼き直される**(器の幅から決まるラスタは動いていないのに)。
+ * 1 文字も変わらない ── ブラウザが reflow する。⚠ ここで描き直すと、描いた DOM
+ * ごと差し替わるので**図が一度消えてから戻る**(P8 段⑩ の「ガクガクする」)。
+ * ⚠ **図のラスタ自体は、紙面を変えると焼き直される**(#722 P2-11 以降)── 塊に
+ *   左の余白が付いて焼き幅が変わるため。それは `mermaid-hydrate.ts` の
+ *   `ResizeObserver` が拾うので、**ここでやることは変わらない**。
  */
 export function applyPageFormat(target: HTMLElement, fmt: PageFormat): void {
   target.setAttribute(PAGE_FORMAT_ATTR, fmt);

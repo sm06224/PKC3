@@ -642,8 +642,13 @@ test('🔴 長い 1 段落は折り返したぶんだけ箱が伸びる(先頭�
  * ⚠ **unit では届かない。** 判定は `getComputedStyle(el).maxWidth`(= CSS の
  *   allow-list の結果)を読むので、CSS を持たない happy-dom では常に「上限なし」に
  *   なる ── ここが唯一の門である。
+ *
+ * 🔴 **左端も見る**(#722 P2-11。着地前レビューの実測で足した)── 幅だけ見ていると、
+ *   **押した行が 126px 左へ飛ぶ**変異が生き延びる。実測(直す前):塊 L=127 /
+ *   段落の行 L=127 / **表の行 L=0**。原因は、行スロットの余白を
+ *   `[data-pkc-row-prose]` の付く行にだけ当てていたこと(印は散文にしか付かない)。
  */
-test('🔴 表・コードの行を押しても編集欄が縮まない(段落は散文の幅のまま)', async ({
+test('🔴 表・コードの行を押しても編集欄が縮まず、左端も塊と揃う', async ({
   page,
 }) => {
   const errors = collectPageErrors(page);
@@ -662,9 +667,35 @@ test('🔴 表・コードの行を押しても編集欄が縮まない(段落�
     Math.round((await live.locator(sel).first().boundingBox())!.width);
   const box = async (): Promise<number> => w('[data-pkc-field="row-source"]');
 
+  /** 生になった行の左端(器の左からの相対)。⚠ 器の padding を含めない。 */
+  const slotLeft = async (): Promise<number> =>
+    page.evaluate(() => {
+      const src = document.querySelector('[data-pkc-field="row-source"]');
+      const slot = src?.closest('[data-pkc-row-slot]');
+      const host = slot?.closest('.pkc-md-rendered');
+      if (slot === null || slot === undefined || host === null || host === undefined)
+        throw new Error('前提が崩れている: 生になった行が無い');
+      return Math.round(slot.getBoundingClientRect().left - host.getBoundingClientRect().left);
+    });
+  /** 描かれた塊の左端(同じ基準)。 */
+  const blockLeft = async (sel: string): Promise<number> =>
+    page.evaluate((q) => {
+      // ⚠ 器**そのもの**が `.pkc-md-rendered` である(子孫ではない ── 1 度外した)
+      const host = document.querySelector('[data-pkc-region="editor-live"].pkc-md-rendered');
+      const el = host?.querySelector(q);
+      if (host === null || host === undefined || el === null || el === undefined)
+        throw new Error(`前提が崩れている: ${q} が描かれていない`);
+      return Math.round(el.getBoundingClientRect().left - host.getBoundingClientRect().left);
+    }, sel);
+
   const proseW = await w('p');
   const tableW = await w('table');
   const codeW = await w('pre');
+  const pLeft = await blockLeft('p');
+  const tLeft = await blockLeft('.pkc-md-block[data-pkc-md-block-kind="table"]');
+  // ⚠ 空振り防止 ── 左に余白が入っている状態でだけ、左端の揃いは判定になる
+  expect(pLeft, '器と読み幅が同じで、左端の揃いを見ていない').toBeGreaterThan(20);
+  expect(Math.abs(tLeft - pLeft), `表の塊が段落と違う左端に在る(表 ${tLeft} / 段落 ${pLeft})`).toBeLessThanOrEqual(2);
   // ⚠ **空振り防止** ── 散文と表で幅が違うこと(同じなら以下は何も判定していない)
   expect(tableW, '表が散文より広くない(この窓では違いが出ない)').toBeGreaterThan(proseW + 100);
 
@@ -672,12 +703,20 @@ test('🔴 表・コードの行を押しても編集欄が縮まない(段落�
   await live.locator('table td, table th').first().click({ modifiers: ['ControlOrMeta'] });
   await expect(live.locator('[data-pkc-field="row-source"]')).toBeVisible();
   expect(await box(), '表の編集欄が散文の幅へ縮んだ').toBeGreaterThan(proseW + 100);
+  expect(
+    Math.abs((await slotLeft()) - tLeft),
+    `表を押した行が塊と違う左端へ飛んだ(行 ${await slotLeft()} / 塊 ${tLeft})`,
+  ).toBeLessThanOrEqual(2);
 
   // コード fence も同じ
   await page.keyboard.press('Escape');
   await live.locator('pre').first().click({ modifiers: ['ControlOrMeta'] });
   await expect(live.locator('[data-pkc-field="row-source"]')).toBeVisible();
   expect(await box(), 'コードの編集欄が散文の幅へ縮んだ').toBeGreaterThan(proseW + 100);
+  expect(
+    Math.abs((await slotLeft()) - pLeft),
+    `コードを押した行が段落と違う左端へ飛んだ(行 ${await slotLeft()} / 段落 ${pLeft})`,
+  ).toBeLessThanOrEqual(2);
   expect(codeW, 'コードが散文より広くない').toBeGreaterThan(proseW + 100);
 
   // 段落は散文の幅のまま(= 押した行だけ全幅へ跳ねない)
@@ -685,6 +724,10 @@ test('🔴 表・コードの行を押しても編集欄が縮まない(段落�
   await live.locator('p').first().click({ modifiers: ['ControlOrMeta'] });
   await expect(live.locator('[data-pkc-field="row-source"]')).toBeVisible();
   expect(await box(), '段落の編集欄が全幅へ跳ねた').toBeLessThan(proseW + 20);
+  expect(
+    Math.abs((await slotLeft()) - pLeft),
+    `段落を押した行が塊と違う左端へ飛んだ(行 ${await slotLeft()} / 段落 ${pLeft})`,
+  ).toBeLessThanOrEqual(2);
 
   expect(errors).toEqual([]);
 });

@@ -82,3 +82,46 @@ describe('csv の表は読み幅の中で器いっぱい(#704)', () => {
     ).not.toMatch(decl('width', 'fit-content'));
   });
 });
+
+/**
+ * 🔴 **読み幅の左の余白は、縦書きの文書には当てない**(#722 P2-11。着地前レビュー)。
+ *
+ * ⚠ `margin` の `%` は**プロパティの向きに依らず包含ブロックの inline サイズ**を
+ *   基準にする ── `writing-mode: vertical-rl` では inline 軸が縦なので、
+ *   `100%` が**器の高さ**に、`margin-inline-start` が **`margin-top`** に化ける。
+ *   物理プロパティへ替えても直らない(基準が同じ)ので、**選択子から外す**しかない。
+ *
+ * 🔴 **なぜ smoke ではなくここか**(実測してから決めた)── いまのアプリでは
+ *   縦書きの器の高さが**内容で決まり、読み幅より低い**ので、門を外しても
+ *   `max(0px, …)` が 0 に潰れて**何も起きない**。実測(1440×1400 の窓 / 40 段落 +
+ *   表 / 既定の 2 ペイン):`[data-pkc-field="detail-body"]` の高さは **303px**
+ *   (読み幅 672px)、`margin-top` は門の有無に依らず `0px`。
+ *   ⚠ だから smoke を書くと**空振りの緑**になる(変異試験 V1 が実際に SURVIVED した)。
+ * 🔑 危ないのは「器に確定した高さが付いた日」である ── そのとき縦書きの文書は
+ *   表・図・コードの**上に**余白が入る。門を消すと**その日に静かに壊れる**ので、
+ *   字面で pin して**消したら必ず落ちる**ようにする。
+ */
+describe('読み幅の左の余白(#722 P2-11)', () => {
+  it('🔴 縦書きを選択子から外している ── 余白が 90 度回らない', () => {
+    const text = css();
+    const SEL = ".pkc-md-rendered[data-pkc-prose]:not([data-pkc-writing='vertical']) > .pkc-md-block";
+    const b = blocksFor(text, SEL);
+    expect(
+      b.length,
+      `${SEL} の規則が無い ── 縦書きを外す門が消えたか、選択子が変わった`,
+    ).toBeGreaterThan(0);
+    expect(b.join('\n'), '左の余白の宣言が無い(空振り)').toContain('margin-inline-start');
+    // ⚠ 生になった行(ライブエディタ)も**同じ 1 本**に乗っていること ──
+    //    別の規則へ分かれると、印の付かない行だけ左へ飛ぶ形に戻る
+    const rows = blocksFor(
+      text,
+      ".pkc-md-rendered[data-pkc-prose]:not([data-pkc-writing='vertical']) > [data-pkc-row-slot]",
+    );
+    expect(rows.length, '生になった行が同じ規則に乗っていない').toBeGreaterThan(0);
+    // ⚠ 対照群 ── 門の無い綴りが残っていない(片方だけ直した形を落とす)
+    expect(
+      blocksFor(text, '.pkc-md-rendered[data-pkc-prose] > .pkc-md-block'),
+      '縦書きを外していない綴りが残っている',
+    ).toEqual([]);
+  });
+});
