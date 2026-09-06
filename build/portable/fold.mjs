@@ -28,6 +28,7 @@ import { join } from 'node:path';
 import {
   bundleTagCount,
   externalRefs,
+  cssUrlRefs,
   manualPageTag,
   manualPageTagCount,
   shellOf,
@@ -128,7 +129,35 @@ for (const [name, src] of workerSrc) {
 if (swapped === 0) throw new Error('worker の作り方に 1 件も当たらなかった(上流の形が変わった)');
 
 // ── ③ HTML へ畳む
-const css = readFileSync(join(A, pick(/^index-.*\.css$/)), 'utf-8');
+let css = readFileSync(join(A, pick(/^index-.*\.css$/)), 'utf-8');
+
+/**
+ * 🔴 **書体を CSS へ焼き込む**(#707)。
+ *
+ * ⚠ 1 枚に畳むと `assets/` は隣に居ない ── `url(./KaTeX_Main-Regular-xxxx.woff2)`
+ *   は**どこも指さない**ので、数式だけ代替書体で出る(記号がずれる / 見えない)。
+ * 🔴 そして**それを止める計器が無かった** ── `externalRefs` は HTML 属性の
+ *   `src=` / `href=` しか見ておらず、inline した `<style>` の中の `url(...)` を
+ *   1 件も拾わない(着地前調査 2026-09-06。いまは下の走査で拾う)。
+ * 🔑 `data:` にすれば「参照が消えて縮む」向きの壊れ方もしない。
+ * ⚠ base64 は元の 4/3 倍になる(実測 250.2 KB → 約 340 KB)── portable の cap の内。
+ */
+{
+  const before = [...css.matchAll(/url\(\.\/([^)"']+\.woff2)\)/g)];
+  for (const m of before) {
+    const name = m[1];
+    css = css.replace(m[0], `url(data:font/woff2;base64,${b64(name)})`);
+  }
+  // ⚠ **下限の tripwire**(この file の他の畳みと同じ作法)── 0 件になったら
+  //    「書体の取り込みが消えた」か「上流の綴りが変わった」のどちらかである
+  if (before.length === 0)
+    throw new Error('CSS に woff2 の参照が 1 件も無い(書体の取り込みが消えた?)');
+  // ⚠ **焼き残しを許さない** ── 1 本でも残ると、その書体だけ代替に落ちる
+  const left = [...css.matchAll(/url\(\.\/[^)"']+\)/g)];
+  if (left.length > 0)
+    throw new Error(`CSS に畳めなかった参照が ${left.length} 件残った: ${left[0][0]}`);
+  console.log(`  書体を焼き込んだ: ${before.length} 本`);
+}
 let html = readFileSync(join(DIR, 'index.html'), 'utf-8');
 
 /**
@@ -204,6 +233,13 @@ if (!shell.includes('data-pkc-slot="root"'))
   throw new Error('器を抜きすぎている(検査そのものが空振りしている)');
 const left = externalRefs(shell);
 if (left.length > 0) throw new Error(`外部参照が残っている: ${left.join(' / ')}`);
+/**
+ * 🔴 **畳んだ CSS の中も見る**(#707)── `externalRefs` は HTML 属性しか見ない。
+ * ⚠ `shellOf` は `<style>` の中身を消すので、**畳む前の `html`** を渡す。
+ */
+const cssLeft = cssUrlRefs(html);
+if (cssLeft.length > 0)
+  throw new Error(`畳んだ CSS に外部参照が残っている: ${cssLeft.join(' / ')}`);
 for (const mark of ['data-pkc-slot="root"', 'createObjectURL']) {
   if (!html.includes(mark)) throw new Error(`畳んだ HTML に「${mark}」が無い(中身が落ちている)`);
 }

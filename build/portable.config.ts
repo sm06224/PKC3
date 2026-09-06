@@ -8,12 +8,13 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import { bodyCssPlugin } from './body-css-plugin.ts';
 import { manualPagePlugin } from './manual-page-plugin.ts';
+import { katexWoff2Plugin } from './katex-woff2-plugin.ts';
 
 export default defineConfig({
   base: './',
   // 🔴 `manual.html` もここで焼く(#648 段③)── `fold.mjs` が 1 枚の中へ焼き込む。
   //    ⚠ 外すと fold が「畳む前にマニュアルの page が焼かれていない」で止まる(黙って落ちない)
-  plugins: [manualPagePlugin(), bodyCssPlugin()],
+  plugins: [manualPagePlugin(), bodyCssPlugin(), katexWoff2Plugin()],
   optimizeDeps: { exclude: ['@sqlite.org/sqlite-wasm'] },
   resolve: {
     alias: {

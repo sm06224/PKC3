@@ -128,8 +128,17 @@ const SHIPPED_FLOOR_KB = { dev: 3500, product: 800 };
  * 🔑 2026-09-04(#648 段③)にマニュアルの page を 1 枚の中へ焼き込んだ ── 実測 **7613.5 KB**
  *   (dev の kind で `npm run build:portable`。+562 KB = page 391 KB を JSON で逃がした分)。
  *   cap 9000 KB の内に収まったので動かしていない(余裕は約 1390 KB ── 誤取込 1 本は今も止まる)。
+ * 🔑 **2026-09-06(#707)に 9000 → 9800 KB へ引き上げた**。数式の書体を **data: URL で
+ *   焼き込んだ**ため ── 実測 **8556.2 KB**(dev。+942.7 KB。woff2 250.2 KB が
+ *   base64 で 4/3 倍になる)。
+ *   🔴 **焼き込みは値切れない** ── 1 枚には隣の `assets/` が無いので、`url(./…woff2)` は
+ *   どこも指さない。⚠ しかも**それを止める計器が無かった**(`externalRefs` は HTML 属性しか
+ *   見ておらず、inline した `<style>` の中の `url(...)` を 1 件も拾わない)── 配ると
+ *   **数式だけ代替書体で出る**のに誰の計器も鳴らない、という形だった。
+ *   いまは `cssUrlRefs`(`build/portable/shell-scan.mjs`)が畳んだ CSS も見る。
+ *   ⚠ 余裕は約 1240 KB ── **誤取込 1 本は今も止まる**。
  */
-const PORTABLE_CAP_KB = 9000;
+const PORTABLE_CAP_KB = 9800;
 const PORTABLE_FLOOR_KB = 3000;
 
 /**

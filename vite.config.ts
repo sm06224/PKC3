@@ -43,7 +43,7 @@ export default defineConfig({
   // 🔴 manualPagePlugin は **swPlugin より前**(#645 段②)── `generateBundle` で emit した
   //    `manual.html` を swPlugin の precache 一覧が拾うには、先に bundle に載っている必要がある。
   //    順番は `tests/build/manual-page-plugin.test.ts` がこの字面で pin する
-  plugins: [katexWoff2Plugin(), manualPagePlugin(), swPlugin(buildIdFor), bodyCssPlugin()],
+  plugins: [manualPagePlugin(), swPlugin(buildIdFor), bodyCssPlugin(), katexWoff2Plugin()],
   // 🔴 **crossOriginIsolated を成立させる**(#88 O2 の前提)。
   //
   // Office(LibreOffice wasm)は `-pthread` = SharedArrayBuffer を要求し、

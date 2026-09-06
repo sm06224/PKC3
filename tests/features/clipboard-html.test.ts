@@ -132,3 +132,44 @@ describe('貼る用の掃除', () => {
     expect(r.html).toContain('x = 1');
   });
 });
+
+/**
+ * 🔴 **数式は打った字に戻して貼る**(#707)。
+ *
+ * ⚠ KaTeX の出力は **MathML(CSS で隠す)と見た目の span** の 2 本立てで、
+ *   貼り先はこちらの CSS を持たない ── 素通しすると
+ *   **同じ式が 2 回、崩れて**貼られる。
+ * ⚠ 既に在る「隠してあるものを落とす」では届かない ── KaTeX が隠すのは
+ *   `.katex-mathml` の中で、`[hidden]` でも `COPY_JUNK_CLASSES` でもない。
+ */
+describe('数式(#707)', () => {
+  const katexish =
+    '<span class="pkc-math" data-pkc-math-src="E = mc^2" data-pkc-math-display="0"' +
+    ' data-pkc-math-state="done"><span class="katex">' +
+    '<span class="katex-mathml"><math><mi>E</mi></math></span>' +
+    '<span class="katex-html"><span class="mord">E</span></span></span></span>';
+
+  it('🔴 貼ると「$E = mc^2$」の 1 つになる(2 回貼られない)', () => {
+    const el = host(`<p>式は ${katexish} です。</p>`);
+    cleanForClipboard(el);
+    const text = el.textContent ?? '';
+    expect(text, '打った字に戻っていない').toContain('$E = mc^2$');
+    expect(el.innerHTML, 'KaTeX の中身が残っている(2 回貼られる)').not.toContain('katex-mathml');
+    expect(el.innerHTML, 'KaTeX の見た目の span が残っている').not.toContain('mord');
+  });
+
+  it('🔴 塊の数式は $$…$$ に戻る', () => {
+    const el = host(
+      '<div class="pkc-math pkc-math-display" data-pkc-math-src="x^2" ' +
+        'data-pkc-math-display="1"><span class="katex"><span class="mord">x</span></span></div>',
+    );
+    cleanForClipboard(el);
+    expect(el.textContent, '塊の区切りが戻っていない').toContain('$$x^2$$');
+  });
+
+  /** ⚠ 空振り防止 ── 台が 2 本立てを持っていること(無ければ上は何も見ていない)。 */
+  it('⚠ 台が KaTeX の 2 本立てを持っている(前提)', () => {
+    expect(katexish, '前提が崩れている: MathML が無い').toContain('katex-mathml');
+    expect(katexish, '前提が崩れている: 見た目の span が無い').toContain('mord');
+  });
+});

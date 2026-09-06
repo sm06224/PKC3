@@ -563,3 +563,53 @@ describe('紙面と改頁(#187 段③)', () => {
     expect(part(res, 'word/document.xml')).toContain(`<w:footerReference w:type="default" r:id="${id!}"/>`);
   });
 });
+
+/**
+ * 🔴 **数式は「打った字」で Word に入る**(#707)。
+ *
+ * ⚠ **黙って壊れる側の穴**だった(着地前調査 2026-09-06)── KaTeX の出力は
+ *   **MathML(CSS で隠す)と見た目用の span** の 2 本立てなので、素直に走査すると
+ *   **同じ式が 2 回、しかも 1 文字ずつ崩れて**入る。⚠ しかも `skippedName` は
+ *   この形を知らないので**理由も出ない**(「写せませんでした」すら出ない)。
+ */
+describe('数式(#707)', () => {
+  /** KaTeX が実際に吐く形(MathML + 見た目の span の 2 本立て)を真似た器。 */
+  const katexish = (tex: string, display: boolean): string =>
+    `<${display ? 'div' : 'span'} class="pkc-math${display ? ' pkc-math-display' : ''}"` +
+    ` data-pkc-math-src="${tex}" data-pkc-math-display="${display ? '1' : '0'}"` +
+    ` data-pkc-math-state="done">` +
+    `<span class="katex"><span class="katex-mathml"><math><mi>E</mi></math></span>` +
+    `<span class="katex-html"><span class="mord">E</span><span class="mord">=</span></span></span>` +
+    `</${display ? 'div' : 'span'}>`;
+
+  it('🔴 行の中の数式は、打った字 1 つとして入る(2 回入らない)', () => {
+    const { blocks } = blocksOf(`<p>式は ${katexish('E = mc^2', false)} です。</p>`);
+    const text = blocks
+      .flatMap((b) => ('runs' in b ? b.runs : []))
+      .map((r) => r.text)
+      .join('');
+    expect(text, '打った字が入っていない').toContain('$E = mc^2$');
+    // 🔴 **2 本立てが素通りしていないこと** ── 直す前はここに `E=` が混ざっていた
+    expect(text, 'KaTeX の中身まで写している(同じ式が 2 回入る)').not.toContain('mord');
+    expect(text.match(/E = mc\^2/g)?.length, '式が 2 回入っている').toBe(1);
+  });
+
+  it('🔴 塊の数式は 1 段落として入る', () => {
+    const { blocks } = blocksOf(katexish('x^2 + y^2 = z^2', true));
+    const text = blocks
+      .flatMap((b) => ('runs' in b ? b.runs : []))
+      .map((r) => r.text)
+      .join('');
+    expect(text, '塊の数式が打った字で入っていない').toBe('$$x^2 + y^2 = z^2$$');
+  });
+
+  /**
+   * ⚠ **空振り防止** ── 台が本当に「2 本立て」を持っていること。
+   * 持っていなければ、上の 2 つは何も判定していない。
+   */
+  it('⚠ 台が KaTeX の 2 本立てを持っている(前提)', () => {
+    const html = katexish('E = mc^2', false);
+    expect(html, '前提が崩れている: MathML が無い').toContain('katex-mathml');
+    expect(html, '前提が崩れている: 見た目の span が無い').toContain('katex-html');
+  });
+});

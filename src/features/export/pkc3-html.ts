@@ -505,7 +505,10 @@ try{
     // 図とグラフは**原文のまま**見せる(閲覧側に mermaid / chart.js を積まない)。
     // ⚠ **両方を回す** ── mermaid だけ書くと、グラフが**空の器**で出荷される
     //    (#188 のレビューで判明。片側だけ直す型の再演)
-    ['data-pkc-mermaid-src','data-pkc-chart-src'].forEach(function(attr){
+    // 数式も**原文のまま**見せる(#707)── 閲覧側に KaTeX と 250 KB の書体を
+    // 積まない。⚠ 器の中は KaTeX の 2 本立て(MathML + 見た目の span)なので、
+    // 素通しすると**同じ式が 2 回、崩れて**出る ── だから必ず原文へ戻す。
+    ['data-pkc-mermaid-src','data-pkc-chart-src','data-pkc-math-src'].forEach(function(attr){
       Array.prototype.forEach.call(box.querySelectorAll('['+attr+']'),function(el){
         var s=el.getAttribute(attr)||'';
         el.textContent='';var p=document.createElement('pre');p.className='d';
