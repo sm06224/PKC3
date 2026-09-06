@@ -877,7 +877,17 @@ function cellEditAttrs(
    *   そこから下は添字が丸ごとずれる。実測:`__字下げ` の下の表は
    *   **最後の行の升が 1 つも押せず**、逆に**別の行の升**に印が焼かれていた。
    */
-  const span = gate === undefined ? undefined : mdCellSpanAt(gate, raw, col);
+  /**
+   * 🔴 **gate が無いときは焼かない**(着地前レビュー [記録] 1)。⚠ 直す前は
+   *   `inline.content` へ落ちていたが、それは**門が 1 つも通っていない字**である ──
+   *   将来 `cellGate` を載せ忘れた面が現れたら、#747-1(属性の突き破り)と
+   *   #747-2(押せるのに書けない)が**同時に再発するのに tsc は黙る**。
+   * ⚠ **いまは到達しない**(`cellGate` を載せるのは `renderMarkdown` の 1 か所だけ)。
+   *   実測でも、ここを元へ戻す変異は全 spec 緑のまま生き延びる ── つまりこれは
+   *   **鳴る検査を持たない防御**である。載せ忘れを止めるのは型ではなく、この 1 行。
+   */
+  if (gate === undefined) return '';
+  const span = mdCellSpanAt(gate, raw, col);
   if (span === null) return '';
   /**
    * 🔴 **欄に出すのは「原文の升の字」である**(#747-1 / -4)。
@@ -898,12 +908,25 @@ function cellEditAttrs(
    *   (実測:1 回目 `みかん\|橙` → 3 回目 `みかん\\\|橙`)。
    *   🔑 **逃がすのは原文を作る側だけの仕事**である。
    */
-  const source = gate !== undefined && span !== undefined && span !== null
-    ? (gate.lines[raw] ?? '').slice(span.start, span.end).replace(/\\\|/g, '|')
-    : inline.content;
+  const source = (gate.lines[raw] ?? '').slice(span.start, span.end).replace(/\\\|/g, '|');
+  /**
+   * 🔴 **sentinel は数値参照へ逃がす**(着地前レビューが実測で拾った)。
+   *
+   * ⚠ 原文の控えは `neutralizeSentinels` の**前**で取っている(書き戻す先と
+   *   同じ字にするため)ので、本文に PUA(U+E110〜U+E17F)を書いた user では
+   *   **生の sentinel が属性値に残る**。⚠ ところが `postProcessVariableUndefined`
+   *   などは**描画の後に HTML 全体を文字列置換する**ので、属性値の中でも展開され、
+   *   `data-pkc-cell-raw="<span class="` と**属性を突き破る**
+   *   (実測 2026-09-06:`td` に `pkc-variable-undefined` と `title` が生えた)。
+   * 🔑 数値参照なら post 段の正規表現は当たらず、`getAttribute` は元の字へ戻す ──
+   *   **原文はそのまま往復する**(`escapeHtml` だけでは防げない。展開はその後だから)。
+   */
+  const safe = md.utils
+    .escapeHtml(source)
+    .replace(SENTINEL_RANGE, (c) => `&#x${c.codePointAt(0)!.toString(16)};`);
   return (
     ` data-pkc-action="edit-cell" data-pkc-cell-line="${raw + offset}"` +
-    ` data-pkc-cell-col="${col}" data-pkc-cell-raw="${md.utils.escapeHtml(source)}"`
+    ` data-pkc-cell-col="${col}" data-pkc-cell-raw="${safe}"`
   );
 }
 

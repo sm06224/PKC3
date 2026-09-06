@@ -14,8 +14,10 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  allFences,
   blockSpanAt,
   containerAtLine,
+  fenceAt,
   findOpenEnds,
   scanContainers,
   sliceLines,
@@ -223,5 +225,97 @@ describe('行範囲の切り出し(sliceLines) #677', () => {
     expect(sliceLines('a\nb\nc\nd', { start: 0, end: 3 })).toBe('a\nb\nc\nd');
     // 空行も 1 行として数える(落とすと貼った先で段落が繋がる)
     expect(sliceLines('a\n\nb', { start: 0, end: 2 })).toBe('a\n\nb');
+  });
+});
+
+/**
+ * 🔴 **入れ子まで含めた囲み**(#747 / #743)。
+ *
+ * ⚠ ここは**着地前レビューが「検査が 1 件も無い」と指摘して足した**節である ──
+ *   `line - from` を `line` にする変異(= 添字を原文へ戻し忘れる)が **8 spec を
+ *   素通り**し、2 段の板の中のコードが表として書き換わることを実測した。
+ * 🔑 だから見るのは**深さ 2 以上**である ── 深さ 1 だけの台では `from` が 0 なので、
+ *   添字を戻し忘れても答えが変わらない(= 何も守れない)。
+ */
+describe('入れ子の囲み(fenceAt / allFences)', () => {
+  /** 板が 2 段。⚠ 深さ 1 の台では `from = 0` なので、この誤りは見えない。 */
+  const D2 = ':::note\n:::section\n```txt\n| a | b |\n|---|---|\n| 1 | 2 |\n```\n:::\n:::\n';
+
+  it('🔴 2 段の板の中の囲みを、原文の行番号で返す', () => {
+    // 空振り防止 ── 台が本当に 2 段になっている(内側の板が最上位に出ていない)
+    expect(scanContainers(D2), '台が 2 段になっていない').toHaveLength(1);
+    expect(fenceAt(D2, 5), '2 段の板の中の囲みを見落とした').toEqual(
+      expect.objectContaining({ start: 2, end: 6, kind: 'fence', name: 'txt' }),
+    );
+    // 🔑 中の 5 行(柵から柵まで)が全部その囲みに属する
+    for (const l of [2, 3, 4, 5, 6]) expect(fenceAt(D2, l), `行 ${l}`).not.toBeNull();
+  });
+
+  it('🔴 板の開き行・閉じ行は囲みではない', () => {
+    for (const l of [0, 1, 7, 8]) expect(fenceAt(D2, l), `行 ${l} を囲みと読んだ`).toBeNull();
+  });
+
+  it('⚠ 閉じの `:::` を中身として飲まない(範囲が 1 行伸びない)', () => {
+    // 板の閉じの直前に囲みが在る形 ── 飲むと囲みの `end` が閉じの行まで伸びる
+    const b = ':::note\n```txt\nq\n```\n:::\nそと\n';
+    expect(fenceAt(b, 1)).toEqual(expect.objectContaining({ start: 1, end: 3 }));
+    expect(fenceAt(b, 4), '板の閉じを囲みが飲んだ').toBeNull();
+    expect(fenceAt(b, 5), '板の外まで飲んだ').toBeNull();
+  });
+
+  /**
+   * 🔴 **板の閉じの `:::` を、囲みの中身に数えない**(変異 M1b)。
+   * ⚠ 数えると、**閉じていない囲みの最後の行が「書ける升」に化ける** ──
+   *   csv の側は `line < fence.end` で中身を切るので、`end` が 1 行伸びるだけで
+   *   コードの字を表の行として書き換える。
+   */
+  it('🔴 閉じていない囲みは、板の閉じの手前で終わる', () => {
+    const b = ':::note\n```csv\na,b\n1,2\n:::\nそと\n';
+    expect(fenceAt(b, 3), '囲みが板の閉じまで伸びた').toEqual(
+      expect.objectContaining({ start: 1, end: 3, open: true }),
+    );
+    expect(fenceAt(b, 4), '板の閉じを囲みが飲んだ').toBeNull();
+  });
+
+  it('⚠ 閉じていない板の中でも見つかる(末尾まで飲む)', () => {
+    const b = ':::note\n```txt\nq\n```\nあと\n';
+    expect(fenceAt(b, 2)).toEqual(expect.objectContaining({ start: 1, end: 3 }));
+    expect(fenceAt(b, 4)).toBeNull();
+  });
+
+  it('⚠ 中を飲まない板(`:::toc`)の後ろへ降りない', () => {
+    const b = ':::toc\n:::\n```txt\nq\n```\n';
+    expect(fenceAt(b, 3), '飲まない板の後ろの囲みを見落とした').toEqual(
+      expect.objectContaining({ start: 2, end: 4 }),
+    );
+    expect(fenceAt(b, 0), '飲まない板を囲みと読んだ').toBeNull();
+  });
+
+  it('⚠ 囲みの中の `:::` はコードの字(降りない)', () => {
+    const b = '```txt\n:::note\n| a | b |\n:::\n```\n';
+    for (const l of [0, 1, 2, 3, 4]) {
+      expect(fenceAt(b, l), `行 ${l} が囲みの外に見えた`).not.toBeNull();
+    }
+  });
+
+  it('⚠ 深さ 3 でも当たる', () => {
+    const b = ':::note\n:::section\n:::details\n```txt\nq\n```\n:::\n:::\n:::\n';
+    expect(fenceAt(b, 4)).toEqual(expect.objectContaining({ start: 3, end: 5 }));
+  });
+
+  it('⚠ 範囲の外・整数でない行は `null`', () => {
+    expect(fenceAt(D2, -1)).toBeNull();
+    expect(fenceAt(D2, 999)).toBeNull();
+    expect(fenceAt(D2, 1.5)).toBeNull();
+  });
+
+  it('🔑 `allFences` は板の中も外も、文書順に全部返す', () => {
+    const b = ':::note\n```x\nq\n```\n:::\n```y\nz\n```\n';
+    expect(allFences(b).map((f) => [f.name, f.start, f.end])).toEqual([
+      ['x', 1, 3],
+      ['y', 5, 7],
+    ]);
+    // ⚠ 空振り防止 ── 最上位の走査は板 1 つと囲み 1 つしか返さない(= 入れ子を見ている)
+    expect(scanContainers(b).map((c) => c.kind)).toEqual(['directive', 'fence']);
   });
 });

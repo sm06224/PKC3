@@ -277,6 +277,10 @@ describe('#747 焼いた升と、書ける升を揃える', () => {
     { name: '升の数が足りない行', body: '| a | b | c |\n|---|---|---|\n| 1 |\n| 2 | 3 | 4 |\n' },
     { name: ':::の板の中', body: ':::note\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n:::\n' },
     { name: '板の中の囲み', body: ':::note\n\n```psv\na|b\n-|-\n1|2\n```\n\n:::\n' },
+    // 🔴 **深さ 2** ── 深さ 1 だけの台では、囲みの添字を原文へ戻し忘れても答えが変わらない
+    { name: '2 段の板の中の囲み', body: ':::note\n:::section\n```txt\n| a | b |\n|---|---|\n| 1 | 2 |\n```\n:::\n:::\n' },
+    // 🔴 frontmatter の中の**閉じていない柵** ── 数えると本文の升が全部書けなくなる
+    { name: 'frontmatter に柵が 1 本', body: '---\ndesc: |\n  ```\n---\n| a | b |\n|---|---|\n| 1 | 2 |\n' },
     { name: '囲みの中', body: '```txt\n| a | b |\n|---|---|\n| 1 | 2 |\n```\n' },
     { name: 'frontmatter の下', body: '---\ntitle: あ\n---\n\n| a | b |\n|---|---|\n| 1 | 2 |\n' },
   ];
@@ -298,20 +302,69 @@ describe('#747 焼いた升と、書ける升を揃える', () => {
    * 🔑 だから「印が焼かれる形」と「1 つも焼かれない形」を**別々に名指しで pin する**
    *   (どちらが崩れても鳴る)。
    */
-  it('⚠ 印が焼かれる形と、焼かれない形を名指しで数える', () => {
+  it('⚠ 印が焼かれる形と、焼かれない形を、corpus の全行で数える', () => {
     const n = (name: string) => marks(CORPUS.find((c) => c.name === name)!.body).length;
-    expect(n('ふつうの表'), 'ふつうの表で印が焼かれていない').toBe(6);
-    expect(n(':::の板の中'), '板の中の表で印が焼かれていない').toBe(4);
-    expect(n('升の数が足りない行'), '空の升にまで焼いている').toBe(7);
-    expect(n('字下げの記号の下'), '記号の下で行がずれて焼き落としている').toBe(6);
-    // 🔴 **押せない形**(押せると「押せるのに書けない」= 打った字が消える動線になる)
-    expect(n('引用の中'), '書けないのに押せる').toBe(0);
-    // 🔑 字下げした表は**押せて書ける**(行頭の空白ぶんを詰めて書く ── 変異 R1)
-    expect(n('箇条書きの中'), '字下げした表の升が押せない').toBe(4);
-    expect(n('囲みの中'), 'コードの字を押せてしまう').toBe(0);
-    // 🔑 板の中の ` ```psv ` は**表**なので押せる(#743 で書けるようにした)──
-    //    押せるのに書けない形ではない(上の it.each がその往復を見ている)
-    expect(n('板の中の囲み'), '板の中の csv の升が押せない(#743)').toBe(6);
+    /**
+     * 🔴 **corpus の全行に数を置く**(着地前レビューの指摘)。
+     * ⚠ 直す前は 4 行に無く、うち `4 字下げ(コード)` は**印が 0 個なので
+     *   `it.each` の本体が 1 度も走らない** ── その行は何も守っていなかった
+     *   (CLAUDE.md §2「弱いのではなく走っていない」)。
+     * 🔑 0 を pin すれば、**押せる形に化けた瞬間に鳴る**。
+     */
+    const WANT: readonly [string, number][] = [
+      ['ふつうの表', 6],
+      ['引用の中', 0],
+      // 🔑 字下げした表は**押せて書ける**(行頭の空白ぶんを詰めて書く ── 変異 R1)
+      ['箇条書きの中', 4],
+      // 🔴 4 字下げはコードである(`TABLE_BREAK_INDENT` が死ぬと押せる形に化ける)
+      ['4 字下げ(コード)', 0],
+      ['字下げの記号の下', 6],
+      ['中央寄せの記号の下', 6],
+      ['升の数が足りない行', 7],
+      [':::の板の中', 4],
+      // 🔑 板の中の ` ```psv ` は**表**なので押せる(#743 で書けるようにした)
+      ['板の中の囲み', 6],
+      ['2 段の板の中の囲み', 0],
+      ['囲みの中', 0],
+      ['frontmatter の下', 4],
+      // ⚠ **ここは 0 が正しい** ── frontmatter ごと読み手に渡すと、
+      //   `  ``` ` が囲みの開きに見えて表そのものが描かれない(実物は落として渡す)。
+      //   この形が効くのは下の「本文の面と同じ渡し方」のほうである
+      ['frontmatter に柵が 1 本', 0],
+    ];
+    // ⚠ 空振り防止 ── 数えていない corpus の行が残っていないこと
+    expect(WANT.map(([k]) => k).sort()).toEqual(CORPUS.map((c) => c.name).sort());
+    for (const [name, want] of WANT) expect(n(name), `印の数が違う: ${name}`).toBe(want);
+  });
+
+  /**
+   * 🔴 **本文の面と同じ渡し方でも通す**(着地前レビューの指摘)。
+   *
+   * ⚠ 上の corpus は全部 `renderMarkdown(body)`(frontmatter ごと・offset 0)で
+   *   焼いているが、**実物(`detail.ts:728`)は frontmatter を落とした本文**を渡し、
+   *   行番号を `taskLineOffset` で戻す ── その経路を 1 度も通っていなかった
+   *   (CLAUDE.md §2「本命の分岐を unit が 1 度も通らない」)。
+   * ⚠ 実際にここで割れていた:frontmatter に**閉じていない柵**が 1 本在ると、
+   *   焼く側(frontmatter 無し)と書く側(frontmatter 込み)で囲みの答えが食い違い、
+   *   本文の升が**全部「押せるのに書けない」**になっていた(実測 96 形中 24 形)。
+   */
+  it.each(CORPUS)('🔴 $name ── 本文の面と同じ渡し方でも、焼いた升は書き換えられる', ({ body }) => {
+    const fm = frontmatterLineCount(body);
+    const host = document.createElement('div');
+    host.innerHTML = renderMarkdown(bodyBelowFrontmatter(body), {
+      interactiveCells: true,
+      taskLineOffset: fm,
+    } as never);
+    const cells = [...host.querySelectorAll('[data-pkc-action="edit-cell"]')].map((c) => ({
+      line: Number(c.getAttribute('data-pkc-cell-line')),
+      col: Number(c.getAttribute('data-pkc-cell-col')),
+    }));
+    for (const cell of cells) {
+      expect(
+        write(body, cell.line, cell.col, 'ZQZ'),
+        `印が焼かれているのに書けない(行 ${cell.line} 列 ${cell.col})`,
+      ).not.toBeNull();
+    }
   });
 
   /**
@@ -433,4 +486,100 @@ describe('#747 焼いた升と、書ける升を揃える', () => {
     const code = ':::note\n\n```txt\n| a | b |\n|---|---|\n| 1 | 2 |\n```\n\n:::\n';
     expect(write(code, 3, 0, 'ZQZ'), 'コードの中身を書き換えた').toBeNull();
   });
+});
+
+/**
+ * 🔴 **着地前レビュー(実装)が実測で拾った 2 件**(#747)。
+ * ⚠ どちらも**私がこの PR で入れた退行**である ── base では起きない。
+ */
+describe('#747 着地前レビューの指摘', () => {
+  /**
+   * 🔴 **属性を突き破らない ── 本文に私用領域の字が在っても**(レビュー [重大] 1)。
+   *
+   * ⚠ 原文の控えは `neutralizeSentinels` の**前**で取るので、本文に PUA
+   *   (U+E110〜U+E17F)を書いた user では**生の sentinel が属性値に残る**。
+   *   描画の**後**に走る文字列置換は属性値の中でも当たるので、
+   *   `data-pkc-cell-raw="<span class="` と属性が割れていた(実測)。
+   * 🔑 見るのは**属性の数**である ── 割れると余計な属性が生える。
+   */
+  it('🔴 本文に私用領域の字が在っても、属性が割れない', () => {
+    const PUA = '\u{E140}abc\u{E141}';
+    const body = `| a | b |\n|---|---|\n| ${PUA} | 2 |\n`;
+    const host = document.createElement('div');
+    host.innerHTML = renderMarkdown(body, { interactiveCells: true });
+    const cells = [...host.querySelectorAll('[data-pkc-action="edit-cell"]')];
+    expect(cells, '空振り(印が焼かれていない)').toHaveLength(4);
+    const td = cells[2]!;
+    expect([...td.attributes].map((a) => a.name).sort(), '属性が割れて余計な物が生えた').toEqual([
+      'data-pkc-action',
+      'data-pkc-cell-col',
+      'data-pkc-cell-line',
+      'data-pkc-cell-raw',
+    ]);
+    // 🔑 **原文はそのまま往復する**(数値参照で逃がすので `getAttribute` が戻す)
+    expect(td.getAttribute('data-pkc-cell-raw'), '原文の字が変わった').toBe(PUA);
+  });
+
+  /**
+   * 🔴 **走の控えが 1 行はみ出さない**(レビューの変異 M7)。
+   * ⚠ はみ出すと、表の**次の行**が「書ける升」に化ける ── `+++`(改頁)は
+   *   `|` を持たないので、そこへ書くと改頁の記号が壊れる。
+   */
+  it('🔴 表の次の行は、表の升として書き換えない', () => {
+    const body = '| a | b |\n|---|---|\n| 1 | 2 |\n+++\nつぎの頁\n';
+    // ⚠ 空振り防止 ── 表そのものは書ける(前提が崩れていない)
+    expect(write(body, 2, 0, 'ZQZ'), '表が書けない(前提が崩れた)').toContain('| ZQZ | 2 |');
+    expect(write(body, 3, 0, 'ZQZ'), '表の外の行を書き換えた').toBeNull();
+    expect(marks(body).some((m) => m.line === 3), '表の外に印を焼いた').toBe(false);
+  });
+});
+
+/**
+ * 🔴 **frontmatter の中の柵を、囲みとして数えない**(着地前レビュー [要注意] 5)。
+ *
+ * ⚠ 焼く側は **frontmatter を落とした本文**を渡され、書く側は**本文全体**を見る。
+ *   frontmatter の中の ` ``` ` を囲みの柵として数えると、**閉じていない柵が 1 本
+ *   在るだけで本文の升が全部「押せるのに書けない」**になる(実測 96 形中 24 形)。
+ * 🔑 frontmatter は YAML であって markdown ではない ── 走査を下から始めれば、
+ *   両側が同じ本文を見ることになる(§7)。
+ */
+describe('#747 frontmatter の中の柵', () => {
+  const HEADS: readonly [string, string][] = [
+    ['閉じていない ```', '---\ndesc: |\n  ```\n---\n'],
+    ['閉じていない ~~~', '---\ndesc: |\n  ~~~\n---\n'],
+    // ⚠ **対照群** ── 柵が 2 本(偶数)なら、数えても数えなくても答えが同じ
+    ['``` が 2 本', '---\ndesc: |\n  ```\n  ```\n---\n'],
+    ['柵なし', '---\ntitle: あ\n---\n'],
+  ];
+  const TAILS: readonly [string, string][] = [
+    ['ふつうの表', '| a | b |\n|---|---|\n| 1 | 2 |\n'],
+    ['板の中の表', ':::note\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n:::\n'],
+    ['板の中の csv', ':::note\n\n```psv\na|b\n-|-\n1|2\n```\n\n:::\n'],
+  ];
+
+  it.each(HEADS.flatMap(([hn, head]) => TAILS.map(([tn, tail]) => ({ hn, tn, head, tail }))))(
+    '🔴 $hn × $tn ── 焼いた升は必ず書き換えられる',
+    ({ head, tail }) => {
+      const body = head + tail;
+      const fm = frontmatterLineCount(body);
+      expect(fm, '空振り(frontmatter と読まれていない)').toBeGreaterThan(0);
+      const host = document.createElement('div');
+      host.innerHTML = renderMarkdown(bodyBelowFrontmatter(body), {
+        interactiveCells: true,
+        taskLineOffset: fm,
+      } as never);
+      const cells = [...host.querySelectorAll('[data-pkc-action="edit-cell"]')].map((c) => ({
+        line: Number(c.getAttribute('data-pkc-cell-line')),
+        col: Number(c.getAttribute('data-pkc-cell-col')),
+      }));
+      // ⚠ 空振り防止 ── 印が 0 個なら「全部書けた」は何も言っていない
+      expect(cells.length, '印が 1 つも焼かれていない').toBeGreaterThan(0);
+      for (const c of cells) {
+        expect(
+          write(body, c.line, c.col, 'ZQZ'),
+          `押せるのに書けない(行 ${c.line} 列 ${c.col})`,
+        ).not.toBeNull();
+      }
+    },
+  );
 });

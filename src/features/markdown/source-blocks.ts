@@ -196,7 +196,7 @@ export function containerAtLine(spans: readonly ContainerSpan[], line: number): 
 }
 
 /**
- * 🔴 **その行を飲んでいる囲み(```)── 入れ子の深さを問わない**(#747 / #743)。
+ * 🔴 **入れ子まで含めた囲み(```)を、文書順に全部返す**(#747 / #743)。
  *
  * ⚠ `scanContainers` は**最上位しか返さない**ので、`:::` の板の中の ` ```psv ` は
  *   そこに出ない。それを「囲みではない」と読むと、**コードの字を表の行として
@@ -204,31 +204,49 @@ export function containerAtLine(spans: readonly ContainerSpan[], line: number): 
  *   `| ZZZ | b |` に化けた)。
  * 🔑 降り方は `blockSpanAt` と同じ ── **先頭から**外側 → 内側へ降りる
  *   (開き行から後ろだけを切ると fence の文脈が落ちる)。
+ * ⚠ **添字の戻し忘れが、いちばん静かに壊れる** ── 内側の走査は切り出した本文の
+ *   行番号を返すので、`from` を足さないと**深さ 2 以上の板で 1 つもずれた囲み**を
+ *   返す(実測 2026-09-06:`line - from` を `line` にする変異が 8 spec を素通りし、
+ *   2 段の板の中のコードが表として書き換わった)。`tests/features/source-blocks.test.ts`
+ *   の `fenceAt` の検査が守る。
  *
  * ⚠ **`place-notation.ts` にも同じ問いに答える `insideFence` が在る**(§7)。
  *   あちらは行を走査して mask を組む形で、`:::` を知らない代わりに軽い ──
  *   **囲みの名前も範囲も要らない**呼び側はそちらでよい。ここは囲みそのものを
  *   返すので、名前を分けて取り違えを防いでいる。
  */
-export function fenceAt(body: string, line: number): ContainerSpan | null {
+export function allFences(body: string): ContainerSpan[] {
   const lines = body.split('\n');
-  if (!Number.isInteger(line) || line < 0 || line >= lines.length) return null;
-  let from = 0;
-  let to = lines.length - 1;
-  for (;;) {
-    const hit = containerAtLine(scanContainers(lines.slice(from, to + 1).join('\n')), line - from);
-    if (hit === null) return null;
-    // 🔑 範囲は**原文の行番号**へ戻して返す(呼び側は原文を splice する)
-    if (hit.kind === 'fence') return { ...hit, start: from + hit.start, end: from + hit.end };
-    // `:::` の板 ── 中身(開きの次 〜 閉じの手前)へ降りる
-    const innerFrom = from + hit.start + 1;
-    const innerTo = hit.open ? from + hit.end : from + hit.end - 1;
-    if (innerFrom > line || innerTo < line) return null;
-    from = innerFrom;
-    to = innerTo;
-  }
+  const out: ContainerSpan[] = [];
+  const walk = (from: number, to: number): void => {
+    if (from > to) return;
+    for (const s of scanContainers(lines.slice(from, to + 1).join('\n'))) {
+      // 🔑 範囲は**原文の行番号**へ戻す(呼び側は原文を splice する)
+      const start = from + s.start;
+      const end = from + s.end;
+      if (s.kind === 'fence') {
+        out.push({ ...s, start, end });
+        continue;
+      }
+      // `:::` の板 ── 中身(開きの次 〜 閉じの手前)へ降りる
+      walk(start + 1, s.open ? end : end - 1);
+    }
+  };
+  walk(0, lines.length - 1);
+  return out;
 }
 
+/**
+ * その行を飲んでいる囲み。⚠ **囲みは入れ子にならない**(囲みの中の柵はコードの字)ので、
+ * 1 行が属する囲みは高々 1 つである。
+ *
+ * ⚠ 表を何十個も持つ本文では**行ごとに呼ばない** ── {@link allFences} を 1 回だけ
+ *   呼んで控える(実測 2026-09-06:表 160 個・3680 行で描画が 62ms → 262ms になった)。
+ */
+export function fenceAt(body: string, line: number): ContainerSpan | null {
+  if (!Number.isInteger(line) || line < 0) return null;
+  return containerAtLine(allFences(body), line);
+}
 
 /** `:::` の塊の原文の行範囲(0 始まり・**両端含む**)。 */
 export interface BlockSpan {

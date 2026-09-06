@@ -22,11 +22,12 @@ import { readTags, withTagResult } from '../flavor/tags';
 import { acceptsExternalImage, rewriteAdopted } from '../asset/inline-url-adopt';
 import { DELIMITER, csvEscapeField, parseCsv, type CsvPositions } from './csv-table';
 import { parseRenderableFence } from './markdown-render';
-import { fenceAt } from './source-blocks';
+import { containerAtLine } from './source-blocks';
 import { insertLines, moveLines } from './line-move';
 import { gfmCellText } from './html-to-markdown';
 import {
   convertTable,
+  fencesBelowFrontmatter,
   mdCellGate,
   mdCellSpanAt,
   tableAt,
@@ -709,7 +710,7 @@ function csvTableAt(
    *   **最上位しか見ていなかった**ので、`:::` の板の中の ` ```csv ` は
    *   **升を押せるのに書けなかった**(打った字が消え、起きていない理由が出る)。
    */
-  const fence = fenceAt(body, line);
+  const fence = containerAtLine(fencesBelowFrontmatter(body), line);
   if (fence === null || line <= fence.start || line >= fence.end) return null;
   const parsed = parseRenderableFence(fence.name);
   if (parsed === null) return null;
