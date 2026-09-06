@@ -210,6 +210,44 @@ describe('ヘルプの面', () => {
   });
 
   /**
+   * 🔴 **面の並びを丸ごと等値で pin する**(着地前レビュー・実装 ⚠-4)。
+   *
+   * ⚠ 上の `h3` の並びだけでは足りない ── 変異試験で **3 件**が生き延びた:
+   *   ①版をマニュアルの見出しの**上**へ戻す ②目次を別窓ボタンの**前**へ戻す
+   *   ③探す欄を目次の**後ろ**へ回す。⚠ どれも h3 は 3 つのまま動かないので、
+   *   「マニュアル → ショートカット → お知らせ」の pin は**1 つも鳴らない**。
+   * 🔑 だから**器の直下の子を全部、順番どおりに**留める ── #719 の裁定は
+   *   「何が在るか」ではなく「**開いた 1 画面に何がこの順で出るか**」だった。
+   * ⚠ 名前は `data-pkc-region` → `data-pkc-field` → `タグ:字` の順に採る
+   *   (`settings-note` が 2 つ在るのは正しい ── 目次の断りと、キーの断り)。
+   */
+  it('🔴 ヘルプの面は、器の直下がこの順に並ぶ', () => {
+    new HelpRenderer(region).render();
+    const body = region.querySelector('[data-pkc-region="help-body"]');
+    expect(body, '前提が崩れている: ヘルプの器が無い').not.toBeNull();
+    const labels = [...body!.children].map(
+      (e) =>
+        e.getAttribute('data-pkc-region') ??
+        e.getAttribute('data-pkc-field') ??
+        `${e.tagName}:${e.textContent ?? ''}`,
+    );
+    expect(labels, 'ヘルプの面の並びが変わった(#719 の裁定と食い違う)').toEqual([
+      'H3:マニュアル',
+      'help-version',
+      'help-manual-open',
+      'help-find-bar',
+      'settings-note',
+      'help-toc',
+      'help-manual',
+      'H3:ショートカットキー',
+      'settings-note',
+      'help-keymap',
+      'H3:これまでのお知らせ',
+      'help-notices',
+    ]);
+  });
+
+  /**
    * ⚠ **取込の注意**(`notices.ts`)と名前がかぶらないこと。同じ document に
    * 両方が居るので、かぶると片方を数える検査がもう片方を拾う。
    */
@@ -904,6 +942,94 @@ describe('ヘルプの面の目次(#719)', () => {
     for (let i = 0; i < 8; i++) await Promise.resolve();
     expect(seen, '押しても飛んでいない').toHaveLength(1);
     expect(seen[0], '押した行と違う見出しへ飛んだ').toBe(withId[3]);
+
+    /**
+     * 🔴 **行の字と段を、見出しと 1 本ずつ突き合わせる**(着地前レビュー・実装 ⚠-5)。
+     * ⚠ 数だけ合わせていたので、変異試験で **3 件**が生き延びた:
+     *   ①行の字を空にする ②`data-pkc-level` を落とす ③段をいつも `'1'` にする。
+     *   ⚠ ①は「85 個の空のボタン」、②③は「85 行が平らな 1 枚の壁」になる
+     *   (どちらも CSS の段付けが当たる先を失う)が、**数は 85 のままである**。
+     */
+    expect(
+      rows.map((r) => r.textContent),
+      '目次の字が、見出しの字と違う',
+    ).toEqual(withId.map((h) => h.textContent));
+    expect(
+      rows.map((r) => r.getAttribute('data-pkc-level')),
+      '目次の段が、見出しの段と違う(段付けの当たる先が消える)',
+    ).toEqual(withId.map((h) => h.tagName.slice(1)));
+    // ⚠ 空振り防止 ── 段が 1 種類しか出ていないなら、上の等値は何も見ていない
+    expect(
+      new Set(rows.map((r) => r.getAttribute('data-pkc-level'))).size,
+      '前提が崩れている: 見出しの段が 1 種類しか無い(段付けを判定できない)',
+    ).toBeGreaterThan(1);
+
+    /**
+     * 🔴 **数字で始まる見出しは、ここでは判定できない**(着地前レビュー・実装 ⚠-7)。
+     *
+     * ⚠ マニュアルの見出しは **85 本のうち 30 本**が `1-はじめる` のように
+     *   数字で始まるので、`CSS.escape` を外すと `#1-…` が `SyntaxError` になり
+     *   **目次の 35% が無言で死ぬ**。⚠ ところが **happy-dom は escape 済みの
+     *   選択子(`#\\31 -はじめる`)を解決しない**(実測: `querySelector` が
+     *   `null` を返す)── つまりここでは**正しい実装のほうが落ちる**。
+     * 🔑 だから観測点は実ブラウザに置いた(`tests/smoke/help-announce.smoke.spec.ts`
+     *   の「数字で始まる見出しの行」)。⚠ ここに弱い代替(原文に `CSS.escape` が
+     *   在るかの grep)を置かない ── 字が在っても効いている証拠にならない。
+     * ⚠ 上の `rows[3]` は**英字始まり**なので、この穴を 1 度も通らない(§2)。
+     */
+    expect(
+      withId.filter((h) => /^[0-9]/.test(h.id)).length,
+      '前提が崩れている: 数字で始まる見出しが 1 つも無い(smoke 側の判定も無意味になる)',
+    ).toBeGreaterThan(10);
+  });
+
+  /**
+   * 🔴 **入れ直しても目次は同じ本数**(着地前レビュー・実装 ⚠-6)。
+   *
+   * ⚠ 5 分使わないと `dropManual()` が**本文だけ**捨てる(目次の行は残る)。
+   *   開き直すと `drawManual` → `syncToc` が走るので、⚠ **前の 85 行を消さないと
+   *   170 行に増える**(同じ見出しが 2 度並び、後半は押しても飛べない)。
+   * ⚠ 既存の test は「1 度描いた直後」しか見ていないので、この経路を
+   *   **1 度も通っていなかった**(`nav.textContent = ''` を消す変異が生き延びた)。
+   */
+  it('🔴 手放して開き直しても、目次は同じ本数のまま', async () => {
+    const jobs: (() => void)[] = [];
+    const r = new HelpRenderer(
+      region,
+      { render: async (t) => renderMarkdown(t) },
+      undefined,
+      undefined,
+      {
+        set: (fn) => {
+          jobs.push(fn);
+          return jobs.length;
+        },
+        clear: () => {
+          jobs.length = 0;
+        },
+      },
+      1000,
+    );
+    r.render('c1');
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    const count = (): number =>
+      region.querySelectorAll('[data-pkc-field="help-toc-row"]').length;
+    const first = count();
+    expect(first, '目次が出ていない(空振り)').toBeGreaterThan(10);
+
+    // 閉じて、しばらく開かないと本文だけ手放す
+    r.onHidden();
+    expect(jobs.length, '手放す予約をしていない(前提が崩れている)').toBe(1);
+    jobs.splice(0, jobs.length).forEach((fn) => fn());
+    expect(
+      region.querySelector('[data-pkc-region="help-manual"]')!.querySelectorAll('h2').length,
+      '前提が崩れている: 本文を手放していない',
+    ).toBe(0);
+
+    // 開き直す ── 目次は組み直されるが、**増えない**
+    r.render('c1');
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    expect(count(), '開き直したら目次が増えた(同じ見出しが 2 度並ぶ)').toBe(first);
   });
 
   /**
