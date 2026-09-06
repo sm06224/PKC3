@@ -111,11 +111,38 @@ export function hydrateMath(root: ParentNode | readonly ParentNode[]): MathScope
     display: h.getAttribute('data-pkc-math-display') === '1',
   }));
 
+  /**
+   * 🔴 **読めなかった理由を、画面にも 1 つ出す**(user 裁定 2026-09-06 =
+   * 「打った字 + 『式が読めません』」)。
+   *
+   * ⚠ 打った字が残るだけだと、**数式のつもりだったのに数式にならなかった**のか
+   *   **そもそも数式として読まれていない**のか(金額・差し込み・逆引用符の中)が
+   *   user から区別できない ── 前者だけに印を出す。
+   * ⚠ **KaTeX の英語のエラーは画面に出さない**(`data-pkc-math-error` に残す)──
+   *   読めないうえに、指で触る端末では吹き出しが出ない。
+   * ⚠ **二重に付けない**(描き直しで何度も通る)。
+   */
+  const noteFailure = (host: HTMLElement): void => {
+    if (host.querySelector('.pkc-math-error') !== null) return;
+    const note = host.ownerDocument.createElement('span');
+    // ⚠ **class で出す**(`data-pkc-field` にしない)── これは器ではなく
+    //    **本文の中身**なので、本文の CSS を抜く段(`build/body-css.ts`)が
+    //    器の規則として弾く。前例は未定義変数のバッジ(`pkc-variable-undefined`)。
+    note.className = 'pkc-math-error';
+    note.textContent = '式が読めません';
+    host.append(note);
+  };
+
   /** ⚠ 失敗の印は**その場で**付ける(次の描き直しで無限に試させない)。 */
   const markFailed = (why: string): void => {
     for (const h of hosts) {
       h.setAttribute('data-pkc-math-state', 'failed');
       h.setAttribute('data-pkc-math-error', why.slice(0, 120));
+      /**
+       * ⚠ **ここでは画面に出さない** ── ワーカーが立たない / KaTeX が読めないのは
+       *   **式のせいではない**(user には直しようが無い)。「式が読めません」と
+       *   出すと、正しい式を書いた人に嘘をつくことになる。
+       */
     }
     done = true;
   };
@@ -135,6 +162,7 @@ export function hydrateMath(root: ParentNode | readonly ParentNode[]): MathScope
             // ⚠ **原文はそのまま**(中身を捨てるのは成功したときだけ)
             host.setAttribute('data-pkc-math-state', 'failed');
             host.setAttribute('data-pkc-math-error', (r?.ok === false ? r.error : '結果が無い').slice(0, 120));
+            noteFailure(host);
             continue;
           }
           host.innerHTML = r.html;

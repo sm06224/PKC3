@@ -5517,6 +5517,18 @@ li[data-pkc-row-slot] {
 .pkc-md-rendered .pkc-math {
   overflow-wrap: normal;
 }
+/**
+ * 🔴 **読めなかった式の断り**(#707。user 裁定 2026-09-06)。
+ * ⚠ 色は **`--danger`** を使う ── KaTeX 自身は `#cc0000` を inline style で焼くが、
+ *   それは暗い配色の地(`#14171a`)の上で沈む(概算 2.9:1)。PKC は配色ごとに
+ *   読める赤を持っているので、そちらに合わせる。
+ * ⚠ 打った字より**小さく**出す(主役は打った字のほう ── 直す手がかりである)。
+ */
+.pkc-md-rendered .pkc-math-error {
+  margin-inline-start: var(--s2);
+  font-size: 0.85em;
+  color: var(--danger);
+}
 
 /* 🔴 **これまでのお知らせは題名だけ並べる**(#719 案 A)── 直す前は 11 件の
    中身が全部開いたまま**面の先頭**に居て、マニュアルまで 5455px あった。 */

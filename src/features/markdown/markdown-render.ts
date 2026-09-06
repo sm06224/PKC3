@@ -1357,7 +1357,29 @@ function buildMathHtml(
    */
   rawText = display ? `$$${tex}$$` : `$${tex}$`,
 ): string {
-  const src = md.utils.escapeHtml(tex);
+  /**
+   * 🔴 **sentinel は数値参照へ逃がす**(着地前レビュー 2026-09-06・重大 1)。
+   *
+   * ⚠ `escapeHtml` **だけでは防げない** ── 未定義の `{{vars.x}}` は前処理で
+   *   PUA の sentinel になり、`postProcessVariableUndefined` が**描画の後に
+   *   HTML 全体を文字列置換する**ので、**属性値の中でも展開される**。
+   *   実測:`$a {{vars.x}} b$` が
+   *   `data-pkc-math-src="a <span class="` と**属性を突き破り**、
+   *   画面に生の HTML が字として出ていた。
+   * 🔴 **同じ罠を同じ日に `data-pkc-cell-raw` で踏んで直してある**
+   *   (この file の `cellEditAttrs` ── そこの戒めがこの形を名指ししている)。
+   *   CLAUDE.md「片側を直したら、対称の反対側を必ず疑う」の同日再演である。
+   * 🔑 数値参照なら post 段の正規表現は当たらず、`getAttribute` は元の字へ戻す。
+   * ⚠ **逃がすのは属性だけ**(`src`)── 器の中の字(`raw`)まで逃がすと、
+   *   post 段が戻せなくなって**画面に豆腐文字が出る**(1 稿目で実測)。
+   *   中の字はそのまま流し、いままでどおり「未定義変数」のバッジが出る。
+   * 🔑 帰結:**未定義の変数を含む式は数式にならず、バッジのまま残る** ──
+   *   属性には PUA が入るので KaTeX が読めず、`throwOnError` で打った字が残る。
+   *   ⚠ これは正しい向きである(値が決まっていない式は組みようがない)。
+   */
+  const src = md.utils
+    .escapeHtml(tex)
+    .replace(SENTINEL_RANGE, (c) => `&#x${c.codePointAt(0)!.toString(16)};`);
   const raw = md.utils.escapeHtml(rawText);
   const tag = display ? 'div' : 'span';
   const cls = display ? 'pkc-math pkc-math-display' : 'pkc-math';

@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { closesMath, isEscaped, opensMath, readMathAt } from '../../src/features/markdown/math-delims';
+import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 
 /** 先頭の `$` から 1 つ読む(読めなければ null)。 */
 const read = (s: string): string | null => {
@@ -121,6 +122,10 @@ describe('⚠ 開きと閉じは別の判定である', () => {
 describe('🔴 `$` + 名前の書き方を飲まない(実測で壊れていた 5 形)', () => {
   const cases: [string, string][] = [
     ['コードの中の $ を閉じに使わない', '変数 $x と `$y` を比べる'],
+    // 🔴 **逆引用符の壁でしか止まらない形**(変異試験 M-backtick が SURVIVED で教えた)
+    //    ⚠ 閉じの直後が `` ` `` なので「語の字」の門は素通りする ──
+    //    走査が逆引用符で止まらなければ、`A と \`x` が数式になる
+    ['コードの閉じ引用符の直前の $', '合計 $A と `x$` の話'],
     ['シェルの変数', 'PATH=$HOME/bin:$PATH を .bashrc に書く'],
     ['環境変数を並べる', '環境変数 $PATH,$HOME を設定する'],
     ['通貨の記号', 'レートは $USD で計算し、$EUR も見る'],
@@ -154,5 +159,46 @@ describe('⚠ それでも数式は読める(門を締めすぎていない)', (
       const at = src.indexOf('$');
       expect(opensMath(src, at), `前提が崩れている: 開きが立たない(${src})`).toBe(true);
     }
+  });
+});
+
+/**
+ * 🔴 **器の属性は突き破られない**(着地前レビュー 2026-09-06・重大 1)。
+ *
+ * ⚠ `escapeHtml` **だけでは足りない** ── 未定義の `{{vars.x}}` は前処理で
+ *   PUA の sentinel になり、**描画の後に** HTML 全体が文字列置換されるので、
+ *   属性値の中でも展開されて `data-pkc-math-src="a <span class="` と突き破る。
+ * ⚠ そして goldens も CSS の代表入力も、数式に `<` も `"` も持っていない ──
+ *   **escape を落とす変異が全部素通りしていた**。
+ */
+describe('🔴 器の属性を突き破らせない', () => {
+  it('🔴 記号を含む式は escape される(属性も、器の中の字も)', () => {
+    const html = renderMarkdown('$a<b>"c$\n');
+    expect(html, '属性が escape されていない(属性が突き破られる)').toContain(
+      'data-pkc-math-src="a&lt;b&gt;&quot;c"',
+    );
+    /**
+     * 🔴 **器の中の字も見る**(変異試験 M-escape が SURVIVED で教えた)。
+     * ⚠ 属性だけ見ていると、**描く前に画面へ出る字**の escape を落とす変異が通る
+     *   ── 打った `<b>` が本物の太字になり、`<script>` なら script が生える。
+     */
+    expect(html, '器の中の字が escape されていない(打った記法が本物になる)').toContain(
+      '>$a&lt;b&gt;&quot;c$<',
+    );
+    expect(html, '生の < が器の中に出ている').not.toMatch(/>\$a<b>/);
+  });
+
+  it('🔴 未定義の変数を含む式でも、属性が閉じたまま', () => {
+    const html = renderMarkdown('$a {{vars.x}} b$\n');
+    // 🔴 属性の中に生の `<span` が出ていないこと(1 稿目はここが破れていた)
+    expect(html, '属性の中に生の HTML が出ている').not.toMatch(
+      /data-pkc-math-src="[^"]*<span/,
+    );
+    // ⚠ 空振り防止 ── 台が本当に sentinel を作っていること
+    expect(html, '前提が崩れている: 未定義変数のバッジが出ていない').toContain(
+      'pkc-variable-undefined',
+    );
+    // 🔑 属性は数値参照で逃がしてある(post 段の置換が当たらない)
+    expect(html, 'sentinel を逃がしていない').toMatch(/data-pkc-math-src="a &#x[0-9a-f]+;/);
   });
 });
