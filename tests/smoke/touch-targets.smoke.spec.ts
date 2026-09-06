@@ -176,6 +176,21 @@ test.describe('指で触る端末(#706)', () => {
       .locator('[data-pkc-field="editor-body"]')
       .fill('```csv\n名前,メモ\na,b\n```\n');
     await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+    /**
+     * 🔴 **描かれるのを待つ**(2026-09-06。CI で 1 回だけ「csv の塊が見つからない」で落ちた)。
+     *
+     * ⚠ 直す前は `commit-edit` の直後に `page.evaluate` していたが、保存 → 書き戻し →
+     *   再描画は**非同期**なので、表がまだ無い回がある(`null` が返って空振り防止の
+     *   assert が落ちる ── 症状は「塊が無い」で、**重なりの話は 1 度も測っていない**)。
+     * 🔑 **緩めたのではない** ── 待つのは「この test が測る対象が画面に出るまで」で、
+     *   重なりの判定は 1 バイトも変えていない。
+     * ⚠ 手元(headless_shell)ではフル走行 471/471 緑で再現しなかった ──
+     *   落ちたのは CI の 1 回だけ(run 34027869320)。
+     */
+    await expect(
+      page.locator('table.pkc-md-rendered-csv'),
+      'csv の表が描かれない',
+    ).toBeVisible({ timeout: 15_000 });
 
     const rects = await page.evaluate(() => {
       const block = document

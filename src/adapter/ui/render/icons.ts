@@ -409,3 +409,41 @@ export function iconButton(action: string, label: string, iconKey = action): HTM
   btn.append(text);
   return btn;
 }
+
+/**
+ * 🔴 **その面の「主の操作」の印**(#722 P2-10。user 裁定 2026-09-06 = 案 A)。
+ *
+ * cowork 実測 2026-09-05:「1440px の 1 画面に押せるボタンが **50 個**、うち
+ * **23 個が完全に同じ見た目**。濃い地を持つのは『いま選んでいるタブ』の 1 個だけ」──
+ * つまり **どれを押せば話が進むのかが、画面から読めない**。
+ *
+ * 🔑 **色ではなく濃さで段を作る**(user 指示 2026-08-03「地は無彩色、色は情報にだけ」)。
+ *   地を `--fg`、字を `--surface` に**反転**するだけなので、色相は 1 つも増えない。
+ * ⚠ **1 つの面に 1 つだけ**。⚠ ここを増やすと段が消える(全部が主なら主は無い)ので、
+ *   `tests/adapter/primary-action.test.ts` が**面ごとに 1 個以下**を全数で見る。
+ * ⚠ 印を付けるのは**この関数だけ** ── 属性を直に書くと、上の全数検査が数え落とす
+ *   (`tests/repo-hygiene.test.ts` が直書きを止める)。
+ */
+export const PRIMARY_ATTR = 'data-pkc-primary';
+
+/** 主の操作にする。⚠ 返り値を使わなくてよい(その場で印が付く)。 */
+export function markPrimary(btn: HTMLButtonElement): HTMLButtonElement {
+  return setPrimary(btn, true);
+}
+
+/**
+ * 印を**付け外し**する(状態で変わる面はこちらを使う)。
+ *
+ * 🔴 **押しても何も起きないボタンを、いちばん濃くしない**(着地前レビュー・動線 1、
+ * 2026-09-06)。⚠ 「+ ノート」は `CREATE_ENTRY` が `phase !== 'ready'` を
+ * **黙って捨てる**(`app-state.ts` の `CREATE_ENTRY`)ので、**編集中は押しても
+ * 1 ドットも動かない** ── そこを画面でいちばん濃くすると、
+ * 「濃い = 次に押す物」と教えた直後に嘘をつくことになる。
+ * ⚠ **押した結果は変えていない**(黙って捨てるのは前からの穴で、別に起票した)──
+ *   ここで直すのは**見え方**だけである。
+ */
+export function setPrimary(btn: HTMLElement, on: boolean): HTMLButtonElement {
+  if (on) btn.setAttribute(PRIMARY_ATTR, '');
+  else btn.removeAttribute(PRIMARY_ATTR);
+  return btn as HTMLButtonElement;
+}
