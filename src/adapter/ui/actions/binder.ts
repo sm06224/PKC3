@@ -6766,6 +6766,22 @@ export function bindActions(
     );
     if (!el || !root.contains(el)) return;
     /**
+     * 🔴 **表の升の中のリンクは、リンクとして働く**(#708 段④、着地前レビュー・動線 ③)。
+     *
+     * ⚠ 升そのものが `edit-cell` の印を持つので、升の中の `<a>` を押すと
+     *   **`closest` が升まで登って、リンクではなく入力欄が開く**。
+     *   実害:表にリンクを並べるのは markdown の表のいちばん普通の使い方なのに、
+     *   **そこだけリンクが死ぬ**(しかも開かない理由はどこにも出ない)。
+     * 🔑 ノートへのリンク・添付・タグは `<a>` 自身が印を持つので `closest` が
+     *   そちらを先に拾う ── 落ちていたのは**印を持たない `<a>`**
+     *   (外部リンク / 同じノートの中の飛び先 / 脚注)だけである。
+     * ⚠ 升を打ちたいときは、リンクでない所を押す(csv の升と同じ)。
+     */
+    if (el.getAttribute('data-pkc-action') === 'edit-cell') {
+      const link = (ev.target as HTMLElement | null)?.closest<HTMLElement>('a[href]');
+      if (link != null && el.contains(link)) return;
+    }
+    /**
      * 🔴 **アプリ内リンクは、ブラウザに遷移させない**(2026-08-08)。
      *
      * 本文の `[題名](entry:<lid>)` は `<a href="entry:…">` として出る

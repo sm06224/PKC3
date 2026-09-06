@@ -47,10 +47,10 @@ test('🔴 markdown の表の升を押して打つと、本文に残る (#708 �
   await expect(page.locator('[data-pkc-field="cell-input"]'), '欄が 2 つ以上出た').toHaveCount(1);
   await expect(page.locator('[data-pkc-field="editor-body"]'), '原文の欄が出た').toHaveCount(0);
   /**
-   * 🔑 **焼いた原文は逃がしたまま出る** ── `りんご|青` と出ていたら、確定した瞬間に
-   *   列が増える(この段でいちばん静かに壊れる形)。
+   * 🔑 **欄に出るのは画面の字**(`りんご|青`)── 逃がした形(`りんご\\|青`)が出ると、
+   *   確定するたびに `\\` が 1 本ずつ増えて原文が壊れる(着地前レビューが実測)。
    */
-  await expect(input, '欄に出た原文の逃がしが外れている').toHaveValue('りんご\\|青');
+  await expect(input, '欄に原文の逃がしが見えている').toHaveValue('りんご|青');
 
   await page.keyboard.press('Control+a');
   await page.keyboard.type('みかん|橙');

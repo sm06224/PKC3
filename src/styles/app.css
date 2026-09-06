@@ -2775,6 +2775,14 @@ li[data-pkc-row-slot] {
   cursor: text;
   position: relative;
 }
+/* 🔴 **押せることが見えるようにする**(#708 段④、着地前レビュー・動線 ⑦)。
+ *    ⚠ `cursor: text` は**字の上では既定と同じ**なので、合図になっていなかった ──
+ *    csv の表には ＋ × という合図が在るのに、markdown の表には何も無かった。
+ *    🔑 乗せた升だけをほんの少し濃くする(色は使わない ── 方針「地は無彩色」)。
+ *    ⚠ 押せる面だけに出る(`interactiveCells` を渡していない面には印が無い)。 */
+.pkc-md-rendered [data-pkc-action='edit-cell']:hover {
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+}
 /* ⚠ **升の中いっぱいに開く** ── 小さい欄が升の中に浮くと、どの升を
  *    打っているのか分からなくなる(隣の升と重なって見える) */
 .pkc-md-rendered .pkc-csv-cell-input {

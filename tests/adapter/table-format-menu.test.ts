@@ -281,3 +281,41 @@ describe('右クリックで表の形を変える(#708 段②)', () => {
     expect(s.d.getState().notice, '断りの理由が出ていない').toContain('別のノート');
   });
 });
+
+/**
+ * 🔴 **表の升の中のリンクは、リンクとして働く**(#708 段④、着地前レビュー・動線 ③)。
+ *
+ * ⚠ 升そのものが `edit-cell` の印を持つので、升の中の `<a>` を押すと
+ *   **`closest` が升まで登って、リンクではなく入力欄が開く**。
+ *   実害:表にリンクを並べるのは markdown の表のいちばん普通の使い方なのに、
+ *   **そこだけリンクが死ぬ**(しかも開かない理由はどこにも出ない)。
+ */
+describe('表の升の中のリンク(#708 段④)', () => {
+  const LINKED = '| 参考 | [公式](https://example.com) |\n|---|---|\n| 次 | ふつうの字 |\n';
+
+  it('🔴 升の中のリンクを押しても、入力欄が開かない', () => {
+    const s = setup(LINKED, 'ready');
+    const link = document.querySelector<HTMLElement>('[data-pkc-field="detail-body"] a[href]');
+    expect(link, '前提: 升の中にリンクが描かれていない').not.toBeNull();
+    link!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(
+      document.querySelector('[data-pkc-field="cell-input"]'),
+      'リンクを押したら升の入力欄が開いた',
+    ).toBeNull();
+  });
+
+  it('⚠ 対照群 ── リンクでない升を押せば、いままでどおり欄が開く', () => {
+    const s = setup(LINKED, 'ready');
+    void s;
+    const cells = [
+      ...document.querySelectorAll<HTMLElement>('[data-pkc-action="edit-cell"]'),
+    ];
+    const plain = cells.find((c) => c.querySelector('a[href]') === null);
+    expect(plain, '前提: リンクの無い升が無い').toBeDefined();
+    plain!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(
+      document.querySelector('[data-pkc-field="cell-input"]'),
+      'ふつうの升で欄が開かない',
+    ).not.toBeNull();
+  });
+});

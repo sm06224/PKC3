@@ -29,7 +29,7 @@ import { MAX_TAGS, sameTag } from '../flavor/tags';
 // 部分 path は exports map から**消えた**(v14 では `@types/markdown-it` が
 // `lib/token.mjs` を生やしていた)。型は本入口から名前付きで取る。
 import type { Token } from 'markdown-it';
-import { gfmCellText } from './html-to-markdown';
+import { mdCellSpan } from './table-convert';
 // PR-W18:HTML footnote plugin(`[^id]` → `<sup class="footnote-ref">`)。
 // CJS package だが exports map で `.mjs` を提供しているため ESM import OK。
 import footnotePlugin from 'markdown-it-footnote';
@@ -858,9 +858,29 @@ function cellEditAttrs(
   // ⚠ 升の原文は**次の inline token**が持つ(`renderToken` はここでは中身を見ない)
   const inline = tokens[idx + 1];
   if (inline === undefined || inline.type !== 'inline') return '';
+  /**
+   * 🔴 **原文に無い升には焼かない**(着地前レビュー・動線 ②)。
+   *
+   * ⚠ 読み手は**見出しの列数ぶん**升を作るので、`| 1 |` の行にも空の升が並ぶ ──
+   *   そこに印を焼くと、押せて、打てて、**「本文が変わっているため反映できません
+   *   でした」という起きていない理由**が出る(打った字は消える)。
+   * 🔑 判定は `mdCellSpan` の 1 本を借りる(§7)── 書く側と同じ物差しで見る。
+   */
+  const src = (env as { cellSourceLines?: readonly string[] } | undefined)?.cellSourceLines;
+  if (src !== undefined && mdCellSpan(src[rowLine] ?? '', col) === null) return '';
+  /**
+   * 🔴 **欄に出すのは「画面に出ている字」である**(着地前レビュー・動線 ①)。
+   *
+   * ⚠ 直す前は `gfmCellText`(= `|` を `\|` に逃がす)を通していたが、書き戻す側も
+   *   同じ規則で逃がすので、**押して確定するたびに `\` が 1 本ずつ増えた**
+   *   (実測:1 回目 `みかん\|橙` → 3 回目 `みかん\\\|橙`)。⚠ 2 回目までは画面が
+   *   正しいので、**壊れたことに気づけない**。しかもよそへ貼ると列が割れる。
+   * 🔑 **逃がすのは原文を作る側だけの仕事**である ── ここは読み手が渡してきた
+   *   「逃がしを外した字」をそのまま出す(csv の升と同じ手触りになる)。
+   */
   return (
     ` data-pkc-action="edit-cell" data-pkc-cell-line="${raw + offset}"` +
-    ` data-pkc-cell-col="${col}" data-pkc-cell-raw="${md.utils.escapeHtml(gfmCellText(inline.content))}"`
+    ` data-pkc-cell-col="${col}" data-pkc-cell-raw="${md.utils.escapeHtml(inline.content)}"`
   );
 }
 
@@ -5366,7 +5386,13 @@ export function renderMarkdown(
     taskLineOffset: number;
     lineMap?: number[];
     fenceAssets?: Readonly<Record<string, string>>;
+    /**
+     * 🔴 **押せる升を決めるための原文**(#708 段④)。
+     * ⚠ 呼び側には足させない ── ここが `text` を持っているので、ここで載せる。
+     */
+    cellSourceLines?: readonly string[];
   } = {
+    cellSourceLines: text.split('\n'),
     // 🔴 添付から取った字(#444 段②)。⚠ 渡されないのが既定 = 器を置く
     ...(opts.fenceAssets !== undefined ? { fenceAssets: opts.fenceAssets } : {}),
     currentContainerId: opts.currentContainerId ?? '',
