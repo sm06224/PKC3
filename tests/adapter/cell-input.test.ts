@@ -19,8 +19,6 @@ import {
   neighborCell,
   openCellAt,
   reopenCellInput,
-  requestCellMove,
-  takeCellMove,
 } from '../../src/adapter/ui/render/cell-input';
 
 /** 升 1 つ。⚠ 属性の綴りは**実物の発行口と同じ**(`csv-table.ts` / `markdown-render.ts`)。 */
@@ -156,6 +154,34 @@ describe('升の欄を開き直す(#745)', () => {
     ]);
     reopenCellInput(same, keep);
     expect(openInput(same), '同じ升にも開かない(門が広すぎる)').not.toBeNull();
+  });
+
+  it('🔴 まだ 1 字も打っていない欄は、新しい字で開き直す(古い字を出さない)', () => {
+    /**
+     * 🔴 **実ブラウザで再現した形**(#750 I1、2026-09-06):B1 に打って `Enter` で
+     *   下へ移り、すぐ `Shift`+`Enter` で B1 へ戻る ── 書き戻しがまだ届いていないので
+     *   **古い字**で開き、直後に届いた書き戻しで字が変わるため**欄がそのまま消えた**
+     *   (#745 で直した「欄が黙って消える」が、戻る道で復活していた)。
+     * 🔑 突き合わせの門は「**打ちかけの字を別の升へ移さない**」ためなので、
+     *   打ちかけの字が無い回には効かせない ── いまの字で開き直す。
+     */
+    const h = host([[3, 1, '古い']]);
+    const keep = { line: '3', col: '1', value: '古い', start: 2, end: 2, raw: '古い' };
+    // 書き戻しが届いて字が変わった
+    h.querySelector('[data-pkc-action="edit-cell"]')!.setAttribute('data-pkc-cell-raw', '新しい');
+    reopenCellInput(h, keep);
+    const input = openInput(h);
+    expect(input, '打っていない欄が開き直されていない(欄が消える)').not.toBeNull();
+    expect(input?.value, '古い字のまま開いた').toBe('新しい');
+  });
+
+  it('⚠ 打ちかけの字が在れば、字が変わった升には開かない(対照群)', () => {
+    /** ⚠ ここは今までどおり ── 打った字を、下で変わった升へ移さない。 */
+    const h = host([[3, 1, '古い']]);
+    const keep = { line: '3', col: '1', value: '打ちかけ', start: 4, end: 4, raw: '古い' };
+    h.querySelector('[data-pkc-action="edit-cell"]')!.setAttribute('data-pkc-cell-raw', '新しい');
+    reopenCellInput(h, keep);
+    expect(openInput(h), '字が変わった升へ打ちかけの字を移した').toBeNull();
   });
 
   it('⚠ その升が消えていれば、何もしない', () => {
@@ -316,7 +342,6 @@ describe('隣の升へ移る(#750 I1)', () => {
 
   beforeEach(() => {
     document.body.innerHTML = '';
-    requestCellMove(null);
   });
 
   it('🔴 右は次の升、左は前の升(行の端では次 / 前の行へ回る)', () => {
@@ -382,23 +407,39 @@ describe('隣の升へ移る(#750 I1)', () => {
     expect(neighborCell(at(one, 0), 'right'), '別の表の升へ飛び移った').toBeNull();
   });
 
-  it('🔴 予約は 1 回だけ有効(読んだら消える)', () => {
+  it('🔴 上は「同じ列の、いちばん近い上の升」(片道の操作を作らない)', () => {
     /**
-     * ⚠ 残すと、**無関係な描き直し**で押していない升が突然開く ──
-     *   `detail.ts` は描き直しのたびに読むので、消さないと毎回開くことになる。
+     * ⚠ 1 稿目は `down` だけで、commit の説明文には「左と**上**を用意した」と
+     *   書いていた ── **嘘だった**(着地前レビュー・動線 D4)。
+     * 🔑 `Tab` は右↔左が対なのに `Enter` が下だけの片道では、行き過ぎたときに
+     *   同じ列の 1 つ上へ戻るのに **5 列なら 5 回** `Shift`+`Tab` を押すことになる。
      */
-    requestCellMove({ line: '3', col: '1' });
-    expect(takeCellMove(), '預けた行き先が返ってこない').toEqual({ line: '3', col: '1' });
-    expect(takeCellMove(), '読んだのに残っている(次の描き直しで升が開く)').toBeNull();
+    const b = block([
+      [2, 0, 'a'],
+      [2, 1, 'b'],
+      [3, 0, 'c'],
+      [3, 1, 'd'],
+      [4, 0, 'e'],
+      [4, 1, 'f'],
+    ]);
+    document.body.append(b);
+    // 5 = [4,1] ── いちばん近い上は [3,1]
+    expect(neighborCell(at(b, 5), 'up'), '同じ列の上へ戻れていない').toEqual({
+      line: '3',
+      col: '1',
+    });
+    // ⚠ 対照群 ── 並び順の前は [4,0] なので、そちらを返していたらこの検査は落ちる
+    expect(neighborCell(at(b, 5), 'left'), '前提が崩れている').toEqual({ line: '4', col: '0' });
+    expect(neighborCell(at(b, 1), 'up'), 'その列の上は無いのに動いた').toBeNull();
   });
 
-  it('🔴 予約した升を開ける ── 無ければ開かないと言う', () => {
+  it('🔴 名指しした升を開ける ── 無ければ開かないと言う', () => {
     const b = block([
       [2, 0, 'a'],
       [2, 1, 'b'],
     ]);
     document.body.append(b);
-    expect(openCellAt(b, { line: '2', col: '1' }), '予約した升を開けていない').toBe(true);
+    expect(openCellAt(b, { line: '2', col: '1' }), '名指しした升を開けていない').toBe(true);
     expect(
       b.querySelector<HTMLInputElement>('[data-pkc-field="cell-input"]')?.value,
       '開いた欄が別の升のもの',

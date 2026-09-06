@@ -19,7 +19,6 @@ import { initialState, type AppState, type DomainEvent } from '../../src/adapter
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import { applyBodyRewrite, type BodyRewrite } from '../../src/features/markdown/body-rewrite';
 import { frontmatterLineCount, bodyBelowFrontmatter } from '../../src/features/markdown/frontmatter';
-import { requestCellMove, takeCellMove } from '../../src/adapter/ui/render/cell-input';
 
 const MENU = '[data-pkc-region="context-menu"]';
 
@@ -523,78 +522,172 @@ describe('表の升で Tab / Enter を押す(#750 I1)', () => {
     nth: number,
     value: string | null,
     key: string,
-    shift = false,
-  ): void {
+    mods: { shift?: boolean; ctrl?: boolean; composing?: boolean } = {},
+  ): KeyboardEvent {
     cells(host)[nth]!.click();
     const input = openInput(host);
     if (input === null) throw new Error('前提が崩れている: 欄が開いていない');
     if (value !== null) input.value = value;
-    input.dispatchEvent(
-      new KeyboardEvent('keydown', { key, shiftKey: shift, bubbles: true, cancelable: true }),
-    );
+    const ev = new KeyboardEvent('keydown', {
+      key,
+      shiftKey: mods.shift === true,
+      ctrlKey: mods.ctrl === true,
+      bubbles: true,
+      cancelable: true,
+    });
+    if (mods.composing === true) Object.defineProperty(ev, 'isComposing', { value: true });
+    input.dispatchEvent(ev);
+    return ev;
   }
 
-  it('🔴 字を変えて Tab を押すと、確定して「右の升」を予約する', () => {
-    requestCellMove(null);
+  /**
+   * 🔴 **隣は「その場で」開く**(着地前レビュー・動線 D3 / D5 で 1 稿目から変えた)。
+   *
+   * ⚠ 1 稿目は書き戻しが届くまで**予約**していた ── ① `Tab` の直後 50〜150ms
+   *   **焦点がどこにも無く**、間を置かずに打った字が消える ② 書き戻しが**来ない**回
+   *   (別の窓と衝突など)に予約が残り、**別のノートで升が勝手に開く**。
+   * 🔑 その場で開けば両方消える ── 塊が差し替わった後の開き直しは
+   *   **#745 の仕掛け**が既に受け持っている。
+   */
+  it('🔴 字を変えて Tab を押すと、確定して「右の升」がその場で開く', () => {
     const s = setup(MD);
-    press(s.host, 2, 'みかん', 'Tab'); // 2 = 「りんご」(見出しの 2 つの次)
-    // ① 確定した(本文の書換を頼んでいる)
+    press(s.host, 2, 'みかん', 'Tab'); // 2 = 「りんご」
     expect(s.events, '確定していない(Tab で字が捨てられている)').toHaveLength(1);
-    // ② 行き先を預けた ── 実際に開くのは `detail.ts` が塊を差し替えた後
-    expect(takeCellMove(), '右の升を預けていない').toEqual({ line: '4', col: '1' });
+    expect(openInput(s.host)?.value, '右の升の欄がその場で開いていない').toBe('3');
   });
 
-  it('🔴 Enter は「同じ列の下」を予約する(右ではない)', () => {
-    requestCellMove(null);
+  it('🔴 Enter は「同じ列の下」を開く(右ではない)', () => {
     const s = setup(MD);
     press(s.host, 0, 'しなもの', 'Enter'); // 0 = 見出しの「品名」
     expect(s.events, '確定していない').toHaveLength(1);
-    expect(takeCellMove(), '下の升を預けていない').toEqual({ line: '4', col: '0' });
+    expect(openInput(s.host)?.value, '下の升ではない所が開いた').toBe('りんご');
   });
 
-  it('🔴 Shift+Tab は「左の升」(片道の操作を作らない)', () => {
-    requestCellMove(null);
-    const s = setup(MD);
-    press(s.host, 3, '5', 'Tab', true); // 3 = 「3」
-    expect(takeCellMove(), '左の升を預けていない').toEqual({ line: '4', col: '0' });
+  it('🔴 Shift+Tab は左、Shift+Enter は上(片道の操作を作らない)', () => {
+    const left = setup(MD);
+    press(left.host, 3, '5', 'Tab', { shift: true }); // 3 = 「3」
+    expect(openInput(left.host)?.value, '左の升が開いていない').toBe('りんご');
+
+    const up = setup(MD);
+    press(up.host, 2, 'みかん', 'Enter', { shift: true }); // 2 = 「りんご」
+    expect(openInput(up.host)?.value, '上の升が開いていない').toBe('品名');
   });
 
-  it('🔴 字が変わっていない回は、書き戻しを待たずにその場で隣を開く', () => {
+  it('🔴 Ctrl+Enter は確定して閉じる(1 升だけ直す人の「終わり方」)', () => {
     /**
-     * ⚠ 変わっていなければ `SET_CSV_CELL` は撃たれない = **描き直しが来ない**ので、
-     *   予約だけして待つと**押したのに何も起きない**(次の無関係な描き直しまで)。
+     * ⚠ `Enter` が「終わり」から「次へ」に変わったので、**終わり方が消えていた**
+     *   (着地前レビュー・動線 D2)── `Escape` は打った字を捨てるので代わりにならない。
      */
-    requestCellMove(null);
+    /**
+     * ⚠ **下に升が在る所で押す**(着地前レビュー・実装 A2 が空振りを教えた)──
+     *   1 稿目は「りんご」(最下行)で押していたので、`Ctrl` を見ない変異を当てても
+     *   `down` が `null` になって**同じ結果**になり、**検査が何も見ていなかった**。
+     * 🔑 だから対照群を同じ it に置く ── `Ctrl` 無しなら下が開く。
+     */
     const s = setup(MD);
-    press(s.host, 2, null, 'Tab'); // 字はそのまま
+    press(s.host, 0, 'しなもの', 'Enter', { ctrl: true }); // 0 = 見出し(下に「りんご」が在る)
+    expect(s.events, '確定していない(打った字が捨てられた)').toHaveLength(1);
+    expect(openInput(s.host), '確定して閉じていない(下の升が開いた)').toBeNull();
+
+    // 対照群 ── `Ctrl` を押さなければ、同じ升から下が開く
+    const move = setup(MD);
+    press(move.host, 0, 'しなもの', 'Enter');
+    expect(openInput(move.host)?.value, '対照群が鳴っていない').toBe('りんご');
+  });
+
+  it('🔴 変換中の鍵は 1 つも横取りしない(日本語で打つ人が毎升踏む)', () => {
+    /**
+     * ⚠ 直す前は、変換確定の `Enter` で**下の升が開いて全選択**され、
+     *   続けて打った字が**その升の中身を消して上書き**していた。
+     * 🔑 実測(`row-swap.ts`):変換中は Enter / Tab / Escape が**全部** `isComposing`。
+     */
+    const s = setup(MD);
+    press(s.host, 2, 'みかん', 'Enter', { composing: true });
+    expect(s.events, '変換中なのに確定した').toEqual([]);
+    expect(openInput(s.host)?.value, '変換中なのに隣へ移った').toBe('みかん');
+  });
+
+  it('🔴 字が変わっていなくても、隣はその場で開く', () => {
+    const s = setup(MD);
+    press(s.host, 2, null, 'Tab');
     expect(s.events, '変えていないのに書換を頼んだ').toEqual([]);
-    expect(takeCellMove(), '待つ必要が無いのに予約した').toBeNull();
-    // 🔑 その場で隣が開いている
     expect(openInput(s.host)?.value, '隣の升の欄が開いていない').toBe('3');
   });
 
-  it('🔴 自分で別の升を押したら、預けた行き先は捨てる', () => {
+  it('🔴 欄は 1 字ぶんの幅しか要求しない(表の列幅を動かさない)', () => {
     /**
-     * ⚠ 予約を残すと、**後から届いた書き戻し**で「押していない升」が開く ──
-     *   user は自分が押した升に打っているつもりなので、**打った字が別の升へ入る**。
-     * 🔑 だから**升を開いた時点**で捨てる(取り消しはその 1 か所だけ)。
-     * ⚠ 変異試験 M5 が SURVIVED で教えた ── 予約を捨てる行を消しても、
-     *   これを足すまでどの検査も鳴らなかった。
+     * ⚠ `<input>` の既定は `size="20"` ── 放っておくと開いた升の列が広がり、
+     *   隣の空の升が縮んで**真ん中が「＋」ボタンになる**(押すと列が増える)。
+     * ⚠ これを守っていたのは**実ブラウザの smoke 1 本だけ**で、`size` を戻す変異は
+     *   unit を 1 件も鳴らさなかった(着地前レビュー・実装 A3)。
+     * 🔑 unit は**指示そのもの**、smoke は**効いた結果**(押し所が動かないこと)を見る。
      */
-    requestCellMove(null);
     const s = setup(MD);
-    press(s.host, 2, 'みかん', 'Tab'); // ここで (4,1) を預ける
-    cells(s.host)[0]!.click(); // user が自分で別の升を押す
-    expect(takeCellMove(), '別の升を押したのに、前の行き先が残っている').toBeNull();
+    cells(s.host)[2]!.click();
+    expect(openInput(s.host)?.size, '欄が 20 字ぶんの幅を要求している').toBe(1);
   });
 
-  it('🔴 行き先が無ければ、いままでどおり閉じる(動かない欄を残さない)', () => {
-    requestCellMove(null);
+  it('🔴 留めた枠で押しても、主の枠に欄を開かない(同じ行番号の升が 2 か所ある)', () => {
+    /**
+     * 🔴 **実測で再現した誤爆**(着地前レビュー・実装 A1)── 開く範囲を
+     *   `.pkc-md-block` から `document` 全体へ広げる変異は、**留めた枠で `Tab` を
+     *   押すと主の枠に欄を開いた**(`main input=1 / pinned input=0`)。
+     * ⚠ `neighborCell` 側には「別の表へ飛び移らない」検査が在るのに、
+     *   **開く側には無かった**(§7「片側を直したら、対称の反対側を必ず疑う」)。
+     * 🔑 台は**枠を 2 つ**立てる ── 同じノートを主と留めた枠に出すと
+     *   **同じ行番号・列番号の升が 2 か所**に在り、範囲を広げた実装は
+     *   文書の**先に在るほう**(= 主の枠)を掴む。
+     *   ⚠ 1 稿目は「同じ器に表 2 つ」だったので、行番号が違って**空振り**だった。
+     */
+    document.body.innerHTML = '';
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    const drawn = renderMarkdown(bodyBelowFrontmatter(MD), {
+      sourceLineAnchors: true,
+      taskLineOffset: frontmatterLineCount(MD),
+      interactiveCells: true,
+    } as never);
+    // ⚠ 主の枠が**先**、留めた枠が後(実物の並びと同じ)
+    root.innerHTML =
+      `<div data-pkc-region="detail"><div data-pkc-field="detail-body">${drawn}</div>` +
+      `<div data-pkc-split-lid="n2"><div data-pkc-field="split-body">${drawn}</div></div></div>`;
+    document.body.append(root);
+    const d = new Dispatcher({
+      ...initialState,
+      cid: 'c1',
+      phase: 'ready',
+      selectedLid: 'n1',
+      entryMetas: metasOf(['n1', 'n2']),
+      openBody: { lid: 'n1', body: MD, baseline: MD, persisted: MD, diskAhead: false },
+    });
+    bindActions(root, d, {});
+    const main = root.querySelector<HTMLElement>('[data-pkc-field="detail-body"]')!;
+    const pinned = root.querySelector<HTMLElement>('[data-pkc-field="split-body"]')!;
+    // 前提 ── 同じ行番号の升が 2 か所に在る
+    expect(cells(main).length, '前提が崩れている: 主の枠に升が無い').toBe(4);
+    expect(cells(pinned).length, '前提が崩れている: 留めた枠に升が無い').toBe(4);
+
+    press(pinned, 2, 'みかん', 'Tab');
+    expect(openInput(pinned)?.value, '押した枠に欄が開いていない').toBe('3');
+    expect(openInput(main), '押していない枠(主の枠)に欄が開いた').toBeNull();
+  });
+
+  it('🔴 行き先が無ければ、確定して閉じ、Tab は素のまま通す(表から出られる)', () => {
+    /**
+     * 🔴 **無条件に握ると、表から `Tab` で出られなくなる**(着地前レビュー・動線 D2)。
+     * ⚠ この binder の別の場所には既にその戒めが書いてある ──
+     *   「常に握ると編集欄から `Tab` で出られなくなる(キーボードだけで使う人の動線を
+     *   1 つ殺す)」。表の升だけがそれを踏んでいた。
+     */
     const s = setup(MD);
-    press(s.host, 3, 'みかん', 'Tab'); // 3 = 最後の升
+    const ev = press(s.host, 3, 'みかん', 'Tab'); // 3 = 最後の升
     expect(s.events, '確定していない').toHaveLength(1);
-    expect(takeCellMove(), '行き先が無いのに預けた').toBeNull();
     expect(openInput(s.host), '行き先が無いのに欄が残っている').toBeNull();
-  });
+    expect(ev.defaultPrevented, '行き先が無いのに Tab を握った(表から出られない)').toBe(false);
 
+    // 対照群 ── 行き先が在るときは握る(ブラウザの焦点移動に持っていかれない)
+    const mid = setup(MD);
+    const ev2 = mid.host && press(mid.host, 2, 'みかん', 'Tab');
+    expect(ev2.defaultPrevented, '隣が在るのに Tab を握っていない').toBe(true);
+  });
 });

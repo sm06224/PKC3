@@ -139,7 +139,22 @@ export function reopenCellInput(host: HTMLElement, keep: OpenCell): void {
    *   打った字が別の行に入る(画面は「打っている升」に見えるので気づけない)。
    * 🔑 一致しなければ**開かない** ── 打ちかけの字は落ちるが、別の升は汚さない。
    */
-  if ((cell.getAttribute('data-pkc-cell-raw') ?? '') !== keep.raw) return;
+  const raw = cell.getAttribute('data-pkc-cell-raw') ?? '';
+  /**
+   * 🔴 **まだ 1 字も打っていない欄なら、新しい字で開き直す**(#750 I1、実測 2026-09-06)。
+   *
+   * ⚠ 上の突き合わせは「**打ちかけの字を別の升へ移さない**」ための門なので、
+   *   **打ちかけの字が無い回**には効かせる理由が無い ── ところが効かせていたため、
+   *   こういう形が出た(実ブラウザで再現した):
+   *   B1 に打って `Enter`(下へ)→ すぐ `Shift`+`Enter` で B1 へ戻る →
+   *   書き戻しがまだ届いていないので**古い字**で開き、
+   *   直後に届いた書き戻しで字が変わるため**欄がそのまま消える**
+   *   (#745 で直した「欄が黙って消える」が、戻る道で復活していた)。
+   * 🔑 打っていなければ、**いまの字**で開き直すのが正しい ── 画面は最新になり、
+   *   欄も生き残る。⚠ 打ちかけの字が在る回は**今までどおり開かない**
+   *   (下で字が変わった升へ、打った字を移さない)。
+   */
+  if (raw !== keep.raw && keep.value !== keep.raw) return;
   // 🔑 開くのは `binder.ts` の `edit-cell` ── ここは押すだけ(§7)
   cell.click();
   const input = host.querySelector<HTMLInputElement>(INPUT);
@@ -150,7 +165,8 @@ export function reopenCellInput(host: HTMLElement, keep: OpenCell): void {
    * 🔑 いまは確定させない({@link captureCellInput} の印)ので、**この行が唯一の道**
    *   である ── 落とすと打ちかけの字がそのまま消える。
    */
-  input.value = keep.value;
+  // ⚠ 打っていない回は**いまの字**を出す(上の門の但し書き)── 古い字を出さない
+  input.value = keep.value === keep.raw ? raw : keep.value;
   /**
    * 🔴 **字を打つ位置を戻す。落とすと、打ちかけの字が次の 1 打で全部消える**
    *   (着地前レビュー A-1 が実測で示した ── 私は「殺せない」と書いていたが誤り)。
@@ -171,42 +187,26 @@ export interface CellMove {
 }
 
 /**
- * 🔴 **確定したあと、隣の升の欄を開き直す予約**(#750 I1。user 裁定 2026-09-06)。
- *
- * ## なぜ「予約」が要るか
- *
- * `Tab` / `Enter` で確定すると `SET_CSV_CELL` → worker を往復 → `BODY_REWRITTEN` →
- * `applyBlocks` が**表の塊ごと差し替える**。⚠ つまり**隣の升は、いま画面に在る物とは
- * 別の要素になる** ── その場で `click()` しても、数十ミリ秒後に捨てられる
- * (#745 で直したのと同じ経路である)。
- * 🔑 だから**差し替えた後に開く**:ここに預けておき、`detail.ts` の描き直しが
- *   {@link takeCellMove} で受け取って開く。
- *
- * ⚠ **1 回の描き直しでだけ有効**(`take` は読んだら捨てる)── 残しておくと、
- *   無関係な描き直しで**押していない升が突然開く**。
- * 🔑 **取り消しは「升を開いたとき」1 か所だけ**(`binder.ts` の `edit-cell` が
- *   `requestCellMove(null)` を撃つ)── user が自分で別の升を押した回に、
- *   後から届いた書き戻しで**預けていた升**が開くのを止める。
- * ⚠ **`Escape` には置いていない。** 置きかけたが、外しても何も壊れなかった ──
- *   予約を撃つのは確定の瞬間だけで、そのとき欄は閉じている。次に鍵を押せるのは
- *   **升を開いた後**で、開いた時点で上の 1 か所が既に消している(到達しない)。
- *   🔑 CLAUDE.md「『これが無いと壊れる』と書く前に、外して壊れることを見る」。
- */
-let pendingMove: CellMove | null = null;
-
-export function requestCellMove(move: CellMove | null): void {
-  pendingMove = move;
-}
-
-export function takeCellMove(): CellMove | null {
-  const m = pendingMove;
-  pendingMove = null;
-  return m;
-}
-
-/**
  * その升の欄を開く。開けたら `true`。
- * ⚠ 開くのは `binder.ts` の `edit-cell` ── ここは押すだけ(§7。{@link reopenCellInput} と同じ)。
+ *
+ * 🔴 **確定した直後に、その場で開く**(#750 I1。着地前レビュー・動線 D3 / D5 で決めた)。
+ *
+ * ⚠ 1 稿目は「**書き戻しが届いてから開く**」形にしていた(モジュール変数へ予約し、
+ *   `detail.ts` の描き直しが読む)── 塊が差し替わると欄が壊れるからである。
+ *   🔴 **それは 2 つ壊していた**:
+ *   ① 予約してから開くまでの **50〜150ms、焦点がどこにも無い** ──
+ *      `Tab` の直後に間を置かず打った字は**どこにも入らず、合図も出ない**
+ *      (`Tab` で移る機能は**速く打つ人のため**なのに、その人だけが穴に落ちる)
+ *   ② 書き戻しが**来ない**経路(当てられなかった / 別の窓と衝突した / bytes が同じ)では
+ *      予約が残り、**次に別のノートを描いた回**に消費される ── 触ってもいない升が
+ *      開いて全選択になり、次の 1 打がその升を消す
+ * 🔑 **その場で開けば、両方消える** ── 壊れた後の開き直しは **#745 の仕掛け**
+ *   (`captureCellInput` → `reopenCellInput`)が既に受け持っている。⚠ あちらは
+ *   **開いている欄が誰のものでも**控えて開き直すので、隣の升でもそのまま働く
+ *   (打ちかけの字と caret ごと戻る)。
+ * 🔑 つまり**新しい機構を足さないのが正解**だった(§7:同じ仕事の口を 2 つ作らない)。
+ *
+ * ⚠ 開くのは `binder.ts` の `edit-cell` ── ここは押すだけ({@link reopenCellInput} と同じ)。
  */
 export function openCellAt(host: HTMLElement, move: CellMove): boolean {
   const cell = host.querySelector<HTMLElement>(cellSelector(move.line, move.col));
@@ -224,12 +224,21 @@ export function openCellAt(host: HTMLElement, move: CellMove): boolean {
  * 🔑 だから**同じ表の中の「印の在る升」だけ**を読み、その中で隣を選ぶ。
  *
  * - `right` / `left` … 画面の並び順で次 / 前(行の端では次 / 前の行へ回る)
- * - `down` … **同じ列**の、行番号がいちばん近い下の升(無ければ `null`)
+ * - `down` / `up` … **同じ列**の、行番号がいちばん近い下 / 上の升(無ければ `null`)
+ *
+ * ⚠ **`up` は後から足した**(着地前レビュー・動線 D4)── 1 稿目は `down` だけで、
+ *   commit の説明文には「左と**上**を用意した」と書いていた ── **嘘だった**。
+ *   🔑 `Tab` は右↔左が対なのに `Enter` が下だけの片道では、行き過ぎたときに
+ *   **同じ列の 1 つ上へ戻るのに 5 回**(5 列なら)`Shift`+`Tab` を押すことになる
+ *   (user 指示 2026-08-23「片道の操作を作らない」)。
  *
  * ⚠ 探す範囲は**その表の塊の中だけ** ── 本文に表が 2 つ在るとき、
  *   1 つ目の右端から 2 つ目へ飛び移らない。
  */
-export function neighborCell(from: HTMLElement, dir: 'right' | 'left' | 'down'): CellMove | null {
+export function neighborCell(
+  from: HTMLElement,
+  dir: 'right' | 'left' | 'down' | 'up',
+): CellMove | null {
   const block = from.closest<HTMLElement>('.pkc-md-block');
   if (block === null) return null;
   const cells = [...block.querySelectorAll<HTMLElement>('[data-pkc-action="edit-cell"]')];
@@ -240,7 +249,7 @@ export function neighborCell(from: HTMLElement, dir: 'right' | 'left' | 'down'):
     const col = el.getAttribute('data-pkc-cell-col');
     return line === null || col === null ? null : { line, col };
   };
-  if (dir !== 'down') {
+  if (dir === 'right' || dir === 'left') {
     const next = cells[at + (dir === 'right' ? 1 : -1)];
     return next === undefined ? null : coord(next);
   }
@@ -248,12 +257,14 @@ export function neighborCell(from: HTMLElement, dir: 'right' | 'left' | 'down'):
   if (here === null) return null;
   const line = Number(here.line);
   if (!Number.isFinite(line)) return null;
+  const down = dir === 'down';
   let best: { el: HTMLElement; line: number } | null = null;
   for (const el of cells) {
     if (el.getAttribute('data-pkc-cell-col') !== here.col) continue;
     const n = Number(el.getAttribute('data-pkc-cell-line'));
-    if (!Number.isFinite(n) || n <= line) continue;
-    if (best === null || n < best.line) best = { el, line: n };
+    if (!Number.isFinite(n) || (down ? n <= line : n >= line)) continue;
+    // 🔑 いちばん近い側を採る(下なら最小、上なら最大)
+    if (best === null || (down ? n < best.line : n > best.line)) best = { el, line: n };
   }
   return best === null ? null : coord(best.el);
 }

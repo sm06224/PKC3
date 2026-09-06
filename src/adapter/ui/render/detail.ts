@@ -39,7 +39,7 @@ function hydrateFigures(root: ParentNode | readonly ParentNode[]): MermaidScope[
   return [hydrateMermaid(root), hydrateChart(root)];
 }
 import { applyBlocks, EMPTY_VIEW, type BlockView } from './apply-blocks';
-import { captureCellInput, openCellAt, reopenCellInput, takeCellMove } from './cell-input';
+import { captureCellInput, reopenCellInput } from './cell-input';
 import { RowSwap } from './row-swap';
 import { diffCounts, diffRows, type DiffRow } from '@features/revision/diff-view';
 import type { RenderedWithRanges } from '@adapter/platform/render/markdown-client';
@@ -799,13 +799,6 @@ export class DetailRenderer {
         const applied = applyBlocks(host, html, this.bodyView);
         this.bodyView = applied.view;
         if (keptCell !== null) reopenCellInput(host, keptCell);
-        /**
-         * 🔴 **`Tab` / `Enter` で頼まれた隣の升を、差し替えた後に開く**(#750 I1)。
-         * ⚠ 押した時点で開くと、この差し替えで**その欄ごと捨てられる**(#745 と同じ経路)。
-         * ⚠ 予約は**読んだら捨てる** ── 残すと、無関係な描き直しで升が突然開く。
-         */
-        const move = takeCellMove();
-        if (move !== null) openCellAt(host, move);
         // writing / direction / align / layout の属性契約(dir 込みで 1 箇所)
         applyDocumentGlobals(host, extractDocumentGlobals(body));
         // ⚠ 面倒を見るのは**新しく入った所だけ**(全体に掛け直すと、生きている

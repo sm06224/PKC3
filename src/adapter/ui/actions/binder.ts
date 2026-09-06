@@ -73,12 +73,7 @@ import { buildVcf, isVcfFileName, vcfNoteOf } from '@features/contact/vcard';
 import { isMarkdownFileName } from '@features/import/plain-markdown';
 import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
 import { insertBlockText, insertText, OWN_MEANING } from '@adapter/ui/render/row-swap';
-import {
-  HOLD_ATTR,
-  neighborCell,
-  openCellAt,
-  requestCellMove,
-} from '@adapter/ui/render/cell-input';
+import { HOLD_ATTR, neighborCell, openCellAt } from '@adapter/ui/render/cell-input';
 import { resolveAppendAt, sectionAt } from '@features/markdown/append-target';
 import { isTextScale } from '@features/text-scale';
 import { chooseTextScale } from '@adapter/ui/render/text-scale';
@@ -4494,13 +4489,6 @@ const ACTIONS: Record<string, ActionHandler> = {
     // ⚠ 2 度押しで欄を作り直さない(打ちかけの字を捨てない)
     if (target.querySelector('[data-pkc-field="cell-input"]') !== null) return;
     /**
-     * ⚠ **押して開く回は、隣へ移る予約を捨てる**(#750 I1)── user が自分で別の升を
-     *   押したのに、その後の書き戻しで**予約していた升**が開くと、押した所と
-     *   開いた所が食い違う。⚠ `cell-input.ts` の {@link openCellAt} 経由でもここを通るが、
-     *   あちらは予約を**読み終えてから**押すので消して問題ない。
-     */
-    requestCellMove(null);
-    /**
      * 🔴 **字を選んでいる最中は開かない**(CLAUDE.md §10)。
      *
      * ⚠ 押せるようにする前、升は**ただの字**だった ── ドラッグで選んで
@@ -4603,20 +4591,52 @@ const ACTIONS: Record<string, ActionHandler> = {
      *   その回は**その場で開く** ── 予約だけして待つと、次の無関係な描き直しまで
      *   何も起きない(押したのに動かない、に見える)。
      */
-    const moveTo = (dir: 'right' | 'left' | 'down'): void => {
+    const moveTo = (dir: 'right' | 'left' | 'down' | 'up'): void => {
       const next = neighborCell(target, dir);
-      const changed = input.value !== before;
       commit();
-      if (next === null) return;
-      if (changed) requestCellMove(next);
-      else openCellAt(target.closest<HTMLElement>('.pkc-md-block') ?? target, next);
+      // ⚠ 行き先が無ければ、確定して閉じるだけ(動かない欄を残さない)
+      if (next !== null) openCellAt(target.closest<HTMLElement>('.pkc-md-block') ?? target, next);
     };
     input.addEventListener('keydown', (ev) => {
+      /**
+       * 🔴 **変換中の鍵は IME のもの ── 1 つも横取りしない**
+       * (着地前レビュー・動線 D1、2026-09-06。**この PR でいちばん重い**)。
+       *
+       * ⚠ この欄だけが `isComposing` を見ていなかった ── 画面全体(`:7238`)も
+       *   小窓(`app-dialog.ts`)も鍵の一覧(`keymap-panel.ts`)も見ているのに。
+       *   🔑 `row-swap.ts` に実測が残っている:**変換中は Enter / Tab / Escape が
+       *   全部 `isComposing`** である。
+       * 🔴 **直す前より悪くなっていた**:`Enter` の横取りは前からだったが、
+       *   前は「欄が閉じて、続きの字がどこにも入らない」だったのに対し、いまは
+       *   「**下の升が開いて全選択**され、続きの字が**その升の中身を消して上書きする**」
+       *   ── 「打った字が消える」から「**別の升のデータが消える**」へ変わっていた。
+       * ⚠ 日本語で表を埋める人は**升 1 つにつき最低 1 回**変換を確定するので、
+       *   これは**毎升踏む**。しかも壊れるのは**まだ見ていない隣の升**である。
+       */
+      if (ev.isComposing) return;
       if (ev.key === 'Enter') {
         ev.preventDefault();
-        moveTo('down');
+        /**
+         * 🔴 **確定して、閉じる鍵を残す**(同 D2)。
+         * ⚠ `Enter` が「終わり」から「次へ」に変わったので、**1 升だけ直したい人**
+         *   (いちばん多い使い方)から**終わり方が消えていた** ── `Escape` は
+         *   打った字を捨てるので代わりにならない。
+         * 🔑 `Ctrl`(mac は `⌘`)+ `Enter` で、確定して閉じる。
+         */
+        if (ev.ctrlKey || ev.metaKey) commit();
+        else moveTo(ev.shiftKey ? 'up' : 'down');
       } else if (ev.key === 'Tab') {
-        ev.preventDefault();
+        /**
+         * 🔴 **行き先が無いときは `Tab` を握らない**(着地前レビュー・動線 D2 / 実装 A4)。
+         *
+         * ⚠ 無条件に握ると、**表から `Tab` で出られなくなる** ── この binder の
+         *   別の場所(`onShortcut`)には既にその戒めが書いてある:
+         *   「どちらも当たらなければ `preventDefault()` しない ── 常に握ると
+         *   **編集欄から `Tab` で出られなくなる**(キーボードだけで使う人の動線を 1 つ殺す)」。
+         * 🔑 隣が在るときだけ握り、**表の最後の升では素の `Tab`** に戻す
+         *   ── 確定はする(下の `moveTo` が `commit()` する)ので、字は残る。
+         */
+        if (neighborCell(target, ev.shiftKey ? 'left' : 'right') !== null) ev.preventDefault();
         moveTo(ev.shiftKey ? 'left' : 'right');
       } else if (ev.key === 'Escape') {
         ev.preventDefault();

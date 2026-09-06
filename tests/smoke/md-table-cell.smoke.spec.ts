@@ -277,17 +277,30 @@ test('🔴 Tab で右、Enter で下へ、押し直さずに続けて打てる (
   await page.keyboard.press('Control+a');
   await page.keyboard.type('りんご');
 
-  // 🔴 Tab ── 右の升へ、欄が開いたまま移る
+  /**
+   * 🔴 **`Tab` の直後、間を置かずに打てる**(着地前レビュー・動線 D3)。
+   *
+   * ⚠ 1 稿目は書き戻しが届いてから隣を開いていたので、**50〜150ms のあいだ
+   *   焦点がどこにも無く**、そこで打った字は**どこにも入らず合図も出なかった**
+   *   (`Tab` で移る機能は**速く打つ人のため**なのに、その人だけが穴に落ちる)。
+   * 🔑 だからここは **`toBeVisible` で待たずに**打つ ── 待つと穴をまたいでしまう
+   *   (#745 の smoke が `locator.click()` の自動待ちで直す前も緑だったのと同じ型)。
+   */
   await page.keyboard.press('Tab');
-  await expect(input, 'Tab のあと欄が閉じた(押し直しが要る)').toBeVisible({ timeout: 10_000 });
-  await expect(input, '右ではない升が開いた').toHaveValue('b');
   await page.keyboard.press('Control+a');
   await page.keyboard.type('3');
+  await expect(input, 'Tab のあと欄が閉じた(押し直しが要る)').toBeVisible({ timeout: 10_000 });
+  await expect(input, '間を置かずに打った字が入っていない').toHaveValue('3');
 
   // 🔴 Enter ── 同じ列の下の升へ(右ではない)
   await page.keyboard.press('Enter');
   await expect(input, 'Enter のあと欄が閉じた').toBeVisible({ timeout: 10_000 });
   await expect(input, '下ではない升が開いた').toHaveValue('d');
+  // 🔴 Shift+Enter ── 同じ列の上へ戻れる(片道の操作を作らない)
+  await page.keyboard.press('Shift+Enter');
+  await expect(input, 'Shift+Enter で上へ戻れない').toHaveValue('3', { timeout: 10_000 });
+  await page.keyboard.press('Enter');
+  await expect(input, '下へ戻れない').toHaveValue('d', { timeout: 10_000 });
   await page.keyboard.press('Control+a');
   await page.keyboard.type('5');
   await page.keyboard.press('Escape');
