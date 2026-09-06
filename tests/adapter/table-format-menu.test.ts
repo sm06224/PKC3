@@ -294,7 +294,7 @@ describe('表の升の中のリンク(#708 段④)', () => {
   const LINKED = '| 参考 | [公式](https://example.com) |\n|---|---|\n| 次 | ふつうの字 |\n';
 
   it('🔴 升の中のリンクを押しても、入力欄が開かない', () => {
-    const s = setup(LINKED, 'ready');
+    setup(LINKED, 'ready');
     const link = document.querySelector<HTMLElement>('[data-pkc-field="detail-body"] a[href]');
     expect(link, '前提: 升の中にリンクが描かれていない').not.toBeNull();
     link!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
@@ -305,8 +305,7 @@ describe('表の升の中のリンク(#708 段④)', () => {
   });
 
   it('⚠ 対照群 ── リンクでない升を押せば、いままでどおり欄が開く', () => {
-    const s = setup(LINKED, 'ready');
-    void s;
+    setup(LINKED, 'ready');
     const cells = [
       ...document.querySelectorAll<HTMLElement>('[data-pkc-action="edit-cell"]'),
     ];
