@@ -192,8 +192,25 @@ export function flashCopied(target: HTMLElement): void {
 export interface CopyMdBlockDeps {
   /** 形を選ばせる(`app-dialog.ts` の `pickCopyFormatInApp`)。やめたら `null`。 */
   pick(
-    choices: readonly { readonly id: string; readonly label: string }[],
+    choices: readonly {
+      readonly id: string;
+      readonly label: string;
+      readonly separatorBefore?: boolean;
+    }[],
   ): Promise<string | null>;
+  /**
+   * 🔴 **本文の表そのものを作り変える口**(#708 裁定②、user 2026-09-06)。
+   *
+   * ⚠ 指で触る端末には**右クリックが無い**ので、直す前は「表の形を変える」入口が
+   *   **1 つも無かった**。⚠ 「▾」の小窓は指でも押せる唯一の口なので、そこへ足す。
+   * 🔑 **出せないときは `null` を返す**(`:::` の囲みの中 / 式が入っている表 …)──
+   *   出すと**押しても何も起きない行**になる(user 指示「片道の操作を作らない」)。
+   * ⚠ **判定はここに書かない** ── 呼び側(`binder.ts`)が右クリックと**同じ関数**
+   *   (`tableAt` / `tableConvertRefusal`)で決める(§7:答える口を 2 つ作らない)。
+   * ⚠ **optional にしない**(この file の上の註記と同じ理由)── 配線を落としても
+   *   `tsc` が黙ると、戻ってくる症状は「指の端末で形を変えられない」に戻ることである。
+   */
+  convert(): { readonly label: string; readonly run: () => void } | null;
   /** file を渡す(`platform/download.ts` の `downloadBlob`)。 */
   download(name: string, blob: Blob): void;
   /** 落とす file の名前の素 ── **その表が載っているノート**の題名(空でもよい)。 */
@@ -232,6 +249,13 @@ const CSV_BOM = '\uFEFF';
 
 /** 渡らなかったときの字。⚠ 他のコピー(`copy-source.ts`)と**同じ 1 つ**にする。 */
 const COPY_FAILED = 'コピーできませんでした';
+
+/**
+ * 「本文を書き換える」行の id。
+ * ⚠ **コピーの形と混ぜない** ── `TableCopyFormat` に足すと、書き出しの分岐
+ *   (`putTable`)が**知らない形**を受け取ることになる(`csv-file` と同じ罠)。
+ */
+const TABLE_CONVERT_ID = 'convert-format';
 
 /** 落とす file の名前。⚠ 名前の規則は `safeName` 1 本(`features/export/file-name.ts`)。 */
 function csvFileName(title: string): string {
@@ -289,9 +313,28 @@ export function handleCopyMdBlock(target: HTMLElement, deps: CopyMdBlockDeps): v
   if (!block) return;
 
   if (target.hasAttribute('data-pkc-copy-menu') && findMdBlockTable(block) !== null) {
-    void deps.pick(TABLE_COPY_CHOICES).then(async (id) => {
+    /**
+     * 🔴 **持ち出す口の下に、書き換える口を 1 行足す**(#708 裁定②)。
+     * ⚠ 出せないときは足さない ── 押しても何も起きない行を作らない。
+     * 🔑 区切りを 1 本引く ── 上は「よそへ持ち出す」、下は「**本文を書き換える**」で、
+     *   やることが違う(取り違えると、コピーのつもりで本文が変わる)。
+     */
+    const convert = deps.convert();
+    const choices =
+      convert === null
+        ? TABLE_COPY_CHOICES
+        : [
+            ...TABLE_COPY_CHOICES,
+            { id: TABLE_CONVERT_ID, label: convert.label, separatorBefore: true },
+          ];
+    void deps.pick(choices).then(async (id) => {
       // ⚠ 「やめた」は断り文を出さない ── user が自分で閉じたので、伝えることは無い
       if (id === null) return;
+      if (id === TABLE_CONVERT_ID) {
+        // ⚠ 断る理由は `run` の側が言う(右クリックと同じ 1 本を通る)
+        convert?.run();
+        return;
+      }
       // ⚠ 一覧から消えた id は黙って落とす(無い形で書き出すより何もしない方がよい)
       const chosen = TABLE_COPY_CHOICES.find((c) => c.id === id);
       if (chosen === undefined) return;

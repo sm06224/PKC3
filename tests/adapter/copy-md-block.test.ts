@@ -27,17 +27,38 @@ function deps(
   sink: {
     name?: string;
     blob?: Blob;
-    asked?: readonly { id: string; label: string }[];
+    asked?: readonly { id: string; label: string; separatorBefore?: boolean }[];
+    /** 「本文を書き換える」行を押されたか(#708 裁定②)。 */
+    converted?: number;
     /** 🔑 **言った字を全部採る** ── 「無言だった」を見分けるのに要る。 */
     said?: string[];
   } = {},
+  /**
+   * 「本文を書き換える」行を出すか(#708 裁定②)。
+   * ⚠ 既定は**出さない** ── 既存の検査は「コピーの 5 つだけ」を見ている。
+   */
+  convertLabel: string | null = null,
 ): CopyMdBlockDeps {
   sink.said ??= [];
+  sink.converted = 0;
   return {
     pick: (choices) => {
-      sink.asked = choices.map((c) => ({ id: c.id, label: c.label }));
+      sink.asked = choices.map((c) => ({
+        id: c.id,
+        label: c.label,
+        ...(c.separatorBefore === true ? { separatorBefore: true } : {}),
+      }));
       return Promise.resolve(pick);
     },
+    convert: () =>
+      convertLabel === null
+        ? null
+        : {
+            label: convertLabel,
+            run: () => {
+              sink.converted = (sink.converted ?? 0) + 1;
+            },
+          },
     download: (name, blob) => {
       sink.name = name;
       sink.blob = blob;
@@ -256,6 +277,78 @@ describe('形を選ぶ口(▾)', () => {
       sink.asked?.map((c) => c.id),
       '一覧が食い違っている',
     ).toEqual(['tsv', 'markdown', 'html', 'csv', 'csv-file']);
+  });
+
+  /**
+   * 🔴 **指で触る端末に、表の形を変える入口を作る**(#708 裁定②。user 2026-09-06)。
+   *
+   * ⚠ 右クリックが無い端末では、直す前は**形を変える口が 1 つも無かった** ──
+   *   「▾」の小窓が指でも押せる唯一の口なので、そこへ 1 行足した。
+   * 🔑 区切りを 1 本引く ── 上は「よそへ持ち出す」、下は「**本文を書き換える**」で、
+   *   やることが違う(取り違えると、コピーのつもりで本文が変わる)。
+   */
+  it('🔴 作り変えられる表なら、コピーの下に区切りと「本文を書き換える」が 1 行出る', async () => {
+    const block = blockOf(MD_TABLE);
+    const sink: {
+      asked?: readonly { id: string; label: string; separatorBefore?: boolean }[];
+      converted?: number;
+    } = {};
+    handleCopyMdBlock(menuBtn(block), deps(null, sink, '本文を CSV の表に書き換える'));
+    await flush();
+    expect(sink.asked?.map((c) => c.label), '一覧が食い違っている').toEqual([
+      '表計算に貼る(TSV)',
+      'Markdown の表',
+      'HTML',
+      'CSV',
+      '.csv で保存',
+      '本文を CSV の表に書き換える',
+    ]);
+    // 🔑 **区切りは最後の 1 行にだけ**(コピーの 5 つの間には引かない)
+    expect(
+      sink.asked?.map((c) => c.separatorBefore === true),
+      '区切りの位置が違う',
+    ).toEqual([false, false, false, false, false, true]);
+    /**
+     * 🔴 **id がコピーの 5 つと衝突していない**(着地前レビュー・実装 ⑦、2026-09-06)。
+     * ⚠ 衝突すると「押した行」と「効く行」が別になる ── コピーのつもりで
+     *   本文が書き換わる、という**この裁定がいちばん避けたい形**である。
+     * ⚠ 既存の検査は間接的に殺しはするが、**衝突そのものを見ている検査は無かった**。
+     */
+    const ids = sink.asked?.map((c) => c.id) ?? [];
+    expect(ids.length, '空振り(一覧を採れていない)').toBe(6);
+    expect(new Set(ids).size, '書き換える行の id が、コピーのどれかと同じ').toBe(ids.length);
+  });
+
+  it('🔴 押すと本文が書き換わる(コピーは走らない)', async () => {
+    const block = blockOf(MD_TABLE);
+    const sink: { said?: string[]; name?: string; converted?: number } = {};
+    handleCopyMdBlock(
+      menuBtn(block),
+      deps('convert-format', sink, '本文を CSV の表に書き換える'),
+    );
+    await flush();
+    expect(sink.converted, '書き換えが走っていない').toBe(1);
+    // ⚠ コピーの側は 1 つも走らない(file も落ちない・断り文も出ない)
+    expect(sink.name, 'file を落とした').toBeUndefined();
+    expect(sink.said, '余計な字を出した').toEqual([]);
+  });
+
+  /**
+   * 🔴 **作り変えられない表には出さない**(押しても何も起きない行を作らない)。
+   * ⚠ `:::` の囲みの中の表がこれに当たる ── 呼び側が `null` を返す。
+   */
+  it('🔴 作り変えられない表では、コピーの 5 つだけが出る', async () => {
+    const block = blockOf(MD_TABLE);
+    const sink: { asked?: readonly { id: string; label: string }[] } = {};
+    handleCopyMdBlock(menuBtn(block), deps(null, sink));
+    await flush();
+    expect(sink.asked?.map((c) => c.id), '出してはいけない行が出た').toEqual([
+      'tsv',
+      'markdown',
+      'html',
+      'csv',
+      'csv-file',
+    ]);
   });
 
   /** 図やコードの囲みには出さない ── 選べる形が無いので押せるだけの口になる。 */

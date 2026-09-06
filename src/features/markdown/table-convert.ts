@@ -499,8 +499,15 @@ export function tableConvertRefusal(at: TableAt, to: TableFormat): string | null
    * ⚠ 数え方は**画面に出ている表のまま**(見出しの行も 1 行目に数える)。
    */
   const where = (r: number, c: number): string => `${r + 1} 行目の ${c + 1} 列目`;
-  /** ⚠ 断るときは**代わりにできること**も言う ── 持ち出したいだけの人が居る。 */
-  const instead = '(表の右上の ▾ →「Markdown の表」ならコピーできます)';
+  /**
+   * ⚠ 断るときは**代わりにできること**も言う ── 持ち出したいだけの人が居る。
+   * ⚠ **「もう一度開いて」まで書く**(#708 裁定②の着地前レビュー・改善 I4)──
+   *   ▾ の小窓から来た人は、行を押した時点で**その小窓が閉じている**ので、
+   *   「▾ →」だけだと**いま閉じたばかりのもの**を指しているように読める。
+   *   🔑 右クリックから来た人にも同じ字で通る(▾ はどちらの端末にも出る)。
+   */
+  const instead =
+    '(表の右上の ▾ をもう一度開いて「Markdown の表」を選べば、本文はそのままコピーできます)';
   for (const [r, row] of at.rows.entries()) {
     for (const [c, cell] of row.cells.entries()) {
       /**

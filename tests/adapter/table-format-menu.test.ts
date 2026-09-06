@@ -40,7 +40,17 @@ function metasOf(lids: readonly string[]): AppState['entryMetas'] {
   return m as AppState['entryMetas'];
 }
 
-function setup(body: string, phase: AppState['phase'] = 'ready') {
+function setup(
+  body: string,
+  phase: AppState['phase'] = 'ready',
+  services: Parameters<typeof bindActions>[2] = {},
+  /**
+   * 🔑 **留めた枠(スタック)として描く**(#505)── 器に `data-pkc-split-lid` が
+   *   焼かれる。⚠ 中身は**別のノートの本文**なので、`openBody`(主の枠)の
+   *   行番号で読んではいけない(着地前レビュー・実装 R1)。
+   */
+  splitLid: string | null = null,
+) {
   document.body.innerHTML = '';
   const root = document.createElement('div');
   root.setAttribute('data-pkc-slot', 'root');
@@ -52,11 +62,13 @@ function setup(body: string, phase: AppState['phase'] = 'ready') {
    *   焼かれる行番号がずれ、`tableLineAt` の足し込みが**当たっているのか
    *   ずれているのか**が見えなくなる。
    */
-  host.innerHTML = renderMarkdown(bodyBelowFrontmatter(body), {
+  const drawn = renderMarkdown(bodyBelowFrontmatter(body), {
     sourceLineAnchors: true,
     taskLineOffset: frontmatterLineCount(body),
     interactiveCells: true,
   } as never);
+  host.innerHTML =
+    splitLid === null ? drawn : `<div data-pkc-split-lid="${splitLid}">${drawn}</div>`;
   const d = new Dispatcher({
     ...initialState,
     cid: 'c1',
@@ -71,7 +83,7 @@ function setup(body: string, phase: AppState['phase'] = 'ready') {
   });
   const events: DomainEvent[] = [];
   d.onEvent((e) => void events.push(e));
-  bindActions(root, d, {});
+  bindActions(root, d, services);
   const rightClickAt = (sel: string): void => {
     const el = host.querySelector(sel);
     if (el === null) throw new Error(`前提が崩れている: ${sel} が描かれていない`);
@@ -98,6 +110,31 @@ function setup(body: string, phase: AppState['phase'] = 'ready') {
 }
 
 const MD = '# 覚書\n\n| 品名 | 数 |\n|---|---|\n| りんご | 3 |\n';
+
+/**
+ * 「▾」を押して小窓が組み上がるまで待つ。
+ * 🔴 **開けたら必ず閉じる**(`closePick`)── `app-dialog` は**重なったときだけ列に
+ *   並べる**ので、開きっぱなしにすると**次の `pick` が 1 マイクロタスクでは開かない**。
+ *   ⚠ 実際に踏んだ:1 つの `it` で 2 回開いたら 2 回目が 0 行に見え、
+ *   さらに**次の `it` まで巻き添え**にした(検査が製品ではなく台のせいで落ちる)。
+ */
+async function openPick(host: HTMLElement): Promise<HTMLElement[]> {
+  const menu = host.querySelector<HTMLElement>('[data-pkc-copy-menu]');
+  if (menu === null) throw new Error('前提が崩れている: ▾ が描かれていない');
+  menu.click();
+  await Promise.resolve();
+  return [...document.querySelectorAll<HTMLElement>('[data-pkc-field="pick-copy-format"]')];
+}
+
+/** いま開いている小窓の題名。⚠ 題名は**中身と一致**していなければならない(動線 D5)。 */
+function pickTitle(): string {
+  return document.querySelector('[data-pkc-field="dialog-title"]')?.textContent ?? '';
+}
+
+async function closePick(): Promise<void> {
+  document.querySelector<HTMLElement>('[data-pkc-field="dialog-cancel"]')?.click();
+  await Promise.resolve();
+}
 const CSV = '# 覚書\n\n```csv\n品名,数\nりんご,3\n```\n';
 
 describe('右クリックで表の形を変える(#708 段②)', () => {
@@ -174,6 +211,140 @@ describe('右クリックで表の形を変える(#708 段②)', () => {
   });
 
   /**
+   * 🔴 **留めた枠の ▾ から、主の枠のノートを書き換えない**
+   * (着地前レビュー・実装 R1、2026-09-06。**実ブラウザで再現された**)。
+   *
+   * ⚠ `convert()` は `tableLineAt` も `tableAt` も **`openBody`(主の枠)の本文**で
+   *   読むので、**留めた枠**(別のノート)の表で押すと、押した物ではなく
+   *   **主の枠のノート**が csv に化けた。画面では留めた枠が変わらないので、
+   *   user は自分の操作を疑わない ── 押した物と壊れた物が別、の型である。
+   * ⚠ 同じ handler の 10 行下(`noteTitle`)は `lidOfNode` を通していた ──
+   *   **隣に足した口だけがその 1 本を外れていた**(#281 で 1 度直した罠の 3 度目)。
+   * 🔑 いまは「押した所の持ち主 ≠ 開いている本文」なら**行を出さない**。
+   *
+   * ⚠ **対照群を同じ it に置く** ── 留めた枠で 5 行なのは「▾ がそもそも
+   *   出ていない」でも成り立つので、**同じ表を主の枠で描いた台**で 6 行出ることを見る。
+   */
+  it('🔴 留めた枠の ▾ には「本文を書き換える」行を出さない(主の枠を書き換えない)', async () => {
+    // ── 対照群 ── 主の枠なら 6 行目が出る
+    const main = setup(MD);
+    expect(
+      (await openPick(main.host)).length,
+      '対照群が鳴っていない ── 主の枠でも書き換える行が出ていない',
+    ).toBe(6);
+    expect(pickTitle(), '書き換える行が在るのに題名が名乗っていない').toBe(
+      'この表を持ち出す / 書き換える',
+    );
+    await closePick();
+
+    // ── 本題 ── 留めた枠(別ノート)では出さない
+    const split = setup(MD, 'ready', {}, 'n2');
+    expect((await openPick(split.host)).length, '留めた枠の ▾ に、主の枠を書き換える行が出た').toBe(
+      5,
+    );
+    expect(
+      document.querySelectorAll('[data-pkc-field="pick-copy-format-sep"]').length,
+      '書き換える行が無いのに区切りだけ出た',
+    ).toBe(0);
+    /**
+     * 🔴 **題名は、在る物だけを名乗る**(着地前レビュー・動線 D5)。
+     * ⚠ 行が無いのに「書き換える」と名乗ると、user は「壊れている」か
+     *   「自分の押し方が悪い」と読む(約束だけが残る)。
+     */
+    expect(pickTitle(), '書き換える行が無いのに題名が約束している').toBe('この表をコピー');
+    await closePick();
+  });
+
+  /**
+   * 🔴 **区切りは「書き換える行の上」に在る**(着地前レビュー・実装 R4)。
+   *
+   * ⚠ 直す前の検査は区切りを `toHaveCount(1)` でしか見ていなかったので、
+   *   **線を一番下へ動かす変異が生き延びた** ── そうなると書き換える行が
+   *   コピーの 5 つと**地続き**になり、**この裁定が防ごうとした当のもの**
+   *   (コピーのつもりで本文が変わる)が戻る。
+   * 🔑 だから**位置**で見る ── 線より下に在る行は 1 つだけである。
+   */
+  it('🔴 区切りより下に在るのは、書き換える 1 行だけ', async () => {
+    const s = setup(MD);
+    expect((await openPick(s.host)).length, '前提が崩れている: 小窓が開いていない').toBe(6);
+    const sep = document.querySelector('[data-pkc-field="pick-copy-format-sep"]');
+    expect(sep, '前提が崩れている: 区切りが出ていない').not.toBeNull();
+    const below = [...(sep!.parentElement?.children ?? [])]
+      .slice([...(sep!.parentElement?.children ?? [])].indexOf(sep!) + 1)
+      .filter((e) => e.getAttribute('data-pkc-field') === 'pick-copy-format');
+    expect(below.length, '区切りより下が 1 行になっていない').toBe(1);
+    expect(below[0]?.textContent, '区切りより下がコピーの行になっている').toContain('書き換える');
+    await closePick();
+  });
+
+  /**
+   * 🔴 **忙しい間に止めるのは「書く 1 行」だけで、コピーは止めない**
+   * (#708 裁定②の着地前レビュー・動線 D3、2026-09-06)。
+   *
+   * ⚠ 1 稿目は `copy-md-block` を **action の名前**で `BODY_WRITE_ACTIONS` に載せた。
+   *   ところがその名前は表だけの受け手ではなく、**コードの囲み・mermaid / chart /
+   *   html / svg の ⧉** も同じ名前で受ける ── つまり**コピーが 1 つ残らず止まる**。
+   *   ⚠ そのうえ `busy` は書き出し / 取込だけでなく**添付の取り込み**でも真になるので、
+   *   写真を 1 枚入れた直後にコードをコピーすると「書き出し / 取込が実行中です」と出た
+   *   (押した所と理由が食い違う)。
+   * 🔑 いまは門を `applyTableFormat`(**書く瞬間**)へ移してある。
+   *
+   * ⚠ **対照群を同じ it に置く**(CLAUDE.md §1)── 台が `busy` を渡せていないだけで
+   *   「止まらなかった」と読めてしまう。だから**止まるはずの物**(`edit-cell`)が
+   *   同じ台で本当に止まることを先に見る。
+   */
+  it('🔴 忙しい間でも、コードの囲みの ⧉ は断られない(止まるのは書く操作だけ)', () => {
+    const body = '# 覚書\n\n```js\nconst a = 1;\n```\n\n| 品名 | 数 |\n|---|---|\n| りんご | 3 |\n';
+
+    /**
+     * ── 対照群 ── 止まるはずの物は、この台で本当に止まる。
+     * ⚠ **台を分ける**(同じ台で続けて押さない)── 断りは `state.error` に残るので、
+     *   1 つの台で 2 つ押すと「消し忘れた前の断り」と「新しい断り」が**同じ字**になり、
+     *   区別できない(消す口を足すより、台を 2 つ作るほうが読める)。
+     */
+    const ctrl = setup(body, 'ready', { busy: () => true });
+    const cell = ctrl.host.querySelector<HTMLElement>('[data-pkc-action="edit-cell"]');
+    expect(cell, '前提が崩れている: 升に押し所が焼かれていない').not.toBeNull();
+    cell!.click();
+    expect(ctrl.d.getState().error, '対照群が鳴っていない ── 台が busy を渡せていない').toContain(
+      '書き出し / 取込が実行中です',
+    );
+
+    // ── 本題 ── コピーは読むだけなので止めない
+    const s = setup(body, 'ready', { busy: () => true });
+    const copy = s.host.querySelector<HTMLElement>('[data-pkc-copy-kind="code"]');
+    expect(copy, '前提が崩れている: コードの囲みに ⧉ が無い').not.toBeNull();
+    copy!.click();
+    expect(s.d.getState().error, '忙しいだけでコピーまで断られた').toBeNull();
+  });
+
+  /**
+   * 🔴 **止めるほうは、その操作の言葉で断る**(同 D3)。
+   *
+   * ⚠ 名前の門の字は「書き出し / 取込が実行中です」だが、`busy` は**添付の取り込み**
+   *   でも真になるので、**書き出しも取込もしていない user** がその字を読むことがある。
+   * 🔑 書く瞬間の門は、**何ができないか**を言う。
+   * ⚠ **対照群**(忙しくない同じ台)を同じ it に置く ── 置かないと「別の理由で
+   *   書換が来なかった」と区別できない。
+   */
+  it('🔴 忙しい間に表の形を変えようとすると、その操作の言葉で断る(裏で書き換えない)', () => {
+    const busy = setup(MD, 'ready', { busy: () => true });
+    busy.rightClickAt('table td');
+    busy.press('table-to-csv');
+    expect(busy.events, '忙しいのに書換を頼んだ').toEqual([]);
+    expect(busy.d.getState().error, '断りの理由が出ていない').toBe(
+      '取り込みが終わってから、表の形を変えてください',
+    );
+
+    // ── 対照群 ── 忙しくなければ同じ手順で書換が届く
+    const free = setup(MD, 'ready', { busy: () => false });
+    free.rightClickAt('table td');
+    free.press('table-to-csv');
+    expect(free.events, '忙しくないのに書換が来ない ── 台が壊れている').toHaveLength(1);
+    expect(free.d.getState().error, '忙しくないのに断られた').toBeNull();
+  });
+
+  /**
    * 🔴 **編集中は理由を出して断る**(`edit-cell` / `shape-cell` と同じ作法)。
    * ⚠ 実物では本文が `textarea` に替わるので右クリックはまず来ないが、
    *   **受け手の側でも断る** ── 別の経路から来た日に、裏で本文を書き換えない。
@@ -240,7 +411,18 @@ describe('右クリックで表の形を変える(#708 段②)', () => {
      */
     expect(note, '形で何が変わるかを言っていない').toContain('行と列');
     expect(note, '式のことを言っていない').toContain('式');
-    expect(note, '帰り道を言っていない').toContain('右クリック');
+    /**
+     * 🔴 **帰り道は「▾」で言う**(着地前レビュー・動線 D1、2026-09-06)。
+     * ⚠ ここは 2026-09-05 まで「右クリック」を pin していた ── ところが
+     *   **指で触る端末に右クリックは無い**ので、この裁定(#708 裁定②)で
+     *   入口を足した当の user に、**その端末に無い操作**で戻れと言っていた。
+     * ⚠ だから**「右クリック」が戻っていないことも見る** ── 字を書き戻す変異が
+     *   「▾ を含む」だけの検査では生き延びる(両方書けば通ってしまう)。
+     */
+    expect(note, '帰り道を言っていない').toContain('▾');
+    expect(note, '指の端末に無い操作で戻れと言っている').not.toContain('右クリック');
+    // 🔴 **往復で落ちる物も同じ 1 行で言う**(同 D6)── 「戻せます」だけは嘘に近い
+    expect(note, '桁揃えが戻らないことを言っていない').toContain('桁揃え');
 
     // 対照群 ── 別の書換では、この字は出ない(何にでも出る字ではない)
     const s2 = setup(MD, 'ready');
