@@ -51,7 +51,7 @@ import {
   stepFor,
   undo,
 } from '@features/markdown/edit-journal';
-import { CANCEL_EDIT_HINT, COMMIT_EDIT_HINT, iconButton } from './icons';
+import { CANCEL_EDIT_HINT, COMMIT_EDIT_HINT, iconButton, markPrimary } from './icons';
 import { buildFormatBar } from './format-bar';
 import { hasSourceSelection } from '../actions/copy-source';
 import {
@@ -969,7 +969,8 @@ export class DetailRenderer {
           // 削除は右の情報ペインが持つ ── 同じボタンを 2 か所に出すと、押す場所が
           // 定まらない(コピーはここ**だけ**に在る)。
           // 🔑 **追記もここに無い**(P8 段⑧)── 編集画面を通らない別の器が持つ
-          this.barButton = iconButton('start-edit', '編集');
+          // 🔑 **読む面の主の操作**(#722 P2-10)── ここから話が進む
+          this.barButton = markPrimary(iconButton('start-edit', '編集'));
           /**
            * 🔴 **コピーの 2 系統 + 選択範囲**(2026-08-08。user 裁定「markdown の
            * テキストとしてのコピーと HTML 書式ありのコピーの両方」)。
@@ -1172,7 +1173,8 @@ export class DetailRenderer {
 
     const bar = document.createElement('div');
     bar.setAttribute('data-pkc-field', 'detail-toolbar');
-    const commit = iconButton('commit-edit', '保存');
+    // 🔑 **編集中の主の操作**(#722 P2-10)── 打った字を残す出口
+    const commit = markPrimary(iconButton('commit-edit', '保存'));
     const cancel = iconButton('cancel-edit', 'キャンセル');
     // ⚠ 説明は追記欄の同じ出口と**同じ字**(#716)── 正本は `icons.ts` の 2 定数
     commit.title = COMMIT_EDIT_HINT;

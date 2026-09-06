@@ -393,6 +393,28 @@ export const CANCEL_EDIT_HINT = '変更を捨てて編集を終えます';
  * 「このボタンだけ高さが違う」が生まれる(それが user 指摘の中身)。
  * ⚠ **引数の並びを変えない**(`docs-parity` が「文言は第 2 引数」で突合している)。
  */
+/**
+ * 🔴 **その面の「主の操作」の印**(#722 P2-10。user 裁定 2026-09-06 = 案 A)。
+ *
+ * cowork 実測 2026-09-05:「1440px の 1 画面に押せるボタンが **50 個**、うち
+ * **23 個が完全に同じ見た目**。濃い地を持つのは『いま選んでいるタブ』の 1 個だけ」──
+ * つまり **どれを押せば話が進むのかが、画面から読めない**。
+ *
+ * 🔑 **色ではなく濃さで段を作る**(user 指示 2026-08-03「地は無彩色、色は情報にだけ」)。
+ *   地を `--fg`、字を `--surface` に**反転**するだけなので、色相は 1 つも増えない。
+ * ⚠ **1 つの面に 1 つだけ**。⚠ ここを増やすと段が消える(全部が主なら主は無い)ので、
+ *   `tests/adapter/primary-action.test.ts` が**面ごとに 1 個以下**を全数で見る。
+ * ⚠ 印を付けるのは**この関数だけ** ── 属性を直に書くと、上の全数検査が数え落とす
+ *   (`tests/repo-hygiene.test.ts` が直書きを止める)。
+ */
+export const PRIMARY_ATTR = 'data-pkc-primary';
+
+/** 主の操作にする。⚠ 返り値を使わなくてよい(その場で印が付く)。 */
+export function markPrimary(btn: HTMLButtonElement): HTMLButtonElement {
+  btn.setAttribute(PRIMARY_ATTR, '');
+  return btn;
+}
+
 export function iconButton(action: string, label: string, iconKey = action): HTMLButtonElement {
   const btn = document.createElement('button');
   btn.type = 'button';

@@ -1266,6 +1266,51 @@ select:focus-visible {
   background: var(--accent-dim);
   color: var(--accent-dim-fg);
 }
+/**
+ * 🔴 **その面の「主の操作」だけ、地と字を反転する**(#722 P2-10。user 裁定 2026-09-06 = 案 A)。
+ *
+ * cowork 実測 2026-09-05:「1440px の 1 画面に押せるボタンが **50 個**、うち **23 個が
+ * 完全に同じ見た目**。濃い地を持つのは『いま選んでいるタブ』の 1 個だけ」──
+ * **どれを押せば話が進むのかが画面から読めない**、が実害だった。
+ *
+ * 🔑 **色ではなく濃さ**(user 指示 2026-08-03「地は無彩色、色は情報にだけ使う」)──
+ *   `--fg` / `--surface` は**本文の対**なので、入れ替えても**色相は 1 つも増えない**し、
+ *   9 テーマ全部でコントラストが本文と同じだけ確保される(テーマごとに書かない)。
+ * ⚠ **`--accent` は使わない** ── 緑 / 青は「いま選んでいるタブ」と「押している最中」が
+ *   既に使っており、意味が 3 つ重なる。
+ * ⚠ **図案は `currentColor`** なので、字と一緒に反転する(上の `[data-pkc-icon] > svg`)。
+ * ⚠ `:hover` / `:active` を**書き足さないと外れる** ── `button:hover:not(:disabled)`
+ *   (0,2,1)は `button[data-pkc-primary]`(0,1,1)より詳細度が高いので、
+ *   **乗せただけだと地が普通のボタンへ戻る**。だから両方に印つきの規則を置く。
+ * 🔴 **置き場所は「器ごとの化粧の後」でなければならない**(実測で 1 度外した)。
+ *   `[data-pkc-field='detail-toolbar'] button`(0,1,1)は `button[data-pkc-primary]`
+ *   (0,1,1)と**詳細度が同じ**なので、前に置くと**後ろの器の化粧が勝つ** ──
+ *   実測では「編集」の地が `--accent-dim`(帯の hover)のままだった。
+ *   ⚠ だから**この 3 本は器の規則より後ろに置く**。
+ *   🔑 守るのは字面ではなく**見え方**:`tests/smoke/primary-action.smoke.spec.ts` が
+ *   「地と字が入れ替わっている」「**乗せても濃いまま**」を実ブラウザで見る
+ *   (順番が戻った日は、そこが赤くなる)。
+ * ⚠ 印は面ごとに 1 つだけ(`icons.ts` の `markPrimary`)── 増やすと段が消える。
+ */
+button[data-pkc-primary] {
+  background: var(--fg);
+  color: var(--surface);
+  border-color: var(--fg);
+}
+button[data-pkc-primary]:hover:not(:disabled) {
+  background: var(--fg);
+  /* ⚠ **字も書き直す** ── 帯の hover は `color: var(--accent-dim-fg)` も当てるので、
+   *   地だけ書き直すと**濃い地に濃い緑の字**になる(実測でそうなった)。 */
+  color: var(--surface);
+  border-color: var(--fg);
+  /* ⚠ 反転した地では「明るくする」が効かない ── 少し透かして「乗っている」を出す */
+  opacity: 0.85;
+}
+button[data-pkc-primary]:active {
+  background: var(--fg);
+  color: var(--surface);
+  opacity: 0.72;
+}
 [data-pkc-action='delete-entry'],
 [data-pkc-action='purge-trash'] {
   border-color: var(--danger);

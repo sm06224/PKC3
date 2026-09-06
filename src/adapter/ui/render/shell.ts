@@ -12,7 +12,7 @@
 import { SEALED_ARCHETYPES, SEALED_VIEWS } from '@features/sealed';
 import { HINT_BASE, HINT_COMMAND, hintTitle } from './shortcut-hint';
 import { COLLECTION_COMMANDS } from './commands';
-import { BROWSE_ICONS, iconButton, iconSpan } from './icons';
+import { BROWSE_ICONS, iconButton, iconSpan, markPrimary } from './icons';
 import { COLUMN_PANES, PANE_LABELS } from '@features/pane-visibility';
 import { PHONE_BAR_REGION, PHONE_RETURN_REGION } from './phone-layout';
 import { BROWSE_TABS } from './browse';
@@ -445,6 +445,8 @@ export function buildShell(root: HTMLElement): ShellRegions {
     // ⚠ 図案は**種類のもの**を出す(user「これもアイコン欲しいよね」)
     first ? `archetype:${first.archetype}` : 'create-entry',
   );
+  // 🔑 **一覧の主の操作**(#722 P2-10)── 何も無いところから話が始まる
+  markPrimary(create);
   create.setAttribute('data-pkc-field', 'create-run');
   create.setAttribute(HINT_BASE, 'この種類で新しく作ります');
   create.setAttribute(HINT_COMMAND, 'create-entry');
