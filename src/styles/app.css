@@ -1930,6 +1930,21 @@ li[data-pkc-row-slot] {
    */
   --pkc-prose-block: 1;
   max-width: var(--read-w);
+  /**
+   * 🔴 **読み幅を列の中央に置く**(#722 P2-11。user 裁定 2026-09-06 = 案 A)。
+   *
+   * ⚠ 直す前は左寄せだったので、1440px の窓では中央の列 941px に対して本文が
+   *   672px、**右に 269px がいつも空いていた**(cowork 実測 2026-09-05)。
+   * 🔑 **器には掛けない**(上の戒め)── 器(`.pkc-md-rendered`)の `clientWidth` は
+   *   1px も動かない。⚠ ただし**塊の側は動く** ── 表・図・コードの塊は
+   *   `margin-inline-start` のぶん狭くなるので、**紙面を変えると図は焼き直される**
+   *   (実測: 焼き幅 A4 848px ↔ フル HD 1040px、PNG も別物になる)。
+   *   user 裁定で「表・図も段落と同じ左端」を選んだ結果なので受け入れる ──
+   *   代わりに「図は焼き直されない」と書いていた 4 か所を直した。
+   * ⚠ **上限が無い人**(紙面「フル HD」= `--read-w: none`)には**何も起きない**
+   *   ── 塊が器いっぱいなので `auto` は 0 になる。
+   */
+  margin-inline: auto;
 }
 /**
  * 🔴 **ライブエディタで生になった行**(`[data-pkc-row-slot]`)。
@@ -1942,6 +1957,9 @@ li[data-pkc-row-slot] {
  * (`proseSpan`)── allow-list の判定は上の 1 本のままで、こちらは結果を引き継ぐ。 */
 .pkc-md-rendered[data-pkc-prose] > [data-pkc-row-slot][data-pkc-row-prose] {
   max-width: var(--read-w);
+  /* ⚠ 左の余白は**印の有無に依らず**下の 1 本で当てる(#722 P2-11)──
+   *   ここで `margin-inline: auto` を書くと、印の付かない行(表・コード・図)だけ
+   *   左へ飛ぶ(着地前レビューの実測)。 */
 }
 /**
  * 🔴 **見出しは「見出しに見える」ことが先**(user 報告 2026-08-27)。
@@ -2190,6 +2208,23 @@ li[data-pkc-row-slot] {
 .pkc-md-rendered .pkc-md-block[data-pkc-md-block-kind='table'] {
   width: fit-content;
   max-width: 100%;
+  /**
+   * 🔴 **左に余白が入ったら、頭打ちもそのぶん縮める**(#722 P2-11。着地前レビュー、実測)。
+   *
+   * ⚠ `100%` は**包含ブロックの幅**なので、`margin-inline-start`(126px)を引いてくれない
+   *   ── 塊が「左端 126px・幅 925px」になり、**右へ 126px はみ出して読む面ごと横スクロール**
+   *   していた(実測: 14 列・英字の表で pane の scrollWidth 925 → **1052**)。
+   *   ⚠ セルは `break-word` なので「min-content が器より広い表」は**設計上の通常ケース**である
+   *   (上の `td, th` の注記)── 日本語だけの表では起きず、英字・数値・URL の列で出る。
+   * 🔑 `stretch`(= 使える幅。旧綴りは `-webkit-fill-available`)は**余白を引いた幅**を指す。
+   *   ⚠ 読めないブラウザは上の `100%` に落ちる(いまと同じ = はみ出す)ので、
+   *   **`100%` の行を消してはいけない**。
+   * ⚠ `--read-w` を使う式で書いてはいけない ── フル HD(`none`)で `calc` が壊れると
+   *   `max-width` は `100%` へ**戻らず `none` に落ちる**ので、今度はフル HD で
+   *   表が max-content まで伸びて横スクロールする(レビューが実測で外した案)。
+   */
+  max-width: -webkit-fill-available;
+  max-width: stretch;
 }
 /**
  * 🔴 **csv の表は、読み幅までで止める**(#704。user 裁定 案 A「読み幅の中で器いっぱい」)。
@@ -2204,6 +2239,49 @@ li[data-pkc-row-slot] {
  */
 .pkc-md-rendered[data-pkc-prose] > .pkc-md-block[data-pkc-render-lang='csv'] {
   max-width: var(--read-w);
+}
+/**
+ * 🔴 **表・図・コードの塊も、読み幅の左端に揃える**
+ * (#722 P2-11。user 裁定 2026-09-06 ── 実測の 3 択から「段落と同じ左端に揃える」)。
+ *
+ * ⚠ **中央に置く形は採らない** ── 読み幅より狭い塊が段落から離れて浮く。
+ *   実測(1440px の窓 / 中央の列 925px / 読み幅 672px):3 列の表(144px)が
+ *   左端 **390px**、段落は **126px** で **264px** ずれた。
+ * ⚠ **代償を正直に書く**:左に余白を入れるぶん、**横に広い塊は 126px 狭くなる**
+ *   (実測 1036px → 854px)。user 裁定でこちらを選んでいる ── 文章と表が
+ *   **1 本の列に見える**ほうを採った。
+ * ⚠ そのため `page-format.smoke.spec.ts` の「紙面を変えても表の幅は動かない」は
+ *   **主張を書き直した**(器に cap が掛かっていないことは、表が読み幅を**超える**ことで見る)。
+ * ⚠ **上限なし**(紙面「フル HD」= `--read-w: none`)では `calc` が成り立たないので
+ *   この宣言は無効になり、`margin-inline-start` は **0** に戻る ── 上限が無いのだから
+ *   左端でよい(実測で確かめた)。
+ *
+ * 🔴 **縦書きを外す**(着地前レビュー、実測)。`margin` の `%` は**プロパティの向きに
+ *   依らず包含ブロックの inline サイズ**を基準にするので、`writing-mode: vertical-rl`
+ *   では `100%` が**器の高さ**に、`margin-inline-start` が **`margin-top`** に化ける。
+ *   合成ページの実測(器の高さ 1200px / 読み幅 672px):表・図・コードの上に
+ *   **264px** の空白が入った。⚠ 物理プロパティへ替えても直らない(基準が同じ)。
+ * ⚠ **いまのアプリでは害は出ない** ── 縦書きの器の高さは内容で決まり、読み幅より低い
+ *   ので `max(0px, …)` が 0 に潰れる(実測: 1440×1400 の窓 / 40 段落で **303px**、
+ *   `margin-top` は門の有無に依らず 0px)。だから smoke は書けない(空振りになる)。
+ *   🔑 危ないのは**器に確定した高さが付いた日**である ── そのとき静かに壊れるので、
+ *   `tests/adapter/table-width-css.test.ts` が**この門を字面で pin** している。
+ * 🔴 **生になった行にも同じ余白を当てる**(着地前レビュー、実測)。`[data-pkc-row-prose]`
+ *   の付く行だけに当てていたので、**表・コード・図を押すと行が 126px 左へ飛んでいた**
+ *   (実測: 塊 L=127 / 段落の行 L=127 / 表の行 **L=0**)。幅の上限は今までどおり
+ *   散文の行にしか付けない ── 表の編集欄は縮めない(下の注記)。
+ * ⚠ `margin-inline-end: auto` は**消した** ── 外しても段落・広い表・狭い表・図の幾何が
+ *   1px も動かない(`width: auto` では auto が 0 に潰れ、`width: fit-content` の表では
+ *   over-constrained 解決が無視する)。CLAUDE.md「『これが無いと壊れる』と書く前に、
+ *   外して壊れるのを見る」。
+ */
+.pkc-md-rendered[data-pkc-prose]:not([data-pkc-writing='vertical']) > .pkc-md-block,
+.pkc-md-rendered[data-pkc-prose]:not([data-pkc-writing='vertical']) > [data-pkc-row-slot] {
+  /* ⚠ 中身の定義は**この 1 本だけ**(塊と、生になった行が同じ軸に乗る)──
+   *   custom property へ切り出すと `tokens.css` にトークンを置く決まりに当たるが、
+   *   `100%` は使う側の包含ブロックで解決されるので `:root` には置けない
+   *   (書き出した HTML は `--read-w` を器に付ける)。選択子リストで 1 本に保つ。 */
+  margin-inline-start: max(0px, calc((100% - var(--read-w)) / 2));
 }
 .pkc-md-rendered .pkc-render-source {
   margin: 0;

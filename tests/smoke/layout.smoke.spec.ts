@@ -1290,15 +1290,29 @@ test('🔴 本文に読み幅の上限が効き、表と図は対象外である
   //    「器ごと狭める」実装との区別がつかない ── 図の焼き直しを招く形である
   expect(m.table, '表が読み幅の上限に巻き込まれている').toBeGreaterThan(-1);
 
-  // ③ 🔴 **図の焼き幅は器の幅から決まる**(`mermaid-hydrate` が親の clientWidth を読む)。
-  //    上限を器に掛けると全部の図が焼き直され、キャッシュ鍵も変わる ── そうなっていないこと
+  /**
+   * ③ 🔴 **図の焼き幅は、読み幅の cap ではなく「器 − 左の余白」で決まる**
+   *    (`mermaid-hydrate` が親の clientWidth を読む)。
+   *
+   * ⚠ **等値で見る**(#722 P2-11。着地前レビューの指摘で直した)── かつては
+   *   `> 900` だったが、P2-11 で塊に左の余白が付いてからは
+   *   `(器 + 読み幅) / 2` になるので、**「半分まで狭められた」も合格にしていた**。
+   *   本当に守りたいのは「**読み幅の cap が図に掛かっていない**」ことなので、
+   *   期待値を幾何で書く。
+   */
   const parentWidth = await page.evaluate(() => {
     const h = document.querySelector('[data-pkc-mermaid-src]');
     return h?.parentElement?.clientWidth ?? -1;
   });
-  expect(parentWidth, '図の親が読み幅まで狭められている(器に上限を掛けている)').toBeGreaterThan(
-    900,
-  );
+  const indent = Math.max(0, (m.body - m.p) / 2);
+  expect(
+    Math.abs(parentWidth - (m.body - indent)),
+    `図の親の幅が幾何と合わない(実測 ${parentWidth} / 期待 ${m.body - indent} = 器 ${m.body} − 余白 ${indent})`,
+  ).toBeLessThanOrEqual(2);
+  expect(
+    parentWidth,
+    `図が読み幅まで狭められている(図の親 ${parentWidth} / 読み幅 ${m.p})`,
+  ).toBeGreaterThan(m.p + 100);
 
   expect(errors).toEqual([]);
 });
