@@ -171,6 +171,7 @@ import {
   NOTE_TOOL_ACTIONS,
   noteToolActions,
   tableMenuActions,
+  tableConvertPickLabel,
   withTrailingLast,
 } from '@features/entry-actions';
 import {
@@ -1135,6 +1136,17 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'table-to-markdown',
   'table-to-csv',
   /**
+   * 🔴 **「▾」の小窓からも同じ操作ができる**(#708 裁定②)── 上の 2 つと
+   *   **同じ `SET_TABLE_FORMAT`** を撃つので、同じ門をくぐらせる。
+   *   ⚠ この検査(`repo-hygiene` の「本文を書く導線は門に載っている」)が
+   *   足し忘れをその場で捕まえた ── 散文では守れない、の実例がもう 1 つ。
+   * ⚠ **巻き添えを正直に書く**:これでコピー(⧉ / ▾)も忙しい間は断られる。
+   *   🔑 それでよいと判断した ── ①断りは**可視**である(黙って落ちない)
+   *   ②同じ表の `edit-cell` / `shape-cell` は既に門に載っているので、
+   *   忙しい間その表はどのみち触れない ③取り込みの最中に表をコピーする形は稀。
+   */
+  'copy-md-block',
+  /**
    * 🔴 **今日のノートは「作る」ことがある**(#348、2026-08-23)。
    * ⚠ 既に在れば選ぶだけだが、**無ければ `CREATE_ENTRY` を撃つ** ──
    *   取り込みが entry を総入れ替えしている裏で作らせない。
@@ -1767,6 +1779,18 @@ function moveStackLink(dispatcher: Dispatcher, target: HTMLElement, dir: 'up' | 
 function setTableFormat(dispatcher: Dispatcher, target: HTMLElement, to: TableFormat): void {
   const line = menuCarriedAt(target, MENU_TABLE_ATTR);
   if (line === null || refuseStaleMenu(dispatcher, target)) return;
+  applyTableFormat(dispatcher, line, to);
+}
+
+/**
+ * 🔴 **表の形を変える判定と実行**(#708 段② / 裁定②)。
+ *
+ * ⚠ **入口は 2 つ、判定は 1 つ**(§7)── 右クリックのメニュー(`setTableFormat`)と、
+ *   表の右上の「▾」の小窓(`copy-md-block`)。⚠ 指で触る端末には右クリックが無いので、
+ *   後者が**唯一の入口**である(user 裁定 2026-09-06)。
+ * 🔑 断る理由も**ここ 1 か所**で言う ── 入口ごとに書くと、片方だけ黙る。
+ */
+function applyTableFormat(dispatcher: Dispatcher, line: number, to: TableFormat): void {
   const st = dispatcher.getState();
   if (st.phase !== 'ready') {
     dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから表の形を変えてください' });
@@ -3900,6 +3924,29 @@ const ACTIONS: Record<string, ActionHandler> = {
   'copy-md-block': (dispatcher, target, _services, root) =>
     handleCopyMdBlock(target, {
       pick: (choices) => pickCopyFormatInApp(root, choices),
+      /**
+       * 🔴 **指で触る端末に、表の形を変える入口を作る**(#708 裁定②、user 2026-09-06)。
+       *
+       * ⚠ 右クリックが無い端末では、直す前は**形を変える口が 1 つも無かった**。
+       * ⚠ **判定は右クリックと同じ `tableAt`** ── DOM の class で見分けると
+       *   書き換える側と別の答えを持つ口が 2 つになる(§7)。
+       * 🔑 `null` を返すのは「**そもそも作り変えられない表**」だけ
+       *   (`:::` の囲みの中 …)── 押しても何も起きない行を作らない。
+       *   ⚠ 式が入っている等の「**理由を言って断る**」形は行を出す
+       *   (user 裁定 2026-09-04「黙って断らない」)。
+       */
+      convert: () => {
+        const st = dispatcher.getState();
+        const ob = st.openBody;
+        const line = tableLineAt(target, ob?.body ?? null);
+        const at = line === null || ob === null ? null : tableAt(ob.body, line);
+        if (at === null || line === null) return null;
+        const to: TableFormat = at.format === 'markdown' ? 'csv' : 'markdown';
+        return {
+          label: tableConvertPickLabel(at.format),
+          run: () => applyTableFormat(dispatcher, line, to),
+        };
+      },
       download: downloadBlob,
       noteTitle: () => {
         const st = dispatcher.getState();

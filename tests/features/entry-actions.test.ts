@@ -20,6 +20,8 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
+  tableConvertPickLabel,
+  tableMenuActions,
   ADOPT_IMAGES_LABEL,
   adoptImagesLabel,
   BODY_MENU_ACTIONS,
@@ -530,5 +532,48 @@ describe('小窓の字と並び(#690 I1 / I2)', () => {
       'copy-plain-markdown',
       'open-note-window',
     ]);
+  });
+});
+
+/**
+ * 🔴 **表の形を変える字は 2 つ在り、向きが揃っていること**(#708 段② / 裁定②)。
+ *
+ * ⚠ 入口が 2 つ在る:右クリックのメニュー(`tableMenuActions`)と、
+ *   表の右上の「▾」の小窓(`tableConvertPickLabel`)── 指で触る端末には
+ *   右クリックが無いので、**後者が唯一の入口**である。
+ * ⚠ 字が**別に要る**のは文脈が違うから ── 小窓ではコピーの形が 5 つ並んだ下に
+ *   出るので、「CSV の表にする」だと「**CSV でコピーする**」と読める。
+ * 🔑 だが**向き**(どちらの形にするか)は同じでなければならない ──
+ *   片方だけ逆になると、同じ表に対して 2 つの入口が反対のことを言う。
+ */
+describe('表の形を変える字(#708)', () => {
+  it('🔴 出るのは 1 つだけで、いまの形の反対側である', () => {
+    expect(tableMenuActions({ from: 'markdown' }).map((a) => a.action)).toEqual(['table-to-csv']);
+    expect(tableMenuActions({ from: 'csv' }).map((a) => a.action)).toEqual(['table-to-markdown']);
+  });
+
+  it('🔴 2 つの入口の字が、同じ向きを指している', () => {
+    for (const from of ['markdown', 'csv'] as const) {
+      const menu = tableMenuActions({ from })[0]!;
+      const pick = tableConvertPickLabel(from);
+      // 🔑 行き先の名前(`CSV` / `Markdown`)が両方に在り、**同じ側**を指す
+      const want = from === 'markdown' ? 'CSV' : 'Markdown';
+      const other = from === 'markdown' ? 'Markdown' : 'CSV';
+      expect(menu.label, `メニューの字が行き先を言っていない(${from})`).toContain(want);
+      expect(pick, `小窓の字が行き先を言っていない(${from})`).toContain(want);
+      expect(pick, `小窓の字が逆を指している(${from})`).not.toContain(other);
+    }
+  });
+
+  /**
+   * ⚠ **小窓の字は「本文が変わる」と分かる形にする** ── 周りはコピーの一覧なので、
+   *   そう書かないと「コピーの形が 1 つ増えた」と読める。
+   */
+  it('⚠ 小窓の字は「本文を…書き換える」と読める', () => {
+    for (const from of ['markdown', 'csv'] as const) {
+      const pick = tableConvertPickLabel(from);
+      expect(pick, `本文が変わると読めない(${from})`).toContain('本文を');
+      expect(pick, `書き換えると読めない(${from})`).toContain('書き換える');
+    }
   });
 });

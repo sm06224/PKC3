@@ -532,14 +532,28 @@ export function pickDiagramInApp(
  */
 export function pickCopyFormatInApp(
   host: HTMLElement,
-  choices: readonly { readonly id: string; readonly label: string }[],
+  choices: readonly {
+    readonly id: string;
+    readonly label: string;
+    readonly separatorBefore?: boolean;
+  }[],
 ): Promise<string | null> {
   return pickRowInApp(host, {
-    title: 'この表をコピー',
+    /**
+     * 🔴 **題名は「コピー」だけを名乗らない**(#708 裁定②、user 2026-09-06)。
+     * ⚠ 指で触る端末には右クリックが無いので、この小窓が**表の形を変える唯一の入口**
+     *   でもある ── 「この表をコピー」と書くと、そこに在る「書き換える」行が
+     *   **題名と食い違って読めない**。
+     */
+    title: 'この表を持ち出す / 書き換える',
     field: 'pick-copy-format',
     indexAttr: 'data-pkc-copy-format-index',
     note: '',
-    rows: choices.map((c) => ({ label: c.label, value: c.id })),
+    rows: choices.map((c) => ({
+      label: c.label,
+      value: c.id,
+      ...(c.separatorBefore === true ? { separatorBefore: true } : {}),
+    })),
   });
 }
 
@@ -551,7 +565,18 @@ interface PickRowsSpec<T> {
   readonly indexAttr: string;
   /** 一覧の上に出す 1 行。空なら出さない。 */
   readonly note: string;
-  readonly rows: readonly { readonly label: string; readonly value: T }[];
+  readonly rows: readonly {
+    readonly label: string;
+    readonly value: T;
+    /**
+     * 🔴 **この行の前に区切りを 1 本引く**(#708 裁定②)。既定は引かない。
+     * ⚠ この器は**雛形 / 図 / 表の 3 つで使い回す**ので、既定で引くと
+     *   区切りの要らない一覧にも線が出る。
+     * 🔑 引くのは「**種類が変わる**」ところ ── 表の小窓では、持ち出す口の下に
+     *   引いて、その下に**本文を書き換える口**を置く(やることが違う)。
+     */
+    readonly separatorBefore?: boolean;
+  }[];
 }
 
 /**
@@ -584,6 +609,11 @@ function pickRowInApp<T>(host: HTMLElement, spec: PickRowsSpec<T>): Promise<T | 
     let chosen: T | null = null;
     const rows: HTMLButtonElement[] = [];
     for (const [index, row] of spec.rows.entries()) {
+      if (row.separatorBefore === true) {
+        const sep = document.createElement('hr');
+        sep.setAttribute('data-pkc-field', `${spec.field}-sep`);
+        f.body.append(sep);
+      }
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.setAttribute('data-pkc-field', spec.field);

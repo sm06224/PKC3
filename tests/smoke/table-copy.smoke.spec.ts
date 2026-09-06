@@ -118,7 +118,8 @@ test('🔴 表の ▾ から形を選んでコピーでき、⧉ の 1 押しは
   await watchFlash(page, menu);
   await clickReal(page, menu);
   const rows = page.locator('[data-pkc-field="pick-copy-format"]');
-  await expect(rows, '形の一覧が出ない').toHaveCount(5);
+  // ⚠ 5 = コピーの形 / 6 つ目は「本文を書き換える」(#708 裁定②)
+  await expect(rows, '形の一覧が出ない').toHaveCount(6);
   await expect(rows.first(), '一覧が読めない字になっている').toHaveText('表計算に貼る(TSV)');
   await clickReal(page, '[data-pkc-field="pick-copy-format"][data-pkc-copy-format-index="1"]');
   await expectFlashed(page, menu, 'markdown の表');
@@ -132,7 +133,7 @@ test('🔴 表の ▾ から形を選んでコピーでき、⧉ の 1 押しは
    *   ⚠ ここでは CSV を選ぶ ── 同じ一覧から別の形が選べることも同時に見る。
    */
   await page.locator(menu).nth(1).click();
-  await expect(rows, '2 つ目の表で一覧が出ない').toHaveCount(5);
+  await expect(rows, '2 つ目の表で一覧が出ない').toHaveCount(6);
   await page.locator('[data-pkc-field="pick-copy-format"][data-pkc-copy-format-index="3"]').click();
   await expect
     .poll(() => page.evaluate(() => navigator.clipboard.readText()), {
@@ -195,4 +196,108 @@ test('🔴 表の ▾ から形を選んでコピーでき、⧉ の 1 押しは
   ).toContainText(/買い物メモ-\d{4}-\d{2}-\d{2}\.csv を保存しました/);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **指で触る端末から、表の形を変えられる**(#708 裁定②。user 2026-09-06)。
+ *
+ * > user への設問:「指で触る端末には右クリックが無いので、いま
+ * > 『Markdown の表 ⇄ CSV の表』を入れ替える方法が 1 つもありません」
+ * > → 裁定は「**▾ の小窓に 1 行足す**」。
+ *
+ * 🔑 **unit では届かない 2 つ**を実ブラウザで見る:
+ * 1. 押した行が `SET_TABLE_FORMAT` まで届き、**本文が本当に書き換わるか**
+ * 2. 書き換わった表が**升を押して打てる形**になっているか(それが変える目的である)
+ */
+test('🔴 ▾ の小窓から、本文の表を作り変えられる (#708 裁定②)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('作り変え');
+  await page
+    .locator('[data-pkc-field="editor-body"]')
+    .fill('| 品名 | 数 |\n|---|---|\n| りんご | 3 |\n');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+
+  const menu = '[data-pkc-field="detail-body"] [data-pkc-copy-menu]';
+  await expect(page.locator(menu), '▾ が出ていない').toHaveCount(1, { timeout: 15_000 });
+  // 🔑 前提 ── いまは markdown の表なので、行や列を足す ＋ × は出ていない
+  await expect(
+    page.locator('[data-pkc-field="detail-body"] [data-pkc-action="shape-cell"]'),
+    '前提が崩れた(markdown の表なのに ＋ × が出ている)',
+  ).toHaveCount(0);
+
+  await clickReal(page, menu);
+  const rows = page.locator('[data-pkc-field="pick-copy-format"]');
+  await expect(rows, '一覧が出ない').toHaveCount(6);
+  // 🔴 **区切りが 1 本引かれている**(上は持ち出す・下は本文を書き換える)
+  await expect(
+    page.locator('[data-pkc-field="pick-copy-format-sep"]'),
+    '区切りが引かれていない(コピーと書き換えが地続きに見える)',
+  ).toHaveCount(1);
+  await expect(rows.nth(5), '書き換える行の字が違う').toHaveText('本文を CSV の表に書き換える');
+
+  await clickReal(page, '[data-pkc-field="pick-copy-format"][data-pkc-copy-format-index="5"]');
+
+  /**
+   * 🔴 **本文が本当に書き換わる** ── 観測点は「行が出た」ではなく、
+   *   **csv の表にしかない ＋ × が出たこと**である(形が変わった証拠)。
+   */
+  await expect(
+    page.locator('[data-pkc-field="detail-body"] [data-pkc-action="shape-cell"]'),
+    '本文が書き換わっていない(csv の表になっていない)',
+  ).not.toHaveCount(0, { timeout: 15_000 });
+  // 🔑 升は今までどおり押して打てる(作り変えた目的が果たせている)
+  await expect(
+    page.locator('[data-pkc-field="detail-body"] [data-pkc-action="edit-cell"]'),
+    '作り変えた表の升が押せない',
+  ).not.toHaveCount(0);
+
+  /** 🔴 **戻せる**(片道の操作を作らない ── user 指示 2026-08-23)。 */
+  await clickReal(page, menu);
+  await expect(rows, '作り変えた後に一覧が出ない').toHaveCount(6);
+  await expect(rows.nth(5), '戻す字が出ていない').toHaveText('本文を Markdown の表に書き換える');
+
+  expect(errors, `ページで例外が出た: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **作り変えられない表には、その行を出さない**(#708 裁定②)。
+ *
+ * ⚠ `:::` の囲みの中の表は `tableAt` が `null` を返す ── 作り変えると
+ *   **戻す項目が出ない片道**になるので外してある(#743 の条件②)。
+ * 🔑 だから小窓にも出さない ── **押しても何も起きない行を作らない**
+ *   (user 指示 2026-08-23「片道の操作を作らない」)。
+ * ⚠ この形の台が無いと、「出さない」を守る門が**丸ごと素通り**する
+ *   (実測:`at === null` の判定を外す変異が unit も smoke も生き延びた)。
+ */
+test('🔴 ::: の囲みの中の表では、書き換える行を出さない (#708 裁定②)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('囲みの中');
+  await page
+    .locator('[data-pkc-field="editor-body"]')
+    .fill(':::note\n\n| 品名 | 数 |\n|---|---|\n| りんご | 3 |\n\n:::\n');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+
+  const menu = '[data-pkc-field="detail-body"] [data-pkc-copy-menu]';
+  await expect(page.locator(menu), '▾ が出ていない(前提が崩れた)').toHaveCount(1, {
+    timeout: 15_000,
+  });
+  await clickReal(page, menu);
+
+  const rows = page.locator('[data-pkc-field="pick-copy-format"]');
+  // 🔴 **コピーの 5 つだけ**(書き換える行は出ない)
+  await expect(rows, '押しても何も起きない行を出した').toHaveCount(5);
+  await expect(
+    page.locator('[data-pkc-field="pick-copy-format-sep"]'),
+    '出す行が無いのに区切りだけ引いた',
+  ).toHaveCount(0);
+  // ⚠ 空振り防止 ── 一覧そのものはちゃんと出ている
+  await expect(rows.first(), '一覧が出ていない').toHaveText('表計算に貼る(TSV)');
+
+  expect(errors, `ページで例外が出た: ${errors.join(' / ')}`).toEqual([]);
 });
