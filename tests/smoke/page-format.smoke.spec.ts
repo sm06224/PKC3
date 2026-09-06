@@ -64,10 +64,23 @@ test('🔴 紙面を変えると散文の幅だけが変わる(表は動かな�
   await expect.poll(async () => await widthOf(para), { timeout: 5000 }).toBeGreaterThan(a4 + 100);
   const wide = await widthOf(para);
 
-  // ③ 🔴 表は 1px も動いていない(器の幅を動かしていない証拠)
-  expect(await widthOf(table), '紙面で器の幅が動いている(図が焼き直される実装)').toBe(
-    tableA4,
-  );
+  /**
+   * ③ 🔴 **器に cap が掛かっていない**(= 図が焼き直される実装に戻っていない)。
+   *
+   * ⚠ **主張を書き直した**(#722 P2-11、2026-09-06)── かつては「表の幅が
+   *   **1px も動かない**」で見ていたが、user 裁定で**表も読み幅の左端に揃える**
+   *   ことにしたので、A4 では左に余白が入って**表は狭くなる**(実測 1036 → 854)。
+   *   ⚠ 古い主張のままだと、**裁定どおりに直すたびに落ちる**検査になる。
+   * 🔑 器に cap が掛かっていないことは、**表が読み幅を超える**ことで見る ──
+   *   掛かっていれば表も 672px で切られる(それが元の実害である)。
+   *   ⚠ そして**フル HD では余白が 0 になる**ので、表は器いっぱいまで戻る。
+   */
+  const tableWide = await widthOf(table);
+  expect(tableWide, '表に読み幅が掛かっている(器に cap を掛けた実装)').toBeGreaterThan(wide - 1);
+  expect(
+    tableWide,
+    '上限を外したのに表が広がっていない(左の余白が 0 に戻っていない)',
+  ).toBeGreaterThan(tableA4);
 
   // ⚠ **戻せる**(片道だけ効く実装を落とす)。選び直したら元の幅へ
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
@@ -84,4 +97,79 @@ test('🔴 紙面を変えると散文の幅だけが変わる(表は動かな�
   await expect(page.locator('[data-pkc-field="page-format-select"]')).toHaveValue('a3-landscape');
 
   expect(errors).toEqual([]);
+});
+
+/**
+ * 🔴 **読み幅を列の中央に置く**(#722 P2-11。user 裁定 2026-09-06 = 案 A)。
+ *
+ * ⚠ 直す前は左寄せで、1440px の窓では中央の列 941px に対して本文が 672px、
+ *   **右に 269px がいつも空いていた**(cowork 実測 2026-09-05)。
+ *
+ * 観測点は 2 つ ── **どちらも実ブラウザにしか無い**(happy-dom に版面は無い):
+ * ① 段落の**左右の余白が同じ**(= 中央に在る)
+ * ② 🔴 **表が段落と同じ左端に在る** ── ここが肝である。塊を素直に中央へ置くと
+ *    **読み幅より狭い表が段落から離れて浮く**(実測:4 列の表 240px が L=342、
+ *    段落は L=126 で **216px** ずれた)。だから表・図は「読み幅の**左端**」に揃える。
+ * ⚠ **器には cap を掛けない**(掛けると全部の図が焼き直される)ので、ここも
+ *   「器が狭まっていないこと」を上の test と同じ形で守っている。
+ */
+test('🔴 本文が列の中央に置かれ、表は段落と同じ左端に揃う (#722 P2-11)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('幅');
+  await page
+    .locator('[data-pkc-field="editor-body"]')
+    .fill(
+      '# 見出し\n\n段落です。読み幅いっぱいに広がるくらいの長さを持たせてあります。\n\n' +
+        '| 品名 | 数量 | 単価 |\n|---|---|---|\n| りんご | 3 | 120 |\n',
+    );
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  // ⚠ 描き終わるまで待つ ── 待たずに測ると器がまだ空で「前提が崩れている」で落ちる
+  await expect(
+    page.locator('[data-pkc-field="detail-body"] p').first(),
+    '読む面に本文が出ていない',
+  ).toBeVisible({ timeout: 15_000 });
+  await expect(
+    page.locator('[data-pkc-field="detail-body"] table').first(),
+    '読む面に表が出ていない',
+  ).toBeVisible({ timeout: 15_000 });
+
+  const box = async (sel: string): Promise<{ l: number; w: number; r: number }> =>
+    page.evaluate((s) => {
+      /**
+       * ⚠ **器の探し方で 2 度外した**(1 稿目・2 稿目)── `data-pkc-prose` は
+       *   本文の器**そのもの**に付く(子孫ではない)が、同じ名前の器は
+       *   **分割プレビュー側にも在る**ので、`[…][data-pkc-prose]` の 1 件目は
+       *   段落を 1 つも持たない器に当たった。
+       * 🔑 **中身で選ぶ** ── 段落を持っている本文の器を採り、
+       *   それが散文の器だと名乗っていることも見る(空振り防止)。
+       */
+      const host = [...document.querySelectorAll('[data-pkc-field="detail-body"]')].find(
+        (el) => el.querySelector('p') !== null,
+      );
+      if (host !== undefined && !host.hasAttribute('data-pkc-prose'))
+        throw new Error('前提が崩れている: 本文の器が散文と名乗っていない');
+      if (host === undefined) throw new Error('前提が崩れている: 散文の器が無い');
+      const hr = host.getBoundingClientRect();
+      const el = host.querySelector(s);
+      if (el === null) throw new Error(`前提が崩れている: ${s} が描かれていない`);
+      const r = el.getBoundingClientRect();
+      return { l: Math.round(r.left - hr.left), w: Math.round(r.width), r: Math.round(hr.right - r.right) };
+    }, sel);
+
+  const p = await box('p');
+  // ① 左右の余白が同じ(± 2px は端数)
+  expect(Math.abs(p.l - p.r), `本文が中央に無い(左 ${p.l} / 右 ${p.r})`).toBeLessThanOrEqual(2);
+  // ⚠ 空振り防止 ── 余白が 0 なら「中央」も自明に成り立つ
+  expect(p.l, '器と読み幅が同じで、中央かどうかを見ていない').toBeGreaterThan(20);
+
+  // ② 表は段落と同じ左端(浮かせない)
+  const t = await box('.pkc-md-block[data-pkc-md-block-kind="table"]');
+  expect(Math.abs(t.l - p.l), `表が段落と違う左端に在る(表 ${t.l} / 段落 ${p.l})`).toBeLessThanOrEqual(2);
+  // ⚠ 空振り防止 ── 表が読み幅より狭いときにだけ、この検査は意味を持つ
+  expect(t.w, '表が読み幅と同じ幅で、左端の揃いを見ていない').toBeLessThan(p.w - 50);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

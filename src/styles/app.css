@@ -1930,6 +1930,18 @@ li[data-pkc-row-slot] {
    */
   --pkc-prose-block: 1;
   max-width: var(--read-w);
+  /**
+   * 🔴 **読み幅を列の中央に置く**(#722 P2-11。user 裁定 2026-09-06 = 案 A)。
+   *
+   * ⚠ 直す前は左寄せだったので、1440px の窓では中央の列 941px に対して本文が
+   *   672px、**右に 269px がいつも空いていた**(cowork 実測 2026-09-05)。
+   * 🔑 **器には掛けない**(上の戒め)── 器を狭めると図のラスタ幅が変わって
+   *   **全部の図が焼き直される**。塊の側を `margin-inline: auto` で寄せれば、
+   *   器の `clientWidth` は 1px も動かない。
+   * ⚠ **上限が無い人**(紙面「フル HD」= `--read-w: none`)には**何も起きない**
+   *   ── 塊が器いっぱいなので `auto` は 0 になる。
+   */
+  margin-inline: auto;
 }
 /**
  * 🔴 **ライブエディタで生になった行**(`[data-pkc-row-slot]`)。
@@ -1942,6 +1954,8 @@ li[data-pkc-row-slot] {
  * (`proseSpan`)── allow-list の判定は上の 1 本のままで、こちらは結果を引き継ぐ。 */
 .pkc-md-rendered[data-pkc-prose] > [data-pkc-row-slot][data-pkc-row-prose] {
   max-width: var(--read-w);
+  /* ⚠ 生になった行も同じ軸に置く(#722 P2-11)── 押した瞬間に左へ飛ばない */
+  margin-inline: auto;
 }
 /**
  * 🔴 **見出しは「見出しに見える」ことが先**(user 報告 2026-08-27)。
@@ -2204,6 +2218,26 @@ li[data-pkc-row-slot] {
  */
 .pkc-md-rendered[data-pkc-prose] > .pkc-md-block[data-pkc-render-lang='csv'] {
   max-width: var(--read-w);
+}
+/**
+ * 🔴 **表・図・コードの塊も、読み幅の左端に揃える**
+ * (#722 P2-11。user 裁定 2026-09-06 ── 実測の 3 択から「段落と同じ左端に揃える」)。
+ *
+ * ⚠ **中央に置く形は採らない** ── 読み幅より狭い塊が段落から離れて浮く。
+ *   実測(1440px の窓 / 中央の列 925px / 読み幅 672px):3 列の表(144px)が
+ *   左端 **390px**、段落は **126px** で **264px** ずれた。
+ * ⚠ **代償を正直に書く**:左に余白を入れるぶん、**横に広い塊は 126px 狭くなる**
+ *   (実測 1036px → 854px)。user 裁定でこちらを選んでいる ── 文章と表が
+ *   **1 本の列に見える**ほうを採った。
+ * ⚠ そのため `page-format.smoke.spec.ts` の「紙面を変えても表の幅は動かない」は
+ *   **主張を書き直した**(器に cap が掛かっていないことは、表が読み幅を**超える**ことで見る)。
+ * ⚠ **上限なし**(紙面「フル HD」= `--read-w: none`)では `calc` が成り立たないので
+ *   この宣言は無効になり、`margin-inline-start` は **0** に戻る ── 上限が無いのだから
+ *   左端でよい(実測で確かめた)。
+ */
+.pkc-md-rendered[data-pkc-prose] > .pkc-md-block {
+  margin-inline-start: max(0px, calc((100% - var(--read-w)) / 2));
+  margin-inline-end: auto;
 }
 .pkc-md-rendered .pkc-render-source {
   margin: 0;
