@@ -182,11 +182,31 @@ describe('ヘルプの面', () => {
     expect(src, 'ヘルプの面が窓を開いている').not.toContain('window.open');
   });
 
-  /** ⚠ 見出しが無いと、版の行とお知らせが地続きに見える。 */
-  it('⚠ 「これまでのお知らせ」と「マニュアル」の見出しが出る', () => {
+  /**
+   * ⚠ 見出しが無いと、版の行とお知らせが地続きに見える。
+   * 🔴 **並びは「マニュアル → ショートカット → お知らせ」**(#719。user 裁定
+   *   2026-09-06 = 案 A)── cowork 実測で「使い方を知りたい」で開いた人が最初に
+   *   読むのが**リリースノート 11 件**だった(本文 106,339 字 / 5455px)。
+   * ⚠ **等値で pin する** ── 「3 つ在る」だけだと、並びが戻っても落ちない。
+   */
+  it('🔴 見出しは「マニュアル → ショートカットキー → これまでのお知らせ」の順に出る', () => {
     new HelpRenderer(region).render();
     const heads = [...region.querySelectorAll('h3')].map((e) => e.textContent);
-    expect(heads, '見出しが足りない').toEqual(['これまでのお知らせ', 'ショートカットキー', 'マニュアル']);
+    expect(heads, '見出しの並びが違う').toEqual(['マニュアル', 'ショートカットキー', 'これまでのお知らせ']);
+    /**
+     * 🔑 **版は先頭のほうに在る**(下へ沈めない ── #719 の裁定)。
+     * ⚠ **1 つだけ**であることも見る ── 「上にも出す」形にすると同じ値が 2 経路に
+     *   なり、片方だけ直して食い違う(CLAUDE.md §7 / この面の元からの戒め)。
+     */
+    const vers = region.querySelectorAll('[data-pkc-field="help-version"]');
+    expect(vers.length, '版が 2 か所に出ている(または消えた)').toBe(1);
+    const order = [...region.querySelectorAll('[data-pkc-field="help-version"], h3')].map((e) =>
+      e.getAttribute('data-pkc-field') ?? e.textContent,
+    );
+    expect(order.slice(0, 2), '版がマニュアルの見出しの直後に無い').toEqual([
+      'マニュアル',
+      'help-version',
+    ]);
   });
 
   /**
@@ -829,9 +849,77 @@ describe('マニュアルの中を探す(#636)', () => {
   it('⚠ 探す欄のために見出しを増やしていない', () => {
     new HelpRenderer(region).render();
     expect([...region.querySelectorAll('h3')].map((h) => h.textContent)).toEqual([
-      'これまでのお知らせ',
-      'ショートカットキー',
       'マニュアル',
+      'ショートカットキー',
+      'これまでのお知らせ',
     ]);
+  });
+});
+
+/**
+ * 🔴 **面の中の目次**(#719。user 裁定 2026-09-06 = 案 A)。
+ *
+ * cowork 実測 2026-09-05:「本文 **106,339 字 / `scrollHeight` 5455px**、
+ * **面の中のリンク 0 件**」── 10 万字を目次なしで探す形だった。
+ *
+ * ⚠ **飛び先が在る見出しだけ並べる**(無言の dead click を作らない)── 描画器が
+ *   `id` を焼くのは h1〜h3 だけなので、h4 以下は行にしない。
+ */
+describe('ヘルプの面の目次(#719)', () => {
+  it('🔴 目次の行が出て、押すとその見出しへ飛ぶ', async () => {
+    const r = new HelpRenderer(region, { render: async (t) => renderMarkdown(t) });
+    r.render();
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    const host = region.querySelector<HTMLElement>('[data-pkc-region="help-manual"]')!;
+    // ⚠ 空振り防止 ── 実物が描けていること
+    expect(
+      host.querySelectorAll('h1,h2,h3,h4,h5,h6').length,
+      'マニュアルが描けていない(台の空振り)',
+    ).toBeGreaterThan(50);
+
+    const rows = [...region.querySelectorAll<HTMLElement>('[data-pkc-field="help-toc-row"]')];
+    expect(rows.length, '目次の行が 1 つも出ていない').toBeGreaterThan(10);
+
+    /**
+     * 🔴 **行の数 = `id` を持つ見出しの数**(等値)。
+     * ⚠ 「1 つ以上」だと、**先頭 1 件だけ出す**実装でも緑になる。
+     */
+    const withId = [...host.querySelectorAll('h1[id], h2[id], h3[id]')];
+    expect(rows.length, '目次の行と、飛び先のある見出しの数が合わない').toBe(withId.length);
+    // ⚠ 対照群 ── `id` の無い見出しは行にしない(押しても飛べないので)
+    expect(
+      host.querySelectorAll('h4[id], h5[id], h6[id]').length,
+      '前提が崩れている: h4 以下に id が焼かれている(目次の切り方を見直す)',
+    ).toBe(0);
+
+    // 押すと、その見出しへ飛ぶ
+    const seen: HTMLElement[] = [];
+    for (const h of withId)
+      (h as HTMLElement).scrollIntoView = function (this: HTMLElement): void {
+        seen.push(this);
+      };
+    rows[3]!.click();
+    expect(seen, '押しても飛んでいない').toHaveLength(1);
+    expect(seen[0], '押した行と違う見出しへ飛んだ').toBe(withId[3]);
+  });
+
+  /**
+   * 🔴 **これまでのお知らせは題名だけ並ぶ**(#719 案 A)。
+   * ⚠ 直す前は 11 件の中身が全部開いたまま**面の先頭**に居た。
+   */
+  it('🔴 お知らせは畳まれて出て、押すと中身が開く', () => {
+    new HelpRenderer(region).render();
+    const items = [...region.querySelectorAll<HTMLDetailsElement>('[data-pkc-help-notice]')];
+    expect(items.length, 'お知らせが 1 件も出ていない(空振り)').toBeGreaterThan(0);
+    for (const it of items) {
+      expect(it.tagName, 'お知らせが畳める形になっていない').toBe('DETAILS');
+      expect(it.open, '最初から開いている(題名だけ並べる裁定に反する)').toBe(false);
+      expect(
+        it.querySelector('[data-pkc-field="notice-title"]')?.tagName,
+        '題名が summary になっていない(押しても開かない)',
+      ).toBe('SUMMARY');
+      // ⚠ 中身は**在る**(畳んだのであって、落としたのではない)
+      expect(it.querySelectorAll('li').length, 'お知らせの中身が落ちている').toBeGreaterThan(0);
+    }
   });
 });

@@ -5439,6 +5439,62 @@ li[data-pkc-row-slot] {
  * 「同じものは同じ場所」を崩さないよう、器の padding は共有している(上)。
  * ⚠ マニュアルは本文と**同じ体裁**で出す(`.pkc-md-rendered` を付けてある)。
  */
+/**
+ * 🔴 **ヘルプの面の中の目次**(#719。user 裁定 2026-09-06 = 案 A)。
+ *
+ * cowork 実測 2026-09-05:「本文 **106,339 字 / `scrollHeight` 5455px**、
+ * 面の中のリンク **0 件**」── 10 万字を目次なしで探す形だった。
+ *
+ * ⚠ **高さを切って自分で流す** ── 切らないと目次だけで画面が埋まり、
+ *   「先頭にマニュアルを置いた」意味が消える(マニュアルの h1〜h3 は 100 行を超える)。
+ * ⚠ 段付けは**押し込みの深さ**だけ ── 色は情報にだけ使う(業務画面の作法)。
+ */
+[data-pkc-region='help-toc'] {
+  max-height: 30vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--s2);
+  margin-bottom: var(--s3);
+}
+/* ⚠ ボタンの既定(高さ固定・中央寄せ・枠)を**ここで外す** ── 目次の行は
+   読み物であって、押し所の粒ではない(字が折り返しても潰さない)。 */
+[data-pkc-region='help-toc'] [data-pkc-field='help-toc-row'] {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  justify-content: flex-start;
+  text-align: start;
+  border: none;
+  background: none;
+  padding: 2px var(--s2);
+  white-space: normal;
+}
+[data-pkc-region='help-toc'] [data-pkc-field='help-toc-row']:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+[data-pkc-region='help-toc'] [data-pkc-level='1'] {
+  font-weight: 600;
+}
+[data-pkc-region='help-toc'] [data-pkc-level='2'] {
+  padding-inline-start: var(--s4);
+}
+[data-pkc-region='help-toc'] [data-pkc-level='3'] {
+  padding-inline-start: var(--s5);
+  color: var(--muted);
+}
+/* 🔴 **これまでのお知らせは題名だけ並べる**(#719 案 A)── 直す前は 11 件の
+   中身が全部開いたまま**面の先頭**に居て、マニュアルまで 5455px あった。 */
+[data-pkc-region='help-notices'] > details {
+  margin: 0 0 var(--s3);
+}
+[data-pkc-region='help-notices'] > details > summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
 [data-pkc-region='help-notices'] section {
   margin: 0 0 var(--s4);
 }
