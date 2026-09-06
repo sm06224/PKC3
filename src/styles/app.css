@@ -644,10 +644,30 @@ select:focus-visible {
 [data-pkc-region='browse-tabs'] [data-pkc-icon] {
   display: none;
 }
+/**
+ * 🔴 **選んでいるタブの下線は「字の色」**(#720 ②。user 裁定 2026-09-06)。
+ *
+ * cowork 実測 2026-09-05:「5 つのタブに `role` も `aria-selected` も無く、
+ * 選択状態は **`background` と `color` だけ**」── ①で読み上げには届くようにしたが、
+ * **色が見分けにくい人には手がかりが 1 つも無い**ままだった。
+ *
+ * 🔑 **色ではなく濃さで示す** ── 下線を `--accent` から `--fg`(本文の字の色)へ。
+ *   ⚠ 線が乗るのは**タブ自身の地**(`--accent-dim`)なので、そことの比で測る:
+ *
+ *   | | `--fg` / 地 | `--accent` / 地 |
+ *   |---|---|---|
+ *   | 9 配色のうち **8 つ** | **6.66 〜 14.30** | 3.07 〜 5.68 |
+ *   | terminal だけ | 3.59 | 4.03 |
+ *
+ *   ⚠ **terminal では少し下がる**が、UI 部品の基準(3:1)は満たしている ──
+ *   残り 8 配色で**2〜4 倍**強くなるほうを採った(user 裁定)。
+ * ⚠ 地(`--accent-dim`)と太字は**残す** ── 手がかりを増やしたのであって、
+ *   置き換えたのではない。
+ */
 [data-pkc-region='browse-tabs'] [data-pkc-active] {
   background: var(--accent-dim);
   color: var(--accent-dim-fg);
-  box-shadow: inset 0 -2px 0 var(--accent);
+  box-shadow: inset 0 -2px 0 var(--fg);
   font-weight: 600;
 }
 /* 左の列の下端: **ノート全体**に対する操作 */

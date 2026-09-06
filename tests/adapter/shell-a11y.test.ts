@@ -24,6 +24,7 @@ import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { CenterRouter } from '../../src/adapter/ui/render/center';
 import { appPanes } from '../../src/adapter/ui/render/pane-visibility';
+import { blocksFor, stripComments, withoutMedia } from '../helpers/css-blocks';
 import {
   DIALOG_REGION,
   confirmInApp,
@@ -245,5 +246,32 @@ describe('⑤ 面とダイアログに名前が付いている(#720)', () => {
     expect(title, '題名が描かれていない(台が崩れている)').not.toBeNull();
     expect(title!.textContent).toBe('資料 A');
     expect(title!.tagName, '題名の段が h1 でない(見出し一覧の最上段が欠ける)').toBe('H1');
+  });
+});
+
+/**
+ * 🔴 **選んでいるタブの手がかりを、色だけにしない**(#720 ②。user 裁定 2026-09-06)。
+ *
+ * cowork 実測 2026-09-05:「5 つのタブに `role` も `aria-selected` も無く、選択状態は
+ * **`background` と `color` だけ**」。①で読み上げには届くようにしたが、
+ * **色が見分けにくい人には手がかりが 1 つも無い**ままだった。
+ *
+ * 🔑 下線を `--accent` から **`--fg`(本文の字の色)** へ替える。
+ * ⚠ **実ブラウザにしか無い話ではない** ── 値はトークン 1 つなので字面で pin できる。
+ *   実際に線が見えるか(太さ・位置)は `organize.smoke.spec.ts` が見る。
+ */
+describe('選んでいるタブの下線(#720 ②)', () => {
+  const css = (): string =>
+    withoutMedia(stripComments(readFileSync('src/styles/app.css', 'utf-8')));
+
+  it('🔴 下線は字の色(--fg)── 色だけの手がかりにしない', () => {
+    const b = blocksFor(css(), "[data-pkc-region='browse-tabs'] [data-pkc-active]");
+    expect(b.length, '選んでいるタブの規則が無い(空振り)').toBe(1);
+    const dec = b[0]!;
+    expect(dec, '下線が引かれていない').toContain('inset 0 -2px 0');
+    expect(dec, '下線が字の色になっていない').toContain('inset 0 -2px 0 var(--fg)');
+    // ⚠ **対照群** ── 地と太字は残っている(手がかりを増やしたのであって、置き換えていない)
+    expect(dec, 'タブの地が消えた').toContain('var(--accent-dim)');
+    expect(dec, '太字が消えた').toContain('font-weight: 600');
   });
 });
