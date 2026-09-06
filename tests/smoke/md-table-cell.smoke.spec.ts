@@ -128,6 +128,8 @@ test('🔴 升を打った直後に隣の升を押しても、欄が消えない
     q()[3]!.click();
     const i2 = document.querySelector<HTMLInputElement>('[data-pkc-field="cell-input"]');
     if (i2 === null) return 'i2 が開かない';
+    // 🔑 **この欄そのものに印を付ける** ── 壊されて開き直されたなら印は消える
+    i2.setAttribute('data-probe-mark', '1');
     i2.value = 'い';
     return 'ok';
   });
@@ -140,6 +142,15 @@ test('🔴 升を打った直後に隣の升を押しても、欄が消えない
   });
   await expect(input, '書き戻しが届いた瞬間に欄が消えた(#745)').toBeVisible();
   await expect(input, '打ちかけの字が消えた(#745)').toHaveValue('い');
+  /**
+   * 🔑 **空振り防止** ── 欄が一度も壊されなかった回は、この検査は何も見ていない。
+   * ⚠ 製品の側が変わって(書換が同期になる / 塊を留めるようになる)競合の窓に
+   *   入らなくなったら、ここが鳴る。
+   */
+  await expect(input, '欄が壊されていない(競合の窓に入っていない)').not.toHaveAttribute(
+    'data-probe-mark',
+    '1',
+  );
 
   /**
    * 🔴 **ここが決め手** ── 続きを打てるか。
@@ -163,6 +174,71 @@ test('🔴 升を打った直後に隣の升を押しても、欄が消えない
     timeout: 15_000,
   });
   await expect(page.locator(CELL).nth(3), '開き直したら 2 つ目が消えた').toHaveText('いろは');
+
+  expect(errors, `ページで例外が出た: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **打っている途中で書き戻しが届いても、`Escape` は「やめる」のまま**(#745 の 2 巡目)。
+ *
+ * > 動線レビューの物語:A1 に打って `Enter`、すぐ A2 を押して「りんご」と打つ。
+ * > 100ms 後に A1 の書き戻しが届く。ここで気を変えて `Escape` を押すと升は空に戻る
+ * > ── **ところが数百ミリ秒後、「りんご」がひとりでに戻ってくる**。
+ *
+ * ⚠ 原因は、欄が壊されるとき `blur` が飛んで**打ちかけの字を確定していた**こと。
+ * 🔑 マニュアルは「やめる ── `Escape`(押す前の字に戻ります)」と約束している ──
+ *   その約束が、この直しがいちばん想定している流れ**でだけ**破れていた。
+ * ⚠ そのうえ書込は履歴を伸ばさない形なので、**戻す道も無かった**。
+ */
+test('🔴 打っている途中で書き戻しが届いても、Escape で消した字は戻ってこない (#745)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('やめる');
+  await page
+    .locator('[data-pkc-field="editor-body"]')
+    .fill('| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+
+  const cells = page.locator(CELL);
+  await expect(cells, '押せる升の数が違う').toHaveCount(6, { timeout: 15_000 });
+
+  await page.evaluate(() => {
+    const sel = '[data-pkc-field="detail-body"] [data-pkc-action="edit-cell"]';
+    const q = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>(sel)];
+    q()[2]!.click();
+    const i1 = document.querySelector<HTMLInputElement>('[data-pkc-field="cell-input"]')!;
+    i1.value = 'あ';
+    i1.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    q()[3]!.click();
+    document.querySelector<HTMLInputElement>('[data-pkc-field="cell-input"]')!.value = 'りんご';
+  });
+
+  // ⚠ **書き戻しが届くまで待つ**(= 欄が壊されて開き直される回に当てる)
+  await expect(cells.nth(2), '前提が崩れた(書き戻しが届いていない)').toHaveText('あ', {
+    timeout: 15_000,
+  });
+
+  // 🔴 ここで気を変えて `Escape`
+  await page.keyboard.press('Escape');
+  await expect(cells.nth(3), 'Escape で押す前の字に戻っていない').toHaveText('2');
+
+  /**
+   * 🔴 **戻ってこないこと**を見る ── ここが決め手である。
+   * ⚠ 直す前は、この待ちの間に「りんご」がひとりでに現れた(実測)。
+   */
+  await page.waitForTimeout(2_500);
+  await expect(cells.nth(3), 'やめたのに、打ちかけの字が戻ってきた (#745)').toHaveText('2');
+
+  // ── 開き直しても戻らない(disk にも書かれていない)
+  await page.reload();
+  await page.locator('[data-pkc-region="filer-table"] tbody tr').first().click();
+  await expect(page.locator(CELL).nth(3), 'disk に打ちかけの字が書かれていた').toHaveText('2', {
+    timeout: 15_000,
+  });
 
   expect(errors, `ページで例外が出た: ${errors.join(' / ')}`).toEqual([]);
 });

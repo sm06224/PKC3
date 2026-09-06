@@ -42,17 +42,51 @@ export interface OpenCell {
   readonly value: string;
   readonly start: number;
   readonly end: number;
+  /**
+   * 🔴 **控えたときの升の字**(`data-pkc-cell-raw`)。
+   * ⚠ 開き直す先が**同じ升かどうか**を見分けるために要る ── 行番号だけでは
+   *   足りない(本文に 1 行入ると番号が全部ずれ、**1 つ上の升**が同じ番号を持つ)。
+   */
+  readonly raw: string;
 }
+
+/** 🔴 **確定させないための印**(下の docstring)。 */
+export const HOLD_ATTR = 'data-pkc-cell-hold';
 
 const INPUT = '[data-pkc-field="cell-input"]';
 
-/** その升を名指しする選択子(⚠ 値は属性なので、引用符を含む字は来ない)。 */
+/**
+ * その升を名指しする選択子。
+ *
+ * ⚠ **「属性値だから安全」ではない**(着地前レビュー 記録 6)── 属性値に引用符は入りうる。
+ * 🔑 ここが安全なのは**焼く側が数字しか出さない**からである:
+ *   `markdown-render.ts` と `csv-table.ts` の 2 か所とも `${数値}` で組み、
+ *   読み手は `html: false` なので user が生の `<td>` を書いても字として escape される。
+ *   ⚠ 守り手が**別の file に居る**ので、そちらを変えるときはここも見ること。
+ */
 function cellSelector(line: string, col: string): string {
   return `[data-pkc-action="edit-cell"][data-pkc-cell-line="${line}"][data-pkc-cell-col="${col}"]`;
 }
 
 /**
- * いま開いている升の欄を控える。開いていなければ `null`。
+ * 🔴 **いま開いている升の欄を控え、確定しないように印を付ける**。開いていなければ `null`。
+ *
+ * ⚠ **副作用がある**(名前は「控える」だが、印も付ける)── 塊が差し替わると
+ *   欄は壊れ、そのとき `blur` が飛んで `commit()` が走る。それを止めないと 3 つ壊れる
+ *   (どれも 2026-09-06 に実測した):
+ *
+ * 1. 🔴 **`Escape` が効かなくなる** ── 打ちかけの字が本文に入ってしまうので、
+ *    `Escape` でいったん消えても**数百ミリ秒後にひとりでに戻ってくる**
+ *    (マニュアルの「押す前の字に戻ります」が嘘になる)
+ * 2. 🔴 **書込が輪になる** ── 確定 → 書き戻し → 欄が壊れる → また確定 …
+ *    打ち続けている間ずっと disk へ書き、**日本語の変換が毎回途切れる**
+ * 3. 🔴 **行がずれた回に、別の升へ書く** ── 行番号は掴んだ時点のものなので、
+ *    本文に 1 行入ると**1 つ上の升**を指す
+ *
+ * 🔑 **開き直すのだから、ここで確定させる理由はもう無い**(打ちかけの字は
+ *   欄ごと戻る)。⚠ 開き直せなかった回は打ちかけの字が落ちるが、
+ *   **古い行番号で別の升へ書くよりは安全**である
+ *   (CLAUDE.md「衝突は、検出するより起こらなくするほうが強い」)。
  * ⚠ **`host` の中だけ**を見る ── 別の面(添付の説明・小窓)の欄を掴まない。
  */
 export function captureCellInput(host: HTMLElement): OpenCell | null {
@@ -63,9 +97,12 @@ export function captureCellInput(host: HTMLElement): OpenCell | null {
   const line = cell.getAttribute('data-pkc-cell-line');
   const col = cell.getAttribute('data-pkc-cell-col');
   if (line === null || col === null) return null;
+  // 🔴 確定させない(この印は `binder.ts` の `commit()` が見る)
+  input.setAttribute(HOLD_ATTR, '');
   return {
     line,
     col,
+    raw: cell.getAttribute('data-pkc-cell-raw') ?? '',
     value: input.value,
     start: input.selectionStart ?? input.value.length,
     end: input.selectionEnd ?? input.value.length,
@@ -77,26 +114,51 @@ export function captureCellInput(host: HTMLElement): OpenCell | null {
  *
  * ⚠ **同じ升が新しい塊に無ければ、何もしない** ── 行が消えた / 列が減った本文が
  *   届いたときに、**別の升へ打ちかけの字を移さない**(それはデータの取り違えである)。
+ * ⚠ 見分けは**行番号だけでは足りない**(行がずれると別の升が同じ番号を持つ)ので、
+ *   **升の字も突き合わせる**。
  * ⚠ 既に欄が開いているなら何もしない(塊が差し替わらなかった回)。
  */
 export function reopenCellInput(host: HTMLElement, keep: OpenCell): void {
+  /**
+   * 🔴 **印は 1 回の描き直しの間だけ有効**(着地前レビュー W-1)。
+   *
+   * ⚠ 塊が差し替わらなかった回(= 表と関係ない書き戻し)は**同じ欄が生き残る**ので、
+   *   印を消さないと**そのまま残る** ── `commit()` は印を見て黙って帰るので、
+   *   user が `Enter` を押しても**何も起きず、打った字が本文に入らない**。
+   *   ⚠ #748 が直した「押せるのに書けない」と同じ顔で、今度は**字が消える側**である。
+   * 🔑 だから**まず消す**(早期 return より前)── 付ける側と消す側を同じ file に置く。
+   */
+  host.querySelector<HTMLInputElement>(INPUT)?.removeAttribute(HOLD_ATTR);
   if (host.querySelector(INPUT) !== null) return;
   const cell = host.querySelector<HTMLElement>(cellSelector(keep.line, keep.col));
   if (cell === null) return;
+  /**
+   * 🔴 **同じ升であることを、字で確かめる**(動線レビュー D3)。
+   * ⚠ 行番号は**掴んだ時点のもの**なので、本文に 1 行入ると番号が全部ずれ、
+   *   その番号を持つのは**さっきまで 1 つ上だった升**である ── そこへ開き直すと
+   *   打った字が別の行に入る(画面は「打っている升」に見えるので気づけない)。
+   * 🔑 一致しなければ**開かない** ── 打ちかけの字は落ちるが、別の升は汚さない。
+   */
+  if ((cell.getAttribute('data-pkc-cell-raw') ?? '') !== keep.raw) return;
   // 🔑 開くのは `binder.ts` の `edit-cell` ── ここは押すだけ(§7)
   cell.click();
   const input = host.querySelector<HTMLInputElement>(INPUT);
   if (input === null) return;
   /**
-   * ⚠ **この 2 行は、smoke では殺せない**(実測 2026-09-06)。
-   *
-   * 欄が壊されるとき `blur` が撃たれて打ちかけの字は確定するので、
-   * 本文を往復して**同じ字が戻ってくる** ── だから最後の姿は同じになる。
-   * 🔑 それでも書くのは、**往復の間に打った字を取りこぼさないため**である
-   *   (戻さないと、その窓では古い字が全選択されていて、次の 1 打で消える)。
-   * ⚠ **鳴る検査は持っていない**と自覚して置く(守っていると書かない)。
+   * ⚠ **この 1 行は殺せない**(実測 2026-09-06)── 欄が壊されるとき `blur` が
+   *   打ちかけの字を確定していた頃は、本文を往復して**同じ字が戻ってきた**ため。
+   * 🔑 いまは確定させない({@link captureCellInput} の印)ので、**この行が唯一の道**
+   *   である ── 落とすと打ちかけの字がそのまま消える。
    */
   input.value = keep.value;
+  /**
+   * 🔴 **字を打つ位置を戻す。落とすと、打ちかけの字が次の 1 打で全部消える**
+   *   (着地前レビュー A-1 が実測で示した ── 私は「殺せない」と書いていたが誤り)。
+   *
+   * ⚠ 欄を開くと `binder.ts` が `select()` で**全部選ぶ**。戻さないとその全選択が
+   *   残るので、次に打った 1 字が**打ちかけの字を丸ごと置き換える**。
+   *   実測:`いう` の間に caret を置いて `X` を打つと `いXう` → 落とすと **`X`**。
+   */
   input.setSelectionRange(keep.start, keep.end);
   /** ⚠ `focus` は `binder.ts` が既に撃っている ── ここは念のためで、no-op である。 */
   input.focus();

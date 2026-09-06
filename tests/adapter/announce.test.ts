@@ -851,8 +851,7 @@ describe('お知らせの文面は固定(#220-7)', () => {
   /** id → 文面(題名 + items)の digest。⚠ **足したら 1 行足す**。 */
   const KNOWN: readonly [string, string][] = [
     // ⚠ まだ配っていない(この PR で足した entry)
-    ['2026-09-06-table-cell-keep-typing', '8ed3a035'],
-    ['2026-09-06-table-cell-fixes', '8dc06233'],
+    ['2026-09-06-table-cell-fixes', '17f2c6be'],
     ['2026-09-05-md-table-cell', 'c0d4b294'],
     ['2026-09-05-paste-tsv-table', '359f45be'],
     // ⚠ まだ配っていない(この PR で足した entry)ので、着地前に字を直して pin し直した
@@ -862,6 +861,7 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-09-05-scan-after-save', 'ab86edfd'],
     ['2026-09-05-a11y-theme-keys', 'b4399731'],
     ['2026-09-05-empty-list-and-touch', 'b6f7b1d8'],
+    ['2026-09-05-low-window-append', '14a32fb3'],
     // ⚠ 落とした entry の注記(訂正の経緯)は CHANGELOG と git の履歴に在る ── ここには残さない
   ];
 
