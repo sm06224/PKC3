@@ -32,9 +32,43 @@
 /** 計算に使える字(この whitelist の外が 1 つでも入ったら式ではない)。 */
 const CALC_CHARS = /^[0-9+\-*/%().\s]+$/;
 
+/**
+ * 🔴 **全角で打った字を半角に読み替える**(user 報告 2026-09-07
+ * 「全文編集やインライン編集で数式評価が発火していない気がする」)。
+ *
+ * ⚠ **日本語入力のまま打つと全角になる** ── 実測(実ブラウザ):
+ *   `２＋３＝` + `Enter` は**何も起きなかった**。日本語で書く人にとっては
+ *   これが**既定の打ち方**なので、「効かない機能」に見える。
+ * 🔑 読み替えるのは**読むときだけ** ── 打った式は全角のまま残し、
+ *   答えだけ半角で挿す(`２＋３＝5`)。⚠ user が打った字を書き換えない。
+ * ⚠ `，`(全角のカンマ)は**半角の `,` と同じく計算に使えない字**へ写る
+ *   ── だから `１，０００＝` も半角と同じように止まる(桁区切りの門)。
+ * ⚠ 全角の空白(`\u3000`)は写さなくてよい ── 正規表現の `\s` が既に含む。
+ */
+const FULLWIDTH_TO_HALF: Readonly<Record<string, string>> = {
+  '０': '0', '１': '1', '２': '2', '３': '3', '４': '4',
+  '５': '5', '６': '6', '７': '7', '８': '8', '９': '9',
+  '＋': '+', '－': '-', '\u2212': '-', '＊': '*', '／': '/', '％': '%',
+  '（': '(', '）': ')', '．': '.', '，': ',', '＝': '=',
+};
+
+/** 1 字を半角に読み替える(表に無ければそのまま)。 */
+function toHalf(ch: string): string {
+  return FULLWIDTH_TO_HALF[ch] ?? ch;
+}
+
+/**
+ * 字の並びを半角に読み替える。
+ * ⚠ 表は**すべて 1 字 → 1 字**なので、**位置が動かない**
+ *   (添字で切っている呼び側が壊れない)。
+ */
+function toHalfWidth(s: string): string {
+  return [...s].map(toHalf).join('');
+}
+
 /** 走査に使う 1 字の判定(上の whitelist と**同じ集合**を 1 か所で持つ)。 */
 function isCalcChar(ch: string): boolean {
-  return CALC_CHARS.test(ch);
+  return CALC_CHARS.test(toHalf(ch));
 }
 
 /**
@@ -204,7 +238,12 @@ function startsMidToken(before: string | undefined, expr: string): boolean {
  * ⚠ 失う動線は `1200=` → `1200=1200` だけである。
  */
 function hasNoOperation(expr: string): boolean {
-  return !/[+\-*/%()]/.test(expr);
+  /**
+   * ⚠ **括弧は「計算する所」に数えない**(2026-09-07、全角を受けるときに気づいた)
+   *   ── 日本語の箇条書きの印 `（１）` は全角の丸括弧なので、数えると
+   *   `（１）＝` が `（１）＝1` になる。括弧しか無い式は答えが中身と同じである。
+   */
+  return !/[+\-*/%]/.test(expr);
 }
 
 /**
@@ -219,7 +258,8 @@ export function detectInlineCalcRequest(
 ): InlineCalcRequest | null {
   if (typeof fullText !== 'string') return null;
   if (caretPos < 0 || caretPos > fullText.length) return null;
-  if (fullText[caretPos - 1] !== '=') return null;
+  // ⚠ 全角の `＝` も合図にする(日本語入力のまま打つとこちらになる)
+  if (toHalf(fullText[caretPos - 1] ?? '') !== '=') return null;
   /**
    * 🔴 **行の終わりでなければ撃たない**(2026-09-07、同じレビュー)。
    *
@@ -242,17 +282,18 @@ export function detectInlineCalcRequest(
   // 行頭なら、箇条書きの印を式から外す(`- 1+2=` の `- `)
   const atLineStart = start === 0 || fullText[start - 1] === '\n';
   if (atLineStart) {
-    const m = LIST_MARKER.exec(fullText.slice(start, caretPos - 1));
+    const m = LIST_MARKER.exec(toHalfWidth(fullText.slice(start, caretPos - 1)));
     if (m !== null) start += m[0].length;
   }
 
-  const raw = fullText.slice(start, caretPos - 1);
+  const raw = toHalfWidth(fullText.slice(start, caretPos - 1));
   const expression = raw.trim();
   if (expression === '') return null;
 
   // 🔴 切れ端を式にしない(この門が PKC2 の 3 件を落とす)
   const lead = raw.length - raw.trimStart().length;
-  const before = start + lead > 0 ? fullText[start + lead - 1] : undefined;
+  const beforeRaw = start + lead > 0 ? fullText[start + lead - 1] : undefined;
+  const before = beforeRaw === undefined ? undefined : toHalf(beforeRaw);
   if (startsMidToken(before, expression)) return null;
   if (hasNoOperation(expression)) return null;
 
