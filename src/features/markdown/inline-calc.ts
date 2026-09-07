@@ -185,8 +185,17 @@ class Parser {
  *   (2026-09-07、着地前レビューが「誰も読んでいない field」として指摘)。
  */
 export interface InlineCalcRequest {
-  /** 式(前後の空白は落としてある)。 */
+  /** 式(前後の空白は落としてある。**半角に直してある**)。 */
   expression: string;
+  /**
+   * 🔴 **全角で打っていたときに、半角へ直す範囲と字**(#773。user 裁定 2026-09-07
+   * 「**全角入力時は計算式を含めて半角化して欲しい**」)。半角で打っていれば `null`。
+   *
+   * ⚠ 直すのは**式と `＝` だけ** ── 式の前に書いた文(`合計` の後ろの全角の空白)や全角の空白は
+   *   user の字なので触らない。
+   * ⚠ 全角と半角は**1 字 → 1 字**なので、差し替えても後ろの位置が動かない。
+   */
+  halfWidth: { from: number; to: number; text: string } | null;
 }
 
 /** 行頭の箇条書きの印(`- ` / `* ` / `+ ` / `1. `)。⚠ 式から外す。 */
@@ -297,7 +306,21 @@ export function detectInlineCalcRequest(
   if (startsMidToken(before, expression)) return null;
   if (hasNoOperation(expression)) return null;
 
-  return { expression };
+  /**
+   * 🔴 **打った字が全角なら、式と `＝` を半角へ直す**(#773 の裁定)。
+   *
+   * ⚠ 始まりは `start + lead`(**式の 1 字目**)── ここより前の全角の空白や
+   *   日本語は user の字なので、範囲に入れない。
+   * ⚠ 終わりは `caretPos`(`＝` を**含む**)── 「計算式を含めて半角化」なので
+   *   合図の `＝` も直す。
+   */
+  const from = start + lead;
+  const typed = fullText.slice(from, caretPos);
+  const half = toHalfWidth(typed);
+  return {
+    expression,
+    halfWidth: half === typed ? null : { from, to: caretPos, text: half },
+  };
 }
 
 /**
