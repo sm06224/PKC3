@@ -296,7 +296,7 @@ describe('ヘルプの面', () => {
 
   it('マニュアルを焼き込んでいる(外へ見に行かない)', () => {
     expect(MANUAL_TEXT.length, 'マニュアルが空').toBeGreaterThan(1000);
-    expect(MANUAL_TEXT, 'マニュアル本体ではない').toContain('## 4. 画面のならび');
+    expect(MANUAL_TEXT, 'マニュアル本体ではない').toContain('## 画面を組み替える');
   });
 
   /**
@@ -334,7 +334,7 @@ describe('ヘルプの面', () => {
   it('⚠ markdown の口が無くても白紙にしない', () => {
     new HelpRenderer(region).render();
     const host = region.querySelector('[data-pkc-region="help-manual"]')!;
-    expect(host.textContent, '白紙になっている').toContain('画面のならび');
+    expect(host.textContent, '白紙になっている').toContain('画面を組み替える');
   });
 
   it('markdown の口が在れば、それで描く', async () => {
@@ -360,7 +360,7 @@ describe('ヘルプの面', () => {
     await Promise.resolve();
     await Promise.resolve();
     const host = region.querySelector('[data-pkc-region="help-manual"]')!;
-    expect(host.textContent, '白紙になっている').toContain('画面のならび');
+    expect(host.textContent, '白紙になっている').toContain('画面を組み替える');
   });
 });
 
@@ -980,8 +980,12 @@ describe('ヘルプの面の目次(#719)', () => {
     /**
      * 🔴 **数字で始まる見出しでも飛ぶ**(着地前レビュー ⚠-7 / 2 巡目)。
      *
-     * ⚠ マニュアルの見出しは **85 本のうち 30 本**が `1-はじめる` のように数字で
-     *   始まる。⚠ 1 稿目の実装は `` `#${CSS.escape(id)}` `` で選択子を組んでおり、
+     * ⚠ マニュアルの見出しは、かつて **85 本のうち 30 本**が `1-はじめる` のように
+     *   数字で始まっていた。🔴 **#779(2026-09-07)で章番号を全廃したので 3 本になった**
+     *   ── いま数字で始まるのは「1 面で編集する」「2 ペインで整理する」
+     *   「2 ペインの面で」だけである。⚠ **0 本になったらこの段は何も見ていない**ので、
+     *   下限はそのまま置く(数だけ実測に合わせた)。
+     * ⚠ 1 稿目の実装は `` `#${CSS.escape(id)}` `` で選択子を組んでおり、
      *   **happy-dom は escape 済みの選択子を解決しない**ので、この 35% は
      *   **unit から 1 度も通せなかった**(守れるのは smoke 1 本だけ ── §2)。
      * 🔑 2 巡目で実装を**列挙 + id の突き合わせ**へ変えた(選択子を組まない)ので、
@@ -992,7 +996,7 @@ describe('ヘルプの面の目次(#719)', () => {
     expect(
       digits.length,
       '前提が崩れている: 数字で始まる見出しが 1 つも無い(この段は何も見ていない)',
-    ).toBeGreaterThan(10);
+    ).toBeGreaterThanOrEqual(3);
     // ⚠ **いちばん後ろ**を採る ── 先頭は「上から 2 番目の見出し」で、
     //    前置きが縮んだ日に別の理由で落ちる(着地前レビュー 2 巡目・[軽] 6)
     const last = digits[digits.length - 1]!;

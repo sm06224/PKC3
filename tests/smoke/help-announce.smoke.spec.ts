@@ -162,7 +162,7 @@ test('🔴 ヘルプの面が開き、マニュアルが描かれる', async ({ 
    */
   const manual = page.locator('[data-pkc-region="help-manual"]');
   await expect(manual).toBeVisible();
-  await expect(manual.locator('h2', { hasText: '画面のならび' })).toBeVisible({
+  await expect(manual.locator('h2', { hasText: '画面を組み替える' })).toBeVisible({
     timeout: 10_000,
   });
 
@@ -174,8 +174,11 @@ test('🔴 ヘルプの面が開き、マニュアルが描かれる', async ({ 
  * 書き直した)。
  *
  * 面は `hidden` で**同一 document に常駐**するので、マニュアルの見出しが焼く
- * `id` は本文の見出しと**必ずぶつかりうる**(実測: 本文に `## 4. 画面のならび`
- * と書くと、`4-画面のならび` が detail と help の 2 面に出る)。
+ * `id` は本文の見出しと**必ずぶつかりうる**(実測: 本文に `## 画面を組み替える`
+ * と書くと、`画面を組み替える` が detail と help の 2 面に出る)。
+ * ⚠ 字は #779(2026-09-07)で章名が変わったので差し替えた ── **ぶつける相手は
+ *   マニュアルに実在する章名でなければならない**(違う字にすると 1 面しか出ず、
+ *   前提の assert が「ぶつかっていない」で落ちる)。
  *
  * ⚠ **1 巡目の検査は「重複が 0 件」を要求していたが、主張そのものが間違っていた** ──
  * user が同じ見出しを書けば必ず重複するので、守れない条件である。しかも
@@ -194,19 +197,19 @@ test('🔴 マニュアルを開いても、本文の #リンクは本文へ着�
 
   // ⚠ **マニュアルと同じ見出し**を本文に書く(ぶつかる材料を作る)
   await createEntry(page, 'text');
-  await page.locator('[data-pkc-field="editor-body"]').fill('## 4. 画面のならび\n\n本文。\n');
+  await page.locator('[data-pkc-field="editor-body"]').fill('## 画面を組み替える\n\n本文。\n');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
   // マニュアルを描かせる(ここで初めて help 側の id が生える)
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="help"]');
   await expect(
-    page.locator('[data-pkc-region="help-manual"] h2', { hasText: '画面のならび' }),
+    page.locator('[data-pkc-region="help-manual"] h2', { hasText: '画面を組み替える' }),
   ).toBeVisible({ timeout: 10_000 });
 
   const r = await page.evaluate(() => {
     const paneOf = (el: Element | null): string | null =>
       el?.closest('[data-pkc-view-pane]')?.getAttribute('data-pkc-view-pane') ?? null;
-    const id = '4-画面のならび';
+    const id = '画面を組み替える';
     const all = [...document.querySelectorAll(`[id="${CSS.escape(id)}"]`)];
     return { count: all.length, winner: paneOf(document.getElementById(id)) };
   });

@@ -2192,7 +2192,7 @@ function reduceCore(
       // 🔴 **設定を開いたまま一覧を押したら、中央をノートへ戻す**(P8 段⑲)。
       //    直す前は右の情報ペインだけ切り替わり、中央は設定のまま・追記欄も
       //    消えたままで、ノートが開かない理由が画面のどこにも無かった
-      //    (マニュアル「中央は常にいま開いているノート」の当の破れ)
+      //    (マニュアル「行の右クリックから整理する」の「中央は常にいま開いているノート」の当の破れ)
       const leaveSettings = isAsidePane(state.viewMode);
       if (state.selectedLid === action.lid && state.openBody?.lid === action.lid) {
         /**
