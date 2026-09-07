@@ -6050,6 +6050,38 @@ li[data-pkc-row-slot] {
   .pkc-md-rendered .pkc-render-toggle {
     opacity: 1;
   }
+  /**
+   * 🔴 **押せる升に、常に見える印を出す**(#750 I2。user 裁定 2026-09-06)。
+   *
+   * ⚠ 直す前の合図は **`:hover` 1 つだけ**だった ── **指で触る端末に hover は無い**
+   *   ので、押せることを知らせる物が **1 つも出ていなかった**。PKC3 は指で触る端末を
+   *   明示して支えているのに、この機能だけ入口が hover 依存だった。
+   * 🔴 **裁定された案(右上に吹き出しを 1 つ)は目的と逆だった** ── 吹き出し
+   *   (`title`)**も hover が要る**ので、指で触る端末には届かない。差し戻して選び直した。
+   * 🔑 **ジェスチャーでは解けない**(user の問い)── I2 は「押せると**気づけない**」
+   *   問題なので、印の無い操作を足しても見つけられない(隠れた操作が 1 つ増えるだけ)。
+   *
+   * ⚠ **マウスのある端末は 1px も変わらない**(この `@media` の中だけ)。
+   * ⚠ 地は無彩色のまま ── 色は情報にだけ使う(user 指示 2026-08-03「業務画面」)。
+   * ⚠ **押せる升にしか当たらない** ── 印(`data-pkc-action`)で選ぶので、
+   *   書き出した HTML・印刷・編集の面には**この規則に当たる要素が 1 つも無い**。
+   * ⚠ **`@media` はこの file の末尾に置く規約**である ── 1 稿目は規則の隣に
+   *   書いてしまい、「最初の `@media` で切る」検査が**その後ろの規則を全部見失った**
+   *   (`announce.test.ts` が落ちて教えた。規約が破れたら落ちる側に倒してある)。
+   */
+  .pkc-md-rendered [data-pkc-action='edit-cell']::after {
+    content: '';
+    position: absolute;
+    right: 2px;
+    bottom: 2px;
+    width: 0;
+    height: 0;
+    /* 右下の角の小さな三角(字にかからないよう、升の隅に置く) */
+    border-inline-start: 5px solid transparent;
+    border-block-end: 5px solid var(--muted);
+    opacity: 0.55;
+    pointer-events: none;
+  }
 }
 
 /**

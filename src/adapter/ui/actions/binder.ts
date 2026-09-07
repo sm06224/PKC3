@@ -40,6 +40,11 @@ import {
   BLOCK_START_ATTR,
   grippedBlock,
 } from '../render/block-grip';
+import {
+  detectInlineCalcRequest,
+  evaluateCalcExpression,
+  formatCalcResult,
+} from '@features/markdown/inline-calc';
 import { quoteOnEnter } from '@features/markdown/quote-assist';
 import { renumberLists } from '@features/markdown/list-renumber';
 import { stripDialect } from '@features/markdown/strip-dialect';
@@ -7257,6 +7262,57 @@ export function bindActions(
     // 日本語で書く人は「打ち終わる前に飛ぶ」を毎回踏む
     if (ke.isComposing) return;
     /**
+     * 🔴 **その場で計算する**(#764。user 裁定 2026-09-06「**PKC2と同じで！**」)。
+     *
+     * `2+3=` まで打って `Enter` を押すと、その場が `2+3=5` になって改行する。
+     *
+     * ⚠ **改行は止めない** ── 答えを差し込んだうえで、下の引用の継ぎ足しと
+     *   ブラウザ既定の改行にそのまま渡す(`Enter` の意味を奪わない)。
+     * ⚠ **選んでいる字があるときは撃たない** ── その `Enter` は
+     *   「選んだ所を改行で置き換える」であって、計算の合図ではない
+     *   (撃つと `insertText` が**選んだ字を答えで置き換えて消す**)。
+     * 🔑 規則は `features/markdown/inline-calc.ts` の 1 か所 ── ここは当てるだけ。
+     *
+     * 🔴 **効く欄は 3 つ**(2026-09-07、着地前の動線レビュー):
+     *   2 列の全文欄(`editor-body`)/ ライブの行(`row-source`)/
+     *   **追記欄(`append-input`)**。
+     *   ⚠ 追記欄を落としていたのは**裁定と食い違っていた** ── PKC2 は
+     *   `isInlineCalcTarget` で追記の欄を名指しで許しており、素の `Enter` を
+     *   計算に使っている(送るのは `Ctrl`+`Enter` なので取り合わない)。
+     *   ⚠ 追記欄は「開かずに済ませる」いちばん短い動線で、家計や作業ログの
+     *   ような**数を書く用途そのもの**である。
+     * 🔴 **引用の継ぎ足し(下)とは欄の集合が違う**ので、同じ `if` に相乗りさせない
+     *   ── 相乗りさせると、追記欄で引用の継ぎ足しまで始まる(§7)。
+     */
+    if (
+      ke.key === 'Enter' &&
+      !ke.shiftKey &&
+      !ke.ctrlKey &&
+      !ke.altKey &&
+      !ke.metaKey &&
+      (field === 'editor-body' || field === 'row-source' || field === 'append-input') &&
+      ke.target instanceof HTMLTextAreaElement &&
+      ke.target.selectionStart === ke.target.selectionEnd
+    ) {
+      const ta = ke.target;
+      const req = detectInlineCalcRequest(ta.value, ta.selectionStart);
+      const v = req === null ? null : evaluateCalcExpression(req.expression);
+      if (v !== null) {
+        /**
+         * 🔴 **`insertText` で挿す**(= `execCommand('insertText')`)。
+         *
+         * ⚠ **`setRangeText` では取り消せない**(2026-09-07 実測)── 答えを
+         *   挿した後に `Ctrl`+`Z` を 6 回押しても `1200*1.1=1320` で止まり、
+         *   **自分で打った字にも戻れなかった**(取り消しの履歴ごと切れる)。
+         *   🔑 `insertText` なら履歴に載るので、押した分だけ戻せる。
+         * ⚠ 挿す位置を指定しない ── `insertText` は**カーソルの所**へ挿し、
+         *   カーソルは発火の条件からして `=` の直後に在る。位置を渡すと
+         *   `execCommand` の道と fallback の道で挿し先が食い違う余地ができる(§7)。
+         */
+        insertText(ta, formatCalcResult(v));
+      }
+    }
+    /**
      * 🔴 **引用(`>`)を書き続けられるようにする**(#396)。
      *
      * ⚠ **IME ガードの直後**に置く ── 変換確定の Enter で引用を継ぎ足したら、
@@ -7277,17 +7333,29 @@ export function bindActions(
     ) {
       const ta = ke.target;
       const r = quoteOnEnter(ta.value, ta.selectionStart);
+      /**
+       * 🔴 **書き込みは `insertText`(`execCommand`)で行う**(#765、2026-09-07)。
+       *
+       * ⚠ ここは長らく `setRangeText` で、注釈には「`value` 直代入は Ctrl+Z の
+       *   履歴を捨てる」と書いてあった ── **`setRangeText` も同じく捨てる**。
+       *   実測(実ブラウザ):`> ひきよう` で `Enter` を押すと、以後
+       *   **`Ctrl`+`Z` を 8 回押しても 1 文字も戻らない**(継ぎ足した `> ` も、
+       *   自分で打った `ひきよう` も)。
+       * 🔴 直す理由は**この PR が約束を配るから**である ── #764 のお知らせと
+       *   マニュアルは「出た答えは `Ctrl`+`Z` で戻せます」と書くが、引用の行では
+       *   直後にここが走るので、**答えごと戻せなくなっていた**。
+       * ⚠ `exit`(引用をやめる)は**範囲を消す**ので、消す所を選んでから撃つ ──
+       *   空文字の `insertText` は選択を消し、取り消しにも載る(実測)。
+       */
       if (r.kind === 'continue') {
         ev.preventDefault();
-        // ⚠ `setRangeText` を使う ── `value` 直代入は Ctrl+Z の履歴を捨てる
-        ta.setRangeText(r.insert, ta.selectionStart, ta.selectionEnd, 'end');
-        ta.dispatchEvent(new Event('input', { bubbles: true }));
+        insertText(ta, r.insert);
         return;
       }
       if (r.kind === 'exit') {
         ev.preventDefault();
-        ta.setRangeText(r.text, r.from, r.to, 'end');
-        ta.dispatchEvent(new Event('input', { bubbles: true }));
+        ta.setSelectionRange(r.from, r.to);
+        insertText(ta, r.text);
         return;
       }
     }
