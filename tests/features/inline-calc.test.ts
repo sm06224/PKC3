@@ -20,8 +20,8 @@ import {
  * user が `…=` まで打って `Enter` を押した形を通し、**本文に足される字**を返す。
  * 発火しなければ `null`(= `Enter` がそのまま通る)。
  */
-const typed = (text: string): string | null => {
-  const req = detectInlineCalcRequest(text, text.length);
+const typed = (text: string, caret = text.length): string | null => {
+  const req = detectInlineCalcRequest(text, caret);
   if (req === null) return null;
   const v = evaluateCalcExpression(req.expression);
   if (v === null) return null;
@@ -108,6 +108,16 @@ describe('🔴 PKC2 が本文を壊していた 3 件(#764 で塞いだ)', () =>
 
   it('🔴 桁区切りの数を途中で切らない(PKC2 は `1,000=0` と書き込んだ)', () => {
     expect(typed('1,000=')).toBeNull();
+    /**
+     * 🔴 **`,` の門でしか止まらない形**(2026-09-07、変異試験 N7 が SURVIVED で教えた)。
+     *
+     * ⚠ 上の 1 行は**門から `,` を落としても通る** ── 式が `000` になって
+     *   「計算する所が無い」門に引っかかるからである。
+     * 🔑 `,` でしか止まらないのは、**区切りの後ろにも式が続く**形である ──
+     *   `1,200+800=` は門が無いと `200+800` を計算して **`1000`**(正しくは 2000)を
+     *   本文へ書き込む。⚠ 「無音」より悪い ── **それらしい間違いが残る**。
+     */
+    expect(typed('1,200+800=')).toBeNull();
     // ⚠ 対照群 ── 門が「数の直後」だけを見ていることを示す
     //    (門を無条件にすると、この行も落ちて動線が 1 つ消える)
     expect(typed('1,000 と 2+3=')).toBe('5');
@@ -123,6 +133,44 @@ describe('🔴 PKC2 が本文を壊していた 3 件(#764 で塞いだ)', () =>
   it('🔴 差し込みの記法の後ろを式にしない(PKC2 は `{{vars.a}}+1=1` と書き込んだ)', () => {
     expect(typed('{{vars.a}}+1=')).toBeNull();
     expect(typed('${HOME}+1=')).toBeNull();
+  });
+});
+
+describe('🔴 語や数を途中で切らない(2026-09-07、着地前の動線レビューが実測)', () => {
+  /**
+   * ⚠ **1 稿目はここが抜けていた** ── 門①が `[0-9,.]` しか見ておらず、
+   *   `md5=` → `md5=5` / `A1+B1=` → `A1+B1=1` を通していた。
+   *   🔴 これは この PR が「PKC2 から直した」と書いている `1,000=0` と**同じ型**
+   *   である(数だけ見て、語を見ていなかった ── CLAUDE.md §7「片側を直したら、
+   *   対称の反対側を必ず疑う」)。
+   */
+  it('🔴 ASCII の語から切り出した数を式にしない', () => {
+    expect(typed('md5=')).toBeNull();
+    expect(typed('A1+B1=')).toBeNull();
+    expect(typed('Windows10=')).toBeNull();
+    expect(typed('v1.2=')).toBeNull();
+    expect(typed('1e3+1=')).toBeNull();
+    // ⚠ 対照群 ── **日本語の直後は通す**(空白を置かない書き方が普通である)
+    expect(typed('結果は3*4=')).toBe('12');
+  });
+
+  it('🔴 数を 1 つ書いただけのものは式ではない(`2^3=3` を出さない)', () => {
+    // ⚠ `^` で走査が止まるので式が `3` になり、**8 でない答え**が本文へ入っていた
+    expect(typed('2^3=')).toBeNull();
+    expect(typed('10^2=')).toBeNull();
+    // ⚠ 日本語の直後なので門①では止まらない ── 止めるのは「計算する所が無い」門
+    expect(typed('第2=')).toBeNull();
+    expect(typed('1200=')).toBeNull();
+    // ⚠ 対照群 ── 計算する所が 1 つでもあれば通す
+    expect(typed('第2+3=')).toBe('5');
+  });
+
+  it('🔴 行の終わりでなければ撃たない(答えが 2 つにならない)', () => {
+    // ⚠ 既にある `1200*1.1=1320` の `=` の直後で行を割ろうとした形
+    const line = '1200*1.1=1320';
+    expect(detectInlineCalcRequest(line, line.indexOf('=') + 1)).toBeNull();
+    // ⚠ 対照群 ── 次が改行なら行末である(打っている最中は必ずこちら)
+    expect(typed('2+3=\nつぎ', 4)).toBe('5');
   });
 });
 

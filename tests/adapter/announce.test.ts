@@ -864,7 +864,7 @@ describe('お知らせの文面は固定(#220-7)', () => {
      * ⚠ 落とした 1 件は**まだ配っていない**が、原本は CHANGELOG に在る
      *   (`tests/docs-parity.test.ts` の `DROPPED` が等値で見ている)。
      */
-    ['2026-09-07-inline-calc', '947e5f40'],
+    ['2026-09-07-inline-calc', '7c9ad9f3'],
     ['2026-09-06-touch-cell-mark', '720f55d7'],
     ['2026-09-06-math', '7ee66d7b'],
     ['2026-09-06-help-manual-first', '0f49cf84'],

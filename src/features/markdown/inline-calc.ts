@@ -58,8 +58,9 @@ export function evaluateCalcExpression(src: string): number | null {
   const p = new Parser(src);
   const v = p.parseExpression();
   if (v === null) return null;
-  p.skipWs();
   // ⚠ 全部読み切っていなければ式ではない(`1+2)` を通さない)
+  // ⚠ ここで `skipWs()` を呼ばない ── `parseExpression` / `parseTerm` の
+  //    ループが返る前に必ず飛ばしているので、外側の 1 回は届かない(no-op)
   if (!p.done()) return null;
   return Number.isFinite(v) ? v : null;
 }
@@ -142,12 +143,16 @@ class Parser {
   }
 }
 
-/** 見つかった計算の依頼。 */
+/**
+ * 見つかった計算の依頼。
+ *
+ * ⚠ **挿す位置を持たない** ── 答えはカーソルの所へ挿す(`=` の直後 = カーソル)。
+ *   位置を返すと、`execCommand` の道と fallback の道で挿し先が食い違う余地ができる
+ *   (2026-09-07、着地前レビューが「誰も読んでいない field」として指摘)。
+ */
 export interface InlineCalcRequest {
   /** 式(前後の空白は落としてある)。 */
   expression: string;
-  /** `=` の位置(この後ろに答えを挿す)。 */
-  equalsPos: number;
 }
 
 /** 行頭の箇条書きの印(`- ` / `* ` / `+ ` / `1. `)。⚠ 式から外す。 */
@@ -161,12 +166,45 @@ const LIST_MARKER = /^([\t ]*)([-*+]|\d+\.)\s+/;
  */
 function startsMidToken(before: string | undefined, expr: string): boolean {
   if (before === undefined || before === '\n') return false;
-  // ① 数を途中で切っている(`1,000=` の `000` / `1.5.2` のような形)
-  if (/[0-9,.]/.test(before)) return true;
+  /**
+   * ① **語や数を途中で切っている**(`1,000=` の `000` / `md5=` の `5` /
+   *   `1e3+1=` の `3+1`)。
+   *
+   * 🔴 **1 稿目は `[0-9,.]` しか見ておらず、`md5=` → `md5=5` /
+   *   `A1+B1=` → `A1+B1=1` / `v1.2=` → `v1.2=1.2` を通していた**
+   *   (2026-09-07、着地前の動線レビューが実測して指摘)── ⚠ これは
+   *   この file が「PKC2 から直した」と書いている `1,000=0` と**同じ型**である
+   *   (数だけ見て、語を見ていなかった)。
+   * ⚠ **日本語は含めない** ── `結果は3*4=` は通す(空白を置かない書き方が普通)。
+   *   だから ASCII の語の字(`[A-Za-z0-9_]`)と `,` `.` だけを見る。
+   */
+  /**
+   * ⚠ **数字と `.` は、いまの走査では `before` に現れない**(2026-09-07、
+   *   着地前レビューが総当たりで実測 ── 現れうるのは
+   *   `\t \n # $ , = > _ a { | } あ` の類だけ)。`CALC_CHARS` に入っている字は
+   *   走査が**そこで止まらない**からである。効いているのは `,` と ASCII の語の字。
+   * 🔑 それでも落とさないのは、`CALC_CHARS` を狭めた日にここが受け皿になるため
+   *   ── ⚠ 「これが無いと壊れる」ではなく「**いまは効いていない**」と書いておく。
+   */
+  if (/[0-9A-Za-z_,.]/.test(before)) return true;
   // ② 語にくっついた切れ端(`foo+1=` の `+1` / `${…}+1=`)
   //    ⚠ 直前が空白なら切れ端ではない(`結果は 3*4=` は通す)
   if (/^[+\-*/%]/.test(expr) && !/\s/.test(before)) return true;
   return false;
+}
+
+/**
+ * 🔴 **数を 1 つ書いただけのものは式ではない**(2026-09-07、同じレビュー)。
+ *
+ * ⚠ `2^3=` は `^` で走査が止まるので式が `3` になり、`2^3=3` と**8 でない答え**が
+ *   本文へ入っていた(`第2=` → `第2=2` も同じ)。門①(ASCII の語)だけでは
+ *   `^` や日本語の直後を止められない。
+ * 🔑 判定は「**計算する所が 1 つも無い**」── 演算子も括弧も無い式は、
+ *   答えが打った字と同じになるので、そもそも計算する意味が無い。
+ * ⚠ 失う動線は `1200=` → `1200=1200` だけである。
+ */
+function hasNoOperation(expr: string): boolean {
+  return !/[+\-*/%()]/.test(expr);
 }
 
 /**
@@ -182,6 +220,16 @@ export function detectInlineCalcRequest(
   if (typeof fullText !== 'string') return null;
   if (caretPos < 0 || caretPos > fullText.length) return null;
   if (fullText[caretPos - 1] !== '=') return null;
+  /**
+   * 🔴 **行の終わりでなければ撃たない**(2026-09-07、同じレビュー)。
+   *
+   * ⚠ 既にある `1200*1.1=1320` の `=` の直後で行を割ろうと `Enter` を押すと、
+   *   答えが**もう 1 つ**挿さって `1200*1.1=1320` の下に `1320` が残っていた
+   *   ── 増えた字が元と同じなので、**見ても間違いに見えない**。
+   * 🔑 打っている最中は必ず行末なので、この門で失う動線は無い。
+   */
+  const after = fullText[caretPos];
+  if (after !== undefined && after !== '\n') return null;
 
   // `=` から後ろへ、計算に使える字の間だけ戻る
   let start = caretPos - 1;
@@ -206,8 +254,9 @@ export function detectInlineCalcRequest(
   const lead = raw.length - raw.trimStart().length;
   const before = start + lead > 0 ? fullText[start + lead - 1] : undefined;
   if (startsMidToken(before, expression)) return null;
+  if (hasNoOperation(expression)) return null;
 
-  return { expression, equalsPos: caretPos - 1 };
+  return { expression };
 }
 
 /**
@@ -216,7 +265,8 @@ export function detectInlineCalcRequest(
  */
 export function formatCalcResult(value: number): string {
   if (!Number.isFinite(value)) return '';
-  if (value === 0) return '0';
+  // ⚠ `0` を別扱いしない ── `Number.isInteger(-0)` は true、`String(-0)` は `'0'`
+  //    なので、次の行が同じ答えを返す(no-op だった)
   if (Number.isInteger(value)) return String(value);
   return Number(value.toPrecision(12)).toString();
 }

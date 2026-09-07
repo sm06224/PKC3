@@ -18,6 +18,7 @@ import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
+import { AppendBoxRenderer } from '../../src/adapter/ui/render/append-box';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { stubRevisionOps } from '../helpers/revision-stub';
 import { stubStamps } from '../helpers/store-stamps';
@@ -47,7 +48,13 @@ function setup(body: string) {
   const detail = new DetailRenderer(regions.detail, null, undefined, (b) =>
     d.dispatch({ type: 'UPDATE_OPEN_BODY', body: b }),
   );
-  d.onState((s) => detail.render(s));
+  // ⚠ 追記欄は `detail` 面の**外**に在る(`shell.ts` で兄弟)── 組まないと
+  //    「追記欄でも計算する」を 1 度も通らない(CLAUDE.md §2)
+  const box = new AppendBoxRenderer(regions.append);
+  d.onState((s) => {
+    detail.render(s);
+    box.render(s);
+  });
   bindActions(root, d);
   const persisted: EntryUpsert[] = [];
   connectStoreEffects(d, {
@@ -86,6 +93,85 @@ async function pressEnter(body: string) {
   await tick();
   return { ta, d, prevented: ev.defaultPrevented };
 }
+
+/**
+ * 🔴 **追記欄でも計算する**(2026-09-07、着地前の動線レビュー)。
+ *
+ * ⚠ 1 稿目は `editor-body` / `row-source` の 2 つしか見ておらず、**追記欄で
+ *   打つと無音**だった ── 裁定は「**PKC2と同じで！**」で、PKC2 は
+ *   `isInlineCalcTarget` が追記の欄を名指しで許している。
+ * ⚠ 追記欄は「本文を開かずに済ませる」いちばん短い動線で、家計や作業ログの
+ *   ような**数を書く用途そのもの**である。
+ */
+/**
+ * 🔴 **既定の編集画面(1 面のライブエディタ)でも計算する**
+ * (2026-09-07、着地前の実装レビュー)。
+ *
+ * ⚠ 1 稿目は unit も smoke も **2 列(split)固定**で、`row-source` の経路を
+ *   1 度も通っていなかった ── ⚠ **既定は live** なので
+ *   (`src/features/editor-mode.ts` の `DEFAULT_EDITOR_MODE`)、
+ *   **いちばん多くの user が触る経路が 0 件**だった(CLAUDE.md §2)。
+ * 🔑 配線から `row-source` を落とす変異は、split だけ見る test を**素通りする**。
+ */
+describe('1 面のライブエディタでも計算される(#764)', () => {
+  beforeEach(() => {
+    localStorage.setItem('pkc3.editor-mode', 'live');
+  });
+
+  it('🔴 行の欄で Enter を押すと答えが入り、確定すると本文に残る', async () => {
+    const { d, q, root } = setup('見積もり');
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    q('[data-pkc-action="start-edit"]')!.click();
+    await tick(30); // 描画は follower(microtask)── 1 拍待つ
+    const live = root.querySelector('[data-pkc-region="editor-live"]')!;
+    const p = [...live.querySelectorAll('p')].find((e) => e.textContent === '見積もり')!;
+    p.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, ctrlKey: true }));
+    const ta = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]')!;
+    ta.value = '見積もり 1200*1.1=';
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+    ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await tick();
+    expect(ta.value, '既定の編集画面で計算が届いていない').toBe('見積もり 1200*1.1=1320');
+    // 🔴 行は `blur` で確定する ── ここが切れていると、画面に見えているのに本文に無い
+    ta.blur();
+    await tick();
+    expect(d.getState().openBody?.body).toContain('1200*1.1=1320');
+  });
+});
+
+describe('追記欄で Enter を押しても計算される(#764)', () => {
+  // ⚠ 追記欄は編集の面の外に在るので、どちらの編集画面でも同じである
+  //    ── それでも明示する(前の describe の後片付けに寄りかからない)
+  beforeEach(() => {
+    localStorage.setItem('pkc3.editor-mode', 'live');
+  });
+
+  async function pressInAppend(text: string) {
+    const { d, q } = setup('# ログ\n');
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    const ta = q<HTMLTextAreaElement>('[data-pkc-field="append-input"]')!;
+    ta.value = text;
+    ta.setSelectionRange(text.length, text.length);
+    const ev = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    ta.dispatchEvent(ev);
+    await tick();
+    return { ta, prevented: ev.defaultPrevented };
+  }
+
+  it('🔴 追記欄の Enter で答えが入る', async () => {
+    const { ta } = await pressInAppend('昼 800+250=');
+    expect(ta.value).toBe('昼 800+250=1050');
+  });
+
+  it('🔴 引用の継ぎ足しは追記欄では起こさない(欄の集合が違う)', async () => {
+    // ⚠ 対照群 ── 計算を追記欄へ広げたついでに、引用まで広げていないこと
+    const { ta, prevented } = await pressInAppend('> ひきよう');
+    expect(ta.value).toBe('> ひきよう');
+    expect(prevented, '追記欄で引用を継ぎ足している').toBe(false);
+  });
+});
 
 describe('本文で Enter を押すと計算される(#764)', () => {
   beforeEach(() => {

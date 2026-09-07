@@ -59,6 +59,42 @@ test('🔴 `=` まで打って Enter を押すと、答えが出て次の行へ�
   expect(errors, errors.join('\n')).toHaveLength(0);
 });
 
+/**
+ * 🔴 **引用の行でも取り消せる**(#765 を #764 の中で直した)。
+ *
+ * ⚠ 引用の継ぎ足しは長らく `setRangeText` で書いており、**取り消しの履歴ごと
+ *   切っていた** ── 実測(2026-09-07)では `> ひきよう` で `Enter` を押すと、
+ *   以後 `Ctrl`+`Z` を 8 回押しても 1 文字も戻らなかった。
+ * 🔴 この PR は「出た答えは `Ctrl`+`Z` で戻せます」と**お知らせとマニュアルで
+ *   約束する**ので、引用の行だけ嘘になるのを許さない。
+ * 🔴 **unit では原理的に見えない** ── happy-dom に取り消しの履歴は無い。
+ */
+test('🔴 引用の行で計算しても、取り消しで打った字へ戻れる (#764 / #765)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+  await createEntry(page, 'text');
+
+  const ta = page.locator('[data-pkc-field="editor-body"]');
+  await expect(ta).toBeVisible();
+  await ta.click();
+
+  await page.keyboard.type('> 1200*1.1=');
+  await page.keyboard.press('Enter');
+  // ⚠ 計算が入り、そのうえで引用が継ぎ足される(2 つの仕掛けが同じ Enter に乗る)
+  await expect(ta).toHaveValue('> 1200*1.1=1320\n> ');
+
+  const seen: string[] = [];
+  for (let i = 0; i < 8; i += 1) {
+    await page.keyboard.press('Control+z');
+    seen.push(await ta.inputValue());
+  }
+  expect(seen, `引用の行で取り消しが効かない: ${JSON.stringify(seen)}`).toContain(
+    '> 1200*1.1=',
+  );
+
+  expect(errors, errors.join('\n')).toHaveLength(0);
+});
+
 test('⚠ 式でない `=` では、ただ改行するだけ (#764)', async ({ page }) => {
   // 🔑 対照群 ── これが無いと「常に何か足す」実装でも上の test が通ってしまう
   const errors = collectPageErrors(page);
