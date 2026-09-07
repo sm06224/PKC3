@@ -108,3 +108,112 @@ test('🔴 表を右クリックして形を変えると、保存された本文
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+/**
+ * 🔴 **引用(`>`)と `:::` の板の中でも、表の形を変えられる**
+ *   (#743。**user 裁定 2026-09-07「出す」**)。
+ *
+ * 🔑 **unit では届かない 3 つ**を実ブラウザで見る:
+ * 1. **器の中の表を本物の右クリックで掴めるか** ── どの表かは描画が焼いた
+ *    `data-pkc-source-line` から引くので、**焼かれていなければ項目は出ない**。
+ *    ⚠ unit は行番号を自分で渡すので、この段を 1 度も通らない
+ * 2. **メニューの項目から実際に効くか** ── メニューは `data-pkc-action` を置くだけで、
+ *    実行は root の委譲がやる(`table-copy` の ▾ とは別の配線である)
+ * 3. 🔴 **読み直しても残るか** ── 画面の字だけ見ると、本文へ書かれていなくても緑になる
+ *
+ * ⚠ 「**器から落ちていない**」(引用の前置きを付け直したか)は**unit でも見ている**
+ *   ── `table-convert.test.ts` が描いた HTML の `blockquote` / `.pkc-section-callout`
+ *   を見る。ここに置くのは**同じ不変量を、本物の操作の後で**確かめるためである
+ *   (2 か所で見ているのは重複ではない:片方は関数の答え、片方は user の一連の動作)。
+ */
+const CALLOUT_TABLE = '[data-pkc-field="detail-body"] .pkc-section-callout table';
+const QUOTE_TABLE = '[data-pkc-field="detail-body"] blockquote table';
+const NESTED_BODY = [
+  '# 在庫',
+  '',
+  ':::note',
+  '| 品名 | 数 |',
+  '|---|---|',
+  '| りんご | 3 |',
+  ':::',
+  '',
+  '> | 品目 | 個 |',
+  '> |---|---|',
+  '> | みかん | 5 |',
+  '',
+  '以上。',
+].join('\n');
+
+test('🔴 引用と ::: の中の表も、右クリックで形を変えられて器から落ちない (#743)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('在庫');
+  await page.locator('[data-pkc-field="editor-body"]').fill(`${NESTED_BODY}\n`);
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+
+  // 🔑 **前提** ── 表が 2 つとも器の中に描かれ、まだ markdown である
+  await expect(page.locator(CALLOUT_TABLE), '板の中に表が無い').toHaveCount(1, { timeout: 15_000 });
+  await expect(page.locator(QUOTE_TABLE), '引用の中に表が無い').toHaveCount(1);
+  await expect(page.locator(CSV_ONLY), '前提: もう csv の表になっている').toHaveCount(0);
+
+  const menu = page.locator(MENU);
+  /** 器の中の表を右クリックして「CSV の表にする」を押す。 */
+  const toCsv = async (where: string, name: string): Promise<void> => {
+    await page.locator(`${where} td`).first().click({ button: 'right' });
+    await expect(menu, `${name}: メニューが出ない`).toBeVisible();
+    const item = menu.locator('[data-pkc-action="table-to-csv"]');
+    await expect(item, `${name}: 「CSV の表にする」が出ていない`).toHaveText('CSV の表にする');
+    await clickReal(page, item);
+  };
+
+  await toCsv(CALLOUT_TABLE, '板の中');
+  await expect(
+    page.locator(`${CALLOUT_TABLE} [data-pkc-action="shape-cell"]`),
+    '板の中の表が csv になっていない(行・列の ＋ × が焼かれていない)',
+  ).not.toHaveCount(0, { timeout: 15_000 });
+  // 🔴 **器から落ちていない** ── 板の外に表が増えていないことも見る
+  await expect(page.locator(CALLOUT_TABLE), '作り変えたら板から落ちた').toHaveCount(1);
+
+  await toCsv(QUOTE_TABLE, '引用の中');
+  await expect(
+    page.locator(`${QUOTE_TABLE} [data-pkc-action="shape-cell"]`),
+    '引用の中の表が csv になっていない',
+  ).not.toHaveCount(0, { timeout: 15_000 });
+  // 🔴 **前置き(`> `)を付け直していないと、ここで落ちる**(升の字は同じまま)
+  await expect(page.locator(QUOTE_TABLE), '作り変えたら引用から落ちた').toHaveCount(1);
+
+  await expect(
+    page.locator('[data-pkc-field="detail-body"]'),
+    '器の外の字まで書き換えた',
+  ).toContainText('以上。');
+
+  // ── 🔴 **読み込み直しても残る**(本文へ書かれた証拠)
+  await page.reload();
+  await page.locator('[data-pkc-region="filer-table"] tbody tr').first().click();
+  await expect(page.locator(`${QUOTE_TABLE} [data-pkc-action="shape-cell"]`), '読み直したら戻った')
+    .not.toHaveCount(0, { timeout: 15_000 });
+  await expect(page.locator(CALLOUT_TABLE), '読み直したら板から落ちた').toHaveCount(1);
+  await expect(page.locator(QUOTE_TABLE), '読み直したら引用から落ちた').toHaveCount(1);
+
+  /**
+   * ── 🔴 **戻せる**(片道ではない ── 出す判断の根拠そのもの)。
+   * ⚠ ここが出なければ、#743 で出すと決めた前提が崩れている。
+   */
+  await page.locator(`${QUOTE_TABLE} td`).first().click({ button: 'right' });
+  const toMd = menu.locator('[data-pkc-action="table-to-markdown"]');
+  await expect(toMd, '引用の中で「Markdown の表にする」が出ていない').toHaveText(
+    'Markdown の表にする',
+  );
+  await clickReal(page, toMd);
+  await expect(
+    page.locator(`${QUOTE_TABLE} [data-pkc-action="shape-cell"]`),
+    '引用の中で markdown へ戻っていない',
+  ).toHaveCount(0, { timeout: 15_000 });
+  await expect(page.locator(QUOTE_TABLE), '戻したら引用から落ちた').toHaveCount(1);
+  await expect(page.locator(QUOTE_TABLE), '戻したら升の字が消えた').toContainText('みかん');
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

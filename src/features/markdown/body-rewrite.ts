@@ -751,7 +751,22 @@ function rewriteTableFormat(
   const text = convertTable(at, rewrite.to);
   if (text === null) return null;
   const lines = body.split('\n');
-  lines.splice(at.start, at.end - at.start + 1, ...text.split('\n'));
+  /**
+   * 🔴 **引用(`>`)の中の表は、前置きを付け直して差し戻す**(#743)。
+   *
+   * ⚠ `convertTable` が組むのは**前置きの無い字**である(升の中身しか知らない)。
+   *   そのまま差し替えると `>` が 1 つも無い行になり、**表が引用から抜け落ちて
+   *   地の本文になる**(引用の縦線も板の色も消える ── user は「変な所へ出た」と
+   *   しか読めない)。⚠ **升の字は 1 文字も変わらない**ので、升を数える検査では
+   *   見えない ── 見えるのは「表が `blockquote` の中に在るか」である。
+   * 🔑 付ける字は**読む側が実際に剥がしたもの**(`at.quoteLead`)── ここで
+   *   `> ` と `>` と `>> ` を組み直さない(user が書いた書き方をそのまま返す)。
+   */
+  lines.splice(
+    at.start,
+    at.end - at.start + 1,
+    ...text.split('\n').map((l) => at.quoteLead + l),
+  );
   return lines.join('\n');
 }
 

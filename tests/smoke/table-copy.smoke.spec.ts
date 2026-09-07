@@ -279,22 +279,30 @@ test('🔴 ▾ の小窓から、本文の表を作り変えられる (#708 裁�
 /**
  * 🔴 **作り変えられない表には、その行を出さない**(#708 裁定②)。
  *
- * ⚠ `:::` の囲みの中の表は `tableAt` が `null` を返す ── 作り変えると
- *   **戻す項目が出ない片道**になるので外してある(#743 の条件②)。
+ * ## ⚠ 台を差し替えた(2026-09-07、#743)
+ *
+ * ここは長く `:::note` の中の表を台にしていたが、**user 裁定「出す」で
+ * `:::` の中も引用の中も出るようになった**ので、台としては成り立たなくなった。
+ * 🔑 差し替え先は「**閉じていない csv の囲み**」── 実測でこの形だけが
+ *   「**表も ▾ も出るのに `tableAt` が `null`**」を今も満たす
+ *   (表=1 / ▾=1 / `tableAt`=null。閉じた囲みは対照群として csv を返す)。
+ * ⚠ 閉じていない囲みを触らないのは**下の本文を丸ごと飲むから**である ──
+ *   走査は閉じ無しの柵を末尾まで飲むので、書き換えると囲みより下が消える。
  * 🔑 だから小窓にも出さない ── **押しても何も起きない行を作らない**
  *   (user 指示 2026-08-23「片道の操作を作らない」)。
  * ⚠ この形の台が無いと、「出さない」を守る門が**丸ごと素通り**する
  *   (実測:`at === null` の判定を外す変異が unit も smoke も生き延びた)。
  */
-test('🔴 ::: の囲みの中の表では、書き換える行を出さない (#708 裁定②)', async ({ page }) => {
+test('🔴 閉じていない csv の囲みでは、書き換える行を出さない (#708 裁定②)', async ({
+  page,
+}) => {
   const errors = collectPageErrors(page);
   await gotoApp(page);
 
   await createEntry(page, 'text');
-  await page.locator('[data-pkc-field="editor-title"]').fill('囲みの中');
-  await page
-    .locator('[data-pkc-field="editor-body"]')
-    .fill(':::note\n\n| 品名 | 数 |\n|---|---|\n| りんご | 3 |\n\n:::\n');
+  await page.locator('[data-pkc-field="editor-title"]').fill('閉じていない囲み');
+  // ⚠ **閉じの ``` を書かない** ── これが「表は出るが作り変えられない」唯一の形である
+  await page.locator('[data-pkc-field="editor-body"]').fill('```csv\n品名,数\nりんご,3\n');
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
 
   const menu = '[data-pkc-field="detail-body"] [data-pkc-copy-menu]';
