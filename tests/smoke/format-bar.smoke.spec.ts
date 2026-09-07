@@ -145,12 +145,26 @@ test('🔴 編集中は追記できず、理由と出口が画面に出る(競�
  * いた。長いログでは、追記した先が見えなくなる。
  *
  * ⚠ 観測点は 2 つ:
- *  ① **追記しても位置が動かない**(同じノートを見続けている)
+ *  ① **追記しても先頭へ戻らない**(同じノートを見続けている)
  *  ② **保存して戻っても位置が戻る**(編集の面は別物なので、覚えて戻す)
  * ⚠ 逆に「**別のノートへ移ったら先頭から**」は正しい ── そこも一緒に見る
  * (「常に動かさない」実装だと、次のノートを途中から読まされる)。
+ *
+ * ## 🔴 ①の主張を書き直した(#782 B。user 裁定 2026-09-07)
+ *
+ * > 「**追記した見出しや末尾にジャンプ ただし、別窓で開いている場合の
+ * > 再レンダリングは固定**」
+ *
+ * ⚠ ①はもともと `|scrollTop - parked| < 40` = 「**1 px も動かない**」で pin して
+ *   いたが、それは題名(「**トップへ戻らない**」)より**強い主張**だった ──
+ *   2026-08-03 の指示が塞ぎたかったのは「**先頭へ飛ぶ**」ことである。
+ * 🔑 裁定で「足した所へ動く」が正になったので、主張を**目的の側**へ書き直した:
+ *   **先頭へ戻っていない**(位置が 0 付近でない)+ **足した所へ動いた**
+ *   (`parked` より下)。⚠ 2026-08-03 の指示は**捨てていない** ── 前者が守る。
+ * ⚠ ②の基準も `parked` から**追記の後の位置**へ移した(追記で動くようになった
+ *   以上、そこが「読んでいた場所」である)。
  */
-test('🔴 追記・保存しても本文のスクロールがトップへ戻らない', async ({ page }) => {
+test('🔴 追記すると足した所へ動き、保存しても先頭へ戻らない', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
@@ -180,14 +194,15 @@ test('🔴 追記・保存しても本文のスクロールがトップへ戻ら
     b!.firstElementChild!.setAttribute('data-mark', 'V');
   });
 
-  // ① 🔴 追記しても位置が動かない
+  // ① 🔴 追記すると足した所へ動く(先頭へは戻らない)
   await page.locator('[data-pkc-field="append-input"]').fill('追記した行');
   await clickReal(page, '[data-pkc-action="append-entry"]');
   await expect(page.locator('[data-pkc-field="detail-body"]')).toContainText('追記した行');
-  expect(
-    Math.abs((await detail.evaluate((el) => el.scrollTop)) - parked),
-    '追記でスクロールがトップへ飛んだ',
-  ).toBeLessThan(40);
+  const afterAppend = await detail.evaluate((el) => el.scrollTop);
+  // 🔴 2026-08-03 の指示が塞いだもの ── これは裁定が変わっても守り続ける
+  expect(afterAppend, '追記でスクロールが先頭へ飛んだ').toBeGreaterThan(100);
+  // 🔴 #782 B の裁定 ── 足した字は末尾なので、置いた所より**下**へ動く
+  expect(afterAppend, '追記しても足した所へ動いていない').toBeGreaterThan(parked);
   expect(
     await page.evaluate(
       () =>
@@ -203,7 +218,7 @@ test('🔴 追記・保存しても本文のスクロールがトップへ戻ら
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   await expect(page.locator('[data-pkc-field="detail-body"]')).toBeVisible();
   expect(
-    Math.abs((await detail.evaluate((el) => el.scrollTop)) - parked),
+    Math.abs((await detail.evaluate((el) => el.scrollTop)) - afterAppend),
     '保存で戻ったらスクロールがトップへ飛んだ',
   ).toBeLessThan(40);
 
