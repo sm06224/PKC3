@@ -402,3 +402,46 @@ test('🔴 マウスのある端末には、升の印を出さない (#750 I2 �
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **引用(`>`)の中の表も、升を押して打てる**(#749)。
+ *
+ * > user から見た食い違い(#749): 同じ引用の中で、**チェックの印は押せるのに
+ * > 表の升は押せない**。しかも csv の囲みなら押せる。
+ *
+ * 🔑 **unit では届かない層**は上の test と同じ 3 つ(焦点 / `execCommand` /
+ *   disk まで届くか)だが、⚠ ここで見たいのは **`> ` が 1 文字も動かないこと**である。
+ *   前置きを升の一部として数えていたら、確定した瞬間に引用が壊れる。
+ */
+test('🔴 引用の中の表の升を押して打つと、`>` を動かさずに本文へ入る (#749)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  await createEntry(page, 'text');
+  await page
+    .locator('[data-pkc-field="editor-body"]')
+    .fill('> | 品名 | 数 |\n> |---|---|\n> | りんご | 3 |\n');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+
+  const cells = page.locator(CELL);
+  await expect(cells.first(), '引用の中の升が押せる形で出ていない').toBeVisible({
+    timeout: 15_000,
+  });
+  // 🔑 前提 ── 見出し 2 + 中身 2 の 4 つ(区切りの行には焼かれていない)
+  await expect(cells, '押せる升の数が違う').toHaveCount(4);
+
+  await cells.nth(3).click();
+  const input = page.locator('[data-pkc-field="cell-input"]');
+  await expect(input, '引用の中の升で欄が開かない').toBeVisible();
+  await input.fill('7');
+  await page.keyboard.press('Control+Enter');
+
+  // 🔴 **原文まで届いているか** ── 画面だけの嘘でないことを、開き直して見る
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="start-edit"]');
+  await expect(
+    page.locator('[data-pkc-field="editor-body"]'),
+    '引用の前置きが動いた / 字が届いていない',
+  ).toHaveValue('> | 品名 | 数 |\n> |---|---|\n> | りんご | 7 |\n');
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

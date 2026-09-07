@@ -17,6 +17,8 @@ import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import { applyBodyRewrite } from '../../src/features/markdown/body-rewrite';
 import {
   convertTable,
+  mdCellGate,
+  mdCellSpanAt,
   tableAt,
   tableConvertRefusal,
 } from '../../src/features/markdown/table-convert';
@@ -497,5 +499,31 @@ describe('表の形を変える(#708 段②)', () => {
     }
     const nested = ':::note\n```txt\n| a | b |\n|---|---|\n| 1 | 2 |\n```\n:::\n';
     expect(tableAt(nested, 2), '板の中のコードの字を表として読んだ').toBeNull();
+  });
+
+  /**
+   * 🔴 **引用の中の表には「形を作り変える」を出さない**(#749、2026-09-07)。
+   *
+   * ⚠ issue のコメントには「作り変えた先(csv の囲み)は引用の中で既にちゃんと動くので
+   *   **出す**」と書いたが、**実測でこれを訂正した** ── その根拠は「升を打てる」話で
+   *   あって「**戻す口が出る**」話ではなかった。
+   * 🔑 囲みの走査は**引用の中の柵を 1 本も見ない**ので、markdown → csv にすると
+   *   「Markdown の表にする」が二度と出ない**片道**になる。
+   * ⚠ `:::` の板の中を外しているのと**同じ理由**である(#743)。
+   * 🔑 ⚠ **升を押して打つほうは引用の中でも通る** ── 問いが違えば門も違う
+   *   (そちらは `tests/features/md-table-cell.test.ts` の corpus が見る)。
+   */
+  it('🔴 引用の中の表には形の作り変えを出さない(片道の操作を作らない)', () => {
+    const md = '> | a | b |\n> |---|---|\n> | 1 | 2 |\n';
+    for (let l = 0; l < 3; l += 1) {
+      expect(tableAt(md, l), `引用の中の表に作り変えを出した(行 ${l})`).toBeNull();
+    }
+    // ⚠ **空振り防止** ── 同じ表を引用の外へ出せば、ちゃんと出る
+    const plain = '| a | b |\n|---|---|\n| 1 | 2 |\n';
+    expect(tableAt(plain, 0), '引用でない表にも出ていない(この検査は何も見ていない)')
+      .not.toBeNull();
+    // 🔑 前提:引用の中でも**升は押して打てる**(こちらは別の門で通る)
+    const gate = mdCellGate(md.split('\n'));
+    expect(mdCellSpanAt(gate, 0, 0), '引用の中の升が打てない').not.toBeNull();
   });
 });
