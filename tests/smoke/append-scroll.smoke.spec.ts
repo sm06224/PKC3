@@ -92,7 +92,14 @@ test('🔴 別の窓が追記しても、こちらの読んでいた場所は動
   expect(winErrors, `別窓の error: ${winErrors.join(' / ')}`).toEqual([]);
 });
 
-test('🔴 自分の窓で追記しても、読んでいた場所は動かない (#782)', async ({ page }) => {
+/**
+ * 🔴 **追記した窓は、足した所へ送る**(#782 B。user 裁定 2026-09-07
+ * 「追記した見出しや末尾にジャンプ」)。
+ *
+ * ⚠ ここも unit では原理的に見えない ── 「見えているか」は版面の話であり、
+ *   happy-dom は版面を持たない。
+ */
+test('🔴 自分の窓で末尾に追記すると、足した字が見える所まで送る (#782 B)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await makeLongNote(page);
   const room = await page.evaluate(() => {
@@ -100,16 +107,130 @@ test('🔴 自分の窓で追記しても、読んでいた場所は動かない
     return el.scrollHeight - el.clientHeight;
   });
   expect(room, '本文が短すぎて送れない(空振り)').toBeGreaterThan(2000);
+  // ⚠ **上のほうを読んでいる状態**にする ── 足した字は本文のいちばん下なので、
+  //    ここが下に居ると「送らなくても見えている」で空振りする
   await page.evaluate(() => {
-    document.querySelector<HTMLElement>('[data-pkc-region="detail"]')!.scrollTop = 1500;
+    document.querySelector<HTMLElement>('[data-pkc-region="detail"]')!.scrollTop = 300;
   });
-  await page.locator('[data-pkc-field="append-input"]').fill('自分の窓で追記した字');
+  /**
+   * 🔴 **1 回目を、上のほうの見出しへ足しておく**(#782 B の変異 M4)。
+   *
+   * ⚠ 1 回だけの台では「`lastAppend` が**動いた**回だけ送る」門を検められない ──
+   *   その門が外れると、撃った直後(`writeLock` が立った瞬間)に**古い
+   *   `lastAppend`** で発火し、**前に足した所**へ送って降りてしまう。
+   * 🔑 だから 2 回足し、2 回目は**長い字**にする ── 古い所へ送ると、
+   *   下の「最後の行が見えているか」が**画面の外**になる。
+   */
+  await page.locator('[data-pkc-field="append-target"]').selectOption({ index: 1 });
+  await page.locator('[data-pkc-field="append-input"]').fill('1 回目の追記');
+  await clickReal(page, '[data-pkc-action="append-entry"]');
+  await expect(page.locator('[data-pkc-region="detail"]')).toContainText('1 回目の追記', {
+    timeout: 15_000,
+  });
+  await page.locator('[data-pkc-field="append-target"]').selectOption({ index: 0 });
+  await page.evaluate(() => {
+    document.querySelector<HTMLElement>('[data-pkc-region="detail"]')!.scrollTop = 300;
+  });
+  const LONG_ADD = [
+    'ここから 2 回目の追記です。',
+    ...Array.from({ length: 28 }, (_, i) => `追記の中の行 ${i + 1} です。`),
+    '自分の窓で追記した字',
+  ].join('\n');
+  await page.locator('[data-pkc-field="append-input"]').fill(LONG_ADD);
   await clickReal(page, '[data-pkc-action="append-entry"]');
   await expect(page.locator('[data-pkc-region="detail"]')).toContainText('自分の窓で追記した字', {
     timeout: 15_000,
   });
-  expect(await top(page), '追記した窓が先頭へ飛んだ').toBe(1500);
-  await page.waitForTimeout(800);
-  expect(await top(page), '遅れて先頭へ飛んだ').toBe(1500);
+  /**
+   * 🔑 観測点は**位置の数**ではなく「**足した字が画面に入っているか**」である
+   *   ── 送り先の px を pin すると、版面が 1px 変わるたびに落ちる。
+   */
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(() => {
+          const el = document.querySelector<HTMLElement>('[data-pkc-region="detail"]')!;
+          /**
+           * 🔑 **字そのものの位置を測る**(囲んでいる要素ではなく、字の入っている節点)。
+           * ⚠ 1 稿目は「子を持たない要素」を探していたが、**続けて書いた行は
+           *   1 つの段落**になる(`breaks: true` は `<br>` で繋ぐ)ので当たらず、
+           *   しかも段落の枠は 30 行ぶんの高さを持つので「見えている」が緩くなる。
+           */
+          const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+          let node: Node | null = null;
+          while (walk.nextNode() !== null) {
+            if ((walk.currentNode.textContent ?? '').includes('自分の窓で追記した字')) {
+              node = walk.currentNode;
+              break;
+            }
+          }
+          if (node === null) return 'まだ描けていない';
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          const a = range.getBoundingClientRect();
+          const b = el.getBoundingClientRect();
+          return a.top < b.bottom && a.bottom > b.top ? '見えている' : '画面の外';
+        }),
+      { timeout: 10_000 },
+    )
+    .toBe('見えている');
+  // ⚠ 送ったことの裏取り ── 上に居たままなら送っていない(空振り防止)
+  expect(await top(page), '足した所へ送っていない(位置が動いていない)').toBeGreaterThan(300);
+  expect(errors, `error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **見えているなら動かさない**(#782 B の対照群)。
+ *
+ * ⚠ 1 稿目は**短い本文**で書いていたが、それでは `block: 'start'` に変える変異が
+ *   **生き延びた** ── 送れない本文では、どちらでも位置は 0 のままである
+ *   (CLAUDE.md §1「空振り」)。🔑 だから**送れる本文**のまま、
+ *   **足す先が画面に入っている**形にした。
+ */
+test('⚠ 足した字が既に見えているときは、画面を動かさない (#782 B)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await makeLongNote(page);
+  const room = await page.evaluate(() => {
+    const el = document.querySelector<HTMLElement>('[data-pkc-region="detail"]')!;
+    return el.scrollHeight - el.clientHeight;
+  });
+  // 🔑 空振り防止 ── **送れる本文**であること(送れないなら、どちらでも 0 のまま)
+  expect(room, '本文が短すぎて送れない(空振り)').toBeGreaterThan(2000);
+  expect(await top(page), '前提が崩れた(先頭に居ない)').toBe(0);
+  // ⚠ 入り先は**いちばん上の見出し** ── 先頭を見たままで、足した字が画面に入る
+  await page.locator('[data-pkc-field="append-target"]').selectOption({ index: 1 });
+  await page.locator('[data-pkc-field="append-input"]').fill('見えている所へ追記した字');
+  await clickReal(page, '[data-pkc-action="append-entry"]');
+  await expect(page.locator('[data-pkc-region="detail"]')).toContainText('見えている所へ追記した字', {
+    timeout: 15_000,
+  });
+  await page.waitForTimeout(600);
+  expect(await top(page), '見えているのに画面が動いた').toBe(0);
+  expect(errors, `error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **断られた回は動かさない**(#782 B の対照群 2)。
+ *
+ * ⚠ これが無いと「着いた回だけ動く」の門(`lastAppend` が**動いたか**)を外す変異が
+ *   生き延びる ── 外すと、空のまま押しただけで**前に足した所へ画面が飛ぶ**。
+ */
+test('⚠ 空のまま「追記」を押しても、画面は動かない (#782 B)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await makeLongNote(page);
+  // ① 1 度ちゃんと追記する(`lastAppend` に中身を作る)
+  await page.locator('[data-pkc-field="append-input"]').fill('1 回目の追記');
+  await clickReal(page, '[data-pkc-action="append-entry"]');
+  await expect(page.locator('[data-pkc-region="detail"]')).toContainText('1 回目の追記', {
+    timeout: 15_000,
+  });
+  // ② 先頭へ戻して、**空のまま**押す
+  await page.evaluate(() => {
+    document.querySelector<HTMLElement>('[data-pkc-region="detail"]')!.scrollTop = 0;
+  });
+  await page.locator('[data-pkc-field="append-input"]').fill('');
+  await clickReal(page, '[data-pkc-action="append-entry"]');
+  await page.waitForTimeout(1200);
+  expect(await top(page), '何も足していないのに画面が動いた').toBe(0);
   expect(errors, `error: ${errors.join(' / ')}`).toEqual([]);
 });
