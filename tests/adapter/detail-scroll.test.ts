@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
 import { initialState, type AppState } from '../../src/adapter/state/app-state';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
+import { attachmentBody } from '../../src/features/flavor/attachment-flavor';
 
 function meta(lid: string): EntryMeta {
   return {
@@ -96,6 +97,91 @@ describe('本文ペインのスクロール', () => {
     r.render(state('a', LONG));
     await settle();
     expect(scroller.scrollTop, '保存で戻ったら先頭へ飛んだ').toBe(500);
+  });
+
+  /**
+   * 🔴 **本文が届くのを待つあいだ、器を空にしない**(#782。user 報告 2026-09-07)。
+   *
+   * > 「**別窓側は再レンダリングでもスクロールは固定しておいて欲しい**」
+   *
+   * ⚠ 別の窓が追記すると、こちらの窓は**入れ物ごと読み直す**経路を通り、
+   *   本文が一瞬 `null` になる。直す前はそこで器を空にして
+   *   「読み込んでいます…」を出していたので、**本文の高さが潰れてブラウザが
+   *   送り位置を 0 に丸めた**(実ブラウザ実測 2026-09-07:1200 → 0、高さ 10208 → 650)。
+   * 🔑 ここが見るのは**器の中身**である ── happy-dom は版面を持たないので
+   *   `scrollTop` は丸められない(**この台では位置そのものを見ても空振りする**)。
+   *   位置は `tests/smoke/append-scroll.smoke.spec.ts` が実ブラウザで見る。
+   */
+  it('🔴 同じノートの本文待ちでは、器を空にしない(#782)', async () => {
+    const { scroller, r } = setup();
+    r.render(state('a', LONG));
+    await settle();
+    /**
+     * ⚠ **自分の器の中だけを見る**(CLAUDE.md §1「面へスコープする」)── この file の
+     *   `setup()` は document に器を**積み増す**ので、`document.querySelector` は
+     *   **前の test の器**に当たる(実際に 1 度そう外した)。
+     * ⚠ 器は本文を描く枝で **`detail-body` に名を変える**(組んだ直後だけ `-host`)。
+     */
+    const host = scroller.querySelector<HTMLElement>('[data-pkc-field="detail-body"]');
+    const before = host?.childElementCount ?? 0;
+    // 空振り防止 ── 本文が本当に描けている(0 個の器で「減っていない」と言わない)
+    expect(before, '本文が 1 つも描けていない').toBeGreaterThan(5);
+    r.render({ ...state('a', LONG), openBody: null });
+    await settle();
+    expect(host?.childElementCount, '本文待ちで器を空にした').toBe(before);
+    expect(
+      scroller.querySelector('[data-pkc-field="detail-loading"]'),
+      '同じノートを見ているのに「読み込んでいます…」を出した',
+    ).toBeNull();
+  });
+
+  /**
+   * ⚠ **対照群** ── 初めて開くノートでは、これまでどおり「読み込んでいます…」を出す
+   * (出さないと、本文が届くまで**前のノートの本文**が出たままになる)。
+   */
+  it('別のノートに移って本文を待つあいだは「読み込んでいます…」を出す', async () => {
+    const { scroller, r } = setup();
+    r.render(state('a', LONG));
+    await settle();
+    r.render({ ...state('b', LONG), openBody: null });
+    await settle();
+    expect(
+      scroller.querySelector('[data-pkc-field="detail-loading"]'),
+      '別のノートなのに前の本文を出したままにした',
+    ).not.toBeNull();
+  });
+
+  /**
+   * 🔴 **添付のノートでは、これまでどおり空にする**(#782 の変異 M3)。
+   *
+   * ⚠ 上の直しを `bodyKind === 'md'` に絞っているのは**わざと**である ── 添付の面は
+   *   貸し出した ObjectURL の寿命を `disposeLends()` で畳んでから組み直す作りなので
+   *   (P8 段⑰)、古い面を出したままにすると**返し忘れた URL が積もる**。
+   * ⚠ 絞りを外す変異(`bodyKind` を見ない)は、これが無いと**生き延びる**
+   *   (実測 2026-09-07:SURVIVED)。
+   * 🔑 ここが「なぜ狭いのか」の唯一の証拠である。広げるなら、まず貸し借りの側を測る。
+   */
+  it('🔴 添付のノートでは、本文待ちに「読み込んでいます…」を出す(#782 の絞り)', async () => {
+    const { scroller, r } = setup();
+    const att = attachmentBody({ name: 'a.png', mime: 'image/png', size: 3, assetKey: 'k1' });
+    const base = state('a', att);
+    const withAtt: AppState = {
+      ...base,
+      entryMetas: new Map([['a', { ...meta('a'), archetype: 'attachment' }]]),
+    };
+    r.render(withAtt);
+    await settle();
+    // 空振り防止 ── 添付として描けている(md のまま描いていたら、この検査は別物を見ている)
+    expect(
+      scroller.querySelector('[data-pkc-field="detail-body"]'),
+      '添付なのに markdown の器で描いた(台が崩れている)',
+    ).toBeNull();
+    r.render({ ...withAtt, openBody: null });
+    await settle();
+    expect(
+      scroller.querySelector('[data-pkc-field="detail-loading"]'),
+      '添付でも古い面を出したままにした(貸した URL が返らない)',
+    ).not.toBeNull();
   });
 
   it('🔴 編集に入ったまま**別のノート**を開いたら、覚えた位置を持ち込まない', async () => {
