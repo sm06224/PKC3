@@ -185,6 +185,40 @@ describe('🔴 語や数を途中で切らない(2026-09-07、着地前の動線
  *   答えだけ半角で挿す(`２＋３＝5`)。
  */
 describe('🔴 全角で打っても計算する(#764、user 報告 2026-09-07)', () => {
+  /**
+   * 🔴 **打った式ごと半角に直す**(#773。user 裁定 2026-09-07
+   * 「**全角入力時は計算式を含めて半角化して欲しい**」)。
+   *
+   * ⚠ これは 2026-09-07 に配った姿(#766 案 C-2「式は全角のまま」)を**覆す裁定**である。
+   * ⚠ 直すのは**式と `＝` だけ** ── 前に書いた文と全角の空白は user の字なので触らない。
+   */
+  it('🔴 全角で打ったら、式と `＝` を半角へ直す範囲を返す', () => {
+    const req = detectInlineCalcRequest('合計\u3000２＋３＝', 7)!;
+    expect(req.halfWidth).not.toBeNull();
+    // ⚠ 直すのは式の 1 字目から ── `合計` と全角の空白(添字 0〜2)は範囲の外
+    expect(req.halfWidth).toEqual({ from: 3, to: 7, text: '2+3=' });
+  });
+
+  it('⚠ 半角で打っていたら、直す所は無い', () => {
+    expect(detectInlineCalcRequest('合計 2+3=', 7)?.halfWidth).toBeNull();
+  });
+
+  it('⚠ 全角と半角が混ざっていたら、混ざった所だけ直る', () => {
+    const req = detectInlineCalcRequest('1200*1.1＝', 9)!;
+    expect(req.halfWidth).toEqual({ from: 0, to: 9, text: '1200*1.1=' });
+  });
+
+  it('🔴 全角と半角は 1 字 → 1 字(直しても後ろの位置が動かない)', () => {
+    const req = detectInlineCalcRequest('２＋３＝', 4)!;
+    expect(req.halfWidth!.text.length).toBe(req.halfWidth!.to - req.halfWidth!.from);
+  });
+
+  it('🔴 計算にならないものは、半角にも直さない', () => {
+    // ⚠ 「打った字は 1 文字も変えない」の側 ── 発火しない以上、直す口も出ない
+    expect(detectInlineCalcRequest('１，０００＝', 6)).toBeNull();
+    expect(detectInlineCalcRequest('１２００＝', 5)).toBeNull();
+  });
+
   it('🔴 全角の式と全角の `＝` で発火する', () => {
     expect(typed('２＋３＝')).toBe('5');
     expect(typed('１２００＊１．１＝')).toBe('1320');

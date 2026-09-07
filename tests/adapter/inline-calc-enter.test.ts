@@ -188,6 +188,25 @@ describe('本文で Enter を押すと計算される(#764)', () => {
     expect(ta.selectionStart).toBe('請求は 1200*1.1=1320'.length);
   });
 
+  /**
+   * 🔴 **全角で打ったら、式ごと半角に直して答えを足す**(#773。user 裁定 2026-09-07)。
+   * ⚠ 規則(どこからどこまで直すか)は `tests/features/inline-calc.test.ts` が見る ──
+   *   ここが見るのは**欄と state に、直した字がそろって届くか**である。
+   */
+  it('🔴 全角で打つと、式ごと半角になって答えが入る', async () => {
+    const { ta, d } = await pressEnter('合計\u3000２＋３＝');
+    expect(ta.value).toBe('合計\u30002+3=5');
+    expect(d.getState().openBody?.body).toBe('合計\u30002+3=5');
+    // ⚠ カーソルは答えの後ろ(続けて打てる)
+    expect(ta.selectionStart).toBe('合計\u30002+3=5'.length);
+  });
+
+  it('⚠ 計算にならない全角は 1 文字も変えない', async () => {
+    // ⚠ 半角化は**計算が通ったときだけ**である(打った字を勝手に直さない)
+    const { ta } = await pressEnter('１，０００＝');
+    expect(ta.value).toBe('１，０００＝');
+  });
+
   it('🔴 改行は止めない(Enter の意味を奪わない)', async () => {
     const { prevented } = await pressEnter('2+3=');
     expect(prevented, '計算のために Enter を食べてはいけない').toBe(false);

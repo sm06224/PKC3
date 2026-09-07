@@ -95,6 +95,43 @@ test('🔴 引用の行で計算しても、取り消しで打った字へ戻れ
   expect(errors, errors.join('\n')).toHaveLength(0);
 });
 
+/**
+ * 🔴 **全角で打つと、式ごと半角になる**(#773。user 裁定 2026-09-07
+ * 「**全角入力時は計算式を含めて半角化して欲しい**」)。
+ *
+ * 🔴 **ここでしか見えない層が 2 つ**:①半角へ直す一手と答えを挿す一手が
+ *   **続けて撃たれても位置がずれない**か(全角と半角は 1 字 → 1 字だが、
+ *   `execCommand` が実際にそう動くかは実ブラウザにしか無い)
+ *   ②直した字が **`Ctrl`+`Z` で打った全角へ戻せる**か。
+ */
+test('🔴 全角で打つと式ごと半角になり、取り消しで全角に戻る (#773)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+  await createEntry(page, 'text');
+
+  const ta = page.locator('[data-pkc-field="editor-body"]');
+  await expect(ta).toBeVisible();
+  await ta.click();
+
+  // ⚠ 日本語入力のまま打った形を、そのまま入れる
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Input.insertText', { text: '合計\u3000１２００＊１．１＝' });
+  await page.keyboard.press('Enter');
+  // ⚠ 前に書いた文と全角の空白は残り、**式と `＝` だけ**半角になる
+  await expect(ta).toHaveValue('合計\u30001200*1.1=1320\n');
+
+  const seen: string[] = [];
+  for (let i = 0; i < 8; i += 1) {
+    await page.keyboard.press('Control+z');
+    seen.push(await ta.inputValue());
+  }
+  expect(seen, `打った全角へ戻れない: ${JSON.stringify(seen)}`).toContain(
+    '合計\u3000１２００＊１．１＝',
+  );
+
+  expect(errors, errors.join('\n')).toHaveLength(0);
+});
+
 test('⚠ 式でない `=` では、ただ改行するだけ (#764)', async ({ page }) => {
   // 🔑 対照群 ── これが無いと「常に何か足す」実装でも上の test が通ってしまう
   const errors = collectPageErrors(page);

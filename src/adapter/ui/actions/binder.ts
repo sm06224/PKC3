@@ -7309,6 +7309,19 @@ export function bindActions(
          *   カーソルは発火の条件からして `=` の直後に在る。位置を渡すと
          *   `execCommand` の道と fallback の道で挿し先が食い違う余地ができる(§7)。
          */
+        /**
+         * 🔴 **全角で打っていたら、式ごと半角へ直す**(#773。user 裁定 2026-09-07
+         * 「**全角入力時は計算式を含めて半角化して欲しい**」)。
+         *
+         * ⚠ 差し替えも `insertText` で撃つ ── `setRangeText` だと**取り消しの
+         *   履歴が切れる**(#765 で実測した)。
+         * ⚠ 全角と半角は**1 字 → 1 字**なので、差し替えてもカーソルは `＝` の
+         *   直後(= 元の位置)のままである ── だから次の 1 手がそのまま使える。
+         */
+        if (req !== null && req.halfWidth !== null) {
+          ta.setSelectionRange(req.halfWidth.from, req.halfWidth.to);
+          insertText(ta, req.halfWidth.text);
+        }
         insertText(ta, formatCalcResult(v));
       }
     }
