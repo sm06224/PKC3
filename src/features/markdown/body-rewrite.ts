@@ -22,7 +22,7 @@ import { readTags, withTagResult } from '../flavor/tags';
 import { acceptsExternalImage, rewriteAdopted } from '../asset/inline-url-adopt';
 import { DELIMITER, csvEscapeField, parseCsv, type CsvPositions } from './csv-table';
 import { parseRenderableFence } from './markdown-render';
-import { containerAtLine } from './source-blocks';
+import { containerAtLine, quoteLead } from './source-blocks';
 import { insertLines, moveLines } from './line-move';
 import { gfmCellText } from './html-to-markdown';
 import {
@@ -643,8 +643,21 @@ function rewriteCsvCell(
    */
   if (table === null) return rewriteMdCell(lines, rewrite);
   const { delimiter } = table;
+  /**
+   * 🔴 **引用の前置きは升ではない**(#775)── `> 品名,数` の `> ` を剥がしてから
+   *   csv として読み、書き戻すときに**そのまま付け直す**(前置きは 1 文字も動かない)。
+   *
+   * ⚠ 剥がす段数は**囲みが居る深さ**であって、行ごとに数え直すのではない ──
+   *   素の ` ```csv ` の中に書いた `> a,b` は、読み手も **`> a`** を 1 つ目の升として
+   *   渡してくる(実測 2026-09-07)。行ごとに数えると、そこを升の字として食う。
+   * ⚠ 段が足りない行は**この囲みの中身ではない**ので断る(`quoteLead` が `null`)。
+   */
+  const lead = quoteLead(line, table.quote);
+  if (lead === null) return null;
+  const head = line.slice(0, lead);
+  const text = line.slice(lead);
   const out: CsvPositions = { rowLines: [], cellSpans: [] };
-  const rows = parseCsv(line, delimiter, out);
+  const rows = parseCsv(text, delimiter, out);
   /**
    * ⚠ **1 行を渡して、閉じた 1 行が返ること**を検める。
    *   返らない / 2 行になる / **引用が閉じていない**形は、
@@ -658,8 +671,9 @@ function rewriteCsvCell(
   const span = spans[rewrite.col];
   if (span === undefined) return null;
   const next = csvEscapeField(rewrite.value, delimiter);
-  if (line.slice(span.start, span.end) === next) return null;
-  lines[rewrite.line] = line.slice(0, span.start) + next + line.slice(span.end);
+  // ⚠ 範囲は**前置きを剥がした字**の中の位置なので、書き戻しも `text` の上で行う
+  if (text.slice(span.start, span.end) === next) return null;
+  lines[rewrite.line] = head + text.slice(0, span.start) + next + text.slice(span.end);
   return lines.join('\n');
 }
 
@@ -704,20 +718,34 @@ function rewriteTableFormat(
 function csvTableAt(
   body: string,
   line: number,
-): { first: number; last: number; delimiter: string } | null {
+): { first: number; last: number; delimiter: string; quote: number } | null {
   /**
    * 🔴 **入れ子の深さを問わない**(#743)。⚠ 直す前は `scanContainers` の
    *   **最上位しか見ていなかった**ので、`:::` の板の中の ` ```csv ` は
    *   **升を押せるのに書けなかった**(打った字が消え、起きていない理由が出る)。
+   * 🔴 **引用(`>`)の中も同じ**(#775)── 走査が引用へ降りるようになったので、
+   *   `> ```csv ` の中身もここに出る。⚠ そのぶん **`quote` を持ち帰る**:
+   *   中身の行は前置きを剥がしてから読む(すぐ下の `rewriteCsvCell`)。
    */
   const fence = containerAtLine(fencesBelowFrontmatter(body), line);
-  if (fence === null || line <= fence.start || line >= fence.end) return null;
+  if (fence === null || line <= fence.start) return null;
+  /**
+   * 🔴 **閉じが来ていない囲みは、末尾までが中身である**(#775)。
+   *
+   * ⚠ 直す前は閉じの有無に関わらず `end - 1` にしていた。素の本文では
+   *   末尾の空行が**閉じの代わりになって偶然当たっていた**ので気づけなかったが、
+   *   実測(2026-09-07)で 2 つの形が割れていた ── ①`\n` で終わらない本文
+   *   (` ```csv\na,b `)の**最後の行**②引用の中の閉じない囲み
+   *   (`> ```csv\n> a,b `)。どちらも**押せるのに書けない**(打った字が消える)。
+   */
+  const last = fence.open ? fence.end : fence.end - 1;
+  if (line > last) return null;
   const parsed = parseRenderableFence(fence.name);
   if (parsed === null) return null;
   const delimiter = (DELIMITER as Record<string, string | undefined>)[parsed.lang];
   if (delimiter === undefined) return null;
   // ⚠ 中身は**見出しの次から閉じの手前まで**(閉じが無い囲みは末尾まで)
-  return { first: fence.start + 1, last: fence.end - 1, delimiter };
+  return { first: fence.start + 1, last, delimiter, quote: fence.quote };
 }
 
 /**
@@ -736,12 +764,27 @@ function rewriteCsvShape(
   const table = csvTableAt(body, rewrite.line);
   if (table === null) return null;
   const lines = body.split('\n');
+  /**
+   * 🔴 **引用の前置きを剥がしてから読む**(#775)── `rewriteCsvCell` と同じ作法。
+   * ⚠ 剥がさずに `trim()` すると、引用の中の**空の行**(`>`)が「空でない」と読まれ、
+   *   表の行として数えられる。
+   * @returns 中身(前置きを剥がした字)。段が足りない行は `null`(この表の行ではない)
+   */
+  const textOf = (at: number): string | null => {
+    const l = lines[at];
+    if (l === undefined) return null;
+    const lead = quoteLead(l, table.quote);
+    return lead === null ? null : l.slice(lead);
+  };
   /** 表の中身の行(空行は行として数えない ── 描かれていないので押されない)。 */
   const rows: number[] = [];
   for (let i = table.first; i <= table.last && i < lines.length; i += 1) {
-    if ((lines[i] ?? '').trim() !== '') rows.push(i);
+    const text = textOf(i);
+    if (text !== null && text.trim() !== '') rows.push(i);
   }
   if (!rows.includes(rewrite.line)) return null;
+  /** 前置きの字数(⚠ `rows` に居る行だけに使う = 剥がせた行なので `null` にならない)。 */
+  const lead = (at: number): number => quoteLead(lines[at]!, table.quote)!;
 
   if (rewrite.what === 'row') {
     if (rewrite.mode === 'remove') {
@@ -751,16 +794,21 @@ function rewriteCsvShape(
       return lines.join('\n');
     }
     // 足すのは**押した行の下**。⚠ 幅は押した行に揃える(でこぼこにしない)
-    const cells = cellsOf(lines[rewrite.line]!, table.delimiter);
+    const cells = cellsOf(textOf(rewrite.line)!, table.delimiter);
     if (cells === null) return null;
-    lines.splice(rewrite.line + 1, 0, table.delimiter.repeat(cells.length - 1));
+    /**
+     * ⚠ **足す行にも同じ前置きを付ける**(#775)── 付けないと引用の外へ落ちて、
+     *   囲みがそこで閉じる(表が真っ二つになる)。
+     */
+    const prefix = lines[rewrite.line]!.slice(0, lead(rewrite.line));
+    lines.splice(rewrite.line + 1, 0, prefix + table.delimiter.repeat(cells.length - 1));
     return lines.join('\n');
   }
 
   // ── 列は**全部の行**を触る。まず全行が読めることを確かめてから当てる
   const parsed: Array<{ at: number; spans: Array<{ start: number; end: number }> }> = [];
   for (const at of rows) {
-    const spans = cellsOf(lines[at]!, table.delimiter);
+    const spans = cellsOf(textOf(at)!, table.delimiter);
     if (spans === null) return null;
     if (spans[rewrite.col] === undefined) return null;
     parsed.push({ at, spans });
@@ -768,17 +816,19 @@ function rewriteCsvShape(
   if (rewrite.mode === 'remove' && parsed.some((r) => r.spans.length <= 1)) return null;
   for (const { at, spans } of parsed) {
     const line = lines[at]!;
+    // ⚠ 範囲は**前置きを剥がした字**の中の位置 ── 前置きのぶんだけずらして当てる
+    const off = lead(at);
     const span = spans[rewrite.col]!;
     if (rewrite.mode === 'add') {
       // 押した列の**右**へ空のセルを 1 つ
-      lines[at] = line.slice(0, span.end) + table.delimiter + line.slice(span.end);
+      lines[at] = line.slice(0, off + span.end) + table.delimiter + line.slice(off + span.end);
     } else {
       // ⚠ 区切り字も 1 つ連れて消す ── 最後の列なら**左側**の区切り字を消す
       const cut =
         rewrite.col + 1 < spans.length
           ? { start: span.start, end: spans[rewrite.col + 1]!.start }
           : { start: spans[rewrite.col - 1]!.end, end: span.end };
-      lines[at] = line.slice(0, cut.start) + line.slice(cut.end);
+      lines[at] = line.slice(0, off + cut.start) + line.slice(off + cut.end);
     }
   }
   return lines.join('\n');

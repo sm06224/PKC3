@@ -15,6 +15,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   allFences,
+  quoteLead,
+  quoteMarkLength,
+  quotePrefix,
   blockSpanAt,
   containerAtLine,
   fenceAt,
@@ -317,5 +320,113 @@ describe('入れ子の囲み(fenceAt / allFences)', () => {
     ]);
     // ⚠ 空振り防止 ── 最上位の走査は板 1 つと囲み 1 つしか返さない(= 入れ子を見ている)
     expect(scanContainers(b).map((c) => c.kind)).toEqual(['directive', 'fence']);
+  });
+});
+
+/**
+ * 🔴 **引用(`>`)の中の囲みも数える**(#775)。
+ *
+ * ⚠ 直す前はここが `[]` だったので、`> ```csv ` の升は**押せるのに書けなかった**
+ *   (焼く側は markdown-it の答えを使うので印は焼かれる)。
+ * 🔑 見るのは**深さ(`quote`)も**である ── 中身の行はこの数だけ前置きを剥がして
+ *   読むので、深さを取り違えると引用の印を升の字として書き換える。
+ */
+describe('引用の中の囲み(fenceAt / allFences)#775', () => {
+  it('🔴 引用の中の柵を見つけ、深さを 1 と言う', () => {
+    const b = '> ```csv\n> a,b\n> ```\n';
+    // ⚠ 空振り防止 ── 最上位の走査は 1 つも返さない(= 引用へ降りている)
+    expect(scanContainers(b), '台が引用になっていない').toHaveLength(0);
+    expect(fenceAt(b, 1)).toEqual(
+      expect.objectContaining({ start: 0, end: 2, kind: 'fence', name: 'csv', quote: 1 }),
+    );
+  });
+
+  it('🔴 引用の外の囲みは深さ 0(前置きを剥がさない印)', () => {
+    expect(fenceAt('```csv\n> a,b\n```\n', 1)).toEqual(expect.objectContaining({ quote: 0 }));
+  });
+
+  it('🔴 深さは 1 段ずつ数える(`>>` は 2)', () => {
+    expect(fenceAt('>> ```csv\n>> a,b\n>> ```\n', 1)).toEqual(
+      expect.objectContaining({ quote: 2, start: 0, end: 2 }),
+    );
+  });
+
+  /**
+   * 🔴 **1 段だけ剥がす** ── 読み手も 1 段しか剥がさない。
+   * ⚠ 全段まとめて剥がすと、`>> a,b` の中身が `a,b` に見えて
+   *   **画面(`> a` が 1 つ目の升)と食い違う**。
+   */
+  it('🔴 中身が 1 段深くても、囲みの深さは開き行のまま', () => {
+    expect(fenceAt('> ```csv\n>> a,b\n> ```\n', 1)).toEqual(
+      expect.objectContaining({ quote: 1, start: 0, end: 2 }),
+    );
+  });
+
+  it('⚠ 引用が切れた所で囲みも終わる(閉じが外に残るので `open`)', () => {
+    const b = '> ```csv\n> a,b\nそと\n> ```\n';
+    expect(fenceAt(b, 1)).toEqual(expect.objectContaining({ start: 0, end: 1, open: true }));
+    expect(fenceAt(b, 2), '引用の外まで飲んだ').toBeNull();
+  });
+
+  it('⚠ 囲みの中の `>` はコードの字(降りない)', () => {
+    // 🔴 降りると、素の csv に書いた `> a,b` の `> ` を前置きとして食う
+    const b = '```txt\n> ```csv\n> a,b\n> ```\n';
+    for (const l of [0, 1, 2, 3]) {
+      expect(fenceAt(b, l), `行 ${l} が囲みの外に見えた`).toEqual(
+        expect.objectContaining({ name: 'txt', quote: 0 }),
+      );
+    }
+  });
+
+  it('⚠ 板と引用は、どちらの順でも降りる', () => {
+    expect(fenceAt(':::note\n> ```csv\n> a,b\n> ```\n:::\n', 2)).toEqual(
+      expect.objectContaining({ name: 'csv', quote: 1, start: 1, end: 3 }),
+    );
+    expect(fenceAt('> :::note\n> ```csv\n> a,b\n> ```\n> :::\n', 2)).toEqual(
+      expect.objectContaining({ name: 'csv', quote: 1, start: 1, end: 3 }),
+    );
+  });
+
+  it('🔑 引用の中も外も、文書順に全部返す', () => {
+    const b = '```x\nq\n```\n\n> ```y\n> z\n> ```\n';
+    expect(allFences(b).map((f) => [f.name, f.start, f.end, f.quote])).toEqual([
+      ['x', 0, 2, 0],
+      ['y', 4, 6, 1],
+    ]);
+  });
+
+  it('⚠ `>` の後ろに空白が無くても、3 字までの字下げがあっても数える', () => {
+    expect(fenceAt('>```csv\n>a,b\n>```\n', 1)).toEqual(expect.objectContaining({ quote: 1 }));
+    expect(fenceAt('   > ```csv\n   > a,b\n   > ```\n', 1)).toEqual(
+      expect.objectContaining({ quote: 1 }),
+    );
+  });
+});
+
+/**
+ * 🔴 **前置きを飲む規則は 1 本だけ**(#775。CLAUDE.md §7)。
+ * ⚠ 直す前は同じ正規表現が `table-convert.ts` にも在り、**囲みの走査だけが
+ *   それを知らなかった**。
+ */
+describe('引用の前置き(quoteMarkLength / quoteLead / quotePrefix)#775', () => {
+  it('🔴 1 段だけ飲む(CommonMark と同じ)', () => {
+    expect(quoteMarkLength('> a')).toBe(2);
+    expect(quoteMarkLength('>a')).toBe(1);
+    expect(quoteMarkLength('   > a'), '字下げ 3 字までは飲む').toBe(5);
+    expect(quoteMarkLength('    > a'), '字下げ 4 字はコード').toBe(0);
+    expect(quoteMarkLength('>> a'), '2 段目は飲まない').toBe(1);
+    expect(quoteMarkLength('a')).toBe(0);
+  });
+
+  it('🔴 段が足りなければ `null`(0 と読み替えない)', () => {
+    expect(quoteLead('>> a,b', 2)).toBe(3);
+    expect(quoteLead('> a,b', 2), '足りないのに字数を返した').toBeNull();
+    expect(quoteLead('a,b', 1)).toBeNull();
+    expect(quoteLead('a,b', 0), '0 段は常に 0').toBe(0);
+  });
+
+  it('⚠ 深さと字数を数える', () => {
+    expect(quotePrefix('>> a')).toEqual({ depth: 2, length: 3 });
+    expect(quotePrefix('a')).toEqual({ depth: 0, length: 0 });
   });
 });
