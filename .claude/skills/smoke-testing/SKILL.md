@@ -455,3 +455,35 @@ await win.keyboard.press('Alt+1');              // 本文の面へ(窓は残る)
 
 ⚠ 併せて疑う:`gotoApp(page)` の後に `page.goto(<同じ origin の断片違い>)` を
 書いた spec は、全部この形である。
+
+
+## 🔴 `setRangeText` は `Ctrl`+`Z` の履歴を切る(2026-09-07、#765)
+
+repo のコメントは長らく「**`value` 直代入は Ctrl+Z の履歴を捨てる**」と書いており、
+`setRangeText` は安全に読めた。⚠ **実測すると同じだった**:
+
+| 押した回数 | 欄の字(`> ひきよう` で `Enter` を押した後) |
+|---|---|
+| 1〜3 | 打った字が 1 文字ずつ戻る |
+| **4〜8** | 🔴 **`> ひきよう\n> ` から 1 文字も戻らない** |
+
+🔑 **undo に載せたいなら `insertText`**(`src/adapter/ui/render/row-swap.ts` ──
+中身は `document.execCommand('insertText')`)。範囲を消す / 置き換えるときは
+**先に `setSelectionRange` で選んでから**撃つ(空文字の `insertText` は選択を消し、
+取り消しにも載る ── これも実測)。
+
+🔴 **この差は unit では原理的に見えない**:
+- happy-dom に**取り消しの履歴が無い**
+- `execCommand` も無いので、unit は**必ず fallback を通る**(CLAUDE.md §2)
+
+⚠ だから「取り消せます」と**お知らせやマニュアルで約束する**なら、
+**smoke で押して確かめる**。押す回数は固定しない ── 粒度はブラウザが決める:
+
+```ts
+const seen: string[] = [];
+for (let i = 0; i < 8; i += 1) {
+  await page.keyboard.press('Control+z');
+  seen.push(await ta.inputValue());
+}
+expect(seen, `取り消しで打った字へ戻れない: ${JSON.stringify(seen)}`).toContain('打った字');
+```
