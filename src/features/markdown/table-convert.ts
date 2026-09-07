@@ -36,8 +36,9 @@ import {
   allFences,
   containerAtLine,
   fenceInfo,
+  quotePrefix,
   scanContainers,
-  type ContainerSpan,
+  type FenceSpan,
 } from './source-blocks';
 import { tableToCsv, tableToMarkdown, type TableCopyRow } from './table-copy';
 
@@ -88,28 +89,18 @@ const TABLE_BREAK_INDENT = /^(?: {4}|\t)/;
 const TABLE_BREAK_SECTION = /^\s*\+\+\+\s*(?:\{[^}]*\}\s*)?$/;
 
 /**
- * 🔴 **行頭の引用の前置き**(`>` の繰り返し)を数える(#749)。
+ * 🔴 **行頭の引用の前置きは `source-blocks.ts` の 1 本**(#749 / #775)。
  *
- * ⚠ 綴りは CommonMark と同じ ── `>` の前に空白 3 個まで、後ろに空白か tab を 1 個
- *   まで飲む。これを繰り返した数が**深さ**である(`>> ` は 2)。
+ * ⚠ 2026-09-07 まで**同じ正規表現がここにも在った** ── そして囲みの走査
+ *   (`allFences`)だけがそれを知らなかったので、引用の中の csv は
+ *   **押せるのに書けない**形になっていた(#775)。
+ * 🔑 規則を 1 本にしたので、走査と読み書きが**同じ答え**を持つ(CLAUDE.md §7)。
+ *
  * 🔑 **引用の中でも表の升を押して打てるようにする**ための土台。同じ file が
  *   2026-08-19 に**チェックの印**で同じ穴を塞いでおり(`body-rewrite.ts` の
  *   `TASK_LINE` は `(?:\s*>)*` を受ける)、user から見ると
  *   「同じ引用の中で、チェックは押せるのに表の升は押せない」食い違いだった。
- *
- * @returns `depth` = `>` の数 / `length` = 前置きの**字数**(本文はここから始まる)
  */
-function quotePrefix(line: string): { depth: number; length: number } {
-  let at = 0;
-  let depth = 0;
-  for (;;) {
-    const m = /^ {0,3}>[ \t]?/.exec(line.slice(at));
-    if (m === null) break;
-    at += m[0].length;
-    depth += 1;
-  }
-  return { depth, length: at };
-}
 
 /**
  * その行で表が終わるか(空行も含む)。
@@ -385,11 +376,17 @@ export function tableAt(body: string, line: number): TableAt | null {
    *
    * ⚠ issue のコメントには「作り変えた先(csv の囲み)は引用の中で既にちゃんと動くので
    *   出す」と書いたが、**その根拠は升を打つ話**であって、**戻す口**の話ではなかった。
-   *   🔑 実測(2026-09-07):`allFences('> ```csv\n> a,b\n> ```')` は **`[]`** ──
-   *   囲みの走査は**引用の中の柵を 1 本も見ない**。つまり markdown → csv にすると
-   *   **「Markdown の表にする」が二度と出ない片道**になる。
-   * ⚠ これは `:::` の板の中を外しているのと**同じ理由**である(すぐ下)。
-   *   引用の中の柵を数えられるようにする直しは **#743** と同じ筋で別に要る。
+   *   当時の実測(2026-09-06):`allFences('> ```csv\n> a,b\n> ```')` は **`[]`** ──
+   *   囲みの走査が**引用の中の柵を 1 本も見なかった**ので、markdown → csv にすると
+   *   **「Markdown の表にする」が二度と出ない片道**になっていた。
+   *
+   * 🔴 **その理由は #775(2026-09-07)で消えた。** 走査は引用の中へ降りるように
+   *   なり、引用の中の csv は**升も打てるし、行・列も動かせる** ── つまり
+   *   **もう片道ではない**。⚠ ここをまだ閉じているのは
+   *   「**引用の中で右クリックの項目が 1 つ増える = 見え方が変わる**」からであって、
+   *   壊れるからではない(user 指示 2026-08-28「見え方を変える判断は user のもの」)。
+   * 🔑 開ける条件は 1 つ:**user に画面の言葉で 1 度お出しして、裁定をいただく**。
+   *   `:::` の板の中(すぐ下)も**同じ 1 問**なので、#743 とまとめて出す。
    * 🔑 ⚠ **升を押して打つほうは引用の中でも通る**(`mdCellSpanAt`)── そちらは
    *   いつでも打ち直せるので片道にならない。問いが違えば門も違う。
    */
@@ -401,12 +398,13 @@ export function tableAt(body: string, line: number): TableAt | null {
      * 🔴 **`:::` の板の中の表には出さない**(着地前レビュー・動線 ③ / 実装 S-6)。
      *
      * ⚠ `scanContainers` は**最上位の囲いしか返さない**ので、板の中の csv の囲みは
-     *   ここにも `csvTableAt`(`body-rewrite.ts`)にも出ない。つまり板の中の
-     *   markdown の表を csv にすると、**戻す項目も出ず、升も押して打てない** ──
-     *   **片道の操作**になる(user 指示 2026-08-23「片道の操作を作らない」)。
+     *   ここには出ない。かつては `csvTableAt`(`body-rewrite.ts`)にも出なかったので、
+     *   板の中の markdown の表を csv にすると**戻す項目も出ず、升も押して打てない**
+     *   ── **片道の操作**だった(user 指示 2026-08-23「片道の操作を作らない」)。
+     * 🔴 **升のほうは #747 / #775 で通るようになった**(`allFences` が入れ子と引用へ
+     *   降りる)。⚠ だから残っているのは**片道かどうかではなく、見え方の 1 問**である
+     *   ── 上の引用の註記と**同じ 1 問**なので、まとめて #743 で裁定を仰ぐ。
      * ⚠ 板の中の ` ```txt ` に書いた `| a | b |` を表として読む穴も、ここで塞がる。
-     * 🔑 板の中でも扱えるようにする直しは **#743**(`scanContainers` に入れ子を
-     *   返す口を足して、升を押す口・行列の口・ここの 3 つを寄せる)。
      */
     return span.kind === 'fence' ? csvFenceAt(lines, span) : null;
   }
@@ -463,18 +461,26 @@ export interface MdCellGate {
    */
   body?: string;
   fm?: number;
-  fences?: readonly ContainerSpan[];
+  fences?: readonly FenceSpan[];
   /**
-   * 🔴 **引用の前置きを剥がした写しの囲み**(#749)。
+   * 🔴 **引用の前置きを「全段」剥がした写しの囲み**(#749)。
    *
-   * ⚠ 囲みの走査(`allFences`)は**引用の中の柵を 1 本も見ない**(2026-09-07 実測)。
-   *   引用の中の表を読めるようにした瞬間、`> ``` ` の中に書いた表まで
-   *   **押せる(書ける)側に化ける** ── コードとして描かれているのに、である。
-   * 🔑 だから**同じ走査を、前置きを剥がした写しにもう一度当てて**、
-   *   どちらかが囲みだと言えば外す。⚠ 規則を 2 本書くのではなく、
-   *   **同じ 1 本を 2 つの見え方に当てている**(§7)。
+   * ⚠ **足した当時の理由は #775 で消えた。** 当時は囲みの走査(`allFences`)が
+   *   引用の中の柵を 1 本も見なかったので、`> ``` ` の中の表が
+   *   **押せる側に化ける**のをここで止めていた ── いまは走査が引用へ降りるので、
+   *   そろった形(`> ``` ` の中身も `> `)は {@link gateFences} だけで外れる。
+   *
+   * 🔴 **いまこの門だけが効くのは「深さが食い違う形」である**(2026-09-07 実測):
+   *   `>> ``` ` の中身が `> | a |` / `> ``` ` の中身が前置き無しの `| a |`。
+   *   ⚠ そこは読み手が**表として描く**(コードではない)ので、外せば
+   *   **押せて書ける**(実測:印 4 / 書けた 4 ── 不変量は壊れない)。
+   * 🔑 つまり残っているのは**壊れるかどうかではなく、見え方の 1 問**である
+   *   ── 崩れた入れ子の引用で升を押させるか。裁定は #743 とまとめて仰ぐ。
+   * ⚠ **外すと黙って見え方が変わる**ので、いまの答え(押させない)を
+   *   `tests/features/md-table-cell.test.ts` が名指しで pin する
+   *   ── 直す前はここを消しても**全 8,180 件が緑のまま**だった。
    */
-  quotedFences?: readonly ContainerSpan[];
+  quotedFences?: readonly FenceSpan[];
 }
 
 /** {@link mdCellSpanAt} に渡す入れ物を作る。 */
@@ -493,7 +499,7 @@ export function mdCellGate(lines: readonly string[]): MdCellGate {
  *   🔑 描く側は frontmatter を落とした本文を渡してくるので、ここで揃えないと
  *   **同じ 1 本の門でも、見ている本文が違う**(§7)。
  */
-function gateFences(gate: MdCellGate): readonly ContainerSpan[] {
+function gateFences(gate: MdCellGate): readonly FenceSpan[] {
   gate.fences ??= fencesBelowFrontmatter(gate.body ?? gate.lines.join('\n'));
   return gate.fences;
 }
@@ -510,7 +516,7 @@ function withoutQuotePrefix(body: string): string {
 }
 
 /** 引用を剥がした写しの囲み(gate に 1 回だけ組む)。 */
-function gateQuotedFences(gate: MdCellGate): readonly ContainerSpan[] {
+function gateQuotedFences(gate: MdCellGate): readonly FenceSpan[] {
   gate.quotedFences ??= fencesBelowFrontmatter(
     withoutQuotePrefix(gate.body ?? gate.lines.join('\n')),
   );
@@ -522,7 +528,7 @@ function gateQuotedFences(gate: MdCellGate): readonly ContainerSpan[] {
  * 🔑 起点を決めるのはここ 1 か所 ── 升を打つ側(`mdCellSpanAt`)と
  *   csv の側(`body-rewrite.ts` の `csvTableAt`)が同じ答えを持つ(§7)。
  */
-export function fencesBelowFrontmatter(body: string): readonly ContainerSpan[] {
+export function fencesBelowFrontmatter(body: string): readonly FenceSpan[] {
   const fm = frontmatterLineCount(body);
   const below = fm === 0 ? body : body.split('\n').slice(fm).join('\n');
   const found = allFences(below);
@@ -546,8 +552,9 @@ function mdTableRun(gate: MdCellGate, line: number): TableAt | null {
   if (containerAtLine(gateFences(gate), line) !== null) return null;
   /**
    * 🔴 **引用の中の囲みも外す**(#749)── `> ``` ` の中の `| a | b |` は
-   *   コードであって表ではない。⚠ 走査は引用の中の柵を見ないので、
-   *   **前置きを剥がした写し**にもう一度当てる(上の `gateQuotedFences`)。
+   *   コードであって表ではない。
+   * ⚠ そろった形は 1 つ上の `gateFences` が外す(#775 で走査が引用へ降りた)。
+   *   ここが効くのは**深さが食い違う形**だけ ── 詳しくは `quotedFences` の註記。
    */
   if (containerAtLine(gateQuotedFences(gate), line) !== null) return null;
   /**

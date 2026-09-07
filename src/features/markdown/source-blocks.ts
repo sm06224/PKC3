@@ -61,6 +61,19 @@ export interface ContainerSpan {
   readonly name: string;
 }
 
+/**
+ * 🔴 **囲み(```)1 つ**。{@link allFences} が返す。
+ *
+ * ⚠ `quote` を持つのは飾りではない ── 中身の行は**この数だけ前置きを剥がしてから**
+ *   読み、書き戻すときに**そのまま付け直す**(#775)。持たずに渡すと、呼び側は
+ *   引用の印を升の字として書き換える。
+ */
+export interface FenceSpan extends ContainerSpan {
+  readonly kind: 'fence';
+  /** その囲みを飲んでいる引用の深さ(引用の外は 0)。 */
+  readonly quote: number;
+}
+
 const FENCE_OPEN = /^(\s*)(`{3,}|~{3,})(.*)$/;
 const DIRECTIVE_OPEN = /^:::([A-Za-z][\w-]*)/;
 const DIRECTIVE_CLOSE = /^:::\s*$/;
@@ -189,10 +202,69 @@ export function scanContainers(text: string): ContainerSpan[] {
 /**
  * その行を含む囲いを探す。無ければ null。
  * ⚠ 走査で組む(囲いは 1 文書あたり数〜数十なので線形で足りる)。
+ *
+ * 🔑 **渡した型のまま返す**(#775)── {@link FenceSpan} の配列を渡したら
+ *   `quote` を持ったまま返る。⚠ `ContainerSpan` へ潰すと、呼び側は
+ *   **前置きを何段剥がすかを知らないまま**中身を読むことになる。
  */
-export function containerAtLine(spans: readonly ContainerSpan[], line: number): ContainerSpan | null {
+export function containerAtLine<T extends ContainerSpan>(
+  spans: readonly T[],
+  line: number,
+): T | null {
   for (const s of spans) if (line >= s.start && line <= s.end) return s;
   return null;
+}
+
+/**
+ * 🔴 **行頭の引用の印を 1 段だけ飲む**(#775)。
+ *
+ * ⚠ 綴りは CommonMark と同じ ── `>` の前に空白 3 個まで、後ろに空白か tab を
+ *   1 個まで飲む。
+ * 🔑 **引用の規則はこの 1 本だけ**(CLAUDE.md §7)── `table-convert.ts` の
+ *   `quotePrefix` もここを呼ぶ。⚠ 直す前は同じ正規表現が 2 か所に在り、
+ *   **囲みの走査だけが引用を知らない**という食い違いになっていた(#775 の根)。
+ *
+ * @returns 飲んだ字数。引用の印で始まっていなければ 0。
+ */
+export function quoteMarkLength(line: string): number {
+  const m = /^ {0,3}>[ \t]?/.exec(line);
+  return m === null ? 0 : m[0].length;
+}
+
+/**
+ * 🔴 **前置きを `depth` 段「ちょうど」飲んだ字数**(#775)。段が足りなければ `null`。
+ *
+ * ⚠ **`null` を 0 と読み替えない。** 深さの足りない行を本文の頭から読むと、
+ *   引用の印そのものを升の字として書き換える ── 実測(2026-09-07):
+ *   `>> ```csv` の中身に `> a,b` と書いた形は、読み手も**押せる升を 1 つも
+ *   焼かない**(その行は囲みの中身ではない)。
+ */
+export function quoteLead(line: string, depth: number): number | null {
+  let at = 0;
+  for (let i = 0; i < depth; i += 1) {
+    const n = quoteMarkLength(line.slice(at));
+    if (n === 0) return null;
+    at += n;
+  }
+  return at;
+}
+
+/**
+ * 行頭の引用の前置き(`>` の繰り返し)。
+ *
+ * @returns `depth` = `>` の数(`>> ` は 2)/ `length` = 前置きの**字数**
+ *   (本文はここから始まる)
+ */
+export function quotePrefix(line: string): { depth: number; length: number } {
+  let at = 0;
+  let depth = 0;
+  for (;;) {
+    const n = quoteMarkLength(line.slice(at));
+    if (n === 0) break;
+    at += n;
+    depth += 1;
+  }
+  return { depth, length: at };
 }
 
 /**
@@ -215,25 +287,62 @@ export function containerAtLine(spans: readonly ContainerSpan[], line: number): 
  *   **囲みの名前も範囲も要らない**呼び側はそちらでよい。ここは囲みそのものを
  *   返すので、名前を分けて取り違えを防いでいる。
  */
-export function allFences(body: string): ContainerSpan[] {
-  const lines = body.split('\n');
-  const out: ContainerSpan[] = [];
-  const walk = (from: number, to: number): void => {
-    if (from > to) return;
-    for (const s of scanContainers(lines.slice(from, to + 1).join('\n'))) {
-      // 🔑 範囲は**原文の行番号**へ戻す(呼び側は原文を splice する)
-      const start = from + s.start;
-      const end = from + s.end;
+export function allFences(body: string): FenceSpan[] {
+  const out: FenceSpan[] = [];
+  /**
+   * @param region 走査する行(**引用の前置きを剥がした後**の姿)
+   * @param offset `region[0]` が**原文**の何行目か(範囲はここを足して返す)
+   * @param quote その region を飲んでいる引用の深さ(引用の外は 0)
+   */
+  const walk = (region: readonly string[], offset: number, quote: number): void => {
+    if (region.length === 0) return;
+    const spans = scanContainers(region.join('\n'));
+    /** ⚠ 囲い・板に飲まれている行から引用へ降りない(中はコード / 別の器である)。 */
+    const eaten: boolean[] = new Array<boolean>(region.length).fill(false);
+    for (const s of spans) for (let k = s.start; k <= s.end; k += 1) eaten[k] = true;
+    for (const s of spans) {
       if (s.kind === 'fence') {
-        out.push({ ...s, start, end });
+        // 🔑 範囲は**原文の行番号**へ戻す(呼び側は原文を splice する)
+        out.push({ ...s, kind: 'fence', start: s.start + offset, end: s.end + offset, quote });
         continue;
       }
       // `:::` の板 ── 中身(開きの次 〜 閉じの手前)へ降りる
-      walk(start + 1, s.open ? end : end - 1);
+      const last = s.open ? s.end : s.end - 1;
+      walk(region.slice(s.start + 1, last + 1), offset + s.start + 1, quote);
+    }
+    /**
+     * 🔴 **引用(`>`)の中へも降りる**(#775)。
+     *
+     * ⚠ 直す前はここが無く、`> ```csv` の柵を**1 本も見なかった** ── 焼く側
+     *   (markdown-it)は引用の中の csv をちゃんと表として描いて**押せる印を焼く**ので、
+     *   「押せる → 打てる → 消える」になっていた(実測 2026-09-07:印 4 / 書けた 0)。
+     * 🔑 剥がすのは**1 段ずつ**である ── 読み手も 1 段ずつ剥がす。実測:
+     *   `> ```csv` の中身に `>> a,b` と書くと、升の字は **`> a`**(`>` が 1 つ残る)。
+     *   全段まとめて剥がすと `a` になり、**画面と書き戻しが食い違う**。
+     * ⚠ 走は「引用の印で始まる行」が続く間だけ ── 途中に前置きの無い行が挟まれば
+     *   そこで切る(読み手もそこで囲みを閉じる ── 実測:印は 0 個)。
+     */
+    let i = 0;
+    while (i < region.length) {
+      if (eaten[i] === true || quoteMarkLength(region[i] ?? '') === 0) {
+        i += 1;
+        continue;
+      }
+      let j = i;
+      while (j + 1 < region.length && eaten[j + 1] !== true && quoteMarkLength(region[j + 1] ?? '') > 0) {
+        j += 1;
+      }
+      walk(
+        region.slice(i, j + 1).map((l) => l.slice(quoteMarkLength(l))),
+        offset + i,
+        quote + 1,
+      );
+      i = j + 1;
     }
   };
-  walk(0, lines.length - 1);
-  return out;
+  walk(body.split('\n'), 0, 0);
+  // 🔑 **文書順**に返す(引用へ降りる分は後から積まれるので並べ直す)
+  return out.sort((a, b) => a.start - b.start);
 }
 
 /**
@@ -243,7 +352,7 @@ export function allFences(body: string): ContainerSpan[] {
  * ⚠ 表を何十個も持つ本文では**行ごとに呼ばない** ── {@link allFences} を 1 回だけ
  *   呼んで控える(実測 2026-09-06:表 160 個・3680 行で描画が 62ms → 262ms になった)。
  */
-export function fenceAt(body: string, line: number): ContainerSpan | null {
+export function fenceAt(body: string, line: number): FenceSpan | null {
   if (!Number.isInteger(line) || line < 0) return null;
   return containerAtLine(allFences(body), line);
 }
