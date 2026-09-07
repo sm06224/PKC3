@@ -87,13 +87,51 @@ const TABLE_BREAK_INDENT = /^(?: {4}|\t)/;
  */
 const TABLE_BREAK_SECTION = /^\s*\+\+\+\s*(?:\{[^}]*\}\s*)?$/;
 
-/** その行で表が終わるか(空行も含む)。 */
-function breaksTable(line: string): boolean {
+/**
+ * 🔴 **行頭の引用の前置き**(`>` の繰り返し)を数える(#749)。
+ *
+ * ⚠ 綴りは CommonMark と同じ ── `>` の前に空白 3 個まで、後ろに空白か tab を 1 個
+ *   まで飲む。これを繰り返した数が**深さ**である(`>> ` は 2)。
+ * 🔑 **引用の中でも表の升を押して打てるようにする**ための土台。同じ file が
+ *   2026-08-19 に**チェックの印**で同じ穴を塞いでおり(`body-rewrite.ts` の
+ *   `TASK_LINE` は `(?:\s*>)*` を受ける)、user から見ると
+ *   「同じ引用の中で、チェックは押せるのに表の升は押せない」食い違いだった。
+ *
+ * @returns `depth` = `>` の数 / `length` = 前置きの**字数**(本文はここから始まる)
+ */
+function quotePrefix(line: string): { depth: number; length: number } {
+  let at = 0;
+  let depth = 0;
+  for (;;) {
+    const m = /^ {0,3}>[ \t]?/.exec(line.slice(at));
+    if (m === null) break;
+    at += m[0].length;
+    depth += 1;
+  }
+  return { depth, length: at };
+}
+
+/**
+ * その行で表が終わるか(空行も含む)。
+ *
+ * 🔴 **引用の深さが変わったら切る**(#749)。⚠ 前置きを剥がすだけだと、
+ *   引用でない表の下に `> 引用` を書いた行を**表に巻き込んで書き換える**
+ *   (この file の冒頭が戒めている「表の下の段落まで巻き込む」)。
+ * ⚠ 深さが途中で変わる表(`> | a |` の次が `>> | b |`)も**そこで切る** ──
+ *   描き手(markdown-it)が `>>` を**別の引用**として扱うので、切らないと
+ *   **画面と原文の切り方が食い違う**(2026-09-06 の実測で決めた)。
+ *
+ * @param depth その表が居る引用の深さ(引用の外なら 0)
+ */
+function breaksTable(line: string, depth = 0): boolean {
+  const q = quotePrefix(line);
+  if (q.depth !== depth) return true;
+  const rest = line.slice(q.length);
   return (
-    line.trim() === '' ||
-    TABLE_BREAK.test(line) ||
-    TABLE_BREAK_INDENT.test(line) ||
-    TABLE_BREAK_SECTION.test(line)
+    rest.trim() === '' ||
+    TABLE_BREAK.test(rest) ||
+    TABLE_BREAK_INDENT.test(rest) ||
+    TABLE_BREAK_SECTION.test(rest)
   );
 }
 
@@ -105,8 +143,15 @@ function breaksTable(line: string): boolean {
  *   (いちばん静かなデータ破壊)。一致は parity 検査が守る。
  */
 function splitRowSpans(line: string): { cells: string[]; spans: { start: number; end: number }[] } {
-  const lead = line.length - line.trimStart().length;
-  const src = line.trim();
+  /**
+   * 🔴 **引用の前置きは升ではない**(#749)── `> | a | b |` の `> ` を飲む。
+   * ⚠ `lead` は**原文の中での位置**なので、前置きの字数をそのまま足す ──
+   *   これで書き換えは升の中だけに当たり、**前置きは 1 文字も動かない**。
+   */
+  const q = quotePrefix(line);
+  const rest = line.slice(q.length);
+  const lead = q.length + (rest.length - rest.trimStart().length);
+  const src = rest.trim();
   const out: string[] = [];
   /** ⚠ **原文の範囲**(区切りの `|` の間)── 升の字と**同じ添字**で並べる。 */
   const raw: { start: number; end: number }[] = [];
@@ -195,7 +240,9 @@ export function mdCellSpan(line: string, col: number): { start: number; end: num
 
 /** 区切りの行なら列数、そうでなければ `null`。 */
 function alignCount(line: string): number | null {
-  const t = line.trim();
+  // ⚠ **引用の前置きは骨格ではない**(#749)── 剥がしてから見ないと
+  //    `> |---|---|` の `>` が `[|\-: ]` に当たらず、区切りの行に見えない
+  const t = line.slice(quotePrefix(line).length).trim();
   if (t === '' || !/^[|\-: ]+$/.test(t) || !t.includes('-')) return null;
   const cells = splitRow(line);
   if (cells.length === 0) return null;
@@ -213,7 +260,19 @@ function tableRunFrom(lines: readonly string[], s: number): TableAt | null {
   const header = lines[s];
   const delim = lines[s + 1];
   if (header === undefined || delim === undefined) return null;
-  if (breaksTable(header) || !header.includes('|')) return null;
+  /**
+   * 🔴 **深さは見出しの行が決める**(#749)── 以降の行はこの深さで読み、
+   *   違う深さの行が来たら `breaksTable` がそこで切る。
+   * ⚠ 区切りの行だけは `alignCount` が前置きを剥がして読んでしまうので、
+   *   ここで**深さを明示して**検める(`> | a |` の次が `>> |---|` を表にしない)。
+   */
+  const depth = quotePrefix(header).depth;
+  if (breaksTable(header, depth)) return null;
+  // ⚠ `|` は**前置きの外**で探す(`>` は升の区切りではない)
+  if (!header.slice(quotePrefix(header).length).includes('|')) return null;
+  // ⚠ 区切りの行の深さも検める ── `alignCount` は前置きを剥がして読むので、
+  //    ここで見ないと `> | a |` の次の `>> |---|` を同じ表として飲む
+  if (quotePrefix(delim).depth !== depth) return null;
   const head = splitRow(header);
   const cols = alignCount(delim);
   // ⚠ `cols === 0` は書かない ── `alignCount` が升 0 個で既に `null` を返すので
@@ -224,7 +283,7 @@ function tableRunFrom(lines: readonly string[], s: number): TableAt | null {
   const rows: TableCopyRow[] = [];
   for (let i = s + 2; i < lines.length; i += 1) {
     const l = lines[i]!;
-    if (breaksTable(l)) break;
+    if (breaksTable(l, depth)) break;
     /**
      * ⚠ **列数は見出しに揃える** ── 読み手(markdown-it)は多い分を捨て、足りない分を
      *   空で埋めて描く。ここで原文どおりの数を持つと、**画面に出ていない升**が
@@ -320,6 +379,22 @@ export function tableAt(body: string, line: number): TableAt | null {
    *   ` ```js ` の中の `| a | b |` を markdown の表として書き換えかねない
    *   (`csvTableAt` の註記と同じ罠)。
    */
+  /**
+   * 🔴 **引用(`>`)の中の表には「形を作り変える」を出さない**(#749、2026-09-06 の
+   *   決めを**実測で訂正した**)。
+   *
+   * ⚠ issue のコメントには「作り変えた先(csv の囲み)は引用の中で既にちゃんと動くので
+   *   出す」と書いたが、**その根拠は升を打つ話**であって、**戻す口**の話ではなかった。
+   *   🔑 実測(2026-09-07):`allFences('> ```csv\n> a,b\n> ```')` は **`[]`** ──
+   *   囲みの走査は**引用の中の柵を 1 本も見ない**。つまり markdown → csv にすると
+   *   **「Markdown の表にする」が二度と出ない片道**になる。
+   * ⚠ これは `:::` の板の中を外しているのと**同じ理由**である(すぐ下)。
+   *   引用の中の柵を数えられるようにする直しは **#743** と同じ筋で別に要る。
+   * 🔑 ⚠ **升を押して打つほうは引用の中でも通る**(`mdCellSpanAt`)── そちらは
+   *   いつでも打ち直せるので片道にならない。問いが違えば門も違う。
+   */
+  if (quotePrefix(lines[line] ?? '').depth > 0) return null;
+
   const span = scanContainers(body).find((c) => line >= c.start && line <= c.end);
   if (span !== undefined) {
     /**
@@ -341,6 +416,7 @@ export function tableAt(body: string, line: number): TableAt | null {
    * ⚠ 遡り先が段落の途中のことがある(表が段落に続いている形)ので、
    *   頭から押した行まで順に当て、**押した行を含む走**が出たところで採る。
    */
+  // ⚠ ここへ来るのは**引用の外**だけ(上で外した)なので、深さは 0 のままでよい
   let top = line;
   while (top > fm && !breaksTable(lines[top - 1] ?? '')) top -= 1;
   for (let s = top; s <= line; s += 1) {
@@ -388,6 +464,17 @@ export interface MdCellGate {
   body?: string;
   fm?: number;
   fences?: readonly ContainerSpan[];
+  /**
+   * 🔴 **引用の前置きを剥がした写しの囲み**(#749)。
+   *
+   * ⚠ 囲みの走査(`allFences`)は**引用の中の柵を 1 本も見ない**(2026-09-07 実測)。
+   *   引用の中の表を読めるようにした瞬間、`> ``` ` の中に書いた表まで
+   *   **押せる(書ける)側に化ける** ── コードとして描かれているのに、である。
+   * 🔑 だから**同じ走査を、前置きを剥がした写しにもう一度当てて**、
+   *   どちらかが囲みだと言えば外す。⚠ 規則を 2 本書くのではなく、
+   *   **同じ 1 本を 2 つの見え方に当てている**(§7)。
+   */
+  quotedFences?: readonly ContainerSpan[];
 }
 
 /** {@link mdCellSpanAt} に渡す入れ物を作る。 */
@@ -409,6 +496,25 @@ export function mdCellGate(lines: readonly string[]): MdCellGate {
 function gateFences(gate: MdCellGate): readonly ContainerSpan[] {
   gate.fences ??= fencesBelowFrontmatter(gate.body ?? gate.lines.join('\n'));
   return gate.fences;
+}
+
+/**
+ * 引用の前置きを**空にした写し**(#749)。
+ * ⚠ 行数も行番号も変わらない ── 囲みの範囲は行で返るので、そのまま突き合わせられる。
+ */
+function withoutQuotePrefix(body: string): string {
+  return body
+    .split('\n')
+    .map((l) => l.slice(quotePrefix(l).length))
+    .join('\n');
+}
+
+/** 引用を剥がした写しの囲み(gate に 1 回だけ組む)。 */
+function gateQuotedFences(gate: MdCellGate): readonly ContainerSpan[] {
+  gate.quotedFences ??= fencesBelowFrontmatter(
+    withoutQuotePrefix(gate.body ?? gate.lines.join('\n')),
+  );
+  return gate.quotedFences;
 }
 
 /**
@@ -438,8 +544,19 @@ function mdTableRun(gate: MdCellGate, line: number): TableAt | null {
   const lines = gate.lines;
   if (!Number.isInteger(line) || line < fm || line >= lines.length) return null;
   if (containerAtLine(gateFences(gate), line) !== null) return null;
+  /**
+   * 🔴 **引用の中の囲みも外す**(#749)── `> ``` ` の中の `| a | b |` は
+   *   コードであって表ではない。⚠ 走査は引用の中の柵を見ないので、
+   *   **前置きを剥がした写し**にもう一度当てる(上の `gateQuotedFences`)。
+   */
+  if (containerAtLine(gateQuotedFences(gate), line) !== null) return null;
+  /**
+   * 🔴 **遡りは「押した行の深さ」で行う**(#749)── 引用の中の表なら、
+   *   その引用の中だけを遡る。深さが違う行に当たったら `breaksTable` が切る。
+   */
+  const depth = quotePrefix(lines[line] ?? '').depth;
   let top = line;
-  while (top > fm && !breaksTable(lines[top - 1] ?? '')) top -= 1;
+  while (top > fm && !breaksTable(lines[top - 1] ?? '', depth)) top -= 1;
   for (let s = top; s <= line; s += 1) {
     const run = tableRunFrom(lines, s);
     if (run !== null && line >= run.start && line <= run.end) return run;
