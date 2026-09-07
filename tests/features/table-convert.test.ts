@@ -17,10 +17,9 @@ import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import { applyBodyRewrite } from '../../src/features/markdown/body-rewrite';
 import {
   convertTable,
-  mdCellGate,
-  mdCellSpanAt,
   tableAt,
   tableConvertRefusal,
+  type TableFormat,
 } from '../../src/features/markdown/table-convert';
 
 /** 描いた表の升(表ごと・行ごと)。⚠ **実物の読み手**から採る観測点である。 */
@@ -76,6 +75,18 @@ describe('表の形を変える(#708 段②)', () => {
       name: '表が 2 つ',
       body: '| a | b |\n|---|---|\n| 1 | 2 |\n\n| c | d |\n|---|---|\n| 3 | 4 |\n',
     },
+    /**
+     * 🔴 **引用と `:::` の中**(#743。user 裁定 2026-09-07「出す」)。
+     * ⚠ ここに無かったから、範囲の食い違いを**誰も見ていなかった** ── 出す側へ
+     *   裏返した以上、範囲の一致も引用の中で見なければ空振りである。
+     */
+    { name: '引用の表', body: '> | a | b |\n> |---|---|\n> | 1 | 2 |\n' },
+    { name: '引用の表(前後に地の段落)', body: '前\n\n> | a | b |\n> |---|---|\n> | 1 | 2 |\n\n後\n' },
+    { name: '2 段引用の表', body: '>> | a | b |\n>> |---|---|\n>> | 1 | 2 |\n' },
+    { name: '引用の csv の囲み', body: '> ```csv\n> A,B\n> 1,2\n> ```\n' },
+    { name: '::: の板の表', body: ':::note\n| a | b |\n|---|---|\n| 1 | 2 |\n:::\n' },
+    { name: '::: の板の csv の囲み', body: ':::note\n```csv\nA,B\n1,2\n```\n:::\n' },
+    { name: '::: の板の中の引用の表', body: ':::note\n> | a | b |\n> |---|---|\n> | 1 | 2 |\n:::\n' },
   ];
 
   it('🔴 表の行範囲が、描いた読み手の答え(source-line / -end)と一致する', () => {
@@ -483,47 +494,177 @@ describe('表の形を変える(#708 段②)', () => {
   });
 
   /**
-   * 🔴 **`:::` の板の中の表には出さない**(着地前レビュー・動線 ③ / 実装 S-6)。
+   * 🔴 **引用と `:::` の板の中でも「形を作り変える」を出す**
+   *   (#743。**user 裁定 2026-09-07**「**出す**」)。
    *
-   * ⚠ 板の中の csv の囲みは `scanContainers`(最上位だけ)に出ないので、変換すると
-   *   **戻す項目も出ず、升も押して打てない** ── 片道の操作になる。
-   * ⚠ 板の中の ` ```txt ` に書いた表の形の字を読む穴も、同じ門で塞がる。
-   * 🔑 板の中でも扱えるようにする直しは **#743**。
+   * ## ⚠ ここは 2026-09-07 まで正反対を pin していた
+   *
+   * 直す前の 2 件は「板の中では出さない」「引用の中では出さない」で、理由はどちらも
+   * **戻す口が出ない片道になるから**だった ── 当時は囲みの走査が最上位しか返さず、
+   * 作り変えた先の ` ```csv ` を二度と囲みと読めなかった。
+   * 🔑 **その理由は #747 / #775 で消えた**(走査が板の中へも引用の中へも降りる)ので、
+   *   残っていたのは**見え方の 1 問**だけになり、user に裁定をいただいた。
+   *
+   * ## 🔑 観測点は「実物の読み手」から採る(CLAUDE.md §1)
+   *
+   * ⚠ 主張を裏返したら**作法も裏返る**(2026-08-18)ので、検査を書き直した:
+   *   ①**どの行を押すか**は読み手が焼いた `data-pkc-source-line` から採る
+   *     (自分で数えない)
+   *   ②**升の字**は描いた `<td>` から採り、往復で 1 文字も変わらないことを見る
+   *   ③🔴 **表を包んでいる器**(`blockquote` / `section.pkc-section-callout`)が
+   *     往復で変わらないことを見る ── ⚠ ②だけでは**引用の前置きを落とす変異を
+   *     殺せない**(升の字は同じまま、表だけが引用から地の本文へ落ちる)
    */
-  it('🔴 ::: の板の中の表には出さない(戻れなくなるので)', () => {
-    const md = ':::note\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n:::\n';
-    // 空振り防止 ── 板の外に同じ表を置けば読めること(門だけが効いている)
-    expect(tableAt('| a | b |\n|---|---|\n| 1 | 2 |\n', 0), '前提: この表は読めない').not.toBeNull();
-    for (const line of [1, 2, 3, 4]) {
-      expect(tableAt(md, line), `板の中の ${line} 行目を表として読んだ`).toBeNull();
-    }
-    const nested = ':::note\n```txt\n| a | b |\n|---|---|\n| 1 | 2 |\n```\n:::\n';
-    expect(tableAt(nested, 2), '板の中のコードの字を表として読んだ').toBeNull();
-  });
+  describe('🔴 引用と ::: の中でも形を作り変えられる(#743。user 裁定 2026-09-07)', () => {
+    /** 読み手が焼いた**表の塊**の原文行(無ければ `null`)。⚠ 押す行はここから採る。 */
+    const tableLines = (body: string): number[] => {
+      const host = document.createElement('div');
+      host.innerHTML = renderMarkdown(body, { sourceLineAnchors: true });
+      return [...host.querySelectorAll('table')].flatMap((t) => {
+        const b = t.closest('.pkc-md-block[data-pkc-source-line]');
+        const n = b === null ? NaN : Number(b.getAttribute('data-pkc-source-line'));
+        return Number.isInteger(n) ? [n] : [];
+      });
+    };
+    /**
+     * 表を包んでいる器の名札(外側から順)。
+     * ⚠ **升の字とは別の観測**である ── 前置きを落とすとここだけが変わる。
+     */
+    const nests = (body: string): string[][] => {
+      const host = document.createElement('div');
+      host.innerHTML = renderMarkdown(body, {});
+      return [...host.querySelectorAll('table')].map((t) => {
+        const out: string[] = [];
+        for (let e: Element | null = t.parentElement; e !== null && e !== host; e = e.parentElement) {
+          if (e.tagName === 'BLOCKQUOTE') out.unshift('blockquote');
+          else if (e.classList.contains('pkc-section-callout')) out.unshift('callout');
+        }
+        return out;
+      });
+    };
 
-  /**
-   * 🔴 **引用の中の表には「形を作り変える」を出さない**(#749、2026-09-07)。
-   *
-   * ⚠ issue のコメントには「作り変えた先(csv の囲み)は引用の中で既にちゃんと動くので
-   *   **出す**」と書いたが、**実測でこれを訂正した** ── その根拠は「升を打てる」話で
-   *   あって「**戻す口が出る**」話ではなかった。
-   * 🔑 囲みの走査は**引用の中の柵を 1 本も見ない**ので、markdown → csv にすると
-   *   「Markdown の表にする」が二度と出ない**片道**になる。
-   * ⚠ `:::` の板の中を外しているのと**同じ理由**である(#743)。
-   * 🔑 ⚠ **升を押して打つほうは引用の中でも通る** ── 問いが違えば門も違う
-   *   (そちらは `tests/features/md-table-cell.test.ts` の corpus が見る)。
-   */
-  it('🔴 引用の中の表には形の作り変えを出さない(片道の操作を作らない)', () => {
-    const md = '> | a | b |\n> |---|---|\n> | 1 | 2 |\n';
-    for (let l = 0; l < 3; l += 1) {
-      expect(tableAt(md, l), `引用の中の表に作り変えを出した(行 ${l})`).toBeNull();
-    }
-    // ⚠ **空振り防止** ── 同じ表を引用の外へ出せば、ちゃんと出る
-    const plain = '| a | b |\n|---|---|\n| 1 | 2 |\n';
-    expect(tableAt(plain, 0), '引用でない表にも出ていない(この検査は何も見ていない)')
-      .not.toBeNull();
-    // 🔑 前提:引用の中でも**升は押して打てる**(こちらは別の門で通る)
-    const gate = mdCellGate(md.split('\n'));
-    expect(mdCellSpanAt(gate, 0, 0), '引用の中の升が打てない').not.toBeNull();
+    /** ⚠ **器つきの形**を並べる ── 素の表は上の SPAN_CASES が見ている。 */
+    const FORMS: Array<{ name: string; body: string; nest: string[]; grows?: true }> = [
+      { name: '引用の md 表', body: '> | a | b |\n> |---|---|\n> | 1 | 2 |\n', nest: ['blockquote'] },
+      { name: '引用の csv', body: '> ```csv\n> a,b\n> 1,2\n> ```\n', nest: ['blockquote'] },
+      {
+        name: '2 段引用の md 表',
+        body: '>> | a | b |\n>> |---|---|\n>> | 1 | 2 |\n',
+        nest: ['blockquote', 'blockquote'],
+      },
+      { name: '::: の板の md 表', body: ':::note\n| a | b |\n|---|---|\n| 1 | 2 |\n:::\n', nest: ['callout'] },
+      { name: '::: の板の csv', body: ':::note\n```csv\na,b\n1,2\n```\n:::\n', nest: ['callout'] },
+      {
+        name: '::: の板の中の引用の md 表',
+        body: ':::note\n> | a | b |\n> |---|---|\n> | 1 | 2 |\n:::\n',
+        nest: ['callout', 'blockquote'],
+      },
+      {
+        /**
+         * ⚠ **見出しの無い表だけは、Markdown にすると空の見出しが 1 本増える**
+         *   (マニュアルにもそう書いてある ── Markdown の表は必ず見出しを持つ)。
+         * 🔑 隠さずに `grows` で名指しして pin する ── 隠すと、増えなくなる変異も
+         *   増えすぎる変異も両方こぼれる。
+         */
+        name: '引用の tsv(見出しなし)',
+        body: '> ```tsv noheader\n> a\tb\n> 1\t2\n> ```\n',
+        nest: ['blockquote'],
+        grows: true,
+      },
+    ];
+
+    it('🔴 読み手が表を焼いた所では作り変えが出て、往復しても升も器も変わらない', () => {
+      for (const f of FORMS) {
+        const lines = tableLines(f.body);
+        // ⚠ 空振り防止 ── 読み手が表を焼いていない body で「出た」と言わない
+        expect(lines.length, `${f.name}: 前提が崩れている(読み手が表を焼いていない)`).toBe(1);
+        // ⚠ 前提 ── 器が期待どおり(器が無い body で「器が変わらない」と言わない)
+        expect(nests(f.body), `${f.name}: 前提が崩れている(器が違う)`).toEqual([f.nest]);
+        const before = grid(f.body);
+        const line = lines[0]!;
+
+        const at = tableAt(f.body, line);
+        expect(at, `${f.name}: 表を焼いているのに作り変えが出ない`).not.toBeNull();
+        const to: TableFormat = at!.format === 'markdown' ? 'csv' : 'markdown';
+
+        const one = applyBodyRewrite(f.body, { kind: 'table-format', line, to });
+        expect(one, `${f.name}: 出したのに書けない(押せる → 何も起きない)`).not.toBeNull();
+        const want = f.grows === true ? [[['', ''], ...before[0]!]] : before;
+        expect(grid(one!), `${f.name}: 作り変えで升の字が変わった`).toEqual(want);
+        expect(nests(one!), `${f.name}: 作り変えで表が器から落ちた`).toEqual([f.nest]);
+
+        // 🔴 **戻す口が出る**(片道ではない ── 出す判断の根拠そのもの)
+        const backLines = tableLines(one!);
+        expect(backLines.length, `${f.name}: 作り変えた先で表が焼かれていない`).toBe(1);
+        const back = tableAt(one!, backLines[0]!);
+        expect(back, `${f.name}: 作り変えたら戻す口が出ない(片道になった)`).not.toBeNull();
+        expect(back!.format, `${f.name}: 形が変わっていない`).toBe(to);
+
+        const two = applyBodyRewrite(one!, {
+          kind: 'table-format',
+          line: backLines[0]!,
+          to: at!.format,
+        });
+        expect(two, `${f.name}: 戻す口が出たのに書けない`).not.toBeNull();
+        expect(grid(two!), `${f.name}: 往復で升の字が変わった`).toEqual(before);
+        expect(nests(two!), `${f.name}: 戻したら表が器から落ちた`).toEqual([f.nest]);
+      }
+    });
+
+    /**
+     * 🔴 **囲み(` ```txt `)の中の表の字は、どこに在っても出さない**。
+     *
+     * ⚠ 読み手はそこに表を焼かないので**押せる所が無い**が、それは
+     *   「押せないから安全」であって「門が在る」ではない ── 別の窓から古い行が
+     *   来た日にコードの字を書き換えないよう、**判定関数を直に当てて**pin する
+     *   (CLAUDE.md §3「印の数では見えない門がある」)。
+     */
+    it('🔴 コードの囲みの中の表の字は、板の中でも引用の中でも作り変えない', () => {
+      const CODE: Array<{ name: string; body: string; lines: number[] }> = [
+        { name: '素の ```txt', body: '```txt\n| a | b |\n|---|---|\n| 1 | 2 |\n```\n', lines: [1, 2, 3] },
+        {
+          name: '::: の板の ```txt',
+          body: ':::note\n```txt\n| a | b |\n|---|---|\n| 1 | 2 |\n```\n:::\n',
+          lines: [2, 3, 4],
+        },
+        {
+          name: '引用の ```txt',
+          body: '> ```txt\n> | a | b |\n> |---|---|\n> | 1 | 2 |\n> ```\n',
+          lines: [1, 2, 3],
+        },
+        {
+          name: '引用の csv-norender',
+          body: '> ```csv-norender\n> a,b\n> 1,2\n> ```\n',
+          lines: [1, 2],
+        },
+      ];
+      for (const c of CODE) {
+        // ⚠ 前提 ── 読み手もそこに表を焼いていない(焼いていれば「出さない」は不合格)
+        expect(tableLines(c.body), `${c.name}: 読み手が表を焼いている(前提が崩れている)`).toEqual([]);
+        for (const l of c.lines) {
+          expect(tableAt(c.body, l), `${c.name}: ${l} 行目のコードの字を表として読んだ`).toBeNull();
+        }
+      }
+    });
+
+    /**
+     * 🔴 **書き換わるのは押した 1 つだけ**(引用の中でも)。
+     * ⚠ 前置きを付け直す処理が**行数を数え違える**と、隣の表や地の段落を巻き込む。
+     */
+    it('🔴 引用の中の表を作り変えても、まわりの行は 1 バイトも動かない', () => {
+      const body = '前置き\n\n> | a | b |\n> |---|---|\n> | 1 | 2 |\n\n| c | d |\n|---|---|\n| 3 | 4 |\n\n後書き\n';
+      const lines = tableLines(body);
+      expect(lines.length, '前提: 表が 2 つ焼かれていない').toBe(2);
+      const out = applyBodyRewrite(body, { kind: 'table-format', line: lines[0]!, to: 'csv' });
+      expect(out, '引用の中の表を書けなかった').not.toBeNull();
+      const src = body.split('\n');
+      const got = out!.split('\n');
+      // 前置きと空行(0〜1 行目)
+      expect(got.slice(0, 2), '表より上の行が動いた').toEqual(src.slice(0, 2));
+      // 🔑 引用の表は 3 行 → 囲み 4 行になるので、下は 1 行ぶんずれて突き合わせる
+      expect(got.slice(6), '表より下の行が動いた').toEqual(src.slice(5));
+      // 🔴 2 つ目の表は markdown のまま(巻き込んでいない)
+      expect(tableAt(out!, tableLines(out!)[1]!)!.format, '2 つ目の表まで作り変えた').toBe('markdown');
+    });
   });
 });
