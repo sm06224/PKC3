@@ -40,6 +40,11 @@ import {
   BLOCK_START_ATTR,
   grippedBlock,
 } from '../render/block-grip';
+import {
+  detectInlineCalcRequest,
+  evaluateCalcExpression,
+  formatCalcResult,
+} from '@features/markdown/inline-calc';
 import { quoteOnEnter } from '@features/markdown/quote-assist';
 import { renumberLists } from '@features/markdown/list-renumber';
 import { stripDialect } from '@features/markdown/strip-dialect';
@@ -7276,6 +7281,36 @@ export function bindActions(
       ke.target instanceof HTMLTextAreaElement
     ) {
       const ta = ke.target;
+      /**
+       * 🔴 **その場で計算する**(#764。user 裁定 2026-09-06「PKC2 と同じで」)。
+       *
+       * `2+3=` まで打って `Enter` を押すと、その場が `2+3=5` になって改行する。
+       * ⚠ **改行は止めない** ── 答えを差し込んだうえで、下の引用の継ぎ足しと
+       *   ブラウザ既定の改行にそのまま渡す(`Enter` の意味を奪わない)。
+       * ⚠ **選んでいる字があるときは撃たない** ── その `Enter` は
+       *   「選んだ所を改行で置き換える」であって、計算の合図ではない。
+       * 🔑 規則は `features/markdown/inline-calc.ts` の 1 か所 ── ここは当てるだけ。
+       */
+      if (ta.selectionStart === ta.selectionEnd) {
+        const req = detectInlineCalcRequest(ta.value, ta.selectionStart);
+        if (req !== null) {
+          const v = evaluateCalcExpression(req.expression);
+          if (v !== null) {
+            /**
+             * 🔴 **`insertText` で挿す**(= `execCommand('insertText')`)。
+             *
+             * ⚠ **`setRangeText` では取り消せない**(2026-09-07 実測)── 答えを
+             *   挿した後に `Ctrl`+`Z` を 6 回押しても `1200*1.1=1320` で止まり、
+             *   **自分で打った字にも戻れなかった**(取り消しの履歴ごと切れる)。
+             *   🔑 `insertText` なら履歴に載るので、押した分だけ戻せる。
+             * ⚠ カーソルは `=` の直後に在る(`equalsPos + 1` と等しい)ので、
+             *   挿す位置を指定し直さない ── 指定し直すと `execCommand` の道と
+             *   fallback の道で挿し先が食い違う(§7)。
+             */
+            insertText(ta, formatCalcResult(v));
+          }
+        }
+      }
       const r = quoteOnEnter(ta.value, ta.selectionStart);
       if (r.kind === 'continue') {
         ev.preventDefault();

@@ -1,0 +1,172 @@
+/** @vitest-environment happy-dom */
+/**
+ * 🔴 **その場で計算**(#764)の**繋がり**を見る。
+ *
+ * 規則そのもの(何を式と読むか / 答えの字)は
+ * `tests/features/inline-calc.test.ts` が見ている ── ⚠ **ここが見るのは配線**
+ * である:本文の欄で `Enter` を押したとき、
+ * ①欄の字が変わるか ②**state に届くか**(届かないと保存で消える)
+ * ③**改行も起きるか**(`Enter` の意味を奪っていないか)。
+ *
+ * ⚠ 規則の test だけでは、**押しても何も起きない**実装が緑で通る
+ *   (PKC2 は評価器しか test しておらず、検出器の穴を出荷した ── CLAUDE.md §2)。
+ */
+import { beforeEach, describe, expect, it } from 'vitest';
+import type { EntryMeta } from '../../src/core/model/entry-meta';
+import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
+import { Dispatcher } from '../../src/adapter/state/dispatcher';
+import { connectStoreEffects } from '../../src/adapter/state/store-effects';
+import { buildShell } from '../../src/adapter/ui/render/shell';
+import { DetailRenderer } from '../../src/adapter/ui/render/detail';
+import { bindActions } from '../../src/adapter/ui/actions/binder';
+import { stubRevisionOps } from '../helpers/revision-stub';
+import { stubStamps } from '../helpers/store-stamps';
+
+function meta(lid: string): EntryMeta {
+  return {
+    lid,
+    title: 't-' + lid,
+    archetype: 'text',
+    createdAt: null,
+    updatedAt: null,
+    entryOrder: 1,
+    status: null,
+    date: null,
+    archived: false,
+    bodyChars: null,
+  };
+}
+
+const tick = (ms = 10): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+function setup(body: string) {
+  const root = document.createElement('div');
+  document.body.append(root);
+  const d = new Dispatcher();
+  const regions = buildShell(root);
+  const detail = new DetailRenderer(regions.detail, null, undefined, (b) =>
+    d.dispatch({ type: 'UPDATE_OPEN_BODY', body: b }),
+  );
+  d.onState((s) => detail.render(s));
+  bindActions(root, d);
+  const persisted: EntryUpsert[] = [];
+  connectStoreEffects(d, {
+    ...stubRevisionOps(),
+    getBody: async () => body,
+    deleteEntry: async () => {},
+    setEntryParent: async () => {},
+    renameEntry: async () => stubStamps(),
+    replaceAssetRefs: () => Promise.reject(new Error('この test では使わない')),
+    reorderEntry: async () => stubStamps(),
+    persistEntry: async (e) => {
+      persisted.push(e);
+      return stubStamps();
+    },
+  });
+  d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a')], relations: [] });
+  const q = <T extends HTMLElement>(s: string) => root.querySelector<T>(s);
+  return { root, d, q };
+}
+
+/**
+ * 本文の欄を開き、末尾にカーソルを置いて `Enter` を押す。
+ * @returns 欄と、`preventDefault` が呼ばれたか(= 改行を止めたか)
+ */
+async function pressEnter(body: string) {
+  const { d, q } = setup(body);
+  d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+  await tick();
+  q('[data-pkc-action="start-edit"]')!.click();
+  await tick();
+  const ta = q<HTMLTextAreaElement>('[data-pkc-field="editor-body"]')!;
+  ta.value = body;
+  ta.setSelectionRange(body.length, body.length);
+  const ev = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+  ta.dispatchEvent(ev);
+  await tick();
+  return { ta, d, prevented: ev.defaultPrevented };
+}
+
+describe('本文で Enter を押すと計算される(#764)', () => {
+  beforeEach(() => {
+    localStorage.setItem('pkc3.editor-mode', 'split');
+  });
+
+  it('🔴 欄と state の両方に答えが入る', async () => {
+    const { ta, d } = await pressEnter('請求は 1200*1.1=');
+    // ① 欄の字
+    expect(ta.value).toBe('請求は 1200*1.1=1320');
+    // ② 🔴 state ── ここが繋がっていないと、保存した瞬間に答えが消える
+    expect(d.getState().openBody?.body).toBe('請求は 1200*1.1=1320');
+    // ③ カーソルは答えの後ろ(続けて打てる)
+    expect(ta.selectionStart).toBe('請求は 1200*1.1=1320'.length);
+  });
+
+  it('🔴 改行は止めない(Enter の意味を奪わない)', async () => {
+    const { prevented } = await pressEnter('2+3=');
+    expect(prevented, '計算のために Enter を食べてはいけない').toBe(false);
+  });
+
+  it('🔴 引用の中でも計算し、引用の継ぎ足しも効く', async () => {
+    // ⚠ 2 つの仕掛けが同じ Enter に乗る ── 計算が先、継ぎ足しが後
+    const { ta, prevented } = await pressEnter('> 2+3=');
+    expect(ta.value).toBe('> 2+3=5\n> ');
+    expect(prevented, '継ぎ足しは自分で改行を書くので止める').toBe(true);
+  });
+
+  it('⚠ 式でないところでは何も足さない', async () => {
+    const { ta, d, prevented } = await pressEnter('締切=');
+    expect(ta.value).toBe('締切=');
+    expect(d.getState().openBody?.body).toBe('締切=');
+    expect(prevented).toBe(false);
+  });
+
+  it('🔴 打っていない字を足さない(PKC2 が `1,000=0` と書き込んだ形)', async () => {
+    const { ta } = await pressEnter('会費は 1,000=');
+    expect(ta.value).toBe('会費は 1,000=');
+  });
+
+  /**
+   * ⚠ **選んでいる所は `=` の直後から始める**(2026-09-07、変異試験 M12 が
+   *   SURVIVED で教えた)。1 稿目は行の先頭から選んでいたが、それだと
+   *   カーソルの直前が `=` ではないので**門を外しても発火しない** ── 守っている
+   *   ものが「選択の門」ではなく「`=` の門」だった(CLAUDE.md §1)。
+   * 🔑 門でしか止まらないのは、**選択の始まりがちょうど `=` の直後**のときである
+   *   ── そこで撃つと、`insertText` が**選んだ字を答えで置き換えて消す**。
+   */
+  it('⚠ 字を選んでいるときは撃たない(その Enter は置き換えの合図)', async () => {
+    const { d, q } = setup('2+3=まちがい');
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    q('[data-pkc-action="start-edit"]')!.click();
+    await tick();
+    const ta = q<HTMLTextAreaElement>('[data-pkc-field="editor-body"]')!;
+    ta.value = '2+3=まちがい';
+    ta.setSelectionRange(4, 8); // 「まちがい」を選んでいる(始まりは `=` の直後)
+    ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await tick();
+    expect(ta.value, '選んだ字が答えで消された').toBe('2+3=まちがい');
+  });
+
+  it('⚠ 変換中の Enter では撃たない(日本語で打つ人が毎回踏む)', async () => {
+    const { d, q } = setup('けいさん 2+3=');
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    q('[data-pkc-action="start-edit"]')!.click();
+    await tick();
+    const ta = q<HTMLTextAreaElement>('[data-pkc-field="editor-body"]')!;
+    ta.value = 'けいさん 2+3=';
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+    ta.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Enter',
+        bubbles: true,
+        cancelable: true,
+        // ⚠ happy-dom は init の `isComposing` をそのまま返す(2026-09-07 実測)
+        isComposing: true,
+      }),
+    );
+    await tick();
+    expect(ta.value).toBe('けいさん 2+3=');
+  });
+});
