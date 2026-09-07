@@ -445,3 +445,45 @@ test('🔴 引用の中の表の升を押して打つと、`>` を動かさず�
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **原文に無い升も、押して打てて、開き直しても残る**(#780。user 裁定 2026-09-07)。
+ *
+ * ⚠ unit(happy-dom)では**押して打つ往復**が通せない ── 欄を開くのも、
+ *   確定して本文へ届くのも実 DOM の話である。ここが唯一の門。
+ * 🔑 観測点は**開き直した原文** ── 画面だけの嘘でないことまで見る。
+ */
+test('🔴 升が足りない行の空いているセルに打つと、区切りを補って本文へ入る (#780)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  await createEntry(page, 'text');
+  // ⚠ 3 列の表で、2 行目は**升が 1 つだけ** ── 読み手は空の升を 2 つ足して描く
+  await page
+    .locator('[data-pkc-field="editor-body"]')
+    .fill('```csv\nしなもの,かず,ねだん\nりんご\nみかん,2,300\n```\n');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+
+  const cells = page.locator(CELL);
+  await expect(cells.first(), '押せる升が出ていない').toBeVisible({ timeout: 15_000 });
+  // 🔑 前提 ── 3 列 × 3 行 = 9 個(詰め物の升にも印が焼かれている)
+  await expect(cells, '押せる升の数が違う(前提が崩れた)').toHaveCount(9);
+
+  // 2 行目の 3 列目(= 原文に無い升)。⚠ 索引は 0 始まりで 3 + 2 = 5
+  await cells.nth(5).click();
+  const input = page.locator('[data-pkc-field="cell-input"]');
+  await expect(input, '原文に無い升で欄が開かない').toBeVisible();
+  await input.fill('150');
+  await page.keyboard.press('Control+Enter');
+
+  // 🔴 **原文まで届いているか** ── 足りない区切りが補われている
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="start-edit"]');
+  await expect(
+    page.locator('[data-pkc-field="editor-body"]'),
+    '区切りが補われていない / 字が届いていない',
+  ).toHaveValue('```csv\nしなもの,かず,ねだん\nりんご,,150\nみかん,2,300\n```\n');
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
