@@ -656,25 +656,77 @@ function rewriteCsvCell(
   if (lead === null) return null;
   const head = line.slice(0, lead);
   const text = line.slice(lead);
-  const out: CsvPositions = { rowLines: [], cellSpans: [] };
-  const rows = parseCsv(text, delimiter, out);
   /**
-   * ⚠ **1 行を渡して、閉じた 1 行が返ること**を検める。
-   *   返らない / 2 行になる / **引用が閉じていない**形は、
-   *   「この行だけでは表の行として決まらない」= **次の行へまたがっている**
-   *   ということである(`\"あ` がそれ)── そこへ書くと次の行まで巻き込む。
+   * 🔑 **升の切り方は `cellsOf` の 1 本**(#780 で寄せた)── ⚠ 直す前はここに
+   *   同じ処理が書き写されており、**片方だけ直す**と静かに食い違う(§7)。
    */
-  if (rows === null || rows.length !== 1 || out.unterminated === true) return null;
-  const spans = out.cellSpans?.[0];
-  const cells = rows[0]!;
-  if (spans === undefined || spans.length !== cells.length) return null;
-  const span = spans[rewrite.col];
-  if (span === undefined) return null;
+  const spans = csvRowSpans(text, delimiter);
+  if (spans === null) return null; // またがっている行(そこへ書くと次の行を巻き込む)
   const next = csvEscapeField(rewrite.value, delimiter);
+  const span = spans[rewrite.col];
+  if (span === undefined) {
+    /**
+     * 🔴 **原文に無い升にも打てる**(#780。user 裁定 2026-09-07「押したら打てる」)。
+     *
+     * ⚠ 読み手は**見出しの列数ぶんに詰め物をして**升を並べるので、升の数が足りない行や
+     *   空行にも**押せる印が焼かれる**。直す前はそこを断っていたので、
+     *   「**押せる → 打てる → 消える**」だった(実測 2026-09-07:9 升のうち 2 升)。
+     * 🔑 だから**足りない区切りを補って書く** ── `1` の 3 列目に `x` なら `1,,x`。
+     *   行を足したときにできる空の升と**同じ動き**になる。
+     * ⚠ **表の幅を超える依頼は断る** ── 焼く側は幅までしか升を出さないので、
+     *   それを超えるのは「別の窓から来た古い依頼」である。
+     * ⚠ **空を書いても原文は変わらない**ので断る(「同じ字なら書かない」と同じ向き)。
+     */
+    if (!Number.isInteger(rewrite.col) || rewrite.col < 0) return null;
+    if (rewrite.col >= csvTableWidth(lines, table)) return null;
+    if (next === '') return null;
+    // ⚠ いまの区切りの数は `len - 1`(空行は 0)── そこから `col` 個まで足す
+    const gap = delimiter.repeat(rewrite.col - Math.max(spans.length - 1, 0));
+    lines[rewrite.line] = head + text + gap + next;
+    return lines.join('\n');
+  }
   // ⚠ 範囲は**前置きを剥がした字**の中の位置なので、書き戻しも `text` の上で行う
   if (text.slice(span.start, span.end) === next) return null;
   lines[rewrite.line] = head + text.slice(0, span.start) + next + text.slice(span.end);
   return lines.join('\n');
+}
+
+/**
+ * 🔴 **その 1 行の升の範囲**(#780)。⚠ **空行は「升 0 個」**である。
+ *
+ * ⚠ `parseCsv('')` は `null` を返す ── それを「読めない行」と読むと、
+ *   **空行の升が永久に打てない**(読み手は詰め物で升を並べているのに)。
+ * 🔑 「読めない」(`null` = またがっている)と「升が 0 個」を**分ける**のがここの仕事。
+ */
+function csvRowSpans(
+  text: string,
+  delimiter: string,
+): Array<{ start: number; end: number }> | null {
+  return text === '' ? [] : cellsOf(text, delimiter);
+}
+
+/**
+ * 🔴 **その表の幅**(#780)── 読み手が升を並べる数。
+ *
+ * 🔑 **読み手と同じ数え方**にする ── `rowsToHtml` は「全部の行のうち**いちばん
+ *   多い升の数**」を幅にして、足りない行を詰め物で埋める。だから同じ物を
+ *   **囲みの中身をまとめて**読んで数える(行ごとに数えると詰め物の分を落とす)。
+ * ⚠ 前置き(引用)は剥がしてから渡す ── 読み手が受け取るのはその形である。
+ */
+function csvTableWidth(
+  lines: readonly string[],
+  table: { first: number; last: number; delimiter: string; quote: number },
+): number {
+  const body: string[] = [];
+  for (let i = table.first; i <= table.last && i < lines.length; i += 1) {
+    const l = lines[i];
+    if (l === undefined) continue;
+    const lead = quoteLead(l, table.quote);
+    if (lead === null) continue;
+    body.push(l.slice(lead));
+  }
+  const rows = parseCsv(body.join('\n'), table.delimiter);
+  return rows === null ? 0 : rows.reduce((max, r) => Math.max(max, r.length), 0);
 }
 
 /**
@@ -776,11 +828,17 @@ function rewriteCsvShape(
     const lead = quoteLead(l, table.quote);
     return lead === null ? null : l.slice(lead);
   };
-  /** 表の中身の行(空行は行として数えない ── 描かれていないので押されない)。 */
+  /**
+   * 表の中身の行。
+   *
+   * 🔴 **空行も行として数える**(#780。user 裁定 2026-09-07)── 読み手は空行にも
+   *   **行を 1 本描いて、行の ＋ × を焼く**ので、数えないと dead click になる
+   *   (実測 2026-09-07:押しても何も起きない)。
+   * ⚠ 段が足りない行(引用の深さ違い)だけは**この表の行ではない**ので外す。
+   */
   const rows: number[] = [];
   for (let i = table.first; i <= table.last && i < lines.length; i += 1) {
-    const text = textOf(i);
-    if (text !== null && text.trim() !== '') rows.push(i);
+    if (textOf(i) !== null) rows.push(i);
   }
   if (!rows.includes(rewrite.line)) return null;
   /** 前置きの字数(⚠ `rows` に居る行だけに使う = 剥がせた行なので `null` にならない)。 */
@@ -794,26 +852,55 @@ function rewriteCsvShape(
       return lines.join('\n');
     }
     // 足すのは**押した行の下**。⚠ 幅は押した行に揃える(でこぼこにしない)
-    const cells = cellsOf(textOf(rewrite.line)!, table.delimiter);
+    // ⚠ 空行から足したら**空行**が入る(「押した行に揃える」の素直な帰結。#780)
+    const cells = csvRowSpans(textOf(rewrite.line)!, table.delimiter);
     if (cells === null) return null;
     /**
      * ⚠ **足す行にも同じ前置きを付ける**(#775)── 付けないと引用の外へ落ちて、
      *   囲みがそこで閉じる(表が真っ二つになる)。
      */
     const prefix = lines[rewrite.line]!.slice(0, lead(rewrite.line));
-    lines.splice(rewrite.line + 1, 0, prefix + table.delimiter.repeat(cells.length - 1));
+    /**
+     * ⚠ **空行から足したら空行**(#780)── `cells.length` が 0 のとき `- 1` は **-1** で、
+     *   `repeat(-1)` は例外を投げる(実測 2026-09-07:`RangeError: Invalid count value`)。
+     * 🔑 0 で止める ── 区切りが 0 個 = 空の行が入る(「押した行に揃える」の素直な帰結)。
+     */
+    lines.splice(rewrite.line + 1, 0, prefix + table.delimiter.repeat(Math.max(cells.length - 1, 0)));
     return lines.join('\n');
   }
 
-  // ── 列は**全部の行**を触る。まず全行が読めることを確かめてから当てる
+  /**
+   * ── 列は**全部の行**を触る。まず全行が読めることを確かめてから当てる。
+   *
+   * 🔴 **その列を持たない行は飛ばす**(#780)。⚠ 直す前は「1 行でも持っていなければ
+   *   丸ごと断る」だったので、**升の数が足りない行が 1 本あるだけで列の ＋ × が
+   *   全部死んで**いた(実測 2026-09-07:10 個中 5 個が dead click)。
+   * 🔑 飛ばすのであって**埋めない** ── 埋めると「触っていないセルの字は 1 バイトも
+   *   動かない」(この file の既存の不変量)が壊れる。
+   * ⚠ **またがっている行は今までどおり丸ごと断る** ── 半分だけ当てると、表の形が
+   *   行ごとに食い違う(いちばん直しにくい壊れ方)。「読めない」と「持っていない」を
+   *   混ぜないのが肝である。
+   */
   const parsed: Array<{ at: number; spans: Array<{ start: number; end: number }> }> = [];
   for (const at of rows) {
-    const spans = cellsOf(textOf(at)!, table.delimiter);
+    const spans = csvRowSpans(textOf(at)!, table.delimiter);
     if (spans === null) return null;
-    if (spans[rewrite.col] === undefined) return null;
+    if (spans[rewrite.col] === undefined) continue;
     parsed.push({ at, spans });
   }
-  if (rewrite.mode === 'remove' && parsed.some((r) => r.spans.length <= 1)) return null;
+  // ⚠ 押した列を 1 行も持っていなければ、当てる先が無い(押せる印も焼かれていない)
+  if (parsed.length === 0) return null;
+  /**
+   * ⚠ **最後の 1 列は消さない**(消すと表そのものが消えて、CSV の原文に放り出される)。
+   *
+   * 🔴 **数えるのは「表の幅」である**(#780)。⚠ 直す前は「**どれか 1 行でも升が
+   *   1 つしかなければ断る**」だったので、3 列の表に**升が 1 つの行が 1 本**
+   *   在るだけで列を消せなかった ── 註記が言っているのは「**表**そのものが
+   *   消える」ことなので、行ごとに数えるのは的が違う。
+   * 🔑 幅が 1 なら断る / それより広ければ、升の足りない行は**空の行になるだけ**
+   *   (空の行は #780 で打てるようになったので、行き止まりにならない)。
+   */
+  if (rewrite.mode === 'remove' && csvTableWidth(lines, table) <= 1) return null;
   for (const { at, spans } of parsed) {
     const line = lines[at]!;
     // ⚠ 範囲は**前置きを剥がした字**の中の位置 ── 前置きのぶんだけずらして当てる
@@ -823,11 +910,18 @@ function rewriteCsvShape(
       // 押した列の**右**へ空のセルを 1 つ
       lines[at] = line.slice(0, off + span.end) + table.delimiter + line.slice(off + span.end);
     } else {
-      // ⚠ 区切り字も 1 つ連れて消す ── 最後の列なら**左側**の区切り字を消す
+      /**
+       * ⚠ 区切り字も 1 つ連れて消す ── 最後の列なら**左側**の区切り字を消す。
+       * 🔴 **升が 1 つしかない行では、升だけ消して空にする**(#780)。
+       *   ⚠ 直す前はここで `spans[-1]` を読んで**例外を投げて**いた
+       *   (幅の門が先に断っていたので届いていなかっただけである)。
+       */
       const cut =
         rewrite.col + 1 < spans.length
           ? { start: span.start, end: spans[rewrite.col + 1]!.start }
-          : { start: spans[rewrite.col - 1]!.end, end: span.end };
+          : rewrite.col > 0
+            ? { start: spans[rewrite.col - 1]!.end, end: span.end }
+            : { start: span.start, end: span.end };
       lines[at] = line.slice(0, off + cut.start) + line.slice(off + cut.end);
     }
   }
