@@ -1520,13 +1520,29 @@ function bodySourceLineAt(
  * 🔑 `revealBlock` は**その塊を覆う畳みを全部**開く(内も外も)ので、
  * 塊さえ正しく引ければ 1 本で解ける。
  */
-function revealAppendTarget(dispatcher: Dispatcher, root: HTMLElement, slug: string): void {
+/**
+ * 🔴 **入り先の直前で終わっている塊を引く**(#395 段① / #782 B)。
+ *
+ * 🔑 **同じ引き方を 2 つの用途が借りる**(CLAUDE.md §7)──
+ *   ① 押す**前**:そこを覆う畳みを開いておく(`revealAppendTarget`)
+ *   ② 着いた**後**:**足した字がその塊である**ので、そこへ送る(`jumpToAppended`)。
+ *   ⚠ ②が成り立つのは、着いた後に引き直すと**入り先が足した字の後ろへ動く**から
+ *   ── その手前で終わっている塊が、いま足したものである。
+ *
+ * @returns 器と塊。⚠ 引けなければ `null`(呼び手は**何もしない** ── 当てずっぽうで
+ *   別の所へ送らない)
+ */
+function appendTargetBlock(
+  dispatcher: Dispatcher,
+  root: HTMLElement,
+  slug: string,
+): { host: HTMLElement; block: Element } | null {
   const body = dispatcher.getState().openBody?.body ?? null;
   const host = root.querySelector<HTMLElement>('[data-pkc-field="detail-body"]');
-  if (body === null || host === null) return;
+  if (body === null || host === null) return null;
   // ⚠ 「末尾」は文書のいちばん後ろ ── 行数を渡せば、どの塊よりも後ろになる
   const at = slug === '' ? body.split('\n').length : resolveAppendAt(body, slug);
-  if (at === null) return;
+  if (at === null) return null;
   /**
    * ⚠ **原文の行 → 描く面の行** ── 描く面は frontmatter を剥がした側を見ている。
    * ずらす値は `frontmatterLineCount` 1 つ(`pickAppendTarget` と同じ規律)。
@@ -1539,7 +1555,13 @@ function revealAppendTarget(dispatcher: Dispatcher, root: HTMLElement, slug: str
     if (!Number.isInteger(end) || end >= line) continue;
     block = el;
   }
-  if (block === null) return;
+  return block === null ? null : { host, block };
+}
+
+function revealAppendTarget(dispatcher: Dispatcher, root: HTMLElement, slug: string): void {
+  const hit = appendTargetBlock(dispatcher, root, slug);
+  if (hit === null) return;
+  const { host, block } = hit;
   /**
    * 🔑 **`revealBlock` 1 本で足りる**(変異 Q2 / Q4 が生き延びて確かめた)。
    *
@@ -1550,6 +1572,95 @@ function revealAppendTarget(dispatcher: Dispatcher, root: HTMLElement, slug: str
    * 🔑 だから消した(CLAUDE.md「これが無いと壊れる、と書く前に外して壊れるのを見る」)。
    */
   revealBlock(host, block);
+}
+
+/**
+ * 🔴 **追記が着いたら、足した所へ送る**(#782 B。user 裁定 2026-09-07)。
+ *
+ * > 「**追記した見出しや末尾にジャンプ ただし、別窓で開いている場合の
+ * > 再レンダリングは固定**」
+ * > (⚠ 原文の全角の空白 1 つだけ半角にした ── 語は 1 つも変えていない)
+ *
+ * ## ⚠ 別窓が動かないのは「実装の副作用」ではなく、この置き場そのものである
+ *
+ * 🔑 **押した窓でしか走らない** ── ここは押し所の処理なので、別の窓には
+ *   1 行も届かない。別窓の側は #782 A(`detail.ts`)が「器を空にしない」形で
+ *   固定してあり、**2 つは別の機構**である(片方を直しても片方は動かない)。
+ *   検査も別:`tests/smoke/append-scroll.smoke.spec.ts` が両方を見る。
+ *
+ * ## 待ち方
+ *
+ * ⚠ **撃った直後には送れない** ── 本文の描き直しは worker 越しなので、
+ *   その瞬間の DOM にはまだ足した字が無い。
+ * 🔑 順番はこうなっている:①`ENTRY_APPENDED` で state が動く ②**描画器が先に**
+ *   `render()` され、印(`PAINTED_ATTR`)を**外す** ③ここの購読が呼ばれる
+ *   ④`waitPainted` が印の付け直しを待つ。
+ *   ⚠ ②→③の順は購読の登録順で決まる(描画器は boot 時、ここは押した時)。
+ * ⚠ **期限を置く** ── 追記が断られた回(空のまま押した / 錠が取れない)は
+ *   `lastAppend` が動かないので、置きっぱなしの購読を残さない。
+ *
+ * ## 送り方
+ *
+ * ⚠ `block: 'nearest'` にする ── **見えているなら動かさない**。
+ *   足した字が画面に入っているのに画面が跳ねると、user 裁定の
+ *   「読むのを邪魔しない」と食い違う。
+ */
+function jumpWhenAppended(
+  dispatcher: Dispatcher,
+  root: HTMLElement,
+  lid: string,
+  slug: string,
+): void {
+  const before = dispatcher.getState().lastAppend;
+  let off: () => void = () => {};
+  const stop = (): void => {
+    off();
+  };
+  const timer = setTimeout(stop, 8000);
+  off = dispatcher.onState((s) => {
+    /**
+     * ⚠ 別のノートへ移ったら降りる ── **後始末のためだけ**である
+     *   (送らない判定は下の「送る直前にもう一度見る」が持つ)。
+     * ⚠ ここを外す変異は**等価**で、期限(8 秒)まで購読が残るだけになる ──
+     *   test で殺せないことを承知で残している。
+     */
+    if (s.selectedLid !== lid) {
+      clearTimeout(timer);
+      stop();
+      return;
+    }
+    const now = s.lastAppend;
+    /**
+     * 🔴 **`lastAppend` が「動いた」回だけ送る**(#782 B)。
+     *
+     * ⚠ 参照の比較(`now === before`)を外すと、**着く前に別の理由で state が
+     *   動いた瞬間**に発火する ── `APPEND_TO_ENTRY` 自身が `writeLock` を立てるので、
+     *   撃った直後に必ず 1 回来る。そこで送ると**前に足した所**(古い DOM)へ行き、
+     *   購読はもう降りているので**今回足した字には二度と行かない**。
+     * ⚠ 空のまま押した回は state が 1 バイトも動かない(reducer が同じ参照を返す)ので、
+     *   **ここは呼ばれない** ── だから「空押し」ではこの門を検められない。
+     *   🔑 割れるのは**長い追記を 2 回目に足す**形である(検査はそちら)。
+     */
+    if (now === before || now === null || now.lid !== lid) return;
+    clearTimeout(timer);
+    stop();
+    void (async (): Promise<void> => {
+      const detail = root.querySelector<HTMLElement>('[data-pkc-region="detail"]');
+      if (detail === null) return;
+      await waitPainted(detail, lid);
+      /**
+       * 🔴 **送る直前にもう一度見る** ── 待っている間に別のノートへ移っていたら、
+       *   引く本文も器も**そのノートのもの**になる。⚠ 入り先が「末尾」だと
+       *   `appendTargetBlock` は必ず塊を引き当てるので、**開いたばかりのノートを
+       *   いきなり一番下へ送る**(いちばん気づけない形)。
+       */
+      if (dispatcher.getState().selectedLid !== lid) return;
+      const hit = appendTargetBlock(dispatcher, root, slug);
+      if (hit === null) return;
+      revealBlock(hit.host, hit.block);
+      hit.block.scrollIntoView({ block: 'nearest' });
+    })();
+  });
 }
 
 /**
@@ -4332,6 +4443,8 @@ const ACTIONS: Record<string, ActionHandler> = {
      * (閉じ直すのは押し所 1 つ)。
      */
     revealAppendTarget(dispatcher, root, target);
+    // 🔴 **着いたら足した所へ送る**(#782 B)── ⚠ 撃つ**前**に張る(着地を見逃さない)
+    jumpWhenAppended(dispatcher, root, lid, target);
     dispatcher.dispatch({
       type: 'APPEND_TO_ENTRY',
       lid,
