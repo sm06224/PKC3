@@ -103,7 +103,7 @@ function buttonLabels(action: string): string[] {
 /**
  * 🔴 **文言そのものを pin する**。「マニュアルに `**<文言>**` が在るか」だけでは
  * 足りない ── `バックアップ` を `保存` に改名する変異が**生き残った**。
- * マニュアル §2 の「書く → **保存**」(編集ボタンの話)に**たまたま救われて**いた。
+ * マニュアル「書く」の「書く → **保存**」(編集ボタンの話)に**たまたま救われて**いた。
  * 散文は何にでも当たるので、**期待する一覧を literal で持つ**しかない。
  * 改名したらここが落ちる = マニュアルも直せ、という合図になる。
  */
@@ -775,7 +775,7 @@ describe('マニュアルと実装の突合', () => {
 });
 
 describe('確認の画面とマニュアルの突合(#299)', () => {
-  /** マニュアル §4「確認の画面」の節だけを切り出す。⚠ 節ごと消えたら落ちる。 */
+  /** マニュアル「確認の画面」の節だけを切り出す。⚠ 節ごと消えたら落ちる。 */
   function section(): string {
     const at = MANUAL.indexOf('### 確認の画面');
     expect(at, 'マニュアルに「確認の画面」の節が無い').toBeGreaterThan(-1);
@@ -845,7 +845,7 @@ describe('確認の画面とマニュアルの突合(#299)', () => {
     expect(labels.length, '危険色の字を 1 つも読めていない').toBe(8);
     const s = section();
     for (const label of labels)
-      expect(s, `マニュアル §4「確認の画面」に「${label}」が無い`).toContain(`**${label}**`);
+      expect(s, `マニュアル「確認の画面」に「${label}」が無い`).toContain(`**${label}**`);
     // ⚠ 散文の数字も pin する(「数字を 2 か所に書いたら突き合わせる」── 上の
     //   タブ上限の検査と同じ理由。ラベルは全部在るのに数字だけ古い、を許さない)
     expect(s, 'マニュアルの「全部で N 種類」の数字が実装と食い違っている').toContain(
@@ -873,7 +873,7 @@ describe('確認の画面とマニュアルの突合(#299)', () => {
 
 describe('ショートカットとマニュアルの突合(#256)', () => {
   /**
-   * 🔴 **マニュアル §10 は 3 つ目の面である**(着地前レビュー 5)。
+   * 🔴 **マニュアル「ショートカットキー」 は 3 つ目の面である**(着地前レビュー 5)。
    *
    * 設定とヘルプの一覧は `KEY_COMMANDS` から出るのでズレようがないが、
    * **マニュアルは手書き**で、しかも焼き込まれてヘルプの中に出る。
@@ -882,8 +882,8 @@ describe('ショートカットとマニュアルの突合(#256)', () => {
    */
   it('🔴 既定の割当と名前が、マニュアルに全部載っている', () => {
     // 空振り防止 ── §10 が丸ごと消えたら落ちる
-    const section = MANUAL.slice(MANUAL.indexOf('## 10. ショートカットキー'));
-    expect(section.length, 'マニュアルに §10 が無い').toBeGreaterThan(500);
+    const section = MANUAL.slice(MANUAL.indexOf('## ショートカットキー'));
+    expect(section.length, 'マニュアルに「ショートカットキー」の章が無い').toBeGreaterThan(500);
     const missing: string[] = [];
     for (const cmd of KEY_COMMANDS) {
       for (const chord of cmd.defaults) {
@@ -905,7 +905,7 @@ describe('ショートカットとマニュアルの突合(#256)', () => {
   });
 
   it('🔴 割り当て直しの導線がマニュアルに書いてある', () => {
-    const section = MANUAL.slice(MANUAL.indexOf('## 10. ショートカットキー'));
+    const section = MANUAL.slice(MANUAL.indexOf('## ショートカットキー'));
     for (const word of ['割り当て', '既定に戻す', 'すべて既定に戻す']) {
       expect(section, `マニュアルに「${word}」の説明が無い`).toContain(word);
     }
@@ -922,7 +922,7 @@ describe('ショートカットとマニュアルの突合(#256)', () => {
    *   尻に含まれる、という救われ方を作らない)。
    */
   it('🔴 §10 の表に書いた鍵は、全部いまの既定に在る(外した鍵が残らない)', () => {
-    const section = MANUAL.slice(MANUAL.indexOf('## 10. ショートカットキー'));
+    const section = MANUAL.slice(MANUAL.indexOf('## ショートカットキー'));
     const defaults = new Set<string>();
     for (const cmd of KEY_COMMANDS) {
       for (const chord of cmd.defaults) defaults.add(chordLabel(chord, false));
@@ -934,7 +934,7 @@ describe('ショートカットとマニュアルの突合(#256)', () => {
       for (const m of cell.matchAll(/\*\*([^*]+)\*\*/g)) written.push(m[1]!);
     }
     // 空振り防止 ── 表から鍵を読めていないなら何も守っていない
-    expect(written.length, '§10 の表から鍵を 1 つも読めていない').toBeGreaterThan(30);
+    expect(written.length, '「ショートカットキー」の表から鍵を 1 つも読めていない').toBeGreaterThan(30);
     const stale = written.filter((k) => !defaults.has(k));
     expect(stale, '既定に無い鍵がマニュアルの表に残っている').toEqual([]);
   });
@@ -948,7 +948,7 @@ describe('ショートカットとマニュアルの突合(#256)', () => {
    * 🔑 一覧も件数も実装から出し、**両向き**で見る(通らない鍵を「効く」と書かない)。
    */
   it('🔴 「打っている最中」に効く鍵の一覧と件数が、門の判定と一致する', () => {
-    const section = MANUAL.slice(MANUAL.indexOf('## 10. ショートカットキー'));
+    const section = MANUAL.slice(MANUAL.indexOf('## ショートカットキー'));
     const from = section.indexOf('⚠ **打っている最中**');
     const to = section.indexOf('⚠ 画面を開くキーは');
     const para = from >= 0 && to > from ? section.slice(from, to) : '';
@@ -1042,8 +1042,8 @@ describe('設定の画面の節とマニュアルの突合(#697)', () => {
  * ⚠ `§N「…」` は**マニュアルの節への参照**なので除く(あれは画面の字ではない)。
  */
 describe('§9「困ったとき」の引用が画面の字と一致する(#697)', () => {
-  const from = MANUAL.indexOf('## 9. 困ったとき');
-  const to = MANUAL.indexOf('## 10. ショートカットキー');
+  const from = MANUAL.indexOf('## 困ったとき');
+  const to = MANUAL.indexOf('## ショートカットキー');
   const section = from >= 0 && to > from ? MANUAL.slice(from, to) : '';
   const SRC = srcFiles()
     .map((f) => codeOnly(readFileSync(f, 'utf-8')))
@@ -1051,11 +1051,14 @@ describe('§9「困ったとき」の引用が画面の字と一致する(#697)'
     .replace(/`/g, '');
 
   it('🔴 表の中の「…」は、全部 src のコードに在る', () => {
-    expect(section.length, '§9 が無い(空振り)').toBeGreaterThan(500);
+    expect(section.length, '「困ったとき」が無い(空振り)').toBeGreaterThan(500);
     const quotes: string[] = [];
     for (const row of section.split('\n')) {
       if (!row.startsWith('| ') || row.startsWith('| 症状') || row.startsWith('|---')) continue;
-      const noRefs = row.replace(/§\d+(?:-\d+)?「[^」]*」/g, '');
+      // ⚠ **節への案内は画面の字ではない**ので落とす。#779 で書き方が
+      //    `§4-2「…」` から `→「節の名前」` へ変わったので、両方を落とす
+      //    (落とさないと「出す・取り込む」を画面の字として探しに行く)。
+      const noRefs = row.replace(/§\d+(?:-\d+)?「[^」]*」/g, '').replace(/→\s*「[^」]*」/g, '');
       for (const m of noRefs.matchAll(/「([^」]+)」/g)) quotes.push(m[1]!.replace(/`/g, ''));
     }
     expect(quotes.length, '引用を 1 つも拾えていない(空振り)').toBeGreaterThan(3);
@@ -1251,7 +1254,7 @@ describe('導線の置き場所(P8 段⑱)', () => {
   });
 
   it('🔴 添付の参照を本文へ入れる導線が**実在する**(書ける形式なのに書けない、を作らない)', () => {
-    // マニュアル §3 が「参照をコピー」を案内している以上、実装に無ければ嘘になる
+    // マニュアル「本文に書けるもの」 が「参照をコピー」を案内している以上、実装に無ければ嘘になる
     expect(MANUAL).toContain('参照をコピー');
     // ⚠ **文字列が在るか**では当てられない ── `data-pkc-field` にも同じ語が
     //    出るので、action を消しても満たされる(変異試験で実際に生き残った)。
@@ -1304,30 +1307,33 @@ describe('クラス名と CSS 規則の突合', () => {
 /**
  * 🔴 **マニュアルの節を指す参照が、指す先とずれていない**(#261 で実際にずれた)。
  *
- * ⚠ 節を 1 つ挿すと**以降の番号が全部動く** ── #251 で §7-2 に「文字を貼る」を
- * 入れたとき、マニュアル内部の 4 か所は直したのに、**マニュアルの外から指していた
- * 4 か所**(コード 1 / smoke 1 / doc 2)が別の節を指したまま残った。
- * ⚠ 「その番号の節が在るか」だけを見ると**空振りする** ── §7-2 は在るのだから
- * 常に真になる。だから**引用句が当の節の中に在るか**まで見る(CLAUDE.md §1)。
+ * ## ⚠ 番号ではなく**名前**で指す(#779、2026-09-07 に切り替えた)
+ *
+ * 直す前は `マニュアル §7-3` のように**節番号**で指していた。⚠ 番号は
+ * 節を 1 つ挿すと**以降が全部動く** ── #251 で §7-2 に「文字を貼る」を入れたとき、
+ * マニュアル内部の 4 か所は直したのに、**外から指していた 4 か所**が別の節を指したまま
+ * 残った。🔑 #779 で節番号そのものを全廃したので、参照は
+ * **「マニュアル」の直後に節の名前を鉤括弧で書く**形に統一した(外の 47 か所を書き換えた)。
+ *
+ * 🔑 **門は「その名前を含む見出しがちょうど 1 つ在る」**である ──
+ * ⚠ 「在るか」だけでは空振りする(同じ語を含む見出しが 2 つあると、どちらを
+ * 指しているか分からないまま緑になる)。⚠ 節を改名すると 0 個になって落ちる ──
+ * それがこの検査の目的である。
  */
 describe('マニュアルの節を指す参照', () => {
-  /** `### 7-3. …` から次の `### ` までを 1 節として切る。 */
-  const sections = ((): Map<string, string> => {
-    const out = new Map<string, string>();
-    const lines = MANUAL.split('\n');
-    let key: string | null = null;
-    let buf: string[] = [];
-    for (const line of lines) {
-      const m = /^### (\d+-\d+)\./.exec(line);
-      if (m) {
-        if (key) out.set(key, buf.join('\n'));
-        key = m[1]!;
-        buf = [];
+  /** マニュアルの見出し(H2〜H5)。⚠ 囲みの中の `#` は見出しではない。 */
+  const headings = ((): string[] => {
+    const out: string[] = [];
+    let fence = false;
+    for (const line of MANUAL.split('\n')) {
+      if (/^\s*(```|~~~)/.test(line)) {
+        fence = !fence;
         continue;
       }
-      if (key) buf.push(line);
+      if (fence) continue;
+      const m = /^#{2,5} (.*)$/.exec(line);
+      if (m) out.push(m[1]!);
     }
-    if (key) out.set(key, buf.join('\n'));
     return out;
   })();
 
@@ -1346,36 +1352,43 @@ describe('マニュアルの節を指す参照', () => {
     ...collect('docs', '.md'),
   ].filter((f) => f !== join('docs', 'manual.md'));
 
+  /**
+   * 参照を拾う形。⚠ **綴りをそのまま書かない**(この file 自身が走査の対象なので、
+   * 書くと自分に当たる)── 2 つに割って組む。
+   */
+  const REF = new RegExp('\u30de\u30cb\u30e5\u30a2\u30eb' + '\u300c([^\u300d]{2,})\u300d', 'gs');
+
   /** コメントの行頭記号・改行を落として 1 本の文字列にする(引用句は行を跨ぐ)。 */
   const flatten = (s: string): string =>
     s.replace(/\n\s*(?:\*|\/\/|>)?\s*/g, '').replace(/\s+/g, '');
 
-  it('🔴 指している節が実在し、引用句もその節の中に在る', () => {
+  it('🔴 指している節が、いまも 1 つだけ実在する', () => {
     const bad: string[] = [];
     let refs = 0;
     for (const file of FILES) {
       const text = readFileSync(file, 'utf-8');
-      // 節番号だけの参照と、引用句つきの参照の両方を拾う
       // ⚠ ここに**拾う形そのもの**を例として書かない ── 自分のコメントに
       //   当たって落ちる(1 稿目で実際に踏んだ)
-      for (const m of text.matchAll(/マニュアル\s*§(\d+-\d+)\s*(「[^」]*」)?/gs)) {
+      // ⚠ 「マニュアル」の直後に鉤括弧が来る形**だけ**を参照と数える ── 間に「の」を
+      //    挟む形は節の名前ではなく**画面の字の引用**なので拾わない(1 稿目で 20 件誤検知)
+      // 🔑 **綴りを 2 つに割って組む** ── この file 自身も走査の対象なので、
+      //    拾う形をそのまま書くと**自分のコメントに当たって落ちる**(CLAUDE.md §1)
+      for (const m of text.matchAll(REF)) {
         refs += 1;
-        const num = m[1]!;
-        const body = sections.get(num);
-        if (body === undefined) {
-          bad.push(`${file}: §${num} という節がマニュアルに無い`);
-          continue;
+        const name = m[1]!;
+        // 🔑 **完全一致が在ればそれ**(「設定」は 3 つの見出しに含まれるが、
+        //    `### 設定` そのものが在るので迷わない)。無ければ**ちょうど 1 つ**含む見出し。
+        const exact = headings.filter((h) => flatten(h) === flatten(name));
+        const hits = exact.length > 0 ? exact : headings.filter((h) => flatten(h).includes(flatten(name)));
+        if (hits.length === 0) {
+          bad.push(`${file}: 「${name}」という節がマニュアルに無い`);
+        } else if (hits.length > 1) {
+          bad.push(`${file}: 「${name}」に当たる見出しが ${hits.length} 個ある(どれか分からない)`);
         }
-        const quote = m[2];
-        if (quote === undefined) continue;
-        // ⚠ 引用句は**先頭 8 字**で照合する(途中で切って書くことがある)
-        const needle = flatten(quote.slice(1, -1)).slice(0, 8);
-        if (needle !== '' && !flatten(body).includes(needle))
-          bad.push(`${file}: §${num} に「${needle}…」が無い(節がずれている)`);
       }
     }
     // ⚠ 空振り防止 ── 参照を 1 件も拾えていないなら、この検査は何も守っていない
-    expect(refs, 'マニュアルへの参照を 1 件も拾えていない(検査が空振り)').toBeGreaterThan(2);
+    expect(refs, 'マニュアルへの参照を 1 件も拾えていない(検査が空振り)').toBeGreaterThan(20);
     expect(bad).toEqual([]);
   });
 });
@@ -2008,15 +2021,15 @@ describe('近道の押し先が画面に在る', () => {
    *   逆に面を畳むと、**存在しない名前を案内し続ける**。
    * 🔑 だから**両向きを等値で**見る(片方だけ増やしても落ちる)。
    */
-  it('🔴 マニュアル §4-1 の表が、アドレスから開ける面と 1 対 1', () => {
+  it('🔴 マニュアル「開いたときの画面を指定する」 の表が、アドレスから開ける面と 1 対 1', () => {
     const manual = readFileSync('docs/manual.md', 'utf-8');
-    const at = manual.indexOf('### 4-1.');
-    expect(at, 'マニュアルに §4-1 が無い').toBeGreaterThan(-1);
-    const section = manual.slice(at, manual.indexOf('### 4-2.', at));
+    const at = manual.indexOf('### 開いたときの画面を指定する');
+    expect(at, 'マニュアルに「開いたときの画面を指定する」が無い').toBeGreaterThan(-1);
+    const section = manual.slice(at, manual.indexOf('### 設定', at));
     const rows = [...section.matchAll(/^\| `([a-z]+)` \| (.+?) \|$/gm)];
     expect(
       rows.map((m) => m[1]!).sort(),
-      'マニュアル §4-1 の名前が、アドレスから開ける面と食い違う',
+      'マニュアル「開いたときの画面を指定する」 の名前が、アドレスから開ける面と食い違う',
     ).toEqual([...openableViewNames()].sort());
     for (const m of rows) {
       expect(m[2], `${m[1]} の呼び名がマニュアルと食い違う`).toBe(viewModeLabel(m[1] as ViewMode));
