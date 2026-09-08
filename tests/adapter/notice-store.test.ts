@@ -55,6 +55,31 @@ describe('既読の集合', () => {
   });
 
   /**
+   * 🔴 **既に読んだ id へ item を足しても、帯には出ない**(2026-09-08、user 報告
+   *   「マニュアル分割が…ヘルプのお知らせにも載ってない」で判明)。
+   *
+   * ⚠ この性質は `announce.test.ts` の docstring と `notice-writing` skill に
+   *   文章では書いてあったが、**動く形では 1 度も pin されていなかった** ──
+   *   だから「未配布だと思って足す」という誤りを 3 回続けても、何も鳴らなかった。
+   * 🔑 だから**対で置く**:足しても出ない(実害)/ 新しい id なら出る(直し方)。
+   *   ⚠ 片方だけだと「そもそも未読が出ない台」でも緑になる。
+   */
+  it('🔴 読んだ id へ行を足しても未読に戻らない ── 新しい id にすれば出る', () => {
+    const s = new NoticeStore(fakeStorage());
+    const shipped = { id: '2026-09-06-x', title: 't', items: ['配った 1 行'] };
+    s.markSeen([shipped.id]);
+    expect(unreadNotices([shipped], s.seenIds()), '前提: 読んだので出ない').toHaveLength(0);
+
+    // ① 同じ id へ足す(2026-09-07〜08 に実際にやった形)
+    const amended = { ...shipped, items: [...shipped.items, '後から足した 1 行'] };
+    expect(unreadNotices([amended], s.seenIds()), '足した行が帯に出てしまった').toHaveLength(0);
+
+    // ② 新しい id へ移す(正しい直し方)
+    const moved = { id: '2026-09-08-x', title: 't2', items: ['後から足した 1 行'] };
+    expect(unreadNotices([amended, moved], s.seenIds()).map((x) => x.id)).toEqual([moved.id]);
+  });
+
+  /**
    * 🔴 **旧ビルドへ往復しても既読が巻き戻らない**(PKC2 の F5)。
    * ⚠ 「最後に閉じた 1 件」で持っていると、ここで古い id へ戻る。
    */
