@@ -1538,18 +1538,34 @@ test('🔴 スマホでは、表の升が押せることが字で出る (#750 I2
   await expect(hint, '触る端末なのに合図が出ていない').toBeVisible();
   await expect(hint).toHaveText('押すと打てます');
   /**
-   * ⚠ **押し所を横取りしない** ── 横取りすると「知らせるために押せなくする」本末転倒。
-   * 🔑 観測点は「**合図の中心を押したとき、合図自身が受けるか**」である。
-   *   ⚠ 1 稿目は「その点が升か」を見ていたが、それは**逆**だった ──
-   *   `pointer-events: none` が効いていれば、その点は**升を返すのが正しい**。
-   *   実際に落ちて気づいた(主張と観測点が食い違っていた)。
+   * 🔴 **画面の中に収まっていて、升に重なっていない**。
+   *
+   * ⚠ `toBeVisible()` は**画面の外に出た合図を通す**(大きさは在るので)──
+   *   1 稿目は `position: absolute; right: 44px` で浮かせており、**表の器が
+   *   `width: fit-content`** なので細い表では **x = −26px**(画面外)に出ていた。
+   *   実測して初めて分かった(検査が主張を守っていなかった)。
+   * 🔑 だから見るのは 2 つ:①**器の中に収まっている** ②**升に重なっていない**。
    */
-  const intercepts = await hint.evaluate((el) => {
+  const box = await hint.evaluate((el) => {
     const r = el.getBoundingClientRect();
-    const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
-    return at === el || el.contains(at);
+    const cell = el.closest('.pkc-md-block')?.querySelector('[data-pkc-action="edit-cell"]');
+    const c = cell?.getBoundingClientRect();
+    return {
+      x: Math.round(r.x),
+      right: Math.round(r.right),
+      w: Math.round(r.width),
+      vw: document.documentElement.clientWidth,
+      // 縦に重なっていなければ、升の押し所は 1px も削られない
+      overlaps: c === undefined ? null : r.bottom > c.top && r.top < c.bottom,
+    };
   });
-  expect(intercepts, '合図が押し所を横取りしている(升が押せなくなる)').toBe(false);
+  expect(box.w, '合図に幅が無い(台の空振り)').toBeGreaterThan(0);
+  expect(box.x, `合図が画面の左へはみ出している(x=${box.x})`).toBeGreaterThanOrEqual(0);
+  expect(
+    box.right,
+    `合図が画面の右へはみ出している(right=${box.right} / 窓 ${box.vw})`,
+  ).toBeLessThanOrEqual(box.vw);
+  expect(box.overlaps, '升と縦に重なっている(押し所を削る)').toBe(false);
 
   expect(errors, `console/pageerror: ${errors.join(' | ')}`).toEqual([]);
 });

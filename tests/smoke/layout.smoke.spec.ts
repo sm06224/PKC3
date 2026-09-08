@@ -1842,3 +1842,42 @@ test('🔴 長いノートを深く送っても、操作の帯が画面に残る
   }
   expect(errors).toEqual([]);
 });
+
+/**
+ * 🔴 **対照群 ── マウスの端末には「押すと打てます」を出さない**(#750 I2、2026-09-08)。
+ *
+ * ⚠ これが無いと、規則を `@media` の**外**へ出す変異(= 全部の端末に出す)が
+ *   **生き延びる** ── 触る端末の spec だけでは「出ること」しか見ていない
+ *   (実測:変異 S4 が SURVIVED だった)。
+ * 🔑 マウスの端末には**上の `:hover` の合図が既に在る**ので、字は要らない。
+ */
+test('🔴 マウスの端末には、表の「押すと打てます」を出さない (#750 I2)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('表');
+  await page
+    .locator('[data-pkc-field="editor-body"]')
+    .fill('| 品 | 数 |\n|---|---|\n| りんご | 3 |\n');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+
+  // 🔑 空振り防止 ── 押せる升が焼かれている面である(器そのものは在る)
+  await expect(
+    page.locator('[data-pkc-field="detail-body"] [data-pkc-action="edit-cell"]').first(),
+    '押せる升が 1 つも無い(この検査は空振り)',
+  ).toBeAttached();
+  await expect(
+    page.locator('[data-pkc-field="detail-body"] [data-pkc-field="cell-tap-hint"]').first(),
+    '器が焼かれていない(この検査は空振り)',
+  ).toBeAttached();
+
+  // 🔴 器は在るが、**マウスの端末では見えない**(規則が `@media` の中に在る)
+  await expect(
+    page.locator('[data-pkc-field="detail-body"] [data-pkc-field="cell-tap-hint"]').first(),
+    'マウスの端末なのに合図が出ている',
+  ).toBeHidden();
+
+  expect(errors, `console/pageerror: ${errors.join(' | ')}`).toEqual([]);
+});
