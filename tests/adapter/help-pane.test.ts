@@ -689,8 +689,7 @@ describe('お知らせの登記表', () => {
    */
   it('⚠ 登記表が上限を超えておらず、上限の宣言も動いていない', () => {
     expect(NOTICES.length).toBeLessThanOrEqual(NOTICE_KEEP_MAX);
-    expect(NOTICE_SHOW_MAX, '表示上限が変わった').toBe(10);
-    expect(NOTICE_KEEP_MAX, '保持上限が変わった').toBe(10);
+
     /**
      * 🔴 **「表示の 2 倍」から「表示と同じ」へ変えた**(2026-08-29、#596 E)。
      * ⚠ 2 倍だった理由は「**原本は残す**」だったが、その役目は `CHANGELOG.md` が
@@ -719,6 +718,17 @@ describe('お知らせの登記表', () => {
       NOTICE_SEEN_MAX,
       '既読の席が増えすぎ ── localStorage に読まれない id を積み続ける',
     ).toBeLessThanOrEqual(NOTICE_SHOW_MAX * 4);
+    /**
+     * 🔴 **10 → 30**(2026-09-08、#751)。⚠ 直す前は 1 つ足すたびに
+     *   **まだ読んでいないお知らせでも**いちばん古い 1 件が黙って消えていた
+     *   ── 実測(2026-09-06)在庫 10 件が全部 2 日ぶんで、9 月 5 日だけで
+     *   **11 件**が押し出されていた。
+     * 🔑 **登記表と表示上限は同じ数である**(2026-08-29 の不変条件)──
+     *   `NOTICE_KEEP_MAX` は式で `NOTICE_SHOW_MAX` を指しているので、
+     *   ここはその**式が生きていること**を見る(数を 2 か所に書かない)。
+     */
+    expect(NOTICE_SHOW_MAX, '表示上限が変わった').toBe(30);
+    expect(NOTICE_KEEP_MAX, '登記表 = 画面に出るもの、が崩れた').toBe(NOTICE_SHOW_MAX);
     expect(NOTICE_ITEMS_MAX, '項目数の上限が変わった').toBe(6);
     expect(NOTICE_ITEM_CHARS_MAX, '字数の上限が変わった').toBe(120);
     expect(NOTICE_ITEM_CHARS_MIN, '字数の下限が変わった').toBe(4);

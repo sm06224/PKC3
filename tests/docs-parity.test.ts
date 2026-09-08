@@ -34,7 +34,12 @@ import { showUpdateCard } from '../src/adapter/ui/render/update-card';
 import { RENDERABLE_FENCE_LANGS } from '../src/features/markdown/markdown-render';
 import { initialState, viewModeLabel, type ViewMode } from '../src/adapter/state/app-state';
 import { openableViewNames } from '../src/adapter/platform/deep-link';
-import { NOTICES, NOTICE_KEEP_MAX } from '../src/features/notice/notice-log';
+import {
+  NOTICES,
+  NOTICE_KEEP_MAX,
+  NOTICE_READABLE_TEXT,
+  NOTICE_SHOW_MAX,
+} from '../src/features/notice/notice-log';
 import { PORTABLE_KEYS } from '../src/features/settings/settings-file';
 import { PASTE_SOURCES } from '../src/features/markdown/paste-source';
 import { MAX_TABS } from '../src/features/relation/dual-pane';
@@ -1810,6 +1815,60 @@ describe('2 ペインの上限が、マニュアルと一致する', () => {
     expect(manual, `実装は ${MAX_TABS} 枚だが、マニュアルの数字が違う`).toContain(
       `**${MAX_TABS} 枚**まで`,
     );
+  });
+});
+
+/**
+ * 🔴 **「アプリの中から何件読めるか」の字は、5 か所に散っていた**(2026-09-08、#751)。
+ *
+ * ⚠ 帯の案内 2 か所 / 設定 / マニュアル 2 か所 ── 上限を動かした日に
+ *   **どれか 1 つが取り残されて嘘になる**(CLAUDE.md §7「同じ値が複数の場所にある」)。
+ *   そして嘘の向きは「**まだ読めます**」なので、user は探しに行って**見つからない**。
+ *
+ * 🔑 製品側は `NOTICE_READABLE_TEXT` の 1 か所から組み立てるようにした。
+ *   ⚠ マニュアルは**字を写すしかない**ので、ここで**全数**突き合わせる。
+ * ⚠ 「1 件でも在る」ではなく **全数** ── 5 か所のうち 1 つを直し忘れる形が
+ *   まさにこの欠陥だったので、`toContain` では守れない(#702 と同じ型)。
+ */
+describe('お知らせを何件読めるか(#751)', () => {
+  const manual = readFileSync('docs/manual.md', 'utf8');
+  /** マニュアルの中で「お知らせが N 件読める」と言っている行を全部拾う。 */
+  const claims = manual
+    .split('\n')
+    .filter((line) => line.includes('お知らせ'))
+    .flatMap((line) => [...line.matchAll(/新しい\s*(\d+)\s*件/gu)].map((m) => Number(m[1])));
+
+  it('🔴 マニュアルの件数が、実装の上限と全部一致する', () => {
+    // 空振り防止 ── 1 行も拾えていなければ、この検査は何も見ていない
+    expect(claims.length, 'マニュアルに件数の記述が無い(空振り)').toBeGreaterThanOrEqual(3);
+    expect(
+      claims.filter((n) => n !== NOTICE_SHOW_MAX),
+      `実装は ${NOTICE_SHOW_MAX} 件だが、マニュアルに違う数が書いてある`,
+    ).toEqual([]);
+  });
+
+  /**
+   * 🔴 **製品側は数を書かず、組み立てる。**
+   * ⚠ 直書きに戻ると、この test は**マニュアルしか見ていない**ので気づけない。
+   */
+  it('🔴 画面に出る字は、上限から組み立てている', () => {
+    expect(NOTICE_READABLE_TEXT, '字の組み立て方が変わった').toBe(`新しい ${NOTICE_SHOW_MAX} 件`);
+    for (const f of [
+      'src/adapter/ui/render/announce.ts',
+      'src/adapter/ui/render/settings.ts',
+    ]) {
+      const src = readFileSync(f, 'utf8');
+      expect(src, `${f} が NOTICE_READABLE_TEXT を使っていない`).toContain('NOTICE_READABLE_TEXT');
+      // ⚠ **実行する行だけ**を見る(コメントに書いた昔の字に満たされない)
+      const code = src
+        .split('\n')
+        .filter((line) => !/^\s*(\*|\/\/|\/\*)/.test(line))
+        .join('\n');
+      expect(
+        /新しい\s*\d+\s*件/u.test(code),
+        `${f} に件数が直書きで残っている(上限を動かした日に嘘になる)`,
+      ).toBe(false);
+    }
   });
 });
 

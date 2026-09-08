@@ -11,7 +11,7 @@
  * 3. **確定した字が disk まで届き、開き直しても残るか**
  */
 import { test, expect } from '@playwright/test';
-import { gotoApp, collectPageErrors, clickReal, createEntry } from './helpers';
+import { gotoApp, collectPageErrors, createEntry } from './helpers';
 
 /** 表の升(押せる口を持つもの)。 */
 const CELL = '[data-pkc-field="detail-body"] [data-pkc-action="edit-cell"]';
@@ -21,9 +21,17 @@ test('🔴 「表」を作って、升に打てる ── 原文を数えなく�
   await gotoApp(page);
 
   await createEntry(page, 'spreadsheet');
-  // ⚠ 作った直後は編集の面 ── 保存して読む面へ戻す(押せるのは読む面だけ)
-  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
-
+  /**
+   * 🔴 **保存を挟まない**(#753、2026-09-08)。
+   *
+   * ⚠ 直す前はここに「作った直後は編集の面 ── **保存して読む面へ戻す**」と書いて
+   *   `commit-edit` を押していた。🔴 **それが #753 の当の症状である** ──
+   *   マニュアルは「**そのままセルから打てます**」と書いているのに、
+   *   実際は保存を 1 回はさむ必要があった(押せる印を焼くのは読む面だけなので、
+   *   押した升が**原文の欄に化けて**いた)。
+   * 🔑 いまは「表」だけ**読む面で開く**ので、この 1 行が要らない ──
+   *   **この行を消したこと自体が回帰試験**である(戻せばここが落ちる)。
+   */
   const cells = page.locator(CELL);
   await expect(cells.first(), '表の升が押せる形で出ていない').toBeVisible({ timeout: 10_000 });
   // 🔑 前提 ── 種は 5 列 × 3 行(ここが崩れたら以降の数え方が意味を失う)
@@ -89,7 +97,7 @@ test('🔴 行と列を足せて、消せる ── 5 列で足りなくなっ�
   await gotoApp(page);
 
   await createEntry(page, 'spreadsheet');
-  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  // ⚠ 保存を挟まない(#753 ── 表は読む面で開く)
   const cells = page.locator(CELL);
   await expect(cells.first()).toBeVisible({ timeout: 10_000 });
   expect(await cells.count()).toBe(15);
@@ -132,7 +140,7 @@ test('🔴 升に式を打つと結果が出て、押すと式が出る(#418 段
   await gotoApp(page);
 
   await createEntry(page, 'spreadsheet');
-  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  // ⚠ 保存を挟まない(#753 ── 表は読む面で開く)
   const cells = page.locator(CELL);
   await expect(cells.first()).toBeVisible({ timeout: 10_000 });
 
@@ -180,7 +188,7 @@ test('🔴 csv の升も、打った直後に隣を押して続けて打てる (
   await gotoApp(page);
 
   await createEntry(page, 'spreadsheet');
-  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  // ⚠ 保存を挟まない(#753 ── 表は読む面で開く)
 
   const cells = page.locator(CELL);
   await expect(cells.first(), '表の升が押せる形で出ていない').toBeVisible({ timeout: 10_000 });

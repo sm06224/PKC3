@@ -28,6 +28,7 @@ import type { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { initialState } from '../../src/adapter/state/app-state';
 import {
   NOTICES,
+  NOTICE_KEEP_MAX,
   NOTICE_SEEN_MAX,
   NOTICE_SHOW_MAX,
   recentNotices,
@@ -963,7 +964,13 @@ describe('お知らせの文面は固定(#220-7)', () => {
      * 🔑 枠のためいちばん古い 1 件(`2026-09-07-csv-empty-cell`)を落とした ──
      *   落とす相手は **origin/main に在るもの**から選んだ(650d9ce)。原本は CHANGELOG。
      */
-    ['2026-09-08-split-and-office-size', '06dc6971'],
+    /**
+     * ⚠ **#751 / #753 / #766 / #759 で足した**(2026-09-08)。
+     * 🔑 **枠を空けていない** ── 同じ束で `NOTICE_SHOW_MAX` を 10 → 30 へ上げたので、
+     *   押し出す相手が居なくなった(それが #751 の当の直しである)。
+     */
+    ['2026-09-08-notice-keep-and-table', '77dfc01d'],
+    ['2026-09-08-split-and-office-size', '06dc6971', 'main'],
     ['2026-09-08-manual-jump', '5b106bb6'],
     ['2026-09-08-manual-terms', '2f8d9b5f'],
     ['2026-09-08-manual-otherwise-split', 'e3f46a74'],
@@ -1075,13 +1082,40 @@ describe('登記表と画面のずれ(#596 E)', () => {
      *   古い日付だと**押し出されるのは fixture 自身**になり、この test は
      *   「足した分が見えない」を主張してしまう(空振りではないが、**別の主張**)。
      */
+    /**
+     * ⚠ **登記表をいったん上限ちょうどまで埋める**(2026-09-08、#751)。
+     *   直す前は `NOTICES`(= その日の在庫)が上限そのものだったので足すだけで
+     *   超えたが、**上限を 30 へ上げた瞬間にこの test は何も押し出さなくなった**
+     *   ── 落ちてはくれたが、主張(「超えると 1 件読めなくなる」)は
+     *   **在庫の数に寄りかかっていた**(CLAUDE.md §1「前提を検算してから比べる」)。
+     * 🔑 だから**その場で上限まで埋める**。⚠ 埋める分は**全部より古い日付**にする
+     *   ── そうしないと押し出されるのが埋め草自身になり、別の主張になる。
+     */
+    const fillerCount = NOTICE_KEEP_MAX - NOTICES.length;
+    /**
+     * ⚠ **登記表と同じ「新しい順」で並べる**(1 稿目は逆順に作って落ちた)──
+     *   `atCap` の**末尾がいちばん古い**でなければ、下の期待値が別の物を指す。
+     */
+    const filler = Array.from({ length: fillerCount }, (_, i) => ({
+      id: `2020-01-${String(fillerCount - i).padStart(2, '0')}-filler`,
+      title: `古い ${i}`,
+      items: ['埋め草です。'],
+    }));
+    const atCap = [...NOTICES, ...filler];
+    // 空振り防止 ── ちょうど上限でなければ「1 件超えた」を見ていない
+    expect(atCap.length, '登記表を上限ちょうどまで埋められていない').toBe(NOTICE_KEEP_MAX);
+    // 空振り防止 ── 末尾がいちばん古いこと(期待値がここを指す)
+    expect(
+      recentNotices(atCap).at(-1)?.id,
+      '末尾がいちばん古くない ── 期待値が別の物を指す',
+    ).toBe(atCap[atCap.length - 1]!.id);
     const over = [
       { id: '2026-12-31-over', title: '新しく足した分', items: ['先頭に足しました。'] },
-      ...NOTICES,
+      ...atCap,
     ];
     const shown = new Set(recentNotices(over).map((n) => n.id));
     expect(over.filter((n) => !shown.has(n.id)).map((n) => n.id)).toEqual([
-      NOTICES[NOTICES.length - 1]!.id,
+      atCap[atCap.length - 1]!.id,
     ]);
   });
 });

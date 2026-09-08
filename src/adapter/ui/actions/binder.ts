@@ -43,6 +43,7 @@ import {
 import {
   detectInlineCalcRequest,
   evaluateCalcExpression,
+  explainCalcMiss,
   formatCalcResult,
 } from '@features/markdown/inline-calc';
 import { quoteOnEnter } from '@features/markdown/quote-assist';
@@ -434,6 +435,25 @@ const moveEntries = (
  *   「取れてから入る」順に直すと user gesture の同期性を失うだけで守るものが無い。
  *   別タブは 'changed' でこの lid を知るため、登録が先に着けばよい。
  */
+/**
+ * 🔴 **作った直後に「そのまま打てる」種類は、編集の面へ落とさない**(#753、2026-09-08)。
+ *
+ * ⚠ 表は `CREATE_ENTRY` の既定どおり**編集の面**(ライブエディタ)で開いていた ──
+ *   ところが**升を押せる印を焼いているのは読む面だけ**(`detail.ts` の
+ *   `interactiveCells: true` はそこにしか渡っていない)なので、
+ *   **升を押すと原文の欄に化けた**。
+ * 🔴 つまり #418 が無くそうとした「**カンマを目で数える画面**」が、
+ *   表を作った直後だけ戻ってきていた。⚠ しかもマニュアルは
+ *   「**そのままセルから打てます**」と書いていたので、**約束のほうが嘘**だった。
+ *
+ * 🔑 直しは「読む面で開く」1 つ ── 保存を 1 回はさむ必要が消える。
+ * ⚠ **ほかの種類は変えない**(ノート / ログ / 雛形 / Todo は、作ったら本文を
+ *   打つのが仕事なので編集の面が正しい)── 表だけが「**器が先にできていて、
+ *   中を埋める**」形である。
+ * ⚠ 名前を直したいときは、これまでどおり「編集」か題名の欄から入れる。
+ */
+const OPENS_READABLE: readonly string[] = ['spreadsheet'];
+
 const createAndEdit = (
   dispatcher: Dispatcher,
   services: BinderServices,
@@ -450,6 +470,7 @@ const createAndEdit = (
     title: defaultTitle(dispatcher, archetype),
     parentLid,
     relationId: generateLid(),
+    ...(OPENS_READABLE.includes(archetype) ? { edit: false } : {}),
   });
   if (dispatcher.getState().phase === 'editing') void services.acquireEditLock?.(lid);
 };
@@ -7468,6 +7489,21 @@ export function bindActions(
           insertText(ta, req.halfWidth.text);
         }
         insertText(ta, formatCalcResult(v));
+      } else {
+        /**
+         * 🔴 **計算にならなかったら、理由を 1 行だけ出す**(#766 A-2、2026-09-08)。
+         *
+         * ⚠ 直す前は**発火したときしか痕跡が無かった** ── `1,2+3=` も `2^3=` も
+         *   `50%=` も**無音**なので、3 回試して 3 回とも黙られると
+         *   「この機能は効かない」と思ってやめる。
+         * 🔑 出す条件は `explainCalcMiss` が持つ(**数と記号だけの行**に限る)──
+         *   `締切=` のような普通の文では 1 度も出ない。
+         * ⚠ **`OP_FAILED` に載せない**(あれはエラーの行)── 一時の知らせへ出す。
+         * ⚠ **`Enter` は止めない** ── 理由を出すだけで、改行はそのまま通す
+         *   (打っている手を止めない)。
+         */
+        const why = explainCalcMiss(ta.value, ta.selectionStart);
+        if (why !== null) services.showStatus?.(why);
       }
     }
     /**
