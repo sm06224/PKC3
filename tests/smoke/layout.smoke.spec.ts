@@ -1488,9 +1488,13 @@ test('🔴 新規の分割ボタン: 選ぶと文言・図案・Ctrl+N の対象
   const cells = page.locator('[data-pkc-field="detail-body"] [data-pkc-action="edit-cell"]');
   const title = page.locator('[data-pkc-field="detail-title"]').first();
   await clickReal(page, '[data-pkc-field="create-run"]');
-  await expect(cells.first(), '表が出来ていない').toBeVisible({ timeout: 10_000 });
-  // 🔑 種は 5 列 × 3 行 ── 別の種類が出来ていたら 0 になる(見た目と結果の食い違い)
-  expect(await cells.count(), '出来たものが表でない').toBe(15);
+  /**
+   * 🔑 種は 5 列 × 3 行 ── 別の種類が出来ていたら 0 になる(見た目と結果の食い違い)。
+   * ⚠ **`await cells.count()` で数えない** ── あれは**その瞬間の枚数**なので、
+   *   描き上がる前に数えて 0 を掴む(フル走行で実際に落ちた)。
+   *   `toHaveCount` は届くまで待つ。
+   */
+  await expect(cells, '出来たものが表でない').toHaveCount(15, { timeout: 10_000 });
   // ⚠ **編集の面に落ちていない**(#753 ── ここが原文の欄だと、升を押しても打てない)
   await expect(page.locator('[data-pkc-field="editor-body"]')).toHaveCount(0);
   await expect(title, '既定の題名が「表」でない').toHaveText(/表 1$/);
@@ -1504,7 +1508,12 @@ test('🔴 新規の分割ボタン: 選ぶと文言・図案・Ctrl+N の対象
    */
   await page.keyboard.press('Control+n');
   await expect(title, 'Ctrl+N が選んだ種類を無視している').toHaveText(/表 2$/, { timeout: 10_000 });
-  expect(await cells.count(), 'Ctrl+N で出来たものが表でない').toBe(15);
+  /**
+   * ⚠ **題名が先に変わる** ── `CREATE_ENTRY` は題名を楽観更新するので、
+   *   本文(升)はその後に描かれる。フル走行では実際にここで **0** を掴んだ
+   *   (単独では通っていた ── CLAUDE.md「flake に見えるものは、たいてい観測点の側」)。
+   */
+  await expect(cells, 'Ctrl+N で出来たものが表でない').toHaveCount(15, { timeout: 10_000 });
 
   expect(errors).toEqual([]);
 });
