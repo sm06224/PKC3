@@ -5449,6 +5449,23 @@ li[data-pkc-row-slot] {
  *   「先頭にマニュアルを置いた」意味が消える(マニュアルの h1〜h3 は 100 行を超える)。
  * ⚠ 段付けは**押し込みの深さ**だけ ── 色は情報にだけ使う(業務画面の作法)。
  */
+/**
+ * 🔴 **「← さっきの場所へ戻る」の帯**(#779 段⑧、user 裁定 2026-09-08)。
+ *
+ * ⚠ **貼り付けない**(`sticky` にしない)。1 稿目は「飛び先は本文の深い所なので、
+ *   ふつうに置くと帰り道が画面の外へ流れて消える」と書いて `position: sticky` を
+ *   置いたが、🔴 **変異試験が SURVIVED で「無くても同じ」と教えた** ──
+ *   送られるのは **`help-manual` の中**(`max-height: 60vh; overflow: auto` の器)で、
+ *   この帯は**その外**に居るので、本文をいくら送っても動かない。
+ *   🔑 CLAUDE.md「『これが無いと壊れる』と書く前に、外して壊れるのを見る」。
+ * ⚠ 見えていることは `help-announce.smoke.spec.ts` が `toBeInViewport()` で見る
+ *   ── 置き方ではなく**結果**を留める。
+ * ⚠ 畳んでいるときは `hidden`(器は捨てない)。
+ */
+[data-pkc-region='help-jump-back'] {
+  margin: 0 0 var(--s2);
+}
+
 [data-pkc-region='help-toc'] {
   max-height: 30vh;
   overflow: auto;
