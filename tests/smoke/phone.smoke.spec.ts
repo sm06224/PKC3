@@ -1513,7 +1513,12 @@ test('🔴 390px の空の PKC で、一覧に「作る」と「取り込む」�
  */
 test('🔴 スマホでは、表の升が押せることが字で出る (#750 I2)', async ({ page }) => {
   const errors = collectPageErrors(page);
+  // ⚠ 全文の textarea を入力の道具に使うので、既定(live)ではなく split を明示する
+  await useSplitEditor(page);
   await gotoApp(page);
+  // ⚠ **お知らせは先に畳む** ── 畳まないと、カードの見出しが「作る」を覆って
+  //    `createEntry` が届かない(この spec の他の test と同じ作法)
+  await dismissAnnounce(page);
   await createEntry(page, 'text');
   await page.locator('[data-pkc-field="editor-title"]').fill('表');
   await page
@@ -1532,13 +1537,19 @@ test('🔴 スマホでは、表の升が押せることが字で出る (#750 I2
   const hint = page.locator('[data-pkc-field="cell-tap-hint"]').first();
   await expect(hint, '触る端末なのに合図が出ていない').toBeVisible();
   await expect(hint).toHaveText('押すと打てます');
-  // ⚠ **升を覆わない** ── 覆うと、知らせるために押せなくする本末転倒になる
-  const covers = await hint.evaluate((el) => {
+  /**
+   * ⚠ **押し所を横取りしない** ── 横取りすると「知らせるために押せなくする」本末転倒。
+   * 🔑 観測点は「**合図の中心を押したとき、合図自身が受けるか**」である。
+   *   ⚠ 1 稿目は「その点が升か」を見ていたが、それは**逆**だった ──
+   *   `pointer-events: none` が効いていれば、その点は**升を返すのが正しい**。
+   *   実際に落ちて気づいた(主張と観測点が食い違っていた)。
+   */
+  const intercepts = await hint.evaluate((el) => {
     const r = el.getBoundingClientRect();
     const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
-    return at?.closest('[data-pkc-action="edit-cell"]') !== null;
+    return at === el || el.contains(at);
   });
-  expect(covers, '合図が升を覆っている(押せなくなる)').toBe(false);
+  expect(intercepts, '合図が押し所を横取りしている(升が押せなくなる)').toBe(false);
 
   expect(errors, `console/pageerror: ${errors.join(' | ')}`).toEqual([]);
 });
