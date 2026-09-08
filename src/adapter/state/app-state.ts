@@ -346,6 +346,26 @@ export function phaseDisabledNote(phase: AppPhase): string | null {
 }
 
 /**
+ * 編集中に「押せない理由」として画面へ出す 1 行(#715)。
+ * ⚠ 出口は**ボタンの字**(保存 / キャンセル)で言う ── {@link phaseDisabledNote} の
+ *   「確定するか取り消して」は、画面のどのボタンの字とも一致しない。
+ */
+export const EDITING_NOTE = '編集中は使えません(保存するか、キャンセルすると戻ります)';
+
+/**
+ * 🔴 **user に見せる「押せない理由」**(#516 / #715 / #761)。押せるなら `null`。
+ *
+ * ⚠ {@link phaseDisabledNote} との差は**編集中の 1 行だけ**である ── そこだけ
+ *   出口をボタンの字で言う({@link EDITING_NOTE})。
+ * 🔑 **この使い分けを 2 か所に書かない**(CLAUDE.md §7)── 直す前は
+ *   `inspector.ts` にしか無く、左の列の「+ ノート」は**理由を 1 文字も出さずに
+ *   黙って捨てて**いた(#761)。寄せたので、次に足す面も同じ字で言える。
+ */
+export function blockedActionNote(phase: AppPhase): string | null {
+  return phase === 'editing' ? EDITING_NOTE : phaseDisabledNote(phase);
+}
+
+/**
  * 🔴 **もう一度押したら本文へ戻る**(P8 段⑲ の規約を 1 か所へ寄せた。#277 段②-b)。
  *
  * 直す前の 設定 は行きっぱなしで、閉じる導線がどこにも無かった ── user から見ると

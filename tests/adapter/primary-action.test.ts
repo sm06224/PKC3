@@ -32,6 +32,9 @@ import { buildShell } from '../../src/adapter/ui/render/shell';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
 import { AppendBoxRenderer } from '../../src/adapter/ui/render/append-box';
 import { BrowseRouter } from '../../src/adapter/ui/render/browse';
+import { runGlobalCommand } from '../../src/adapter/ui/actions/binder';
+import { appKeymap } from '../../src/adapter/ui/render/keymap';
+import { applyShortcutHints } from '../../src/adapter/ui/render/shortcut-hint';
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
@@ -217,5 +220,129 @@ describe('主の操作は面ごとに 1 つ(#722 P2-10)', () => {
       readFileSync('src/adapter/ui/render/icons.ts', 'utf-8'),
       '印の定義が icons.ts から消えた',
     ).toContain('data-pkc-primary');
+  });
+});
+/**
+ * 🔴 **編集中の「+ ノート」は、押せない見た目になり、理由を言う**(#761)。
+ *
+ * ## 直す前に起きていたこと
+ *
+ * `CREATE_ENTRY` は `phase !== 'ready'` を **`events: []` で黙って捨てる**。
+ * だから編集中の「+ ノート」は **1 ドットも動かず、断り文も出なかった** ──
+ * `Ctrl+N` も同じボタンを押しに行くので、鍵も**完全に無音**だった。
+ *
+ * ## 🔑 観測点を 3 つに分けた(1 つでは足りない)
+ *
+ * | 見るもの | 落ちないと何を見逃すか |
+ * |---|---|
+ * | `disabled` | 見た目で押せないと分からない(#715 の規律の外に落ちる) |
+ * | 説明(`title`)の中の理由 | hover と「操作を名前で探す」に理由が届かない |
+ * | **鍵で撃ったときの 1 行** | 🔴 **鍵は見た目を持たない** ── ここだけが無音のまま残る |
+ *
+ * ⚠ **「ノートが増えない」だけを見ても意味が無い** ── 直す前も増えなかった
+ *   (issue #761 がそう書いている)。**理由の側**が、この検査の本体である。
+ *
+ * ## ⚠ ここが見ているのは「鍵がボタンまで届いたとき」だけである
+ *
+ * 実ブラウザで測って分かったこと(2026-09-08):**本文を打っている最中の
+ * `Ctrl+N` は、もっと手前の門で止まる** ── 文字を打つ欄に焦点があるときは
+ * 全域の鍵を通さない(`typing` の判定)。⚠ そこは「打っている途中に別のノートへ
+ * 飛ばない」ための**意図的な門**で、#761 が直す所ではない(マニュアルにも
+ * 前からそう書いてある)。
+ * 🔑 だから下の検査は `runGlobalCommand` を**直に**呼ぶ ── 鍵の配線そのものは
+ *   `tests/smoke/primary-action.smoke.spec.ts` が、焦点を欄の外へ出してから見る。
+ */
+describe('編集中の「+ ノート」は理由を言う(#761)', () => {
+  /** 左の列の「+ ノート」。⚠ 無ければ前提が崩れている。 */
+  function createBtn(root: HTMLElement): HTMLButtonElement {
+    const b = root.querySelector<HTMLButtonElement>('[data-pkc-field="create-run"]');
+    if (b === null) throw new Error('前提が崩れている: 「+ ノート」が無い');
+    return b;
+  }
+
+  it('🔴 読んでいる間は押せる(空振り防止の対照群)', () => {
+    const { root, d } = mount();
+    const b = createBtn(root);
+    expect(b.disabled, '読んでいるのに押せない').toBe(false);
+    expect(b.getAttribute('data-pkc-blocked'), '押せるのに理由が付いている').toBeNull();
+    expect(b.title, '押せるのに説明へ理由が混ざっている').not.toContain('編集中');
+    // 🔑 **実際に増える**ことまで見る ── 増えないなら、下の「増えない」は自明になる
+    const before = d.getState().entryMetas.size;
+    d.dispatch({ type: 'CREATE_ENTRY', archetype: 'text', lid: 'n9', title: '新規' });
+    expect(d.getState().entryMetas.size, '押せる状態なのに増えない(台が壊れている)').toBe(
+      before + 1,
+    );
+  });
+
+  it('🔴 編集中は押せない見た目になり、説明に理由が入る', () => {
+    const { root, d } = mount();
+    d.dispatch({ type: 'START_EDIT' });
+    const b = createBtn(root);
+    expect(b.disabled, '編集中なのに押せる見た目のまま').toBe(true);
+    const why = b.getAttribute('data-pkc-blocked');
+    expect(why, '押せないのに理由を持っていない').not.toBeNull();
+    expect(why, '理由が編集中の話になっていない').toContain('編集中');
+    // ⚠ 出口も言う ── 「使えません」だけだと、user はどこを押せばよいか分からない
+    expect(why, '出口(保存 / キャンセル)を言っていない').toContain('保存');
+    expect(b.title, '説明に理由が出ていない(hover と「操作を探す」が読む所)').toContain(why!);
+  });
+
+  /**
+   * 🔴 **割当を変えても理由が消えない**(#761)。
+   *
+   * ⚠ 説明は `applyShortcutHints` が**割当の変更のたびに組み直す** ── 理由を
+   *   知らないまま土台だけ書き戻すと、`Ctrl+N` を割り当て直した瞬間に
+   *   **理由だけが静かに消える**(画面は「押せない」のに、なぜかは読めない)。
+   * 🔑 だから理由はボタンの属性に置き、組み立ての 1 本が毎回読む。
+   */
+  it('🔴 説明を組み直しても、理由は残る', () => {
+    const { root, d } = mount();
+    d.dispatch({ type: 'START_EDIT' });
+    const b = createBtn(root);
+    const why = b.getAttribute('data-pkc-blocked');
+    expect(why, '前提が崩れている: 理由が付いていない').not.toBeNull();
+    // ⚠ 空振り防止 ── 組み直しが 1 件も当たっていないなら、この検査は何も見ていない
+    expect(applyShortcutHints(root), '説明を 1 つも組み直していない').toBeGreaterThan(0);
+    expect(b.title, '組み直したら理由が消えた').toContain(why!);
+  });
+
+  it('🔴 編集中に鍵で撃つと、ノートは増えず、画面に理由が 1 行出る', () => {
+    const { root, d } = mount();
+    d.dispatch({ type: 'START_EDIT' });
+    const before = d.getState().entryMetas.size;
+    const said: string[] = [];
+    let prevented = 0;
+    const ran = runGlobalCommand(
+      'create-entry',
+      root,
+      d,
+      appKeymap,
+      () => {
+        prevented += 1;
+      },
+      (t) => said.push(t),
+    );
+    expect(ran, '鍵の受け手が拾っていない').toBe(true);
+    expect(prevented, 'ブラウザの既定を止めていない').toBe(1);
+    expect(d.getState().entryMetas.size, '編集中なのにノートが増えた').toBe(before);
+    // 🔴 **ここが本体** ── 直す前はここが 0 行だった
+    expect(said, '鍵で撃ったのに理由が 1 行も出ない').toHaveLength(1);
+    expect(said[0], '出た字が理由になっていない').toContain('編集中');
+  });
+
+  it('⚠ 理由を持たない押せないボタンは、今までどおり黙っている(nav-back)', () => {
+    /**
+     * 🔑 **対照群**(#761 の実装が「一律に何か言う」形になっていないこと)。
+     * ⚠ 履歴が無いときの `Alt+←` まで喋ると、連打で字が出続ける ──
+     *   `nav-back` は `disabled` だが**理由を持たない**ので黙るのが正しい。
+     */
+    const { root, d } = mount();
+    const back = root.querySelector<HTMLButtonElement>('button[data-pkc-action="nav-back"]');
+    expect(back, '前提が崩れている: 戻るボタンが無い').not.toBeNull();
+    expect(back!.disabled, '前提が崩れている: 履歴が無いのに押せる').toBe(true);
+    expect(back!.getAttribute('data-pkc-blocked'), '理由を持ってしまっている').toBeNull();
+    const said: string[] = [];
+    runGlobalCommand('nav-back', root, d, appKeymap, () => {}, (t) => said.push(t));
+    expect(said, '理由を持たないのに喋った').toEqual([]);
   });
 });

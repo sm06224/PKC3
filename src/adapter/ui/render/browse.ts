@@ -20,7 +20,7 @@
  * ⚠ 描画器は使い回す(`FilerRenderer` / `LauncherRenderer`)── 置き場所が
  * 変わっただけで、中身の意味論は変えていない。
  */
-import type { AppState } from '@adapter/state/app-state';
+import { blockedActionNote, type AppState } from '@adapter/state/app-state';
 import { SidebarRenderer } from './sidebar';
 import { ScrollMemory } from './scroll-memory';
 import { FilerRenderer } from './filer';
@@ -33,6 +33,7 @@ export type { BrowseMode } from './browse-mode';
 import { DEFAULT_BROWSE_MODE, type BrowseMode } from './browse-mode';
 import { KindBarRenderer } from './kind-bar';
 import { setPrimary } from './icons';
+import { setBlocked } from './shortcut-hint';
 
 /**
  * タブ。⚠ 文言は「探し方」を表す(「詳細」のような場所の名前にしない)。
@@ -155,13 +156,22 @@ export class BrowseRouter {
     //    その面を開いていない間は**古い DOM のまま**になり、押しても嘘をつく。
     this.kindBar.render(state, mode);
     /**
-     * 🔴 **編集中は「+ ノート」を濃くしない**(#722 P2-10。着地前レビュー・動線 1)。
-     * ⚠ `CREATE_ENTRY` は `phase !== 'ready'` を**黙って捨てる**ので、編集中の
-     *   「+ ノート」は**押しても 1 ドットも動かない** ── 画面でいちばん濃い物が
-     *   無反応だと、user は「壊れた」か「自分の押し方が悪い」と読む。
-     * ⚠ 押した結果は**変えていない**(黙って捨てる穴は別に起票した)。
+     * 🔴 **編集中は「+ ノート」を押せない形にする**(#722 P2-10 → #761)。
+     *
+     * ⚠ `CREATE_ENTRY` は `phase !== 'ready'` を**黙って捨てる**ので、直す前の
+     *   「+ ノート」は**押しても 1 ドットも動かず、理由も出なかった** ──
+     *   画面でいちばん濃い物が無反応だと、user は「壊れた」か「自分の押し方が
+     *   悪い」と読む。⚠ #722 P2-10 では**濃さだけ**を直しており、押した結果は
+     *   そのままだった(その残りがこれ)。
+     * 🔑 `setBlocked` が 3 つ同時に動かす ── 見た目(`disabled`)/ 説明の末尾の
+     *   理由 / 鍵で撃たれたときに出す字。**字は `blockedActionNote` の 1 か所**
+     *   から採る(情報ペインの帯と同じ ── CLAUDE.md §7)。
      */
-    if (this.createRun !== null) setPrimary(this.createRun, state.phase === 'ready');
+    if (this.createRun !== null) {
+      const ready = state.phase === 'ready';
+      setPrimary(this.createRun, ready);
+      setBlocked(this.createRun, blockedActionNote(state.phase));
+    }
     /**
      * 🔴 **絞りの字も面に関係なく合わせる**(#536 ②)。
      * ⚠ 打鍵中は `value === filterQuery` なので書き戻しは起きない(caret を壊さない)。

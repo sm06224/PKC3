@@ -37,7 +37,7 @@
  * **毎回値を計算して、違うものだけ書く**なら、その族は原理的に発生しない。
  * ⚠ 器を組み直すのは**形が変わるときだけ**(選択の有無 / 「書き戻す」の有無)。
  */
-import { phaseDisabledNote, type AppState } from '@adapter/state/app-state';
+import { EDITING_NOTE, phaseDisabledNote, type AppState } from '@adapter/state/app-state';
 import type { EntryMeta } from '@core/model/entry-meta';
 import { ScrollMemory } from './scroll-memory';
 import { archetypeLabel } from './sidebar';
@@ -63,10 +63,11 @@ import {
 export const RELATION_CANDIDATE_MAX = 200;
 /**
  * 編集中に操作の帯の直上へ出す 1 行(#715)。
- * ⚠ 出口は**ボタンの字**(保存 / キャンセル)で言う ── `phaseDisabledNote` の
- *   「確定するか取り消して」は、画面のどのボタンの字とも一致しない。
+ * 🔑 **綴りと使い分けは `app-state.ts` の 1 か所**(#761 で寄せた)── 左の列の
+ *   「+ ノート」も同じ字で言うので、ここに 2 本目を持たない(CLAUDE.md §7)。
+ * ⚠ ここの再輸出は**呼び側の import を変えないため**だけに在る。
  */
-export const EDITING_NOTE = '編集中は使えません(保存するか、キャンセルすると戻ります)';
+export { EDITING_NOTE } from '@adapter/state/app-state';
 import { getAncestorFolders } from '@features/relation/tree';
 import { BODY_LINK_KIND, renderRelationMap } from './relation-map';
 import { bodyLinkTargets } from '@features/entry-ref/body-links';
