@@ -948,6 +948,12 @@ describe('お知らせの文面は固定(#220-7)', () => {
      * ⚠ 直前の `2026-09-08-manual-chapters`(章の割り直し)へ足したくなるが、
      *   **91b1d00 で main に入っている = 配ってある**ので、足しても帯には出ない。
      */
+    /**
+     * ⚠ **#779 段⑥ / #793 条 4・5・6(user 裁定 2026-09-08)で足した。**
+     * 🔑 枠のためいちばん古い 1 件(`2026-09-07-inline-calc`)を落とした ──
+     *   落とす相手は **origin/main に在るもの**から選んだ(fc72eb1)。原本は CHANGELOG。
+     */
+    ['2026-09-08-manual-terms', '2f8d9b5f'],
     ['2026-09-08-manual-otherwise-split', 'e3f46a74'],
     ['2026-09-08-dev-build-stamp', '98ee6540'],
     ['2026-09-08-blocked-reason-everywhere', '15ff38a8'],
@@ -958,7 +964,6 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-09-08-table-convert-quote', 'ddd26648', 'main'],
     ['2026-09-07-csv-empty-cell', 'edeaa23e', 'main'],
     ['2026-09-07-append-scroll', '9eabafe9', 'main'],
-    ['2026-09-07-inline-calc', 'ad8c3c56', 'main'],
     // ⚠ 2026-09-07(#764): 枠 10 を超えたので `2026-09-05-scan-after-save` を
     //    登記表から落とした(いちばん古い 1 件 ── user 裁定「古い順に出す」)
     // ⚠ 2026-09-06(#750 I2): 枠 10 を超えたので `2026-09-05-a11y-theme-keys` を
