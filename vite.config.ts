@@ -36,6 +36,18 @@ const COI_HEADERS: Record<string, string> = { ...SHARED_COI_HEADERS };
 
 // base './' — Pages の / と /dev/ の両方で同一ビルドが動く相対パス配信
 export default defineConfig({
+  /**
+   * 🔴 **このビルドを焼いた時刻**(#789。user 裁定 2026-09-08「日時を足す」)。
+   *
+   * ⚠ `/dev/` は 1 日に何度も配り直されるのに `APP_VERSION` は手書きのリテラルなので、
+   *   **どの回でも版の字が同じ**だった ── user は「新しくなったのか、まだ古いのか」を
+   *   画面から確かめられない(2026-09-08 に実際にそこで詰まった)。
+   * 🔑 **数(epoch ms)だけを焼く。字は焼かない** ── 字にすると焼いた箱の時計と
+   *   時間帯で出るので、user の端末で読んだとき合わない。表示の側で端末の時刻へ直す。
+   * ⚠ **本番では使わない**(`versionLine` が `product` を素通しする)── そちらは
+   *   tag が版を名乗るので足りる。
+   */
+  define: { __PKC_BUILT_AT__: JSON.stringify(Date.now()) },
   base: './',
   // ⚠ bodyCssPlugin は `apply` を付けない ── dev / build / **vitest** の 3 つで
   //    同じものを配る必要がある(test だけ virtual module が解決できないと、

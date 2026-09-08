@@ -17,7 +17,8 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
-import { HelpRenderer, MANUAL_TEXT, versionText } from '../../src/adapter/ui/render/help';
+import { HelpRenderer, MANUAL_TEXT, versionText, versionLine } from '../../src/adapter/ui/render/help';
+import { BUILT_AT } from '../../src/runtime/release-meta';
 import { CenterRouter } from '../../src/adapter/ui/render/center';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
@@ -97,10 +98,19 @@ describe('ヘルプの面', () => {
      *   **全ビルドから開発版の刻印が消える**。関数を試すだけでは面を守らない。
      * ⚠ vitest は `BUILD_KIND === 'dev'`(`release-meta.ts`)。
      */
+    /*
+     * ⚠ **日時が付くようになった**(#789)── vitest は `vite.config.ts` を読むので
+     *   `define` が効き、`BUILT_AT` は**焼いた時刻の実値**になる。
+     * 🔴 **日時を「在っても無くてもよい」形で見ない**(変異 M5 / M6 が SURVIVED で教えた)──
+     *   それだと**面が `versionText()` を呼んで日時を落としても**、
+     *   **焼いた時刻を受け取り損ねて 0 になっても**、どちらも緑のまま通る。
+     * 🔑 だから**前提を先に立てて**(時刻が届いている)、**厳密な形**で見る。
+     */
+    expect(BUILT_AT, '焼いた時刻が届いていない(vite の define が効いていない)').toBeGreaterThan(0);
     expect(
-      region.querySelector('[data-pkc-field="help-version"]')?.textContent,
-      '面が種別の刻印を落としている(versionText を固定引数で呼んでいる)',
-    ).toContain('(開発版)');
+      region.querySelector('[data-pkc-field="help-version"]')?.textContent ?? '',
+      '面が種別の刻印か日時を落としている(versionText を呼んでいる?)',
+    ).toMatch(/\(開発版・\d+\/\d+ \d\d:\d\d\)/);
     expect(region.querySelector('[data-pkc-region="help-notices"]'), 'お知らせが無い').not.toBeNull();
     expect(region.querySelector('[data-pkc-region="help-manual"]'), 'マニュアルが無い').not.toBeNull();
   });
@@ -118,6 +128,49 @@ describe('ヘルプの面', () => {
     expect(versionText('product'), 'product に余計な刻印が付いた').toBe(`pkc3 v${APP_VERSION}`);
     expect(versionText('stage'), '検証版の刻印が無い').toContain('(検証版)');
     expect(versionText('dev'), '開発版の刻印が無い').toContain('(開発版)');
+  });
+
+  /**
+   * 🔴 **dev の版の字に、焼いた日時が付く**(#789。user 裁定 2026-09-08「日時を足す」)。
+   *
+   * ⚠ `/dev/` は 1 日に何度も配り直されるのに `APP_VERSION` は手書きのリテラルなので、
+   *   **どの回でも同じ字**だった ── user は「新しくなったのか」を画面から確かめられない
+   *   (2026-09-08 に実際にそこで詰まった)。
+   */
+  it('🔴 開発版の字に、焼いた日時が付く', () => {
+    const at = new Date(2026, 8, 8, 7, 2).getTime(); // 2026-09-08 07:02(端末の時刻)
+    expect(versionLine('dev', at), '日時が出ていない').toBe(`pkc3 v${APP_VERSION}(開発版・9/8 07:02)`);
+    expect(versionLine('stage', at), '検証版にも出る').toContain('(検証版・9/8 07:02)');
+  });
+
+  it('🔴 本番の字は 1 文字も変わらない(対照群)', () => {
+    const at = new Date(2026, 8, 8, 7, 2).getTime();
+    expect(versionLine('product', at), '本番に日時が付いた').toBe(versionText('product'));
+  });
+
+  it('⚠ 焼いていない環境(日時が無い)では、これまでと同じ字', () => {
+    expect(versionLine('dev', 0), '焼いていないのに日時が出た').toBe(versionText('dev'));
+  });
+
+  /**
+   * 🔴 **入れ替えの印に日時を混ぜない**(#789 で踏みかけた)。
+   *
+   * `main.ts` は `manualBuildTag(versionText(), MANUAL_TEXT)` で
+   * **マニュアルの窓を組み直すかの印**を作る。⚠ ここに日時を入れると
+   * **毎ビルドで印が変わり、開いている窓が組み直される** ── 中身が 1 字も
+   * 変わっていないのに、user が読んでいた場所が失われる。
+   * 🔑 だから日時が付くのは **`versionLine`(見せる字)だけ**で、
+   *   `versionText`(印)は 1 文字も変えていない。
+   */
+  it('🔴 マニュアルの窓の印は `versionText`(日時を含まない)から作る', () => {
+    // ① 関数の側 ── 印に使う字に日時は入らない
+    expect(versionText('dev'), '印に使う字に日時が混ざった').toBe(`pkc3 v${APP_VERSION}(開発版)`);
+    // ② 配線の側 ── `main.ts` はどの test からも実行されないので原文で pin する
+    const main = readFileSync('src/main.ts', 'utf-8');
+    expect(main, '印を versionLine から作っている(毎ビルドで窓が組み直される)').toContain(
+      'manualBuildTag(versionText()',
+    );
+    expect(main, '印に versionLine が混ざっている').not.toContain('manualBuildTag(versionLine');
   });
 
   it('🔴 お知らせが新しい順に、上限まで出る', () => {

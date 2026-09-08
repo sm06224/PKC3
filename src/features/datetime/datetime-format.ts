@@ -40,6 +40,18 @@ export function formatTime(d: Date = new Date()): string {
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
 }
 
+/**
+ * 🔴 **ビルドの刻印**(`M/D HH:mm`。#789)。⚠ 月日は 0 詰めしない ── 版の字に
+ * 添える短い印なので、`09/08` より `9/8` のほうが読みやすい。
+ *
+ * 🔑 **ここに置く理由**:`help.ts` に自前で組んだら
+ * `tests/features/elapsed-text.test.ts` の「時刻を組み立てる場所は 1 か所」に当たった
+ * ── 日時の組み立ては**この file に寄せる**(CLAUDE.md §7)。
+ */
+export function formatBuildStamp(d: Date): string {
+  return `${d.getMonth() + 1}/${d.getDate()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
 /** yyyy/MM/dd HH:mm:ss */
 export function formatDateTime(d: Date = new Date()): string {
   return `${formatDate(d)} ${formatTime(d)}`;
