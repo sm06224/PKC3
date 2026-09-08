@@ -34,13 +34,26 @@ export const CAPTURE_LABEL: Readonly<Record<CaptureTextKind, string>> = {
 };
 
 /**
- * `録音-2026-08-27-030102.webm` の形。
+ * `録音-2026-08-27-030102.webm` の形。分かれた回は `…-030102-2.webm`(#771)。
+ *
  * ⚠ 日時の形は**貼り付けた画像と同じ**(`assetStamp`)── 一覧に並んだとき、
  *   同じ規則で並ぶ物は同じ形をしているべきである。
+ * 🔴 **日時は「始めた時刻」を渡す**(呼び側の約束)── 分かれた 3 本が
+ *   3 つの時刻を持つと、一覧で**バラバラの場所に並ぶ**。同じ時刻 + 連番なら
+ *   必ず隣どうしになる。
+ * 🔴 **`part` は「分かれたときだけ」番号を付ける**(`null` = 1 本で収まった)。
+ *   ⚠ 常に `-1` を付けると、**分かれていない大多数の名前まで変わる** ──
+ *   分かれるかどうかは、切った瞬間に分かる(切ったから 2 本目が在る)。
  */
-export function captureFileName(kind: CaptureTextKind, at: Date, mime: string): string {
+export function captureFileName(
+  kind: CaptureTextKind,
+  at: Date,
+  mime: string,
+  part: number | null,
+): string {
   const ext = EXT[mime.split(';')[0]!.trim().toLowerCase()] ?? 'webm';
-  return `${CAPTURE_LABEL[kind]}-${assetStamp(at)}.${ext}`;
+  const nth = part === null ? '' : `-${part}`;
+  return `${CAPTURE_LABEL[kind]}-${assetStamp(at)}${nth}.${ext}`;
 }
 
 /**
@@ -49,11 +62,24 @@ export function captureFileName(kind: CaptureTextKind, at: Date, mime: string): 
  */
 
 /**
- * 帯の 1 行(`録音中 0:07(約 12KB)`)。
+ * 帯の 1 行(`録音中 0:07(約 12KB・残り 11:59:53)`)。
  *
  * ⚠ **「約」と書く** ── ここに出るのは**届いた断片の合計**であって、
  *   まだ切られていない分は入っていない。丸めた数を断定で書かない。
+ * 🔴 **残りを出す**(#771)── 上限が 12 時間になったので、user が
+ *   「あとどれくらい録れるのか」を**押す前に**読めないと意味が無い。
+ * 🔴 **`partNo` は「いま録っている本が何本目か」**(1 始まり)。⚠ 1 本目は
+ *   出さない ── 分かれていない回に「1 本目」と出すと、**分かれたのかと思わせる**。
+ * ⚠ 引数は**どれも省略できない** ── 省略できるようにすると、呼び側が渡し忘れた日に
+ *   帯から静かに消える(CLAUDE.md §7「optional にすると門ごと消える」)。
  */
-export function captureBarLine(kind: CaptureTextKind, elapsedMs: number, bytes: string): string {
-  return `${CAPTURE_LABEL[kind]}中 ${elapsedText(elapsedMs)}(約 ${bytes})`;
+export function captureBarLine(
+  kind: CaptureTextKind,
+  elapsedMs: number,
+  bytes: string,
+  remainingMs: number,
+  partNo: number,
+): string {
+  const nth = partNo > 1 ? `・${partNo} 本目` : '';
+  return `${CAPTURE_LABEL[kind]}中 ${elapsedText(elapsedMs)}(約 ${bytes}${nth}・残り ${elapsedText(remainingMs)})`;
 }
