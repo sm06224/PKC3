@@ -194,10 +194,19 @@ test('🔴 主の操作だけ地と字が反転して見える (#722 P2-10)', as
  * 🔴 **編集中の「+ ノート」は薄くなり、鍵で撃つと理由が出る**(#761)。
  *
  * ⚠ **unit では届かない 2 つ**をここで見る:
- * ① **本当に薄く見えるか** ── happy-dom は CSS を組まないので、`disabled` が
- *    付いていることしか見られない。⚠ しかも主の印(`button[data-pkc-primary]`)は
- *    地を反転させるので、**印を外し忘れると濃いまま**になる(実装は `setPrimary` と
- *    `setBlocked` を対で呼んでいる ── その対が効いているかは、ここでしか分からない)
+ * ① **`disabled` に CSS が本当に効くか** ── happy-dom は CSS を組まないので、
+ *    属性が付いていることしか見られない。薄さの出どころは `app.css` の
+ *    `button:disabled { opacity: .45 }` **1 本だけ**である。
+ *    ⚠ 🔴 **註記を直した**(2026-09-08、着地前レビュー)── 直す前ここには
+ *    「主の印(`button[data-pkc-primary]`)を外し忘れると濃いままになる /
+ *    その対が効いているかはここでしか分からない」と書いてあったが、**嘘だった**:
+ *    `[data-pkc-primary]` は `background` / `color` / `border-color` しか書かず、
+ *    `opacity` を書く 2 本は `:hover:not(:disabled)` と `:active:not(:disabled)` で
+ *    **`:disabled` には当たらない**。つまり `setPrimary` を落としても薄さは 0.45 の
+ *    まま = この検査は通る。**対が効いていることは unit が見ている**
+ *    (`primary-action.test.ts`「編集中は、左の列の『+ ノート』が濃くなくなる」)。
+ *    🔑 CLAUDE.md「『これが無いと壊れる』と書く前に、外して壊れるのを見る」。
+ *    ⚠ そのうえで**印そのものも 1 行見る**(下)── 薄さとは別の主張である
  * ② **本物の鍵**で撃ったときに、画面へ理由の 1 行が出るか
  *
  * ⚠ 空振り防止:**読んでいる間は薄くない**ことを先に測る(いつも薄いなら何も見ていない)。
@@ -230,9 +239,14 @@ test('🔴 編集中は「+ ノート」が薄くなり、鍵で撃つと理由�
     .poll(async () => (await look()).disabled, { timeout: 10_000 })
     .toBe(true);
   const editing = await look();
-  expect(editing.opacity, '編集中なのに薄くなっていない(主の印を外し忘れている?)').toBeLessThan(
+  expect(editing.opacity, '編集中なのに薄くなっていない(disabled に CSS が効いていない)').toBeLessThan(
     0.6,
   );
+  // ⚠ 薄さとは**別の主張** ── 印を外し忘れても薄さは変わらないので、ここで直に見る
+  expect(
+    await create.getAttribute('data-pkc-primary'),
+    '編集中なのに主の印が残っている(地が反転したままになる)',
+  ).toBeNull();
 
   /**
    * ── ② 🔴 **本物の鍵**で撃つと、画面の下に理由が 1 行出る。

@@ -32,6 +32,7 @@ import { buildShell } from '../../src/adapter/ui/render/shell';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
 import { AppendBoxRenderer } from '../../src/adapter/ui/render/append-box';
 import { BrowseRouter } from '../../src/adapter/ui/render/browse';
+import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
 import { runGlobalCommand } from '../../src/adapter/ui/actions/binder';
 import { appKeymap } from '../../src/adapter/ui/render/keymap';
 import { applyShortcutHints } from '../../src/adapter/ui/render/shortcut-hint';
@@ -78,10 +79,14 @@ function mount(metas: EntryMeta[] = [meta('n1', 'あ')]): { root: HTMLElement; d
   const detail = new DetailRenderer(regions.detail);
   const box = new AppendBoxRenderer(regions.append);
   const browse = new BrowseRouter(regions.sidebar, regions.browseHost);
+  // 🔑 情報ペインも組む ── 「押せない理由」を言う面が 2 つあるので、
+  //    同じ画面に並べないと食い違いが見えない(下の parity)
+  const inspector = new InspectorRenderer(regions.inspector);
   d.onState((s) => {
     detail.render(s);
     box.render(s);
     browse.render(s, 'list');
+    inspector.render(s);
   });
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas, relations: [] });
   if (metas.length > 0) {
@@ -274,6 +279,34 @@ describe('編集中の「+ ノート」は理由を言う(#761)', () => {
     );
   });
 
+  /**
+   * 🔴 **編集を終えたら、全部戻る**(2026-09-08、着地前レビューが 3 変異で突いた)。
+   *
+   * ⚠ 直す前、この describe の 5 件は**どれも editing で終わっていた** ── だから
+   *   「外す側」を壊す変異が全部生き延びる:
+   *   ① `setBlocked` の `removeAttribute` を落とす → **押せるボタンが永久に
+   *      「押せません」と言い続ける**(#761 の逆)
+   *   ② `disabled` を `true` にしかしない → **そのタブでは二度と作れない**
+   *   ⚠ ②を殺していたのは `layout.smoke` の偶然だけで、
+   *      「その変異が殺されるはずの 1 spec に絞る」規律で回すと SURVIVED になる。
+   * 🔑 同じ機構の情報ペイン側は既に「編集を終えれば消える(片道にしない)」を
+   *   持っている(`inspector-editing-locks.test.ts`)── 左の列だけ落ちていた。
+   */
+  it('🔴 編集を終えると、押せる形へ戻る(片道にしない)', () => {
+    const { root, d } = mount();
+    d.dispatch({ type: 'START_EDIT' });
+    const b = createBtn(root);
+    expect(b.disabled, '前提が崩れている: 編集中なのに押せる').toBe(true);
+    d.dispatch({ type: 'CANCEL_EDIT' });
+    expect(b.disabled, '編集を終えたのに押せない形のまま').toBe(false);
+    expect(b.getAttribute('data-pkc-blocked'), '編集を終えたのに理由が残っている').toBeNull();
+    expect(b.title, '説明に「編集中」が残っている').not.toContain('編集中');
+    // 🔑 **実際に作れる**ところまで見る ── 見た目だけ戻って口が死んでいたら同じことである
+    const before = d.getState().entryMetas.size;
+    d.dispatch({ type: 'CREATE_ENTRY', archetype: 'text', lid: 'n8', title: '戻った' });
+    expect(d.getState().entryMetas.size, '戻ったのに作れない').toBe(before + 1);
+  });
+
   it('🔴 編集中は押せない見た目になり、説明に理由が入る', () => {
     const { root, d } = mount();
     d.dispatch({ type: 'START_EDIT' });
@@ -328,6 +361,51 @@ describe('編集中の「+ ノート」は理由を言う(#761)', () => {
     // 🔴 **ここが本体** ── 直す前はここが 0 行だった
     expect(said, '鍵で撃ったのに理由が 1 行も出ない').toHaveLength(1);
     expect(said[0], '出た字が理由になっていない').toContain('編集中');
+  });
+
+  /**
+   * 🔴 **「押せない理由」を言う 2 つの面が、全 phase で同じ字を出す**
+   *   (2026-09-08、着地前レビュー)。
+   *
+   * ⚠ #761 の commit は「使い分けを 1 か所へ寄せた」と書いたが、寄せたのは
+   *   **定数だけ**で、`inspector.ts` に**同じ三項の 2 本目**が残っていた。
+   *   直したので、二度と分かれないように門を置く。
+   * 🔑 **両辺が同じ関数を呼ぶ形にしない**(CLAUDE.md §7 の警告)──
+   *   左の列は `data-pkc-blocked`(属性)から、帯は DOM の字から読む。
+   *   ⚠ どちらも `blockedActionNote` を呼び直すと、寄せ忘れを検出できない。
+   * ⚠ **空振り防止**:`editing` 以外でも字が出ること自体は主張しない
+   *   (`ready` は null が正しい)── 見るのは**両辺が一致すること**である。
+   */
+  it('🔴 左の列と情報ペインの帯は、どの phase でも同じ理由を言う', () => {
+    // ⚠ phase は**その phase へ行く実際の道**で作る(直に代入する口は無い)
+    const drive: readonly [string, (d: Dispatcher) => void][] = [
+      ['ready', () => {}],
+      ['editing', (d) => d.dispatch({ type: 'START_EDIT' })],
+      [
+        // ⚠ error phase は「守るべき未達 commit が在る」ときだけ立つ ── その順で作る
+        'error',
+        (d) => {
+          d.dispatch({ type: 'START_EDIT' });
+          d.dispatch({ type: 'UPDATE_OPEN_BODY', body: '本文 2\n' });
+          d.dispatch({ type: 'COMMIT_EDIT' });
+          d.dispatch({ type: 'SYS_ERROR', error: 'disk' });
+        },
+      ],
+    ];
+    let spoke = 0;
+    for (const [phase, go] of drive) {
+      const { root, d } = mount();
+      go(d);
+      expect(d.getState().phase, `台が ${phase} になっていない`).toBe(phase);
+      const left = createBtn(root).getAttribute('data-pkc-blocked') ?? '';
+      const band = root.querySelector('[data-pkc-field="inspector-editing-note"]');
+      const said = band?.textContent ?? '';
+      expect(said, `${phase} で左の列と帯の理由が食い違っている`).toBe(left);
+      if (left !== '') spoke += 1;
+      root.remove();
+    }
+    // 🔑 空振り防止 ── 1 つも理由が出ない台なら、上の一致は自明である
+    expect(spoke, '全 phase で理由が空(台が何も言っていない)').toBeGreaterThan(0);
   });
 
   it('⚠ 理由を持たない押せないボタンは、今までどおり黙っている(nav-back)', () => {

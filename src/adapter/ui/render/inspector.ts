@@ -37,7 +37,7 @@
  * **毎回値を計算して、違うものだけ書く**なら、その族は原理的に発生しない。
  * ⚠ 器を組み直すのは**形が変わるときだけ**(選択の有無 / 「書き戻す」の有無)。
  */
-import { EDITING_NOTE, phaseDisabledNote, type AppState } from '@adapter/state/app-state';
+import { blockedActionNote, phaseDisabledNote, type AppState } from '@adapter/state/app-state';
 import type { EntryMeta } from '@core/model/entry-meta';
 import { ScrollMemory } from './scroll-memory';
 import { archetypeLabel } from './sidebar';
@@ -809,7 +809,15 @@ export class InspectorRenderer {
      *   **ボタンの字**(保存 / キャンセル)で出口を言う。
      */
     if (this.editingNote) {
-      const noteText = state.phase === 'editing' ? EDITING_NOTE : blockedNote;
+      /*
+       * 🔴 **使い分けごと `blockedActionNote` を呼ぶ**(2026-09-08、着地前レビュー)。
+       * ⚠ 直す前はここに `phase === 'editing' ? EDITING_NOTE : blockedNote` という
+       *   **同じ三項の 2 本目**が在った ── #761 の commit が「使い分けは 1 か所へ
+       *   寄せた」と書いていたのに、寄せたのは**定数だけ**だった(CLAUDE.md §7)。
+       * ⚠ 出る字は 1 文字も変わらない(同じ式である)。変わるのは**次に phase が
+       *   増えたとき** ── 直す前は左の列だけ新しい字になり、ここが古い字のまま残った。
+       */
+      const noteText = blockedActionNote(state.phase) ?? '';
       if (this.editingNote.textContent !== noteText) this.editingNote.textContent = noteText;
       if (this.editingNote.hidden !== !editing) this.editingNote.hidden = !editing;
     }

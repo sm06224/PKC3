@@ -129,7 +129,7 @@ export function createAnnounce(
     close.title =
       unread.length === 1
         ? '読んだことにして閉じます'
-        : `残り ${unread.length} 件を読んだことにして閉じます(ヘルプからいつでも読めます)`;
+        : `残り ${unread.length} 件を読んだことにして閉じます(ヘルプから新しい 10 件が読めます)`;
     head.append(close);
     region.append(head);
 
@@ -176,7 +176,12 @@ export function createAnnounce(
      *   指で触る端末では `title` は**一度も出ない**。
      */
     where.textContent =
-      '過去のお知らせは「ヘルプ」からいつでも読めます。「今後は出さない」は設定の「表示」から戻せます。';
+      /*
+       * ⚠ **「いつでも」と書かない**(2026-09-08、着地前レビュー)── ヘルプに並ぶのは
+       *   `NOTICE_SHOW_MAX`(10 件)までで、11 件目より古いものはアプリから読めない。
+       *   🔑 数を書けば、user は「無くなった」と「まだ在る」を自分で判断できる。
+       */
+      '過去のお知らせは「ヘルプ」から新しい 10 件が読めます。「今後は出さない」は設定の「表示」から戻せます。';
 
     const mute = document.createElement('button');
     mute.type = 'button';
