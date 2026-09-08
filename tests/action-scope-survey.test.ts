@@ -86,7 +86,9 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
     // ⚠ 2026-09-05(#708 段②): 表の形を変える `table-to-markdown` / `table-to-csv` で N が
     //   103 → 105 ── 行番号はメニューが運ぶので、押した所からは何も要らない
     //   (`copy-chapter-md` / `copy-section-ref` と同じ仕分け)
-    expect(counts()).toEqual({ P1: 42, P2: 33, E: 20, V: 8, N: 105 });
+    // ⚠ 2026-09-08(#722): 本文の置き場所(`set-prose-align`)で E が 20 → 21
+    //   ── 紙面(`set-page-format`)と**同じ仕分け**(閉じた選択肢を 1 つ選ぶ)
+    expect(counts()).toEqual({ P1: 42, P2: 33, E: 21, V: 8, N: 105 });
   });
 
   it('🔴 名指しの錨 ── 件数が同じまま入れ替わっても落ちる', () => {
