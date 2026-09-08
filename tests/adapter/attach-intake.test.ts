@@ -12,7 +12,11 @@ import { removeInsertedLines } from '../../src/features/markdown/append-target';
 import { stubRevisionOps } from '../helpers/revision-stub';
 
 /** ⚠ 実物の効果層を差し替える口(遅い `getBody` で錠を握らせる等)。 */
-type StoreOver = { getBody?: () => Promise<string | null> };
+type StoreOver = {
+  getBody?: () => Promise<string | null>;
+  /** 保存を横取りする(#684 段④ ── 書いた本文を disk に返して、次の 1 枚に読ませる)。 */
+  onPersist?: (lid: string, body: string) => void;
+};
 
 function harness(estimate?: AttachDeps['estimate'], over?: StoreOver) {
   const putBlobs: Array<{ key: string; size: number }> = [];
@@ -44,6 +48,7 @@ function harness(estimate?: AttachDeps['estimate'], over?: StoreOver) {
     reorderEntry: async () => stubStamps(),
     persistEntry: async (e) => {
       persisted.push({ lid: e.lid, body: e.body });
+      over?.onPersist?.(e.lid, e.body);
       return stubStamps();
     },
     deleteEntry: async () => {},
@@ -650,5 +655,307 @@ describe('attachFiles (P4a intake)', () => {
     expect(resolveMime('img.PNG', '')).toBe('image/png');
     expect(resolveMime('unknown.zzz', '')).toBe('application/octet-stream');
     expect(resolveMime('x.md', 'text/plain')).toBe('text/plain'); // 宣言優先
+  });
+});
+
+/**
+ * 🔴 **落とした所へ入れる**(#684 段④)。
+ *
+ * > issue の一覧:「**添付を本文の好きな位置へ** … 🔴 0 件(**入るのは末尾**)」
+ *
+ * ## 守る主張
+ *
+ * 1. 🔴 落とした所へ入る(末尾ではない)── `REQUEST_BODY_REWRITE { insert-lines }`
+ * 2. 🔴 まとめて落とした 2 枚目は **1 枚目の下**(落とした順と本文の並びが揃う)
+ * 3. 🔴 落としてから書くまでに本文が動いていたら、**位置を使わず末尾**へ(黙って別の所へ入れない)
+ * 4. 🔴 「元に戻す」が残る ── まとめて落とした回は **1 手**で全部消える
+ * 5. 位置を渡さない経路(添付ボタン / 貼付)は**これまでどおり末尾**
+ *
+ * ⚠ 効果層は本物(`connectStoreEffects`)を通す ── disk を読み直して書き戻す所まで
+ *   走らせないと、2 枚目が「1 枚目の入った本文」を見られない。
+ */
+describe('落とした所へ入れる(#684 段④)', () => {
+  const DOC = ['# 買い物メモ', '', '牛乳', '', 'パン', ''].join('\n');
+
+  /** disk の本文を持つ台(書換が実際に効いて、次の 1 枚がそれを読む)。 */
+  function withBody(body = DOC) {
+    let disk = body;
+    /** ⚠ `getBody` を遅くして錠を握らせる口(③-b)── 実物では worker の往復。 */
+    let delay = 0;
+    const h = harness(undefined, {
+      getBody: async () => {
+        if (delay > 0) await new Promise((r) => setTimeout(r, delay));
+        return disk;
+      },
+      // ⚠ **書いたら disk に返す** ── 返さないと 2 枚目が「1 枚目の入る前」を読み、
+      //    台のほうが本物より甘くなる(§3「stub は本物の意味論を真似る」)
+      onPersist: (lid, b) => {
+        if (lid === 'n1') disk = b;
+      },
+    });
+    h.d.dispatch({
+      type: 'CREATE_ENTRY',
+      archetype: 'text',
+      lid: 'n1',
+      title: '買い物メモ',
+      body: disk,
+      edit: false,
+    });
+    h.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    h.d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: disk });
+    return {
+      ...h,
+      disk: () => disk,
+      slow: (ms: number) => void (delay = ms),
+      /** ⚠ **disk だけ**を動かす(画面と落とした時の本文は据え置き)── 別の窓の書込を模す。 */
+      setDisk: (b: string) => void (disk = b),
+    };
+  }
+
+  const png = (n: string, bytes: string) => new File([bytes], n, { type: 'image/png' });
+  /**
+   * 落とした所 = 「牛乳」の後(生 3 行目 = 空行の前)。
+   * ⚠ 落とした時の本文と、落とした塊の開き行(目印)も一緒に渡る。
+   */
+  const AFTER_MILK = { lid: 'n1', toBefore: 3, body: DOC, anchor: { line: 2, text: '牛乳' } };
+
+  it('🔴 ① 落とした所へ入る(末尾ではない)', async () => {
+    const h = withBody();
+    await attachFiles(h.d, h.deps, [png('猫.png', 'a')], '', AFTER_MILK);
+    await tick();
+    const rows = h.disk().split('\n');
+    const i = rows.findIndex((r) => r.startsWith('!['));
+    expect(i, '参照が本文に入っていない').toBeGreaterThan(-1);
+    expect(rows[i - 2] ?? rows[i - 1], '「牛乳」の下に入っていない').toBe('牛乳');
+    expect(rows.indexOf('パン'), '「パン」の下(= 末尾寄り)へ落ちた').toBeGreaterThan(i);
+    // ⚠ **どこに入ったかを字で言う**(押した場所と文言が対 ── 着地前レビュー G)
+    expect(h.d.getState().notice ?? '', 'どこに入ったかを言っていない').toContain('落とした所');
+  });
+
+  it('🔴 ② まとめて落とした 2 枚目は 1 枚目の下(落とした順と並びが揃う)', async () => {
+    const h = withBody();
+    await attachFiles(h.d, h.deps, [png('猫.png', 'a'), png('犬.png', 'b')], '', AFTER_MILK);
+    await tick();
+    await tick();
+    const rows = h.disk().split('\n');
+    const cat = rows.findIndex((r) => r.includes('猫.png'));
+    const dog = rows.findIndex((r) => r.includes('犬.png'));
+    expect(cat, '1 枚目が入っていない').toBeGreaterThan(-1);
+    expect(dog, '2 枚目が入っていない').toBeGreaterThan(-1);
+    expect(cat < dog, '2 枚目が 1 枚目の上に入った(落とした順と逆)').toBe(true);
+    expect(rows.indexOf('パン'), '2 枚とも「パン」より上に居ない').toBeGreaterThan(dog);
+  });
+
+  it('🔴 ③ 書けるようになるまで待った回は、位置を捨てて末尾へ(黙って別の所へ入れない)', async () => {
+    const h = withBody();
+    appendsSeen.length = 0;
+    const events: string[] = [];
+    h.d.onEvent((e) => events.push(e.type));
+    // ⚠ **実物の経路で編集へ入れる**(state を手で捏ねない)── ここで落としたぶんは預かられる
+    h.d.dispatch({ type: 'START_EDIT' });
+    await attachFiles(h.d, h.deps, [png('猫.png', 'a')], '', AFTER_MILK);
+    await tick();
+    expect(appendsSeen.filter((a) => a.lid === 'n1'), '預かる前に書いた').toHaveLength(0);
+    // 編集を抜けると預かりが流れる ── そこで入るのは**末尾**である
+    h.d.dispatch({ type: 'CANCEL_EDIT' });
+    await tick();
+    await tick();
+    expect(appendsSeen.filter((a) => a.lid === 'n1'), '預かったぶんが入っていない').toHaveLength(1);
+    expect(
+      events.filter((t) => t === 'REQUEST_BODY_REWRITE'),
+      '待たされたのに、落とした所の行番号で書いた',
+    ).toHaveLength(0);
+    // ⚠ 末尾へ落ちた回に「落とした所」と言わない(着地前レビュー G)
+    expect(h.d.getState().notice ?? '', '末尾へ落ちたのに「落とした所」と言っている').toContain(
+      'いちばん下',
+    );
+  });
+
+  it('🔴 ④ 「元に戻す」の材料が残り、まとめて落とした回は 1 手で全部消える', async () => {
+    const h = withBody();
+    await attachFiles(h.d, h.deps, [png('猫.png', 'a'), png('犬.png', 'b')], '', AFTER_MILK);
+    await tick();
+    await tick();
+    const last = h.d.getState().lastAppend;
+    expect(last, '差し込んだのに「元に戻す」の材料が無い').not.toBeNull();
+    expect(last!.lid).toBe('n1');
+    expect(last!.lines.filter((l) => l.includes('asset:')), '2 枚とも 1 手に継がれていない').toHaveLength(2);
+    // 🔴 その材料で、実際に元の本文へ戻る(材料が在るだけでは戻せない)
+    const undone = removeInsertedLines(h.disk(), last!.lines);
+    expect(undone, '材料が本文の中で連続していない(1 手で消せない)').not.toBeNull();
+    expect(undone).toBe(DOC);
+  });
+
+  /**
+   * 🔴 **③-b 別の書込が錠を握っている間に落ちた回も、末尾へ**(変異試験 M7 が SURVIVED で教えた)。
+   *
+   * ⚠ ③ が見ているのは**取込ごと預かった**形(`attach.ts` の門)で、こちらは
+   *   **1 枚ずつの門**(`asset-into-note.ts` の `canWriteBody`)である ── 取込は走れるが
+   *   本文だけ書けない、という状態は**錠**で起きる(録音の保存・追記が飛んでいる最中)。
+   * 🔑 台は **`getBody` を遅くして錠を握らせる**(実物では worker の往復がこれに当たる)。
+   */
+  it('🔴 ③-b 別の書込が錠を握っている間に落とした回も、末尾へ', async () => {
+    const h = withBody();
+    // ⚠ 追記を 1 本飛ばして錠を握らせる(`getBody` が遅いので解けない)
+    h.slow(200);
+    h.d.dispatch({ type: 'APPEND_TO_ENTRY', lid: 'n1', text: '手で足した行', heading: null, target: null });
+    expect(h.d.getState().writeLock, '台の前提: 錠が立っていない').not.toBeNull();
+    appendsSeen.length = 0;
+    const events: string[] = [];
+    h.d.onEvent((e) => events.push(e.type));
+    await attachFiles(h.d, h.deps, [png('猫.png', 'a')], '', AFTER_MILK);
+    await new Promise((r) => setTimeout(r, 400));
+    expect(appendsSeen.filter((a) => a.lid === 'n1'), '末尾へ落ちていない').toHaveLength(1);
+    expect(
+      events.filter((t) => t === 'REQUEST_BODY_REWRITE'),
+      '錠が立っている間に落としたのに、落とした所の行番号で書いた',
+    ).toHaveLength(0);
+  });
+
+  /**
+   * 🔴 **落とした本文と入れ先が違う回は、位置を使わない**(変異試験 M-A / 着地前レビュー A)。
+   * ⚠ 横に留めた枠(別のノート)へ落としても、添付が入るのは**主の枠のノート**である
+   *   ── そこで留めた枠の行番号を信じると、**別のノートの段落の途中へ刺さる**
+   *   (#277 で 1 度塞いだ「別のノートの同じ行番号を書く」の再来)。
+   * 🔑 そこへ線を出さないのは binder の側(`body-block-drag.test.ts`)。
+   */
+  it('🔴 落とした本文が入れ先と違うノートなら、位置は使わない', async () => {
+    const h = withBody();
+    appendsSeen.length = 0;
+    const events: string[] = [];
+    h.d.onEvent((e) => events.push(e.type));
+    await attachFiles(h.d, h.deps, [png('猫.png', 'a')], '', { ...AFTER_MILK, lid: 'other' });
+    await tick();
+    expect(appendsSeen.filter((a) => a.lid === 'n1'), '末尾へ落ちていない').toHaveLength(1);
+    expect(
+      events.filter((t) => t === 'REQUEST_BODY_REWRITE'),
+      '別のノートの行番号で本文へ書いた',
+    ).toHaveLength(0);
+  });
+
+  /**
+   * 🔴 **落とした所と末尾が混ざった回は、「元に戻す」を 1 手に継がない**
+   * (着地前レビュー F / UX レビュー 6)。
+   *
+   * ⚠ `nextLastAppend` は「継いだ行は本文の中で**連続している**」を前提にしている。
+   *   1 枚目が本文の途中・2 枚目が末尾だと連続しないので、継ぐと
+   *   `removeInsertedLines` が **1 行も消せずに断る** ── しかも押した時点で材料は
+   *   捨てられるので、**ボタンごと消えて押し直せない**。
+   */
+  it('🔴 途中と末尾が混ざった回は、「元に戻す」が本当に消せる形で残る', async () => {
+    const h = withBody();
+    h.d.onState(() => undefined);
+    // 1 枚目 ── 落とした所へ
+    await attachFiles(h.d, h.deps, [png('猫.png', 'a')], '', AFTER_MILK);
+    await tick();
+    expect(h.disk(), '前提: 1 枚目が途中に入っていない').toContain('猫.png');
+    const rows1 = h.disk().split('\n');
+    expect(rows1.indexOf('パン')).toBeGreaterThan(rows1.findIndex((r) => r.includes('猫.png')));
+    // 2 枚目 ── 錠が握られている間に落として末尾へ(同じ回の印は付いている)
+    h.slow(200);
+    h.d.dispatch({ type: 'APPEND_TO_ENTRY', lid: 'n1', text: '手で足した行', heading: null, target: null });
+    await attachFiles(h.d, h.deps, [png('犬.png', 'b')], '', AFTER_MILK);
+    await new Promise((r) => setTimeout(r, 500));
+    const last = h.d.getState().lastAppend;
+    expect(last, '材料が無い').not.toBeNull();
+    // 🔴 材料は**本当に消せる**もの ── 継いで連続しなくなっていたら `null` が返る
+    expect(
+      removeInsertedLines(h.disk(), last!.lines),
+      '「元に戻す」が 1 行も消せない(途中と末尾を 1 手に継いだ)',
+    ).not.toBeNull();
+  });
+
+  /**
+   * 🔴 **落としてから書くまでに別の窓が書いていたら、当てずっぽうな所へ入れない**
+   * (着地前レビュー D / UX レビュー 7、変異試験 N4 / N5)。
+   *
+   * ⚠ 兄弟の書換(`move-lines` / `place-move` / `undo-append`)は全部「掴んだ時点の字」を
+   *   disk 側と突き合わせる。差し込みだけが番号しか見ておらず、**段④ は落としてから
+   *   書くまで待つ**(縮める / bytes を置く / 添付のノートを作る)ので、その間に行が
+   *   増えると**段落の途中へ黙って刺さる**。
+   */
+  it('🔴 落としてから書くまでに本文が動いていたら、当てずっぽうに書かない', async () => {
+    const h = withBody();
+    // ⚠ **台のノートが disk に届くまで待ってから**動かす ── 待たずに書き換えると、
+    //    後から届く `CREATE_ENTRY` の保存が元へ戻して、この test は何も検めない
+    await tick();
+    // ⚠ **disk だけ**を動かす(画面と落とした時の本文は据え置き)── 別の窓が上へ 1 行足した形
+    h.setDisk(`別の窓が足した行\n${DOC}`);
+    await attachFiles(h.d, h.deps, [png('猫.png', 'a')], '', AFTER_MILK);
+    await tick();
+    await tick();
+    expect(h.disk(), '本文が動いているのに書き込んだ').not.toContain('asset:');
+    expect(h.d.getState().error ?? '', '黙って諦めた(理由が出ていない)').toContain('本文が変わっている');
+    // ⚠ 対照群 ── 動いていなければ、同じ落とし方でちゃんと入る
+    const ok = withBody();
+    await tick();
+    await attachFiles(ok.d, ok.deps, [png('猫.png', 'a')], '', AFTER_MILK);
+    await tick();
+    expect(ok.disk(), '対照群が入っていない(この test は空振り)').toContain('asset:');
+  });
+
+  /**
+   * 🔴 **回の途中で末尾へ落ちたら、「元に戻す」を 1 手に継がない**
+   * (着地前レビュー F / UX レビュー 6、変異試験 N2 / N3)。
+   *
+   * ⚠ 台は **2 枚目の bytes を置く瞬間に別の追記を走らせて錠を握らせる**
+   *   ── 実物では録音の保存・追記がこれに当たる(1 回の落としの途中で錠が立つ)。
+   */
+  /**
+   * 🔴 **1 回の落としで途中と末尾が混ざっても、「元に戻す」が本当に消せる**
+   * (着地前レビュー F / UX レビュー 6)。
+   *
+   * ⚠ `nextLastAppend` は「継いだ行は本文の中で**連続している**」を前提にしている。
+   *   1 枚目が本文の途中・2 枚目が末尾だと連続しないので、そこを 1 手に継ぐと
+   *   `removeInsertedLines` は **1 行も消せずに断る**(押した時点で材料も捨てられるので
+   *   押し直しもできない)。この test は**そうなっていないこと**を実際に消して確かめる。
+   *
+   * 🔑 **末尾へ落ちる引き金は「錠」しか無い**(`writeLock` を立てるのは
+   *   `APPEND_TO_ENTRY` **1 か所**。編集に入る道は `CREATE_ENTRY` ごと黙殺されるので
+   *   回の途中では起きない)── その錠を立てた追記自身が `lastAppend` を差し替えるため、
+   *   鎖はそこで切れる。⚠ だから `asset-into-note.ts` の「継がない」門は**等価**である
+   *   (変異試験 N2 / N3 が SURVIVED で教えた)── 門を外しても結果は変わらない。
+   *   🔑 それでも門を残すのは、**引き金が増えた日**(錠を立てる 2 か所目・編集の途中入り)に
+   *   ここが壊れないようにするため。この test は**結果**を守る(門ではなく)。
+   */
+  it('🔴 1 回の落としで途中と末尾が混ざっても、「元に戻す」が本当に消せる', async () => {
+    const h = withBody();
+    await tick();
+    let n = 0;
+    const putBlob = h.deps.putBlob;
+    h.deps.putBlob = async (key, blob) => {
+      n += 1;
+      // ⚠ 2 枚目の取込が始まった所で、別の追記が錠を握る(実物では録音の保存・追記)
+      if (n === 2) {
+        h.slow(200);
+        h.d.dispatch({ type: 'APPEND_TO_ENTRY', lid: 'n1', text: '別の追記', heading: null, target: null });
+      }
+      await putBlob(key, blob);
+    };
+    await attachFiles(h.d, h.deps, [png('猫.png', 'a'), png('犬.png', 'b')], '', AFTER_MILK);
+    await new Promise((r) => setTimeout(r, 1500));
+    const rows = h.disk().split('\n');
+    const cat = rows.findIndex((r) => r.includes('猫.png'));
+    const dog = rows.findIndex((r) => r.includes('犬.png'));
+    expect(cat, '1 枚目が入っていない').toBeGreaterThan(-1);
+    expect(dog, '2 枚目が入っていない').toBeGreaterThan(-1);
+    // 🔴 台の前提 ── 途中と末尾に**分かれて**いる(分かれていなければこの test は空振り)
+    expect(rows.indexOf('パン'), '前提が崩れた: 2 枚とも同じ所に入っている').toBeGreaterThan(cat);
+    expect(rows.indexOf('パン'), '前提が崩れた: 2 枚とも同じ所に入っている').toBeLessThan(dog);
+    const last = h.d.getState().lastAppend;
+    expect(last, '材料が無い').not.toBeNull();
+    expect(
+      removeInsertedLines(h.disk(), last!.lines),
+      '「元に戻す」が 1 行も消せない(途中と末尾を 1 手に継いだ)',
+    ).not.toBeNull();
+  });
+
+  it('位置を渡さない経路(添付ボタン / 貼付)は、これまでどおり末尾', async () => {
+    const h = withBody();
+    appendsSeen.length = 0;
+    await attachFiles(h.d, h.deps, [png('猫.png', 'a')]);
+    await tick();
+    expect(appendsSeen.filter((a) => a.lid === 'n1'), '末尾の経路が消えた').toHaveLength(1);
+    expect(h.d.getState().error ?? '', '断りが出ている').toBe('');
   });
 });

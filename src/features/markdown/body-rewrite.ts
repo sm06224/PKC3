@@ -23,7 +23,7 @@ import { acceptsExternalImage, rewriteAdopted } from '../asset/inline-url-adopt'
 import { DELIMITER, csvEscapeField, parseCsv, type CsvPositions } from './csv-table';
 import { parseRenderableFence } from './markdown-render';
 import { containerAtLine, quoteLead } from './source-blocks';
-import { insertLines, moveLines } from './line-move';
+import { insertLines, moveLines, type InsertAnchor } from './line-move';
 import { gfmCellText } from './html-to-markdown';
 import {
   convertTable,
@@ -251,6 +251,19 @@ export type BodyRewrite =
       kind: 'insert-lines';
       toBefore: number;
       lines: readonly string[];
+      /**
+       * 🔴 **落とした時の目印**(#684 段④)── `line` 行目が `text` のままでなければ書かない。
+       * ⚠ 差し込みだけが錨を持っていなかった(兄弟は全部 byte 一致を検める)。
+       *   段④ は落としてから書くまで待つので、番号だけでは別の行を指す。
+       */
+      anchor?: InsertAnchor;
+      /**
+       * 🔴 **取り込みの回の印**(#684 段④)── 同じ印で入れた行は「元に戻す」1 回で
+       *   まとめて消える(3 枚まとめて落とした写真は 1 手で戻る)。
+       * ⚠ `applyBodyRewrite` は読まない ── 読むのは ack を受ける reducer
+       *   (`BODY_REWRITTEN` が `lastAppend` を継ぐ)。⚠ 省略 = 単独の 1 手。
+       */
+      batch?: string;
     }
   | {
       /**
@@ -434,7 +447,8 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
   if (rewrite.kind === 'table-format') return rewriteTableFormat(body, rewrite);
   // 🔑 塊の移動と差し込みは `line-move.ts` の 1 本(#684)── 取りやめは body をそのまま返す
   if (rewrite.kind === 'move-lines') return moveLines(body, rewrite);
-  if (rewrite.kind === 'insert-lines') return insertLines(body, rewrite.toBefore, rewrite.lines);
+  if (rewrite.kind === 'insert-lines')
+    return insertLines(body, rewrite.toBefore, rewrite.lines, rewrite.anchor);
   if (rewrite.kind === 'adopt-images') {
     /**
      * ⚠ **規則を書き直さない** ── 拾う側(`externalImageUrls`)と当てる側は

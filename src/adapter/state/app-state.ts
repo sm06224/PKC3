@@ -14,7 +14,7 @@ import { extractMeta, seedBodyFor } from '@features/flavor';
 import { applyBodyRewrite, type BodyRewrite } from '@features/markdown/body-rewrite';
 import type { TableFormat } from '@features/markdown/table-convert';
 import { isPlaceOpen } from '@features/markdown/place-notation';
-import { moveLinesWithInverse, type MoveLines } from '@features/markdown/line-move';
+import { moveLinesWithInverse, type InsertAnchor, type MoveLines } from '@features/markdown/line-move';
 import { replaceTaskCards, type TaskScan } from '@features/schedule/task-cards';
 import type { ContactScan } from '@features/contact/contact-card';
 import type { SnippetScan } from '@features/snippet/snippet-table';
@@ -1192,7 +1192,27 @@ export type UserAction =
    * 🔴 **行の並びを本文へ差し込む**(#684 段②)── 一覧の行を本文へ落とすとリンクになる。
    * ⚠ 何を入れるか(リンクの字)は binder が組んで渡す(`formatEntryLink` 1 本)。
    */
-  | { type: 'INSERT_LINES'; lid: string; toBefore: number; lines: readonly string[] }
+  | {
+      type: 'INSERT_LINES';
+      lid: string;
+      toBefore: number;
+      lines: readonly string[];
+      /**
+       * 取り込みの回の印(#684 段④)。同じ印で入れた行は `lastAppend` で 1 手に継がれる。
+       * ⚠ 省略 = 単独の 1 手(一覧の行を落とした 1 回は、それ自身で 1 手)。
+       */
+      batch?: string;
+      /**
+       * 編集中の断り文(#684 段④)。⚠ **押した場所と対で書く** ── 既定は
+       * 「一覧の行を…」なので、file を落とす経路はそのままだと嘘を言う。
+       */
+      refusal?: string;
+      /**
+       * 🔴 **落とした時の目印**(#684 段④)── 書く直前に disk 側で突き合わせる。
+       * ⚠ 省略 = 突き合わせない(段②:落としたその場で撃つので待ち時間が無い)。
+       */
+      anchor?: InsertAnchor;
+    }
   /**
    * 🔴 **直前の塊の移動を元に戻す**(#684 段①。user 指示 2026-08-23「片道の操作を作らない」)。
    * ⚠ `UNDO_APPEND` と同じ形 ── 独自の書込経路を作らず `REQUEST_BODY_REWRITE` を通る。
@@ -1620,6 +1640,14 @@ export type SystemCommand =
       body: string;
       /** 何をしたか。⚠ **やり直せる形**で持つ ── 未達 commit との合流に要る。 */
       rewrite: BodyRewrite;
+      /**
+       * 🔴 **足した行そのもの**(#684 段④、「元に戻す」の材料)。⚠ **書いた結果から**
+       *   効果層が取り出す(`insertedLines`)── 前後に空行を補う作法をここで書き写すと
+       *   規則が 2 か所になる(§7)。⚠ 画面の本文からは導けない:添付を取り込むと
+       *   `openBody` が一度捨てられるので、reducer 側は `null` しか読めない。
+       * ⚠ 差し込み(`insert-lines`)以外では**渡らない**(`undefined`)。
+       */
+      inserted?: readonly string[] | null;
       status: string | null;
       date: string | null;
       archived: boolean;
@@ -3312,6 +3340,7 @@ function reduceCore(
      */
     case 'MOVE_PLACE':
       return bodyRewriteGate(state, action.lid, '編集を終了してから、板の付箋を動かしてください', (shown) => {
+        if (shown === null) return null; // 画面に無い本文の行番号は信じない
         if (!isPlaceCoord(action.x) || !isPlaceCoord(action.y)) return null;
         const openLine = placeOpenLineOf(shown, action.line);
         if (openLine === null) return null;
@@ -3324,6 +3353,7 @@ function reduceCore(
      */
     case 'RESIZE_PLACE':
       return bodyRewriteGate(state, action.lid, '編集を終了してから、板の大きさを変えてください', (shown) => {
+        if (shown === null) return null; // 画面に無い本文の行番号は信じない
         if (!isPlaceCoord(action.w) || !isPlaceCoord(action.h)) return null;
         const openLine = placeOpenLineOf(shown, action.line);
         if (openLine === null) return null;
@@ -3331,18 +3361,21 @@ function reduceCore(
       });
     case 'REMOVE_PLACE':
       return bodyRewriteGate(state, action.lid, '編集を終了してから、板を消してください', (shown) => {
+        if (shown === null) return null; // 画面に無い本文の行番号は信じない
         const openLine = placeOpenLineOf(shown, action.line);
         if (openLine === null) return null;
         return { kind: 'place-remove', line: action.line, openLine };
       });
     case 'ADD_PLACE':
-      return bodyRewriteGate(state, action.lid, '編集を終了してから、板を置いてください', () =>
-        isPlaceCoord(action.x) && isPlaceCoord(action.y)
+      return bodyRewriteGate(state, action.lid, '編集を終了してから、板を置いてください', (shown) =>
+        // ⚠ 画面に出ていない面へは置かない(押し所は面の上にしか無い ── これまでの門を保つ)
+        shown !== null && isPlaceCoord(action.x) && isPlaceCoord(action.y)
           ? { kind: 'place-add', x: action.x, y: action.y }
           : null,
       );
     case 'RAISE_PLACE':
       return bodyRewriteGate(state, action.lid, '編集を終了してから、板を前へ出してください', (shown) => {
+        if (shown === null) return null; // 画面に無い本文の行番号は信じない
         const openLine = placeOpenLineOf(shown, action.line);
         if (openLine === null) return null;
         return { kind: 'place-raise', line: action.line, openLine };
@@ -3355,18 +3388,42 @@ function reduceCore(
      */
     case 'MOVE_BLOCK':
       return bodyRewriteGate(state, action.lid, '編集を終了してから、本文の塊を動かしてください', (shown) => {
+        if (shown === null) return null; // 画面に無い本文の行番号は信じない
         const { start, end, toBefore } = action;
         if (!Number.isInteger(start) || !Number.isInteger(end) || !Number.isInteger(toBefore)) return null;
         const lines = shown.split('\n');
         if (start < 0 || end < start || end >= lines.length) return null;
         return { kind: 'move-lines', start, end, toBefore, lines: lines.slice(start, end + 1) };
       });
-    /** 🔴 **一覧の行を本文へ落とすとリンクになる**(#684 段②)── 同じ門。空の並びは撃たない。 */
+    /**
+     * 🔴 **一覧の行を本文へ落とすとリンクになる**(#684 段②)── 同じ門。空の並びは撃たない。
+     * ⚠ 落とした所へ入れる添付(#684 段④)も同じ口を通る ── 入る字が違うだけで、
+     *   「本文のここへ 1 塊を差し込む」は同じ 1 つの操作である(§7)。
+     * 🔑 断り文は**押した場所と対**なので、掴んだ物の名前は呼び側が渡す(`refusal`)──
+     *   ここで 1 本に丸めると、file を落とした user が「一覧の行」と言われる。
+     * ⚠ 段④ は `writable-queue` が**書けるようになってから**撃つので、実際にはここへ
+     *   来ない ── それでも既定に頼らず渡すのは、来たときに嘘を言わせないためである。
+     * 🔴 **`shown` を読まない**(座標も字も呼び側が持っている)── だから画面に本文が
+     *   出ていなくても通す。⚠ これは緩めているのではなく、**この経路では画面に
+     *   出ていないのが普通**だからである:添付を取り込むと `CREATE_ENTRY` が選択を
+     *   移し、`SELECT_ENTRY` で戻す時に旧 `openBody` が捨てられる(本文は非同期に
+     *   読み直される)。画面を要求すると、落とした所は**一度も使われない**。
+     */
     case 'INSERT_LINES':
-      return bodyRewriteGate(state, action.lid, '編集を終了してから、一覧の行を本文へ落としてください', () =>
-        Number.isInteger(action.toBefore) && action.lines.length > 0
-          ? { kind: 'insert-lines', toBefore: action.toBefore, lines: action.lines }
-          : null,
+      return bodyRewriteGate(
+        state,
+        action.lid,
+        action.refusal ?? '編集を終了してから、一覧の行を本文へ落としてください',
+        () =>
+          Number.isInteger(action.toBefore) && action.lines.length > 0
+            ? {
+                kind: 'insert-lines',
+                toBefore: action.toBefore,
+                lines: action.lines,
+                ...(action.batch === undefined ? {} : { batch: action.batch }),
+                ...(action.anchor === undefined ? {} : { anchor: action.anchor }),
+              }
+            : null,
       );
     /**
      * 🔴 **直前の塊の移動を元に戻す**(#684 段①)── `UNDO_APPEND` と同じ形。
@@ -3540,6 +3597,30 @@ function reduceCore(
         lastMove = null;
       }
       /**
+       * 🔴 **差し込んだ回も「元に戻す」の材料を入れる**(#684 段④)。
+       *
+       * ⚠ 直す前、本文へ入る添付は `APPEND_TO_ENTRY`(末尾)だけで、そちらは
+       *   `ENTRY_APPENDED` が材料を入れていた ── **落とした所へ入れる経路に
+       *   移した瞬間、追記欄の「元に戻す」が黙って消える**(動線を 1 つ失う。
+       *   user 指示 2026-08-23「片道の操作を作らない」)。
+       * 🔑 **足した行は「結果から」取り出す**(`insertedLines`)── 前後に空行を補う
+       *   作法をここで書き写すと、規則が 2 か所になる(§7)。⚠ 補った空行まで
+       *   材料に入るので、まとめて落とした 2 枚目以降の run は 1 枚目の**すぐ後ろ**に
+       *   並ぶ = `removeInsertedLines` が 1 手として消せる(`nextLastAppend` の前提)。
+       * ⚠ **画面の本文は読まない**(着地前レビュー E で直した)── ここへ来る書換は
+       *   画面に本文が出ていなくても通る(段④ の経路がまさにそれ)。材料は
+       *   **書いた結果から**効果層が出し、純粋な挿入でなければ `null` が届く
+       *   ── そのときは材料を入れない(当てずっぽうで消さない)。
+       */
+      let lastAppend = state.lastAppend;
+      if (action.rewrite.kind === 'insert-lines') {
+        lastAppend = nextLastAppend(lastAppend, {
+          lid: action.lid,
+          inserted: action.inserted ?? null,
+          ...(action.rewrite.batch === undefined ? {} : { batch: action.rewrite.batch }),
+        });
+      }
+      /**
        * 🔴 **表の形を変えたら、変えたと言う**(#708 段②、着地前レビュー・動線 ①)。
        *
        * ⚠ 直す前は**完全に無言**だった ── 本文が丸ごと書き換わるのに、画面に出る
@@ -3608,6 +3689,7 @@ function reduceCore(
           smartHits,
           tagSuggestions,
           lastMove,
+          lastAppend,
           notice,
           noticeOpen,
           splitBodies: rewrittenSplit,
@@ -4702,6 +4784,7 @@ function reduceCore(
       if (state.entryMetas.get(action.lid)?.archetype !== STACK_ARCHETYPE) return { state, events: [] };
       // 🔑 門と event の組み立ては板の書換と**同じ 1 本**(`bodyRewriteGate`(#684 で `placeRewrite` から改名))── 編集中は声に出して断る
       return bodyRewriteGate(state, action.lid, '編集を終えてから、並べ替えてください', (shown) => {
+        if (shown === null) return null; // 画面に無い本文の行番号は信じない
         const openLine = shown.split('\n')[action.line];
         if (openLine === undefined) return null;
         return { kind: 'link-move', line: action.line, openLine, dir: action.dir };
@@ -5187,20 +5270,27 @@ export function screenBodyOf(state: AppState, lid: string): string | null {
  *
  * @param refusal 編集中の断り文(押した場所と対で書く)
  * @param build 画面が見ている本文から書換を組む。組めなければ `null` = 黙って no-op
- *   (行が板でない / 値が壊れている ── どれも画面の操作からは起きない形)
+ *   (行が板でない / 値が壊れている ── どれも画面の操作からは起きない形)。
+ *   🔴 **`shown` は `null` のことがある**(#684 段④、2026-09-08)── 画面に本文が
+ *   出ていない、という意味である。⚠ **行番号を `shown` から採る書換は必ず断る**
+ *   (画面に無い物の座標を信じて書くと、当てずっぽうで別の所を消す)。
+ *   🔑 ただし**`shown` を 1 バイトも読まない書換**(座標も字も呼び側が持っている)は
+ *   通してよい ── `insert-lines` は落とした所を**落とした時の本文**で決めており、
+ *   そこで画面を要求すると経路が**一度も通らない**:添付は取り込むときに
+ *   `CREATE_ENTRY` が選択を移し、`SELECT_ENTRY` で戻す時に旧 `openBody` が捨てられる。
+ *   ⚠ ここを 1 か所に寄せず各 `build` に持たせるのは、**新しい case が黙って
+ *   `null` を素通りしない**ようにするためである(既定で通すと取り違えが静かに出る)。
  */
 function bodyRewriteGate(
   state: AppState,
   lid: string,
   refusal: string,
-  build: (shown: string) => BodyRewrite | null,
+  build: (shown: string | null) => BodyRewrite | null,
 ): ReduceResult {
   if (state.phase !== 'ready') return { state: { ...state, error: refusal }, events: [] };
   const meta = state.entryMetas.get(lid);
   if (!meta) return { state, events: [] };
-  const shown = screenBodyOf(state, lid);
-  if (shown === null) return { state, events: [] };
-  const rewrite = build(shown);
+  const rewrite = build(screenBodyOf(state, lid));
   if (rewrite === null) return { state, events: [] };
   return {
     state,

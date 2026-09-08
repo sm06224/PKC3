@@ -71,12 +71,102 @@ function insideContainer(spans: readonly ContainerSpan[], p: number): boolean {
 }
 
 /**
+ * 🔴 **差し込む所**(#684 段④)── 落とした所か、直前に入れた行の下か。
+ *
+ * ⚠ **落とした時の本文で決める。** 添付は落としてから本文へ書くまでに待つ
+ *   (bytes を読む / 添付のノートを作る)ので、書く時に画面が持っている本文は
+ *   **いったん捨てられている**(`SELECT_ENTRY` が「選択が変わったら旧 openBody は破棄」)。
+ *   🔑 だから基底は呼び側が**落とした時に読んだ本文**を持ち回り、自分が入れたぶんだけ
+ *   進める(効果層は書換を**直列の 1 op** で回すので、その本文が書く時の disk と揃う)。
+ * ⚠ **待たされた回は位置ごと捨てる** ── 編集中で預かられた回は、書ける頃には
+ *   本文が別物になっている。判定は `asset-into-note.ts`(`canWriteBody`)。
+ */
+export type InsertPlace =
+  | {
+      /**
+       * 落とした所(生の body の行番号。この行の前へ入れる)。
+       * ⚠ `anchor` は**落とした塊の開き行**(行番号 + その字)── 書く直前に disk 側で
+       *   突き合わせる目印である(`place-move` の `openLine` と同じ作法)。
+       */
+      readonly kind: 'before';
+      readonly toBefore: number;
+      readonly anchor: InsertAnchor;
+    }
+  | {
+      /**
+       * 直前に入れた行の**下** ── まとめて落とした 2 枚目以降が、落とした順に続く。
+       * ⚠ `kind: 'before'` を使い回すと 2 枚目が 1 枚目の**上**へ入って**順番が
+       *   逆になる**(落とした所は 1 枚目に押し下げられているので)。
+       * ⚠ 同じ字が 2 行あるとき(同じ bytes の file を 2 つ落とすと参照の字も同じ)は
+       *   **いちばん後ろ**を採る ── さっき入れたほうである。
+       */
+      readonly kind: 'after';
+      readonly anchor: string;
+    };
+
+/**
+ * 🔴 **書く直前に突き合わせる目印**(#684 段④)── `line` 行目が `text` のままでなければ書かない。
+ *
+ * ⚠ 差し込みだけが**錨を持っていなかった**(`move-lines` は掴んだ行、`place-move` は
+ *   `openLine`、`undo-append` は行の並びで突き合わせる)。段②(一覧の行)は落とした
+ *   その場で撃つので実害が小さかったが、**段④は落としてから書くまでに待つ**
+ *   (縮める / bytes を置く / 添付のノートを作る)── その間に別の書換が行を足すと、
+ *   行番号だけでは**段落の途中へ黙って刺さる**。
+ */
+export interface InsertAnchor {
+  readonly line: number;
+  readonly text: string;
+}
+
+/**
+ * `place` を、その本文の行番号へ解く。
+ *
+ * @returns 差し込む位置(この行の前)と、書く直前に突き合わせる目印。
+ *   ⚠ **解けなければ `null`** ── 覚えていた字が無い / 囲いの中。呼び側は**末尾へ**
+ *   落とす(当てずっぽうで入れない)。
+ * ⚠ 範囲の検査は `insertionBlocked` が持つ(整数でない / 負 / 行数超過を同じ本文で見る)
+ *   ── ここで数え直すと**同じ判定が 2 か所**になる(変異試験 M-D が等価だと教えた)。
+ */
+export function resolveInsertPlace(
+  body: string,
+  place: InsertPlace,
+): { to: number; anchor: InsertAnchor } | null {
+  const lines = body.split('\n');
+  let at: number;
+  let anchor: InsertAnchor;
+  if (place.kind === 'before') {
+    at = place.toBefore;
+    anchor = place.anchor;
+  } else {
+    const i = lines.lastIndexOf(place.anchor);
+    if (i < 0) return null;
+    at = i + 1;
+    anchor = { line: i, text: place.anchor };
+  }
+  if (insertionBlocked(body, at)) return null;
+  // ⚠ **持ち回っている本文でも目印が合わない**なら、そもそも解けていない(空振り防止)
+  return lines[anchor.line] === anchor.text ? { to: at, anchor } : null;
+}
+
+/**
  * 🔴 **行の並びを差し込む**(段②: 一覧の行を落とすとリンクになる)。
  *
  * @returns 入れられなければ `null`(断る)。`lines` が空でも `null`。
  */
-export function insertLines(body: string, toBefore: number, lines: readonly string[]): string | null {
+export function insertLines(
+  body: string,
+  toBefore: number,
+  lines: readonly string[],
+  /**
+   * 🔴 **落とした時の目印**(#684 段④)。⚠ 合わなければ**書かない** ── 落としてから
+   *   書くまでに別の書換が行を足していたら、同じ番号は**別の行**を指す
+   *   (`moveLinesWithInverse` の byte 一致・`place-move` の `openLine` と同じ作法)。
+   * ⚠ 省略 = これまでどおり(段②:落としたその場で撃つので待ち時間が無い)。
+   */
+  anchor?: InsertAnchor,
+): string | null {
   if (lines.length === 0 || insertionBlocked(body, toBefore)) return null;
+  if (anchor !== undefined && body.split('\n')[anchor.line] !== anchor.text) return null;
   const all = body.split('\n');
   return placeChunk(all, frontmatterLineCount(body), toBefore, lines).lines.join('\n');
 }

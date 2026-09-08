@@ -15,7 +15,7 @@
  *   ── PKC2 は走査が 500MB データで boot OOM を誘発した)
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
-import { noteToPutInto, putAssetIntoNote } from './asset-into-note';
+import { dropCursor, noteToPutInto, putAssetIntoNote, type DroppedAt } from './asset-into-note';
 import { createWritableQueue } from './writable-queue';
 import { attachmentBody } from '@features/flavor/attachment-flavor';
 import { identifyAsset, assetKeyFromHash } from '@adapter/platform/storage/asset-key';
@@ -299,6 +299,13 @@ export async function attachFiles(
    *   「共有が終わったので画面収録を止めました。」と同じ seam である。
    */
   why = '',
+  /**
+   * 🔴 **落とした所**(#684 段④)── 読む面の本文へ落としたときだけ渡る。
+   * ⚠ 省略 = これまでどおり**本文のいちばん下**(添付ボタン / 貼付 / 窓の地へ落とした回)。
+   * ⚠ 落とした本文が**入れ先のノートと違う**なら位置は使わない(`placeFor` が見る)──
+   *   横に留めた枠へ落として、主の枠のノートの行番号を信じる形にしない。
+   */
+  at?: DroppedAt,
 ): Promise<void> {
   if (files.length === 0) return;
 
@@ -321,6 +328,12 @@ export async function attachFiles(
    */
   const into = noteToPutInto(dispatcher);
   const queue = createWritableQueue(dispatcher);
+  /**
+   * 🔴 **落とした所は、この 1 回のあいだ持ち回る**(#684 段④)── 1 枚入るたびに
+   *   「その行の下」へ進むので、まとめて落とした写真が**落とした順**に並ぶ。
+   * ⚠ 輪の中で作り直すと、2 枚目以降が 1 枚目の**上**へ入って順番が逆になる。
+   */
+  const place = at === undefined ? undefined : dropCursor(at);
   /**
    * 🔴 **この 1 回の取り込みの印**(#668 C)── 同じ印で入れた行は「元に戻す」1 回で
    *   まとめて消える(3 枚落としたら 3 行が 1 手)。⚠ 直す前は最後の 1 枚しか戻らなかった。
@@ -387,6 +400,7 @@ export async function attachFiles(
           mime: attached.mime,
           why,
           batch,
+          ...(place === undefined ? {} : { place }),
           onPut: (n) => {
             tally.put += 1;
             tally.last = n;
@@ -435,6 +449,14 @@ export async function attachFiles(
     });
     return;
   }
+  /**
+   * 🔴 **預かった回は、落とした所を捨てる**(#684 段④)。
+   * ⚠ 取り込みごと編集の後まで待つので、**書ける頃には本文が別物**である ──
+   *   落とした時の行番号は別の所を指す。だから**いちばん下**へ入れる。
+   * ⚠ ここで捨てないと `putAssetIntoNote` の門は素通りする ── あちらが見るのは
+   *   **入れる時**の `canWriteBody` で、その時はもう書ける(だから走っている)。
+   */
+  if (place !== undefined) place.at = null;
   // 🔴 門の中で走らせる(#724 ⑤)── `queue` が走らせる時点では呼び側の鎖は解けている
   queue.push(() => deps.gate(run));
   const what = files.length === 1 ? `「${files[0]!.name}」` : `${files.length} 件`;

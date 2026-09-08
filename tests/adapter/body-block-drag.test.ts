@@ -25,7 +25,7 @@ import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import type { DomainEvent } from '../../src/adapter/state/app-state';
-import { bindActions } from '../../src/adapter/ui/actions/binder';
+import { bindActions, type BinderServices } from '../../src/adapter/ui/actions/binder';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { paintStatusUndo } from '../../src/adapter/ui/render/status-open';
 import {
@@ -40,6 +40,7 @@ import { PAINTED_ATTR } from '../../src/adapter/ui/render/detail';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import { bodyBelowFrontmatter } from '../../src/features/markdown/frontmatter';
 import { applyBodyRewrite } from '../../src/features/markdown/body-rewrite';
+import { insertedLines } from '../../src/features/markdown/append-target';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { blocksFor, stripComments, withoutMedia } from '../helpers/css-blocks';
 
@@ -121,8 +122,21 @@ function rect(el: Element, top: number, height: number, left = 40, right = 400):
   });
 }
 
+/** 外から落とす file の荷物(`types` は `Files` の 1 本)。 */
+function filesDt(files: File[]) {
+  return {
+    dropEffect: 'none',
+    effectAllowed: 'none',
+    types: ['Files'],
+    getData: () => '',
+    setData: () => undefined,
+    files: { length: files.length, item: (i: number) => files[i] ?? null },
+    items: [] as unknown[],
+  } as unknown as ReturnType<typeof dtStub>;
+}
+
 /** 読む面の実構造 ── scroller > pane > 主の器(display: contents) > 本文の器。 */
-function setup() {
+function setup(over: Partial<BinderServices> = {}, archetype = 'text') {
   document.body.textContent = '';
   const root = document.createElement('div');
   root.setAttribute('data-pkc-slot', 'root');
@@ -147,11 +161,16 @@ function setup() {
   const d = new Dispatcher();
   const events: DomainEvent[] = [];
   d.onEvent((e) => events.push(e));
-  d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1', '本'), meta('n2', '相手')], relations: [] });
+  d.dispatch({
+    type: 'SYS_BOOTED',
+    cid: 'c1',
+    metas: [{ ...meta('n1', '本'), archetype }, meta('n2', '相手')],
+    relations: [],
+  });
   d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
   d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: RAW });
   const said: string[] = [];
-  const unbind = bindActions(root, d, { showStatus: (t) => said.push(t) });
+  const unbind = bindActions(root, d, { showStatus: (t) => said.push(t), ...over });
   installBlockGrip(region, host, 'n1', RAW);
   events.length = 0;
 
@@ -544,6 +563,29 @@ describe('一覧の行を本文へ落とすとリンクになる(#684 段②)', 
       rewrite: { kind: 'insert-lines', toBefore: 22, lines: ['[相手](entry:n2)'] },
     });
     expect(s.root.querySelectorAll('[data-pkc-drop-edge]'), '落とした後に印が残っている').toHaveLength(0);
+    /**
+     * 🔴 **入れたリンクは「元に戻す」で消せる**(`docs/manual.md` の約束。着地前レビュー B)。
+     * ⚠ 材料が入るのは**書けた ack**(`BODY_REWRITTEN`)なので、そこまで通す ──
+     *   撃った所で止めると、マニュアルにだけ在る機能になる。
+     */
+    const rw = (ev as { rewrite: Parameters<typeof applyBodyRewrite>[1] }).rewrite;
+    const after = applyBodyRewrite(RAW, rw)!;
+    expect(after, '前提: この書換が本文へ当たらない').not.toBeNull();
+    s.d.dispatch({
+      type: 'BODY_REWRITTEN',
+      lid: 'n1',
+      body: after,
+      rewrite: rw,
+      inserted: insertedLines(RAW, after),
+      status: null,
+      date: null,
+      archived: false,
+    });
+    expect(s.d.getState().lastAppend?.lid, '落としたリンクが「元に戻す」で消せない').toBe('n1');
+    expect(
+      s.d.getState().lastAppend!.lines.join('\n'),
+      '材料が入ったリンクを持っていない',
+    ).toContain('[相手](entry:n2)');
   });
 
   it('🔴 複数の行は 1 塊(改行区切り)。題名の無い lid は入れない', () => {
@@ -637,5 +679,189 @@ describe('CSS ── 落とし先の線と口の置き場', () => {
     expect(blocksFor(APP, "[data-pkc-field='block-grip']").join(';')).toContain('position: absolute');
     expect(blocksFor(APP, "[data-pkc-view-pane='detail']").join(';')).toContain('position: relative');
     expect(blocksFor(APP, "[data-pkc-region='split-frame']").join(';')).toContain('position: relative');
+  });
+});
+
+/**
+ * 🔴 **外から落とした file は、落とした所へ入る**(#684 段④)。
+ *
+ * > issue の一覧:「**添付を本文の好きな位置へ** … 🔴 0 件(入るのは末尾)」
+ *
+ * 守る主張:
+ * 1. 🔴 本文の塊の上では、段①② と**同じ前 / 後の線**が出る(落とせる印。issue の要件)
+ * 2. 🔴 落とすと `attachFiles` に**落とした所**(lid / 行番号 / その行の字)が渡る
+ * 3. 🔴 面の外へ落としたら位置は渡らない(= これまでどおり本文のいちばん下)
+ * 4. 🔴 落とした後に線は残らない
+ *
+ * ⚠ ここは**渡る所まで**。入った所は `attach-intake.test.ts`(本物の `attachFiles`)が見る。
+ */
+describe('外から落とした file は落とした所へ入る(#684 段④)', () => {
+  const at = (): { calls: Parameters<NonNullable<BinderServices['attachFiles']>>[] } => ({ calls: [] });
+
+  it('🔴 本文の塊の上では前 / 後の線が出て、落とすと「落とした所」が渡る', () => {
+    const got = at();
+    const s = setup({ attachFiles: (...a) => void got.calls.push(a) });
+    teardown = s.unbind;
+    const dt = filesDt([new File(['x'], '猫.png', { type: 'image/png' })]);
+    const target = s.block(2); // 段落 A(生 5)
+    rect(target, 100, 20);
+    const over = dragEv('dragover', dt, 105); // 上半分 = 前
+    target.dispatchEvent(over);
+    expect(over.defaultPrevented, 'file を受けていない').toBe(true);
+    expect(dt.dropEffect).toBe('copy');
+    expect(target.getAttribute('data-pkc-drop-edge'), '落とせる印が出ていない').toBe('before');
+    target.dispatchEvent(dragEv('drop', dt, 105));
+    expect(got.calls, '添付へ渡っていない').toHaveLength(1);
+    const [files, why, at3] = got.calls[0]!;
+    expect(files.map((f) => f.name)).toEqual(['猫.png']);
+    expect(why, '事情が無い回に事情を渡している').toBeUndefined();
+    // 生の body の 5 行目(段落 A)の**前**。⚠ **落とした時の本文も一緒に渡る** ──
+    //    書く頃には画面から消えているので、書く側はこれを基底にする
+    expect(at3).toEqual({ lid: 'n1', toBefore: 5, body: RAW, anchor: { line: 5, text: '段落 A' } });
+    expect(s.root.querySelectorAll('[data-pkc-drop-edge]'), '落とした後に線が残っている').toHaveLength(0);
+  });
+
+  it('🔴 下半分に落としたら塊の後ろ ── 章は章ごと(段① と同じ座標)', () => {
+    const got = at();
+    const s = setup({ attachFiles: (...a) => void got.calls.push(a) });
+    teardown = s.unbind;
+    const dt = filesDt([new File(['x'], 'a.png', { type: 'image/png' })]);
+    const target = s.block(2);
+    rect(target, 100, 20);
+    target.dispatchEvent(dragEv('dragover', dt, 115)); // 下半分 = 後
+    expect(target.getAttribute('data-pkc-drop-edge')).toBe('after');
+    target.dispatchEvent(dragEv('drop', dt, 115));
+    expect(got.calls[0]![2]).toEqual({
+      lid: 'n1',
+      toBefore: 6,
+      body: RAW,
+      anchor: { line: 5, text: '段落 A' },
+    });
+  });
+
+  /**
+   * 🔴 **線を出すのは「その本文へ本当に入る」ときだけ**(着地前レビュー A / UX レビュー 1・4)。
+   *
+   * ⚠ 添付が入るのは **`selectedLid` の本文**なので、**いま選んでいないノートの本文**
+   *   (= 横に留めた枠)へ落としても、そこには 1 バイトも入らない ── そこに線を出すと
+   *   「そこへ入る」という**守れない約束**になる(#300 と同じ型)。
+   * ⚠ **本文に入れられない種類**(フォルダ / 添付 / スタック)も同じ ── 線を出してから
+   *   「入れられません」と言うのは、issue の要件(落とせる印を出す)の裏返しである。
+   */
+  it('🔴 いま選んでいないノートの本文には線を出さず、位置も渡さない', () => {
+    const got = at();
+    const s = setup({ attachFiles: (...a) => void got.calls.push(a) });
+    teardown = s.unbind;
+    // ⚠ 描いてあるのは n1 の本文のまま、選んでいるのは別のノート(= 留めた枠と同じ形)
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+    const dt = filesDt([new File(['x'], 'a.png', { type: 'image/png' })]);
+    const target = s.block(2);
+    rect(target, 100, 20);
+    const over = dragEv('dragover', dt, 105);
+    target.dispatchEvent(over);
+    expect(over.defaultPrevented, '窓の上では受け続ける(落とせなくしない)').toBe(true);
+    expect(target.hasAttribute('data-pkc-drop-edge'), '入らない本文に線を出した').toBe(false);
+    target.dispatchEvent(dragEv('drop', dt, 105));
+    expect(got.calls, '添付へ渡っていない').toHaveLength(1);
+    expect(got.calls[0]![2], '入らない本文の行番号を渡した').toBeUndefined();
+  });
+
+  it('🔴 本文に入れられない種類(フォルダ)には線を出さず、位置も渡さない', () => {
+    const got = at();
+    const s = setup({ attachFiles: (...a) => void got.calls.push(a) }, 'folder');
+    teardown = s.unbind;
+    const dt = filesDt([new File(['x'], 'a.png', { type: 'image/png' })]);
+    const target = s.block(2);
+    rect(target, 100, 20);
+    target.dispatchEvent(dragEv('dragover', dt, 105));
+    expect(target.hasAttribute('data-pkc-drop-edge'), '入れられない種類に線を出した').toBe(false);
+    target.dispatchEvent(dragEv('drop', dt, 105));
+    expect(got.calls[0]![2], '入れられない種類に行番号を渡した').toBeUndefined();
+  });
+
+  /**
+   * 🔴 **出した線は必ず消える**(着地前レビュー C / 変異試験 M-C)。
+   * ⚠ 直す前の検査は**線を 1 度も出さずに**「0 件」を見ていたので、消す口を外しても緑だった。
+   * ⚠ 外から来た荷物には **`dragend` が飛ばない**(掴んだ元が OS 側)ので、
+   *   窓の外へ抜けた回は `dragleave` が畳む ── これが無いと**線が本文に残る**。
+   */
+  it('🔴 線を出した後に外れたら消える(面の外・窓の外)', () => {
+    const s = setup();
+    teardown = s.unbind;
+    const dt = filesDt([new File(['x'], 'a.png', { type: 'image/png' })]);
+    const target = s.block(2);
+    rect(target, 100, 20);
+    target.dispatchEvent(dragEv('dragover', dt, 105));
+    expect(target.getAttribute('data-pkc-drop-edge'), '前提: 線が出ていない(空振り)').toBe('before');
+    // ① 面の外へ動かしたら消える
+    const outside = document.createElement('div');
+    outside.setAttribute('data-pkc-region', 'entry-list');
+    s.root.append(outside);
+    outside.dispatchEvent(dragEv('dragover', dt, 5));
+    expect(s.root.querySelectorAll('[data-pkc-drop-edge]'), '面の外へ出ても線が残る').toHaveLength(0);
+    // ② 🔴 窓の外へ抜けたら消える(`dragend` が飛ばない外部の荷物)
+    target.dispatchEvent(dragEv('dragover', dt, 105));
+    expect(target.getAttribute('data-pkc-drop-edge'), '前提: 線が出ていない(空振り)').toBe('before');
+    const leave = dragEv('dragleave', dt, 105);
+    Object.defineProperty(leave, 'relatedTarget', { value: null });
+    target.dispatchEvent(leave);
+    expect(
+      s.root.querySelectorAll('[data-pkc-drop-edge]'),
+      '窓の外へ抜けても線が残る(消す口が画面に無い)',
+    ).toHaveLength(0);
+    // ⚠ 対照群 ── 面の中の別の要素へ移っただけでは畳まない(移動のたびに消さない)
+    target.dispatchEvent(dragEv('dragover', dt, 105));
+    const inner = dragEv('dragleave', dt, 105);
+    Object.defineProperty(inner, 'relatedTarget', { value: s.host });
+    target.dispatchEvent(inner);
+    expect(
+      s.root.querySelectorAll('[data-pkc-drop-edge]'),
+      '面の中を動いただけで線が消えた(ちらつく)',
+    ).toHaveLength(1);
+  });
+
+  it('🔴 本文の外へ落としたら位置は渡らない(これまでどおり、いちばん下)', () => {
+    const got = at();
+    const s = setup({ attachFiles: (...a) => void got.calls.push(a) });
+    teardown = s.unbind;
+    const outside = document.createElement('div');
+    outside.setAttribute('data-pkc-region', 'entry-list');
+    s.root.append(outside);
+    const dt = filesDt([new File(['x'], 'a.png', { type: 'image/png' })]);
+    const over = dragEv('dragover', dt, 5);
+    outside.dispatchEvent(over);
+    expect(over.defaultPrevented, '窓の上では受け続ける(落とせなくしない)').toBe(true);
+    expect(s.root.querySelectorAll('[data-pkc-drop-edge]'), '本文の外なのに線が出た').toHaveLength(0);
+    outside.dispatchEvent(dragEv('drop', dt, 5));
+    expect(got.calls, '添付へ渡っていない').toHaveLength(1);
+    expect(got.calls[0]![2], '本文の外なのに位置が渡った').toBeUndefined();
+  });
+
+  it('🔴 囲みは丸ごと 1 つの落とし先 ── 中へは入らない(書く側の門と同じ 1 本)', () => {
+    const got = at();
+    const s = setup({ attachFiles: (...a) => void got.calls.push(a) });
+    teardown = s.unbind;
+    const dt = filesDt([new File(['x'], 'a.png', { type: 'image/png' })]);
+    // ::: の塊(生 15〜17)── 下半分は**閉じの次**(生 18)であって、中(生 16)ではない
+    const box = s.block(12);
+    rect(box, 300, 40);
+    box.dispatchEvent(dragEv('dragover', dt, 335));
+    expect(box.getAttribute('data-pkc-drop-edge')).toBe('after');
+    box.dispatchEvent(dragEv('drop', dt, 335));
+    expect(got.calls[0]![2]).toEqual({
+      lid: 'n1',
+      toBefore: 18,
+      body: RAW,
+      anchor: { line: 15, text: ':::note' },
+    });
+    // 対照群 ── 上半分は開きの**前**(生 15)。どちらも囲いの外である
+    const dt2 = filesDt([new File(['x'], 'b.png', { type: 'image/png' })]);
+    box.dispatchEvent(dragEv('drop', dt2, 305));
+    expect(got.calls[1]![2]).toEqual({
+      lid: 'n1',
+      toBefore: 15,
+      body: RAW,
+      anchor: { line: 15, text: ':::note' },
+    });
   });
 });
