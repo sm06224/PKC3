@@ -383,6 +383,27 @@ test('🔴 設定で配色と文字の大きさを変えて、もう一度押す
   });
   const scrolled = await win.locator(MAIN).evaluate((el) => el.scrollTop);
   expect(scrolled, '送れていない(前提が崩れている)').toBeGreaterThan(0);
+  /**
+   * 🔑 **「読んでいた所」は、画面のいちばん上に在る塊で見る**(2026-09-08)。
+   * ⚠ 直す前はここで `scrollTop` の**数**を比べていたが、**字の大きさを変えると
+   *   上の中身が伸びる**ので、同じ所を読んでいても数は必ず動く ── ブラウザの
+   *   scroll anchoring が「見えている物」を留めるために `scrollTop` を足すからである。
+   *   実測(この test):**700 → 879**、そのとき画面の頭に在る段落は**同じ 1 つ**
+   *   (offsetTop 874 → 1135)。つまり**数が変わったのは正しい動き**だった。
+   * ⚠ 数の一致は**たまたま**成り立っていた ── マニュアルに節を 1 つ足したら落ちた。
+   *   CLAUDE.md §4「観測点が放っておいても変わるなら、変化は届いた証拠にならない」。
+   */
+  const topOfView = (): Promise<{ scrollTop: number; text: string }> =>
+    win.locator(MAIN).evaluate((el) => {
+      const top = el.scrollTop;
+      const kids = [...el.querySelectorAll('h1,h2,h3,h4,h5,h6,p,li,td,th,pre')];
+      const first = kids.find((k) => (k as HTMLElement).offsetTop >= top - 2);
+      return { scrollTop: top, text: (first?.textContent ?? '').trim().slice(0, 50) };
+    });
+
+  const topBefore = await topOfView();
+  // ⚠ 空振り防止 ── 読み取れていなければ、下の一致は「空 = 空」で必ず通る
+  expect(topBefore.text.length, '画面の頭の塊を読み取れていない').toBeGreaterThan(10);
 
   // 設定画面で実際に変える(保存の鍵を直に触らない)
   await page.bringToFront();
@@ -405,9 +426,12 @@ test('🔴 設定で配色と文字の大きさを変えて、もう一度押す
     url: location.href,
   }));
   expect(after.url, '読み直している').toBe(before.url);
-  expect(await win.locator(MAIN).evaluate((el) => el.scrollTop), '読んでいた所が先頭へ戻った').toBe(
-    scrolled,
+  const topAfter = await topOfView();
+  expect(topAfter.text, '読んでいた所が変わった(先頭へ戻った / 別の所を映している)').toBe(
+    topBefore.text,
   );
+  // ⚠ もう 1 つの向き ── 先頭へ戻っていない(中身の一致だけだと、全部同じ字の面で通る)
+  expect(topAfter.scrollTop, '先頭の近くへ戻っている').toBeGreaterThan(scrolled / 2);
   expect(after.theme).toBe('dracula');
   expect(after.bg, '地の色が新しい配色になっていない').not.toBe(before.bg);
   expect(after.fontSize, '文字の大きさが新しい設定になっていない').toBe('17px');
