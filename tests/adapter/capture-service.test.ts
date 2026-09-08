@@ -53,30 +53,60 @@ function meta(lid: string, archetype: string): EntryMeta {
   };
 }
 
-/** 手で動かせる収録。⚠ 終わり方(`onEnd`)は**実物と同じ 4 値**を撃てる形にする。 */
-function fakeCapture(kind: CaptureKind, onEnd: (r: CaptureEnd) => void, blob: Blob | null) {
+/**
+ * 手で動かせる収録。⚠ 終わり方(`onEnd`)は**実物と同じ 5 値**を撃てる形にする。
+ * 🔴 **切れた 1 本(`onPart`)も撃てる**(#771)── 撃てない fake にすると、
+ *   「分かれた回にどう見えるか」を**この層では 1 度も通らない**ことになる。
+ */
+function fakeCapture(
+  kind: CaptureKind,
+  onEnd: (r: CaptureEnd) => void,
+  onPart: ((b: Blob, n: number) => void) | undefined,
+  blob: Blob | null,
+) {
   let bytes = 0;
   let ms = 0;
   let stopped = 0;
   let discarded = 0;
+  /** 🔑 実物と同じ ── **渡し終えた本数**(いま録っている 1 本は含まない)。 */
+  let parts = 0;
+  /**
+   * 🔴 **終わりの合図は 1 回だけ**(実物の `finish` と同じ ── §3「stub を本物より
+   *   甘くしない」)。⚠ 1 稿目は `stop()` が `onEnd` を**撃たなかった**ので、
+   *   「止めたら `onEnd('stopped')` が返ってきて、受け側が二重に片付けかける」
+   *   という**実物にだけ在る場面**が 1 度も通っていなかった(変異試験 D5)。
+   */
+  let ended = false;
+  const finishOnce = (r: CaptureEnd): void => {
+    if (ended) return;
+    ended = true;
+    onEnd(r);
+  };
   const handle: CaptureHandle = {
     kind,
     bytes: () => bytes,
+    parts: () => parts,
     elapsedMs: () => ms,
     stop: () => {
       stopped += 1;
+      finishOnce('stopped');
       return Promise.resolve(blob);
     },
     discard: () => {
       discarded += 1;
-      onEnd('discarded');
+      finishOnce('discarded');
     },
   };
   return {
     handle,
     grow: (n: number) => (bytes += n),
     advance: (n: number) => (ms += n),
-    end: (r: CaptureEnd) => onEnd(r),
+    end: (r: CaptureEnd) => finishOnce(r),
+    /** 1 本切れた。⚠ **本数も進める**(実物と同じ ── 進めないと名前の連番がずれる)。 */
+    cut: (b: Blob) => {
+      parts += 1;
+      onPart?.(b, parts);
+    },
     stops: () => stopped,
     discards: () => discarded,
   };
@@ -110,6 +140,11 @@ function bench(
     holdAttach?: boolean;
     /** 書込の ack を返さない(`writeLock` が立ったままの状態を作る)。 */
     keepLock?: boolean;
+    /**
+     * 🔴 **動く時計**(#771)。⚠ 止まった時計では「**始めた時刻で名乗る**」を
+     *   確かめられない(取り込む時刻で名乗っても同じ字が出る ── 変異試験 C6)。
+     */
+    clock?: { at: Date };
   } = {},
 ): Bench {
   const d = new Dispatcher();
@@ -197,7 +232,7 @@ function bench(
     },
     onChange: (line) => lines.push(line),
     notify: (t) => notices.push(t),
-    now: () => new Date(2026, 7, 27, 3, 1, 2),
+    now: () => opts.clock?.at ?? new Date(2026, 7, 27, 3, 1, 2),
     tick: (fn) => {
       beats.push(fn);
       return () => {
@@ -206,7 +241,12 @@ function bench(
     },
     start: (kind, _capture, o) => {
       if (opts.refuse !== undefined) return Promise.reject(new CaptureRefused(opts.refuse));
-      live = fakeCapture(kind, o.onEnd ?? (() => {}), opts.blob === undefined ? new Blob(['xy']) : opts.blob);
+      live = fakeCapture(
+        kind,
+        o.onEnd ?? (() => {}),
+        o.onPart,
+        opts.blob === undefined ? new Blob(['xy']) : opts.blob,
+      );
       return Promise.resolve(live.handle);
     },
   };
@@ -264,7 +304,9 @@ describe('録音を止めると、開いていたノートに入る(#413)', () =
     b.live()!.advance(65_000);
     b.live()!.grow(2048);
     b.beat();
-    expect(b.lines.at(-1), '1 秒ごとに書き替わっていない').toBe('録音中 1:05(約 2.0 KB)');
+    expect(b.lines.at(-1), '1 秒ごとに書き替わっていない').toBe(
+      '録音中 1:05(約 2.0 KB・残り 11:58:55)',
+    );
     b.service.stop();
     await tick();
     expect(b.service.line(), '止めたのに帯が残っている').toBeNull();
@@ -443,7 +485,7 @@ describe('🔴 編集中に終わっても、収録を失わない(#413)', () =>
     expect(b.subs(), '始める前から見張っている').toBe(0);
     await b.service.start('audio');
     edit(b);
-    b.live()!.end('too-large');
+    b.live()!.end('too-long');
     await tick();
     expect(b.subs(), '預かったのに見張っていない').toBe(1);
 
@@ -465,7 +507,7 @@ describe('🔴 編集中に終わっても、収録を失わない(#413)', () =>
     const b = bench();
     await b.service.start('audio');
     edit(b);
-    b.live()!.end('too-large');
+    b.live()!.end('too-long');
     await tick();
     b.d.dispatch({ type: 'CANCEL_EDIT' });
     await tick();
@@ -474,7 +516,7 @@ describe('🔴 編集中に終わっても、収録を失わない(#413)', () =>
     // ⚠ もう一度、編集中に強制終了 ── **入るのは 2 本目だけ**
     await b.service.start('audio');
     edit(b);
-    b.live()!.end('too-large');
+    b.live()!.end('too-long');
     await tick();
     b.d.dispatch({ type: 'CANCEL_EDIT' });
     await tick();
@@ -513,18 +555,32 @@ describe('🔴 ④⑤ 断る / 捨てる(#413)', () => {
 });
 
 describe('🔴 黙って終わらない(#413)', () => {
-  it('上限に当たって自動で止まったら、理由が出て、それまでの分は残る', async () => {
+  it('12 時間に達して自動で止まったら、理由が出て、それまでの分は残る', async () => {
     const b = bench();
     await b.service.start('audio');
-    b.live()!.end('too-large');
+    b.live()!.end('too-long');
     await tick();
     // 🔴 **理由と結果は同じ 1 行**(別々に出すと、後の 1 行が前の 1 行を消す)
-    expect(b.notices.at(-1), '上限で止まった理由が出ていない').toMatch(/^録音が上限\(250\.0 MB\)に達したので止めました。/);
+    expect(b.notices.at(-1), '上限で止まった理由が出ていない').toMatch(
+      /^録音が上限\(12:00:00\)に達したので止めました。/,
+    );
     expect(b.notices.at(-1), '結果が同じ行に載っていない').toMatch(/本文のいちばん下に入れました$/);
     expect(b.d.getState().error, '知らせをエラーの行に出した').toBeNull();
     // 🔴 **落ちて全損だけは繰り返さない** ── 添付にも本文にも入っている
     expect(b.attached.length, '上限で止まったら収録が消えた').toBe(1);
     expect(appends(b.events).length, '上限で止まった回だけ本文へ入らない').toBe(1);
+  });
+
+  it('🔴 符号化が死んだ回も、理由が出て、それまでの分は残る(#771)', async () => {
+    const b = bench();
+    await b.service.start('screen');
+    b.live()!.end('failed');
+    await tick();
+    // 🔴 直す前は**受け口が 0 件**で、帯だけ伸び続けて誰も何も言わなかった
+    expect(b.notices.at(-1), '死んだ理由が出ていない').toMatch(
+      /^画面収録を続けられなくなったので止めました\(ブラウザが収録を止めました\)。/,
+    );
+    expect(b.attached.length, 'そこまでの分が消えた').toBe(1);
   });
 
   it('ブラウザ側の「共有を停止」でも終わり、そう言う', async () => {
@@ -545,5 +601,170 @@ describe('🔴 黙って終わらない(#413)', () => {
     await tick();
     expect(b.attached.length, '2 回取り込んだ').toBe(1);
     expect(appends(b.events).length, '2 回追記した').toBe(1);
+  });
+});
+
+describe('🔴 長い収録は分けて入れる(#771)', () => {
+  /** 追記に載った印(#668 C)。⚠ 「元に戻す」1 回でまとめて消えるための鍵。 */
+  const batches = (events: DomainEvent[]): Array<string | undefined> =>
+    events.flatMap((e) => (e.type === 'REQUEST_APPEND' ? [e.batch] : []));
+
+  it('🔴 切れた 1 本は、その場で添付になって本文へ入る(止まらない)', async () => {
+    const b = bench();
+    await b.service.start('audio');
+    b.live()!.cut(new Blob(['part-one']));
+    await tick();
+    expect(b.attached.length, '切れた本が取り込まれていない').toBe(1);
+    expect(appends(b.events).length, '切れた本が本文へ入っていない').toBe(1);
+    // 🔴 **まだ録っている** ── user の言葉は「途中終了はしてほしくない」
+    expect(b.service.line(), '切っただけで帯が消えた').not.toBeNull();
+  });
+
+  it('🔴 分かれた本には連番が付き、時刻は「始めた時刻」で揃う', async () => {
+    const b = bench();
+    await b.service.start('audio');
+    b.live()!.cut(new Blob(['a']));
+    await tick();
+    b.service.stop();
+    await tick();
+    expect(b.attached.map((a) => a.name)).toEqual([
+      '録音-2026-08-27-030102-1.webm',
+      '録音-2026-08-27-030102-2.webm',
+    ]);
+  });
+
+  it('🔴 分かれた本は「始めた時刻」で名乗る(取り込んだ時刻ではない)', async () => {
+    // ⚠ 時計を**動かす** ── 止めておくと、どちらで名乗っても同じ字になる
+    const clock = { at: new Date(2026, 7, 27, 3, 1, 2) };
+    const b = bench({ clock });
+    await b.service.start('audio');
+    b.live()!.cut(new Blob(['a']));
+    await tick();
+    // 🔴 4 時間経ってから止める(分かれた 2 本が別々の時刻を名乗ると、一覧で離れる)
+    clock.at = new Date(2026, 7, 27, 7, 30, 45);
+    b.service.stop();
+    await tick();
+    expect(b.attached.map((a) => a.name), '2 本目が別の時刻を名乗っている').toEqual([
+      '録音-2026-08-27-030102-1.webm',
+      '録音-2026-08-27-030102-2.webm',
+    ]);
+  });
+
+  it('⚠ 対照群 ── 1 本で収まった回は連番が付かない', async () => {
+    const b = bench();
+    await b.service.start('audio');
+    b.service.stop();
+    await tick();
+    expect(b.attached.map((a) => a.name)).toEqual(['録音-2026-08-27-030102.webm']);
+  });
+
+  it('🔴 分かれた行は同じ印で入る(「元に戻す」1 回でまとめて消える)', async () => {
+    const b = bench();
+    await b.service.start('audio');
+    b.live()!.cut(new Blob(['a']));
+    await tick();
+    b.service.stop();
+    await tick();
+    const tags = batches(b.events);
+    expect(tags.length, '2 行入っていない').toBe(2);
+    expect(tags[0], '印が付いていない').toBeDefined();
+    expect(tags[1], '分かれた行の印が違う ── 元に戻すが 2 回になる').toBe(tags[0]);
+  });
+
+  it('⚠ 対照群 ── 1 本で収まった回に印は付けない(元から 1 手である)', async () => {
+    const b = bench();
+    await b.service.start('audio');
+    b.service.stop();
+    await tick();
+    expect(batches(b.events)).toEqual([undefined]);
+  });
+
+  it('🔴 切れた本が編集中に落ちても、捨てずに預かる', async () => {
+    const b = bench();
+    await b.service.start('audio');
+    // ⚠ `BODY_LOADED` が先に要る(reducer の門)── 前提が崩れたらここで落ちる
+    b.d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: '本文' });
+    b.d.dispatch({ type: 'START_EDIT' });
+    expect(b.d.getState().phase, '編集に入っていない(前提が崩れている)').toBe('editing');
+    b.live()!.cut(new Blob(['a']));
+    await tick();
+    expect(b.attached, '編集中に取り込もうとしている').toEqual([]);
+    expect(b.notices.join(''), '預かったことを言っていない').toMatch(/預かりました/);
+    // 🔑 編集を終えたら入る(捨てていない)
+    b.d.dispatch({ type: 'CANCEL_EDIT' });
+    await tick();
+    await tick();
+    expect(b.attached.length, '編集を終えても入らない').toBe(1);
+  });
+
+  it('🔴 最後の 1 本が空でも、切れた本が在れば「録れていません」と言わない', async () => {
+    const b = bench({ blob: null });
+    await b.service.start('audio');
+    b.live()!.cut(new Blob(['a']));
+    await tick();
+    b.service.stop();
+    await tick();
+    expect(b.d.getState().error, '入っているのに失敗と言った').toBeNull();
+    expect(b.notices.at(-1), '何本入ったのかを言っていない').toMatch(/1 本に分けて入れました$/);
+  });
+
+  it('⚠ 対照群 ── 1 本も切れておらず空なら、これは本当に失敗である', async () => {
+    const b = bench({ blob: null });
+    await b.service.start('audio');
+    b.service.stop();
+    await tick();
+    expect(b.d.getState().error, '何も残っていないのに黙っている').toMatch(/1 バイトも録れていません/);
+  });
+
+  it('🔴 置き場に入らなかったら、録るのをやめる(250MB ごとに同じ断りを繰り返さない)', async () => {
+    const b = bench({ attachFails: true });
+    await b.service.start('audio');
+    b.live()!.cut(new Blob(['a']));
+    await tick();
+    await tick();
+    // 🔴 **録り続けない** ── 続けても次の 1 本も入らず、最後には 1 本も残らない
+    expect(b.service.line(), '入らないのに録り続けている').toBeNull();
+    expect(b.notices.at(-1), '止めた理由を言っていない').toMatch(/^置き場に空きが無いので録音を止めました/);
+  });
+
+  it('🔴 預かった本が入らなかったときも、録るのをやめる', async () => {
+    const b = bench({ attachFails: true });
+    await b.service.start('audio');
+    // ⚠ `BODY_LOADED` が先に要る(reducer の門)── 前提が崩れたらここで落ちる
+    b.d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: '本文' });
+    b.d.dispatch({ type: 'START_EDIT' });
+    expect(b.d.getState().phase, '編集に入っていない(前提が崩れている)').toBe('editing');
+    b.live()!.cut(new Blob(['a']));
+    await tick();
+    // ⚠ ここでは**まだ止まらない**(預かっただけ ── 入らないとは限らない)
+    expect(b.service.line(), '預かった時点で止めている').not.toBeNull();
+    b.d.dispatch({ type: 'CANCEL_EDIT' });
+    await tick();
+    await tick();
+    expect(b.service.line(), '預かった本が入らなかったのに録り続けている').toBeNull();
+    expect(b.notices.at(-1), '止めた理由を言っていない').toMatch(/^置き場に空きが無いので録音を止めました/);
+  });
+
+  it('⚠ 対照群 ── 入った回は録り続ける(止めるのは「入らなかったとき」だけ)', async () => {
+    const b = bench();
+    await b.service.start('audio');
+    b.live()!.cut(new Blob(['a']));
+    await tick();
+    await tick();
+    expect(b.service.line(), '入ったのに止まった').not.toBeNull();
+    expect(b.notices.join(''), '入ったのに置き場の話をしている').not.toMatch(/置き場に空きが無い/);
+  });
+
+  it('🔴 帯に「残り」と「何本目か」が出る', async () => {
+    const b = bench();
+    await b.service.start('audio');
+    b.live()!.advance(5_000);
+    b.beat();
+    expect(b.lines.at(-1), '残りが出ていない').toMatch(/残り 11:59:55/);
+    expect(b.lines.at(-1), '1 本目に「本目」を出している').not.toMatch(/本目/);
+    b.live()!.cut(new Blob(['a']));
+    await tick();
+    b.beat();
+    expect(b.lines.at(-1), '切った後に何本目かを出していない').toMatch(/2 本目/);
   });
 });
