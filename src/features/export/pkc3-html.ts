@@ -51,7 +51,8 @@ import {
   DEFAULT_PAGE_FORMAT,
   pageFormatCss,
   type PageFormat,
-} from '@features/page-format';
+} from '../page-format';
+import { DEFAULT_PROSE_ALIGN, proseAlignCss, type ProseAlign } from '../prose-align';
 import type { ArchiveSource } from './pkc3-archive';
 
 export const HTML_FORMAT = 'pkc3-portable';
@@ -142,7 +143,7 @@ export async function* base64Chunks(blob: Blob): AsyncGenerator<string> {
  * ⚠ **紙面フォーマットを受ける**(2026-08-08)ので関数である ── 書き出した瞬間の
  * 設定を焼く。器(`<body>`)に印を 1 つ付け、値の差し替えは style の末尾で行う。
  */
-function viewer(pageFormat: PageFormat): string {
+function viewer(pageFormat: PageFormat, proseAlign: ProseAlign): string {
   return `
 <style>
 :root{color-scheme:light dark}
@@ -299,6 +300,14 @@ object.p{display:block;width:100%;height:calc(100vh - 12rem);min-height:320px;
    ⚠ 紙系(A4 / A3)のときだけ @page が出る ── 画面用(フル HD / 4:3)は
      受け手の既定紙に任せる。 */
 ${pageFormatCss(pageFormat)}
+/* 🔴 **本文の置き場所**(#722、2026-09-08)── 書き出した瞬間の設定を焼く。
+   ⚠ 当たる先は上と同じ**器の body 要素**(data-pkc-prose-align を下に付けてある)で、
+     焼いたトークンの :root{--prose-lead:auto} とは**別の要素**である ──
+     カスタムプロパティの継承で本文へ届くので、順序も詳細度も争わない。
+   ⚠ **既定(中央)でも書く** ── 空にすると、既定の人だけ :root の値へ暗黙に
+     依存する形になり、「焼いた側が正本」が 1 通りでなくなる。
+   ⚠ 値の正本は features/prose-align.ts の表 1 枚(アプリの tokens.css と同じ値)。 */
+${proseAlignCss(proseAlign)}
 /* ── 🔴 **本文の見た目の正本は app.css**(2026-08-07)。ここから下は
    src/styles/app.css の .pkc-md-rendered 前置きの規則を build 時に抜いて焼いたもの
    (build/body-css.ts + build/body-css-plugin.ts)。器は class .b、本文の規則は
@@ -328,7 +337,7 @@ ${BODY_CSS}
    (押しても何も起きない飾りなので)── 26px のままだと 24px の空きが残る(実測)。 */
 .b .pkc-render-toggle{right:2px}
 </style>
-<body data-pkc-page-format="${pageFormat}">
+<body data-pkc-page-format="${pageFormat}" data-pkc-prose-align="${proseAlign}">
 <nav>
   <h1 id="t"></h1>
   <button id="print" class="p" type="button" hidden>この文書を印刷</button>
@@ -743,6 +752,11 @@ export async function writePortableHtml(
    *   (`localStorage` にも container にも触らない)。
    */
   pageFormat: PageFormat = DEFAULT_PAGE_FORMAT,
+  /**
+   * 🔴 **本文の置き場所**(#722、2026-09-08)。**書き出した瞬間の設定**を焼く。
+   * ⚠ 渡さないと既定(中央)── 呼び手が忘れても「いままでと同じ」に倒れる。
+   */
+  proseAlign: ProseAlign = DEFAULT_PROSE_ALIGN,
 ): Promise<HtmlResult> {
   const warnings: string[] = [];
   /**
@@ -935,7 +949,7 @@ export async function writePortableHtml(
     assetCount++;
   }
   parts.push('}}');
-  parts.push('</script>', viewer(pageFormat));
+  parts.push('</script>', viewer(pageFormat, proseAlign));
 
   // 🔴 畳んだぶんの行をここで足す(#202)── 呼ばないと「超えた件数」が消える
   warn.finish();

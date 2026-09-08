@@ -2031,8 +2031,11 @@ li[data-pkc-row-slot] {
    *   代わりに「図は焼き直されない」と書いていた 4 か所を直した。
    * ⚠ **上限が無い人**(紙面「フル HD」= `--read-w: none`)には**何も起きない**
    *   ── 塊が器いっぱいなので `auto` は 0 になる。
+   * 🔴 **左寄せへ戻せる**(#722、2026-09-08)── `--prose-lead` は既定 `auto`(中央)、
+   *   設定「本文の置き場所 = 左」で `0` になる。⚠ **切替をここに書かない** ──
+   *   値の正本は `tokens.css`(と `features/prose-align.ts` の表)1 か所である。
    */
-  margin-inline: auto;
+  margin-inline: var(--prose-lead) auto;
 }
 /**
  * 🔴 **ライブエディタで生になった行**(`[data-pkc-row-slot]`)。
@@ -2369,7 +2372,10 @@ li[data-pkc-row-slot] {
    *   custom property へ切り出すと `tokens.css` にトークンを置く決まりに当たるが、
    *   `100%` は使う側の包含ブロックで解決されるので `:root` には置けない
    *   (書き出した HTML は `--read-w` を器に付ける)。選択子リストで 1 本に保つ。 */
-  margin-inline-start: max(0px, calc((100% - var(--read-w)) / 2));
+  /* 🔴 **左寄せへ戻せる**(#722)── 既定は中央(`tokens.css` の `--prose-indent`)。
+   *   ⚠ 上の `--prose-lead` と**対で**動く ── 片方だけ 0 にすると、
+   *   段落は左端なのに表だけ 126px 内側、という食い違いが出る。 */
+  margin-inline-start: var(--prose-indent);
 }
 .pkc-md-rendered .pkc-render-source {
   margin: 0;

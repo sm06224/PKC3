@@ -697,6 +697,11 @@ export interface BinderServices {
    */
   setPageFormat?(format: string): void;
   /**
+   * 🔴 **本文の置き場所**(#722、2026-09-08)。⚠ **flag ではない**(正規設定)──
+   *   読み幅より窓が広いとき、本文を列の中央に置くか左端に置くかが決まる。
+   */
+  setProseAlign?(align: string): void;
+  /**
    * 編集の仕方(#104 第 2 弾。user 裁定 2026-08-08)。
    * ⚠ **flag ではない**(正規設定)── 効くのは次に編集を開いたとき。
    */
@@ -6383,6 +6388,17 @@ const ACTIONS: Record<string, ActionHandler> = {
         ? target.value
         : target.getAttribute('data-pkc-page-format-value');
     if (format) services.setPageFormat?.(format);
+  },
+  /**
+   * 🔴 **本文の置き場所**(#722)。⚠ `set-page-format` と**同じ受け方**
+   *   (`<select>` でもボタンでも通す)── 3 本目の作法を作らない。
+   */
+  'set-prose-align': (_dispatcher, target, services) => {
+    const align =
+      target instanceof HTMLSelectElement
+        ? target.value
+        : target.getAttribute('data-pkc-prose-align-value');
+    if (align) services.setProseAlign?.(align);
   },
   'set-editor-mode': (_dispatcher, target, services) => {
     // ⚠ `set-theme` と同じ受け方(`<select>` でもボタンでも通す)

@@ -1646,6 +1646,63 @@ describe('執筆規約 条 4 / 5 / 6(#793)', () => {
 });
 
 /**
+ * 🔴 **執筆規約 条 8 ── ガイドの表にキーの一覧を作らない**(#779 段⑤、2026-09-08)。
+ *
+ * ⚠ 直す前は**同じ 4 つのキーが 2 か所**に書かれていた:
+ *   ① 書式パネル(ガイド)の「ボタンが無い書式」の表 ── 3 列目が「既定のキー」
+ *   ② ショートカットキー(早見表)の「編集しているとき」の表
+ *   🔴 **綴りが違う**(`` `Alt` + `Shift` + `H` `` と `**Alt + Shift + H**`)ので、
+ *   素朴な `grep` では **1 か所しか出ない** ── 片方だけ直す日が来る。
+ *
+ * 🔑 規約 条 8「**ガイドに一覧を書かない。早見表に説明を書かない**」に沿って寄せた:
+ *   ガイドは「何になるか」だけ、キーは早見表 1 か所。
+ * ⚠ **「マニュアル全体でキーの綴りが 1 回ずつ」にはできない** ── 手順の文の中で
+ *   同じキーに触れるのは正しい(実測: `Alt + Shift + W` は 3 か所、`Ctrl + Shift + P`
+ *   は 7 か所)。だから見るのは**この節の表の中だけ**である
+ *   (CLAUDE.md §1「主張そのものが成り立たない条件を置かない」)。
+ */
+describe('執筆規約 条 8 ── ガイドの表にキーを並べない(#779 段⑤)', () => {
+  /** 見出し 1 つぶんの本文(次の `#` 見出しの手前まで)。 */
+  function sectionBody(title: string): string {
+    const lines = MANUAL.split('\n');
+    const heads = scanHeadings(MANUAL);
+    const at = heads.findIndex((h) => h.title === title);
+    expect(at, `見出し「${title}」がマニュアルに無い(この検査は空振り)`).toBeGreaterThanOrEqual(0);
+    const start = heads[at]!.line;
+    const next = heads[at + 1];
+    return lines.slice(start, next === undefined ? lines.length : next.line - 1).join('\n');
+  }
+
+  const GUIDE = 'ボタンが無い書式(キーで入れます)';
+
+  it('空振り防止 ── その節と、その表を本当に読めている', () => {
+    const body = sectionBody(GUIDE);
+    const rows = body.split('\n').filter((l) => l.startsWith('|'));
+    // 🔑 読めていなければ、下の「キーが無い」は**必ず**成り立ってしまう
+    expect(rows.length, 'ガイドの表を拾えていない').toBeGreaterThanOrEqual(6);
+    expect(body, '書式の名前が読めていない').toContain('ハイライト');
+  });
+
+  it('🔴 ガイドの表にキーの列を作らない(早見表 1 か所へ寄せる)', () => {
+    const rows = sectionBody(GUIDE)
+      .split('\n')
+      .filter((l) => l.startsWith('|'));
+    const bad = rows.filter((l) => /Alt|Ctrl|⌘/.test(l.replace(/`/g, '')));
+    expect(
+      bad,
+      'ガイドの表にキーが並んでいる ── 早見表(→「ショートカットキー」)へ寄せる(規約 条 8)',
+    ).toEqual([]);
+  });
+
+  it('🔴 早見表の側には 4 つとも残っている(寄せた先が空でない)', () => {
+    const flat = MANUAL.replace(/`/g, '').replace(/\*/g, '');
+    for (const k of ['H', 'R', 'E', 'X']) {
+      expect(flat, `Alt + Shift + ${k} がマニュアルから消えた`).toContain(`Alt + Shift + ${k}`);
+    }
+  });
+});
+
+/**
  * 🔴 **執筆規約 条 9(1 節 600〜800 字)を「増やさない」で守る**(#793、2026-09-08)。
  *
  * ⚠ **0 件にはできない** ── いま 93 節中 46 節が 800 字を超えている。ここを

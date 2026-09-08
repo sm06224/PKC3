@@ -48,6 +48,12 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
   { key: 'pkc3.editor-mode', label: '編集の仕方' },
   { key: 'pkc3.open-in-edit', label: '「開く」で編集に入るか' },
   { key: 'pkc3.page-format', label: '紙面' },
+  /**
+   * ⚠ **紙面と対**(#722、2026-09-08)── 片方だけ運ぶと「読み幅は移ったのに
+   *   置き場所は既定」になる。⚠ 別の端末でも**同じ意味**になる
+   *   (中央で読みたいか左端で読みたいかは**人に付く**)。
+   */
+  { key: 'pkc3.prose-align', label: '本文の置き場所' },
   // ⚠ 別の端末でも**同じ意味**になる(見づらいと感じる大きさは人に付く)── 移す
   { key: 'pkc3.text-scale', label: '文字の大きさ' },
   { key: 'pkc3.read-columns', label: '本文の段組み' },
