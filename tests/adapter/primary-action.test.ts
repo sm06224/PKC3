@@ -441,14 +441,26 @@ describe('編集中の「+ ノート」は理由を言う(#761)', () => {
   it('🔴 編集中でも動くボタン(添付・録音・画面・計る)は薄くしない', () => {
     const { root, d } = mount();
     d.dispatch({ type: 'START_EDIT' });
-    const alive = ['attach-file', 'start-audio-capture', 'start-screen-capture', 'start-timer'];
+    /*
+     * ⚠ **「添付」だけ `data-pkc-field` を持たない**(`data-pkc-action` のみ)──
+     *   1 稿目は 4 つとも field で引いて **3 つしか見つかっていなかった**のに、
+     *   下限が `> 1` だったので**素通りした**(smoke が実ブラウザで拾った)。
+     * 🔑 下限は**数え上げた数そのもの**にする ── 1 つ名前が変わったら落ちる
+     *   (CLAUDE.md §1「空振り防止は、満たされない条件で書く」)。
+     */
+    const alive = [
+      '[data-pkc-action="attach-file"]',
+      '[data-pkc-field="start-audio-capture"]',
+      '[data-pkc-field="start-screen-capture"]',
+      '[data-pkc-field="start-timer"]',
+    ];
     const found = alive
-      .map((f) => root.querySelector<HTMLButtonElement>(`[data-pkc-field="${f}"]`))
+      .map((sel) => root.querySelector<HTMLButtonElement>(sel))
       .filter((el): el is HTMLButtonElement => el !== null);
-    // ⚠ 空振り防止 ── 1 つも見つからないなら、下の assert は何も見ていない
-    expect(found.length, '対照群のボタンが 1 つも無い(名前が変わった?)').toBeGreaterThan(1);
+    expect(found.length, '対照群のボタンが欠けている(名前が変わった?)').toBe(alive.length);
     for (const el of found) {
-      expect(el.disabled, `編集中でも動くはずの ${el.dataset['pkcField']} が薄くなった`).toBe(false);
+      const name = el.dataset['pkcField'] ?? el.dataset['pkcAction'] ?? '?';
+      expect(el.disabled, `編集中でも動くはずの ${name} が薄くなった`).toBe(false);
       expect(el.getAttribute('data-pkc-blocked'), '理由が付いている').toBeNull();
     }
   });

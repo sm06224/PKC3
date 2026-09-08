@@ -254,13 +254,16 @@ test('🔴 編集中は「+ ノート」が薄くなり、鍵で撃つと理由�
    * 🔑 **対照群を同じ息で見る**:同じ帯の「添付」は**編集中でも使える**ので薄くない
    *   ── これが無いと「帯ごと薄くする」実装でも通る。
    */
-  const opacityOf = async (field: string): Promise<number> =>
-    page
-      .locator(`[data-pkc-field="${field}"]`)
-      .evaluate((el) => Number(getComputedStyle(el).opacity));
-  expect(await opacityOf('open-today'), '編集中なのに「今日」が薄くなっていない').toBeLessThan(0.6);
+  // ⚠ **「添付」は `data-pkc-field` を持たない**(`data-pkc-action` のみ)── 1 稿目は
+  //    field で引いて **30 秒待って落ちた**。引き方は面ごとに確かめる
+  const opacityOf = async (sel: string): Promise<number> =>
+    page.locator(sel).evaluate((el) => Number(getComputedStyle(el).opacity));
   expect(
-    await opacityOf('attach-file'),
+    await opacityOf('[data-pkc-field="open-today"]'),
+    '編集中なのに「今日」が薄くなっていない',
+  ).toBeLessThan(0.6);
+  expect(
+    await opacityOf('[data-pkc-action="attach-file"]'),
     '編集中でも使える「添付」まで薄くなった(帯ごと薄くしている?)',
   ).toBeGreaterThan(0.9);
 
