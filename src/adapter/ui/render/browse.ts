@@ -58,6 +58,26 @@ export const BROWSE_TABS: readonly { mode: BrowseMode; label: string }[] = [
   { mode: 'contacts', label: '連絡先' },
 ] as const;
 
+/**
+ * 🔴 **編集中に黙って死ぬボタンの名指し**(#791。user 裁定 2026-09-08)。
+ *
+ * ⚠ **帯のボタン全部にしてはいけない** ── 添付 / 録音 / 画面 / 計る は
+ *   **編集中でも動く**(預かる)ので、薄くすると嘘になる。
+ * 🔑 ここに足すのは「`phase !== 'ready'` で**無言 return する** handler を持つ物」だけ。
+ *   ⚠ `binder.ts` の handler を直したら、この一覧も見直す(§7 ── 判定が 2 か所にある)。
+ */
+const BLOCKABLE_FIELDS: readonly string[] = [
+  // 今日の日付のノートを開く(`open-today` が `phase !== 'ready'` で黙って降りる)
+  '[data-pkc-field="open-today"]',
+  /*
+   * 1 件も無い一覧の「+ ノートを作る」(`CREATE_ENTRY` を phase が捨てる)。
+   * ⚠ **重なるのは `initializing` だけ**である(実測)── `editing` / `error` は
+   *   **開いている本文**が要るので、そのノートが `entryMetas` に居て一覧が空にならない。
+   *   レビューは `error` と書いていたが、その形は**到達しない**。
+   */
+  '[data-pkc-field="empty-start-create"]',
+];
+
 export class BrowseRouter {
   private readonly panes: Record<BrowseMode, HTMLElement>;
   private readonly list: SidebarRenderer;
@@ -80,6 +100,8 @@ export class BrowseRouter {
   private readonly filterInput: HTMLInputElement | null;
   /** 左の列の「+ ノート」(主の操作の印を phase で付け外しする)。 */
   private readonly createRun: HTMLElement | null;
+  /** 押せない理由を探す範囲(左の列 / 面の器)。 */
+  private readonly roots: readonly HTMLElement[];
   private last: BrowseMode;
 
   /**
@@ -129,12 +151,27 @@ export class BrowseRouter {
      *   (どの面を開いていても左の列に出ているボタンである)。
      */
     this.createRun = sidebar.querySelector<HTMLElement>('[data-pkc-field="create-run"]');
+    // 押せない理由を添える先を探す範囲 ── 左の列(帯 + 一覧)と、面の器(ファイラ)
+    this.roots = [sidebar, host];
     this.list = new SidebarRenderer(sidebar);
     this.kindBar = new KindBarRenderer(sidebar);
     this.filer = new FilerRenderer(this.panes.filer);
     this.launcher = new LauncherRenderer(this.panes.launcher);
     this.schedule = new ScheduleRenderer(this.panes.schedule, now);
     this.contacts = new ContactsRenderer(this.panes.contacts);
+  }
+
+  /**
+   * 押せない理由を添える先。⚠ **口を 1 つにする**(CLAUDE.md §7)── 面ごとに
+   * `setBlocked` を書くと、次に足した面だけ黙って死ぬ。
+   */
+  private blockables(): HTMLElement[] {
+    const out: HTMLElement[] = [];
+    if (this.createRun !== null) out.push(this.createRun);
+    for (const sel of BLOCKABLE_FIELDS)
+      for (const el of this.roots.flatMap((r) => [...r.querySelectorAll<HTMLElement>(sel)]))
+        out.push(el);
+    return out;
   }
 
   render(state: AppState, mode: BrowseMode): void {
@@ -170,8 +207,23 @@ export class BrowseRouter {
     if (this.createRun !== null) {
       const ready = state.phase === 'ready';
       setPrimary(this.createRun, ready);
-      setBlocked(this.createRun, blockedActionNote(state.phase));
     }
+    /**
+     * 🔴 **同じ帯の「今日」も、1 件も無い一覧の「作る」も、同じ字で断る**
+     *   (#791 ①②。user 裁定 2026-09-08「『今日』も薄くする」)。
+     *
+     * ⚠ 直す前は **「+ ノート」だけ**が薄くなり、その 1 つ右の「今日」は
+     *   **濃いまま押せそうに見えて、押しても何も起きなかった**(`open-today` の
+     *   handler が `phase !== 'ready'` で無言 return する)。
+     *   🔴 #761 で「**薄い = 押せない**」を user に教えたぶん、隣がその規則を
+     *   裏切ると**直す前より悪い** ── user は自分の押し方を疑う。
+     * ⚠ **同じ帯でも薄くしてはいけない物がある** ── 添付 / 録音 / 画面 / 計る は
+     *   **編集中でも動く**(預かる)。黙って死んでいたのは「今日」1 つだけだった。
+     * 🔑 だから**名指しの一覧**で持つ ── 「帯のボタン全部」にすると、
+     *   動く物まで薄くなる(この差は phase では表せない)。
+     * ⚠ 「1 件も無い一覧の作る」は**描き直されるたびに別の要素**なので、
+     *   構築時ではなく**毎回引き直す**(`empty-start` は list / filer が render 中に作る)。
+     */
     /**
      * 🔴 **絞りの字も面に関係なく合わせる**(#536 ②)。
      * ⚠ 打鍵中は `value === filterQuery` なので書き戻しは起きない(caret を壊さない)。
@@ -184,6 +236,13 @@ export class BrowseRouter {
     else if (mode === 'schedule') this.schedule.render(state);
     else if (mode === 'contacts') this.contacts.render(state);
     else this.launcher.render(state);
+    /*
+     * 🔴 **面を描き終えてから理由を添える**(#791 ②)── 「1 件も無い一覧の作る」は
+     *   この render の中で**作り直される**ので、先に添えると**古い要素**に付いて
+     *   新しい要素は素のまま出る(1 稿目で実際に踏んだ:test が「押せる見た目のまま」で落ちた)。
+     */
+    const why = blockedActionNote(state.phase);
+    for (const el of this.blockables()) setBlocked(el, why);
     // 🔑 **中身を入れ終わってから**位置を合わせる(空の器に書いても丸められる)。
     // ⚠ 面 = 探し方 × 「絞り込み中かどうか」── 絞り込んだ結果は先頭からが正しく、
     //    戻したときに元の位置へ帰るのが欲しい振る舞い

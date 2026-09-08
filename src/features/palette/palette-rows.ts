@@ -87,7 +87,17 @@ function rankOf(cmd: KeyCommand, q: string): number | null {
  *   (「ノートを選んでいるときだけ効きます」)── だからそれを引く。
  *   ここで書き直すと、`note` と理由の**2 つの答え**ができる(§7)。
  */
-function reasonOf(cmd: KeyCommand): string {
+function reasonOf(cmd: KeyCommand, blocked: string | null): string {
+  /*
+   * 🔴 **そのボタンが持っている理由を最優先で使う**(#791 ④)。
+   *
+   * ⚠ 直す前はここが `cmd.note`(**静的な字**)しか見ておらず、
+   *   ①出口(保存 / キャンセル)を言わない ②**保存に失敗している保護中でも
+   *   「編集中は効きません」と出る**(#516 が直したはずの形)という 2 つを踏んでいた。
+   * 🔑 理由は**画面のボタンが持っている**ので、そこから引く ── phase をここで
+   *   読み直すと、同じ問いに答える口が 2 つになる(CLAUDE.md §7)。
+   */
+  if (blocked !== null && blocked !== '') return `${NOT_READY_PREFIX}${blocked}`;
   if (!cmd.contexts.includes('global')) {
     const where = cmd.contexts.map((c) => CONTEXT_LABELS[c]).join(' / ');
     return `${NOT_READY_PREFIX}${where}にいるときだけ効きます`;
@@ -103,6 +113,11 @@ function reasonOf(cmd: KeyCommand): string {
  * @param bindings いまの割当(`resolveBindings` の結果)
  * @param ready **いま実行できる**コマンドの id。⚠ 呼び側(adapter)が画面を見て決める
  * @param mac 鍵の字を mac 風(⌘ / ⌥)にするか
+ * @param blockedReason 🔴 **そのボタンがいま持っている「押せない理由」**を引く関数
+ *   (#791 ④。user 裁定 2026-09-08)。⚠ 呼び側(adapter)が渡す ── この層は
+ *   `AppState` を知らないので、ここで phase を読むと**判定が 2 か所**になる(§7)。
+ *   ⚠ 返らないとき(`null`)は今までどおり `note` を使う ── `note` は
+ *   「履歴が無い」のような **phase と関係のない理由**を持っている
  *
  * 🔑 **押せるものが先**。⚠ 押せないものを混ぜて並べると、
  *   絞り込んだ結果の 1 行目が押せない行になり、**Enter が空振りする**。
@@ -112,6 +127,7 @@ export function paletteRows(
   bindings: KeymapBindings,
   ready: ReadonlySet<string>,
   mac = false,
+  blockedReason: (id: string) => string | null = () => null,
 ): readonly PaletteRow[] {
   const q = fold(query.trim());
   const hits: { row: PaletteRow; rank: number; order: number }[] = [];
@@ -127,7 +143,7 @@ export function paletteRows(
         label: cmd.label,
         keys: (bindings[cmd.id] ?? cmd.defaults).map((b) => chordLabel(b, mac)),
         ready: ok,
-        why: ok ? (cmd.note ?? '') : reasonOf(cmd),
+        why: ok ? (cmd.note ?? '') : reasonOf(cmd, blockedReason(cmd.id)),
       },
     });
   }

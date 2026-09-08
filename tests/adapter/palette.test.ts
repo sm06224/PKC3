@@ -17,6 +17,8 @@ import { buildShell } from '../../src/adapter/ui/render/shell';
 import { bindActions, formatTargetOf } from '../../src/adapter/ui/actions/binder';
 import { DIALOG_REGION, resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
 import { NOT_READY_PREFIX } from '../../src/features/palette/palette-rows';
+import { BrowseRouter } from '../../src/adapter/ui/render/browse';
+import { EDITING_NOTE } from '../../src/adapter/state/app-state';
 
 function meta(lid: string, title: string): EntryMeta {
   return {
@@ -512,5 +514,77 @@ describe('小窓を名前で探す(#690 I5)', () => {
     root.append(stray);
     await search(root, 'ウィンドウ');
     expect(rowOf('open-note-window')!.disabled, '帯の外のボタンを受け手に数えた').toBe(true);
+  });
+});
+
+/**
+ * 🔴 **「押せない理由」は、3 つの経路で同じ字を出す**(#791 ④。user 裁定 2026-09-08)。
+ *
+ * ⚠ 直す前、パレットの行だけ `keymap.ts` の `note`(**静的な字**)を出していた:
+ *   ①**出口(保存 / キャンセル)を言わない** ②**保存に失敗している保護中でも
+ *   「編集中は効きません」と出る**(#516 が直したはずの形が、ここだけ残っていた)。
+ * 🔑 **本物どうしを繋ぐ**(CLAUDE.md §7)── 理由を置く側(`BrowseRouter` →
+ *   `setBlocked`)と、読む側(`binder` → `paletteRows`)を**同じ画面**に立てる。
+ *   ⚠ 片方を stub にすると、綴りの食い違いが両方緑のまま通る。
+ */
+describe('パレットの「押せない理由」は、ボタンが持っている字を出す(#791 ④)', () => {
+  function setupWithBrowse(): { root: HTMLElement; d: Dispatcher } {
+    document.body.innerHTML = '';
+    resetAppDialogForTest();
+    const root = document.createElement('div');
+    document.body.append(root);
+    const regions = buildShell(root);
+    const d = new Dispatcher();
+    // 🔑 理由を置くのはこの器である(これが無いと `data-pkc-blocked` は誰も書かない)
+    const browse = new BrowseRouter(regions.sidebar, regions.browseHost);
+    d.onState((st) => browse.render(st, 'list'));
+    bindActions(root, d);
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1', 'めも')], relations: [] });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '本文\n' });
+    return { root, d };
+  }
+
+  it('🔴 編集中は、出口(保存 / キャンセル)まで言う', async () => {
+    const { root, d } = setupWithBrowse();
+    d.dispatch({ type: 'START_EDIT' });
+    // ⚠ 空振り防止 ── 理由がボタンに置かれていること(置かれていなければ下は自明に落ちる)
+    const btn = root.querySelector('[data-pkc-field="create-run"]');
+    expect(btn?.getAttribute('data-pkc-blocked'), '前提が崩れている').toBe(EDITING_NOTE);
+
+    key({ key: 'p', ctrlKey: true, shiftKey: true });
+    await tick();
+    expect(whyOf('create-entry'), '理由が出ていない').toContain(NOT_READY_PREFIX);
+    expect(whyOf('create-entry'), '出口(保存 / キャンセル)を言っていない').toContain(EDITING_NOTE);
+  });
+
+  it('🔴 保存に失敗している保護中に「編集中」と言わない(#516 の形)', async () => {
+    const { root, d } = setupWithBrowse();
+    // ⚠ error phase は「守るべき未達 commit が在る」ときだけ立つ ── その順で作る
+    d.dispatch({ type: 'START_EDIT' });
+    d.dispatch({ type: 'UPDATE_OPEN_BODY', body: '本文 2\n' });
+    d.dispatch({ type: 'COMMIT_EDIT' });
+    d.dispatch({ type: 'SYS_ERROR', error: 'disk' });
+    expect(d.getState().phase, '前提が崩れている').toBe('error');
+    expect(
+      root.querySelector('[data-pkc-field="create-run"]')?.getAttribute('data-pkc-blocked'),
+      '前提が崩れている(理由が置かれていない)',
+    ).toContain('保存に失敗');
+
+    key({ key: 'p', ctrlKey: true, shiftKey: true });
+    await tick();
+    const why = whyOf('create-entry');
+    expect(why, '編集していないのに「編集中」と言った').not.toContain('編集中');
+    expect(why, 'いまの理由を言っていない').toContain('保存に失敗');
+  });
+
+  it('⚠ 対照群 ── 理由を持たない行は、今までどおり登記簿の字を出す', async () => {
+    setupWithBrowse();
+    key({ key: 'p', ctrlKey: true, shiftKey: true });
+    await tick();
+    // 「戻る」は履歴が無いだけ(phase の話ではない)ので、ボタンは理由を持たない
+    const why = whyOf('nav-back');
+    expect(why, '押せない行なのに理由が空').toContain(NOT_READY_PREFIX);
+    expect(why, 'phase の理由が漏れている').not.toContain('編集中は使えません');
   });
 });

@@ -2777,7 +2777,21 @@ export function openPaletteFor(
      * 🔑 外すのは**ここ 1 か所** ── `ready` の側でも外すと、片方を消しても
      *   もう片方が救うので、**どちらが効いているか分からなくなる**(§1)。
      */
-    return paletteRows(query, keymap.getBindings(), ready, isMac()).filter(
+    /**
+     * 🔴 **押せない理由は、そのボタン自身から引く**(#791 ④。user 裁定 2026-09-08)。
+     *
+     * ⚠ 直す前は `keymap.ts` の `note`(静的な字)しか出ておらず、
+     *   ①**出口(保存 / キャンセル)を言わない** ②**保存に失敗している保護中でも
+     *   「編集中は効きません」と出る**(#516 が直したはずの形)を踏んでいた。
+     * 🔑 `SHORTCUT_BUTTON` で当のボタンを引き、`setBlocked` が置いた
+     *   `data-pkc-blocked` を読む ── ここで phase を読み直すと**判定が 2 か所**になる(§7)。
+     */
+    const blockedReason = (id: string): string | null => {
+      const sel = SHORTCUT_BUTTON[id];
+      if (sel === undefined) return null;
+      return root.querySelector(sel)?.getAttribute(HINT_BLOCKED) ?? null;
+    };
+    return paletteRows(query, keymap.getBindings(), ready, isMac(), blockedReason).filter(
       (r) => r.id !== 'open-palette',
     );
   };
