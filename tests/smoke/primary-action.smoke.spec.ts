@@ -248,6 +248,25 @@ test('🔴 編集中は「+ ノート」が薄くなり、鍵で撃つと理由�
     '編集中なのに主の印が残っている(地が反転したままになる)',
   ).toBeNull();
 
+  /*
+   * 🔴 **隣の「今日」も薄い**(#791 ①。user 裁定 2026-09-08)。
+   * ⚠ ここでしか見えない ── happy-dom は CSS を組まないので `disabled` しか分からない。
+   * 🔑 **対照群を同じ息で見る**:同じ帯の「添付」は**編集中でも使える**ので薄くない
+   *   ── これが無いと「帯ごと薄くする」実装でも通る。
+   */
+  // ⚠ **「添付」は `data-pkc-field` を持たない**(`data-pkc-action` のみ)── 1 稿目は
+  //    field で引いて **30 秒待って落ちた**。引き方は面ごとに確かめる
+  const opacityOf = async (sel: string): Promise<number> =>
+    page.locator(sel).evaluate((el) => Number(getComputedStyle(el).opacity));
+  expect(
+    await opacityOf('[data-pkc-field="open-today"]'),
+    '編集中なのに「今日」が薄くなっていない',
+  ).toBeLessThan(0.6);
+  expect(
+    await opacityOf('[data-pkc-action="attach-file"]'),
+    '編集中でも使える「添付」まで薄くなった(帯ごと薄くしている?)',
+  ).toBeGreaterThan(0.9);
+
   /**
    * ── ② 🔴 **本物の鍵**で撃つと、画面の下に理由が 1 行出る。
    *

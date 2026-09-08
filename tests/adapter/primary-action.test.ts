@@ -408,6 +408,100 @@ describe('編集中の「+ ノート」は理由を言う(#761)', () => {
     expect(spoke, '全 phase で理由が空(台が何も言っていない)').toBeGreaterThan(0);
   });
 
+  /**
+   * 🔴 **同じ帯で黙って死んでいた「今日」も、同じ字で断る**(#791 ①。
+   *   user 裁定 2026-09-08「『今日』も薄くする」)。
+   *
+   * ⚠ 直す前は「+ ノート」だけが薄くなり、その**1 つ右**の「今日」は濃いまま
+   *   押せそうに見えて、押しても何も起きなかった ── #761 で「薄い = 押せない」を
+   *   教えたぶん、隣がその規則を裏切ると**直す前より悪い**。
+   */
+  it('🔴 編集中は「今日」も薄くなり、同じ理由を言う', () => {
+    const { root, d } = mount();
+    const today = root.querySelector<HTMLButtonElement>('[data-pkc-field="open-today"]');
+    if (today === null) throw new Error('前提が崩れている: 「今日」が無い');
+    expect(today.disabled, '読んでいるのに押せない').toBe(false);
+
+    d.dispatch({ type: 'START_EDIT' });
+    expect(today.disabled, '編集中なのに押せる見た目のまま').toBe(true);
+    expect(today.getAttribute('data-pkc-blocked'), '理由を持っていない').toBe(
+      createBtn(root).getAttribute('data-pkc-blocked'),
+    );
+
+    d.dispatch({ type: 'CANCEL_EDIT' });
+    expect(today.disabled, '編集を終えたのに押せない形のまま').toBe(false);
+    expect(today.getAttribute('data-pkc-blocked'), '理由が残っている').toBeNull();
+  });
+
+  /**
+   * 🔴 **名指しの一覧が広すぎないこと**(#791)。
+   * ⚠ 同じ帯の 添付 / 録音 / 画面 / 計る は**編集中でも動く**(預かる)ので、
+   *   薄くすると**嘘になる** ── 「帯のボタン全部」で実装したら、ここが落ちる。
+   */
+  it('🔴 編集中でも動くボタン(添付・録音・画面・計る)は薄くしない', () => {
+    const { root, d } = mount();
+    d.dispatch({ type: 'START_EDIT' });
+    /*
+     * ⚠ **「添付」だけ `data-pkc-field` を持たない**(`data-pkc-action` のみ)──
+     *   1 稿目は 4 つとも field で引いて **3 つしか見つかっていなかった**のに、
+     *   下限が `> 1` だったので**素通りした**(smoke が実ブラウザで拾った)。
+     * 🔑 下限は**数え上げた数そのもの**にする ── 1 つ名前が変わったら落ちる
+     *   (CLAUDE.md §1「空振り防止は、満たされない条件で書く」)。
+     */
+    const alive = [
+      '[data-pkc-action="attach-file"]',
+      '[data-pkc-field="start-audio-capture"]',
+      '[data-pkc-field="start-screen-capture"]',
+      '[data-pkc-field="start-timer"]',
+    ];
+    const found = alive
+      .map((sel) => root.querySelector<HTMLButtonElement>(sel))
+      .filter((el): el is HTMLButtonElement => el !== null);
+    expect(found.length, '対照群のボタンが欠けている(名前が変わった?)').toBe(alive.length);
+    for (const el of found) {
+      const name = el.dataset['pkcField'] ?? el.dataset['pkcAction'] ?? '?';
+      expect(el.disabled, `編集中でも動くはずの ${name} が薄くなった`).toBe(false);
+      expect(el.getAttribute('data-pkc-blocked'), '理由が付いている').toBeNull();
+    }
+  });
+
+  /**
+   * 🔴 **1 件も無い一覧の「+ ノートを作る」も同じ**(#791 ②)。
+   *
+   * ⚠ **レビューが挙げた条件(`phase === 'error'`)は到達しなかった** ── 測って分かった:
+   *   `error` も `editing` も**開いている本文が要る**ので、その本文のノートが
+   *   `entryMetas` に居る = **一覧は空にならない**。
+   * 🔑 実際に重なるのは **`initializing`**(起動して一覧が届くまで)だった ──
+   *   実測:`box=true / disabled=true`(直す前は `disabled=false`)。
+   *   ⚠ CLAUDE.md「到達しない条件は書かない」── 条件を測らずに写すと、
+   *   **一度も通らない test** を足すことになる。
+   * ⚠ これは描き直されるたびに**別の要素**なので、構築時に掴む形では守れない
+   *   (1 稿目は理由を添える処理が **list の render より前**に在り、古い要素に付いていた)。
+   */
+  it('🔴 1 件も無い一覧の「作る」も、読み込み中は理由を言う', () => {
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    document.body.append(root);
+    const d = new Dispatcher();
+    const regions = buildShell(root);
+    const browse = new BrowseRouter(regions.sidebar, regions.browseHost);
+    d.onState((s) => browse.render(s, 'list'));
+    // ⚠ **まだ SYS_BOOTED を撃たない** ── そこが `initializing` の唯一の窓である
+    d.dispatch({ type: 'OP_FAILED', error: 'probe' }); // phase を動かさずに 1 度描かせる
+    expect(d.getState().phase, '前提が崩れている').toBe('initializing');
+    const box = root.querySelector<HTMLButtonElement>('[data-pkc-field="empty-start-create"]');
+    if (box === null) throw new Error('前提が崩れている: 1 件も無い一覧の「作る」が無い');
+    expect(box.disabled, '読み込み中なのに押せる見た目のまま').toBe(true);
+    expect(box.getAttribute('data-pkc-blocked'), '理由を持っていない').toContain('読み込み中');
+
+    // 🔑 対照群 ── 一覧が届いたら押せる形へ戻る(戻らなければ、上は「いつも薄い」)
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [], relations: [] });
+    const after = root.querySelector<HTMLButtonElement>('[data-pkc-field="empty-start-create"]');
+    expect(after?.disabled, '届いたのに押せない形のまま').toBe(false);
+    expect(after?.getAttribute('data-pkc-blocked'), '理由が残っている').toBeNull();
+    root.remove();
+  });
+
   it('⚠ 理由を持たない押せないボタンは、今までどおり黙っている(nav-back)', () => {
     /**
      * 🔑 **対照群**(#761 の実装が「一律に何か言う」形になっていないこと)。
