@@ -334,8 +334,16 @@ export function connectStoreEffects(
     });
   };
 
+  /**
+   * 🔴 **積んだ書込の通し番号**(2026-09-08、#759)。
+   * 走査が「自分は列のどこまでを読むのか」を言えるようにするためだけに在る ──
+   * ⚠ これが無いと、待っている走査を畳んでよいかを**判断できない**(下の `scanAfterWrites`)。
+   */
+  let writeSeq = 0;
+
   /** 全 store op を単一 chain に直列化(順序保証)。op の失敗は chain を殺さない。 */
   const enqueue = (op: () => Promise<void>): void => {
+    writeSeq += 1;
     queue = queue.then(op, op);
   };
 
@@ -370,13 +378,48 @@ export function connectStoreEffects(
    * 🔑 **走り出したら鍵を外す** ── 走っている最中に届いた書込は、その走査が
    *   読み逃しているので、次の 1 本は積む必要がある。
    */
-  const pendingScans = new Set<string>();
+  /**
+   * 🔴 **畳んでよいのは「読む範囲が同じ」ときだけ**(2026-09-08、#759。
+   *   **フル smoke が 2 回落ちて分かった**)。
+   *
+   * ⚠ 直す前は「待っている 1 本が在れば捨てる」だった。上の docstring は
+   *   「走り出したら鍵を外すので、走っている最中に届いた分は次の 1 本が拾う」と
+   *   書いてあるが、🔴 **待っている間に届いた分は誰も拾わない**。
+   *
+   * ⚠ そして待っている 1 本は、**自分が頼まれた時点の列の末尾までしか読まない**
+   *   (`afterWrites` がそのとき `queue` を掴むため)── 後から積まれた書込は
+   *   **読み逃す**。つまり捨ててよいのは「**その後 1 本も書込が積まれていない**」
+   *   ときだけである。
+   *
+   * 🔴 **実害**:雛形を保存した直後に別のノートを開くと、集め直しが握り潰されて
+   *   **短縮語 + `Tab` が何も起きない**(`Tab` は撃ち直しが無いので、user から見ると
+   *   「この機能は効かない」)。⚠ 間欠なので、フル smoke でしか出なかった(#759)。
+   *
+   * 🔑 直しは 1 つ:**待っている 1 本が掴んだ番号と、いまの番号を比べる。**
+   *   同じなら畳む(畳む目的 ── 別タブの束ねで全件走査が秒に何本も飛ぶのを止める ──
+   *   はそのまま保たれる)。増えていたら印を立て、走り終わってから張り直す。
+   * ⚠ 張り直しは `scanAfterWrites` を通す ── そこで `afterWrites` が
+   *   **そのときの列の末尾**を取り直すので、後から積まれた書込を必ず読む。
+   * ⚠ 積み増しは**最大 1 本**(`Set` なので何度来ても 1 つ)。
+   */
+  /** key → 待っている走査が掴んだ `writeSeq`(走り出したら消す)。 */
+  const pendingScans = new Map<string, number>();
+  const againScans = new Set<string>();
   const scanAfterWrites = (key: string, op: () => Promise<void>): void => {
-    if (pendingScans.has(key)) return;
-    pendingScans.add(key);
+    const waiting = pendingScans.get(key);
+    if (waiting !== undefined) {
+      // ⚠ 待っている 1 本は `waiting` までしか読まない ── それ以降に積まれた
+      //    書込が在るなら、この依頼は畳めない(読み逃す)
+      if (writeSeq > waiting) againScans.add(key);
+      return;
+    }
+    pendingScans.set(key, writeSeq);
     afterWrites(async () => {
       pendingScans.delete(key);
       await op();
+      // ⚠ 走っている間に来た分は上の `delete` より後なので、ここには来ない
+      //    (来るのは**待っている間**に、読む範囲が伸びたせいで畳めなかった分だけ)
+      if (againScans.delete(key)) scanAfterWrites(key, op);
     });
   };
 

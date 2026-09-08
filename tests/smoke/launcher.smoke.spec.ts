@@ -387,7 +387,16 @@ test('🔴 登録 → タイル → SPA が動き、開き直しても続きが�
   await clickReal(page, '[data-pkc-browse="launcher"]');
   const tile = page.locator(USER_TILES);
   await expect(tile).toHaveCount(1, { timeout: 15000 });
-  await expect(page.locator('[data-pkc-field="launcher-group"]')).toHaveText('道具');
+  /**
+   * 🔴 **見出しは 2 本になった**(#531 段② / #281、2026-09-08)── user が付けた
+   *   群(`道具`)と、最初から在る `組み込みアプリ` である。
+   * ⚠ 名指しせずに 1 本だと決めつけると、`toHaveText` が
+   *   「2 件に当たった」で落ちる(この test が実際にそう落ちた)。
+   * 🔑 **自分で付けた群が、組み込みの見出しより上に居る**ことまで見る ──
+   *   それがこの並べ替えの目的である(自分のタイルが下へ押し下がらない)。
+   */
+  const groups = page.locator('[data-pkc-field="launcher-group"]');
+  await expect(groups).toHaveText(['道具', '組み込みアプリ']);
   await expect(tile.locator('[data-pkc-field="tile-icon"]')).toHaveText('🧮');
 
   // ③ 🔴 押すと**アプリが動く**
