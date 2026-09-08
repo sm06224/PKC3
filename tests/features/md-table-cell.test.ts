@@ -719,3 +719,46 @@ describe('#749 印が焼かれない形でも、書く側の門は閉じてい�
     expect(span(same, 0), '深さの揃った表が書けない(前提が崩れている)').not.toBeNull();
   });
 });
+
+/**
+ * 🔴 **指で触る端末に「押すと打てます」を出す**(#750 I2、2026-09-08)。
+ *
+ * ⚠ 直す前の合図は `app.css` の **`:hover` 1 つだけ**で、**指で触る端末に hover は
+ *   無い** ── スマホでは「升が押せる」ことを知らせる物が画面に何も無かった。
+ *
+ * 🔑 見るのは 2 つ:① 押せる面には出る ② **押せない面には要素ごと無い**
+ *   (書き出した HTML と印刷。出したら「押しても打てない」嘘になる)。
+ * ⚠ 出す / 出さないの最後の 1 段は CSS の `@media` なので、ここでは**器が在るか**
+ *   までしか言えない ── 実際に画面へ出るかは smoke が見る(弱いと自覚して使う)。
+ */
+describe('🔴 指で触る端末への合図(#750 I2)', () => {
+  const hints = (body: string, opts: Record<string, unknown> = {}): Element[] => {
+    const host = document.createElement('div');
+    host.innerHTML = renderMarkdown(body, opts as never);
+    return [...host.querySelectorAll('[data-pkc-field="cell-tap-hint"]')];
+  };
+  const TABLE = '| 品 | 数 |\n|---|---|\n| りんご | 3 |\n';
+
+  it('🔴 押せる面には、表 1 つにつき 1 つ出る', () => {
+    const found = hints(TABLE, { interactiveCells: true });
+    expect(found.length, '合図が出ていない').toBe(1);
+    expect(found[0]!.textContent, '何ができるのか書いていない').toBe('押すと打てます');
+    // 🔑 空振り防止 ── そもそも押せる升が焼かれている面である
+    expect(marks(TABLE).length, '押せる升が 1 つも無い(この検査は空振り)').toBeGreaterThan(0);
+  });
+
+  it('🔴 押せない面(書き出し・印刷)には**要素ごと無い**', () => {
+    // ⚠ `interactiveCells` を渡さない = 升に印も焼かれない面
+    expect(hints(TABLE).length, '押せないのに「押すと打てます」と出ている').toBe(0);
+  });
+
+  it('⚠ 表が 2 つなら 2 つ(表ごとに 1 つ)', () => {
+    expect(hints(`${TABLE}\n段落\n\n${TABLE}`, { interactiveCells: true }).length).toBe(2);
+  });
+
+  it('⚠ 表の無い本文には出ない(段落やコードに付けない)', () => {
+    expect(hints('段落です。\n\n```js\nconst x = 1;\n```\n', { interactiveCells: true }).length).toBe(
+      0,
+    );
+  });
+});

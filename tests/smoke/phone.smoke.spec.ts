@@ -1499,3 +1499,46 @@ test('🔴 390px の空の PKC で、一覧に「作る」と「取り込む」�
 
   expect(errors, `console/pageerror: ${errors.join(' | ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **指で触る端末に「升は押すと打てます」が出る**(#750 I2、2026-09-08)。
+ *
+ * ⚠ 直す前の合図は `app.css` の **`:hover` 1 つだけ**だった ── 指で触る端末に
+ *   hover は無いので、スマホでは**押せることを知らせる物が画面に何も無かった**。
+ * 🔑 ここでしか確かめられない ── 出す / 出さないの最後の 1 段は
+ *   `@media (hover: none) and (pointer: coarse)` で、**端末の性質**は unit に無い。
+ * ⚠ **対照群を同じ spec に置かない** ── マウスの端末で出ないことは
+ *   `layout.smoke.spec.ts` の側(`test.use` が違う)で見る。ここは
+ *   「触る端末では出る」だけを主張する。
+ */
+test('🔴 スマホでは、表の升が押せることが字で出る (#750 I2)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('表');
+  await page
+    .locator('[data-pkc-field="editor-body"]')
+    .fill('| 品 | 数 |\n|---|---|\n| りんご | 3 |\n');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+
+  const table = page.locator('[data-pkc-field="detail-body"] table').first();
+  await expect(table, '読む面に表が出ていない').toBeVisible({ timeout: 15_000 });
+  // 🔑 空振り防止 ── 押せる升が本当に焼かれている面である
+  await expect(
+    page.locator('[data-pkc-field="detail-body"] [data-pkc-action="edit-cell"]').first(),
+    '押せる升が 1 つも無い(この検査は空振り)',
+  ).toBeAttached();
+
+  const hint = page.locator('[data-pkc-field="cell-tap-hint"]').first();
+  await expect(hint, '触る端末なのに合図が出ていない').toBeVisible();
+  await expect(hint).toHaveText('押すと打てます');
+  // ⚠ **升を覆わない** ── 覆うと、知らせるために押せなくする本末転倒になる
+  const covers = await hint.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    return at?.closest('[data-pkc-action="edit-cell"]') !== null;
+  });
+  expect(covers, '合図が升を覆っている(押せなくなる)').toBe(false);
+
+  expect(errors, `console/pageerror: ${errors.join(' | ')}`).toEqual([]);
+});
