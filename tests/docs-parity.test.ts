@@ -73,6 +73,42 @@ function srcFiles(dir = 'src', out: string[] = []): string[] {
 
 const MANUAL = readFileSync('docs/manual.md', 'utf-8');
 
+/**
+ * 🔴 **マニュアルの見出しを 1 か所で拾う**(2026-09-08、#793)。
+ *
+ * ⚠ 直す前は**同じ走査が 4 か所**に写されていた(番号と日付 / 節を指す参照 /
+ *   記号 / 守れていない条)── 4 つとも「囲みの中の `#` は見出しではない」を
+ *   自前で持っており、⚠ **どれか 1 つを直しても他の 3 つは古いまま**になる
+ *   (CLAUDE.md §7「同じ問いに答える口が 2 つあると、片方だけ壊しても届かない」)。
+ *
+ * 🔑 **関数で渡す**(MANUAL に固定しない)── 下の対照群で
+ *   「囲みの中を数えていないこと」を**自前の小さな原稿**で見るためである。
+ *   ⚠ いまのマニュアルの囲みの中には `#` の行が **6 件**在るが、
+ *   どれも H5 でも同名でもないので、**本文に当てるだけでは除外が効いているか
+ *   分からない**(変異試験が SURVIVED で教えた)。
+ */
+export type MdHeading = { readonly level: number; readonly title: string; readonly line: number };
+
+export function scanHeadings(text: string): MdHeading[] {
+  const out: MdHeading[] = [];
+  let fence = false;
+  const lines = text.split('\n');
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]!;
+    if (/^\s*(```|~~~)/.test(line)) {
+      fence = !fence;
+      continue;
+    }
+    if (fence) continue;
+    const m = /^(#{1,6}) (.*)$/.exec(line);
+    if (m) out.push({ level: m[1]!.length, title: m[2]!, line: i + 1 });
+  }
+  return out;
+}
+
+/** マニュアルの見出し(段つき)。⚠ **これを使う** ── 面ごとに走査を書かない。 */
+const MANUAL_HEADINGS: readonly MdHeading[] = scanHeadings(MANUAL);
+
 const SHELL = readFileSync('src/adapter/ui/render/shell.ts', 'utf-8');
 const COMMANDS = readFileSync('src/adapter/ui/render/commands.ts', 'utf-8');
 const DETAIL = readFileSync('src/adapter/ui/render/detail.ts', 'utf-8');
@@ -1331,22 +1367,59 @@ describe('クラス名と CSS 規則の突合', () => {
  *   数えられていることを先に見る(見出しを 1 つも拾えていなければ、下は常に真である)。
  * ⚠ 囲みの中の `#` は見出しではない ── そこには日付も番号も自由に書ける。
  */
-describe('マニュアルの見出しは、番号も日付も持たない(#779 段②)', () => {
-  /** 見出し(H2〜H5)。⚠ 囲みの中は数えない。 */
-  const heads = ((): string[] => {
-    const out: string[] = [];
-    let fence = false;
-    for (const line of MANUAL.split('\n')) {
-      if (/^\s*(```|~~~)/.test(line)) {
-        fence = !fence;
-        continue;
+/**
+ * 🔴 **見出しの拾い方そのものを、自前の原稿で検める**(2026-09-08、#793)。
+ *
+ * ⚠ いまのマニュアルの囲みの中には `#` の行が **6 件**在るが、H5 でも同名でも
+ *   「そのほか」でもないので、**本文に当てるだけでは囲みの除外が効いているか
+ *   分からない**(変異試験が SURVIVED で教えた ── 除外を外しても全部緑だった)。
+ * 🔑 だから**対照群を自分で作る**(CLAUDE.md「期待値は『別の綴り』ではなく
+ *   『別の観測』から作る」)。
+ */
+describe('マニュアルの見出しの拾い方(scanHeadings)', () => {
+  it('🔴 囲みの中の `#` は見出しにしない ── 対照群つき', () => {
+    // 対照群 ── 囲みの外なら拾う
+    expect(scanHeadings('##### 小見出し').map((h) => h.level)).toEqual([5]);
+    // ① 囲みの中は拾わない
+    expect(scanHeadings(['```', '##### 小見出し', '```'].join('\n'))).toEqual([]);
+    expect(scanHeadings(['~~~md', '# 例', '~~~'].join('\n'))).toEqual([]);
+    // ② 囲みが閉じたら、また拾う
+    expect(
+      scanHeadings(['```', '# 中', '```', '## 外'].join('\n')).map((h) => h.title),
+    ).toEqual(['外']);
+    // ③ 段と行を持っている(呼ぶ側が段で絞れる)
+    expect(scanHeadings(['## 章', '', '#### 小節'].join('\n'))).toEqual([
+      { level: 2, title: '章', line: 1 },
+      { level: 4, title: '小節', line: 3 },
+    ]);
+    // ④ `#` の後ろに空白が無いものは見出しではない(`#tag` を拾わない)
+    expect(scanHeadings('#タグ')).toEqual([]);
+  });
+
+  it('空振り防止 ── 本文からもちゃんと拾えている', () => {
+    expect(MANUAL_HEADINGS.length, 'マニュアルの見出しを 1 つも拾えていない').toBeGreaterThan(
+      100,
+    );
+    // ⚠ 囲みの中に `#` の行が実在すること ── 0 件なら上の①②は本文について何も守らない
+    const inFence = ((): number => {
+      let fence = false;
+      let n = 0;
+      for (const line of MANUAL.split('\n')) {
+        if (/^\s*(```|~~~)/.test(line)) {
+          fence = !fence;
+          continue;
+        }
+        if (fence && /^#{1,6} /.test(line)) n += 1;
       }
-      if (fence) continue;
-      const m = /^#{2,5} (.*)$/.exec(line);
-      if (m) out.push(m[1]!);
-    }
-    return out;
-  })();
+      return n;
+    })();
+    expect(inFence, '囲みの中に `#` の行が 1 つも無い ── 除外の検査が本文について空振り').toBeGreaterThan(0);
+  });
+});
+
+describe('マニュアルの見出しは、番号も日付も持たない(#779 段②)', () => {
+  /** 見出し(H2〜H5)。⚠ 走査は `scanHeadings` 1 か所(この file の頭)。 */
+  const heads = MANUAL_HEADINGS.filter((h) => h.level >= 2 && h.level <= 5).map((h) => h.title);
 
   it('空振り防止 ── 見出しをちゃんと拾えている', () => {
     // 🔑 下の 2 件は「0 件であること」を見るので、**拾えていないと必ず緑**になる
@@ -1467,22 +1540,103 @@ describe('マニュアルの記号は 🔴 ⚠ 🔑 の 3 種だけ(執筆規約
   });
 });
 
+/**
+ * 🔴 **執筆規約のうち、まだ守れていない条を「増えないこと」だけ止める**(#793、2026-09-08)。
+ *
+ * 規約(`docs/development/manual-style-2026-09.md`)の条 4 /5 /6 は、いまの本文が
+ * 守れていない ── だから「0 件」の門は置けない。⚠ それを理由に**何も置かない**と、
+ * 次に節を書く人が `##### …` や 2 つ目の「そのほか」を足しても**誰も止められない**
+ * (直す前より遠ざかる)。
+ *
+ * 🔑 **だから件数の上限ではなく、身元の等値 pin にする** ── いま在るものを名前で
+ *   並べ、**それと完全に一致する**ことを見る。
+ *   ⚠ 上限(`<= 16`)にすると、**直しても表を触らずに済む**ので、
+ *     直したことが記録に残らない(そして次に読む人が「16 件在る」と誤解する)。
+ *   🔑 等値なら**直したら表からも消さないと落ちる**ので、burn-down が忘れられない
+ *     (CLAUDE.md「等値 pin の既知リストは良く効いた ── 直したら消さないと落ちる」)。
+ *
+ * ⚠ **これは「守っている」ではない。** 守っているのは「**増えていない**」だけである
+ *   ── 残件と裁定は #793 に在る。
+ */
+describe('執筆規約のうち、まだ守れていない条(増えないことだけ止める。#793)', () => {
+  /** 見出し(段, 題名)。⚠ 走査は `scanHeadings` 1 か所(この file の頭)。 */
+  const heads = MANUAL_HEADINGS;
+
+  it('空振り防止 ── 見出しを段つきで拾えている', () => {
+    // 🔑 下の 3 件は既知リストとの一致を見るので、**拾えていないと表も空**で緑になる
+    expect(heads.length, 'マニュアルの見出しを 1 つも拾えていない').toBeGreaterThan(100);
+    expect(new Set(heads.map((h) => h.level)), '段が 1 種類しか出ていない').toContain(5);
+  });
+
+  /**
+   * 🔴 **条 5:見出しは 3 段まで(H5 を使わない)。**
+   * ⚠ いま 16 件在る ── 3 か所に固まっていて、どれも「節が太りすぎて段が 1 つ余計に
+   *   要った」形である(= 条 9 の症状)。直し方の裁定は #793。
+   */
+  it('🔴 条 5 ── H5 が、いま在る 16 件から増えていない', () => {
+    const KNOWN_H5: readonly string[] = [
+      // ① 記法の章(表の節)── 親の但し書き
+      '⚠ 押せないセル(ここに全部あります)',
+      // ② 設定の中(9 件)── `### 設定` → `#### 表示` の下
+      '配色',
+      '紙面',
+      '文字の大きさ',
+      '本文の段組み(ウルトラワイド向け)',
+      '編集の仕方',
+      'このアプリのデータ',
+      'お知らせ',
+      '狭い画面の断り書き',
+      'html フェンスで、画像以外が止まったとき',
+      // ③ 添付の章(文字を貼る / ランチャー)
+      '🔑 タブで区切った文字を貼ると、そのまま表になります',
+      '「ウェブページの形をそのまま(html のコードブロック)」について',
+      '一度許したら、次からは聞きません(アプリとして登録したものだけ)',
+      '1 件だけ渡す(このアプリへ送る)',
+      '渡した 1 件は、アプリから書き戻せます',
+      '一度許したら、次からは普通の「起動」でも見えます',
+    ];
+    const now = heads.filter((h) => h.level === 5).map((h) => h.title);
+    expect(
+      [...now].sort(),
+      'H5 が増減した ── 増やすなら規約 条 5 に反する。減らしたなら KNOWN_H5 からも消す(#793)',
+    ).toEqual([...KNOWN_H5].sort());
+  });
+
+  /**
+   * 🔴 **条 4:「そのほか」という見出しを作らない。**
+   * ⚠ #779 段④ で「書く」章の 1 件を 7 節へ割った。残る 1 件の名前は裁定待ち(#793)。
+   */
+  it('🔴 条 4 ── 「そのほか」の見出しが、いま在る 1 件から増えていない', () => {
+    const KNOWN_OTHER: readonly string[] = [
+      // 「スマホ・タッチで使う」章の小見出し(H4)
+      'そのほか',
+    ];
+    const now = heads.filter((h) => h.title.includes('そのほか')).map((h) => h.title);
+    expect(
+      [...now].sort(),
+      '「そのほか」が増えた ── 行き先が無いものは名前を付けて節にするか、既存節へ吸収する(規約 条 4)',
+    ).toEqual([...KNOWN_OTHER].sort());
+  });
+
+  /**
+   * 🔴 **条 6:同じ名前の見出しを 2 つ作らない**(検索で引いたとき区別できない)。
+   * ⚠ 残る 1 組は `お知らせ`(設定の中の H5 / 「お知らせと更新」章の H3)。裁定待ち(#793)。
+   */
+  it('🔴 条 6 ── 同名の見出しが、いま在る 1 組から増えていない', () => {
+    const KNOWN_DUP: readonly string[] = ['お知らせ'];
+    const seen = new Map<string, number>();
+    for (const h of heads) seen.set(h.title, (seen.get(h.title) ?? 0) + 1);
+    const now = [...seen].filter(([, n]) => n > 1).map(([t]) => t);
+    expect(
+      [...now].sort(),
+      '同名の見出しが増えた ── どちらを指しているか検索で区別できない(規約 条 6)',
+    ).toEqual([...KNOWN_DUP].sort());
+  });
+});
+
 describe('マニュアルの節を指す参照', () => {
-  /** マニュアルの見出し(H2〜H5)。⚠ 囲みの中の `#` は見出しではない。 */
-  const headings = ((): string[] => {
-    const out: string[] = [];
-    let fence = false;
-    for (const line of MANUAL.split('\n')) {
-      if (/^\s*(```|~~~)/.test(line)) {
-        fence = !fence;
-        continue;
-      }
-      if (fence) continue;
-      const m = /^#{2,5} (.*)$/.exec(line);
-      if (m) out.push(m[1]!);
-    }
-    return out;
-  })();
+  /** マニュアルの見出し(H2〜H5)。⚠ 走査は `scanHeadings` 1 か所(この file の頭)。 */
+  const headings = MANUAL_HEADINGS.filter((h) => h.level >= 2 && h.level <= 5).map((h) => h.title);
 
   /** 参照を書いてよい場所(散文の doc も含めて**全数**見る)。 */
   const collect = (dir: string, ext: string, out: string[] = []): string[] => {
