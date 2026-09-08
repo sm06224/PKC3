@@ -500,7 +500,14 @@ describe('本文の器の全数(印の付け忘れを数で止める)', () => {
     for (const [file, spec] of Object.entries(SITES)) {
       const code = stripComments(readFileSync(file, 'utf8'));
       const hosts = [...code.matchAll(spec.host)].length;
-      const marks = [...code.matchAll(/data-pkc-prose/g)].length;
+      /**
+       * ⚠ **前置きで止める**(#722、2026-09-08 に踏んだ)── 素の `data-pkc-prose`
+       *   で数えると、**`data-pkc-prose-align`(本文の置き場所)まで印として数える**。
+       *   実際、書き出しの器 2 個に対して印が 3 個と出て落ちた。
+       * 🔑 属性の名前は**次の字で切る** ── 名前の続きが `-` や英数字なら別物である
+       *   (CLAUDE.md §1「範囲が広すぎて無関係な文字列に満たされる」)。
+       */
+      const marks = [...code.matchAll(/data-pkc-prose(?![\w-])/g)].length;
       if (!spec.prose) {
         expect(marks, `${file}: 対象外のはずが印が付いている(${spec.why})`).toBe(0);
         expect(hosts, `${file}: 器が 1 つも無い(この検査は空振り)`).toBeGreaterThan(0);

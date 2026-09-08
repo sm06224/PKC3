@@ -272,6 +272,22 @@
   --read-w: 42rem;
 
   /**
+   * 🔴 **本文の置き場所**(#722、2026-09-08)。⚠ **既定は中央 = いまのまま**。
+   *
+   * `--prose-lead` = 散文の塊の `margin-inline` の**始まり側**、
+   * `--prose-indent` = 表・図・コードの `margin-inline-start`。
+   * 🔑 中央寄せは `app.css` の **2 か所**で成り立っているので、切替もこの 2 つで表す
+   *   ── 規則を二重に書かない(片方だけ直る日を作らない)。
+   * ⚠ `100%` は**使う側の包含ブロック**で解決される(カスタムプロパティは字句のまま
+   *   置換される)ので、ここ `:root` に置いてよい。
+   * ⚠ **値の正本は `src/features/prose-align.ts` の `PROSE_ALIGNS`** ──
+   *   `tests/features/prose-align.test.ts` がこの CSS と表を突き合わせる
+   *   (片方だけ足すと「選べるのに効かない」「効くのに選べない」が起きる)。
+   */
+  --prose-lead: auto;
+  --prose-indent: max(0px, calc((100% - var(--read-w)) / 2));
+
+  /**
    * 🔴 **本文の中のタグの札**(#550 段③)。⚠ **既定はここ**(= 薄い灰色の下地の札)。
    *
    * 🔑 **ここに置く理由は「書き出しへ運ばれる」から**である ── 書き出し HTML の
@@ -335,6 +351,15 @@
  * ⚠ 印刷の紙(`@page { size: … }`)はここに書けない(セレクタで絞れない)──
  *   `adapter/ui/render/page-format.ts` が選んだ 1 つだけを `<style>` に載せる。
  */
+/**
+ * 🔴 **本文の置き場所を「左」にしたとき**(#722、2026-09-08)。
+ * ⚠ **中央(既定)はここに書かない** ── 既定は上の `:root` が持っている
+ *   (2 か所に既定を書くと、片方だけ直る日が来る)。
+ */
+:root[data-pkc-prose-align='start'] {
+  --prose-lead: 0;
+  --prose-indent: 0px;
+}
 :root[data-pkc-page-format='a4-portrait'] {
   --read-w: 42rem;
 }

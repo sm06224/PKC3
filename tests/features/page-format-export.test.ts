@@ -44,8 +44,11 @@ function source(): ArchiveSource {
 
 const NOW = '2026-08-08T00:00:00.000Z';
 
-async function html(fmt?: Parameters<typeof writePortableHtml>[4]): Promise<string> {
-  const out = await writePortableHtml(source(), NOW, undefined, false, fmt);
+async function html(
+  fmt?: Parameters<typeof writePortableHtml>[4],
+  align?: Parameters<typeof writePortableHtml>[5],
+): Promise<string> {
+  const out = await writePortableHtml(source(), NOW, undefined, false, fmt, align);
   return out.blob.text();
 }
 
@@ -107,5 +110,43 @@ describe('書き出す HTML の紙面', () => {
     const at = out.indexOf("[data-pkc-page-format='a4-landscape']");
     expect(at, '紙面の規則が <style> の外に出ている').toBeGreaterThan(0);
     expect(at, '紙面の規則が <style> の外に出ている').toBeLessThan(styleEnd);
+  });
+});
+
+/**
+ * 🔴 **書き出した HTML にも「本文の置き場所」が届く**(#722、2026-09-08)。
+ *
+ * ⚠ 届かないと、**左寄せで読んでいる人が書き出した HTML だけ中央**になる ──
+ *   紙面と同じ非対称を作り直さないための検査である。
+ * 🔑 見るのは 3 つ:① 器(`<body>`)の印 ② 印に当たる規則が `<style>` に在る
+ *   ③ **両方のトークン**が載っている(片方だけだと段落と表が別の側に着く)
+ */
+describe('🔴 書き出した HTML にも本文の置き場所が届く(#722)', () => {
+  it('選んだ置き場所が器と規則の両方に焼かれる', async () => {
+    const out = await html(undefined, 'start');
+    expect(out, '器に印が焼かれていない').toContain('data-pkc-prose-align="start"');
+    expect(out, '置き場所の差し替えが焼かれていない').toContain(
+      "[data-pkc-prose-align='start']{--prose-lead:0;--prose-indent:0px}",
+    );
+  });
+
+  it('⚠ 渡し忘れたら既定(中央)── いままでと同じ見え方に倒れる', async () => {
+    const out = await html();
+    expect(out).toContain('data-pkc-prose-align="center"');
+    expect(out, '既定でも焼く(:root の値へ暗黙に依存させない)').toContain(
+      "[data-pkc-prose-align='center']{--prose-lead:auto;",
+    );
+  });
+
+  it('🔴 焼いた規則が **トークンを使う規則と同じ style に在る**(差し替えが効く)', async () => {
+    const out = await html(undefined, 'start');
+    // 焼いた本文の規則が `var(--prose-lead)` / `var(--prose-indent)` を使っていて
+    // 初めて、値の差し替えが意味を持つ(片方だけでは何も変わらない)
+    expect(out, '散文の塊がトークンを読んでいない').toContain('var(--prose-lead)');
+    expect(out, '表・図・コードがトークンを読んでいない').toContain('var(--prose-indent)');
+    const styleEnd = out.indexOf('</style>');
+    const at = out.indexOf("[data-pkc-prose-align='start']");
+    expect(at, '置き場所の規則が <style> の外に出ている').toBeGreaterThan(0);
+    expect(at, '置き場所の規則が <style> の外に出ている').toBeLessThan(styleEnd);
   });
 });

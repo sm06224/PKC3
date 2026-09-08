@@ -105,12 +105,19 @@ import { appNoticeStore } from '@adapter/platform/notice-store';
 import { NOTICES } from '@features/notice/notice-log';
 import { applyTheme, chooseTheme, initialTheme, isTheme } from '@adapter/ui/render/theme';
 import {
+  applyProseAlign,
+  chooseProseAlign,
+  currentProseAlign,
+  initialProseAlign,
+} from '@adapter/ui/render/prose-align';
+import {
   applyPageFormat,
   choosePageFormat,
   currentPageFormat,
   initialPageFormat,
 } from '@adapter/ui/render/page-format';
 import { isPageFormat } from '@features/page-format';
+import { isProseAlign } from '@features/prose-align';
 import { appExternalImages } from '@adapter/ui/render/external-images';
 import { appPasteSource } from '@adapter/ui/render/paste-source';
 import { appDualPrefs } from '@adapter/ui/render/dual-prefs';
@@ -802,6 +809,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   // ⚠ ここでは**保存しない**(`applyPageFormat` は当てるだけ)── 保存するのは
   //    user が選んだときだけ(`theme.ts` の M-7 と同じ)
   applyPageFormat(document.documentElement, initialPageFormat());
+  /**
+   * 🔴 **本文の置き場所も枠より先**(#722、2026-09-08)── 理由は紙面と同じで、
+   *   後だと**一瞬だけ中央で組んでから左へ飛ぶ**。
+   * ⚠ ここでは**保存しない**(`applyProseAlign` は当てるだけ)。
+   */
+  applyProseAlign(document.documentElement, initialProseAlign());
   /**
    * 🔤 **文字の大きさも枠より先**(#504。理由は配色・紙面と同じ ── 後だと
    *   一瞬だけ既定の大きさで組んでから跳ねる)。
@@ -1619,6 +1632,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
          *   使えない環境では画面と保存が食い違い、配った HTML だけ別の幅になる。
          */
         pageFormat: currentPageFormat(document.documentElement),
+        /**
+         * 🔴 **本文の置き場所も焼く**(#722、2026-09-08)。⚠ 紙面と同じ理由で
+         *   **いま画面に当たっている**値を渡す ── 焼かないと、左寄せで読んでいる人が
+         *   書き出した HTML だけ中央になる(配った先で見え方が割れる)。
+         */
+        proseAlign: currentProseAlign(document.documentElement),
       };
       // 1 ノートだけの書出しも**同じ実行部・同じ形式**を通る(P6f)──
       // 別経路にすると「1 件書出しだけ壊れている」が起きる
@@ -2753,6 +2772,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      */
     setPageFormat: (format) => {
       if (isPageFormat(format)) choosePageFormat(document.documentElement, format);
+    },
+    /**
+     * 🔴 **本文の置き場所**(#722、2026-09-08)。⚠ **描き直さない** ── 変わるのは
+     *   トークン 2 つの値だけで、HTML は 1 文字も変わらない(紙面と同じ道)。
+     */
+    setProseAlign: (align) => {
+      if (isProseAlign(align)) chooseProseAlign(document.documentElement, align);
     },
     /**
      * ✏️ 編集の仕方(#104 第 2 弾)。⚠ **描き直さない** ── 編集の面は

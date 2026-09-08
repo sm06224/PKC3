@@ -252,3 +252,85 @@ test('🔴 本文が列の中央に置かれ、表は段落と同じ左端に揃
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **本文の置き場所を選べる**(#722、2026-09-08)。
+ *
+ * unit は「トークンが在るか / 規則がトークンを読んでいるか」しか見られない ──
+ * **実際に本文が左へ寄るか**は実ブラウザでしか分からない
+ * (`margin-inline: var(--prose-lead) auto` の解決と、`auto` の潰れ方)。
+ *
+ * 観測点は 3 つ:
+ * ① 既定(中央)で段落の左右の余白が同じ
+ * ② 「左」にすると**段落の左端が 0 になり、右に余白が残る**
+ * ③ 🔴 **表・図・コードも一緒に動く** ── 片方だけ効くと「段落は左端なのに
+ *    表だけ内側」という食い違いが出る(トークン 2 つが対で動いていることの証拠)
+ */
+test('🔴 本文の置き場所を「左」にすると、段落も表も左端へ寄る (#722)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('置き場所');
+  await page
+    .locator('[data-pkc-field="editor-body"]')
+    .fill(
+      '段落です。読み幅いっぱいに広がるくらいの長さを持たせてあります。\n\n' +
+        '| 品名 | 数量 |\n|---|---|\n| りんご | 3 |\n',
+    );
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await expect(
+    page.locator('[data-pkc-field="detail-body"] table').first(),
+    '読む面に表が出ていない',
+  ).toBeVisible({ timeout: 15_000 });
+
+  const box = async (sel: string): Promise<{ l: number; r: number; w: number }> =>
+    page.evaluate((s) => {
+      // ⚠ **中身で選ぶ**(同じ名前の器が分割プレビュー側にも在る ── 上の test と同じ罠)
+      const host = [...document.querySelectorAll('[data-pkc-field="detail-body"]')].find(
+        (el) => el.querySelector('p') !== null,
+      );
+      if (host === undefined) throw new Error('前提が崩れている: 散文の器が無い');
+      const hr = host.getBoundingClientRect();
+      const el = host.querySelector(s);
+      if (el === null) throw new Error(`前提が崩れている: ${s} が描かれていない`);
+      const r = el.getBoundingClientRect();
+      return {
+        l: Math.round(r.left - hr.left),
+        r: Math.round(hr.right - r.right),
+        w: Math.round(r.width),
+      };
+    }, sel);
+
+  // ① 既定は中央 ── 左右の余白が同じ
+  const before = await box('p');
+  expect(
+    Math.abs(before.l - before.r),
+    `既定で中央に無い(左 ${before.l} / 右 ${before.r})`,
+  ).toBeLessThanOrEqual(2);
+  // ⚠ 空振り防止 ── 余白が 0 なら「左へ寄った」も自明に成り立つ
+  expect(before.l, '器と読み幅が同じで、寄せを見ていない').toBeGreaterThan(20);
+
+  // ② 設定から「左」にする(実際の導線)
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  await page.locator('[data-pkc-field="prose-align-select"]').selectOption('start');
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+
+  await expect.poll(async () => (await box('p')).l, { timeout: 5000 }).toBeLessThanOrEqual(2);
+  const left = await box('p');
+  expect(left.r, `左へ寄せたのに右に余白が残っていない(右 ${left.r})`).toBeGreaterThan(20);
+  // ⚠ 幅は変えない ── 変わったら読み幅の上限まで巻き込んでいる
+  expect(Math.abs(left.w - before.w), '読み幅まで変わっている').toBeLessThanOrEqual(2);
+
+  // ③ 🔴 表も一緒に動く(トークン 2 つが対で効いている証拠)
+  const t = await box('.pkc-md-block[data-pkc-md-block-kind="table"]');
+  expect(t.l, `段落は左端なのに表が内側に在る(表 ${t.l})`).toBeLessThanOrEqual(2);
+
+  // ④ 戻せる ── 「中央」を選べば元どおり
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  await page.locator('[data-pkc-field="prose-align-select"]').selectOption('center');
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  await expect.poll(async () => (await box('p')).l, { timeout: 5000 }).toBeGreaterThan(20);
+
+  expect(errors, `例外が出ている: ${errors.join(' / ')}`).toEqual([]);
+});

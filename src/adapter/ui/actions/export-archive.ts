@@ -22,6 +22,7 @@ import type { DocxBlock } from '@features/export/docx';
 import { svgToEmf } from '@features/export/svg-emf';
 import { htmlToDocxBlocks } from '@adapter/platform/export/html-blocks';
 import { DEFAULT_PAGE_FORMAT, type PageFormat } from '@features/page-format';
+import { DEFAULT_PROSE_ALIGN, type ProseAlign } from '@features/prose-align';
 import { writeMarkdownZip } from '@features/export/pkc3-markdown-zip';
 import { singleEntrySource } from '@features/export/single-entry-source';
 import { folderSource } from '@features/export/folder-source';
@@ -99,6 +100,12 @@ export interface ExportDeps {
    * ⚠ 判断は `main.ts` が持つ(いま画面に当たっている値をそのまま渡す)。
    */
   pageFormat?: PageFormat;
+  /**
+   * 🔴 **本文の置き場所**(#722、2026-09-08)。**書き出した瞬間の設定**を焼く。
+   * ⚠ 省略すると既定(中央)── いままでと同じ見え方に倒れる。
+   * ⚠ 焼かないと、左寄せで読んでいる人が**書き出した HTML だけ中央**になる。
+   */
+  proseAlign?: ProseAlign;
 }
 
 // 🔑 file 名の「今日」は `dayStamp`(端末の暦日)1 本 ── ここに私的な stamp を持たない(#709)
@@ -232,6 +239,7 @@ export async function exportArchive(
         deps.renderBody,
         deps.allowExternalImages === true,
         deps.pageFormat ?? DEFAULT_PAGE_FORMAT,
+        deps.proseAlign ?? DEFAULT_PROSE_ALIGN,
       );
       name = `${base}.html`;
       // ⚠ **可逆ではない**ことをその場で言う(後から見分けられない形にしない ──

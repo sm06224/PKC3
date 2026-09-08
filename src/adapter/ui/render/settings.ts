@@ -16,7 +16,9 @@ import type { AppState } from '@adapter/state/app-state';
 import type { PersistState } from '@adapter/platform/storage-persist';
 import { THEMES } from './theme';
 import { PAGE_FORMATS } from '@features/page-format';
+import { PROSE_ALIGNS } from '@features/prose-align';
 import { currentPageFormat } from './page-format';
+import { currentProseAlign } from './prose-align';
 import { EDITOR_MODES } from '@features/editor-mode';
 import { TEXT_SCALES } from '@features/text-scale';
 import { COLUMN_RULES } from '@features/column-rule';
@@ -120,6 +122,7 @@ export class SettingsRenderer {
       // 配色は user 操作でしか変わらない ── 毎 state で組み直さない
       this.syncTheme();
       this.syncPageFormat();
+      this.syncProseAlign();
       this.syncTextScale();
       this.syncReadColumns();
       this.syncEditorMode();
@@ -223,6 +226,42 @@ export class SettingsRenderer {
       '書き出した HTML は、書き出したときの紙面のまま表示されます。';
     pd.append(pnote);
     dl.append(pt, pd);
+
+    /**
+     * 🔴 **本文の置き場所**(#722、2026-09-08)。
+     *
+     * ⚠ **戻す口が 1 つも無かった** ── 2026-09-06 に読み幅を列の中央へ置いたが、
+     *   左寄せに戻すには紙面を「フル HD」にするしかなく、そうすると
+     *   **読み幅の上限ごと外れる**。「上限は欲しいが左寄せがよい」人の行き場が無い。
+     * 🔑 user 指示 2026-08-28「**私が決めた見え方を配るより、user が変えられる
+     *   設定を作る**」に沿って選べる形にした。⚠ **既定は中央 = いまのまま**。
+     * ⚠ ここ「表示」に置く ── 紙面・文字の大きさと同じ「見え方の好み」である。
+     */
+    const pat = document.createElement('dt');
+    pat.textContent = '本文の置き場所';
+    const pad = document.createElement('dd');
+    const paselect = document.createElement('select');
+    paselect.setAttribute('data-pkc-action', 'set-prose-align');
+    paselect.setAttribute('data-pkc-field', 'prose-align-select');
+    paselect.setAttribute('aria-label', '本文の置き場所');
+    for (const a of PROSE_ALIGNS) {
+      const opt = document.createElement('option');
+      opt.value = a.id;
+      opt.textContent = a.label;
+      paselect.append(opt);
+    }
+    pad.append(paselect);
+    const panote = document.createElement('p');
+    panote.setAttribute('data-pkc-field', 'settings-note');
+    // ⚠ **いつ効くのか**まで書く ── 窓が読み幅より狭ければ、どちらでも同じに見える
+    panote.textContent =
+      '窓が本文の読み幅より広いとき、本文を列の中央に置くか、左端に置くかが決まります。' +
+      '表・図・コードも段落と同じ側に揃います。' +
+      '窓が読み幅より狭いときは、どちらを選んでも同じ見え方です。' +
+      '紙面が「フル HD」(読み幅の上限なし)のときも同じです。' +
+      '書き出した HTML は、書き出したときの置き場所のまま表示されます。';
+    pad.append(panote);
+    dl.append(pat, pad);
 
     /**
      * 🔴 **文字の大きさ**(#504。user 指示 2026-08-28
@@ -559,6 +598,7 @@ export class SettingsRenderer {
     this.region.append(body);
     this.syncTheme();
     this.syncPageFormat();
+    this.syncProseAlign();
     this.syncTextScale();
     this.syncReadColumns();
     this.syncEditorMode();
@@ -1021,6 +1061,19 @@ export class SettingsRenderer {
     );
     // ⚠ 正本は DOM(`applyPageFormat` が当てた属性)── 保存を読み直さない
     const cur = currentPageFormat(document.documentElement);
+    if (select && select.value !== cur) select.value = cur;
+  }
+
+  /**
+   * ⚠ 画面の値を**いまの置き場所に合わせる**(#722)。器は 1 度しか組まないので、
+   *   映さないと**別の面へ行って戻ると古い値が見える**(§7 の「設定画面の値の同期」)。
+   * ⚠ 正本は DOM(`applyProseAlign` が当てた属性)── 保存を読み直さない。
+   */
+  private syncProseAlign(): void {
+    const select = this.region.querySelector<HTMLSelectElement>(
+      '[data-pkc-field="prose-align-select"]',
+    );
+    const cur = currentProseAlign(document.documentElement);
     if (select && select.value !== cur) select.value = cur;
   }
 
