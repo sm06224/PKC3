@@ -29,7 +29,8 @@
  * `:::toc` を書くと、そこから壊れる ── `tests/adapter/help-pane.test.ts` が
  * 「マニュアルに文書内アンカーが 0 件」を機械で守る。
  */
-import { APP_ID, APP_VERSION, BUILD_KIND } from '@runtime/release-meta';
+import { APP_ID, APP_VERSION, BUILD_KIND, BUILT_AT } from '@runtime/release-meta';
+import { formatBuildStamp } from '@features/datetime/datetime-format';
 import { NOTICES, noticeDate, recentNotices, type Notice } from '@features/notice/notice-log';
 import manualText from '../../../../docs/manual.md?raw';
 import { KEY_COMMANDS, chordLabel } from '@features/keymap';
@@ -53,8 +54,48 @@ export const MANUAL_TEXT: string = manualText;
  * 「開発版 / 検証版の刻印を落とす」変異が誰にも殺されなかった。
  */
 export function versionText(kind: string = BUILD_KIND): string {
-  const suffix = kind === 'product' ? '' : kind === 'stage' ? '(検証版)' : '(開発版)';
-  return `${APP_ID} v${APP_VERSION}${suffix}`;
+  const label = kindLabel(kind);
+  return `${APP_ID} v${APP_VERSION}${label === '' ? '' : `(${label})`}`;
+}
+
+/** 種別の呼び名。⚠ 本番は名乗らない(空)。 */
+function kindLabel(kind: string): string {
+  return kind === 'product' ? '' : kind === 'stage' ? '検証版' : '開発版';
+}
+
+/**
+ * 🔴 **画面に出す版の行**(#789。user 裁定 2026-09-08「日時を足す」)。
+ *
+ * ⚠ **`versionText()` と分けてある。混ぜてはいけない。**
+ *   `versionText()` は**マニュアルの窓を入れ替えるかの印**にも使われる
+ *   (`main.ts` → `manualBuildTag(versionText(), MANUAL_TEXT)`)ので、
+ *   そこに日時を入れると**毎ビルドで印が変わり、開いている窓が組み直される**
+ *   ── user が読んでいた場所が、中身が 1 字も変わっていないのに失われる。
+ * 🔑 だから**日時が付くのは「見せる字」だけ**である。
+ *
+ * ⚠ **本番では足さない** ── あちらは tag が版を名乗るので足りる。
+ * ⚠ 焼いていない環境(dev server / test)では `builtAt` が `0` なので、
+ *   これまでと 1 文字も変わらない。
+ *
+ * @param kind    build の種別(test から分岐を動かすため引数で受ける)
+ * @param builtAt 焼いた時刻(epoch ms)。`0` なら足さない
+ */
+export function versionLine(kind: string = BUILD_KIND, builtAt: number = BUILT_AT): string {
+  const label = kindLabel(kind);
+  if (label === '') return versionText(kind);
+  const stamp = buildStamp(builtAt);
+  return `${APP_ID} v${APP_VERSION}(${label}${stamp === '' ? '' : `・${stamp}`})`;
+}
+
+/**
+ * 焼いた時刻を「9/8 07:02」の形にする。⚠ **読む端末の時刻**で出す
+ * (焼いた箱の時間帯をそのまま出すと、user の手元と合わない)。
+ * 🔑 組み立ては `datetime-format.ts` の 1 か所から借りる ── ここで自前に組むと
+ *   「時刻を組み立てる場所は 1 か所」の門に当たる(実際に当たった)。
+ */
+function buildStamp(builtAt: number): string {
+  if (!Number.isFinite(builtAt) || builtAt <= 0) return '';
+  return formatBuildStamp(new Date(builtAt));
 }
 
 /**
@@ -244,7 +285,8 @@ export class HelpRenderer {
      *   見出しの下へ移したので、裸の版番号は**マニュアルの版**と読める位置になった。
      * 🔑 何のための数字かも書く ── 版を見る唯一の理由は**不具合の報告に添えること**である。
      */
-    ver.textContent = `この版: ${versionText()}(不具合の報告に添えてください)`;
+    // ⚠ ここは**見せる字**なので `versionLine()`(日時つき)── 入れ替えの印は `versionText()`
+    ver.textContent = `この版: ${versionLine()}(不具合の報告に添えてください)`;
     body.append(ver);
 
 
