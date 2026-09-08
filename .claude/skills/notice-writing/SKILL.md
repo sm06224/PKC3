@@ -82,7 +82,13 @@ git の履歴に在るので、表には**いま在る行の注記だけ**を置
 | | 何に答える計器か |
 |---|---|
 | 🚫 `git show v3.2.0:src/features/notice/notice-log.ts \| grep "id: "` | **本番の tag に在るか**だけ |
-| ✅ `git log --oneline main -S"<id>" -- src/features/notice/notice-log.ts` | **main に入ったか** = `/dev/` に配ったか |
+| ✅ `git log --oneline origin/main -S"<id>" -- src/features/notice/notice-log.ts` | **main に入ったか** = `/dev/` に配ったか |
+
+⚠ 🔴 **`main` ではなく `origin/main` と書く**(2026-09-08 に踏みかけた)── session の作業ツリーは
+feature branch だけを持っていることがあり、そこで `git log main …` を打つと
+**`unknown revision` か空**が返る。⚠ **空 = 「未配布」に見える**ので、
+この誤りは**当の間違いをそのまま再生産する**。🔑 打ったら `origin/main` の側で
+1 件は当たることを確かめる(全部空なら、引く先を間違えている)。
 
 🔑 **user が読んでいるのは `/dev/`(main HEAD)である。** merge した瞬間に配布済みで、
 本番の tag は関係ない。⚠ 2026-09-07〜08 に、この取り違えで**既配布の 3 件**へ
