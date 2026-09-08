@@ -337,11 +337,23 @@ describe('既読の集合', () => {
 });
 
 describe('登記表の読み方', () => {
+  /**
+   * ⚠ **上限の数を書かない**(2026-09-08、#751 で 10 → 30 にしたときに落ちた)。
+   * 🔑 主張は「**上限まで切る**」であって「10 件に切る」ではない ──
+   *   数を書くと、上限を動かすたびに**この test が意味を失ったまま落ちる**。
+   */
   it('🔴 新しい順に並べて、上限まで切る(切るのはここだけ)', () => {
-    const all = Array.from({ length: 15 }, (_, i) => n(`2026-01-${String(i + 1).padStart(2, '0')}-x`));
+    const over = NOTICE_SHOW_MAX + 5;
+    const all = Array.from({ length: over }, (_, i) =>
+      n(`2026-01-${String(i + 1).padStart(2, '0')}-x`),
+    );
+    // 空振り防止 ── fixture が上限を超えていなければ「切った」を 1 件も見ていない
+    expect(all.length, 'fixture が上限を超えていない').toBeGreaterThan(NOTICE_SHOW_MAX);
     const shown = recentNotices(all);
-    expect(shown).toHaveLength(10);
-    expect(shown[0]?.id, '新しい順になっていない').toBe('2026-01-15-x');
+    expect(shown).toHaveLength(NOTICE_SHOW_MAX);
+    expect(shown[0]?.id, '新しい順になっていない').toBe(
+      `2026-01-${String(over).padStart(2, '0')}-x`,
+    );
   });
 
   it('日付は id から引く(field を二重に持たない)', () => {

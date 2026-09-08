@@ -29,8 +29,32 @@
  *   書き方は日本語の user の普通である。門②が「切れ端」だけを落とす。
  */
 
-/** 計算に使える字(この whitelist の外が 1 つでも入ったら式ではない)。 */
-const CALC_CHARS = /^[0-9+\-*/%().\s]+$/;
+/**
+ * 計算に使える字(この whitelist の外が 1 つでも入ったら式ではない)。
+ *
+ * 🔴 **桁区切りの `,` を入れた**(2026-09-08、#766 B-2)。
+ * ⚠ 日本語で数を書く人の 1 行は `1,200 円` である ── 入れる前は `1,200+800=` が
+ *   `,` で走査を止め、**何も起きなかった**(3 回試して 3 回とも無音だと、
+ *   user は「この機能は効かない」と思ってやめる)。
+ * 🔑 ただし**受けるのは桁区切りだけ** ── `,` を素通しにすると `1,2+3=` が
+ *   `12+3` になって**打った覚えのない答え**が出る。落とすのは
+ *   「数の直後で、3 桁の数が続き、その先が数でない」`,` に限る(下の `stripGrouping`)。
+ * ⚠ 落とし切れなかった `,` が 1 つでも残ったら**式ではない**(評価しない)。
+ */
+const CALC_CHARS = /^[0-9+\-*/%().,\s]+$/;
+
+/**
+ * 桁区切りの `,` だけを落とす。⚠ **繰り返す** ── 1 回だと `1,234,567` の
+ * 2 つ目が「直前の数」を先の一致に食われて残る(実測)。
+ */
+function stripGrouping(src: string): string {
+  let out = src;
+  for (;;) {
+    const next = out.replace(/(\d),(\d{3})(?!\d)/gu, '$1$2');
+    if (next === out) return out;
+    out = next;
+  }
+}
 
 /**
  * 🔴 **全角で打った字を半角に読み替える**(user 報告 2026-09-07
@@ -89,7 +113,17 @@ function isCalcChar(ch: string): boolean {
 export function evaluateCalcExpression(src: string): number | null {
   if (typeof src !== 'string' || src.trim() === '') return null;
   if (!CALC_CHARS.test(src)) return null;
-  const p = new Parser(src);
+  /**
+   * 🔴 桁区切りを落としてから読む(#766 B-2)。
+   *
+   * ⚠ **落とし切れなかった `,` を弾く行は書かない** ── 書いたが、変異試験 C9 が
+   *   **SURVIVED**(= no-op)で教えた:残った `,` は必ず読み手を途中で止めるので、
+   *   下の `done()` が false になって**どのみち `null` になる**。
+   *   🔑 CLAUDE.md「『これが無いと壊れる』と書く前に、外して壊れることを見る」。
+   * 🔑 `1,2+3` を `12+3` と読まないことを担保しているのは、
+   *   **`stripGrouping` が厳しいこと**である(3 桁ちょうどのときだけ落とす)。
+   */
+  const p = new Parser(stripGrouping(src));
   const v = p.parseExpression();
   if (v === null) return null;
   // ⚠ 全部読み切っていなければ式ではない(`1+2)` を通さない)
@@ -197,6 +231,15 @@ export interface InlineCalcRequest {
    */
   halfWidth: { from: number; to: number; text: string } | null;
 }
+
+/**
+ * 🔴 **「言葉が混ざっている」の判定**(2026-09-08、#766 A-2)。
+ * ⚠ ここに当たる行では**理由を出さない** ── `締切=` / `md5=` / `A1+B1=` は
+ *   user が計算を頼んだ行ではないので、口を出すとただの雑音になる。
+ * ⚠ 全角の英字(`ｍｄ５`)は `toHalfWidth` で半角にならない(表は数と記号だけ)ので、
+ *   ここで**全角の英字も直に**見る。
+ */
+const WORD_CHARS = /[A-Za-z\uFF21-\uFF3A\uFF41-\uFF5A\u3040-\u30FF\u4E00-\u9FFF\uFF66-\uFF9D]/u;
 
 /** 行頭の箇条書きの印(`- ` / `* ` / `+ ` / `1. `)。⚠ 式から外す。 */
 const LIST_MARKER = /^([\t ]*)([-*+]|\d+\.)\s+/;
@@ -321,6 +364,61 @@ export function detectInlineCalcRequest(
     expression,
     halfWidth: half === typed ? null : { from, to: caretPos, text: half },
   };
+}
+
+/**
+ * 🔴 **計算にならなかったとき、理由を 1 行で返す**(2026-09-08、#766 A-2)。
+ *
+ * ## なぜ要るか
+ *
+ * ⚠ お知らせを読んだ人が最初に試すのは、例文の `2+3=` ではなく**自分の数字**である。
+ *   `1,2+3=` / `2^3=` / `50%=` ── どれも**何も起きない**ので、3 回試して 3 回とも
+ *   無音だと「この機能は効かない」と思ってやめる。
+ * 🔴 しかも**発火したときしか痕跡が無い**ので、user に**確かめる材料が 1 つも無い**。
+ *
+ * ## 出す条件を絞る(普通の文では 1 度も出さない)
+ *
+ * 🔑 出すのは「**数と記号だけの行**」に限る ── `締切=` や `md5=` のように
+ *   言葉が混ざる行では**黙る**(user 裁定 A-2 の条件そのもの)。
+ * ⚠ 「数が 1 つも無い」行も黙る ── `(=` のような打ち間違いに口を出さない。
+ * ⚠ **計算できた回は必ず `null`**(成功に注釈を付けない)。
+ *
+ * @returns 出す 1 行。出さないなら `null`
+ */
+export function explainCalcMiss(fullText: string, caretPos: number): string | null {
+  if (typeof fullText !== 'string') return null;
+  if (caretPos < 0 || caretPos > fullText.length) return null;
+  // 合図(`=` / `＝`)が直前に無ければ、そもそも計算を頼んでいない
+  if (toHalf(fullText[caretPos - 1] ?? '') !== '=') return null;
+  // 行の終わりでなければ発火しない(製品と同じ門 ── ここだけ緩めない)
+  const after = fullText[caretPos];
+  if (after !== undefined && after !== '\n') return null;
+  // 🔴 計算できたなら黙る(成功に口を出さない)
+  const req = detectInlineCalcRequest(fullText, caretPos);
+  if (req !== null && evaluateCalcExpression(req.expression) !== null) return null;
+
+  const nl = fullText.lastIndexOf('\n', caretPos - 1);
+  const head = toHalfWidth(fullText.slice(nl + 1, caretPos - 1));
+  const body = head.replace(LIST_MARKER, '').trim();
+  if (body === '') return null;
+  // ⚠ **数が 1 つも無い行**は普通の文(`(=` のような打ち間違いに口を出さない)
+  if (!/\d/u.test(body)) return null;
+  // ⚠ **言葉が混ざる行**は普通の文(`締切=` / `md5=` / `A1+B1=`)
+  if (WORD_CHARS.test(body)) return null;
+
+  // ① 計算に使えない字が入っている(`2^3=` の `^` / `50=` の後ろの記号)
+  const bad = [...body].find((ch) => !CALC_CHARS.test(ch));
+  if (bad !== undefined) return `計算できませんでした(${bad} は計算に使えません)`;
+  // ② 桁区切りに見えない `,`(`1,2+3=`)
+  if (stripGrouping(body).includes(','))
+    return '計算できませんでした(桁区切りの , は 3 桁ごとのときだけ数として読みます)';
+  // ③ `%` は余り(百分率ではない)── 末尾の `%` は必ずここに来る
+  if (/%\s*$/u.test(body)) return '計算できませんでした(% は「余り」です。百分率ではありません)';
+  // ④ 計算する所が無い(`1200=` / `(1)=`)
+  if (hasNoOperation(body)) return '計算できませんでした(足し算や掛け算がありません)';
+  // ⑤ 0 で割った(`1/0=` / `1%0=`)
+  if (/[/%]\s*0(?!\.\d*[1-9])/u.test(body)) return '計算できませんでした(0 で割れません)';
+  return '計算できませんでした(式として読めませんでした)';
 }
 
 /**

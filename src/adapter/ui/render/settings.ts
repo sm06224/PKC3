@@ -36,6 +36,7 @@ import { appEditorMode, EditorModeStore } from './editor-mode';
 import { appOpenInEdit, OpenInEditStore } from './open-in-edit';
 import { appAlarmEnabled, AlarmEnabledStore } from './alarm-enabled';
 import { EXTERNAL_IMAGE_MODES } from '@features/markdown/external-images';
+import { NOTICE_READABLE_TEXT } from '@features/notice/notice-log';
 import { appExternalImages, ExternalImagePolicy } from './external-images';
 import { PASTE_SOURCES } from '@features/markdown/paste-source';
 import { appPasteSource, PasteSourceStore } from './paste-source';
@@ -491,8 +492,9 @@ export class SettingsRenderer {
     nd.append(nlabel);
     const nnote = document.createElement('p');
     nnote.setAttribute('data-pkc-field', 'settings-note');
-    // ⚠ 「いつでも」と書かない ── ヘルプに並ぶのは新しい 10 件までである(2026-09-08)
-    nnote.textContent = '出さなくても、過去のお知らせはヘルプから新しい 10 件が読めます。';
+    // ⚠ 「いつでも」と書かない ── ヘルプに並ぶのは上限までである(2026-09-08)
+    // ⚠ **数は書かない、組み立てる**(#751 ── 同じ字が 5 か所に散っていた)
+    nnote.textContent = `出さなくても、過去のお知らせはヘルプから${NOTICE_READABLE_TEXT}が読めます。`;
     nd.append(nnote);
     dl.append(nt, nd);
 

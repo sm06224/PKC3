@@ -100,34 +100,72 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>) {
 
 describe('create (P3-7a)', () => {
   it('作成ボタン → seed 付き editor + 即永続、保存で本文が確定する', async () => {
-    // ⚠ かつては todo で見ていたが、todo は封印中(features/sealed.ts)で
-    // select に出ない ── seed を持つ別の種類(表)で同じことを見る
+    // ⚠ かつては todo で見ていたが、todo は封印中(features/sealed.ts)で select に出ない。
+    // ⚠ **2026-09-08(#753)に表からも移した** ── 表は「読む面で開く」へ変わったので、
+    //    「作ると編集の面が出る」を見る台にはもう使えない。seed を持ち、
+    //    作ったら本文を打つ種類(雛形)で同じことを見る。
     const { root, d, q, qa, persisted, store } = setup([meta('a', 1)], { a: 'x' });
-    createByUi(root, 'spreadsheet');
+    createByUi(root, 'snippet');
     await tick();
 
     // 即永続(作成時点で行が存在 ── PKC2 と同じ)+ seed が editor に見える
     expect(persisted).toHaveLength(1);
-    expect(persisted[0]).toMatchObject({
-      archetype: 'spreadsheet',
-      body: '```csv-render noheader\n,,,,\n,,,,\n,,,,\n```',
-      entryOrder: 2,
-    });
+    expect(persisted[0]).toMatchObject({ archetype: 'snippet', entryOrder: 2 });
+    const seed = persisted[0]!.body;
+    // 空振り防止 ── seed が空なら「seed が editor に見える」を 1 文字も見ていない
+    expect(seed.length, 'seed が空(この台は seed を見るためのもの)').toBeGreaterThan(20);
     const lid = persisted[0]!.lid;
     expect(d.getState().phase).toBe('editing');
     const ta = q<HTMLTextAreaElement>('[data-pkc-field="editor-body"]')!;
-    expect(ta.value).toBe('```csv-render noheader\n,,,,\n,,,,\n,,,,\n```');
+    expect(ta.value).toBe(seed);
     // 既定 title(日付 + 種別 + 連番)が title input に入っている
     const title = q<HTMLInputElement>('[data-pkc-field="editor-title"]')!;
-    expect(title.value).toMatch(/^\d{4}-\d{2}-\d{2} 表 1$/);
+    expect(title.value).toMatch(/^\d{4}-\d{2}-\d{2} 雛形 1$/);
     // sidebar に行が生えている
     expect(qa(`[data-pkc-entry="${lid}"]`).length).toBeGreaterThan(0);
 
-    ta.value = '```csv-render noheader\n,,,,\n,,,,\n,,,,\n```\n買い物';
+    ta.value = `${seed}買い物`;
     ta.dispatchEvent(new Event('input', { bubbles: true }));
     q<HTMLElement>('[data-pkc-action="commit-edit"]')!.click();
     await tick(20);
-    expect(store[lid]).toBe('```csv-render noheader\n,,,,\n,,,,\n,,,,\n```\n買い物');
+    expect(store[lid]).toBe(`${seed}買い物`);
+  });
+
+  /**
+   * 🔴 **表は「読む面」で開く**(#753、2026-09-08)。
+   *
+   * ⚠ 直す前は編集の面(ライブエディタ)で開いていたが、**升を押せる印を焼くのは
+   *   読む面だけ**なので、**升を押すと原文の欄に化けた** ── #418 が無くそうとした
+   *   「カンマを目で数える画面」が、作った直後だけ戻っていた。
+   * ⚠ しかもマニュアルは「**そのままセルから打てます**」と書いており、
+   *   **約束のほうが嘘**だった。
+   *
+   * 🔑 **対照群を同じ it に置く**(ノートは今までどおり編集の面)── 置かないと
+   *   「全部の種類を読む面にした」という**逆の壊し方**を 1 つも止められない。
+   */
+  it('🔴 表は読む面で開く / ノートは編集の面のまま (#753)', async () => {
+    const a = setup([meta('a', 1)], { a: 'x' });
+    createByUi(a.root, 'spreadsheet');
+    await tick();
+    expect(a.persisted).toHaveLength(1);
+    expect(a.persisted[0]).toMatchObject({
+      archetype: 'spreadsheet',
+      body: '```csv-render noheader\n,,,,\n,,,,\n,,,,\n```',
+    });
+    expect(a.d.getState().phase, '表が編集の面で開いている(升を押しても打てない)').toBe('ready');
+    expect(
+      a.q<HTMLTextAreaElement>('[data-pkc-field="editor-body"]'),
+      '原文の欄が出ている(読む面ではない)',
+    ).toBeNull();
+    // 🔑 作った表が**選ばれている**(作っただけで見えないと、次に押す所が無い)
+    expect(a.d.getState().selectedLid).toBe(a.persisted[0]!.lid);
+
+    // ⚠ 対照群 ── ノートは今までどおり編集の面で開く
+    const b = setup([meta('a', 1)], { a: 'x' });
+    createByUi(b.root, 'text');
+    await tick();
+    expect(b.d.getState().phase, 'ノートまで読む面にしてしまった').toBe('editing');
+    expect(b.q<HTMLTextAreaElement>('[data-pkc-field="editor-body"]')).not.toBeNull();
   });
 
   it('未編集のまま cancel → entry ごと掃除(PKC2 の空 entry 堆積の対策)', async () => {

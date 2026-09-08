@@ -22,7 +22,7 @@
  *   user が旧ビルドを手元に残す単一 HTML 製品では往復のたび巻き戻る。
  */
 import type { Notice } from '@features/notice/notice-log';
-import { noticeDate, unreadNotices } from '@features/notice/notice-log';
+import { NOTICE_READABLE_TEXT, noticeDate, unreadNotices } from '@features/notice/notice-log';
 import type { NoticeStore } from '@adapter/platform/notice-store';
 
 export interface Announce {
@@ -129,7 +129,7 @@ export function createAnnounce(
     close.title =
       unread.length === 1
         ? '読んだことにして閉じます'
-        : `残り ${unread.length} 件を読んだことにして閉じます(ヘルプから新しい 10 件が読めます)`;
+        : `残り ${unread.length} 件を読んだことにして閉じます(ヘルプから${NOTICE_READABLE_TEXT}が読めます)`;
     head.append(close);
     region.append(head);
 
@@ -178,10 +178,12 @@ export function createAnnounce(
     where.textContent =
       /*
        * ⚠ **「いつでも」と書かない**(2026-09-08、着地前レビュー)── ヘルプに並ぶのは
-       *   `NOTICE_SHOW_MAX`(10 件)までで、11 件目より古いものはアプリから読めない。
+       *   `NOTICE_SHOW_MAX` までで、それより古いものはアプリから読めない。
        *   🔑 数を書けば、user は「無くなった」と「まだ在る」を自分で判断できる。
+       * ⚠ **数は書かない、組み立てる**(2026-09-08、#751)── 同じ字が 5 か所に
+       *   散っていて、上限を動かした日にどれかが嘘になる(CLAUDE.md §7)。
        */
-      '過去のお知らせは「ヘルプ」から新しい 10 件が読めます。「今後は出さない」は設定の「表示」から戻せます。';
+      `過去のお知らせは「ヘルプ」から${NOTICE_READABLE_TEXT}が読めます。「今後は出さない」は設定の「表示」から戻せます。`;
 
     const mute = document.createElement('button');
     mute.type = 'button';
