@@ -2955,6 +2955,19 @@ li[data-pkc-row-slot] {
 .pkc-md-rendered [data-pkc-action='edit-cell']:hover {
   background: color-mix(in srgb, var(--fg) 6%, transparent);
 }
+/**
+ * 🔴 **指で触る端末には、上の合図が 1 つも届かない**(#750 I2、2026-09-08)。
+ *
+ * ⚠ 合図は `:hover` **1 本だけ**だった ── 指で触る端末に hover は無いので、
+ *   スマホ・タブレットでは「升が押せる」ことを知らせる物が**画面に何も無かった**。
+ * 🔑 **升そのものの見え方は 1px も変えない**(推薦した案 B)── 表の右上、
+ *   コピーの ⧉ の隣に 1 つだけ出す。マウスの端末では**出さない**(合図は上に在る)。
+ * ⚠ 器は `interactiveCells` を渡した面にしか焼かれないので、**書き出した HTML と
+ *   印刷には要素ごと無い**(そこでは押しても打てないので、出したら嘘になる)。
+ */
+.pkc-md-rendered .pkc-cell-tap-hint {
+  display: none;
+}
 /* ⚠ **升の中いっぱいに開く** ── 小さい欄が升の中に浮くと、どの升を
  *    打っているのか分からなくなる(隣の升と重なって見える) */
 .pkc-md-rendered .pkc-csv-cell-input {
@@ -6147,6 +6160,27 @@ li[data-pkc-row-slot] {
   /** 🔴 指で触る端末にだけ、押せない理由を字で出す(#791 ③)。 */
   .pkc-create-blocked-note {
     display: block;
+  }
+
+  /**
+   * 🔴 指で触る端末にだけ、「升は押すと打てます」を出す(#750 I2)。
+   * ⚠ 器の側は `interactiveCells` を渡した面にしか焼かれない ──
+   *   だから書き出した HTML と印刷では、この規則に当たる要素が 1 つも無い。
+   *
+   * 🔴 **表の上に 1 行として置く**(浮かせない)。⚠ 1 稿目は
+   *   `position: absolute; right: 44px`(⧉ の隣)にしていたが、**表の器は
+   *   `width: fit-content`**(表の幅)なので、**細い表では合図が器からはみ出して
+   *   画面の外へ出た** ── 390px の実機幅で `x = -26px`(実測)。
+   *   ⚠ `toBeVisible()` は**それを通す**(大きさは在るので)。
+   * 🔑 流し込みにすれば器の幅に依らず必ず収まり、**升に重ならない**ので
+   *   `pointer-events` の細工も要らない。
+   */
+  .pkc-md-rendered .pkc-cell-tap-hint {
+    display: block;
+    margin: 0 0 2px;
+    font-size: var(--btn-fs-sm);
+    line-height: 1.4;
+    color: var(--muted);
   }
 
   /**

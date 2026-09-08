@@ -436,6 +436,26 @@ function toggleKey(content: string, salt: string): string {
  * ⚠ **表を出す囲みにだけ付ける** ── コード囲みや図に「CSV で保存」を出しても
  *   選べる物が無い(押せるのに意味の無い口を作らない)。
  */
+/**
+ * 🔴 **指で触る端末に「押すと打てます」を 1 つ出す**(#750 I2、2026-09-08)。
+ *
+ * ⚠ 直す前の合図は `app.css` の **`:hover` 1 つだけ**で、**指で触る端末に hover は
+ *   無い** ── PKC3 は指で触る端末を明示して支えている(マニュアル)のに、
+ *   この機能だけ入口が hover に依存していた。
+ *
+ * 🔑 **升そのものの見え方は 1px も変えない**(推薦した案 B)── 表の右上に 1 つ置く。
+ * 🔑 **出る条件は「升が押せること」と同じ 1 つ**(`interactiveCells`)── だから
+ *   **書き出した HTML と印刷には出ない**(そこでは升を押しても打てないので、
+ *   出したら嘘になる)。⚠ 判定を別に持つと、片方だけ直る日が来る(§7)。
+ * ⚠ 出す / 出さないの**最後の 1 段は CSS**(`@media (hover: none) and
+ *   (pointer: coarse)`)── 端末の性質は描くときに分からない(同じ HTML が
+ *   マウスの端末でも読まれる)。
+ */
+function cellTapHintHtml(env: unknown): string {
+  if ((env as { interactiveCells?: boolean } | undefined)?.interactiveCells !== true) return '';
+  return `<span class="pkc-cell-tap-hint" data-pkc-field="cell-tap-hint">押すと打てます</span>`;
+}
+
 function copyMenuButtonHtml(): string {
   return (
     `<button class="pkc-md-copy-btn pkc-md-copy-menu-btn" data-pkc-action="copy-md-block"` +
@@ -794,7 +814,7 @@ export function renderFenceFromAsset(
 // action-binder) and writes both `text/plain` (TSV) and `text/html`
 // (the table's own HTML) to the clipboard via `copyMarkdownAndHtml`-
 // style multi-MIME write.
-md.renderer.rules.table_open = function (tokens, idx, options, _env, self) {
+md.renderer.rules.table_open = function (tokens, idx, options, env, self) {
   // 領域 10-1 PR 2 hotfix: also propagate source-line attrs onto the
   // pkc-md-block wrapper so caret-on-table-line activates the wrapper
   // visually (the inner <table> still carries its own attrs through
@@ -806,7 +826,7 @@ md.renderer.rules.table_open = function (tokens, idx, options, _env, self) {
   const sourceLineAttrs = collectSourceLineAttrs(token);
   // 🔴 **csv の表と同じ口を出す**(#708 段①)── 直す前は csv の囲みにしか
   //    形を選ぶ道が無く、同じ「表」なのに持ち出し方が違っていた
-  return `<div class="pkc-md-block" data-pkc-md-block-kind="table"${sourceLineAttrs}><button class="pkc-md-copy-btn" data-pkc-action="copy-md-block" data-pkc-copy-kind="table" type="button" aria-label="コピー" title="コピー">⧉</button>${copyMenuButtonHtml()}${self.renderToken(tokens, idx, options)}`;
+  return `<div class="pkc-md-block" data-pkc-md-block-kind="table"${sourceLineAttrs}><button class="pkc-md-copy-btn" data-pkc-action="copy-md-block" data-pkc-copy-kind="table" type="button" aria-label="コピー" title="コピー">⧉</button>${copyMenuButtonHtml()}${cellTapHintHtml(env)}${self.renderToken(tokens, idx, options)}`;
 };
 md.renderer.rules.table_close = function (tokens, idx, options, _env, self) {
   return `${self.renderToken(tokens, idx, options)}</div>`;

@@ -214,6 +214,13 @@ const STYLED_ELSEWHERE: Readonly<Record<string, string>> = {
   // 板の器の印(#283 P4)── 塊が 1 つでも在るとき adapter が host へ付ける
   'pkc-board-host': 'src/adapter/ui/render/place-board.ts',
   /**
+   * 指で触る端末で「升は押すと打てます」と出す 1 行(#750 I2)。
+   * ⚠ これは**本文の描画物である**が、`renderMarkdown` の既定では出ない ──
+   *   出るのは `interactiveCells` を渡した面だけ(= 押せる面だけ)なので、
+   *   既定で描く走査には現れない。
+   */
+  'pkc-cell-tap-hint': 'src/features/markdown/markdown-render.ts',
+  /**
    * 指で触る端末で、「作る」が押せない理由を出す 1 行(#791 ③)。
    * ⚠ これは**本文の描画物ではない** ── 器(shell)が組み立てる帯の部品なので、
    *   `renderMarkdown` からは 1 度も出てこない。

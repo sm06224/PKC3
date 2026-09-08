@@ -1499,3 +1499,73 @@ test('🔴 390px の空の PKC で、一覧に「作る」と「取り込む」�
 
   expect(errors, `console/pageerror: ${errors.join(' | ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **指で触る端末に「升は押すと打てます」が出る**(#750 I2、2026-09-08)。
+ *
+ * ⚠ 直す前の合図は `app.css` の **`:hover` 1 つだけ**だった ── 指で触る端末に
+ *   hover は無いので、スマホでは**押せることを知らせる物が画面に何も無かった**。
+ * 🔑 ここでしか確かめられない ── 出す / 出さないの最後の 1 段は
+ *   `@media (hover: none) and (pointer: coarse)` で、**端末の性質**は unit に無い。
+ * ⚠ **対照群を同じ spec に置かない** ── マウスの端末で出ないことは
+ *   `layout.smoke.spec.ts` の側(`test.use` が違う)で見る。ここは
+ *   「触る端末では出る」だけを主張する。
+ */
+test('🔴 スマホでは、表の升が押せることが字で出る (#750 I2)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  // ⚠ 全文の textarea を入力の道具に使うので、既定(live)ではなく split を明示する
+  await useSplitEditor(page);
+  await gotoApp(page);
+  // ⚠ **お知らせは先に畳む** ── 畳まないと、カードの見出しが「作る」を覆って
+  //    `createEntry` が届かない(この spec の他の test と同じ作法)
+  await dismissAnnounce(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('表');
+  await page
+    .locator('[data-pkc-field="editor-body"]')
+    .fill('| 品 | 数 |\n|---|---|\n| りんご | 3 |\n');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+
+  const table = page.locator('[data-pkc-field="detail-body"] table').first();
+  await expect(table, '読む面に表が出ていない').toBeVisible({ timeout: 15_000 });
+  // 🔑 空振り防止 ── 押せる升が本当に焼かれている面である
+  await expect(
+    page.locator('[data-pkc-field="detail-body"] [data-pkc-action="edit-cell"]').first(),
+    '押せる升が 1 つも無い(この検査は空振り)',
+  ).toBeAttached();
+
+  const hint = page.locator('[data-pkc-field="cell-tap-hint"]').first();
+  await expect(hint, '触る端末なのに合図が出ていない').toBeVisible();
+  await expect(hint).toHaveText('押すと打てます');
+  /**
+   * 🔴 **画面の中に収まっていて、升に重なっていない**。
+   *
+   * ⚠ `toBeVisible()` は**画面の外に出た合図を通す**(大きさは在るので)──
+   *   1 稿目は `position: absolute; right: 44px` で浮かせており、**表の器が
+   *   `width: fit-content`** なので細い表では **x = −26px**(画面外)に出ていた。
+   *   実測して初めて分かった(検査が主張を守っていなかった)。
+   * 🔑 だから見るのは 2 つ:①**器の中に収まっている** ②**升に重なっていない**。
+   */
+  const box = await hint.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const cell = el.closest('.pkc-md-block')?.querySelector('[data-pkc-action="edit-cell"]');
+    const c = cell?.getBoundingClientRect();
+    return {
+      x: Math.round(r.x),
+      right: Math.round(r.right),
+      w: Math.round(r.width),
+      vw: document.documentElement.clientWidth,
+      // 縦に重なっていなければ、升の押し所は 1px も削られない
+      overlaps: c === undefined ? null : r.bottom > c.top && r.top < c.bottom,
+    };
+  });
+  expect(box.w, '合図に幅が無い(台の空振り)').toBeGreaterThan(0);
+  expect(box.x, `合図が画面の左へはみ出している(x=${box.x})`).toBeGreaterThanOrEqual(0);
+  expect(
+    box.right,
+    `合図が画面の右へはみ出している(right=${box.right} / 窓 ${box.vw})`,
+  ).toBeLessThanOrEqual(box.vw);
+  expect(box.overlaps, '升と縦に重なっている(押し所を削る)').toBe(false);
+
+  expect(errors, `console/pageerror: ${errors.join(' | ')}`).toEqual([]);
+});
