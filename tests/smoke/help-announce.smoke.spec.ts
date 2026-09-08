@@ -776,3 +776,81 @@ test('🔴 ヘルプでは Ctrl+F を奪わない / 本文では奪う (#636)', 
 
   expect(errors, 'console に赤が出ている').toEqual([]);
 });
+
+/**
+ * 🔴 **本文の「→「名前」」を押すと、その節へ送られ、帰り道が出る**
+ *   (#779 段⑧、user 裁定 2026-09-08「押せる + 戻る道も付ける」)。
+ *
+ * ⚠ **unit では飛ぶことを見られない** ── happy-dom は版面を持たないので
+ *   `scrollIntoView` が何も動かさない(`help-pane.test.ts` は帰り道の側だけ見る)。
+ *   🔑 「本当に送られる」と「帰り道が**見えている**」は、ここでしか確かめられない。
+ */
+test('🔴 本文の参照を押すと節へ送られ、「戻る」で読んでいた場所へ帰る (#779 段⑧)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await gotoApp(page);
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="help"]');
+
+  const manualBox = page.locator('[data-pkc-region="help-manual"]');
+  const refs = page.locator('[data-pkc-field="manual-ref"]');
+  await expect(refs.first()).toBeAttached({ timeout: 15_000 });
+  // 空振り防止 ── 押せる参照が**たくさん**在ること(1 つだけなら偶然でありうる)
+  expect(await refs.count(), '押せる参照が少なすぎる').toBeGreaterThan(50);
+
+  const back = page.locator('[data-pkc-region="help-jump-back"]');
+  await expect(back, '押す前から帰り道が出ている').toBeHidden();
+
+  /**
+   * 読んでいた場所を作る ── 本文を送ってから、そこに在る参照を押す。
+   * 🔴 **「読んでいた場所」は、押す直前に測る**(2026-09-08、実測で直した)。
+   * ⚠ 1 稿目は送った直後に測ってから `scrollIntoViewIfNeeded()` を呼んでいたので、
+   *   **測った後・押す前に位置が動いていた**(実測: 測った 600 → 帰った 78)。
+   *   product は「押した時点の場所」へ正しく帰しており、**test の測り方が誤っていた**。
+   */
+  // ⚠ **奥の参照**を選ぶ ── 先頭の参照は開いた直後から見えているので、
+  //    「読んでいる途中で出会う」という当の場面にならない(実測: from が 0 のまま)
+  const target = refs.nth(20);
+  await target.scrollIntoViewIfNeeded();
+  const from = await manualBox.evaluate((el) => el.scrollTop);
+  expect(from, '前提が崩れている: 本文が送られていない').toBeGreaterThan(0);
+  const outerFrom = await page
+    .locator('[data-pkc-region="detail"]')
+    .evaluate((el) => el.scrollTop);
+  await target.click();
+
+  // ① 送られた ── 読んでいた場所から動いた
+  await expect
+    .poll(async () => manualBox.evaluate((el) => el.scrollTop), {
+      message: '押しても本文が動かない',
+    })
+    .not.toBe(from);
+
+  /**
+   * 🔴 **外側は動かない**(目次の行と同じ ── `jumpTo` は 1 か所)。
+   * ⚠ 動くと**帰り道まで画面の外へ出る**(#719 で目次が踏んだのと同じ形)。
+   */
+  expect(
+    await page.locator('[data-pkc-region="detail"]').evaluate((el) => el.scrollTop),
+    '外側までスクロールした(帰り道が画面の外へ出る)',
+  ).toBe(outerFrom);
+
+  // ② 帰り道が出て、**画面の中に見えている**(出ているだけでは足りない)
+  await expect(back, '飛んだのに帰り道が出ない').toBeVisible();
+  await expect(
+    page.locator('[data-pkc-field="manual-jump-back"]'),
+    '帰り道が画面の外に居る(見えなければ無いのと同じ)',
+  ).toBeInViewport();
+
+  // ③ 押すと読んでいた場所へ帰り、帰り道は畳まれる
+  await page.locator('[data-pkc-field="manual-jump-back"]').click();
+  await expect
+    .poll(async () => manualBox.evaluate((el) => el.scrollTop), {
+      message: '読んでいた場所へ帰っていない',
+    })
+    .toBe(from);
+  await expect(back, '帰ったのに帰り道が残っている').toBeHidden();
+
+  expect(errors, `裏で例外が出ている: ${errors.join(' / ')}`).toEqual([]);
+});

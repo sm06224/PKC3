@@ -953,6 +953,12 @@ describe('お知らせの文面は固定(#220-7)', () => {
      * 🔑 枠のためいちばん古い 1 件(`2026-09-07-inline-calc`)を落とした ──
      *   落とす相手は **origin/main に在るもの**から選んだ(fc72eb1)。原本は CHANGELOG。
      */
+    /**
+     * ⚠ **#779 段⑧(本文の参照を押せる字にする)で足した**(2026-09-08、user 裁定)。
+     * 🔑 枠のためいちばん古い 1 件(`2026-09-07-append-scroll`)を落とした ──
+     *   落とす相手は **origin/main に在るもの**から選んだ(fef58d6)。原本は CHANGELOG。
+     */
+    ['2026-09-08-manual-jump', '5b106bb6'],
     ['2026-09-08-manual-terms', '2f8d9b5f'],
     ['2026-09-08-manual-otherwise-split', 'e3f46a74'],
     ['2026-09-08-dev-build-stamp', '98ee6540'],
@@ -963,7 +969,6 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-09-08-note-button-blocked', '0af5d3f2', 'main'],
     ['2026-09-08-table-convert-quote', 'ddd26648', 'main'],
     ['2026-09-07-csv-empty-cell', 'edeaa23e', 'main'],
-    ['2026-09-07-append-scroll', '9eabafe9', 'main'],
     // ⚠ 2026-09-07(#764): 枠 10 を超えたので `2026-09-05-scan-after-save` を
     //    登記表から落とした(いちばん古い 1 件 ── user 裁定「古い順に出す」)
     // ⚠ 2026-09-06(#750 I2): 枠 10 を超えたので `2026-09-05-a11y-theme-keys` を

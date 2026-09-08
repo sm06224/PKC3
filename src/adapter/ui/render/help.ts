@@ -35,6 +35,7 @@ import { NOTICES, noticeDate, recentNotices, type Notice } from '@features/notic
 import manualText from '../../../../docs/manual.md?raw';
 import { KEY_COMMANDS, chordLabel } from '@features/keymap';
 import { appKeymap, type KeymapStore } from './keymap';
+import { findManualRefs, resolveManualRef } from '@features/help/manual-refs';
 import {
   findInManual,
   manualLineCount,
@@ -130,6 +131,12 @@ export class HelpRenderer {
   private manualHost: HTMLElement | null = null;
   /** 面の中の目次(#719)。⚠ マニュアルを描いた**後**に埋める(id が要る)。 */
   private tocHost: HTMLElement | null = null;
+
+  /** 「← さっきの場所へ戻る」の帯(#779 段⑧)。⚠ 器は捨てず `hidden` で畳む。 */
+  private backHost: HTMLElement | null = null;
+
+  /** 飛ぶ前のスクロール位置(祖先ぜんぶ)。⚠ 帰ったら `null` に戻す。 */
+  private backTo: readonly { el: HTMLElement; top: number }[] | null = null;
   /**
    * 🔴 **マニュアルを描いてあるか**(#531 H3)。⚠ `built`(器を組んだか)とは**別**
    *   である ── 器は捨てず、**中身だけ**を手放すので、2 つの状態が要る。
@@ -407,6 +414,24 @@ export class HelpRenderer {
     this.tocHost.setAttribute('aria-label', 'マニュアルの目次');
     body.append(this.tocHost);
 
+    /**
+     * 🔴 **「← さっきの場所へ戻る」の帯**(#779 段⑧、user 裁定 2026-09-08)。
+     * ⚠ **本文の器より先に組む**(本文の上に出す)── 飛んだ先は画面の上に来るので、
+     *   帰り道も上に在るほうが目に入る。⚠ 既定は畳んでおく。
+     */
+    this.backHost = document.createElement('p');
+    this.backHost.setAttribute('data-pkc-region', 'help-jump-back');
+    this.backHost.hidden = true;
+    const backBtn = document.createElement('button');
+    backBtn.type = 'button';
+    backBtn.setAttribute('data-pkc-field', 'manual-jump-back');
+    backBtn.textContent = '← さっきの場所へ戻る';
+    backBtn.addEventListener('click', () => {
+      this.goBack();
+    });
+    this.backHost.append(backBtn);
+    body.append(this.backHost);
+
     this.manualHost = document.createElement('div');
     this.manualHost.setAttribute('data-pkc-region', 'help-manual');
     this.manualHost.className = 'pkc-md-rendered';
@@ -621,6 +646,141 @@ export class HelpRenderer {
       host.textContent = MANUAL_TEXT;
     }
     this.syncToc();
+    this.linkRefs();
+  }
+
+  /**
+   * 🔴 **本文の「→「名前」」を押せる字にする**(#779 段⑧、user 裁定 2026-09-08)。
+   *
+   * ⚠ **描いた DOM を歩く**(原文を書き換えない)── `docs/manual.md` は
+   *   マニュアルの窓・持ち歩ける HTML も読む正本なので、そこへ `#` を書けない
+   *   (`help.ts` 冒頭)。🔑 押せる形にするのは**この面の中だけ**である。
+   *
+   * ⚠ **見出しと囲みの中は歩かない** ── 見出しの中の参照を押せる字にすると
+   *   目次の字が変わり、`code` の中は「書き方の例」であって参照ではない。
+   *
+   * ⚠ **解決しない参照は素の字のまま**(`resolveManualRef` が `null`)──
+   *   押しても何も起きない字を作らないため(この repo がいちばん嫌う形)。
+   */
+  private linkRefs(): void {
+    const host = this.manualHost;
+    if (host === null) return;
+    const heads = [...host.querySelectorAll<HTMLElement>('h1, h2, h3, h4')];
+    const names = heads.map((h) => h.textContent ?? '');
+    const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
+    /** ⚠ 歩きながら差し替えると walker が壊れるので、**先に集めてから**当てる。 */
+    const jobs: { node: Text; hits: { name: string; start: number; end: number }[] }[] = [];
+    for (let n = walker.nextNode(); n !== null; n = walker.nextNode()) {
+      const node = n as Text;
+      if (node.parentElement?.closest('h1, h2, h3, h4, h5, h6, code, pre') != null) continue;
+      const hits = findManualRefs(node.data).filter(
+        (h) => resolveManualRef(h.name, names) !== null,
+      );
+      if (hits.length > 0) jobs.push({ node, hits });
+    }
+    for (const job of jobs) {
+      const frag = document.createDocumentFragment();
+      let at = 0;
+      for (const hit of job.hits) {
+        if (hit.start > at) frag.append(job.node.data.slice(at, hit.start));
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.setAttribute('data-pkc-field', 'manual-ref');
+        btn.setAttribute('data-pkc-ref', hit.name);
+        btn.textContent = hit.name;
+        btn.title = `「${hit.name}」の節へ送ります`;
+        /**
+         * ⚠ **押したときに引き直す**(飛び先の要素を掴まない)── 描き直しで
+         *   器が入れ替わっても迷子にならない(目次の行と同じ作法)。
+         * 🔑 **名前で引く** ── 条 6(同名の見出しを 2 つ作らない)を満たしたので、
+         *   名前から見出しが**一意に決まる**(#793、2026-09-08)。
+         */
+        const want = hit.name;
+        btn.addEventListener('click', () => {
+          const now = [...host.querySelectorAll<HTMLElement>('h1, h2, h3, h4')];
+          const title = resolveManualRef(
+            want,
+            now.map((h) => h.textContent ?? ''),
+          );
+          if (title === null) return;
+          const target = now.find((h) => (h.textContent ?? '') === title) ?? null;
+          if (target === null) return;
+          this.jumpTo(target, true);
+        });
+        frag.append(btn);
+        at = hit.end;
+      }
+      if (at < job.node.data.length) frag.append(job.node.data.slice(at));
+      job.node.replaceWith(frag);
+    }
+  }
+
+  /**
+   * 🔴 **その見出しまで送る**(目次の行と本文の参照で**同じ 1 か所**。§7)。
+   *
+   * 🔴 **外側は動かさない**(着地前レビュー・動線 4、実測)。
+   * ⚠ `scrollIntoView` は**スクロールできる祖先を全部**動かすので、外側
+   *   (`[data-pkc-region='detail']`)まで動いて**目次が画面の外へ出る**
+   *   (実測: 押す前 `outerScrollTop 0` / 押した後 **494**)。目次は
+   *   「押して読んで、また押す」物なので、1 回で消えては使えない。
+   * 🔑 **送ってから外側だけ戻す**。⚠ 内側を自分で計算しない
+   *   (`getBoundingClientRect` は happy-dom で 0 ── 観測点を捨てない)。
+   *
+   * @param offerBack 🔴 **本文の参照から飛んだときだけ `true`**。
+   *   ⚠ 目次から飛んだときは出さない ── 目次は**画面にずっと在る**ので、
+   *   もう一度押せば戻れる(帰り道が既に在る所に、2 つ目を作らない)。
+   */
+  private jumpTo(target: HTMLElement, offerBack: boolean): void {
+    const host = this.manualHost;
+    if (host === null) return;
+    /**
+     * ⚠ **戻る先は「動かした物の位置」で控える** ── `scrollIntoView` は
+     *   スクロールできる祖先を全部動かすので、控えるのも**祖先ぜんぶ**にする。
+     *   ⚠ 動かない要素の `scrollTop` は 0 で、0 を書き戻すのは無害である。
+     */
+    const chain: { el: HTMLElement; top: number }[] = [];
+    /**
+     * 🔴 **`host` 自身から控える**(2026-09-08、smoke を読んで見つけた)。
+     * ⚠ 1 稿目は `host.parentElement` から始めていたが、**実際に動くのは
+     *   `help-manual` 自身**である(`max-height: 60vh; overflow: auto` の器 ──
+     *   `help-announce.smoke.spec.ts` が「動くのは help-body ではなくマニュアルの箱」と
+     *   実測で書いている)。⚠ unit は版面を持たないので、親を手で動かす台では
+     *   **どちらの実装でも緑**になり、この取り違えを見られなかった。
+     */
+    for (let el: HTMLElement | null = host; el !== null; el = el.parentElement) {
+      chain.push({ el, top: el.scrollTop });
+      if (el.getAttribute('data-pkc-region') === 'detail') break;
+    }
+    const outer = host.closest<HTMLElement>('[data-pkc-region="detail"]');
+    const keep = outer?.scrollTop ?? 0;
+    target.scrollIntoView({ block: 'start' });
+    if (outer !== null && outer !== undefined) outer.scrollTop = keep;
+    if (offerBack) this.showBack(chain);
+  }
+
+  /**
+   * 🔴 **「← さっきの場所へ戻る」を出す**(user 裁定 2026-09-08「戻る道も付ける」)。
+   *
+   * ⚠ **片道の操作を作らない** ── 飛べるなら帰れなければならない
+   *   (CLAUDE.md「面から**置ける**なら、面から**外せなければならない**」の読む版)。
+   * ⚠ 帰ったら**その表示は消す** ── 帰り道を使い切ったのに残っていると、
+   *   もう一度押した人が**知らない場所へ飛ばされる**。
+   * ⚠ **器は捨てず、中身だけ書き換える**(この repo で 3 度踏んだ形)。
+   */
+  private showBack(chain: readonly { el: HTMLElement; top: number }[]): void {
+    const bar = this.backHost;
+    if (bar === null) return;
+    bar.hidden = false;
+    this.backTo = chain;
+  }
+
+  /** 控えた位置へ戻して、帰り道を畳む。 */
+  private goBack(): void {
+    const to = this.backTo;
+    this.backTo = null;
+    if (this.backHost !== null) this.backHost.hidden = true;
+    if (to === null) return;
+    for (const { el, top } of to) el.scrollTop = top;
   }
 
   /**
@@ -675,21 +835,8 @@ export class HelpRenderer {
               (h) => h.id === id,
             ) ?? null;
           if (target === null) return;
-          /**
-           * 🔴 **外側は動かさない**(着地前レビュー・動線 4、実測)。
-           * ⚠ `scrollIntoView` は**スクロールできる祖先を全部**動かすので、
-           *   外側(`[data-pkc-region='detail']`)まで動いて**目次が画面の外へ出る**
-           *   (実測: 押す前 `outerScrollTop 0` / 押した後 **494**、目次は見えなくなった)。
-           *   目次は「押して読んで、また押す」物なので、1 回で消えては使えない。
-           * 🔑 **送ってから外側だけ戻す** ── 描画の合間に戻すので、画面には
-           *   「内側だけ動いた」ように見える。⚠ 内側を自分で計算しない
-           *   (`getBoundingClientRect` は happy-dom で 0 なので、**unit から
-           *   飛び先を確かめられなくなる** ── 観測点を捨てないほうを採った)。
-           */
-          const outer = host.closest<HTMLElement>('[data-pkc-region="detail"]');
-          const keep = outer?.scrollTop ?? 0;
-          target.scrollIntoView({ block: 'start' });
-          if (outer !== null && outer !== undefined) outer.scrollTop = keep;
+          // ⚠ 送り方は `jumpTo` 1 か所(§7)── 目次と本文の参照で 2 通りに書かない
+          this.jumpTo(target, false);
         });
       });
       nav.append(row);

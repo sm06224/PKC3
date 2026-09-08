@@ -329,6 +329,9 @@ describe('ヘルプの面', () => {
       'help-find-bar',
       'settings-note:目次 ── ',
       'help-toc',
+      // ⚠ **本文の直前**(#779 段⑧)── 飛び先は本文の深い所なので、帰り道は
+      //    本文の頭に貼り付けて置く(CSS の `sticky`)。既定は `hidden` で畳む
+      'help-jump-back',
       'help-manual',
       'H3:ショートカットキー',
       'settings-note:Ctrl は',
@@ -402,6 +405,92 @@ describe('ヘルプの面', () => {
     await Promise.resolve();
     expect(seen[0], 'マニュアル全文を渡していない').toBe(MANUAL_TEXT);
     expect(region.querySelector('[data-probe="1"]'), '描いた結果が入っていない').not.toBeNull();
+  });
+
+  /**
+   * 🔴 **本文の参照を押せる字にする ── 作る側と押す側が同じ画面で出会う**
+   *   (#779 段⑧、user 裁定 2026-09-08)。
+   *
+   * ⚠ 規則そのものは `tests/features/manual-refs.test.ts` が自前の原稿で見ている。
+   *   ここで見るのは**配線**である ── CLAUDE.md §7「A と B が合意していることは、
+   *   A の test にも B の test にも書けない」。
+   */
+  describe('本文の「→「名前」」(#779 段⑧)', () => {
+    /** 見出し 2 つと、それを指す参照 3 つ(決まる / 曖昧 / 無い)を持つ小さな原稿。 */
+    /** ⚠ 見出しには `id` を持たせる ── 目次は `h1[id], h2[id], h3[id]` しか拾わない。 */
+    const DOC =
+      '<h2 id="a">設定</h2><p>あれ(→「設定」)と(→「予定」)と(→「前へ出す」)。</p>' +
+      '<h2 id="b">予定を扱う</h2><h2 id="c">予定(左の列のタブ)</h2>';
+
+    const mount = async (): Promise<HTMLElement> => {
+      new HelpRenderer(region, { render: () => Promise.resolve(DOC) }).render();
+      for (let i = 0; i < 4; i += 1) await Promise.resolve();
+      return region.querySelector<HTMLElement>('[data-pkc-region="help-manual"]')!;
+    };
+
+    it('🔴 行き先が決まる参照だけがボタンになる(曖昧・不在は素の字)', async () => {
+      const host = await mount();
+      const btns = [...host.querySelectorAll<HTMLElement>('[data-pkc-field="manual-ref"]')];
+      expect(btns.map((b) => b.textContent), '押せる字の顔ぶれが違う').toEqual(['設定']);
+      // ⚠ 対照群 ── 決まらなかった 2 つは**字として残っている**(消していない)
+      expect(host.textContent, '曖昧な参照の字が消えた').toContain('「予定」');
+      expect(host.textContent, '無い参照の字が消えた').toContain('「前へ出す」');
+    });
+
+    it('🔴 見出しの中の参照はボタンにしない(目次の字が変わる)', async () => {
+      new HelpRenderer(region, {
+        render: () => Promise.resolve('<h2>設定</h2><h2>あれ(→「設定」)</h2>'),
+      }).render();
+      for (let i = 0; i < 4; i += 1) await Promise.resolve();
+      const host = region.querySelector<HTMLElement>('[data-pkc-region="help-manual"]')!;
+      expect(
+        host.querySelectorAll('h2 [data-pkc-field="manual-ref"]').length,
+        '見出しの中がボタンになっている',
+      ).toBe(0);
+    });
+
+    it('🔴 押すと帰り道が出て、もう一度押すと畳む', async () => {
+      const host = await mount();
+      const back = region.querySelector<HTMLElement>('[data-pkc-region="help-jump-back"]')!;
+      // 前提 ── 押す前は畳んである
+      expect(back.hidden, '帰り道が最初から出ている').toBe(true);
+      host.querySelector<HTMLElement>('[data-pkc-field="manual-ref"]')!.click();
+      expect(back.hidden, '飛んだのに帰り道が出ない').toBe(false);
+      back.querySelector<HTMLElement>('[data-pkc-field="manual-jump-back"]')!.click();
+      expect(back.hidden, '帰ったのに帰り道が残っている').toBe(true);
+    });
+
+    /**
+     * 🔴 **動くのは `help-manual` 自身**(`max-height: 60vh; overflow: auto` の器)。
+     * ⚠ 1 稿目はここで **`help-body`** を動かしており、実装が `host.parentElement`
+     *   から控えていても緑だった ── **製品に存在しない状態を再現していた**
+     *   (CLAUDE.md「台が作った状態が、両方の実装で同じ結果になる」)。
+     *   実測の出どころは `tests/smoke/help-announce.smoke.spec.ts`
+     *   「動くのは help-body ではなくマニュアルの箱」。
+     * ⚠ happy-dom は版面を持たないので `scrollIntoView` は動かさない ──
+     *   だから**こちらで動かして**、帰りが効くことを見る(飛ぶ側は smoke が見る)。
+     */
+    it('🔴 帰ると、飛ぶ前のスクロール位置へ戻る(動くのはマニュアルの箱)', async () => {
+      const host = await mount();
+      host.scrollTop = 321;
+      host.querySelector<HTMLElement>('[data-pkc-field="manual-ref"]')!.click();
+      host.scrollTop = 999;
+      region.querySelector<HTMLElement>('[data-pkc-field="manual-jump-back"]')!.click();
+      expect(host.scrollTop, '飛ぶ前の位置へ戻っていない').toBe(321);
+    });
+
+    it('🔴 目次から飛んだときは帰り道を出さない(目次はずっと画面に在る)', async () => {
+      const host = await mount();
+      const back = region.querySelector<HTMLElement>('[data-pkc-region="help-jump-back"]')!;
+      const row = region.querySelector<HTMLElement>('[data-pkc-field="help-toc-row"]');
+      expect(row, '前提が崩れている: 目次の行が無い').not.toBeNull();
+      row!.click();
+      for (let i = 0; i < 4; i += 1) await Promise.resolve();
+      expect(back.hidden, '目次から飛んで帰り道が出た').toBe(true);
+      // 対照群 ── 本文の参照からなら出る(この test 自身が空振りでないこと)
+      host.querySelector<HTMLElement>('[data-pkc-field="manual-ref"]')!.click();
+      expect(back.hidden, '本文の参照から飛んでも出ない').toBe(false);
+    });
   });
 
   /** ⚠ 口が壊れていても白紙にしない(素の原文へ落ちる)。 */
