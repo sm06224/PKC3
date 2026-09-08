@@ -213,6 +213,12 @@ const STYLED_ELSEWHERE: Readonly<Record<string, string>> = {
   'pkc-body-media': 'src/features/asset/asset-preview-kind.ts',
   // 板の器の印(#283 P4)── 塊が 1 つでも在るとき adapter が host へ付ける
   'pkc-board-host': 'src/adapter/ui/render/place-board.ts',
+  /**
+   * 指で触る端末で、「作る」が押せない理由を出す 1 行(#791 ③)。
+   * ⚠ これは**本文の描画物ではない** ── 器(shell)が組み立てる帯の部品なので、
+   *   `renderMarkdown` からは 1 度も出てこない。
+   */
+  'pkc-create-blocked-note': 'src/adapter/ui/render/shell.ts',
 };
 
 const NO_STYLE_NEEDED: Readonly<Record<string, string>> = {
