@@ -12,6 +12,8 @@
  * ⚠ ここに DOM も window も持ち込まない ── そうしないと test が実機依存になる。
  */
 
+import { OFFICE_PACK_APPROX } from './office-pack-size';
+
 /** 添付が Office 文書かどうかの判定に使う MIME。 */
 const OFFICE_MIMES: ReadonlySet<string> = new Set([
   // OOXML
@@ -121,7 +123,7 @@ export function officeEntry(input: OfficeEntryInput): OfficeEntry {
        * 🔑 O6 で設置の面ができたら、**ここを場所付きの文へ戻す**
        * (`tests/features/office-entry.test.ts` が場所の名指しを見張っている)。
        */
-      reason: 'Office 表示には一式(約 77MB)が要ります。まだ入っていません。',
+      reason: `Office 表示には一式(${OFFICE_PACK_APPROX})が要ります。まだ入っていません。`,
     };
   }
   return { kind: 'open', label: 'Office で開く' };

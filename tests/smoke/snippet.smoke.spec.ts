@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import {
   gotoApp,
   clickReal,
@@ -9,6 +9,35 @@ import {
   resetStoreOps,
   waitForStoreOp,
 } from './helpers';
+
+/**
+ * 🔴 **索引に「載った」ことを見る**(#759、2026-09-08)。
+ *
+ * ⚠ `waitForStoreOp(page, 'snippetScan', 1)` が言えるのは
+ *   「**走査が 1 本返ってきた**」だけである ── その 1 本が
+ *   **この雛形を保存する前の列**を読んでいた回があり、フル smoke が 2 度落ちた
+ *   (短縮語が索引に無いまま `Tab` を押していた)。
+ *   🔑 CLAUDE.md §4「観測点が『放っておいても変わる』なら、変化は届いた証拠にならない」。
+ *
+ * 🔑 だから**一覧を開いて、短縮語が出るまで**待つ ── これは user が見るのと
+ *   同じ面である(`title(abbr)` の形で出る)。
+ * ⚠ 一覧は**開いた時点の索引を握る**(`binder.ts` の `insert-snippet` に明記)ので、
+ *   開きっぱなしで待っても更新されない ── **毎回開き直す**。
+ * ⚠ 製品側の穴は別に直してある(`store-effects.ts` の `scanAfterWrites` ──
+ *   待っている走査の後ろに書込が積まれたら、もう 1 本走らせる)。
+ *   ここはその**上流に残る「まだ届いていない」窓**を閉じるための待ちである。
+ */
+async function waitForSnippetIndexed(page: Page, abbr: string): Promise<void> {
+  const rows = page.locator('[data-pkc-field="pick-snippet"]');
+  await expect(async () => {
+    await clickReal(page, '[data-pkc-action="insert-snippet"]');
+    await expect(rows.first()).toBeVisible();
+    const hit = await rows.filter({ hasText: abbr }).count();
+    await page.keyboard.press('Escape');
+    await expect(rows.first()).toBeHidden();
+    expect(hit, `雛形(${abbr})がまだ索引に載っていない`).toBeGreaterThan(0);
+  }).toPass({ timeout: 15_000 });
+}
 
 test.beforeEach(async ({ page }) => {
   await useSplitEditor(page);
@@ -52,6 +81,7 @@ test('🔴 雛形を作って、短縮語 + Tab で本文に挿せる (#196)', a
   await resetStoreOps(page);
   await createEntry(page, 'text');
   await waitForStoreOp(page, 'snippetScan', 1);
+  await waitForSnippetIndexed(page, 'addr');
   await ta.fill('addr');
   // ⚠ 末尾へカーソルを置く(短縮語は**カーソルの手前**で当たる)
   await ta.press('End');
@@ -137,6 +167,7 @@ test('🔴 雛形を一覧から選ぶと、caret の位置に入る (#196)', as
   await resetStoreOps(page);
   await createEntry(page, 'text');
   await waitForStoreOp(page, 'snippetScan', 1);
+  await waitForSnippetIndexed(page, 'addr');
   await ta.fill('まえ\nうしろ');
   await ta.evaluate((el) => {
     (el as HTMLTextAreaElement).setSelectionRange(3, 3);

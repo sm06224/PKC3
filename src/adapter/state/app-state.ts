@@ -3585,6 +3585,20 @@ function reduceCore(
        */
       const tagSuggestions =
         action.rewrite.kind === 'tag' ? null : state.tagSuggestions;
+      /**
+       * 🔴 **留めた枠にも同じノートが出ていることがある**(#757、2026-09-08)。
+       *
+       * ⚠ **これが無いと、左で升を打っても・チェックを押しても・日付を書いても、
+       *   右(横に留めた枠)は古い字のまま**である ── user から見れば
+       *   「どちらが本当か分からない」形で、直したはずの所をもう一度直すことになる。
+       *
+       * 🔴 **`BODY_PERSISTED` と `REMOTE_BODY_CHANGED` には既に在ったのに、
+       *   ここだけ抜けていた**(§7「同じ問いに答える口が複数あると、片方だけ直る」)。
+       *   ⚠ しかも**いちばん通る経路**である ── 升を打つ・チェックを押す・日付を書くは
+       *   全部 `REQUEST_BODY_REWRITE` → `BODY_REWRITTEN` を通り、
+       *   `BODY_PERSISTED` は**通らない**(`store-effects.ts` が `BODY_REWRITTEN` しか出さない)。
+       */
+      const rewrittenSplit = syncSplitBody(state, action.lid, action.body);
       return {
         state: {
           ...state,
@@ -3596,6 +3610,7 @@ function reduceCore(
           lastMove,
           notice,
           noticeOpen,
+          splitBodies: rewrittenSplit,
         },
         events: [],
       };

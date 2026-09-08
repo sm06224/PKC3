@@ -158,11 +158,26 @@ export function buildTiles(sources: readonly TileSource[]): LauncherTile[] {
  * ⚠ `pkc-` で始めない ── goldens の正規化が id らしき名前を機械的に潰す
  * リポジトリでは、「id らしく見える名前」は id として扱われる(CLAUDE.md §9)。
  */
+/**
+ * 🔴 **組み込みアプリの群の名前**(#531 段② / #281。user 指示 2026-08-28
+ * 「組み込みアプリを**グループに収納して整理する**」)。
+ *
+ * ⚠ 直す前は 6 枚とも `group: ''`(既定群)で、**user が入れたタイルと地続き**に
+ *   並んでいた ── 群にも分かれず目印も無いので、自分で入れたものが
+ *   **下へ押し下がっているようにしか見えない**(#281 の実害)。
+ * 🔑 名前の付いた群にすると、`launcher.ts` が**見出しを 1 本引く**
+ *   (既定群は見出しを出さない作法のまま)── これで
+ *   「最初から在るもの」と「自分で入れたもの」が字で分かれる。
+ * ⚠ **並び順は変えない** ── 組み込みが先、自分のものが後(`withBuiltinTiles`)。
+ *   順番まで動かすと「いつものタイルが下へ消えた」を起こす(`sortTiles` の注記と同じ向き)。
+ */
+export const BUILTIN_GROUP = '組み込みアプリ';
+
 export const OFFICE_TILE_LID = 'builtin:office';
 
 /** Office(Start Center)を開く組み込みタイル。 */
 export function officeTile(): LauncherTile {
-  return { lid: OFFICE_TILE_LID, title: 'Office', group: '', kind: 'office' };
+  return { lid: OFFICE_TILE_LID, title: 'Office', group: BUILTIN_GROUP, kind: 'office' };
 }
 
 /**
@@ -178,7 +193,7 @@ export function officeTile(): LauncherTile {
 export const DUAL_TILE_LID = 'builtin:dual';
 
 export function dualTile(): LauncherTile {
-  return { lid: DUAL_TILE_LID, title: '2 ペインで整理', group: '', kind: 'dual' };
+  return { lid: DUAL_TILE_LID, title: '2 ペインで整理', group: BUILTIN_GROUP, kind: 'dual' };
 }
 
 /**
@@ -195,7 +210,7 @@ export function dualTile(): LauncherTile {
 export const SCHEDULE_TILE_LID = 'builtin:schedule';
 
 export function scheduleTile(): LauncherTile {
-  return { lid: SCHEDULE_TILE_LID, title: '予定表', group: '', kind: 'schedule' };
+  return { lid: SCHEDULE_TILE_LID, title: '予定表', group: BUILTIN_GROUP, kind: 'schedule' };
 }
 
 /**
@@ -206,7 +221,7 @@ export function scheduleTile(): LauncherTile {
 export const CONTACTS_TILE_LID = 'builtin:contacts';
 
 export function contactsTile(): LauncherTile {
-  return { lid: CONTACTS_TILE_LID, title: '連絡先', group: '', kind: 'contacts' };
+  return { lid: CONTACTS_TILE_LID, title: '連絡先', group: BUILTIN_GROUP, kind: 'contacts' };
 }
 
 /**
@@ -221,7 +236,7 @@ export function contactsTile(): LauncherTile {
 export const SEARCH_TILE_LID = 'builtin:search';
 
 export function searchTile(): LauncherTile {
-  return { lid: SEARCH_TILE_LID, title: '探す', group: '', kind: 'search' };
+  return { lid: SEARCH_TILE_LID, title: '探す', group: BUILTIN_GROUP, kind: 'search' };
 }
 
 /**
@@ -238,7 +253,7 @@ export function searchTile(): LauncherTile {
 export const MANUAL_TILE_LID = 'builtin:manual';
 
 export function manualTile(): LauncherTile {
-  return { lid: MANUAL_TILE_LID, title: 'マニュアル', group: '', kind: 'manual' };
+  return { lid: MANUAL_TILE_LID, title: 'マニュアル', group: BUILTIN_GROUP, kind: 'manual' };
 }
 
 /**
@@ -290,7 +305,19 @@ export function withBuiltinTiles(
   const builtin: LauncherTile[] = [dualTile(), scheduleTile(), contactsTile(), searchTile()];
   if (opts.office) builtin.push(officeTile());
   builtin.push(manualTile());
-  return [...builtin, ...tiles];
+  /**
+   * 🔴 **組み込みは末尾へ「収納」する**(#531 段② / #281。user 指示 2026-08-28
+   * 「組み込みアプリをグループに**収納して**整理する」)。
+   *
+   * ⚠ 直す前は**先頭**に置いていた ── 6 枚が上を占めるので、
+   *   **自分で入れたタイルが下へ押し下がっているようにしか見えない**(#281 の実害)。
+   * ⚠ そして名前を付けた途端、順番が「**名前つき → 名前なし → 名前つき**」になり、
+   *   名前の無い群が 2 つの見出しに挟まれる(読めない並び)。
+   * 🔑 末尾へ回すと「**自分のもの → 名前を付けた群 → 組み込み**」で一本になる。
+   * ⚠ **組み込みの中の順番は変えない**(2 ペイン → 予定表 → 連絡先 → 探す →
+   *   Office → マニュアル)── Office の有無で位置が動かない向きはそのまま。
+   */
+  return [...tiles, ...builtin];
 }
 
 /**

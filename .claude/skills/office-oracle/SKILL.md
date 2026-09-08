@@ -510,3 +510,57 @@ done
 ⚠ **診断の grep はこの行を拾わない** ── `Argument list too long` には
 `error:` も `***` も無い。だから workflow の診断に「**落ちた行の手前 80 行**」を
 出す段を置いてある(2026-08-30)。**型に当たらないエラーこそ読みたい。**
+
+## 15. 🔴 `wasm-function[60973]` を名前に直す ── 焼き直さない(2026-09-08、#631)
+
+> ⚠ **「名前つきで焼き直すしかない」と書こうとした瞬間に、ここを読む。**
+> #117 / #88 / #431 は、その思い込みで**焼き 1 本(30 分〜4 時間)待ち**のまま止まっていた。
+
+配っている一式には **name section が 0 件**なので、停止のスタックは
+`wasm-function[60973]` という**番号だけ**で出る。🔑 だが
+**`--profiling-funcs` は名前の節を足すだけ**で、関数の並びも offset も動かさない ──
+つまり**名前つき一式の表を引けば、配布一式の番号がそのまま名前になる**。
+
+```bash
+# ① 名前つき一式を落とす(§1 と同じ手順。tag に -names が付いているもの)
+# ② 番号を直に渡す
+python3 build/office-wasm/wasm-names.py \
+  --wasm /tmp/lo-names/soffice.wasm \
+  --lo-sha "$(jq -r .build.lo_sha /tmp/lo-pack/pack.json)" \
+  60973 198121 235333
+
+# ③ スタックの字をそのまま食わせる(`wasm-function[N]` を拾って、出た順に返す)
+python3 build/office-wasm/wasm-names.py --wasm /tmp/lo-names/soffice.wasm \
+  --lo-sha "$(jq -r .build.lo_sha /tmp/lo-pack/pack.json)" --stack crash.txt
+```
+
+| 番号 | 名前(#117 で実証) |
+|---|---|
+| 60973 | `Scheduler::CallbackTaskScheduling()` |
+| 198121 | `QtTimer::timeoutActivated()` |
+| 235333 | `void doActivate<false>(QObject*, int, void**)` |
+
+### 🔴 使える条件は 1 つ ── `lo_sha` が同じであること
+
+**反例が実測済み**:番号 **39465** は `63426ccd1d7c` では `vcl::Window::ToTop(ToTopFlags)`、
+`95e83feb2e85` では `ImplBorderWindow::GetOptimalSize()` である。
+
+🔑 だからこの道具は **`--lo-sha` を必須**にし、名前つき一式に同梱された
+`build-info.json` の `lo_sha` と**突き合わせてからしか引かない**
+(食い違い / `build-info.json` が無い / 7 文字未満 ── どれでも**落ちる**)。
+
+⚠ **記録には「番号 + `lo_sha`」を対で書く。** 番号だけの記録は、枝が 1 つ動いた瞬間に
+**それらしい嘘**になる ── しかも名前が出てしまうので、**誰も検算しない**。
+
+### 落ちる形(全部わざとそうしてある)
+
+| 渡したもの | どうなるか |
+|---|---|
+| **配布一式**(name section 0 件) | ✗ で止まる。⚠ 黙って「名前なし」を並べると、渡した人が「名前が付いていない関数だ」と誤読する |
+| name section は在るが**関数名の副節が無い** | ✗ で止まる |
+| **`lo_sha` が違う / 7 文字未満** | ✗ で止まる(上の反例をそのまま踏むため) |
+| `build-info.json` が無い | ✗ で止まる(どの枝か分からないまま引かない) |
+| **引けなかった番号が 1 件でもある** | 引けた分は刷ってから ✗(穴を黙って読ませない) |
+
+検めているのは `tests/office-wasm-names.test.ts`(自作の wasm を組む ── 実物に依存すると
+手元でも CI でも走らない)。変異試験 **9/9 KILLED**(2026-09-08)。

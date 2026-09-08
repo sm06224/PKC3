@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects, type StorePort } from '../../src/adapter/state/store-effects';
-import { DUAL_TILE_LID,
+import { BUILTIN_GROUP, DUAL_TILE_LID,
   MANUAL_TILE_LID, OFFICE_TILE_LID, SCHEDULE_TILE_LID, CONTACTS_TILE_LID, type LauncherTile } from '../../src/features/launcher/tiles';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 
@@ -115,13 +115,14 @@ describe('ランチャーのタイルを読む', () => {
     // ⚠ **予定表**(#673 段②、user 裁定 2026-09-04)── 左の「予定」タブを残したまま、
     //    同じ面を別窓で開く 2 つ目の入口として戻った
     // ⚠ **探す**(#680)── 連絡先の次。左に同じ面は無い(欄だけ)、別窓で開く組み込み
+    // 🔴 **組み込みは末尾**(#531 段② / #281、2026-09-08)── user が入れた `app` が先頭
     expect(dispatcher.getState().launcherTiles?.map((t) => t.kind)).toEqual([
+      'app',
       'dual',
       'schedule',
       'contacts',
       'search',
       'manual',
-      'app',
     ]);
     off();
   });
@@ -187,35 +188,57 @@ describe('組み込み Office タイルの合流 (#148)', () => {
 
   /**
    * 🔴 **並びは固定**(#241 で 2 ペインが加わった。user 指摘 2026-08-19)。
-   * ⚠ 2 ペインは**アプリに最初から在る**ので先頭、Office は**入れた端末だけ**
-   *   なのでその次 ── 入れたり消したりで 2 ペインの位置が動かない向きに並べる
-   *   (「同じものが常に同じ場所にある」)。
+   * ⚠ 2 ペインは**アプリに最初から在る**ので組み込みの束の先頭、Office は
+   *   **入れた端末だけ**なのでその後ろ ── 入れたり消したりで 2 ペインの位置が
+   *   動かない向きに並べる(「同じものが常に同じ場所にある」)。
+   *
+   * 🔴 **2026-09-08(#531 段② / #281)に束ごと末尾へ移した。**
+   * ⚠ 直す前は組み込み 6 枚が**先頭**に居たので、user が自分で入れたタイルが
+   *   **下へ押し下がって見えた**(#281 の実害)。いまは
+   *   「**自分のもの → 「組み込みアプリ」の見出し → 組み込み 6 枚**」である。
+   * 🔑 だから位置は**先頭からではなく、user のタイルの後ろから**数える ──
+   *   前から数える書き方に戻すと、user のタイルが 1 枚増えるたびに落ちる。
    */
-  it('組み込みは 2 ペイン → 予定表 → Office の順で先頭に付く', async () => {
+  /** user 由来のタイル(この fixture では `a1` の 1 枚)より後ろ = 組み込みの束。 */
+  function builtinBlock(tiles: readonly LauncherTile[]): readonly LauncherTile[] {
+    const own = tiles.findIndex((t) => t.lid === 'a1');
+    // 空振り防止 ── user のタイルが 1 枚も出ていなければ、以降は何も見ていない
+    expect(own, 'user 由来のタイル a1 が出ていない(以降の位置の主張が空振りする)').toBe(0);
+    return tiles.slice(own + 1);
+  }
+
+  it('組み込みは 2 ペイン → 予定表 → Office の順で、user のタイルの後ろに付く', async () => {
     const tiles = await tilesWith(true);
-    expect(tiles[0]?.lid, '2 ペインが先頭でない').toBe(DUAL_TILE_LID);
+    const b = builtinBlock(tiles);
+    expect(b[0]?.lid, '2 ペインが組み込みの先頭でない').toBe(DUAL_TILE_LID);
     // ⚠ 予定表(#673 段②)は Office より前 ── アプリに最初から在るものを先に
-    expect(tiles[1]?.lid, '予定表が 2 ペインの次に居ない').toBe(SCHEDULE_TILE_LID);
-    expect(tiles[2]?.lid, '連絡先が予定表の次に居ない').toBe(CONTACTS_TILE_LID);
+    expect(b[1]?.lid, '予定表が 2 ペインの次に居ない').toBe(SCHEDULE_TILE_LID);
+    expect(b[2]?.lid, '連絡先が予定表の次に居ない').toBe(CONTACTS_TILE_LID);
     // ⚠ 探す(#680)は連絡先の次 ── Office より前(アプリに最初から在る側)
-    expect(tiles[3]?.kind, '探すが連絡先の次に居ない').toBe('search');
-    expect(tiles[4]?.kind).toBe('office');
-    expect(tiles[4]?.lid).toBe(OFFICE_TILE_LID);
-    expect(tiles[5]?.lid, 'マニュアルが組み込みの最後に居ない').toBe(MANUAL_TILE_LID);
-    // ⚠ entry 由来のタイルが**消えていない**こと(置き換えではなく合流)
-    expect(tiles.some((t) => t.lid === 'a1')).toBe(true);
+    expect(b[3]?.kind, '探すが連絡先の次に居ない').toBe('search');
+    expect(b[4]?.kind).toBe('office');
+    expect(b[4]?.lid).toBe(OFFICE_TILE_LID);
+    expect(b[5]?.lid, 'マニュアルが組み込みの最後に居ない').toBe(MANUAL_TILE_LID);
+    // 🔴 6 枚とも「組み込みアプリ」の群に居る(見出しが 1 本引かれる条件)
+    expect(
+      b.map((t) => t.group),
+      '組み込みが既定群のまま(見出しが引かれず、自分のものと地続きに見える)',
+    ).toEqual(Array.from({ length: 6 }, () => BUILTIN_GROUP));
   });
 
   it('🔴 Office が入っていなくても、最初から在るものは出る(位置も動かない)', async () => {
     const tiles = await tilesWith(false);
     expect(tiles.some((t) => t.kind === 'office')).toBe(false);
-    expect(tiles[0]?.lid, 'Office の有無で 2 ペインの位置が動いた').toBe(DUAL_TILE_LID);
-    expect(tiles[1]?.lid, 'Office の有無で予定表の位置が動いた').toBe(SCHEDULE_TILE_LID);
-    expect(tiles[2]?.lid, 'Office の有無で連絡先の位置が動いた').toBe(CONTACTS_TILE_LID);
-    expect(tiles[3]?.kind, 'Office の有無で探すの位置が動いた').toBe('search');
+    // 🔴 組み込みを末尾へ回した効き ── Office の有無で
+    //    **user のタイルの位置が 1px も動かない**(前に居たときは動いていた)
+    expect(tiles[0]?.lid, 'Office の有無で entry 由来の位置が動いた').toBe('a1');
+    const b = builtinBlock(tiles);
+    expect(b[0]?.lid, 'Office の有無で 2 ペインの位置が動いた').toBe(DUAL_TILE_LID);
+    expect(b[1]?.lid, 'Office の有無で予定表の位置が動いた').toBe(SCHEDULE_TILE_LID);
+    expect(b[2]?.lid, 'Office の有無で連絡先の位置が動いた').toBe(CONTACTS_TILE_LID);
+    expect(b[3]?.kind, 'Office の有無で探すの位置が動いた').toBe('search');
     // ⚠ **マニュアル**(#645)は Office の有無に依らず、組み込みの最後に居る
-    expect(tiles[4]?.lid, 'Office の有無でマニュアルの位置が動いた').toBe(MANUAL_TILE_LID);
-    expect(tiles[5]?.lid, 'Office の有無で entry 由来の位置が動いた').toBe('a1');
-    expect(tiles.some((t) => t.lid === 'a1')).toBe(true);
+    expect(b[4]?.lid, 'Office の有無でマニュアルの位置が動いた').toBe(MANUAL_TILE_LID);
+    expect(b, '組み込みが 5 枚でない').toHaveLength(5);
   });
 });

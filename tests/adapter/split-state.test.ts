@@ -170,6 +170,55 @@ describe('主の枠で直したら、留めた枠も追いつく', () => {
     expect(d.getState().splitBodies.get('n1')).toBe('別窓\n');
   });
 
+  /**
+   * 🔴 **升を打つ・チェックを押す・日付を書く でも追いつく**(#757、2026-09-08)。
+   *
+   * ⚠ **これがいちばん通る経路**である ── 表の升も、チェックの印も、予定の日付も、
+   *   全部 `REQUEST_BODY_REWRITE` → **`BODY_REWRITTEN`** を通る。
+   *   ⚠ `BODY_PERSISTED` は**通らない**(`store-effects.ts` が `BODY_REWRITTEN` しか出さない)ので、
+   *   上の 2 件が緑でも**この経路だけ古いまま**になっていた(§7 の片側だけ直る形)。
+   * 🔑 直す前の実装に戻すと、この 3 件は落ちる(変異試験で確かめた)。
+   */
+  const rewritten = (d: Dispatcher, lid: string, body: string, kind: 'cell' | 'task' | 'schedule') =>
+    d.dispatch({
+      type: 'BODY_REWRITTEN',
+      lid,
+      body,
+      rewrite: { kind } as never,
+      status: null,
+      date: null,
+      archived: false,
+    } as never);
+
+  it('🔴 升を打つと、留めた枠も新しい字になる', () => {
+    const d = booted();
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'SPLIT_BODY_LOADED', lid: 'n1', body: '| a |\n|---|\n| 古 |\n' });
+    rewritten(d, 'n1', '| a |\n|---|\n| 新 |\n', 'cell');
+    expect(d.getState().splitBodies.get('n1')).toBe('| a |\n|---|\n| 新 |\n');
+  });
+
+  it('🔴 チェックを押しても、日付を書いても同じ(経路は 1 つ)', () => {
+    for (const kind of ['task', 'schedule'] as const) {
+      const d = booted();
+      d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'n1' });
+      d.dispatch({ type: 'SPLIT_BODY_LOADED', lid: 'n1', body: '- [ ] やること\n' });
+      rewritten(d, 'n1', '- [x] やること\n', kind);
+      expect(d.getState().splitBodies.get('n1'), `${kind} で追いつかない`).toBe(
+        '- [x] やること\n',
+      );
+    }
+  });
+
+  it('⚠ 対照群 ── 留めていないノートの書換では、留めの入れ物を作り直さない', () => {
+    const d = booted();
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'n2' });
+    d.dispatch({ type: 'SPLIT_BODY_LOADED', lid: 'n2', body: 'x' });
+    const before = d.getState().splitBodies;
+    rewritten(d, 'n3', 'よそ', 'cell');
+    expect(d.getState().splitBodies).toBe(before);
+  });
+
   it('⚠ 留めていないノートの書込では、留めの入れ物を作り直さない', () => {
     const d = booted();
     d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'n2' });

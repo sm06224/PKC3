@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildTiles,
   dualTile,
+  BUILTIN_GROUP,
   DUAL_TILE_LID,
   isLaunchableUrl,
   officeTile,
@@ -151,12 +152,27 @@ describe('組み込みタイルの合流 (#148)', () => {
    * ⚠ 2 ペインは**アプリに最初から在る**ので先頭、Office は**入れた端末だけ**なので
    *   その次 ── 入れたり消したりで 2 ペインの位置が動かない向きに並べる。
    */
-  it('組み込みは 2 ペイン → 予定表 → 連絡先 → 探す → Office → マニュアルの順で、既定グループの先頭に付く', () => {
+  /**
+   * 🔴 **組み込みは名前の付いた群に入る**(#531 段② / #281。2026-09-08)。
+   * ⚠ 直す前は 6 枚とも既定群(`''`)で、**user が入れたタイルと地続き**だった ──
+   *   群にも分かれず目印も無いので、自分で入れたものが下へ押し下がって見えた。
+   * 🔴 **末尾へ「収納」する**(user 指示 2026-08-28 の「収納して整理する」)──
+   *   先頭のままだと 6 枚が上を占め、自分で入れたタイルが下へ押し下がって見える。
+   *   ⚠ 名前を付けただけで先頭に残すと、並びが「名前つき → 名前なし → 名前つき」に
+   *   なり、名前の無い群が 2 つの見出しに挟まれる(読めない)。
+   * ⚠ **組み込みの中の順番は変えない**(2 ペイン → … → マニュアル)。
+   */
+  it('組み込みは 2 ペイン → 予定表 → 連絡先 → 探す → Office → マニュアルの順で、名前の付いた群として末尾に付く', () => {
     const merged = withBuiltinTiles(entryTiles, { office: true });
-    expect(merged[0]).toEqual({
+    // 🔴 **自分で入れたタイルが先**(#281 の実害を直した向き)
+    expect(merged.slice(0, entryTiles.length), '自分のタイルが先頭に残っていない').toEqual(
+      entryTiles,
+    );
+    const b = merged.slice(entryTiles.length);
+    expect(b[0]).toEqual({
       lid: DUAL_TILE_LID,
       title: '2 ペインで整理',
-      group: '',
+      group: BUILTIN_GROUP,
       kind: 'dual',
     });
     /**
@@ -167,30 +183,30 @@ describe('組み込みタイルの合流 (#148)', () => {
      *   別窓の入口として戻った** ── 左のタブは残したまま、2 つ目の入口である。
      *   Office より前(アプリに最初から在るものを先に ── Office の有無で位置が動かない)。
      */
-    expect(merged[1]).toEqual({
+    expect(b[1]).toEqual({
       lid: SCHEDULE_TILE_LID,
       title: '予定表',
-      group: '',
+      group: BUILTIN_GROUP,
       kind: 'schedule',
     });
     // ⚠ 連絡先(#278 段③)は予定表の次 ── 同じく「アプリに最初から在る」側
-    expect(merged[2]).toEqual({
+    expect(b[2]).toEqual({
       lid: CONTACTS_TILE_LID,
       title: '連絡先',
-      group: '',
+      group: BUILTIN_GROUP,
       kind: 'contacts',
     });
     // ⚠ 探す(#680)は連絡先の次 ── 同じく「アプリに最初から在る」側(Office より前)
-    expect(merged[3]).toEqual({
+    expect(b[3]).toEqual({
       lid: SEARCH_TILE_LID,
       title: '探す',
-      group: '',
+      group: BUILTIN_GROUP,
       kind: 'search',
     });
-    expect(merged[4]).toEqual({
+    expect(b[4]).toEqual({
       lid: OFFICE_TILE_LID,
       title: 'Office',
-      group: '',
+      group: BUILTIN_GROUP,
       kind: 'office',
     });
     /**
@@ -198,24 +214,26 @@ describe('組み込みタイルの合流 (#148)', () => {
      *   「作業する所」で、マニュアルは「読む所」である。読み物の有無で
      *   作業の口の位置を動かさない(上の「位置が動かない向きに並べる」と同じ判断)。
      */
-    expect(merged[5]).toEqual({
+    expect(b[5]).toEqual({
       lid: MANUAL_TILE_LID,
       title: 'マニュアル',
-      group: '',
+      group: BUILTIN_GROUP,
       kind: 'manual',
     });
-    // ⚠ entry 由来の並びには触らない(合流は前置だけ)
-    expect(merged.slice(6)).toEqual(entryTiles);
+    // ⚠ entry 由来の並びには触らない(合流は**後置**だけ ── 2026-09-08 に前置から変えた)
+    expect(b, '組み込みが 6 枚ちょうどでない').toHaveLength(6);
   });
 
   it('🔴 Office が入っていなくても、最初から在るものは出る(位置も動かない)', () => {
     const merged = withBuiltinTiles(entryTiles, { office: false });
-    expect(merged[0]?.lid, 'Office の有無で 2 ペインの位置が動いた').toBe(DUAL_TILE_LID);
-    expect(merged[1]?.lid, 'Office の有無で予定表の位置が動いた').toBe(SCHEDULE_TILE_LID);
-    expect(merged[2]?.lid, 'Office の有無で連絡先の位置が動いた').toBe(CONTACTS_TILE_LID);
-    expect(merged[3]?.lid, 'Office の有無で探すの位置が動いた').toBe(SEARCH_TILE_LID);
-    expect(merged[4]?.lid, 'Office の有無でマニュアルの位置が動いた').toBe(MANUAL_TILE_LID);
-    expect(merged.slice(5)).toEqual(entryTiles);
+    // ⚠ 組み込みは**末尾**(2026-09-08 に前置から変えた ── #531 段② / #281)
+    const b = merged.slice(entryTiles.length);
+    expect(b[0]?.lid, 'Office の有無で 2 ペインの位置が動いた').toBe(DUAL_TILE_LID);
+    expect(b[1]?.lid, 'Office の有無で予定表の位置が動いた').toBe(SCHEDULE_TILE_LID);
+    expect(b[2]?.lid, 'Office の有無で連絡先の位置が動いた').toBe(CONTACTS_TILE_LID);
+    expect(b[3]?.lid, 'Office の有無で探すの位置が動いた').toBe(SEARCH_TILE_LID);
+    expect(b[4]?.lid, 'Office の有無でマニュアルの位置が動いた').toBe(MANUAL_TILE_LID);
+    expect(merged.slice(0, entryTiles.length)).toEqual(entryTiles);
     // ⚠ 「同じ長さ」だけでは足して 1 枚消す実装と区別がつかない ── kind で見る
     expect(merged.some((t) => t.kind === 'office')).toBe(false);
   });

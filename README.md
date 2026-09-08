@@ -68,7 +68,7 @@ Firefox / Safari では**一度も走らせていない**からです。
   Safari は `credentialless` に未対応のため、分離が成立せず Office が動きません。
   外部画像は分離が無ければ普通に出ます。
 - **Office は既定では入っていません。** 使う人が設定画面で明示的に有効化したときだけ、
-  約 77MB の一式を 1 回だけ取得して IndexedDB に置き、以降はローカルから起動します
+  約 93MB の一式を 1 回だけ取得して IndexedDB に置き、以降はローカルから起動します
   ([設計](./docs/development/office-wasm-integration-design-2026-08.md))。
   ⚠ 一式を配っているのは**別のリポジトリの Pages**(`sm06224/office-pack`)ですが、
   置き場は `https://sm06224.github.io/office-pack/` ── PKC3 本体と**同じ origin** です。

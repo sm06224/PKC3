@@ -18,6 +18,7 @@
  * 例外を上へ投げると、呼び側が握り忘れた瞬間に**進捗の字が出たまま固まる**ように見える。
  * だからこの層で全部受けて、**そのまま画面に出せる文**にして返す。
  */
+import { OFFICE_PACK_APPROX } from '@features/office/office-pack-size';
 import {
   DEFAULT_PACK_BASE,
   OfficePackError,
@@ -88,7 +89,7 @@ function toMessage(e: unknown, what: string): string {
   if (e instanceof OfficePackError) return e.message;
   const raw = e instanceof Error ? e.message : String(e);
   if (/quota/i.test(raw)) {
-    return `${what}に失敗しました: この端末の空き容量が足りません(約 77MB 必要です)。`;
+    return `${what}に失敗しました: この端末の空き容量が足りません(${OFFICE_PACK_APPROX} 必要です)。`;
   }
   return `${what}に失敗しました: ${raw.slice(0, 160)}`;
 }

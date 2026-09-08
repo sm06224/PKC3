@@ -266,4 +266,62 @@ describe('面の走査は、飛んでいる書込を追い越さない', () => {
       'taskScan',
     ]);
   });
+
+  /**
+   * 🔴 **畳んでよいのは「読む範囲が同じ」ときだけ**(#759、2026-09-08。
+   *   **フル smoke が 2 回落ちて分かった**)。
+   *
+   * ⚠ 待っている 1 本は、**自分が頼まれた時点の列の末尾までしか読まない**
+   *   (`afterWrites` がそのとき `queue` を掴む)。だから**その後ろに積まれた書込**が
+   *   在るのに畳むと、**その書込を読んだ走査が 1 本も走らない**。
+   *
+   * 🔴 user から見た形:雛形を保存した直後に別のノートを開くと、集め直しが
+   *   握り潰されて **短縮語 + `Tab` が何も起きない**(`Tab` は撃ち直しが無い)。
+   *
+   * 🔑 上の「5 回頼んでも 1 本」が**対照群**である ── あちらは間に書込が 1 本も
+   *   積まれないので、いまも **1 本のまま**。畳む目的(別タブの束ねで全件走査が
+   *   秒に何本も飛ぶのを止める)は保たれている。
+   * ⚠ 対照群が無いと、「常に 2 本走る」という**畳むのをやめただけ**の実装と
+   *   区別がつかない。
+   */
+  it('🔴 待っている走査の後ろに書込が積まれたら、もう 1 本走る (#759)', async () => {
+    const { d, order, g, before } = await setup();
+    // ① 走査を頼む(門が閉じているので待つ ── 読む範囲は「いま列に在る書込まで」)
+    d.dispatch({ type: 'REFRESH_TASK_SCAN' });
+    /**
+     * ② 🔴 **その後ろに書込を 1 本積む。**
+     * ⚠ 改名を使うのは、**走査を 1 本も撃たない書込**だからである
+     *   (保存を使うと `REQUEST_TASK_SCAN` が付いてきて、②と③が混ざる)。
+     */
+    d.dispatch({ type: 'RENAME_ENTRY_TITLE', lid: 'n2', title: '名前を変えた' });
+    // ③ もう一度頼む ── 直す前はここで**捨てられていた**
+    d.dispatch({ type: 'REFRESH_TASK_SCAN' });
+    g.open();
+    await flush();
+    expect(order, '後から積まれた書込を読む走査が 1 本も走っていない').toEqual([
+      ...before,
+      'write',
+      'taskScan',
+      'taskScan',
+    ]);
+  });
+
+  /**
+   * ⚠ **積み増しは最大 1 本**(畳むのをやめたのではない)。
+   * 🔑 書込 1 本の後ろで 5 回頼んでも、走るのは **2 本**である。
+   */
+  it('⚠ 後ろに書込が在っても、積み増すのは 1 本だけ (#759)', async () => {
+    const { d, order, g, before } = await setup();
+    d.dispatch({ type: 'REFRESH_TASK_SCAN' });
+    d.dispatch({ type: 'RENAME_ENTRY_TITLE', lid: 'n2', title: '名前を変えた' });
+    for (let i = 0; i < 5; i += 1) d.dispatch({ type: 'REFRESH_TASK_SCAN' });
+    g.open();
+    await flush();
+    expect(order, '積み増しが 1 本に畳まれていない').toEqual([
+      ...before,
+      'write',
+      'taskScan',
+      'taskScan',
+    ]);
+  });
 });
