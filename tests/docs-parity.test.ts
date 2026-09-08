@@ -11,6 +11,7 @@
  * 縛っていない主張が嘘になる可能性は残る ── だから doc 側にも
  * 「いま動くものだけを書く」と明記してある。
  */
+import { OFFICE_PACK_APPROX, OFFICE_PACK_APPROX_MB } from '../src/features/office/office-pack-size';
 import { describe, expect, it } from 'vitest';
 import {
   KEY_COMMANDS,
@@ -690,8 +691,53 @@ describe('マニュアルと実装の突合', () => {
       expect(MANUAL, `マニュアルに「${label}」の説明が無い`).toContain(`**${label}**`);
     }
     panel.dispose();
-    // ⚠ **数字も pin する**(「数字は真っ先に腐る」)── 77MB は画面にも出る
-    expect(MANUAL, 'マニュアルに一式の大きさが無い').toContain('77MB');
+    /**
+     * ⚠ **数字も pin する**(「数字は真っ先に腐る」)── 画面にも出る。
+     * 🔴 **リテラルで書かない**(#702、2026-09-08)── 直す前はここが `'77MB'` を
+     *   直書きしており、**実装の側と食い違ったまま両方緑**だった
+     *   (実際に食い違っていた:画面 77MB / 実際に取る量 93MB)。
+     * 🔑 実装の定数を見れば、片方だけ直したときに必ず落ちる(§7)。
+     */
+    expect(MANUAL, 'マニュアルに一式の大きさが無い').toContain(OFFICE_PACK_APPROX);
+    /**
+     * 🔴 **「1 か所でも正しければ緑」にしない**(2026-09-08、変異試験が SURVIVED で教えた)。
+     *
+     * ⚠ `toContain` だけだと、マニュアルの 5 か所のうち **1 つを古い数字に戻しても緑**である
+     *   ── まさに #702 が起きた形(画面・マニュアル・README で数字が散っていた)。
+     * 🔑 だから**食い違う数字が 1 つでも在れば落とす** ── 一式の話をしている行に
+     *   `約 NNMB` が出たら、それは定数と同じでなければならない。
+     * ⚠ 行に絞る(面へスコープする)── 別の話の MB(添付の上限 200MB など)に
+     *   満たされない(CLAUDE.md §1「別の面の文字に満たされる」)。
+     */
+    const PACK_WORDS = /一式|ひとそろい|office|Office/u;
+    const MB = /約\s*(\d+)\s*MB/gu;
+    const wrong: string[] = [];
+    for (const [name, text] of [
+      ['マニュアル', MANUAL],
+      ['README', readFileSync('README.md', 'utf-8')],
+      ['画面(設定の Office)', readFileSync('src/adapter/ui/render/office-pack-panel.ts', 'utf-8')],
+      ['画面(添付を開く)', readFileSync('src/features/office/office-entry.ts', 'utf-8')],
+      [
+        '画面(設置の失敗)',
+        readFileSync('src/adapter/platform/office/office-pack-install.ts', 'utf-8'),
+      ],
+    ] as const) {
+      for (const line of text.split('\n')) {
+        if (!PACK_WORDS.test(line)) continue;
+        for (const m of line.matchAll(MB)) {
+          if (Number(m[1]) !== OFFICE_PACK_APPROX_MB) wrong.push(`${name}: ${line.trim().slice(0, 70)}`);
+        }
+      }
+    }
+    expect(
+      wrong,
+      `一式の大きさが実装(${OFFICE_PACK_APPROX})と食い違っている ── 数字は 1 か所(office-pack-size.ts)で決める`,
+    ).toEqual([]);
+    // ⚠ 空振り防止 ── 走査が当たっていること(0 件なら上は何も言わない)
+    expect(
+      [...MANUAL.matchAll(MB)].length,
+      'マニュアルから「約 NNMB」を 1 つも拾えていない(空振り)',
+    ).toBeGreaterThan(0);
   });
 
   it('🔴 更新の案内の文言が pin と一致し、マニュアルにも在る', () => {
@@ -1793,6 +1839,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    /**
+     * ⚠ **2026-09-08(#757 / #702)にいちばん古い 1 件が枠から出た** ── user 裁定
+     *   2026-09-06「古い順に出す」。原本は CHANGELOG(650d9ce で配布済み)。
+     */
+    '表の空いているセルにも、押して打てるようになりました',
     /**
      * ⚠ **2026-09-08(#779 段⑧)にいちばん古い 1 件が枠から出た** ── user 裁定
      *   2026-09-06「古い順に出す」。原本は CHANGELOG(fef58d6 で配布済み)。

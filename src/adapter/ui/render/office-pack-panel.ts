@@ -21,6 +21,7 @@
  * **押している最中のボタンが作り直されて無言の dead click になる** ──
  * この repo が 2026-08-07 に 3 面で踏んだ形なので、`sync()` で字だけ書き換える。
  */
+import { OFFICE_PACK_APPROX } from '@features/office/office-pack-size';
 import type { OfficePackMeta } from '@adapter/platform/office/office-pack';
 import {
   comparePackVersion,
@@ -149,7 +150,7 @@ export function buildOfficePackPanel(state: OfficePackState = appOfficePack): Of
   intro.setAttribute('data-pkc-field', 'settings-note');
   intro.textContent =
     'Word / Excel / PowerPoint の添付を、別のウィンドウで開いて読めるようにします。'
-    + '約 77MB の一式をこの端末に入れます ── 一度入れれば、次からは端末の中から起動します。';
+    + `${OFFICE_PACK_APPROX} の一式をこの端末に入れます ── 一度入れれば、次からは端末の中から起動します。`;
   root.append(intro);
 
   const status = document.createElement('p');

@@ -12,6 +12,7 @@
  *  ⑤ 🔴 **添付の画面に実際に出る** ── 部品が正しくても、呼ばれていなければ
  *     user には 1 つも届かない(この repo が繰り返し踏んだ形)
  */
+import { OFFICE_PACK_APPROX } from '../../src/features/office/office-pack-size';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { stubStamps } from '../helpers/store-stamps';
@@ -86,7 +87,7 @@ describe('buildOfficeEntry(O3-c)', () => {
     const el = buildOfficeEntry(DOCX, avail(false))!;
     expect(el.tagName, 'ボタンを出すと押しても何も起きない').not.toBe('BUTTON');
     expect(el.getAttribute('data-pkc-office-state')).toBe('setup');
-    expect(el.textContent).toContain('77MB');
+    expect(el.textContent).toContain(OFFICE_PACK_APPROX);
     // ⚠ 受け口を持たない `data-pkc-action` を紛れ込ませない
     expect(el.querySelector('[data-pkc-action]')).toBeNull();
     expect(el.hasAttribute('data-pkc-action')).toBe(false);

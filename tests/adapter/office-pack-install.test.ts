@@ -10,6 +10,7 @@
  *  ⑤ 取得元の目録に従う(PKC3 側にフォント名を書き写さない)
  *  ⑥ 進捗を必ず流す ── 93MB の間、無反応にしない
  */
+import { OFFICE_PACK_APPROX } from '../../src/features/office/office-pack-size';
 import { describe, expect, it, vi } from 'vitest';
 import { OfficePackInstaller } from '../../src/adapter/platform/office/office-pack-install';
 import {
@@ -216,7 +217,7 @@ describe('OfficePackInstaller', () => {
     });
     const r = await installer.installFromUrl();
     expect(!r.ok && r.message).toContain('空き容量');
-    expect(!r.ok && r.message, '必要な量を言う').toContain('77MB');
+    expect(!r.ok && r.message, '必要な量を言う').toContain(OFFICE_PACK_APPROX);
   });
 
   it('🔴 二重起動しない(93MB を 2 本走らせない)', async () => {

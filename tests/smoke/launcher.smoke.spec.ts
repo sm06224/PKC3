@@ -118,8 +118,23 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   // 🔴 見出しが出るのは**名前の付いた群だけ**(P8 段⑭)。既定群に「よく使う」と
   //    名乗らせていたが、画面はその情報(頻度)を持っていない ── 名乗ったぶん嘘になる
   const groups = page.locator('[data-pkc-field="launcher-group"]');
-  await expect(groups).toHaveCount(1);
+  /**
+   * 🔴 **組み込みは名前の付いた群として末尾に「収納」される**(#531 段② / #281、2026-09-08)。
+   * ⚠ 直す前は組み込み 6 枚が**先頭の既定群**に混ざっており、見出しは「ツール」1 本だけだった
+   *   ── 自分で入れたタイルが下へ押し下がって見えた(#281 の実害)。
+   * 🔑 いまは「**自分のもの(見出しなし)→ ツール → 組み込みアプリ**」で一本になる。
+   */
+  await expect(groups).toHaveCount(2);
   await expect(groups.nth(0)).toHaveText('ツール');
+  await expect(groups.nth(1)).toHaveText('組み込みアプリ');
+  // 🔴 **自分のタイルが上に残っている** ── 組み込みの見出しより前に居ること
+  const builtinHead = groups.nth(1);
+  const myTile = page.locator('[data-pkc-tile-kind="url"]').first();
+  const [headTop, mineTop] = await Promise.all([
+    builtinHead.evaluate((el) => el.getBoundingClientRect().top),
+    myTile.evaluate((el) => el.getBoundingClientRect().top),
+  ]);
+  expect(mineTop, '自分のタイルが組み込みの見出しより下へ押し下がっている').toBeLessThan(headTop);
 
   // ③ 外部へ飛ぶタイルは**行き先が見えている**(押す前に分かる)
   await expect(tiles.nth(1).locator('[data-pkc-field="tile-url"]')).not.toHaveText('');

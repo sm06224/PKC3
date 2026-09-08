@@ -7,6 +7,7 @@
  *  ③ **使えない環境**は「未配備」より**先**に見る(77MB を無駄に取らせない)
  *  ④ 出すのは常に「押せる」か「理由」── **押しても何も起きないボタンを作らない**
  */
+import { OFFICE_PACK_APPROX } from '../../src/features/office/office-pack-size';
 import { describe, expect, it } from 'vitest';
 import {
   isOfficeAttachment,
@@ -91,7 +92,7 @@ describe('officeEntry', () => {
       mime: 'application/msword', fileName: 'a.doc', packInstalled: false, capability: OK,
     });
     expect(e.kind).toBe('setup');
-    expect(e.kind === 'setup' && e.reason).toContain('77MB');
+    expect(e.kind === 'setup' && e.reason).toContain(OFFICE_PACK_APPROX);
     /**
      * 🔴 **無い場所を案内しない**(2026-08-11、O3-c)。設置の面は O6 でできる ──
      * それまで「設定から」と書くと、user は**無い物を探す**
