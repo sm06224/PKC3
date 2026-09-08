@@ -1371,6 +1371,102 @@ describe('マニュアルの見出しは、番号も日付も持たない(#779 �
   });
 });
 
+/**
+ * 🔴 **執筆規約 条 10 を機械で守る**(2026-09-08、user 裁定)。
+ *
+ * 規約(`docs/development/manual-style-2026-09.md`)の条 10 は
+ * 「**記号は 🔴 ⚠ 🔑 の 3 種のみ**」である。⚠ 置くまでは**散文の規律**でしかなく、
+ * 次に節を書く人が 💡 や 📌 を持ち込んでも**誰も止められない**
+ * (同じ doc が「置けていない条は『まだ守っていない』と書く」と決めている)。
+ *
+ * 🔑 **数えるのは「行の頭に立つ記号」だけ**である ── 注記はそこにしか立たない。
+ * ⚠ **表の升は数えない**(`| 🟢 できる | …`)── 升の印は**注記ではなくデータ**で、
+ *   product の画面に出る字(▾ / ⌘ / ⧉)と同じ扱いである。🔑 升を外す行は**書いていない**
+ *   ── 表の行は 1 字目が `|` なので、「行の頭の 1 字だけ見る」時点で対象外になる
+ *   (1 稿目は `if (/^\s*\|/.test(raw)) continue;` と書いていたが、変異試験が
+ *   **SURVIVED** で「それが無くても同じ」と教えた ── CLAUDE.md「『これが無いと壊れる』と
+ *   書く前に、外して壊れるのを見る」)。
+ * 🔑 **除外が効いていることは、自前の小さな原稿で見る** ── いまの本文には囲みの中の
+ *   記号も升の頭の記号も**在らない**ので、本文に当てるだけでは除外を外しても緑になる
+ *   (これも変異試験が SURVIVED で教えた)。だから拾い方を関数にして、対照群を当てている。
+ * ⚠ **範囲は「字の種類」で決める**(CLAUDE.md「見えないものを止める検査は、範囲を
+ *   字の種類で決める」)── 絵の記号(U+2600〜27BF / U+26A0 / U+1F300 以降)だけを見る。
+ *   矢印(→ ←)・図形(▾ ▶ ★)・罫線(─)は**文章の部品**なので対象外である。
+ */
+describe('マニュアルの記号は 🔴 ⚠ 🔑 の 3 種だけ(執筆規約 条 10)', () => {
+  const ALLOWED = ['\u{1F534}', '\u26A0', '\u{1F511}'];
+
+  /**
+   * 行の頭に立つ「絵の記号」を集める。⚠ 囲みの中は数えない。
+   * 🔑 **関数にしてある**(MANUAL に固定しない)── 下で**自前の小さな原稿**に当てて、
+   *   囲みの除外と表の升の扱いが**実際に効いていること**を見るためである
+   *   (CLAUDE.md「『これが無いと壊れる』と書く前に、外して壊れるのを見る」)。
+   */
+  const leadingMarks = (text: string): { ok: string[]; bad: { line: number; text: string }[] } => {
+    const ok: string[] = [];
+    const bad: { line: number; text: string }[] = [];
+    let fence = false;
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i += 1) {
+      const raw = lines[i]!;
+      if (/^\s*(```|~~~)/.test(raw)) {
+        fence = !fence;
+        continue;
+      }
+      if (fence) continue;
+      // 引用符・箇条書きの印・見出しの `#` を落として、本文の 1 字目を取る
+      const body = raw.replace(/^[>\s]*/, '').replace(/^(?:[-*+]\s+|\d+\.\s+|#{1,6}\s+)/, '');
+      const head = [...body][0];
+      if (head === undefined) continue;
+      const c = head.codePointAt(0)!;
+      const pictorial = c === 0x26a0 || (c >= 0x2600 && c <= 0x27bf) || c >= 0x1f300;
+      if (!pictorial) continue;
+      if (ALLOWED.includes(head)) ok.push(head);
+      else bad.push({ line: i + 1, text: raw.slice(0, 60) });
+    }
+    return { ok, bad };
+  };
+
+  const found = leadingMarks(MANUAL);
+
+  it('空振り防止 ── 行の頭に立つ記号をちゃんと拾えている', () => {
+    // 🔑 下の 1 件は「0 件であること」を見るので、**拾えていないと必ず緑**になる
+    expect(found.ok.length, 'マニュアルの記号を 1 つも拾えていない').toBeGreaterThan(500);
+    // ⚠ 3 種が**全部**出ていること ── 1 種でも 0 件なら、その字は守られていない
+    for (const ch of ALLOWED)
+      expect(found.ok, `${ch} が 1 件も無い ── 拾い方が狭すぎる`).toContain(ch);
+  });
+
+  /**
+   * 🔑 **拾い方そのものを、自前の原稿で検める。**
+   * ⚠ いまのマニュアルには「囲みの中の記号」も「升の頭の記号」も**在らない**ので、
+   *   本文に当てるだけでは**除外が効いているか分からない**(変異試験が SURVIVED で
+   *   教えた ── 除外を外しても本文は同じ結果になる)。だから**対照群を自分で作る**。
+   */
+  it('🔴 拾うのは「本文の行の頭」だけ ── 囲みの中と表の升は数えない', () => {
+    const BULB = '\u{1F4A1}';
+    // 対照群 ── 同じ字が、本文の行の頭に立てば拾われる
+    expect(leadingMarks(`${BULB} 本文の行`).bad, '本文の行頭の記号を拾えていない').toHaveLength(1);
+    // ① 囲みの中は数えない
+    expect(leadingMarks(['```', `${BULB} 囲みの中`, '```'].join('\n')).bad).toEqual([]);
+    // ② 表の升は数えない(1 字目が `|` なので、頭の 1 字を見る時点で外れる)
+    expect(leadingMarks(`| ${BULB} できる | 説明 |`).bad).toEqual([]);
+    // ③ 引用・箇条書き・見出しの印は落としてから見る(注記はその後ろに立つ)
+    expect(leadingMarks(`> - ${BULB} 引用の中の箇条書き`).bad, '印を落とせていない').toHaveLength(
+      1,
+    );
+    // ④ 許した 3 種は拾わない
+    for (const ch of ALLOWED) expect(leadingMarks(`${ch} 本文の行`).bad).toEqual([]);
+  });
+
+  it('🔴 4 種目の記号が持ち込まれていない(規約 条 10)', () => {
+    expect(
+      found.bad,
+      '行の頭に規約外の記号が立っている ── 🔴(失う恐れ)/ ⚠(片道)/ 🔑(知っておくと速い)へ寄せる',
+    ).toEqual([]);
+  });
+});
+
 describe('マニュアルの節を指す参照', () => {
   /** マニュアルの見出し(H2〜H5)。⚠ 囲みの中の `#` は見出しではない。 */
   const headings = ((): string[] => {
@@ -1541,6 +1637,14 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    /**
+     * ⚠ **2026-09-08(#779 段④)にいちばん古い 1 件が枠から出た** ── user 裁定
+     *   2026-09-06「古い順に出す」。原本は CHANGELOG に在る。
+     * 🔑 落とす相手は **もう配ったもの**から選んだ:
+     *   `git log --oneline origin/main -S"2026-09-06-touch-cell-mark" -- src/features/notice/notice-log.ts`
+     *   → fc72eb1。
+     */
+    '指で触る端末で、表のどの升が打てるか見えるようになりました',
     // ⚠ 2026-09-08(#789): 枠 10 を超えたので、いちばん古い 1 件を落とした
     //    (user 裁定 2026-09-06「古い順に出す」)。原本は CHANGELOG に在る
     '数式が書けるようになりました($ で囲みます)',

@@ -939,6 +939,16 @@ describe('お知らせの文面は固定(#220-7)', () => {
      * 🔑 枠のためいちばん古い 1 件(`2026-09-06-math`)を落とした ── 落とす相手は
      *   **origin/main に在るもの**から選んだ(41ffeb0、2026-09-06)。原本は CHANGELOG。
      */
+    /**
+     * ⚠ **#779 段④(「そのほか」を 7 節へ)で足した**(2026-09-08、user 裁定)。
+     * 🔑 枠のためいちばん古い 1 件(`2026-09-06-touch-cell-mark`)を落とした ──
+     *   落とす相手は **origin/main に在るもの**から選んだ:
+     *   `git log --oneline origin/main -S"2026-09-06-touch-cell-mark" -- src/features/notice/notice-log.ts`
+     *   → fc72eb1。原本は CHANGELOG に在る。
+     * ⚠ 直前の `2026-09-08-manual-chapters`(章の割り直し)へ足したくなるが、
+     *   **91b1d00 で main に入っている = 配ってある**ので、足しても帯には出ない。
+     */
+    ['2026-09-08-manual-otherwise-split', 'e3f46a74'],
     ['2026-09-08-dev-build-stamp', '98ee6540'],
     ['2026-09-08-blocked-reason-everywhere', '15ff38a8'],
     ['2026-09-08-manual-start', 'dcc95f73'],
@@ -949,7 +959,6 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-09-07-csv-empty-cell', 'edeaa23e', 'main'],
     ['2026-09-07-append-scroll', '9eabafe9', 'main'],
     ['2026-09-07-inline-calc', 'ad8c3c56', 'main'],
-    ['2026-09-06-touch-cell-mark', '720f55d7', 'main'],
     // ⚠ 2026-09-07(#764): 枠 10 を超えたので `2026-09-05-scan-after-save` を
     //    登記表から落とした(いちばん古い 1 件 ── user 裁定「古い順に出す」)
     // ⚠ 2026-09-06(#750 I2): 枠 10 を超えたので `2026-09-05-a11y-theme-keys` を
