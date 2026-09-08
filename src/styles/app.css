@@ -6117,7 +6117,32 @@ li[data-pkc-row-slot] {
  * ⚠ `checkbox` / `radio` を外すのは、素の規則(この file の上のほう)と同じ理由
  *   ── 一括で当てると印が潰れる。
  */
+/**
+ * 🔴 **押せない理由は、指で触る端末にだけ字で出す**(#791 ③、2026-09-08)。
+ *
+ * ⚠ `setBlocked` が置く理由の受け取り口は **hover(`title`)と鍵**の 2 つで、
+ *   触る端末には**どちらも無い** ── 薄いことは見えるのに、**なぜ薄いのかが
+ *   一生分からない**。
+ * ⚠ マウスの端末では出さない ── あちらは `title` が既に答えているので、
+ *   字を足すと**同じことを 2 回言う**(帯が縦に伸びるだけ)。
+ * 🔑 だから既定は畳んだまま、下の `@media` でだけ出す
+ *   (⚠ `[hidden]` は `!important` で畳むので、理由が無いときは常に出ない)。
+ */
+.pkc-create-blocked-note {
+  display: none;
+  margin: 0;
+  padding: 2px 4px 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
 @media (hover: none) and (pointer: coarse) {
+  /** 🔴 指で触る端末にだけ、押せない理由を字で出す(#791 ③)。 */
+  .pkc-create-blocked-note {
+    display: block;
+  }
+
   /**
    * ⚠ **器を 1 つ噛ませて詳細度を上げる**(#632 段② の着地前レビュー 欠陥 1)。
    * 🔴 1 稿目は素の `textarea`(0,0,1)だったので、**本文を打つ 3 つの欄に負けていた**

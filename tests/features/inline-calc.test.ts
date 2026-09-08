@@ -11,6 +11,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  calcLineAction,
   detectInlineCalcRequest,
   evaluateCalcExpression,
   explainCalcMiss,
@@ -339,5 +340,54 @@ describe('計算にならなかった理由を 1 行で出す(#766 A-2)', () => 
   it('🔴 全角で打っても、同じ理由が出る', () => {
     expect(why('１，２＋３＝')).toContain('桁区切り');
     expect(why('１２００＝')).toContain('足し算');
+  });
+});
+
+/**
+ * 🔴 **「操作を探す」から計算する**(#766 D-2、2026-09-08)。
+ *
+ * ⚠ 入口が**本文に打つことだけ**だったので、打ち方を忘れた人には**無い機能**だった。
+ * 🔑 打っている最中と**同じ規則**を通す ── 別の判定を作ると、`Enter` で計算できる式と
+ *   パレットで計算できる式が食い違う(CLAUDE.md §7)。
+ */
+describe('行を計算する(#766 D-2)', () => {
+  /** カーソルは行のどこでもよい ── 行を見るので、末尾に寄せない。 */
+  const act = (text: string, caret = text.length) => calcLineAction(text, caret);
+
+  it('🔴 `=` が無い行でも、足して計算する', () => {
+    expect(act('2+3')).toEqual({ kind: 'insert', at: 3, text: '=5' });
+    // ⚠ カーソルが行の**途中**でも同じ(行を見るので)
+    expect(act('2+3', 1)).toEqual({ kind: 'insert', at: 3, text: '=5' });
+  });
+
+  it('🔴 `=` が在る行では、答えだけを足す', () => {
+    expect(act('2+3=')).toEqual({ kind: 'insert', at: 4, text: '5' });
+  });
+
+  it('🔴 複数行でも、いる行だけを見る', () => {
+    const text = 'まえ\n2+3\nうしろ';
+    // カーソルは 2 行目
+    expect(act(text, 5)).toEqual({ kind: 'insert', at: 6, text: '=5' });
+  });
+
+  it('🔴 計算にならない行では、理由を返す(打ったときと同じ字)', () => {
+    const r = act('2^3');
+    expect(r?.kind).toBe('why');
+    expect(r?.kind === 'why' ? r.text : '').toContain('^');
+  });
+
+  it('⚠ 普通の文の行では、何も言わない', () => {
+    expect(act('締切'), '言葉の行に口を出している').toBeNull();
+    expect(act('打合せ 9/7 に決めた'), '言葉の行に口を出している').toBeNull();
+    expect(act(''), '空の行に口を出している').toBeNull();
+    expect(act('   '), '空白だけの行に口を出している').toBeNull();
+  });
+
+  it('🔴 全角で打った行も計算する', () => {
+    expect(act('２＋３')).toEqual({ kind: 'insert', at: 3, text: '=5' });
+  });
+
+  it('🔴 桁区切りも読む(打ったときと同じ規則)', () => {
+    expect(act('1,200+800')).toEqual({ kind: 'insert', at: 9, text: '=2000' });
   });
 });

@@ -100,6 +100,8 @@ export class BrowseRouter {
   private readonly filterInput: HTMLInputElement | null;
   /** 左の列の「+ ノート」(主の操作の印を phase で付け外しする)。 */
   private readonly createRun: HTMLElement | null;
+  /** 🔴 指で触る端末へ理由を届ける 1 行(#791 ③)。⚠ CSS が出し分ける。 */
+  private readonly createBlockedNote: HTMLElement | null;
   /** 押せない理由を探す範囲(左の列 / 面の器)。 */
   private readonly roots: readonly HTMLElement[];
   private last: BrowseMode;
@@ -151,6 +153,9 @@ export class BrowseRouter {
      *   (どの面を開いていても左の列に出ているボタンである)。
      */
     this.createRun = sidebar.querySelector<HTMLElement>('[data-pkc-field="create-run"]');
+    this.createBlockedNote = sidebar.querySelector<HTMLElement>(
+      '[data-pkc-field="create-blocked-note"]',
+    );
     // 押せない理由を添える先を探す範囲 ── 左の列(帯 + 一覧)と、面の器(ファイラ)
     this.roots = [sidebar, host];
     this.list = new SidebarRenderer(sidebar);
@@ -243,6 +248,21 @@ export class BrowseRouter {
      */
     const why = blockedActionNote(state.phase);
     for (const el of this.blockables()) setBlocked(el, why);
+    /**
+     * 🔴 **指で触る端末にも、なぜ薄いのかを届ける**(#791 ③)。
+     *
+     * ⚠ `setBlocked` が置くのは `title`(hover 専用)と `data-pkc-blocked`
+     *   (鍵とパレットが読む)だけなので、**指で触る人には薄さしか届かない**。
+     * 🔑 字は**上の `why` をそのまま**使う ── ここで `blockedActionNote` を
+     *   呼び直すと、同じ問いに答える口が 2 つになる(§7)。
+     * ⚠ 出し分けは CSS(`@media (hover: none) and (pointer: coarse)`)── ここは
+     *   端末を見ない。**見えるかどうかは 1 か所**で決める。
+     */
+    if (this.createBlockedNote !== null) {
+      const text = why ?? '';
+      if (this.createBlockedNote.textContent !== text) this.createBlockedNote.textContent = text;
+      if (this.createBlockedNote.hidden !== (why === null)) this.createBlockedNote.hidden = why === null;
+    }
     // 🔑 **中身を入れ終わってから**位置を合わせる(空の器に書いても丸められる)。
     // ⚠ 面 = 探し方 × 「絞り込み中かどうか」── 絞り込んだ結果は先頭からが正しく、
     //    戻したときに元の位置へ帰るのが欲しい振る舞い

@@ -423,6 +423,55 @@ export function explainCalcMiss(fullText: string, caretPos: number): string | nu
 }
 
 /**
+ * 🔴 **「操作を探す」から計算する**(2026-09-08、#766 D-2)。
+ *
+ * ## なぜ要るか
+ *
+ * ⚠ 入口が**本文に打つことだけ**だった ── `Ctrl`+`K` で「計算」と打っても **0 行**、
+ *   書式パネルにも無い。マニュアル自身が「名前を忘れても**操作を探す**で引けます」と
+ *   書いているのに、この機能だけそこに居なかった。
+ * 🔑 画面に物は 1 つも増えない(探したときだけ出る)。
+ *
+ * ## 何をするか
+ *
+ * **いまカーソルの在る行**を読み、`=` が無ければ**足してから**計算する。
+ * ⚠ 打っている最中と**同じ規則**を通す(`detectInlineCalcRequest`)── 別の判定を
+ *   作ると、`Enter` で計算できる式とパレットで計算できる式が食い違う(§7)。
+ *
+ * @returns 挿す字と場所 / 出す理由 / `null`(その行では何も言わない)
+ */
+export type CalcLineAction =
+  | { readonly kind: 'insert'; readonly at: number; readonly text: string }
+  | { readonly kind: 'why'; readonly text: string };
+
+export function calcLineAction(fullText: string, caretPos: number): CalcLineAction | null {
+  if (typeof fullText !== 'string') return null;
+  if (caretPos < 0 || caretPos > fullText.length) return null;
+  const start = fullText.lastIndexOf('\n', Math.max(0, caretPos - 1)) + 1;
+  const nl = fullText.indexOf('\n', caretPos);
+  const end = nl === -1 ? fullText.length : nl;
+  const line = fullText.slice(start, end);
+  if (line.trim() === '') return null;
+
+  /**
+   * 🔴 **`=` が無ければ、足した形で読む。**
+   * ⚠ 本文をその場で書き換えて読むのではなく、**読むときだけ**足す ──
+   *   書き換えてから読むと、計算にならなかった回に `=` だけが残る。
+   */
+  const hasEq = toHalf(line.at(-1) ?? '') === '=';
+  const probe = hasEq ? fullText : `${fullText.slice(0, end)}=${fullText.slice(end)}`;
+  const at = hasEq ? end : end + 1;
+  const req = detectInlineCalcRequest(probe, at);
+  const v = req === null ? null : evaluateCalcExpression(req.expression);
+  if (v !== null) {
+    // ⚠ `=` を足す回は、答えの前に `=` も入れる(1 回の挿入にまとめる)
+    return { kind: 'insert', at: end, text: `${hasEq ? '' : '='}${formatCalcResult(v)}` };
+  }
+  const why = explainCalcMiss(probe, at);
+  return why === null ? null : { kind: 'why', text: why };
+}
+
+/**
  * 答えを字にする。
  * ⚠ **浮動小数のゴミを落とす**(`0.1+0.2` を `0.30000000000000004` と出さない)。
  */
