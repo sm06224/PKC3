@@ -855,7 +855,7 @@ describe('お知らせの文面は固定(#220-7)', () => {
    * ⚠ 直す前この表は digest しか持たず、落ちたときの文言は「配った id を書き換えた」でも
    *   「まだ配っていない id を直した」でも**同じ 1 行**だった ── だから 3 回続けて
    *   「この表を直す」を選べてしまい、**帯に出ないお知らせ**を 3 件作った。
-   * 🔑 判定は `git log --oneline main -S"<id>" -- src/features/notice/notice-log.ts` ──
+   * 🔑 判定は `git log --oneline origin/main -S"<id>" -- src/features/notice/notice-log.ts` ──
    *   `/dev/` は main HEAD を配るので、**main に入った = 配った**である
    *   (⚠ `git show v3.2.0:…` は**本番の tag** にしか答えない。それで 3 回外した)。
    * ⚠ 印を付ける作業そのものが「main で確かめる」を強制する ── だから欄で持つ。
@@ -914,14 +914,24 @@ describe('お知らせの文面は固定(#220-7)', () => {
      * 🔑 **「未配布」の観測点を直した** ── `git show v3.2.0:…` は**本番の tag**しか
      *   答えない。user が読むのは `/dev/` = main HEAD なので、判定は
      *   **「その id が main に入ったか」**である
-     *   (`git log --oneline main -S"<id>" -- src/features/notice/notice-log.ts`)。
+     *   (`git log --oneline origin/main -S"<id>" -- src/features/notice/notice-log.ts`)。
      * ⚠ 枠(10 件)を空けるため、いちばん古い 3 件
      *   (`2026-09-06-table-cell-fixes` / `-reading-column` / `-table-convert-touch`)を
      *   登記表から落とした ── user 裁定 2026-09-06「古い順に出す」。原本は CHANGELOG。
      */
-    ['2026-09-08-manual-chapters', 'bfe90dd2'],
-    ['2026-09-08-note-button-blocked', '0af5d3f2'],
-    ['2026-09-08-table-convert-quote', 'ddd26648'],
+    /**
+     * ⚠ **#779 段③(はじめかた)で足した**(2026-09-08)。枠(10 件)は満杯だったので、
+     *   いちばん古い 1 件(`2026-09-06-primary-action`)を落として空けた
+     *   ── user 裁定 2026-09-06「古い順に出す」。原本は CHANGELOG に在る。
+     * 🔑 落とす相手は **main に入っている**もの(= もう配ったもの)から選んだ:
+     *   `git log --oneline origin/main -S"2026-09-06-primary-action" -- src/features/notice/notice-log.ts`
+     *   → f5c6b7c(2026-09-06 19:51)。
+     */
+    ['2026-09-08-manual-start', 'dcc95f73'],
+    // ⚠ 下の 3 件は 91b1d00(2026-09-08 05:03)で main へ入った = 配ってある
+    ['2026-09-08-manual-chapters', 'bfe90dd2', 'main'],
+    ['2026-09-08-note-button-blocked', '0af5d3f2', 'main'],
+    ['2026-09-08-table-convert-quote', 'ddd26648', 'main'],
     ['2026-09-07-csv-empty-cell', 'edeaa23e', 'main'],
     ['2026-09-07-append-scroll', '9eabafe9', 'main'],
     ['2026-09-07-inline-calc', 'ad8c3c56', 'main'],
@@ -933,7 +943,7 @@ describe('お知らせの文面は固定(#220-7)', () => {
      * ⚠ 前日ここへ 2 行足したとき、理由に「**未配布(誰の画面にも出ていない)**」と
      *   書いた ── **観測点が間違っていた**。`git show v3.2.0:…` が答えるのは
      *   「**本番の tag に在るか**」だけで、user が読んでいるのは `/dev/`(main HEAD)である。
-     *   🔑 正しい観測点:`git log --oneline main -S"<id>" -- src/features/notice/notice-log.ts`
+     *   🔑 正しい観測点:`git log --oneline origin/main -S"<id>" -- src/features/notice/notice-log.ts`
      *   ── この id は **6dc610b(2026-09-06 21:51)で main に入っている = 配ってある**。
      * ⚠ 既配布の id へ足した行は、`unreadNotices` が **id だけ**で判定するので
      *   **帯には二度と出ない**(すぐ上の #720 の注記が同じことを戒めている)。
@@ -941,19 +951,6 @@ describe('お知らせの文面は固定(#220-7)', () => {
      * 🔑 戻した digest は**足す前と 1 文字も違わない**(bd99233 の pin と同値)。
      */
     ['2026-09-06-help-manual-first', '0f49cf84', 'main'],
-    /**
-     * 🔴 **2026-09-08 に足した 2 行を外した**(上の `help-manual-first` と同じ誤り)。
-     * ⚠ この id も **f5c6b7c(2026-09-06 19:51)で main に入っている = 配ってある**ので、
-     *   足した行は帯に出ない。編集中の「+ ノート」の話は**新しい 1 件**
-     *   (`2026-09-08-note-button-blocked`)へ移した。
-     * ⚠ **1 行だけは配った姿へ戻していない**(digest が `88d3360a` に戻らないのはそのため)。
-     *   「押せる場所と押した結果は、これまでと 1 つも変わりません」を落としたままにする ──
-     *   #761 で**まさに押した結果が変わった**ので、残すとヘルプの中で
-     *   新しい 1 件と正面から食い違う。⚠ これは上の docstring の②
-     *   (**届かなくてよい訂正**)である ── 既読の user には届かないと認めたうえで、
-     *   これから読む人に嘘を出さない側を採った。
-     */
-    ['2026-09-06-primary-action', 'dc996f5c', 'main'],
     // ⚠ 2026-09-07(#764): 枠 10 を超えたので `2026-09-05-scan-after-save` を
     //    登記表から落とした(いちばん古い 1 件 ── user 裁定「古い順に出す」)
     // ⚠ 2026-09-06(#750 I2): 枠 10 を超えたので `2026-09-05-a11y-theme-keys` を
@@ -992,7 +989,7 @@ describe('お知らせの文面は固定(#220-7)', () => {
                 ' user には届かない。新しい id を作ること(どうしても届かなくてよい訂正' +
                 'なら、その理由を注記に書いてからこの行を直す)'
               : ' ── まだ配っていないので、この行を直してよい(main に入る前に確かめる:' +
-                ' git log --oneline main -S"<id>" -- src/features/notice/notice-log.ts)'),
+                ' git log --oneline origin/main -S"<id>" -- src/features/notice/notice-log.ts)'),
         );
     }
     expect(drift).toEqual([]);
