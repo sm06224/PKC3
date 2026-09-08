@@ -41,6 +41,7 @@ import {
   grippedBlock,
 } from '../render/block-grip';
 import {
+  calcLineAction,
   detectInlineCalcRequest,
   evaluateCalcExpression,
   explainCalcMiss,
@@ -2786,7 +2787,7 @@ export function openPaletteFor(
        * 🔑 判定は `applyFormatTo` と**同じ表**(`FORMAT_OF`)を見る ──
        *   別の一覧を持つと「出るのに押せない」が静かに生まれる(§7)。
        */
-      if (target !== null && FORMAT_OF[c.id] !== undefined) {
+      if (target !== null && editorCommand(c.id)) {
         ready.add(c.id);
         continue;
       }
@@ -2832,7 +2833,7 @@ export function openPaletteFor(
      *   (CLAUDE.md「これが無いと壊れる、と書く前に外して壊れるのを見る」)。
      */
     if (runGlobalCommand(picked, root, dispatcher, keymap, noop, notify)) return;
-    if (FORMAT_OF[picked] === undefined) return;
+    if (!editorCommand(picked)) return;
     /**
      * 🔴 **記法を、開いたときの欄へ当てる**(#425 段②-b)。
      *
@@ -2847,6 +2848,20 @@ export function openPaletteFor(
         type: 'OP_FAILED',
         error: '書き込む欄が変わったので入れませんでした(もう一度選んでから実行してください)',
       });
+      return;
+    }
+    /**
+     * 🔴 **記法でない「本文の欄へ当てる命令」も、同じ門を通す**(#766 D-2)。
+     * ⚠ 上の 2 つの門(欄が在る / 欄が生きている)は**どちらの命令にも要る** ──
+     *   ここで分岐を上へ移すと、計算だけが門を通らない形になる。
+     * ⚠ 焦点を返してから当てる ── パレットが閉じた直後の選択は `0,0` なので、
+     *   **控えた範囲**(`range`)へ戻してから読む(記法と同じ作法)。
+     */
+    const runEditor = EDITOR_RUN[picked];
+    if (runEditor !== undefined) {
+      target.focus();
+      if (range !== null) target.setSelectionRange(range.start, range.end);
+      runEditor(target, notify);
       return;
     }
     applyFormatTo(target, picked, range ?? undefined);
@@ -6907,6 +6922,40 @@ const FORMAT_OF: Readonly<Record<string, FormatOp>> = {
  *
  * @returns その命令が記法でなければ `false`(呼び側は既定を止めない)
  */
+/**
+ * 🔴 **記法ではないが、開いている本文の欄へ当てる命令**(#766 D-2、2026-09-08)。
+ *
+ * ⚠ 「操作を探す」の行は、これまで **①受け手のボタンを持つ**か
+ *   **②記法(`FORMAT_OF`)** のどちらかだった ── その場で計算はどちらでもない。
+ * 🔑 **判定の口は 1 つにする**(`editorCommand`)── 表を 2 つ持っても
+ *   「この命令は本文の欄へ当てるか」に答える場所が 2 つになると、
+ *   片方だけ直して「出るのに押せない」が静かに生まれる(CLAUDE.md §7)。
+ */
+const EDITOR_RUN: Readonly<Record<string, (ta: HTMLTextAreaElement, notify: (t: string) => void) => void>> = {
+  /**
+   * 🔴 **いまカーソルの在る行を計算して、行の終わりに答えを入れる**(#766 D-2)。
+   * ⚠ 規則は打っているときと**同じ 1 か所**(`calcLineAction`)── 別の判定を作ると、
+   *   `Enter` で計算できる式とパレットで計算できる式が食い違う。
+   * ⚠ 挿すのは `insertText`(= `execCommand`)── `setRangeText` だと
+   *   **取り消しの履歴が切れる**(#765 で実測した)。
+   */
+  'inline-calc': (ta, notify) => {
+    const action = calcLineAction(ta.value, ta.selectionStart);
+    if (action === null) return;
+    if (action.kind === 'why') {
+      notify(action.text);
+      return;
+    }
+    ta.setSelectionRange(action.at, action.at);
+    insertText(ta, action.text);
+  },
+};
+
+/** 🔑 「この命令は本文の欄へ当てるか」に答える口は**ここ 1 つ**(§7)。 */
+function editorCommand(cmd: string): boolean {
+  return FORMAT_OF[cmd] !== undefined || EDITOR_RUN[cmd] !== undefined;
+}
+
 export function applyFormatTo(
   ta: HTMLTextAreaElement,
   cmd: string,
@@ -7675,12 +7724,18 @@ export function bindActions(
     // 編集中の draft と競合し、追記した節が保存で黙って消える(PKC2 の実測)
     const cmd = keymap.match(ke, 'editor');
     const op = cmd === null ? undefined : FORMAT_OF[cmd];
+    // 🔴 記法でない「本文の欄へ当てる命令」(#766 D-2)── 鍵の側でも同じ口を通す
+    const runEditor = cmd === null ? undefined : EDITOR_RUN[cmd];
     if (cmd === 'commit-edit') {
       ke.preventDefault();
       // ⚠ 近道キーも同じ規則に乗せる(ボタンだけ止めても意味が無い)
       if (refuseWhileBusy('commit-edit', dispatcher, services)) return;
       renameFromEditorInput(dispatcher, root);
       dispatcher.dispatch({ type: 'COMMIT_EDIT' });
+    } else if (field === 'editor-body' && runEditor !== undefined) {
+      // 🔑 **本文だけ**(題名で計算しても意味が無い)。⚠ `isComposing` は上で弾き済み
+      ke.preventDefault();
+      runEditor(ke.target as HTMLTextAreaElement, (t) => services.showStatus?.(t));
     } else if (field === 'editor-body' && op !== undefined && cmd !== null) {
       // 🔑 **キーボードは近道**(業務画面の作法 ── user 指示 2026-08-03)。
       // 本文だけ。題名に太字を入れても意味が無い。⚠ `isComposing` は上で弾き済み

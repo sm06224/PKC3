@@ -532,6 +532,26 @@ export function buildShell(root: HTMLElement): ShellRegions {
   attachInput.setAttribute('data-pkc-field', 'attach-input');
   createBar.append(attachInput);
 
+  /**
+   * 🔴 **指で触る端末に、押せない理由を届ける 1 行**(#791 ③。2026-09-08)。
+   *
+   * ⚠ `setBlocked` が置く理由の受け取り口は **hover(`title`)と鍵**の 2 つで、
+   *   触る端末には**どちらも無い** ── 薄いことは見えるのに、**なぜ薄いのかが
+   *   一生分からない**。⚠ `disabled` は焦点も取れないので読み上げからも消える。
+   * 🔑 **新しい見せ方は作らない** ── 情報ペインが同じ問題を
+   *   「**帯の直上に字を出す**」で既に解いており(`inspector.ts` の `editingNote`)、
+   *   user はその形をもう見ている。
+   * ⚠ **ボタンごとには出さない** ── 同じ帯で 2 つ薄くなると字が 2 行出る。
+   *   帯に **1 行**だけ置き、字は `blockedActionNote` の**同じ 1 か所**から採る。
+   * ⚠ 出し分けは **CSS の `@media (hover: none) and (pointer: coarse)`** に持たせる
+   *   ── JS で端末を判定すると、判定が 2 か所になる(§7)。ここは常に組む。
+   */
+  const createBlockedNote = document.createElement('p');
+  createBlockedNote.className = 'pkc-create-blocked-note';
+  createBlockedNote.setAttribute('data-pkc-field', 'create-blocked-note');
+  createBlockedNote.hidden = true;
+  createBar.append(createBlockedNote);
+
   /** ノート全体に対する操作(取り込む / 書き出す / 片づける)。 */
   const collectionBar = document.createElement('div');
   collectionBar.setAttribute('data-pkc-region', 'collection-bar');

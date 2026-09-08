@@ -89,6 +89,13 @@ const UNBRIDGED: readonly string[] = [
   'filer-select-all',
   'filer-trash',
   'focus-search',
+  /**
+   * ⚠ 2026-09-08(#766 D-2): その場で計算する。**押しボタンを持たない** ──
+   *   書式の帯は 14 個で横に長く、これ以上増やせない(D-3 を退けた理由)ので、
+   *   記法(`FORMAT_OF`)と同じ「本文の欄へ当てる命令」の継ぎ目(`EDITOR_RUN`)で受ける。
+   * 🔑 だから `SHORTCUT_BUTTON` には載らない ── 「辿れない」のは意図である。
+   */
+  'inline-calc',
   'redo',
   'row-cancel',
   'row-commit',
@@ -135,11 +142,13 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-09-05(#708 段②): 表の形を変える 2 つ(`table-to-markdown` / `table-to-csv`)で
       //    受け手 +2 ── 登記は増えない(本文の右クリックにだけ出る。`BODY_MENU_ACTIONS` には
       //    入れていない ── あちらは「読んでいる見え方を変える」物の表である)
-      total: 255,
+      // ⚠ 2026-09-08(#766 D-2): その場で計算する ── 登記 +1(押し所は持たない。
+      //    記法と同じ「本文の欄へ当てる命令」の継ぎ目で受けるので、受け手は増えない)
+      total: 256,
       receivers: 208,
-      registered: 82,
+      registered: 83,
       both: 35,
-      outsideActionsTable: 47,
+      outsideActionsTable: 48,
       unregistered: 173,
     });
   });
@@ -166,7 +175,8 @@ describe('操作の全数台帳(#582 段①)', () => {
     // ⚠ 2026-09-05(#215): 鍵が 53 → 56(左の列の行の F2 / F6 / Shift+F4)
     // ⚠ 2026-09-05(#633 段②): 鍵が 56 → 59(スタックの 3 手)
     // ⚠ 2026-09-05(#633 段③): 行のメニューが 15 → 16(`stack-load`)
-    expect(s().perBook).toEqual({ key: 59, entry: 16, body: 3, collection: 2, settings: 5 });
+    // ⚠ 2026-09-08(#766 D-2): 鍵が 59 → 60(その場で計算する)
+    expect(s().perBook).toEqual({ key: 60, entry: 16, body: 3, collection: 2, settings: 5 });
   });
 
   it('🔴 押し所へ辿れない登記を、身元で pin する', () => {

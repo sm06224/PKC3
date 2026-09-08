@@ -35,6 +35,7 @@ import { BrowseRouter } from '../../src/adapter/ui/render/browse';
 import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
 import { runGlobalCommand } from '../../src/adapter/ui/actions/binder';
 import { appKeymap } from '../../src/adapter/ui/render/keymap';
+import { blocksFor, decl, mediaBlock, stripComments } from '../helpers/css-blocks';
 import { applyShortcutHints } from '../../src/adapter/ui/render/shortcut-hint';
 
 function walk(dir: string, out: string[] = []): string[] {
@@ -434,6 +435,36 @@ describe('編集中の「+ ノート」は理由を言う(#761)', () => {
   });
 
   /**
+   * 🔴 **指で触る端末にも、なぜ薄いのかを届ける**(#791 ③、2026-09-08)。
+   *
+   * ⚠ `setBlocked` が置く理由の受け取り口は **hover(`title`)と鍵**の 2 つで、
+   *   触る端末には**どちらも無い** ── 薄いことは見えるのに、**なぜ薄いのかが
+   *   一生分からない**(`disabled` は焦点も取れないので読み上げからも消える)。
+   * 🔑 字は `blockedActionNote` の**同じ 1 か所**から採る ── 鍵・パレット・
+   *   情報ペインと 1 文字も違わないことを、ここで**等値**で見る(§7)。
+   * ⚠ **出し分けは CSS が持つ**(`@media (hover: none) and (pointer: coarse)`)ので、
+   *   ここでは「字が入っているか / 畳まれているか」だけを見る。
+   */
+  it('🔴 編集中は、帯に押せない理由の 1 行が出る(#791 ③)', () => {
+    const { root, d } = mount();
+    const note = root.querySelector<HTMLElement>('[data-pkc-field="create-blocked-note"]');
+    if (note === null) throw new Error('前提が崩れている: 理由の行が無い');
+    expect(note.hidden, '読んでいるのに理由が出ている').toBe(true);
+    expect(note.textContent, '読んでいるのに字が入っている').toBe('');
+
+    d.dispatch({ type: 'START_EDIT' });
+    expect(note.hidden, '編集中なのに理由が畳まれたまま').toBe(false);
+    // 🔑 **ボタンが持つ理由と 1 文字も違わない**(字を 2 か所で持たない)
+    expect(note.textContent, 'ボタンと違う字を出している').toBe(
+      createBtn(root).getAttribute('data-pkc-blocked'),
+    );
+
+    d.dispatch({ type: 'CANCEL_EDIT' });
+    expect(note.hidden, '編集を終えたのに理由が残っている').toBe(true);
+    expect(note.textContent, '編集を終えたのに字が残っている').toBe('');
+  });
+
+  /**
    * 🔴 **名指しの一覧が広すぎないこと**(#791)。
    * ⚠ 同じ帯の 添付 / 録音 / 画面 / 計る は**編集中でも動く**(預かる)ので、
    *   薄くすると**嘘になる** ── 「帯のボタン全部」で実装したら、ここが落ちる。
@@ -516,5 +547,43 @@ describe('編集中の「+ ノート」は理由を言う(#761)', () => {
     const said: string[] = [];
     runGlobalCommand('nav-back', root, d, appKeymap, () => {}, (t) => said.push(t));
     expect(said, '理由を持たないのに喋った').toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **出し分けは CSS が持つ**(#791 ③、2026-09-08)。
+ *
+ * ⚠ 描く側(`browse.ts`)は端末を見ない ── 見ると判定が 2 か所になる(§7)。
+ *   だから「マウスの端末では出ない / 指で触る端末では出る」は**ここでしか守れない**。
+ * ⚠ **注釈を剥いでから見る** ── 自分の解説文が検査を満たす(CLAUDE.md §1 に 5 回の記録)。
+ */
+describe('押せない理由の 1 行は、指で触る端末にだけ出る(#791 ③)', () => {
+  const bare = (): string => stripComments(readFileSync('src/styles/app.css', 'utf-8'));
+  const SEL = '.pkc-create-blocked-note';
+
+  it('🔴 既定は畳んであり、触る端末の中でだけ開く', () => {
+    const text = bare();
+    const base = blocksFor(text, SEL);
+    // 空振り防止 ── 規則が 1 つも無ければ、この検査は何も見ていない
+    expect(base, '既定の規則が無い(この検査は何も見ていない)').not.toHaveLength(0);
+    expect(base.join('\n'), 'マウスの端末でも出てしまう').toMatch(decl('display', 'none'));
+
+    const touch = mediaBlock(text, '(hover: none) and (pointer: coarse)').body;
+    const inTouch = blocksFor(touch, SEL);
+    expect(inTouch, '触る端末でも出ない(理由がどこにも届かない)').not.toHaveLength(0);
+    expect(inTouch.join('\n'), '触る端末で開いていない').toMatch(decl('display', 'block'));
+  });
+
+  /**
+   * ⚠ **対照群** ── 「触る端末の中に在る」だけでは、
+   *   `@media` の外にも `display: block` を書いた実装と区別が付かない。
+   * 🔑 だから**外側には `block` が無い**ことも見る。
+   */
+  it('⚠ 対照群 ── @media の外で開いていない', () => {
+    const text = bare();
+    const at = mediaBlock(text, '(hover: none) and (pointer: coarse)').at;
+    const outside = text.slice(0, at) + text.slice(at + mediaBlock(text, '(hover: none) and (pointer: coarse)').body.length);
+    for (const b of blocksFor(outside, SEL))
+      expect(b, '@media の外で開いている').not.toMatch(decl('display', 'block'));
   });
 });

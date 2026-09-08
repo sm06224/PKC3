@@ -321,6 +321,59 @@ describe('編集中の記法をパレットから入れる(#425 段②-b)', () =
   });
 
   /**
+   * 🔴 **記法でない「本文の欄へ当てる命令」も、同じ道を通る**(#766 D-2、2026-09-08)。
+   *
+   * ⚠ 入口が**本文に打つことだけ**だったので、打ち方を忘れた人には
+   *   **無い機能**だった(「操作を探す」で「計算」と打っても 0 行)。
+   * 🔑 判定の口は 1 つ(`editorCommand`)── 記法と同じ門(欄が在る / 生きている)を
+   *   通ることを、ここで**同じ形の test** で見る。
+   */
+  it('🔴 その場で計算が、本文の欄に居るとき「押せる」と出る (#766 D-2)', async () => {
+    const { root } = setup();
+    editing(root, '2+3', 3, 3);
+    root.querySelector<HTMLElement>('[data-pkc-action="open-palette"]')!.click();
+    await tick();
+    expect(rowOf('inline-calc'), '計算の行が出ていない').toBeDefined();
+    expect(whyOf('inline-calc'), '本文の欄に居るのに「押せません」と出ている').not.toContain(
+      NOT_READY_PREFIX,
+    );
+  });
+
+  /** ⚠ 対照群 ── 欄に居なければ、記法と同じく理由が出る。 */
+  it('⚠ 本文の欄に居なければ、計算も理由が出る (#766 D-2)', async () => {
+    const { root } = setup();
+    root.querySelector<HTMLElement>('[data-pkc-action="open-palette"]')!.click();
+    await tick();
+    expect(whyOf('inline-calc'), '押せない理由が出ていない').toContain(NOT_READY_PREFIX);
+  });
+
+  it('🔴 選ぶと、その行の終わりに答えが入る (#766 D-2)', async () => {
+    const { root } = setup();
+    const ta = editing(root, '2+3', 3, 3);
+    root.querySelector<HTMLElement>('[data-pkc-action="open-palette"]')!.click();
+    await tick();
+    rowOf('inline-calc')!.click();
+    await tick();
+    await tick();
+    expect(ta.value, '答えが入っていない').toBe('2+3=5');
+  });
+
+  /**
+   * ⚠ **計算にならない行では、本文を 1 文字も変えない**(理由だけ出す)。
+   * 🔑 これが無いと「押したら何か入る」実装でも緑になる。
+   */
+  it('🔴 計算にならない行では、本文を書き換えない (#766 D-2)', async () => {
+    const { root } = setup();
+    const ta = editing(root, '2^3', 3, 3);
+    root.querySelector<HTMLElement>('[data-pkc-action="open-palette"]')!.click();
+    await tick();
+    rowOf('inline-calc')!.click();
+    await tick();
+    await tick();
+    expect(ta.value, '計算にならないのに本文が変わった').toBe('2^3');
+  });
+
+  /**
    * 🔴 **選んだら、控えた欄の選んだ範囲に入る**(段②-b の本体)。
    * ⚠ 器が閉じるとき焦点はこの欄へ返る(`app-dialog` の後始末)── その上で当てる。
    */
