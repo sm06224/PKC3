@@ -2102,6 +2102,15 @@ export function connectStoreEffects(
                 lid: ev.lid,
                 body: newBody,
                 rewrite: ev.rewrite,
+                /**
+                 * 🔴 **足した行を「結果から」取り出す**(#684 段④、取り消しのため)。
+                 * ⚠ 挿し込みの規則(前後に空行を足す作法)を写さない ── `REQUEST_APPEND`
+                 *   と**同じ 1 本**(`insertedLines`)を通す(§7)。
+                 * ⚠ 差し込み以外では渡さない(`lastAppend` を触るのはこの書換だけ)。
+                 */
+                ...(ev.rewrite.kind === 'insert-lines'
+                  ? { inserted: insertedLines(body, newBody) }
+                  : {}),
                 status: ext.status,
                 date: ext.date,
                 archived: ext.archived,

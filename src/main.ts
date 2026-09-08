@@ -2070,8 +2070,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   if (appAlarmEnabled.enabled()) dispatcher.dispatch({ type: 'REFRESH_TASK_SCAN' });
 
   const services: BinderServices = {
-    attachFiles: (files, why) =>
-      void withAssetGate(() => attachFiles(dispatcher, attachDeps, files, why)),
+    attachFiles: (files, why, at) =>
+      void withAssetGate(() => attachFiles(dispatcher, attachDeps, files, why, at)),
     // 🔴 録音・画面収録(#413)── 押す口は左の列の「添付」の隣に在る
     startCapture: (kind) => void captureService.start(kind),
     stopCapture: () => captureService.stop(),

@@ -14,6 +14,7 @@
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { lidOfNode } from './lid-of-node';
+import type { DroppedAt } from './asset-into-note';
 import { deliveredEntryOf, type ExtDeliveredEntry } from '@features/extension/ext-delivery';
 import { isLaunchableUrl } from '@features/launcher/tiles';
 import {
@@ -494,7 +495,11 @@ export interface BinderServices {
    * 🔴 呼び側が別の `OP_FAILED` で言うと **`CREATE_ENTRY` が `error: null` を書いて
    *   消す**(#666 の着地前レビュー 1)。
    */
-  attachFiles?(files: File[], why?: string): void;
+  /**
+   * @param at 🔴 **落とした所**(#684 段④)── 読む面の本文へ落とした回だけ渡す。
+   *   省略 = これまでどおり本文のいちばん下。
+   */
+  attachFiles?(files: File[], why?: string, at?: DroppedAt): void;
   /**
    * 🔴 **スクショ(画像)の貼付**(#250。user 指示 2026-08-18
    * 「PKC3 でスクショ貼付の導線がない。PKC2 と同様以上に実装してください」)。
@@ -7898,7 +7903,12 @@ export function bindActions(
    * ⚠ **受け手がいなければ `false` を返す**(呼び側は既定を止めない)──
    * 止めると文字の貼付まで死ぬ。
    */
-  const routeFiles = (files: readonly File[], target: EventTarget | null): boolean => {
+  const routeFiles = (
+    files: readonly File[],
+    target: EventTarget | null,
+    /** 🔴 落とした所(#684 段④)。⚠ 貼付・ボタンの経路は渡さない(= いちばん下)。 */
+    at?: DroppedAt,
+  ): boolean => {
     if (files.length === 0) return false;
     /**
      * 🔴 **落とした `.md` / `.vcf` は「取り込む」と同じ結果にする**(#535 ①)。
@@ -7943,7 +7953,8 @@ export function bindActions(
     // ⚠ 画像**以外**(と、差し込む口が無い環境)は添付へ倒す ── 無反応にしない
     const leftover = images.length > 0 && services.pasteImages ? rest : files;
     if (leftover.length > 0 && services.attachFiles) {
-      services.attachFiles([...leftover]);
+      // ⚠ `why` は空(事情が無い)── 落とした所だけを渡す
+      services.attachFiles([...leftover], undefined, at);
       handled = true;
     }
     return handled;
@@ -8226,7 +8237,39 @@ export function bindActions(
     }
     if (de.dataTransfer?.types?.includes('Files') !== true) return;
     e.preventDefault();
-    if (de.dataTransfer) de.dataTransfer.dropEffect = 'copy';
+    de.dataTransfer.dropEffect = 'copy';
+    /**
+     * 🔴 **外から落とす file も、本文の塊の前 / 後に線が出る**(#684 段④)。
+     *
+     * > issue の要件:「落とす先には必ず『落とせる』印を出す ── 出さないと、
+     * > 落ちなかったときに理由が分かりません」
+     *
+     * ⚠ 線が出ない所(面の外・fence の中・畳んだ塊)へ落としても**これまでどおり
+     *   本文のいちばん下**へ入る ── 受けないのではなく、入る所が違う。
+     * 🔑 線を出すか決める判定は、書く直前の門と**同じ 1 本**(`bodyDropAt`)。
+     */
+    const at = bodyDropAt(de);
+    if (at === null || !fileDropLands(at.lid)) {
+      clearDropTarget();
+      return;
+    }
+    markDropTarget(at.el, DROP_EDGE_ATTR, at.edge);
+  };
+  /**
+   * 🔴 **その本文へ file の行が本当に入るか**(#684 段④、着地前レビュー A)。
+   *
+   * ⚠ 添付が入るのは **`selectedLid` の本文**(`attach.ts` の `noteToPutInto`)なので、
+   *   **横に留めた枠**へ落としても、そこには 1 バイトも入らない ── 主の枠のノートの
+   *   いちばん下へ落ちる。そこへ線を出すと「そこへ入る」という**守れない約束**になる
+   *   (#300 の「押した所と起きる所が違う」と同じ型)。
+   * ⚠ **本文に入れられない種類**(フォルダ / 添付 / スタック)も同じ ── 線を出してから
+   *   「入れられません」と言うのは、issue の要件(落とせる印を出す)の裏返しである。
+   * 🔑 判定は `isAppendable` **1 か所**(断る側と同じ関数 ── §7)。
+   */
+  const fileDropLands = (lid: string): boolean => {
+    const st = dispatcher.getState();
+    if (lid !== st.selectedLid) return false;
+    return isAppendable(st.entryMetas.get(lid)?.archetype);
   };
   /**
    * 掴んだのがどちらのペインか(2026-08-21)。⚠ **落とした後に印を外す先**であって、
@@ -8419,11 +8462,24 @@ export function bindActions(
       }
       return;
     }
+    /**
+     * 🔴 **落とした所へ入れる**(#684 段④)── 読む面の本文の上なら、その塊の前 / 後。
+     * ⚠ **印は必ず外す**(受けない回も)── 通ってから別の所で離すと
+     *   「そこへ入った」と読む(段①②と同じ作法)。
+     */
+    const at = bodyDropAt(de);
+    clearDropTarget();
     const files = filesOf(de.dataTransfer);
     if (files.length === 0) return;
     // ⚠ 受け手がいなくても止める(上の理由 ── 遷移で編集が飛ぶ)
     e.preventDefault();
-    routeFiles(files, de.target);
+    routeFiles(
+      files,
+      de.target,
+      at === null || !fileDropLands(at.lid)
+        ? undefined
+        : { lid: at.lid, toBefore: at.toBefore, body: at.body, anchor: at.anchor },
+    );
   };
   /**
    * 🔴 **掴んだものを運ぶ**(#240 段④)。
@@ -8564,6 +8620,23 @@ export function bindActions(
     blockDrag = null;
   };
   /**
+   * 🔴 **窓の外へ抜けたら印を消す**(#684 段④、着地前レビュー C)。
+   *
+   * ⚠ **外から来た荷物には `dragend` が飛ばない**(掴んだ元が OS 側)── 段①② は
+   *   ページの中で掴むので `onDragEnd` が拾っていたが、**外の file を線付きで受けるのは
+   *   段④ が初めて**である。塊の上に線を出したまま窓の外で離す(または Esc で捨てる)と、
+   *   **線が本文に残って消せない**(「そこへ入った」と読ませる)。
+   * ⚠ `dragleave` は要素をまたぐたびに飛ぶので、**窓の外へ出た回だけ**畳む
+   *   ── 判定は `relatedTarget`(次に入る要素。窓の外なら `null`)。
+   */
+  const onDragLeave = (e: Event): void => {
+    const to = (e as DragEvent).relatedTarget;
+    if (to === null || !root.contains(to as Node)) {
+      cancelTabHover();
+      clearDropTarget();
+    }
+  };
+  /**
    * 予定の落とし先(日の升目 / 束の見出し)。`null` = 落とせない場所。
    * ⚠ **空文字は「日付なし」**(属性が無いのとは別物)── だから `null` で表す。
    */
@@ -8603,7 +8676,25 @@ export function bindActions(
   const BODY_DROP_HOST = '[data-pkc-field="detail-body"], [data-pkc-field="split-body"]';
   const bodyDropAt = (
     de: DragEvent,
-  ): { host: HTMLElement; lid: string; el: HTMLElement; edge: 'before' | 'after'; toBefore: number } | null => {
+  ): {
+    host: HTMLElement;
+    lid: string;
+    el: HTMLElement;
+    edge: 'before' | 'after';
+    toBefore: number;
+    /**
+     * 🔴 いま読んだ本文(#684 段④)── 添付は**落としてから書くまで待つ**うえ、
+     *   その間に画面の本文はいったん捨てられる(`DropCursor.body` の注記)。
+     *   落とした時の本文をここで渡して、書く側はそれを基底にする。
+     */
+    body: string;
+    /**
+     * 🔴 **落とした塊の開き行**(行番号 + その字)── #684 段④。
+     * ⚠ 待ってから書く経路(添付)は、行番号だけでは**段落の途中へ刺さる**
+     *   ── 書く直前に disk 側で突き合わせる目印である。
+     */
+    anchor: { line: number; text: string };
+  } | null => {
     const target = de.target as HTMLElement | null;
     if (target === null || !root.contains(target)) return null;
     let host = target.closest<HTMLElement>(BODY_DROP_HOST);
@@ -8654,7 +8745,11 @@ export function bindActions(
     }
     toBefore += fm;
     if (insertionBlocked(body, toBefore)) return null;
-    return { host, lid, el, edge, toBefore };
+    const rows = body.split('\n');
+    const anchorLine = line + fm;
+    const text = rows[anchorLine];
+    if (text === undefined) return null;
+    return { host, lid, el, edge, toBefore, body, anchor: { line: anchorLine, text } };
   };
   /** 掴んでいる本文の塊(`dragstart` で決め、`dragend` で捨てる)。`null` = 塊は掴んでいない。 */
   let blockDrag: { lid: string; start: number; end: number } | null = null;
@@ -9208,6 +9303,8 @@ export function bindActions(
   root.addEventListener('drop', onDrop);
   root.addEventListener('dragstart', onDragStart);
   root.addEventListener('dragend', onDragEnd);
+  // 🔴 外から来た荷物は `dragend` を投げない ── 窓の外へ抜けた回はここが印を畳む
+  root.addEventListener('dragleave', onDragLeave);
   root.addEventListener('mousedown', onMousedown);
   root.addEventListener('input', onInput);
   root.addEventListener('change', onChange);

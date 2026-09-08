@@ -154,3 +154,77 @@ test('🔴 一覧の行を本文へ落とすと、そのノートへのリンク
   await expect(row).toBeVisible();
   expect(errors, 'pageerror が出た').toEqual([]);
 });
+
+/**
+ * 🔴 **パソコンの中のファイルを、落とした所へ入れる**(#684 段④)。
+ *
+ * ⚠ unit は合成 event で「落とした所が `attachFiles` へ渡る」までしか見ない ──
+ *   本物の `DataTransfer`(`Files`)を実レイアウトの座標で受け、bytes を IDB へ置き、
+ *   本文を書き替えて**絵として描き直す**所は実ブラウザにしか無い。
+ * 🔑 観測点は**刻印の並び**(本文から描き直した順)+ 画面の下の 1 行。
+ */
+test('🔴 ファイルを本文の塊の上へ落とすと、その所に添付が入る (#684 段④)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await gotoApp(page);
+
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', '受け取るノート');
+  await page.fill('[data-pkc-field="editor-body"]', BODY);
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  await expect(page.locator(`${HOST}[data-pkc-painted]`)).toBeAttached();
+
+  const target = page.locator(`${HOST} > p`).first(); // 段落 A
+  const t = (await target.boundingBox())!;
+  const at = { x: t.x + t.width / 2, y: t.y + t.height * 0.8 }; // 下半分 = 後
+
+  /**
+   * ⚠ **本物の OS ドラッグは Playwright から起こせない** ── `DataTransfer` を箱の中で
+   *   組み、実レイアウトの座標で `dragover` / `drop` を撃つ(受け側の座標計算・CSS の線・
+   *   取込の往復は本物である)。⚠ **1 回目と 2 回目で同じ荷物**を使う(別の荷物にすると、
+   *   dragover が受けた物と drop で来た物が食い違う)。
+   */
+  await page.evaluate((p) => {
+    const dt = new DataTransfer();
+    dt.items.add(new File([new Uint8Array([1, 2, 3, 4])], '猫.png', { type: 'image/png' }));
+    (window as unknown as { __dropDt: DataTransfer }).__dropDt = dt;
+    const el = document.elementFromPoint(p.x, p.y)!;
+    el.dispatchEvent(
+      new DragEvent('dragover', { bubbles: true, cancelable: true, clientX: p.x, clientY: p.y, dataTransfer: dt }),
+    );
+  }, at);
+  // ⚠ 線は**落とす前**に見る(落とした後は消える)── 「落とせる」印が出ているか
+  await expect(target, '本文の上で「後」の線が出ない').toHaveAttribute('data-pkc-drop-edge', 'after');
+
+  await page.evaluate((p) => {
+    const dt = (window as unknown as { __dropDt: DataTransfer }).__dropDt;
+    const el = document.elementFromPoint(p.x, p.y)!;
+    el.dispatchEvent(
+      new DragEvent('drop', { bubbles: true, cancelable: true, clientX: p.x, clientY: p.y, dataTransfer: dt }),
+    );
+  }, at);
+
+  /**
+   * 🔴 観測点は**描き直した刻印の並び** ── 絵の塊は字を持たないので `IMG` と読む。
+   * ⚠ 「末尾に入った」なら最後に来る ── そこが**直す前の姿**である。
+   */
+  const kinds = async (): Promise<string[]> =>
+    page.locator(`${HOST} > [data-pkc-source-line]`).evaluateAll((els) =>
+      els.map((e) => (e.querySelector('img') ? 'IMG' : (e.textContent ?? '').trim())),
+    );
+  await expect
+    .poll(kinds, { timeout: 8000, message: '落とした所に入っていない(末尾に入っていないか)' })
+    .toEqual(['題', '段落 A', 'IMG', '章 B', '本文 B', '章 C', '本文 C']);
+  // どこに入ったかを字でも言う(画面は動かないので、字が唯一の手がかり)
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('落とした所に入れました');
+  // 🔴 片道にしない ── 追記欄の「元に戻す」1 回で消える
+  const undo = page.locator('[data-pkc-action="undo-append"]');
+  await expect(undo, '「元に戻す」が出ない').toBeVisible();
+  await clickReal(page, '[data-pkc-action="undo-append"]');
+  await expect
+    .poll(kinds, { timeout: 8000, message: '元に戻らない' })
+    .toEqual(['題', '段落 A', '章 B', '本文 B', '章 C', '本文 C']);
+
+  expect(errors, 'pageerror が出た').toEqual([]);
+});
