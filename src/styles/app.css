@@ -6166,19 +6166,21 @@ li[data-pkc-row-slot] {
    * 🔴 指で触る端末にだけ、「升は押すと打てます」を出す(#750 I2)。
    * ⚠ 器の側は `interactiveCells` を渡した面にしか焼かれない ──
    *   だから書き出した HTML と印刷では、この規則に当たる要素が 1 つも無い。
+   *
+   * 🔴 **表の上に 1 行として置く**(浮かせない)。⚠ 1 稿目は
+   *   `position: absolute; right: 44px`(⧉ の隣)にしていたが、**表の器は
+   *   `width: fit-content`**(表の幅)なので、**細い表では合図が器からはみ出して
+   *   画面の外へ出た** ── 390px の実機幅で `x = -26px`(実測)。
+   *   ⚠ `toBeVisible()` は**それを通す**(大きさは在るので)。
+   * 🔑 流し込みにすれば器の幅に依らず必ず収まり、**升に重ならない**ので
+   *   `pointer-events` の細工も要らない。
    */
   .pkc-md-rendered .pkc-cell-tap-hint {
     display: block;
-    position: absolute;
-    /* ⚠ ⧉ と ▾ の**左**へ置く(重ねない)── 2 つぶんの幅を空ける */
-    top: 2px;
-    right: 44px;
+    margin: 0 0 2px;
     font-size: var(--btn-fs-sm);
-    line-height: 1.6;
+    line-height: 1.4;
     color: var(--muted);
-    /* ⚠ 押す物ではない ── 触っても升の編集を邪魔しない */
-    pointer-events: none;
-    white-space: nowrap;
   }
 
   /**
