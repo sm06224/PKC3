@@ -491,7 +491,8 @@ export class SettingsRenderer {
     nd.append(nlabel);
     const nnote = document.createElement('p');
     nnote.setAttribute('data-pkc-field', 'settings-note');
-    nnote.textContent = '出さなくても、過去のお知らせはヘルプからいつでも読めます。';
+    // ⚠ 「いつでも」と書かない ── ヘルプに並ぶのは新しい 10 件までである(2026-09-08)
+    nnote.textContent = '出さなくても、過去のお知らせはヘルプから新しい 10 件が読めます。';
     nd.append(nnote);
     dl.append(nt, nd);
 

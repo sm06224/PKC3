@@ -185,7 +185,7 @@ import {
   contextMenuOpen,
   openContextMenu,
 } from '../render/context-menu';
-import { chordHint } from '../render/shortcut-hint';
+import { chordHint, HINT_BLOCKED } from '../render/shortcut-hint';
 import { structureText } from '@features/structure/structure-text';
 import {
   profileLineText,
@@ -2682,6 +2682,23 @@ export function runGlobalCommand(
    */
   if (dry) return !(btn instanceof HTMLButtonElement && btn.disabled);
   prevent();
+  /**
+   * 🔴 **押せないボタンを鍵で撃ったら、理由を言う**(#761)。
+   *
+   * ⚠ `disabled` のボタンは `click()` が**無反応**なので、直す前は
+   *   `Ctrl+N` が**完全に無音**だった ── 鍵は見た目を持たないので、
+   *   「押せない見た目」(#715)では**鍵の人に何も届かない**。
+   * 🔑 理由は**ボタン自身が持っている**(`setBlocked` が置く)── ここで
+   *   phase を読み直すと、同じ問いに答える口が 2 つになる(CLAUDE.md §7)。
+   * ⚠ **理由を持たない `disabled` は今までどおり無音**(`nav-back` など)──
+   *   あちらは「履歴が無い」だけで、言うことが無い。⚠ ここで一律に
+   *   何か言うと、`Alt+←` を連打しただけで字が出続ける。
+   */
+  if (btn instanceof HTMLButtonElement && btn.disabled) {
+    const why = btn.getAttribute(HINT_BLOCKED);
+    if (why !== null && why !== '') notify(why);
+    return true;
+  }
   btn.click();
   return true;
 }

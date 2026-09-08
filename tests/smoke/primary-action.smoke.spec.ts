@@ -189,3 +189,85 @@ test('🔴 主の操作だけ地と字が反転して見える (#722 P2-10)', as
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **編集中の「+ ノート」は薄くなり、鍵で撃つと理由が出る**(#761)。
+ *
+ * ⚠ **unit では届かない 2 つ**をここで見る:
+ * ① **`disabled` に CSS が本当に効くか** ── happy-dom は CSS を組まないので、
+ *    属性が付いていることしか見られない。薄さの出どころは `app.css` の
+ *    `button:disabled { opacity: .45 }` **1 本だけ**である。
+ *    ⚠ 🔴 **註記を直した**(2026-09-08、着地前レビュー)── 直す前ここには
+ *    「主の印(`button[data-pkc-primary]`)を外し忘れると濃いままになる /
+ *    その対が効いているかはここでしか分からない」と書いてあったが、**嘘だった**:
+ *    `[data-pkc-primary]` は `background` / `color` / `border-color` しか書かず、
+ *    `opacity` を書く 2 本は `:hover:not(:disabled)` と `:active:not(:disabled)` で
+ *    **`:disabled` には当たらない**。つまり `setPrimary` を落としても薄さは 0.45 の
+ *    まま = この検査は通る。**対が効いていることは unit が見ている**
+ *    (`primary-action.test.ts`「編集中は、左の列の『+ ノート』が濃くなくなる」)。
+ *    🔑 CLAUDE.md「『これが無いと壊れる』と書く前に、外して壊れるのを見る」。
+ *    ⚠ そのうえで**印そのものも 1 行見る**(下)── 薄さとは別の主張である
+ * ② **本物の鍵**で撃ったときに、画面へ理由の 1 行が出るか
+ *
+ * ⚠ 空振り防止:**読んでいる間は薄くない**ことを先に測る(いつも薄いなら何も見ていない)。
+ */
+test('🔴 編集中は「+ ノート」が薄くなり、鍵で撃つと理由が出る (#761)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-body"]').fill('本文です。\n');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.mouse.move(0, 0);
+
+  const create = page.locator('[data-pkc-field="create-run"]');
+  const look = async (): Promise<{ opacity: number; disabled: boolean }> =>
+    create.evaluate((el) => ({
+      opacity: Number(getComputedStyle(el).opacity),
+      disabled: (el as HTMLButtonElement).disabled,
+    }));
+
+  // ── ⚠ 前提(空振り防止)── 読んでいる間は押せて、薄くない
+  const before = await look();
+  expect(before.disabled, '読んでいるのに押せない').toBe(false);
+  expect(before.opacity, '読んでいるのに薄い(いつも薄いなら何も見ていない)').toBeGreaterThan(0.9);
+
+  // ── ① 編集に入ると薄くなる
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="start-edit"]');
+  await page.mouse.move(0, 0);
+  await expect
+    .poll(async () => (await look()).disabled, { timeout: 10_000 })
+    .toBe(true);
+  const editing = await look();
+  expect(editing.opacity, '編集中なのに薄くなっていない(disabled に CSS が効いていない)').toBeLessThan(
+    0.6,
+  );
+  // ⚠ 薄さとは**別の主張** ── 印を外し忘れても薄さは変わらないので、ここで直に見る
+  expect(
+    await create.getAttribute('data-pkc-primary'),
+    '編集中なのに主の印が残っている(地が反転したままになる)',
+  ).toBeNull();
+
+  /**
+   * ── ② 🔴 **本物の鍵**で撃つと、画面の下に理由が 1 行出る。
+   *
+   * ⚠ **先に焦点を打つ欄から外す** ── 本文を打っている最中は、**その手前に
+   *   もっと古い門が在る**(`typing` の判定:文字を打つ欄に焦点があるときは
+   *   全域の鍵を通さない)。⚠ そこは「打っている途中に別のノートへ飛ばない」
+   *   ための意図的な門で、#761 が直す所ではない。
+   * 🔑 だからこの検査が見るのは「**鍵がボタンまで届いたとき**、黙って無反応に
+   *   ならないこと」である ── 焦点が欄の外(左の列を触った後など)なら届く。
+   */
+  await page.evaluate(() => {
+    (document.activeElement as HTMLElement | null)?.blur();
+  });
+  await page.keyboard.press('Control+n');
+  const status = page.locator('[data-pkc-region="status"]');
+  await expect(status, '鍵で撃ったのに理由が出ない').toContainText('編集中は使えません', {
+    timeout: 10_000,
+  });
+  // 🔑 出口も画面に出ている(「使えません」だけだと、どこを押せばよいか分からない)
+  await expect(status, '出口(保存 / キャンセル)を言っていない').toContainText('保存');
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

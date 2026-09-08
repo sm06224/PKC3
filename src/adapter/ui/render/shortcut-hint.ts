@@ -33,6 +33,15 @@ import { appKeymap, type KeymapStore } from './keymap';
 /** 属性の名前(描く側と読む側で 1 か所に持つ)。 */
 export const HINT_BASE = 'data-pkc-hint-base';
 export const HINT_COMMAND = 'data-pkc-hint-command';
+/**
+ * 🔴 **いま押せない理由**(#761)。押せるときは属性ごと外す。
+ *
+ * ⚠ **`disabled` と対で置く** ── `disabled` だけだと、鍵で撃った人にも
+ *   指で触る人にも**理由が 1 文字も届かない**(hover が無い)。
+ * 🔑 読む側は 2 つ:①{@link applyShortcutHints} が説明の末尾へ足す
+ *   ②鍵の受け手(`runGlobalCommand`)が、押せないときこの字を画面へ出す。
+ */
+export const HINT_BLOCKED = 'data-pkc-blocked';
 
 /**
  * その命令の**いまの第 1 割当**を画面の綴りで返す。⚠ 割当が 1 つも無ければ `null`
@@ -49,9 +58,40 @@ export function hintTitle(
   base: string,
   commandId: string,
   keymap: KeymapStore = appKeymap,
+  /** 🔴 いま押せない理由(#761)。⚠ 在るときは末尾へ足す ── `#715` と同じ作法。 */
+  blocked: string | null = null,
 ): string {
   const hint = chordHint(commandId, keymap);
-  return hint === null ? base : `${base}(${hint})`;
+  const head = hint === null ? base : `${base}(${hint})`;
+  return blocked === null || blocked === '' ? head : `${head}(${blocked})`;
+}
+
+/**
+ * 🔴 **その押しボタンを「いま押せない」形にする**(#761)。押せるなら `reason` は `null`。
+ *
+ * ⚠ **3 つを同時に動かす** ── ①`disabled`(見た目で押せないと分かる。#715 の規律)
+ *   ②説明の末尾に理由(hover と「操作を名前で探す」が読む)③{@link HINT_BLOCKED}
+ *   (鍵で撃った人へ画面に 1 行出すための置き場)。
+ * ⚠ **どれか 1 つでも落とすと穴が残る**:`disabled` だけ → 鍵も指も理由が読めない /
+ *   字だけ → 見た目は押せるボタンのまま / 属性だけ → 押せてしまう。
+ * 🔑 説明は {@link hintTitle} の 1 本で組む ── {@link applyShortcutHints} が
+ *   割当の変更で呼び直しても**理由が消えない**(直す前は上書きで消えた)。
+ */
+export function setBlocked(
+  el: HTMLElement,
+  reason: string | null,
+  keymap: KeymapStore = appKeymap,
+): void {
+  const blocked = reason === null || reason === '' ? null : reason;
+  if (blocked === null) el.removeAttribute(HINT_BLOCKED);
+  else el.setAttribute(HINT_BLOCKED, blocked);
+  if (el instanceof HTMLButtonElement && el.disabled !== (blocked !== null))
+    el.disabled = blocked !== null;
+  const base = el.getAttribute(HINT_BASE);
+  const id = el.getAttribute(HINT_COMMAND);
+  if (base === null || id === null) return;
+  const next = hintTitle(base, id, keymap, blocked);
+  if (el.title !== next) el.title = next;
 }
 
 /**
@@ -65,7 +105,9 @@ export function applyShortcutHints(root: ParentNode, keymap: KeymapStore = appKe
     const base = el.getAttribute(HINT_BASE);
     const id = el.getAttribute(HINT_COMMAND);
     if (base === null || id === null) continue;
-    el.title = hintTitle(base, id, keymap);
+    // ⚠ **理由を消さない**(#761)── 割当を変えるたびに呼ばれるので、
+    //    ここで土台だけを書き戻すと「押せない理由」が静かに消える
+    el.title = hintTitle(base, id, keymap, el.getAttribute(HINT_BLOCKED));
     applied += 1;
   }
   return applied;
