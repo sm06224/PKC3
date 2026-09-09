@@ -1001,10 +1001,16 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-09-09-selfhost-update', '833fd456'],
     /**
      * ⚠ **#678(コピーした物)で足した**(2026-09-09)。枠(30 件)に余りが在るので、
-     *   押し出した entry は無い。🔑 まだ配っていない(`git log --oneline origin/main
-     *   -S"2026-09-09-copy-history" -- src/features/notice/notice-log.ts` が空)。
+     *   押し出した entry は無い。
+     * ⚠ **同じ日に main へ入った**(PR #819 → 4ea9636)ので印を付けた ──
+     *   中身を変えても既読の user には届かない。
      */
-    ['2026-09-09-copy-history', 'f7d44c63'],
+    ['2026-09-09-copy-history', 'f7d44c63', 'main'],
+    /**
+     * ⚠ **#679(まとめて貼る)で足した**(2026-09-09)。⚠ コピー履歴の文面は
+     *   **既に配ったので触らない** ── 足りない案内は**新しい entry**で出す。
+     */
+    ['2026-09-09-scrap-paste', '48131bd1'],
     ['2026-09-09-selfhost-bundle', '0a1314ef'],
     ['2026-09-09-manual-toc-fold', '879eb2ed'],
     ['2026-09-09-storage-fallback-line', 'b3cdbb87'],

@@ -14,6 +14,7 @@ import {
   confirmInApp,
   DIALOG_REGION,
   pickDateInApp,
+  pickScrapInApp,
   pickSnippetInApp,
   resetAppDialogForTest,
 } from '../../src/adapter/ui/render/app-dialog';
@@ -441,5 +442,97 @@ describe('雛形の一覧(#196 / B-2 段②-b)', () => {
     expect(q('[data-pkc-field="pick-snippet-note"]'), '空でも 1 行出している').toBeNull();
     cancelBtn().click();
     await without;
+  });
+});
+
+/**
+ * 🔴 **溜めてから貼る ── 選んで、並べる**(#679)。
+ *
+ * ⚠ ここは**器の側**だけを見る(何を貼るかは `features/clipboard/scrap` の test)。
+ * 🔑 見るのは 3 つ:①**押した順で返る** ②**▲▼ で入れ替わる**
+ * ③**0 件では押せない**(押せてしまうと無言の dead click)。
+ */
+describe('まとめて貼るの選び方(#679)', () => {
+  const ROWS = [
+    { label: 'あ', key: 'あ' },
+    { label: 'い', key: 'い' },
+    { label: 'う', key: 'う' },
+  ];
+  const pick = (i: number): void =>
+    q<HTMLButtonElement>(`[data-pkc-scrap-index="${i}"]`).click();
+
+  it('🔴 押した順で返る(一覧の並びではない)', async () => {
+    const host = document.body;
+    const answered = pickScrapInApp(host, ROWS);
+    pick(2);
+    pick(0);
+    okBtn().click();
+    expect(await answered).toEqual(['う', 'あ']);
+  });
+
+  it('押した行に番号が付く(何番目に入るかが読める)', async () => {
+    const answered = pickScrapInApp(document.body, ROWS);
+    pick(1);
+    pick(0);
+    expect(q('[data-pkc-scrap-index="1"]').textContent).toBe('1. い');
+    expect(q('[data-pkc-scrap-index="0"]').textContent).toBe('2. あ');
+    cancelBtn().click();
+    expect(await answered).toBeNull();
+  });
+
+  it('🔴 ▲▼ で入れ替わる', async () => {
+    const answered = pickScrapInApp(document.body, ROWS);
+    pick(0);
+    pick(1);
+    // 「い」(2 番目)を前へ
+    q<HTMLButtonElement>('[data-pkc-scrap-index="1"]')
+      .parentElement!.querySelector<HTMLButtonElement>('[data-pkc-field="pick-scrap-up"]')!
+      .click();
+    okBtn().click();
+    expect(await answered).toEqual(['い', 'あ']);
+  });
+
+  /** 🔴 端では押せない ── 押しても動かない口を残さない。 */
+  it('先頭の ▲ と末尾の ▼ は押せない', async () => {
+    const answered = pickScrapInApp(document.body, ROWS);
+    pick(0);
+    const line = q('[data-pkc-scrap-index="0"]').parentElement!;
+    expect(line.querySelector<HTMLButtonElement>('[data-pkc-field="pick-scrap-up"]')!.disabled).toBe(
+      true,
+    );
+    expect(
+      line.querySelector<HTMLButtonElement>('[data-pkc-field="pick-scrap-down"]')!.disabled,
+    ).toBe(true);
+    cancelBtn().click();
+    await answered;
+  });
+
+  it('🔴 1 件も選んでいなければ押せない(無言の dead click を作らない)', async () => {
+    const answered = pickScrapInApp(document.body, ROWS);
+    expect(okBtn().disabled, '選んでいないのに押せる').toBe(true);
+    expect(okBtn().textContent).toBe('入れる');
+    pick(0);
+    expect(okBtn().disabled).toBe(false);
+    expect(okBtn().textContent, '何件入るかが字に出ていない').toBe('選んだ 1 件を入れる');
+    cancelBtn().click();
+    await answered;
+  });
+
+  /** ⚠ 器は使い回すので、押せなくしたまま返さない(次の確認が押せなくなる)。 */
+  it('閉じたら、受ける側は押せる状態へ戻る', async () => {
+    const answered = pickScrapInApp(document.body, ROWS);
+    cancelBtn().click();
+    await answered;
+    expect(okBtn().disabled).toBe(false);
+  });
+
+  it('もう一度押すと外れ、押し直すと最後に回る', async () => {
+    const answered = pickScrapInApp(document.body, ROWS);
+    pick(0);
+    pick(1);
+    pick(0); // 外す
+    pick(0); // 付け直す → 最後
+    okBtn().click();
+    expect(await answered).toEqual(['い', 'あ']);
   });
 });

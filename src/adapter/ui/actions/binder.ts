@@ -247,6 +247,7 @@ function openCopyHistory(root: HTMLElement, notify: (text: string) => void): voi
   );
 }
 import { cleanForClipboard } from '@features/export/clipboard-html';
+import { joinCopied, pickMarked } from '@features/clipboard/scrap';
 import {
   confirmInApp,
   pickDateInApp,
@@ -255,6 +256,7 @@ import {
   pickSnippetInApp,
   pickDiagramInApp,
   pickCopyFormatInApp,
+  pickScrapInApp,
   promptInApp,
   isAppDialogOpen,
   type ConfirmOptions,
@@ -3467,6 +3469,48 @@ const ACTIONS: Record<string, ActionHandler> = {
             : 'コピーできませんでした(ブラウザが断りました)',
         );
       });
+  },
+  /**
+   * 🔴 **溜めてから貼る**(#679)── 選んで、並べて、**追記の欄へ**まとめて入れる。
+   *
+   * > user の言葉 2026-09-03「**ペースト時の一括ペーストや並び替えしてからのペースト
+   * > (スクラップのような)**」
+   *
+   * 🔑 **入れる先は本文ではなく追記の欄**である。⚠ 本文へ直に入れると
+   *   「入る前に見る」場所がどこにも無い ── 追記の欄は**既に在る下見**で、
+   *   そこで直せるし、入り先(末尾 / 章)も既に選べる(新しい入れ先を作らない)。
+   * ⚠ 欄が畳んであっても**開いてから**入れる ── 入れた字が画面のどこにも
+   *   無い、という形にしない(#655 ② と同じ作法)。
+   * ⚠ 既に打ちかけの字が在れば**空行 1 つで後ろに継ぐ** ── 消さない。
+   */
+  'paste-many-copied': (_dispatcher, _target, services, root) => {
+    const items = appCopyHistory.items();
+    void pickScrapInApp(
+      root,
+      items.map((c) => ({ label: copyLabel(c.text), key: c.text })),
+    ).then((keys) => {
+      if (keys === null) return;
+      const text = joinCopied(pickMarked(items, keys));
+      if (text === '') {
+        services.showStatus?.('選んだ物が空だったので、何も入れていません');
+        return;
+      }
+      const opened = revealAppendPane(root);
+      const input = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="append-input"]');
+      if (input === null) {
+        services.showStatus?.('追記の欄が見つかりません(ノートを開いてから押してください)');
+        return;
+      }
+      const prev = input.value.replace(/\s+$/, '');
+      input.value = prev === '' ? text : `${prev}\n\n${text}`;
+      // ⚠ 欄の高さを合わせている側へ知らせる(値を入れただけでは伸びない)
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+      services.showStatus?.(
+        `選んだ ${keys.length} 件を追記の欄に入れました(「追記」で本文へ入ります)${openedNote(opened)}`,
+      );
+    });
   },
   /**
    * 🔴 **全部消す**(#678)── コピーした物が残り続けるのは、user が消したい情報を

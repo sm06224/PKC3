@@ -85,6 +85,70 @@ test('🔴 コピーした物が残り、選ぶともう一度コピーされる
   const pasted = await page.evaluate(() => navigator.clipboard.readText());
   expect(pasted, 'クリップボードに戻っていない(貼っても前の物が出る)').toContain('ひとつめの中身');
 
+  /**
+   * ── ④-b 🔴 **溜めてから貼る**(#679)── 選んで、並べて、追記の欄へまとめて入れる。
+   *
+   * ⚠ **新しい起動を足さない**(#820 の規律)── 起動 1 回は実測 1.63 秒で、
+   *   以後すべての回に積まれる。同じ物語の続きとして測れるものは、続きで測る。
+   * 🔴 ここでしか見えないのは 2 つ:①**器が本当に出て押せるか**
+   *   ②**追記の欄に、押した順で・空行区切りで入るか**(欄は実 DOM の textarea)。
+   */
+  await page.keyboard.press('Escape');
+  // ⚠ 2 件目を作る ── 同じ口(`copy-note-md`)を使う。別の口を足すと、
+  //    そちらが押せるかどうかまで巻き込んで落ちる(この段が見たいのはそこではない)
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('べつのノート');
+  await page.locator('[data-pkc-field="editor-body"]').fill('べつのノートの中身');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await clickReal(page, '[data-pkc-action="copy-note-md"]');
+  await page.waitForFunction(
+    () => (localStorage.getItem('pkc3.copy.history') ?? '').includes('べつのノートの中身'),
+    undefined,
+    { timeout: 15_000 },
+  );
+  // ⚠ **打ちかけの字を先に置く** ── まとめて入れたときに消えないことを見る
+  //    (消えると、user が打っていた物が黙って失われる)
+  await page.locator('[data-pkc-field="append-input"]').fill('打ちかけの字');
+  // ⚠ 欄から焦点を外す ── **打っている最中は近道が効かない**(仕様)ので、
+  //    外さないと次の Ctrl+Shift+V が無視される
+  await page.locator('[data-pkc-field="append-input"]').blur();
+  await page.keyboard.press('Control+Shift+V');
+  await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="paste-many-copied"]');
+  await expect(
+    page.locator('[data-pkc-region="app-dialog"]'),
+    'まとめて貼るの器が出ない',
+  ).toBeVisible();
+  // ⚠ 2 番目(古いほう)を先に押す ── **押した順**で入ることを見るため
+  await clickReal(page, '[data-pkc-scrap-index="1"]');
+  await clickReal(page, '[data-pkc-scrap-index="0"]');
+  await expect(
+    page.locator('[data-pkc-field="dialog-ok"]'),
+    '何件入るかが字に出ていない',
+  ).toHaveText('選んだ 2 件を入れる');
+  await clickReal(page, '[data-pkc-field="dialog-ok"]');
+  const appendInput = page.locator('[data-pkc-field="append-input"]');
+  await expect(appendInput, '追記の欄へ入っていない').toHaveValue(/ひとつめの中身/);
+  const many = await appendInput.inputValue();
+  expect(
+    many.indexOf('ひとつめの中身'),
+    '押した順で入っていない(後で押した物が先に来ている)',
+  ).toBeLessThan(many.indexOf('べつのノートの中身'));
+  /**
+   * 🔴 **繋ぎ目そのものを見る**(2026-09-09、変異試験 S1 が生き延びて判明)。
+   *
+   * ⚠ 1 稿目は「どこかに空行が在る」(`toContain('\n\n')`)で見ていたが、
+   *   **打ちかけの字と貼った物の間**にも空行が入るので、`joinCopied` の繋ぎを
+   *   `\n` に変えても**満たされてしまった**(CLAUDE.md §1「救い手が変わっただけ」)。
+   * 🔑 だから **1 つ目の物の末尾**(`ふたつめの中身`)の直後を見る ──
+   *   ここは繋ぎ目にしか現れない。
+   */
+  expect(many, '2 つの物の間が空行で区切られていない').toContain('ふたつめの中身\n\n');
+  expect(many, '打ちかけの字が消えた(黙って捨てている)').toContain('打ちかけの字');
+  expect(
+    many.indexOf('打ちかけの字'),
+    '打ちかけの字の前に入れている(後ろへ継ぐ)',
+  ).toBeLessThan(many.indexOf('ひとつめの中身'));
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('追記の欄に入れました');
   // ── ⑤ 🔴 読み直しても残る(この端末に残る、が本当か)
   await page.reload();
   await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });

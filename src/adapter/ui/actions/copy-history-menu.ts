@@ -27,6 +27,12 @@ export const COPY_HISTORY_EMPTY =
 export const COPY_HISTORY_CLEAR = 'コピーした物を消す';
 
 /**
+ * 🔴 **まとめて貼る**(#679)。⚠ **2 件以上あるときだけ**出す ──
+ * 1 件しか無いのに「まとめて」を出すと、押しても 1 件を選ぶだけの遠回りになる。
+ */
+export const COPY_HISTORY_MANY = 'まとめて貼る…';
+
+/**
  * 一覧をメニューの項目にする。
  *
  * ⚠ **消す口を必ず置く**(issue #678)── コピーした物が残り続けるのは、
@@ -44,6 +50,15 @@ export function copyHistoryMenu(items: readonly CopiedItem[]): MenuItem[] {
       hint: 'もう一度コピーします(そのまま貼れます)',
       attrs: { 'data-pkc-copied': String(i) },
     })),
+    ...(items.length >= 2
+      ? [
+          {
+            action: 'paste-many-copied',
+            label: COPY_HISTORY_MANY,
+            hint: '選んで、並べて、追記の欄へまとめて入れます',
+          },
+        ]
+      : []),
     {
       action: 'clear-copy-history',
       label: COPY_HISTORY_CLEAR,
