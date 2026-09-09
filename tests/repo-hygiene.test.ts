@@ -1274,7 +1274,11 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     //    🔴 **ここでしか見えない層が本体である** ── 壊れ方は「本文の高さが潰れて
     //    ブラウザが送り位置を 0 に丸める」なので、版面を持たない happy-dom では
     //    **直す前でも位置が動かず、位置を見る検査は必ず緑になる**
-    expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(92);
+    // ⚠ 2026-09-09(#532 S1): 根を配らない場所（sub-path）へ置いて起動させる
+    //    spec を 1 本足した → 92 → 93。🔴 **ここでしか見えない層が本体である** ──
+    //    `base: './'` は config と生成物でも見れるが、**worker と wasm は
+    //    実行時に URL を組み立てる**ので、実際に置いて動かすまで分からない
+    expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(93);
     expect(
       counts.reduce((a, b) => a + b, 0),
       'smoke の test が増減した(足したらこの数を直す)',
@@ -1351,7 +1355,11 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
       //    ブラウザによって違う(古い実装は中身に display:none、新しい実装は
       //    ::details-content の content-visibility)── CSS には両方書いたが、
       //    **どちらが効いたかは CSS からは読めない**ので、実物で見るしかない
-    ).toBe(492);
+      // ⚠ 2026-09-09(#532 S1): sub-path に置いて起動・保存まで見る 1 本
+      //    → 492 → 493。⚠ **門は 3 段ある**（config = `tests/build-config.test.ts` /
+      //    生成物 = `scripts/dist-inspect.mjs` / 実配信 = この spec）。
+      //    実測：`base` を `'/'` へ変異させると 3 段とも鳴った
+    ).toBe(493);
   });
 });
 

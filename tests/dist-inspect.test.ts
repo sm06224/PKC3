@@ -11,8 +11,13 @@
  * ここで assert する。⚠ 「正常系が通る」だけの test は、規則を全部消しても通る。
  *
  * ⚠ **fixture のゼロ件の次元は「測っていない次元」**。`healthy()` は css chunk /
- * query 付き参照 / 単一引用符 / 絶対 path を**実際に持つ** ── 持たせないと、
+ * query 付き参照 / 単一引用符 / 拡張子なし / 外部 URL を**実際に持つ** ── 持たせないと、
  * それらを扱う枝を消しても誰も気づかない。
+ * 🔴 **絶対 path だけは `healthy()` から外した**(#532 S1、2026-09-09)── いまは
+ *   「置き場を根に決め打ちした参照」= **error** なので、健全な fixture に混ぜると
+ *   全 test が鳴る。⚠ 次元は捨てていない ── 専用の test 4 本で、
+ *   index.html / code / manifest / precache の**4 経路それぞれ**に当てる
+ *   (CLAUDE.md「同じ値を複数の経路へ渡すものは、経路ごとに pin する」)。
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -45,7 +50,7 @@ const MANUAL = 'manual.html';
 
 /**
  * index.html。実物と同じ癖を**わざと混ぜる**:
- * - entry は絶対 path(`base: '/'` にすると Vite がこう吐く)
+ * - entry は `./` 付き(`base: './'` で Vite が吐く形。⚠ 絶対 path は #532 S1 で error)
  * - stylesheet は query 付き
  * - icon は単一引用符 + **`./` 無しの裸名**(手書き HTML の普通の書き方)
  * - preload は**拡張子つきの外部 URL**(dist の file として解決してはいけない)
@@ -55,7 +60,7 @@ const INDEX_HTML = `<!doctype html><html><head>
 <link rel="preload" as="style" href="https://cdn.example/theme.css" />
 <link rel="icon" href='icon.svg' type="image/svg+xml" />
 <link rel="stylesheet" href="./${CSS}?v=1" />
-<script type="module" crossorigin src="/${ENTRY}"></script>
+<script type="module" crossorigin src="./${ENTRY}"></script>
 </head><body></body></html>`;
 
 /** 健全な生成物。各 test はここから **1 か所だけ**壊す。 */
@@ -91,9 +96,10 @@ function healthy(kind: 'product' | 'dev' = 'product'): Input {
       ENTRY,
       'const w=new Worker(new URL(`storage-worker-BBBBBBBB.js`,import.meta.url));' +
         'navigator.serviceWorker.register("./sw.js");' +
-        // ⚠ 参照の**書かれ方**の次元をゼロにしない ── 絶対 path(`base: '/'`)・
-        // 外部 URL・拡張子なしの 3 つは、扱いを間違えると誤検知で release が止まる
-        'const s=new URL("/sw.js",location.href);' +
+        // ⚠ 参照の**書かれ方**の次元をゼロにしない ── `../`(親へ戻る)・外部 URL・
+        // 拡張子なし・前置きなしの裸名は、扱いを間違えると誤検知で release が止まる。
+        // 🔑 entry は `assets/` の中に居るので、根の `sw.js` は `../` で指す
+        'const s=new URL("../sw.js",location.href);' +
         '// …is not intended to be invoked from`,`client-level code' +
         'const up=new URL("https://sqlite.org/dist/helper.js");' +
         'if(0)import("./nowhere");' +
@@ -141,10 +147,47 @@ describe('🔴 空振りしないこと ── 規則ごとに固有の壊し方
     expect(i.files.some((f) => f.path.endsWith('.js'))).toBe(true); // sw.js は残っている
   });
 
-  it('🔴 entry が絶対 path で参照されていても消滅を捕まえる', () => {
-    // 2 巡目 H-1 の実物。`./` 始まりだけを拾う実装は `base: '/'` で盲目になる。
-    // fixture の entry は既に `/assets/…` なので、上の test がそのまま効いている
-    expect(INDEX_HTML).toContain(`src="/${ENTRY}"`);
+  it('🔴 index.html が絶対 path で参照していたら落とす(#532 S1)', () => {
+    // 直す前は **dist の根へ畳んで通していた** ── `base: '/'` で焼いた生成物が
+    // そのまま検品を素通りし、`/dev/` とセルフホストが同時に 404 になる
+    const i = healthy();
+    i.text.set('index.html', INDEX_HTML.replace(`./${ENTRY}`, `/${ENTRY}`));
+    const out = run(i).join('\n');
+    expect(out).toContain('配置場所を根に決め打ちした参照');
+    expect(out).toContain(`/${ENTRY}`);
+  });
+
+  it('🔴 コードの中の絶対 path も落とす(index.html だけ見ない)', () => {
+    const i = healthy();
+    i.text.set(ENTRY, i.text.get(ENTRY)!.replace('"../sw.js"', '"/sw.js"'));
+    expect(run(i).join('\n')).toContain('配置場所を根に決め打ちした参照');
+  });
+
+  it('🔴 manifest の置き場が絶対でも落とす(鍵の名前で拾っていない)', () => {
+    // ⚠ わざと **`start_url` ではない鍵**で壊す ── 鍵を数え上げる実装だと素通りする
+    const i = healthy();
+    i.text.set(
+      'manifest.webmanifest',
+      JSON.stringify({ icons: [{ src: 'icon.svg' }], file_handlers: [{ action: '/open' }] }),
+    );
+    expect(run(i).join('\n')).toContain('配置場所を根に決め打ちした参照');
+  });
+
+  it('🔴 precache が絶対 path を並べていても落とす', () => {
+    const i = healthy();
+    i.text.set('sw.js', i.text.get('sw.js')!.replace('"./index.html"', '"/index.html"'));
+    expect(run(i).join('\n')).toContain('配置場所を根に決め打ちした参照');
+  });
+
+  it('⚠ 健全な生成物では鳴らない(対照群 ── 鳴りっぱなしの門は門ではない)', () => {
+    expect(run(healthy()).join('\n')).not.toContain('配置場所を根に決め打ちした参照');
+  });
+
+  it('🔴 参照を 1 つも走査しなかったら、それ自体を落とす(空振り防止)', () => {
+    // ⚠ 「絶対 path 0 件」は、走査が動いていなければ**必ず**成り立つ
+    const i = healthy();
+    i.text = new Map();
+    expect(run(i).join('\n')).toContain('配置の走査が 1 件も動いていない');
   });
 
   it('worker chunk が消えたら鳴る(index.html は指していない)', () => {

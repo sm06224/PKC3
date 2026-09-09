@@ -27,6 +27,18 @@ const PORT = Number(process.env.PKC3_SMOKE_PORT ?? 45732);
  */
 const PLAIN_PORT = Number(process.env.PKC3_PLAIN_PORT ?? PORT + 1);
 
+/**
+ * 🔴 **根を配らない配信**(#532 S1)。同じ `plain-server.mjs` を、
+ * `PKC3_PLAIN_PREFIX` 付きで**もう 1 本**立てる。
+ *
+ * ⚠ 既存の 2 本(preview / plain)は**どちらも根で配る**ので、
+ * 「絶対 path で参照している生成物」を配っても**通ってしまう**。
+ * 🔑 prefix の外を 404 にする配信でだけ、「どこに置いても動く」が検査になる ──
+ *   これは Pages の `/dev/` と、セルフホスト(#532)が立つ場所そのものである。
+ */
+const SUB_PORT = Number(process.env.PKC3_SUBPATH_PORT ?? PORT + 2);
+const SUB_PREFIX = '/pkc/';
+
 // 同梱 Chromium(コンテナ / self-host)を優先、無ければ playwright 管理の
 // ブラウザ(CI は install 済みが前提)
 //
@@ -69,8 +81,13 @@ export default defineConfig({
     baseURL: `http://localhost:${PORT}`,
     ...(executablePath ? { launchOptions: { executablePath } } : {}),
   },
-  // 🔑 spec から使う口(`coi.smoke.spec.ts` だけが plain を見る)
-  metadata: { plainBaseURL: `http://localhost:${PLAIN_PORT}` },
+  // 🔑 spec から使う口(`coi.smoke.spec.ts` だけが plain を見る /
+  //    `sub-path.smoke.spec.ts` だけが sub-path を見る)
+  metadata: {
+    plainBaseURL: `http://localhost:${PLAIN_PORT}`,
+    subPathBaseURL: `http://localhost:${SUB_PORT}`,
+    subPathPrefix: SUB_PREFIX,
+  },
   webServer: [
     {
       // 実際に配布するビルド(dist)を検品する ── dev server ではなく preview。
@@ -88,6 +105,15 @@ export default defineConfig({
       cwd: repoRoot,
       url: `http://localhost:${PLAIN_PORT}/index.html`,
       env: { PKC3_PLAIN_PORT: String(PLAIN_PORT) },
+      reuseExistingServer: !process.env.CI,
+      timeout: 30_000,
+    },
+    {
+      // ⚠ 同じ `dist` を、**`/pkc/` の下だけ**で配る(根は 404)。#532 S1
+      command: `node tests/smoke/plain-server.mjs`,
+      cwd: repoRoot,
+      url: `http://localhost:${SUB_PORT}${SUB_PREFIX}index.html`,
+      env: { PKC3_PLAIN_PORT: String(SUB_PORT), PKC3_PLAIN_PREFIX: SUB_PREFIX },
       reuseExistingServer: !process.env.CI,
       timeout: 30_000,
     },

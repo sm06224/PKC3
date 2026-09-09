@@ -59,9 +59,17 @@ function refFromCode(raw) {
   return /^\.{0,2}\//.test(clean) || HASHED_NAME.test(clean) ? clean : null;
 }
 
-/** 参照元 file からの相対解決(`./` `../` `/` を畳む)。 */
+/**
+ * 参照元 file からの相対解決(`./` `../` を畳む)。
+ *
+ * ⚠ **絶対 path(`/…`)はここへ来ない。** かつては `[]`(= dist の根)へ畳んで
+ * **通していた**が、それだと `base: '/'` で焼いた生成物が検品を素通りする
+ * (#532 S1)。いまは `note` が絶対を捕まえて error にするので、
+ * ここに畳む枝を置くと **no-op の枝**になる(CLAUDE.md §1「これが無いと壊れると
+ * 書いた規則が no-op だった」)。
+ */
 function resolveFrom(referrer, ref) {
-  const base = ref.startsWith('/') ? [] : referrer.split('/').slice(0, -1);
+  const base = referrer.split('/').slice(0, -1);
   const out = [];
   for (const p of [...base, ...ref.split('/')]) {
     if (p === '' || p === '.') continue;
@@ -174,12 +182,38 @@ export function inspectDist({
   //      **誰からも参照されていない生成物が無いか**(後方)。
   const wanted = new Map(); // 参照先 → 参照元
   const referenced = new Set();
+  /**
+   * 🔴 **配置場所を根に決め打ちした参照**(#532 S1)。
+   *
+   * PKC3 は `vite.config.ts` の `base: './'` に**全面的に依存**している ──
+   * Pages の `/` と `/dev/`、そしてセルフホスト(#532)は、どれも
+   * 「配置場所を知らないビルドを、任意の場所へ置く」形である。
+   * ⚠ ところがこの検品は 2026-09-09 まで、絶対 path を **dist の根へ畳んで
+   *   通していた** ── `src="/assets/index-XXXX.js"` に変わっても緑だった。
+   * 🔑 だから**畳まずに、その場で落とす**。畳むのは「動いているように見せる」
+   *   ことであって、検めることではない。
+   */
+  const absolute = new Map(); // 生の参照 → 参照元
+  /** 空振り防止 ── 「配置」の走査が 1 件も動いていないなら、この門は何も見ていない。 */
+  let scanned = 0;
   const note = (referrer, raw, from) => {
     const ref = from(raw);
     if (ref === null) return;
+    scanned += 1;
+    // ⚠ `//host/x` は protocol-relative(外部)── `refFromValue` が既に落としている
+    if (ref.startsWith('/')) {
+      absolute.set(ref, referrer);
+      return;
+    }
     const target = resolveFrom(referrer, ref);
     if (paths.has(target)) referenced.add(target);
     else wanted.set(target, referrer);
+  };
+  /** manifest / precache の「置き場を指す文字列」を、鍵の名前に依らず拾う。 */
+  const notePlacement = (referrer, raw) => {
+    if (typeof raw !== 'string' || raw === '') return;
+    scanned += 1;
+    if (raw.startsWith('/') && !raw.startsWith('//')) absolute.set(raw, referrer);
   };
 
   const html = text.get('index.html');
@@ -232,6 +266,7 @@ export function inspectDist({
       } catch (e) {
         errors.push(`sw.js の precache 一覧が読めない: ${e.message}`);
       }
+      for (const u of listed) notePlacement('sw.js(precache)', u);
       const want = shipped.map((f) => f.path).filter((p) => p !== 'sw.js');
       const have = new Set(listed.map((u) => u.replace(/^\.\//, '')));
       /**
@@ -268,6 +303,19 @@ export function inspectDist({
     } catch (e) {
       errors.push(`manifest.webmanifest が JSON として読めない: ${e.message}`);
     }
+    /**
+     * 🔴 **鍵の名前で拾わない**(#532 S1)。`start_url` / `scope` / `icons[].src` /
+     * `file_handlers[].action` / `shortcuts[].url` … と数え上げる形にすると、
+     * **次に足された鍵**が黙って抜ける(CLAUDE.md §8「入れる物は登録を読む」の逆で、
+     * ここは *何が来るか分からない* 側)。文字列を全部歩いて、`/` 始まりだけを見る。
+     * ⚠ `image/svg+xml` のような値は `/` で始まらないので当たらない。
+     */
+    const walk = (v) => {
+      if (typeof v === 'string') notePlacement('manifest.webmanifest', v);
+      else if (Array.isArray(v)) for (const x of v) walk(x);
+      else if (v !== null && typeof v === 'object') for (const x of Object.values(v)) walk(x);
+    };
+    walk(manifest);
     for (const icon of manifest?.icons ?? []) {
       const target = resolveFrom('manifest.webmanifest', refFromValue(icon.src) ?? '');
       if (target !== '' && !paths.has(target)) {
@@ -275,6 +323,25 @@ export function inspectDist({
         errors.push(`manifest が指す icon が無い: ${icon.src}`);
       }
     }
+  }
+
+  /**
+   * 🔴 **どこに置いても動くか**(#532 S1)。⚠ ここが鳴ったら「壊れた」ではなく
+   * 「**根に置いたときしか動かない物を配ろうとしている**」である ── Pages の
+   * `/dev/`(sub-path)と、セルフホスト(#532)が同時に落ちる。
+   * 🔑 実ブラウザ側の対は `tests/smoke/sub-path.smoke.spec.ts`(根を配らない
+   *   server に置いて起動させる)。**config → 生成物 → 実配信**の 3 段構えである。
+   */
+  if (absolute.size > 0) {
+    errors.push(
+      `配置場所を根に決め打ちした参照がある(${absolute.size} 件)── ` +
+        '`base` が相対でないか、絶対 path を書いた所がある。sub-path 配信で 404 になる:\n' +
+        [...absolute].map(([r, by]) => `      ${r}  ← ${by}`).join('\n'),
+    );
+  }
+  if (scanned === 0) {
+    // ⚠ 空振り防止 ── 走査が 1 件も動いていないなら、上の 0 件は「無い」ではなく「見ていない」
+    errors.push('配置の走査が 1 件も動いていない ── 参照の拾い方が壊れている(絶対 path の門が空振りする)');
   }
 
   // ── ⑤ 配る量。**上限と下限の両方**を見る。
