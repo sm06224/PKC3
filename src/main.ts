@@ -31,8 +31,8 @@ import {
 import { setFoldNotify } from '@adapter/ui/render/fold-notify';
 import { appTooNarrowOk, installTooNarrow } from '@adapter/ui/render/too-narrow';
 import { paintStatusOpen, paintStatusUndo } from '@adapter/ui/render/status-open';
+import { openStorageWithRetry } from '@adapter/platform/storage/open-with-retry';
 import {
-  storageFallbackError,
   storageStatusLine,
   storageStatusTitle,
   storageWhereLine,
@@ -330,13 +330,18 @@ export interface AppHandle {
 }
 
 /**
- * 昇格 boot(lease 待ち → held)では、旧タブの SAH 解放が lock 解放より遅れて
- * memory fallback しうる(review B-2 ── 空 DB に見え、編集が reload で消える)。
- * fallback を受け入れず、新しい worker で短い backoff 再試行する
- * (install 失敗は worker 内で per-name cache されるため、worker ごと作り直す)。
+ * 🔴 **保存先を開く。`memory` へ落ちた回は、少し待って開き直す**(#811 の 3 番目)。
+ *
+ * ⚠ 直す前は**昇格 boot のときだけ**試し直していた ── ところが
+ *   **いちばん多い形(タブ 1 枚 = すぐ lease が取れた)は 1 度も通っていなかった**。
+ *   旧タブの SAH 解放が lock 解放より遅れる現象は、昇格に限らず
+ *   「前のタブを閉じた直後に開き直す」形でも起きる。
+ * ⚠ そして**投げない** ── 止めると、端末側の事情で OPFS が取れない iPhone が
+ *   **いま在るノートを読むこともできなくなる**。代わりに画面が言う(#811 の 1 と 2)。
+ * 🔑 待つ回数も諦め方も `open-with-retry.ts` が持つ ── この file は
+ *   **どの test からも実行されない**(CLAUDE.md §2)ので、判断を置かない。
  */
 async function initStorage(
-  promoted: boolean,
   portable: PortableStart | null,
 ): Promise<{
   client: StoreClient;
@@ -358,22 +363,18 @@ async function initStorage(
         ...(portable.image ? { image: portable.image } : {}),
       })
     : ({ op: 'init' as const, dbName: DB_NAME });
-  let client = new StoreClient();
-  let init = await client.request(req);
-  if (promoted && portable === null && init.vfs === 'memory') {
-    for (const delayMs of [200, 500, 1000]) {
-      client.terminate();
-      await new Promise((r) => setTimeout(r, delayMs));
-      client = new StoreClient();
-      init = await client.request(req);
-      if (init.vfs !== 'memory') break;
-    }
-    if (init.vfs === 'memory') {
-      client.terminate();
-      // 🔑 言い方は `storage-notice.ts` 1 か所(#811)── 同じ事実に説明を 2 通り持たない
-      throw new Error(storageFallbackError(init.fallbackReason));
-    }
-  }
+  const { client, init } = await openStorageWithRetry<StoreClient, InitResult>({
+    open: async () => {
+      const c = new StoreClient();
+      return { client: c, init: await c.request(req) };
+    },
+    close: (c) => {
+      c.terminate();
+    },
+    wait: (ms) => new Promise((r) => setTimeout(r, ms)),
+    // ⚠ 持ち歩ける 1 枚の HTML は**選んで** `memory` なので、試し直さない
+    retryable: portable === null,
+  });
   return { client, init };
 }
 
@@ -697,7 +698,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
 
   if (immediateHeld) {
     writerHolder = true;
-    const real = await initStorage(false, portable);
+    const real = await initStorage(portable);
     armPersist(real.client);
     const host = new StoreProxyHost({ client: real.client, init: real.init, ...proxyDeps, ...persistHook });
     client = host.localClient();
@@ -743,7 +744,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       } else {
         followerConn = null;
         await heldP;
-        const real = await initStorage(true, portable);
+        const real = await initStorage(portable);
         armPersist(real.client);
         const host = new StoreProxyHost({ client: real.client, init: real.init, ...proxyDeps, ...persistHook });
         client = host.localClient();
@@ -1495,7 +1496,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     void lease.whenHeld.then(async () => {
       try {
         await conn.promote(async () => {
-          const r = await initStorage(true, portable);
+          const r = await initStorage(portable);
           // ⚠ 昇格でも arm する(忘れると、続きを書いたぶんが丸ごと保存されない)
           armPersist(r.client);
           const host = new StoreProxyHost({

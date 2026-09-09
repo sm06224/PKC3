@@ -56,13 +56,12 @@ export function storageStatusLine(fallbackReason: string | undefined): string {
 }
 
 /**
- * 起動を止めるときの字(再試行が尽きた回)。
- * ⚠ こちらは**開けない**ので、原因も添える ── 読むのは「起動に失敗しました」の
- *   画面で、user はそれを報告に写す。
+ * 🔴 **2026-09-09 に消した**:`storageFallbackError`(起動を止めるときの字)。
+ *
+ * ⚠ #811 の 3 番目で「**取れなくても開く**」に決めたので、**止める道そのものが
+ *   無くなった** ── 字だけ残すと「まだ止まることがある」と次に読む人が読む。
+ * 🔑 止めない理由は `open-with-retry.ts` に書いてある(iPhone で締め出しになりうる)。
  */
-export function storageFallbackError(fallbackReason: string | undefined): string {
-  return `${STORAGE_FALLBACK_LINE}(原因: ${fallbackReason ?? 'unknown'})`;
-}
 
 /**
  * 🔴 **「いまどこに保存しているか」をヘルプに出す字**(#811 の 2 番目)。
