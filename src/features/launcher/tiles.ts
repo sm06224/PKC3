@@ -41,7 +41,16 @@ export interface LauncherTile {
    * 🔑 **`ViewMode` と同じ綴りの種別は、PKC をもう 1 枚別窓で開く**
    *   (`launch-tile.ts` が `isViewMode(kind)` で見分ける ── 名指しの `if` を並べない)。
    */
-  kind: 'app' | 'url' | 'office' | 'dual' | 'schedule' | 'contacts' | 'search' | 'manual';
+  kind:
+    | 'app'
+    | 'url'
+    | 'office'
+    | 'dual'
+    | 'schedule'
+    | 'contacts'
+    | 'search'
+    | 'manual'
+    | 'selfhost';
   /** `kind === 'url'` のときの飛び先。 */
   url?: string;
   /** `kind === 'app'` のときの実体(IDB Blob の鍵)。 */
@@ -257,6 +266,28 @@ export function manualTile(): LauncherTile {
 }
 
 /**
+ * 🔴 **自分のパソコンで動かす**(#532 段 B。user 指示 2026-08-28
+ * 「ローカルでホストする仕組みと一緒にインストーラーを PKC3 自身で配布できるように
+ * **組み込みアプリに動線を追加しましょう**」)。
+ *
+ * 🔑 **これは「面」ではない** ── 押すと zip が 1 個落ちるだけで、画面は変わらない。
+ *   だから `ViewMode` の 3 点(左に置き場 / 別窓 / 塞がれたら左へ戻す)は要らない。
+ * ⚠ 並びは**いちばん最後**(マニュアルの次)── これは「作業する所」でも
+ *   「読む所」でもなく、**1 度だけ使う支度**である。ここに置けば、
+ *   足しても他のタイルの位置が 1 つも動かない。
+ */
+export const SELFHOST_TILE_LID = 'builtin:selfhost';
+
+export function selfhostTile(): LauncherTile {
+  return {
+    lid: SELFHOST_TILE_LID,
+    title: '自分のパソコンで動かす',
+    group: BUILTIN_GROUP,
+    kind: 'selfhost',
+  };
+}
+
+/**
  * 🔴 **カレンダーの組み込みタイル**(#276。封印の解除。user 指示 2026-08-19
  * 「かつて無くしたカレンダーとカンバンはここで生きてきます / 発想を変え、
  * frontmatter でのカレンダー情報付与や…で復活させるのです」)。
@@ -305,6 +336,8 @@ export function withBuiltinTiles(
   const builtin: LauncherTile[] = [dualTile(), scheduleTile(), contactsTile(), searchTile()];
   if (opts.office) builtin.push(officeTile());
   builtin.push(manualTile());
+  // ⚠ 支度の口は**最後**(#532 段 B)── 1 度だけ使う物で、他の位置を動かさない
+  builtin.push(selfhostTile());
   /**
    * 🔴 **組み込みは末尾へ「収納」する**(#531 段② / #281。user 指示 2026-08-28
    * 「組み込みアプリをグループに**収納して**整理する」)。
@@ -341,4 +374,5 @@ export const BUILTIN_KINDS: ReadonlySet<LauncherTile['kind']> = new Set([
   'contacts',
   'search',
   'manual',
+  'selfhost',
 ]);

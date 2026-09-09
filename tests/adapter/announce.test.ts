@@ -985,6 +985,13 @@ describe('お知らせの文面は固定(#220-7)', () => {
      *   タブを閉じると消えるので、「見たことがある字」にしておく必要がある。
      */
     /** ⚠ **#812(iPhone の user 報告)で足した**(2026-09-09)。枠はまだ余っている。 */
+    /**
+     * ⚠ **#532 段 B(自分のパソコンで動かす)で足した**(2026-09-09)。枠(30 件)に
+     *   余りが在るので、押し出した entry は無い。
+     * 🔑 まだ配っていない(`git log --oneline origin/main -S"2026-09-09-selfhost-bundle"
+     *   -- src/features/notice/notice-log.ts` が空)ので、main に入る前なら文面を直してよい。
+     */
+    ['2026-09-09-selfhost-bundle', '0a1314ef'],
     ['2026-09-09-manual-toc-fold', '879eb2ed'],
     ['2026-09-09-storage-fallback-line', 'b3cdbb87'],
     ['2026-09-09-file-drop-pinned', 'caf6fffe'],

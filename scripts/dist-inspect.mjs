@@ -103,6 +103,13 @@ export const PORTABLE_TEMPLATE = 'portable-template.html';
 export const MANUAL_PAGE = 'manual.html';
 
 /**
+ * 配る物の一覧を data でも置く file(#532 段 B)。⚠ 綴りの正本は
+ * `src/features/selfhost/precache-list.ts` の `PRECACHE_LIST_FILE`
+ * (`tests/dist-inspect.test.ts` が突き合わせる)。
+ */
+export const PRECACHE_LIST_FILE = 'precache.json';
+
+/**
  * @param {{kind: 'product'|'dev', capKb: number, floorKb: number,
  *          sidecarCapKb?: number, sidecarFloorKb?: number, manualFloorKb?: number,
  *          requireManual?: boolean,
@@ -279,6 +286,45 @@ export function inspectDist({
           `precache に ${PORTABLE_TEMPLATE} が載っている ── ` +
             'これは押したときだけ取りに行く雛形で、install で落とす物ではない',
         );
+      }
+      /**
+       * 🔴 **一覧を data でも配る**(#532 段 B)── `precache.json`。
+       *
+       * 「自分のパソコンで動かす」がここを読む。⚠ 2 つに割れた瞬間、
+       * アプリは**古い一覧で zip を組む**(足りない file が入らない)ので、
+       * **両方向で**突き合わせる ── 件数ではなく集合で見る(#225 の教訓:
+       * 同じ数だけ取り違えても件数は合う)。
+       */
+      const listText = text.get(PRECACHE_LIST_FILE);
+      if (listText === undefined) {
+        errors.push(
+          `dist に ${PRECACHE_LIST_FILE} が無い ── 「自分のパソコンで動かす」が` +
+            '配る物の一覧を読めない(plugin が emit していない)',
+        );
+      } else {
+        let listed2 = null;
+        try {
+          listed2 = JSON.parse(listText);
+        } catch (e) {
+          errors.push(`${PRECACHE_LIST_FILE} が JSON として読めない: ${e.message}`);
+        }
+        if (!Array.isArray(listed2)) {
+          if (listed2 !== null) errors.push(`${PRECACHE_LIST_FILE} が配列ではない`);
+        } else if (listed2.length === 0) {
+          errors.push(`${PRECACHE_LIST_FILE} が空 ── 配る物が 1 つも無い一式を組ませてしまう`);
+        } else {
+          const a = new Set(listed2);
+          const b = new Set(listed);
+          const onlyJson = [...a].filter((p) => !b.has(p));
+          const onlySw = [...b].filter((p) => !a.has(p));
+          if (onlyJson.length > 0 || onlySw.length > 0) {
+            errors.push(
+              `${PRECACHE_LIST_FILE} と sw.js の一覧が食い違う ── ` +
+                `json だけ ${onlyJson.length} 件 / sw.js だけ ${onlySw.length} 件:\n` +
+                [...onlyJson.map((p) => `      json のみ: ${p}`), ...onlySw.map((p) => `      sw.js のみ: ${p}`)].join('\n'),
+            );
+          }
+        }
       }
       const missing = want.filter((p) => !have.has(p));
       const extra = [...have].filter((p) => !want.includes(p));

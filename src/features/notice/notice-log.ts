@@ -162,6 +162,17 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-09-09-selfhost-bundle',
+    title: 'PKC を自分のパソコンで動かす一式を、ここから落とせるようになりました',
+    items: [
+      'アプリの一覧のいちばん下に「自分のパソコンで動かす」が出ます。押すと zip が 1 個落ちます。',
+      '中の start-windows.cmd(Mac / Linux は start-mac-linux.sh)を開くと、http://localhost:8787 で PKC が開きます。ネットに繋がっていなくても使えます。',
+      'このパソコンの中だけで動きます。同じ Wi-Fi の別の端末からは開けません。',
+      '⚠ そこに書いたノートは、その住所にだけ残ります。番号が変わると前に書いたノートは見えなくなるので、8787 が使われているときは番号を変えず、先に使っている物を止めてください。',
+      'Mac / Linux では Python 3 か Node.js のどちらかが要ります。無いときは、何を入れればよいかが画面に出ます。',
+    ],
+  },
+  {
     id: '2026-09-09-manual-toc-fold',
     title: 'スマホでマニュアルを開くと、目次が畳まれて出るようになりました',
     items: [
