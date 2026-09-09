@@ -2840,6 +2840,20 @@ export function runGlobalCommand(
     });
     return true;
   }
+  /**
+   * 🔴 **SQL の面も押しボタンを持たない**(#681 段②)── `view-dual` と同じく直に投げる。
+   * ⚠ この 1 行が、左の一覧を押して中央が本文へ戻った後の**唯一の戻り道**である
+   *   (左にタブが無い面なので)。
+   */
+  if (cmd === 'view-sql') {
+    if (dry) return true;
+    prevent();
+    dispatcher.dispatch({
+      type: 'SET_VIEW_MODE',
+      mode: nextViewMode(dispatcher.getState().viewMode, 'sql'),
+    });
+    return true;
+  }
   if (cmd === 'open-palette') {
     if (dry) return true;
     prevent();

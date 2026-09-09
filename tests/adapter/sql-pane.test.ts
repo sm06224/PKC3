@@ -22,13 +22,16 @@ import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import {
   connectStoreEffects,
+  SQL_MAX_MS,
   SQL_MAX_ROWS,
   SQL_MAX_STEPS,
 } from '../../src/adapter/state/store-effects';
+import { REQUEST_TIMEOUT_MS } from '../../src/adapter/platform/storage/store-proxy';
 import { CenterRouter } from '../../src/adapter/ui/render/center';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { isAsidePane, viewModeLabel } from '../../src/adapter/state/app-state';
 import { homeTabOf } from '../../src/adapter/ui/render/browse-mode';
+import { readFileSync } from 'node:fs';
 import { stubStamps } from '../helpers/store-stamps';
 import { stubRevisionOps } from '../helpers/revision-stub';
 
@@ -152,6 +155,46 @@ describe('SQL を調べる面(#681 段②)', () => {
     expect(tip, 'REGEXP が無いことを言っていない').toContain('REGEXP');
   });
 
+  /**
+   * 🔴 **開いたら、そのまま打てる**(2026-09-09 の動線レビュー)。
+   * ⚠ 打つためだけに開く窓なので、まず欄を 1 回押させるのは手数が 1 つ多い
+   *   (探す面は既にそうしている)。⚠ **1 回だけ** ── 答えが届くたびに奪い直さない。
+   */
+  it('🔴 開いた最初の 1 回だけ、欄へ焦点が入る', async () => {
+    const { box, type, runBtn } = setup();
+    expect(document.activeElement, '開いたのに欄へ焦点が入っていない').toBe(box);
+    box.blur();
+    type('SELECT 1');
+    runBtn.click();
+    await settle();
+    expect(document.activeElement, '答えが届いた瞬間に焦点を奪った').not.toBe(box);
+  });
+
+  /**
+   * 🔴 **注意書きは「何が調べられるか」から始める**(2026-09-09 の動線レビュー)。
+   * ⚠ 落とし穴だけを並べると、**表の名前が 1 つも出ていない**画面になる ──
+   *   唯一の手掛かりだった薄字の例文は、**1 文字打った瞬間に消える**。
+   */
+  it('🔴 注意書きが、調べられる表の名前を出している', () => {
+    const { pane } = setup();
+    const tip = pane.querySelector('[data-pkc-field="sql-tip"]')?.textContent ?? '';
+    for (const table of ['entries', 'relations', 'revisions', 'assets'])
+      expect(tip, `${table} の名前が画面に無い`).toContain(table);
+  });
+
+  /**
+   * 🔴 **断った回も、直した字を欄へ返す**(2026-09-09 の着地前レビュー)。
+   * ⚠ 返さないと、断り文には半角の `DELETE` と出るのに欄は全角のまま ──
+   *   **画面の中で辻褄が合わない**(`sql-guard.ts` はそう返す約束を書いている)。
+   */
+  it('🔴 断られた回も、欄の字は走らせる形に直る', () => {
+    const { box, type, runBtn, note } = setup();
+    type('ＤＥＬＥＴＥ　ＦＲＯＭ　entries');
+    runBtn.click();
+    expect(note(), '断っていない(前提が崩れている)').toContain('DELETE');
+    expect(box.value, '断り文と欄の字が食い違っている').toBe('DELETE FROM entries');
+  });
+
   it('🔴 打っただけでは走らない(打鍵ごとに worker を叩かない)', () => {
     const { d, type, runReadOnlySql } = setup();
     type('SELECT 1');
@@ -169,6 +212,7 @@ describe('SQL を調べる面(#681 段②)', () => {
     expect(runReadOnlySql.mock.calls[0]?.[1], '上限を渡していない').toEqual({
       maxRows: SQL_MAX_ROWS,
       maxSteps: SQL_MAX_STEPS,
+      maxMs: SQL_MAX_MS,
     });
     // 🔑 **直した字を欄へ返す**(実際に走った字を見せる ── 打った字と違うので)
     expect(box.value, '直した字が欄へ戻っていない').toBe('SELECT 1');
@@ -223,7 +267,51 @@ describe('SQL を調べる面(#681 段②)', () => {
     await settle();
     expect(heads(), '当たらないと列の名前まで消える(走ったのか分からない)').toEqual(['title']);
     expect(cells()).toEqual([]);
-    expect(note(), '0 件だと黙る').toBe('0 行(2 ミリ秒)');
+    expect(note(), '0 件だと黙る').toBe('0 行(2 ミリ秒) ── 条件に当たるものがありませんでした');
+  });
+
+  /**
+   * 🔴 **0 行のとき、いちばん多い外し方を名指しする**(2026-09-09 の動線レビュー)。
+   *
+   * ⚠ 日本語入力のまま `LIKE '％請求％'` と打つと、門は通り(引用符の中は直さないのが
+   *   正しい)、走り、**0 行**で返る ── 実測で半角なら 1 行、全角なら 0 行。
+   * 🔑 失敗ではなく 0 行なので、user は「そのノートは無い」と読む。だから画面が言う。
+   */
+  it('🔴 全角の ％ で 0 行になった回は、その理由を名指しする', async () => {
+    const { type, runBtn, note } = setup(async () => answer(['title'], [], { ms: 1 }));
+    type("SELECT title FROM entries WHERE body LIKE '％請求％'");
+    runBtn.click();
+    await settle();
+    expect(note(), '全角の記号だと気づける字が無い').toContain('全角の ％');
+  });
+
+  it('⚠ 対照群 ── 半角で打って 0 行だったときは、その注記を出さない', async () => {
+    const { type, runBtn, note } = setup(async () => answer(['title'], [], { ms: 1 }));
+    type("SELECT title FROM entries WHERE body LIKE '%請求%'");
+    runBtn.click();
+    await settle();
+    expect(note(), '半角で打った人にまで全角の話をしている').not.toContain('全角の ％');
+  });
+
+  /**
+   * 🔴 **上限は、画面の外の約束と噛み合っていること**(2026-09-09 の着地前レビュー)。
+   * ⚠ 期待値を同じ定数から作ると**両辺が同じ盲点を共有する**ので、
+   *   **別の観測**(follower が諦める時刻 / マニュアルの字)と突き合わせる。
+   */
+  it('🔴 実時間の上限は、別窓が諦めるより先に来る', () => {
+    expect(
+      SQL_MAX_MS,
+      '別窓は先に諦める ── 面には「本体タブと通信できません」という嘘が出る',
+    ).toBeLessThan(REQUEST_TIMEOUT_MS);
+    expect(SQL_MAX_MS, '短すぎて普通の問い合わせが止まる').toBeGreaterThan(3_000);
+  });
+
+  it('🔴 行の上限は、マニュアルが書いている数と同じ', () => {
+    // ⚠ 相対 path で読む(`docs-parity.test.ts` と同じ作法 ── cwd はリポジトリの根)
+    const manual = readFileSync('docs/manual.md', 'utf-8');
+    expect(manual, 'マニュアルの数と実装が食い違っている').toContain(
+      `答えは ${String(SQL_MAX_ROWS)} 行まで`,
+    );
   });
 
   it('🔴 走っている間は押せず、二重には走らない', async () => {

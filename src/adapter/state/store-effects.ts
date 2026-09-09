@@ -11,6 +11,11 @@ import { extractMeta, type FlavorExtract } from '@features/flavor';
 import { PersistOnce, type PersistState } from '@adapter/platform/storage-persist';
 // 🔴 追記の楽観検査(#178)── 「読んだ本文」を worker と突き合わせるための指紋
 import { contentHash64Hex } from '@adapter/platform/storage/content-hash';
+/**
+ * ⚠ **follower の諦める時刻を、こちらの上限の根拠にする**(#681 段②)── 2 か所に
+ *   別の数を書かない(§7 同じ値が複数の場所にある)。
+ */
+import { REQUEST_TIMEOUT_MS } from '@adapter/platform/storage/store-proxy';
 import { appendBlock } from '@features/markdown/text-ops';
 import {
   appendIntoSection,
@@ -85,7 +90,7 @@ export interface StorePort {
    */
   runReadOnlySql?(
     sql: string,
-    limits: { maxRows: number; maxSteps: number },
+    limits: { maxRows: number; maxSteps: number; maxMs: number },
   ): Promise<{
     columns: string[];
     rows: Array<Array<string | number | null>>;
@@ -320,12 +325,31 @@ export const SQL_MAX_ROWS = 500;
 
 /**
  * 🔴 **進み具合の見張りが我慢する回数**(#681 段②)。
- * ⚠ **時間ではなく歩数**で切る ── 端末の速さで意味が変わらないほうが、
- *   test でも実機でも同じ振る舞いになる。
- * 🔑 目安:同梱の sqlite で 400×400×400 の直積が **50 歩**で止まった(実測)。
- *   ここは「普通の問い合わせは通り、終わらないものは止まる」桁にする。
+ * ⚠ **歩数**で切ると端末の速さで意味が変わらない(test でも実機でも同じになる)。
+ *
+ * 🔑 根拠(2026-09-09 実測、同梱 sqlite・この箱):
+ *   400×400×400 の直積は **128,320 歩 / 1.36 秒**で完走した ── つまり
+ *   20 万歩は「**普通に重い問い合わせは通る**」桁である。
+ * ⚠ 初稿はここに「直積が **50 歩**で止まった」と書いていたが、**その 50 は
+ *   `sqlite-capabilities.test.ts` が自分で切った数**であって、この問い合わせの
+ *   性質ではなかった(CLAUDE.md「一致の件数は、因果の証拠ではない」)。
+ * 🔴 そして**歩数だけでは足りない** ── 1 歩の重さが 7 倍以上ぶれるので、
+ *   下の `SQL_MAX_MS` と**対で**使う。
  */
 export const SQL_MAX_STEPS = 200_000;
+
+/**
+ * 🔴 **実時間の天井(ms)**(#681 段②、2026-09-09 の着地前レビュー)。
+ *
+ * ⚠ この面は**別窓**が既定なので、打つ user はたいてい follower に居る ──
+ *   follower の依頼は `REQUEST_TIMEOUT_MS` で諦め、面には
+ *   「**本体タブと通信できません(応答がありません)**」という**嘘**が出る
+ *   (本体は生きていて、user 自身の問い合わせで塞がっているだけ)。
+ *   ⚠ しかも問い合わせは走り続けるので、**その間ノートの保存が進まない**。
+ * 🔑 だから engine が**必ず先に**止まる ── `REQUEST_TIMEOUT_MS` から**引いて**決める
+ *   (2 か所に別の数を書かない ── §7)。差の 2 秒は、答えを組んで返すための余白である。
+ */
+export const SQL_MAX_MS = REQUEST_TIMEOUT_MS - 2_000;
 
 /** `settled()` が待つ最大の巡回数(積まれ続ける相手で永久に待たないための上限)。 */
 const SETTLE_ROUNDS_MAX = 20;
@@ -639,7 +663,7 @@ export function connectStoreEffects(
           });
           break;
         }
-        void ask(sql, { maxRows: SQL_MAX_ROWS, maxSteps: SQL_MAX_STEPS }).then(
+        void ask(sql, { maxRows: SQL_MAX_ROWS, maxSteps: SQL_MAX_STEPS, maxMs: SQL_MAX_MS }).then(
           ({ columns, rows, truncated, ms }) => {
             if (disposed) return;
             dispatcher.dispatch({ type: 'SET_SQL_RESULT', sql, columns, rows, truncated, ms });

@@ -2607,7 +2607,18 @@ function reduceCore(
       const checked = checkReadOnlySql(state.sqlPage.sql);
       if (!checked.ok) {
         return {
-          state: { ...state, sqlPage: { ...state.sqlPage, error: checked.why } },
+          state: {
+            ...state,
+            /**
+             * 🔴 **断った回も、直した字を欄へ返す**(2026-09-09 の着地前レビュー)。
+             * ⚠ `sql-guard.ts` は「`ok:false` の側にも `sql` を残すのは、断り文の隣に
+             *   **直した後の字**を出して『なぜ断られたか』を読めるようにするためである」と
+             *   書いているのに、初稿はここで**捨てていた** ── 全角のまま打った人は、
+             *   断り文には半角の `DELETE` と出るのに欄は全角のままで、
+             *   **画面の中で辻褄が合わない**。
+             */
+            sqlPage: { ...state.sqlPage, sql: checked.sql, error: checked.why },
+          },
           events: [],
         };
       }

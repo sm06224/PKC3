@@ -2589,12 +2589,17 @@ describe('容量の内訳(#415)', () => {
  * 5. BLOB の中身は運ばない(大きさの字へ畳む)
  */
 describe('読むだけの SQL(#681 段②)', () => {
-  const run = (sql: string, over: { maxRows?: number; maxSteps?: number } = {}) =>
+  const run = (
+    sql: string,
+    over: { maxRows?: number; maxSteps?: number; maxMs?: number } = {},
+  ) =>
     request({
       op: 'runReadOnlySql',
       sql,
       maxRows: over.maxRows ?? 100,
       maxSteps: over.maxSteps ?? 1_000_000,
+      // ⚠ 既定は**十分に長く** ── 時間で切れたのか歩数で切れたのかを混ぜない
+      maxMs: over.maxMs ?? 60_000,
     });
 
   it('読む問い合わせは通り、列名と行が返る', async () => {
@@ -2709,6 +2714,70 @@ describe('読むだけの SQL(#681 段②)', () => {
     const r = await run('SELECT title FROM entries WHERE 1 = 0');
     expect(r.rows, '当たらないはずの問い合わせで行が返った(前提が崩れている)').toEqual([]);
     expect(r.columns, '0 件のときに列の名前が消える').toEqual(['title']);
+  });
+
+  /**
+   * 🔴 **行の上限に達したら、その場で止める**(2026-09-09 の着地前レビュー、実測)。
+   *
+   * ⚠ 初稿は `callback` が `return;` していた ── 同梱の `oo1.DB.exec` は
+   *   **`false` を返したときだけ `break`** するので、**回り続けていた**。
+   *   実測:100 万行を返す再帰 CTE で callback **100 万回 / 2030 ms** →
+   *   直した後は **502 回 / 6 ms**。
+   * 🔑 **件数だけを見る assert では原理的に見分けられない**(切った後の答えは
+   *   どちらも同じ)── だから**かかった時間**を見る。
+   */
+  it('🔴 行の上限に達したら、そこで止める(残りを数え続けない)', async () => {
+    const million =
+      'WITH RECURSIVE r(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM r WHERE i < 1000000) SELECT i FROM r';
+    const r = await run(million, { maxRows: 3, maxSteps: 100_000_000, maxMs: 60_000 });
+    expect(r.rows, '上限どおりに切れていない(前提が崩れている)').toHaveLength(3);
+    expect(r.truncated).toBe(true);
+    expect(
+      r.ms,
+      `上限に達した後も回り続けている(${String(r.ms)} ms ── 止めていれば 1 桁 ms で返る)`,
+    ).toBeLessThan(500);
+  });
+
+  /**
+   * 🔴 **実時間でも切る**(2026-09-09 の着地前レビュー)。
+   * ⚠ 歩数だけでは**止まるまでの時間が桁でぶれる**(1 歩の重さが 7 倍以上違う)。
+   *   別窓の user は 10 秒で「本体タブと通信できません」という嘘を見るので、
+   *   engine が**必ず先に**止まる必要がある。
+   */
+  it('🔴 歩数が残っていても、時間で切れる', async () => {
+    const heavy =
+      'WITH RECURSIVE r(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM r WHERE i < 100000000) SELECT count(*) FROM r';
+    // ⚠ 歩数は**使い切れない**ほど大きくしておく ── 切ったのが時間だと分かる形にする
+    await expect(run(heavy, { maxSteps: 100_000_000, maxMs: 30 })).rejects.toThrow(/interrupt/i);
+    // ⚠ **対照群** ── 時間を十分にとれば同じ字が通る(門そのものが生きている)
+    expect((await run('SELECT 3 AS n', { maxMs: 60_000 })).rows).toEqual([[3]]);
+  });
+
+  /**
+   * 🔴 **長い字も畳む**(2026-09-09 の着地前レビュー)。
+   * ⚠ BLOB を畳む理由(画面で読めない / heap に載せる理由が無い)は**字にも当たる**のに、
+   *   初稿は字だけ素通りだった。⚠ しかも 1 行なので**歩数の門も行数の門も鳴らない**。
+   */
+  it('🔴 長い字は畳んで、全体で何字あったかを言う', async () => {
+    const r = await run("SELECT hex(zeroblob(100000)) AS s");
+    const cell = String(r.rows[0]?.[0]);
+    expect(cell.length, `1 升に ${String(cell.length)} 字を運んだ`).toBeLessThan(3000);
+    expect(cell, '切ったことも、全体の長さも言っていない').toContain('全 200000 字');
+    // ⚠ **対照群** ── 短い字はそのまま(畳む規則が効きすぎていない)
+    expect((await run("SELECT 'みじかい' AS s")).rows).toEqual([['みじかい']]);
+  });
+
+  /**
+   * 🔴 **大きな数は字で返す**(2026-09-09 実測)。
+   * ⚠ 同梱の sqlite が `bigint` を返すのは `Number.MAX_SAFE_INTEGER` を超えたときだけ ──
+   *   つまりこの枝の値は**定義上すべて `Number()` で化ける**
+   *   (`9007199254740993` → `…992` / `9223372036854775807` → `…776000`)。
+   */
+  it('🔴 大きな数は、数として化けさせずに字で返す', async () => {
+    expect((await run('SELECT 9007199254740993 AS n')).rows).toEqual([['9007199254740993']]);
+    expect((await run('SELECT 9223372036854775807 AS n')).rows).toEqual([['9223372036854775807']]);
+    // ⚠ **対照群** ── 普通の数は数のまま(全部を字にしていない)
+    expect((await run('SELECT 42 AS n')).rows).toEqual([[42]]);
   });
 
   it('BLOB は中身ではなく大きさを返す(heap に載せない)', async () => {

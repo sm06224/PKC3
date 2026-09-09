@@ -36,6 +36,13 @@ export class SqlRenderer {
   private body: HTMLElement | null = null;
   /** 直前に描いた指紋。⚠ 同じなら触らない。 */
   private last = ' ';
+  /**
+   * 🔴 **開いた最初の 1 回だけ欄へ焦点**(2026-09-09 の動線レビュー)。
+   * ⚠ 打つためだけに開く窓なので、まず欄を 1 回押させるのは手数が 1 つ多い。
+   *   探す面(`search.ts`)が同じ作法を採っている ── そちらへ揃える。
+   * ⚠ **1 回だけ** ── 答えが届くたびに奪い直すと、読んでいる最中に飛ぶ。
+   */
+  private focused = false;
 
   constructor(host: HTMLElement) {
     this.host = host;
@@ -71,10 +78,17 @@ export class SqlRenderer {
      * ⚠ **実測したことだけ書く**(`sqlite-capabilities.test.ts` が pin している)。
      * ⚠ 記法は書かない(`textContent` なので記号がそのまま出る)。
      */
+    /**
+     * 🔴 **1 行目は「何が調べられるか」**(2026-09-09 の動線レビュー)。
+     * ⚠ 初稿は落とし穴だけを並べていたので、**表の名前が 1 つも出ていなかった** ──
+     *   唯一の手掛かりは薄字の例文で、それは **1 文字打った瞬間に消える**。
+     */
     tip.textContent =
-      '読むだけです(書き換えはできません)。文字列は単引用符で囲みます' +
-      '(二重引用符は列の名前です)。REGEXP は使えません(LIKE と GLOB は使えます)。' +
-      '日本語入力のままでも打てます。';
+      '調べられるのは entries(ノート)/ relations(つながり)/ revisions(履歴)/ ' +
+      'assets(添付)です。読むだけで、書き換えはできません。' +
+      '文字列は単引用符で囲みます(二重引用符は列の名前です)。' +
+      'REGEXP は使えません(LIKE と GLOB は使えます)。' +
+      '日本語入力のままでも打てます(ただし LIKE の ％ と ＿ は半角で打ってください)。';
     const note = document.createElement('p');
     note.setAttribute('data-pkc-field', 'sql-note');
     const body = document.createElement('div');
@@ -94,6 +108,10 @@ export class SqlRenderer {
     // ⚠ 打ちかけの字は**上書きしない**(state が直した字を返したときだけ揃える)
     if (this.box !== null && this.box.value !== p.sql) this.box.value = p.sql;
     if (this.run !== null) this.run.disabled = p.running;
+    if (!this.focused && !this.host.hidden) {
+      this.focused = true;
+      this.box?.focus();
+    }
     /**
      * 🔴 **「答えの回」を数える必要は無い**(2026-09-09、変異試験 M27/M28 が SURVIVED で教えた)。
      *
@@ -152,11 +170,34 @@ export class SqlRenderer {
   }
 }
 
-/** 表の上に出す 1 行。⚠ **どの状態でも 1 行言う**(黙って終わらない)。 */
+/**
+ * 表の上に出す 1 行。⚠ **どの状態でも 1 行言う**(黙って終わらない)。
+ *
+ * 🔴 **数だけで終えない ── 次の一手まで言う**(2026-09-09 の動線レビュー)。
+ * ⚠ 「500 行」「0 行」で止めると、マニュアルを開いていない人はそこで手が止まる。
+ */
 function noteLine(p: AppState['sqlPage']): string {
   if (p.running) return '走らせています…';
   if (p.error !== '') return p.error;
   if (p.ranSql === '') return '';
-  const tail = p.truncated ? ' ── 多すぎるので途中まで出しています' : '';
-  return `${String(p.rows.length)} 行(${String(p.ms)} ミリ秒)${tail}`;
+  const took = `(${String(p.ms)} ミリ秒)`;
+  if (p.truncated)
+    return `${String(p.rows.length)} 行${took} ── 多すぎるので途中まで出しています(LIMIT や条件で絞ると全部見えます)`;
+  if (p.rows.length === 0) return `0 行${took} ── 条件に当たるものがありませんでした${zeroHint(p.ranSql)}`;
+  return `${String(p.rows.length)} 行${took}`;
+}
+
+/**
+ * 🔴 **0 行のとき、いちばん多い外し方を名指しする**(2026-09-09 の動線レビュー、実測)。
+ *
+ * ⚠ 日本語入力のまま `LIKE '％請求％'` と打つと、門は通り(引用符の中は直さないのが
+ *   正しい ── 探したい字そのものだから)、走り、**0 行**で返る。
+ *   実測:同じ 1 件に対して半角 `'%請求%'` は **1 行**、全角 `'％請求％'` は **0 行**。
+ * 🔑 失敗ではなく **0 行**として返るので、user は「そのノートは無い」と読む ──
+ *   いちばん気づけない外し方である。だから**画面が名前で言う**。
+ */
+function zeroHint(sql: string): string {
+  return /[％＿]/.test(sql)
+    ? '(打った字に全角の ％ か ＿ が入っています ── LIKE の記号は半角の % と _ です)'
+    : '';
 }

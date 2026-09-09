@@ -68,7 +68,13 @@ export function createStorePort(client: StoreClientLike, cid: string): StorePort
      *   問い合わせである(器で絞らない)。
      */
     runReadOnlySql: (sql, limits) =>
-      client.request({ op: 'runReadOnlySql', sql, maxRows: limits.maxRows, maxSteps: limits.maxSteps }),
+      client.request({
+        op: 'runReadOnlySql',
+        sql,
+        maxRows: limits.maxRows,
+        maxSteps: limits.maxSteps,
+        maxMs: limits.maxMs,
+      }),
     /**
      * 🔴 **このノートを参照しているのはどれか**(#348)。⚠ ここも**渡すだけ** ──
      * 探し方(`entry:<lid>` を LIKE で当てる)の規則は worker が 1 か所で持つ。

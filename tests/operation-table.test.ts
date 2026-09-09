@@ -110,6 +110,8 @@ const UNBRIDGED: readonly string[] = [
   'undo',
   'view-detail',
   'view-dual',
+  // ⚠ 2026-09-09(#681 段②)── SQL の面も押しボタンを持たない(組み込みタイルから別窓)
+  'view-sql',
 ];
 
 describe('操作の全数台帳(#582 段①)', () => {
@@ -154,11 +156,13 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   ── 設定の選択欄が受ける(`set-prose-align` と同じ形。登記は増えない)
       // ⚠ 2026-09-09(#681 段②): SQL の面 ── 受け手 +2(`set-sql-text` / `run-sql`)。
       //   登記は増えない(面そのものは `set-view` で開く。欄と押し所はその面の中にしか無い)
-      total: 265,
+      // ⚠ 2026-09-09(#681 段②): 鍵 `view-sql` で登記 +1(受け手は増えない ──
+      //   `runGlobalCommand` の特例で受ける。押しボタンを持たない面である)
+      total: 266,
       receivers: 217,
-      registered: 84,
+      registered: 85,
       both: 36,
-      outsideActionsTable: 48,
+      outsideActionsTable: 49,
       unregistered: 181,
     });
   });
@@ -186,7 +190,8 @@ describe('操作の全数台帳(#582 段①)', () => {
     // ⚠ 2026-09-05(#633 段②): 鍵が 56 → 59(スタックの 3 手)
     // ⚠ 2026-09-05(#633 段③): 行のメニューが 15 → 16(`stack-load`)
     // ⚠ 2026-09-08(#766 D-2): 鍵が 59 → 60(その場で計算する)
-    expect(s().perBook).toEqual({ key: 61, entry: 16, body: 3, collection: 2, settings: 5 });
+    // ⚠ 2026-09-09(#681 段②): 鍵が 61 → 62(SQL の面へ)
+    expect(s().perBook).toEqual({ key: 62, entry: 16, body: 3, collection: 2, settings: 5 });
   });
 
   it('🔴 押し所へ辿れない登記を、身元で pin する', () => {
