@@ -160,12 +160,14 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   `runGlobalCommand` の特例で受ける。押しボタンを持たない面である)
       // ⚠ 2026-09-09(#681 段③): 答えをノートへ(`sql-to-note`)で受け手 +1
       //   ── SQL の面の中にしか無い押し所(登記は増えない。`run-sql` と同じ)
-      total: 267,
-      receivers: 218,
+      // ⚠ 2026-09-09(#681 段③): 調べる相手(`set-sql-source`)で受け手 +1
+      //   ── SQL の面の中の選択欄(登記は増えない)
+      total: 268,
+      receivers: 219,
       registered: 85,
       both: 36,
       outsideActionsTable: 49,
-      unregistered: 182,
+      unregistered: 183,
     });
   });
 

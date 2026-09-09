@@ -3003,3 +3003,110 @@ describe('本文の csv を SQL から引く(#681 段③)', () => {
     await expect(run('SELECT * FROM 売上高')).rejects.toThrow(/no such table/i);
   });
 });
+
+/**
+ * 🔴 **取り込んだ `.sqlite` を、別の接続で調べる**(#681 段③ の 2 つ目)。
+ *
+ * user の言葉(2026-09-03)の「**csv や sqliteDB のクエリアプリ**」の sqliteDB の側。
+ *
+ * 守る主張:
+ * 1. 開いた客の DB へ打てる ── **表の名前も返す**(打つ前に何が在るか見える)
+ * 2. 🔴 **混ざらない** ── 客へ打っても `entries` は見えないし、
+ *    こちら側へ打っても客の表は見えない(issue の指示「別の接続にする」)
+ * 3. 🔴 **書けない**(客の側でも `query_only` が効く)
+ * 4. 🔴 **外したら手放す** ── 外した後に打つと、黙って本体を返さずに断る
+ * 5. でたらめな bytes は「DB として読めない」と**その場で**言う
+ *    (`sqlite3_deserialize` は rc = 0 を返すので、読まないと後で落ちる)
+ * 6. 開き直すと前の客は閉じる(選び直すたびに積み上がらない)
+ */
+describe('取り込んだ .sqlite を調べる(#681 段③ の 2 つ目)', () => {
+  const run = (sql: string, guest = false) =>
+    request({
+      op: 'runReadOnlySql',
+      sql,
+      maxRows: 100,
+      maxSteps: 1_000_000,
+      maxMs: 60_000,
+      ...(guest ? { guest: true } : {}),
+    });
+
+  /**
+   * 客に渡す DB の画像。
+   * 🔑 **この worker 自身に焼かせる** ── 手で組んだ bytes は本物ではないので、
+   *   「読めた / 読めない」の判定が本物と食い違う。
+   * ⚠ だから客の中身は**この DB の写し**である(表の名前もこちらと同じ)──
+   *   「混ざらないか」は**写しを取った後に足したノート**で見る(下の test)。
+   */
+  const image = async (): Promise<Uint8Array> => (await request({ op: 'exportImage' })).image;
+
+  it('🔴 でたらめな bytes は、その場で「DB として読めない」と言う', async () => {
+    const junk = new Uint8Array(4096);
+    junk.fill(7);
+    await expect(request({ op: 'openSqlGuest', image: junk })).rejects.toThrow(/読めません/);
+  });
+
+  it('🔴 開くと表の名前が返り、その表へ打てる', async () => {
+    const img = await image();
+    const opened = await request({ op: 'openSqlGuest', image: img });
+    expect(opened.bytes, '大きさを返していない').toBeGreaterThan(0);
+    expect(opened.tables, '表の名前を返していない').toContain('entries');
+    // 🔑 客の側にも `entries` は在る(この画像はこの DB の写しなので)
+    const r = await run('SELECT count(*) AS n FROM entries', true);
+    expect(typeof r.rows[0]?.[0]).toBe('number');
+  });
+
+  /**
+   * 🔴 **混ざらない**(issue の指示「別の接続にする」)。
+   * ⚠ 客に**こちらにしか無い表**を作れないので、逆向きで見る ──
+   *   客の DB に**新しいノートを足しても**、こちら側の件数は変わらない。
+   */
+  it('🔴 客の DB とこちらの DB は混ざらない', async () => {
+    const before = await run('SELECT count(*) AS n FROM entries');
+    const img = await image();
+    await request({ op: 'openSqlGuest', image: img });
+    // ⚠ 画像を取った後に 1 件足す ── 客は**その時点の写し**なので増えない
+    await write('guest-after', doc('客を開いた後に足した'));
+    const mine = await run('SELECT count(*) AS n FROM entries');
+    const guest = await run('SELECT count(*) AS n FROM entries', true);
+    expect(Number(mine.rows[0]?.[0]), 'こちら側が増えていない(前提が崩れている)').toBe(
+      Number(before.rows[0]?.[0]) + 1,
+    );
+    expect(Number(guest.rows[0]?.[0]), '客の側までつられて増えた(同じ接続を見ている)').toBe(
+      Number(before.rows[0]?.[0]),
+    );
+  });
+
+  it('🔴 客の側でも書けない(query_only が効く)', async () => {
+    await request({ op: 'openSqlGuest', image: await image() });
+    await expect(run("INSERT INTO entries (lid) VALUES ('x')", true)).rejects.toThrow(/readonly/i);
+    // ⚠ 対照群 ── 断った後もこちらのノートは保存できる
+    await write('guest-ro', doc('客が断られた後に書く'));
+    expect(await request({ op: 'getBody', cid: 'c1', lid: 'guest-ro' })).toContain(
+      '客が断られた後に書く',
+    );
+  });
+
+  it('🔴 外したら手放す ── その後に打つと、黙って本体を返さずに断る', async () => {
+    await request({ op: 'openSqlGuest', image: await image() });
+    await request({ op: 'closeSqlGuest' });
+    await expect(run('SELECT 1', true)).rejects.toThrow(/開かれていません/);
+    // ⚠ 外す口は二度押しても落ちない
+    await expect(request({ op: 'closeSqlGuest' })).resolves.toBeNull();
+  });
+
+  it('⚠ 開き直しても落ちない(前の客は閉じる)', async () => {
+    const img = await image();
+    await request({ op: 'openSqlGuest', image: img });
+    await request({ op: 'openSqlGuest', image: img });
+    expect((await run('SELECT 1 AS n', true)).rows).toEqual([[1]]);
+    await request({ op: 'closeSqlGuest' });
+  });
+
+  it('⚠ 客の側では、本文の csv の表は組み立てない(器が違う)', async () => {
+    await request({ op: 'openSqlGuest', image: await image() });
+    await expect(run('SELECT * FROM csv_tables', true)).rejects.toThrow(/no such table/i);
+    // ⚠ 対照群 ── こちら側では目録が出る
+    expect((await run('SELECT count(*) AS n FROM csv_tables')).rows.length).toBe(1);
+    await request({ op: 'closeSqlGuest' });
+  });
+});

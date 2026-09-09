@@ -1837,6 +1837,37 @@ function createCsvTable(database: Database, t: CsvTable, fresh: (name: string) =
   for (const row of t.rows) database.exec({ sql: insert, bind: [...row] });
 }
 
+/**
+ * 🔴 **取り込んだ `.sqlite` の接続**(#681 段③ の 2 つ目)。
+ *
+ * ⚠ **ノートの DB とは別**である(issue の指示「混ぜない」)── 同じ接続へ
+ *   `ATTACH` すると、打ち間違い 1 つで**こちらの表と向こうの表が混ざる**。
+ * ⚠ `:memory:` に画像を流し込む形なので、**書いてもどこにも残らない**
+ *   (客の file を書き換えない)。
+ * 🔴 **常駐メモリを食う**ので、外したら必ず閉じる(不可侵指示 2026-07-27
+ *   「生成とライフサイクル後の速やかな破棄」)。
+ */
+let guestDb: Database | null = null;
+
+/** 客の DB を閉じて手放す。⚠ **二度呼ばれても落ちない**(外す口は 2 つある)。 */
+function closeGuest(): void {
+  const db = guestDb;
+  guestDb = null;
+  try {
+    db?.close();
+  } catch {
+    // ⚠ 閉じられなくても、参照は手放した(次に開くときは作り直す)
+  }
+}
+
+/** 客の DB。⚠ **開いていないのに打たれたら断る**(黙って本体を返さない)。 */
+function needGuest(): Database {
+  if (guestDb === null) {
+    throw new Error('取り込んだ .sqlite が開かれていません(先に選んでください)');
+  }
+  return guestDb;
+}
+
 const handlers: Handlers = {
   init: (req) => init(req.dbName, req.journalMode, { memory: req.memory, image: req.image }),
   /**
@@ -1869,7 +1900,13 @@ const handlers: Handlers = {
    *   ⚠ 「たぶん軽いから」で通さない ── 軽いかどうかは打つ前に分からない。
    */
   runReadOnlySql: (req) => {
-    const database = need();
+    /**
+     * 🔴 **打つ先は 1 か所で決める**(#681 段③ の 2 つ目)。
+     * ⚠ 既定は**この PKC の DB** ── 取り違えると「ノートを数えたつもりで
+     *   よその DB を数えていた」になる(いちばん気づけない外し方)。
+     */
+    const guest = req.guest === true;
+    const database = guest ? needGuest() : need();
     const api = sqliteApi;
     if (api === null) throw new Error('sqlite が初期化されていません');
     const install = api.wasm['installFunction'] as unknown as
@@ -1930,7 +1967,11 @@ const handlers: Handlers = {
        * ⚠ 見張りもまだ張っていない ── 組み立ての重さは
        *   `CSV_TABLE_CELLS_MAX` が断る(見張りでは切れない)。
        */
-      buildCsvTables(database, req.sql, made);
+      /**
+       * ⚠ **本文の csv は、この PKC の側にしか組み立てない** ── 客の DB は
+       *   別の器なので、そこへノートの表を混ぜると「どちらの話か」が消える。
+       */
+      if (!guest) buildCsvTables(database, req.sql, made);
       database.exec({ sql: 'PRAGMA query_only = 1' });
       setProgress(pointer, PROGRESS_EVERY, fn, 0);
       const columns: string[] = [];
@@ -2001,6 +2042,55 @@ const handlers: Handlers = {
         }
       }
     }
+  },
+  /**
+   * 🔴 **取り込んだ `.sqlite` を開く**(#681 段③ の 2 つ目)。
+   *
+   * ⚠ **前の客は必ず閉じる** ── 開きっぱなしにすると、選び直すたびに
+   *   常駐メモリが積み上がる(worker は DB の lease を握るので常駐する)。
+   *   🔴 **これは test では殺せない**(変異試験 G3 が SURVIVED)── 閉じ忘れても
+   *   **振る舞いは 1 つも変わらない**(答えは新しい客から返る)。正直に書くと、
+   *   守っているのは**メモリだけ**で、それを外から観測する口はこの箱に無い
+   *   (CLAUDE.md「『これが無いと壊れる』と書く前に、外して壊れるのを見る」)。
+   *   ⚠ それでも残す ── 不可侵指示 2026-07-27「生成とライフサイクル後の速やかな破棄」。
+   * ⚠ **中身を 1 回読む** ── `sqlite3_deserialize` は**でたらめな bytes でも
+   *   rc = 0 を返す**ので、ここで読まないと「開けたのに打つと落ちる」になる
+   *   (`init` の画像と同じ罠。同じ形で言い直す)。
+   */
+  openSqlGuest: (req) => {
+    const api = sqliteApi;
+    if (api === null) throw new Error('sqlite が初期化されていません');
+    closeGuest();
+    const oo1 = (api as unknown as { oo1: { DB: new (name: string) => Database } }).oo1;
+    const db = new oo1.DB(':memory:');
+    try {
+      deserializeInto(
+        api as unknown as Parameters<typeof deserializeInto>[0],
+        db,
+        req.image,
+      );
+      const tables = (
+        db.selectObjects(
+          "SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+        ) as unknown as Array<{ name: string }>
+      ).map((r) => r.name);
+      guestDb = db;
+      return { tables, bytes: req.image.byteLength };
+    } catch (e) {
+      /**
+       * ⚠ **読めなかった器も閉じる**(同上 ── 変異試験 G4 も SURVIVED)。
+       *   振る舞いは変わらないが、断った回に器が残るのは「速やかな破棄」の逆である。
+       */
+      db.close();
+      throw new Error(`この file は sqlite の DB として読めませんでした(${String(e)})`, {
+        cause: e,
+      });
+    }
+  },
+  /** 客の DB を手放す。⚠ 開いていなくても落ちない(押し所は常に在る)。 */
+  closeSqlGuest: () => {
+    closeGuest();
+    return null;
   },
   openContainer: (req) => {
     need().exec({
@@ -3139,6 +3229,8 @@ const handlers: Handlers = {
     };
   },
   close: () => {
+    // ⚠ 客の DB も一緒に手放す(閉じ忘れると、この worker が持ったまま消える)
+    closeGuest();
     // ⚠ close は DB 接続を閉じるだけで、SAHPool の SAH は worker 破棄まで残る
     // (review #9)。multi-tab リース実装時はこの前提で設計する
     db?.close();

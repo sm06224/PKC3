@@ -23,6 +23,8 @@
  *   面を閉じて戻っても消えない。
  */
 import type { AppState } from '@adapter/state/app-state';
+import { sqlSourcesOf } from '@features/query/sqlite-attachment';
+import { humanBytes } from '@features/human-bytes';
 
 /** 表の値を字にする。⚠ `null` と空文字を**見分けられる**ようにする。 */
 const cellText = (v: string | number | null): string => (v === null ? '(なし)' : String(v));
@@ -45,6 +47,10 @@ export class SqlRenderer {
   private focused = false;
   /** 「ノートへ」の口(答えが無いうちは押させない)。 */
   private save: HTMLButtonElement | null = null;
+  /** 調べる相手の選び所(#681 段③ の 2 つ目)。 */
+  private source: HTMLSelectElement | null = null;
+  /** 直前に組んだ選択肢の指紋(添付が増減したときだけ組み直す)。 */
+  private sourceKey = '';
 
   constructor(host: HTMLElement) {
     this.host = host;
@@ -85,7 +91,16 @@ export class SqlRenderer {
     save.setAttribute('data-pkc-field', 'sql-to-note');
     save.textContent = 'ノートへ';
     save.title = 'いま出ている答えを、新しいノートに書き出します';
-    bar.append(run, save);
+    /**
+     * 🔴 **調べる相手**(#681 段③ の 2 つ目)。既定は「この PKC のノート」。
+     * ⚠ **どちらを調べているかが読めない**と、user は「ノートを数えたつもりで
+     *   よその DB を数えていた」に気づけない ── だから常に画面に出す。
+     */
+    const source = document.createElement('select');
+    source.setAttribute('data-pkc-action', 'set-sql-source');
+    source.setAttribute('data-pkc-field', 'sql-source');
+    source.setAttribute('aria-label', '調べる相手');
+    bar.append(run, save, source);
     const tip = document.createElement('p');
     tip.setAttribute('data-pkc-field', 'sql-tip');
     /**
@@ -115,9 +130,45 @@ export class SqlRenderer {
     this.box = box;
     this.run = run;
     this.save = save;
+    this.source = source;
     this.note = note;
     this.body = body;
     return body;
+  }
+
+  /**
+   * 🔴 **調べる相手の選び所を揃える**(#681 段③ の 2 つ目)。
+   *
+   * ⚠ **選択肢は添付が増減したときだけ組み直す** ── 毎回作り直すと、
+   *   開いたまま増えた添付に気づける代わりに、**選んでいる最中に選択肢が
+   *   差し替わる**(押している指の下で並びが動く)。
+   * ⚠ **いま選ばれている物は state から書き戻す** ── 開けなかった回は
+   *   `guest` が `null` に戻るので、選び所も「この PKC」へ戻る
+   *   (画面と実体が食い違わない)。
+   */
+  private paintSource(state: AppState): void {
+    const sel = this.source;
+    if (sel === null) return;
+    const sources = sqlSourcesOf(state.entryMetas.values());
+    const key = sources.map((s) => `${s.lid}:${s.name}`).join('|');
+    if (key !== this.sourceKey) {
+      this.sourceKey = key;
+      sel.textContent = '';
+      const here = document.createElement('option');
+      here.value = '';
+      here.textContent = 'この PKC のノート';
+      sel.append(here);
+      for (const s of sources) {
+        const opt = document.createElement('option');
+        opt.value = s.lid;
+        opt.textContent = s.name;
+        sel.append(opt);
+      }
+      // ⚠ 選べる相手が 1 つも無いときは**出さない**(押しても何も無い口を作らない)
+      sel.hidden = sources.length === 0;
+    }
+    const want = state.sqlPage.guest?.lid ?? '';
+    if (sel.value !== want) sel.value = want;
   }
 
   render(state: AppState): void {
@@ -131,6 +182,7 @@ export class SqlRenderer {
      *   走っている最中は押させない(押した後に「何も起きなかった」を作らない)。
      */
     if (this.save !== null) this.save.disabled = p.running || p.ranSql === '' || p.columns.length === 0;
+    this.paintSource(state);
     if (!this.focused && !this.host.hidden) {
       this.focused = true;
       this.box?.focus();
@@ -156,6 +208,9 @@ export class SqlRenderer {
       String(p.rows.length),
       // ⚠ 書き出しの知らせも指紋に入れる ── 入れないと、答えが同じ回に**行が更新されない**
       p.saved,
+      // ⚠ 調べる相手が変わったら、上の行を必ず言い直す(#681 段③ の 2 つ目)
+      p.guest?.lid ?? '',
+      p.guestError,
     ].join(' ');
     if (fingerprint === this.last) return;
     this.last = fingerprint;
@@ -202,6 +257,11 @@ export class SqlRenderer {
  * ⚠ 「500 行」「0 行」で止めると、マニュアルを開いていない人はそこで手が止まる。
  */
 function noteLine(p: AppState['sqlPage']): string {
+  /**
+   * 🔴 **開けなかったことを、いちばん上で言う**(#681 段③ の 2 つ目)。
+   * ⚠ 黙って「この PKC」へ戻ると、選んだ人には**選べなかった**ようにしか見えない。
+   */
+  if (p.guestError !== '') return `取り込んだ .sqlite を開けませんでした ── ${p.guestError}`;
   if (p.running) return '走らせています…';
   if (p.error !== '') return p.error;
   /**
@@ -210,12 +270,19 @@ function noteLine(p: AppState['sqlPage']): string {
    *   言わないと「押せなかった」に見える。
    */
   if (p.saved !== '') return `「${p.saved}」というノートに書き出しました(左の一覧に出ています)`;
-  if (p.ranSql === '') return '';
+  /**
+   * 🔴 **どちらを調べているかを、打つ前から言う**(#681 段③ の 2 つ目)。
+   * ⚠ 言わないと「ノートを数えたつもりで、よその DB を数えていた」に気づけない。
+   */
+  if (p.ranSql === '')
+    return p.guest === null
+      ? ''
+      : `${p.guest.name} を調べています(表 ${String(p.guest.tables.length)} 個 / ${humanBytes(p.guest.bytes)})`;
   const took = `(${String(p.ms)} ミリ秒)`;
   if (p.truncated)
     return `${String(p.rows.length)} 行${took} ── 多すぎるので途中まで出しています(LIMIT や条件で絞ると全部見えます)`;
   if (p.rows.length === 0) return `0 行${took} ── 条件に当たるものがありませんでした${zeroHint(p.ranSql)}`;
-  return `${String(p.rows.length)} 行${took}`;
+  return `${String(p.rows.length)} 行${took}${p.guest === null ? '' : ` ── ${p.guest.name} を調べています`}`;
 }
 
 /**
