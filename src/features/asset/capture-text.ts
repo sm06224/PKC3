@@ -17,7 +17,7 @@ export type CaptureTextKind = 'audio' | 'screen';
  * ⚠ 知らない型は `webm` に倒す(ブラウザ既定がほぼ webm。拡張子が無いと
  *   書き出しで種類を失う ── `pasted-image-name.ts` が `png` に倒すのと同じ理由)。
  */
-const EXT: Readonly<Record<string, string>> = {
+export const CAPTURE_MIME_EXT: Readonly<Record<string, string>> = {
   'audio/webm': 'webm',
   'audio/ogg': 'ogg',
   'audio/mpeg': 'mp3',
@@ -51,7 +51,7 @@ export function captureFileName(
   mime: string,
   part: number | null,
 ): string {
-  const ext = EXT[mime.split(';')[0]!.trim().toLowerCase()] ?? 'webm';
+  const ext = CAPTURE_MIME_EXT[mime.split(';')[0]!.trim().toLowerCase()] ?? 'webm';
   const nth = part === null ? '' : `-${part}`;
   return `${CAPTURE_LABEL[kind]}-${assetStamp(at)}${nth}.${ext}`;
 }

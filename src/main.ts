@@ -56,7 +56,7 @@ import {
   FLAG_OFFICE_INPUT_LOG,
   FLAG_PASTE_INSPECT,
 } from '@features/flags';
-import { appBrowseMode, isBrowseMode } from '@adapter/ui/render/browse-mode';
+import { appBrowseMode, browseScanOf, isBrowseMode } from '@adapter/ui/render/browse-mode';
 import { StoreClient } from '@adapter/platform/storage/store-client';
 import { openAssetWindow } from '@adapter/platform/asset-window';
 import {
@@ -3011,20 +3011,19 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       appBrowseMode.set(mode); // 次に開いたときも同じ探し方で出す(#240 段⑤)
       markBrowse(mode);
       browse.render(dispatcher.getState(), mode);
-      // ⚠ アプリの一覧は開いたときに読む(常駐していない)。
-      // 🔴 **view を借りない**(P8 段⑱)── 中央の面を変える必要が無いのに
-      //    `SET_VIEW_MODE 'launcher'` を撃っていたので、タブを切り替えただけで
-      //    中央下の追記欄が消えていた(他の 2 タブでは残る)
-      if (mode === 'launcher') dispatcher.dispatch({ type: 'REFRESH_LAUNCHER_TILES' });
-      // 🔑 予定も同じ流儀(#292 段③)── 開いたときに集める。⚠ 前の束は消さない
-      if (mode === 'schedule') dispatcher.dispatch({ type: 'REFRESH_TASK_SCAN' });
       /**
-       * 🔑 連絡先も同じ流儀(#278 段①)── **開いたときに集める**。
-       * ⚠ boot では集めない ── 「`tel:` を持つ」は抽出列に無いので**全件の
-       *   本文を読む**ことになり、連絡先を使わない user に負わせることになる。
-       * ⚠ 前の一覧は消さない(読み直しの間に空白を出さない)。
+       * 🔑 **中身を開いたときに集めるタブ**(アプリ / 予定 / 連絡先)。
+       *
+       * ⚠ **表は `browse-mode.ts` の 1 つ**(2026-09-09)── 直す前はここに
+       *   `if (mode === '…')` を 3 本並べ、起動側(下の boot)には 1 本しか
+       *   無かったので、**前回そのタブで閉じた user が起動直後に止まっていた**。
+       * 🔴 **view を借りない**(P8 段⑱)── 中央の面を変える必要が無いのに
+       *   `SET_VIEW_MODE 'launcher'` を撃っていたので、タブを切り替えただけで
+       *   中央下の追記欄が消えていた。
+       * ⚠ 前の一覧・束は消さない(読み直しの間に空白を出さない)。
        */
-      if (mode === 'contacts') dispatcher.dispatch({ type: 'REFRESH_CONTACT_SCAN' });
+      const scan = browseScanOf(mode);
+      if (scan !== null) dispatcher.dispatch({ type: scan });
       /**
        * 🔴 **面を畳むのは「わきの面」だけ**(2026-08-20。user 指示
        * 「カレンダーを利用するための導線が不足している」の調査で判明)。
@@ -3479,16 +3478,23 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     saveSplitLids(state.splitLids);
   });
   /**
-   * 🔑 **覚えている探し方が「予定」なら、起動でそのまま集める**(#292 段⑤)。
+   * 🔑 **覚えている探し方が「開いたときに集める」タブなら、起動でそのまま集める**
+   * (#292 段⑤ → 2026-09-09 に**表へ寄せた**)。
    *
-   * ⚠ 集めを頼むのは `setBrowse`(タブを押したとき)だけだったので、
-   *   **前回「予定」で閉じた user は、起動直後に「集めています…」で止まる**
-   *   ── 一度別のタブへ行って戻るまで動かない。
-   * ⚠ 配線であって判定ではない ── 条件は `setBrowse` の 1 行と**同じ綴り**に
-   *   しておく(片方だけ直すと、また片方が止まる)。
+   * 🔴 直す前、ここは **`=== 'schedule'` の名指し 1 本**だった ── その後
+   *   「アプリ」と「連絡先」が同じ流儀で足されたのに**ここへは足されなかった**。
+   *   帰結:**前回そのタブで閉じた user は、起動直後に止まる**
+   *   ──「アプリ」なら**読み込んでいます…**(組み込みアプリを 1 つも開けない)、
+   *   「連絡先」なら**集めています…**。⚠ 別のタブへ行って戻るまで動かない。
+   * ⚠ かつてここのコメントは「条件は `setBrowse` の 1 行と**同じ綴り**にしておく」と
+   *   書いていたが、**綴りを揃える運用では守れなかった**(実際に 2 本落ちた)。
+   * 🔑 だから**表は `browse-mode.ts` の 1 つ**にして、押した側と起動側が同じ関数を引く。
+   * ⚠ `main.ts` は**どの unit からも実行されない**ので、この配線は
+   *   `tests/adapter/bootstrap-wiring.test.ts` が原文で pin する。
    */
-  if (appBrowseMode.get() === 'schedule') {
-    dispatcher.dispatch({ type: 'REFRESH_TASK_SCAN' });
+  const bootScan = browseScanOf(appBrowseMode.get());
+  if (bootScan !== null) {
+    dispatcher.dispatch({ type: bootScan });
   }
   /**
    * 🔴 **棚に残っている Office の保存を拾う**(#205、B5 の入口③「起動時」)。

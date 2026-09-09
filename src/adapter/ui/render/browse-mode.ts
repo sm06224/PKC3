@@ -77,6 +77,45 @@ export function homeTabOf(view: ViewMode): BrowseMode | null {
   return HOME_TAB[view] ?? null;
 }
 
+/**
+ * 🔴 **タブを開いたときに集め直す頼み**(2026-09-09。**起動直後に止まっていた**)。
+ *
+ * ## 直す前、画面で何が起きていたか
+ *
+ * 一覧の中身を**開いたときに集める**タブが 3 つある(アプリ / 予定 / 連絡先)。
+ * ⚠ ところが頼んでいたのは **`setBrowse`(タブを押したとき)だけ**で、
+ * **起動のときは `schedule` しか頼んでいなかった**(`main.ts`)。
+ *
+ * 🔴 帰結:**前回そのタブで閉じた user は、起動した瞬間に止まる** ──
+ * 「アプリ」なら**読み込んでいます…**(組み込みアプリを 1 つも開けない)、
+ * 「連絡先」なら**集めています…**。⚠ 別のタブへ行って戻るまで動かない。
+ * ⚠ そして**画面には理由が出ない**(「まだ」と「駄目だった」の区別なので、
+ * 断り文も出ない)── user から見れば**壊れている**。
+ *
+ * 🔑 **同じ表を 2 か所で持たない**(CLAUDE.md §7)── `main.ts` のコメントは
+ * 「条件は `setBrowse` の 1 行と**同じ綴り**にしておく(片方だけ直すと、また
+ * 片方が止まる)」と**警告していた**のに、綴りを揃える運用では守れなかった。
+ * だから**表をここへ 1 つ置き、両方が引く**。
+ */
+export type BrowseScan =
+  | 'REFRESH_LAUNCHER_TILES'
+  | 'REFRESH_TASK_SCAN'
+  | 'REFRESH_CONTACT_SCAN';
+
+const OPEN_SCAN: Readonly<Partial<Record<BrowseMode, BrowseScan>>> = {
+  launcher: 'REFRESH_LAUNCHER_TILES',
+  schedule: 'REFRESH_TASK_SCAN',
+  contacts: 'REFRESH_CONTACT_SCAN',
+};
+
+/**
+ * そのタブを出すとき、集め直しを頼むか。⚠ 要らないタブは `null`。
+ * 🔑 **押したときと起動のときで、同じ答えを返す**のがこの関数の仕事である。
+ */
+export function browseScanOf(mode: BrowseMode): BrowseScan | null {
+  return OPEN_SCAN[mode] ?? null;
+}
+
 const KEY = 'pkc3.browse';
 
 function readStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
