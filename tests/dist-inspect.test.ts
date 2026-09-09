@@ -22,7 +22,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error -- 検品規則は素の .mjs(ビルド対象外の CI script 群)
-import { inspectDist } from '../scripts/dist-inspect.mjs';
+import { inspectDist, PRECACHE_LIST_FILE } from '../scripts/dist-inspect.mjs';
 
 type File = { path: string; bytes: number };
 type Input = {
@@ -47,6 +47,11 @@ const WORKER = 'assets/storage-worker-BBBBBBBB.js';
 const WASM = 'assets/sqlite3-CCCCCCCC.wasm';
 const CSS = 'assets/style-DDDDDDDD.css';
 const MANUAL = 'manual.html';
+/**
+ * 配る物の一覧を data でも置く file(#532 段 B)。⚠ **綴りは実装から引く** ──
+ * ここに字を書くと、改名した日に「食い違い」ではなく「両方から消えた」で素通りする。
+ */
+const LIST = PRECACHE_LIST_FILE;
 
 /**
  * index.html。実物と同じ癖を**わざと混ぜる**:
@@ -76,18 +81,29 @@ function healthy(kind: 'product' | 'dev' = 'product'): Input {
     { path: CSS, bytes: 20_000 },
     // 焼いたマニュアル(#645 段②)── アプリの一部。precache に載り、cap の内で数える
     { path: MANUAL, bytes: 350_000 },
+    // 配る物の一覧(#532 段 B)── **これ自身も配る物**なので precache に載る
+    { path: LIST, bytes: 400 },
   ];
+  const listed = [
+    'index.html',
+    'manifest.webmanifest',
+    'icon.svg',
+    ENTRY,
+    WORKER,
+    WASM,
+    CSS,
+    MANUAL,
+    LIST,
+  ].map((p) => `./${p}`);
   const text = new Map<string, string>([
     ['index.html', INDEX_HTML],
     ['manifest.webmanifest', JSON.stringify({ icons: [{ src: 'icon.svg' }] })],
+    // ⚠ **sw.js と同じ配列**(食い違えば検品が落ちる ── それがこの門である)
+    [LIST, JSON.stringify(listed)],
     [
       'sw.js',
       // ⚠ 実物と同じ形(検品はここを読む)。**生成物と一致していること**が規則
-      `const PRECACHE = ${JSON.stringify(
-        ['index.html', 'manifest.webmanifest', 'icon.svg', ENTRY, WORKER, WASM, CSS, MANUAL].map(
-          (p) => `./${p}`,
-        ),
-      )};\nself.addEventListener("fetch", () => {});`,
+      `const PRECACHE = ${JSON.stringify(listed)};\nself.addEventListener("fetch", () => {});`,
     ],
     // 参照の連鎖は実物と同じ構文で(entry → worker → wasm)。
     // ⚠ 散文に **hash らしき名前**を混ぜてある ── 形で拾う実装だと誤検知して
@@ -366,12 +382,66 @@ describe('🔴 縮む方向の事故 ── cap は上限しか見ない', () =>
   });
 });
 
+/**
+ * 🔴 **配る物の一覧を data でも配る**(#532 段 B)。
+ *
+ * 「自分のパソコンで動かす」はここを読んで zip を組むので、**2 つが割れた瞬間に
+ * 足りない file の入った一式が配られる** ── 症状は「展開して起動して初めて白い画面」
+ * なので、**組む前に**落とす必要がある。⚠ だから**両方向**で見る
+ * (#225 の教訓:件数ではなく集合)。
+ */
+describe('🔴 precache.json と sw.js の一覧が一致する(#532 段 B)', () => {
+  it('無ければ鳴る(plugin が emit していない)', () => {
+    const i = healthy();
+    i.files = i.files.filter((f) => f.path !== LIST);
+    i.text.delete(LIST);
+    expect(run(i).join('\n')).toContain(`dist に ${LIST} が無い`);
+  });
+
+  it('🔴 json にだけ在る名前があれば鳴る', () => {
+    const i = healthy();
+    i.text.set(LIST, JSON.stringify([...JSON.parse(i.text.get(LIST)!), './nowhere.js']));
+    const out = run(i).join('\n');
+    expect(out).toContain('食い違う');
+    expect(out).toContain('json のみ: ./nowhere.js');
+  });
+
+  it('🔴 sw.js にだけ在る名前があっても鳴る(片方向で終わらせない)', () => {
+    const i = healthy();
+    const kept = (JSON.parse(i.text.get(LIST)!) as string[]).filter((p) => !p.endsWith(CSS));
+    i.text.set(LIST, JSON.stringify(kept));
+    const out = run(i).join('\n');
+    expect(out).toContain('食い違う');
+    expect(out).toContain(`sw.js のみ: ./${CSS}`);
+  });
+
+  it('🔴 空なら鳴る(配る物が 1 つも無い一式を組ませない)', () => {
+    const i = healthy();
+    i.text.set(LIST, '[]');
+    expect(run(i).join('\n')).toContain(`${LIST} が空`);
+  });
+
+  it('JSON でなければ鳴る', () => {
+    const i = healthy();
+    i.text.set(LIST, '{ oops');
+    expect(run(i).join('\n')).toContain('JSON として読めない');
+  });
+
+  it('⚠ 健全なら鳴らない(対照群 ── 鳴りっぱなしの門は門ではない)', () => {
+    expect(run(healthy()).join('\n')).not.toContain('食い違う');
+  });
+});
+
 describe('🔴 焼いたマニュアル(manual.html)── 届いたかを出力の側で見る(#645 段②)', () => {
   const without = (kind: 'product' | 'dev'): Input => {
     const i = healthy(kind);
     i.files = i.files.filter((f) => f.path !== MANUAL);
     // ⚠ precache も揃えて落とす ── 「載っていない」の門ではなく**この門**が鳴ることを見る
-    i.text.set('sw.js', i.text.get('sw.js')!.replace(`,"./${MANUAL}"`, ''));
+    // ⚠ **一覧は 2 つある**(#532 段 B)── 片方だけ直すと「食い違い」の門が鳴り、
+    //    どの門を見ているのか分からなくなる
+    for (const key of ['sw.js', LIST]) {
+      i.text.set(key, i.text.get(key)!.replace(`,"./${MANUAL}"`, ''));
+    }
     return i;
   };
 
@@ -509,7 +579,7 @@ describe('配る量の tripwire', () => {
 
   it('ファイル数と map の件数を報告する(CI ログで人が読む数字)', () => {
     const out = inspect(healthy('dev')).lines.join('\n');
-    expect(out).toContain('[dev] ファイル 10 件 / うち map 1 件');
+    expect(out).toContain('[dev] ファイル 11 件 / うち map 1 件');
     expect(out).toContain('map: 1367.2 KB');
   });
 });
