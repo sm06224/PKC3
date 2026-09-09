@@ -42,7 +42,33 @@ test('🔴 コピーした物が残り、選ぶともう一度コピーされる
   await page.locator('[data-pkc-field="editor-body"]').fill('ひとつめの中身\n\nふたつめの中身');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   await clickReal(page, '[data-pkc-action="copy-note-md"]');
-  await expect(page.locator('[data-pkc-region="status"]')).toContainText('コピー');
+
+  /**
+   * 🔴 **積まれたことを、置き場そのもので待つ**(2026-09-09。フル smoke で 1 度落ちた)。
+   *
+   * ⚠ 直す前は「帯に『コピー』と出た」で次へ進んでいた ── これは**代理の観測点**で、
+   *   ①別の知らせでも満たされうる ②写しは非同期なので、帯が出てから積まれるまでに
+   *   間が空く。⚠ 実際、単独では 5/5 通るのにフル(498 本)の中でだけ落ちた
+   *   (**再現は取れていない** ── 隣の spec と 2 本で回しても通る)。
+   * 🔑 だから待つ相手を**置き場**にする。⚠ そして**落ちたら理由が読める**ようにする
+   *   ── 「メニューが出ない」だけでは、写せなかったのか出せなかったのかが分からない。
+   */
+  await page
+    .waitForFunction(
+      () => (localStorage.getItem('pkc3.copy.history') ?? '').includes('ひとつめの中身'),
+      undefined,
+      { timeout: 15_000 },
+    )
+    .catch(async (e: unknown) => {
+      const why = await page.evaluate(() => ({
+        stored: (localStorage.getItem('pkc3.copy.history') ?? '(空)').slice(0, 200),
+        status: document.querySelector('[data-pkc-region="status"]')?.textContent ?? '(無し)',
+      }));
+      throw new Error(
+        `コピーが履歴に積まれない ── 置き場: ${why.stored} / 帯: ${why.status}`,
+        { cause: e },
+      );
+    });
 
   // ── ③ 履歴に出る
   await page.keyboard.press('Control+Shift+V');
