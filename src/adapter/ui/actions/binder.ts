@@ -8176,7 +8176,7 @@ export function bindActions(
          *   段① と同じ「前 / 後」の線が出る。
          * ⚠ 本文に入れられない種類へは受けない(線を出してから断らない ── 段④ と同じ規律)。
          */
-        if (blockHandoffLands(drop.lid)) {
+        if (canPutIntoBody(drop.lid)) {
           e.preventDefault();
           de.dataTransfer.dropEffect = 'move';
           markDropTarget(drop.el, DROP_EDGE_ATTR, drop.edge);
@@ -8197,7 +8197,7 @@ export function bindActions(
          * ⚠ 掴んだ塊のノート自身の行へは受けない(同じ本文の中は段① の仕事)。
          */
         const row = blockDrag === null ? null : blockRowTarget(de.target);
-        if (row !== null && row.lid !== blockDrag!.lid && blockHandoffLands(row.lid)) {
+        if (row !== null && row.lid !== blockDrag!.lid && canPutIntoBody(row.lid)) {
           e.preventDefault();
           de.dataTransfer.dropEffect = 'move';
           markDropTarget(row.el);
@@ -8276,30 +8276,29 @@ export function bindActions(
      * 🔑 線を出すか決める判定は、書く直前の門と**同じ 1 本**(`bodyDropAt`)。
      */
     const at = bodyDropAt(de);
-    if (at === null || !fileDropLands(at.lid)) {
+    if (at === null || !canPutIntoBody(at.lid)) {
       clearDropTarget();
       return;
     }
     markDropTarget(at.el, DROP_EDGE_ATTR, at.edge);
   };
   /**
-   * 🔴 **その本文へ file の行が本当に入るか**(#684 段④、着地前レビュー A)。
+   * 🔴 **その本文へ行が入るか**(#684 段③④㋑)── 塊を持っていくときも、外から
+   *   file を落とすときも**同じ 1 本**である。
    *
-   * ⚠ 添付が入るのは **`selectedLid` の本文**(`attach.ts` の `noteToPutInto`)なので、
-   *   **横に留めた枠**へ落としても、そこには 1 バイトも入らない ── 主の枠のノートの
-   *   いちばん下へ落ちる。そこへ線を出すと「そこへ入る」という**守れない約束**になる
-   *   (#300 の「押した所と起きる所が違う」と同じ型)。
-   * ⚠ **本文に入れられない種類**(フォルダ / 添付 / スタック)も同じ ── 線を出してから
-   *   「入れられません」と言うのは、issue の要件(落とせる印を出す)の裏返しである。
-   * 🔑 判定は `isAppendable` **1 か所**(断る側と同じ関数 ── §7)。
+   * ⚠ **本文に入れられない種類**(フォルダ / 添付 / スタック)へは入らない ──
+   *   線を出してから「入れられません」と言うのは、issue の要件(落とせる印を出す)の
+   *   裏返しである。🔑 判定は `isAppendable` **1 か所**(断る側と同じ関数 ── §7)。
+   *
+   * 🔴 **「いま開いているノートか」は見ない**(#684 ㋑、2026-09-09 に外した)。
+   * ⚠ 外す前は file だけ `lid === selectedLid` を要求していた ── 入れ先が
+   *   `selectedLid` 固定だったので、**横に留めた枠**へ線を出すと「そこへ入る」という
+   *   守れない約束になったためである。🔑 いまは `attach.ts` が**落とした本文のノート**
+   *   へ入れる(`elsewhere`)ので、その理由ごと消えた ── 塊・一覧の行と同じ扱いになる。
+   * ⚠ **判定を 2 本に戻さない**:片方だけ条件が増えると、印の出る所と書く所が割れる
+   *   (CLAUDE.md §7「同じ問いに答える口が 2 つ」)。
    */
-  /**
-   * 🔴 **その本文へ塊を持っていけるか**(#684 段③)。
-   * ⚠ **本文に入れられない種類**(フォルダ / 添付 / スタック)へは持っていかない ──
-   *   線を出してから断るのは、印を出す約束の裏返しである(段④ と同じ規律)。
-   * 🔑 判定は `isAppendable` **1 か所**(段④ と共有)。
-   */
-  const blockHandoffLands = (lid: string): boolean =>
+  const canPutIntoBody = (lid: string): boolean =>
     isAppendable(dispatcher.getState().entryMetas.get(lid)?.archetype);
   /**
    * 🔴 **一覧の行(どのノートでも)**(#684 段③)。
@@ -8336,11 +8335,6 @@ export function bindActions(
      */
     return { el: el.closest<HTMLElement>('tr, li') ?? el, lid };
   };
-  const fileDropLands = (lid: string): boolean => {
-    const st = dispatcher.getState();
-    if (lid !== st.selectedLid) return false;
-    return isAppendable(st.entryMetas.get(lid)?.archetype);
-  };
   /**
    * 掴んだのがどちらのペインか(2026-08-21)。⚠ **落とした後に印を外す先**であって、
    * 行き先ではない ── 左から右へ落としたら、印を外すのは**左**である。
@@ -8374,7 +8368,7 @@ export function bindActions(
        */
       const toLid = drop === null ? row!.lid : drop.lid;
       if (toLid !== lid) {
-        if (!blockHandoffLands(toLid)) return;
+        if (!canPutIntoBody(toLid)) return;
         dispatcher.dispatch({
           type: 'HANDOFF_BLOCK',
           fromLid: lid,
@@ -8568,7 +8562,7 @@ export function bindActions(
     routeFiles(
       files,
       de.target,
-      at === null || !fileDropLands(at.lid)
+      at === null || !canPutIntoBody(at.lid)
         ? undefined
         : { lid: at.lid, toBefore: at.toBefore, body: at.body, anchor: at.anchor },
     );

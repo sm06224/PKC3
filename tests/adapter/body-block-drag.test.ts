@@ -190,6 +190,25 @@ function setup(over: Partial<BinderServices> = {}, archetype = 'text') {
   return { root, pane, region, host, d, events, said, unbind, block, hover, grip, grab };
 }
 
+/** 横に留めた枠(別のノートの本文が painted で出ている)を足す。 */
+function pinned(s: ReturnType<typeof setup>, body = '# さき\n\n牛乳\n\nパン\n') {
+  const frame = document.createElement('div');
+  frame.setAttribute('data-pkc-region', 'split-frame');
+  frame.setAttribute('data-pkc-split-lid', 'n2');
+  const host = document.createElement('div');
+  host.className = 'pkc-md-rendered';
+  host.setAttribute('data-pkc-field', 'split-body');
+  host.setAttribute(PAINTED_ATTR, 'n2');
+  host.innerHTML = renderMarkdown(body, { sourceLineAnchors: true });
+  frame.append(host);
+  s.root.append(frame);
+  rect(frame, 0, 1000);
+  s.d.dispatch({ type: 'SPLIT_RESTORED', lids: ['n2'] });
+  s.d.dispatch({ type: 'SPLIT_BODY_LOADED', lid: 'n2', body });
+  expect(s.d.getState().splitBodies.get('n2'), '台の前提: 留めた本文が state に無い').toBe(body);
+  return { frame, host };
+}
+
 let teardown: (() => void) | null = null;
 afterEach(() => {
   teardown?.();
@@ -522,7 +541,8 @@ describe('元に戻す(UNDO_MOVE)', () => {
     expect(btn.hidden).toBe(true);
     expect(regions.status.contains(btn), '状態の行の外に居る').toBe(true);
     const LINE = '本文の塊を動かしました';
-    paintStatusUndo(btn, { lastMove: {}, notice: LINE }, LINE);
+    const NO_APPEND = { lastAppend: null, noticeOpen: null } as const;
+    paintStatusUndo(btn, { lastMove: {}, notice: LINE, ...NO_APPEND }, LINE);
     expect(btn.hidden, '材料と知らせが揃っているのに出ない').toBe(false);
     /**
      * 🔴 **呼び側は「いま出ている知らせ」を渡す**(`main.ts`)ので、
@@ -530,12 +550,12 @@ describe('元に戻す(UNDO_MOVE)', () => {
      *   (2026-09-09、UX レビューが実害を拾った:段③ の知らせの隣に出て、
      *   押すと**画面に出ていない別のノート**の前の並べ替えが戻っていた)。
      */
-    paintStatusUndo(btn, { lastMove: {}, notice: 'コピーしました' }, 'コピーしました');
+    paintStatusUndo(btn, { lastMove: {}, notice: 'コピーしました', ...NO_APPEND }, 'コピーしました');
     expect(btn.hidden, '別の知らせの隣に残っている(押すと別の物が戻る)').toBe(true);
     const HANDOFF = '本文の塊を「さき」のいちばん下へ持っていきました';
-    paintStatusUndo(btn, { lastMove: {}, notice: HANDOFF }, HANDOFF);
+    paintStatusUndo(btn, { lastMove: {}, notice: HANDOFF, ...NO_APPEND }, HANDOFF);
     expect(btn.hidden, '持っていきの知らせの隣に「元に戻す」が出た').toBe(true);
-    paintStatusUndo(btn, { lastMove: null, notice: LINE }, LINE);
+    paintStatusUndo(btn, { lastMove: null, notice: LINE, ...NO_APPEND }, LINE);
     expect(btn.hidden, '材料が無いのに出ている').toBe(true);
   });
 });
@@ -749,15 +769,46 @@ describe('外から落とした file は落とした所へ入る(#684 段④)', 
   });
 
   /**
-   * 🔴 **線を出すのは「その本文へ本当に入る」ときだけ**(着地前レビュー A / UX レビュー 1・4)。
+   * 🔴 **横に留めた枠へ落とした file は、その枠のノートへ入る**(#684 ㋑)。
    *
-   * ⚠ 添付が入るのは **`selectedLid` の本文**なので、**いま選んでいないノートの本文**
-   *   (= 横に留めた枠)へ落としても、そこには 1 バイトも入らない ── そこに線を出すと
-   *   「そこへ入る」という**守れない約束**になる(#300 と同じ型)。
-   * ⚠ **本文に入れられない種類**(フォルダ / 添付 / スタック)も同じ ── 線を出してから
-   *   「入れられません」と言うのは、issue の要件(落とせる印を出す)の裏返しである。
+   * ⚠ **仕様が裏返った検査である。** 直す前ここは「いま選んでいないノートの本文には
+   *   線を出さない」を pin していた ── 添付が入るのは `selectedLid` の本文**固定**で、
+   *   留めた枠には 1 バイトも入らなかったからである(線を出すと守れない約束になる)。
+   * 🔑 いまは `attach.ts` が**落とした本文のノート**へ入れる(`elsewhere`)ので、
+   *   線を出すのが正しい ── 塊(段③)・一覧の行(段②)と同じ扱いになった。
+   * ⚠ 渡す座標は**その枠の本文**のもの(主の枠の行番号を渡すと、別の所へ刺さる)。
    */
-  it('🔴 いま選んでいないノートの本文には線を出さず、位置も渡さない', () => {
+  it('🔴 横に留めた枠の本文へ落とすと、その枠のノートの座標で渡る(#684 ㋑)', () => {
+    const got = at();
+    const s = setup({ attachFiles: (...a) => void got.calls.push(a) });
+    teardown = s.unbind;
+    const body = '# さき\n\n牛乳\n\nパン\n';
+    const { host } = pinned(s, body);
+    const dt = filesDt([new File(['x'], 'a.png', { type: 'image/png' })]);
+    const target = [...host.children].find(
+      (c): c is HTMLElement => c instanceof HTMLElement && c.getAttribute('data-pkc-source-line') === '2',
+    )!; // 「牛乳」
+    rect(target, 100, 20);
+    const over = dragEv('dragover', dt, 115); // 下半分 = 後
+    target.dispatchEvent(over);
+    expect(over.defaultPrevented, '留めた枠で受けていない').toBe(true);
+    expect(target.getAttribute('data-pkc-drop-edge'), '留めた枠に線が出ていない').toBe('after');
+    target.dispatchEvent(dragEv('drop', dt, 115));
+    expect(got.calls, '添付へ渡っていない').toHaveLength(1);
+    expect(got.calls[0]![2], '留めた枠の座標で渡っていない').toEqual({
+      lid: 'n2',
+      toBefore: 3,
+      body,
+      anchor: { line: 2, text: '牛乳' },
+    });
+  });
+
+  /**
+   * 🔴 **画面に本文が無い器には線を出さない**(位置を作れないので)。
+   * ⚠ 描いてあるのが n1 でも、選んでいるのが別のノートなら `screenBodyOf` は n1 の
+   *   本文を持っていない ── ここで線を出すと、落とした所が**どこでもない**ことになる。
+   */
+  it('🔴 画面に本文が無い器には線を出さず、位置も渡さない', () => {
     const got = at();
     const s = setup({ attachFiles: (...a) => void got.calls.push(a) });
     teardown = s.unbind;
@@ -909,25 +960,6 @@ describe('本文の塊を別のノートへ持っていく(#684 段③)', () => 
     row.setAttribute('data-pkc-entry', lid);
     table.append(row);
     return row;
-  }
-
-  /** 横に留めた枠(別のノートの本文が painted で出ている)を足す。 */
-  function pinned(s: ReturnType<typeof setup>, body = '# さき\n\n牛乳\n\nパン\n') {
-    const frame = document.createElement('div');
-    frame.setAttribute('data-pkc-region', 'split-frame');
-    frame.setAttribute('data-pkc-split-lid', 'n2');
-    const host = document.createElement('div');
-    host.className = 'pkc-md-rendered';
-    host.setAttribute('data-pkc-field', 'split-body');
-    host.setAttribute(PAINTED_ATTR, 'n2');
-    host.innerHTML = renderMarkdown(body, { sourceLineAnchors: true });
-    frame.append(host);
-    s.root.append(frame);
-    rect(frame, 0, 1000);
-    s.d.dispatch({ type: 'SPLIT_RESTORED', lids: ['n2'] });
-    s.d.dispatch({ type: 'SPLIT_BODY_LOADED', lid: 'n2', body });
-    expect(s.d.getState().splitBodies.get('n2'), '台の前提: 留めた本文が state に無い').toBe(body);
-    return { frame, host };
   }
 
   it('🔴 横に留めた枠へ落とすと、落とした所へ持っていく', () => {

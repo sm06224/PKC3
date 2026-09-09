@@ -16,7 +16,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { buildShell } from '../../src/adapter/ui/render/shell';
-import { paintStatusOpen } from '../../src/adapter/ui/render/status-open';
+import { paintStatusOpen, paintStatusUndo } from '../../src/adapter/ui/render/status-open';
 
 const LINE = '「見積.pdf」を添付にしました(開いているのは『フォルダ』なので、本文には入れていません)';
 
@@ -70,5 +70,74 @@ describe('知らせの隣の「開く」(#668 A)', () => {
     // 「コピーしました」が字だけ上書きした ── state の notice は古いまま残る
     paintStatusOpen(b, { noticeOpen: 'a1', selectedLid: 'f1', notice: LINE }, 'コピーしました');
     expect(b.hidden, '別の知らせの隣に、前の添付の「開く」が残っている').toBe(true);
+  });
+});
+
+/**
+ * 🔴 **知らせの隣の「元に戻す」が、開いていないノートへ足した行も戻す**
+ * (#684 ㋑、着地前の動線レビュー 欠陥 3・4・6)。
+ *
+ * ## 直す前に何が起きていたか
+ *
+ * 追記欄の「元に戻す」は **`lastAppend.lid === selectedLid`** のときだけ出る
+ * (`append-box.ts`)。だから**横に留めた枠へ入れた行**は、そのノートを中央へ
+ * 開くまで戻せず、⚠ 開くと**読んでいた本文が中央から消える** ── 戻すために
+ * 主の作業領域を明け渡すことになっていた(#300 と同じ形)。
+ *
+ * ## 守る主張
+ *
+ * ① 🔴 行き先(`noticeOpen`)と材料(`lastAppend.lid`)が**同じノート**なら出る
+ * ② 🔴 押し先が **`undo-append`** に切り替わる(塊の取り消しと同じ器・別の受け手)
+ * ③ ⚠ 塊の移動が先で、両方の条件が立っても**塊の側が勝つ**(字と押し先が揃う)
+ * ④ ⚠ 字が別の知らせに上書きされたら畳む(「開く」と同じ作法)
+ * ⑤ ⚠ 材料が**別のノート**を指していたら出ない(押すと画面に無い物が戻る)
+ */
+describe('知らせの隣の「元に戻す」── 開いていないノートの行(#684 ㋑)', () => {
+  const PUT = '「猫.png」を『さきの予定』の落とした所に入れました';
+  const undoBtn = (): HTMLElement => {
+    const b = document.createElement('button');
+    b.hidden = true;
+    b.setAttribute('data-pkc-action', 'undo-move');
+    return b;
+  };
+
+  it('🔴 ① ② 行き先と材料が同じノートなら出て、undo-append へ繋がる', () => {
+    const b = undoBtn();
+    paintStatusUndo(b, { lastMove: null, notice: PUT, lastAppend: { lid: 'n2' }, noticeOpen: 'n2' }, PUT);
+    expect(b.hidden, '戻す口が出ない(片道になっている)').toBe(false);
+    expect(b.getAttribute('data-pkc-action'), '押すと別の物が戻る').toBe('undo-append');
+  });
+
+  it('🔴 ③ 塊を動かした知らせでは、これまでどおり undo-move が勝つ', () => {
+    const b = undoBtn();
+    const MOVED = '本文の塊を動かしました';
+    // ⚠ 材料が両方在る形で見る(片方しか無い台では、どちらが勝つかを見ていない)
+    paintStatusUndo(b, { lastMove: {}, notice: MOVED, lastAppend: { lid: 'n2' }, noticeOpen: 'n2' }, MOVED);
+    expect(b.hidden).toBe(false);
+    expect(b.getAttribute('data-pkc-action'), '塊の知らせなのに追記が戻る').toBe('undo-move');
+  });
+
+  it('🔴 ⑤ 材料が別のノートを指していたら出ない', () => {
+    const b = undoBtn();
+    paintStatusUndo(b, { lastMove: null, notice: PUT, lastAppend: { lid: 'n9' }, noticeOpen: 'n2' }, PUT);
+    expect(b.hidden, '画面に出ていない別のノートの行が戻る口を出した').toBe(true);
+  });
+
+  it('⚠ ④ 字が別の知らせに上書きされたら畳む', () => {
+    const b = undoBtn();
+    paintStatusUndo(b, { lastMove: null, notice: PUT, lastAppend: { lid: 'n2' }, noticeOpen: 'n2' }, PUT);
+    expect(b.hidden, '前提: 出ている').toBe(false);
+    paintStatusUndo(
+      b,
+      { lastMove: null, notice: PUT, lastAppend: { lid: 'n2' }, noticeOpen: 'n2' },
+      'コピーしました',
+    );
+    expect(b.hidden, '別の知らせの隣に残っている(押すと別の物が戻る)').toBe(true);
+  });
+
+  it('⚠ 材料が無ければ出ない(押しても何も起きない口を出さない)', () => {
+    const b = undoBtn();
+    paintStatusUndo(b, { lastMove: null, notice: PUT, lastAppend: null, noticeOpen: 'n2' }, PUT);
+    expect(b.hidden).toBe(true);
   });
 });

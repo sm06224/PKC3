@@ -29,7 +29,7 @@ import {
   type InsertAnchor,
   type InsertPlace,
 } from '@features/markdown/line-move';
-import { canWriteBody, type WritableQueue } from './writable-queue';
+import { bodyWillChange, type WritableQueue } from './writable-queue';
 import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
 import { appendableKindsLabel, isAppendable } from '@features/flavor/append-spec';
 import { archetypeLabel } from '@features/flavor/archetype-label';
@@ -63,6 +63,18 @@ export interface PutAssetArgs {
   readonly notify: (text: string, open?: string) => void;
   /** `noteToPutInto` で**先に**控えたもの。 */
   readonly into: NoteToPutInto;
+  /**
+   * 🔴 **選択を返す先**(#684 ㋑)。⚠ **入れ先と別**である ── 横に留めた枠へ落とした回は
+   *   「入るのは留めた枠のノート、画面に戻すのは主の枠のノート」になる。
+   * ⚠ 省略 = 入れ先へ返す(これまでどおり。添付が奪った選択を戻すだけ)。
+   */
+  readonly selectBack?: string | null;
+  /**
+   * 入れ先のノートの題名。⚠ **入れ先が「いま開いているノート」でないときだけ**渡す
+   *   ── 渡すと知らせが名前で言う(「『◯◯』の落とした所に入れました」)。
+   *   ⚠ いつも名前を出すと、1 つしか見ていない user には**要らない字**が増える。
+   */
+  readonly intoTitle?: string;
   /** 出来た添付の lid(選択を返すときに、同じものなら撃たない)。 */
   readonly attachedLid: string;
   readonly assetKey: string;
@@ -176,12 +188,46 @@ function placeFor(
  *   「消えた」と読ませないので、そこまで言う。
  */
 export function putAssetIntoNote(args: PutAssetArgs): void {
-  const { dispatcher, queue, notify, into, attachedLid, assetKey, name, mime, why, batch, onPut, place } =
-    args;
+  const {
+    dispatcher,
+    queue,
+    notify,
+    into,
+    attachedLid,
+    assetKey,
+    name,
+    mime,
+    why,
+    batch,
+    onPut,
+    place,
+    intoTitle,
+  } = args;
 
-  // 🔴 **開いていたノートへ戻す**(添付が奪った選択を返す)
-  if (into.lid !== null && into.lid !== attachedLid) {
-    dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: into.lid });
+  /**
+   * 🔴 **開いていたノートへ戻す**(添付が奪った選択を返す)。
+   * ⚠ 返す先は**入れ先とは限らない**(#684 ㋑)── 横に留めた枠へ落とした回は、
+   *   入るのは留めた枠のノートだが、**画面は主の枠のまま**でなければならない
+   *   (勝手に開き直したら「補助的な物が主の作業領域を奪う」#300 と同じ)。
+   */
+  const back = args.selectBack === undefined ? into.lid : args.selectBack;
+  if (args.selectBack === null) {
+    /**
+     * 🔴 **何も開いていなかったなら、何も開いていない所へ返す**(#684 ㋑、
+     *   着地前の動線レビュー 欠陥 2)。
+     *
+     * ⚠ 起動した直後は中央に何も開いていない(留めた枠だけ復元される)。そこへ
+     *   留めた枠へ file を落とすと、`CREATE_ENTRY` が選択を**作った添付へ移す**ので、
+     *   返し先が `null` = 撃たないだと **中央が `猫.png` の画面に化ける** ──
+     *   お知らせにもマニュアルにも「画面は動きません」と書いた当の約束が、
+     *   いちばん起きやすい入り口で破れる。
+     * 🔑 だから**戻す先が「無い」ことも指示として扱う**(`DESELECT_ENTRY`)。
+     * ⚠ `undefined`(= 指示が無い)とは区別する ── そちらはこれまでどおり
+     *   「入れ先へ返す / 入れ先が無ければ何もしない」である。
+     */
+    dispatcher.dispatch({ type: 'DESELECT_ENTRY' });
+  } else if (back !== null && back !== attachedLid) {
+    dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: back });
   }
 
   if (into.lid === null) {
@@ -213,16 +259,36 @@ export function putAssetIntoNote(args: PutAssetArgs): void {
   const ref = formatAssetRef(name, `asset:${assetKey}`, isImageAssetMime(mime));
   const lid = into.lid;
   /**
-   * 🔴 **待たされる回は、落とした所を捨てる**(#684 段④)。
+   * 🔴 **待っている間に本文が変わる回は、落とした所を捨てる**(#684 段④ / ㋑)。
    *
-   * ⚠ 待つのは**いま本文を書けない**とき(編集中 / 別の書込が錠を握っている)。
-   *   書けるようになる頃には本文は別物なので、落とした時の行番号は**別の所**を指す。
-   * 🔑 だから位置を捨てて**いちばん下**へ入れる ── 黙って別の所へ入れない。
-   *   ⚠ 判定は `queue.push` と**同じ 1 本**(`canWriteBody`)── ここで `phase` を
-   *   数え直さない(`putAssetIntoNote` の冒頭の注記と同じ向き)。
+   * ⚠ 直す前は「**いま書けない**」(`canWriteBody`)で捨てていたが、それは
+   *   問いが 1 つ広すぎた(#684 ㋑ の着地前レビュー 重大 ②)── **編集していない
+   *   ノート**(横に留めた枠)へ落としても位置が捨てられ、線を出した所ではなく
+   *   いちばん下へ入っていた。線が**守れない約束**になる。
+   * 🔑 捨てるべきなのは**その本文自身が書き換わる**ときだけ(`bodyWillChange`):
+   *   ①いま編集しているのがこのノート ②この本文への書込が錠を握っている。
+   * ⚠ どちらでもなければ待っても本文は動かない ── 万一動いていても、書く直前に
+   *   **目印(`InsertAnchor`)で突き合わせる**ので断る側に倒れる(黙って別の所へ入れない)。
    */
-  if (place !== undefined && !canWriteBody(dispatcher)) place.at = null;
+  if (place !== undefined && bodyWillChange(dispatcher, lid)) place.at = null;
   const held = queue.push(() => {
+    /**
+     * 🔴 **開いているノートと違う所へ入れた回は、「開く」を添える**(#684 ㋑、
+     *   着地前の動線レビュー)。
+     *
+     * ⚠ 追記欄の「元に戻す」は**開いているノートの欄にしか出ない**
+     *   (`append-box.ts` の `state.lastAppend?.lid === mode.lid`)── つまり
+     *   留めた枠へ入れた 1 行は、**そのノートを開くまで戻す口が画面に無い**。
+     *   それは「片道の操作を作らない」(user 指示 2026-08-23)に反する。
+     * 🔑 だから知らせの隣に**行き先へ行く道**を置く ── 押して開けば、そこで
+     *   「元に戻す」が出る(`lastAppend` は選び直しでは落ちない)。
+     * ⚠ 開いているノート自身へ入れた回は添えない ── `paintStatusOpen` が
+     *   「もうそれを開いている」で畳むので、どのみち出ない(口だけ作らない)。
+     * ⚠ `notify` の 2 つ目を**受け取らない受け手が居る**(`capture.ts` の
+     *   `showStatus` は字だけ出す)ので、渡すのは任意のままにする。
+     */
+    const openArg: readonly [string] | readonly [] =
+      intoTitle === undefined ? [] : ([lid] as const);
     /**
      * 🔴 **落とした所が今も在るなら、そこへ**(#684 段④)。
      * ⚠ 解けなければ**末尾へ落とす**(黙って別の所へ入れない)。
@@ -246,7 +312,12 @@ export function putAssetIntoNote(args: PutAssetArgs): void {
       place!.at = next === null ? null : { kind: 'after', anchor: ref };
       if (next !== null) place!.body = next;
       // 🔑 **どこに入ったかを言う**(#668 F)── 画面は動かさないので、字で場所を指す
-      notify(`${why}「${name}」を落とした所に入れました`);
+      notify(
+        intoTitle === undefined
+          ? `${why}「${name}」を落とした所に入れました`
+          : `${why}「${name}」を『${intoTitle}』の落とした所に入れました`,
+        ...openArg,
+      );
     } else {
       /**
        * ⚠ **この行は等価な変異である**(変異試験 M6 が SURVIVED で教えた、2026-09-08)。
@@ -279,7 +350,12 @@ export function putAssetIntoNote(args: PutAssetArgs): void {
         target: null,
         ...(keep ? { batch } : {}),
       });
-      notify(`${why}「${name}」を本文のいちばん下に入れました`);
+      notify(
+        intoTitle === undefined
+          ? `${why}「${name}」を本文のいちばん下に入れました`
+          : `${why}「${name}」を『${intoTitle}』の本文のいちばん下に入れました`,
+        ...openArg,
+      );
     }
     // ⚠ 知らせの**後**に数える ── まとめた回の締め(件数)が、この 1 行を上書きする側
     onPut?.(name);

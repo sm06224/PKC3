@@ -21,6 +21,7 @@ import { attachmentBody } from '@features/flavor/attachment-flavor';
 import { identifyAsset, assetKeyFromHash } from '@adapter/platform/storage/asset-key';
 import { shrinkPlan, shrinkQuestion } from '@features/asset/image-shrink';
 import { generateLid } from './binder';
+import { isAppendable } from '@features/flavor/append-spec';
 
 export interface AttachDeps {
   putBlob(assetKey: string, blob: Blob): Promise<void>;
@@ -303,7 +304,8 @@ export async function attachFiles(
    * 🔴 **落とした所**(#684 段④)── 読む面の本文へ落としたときだけ渡る。
    * ⚠ 省略 = これまでどおり**本文のいちばん下**(添付ボタン / 貼付 / 窓の地へ落とした回)。
    * ⚠ 落とした本文が**入れ先のノートと違う**なら位置は使わない(`placeFor` が見る)──
-   *   横に留めた枠へ落として、主の枠のノートの行番号を信じる形にしない。
+   *   別のノートの行番号を信じる形にしない。⚠ ㋑ の後は、入れられる種類へ落とせば
+   *   入れ先もその本文になるので、ここが食い違うのは**入れられない種類**へ落ちた回だけ。
    */
   at?: DroppedAt,
 ): Promise<void> {
@@ -326,7 +328,22 @@ export async function attachFiles(
    * 🔑 選択を返す / 本文へ入れる / 書けないなら預かるは `asset-into-note.ts`
    *   **1 か所** ── 録音・画面録画と同じ口である(CLAUDE.md §7)。
    */
-  const into = noteToPutInto(dispatcher);
+  const opened = noteToPutInto(dispatcher);
+  /**
+   * 🔴 **落とした本文のノートへ入れる**(#684 ㋑、user 裁定待ちの推薦を実装)。
+   *
+   * ⚠ 直す前は入れ先が **`selectedLid` 固定**だったので、**横に留めた枠**へ落としても
+   *   そこには 1 バイトも入らず、主の枠のノートのいちばん下へ落ちていた ──
+   *   塊(段③)も一覧の行(段②)も**落とした枠のノート**へ書くので、file だけ違った。
+   * 🔑 **選択は動かさない** ── 入れ先だけを付け替え、画面は主の枠のまま返す
+   *   (`selectBack`)。⚠ 開き直すと「補助的な物が主の作業領域を奪う」(#300)になる。
+   * ⚠ 入れられない種類なら**付け替えない**(これまでどおり開いているノートへ ──
+   *   落とす側が線を出さないので、普通はここへ来ない)。
+   */
+  const dropped = at === undefined ? undefined : dispatcher.getState().entryMetas.get(at.lid);
+  const elsewhere =
+    at !== undefined && dropped !== undefined && at.lid !== opened.lid && isAppendable(dropped.archetype);
+  const into = elsewhere ? { lid: at!.lid, archetype: dropped!.archetype } : opened;
   const queue = createWritableQueue(dispatcher);
   /**
    * 🔴 **落とした所は、この 1 回のあいだ持ち回る**(#684 段④)── 1 枚入るたびに
@@ -361,6 +378,22 @@ export async function attachFiles(
   let intakeDone = false;
   const summarize = (): void => {
     if (!intakeDone || tally.expected < 2 || tally.put !== tally.expected) return;
+    /**
+     * 🔴 **締めの 1 行も、行き先を落とさない**(#684 ㋑、着地前の動線レビュー)。
+     *
+     * ⚠ 締めは**知らせを上書きする**ので、1 枚ごとの行が言っていた「行き先の名前」と
+     *   「開く」が、まとめて落とした回だけ**消えていた**(`OP_NOTICE` は
+     *   `noticeOpen: action.open ?? null` ── 添えなければ前の道も畳まれる)。
+     * 🔑 つまり **2 枚以上落とした user だけ、戻す道が無くなる**という、
+     *   いちばん気づけない形の欠け方だった(CLAUDE.md §7「同じ値を複数の描画経路へ」)。
+     */
+    if (elsewhere) {
+      notify(
+        `${why}${tally.put} 件を『${dropped!.title}』の本文に入れました(${tally.last} ほか)`,
+        at!.lid,
+      );
+      return;
+    }
     notify(`${why}${tally.put} 件を本文に入れました(${tally.last} ほか)`);
   };
 
@@ -401,6 +434,7 @@ export async function attachFiles(
           why,
           batch,
           ...(place === undefined ? {} : { place }),
+          ...(elsewhere ? { selectBack: opened.lid, intoTitle: dropped!.title } : {}),
           onPut: (n) => {
             tally.put += 1;
             tally.last = n;
@@ -438,7 +472,8 @@ export async function attachFiles(
    *   編集が終わって書けるようになった瞬間に `run` が走る。
    * ⚠ **`await` しない** ── 編集が終わるまで解けない約束を返すと、`withAssetGate`
    *   の鎖が編集の間ずっと詰まり、整理(未参照 GC)まで待たされる。
-   * ⚠ 入れ先(`into`)は**押した時点**で控えてある ── 編集していたノートに入る。
+   * ⚠ 入れ先(`into`)は**押した時点**で控えてある ── 落とした本文のノート
+   *   (どこにも落としていなければ、編集していたノート)に入る。
    * ⚠ `editing` 以外の `ready` でない相(起動前 / 致命エラー)は、これまでどおり断る
    *   ── 「編集を終えたら」と言っても、その日は来ない。
    */
@@ -450,15 +485,33 @@ export async function attachFiles(
     return;
   }
   /**
-   * 🔴 **預かった回は、落とした所を捨てる**(#684 段④)。
-   * ⚠ 取り込みごと編集の後まで待つので、**書ける頃には本文が別物**である ──
-   *   落とした時の行番号は別の所を指す。だから**いちばん下**へ入れる。
-   * ⚠ ここで捨てないと `putAssetIntoNote` の門は素通りする ── あちらが見るのは
-   *   **入れる時**の `canWriteBody` で、その時はもう書ける(だから走っている)。
+   * 🔴 **預かった回は、編集していたノートのぶんだけ落とした所を捨てる**(#684 段④ / ㋑)。
+   *
+   * ⚠ 編集していたノートは、取り込みごと編集の後まで待つあいだに**本文が別物**になる
+   *   ので、落とした時の行番号は別の所を指す ── だからいちばん下へ入れる。
+   * 🔑 ⚠ **横に留めた枠(`elsewhere`)は別である**(着地前レビュー 重大 ②)──
+   *   そちらは編集していないので本文は動かない。捨てると「線を出した所に入らない」
+   *   という守れない約束になるので、**位置を残す**。
+   * ⚠ ここで判断しないと `putAssetIntoNote` の門は素通りする ── あちらが見るのは
+   *   **入れる時**の状態で、その時はもう編集が終わっている(だから走っている)。
    */
-  if (place !== undefined) place.at = null;
+  if (place !== undefined && !elsewhere) place.at = null;
   // 🔴 門の中で走らせる(#724 ⑤)── `queue` が走らせる時点では呼び側の鎖は解けている
   queue.push(() => deps.gate(run));
   const what = files.length === 1 ? `「${files[0]!.name}」` : `${files.length} 件`;
-  notify(`${why}${what}を預かりました(編集を終えたら本文に入れます)`);
+  /**
+   * 🔴 **線を出した所に入らない回は、その場でそう言う**(#684 ㋑、着地前の
+   *   動線レビュー 欠陥 1)。
+   *
+   * ⚠ 編集中でも**横に留めた枠は読む形のまま描かれ続ける**ので、そこへ運べば
+   *   前 / 後の線が出る。ところが預かった回は落とした所を捨てる(すぐ上)ので、
+   *   入るのは**いちばん下**である ── 黙っていると「ここに入る」と見せておいて
+   *   別の所へ入れたことになる。
+   * 🔑 だから**どのノートの、どこへ入るか**を預かった時点で言い切る。
+   */
+  notify(
+    elsewhere
+      ? `${why}${what}を預かりました(編集を終えたら『${dropped!.title}』の本文のいちばん下に入れます)`
+      : `${why}${what}を預かりました(編集を終えたら本文に入れます)`,
+  );
 }

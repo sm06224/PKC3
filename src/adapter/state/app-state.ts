@@ -3140,6 +3140,21 @@ function reduceCore(
            *   板から「やること」を足す口を作ると、これが正面の欠陥になる。
            */
           taskScan: refreshTaskCards(state.taskScan, action.lid, action.body),
+          /**
+           * 🔴 **横に留めた枠にも、同じノートが出ていることがある**(#684 ㋑、
+           *   着地前レビュー 重大 ①)。
+           *
+           * ⚠ `syncSplitBody` を呼ぶ口は `BODY_REWRITTEN` / `BODY_PERSISTED` /
+           *   `REMOTE_BODY_CHANGED` の 3 つで、**追記(ここ)だけ抜けていた** ──
+           *   しかも追記は `BODY_PERSISTED` を通らない(`store-effects` は
+           *   `ENTRY_APPENDED` しか撃たない)ので、**どこからも直らない**。
+           * 🔴 実害:留めた枠へ落とした file が入った回、知らせは
+           *   「『◯◯』の本文に入れました」と言うのに**目の前の枠は 1 文字も変わらない**
+           *   ── user は入っていないと読んで、もう一度落とす(行が二重になる)。
+           * ⚠ 同じ穴を #757 が `BODY_REWRITTEN` で塞いだばかりで、その注記が
+           *   「§7 ── 片方だけ直る」と戒めている。**4 か所目がここだった。**
+           */
+          splitBodies: syncSplitBody(state, action.lid, action.body),
           // 🔑 タグが変われば、開いている入れ物の中身も変わる(#421 / user 要望 2026-08-26)
           smartHits: refreshSmartHits(
             state.smartHits,
