@@ -42,6 +42,22 @@ export type OpenPlace = (typeof OPEN_PLACES)[number]['id'];
  */
 export const DEFAULT_OPEN_PLACE: OpenPlace = 'window';
 
+/**
+ * 🔴 **実際にどちらで開くか**(#826 の着地前レビュー 欠陥 7)。
+ *
+ * ⚠ **電話の画面では、選ばれていても「この画面」にする。**
+ *   🔑 理由は端末の**画面が 1 枚しかない**ことである ── 別の窓にしたときの取り柄は
+ *   「**本文を見ながら選べる**」だが、画面が 1 枚なら**並べられない**ので取り柄が
+ *   成立しない。そのうえ行き来の手間だけが増える(user が最初に困った
+ *   「本文が 1 文字も見えない」に戻る)。
+ * ⚠ **窓が開けたかどうかとは別の話**である ── 開けてしまうので、
+ *   塞がれたときの退避(`null` で器へ落ちる)では拾えない。
+ * ⚠ **保存は書き換えない** ── 電話で開いた日に、机の端末の好みまで変わってはいけない。
+ */
+export function effectiveOpenPlace(saved: OpenPlace, phone: boolean): OpenPlace {
+  return phone ? 'here' : saved;
+}
+
 const IDS: readonly string[] = OPEN_PLACES.map((p) => p.id);
 
 export function isOpenPlace(v: string): v is OpenPlace {

@@ -266,6 +266,14 @@ async function browseArchive(
   services: BinderServices,
   assetKey: string,
   name: string,
+  /**
+   * 🔴 **入れ先のノート**(#826 の着地前レビュー)。⚠ **押した瞬間に控える** ──
+   *   別の窓で選んでいる間、user は主の窓で**別のノートへ移れる**ので、
+   *   取り出すときに読み直すと**押したときと違うノートへ入る**。
+   * ⚠ modal はこれを「周りを止める」ことで**ついでに**守っていた(CLAUDE.md §10)──
+   *   止めないと決めた以上、**身元は自分で持つ**。
+   */
+  intoLid: string | null,
 ): Promise<void> {
   const say = (text: string): void => services.showStatus?.(text);
   const why = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -279,36 +287,58 @@ async function browseArchive(
    * 🔑 どちらで開くかは **user の設定**(既定は別の窓)。⚠ 「この画面」を選んでいる人には
    *   窓を掴もうとしない ── 掴めなかったのか、選んだ結果なのかを混ぜない。
    */
-  const wantWindow = currentOpenPlace() === 'window';
+  // ⚠ 電話の画面では、選ばれていても「この画面」── 画面が 1 枚なら並べられない
+  const wantWindow = effectiveOpenPlace(currentOpenPlace(), appPhone.isPhone()) === 'window';
   const win = wantWindow ? (services.grabArchiveWindow?.(name, assetKey) ?? null) : null;
-  if (wantWindow && win === null) {
-    // ⚠ **黙ってその場の器へ落ちない** ── 「別の窓で開く」と設定した人には理由が要る
-    say('別の窓が開けなかったので、この画面で開きます(ポップアップの許可を確かめてください)');
+  /**
+   * 🔴 **既に同じ書庫を映している窓は、前へ出すだけ**(#826 の着地前レビュー)。
+   * ⚠ 読み直して組み直すと、user が付けた印が全部消える ── 押した動機は
+   *   「窓が見つからない」なので、**選び直しにさせない**。
+   */
+  if (win !== null && win.reused) {
+    say(`「${name}」の一覧は別の窓に出ています`);
+    return;
   }
   const blob = await services.readAssetBlob(assetKey).catch(() => null);
   if (blob === null) {
-    // ⚠ 掴んだ窓を**必ず閉じる** ── 残すと「読んでいます…」のまま止まった窓になる
-    win?.close();
-    say(`「${name}」の中身が見つかりません(添付が消えている可能性があります)`);
+    // ⚠ 理由は**窓の中にも出す** ── user は開いた窓を見ている(黙って閉じない)
+    const why0 = `「${name}」の中身が見つかりません(添付が消えている可能性があります)`;
+    win?.fail(why0);
+    say(why0);
     return;
   }
   let entries: ZipEntry[];
   try {
     entries = await readZipDirectory(blob);
   } catch (e) {
-    win?.close();
-    say(`「${name}」の中を開けません ── ${why(e)}`);
+    const why1 = `「${name}」の中を開けません ── ${why(e)}`;
+    win?.fail(why1);
+    say(why1);
     return;
   }
   const rows = archiveRows(entries);
   if (rows.length === 0) {
-    win?.close();
-    say(`「${name}」の中に取り出せる物がありません`);
+    const why2 = `「${name}」の中に取り出せる物がありません`;
+    win?.fail(why2);
+    say(why2);
     return;
   }
   const pickRows = rows.map((r) => ({ ...r, size: r.isDirectory ? '' : humanBytes(r.size) }));
   // 🔑 何件入るかの判定は **1 本**(`markedFiles`)── 器の中で数え直さない
   const countFiles = (m: readonly string[]): number => markedFiles(entries, m).length;
+  /**
+   * ⚠ **黙ってその場の器へ落ちない** ── 「別の窓で開く」と設定した人には理由が要る。
+   * ⚠ **言うのは器を出す直前**(着地前レビュー 💭J)── 読む前に言うと、添付が消えて
+   *   いる回に「この画面で開きます」→「中身が見つかりません」と、開くと言った物が
+   *   開かない 2 連になる。
+   * 🔑 **戻し方まで書く**(良 5)── わざと止めている人は、これを押すたび読むことになる。
+   */
+  if (wantWindow && win === null) {
+    say(
+      '別の窓が開けなかったので、この画面で開きます' +
+        '(いつもこの画面でよければ、設定の「開く場所」で選べます)',
+    );
+  }
   const marks =
     win !== null
       ? await win.pick({ rows: pickRows, countFiles, toggle: toggleArchiveMark })
@@ -326,7 +356,7 @@ async function browseArchive(
       bad.push(`${outName}(${why(err)})`);
     }
   }
-  if (out.length > 0) services.attachFiles?.(out, `「${name}」から取り出しました`);
+  if (out.length > 0) services.attachFiles?.(out, `「${name}」から取り出しました`, undefined, intoLid);
   const tail = bad.length === 0 ? '' : ` ⚠ ${bad.length} 件は取り出せません ── ${bad.join(' / ')}`;
   say(out.length === 0 ? `取り出せませんでした ── ${bad.join(' / ')}` : `${out.length} 件を添付にしました${tail}`);
 }
@@ -341,6 +371,7 @@ import {
   toggleArchiveMark,
 } from '@features/archive/zip-browse';
 import { currentOpenPlace } from '@adapter/ui/render/open-place';
+import { effectiveOpenPlace } from '@features/open-place';
 import { joinCopied, pickMarked } from '@features/clipboard/scrap';
 import {
   confirmInApp,
@@ -623,14 +654,23 @@ const rowLidOrSelected = (st: AppState, target: HTMLElement): string | null =>
  * ⚠ **掴んだ直後の窓**であって、まだ中身は入っていない ── `pick` で組む。
  */
 export interface ArchiveWindowHandle {
+  /**
+   * 🔴 **もう同じ書庫の一覧が組んである**(#826 の着地前レビュー)。
+   * ⚠ そのときは**組み直さない** ── user が 2 回目を押す動機は「窓が後ろに隠れて
+   *   見つからない」であって、選び直したいわけではない(印が消えると選び直しになる)。
+   */
+  readonly reused: boolean;
   /** 一覧を組んで、選ばれるまで待つ。⚠ 「やめる」/ 窓を閉じた / 0 件なら `null`。 */
   pick(deps: {
     readonly rows: readonly ArchivePickRow[];
     readonly countFiles: (marks: readonly string[]) => number;
     readonly toggle: (marks: readonly string[], path: string) => string[];
   }): Promise<string[] | null>;
-  /** こちらから閉じる(読めなかったときに「読んでいます…」を残さない)。 */
-  close(): void;
+  /**
+   * 🔴 **読めなかった理由を窓の中に出す**(閉じない)。⚠ user は**開いた窓を見ている**
+   *   ので、黙って閉じると「窓が壊れた」と読む。閉じるのは user に任せる。
+   */
+  fail(text: string): void;
 }
 
 export interface BinderServices {
@@ -643,7 +683,7 @@ export interface BinderServices {
    * @param at 🔴 **落とした所**(#684 段④)── 読む面の本文へ落とした回だけ渡す。
    *   省略 = これまでどおり本文のいちばん下。
    */
-  attachFiles?(files: File[], why?: string, at?: DroppedAt): void;
+  attachFiles?(files: File[], why?: string, at?: DroppedAt, intoLid?: string | null): void;
   /**
    * 🔴 **スクショ(画像)の貼付**(#250。user 指示 2026-08-18
    * 「PKC3 でスクショ貼付の導線がない。PKC2 と同様以上に実装してください」)。
@@ -6356,10 +6396,18 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔴 **書庫の中を見る**(#818)。⚠ 出るのは zip の添付にだけ
    *   (`isZipAttachment` ── 押せるのに必ず失敗する口を作らない)。
    */
-  'browse-archive': (_dispatcher, target, services, root) => {
+  'browse-archive': (dispatcher, target, services, root) => {
     const key = target.getAttribute('data-pkc-asset-key');
     if (key === null || key === '') return;
-    void browseArchive(root, services, key, target.getAttribute('data-pkc-asset-name') ?? '書庫');
+    void browseArchive(
+      root,
+      services,
+      key,
+      target.getAttribute('data-pkc-asset-name') ?? '書庫',
+      // 🔴 **押した瞬間の選択**を控える(別の窓で選んでいる間に動きうる)
+      dispatcher.getState().selectedLid,
+      // ⚠ 組めずに投げた回も**黙って終わらせない**(押して無反応にしない)
+    ).catch(() => services.showStatus?.('書庫の一覧を組めませんでした'));
   },
   'download-asset': (dispatcher, target, services) => {
     const key = target.getAttribute('data-pkc-asset-key');

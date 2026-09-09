@@ -72,7 +72,7 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
    *   **人に付く**好みである。⚠ 端末側の事情(ポップアップを止めている)で効かない回は
    *   その場で理由を出すので、移して害が出ない。
    */
-  { key: 'pkc3.open-place', label: '開く場所' },
+  { key: 'pkc3.open-place', label: '書庫(zip)を開く場所' },
 ];
 
 /**

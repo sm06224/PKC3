@@ -43,9 +43,20 @@ export interface NoteToPutInto {
   readonly archetype: string | undefined;
 }
 
-export function noteToPutInto(dispatcher: Dispatcher): NoteToPutInto {
+/**
+ * @param pinned 🔴 **入れ先を名指しする**(#826)。⚠ 既定(省略)はこれまでどおり
+ *   **いま選んでいるノート**である。
+ *
+ *   ⚠ 名指しが要るのは、**選ぶ間ずっと画面を止めていない**口ができたからである ──
+ *   別の窓で書庫の中を選んでいる間、user は主の窓で**別のノートへ移れる**。
+ *   そのとき「いま選んでいるノート」を読むと、**押したときと違うノートへ入る**
+ *   (CLAUDE.md §10「置き換えられる側が"ついでに"提供していた性質」── modal は
+ *   周りを止めることで**入れ先の身元**も守っていた)。
+ * 🔑 **判定はこの 1 本のまま**にする(呼び側で `entryMetas` を引き直さない)。
+ */
+export function noteToPutInto(dispatcher: Dispatcher, pinned?: string | null): NoteToPutInto {
   const st = dispatcher.getState();
-  const lid = st.selectedLid;
+  const lid = pinned === undefined ? st.selectedLid : pinned;
   return {
     lid,
     archetype: lid === null ? undefined : st.entryMetas.get(lid)?.archetype,

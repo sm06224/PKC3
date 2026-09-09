@@ -57,7 +57,11 @@ import {
 import { appBrowseMode, isBrowseMode } from '@adapter/ui/render/browse-mode';
 import { StoreClient } from '@adapter/platform/storage/store-client';
 import { openAssetWindow } from '@adapter/platform/asset-window';
-import { grabArchiveWindow, pickInArchiveWindow } from '@adapter/platform/archive-window';
+import {
+  grabArchiveWindow,
+  pickInArchiveWindow,
+  showArchiveWindowError,
+} from '@adapter/platform/archive-window';
 import { isOpenPlace } from '@features/open-place';
 import { chooseOpenPlace } from '@adapter/ui/render/open-place';
 import { assetWindowKind } from '@features/asset/asset-preview-kind';
@@ -2117,8 +2121,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   if (appAlarmEnabled.enabled()) dispatcher.dispatch({ type: 'REFRESH_TASK_SCAN' });
 
   const services: BinderServices = {
-    attachFiles: (files, why, at) =>
-      void withAssetGate(() => attachFiles(dispatcher, attachDeps, files, why, at)),
+    attachFiles: (files, why, at, intoLid) =>
+      void withAssetGate(() => attachFiles(dispatcher, attachDeps, files, why, at, intoLid)),
     // 🔴 録音・画面収録(#413)── 押す口は左の列の「添付」の隣に在る
     startCapture: (kind) => void captureService.start(kind),
     stopCapture: () => captureService.stop(),
@@ -2570,17 +2574,18 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * 🔑 配色は**根から写す** ── ここに色の表を持たない(`theme.ts` と同じ作法)。
      */
     grabArchiveWindow: (title, assetKey) => {
-      const win = grabArchiveWindow(title, assetKey, (u, n, f) => globalThis.open?.(u, n, f) ?? null);
-      if (win === null) return null;
+      const got = grabArchiveWindow(title, assetKey, (u, n, f) => globalThis.open?.(u, n, f) ?? null);
+      if (got === null) return null;
       return {
-        pick: (deps) => pickInArchiveWindow(win, { ...deps, themeFrom: document.documentElement }),
-        close: () => {
-          try {
-            win.close();
-          } catch {
-            // 既に閉じている
-          }
-        },
+        reused: got.reused,
+        pick: (deps) =>
+          pickInArchiveWindow(got.win, {
+            ...deps,
+            assetKey,
+            title,
+            themeFrom: document.documentElement,
+          }),
+        fail: (text) => showArchiveWindowError(got.win, title, text),
       };
     },
     openTile: (lid) => {

@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_OPEN_PLACE,
+  effectiveOpenPlace,
   isOpenPlace,
   OPEN_PLACES,
   type OpenPlace,
@@ -43,5 +44,19 @@ describe('開く場所', () => {
   it('型は 2 つに閉じている', () => {
     const all: OpenPlace[] = ['window', 'here'];
     expect(new Set(all).size).toBe(OPEN_PLACES.length);
+  });
+
+  /**
+   * 🔴 **電話の画面では、選ばれていても「この画面」**(着地前レビュー 欠陥 7)。
+   * ⚠ 別の窓の取り柄は「本文を見ながら選べる」だが、**画面が 1 枚なら並べられない**
+   *   ので取り柄が成立しない ── 行き来の手間だけが増える。
+   */
+  it.each([
+    ['window', true, 'here'],
+    ['here', true, 'here'],
+    ['window', false, 'window'],
+    ['here', false, 'here'],
+  ])('選んだ %s ・電話 %s → %s', (saved, phone, want) => {
+    expect(effectiveOpenPlace(saved as OpenPlace, phone as boolean)).toBe(want);
   });
 });

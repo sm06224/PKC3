@@ -498,12 +498,12 @@ export class SettingsRenderer {
      *   「設定したのに変わらない」になる(この repo がいちばん嫌う形)。
      */
     const plt = document.createElement('dt');
-    plt.textContent = '開く場所';
+    plt.textContent = '書庫(zip)を開く場所';
     const pld = document.createElement('dd');
     const plselect = document.createElement('select');
     plselect.setAttribute('data-pkc-action', 'set-open-place');
     plselect.setAttribute('data-pkc-field', 'open-place-select');
-    plselect.setAttribute('aria-label', '開く場所');
+    plselect.setAttribute('aria-label', '書庫(zip)を開く場所');
     for (const o of OPEN_PLACES) {
       const opt = document.createElement('option');
       opt.value = o.id;
@@ -517,7 +517,10 @@ export class SettingsRenderer {
       '添付の書庫(zip)で「中を見る」を押したとき、一覧を別の窓に出すか、' +
       'この画面の上に出すかが決まります。' +
       '別の窓なら、本文を見ながらどのファイルが要るかを確かめられます。' +
+      '同じ書庫をもう一度押すと、選んだ印はそのままで、その窓が前に出ます。' +
       'ブラウザが別の窓を止めている場合は、この画面の上に出して、その理由を画面の下に出します。' +
+      '⚠ 電話の画面では、どちらを選んでもこの画面に出ます(画面が 1 枚なので、' +
+      '別の窓にしても本文と並べられないためです)。' +
       '予定表や連絡先など、ほかの窓の開き方はここでは変わりません。';
     pld.append(plnote);
     dl.append(plt, pld);
