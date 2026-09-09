@@ -134,9 +134,31 @@ test('🔴 根を配らない場所(sub-path)に置いても、PKC3 は起動し
       .getEntriesByType('resource')
       .map((e) => e.name)
       .filter((u) => u.startsWith(location.origin));
-    return { total: same.length, outside: same.filter((u) => !u.startsWith(location.origin + p)) };
+    return {
+      same,
+      // 🔑 空振り防止は **hash 付きの生成物**で見る(下の注記)
+      hashed: same.filter((u) => /-[A-Za-z0-9_-]{8}\.(?:js|css)(?:[?#]|$)/.test(u)),
+      outside: same.filter((u) => !u.startsWith(location.origin + p)),
+    };
   }, prefix);
-  expect(asked.total, '同一 origin への要求が 0 件 ── 走査が空振りしている').toBeGreaterThan(3);
+  /**
+   * 🔴 **空振り防止は「件数」で書かない**(2026-09-09、CI で実際に落ちた)。
+   *
+   * ⚠ 1 稿目は `total > 3` と書いたが、**同一 origin の要求の数はブラウザで違う** ──
+   *   実測(2026-09-09、同じ dist・同じ server):
+   *   headless shell = `index-*.js` / `index-*.css` / `storage-worker-*.js` の **3 件**、
+   *   フル Chromium = それに **`icon.svg` を足した 4 件**(favicon を取りに行く)。
+   *   つまり `> 3` は**手元でだけ**成り立っていた ── CLAUDE.md §5
+   *   「CI と手元で別のブラウザが動いている」そのもので、**製品ではなく計器の欠陥**である。
+   * 🔑 だから**どちらでも必ず成り立つ 1 点**で見る ── アプリは
+   *   **hash 付きの entry chunk を取らなければ描けない**。0 件なら、それは
+   *   「絶対 path が無い」ではなく「**何も見ていない**」である
+   *   (`dist-inspect` の「hash 付き生成物への参照が 1 件でもある」と同じ形)。
+   */
+  expect(
+    asked.hashed.length,
+    `hash 付きの生成物を 1 つも取っていない ── 走査が空振りしている: ${asked.same.join(' ')}`,
+  ).toBeGreaterThan(0);
   expect(asked.outside, 'prefix の外を要求した(絶対 path が混ざっている)').toEqual([]);
 
   /**
