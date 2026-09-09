@@ -13,7 +13,7 @@ import { stubRevisionOps } from '../helpers/revision-stub';
 
 /** ⚠ 実物の効果層を差し替える口(遅い `getBody` で錠を握らせる等)。 */
 type StoreOver = {
-  getBody?: () => Promise<string | null>;
+  getBody?: (lid: string) => Promise<string | null>;
   /** 保存を横取りする(#684 段④ ── 書いた本文を disk に返して、次の 1 枚に読ませる)。 */
   onPersist?: (lid: string, body: string) => void;
 };
@@ -957,5 +957,109 @@ describe('落とした所へ入れる(#684 段④)', () => {
     await tick();
     expect(appendsSeen.filter((a) => a.lid === 'n1'), '末尾の経路が消えた').toHaveLength(1);
     expect(h.d.getState().error ?? '', '断りが出ている').toBe('');
+  });
+});
+
+/**
+ * 🔴 **横に留めた枠の本文へ落とした file は、その枠のノートへ入る**(#684 ㋑)。
+ *
+ * ## 直す前に何が起きていたか
+ *
+ * 入れ先は **`selectedLid` 固定**だった ── 留めた枠の「牛乳」の下へ落としても、
+ * その本文には **1 バイトも入らず**、主の枠のノートのいちばん下へ落ちていた。
+ * ⚠ 同じ枠へ**塊**(段③)や**一覧の行**(段②)を落とすとその枠のノートへ書くので、
+ * **file だけ行き先が違う**という覚え直しになっていた。
+ *
+ * ## 守る主張
+ *
+ * ① 🔴 **落とした本文のノート**へ、落とした所に入る(主の枠の本文は 1 バイトも動かない)
+ * ② 🔴 **画面は動かさない** ── 選択は主の枠のノートへ返る(補助的な枠が主を奪わない)
+ * ③ 🔴 知らせが**行き先の名前**を言う(見ている本文と違う所へ入るので、名前が要る)
+ * ④ ⚠ **入れられない種類**へ落ちた回は、これまでどおり開いているノートの末尾
+ */
+describe('横に留めた枠へ落とした file は、その枠のノートへ入る(#684 ㋑)', () => {
+  const MAIN = ['# 買い物メモ', '', '卵', ''].join('\n');
+  const SIDE = ['# さきの予定', '', '牛乳', '', 'パン', ''].join('\n');
+  /** 留めた枠の「牛乳」の後(生 3 行目)。 */
+  const AFTER_MILK_ON_SIDE = { lid: 'n2', toBefore: 3, body: SIDE, anchor: { line: 2, text: '牛乳' } };
+  const png = (n: string, bytes: string) => new File([bytes], n, { type: 'image/png' });
+
+  /** 2 つのノートが disk に在る台(書換が効いて、読み直すとその本文が返る)。 */
+  function withNotes(sideArchetype: 'text' | 'folder' = 'text') {
+    const disks: Record<string, string> = { n1: MAIN, n2: SIDE };
+    const h = harness(undefined, {
+      getBody: async (lid) => disks[lid] ?? null,
+      onPersist: (lid, b) => {
+        if (lid in disks) disks[lid] = b;
+      },
+    });
+    h.d.dispatch({ type: 'CREATE_ENTRY', archetype: sideArchetype, lid: 'n2', title: 'さきの予定', body: SIDE, edit: false });
+    h.d.dispatch({ type: 'CREATE_ENTRY', archetype: 'text', lid: 'n1', title: '買い物メモ', body: MAIN, edit: false });
+    h.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    h.d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: MAIN });
+    appendsSeen.length = 0;
+    return { ...h, disks };
+  }
+
+  it('🔴 ① ② ③ 落とした枠のノートの、落とした所へ入る(画面は動かず、名前で言う)', async () => {
+    const h = withNotes();
+    await attachFiles(h.d, h.deps, [png('猫.png', 'a')], '', AFTER_MILK_ON_SIDE);
+    await tick();
+    const rows = h.disks.n2!.split('\n');
+    const i = rows.findIndex((r) => r.startsWith('!['));
+    expect(i, '留めた枠の本文に入っていない').toBeGreaterThan(-1);
+    expect(rows[i - 2] ?? rows[i - 1], '「牛乳」の下に入っていない').toBe('牛乳');
+    expect(rows.indexOf('パン'), '末尾へ落ちた(落とした所ではない)').toBeGreaterThan(i);
+    // ② 画面は主の枠のまま ── 選択を留めた枠へ移さない
+    expect(h.d.getState().selectedLid, '見ていたノートから画面を持っていかれた').toBe('n1');
+    // ① 主の枠の本文は 1 バイトも動かない
+    expect(h.disks.n1, '見ていたノートの本文が動いた').toBe(MAIN);
+    expect(appendsSeen.filter((a) => a.lid === 'n1'), '見ていたノートの末尾へも入れた').toHaveLength(0);
+    // ③ 行き先の名前を言う(見ている本文と違う所へ入るので)
+    expect(h.d.getState().notice ?? '', '行き先の名前を言っていない').toContain('『さきの予定』');
+  });
+
+  it('⚠ 対照群 ── 開いているノート自身へ落とした回は、名前を言わない', async () => {
+    const h = withNotes();
+    await attachFiles(h.d, h.deps, [png('猫.png', 'a')], '', {
+      lid: 'n1',
+      toBefore: 3,
+      body: MAIN,
+      anchor: { line: 2, text: '卵' },
+    });
+    await tick();
+    expect(h.disks.n1!.includes('!['), '開いているノートへ入っていない').toBe(true);
+    expect(h.d.getState().notice ?? '', '1 つしか見ていないのに名前が出た').not.toContain('『');
+    expect(h.d.getState().notice ?? '', 'どこに入ったかを言っていない').toContain('落とした所');
+  });
+
+  /**
+   * 🔴 **編集中に留めた枠へ落とした回も、行き先はその枠のノート**(#684 ㋑ × #668 B)。
+   * ⚠ 預かった回は**落とした所を捨てる**(段④)ので入るのは末尾だが、
+   *   **どのノートの末尾か**は変わらない ── ここで開いているノートへ戻すと、
+   *   user は「留めた枠へ落としたのに、見ていた本文に入った」を見る。
+   * 🔑 だから**末尾の知らせも名前で言う**(落とした所の知らせと同じ扱い)。
+   */
+  it('🔴 編集中に留めた枠へ落としても、編集を終えるとその枠のノートの末尾へ', async () => {
+    const h = withNotes();
+    h.d.dispatch({ type: 'START_EDIT' });
+    await attachFiles(h.d, h.deps, [png('猫.png', 'a')], '', AFTER_MILK_ON_SIDE);
+    await tick();
+    expect(h.disks.n2, '預かる前に書いた').toBe(SIDE);
+    h.d.dispatch({ type: 'CANCEL_EDIT' });
+    await tick();
+    await tick();
+    expect(appendsSeen.filter((a) => a.lid === 'n2'), '留めた枠のノートの末尾へ入っていない').toHaveLength(1);
+    expect(appendsSeen.filter((a) => a.lid === 'n1'), '見ていたノートへ入れた').toHaveLength(0);
+    expect(h.d.getState().notice ?? '', '行き先の名前を言っていない').toContain('『さきの予定』');
+  });
+
+  it('🔴 ④ 入れられない種類の本文へ落ちた回は、開いているノートの末尾へ', async () => {
+    const h = withNotes('folder');
+    await attachFiles(h.d, h.deps, [png('猫.png', 'a')], '', AFTER_MILK_ON_SIDE);
+    await tick();
+    expect(appendsSeen.filter((a) => a.lid === 'n1'), '開いているノートの末尾へ入っていない').toHaveLength(1);
+    expect(h.disks.n2, '入れられない種類の本文へ書いた').toBe(SIDE);
+    expect(h.d.getState().error ?? '', '断りが出ている(開いているノートには入れられる)').toBe('');
   });
 });

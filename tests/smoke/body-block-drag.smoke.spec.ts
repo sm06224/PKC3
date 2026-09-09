@@ -12,7 +12,14 @@
  *   見ると「見た目は動いたが本文に書けていない」を素通りする(`place-board.smoke` と同じ型)。
  */
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
+import {
+  gotoApp,
+  clickReal,
+  createEntry,
+  collectPageErrors,
+  useSplitEditor,
+  useListBrowse,
+} from './helpers';
 
 test.beforeEach(async ({ page }) => {
   await useSplitEditor(page);
@@ -299,6 +306,98 @@ test('🔴 ⠿ を一覧の行へ落とすと、その塊が別のノートへ�
   await expect
     .poll(() => order(page), { timeout: 8000, message: '行き先に入っていない' })
     .toEqual(['受け皿', '段落 A']);
+
+  expect(errors, 'pageerror が出た').toEqual([]);
+});
+
+/**
+ * 🔴 **横に留めた枠の本文へ落としたファイルは、その枠のノートへ入る**(#684 ㋑)。
+ *
+ * ⚠ 直す前は入れ先が「いま開いているノート」**固定**だったので、留めた枠へ落としても
+ *   そこには 1 バイトも入らず、**主の枠のノートのいちばん下**へ落ちていた ──
+ *   同じ枠へ**塊**(段③)や**一覧の行**(段②)を落とすとその枠のノートへ書くので、
+ *   file だけ行き先が違った。
+ *
+ * 🔑 ここでしか見られないもの:**本当に 2 枠並んでいる**状態で、留めた枠の座標に
+ *   線が出て、**その枠の本文だけ**が描き直され、**主の枠は 1 文字も動かない**こと。
+ *   (unit は合成 event なので、枠が本当に並んでいるかも、どちらが描き直されるかも見ない)
+ */
+test('🔴 横に留めた枠へファイルを落とすと、その枠のノートへ入る (#684 ㋑)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await useListBrowse(page);
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await gotoApp(page);
+
+  const write = async (title: string, body: string): Promise<void> => {
+    await createEntry(page, 'text');
+    await page.fill('[data-pkc-field="editor-title"]', title);
+    await page.fill('[data-pkc-field="editor-body"]', body);
+    await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+    await page.waitForSelector('[data-pkc-action="start-edit"]');
+    await expect(page.locator(`${HOST}[data-pkc-painted]`)).toBeAttached();
+  };
+  await write('主のノート', '# 主のノート\n\n卵\n');
+  await write('留める側', '# 留める側\n\n牛乳\n\nパン\n');
+
+  // 「留める側」を横に留める(実物のメニューを実物のマウスで)
+  await page.locator(`${HOST} p`).first().click({ button: 'right' });
+  const menu = page.locator('[data-pkc-region="context-menu"]');
+  await expect(menu, '本文で右クリックしてもメニューが出ない').toBeVisible();
+  await menu.locator('button[data-pkc-action="pin-split"]').click();
+  await expect(page.locator('[data-pkc-split-lid]'), '横に留まっていない').toHaveCount(1);
+
+  // 主の枠は別のノートへ ── ここで「見ているノート ≠ 留めた枠のノート」が成立する
+  await page
+    .locator('[data-pkc-region="entry-list"] [data-pkc-entry]')
+    .filter({ hasText: '主のノート' })
+    .first()
+    .click();
+  const SIDE = '[data-pkc-split-lid] [data-pkc-field="split-body"]';
+  await expect(page.locator(`${HOST} h1`).first(), '前提: 主の枠が別のノートでない').toContainText(
+    '主のノート',
+  );
+  await expect(page.locator(`${SIDE} h1`).first(), '前提: 留めた枠が入れ替わった').toContainText(
+    '留める側',
+  );
+
+  const kinds = async (sel: string): Promise<string[]> =>
+    page.locator(`${sel} > [data-pkc-source-line]`).evaluateAll((els) =>
+      els.map((e) => (e.querySelector('img') ? 'IMG' : (e.textContent ?? '').trim())),
+    );
+  expect(await kinds(SIDE), '前提: 留めた枠の並び').toEqual(['留める側', '牛乳', 'パン']);
+
+  // 🔴 留めた枠の「牛乳」の下半分へ落とす
+  const target = page.locator(`${SIDE} > p`).first();
+  const t = (await target.boundingBox())!;
+  const at = { x: t.x + t.width / 2, y: t.y + t.height * 0.8 };
+  await page.evaluate((p) => {
+    const dt = new DataTransfer();
+    dt.items.add(new File([new Uint8Array([9, 8, 7, 6])], '猫.png', { type: 'image/png' }));
+    (window as unknown as { __dropDt: DataTransfer }).__dropDt = dt;
+    const el = document.elementFromPoint(p.x, p.y)!;
+    el.dispatchEvent(
+      new DragEvent('dragover', { bubbles: true, cancelable: true, clientX: p.x, clientY: p.y, dataTransfer: dt }),
+    );
+  }, at);
+  await expect(target, '留めた枠の本文に「後」の線が出ない').toHaveAttribute(
+    'data-pkc-drop-edge',
+    'after',
+  );
+  await page.evaluate((p) => {
+    const dt = (window as unknown as { __dropDt: DataTransfer }).__dropDt;
+    const el = document.elementFromPoint(p.x, p.y)!;
+    el.dispatchEvent(
+      new DragEvent('drop', { bubbles: true, cancelable: true, clientX: p.x, clientY: p.y, dataTransfer: dt }),
+    );
+  }, at);
+
+  await expect
+    .poll(() => kinds(SIDE), { timeout: 8000, message: '留めた枠のノートの落とした所に入っていない' })
+    .toEqual(['留める側', '牛乳', 'IMG', 'パン']);
+  // 🔴 主の枠は 1 文字も動かない(見ていた本文を奪わない)
+  expect(await kinds(HOST), '見ていたノートの本文が動いた').toEqual(['主のノート', '卵']);
+  // 行き先の名前を言う ── 見ている本文と違う所へ入るので、名前が唯一の手がかり
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('『留める側』');
 
   expect(errors, 'pageerror が出た').toEqual([]);
 });

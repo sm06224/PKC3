@@ -63,6 +63,18 @@ export interface PutAssetArgs {
   readonly notify: (text: string, open?: string) => void;
   /** `noteToPutInto` で**先に**控えたもの。 */
   readonly into: NoteToPutInto;
+  /**
+   * 🔴 **選択を返す先**(#684 ㋑)。⚠ **入れ先と別**である ── 横に留めた枠へ落とした回は
+   *   「入るのは留めた枠のノート、画面に戻すのは主の枠のノート」になる。
+   * ⚠ 省略 = 入れ先へ返す(これまでどおり。添付が奪った選択を戻すだけ)。
+   */
+  readonly selectBack?: string | null;
+  /**
+   * 入れ先のノートの題名。⚠ **入れ先が「いま開いているノート」でないときだけ**渡す
+   *   ── 渡すと知らせが名前で言う(「『◯◯』の落とした所に入れました」)。
+   *   ⚠ いつも名前を出すと、1 つしか見ていない user には**要らない字**が増える。
+   */
+  readonly intoTitle?: string;
   /** 出来た添付の lid(選択を返すときに、同じものなら撃たない)。 */
   readonly attachedLid: string;
   readonly assetKey: string;
@@ -176,12 +188,31 @@ function placeFor(
  *   「消えた」と読ませないので、そこまで言う。
  */
 export function putAssetIntoNote(args: PutAssetArgs): void {
-  const { dispatcher, queue, notify, into, attachedLid, assetKey, name, mime, why, batch, onPut, place } =
-    args;
+  const {
+    dispatcher,
+    queue,
+    notify,
+    into,
+    attachedLid,
+    assetKey,
+    name,
+    mime,
+    why,
+    batch,
+    onPut,
+    place,
+    intoTitle,
+  } = args;
 
-  // 🔴 **開いていたノートへ戻す**(添付が奪った選択を返す)
-  if (into.lid !== null && into.lid !== attachedLid) {
-    dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: into.lid });
+  /**
+   * 🔴 **開いていたノートへ戻す**(添付が奪った選択を返す)。
+   * ⚠ 返す先は**入れ先とは限らない**(#684 ㋑)── 横に留めた枠へ落とした回は、
+   *   入るのは留めた枠のノートだが、**画面は主の枠のまま**でなければならない
+   *   (勝手に開き直したら「補助的な物が主の作業領域を奪う」#300 と同じ)。
+   */
+  const back = args.selectBack === undefined ? into.lid : args.selectBack;
+  if (back !== null && back !== attachedLid) {
+    dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: back });
   }
 
   if (into.lid === null) {
@@ -246,7 +277,11 @@ export function putAssetIntoNote(args: PutAssetArgs): void {
       place!.at = next === null ? null : { kind: 'after', anchor: ref };
       if (next !== null) place!.body = next;
       // 🔑 **どこに入ったかを言う**(#668 F)── 画面は動かさないので、字で場所を指す
-      notify(`${why}「${name}」を落とした所に入れました`);
+      notify(
+        intoTitle === undefined
+          ? `${why}「${name}」を落とした所に入れました`
+          : `${why}「${name}」を『${intoTitle}』の落とした所に入れました`,
+      );
     } else {
       /**
        * ⚠ **この行は等価な変異である**(変異試験 M6 が SURVIVED で教えた、2026-09-08)。
@@ -279,7 +314,11 @@ export function putAssetIntoNote(args: PutAssetArgs): void {
         target: null,
         ...(keep ? { batch } : {}),
       });
-      notify(`${why}「${name}」を本文のいちばん下に入れました`);
+      notify(
+        intoTitle === undefined
+          ? `${why}「${name}」を本文のいちばん下に入れました`
+          : `${why}「${name}」を『${intoTitle}』の本文のいちばん下に入れました`,
+      );
     }
     // ⚠ 知らせの**後**に数える ── まとめた回の締め(件数)が、この 1 行を上書きする側
     onPut?.(name);

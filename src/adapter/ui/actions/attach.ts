@@ -21,6 +21,7 @@ import { attachmentBody } from '@features/flavor/attachment-flavor';
 import { identifyAsset, assetKeyFromHash } from '@adapter/platform/storage/asset-key';
 import { shrinkPlan, shrinkQuestion } from '@features/asset/image-shrink';
 import { generateLid } from './binder';
+import { isAppendable } from '@features/flavor/append-spec';
 
 export interface AttachDeps {
   putBlob(assetKey: string, blob: Blob): Promise<void>;
@@ -303,7 +304,8 @@ export async function attachFiles(
    * 🔴 **落とした所**(#684 段④)── 読む面の本文へ落としたときだけ渡る。
    * ⚠ 省略 = これまでどおり**本文のいちばん下**(添付ボタン / 貼付 / 窓の地へ落とした回)。
    * ⚠ 落とした本文が**入れ先のノートと違う**なら位置は使わない(`placeFor` が見る)──
-   *   横に留めた枠へ落として、主の枠のノートの行番号を信じる形にしない。
+   *   別のノートの行番号を信じる形にしない。⚠ ㋑ の後は、入れられる種類へ落とせば
+   *   入れ先もその本文になるので、ここが食い違うのは**入れられない種類**へ落ちた回だけ。
    */
   at?: DroppedAt,
 ): Promise<void> {
@@ -326,7 +328,22 @@ export async function attachFiles(
    * 🔑 選択を返す / 本文へ入れる / 書けないなら預かるは `asset-into-note.ts`
    *   **1 か所** ── 録音・画面録画と同じ口である(CLAUDE.md §7)。
    */
-  const into = noteToPutInto(dispatcher);
+  const opened = noteToPutInto(dispatcher);
+  /**
+   * 🔴 **落とした本文のノートへ入れる**(#684 ㋑、user 裁定待ちの推薦を実装)。
+   *
+   * ⚠ 直す前は入れ先が **`selectedLid` 固定**だったので、**横に留めた枠**へ落としても
+   *   そこには 1 バイトも入らず、主の枠のノートのいちばん下へ落ちていた ──
+   *   塊(段③)も一覧の行(段②)も**落とした枠のノート**へ書くので、file だけ違った。
+   * 🔑 **選択は動かさない** ── 入れ先だけを付け替え、画面は主の枠のまま返す
+   *   (`selectBack`)。⚠ 開き直すと「補助的な物が主の作業領域を奪う」(#300)になる。
+   * ⚠ 入れられない種類なら**付け替えない**(これまでどおり開いているノートへ ──
+   *   落とす側が線を出さないので、普通はここへ来ない)。
+   */
+  const dropped = at === undefined ? undefined : dispatcher.getState().entryMetas.get(at.lid);
+  const elsewhere =
+    at !== undefined && dropped !== undefined && at.lid !== opened.lid && isAppendable(dropped.archetype);
+  const into = elsewhere ? { lid: at!.lid, archetype: dropped!.archetype } : opened;
   const queue = createWritableQueue(dispatcher);
   /**
    * 🔴 **落とした所は、この 1 回のあいだ持ち回る**(#684 段④)── 1 枚入るたびに
@@ -401,6 +418,7 @@ export async function attachFiles(
           why,
           batch,
           ...(place === undefined ? {} : { place }),
+          ...(elsewhere ? { selectBack: opened.lid, intoTitle: dropped!.title } : {}),
           onPut: (n) => {
             tally.put += 1;
             tally.last = n;
@@ -438,7 +456,8 @@ export async function attachFiles(
    *   編集が終わって書けるようになった瞬間に `run` が走る。
    * ⚠ **`await` しない** ── 編集が終わるまで解けない約束を返すと、`withAssetGate`
    *   の鎖が編集の間ずっと詰まり、整理(未参照 GC)まで待たされる。
-   * ⚠ 入れ先(`into`)は**押した時点**で控えてある ── 編集していたノートに入る。
+   * ⚠ 入れ先(`into`)は**押した時点**で控えてある ── 落とした本文のノート
+   *   (どこにも落としていなければ、編集していたノート)に入る。
    * ⚠ `editing` 以外の `ready` でない相(起動前 / 致命エラー)は、これまでどおり断る
    *   ── 「編集を終えたら」と言っても、その日は来ない。
    */
