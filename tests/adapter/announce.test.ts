@@ -999,6 +999,12 @@ describe('お知らせの文面は固定(#220-7)', () => {
      *   書いており、**それが誤りだった**(自分の origin から集めるので同じ物が落ちる)。
      */
     ['2026-09-09-selfhost-update', '833fd456'],
+    /**
+     * ⚠ **#678(コピーした物)で足した**(2026-09-09)。枠(30 件)に余りが在るので、
+     *   押し出した entry は無い。🔑 まだ配っていない(`git log --oneline origin/main
+     *   -S"2026-09-09-copy-history" -- src/features/notice/notice-log.ts` が空)。
+     */
+    ['2026-09-09-copy-history', 'f7d44c63'],
     ['2026-09-09-selfhost-bundle', '0a1314ef'],
     ['2026-09-09-manual-toc-fold', '879eb2ed'],
     ['2026-09-09-storage-fallback-line', 'b3cdbb87'],
