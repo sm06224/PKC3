@@ -73,6 +73,7 @@ function setup(
 ) {
   const root = document.createElement('div');
   document.body.append(root);
+  const persisted: Array<{ lid: string; body: string }> = [];
   const d = new Dispatcher();
   const center = new CenterRouter(root);
   d.onState((s) => center.render(s));
@@ -91,7 +92,11 @@ function setup(
     renameEntry: async () => stubStamps(),
     replaceAssetRefs: () => Promise.reject(new Error('この test では添付の差し替えを使わない')),
     reorderEntry: async () => stubStamps(),
-    persistEntry: async () => stubStamps(),
+    // 🔑 **書いた本文を控える**(#681 段③ ── 「ノートへ」が何を書いたかを見るため)
+    persistEntry: async (e: { lid: string; body: string }) => {
+      persisted.push(e);
+      return stubStamps();
+    },
     ...(opts.withOp === false ? {} : { runReadOnlySql }),
   });
   bindActions(root, d, {});
@@ -116,7 +121,22 @@ function setup(
     [...pane.querySelectorAll('[data-pkc-field="sql-table"] tbody tr')].map((tr) =>
       [...tr.querySelectorAll('td')].map((td) => td.textContent ?? ''),
     );
-  return { root, d, pane, box, runBtn, type, key, note, heads, cells, runReadOnlySql };
+  const saveBtn = pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-to-note"]')!;
+  return {
+    root,
+    d,
+    pane,
+    box,
+    runBtn,
+    saveBtn,
+    type,
+    key,
+    note,
+    heads,
+    cells,
+    runReadOnlySql,
+    persisted,
+  };
 }
 
 beforeEach(() => {
@@ -454,5 +474,127 @@ describe('SQL を調べる面(#681 段②)', () => {
     d.dispatch({ type: 'SET_VIEW_MODE', mode: 'sql' });
     const box = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="sql-input"]')!;
     expect(box.value, '戻ったら打ちかけが消えていた').toBe('SELECT 1 -- 書きかけ');
+  });
+});
+
+/**
+ * 🔴 **答えをノートへ書き出す**(#681 段③ の 3 つ目)。
+ *
+ * ⚠ この面は**別の窓**で開くので、ノートを作っても**その窓には何も起きない** ──
+ *   だから「作った」と画面で言う。言わないと、押した user には
+ *   **押せなかった**ように見える(CLAUDE.md「押した後どうなるか」)。
+ *
+ * 守る主張:
+ * 1. 答えが無いうちは**押せない**(押せるのに何も起きない口を作らない)
+ * 2. 押すとノートが 1 件できて、本文に打った SQL と表が入る
+ * 3. 🔴 できたことを**画面が言う**(題名つき)
+ * 4. 走らせ直したら知らせは消える(古い知らせを次の答えの上に残さない)
+ */
+describe('答えをノートへ書き出す(#681 段③ の 3 つ目)', () => {
+  it('🔴 まだ走らせていないうちは押せない', () => {
+    const { saveBtn } = setup();
+    expect(saveBtn, '「ノートへ」の口が無い').not.toBeNull();
+    expect(saveBtn.disabled, '答えが無いのに押せる').toBe(true);
+  });
+
+  it('🔴 押すとノートが 1 件でき、打った SQL と表が本文に入る', async () => {
+    const { d, type, runBtn, saveBtn, persisted } = setup(async () =>
+      answer(['title', 'n'], [['あ', 1]]),
+    );
+    type('SELECT title, n FROM entries');
+    runBtn.click();
+    await settle();
+    expect(saveBtn.disabled, '答えが出たのに押せない').toBe(false);
+
+    const before = d.getState().entryMetas.size;
+    saveBtn.click();
+    const metas = [...d.getState().entryMetas.values()];
+    expect(metas.length, 'ノートが増えていない').toBe(before + 1);
+    const made = metas.find((m) => m.title.startsWith('SQL の答え'));
+    expect(made, '題名が「SQL の答え …」になっていない').toBeDefined();
+
+    /**
+     * 🔴 **disk へ渡った本文で見る**(state の下書きではない)── ここを見ないと、
+     *   「ノートは増えたが中身が空」でも緑になる(CLAUDE.md §4「下流まで通す」)。
+     */
+    await settle();
+    const wrote = persisted.find((e) => e.lid === made?.lid);
+    expect(wrote, '本文が disk へ渡っていない').toBeDefined();
+    expect(wrote?.body, '打った SQL が本文に無い').toContain('SELECT title, n FROM entries');
+    expect(wrote?.body, '見出しが本文に無い').toContain('title,n');
+    expect(wrote?.body, '行が本文に無い').toContain('あ,1');
+  });
+
+  it('🔴 書き出したことを画面が言う(別の窓なので、言わないと押せなかったように見える)', async () => {
+    const { type, runBtn, saveBtn, note } = setup(async () => answer(['a'], [[1]]));
+    type('SELECT 1 AS a');
+    runBtn.click();
+    await settle();
+    expect(note(), '押す前から書き出したと言っている').not.toContain('書き出しました');
+    saveBtn.click();
+    expect(note(), '書き出したことを言っていない').toContain('書き出しました');
+    expect(note(), '題名を言っていない').toContain('SQL の答え');
+  });
+
+  /**
+   * 🔴 **知らせを消す門は 2 つある**(打ち直した / 走らせ直した)。
+   * ⚠ **1 つずつ鳴る場面を作る**(CLAUDE.md §1「門を N 個置いたら、N 個目だけが
+   *   鳴る場面を N 通り作る」)── まとめて 1 本の test にすると、
+   *   **片方を壊してももう片方が救って落ちない**(変異試験 A1/A2 が SURVIVED で教えた)。
+   */
+  it('⚠ 打ち直しただけで、前の知らせは消える(走らせなくても)', async () => {
+    const { type, runBtn, saveBtn, note } = setup(async () => answer(['a'], [[1]]));
+    type('SELECT 1 AS a');
+    runBtn.click();
+    await settle();
+    saveBtn.click();
+    expect(note()).toContain('書き出しました');
+    // ⚠ **走らせない** ── 打っただけで消えることを見る
+    type('SELECT 2 AS a');
+    expect(note(), '打ち直したのに前の知らせが残っている').not.toContain('書き出しました');
+  });
+
+  it('⚠ 同じ字のまま走らせ直しても、前の知らせは消える', async () => {
+    const { type, runBtn, saveBtn, note } = setup(async () => answer(['a'], [[1]]));
+    type('SELECT 1 AS a');
+    runBtn.click();
+    await settle();
+    saveBtn.click();
+    expect(note()).toContain('書き出しました');
+    // ⚠ **打ち直さない** ── 走らせ直しただけで消えることを見る
+    runBtn.click();
+    await settle();
+    expect(note(), '走らせ直したのに前の知らせが残っている').not.toContain('書き出しました');
+  });
+
+  /**
+   * 🔴 **押せる印を外しても、何も起きない**(2 つ目の網)。
+   *
+   * ⚠ ふだんは画面が押させない(`disabled`)が、それは**見た目の側の門**である ──
+   *   別の道(鍵・拡張・作り直しの途中)から同じ action が来ても、答えが無ければ
+   *   **ノートを作ってはいけない**(空のノートが増えるのがいちばん困る)。
+   * ⚠ この test が無いと、受け側の門を外しても誰も落ちない(変異試験 B1 が SURVIVED)。
+   */
+  it('🔴 答えが無いまま呼ばれても、ノートは作らない', () => {
+    const { d, saveBtn, note } = setup();
+    const before = d.getState().entryMetas.size;
+    saveBtn.disabled = false; // ⚠ 画面の門を外して、受け側の門だけを見る
+    saveBtn.click();
+    expect(d.getState().entryMetas.size, '答えが無いのにノートを作った').toBe(before);
+    expect(note(), '作っていないのに書き出したと言った').not.toContain('書き出しました');
+  });
+
+  it('⚠ 走っている最中は押せない(二重に作らせない)', async () => {
+    let release = (): void => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const { type, runBtn, saveBtn } = setup(async () => {
+      await gate;
+      return answer(['a'], [[1]]);
+    });
+    type('SELECT 1 AS a');
+    runBtn.click();
+    expect(saveBtn.disabled, '走っている最中に押せる').toBe(true);
+    release();
+    await settle();
   });
 });

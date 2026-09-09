@@ -43,6 +43,8 @@ export class SqlRenderer {
    * ⚠ **1 回だけ** ── 答えが届くたびに奪い直すと、読んでいる最中に飛ぶ。
    */
   private focused = false;
+  /** 「ノートへ」の口(答えが無いうちは押させない)。 */
+  private save: HTMLButtonElement | null = null;
 
   constructor(host: HTMLElement) {
     this.host = host;
@@ -71,7 +73,19 @@ export class SqlRenderer {
     run.textContent = '走らせる';
     // 🔑 近道も出す(打ち終わって手を動かさずに走らせられる)
     run.title = 'Ctrl+Enter でも走ります';
-    bar.append(run);
+    /**
+     * 🔴 **答えをノートへ書き出す**(#681 段③ の 3 つ目)。
+     * ⚠ 窓を閉じれば答えは消えるので、**残す道が要る** ── 無いと
+     *   「調べられるが、持ち帰れない」で終わる。
+     * ⚠ 答えが無いうちは**押せない**(押せるのに何も起きない口を作らない)。
+     */
+    const save = document.createElement('button');
+    save.type = 'button';
+    save.setAttribute('data-pkc-action', 'sql-to-note');
+    save.setAttribute('data-pkc-field', 'sql-to-note');
+    save.textContent = 'ノートへ';
+    save.title = 'いま出ている答えを、新しいノートに書き出します';
+    bar.append(run, save);
     const tip = document.createElement('p');
     tip.setAttribute('data-pkc-field', 'sql-tip');
     /**
@@ -100,6 +114,7 @@ export class SqlRenderer {
     this.host.append(head, note, body);
     this.box = box;
     this.run = run;
+    this.save = save;
     this.note = note;
     this.body = body;
     return body;
@@ -111,6 +126,11 @@ export class SqlRenderer {
     // ⚠ 打ちかけの字は**上書きしない**(state が直した字を返したときだけ揃える)
     if (this.box !== null && this.box.value !== p.sql) this.box.value = p.sql;
     if (this.run !== null) this.run.disabled = p.running;
+    /**
+     * ⚠ **押せるのに何も起きない口を作らない** ── まだ走らせていない回と、
+     *   走っている最中は押させない(押した後に「何も起きなかった」を作らない)。
+     */
+    if (this.save !== null) this.save.disabled = p.running || p.ranSql === '' || p.columns.length === 0;
     if (!this.focused && !this.host.hidden) {
       this.focused = true;
       this.box?.focus();
@@ -134,6 +154,8 @@ export class SqlRenderer {
       String(p.truncated),
       String(p.ms),
       String(p.rows.length),
+      // ⚠ 書き出しの知らせも指紋に入れる ── 入れないと、答えが同じ回に**行が更新されない**
+      p.saved,
     ].join(' ');
     if (fingerprint === this.last) return;
     this.last = fingerprint;
@@ -182,6 +204,12 @@ export class SqlRenderer {
 function noteLine(p: AppState['sqlPage']): string {
   if (p.running) return '走らせています…';
   if (p.error !== '') return p.error;
+  /**
+   * 🔴 **書き出したことを、いちばん上で言う**(#681 段③ の 3 つ目)。
+   * ⚠ この面は**別の窓**なので、ノートを作っても窓の中は何も変わらない ──
+   *   言わないと「押せなかった」に見える。
+   */
+  if (p.saved !== '') return `「${p.saved}」というノートに書き出しました(左の一覧に出ています)`;
   if (p.ranSql === '') return '';
   const took = `(${String(p.ms)} ミリ秒)`;
   if (p.truncated)

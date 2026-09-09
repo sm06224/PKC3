@@ -142,6 +142,15 @@ export interface SqlPageState {
   readonly running: boolean;
   /** 断りの字(空 = 無い)。⚠ **そのまま画面に出せる字**にする。 */
   readonly error: string;
+  /**
+   * 🔴 **書き出したノートの題名**(空 = まだ書き出していない。#681 段③ の 3 つ目)。
+   *
+   * ⚠ この面は**別の窓**で開くので、ノートを作っても**その窓には何も起きない**
+   *   ── 何も言わないと、押した user には**押せなかった**ように見える
+   *   (CLAUDE.md「押した後どうなるか」)。だから題名を控えて、表の上の行で言う。
+   * ⚠ 走らせ直したら消す(古い知らせを次の答えの上に残さない)。
+   */
+  readonly saved: string;
 }
 
 /**
@@ -1054,6 +1063,7 @@ export const initialState: AppState = {
     ms: 0,
     running: false,
     error: '',
+    saved: '',
   },
   queryKey: null,
   smartHits: new Map<string, SmartHitState>(),
@@ -1132,6 +1142,12 @@ export type UserAction =
   | { type: 'SET_SEARCH_PAGE_QUERY'; query: string }
   | { type: 'SET_SQL_TEXT'; sql: string }
   | { type: 'RUN_SQL' }
+  /**
+   * 🔴 **答えをノートへ書き出した**(#681 段③ の 3 つ目)。
+   * ⚠ ノートを作るのは `CREATE_ENTRY` の仕事 ── ここは**言うだけ**である
+   *   (2 つの仕事を 1 つの action に持たせない)。
+   */
+  | { type: 'SQL_SAVED'; title: string }
   | {
       type: 'SET_SQL_RESULT';
       sql: string;
@@ -2595,7 +2611,11 @@ function reduceCore(
     /** 欄に打っただけ ── **走らせない**(重い問い合わせを打鍵ごとに投げない)。 */
     case 'SET_SQL_TEXT':
       // ⚠ 断りの字は消す(打ち直したのに前の断りが残ると、直したか分からない)
-      return { state: { ...state, sqlPage: { ...state.sqlPage, sql: action.sql, error: '' } }, events: [] };
+      // ⚠ 書き出しの知らせも消す(打ち直したのに前の知らせが残ると、いま出た表の話に見える)
+      return {
+        state: { ...state, sqlPage: { ...state.sqlPage, sql: action.sql, error: '', saved: '' } },
+        events: [],
+      };
     /**
      * 🔴 **走らせる**(#681 段②)。
      * ⚠ 走らせる前に**字で見分ける** ── ここは「断る理由を読める字で言う」ための門で、
@@ -2626,7 +2646,7 @@ function reduceCore(
         state: {
           ...state,
           // 🔑 **直した字を欄へ戻す**(全角で打った人に、実際に走った字を見せる)
-          sqlPage: { ...state.sqlPage, sql: checked.sql, running: true, error: '' },
+          sqlPage: { ...state.sqlPage, sql: checked.sql, running: true, error: '', saved: '' },
         },
         events: [{ type: 'REQUEST_SQL_RUN', sql: checked.sql }],
       };
@@ -2646,6 +2666,15 @@ function reduceCore(
             error: '',
           },
         },
+        events: [],
+      };
+    /**
+     * 🔴 **書き出したことを画面で言う**(#681 段③ の 3 つ目)。
+     * ⚠ 別の窓で開いている面なので、**言わないと押せなかったように見える**。
+     */
+    case 'SQL_SAVED':
+      return {
+        state: { ...state, sqlPage: { ...state.sqlPage, saved: action.title } },
         events: [],
       };
     case 'SQL_RUN_FAILED':
