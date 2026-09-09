@@ -226,7 +226,15 @@ describe('SQL を調べる面(#681 段②)', () => {
      * 🔴 **実測したことだけ書く**(`sqlite-capabilities.test.ts` が pin)。
      * ⚠ これが消えると、打つ人は同梱 sqlite の 3 つの癖に**必ず 1 度はぶつかる**。
      */
-    const tip = pane.querySelector('[data-pkc-field="sql-tip"]')?.textContent ?? '';
+    /**
+     * ⚠ **2026-09-09(#837 K1)に 3 行へ割った** ── 案内(何が調べられるか)/
+     *   約束(読むだけ・引用符・REGEXP)/ 消えない手本。
+     * 🔑 **主張は変えていない**:「画面に出ている」ことを見るので、
+     *   3 つを合わせて読む(どの要素に書いてあるかは主張ではない)。
+     */
+    const tip =
+      (pane.querySelector('[data-pkc-field="sql-tip"]')?.textContent ?? '') +
+      (pane.querySelector('[data-pkc-field="sql-rules"]')?.textContent ?? '');
     expect(tip, '読むだけだと言っていない').toContain('読むだけ');
     expect(tip, '単引用符の話が無い').toContain('単引用符');
     expect(tip, 'REGEXP が無いことを言っていない').toContain('REGEXP');
@@ -964,5 +972,57 @@ describe('着地前レビューの直し(#681)', () => {
      */
     expect(note(), '断りが出ていない(前提が崩れている)').toContain('読み取り専用です');
     expect(note(), '断りの行で名札が消えた').toContain('売上.sqlite');
+  });
+});
+/**
+ * 🔴 **#837 の改善 3 件**(2026-09-09。user 裁定 2026-09-02「推奨で実装を許可」)。
+ */
+describe('#837 の改善(K1 / K2 / K3)', () => {
+  it('🔴 K1 打ち始めても消えない手本が、画面に字として在る', () => {
+    const { pane, box } = setup();
+    const ex = pane.querySelector('[data-pkc-field="sql-example"]')?.textContent ?? '';
+    expect(ex, '消えない手本が画面に無い').not.toBe('');
+    // 🔑 薄字と**同じ字**である(手本を 2 通り持たない)
+    expect(ex, '薄字と別の字を出している').toContain(box.placeholder);
+    // ⚠ 打ち始めても消えない(薄字と違って値ではないので、そもそも消えようがない)
+    box.value = 'SELECT 1';
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(
+      pane.querySelector('[data-pkc-field="sql-example"]')?.textContent ?? '',
+      '打ったら手本が消えた',
+    ).toBe(ex);
+  });
+
+  it('🔴 K1 相手を選ぶと、消えない手本もその file のものになる', async () => {
+    const { pane, pick } = setup();
+    const before = pane.querySelector('[data-pkc-field="sql-example"]')?.textContent ?? '';
+    pick('db1');
+    await settle();
+    const after = pane.querySelector('[data-pkc-field="sql-example"]')?.textContent ?? '';
+    expect(after, 'その file の表が手本になっていない').toContain('売上');
+    expect(after, '相手を変えても手本が変わらない').not.toBe(before);
+  });
+
+  it('🔴 K1 打ち方の約束が、案内とは別の行に在る', () => {
+    const { pane } = setup();
+    const rules = pane.querySelector('[data-pkc-field="sql-rules"]')?.textContent ?? '';
+    expect(rules, '約束の行が無い').toContain('読むだけ');
+    const tip = pane.querySelector('[data-pkc-field="sql-tip"]')?.textContent ?? '';
+    expect(tip, '案内へ戻っている(1 段落に 6 文が並ぶ)').not.toContain('読むだけ');
+  });
+
+  it('🔴 K3 書き出したノートに、どこを調べたかが残る', async () => {
+    const { type, runBtn, saveBtn, persisted, pick } = setup(async () =>
+      answer(['a'], [[1]]),
+    );
+    pick('db1');
+    await settle();
+    type('SELECT 1');
+    runBtn.click();
+    await settle();
+    saveBtn.click();
+    await settle();
+    const body = persisted.at(-1)?.body ?? '';
+    expect(body, 'どこを調べたか書いていない').toContain('売上.sqlite を調べました');
   });
 });

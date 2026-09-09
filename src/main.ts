@@ -57,6 +57,7 @@ import {
   FLAG_PASTE_INSPECT,
 } from '@features/flags';
 import { appBrowseMode, browseScanOf, isBrowseMode } from '@adapter/ui/render/browse-mode';
+import { SavingIndicator } from '@features/status/saving-line';
 import { StoreClient } from '@adapter/platform/storage/store-client';
 import { openAssetWindow } from '@adapter/platform/asset-window';
 import {
@@ -647,6 +648,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   let persist: PortablePersist | null = null;
   let persistState = '';
+  /**
+   * 🔴 **「保存中…」**(#828 ①。user 推薦)。
+   *
+   * ⚠ 題名の書換えは画面が**先**、disk が**後**なので、押した直後に読み直すと
+   *   **題名だけが元へ戻る**ことがある(混んでいるとき 8 回中 4 回)。
+   * 🔑 だから**書いている間だけ**帯に出す ── 消えたら書き終わりである。
+   * ⚠ **判断はここに書かない**(`saving-line.ts`)── この file はどの test からも
+   *   実行されない(CLAUDE.md §2)。ここは**繋ぐだけ**。
+   */
+  const saving = new SavingIndicator(() => repaintStatus());
   /** ⚠ `paint` はずっと後で組まれるので、繋がるまでは何もしない口にしておく。 */
   let repaintStatus: () => void = () => undefined;
   const armPersist = (real: StoreClient): void => {
@@ -1163,7 +1174,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * 🔴 **可搬単一 HTML の保存の状態**(#400 段③)。⚠ ふだんは空文字なので
      *   場所を取らない ── 出るのは「長く書けていない」か「書けなかった」ときだけ。
      */
-    const parts = [statusBase, sync, portableAssetNote, persistState, noticeLine, errorLine]
+    const parts = [statusBase, sync, portableAssetNote, persistState, saving.line(), noticeLine, errorLine]
       .filter((t) => t !== '');
     const text = parts.join(' — ');
     /**
@@ -3374,7 +3385,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * ⚠ 判断は `store-effects.ts` が持つ ── この file はどの test からも
      *   実行されない(CLAUDE.md §2)ので、ここは**渡すだけ**にする。
      */
-    onWriting: (writing) => root.toggleAttribute('data-pkc-writing', writing),
+    onWriting: (writing) => {
+      root.toggleAttribute('data-pkc-saving', writing);
+      saving.setWriting(writing);
+    },
     /**
      * 🔴 **添付の bytes を読む口**(#681 段③ の 2 つ目)。
      *

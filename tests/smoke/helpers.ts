@@ -346,7 +346,10 @@ export async function createEntry(page: Page, archetype: string): Promise<void> 
  *   そこで読み直すと**題名だけが既定へ戻る**。CPU に 4 本の負荷を掛けて
  *   `sub-path.smoke.spec.ts` を 6 回回すと **1 回**出た(負荷なしでは 0 / 多数)。
  *
- * 🔑 印は `data-pkc-writing`(`data-pkc-boot` と同じ**検査のための契約**)。
+ * 🔑 印は `data-pkc-saving`(`data-pkc-boot` と同じ**検査のための契約**)。
+ * ⚠ **`data-pkc-writing` ではない**(2026-09-09 に改名した)── あちらは
+ *   **縦書きかどうか**(`document-globals.ts` の `data-pkc-writing="vertical"`)で
+ *   既に使われている綴りで、同じ名前に 2 つの意味を載せると次に読む人が取り違える。
  * ⚠ **空振りは別の場所で止めている** ── 印を出す判断は
  *   `tests/adapter/store-settle.test.ts` が(true / false の順まで)決定的に見て、
  *   `main.ts` が渡していることは `tests/adapter/bootstrap-wiring.test.ts` が
@@ -359,7 +362,7 @@ export async function writesLanded(page: Page): Promise<void> {
     () => {
       const el = document.querySelector('[data-pkc-boot]');
       // ⚠ 起動前に「書いていない」と読まない(起動を待つ)
-      return el !== null && !el.hasAttribute('data-pkc-writing');
+      return el !== null && !el.hasAttribute('data-pkc-saving');
     },
     undefined,
     { timeout: 15_000 },

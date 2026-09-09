@@ -25,7 +25,7 @@
 import type { AppState } from '@adapter/state/app-state';
 import { sqlSourcesOf } from '@features/query/sqlite-attachment';
 import { humanBytes } from '@features/human-bytes';
-import { sqlPlaceholder, sqlTipText } from '@features/query/sql-tip';
+import { SQL_RULES, sqlExampleText, sqlPlaceholder, sqlTipText } from '@features/query/sql-tip';
 
 /** 表の値を字にする。⚠ `null` と空文字を**見分けられる**ようにする。 */
 const cellText = (v: string | number | null): string => (v === null ? '(なし)' : String(v));
@@ -60,6 +60,8 @@ export class SqlRenderer {
    *   (「押しても何も無い口を作らない」と書いた当の行が、初回だけ走っていなかった)。
    */
   private sourceKey: string | null = null;
+  /** 打ち始めても消えない手本(#837 K1)。⚠ 器は 1 度しか組まないので控えを持つ。 */
+  private example: HTMLElement | null = null;
 
   constructor(host: HTMLElement) {
     this.host = host;
@@ -123,16 +125,32 @@ export class SqlRenderer {
      */
     // 🔴 中身は `render` が揃える(#681 F2)── 相手が変われば案内も手本も変わる
     tip.textContent = sqlTipText(null);
+    /**
+     * 🔴 **打ち方の約束は 2 行目へ**(#837 K1、2026-09-09)。
+     * ⚠ 直す前は 6 文が 1 段落に続いていて、**読み飛ばされる長さ**だった。
+     */
+    const rules = document.createElement('p');
+    rules.setAttribute('data-pkc-field', 'sql-rules');
+    rules.textContent = SQL_RULES;
+    /**
+     * 🔴 **打ち始めても消えない手本**(#837 K1)。
+     * ⚠ 薄字(`placeholder`)は **1 文字打った瞬間に消える**ので、
+     *   「打つために開く面」なのに**打つ物の見本が画面から無くなって**いた。
+     */
+    const example = document.createElement('p');
+    example.setAttribute('data-pkc-field', 'sql-example');
+    example.textContent = sqlExampleText(null);
     const note = document.createElement('p');
     note.setAttribute('data-pkc-field', 'sql-note');
     const body = document.createElement('div');
     body.setAttribute('data-pkc-field', 'sql-body');
-    head.append(title, box, bar, tip);
+    head.append(title, box, bar, tip, rules, example);
     this.host.append(head, note, body);
     this.box = box;
     this.run = run;
     this.save = save;
     this.source = source;
+    this.example = example;
     this.tip = tip;
     this.note = note;
     this.body = body;
@@ -196,6 +214,11 @@ export class SqlRenderer {
     if (this.tip !== null && this.tip.textContent !== tipText) this.tip.textContent = tipText;
     const hint = sqlPlaceholder(target);
     if (this.box !== null && this.box.placeholder !== hint) this.box.placeholder = hint;
+    // 🔴 **消えない手本も相手へ揃える**(#837 K1)── 薄字と同じ 1 本から採る
+    const example = sqlExampleText(target);
+    if (this.example !== null && this.example.textContent !== example) {
+      this.example.textContent = example;
+    }
     if (!this.focused && !this.host.hidden) {
       this.focused = true;
       this.box?.focus();
