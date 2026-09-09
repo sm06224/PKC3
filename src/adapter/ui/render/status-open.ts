@@ -60,6 +60,8 @@ export interface StatusUndoState {
   readonly notice: string | null;
 }
 
+import { BLOCK_MOVED_NOTICE } from '@features/markdown/line-move';
+
 /**
  * 🔴 **知らせの隣の「元に戻す」を出し入れする**(#684 段①)。
  *
@@ -74,6 +76,16 @@ export interface StatusUndoState {
  * 🔑 押した先は `undo-move` の受け手(`binder.ts`)── 書くのは `hidden` だけ。
  */
 export function paintStatusUndo(btn: HTMLElement, state: StatusUndoState, shownLine: string): void {
-  const show = state.lastMove !== null && state.notice === shownLine;
+  /**
+   * 🔴 **出ている字が「動かしました」そのものか**を見る(2026-09-09、UX レビューで直した)。
+   *
+   * ⚠ 直す前は `state.notice === shownLine` だった ── **呼び側はいまの知らせを渡す**ので
+   *   これは常に真で、`lastMove` が残っている限り**どの知らせの隣にも**出ていた。
+   * 🔴 実害:段③(塊を別のノートへ持っていく)の知らせの隣に出て、押すと
+   *   **画面に出ていない別のノートの、前の並べ替え**が戻る(押した字と起きることが違う)。
+   * ⚠ `lastMove` はノートを切り替えても捨てられない(捨てるのは編集開始と同じノートの
+   *   別の書換だけ)ので、字で見分けるしかない。
+   */
+  const show = state.lastMove !== null && shownLine === BLOCK_MOVED_NOTICE;
   if (btn.hidden !== !show) btn.hidden = !show;
 }

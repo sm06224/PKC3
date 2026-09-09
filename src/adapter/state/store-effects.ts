@@ -18,6 +18,7 @@ import {
   resolveAppendAt,
 } from '@features/markdown/append-target';
 import { applyBodyRewrite, applyTagsToBody } from '@features/markdown/body-rewrite';
+import { cutLines, insertLines } from '@features/markdown/line-move';
 import { clipPreview } from '@features/relation/dual-pane';
 import {
   EMPTY_SMART,
@@ -2016,6 +2017,146 @@ export function connectStoreEffects(
             stamp(ev.lid, stamps);
           } catch (e) {
             fail(`追記を保存できませんでした: ${String(e)}`);
+          }
+        });
+        break;
+      /**
+       * 🔴 **本文の塊を、別のノートへ持っていく**(#684 段③)。
+       *
+       * ## 順番に意味がある ── **入れてから切る**
+       *
+       * ⚠ 触る本文が 2 つあるので、**片方だけ通る回**が普通に起きる(別の窓の書込)。
+       * 🔑 先に切ると、入らなかった回に**本文が消えたまま**になり、どこからも戻せない。
+       *   先に入れれば、切れなかった回は**二重になる**だけ ── 見えるし、掴んで捨てられる。
+       * ⚠ どちらの本文も**disk から読み直す**(画面の古い本文を基底にしない)。
+       * ⚠ 切る側は**掴んだ時点の行と byte 一致**しなければ切らない(`cutLines`)、
+       *   入れる側は**落とした所の目印**が合わなければ入れない(`insertLines` の `anchor`)。
+       * 🔑 read→write を**同じ 1 op** で回す(直列 queue)── 間に別の書込を挟ませない。
+       */
+      case 'REQUEST_BLOCK_HANDOFF':
+        enqueue(async () => {
+          if (disposed) return;
+          const fail = (error: string): void => {
+            if (!disposed) dispatcher.dispatch({ type: 'OP_FAILED', error });
+          };
+          try {
+            const fromBody = await store.getBody(ev.from.lid);
+            const toBody = await store.getBody(ev.to.lid);
+            if (disposed) return;
+            if (fromBody === null || toBody === null)
+              return fail('持っていけません(ノートが見つかりません)');
+            // ① 切った後の姿と塊を**計算だけ**する(まだ書かない)
+            const cut = cutLines(fromBody, ev.from);
+            if (cut === null)
+              return fail('本文が変わっているため、その塊を持っていけませんでした(開き直してください)');
+            // ② 行き先へ**先に**入れる ── 入らなければ元は 1 バイトも触らない
+            /**
+             * ⚠ **末尾へ入れるときは、終端の改行の「前」へ**(着地前レビュー D)。
+             *   行数をそのまま渡すと**最後の空要素の後ろ**に置かれ、
+             *   行き先の本文の**終端の改行が消える**(`appendBlock` は必ず `\n` で閉じる ──
+             *   同じ問いに 2 つの答えを作らない。§7)。
+             */
+            const toRows = toBody.split('\n');
+            const at = ev.to.toBefore ?? toRows.length - (toBody.endsWith('\n') ? 1 : 0);
+            const newTo = insertLines(toBody, at, cut.chunk, ev.to.anchor);
+            if (newTo === null)
+              /**
+               * ⚠ **断り文は「落とした所」を選んだ回だけ**(2026-09-09 の UX レビュー)──
+               *   一覧の行へ落とした user は所を選んでいないので、「落とした所が…」では
+               *   何を直せばよいか分からない(しかも開き直しても直らない ── 行き先の本文が
+               *   閉じていない ``` で終わっていると、末尾は必ず囲いの中である)。
+               */
+              return fail(
+                ev.to.toBefore === null
+                  ? `「${ev.to.title}」の本文が閉じていない囲み(\`\`\` や :::)で終わっているため、そこへは入れられませんでした`
+                  : '落とした所が本文から無くなっていたため、持っていけませんでした(開き直してください)',
+              );
+            const toExt = extractMeta(ev.to.archetype, newTo);
+            const toStamps = await store.persistEntry(
+              {
+                lid: ev.to.lid,
+                title: ev.to.title,
+                archetype: ev.to.archetype,
+                body: newTo,
+                entryOrder: ev.to.entryOrder,
+                status: toExt.status,
+                date: toExt.date,
+                archived: toExt.archived,
+              },
+              { expectHash: contentHash64Hex(toBody) },
+            );
+            if (disposed) return;
+            if (toStamps.conflict === true)
+              return fail(
+                '別のウィンドウが持っていき先のノートを書き替えたため、持っていけませんでした(もう一度掴んでください)',
+              );
+            dispatcher.dispatch({
+              type: 'BODY_REWRITTEN',
+              lid: ev.to.lid,
+              body: newTo,
+              rewrite: { kind: 'insert-lines', toBefore: at, lines: cut.chunk },
+              /**
+               * 🔴 **「元に戻す」の材料は入れない**(#684 段③)。
+               * ⚠ 入れると、行き先で「元に戻す」を押した user が**塊を消す**ことになる
+               *   ── 元のノートからは既に切れているので、**どこにも無くなる**。
+               * 🔑 戻し方は**掴んで持ち帰る**(同じ ⠿)── 知らせが行き先を名指しし、
+               *   隣の「開く」でそこへ行ける。
+               */
+              status: toExt.status,
+              date: toExt.date,
+              archived: toExt.archived,
+            });
+            stamp(ev.to.lid, toStamps);
+            // ③ 元から切る ── ここで落ちても**二重になるだけ**(消えるより良い側)
+            const fromExt = extractMeta(ev.from.archetype, cut.body);
+            const fromStamps = await store.persistEntry(
+              {
+                lid: ev.from.lid,
+                title: ev.from.title,
+                archetype: ev.from.archetype,
+                body: cut.body,
+                entryOrder: ev.from.entryOrder,
+                status: fromExt.status,
+                date: fromExt.date,
+                archived: fromExt.archived,
+              },
+              { expectHash: contentHash64Hex(fromBody) },
+            );
+            if (disposed) return;
+            if (fromStamps.conflict === true)
+              return fail(
+                '持っていき先には入りましたが、元の本文からは消せませんでした(別のウィンドウが書き替えたためです。元の塊は残っています)',
+              );
+            dispatcher.dispatch({
+              type: 'BODY_REWRITTEN',
+              lid: ev.from.lid,
+              body: cut.body,
+              rewrite: { kind: 'cut-lines', start: ev.from.start, end: ev.from.end, lines: ev.from.lines },
+              status: fromExt.status,
+              date: fromExt.date,
+              archived: fromExt.archived,
+            });
+            stamp(ev.from.lid, fromStamps);
+            /**
+             * 🔑 **どこへ行ったかを名指しし、そこへ行ける口を添える**(#668 A と同じ作法)。
+             * ⚠ 画面は動かない(掴んだ側に居るまま)ので、字だけが手がかりである。
+             */
+            dispatcher.dispatch({
+              type: 'OP_NOTICE',
+              /**
+               * ⚠ **どこに入ったかと、帰り道を同じ 1 行で言う**(2026-09-09 の UX レビュー)──
+               *   1 稿目は行き先の名前だけで、①末尾に入ったこと ②戻し方 のどちらも
+               *   画面に出ていなかった(マニュアルとお知らせにしか無い = 事故の瞬間に読めない)。
+               * 🔑 この repo は既にそう書いている(`app-state.ts` の表の形の知らせ)。
+               */
+              message:
+                ev.to.toBefore === null
+                  ? `本文の塊を「${ev.to.title}」のいちばん下へ持っていきました(戻すには、そこで同じ ⠿ を掴んで持ち帰ってください)`
+                  : `本文の塊を「${ev.to.title}」へ持っていきました(戻すには、そこで同じ ⠿ を掴んで持ち帰ってください)`,
+              open: ev.to.lid,
+            });
+          } catch (e) {
+            fail(String(e));
           }
         });
         break;

@@ -228,3 +228,77 @@ test('🔴 ファイルを本文の塊の上へ落とすと、その所に添付
 
   expect(errors, 'pageerror が出た').toEqual([]);
 });
+
+/**
+ * 🔴 **塊を別のノートへ持っていく**(#684 段③)。
+ *
+ * ⚠ unit は「正しい座標で `HANDOFF_BLOCK` が飛ぶ」までと「入れてから切る」まで ──
+ *   **実マウスで一覧の行まで運べること**と、**2 つのノートの本文が保存されて描き直る**
+ *   往復は実ブラウザにしか無い。
+ * 🔑 観測点は**両側**(元から消え、行き先に出る)── 片側だけ見ると、
+ *   「入ったが元にも残っている」(二重)を素通りする。
+ */
+test('🔴 ⠿ を一覧の行へ落とすと、その塊が別のノートへ移る (#684 段③)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await gotoApp(page);
+
+  // 行き先を先に作る
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', '行き先のノート');
+  await page.fill('[data-pkc-field="editor-body"]', '受け皿\n');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  // 掴む側
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', '持っていくノート');
+  await page.fill('[data-pkc-field="editor-body"]', BODY);
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  await expect(page.locator(`${HOST}[data-pkc-painted]`)).toBeAttached();
+  expect(await order(page), '前提: 描いた並び').toEqual(['題', '段落 A', '章 B', '本文 B', '章 C', '本文 C']);
+
+  // 段落 A に乗せて ⠿ を出し、実マウスで「行き先のノート」の行まで運ぶ
+  await page.locator(`${HOST} > p`).first().hover();
+  const grip = page.locator('[data-pkc-field="block-grip"]');
+  await expect(grip, '乗せても口が出ない').toBeVisible();
+  const g = (await grip.boundingBox())!;
+  const row = page
+    .locator('[data-pkc-region="filer-table"] [data-pkc-entry]', { hasText: '行き先のノート' })
+    .first();
+  await expect(row, '行き先の行が無い(前提が崩れた)').toBeVisible();
+  const r = (await row.boundingBox())!;
+  await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(g.x + 40, g.y + 40, { steps: 4 });
+  await page.mouse.move(r.x + r.width / 2, r.y + r.height / 2, { steps: 8 });
+  // ⚠ 落とす前に「落とせる」印が出ている(落とした後は消える)
+  await expect(row, '一覧の行に落とせる印が出ない').toHaveAttribute('data-pkc-dropping', '');
+  /**
+   * 🔴 **画面が本当に変わっているか**(2026-09-09 の UX レビュー)。
+   * ⚠ 属性が付くことは unit も見ているが、**CSS が当たっているか**はここでしか分からない ──
+   *   1 稿目は `[data-pkc-drop][data-pkc-dropping]` の規則しか無く、`data-pkc-drop` は
+   *   **フォルダの行にしか付かない**ので、普通のノートの行は**1px も変わらなかった**。
+   */
+  const outline = await row.evaluate((el) => getComputedStyle(el).outlineStyle);
+  expect(outline, '落とせる行が光っていない(印は付いているのに画面が変わらない)').toBe('dashed');
+  await page.mouse.up();
+
+  // 🔴 元から消える
+  await expect
+    .poll(() => order(page), { timeout: 8000, message: '元の本文から消えていない' })
+    .toEqual(['題', '章 B', '本文 B', '章 C', '本文 C']);
+  // どこへ行ったかを言う
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText(
+    '本文の塊を「行き先のノート」のいちばん下へ持っていきました',
+  );
+  // ⚠ 帰り道を同じ 1 行で言う(事故の瞬間に読むのはここだけ)
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('持ち帰って');
+  // 🔴 行き先に出る(「開く」で行ける ── 帰り道もここから)
+  await clickReal(page, '[data-pkc-field="status-open"]');
+  await expect
+    .poll(() => order(page), { timeout: 8000, message: '行き先に入っていない' })
+    .toEqual(['受け皿', '段落 A']);
+
+  expect(errors, 'pageerror が出た').toEqual([]);
+});
