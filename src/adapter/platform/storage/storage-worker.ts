@@ -60,6 +60,14 @@ import {
   type ContactScan,
 } from '@features/contact/contact-card';
 import { createQueryScan, FRONTMATTER_SCAN_CHARS } from '@features/query/group-by';
+import {
+  collectCsvTables,
+  csvCellsOverBudget,
+  mergeCsvTables,
+  csvTablesMentioned,
+  type CsvTable,
+  type CsvTableReject,
+} from '@features/query/csv-tables';
 import { createSmartScan } from '@features/smart/smart-spec';
 import {
   applyLinePatch,
@@ -1742,6 +1750,93 @@ function updateEntryColumn(
   };
 }
 
+/**
+ * 🔴 **本文の名前つき csv を、引ける表として組み立てる**(#681 段③)。
+ *
+ * ⚠ **`PRAGMA query_only = 1` を掛ける前に呼ぶ** ── temp の表を作るのも
+ *   engine から見れば書き込みなので、掛けた後では作れない。
+ * 🔑 目録(`csv_tables`)は**必ず**作る ── これが無いと、user は
+ *   「どんな名前を打てばよいか」を画面のどこからも知れない。
+ * ⚠ 中身の表は**打った字に名前が出てくる物だけ** ── 全部組み立てると、
+ *   引かない表のために本文を升まで開くことになる。
+ *
+ * @param made 作った表の名前を積む先(呼び側が `finally` で落とす)。
+ *   ⚠ **戻り値にしない** ── 投げた回に呼び側へ届かず、作りかけが残る。
+ */
+function buildCsvTables(database: Database, sql: string, made: string[]): void {
+  /**
+   * ⚠ **粗く絞ってから正しく読む** ── `name=` は本文のどこにでも書けるので、
+   *   ここで当たった本文を `collectCsvTables` が囲みとして読み直す。
+   * ⚠ 索引は無いので全走査になる。⚠ それでよい:この op は user が
+   *   `Ctrl+Enter` を押したときにだけ走る(打鍵ごとではない)。
+   */
+  const notes = database.selectObjects(
+    "SELECT lid, title, body FROM entries WHERE body LIKE '%name=%'",
+  ) as unknown as Array<{ lid: string; title: string; body: string }>;
+  /**
+   * 🔴 **受けられなかった名前も拾う**(#681 段③)── 目録で理由を言うため。
+   * ⚠ 黙って落とすと、user に見えるのは「表が出てこない」だけで、
+   *   **なぜ出ないのかが画面のどこにも無い**(CLAUDE.md §4)。
+   */
+  const rejects: CsvTableReject[] = [];
+  const blocks = notes.flatMap((n) =>
+    collectCsvTables(n.body, { lid: n.lid, title: n.title }, rejects),
+  );
+  const tables = mergeCsvTables(blocks);
+  /**
+   * ⚠ **作る前に落とす ── ただしこれは 2 つ目の網である**(2026-09-09、正直に書く)。
+   *
+   * ふだん落としているのは呼び側の `finally` なので、**この 1 行を外しても
+   * test は 1 つも落ちない**(変異試験 W1 が SURVIVED で教えた ── CLAUDE.md
+   * 「『これが無いと壊れる』と書く前に、外して壊れるのを見る」)。
+   * 🔑 それでも残す理由は 1 つ:**`finally` の落としは例外を飲む**(下の註記)。
+   *   飲んだ回に残った表を、次の回が**古い中身のまま引く**のを止めるのはここだけである。
+   */
+  const fresh = (name: string): void => {
+    database.exec({ sql: `DROP TABLE IF EXISTS temp."${name}"` });
+    made.push(name);
+  };
+
+  fresh('csv_tables');
+  database.exec({
+    sql: 'CREATE TEMP TABLE "csv_tables" (name TEXT, note TEXT, lid TEXT, rows INTEGER, cols INTEGER, why TEXT)',
+  });
+  const listed =
+    'INSERT INTO temp."csv_tables" (name, note, lid, rows, cols, why) VALUES (?, ?, ?, ?, ?, ?)';
+  for (const t of tables) {
+    for (const b of blocks.filter((x) => x.name === t.name)) {
+      database.exec({
+        sql: listed,
+        bind: [t.name, b.noteTitle, b.lid, b.rows.length, b.columns.length, ''],
+      });
+    }
+  }
+  // ⚠ 受けられなかった囲みも**同じ表に**出す(別の表にすると、探す先が 2 つになる)
+  for (const r of rejects) {
+    database.exec({ sql: listed, bind: [r.raw, r.noteTitle, r.lid, r.rows, r.cols, r.why] });
+  }
+
+  const wanted = new Set(csvTablesMentioned(sql, tables.map((t) => t.name)));
+  const build = tables.filter((t) => wanted.has(t.name));
+  /**
+   * ⚠ **組み立てる前に、まとめて断る**(判断は `csv-tables.ts` の 1 本)──
+   *   途中まで作ってから投げると、`finally` が落とす前に worker の heap を食う。
+   */
+  const tooBig = csvCellsOverBudget(build);
+  if (tooBig !== null) throw new Error(tooBig);
+  for (const t of build) createCsvTable(database, t, fresh);
+}
+
+/** 1 つの表を temp に作って中身を入れる。⚠ 名前と列は `csv-tables.ts` が検めた物だけが来る。 */
+function createCsvTable(database: Database, t: CsvTable, fresh: (name: string) => void): void {
+  fresh(t.name);
+  const cols = t.columns.map((c) => `"${c}" TEXT`).join(', ');
+  database.exec({ sql: `CREATE TEMP TABLE "${t.name}" (${cols})` });
+  const marks = t.columns.map(() => '?').join(', ');
+  const insert = `INSERT INTO temp."${t.name}" VALUES (${marks})`;
+  for (const row of t.rows) database.exec({ sql: insert, bind: [...row] });
+}
+
 const handlers: Handlers = {
   init: (req) => init(req.dbName, req.journalMode, { memory: req.memory, image: req.image }),
   /**
@@ -1821,7 +1916,21 @@ const handlers: Handlers = {
      *   `finally` が回らず、**張りっぱなしのまま**この worker が生き続ける
      *   (= 以後ノートを保存できない / 身に覚えのない中断を受ける)。
      */
+    /**
+     * 組み立てた temp の表(`finally` で必ず落とす)。
+     * 🔴 **控えは呼び側が持つ**(2026-09-09、変異試験で判明)── 組み立ての途中で
+     *   投げた回に、**そこまでに作った表が落ちない**形になっていた(断りが出る
+     *   大きな表で実際に残った)。積む先を渡せば、投げても `finally` が拾う。
+     */
+    const made: string[] = [];
     try {
+      /**
+       * 🔴 **`query_only` を掛ける前に組み立てる**(#681 段③)── temp の表を
+       *   作るのも engine から見れば書き込みなので、掛けた後では作れない。
+       * ⚠ 見張りもまだ張っていない ── 組み立ての重さは
+       *   `CSV_TABLE_CELLS_MAX` が断る(見張りでは切れない)。
+       */
+      buildCsvTables(database, req.sql, made);
       database.exec({ sql: 'PRAGMA query_only = 1' });
       setProgress(pointer, PROGRESS_EVERY, fn, 0);
       const columns: string[] = [];
@@ -1873,7 +1982,23 @@ const handlers: Handlers = {
         setProgress(pointer, 0, 0, 0);
         uninstall?.(fn);
       } finally {
-        database.exec({ sql: 'PRAGMA query_only = 0' });
+        try {
+          database.exec({ sql: 'PRAGMA query_only = 0' });
+        } finally {
+          /**
+           * ⚠ **落とすのは `query_only` を戻した後** ── 落とすのも書き込みである。
+           * ⚠ 例外は飲む ── ここで投げると、上の本当の理由が消える。
+           *   ⚠ 残っても次の回の頭で `DROP … IF EXISTS` が落とすので、
+           *   **古い中身が引ける**形にはならない(`buildCsvTables` の註記)。
+           */
+          for (const name of made) {
+            try {
+              database.exec({ sql: `DROP TABLE IF EXISTS temp."${name}"` });
+            } catch {
+              // 落とせなくても、次の回が作り直す前に落とす
+            }
+          }
+        }
       }
     }
   },
