@@ -336,6 +336,37 @@ export async function createEntry(page: Page, archetype: string): Promise<void> 
 }
 
 /**
+ * 🔴 **飛んでいる書込が disk へ届くまで待つ**(#828)。
+ *
+ * ## なぜ「画面に出た」で足りないのか(実測 2026-09-09)
+ *
+ * 題名の書換えは **画面が先・disk が後**である(`RENAME_ENTRY_TITLE` が
+ * `entryMetas` を楽観更新し、`REQUEST_RENAME` が effect の列へ後から積まれる)。
+ * ⚠ だから「新しい題名が画面に出た」は **commit が届いた証拠にならない** ──
+ *   そこで読み直すと**題名だけが既定へ戻る**。CPU に 4 本の負荷を掛けて
+ *   `sub-path.smoke.spec.ts` を 6 回回すと **1 回**出た(負荷なしでは 0 / 多数)。
+ *
+ * 🔑 印は `data-pkc-writing`(`data-pkc-boot` と同じ**検査のための契約**)。
+ * ⚠ **空振りは別の場所で止めている** ── 印を出す判断は
+ *   `tests/adapter/store-settle.test.ts` が(true / false の順まで)決定的に見て、
+ *   `main.ts` が渡していることは `tests/adapter/bootstrap-wiring.test.ts` が
+ *   原文で pin する。ここは**待つだけ**である。
+ * ⚠ これは「保存直後に読み直しても消えない」を**検査から外す**ものではない ──
+ *   その主張は #828 の残りとして別に持つ(ここは配り場所の spec である)。
+ */
+export async function writesLanded(page: Page): Promise<void> {
+  await page.waitForFunction(
+    () => {
+      const el = document.querySelector('[data-pkc-boot]');
+      // ⚠ 起動前に「書いていない」と読まない(起動を待つ)
+      return el !== null && !el.hasAttribute('data-pkc-writing');
+    },
+    undefined,
+    { timeout: 15_000 },
+  );
+}
+
+/**
  * 🔴 **再描画で node が差し替わるのは正常**(2026-08-05、CI と full run で実際に落ちた)。
  *
  * 情報ペインもファイラのパンくずも、値が変わると作り直される。保存の直後は worker から

@@ -1,5 +1,12 @@
 import { expect, test } from '@playwright/test';
-import { bootedHere, clickReal, collectPageErrors, createEntry, dismissAnnounce } from './helpers';
+import {
+  bootedHere,
+  clickReal,
+  collectPageErrors,
+  createEntry,
+  dismissAnnounce,
+  writesLanded,
+} from './helpers';
 
 /**
  * #532 S1: **どこに置いても動く**ことを、実際に置いて確かめる。
@@ -143,7 +150,29 @@ test('🔴 根を配らない場所(sub-path)に置いても、PKC3 は起動し
   await createEntry(page, 'text');
   await page.locator('[data-pkc-field="editor-title"]').fill('置いた先で書いたノート');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
-  await expect(page.getByText('置いた先で書いたノート').first()).toBeVisible();
+  /**
+   * ⚠ **面を名指しで見る**(CLAUDE.md §1「別の面の文字に満たされる」)。
+   * 直す前は `getByText(...).first()` = **画面のどこか**だったので、
+   * 編集中の見出しでも満たされた ── 「一覧に載った」を 1 つも見ていない。
+   * ⚠ 見るのは **`browse-host`**(左の列の中身の器)である ── 既定のタブは
+   *   「フォルダ」で、そこに出るのは `entry-list` ではなく `filer-table` なので、
+   *   `entry-list` を名指しすると**空の `<ul hidden>` に当たって必ず落ちる**
+   *   (実測:8/8 で `Received string: ""`)。
+   */
+  await expect(
+    page.locator('[data-pkc-region="browse-host"]'),
+    '左の一覧に新しい題名が出ていない',
+  ).toContainText('置いた先で書いたノート');
+  /**
+   * 🔴 **書込が disk へ届くのを待ってから読み直す**(#828)。
+   *
+   * ⚠ 画面の題名は**楽観更新**なので、出たことは届いた証拠にならない ──
+   *   ここを待たずに読み直すと、負荷が掛かった回に**題名だけが既定へ戻る**
+   *   (2026-09-09 実測、CPU 4 本の負荷で 1/6)。
+   * 🔑 この spec が主張するのは「**置いた場所の下で読み書きできる**」(#532 S1)で
+   *   あって、保存の間合いではない ── 間合いのほうは #828 が持つ。
+   */
+  await writesLanded(page);
 
   await page.reload();
   await bootedHere(page, () =>

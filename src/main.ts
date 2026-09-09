@@ -3353,6 +3353,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // #148 組み込みタイル ── 一式が入っている端末にだけ Office のタイルを出す。
     // 控えは起動時と設置/削除の直後に setMeta で合っている(officeOpener と同じ値)
     officeInstalled: () => appOfficePack.isInstalled(),
+    /**
+     * 🔴 **書いている間だけ印を付ける**(#828)。`data-pkc-boot` と同じ
+     *   「**検査のための契約**」で、画面の見え方は 1px も変えない。
+     *
+     * ⚠ 題名の書換えは画面が**先**、disk が**後**である ── その間に読み直すと
+     *   題名だけが戻る(負荷を掛けると 1/6 で出た)。この印が消えたことを見れば
+     *   「**届いた**」と言える(CLAUDE.md §4「何を見れば届いたと言えるか」)。
+     * ⚠ 判断は `store-effects.ts` が持つ ── この file はどの test からも
+     *   実行されない(CLAUDE.md §2)ので、ここは**渡すだけ**にする。
+     */
+    onWriting: (writing) => root.toggleAttribute('data-pkc-writing', writing),
   });
   /**
    * 🔴 **一式が入っているかを 1 度だけ読み、控えに写す**(#88 / O3-c)。
