@@ -18,9 +18,28 @@ npm run test:smoke -- tests/smoke/<触った>.smoke.spec.ts
 
 # 🔴 全量(95 spec / 499 test ── 実数は tests/repo-hygiene.test.ts が pin)。
 #    **着地の直前に 1 回だけ**。2026-09-09 実測: 手元 headless_shell・`workers: 4` で
-#    約 7 分(`workers: 1` だった頃は 13.2 分)。CI は 3 shard
+#    約 7 分(`workers: 1` だった頃は 13.2 分)
 npm run test:smoke
 ```
+
+### 🔴 CI の全量は **押したときだけ**(user 指示 2026-09-09。不可侵)
+
+> 「**自動CIにフルスモークテスト入ってない？/ 自動実行は禁止したはず /
+> 約束では全て任意起動のはず**」
+
+⚠ かつては `ci.yml` の `smoke` job が **PR / main への push のたび**に全量を
+3 shard で回していた ── 手元を `smoke:pick` で引く形に直しても、
+**CI が毎 push でフル**なら user の言う o(n²) は消えない。
+
+| 回す場所 | 引き金 | 中身 |
+|---|---|---|
+| **PR gate**(`ci.yml`) | push / PR で自動 | 型 / lint / unit / build / 検品 ── **smoke は 0 件** |
+| **`Smoke (手動)`**(`smoke.yml`) | 🔴 **Run workflow を押したときだけ** | 全量・3 shard・headless_shell |
+| **`Nightly`**(`nightly.yml`) | 夜 18:00 UTC / 手動 | 全量 × **2 つのブラウザ** + product |
+
+🔑 **1 件も減っていない ── 起動する条件だけが変わった。**
+⚠ `smoke.yml` / `nightly.yml` の `on:` に `push` / `pull_request` を足すと
+`tests/workflow-steps.test.ts` が全数走査で落とす(**file 名ではなく引き金**を見る)。
 
 ⚠ **smoke は `vite preview` で `dist/` を配信する。** source を直しただけでは
 検査対象に**届かない** ── 必ず `npm run build` を挟む。
@@ -112,7 +131,7 @@ npm run smoke:map             # coverage-smoke/ → tests/smoke/smoke-map.json
 **フルを回してよい「ここぞ」は 3 つだけ**:
 
 1. **共有面**を触った(boot / renderer / storage / CSS / shell)── どの spec に効くか読めない
-2. **CI のフルが落ちた**ので手元で再現したい
+2. **CI のフルが落ちた**ので手元で再現したい(夜 / 手で押した `Smoke (手動)`)
 3. **着地直前の最後の 1 回**
 
 ⚠ **変異試験の smoke は、その変異が殺されるはずの 1 spec に絞る。**

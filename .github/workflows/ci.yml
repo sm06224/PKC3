@@ -4,9 +4,11 @@
 # main push / nightly / 手動 dispatch へ。timeout 10 分は速度予算の tripwire。
 #
 # 🔴 **job は 2 つに割ってある**(2026-08-18)。
-#   ⚠ 2026-09-05 注記: いまは **`audit` / `verify` / `smoke`(3 shard)** の 3 種 = 5 job。
-#     「2 つ」は 2026-08-18 時点の数で、下の経緯(verify と smoke を割った理由)は
-#     そのまま正しい。`audit` は #675、shard は 2026-08-28 / 09-04(smoke lane の注記)。
+#   ⚠ 2026-09-09 注記: いまは **`audit` / `verify`** の 2 job だけである ──
+#     🔴 **全量 smoke は `smoke.yml`(任意起動)へ出した**(user 指示、下の
+#     「実ブラウザ lane は、ここには無い」を参照)。下の経緯(verify と smoke を
+#     割った理由)は「**smoke をここへ戻すなら、また同じ税を払う**」という
+#     記録として残す。`audit` は #675。
 #
 # ⚠ 直す前は smoke を `verify` に同居させており、その理由は
 # 「`npm ci` / build の二重払い(PKC2 のセットアップ税)を避けるため」と
@@ -37,8 +39,9 @@ on:
   pull_request:
     branches: [main]
 # 🔴 **重ねて push したら、古い実行を畳む**(user 指示 2026-08-19「フルスモークを
-# 乱発しない」)。この workflow は smoke を**全量**回すので **1 実行 4〜6 分**
-# かかり、直して push し直すたびに**古い実行が最後まで走り続けていた**。
+# 乱発しない」)。⚠ 2026-09-09 に smoke を出したので **1 実行は速い lane だけ**に
+# なったが、畳むこと自体は残す ── 直して push し直すたびに古い実行が最後まで
+# 走り続ける形は、runner を無駄に掴む(かつては smoke の 4〜6 分がそれだった)。
 # ⚠ **畳むのは PR のときだけ** ── `main` への push は「配った物の検査」なので、
 #   後続に追い越されて**検査そのものが消える**形にしない。
 concurrency:
@@ -111,67 +114,17 @@ jobs:
       - name: dist の検品(map の有無 / 参照の実在 / 配る量の tripwire)
         run: node scripts/check-dist.mjs dev --require-precache-list
 
-  # ── 実ブラウザ lane: smoke ────────────────────────────────────────────
-  # ⚠ **2026-08-19 訂正**: ここは「最小 smoke(全量は nightly)」と書いてあったが
-  #   **事実ではない** ── `npm run test:smoke` は `tests/smoke/**` を**全部**回す
-  #   (2026-08-19 時点で 35 spec / 181 test、手元の実測 3.9〜4.2 分。⚠ 2026-09-05 に
-  #   `npx playwright test --list -c tests/smoke/playwright.config.ts` で数え直すと
-  #   **80 spec / 431 test** ── 実数は `tests/repo-hygiene.test.ts` が pin する)。nightly が足すのは
-  #   「もう 1 つのブラウザで回す」ことであって、件数ではない。
-  # ⚠ 2026-08-19: `playwright install --with-deps` が **10 分の job timeout に
-  #   当たって cancel** された(smoke は 1 件も走っていない)。この step は
-  #   上の注記どおり大きくぶれる ── **install 段で死んだ回は再実行が正しい対処**
-  #   であって、test を疑う場面ではない(CLAUDE.md の flaky の扱い)。
-  # 🔑 実態と食い違う注記は、次に読む人の判断を狂わせる(CLAUDE.md「実態と乖離した
-  #   記述は見つけ次第その場で直す」)── 直すなら**注記ではなく job の中身**である。
-  # ⚠ ここだけ `playwright install` を払う。上の注記のとおり、この step は
-  #   22〜390 秒でぶれるので**速い lane と同じ budget に同居させない**。
+  # ── 実ブラウザ lane は、ここには無い ──────────────────────────────────
+  # 🔴 **全量 smoke を PR gate から外した**(user 指示 2026-09-09。不可侵):
   #
-  # 🔴 **2026-08-28: 今度は install ではなく smoke 本体が budget を食い切った。**
-  #   ⚠ 上の 2026-08-19 の注記は「install 段で死んだ回は再実行が正しい対処であって、
-  #     test を疑う場面ではない」と書いているが、**この回には当てはまらない** ──
-  #     実測(run 33192366507): install は **30 秒**で終わり、
-  #     smoke 本体が **9 分 25 秒**走ったところで 10 分の job timeout に当たった。
-  #   🔑 **再実行では 1 度も直らない**(毎回同じだけ掛かる)。注記のとおりに
-  #     再実行していたら、runner を 2 回捨てて同じ赤を見ることになる。
-  #   ⚠ 原因は spec が増えたことで、**どれかが遅いのではない**
-  #     (手元のフル走行も 8.3 分 → **10.1 分**へ伸びていた)。
+  # > 「**自動CIにフルスモークテスト入ってない？/ 自動実行は禁止したはず /
+  # >   約束では全て任意起動のはず**」
   #
-  # 🔑 **だから timeout を上げるのではなく、2 つに割って並べる。**
-  #   ⚠ 上げるのは「CI を長くしない」(user 指示 2026-07-30)と逆向きで、
-  #     しかも **tripwire を鈍らせる**(次に本当に遅くなったとき鳴らない)。
-  #   ⚠ 割っても**1 件も減らさない** ── playwright の `--shard` は
-  #     spec を分けるだけで、2 つ合わせれば全量である。
-  #   ⚠ shard ごとに**別の runner**なので、`vite preview` の port も
-  #     `workers: 1` の直列も、そのまま安全に効く。
-  #   ⚠ `fail-fast: false` ── 片方が落ちても**もう片方を最後まで走らせる**
-  #     (走らなかった shard は「確かめていない」であって「緑」ではない。
-  #      2026-08-17 に nightly で踏んだ形)。
-  # 🔴 **3 分割にした**(2026-09-04)。⚠ 2 分割のままでは、`npm ci` が遅い日に
-  #    **時間切れで打ち切られる** ── 同じ run の 3 job が揃って `npm ci` に
-  #    **5 分 02 秒**を使った(前回は 1m53s〜2m38s)。test 自体はむしろ速く
-  #    なっている(shard 2 は 4m38s → 3m51s)ので、伸びたのは**取り込みだけ**。
-  # 🔑 分割を増やすと**壁時計は伸びない**(並列に走る)ので、10 分の
-  #    tripwire を弱めずに余裕を作れる。
-  smoke:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3]
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: npm
-      - run: npm ci
-      # ⚠ smoke は `vite preview` で **`dist/` を配信する**ので、build が要る
-      #   (source を書き換えただけでは smoke に一切届かない ── CLAUDE.md §3)
-      - run: VITE_PKC_KIND=dev npm run build
-      - run: npx playwright install chromium --with-deps
-      # ⚠ 名前も実態に合わせる(「最小」ではない ── 上の訂正を参照)
-      # ⚠ 3 つ合わせて全量。1 つだけ緑でも**全量が通ったことにはならない**
-      - name: Visual smoke (${{ matrix.shard }}/3 ── もう 1 つのブラウザは nightly)
-        run: npm run test:smoke -- --shard=${{ matrix.shard }}/3
+  # ⚠ ここには `smoke` job(3 shard で `npm run test:smoke` を全量)が居て、
+  #   **PR へ push するたび / main へ push するたび**に回っていた ── 同じ日の
+  #   「**改修一件で増えるテストが毎ターンの負荷に積み上がる**」の CI 側の実体である。
+  # 🔑 移した先は 2 つ。**1 件も減らしていない ── 起動する条件だけを変えた**:
+  #   ① `smoke.yml`(**手で押す**。Actions の Run workflow。着地の直前の 1 回はここ)
+  #   ② `nightly.yml`(**夜**。2 つのブラウザで突き合わせる唯一の場所)
+  # ⚠ **ここへ `test:smoke` を戻さない。** 戻すと user の指示が破れるので、
+  #   `tests/workflow-steps.test.ts` が「ci.yml の実行する行に smoke が無い」を pin する。

@@ -1255,6 +1255,12 @@ describe('移行ガイドと実装の突合', () => {
  * 「probe 6 本(…かんばん)」と、**1 か月前の実態**を書いたままだった ── 版は
  * `package.json`、job は `ci.yml`、probe は `nightly.yml` の step 名が正本なので、
  * そこから出して README に在ることを見る。
+ *
+ * ⚠ **2026-09-09**: 全量 smoke を `ci.yml` から `smoke.yml`(任意起動)へ出した
+ * (user 指示「**自動実行は禁止したはず / 約束では全て任意起動のはず**」)。
+ * 🔴 **出した先も README に在ることを見る** ── 出しただけだと、README を読んだ人には
+ * 「実ブラウザの検査が消えた」ようにしか見えない(CLAUDE.md「外したら、外したぶんの
+ * 門を置き直す」の doc 版)。
  */
 describe('README と実体の突合(#696)', () => {
   const README = readFileSync('README.md', 'utf-8');
@@ -1272,10 +1278,22 @@ describe('README と実体の突合(#696)', () => {
     const jobsAt = CI.indexOf('\njobs:\n');
     expect(jobsAt, 'ci.yml に jobs: が無い(空振り)').toBeGreaterThan(0);
     const jobs = [...CI.slice(jobsAt).matchAll(/^ {2}([a-z][a-z0-9-]*):$/gm)].map((m) => m[1]!);
-    expect(jobs.length, 'job を読めていない(空振り)').toBeGreaterThanOrEqual(3);
+    // ⚠ 2026-09-09: `smoke` を出したので PR gate は 2 job(`audit` / `verify`)。
+    //   この下限は**空振り防止**であって「2 つ以上あるべき」という主張ではない
+    //   ── 切り出しが壊れて 0 件になった形で「全部載っている」と言わないためのもの。
+    expect(jobs.length, 'job を読めていない(空振り)').toBeGreaterThanOrEqual(2);
     for (const j of jobs) {
       expect(README, `README の CI の表に job「${j}」が無い`).toContain(`\`${j}\``);
     }
+  });
+
+  it('🔴 README に、任意起動へ出した全量 smoke の行が在る', () => {
+    // 🔑 実体(workflow の `name:`)を正本にして、README がそれを写しているかを見る
+    const SMOKE = readFileSync('.github/workflows/smoke.yml', 'utf-8');
+    const name = /^name: (.+)$/m.exec(SMOKE)?.[1]?.trim() ?? '';
+    expect(name, 'smoke.yml の name: が読めていない(空振り)').not.toBe('');
+    expect(README, `README に「${name}」の行が無い(押す口が doc から消えた)`).toContain(name);
+    expect(README, 'README が smoke.yml の在り処を書いていない').toContain('smoke.yml');
   });
 
   it('🔴 README の nightly の行に、nightly.yml の Probe の step 名が全部載っている', () => {
