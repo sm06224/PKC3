@@ -207,14 +207,35 @@ test('🔴 大きい添付を貼ってもメインスレッドが固まらない
     for (let i = 0; i < bytes.length; i += 4096) bytes[i] = i & 0xff;
     const file = new File([bytes], `big-${sizeMb}.bin`, { type: 'application/octet-stream' });
 
-    const gaps: number[] = [];
-    let last = performance.now();
-    const hb = setInterval(() => {
-      const now = performance.now();
-      gaps.push(now - last);
-      last = now;
-    }, 4);
+    /**
+     * 🔴 **心拍は使い回す**(2026-09-09)── 同じ測り方で「何もしていない間」も測り、
+     * **対照群**にする(CLAUDE.md 計測規律「対照群は『何もしない』ではなく
+     * 『測りたい操作以外を全部同じにしたもの』」)。
+     */
+    const beat = (): { stop: () => { max: number; ticks: number } } => {
+      const gaps: number[] = [];
+      let last = performance.now();
+      const hb = setInterval(() => {
+        const now = performance.now();
+        gaps.push(now - last);
+        last = now;
+      }, 4);
+      return {
+        stop: () => {
+          clearInterval(hb);
+          gaps.sort((a, b) => b - a);
+          return { max: Math.round(gaps[0] ?? 0), ticks: gaps.length };
+        },
+      };
+    };
 
+    // ⚠ **対照群 ── 何もしていない間の欠測**。この箱がどれだけ忙しいかを、
+    //    測りたい操作と**同じ計器**で先に採る
+    const idle = beat();
+    await new Promise<void>((r) => setTimeout(r, 800));
+    const base = idle.stop();
+
+    const run = beat();
     const rows = (): number =>
       document.querySelectorAll('[data-pkc-region="entry-list"] [data-pkc-entry]').length;
     const before = rows();
@@ -236,18 +257,38 @@ test('🔴 大きい添付を貼ってもメインスレッドが固まらない
         res();
       }, 60000);
     });
-    clearInterval(hb);
-    gaps.sort((a, b) => b - a);
-    return { added: rows() - before, maxGap: Math.round(gaps[0] ?? 0), ticks: gaps.length };
+    const load = run.stop();
+    return {
+      added: rows() - before,
+      maxGap: load.max,
+      ticks: load.ticks,
+      base: base.max,
+      baseTicks: base.ticks,
+    };
   }, SIZE_MB);
 
   // ① 🔴 **実際に添付された**(空振り防止 ── 何も起きなければ当然止まらない)
   expect(m.added, '添付が作られていない(この次元を測れていない)').toBe(1);
   // ② 心拍が回っていた(計器が死んでいたら最大欠測は 0 になる)
   expect(m.ticks, '心拍が取れていない').toBeGreaterThan(5);
-  // ③ 🔴 メインが止まっていない。⚠ ワーカー 10〜14ms 対 メイン 500〜726ms なので
-  //    80ms は「余裕をもって落ちる」閾値(flake を閾値上げで隠さないための余白)
-  expect(m.maxGap, `メインスレッドが ${m.maxGap}ms 止まった`).toBeLessThan(80);
+  expect(m.baseTicks, '対照群の心拍が取れていない(比べる相手が無い)').toBeGreaterThan(5);
+  /**
+   * ③ 🔴 **メインが止まっていない ── 対照群より目立って止まっていない**。
+   *
+   * ⚠ ここは長らく `< 80` の**絶対値**だった。2026-09-09 に smoke を 4 本並べたら
+   *   **112ms** で落ちた ── 4 つのブラウザが 4 コアを分け合うので、
+   *   **何もしていなくてもメインは 100ms 級で降ろされる**。
+   * 🔴 だが閾値を上げるのは「flake を閾値上げで隠す」ことである(この test 自身が
+   *   そう戒めていた)。🔑 正しい直しは**同じ計器で採った対照群と比べる**こと ──
+   *   箱が静かなら `base` は 10ms 級なので門は実質 90ms のまま、
+   *   箱が忙しければ床が上がるぶんだけ門も上がる。
+   * ⚠ 守る力は落ちない:壊れたときのメインは **500〜726ms**(ワーカーは 10〜14ms)
+   *   なので、床が 100ms 級に上がっても**余裕をもって落ちる**。
+   */
+  expect(
+    m.maxGap,
+    `メインスレッドが ${m.maxGap}ms 止まった(何もしていない間は ${m.base}ms)`,
+  ).toBeLessThan(m.base + 80);
 
   expect(errors).toEqual([]);
 });
