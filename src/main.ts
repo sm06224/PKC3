@@ -31,6 +31,11 @@ import {
 import { setFoldNotify } from '@adapter/ui/render/fold-notify';
 import { appTooNarrowOk, installTooNarrow } from '@adapter/ui/render/too-narrow';
 import { paintStatusOpen, paintStatusUndo } from '@adapter/ui/render/status-open';
+import {
+  storageFallbackError,
+  storageStatusLine,
+  storageStatusTitle,
+} from '@features/storage/storage-notice';
 import { appOpenInEdit } from '@adapter/ui/render/open-in-edit';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { installAppendAutofold } from '@adapter/ui/render/append-autofold';
@@ -354,9 +359,8 @@ async function initStorage(
     }
     if (init.vfs === 'memory') {
       client.terminate();
-      throw new Error(
-        `ストレージを確保できませんでした(別タブが保持中の可能性): ${init.fallbackReason ?? 'unknown'}`,
-      );
+      // 🔑 言い方は `storage-notice.ts` 1 か所(#811)── 同じ事実に説明を 2 通り持たない
+      throw new Error(storageFallbackError(init.fallbackReason));
     }
   }
   return { client, init };
@@ -1082,8 +1086,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   同時に出ていた ── PKC2 が「版が 4 系統でバラバラ」になった芽そのもの。
    *   `docs-parity` が `src/adapter/ui/render/` を全数走査して 1 か所を pin する。
    */
-  const statusBase = init.fallbackReason ? `⚠ ${init.fallbackReason}` : '';
-  regions.status.title = `${versionText()} — ${init.vfs}`;
+  /**
+   * 🔴 **字は `storage-notice.ts` が持つ**(#811。user 報告 2026-09-09)。
+   * ⚠ 直す前はここで `⚠ ${init.fallbackReason}` と**ブラウザの例外の綴りそのまま**を
+   *   出していた ── iPhone に `⚠ InvalidStateError: The object is in an invalid state.`
+   *   とだけ出て、**何を失うか(閉じると消える)が 1 文字も無かった**。
+   * 🔑 原因の綴りは**ツールチップ**へ回す(診断は要るが、読ませたいのは実害のほう)。
+   */
+  const statusBase = storageStatusLine(init.fallbackReason);
+  regions.status.title = storageStatusTitle(`${versionText()} — ${init.vfs}`, init.fallbackReason);
   /**
    * #177: 本体タブ経由(follower)で開いているときの常設バッジ。fallback 警告と
    * 同型(「意図と違う接続形態は user が知るべき事実」)。昇格で空にする。

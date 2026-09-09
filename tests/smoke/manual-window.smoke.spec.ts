@@ -458,3 +458,60 @@ test('🔴 窓で印刷すると、本文が全部の頁に出る (#645 段②)'
   expect(pages, `印刷が ${pages} 頁 ── スクロール箱がほどけていない`).toBeGreaterThan(10);
   await win.close();
 });
+
+/**
+ * 🔴 **狭い画面では、目次が畳まれて出る**(#812。user 報告 2026-09-09、iPhone)。
+ *
+ * ## 直す前に何が起きていたか
+ *
+ * 狭い窓では目次を上へ回していたが、**畳んだ先でも 32vh を必ず食って**いた ──
+ * スマホで開くと画面の上 3 分の 1 が目次で埋まり、本文は書き出しの数行しか見えない。
+ * 「読みに来たのに読めない」形だった。
+ *
+ * ## ⚠ ここでしか確かめられないこと
+ *
+ * 🔴 `details` の**閉じ方はブラウザによって違う**(古い実装は中身に `display:none`、
+ * 新しい実装は `::details-content` の `content-visibility`)。CSS には**両方**書いたが、
+ * **どちらが効いたかは CSS からは読めない** ── だから
+ * 「広い窓では目次の行が見えている / 狭い窓では見えていない」を**実物で**見る。
+ * ⚠ unit(happy-dom)は layout も `details` の既定も持たないので、ここでしか届かない。
+ */
+test('🔴 狭い画面では目次が畳まれ、押すと開く (#812)', async ({ page, context }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="help"]');
+  const win = await openManual(page, context);
+
+  const rows = win.locator(`${TOC} a`);
+  const opener = win.locator('[data-pkc-field="manual-window-toc-open"]');
+
+  /**
+   * 🔴 **対照群 ── 広い窓では、いままでどおり出ている**(見え方を 1px も変えていない)。
+   * ⚠ これを先に測る:出ていないなら、以降の「狭いと畳む」は何も証明しない。
+   */
+  await win.setViewportSize({ width: 1200, height: 900 });
+  await expect(rows.first(), '広い窓で目次が出ていない(畳みが広い窓まで効いた)').toBeVisible();
+  await expect(opener, '広い窓に「目次」の押し所が出ている').toBeHidden();
+
+  // 🔴 スマホの幅 ── 畳まれて、押し所だけが出る
+  await win.setViewportSize({ width: 390, height: 780 });
+  await expect(opener, '狭い窓に「目次」の押し所が出ない').toBeVisible();
+  await expect(rows.first(), '狭い窓でも目次が開いたまま(画面を食い続ける)').toBeHidden();
+
+  /**
+   * 🔴 **目次が食う高さ**が、畳んだ 1 行ぶんに収まっている。
+   * ⚠ 「見えていない」だけでは足りない ── 器が高さを持ったままなら、
+   *   本文はやはり下へ押し出される(直す前の 32vh = 250px がまさにそれ)。
+   */
+  const box = await win.locator(TOC).boundingBox();
+  expect(box, '目次の器が見えない').not.toBeNull();
+  expect(box!.height, '畳んでいるのに高さを食っている').toBeLessThan(780 * 0.15);
+
+  // 🔴 押すと開く(畳めるだけで開けない、を作らない)
+  await opener.click();
+  await expect(rows.first(), '押しても目次が開かない').toBeVisible();
+
+  expect(errors, 'pageerror が出た').toEqual([]);
+  await win.close();
+});

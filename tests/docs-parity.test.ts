@@ -1160,11 +1160,20 @@ describe('§9「困ったとき」の引用が画面の字と一致する(#697)'
    * ⚠ で始まる文は 5 つ(⚠ だけが 4 つ + 「⚠ エラー:」)── 種類の数だけ行を持つ。
    */
   it('🔴 ⚠ で始まる status の種類の数だけ、§9 に行がある', () => {
-    const main = codeOnly(readFileSync('src/main.ts', 'utf-8'));
-    const kinds = [...main.matchAll(/[`'"]⚠ /g)].length;
-    expect(kinds, 'main.ts の ⚠ で始まる status の種類が変わった(§9 の表を直す)').toBe(5);
+    /**
+     * ⚠ **数える先は `main.ts` だけではない**(#811、2026-09-09)。
+     * 🔴 保存先の警告は `main.ts` から `features/storage/storage-notice.ts` へ
+     *   出した(あそこは**どの test からも実行されない** file なので、判断を置けない)
+     *   ── file 名指しのまま数えていたら、**種類が 1 つ減ったのに表は 5 行のまま**
+     *   通ってしまう(CLAUDE.md §1「guard を file 名指しで書かない」)。
+     * 🔑 だから**字を出しうる file を並べて数える**。⚠ 増えたらここへ足す。
+     */
+    const kinds = ['src/main.ts', 'src/features/storage/storage-notice.ts']
+      .map((f) => codeOnly(readFileSync(f, 'utf-8')))
+      .flatMap((t) => [...t.matchAll(/[`'"]⚠ /g)]).length;
+    expect(kinds, '⚠ で始まる status の種類が変わった(§9 の表を直す)').toBe(5);
     for (const needle of [
-      '保存先を確保できていない',
+      '保存先が使えません',
       '⚠ 本体への切り替えに失敗しました',
       '⚠ 添付 N 件を読み込めませんでした',
       '⚠ この端末に保存できませんでした',
