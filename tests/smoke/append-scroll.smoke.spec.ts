@@ -34,6 +34,33 @@ const top = (p: Page): Promise<number> =>
     return el === null ? -1 : Math.round(el.scrollTop);
   });
 
+/**
+ * 🔴 **「送れる本文になった」まで待つ**(2026-09-09。`workers` を 4 にしたら落ちた)。
+ *
+ * ⚠ ここは `makeLongNote` の直後に **1 度だけ**測っていた ── ところが
+ *   `makeLongNote` が待っているのは**追記欄が出ること**であって、
+ *   **本文が組み上がること**ではない。箱が忙しいと組み上がりが後ろへずれ、
+ *   `scrollHeight - clientHeight` が **0 のまま**測れてしまう
+ *   (実測: フル smoke で `Received: 0` で落ちた)。
+ * 🔑 これは**前提**なので、1 度の assert ではなく**待ち**にする ──
+ *   待っても伸びなければ**同じ文言で落ちる**ので、空振り防止の強さは変わらない。
+ * ⚠ 直すのは「送れる本文か」の判定を**1 か所**にすること ── 同じ測り方が
+ *   3 か所に散っていたので、1 か所だけ直すと残りが同じ形で落ちる。
+ */
+async function expectRoom(target: Page, what: string): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        target.evaluate(() => {
+          const el = document.querySelector<HTMLElement>('[data-pkc-region="detail"]');
+          return el === null ? -1 : el.scrollHeight - el.clientHeight;
+        }),
+      { message: `${what}が短すぎて送れない(空振り)`, timeout: 15_000 },
+    )
+    .toBeGreaterThan(2000);
+}
+
+/** 長い本文のノートを作る。⚠ **送れる本文になるまで待って**から返る。 */
 async function makeLongNote(page: Page): Promise<void> {
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
@@ -46,6 +73,8 @@ async function makeLongNote(page: Page): Promise<void> {
   await page.keyboard.press('Tab');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   await expect(page.locator('[data-pkc-field="append-input"]')).toBeVisible();
+  // ⚠ 追記欄が出ても本文はまだ組み上がっていないことがある(上の docstring)
+  await expectRoom(page, '本文');
 }
 
 test('🔴 別の窓が追記しても、こちらの読んでいた場所は動かない (#782)', async ({
@@ -65,11 +94,8 @@ test('🔴 別の窓が追記しても、こちらの読んでいた場所は動
   await win.waitForTimeout(1000);
 
   // ⚠ **送れる本文であることを先に検める** ── 短い本文では 0 のままでも緑になる
-  const room = await win.evaluate(() => {
-    const el = document.querySelector<HTMLElement>('[data-pkc-region="detail"]')!;
-    return el.scrollHeight - el.clientHeight;
-  });
-  expect(room, '別窓の本文が短すぎて送れない(空振り)').toBeGreaterThan(2000);
+  //    (別窓は `makeLongNote` が面倒を見ないので、ここで待つ)
+  await expectRoom(win, '別窓の本文');
   await win.evaluate(() => {
     document.querySelector<HTMLElement>('[data-pkc-region="detail"]')!.scrollTop = 1200;
   });
@@ -101,12 +127,8 @@ test('🔴 別の窓が追記しても、こちらの読んでいた場所は動
  */
 test('🔴 自分の窓で末尾に追記すると、足した字が見える所まで送る (#782 B)', async ({ page }) => {
   const errors = collectPageErrors(page);
+  // ⚠ 「送れる本文であること」は `makeLongNote` が待って保証する(空振り防止)
   await makeLongNote(page);
-  const room = await page.evaluate(() => {
-    const el = document.querySelector<HTMLElement>('[data-pkc-region="detail"]')!;
-    return el.scrollHeight - el.clientHeight;
-  });
-  expect(room, '本文が短すぎて送れない(空振り)').toBeGreaterThan(2000);
   // ⚠ **上のほうを読んでいる状態**にする ── 足した字は本文のいちばん下なので、
   //    ここが下に居ると「送らなくても見えている」で空振りする
   await page.evaluate(() => {
@@ -189,13 +211,9 @@ test('🔴 自分の窓で末尾に追記すると、足した字が見える所
  */
 test('⚠ 足した字が既に見えているときは、画面を動かさない (#782 B)', async ({ page }) => {
   const errors = collectPageErrors(page);
+  // 🔑 空振り防止 ── **送れる本文**であること(送れないなら、どちらでも 0 のまま)は
+  //    `makeLongNote` が待って保証する
   await makeLongNote(page);
-  const room = await page.evaluate(() => {
-    const el = document.querySelector<HTMLElement>('[data-pkc-region="detail"]')!;
-    return el.scrollHeight - el.clientHeight;
-  });
-  // 🔑 空振り防止 ── **送れる本文**であること(送れないなら、どちらでも 0 のまま)
-  expect(room, '本文が短すぎて送れない(空振り)').toBeGreaterThan(2000);
   expect(await top(page), '前提が崩れた(先頭に居ない)').toBe(0);
   // ⚠ 入り先は**いちばん上の見出し** ── 先頭を見たままで、足した字が画面に入る
   await page.locator('[data-pkc-field="append-target"]').selectOption({ index: 1 });
