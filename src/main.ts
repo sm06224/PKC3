@@ -57,6 +57,9 @@ import {
 import { appBrowseMode, isBrowseMode } from '@adapter/ui/render/browse-mode';
 import { StoreClient } from '@adapter/platform/storage/store-client';
 import { openAssetWindow } from '@adapter/platform/asset-window';
+import { grabArchiveWindow, pickInArchiveWindow } from '@adapter/platform/archive-window';
+import { isOpenPlace } from '@features/open-place';
+import { chooseOpenPlace } from '@adapter/ui/render/open-place';
 import { assetWindowKind } from '@features/asset/asset-preview-kind';
 import {
   createStorePort,
@@ -2560,6 +2563,26 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   片方だけ直した日に「ヘルプからは開くがタイルからは開かない」になる(§7)。
      */
     openManualWindow: () => void openManualTile(dispatcher, markdown, showStatus),
+    /**
+     * 🔴 **書庫(zip)の中を別の窓で見る**(#826)。
+     * ⚠ **掴むだけ**を同期でやる(`window.open` は user の操作の中でしか通らない)──
+     *   目録を読み終えてから `pick` が中身を組む。
+     * 🔑 配色は**根から写す** ── ここに色の表を持たない(`theme.ts` と同じ作法)。
+     */
+    grabArchiveWindow: (title, assetKey) => {
+      const win = grabArchiveWindow(title, assetKey, (u, n, f) => globalThis.open?.(u, n, f) ?? null);
+      if (win === null) return null;
+      return {
+        pick: (deps) => pickInArchiveWindow(win, { ...deps, themeFrom: document.documentElement }),
+        close: () => {
+          try {
+            win.close();
+          } catch {
+            // 既に閉じている
+          }
+        },
+      };
+    },
     openTile: (lid) => {
       const tile = dispatcher.getState().launcherTiles?.find((t) => t.lid === lid);
       if (!tile) return;
@@ -2832,6 +2855,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      */
     setProseAlign: (align) => {
       if (isProseAlign(align)) chooseProseAlign(document.documentElement, align);
+    },
+    /**
+     * 🔴 **開く場所**(#826)。⚠ **描き直さない** ── 画面は 1px も変わらず、
+     *   次に「中を見る」を押したときから効く(設定の説明文がそう約束している)。
+     */
+    setOpenPlace: (place) => {
+      if (isOpenPlace(place)) chooseOpenPlace(place);
     },
     /**
      * ✏️ 編集の仕方(#104 第 2 弾)。⚠ **描き直さない** ── 編集の面は

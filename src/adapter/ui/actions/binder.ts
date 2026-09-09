@@ -273,8 +273,22 @@ async function browseArchive(
     say('この版では書庫の中を見られません');
     return;
   }
+  /**
+   * 🔴 **窓は「押した瞬間」に掴む**(#826)── `await` の後に `window.open` を呼ぶと、
+   *   user の操作から離れて**ポップアップ阻止に掛かる**(`manual-window.ts` と同じ作法)。
+   * 🔑 どちらで開くかは **user の設定**(既定は別の窓)。⚠ 「この画面」を選んでいる人には
+   *   窓を掴もうとしない ── 掴めなかったのか、選んだ結果なのかを混ぜない。
+   */
+  const wantWindow = currentOpenPlace() === 'window';
+  const win = wantWindow ? (services.grabArchiveWindow?.(name, assetKey) ?? null) : null;
+  if (wantWindow && win === null) {
+    // ⚠ **黙ってその場の器へ落ちない** ── 「別の窓で開く」と設定した人には理由が要る
+    say('別の窓が開けなかったので、この画面で開きます(ポップアップの許可を確かめてください)');
+  }
   const blob = await services.readAssetBlob(assetKey).catch(() => null);
   if (blob === null) {
+    // ⚠ 掴んだ窓を**必ず閉じる** ── 残すと「読んでいます…」のまま止まった窓になる
+    win?.close();
     say(`「${name}」の中身が見つかりません(添付が消えている可能性があります)`);
     return;
   }
@@ -282,20 +296,23 @@ async function browseArchive(
   try {
     entries = await readZipDirectory(blob);
   } catch (e) {
+    win?.close();
     say(`「${name}」の中を開けません ── ${why(e)}`);
     return;
   }
   const rows = archiveRows(entries);
   if (rows.length === 0) {
+    win?.close();
     say(`「${name}」の中に取り出せる物がありません`);
     return;
   }
-  const marks = await pickArchiveInApp(
-    root,
-    rows.map((r) => ({ ...r, size: r.isDirectory ? '' : humanBytes(r.size) })),
-    // 🔑 何件入るかの判定は **1 本**(`markedFiles`)── 器の中で数え直さない
-    (m: readonly string[]) => markedFiles(entries, m).length,
-  );
+  const pickRows = rows.map((r) => ({ ...r, size: r.isDirectory ? '' : humanBytes(r.size) }));
+  // 🔑 何件入るかの判定は **1 本**(`markedFiles`)── 器の中で数え直さない
+  const countFiles = (m: readonly string[]): number => markedFiles(entries, m).length;
+  const marks =
+    win !== null
+      ? await win.pick({ rows: pickRows, countFiles, toggle: toggleArchiveMark })
+      : await pickArchiveInApp(root, pickRows, countFiles);
   if (marks === null) return;
   const files = markedFiles(entries, marks);
   const names = extractNames(files.map((e) => e.name));
@@ -321,7 +338,9 @@ import {
   baseName,
   extractNames,
   markedFiles,
+  toggleArchiveMark,
 } from '@features/archive/zip-browse';
+import { currentOpenPlace } from '@adapter/ui/render/open-place';
 import { joinCopied, pickMarked } from '@features/clipboard/scrap';
 import {
   confirmInApp,
@@ -335,6 +354,7 @@ import {
   pickScrapInApp,
   promptInApp,
   isAppDialogOpen,
+  type ArchivePickRow,
   type ConfirmOptions,
 } from '@adapter/ui/render/app-dialog';
 
@@ -598,6 +618,21 @@ const rowLidOrSelected = (st: AppState, target: HTMLElement): string | null =>
   target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? st.selectedLid;
 
 /** UI サービス面(storage 依存の操作は main が実体を注入。test は fake)。 */
+/**
+ * 🔴 **別の窓で開いた書庫の一覧**(#826)。
+ * ⚠ **掴んだ直後の窓**であって、まだ中身は入っていない ── `pick` で組む。
+ */
+export interface ArchiveWindowHandle {
+  /** 一覧を組んで、選ばれるまで待つ。⚠ 「やめる」/ 窓を閉じた / 0 件なら `null`。 */
+  pick(deps: {
+    readonly rows: readonly ArchivePickRow[];
+    readonly countFiles: (marks: readonly string[]) => number;
+    readonly toggle: (marks: readonly string[], path: string) => string[];
+  }): Promise<string[] | null>;
+  /** こちらから閉じる(読めなかったときに「読んでいます…」を残さない)。 */
+  close(): void;
+}
+
 export interface BinderServices {
   /**
    * ⚠ `why` は**文頭に付ける事情** ── 取込の知らせと**同じ 1 行**に載る。
@@ -766,6 +801,17 @@ export interface BinderServices {
    */
   openManualWindow?(): void;
   /**
+   * 🔴 **書庫(zip)の中を別の窓で見る**(#826。user 指摘 2026-09-09
+   * 「**別窓にはできないの？**」)。
+   *
+   * ⚠ **同期で呼ぶ**(実体側が `window.open` を user gesture の中で撃つ)──
+   *   だから「掴む」と「中身を組む」を割ってある:ここは**掴むだけ**で、
+   *   目録を読み終えてから `pick` を呼ぶ。
+   * ⚠ **`null` = 掴めなかった**(ポップアップ阻止)── 呼び側がその場の器へ落ちる。
+   * ⚠ 省略可 ── 渡らない版では今までどおりその場の器で開く。
+   */
+  grabArchiveWindow?(title: string, assetKey: string): ArchiveWindowHandle | null;
+  /**
    * 🔴 **選んでいる添付を起動する**(P10、user 指示 2026-08-05
    * 「HTML アセットの詳細画面から起動できない」)。
    *
@@ -822,6 +868,11 @@ export interface BinderServices {
    *   読み幅より窓が広いとき、本文を列の中央に置くか左端に置くかが決まる。
    */
   setProseAlign?(align: string): void;
+  /**
+   * 🔴 **開く場所**(#826)。⚠ 綴りの検めは実体側(`isOpenPlace`)── binder は
+   *   `<select>` の値をそのまま渡す(`setProseAlign` と同じ作法)。
+   */
+  setOpenPlace?(place: string): void;
   /**
    * 編集の仕方(#104 第 2 弾。user 裁定 2026-08-08)。
    * ⚠ **flag ではない**(正規設定)── 効くのは次に編集を開いたとき。
@@ -6631,6 +6682,16 @@ const ACTIONS: Record<string, ActionHandler> = {
         ? target.value
         : target.getAttribute('data-pkc-prose-align-value');
     if (align) services.setProseAlign?.(align);
+  },
+  /**
+   * 🔴 **開く場所**(#826)。⚠ `set-prose-align` と同じ受け方(`<select>` でもボタンでも通す)。
+   */
+  'set-open-place': (_dispatcher, target, services) => {
+    const place =
+      target instanceof HTMLSelectElement
+        ? target.value
+        : target.getAttribute('data-pkc-open-place-value');
+    if (place) services.setOpenPlace?.(place);
   },
   'set-editor-mode': (_dispatcher, target, services) => {
     // ⚠ `set-theme` と同じ受け方(`<select>` でもボタンでも通す)

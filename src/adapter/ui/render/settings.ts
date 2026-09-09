@@ -17,8 +17,10 @@ import type { PersistState } from '@adapter/platform/storage-persist';
 import { THEMES } from './theme';
 import { PAGE_FORMATS } from '@features/page-format';
 import { PROSE_ALIGNS } from '@features/prose-align';
+import { OPEN_PLACES } from '@features/open-place';
 import { currentPageFormat } from './page-format';
 import { currentProseAlign } from './prose-align';
+import { currentOpenPlace } from './open-place';
 import { EDITOR_MODES } from '@features/editor-mode';
 import { TEXT_SCALES } from '@features/text-scale';
 import { COLUMN_RULES } from '@features/column-rule';
@@ -127,6 +129,7 @@ export class SettingsRenderer {
       this.syncReadColumns();
       this.syncEditorMode();
       this.syncOpenInEdit();
+      this.syncOpenPlace();
       this.syncAlarmEnabled();
       this.syncExternalImages();
       this.syncPasteSource();
@@ -485,6 +488,41 @@ export class SettingsRenderer {
     dl.append(ot, od);
 
     /**
+     * 🔴 **別の窓で開くか、この画面で開くか**(#826。user 指摘 2026-09-09
+     * 「**普通に別窓で開くとここで開くは共存で、デフォをどちらとするかは
+     * ユーザー設定では？**」)。
+     *
+     * ⚠ **flag ではない**(正規設定)── 恒久の好みで、畳む予定が無い。
+     * ⚠ 「開いたときの状態」の**すぐ下**に置く ── どちらも「開く」の話である。
+     * 🔑 **いま効く先を書く** ── 効かない所まで効くと読まれると、
+     *   「設定したのに変わらない」になる(この repo がいちばん嫌う形)。
+     */
+    const plt = document.createElement('dt');
+    plt.textContent = '開く場所';
+    const pld = document.createElement('dd');
+    const plselect = document.createElement('select');
+    plselect.setAttribute('data-pkc-action', 'set-open-place');
+    plselect.setAttribute('data-pkc-field', 'open-place-select');
+    plselect.setAttribute('aria-label', '開く場所');
+    for (const o of OPEN_PLACES) {
+      const opt = document.createElement('option');
+      opt.value = o.id;
+      opt.textContent = o.label;
+      plselect.append(opt);
+    }
+    pld.append(plselect);
+    const plnote = document.createElement('p');
+    plnote.setAttribute('data-pkc-field', 'settings-note');
+    plnote.textContent =
+      '添付の書庫(zip)で「中を見る」を押したとき、一覧を別の窓に出すか、' +
+      'この画面の上に出すかが決まります。' +
+      '別の窓なら、本文を見ながらどのファイルが要るかを確かめられます。' +
+      'ブラウザが別の窓を止めている場合は、この画面の上に出して、その理由を画面の下に出します。' +
+      '予定表や連絡先など、ほかの窓の開き方はここでは変わりません。';
+    pld.append(plnote);
+    dl.append(plt, pld);
+
+    /**
      * 🔴 **予定の時刻に知らせるか**(#280。user 指示 2026-08-19「アラートは
      * 組み込みアプリでリリースしたい」)。
      * ⚠ **既定は切** ── 音は割り込みであり、入にすると起動のたびに予定を数える。
@@ -603,6 +641,7 @@ export class SettingsRenderer {
     this.syncReadColumns();
     this.syncEditorMode();
     this.syncOpenInEdit();
+    this.syncOpenPlace();
     this.syncAlarmEnabled();
     this.syncSameOrigin(state);
     this.syncExtensions(state);
@@ -1074,6 +1113,20 @@ export class SettingsRenderer {
       '[data-pkc-field="prose-align-select"]',
     );
     const cur = currentProseAlign(document.documentElement);
+    if (select && select.value !== cur) select.value = cur;
+  }
+
+  /**
+   * ⚠ 画面の値を**いまの開き場所に合わせる**(#826)。器は 1 度しか組まないので、
+   *   映さないと**別の面へ行って戻ると古い値が見える**(§7 の「設定画面の値の同期」)。
+   * ⚠ ここだけ **DOM ではなく保存が正本**である ── この設定は画面に出ない
+   *   (見え方のトークンではない)ので、当てる先が無い。
+   */
+  private syncOpenPlace(): void {
+    const select = this.region.querySelector<HTMLSelectElement>(
+      '[data-pkc-field="open-place-select"]',
+    );
+    const cur = currentOpenPlace();
     if (select && select.value !== cur) select.value = cur;
   }
 

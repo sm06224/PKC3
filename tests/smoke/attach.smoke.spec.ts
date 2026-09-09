@@ -169,21 +169,34 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
   ).toHaveCount(0);
 
   await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]:has-text("書庫.zip")');
-  await clickReal(page, '[data-pkc-action="browse-archive"]');
-  const box = page.locator('[data-pkc-region="app-dialog"]');
-  await expect(box, '書庫の器が出ない').toBeVisible();
+  /**
+   * 🔴 **既定は「別の窓」**(#826。user 指摘 2026-09-09「**別窓にはできないの？**」)。
+   *
+   * ⚠ **ここでしか見えない**:`window.open` は **user の操作の続き**でしか通らないので、
+   *   「目録を読んでから開く」形にすると**本物のブラウザだけで塞がれる**。
+   *   unit の作り物の窓では、その順番は再現できない(§2 未実行の経路)。
+   */
+  const [win] = await Promise.all([
+    page.context().waitForEvent('page'),
+    clickReal(page, '[data-pkc-action="browse-archive"]'),
+  ]);
+  const rows = win.locator('[data-pkc-field="archive-window-row"]');
+  await expect(rows.first(), '別の窓に一覧が出ない').toBeVisible();
   // 階層が出ている(フォルダは末尾の `/`)
-  await expect(box).toContainText('写真/');
-  await expect(box).toContainText('readme.txt');
-  // 🔴 フォルダを押すと、その下の 2 件が入る
-  await clickReal(page, '[data-pkc-field="pick-archive"][data-pkc-archive-index="0"]');
+  await expect(win.locator('body')).toContainText('写真/');
+  await expect(win.locator('body')).toContainText('readme.txt');
+  // ⚠ **本文が退いていない**(その場の器と違うのはここ ── 見ながら選べる)
   await expect(
-    page.locator('[data-pkc-field="dialog-ok"]'),
-    'フォルダの下の件数が字に出ていない',
-  ).toHaveText('選んだ 2 件を取り出す');
+    page.locator('[data-pkc-region="app-dialog"]'),
+    '別の窓で開いたのに、この画面の器も出ている',
+  ).toHaveCount(0);
+  const winOk = win.locator('[data-pkc-field="archive-window-ok"]');
+  // 🔴 フォルダを押すと、その下の 2 件が入る
+  await rows.nth(0).click();
+  await expect(winOk, 'フォルダの下の件数が字に出ていない').toHaveText('選んだ 2 件を取り出す');
   // ⚠ 重い 1 件も混ぜる(下の「固まらない」を測るため)
-  await clickReal(page, page.locator('[data-pkc-field="pick-archive"]', { hasText: '大きい.bin' }));
-  await expect(page.locator('[data-pkc-field="dialog-ok"]')).toHaveText('選んだ 3 件を取り出す');
+  await win.locator('[data-pkc-field="archive-window-row"]', { hasText: '大きい.bin' }).click();
+  await expect(winOk).toHaveText('選んだ 3 件を取り出す');
 
   /**
    * 🔴 **取り出しでメインが固まらない**(#818 の残件。user 指示 2026-08-03
@@ -219,7 +232,11 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
       last = now;
     }, 4);
   });
-  await clickReal(page, '[data-pkc-field="dialog-ok"]');
+  await winOk.click();
+  // ⚠ **選んだら窓は閉じる**(取り出した後も選び手が残らない)
+  await expect
+    .poll(() => win.isClosed(), { message: '選んだのに別の窓が残っている' })
+    .toBe(true);
   // 🔴 取り出した物が添付になる(ノート + png + zip + 3 = 6 行)
   await expect(
     page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]'),
@@ -238,6 +255,23 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
   ).toBeLessThan(base.max + 80);
   await expect(page.locator('[data-pkc-region="entry-list"]')).toContainText('海.jpg');
   await expect(page.locator('[data-pkc-region="entry-list"]')).toContainText('山.jpg');
+
+  /**
+   * ── ⑥ 🔴 **「この画面」を選ぶと、今までどおりその場の器で開く**(#826)。
+   *
+   * ⚠ **新しい起動を足さない**(#820 の規律)── 同じ物語の続きで、
+   *   保存を書き換えてもう 1 度押すだけ(`currentOpenPlace` は押すたびに読む)。
+   * 🔑 **その場の器を消していないこと**の後条件でもある ── ポップアップを
+   *   止めている user は、ここしか通らない。
+   */
+  await page.evaluate(() => localStorage.setItem('pkc3.open-place', 'here'));
+  await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]:has-text("書庫.zip")');
+  await clickReal(page, '[data-pkc-action="browse-archive"]');
+  const box = page.locator('[data-pkc-region="app-dialog"]');
+  await expect(box, 'この画面を選んだのに器が出ない').toBeVisible();
+  await expect(box).toContainText('写真/');
+  await clickReal(page, '[data-pkc-field="dialog-cancel"]');
+  await expect(box).toBeHidden();
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
