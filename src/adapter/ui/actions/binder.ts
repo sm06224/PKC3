@@ -6817,7 +6817,13 @@ const ACTIONS: Record<string, ActionHandler> = {
       });
       return;
     }
-    const title = sqlNoteTitle(new Date());
+    /**
+     * 🔴 **どこを調べた答えかを、題名と本文の両方に残す**(#837 K3)。
+     * ⚠ 画面では名札を出しているのに、**いちばん長く残るノート**から
+     *   その情報だけが落ちていた ── 1 週間後に同じ SQL を走らせて断られる。
+     */
+    const where = p.guest?.name ?? null;
+    const title = sqlNoteTitle(new Date(), where);
     const lid = generateLid();
     dispatcher.dispatch({
       type: 'CREATE_ENTRY',
@@ -6829,6 +6835,7 @@ const ACTIONS: Record<string, ActionHandler> = {
         columns: p.columns,
         rows: p.rows,
         truncated: p.truncated,
+        where,
       }),
       parentLid: null,
       relationId: generateLid(),

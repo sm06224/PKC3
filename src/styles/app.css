@@ -3740,10 +3740,23 @@ li[data-pkc-row-slot] {
   gap: var(--s2);
 }
 [data-pkc-field='sql-tip'],
+[data-pkc-field='sql-rules'],
+[data-pkc-field='sql-example'],
 [data-pkc-field='sql-note'] {
   margin: 0;
   color: var(--muted);
   font-size: 12px;
+}
+/**
+ * 🔴 **消えない手本は、打つ字と同じ形で出す**(#837 K1、2026-09-09)。
+ * ⚠ 地の文と同じ形だと**写す物に見えない** ── 欄に打つ字なので、等幅で出す。
+ * 🔑 選んで写せるように `user-select` は既定のまま(触らない)。
+ */
+[data-pkc-field='sql-example'] {
+  /* ⚠ 打つ欄(`sql-input`)と**同じ変数**を使う ── 手本と打つ字の形を分けない */
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 /* 断りの 1 行だけ色を持つ ── 出ていること自体が「直す所がある」の合図である */
 [data-pkc-field='sql-note'][data-pkc-sql-error='yes'] {
@@ -3765,8 +3778,23 @@ li[data-pkc-row-slot] {
   border: 1px solid var(--border);
   text-align: left;
 }
+/**
+ * 🔴 **列の名前を、表の上に貼り付ける**(#837 K2、2026-09-09)。
+ *
+ * ⚠ 直す前:「500 行」出た表を下へ転がして 200 行目を見ているとき、
+ *   「この 3 列目は何だったか」を確かめるには**いちばん上まで戻す**しかなく、
+ *   戻したらまた 200 行目まで転がし直しだった。
+ * 🔑 転がるのは器(`sql-body`)なので、そこを基準に貼り付く。
+ * ⚠ `border-collapse: collapse` の表では**枠線が一緒に貼り付かない**ので、
+ *   下の線は `box-shadow` で描く(貼り付いた行が中身と地続きに見えないように)。
+ * ⚠ 地は不透明にする ── 透けると、下を通る行が名前に重なって読めなくなる。
+ */
 [data-pkc-field='sql-table'] th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   background: var(--surface-2);
+  box-shadow: inset 0 -1px 0 var(--border);
 }
 /* ⚠ 「空の字」と「値が無い」を**見分けられる**ようにする(字は描画器が入れる) */
 [data-pkc-field='sql-table'] td[data-pkc-sql-null='yes'] {

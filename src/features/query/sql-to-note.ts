@@ -36,13 +36,23 @@ export function fenceMarkFor(text: string): string {
   return '`'.repeat(Math.max(3, longest + 1));
 }
 
-/** 題名。⚠ **いつ調べたか**を入れる(同じ問いを何度も書き出すので、並ぶと区別が要る)。 */
-export function sqlNoteTitle(now: Date): string {
+/**
+ * 題名。⚠ **いつ調べたか**を入れる(同じ問いを何度も書き出すので、並ぶと区別が要る)。
+ *
+ * 🔴 **何を調べたかも入れる**(#837 K3、2026-09-09)。⚠ 日時は**分まで**なので、
+ *   続けて書き出した 2 件は**同じ題名**で並ぶ ── 一覧で見分けられない。
+ * ⚠ `where` は取り込んだ `.sqlite` の file 名(この PKC のノートなら `null`)。
+ *   ⚠ ノート側で括弧を足さない ── 「(この PKC のノート)」は**ほとんどの回**に
+ *   付くので、題名が毎回長くなるだけで見分けの役に立たない。
+ */
+export function sqlNoteTitle(now: Date, where: string | null = null): string {
   const p = (n: number): string => String(n).padStart(2, '0');
-  return (
-    `SQL の答え ${String(now.getFullYear())}-${p(now.getMonth() + 1)}-${p(now.getDate())}` +
-    ` ${p(now.getHours())}:${p(now.getMinutes())}`
-  );
+  const stamp =
+    `${String(now.getFullYear())}-${p(now.getMonth() + 1)}-${p(now.getDate())}` +
+    ` ${p(now.getHours())}:${p(now.getMinutes())}`;
+  return where === null || where === ''
+    ? `SQL の答え ${stamp}`
+    : `SQL の答え ${stamp}(${where})`;
 }
 
 /** 升 1 つを csv の字へ。⚠ `null` は**空の升**にする(`null` という字にしない)。 */
@@ -60,6 +70,16 @@ export function sqlNoteBody(p: {
   readonly columns: readonly string[];
   readonly rows: readonly (readonly SqlCell[])[];
   readonly truncated: boolean;
+  /**
+   * 🔴 **どこを調べた答えか**(#837 K3、2026-09-09)。取り込んだ `.sqlite` の
+   * file 名。この PKC のノートなら省略(または `null`)。
+   *
+   * ⚠ 書かないと、1 週間後にそのノートを開いた人は**同じ SQL をノート側で
+   *   走らせて `no such table` と断られる** ── この面は画面では
+   *   「どちらを調べているか」に気を配っているのに、**いちばん長く残る成果物
+   *   (ノート)からその情報だけが落ちて**いた。
+   */
+  readonly where?: string | null;
 }): string {
   const table = [p.columns.map((c) => csvEscapeField(c, ',')).join(','), ...p.rows.map((r) => r.map(cell).join(','))].join(
     '\n',
@@ -75,7 +95,12 @@ export function sqlNoteBody(p: {
     table,
     csvMark,
     '',
-    `> ${String(p.rows.length)} 行の答えです。`,
+    // 🔴 **どこを調べたかを、いちばん先に言う**(#837 K3)
+    `> ${String(p.rows.length)} 行の答えです(${
+      p.where === undefined || p.where === null || p.where === ''
+        ? 'この PKC のノート'
+        : p.where
+    } を調べました)。`,
   ];
   if (p.truncated) {
     lines.push('>');

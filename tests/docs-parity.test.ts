@@ -2091,6 +2091,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-09(#837 K1/K2/K3)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-08-dev-build-stamp" …` → 90d02df
+     */
+    '開発版の版の字に、そのビルドを焼いた日時が出るようになりました',
+    /**
      * ⚠ **2026-09-09(「保存中…」)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-08-blocked-reason-everywhere" …` → 7854217
      */

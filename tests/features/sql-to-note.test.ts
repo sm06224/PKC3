@@ -109,3 +109,46 @@ describe('本文', () => {
     expect(allFences(body).map((f) => f.name.toLowerCase())).toEqual(['sql', 'csv']);
   });
 });
+/**
+ * 🔴 **どこを調べた答えかを、ノートに残す**(#837 K3、2026-09-09)。
+ *
+ * ⚠ 直す前、書き出したノートには**どの DB を調べたのかが 1 文字も無かった** ──
+ * 1 週間後に開いた人が同じ SQL をノート側で走らせると `no such table` で断られる。
+ * ⚠ 題名の日時も**分まで**なので、続けて書き出した 2 件は**同じ題名**で並んだ。
+ */
+describe('どこを調べた答えかを残す(#837 K3)', () => {
+  const answer = { sql: 'SELECT 1', columns: ['a'], rows: [[1]], truncated: false } as const;
+
+  it('🔴 取り込んだ file を調べた回は、その名前を本文と題名に書く', () => {
+    const body = sqlNoteBody({ ...answer, where: '売上.sqlite' });
+    expect(body, 'どこを調べたか本文に書いていない').toContain('売上.sqlite を調べました');
+    const title = sqlNoteTitle(new Date('2026-09-09T15:04:00'), '売上.sqlite');
+    expect(title, '題名に相手が入っていない(一覧で見分けられない)').toContain('売上.sqlite');
+    // ⚠ いつ調べたかは残す(同じ相手を何度も書き出すので、日時でも分ける)
+    expect(title).toContain('2026-09-09 15:04');
+  });
+
+  it('🔴 この PKC のノートを調べた回も、そう書く(空白にしない)', () => {
+    const body = sqlNoteBody(answer);
+    expect(body, 'どこを調べたか本文に書いていない').toContain('この PKC のノート を調べました');
+    /**
+     * ⚠ **題名には足さない** ── 「(この PKC のノート)」はほとんどの回に付くので、
+     *   題名が毎回長くなるだけで**見分けの役に立たない**。
+     */
+    const title = sqlNoteTitle(new Date('2026-09-09T15:04:00'));
+    expect(title, '題名に括弧が付いた(毎回長くなるだけ)').not.toContain('(');
+    expect(title).toBe('SQL の答え 2026-09-09 15:04');
+  });
+
+  it('⚠ 空文字は「ノート側」と同じに扱う(呼び側の書き方で結果を変えない)', () => {
+    expect(sqlNoteTitle(new Date('2026-09-09T15:04:00'), '')).toBe(
+      sqlNoteTitle(new Date('2026-09-09T15:04:00'), null),
+    );
+    expect(sqlNoteBody({ ...answer, where: '' })).toBe(sqlNoteBody({ ...answer, where: null }));
+  });
+
+  it('🔴 行の数は、これまでどおり残っている(足したぶんで押し出さない)', () => {
+    const body = sqlNoteBody({ ...answer, rows: [[1], [2], [3]], where: '売上.sqlite' });
+    expect(body, '行の数が消えた').toContain('3 行の答えです');
+  });
+});
