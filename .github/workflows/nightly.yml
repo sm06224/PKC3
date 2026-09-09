@@ -163,7 +163,7 @@ jobs:
       # 🔴 焼きたてなので manual.html の実在も要求する(#648 💭)
       - name: Product 検品 (map の有無 / 参照の実在 / 配る量 / manual.html)
         id: product_check
-        run: node scripts/check-dist.mjs product --require-manual
+        run: node scripts/check-dist.mjs product --require-manual --require-precache-list
       - name: Product smoke
         id: product_smoke
         run: npm run test:smoke

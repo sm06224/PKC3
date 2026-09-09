@@ -112,7 +112,7 @@ export const PRECACHE_LIST_FILE = 'precache.json';
 /**
  * @param {{kind: 'product'|'dev', capKb: number, floorKb: number,
  *          sidecarCapKb?: number, sidecarFloorKb?: number, manualFloorKb?: number,
- *          requireManual?: boolean,
+ *          requireManual?: boolean, requirePrecacheList?: boolean,
  *          files: {path: string, bytes: number}[],
  *          text: Map<string, string>}} input
  */
@@ -124,6 +124,7 @@ export function inspectDist({
   sidecarFloorKb,
   manualFloorKb,
   requireManual = false,
+  requirePrecacheList = false,
   files,
   text,
 }) {
@@ -297,10 +298,24 @@ export function inspectDist({
        */
       const listText = text.get(PRECACHE_LIST_FILE);
       if (listText === undefined) {
-        errors.push(
-          `dist に ${PRECACHE_LIST_FILE} が無い ── 「自分のパソコンで動かす」が` +
-            '配る物の一覧を読めない(plugin が emit していない)',
-        );
+        /**
+         * 🔴 **要求するのは「焼きたての一式」だけ**(2026-09-09、`/dev/` を止めて分かった)。
+         *
+         * ⚠ `pages.yml` は **過去の release の zip** を **main HEAD の規則**で検品する。
+         *   `precache.json` は #532 段 B で足したので、**それより前に切った v3.2.0 には
+         *   在りえない** ── 無条件で要求すると、無傷の release に対して job が赤になり
+         *   **`/dev/` の更新まで止まる**(実際に run 500 / 501 が止めた)。
+         * 🔑 だから `--require-manual` と**同じ作法**にする ── 焼きたてを見る経路
+         *   (`release.yml` / `nightly.yml`)だけが旗を立てる。
+         * ⚠ 旗が立っていない回に**黙って通す**のは、この 1 件だけである
+         *   (`sw.js` の一覧そのものは、旗に関わらず全数で突き合わせている)。
+         */
+        if (requirePrecacheList) {
+          errors.push(
+            `dist に ${PRECACHE_LIST_FILE} が無い ── 「自分のパソコンで動かす」が` +
+              '配る物の一覧を読めない(plugin が emit していない)',
+          );
+        }
       } else {
         let listed2 = null;
         try {
