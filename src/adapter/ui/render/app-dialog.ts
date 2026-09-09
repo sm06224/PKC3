@@ -37,6 +37,7 @@
 import type { PaletteRow } from '@features/palette/palette-rows';
 import type { EntryPickRow } from '@features/entry-ref/entry-pick';
 import type { SnippetChoice } from '@features/snippet/snippet-menu';
+import { moveMark, toggleMark } from '@features/clipboard/scrap';
 
 export type DialogAnswer = 'ok' | 'cancel';
 
@@ -907,6 +908,131 @@ export function pickEntryInApp(
     const answer = await answered;
     f.ok.hidden = false;
     return answer === 'ok' ? chosen : null;
+  });
+}
+
+/** 「溜めてから貼る」の 1 行(#679)。 */
+export interface ScrapRow {
+  /** 一覧に出す字(既に切ってある)。 */
+  readonly label: string;
+  /** 名指しの鍵(コピーした物の原文)。 */
+  readonly key: string;
+}
+
+/**
+ * 🔴 **溜めてから貼る ── 選んで、並べて、まとめて入れる**(#679)。
+ *
+ * > user の言葉 2026-09-03「**ペースト時の一括ペーストや並び替えしてからのペースト
+ * > (スクラップのような)**」
+ *
+ * ⚠ ここだけは**「押した行がそのまま答え」にできない** ── 選ぶのが複数だからである。
+ *   だから受ける側(`入れる`)を**出す**(ほかの一覧は隠している。理由は
+ *   `pickSnippetInApp` の docstring)。
+ *
+ * 🔑 **並びは「押した順」** ── 押した行に番号が付く。押し直すと外れて、
+ *   もう一度押すと**最後に回る**。⚠ さらに ▲▼ で 1 つずつ動かせる
+ *   (押し直しだけだと、途中へ入れるのに全部押し直すことになる)。
+ *
+ * ⚠ **0 件のときは入れられない** ── 押せてしまうと「押したのに何も起きない」に
+ *   なる(無言の dead click)。だから受ける側を `disabled` にし、**理由を字で出す**。
+ *
+ * @returns 選んだ鍵を**入れる順**で。`Escape` / 「やめる」/ 外なら `null`
+ */
+export function pickScrapInApp(
+  host: HTMLElement,
+  rows: readonly ScrapRow[],
+): Promise<string[] | null> {
+  return enqueue(async () => {
+    const f = ensureFrame(host);
+    f.title.textContent = 'まとめて貼る';
+    f.body.textContent = '';
+
+    const note = document.createElement('p');
+    note.setAttribute('data-pkc-field', 'pick-scrap-note');
+    note.textContent = '押した順に、空行で区切って入ります(▲▼ で入れ替えられます)';
+    f.body.append(note);
+
+    const list = document.createElement('div');
+    list.setAttribute('data-pkc-field', 'pick-scrap-list');
+    f.body.append(list);
+
+    let marks: string[] = [];
+    /** ⚠ 描き直すと焦点が飛ぶので、**戻す先**を覚えておく。 */
+    let focusKey: string | null = null;
+
+    const paint = (): void => {
+      list.textContent = '';
+      for (const [index, row] of rows.entries()) {
+        const at = marks.indexOf(row.key);
+        const line = document.createElement('div');
+        line.setAttribute('data-pkc-field', 'pick-scrap-row');
+
+        const pick = document.createElement('button');
+        pick.type = 'button';
+        pick.setAttribute('data-pkc-field', 'pick-scrap');
+        pick.setAttribute('data-pkc-scrap-index', String(index));
+        pick.setAttribute('aria-pressed', at < 0 ? 'false' : 'true');
+        pick.textContent = at < 0 ? row.label : `${at + 1}. ${row.label}`;
+        pick.addEventListener('click', () => {
+          marks = toggleMark(marks, row.key);
+          focusKey = row.key;
+          paint();
+        });
+        line.append(pick);
+
+        // ⚠ 動かす口は**選んだ行にだけ**出す(選んでいない行に ▲▼ は意味が無い)
+        if (at >= 0) {
+          for (const [label, to] of [
+            ['▲', at - 1],
+            ['▼', at + 1],
+          ] as const) {
+            const move = document.createElement('button');
+            move.type = 'button';
+            move.setAttribute('data-pkc-field', label === '▲' ? 'pick-scrap-up' : 'pick-scrap-down');
+            move.textContent = label;
+            move.setAttribute('aria-label', `${row.label} を${label === '▲' ? '前' : '後ろ'}へ`);
+            // 🔑 端では**押せなくする**(押しても動かない口を残さない)
+            move.disabled = to < 0 || to >= marks.length;
+            move.addEventListener('click', () => {
+              marks = moveMark(marks, at, to);
+              focusKey = row.key;
+              paint();
+            });
+            line.append(move);
+          }
+        }
+        list.append(line);
+      }
+
+      f.ok.textContent = marks.length === 0 ? '入れる' : `選んだ ${marks.length} 件を入れる`;
+      f.ok.disabled = marks.length === 0;
+
+      if (focusKey !== null) {
+        const back = rows.findIndex((r) => r.key === focusKey);
+        list
+          .querySelector<HTMLButtonElement>(`[data-pkc-scrap-index="${back}"]`)
+          ?.focus();
+      }
+    };
+    paint();
+
+    const onOutside = (ev: MouseEvent): void => {
+      if (ev.target === f.dialog) f.cancel.click();
+    };
+    f.dialog.addEventListener('click', onOutside);
+
+    f.ok.removeAttribute('data-pkc-danger');
+    f.ok.hidden = false;
+    f.cancel.textContent = 'やめる';
+    f.cancel.hidden = false;
+
+    const answered = open(f, 'cancel');
+    list.querySelector<HTMLButtonElement>('[data-pkc-scrap-index="0"]')?.focus();
+    const answer = await answered;
+    f.dialog.removeEventListener('click', onOutside);
+    // ⚠ 器は使い回すので、押せなくしたまま返さない
+    f.ok.disabled = false;
+    return answer === 'ok' && marks.length > 0 ? [...marks] : null;
   });
 }
 
