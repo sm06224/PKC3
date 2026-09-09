@@ -3,6 +3,9 @@ dist/
 # 可搬単一 HTML の実験用(#400 段①②)── 配り物ではないので追跡しない
 dist-portable/
 coverage/
+# smoke の被覆の記録(#820)── 1 test 1 file の中間物。束ねた結果だけを
+# tests/smoke/smoke-map.json として commit する
+coverage-smoke/
 *.local
 .bench-profile/
 .lease-profile/

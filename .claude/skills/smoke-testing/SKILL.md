@@ -9,12 +9,16 @@ description: PKC3 の実ブラウザ検証(tests/smoke、Playwright)を書く・
 実ブラウザでしか分からない ── そのための最小の lane が `tests/smoke` である。
 
 ```bash
-# 🟢 既定はこちら ── **触った spec だけ**(4〜20 秒)
+# 🟢 既定はこちら ── **触った物から引く**(#820)。読めない物が 1 件でも
+#    混じったら自分でフルへ倒れる(表に無い file / CSS / smoke の土台 / src の外)
+npm run smoke:pick
+
+# 🟢 引く先が分かっているなら直に ── **触った spec だけ**(4〜20 秒)
 npm run test:smoke -- tests/smoke/<触った>.smoke.spec.ts
 
-# 🔴 全量(80 spec / 431 test ── 2026-09-05 に `npx playwright test --list -c tests/smoke/playwright.config.ts`
-#    で数えた。実数は tests/repo-hygiene.test.ts が pin)。**ここぞ**のときだけ ──
-#    CI は 3 shard で 5〜7 分、手元は 8〜10 分かかる(2026-08-27 実測、CLAUDE.md §5)
+# 🔴 全量(95 spec / 499 test ── 実数は tests/repo-hygiene.test.ts が pin)。
+#    **着地の直前に 1 回だけ**。2026-09-09 実測: 手元 headless_shell・`workers: 4` で
+#    約 7 分(`workers: 1` だった頃は 13.2 分)。CI は 3 shard
 npm run test:smoke
 ```
 
@@ -58,6 +62,52 @@ run2: 10:51:11 → 10:57:12 に実行
 
 🔑 **いちばん効くのは「push をまとめる」** ── **push 1 回 = フル 1 回**である。
 1 commit ごとに投げず、手元で緑にしてからまとめて 1 回にする。
+
+### 🔴 引く・数える・作り直す(#820。user 指摘 2026-09-09)
+
+> 「**最近、フルスモークが多すぎる / なぜフルで流すのか？ / 改修一件で増えるテストが
+> 毎ターンの負荷に積み上がる / o(n2)のテストケース広がりを回避するための方策を**」
+
+⚠ **`--only-changed` は使えない。** playwright のそれは **spec の import グラフ**を
+追うが、smoke は `dist/` を配って動くので **spec と `src` の間に辺が無い** ──
+実測で `src` を 1 file 触ると **0 本**しか選ばれない(spec を触れば 11 本)。
+🔴 **製品を直したときだけ何も走らない**、という最悪の外し方である。
+
+#### ① 引く ── `npm run smoke:pick`
+
+```bash
+node scripts/pick-smoke.mjs              # 引いた spec の名前を出すだけ
+node scripts/pick-smoke.mjs --run        # そのまま走らせる(= npm run smoke:pick)
+node scripts/pick-smoke.mjs src/a.ts     # file を直に渡す
+```
+
+表は `tests/smoke/smoke-map.json`(**どの spec がどの `src` を動かしたか**)。
+⚠ **迷ったらフルへ倒れる**のが仕様である ── 倒れ損なう向きだけが本当の欠陥なので、
+`tests/pick-smoke.test.ts` はそちらだけを厚く見ている。
+
+#### ② 数える ── `npm run smoke:budget`
+
+所要はほぼ**起動の数**で決まる(実測 **1 起動 ≒ 1.63 秒**、`workers: 1` のとき)。
+⚠ assert を 1 つ足すのはほぼ 0 秒、起動を 1 つ足すと**以後すべての回に積まれる**。
+
+🔑 だから **新しく起動する test を足すのではなく、既に在る道中に assert を足す**。
+上限は `scripts/smoke-budget.mjs` の `BOOT_BUDGET`(`tests/smoke-budget.test.ts` が pin)。
+⚠ **上げてよい。ただし理由を 1 行書く** ── 黙って上げると、何も守らない数字になる。
+
+#### ③ 作り直す ── `npm run smoke:record && npm run smoke:map`
+
+```bash
+npm run build                 # ⚠ smoke は dist を配る
+npm run smoke:record          # PKC3_SMOKE_COVERAGE=1 で全量(記録つき)
+npm run smoke:map             # coverage-smoke/ → tests/smoke/smoke-map.json
+```
+
+⚠ **記録は既定では取らない**(取ること自体が遅くする)。表が古くなっても
+**引く側が「表に無い」でフルへ倒れる**ので、腐り方は安全側である。
+🔑 ただし**古い表は引きすぎず・引かなすぎる**ので、spec を大きく足したら作り直す。
+
+⚠ **表が言えるのは「あの日の版で動かした」だけ** ── 「これから動かしうる」は
+言えない(TIA の定石)。だから**着地の 1 回はフルのまま**にする。
 
 **フルを回してよい「ここぞ」は 3 つだけ**:
 

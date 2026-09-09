@@ -13,6 +13,10 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:smoke": "playwright test --config tests/smoke/playwright.config.ts",
+    "smoke:pick": "node scripts/pick-smoke.mjs --run",
+    "smoke:budget": "node scripts/smoke-budget.mjs",
+    "smoke:record": "node scripts/smoke-record.mjs",
+    "smoke:map": "node scripts/smoke-map.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests build scripts",
     "build:portable": "vite build --config build/portable.config.ts && node build/portable/fold.mjs"
