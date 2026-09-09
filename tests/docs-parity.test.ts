@@ -2092,6 +2092,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-09(#809 の 4 件)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-08-manual-terms" …` → 8e8684b
+     */
+    'マニュアルに用語集が付き、「設定」と「ランチャー」が章になりました',
+    /**
      * ⚠ **2026-09-09(#683 段①)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-08-manual-otherwise-split" …` → c8bda7e
      */

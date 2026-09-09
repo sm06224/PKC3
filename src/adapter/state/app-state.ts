@@ -1183,6 +1183,18 @@ export type UserAction =
    */
   | { type: 'PIN_SPLIT_ENTRY'; lid: string }
   /**
+   * 🔴 **開くときに、いま中央に居るノートと入れ替える**(#809-4、2026-09-09。user 推薦 A)。
+   *
+   * ⚠ 直す前、知らせの隣の **開く** は素の `SELECT_ENTRY` だったので:
+   *   ① それまで読んでいた本文が**中央から消える**(留めていないので、戻るには
+   *      左の一覧で探し直し)② 留めた枠は外れないので、**同じノートが中央と
+   *      枠の 2 か所に並ぶ**。
+   * 🔑 だから**入れ替える** ── 行き先が中央へ、いま中央に居たものがその枠へ。
+   *   左右が入れ替わるだけで、**どちらも画面に残る**。
+   * ⚠ 行き先が枠に居ないとき(添付を作った回など)は、ただ開く ── 入れ替える相手が無い。
+   */
+  | { type: 'SWAP_OPEN_ENTRY'; lid: string }
+  /**
    * `gone: true` = **ノートが消えていたので降ろす**(効果層の自己修復。#633 段①)。
    * ⚠ user が × を押したときは付けない ── 付けると「消えた」と嘘を言う。
    *   付いていれば reducer が 1 行知らせる(黙って降ろすと dead click に見える)。
@@ -5291,6 +5303,45 @@ function reduceCore(
     }
     case 'SMART_RESCAN':
       return { state, events: smartScanFor(state, action.lid) };
+    case 'SWAP_OPEN_ENTRY': {
+      const i = state.splitLids.indexOf(action.lid);
+      const old = state.selectedLid;
+      /**
+       * ⚠ **入れ替えられないときは、ただ開く**(3 通り)──
+       *   ①行き先が枠に居ない ②中央が空 ③同じもの。
+       * ⚠ そして **`folder` は枠に置けない**(`PIN_SPLIT_ENTRY` が断る)ので、
+       *   中央がフォルダなら入れ替えない ── 入れ替えると**枠が永久に空**になる。
+       */
+      if (
+        i < 0 ||
+        old === null ||
+        old === action.lid ||
+        state.entryMetas.get(old)?.archetype === 'folder'
+      )
+        return reduce(state, { type: 'SELECT_ENTRY', lid: action.lid });
+      const swapped = [...state.splitLids];
+      swapped[i] = old;
+      /**
+       * 🔑 **選択の遷移は `SELECT_ENTRY` に任せる**(§7:開く判定を 2 か所に書かない)──
+       *   ここがやるのは**枠の中身の差し替え**だけである。
+       * ⚠ 枠の本文は**入れ替えた側を捨て、入った側を頼む** ── 捨てないと、
+       *   降ろしたノートの本文が器に残り続ける(常駐が積み上がる)。
+       */
+      const r = reduce(
+        {
+          ...state,
+          splitLids: swapped,
+          splitBodies: dropSplitBody(state.splitBodies, action.lid),
+        },
+        { type: 'SELECT_ENTRY', lid: action.lid },
+      );
+      return {
+        state: r.state,
+        events: r.state.splitBodies.has(old)
+          ? r.events
+          : [...r.events, { type: 'REQUEST_SPLIT_BODY', lid: old }],
+      };
+    }
     case 'PIN_SPLIT_ENTRY': {
       const meta = state.entryMetas.get(action.lid);
       // ⚠ 居ないものは留めない(消えた lid を指す枠を作らない)

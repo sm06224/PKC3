@@ -35,7 +35,9 @@ describe('知らせの隣の「開く」(#668 A)', () => {
     const open = regions.statusOpen;
     expect(open.getAttribute('data-pkc-field')).toBe('status-open');
     // 🔑 実行の口は既存の受け手 ── ここが別の名前なら、押しても誰も拾わない
-    expect(open.getAttribute('data-pkc-action'), '受け手の無い口').toBe('select-entry');
+    // 🔴 #809-4 で `swap-open` へ ── 行き先が枠に居るときは**入れ替える**
+    //    (枠に居ないときは reducer が素の `SELECT_ENTRY` へ落とす)
+    expect(open.getAttribute('data-pkc-action'), '受け手の無い口').toBe('swap-open');
     expect(open.textContent).toBe('開く');
     expect(open.hidden, '身元が無いのに出ている').toBe(true);
     // ⚠ 状態の行の**中**に居る(知らせの隣に出る)

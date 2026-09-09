@@ -167,12 +167,15 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-09-09(#683 段①): 録ったものの面 ── 受け手 +2
       //   (`capture-play` / `capture-stop`)。登記は増えない ── 面そのものは
       //   `set-browse` / `set-view` で開き、押し所はその面の中にしか無い
-      total: 271,
-      receivers: 222,
+      // ⚠ 2026-09-09(#809-4): 知らせの隣の「開く」が `select-entry` から
+      //   `swap-open` へ分かれて受け手 +1(登記は増えない ── 押し口は状態の行の
+      //   隣 1 か所で、そこは登記の対象ではない)
+      total: 272,
+      receivers: 223,
       registered: 85,
       both: 36,
       outsideActionsTable: 49,
-      unregistered: 186,
+      unregistered: 187,
     });
   });
 

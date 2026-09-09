@@ -297,7 +297,8 @@ test('🔴 ⠿ を一覧の行へ落とすと、その塊が別のノートへ�
     .toEqual(['題', '章 B', '本文 B', '章 C', '本文 C']);
   // どこへ行ったかを言う
   await expect(page.locator('[data-pkc-region="status"]')).toContainText(
-    '本文の塊を「行き先のノート」のいちばん下へ持っていきました',
+    // ⚠ #809-3 でノートの名前を『』へ揃えた(file を落とした回の知らせと同じ括弧)
+    '本文の塊を『行き先のノート』のいちばん下へ持っていきました',
   );
   // ⚠ 帰り道を同じ 1 行で言う(事故の瞬間に読むのはここだけ)
   await expect(page.locator('[data-pkc-region="status"]')).toContainText('持ち帰って');

@@ -373,3 +373,116 @@ describe('前回の並びを戻す', () => {
     expect(d.getState().splitLids).toEqual(['gone']);
   });
 });
+
+/**
+ * 🔴 **知らせの隣の「開く」は、中央と枠を入れ替える**(#809-4、2026-09-09。user 推薦 A)。
+ *
+ * ## 直す前、画面で何が起きていたか
+ *
+ * 知らせの隣の **開く** を押すと、行き先が中央に来て、**それまで読んでいた本文が
+ * 中央から消えました** ── その本文は留めていないので、戻るには左の一覧で探し直しです。
+ * ⚠ さらに留めた枠は外れないので、**同じノートが中央と枠の 2 か所に並びました**。
+ */
+describe('開くときに入れ替える(#809-4)', () => {
+  it('🔴 枠に居るノートを開くと、中央に居たものがその枠へ入る', () => {
+    const d = booted();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'n2' });
+    expect(d.getState().splitLids, '前提が崩れている(留められていない)').toEqual(['n2']);
+    d.dispatch({ type: 'SWAP_OPEN_ENTRY', lid: 'n2' });
+    expect(d.getState().selectedLid, '行き先が中央へ来ていない').toBe('n2');
+    expect(d.getState().splitLids, '中央に居たものが枠へ入っていない').toEqual(['n1']);
+  });
+
+  /**
+   * 🔴 **枠の位置は動かさない** ── 「左右が入れ替わるだけ」が推薦の中身である。
+   *
+   * ⚠ **末尾の枠で見てはいけない**(2026-09-09、変異試験 4b が SURVIVED で教えた)──
+   *   「その場所へ差し替える」と「一度外して末尾へ足す」は、**対象が末尾のとき
+   *   同じ並びになる**(2 枚なら偶然一致する)。🔑 だから**先頭の枠**で見る。
+   */
+  it('🔴 入れ替えても、枠の並びの位置は変わらない', () => {
+    const d = booted(4);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'n2' });
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'n3' });
+    const before = [...d.getState().splitLids];
+    expect(before, '台の前提: 2 枚が並んでいない').toHaveLength(2);
+    // ⚠ **先頭**を入れ替える ── 末尾だと「末尾へ足す」実装と区別がつかない
+    const target = before[0]!;
+    const other = before[1]!;
+    d.dispatch({ type: 'SWAP_OPEN_ENTRY', lid: target });
+    const after = d.getState().splitLids;
+    expect(after, '枚数が変わった').toHaveLength(before.length);
+    expect(after[0], '先頭がその場で入れ替わっていない').toBe('n1');
+    expect(after[1], 'もう 1 枚が動いた').toBe(other);
+  });
+
+  /** 🔴 **入った側の本文を頼む** ── 頼まないと、枠が永久に空のままになる。 */
+  it('🔴 枠へ入ったノートの本文を頼む', () => {
+    const d = booted();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'n2' });
+    d.dispatch({ type: 'SPLIT_BODY_LOADED', lid: 'n2', body: 'ふたつめ' });
+    const seen = eventsOf(d, { type: 'SWAP_OPEN_ENTRY', lid: 'n2' });
+    expect(seen, '枠へ入ったノートの本文を頼んでいない').toContain('REQUEST_SPLIT_BODY');
+  });
+
+  /** ⚠ **降ろした側の本文は捨てる** ── 残すと、器に居ないノートの本文が常駐する。 */
+  it('⚠ 枠から降りたノートの本文は捨てる', () => {
+    const d = booted();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'n2' });
+    d.dispatch({ type: 'SPLIT_BODY_LOADED', lid: 'n2', body: 'ふたつめ' });
+    expect(d.getState().splitBodies.has('n2'), '前提が崩れている').toBe(true);
+    d.dispatch({ type: 'SWAP_OPEN_ENTRY', lid: 'n2' });
+    expect(d.getState().splitBodies.has('n2'), '降ろしたのに本文が残っている').toBe(false);
+  });
+
+  /**
+   * 🔴 **対照群 ── 枠に居ないなら、ただ開く**(入れ替える相手が無い)。
+   * ⚠ これが無いと「いつも入れ替える」実装と区別がつかない。
+   */
+  it('🔴 枠に居ないノートは、ただ開く(枠は 1 枚も動かない)', () => {
+    const d = booted();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'n2' });
+    d.dispatch({ type: 'SWAP_OPEN_ENTRY', lid: 'n3' });
+    expect(d.getState().selectedLid).toBe('n3');
+    expect(d.getState().splitLids, '関係の無い枠が動いた').toEqual(['n2']);
+  });
+
+  /**
+   * 🔴 **中央がフォルダなら入れ替えない** ── フォルダは本文を持たないので
+   *   枠に置けず(`PIN_SPLIT_ENTRY` が断る)、入れ替えると**枠が永久に空**になる。
+   */
+  it('🔴 中央がフォルダのときは入れ替えず、ただ開く', () => {
+    const d = new Dispatcher();
+    d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [
+        { lid: 'f1', title: 'はこ', archetype: 'folder', entry_order: 1 },
+        { lid: 'n1', title: 'ノート', archetype: 'text', entry_order: 2 },
+      ] as never,
+      relations: [],
+    });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'f1' });
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'SWAP_OPEN_ENTRY', lid: 'n1' });
+    expect(d.getState().selectedLid, '開いていない').toBe('n1');
+    expect(d.getState().splitLids, 'フォルダを枠へ入れた(本文が無いので永久に空になる)').toEqual([
+      'n1',
+    ]);
+  });
+
+  /** ⚠ 同じものを押しても壊れない(押しても何も起きないのが正しい)。 */
+  it('⚠ いま中央に居るものを押しても、枠は動かない', () => {
+    const d = booted();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'n2' });
+    d.dispatch({ type: 'SWAP_OPEN_ENTRY', lid: 'n1' });
+    expect(d.getState().splitLids).toEqual(['n2']);
+    expect(d.getState().selectedLid).toBe('n1');
+  });
+});

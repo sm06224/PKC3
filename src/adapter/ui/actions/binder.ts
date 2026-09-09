@@ -3295,6 +3295,18 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (lid) selectEntryOrExplain(dispatcher, lid, 'ノート');
   },
   /**
+   * 🔴 **開くときに、いま中央に居るノートと入れ替える**(#809-4)。
+   *
+   * ⚠ **知らせの隣の「開く」専用**である ── 一覧の行を押したときは今までどおり
+   *   ただ開く(押すたびに枠が組み替わるのは、user が頼んでいない動きである)。
+   * 🔑 判定(入れ替えられるか)は **reducer が持つ**(`SWAP_OPEN_ENTRY`)──
+   *   ここに書くと、`main.ts` と同じで test の届かない所に判断が入る。
+   */
+  'swap-open': (dispatcher, target) => {
+    const lid = target.getAttribute('data-pkc-entry');
+    if (lid) dispatcher.dispatch({ type: 'SWAP_OPEN_ENTRY', lid });
+  },
+  /**
    * 🔴 **録ったものを、その場で鳴らす / やめる**(#683 段①)。
    *
    * ⚠ **借りるのはここではない** ── bytes を借りるのは描画器(`captures.ts`)の
@@ -9303,12 +9315,23 @@ export function bindActions(
     let host = target.closest<HTMLElement>(BODY_DROP_HOST);
     let ground = false;
     if (host === null) {
-      // 面の地 ── その面の本文の器の**下**なら、最後の塊の後として受ける
+      /**
+       * 面の地 ── その面の本文の器の外なら、**最後の塊の後**として受ける。
+       *
+       * 🔴 **上も受ける**(#809-1、2026-09-09。user 推薦 A)。
+       * ⚠ 直す前は `de.clientY < host.bottom` で**器より上を捨てて**いた ──
+       *   つまり留めた枠の**題名**(「さきの予定」)や `← 左で開く` の帯へ落とすと
+       *   線が出ず、写真は**中央のノートのいちばん下**へ入った。
+       * 🔴 **枠 1 つの中で、数 px 上か下かで行き先のノートが変わる**のに、
+       *   外したことが画面に 1 ドットも出ない ── いちばん気づけない外し方である。
+       * 🔑 だから**その枠のどこへ落としても、その枠のノートへ入れる**
+       *   (狙った枠に入るのが、覚え直しがいちばん少ない)。
+       */
       const pane = target.closest<HTMLElement>(
         '[data-pkc-region="split-frame"], [data-pkc-view-pane="detail"]',
       );
       host = pane?.querySelector<HTMLElement>(BODY_DROP_HOST) ?? null;
-      if (host === null || de.clientY < host.getBoundingClientRect().bottom) return null;
+      if (host === null) return null;
       ground = true;
     }
     if (!host.hasAttribute(PAINTED_ATTR) || host.classList.contains('pkc-board-host')) return null;

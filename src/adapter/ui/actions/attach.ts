@@ -366,6 +366,23 @@ export async function attachFiles(
   const elsewhere =
     at !== undefined && dropped !== undefined && at.lid !== opened.lid && isAppendable(dropped.archetype);
   const into = elsewhere ? { lid: at!.lid, archetype: dropped!.archetype } : opened;
+  /**
+   * 🔴 **横に枠を留めているときは、中央へ入った回も名前を言う**(#809-2、2026-09-09。
+   * user 推薦 A)。
+   *
+   * ⚠ 直す前、中央のノートへ入った回の字は「「猫.png」を落とした所に入れました」で、
+   *   **どのノートかを 1 文字も言わなかった** ── 枠を 2〜3 枚並べていると、
+   *   user は**どの本文に入ったのか字から読めない**(画面には本文が 3 つ出ている)。
+   * 🔑 だから**枠を 1 枚でも留めているときだけ**名前を足す ──
+   *   ⚠ 枠を使わない user には 1 語も増やさない(本文が 1 つしか無いなら
+   *   「どれに入ったか」は自明で、要らない字である)。
+   */
+  const manyBodies = dispatcher.getState().splitLids.length > 0;
+  const namedTitle = elsewhere
+    ? dropped!.title
+    : manyBodies
+      ? dispatcher.getState().entryMetas.get(opened.lid ?? '')?.title
+      : undefined;
   const queue = createWritableQueue(dispatcher);
   /**
    * 🔴 **落とした所は、この 1 回のあいだ持ち回る**(#684 段④)── 1 枚入るたびに
@@ -409,6 +426,10 @@ export async function attachFiles(
      * 🔑 つまり **2 枚以上落とした user だけ、戻す道が無くなる**という、
      *   いちばん気づけない形の欠け方だった(CLAUDE.md §7「同じ値を複数の描画経路へ」)。
      */
+    /**
+     * ⚠ **締めの 1 行も、1 枚ごとの行と同じ物差しで名前を出す**(#809-2)──
+     *   片方だけ名前を落とすと、まとめて落とした user だけ行き先が読めなくなる。
+     */
     if (elsewhere) {
       notify(
         `${why}${tally.put} 件を『${dropped!.title}』の本文に入れました(${tally.last} ほか)`,
@@ -416,7 +437,11 @@ export async function attachFiles(
       );
       return;
     }
-    notify(`${why}${tally.put} 件を本文に入れました(${tally.last} ほか)`);
+    notify(
+      namedTitle === undefined
+        ? `${why}${tally.put} 件を本文に入れました(${tally.last} ほか)`
+        : `${why}${tally.put} 件を『${namedTitle}』の本文に入れました(${tally.last} ほか)`,
+    );
   };
 
   /**
@@ -456,7 +481,8 @@ export async function attachFiles(
           why,
           batch,
           ...(place === undefined ? {} : { place }),
-          ...(elsewhere ? { selectBack: opened.lid, intoTitle: dropped!.title } : {}),
+          ...(elsewhere ? { selectBack: opened.lid } : {}),
+          ...(namedTitle === undefined ? {} : { intoTitle: namedTitle }),
           onPut: (n) => {
             tally.put += 1;
             tally.last = n;
@@ -534,6 +560,8 @@ export async function attachFiles(
   notify(
     elsewhere
       ? `${why}${what}を預かりました(編集を終えたら『${dropped!.title}』の本文のいちばん下に入れます)`
-      : `${why}${what}を預かりました(編集を終えたら本文に入れます)`,
+      : namedTitle === undefined
+        ? `${why}${what}を預かりました(編集を終えたら本文に入れます)`
+        : `${why}${what}を預かりました(編集を終えたら『${namedTitle}』の本文のいちばん下に入れます)`,
   );
 }
