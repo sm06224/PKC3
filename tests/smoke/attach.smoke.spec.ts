@@ -152,6 +152,12 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
       { name: '写真/海.jpg', data: Buffer.from('umi') },
       { name: '写真/山.jpg', data: Buffer.from('yama') },
       { name: 'readme.txt', data: Buffer.from('hello') },
+      /**
+       * ⚠ **重い 1 件を混ぜる**(#818 の残件)── 取り出しは CRC を舐めるので、
+       *   小さい物だけでは「固まらない」を**測ったことにならない**
+       *   (fixture のゼロ件次元 ── CLAUDE.md §2)。
+       */
+      { name: '大きい.bin', data: Buffer.alloc(8 * 1024 * 1024, 7) },
     ]),
   });
   await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(3);
@@ -175,12 +181,61 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
     page.locator('[data-pkc-field="dialog-ok"]'),
     'フォルダの下の件数が字に出ていない',
   ).toHaveText('選んだ 2 件を取り出す');
+  // ⚠ 重い 1 件も混ぜる(下の「固まらない」を測るため)
+  await clickReal(page, page.locator('[data-pkc-field="pick-archive"]', { hasText: '大きい.bin' }));
+  await expect(page.locator('[data-pkc-field="dialog-ok"]')).toHaveText('選んだ 3 件を取り出す');
+
+  /**
+   * 🔴 **取り出しでメインが固まらない**(#818 の残件。user 指示 2026-08-03
+   * 「重い処理はワーカーへ」)。
+   *
+   * ⚠ **絶対値の閾値にしない** ── 何もしていない間の欠測を**同じ計器**で先に採り、
+   *   そこからの増分で見る(`大きい添付を貼っても…` と同じ規律。閾値上げで
+   *   flake を隠さないため)。
+   * 🔑 取り出しは `Blob.stream()` を舐めながら CRC を取る作りなので、
+   *   **塊ごとに手が空く**はずである ── ここはその**後条件**である。
+   */
+  const base = await page.evaluate(async () => {
+    const gaps: number[] = [];
+    let last = performance.now();
+    const hb = setInterval(() => {
+      const now = performance.now();
+      gaps.push(now - last);
+      last = now;
+    }, 4);
+    await new Promise<void>((r) => setTimeout(r, 500));
+    clearInterval(hb);
+    gaps.sort((a, b) => b - a);
+    return { max: Math.round(gaps[0] ?? 0), ticks: gaps.length };
+  });
+  expect(base.ticks, '対照群の心拍が取れていない(比べる相手が無い)').toBeGreaterThan(5);
+  await page.evaluate(() => {
+    const w = window as unknown as { __gaps: number[]; __hb: number };
+    w.__gaps = [];
+    let last = performance.now();
+    w.__hb = window.setInterval(() => {
+      const now = performance.now();
+      w.__gaps.push(now - last);
+      last = now;
+    }, 4);
+  });
   await clickReal(page, '[data-pkc-field="dialog-ok"]');
-  // 🔴 取り出した物が添付になる(ノート + png + zip + 2 = 5 行)
+  // 🔴 取り出した物が添付になる(ノート + png + zip + 3 = 6 行)
   await expect(
     page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]'),
     '取り出した物が添付になっていない',
-  ).toHaveCount(5, { timeout: 15_000 });
+  ).toHaveCount(6, { timeout: 20_000 });
+  const load = await page.evaluate(() => {
+    const w = window as unknown as { __gaps: number[]; __hb: number };
+    clearInterval(w.__hb);
+    const g = [...w.__gaps].sort((a, b) => b - a);
+    return { max: Math.round(g[0] ?? 0), ticks: g.length };
+  });
+  expect(load.ticks, '取り出し中の心拍が取れていない').toBeGreaterThan(5);
+  expect(
+    load.max,
+    `取り出し中にメインが ${load.max}ms 止まった(何もしていない間は ${base.max}ms)`,
+  ).toBeLessThan(base.max + 80);
   await expect(page.locator('[data-pkc-region="entry-list"]')).toContainText('海.jpg');
   await expect(page.locator('[data-pkc-region="entry-list"]')).toContainText('山.jpg');
 
