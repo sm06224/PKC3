@@ -65,7 +65,7 @@ set-editor-mode set-text-scale set-read-columns set-column-rule set-tag-badge se
 
 /** 欄の値そのもの ── パレットからは「その欄へ連れて行く」形になる。 */
 export const V = `smart-field set-open-in-edit set-alarm-enabled set-notices-enabled
-rename-attachment toggle-app-tile set-app-group set-app-icon`.split(/\s+/);
+rename-attachment toggle-app-tile set-app-group set-app-icon set-sql-text`.split(/\s+/);
 
 /**
  * 受け手 → 種別を組む**素の関数**。⚠ 割り当て漏れ / 実在しない名前は**投げる**

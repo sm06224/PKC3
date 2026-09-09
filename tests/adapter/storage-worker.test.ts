@@ -2573,3 +2573,215 @@ describe('容量の内訳(#415)', () => {
     expect(p.orphanBytes).toBe(0);
   });
 });
+
+/**
+ * 🔴 **打った SQL を「読むだけ」で走らせる**(#681 段②)。
+ *
+ * ⚠ ここが**安全の境**である ── 打つ前の字の門(`sql-guard.ts`)は「断る理由を
+ * 読める字で言う」ためのもので、境ではない(字で見分ける以上、知らない書き方は漏れうる)。
+ *
+ * 守る主張:
+ * 1. 🔴 **書き込みは engine が断る**(`PRAGMA query_only`)
+ * 2. 🔴 **終わらない問い合わせを止められる**(進み具合の見張り)
+ * 3. 🔴 **どちらも必ず戻る** ── 戻らないと、この面を 1 度開いた user は
+ *    **以後ノートを保存できない**(同じ接続を使うので)
+ * 4. 上限で切ったら `truncated`(黙って切らない)
+ * 5. BLOB の中身は運ばない(大きさの字へ畳む)
+ */
+describe('読むだけの SQL(#681 段②)', () => {
+  const run = (
+    sql: string,
+    over: { maxRows?: number; maxSteps?: number; maxMs?: number } = {},
+  ) =>
+    request({
+      op: 'runReadOnlySql',
+      sql,
+      maxRows: over.maxRows ?? 100,
+      maxSteps: over.maxSteps ?? 1_000_000,
+      // ⚠ 既定は**十分に長く** ── 時間で切れたのか歩数で切れたのかを混ぜない
+      maxMs: over.maxMs ?? 60_000,
+    });
+
+  it('読む問い合わせは通り、列名と行が返る', async () => {
+    const r = await run("SELECT 1 AS n, 'あ' AS s");
+    expect(r.columns).toEqual(['n', 's']);
+    expect(r.rows).toEqual([[1, 'あ']]);
+    expect(r.ms).toBeGreaterThanOrEqual(0);
+    expect(r.truncated).toBe(false);
+  });
+
+  it('🔴 書き込みは engine が断る(字の門を抜けても書けない)', async () => {
+    await expect(run('CREATE TABLE danger (a)')).rejects.toThrow(/readonly/i);
+    await expect(run("INSERT INTO entries (lid) VALUES ('x')")).rejects.toThrow(/readonly/i);
+  });
+
+  /**
+   * 🔴 **戻ることまで見る** ── ここが死ぬと、クエリの面を 1 度開いた user は
+   *   **以後ノートを 1 文字も保存できない**(いちばん気づけない壊れ方)。
+   */
+  it('🔴 走らせた後も、ノートは保存できる(query_only が戻っている)', async () => {
+    await run('SELECT 1');
+    await write('sqlok', doc('走らせた後に書く'));
+    expect(await request({ op: 'getBody', cid: 'c1', lid: 'sqlok' })).toContain('走らせた後に書く');
+  });
+
+  /** ⚠ 断られた回も戻る(`finally` が通っている)。 */
+  it('🔴 断られた後も、ノートは保存できる', async () => {
+    await expect(run('CREATE TABLE danger2 (a)')).rejects.toThrow(/readonly/i);
+    await write('sqlok2', doc('断られた後に書く'));
+    expect(await request({ op: 'getBody', cid: 'c1', lid: 'sqlok2' })).toContain('断られた後に書く');
+  });
+
+  /**
+   * 🔴 **長い問い合わせを止められる**(#681 段②)。
+   *
+   * ⚠ **わざと「終わる」問い合わせにしてある**(2026-09-09、変異試験の結果を受けて直した)。
+   *   初稿は `WHERE` の無い**無限再帰**だったが、見張りを殺す変異を当てると
+   *   **test が落ちずに固まる**(sqlite は worker の thread を同期に握るので、
+   *   vitest の時間切れでは割れない)── ハーネスは `TIMEOUT` を返し、
+   *   **KILLED とも SURVIVED とも言えない**(CLAUDE.md §3 の 4 つ目の値)。
+   * 🔑 20 万回で止まる形にすると、見張りが死んだ回は**普通に終わって行が返る**ので
+   *   `rejects` が落ちる = **殺せる**。⚠ 見張りが生きていれば 50 歩で切れる。
+   */
+  const HEAVY =
+    'WITH RECURSIVE r(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM r WHERE i < 200000) SELECT count(*) FROM r';
+
+  it('🔴 長い問い合わせを止められる', async () => {
+    await expect(run(HEAVY, { maxSteps: 50 })).rejects.toThrow(/interrupt/i);
+    // ⚠ **対照群** ── 我慢する回数を上げれば、同じ字が通る(門そのものが生きている)
+    expect((await run(HEAVY, { maxSteps: 10_000_000 })).rows).toEqual([[200000]]);
+  });
+
+  /** ⚠ 止めた後も戻る ── 見張りを外し損ねると、以後の全部が身に覚えのない中断を受ける。 */
+  it('🔴 止めた後も、普通の問い合わせが通る', async () => {
+    await expect(run(HEAVY, { maxSteps: 50 })).rejects.toThrow(/interrupt/i);
+    expect((await run('SELECT 2 AS n')).rows).toEqual([[2]]);
+  });
+
+  /**
+   * 🔴 **止めた後も、ノートを保存できる**(2026-09-09、変異試験 M24 が SURVIVED で教えた)。
+   *
+   * ⚠ 上の「普通の問い合わせが通る」は**次の SQL が見張りを張り直す**ので、
+   *   外し忘れを**素通りさせる** ── 実際に困るのは **SQL と SQL の間に走るノートの保存**
+   *   である(数え切った古い見張りが残っていると、身に覚えのない中断を受ける)。
+   * 🔑 だから観測点は「次の SELECT」ではなく **`upsertEntry` が通ること**。
+   */
+  it('🔴 止めた後も、ノートを保存できる(見張りが外れている)', async () => {
+    await expect(run(HEAVY, { maxSteps: 50 })).rejects.toThrow(/interrupt/i);
+    await write('sqlok3', doc('止めた後に書く'));
+    expect(await request({ op: 'getBody', cid: 'c1', lid: 'sqlok3' })).toContain('止めた後に書く');
+  });
+
+  /**
+   * 🔴 **長い書込も通る**(2026-09-09。⚠ 上の 1 件では**足りなかった**)。
+   *
+   * ⚠ 変異試験 M24(`setProgress(pointer, 0, 0, 0)` を `finally` から外す)は、
+   *   上の 2 件を**両方とも素通り**した ── 理由は測って分かった:
+   *   **1 件の保存も `SELECT 2` も、見張りが呼ばれる間隔(1000 歩)に届かない**。
+   *   つまり守っていたのは「短い操作が通ること」であって、外し忘れではない。
+   * 🔑 **歩数が要る** ── まとめ書き 400 件なら 1000 歩を確実に超えるので、
+   *   数え切った古い見張りが残っていれば**身に覚えのない中断**を受ける。
+   * ⚠ これが**いちばん気づけない壊れ方**である:SQL を 1 度打った user だけ、
+   *   その後の大きな書込(取り込み・復元)が静かに落ちる。
+   */
+  it('🔴 止めた後、まとめ書き(見張りの間隔を超える長さ)も通る', async () => {
+    await expect(run(HEAVY, { maxSteps: 50 })).rejects.toThrow(/interrupt/i);
+    const many = Array.from({ length: 400 }, (_, i) => entry(`bulk${String(i)}`, `本文 ${String(i)}`));
+    await request({ op: 'bulkUpsertEntries', cid: 'c1', entries: many });
+    expect(await request({ op: 'getBody', cid: 'c1', lid: 'bulk399' })).toContain('本文 399');
+  });
+
+  it('上限で切ったら truncated(黙って切らない)', async () => {
+    const many =
+      'WITH RECURSIVE r(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM r WHERE i < 10) SELECT i FROM r';
+    const r = await run(many, { maxRows: 3 });
+    expect(r.rows).toHaveLength(3);
+    expect(r.truncated, '切ったのに黙っている').toBe(true);
+    // ⚠ 対照群 ── 上限に足りていれば切らない
+    expect((await run(many, { maxRows: 50 })).truncated).toBe(false);
+  });
+
+  /**
+   * 🔴 **1 件も当たらなかった回でも、列の名前は返る**(2026-09-09)。
+   *
+   * ⚠ **門を置かなかった軸**である(CLAUDE.md #764「変異させたのは自分で書いた門だけ」)──
+   *   列名は `exec` の `columnNames` から取っているので、**行が 1 つも返らない回に
+   *   埋まるかどうかは実装依存**であり、推測で書けない。
+   * 🔑 埋まらなければ、画面は**表そのものを出さない**(描画器は列 0 件で早期 return する)──
+   *   user には「打ったのに何も起きない」に見える。だから**実測して pin する**。
+   */
+  it('🔴 1 件も当たらなくても、列の名前は返る', async () => {
+    const r = await run('SELECT title FROM entries WHERE 1 = 0');
+    expect(r.rows, '当たらないはずの問い合わせで行が返った(前提が崩れている)').toEqual([]);
+    expect(r.columns, '0 件のときに列の名前が消える').toEqual(['title']);
+  });
+
+  /**
+   * 🔴 **行の上限に達したら、その場で止める**(2026-09-09 の着地前レビュー、実測)。
+   *
+   * ⚠ 初稿は `callback` が `return;` していた ── 同梱の `oo1.DB.exec` は
+   *   **`false` を返したときだけ `break`** するので、**回り続けていた**。
+   *   実測:100 万行を返す再帰 CTE で callback **100 万回 / 2030 ms** →
+   *   直した後は **502 回 / 6 ms**。
+   * 🔑 **件数だけを見る assert では原理的に見分けられない**(切った後の答えは
+   *   どちらも同じ)── だから**かかった時間**を見る。
+   */
+  it('🔴 行の上限に達したら、そこで止める(残りを数え続けない)', async () => {
+    const million =
+      'WITH RECURSIVE r(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM r WHERE i < 1000000) SELECT i FROM r';
+    const r = await run(million, { maxRows: 3, maxSteps: 100_000_000, maxMs: 60_000 });
+    expect(r.rows, '上限どおりに切れていない(前提が崩れている)').toHaveLength(3);
+    expect(r.truncated).toBe(true);
+    expect(
+      r.ms,
+      `上限に達した後も回り続けている(${String(r.ms)} ms ── 止めていれば 1 桁 ms で返る)`,
+    ).toBeLessThan(500);
+  });
+
+  /**
+   * 🔴 **実時間でも切る**(2026-09-09 の着地前レビュー)。
+   * ⚠ 歩数だけでは**止まるまでの時間が桁でぶれる**(1 歩の重さが 7 倍以上違う)。
+   *   別窓の user は 10 秒で「本体タブと通信できません」という嘘を見るので、
+   *   engine が**必ず先に**止まる必要がある。
+   */
+  it('🔴 歩数が残っていても、時間で切れる', async () => {
+    const heavy =
+      'WITH RECURSIVE r(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM r WHERE i < 100000000) SELECT count(*) FROM r';
+    // ⚠ 歩数は**使い切れない**ほど大きくしておく ── 切ったのが時間だと分かる形にする
+    await expect(run(heavy, { maxSteps: 100_000_000, maxMs: 30 })).rejects.toThrow(/interrupt/i);
+    // ⚠ **対照群** ── 時間を十分にとれば同じ字が通る(門そのものが生きている)
+    expect((await run('SELECT 3 AS n', { maxMs: 60_000 })).rows).toEqual([[3]]);
+  });
+
+  /**
+   * 🔴 **長い字も畳む**(2026-09-09 の着地前レビュー)。
+   * ⚠ BLOB を畳む理由(画面で読めない / heap に載せる理由が無い)は**字にも当たる**のに、
+   *   初稿は字だけ素通りだった。⚠ しかも 1 行なので**歩数の門も行数の門も鳴らない**。
+   */
+  it('🔴 長い字は畳んで、全体で何字あったかを言う', async () => {
+    const r = await run("SELECT hex(zeroblob(100000)) AS s");
+    const cell = String(r.rows[0]?.[0]);
+    expect(cell.length, `1 升に ${String(cell.length)} 字を運んだ`).toBeLessThan(3000);
+    expect(cell, '切ったことも、全体の長さも言っていない').toContain('全 200000 字');
+    // ⚠ **対照群** ── 短い字はそのまま(畳む規則が効きすぎていない)
+    expect((await run("SELECT 'みじかい' AS s")).rows).toEqual([['みじかい']]);
+  });
+
+  /**
+   * 🔴 **大きな数は字で返す**(2026-09-09 実測)。
+   * ⚠ 同梱の sqlite が `bigint` を返すのは `Number.MAX_SAFE_INTEGER` を超えたときだけ ──
+   *   つまりこの枝の値は**定義上すべて `Number()` で化ける**
+   *   (`9007199254740993` → `…992` / `9223372036854775807` → `…776000`)。
+   */
+  it('🔴 大きな数は、数として化けさせずに字で返す', async () => {
+    expect((await run('SELECT 9007199254740993 AS n')).rows).toEqual([['9007199254740993']]);
+    expect((await run('SELECT 9223372036854775807 AS n')).rows).toEqual([['9223372036854775807']]);
+    // ⚠ **対照群** ── 普通の数は数のまま(全部を字にしていない)
+    expect((await run('SELECT 42 AS n')).rows).toEqual([[42]]);
+  });
+
+  it('BLOB は中身ではなく大きさを返す(heap に載せない)', async () => {
+    const r = await run("SELECT zeroblob(1234) AS b");
+    expect(r.rows[0]?.[0]).toBe('<1234 バイト>');
+  });
+});

@@ -1120,6 +1120,52 @@ type Handlers = {
   ) => ResultMap[Op] | Promise<ResultMap[Op]>;
 };
 
+/**
+ * 進み具合の見張りを呼ぶ間隔(VDBE の歩数)。⚠ 細かすぎると見張り自体が重くなる。
+ * 🔑 1000 は sqlite の例と同じ桁(実測で直積を 3ms で止められた)。
+ */
+const PROGRESS_EVERY = 1000;
+
+/**
+ * 🔴 **1 つの升に運ぶ字数の上限**(#681 段②、2026-09-09 の着地前レビュー)。
+ *
+ * ⚠ **BLOB を畳む理由は、長い字にそのまま当たる** ── 画面に出しても読めず、
+ *   heap に載せる理由が無い。⚠ ところが初稿は BLOB だけ畳んで**字は素通り**だった
+ *   (CLAUDE.md「片側を直したら、対称の反対側を必ず疑う」)。
+ * 🔴 実測(2026-09-09):`SELECT hex(randomblob(2000000))` は **1 行で 400 万字**を返し、
+ *   **進み具合の見張りは 1 度も鳴らない**(1 行なので歩数も行数も門にならない)。
+ *   ⚠ そして `entries.body` は同じ表に在るので、`SELECT * FROM entries` は
+ *   **いちばん自然な最初の 1 打**である。
+ */
+const MAX_CELL_CHARS = 2000;
+
+/**
+ * `postMessage` に載る形へ畳む。
+ * ⚠ **BLOB の中身は運ばない** ── 画面に出しても読めず、heap に載せる理由が無い
+ *   (2026-07-27 の不可侵指示「bytes は heap に載せない」と同じ向き)。
+ * ⚠ **長い字も同じ理由で畳む**(上の `MAX_CELL_CHARS`)── ただし
+ *   **全部で何字あったか**は残す(黙って切らない)。
+ */
+function cellForWire(v: unknown): string | number | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'number') return v;
+  if (typeof v === 'string')
+    return v.length > MAX_CELL_CHARS
+      ? `${v.slice(0, MAX_CELL_CHARS)}…(全 ${String(v.length)} 字)`
+      : v;
+  /**
+   * 🔴 **字にする ── `Number()` にしない**(2026-09-09 実測)。
+   * ⚠ 同梱の sqlite が `bigint` を返すのは **`Number.MAX_SAFE_INTEGER` を超えたときだけ**
+   *   なので、この枝に来る値は**定義上すべて `Number()` で表せない**:
+   *   `9007199254740993` → `9007199254740992`(1 違う)/
+   *   `9223372036854775807` → `9223372036854776000`(別の数)。
+   * ⚠ 数として出すために**静かに嘘の数を見せる**より、正しい字を見せる。
+   */
+  if (typeof v === 'bigint') return String(v);
+  if (v instanceof Uint8Array) return `<${String(v.byteLength)} バイト>`;
+  return String(v);
+}
+
 /** 埋め戻しを回す塊の大きさ(本文を一度に heap へ載せない)。 */
 const BACKFILL_CHUNK = 200;
 
@@ -1712,6 +1758,124 @@ const handlers: Handlers = {
     if (api === null) throw new Error('sqlite が初期化されていません');
     const exportDb = api.capi.sqlite3_js_db_export as unknown as (p: unknown) => Uint8Array;
     return { image: exportDb((need() as unknown as { pointer: unknown }).pointer) };
+  },
+  /**
+   * 🔴 **user が打った SQL を、読むだけで走らせる**(#681 段②)。
+   *
+   * ⚠ 安全は**字ではなく engine** に置く(protocol の注記) ── ここが境である。
+   * 🔑 通す門は 2 つで、**どちらも `finally` で必ず戻す**:
+   * ① `PRAGMA query_only` ── 戻し損ねると、この面を 1 度開いた user は
+   *    **以後ノートを保存できない**(同じ接続なので)
+   * ② 進み具合の見張り ── 戻し損ねると、**以後の全部の問い合わせ**が
+   *    身に覚えのない中断を受ける
+   *
+   * ⚠ **見張りを張れない環境では走らせない** ── 張れないまま走らせると、
+   *   終わらない 1 行で**保存ごと固まる**(このワーカーは DB の lease を握っている)。
+   *   ⚠ 「たぶん軽いから」で通さない ── 軽いかどうかは打つ前に分からない。
+   */
+  runReadOnlySql: (req) => {
+    const database = need();
+    const api = sqliteApi;
+    if (api === null) throw new Error('sqlite が初期化されていません');
+    const install = api.wasm['installFunction'] as unknown as
+      | ((sig: string, fn: () => number) => number)
+      | undefined;
+    const uninstall = api.wasm['uninstallFunction'] as unknown as
+      | ((p: number) => void)
+      | undefined;
+    const setProgress = api.capi['sqlite3_progress_handler'] as unknown as
+      | ((db: unknown, n: number, fn: number, arg: number) => void)
+      | undefined;
+    if (install === undefined || setProgress === undefined) {
+      throw new Error('この版では問い合わせを止められないので走らせません');
+    }
+    const pointer = (database as unknown as { pointer: unknown }).pointer;
+    const started = Date.now();
+    let steps = 0;
+    /**
+     * 🔑 **0 以外を返した瞬間に `SQLITE_INTERRUPT`** になる(実測済み)。
+     *
+     * 🔴 **歩数と実時間の 2 つで切る**(2026-09-09 の着地前レビュー、実測で判明)。
+     * ⚠ 初稿は歩数だけだった ── **1 歩の重さが 7 倍以上ぶれる**ので、同じ上限でも
+     *   止まるまでの実時間が桁で違う:
+     *
+     *   | 打った物 | 見張りの回数 | 実時間 | 1 回あたり |
+     *   |---|---|---|---|
+     *   | 再帰 300 万行を**返す** | 54,000 | 5.6 秒 | 0.104 ms |
+     *   | 再帰 300 万行を**数える** | 51,000 | 0.73 秒 | 0.014 ms |
+     *
+     * 🔴 なぜ実時間が要るか:この面を**別窓**で開いた user は follower なので、
+     *   本体タブへの依頼は **10 秒**で諦める(`store-proxy.ts` の `REQUEST_TIMEOUT_MS`)。
+     *   ⚠ そこを越えると、面には「**本体タブと通信できません**」という**嘘**が出る
+     *   (本体は生きていて、user 自身の問い合わせで塞がっているだけ)。
+     *   しかも問い合わせは走り続けるので、**その間ノートの保存が進まない**。
+     * ⚠ だから engine 側が**必ず先に**止まる ── 上限は呼び側が引いて渡す。
+     */
+    const fn = install('i(p)', () => {
+      steps += 1;
+      if (Date.now() - started > req.maxMs) return 1;
+      return steps > req.maxSteps ? 1 : 0;
+    });
+    /**
+     * ⚠ **2 つとも `try` の中で張る** ── 外で張ると、張った直後に例外が出た回に
+     *   `finally` が回らず、**張りっぱなしのまま**この worker が生き続ける
+     *   (= 以後ノートを保存できない / 身に覚えのない中断を受ける)。
+     */
+    try {
+      database.exec({ sql: 'PRAGMA query_only = 1' });
+      setProgress(pointer, PROGRESS_EVERY, fn, 0);
+      const columns: string[] = [];
+      const rows: Array<Array<string | number | null>> = [];
+      /**
+       * ⚠ **1 件多く取って切れたか判る**(`searchEntries` と同じ作法)。
+       * ⚠ 値は `postMessage` に載る形だけにする ── BLOB(`Uint8Array`)は
+       *   **中身を運ばない**(画面に出しても読めないし、heap に載せる理由が無い)。
+       */
+      database.exec({
+        sql: req.sql,
+        rowMode: 'array',
+        columnNames: columns,
+        callback: (row: unknown[]) => {
+          /**
+           * 🔴 **`false` を返して `exec` を止める**(2026-09-09 実測)。
+           * ⚠ 初稿は `return;` だった ── 同梱の `oo1.DB.exec` は
+           *   **`false === callback(...)` のときだけ `break`** するので、
+           *   `undefined` では**回り続ける**。実測(100 万行を返す再帰 CTE、上限 500):
+           *   `return;` = callback **100 万回 / 2030 ms** →
+           *   `return false;` = **502 回 / 6 ms**。
+           * ⚠ つまり上限が守っていたのは「**返す件数**」だけで、
+           *   worker が止まる時間もメモリも 1 つも守っていなかった。
+           */
+          if (rows.length > req.maxRows) return false;
+          rows.push(row.map((v) => cellForWire(v)));
+          return undefined;
+        },
+      } as unknown as Parameters<Database['exec']>[0]);
+      const truncated = rows.length > req.maxRows;
+      return {
+        columns,
+        rows: truncated ? rows.slice(0, req.maxRows) : rows,
+        truncated,
+        ms: Date.now() - started,
+      };
+    } finally {
+      /**
+       * ⚠ **順番が効く**:sqlite から**外してから**枠を解除する(逆にすると宙を指す)。
+       * 🔴 **入れ子にする**(2026-09-09 の着地前レビュー)── 初稿は 3 文を並べて
+       *   「どちらも必ず通る」と**書いていた**が、直列なので**前の 2 つが投げれば
+       *   `query_only = 0` は飛ぶ**。飛んだ結果はこの file が上で書いているとおり
+       *   「**この面を 1 度開いた user は以後ノートを保存できない**」である。
+       * ⚠ **test は持っていない**(`setProgress` を投げさせる口がここには無い)──
+       *   だから「これが無いと壊れる」ではなく「**戻し損ねの結果がいちばん重いので、
+       *   最後尾に置かない**」と書いておく。
+       */
+      try {
+        setProgress(pointer, 0, 0, 0);
+        uninstall?.(fn);
+      } finally {
+        database.exec({ sql: 'PRAGMA query_only = 0' });
+      }
+    }
   },
   openContainer: (req) => {
     need().exec({

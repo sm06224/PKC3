@@ -3706,6 +3706,73 @@ li[data-pkc-row-slot] {
   border-radius: 2px;
 }
 
+/* ══ SQL で調べる面(#681 段②、2026-09-09)═════════════════════════
+ * 🔴 **中央の面(別窓)だけ**── 左の列に同じ面は無い(探す面と同じ形)。
+ * 地は無彩色、色は**断りの 1 行**にだけ使う(業務画面の作法)。 */
+[data-pkc-view-pane='sql'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s2);
+  min-height: 0;
+  overflow: auto;
+}
+[data-pkc-field='sql-head'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+[data-pkc-field='sql-head'] [data-pkc-field='pane-title'] {
+  margin: 0;
+  font-size: 14px;
+}
+/* ⚠ 打つ欄は**等幅** ── SQL は桁を数える字である(記号の見分けもつく) */
+[data-pkc-field='sql-input'] {
+  width: 100%;
+  min-height: 5em;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  resize: vertical;
+}
+[data-pkc-field='sql-bar'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+[data-pkc-field='sql-tip'],
+[data-pkc-field='sql-note'] {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+/* 断りの 1 行だけ色を持つ ── 出ていること自体が「直す所がある」の合図である */
+[data-pkc-field='sql-note'][data-pkc-sql-error='yes'] {
+  color: var(--danger);
+}
+/* 🔴 **表は自分の中で横に流す** ── 面ごと横スクロールさせない(列は何本でも来る) */
+[data-pkc-field='sql-body'] {
+  min-height: 0;
+  overflow: auto;
+}
+[data-pkc-field='sql-table'] {
+  border-collapse: collapse;
+  font-size: 12px;
+  white-space: pre;
+}
+[data-pkc-field='sql-table'] th,
+[data-pkc-field='sql-table'] td {
+  padding: 2px var(--s2);
+  border: 1px solid var(--border);
+  text-align: left;
+}
+[data-pkc-field='sql-table'] th {
+  background: var(--surface-2);
+}
+/* ⚠ 「空の字」と「値が無い」を**見分けられる**ようにする(字は描画器が入れる) */
+[data-pkc-field='sql-table'] td[data-pkc-sql-null='yes'] {
+  color: var(--muted);
+}
+
 /* ══ 予定(#292 段③、2026-08-23)══════════════════════════════════
  * 🔴 **左の列に置く**(user 指示「もう一つ PKC が開いて混乱する」)── 中央は
  *   本文のまま。⚠ 幅は `minmax(200px, 18vw)` = 1920 で 345px / 下限 200px。

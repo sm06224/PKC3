@@ -11,6 +11,11 @@ import { extractMeta, type FlavorExtract } from '@features/flavor';
 import { PersistOnce, type PersistState } from '@adapter/platform/storage-persist';
 // 🔴 追記の楽観検査(#178)── 「読んだ本文」を worker と突き合わせるための指紋
 import { contentHash64Hex } from '@adapter/platform/storage/content-hash';
+/**
+ * ⚠ **follower の諦める時刻を、こちらの上限の根拠にする**(#681 段②)── 2 か所に
+ *   別の数を書かない(§7 同じ値が複数の場所にある)。
+ */
+import { REQUEST_TIMEOUT_MS } from '@adapter/platform/storage/store-proxy';
 import { appendBlock } from '@features/markdown/text-ops';
 import {
   appendIntoSection,
@@ -76,6 +81,22 @@ export interface StorePort {
    * 面は「この版では探せません」と断るだけで、左の列の絞り込みは効いたまま)。
    */
   searchDetail?(query: string): Promise<{ rows: SearchDetailRow[]; truncated: boolean }>;
+  /**
+   * 🔴 **打った SQL を読むだけで走らせる**(#681 段②)。⚠ **省略可** ── 古い worker が
+   *   service worker のキャッシュに残っている端末では未知の op になる。そのとき
+   *   面は「この版では打てません」と断るだけで、ほかは今までどおり動く。
+   * ⚠ 渡す字は**全角を直した後**(`checkReadOnlySql` の `sql`)── 元の字を渡すと、
+   *   日本語入力のまま書いた人だけ構文エラーになる。
+   */
+  runReadOnlySql?(
+    sql: string,
+    limits: { maxRows: number; maxSteps: number; maxMs: number },
+  ): Promise<{
+    columns: string[];
+    rows: Array<Array<string | number | null>>;
+    truncated: boolean;
+    ms: number;
+  }>;
   /**
    * 🔴 このノートを参照しているノート(#348)。⚠ **optional** ── 古い worker が
    * service worker のキャッシュに残っている端末では未知の op になる。
@@ -295,6 +316,40 @@ export interface StoreEffects {
  *   関連度を組むぶん重いので、**止まってから 1 回**にする。
  */
 export const SEARCH_DETAIL_DEBOUNCE_MS = 300;
+
+/**
+ * 🔴 **SQL の答えを画面へ載せる上限**(#681 段②)。
+ * ⚠ 全部載せると**それだけで固まる** ── 切ったことは `truncated` で言う(黙って切らない)。
+ */
+export const SQL_MAX_ROWS = 500;
+
+/**
+ * 🔴 **進み具合の見張りが我慢する回数**(#681 段②)。
+ * ⚠ **歩数**で切ると端末の速さで意味が変わらない(test でも実機でも同じになる)。
+ *
+ * 🔑 根拠(2026-09-09 実測、同梱 sqlite・この箱):
+ *   400×400×400 の直積は **128,320 歩 / 1.36 秒**で完走した ── つまり
+ *   20 万歩は「**普通に重い問い合わせは通る**」桁である。
+ * ⚠ 初稿はここに「直積が **50 歩**で止まった」と書いていたが、**その 50 は
+ *   `sqlite-capabilities.test.ts` が自分で切った数**であって、この問い合わせの
+ *   性質ではなかった(CLAUDE.md「一致の件数は、因果の証拠ではない」)。
+ * 🔴 そして**歩数だけでは足りない** ── 1 歩の重さが 7 倍以上ぶれるので、
+ *   下の `SQL_MAX_MS` と**対で**使う。
+ */
+export const SQL_MAX_STEPS = 200_000;
+
+/**
+ * 🔴 **実時間の天井(ms)**(#681 段②、2026-09-09 の着地前レビュー)。
+ *
+ * ⚠ この面は**別窓**が既定なので、打つ user はたいてい follower に居る ──
+ *   follower の依頼は `REQUEST_TIMEOUT_MS` で諦め、面には
+ *   「**本体タブと通信できません(応答がありません)**」という**嘘**が出る
+ *   (本体は生きていて、user 自身の問い合わせで塞がっているだけ)。
+ *   ⚠ しかも問い合わせは走り続けるので、**その間ノートの保存が進まない**。
+ * 🔑 だから engine が**必ず先に**止まる ── `REQUEST_TIMEOUT_MS` から**引いて**決める
+ *   (2 か所に別の数を書かない ── §7)。差の 2 秒は、答えを組んで返すための余白である。
+ */
+export const SQL_MAX_MS = REQUEST_TIMEOUT_MS - 2_000;
 
 /** `settled()` が待つ最大の巡回数(積まれ続ける相手で永久に待たないための上限)。 */
 const SETTLE_ROUNDS_MAX = 20;
@@ -584,6 +639,48 @@ export function connectStoreEffects(
           () => {
             /* ⚠ 検索の失敗で帯を出さない ── 題名の絞り込みは効いたままで、
                user の操作は止まっていない(黙って減るのは「増えない」方向) */
+          },
+        );
+        break;
+      }
+      /**
+       * 🔴 **打った SQL を走らせる**(#681 段②)。
+       *
+       * ⚠ **debounce しない** ── 打鍵ごとには走らせない設計(押したときだけ)なので、
+       *   待つ理由が無い。⚠ **列(chain)にも入れない** ── 読むだけなので書込の順番に
+       *   関係せず、入れると重い問い合わせが保存を待たせる。
+       * ⚠ 口が無い版(古い worker がキャッシュに残っている端末)では**断る** ──
+       *   押して無反応にしない。
+       */
+      case 'REQUEST_SQL_RUN': {
+        const ask = store.runReadOnlySql;
+        const sql = ev.sql;
+        if (!ask) {
+          dispatcher.dispatch({
+            type: 'SQL_RUN_FAILED',
+            sql,
+            error: 'この版では SQL を打てません(アプリを読み直すと直ることがあります)',
+          });
+          break;
+        }
+        void ask(sql, { maxRows: SQL_MAX_ROWS, maxSteps: SQL_MAX_STEPS, maxMs: SQL_MAX_MS }).then(
+          ({ columns, rows, truncated, ms }) => {
+            if (disposed) return;
+            dispatcher.dispatch({ type: 'SET_SQL_RESULT', sql, columns, rows, truncated, ms });
+          },
+          (e: unknown) => {
+            if (disposed) return;
+            /**
+             * ⚠ **engine の字をそのまま出さない**(`SQLITE_READONLY` では読めない)──
+             *   ただし**消しもしない**(何が起きたかの手がかりは要る)。
+             */
+            const raw = e instanceof Error ? e.message : String(e);
+            const why = /readonly/i.test(raw)
+              ? '書き込みはできません(この面は読むだけです)'
+              : /interrupt/i.test(raw)
+                ? '時間がかかりすぎたので止めました(条件を絞ってください)'
+                : raw;
+            dispatcher.dispatch({ type: 'SQL_RUN_FAILED', sql, error: why });
           },
         );
         break;

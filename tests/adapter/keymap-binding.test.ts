@@ -274,6 +274,26 @@ describe('画面への配線', () => {
   });
 
   /**
+   * 🔴 **`Alt+7` で SQL の面が開く**(#681 段②、2026-09-09 の動線レビュー)。
+   *
+   * ⚠ この面は aside なので、左の一覧でノートを 1 回押すと中央は本文へ戻る
+   *   (それ自体は正しい)。⚠ ところが SQL には**左のタブが無く**、足すまでは
+   *   鍵も操作パレットの行も無かったので、**戻る道が画面に 1 つも無かった**
+   *   ── アドレスに手で `#pkc?view=sql` と打つ以外に戻れない。
+   * 🔑 だから**戻れること**まで見る(開くだけでは、動線としては半分である)。
+   */
+  it('🔴 Alt+7 で SQL の面が開き、ノートを押して戻った後もまた開ける', () => {
+    const { d } = mounted();
+    expect(d.getState().viewMode, '前提が崩れている(最初から SQL)').not.toBe('sql');
+    press('7', { code: 'Digit7', altKey: true });
+    expect(d.getState().viewMode, 'Alt+7 が効いていない').toBe('sql');
+    // ⚠ 左の一覧を押した = 中央は本文へ戻る(aside の規則)
+    d.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
+    press('7', { code: 'Digit7', altKey: true });
+    expect(d.getState().viewMode, '戻る道が無い(1 度離れたら開けない)').toBe('sql');
+  });
+
+  /**
    * 🔴 **確認が開いている間は近道を通さない**(#299 段⑤。着地前レビュー R6)。
    *
    * ⚠ native の `confirm` は**レンダラごと止めていた**ので、鍵はそもそも動かなかった。
@@ -966,6 +986,12 @@ describe('近道の受け手と、打鍵中の免除(等値で pin する)', () 
        * 🔑 ⋯ の項目からも同じ実体を呼ぶ(`openCopyHistory` 1 つ)── 口を 2 つ作らない。
        */
       'open-copy-history',
+      /**
+       * ⚠ 2026-09-09 に足した(#681 段②)── SQL の面も**押しボタンを持たない**
+       *   (組み込みタイルから別窓で開く形)ので、`view-dual` と同じく直に投げる。
+       * 🔑 この 1 行が、左の一覧を押して中央が本文へ戻った後の**唯一の戻り道**である。
+       */
+      'view-sql',
     ];
     for (const id of special) {
       expect(src, `${id} の特例が消えた`).toContain(`cmd === '${id}'`);
@@ -1050,6 +1076,8 @@ describe('近道の受け手と、打鍵中の免除(等値で pin する)', () 
       'open-palette',
       'open-help',
       'view-dual',
+      // ⚠ 2026-09-09 に足した(#681 段② ── わきの面なので打鍵中でも開く)
+      'view-sql',
       'toggle-sidebar',
       'toggle-inspector',
       // ⚠ 2026-08-30 に足した(#609 ── 畳める 3 面のうち追記欄だけ鍵が無かった)

@@ -125,6 +125,8 @@ describe('ランチャーのタイルを読む', () => {
       'manual',
       // ⚠ **支度の口は最後**(#532 段 B)── 足しても他のタイルの位置が動かない
       'selfhost',
+      // ⚠ **SQL で調べる**(#681 段②)── 同じ理由で末尾(位置を動かさない)
+      'sql',
     ]);
     off();
   });
@@ -227,7 +229,7 @@ describe('組み込み Office タイルの合流 (#148)', () => {
     expect(
       b.map((t) => t.group),
       '組み込みが既定群のまま(見出しが引かれず、自分のものと地続きに見える)',
-    ).toEqual(Array.from({ length: 7 }, () => BUILTIN_GROUP));
+    ).toEqual(Array.from({ length: 8 }, () => BUILTIN_GROUP));
   });
 
   it('🔴 Office が入っていなくても、最初から在るものは出る(位置も動かない)', async () => {
@@ -244,6 +246,7 @@ describe('組み込み Office タイルの合流 (#148)', () => {
     // ⚠ **マニュアル**(#645)は Office の有無に依らず、組み込みの最後に居る
     expect(b[4]?.lid, 'Office の有無でマニュアルの位置が動いた').toBe(MANUAL_TILE_LID);
     expect(b[5]?.kind, 'Office の有無で支度の口の位置が動いた').toBe('selfhost');
-    expect(b, '組み込みが 6 枚でない').toHaveLength(6);
+    expect(b[6]?.kind, 'Office の有無で SQL の面の位置が動いた').toBe('sql');
+    expect(b, '組み込みが 7 枚でない').toHaveLength(7);
   });
 });

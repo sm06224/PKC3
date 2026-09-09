@@ -345,5 +345,39 @@ test('🔴 #pkc?view=search で開くと、探す面が中央に出て本文の�
   // ⚠ 面の語で左の一覧は絞られない(別のもの)
   await expect(page.locator('[data-pkc-field="entry-filter"]')).toHaveValue('');
 
+  /**
+   * 🔴 **同じ道中で SQL の面まで見る**(#681 段②)。
+   *
+   * ⚠ **起動を足さない**(`location.hash` を書き換えるだけ ── 読み直しは要らない、と
+   *   マニュアルが約束している側の経路である)。CLAUDE.md「新しく起動する test を
+   *   足すのではなく、既に在る道中に assert を足す」。
+   *
+   * ## unit では届かない層
+   *
+   * unit は `runReadOnlySql` を fake の口で答えている ── ここで見るのは
+   * **本物の worker の本物の sqlite が、いま保存した本文を返すか**である。
+   * ⚠ 届かなければ「この版では SQL を打てません」と出る(押しても何も出ない、ではない)。
+   */
+  await page.evaluate(() => {
+    location.hash = '#pkc?view=sql';
+  });
+  const sql = page.locator('[data-pkc-view-pane="sql"]');
+  await expect(sql, 'アドレスで指した SQL の面が開いていない').toBeVisible();
+  await sql
+    .locator('[data-pkc-field="sql-input"]')
+    .fill("SELECT count(*) AS n FROM entries WHERE body LIKE '%けんさくご%'");
+  await clickReal(page, '[data-pkc-field="sql-run"]');
+  await expect(
+    sql.locator('[data-pkc-field="sql-table"] tbody td'),
+    '本物の worker から答えが返らない(SQL が sqlite まで届いていない)',
+  ).toHaveText('1', { timeout: 10_000 });
+  await expect(sql.locator('[data-pkc-field="sql-table"] thead th'), '列の名前が出ない').toHaveText(
+    'n',
+  );
+  await expect(
+    sql.locator('[data-pkc-field="sql-note"]'),
+    '件数と時間の 1 行が出ない',
+  ).toContainText('1 行');
+
   expect(errors, 'pageerror / console.error が出ている').toEqual([]);
 });

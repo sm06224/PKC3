@@ -207,7 +207,12 @@ export function checkReadOnlySql(input: string): SqlCheck {
   // ⚠ `bare` は `trim()` 済みなので `;\s*$` の `\s*` は**到達しない**(no-op を残さない)
   const body = bare.replace(/;$/, '');
   if (body.includes(';')) {
-    return { ok: false, why: '1 度に打てるのは 1 文だけです(`;` で区切らないでください)', sql };
+    return {
+      ok: false,
+      // ⚠ 記号を字として出さない ── この 1 行は `textContent` でそのまま画面に出る
+      why: '1 度に打てるのは 1 文だけです(セミコロンで区切って 2 文は打てません)',
+      sql,
+    };
   }
 
   /**
@@ -219,9 +224,30 @@ export function checkReadOnlySql(input: string): SqlCheck {
   const openless = body.replace(/^[\s(]+/, '');
   const head = /^[a-z]+/i.exec(openless)?.[0]?.toLowerCase() ?? '';
   if (!READ_HEADS.includes(head as (typeof READ_HEADS)[number])) {
+    /**
+     * 🔴 **起きたことと、断り文を一致させる**(2026-09-09、動線レビュー)。
+     *
+     * ⚠ 初稿はここも「**読み取り専用です**」と言っていた ── つまり
+     *   **打ち間違い**(`SELCT …`)にも、**まだ SQL を打っていない日本語の文**にも、
+     *   「権限がありません」の意味の字を返していた。
+     *   🔑 user は**直す所ではなく、許可の在り処を探しに行く**(実測で 3 形とも同じ字)。
+     * ⚠ 記号(バッククォート)も出さない ── この画面は `textContent` なので、
+     *   記法は**飾りではなく字**として出る(`sql.ts` の注意書きと同じ作法)。
+     */
+    const shown = head === '' ? body.slice(0, 8) : head.toUpperCase();
+    if (head === 'pragma') {
+      return {
+        ok: false,
+        why: 'PRAGMA はこの面では使えません(列を調べるなら SELECT * FROM pragma_table_info(\'entries\') と打ちます)',
+        sql,
+      };
+    }
+    if (WRITE_WORDS.includes(head as (typeof WRITE_WORDS)[number])) {
+      return { ok: false, why: `読み取り専用です ── ${shown} は打てません(この面は読むだけです)`, sql };
+    }
     return {
       ok: false,
-      why: `読み取り専用です ── \`${head === '' ? body.slice(0, 8) : head.toUpperCase()}\` は打てません(打てるのは SELECT / WITH / VALUES / EXPLAIN です)`,
+      why: `${shown} では始められません(SQL は SELECT / WITH / VALUES / EXPLAIN のどれかで始めます)`,
       sql,
     };
   }
@@ -252,7 +278,7 @@ export function checkReadOnlySql(input: string): SqlCheck {
   if (hit !== undefined) {
     return {
       ok: false,
-      why: `読み取り専用です ── \`${hit.toUpperCase()}\` は打てません`,
+      why: `読み取り専用です ── ${hit.toUpperCase()} は打てません(この面は読むだけです)`,
       sql,
     };
   }
