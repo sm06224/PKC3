@@ -58,6 +58,13 @@ export interface StatusUndoState {
   /** 直前の塊の移動を戻す材料(`lastMove`)。`null` = 戻す物が無い。 */
   readonly lastMove: object | null;
   readonly notice: string | null;
+  /**
+   * 🔴 **直前に足した行を戻す材料**(#684 ㋑)。⚠ `lid` を持つのが肝で、
+   *   **開いていないノートへ足した回**はここだけが戻し方を知っている。
+   */
+  readonly lastAppend: { readonly lid: string } | null;
+  /** その知らせが指している行き先(`OP_NOTICE` の `open`)。 */
+  readonly noticeOpen: string | null;
 }
 
 import { BLOCK_MOVED_NOTICE } from '@features/markdown/line-move';
@@ -86,6 +93,34 @@ export function paintStatusUndo(btn: HTMLElement, state: StatusUndoState, shownL
    * ⚠ `lastMove` はノートを切り替えても捨てられない(捨てるのは編集開始と同じノートの
    *   別の書換だけ)ので、字で見分けるしかない。
    */
-  const show = state.lastMove !== null && shownLine === BLOCK_MOVED_NOTICE;
+  const move = state.lastMove !== null && shownLine === BLOCK_MOVED_NOTICE;
+  /**
+   * 🔴 **開いていないノートへ足した回も、ここから 1 回で戻せる**(#684 ㋑、
+   *   着地前の動線レビュー 欠陥 3・4・6)。
+   *
+   * ⚠ 追記欄の「元に戻す」は **`lastAppend.lid === selectedLid`** のときだけ出る
+   *   (`append-box.ts`)。だから**横に留めた枠へ入れた行**は、そのノートを中央へ
+   *   開くまで戻せない ── しかも開くと**読んでいた本文が中央から消える**ので、
+   *   戻すために主の作業領域を明け渡すことになる(#300 と同じ形)。
+   * 🔑 `UNDO_APPEND` は `lastAppend.lid` で動き、**開いているノートを見ない**
+   *   (`app-state.ts`)ので、ここへ出すだけで**画面を 1px も動かさずに**戻せる。
+   *
+   * ⚠ 出す条件は**字ではなく身元**で見る ── 「入れました」を含むか、のような
+   *   字の判定は別の知らせに満たされる(CLAUDE.md §1)。
+   *   `noticeOpen` はこの経路(と断り)しか立てず、断りの `open` は**作った添付**なので
+   *   `lastAppend.lid` と一致しえない(添付の本文へは足さない)。
+   * ⚠ `notice === shownLine` も要る ── 字が別の知らせに上書きされた後に
+   *   「元に戻す」だけ残ると、user は**その知らせが戻る**と読む(「開く」と同じ作法)。
+   */
+  const append =
+    !move &&
+    state.lastAppend !== null &&
+    state.noticeOpen !== null &&
+    state.lastAppend.lid === state.noticeOpen &&
+    state.notice === shownLine;
+  const show = move || append;
+  // ⚠ **押し先も切り替える** ── 同じ器で 2 つの取り消しを出すので、
+  //    字だけ出して受け手を替え忘れると「押すと別の物が戻る」になる
+  if (show) btn.setAttribute('data-pkc-action', move ? 'undo-move' : 'undo-append');
   if (btn.hidden !== !show) btn.hidden = !show;
 }

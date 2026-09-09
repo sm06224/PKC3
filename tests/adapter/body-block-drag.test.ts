@@ -541,7 +541,8 @@ describe('元に戻す(UNDO_MOVE)', () => {
     expect(btn.hidden).toBe(true);
     expect(regions.status.contains(btn), '状態の行の外に居る').toBe(true);
     const LINE = '本文の塊を動かしました';
-    paintStatusUndo(btn, { lastMove: {}, notice: LINE }, LINE);
+    const NO_APPEND = { lastAppend: null, noticeOpen: null } as const;
+    paintStatusUndo(btn, { lastMove: {}, notice: LINE, ...NO_APPEND }, LINE);
     expect(btn.hidden, '材料と知らせが揃っているのに出ない').toBe(false);
     /**
      * 🔴 **呼び側は「いま出ている知らせ」を渡す**(`main.ts`)ので、
@@ -549,12 +550,12 @@ describe('元に戻す(UNDO_MOVE)', () => {
      *   (2026-09-09、UX レビューが実害を拾った:段③ の知らせの隣に出て、
      *   押すと**画面に出ていない別のノート**の前の並べ替えが戻っていた)。
      */
-    paintStatusUndo(btn, { lastMove: {}, notice: 'コピーしました' }, 'コピーしました');
+    paintStatusUndo(btn, { lastMove: {}, notice: 'コピーしました', ...NO_APPEND }, 'コピーしました');
     expect(btn.hidden, '別の知らせの隣に残っている(押すと別の物が戻る)').toBe(true);
     const HANDOFF = '本文の塊を「さき」のいちばん下へ持っていきました';
-    paintStatusUndo(btn, { lastMove: {}, notice: HANDOFF }, HANDOFF);
+    paintStatusUndo(btn, { lastMove: {}, notice: HANDOFF, ...NO_APPEND }, HANDOFF);
     expect(btn.hidden, '持っていきの知らせの隣に「元に戻す」が出た').toBe(true);
-    paintStatusUndo(btn, { lastMove: null, notice: LINE }, LINE);
+    paintStatusUndo(btn, { lastMove: null, notice: LINE, ...NO_APPEND }, LINE);
     expect(btn.hidden, '材料が無いのに出ている').toBe(true);
   });
 });

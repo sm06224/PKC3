@@ -7,6 +7,8 @@ import { describe, expect, it } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { attachFiles, resolveMime, type AttachDeps } from '../../src/adapter/ui/actions/attach';
+import { dropCursor, putAssetIntoNote } from '../../src/adapter/ui/actions/asset-into-note';
+import { createWritableQueue } from '../../src/adapter/ui/actions/writable-queue';
 import { readAttachmentMeta } from '../../src/features/flavor/attachment-flavor';
 import { removeInsertedLines } from '../../src/features/markdown/append-target';
 import { stubRevisionOps } from '../helpers/revision-stub';
@@ -987,8 +989,13 @@ describe('横に留めた枠へ落とした file は、その枠のノートへ�
   /** 2 つのノートが disk に在る台(書換が効いて、読み直すとその本文が返る)。 */
   function withNotes(sideArchetype: 'text' | 'folder' = 'text') {
     const disks: Record<string, string> = { n1: MAIN, n2: SIDE };
+    /** ⚠ `getBody` を遅くして錠を握らせる口(`withBody` と同じ作法)。 */
+    let delay = 0;
     const h = harness(undefined, {
-      getBody: async (lid) => disks[lid] ?? null,
+      getBody: async (lid) => {
+        if (delay > 0) await new Promise((r) => setTimeout(r, delay));
+        return disks[lid] ?? null;
+      },
       onPersist: (lid, b) => {
         if (lid in disks) disks[lid] = b;
       },
@@ -998,7 +1005,7 @@ describe('横に留めた枠へ落とした file は、その枠のノートへ�
     h.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
     h.d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: MAIN });
     appendsSeen.length = 0;
-    return { ...h, disks };
+    return { ...h, disks, slow: (ms: number) => void (delay = ms) };
   }
 
   it('🔴 ① ② ③ 落とした枠のノートの、落とした所へ入る(画面は動かず、名前で言う)', async () => {
@@ -1017,6 +1024,16 @@ describe('横に留めた枠へ落とした file は、その枠のノートへ�
     expect(appendsSeen.filter((a) => a.lid === 'n1'), '見ていたノートの末尾へも入れた').toHaveLength(0);
     // ③ 行き先の名前を言う(見ている本文と違う所へ入るので)
     expect(h.d.getState().notice ?? '', '行き先の名前を言っていない').toContain('『さきの予定』');
+    /**
+     * 🔴 **戻す道を残す**(「片道の操作を作らない」── user 指示 2026-08-23)。
+     * ⚠ 追記欄の「元に戻す」は**開いているノートの欄にしか出ない**
+     *   (`append-box.ts` の `lastAppend?.lid === mode.lid`)ので、留めた枠へ入れた
+     *   1 行は**そのノートを開くまで戻す口が画面に無い**。
+     * 🔑 だから知らせの隣に行き先を添える ── `paintStatusOpen` がそれで「開く」を出す。
+     */
+    expect(h.d.getState().noticeOpen, '行き先へ行く道が知らせに添えられていない').toBe('n2');
+    // ⚠ 材料そのものは行き先のノートに付く(開けばそこで「元に戻す」が出る)
+    expect(h.d.getState().lastAppend?.lid, '戻す材料が行き先のノートに付いていない').toBe('n2');
   });
 
   it('⚠ 対照群 ── 開いているノート自身へ落とした回は、名前を言わない', async () => {
@@ -1031,27 +1048,162 @@ describe('横に留めた枠へ落とした file は、その枠のノートへ�
     expect(h.disks.n1!.includes('!['), '開いているノートへ入っていない').toBe(true);
     expect(h.d.getState().notice ?? '', '1 つしか見ていないのに名前が出た').not.toContain('『');
     expect(h.d.getState().notice ?? '', 'どこに入ったかを言っていない').toContain('落とした所');
+    // ⚠ 開いているノート自身へ入れた回は道を添えない(押しても何も起きない口を出さない)
+    expect(h.d.getState().noticeOpen, '開いているノート自身へ「開く」を添えた').toBeNull();
   });
 
   /**
-   * 🔴 **編集中に留めた枠へ落とした回も、行き先はその枠のノート**(#684 ㋑ × #668 B)。
-   * ⚠ 預かった回は**落とした所を捨てる**(段④)ので入るのは末尾だが、
-   *   **どのノートの末尾か**は変わらない ── ここで開いているノートへ戻すと、
-   *   user は「留めた枠へ落としたのに、見ていた本文に入った」を見る。
-   * 🔑 だから**末尾の知らせも名前で言う**(落とした所の知らせと同じ扱い)。
+   * 🔴 **編集中に留めた枠へ落としても、落とした所へ入る**(#684 ㋑ × #668 B、
+   *   着地前レビュー 重大 ②)。
+   *
+   * ⚠ 預かった回が落とした所を捨てるのは、**編集していたノートの本文が
+   *   待っているあいだに別物になる**からである ── 留めた枠は編集していないので
+   *   本文は動かない。ここで捨てると「線を出した所に入らない」という
+   *   **守れない約束**になる(編集中でも留めた枠には線が出る)。
+   * 🔑 万一動いていても、書く直前に**目印**で突き合わせて断る側に倒れる。
    */
-  it('🔴 編集中に留めた枠へ落としても、編集を終えるとその枠のノートの末尾へ', async () => {
+  it('🔴 編集中に留めた枠へ落としても、編集を終えると落とした所へ入る', async () => {
     const h = withNotes();
     h.d.dispatch({ type: 'START_EDIT' });
     await attachFiles(h.d, h.deps, [png('猫.png', 'a')], '', AFTER_MILK_ON_SIDE);
     await tick();
     expect(h.disks.n2, '預かる前に書いた').toBe(SIDE);
+    // 預かった時点で、どのノートのどこへ入るかを言い切る
+    expect(h.d.getState().notice ?? '', '預かった 1 行が行き先を言っていない').toContain(
+      '『さきの予定』',
+    );
     h.d.dispatch({ type: 'CANCEL_EDIT' });
     await tick();
     await tick();
-    expect(appendsSeen.filter((a) => a.lid === 'n2'), '留めた枠のノートの末尾へ入っていない').toHaveLength(1);
-    expect(appendsSeen.filter((a) => a.lid === 'n1'), '見ていたノートへ入れた').toHaveLength(0);
-    expect(h.d.getState().notice ?? '', '行き先の名前を言っていない').toContain('『さきの予定』');
+    const rows = h.disks.n2!.split('\n');
+    const i = rows.findIndex((r) => r.startsWith('!['));
+    expect(i, '留めた枠のノートに入っていない').toBeGreaterThan(-1);
+    expect(rows[i - 2] ?? rows[i - 1], '落とした所(「牛乳」の下)ではない').toBe('牛乳');
+    expect(rows.indexOf('パン'), 'いちばん下へ落ちた(線を出した所ではない)').toBeGreaterThan(i);
+    expect(h.disks.n1, '見ていたノートの本文が動いた').toBe(MAIN);
+    expect(h.d.getState().noticeOpen, '預かった回にも行き先へ行く道が要る').toBe('n2');
+  });
+
+  /**
+   * ⚠ **対照群 ── 編集していたノート自身へ落とした回は、これまでどおり末尾**。
+   * (待っているあいだにその本文は別物になるので、落とした時の行番号は別の所を指す)
+   */
+  it('⚠ 対照群 ── 編集していたノート自身へ落とした回は、これまでどおり末尾', async () => {
+    const h = withNotes();
+    h.d.dispatch({ type: 'START_EDIT' });
+    await attachFiles(h.d, h.deps, [png('猫.png', 'a')], '', {
+      lid: 'n1',
+      toBefore: 3,
+      body: MAIN,
+      anchor: { line: 2, text: '卵' },
+    });
+    await tick();
+    h.d.dispatch({ type: 'CANCEL_EDIT' });
+    await tick();
+    await tick();
+    expect(appendsSeen.filter((a) => a.lid === 'n1'), '末尾へ入っていない').toHaveLength(1);
+  });
+
+  /**
+   * 🔴 **まとめて落とした回の締めでも、行き先と戻す道を落とさない**(#684 ㋑)。
+   * ⚠ 締めの 1 行は知らせを**上書きする**ので、添えないと
+   *   「行き先の名前」と「開く」が**2 枚以上落とした user だけ**消える。
+   */
+  it('🔴 2 枚まとめて落としても、締めの 1 行が行き先と道を持っている', async () => {
+    const h = withNotes();
+    await attachFiles(h.d, h.deps, [png('猫.png', 'a'), png('犬.png', 'b')], '', AFTER_MILK_ON_SIDE);
+    await tick();
+    await tick();
+    const rows = h.disks.n2!.split('\n');
+    expect(rows.filter((r) => r.startsWith('![')), '2 枚とも入っていない').toHaveLength(2);
+    // 🔴 台の前提 ── 締めが出る回である(1 枚だけの回と取り違えない)
+    expect(h.d.getState().notice ?? '', '締めの 1 行が出ていない').toContain('2 件');
+    expect(h.d.getState().notice ?? '', '締めが行き先の名前を落とした').toContain('『さきの予定』');
+    expect(h.d.getState().noticeOpen, '締めが行き先へ行く道を落とした').toBe('n2');
+    expect(h.disks.n1, '見ていたノートの本文が動いた').toBe(MAIN);
+  });
+
+  /**
+   * 🔴 **何も開いていない回でも、画面は動かない**(#684 ㋑、着地前レビュー 欠陥 2 / 要修正 A)。
+   *
+   * ⚠ 開き直した直後は中央に何も開いていない(留めた枠だけが復元される)。そこで
+   *   留めた枠へ落とすと、`CREATE_ENTRY` が選択を**作った添付へ移す**ので、
+   *   返し先が無いと **中央が「猫.png」の画面に化ける** ── お知らせにもマニュアルにも
+   *   「画面は動きません」と書いた当の約束が、いちばん起きやすい入り口で破れる。
+   */
+  it('🔴 何も開いていないまま留めた枠へ落としても、中央に添付が開かない', async () => {
+    const h = withNotes();
+    h.d.dispatch({ type: 'DESELECT_ENTRY' });
+    expect(h.d.getState().selectedLid, '台の前提: 何も開いていない').toBeNull();
+    await attachFiles(h.d, h.deps, [png('猫.png', 'a')], '', AFTER_MILK_ON_SIDE);
+    await tick();
+    expect(h.disks.n2!.includes('!['), '留めた枠のノートへ入っていない').toBe(true);
+    expect(h.d.getState().selectedLid, '作った添付が中央に開いた(画面が動いた)').toBeNull();
+  });
+
+  /**
+   * 🔴 **別のノートへの書込が錠を握っていても、こちらの位置は残る**
+   *   (#684 ㋑、変異試験 I16 が SURVIVED で教えた)。
+   *
+   * ⚠ 直す前の門は「**いま書けるか**」だけを見ていた ── 錠は**全体で 1 本**なので、
+   *   見ていたノートを保存している最中に留めた枠へ落とすと、**無関係なのに**
+   *   落とした所が捨てられて末尾へ入っていた。
+   * 🔑 待っているあいだに動くのは**錠を握られている本文**だけである。
+   */
+  it('🔴 別のノートを書いている最中でも、留めた枠は落とした所へ入る', async () => {
+    const h = withNotes();
+    h.slow(60); // ⚠ 見ていたノートの追記を、錠を握ったまま止める
+    h.d.dispatch({ type: 'APPEND_TO_ENTRY', lid: 'n1', text: '卵 2 個', heading: null, target: null });
+    expect(h.d.getState().writeLock?.lid, '台の前提: 錠が n1 に握られていない').toBe('n1');
+    await attachFiles(h.d, h.deps, [png('猫.png', 'a')], '', AFTER_MILK_ON_SIDE);
+    // ⚠ 錠が解けるまで待つ(解けた瞬間に預かりが流れる)
+    await new Promise((r) => setTimeout(r, 300));
+    expect(h.d.getState().writeLock, '台の前提: 錠がまだ解けていない').toBeNull();
+    const rows = h.disks.n2!.split('\n');
+    const i = rows.findIndex((r) => r.startsWith('!['));
+    expect(i, '留めた枠のノートに入っていない').toBeGreaterThan(-1);
+    expect(rows[i - 2] ?? rows[i - 1], '落とした所ではなく末尾へ落ちた').toBe('牛乳');
+  });
+
+  /**
+   * 🔴 **入れ先そのものを編集していたら、位置は捨てる**(#684 ㋑、変異試験 I23 が
+   *   SURVIVED で教えた)。
+   *
+   * ⚠ `attachFiles` 越しには**この形へ到達できない** ── あちらの入れ先は
+   *   「落とした本文のノート」か「開いているノート」で、編集しているのは
+   *   **開いているノート**だから、`elsewhere` と「編集中の入れ先」は排他になる。
+   * 🔑 だから**共有の口を直に叩いて**確かめる ── `putAssetIntoNote` は録音・画面録画も
+   *   通る 1 か所なので、次の呼び手が編集中に位置を渡した日に静かに壊れないための門である。
+   * ⚠ 位置を残すと、書く直前の目印の突き合わせで**断られて 1 行も入らない**
+   *   (末尾へ落ちるより悪い)。
+   */
+  it('🔴 入れ先そのものを編集中に落とした回は、位置を捨てて末尾へ(共有の口を直に)', async () => {
+    const h = withNotes();
+    const said: string[] = [];
+    h.d.dispatch({ type: 'START_EDIT' });
+    expect(h.d.getState().phase, '台の前提: 編集に入っていない').toBe('editing');
+    putAssetIntoNote({
+      dispatcher: h.d,
+      queue: createWritableQueue(h.d),
+      notify: (t) => void said.push(t),
+      into: { lid: 'n1', archetype: 'text' },
+      attachedLid: 'a1',
+      assetKey: 'ast-x',
+      name: '猫.png',
+      mime: 'image/png',
+      why: '',
+      place: dropCursor({ lid: 'n1', toBefore: 3, body: MAIN, anchor: { line: 2, text: '卵' } }),
+    });
+    h.d.dispatch({ type: 'CANCEL_EDIT' });
+    await tick();
+    await tick();
+    const rows = h.disks.n1!.split('\n');
+    const i = rows.findIndex((r) => r.startsWith('!['));
+    expect(i, '本文に入っていない').toBeGreaterThan(-1);
+    expect(rows[i - 1] ?? '', '落とした所(「卵」の下)へ入れた ── 本文はもう別物である').not.toBe(
+      '卵',
+    );
+    expect(said.join(' / '), 'いちばん下へ入れたと言っていない').toContain('いちばん下');
   });
 
   it('🔴 ④ 入れられない種類の本文へ落ちた回は、開いているノートの末尾へ', async () => {

@@ -40,6 +40,24 @@ export function canWriteBody(dispatcher: Dispatcher): boolean {
   return s.phase === 'ready' && s.writeLock === null;
 }
 
+/**
+ * 🔴 **書けるようになるまでに、この本文が変わってしまうか**(#684 ㋑、着地前レビュー 重大 ②)。
+ *
+ * ⚠ 「いま書けない」(`canWriteBody`)と「**この本文が変わる**」は別の問いである。
+ *   直す前は前者だけを見て**落とした所を捨てて**いたので、
+ *   **編集していないノート**(横に留めた枠)へ落としても位置が捨てられ、
+ *   線を出した所ではなく**いちばん下**へ入っていた ── 線が守れない約束になる。
+ * 🔑 位置を捨てるべきなのは、待っている間に**その本文自身**が書き換わるときだけ:
+ *   ①いま編集しているのがそのノート ②その本文への書込が錠を握っている。
+ * ⚠ どちらでもなければ、待っても本文は動かない ── しかも書く直前に
+ *   **目印(`InsertAnchor`)で突き合わせる**ので、万一動いていれば断る側に倒れる。
+ */
+export function bodyWillChange(dispatcher: Dispatcher, lid: string): boolean {
+  const s = dispatcher.getState();
+  if (s.phase === 'editing' && s.openBody?.lid === lid) return true;
+  return s.writeLock !== null && s.writeLock.lid === lid;
+}
+
 export function createWritableQueue(dispatcher: Dispatcher): WritableQueue {
   const pending: Array<() => void | Promise<void>> = [];
   let unwatch: (() => void) | null = null;

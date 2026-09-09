@@ -190,6 +190,52 @@ describe('主の枠で直したら、留めた枠も追いつく', () => {
       archived: false,
     } as never);
 
+  /**
+   * 🔴 **追記でも追いつく**(#684 ㋑、着地前レビュー 重大 ①)。
+   *
+   * ⚠ `syncSplitBody` を呼ぶ口は 3 つ在ったが、**追記(`ENTRY_APPENDED`)だけ
+   *   抜けていた** ── しかも追記は `BODY_PERSISTED` を通らない
+   *   (`store-effects` は `ENTRY_APPENDED` しか撃たない)ので、**どこからも直らない**。
+   * 🔴 実害:留めた枠へ落とした file が末尾へ入った回、知らせは入ったと言うのに
+   *   **目の前の枠は 1 文字も変わらない** ── user はもう一度落とす(行が二重になる)。
+   */
+  it('🔴 追記でも、留めた枠は新しい字になる', () => {
+    const d = booted();
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'SPLIT_BODY_LOADED', lid: 'n1', body: '古\n' });
+    expect(d.getState().splitBodies.get('n1'), '台の前提: 留めた本文が入っていない').toBe('古\n');
+    d.dispatch({
+      type: 'ENTRY_APPENDED',
+      // ⚠ **世代が合わないと reducer は丸ごと捨てる** ── 前提が崩れると空振りになる
+      gen: 0,
+      lid: 'n1',
+      body: '古\n\n新\n',
+      status: null,
+      date: null,
+      archived: false,
+      inserted: ['新'],
+    } as never);
+    expect(d.getState().splitBodies.get('n1'), '追記が留めた枠に届いていない').toBe('古\n\n新\n');
+  });
+
+  it('⚠ 対照群 ── 留めていないノートへ追記しても、留めの入れ物を作り直さない', () => {
+    const d = booted();
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'SPLIT_BODY_LOADED', lid: 'n1', body: '古\n' });
+    const before = d.getState().splitBodies;
+    d.dispatch({
+      type: 'ENTRY_APPENDED',
+      gen: 0,
+      lid: 'n2',
+      body: 'よそ\n',
+      status: null,
+      date: null,
+      archived: false,
+      inserted: ['よそ'],
+    } as never);
+    expect(d.getState().splitBodies, '同じ参照でない(断面指紋が毎回変わる)').toBe(before);
+  });
+
   it('🔴 升を打つと、留めた枠も新しい字になる', () => {
     const d = booted();
     d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'n1' });

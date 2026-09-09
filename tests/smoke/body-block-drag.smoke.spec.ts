@@ -398,6 +398,27 @@ test('🔴 横に留めた枠へファイルを落とすと、その枠のノー
   expect(await kinds(HOST), '見ていたノートの本文が動いた').toEqual(['主のノート', '卵']);
   // 行き先の名前を言う ── 見ている本文と違う所へ入るので、名前が唯一の手がかり
   await expect(page.locator('[data-pkc-region="status"]')).toContainText('『留める側』');
+  /**
+   * 🔴 **戻す道を、画面を動かさずに残す**(「片道の操作を作らない」)。
+   *
+   * ⚠ 追記欄の「元に戻す」は**開いているノートの欄にしか出ない**ので、留めた枠へ
+   *   入れた 1 行はそこからは戻せない。⚠ 「開く」で行き先を開いてから戻すと、
+   *   **戻すために読んでいた本文を明け渡す**ことになる(#300 と同じ形)。
+   * 🔑 だから知らせの隣の「元に戻す」で、**画面を動かさずに**その行だけ消す。
+   */
+  const open = page.locator('[data-pkc-field="status-open"]');
+  await expect(open, '行き先へ行く「開く」が出ない').toBeVisible();
+  const undo = page.locator('[data-pkc-field="status-undo"]');
+  await expect(undo, '知らせの隣に「元に戻す」が出ない(戻す道が無い)').toBeVisible();
+  await expect(undo, '押すと別の物が戻る').toHaveAttribute('data-pkc-action', 'undo-append');
+  await clickReal(page, '[data-pkc-field="status-undo"]');
+  await expect
+    .poll(() => kinds(SIDE), { timeout: 8000, message: '「元に戻す」で行が消えない' })
+    .toEqual(['留める側', '牛乳', 'パン']);
+  // 🔴 戻した後も、見ていた本文は中央のまま(戻すために画面を明け渡していない)
+  await expect(page.locator(`${HOST} h1`).first(), '戻したら中央が入れ替わった').toContainText(
+    '主のノート',
+  );
 
   expect(errors, 'pageerror が出た').toEqual([]);
 });
