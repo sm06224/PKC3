@@ -48,6 +48,7 @@ import type {
 } from '@features/query/group-by';
 // ⚠ 「未設定」の綴りは features 側の 1 か所(`''`)── ここで書き写さない(§7)
 import { TAGS_KEY, UNSET as QUERY_UNSET } from '@features/query/group-by';
+import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import { collectEntryTags } from '@features/flavor/entry-tags';
 import { MAX_TAGS, sameTag } from '@features/flavor/tags';
 import type { TaskScan } from '@features/schedule/task-cards';
@@ -90,13 +91,19 @@ export interface StorePort {
    */
   runReadOnlySql?(
     sql: string,
-    limits: { maxRows: number; maxSteps: number; maxMs: number },
+    limits: { maxRows: number; maxSteps: number; maxMs: number; guest?: boolean },
   ): Promise<{
     columns: string[];
     rows: Array<Array<string | number | null>>;
     truncated: boolean;
     ms: number;
   }>;
+  /**
+   * 🔴 **取り込んだ `.sqlite` を開く / 手放す**(#681 段③ の 2 つ目)。
+   * ⚠ 古い口(持っていない port)では**機能が減るだけ**にする ── 落とすと画面ごと止まる。
+   */
+  openSqlGuest?(image: Uint8Array): Promise<{ tables: string[]; bytes: number }>;
+  closeSqlGuest?(): Promise<null>;
   /**
    * 🔴 このノートを参照しているノート(#348)。⚠ **optional** ── 古い worker が
    * service worker のキャッシュに残っている端末では未知の op になる。
@@ -381,6 +388,13 @@ export function connectStoreEffects(
      * ⚠ 数えるのは **`enqueue` に載せた書込だけ** ── `afterWrites`(読み)は数えない。
      */
     onWriting?: (writing: boolean) => void;
+    /**
+     * 🔴 **添付の bytes を読む口**(#681 段③ の 2 つ目)。
+     * ⚠ bytes は sqlite ではなく **IDB** に在るので、port では取れない ──
+     *   呼び側(`main.ts`)が blob store を包んで渡す。
+     * ⚠ 渡されなければ**機能が減るだけ**(選んでも理由を出して断る)。
+     */
+    readAssetBytes?: (assetKey: string) => Promise<Uint8Array | null>;
   } = {},
 ): StoreEffects {
   let queue: Promise<void> = Promise.resolve();
@@ -683,6 +697,60 @@ export function connectStoreEffects(
        * ⚠ 口が無い版(古い worker がキャッシュに残っている端末)では**断る** ──
        *   押して無反応にしない。
        */
+      /**
+       * 🔴 **取り込んだ `.sqlite` を開く**(#681 段③ の 2 つ目)。
+       *
+       * ⚠ **添付の bytes は IDB に在る**(sqlite の中ではない)ので、
+       *   本文から key を読んで、呼び側が渡した口で bytes を取る。
+       * ⚠ どの段で失敗しても**理由を画面へ返す** ── 黙って何も起きないと、
+       *   選んだ人には「選べなかった」ようにしか見えない。
+       */
+      case 'REQUEST_SQL_GUEST_OPEN': {
+        const open = store.openSqlGuest;
+        const read = opts.readAssetBytes;
+        const { lid, name } = ev;
+        if (!open || !read) {
+          dispatcher.dispatch({
+            type: 'SQL_GUEST_FAILED',
+            lid: ev.lid,
+            error: 'この版では取り込んだ .sqlite を開けません(アプリを読み直すと直ることがあります)',
+          });
+          break;
+        }
+        afterWrites(async () => {
+          if (disposed) return;
+          try {
+            const body = await store.getBody(lid);
+            const key = readAttachmentMeta(body ?? '').assetKey;
+            if (key === null) throw new Error('添付の中身が見つかりません');
+            const bytes = await read(key);
+            if (bytes === null) throw new Error('添付の中身が見つかりません');
+            const opened = await open(bytes);
+            if (disposed) return;
+            dispatcher.dispatch({
+              type: 'SQL_GUEST_OPENED',
+              lid,
+              name,
+              tables: opened.tables,
+              bytes: opened.bytes,
+            });
+          } catch (e) {
+            if (disposed) return;
+            dispatcher.dispatch({
+              type: 'SQL_GUEST_FAILED',
+              lid,
+              error: e instanceof Error ? e.message : String(e),
+            });
+          }
+        });
+        break;
+      }
+      /** 客の DB を手放す。⚠ **常駐メモリを返す**ので、失敗しても画面は先へ進める。 */
+      case 'REQUEST_SQL_GUEST_CLOSE': {
+        const shut = store.closeSqlGuest;
+        if (shut) void shut().catch(() => undefined);
+        break;
+      }
       case 'REQUEST_SQL_RUN': {
         const ask = store.runReadOnlySql;
         const sql = ev.sql;
@@ -694,7 +762,13 @@ export function connectStoreEffects(
           });
           break;
         }
-        void ask(sql, { maxRows: SQL_MAX_ROWS, maxSteps: SQL_MAX_STEPS, maxMs: SQL_MAX_MS }).then(
+        void ask(sql, {
+          maxRows: SQL_MAX_ROWS,
+          maxSteps: SQL_MAX_STEPS,
+          maxMs: SQL_MAX_MS,
+          // 🔴 **打つ先は event が運ぶ**(#681 段③ の 2 つ目)── ここで state を読み直さない
+          ...(ev.guest === true ? { guest: true } : {}),
+        }).then(
           ({ columns, rows, truncated, ms }) => {
             if (disposed) return;
             dispatcher.dispatch({ type: 'SET_SQL_RESULT', sql, columns, rows, truncated, ms });

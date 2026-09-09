@@ -3364,6 +3364,20 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   実行されない(CLAUDE.md §2)ので、ここは**渡すだけ**にする。
      */
     onWriting: (writing) => root.toggleAttribute('data-pkc-writing', writing),
+    /**
+     * 🔴 **添付の bytes を読む口**(#681 段③ の 2 つ目)。
+     *
+     * ⚠ 添付の中身は **IDB** に在る(sqlite の中ではない)ので、store の port からは
+     *   取れない ── だからここで blob store を包んで渡す。
+     * ⚠ **判断は渡さない**(どれが `.sqlite` かは `features/query/sqlite-attachment.ts`)
+     *   ── この file はどの test からも実行されない(CLAUDE.md §2)。
+     * ⚠ ObjectURL は作らない ── bytes を worker へ渡したら、こちらには残さない
+     *   (不可侵指示 2026-07-27「生成とライフサイクル後の速やかな破棄」)。
+     */
+    readAssetBytes: async (assetKey) => {
+      const blob = await blobs.get(cid, assetKey);
+      return blob === null ? null : new Uint8Array(await blob.arrayBuffer());
+    },
   });
   /**
    * 🔴 **一式が入っているかを 1 度だけ読み、控えに写す**(#88 / O3-c)。

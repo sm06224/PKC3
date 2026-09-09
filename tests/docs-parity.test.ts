@@ -2091,6 +2091,14 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-09(#681 段③ の 2 つ目)にいちばん古い 1 件が枠から出た** ──
+     *   user 裁定 2026-09-06「古い順に出す」。
+     * 🔑 配布済みであることの観測点は **main の log** である(本番の tag ではない ──
+     *   user が読んでいるのは `/dev/` = main HEAD):
+     *   `git log --oneline origin/main -S"2026-09-08-table-convert-quote" -- src/features/notice/notice-log.ts`
+     */
+    '引用(>)や ::: の中の表も、Markdown の表と CSV の表を行き来できるようになりました',
+    /**
      * ⚠ **2026-09-08(#757 / #702)にいちばん古い 1 件が枠から出た** ── user 裁定
      *   2026-09-06「古い順に出す」。原本は CHANGELOG(650d9ce で配布済み)。
      */

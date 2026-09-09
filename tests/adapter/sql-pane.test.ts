@@ -79,14 +79,28 @@ function setup(
   d.onState((s) => center.render(s));
   // ⚠ 上限は**捨てない**(呼び側が渡しているかを `mock.calls` で見るため)
   const runReadOnlySql = vi.fn(
-    async (sql: string, limits: { maxRows: number; maxSteps: number }) => {
+    async (sql: string, limits: { maxRows: number; maxSteps: number; guest?: boolean }) => {
       void limits;
       return reply(sql);
     },
   );
+  /** 取り込んだ `.sqlite` の口(#681 段③ の 2 つ目)。⚠ 実物は worker の別接続。 */
+  /** 開くのを**手で止められる**門(遅れて届く答えを作るため)。 */
+  let holdOpen: null | (() => void) = null;
+  const openSqlGuest = vi.fn(async (image: Uint8Array) => {
+    if (image.byteLength === 0) throw new Error('この file は sqlite の DB として読めませんでした');
+    if (holdOpen !== null) {
+      const gate = new Promise<void>((r) => (holdOpen = r as unknown as () => void));
+      await gate;
+    }
+    return { tables: ['売上', '客'], bytes: image.byteLength };
+  });
+  const closeSqlGuest = vi.fn(async () => null);
+  const readAssetBytes = vi.fn(async (key: string) =>
+    key === 'ast-ng' ? null : new Uint8Array([1, 2, 3, 4]),
+  );
   connectStoreEffects(d, {
     ...stubRevisionOps(),
-    getBody: async () => '',
     deleteEntry: async () => {},
     setEntryParent: async () => {},
     renameEntry: async () => stubStamps(),
@@ -97,10 +111,33 @@ function setup(
       persisted.push(e);
       return stubStamps();
     },
-    ...(opts.withOp === false ? {} : { runReadOnlySql }),
-  });
+    // ⚠ 添付の本文は frontmatter に key を持つ(実物と同じ形で読ませる)
+    getBody: async (lid: string) =>
+      lid === 'db1'
+        ? '---\nattachment.name: 売上.sqlite\nattachment.asset_key: ast-ok\n---\n'
+        : lid === 'db2'
+          ? '---\nattachment.name: 壊れ.sqlite\nattachment.asset_key: ast-ng\n---\n'
+          : lid === 'db3'
+            ? // ⚠ **key を持たない添付**(本文が壊れている / 取り込みが途中で終わった)
+              '---\nattachment.name: 中身なし.sqlite\n---\n'
+            : '',
+    ...(opts.withOp === false ? {} : { runReadOnlySql, openSqlGuest, closeSqlGuest }),
+  }, opts.withOp === false ? {} : { readAssetBytes });
   bindActions(root, d, {});
-  d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1', '会議メモ')], relations: [] });
+  d.dispatch({
+    type: 'SYS_BOOTED',
+    cid: 'c1',
+    metas: [
+      meta('n1', '会議メモ'),
+      // 🔑 取り込んだ `.sqlite`(添付のノート)── 選び所に並ぶ相手
+      { ...meta('db1', '売上.sqlite'), archetype: 'attachment' },
+      { ...meta('db2', '壊れ.sqlite'), archetype: 'attachment' },
+      { ...meta('db3', '中身なし.sqlite'), archetype: 'attachment' },
+      // ⚠ **対照群** ── 添付でも `.sqlite` でないものは並ばない
+      { ...meta('png1', 'ねこ.png'), archetype: 'attachment' },
+    ],
+    relations: [],
+  });
   d.dispatch({ type: 'SET_VIEW_MODE', mode: 'sql' });
   const pane = root.querySelector<HTMLElement>('[data-pkc-view-pane="sql"]')!;
   const box = pane.querySelector<HTMLTextAreaElement>('[data-pkc-field="sql-input"]')!;
@@ -122,6 +159,11 @@ function setup(
       [...tr.querySelectorAll('td')].map((td) => td.textContent ?? ''),
     );
   const saveBtn = pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-to-note"]')!;
+  const sourceSel = pane.querySelector<HTMLSelectElement>('[data-pkc-field="sql-source"]')!;
+  const pick = (lid: string): void => {
+    sourceSel.value = lid;
+    sourceSel.dispatchEvent(new Event('change', { bubbles: true }));
+  };
   return {
     root,
     d,
@@ -136,6 +178,21 @@ function setup(
     cells,
     runReadOnlySql,
     persisted,
+    sourceSel,
+    pick,
+    openSqlGuest,
+    closeSqlGuest,
+    readAssetBytes,
+    /** 次に開く 1 回を止める(遅れて届く答えを作る)。 */
+    holdNextOpen: (): void => {
+      holdOpen = () => undefined;
+    },
+    /** 止めていた 1 回を進める。 */
+    releaseOpen: (): void => {
+      const go = holdOpen;
+      holdOpen = null;
+      go?.();
+    },
   };
 }
 
@@ -596,5 +653,130 @@ describe('答えをノートへ書き出す(#681 段③ の 3 つ目)', () => {
     expect(saveBtn.disabled, '走っている最中に押せる').toBe(true);
     release();
     await settle();
+  });
+});
+
+/**
+ * 🔴 **取り込んだ `.sqlite` を調べる**(#681 段③ の 2 つ目)。
+ *
+ * user の言葉(2026-09-03)の「**csv や sqliteDB のクエリアプリ**」の sqliteDB の側。
+ *
+ * 守る主張:
+ * 1. 選び所に**添付の `.sqlite` だけ**が並ぶ(写真は並ばない)
+ * 2. 選ぶと開いて、**どちらを調べているか**が画面の上の行に出る
+ * 3. 🔴 打つ先が**客の DB へ切り替わる**(`guest: true` が渡る)
+ * 4. 🔴 開けなかったら**理由を言って、この PKC へ戻る**(黙って戻らない)
+ * 5. 🔴 選び直すと**前の相手を手放す**(常駐メモリを返す)
+ * 6. 相手を変えたら**前の答えは消す**(別の DB の話が残らない)
+ */
+describe('取り込んだ .sqlite を調べる(#681 段③ の 2 つ目)', () => {
+  it('🔴 選び所に、添付の .sqlite だけが並ぶ', () => {
+    const { sourceSel } = setup();
+    const names = [...sourceSel.options].map((o) => o.textContent);
+    expect(names[0], '既定が「この PKC」でない').toBe('この PKC のノート');
+    expect(names, '取り込んだ DB が並んでいない').toContain('売上.sqlite');
+    // ⚠ **対照群** ── 添付でも DB でないものは並ばない
+    expect(names, '写真まで並んでいる').not.toContain('ねこ.png');
+  });
+
+  it('🔴 選ぶと開いて、どちらを調べているかが画面に出る', async () => {
+    const { pick, note, openSqlGuest, readAssetBytes } = setup();
+    pick('db1');
+    await settle();
+    expect(readAssetBytes).toHaveBeenCalledWith('ast-ok');
+    expect(openSqlGuest, '客の DB を開いていない').toHaveBeenCalledTimes(1);
+    expect(note(), 'どちらを調べているか言っていない').toContain('売上.sqlite');
+    expect(note(), '中に何が在るか言っていない').toContain('表 2 個');
+  });
+
+  it('🔴 打つ先が客の DB へ切り替わる', async () => {
+    const { pick, type, runBtn, runReadOnlySql } = setup();
+    pick('db1');
+    await settle();
+    type('SELECT 1 AS a');
+    runBtn.click();
+    await settle();
+    const limits = runReadOnlySql.mock.calls[0]?.[1];
+    expect(limits?.guest, '客へ打っていない(この PKC を数えている)').toBe(true);
+  });
+
+  it('⚠ この PKC のままなら、客のフラグは渡さない(対照群)', async () => {
+    const { type, runBtn, runReadOnlySql } = setup();
+    type('SELECT 1 AS a');
+    runBtn.click();
+    await settle();
+    expect(runReadOnlySql.mock.calls[0]?.[1]?.guest).toBeUndefined();
+  });
+
+  it('🔴 開けなかったら理由を言って、この PKC へ戻る', async () => {
+    const { pick, note, sourceSel, type, runBtn, runReadOnlySql } = setup();
+    pick('db2'); // ⚠ bytes が取れない添付
+    await settle();
+    expect(note(), '理由を言っていない').toContain('開けませんでした');
+    expect(sourceSel.value, '開けていないのに、その相手を選んだ顔をしている').toBe('');
+    // 🔴 **打つ先も戻っている**(字だけ戻して中身は客のまま、を作らない)
+    type('SELECT 1 AS a');
+    runBtn.click();
+    await settle();
+    expect(runReadOnlySql.mock.calls[0]?.[1]?.guest).toBeUndefined();
+  });
+
+  it('🔴 添付に中身が無いときは、理由を言う(黙って何も起きない形を作らない)', async () => {
+    const { pick, note } = setup();
+    pick('db3'); // ⚠ key を持たない添付
+    await settle();
+    expect(note(), '理由が「中身が見つかりません」になっていない').toContain(
+      '添付の中身が見つかりません',
+    );
+  });
+
+  it('🔴 bytes が取れないときも、同じ理由を言う', async () => {
+    const { pick, note } = setup();
+    pick('db2'); // ⚠ IDB に bytes が無い
+    await settle();
+    expect(note(), '理由が「中身が見つかりません」になっていない').toContain(
+      '添付の中身が見つかりません',
+    );
+  });
+
+  /**
+   * 🔴 **遅れて届いた「開けました」は捨てる**(#681 段③ の 2 つ目)。
+   *
+   * ⚠ 受けてしまうと、**選んでいない DB を「調べています」と出す** ── そして
+   *   打った SQL はそちらへ飛ぶ(いちばん気づけない外し方)。
+   */
+  it('🔴 選び直した後に前の相手が開けても、そちらへ切り替わらない', async () => {
+    const { pick, note, holdNextOpen, releaseOpen, sourceSel } = setup();
+    holdNextOpen();
+    pick('db1'); // ⚠ 開くのを止めておく
+    await settle();
+    pick(''); // この PKC へ戻す
+    await settle();
+    releaseOpen(); // ⚠ ここで「db1 が開けました」が遅れて届く
+    await settle();
+    expect(sourceSel.value, '選んでいない相手へ切り替わった').toBe('');
+    expect(note(), '選んでいない相手を「調べています」と出した').not.toContain('売上.sqlite');
+  });
+
+  it('🔴 選び直すと、前の相手を手放す', async () => {
+    const { pick, closeSqlGuest } = setup();
+    pick('db1');
+    await settle();
+    const before = closeSqlGuest.mock.calls.length;
+    pick('');
+    await settle();
+    expect(closeSqlGuest.mock.calls.length, '手放していない(常駐メモリが残る)').toBe(before + 1);
+  });
+
+  it('🔴 相手を変えたら、前の答えは消える(別の DB の話が残らない)', async () => {
+    const { type, runBtn, pick, cells, note } = setup(async () => answer(['a'], [[1]]));
+    type('SELECT 1 AS a');
+    runBtn.click();
+    await settle();
+    expect(cells(), '前提が崩れている(答えが出ていない)').toEqual([['1']]);
+    pick('db1');
+    await settle();
+    expect(cells(), '別の DB を選んだのに、前の答えが残っている').toEqual([]);
+    expect(note(), '前の件数が残っている').not.toContain('1 行');
   });
 });

@@ -74,7 +74,15 @@ export function createStorePort(client: StoreClientLike, cid: string): StorePort
         maxRows: limits.maxRows,
         maxSteps: limits.maxSteps,
         maxMs: limits.maxMs,
+        ...(limits.guest === true ? { guest: true } : {}),
       }),
+    /**
+     * 🔴 **取り込んだ `.sqlite` を開く**(#681 段③ の 2 つ目)。⚠ ここも**渡すだけ** ──
+     *   別の接続にするのも、読めない bytes を断るのも worker が持つ。
+     * ⚠ **`cid` を渡さない**(`runReadOnlySql` と同じ ── 器で絞る話ではない)。
+     */
+    openSqlGuest: (image) => client.request({ op: 'openSqlGuest', image }),
+    closeSqlGuest: () => client.request({ op: 'closeSqlGuest' }),
     /**
      * 🔴 **このノートを参照しているのはどれか**(#348)。⚠ ここも**渡すだけ** ──
      * 探し方(`entry:<lid>` を LIKE で当てる)の規則は worker が 1 か所で持つ。

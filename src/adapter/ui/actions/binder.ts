@@ -6765,6 +6765,22 @@ const ACTIONS: Record<string, ActionHandler> = {
     dispatcher.dispatch({ type: 'RUN_SQL' });
   },
   /**
+   * 🔴 **調べる相手を選ぶ**(#681 段③ の 2 つ目)。
+   * ⚠ `<select>` でもボタンでも通す(`set-prose-align` と同じ受け方)。
+   * ⚠ **名前も一緒に渡す** ── 画面に出すのは lid ではなく file の名前である。
+   */
+  'set-sql-source': (dispatcher, target) => {
+    const lid =
+      target instanceof HTMLSelectElement
+        ? target.value
+        : (target.getAttribute('data-pkc-sql-source') ?? '');
+    const name =
+      target instanceof HTMLSelectElement
+        ? (target.selectedOptions[0]?.textContent ?? '')
+        : (target.getAttribute('data-pkc-sql-source-name') ?? '');
+    dispatcher.dispatch({ type: 'SET_SQL_SOURCE', lid, name });
+  },
+  /**
    * 🔴 **答えをノートへ書き出す**(#681 段③ の 3 つ目)。
    *
    * ⚠ この面は**別の窓**で開くので、ノートを作っても**その窓には何も起きない** ──

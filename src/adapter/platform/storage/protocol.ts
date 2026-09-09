@@ -241,7 +241,27 @@ export type StorageRequest =
        *   **必ず先に**止まる値を呼び側が引いて渡す(`store-effects.ts` の `SQL_MAX_MS`)。
        */
       maxMs: number;
+      /**
+       * 🔴 **取り込んだ `.sqlite` の側へ打つ**(#681 段③ の 2 つ目)。
+       * ⚠ 既定(省略)は**この PKC の DB**である ── 打つ先を取り違えると、
+       *   「ノートを数えたつもりで、よその DB を数えていた」が起きる。
+       * ⚠ 客の DB には**本文の csv の表を組み立てない**(あちらは別の器である)。
+       */
+      guest?: boolean;
     }
+  | {
+      /**
+       * 🔴 **取り込んだ `.sqlite` を開く**(#681 段③ の 2 つ目)。
+       *
+       * ⚠ **ノートの DB とは別の接続**にする(issue の指示)── 混ぜない。
+       * ⚠ 開くのは `:memory:` の DB へ画像を流し込む形なので、**書いても
+       *   どこにも残らない**(客の file を書き換えない)。
+       * ⚠ 常駐メモリを食うので、**外したら必ず閉じる**(`closeSqlGuest`)。
+       */
+      op: 'openSqlGuest';
+      image: Uint8Array;
+    }
+  | { op: 'closeSqlGuest' }
   | {
       op: 'upsertEntry';
       cid: string;
@@ -678,6 +698,14 @@ export interface ResultMap {
    * ⚠ `truncated` = **上限で切った**(黙って切ると user は「これで全部」と読む)。
    * ⚠ 値は `postMessage` に載る形だけ ── `Uint8Array`(BLOB)は**大きさの字**へ畳む。
    */
+  /** 取り込んだ `.sqlite` を開いた結果(#681 段③ の 2 つ目)。 */
+  openSqlGuest: {
+    /** 中に在る表の名前(打つ前に「何が在るか」を見せる)。 */
+    tables: string[];
+    /** 画像の大きさ(バイト)。⚠ 常駐メモリの目安として画面に出す。 */
+    bytes: number;
+  };
+  closeSqlGuest: null;
   runReadOnlySql: {
     columns: string[];
     rows: Array<Array<string | number | null>>;

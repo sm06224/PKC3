@@ -151,6 +151,34 @@ export interface SqlPageState {
    * ⚠ 走らせ直したら消す(古い知らせを次の答えの上に残さない)。
    */
   readonly saved: string;
+  /**
+   * 🔴 **いま調べている相手**(#681 段③ の 2 つ目)。`null` = この PKC のノート。
+   *
+   * ⚠ **どちらを調べているかが画面から読めない**と、user は
+   *   「ノートを数えたつもりで、よその DB を数えていた」を**気づけない**。
+   *   だから面の上に必ず出す(CLAUDE.md §4)。
+   */
+  readonly guest: {
+    /** 添付のノートの lid(選び直しの照合に使う)。 */
+    readonly lid: string;
+    /** file の名前(= 添付のノートの題名)。画面に出す字。 */
+    readonly name: string;
+    /** 中に在る表の名前(打つ前に何が在るか見せる)。 */
+    readonly tables: readonly string[];
+    /** 画像の大きさ(バイト)。⚠ 常駐メモリの目安。 */
+    readonly bytes: number;
+  } | null;
+  /** 開こうとして失敗した理由(空 = 無い)。⚠ 黙って何も起きない形を作らない。 */
+  readonly guestError: string;
+  /**
+   * 🔴 **いま開こうとしている相手**(空 = 無い)。#681 段③ の 2 つ目。
+   *
+   * ⚠ **遅れて届いた答えを捨てるために在る** ── 選び直した直後は、前の相手の
+   *   「開けました」が**後から**届きうる(読み込みは非同期である)。それを
+   *   受けてしまうと、**選んでいない DB を「調べています」と出す**ことになり、
+   *   打った SQL はそちらへ飛ぶ(いちばん気づけない外し方)。
+   */
+  readonly guestPending: string;
 }
 
 /**
@@ -1064,6 +1092,9 @@ export const initialState: AppState = {
     running: false,
     error: '',
     saved: '',
+    guest: null,
+    guestError: '',
+    guestPending: '',
   },
   queryKey: null,
   smartHits: new Map<string, SmartHitState>(),
@@ -1148,6 +1179,13 @@ export type UserAction =
    *   (2 つの仕事を 1 つの action に持たせない)。
    */
   | { type: 'SQL_SAVED'; title: string }
+  /**
+   * 🔴 **調べる相手を選ぶ**(#681 段③ の 2 つ目)。`lid` が空 = この PKC のノート。
+   * ⚠ 選び直しは**前の相手を必ず手放す**(常駐メモリを返す)。
+   */
+  | { type: 'SET_SQL_SOURCE'; lid: string; name: string }
+  | { type: 'SQL_GUEST_OPENED'; lid: string; name: string; tables: string[]; bytes: number }
+  | { type: 'SQL_GUEST_FAILED'; lid: string; error: string }
   | {
       type: 'SET_SQL_RESULT';
       sql: string;
@@ -1911,7 +1949,19 @@ export type DomainEvent =
    * ⚠ **`sql` は全角を直した後の字**(`checkReadOnlySql` が返した物)── 元の字を
    *   渡すと、日本語入力のまま書いた人だけ構文エラーになる。
    */
-  | { type: 'REQUEST_SQL_RUN'; sql: string }
+  | {
+      type: 'REQUEST_SQL_RUN';
+      sql: string;
+      /**
+       * 🔴 **打つ先**(#681 段③ の 2 つ目)。真 = 取り込んだ `.sqlite`。
+       * ⚠ **event が運ぶ** ── effect 側で state を読み直すと、選び直した直後の
+       *   1 回が**前の相手へ飛ぶ**(読む時点が違う)。
+       */
+      guest?: boolean;
+    }
+  /** 取り込んだ `.sqlite` を開く / 手放す(#681 段③ の 2 つ目)。 */
+  | { type: 'REQUEST_SQL_GUEST_OPEN'; lid: string; name: string }
+  | { type: 'REQUEST_SQL_GUEST_CLOSE' }
   /**
    * 集計を頼む(#184)。⚠ 検索と同じ理由で **SQL 側の仕事** ── 本文は常駐していない。
    * ⚠ **目録と表を 1 回の走査で頼む**(`key` が `null` なら目録だけ)── 別々に
@@ -2648,7 +2698,13 @@ function reduceCore(
           // 🔑 **直した字を欄へ戻す**(全角で打った人に、実際に走った字を見せる)
           sqlPage: { ...state.sqlPage, sql: checked.sql, running: true, error: '', saved: '' },
         },
-        events: [{ type: 'REQUEST_SQL_RUN', sql: checked.sql }],
+        events: [
+          {
+            type: 'REQUEST_SQL_RUN',
+            sql: checked.sql,
+            ...(state.sqlPage.guest === null ? {} : { guest: true }),
+          },
+        ],
       };
     }
     case 'SET_SQL_RESULT':
@@ -2675,6 +2731,78 @@ function reduceCore(
     case 'SQL_SAVED':
       return {
         state: { ...state, sqlPage: { ...state.sqlPage, saved: action.title } },
+        events: [],
+      };
+    /**
+     * 🔴 **調べる相手を選ぶ**(#681 段③ の 2 つ目)。
+     *
+     * ⚠ **前の相手は必ず手放す** ── 選び直すたびに常駐メモリが積み上がる
+     *   (不可侵指示 2026-07-27「生成とライフサイクル後の速やかな破棄」)。
+     * ⚠ **前の答えも消す** ── 相手が変われば、出ている表は**別の DB の話**である
+     *   (残すと「新しい相手を調べた答え」に見える ── いちばん気づけない外し方)。
+     */
+    case 'SET_SQL_SOURCE': {
+      const events: DomainEvent[] = [{ type: 'REQUEST_SQL_GUEST_CLOSE' }];
+      if (action.lid !== '') {
+        events.push({ type: 'REQUEST_SQL_GUEST_OPEN', lid: action.lid, name: action.name });
+      }
+      return {
+        state: {
+          ...state,
+          sqlPage: {
+            ...state.sqlPage,
+            guest: null,
+            guestError: '',
+            guestPending: action.lid,
+            ranSql: '',
+            columns: [],
+            rows: [],
+            truncated: false,
+            ms: 0,
+            error: '',
+            saved: '',
+          },
+        },
+        events,
+      };
+    }
+    /**
+     * 🔴 **いま選んでいる相手の答えだけ受ける**(#681 段③ の 2 つ目)。
+     * ⚠ 選び直した直後は、**前の相手の「開けました」が後から届く** ── 受けると
+     *   選んでいない DB を「調べています」と出し、打った SQL はそちらへ飛ぶ。
+     */
+    case 'SQL_GUEST_OPENED':
+      if (state.sqlPage.guestPending !== action.lid) return { state, events: [] };
+      return {
+        state: {
+          ...state,
+          sqlPage: {
+            ...state.sqlPage,
+            guest: {
+              lid: action.lid,
+              name: action.name,
+              tables: action.tables,
+              bytes: action.bytes,
+            },
+            guestError: '',
+            guestPending: '',
+          },
+        },
+        events: [],
+      };
+    case 'SQL_GUEST_FAILED':
+      // ⚠ 断りも**いま選んでいる相手の分だけ**受ける(古い断りで新しい選択を消さない)
+      if (state.sqlPage.guestPending !== action.lid) return { state, events: [] };
+      /**
+       * ⚠ **`guest` は触らない** ── `SET_SQL_SOURCE` が既に `null` にしてあるので、
+       *   ここで書くと**外しても誰も落ちない行**になる(変異試験 A5 が SURVIVED で
+       *   教えた ── CLAUDE.md「『これが無いと壊れる』と書く前に、外して壊れるのを見る」)。
+       */
+      return {
+        state: {
+          ...state,
+          sqlPage: { ...state.sqlPage, guestError: action.error, guestPending: '' },
+        },
         events: [],
       };
     case 'SQL_RUN_FAILED':
