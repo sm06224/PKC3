@@ -154,6 +154,38 @@ export const MANUAL_CHROME_CSS = [
   '[data-pkc-region="manual-window-toc"] [data-pkc-level="4"]{padding-left:42px;opacity:.85}',
   '[data-pkc-region="manual-window-toc"] [data-pkc-level="5"]{padding-left:56px;opacity:.8}',
   '[data-pkc-region="manual-window-toc"] [data-pkc-level="6"]{padding-left:70px;opacity:.8}',
+  /**
+   * 🔴 **「▸ 目次」の 1 行**(#812)。⚠ 記号は `summary` の既定の三角に任せる
+   *   (自前で描くと、開いているかの向きを 2 か所で持つことになる)。
+   */
+  '[data-pkc-region="manual-window-toc"]>summary{cursor:pointer;padding:6px;',
+  'font-weight:700;border-radius:3px;list-style-position:inside}',
+  '[data-pkc-region="manual-window-toc"]>summary:hover{background:var(--surface-2,#8882)}',
+  '[data-pkc-region="manual-window-toc"]>summary:focus-visible{outline:2px solid currentColor}',
+  /**
+   * 🔴 **広い窓では、畳めるようにしない**(見え方を 1px も変えない)。
+   *
+   * ⚠ 中身を出す手が **2 通り**要る ── ブラウザによって `details` の閉じ方が
+   *   違うためである(古い実装は中身に `display:none`、新しい実装は
+   *   `::details-content` の `content-visibility`)。
+   *
+   * 🔴 **どちらが効いているかを実測した**(2026-09-09 の変異試験):
+   *   - `::details-content` を外す → **smoke が落ちた**(広い窓で目次が丸ごと消える)
+   *     = この箱の Chromium は**新しい実装**である
+   *   - `>nav{display:block}` を外す → **落ちなかった(SURVIVED)**
+   *     = この箱では **no-op** である
+   * ⚠ それでも `>nav` を残す ── **user は iPhone(Safari)で読んでいる**(#812 の
+   *   報告元)。`::details-content` は Safari では新しく、古い版は
+   *   **中身に `display:none`** を当てる。⚠ つまり**この箱では殺せない**が、
+   *   落ちる相手が実在する ── 消すと「iPhone でだけ目次が出ない」になる。
+   * 🔑 CLAUDE.md「『これが無いと壊れる』と書く前に、外して壊れるのを見る」に対する
+   *   答えは「**この箱では壊れない。壊れるのは測れない側の engine である**」。
+   *   ⚠ 実機で確かめるまで、これは**測っていない**と書いておく。
+   */
+  '@media (min-width:761px){[data-pkc-region="manual-window-toc"]>summary{display:none}',
+  '[data-pkc-region="manual-window-toc"]>nav{display:block}',
+  '[data-pkc-region="manual-window-toc"]::details-content{content-visibility:visible;',
+  'block-size:auto}}',
   // 🔴 **本文は窓いっぱい**(ヘルプ面の 60vh の箱がこの窓に来ないようにする)
   '[data-pkc-region="manual-window-main"]{overflow:auto;padding:16px 24px 64px;min-height:0}',
   /**
@@ -174,8 +206,12 @@ export const MANUAL_CHROME_CSS = [
   '[data-pkc-region="manual-window-main"] :is(h1,h2,h3,h4,h5,h6){scroll-margin-top:8px}',
   // 狭い窓では目次を上へ畳む(横に潰さない)
   '@media (max-width:760px){[data-pkc-region="manual-window-body"]{grid-template-columns:1fr;',
-  'grid-template-rows:minmax(0,32vh) 1fr}',
-  '[data-pkc-region="manual-window-toc"]{border-right:0;border-bottom:1px solid var(--border,#8884)}}',
+  // 🔴 **畳んだぶんだけ**(#812)── 直す前は `minmax(0,32vh)` で、閉じていても
+  //    画面の 3 分の 1 を食っていた。開いたときだけ伸びるように `auto` にする
+  "grid-template-rows:auto 1fr}",
+  // ⚠ 開いたら画面の半分までにする(開いた目次で本文が押し出されない)
+  '[data-pkc-region="manual-window-toc"]{border-right:0;max-height:50vh;',
+  'border-bottom:1px solid var(--border,#8884)}}',
   /**
    * 🔴 **紙に出すときは器をほどく**(2026-09-02、動線レビュー D6 が拾った)。
    * ⚠ 本文は `overflow:auto` のスクロール箱に居るので、そのまま Ctrl+P すると
@@ -386,7 +422,19 @@ export function buildManualPage(input: ManualPageInput): ManualPage {
     `<span>${escapeHtml(MANUAL_TIP)}</span>`,
     '</div>',
     '<div data-pkc-region="manual-window-body">',
-    `<nav data-pkc-region="manual-window-toc" aria-label="目次">${toc}</nav>`,
+    /**
+     * 🔴 **狭い画面では畳む**(#812。user 報告 2026-09-09、iPhone)。
+     *
+     * ⚠ 直す前は狭い窓でも目次が **32vh を必ず食って**いた ── スマホで開くと
+     *   画面の上 3 分の 1 が目次で埋まり、**読みに来たのに読めない**形だった。
+     * 🔑 `<details>` にする ── **script を 1 行も足さない**(この file の
+     *   「inline script は配色の 1 本だけ」を守る)。広い窓では CSS で
+     *   `summary` を隠し、中身を常に出す(見え方は 1px も変わらない)。
+     */
+    '<details data-pkc-region="manual-window-toc">',
+    '<summary data-pkc-field="manual-window-toc-open">目次</summary>',
+    `<nav aria-label="目次">${toc}</nav>`,
+    '</details>',
     `<div data-pkc-region="manual-window-main" class="${HOST_CLASS}">${built.html}</div>`,
     '</div>',
     '</body>',
