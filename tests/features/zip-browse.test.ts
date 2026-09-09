@@ -10,6 +10,7 @@ import type { ZipEntry } from '../../src/features/import/zip-reader';
 import {
   archiveRows,
   extractNames,
+  isZipAttachment,
   markedFiles,
   toggleArchiveMark,
 } from '../../src/features/archive/zip-browse';
@@ -135,5 +136,32 @@ describe('取り出した物の名前', () => {
     const paths = ['z/1.txt', 'a/2.txt', 'q/1.txt'];
     expect(extractNames(paths)).toHaveLength(paths.length);
     expect(extractNames(paths)[1]).toBe('2.txt');
+  });
+});
+
+/**
+ * 🔴 **この添付は zip か**(#818)。
+ *
+ * ⚠ mime と名前の**両方**を見る ── 片方だけで見分けると、
+ * **同じ zip が経路によって見えたり見えなかったり**する。
+ */
+describe('zip の見分け', () => {
+  it.each([
+    ['application/zip', 'a.zip'],
+    ['application/x-zip-compressed', 'a.zip'],
+    ['', '写真.ZIP'],
+    ['application/octet-stream', '書庫.zip'],
+    ['application/zip', '名前に拡張子が無い'],
+  ])('%s / %s は zip', (mime, name) => {
+    expect(isZipAttachment(mime as string, name as string)).toBe(true);
+  });
+
+  it.each([
+    ['image/png', 'a.png'],
+    ['application/pdf', 'a.pdf'],
+    ['', 'zip'],
+    ['', 'a.zip.txt'],
+  ])('%s / %s は zip ではない', (mime, name) => {
+    expect(isZipAttachment(mime as string, name as string)).toBe(false);
   });
 });

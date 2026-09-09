@@ -148,12 +148,14 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   ── 設定の選択欄が受ける。鍵は割り当てない(設定で選ぶ物なので登記も増えない)
       // ⚠ 2026-09-09(#679): まとめて貼る(`paste-many-copied`)で受け手 +1
       //   ── コピーした物のメニューにだけ出る(登記は増えない)
-      total: 261,
-      receivers: 213,
+      // ⚠ 2026-09-09(#818): 書庫の中を見る(`browse-archive`)で受け手 +1
+      //   ── 添付の行にだけ出る(登記は増えない)
+      total: 262,
+      receivers: 214,
       registered: 84,
       both: 36,
       outsideActionsTable: 48,
-      unregistered: 177,
+      unregistered: 178,
     });
   });
 

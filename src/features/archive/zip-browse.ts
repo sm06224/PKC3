@@ -155,3 +155,19 @@ export function extractNames(paths: readonly string[]): string[] {
     return (count.get(b) ?? 0) > 1 ? p.split('/').join('-') : b;
   });
 }
+
+/**
+ * 🔴 **この添付は zip か**(#818)。
+ *
+ * ⚠ **mime と名前の両方**を見る ── ブラウザは zip に
+ *   `application/x-zip-compressed` を付けることがあり(古い Windows 由来)、
+ *   逆に**名前だけ `.zip` で mime が空**の経路も在る(取り込み元による)。
+ * 🔑 片方だけで見分けると、**同じ zip が経路によって見えたり見えなかったり**する。
+ * ⚠ ここでは**中身を開かない** ── 開くのは押した後である(右クリックの時点で
+ *   実体を読むと、添付の数だけ storage を叩く)。
+ */
+export function isZipAttachment(mime: string, name: string): boolean {
+  const m = mime.toLowerCase();
+  if (m === 'application/zip' || m === 'application/x-zip-compressed') return true;
+  return /\.zip$/i.test(name.trim());
+}
