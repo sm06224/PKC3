@@ -22,6 +22,20 @@ const ROOT = fileURLToPath(new URL('../../dist', import.meta.url));
 const PORT = Number(process.env.PKC3_PLAIN_PORT ?? 45733);
 
 /**
+ * 🔴 **根を配らない配信**(#532 S1)。既定は空 = 今までどおり根で配る。
+ *
+ * `PKC3_PLAIN_PREFIX=/pkc/` を渡すと、**その下だけ**を配り、**外は 404 にする**。
+ * ⚠ 「prefix を剥がして、根でも配る」形にしてはいけない ── それだと
+ * `src="/assets/x.js"` という**絶対参照が根で当たって通ってしまい**、
+ * sub-path の smoke は**何も守らない**(CLAUDE.md §1「救い手が変わっただけ」)。
+ * 🔑 外を 404 にして初めて、「相対で組んである」が検査になる。
+ */
+const PREFIX = process.env.PKC3_PLAIN_PREFIX ?? '';
+if (PREFIX !== '' && !(PREFIX.startsWith('/') && PREFIX.endsWith('/'))) {
+  throw new Error(`PKC3_PLAIN_PREFIX は '/pkc/' の形で渡す(受け取った値: ${PREFIX})`);
+}
+
+/**
  * 🔴 **起動を壊す古い SW を配れるようにする**(#115)。
  *
  * 2026-08-11 に、起動を壊す SW を出荷して**自己永続化する障害**を作った ──
@@ -67,8 +81,15 @@ const TYPES = {
 };
 
 createServer((req, res) => {
+  const pathname = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+  // 🔴 prefix の**外は配らない**。これが sub-path 検査の空振り防止そのものである
+  if (PREFIX !== '' && !pathname.startsWith(PREFIX)) {
+    res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+    res.end(`この server は ${PREFIX} の下だけを配る(要求: ${pathname})`);
+    return;
+  }
   // ⚠ `..` で dist の外へ出させない
-  const rel = normalize(decodeURIComponent(new URL(req.url, 'http://x').pathname)).replace(
+  const rel = normalize(PREFIX === '' ? pathname : pathname.slice(PREFIX.length - 1)).replace(
     /^(\.\.[/\\])+/,
     '',
   );
@@ -112,5 +133,5 @@ createServer((req, res) => {
   });
   createReadStream(path).pipe(res);
 }).listen(PORT, () => {
-  process.stdout.write(`plain server on ${PORT}\n`);
+  process.stdout.write(`plain server on ${PORT}${PREFIX === '' ? '' : ` (prefix ${PREFIX})`}\n`);
 });

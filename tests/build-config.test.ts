@@ -18,7 +18,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 /** env を差してから config を**読み直す**(import 時に評価されるため)。 */
 async function loadModule(kind: string | undefined): Promise<{
-  default: { build?: { sourcemap?: boolean | 'inline' | 'hidden' } };
+  default: { base?: string; build?: { sourcemap?: boolean | 'inline' | 'hidden' } };
   buildIdFor: (precache: readonly string[]) => string;
 }> {
   vi.resetModules();
@@ -27,7 +27,7 @@ async function loadModule(kind: string | undefined): Promise<{
   else process.env.VITE_PKC_KIND = kind;
   try {
     return (await import('../vite.config')) as unknown as {
-      default: { build?: { sourcemap?: boolean | 'inline' | 'hidden' } };
+      default: { base?: string; build?: { sourcemap?: boolean | 'inline' | 'hidden' } };
       buildIdFor: (precache: readonly string[]) => string;
     };
   } finally {
@@ -38,6 +38,29 @@ async function loadModule(kind: string | undefined): Promise<{
 
 afterEach(() => {
   vi.resetModules();
+});
+
+/**
+ * 🔴 **配置場所を知らないビルド**(#532 S1)。
+ *
+ * `base: './'` は「Pages の `/` と `/dev/` の両方で同一ビルドが動く」ために
+ * 置かれているが、**それを見る検査は 2026-09-09 まで 1 件も無かった**
+ * (`base` の字は `tests/` 配下に一致 0 件)。⚠ セルフホスト(#532)は
+ * 「配置場所を知らないビルドを、任意の場所へ置く」ことに**全面的に依存**するので、
+ * ここが `'/'` に戻った日に**気づける計器が要る**。
+ *
+ * ⚠ **kind ごとに見る。** `VITE_PKC_KIND` で分岐する設定が既に在る(`sourcemap`)ので、
+ *   1 つの kind だけ見る検査は「product だけ絶対 path」を素通りさせる
+ *   (CLAUDE.md「同じ値を複数の経路へ渡すものは、経路ごとに pin する」)。
+ * 🔑 生成物の側は `scripts/dist-inspect.mjs` が見る(2 段構え)── config が
+ *   正しくても plugin が絶対 path を吐けば意味が無い。
+ */
+describe('🔴 ビルド設定 — どこに置いても動く(base は相対)', () => {
+  for (const kind of ['product', 'dev', undefined] as const) {
+    it(`${kind ?? 'kind 指定なし'} で base が './'`, async () => {
+      expect((await loadModule(kind)).default.base).toBe('./');
+    });
+  }
 });
 
 describe('ビルド設定 — product に map を載せない', () => {
