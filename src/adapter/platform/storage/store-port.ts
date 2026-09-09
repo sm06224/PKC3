@@ -45,7 +45,25 @@ export function metaFromRow(row: EntryMetaRow): EntryMeta {
  */
 export const REVISION_KEEP_LATEST = 100;
 
+/**
+ * 🔴 **この窓の合言葉**(#836、2026-09-09)。
+ *
+ * ⚠ 取り込んだ `.sqlite` の接続は worker に在り、**窓は 2 枚開ける**
+ *   (#300 段③ の裁定「同じタイルを 2 回押したら 2 枚開く」)。合言葉が無いと
+ *   worker には「誰の客か」が分からないので、**2 枚目が 1 枚目の客を横取りする**。
+ * 🔑 `createStorePort` は**窓ごとに 1 回**呼ばれる(`main.ts`)ので、ここで作れば
+ *   窓の寿命とちょうど一致する ── 上の層は 1 つも知らずに済む。
+ * ⚠ **合言葉が同じになってはいけない**ので、乱数から作る(器の id では、
+ *   同じ PKC を 2 枚開いた形で必ず衝突する)。
+ */
+function newGuestKey(): string {
+  const c = globalThis.crypto as { randomUUID?: () => string } | undefined;
+  const uuid = c?.randomUUID?.();
+  return uuid ?? `w-${String(Date.now())}-${String(Math.random()).slice(2)}`;
+}
+
 export function createStorePort(client: StoreClientLike, cid: string): StorePort {
+  const guestKey = newGuestKey();
   return {
     getBody: (lid) => client.request({ op: 'getBody', cid, lid }),
     /**
@@ -74,15 +92,17 @@ export function createStorePort(client: StoreClientLike, cid: string): StorePort
         maxRows: limits.maxRows,
         maxSteps: limits.maxSteps,
         maxMs: limits.maxMs,
-        ...(limits.guest === true ? { guest: true } : {}),
+        ...(limits.guest === true ? { guest: guestKey } : {}),
       }),
     /**
      * 🔴 **取り込んだ `.sqlite` を開く**(#681 段③ の 2 つ目)。⚠ ここも**渡すだけ** ──
      *   別の接続にするのも、読めない bytes を断るのも worker が持つ。
      * ⚠ **`cid` を渡さない**(`runReadOnlySql` と同じ ── 器で絞る話ではない)。
+     * 🔑 渡すのは**窓の合言葉**だけ(#836)── 上の層は「窓が 2 枚ある」ことを
+     *   1 つも知らずに済む(知っているのはここと worker だけ)。
      */
-    openSqlGuest: (image) => client.request({ op: 'openSqlGuest', image }),
-    closeSqlGuest: () => client.request({ op: 'closeSqlGuest' }),
+    openSqlGuest: (image) => client.request({ op: 'openSqlGuest', image, guest: guestKey }),
+    closeSqlGuest: () => client.request({ op: 'closeSqlGuest', guest: guestKey }),
     /**
      * 🔴 **このノートを参照しているのはどれか**(#348)。⚠ ここも**渡すだけ** ──
      * 探し方(`entry:<lid>` を LIKE で当てる)の規則は worker が 1 か所で持つ。
