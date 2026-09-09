@@ -56,7 +56,10 @@ function commit(d: Dispatcher, lid: string, body: string): void {
   d.dispatch({ type: 'COMMIT_EDIT' });
 }
 
-function setup(persist: (body: string) => Promise<void>) {
+function setup(
+  persist: (body: string) => Promise<void>,
+  onWriting?: (writing: boolean) => void,
+) {
   const d = new Dispatcher();
   const written: string[] = [];
   const effects = connectStoreEffects(d, {
@@ -77,7 +80,7 @@ function setup(persist: (body: string) => Promise<void>) {
     },
     deleteEntry: async () => {},
     setEntryParent: async () => {},
-  });
+  }, onWriting ? { onWriting } : {});
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1')], relations: [] });
   return { d, effects, written };
 }
@@ -140,5 +143,95 @@ describe('書込の着地を待つ(settled)', () => {
     });
     commit(d, 'n1', 'x');
     await expect(effects.settled()).resolves.toBeUndefined();
+  });
+});
+
+/**
+ * 🔴 **「まだ書いています」を外へ知らせる**(#828)。
+ *
+ * ## なぜ要るか(実測)
+ *
+ * 題名の書換えは **画面が先・disk が後**である(`RENAME_ENTRY_TITLE` が
+ * `entryMetas` を楽観更新し、`REQUEST_RENAME` が後から飛ぶ)。⚠ その間に
+ * 読み直すと**題名だけが既定へ戻る** ── 2026-09-09、CPU に 4 本の負荷を掛けて
+ * `sub-path.smoke.spec.ts` を 6 回回したら **1 回**出た(負荷なしでは 0 / 多数)。
+ * 控えた DOM には**ノートの行は在り、題名だけが `2026-09-09 ノート 1`** だった。
+ *
+ * 🔑 だから「届いた」と言える観測点を 1 つ置く ── `settled()` は**待つ**口で、
+ *   こちらは**知らせる**口である(待てない相手 = smoke / 将来の画面表示のため)。
+ * ⚠ ここは**知らせるだけ**で、まだ何も見た目を変えない(見え方を変える判断は
+ *   user のもの ── CLAUDE.md)。
+ */
+describe('書いている間だけ知らせる(#828)', () => {
+  it('🔴 書込が飛んだら true、着地したら false', async () => {
+    const g = gate();
+    const seen: boolean[] = [];
+    const { d } = setup(() => g.wait, (w) => seen.push(w));
+    // ⚠ 空振り防止 ── 何も書いていないうちは 1 度も呼ばれない
+    expect(seen, '書いていないのに知らせが出た').toEqual([]);
+
+    commit(d, 'n1', '新しい本文');
+    expect(seen, '書き始めを知らせていない').toEqual([true]);
+    await flush();
+    expect(seen, '門が閉じている(= まだ書いている)のに false が出た').toEqual([true]);
+
+    g.open();
+    await flush();
+    expect(seen, '着地を知らせていない').toEqual([true, false]);
+  });
+
+  /**
+   * 🔴 **変わったときだけ呼ぶ** ── 2 本続けて積んでも `true` は 1 回で、
+   *   `false` は**全部着地してから** 1 回である。
+   * ⚠ ここが壊れると、画面に出す側が点滅する(将来「保存中」を出すときの土台)。
+   */
+  it('🔴 2 本積んでも true は 1 回、false は最後の 1 回だけ', async () => {
+    const first = gate();
+    const second = gate();
+    let n = 0;
+    const seen: boolean[] = [];
+    const { d } = setup(
+      () => (n++ === 0 ? first.wait : second.wait),
+      (w) => seen.push(w),
+    );
+    commit(d, 'n1', '1 本目');
+    commit(d, 'n1', '2 本目');
+    expect(seen, '積むたびに知らせている').toEqual([true]);
+
+    first.open();
+    await flush();
+    expect(seen, '1 本目が着いただけで「書き終えた」と言った').toEqual([true]);
+
+    second.open();
+    await flush();
+    expect(seen, '全部着いたのに知らせていない').toEqual([true, false]);
+  });
+
+  /**
+   * 🔴 **失敗しても false を出す**(出さないと「永遠に書いている」で固まる)。
+   * ⚠ chain は `then(op, op)` で死なないので、**知らせだけ取り残される**形になる。
+   */
+  it('🔴 書込が失敗しても、書き終えたことを知らせる', async () => {
+    const seen: boolean[] = [];
+    const { d } = setup(async () => {
+      throw new Error('disk full');
+    }, (w) => seen.push(w));
+    commit(d, 'n1', 'x');
+    await flush();
+    expect(seen, '失敗した回に印が残りっぱなしになる').toEqual([true, false]);
+  });
+
+  /**
+   * ⚠ **知らせ先が投げても、書込は止まらない**(知らせはおまけである)。
+   * 🔑 空振り防止に「本文が実際に書かれた」ことまで見る ── 投げた時点で
+   *   列が止まっていれば、ここが 0 件になる。
+   */
+  it('⚠ 知らせ先が投げても、書込は最後まで走る', async () => {
+    const { d, effects, written } = setup(async () => {}, () => {
+      throw new Error('画面の都合');
+    });
+    commit(d, 'n1', '書けたか');
+    await effects.settled();
+    expect(written, '知らせ先の例外が書込を止めた').toEqual(['書けたか']);
   });
 });

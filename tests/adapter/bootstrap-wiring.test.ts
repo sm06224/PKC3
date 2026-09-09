@@ -437,6 +437,21 @@ describe('書き出しの settle の配線', () => {
   });
 
   /**
+   * 🔴 **「書いている間」の印が、実際に繋がっている**(#828)。
+   *
+   * ⚠ 判断は `store-effects.ts` が持ち(`tests/adapter/store-settle.test.ts` が
+   *   決定的に見ている)、ここが守るのは**配線**である ── 落ちると
+   *   **印が一度も付かない**まま全 unit が緑になる(`main.ts` は実行されない)。
+   * ⚠ **呼びの形ごと留める** ── `onWriting` だけを探すと、
+   *   `onWritingX` に改名する変異が部分一致で生き延びる(#811 で実際に踏んだ)。
+   */
+  it('🔴 書いている間の印(data-pkc-writing)が effect 層から来ている', () => {
+    expect(MAIN, '知らせの口を渡していない').toContain(
+      "onWriting: (writing) => root.toggleAttribute('data-pkc-writing', writing)",
+    );
+  });
+
+  /**
    * 🔴 **PowerPoint の口が実際に繋がっている**(#187 段⑤)。
    *
    * ⚠ `main.ts` は **test から 1 度も実行されない**(原文を読む test しか無い)ので、

@@ -370,6 +370,17 @@ export function connectStoreEffects(
      *   その場合 `unsupported` になって何も起きない(既存の呼び出しを変えない)。
      */
     persist?: PersistOnce;
+    /**
+     * 🔴 **飛んでいる書込がある間だけ真**(#828)。列が空 -> 非空で `true`、
+     * 空に戻ったところで `false` を、**変わったときだけ** 1 回ずつ呼ぶ。
+     *
+     * ⚠ なぜ要るか: 題名の書換え(`RENAME_ENTRY_TITLE`)は画面を**先に**書き換えて、
+     *   disk へは `REQUEST_RENAME` が**後から**飛ぶ。その間に読み直すと
+     *   **題名だけが戻る** ── #828 で実測した(CPU に負荷を掛けると 1/6 で出る)。
+     * 🔑 ここは**知らせる口**であって、待たせる口ではない(待つのは `settled()`)。
+     * ⚠ 数えるのは **`enqueue` に載せた書込だけ** ── `afterWrites`(読み)は数えない。
+     */
+    onWriting?: (writing: boolean) => void;
   } = {},
 ): StoreEffects {
   let queue: Promise<void> = Promise.resolve();
@@ -397,10 +408,30 @@ export function connectStoreEffects(
    */
   let writeSeq = 0;
 
+  /**
+   * 🔴 **いま飛んでいる書込の本数**(#828)。0 に戻った瞬間が「disk へ届いた」である。
+   * ⚠ `settled()` とは別物 ── あちらは**待つ**、こちらは**外へ知らせる**。
+   */
+  let inFlight = 0;
+  const tellWriting = (writing: boolean): void => {
+    try {
+      opts.onWriting?.(writing);
+    } catch {
+      // ⚠ 知らせ先が投げても書込の列は止めない(知らせはおまけである)
+    }
+  };
+
   /** 全 store op を単一 chain に直列化(順序保証)。op の失敗は chain を殺さない。 */
   const enqueue = (op: () => Promise<void>): void => {
     writeSeq += 1;
-    queue = queue.then(op, op);
+    inFlight += 1;
+    if (inFlight === 1) tellWriting(true);
+    // ⚠ **失敗しても減らす** ── 減らさないと「永遠に書いている」で固まる
+    const leave = (): void => {
+      inFlight -= 1;
+      if (inFlight === 0) tellWriting(false);
+    };
+    queue = queue.then(op, op).then(leave, leave);
   };
 
   /**
