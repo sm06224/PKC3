@@ -16,8 +16,12 @@
 import { copyLabel, type CopiedItem } from '@features/clipboard/history';
 import type { MenuItem } from '@adapter/ui/render/context-menu';
 
-/** 空のときに出す 1 行。⚠ **黙って何も出さない**にしない(押した意味が消える)。 */
-export const COPY_HISTORY_EMPTY = 'まだ何もコピーしていません';
+/**
+ * 空のときに**帯へ**出す字。⚠ **黙って何も出さない**にしない(押した意味が消える)。
+ * ⚠ メニューの項目にはしない ── 押しても何も起きない行になる。
+ */
+export const COPY_HISTORY_EMPTY =
+  'まだ何もコピーしていません(PKC の中でコピーすると、この端末に 20 件まで残ります)';
 
 /** 全部消す項目の字。 */
 export const COPY_HISTORY_CLEAR = 'コピーした物を消す';
@@ -27,18 +31,12 @@ export const COPY_HISTORY_CLEAR = 'コピーした物を消す';
  *
  * ⚠ **消す口を必ず置く**(issue #678)── コピーした物が残り続けるのは、
  *   user が消したい情報を持ち続けることである。
- * ⚠ 空でも「消す」は出さない ── 押しても何も起きない行を並べない。
+ * 🔴 **空のときは 0 件を返す** ── 「まだ何もコピーしていません」を*項目*として
+ *   出すと、それは**押しても何も起きない行**になる(無言の dead click)。
+ *   ⚠ 呼び側は 0 件のとき**帯で言う**(`COPY_HISTORY_EMPTY`)── 押した意味が消えない。
  */
 export function copyHistoryMenu(items: readonly CopiedItem[]): MenuItem[] {
-  if (items.length === 0) {
-    return [
-      {
-        action: 'noop',
-        label: COPY_HISTORY_EMPTY,
-        hint: 'PKC の中でコピーすると、ここに 20 件まで残ります(この端末の中だけ)',
-      },
-    ];
-  }
+  if (items.length === 0) return [];
   return [
     ...items.map((c, i) => ({
       action: 'use-copied',

@@ -215,6 +215,37 @@ import { flashCopied, handleCopyMdBlock } from './copy-md-block';
 import { finishCopy, selectedMarkdown } from './copy-source';
 import { installLongPress, LONG_PRESS_TARGET } from './long-press';
 import { copyMarkdownAndHtml, copyPlainText } from '@adapter/platform/clipboard';
+import { appCopyHistory } from '@adapter/platform/copy-history-store';
+import {
+  COPY_HISTORY_EMPTY,
+  copyHistoryMenu,
+} from '@adapter/ui/actions/copy-history-menu';
+import { copyLabel } from '@features/clipboard/history';
+
+/**
+ * 🔴 **「コピーした物」を出す口は 1 つ**(#678)。鍵(`Mod+Shift+V` / パレット)と
+ * スマホの `⋯` の**両方から呼ぶ** ── 2 か所に書くと、片方だけ直した日に
+ * 「鍵では出るのに ⋯ では出ない」形になる(CLAUDE.md §7)。
+ *
+ * ⚠ 0 件のときは**メニューを出さずに帯で言う** ── 「まだ何もコピーしていません」を
+ *   項目にすると、押しても何も起きない行になる。
+ */
+function openCopyHistory(root: HTMLElement, notify: (text: string) => void): void {
+  const items = copyHistoryMenu(appCopyHistory.items());
+  if (items.length === 0) {
+    notify(COPY_HISTORY_EMPTY);
+    return;
+  }
+  // ⚠ 出す場所は ⋯ の下(在れば)── 鍵から来たときは画面の左上へ寄せる
+  const anchor = root.querySelector<HTMLElement>('[data-pkc-field="phone-menu"]');
+  const rect = anchor?.getBoundingClientRect();
+  openContextMenu(
+    root,
+    rect ? { x: rect.left, y: rect.bottom } : { x: 8, y: 8 },
+    items,
+    root.ownerDocument.activeElement,
+  );
+}
 import { cleanForClipboard } from '@features/export/clipboard-html';
 import {
   confirmInApp,
@@ -2640,6 +2671,18 @@ export function runGlobalCommand(
     return true;
   }
   /**
+   * 🔴 **コピーした物**(#678)。⚠ **中央の面を奪わない** ── その場に出して、
+   *   選んだら消える(user 指示 2026-08-22「補助的な物が、主の作業領域を奪ってはいけない」)。
+   * ⚠ 0 件のときは**メニューを出さずに帯で言う** ── 「まだ何もコピーしていません」を
+   *   項目にすると、押しても何も起きない行になる。
+   */
+  if (cmd === 'open-copy-history') {
+    if (dry) return true;
+    prevent();
+    openCopyHistory(root, notify);
+    return true;
+  }
+  /**
    * 🔴 **スタックの 3 手**(#633 段②)── 押しボタンを持たないので、`view-dual` と同じく
    *   ここで直に投げる。⚠ 断り文は**ここに書かない**ものと**ここで言うもの**を分ける:
    *   満杯・フォルダの断りは reducer が 1 か所で出す(`PIN_SPLIT_ENTRY`)。
@@ -3372,6 +3415,15 @@ const ACTIONS: Record<string, ActionHandler> = {
                 },
               ]
             : []),
+          /**
+           * 🔴 **コピーした物**(#678)。⚠ スマホには `Ctrl+Shift+V` が無く、
+           *   左の列も見えていない ── **ここが唯一の入口**である。
+           */
+          {
+            action: 'open-copy-history',
+            label: 'コピーした物',
+            hint: 'この端末で前にコピーした物を出します(押すともう一度コピーされます)',
+          },
           {
             action: 'open-palette',
             label: '操作を探す',
@@ -3385,6 +3437,43 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'open-palette': (dispatcher, _target, services, root) =>
     openPaletteFor(root, dispatcher, appKeymap, (t) => services.showStatus?.(t)),
+  /**
+   * 🔴 **コピーした物を選ぶ**(#678)── **もう一度コピーする**(その場へ差し込まない)。
+   *
+   * ⚠ 差し込むには caret が要るが、メニューを開いた時点で欄から焦点が外れる ──
+   *   **開いた場所によって結果が変わる**動線になる。もう一度コピーする形なら
+   *   どこから開いても同じで、そのまま貼れる。
+   * ⚠ **添字は札が持っている**(`data-pkc-copied`)── ここで推測しない。
+   *   無い / 範囲外なら**何もしない**(押した覚えの無い物をクリップボードへ入れない)。
+   * ⚠ **写せなかったら言う** ── 黙って終えると、貼ったときに前の物が出て
+   *   「押したのに変わらない」になる。
+   */
+  /** ⚠ 鍵と同じ実体を呼ぶ(口を 2 つ作らない)。 */
+  'open-copy-history': (_dispatcher, _target, services, root) => {
+    openCopyHistory(root, (t) => services.showStatus?.(t));
+  },
+  'use-copied': (_dispatcher, target, services) => {
+    const raw = target.getAttribute('data-pkc-copied');
+    const i = raw === null ? -1 : Number(raw);
+    const item = Number.isInteger(i) && i >= 0 ? appCopyHistory.items()[i] : undefined;
+    if (item === undefined) return;
+    void (item.html === '' ? copyPlainText(item.text) : copyMarkdownAndHtml(item.text, item.html))
+      .then((ok) => {
+        services.showStatus?.(
+          ok
+            ? `「${copyLabel(item.text, 24)}」をコピーしました(そのまま貼れます)`
+            : 'コピーできませんでした(ブラウザが断りました)',
+        );
+      });
+  },
+  /**
+   * 🔴 **全部消す**(#678)── コピーした物が残り続けるのは、user が消したい情報を
+   *   持ち続けることである。⚠ 消えたことを言う(無言で終えない)。
+   */
+  'clear-copy-history': (_dispatcher, _target, services) => {
+    appCopyHistory.clear();
+    services.showStatus?.('コピーした物を全部消しました');
+  },
   'nav-back': (dispatcher) => dispatcher.dispatch({ type: 'NAV_HISTORY', dir: 'back' }),
   'nav-forward': (dispatcher) => dispatcher.dispatch({ type: 'NAV_HISTORY', dir: 'forward' }),
   /** 一覧の並び順(#183)。⚠ 妥当性の判定は `isEntrySort` 1 か所。 */
