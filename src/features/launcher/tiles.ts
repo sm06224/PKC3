@@ -49,6 +49,7 @@ export interface LauncherTile {
     | 'schedule'
     | 'contacts'
     | 'search'
+    | 'sql'
     | 'manual'
     | 'selfhost';
   /** `kind === 'url'` のときの飛び先。 */
@@ -249,6 +250,20 @@ export function searchTile(): LauncherTile {
 }
 
 /**
+ * 🔴 **SQL を打つ面の組み込みタイル**(#681 段②。裁定 2026-09-04「アプリの基本は別窓」)。
+ *
+ * ⚠ **これは「ノートの見方」ではない**ので、#292 でカレンダーを外した判定
+ * (「閉じたとき user が失うものは何か」)に照らして**アプリで正しい** ──
+ * この窓を閉じて失うのは**打った字と表**だけで、ノートは 1 件も消えない。
+ * 🔑 `kind` は `ViewMode` の綴り(`sql`)── `launch-tile.ts` がそれを見て別窓へ渡す。
+ */
+export const SQL_TILE_LID = 'builtin:sql';
+
+export function sqlTile(): LauncherTile {
+  return { lid: SQL_TILE_LID, title: 'SQL で調べる', group: BUILTIN_GROUP, kind: 'sql' };
+}
+
+/**
  * 🔴 **マニュアルの組み込みタイル**(#645。user 要望 2026-08-31
  * 「**ヘルプの中からマニュアルをアプリとして出してください**」)。
  *
@@ -339,6 +354,11 @@ export function withBuiltinTiles(
   // ⚠ 支度の口は**最後**(#532 段 B)── 1 度だけ使う物で、他の位置を動かさない
   builtin.push(selfhostTile());
   /**
+   * ⚠ **SQL の面も末尾**(#681 段②)── 足しても**他のタイルの位置が 1 つも動かない**
+   *   (`selfhostTile` と同じ判断)。⚠ 途中に挟むと、既に手が覚えている位置が全部ずれる。
+   */
+  builtin.push(sqlTile());
+  /**
    * 🔴 **組み込みは末尾へ「収納」する**(#531 段② / #281。user 指示 2026-08-28
    * 「組み込みアプリをグループに**収納して**整理する」)。
    *
@@ -373,6 +393,7 @@ export const BUILTIN_KINDS: ReadonlySet<LauncherTile['kind']> = new Set([
   'schedule',
   'contacts',
   'search',
+  'sql',
   'manual',
   'selfhost',
 ]);

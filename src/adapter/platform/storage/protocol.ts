@@ -201,6 +201,39 @@ export type StorageRequest =
       after?: { entryOrder: number; lid: string };
       maxBytes: number;
     }
+  /**
+   * 🔴 **user が打った SQL を、読むだけで走らせる**(#681 段②)。
+   *
+   * > user の言葉 2026-09-03:「**内蔵の sqlite を最大限活用したインスタントな
+   * > csv や sqliteDB のクエリアプリ**」
+   *
+   * ## ⚠ 安全は**字ではなく engine** に置く
+   *
+   * 打つ前に `features/query/sql-guard.ts` が字で見分けるが、**あれは断る理由を
+   * 読める字で言うための門**であって境ではない(字で見分ける以上、知らない書き方は
+   * 漏れうる)。🔑 ここでは 2 つの engine の門を通す ── どちらも同梱 3.53.0 で実測済み
+   * (`tests/adapter/sqlite-capabilities.test.ts` が pin):
+   * - `PRAGMA query_only = 1` ── 書き込みは `SQLITE_READONLY` で断られる
+   * - `sqlite3_progress_handler` ── 終わらない問い合わせを**止められる**
+   *
+   * ⚠ **どちらも必ず戻す**(`finally`)── 戻し損ねると、この面を 1 度開いた user は
+   *   **以後ノートを保存できない**(同じ接続を使うので)。
+   * 🔴 **別のワーカーへ逃がせない** ── `THREADSAFE=0` なので 1 つの接続を 2 つの
+   *   ワーカーで共有できない(実測)。だから「重いものはワーカーへ」は
+   *   **この DB については既に満たされている**(ここがそのワーカーである)。
+   */
+  | {
+      op: 'runReadOnlySql';
+      /** 打つ字。⚠ **全角を直した後の字**を渡すこと(`checkReadOnlySql` の `sql`)。 */
+      sql: string;
+      /** 画面へ返す行の上限。⚠ 全部積むと、それだけで固まる。 */
+      maxRows: number;
+      /**
+       * 進み具合の見張りが我慢する回数。⚠ **時間ではなく歩数**で切る ── 端末の速さで
+       *   意味が変わらないほうが、test でも実機でも同じ振る舞いになる。
+       */
+      maxSteps: number;
+    }
   | {
       op: 'upsertEntry';
       cid: string;
@@ -632,6 +665,18 @@ export interface ResultMap {
    * ⚠ `total` は**上限で切る前**の数 ── 黙って切ると user は「これで全部」と読む。
    */
   smartScan: { lids: string[]; total: number };
+  /**
+   * 打った SQL の答え(#681 段②)。
+   * ⚠ `truncated` = **上限で切った**(黙って切ると user は「これで全部」と読む)。
+   * ⚠ 値は `postMessage` に載る形だけ ── `Uint8Array`(BLOB)は**大きさの字**へ畳む。
+   */
+  runReadOnlySql: {
+    columns: string[];
+    rows: Array<Array<string | number | null>>;
+    truncated: boolean;
+    /** かかった時間(ms)。⚠ 「速いか」を user が見られるようにする。 */
+    ms: number;
+  };
   /**
    * `done` = これ以上ない。`rows` は `entry_order, lid` 順(並びの正本)。
    * `next` = 続きのカーソル(呼び出し側はこれをそのまま渡す ── 自分で組まない)。

@@ -9,6 +9,7 @@
  */
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
 import { DEFAULT_ENTRY_SORT, NATURAL_DESC, type EntrySort } from '@features/filter/entry-sort';
+import { checkReadOnlySql } from '@features/query/sql-guard';
 import { resolveCanonicalParents, reorderSibling } from '@features/relation/tree';
 import { extractMeta, seedBodyFor } from '@features/flavor';
 import { isAppendable } from '@features/flavor/append-spec';
@@ -120,6 +121,30 @@ export interface SearchPageState {
   readonly failed: boolean;
 }
 /**
+ * 🔴 **SQL を打つ面の state**(#681 段②)。
+ *
+ * ⚠ **打っている字と、走らせた字を分ける** ── 結果が「どの字のものか」を
+ *   言えないと、打ち替えた後の表が**前の答えなのか今の答えなのか**分からない
+ *   (`searchPage` の `query` / `rowsQuery` と同じ形)。
+ */
+export interface SqlPageState {
+  /** 欄の中身(打っている字)。 */
+  readonly sql: string;
+  /** いま出ている表が、どの字の答えか(空 = まだ走らせていない)。 */
+  readonly ranSql: string;
+  readonly columns: readonly string[];
+  readonly rows: readonly (readonly (string | number | null)[])[];
+  /** 上限で切ったか。⚠ 黙って切らない。 */
+  readonly truncated: boolean;
+  /** かかった時間(ms)。 */
+  readonly ms: number;
+  /** 走っている最中か(押した口を二重に叩かせない)。 */
+  readonly running: boolean;
+  /** 断りの字(空 = 無い)。⚠ **そのまま画面に出せる字**にする。 */
+  readonly error: string;
+}
+
+/**
  * 🔴 **直前の追記を、次の追記でどう持ち替えるか**(#395 段① / #668 C)。
  *
  * - 純粋な挿入でなかった回は `null` ── 前の材料を**残したままにしない**
@@ -223,6 +248,17 @@ export const VIEW_MODES = [
    * ── 幅は中央にしかない。左の列は「探し方」であって整理の作業台ではない。
    */
   'dual',
+  /**
+   * 🔴 **SQL を打つ面**(#681 段②。user 要望 2026-09-03「内蔵の sqlite を最大限
+   * 活用したインスタントな csv や sqliteDB のクエリアプリ」/ 裁定 2026-09-04
+   * 「アプリの基本は別窓」)。
+   *
+   * ⚠ **aside である**(`ASIDE_PANES`)── ノートを映す面ではなく**道具**なので、
+   *   左の一覧を押したら中央はノートへ戻る(2 ペインと同じ扱い)。
+   * ⚠ **読むだけ** ── 境は worker の `PRAGMA query_only` と進み具合の見張りで、
+   *   打つ前の字の門(`sql-guard.ts`)は「断る理由を読める字で言う」ためのものである。
+   */
+  'sql',
   'settings',
   'flags',
   'help',
@@ -258,6 +294,13 @@ const ASIDE_PANES: ReadonlySet<ViewMode> = new Set<ViewMode>([
    *    P11 で 1 個 → 3 個に増やしてしまった無言の dead click を作り直すことになる。
    */
   'dual',
+  /**
+   * 🔴 **SQL を打つ面もここ**(#681 段②)── 2 ペインと同じ理由:
+   * ① **開いているノートを映さない**ので、左の一覧でノートを押したのに中央が
+   *    動かないと、押しても何も起きない
+   * ② **編集中でも開ける** ── 読むだけなので下書きに触らない
+   */
+  'sql',
 ]);
 
 export function isAsidePane(view: ViewMode): boolean {
@@ -279,6 +322,7 @@ const VIEW_LABELS: Record<ViewMode, string> = {
   contacts: '連絡先',
   search: '探す',
   dual: '2 ペインで整理',
+  sql: 'SQL で調べる',
   settings: '設定',
   flags: 'フラグ',
   help: 'ヘルプ',
@@ -772,6 +816,8 @@ export interface AppState {
    *   区別しないと「探しています…」で永久に止まる(連絡先の `contactScanFailed` と同じ)
    */
   searchPage: SearchPageState;
+  /** SQL を打つ面(#681 段②)。 */
+  sqlPage: SqlPageState;
   /**
    * 🔴 **集計の面**(#184)。⚠ どれも `null` = **まだ読んでいない**(0 件ではない)。
    *
@@ -999,6 +1045,16 @@ export const initialState: AppState = {
   searchHitsQuery: '',
   searchHitsTruncated: false,
   searchPage: { query: '', rows: [], rowsQuery: '', truncated: false, failed: false },
+  sqlPage: {
+    sql: '',
+    ranSql: '',
+    columns: [],
+    rows: [],
+    truncated: false,
+    ms: 0,
+    running: false,
+    error: '',
+  },
   queryKey: null,
   smartHits: new Map<string, SmartHitState>(),
   queryKeys: null,
@@ -1074,6 +1130,17 @@ export type UserAction =
   | { type: 'SET_ENTRY_FILTER'; query: string }
   /** 探す面の欄に打った(#680)。⚠ 左の列の絞り込み(`SET_ENTRY_FILTER`)とは別の語。 */
   | { type: 'SET_SEARCH_PAGE_QUERY'; query: string }
+  | { type: 'SET_SQL_TEXT'; sql: string }
+  | { type: 'RUN_SQL' }
+  | {
+      type: 'SET_SQL_RESULT';
+      sql: string;
+      columns: readonly string[];
+      rows: readonly (readonly (string | number | null)[])[];
+      truncated: boolean;
+      ms: number;
+    }
+  | { type: 'SQL_RUN_FAILED'; sql: string; error: string }
   /** 本文の当たりが SQL から返った(#181)。⚠ `query` は**どの問い合わせの答えか**。 */
   | { type: 'SET_SEARCH_HITS'; query: string; lids: string[]; truncated: boolean }
   /** 一覧の並び順を変える(#183)。⚠ 選択は消さない(絞り込みと同じ規約)。 */
@@ -1824,6 +1891,12 @@ export type DomainEvent =
    */
   | { type: 'REQUEST_SEARCH_DETAIL'; query: string }
   /**
+   * 🔴 **打った SQL を走らせてほしい**(#681 段②)。
+   * ⚠ **`sql` は全角を直した後の字**(`checkReadOnlySql` が返した物)── 元の字を
+   *   渡すと、日本語入力のまま書いた人だけ構文エラーになる。
+   */
+  | { type: 'REQUEST_SQL_RUN'; sql: string }
+  /**
    * 集計を頼む(#184)。⚠ 検索と同じ理由で **SQL 側の仕事** ── 本文は常駐していない。
    * ⚠ **目録と表を 1 回の走査で頼む**(`key` が `null` なら目録だけ)── 別々に
    * 頼むと DB の全件走査が 2 回走る(レビュー B-3)。
@@ -2519,6 +2592,60 @@ function reduceCore(
         events: [{ type: 'REQUEST_SEARCH_DETAIL', query: action.query }],
       };
     }
+    /** 欄に打っただけ ── **走らせない**(重い問い合わせを打鍵ごとに投げない)。 */
+    case 'SET_SQL_TEXT':
+      // ⚠ 断りの字は消す(打ち直したのに前の断りが残ると、直したか分からない)
+      return { state: { ...state, sqlPage: { ...state.sqlPage, sql: action.sql, error: '' } }, events: [] };
+    /**
+     * 🔴 **走らせる**(#681 段②)。
+     * ⚠ 走らせる前に**字で見分ける** ── ここは「断る理由を読める字で言う」ための門で、
+     *   境ではない(境は worker 側の `PRAGMA query_only` と進み具合の見張り)。
+     * ⚠ **走っている間は受けない** ── 同じ問い合わせを二重に投げない。
+     */
+    case 'RUN_SQL': {
+      if (state.sqlPage.running) return { state, events: [] };
+      const checked = checkReadOnlySql(state.sqlPage.sql);
+      if (!checked.ok) {
+        return {
+          state: { ...state, sqlPage: { ...state.sqlPage, error: checked.why } },
+          events: [],
+        };
+      }
+      return {
+        state: {
+          ...state,
+          // 🔑 **直した字を欄へ戻す**(全角で打った人に、実際に走った字を見せる)
+          sqlPage: { ...state.sqlPage, sql: checked.sql, running: true, error: '' },
+        },
+        events: [{ type: 'REQUEST_SQL_RUN', sql: checked.sql }],
+      };
+    }
+    case 'SET_SQL_RESULT':
+      return {
+        state: {
+          ...state,
+          sqlPage: {
+            ...state.sqlPage,
+            ranSql: action.sql,
+            columns: action.columns,
+            rows: action.rows,
+            truncated: action.truncated,
+            ms: action.ms,
+            running: false,
+            error: '',
+          },
+        },
+        events: [],
+      };
+    case 'SQL_RUN_FAILED':
+      /**
+       * ⚠ **前の表は残す**(消すと「失敗して 0 件だった」に見える)── 印だけ立てる
+       *   (`SEARCH_DETAIL_FAILED` と同じ作法)。
+       */
+      return {
+        state: { ...state, sqlPage: { ...state.sqlPage, running: false, error: action.error } },
+        events: [],
+      };
     case 'SET_SEARCH_DETAIL':
       // ⚠ **遅れて返った古い結果を捨てる**(`SET_SEARCH_HITS` と同じ)
       if (action.query !== state.searchPage.query) return { state, events: [] };

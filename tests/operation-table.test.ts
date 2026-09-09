@@ -152,12 +152,14 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   ── 添付の行にだけ出る(登記は増えない)
       // ⚠ 2026-09-09(#826): 開く場所(`set-open-place`)で受け手 +1
       //   ── 設定の選択欄が受ける(`set-prose-align` と同じ形。登記は増えない)
-      total: 263,
-      receivers: 215,
+      // ⚠ 2026-09-09(#681 段②): SQL の面 ── 受け手 +2(`set-sql-text` / `run-sql`)。
+      //   登記は増えない(面そのものは `set-view` で開く。欄と押し所はその面の中にしか無い)
+      total: 265,
+      receivers: 217,
       registered: 84,
       both: 36,
       outsideActionsTable: 48,
-      unregistered: 179,
+      unregistered: 181,
     });
   });
 

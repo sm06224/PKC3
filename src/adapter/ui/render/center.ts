@@ -19,6 +19,7 @@ import { DualFilerRenderer } from './dual-filer';
 import { ScheduleRenderer } from './schedule';
 import { ContactsRenderer } from './contacts';
 import { SearchRenderer } from './search';
+import { SqlRenderer } from './sql';
 import type { MarkdownClient } from '@adapter/platform/render/markdown-client';
 
 type PaneView =
@@ -28,6 +29,7 @@ type PaneView =
   | 'contacts'
   | 'search'
   | 'dual'
+  | 'sql'
   | 'settings'
   | 'flags'
   | 'help';
@@ -39,7 +41,14 @@ type PaneView =
  * 中央をノートへ戻すか」、こちらは「中央に自分の器を持つか」。
  * 両方に足す必要があり、`tests/adapter/help-pane.test.ts` が食い違いを落とす。
  */
-const ASIDE: ReadonlySet<ViewMode> = new Set<ViewMode>(['settings', 'flags', 'help', 'dual']);
+const ASIDE: ReadonlySet<ViewMode> = new Set<ViewMode>([
+  'settings',
+  'flags',
+  'help',
+  'dual',
+  // ⚠ SQL の面(#681 段②)── ノートを映さない**道具**(2 ペインと同じ扱い)
+  'sql',
+]);
 
 /**
  * 🔴 **ノートを映すが、自分の器を持つ面**(集計 #184 / 予定表 #673 段②)。
@@ -90,6 +99,8 @@ export class CenterRouter {
   /** 🔴 **探す面**(#680)── 左の列に同じものは無い(この器だけ)。 */
   private readonly search: SearchRenderer;
   private readonly dual: DualFilerRenderer;
+  /** SQL を打つ面(#681 段2)。 */
+  private readonly sql: SqlRenderer;
   private lastPane: PaneView = 'detail';
   /**
    * 🔴 **面を開いて戻ったら、同じ場所に戻る**(user 目線レビュー U-4、2026-08-22)。
@@ -158,6 +169,7 @@ export class CenterRouter {
       contacts: pane('contacts'),
       search: pane('search'),
       dual: pane('dual'),
+      sql: pane('sql'),
       settings: pane('settings'),
       flags: pane('flags'),
       help: pane('help'),
@@ -186,6 +198,7 @@ export class CenterRouter {
     this.contacts = new ContactsRenderer(this.panes.contacts);
     this.search = new SearchRenderer(this.panes.search);
     this.dual = new DualFilerRenderer(this.panes.dual);
+    this.sql = new SqlRenderer(this.panes.sql);
     this.settings = new SettingsRenderer(this.panes.settings);
     this.flags = new FlagsRenderer(this.panes.flags);
     /**
@@ -261,6 +274,7 @@ export class CenterRouter {
     else if (view === 'contacts') this.contacts.render(state);
     else if (view === 'search') this.search.render(state);
     else if (view === 'dual') this.dual.render(state);
+    else if (view === 'sql') this.sql.render(state);
     else if (view === 'settings') this.settings.render(state);
     else if (view === 'flags') this.flags.render();
     // ⚠ ヘルプにも**コンテナ id を渡す**(Issue #100 段①)── マニュアルも

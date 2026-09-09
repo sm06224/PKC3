@@ -1120,6 +1120,25 @@ type Handlers = {
   ) => ResultMap[Op] | Promise<ResultMap[Op]>;
 };
 
+/**
+ * 進み具合の見張りを呼ぶ間隔(VDBE の歩数)。⚠ 細かすぎると見張り自体が重くなる。
+ * 🔑 1000 は sqlite の例と同じ桁(実測で直積を 3ms で止められた)。
+ */
+const PROGRESS_EVERY = 1000;
+
+/**
+ * `postMessage` に載る形へ畳む。
+ * ⚠ **BLOB の中身は運ばない** ── 画面に出しても読めず、heap に載せる理由が無い
+ *   (2026-07-27 の不可侵指示「bytes は heap に載せない」と同じ向き)。
+ */
+function cellForWire(v: unknown): string | number | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'number' || typeof v === 'string') return v;
+  if (typeof v === 'bigint') return Number(v);
+  if (v instanceof Uint8Array) return `<${String(v.byteLength)} バイト>`;
+  return String(v);
+}
+
 /** 埋め戻しを回す塊の大きさ(本文を一度に heap へ載せない)。 */
 const BACKFILL_CHUNK = 200;
 
@@ -1712,6 +1731,82 @@ const handlers: Handlers = {
     if (api === null) throw new Error('sqlite が初期化されていません');
     const exportDb = api.capi.sqlite3_js_db_export as unknown as (p: unknown) => Uint8Array;
     return { image: exportDb((need() as unknown as { pointer: unknown }).pointer) };
+  },
+  /**
+   * 🔴 **user が打った SQL を、読むだけで走らせる**(#681 段②)。
+   *
+   * ⚠ 安全は**字ではなく engine** に置く(protocol の注記) ── ここが境である。
+   * 🔑 通す門は 2 つで、**どちらも `finally` で必ず戻す**:
+   * ① `PRAGMA query_only` ── 戻し損ねると、この面を 1 度開いた user は
+   *    **以後ノートを保存できない**(同じ接続なので)
+   * ② 進み具合の見張り ── 戻し損ねると、**以後の全部の問い合わせ**が
+   *    身に覚えのない中断を受ける
+   *
+   * ⚠ **見張りを張れない環境では走らせない** ── 張れないまま走らせると、
+   *   終わらない 1 行で**保存ごと固まる**(このワーカーは DB の lease を握っている)。
+   *   ⚠ 「たぶん軽いから」で通さない ── 軽いかどうかは打つ前に分からない。
+   */
+  runReadOnlySql: (req) => {
+    const database = need();
+    const api = sqliteApi;
+    if (api === null) throw new Error('sqlite が初期化されていません');
+    const install = api.wasm['installFunction'] as unknown as
+      | ((sig: string, fn: () => number) => number)
+      | undefined;
+    const uninstall = api.wasm['uninstallFunction'] as unknown as
+      | ((p: number) => void)
+      | undefined;
+    const setProgress = api.capi['sqlite3_progress_handler'] as unknown as
+      | ((db: unknown, n: number, fn: number, arg: number) => void)
+      | undefined;
+    if (install === undefined || setProgress === undefined) {
+      throw new Error('この版では問い合わせを止められないので走らせません');
+    }
+    const pointer = (database as unknown as { pointer: unknown }).pointer;
+    const started = Date.now();
+    let steps = 0;
+    // 🔑 **0 以外を返した瞬間に `SQLITE_INTERRUPT`** になる(実測済み)
+    const fn = install('i(p)', () => {
+      steps += 1;
+      return steps > req.maxSteps ? 1 : 0;
+    });
+    /**
+     * ⚠ **2 つとも `try` の中で張る** ── 外で張ると、張った直後に例外が出た回に
+     *   `finally` が回らず、**張りっぱなしのまま**この worker が生き続ける
+     *   (= 以後ノートを保存できない / 身に覚えのない中断を受ける)。
+     */
+    try {
+      database.exec({ sql: 'PRAGMA query_only = 1' });
+      setProgress(pointer, PROGRESS_EVERY, fn, 0);
+      const columns: string[] = [];
+      const rows: Array<Array<string | number | null>> = [];
+      /**
+       * ⚠ **1 件多く取って切れたか判る**(`searchEntries` と同じ作法)。
+       * ⚠ 値は `postMessage` に載る形だけにする ── BLOB(`Uint8Array`)は
+       *   **中身を運ばない**(画面に出しても読めないし、heap に載せる理由が無い)。
+       */
+      database.exec({
+        sql: req.sql,
+        rowMode: 'array',
+        columnNames: columns,
+        callback: (row: unknown[]) => {
+          if (rows.length > req.maxRows) return;
+          rows.push(row.map((v) => cellForWire(v)));
+        },
+      } as unknown as Parameters<Database['exec']>[0]);
+      const truncated = rows.length > req.maxRows;
+      return {
+        columns,
+        rows: truncated ? rows.slice(0, req.maxRows) : rows,
+        truncated,
+        ms: Date.now() - started,
+      };
+    } finally {
+      // ⚠ **順番も効く** ── 見張りを外してから解除する(どちらも必ず通る)
+      setProgress(pointer, 0, 0, 0);
+      uninstall?.(fn);
+      database.exec({ sql: 'PRAGMA query_only = 0' });
+    }
   },
   openContainer: (req) => {
     need().exec({

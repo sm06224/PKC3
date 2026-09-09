@@ -6732,6 +6732,18 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (align) services.setProseAlign?.(align);
   },
   /**
+   * 🔴 **SQL の欄に打った**(#681 段②)。⚠ **走らせない** ── 重い問い合わせを
+   *   打鍵ごとに投げない(走らせるのは `run-sql` だけ)。
+   */
+  'set-sql-text': (dispatcher, target) => {
+    if (target instanceof HTMLTextAreaElement)
+      dispatcher.dispatch({ type: 'SET_SQL_TEXT', sql: target.value });
+  },
+  /** 🔴 **走らせる**(#681 段②)。⚠ 字の門も engine の門も、判定は呼ばれた先に在る。 */
+  'run-sql': (dispatcher) => {
+    dispatcher.dispatch({ type: 'RUN_SQL' });
+  },
+  /**
    * 🔴 **開く場所**(#826)。⚠ `set-prose-align` と同じ受け方(`<select>` でもボタンでも通す)。
    */
   'set-open-place': (_dispatcher, target, services) => {
@@ -7728,6 +7740,22 @@ export function bindActions(
       return;
     }
     /**
+     * 🔴 **SQL の欄**(#681 段②)。⚠ **打つそばから state へ写す**(`change` を待たない)
+     *   ── 面を切り替えて戻っても打ちかけが残るのは、これが state に在るからである。
+     * 🔑 受け手は `ACTIONS` の 1 つ(`set-sql-text`)── ここで dispatch を書き直さない
+     *   (§7 同じ判定を 2 か所に置かない)。
+     * ⚠ ここは**許可リスト**である(`onChange` の注記と同じ)── `data-pkc-action` を
+     *   付けただけでは `input` では呼ばれない。⚠ 外すと**無言の dead click** になる
+     *   (打っても字が state に届かず、押しても空の SQL を走らせる)。
+     */
+    if (
+      el instanceof HTMLTextAreaElement &&
+      el.getAttribute('data-pkc-field') === 'sql-input'
+    ) {
+      run(el.getAttribute('data-pkc-action'), el);
+      return;
+    }
+    /**
      * 🔴 **そのペインだけの絞り込み**(#273 残件)。
      * ⚠ **打つそばから効かせる**(`change` を待たない)── 器の絞り込みと
      *   同じ手触りにする。⚠ 器のほうと**別の口**なのは、絞る相手が違うからである。
@@ -7833,6 +7861,25 @@ export function bindActions(
     // ⚠ **追記欄より先に置く** ── 変換確定の Enter で送ってしまうと、
     // 日本語で書く人は「打ち終わる前に飛ぶ」を毎回踏む
     if (ke.isComposing) return;
+    /**
+     * 🔴 **SQL は `Ctrl`(mac は Command)+ `Enter` で走る**(#681 段②)。
+     *
+     * ⚠ **素の `Enter` は握らない** ── 打つのは**何行にもなる問い合わせ**なので、
+     *   改行を奪うと 2 行目が書けなくなる(表の升 `:5131` と同じ判断)。
+     * 🔑 走らせるのはボタンと**同じ 1 つの action**(`RUN_SQL`)──
+     *   ここで判定を増やさない(§7)。断る門は reducer に 1 か所だけ在る。
+     */
+    if (
+      ke.key === 'Enter' &&
+      (ke.ctrlKey || ke.metaKey) &&
+      !ke.altKey &&
+      !ke.shiftKey &&
+      field === 'sql-input'
+    ) {
+      ke.preventDefault();
+      dispatcher.dispatch({ type: 'RUN_SQL' });
+      return;
+    }
     /**
      * 🔴 **その場で計算する**(#764。user 裁定 2026-09-06「**PKC2と同じで！**」)。
      *

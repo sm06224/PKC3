@@ -26,6 +26,7 @@ import {
   contactsTile,
   SEARCH_TILE_LID,
   searchTile,
+  SQL_TILE_LID,
   manualTile,
   type LauncherTile,
 } from '../../src/features/launcher/tiles';
@@ -232,8 +233,18 @@ describe('組み込みタイルの合流 (#148)', () => {
       group: BUILTIN_GROUP,
       kind: 'selfhost',
     });
+    /**
+     * 🔴 **SQL の面も最後**(#681 段②、2026-09-09)── 支度の口と同じ理由で、
+     *   足しても他のタイルの位置が 1 つも動かない。
+     */
+    expect(b[7]).toEqual({
+      lid: SQL_TILE_LID,
+      title: 'SQL で調べる',
+      group: BUILTIN_GROUP,
+      kind: 'sql',
+    });
     // ⚠ entry 由来の並びには触らない(合流は**後置**だけ ── 2026-09-08 に前置から変えた)
-    expect(b, '組み込みが 7 枚ちょうどでない').toHaveLength(7);
+    expect(b, '組み込みが 8 枚ちょうどでない').toHaveLength(8);
   });
 
   it('🔴 Office が入っていなくても、最初から在るものは出る(位置も動かない)', () => {
@@ -246,6 +257,7 @@ describe('組み込みタイルの合流 (#148)', () => {
     expect(b[3]?.lid, 'Office の有無で探すの位置が動いた').toBe(SEARCH_TILE_LID);
     expect(b[4]?.lid, 'Office の有無でマニュアルの位置が動いた').toBe(MANUAL_TILE_LID);
     expect(b[5]?.lid, 'Office の有無で支度の口の位置が動いた').toBe(SELFHOST_TILE_LID);
+    expect(b[6]?.lid, 'Office の有無で SQL の面の位置が動いた').toBe(SQL_TILE_LID);
     expect(merged.slice(0, entryTiles.length)).toEqual(entryTiles);
     // ⚠ 「同じ長さ」だけでは足して 1 枚消す実装と区別がつかない ── kind で見る
     expect(merged.some((t) => t.kind === 'office')).toBe(false);
@@ -275,6 +287,7 @@ describe('組み込みタイルの合流 (#148)', () => {
       'office',
       'manual',
       'selfhost',
+      'sql',
     ]);
     // ⚠ Office を入れていない端末でも、面は空にならない
     expect(withBuiltinTiles([], { office: false }).map((t) => t.kind)).toEqual([
@@ -284,6 +297,7 @@ describe('組み込みタイルの合流 (#148)', () => {
       'search',
       'manual',
       'selfhost',
+      'sql',
     ]);
   });
 
