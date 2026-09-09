@@ -3295,6 +3295,24 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (lid) selectEntryOrExplain(dispatcher, lid, 'ノート');
   },
   /**
+   * 🔴 **録ったものを、その場で鳴らす / やめる**(#683 段①)。
+   *
+   * ⚠ **借りるのはここではない** ── bytes を借りるのは描画器(`captures.ts`)の
+   *   `syncBorrow` で、ここは「**どれを鳴らすか**」を state へ置くだけである。
+   *   🔑 そうしないと、同じ面が 2 つ生きている(左のタブ / 別窓)ときに
+   *   **2 本同時に鳴りうる**(CLAUDE.md §7:同じ問いに答える口を 2 つ作らない)。
+   * ⚠ **編集中でも押せる** ── 聞くのは読むだけの操作で、下書きに 1 バイトも触らない
+   *   (`BLOCKABLE_FIELDS` に入れない ── 入れると「動く物まで薄くなる」)。
+   */
+  'capture-play': (dispatcher, target) => {
+    const lid = target.getAttribute('data-pkc-entry');
+    if (lid) dispatcher.dispatch({ type: 'SET_CAPTURE_PLAYING', lid });
+  },
+  /** 🔴 **やめる**(#683 段①)── 器へ返すのは描画器の `syncBorrow` が引き取る。 */
+  'capture-stop': (dispatcher) => {
+    dispatcher.dispatch({ type: 'SET_CAPTURE_PLAYING', lid: null });
+  },
+  /**
    * ✏️ 編集に入る。#177: 多重タブでは**先に編集権を取ってから**入る。
    * ⚠ reducer のガード(ready / openBody 一致 / writeLock)は**ここに写さない**
    *   ── 取ってから dispatch し、入れなかったら返す(判定は reducer 1 か所)。

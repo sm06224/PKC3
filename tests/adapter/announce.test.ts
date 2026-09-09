@@ -1036,6 +1036,15 @@ describe('お知らせの文面は固定(#220-7)', () => {
      *   `git log --oneline origin/main -S"2026-09-08-dev-build-stamp" -- src/features/notice/notice-log.ts`
      *   → 90d02df。原本は CHANGELOG.md に在る。
      */
+    /**
+     * ⚠ **#683 段①(録ったものの面)で足した**(2026-09-09)。
+     * 🔑 枠(30 件)を超えたので、いちばん古い 1 件
+     *   (`2026-09-08-manual-otherwise-split`)を登記表から落とした ── 落とす相手は
+     *   **origin/main に在るもの**から選んだ:
+     *   `git log --oneline origin/main -S"2026-09-08-manual-otherwise-split" -- src/features/notice/notice-log.ts`
+     *   → c8bda7e。原本は CHANGELOG.md に在る。
+     */
+    ['2026-09-09-captures', '43c08c69'],
     ['2026-09-09-sql-polish2', 'bbde1ee2'],
     ['2026-09-09-saving-line', '7054a2a9'],
     /**
@@ -1115,7 +1124,6 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-09-08-split-and-office-size', '06dc6971', 'main'],
     ['2026-09-08-manual-jump', '5b106bb6'],
     ['2026-09-08-manual-terms', '2f8d9b5f'],
-    ['2026-09-08-manual-otherwise-split', 'e3f46a74'],
     // ⚠ 下の 3 件は 91b1d00(2026-09-08 05:03)で main へ入った = 配ってある
     // ⚠ 2026-09-09(#681 の着地前レビューの直し): 枠を超えたので
     //    `2026-09-08-note-button-blocked` を登記表から落とした(この表は登記表と同じ件数)

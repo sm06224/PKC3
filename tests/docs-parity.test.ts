@@ -169,7 +169,8 @@ const EXPECTED_LABELS = {
   // 探し方は**左の列**が持つ
   // ⚠ 2026-08-23 に「予定」を足した(#292 段③)── 等値なので足し忘れると落ちる
   // ⚠ 2026-08-27 に「連絡先」を足した(#278 段①)
-  'set-browse': ['一覧', 'フォルダ', 'アプリ', '予定', '連絡先'],
+  // ⚠ 録ったもの(#683 段①、2026-09-09)── 左の列の 6 枚目のタブ
+  'set-browse': ['一覧', 'フォルダ', 'アプリ', '予定', '連絡先', '音/動画'],
   'export-archive': ['バックアップ'],
   'import-file': ['取り込む'],
   'attach-file': ['添付'],
@@ -2090,6 +2091,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    /**
+     * ⚠ **2026-09-09(#683 段①)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-08-manual-otherwise-split" …` → c8bda7e
+     */
+    'マニュアルの「書く」にあった「そのほか」が、7 つの名前の付いた節に分かれました',
     /**
      * ⚠ **2026-09-09(#837 K1/K2/K3)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-08-dev-build-stamp" …` → 90d02df

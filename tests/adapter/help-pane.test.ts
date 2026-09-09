@@ -753,6 +753,8 @@ const ALL_VIEWS = [
   'schedule',
   // ⚠ 連絡先(#278 段③)── 予定表と同じ形
   'contacts',
+  // ⚠ 録ったもの(#683 段①)── 連絡先と同じ形(左の列の「録ったもの」と同じ描画器)
+  'captures',
   // ⚠ 探す面(#680)── ノートを映す面(行を押すと小窓)。左に同じ面は無い
   'search',
   'dual',
@@ -865,7 +867,12 @@ describe('🔴 中央の面の表が 2 つある(食い違いを落とす)', () 
        *   向こうから import しない(食い違えばここで落ちる)。
        */
       const expected =
-        view === 'query' || view === 'schedule' || view === 'contacts' || view === 'search'
+        view === 'query' ||
+        view === 'schedule' ||
+        view === 'contacts' ||
+        // ⚠ 録ったもの(#683 段①)── 連絡先と同じ「自分の器を持つが aside ではない」側
+        view === 'captures' ||
+        view === 'search'
           ? view
           : 'detail';
       expect(name, `${view} の落ち先が違う(app-state.ts の表に足し忘れ)`).toBe(expected);

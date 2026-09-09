@@ -33,18 +33,21 @@ describe('開いたときに集めるタブ(2026-09-09)', () => {
    * ⚠ **等値で pin する** ── タブを 1 つ足した日に鳴る。
    * 🔑 「集めるタブが 1 つ以上ある」では、**足し忘れを 1 つも捕まえられない**。
    */
-  it('🔴 集め直しを頼むタブは、この 3 つで全部', () => {
+  it('🔴 集め直しを頼むタブは、この 4 つで全部', () => {
     const asked = BROWSE_MODES.filter((m) => browseScanOf(m) !== null);
     expect(
       [...asked].sort(),
       '集めるタブが増減した ── 起動側(main.ts)にも同じ表が効いているか確かめる',
-    ).toEqual(['contacts', 'launcher', 'schedule']);
+      // ⚠ 録ったもの(#683 段①)を足した ── 添付の本文を読むので、
+      //    開いたときだけ集める(連絡先・アプリと同じ流儀)
+    ).toEqual(['captures', 'contacts', 'launcher', 'schedule']);
   });
 
   it('🔴 それぞれが、頼む相手を取り違えていない', () => {
     expect(browseScanOf('launcher')).toBe('REFRESH_LAUNCHER_TILES');
     expect(browseScanOf('schedule')).toBe('REFRESH_TASK_SCAN');
     expect(browseScanOf('contacts')).toBe('REFRESH_CONTACT_SCAN');
+    expect(browseScanOf('captures')).toBe('REFRESH_CAPTURE_SCAN');
     // ⚠ 対照群 ── 集めないタブは `null`(押すたびに無駄な走査を撃たない)
     expect(browseScanOf('list'), '集める必要の無いタブが走査を撃っている').toBeNull();
   });

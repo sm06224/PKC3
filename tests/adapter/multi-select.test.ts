@@ -287,8 +287,15 @@ describe('探し方の既定と記憶(#240 段⑤)', () => {
 
   it('🔴 boot が記憶した探し方で開く(配線の pin)', () => {
     const main = readFileSync('src/main.ts', 'utf-8');
-    expect(main, '既定の探し方が boot に届いていない').toContain(
-      'new BrowseRouter(regions.sidebar, regions.browseHost, appBrowseMode.get())',
+    /**
+     * ⚠ **空白を潰してから見る**(2026-09-09、#683 段①)── 引数が 1 つ増えて
+     *   複数行に折れた日に、`main.ts` を 1 バイトも壊していないのに落ちた。
+     * 🔑 見たいのは「**3 つ目に記憶した探し方が渡っている**」であって、
+     *   1 行に書いてあることではない ── 主張と観測点を揃える(CLAUDE.md §4)。
+     */
+    const flat = main.replace(/\s+/g, ' ');
+    expect(flat, '既定の探し方が boot に届いていない').toContain(
+      'new BrowseRouter( regions.sidebar, regions.browseHost, appBrowseMode.get(),',
     );
     expect(main, '切り替えを覚えていない').toContain('appBrowseMode.set(mode)');
     expect(main, '既定が main.ts に直書きへ戻っている').not.toContain("browseMode: BrowseMode = 'list'");

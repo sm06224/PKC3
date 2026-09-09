@@ -18,6 +18,7 @@ import { ScrollMemory } from './scroll-memory';
 import { DualFilerRenderer } from './dual-filer';
 import { ScheduleRenderer } from './schedule';
 import { ContactsRenderer } from './contacts';
+import { CapturesRenderer } from './captures';
 import { SearchRenderer } from './search';
 import { SqlRenderer } from './sql';
 import type { MarkdownClient } from '@adapter/platform/render/markdown-client';
@@ -27,6 +28,7 @@ type PaneView =
   | 'query'
   | 'schedule'
   | 'contacts'
+  | 'captures'
   | 'search'
   | 'dual'
   | 'sql'
@@ -61,6 +63,8 @@ const NOTE_PANES: ReadonlySet<ViewMode> = new Set<ViewMode>([
   'query',
   'schedule',
   'contacts',
+  // ⚠ 録ったもの(#683 段①)── 連絡先と同じ(名前を押した選択はこの面に留まる)
+  'captures',
   'search',
 ]);
 
@@ -96,6 +100,8 @@ export class CenterRouter {
   private readonly schedule: ScheduleRenderer;
   /** 🔴 **連絡先**(#278 段③)── 予定表と同じく、左の列と**同じ class**。 */
   private readonly contacts: ContactsRenderer;
+  /** 🔴 録ったもの(#683 段①)。⚠ 中身を借りるので、閉じるとき返す。 */
+  private readonly captures: CapturesRenderer;
   /** 🔴 **探す面**(#680)── 左の列に同じものは無い(この器だけ)。 */
   private readonly search: SearchRenderer;
   private readonly dual: DualFilerRenderer;
@@ -160,6 +166,12 @@ export class CenterRouter {
      * ⚠ 渡さなければ**出ない**(この面だけを組む test を壊さない)。
      */
     storageWhere?: () => string,
+    /**
+     * 🔴 **録ったものの中身を借り終えた合図**(#683 段①)。⚠ 渡さないと、
+     *   別窓で「聞く」を押しても**器が出ない**(借りは非同期なので、届いた
+     *   時点で誰かが `render` を呼び直す必要がある)。
+     */
+    onCaptureReady?: () => void,
   ) {
     const pane = (view: PaneView): HTMLElement => {
       const el = document.createElement('div');
@@ -173,6 +185,7 @@ export class CenterRouter {
       query: pane('query'),
       schedule: pane('schedule'),
       contacts: pane('contacts'),
+      captures: pane('captures'),
       search: pane('search'),
       dual: pane('dual'),
       sql: pane('sql'),
@@ -202,6 +215,7 @@ export class CenterRouter {
     // ⚠ `now` は左の列の予定と同じ口で渡す ── 「今日」を面ごとに読まない
     this.schedule = new ScheduleRenderer(this.panes.schedule, now);
     this.contacts = new ContactsRenderer(this.panes.contacts);
+    this.captures = new CapturesRenderer(this.panes.captures, assets, onCaptureReady);
     this.search = new SearchRenderer(this.panes.search);
     this.dual = new DualFilerRenderer(this.panes.dual);
     this.sql = new SqlRenderer(this.panes.sql);
@@ -278,6 +292,13 @@ export class CenterRouter {
        *   ── ここは「出た」という事実だけを渡す(§7:2 か所で数えない)。
        */
       if (this.lastPane === 'help') this.help.onHidden();
+      /**
+       * 🔴 **録ったものから出たら、借りた中身を返す**(#683 段①)。
+       * ⚠ **その場で返す**(ヘルプの遅延と違う)── こちらは録音の bytes なので、
+       *   1 本で数百 MB になりうる(不可侵指示 2026-07-27「ライフサイクル終端で
+       *   速やかに破棄」)。⚠ 返さないと、面を切り替えただけで常駐が積み上がる。
+       */
+      if (this.lastPane === 'captures') this.captures.dispose();
       this.lastPane = view;
     }
     // 🔑 帯は**本文以外のとき**だけ出す(本文は「閉じる」対象ではない)
@@ -286,6 +307,7 @@ export class CenterRouter {
     else if (view === 'query') this.query.render(state);
     else if (view === 'schedule') this.schedule.render(state);
     else if (view === 'contacts') this.contacts.render(state);
+    else if (view === 'captures') this.captures.render(state);
     else if (view === 'search') this.search.render(state);
     else if (view === 'dual') this.dual.render(state);
     else if (view === 'sql') this.sql.render(state);

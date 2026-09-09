@@ -127,6 +127,8 @@ describe('ランチャーのタイルを読む', () => {
       'selfhost',
       // ⚠ **SQL で調べる**(#681 段②)── 同じ理由で末尾(位置を動かさない)
       'sql',
+      // ⚠ **録ったもの**(#683 段①)── 同じ理由で末尾(位置を動かさない)
+      'captures',
     ]);
     off();
   });
@@ -225,11 +227,11 @@ describe('組み込み Office タイルの合流 (#148)', () => {
     expect(b[5]?.lid, 'マニュアルが Office の次に居ない').toBe(MANUAL_TILE_LID);
     // ⚠ **支度の口は最後**(#532 段 B)── 1 度だけ使う物なので、他の位置を動かさない
     expect(b[6]?.kind, '自分のパソコンで動かす が組み込みの最後に居ない').toBe('selfhost');
-    // 🔴 7 枚とも「組み込みアプリ」の群に居る(見出しが 1 本引かれる条件)
+    // 🔴 9 枚とも「組み込みアプリ」の群に居る(見出しが 1 本引かれる条件)
     expect(
       b.map((t) => t.group),
       '組み込みが既定群のまま(見出しが引かれず、自分のものと地続きに見える)',
-    ).toEqual(Array.from({ length: 8 }, () => BUILTIN_GROUP));
+    ).toEqual(Array.from({ length: 9 }, () => BUILTIN_GROUP));
   });
 
   it('🔴 Office が入っていなくても、最初から在るものは出る(位置も動かない)', async () => {
@@ -247,6 +249,8 @@ describe('組み込み Office タイルの合流 (#148)', () => {
     expect(b[4]?.lid, 'Office の有無でマニュアルの位置が動いた').toBe(MANUAL_TILE_LID);
     expect(b[5]?.kind, 'Office の有無で支度の口の位置が動いた').toBe('selfhost');
     expect(b[6]?.kind, 'Office の有無で SQL の面の位置が動いた').toBe('sql');
-    expect(b, '組み込みが 7 枚でない').toHaveLength(7);
+    // ⚠ **録ったもの**(#683 段①)も末尾 ── Office の有無で位置が動かない
+    expect(b[7]?.kind, 'Office の有無で録ったものの位置が動いた').toBe('captures');
+    expect(b, '組み込みが 8 枚でない').toHaveLength(8);
   });
 });

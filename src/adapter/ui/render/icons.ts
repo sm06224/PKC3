@@ -334,6 +334,8 @@ export const BROWSE_ICONS: Readonly<Record<string, IconName>> = {
   launcher: 'apps',
   schedule: 'calendar',
   contacts: 'person',
+  // 🔴 録ったもの(#683 段①)── 録る口(左下の「録音」)と同じ図案にする
+  captures: 'mic',
 };
 
 /** 図案 1 つを作る。⚠ 呼び側は**そのまま append する**(文字列にしない)。 */

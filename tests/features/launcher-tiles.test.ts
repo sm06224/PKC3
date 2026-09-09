@@ -27,6 +27,8 @@ import {
   SEARCH_TILE_LID,
   searchTile,
   SQL_TILE_LID,
+  CAPTURES_TILE_LID,
+  capturesTile,
   manualTile,
   type LauncherTile,
 } from '../../src/features/launcher/tiles';
@@ -243,8 +245,15 @@ describe('組み込みタイルの合流 (#148)', () => {
       group: BUILTIN_GROUP,
       kind: 'sql',
     });
+    // ⚠ 録ったもの(#683 段①)も末尾 ── SQL と同じ理由(位置を動かさない)
+    expect(b[8]).toEqual({
+      lid: CAPTURES_TILE_LID,
+      title: '音/動画',
+      group: BUILTIN_GROUP,
+      kind: 'captures',
+    });
     // ⚠ entry 由来の並びには触らない(合流は**後置**だけ ── 2026-09-08 に前置から変えた)
-    expect(b, '組み込みが 8 枚ちょうどでない').toHaveLength(8);
+    expect(b, '組み込みが 9 枚ちょうどでない').toHaveLength(9);
   });
 
   it('🔴 Office が入っていなくても、最初から在るものは出る(位置も動かない)', () => {
@@ -288,6 +297,8 @@ describe('組み込みタイルの合流 (#148)', () => {
       'manual',
       'selfhost',
       'sql',
+      // ⚠ 録ったもの(#683 段①)── 末尾(足しても他の位置が動かない)
+      'captures',
     ]);
     // ⚠ Office を入れていない端末でも、面は空にならない
     expect(withBuiltinTiles([], { office: false }).map((t) => t.kind)).toEqual([
@@ -298,6 +309,7 @@ describe('組み込みタイルの合流 (#148)', () => {
       'manual',
       'selfhost',
       'sql',
+      'captures',
     ]);
   });
 
@@ -311,6 +323,7 @@ describe('組み込みタイルの合流 (#148)', () => {
     expect(tileSelectsEntry(scheduleTile()), '予定表で選択が立つ').toBe(false);
     expect(tileSelectsEntry(contactsTile()), '連絡先で選択が立つ').toBe(false);
     expect(tileSelectsEntry(searchTile()), '探すで選択が立つ').toBe(false);
+    expect(tileSelectsEntry(capturesTile()), '録ったもので選択が立つ').toBe(false);
     expect(tileSelectsEntry(officeTile())).toBe(false);
     expect(tileSelectsEntry(entryTiles[0]!), 'entry 由来まで立たなくなった').toBe(true);
   });

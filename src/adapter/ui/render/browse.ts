@@ -27,6 +27,8 @@ import { FilerRenderer } from './filer';
 import { LauncherRenderer } from './launcher';
 import { ScheduleRenderer } from './schedule';
 import { ContactsRenderer } from './contacts';
+import { CapturesRenderer } from './captures';
+import type { AssetLender } from './detail';
 
 // 🔑 型と既定は `browse-mode.ts` が持つ(#240 段⑤)── 既定が 4 か所に散っていた
 export type { BrowseMode } from './browse-mode';
@@ -56,6 +58,12 @@ export const BROWSE_TABS: readonly { mode: BrowseMode; label: string }[] = [
    *   連絡先は**ノート**なので、閉じても失う物が無い(#292 段⑤ の見分け方)。
    */
   { mode: 'contacts', label: '連絡先' },
+  /**
+   * 🔴 **録ったもの**(#683 段①。user 要望 2026-09-03)。
+   * ⚠ ここに置くのは、上の表が「**左 = ノート全体**」と決めているからである ──
+   *   録ったものは**添付ノート**なので、閉じても失う物が無い(#292 段⑤ の見分け方)。
+   */
+  { mode: 'captures', label: '音/動画' },
 ] as const;
 
 /**
@@ -90,6 +98,8 @@ export class BrowseRouter {
   private readonly launcher: LauncherRenderer;
   private readonly schedule: ScheduleRenderer;
   private readonly contacts: ContactsRenderer;
+  /** 🔴 録ったもの(#683 段①)。⚠ **中身を借りる**ので、面を捨てるとき返す。 */
+  private readonly captures: CapturesRenderer;
   /**
    * 🔑 **面ごとに位置を覚える**(P8 段⑫。user 指示「サイドバーも同じ、
    * スクロールが発生するすべての画面が対象だよ」)。3 つの面が**同じ器**を
@@ -117,6 +127,13 @@ export class BrowseRouter {
     initial: BrowseMode = DEFAULT_BROWSE_MODE,
     /** ⚠ test 注入用(既定は実時刻)── 「今日」を面ごとに読まない。 */
     now?: () => Date,
+    /**
+     * 🔴 **添付の中身を借りる口**(#683 段①)。⚠ `null` なら「聞く」を出さない
+     *   ── 押しても何も起きないボタンを作らない。
+     */
+    assets: AssetLender | null = null,
+    /** 🔴 借り終えたことを外へ知らせる口(#683 段①)。⚠ 渡さないと器が出ない。 */
+    onCaptureReady: () => void = () => {},
   ) {
     this.last = initial;
     const pane = (mode: BrowseMode): HTMLElement => {
@@ -134,6 +151,7 @@ export class BrowseRouter {
       launcher: pane('launcher'),
       schedule: pane('schedule'),
       contacts: pane('contacts'),
+      captures: pane('captures'),
     };
     // ⚠ 一覧は既存の region を使い回すので、`pane()` の hidden 制御を通らない ──
     //    初期が一覧でないときは**ここで隠す**(隠し忘れると 2 面が重なって出る)
@@ -164,6 +182,7 @@ export class BrowseRouter {
     this.launcher = new LauncherRenderer(this.panes.launcher);
     this.schedule = new ScheduleRenderer(this.panes.schedule, now);
     this.contacts = new ContactsRenderer(this.panes.contacts);
+    this.captures = new CapturesRenderer(this.panes.captures, assets, onCaptureReady);
   }
 
   /**
@@ -192,6 +211,13 @@ export class BrowseRouter {
     if (mode !== this.last) {
       this.panes[this.last].hidden = true;
       this.panes[mode].hidden = false;
+      /**
+       * 🔴 **録ったものから出たら、借りた中身を返す**(#683 段①)。
+       * ⚠ 録音 1 本で数百 MB になりうるので、**その場で返す**
+       *   (不可侵指示 2026-07-27「ライフサイクル終端で速やかに破棄」)。
+       * ⚠ タブは行き来されるので、返さないと**切り替えた回数ぶん積み上がる**。
+       */
+      if (this.last === 'captures') this.captures.dispose();
       this.last = mode;
     }
     // 🔴 **札の帯は面に関係なく描く**(#478)── 面の中の renderer に持たせると、
@@ -240,6 +266,7 @@ export class BrowseRouter {
     else if (mode === 'filer') this.filer.render(state);
     else if (mode === 'schedule') this.schedule.render(state);
     else if (mode === 'contacts') this.contacts.render(state);
+    else if (mode === 'captures') this.captures.render(state);
     else this.launcher.render(state);
     /*
      * 🔴 **面を描き終えてから理由を添える**(#791 ②)── 「1 件も無い一覧の作る」は
