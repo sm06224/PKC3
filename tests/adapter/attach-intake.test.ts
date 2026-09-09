@@ -133,6 +133,64 @@ describe('添付を開いていたノートへ入れる(#666)', () => {
     expect(lines[0], '画像なのに ![…] になっていない').toMatch(/^!\[猫\.png\]\(asset:/);
   });
 
+  /**
+   * 🔴 **入れ先を名指しできる**(#826)。
+   *
+   * ⚠ 要るのは、**選ぶ間ずっと画面を止めていない**口(書庫の別の窓)ができたからである
+   *   ── 選んでいる間に user が別のノートへ移ると、`selectedLid` は**押したときと
+   *   違うノート**を指す。⚠ modal は周りを止めることで**入れ先の身元**も守っていた
+   *   (CLAUDE.md §10)。
+   * 🔑 見るのは「名指しした側へ入る」ことと、⚠ **対照群**(名指ししなければ今までどおり)。
+   */
+  it('🔴 入れ先を名指しすると、いま選んでいるノートが動いていてもそちらへ入る', async () => {
+    const h = withOpenNote();
+    appendsSeen.length = 0;
+    h.d.dispatch({
+      type: 'CREATE_ENTRY',
+      archetype: 'text',
+      lid: 'n2',
+      title: 'ほかのノート',
+      body: '# ほかのノート',
+      edit: false,
+    });
+    h.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+    expect(h.d.getState().selectedLid, '台が崩れた(移れていない)').toBe('n2');
+
+    await attachFiles(
+      h.d,
+      h.deps,
+      [new File(['a'], 'a.png', { type: 'image/png' })],
+      '',
+      undefined,
+      'n1',
+    );
+    await tick();
+    expect(appended(h.d), '名指しした n1 へ入っていない').toHaveLength(1);
+    expect(
+      appendsSeen.filter((a) => a.lid === 'n2'),
+      '移った先(n2)へ入った ── 名指しが効いていない',
+    ).toHaveLength(0);
+  });
+
+  /** ⚠ 対照群 ── 名指ししなければ、これまでどおり**いま選んでいるノート**へ入る。 */
+  it('名指ししなければ、いま選んでいるノートへ入る', async () => {
+    const h = withOpenNote();
+    appendsSeen.length = 0;
+    h.d.dispatch({
+      type: 'CREATE_ENTRY',
+      archetype: 'text',
+      lid: 'n2',
+      title: 'ほかのノート',
+      body: '# ほかのノート',
+      edit: false,
+    });
+    h.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+    await attachFiles(h.d, h.deps, [new File(['a'], 'a.png', { type: 'image/png' })]);
+    await tick();
+    expect(appended(h.d), '名指ししていないのに n1 へ入った').toHaveLength(0);
+    expect(appendsSeen.filter((a) => a.lid === 'n2')).toHaveLength(1);
+  });
+
   it('🔴 ③ 画像でなければ ![…] にしない(描けない物を描こうとしない)', async () => {
     const h = withOpenNote();
     appendsSeen.length = 0;

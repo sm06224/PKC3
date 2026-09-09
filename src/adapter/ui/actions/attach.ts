@@ -308,6 +308,17 @@ export async function attachFiles(
    *   入れ先もその本文になるので、ここが食い違うのは**入れられない種類**へ落ちた回だけ。
    */
   at?: DroppedAt,
+  /**
+   * 🔴 **入れ先を名指しする**(#826)。⚠ 省略 = これまでどおり**いま選んでいるノート**。
+   *
+   * ⚠ 名指しが要るのは、**選ぶ間ずっと画面を止めていない**口(書庫の別の窓)が
+   *   できたからである ── 選んでいる間に user が主の窓で別のノートへ移ると、
+   *   `selectedLid` は**押したときと違うノート**を指す。
+   * ⚠ `at`(落とした所)とは**別の話**である ── あちらは「どの本文のどこへ」、
+   *   こちらは「そもそもどのノートへ」。⚠ 両方渡した回は、これまでどおり
+   *   `at` の側が勝つ(落とした先の本文が正しい入れ先である)。
+   */
+  intoLid?: string | null,
 ): Promise<void> {
   if (files.length === 0) return;
 
@@ -328,7 +339,7 @@ export async function attachFiles(
    * 🔑 選択を返す / 本文へ入れる / 書けないなら預かるは `asset-into-note.ts`
    *   **1 か所** ── 録音・画面録画と同じ口である(CLAUDE.md §7)。
    */
-  const opened = noteToPutInto(dispatcher);
+  const opened = noteToPutInto(dispatcher, intoLid);
   /**
    * 🔴 **落とした本文のノートへ入れる**(#684 ㋑、user 裁定待ちの推薦を実装)。
    *
