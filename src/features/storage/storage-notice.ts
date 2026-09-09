@@ -56,12 +56,37 @@ export function storageStatusLine(fallbackReason: string | undefined): string {
 }
 
 /**
- * 起動を止めるときの字(再試行が尽きた回)。
- * ⚠ こちらは**開けない**ので、原因も添える ── 読むのは「起動に失敗しました」の
- *   画面で、user はそれを報告に写す。
+ * 🔴 **2026-09-09 に消した**:`storageFallbackError`(起動を止めるときの字)。
+ *
+ * ⚠ #811 の 3 番目で「**取れなくても開く**」に決めたので、**止める道そのものが
+ *   無くなった** ── 字だけ残すと「まだ止まることがある」と次に読む人が読む。
+ * 🔑 止めない理由は `open-with-retry.ts` に書いてある(iPhone で締め出しになりうる)。
  */
-export function storageFallbackError(fallbackReason: string | undefined): string {
-  return `${STORAGE_FALLBACK_LINE}(原因: ${fallbackReason ?? 'unknown'})`;
+
+/**
+ * 🔴 **「いまどこに保存しているか」をヘルプに出す字**(#811 の 2 番目)。
+ *
+ * ⚠ 直す前、保存先が読めるのは**帯のツールチップだけ**だった ── つまり
+ *   **指で触る端末では読めない**(user 報告は iPhone である)。
+ * ⚠ そして帯の 1 行は**落ちた回にしか出ない** ── 「ちゃんと保存できている」ことを
+ *   確かめる道が、画面に 1 つも無かった(不安なときに見る場所が要る)。
+ *
+ * 🔑 **3 通りある**。⚠ `memory` を一律に事故として言わない ── 持ち歩ける 1 枚の
+ *   HTML は**選んで** `memory` で動くので、そちらは事故ではない
+ *   (`storage-notice` の他の関数と同じ見分け方:分けるのは `fallbackReason`)。
+ *
+ * @param vfs 実際に開いた保存先
+ * @param fallbackReason 退避した回だけ立つ(立っていなければ、`memory` は**選んだ形**)
+ */
+export function storageWhereLine(
+  vfs: 'opfs-sahpool' | 'memory',
+  fallbackReason: string | undefined,
+): string {
+  const fell = fallbackReason !== undefined && fallbackReason !== '';
+  if (vfs !== 'memory') return '保存先: ブラウザの中(閉じても残ります)';
+  return fell
+    ? '保存先: この画面だけ ── ⚠ 閉じると消えます(ほかのタブを閉じて、読み込み直してください)'
+    : '保存先: この画面だけ(持ち歩ける 1 枚の HTML なので、書き出して保存してください)';
 }
 
 /**

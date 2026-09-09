@@ -154,6 +154,12 @@ export class CenterRouter {
      * ⚠ renderer は dispatch しない(層規約)── 投げるのは `main.ts` の仕事。
      */
     onBodyChange?: (body: string) => void,
+    /**
+     * 🔴 **いまどこに保存しているか**(#811 の 2 番目)── ヘルプの面が版の隣に出す。
+     * 🔑 **関数で受ける**(値の写しにしない)── タブは途中で本体へ昇格しうる。
+     * ⚠ 渡さなければ**出ない**(この面だけを組む test を壊さない)。
+     */
+    storageWhere?: () => string,
   ) {
     const pane = (view: PaneView): HTMLElement => {
       const el = document.createElement('div');
@@ -205,7 +211,15 @@ export class CenterRouter {
      * ⚠ **同じ `markdown` を渡す**(面ごとに作らない)── worker lease が
      * その数だけ立ち、常駐が増える(P8 段⑲ と同じ判断)。
      */
-    this.help = new HelpRenderer(this.panes.help, markdown ?? null);
+    this.help = new HelpRenderer(
+      this.panes.help,
+      markdown ?? null,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      storageWhere ?? null,
+    );
     /**
      * ⚠ **最初の鍵をここで立てる。** `park()` は鍵が `null` だと**黙って何もしない**
      *   ので、立てないと「初めて面を開いたとき」の位置が保存されない ──

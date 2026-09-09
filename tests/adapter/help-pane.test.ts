@@ -18,6 +18,7 @@ import { describe, expect, it, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import { HelpRenderer, MANUAL_TEXT, versionText, versionLine } from '../../src/adapter/ui/render/help';
+import { storageWhereLine } from '../../src/features/storage/storage-notice';
 import { BUILT_AT } from '../../src/runtime/release-meta';
 import { CenterRouter } from '../../src/adapter/ui/render/center';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
@@ -1276,5 +1277,54 @@ describe('ヘルプの面の目次(#719)', () => {
     rows[3]!.click();
     for (let i = 0; i < 8; i++) await Promise.resolve();
     expect(outer.scrollTop, '外側まで動いた(目次が画面の外へ出る)').toBe(0);
+  });
+});
+
+/**
+ * 🔴 **保存先が、版の隣に字で出る**(#811 の 2 番目、2026-09-09)。
+ *
+ * ⚠ 直す前、保存先が読めるのは**帯のツールチップだけ**だった ── 指で触る端末では
+ *   読めない(user 報告は iPhone)。しかも帯は**落ちた回にしか出ない**ので、
+ *   「ちゃんと保存できている」ことを確かめる道が画面に 1 つも無かった。
+ */
+describe('ヘルプに保存先を出す(#811 の 2 番目)', () => {
+  const where = (region: HTMLElement): string =>
+    region.querySelector('[data-pkc-field="help-storage"]')?.textContent ?? '';
+
+  it('🔴 版の隣に、いまの保存先が字で出る', () => {
+    const region = document.createElement('div');
+    new HelpRenderer(region, null, undefined, undefined, undefined, undefined, () =>
+      storageWhereLine('opfs-sahpool', undefined),
+    ).render();
+    expect(where(region), '保存先が画面に出ていない').toContain('ブラウザの中');
+    // ⚠ **版と同じ面に居る**(困ったときに見に来る場所を 2 つに割らない)
+    expect(region.querySelector('[data-pkc-field="help-version"]')).not.toBeNull();
+  });
+
+  /**
+   * 🔴 **昇格したら字が変わる**(値の写しではなく関数で受けている理由)。
+   * ⚠ このタブは途中で**本体へ昇格**しうる ── 写しで持つと、退避していた頃の字を
+   *   出し続ける(user は「まだ消える」と読んで、書くのをやめる)。
+   */
+  it('🔴 保存先が変わったら、開き直したときに字も変わる', () => {
+    const region = document.createElement('div');
+    let vfs: 'opfs-sahpool' | 'memory' = 'memory';
+    let why: string | undefined = 'InvalidStateError';
+    const help = new HelpRenderer(region, null, undefined, undefined, undefined, undefined, () =>
+      storageWhereLine(vfs, why),
+    );
+    help.render();
+    expect(where(region), '退避しているのに言っていない').toContain('消えます');
+    // ── 本体へ昇格した(`init` が差し替わる)
+    vfs = 'opfs-sahpool';
+    why = undefined;
+    help.render();
+    expect(where(region), '昇格したのに古い字のままである').toContain('残ります');
+  });
+
+  it('⚠ 渡さなければ出ない(この面だけを組む test を壊さない)', () => {
+    const region = document.createElement('div');
+    new HelpRenderer(region).render();
+    expect(where(region), '渡していないのに空の行が出ている').toBe('');
   });
 });
