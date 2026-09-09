@@ -146,12 +146,12 @@ describe('操作の全数台帳(#582 段①)', () => {
       //    記法と同じ「本文の欄へ当てる命令」の継ぎ目で受けるので、受け手は増えない)
       // ⚠ 2026-09-08(#722): 本文の置き場所(`set-prose-align`)で受け手 +1
       //   ── 設定の選択欄が受ける。鍵は割り当てない(設定で選ぶ物なので登記も増えない)
-      total: 257,
-      receivers: 209,
-      registered: 83,
-      both: 35,
+      total: 260,
+      receivers: 212,
+      registered: 84,
+      both: 36,
       outsideActionsTable: 48,
-      unregistered: 174,
+      unregistered: 176,
     });
   });
 
@@ -178,7 +178,7 @@ describe('操作の全数台帳(#582 段①)', () => {
     // ⚠ 2026-09-05(#633 段②): 鍵が 56 → 59(スタックの 3 手)
     // ⚠ 2026-09-05(#633 段③): 行のメニューが 15 → 16(`stack-load`)
     // ⚠ 2026-09-08(#766 D-2): 鍵が 59 → 60(その場で計算する)
-    expect(s().perBook).toEqual({ key: 60, entry: 16, body: 3, collection: 2, settings: 5 });
+    expect(s().perBook).toEqual({ key: 61, entry: 16, body: 3, collection: 2, settings: 5 });
   });
 
   it('🔴 押し所へ辿れない登記を、身元で pin する', () => {

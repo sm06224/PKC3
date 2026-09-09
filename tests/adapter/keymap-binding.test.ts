@@ -960,6 +960,12 @@ describe('近道の受け手と、打鍵中の免除(等値で pin する)', () 
       'stack-push',
       'stack-open',
       'stack-clear',
+      /**
+       * ⚠ 2026-09-09 に足した(#678)── コピーした物の一覧は**常設の押しボタンを
+       *   持たない**(⋯ の中とパレットからだけ)ので、`stack-*` と同じく直に投げる。
+       * 🔑 ⋯ の項目からも同じ実体を呼ぶ(`openCopyHistory` 1 つ)── 口を 2 つ作らない。
+       */
+      'open-copy-history',
     ];
     for (const id of special) {
       expect(src, `${id} の特例が消えた`).toContain(`cmd === '${id}'`);
