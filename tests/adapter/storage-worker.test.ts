@@ -21,6 +21,7 @@ import { contentHash64Hex } from '../../src/adapter/platform/storage/content-has
 import { parseFrontmatter } from '../../src/features/markdown/frontmatter';
 import { FRONTMATTER_SCAN_CHARS } from '../../src/features/query/group-by';
 import { createSmartScan, EMPTY_SMART } from '../../src/features/smart/smart-spec';
+import { CSV_TABLE_CELLS_MAX } from '../../src/features/query/csv-tables';
 
 type Op = StorageRequest['op'];
 
@@ -2783,5 +2784,206 @@ describe('読むだけの SQL(#681 段②)', () => {
   it('BLOB は中身ではなく大きさを返す(heap に載せない)', async () => {
     const r = await run("SELECT zeroblob(1234) AS b");
     expect(r.rows[0]?.[0]).toBe('<1234 バイト>');
+  });
+});
+
+/**
+ * 🔴 **本文の csv を SQL から引ける**(#681 段③)。
+ *
+ * user の言葉(2026-09-03):
+ * > **内蔵の sqlite を最大限活用したインスタントな csv や sqliteDB のクエリアプリ**
+ *
+ * 段②で打つ口は配ったが、⚠ **csv は引けなかった** ── 引けたのは内部の表だけで、
+ * user が本文に書いた表は**字のまま**だった。
+ *
+ * 守る主張:
+ * 1. 名前を付けた囲みだけが表になる(3 つの逆引用符のあとに csv name=売上)
+ * 2. 🔴 同じ名前は**積む**(後の囲みで上書きしない)/ どこから来たかが `_note` で分かる
+ * 3. 目録(`csv_tables`)は**必ず**出る ── 名前を知る道が画面のどこかに要る
+ * 4. 🔴 走らせた後も**ノートを保存できる**(temp の表を作っても `query_only` が戻る)
+ * 5. 🔴 **古い中身が残らない**(本文を直したら、次の回は直った側が出る)
+ */
+describe('本文の csv を SQL から引く(#681 段③)', () => {
+  const run = (sql: string) =>
+    request({ op: 'runReadOnlySql', sql, maxRows: 100, maxSteps: 1_000_000, maxMs: 60_000 });
+
+  const fence = (info: string, lines: readonly string[]): string =>
+    ['```' + info, ...lines, '```', ''].join('\n');
+
+  it('🔴 名前を付けた囲みが、その名前の表になる', async () => {
+    await write('csv-a', fence('csv name=売上', ['品名,数', 'りんご,3', 'みかん,5']));
+    const r = await run('SELECT 品名, 数 FROM 売上 ORDER BY 品名');
+    expect(r.columns).toEqual(['品名', '数']);
+    expect(r.rows).toEqual([
+      ['みかん', '5'],
+      ['りんご', '3'],
+    ]);
+  });
+
+  /**
+   * ⚠ **空振り防止** ── 名前が無い囲みは表にならない(だから上の 1 件は名前で来ている)。
+   *
+   * 🔴 **同じノートに名前つきの囲みも置く**(2026-09-09、変異試験 C10 が SURVIVED で判明)。
+   * ⚠ 初稿は名前の無い囲みだけのノートだったので、**そのノートは走査にすら入らなかった**
+   *   (粗い絞りが `body LIKE '%name='` なので、`name=` を 1 つも持たない本文は
+   *   読まれない)── つまり「名前が無いから表にならない」ではなく
+   *   「**そもそも見ていない**」で緑だった(CLAUDE.md §2「通っていない」)。
+   * 🔑 名前つきを 1 つ混ぜると、この本文は**読まれたうえで**名前の無い囲みが落ちる。
+   */
+  it('⚠ 名前の無い囲みは表にならない(同じ本文が読まれていても)', async () => {
+    await write(
+      'csv-noname',
+      fence('csv', ['品名,数', 'ぶどう,1']) + fence('csv name=有名', ['x', '1']),
+    );
+    // ⚠ 空振り防止 ── この本文は実際に読まれている(名前つきの方は引ける)
+    expect((await run('SELECT x FROM 有名')).rows).toEqual([['1']]);
+    await expect(run('SELECT * FROM csv')).rejects.toThrow(/no such table/i);
+  });
+
+  it('🔴 同じ名前は積む ── どこから来たかは _note で分かる', async () => {
+    await write('csv-b', fence('csv name=売上', ['品名,数', 'ばなな,7']));
+    const r = await run('SELECT _note, 品名 FROM 売上 ORDER BY 品名');
+    expect(r.rows.map((x) => x[1])).toEqual(['ばなな', 'みかん', 'りんご']);
+    // ⚠ 2 つのノートから来ている(片方で上書きしていない)
+    expect(new Set(r.rows.map((x) => x[0])).size).toBe(2);
+  });
+
+  it('⚠ 列が食い違う囲みは和集合になり、無い所は NULL', async () => {
+    await write('csv-c', fence('csv name=売上', ['品名,産地', 'すいか,熊本']));
+    const r = await run("SELECT 品名, 数, 産地 FROM 売上 WHERE 品名 = 'すいか'");
+    expect(r.rows).toEqual([['すいか', null, '熊本']]);
+  });
+
+  it('🔴 目録(csv_tables)に名前が並ぶ ── 打つ名前を知る道', async () => {
+    const r = await run("SELECT DISTINCT name FROM csv_tables WHERE why = '' ORDER BY name");
+    expect(r.rows.map((x) => x[0])).toContain('売上');
+  });
+
+  /**
+   * 🔴 **受けられない名前は、理由つきで目録に出る**(#681 段③)。
+   *
+   * ⚠ 黙って落とすと、user に見えるのは「表が出てこない」だけで、
+   *   **なぜ出ないのかが画面のどこにも無い** ── いちばん気づけない外し方である。
+   * 🔑 だから同じ目録に `why` 付きで並べる(探す先を 2 つにしない)。
+   */
+  it('🔴 受けられない名前は、理由つきで目録に出る', async () => {
+    await write('csv-bad', fence('csv name=売上(2026)', ['a', '1']));
+    const r = await run("SELECT name, why FROM csv_tables WHERE why <> ''");
+    const row = r.rows.find((x) => String(x[0]).startsWith('売上'));
+    expect(row, '受けなかった名前が目録に出ていない').toBeDefined();
+    expect(String(row?.[1]), '理由を言っていない').toContain('記号は使えません');
+    // ⚠ 対照群 ── 受けなかったのだから、その名前では引けない
+    await expect(run('SELECT * FROM 売上_2026')).rejects.toThrow(/no such table/i);
+  });
+
+  it('🔴 全角の英数字の名前は、理由つきで断る(打つと半角に直るので引けない)', async () => {
+    await write('csv-zen', fence('csv name=ｓａｌｅｓ', ['a', '1']));
+    const r = await run("SELECT name, why FROM csv_tables WHERE why <> ''");
+    const row = r.rows.find((x) => String(x[0]) === 'ｓａｌｅｓ');
+    expect(row, '全角の名前が目録に出ていない').toBeDefined();
+    expect(String(row?.[1])).toContain('全角');
+  });
+
+  it('⚠ noheader の囲みは col1 / col2 …(見出しを行として食わない)', async () => {
+    await write('csv-nh', fence('csv noheader name=素', ['あ,い', 'う,え']));
+    const r = await run('SELECT col1, col2 FROM 素 ORDER BY col1');
+    expect(r.rows).toEqual([
+      ['あ', 'い'],
+      ['う', 'え'],
+    ]);
+  });
+
+  it('⚠ tsv / psv も同じ規則で引ける', async () => {
+    await write('tsv-1', fence('tsv name=タブ', ['a\tb', '1\t2']));
+    await write('psv-1', fence('psv name=棒', ['a|b', '3|4']));
+    expect((await run('SELECT b FROM タブ')).rows).toEqual([['2']]);
+    expect((await run('SELECT b FROM 棒')).rows).toEqual([['4']]);
+  });
+
+  it('⚠ 引用(>)の中の囲みも引ける(読み手と同じ所まで降りる)', async () => {
+    await write('csv-q', ['> ```csv name=引用表', '> a,b', '> 9,8', '> ```', ''].join('\n'));
+    expect((await run('SELECT a, b FROM 引用表')).rows).toEqual([['9', '8']]);
+  });
+
+  /**
+   * 🔴 **走らせた後もノートを保存できる** ── temp の表を作るのは書き込みなので、
+   *   `query_only` の戻し方を間違えると**この面を 1 度開いた user は以後保存できない**。
+   */
+  it('🔴 csv を引いた後も、ノートは保存できる', async () => {
+    await run('SELECT * FROM 売上');
+    await write('csv-after', doc('csv の後に書く'));
+    expect(await request({ op: 'getBody', cid: 'c1', lid: 'csv-after' })).toContain(
+      'csv の後に書く',
+    );
+  });
+
+  /**
+   * 🔴 **走り終わったら、組み立てた表を手放す**(#681 段③)。
+   *
+   * ⚠ temp の表は**接続に残る**ので、落とさないと次の問い合わせまで居座る
+   *   (上限いっぱいなら 20 万升)。この worker は DB の lease を握っていて
+   *   常駐するので、そのまま常駐メモリになる(不可侵指示 2026-08-03
+   *   「継続使用の常駐メモリ」)。
+   * 🔑 観測点は **`sqlite_temp_master`**(temp に何が在るか)── 「引けるか」では
+   *   見えない(引く字を打てば作り直されるので、残っていても同じ答えが出る)。
+   */
+  it('🔴 走り終わったら、組み立てた表は temp に残らない', async () => {
+    await run('SELECT * FROM 売上');
+    /**
+     * ⚠ **見ている回にも目録は作られる** ── `csv_tables` は毎回作るので、
+     *   ここに 1 件出るのが**正しい**(0 件を期待すると、この test は永久に落ちる)。
+     * 🔑 見たいのは「**前の回の `売上` が残っていないか**」である。
+     */
+    const left = await run(
+      "SELECT name FROM sqlite_temp_master WHERE type = 'table' ORDER BY name",
+    );
+    expect(left.rows.map((r) => r[0]), '前の回に組み立てた表が残っている').toEqual([
+      'csv_tables',
+    ]);
+  });
+
+  /**
+   * 🔴 **古い中身が残らない**(いちばん気づけない外し方)。
+   * ⚠ temp の表は接続に残るので、作る前に落としていないと**前の回の答え**が出る。
+   */
+  it('🔴 本文を直したら、次の回は直った側が出る', async () => {
+    await write('csv-live', fence('csv name=生', ['v', '古']));
+    expect((await run('SELECT v FROM 生')).rows).toEqual([['古']]);
+    await write('csv-live', fence('csv name=生', ['v', '新']));
+    expect((await run('SELECT v FROM 生')).rows).toEqual([['新']]);
+  });
+
+  it('⚠ 値はすべて字(数へ直さない ── 007 が 7 にならない)', async () => {
+    await write('csv-zero', fence('csv name=番', ['no', '007']));
+    expect((await run('SELECT no FROM 番')).rows).toEqual([['007']]);
+    // ⚠ 数えたい人は自分で直せる(語彙の中に在る)
+    expect((await run('SELECT CAST(no AS INTEGER) AS n FROM 番')).rows).toEqual([[7]]);
+  });
+
+  /**
+   * 🔴 **大きすぎる表は断る**(#681 段③)。
+   *
+   * ⚠ 組み立ては `PRAGMA query_only` を掛ける**前**に走るので、進み具合の見張りは
+   *   まだ張っていない ── **ここで断らないと止められない**(worker は DB の lease を
+   *   握っているので、固まると保存ごと止まる)。
+   * ⚠ **本物の大きさで測る**(2026-09-09、変異試験 W4 が SURVIVED で判明)──
+   *   判断は `tests/features/csv-tables.test.ts` が決定的に見ているが、
+   *   **worker がそれを呼んでいるか**は、実際に超える本文でしか殺せない。
+   */
+  it('🔴 升が多すぎる表は、組み立てずに断る', async () => {
+    const rows = Math.ceil(CSV_TABLE_CELLS_MAX / 2) + 1; // 2 列なので、これで上限を超える
+    const big = ['a,b', ...Array.from({ length: rows }, (_, i) => `${String(i)},x`)];
+    await write('csv-big', fence('csv name=巨大', big));
+    await expect(run('SELECT * FROM 巨大 LIMIT 1')).rejects.toThrow(/大きすぎます/);
+    // ⚠ **対照群** ── 断った後もノートは保存できる(`query_only` が戻っている)
+    await write('csv-big-after', doc('断った後に書く'));
+    expect(await request({ op: 'getBody', cid: 'c1', lid: 'csv-big-after' })).toContain(
+      '断った後に書く',
+    );
+  });
+
+  it('⚠ 名前は語の丸ごと一致でだけ拾う(売上高 で 売上 を組み立てない)', async () => {
+    // 「売上」は在るが、打った字には語として出てこない ⇒ 表は作られない
+    await expect(run('SELECT * FROM 売上高')).rejects.toThrow(/no such table/i);
   });
 });

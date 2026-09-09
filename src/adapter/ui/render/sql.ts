@@ -88,7 +88,10 @@ export class SqlRenderer {
       'assets(添付)です。読むだけで、書き換えはできません。' +
       '文字列は単引用符で囲みます(二重引用符は列の名前です)。' +
       'REGEXP は使えません(LIKE と GLOB は使えます)。' +
-      '日本語入力のままでも打てます(ただし LIKE の ％ と ＿ は半角で打ってください)。';
+      '日本語入力のままでも打てます(ただし LIKE の ％ と ＿ は半角で打ってください)。' +
+      '本文の csv の囲みに名前を付けると(3 つの逆引用符のあとに csv name=売上)、' +
+      'その名前で引けます。どんな名前が在るかは csv_tables で分かります' +
+      '(使えない名前は、そこの why の列に理由が出ます)。';
     const note = document.createElement('p');
     note.setAttribute('data-pkc-field', 'sql-note');
     const body = document.createElement('div');

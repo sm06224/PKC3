@@ -162,6 +162,18 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-09-09-sql-csv',
+    title: '本文に書いた csv の表を、SQL で調べられるようになりました',
+    items: [
+      'csv の囲みの 1 行目に name= と書いて名前を付けると、その名前の表として引けます(例: csv name=売上 と書くと SELECT * FROM 売上 で引けます)。',
+      'tsv と psv も同じです。noheader を付けた囲みの列は col1 col2 … になります。',
+      '同じ名前を複数のノートに書くと、行が積まれます。月ごとの表を同じ名前で書けば、そのまま合算できます。',
+      'どの行がどのノートから来たかは _note と _lid の列で分かります。',
+      'どんな名前が在るかは SELECT * FROM csv_tables で一覧できます(使えない名前は、そこの why の列に理由が出ます)。',
+      '⚠ 名前を付けていない囲みは、これまでどおりただの表です(見え方は変わりません)。',
+    ],
+  },
+  {
     id: '2026-09-09-storage-where',
     title: '保存先が「いまどこか」を、ヘルプで確かめられるようになりました',
     items: [
