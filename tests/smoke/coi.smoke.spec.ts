@@ -19,6 +19,7 @@
  * していた。🔑 **誰が読み直したかを問わず「分離した状態」を待つ**形にする。
  */
 import { expect, test, type Page } from '@playwright/test';
+import { bootedHere } from './helpers';
 
 /** ⚠ 既定の baseURL(preview)ではなく **plain** を見る。 */
 function plainBase(testInfo: { config: { metadata?: Record<string, unknown> } }): string {
@@ -33,22 +34,16 @@ function plainBase(testInfo: { config: { metadata?: Record<string, unknown> } })
  * 初稿は `[data-pkc-boot="ready"], [data-pkc-boot="error"]` を待っていた。おかげで
  * **分離した途端に storage worker が読めなくなり、起動が全部失敗していた**のに、
  * この spec は 3 件とも緑だった ── 待っていたのは「起動が終わったこと」であって
- * 「起動したこと」ではなかった。⚠ user には「起動に失敗しました」しか見えない
- * 状態を、**分離の検査が合格印を押して**送り出したことになる。
+ * 「起動したこと」ではなかった。
  *
- * 🔑 `error` は**待たずに落とす** ── 出たらその場で理由ごと落ちるほうが速い。
+ * 🔑 **実体は `helpers.ts` の `bootedHere` へ寄せた**(2026-09-09)── 同じ関数が
+ *   2 つの spec に別々に在り、**どちらも `waitForSelector` の後に `evaluate` する**
+ *   2 段構えだった。⚠ その間にアプリ自身が読み直すと context が消える
+ *   (`sub-path` のフル smoke が実際にそれで落ちた)── ここは
+ *   **まさに読み直しが起きる面**なので、同じ穴を持っていた。
  */
 async function booted(page: Page): Promise<void> {
-  await page.waitForSelector('[data-pkc-boot="ready"], [data-pkc-boot="error"]', {
-    timeout: 40_000,
-  });
-  const state = await page.evaluate(
-    () => document.querySelector('[data-pkc-boot]')?.getAttribute('data-pkc-boot') ?? null,
-  );
-  if (state !== 'ready') {
-    const why = await page.evaluate(() => document.body.innerText.slice(0, 200));
-    throw new Error(`起動に失敗した(data-pkc-boot=${String(state)}): ${why}`);
-  }
+  await bootedHere(page);
 }
 
 /**

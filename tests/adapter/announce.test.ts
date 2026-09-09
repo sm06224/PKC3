@@ -991,6 +991,14 @@ describe('お知らせの文面は固定(#220-7)', () => {
      * 🔑 まだ配っていない(`git log --oneline origin/main -S"2026-09-09-selfhost-bundle"
      *   -- src/features/notice/notice-log.ts` が空)ので、main に入る前なら文面を直してよい。
      */
+    /**
+     * 🔴 **#532 段 C で足した**(2026-09-09)。⚠ **既配布の `-selfhost-bundle` へは足せない**
+     *   ── `git log --oneline origin/main -S"2026-09-09-selfhost-bundle"` が `096944d` を返す
+     *   (= もう `/dev/` に配ってある)ので、中身を変えても帯には 1 行も出ない。新しい id にした。
+     * ⚠ 直前の版のマニュアルと `はじめに.txt` は「PKC3 の中からもう一度落とせます」と
+     *   書いており、**それが誤りだった**(自分の origin から集めるので同じ物が落ちる)。
+     */
+    ['2026-09-09-selfhost-update', '833fd456'],
     ['2026-09-09-selfhost-bundle', '0a1314ef'],
     ['2026-09-09-manual-toc-fold', '879eb2ed'],
     ['2026-09-09-storage-fallback-line', 'b3cdbb87'],

@@ -10,7 +10,9 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  README_TXT,
+  readmeText,
+  builtAtLabel,
+  type SelfhostSource,
   SELFHOST_ORIGIN,
   SELFHOST_PORT,
   SELFHOST_ROOT,
@@ -26,6 +28,17 @@ import {
   siteEntryName,
 } from '../../src/features/selfhost/bundle';
 import { parsePrecacheList, precacheEntryPath } from '../../src/features/selfhost/precache-list';
+// 🔑 案内に書く字は、**実装の綴りから引く**(2 か所に別々に書かない)
+import { UPDATE_TEXT } from '../../src/adapter/ui/render/update-card';
+
+/** 一式に焼く出どころ(#532 段 C)。 */
+const SRC: SelfhostSource = {
+  version: '3.2.0',
+  kind: 'dev',
+  from: 'https://example.test/PKC3/dev/',
+  builtAt: Date.UTC(2026, 8, 9, 3, 20),
+};
+const README_TXT = readmeText(SRC);
 
 /** 起動する側 3 本(この 3 本が住所を決める)。 */
 const STARTERS: readonly (readonly [string, string])[] = [
@@ -116,7 +129,7 @@ describe('zip に入る物', () => {
     expect(siteEntryName('./assets/index-AAAAAAAA.js')).toBe(
       `${SELFHOST_ROOT}/${SELFHOST_SITE}/assets/index-AAAAAAAA.js`,
     );
-    for (const name of selfhostExtras().keys()) {
+    for (const name of selfhostExtras(SRC).keys()) {
       expect(name.startsWith(`${SELFHOST_ROOT}/`), `${name} が根に出ている`).toBe(true);
     }
   });
@@ -154,9 +167,64 @@ describe('zip に入る物', () => {
   it('名前に日付が入る(古い一式と混ざっても見分けられる)', () => {
     expect(selfhostZipName('2026-09-09')).toBe('pkc3-selfhost-2026-09-09.zip');
   });
+});
+
+/**
+ * 🔴 **段 C ── 新しくする道が、正しく書いてあるか**(#532 段 C)。
+ *
+ * ⚠ 段 B では「**PKC3 の中の「自分のパソコンで動かす」からもう一度落とせます**」と
+ *   書いて配った ── **嘘だった**。一式は**自分の origin から集める**ので、
+ *   自分のパソコンで動かしている PKC で押すと、**同じ古い一式が落ちてくる**。
+ * ⚠ しかも落ちてくる zip は正常で、展開すれば起動もする ──
+ *   **user は「更新した」と思ったまま古い版を使い続ける**。
+ * 🔑 だから **元の住所**を焼き、**そこへ戻れ**と書く。ここはその門である。
+ */
+describe('🔴 新しくする道(段 C)', () => {
+  it('🔴 元の住所が焼かれている(どこへ戻れば新しい物が取れるか)', () => {
+    expect(README_TXT).toContain(SRC.from);
+  });
+
+  it('版と、作った日時が焼かれている(古いかどうかの手掛かり)', () => {
+    expect(README_TXT).toContain('3.2.0');
+    expect(README_TXT).toContain('dev');
+    expect(README_TXT).toContain('2026-09-09');
+  });
+
+  it('⚠ 焼いた時刻が無いときは、嘘の日付を出さない', () => {
+    expect(builtAtLabel(0)).toBe('(分かりません)');
+    expect(readmeText({ ...SRC, builtAt: 0 })).toContain('(分かりません)');
+  });
+
+  it('🔴 「ここで押すと同じ物が落ちる」と書いてある(いちばん気づけない誤解を先に潰す)', () => {
+    expect(README_TXT).toContain('まったく同じ一式が落ちてきます');
+    // ⚠ 段 B の嘘が戻っていないこと(**等値で名指しする**)
+    expect(README_TXT, '段 B の誤った案内が戻っている').not.toContain(
+      '新しい一式は、PKC3 の中の「自分のパソコンで動かす」からもう一度落とせます',
+    );
+  });
+
+  it('入れ替え方と、ノートが残ることが書いてある', () => {
+    expect(README_TXT).toContain('site フォルダを新しいものに入れ替えて');
+    expect(README_TXT).toContain('ノートはそのまま残ります');
+  });
+
+  /**
+   * 🔴 **画面に出る字を、実装から引いて突き合わせる**(CLAUDE.md「文言は押した場所と
+   * 対で pin する」)。⚠ 1 稿目は「新しい版が**配られました**」と書いていたが、
+   *   実物は「新しい版が**あります。**」だった ── 実測(probe)で分かった。
+   * ⚠ 案内と実物が違うと、user は**別のものを探す**。
+   */
+  it('🔴 案内が言う文言は、実物と同じ字', () => {
+    expect(README_TXT).toContain(UPDATE_TEXT);
+  });
+
+  it('⚠ 説明も CRLF のまま(メモ帳で 1 行にならない)', () => {
+    expect(README_TXT.includes('\r\n')).toBe(true);
+    expect(README_TXT.replace(/\r\n/g, '')).not.toContain('\n');
+  });
 
   it('起動の入口が 3 OS ぶん揃っている', () => {
-    const names = [...selfhostExtras().keys()].map((n) => n.slice(SELFHOST_ROOT.length + 1));
+    const names = [...selfhostExtras(SRC).keys()].map((n) => n.slice(SELFHOST_ROOT.length + 1));
     expect(new Set(names)).toEqual(
       new Set(['serve.py', 'serve.mjs', 'start-mac-linux.sh', 'start-windows.cmd', 'start.ps1', 'はじめに.txt']),
     );

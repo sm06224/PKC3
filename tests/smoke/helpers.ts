@@ -18,6 +18,58 @@ export async function gotoApp(page: Page): Promise<void> {
 }
 
 /**
+ * 🔴 **起動を、読み直しを跨いで待つ**(2026-09-09。フル smoke が実際に落ちた)。
+ *
+ * ⚠ `waitForSelector` の**後**に `page.evaluate` で状態を読む 2 段構えは、
+ *   その間に**アプリ自身が読み直す**と `Execution context was destroyed` で落ちる ──
+ *   ヘッダを返さない配信(GitHub Pages / セルフホスト)では、分離を得るために
+ *   `coi-reload.ts` が 1 度読み直すので、**そこと競争する**。
+ * 🔑 `waitForFunction` は **navigation を跨いで評価し直す**ので、誰が読み直しても成立する
+ *   (`coi.smoke.spec.ts` の `reachIsolation` が同じ理由でこの形になっている)。
+ *
+ * ⚠ **狙って再現はできなかった**(正直に書く)── 読み直しを「60ms 後」「`ready` が出た
+ *   瞬間」の 2 通りで故意に起こし、旧い形 × 12 回・新しい形 × 12 回を回したが、
+ *   **24 回とも素通りした**。窓は「`waitForSelector` が解けてから `evaluate` が
+ *   走るまで」の数ミリ秒しかなく、外から狙えない。
+ * 🔑 だから根拠は**観測された 1 回の落ち方**(フル smoke、`Execution context was
+ *   destroyed, most likely because of a navigation` が `evaluate` の行を名指し)と、
+ *   **仕組み**(`evaluate` は 1 つの実行文脈に結びつく / `waitForFunction` は結びつかない)
+ *   である。⚠ 「再現できたから直った」とは言えない ── 言えるのは
+ *   **2 段構えそのものを無くした**ことである。
+ * ⚠ **`error` は待たずに落とす** ── 待つと 40 秒後に「時間切れ」としか出ず、
+ *   「起動に失敗した」という**本当の理由**が消える。
+ *
+ * @param hint 落ちたときに添える 1 行(prefix の外を叩いた等)。無ければ `null` を返す。
+ */
+export async function bootedHere(
+  page: Page,
+  hint: () => string | null = () => null,
+): Promise<void> {
+  try {
+    await page.waitForFunction(
+      () => {
+        const v = document.querySelector('[data-pkc-boot]')?.getAttribute('data-pkc-boot');
+        // ⚠ ここで投げると playwright が即座に失敗させる(時間切れを待たない)
+        if (v === 'error') throw new Error('boot-error');
+        return v === 'ready';
+      },
+      undefined,
+      { timeout: 40_000 },
+    );
+  } catch (e) {
+    const extra = hint();
+    if (extra !== null) throw new Error(extra, { cause: e });
+    const why = await page
+      .evaluate(() => ({
+        state: document.querySelector('[data-pkc-boot]')?.getAttribute('data-pkc-boot') ?? null,
+        text: document.body.innerText.slice(0, 300),
+      }))
+      .catch(() => ({ state: null, text: '(読めませんでした)' }));
+    throw new Error(`起動しない(data-pkc-boot=${String(why.state)}): ${why.text}`, { cause: e });
+  }
+}
+
+/**
  * 🔴 **store の往復を数える**(2026-09-05)。
  *
  * ⚠ **待ちを伸ばすための道具ではない。** 面のための走査は 2026-09-05 から
