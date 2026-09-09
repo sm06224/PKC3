@@ -39,7 +39,8 @@ export class QueryKeyStore {
 
   get(): string | null {
     try {
-      const raw = this.storage?.getItem(KEY) ?? null;
+      if (this.storage === null) return this.fallback;
+      const raw = this.storage.getItem(KEY);
       if (raw === null || raw === '' || raw.length > MAX_CHARS) return null;
       return raw;
     } catch {

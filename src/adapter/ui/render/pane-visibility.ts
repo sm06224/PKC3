@@ -71,8 +71,15 @@ export class PaneVisibilityStore {
   }
 
   private readRecord(): PaneId[] {
+    /**
+     * 🔴 **保存が無い環境では控えを読む**(2026-09-09、#278 段② の test が教えた)。
+     * ⚠ `this.storage?.getItem(...)` は `null` のとき**例外を投げずに `undefined`**
+     *   を返すので、`catch` の控えへ 1 度も入らなかった ── 私用ウィンドウでは
+     *   **畳んでも次の描画で戻る**(無言の dead click)。
+     */
+    if (this.storage === null) return this.fallback;
     try {
-      return decodeHidden(this.storage?.getItem(KEY) ?? null);
+      return decodeHidden(this.storage.getItem(KEY));
     } catch {
       return this.fallback;
     }

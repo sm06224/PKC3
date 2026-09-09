@@ -97,7 +97,8 @@ export class BrowseModeStore {
   /** ⚠ 読めない値・知らない値は既定へ落ちる(壊れた保存で面が出ないほうが害が大きい)。 */
   get(): BrowseMode {
     try {
-      const v = this.storage?.getItem(KEY);
+      if (this.storage === null) return this.fallback;
+      const v = this.storage.getItem(KEY);
       return v !== null && v !== undefined && isBrowseMode(v) ? v : DEFAULT_BROWSE_MODE;
     } catch {
       return this.fallback;

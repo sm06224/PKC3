@@ -162,12 +162,14 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   ── SQL の面の中にしか無い押し所(登記は増えない。`run-sql` と同じ)
       // ⚠ 2026-09-09(#681 段③): 調べる相手(`set-sql-source`)で受け手 +1
       //   ── SQL の面の中の選択欄(登記は増えない)
-      total: 268,
-      receivers: 219,
+      // ⚠ 2026-09-09(#278 段②): 本文の電話番号(`set-phone-links`)で受け手 +1
+      //   ── 設定の checkbox が受ける(`set-alarm-enabled` と同じ形。登記は増えない)
+      total: 269,
+      receivers: 220,
       registered: 85,
       both: 36,
       outsideActionsTable: 49,
-      unregistered: 183,
+      unregistered: 184,
     });
   });
 

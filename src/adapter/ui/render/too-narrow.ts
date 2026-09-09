@@ -109,7 +109,8 @@ export class TooNarrowOkStore {
    */
   enabled(): boolean {
     try {
-      const raw = this.storage?.getItem(KEY) ?? null;
+      if (this.storage === null) return this.fallback;
+      const raw = this.storage.getItem(KEY);
       return raw === null ? this.fallback : raw !== '1';
     } catch {
       return this.fallback;

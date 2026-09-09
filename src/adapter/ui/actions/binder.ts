@@ -758,6 +758,12 @@ export interface BinderServices {
   /** 🔴 予定の知らせを入 / 切にする(#280)。⚠ 入にした瞬間に予定を数え直す。 */
   setAlarmEnabled?(on: boolean): void;
   /**
+   * 🔴 **本文の素の電話番号を押せる字にするか**(#278 段②)。⚠ **省略可**。
+   * ⚠ 切り替えたら**その場で本文を描き直す** ── 保存しただけでは、
+   *   いま読んでいるノートは変わらない(設定が嘘になる)。
+   */
+  setPhoneLinks?(on: boolean): void;
+  /**
    * 🔴 **貼る用に画像を持ち歩ける形へ**(#193)。`blob:` → `data:` の対応を返す。
    * ⚠ **省略可** ── 無ければ画像は文字に置き換わる(壊れた画像を貼らせない)。
    */
@@ -6953,6 +6959,10 @@ const ACTIONS: Record<string, ActionHandler> = {
   'set-alarm-enabled': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
     if (target instanceof HTMLInputElement) services.setAlarmEnabled?.(target.checked);
+  },
+  'set-phone-links': (_dispatcher, target, services) => {
+    // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
+    if (target instanceof HTMLInputElement) services.setPhoneLinks?.(target.checked);
   },
   'set-notices-enabled': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
