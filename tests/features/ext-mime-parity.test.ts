@@ -19,6 +19,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { EXT_MIME, resolveMime } from '@adapter/ui/actions/attach';
+import { CAPTURE_MIME_EXT } from '@features/asset/capture-text';
 import { extForMime } from '@features/export/pkc3-markdown-zip';
 import { officeEntry } from '@features/office/office-entry';
 
@@ -72,5 +73,45 @@ describe('拡張子 ↔ MIME の往復', () => {
     expect(resolveMime('集計.xlsx', '')).toContain('spreadsheetml');
     // 宣言があればそちらが勝つ(既存の規約 ── 変えていない)
     expect(resolveMime('x.odt', 'text/plain')).toBe('text/plain');
+  });
+
+  /**
+   * 🔴 **録ったものが、書き出しで拡張子を失っていた**(2026-09-09。実測して確かめた)。
+   *
+   * ⚠ 直す前 `extForMime('audio/webm')` は **`bin`** を返していた ──
+   *   ブラウザの録音は `audio/webm` なので、**書き出した zip の中で録音が
+   *   `assets/<hash>.bin` になり、取り出しても開けなかった**。
+   * 🔑 `capture-text.ts` の表が「録音が出しうる型」の正本なので、
+   *   **そこから母集団を採る**(手で写した一覧を並べると、表ごと消す変異が生き延びる)。
+   * ⚠ 期待するのは**その表と同じ拡張子**である ── `bin` でないだけでは
+   *   「`.webm` の録音が `.mp3` で出る」を見逃す。
+   */
+  it('🔴 録音が出しうる MIME は、書出しで同じ拡張子に戻る', () => {
+    const mimes = Object.keys(CAPTURE_MIME_EXT);
+    // 空振り防止 ── 表が空になっていないこと
+    expect(mimes.length, '録音の表が空(前処理が壊れている)').toBeGreaterThan(4);
+    const bad = mimes
+      .map((m) => ({ m, want: CAPTURE_MIME_EXT[m], got: extForMime(m) }))
+      .filter((x) => x.got !== x.want);
+    expect(
+      bad,
+      '録ったものが書き出しで拡張子を失う ── 取り出しても開けない file になる',
+    ).toEqual([]);
+  });
+
+  /**
+   * ⚠ **逆向きも見る** ── 一度書き出した録音を入れ直したとき、
+   *   その場で聞ける形(音 / 動画)に戻ること。
+   * 🔴 直す前は `ogg` / `m4a` / `mkv` が `EXT_MIME` に無く、
+   *   `application/octet-stream` になって**再生の口が出なかった**。
+   */
+  it('🔴 録音の拡張子は、入れ直しても音か動画として読める', () => {
+    const exts = [...new Set(Object.values(CAPTURE_MIME_EXT))];
+    expect(exts.length, '拡張子の集合が空').toBeGreaterThan(3);
+    const bad = exts.filter((e) => {
+      const mime = EXT_MIME[e];
+      return mime === undefined || !(mime.startsWith('audio/') || mime.startsWith('video/'));
+    });
+    expect(bad, '入れ直すと音とも動画とも読めない拡張子がある(その場で聞けない)').toEqual([]);
   });
 });

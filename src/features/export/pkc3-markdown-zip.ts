@@ -93,8 +93,24 @@ const EXT_BY_MIME: Readonly<Record<string, string>> = {
   'audio/mpeg': 'mp3',
   'audio/wav': 'wav',
   'audio/ogg': 'ogg',
+  /**
+   * 🔴 **録音が実際に出す型**(2026-09-09。**書き出すと `.bin` になっていた**)。
+   *
+   * ⚠ ブラウザの録音は `audio/webm;codecs=opus` を返す(`capture.ts` が引数を
+   *   落として `audio/webm` にする)。⚠ ところがこの表には **`video/webm` しか
+   *   無かった**ので、`extForMime('audio/webm')` は **`bin`** を返していた ──
+   *   🔴 **書き出した zip の中で、録音が `assets/<hash>.bin` になり、
+   *   取り出しても開けない**(実測して確かめた)。
+   * ⚠ `capture.ts` のコメントは「引数付きのまま持ち回ると `.bin` になる」と
+   *   **同じ事故を名指しで警告していた**のに、引数を落とした先の型が表に無かった。
+   * 🔑 `webm` は音と動画で同じ拡張子である(容器が同じ)── 逆向き
+   *   (`EXT_MIME`)は `video/webm` のままでよい。
+   */
+  'audio/webm': 'webm',
+  'audio/mp4': 'm4a',
   'video/mp4': 'mp4',
   'video/webm': 'webm',
+  'video/x-matroska': 'mkv',
   'application/msword': 'doc',
   'application/vnd.ms-excel': 'xls',
   'application/vnd.ms-powerpoint': 'ppt',

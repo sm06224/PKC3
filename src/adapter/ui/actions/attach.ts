@@ -103,6 +103,17 @@ export const EXT_MIME: Record<string, string> = {
   pdf: 'application/pdf',
   mp3: 'audio/mpeg',
   wav: 'audio/wav',
+  /**
+   * 🔴 **録音が出しうる拡張子**(2026-09-09)。⚠ `capture-text.ts` の表は
+   *   `ogg` / `m4a` / `mkv` を出しうるのに、ここに無かった ── 一度書き出して
+   *   入れ直すと **`application/octet-stream`** になり、
+   *   **その場で聞けなくなる**(`assetPreviewKind` が音と読めない)。
+   * ⚠ `webm` は音と動画で同じ拡張子なので、ここは `video/webm` のまま
+   *   (中身が音でも `<video>` で鳴る ── 逆に音として決め打つと動画が映らない)。
+   */
+  ogg: 'audio/ogg',
+  m4a: 'audio/mp4',
+  mkv: 'video/x-matroska',
   mp4: 'video/mp4',
   webm: 'video/webm',
   // 🔴 **Office**(2026-08-16、#205)。⚠ 10 種とも**1 つも入っていなかった** ──
