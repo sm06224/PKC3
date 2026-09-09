@@ -524,8 +524,17 @@ describe('元に戻す(UNDO_MOVE)', () => {
     const LINE = '本文の塊を動かしました';
     paintStatusUndo(btn, { lastMove: {}, notice: LINE }, LINE);
     expect(btn.hidden, '材料と知らせが揃っているのに出ない').toBe(false);
-    paintStatusUndo(btn, { lastMove: {}, notice: LINE }, 'コピーしました');
-    expect(btn.hidden, '別の知らせの隣に残っている').toBe(true);
+    /**
+     * 🔴 **呼び側は「いま出ている知らせ」を渡す**(`main.ts`)ので、
+     *   `notice === shownLine` は常に真である ── だから**その形で**確かめる
+     *   (2026-09-09、UX レビューが実害を拾った:段③ の知らせの隣に出て、
+     *   押すと**画面に出ていない別のノート**の前の並べ替えが戻っていた)。
+     */
+    paintStatusUndo(btn, { lastMove: {}, notice: 'コピーしました' }, 'コピーしました');
+    expect(btn.hidden, '別の知らせの隣に残っている(押すと別の物が戻る)').toBe(true);
+    const HANDOFF = '本文の塊を「さき」のいちばん下へ持っていきました';
+    paintStatusUndo(btn, { lastMove: {}, notice: HANDOFF }, HANDOFF);
+    expect(btn.hidden, '持っていきの知らせの隣に「元に戻す」が出た').toBe(true);
     paintStatusUndo(btn, { lastMove: null, notice: LINE }, LINE);
     expect(btn.hidden, '材料が無いのに出ている').toBe(true);
   });
@@ -863,5 +872,231 @@ describe('外から落とした file は落とした所へ入る(#684 段④)', 
       body: RAW,
       anchor: { line: 15, text: ':::note' },
     });
+  });
+});
+
+/**
+ * 🔴 **本文の塊を、別のノートへ持っていく**(#684 段③)。
+ *
+ * 守る主張:
+ * 1. 🔴 **横に留めた枠の本文**へ持っていくと、段① と同じ線が出て `HANDOFF_BLOCK` が飛ぶ
+ *    (落とした所 + 目印つき)
+ * 2. 🔴 **一覧の行**へ落とすと、そのノートの**末尾**へ(`toBefore: null`)
+ * 3. 🔴 **本文に入れられない種類**の行には線を出さず、撃たない
+ * 4. 🔴 掴んだ塊のノート自身の行へは撃たない(同じ本文の中は段① の仕事)
+ *
+ * ⚠ 書いた結果(入れてから切る / 二重にならない)は `block-handoff.test.ts` が見る。
+ *   ここは**掴んで落とすと、正しい座標で飛ぶ**所まで。
+ */
+describe('本文の塊を別のノートへ持っていく(#684 段③)', () => {
+  /**
+   * 一覧の行を 1 つ足す。
+   * ⚠ **表の中に置く**(`filer-table`)── `data-pkc-entry` は情報ペインのボタンも
+   *   名乗るので、実装は面で絞っている(台がそれを外すと本物より甘くなる)。
+   */
+  function listRow(
+    s: ReturnType<typeof setup>,
+    lid: string,
+    region: 'filer-table' | 'entry-list' | 'dual-table' = 'filer-table',
+  ): HTMLElement {
+    let table = s.root.querySelector<HTMLElement>(`[data-pkc-region="${region}"]`);
+    if (table === null) {
+      table = document.createElement('div');
+      table.setAttribute('data-pkc-region', region);
+      s.root.append(table);
+    }
+    const row = document.createElement('div');
+    row.setAttribute('data-pkc-entry', lid);
+    table.append(row);
+    return row;
+  }
+
+  /** 横に留めた枠(別のノートの本文が painted で出ている)を足す。 */
+  function pinned(s: ReturnType<typeof setup>, body = '# さき\n\n牛乳\n\nパン\n') {
+    const frame = document.createElement('div');
+    frame.setAttribute('data-pkc-region', 'split-frame');
+    frame.setAttribute('data-pkc-split-lid', 'n2');
+    const host = document.createElement('div');
+    host.className = 'pkc-md-rendered';
+    host.setAttribute('data-pkc-field', 'split-body');
+    host.setAttribute(PAINTED_ATTR, 'n2');
+    host.innerHTML = renderMarkdown(body, { sourceLineAnchors: true });
+    frame.append(host);
+    s.root.append(frame);
+    rect(frame, 0, 1000);
+    s.d.dispatch({ type: 'SPLIT_RESTORED', lids: ['n2'] });
+    s.d.dispatch({ type: 'SPLIT_BODY_LOADED', lid: 'n2', body });
+    expect(s.d.getState().splitBodies.get('n2'), '台の前提: 留めた本文が state に無い').toBe(body);
+    return { frame, host };
+  }
+
+  it('🔴 横に留めた枠へ落とすと、落とした所へ持っていく', () => {
+    const s = setup();
+    teardown = s.unbind;
+    const { host } = pinned(s);
+    const dt = s.grab(); // 段落 A(生 5)を掴む
+    const target = [...host.children].find(
+      (c): c is HTMLElement => c instanceof HTMLElement && c.getAttribute('data-pkc-source-line') === '2',
+    )!; // 「牛乳」
+    rect(target, 100, 20);
+    const over = dragEv('dragover', dt, 115); // 下半分 = 後
+    target.dispatchEvent(over);
+    expect(over.defaultPrevented, '別のノートの本文で受けていない').toBe(true);
+    expect(dt.dropEffect).toBe('move');
+    expect(target.getAttribute('data-pkc-drop-edge'), '線が出ていない').toBe('after');
+    s.events.length = 0;
+    target.dispatchEvent(dragEv('drop', dt, 115));
+    const ev = s.events.find((e) => e.type === 'REQUEST_BLOCK_HANDOFF');
+    expect(ev, '持っていく依頼が飛んでいない').toBeDefined();
+    expect(ev).toMatchObject({
+      from: { lid: 'n1', start: 5, end: 5, lines: ['段落 A'] },
+      to: { lid: 'n2', toBefore: 3, anchor: { line: 2, text: '牛乳' } },
+    });
+    expect(s.root.querySelectorAll('[data-pkc-drop-edge]'), '落とした後に線が残っている').toHaveLength(0);
+  });
+
+  it('🔴 一覧の行へ落とすと、そのノートの末尾へ', () => {
+    const s = setup();
+    teardown = s.unbind;
+    const row = listRow(s, 'n2');
+    const dt = s.grab();
+    const over = dragEv('dragover', dt, 5);
+    row.dispatchEvent(over);
+    expect(over.defaultPrevented, '一覧の行で受けていない').toBe(true);
+    expect(row.hasAttribute('data-pkc-dropping'), '落とせる印が出ていない').toBe(true);
+    s.events.length = 0;
+    row.dispatchEvent(dragEv('drop', dt, 5));
+    expect(s.events.find((e) => e.type === 'REQUEST_BLOCK_HANDOFF')).toMatchObject({
+      from: { lid: 'n1', start: 5, end: 5 },
+      to: { lid: 'n2', toBefore: null },
+    });
+  });
+
+  /**
+   * 🔴 **binder の門を、reducer の門と別に見る**(着地前レビュー 変異 2)。
+   * ⚠ event(`REQUEST_BLOCK_HANDOFF`)の件数では割れない ── reducer 側の
+   *   `isAppendable` が止めるので、**binder の門を外しても event は 0 件のまま**。
+   * 🔑 だから **action** を採る(dispatch を包む)── どちらの門が鳴ったかが見分けられる。
+   */
+  it('🔴 入れられない種類の行では、action そのものを撃たない(binder の門)', () => {
+    const s = setup();
+    teardown = s.unbind;
+    s.d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [meta('n1', '本'), { ...meta('n2', '入れ物'), archetype: 'folder' }],
+      relations: [],
+    });
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    s.d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: RAW });
+    const acted: string[] = [];
+    const orig = s.d.dispatch.bind(s.d);
+    s.d.dispatch = ((a: { type: string }) => {
+      acted.push(a.type);
+      return orig(a as never);
+    }) as typeof s.d.dispatch;
+    const row = listRow(s, 'n2');
+    const dt = s.grab();
+    row.dispatchEvent(dragEv('drop', dt, 5));
+    expect(acted.filter((t) => t === 'HANDOFF_BLOCK'), 'binder が撃ってしまった').toHaveLength(0);
+    // ⚠ 対照群 ── 入れられる種類なら撃つ(この test が「常に撃たない」で緑になっていない)
+    s.d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [meta('n1', '本'), meta('n2', '相手')],
+      relations: [],
+    });
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    s.d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: RAW });
+    acted.length = 0;
+    listRow(s, 'n2').dispatchEvent(dragEv('drop', s.grab(), 5));
+    expect(acted.filter((t) => t === 'HANDOFF_BLOCK'), '入れられる種類でも撃たない').toHaveLength(1);
+  });
+
+  /**
+   * 🔴 **左の列はタブで中身が変わる**(「フォルダ」/「一覧」/ 2 ペイン)。
+   * ⚠ 1 稿目は「一覧」タブ(`entry-list`)を落としており、**その名前のタブでだけ
+   *   無言で落とせなかった** ── マニュアルは「左の列のノートの行」と書いているので、
+   *   いちばん外しやすい形だった(変異 R7)。
+   */
+  it('🔴 「一覧」タブ・2 ペインの行でも落とせる(タブで効かなくならない)', () => {
+    for (const region of ['entry-list', 'dual-table'] as const) {
+      const s = setup();
+      teardown = s.unbind;
+      const row = listRow(s, 'n2', region);
+      const dt = s.grab();
+      const over = dragEv('dragover', dt, 5);
+      row.dispatchEvent(over);
+      expect(over.defaultPrevented, `${region} の行で受けていない`).toBe(true);
+      expect(row.hasAttribute('data-pkc-dropping'), `${region} に印が出ていない`).toBe(true);
+      s.events.length = 0;
+      row.dispatchEvent(dragEv('drop', dt, 5));
+      expect(
+        s.events.find((e) => e.type === 'REQUEST_BLOCK_HANDOFF'),
+        `${region} の行へ落としても持っていかない`,
+      ).toMatchObject({ from: { lid: 'n1' }, to: { lid: 'n2', toBefore: null } });
+      s.unbind();
+      teardown = null;
+    }
+  });
+
+  it('🔴 本文に入れられない種類の行には線を出さず、撃たない', () => {
+    const s = setup();
+    teardown = s.unbind;
+    // n2 をフォルダにし直す(実物の経路で meta を入れ替える)
+    s.d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [meta('n1', '本'), { ...meta('n2', '入れ物'), archetype: 'folder' }],
+      relations: [],
+    });
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    s.d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: RAW });
+    const row = listRow(s, 'n2');
+    const dt = s.grab();
+    row.dispatchEvent(dragEv('dragover', dt, 5));
+    expect(row.hasAttribute('data-pkc-dropping'), '入れられない種類に線を出した').toBe(false);
+    s.events.length = 0;
+    row.dispatchEvent(dragEv('drop', dt, 5));
+    expect(s.events.filter((e) => e.type === 'REQUEST_BLOCK_HANDOFF'), '撃ってしまった').toHaveLength(0);
+  });
+
+  /**
+   * 🔴 **`data-pkc-entry` を名乗るのは一覧の行だけではない**(変異試験 H12)。
+   * ⚠ 情報ペインのボタンなども名乗るので、面で絞らないと**押し所へ塊を渡す**形になる
+   *   (CLAUDE.md §1「面へスコープする ── 別の面の文字に満たされる」)。
+   */
+  it('🔴 一覧の表の外の data-pkc-entry には落とせない', () => {
+    const s = setup();
+    teardown = s.unbind;
+    const pane = document.createElement('div');
+    pane.setAttribute('data-pkc-region', 'inspector');
+    const btn = document.createElement('button');
+    btn.setAttribute('data-pkc-entry', 'n2'); // 情報ペインの「開く」のような押し所
+    pane.append(btn);
+    s.root.append(pane);
+    const dt = s.grab();
+    btn.dispatchEvent(dragEv('dragover', dt, 5));
+    expect(btn.hasAttribute('data-pkc-dropping'), '一覧の外の押し所に線を出した').toBe(false);
+    s.events.length = 0;
+    btn.dispatchEvent(dragEv('drop', dt, 5));
+    expect(s.events.filter((e) => e.type === 'REQUEST_BLOCK_HANDOFF'), '撃ってしまった').toHaveLength(0);
+    // ⚠ 対照群 ── 同じ lid でも**一覧の行**なら落とせる(この test が「常に落とせない」で緑になっていない)
+    const row = listRow(s, 'n2');
+    row.dispatchEvent(dragEv('dragover', dt, 5));
+    expect(row.hasAttribute('data-pkc-dropping'), '一覧の行にも落とせない').toBe(true);
+  });
+
+  it('🔴 掴んだ塊のノート自身の行へは撃たない(同じ本文の中は段① の仕事)', () => {
+    const s = setup();
+    teardown = s.unbind;
+    const row = listRow(s, 'n1');
+    const dt = s.grab();
+    row.dispatchEvent(dragEv('dragover', dt, 5));
+    expect(row.hasAttribute('data-pkc-dropping'), '自分の行に線を出した').toBe(false);
+    s.events.length = 0;
+    row.dispatchEvent(dragEv('drop', dt, 5));
+    expect(s.events.filter((e) => e.type === 'REQUEST_BLOCK_HANDOFF')).toHaveLength(0);
+    expect(s.events.filter((e) => e.type === 'REQUEST_BODY_REWRITE'), '同じ本文の中の移動が飛んだ').toHaveLength(0);
   });
 });

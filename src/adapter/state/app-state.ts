@@ -11,10 +11,16 @@ import type { EntryMeta, Relation } from '@core/model/entry-meta';
 import { DEFAULT_ENTRY_SORT, NATURAL_DESC, type EntrySort } from '@features/filter/entry-sort';
 import { resolveCanonicalParents, reorderSibling } from '@features/relation/tree';
 import { extractMeta, seedBodyFor } from '@features/flavor';
+import { isAppendable } from '@features/flavor/append-spec';
 import { applyBodyRewrite, type BodyRewrite } from '@features/markdown/body-rewrite';
 import type { TableFormat } from '@features/markdown/table-convert';
 import { isPlaceOpen } from '@features/markdown/place-notation';
-import { moveLinesWithInverse, type InsertAnchor, type MoveLines } from '@features/markdown/line-move';
+import {
+  BLOCK_MOVED_NOTICE,
+  moveLinesWithInverse,
+  type InsertAnchor,
+  type MoveLines,
+} from '@features/markdown/line-move';
 import { replaceTaskCards, type TaskScan } from '@features/schedule/task-cards';
 import type { ContactScan } from '@features/contact/contact-card';
 import type { SnippetScan } from '@features/snippet/snippet-table';
@@ -1189,6 +1195,25 @@ export type UserAction =
    */
   | { type: 'MOVE_BLOCK'; lid: string; start: number; end: number; toBefore: number }
   /**
+   * 🔴 **本文の塊を、別のノートへ持っていく**(#684 段③)。
+   *
+   * > user 要望 2026-09-03:「本文の行 / 塊を、別のノートへ」
+   *
+   * ⚠ `MOVE_BLOCK`(同じ本文の中)とは**別の action** ── 触る本文が 2 つになるので、
+   *   門も、書く順番も、戻し方も違う(1 本に丸めると片方の規律がもう片方に漏れる)。
+   * ⚠ `toBefore: null` = 行き先の**末尾**(一覧の行へ落とした回。落とした所が無い)。
+   * 🔑 掴んだ時点の行そのものは reducer が**画面の本文から**捕える(`MOVE_BLOCK` と同じ)。
+   */
+  | {
+      type: 'HANDOFF_BLOCK';
+      fromLid: string;
+      start: number;
+      end: number;
+      toLid: string;
+      toBefore: number | null;
+      anchor?: InsertAnchor;
+    }
+  /**
    * 🔴 **行の並びを本文へ差し込む**(#684 段②)── 一覧の行を本文へ落とすとリンクになる。
    * ⚠ 何を入れるか(リンクの字)は binder が組んで渡す(`formatEntryLink` 1 本)。
    */
@@ -1891,6 +1916,45 @@ export type DomainEvent =
       entryOrder: number;
       /** 何をするか。規則は `features/markdown/body-rewrite.ts` の 1 か所。 */
       rewrite: BodyRewrite;
+    }
+  | {
+      /**
+       * 🔴 **本文の塊を、別のノートへ持っていく要求**(#684 段③)。
+       *
+       * ## なぜ 1 つの event なのか(2 本に割らない)
+       *
+       * ⚠ 書換は **2 つのノート**にまたがる ── 割って `REQUEST_BODY_REWRITE` を
+       *   2 本撃つと、**片方だけ通った回**が普通に起きる(別の窓の書込・容量)。
+       *   入れる側だけ落ちれば**本文が消えたまま**になり、どこからも戻せない。
+       * 🔑 だから 1 op にして、**入れてから切る**(効果層が順番を守る)──
+       *   入らなければ元は 1 バイトも触らない。切れなければ**二重になる**
+       *   (見えるし、掴んで捨てられる ── 消えるより良い側)。
+       * ⚠ **本文は載せない**(`REQUEST_BODY_REWRITE` と同じ)── どちらの本文も
+       *   効果層が disk から読み直す。載せる価値が在るのは**掴んだ時点の行**
+       *   (`lines`)だけで、これは byte 一致の錠として使う。
+       */
+      type: 'REQUEST_BLOCK_HANDOFF';
+      /** 元のノート(切る側)。`start`〜`end` は**生の body** の行番号(両端含む)。 */
+      from: {
+        lid: string;
+        title: string;
+        archetype: string;
+        entryOrder: number;
+        start: number;
+        end: number;
+        /** 掴んだ時点の `start..end` の行そのもの ── disk 側と一致しなければ切らない。 */
+        lines: readonly string[];
+      };
+      /** 行き先のノート(入れる側)。`toBefore: null` = **本文の末尾**(一覧の行へ落とした回)。 */
+      to: {
+        lid: string;
+        title: string;
+        archetype: string;
+        entryOrder: number;
+        toBefore: number | null;
+        /** 落とした所の目印(`toBefore` が在るときだけ)。合わなければ入れない。 */
+        anchor?: InsertAnchor;
+      };
     }
   | {
       /**
@@ -3396,6 +3460,59 @@ function reduceCore(
         return { kind: 'move-lines', start, end, toBefore, lines: lines.slice(start, end + 1) };
       });
     /**
+     * 🔴 **本文の塊を、別のノートへ持っていく**(#684 段③)。
+     *
+     * 門(どれか 1 つでも外れたら黙って何もしない):
+     * - 相(`ready`)── 編集中は**声に出して断る**(`bodyRewriteGate` と同じ言い方)
+     * - 元のノートの本文が**画面に出ている**(掴んだ時点の行をそこから捕える)
+     * - 行き先が**別のノート**で、実在し、**本文に入れられる種類**
+     *   (フォルダ・添付・スタックへは持っていかない ── 断り方は落とす側が出す)
+     * ⚠ 同じノートなら `MOVE_BLOCK` の仕事である(ここでは撃たない)。
+     */
+    case 'HANDOFF_BLOCK': {
+      const { fromLid, start, end, toLid } = action;
+      if (state.phase !== 'ready')
+        return {
+          state: { ...state, error: '編集を終了してから、本文の塊を別のノートへ持っていってください' },
+          events: [],
+        };
+      if (fromLid === toLid) return { state, events: [] };
+      const from = state.entryMetas.get(fromLid);
+      const to = state.entryMetas.get(toLid);
+      if (!from || !to || !isAppendable(to.archetype)) return { state, events: [] };
+      const shown = screenBodyOf(state, fromLid);
+      if (shown === null) return { state, events: [] };
+      if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start)
+        return { state, events: [] };
+      const rows = shown.split('\n');
+      if (end >= rows.length) return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_BLOCK_HANDOFF',
+            from: {
+              lid: from.lid,
+              title: from.title,
+              archetype: from.archetype,
+              entryOrder: from.entryOrder,
+              start,
+              end,
+              lines: rows.slice(start, end + 1),
+            },
+            to: {
+              lid: to.lid,
+              title: to.title,
+              archetype: to.archetype,
+              entryOrder: to.entryOrder,
+              toBefore: action.toBefore,
+              ...(action.anchor === undefined ? {} : { anchor: action.anchor }),
+            },
+          },
+        ],
+      };
+    }
+    /**
      * 🔴 **一覧の行を本文へ落とすとリンクになる**(#684 段②)── 同じ門。空の並びは撃たない。
      * ⚠ 落とした所へ入れる添付(#684 段④)も同じ口を通る ── 入る字が違うだけで、
      *   「本文のここへ 1 塊を差し込む」は同じ 1 つの操作である(§7)。
@@ -3590,7 +3707,7 @@ function reduceCore(
             ? { lid: action.lid, ...moved.inverse }
             : null;
         if (lastMove !== null) {
-          notice = '本文の塊を動かしました';
+          notice = BLOCK_MOVED_NOTICE;
           noticeOpen = null;
         }
       } else if (lastMove !== null && lastMove.lid === action.lid) {

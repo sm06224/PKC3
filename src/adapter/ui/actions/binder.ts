@@ -8170,12 +8170,39 @@ export function bindActions(
      */
     if (de.dataTransfer?.types?.includes(PKC_BLOCK_DRAG) === true) {
       const drop = bodyDropAt(de);
+      if (drop !== null && blockDrag !== null && drop.lid !== blockDrag.lid) {
+        /**
+         * 🔴 **別のノートの本文へ持っていく**(#684 段③)── 横に留めた枠との間で、
+         *   段① と同じ「前 / 後」の線が出る。
+         * ⚠ 本文に入れられない種類へは受けない(線を出してから断らない ── 段④ と同じ規律)。
+         */
+        if (blockHandoffLands(drop.lid)) {
+          e.preventDefault();
+          de.dataTransfer.dropEffect = 'move';
+          markDropTarget(drop.el, DROP_EDGE_ATTR, drop.edge);
+          return;
+        }
+        clearDropTarget();
+        return;
+      }
       if (
         drop === null ||
         blockDrag === null ||
         drop.lid !== blockDrag.lid ||
         (drop.toBefore >= blockDrag.start && drop.toBefore <= blockDrag.end + 1)
       ) {
+        /**
+         * 🔴 **一覧の行へ落とすと、そのノートの末尾へ持っていく**(#684 段③)。
+         * ⚠ 一覧の行は**落とした所を持たない**ので、行き先は末尾である(そう言う)。
+         * ⚠ 掴んだ塊のノート自身の行へは受けない(同じ本文の中は段① の仕事)。
+         */
+        const row = blockDrag === null ? null : blockRowTarget(de.target);
+        if (row !== null && row.lid !== blockDrag!.lid && blockHandoffLands(row.lid)) {
+          e.preventDefault();
+          de.dataTransfer.dropEffect = 'move';
+          markDropTarget(row.el);
+          return;
+        }
         clearDropTarget();
         return;
       }
@@ -8266,6 +8293,49 @@ export function bindActions(
    *   「入れられません」と言うのは、issue の要件(落とせる印を出す)の裏返しである。
    * 🔑 判定は `isAppendable` **1 か所**(断る側と同じ関数 ── §7)。
    */
+  /**
+   * 🔴 **その本文へ塊を持っていけるか**(#684 段③)。
+   * ⚠ **本文に入れられない種類**(フォルダ / 添付 / スタック)へは持っていかない ──
+   *   線を出してから断るのは、印を出す約束の裏返しである(段④ と同じ規律)。
+   * 🔑 判定は `isAppendable` **1 か所**(段④ と共有)。
+   */
+  const blockHandoffLands = (lid: string): boolean =>
+    isAppendable(dispatcher.getState().entryMetas.get(lid)?.archetype);
+  /**
+   * 🔴 **一覧の行(どのノートでも)**(#684 段③)。
+   *
+   * ⚠ **`data-pkc-drop` では引けない** ── あれは「**ノートを入れる先**」の印なので
+   *   **フォルダと入れ物にしか付いていない**(`filer.ts` / `dual-filer.ts`)。
+   *   塊の持っていき先は**普通のノート**なので、そこだけを見ると
+   *   **落とせる相手が 1 件も無い**(実ブラウザの smoke がそう落ちた)。
+   * 🔑 だから行そのもの(`data-pkc-entry`)を引き、**一覧の表の中**に限る ──
+   *   情報ペインのボタンなども `data-pkc-entry` を名乗るので、面で絞らないと
+   *   別の物に当たる(CLAUDE.md §1「面へスコープする」)。
+   */
+  const blockRowTarget = (target: EventTarget | null): { el: HTMLElement; lid: string } | null => {
+    const el = (target as HTMLElement | null)?.closest<HTMLElement>('[data-pkc-entry]');
+    if (!el || !root.contains(el)) return null;
+    /**
+     * ⚠ 左の列は**タブで中身が変わる** ── 「フォルダ」(`filer-table`)/「一覧」
+     *   (`entry-list`)/ 2 ペイン(`dual-table`)の**3 つとも**行を持つ。
+     * 🔴 1 稿目は前 2 つを落としており、**「一覧」タブの user だけ無言で落とせなかった**
+     *   (2026-09-09 の UX レビュー)── マニュアルは「左の一覧の行」と書いているのに、
+     *   その名前のタブでだけ効かない、といういちばん外しやすい形だった。
+     */
+    if (
+      el.closest(
+        '[data-pkc-region="filer-table"], [data-pkc-region="dual-table"], [data-pkc-region="entry-list"]',
+      ) === null
+    )
+      return null;
+    const lid = el.getAttribute('data-pkc-entry');
+    if (lid === null || lid === '') return null;
+    /**
+     * ⚠ **印は行そのものへ**(着地前レビュー 💭-3)── 行の中の選択欄も `data-pkc-entry` を
+     *   名乗るので、そのまま印を付けると**チェックボックスだけが光る**。
+     */
+    return { el: el.closest<HTMLElement>('tr, li') ?? el, lid };
+  };
   const fileDropLands = (lid: string): boolean => {
     const st = dispatcher.getState();
     if (lid !== st.selectedLid) return false;
@@ -8288,13 +8358,35 @@ export function bindActions(
      */
     if (de.dataTransfer?.types?.includes(PKC_BLOCK_DRAG) === true) {
       const drop = bodyDropAt(de);
+      const row = drop === null ? blockRowTarget(de.target) : null;
       clearDropTarget();
-      if (drop === null) return;
+      if (drop === null && row === null) return;
       e.preventDefault();
       const [lid, rawStart, rawEnd] = (de.dataTransfer.getData(PKC_BLOCK_DRAG) || '').split(' ');
       const start = Number(rawStart);
       const end = Number(rawEnd);
-      if (lid === undefined || lid !== drop.lid || !Number.isInteger(start) || !Number.isInteger(end)) return;
+      if (lid === undefined || !Number.isInteger(start) || !Number.isInteger(end)) return;
+      /**
+       * 🔴 **別のノートへ持っていく**(#684 段③)── 本文の上なら**落とした所**へ、
+       *   一覧の行なら**そのノートの末尾**へ。
+       * ⚠ 書くのは effect(`REQUEST_BLOCK_HANDOFF`)── **入れてから切る**ので、
+       *   入らなかった回に元の本文が消えることはない。
+       */
+      const toLid = drop === null ? row!.lid : drop.lid;
+      if (toLid !== lid) {
+        if (!blockHandoffLands(toLid)) return;
+        dispatcher.dispatch({
+          type: 'HANDOFF_BLOCK',
+          fromLid: lid,
+          start,
+          end,
+          toLid,
+          toBefore: drop === null ? null : drop.toBefore,
+          ...(drop === null ? {} : { anchor: drop.anchor }),
+        });
+        return;
+      }
+      if (drop === null) return;
       dispatcher.dispatch({ type: 'MOVE_BLOCK', lid, start, end, toBefore: drop.toBefore });
       return;
     }

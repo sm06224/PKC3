@@ -71,6 +71,18 @@ function insideContainer(spans: readonly ContainerSpan[], p: number): boolean {
 }
 
 /**
+ * 🔴 **塊を動かしたときの知らせ**(#684 段①)。
+ *
+ * ⚠ **「元に戻す」を出すかの判定がこの字に懸かっている**ので、書く側(reducer)と
+ *   見る側(`status-open.ts`)が**同じ 1 本**を引く ── 写すと、片方だけ直った日に
+ *   **別の知らせの隣に「元に戻す」が残る**(押すと、見ていないノートの前の並べ替えが戻る)。
+ * 🔑 2026-09-09 に UX レビューが拾った:段③(別のノートへ持っていく)の知らせの隣に
+ *   出ていた ── 判定が「字が一致するか」だったが、呼び側は**いまの知らせ**を渡すので
+ *   常に一致していた(空振り)。
+ */
+export const BLOCK_MOVED_NOTICE = '本文の塊を動かしました';
+
+/**
  * 🔴 **差し込む所**(#684 段④)── 落とした所か、直前に入れた行の下か。
  *
  * ⚠ **落とした時の本文で決める。** 添付は落としてから本文へ書くまでに待つ
@@ -204,19 +216,8 @@ export function moveLinesWithInverse(body: string, move: MoveLines): MovedLines 
   if (toBefore >= start && toBefore <= end + 1) return { body, inverse: null };
   if (insertionBlocked(body, toBefore)) return null;
 
-  // 塊の実体 ── 範囲の末尾の空行は数えない(箇条書きの刻印は直後の空行まで含む)
-  let e = end;
-  while (e > start && all[e] === '') e -= 1;
-  const chunk = all.slice(start, e + 1);
-  // 消す単位 ── 実体 + 隣の空行 1 本(後ろ優先。無ければ前 ── frontmatter は跨がない)
-  // ⚠ 本文の終端の改行(最後の空要素)は「隣の空行」に数えない ── 消すと本文の末尾の
-  //    改行が失われ、「元に戻す」で 1 byte 違う本文になる
-  let from = start;
-  let to = e;
-  if (all[to + 1] === '' && to + 1 !== all.length - 1) to += 1;
-  else if (from > fm && all[from - 1] === '') from -= 1;
+  const { chunk, from, to, rest } = cutChunk(all, fm, start, end);
   const removed = to - from + 1;
-  const rest = [...all.slice(0, from), ...all.slice(to + 1)];
   // 入れる位置を、消した後の座標へ写す
   const p = toBefore > to ? toBefore - removed : toBefore;
   const placed = placeChunk(rest, fm, p, chunk);
@@ -230,6 +231,57 @@ export function moveLinesWithInverse(body: string, move: MoveLines): MovedLines 
         ? null
         : { start: placed.start, end: placed.start + chunk.length - 1, toBefore: back, lines: chunk },
   };
+}
+
+/**
+ * 🔴 **塊を切り出す**(#684 段① / 段③ で共有)── 実体と、消す単位(実体 + 隣の空行 1 本)。
+ *
+ * ⚠ この規則は**動かす**(段①)と**別のノートへ持っていく**(段③)で**同じ 1 本**である
+ *   ── 写すと、片方だけ空行の詰め方が変わる日が来る(§7)。
+ * ⚠ 範囲の末尾の空行は塊に数えない(箇条書きの刻印は直後の空行まで含む)。
+ * ⚠ 本文の終端の改行(最後の空要素)は「隣の空行」に数えない ── 消すと本文の末尾の
+ *   改行が失われ、戻したときに 1 byte 違う本文になる。
+ */
+function cutChunk(
+  all: readonly string[],
+  fm: number,
+  start: number,
+  end: number,
+): { chunk: string[]; from: number; to: number; rest: string[] } {
+  let e = end;
+  while (e > start && all[e] === '') e -= 1;
+  const chunk = all.slice(start, e + 1);
+  let from = start;
+  let to = e;
+  if (all[to + 1] === '' && to + 1 !== all.length - 1) to += 1;
+  else if (from > fm && all[from - 1] === '') from -= 1;
+  return { chunk, from, to, rest: [...all.slice(0, from), ...all.slice(to + 1)] };
+}
+
+/**
+ * 🔴 **塊を切り取る**(#684 段③ ── 別のノートへ持っていく「元の側」)。
+ *
+ * 門は `moveLinesWithInverse` と**同じ**(掴んだ時点の行と byte 一致 / 囲いの中でない)。
+ * ⚠ 入れる側は `insertLines` が別に持つ ── **入れてから切る**(逆にすると、
+ *   入れられなかった回に本文だけ消える)。順番は効果層が守る。
+ *
+ * @returns 切った後の本文と、切り出した塊。⚠ **合わなければ `null`**
+ *   (当てずっぽうで別の所を消さない)。
+ */
+export function cutLines(
+  body: string,
+  cut: { readonly start: number; readonly end: number; readonly lines: readonly string[] },
+): { body: string; chunk: readonly string[] } | null {
+  const { start, end } = cut;
+  const fm = frontmatterLineCount(body);
+  const all = body.split('\n');
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start < fm || end < start) return null;
+  if (end >= all.length) return null;
+  if (cut.lines.length !== end - start + 1) return null;
+  for (let i = 0; i < cut.lines.length; i += 1) if (all[start + i] !== cut.lines[i]) return null;
+  if (insideContainer(scanContainers(all.slice(fm).join('\n')), start - fm)) return null;
+  const { chunk, rest } = cutChunk(all, fm, start, end);
+  return { body: rest.join('\n'), chunk };
 }
 
 /** `moveLinesWithInverse` の本文だけ。 */

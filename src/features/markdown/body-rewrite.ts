@@ -23,7 +23,7 @@ import { acceptsExternalImage, rewriteAdopted } from '../asset/inline-url-adopt'
 import { DELIMITER, csvEscapeField, parseCsv, type CsvPositions } from './csv-table';
 import { parseRenderableFence } from './markdown-render';
 import { containerAtLine, quoteLead } from './source-blocks';
-import { insertLines, moveLines, type InsertAnchor } from './line-move';
+import { cutLines, insertLines, moveLines, type InsertAnchor } from './line-move';
 import { gfmCellText } from './html-to-markdown';
 import {
   convertTable,
@@ -267,6 +267,21 @@ export type BodyRewrite =
     }
   | {
       /**
+       * 🔴 **本文の塊を切り取る**(#684 段③ ── 別のノートへ持っていく「元の側」)。
+       *
+       * ⚠ **単独では撃たない** ── 行き先へ入ったことを確かめてから、同じ 1 op の中で
+       *   効果層が撃つ(`REQUEST_BLOCK_HANDOFF`)。切るだけの口を作ると、
+       *   入れ損ねた回に本文が消える。
+       * ⚠ ここに在るのは **ack の顔**(`BODY_REWRITTEN` が何をしたかを運ぶ)である ──
+       *   `applyBodyRewrite` からは撃たれない(効果層が `cutLines` を直に呼ぶ)。
+       */
+      kind: 'cut-lines';
+      start: number;
+      end: number;
+      lines: readonly string[];
+    }
+  | {
+      /**
        * 🔴 **本文の塊を動かす**(#684 段①)── `start..end` の行を `toBefore` の前へ。
        * ⚠ 座標は**生の body**(`task` と同じ)。掴んだ時点の行そのもの(`lines`)を添え、
        *   disk 側で byte 一致しなければ書かない(`place-move` の `openLine` と同じ作法)。
@@ -458,6 +473,18 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
     const next = rewriteAdopted(body, new Map(Object.entries(rewrite.adopted)), acceptsExternalImage);
     return next.text === body ? null : next.text;
   }
+  /**
+   * 🔴 **切り取り**(#684 段③)。
+   *
+   * ⚠ **ここは「合流」の口である** ── 保存に失敗した状態(`phase: 'error'`)から
+   *   基底へ書換を当て直す経路(`app-state.ts` の `BODY_REWRITTEN`)が通る。
+   *   🔴 1 稿目は「配線の取り違えだから何もしない」と書いて `null` を返していたが、
+   *   **事実と違った**(着地前レビュー 💭-2)── そこで捨てると基底に切り取りが
+   *   反映されず、**再保存で塊が元へ戻って二重になる**。
+   * 🔑 撃つ口が増えるわけではない ── 段③ を**始める**のは効果層の 1 か所だけで
+   *   (`REQUEST_BLOCK_HANDOFF`。必ず「入れてから」)、ここはその ack を当て直すだけである。
+   */
+  if (rewrite.kind === 'cut-lines') return cutLines(body, rewrite)?.body ?? null;
   const lines = body.split('\n');
   const line = lines[rewrite.line];
   if (line === undefined) return null;

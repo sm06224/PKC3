@@ -595,6 +595,35 @@ describe('本文の塊を動かす(#684 段① move-lines)', () => {
   });
 });
 
+/**
+ * 🔴 **切り取り**(#684 段③ `cut-lines`)── ここは**合流**の口である。
+ *
+ * ⚠ 段③ を始めるのは効果層の 1 か所だけ(必ず「入れてから切る」)だが、
+ *   保存に失敗した状態から**基底へ書換を当て直す**経路がここを通る。
+ *   🔴 捨てると基底に切り取りが反映されず、**再保存で塊が元へ戻って二重になる**
+ *   (着地前レビュー 💭-2 / 変異 R5)。
+ */
+describe('本文の塊を切り取る(#684 段③ cut-lines)', () => {
+  const DOC = ['# 題', '', '段落 A', '', '段落 B', ''].join('\n');
+
+  it('掴んだ時点の行と合えば切る(隣の空行 1 本ごと ── 段① と同じ規則)', () => {
+    expect(applyBodyRewrite(DOC, { kind: 'cut-lines', start: 2, end: 2, lines: ['段落 A'] })).toBe(
+      ['# 題', '', '段落 B', ''].join('\n'),
+    );
+  });
+
+  it('🔴 合わなければ切らない(当てずっぽうで別の所を消さない)', () => {
+    expect(
+      applyBodyRewrite(DOC, { kind: 'cut-lines', start: 2, end: 2, lines: ['別の字'] }),
+      '掴んだ時点の行と違うのに切った',
+    ).toBeNull();
+    expect(
+      applyBodyRewrite(DOC, { kind: 'cut-lines', start: 99, end: 99, lines: ['段落 A'] }),
+      '範囲の外なのに切った',
+    ).toBeNull();
+  });
+});
+
 describe('本文へ行を差し込む(#684 段② insert-lines)', () => {
   const DOC = ['# 題', '', '段落', '', '```', 'code', '```', '', ':::note', '中', ':::', ''].join('\n');
   const LINK = ['[相手](entry:n2)'];

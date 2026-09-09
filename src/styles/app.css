@@ -5336,8 +5336,14 @@ li[data-pkc-row-slot] {
   outline: 1px solid var(--accent);
   outline-offset: -1px;
 }
-/* 落とし先(掴んだものを上に置いている場所)。⚠ 行の高さを変えない(ずれると狙えない) */
-[data-pkc-drop][data-pkc-dropping] {
+/* 落とし先(掴んだものを上に置いている場所)。⚠ 行の高さを変えない(ずれると狙えない)
+ * 🔴 **`data-pkc-entry` の行も光らせる**(#684 段③、2026-09-09 の UX レビュー)──
+ *   `data-pkc-drop` が付くのは**フォルダと入れ物の行だけ**なので、塊の持っていき先
+ *   (普通のノートの行)は**印を付けても画面が 1px も変わらなかった**。
+ *   ⚠ 属性を見る test は緑のままだった ── 「印が出る」の観測点が DOM だけだと、
+ *   user に届いているかは分からない(CLAUDE.md「焼けたと届いたの間に何段あるか」)。 */
+[data-pkc-drop][data-pkc-dropping],
+[data-pkc-entry][data-pkc-dropping] {
   outline: 2px dashed var(--accent);
   outline-offset: -2px;
 }

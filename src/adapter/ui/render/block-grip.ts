@@ -83,7 +83,12 @@ function ensureGrip(anchor: HTMLElement): HTMLElement {
     grip.setAttribute('draggable', 'true');
     // ⚠ 文言は**起きること**で書く(user 指示 2026-08-21)
     grip.setAttribute('aria-label', 'この塊を掴んで動かす');
-    grip.title = 'この塊を掴んで、本文の別の場所へ動かします';
+    /**
+     * ⚠ **別のノートへ「移る」ことも字で言う**(#684 段③、2026-09-09 の UX レビュー)──
+     *   段② が「一覧の行 → 本文」を**写す**(元は動かない)と教えているので、
+     *   逆向きが**移す**(元から消える)なのは、言わないと取り違える。
+     */
+    grip.title = 'この塊を掴んで、本文の別の場所や別のノートへ移します';
     grip.textContent = '⠿';
     grip.hidden = true;
     anchor.append(grip);
