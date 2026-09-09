@@ -224,6 +224,8 @@ import {
 import { createAssetGate } from '@adapter/ui/actions/asset-gate';
 import { generateAssetKey } from '@adapter/platform/storage/asset-key';
 import { downloadBlob, downloadUrl } from '@adapter/platform/download';
+import { downloadSelfhostBundle } from '@adapter/ui/actions/selfhost';
+import { dayStamp } from '@features/datetime/date-math';
 import { diagramFileName } from '@features/export/file-name';
 import { renderToSvg, readPalette, svgWithIntrinsicSize } from '@adapter/ui/render/mermaid-raster';
 import { MERMAID_KIND } from '@adapter/ui/render/mermaid-hydrate';
@@ -1219,6 +1221,25 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     noticeLine = text;
     paint();
     paintOpen();
+  };
+  /**
+   * 🔴 **自分のパソコンで動かす一式を落とす**(#532 段 B)。
+   *
+   * ⚠ 取りに行く先は**相対**(`./precache.json` / `./assets/…`)── `base: './'` で
+   *   組んであるので、`/dev/` でも sub-path でも同じ 1 本で通る(門は #532 S1 の
+   *   `tests/smoke/sub-path.smoke.spec.ts`)。
+   * ⚠ **失敗を無言にしない** ── 8 MB ぶん集めるので、黙って終わると user には
+   *   「押したのに何も起きない」に見える。
+   */
+  const runSelfhostDownload = (): void => {
+    void downloadSelfhostBundle({
+      fetchFile: (path) => fetch(new URL(path, document.baseURI).href, { cache: 'no-store' }),
+      download: downloadBlob,
+      notify: showStatus,
+      stamp: () => dayStamp(new Date()),
+    }).catch((e: unknown) => {
+      showStatus(`一式を組めませんでした: ${e instanceof Error ? e.message : String(e)}`);
+    });
   };
   /**
    * 🔴 **左の列の欄へ焦点を入れる**(#680)── 探す面の別窓が塞がれたときの退避先。
@@ -2551,6 +2572,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
         // #148 組み込みタイル ── 文書なしで開く = Start Center(#174 の一言込み)
         openOffice: openOfficeTile,
+        // 🔴 **自分のパソコンで動かす**(#532 段 B)── 配線は 1 つ(下も同じ物を渡す)
+        downloadSelfhost: runSelfhostDownload,
         // 🔴 **組み込みタイルは別窓で開く**(#300 段③)。⚠ 判断と文言は
         //    `view-window.ts` に在る ── この file はどの test からも実行されない
         //    ので、配線だけ置く。⚠ 窓が塞がれたときの退避は `openInPane`(段⑤)。
@@ -2624,6 +2647,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             // ⚠ 添付起動の経路に組み込みタイルは来ない(kind は 'app' 固定)が、
             //    依存の実体も 1 つに保つ(§7)
             openOffice: openOfficeTile,
+            downloadSelfhost: runSelfhostDownload,
             // 🔴 **別窓で開く**(#300 段③)。⚠ 判断と文言は `view-window.ts` に在る
             //    ── 上と同じ配線(§7:依存の実体を 1 つに保つ)
             openView: (view) =>

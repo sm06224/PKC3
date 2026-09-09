@@ -54,6 +54,9 @@ function harness(opts: { granted?: boolean; answer?: boolean } = {}) {
     baseUrl: 'http://x.test/',
     readSeed: () => ({}),
     fail: () => {},
+    downloadSelfhost: () => {
+      throw new Error('この台では押されないはず(自分のパソコンで動かす)');
+    },
     openOffice: () => {},
     openView: () => {},
     openManual: () => {},

@@ -903,6 +903,9 @@ describe('2 ペインの導線(#241。アプリの組み込みタイル)', () =>
         fail: (m) => {
           throw new Error(`断られた: ${m}`);
         },
+        downloadSelfhost: () => {
+          throw new Error('この台では押されないはず(自分のパソコンで動かす)');
+        },
         openOffice: () => {
           officeOpened += 1;
         },

@@ -53,6 +53,8 @@ interface Harness {
   dualOpens: { n: number };
   /** `openManual` が呼ばれた回数(#645 の観測点)。 */
   manualOpens: { n: number };
+  /** `downloadSelfhost` が呼ばれた回数(#532 段 B の観測点)。 */
+  selfhostRuns: { n: number };
   /** ⚠ どの面へ切り替えたか(#276 で口が 1 本になった)。 */
   viewOpens: string[];
   closeWindow: () => void;
@@ -71,6 +73,7 @@ function harness(
   const officeOpens = { n: 0 };
   const dualOpens = { n: 0 };
   const manualOpens = { n: 0 };
+  const selfhostRuns = { n: 0 };
   const viewOpens: string[] = [];
   const win = fakeWindow();
   let release: (() => void) | null = null;
@@ -85,6 +88,7 @@ function harness(
     officeOpens,
     dualOpens,
     manualOpens,
+    selfhostRuns,
     viewOpens,
     closeWindow: () => {
       win.closed = true;
@@ -112,6 +116,9 @@ function harness(
         return opts.seed ?? {};
       },
       fail: (m) => failures.push(m),
+      downloadSelfhost: () => {
+        selfhostRuns.n += 1;
+      },
       openOffice: () => {
         officeOpens.n += 1;
       },
@@ -521,5 +528,27 @@ describe('main.ts の配線(原文 pin ── #174)', () => {
     const h = harness(null);
     void launchTile({ lid: 'builtin:manual', title: 'm', group: '', kind: 'manual' }, h.deps);
     expect(h.manualOpens.n, 'await をまたいでから開いている').toBe(1);
+  });
+
+  /**
+   * 🔴 **自分のパソコンで動かす**(#532 段 B)── 押すと**窓ではなく一式が落ちる**。
+   *
+   * ⚠ 分岐を足し忘れても **tsc は 1 行も文句を言わない**(下の `assetKey === undefined`
+   *   へ落ちるだけ)── 症状は「押しても何も起きない」という無言の dead click である。
+   *   だからここで名指しで見る(マニュアルと同じ理由)。
+   */
+  it('🔴 自分のパソコンで動かす、は一式を落とす口へ行く', () => {
+    const h = harness(null);
+    void launchTile(
+      { lid: 'builtin:selfhost', title: '自分のパソコンで動かす', group: '', kind: 'selfhost' },
+      h.deps,
+    );
+    expect(h.selfhostRuns.n, '一式の口へ行かない(無言の dead click)').toBe(1);
+    // ⚠ **対照群** ── 窓は 1 枚も開かない(これは「面」ではない)
+    expect(h.viewOpens, '面の別窓の口へ流れている').toEqual([]);
+    expect(h.manualOpens.n).toBe(0);
+    expect(h.officeOpens.n).toBe(0);
+    expect(h.opened, '窓を開いている(zip が落ちるだけのはず)').toEqual([]);
+    expect(h.failures, '理由が出た').toEqual([]);
   });
 });

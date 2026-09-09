@@ -11,6 +11,7 @@ import { readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import type { Plugin, ResolvedConfig } from 'vite';
 import { shouldPrecache, swSource } from '../src/adapter/platform/sw/sw-source.ts';
+import { PRECACHE_LIST_FILE } from '../src/features/selfhost/precache-list.ts';
 
 /** `public/` の中身を列挙する(`dist` へそのままコピーされる)。 */
 function listPublic(dir: string): string[] {
@@ -52,7 +53,28 @@ export function swPlugin(buildIdFor: (precache: readonly string[]) => string): P
       const staticFiles = listPublic(publicDir).filter(shouldPrecache);
       // index.html は navigation の fallback として**必ず要る**ので先頭に置く
       const rest = [...staticFiles, ...files].filter((f) => f !== 'index.html');
-      const precache = ['index.html', ...new Set(rest)].map((f) => `./${f}`);
+      /**
+       * 🔴 **一覧そのものも配る**(#532 段 B)。
+       *
+       * 「自分のパソコンで動かす」は、**配っている file を 1 つ残らず**集めて zip に
+       * するので、その一覧が要る。⚠ いま一覧が在るのは `sw.js` の**コードの中**
+       * だけで、アプリから読むには JS を正規表現で削る形になる ── それは
+       * 「読む側と書く側で綴りが 2 か所に割れる」の典型である(CLAUDE.md §7)。
+       * 🔑 だから**同じ配列を data として 1 つ emit する**。⚠ 2 つが食い違わない
+       *   ことは `scripts/dist-inspect.mjs` が**両方向**で検める
+       *   (どちらかにしか無い名前が 1 つでもあれば落ちる)。
+       * ⚠ この file 自身も precache に入れる ── 入れないと
+       *   「precache に載っていない生成物がある」で検品が落ちる(#400 段④ の雛形とは違い、
+       *   これは**アプリの一部**である)。
+       */
+      const precache = ['index.html', ...new Set([...rest, PRECACHE_LIST_FILE])].map(
+        (f) => `./${f}`,
+      );
+      this.emitFile({
+        type: 'asset',
+        fileName: PRECACHE_LIST_FILE,
+        source: `${JSON.stringify(precache, null, 0)}\n`,
+      });
       this.emitFile({
         type: 'asset',
         fileName: 'sw.js', // ⚠ hash を付けない(登録 URL が変わると別 SW になる)

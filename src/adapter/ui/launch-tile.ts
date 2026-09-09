@@ -54,6 +54,17 @@ export interface LaunchDeps {
    */
   openOffice: () => void;
   /**
+   * 🔴 **自分のパソコンで動かす一式を落とす**(#532 段 B)。
+   *
+   * ⚠ **optional にしない** ── 配線を落としても tsc が黙ると、戻ってくる症状は
+   *   「押しても何も起きない」という**無言の dead click**である
+   *   (`repo-hygiene` の「受け手のいない `data-pkc-action`」が見るのは名前だけで、
+   *   中身が空の枝は見えない ── CLAUDE.md §1)。
+   * ⚠ 窓は開かないので `await` の後ろでもよいが、**押した直後に画面へ言う**のは
+   *   実装の側(`actions/selfhost.ts`)が持つ。
+   */
+  downloadSelfhost: () => void;
+  /**
    * 🔴 **組み込みアプリを別窓で開く**(#300 段③、2026-08-22。user 要望
    * 「組み込みのアプリに関しては全て別窓で作業したい Office みたいに!」)。
    *
@@ -206,6 +217,12 @@ export async function launchTile(
     // 🔑 組み込み(#645)── **PKC をもう 1 枚開かない**。窓の中はマニュアルだけである
     //    (`platform/manual-window.ts`)。⚠ `await` より前に呼ぶ(gesture を切らない)
     deps.openManual();
+    return;
+  }
+  if (tile.kind === 'selfhost') {
+    // 🔑 組み込み(#532 段 B)── **窓は開かない**。押すと zip が 1 個落ちる。
+    //    ⚠ だから `isViewMode` の 3 点(左の置き場 / 別窓 / 退避)は当たらない
+    deps.downloadSelfhost();
     return;
   }
   if (tile.kind === 'office') {
