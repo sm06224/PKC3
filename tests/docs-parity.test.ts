@@ -2091,6 +2091,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-09(「保存中…」)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-08-blocked-reason-everywhere" …` → 7854217
+     */
+    '編集中に押せないボタンが、どこから押しても同じ理由を言うようになりました',
+    /**
      * ⚠ **2026-09-09(起動直後の止まりの直し)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-08-manual-start" …` → 7d10777
      */

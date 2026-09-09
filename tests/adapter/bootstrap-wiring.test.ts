@@ -445,10 +445,24 @@ describe('書き出しの settle の配線', () => {
    * ⚠ **呼びの形ごと留める** ── `onWriting` だけを探すと、
    *   `onWritingX` に改名する変異が部分一致で生き延びる(#811 で実際に踏んだ)。
    */
-  it('🔴 書いている間の印(data-pkc-writing)が effect 層から来ている', () => {
+  it('🔴 書いている間の印(data-pkc-saving)が effect 層から来ている', () => {
     expect(MAIN, '知らせの口を渡していない').toContain(
-      "onWriting: (writing) => root.toggleAttribute('data-pkc-writing', writing)",
+      "root.toggleAttribute('data-pkc-saving', writing)",
     );
+    /**
+     * 🔴 **縦書きの印と綴りを分ける**(2026-09-09)。⚠ `data-pkc-writing` は
+     *   `document-globals.ts` が**縦書きかどうか**に使っている ── 同じ名前に
+     *   2 つの意味を載せると、次に読む人が取り違える(CLAUDE.md §9)。
+     */
+    expect(MAIN, '縦書きの印と同じ綴りへ戻っている').not.toContain(
+      "toggleAttribute('data-pkc-writing'",
+    );
+    /**
+     * 🔴 **帯へも繋がっている**(#828 ①)── 印だけ付いても、user には何も見えない。
+     * ⚠ 判断は `saving-line.ts` が持つ(`tests/features/saving-line.test.ts`)。
+     */
+    expect(MAIN, '「保存中…」を帯へ繋いでいない').toContain('saving.setWriting(writing)');
+    expect(MAIN, '帯の字に「保存中…」を載せていない').toContain('saving.line()');
   });
 
   /**
