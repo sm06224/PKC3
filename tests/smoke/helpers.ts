@@ -7,7 +7,7 @@
  *   (⚠ 2026-09-05 に **`console.info` / `console.log`** も数えるようにした ──
  *    アプリの束から出たものだけ。理由は `collectPageErrors` の中に書いた)
  */
-import { expect, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { consoleOrigin, firstAppFrame, isAppOrigin, rawFrame } from './page-errors';
 
 export async function gotoApp(page: Page): Promise<void> {
@@ -597,4 +597,78 @@ export async function openViewPane(page: Page, view: 'dual' | 'query'): Promise<
     location.hash = `#pkc?view=${v}`;
   }, view);
   await expect(page.locator(`[data-pkc-view-pane="${view}"]`)).toBeVisible({ timeout: 15_000 });
+}
+
+
+/**
+ * 🔴 **どの spec が、どの `src` を実際に動かしたか**を記録する(#820)。
+ *
+ * ## なぜ要るか ── `--only-changed` はこの repo で **0 本**を選ぶ
+ *
+ * smoke は `dist/` を配って動くので、**spec と `src` の間に import の辺が無い**。
+ * ⚠ 実測(2026-09-09):`src` を 1 file 触って `--only-changed --list` すると
+ * **0 tests**、spec を 1 本触ると 11 tests ── つまり
+ * **製品を直したときだけ「何も走らない」**という、いちばん危ない外し方をする。
+ *
+ * 🔑 だから**欠けている辺を、実行の記録から作る** ── V8 の被覆を集め、
+ * sourcemap で `src/**` へ引き戻す。⚠ これは「動かした」であって
+ * 「動かしうる」ではないので、**着地の 1 回はフルのまま**にする(TIA の定石)。
+ *
+ * ⚠ **既定では何もしない**(`PKC3_SMOKE_COVERAGE=1` のときだけ)── 毎回集めると
+ * 遅くなるうえ、集めること自体が観測を変える。記録は夜の検査で取り直す。
+ */
+/**
+ * 🔴 **この hook は「worker が最初に読んだ spec」にしか掛からない**(2026-09-09 実測)。
+ *
+ * ⚠ playwright の hook は**読み込み中の spec file**に結び付くが、この module は
+ *   2 本目以降の spec では **cache から返る = 本体が走らない**。
+ *   実測: `--workers=4` の全量で 95 test 走った時点の記録は **11 件**だった。
+ * 🔴 **落ちないので気づけない** ── 表が小さくなるだけで、その表は
+ *   **引かなすぎ**の側へ効く(走らせるべき spec を引かない)。
+ * 🔑 だから記録は `scripts/smoke-record.mjs` から **1 worker = 1 spec** で回し、
+ *   **取れたことを spec ごとに確かめる**。ここを直接 `npm run test:smoke` で
+ *   回してはいけない。
+ */
+if (process.env['PKC3_SMOKE_COVERAGE'] === '1') {
+  const dir = process.env['PKC3_COVERAGE_DIR'] ?? 'coverage-smoke';
+  test.beforeEach(async ({ page }) => {
+    // ⚠ `resetOnNavigation: false` ── アプリは分離を得るために 1 度読み直す
+    //    (`coi-reload.ts`)。既定のままだと、その前の実行が丸ごと消える
+    await page.coverage.startJSCoverage({ resetOnNavigation: false });
+  });
+  test.afterEach(async ({ page }, info) => {
+    let entries: unknown[] = [];
+    let ok = true;
+    try {
+      entries = await page.coverage.stopJSCoverage();
+    } catch {
+      // 窓を閉じた test など ── 取れなければ **取れなかったと書く**(嘘の 0 件にしない)
+      ok = false;
+    }
+    // 🔴 **その場で畳む** ── 生の被覆は 1 test で 4 MB(実測)。499 本置くと 2 GB になる
+    const { mapEntriesToSources } = (await import(
+      // @ts-expect-error -- 畳む規則は素の .mjs(ビルド対象外の CI script 群)
+      '../../scripts/smoke-cov-map.mjs'
+    )) as { mapEntriesToSources: (e: readonly unknown[]) => string[] };
+    const { mkdirSync, writeFileSync } = await import('node:fs');
+    const { join, basename } = await import('node:path');
+    const { createHash } = await import('node:crypto');
+    mkdirSync(dir, { recursive: true });
+    /**
+     * 🔴 **名前は必ず一意にする**(2026-09-09、1 回目の記録で踏んだ)。
+     *
+     * ⚠ 題名は**ほぼ日本語**なので `[^\w]+` で潰すと `_` だけになり、
+     *   **同じ spec の test が 1 つの file に上書きし合う** ── 実測で
+     *   95 test 走ったのに記録は 7 件しか残っていなかった。
+     * 🔴 これは**引きすぎ**ではなく**引かなすぎ**の側へ効くので、
+     *   「表が小さい」という顔でしか見えない(いちばん質が悪い)。
+     * 🔑 だから **`testId` を鍵にする**(題名の字に依存しない)。
+     */
+    const key = createHash('sha1').update(info.testId).digest('hex').slice(0, 12);
+    const name = `${basename(info.file)}--${key}.json`;
+    writeFileSync(
+      join(dir, name),
+      JSON.stringify({ spec: basename(info.file), ok, src: ok ? mapEntriesToSources(entries) : [] }),
+    );
+  });
 }
