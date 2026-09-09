@@ -49,7 +49,9 @@ function run(files, workers) {
       `--workers=${workers}`,
       ...files.map((f) => `${SPEC_DIR}/${f}`),
     ],
-    { stdio: ['ignore', 'ignore', 'inherit'], env: { ...process.env, PKC3_SMOKE_COVERAGE: '1' } },
+    // ⚠ **落ちた回の出力を捨てない**(CLAUDE.md §4)── playwright は失敗の中身を
+    //   stdout へ書くので、捨てると「赤が N 回あった」しか残らない(実際 1 度やった)
+    { stdio: ['ignore', 'inherit', 'inherit'], env: { ...process.env, PKC3_SMOKE_COVERAGE: '1' } },
   );
   return r.status ?? 1;
 }

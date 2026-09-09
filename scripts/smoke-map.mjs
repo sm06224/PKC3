@@ -114,6 +114,16 @@ if (records < onDisk.tests) {
  */
 for (const p of onDisk.per) if (!bySpec.has(p.spec)) always.add(p.spec);
 
+/**
+ * ⚠ **`src` を 1 file も動かさなかった spec も `always` へ**(2026-09-09 実測で 3 本)。
+ *
+ * 記録は取れているのに引き当てが 0 件、という形が在る(アプリの束を読まない面を
+ * 見ている spec 等)。🔴 そのまま表へ入れると **pick-smoke は二度と引かない** ──
+ * 「動かしていないから走らせなくてよい」は**こちらの推測**であって、記録が
+ * 言っていることではない。安全側は常に「走らせる」。
+ */
+for (const [spec, set] of bySpec) if (set.size === 0) always.add(spec);
+
 const src = [...known].sort();
 const at = new Map(src.map((s, i) => [s, i]));
 const specs = {};
