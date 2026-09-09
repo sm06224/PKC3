@@ -25,9 +25,17 @@ export interface CopiedItem {
   readonly text: string;
   /** 貼り先が rich のときに使う形。無ければ空文字。 */
   readonly html: string;
-  /** どこからコピーしたか(ノートの題名など)。無ければ空文字。 */
-  readonly from: string;
 }
+
+/**
+ * ⚠ **「どこからコピーしたか」は持たない**(2026-09-09)。
+ *
+ * 設計の下書きでは `from`(ノートの題名)を置いていたが、**コピーの口は
+ * それを知らない** ── 知っているのは呼び側 13 か所のうち数か所だけである。
+ * 🔴 **座席だけ取ってある field は、次に読む人に「在る」と誤解させる**
+ * (`schema.ts` の `workspaces` が同じ戒めを持っている)。
+ * 🔑 呼び側が渡せるようになった日に足す。
+ */
 
 /**
  * 🔴 **残す件数**(issue の推薦)。
@@ -82,7 +90,7 @@ export function pushCopied(
 
 /** 1 件の重さ(おおよそ)。⚠ UTF-16 の符号単位で数える ── 置き場が持つ形と揃える。 */
 export function copyWeight(item: CopiedItem): number {
-  return item.text.length + item.html.length + item.from.length;
+  return item.text.length + item.html.length;
 }
 
 /**

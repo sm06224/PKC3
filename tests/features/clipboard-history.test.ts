@@ -20,7 +20,7 @@ import {
   type CopiedItem,
 } from '../../src/features/clipboard/history';
 
-const item = (text: string, at = 1, from = ''): CopiedItem => ({ at, text, html: '', from });
+const item = (text: string, at = 1): CopiedItem => ({ at, text, html: '' });
 
 describe('積む規則', () => {
   it('新しいものが先頭に来る', () => {
@@ -65,7 +65,7 @@ describe('積む規則', () => {
 describe('🔴 総量でも切る(件数だけでは破れる)', () => {
   it('大きい物が続くと、20 件に届く前に古いものから落ちる', () => {
     // ⚠ 1 件 400 KB を 4 件 ── 件数は 20 の内だが、総量 1 MB を超える
-    const big = (n: number): CopiedItem => ({ at: n, text: 'x'.repeat(400_000), html: '', from: '' });
+    const big = (n: number): CopiedItem => ({ at: n, text: 'x'.repeat(400_000), html: '' });
     let list: CopiedItem[] = [];
     for (let i = 0; i < 4; i += 1) list = pushCopied(list, { ...big(i), text: 'x'.repeat(400_000) + String(i) });
     expect(list.length, '総量を無視して 4 件持っている').toBeLessThan(4);
@@ -75,13 +75,13 @@ describe('🔴 総量でも切る(件数だけでは破れる)', () => {
   });
 
   it('🔴 先頭の 1 件は、単独で超えていても残す(いまコピーした物が消えない)', () => {
-    const huge: CopiedItem = { at: 1, text: 'x'.repeat(COPY_HISTORY_BYTES_MAX * 2), html: '', from: '' };
+    const huge: CopiedItem = { at: 1, text: 'x'.repeat(COPY_HISTORY_BYTES_MAX * 2), html: '' };
     expect(fitCopied([huge]), 'いまコピーした物が履歴から消えた').toHaveLength(1);
   });
 
   it('⚠ 小さい物なら 20 件まで入る(総量の規則が常に効いていない)', () => {
     let list: CopiedItem[] = [];
-    for (let i = 0; i < COPY_HISTORY_MAX; i += 1) list = pushCopied(list, { at: i, text: `t${String(i)}`, html: '', from: '' });
+    for (let i = 0; i < COPY_HISTORY_MAX; i += 1) list = pushCopied(list, { at: i, text: `t${String(i)}`, html: '' });
     expect(list).toHaveLength(COPY_HISTORY_MAX);
   });
 });

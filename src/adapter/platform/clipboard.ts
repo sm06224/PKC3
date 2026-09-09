@@ -9,9 +9,50 @@
  * fallback 連鎖: clipboard.write(ClipboardItem) → clipboard.writeText →
  * 隠し textarea + execCommand('copy')。**never throw、boolean を resolve**
  * (caller は成功時だけ flash を出す)。
+ *
+ * ## 🔴 履歴へ積むのは**ここ**である(#678、2026-09-09)
+ *
+ * コピーの口はこの 2 つだけで、そこに**13 か所**が集まっている。
+ * ⚠ 呼び側を 1 つずつ拾う形にすると、**次に増えた 1 か所を必ず数え漏らす**
+ * (CLAUDE.md §7「同じ問いに答える口が 2 つあると、片方だけ壊しても届かない」)。
+ * 🔑 だから口の中で積む ── 呼び側は 1 行も変えない。
+ *
+ * ⚠ **二重に積まない。** `copyMarkdownAndHtml` は失敗すると
+ * `copyPlainText` へ落ちるので、**落ちた先で積む**(rich が通った回だけ、
+ * こちらが html つきで積む)。
+ * ⚠ **成功した回だけ積む** ── 写せていない物を履歴に出すと、押しても
+ * 貼れない行が並ぶ。
  */
 
+import { appCopyHistory } from './copy-history-store';
+import type { CopiedItem } from '@features/clipboard/history';
+
+/**
+ * 履歴へ積む口。⚠ **既定で本物へ繋いである** ── 差し替え式にして main で配線すると、
+ * 落とした日に **tsc も test も黙る**(症状は「コピーしたのに履歴に無い」)。
+ * test だけが `setCopyRecorder` で差し替える。
+ */
+let record: (item: CopiedItem) => void = (item) => {
+  appCopyHistory.push(item);
+};
+
+/** ⚠ **test 専用**。製品では呼ばない(呼ぶ場所が増えたら、それは配線の分岐である)。 */
+export function setCopyRecorder(fn: (item: CopiedItem) => void): () => void {
+  const prev = record;
+  record = fn;
+  return () => {
+    record = prev;
+  };
+}
+
 export async function copyPlainText(text: string): Promise<boolean> {
+  const ok = await writePlain(text);
+  // ⚠ 成功した回だけ積む(写せていない物を一覧に出さない)
+  if (ok) record({ at: Date.now(), text, html: '' });
+  return ok;
+}
+
+async function writePlain(text: string): Promise<boolean> {
   if (
     typeof navigator !== 'undefined' &&
     navigator.clipboard &&
@@ -47,11 +88,13 @@ export async function copyMarkdownAndHtml(
         'text/html': new Blob([html], { type: 'text/html' }),
       });
       await navigator.clipboard.write([item]);
+      record({ at: Date.now(), text: markdown, html });
       return true;
     } catch {
       // fall through to plain text
     }
   }
+  // ⚠ 落ちた先が積む(ここで積むと二重になる)
   return copyPlainText(markdown);
 }
 
