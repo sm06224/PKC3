@@ -104,12 +104,27 @@ describe('同梱の sqlite', () => {
     expect(modules).not.toContain(mod as string);
   });
 
-  it.each([
-    ['正規表現(REGEXP)', "select 'a' regexp 'a'"],
-    ['拡張の読み込み', "select load_extension('x')"],
-    ['uuid()', 'select uuid()'],
-  ])('🔴 %s は使えない', (_name, sql) => {
-    expect(works(sql as string)).toBe(false);
+  /**
+   * ⚠ **「呼んで落ちるか」で見ない**(着地前レビュー 2026-09-09)── `works()` は
+   *   例外を丸ごと握り潰すので、「**関数が無い**」と「**在るが今回の呼び方で落ちた**」を
+   *   区別できない。🔴 とくに `load_extension` は、**有効な版では
+   *   `not authorized` を投げる**ので、**在っても `false` のまま**になる ──
+   *   つまり上の「入ったら鳴る」という合図が**原理的に鳴らない**。
+   * 🔑 だから**名簿を引く**(`pragma_function_list`)。
+   */
+  it.each([['regexp'], ['load_extension'], ['uuid'], ['soundex']])(
+    '🔴 %s という関数は名簿に無い',
+    (name) => {
+      expect(list(`select name from pragma_function_list where name = '${name as string}'`)).toEqual(
+        [],
+      );
+    },
+  );
+
+  /** ⚠ 空振り防止 ── 名簿の引き方そのものが死んでいたら、上は全部通る。 */
+  it('名簿の引き方が生きている(在る関数は引ける)', () => {
+    expect(list("select name from pragma_function_list where name = 'replace'")).toEqual(['replace']);
+    expect(modules.length, '仮想表の一覧が空 = 数えられていない').toBeGreaterThan(5);
   });
 
   /**
@@ -146,18 +161,51 @@ describe('🔴 段② が寄りかかる 2 つ', () => {
     expect(db.selectValue('select count(*) from qo_control')).toBe(0);
 
     db.exec({ sql: 'pragma query_only = 1' });
-    expect(db.selectValue('pragma query_only')).toBe(1);
-    // 🔴 書けない
-    expect(() => db.exec({ sql: 'create table qo_blocked(a)' })).toThrow(/readonly/i);
-    expect(() => db.exec({ sql: 'insert into qo_control values (1)' })).toThrow(/readonly/i);
-    // 🟢 読めるほうは通る(門ごと閉じてしまっては使えない)
-    expect(db.selectValue('select 1 + 1')).toBe(2);
-
-    db.exec({ sql: 'pragma query_only = 0' });
+    /**
+     * ⚠ **戻しは `finally` に入れる**(着地前レビュー 2026-09-09)── 直す前は
+     *   assert 4 つの後ろに素で置いてあったので、**1 つでも落ちると戻らない**。
+     *   🔴 `db` は file の中で共有なので、**次の test が「書けない」で巻き添えに落ちる**
+     *   ── 「終わらない問い合わせを止められない」ように読めてしまう(実際は
+     *   接続が読み取り専用のまま)。
+     */
+    try {
+      expect(db.selectValue('pragma query_only')).toBe(1);
+      // 🔴 書けない
+      expect(() => db.exec({ sql: 'create table qo_blocked(a)' })).toThrow(/readonly/i);
+      expect(() => db.exec({ sql: 'insert into qo_control values (1)' })).toThrow(/readonly/i);
+      // 🟢 読めるほうは通る(門ごと閉じてしまっては使えない)
+      expect(db.selectValue('select 1 + 1')).toBe(2);
+    } finally {
+      db.exec({ sql: 'pragma query_only = 0' });
+    }
     // ⚠ **戻ることまで見る** ── 戻らないと、この面を 1 度開いた user は
     //   以後ノートを保存できなくなる(同じ接続を使うので)
     db.exec({ sql: 'insert into qo_control values (1)' });
     expect(db.selectValue('select count(*) from qo_control')).toBe(1);
+  });
+
+  /**
+   * 🔴 **字の門が「語の直後の `(` は関数」と緩めた根拠**(2026-09-09)。
+   *
+   * ⚠ `replace()` は普通の関数なので、`SELECT replace(a,'1','2')` を断ってはいけない。
+   *   そこで「直後が `(` なら関数」と緩めたが、**緩めた分が抜け道でないこと**は
+   *   engine 側の事実に寄りかかっている ── **書き込み文は語の直後に `(` を置けない**。
+   * 🔑 だからここで pin する。⚠ ここが `OK` に変わったら、字の門の緩和を**取り消す**
+   *   合図である(この test が、その日にいちばん早く鳴る計器になる)。
+   */
+  it.each([
+    ['WITH x(a) AS (SELECT 1) REPLACE(a) INTO hole SELECT a FROM x'],
+    ['WITH x(a) AS (SELECT 1) DELETE(a) FROM hole'],
+    ['DELETE (a) FROM hole'],
+    ['UPDATE (hole) SET a = 9'],
+    ['INSERT (INTO) hole VALUES (3)'],
+  ])('🔴 書き込みの語の直後に `(` は置けない ── %s', (sql) => {
+    db.exec({ sql: 'create table if not exists hole(a)' });
+    // ⚠ 空振り防止 ── 表が在って、普通の書き込みなら通ることを見る
+    db.exec({ sql: 'delete from hole' });
+    db.exec({ sql: 'insert into hole values (1)' });
+    expect(() => db.exec({ sql: sql as string })).toThrow();
+    expect(db.selectValue('select count(*) from hole'), '1 行も動いていないこと').toBe(1);
   });
 
   it('終わらない問い合わせを、進み具合の見張りで止められる', () => {

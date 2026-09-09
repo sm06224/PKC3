@@ -49,6 +49,13 @@ export interface SqlCheck {
    * 🔴 **実際に打つべき字**(全角を半角へ直した後)。
    * ⚠ 呼ぶ側は**これを打つ** ── 元の字を打つと、日本語入力のまま書いた人だけ
    *   sqlite の構文エラーになる(門は通ったのに動かない、が最悪の形である)。
+   *
+   * 🔴 **約束を型で守るのは、ここではなく実行の口である**(着地前レビュー 2026-09-09)。
+   *   ⚠ `ok` だけ見て**元の字を打つ**書き方をしても、この形では tsc が黙る。
+   *   🔑 だから段② の実行の口は**生の文字列を受けない** ── `SqlCheck` そのものを
+   *   受け取る形にする(CLAUDE.md #178「衝突は、検出するより**起こらなくする**ほうが
+   *   強い」)。⚠ `ok:false` の側にも `sql` を残すのは、断り文の隣に
+   *   **直した後の字**を出して「なぜ断られたか」を読めるようにするためである。
    */
   readonly sql: string;
 }
@@ -66,9 +73,11 @@ export function stripSqlNoise(sql: string): string {
    * 🔴 **符号単位で切る。** `[...sql]` は**符号点**で切るので、絵文字 1 つにつき
    *   位置が 1 つずれ、**文字列の後ろを絵文字の数だけ余計に塗り潰す**。
    *
-   * ⚠ 実測(直す前):`SELECT '<絵文字 3 つ>'; DROP TABLE t` は `; DR` まで
-   *   食べられて `OP TABLE t` になり、**`;` も `DROP` も消えて `ok: true`** ──
-   *   つまり**全ノートを消す 2 文目が門を素通りする**。
+   * ⚠ 実測(直す前):`SELECT '<絵文字 3 つ>'; DROP TABLE t` は閉じ引用符の後ろを
+   *   3 字ぶん余計に塗り潰して **`ROP TABLE t`** になり、**`;` も `DROP` も消えて
+   *   `ok: true`** ── つまり**全ノートを消す 2 文目が門を素通りする**。
+   * ⚠ 絵文字 **1〜2 個では旧実装でも断れていた**(`DROP` が残るため)── だから
+   *   test は **3 個**でなければ、この門を守っている証拠にならない。
    */
   const out = sql.split('');
   let i = 0;
@@ -150,6 +159,15 @@ export function normalizeSqlInput(sql: string): string {
  * 🔴 **書き込む語**(白名簿の外にあるもの)。⚠ ここは**補助**であって
  * 判定の本体ではない ── 本体は「先頭が読む語か」である。
  * 🔑 `WITH` は読むだけにも書き込みにも使えるので、**中身も見る**必要がある。
+ *
+ * ⚠ **この一覧のうち、実際に書き込みが届くのは 4 語だけ**である
+ *   (着地前レビュー 2026-09-09 の実測):
+ * - 🔴 `insert` / `update` / `delete` / `replace` ── **`WITH … ` の後ろに置けて、
+ *   実際に行が動く**。だから **1 語ずつ**「その語だけが鳴る場面」を test に持つ
+ *   (`WRITE_WORDS` を丸ごと殺す変異では、この 4 つの穴は見えない)
+ * - 残りは `WITH` の後ろに置けないので、届くのは `EXPLAIN <書き込み>` の形だけ ──
+ *   ⚠ **`EXPLAIN` は文を実行しない**ので実害は無い(**それでも残す** ── 打った人に
+ *   「読み取り専用です」と言うほうが、意味の無い実行計画を出すより親切である)
  */
 const WRITE_WORDS = [
   'insert',
@@ -186,7 +204,8 @@ export function checkReadOnlySql(input: string): SqlCheck {
   const bare = stripSqlNoise(sql).trim();
   if (bare === '') return { ok: false, why: 'SQL が空です', sql };
 
-  const body = bare.replace(/;\s*$/, '');
+  // ⚠ `bare` は `trim()` 済みなので `;\s*$` の `\s*` は**到達しない**(no-op を残さない)
+  const body = bare.replace(/;$/, '');
   if (body.includes(';')) {
     return { ok: false, why: '1 度に打てるのは 1 文だけです(`;` で区切らないでください)', sql };
   }
@@ -211,12 +230,25 @@ export function checkReadOnlySql(input: string): SqlCheck {
    * ⚠ **`WITH … INSERT` は SQLite で書ける** ── 先頭だけ見ると読むだけに見える。
    * 🔑 だから**語として**書き込みの語が混じっていないかを見る
    *   (部分一致にしない ── `updated_at` という列名で止めない)。
-   * ⚠ **数字も語の一部に数える** ── `[a-z_]+` だけで切ると `insert2` が
-   *   `insert` に化け、**そういう名前の列を持つ user の表が引けなくなる**
-   *   (断る側へ倒れる誤りなので、鳴っても不具合に見えない ── だから書いておく)。
+   *
+   * ⚠ **語の切り方を間違えると、断る側へ倒れる** ── 鳴っても不具合に見えないので、
+   *   実測した 2 つを書いておく:
+   *   - **数字**も語の一部(`insert2` を `insert` に化けさせない)
+   *   - **`$`** も語の一部(SQLite の識別子文字。`a$insert` で止めない)
+   *
+   * 🔴 **直後が `(` なら関数呼び出しとみなして通す**(着地前レビュー 2026-09-09)。
+   *   ⚠ `replace()` は SQLite の標準の関数で、**文字列を置き換えるいちばん普通の書き方**
+   *   である ── 止めると `SELECT replace(title,'a','b')` が打てない。
+   *   🔑 緩めても抜け道にならないことは実測した:`REPLACE (…)` / `DELETE (a) FROM …` /
+   *   `UPDATE (t) SET …` / `INSERT (INTO) …` は**どれも sqlite が構文エラーで断る**
+   *   (文としての書き込みは、必ず語の後ろに `(` 以外が来る)。
+   * ⚠ **その事実は engine 側の話なので、engine の側で pin する** ──
+   *   `tests/adapter/sqlite-capabilities.test.ts` が同梱の sqlite に当てて確かめる。
+   *   そこが通るようになった日が、この緩和を取り消す合図である。
    */
-  const words = body.toLowerCase().match(/[a-z0-9_]+/g) ?? [];
-  const hit = words.find((w) => WRITE_WORDS.includes(w as (typeof WRITE_WORDS)[number]));
+  const hit = [...body.toLowerCase().matchAll(/([a-z0-9_$]+)(\s*\()?/g)].find(
+    (m) => m[2] === undefined && WRITE_WORDS.includes(m[1] as (typeof WRITE_WORDS)[number]),
+  )?.[1];
   if (hit !== undefined) {
     return {
       ok: false,

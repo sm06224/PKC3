@@ -31,6 +31,9 @@ describe('通すもの', () => {
     "SELECT * FROM t WHERE s = 'a;b'", // `;` が文字列の中
     'SELECT 1 -- ; DROP TABLE t', // `;` が注釈の中
     "SELECT * FROM pragma_table_info('t')", // 表を返す関数(`pragma` に化けない)
+    "SELECT replace(title, 'a', 'b') FROM entries", // 🔴 `replace()` は普通の関数
+    "SELECT replace (title, 'a', 'b') FROM entries", // ⚠ 名前と `(` の間は空けてよい
+    'SELECT a$insert FROM t', // `$` も識別子の字(`insert` に化けない)
   ])('%s', (sql) => {
     expect(ok(sql), why(sql)).toBe(true);
   });
@@ -54,9 +57,29 @@ describe('🔴 断るもの(1 つでも通ると、取り消せない壊し方�
     expect(r.why, '理由が字で出ていない').toContain(word as string);
   });
 
-  /** 🔴 **先頭だけ見ると読むだけに見える** ── SQLite は `WITH … INSERT` が書ける。 */
-  it('🔴 WITH の中に書き込みが混じっていたら断る', () => {
-    expect(ok('WITH x AS (SELECT 1) INSERT INTO t SELECT * FROM x')).toBe(false);
+  /**
+   * 🔴 **先頭だけ見ると読むだけに見える** ── SQLite は `WITH … INSERT` が書ける。
+   *
+   * ⚠ **上の表は、この門を 1 度も通っていない**(着地前レビュー 2026-09-09)──
+   *   10 行とも書き込みの語が**先頭**なので、白名簿の門だけで断られる。
+   *   実測:`WRITE_WORDS` から `delete` / `update` / `replace` を 1 語ずつ外す変異が
+   *   **3 つとも生き延び**、しかも 3 つとも同梱 3.53.0 で**実際に行が動く**。
+   * 🔑 だから **1 語につき 1 場面**を置く(CLAUDE.md「門を N 個置いたら、
+   *   N 個目だけが鳴る場面を N 通り作る」)。
+   * 🔑 そして **どちらの門が鳴ったかを文言で見分ける** ── 白名簿の門だけが
+   *   「打てるのは…」を付けるので、それが**出ていない**ことを見る。
+   *   ⚠ これが無いと、先頭語の門に救われても緑になる(= この門は空振り)。
+   */
+  it.each([
+    ['WITH x(a) AS (SELECT 1) INSERT INTO entries SELECT a FROM x', 'INSERT'],
+    ['WITH x(a) AS (SELECT 1) UPDATE entries SET body = 1', 'UPDATE'],
+    ['WITH x(a) AS (SELECT 1) DELETE FROM entries', 'DELETE'],
+    ['WITH x(a) AS (SELECT 1) REPLACE INTO entries SELECT a FROM x', 'REPLACE'],
+  ])('🔴 先頭が WITH でも %s は断る', (sql, word) => {
+    const r = checkReadOnlySql(sql as string);
+    expect(r.ok).toBe(false);
+    expect(r.why).toContain(word as string);
+    expect(r.why, '白名簿の門が鳴っている = 語の門を見ていない').not.toContain('打てるのは');
   });
 
   /** 🔴 2 文目に紛れ込ませる形 ── いちばん通しやすい抜け道である。 */
@@ -93,14 +116,28 @@ describe('注釈と文字列を落とす', () => {
     expect(stripSqlNoise("SELECT 'DROP'")).not.toContain('DROP');
   });
 
-  /** ⚠ SQLite の `''` は 1 つの `'` ── ここで切ると、後ろが全部文字列に見える。 */
-  it("'' を含む文字列でも、終わりを正しく見つける", () => {
+  /**
+   * ⚠ **これは「危ないから守っている」test ではない**(着地前レビュー 2026-09-09 で
+   *   コメントが実装と正反対だったのを直した)。
+   * 🔑 実装は `''` を**特別扱いしない** ── 素朴に閉じると `'a''b'` は 2 本に割れるが、
+   *   **塗り潰す字は同じ**なので結果が変わらない(自前の総当たりで差 0 件)。
+   *   ここはその**回帰の錨**である。
+   */
+  it("'' を含む文字列でも、結果は同じ(素朴に閉じてよい)", () => {
     expect(ok("SELECT 'it''s ok' AS s")).toBe(true);
   });
 
   it.each([['"'], ['`'], ['[']])('識別子(%s)の中身も落とす', (q) => {
     const close = q === '[' ? ']' : (q as string);
     expect(stripSqlNoise(`SELECT ${q as string}DROP${close} FROM t`)).not.toContain('DROP');
+  });
+
+  /**
+   * ⚠ **端を 1 字残す誤りは、語にならない字しか残さないので気づけない** ──
+   *   だから**等値で 1 本 pin する**(閉じ引用符と `]` の位置がずれたら落ちる)。
+   */
+  it('どこからどこまでを塗るか(等値)', () => {
+    expect(stripSqlNoise("SELECT 'ab' , [cd] , `ef` -- x")).toBe('SELECT      ,      ,          ');
   });
 
   it('改行は残す(行番号がずれない)', () => {
@@ -133,6 +170,18 @@ describe('🔴 日本語入力のまま打たれても通る', () => {
     const r = checkReadOnlySql("SELECT * FROM t WHERE s LIKE '%\uff21\uff22\uff23%'");
     expect(r.ok, r.why).toBe(true);
     expect(r.sql).toContain('\uff21\uff22\uff23');
+  });
+
+  /**
+   * 🔴 **小文字と数字も直す**(着地前レビュー 2026-09-09)。
+   * ⚠ 直す前の fixture は**全角の大文字しか使っていなかった**ので、
+   *   直す範囲の上端を `ff5e` → `ff3a`(= 大文字まで)に縮める変異が**生き延びた**。
+   *   ⚠ IME を切らずに打つ人は `ｓｅｌｅｃｔ` も `１` も打つ。
+   */
+  it('全角の小文字と数字も直る', () => {
+    const r = checkReadOnlySql('\uff53\uff45\uff4c\uff45\uff43\uff54\u3000\uff11\uff0b\uff12');
+    expect(r.ok, r.why).toBe(true);
+    expect(r.sql).toBe('select 1+2');
   });
 
   /** ⚠ 対照群 ── 直す口そのものが死んでいないこと(空振り防止)。 */
