@@ -190,6 +190,18 @@ export class HelpRenderer {
     },
     /** 手放すまでの間(ms)。⚠ test は短くする。 */
     private readonly idleMs: number = HELP_MANUAL_IDLE_MS,
+    /**
+     * 🔴 **いまどこに保存しているか**(#811 の 2 番目、2026-09-09)。
+     *
+     * ⚠ 直す前、これが読めるのは**帯のツールチップだけ**だった ──
+     *   **指で触る端末では読めない**(user 報告は iPhone である)。しかも帯の 1 行は
+     *   **落ちた回にしか出ない**ので、「ちゃんと保存できている」ことを確かめる道が
+     *   画面に 1 つも無かった。
+     * 🔑 **関数で受ける**(値の写しにしない)── このタブは途中で**本体へ昇格**しうる
+     *   ので、boot の一瞬を写して持つと**古い字を出し続ける**(§7 の型)。
+     * ⚠ 既定は `null` = **出さない**(この面だけを組む test を壊さない)。
+     */
+    private readonly storageWhere: (() => string) | null = null,
   ) {}
 
   /**
@@ -221,6 +233,16 @@ export class HelpRenderer {
     host.textContent = 'マニュアルを読み込んでいます…';
   }
 
+  /**
+   * いまの保存先を書く。⚠ 器がまだ無い / 渡されていない回は**何もしない**。
+   * 🔑 字は `features/storage/storage-notice.ts` が 1 か所で持つ(ここは描くだけ)。
+   */
+  private paintStorage(): void {
+    if (this.storageWhere === null) return;
+    const el = this.region.querySelector<HTMLElement>('[data-pkc-field="help-storage"]');
+    if (el !== null) el.textContent = this.storageWhere();
+  }
+
   /** 予約を取り消す。⚠ **見せる前**に呼ぶ(見ている物を消さないため)。 */
   private cancelIdle(): void {
     if (this.idleTimer === null) return;
@@ -239,6 +261,13 @@ export class HelpRenderer {
      * 開いた直後に予約が満期を迎えて**読んでいる最中に中身が消える**。
      */
     this.cancelIdle();
+    /**
+     * 🔴 **保存先は毎回描き直す**(#811 の 2 番目)── 器は 1 度しか組まないが、
+     *   このタブは途中で**本体へ昇格**しうるので、組んだときの字のままだと
+     *   **古い保存先を出し続ける**。⚠ `built` の判定より**前**に置く
+     *   (後ろに置くと、2 回目以降は早期 return に食われて更新されない)。
+     */
+    this.paintStorage();
     if (this.built) {
       // 🔴 **手放してあったら入れ直す**(#531 H3)。⚠ 器は在るので、
       //    描き直すのは**中身だけ**である
@@ -295,6 +324,21 @@ export class HelpRenderer {
     // ⚠ ここは**見せる字**なので `versionLine()`(日時つき)── 入れ替えの印は `versionText()`
     ver.textContent = `この版: ${versionLine()}(不具合の報告に添えてください)`;
     body.append(ver);
+
+    /**
+     * 🔴 **保存先も、版の隣に字で出す**(#811 の 2 番目)。
+     * ⚠ **版と同じ扱い** ── どちらも「困ったときに見に来る事実」で、
+     *   帯のツールチップは指で触る端末では読めない。
+     * ⚠ **毎回描き直す**(下の `render()` 側)── 本体へ昇格すると字が変わる。
+     */
+    if (this.storageWhere !== null) {
+      const where = document.createElement('p');
+      where.setAttribute('data-pkc-field', 'help-storage');
+      // ⚠ **組んだその場でも書く** ── `render()` の頭の塗り直しは、まだ器が無いので
+      //   1 回目は空振りする(2 回目以降だけが通る)
+      where.textContent = this.storageWhere();
+      body.append(where);
+    }
 
 
     /**

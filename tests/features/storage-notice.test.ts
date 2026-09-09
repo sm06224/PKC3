@@ -26,6 +26,7 @@ import { join } from 'node:path';
 import { codeOnly } from '../helpers/code-only';
 import {
   STORAGE_FALLBACK_LINE,
+  storageWhereLine,
   storageFallbackError,
   storageStatusLine,
   storageStatusTitle,
@@ -92,5 +93,39 @@ describe('保存先が取れなかったときの言い方(#811)', () => {
     expect(src, '止める側が別の言い方に戻っている').toContain('storageFallbackError(init.fallbackReason)');
     // 🔴 空振り防止 ── 直す前の綴りが残っていないこと(戻したら落ちる)
     expect(src, '例外の綴りをそのまま出す形が残っている').not.toContain('`⚠ ${init.fallbackReason}`');
+  });
+});
+
+/**
+ * 🔴 **「いまどこに保存しているか」を、指で触る端末でも読める形にする**(#811 の 2 番目)。
+ *
+ * ⚠ 直す前、これが読めるのは**帯のツールチップだけ**だった(user 報告は iPhone)。
+ * ⚠ しかも帯の 1 行は**落ちた回にしか出ない** ── 「ちゃんと保存できている」ことを
+ *   確かめる道が画面に 1 つも無かった。
+ */
+describe('いまどこに保存しているか(#811 の 2 番目)', () => {
+  it('🔴 いつもの保存先なら、残ることを言う', () => {
+    const line = storageWhereLine('opfs-sahpool', undefined);
+    expect(line, '残ると言っていない').toContain('残ります');
+    expect(line, '無用に不安を煽っている').not.toContain('消えます');
+  });
+
+  it('🔴 落ちて退避した回は、消えることを言う', () => {
+    const line = storageWhereLine('memory', 'InvalidStateError: The object is in an invalid state.');
+    expect(line, '何を失うかを言っていない').toContain('消えます');
+    // ⚠ **内部の言葉を画面に出さない**(帯の 1 行と同じ作法)
+    expect(line, 'ブラウザの例外の綴りがそのまま出ている').not.toContain('InvalidStateError');
+  });
+
+  /**
+   * 🔴 **`memory` を一律に事故として言わない**(`storageStatusLine` と同じ見分け方)。
+   * ⚠ 持ち歩ける 1 枚の HTML は**選んで** `memory` で動くので、
+   *   そこで「⚠ 消えます」と出すと**正常な使い方を事故だと告げる**ことになる。
+   * 🔑 分けるのは `fallbackReason` である(`vfs` ではない)。
+   */
+  it('🔴 持ち歩ける 1 枚の HTML(選んだ memory)は、事故として言わない', () => {
+    const line = storageWhereLine('memory', undefined);
+    expect(line, '選んだ形を事故として告げている').not.toContain('⚠');
+    expect(line, '書き出しの案内が無い(それが唯一の残し方である)').toContain('書き出して');
   });
 });

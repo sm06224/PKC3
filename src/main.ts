@@ -35,6 +35,7 @@ import {
   storageFallbackError,
   storageStatusLine,
   storageStatusTitle,
+  storageWhereLine,
 } from '@features/storage/storage-notice';
 import { appOpenInEdit } from '@adapter/ui/render/open-in-edit';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
@@ -1025,6 +1026,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * 走るので、ここが同期なら state は既に新しい本文を持っている。
      */
     (body) => dispatcher.dispatch({ type: 'UPDATE_OPEN_BODY', body }),
+    /**
+     * 🔴 **いまどこに保存しているか**(#811 の 2 番目)。⚠ **関数で渡す** ──
+     *   このタブは途中で**本体へ昇格**しうるので、boot の一瞬を写すと
+     *   古い字を出し続ける(`init` は昇格で差し替わる)。
+     * 🔑 字は `storage-notice.ts` が 1 か所で持つ ── ここは値を渡すだけである
+     *   (この file はどの test からも実行されない ── CLAUDE.md §2)。
+     */
+    () => storageWhereLine(init.vfs, init.fallbackReason),
   );
   // いま居る場所の印(変わったときだけ属性を触る)
   let markedView: string | null = null;
