@@ -37,8 +37,10 @@ export class OpenInEditStore {
    * 再読込まで効かない。
    */
   enabled(): boolean {
+    // 🔴 **保存が無い環境では控えを読む**(#278 段② の test が教えた ── 下の注記)
+    if (this.storage === null) return this.fallback;
     try {
-      return this.storage?.getItem(KEY) === '1';
+      return this.storage.getItem(KEY) === '1';
     } catch {
       return this.fallback;
     }

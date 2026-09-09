@@ -69,6 +69,7 @@ import {
   isCardPresentationLabel,
   parseCardPresentation,
 } from '../link/card-presentation';
+import { findPhones } from '../contact/phone-link';
 
 const md = new MarkdownIt({
   html: false,          // Disable HTML tags in source (XSS safety)
@@ -2453,6 +2454,65 @@ function tagLineHtml(names: readonly string[], interactive: boolean): string {
   return `<span class="pkc-tagline" data-pkc-tagline>${chips}</span>`;
 }
 
+/**
+ * 🔴 **本文に素で書いた電話番号を、押せる形にする**(#278 段②)。
+ *
+ * ⚠ **既定は切**(`env.phoneLinks`)── 設定で入れた人だけが押せる字になる。
+ *   何も選んでいない人の見え方は 1px も変わらない(user 裁定 2026-09-04 の推薦 C)。
+ * ⚠ 判定は `features/contact/phone-link.ts` が**1 か所で**持つ ── ここでは
+ *   拾った所を切って `<a href="tel:…">` にするだけである。
+ * ⚠ **リンクの中では当てない** ── `[電話](tel:…)` の字を二重にしない。
+ *   `code_inline` は別の token 型なので、`text` だけを見れば自然に外れる。
+ */
+md.core.ruler.after('inline', 'pkc-phone', function (state) {
+  if ((state.env as { phoneLinks?: boolean }).phoneLinks !== true) return true;
+  for (const token of state.tokens) {
+    if (token.type !== 'inline') continue;
+    const children = token.children;
+    if (!children) continue;
+    const out: typeof children = [];
+    let inLink = 0;
+    let changed = false;
+    for (const t of children) {
+      if (t.type === 'link_open') inLink += 1;
+      else if (t.type === 'link_close') inLink -= 1;
+      if (t.type !== 'text' || inLink > 0) {
+        out.push(t);
+        continue;
+      }
+      const hits = findPhones(t.content);
+      if (hits.length === 0) {
+        out.push(t);
+        continue;
+      }
+      let at = 0;
+      for (const h of hits) {
+        if (h.start > at) {
+          const head = new state.Token('text', '', 0);
+          head.content = t.content.slice(at, h.start);
+          out.push(head);
+        }
+        const tok = new state.Token('html_inline', '', 0);
+        // ⚠ 属性も本文も**必ず escape する**(`tagLineHtml` と同じ作法)
+        tok.content =
+          `<a class="pkc-tel" href="tel:${escapeHtmlAttr(h.tel)}">` +
+          `${md.utils.escapeHtml(h.raw)}</a>`;
+        out.push(tok);
+        at = h.end;
+        changed = true;
+      }
+      if (at < t.content.length) {
+        const tail = new state.Token('text', '', 0);
+        tail.content = t.content.slice(at);
+        out.push(tail);
+      }
+    }
+    // ⚠ 当たらなかった段落は**触らない**(token の同一性を無駄に壊さない)
+    if (changed) token.children = out;
+  }
+  return true;
+});
+
 md.core.ruler.after('inline', 'pkc-task-list', function (state) {
   const tokens = state.tokens;
   let taskIndex = 0;
@@ -2571,6 +2631,16 @@ export interface RenderMarkdownOptions {
    * ⚠ 渡さなければ属性は 1 つも出ない = 書き出しの goldens は 1 バイトも動かない。
    */
   readonly interactiveTags?: boolean;
+  /**
+   * 🔴 **本文に素で書いた電話番号を、押せる形にするか**(#278 段②。既定 `false`)。
+   *
+   * ⚠ **設定で入れた人だけ**(`pkc3.phone-links`)── 既定では属性も要素も
+   *   1 つも出ないので、書き出しの goldens は 1 バイトも動かない。
+   * ⚠ 受け手はブラウザ(`tel:` を OS へ渡す)なので、`interactiveTasks` の
+   *   ような「受け手が居る面だけ」の制約は無い ── 書き出した HTML でも押せる。
+   *   🔑 だから**渡すのは設定を読める面**である(`detail.ts` など)。
+   */
+  readonly phoneLinks?: boolean;
   /**
    * 🔴 **チェックの印が指す行を、原文の行へ戻すためのずらし**(N1)。
    *
@@ -5609,6 +5679,7 @@ export function renderMarkdown(
     interactiveTasks: boolean;
     interactiveCells: boolean;
     interactiveTags: boolean;
+    phoneLinks: boolean;
     taskLineOffset: number;
     lineMap?: number[];
     fenceAssets?: Readonly<Record<string, string>>;
@@ -5632,6 +5703,8 @@ export function renderMarkdown(
     interactiveCells: opts.interactiveCells === true,
     // 🔴 本文中のタグを押せる形で出すか(#550 段③)。既定は押せない
     interactiveTags: opts.interactiveTags === true,
+    // 🔴 素の電話番号を押せる形にするか(#278 段②)。既定は切
+    phoneLinks: opts.phoneLinks === true,
     // 🔴 剥がして描く面だけがずらす(既定 0)。理由は上の option の注記
     taskLineOffset: Number.isInteger(opts.taskLineOffset) ? (opts.taskLineOffset as number) : 0,
   };

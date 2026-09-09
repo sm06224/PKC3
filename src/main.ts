@@ -38,6 +38,7 @@ import {
   storageWhereLine,
 } from '@features/storage/storage-notice';
 import { appOpenInEdit } from '@adapter/ui/render/open-in-edit';
+import { appPhoneLinks } from '@adapter/ui/render/phone-links';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { installAppendAutofold } from '@adapter/ui/render/append-autofold';
 import { appPaneSizes, applyPaneSizes } from '@adapter/ui/render/pane-size';
@@ -2946,6 +2947,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * ⚠ 知らない値は**捨てる**(判定は `isPasteSource` の 1 か所)── 画面を
      *   描き直す必要は無い(次に貼るときから効く)が、**設定画面の値は映す**。
      */
+    /**
+     * 🔴 **本文の素の電話番号を押せる字にするか**(#278 段②)。
+     * ⚠ 保存だけでは**いま読んでいるノートは変わらない** ── 切り替えた人には
+     *   「効かなかった」に見えるので、`setExternalImages` と同じく
+     *   **描き直しまでが 1 組**である(CLAUDE.md §7「設定画面の値の同期」)。
+     */
+    setPhoneLinks: (on) => {
+      appPhoneLinks.setEnabled(on);
+      center.invalidateDetail();
+      center.render(dispatcher.getState());
+    },
     setPasteSource: (id) => {
       if (!isPasteSource(id)) return;
       if (!appPasteSource.set(id)) return;

@@ -3020,6 +3020,11 @@ describe('本文の csv を SQL から引く(#681 段③)', () => {
  * 6. 開き直すと前の客は閉じる(選び直すたびに積み上がらない)
  */
 describe('取り込んだ .sqlite を調べる(#681 段③ の 2 つ目)', () => {
+  /**
+   * この窓の合言葉(#836)。⚠ 実物は `store-port.ts` が**窓ごとに 1 回**作る ──
+   * ここでは 1 枚の窓を演じるので固定でよい(2 枚の話は下の describe が持つ)。
+   */
+  const W1 = 'w1';
   const run = (sql: string, guest = false) =>
     request({
       op: 'runReadOnlySql',
@@ -3027,7 +3032,7 @@ describe('取り込んだ .sqlite を調べる(#681 段③ の 2 つ目)', () =>
       maxRows: 100,
       maxSteps: 1_000_000,
       maxMs: 60_000,
-      ...(guest ? { guest: true } : {}),
+      ...(guest ? { guest: W1 } : {}),
     });
 
   /**
@@ -3042,12 +3047,12 @@ describe('取り込んだ .sqlite を調べる(#681 段③ の 2 つ目)', () =>
   it('🔴 でたらめな bytes は、その場で「DB として読めない」と言う', async () => {
     const junk = new Uint8Array(4096);
     junk.fill(7);
-    await expect(request({ op: 'openSqlGuest', image: junk })).rejects.toThrow(/読めません/);
+    await expect(request({ op: 'openSqlGuest', image: junk, guest: W1 })).rejects.toThrow(/読めません/);
   });
 
   it('🔴 開くと表の名前が返り、その表へ打てる', async () => {
     const img = await image();
-    const opened = await request({ op: 'openSqlGuest', image: img });
+    const opened = await request({ op: 'openSqlGuest', image: img, guest: W1 });
     expect(opened.bytes, '大きさを返していない').toBeGreaterThan(0);
     expect(opened.tables, '表の名前を返していない').toContain('entries');
     // 🔑 客の側にも `entries` は在る(この画像はこの DB の写しなので)
@@ -3063,7 +3068,7 @@ describe('取り込んだ .sqlite を調べる(#681 段③ の 2 つ目)', () =>
   it('🔴 客の DB とこちらの DB は混ざらない', async () => {
     const before = await run('SELECT count(*) AS n FROM entries');
     const img = await image();
-    await request({ op: 'openSqlGuest', image: img });
+    await request({ op: 'openSqlGuest', image: img, guest: W1 });
     // ⚠ 画像を取った後に 1 件足す ── 客は**その時点の写し**なので増えない
     await write('guest-after', doc('客を開いた後に足した'));
     const mine = await run('SELECT count(*) AS n FROM entries');
@@ -3077,7 +3082,7 @@ describe('取り込んだ .sqlite を調べる(#681 段③ の 2 つ目)', () =>
   });
 
   it('🔴 客の側でも書けない(query_only が効く)', async () => {
-    await request({ op: 'openSqlGuest', image: await image() });
+    await request({ op: 'openSqlGuest', image: await image(), guest: W1 });
     await expect(run("INSERT INTO entries (lid) VALUES ('x')", true)).rejects.toThrow(/readonly/i);
     // ⚠ 対照群 ── 断った後もこちらのノートは保存できる
     await write('guest-ro', doc('客が断られた後に書く'));
@@ -3087,26 +3092,111 @@ describe('取り込んだ .sqlite を調べる(#681 段③ の 2 つ目)', () =>
   });
 
   it('🔴 外したら手放す ── その後に打つと、黙って本体を返さずに断る', async () => {
-    await request({ op: 'openSqlGuest', image: await image() });
-    await request({ op: 'closeSqlGuest' });
+    await request({ op: 'openSqlGuest', image: await image(), guest: W1 });
+    await request({ op: 'closeSqlGuest', guest: W1 });
     await expect(run('SELECT 1', true)).rejects.toThrow(/開かれていません/);
     // ⚠ 外す口は二度押しても落ちない
-    await expect(request({ op: 'closeSqlGuest' })).resolves.toBeNull();
+    await expect(request({ op: 'closeSqlGuest', guest: W1 })).resolves.toBeNull();
   });
 
   it('⚠ 開き直しても落ちない(前の客は閉じる)', async () => {
     const img = await image();
-    await request({ op: 'openSqlGuest', image: img });
-    await request({ op: 'openSqlGuest', image: img });
+    await request({ op: 'openSqlGuest', image: img, guest: W1 });
+    await request({ op: 'openSqlGuest', image: img, guest: W1 });
     expect((await run('SELECT 1 AS n', true)).rows).toEqual([[1]]);
-    await request({ op: 'closeSqlGuest' });
+    await request({ op: 'closeSqlGuest', guest: W1 });
   });
 
   it('⚠ 客の側では、本文の csv の表は組み立てない(器が違う)', async () => {
-    await request({ op: 'openSqlGuest', image: await image() });
+    await request({ op: 'openSqlGuest', image: await image(), guest: W1 });
     await expect(run('SELECT * FROM csv_tables', true)).rejects.toThrow(/no such table/i);
     // ⚠ 対照群 ── こちら側では目録が出る
     expect((await run('SELECT count(*) AS n FROM csv_tables')).rows.length).toBe(1);
-    await request({ op: 'closeSqlGuest' });
+    await request({ op: 'closeSqlGuest', guest: W1 });
+  });
+});
+
+/**
+ * 🔴 **SQL の窓を 2 枚開いても、取り合わない**(#836)。
+ *
+ * ## 直す前、画面で何が起きていたか
+ *
+ * SQL の面は**同じタイルを 2 回押せば 2 枚開く**(#300 段③ の裁定)。窓 A で
+ * `売上.sqlite`、窓 B で `顧客.db` を選ぶと ── 客の DB は本体タブの worker に
+ * **1 つしか無かった**ので、B を開いた瞬間に A の客が**閉じられていた**。
+ * 🔴 それでも窓 A の選び所も上の行も `売上.sqlite` と言ったまま、
+ *   **返る中身は `顧客.db` から**である。この面がいちばん恐れている
+ *   「ノートを数えたつもりで、よその DB を数えていた」がそのまま起きる。
+ * ⚠ 数字は本物なので、**間違いに気づく手がかりが画面に 1 つも無い**。
+ *
+ * ## 守る主張
+ *
+ * ① 窓ごとに別の客を持つ(A へ打っても B の中身は返らない)
+ * ② 片方が外しても、もう片方は生きている
+ * ③ 上限を超えたら**いちばん古い窓から押し出す** ── ⚠ 窓を閉じたことは
+ *    worker へ届かないので、これが無いと積み上がる(不可侵指示 2026-07-27)。
+ *    押し出された窓は「開かれていません」と**言われる**(黙って別の DB を返さない)
+ */
+describe('SQL の窓が 2 枚でも取り合わない(#836)', () => {
+  const runAs = (sql: string, guest: string) =>
+    request({ op: 'runReadOnlySql', sql, maxRows: 100, maxSteps: 1_000_000, maxMs: 60_000, guest });
+  const image = async (): Promise<Uint8Array> => (await request({ op: 'exportImage' })).image;
+  const count = async (guest: string): Promise<number> =>
+    Number((await runAs('SELECT count(*) AS n FROM entries', guest)).rows[0]?.[0]);
+
+  it('🔴 ① 2 枚目が開いても、1 枚目は自分の客を見たまま', async () => {
+    /**
+     * 🔑 **中身の違う 2 枚の画像**を作る ── 同じ画像だと、取り違えても
+     *   同じ数が返るので**取り違えを検出できない**(fixture のゼロ件次元)。
+     */
+    const imgA = await image();
+    await write('w836-a', doc('窓 A の写しを取った後に足した'));
+    const imgB = await image();
+
+    await request({ op: 'openSqlGuest', image: imgA, guest: 'winA' });
+    await request({ op: 'openSqlGuest', image: imgB, guest: 'winB' });
+
+    const a = await count('winA');
+    const b = await count('winB');
+    // ⚠ 空振り防止 ── 2 枚が本当に違う中身であること(同じなら、この test は何も見ていない)
+    expect(b, '2 枚の画像の中身が同じ(前提が崩れている)').toBe(a + 1);
+    expect(a, '1 枚目が 2 枚目の中身を返した(客を取り合っている)').toBe(b - 1);
+  });
+
+  it('🔴 ② 片方が外しても、もう片方は生きている', async () => {
+    const img = await image();
+    await request({ op: 'openSqlGuest', image: img, guest: 'winA' });
+    await request({ op: 'openSqlGuest', image: img, guest: 'winB' });
+    await request({ op: 'closeSqlGuest', guest: 'winB' });
+
+    expect((await runAs('SELECT 1 AS n', 'winA')).rows, '外していない窓まで閉じた').toEqual([[1]]);
+    await expect(
+      runAs('SELECT 1', 'winB'),
+      '外した窓が、まだ客を持っている',
+    ).rejects.toThrow(/開かれていません/);
+    await request({ op: 'closeSqlGuest', guest: 'winA' });
+  });
+
+  it('🔴 ③ 上限を超えたら、いちばん古い窓から押し出す(黙って別の DB を返さない)', async () => {
+    const img = await image();
+    // ⚠ 上限は 4(`GUEST_MAX`)── 5 枚目を開くと 1 枚目が畳まれる
+    for (const w of ['g1', 'g2', 'g3', 'g4']) {
+      await request({ op: 'openSqlGuest', image: img, guest: w });
+    }
+    // 🔑 対照群 ── 押し出す前は 4 枚とも生きている
+    for (const w of ['g1', 'g2', 'g3', 'g4']) {
+      expect((await runAs('SELECT 1 AS n', w)).rows, `${w} が上限の内側で畳まれた`).toEqual([[1]]);
+    }
+    await request({ op: 'openSqlGuest', image: img, guest: 'g5' });
+    await expect(
+      runAs('SELECT 1', 'g1'),
+      'いちばん古い窓が押し出されていない(常駐が積み上がる)',
+    ).rejects.toThrow(/開かれていません/);
+    // ⚠ 押し出すのは**古い方だけ** ── 巻き添えにしない
+    expect((await runAs('SELECT 1 AS n', 'g2')).rows, '古くない窓まで巻き添えにした').toEqual([
+      [1],
+    ]);
+    expect((await runAs('SELECT 1 AS n', 'g5')).rows, '新しく開いた窓が入っていない').toEqual([[1]]);
+    for (const w of ['g2', 'g3', 'g4', 'g5']) await request({ op: 'closeSqlGuest', guest: w });
   });
 });

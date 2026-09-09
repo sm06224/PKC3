@@ -73,6 +73,12 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
    *   その場で理由を出すので、移して害が出ない。
    */
   { key: 'pkc3.open-place', label: '書庫(zip)を開く場所' },
+  /**
+   * ⚠ **人に付く好み**である(#278 段②)── 「本文の番号から掛けたい」かどうかは
+   *   端末の事情ではない。⚠ 掛けられるかは端末しだいだが、**押せる字にするか**は
+   *   読み方の好みなので運ぶ(`pkc3.alarm` と同じ考え方)。
+   */
+  { key: 'pkc3.phone-links', label: '本文の電話番号を押せるようにするか' },
 ];
 
 /**

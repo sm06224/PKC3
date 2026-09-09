@@ -246,8 +246,12 @@ export type StorageRequest =
        * ⚠ 既定(省略)は**この PKC の DB**である ── 打つ先を取り違えると、
        *   「ノートを数えたつもりで、よその DB を数えていた」が起きる。
        * ⚠ 客の DB には**本文の csv の表を組み立てない**(あちらは別の器である)。
+       *
+       * 🔴 **値は真偽ではなく「窓の合言葉」である**(#836)。⚠ 客の DB は
+       *   **窓ごとに別**なので、どの窓の客へ打つのかを渡さないと**取り違える**
+       *   ── 真偽だけだと、worker には「誰の客か」が分からない。
        */
-      guest?: boolean;
+      guest?: string;
     }
   | {
       /**
@@ -260,8 +264,16 @@ export type StorageRequest =
        */
       op: 'openSqlGuest';
       image: Uint8Array;
+      /**
+       * 🔴 **どの窓の客か**(#836)。⚠ SQL の面は**同じタイルを 2 回押せば 2 枚開く**
+       *   (#300 段③ の裁定)ので、客の DB を 1 つしか持たないと**窓が取り合う** ──
+       *   窓 A の名札は `売上.sqlite` のまま、中身は窓 B が開いた `顧客.db` から返る。
+       * 🔑 合言葉は**窓ごとに 1 回だけ作る**(`store-port.ts`)── 窓が閉じれば
+       *   もう誰も名乗らないので、その客は次の追い出しで畳まれる。
+       */
+      guest: string;
     }
-  | { op: 'closeSqlGuest' }
+  | { op: 'closeSqlGuest'; guest: string }
   | {
       op: 'upsertEntry';
       cid: string;

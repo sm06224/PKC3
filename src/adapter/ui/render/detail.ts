@@ -88,6 +88,7 @@ import {
 import type { AppState, AppPhase } from '@adapter/state/app-state';
 import { appEditorMode } from './editor-mode';
 import { appKeymap, type KeymapStore } from './keymap';
+import { appPhoneLinks } from './phone-links';
 import {
   appExtensionGrants,
   type ExtensionGrants,
@@ -766,6 +767,15 @@ export class DetailRenderer {
          *   受け手(`filter-by-tag`)が居ないので、押せない形のまま出す。
          */
         interactiveTags: true,
+        /**
+         * 🔴 **本文の素の電話番号を押せる字にするか**(#278 段②)。
+         *
+         * ⚠ 上の 3 つと違い、**受け手はブラウザ**(`tel:` を OS へ渡す)なので
+         *   「この面だけ」ではない ── 決めているのは**設定**である。
+         * ⚠ 既定は切なので、選んでいない人の本文は 1 文字も変わらない。
+         * ⚠ 描くのはワーカーなので、渡すのは**素の真偽値**である(関数は clone できない)。
+         */
+        phoneLinks: appPhoneLinks.enabled(),
         /**
          * 🔴 **押した行を原文の行で焼く**(N1)。この面は `fm.body`(frontmatter を
          * 剥がした本文)を描くが、受け手(`body-rewrite.ts`)は**原文**を splice する。

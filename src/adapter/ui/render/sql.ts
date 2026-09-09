@@ -25,6 +25,7 @@
 import type { AppState } from '@adapter/state/app-state';
 import { sqlSourcesOf } from '@features/query/sqlite-attachment';
 import { humanBytes } from '@features/human-bytes';
+import { sqlPlaceholder, sqlTipText } from '@features/query/sql-tip';
 
 /** 表の値を字にする。⚠ `null` と空文字を**見分けられる**ようにする。 */
 const cellText = (v: string | number | null): string => (v === null ? '(なし)' : String(v));
@@ -49,8 +50,16 @@ export class SqlRenderer {
   private save: HTMLButtonElement | null = null;
   /** 調べる相手の選び所(#681 段③ の 2 つ目)。 */
   private source: HTMLSelectElement | null = null;
-  /** 直前に組んだ選択肢の指紋(添付が増減したときだけ組み直す)。 */
-  private sourceKey = '';
+  /** 案内の 1 段落(#681 F2 ── 相手に合わせて書き換える)。 */
+  private tip: HTMLElement | null = null;
+  /**
+   * 直前に組んだ選択肢の指紋(添付が増減したときだけ組み直す)。
+   * 🔴 **初期値は `null`**(#681 の着地前レビュー F5)── `''` にすると
+   *   「相手が 1 つも無い」の指紋と**同じ**になり、**1 枚目の描画で枝ごと素通り**する。
+   *   結果、`.sqlite` を 1 つも取り込んでいない人に**中身が空の選び所**が出ていた
+   *   (「押しても何も無い口を作らない」と書いた当の行が、初回だけ走っていなかった)。
+   */
+  private sourceKey: string | null = null;
 
   constructor(host: HTMLElement) {
     this.host = host;
@@ -67,7 +76,7 @@ export class SqlRenderer {
     box.setAttribute('data-pkc-action', 'set-sql-text');
     box.setAttribute('data-pkc-field', 'sql-input');
     box.setAttribute('aria-label', '打つ SQL');
-    box.placeholder = 'SELECT title, updated_at FROM entries ORDER BY updated_at DESC LIMIT 20';
+    box.placeholder = sqlPlaceholder(null);
     box.rows = 4;
     box.spellcheck = false;
     const bar = document.createElement('div');
@@ -112,15 +121,8 @@ export class SqlRenderer {
      * ⚠ 初稿は落とし穴だけを並べていたので、**表の名前が 1 つも出ていなかった** ──
      *   唯一の手掛かりは薄字の例文で、それは **1 文字打った瞬間に消える**。
      */
-    tip.textContent =
-      '調べられるのは entries(ノート)/ relations(つながり)/ revisions(履歴)/ ' +
-      'assets(添付)です。読むだけで、書き換えはできません。' +
-      '文字列は単引用符で囲みます(二重引用符は列の名前です)。' +
-      'REGEXP は使えません(LIKE と GLOB は使えます)。' +
-      '日本語入力のままでも打てます(ただし LIKE の ％ と ＿ は半角で打ってください)。' +
-      '本文の csv の囲みに名前を付けると(3 つの逆引用符のあとに csv name=売上)、' +
-      'その名前で引けます。どんな名前が在るかは csv_tables で分かります' +
-      '(使えない名前は、そこの why の列に理由が出ます)。';
+    // 🔴 中身は `render` が揃える(#681 F2)── 相手が変われば案内も手本も変わる
+    tip.textContent = sqlTipText(null);
     const note = document.createElement('p');
     note.setAttribute('data-pkc-field', 'sql-note');
     const body = document.createElement('div');
@@ -131,6 +133,7 @@ export class SqlRenderer {
     this.run = run;
     this.save = save;
     this.source = source;
+    this.tip = tip;
     this.note = note;
     this.body = body;
     return body;
@@ -183,6 +186,16 @@ export class SqlRenderer {
      */
     if (this.save !== null) this.save.disabled = p.running || p.ranSql === '' || p.columns.length === 0;
     this.paintSource(state);
+    /**
+     * 🔴 **案内も手本も、いま調べている相手へ揃える**(#681 の着地前レビュー F2)。
+     * ⚠ 直す前は静的な字だったので、取り込んだ `.sqlite` を選んでも
+     *   「調べられるのは entries …」のままで、**そのとおり打つと英語で断られた**。
+     */
+    const target = p.guest === null ? null : { name: p.guest.name, tables: p.guest.tables };
+    const tipText = sqlTipText(target);
+    if (this.tip !== null && this.tip.textContent !== tipText) this.tip.textContent = tipText;
+    const hint = sqlPlaceholder(target);
+    if (this.box !== null && this.box.placeholder !== hint) this.box.placeholder = hint;
     if (!this.focused && !this.host.hidden) {
       this.focused = true;
       this.box?.focus();
@@ -258,18 +271,26 @@ export class SqlRenderer {
  */
 function noteLine(p: AppState['sqlPage']): string {
   /**
+   * 🔴 **どちらを調べているかは、どの行にも添える**(#681 の着地前レビュー F2)。
+   * ⚠ 直す前は「まだ走らせていない」と「答えが出た」の 2 つにしか出ておらず、
+   *   **断りが出た回と書き出した回で名札が消えていた** ── いちばん取り違えやすい
+   *   のは断りの直後である。
+   */
+  const where = p.guest === null ? '' : ` ── ${p.guest.name} を調べています`;
+  /**
    * 🔴 **開けなかったことを、いちばん上で言う**(#681 段③ の 2 つ目)。
    * ⚠ 黙って「この PKC」へ戻ると、選んだ人には**選べなかった**ようにしか見えない。
    */
   if (p.guestError !== '') return `取り込んだ .sqlite を開けませんでした ── ${p.guestError}`;
-  if (p.running) return '走らせています…';
-  if (p.error !== '') return p.error;
+  if (p.running) return `走らせています…${where}`;
+  if (p.error !== '') return `${p.error}${where}`;
   /**
    * 🔴 **書き出したことを、いちばん上で言う**(#681 段③ の 3 つ目)。
    * ⚠ この面は**別の窓**なので、ノートを作っても窓の中は何も変わらない ──
    *   言わないと「押せなかった」に見える。
    */
-  if (p.saved !== '') return `「${p.saved}」というノートに書き出しました(左の一覧に出ています)`;
+  if (p.saved !== '')
+    return `「${p.saved}」というノートに書き出しました(左の一覧に出ています)${where}`;
   /**
    * 🔴 **どちらを調べているかを、打つ前から言う**(#681 段③ の 2 つ目)。
    * ⚠ 言わないと「ノートを数えたつもりで、よその DB を数えていた」に気づけない。
@@ -278,11 +299,13 @@ function noteLine(p: AppState['sqlPage']): string {
     return p.guest === null
       ? ''
       : `${p.guest.name} を調べています(表 ${String(p.guest.tables.length)} 個 / ${humanBytes(p.guest.bytes)})`;
+
   const took = `(${String(p.ms)} ミリ秒)`;
   if (p.truncated)
-    return `${String(p.rows.length)} 行${took} ── 多すぎるので途中まで出しています(LIMIT や条件で絞ると全部見えます)`;
-  if (p.rows.length === 0) return `0 行${took} ── 条件に当たるものがありませんでした${zeroHint(p.ranSql)}`;
-  return `${String(p.rows.length)} 行${took}${p.guest === null ? '' : ` ── ${p.guest.name} を調べています`}`;
+    return `${String(p.rows.length)} 行${took} ── 多すぎるので途中まで出しています(LIMIT や条件で絞ると全部見えます)${where}`;
+  if (p.rows.length === 0)
+    return `0 行${took} ── 条件に当たるものがありませんでした${zeroHint(p.ranSql)}${where}`;
+  return `${String(p.rows.length)} 行${took}${where}`;
 }
 
 /**

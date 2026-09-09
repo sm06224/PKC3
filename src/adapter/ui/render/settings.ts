@@ -39,6 +39,7 @@ import { currentReadColumns, lastReadPaneMetrics } from './read-columns';
 import { appEditorMode, EditorModeStore } from './editor-mode';
 import { appOpenInEdit, OpenInEditStore } from './open-in-edit';
 import { appAlarmEnabled, AlarmEnabledStore } from './alarm-enabled';
+import { appPhoneLinks, PhoneLinksStore } from './phone-links';
 import { EXTERNAL_IMAGE_MODES } from '@features/markdown/external-images';
 import { NOTICE_READABLE_TEXT } from '@features/notice/notice-log';
 import { appExternalImages, ExternalImagePolicy } from './external-images';
@@ -114,6 +115,12 @@ export class SettingsRenderer {
      * **唯一の戻し道**である。⚠ **末尾に足す**(すぐ上の戒めのとおり)。
      */
     private readonly tooNarrowOk: TooNarrowOkStore = appTooNarrowOk,
+    /**
+     * 🔴 **本文の素の電話番号を押せる字にするか**(#278 段②)。
+     * ⚠ **末尾に足す**(すぐ上の戒めのとおり)── 1 稿目で `alarmEnabled` の
+     *   直後に入れて、位置引数で渡している test を 1 件落とした。
+     */
+    private readonly phoneLinks: PhoneLinksStore = appPhoneLinks,
   ) {}
 
   private sameOriginList: HTMLElement | null = null;
@@ -131,6 +138,7 @@ export class SettingsRenderer {
       this.syncOpenInEdit();
       this.syncOpenPlace();
       this.syncAlarmEnabled();
+      this.syncPhoneLinks();
       this.syncExternalImages();
       this.syncPasteSource();
       this.syncSameOrigin(state);
@@ -554,6 +562,36 @@ export class SettingsRenderer {
     dl.append(at, ad);
 
     /**
+     * 🔴 **本文の素の電話番号を押せる字にするか**(#278 段②)。
+     *
+     * ⚠ **既定は切** ── 入れると、いま読めている数字が**押せる字**になる
+     *   (本文の見え方が変わる。user 指示 2026-08-28「変更はユーザーに委ねて欲しい」)。
+     * ⚠ 字は「何が起きるか」で書く ── 「tel: リンクにする」は内部の言葉である
+     *   (CLAUDE.md「画面で何が起きるかの言葉で書く」)。
+     */
+    const pht = document.createElement('dt');
+    pht.textContent = '本文の電話番号';
+    const phd = document.createElement('dd');
+    const phlabel = document.createElement('label');
+    const phcheck = document.createElement('input');
+    phcheck.type = 'checkbox';
+    phcheck.setAttribute('data-pkc-action', 'set-phone-links');
+    phcheck.setAttribute('data-pkc-field', 'phone-links');
+    phlabel.append(phcheck, document.createTextNode(' 本文に書いた電話番号を押せるようにする'));
+    phd.append(phlabel);
+    const phnote = document.createElement('p');
+    phnote.setAttribute('data-pkc-field', 'settings-note');
+    phnote.textContent =
+      '本文に 090-1234-5678 のように書いた番号が、押すと電話をかけられる字になります。' +
+      '全角(０９０－１２３４－５６７８)でも、+81 で始まる形でも同じです。' +
+      '日付(2026-09-09)や章番号(1-2-3)は変わりません ── ' +
+      '0 か + で始まる 10〜11 桁だけを見ています。' +
+      '切のままなら、本文の見え方はこれまでと 1 文字も変わりません。' +
+      '⚠ 電話をかけられるかは端末しだいです(パソコンでは、通話のアプリが入っていないと何も起きません)。';
+    phd.append(phnote);
+    dl.append(pht, phd);
+
+    /**
      * 📣 **お知らせを出すか**(P11 段⑤)。
      *
      * 🔑 **ここが「今後は出さない」の戻し道である。** 帯にしか導線が無いと、
@@ -646,6 +684,7 @@ export class SettingsRenderer {
     this.syncOpenInEdit();
     this.syncOpenPlace();
     this.syncAlarmEnabled();
+    this.syncPhoneLinks();
     this.syncSameOrigin(state);
     this.syncExtensions(state);
     this.syncPersist(state);
@@ -1074,6 +1113,11 @@ export class SettingsRenderer {
   private syncAlarmEnabled(): void {
     const box = this.region.querySelector<HTMLInputElement>('[data-pkc-field="alarm-enabled"]');
     if (box) box.checked = this.alarmEnabled.enabled();
+  }
+
+  private syncPhoneLinks(): void {
+    const box = this.region.querySelector<HTMLInputElement>('[data-pkc-field="phone-links"]');
+    if (box) box.checked = this.phoneLinks.enabled();
   }
 
   private syncNotices(): void {

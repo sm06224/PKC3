@@ -36,7 +36,7 @@ jobs:
         run: |
           npm ci
           VITE_PKC_KIND=dev npm run build
-          node scripts/check-dist.mjs dev
+          node scripts/check-dist.mjs dev --require-precache-list
           mkdir -p _site/dev
           cp -r dist/. _site/dev/
       - name: 可搬単一 HTML の雛形(#400 段④)
@@ -104,6 +104,11 @@ jobs:
             # `/dev/` の更新まで止まる。定数を動かすときはここを思い出すこと
             # ⚠ `--require-manual` は**付けない**(#648 💭)── ここは過去の release の
             #    zip で、段②より前の版に manual.html は無い(付けると v3.2.0 が落ちる)
+            # ⚠ `--require-precache-list` も**付けない**(2026-09-09)── 同じ理由で
+            #    v3.2.0 に precache.json は無い。⚠ この 2 つは例ではなく**規則**である:
+            #    **過去の zip を検品するこの行に、新しい要求を無条件で足さない**
+            #    (足した日に run 500 / 501 が落ち、`/dev/` の更新が 2 回止まった)。
+            #    機械の門は `tests/workflow-steps.test.ts`
             node scripts/check-dist.mjs product /tmp/product/site
             cp -r /tmp/product/site/. _site/
           fi

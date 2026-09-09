@@ -758,6 +758,12 @@ export interface BinderServices {
   /** 🔴 予定の知らせを入 / 切にする(#280)。⚠ 入にした瞬間に予定を数え直す。 */
   setAlarmEnabled?(on: boolean): void;
   /**
+   * 🔴 **本文の素の電話番号を押せる字にするか**(#278 段②)。⚠ **省略可**。
+   * ⚠ 切り替えたら**その場で本文を描き直す** ── 保存しただけでは、
+   *   いま読んでいるノートは変わらない(設定が嘘になる)。
+   */
+  setPhoneLinks?(on: boolean): void;
+  /**
    * 🔴 **貼る用に画像を持ち歩ける形へ**(#193)。`blob:` → `data:` の対応を返す。
    * ⚠ **省略可** ── 無ければ画像は文字に置き換わる(壊れた画像を貼らせない)。
    */
@@ -6791,9 +6797,26 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ **編集の面へ入らない**(`edit: false`)── 打っている途中の SQL を退かさない。
    */
   'sql-to-note': (dispatcher) => {
-    const p = dispatcher.getState().sqlPage;
+    const state = dispatcher.getState();
+    const p = state.sqlPage;
     // ⚠ まだ答えが無い回は何もしない(押せる印は renderer 側が消しているが、鍵からも来うる)
     if (p.ranSql === '' || p.columns.length === 0) return;
+    /**
+     * 🔴 **編集中は作れないので、そう言う**(#681 の着地前レビュー F1)。
+     *
+     * ⚠ この面は aside なので**編集中でも開ける** ── ところが `CREATE_ENTRY` は
+     *   `phase !== 'ready'` を**黙って捨てる**ので、直す前は押しても
+     *   **画面が 1 ドットも動かなかった**(user には「壊れている」と
+     *   「押せていない」の区別が付かない)。
+     * 🔑 一覧の行を押したときと**同じ作法**にする ── 断って、理由を画面へ出す。
+     */
+    if (state.phase !== 'ready') {
+      dispatcher.dispatch({
+        type: 'SQL_SAVE_FAILED',
+        error: '編集中は書き出せません(本文の編集を終えてから押してください)',
+      });
+      return;
+    }
     const title = sqlNoteTitle(new Date());
     const lid = generateLid();
     dispatcher.dispatch({
@@ -6811,8 +6834,18 @@ const ACTIONS: Record<string, ActionHandler> = {
       relationId: generateLid(),
       edit: false,
     });
-    // ⚠ **作れた回だけ言う** ── 作れないのに「書き出しました」と出すと嘘になる
-    if (!dispatcher.getState().entryMetas.has(lid)) return;
+    /**
+     * ⚠ **作れた回だけ言う** ── 作れないのに「書き出しました」と出すと嘘になる。
+     * ⚠ ここまで来て作れないのは lid の衝突だけ(上で phase は見た)なので、
+     *   理由を出す(黙って戻らない)。
+     */
+    if (!dispatcher.getState().entryMetas.has(lid)) {
+      dispatcher.dispatch({
+        type: 'SQL_SAVE_FAILED',
+        error: '書き出せませんでした(もう一度押してください)',
+      });
+      return;
+    }
     dispatcher.dispatch({ type: 'SQL_SAVED', title });
   },
   /**
@@ -6926,6 +6959,10 @@ const ACTIONS: Record<string, ActionHandler> = {
   'set-alarm-enabled': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
     if (target instanceof HTMLInputElement) services.setAlarmEnabled?.(target.checked);
+  },
+  'set-phone-links': (_dispatcher, target, services) => {
+    // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
+    if (target instanceof HTMLInputElement) services.setPhoneLinks?.(target.checked);
   },
   'set-notices-enabled': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)

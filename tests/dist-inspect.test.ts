@@ -36,6 +36,8 @@ type Input = {
   manualFloorKb?: number;
   /** 焼きたての product で `manual.html` の実在を要求する(#648 💭)。 */
   requireManual?: boolean;
+  /** 焼きたての一式で `precache.json` の実在を要求する(2026-09-09)。 */
+  requirePrecacheList?: boolean;
   files: File[];
   text: Map<string, string>;
 };
@@ -391,11 +393,57 @@ describe('🔴 縮む方向の事故 ── cap は上限しか見ない', () =>
  * (#225 の教訓:件数ではなく集合)。
  */
 describe('🔴 precache.json と sw.js の一覧が一致する(#532 段 B)', () => {
-  it('無ければ鳴る(plugin が emit していない)', () => {
+  /**
+   * sw.js の一覧からも `precache.json` を外す。
+   * ⚠ **過去の zip はそもそも載せていない**ので、そこを再現しないと
+   *   「実在しないものを指している」という**別の門**が鳴って、
+   *   この test が何を見ているのか分からなくなる。
+   */
+  const dropFromSw = (i: ReturnType<typeof healthy>): void => {
+    // ⚠ **sw.js から読む** ── `text` の `precache.json` は呼び側が既に消しているので、
+    //    そちらを読むと空配列になり「一覧が空」という**別の門**が鳴る(1 稿目で踏んだ)
+    const m = /const PRECACHE = (\[.*\]);/.exec(i.text.get('sw.js') ?? '');
+    const kept = (JSON.parse(m?.[1] ?? '[]') as string[]).filter((p) => p !== `./${LIST}`);
+    expect(kept.length, '前提が崩れている(sw.js の一覧が読めていない)').toBeGreaterThan(0);
+    i.text.set(
+      'sw.js',
+      `const PRECACHE = ${JSON.stringify(kept)};\nself.addEventListener("fetch", () => {});`,
+    );
+  };
+
+  /**
+   * 🔴 **要求するのは「焼きたての一式」だけ**(2026-09-09。`/dev/` を 2 回止めて分かった)。
+   *
+   * ⚠ `pages.yml` は**過去の release の zip** を **main HEAD の規則**で検品する。
+   *   `precache.json` は #532 段 B で足したので、**それより前に切った v3.2.0 には
+   *   在りえない** ── 無条件で要求したせいで、無傷の release に対して job が赤になり
+   *   **`/dev/` の更新が 2 回止まった**(run 500 / 501)。
+   * 🔑 `--require-manual`(#648 💭)と**同じ作法**にした。
+   */
+  it('🔴 旗を立てた回だけ、無いことが鳴る(plugin が emit していない)', () => {
     const i = healthy();
     i.files = i.files.filter((f) => f.path !== LIST);
     i.text.delete(LIST);
-    expect(run(i).join('\n')).toContain(`dist に ${LIST} が無い`);
+    dropFromSw(i);
+    i.requirePrecacheList = true;
+    expect(run(i).join('\n'), '旗を立てたのに鳴っていない').toContain(`dist に ${LIST} が無い`);
+  });
+
+  it('🔴 旗が無ければ、過去の zip は通す(/dev/ を止めない)', () => {
+    const i = healthy();
+    i.files = i.files.filter((f) => f.path !== LIST);
+    i.text.delete(LIST);
+    dropFromSw(i);
+    const out = run(i).join('\n');
+    expect(out, '過去の zip を落としている(/dev/ が止まる)').not.toContain(
+      `dist に ${LIST} が無い`,
+    );
+    // 🔴 空振り防止 ── 「何も鳴らなくなった」のではなく、この 1 件だけを通していること
+    expect(out, 'ほかの門まで一緒に消えた').toBe('');
+    // ⚠ 対照群 ── sw.js の一覧そのものは、旗に関わらず全数で突き合わせている
+    const j = healthy();
+    j.text.set(LIST, JSON.stringify([...JSON.parse(j.text.get(LIST)!), './nowhere.js']));
+    expect(run(j).join('\n'), '一覧の突き合わせまで旗に依存している').toContain('食い違う');
   });
 
   it('🔴 json にだけ在る名前があれば鳴る', () => {

@@ -866,6 +866,56 @@ describe('#648 💭 ── manual.html の実在を要求する経路', () => {
   });
 });
 
+/**
+ * 🔴 **`precache.json` の実在も、焼きたてだけが要求する**(2026-09-09)。
+ *
+ * ⚠ これは 1 つ上の #648 💭 と**同じ罠を、別の file で踏んだ記録**である ──
+ *   `precache.json` は #532 段 B で足したので、**それより前に切った v3.2.0 の zip には
+ *   在りえない**。無条件で要求したせいで、無傷の release に対して `pages.yml` が
+ *   赤になり、**`/dev/` の更新が 2 回止まった**(run 500 / 501)。
+ * 🔑 `pages.yml` 自身のコメントが「定数を動かすときはここを思い出すこと」と
+ *   警告していたが、**定数ではなく門を足した**ので当たらなかった ── だから
+ *   「過去の zip を検品する経路には、新しい要求を無条件で足さない」を機械で留める。
+ * ⚠ 見るのは**実行する行**(コメントに満たされない)。
+ */
+describe('過去の zip を、新しい要求で落とさない(precache.json)', () => {
+  const distLines = (file: string, mode: 'product' | 'dev'): string[] =>
+    readFileSync(join(DIR, file), 'utf-8')
+      .split('\n')
+      .filter((l) => !l.trim().startsWith('#') && l.includes(`check-dist.mjs ${mode}`));
+
+  /** 焼きたての一式を見る経路 ── ここは要求する(要求しないと、欠けた版を配れる)。 */
+  const FRESH = [
+    { file: 'release.yml', mode: 'product' },
+    { file: 'nightly.yml', mode: 'product' },
+    { file: 'ci.yml', mode: 'dev' },
+    { file: 'pages.yml', mode: 'dev' },
+  ] as const;
+
+  for (const c of FRESH) {
+    it(`${c.file}(${c.mode}): 焼きたての検品に --require-precache-list が付いている`, () => {
+      const lines = distLines(c.file, c.mode);
+      expect(lines, `${c.file} に ${c.mode} の検品が無い(空振り)`).toHaveLength(1);
+      expect(lines[0], '旗が無い(plugin が emit を止めた版をそのまま配れる)').toContain(
+        '--require-precache-list',
+      );
+    });
+  }
+
+  it('🔴 pages.yml: 過去の zip の検品には付いていない(/dev/ を止めない)', () => {
+    const lines = distLines('pages.yml', 'product');
+    expect(lines, 'pages.yml に product の検品が無い(空振り)').toHaveLength(1);
+    expect(lines[0], '過去の release を新しい要求で落としている').not.toContain(
+      '--require-precache-list',
+    );
+  });
+
+  it('🔴 旗の綴りが check-dist.mjs の受け口と同じ', () => {
+    const cli = readFileSync('scripts/check-dist.mjs', 'utf-8');
+    expect(cli, '受け口に無い綴りを workflow が渡している').toContain("'--require-precache-list'");
+  });
+});
+
 describe('#400 段④ ── 雛形を置く順番', () => {
   const cases = [
     { file: 'pages.yml', check: 'check-dist.mjs dev' },

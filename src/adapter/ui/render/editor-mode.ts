@@ -33,7 +33,8 @@ export class EditorModeStore {
    */
   getMode(): EditorMode {
     try {
-      const v = this.storage?.getItem(KEY);
+      if (this.storage === null) return this.fallback;
+      const v = this.storage.getItem(KEY);
       if (v !== null && v !== undefined && isEditorMode(v)) return v;
       return DEFAULT_EDITOR_MODE;
     } catch {

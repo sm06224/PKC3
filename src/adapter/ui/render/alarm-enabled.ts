@@ -38,8 +38,10 @@ export class AlarmEnabledStore {
 
   /** ⚠ **読むたびに保存を見る**(`OpenInEditStore` と同じ理由 ── 書き手が複数)。 */
   enabled(): boolean {
+    // 🔴 **保存が無い環境では控えを読む**(#278 段② の test が教えた)
+    if (this.storage === null) return this.fallback;
     try {
-      return this.storage?.getItem(KEY) === '1';
+      return this.storage.getItem(KEY) === '1';
     } catch {
       return this.fallback;
     }

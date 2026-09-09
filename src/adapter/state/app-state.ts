@@ -179,6 +179,16 @@ export interface SqlPageState {
    *   打った SQL はそちらへ飛ぶ(いちばん気づけない外し方)。
    */
   readonly guestPending: string;
+  /**
+   * 🔴 **走らせた回の札**(#681 の着地前レビュー F3-A)。
+   *
+   * ⚠ 走っている最中に**調べる相手を変えられる**ので、前の相手の答えが
+   *   後から届く ── 受けると、画面は**新しい名札のまま古い DB の中身**を出す。
+   *   数字は本物なので、user には**間違いに気づく手がかりが 1 つも無い**。
+   * 🔑 だから頼むときに札を付け、**札が変わっていたら答えを捨てる**
+   *   (`guestPending` と同じ作法)。
+   */
+  readonly runToken: number;
 }
 
 /**
@@ -1095,6 +1105,7 @@ export const initialState: AppState = {
     guest: null,
     guestError: '',
     guestPending: '',
+    runToken: 0,
   },
   queryKey: null,
   smartHits: new Map<string, SmartHitState>(),
@@ -1180,6 +1191,13 @@ export type UserAction =
    */
   | { type: 'SQL_SAVED'; title: string }
   /**
+   * 🔴 **書き出せなかった理由**(#681 の着地前レビュー F1)。
+   * ⚠ 直す前は編集中に押すと**画面が 1 ドットも動かなかった** ── `CREATE_ENTRY` は
+   *   `phase !== 'ready'` を**黙って捨てる**ので、押した人には
+   *   「壊れている」と「押せていない」の区別が付かない。
+   */
+  | { type: 'SQL_SAVE_FAILED'; error: string }
+  /**
    * 🔴 **調べる相手を選ぶ**(#681 段③ の 2 つ目)。`lid` が空 = この PKC のノート。
    * ⚠ 選び直しは**前の相手を必ず手放す**(常駐メモリを返す)。
    */
@@ -1188,13 +1206,15 @@ export type UserAction =
   | { type: 'SQL_GUEST_FAILED'; lid: string; error: string }
   | {
       type: 'SET_SQL_RESULT';
+      /** 走らせた回の札(#681 F3-A)。 */
+      token: number;
       sql: string;
       columns: readonly string[];
       rows: readonly (readonly (string | number | null)[])[];
       truncated: boolean;
       ms: number;
     }
-  | { type: 'SQL_RUN_FAILED'; sql: string; error: string }
+  | { type: 'SQL_RUN_FAILED'; token: number; sql: string; error: string }
   /** 本文の当たりが SQL から返った(#181)。⚠ `query` は**どの問い合わせの答えか**。 */
   | { type: 'SET_SEARCH_HITS'; query: string; lids: string[]; truncated: boolean }
   /** 一覧の並び順を変える(#183)。⚠ 選択は消さない(絞り込みと同じ規約)。 */
@@ -1952,6 +1972,8 @@ export type DomainEvent =
   | {
       type: 'REQUEST_SQL_RUN';
       sql: string;
+      /** 🔴 走らせた回の札(#681 F3-A)── 答えと一緒に返してもらい、古い回は捨てる。 */
+      token: number;
       /**
        * 🔴 **打つ先**(#681 段③ の 2 つ目)。真 = 取り込んだ `.sqlite`。
        * ⚠ **event が運ぶ** ── effect 側で state を読み直すと、選び直した直後の
@@ -2661,9 +2683,18 @@ function reduceCore(
     /** 欄に打っただけ ── **走らせない**(重い問い合わせを打鍵ごとに投げない)。 */
     case 'SET_SQL_TEXT':
       // ⚠ 断りの字は消す(打ち直したのに前の断りが残ると、直したか分からない)
-      // ⚠ 書き出しの知らせも消す(打ち直したのに前の知らせが残ると、いま出た表の話に見える)
+      /**
+       * ⚠ 書き出しの知らせも消す(打ち直したのに前の知らせが残ると、いま出た表の話に見える)。
+       * 🔴 **開けなかった断りも消す**(#681 の着地前レビュー F4)── 直す前は
+       *   `SET_SQL_SOURCE` と `SQL_GUEST_OPENED` でしか消えず、`noteLine` は
+       *   **その行をいちばん先に返す**ので、一度 file を開き損ねた人は
+       *   **以後の知らせを全部食われていた**(切った / 0 行 / 書き出した、が出ない)。
+       */
       return {
-        state: { ...state, sqlPage: { ...state.sqlPage, sql: action.sql, error: '', saved: '' } },
+        state: {
+          ...state,
+          sqlPage: { ...state.sqlPage, sql: action.sql, error: '', saved: '', guestError: '' },
+        },
         events: [],
       };
     /**
@@ -2692,22 +2723,39 @@ function reduceCore(
           events: [],
         };
       }
+      const token = state.sqlPage.runToken + 1;
       return {
         state: {
           ...state,
           // 🔑 **直した字を欄へ戻す**(全角で打った人に、実際に走った字を見せる)
-          sqlPage: { ...state.sqlPage, sql: checked.sql, running: true, error: '', saved: '' },
+          sqlPage: {
+            ...state.sqlPage,
+            sql: checked.sql,
+            running: true,
+            error: '',
+            saved: '',
+            // 🔴 開けなかった断りもここで消す(#681 F4 ── 上の `SET_SQL_TEXT` と同じ理由)
+            guestError: '',
+            runToken: token,
+          },
         },
         events: [
           {
             type: 'REQUEST_SQL_RUN',
             sql: checked.sql,
+            token,
             ...(state.sqlPage.guest === null ? {} : { guest: true }),
           },
         ],
       };
     }
+    /**
+     * 🔴 **古い回の答えは捨てる**(#681 の着地前レビュー F3-A)。
+     * ⚠ 走っている最中に相手を変えられるので、受けると**新しい名札のまま
+     *   古い DB の中身**が出る ── 数字は本物なので気づけない。
+     */
     case 'SET_SQL_RESULT':
+      if (state.sqlPage.runToken !== action.token) return { state, events: [] };
       return {
         state: {
           ...state,
@@ -2754,6 +2802,14 @@ function reduceCore(
             guest: null,
             guestError: '',
             guestPending: action.lid,
+            /**
+             * 🔴 **走っている答えを無効にする**(#681 F3-A)── 札を進めると、
+             *   飛んでいる回の答えは捨てられる。
+             * ⚠ `running` も下ろす ── 下ろさないと「走らせています…」が
+             *   **永久に消えない**(答えは捨てるので、もう来ない)。
+             */
+            runToken: state.sqlPage.runToken + 1,
+            running: false,
             ranSql: '',
             columns: [],
             rows: [],
@@ -2805,11 +2861,21 @@ function reduceCore(
         },
         events: [],
       };
+    /**
+     * 🔴 **書き出せなかった理由を画面へ**(#681 の着地前レビュー F1)。
+     * ⚠ 断りの色が付く行(`error`)へ出す ── 黙って何も起きない形を作らない。
+     */
+    case 'SQL_SAVE_FAILED':
+      return {
+        state: { ...state, sqlPage: { ...state.sqlPage, error: action.error, saved: '' } },
+        events: [],
+      };
     case 'SQL_RUN_FAILED':
       /**
        * ⚠ **前の表は残す**(消すと「失敗して 0 件だった」に見える)── 印だけ立てる
        *   (`SEARCH_DETAIL_FAILED` と同じ作法)。
        */
+      if (state.sqlPage.runToken !== action.token) return { state, events: [] };
       return {
         state: { ...state, sqlPage: { ...state.sqlPage, running: false, error: action.error } },
         events: [],

@@ -1846,13 +1846,36 @@ function createCsvTable(database: Database, t: CsvTable, fresh: (name: string) =
  *   (客の file を書き換えない)。
  * 🔴 **常駐メモリを食う**ので、外したら必ず閉じる(不可侵指示 2026-07-27
  *   「生成とライフサイクル後の速やかな破棄」)。
+ *
+ * 🔴 **窓ごとに 1 つ持つ**(#836、2026-09-09)。
+ *
+ * ⚠ 直す前は `let guestDb` の**1 つだけ**だった ── SQL の面は同じタイルを
+ *   2 回押せば 2 枚開く(#300 段③ の裁定)ので、**2 枚目が開いた瞬間に 1 枚目の
+ *   客が閉じられていた**。1 枚目の選び所も上の行も `売上.sqlite` と言ったまま、
+ *   返る中身は 2 枚目の `顧客.db` である ── この面がいちばん恐れている
+ *   「ノートを数えたつもりで、よその DB を数えていた」が、そのまま起きていた。
+ * 🔑 鍵は**窓の合言葉**(`store-port.ts` が窓ごとに 1 回だけ作る)。
+ * ⚠ 窓が閉じたことは worker へ届かないので、上限(`GUEST_MAX`)で押し出す。
  */
-let guestDb: Database | null = null;
+const guestDbs = new Map<string, Database>();
 
-/** 客の DB を閉じて手放す。⚠ **二度呼ばれても落ちない**(外す口は 2 つある)。 */
-function closeGuest(): void {
-  const db = guestDb;
-  guestDb = null;
+/**
+ * 同時に抱える客の上限(#836)。
+ *
+ * 🔴 **窓が閉じたことは worker に届かない** ── follower の窓を × で閉じても
+ *   `closeSqlGuest` は飛ばない(飛ばす口が無い)。だから**上限で押し出す**。
+ * ⚠ 押し出された窓は、次に走らせたとき「取り込んだ .sqlite が開かれていません
+ *   (先に選んでください)」と**言われる** ── 黙って別の DB の中身を返すより
+ *   はるかに良い(直す前は後者だった)。
+ * 🔑 4 は「見比べる」に足りて、常駐メモリの上限が読める数である
+ *   (取り込んだ DB は `:memory:` に展開されるので、枚数がそのまま積む)。
+ */
+const GUEST_MAX = 4;
+
+/** 客の DB を 1 つ閉じて手放す。⚠ **二度呼ばれても落ちない**(外す口は 2 つある)。 */
+function closeGuest(key: string): void {
+  const db = guestDbs.get(key);
+  guestDbs.delete(key);
   try {
     db?.close();
   } catch {
@@ -1860,12 +1883,21 @@ function closeGuest(): void {
   }
 }
 
-/** 客の DB。⚠ **開いていないのに打たれたら断る**(黙って本体を返さない)。 */
-function needGuest(): Database {
-  if (guestDb === null) {
+/** 客を全部畳む(worker を閉じるとき)。 */
+function closeAllGuests(): void {
+  for (const key of [...guestDbs.keys()]) closeGuest(key);
+}
+
+/**
+ * 客の DB。⚠ **開いていないのに打たれたら断る**(黙って本体を返さない)。
+ * ⚠ **別の窓の客も返さない**(#836)── 合言葉が違えば「開かれていません」である。
+ */
+function needGuest(key: string): Database {
+  const db = guestDbs.get(key);
+  if (db === undefined) {
     throw new Error('取り込んだ .sqlite が開かれていません(先に選んでください)');
   }
-  return guestDb;
+  return db;
 }
 
 const handlers: Handlers = {
@@ -1905,8 +1937,8 @@ const handlers: Handlers = {
      * ⚠ 既定は**この PKC の DB** ── 取り違えると「ノートを数えたつもりで
      *   よその DB を数えていた」になる(いちばん気づけない外し方)。
      */
-    const guest = req.guest === true;
-    const database = guest ? needGuest() : need();
+    const guest = req.guest !== undefined;
+    const database = req.guest === undefined ? need() : needGuest(req.guest);
     const api = sqliteApi;
     if (api === null) throw new Error('sqlite が初期化されていません');
     const install = api.wasm['installFunction'] as unknown as
@@ -2060,7 +2092,18 @@ const handlers: Handlers = {
   openSqlGuest: (req) => {
     const api = sqliteApi;
     if (api === null) throw new Error('sqlite が初期化されていません');
-    closeGuest();
+    // ⚠ **この窓の前の客だけ**を閉じる(ほかの窓の客は触らない ── #836)
+    closeGuest(req.guest);
+    /**
+     * 🔴 **上限を超えたら、いちばん古い客から押し出す**(#836)。
+     * ⚠ `Map` は入れた順を保つので、先頭が最古である。
+     * ⚠ **自分を入れる前に押し出す** ── 後だと、自分が最古のときに自分を畳む。
+     */
+    while (guestDbs.size >= GUEST_MAX) {
+      const oldest = guestDbs.keys().next().value;
+      if (oldest === undefined) break;
+      closeGuest(oldest);
+    }
     const oo1 = (api as unknown as { oo1: { DB: new (name: string) => Database } }).oo1;
     const db = new oo1.DB(':memory:');
     try {
@@ -2074,7 +2117,7 @@ const handlers: Handlers = {
           "SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
         ) as unknown as Array<{ name: string }>
       ).map((r) => r.name);
-      guestDb = db;
+      guestDbs.set(req.guest, db);
       return { tables, bytes: req.image.byteLength };
     } catch (e) {
       /**
@@ -2088,8 +2131,8 @@ const handlers: Handlers = {
     }
   },
   /** 客の DB を手放す。⚠ 開いていなくても落ちない(押し所は常に在る)。 */
-  closeSqlGuest: () => {
-    closeGuest();
+  closeSqlGuest: (req) => {
+    closeGuest(req.guest);
     return null;
   },
   openContainer: (req) => {
@@ -3230,7 +3273,7 @@ const handlers: Handlers = {
   },
   close: () => {
     // ⚠ 客の DB も一緒に手放す(閉じ忘れると、この worker が持ったまま消える)
-    closeGuest();
+    closeAllGuests();
     // ⚠ close は DB 接続を閉じるだけで、SAHPool の SAH は worker 破棄まで残る
     // (review #9)。multi-tab リース実装時はこの前提で設計する
     db?.close();

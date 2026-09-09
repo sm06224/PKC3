@@ -754,9 +754,12 @@ export function connectStoreEffects(
       case 'REQUEST_SQL_RUN': {
         const ask = store.runReadOnlySql;
         const sql = ev.sql;
+        // 🔴 走らせた回の札(#681 F3-A)── 答えと一緒に返す。古い回は reducer が捨てる
+        const token = ev.token;
         if (!ask) {
           dispatcher.dispatch({
             type: 'SQL_RUN_FAILED',
+            token,
             sql,
             error: 'この版では SQL を打てません(アプリを読み直すと直ることがあります)',
           });
@@ -771,7 +774,7 @@ export function connectStoreEffects(
         }).then(
           ({ columns, rows, truncated, ms }) => {
             if (disposed) return;
-            dispatcher.dispatch({ type: 'SET_SQL_RESULT', sql, columns, rows, truncated, ms });
+            dispatcher.dispatch({ type: 'SET_SQL_RESULT', token, sql, columns, rows, truncated, ms });
           },
           (e: unknown) => {
             if (disposed) return;
@@ -785,7 +788,7 @@ export function connectStoreEffects(
               : /interrupt/i.test(raw)
                 ? '時間がかかりすぎたので止めました(条件を絞ってください)'
                 : raw;
-            dispatcher.dispatch({ type: 'SQL_RUN_FAILED', sql, error: why });
+            dispatcher.dispatch({ type: 'SQL_RUN_FAILED', token, sql, error: why });
           },
         );
         break;

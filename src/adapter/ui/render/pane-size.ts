@@ -38,7 +38,8 @@ export class PaneSizeStore {
   /** ⚠ 読むたびに保存を見る(書き手が複数 ── UI と smoke の仕込み)。 */
   get(): PaneSizes {
     try {
-      return decodePaneSizes(this.storage?.getItem(KEY) ?? null);
+      if (this.storage === null) return this.fallback;
+      return decodePaneSizes(this.storage.getItem(KEY));
     } catch {
       return this.fallback;
     }

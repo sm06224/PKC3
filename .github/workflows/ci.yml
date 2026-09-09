@@ -109,7 +109,7 @@ jobs:
       # kind でほぼ変わらない(実測 0.2 KB 差)ので cap の tripwire はこの 1 回で効く。
       # product 固有の検品は tests/build-config.test.ts(config)+ nightly / release(実物)
       - name: dist の検品(map の有無 / 参照の実在 / 配る量の tripwire)
-        run: node scripts/check-dist.mjs dev
+        run: node scripts/check-dist.mjs dev --require-precache-list
 
   # ── 実ブラウザ lane: smoke ────────────────────────────────────────────
   # ⚠ **2026-08-19 訂正**: ここは「最小 smoke(全量は nightly)」と書いてあったが

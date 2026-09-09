@@ -780,3 +780,189 @@ describe('取り込んだ .sqlite を調べる(#681 段③ の 2 つ目)', () =>
     expect(note(), '前の件数が残っている').not.toContain('1 行');
   });
 });
+
+/**
+ * 🔴 **着地前レビュー(動線)が出した 5 件**(#681、2026-09-09)。
+ *
+ * ⚠ どれも「押した user から見て、起きたことが読めない」形である ──
+ *   5 件とも**読んで確かめてから**直した(行番号は在り処であって、証拠ではない)。
+ */
+describe('着地前レビューの直し(#681)', () => {
+  /**
+   * 🔴 **F1: 編集中に「ノートへ」を押すと、画面が 1 ドットも動かなかった。**
+   * ⚠ この面は aside なので編集中でも開けるが、`CREATE_ENTRY` は
+   *   `phase !== 'ready'` を**黙って捨てる** ── 押した人には「壊れている」と
+   *   「押せていない」の区別が付かない。
+   */
+  it('🔴 F1 編集中に押したら、理由を言う(黙って捨てない)', async () => {
+    const { d, pane, type, runBtn, saveBtn, note } = setup(async () => answer(['a'], [[1]]));
+    type('SELECT 1 AS a');
+    runBtn.click();
+    await settle();
+    /**
+     * ⚠ **編集に入ると、面は本文へ戻る**(実測 ── `START_EDIT` は `viewMode` を
+     *   `detail` にする)。だから「編集中に SQL の面が見えている」形は、
+     *   **編集中に `Alt+7` を押した**ときにできる(そのとき `phase` は `editing` のまま)。
+     * 🔑 レビューの筋書きは正しかったが、**そこへ至る道は 1 本だけ**である ──
+     *   確かめずに `START_EDIT` だけで組むと、面が隠れていて何も見えない。
+     */
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '' });
+    d.dispatch({ type: 'START_EDIT' });
+    d.dispatch({ type: 'SET_VIEW_MODE', mode: 'sql' });
+    expect(d.getState().phase, '前提が崩れている(編集に入っていない)').toBe('editing');
+    expect(pane.hidden, '前提が崩れている(SQL の面が見えていない)').toBe(false);
+
+    const before = d.getState().entryMetas.size;
+    saveBtn.click();
+    expect(d.getState().entryMetas.size, '編集中なのにノートを作った').toBe(before);
+    expect(note(), '黙って捨てている(理由が画面に出ない)').toContain('編集中は書き出せません');
+  });
+
+  /**
+   * 🔴 **F4: 一度 file を開き損ねると、以後の知らせを全部食っていた。**
+   * ⚠ `guestError` を消すのが `SET_SQL_SOURCE` と成功時だけで、`noteLine` は
+   *   その行を**いちばん先に返す** ── 切った / 0 行 / 書き出した、が出なくなる。
+   */
+  it('🔴 F4 開き損ねた断りは、打ち直すと消える', async () => {
+    const { pick, type, note } = setup();
+    pick('db2');
+    await settle();
+    expect(note(), '前提が崩れている(断りが出ていない)').toContain('開けませんでした');
+    type('SELECT 1 AS a');
+    expect(note(), '打ち直しても断りが居座っている').not.toContain('開けませんでした');
+  });
+
+  it('🔴 F4 走らせても消える(打ち直さずに走らせた回)', async () => {
+    const { pick, type, runBtn, note } = setup(async () => answer(['a'], [[1]]));
+    type('SELECT 1 AS a');
+    pick('db2');
+    await settle();
+    expect(note()).toContain('開けませんでした');
+    runBtn.click();
+    await settle();
+    expect(note(), '走らせても断りが居座っている').not.toContain('開けませんでした');
+    expect(note(), '答えの行が出ていない').toContain('1 行');
+  });
+
+  /**
+   * 🔴 **F5: `.sqlite` を 1 つも取り込んでいない人に、中身が空の選び所が出ていた。**
+   * ⚠ 「選べる相手が 1 つも無いときは出さない」と**書いてある行**が、
+   *   初回だけ走っていなかった(指紋の初期値が空文字で、0 件の指紋と同じ)。
+   */
+  it('🔴 F5 取り込んだ DB が 1 つも無ければ、選び所を出さない', () => {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const d = new Dispatcher();
+    const center = new CenterRouter(root);
+    d.onState((s) => center.render(s));
+    bindActions(root, d, {});
+    // ⚠ 添付を 1 つも持たない器(いちばん多い形)
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1', '会議メモ')], relations: [] });
+    d.dispatch({ type: 'SET_VIEW_MODE', mode: 'sql' });
+    const sel = root.querySelector<HTMLSelectElement>('[data-pkc-field="sql-source"]')!;
+    expect(sel.hidden, '押しても何も無い選び所が出ている').toBe(true);
+    // ⚠ 空振り防止 ── 選び所そのものは在る(取り込めば出る)
+    expect(sel, '選び所ごと消えている').not.toBeNull();
+  });
+
+  /**
+   * 🔴 **F3-A: 走っている最中に相手を変えると、古い DB の答えが新しい名札で出ていた。**
+   * ⚠ 数字は本物なので、user には**間違いに気づく手がかりが 1 つも無い**。
+   */
+  it('🔴 F3-A 走っている最中に相手を変えたら、古い答えは捨てる', async () => {
+    let release!: (v: SqlAnswer) => void;
+    const gate = new Promise<SqlAnswer>((r) => (release = r));
+    const { type, runBtn, pick, cells, note } = setup(async () => gate);
+    type('SELECT title FROM entries');
+    runBtn.click();
+    await settle();
+    expect(note(), '前提が崩れている(走っていない)').toContain('走らせています');
+
+    pick('db1'); // ⚠ 走っている最中に相手を変える
+    await settle();
+    release(answer(['title'], [['ノートの答え']])); // ⚠ 古い相手の答えが遅れて届く
+    await settle();
+
+    expect(cells(), '古い DB の答えが、新しい名札のまま出た').toEqual([]);
+    expect(note(), '走らせていますが消えていない').not.toContain('走らせています');
+  });
+
+  /**
+   * 🔴 **答えだけでなく、断りにも同じ門が要る**(#681 F3-A の 2 つ目)。
+   *
+   * ⚠ 変異試験 F3b が **SURVIVED** で教えた ── `SET_SQL_RESULT` の門は上の test が
+   *   守っていたが、`SQL_RUN_FAILED` の門は**誰も通っていなかった**
+   *   (CLAUDE.md §「門を N 個置いたら、N 個目だけが鳴る場面を N 通り作る」)。
+   * 🔴 外れると、**よその DB を調べていて出た英語の断りが、新しい名札のまま**残る
+   *   ── 選び直した人には「この file が壊れている」と読める(いちばん誤解を招く形)。
+   */
+  it('🔴 F3-A 走っている最中に相手を変えたら、古い断りも捨てる', async () => {
+    let fail!: (e: Error) => void;
+    let gate = new Promise<SqlAnswer>((_ok, rej) => (fail = rej));
+    const { type, runBtn, pick, note } = setup(async () => gate);
+    type('SELECT title FROM entries');
+    runBtn.click();
+    await settle();
+    expect(note(), '前提が崩れている(走っていない)').toContain('走らせています');
+
+    pick('db1'); // ⚠ 走っている最中に相手を変える
+    await settle();
+    expect(note(), '前提が崩れている(相手が変わっていない)').toContain('売上.sqlite');
+    fail(new Error('no such table: entries')); // ⚠ 古い相手の断りが遅れて届く
+    await settle();
+
+    expect(note(), '古い DB の断りが、新しい名札のまま出た').not.toContain('no such table');
+    expect(note(), '走らせていますが消えていない').not.toContain('走らせています');
+
+    /**
+     * 🔑 **対照群 ── いま選んでいる相手の断りは、ちゃんと出る**(門ごと死んでいない)。
+     * ⚠ これが無いと「断りが 1 つも出ない」に壊しても上の 2 行が通る。
+     */
+    gate = Promise.reject(new Error('no such table: 客先'));
+    // ⚠ 誰も掴んでいない reject を作らない(happy-dom が unhandled で騒ぐ)
+    gate.catch(() => {});
+    type('SELECT * FROM 客先');
+    runBtn.click();
+    await settle();
+    expect(note(), 'いま選んでいる相手の断りまで消えている').toContain('no such table: 客先');
+  });
+
+  /**
+   * 🔴 **F2: 相手を選んでも、案内文と手本が「entries…」のままだった。**
+   * ⚠ 書いてあるとおり打つと `no such table: entries` という英語が返る。
+   *   そのうえ**その file に在る表の名前は画面のどこにも出ていなかった**
+   *   (state には届いているのに、描画器は個数だけを使っていた)。
+   */
+  it('🔴 F2 相手を選んだら、案内も手本もその DB のものになる', async () => {
+    const { pane, box, pick } = setup();
+    const tip = (): string => pane.querySelector('[data-pkc-field="sql-tip"]')?.textContent ?? '';
+    expect(tip(), '前提が崩れている(既定の案内が出ていない)').toContain('entries');
+
+    pick('db1');
+    await settle();
+    expect(tip(), 'その file に在る表の名前が出ていない').toContain('売上');
+    expect(tip(), 'ノートの表が出ないことを言っていない').toContain('出てきません');
+    expect(box.placeholder, '手本が entries のまま(打てない字を手本にしている)').not.toContain(
+      'entries',
+    );
+    expect(box.placeholder, '手本がその DB の表になっていない').toContain('売上');
+  });
+
+  it('🔴 F2 断りが出た回も、どちらを調べているかが消えない', async () => {
+    const { pick, type, runBtn, note } = setup(async () => {
+      throw new Error('SQLITE_READONLY: attempt to write a readonly database');
+    });
+    pick('db1');
+    await settle();
+    type('UPDATE t SET a = 1');
+    runBtn.click();
+    await settle();
+    /**
+     * ⚠ **断るのは字の門である**(`sql-guard`)── worker まで行かないので、
+     *   出る字は engine の言い直しではなく門の字である(実測して合わせた)。
+     */
+    expect(note(), '断りが出ていない(前提が崩れている)').toContain('読み取り専用です');
+    expect(note(), '断りの行で名札が消えた').toContain('売上.sqlite');
+  });
+});

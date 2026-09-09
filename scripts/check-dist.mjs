@@ -4,9 +4,10 @@
  *
  *   node scripts/check-dist.mjs product   # map が 1 つでもあれば落とす + 配信量の tripwire
  *   node scripts/check-dist.mjs dev       # map が 1 つも無ければ落とす(調査手段の喪失)
- *   node scripts/check-dist.mjs product --require-manual
- *                                         # 焼きたての product(release / nightly)── manual.html の
- *                                         # 実在も要求する。⚠ 過去の zip を検品する経路には付けない
+ *   node scripts/check-dist.mjs product --require-manual --require-precache-list
+ *                                         # 焼きたての product(release / nightly)── manual.html と
+ *                                         # precache.json の実在も要求する。
+ *                                         # ⚠ 過去の zip を検品する経路には付けない
  *
  * 🔑 **2 段構え**。`tests/build-config.test.ts` は「config がそう書いてあるか」しか
  * 見ない ── plugin が map を足す・`--sourcemap` が渡る、といった経路は config を
@@ -26,7 +27,7 @@ import { inspectDist, MANUAL_PAGE, PORTABLE_TEMPLATE } from './dist-inspect.mjs'
  * ⚠ 綴りを間違えた旗を黙って捨てると、「要求したつもり」で門が消える ── 呼び側が
  *   `--require-manaul` と打った日に、release が manual.html 無しで通る。
  */
-const KNOWN_FLAGS = new Set(['--require-manual']);
+const KNOWN_FLAGS = new Set(['--require-manual', '--require-precache-list']);
 const flags = process.argv.slice(2).filter((a) => a.startsWith('--'));
 const positional = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const unknownFlags = flags.filter((f) => !KNOWN_FLAGS.has(f));
@@ -205,6 +206,12 @@ const { lines, errors } = inspectDist({
   manualFloorKb: MANUAL_FLOOR_KB,
   // 🔴 焼きたての product だけ manual.html の実在を要求する(release.yml / nightly.yml が渡す)
   requireManual: flags.includes('--require-manual'),
+  /**
+   * 🔴 **焼きたての一式だけ `precache.json` の実在を要求する**(2026-09-09)。
+   * ⚠ `pages.yml` の product の検品は**過去の zip**なので付けない ── 付けると
+   *   #532 段 B より前に切った release(v3.2.0)が落ちて `/dev/` が止まる。
+   */
+  requirePrecacheList: flags.includes('--require-precache-list'),
   files,
   text,
 });
