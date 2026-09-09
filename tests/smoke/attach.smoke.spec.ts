@@ -21,6 +21,67 @@ const PNG_1X1 = Buffer.from(
   'base64',
 );
 
+
+/**
+ * 🔴 **その場で zip を組む**(#818)── store 方式(圧縮なし)+ CRC。
+ *
+ * ⚠ 出来合いの fixture を repo に置かない ── 何が入っているかが**この file から
+ *   読めない**と、落ちたときに「zip が悪いのか実装が悪いのか」が分からない。
+ * 🔑 `zip-reader` は CRC を照合するので、**正しい CRC を書く**のが要点である。
+ */
+const CRC_T = (() => {
+  const t = new Uint32Array(256);
+  for (let i = 0; i < 256; i += 1) {
+    let c = i;
+    for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    t[i] = c >>> 0;
+  }
+  return t;
+})();
+const crc32 = (buf: Buffer): number => {
+  let c = 0xffffffff;
+  for (const b of buf) c = (CRC_T[(c ^ b) & 0xff] ?? 0) ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+};
+function makeZip(files: readonly { name: string; data: Buffer }[]): Buffer {
+  const body: Buffer[] = [];
+  const central: Buffer[] = [];
+  let offset = 0;
+  for (const f of files) {
+    const name = Buffer.from(f.name, 'utf8');
+    const crc = crc32(f.data);
+    const lh = Buffer.alloc(30);
+    lh.writeUInt32LE(0x04034b50, 0);
+    lh.writeUInt16LE(20, 4);
+    lh.writeUInt16LE(0x800, 6); // 名前は UTF-8
+    lh.writeUInt32LE(crc, 14);
+    lh.writeUInt32LE(f.data.length, 18);
+    lh.writeUInt32LE(f.data.length, 22);
+    lh.writeUInt16LE(name.length, 26);
+    body.push(lh, name, f.data);
+    const ch = Buffer.alloc(46);
+    ch.writeUInt32LE(0x02014b50, 0);
+    ch.writeUInt16LE(20, 4);
+    ch.writeUInt16LE(20, 6);
+    ch.writeUInt16LE(0x800, 8);
+    ch.writeUInt32LE(crc, 16);
+    ch.writeUInt32LE(f.data.length, 20);
+    ch.writeUInt32LE(f.data.length, 24);
+    ch.writeUInt16LE(name.length, 28);
+    ch.writeUInt32LE(offset, 42);
+    central.push(ch, name);
+    offset += lh.length + name.length + f.data.length;
+  }
+  const cd = Buffer.concat(central);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(files.length, 8);
+  eocd.writeUInt16LE(files.length, 10);
+  eocd.writeUInt32LE(cd.length, 12);
+  eocd.writeUInt32LE(offset, 16);
+  return Buffer.concat([Buffer.concat(body), cd, eocd]);
+}
+
 /**
  * 🔴 **裁定 A の当のふるまいを、実ブラウザで 1 度通す**(user 裁定 2026-09-02、#666)。
  *
@@ -75,6 +136,53 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
 
   // ⚠ 対照群 ── 添付そのものは 1 件できている(ノートと合わせて 2 行)
   await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(2);
+
+  /**
+   * ── ⑤ 🔴 **zip の中を見て、選んだ物だけ取り出す**(#818 段②③)。
+   *
+   * ⚠ **新しい起動を足さない**(#820 の規律)── この物語の続きとして測る。
+   * 🔴 ここでしか見えないのは 3 つ:①**zip の添付にだけ「中を見る」が出る**
+   *   (対照群 = さっきの png には出ない)②**実体を読んで中央ディレクトリが引ける**
+   *   ③**取り出した物が本当に添付になる**。
+   */
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: '書庫.zip',
+    mimeType: 'application/zip',
+    buffer: makeZip([
+      { name: '写真/海.jpg', data: Buffer.from('umi') },
+      { name: '写真/山.jpg', data: Buffer.from('yama') },
+      { name: 'readme.txt', data: Buffer.from('hello') },
+    ]),
+  });
+  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(3);
+  // ⚠ **対照群** ── 画像の添付には出ない(押せるのに必ず失敗する口を作らない)
+  await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]:has-text("ねこ.png")');
+  await expect(
+    page.locator('[data-pkc-action="browse-archive"]'),
+    '画像の添付にも「中を見る」が出ている',
+  ).toHaveCount(0);
+
+  await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]:has-text("書庫.zip")');
+  await clickReal(page, '[data-pkc-action="browse-archive"]');
+  const box = page.locator('[data-pkc-region="app-dialog"]');
+  await expect(box, '書庫の器が出ない').toBeVisible();
+  // 階層が出ている(フォルダは末尾の `/`)
+  await expect(box).toContainText('写真/');
+  await expect(box).toContainText('readme.txt');
+  // 🔴 フォルダを押すと、その下の 2 件が入る
+  await clickReal(page, '[data-pkc-field="pick-archive"][data-pkc-archive-index="0"]');
+  await expect(
+    page.locator('[data-pkc-field="dialog-ok"]'),
+    'フォルダの下の件数が字に出ていない',
+  ).toHaveText('選んだ 2 件を取り出す');
+  await clickReal(page, '[data-pkc-field="dialog-ok"]');
+  // 🔴 取り出した物が添付になる(ノート + png + zip + 2 = 5 行)
+  await expect(
+    page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]'),
+    '取り出した物が添付になっていない',
+  ).toHaveCount(5, { timeout: 15_000 });
+  await expect(page.locator('[data-pkc-region="entry-list"]')).toContainText('海.jpg');
+  await expect(page.locator('[data-pkc-region="entry-list"]')).toContainText('山.jpg');
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

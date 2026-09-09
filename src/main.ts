@@ -2402,6 +2402,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   台帳も封筒も `extension-links.ts` / `ext-wire.ts` が持つ。
      */
     deliverToExtension: (linkId, entry) => appExtLinks.deliver(linkId, entry),
+    /**
+     * 🔴 **添付の実体を 1 件読む**(#818)。⚠ ここは**器を貸さない**
+     *   (`lendObjectUrl` ではない)── 中を覗くのに URL は要らないし、
+     *   借りた URL は返し忘れると残る(2026-07-27 の不可侵指示)。
+     */
+    readAssetBlob: (assetKey) => blobs.get(cid, assetKey),
     downloadAsset: async (assetKey, name) => {
       try {
         const lent = await blobs.lendObjectUrl(cid, assetKey);

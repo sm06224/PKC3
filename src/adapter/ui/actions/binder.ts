@@ -246,7 +246,82 @@ function openCopyHistory(root: HTMLElement, notify: (text: string) => void): voi
     root.ownerDocument.activeElement,
   );
 }
+
+/**
+ * 🔴 **書庫の中を見て、選んだ物だけ取り出す**(#818 段②)。
+ *
+ * > user の言葉 2026-09-09:「**アーカイブ形式ファイルを右クリックでファイル
+ * > エクスプローラ開始して、階層の異なる複数のファイルを指定して展開できるように
+ * > したい / 最低限 zip 対応したい**」
+ *
+ * 🔑 **取り出した物は、いまの添付と同じ道へ渡す**(`attachFiles`)── 新しい
+ *   保存経路を作らない。重複の畳み・縮め・保存は、そちらが既に持っている。
+ * 🔴 **無言で失敗しない** ── `zip-reader` は断る理由を日本語で持っている
+ *   (暗号化 / ZIP64 / 分割書庫 / CRC 不一致)ので、**その字をそのまま出す**。
+ * ⚠ **1 件落ちても残りは入れる** ── 壊れた 1 件で全部を捨てると、
+ *   user は「何も取り出せない書庫」としか分からない。落ちた物は名前で言う。
+ */
+async function browseArchive(
+  root: HTMLElement,
+  services: BinderServices,
+  assetKey: string,
+  name: string,
+): Promise<void> {
+  const say = (text: string): void => services.showStatus?.(text);
+  const why = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+  if (services.readAssetBlob === undefined) {
+    say('この版では書庫の中を見られません');
+    return;
+  }
+  const blob = await services.readAssetBlob(assetKey).catch(() => null);
+  if (blob === null) {
+    say(`「${name}」の中身が見つかりません(添付が消えている可能性があります)`);
+    return;
+  }
+  let entries: ZipEntry[];
+  try {
+    entries = await readZipDirectory(blob);
+  } catch (e) {
+    say(`「${name}」の中を開けません ── ${why(e)}`);
+    return;
+  }
+  const rows = archiveRows(entries);
+  if (rows.length === 0) {
+    say(`「${name}」の中に取り出せる物がありません`);
+    return;
+  }
+  const marks = await pickArchiveInApp(
+    root,
+    rows.map((r) => ({ ...r, size: r.isDirectory ? '' : humanBytes(r.size) })),
+    // 🔑 何件入るかの判定は **1 本**(`markedFiles`)── 器の中で数え直さない
+    (m: readonly string[]) => markedFiles(entries, m).length,
+  );
+  if (marks === null) return;
+  const files = markedFiles(entries, marks);
+  const names = extractNames(files.map((e) => e.name));
+  const out: File[] = [];
+  const bad: string[] = [];
+  for (const [i, e] of files.entries()) {
+    const outName = names[i] ?? baseName(e.name);
+    try {
+      out.push(new File([await readZipEntry(blob, e)], outName));
+    } catch (err) {
+      bad.push(`${outName}(${why(err)})`);
+    }
+  }
+  if (out.length > 0) services.attachFiles?.(out, `「${name}」から取り出しました`);
+  const tail = bad.length === 0 ? '' : ` ⚠ ${bad.length} 件は取り出せません ── ${bad.join(' / ')}`;
+  say(out.length === 0 ? `取り出せませんでした ── ${bad.join(' / ')}` : `${out.length} 件を添付にしました${tail}`);
+}
 import { cleanForClipboard } from '@features/export/clipboard-html';
+import { readZipDirectory, readZipEntry, type ZipEntry } from '@features/import/zip-reader';
+import { humanBytes } from '@features/human-bytes';
+import {
+  archiveRows,
+  baseName,
+  extractNames,
+  markedFiles,
+} from '@features/archive/zip-browse';
 import { joinCopied, pickMarked } from '@features/clipboard/scrap';
 import {
   confirmInApp,
@@ -255,6 +330,7 @@ import {
   pickEntryInApp,
   pickSnippetInApp,
   pickDiagramInApp,
+  pickArchiveInApp,
   pickCopyFormatInApp,
   pickScrapInApp,
   promptInApp,
@@ -570,6 +646,13 @@ export interface BinderServices {
    */
   deliverToExtension?(linkId: string, entry: ExtDeliveredEntry): boolean;
   downloadAsset?(assetKey: string, name: string): void;
+  /**
+   * 🔴 **添付の実体を 1 件読む**(#818)。⚠ **省略可** ── 無い配線では
+   *   「この版では中を見られません」と断るだけで、他は壊れない
+   *   (`downloadAsset` と同じ規律)。
+   * @returns 実体。⚠ 無ければ `null`(消えた添付を掴んだまま進まない)
+   */
+  readAssetBlob?(assetKey: string): Promise<Blob | null>;
   /**
    * 🔴 **録音・画面収録**(#413。user 要望 2026-07-16「録音と画面収録を…
    * これで、会議メモをうまく残せるはず」)。
@@ -6217,6 +6300,15 @@ const ACTIONS: Record<string, ActionHandler> = {
      * **呼び忘れ**でここだけ外れていた。
      */
     flashCopied(target);
+  },
+  /**
+   * 🔴 **書庫の中を見る**(#818)。⚠ 出るのは zip の添付にだけ
+   *   (`isZipAttachment` ── 押せるのに必ず失敗する口を作らない)。
+   */
+  'browse-archive': (_dispatcher, target, services, root) => {
+    const key = target.getAttribute('data-pkc-asset-key');
+    if (key === null || key === '') return;
+    void browseArchive(root, services, key, target.getAttribute('data-pkc-asset-name') ?? '書庫');
   },
   'download-asset': (dispatcher, target, services) => {
     const key = target.getAttribute('data-pkc-asset-key');

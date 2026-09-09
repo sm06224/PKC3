@@ -20,6 +20,7 @@ import {
   extractVars,
 } from '@features/markdown/frontmatter';
 import { lineStartOffset, scrollTopForLine } from '@features/markdown/line-offset';
+import { isZipAttachment } from '@features/archive/zip-browse';
 import { hydrateMermaid, type MermaidScope } from './mermaid-hydrate';
 import { hydrateMath } from './math-hydrate';
 import { markViewBig } from './view-big';
@@ -1865,6 +1866,28 @@ export class DetailRenderer {
       dl.setAttribute('data-pkc-asset-name', meta.name || 'download');
       dl.textContent = 'ダウンロード';
       info.append(dl);
+      /**
+       * 🔴 **書庫は、落とさなくても中が見られる**(#818。user 要望 2026-09-09
+       * 「アーカイブ形式ファイルを右クリックでファイルエクスプローラ開始して、
+       * 階層の異なる複数のファイルを指定して展開できるようにしたい」)。
+       *
+       * ⚠ **zip のときだけ出す** ── どの添付にも出すと、押しても
+       *   「これは書庫ではありません」と返すだけの口になる(押せるのに必ず失敗する
+       *   のは、出ないより悪い ── `entry-actions.ts` の `when` と同じ規律)。
+       * 🔑 見分けは **mime と名前の両方** ── ブラウザは zip に
+       *   `application/x-zip-compressed` を付けることがあり、逆に名前だけ
+       *   `.zip` で mime が空の経路も在る(取り込み元によって違う)。
+       */
+      if (isZipAttachment(meta.mime, meta.name)) {
+        const peek = document.createElement('button');
+        peek.type = 'button';
+        peek.setAttribute('data-pkc-action', 'browse-archive');
+        peek.setAttribute('data-pkc-asset-key', meta.assetKey);
+        peek.setAttribute('data-pkc-asset-name', meta.name || 'archive.zip');
+        peek.title = '中の一覧を出して、選んだ物だけ取り出します';
+        peek.textContent = '中を見る';
+        info.append(peek);
+      }
       // 🔴 **本文から参照するための導線**(P8 段⑱。レビュー H)。
       //    マニュアル「本文に書けるもの」 は `asset:<key>` を「書ける形式」として説明しているのに、
       //    **本文へ入れる経路も key を見る経路も無かった** ── 書けるのに書けない、

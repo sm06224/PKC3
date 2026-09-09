@@ -13,6 +13,7 @@ import {
   alertInApp,
   confirmInApp,
   DIALOG_REGION,
+  pickArchiveInApp,
   pickDateInApp,
   pickScrapInApp,
   pickSnippetInApp,
@@ -534,5 +535,72 @@ describe('まとめて貼るの選び方(#679)', () => {
     pick(0); // 付け直す → 最後
     okBtn().click();
     expect(await answered).toEqual(['い', 'あ']);
+  });
+});
+
+/**
+ * 🔴 **書庫の中を見て、階層をまたいで選ぶ**(#818 段②)。
+ *
+ * ⚠ ここは**器**だけを見る(何が並ぶか・何件入るかは
+ * `features/archive/zip-browse` の test)。🔑 見るのは 3 つ:
+ * ①**フォルダも押せる** ②**何件入るかは呼び側が数える**(判定を 2 か所に書かない)
+ * ③**0 件では押せない**。
+ */
+describe('書庫の選び方(#818)', () => {
+  const ROWS = [
+    { path: '写真', name: '写真', depth: 0, isDirectory: true, size: '' },
+    { path: '写真/海.jpg', name: '海.jpg', depth: 1, isDirectory: false, size: '2.0 KB' },
+    { path: 'a.txt', name: 'a.txt', depth: 0, isDirectory: false, size: '10 B' },
+  ];
+  /** 「印の下の file を数える」= 呼び側の規則(ここでは簡易版)。 */
+  const count = (marks: readonly string[]): number =>
+    ROWS.filter((r) => !r.isDirectory && marks.some((m) => r.path === m || r.path.startsWith(`${m}/`)))
+      .length;
+  const pick = (i: number): void =>
+    q<HTMLButtonElement>(`[data-pkc-archive-index="${i}"]`).click();
+
+  it('🔴 フォルダを押すと、その下の件数で字が変わる(数えるのは呼び側)', async () => {
+    const answered = pickArchiveInApp(document.body, ROWS, count);
+    pick(0);
+    expect(okBtn().textContent).toBe('選んだ 1 件を取り出す');
+    okBtn().click();
+    expect(await answered).toEqual(['写真']);
+  });
+
+  it('🔴 中に file が 1 つも無い印だけでは押せない', async () => {
+    const answered = pickArchiveInApp(
+      document.body,
+      [{ path: '空', name: '空', depth: 0, isDirectory: true, size: '' }],
+      () => 0,
+    );
+    pick(0);
+    expect(okBtn().disabled, '取り出す物が無いのに押せる').toBe(true);
+    cancelBtn().click();
+    expect(await answered).toBeNull();
+  });
+
+  it('階層は字下げで出る(押した所が読める)', async () => {
+    const answered = pickArchiveInApp(document.body, ROWS, count);
+    expect(q<HTMLButtonElement>('[data-pkc-archive-index="0"]').style.paddingInlineStart).toBe('0px');
+    expect(q<HTMLButtonElement>('[data-pkc-archive-index="1"]').style.paddingInlineStart).toBe(
+      '16px',
+    );
+    cancelBtn().click();
+    await answered;
+  });
+
+  it('file の行には大きさが出る / フォルダには出ない', async () => {
+    const answered = pickArchiveInApp(document.body, ROWS, count);
+    expect(q('[data-pkc-archive-index="1"]').textContent).toBe('海.jpg — 2.0 KB');
+    expect(q('[data-pkc-archive-index="0"]').textContent, 'フォルダの印が無い').toBe('写真/');
+    cancelBtn().click();
+    await answered;
+  });
+
+  it('やめると null(器は押せる状態へ戻る)', async () => {
+    const answered = pickArchiveInApp(document.body, ROWS, count);
+    cancelBtn().click();
+    expect(await answered).toBeNull();
+    expect(okBtn().disabled).toBe(false);
   });
 });

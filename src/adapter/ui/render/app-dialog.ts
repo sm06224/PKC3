@@ -38,6 +38,7 @@ import type { PaletteRow } from '@features/palette/palette-rows';
 import type { EntryPickRow } from '@features/entry-ref/entry-pick';
 import type { SnippetChoice } from '@features/snippet/snippet-menu';
 import { moveMark, toggleMark } from '@features/clipboard/scrap';
+import { toggleArchiveMark } from '@features/archive/zip-browse';
 
 export type DialogAnswer = 'ok' | 'cancel';
 
@@ -1033,6 +1034,106 @@ export function pickScrapInApp(
     // ⚠ 器は使い回すので、押せなくしたまま返さない
     f.ok.disabled = false;
     return answer === 'ok' && marks.length > 0 ? [...marks] : null;
+  });
+}
+
+/** 書庫の一覧の 1 行(#818)。⚠ 何が並ぶかは `features/archive/zip-browse.ts` が決める。 */
+export interface ArchivePickRow {
+  readonly path: string;
+  readonly name: string;
+  readonly depth: number;
+  readonly isDirectory: boolean;
+  /** 大きさの字(フォルダは空)。⚠ 綴りは `human-bytes` の 1 本から来る。 */
+  readonly size: string;
+}
+
+/**
+ * 🔴 **書庫の中を見て、階層をまたいで選ぶ**(#818 段②)。
+ *
+ * > user の言葉 2026-09-09:「**階層の異なる複数のファイルを指定して展開できる
+ * > ようにしたい**」
+ *
+ * ⚠ **別窓ではなく、その場の器**である ── 2026-09-04 の裁定「アプリの基本は別窓」は
+ *   **開いたまま使うアプリ**(予定表・連絡先)の話で、ここは**選んだら消える
+ *   一時的な選び手**である。別窓にすると user が**閉じる操作を 1 つ余計に**する。
+ *
+ * 🔑 **フォルダも押せる** ── 押すと、その下の file が全部入る。⚠ 何件入るかは
+ *   `countFiles` が数える(判定を 2 か所に書かない ── CLAUDE.md §7)。
+ *
+ * @param countFiles 印から「実際に取り出す file の数」を数える(呼び側の 1 本)
+ * @returns 選んだ path。`Escape` / 「やめる」/ 0 件なら `null`
+ */
+export function pickArchiveInApp(
+  host: HTMLElement,
+  rows: readonly ArchivePickRow[],
+  countFiles: (marks: readonly string[]) => number,
+): Promise<string[] | null> {
+  return enqueue(async () => {
+    const f = ensureFrame(host);
+    f.title.textContent = '書庫の中';
+    f.body.textContent = '';
+
+    const note = document.createElement('p');
+    note.setAttribute('data-pkc-field', 'pick-archive-note');
+    note.textContent = 'フォルダを押すと、その下のファイルが全部入ります';
+    f.body.append(note);
+
+    const list = document.createElement('div');
+    list.setAttribute('data-pkc-field', 'pick-archive-list');
+    f.body.append(list);
+
+    let marks: string[] = [];
+    let focusPath: string | null = null;
+
+    const paint = (): void => {
+      list.textContent = '';
+      for (const [index, row] of rows.entries()) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.setAttribute('data-pkc-field', 'pick-archive');
+        btn.setAttribute('data-pkc-archive-index', String(index));
+        btn.setAttribute('aria-pressed', marks.includes(row.path) ? 'true' : 'false');
+        // 🔑 階層は**字下げ**で出す(器の中なので、木の線は引かない)
+        btn.style.paddingInlineStart = `${row.depth * 16}px`;
+        /**
+         * ⚠ **フォルダの印は末尾の `/`**(絵文字を UI に置かない ── `icons.test.ts`)。
+         * 🔑 `/` は書庫の中の綴りそのものなので、説明が要らない。
+         */
+        btn.textContent = row.isDirectory ? `${row.name}/` : `${row.name} — ${row.size}`;
+        btn.addEventListener('click', () => {
+          marks = toggleArchiveMark(marks, row.path);
+          focusPath = row.path;
+          paint();
+        });
+        list.append(btn);
+      }
+      const n = countFiles(marks);
+      f.ok.textContent = n === 0 ? '取り出す' : `選んだ ${n} 件を取り出す`;
+      // ⚠ **0 件では押せない** ── 押しても何も起きない口を作らない
+      f.ok.disabled = n === 0;
+      if (focusPath !== null) {
+        const back = rows.findIndex((r) => r.path === focusPath);
+        list.querySelector<HTMLButtonElement>(`[data-pkc-archive-index="${back}"]`)?.focus();
+      }
+    };
+    paint();
+
+    const onOutside = (ev: MouseEvent): void => {
+      if (ev.target === f.dialog) f.cancel.click();
+    };
+    f.dialog.addEventListener('click', onOutside);
+
+    f.ok.removeAttribute('data-pkc-danger');
+    f.ok.hidden = false;
+    f.cancel.textContent = 'やめる';
+    f.cancel.hidden = false;
+
+    const answered = open(f, 'cancel');
+    list.querySelector<HTMLButtonElement>('[data-pkc-archive-index="0"]')?.focus();
+    const answer = await answered;
+    f.dialog.removeEventListener('click', onOutside);
+    f.ok.disabled = false;
+    return answer === 'ok' && countFiles(marks) > 0 ? [...marks] : null;
   });
 }
 
