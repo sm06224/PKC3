@@ -373,6 +373,7 @@ import {
 import { currentOpenPlace } from '@adapter/ui/render/open-place';
 import { effectiveOpenPlace } from '@features/open-place';
 import { joinCopied, pickMarked } from '@features/clipboard/scrap';
+import { sqlNoteBody, sqlNoteTitle } from '@features/query/sql-to-note';
 import {
   confirmInApp,
   pickDateInApp,
@@ -1384,6 +1385,12 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'schedule-quick-add',
   // 🔴 連絡先を 1 件作る(#278 段③)── `CREATE_ENTRY` は即永続なので同じ門(機械検査は repo-hygiene)
   'contacts-quick-add',
+  /**
+   * 🔴 **SQL の答えをノートへ書き出す**(#681 段③ の 3 つ目)── `CREATE_ENTRY` を撃つ。
+   * ⚠ 取り込みが entry を総入れ替えしている裏で 1 件足させない、が理由
+   *   (`contacts-quick-add` と同じ)。機械検査は `tests/repo-hygiene.test.ts`。
+   */
+  'sql-to-note',
   /**
    * 🔴 **予定から外すのも本文を書く**(#498)── 行の `@…` を剥がす
    *   (`SET_TASK_DATE`)か、frontmatter の `date:` を消す(`SET_ENTRY_DATE`)。
@@ -6756,6 +6763,41 @@ const ACTIONS: Record<string, ActionHandler> = {
   /** 🔴 **走らせる**(#681 段②)。⚠ 字の門も engine の門も、判定は呼ばれた先に在る。 */
   'run-sql': (dispatcher) => {
     dispatcher.dispatch({ type: 'RUN_SQL' });
+  },
+  /**
+   * 🔴 **答えをノートへ書き出す**(#681 段③ の 3 つ目)。
+   *
+   * ⚠ この面は**別の窓**で開くので、ノートを作っても**その窓には何も起きない** ──
+   *   だから作った後に**題名を画面へ返す**(`SQL_SAVED`)。返さないと、押した user には
+   *   **押せなかった**ように見える(CLAUDE.md「押した後どうなるか」)。
+   * ⚠ **本文の組み立ては `sql-to-note.ts`** が持つ(ここは呼ぶだけ)── 柵の長さや
+   *   升の逃がし方をここに書くと、判定が 2 か所になる(§7)。
+   * ⚠ **編集の面へ入らない**(`edit: false`)── 打っている途中の SQL を退かさない。
+   */
+  'sql-to-note': (dispatcher) => {
+    const p = dispatcher.getState().sqlPage;
+    // ⚠ まだ答えが無い回は何もしない(押せる印は renderer 側が消しているが、鍵からも来うる)
+    if (p.ranSql === '' || p.columns.length === 0) return;
+    const title = sqlNoteTitle(new Date());
+    const lid = generateLid();
+    dispatcher.dispatch({
+      type: 'CREATE_ENTRY',
+      archetype: 'text',
+      lid,
+      title,
+      body: sqlNoteBody({
+        sql: p.ranSql,
+        columns: p.columns,
+        rows: p.rows,
+        truncated: p.truncated,
+      }),
+      parentLid: null,
+      relationId: generateLid(),
+      edit: false,
+    });
+    // ⚠ **作れた回だけ言う** ── 作れないのに「書き出しました」と出すと嘘になる
+    if (!dispatcher.getState().entryMetas.has(lid)) return;
+    dispatcher.dispatch({ type: 'SQL_SAVED', title });
   },
   /**
    * 🔴 **開く場所**(#826)。⚠ `set-prose-align` と同じ受け方(`<select>` でもボタンでも通す)。

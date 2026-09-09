@@ -379,5 +379,23 @@ test('🔴 #pkc?view=search で開くと、探す面が中央に出て本文の�
     '件数と時間の 1 行が出ない',
   ).toContainText('1 行');
 
+  /**
+   * 🔴 **答えをノートへ書き出せる**(#681 段③ の 3 つ目)。
+   *
+   * ⚠ **起動は 1 つも足していない**(いま開いている面で 1 回押すだけ)──
+   *   CLAUDE.md「新しく起動する test を足すのではなく、既に在る道中に assert を足す」。
+   * ⚠ unit(happy-dom)では**本文が disk へ渡ったか**までしか見られない ──
+   *   ここで見るのは**実物の worker と実物の sqlite を通って、左の一覧に出るか**である。
+   */
+  await clickReal(page, '[data-pkc-field="sql-to-note"]');
+  await expect(
+    sql.locator('[data-pkc-field="sql-note"]'),
+    '書き出したことを画面が言わない(別の窓では、言わないと押せなかったように見える)',
+  ).toContainText('書き出しました');
+  await expect(
+    page.locator('[data-pkc-region="browse-host"]'),
+    '書き出したノートが左の一覧に出ない',
+  ).toContainText('SQL の答え', { timeout: 10_000 });
+
   expect(errors, 'pageerror / console.error が出ている').toEqual([]);
 });

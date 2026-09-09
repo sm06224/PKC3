@@ -158,12 +158,14 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   登記は増えない(面そのものは `set-view` で開く。欄と押し所はその面の中にしか無い)
       // ⚠ 2026-09-09(#681 段②): 鍵 `view-sql` で登記 +1(受け手は増えない ──
       //   `runGlobalCommand` の特例で受ける。押しボタンを持たない面である)
-      total: 266,
-      receivers: 217,
+      // ⚠ 2026-09-09(#681 段③): 答えをノートへ(`sql-to-note`)で受け手 +1
+      //   ── SQL の面の中にしか無い押し所(登記は増えない。`run-sql` と同じ)
+      total: 267,
+      receivers: 218,
       registered: 85,
       both: 36,
       outsideActionsTable: 49,
-      unregistered: 181,
+      unregistered: 182,
     });
   });
 
