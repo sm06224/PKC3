@@ -226,6 +226,7 @@ import { generateAssetKey } from '@adapter/platform/storage/asset-key';
 import { downloadBlob, downloadUrl } from '@adapter/platform/download';
 import { downloadSelfhostBundle } from '@adapter/ui/actions/selfhost';
 import { dayStamp } from '@features/datetime/date-math';
+import { APP_VERSION, BUILD_KIND, BUILT_AT } from '@runtime/release-meta';
 import { diagramFileName } from '@features/export/file-name';
 import { renderToSvg, readPalette, svgWithIntrinsicSize } from '@adapter/ui/render/mermaid-raster';
 import { MERMAID_KIND } from '@adapter/ui/render/mermaid-hydrate';
@@ -1237,6 +1238,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       download: downloadBlob,
       notify: showStatus,
       stamp: () => dayStamp(new Date()),
+      /**
+       * 🔴 **どこから作ったかを焼く**(#532 段 C)。
+       * ⚠ `document.baseURI`(配信ディレクトリ)であって `location.origin` ではない ──
+       *   `base: './'` の相対配信なので、`/PKC3/dev/` まで含めないと戻れない。
+       */
+      source: {
+        version: APP_VERSION,
+        kind: BUILD_KIND,
+        from: document.baseURI,
+        builtAt: BUILT_AT,
+      },
     }).catch((e: unknown) => {
       showStatus(`一式を組めませんでした: ${e instanceof Error ? e.message : String(e)}`);
     });

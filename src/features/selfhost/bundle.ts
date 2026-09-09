@@ -297,8 +297,67 @@ export const START_PS1 = [
   '',
 ].join('\r\n');
 
+/**
+ * 🔴 **この一式が、どこの・いつの・どの版から作られたか**(#532 段 C)。
+ *
+ * ⚠ 段 B ではこれを焼いておらず、案内に「**PKC3 の中の「自分のパソコンで動かす」から
+ * もう一度落とせます**」と書いた ── **嘘だった**。一式は**自分の origin から集める**ので、
+ * **自分のパソコンで動かしている PKC で押すと、同じ古い一式が落ちてくる**。
+ * ⚠ しかも落ちてくる zip は正常で、展開すれば起動もする ──
+ * **user は「更新した」と思ったまま古い版を使い続ける**(いちばん気づけない形)。
+ * 🔑 だから**元の住所を焼く**。新しい物はそこへ戻らないと取れない。
+ */
+export interface SelfhostSource {
+  /** 例 `3.2.0`。 */
+  readonly version: string;
+  /** `dev` / `stage` / `product`。 */
+  readonly kind: string;
+  /**
+   * 🔴 **配信ディレクトリ**の URL(`document.baseURI`)。
+   * ⚠ `location.origin` ではない ── `base: './'` の相対配信なので、
+   *   `/PKC3/dev/` のような**ディレクトリまで**含めないと戻れない
+   *   (`launch-tile.ts` の `baseUrl` が同じ理由で origin を使っていない)。
+   */
+  readonly from: string;
+  /** 焼いた時刻(epoch ms)。⚠ 焼いていなければ `0`。 */
+  readonly builtAt: number;
+}
+
+/** 焼いた時刻を、読める字にする。⚠ 0 のときは「分かりません」と書く(嘘の日付を出さない)。 */
+export function builtAtLabel(builtAt: number): string {
+  if (!Number.isFinite(builtAt) || builtAt <= 0) return '(分かりません)';
+  const d = new Date(builtAt);
+  const p2 = (n: number): string => String(n).padStart(2, '0');
+  return `${String(d.getFullYear())}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
+}
+
 /** 同梱する説明。⚠ **住所が変わるとノートが見えなくなる**ことを必ず書く。 */
-export const README_TXT = [
+export function readmeText(src: SelfhostSource): string {
+  return [
+    ...README_HEAD,
+    '【この一式について】',
+    '  版          : ' + src.version + ' (' + src.kind + ')',
+    '  作った日時  : ' + builtAtLabel(src.builtAt),
+    '  元の住所    : ' + src.from,
+    '',
+    '【新しくするとき】',
+    '  🔴 上の「元の住所」をブラウザで開いて、そこで',
+    '     「自分のパソコンで動かす」を押してください。',
+    '',
+    '  ⚠ いま動かしているこの PKC(' + SELFHOST_ORIGIN + ')で押すと、',
+    '     まったく同じ一式が落ちてきます ── この一式は自分の中から集めるためです。',
+    '     (コピーをもう 1 つ作りたいときは、それで正しい動きです)',
+    '',
+    '  落とし直したら、site フォルダを新しいものに入れ替えて、',
+    '  ブラウザを読み直してください。画面に「新しい版があります。」と出ます。',
+    '  ⚠ 住所が同じなので、書いたノートはそのまま残ります。',
+    '',
+    '  一式の形: ' + String(SELFHOST_LAYOUT),
+    '',
+  ].join('\r\n');
+}
+
+const README_HEAD = [
   'PKC3 を自分のパソコンで動かす',
   '============================',
   '',
@@ -334,22 +393,17 @@ export const README_TXT = [
   '  serve.py         … Python で動かすときの本体',
   '  serve.mjs        … Node.js で動かすときの本体',
   '',
-  '【古くなったら】',
-  '  新しい一式は、PKC3 の中の「自分のパソコンで動かす」からもう一度落とせます。',
-  '  ⚠ site/ を入れ替えても、住所が同じならノートはそのまま残ります。',
   '',
-  '  一式の形: ' + String(SELFHOST_LAYOUT),
-  '',
-].join('\r\n');
+];
 
 /** zip に入れる「site 以外」の中身(名前 → 中身)。 */
-export function selfhostExtras(): ReadonlyMap<string, string> {
+export function selfhostExtras(src: SelfhostSource): ReadonlyMap<string, string> {
   return new Map([
     [`${SELFHOST_ROOT}/serve.py`, SERVE_PY],
     [`${SELFHOST_ROOT}/serve.mjs`, SERVE_MJS],
     [`${SELFHOST_ROOT}/start-mac-linux.sh`, START_SH],
     [`${SELFHOST_ROOT}/start-windows.cmd`, START_CMD],
     [`${SELFHOST_ROOT}/start.ps1`, START_PS1],
-    [`${SELFHOST_ROOT}/はじめに.txt`, README_TXT],
+    [`${SELFHOST_ROOT}/はじめに.txt`, readmeText(src)],
   ]);
 }

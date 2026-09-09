@@ -36,6 +36,13 @@ function deps(files: Record<string, string>): {
       download: (name, blob) => got.push({ name, blob }),
       notify: (m) => said.push(m),
       stamp: () => '2026-09-09',
+      // 🔑 一式に焼く出どころ(#532 段 C)── 新しくするときに戻る先
+      source: {
+        version: '3.2.0',
+        kind: 'dev',
+        from: 'https://example.test/PKC3/dev/',
+        builtAt: Date.UTC(2026, 8, 9, 3, 20),
+      },
     },
   };
 }
@@ -48,20 +55,28 @@ const HEALTHY = {
   'sw.js': 'self.addEventListener("fetch", () => {});',
 };
 
-/** ZIP の中の名前を読む(中央ディレクトリではなく local header を走査する)。 */
-async function namesIn(blob: Blob): Promise<string[]> {
+/**
+ * ZIP の中身を読む(中央ディレクトリではなく local header を走査する)。
+ * 🔑 `ZipWriter` は **store 固定**(圧縮しない)ので、中身はそのまま読める。
+ */
+async function entriesIn(blob: Blob): Promise<Map<string, string>> {
   const buf = new Uint8Array(await blob.arrayBuffer());
   const dec = new TextDecoder();
-  const out: string[] = [];
+  const out = new Map<string, string>();
   for (let i = 0; i + 30 <= buf.length; i += 1) {
     if (buf[i] === 0x50 && buf[i + 1] === 0x4b && buf[i + 2] === 0x03 && buf[i + 3] === 0x04) {
       const nameLen = buf[i + 26]! | (buf[i + 27]! << 8);
       const size = buf[i + 18]! | (buf[i + 19]! << 8) | (buf[i + 20]! << 16) | (buf[i + 21]! << 24);
-      out.push(dec.decode(buf.subarray(i + 30, i + 30 + nameLen)));
-      i += 30 + nameLen + size - 1;
+      const at = i + 30 + nameLen;
+      out.set(dec.decode(buf.subarray(i + 30, at)), dec.decode(buf.subarray(at, at + size)));
+      i = at + size - 1;
     }
   }
   return out;
+}
+
+async function namesIn(blob: Blob): Promise<string[]> {
+  return [...(await entriesIn(blob)).keys()];
 }
 
 describe('自分のパソコンで動かす ── 一式を組む', () => {
@@ -97,6 +112,24 @@ describe('自分のパソコンで動かす ── 一式を組む', () => {
     const b = deps(HEALTHY);
     await downloadSelfhostBundle(b.d);
     expect(b.got).toHaveLength(1);
+  });
+
+  /**
+   * 🔴 **出どころが本当に焼かれているか**(#532 段 C。変異試験 C5 が SURVIVED で教えた)。
+   *
+   * ⚠ 直す前は「`はじめに.txt` が**在る**」しか見ていなかったので、
+   *   **中身から元の住所を抜く変異が生き延びた** ── そのとき user は
+   *   「どこへ戻れば新しい物が取れるか」を知る術を失い、
+   *   **古い版を使い続けていることに気づけない**。
+   * 🔑 だから**中身まで開く**(`ZipWriter` は store 固定なのでそのまま読める)。
+   */
+  it('🔴 はじめに.txt に、戻る先(元の住所)が本当に入っている', async () => {
+    const { d, got } = deps(HEALTHY);
+    await downloadSelfhostBundle(d);
+    const readme = (await entriesIn(got[0]!.blob)).get(`${SELFHOST_ROOT}/はじめに.txt`);
+    expect(readme, 'はじめに.txt が入っていない').toBeDefined();
+    expect(readme, '元の住所が焼かれていない').toContain('https://example.test/PKC3/dev/');
+    expect(readme, '版が焼かれていない').toContain('3.2.0');
   });
 
   it('🔴 1 件でも取れなければ、欠けた一式を渡さない', async () => {

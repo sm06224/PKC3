@@ -5,12 +5,22 @@
  * `showNotices` が中身を作り替えるので、更新の案内をそこへ載せると
  * **次の取込で黙って消える**(user が押す前に導線が失われる)。
  */
+/**
+ * 🔴 **画面に出る字は、ここが正本**(#532 段 C、2026-09-09)。
+ *
+ * ⚠ セルフホストの `はじめに.txt` とマニュアルが「読み直すとこう出ます」と**案内する**ので、
+ *   字が 2 か所に別々に書かれると、片方だけ変わった日に **user は別のものを探す**
+ *   (CLAUDE.md「文言は押した場所と対で pin する」)。
+ * 🔑 だから export して、案内の側の test がここから引く。
+ */
+export const UPDATE_TEXT = '新しい版があります。';
+
 export function showUpdateCard(region: HTMLElement): void {
   region.textContent = '';
 
   const text = document.createElement('span');
   text.setAttribute('data-pkc-field', 'update-text');
-  text.textContent = '新しい版があります。';
+  text.textContent = UPDATE_TEXT;
 
   const apply = document.createElement('button');
   apply.type = 'button';

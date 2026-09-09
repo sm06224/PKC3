@@ -20,6 +20,7 @@ import {
   selfhostZipName,
   siteEntryName,
   SELFHOST_ORIGIN,
+  type SelfhostSource,
 } from '@features/selfhost/bundle';
 
 export interface SelfhostDeps {
@@ -35,6 +36,15 @@ export interface SelfhostDeps {
   notify(message: string): void;
   /** 日付の刻印(zip の名前に入れる)。 */
   stamp(): string;
+  /**
+   * 🔴 **この一式が、どこの・いつの・どの版から作られたか**(#532 段 C)。
+   *
+   * ⚠ **optional にしない** ── 配線を落としても tsc が黙ると、
+   *   `はじめに.txt` から**元の住所が消える**。そのとき user は
+   *   「どこへ戻れば新しい物が取れるか」を知る術を失い、
+   *   **古い版を使い続けていることに気づけない**(段 B で実際に配った誤りの形)。
+   */
+  source: SelfhostSource;
 }
 
 /**
@@ -53,7 +63,7 @@ export async function downloadSelfhostBundle(deps: SelfhostDeps): Promise<void> 
   const files = planSiteFiles(parsePrecacheList(await listRes.text()));
 
   const zip = new ZipWriter();
-  for (const [name, text] of selfhostExtras()) {
+  for (const [name, text] of selfhostExtras(deps.source)) {
     await zip.add(name, [text]);
   }
   const missing: string[] = [];
