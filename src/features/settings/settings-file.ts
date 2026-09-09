@@ -86,6 +86,10 @@ export const SKIPPED_KEYS: readonly { readonly key: string; readonly why: string
     why: 'flag は設定ではない(15 枠 + 畳む条件の宣言 + フラグ画面という別の機構)。運ぶと畳む条件を跨いで別の端末へ持ち込むことになる',
   },
   {
+    key: 'pkc3.copy.history',
+    why: 'コピーした物である ── その端末で、いま貼りたい物。別の端末へ運ぶ物でも、誰かに渡す物でもない(#678)',
+  },
+  {
     key: 'pkc3.external-images',
     why: '許可である ── その端末でその中身を見て許したもの',
   },

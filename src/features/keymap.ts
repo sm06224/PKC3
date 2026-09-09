@@ -469,6 +469,21 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     whileTyping: true,
     note: 'できる操作を名前で絞り込んで、その場で実行します(PKC2 の Ctrl+Shift+P と同じ手)',
   },
+  /**
+   * 🔴 **コピーした物**(#678。user 要望 2026-09-03「コピーをアプリ内で履歴する機能」)。
+   *
+   * ⚠ 既定は `Mod+Shift+V` ── ブラウザの「書式なしで貼る」と同じ鍵に見えるが、
+   *   これは `whileTyping: false` なので**欄の中では効かない**(打っている最中は
+   *   今までどおりブラウザ側が受ける)。⚠ 空の既定は置けない
+   *   (この表の規約:「既定が無い口は戻し道が無い」)。
+   */
+  {
+    id: 'open-copy-history',
+    label: 'コピーした物',
+    contexts: ['global'],
+    defaults: ['Mod+Shift+V'],
+    note: 'この端末で前にコピーした物を出します。押すともう一度コピーされるので、そのまま貼れます',
+  },
   {
     id: 'open-help',
     label: 'ヘルプの面へ',
