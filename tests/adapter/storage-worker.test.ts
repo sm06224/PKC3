@@ -2876,6 +2876,22 @@ describe('本文の csv を SQL から引く(#681 段③)', () => {
     await expect(run('SELECT * FROM 売上_2026')).rejects.toThrow(/no such table/i);
   });
 
+  /**
+   * 🔴 **中の表を隠さない**(#681 段③、着地前の自己レビューで見つけた)。
+   *
+   * ⚠ temp の表は**同じ名前の本表を隠す** ── ` name=entries ` を受けてしまうと、
+   *   `SELECT * FROM entries` が**ノートではなく csv** を返す。
+   *   打った本人は「ノートを数えたつもり」なので、**答えが違うことに気づけない**。
+   */
+  it('🔴 name=entries と書いても、ノートの表は隠れない', async () => {
+    await write('csv-shadow', fence('csv name=entries', ['title', 'にせもの']));
+    const r = await run("SELECT count(*) AS n FROM entries WHERE lid = 'csv-shadow'");
+    expect(r.rows[0]?.[0], 'ノートの表が csv に隠された').toBe(1);
+    // ⚠ 断った理由は目録に出る(黙って落とさない)
+    const why = await run("SELECT why FROM csv_tables WHERE name = 'entries'");
+    expect(String(why.rows[0]?.[0])).toContain('中の仕組み');
+  });
+
   it('🔴 全角の英数字の名前は、理由つきで断る(打つと半角に直るので引けない)', async () => {
     await write('csv-zen', fence('csv name=ｓａｌｅｓ', ['a', '1']));
     const r = await run("SELECT name, why FROM csv_tables WHERE why <> ''");

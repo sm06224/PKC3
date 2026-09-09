@@ -57,6 +57,33 @@ export const CSV_TABLE_NAME_MAX = 40;
  */
 export const CSV_TABLE_CELLS_MAX = 200_000;
 
+
+/**
+ * 🔴 **この名前は取らせない**(#681 段③、着地前の自己レビューで見つけた)。
+ *
+ * ⚠ temp の表は**同じ名前の本表を隠す** ── ` ```csv name=entries ` と書いた人が
+ *   `SELECT * FROM entries` を打つと、**ノートではなく自分の csv が出る**。
+ *   本人は「ノートを数えたつもり」なので、⚠ **答えが違うことに気づけない**。
+ * ⚠ `csv_tables` も同じ ── 取られると**名前を知る道が消える**(目録が上書きされる)。
+ * 🔑 だから**名前の側で断る**(理由は `csv_tables` の `why` に出る)。
+ *
+ * ⚠ **この一覧は `schema.ts` と揃っていなければならない** ── 揃っているかは
+ *   `tests/adapter/csv-table-reserved.test.ts` が**両方を読んで**検める(§7)。
+ *   features 層から adapter 層は import できないので、写しをここに置く形になる。
+ */
+export const CSV_TABLE_RESERVED: readonly string[] = [
+  'csv_tables',
+  'containers',
+  'entries',
+  'entries_fts',
+  'relations',
+  'revisions',
+  'assets',
+  'settings',
+  'flags',
+  'workspaces',
+];
+
 /** どの行がどこから来たかの列(必ず先頭に付く)。 */
 export const CSV_SOURCE_COLUMNS = ['_note', '_lid'] as const;
 
@@ -117,6 +144,8 @@ export function csvTableNameWhy(raw: string): string {
     return `名前が長すぎます(${String(CSV_TABLE_NAME_MAX)} 字まで)`;
   if (raw.toLowerCase().startsWith('sqlite_'))
     return 'sqlite_ で始まる名前は使えません(中の仕組みが使っています)';
+  if (CSV_TABLE_RESERVED.includes(raw.toLowerCase()))
+    return `${raw} は中の仕組みが使っている名前です(同じ名前にすると、その表が隠れて別の答えが出ます)。別の名前にしてください`;
   for (const ch of raw) {
     const code = ch.charCodeAt(0);
     if (code >= 0xff01 && code <= 0xff5e)
@@ -137,6 +166,7 @@ export function csvTableNameWhy(raw: string): string {
 export function validCsvTableName(name: string): boolean {
   if (name === '' || name.length > CSV_TABLE_NAME_MAX) return false;
   if (name.toLowerCase().startsWith('sqlite_')) return false;
+  if (CSV_TABLE_RESERVED.includes(name.toLowerCase())) return false;
   /**
    * 🔴 **全角の英数字は名前にしない**(#681 段③、`sql-guard.ts` と噛み合わせる)。
    *
