@@ -1442,9 +1442,15 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'restore-revision',
   'restore-trash',
   'purge-trash',
-  // ⚠ 本文は書かないが **disk への書込**である(取込は relations を総入れ替えする
-  //    ので、走っている最中に居場所を変えると片方が消える)
-  'move-entry',
+  /**
+   * ⚠ 本文は書かないが **disk への書込**である(取込は relations を総入れ替えする
+   *   ので、走っている最中に居場所を変えると片方が消える)。
+   * 🔴 **`move-entry` から `move-to-folder` へ移した**(#813、2026-09-09)──
+   *   プルダウンを外して受け手ごと消えたので、**残った口をここへ載せ直す**。
+   * ⚠ 載せ直さないと、**門だけが静かに消える**(受け手を消したときに
+   *   いちばん起きやすい形。CLAUDE.md「片側を直したら対称の反対側を疑う」)。
+   */
+  'move-to-folder',
   // ⚠ user の**ファイル**を上書きする ── 取込・書出しの最中に走らせない
   'write-back-file',
 ]);
@@ -5380,13 +5386,13 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 空値 = ルートへ出す。⚠ 動かす当人は**帯自身**が持っている
    * (`selectedLid` を読み直すと、選び直した直後に別のものを動かす)。
    */
-  'move-entry': (dispatcher, target, services) => {
-    const lid = target.getAttribute('data-pkc-entry');
-    if (!lid) return;
-    const value = target instanceof HTMLSelectElement ? target.value : '';
-    // 🔴 実体は `moveEntries` 1 本(D&D と同じ ── 断り方も知らせ方も揃う)
-    moveEntries(dispatcher, [lid], value === '' ? null : value, services.showStatus);
-  },
+  /*
+   * ⚠ ここに在った `move-entry` は **#813(2026-09-09)で外した** ──
+   *   焼く所(フォルダの面の「居場所」の `<select>`)が 0 件になったからである
+   *   (user 指示「**移動先指定プルダウン邪魔、利便性悪いし整理アプリに移行しよう**」)。
+   * 🔑 実体は `moveEntries` **1 本**のままで、残る呼び手は
+   *   `move-to-folder`(右クリック / パンくず)と D&D(`moveDropped`)である。
+   */
   /**
    * 🔴 **行の名前を、その場で打ち替え始める**(#215。行の右クリック / 情報ペイン / `F2`)。
    *

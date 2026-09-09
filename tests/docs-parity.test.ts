@@ -2092,6 +2092,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-09(#813)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-08-manual-jump" …` → bcc0b0a
+     */
+    'マニュアルの中の「→「設定」」のような字が、押せるようになりました',
+    /**
      * ⚠ **2026-09-09(#809 の 4 件)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-08-manual-terms" …` → 8e8684b
      */

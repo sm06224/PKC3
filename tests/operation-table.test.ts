@@ -170,12 +170,14 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-09-09(#809-4): 知らせの隣の「開く」が `select-entry` から
       //   `swap-open` へ分かれて受け手 +1(登記は増えない ── 押し口は状態の行の
       //   隣 1 か所で、そこは登記の対象ではない)
-      total: 272,
-      receivers: 223,
+      // ⚠ 2026-09-09(#813): 「居場所」のプルダウンを外して `move-entry` の受け手が
+      //   消え、受け手 −1(登記は動かない ── 押し口は面の中にしか無かった)
+      total: 271,
+      receivers: 222,
       registered: 85,
       both: 36,
       outsideActionsTable: 49,
-      unregistered: 187,
+      unregistered: 186,
     });
   });
 

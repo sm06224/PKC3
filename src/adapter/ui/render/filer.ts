@@ -18,12 +18,10 @@
  */
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
 import { TAG_INPUT_FIELDS, type AppState, type TagInputField } from '@adapter/state/app-state';
-import {
-  getAncestorFolders,
-  resolveCanonicalParents,
-  listMoveTargets,
-  listSiblings,
-} from '@features/relation/tree';
+// ⚠ `resolveCanonicalParents` / `listMoveTargets` は #813(2026-09-09)で
+//    「居場所」のプルダウンを外したときに、この面から要らなくなった ──
+//    どちらも `move-to-folder`(探して選ぶ窓)と D&D の側で生きている
+import { getAncestorFolders, listSiblings } from '@features/relation/tree';
 import { filerRows, smartLidsOf } from '@features/relation/filer-list';
 import {
   SMART_ARCHETYPE,
@@ -475,36 +473,23 @@ export class FilerRenderer {
       hint.textContent = '動かしたいものを選ぶと、ここで居場所を変えられます';
       host.append(hint);
     } else {
-      const label = document.createElement('label');
-      const cap = document.createElement('span');
-      cap.setAttribute('data-pkc-field', 'move-caption');
-      cap.textContent = `「${moving.title}」の居場所`;
-      const sel = document.createElement('select');
-      sel.setAttribute('data-pkc-field', 'move-target');
-      // 🔑 選んだ瞬間に効く(binder の change 経路)── 「選ぶ」と「押す」に
-      //    割らない。割ると選んだだけで満足して押し忘れる
-      sel.setAttribute('data-pkc-action', 'move-entry');
-      // ⚠ **動かす当人の lid は帯自身が持つ** ── `selectedLid` を binder 側で
-      //    読み直すと、押した瞬間に選択が変わっていた場合に別のものが動く
-      sel.setAttribute('data-pkc-entry', moving.lid);
-      sel.title = 'このノートを入れるフォルダを選びます';
-      const root = document.createElement('option');
-      root.value = '';
-      root.textContent = 'ルート(いちばん上)';
-      sel.append(root);
-      for (const f of listMoveTargets(moving.lid, state.entryMetas, state.relations)) {
-        const opt = document.createElement('option');
-        opt.value = f.lid;
-        // ⚠ 字下げは**見た目だけ**。同名フォルダの取り違えは hover の道が防ぐ
-        opt.textContent = `${'　'.repeat(f.depth)}${f.title}`;
-        opt.title = f.path;
-        sel.append(opt);
-      }
-      // ⚠ いまの親を選んでおく(「どこに居るか」が読める)。候補に無い親
-      //    (取り込んだデータに輪がある等)なら空 = ルート表示に落ちる
-      sel.value = resolveCanonicalParents(state.entryMetas, state.relations).get(moving.lid) ?? '';
-      label.append(cap, sel);
-      host.append(label);
+      /**
+       * 🔴 **「居場所」のプルダウンは外した**(#813、2026-09-09。user 指示
+       * 「**フォルダ表示の時の移動先指定プルダウン邪魔、利便性悪いし
+       * 整理アプリに移行しよう**」)。
+       *
+       * ⚠ 直す前はここに `<select data-pkc-field="move-target">` が在り、
+       *   選んでいるものの移し先を字下げした一覧で出していた ── 指で触る端末では
+       *   **同名フォルダが並ぶ長い一覧**になり、選びにくい形だった。
+       * 🔑 **移す道は 3 本残っている**ので、動線は 1 つも減らない:
+       *   ①掴んでフォルダの行へ落とす / パンくずへ落として出す
+       *   ②右クリック(狭い画面は ⋯)→ **「移す…」**(探して選ぶ窓)
+       *   ③**2 ペインで整理**(user の言う「整理アプリ」)
+       * ⚠ そして**そこにしか無かった 1 つ**(いま入っているフォルダ自身を移す)は、
+       *   **パンくずの現在地の「移す…」**へ置き直した(上を見よ)。
+       * 🔑 残すのは**並べ替え**だけ ── これは行にも右クリックにも無い
+       *   (フォルダ自身は中に入ると表から消えるので、帯にしか置けない)。
+       */
 
       /**
        * 🔴 **並べ替え**(2026-08-06。user 報告 2-10「並べ替えの手段が無い」)。
@@ -852,6 +837,29 @@ export class FilerRenderer {
         btn.setAttribute('data-pkc-drop', 'crumb');
         btn.textContent = seg.title;
         crumb.append(btn);
+      }
+      /**
+       * 🔴 **いま入っているフォルダ自身を移す口**(#813、2026-09-09。
+       * user 指示「**移動先指定プルダウン邪魔、利便性悪いし整理アプリに移行しよう**」)。
+       *
+       * ⚠ 帯の `<select>` を外すとき、**そこにしか無かった仕事が 1 つ**あった ──
+       *   **いま入っているフォルダ自身を動かす**ことである(中に入ると、その
+       *   フォルダの行は表から消えるので、行のメニューでは動かせない)。
+       * 🔑 だから**捨てる前に置き直す**(CLAUDE.md「捨てるものの表は、行ごとに
+       *   『代わりに何ができるようになるか』を書く」)── 現在地の隣に 1 つ。
+       * ⚠ 押し先は既存の `move-to-folder` **1 本**(探して選ぶ窓が出る)──
+       *   移す道を 2 通り憶えさせない。⚠ ルートには出さない(移す物が無い)。
+       */
+      const here = chain[chain.length - 1];
+      if (here !== undefined) {
+        const move = document.createElement('button');
+        move.type = 'button';
+        move.setAttribute('data-pkc-field', 'crumb-move');
+        move.setAttribute('data-pkc-action', 'move-to-folder');
+        move.setAttribute('data-pkc-entry', here.lid);
+        move.textContent = '移す…';
+        move.title = `いま開いている「${here.title}」を、別のフォルダへ移します`;
+        crumb.append(move);
       }
     }
     this.region.append(crumb);

@@ -120,7 +120,8 @@ const OBJECT_LONE: readonly string[] = [
   'launch-asset',
   'launch-asset-extension',
   'launch-asset-raw',
-  'move-entry',
+  // ⚠ `move-entry` は #813(2026-09-09)で受け手ごと外した ── プルダウンを消したので
+  //    焼く所が 0 件になった(残る口は `move-to-folder` と D&D)
   'navigate-entry-ref',
   'open-alarm',
   /**

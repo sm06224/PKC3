@@ -20,6 +20,7 @@ import { buildShell } from '../../src/adapter/ui/render/shell';
 import { BrowseRouter } from '../../src/adapter/ui/render/browse';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { stubRevisionOps } from '../helpers/revision-stub';
+import { openDialog } from './dialog-helper';
 import { getStructuralChildren, getRootEntries } from '../../src/features/relation/tree';
 
 function meta(lid: string, order: number, archetype = 'text'): EntryMeta {
@@ -370,12 +371,52 @@ function setup(metas: EntryMeta[], relations: Relation[]) {
     [...pane.querySelectorAll('tbody [data-pkc-entry]')].map((r) =>
       r.getAttribute('data-pkc-entry'),
     );
-  const moveSelect = () => q<HTMLSelectElement>('[data-pkc-field="move-target"]');
-  /** 実際の操作と同じ形で選ぶ(値を入れて change を出す ── binder の経路)。 */
-  const moveTo = (value: string): void => {
-    const sel = moveSelect()!;
-    sel.value = value;
-    sel.dispatchEvent(new Event('change', { bubbles: true }));
+  /**
+   * 🔴 **移す道は「行を右クリック →『移す…』→ 探して選ぶ」**(#813、2026-09-09)。
+   *
+   * ⚠ 直す前ここは帯の `<select data-pkc-field="move-target">` を回していたが、
+   *   user 指示「**移動先指定プルダウン邪魔、利便性悪いし整理アプリに移行しよう**」で
+   *   その口は外した。🔑 **主張は 1 つも変えていない** ── 同じ「入る / 出る /
+   *   入れられない先は出さない / 編集中は断る」を、**残った道**で見る。
+   */
+  const rightClick = (lid: string): void => {
+    const e = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 5, clientY: 5 });
+    (q<HTMLElement>(`tbody [data-pkc-entry="${lid}"]`) ?? pane).dispatchEvent(e);
+  };
+  /** いま出ている「探して選ぶ」窓の行(題名)。⚠ 出ていなければ `null`。 */
+  const pickRows = (): string[] | null => {
+    const list = openDialog()?.querySelector('[data-pkc-field="entry-pick-list"]') ?? null;
+    if (list === null) return null;
+    return [...list.querySelectorAll('button')].map((b) => b.textContent ?? '');
+  };
+  /**
+   * 開いている窓を閉じる。
+   * ⚠ **開いたまま it を終えない** ── `pickEntryInApp` は 1 本の queue に並ぶので、
+   *   閉じ忘れると**次の it の窓が永久に開かない**(1 度これで外した)。
+   */
+  const pickCancel = (): void => {
+    openDialog()?.querySelector<HTMLElement>('[data-pkc-field="dialog-cancel"]')?.click();
+  };
+  /** その窓で 1 行押す(題名の**前方一致**で選ぶ ── 「場所」の列が後ろに付く)。 */
+  const pickChoose = (title: string): boolean => {
+    const list = openDialog()?.querySelector('[data-pkc-field="entry-pick-list"]') ?? null;
+    const btn = [...(list?.querySelectorAll('button') ?? [])].find((b) =>
+      (b.textContent ?? '').startsWith(title),
+    );
+    if (btn === undefined) return false;
+    (btn as HTMLElement).click();
+    return true;
+  };
+  /**
+   * 右クリック →「移す…」を押す(窓が開くところまで)。
+   * ⚠ **押す口はメニューの中から取る** ── `root` の先頭から探すと、
+   *   パンくずの「移す…」(#813 で足した、いま入っているフォルダを指す口)に当たり、
+   *   **別のものを動かす**(実際にこれで 1 度外した)。
+   */
+  const startMove = (lid: string): void => {
+    rightClick(lid);
+    const menu = root.querySelector('[data-pkc-region="context-menu"]');
+    menu?.querySelector<HTMLElement>('[data-pkc-action="move-to-folder"]')?.click();
   };
   const nudge = (dir: 'up' | 'down') =>
     q<HTMLButtonElement>(`[data-pkc-action="move-order-${dir}"]`);
@@ -397,8 +438,11 @@ function setup(metas: EntryMeta[], relations: Relation[]) {
     pane,
     q,
     rows,
-    moveSelect,
-    moveTo,
+    startMove,
+    pickRows,
+    pickChoose,
+    pickCancel,
+    rightClick,
     parentCalls,
     persisted,
     reordered,
@@ -413,12 +457,15 @@ describe('フォルダ整理の導線(画面)', () => {
   const METAS = [meta('f1', 1, 'folder'), meta('f2', 2, 'folder'), meta('n1', 3), meta('n2', 4)];
 
   it('🔴 選ぶ → 入れ先を選ぶ、で本当に入る(disk への要求まで届く)', async () => {
-    const { q, rows, moveTo, parentCalls, enter, status } = setup(METAS, []);
+    const { q, rows, startMove, pickChoose, parentCalls, enter, status } = setup(METAS, []);
     expect(rows()).toEqual(['f1', 'f2', 'n1', 'n2']);
 
     q<HTMLElement>('tbody [data-pkc-entry="n1"]')!.click();
     await tick();
-    moveTo('f1');
+    startMove('n1');
+    await tick();
+    await tick();
+    expect(pickChoose('t-f1'), '入れ先の窓に候補が出ていない(空振り)').toBe(true);
     await tick();
 
     /**
@@ -441,12 +488,16 @@ describe('フォルダ整理の導線(画面)', () => {
   });
 
   it('🔴 ルートへ出せる(入れたら出せない、を作らない)', async () => {
-    const { q, rows, moveTo, parentCalls, enter, status } = setup(METAS, [rel('r0', 'f1', 'n1')]);
+    const { q, rows, startMove, pickChoose, parentCalls, enter, status } = setup(METAS, [rel('r0', 'f1', 'n1')]);
     enter('f1'); // 2 クリックで入る(#240 段①)
     await tick();
     q<HTMLElement>('tbody [data-pkc-entry="n1"]')!.click();
     await tick();
-    moveTo('');
+    startMove('n1');
+    await tick();
+    // ⚠ 「ルート(いちばん上)」は**絞りが空のときだけ**先頭に出る(実装の規約)
+    expect(pickChoose('ルート'), '出す先の窓に「ルート」が出ていない(空振り)').toBe(true);
+    await tick();
     await tick();
     expect(parentCalls).toEqual([
       { lid: 'n1', parentLid: null, relationId: expect.any(String) },
@@ -460,42 +511,69 @@ describe('フォルダ整理の導線(画面)', () => {
     expect(rows()).toEqual(['f1', 'f2', 'n1', 'n2']);
   });
 
-  it('🔴 選び直すと帯も追従する(別のノートが動かない)', async () => {
-    // ⚠ 同一 scope 内の選択変更は**表を作り直さない**速い経路を通る。
-    //    そこで帯を更新し忘れると、帯は前のノートを指したまま = 見えない取り違え
-    const { q, moveSelect, moveTo, parentCalls } = setup(METAS, []);
+  /**
+   * 🔴 **動くのは「押した行」である**(選択に引きずられない)。
+   * ⚠ 直す前は帯が `selectedLid` を指していたので、選び直しに追従しないと
+   *   **別のノートが動く**形だった ── 右クリックの道でも同じ主張が要る
+   *   (押した行の `data-pkc-entry` を読む)。
+   */
+  it('🔴 押した行が動く(別のノートが動かない)', async () => {
+    const { q, startMove, pickChoose, parentCalls } = setup(METAS, []);
+    // ⚠ **選んでいるのは n1、押すのは n2** ── 取り違えるとここで分かれる
     q<HTMLElement>('tbody [data-pkc-entry="n1"]')!.click();
     await tick();
-    expect(moveSelect()!.getAttribute('data-pkc-entry')).toBe('n1');
-    q<HTMLElement>('tbody [data-pkc-entry="n2"]')!.click();
+    startMove('n2');
     await tick();
-    expect(moveSelect()!.getAttribute('data-pkc-entry')).toBe('n2');
-    moveTo('f1');
+    expect(pickChoose('t-f1'), '入れ先の窓に候補が出ていない(空振り)').toBe(true);
     await tick();
-    expect(parentCalls.map((c) => c.lid)).toEqual(['n2']);
-  });
-
-  it('いまの居場所が選ばれた状態で出る(どこに居るか読める)', async () => {
-    const { q, moveSelect, enter } = setup(METAS, [rel('r0', 'f2', 'n1')]);
-    enter('f2'); // ⚠ 入るのは 2 クリック(#240 段①)
-    await tick();
-    q<HTMLElement>('tbody [data-pkc-entry="n1"]')!.click();
-    await tick();
-    expect(moveSelect()!.value).toBe('f2');
+    expect(parentCalls.map((c) => c.lid), '選んでいるほうが動いた').toEqual(['n2']);
   });
 
   it('🔴 入れられない先は一覧に出さない(押してから黙って断らない)', async () => {
     const metas = [meta('a', 1, 'folder'), meta('b', 2, 'folder')];
-    const { q, moveSelect } = setup(metas, [rel('r1', 'a', 'b')]);
-    q<HTMLElement>('tbody [data-pkc-entry="a"]')!.click(); // a を選ぶ(scope も a)
+    const { startMove, pickRows, pickCancel } = setup(metas, [rel('r1', 'a', 'b')]);
+    startMove('a');
     await tick();
-    const values = [...moveSelect()!.options].map((o) => o.value);
-    expect(values).toEqual(['']); // ルートのみ ── 自分 a も 子 b も出ない
+    const shown = pickRows();
+    expect(shown, '入れ先の窓が出ていない(空振り)').not.toBeNull();
+    // ⚠ 出るのは**ルートだけ** ── 自分 a も 子 b も入れ先にならない
+    expect(shown!.some((t) => t.startsWith('ルート')), 'ルートへ出す道が消えた').toBe(true);
+    expect(shown!.some((t) => t.startsWith('t-a')), '自分自身が入れ先に出ている').toBe(false);
+    expect(shown!.some((t) => t.startsWith('t-b')), '自分の子が入れ先に出ている').toBe(false);
+    pickCancel();
+  });
+
+  /**
+   * 🔴 **いま入っているフォルダ自身を移す道**(#813)。
+   * ⚠ 中に入ると**そのフォルダの行は表から消える**ので、行の右クリックでは動かせない
+   *   ── 帯の `<select>` にしか無かった仕事である。捨てる前に置き直した。
+   */
+  it('🔴 いま入っているフォルダ自身を、パンくずから移せる', async () => {
+    const { q, enter, pickChoose, parentCalls } = setup(METAS, []);
+    enter('f1');
+    await tick();
+    const move = q<HTMLElement>('[data-pkc-field="crumb-move"]');
+    expect(move, 'いま入っているフォルダを移す口が無い(動線を 1 つ失った)').not.toBeNull();
+    expect(move!.getAttribute('data-pkc-entry'), '別のものを指している').toBe('f1');
+    move!.click();
+    await tick();
+    await tick();
+    expect(pickChoose('t-f2'), '入れ先の窓が出ていない(空振り)').toBe(true);
+    await tick();
+    expect(parentCalls).toEqual([{ lid: 'f1', parentLid: 'f2', relationId: expect.any(String) }]);
+    // ⚠ ルートには出さない(移す物が無い)
+    q<HTMLElement>('[data-pkc-region="filer-breadcrumb"] button')!.click();
+    await tick();
+    expect(
+      q('[data-pkc-field="crumb-move"]'),
+      'ルートに移す口が出ている(押しても何も起きない)',
+    ).toBeNull();
   });
 
   it('何も選んでいなければ、何をすれば出るかを書く', () => {
     const { q } = setup(METAS, []);
-    expect(q('[data-pkc-field="move-target"]')).toBeNull();
+    // ⚠ #813 で「居場所」のプルダウンは外した ── 戻っていないことを見る
+    expect(q('[data-pkc-field="move-target"]'), '外したプルダウンが戻っている').toBeNull();
     expect(q('[data-pkc-field="filer-move-empty"]')?.textContent).toContain('選ぶと');
   });
 
@@ -1004,17 +1082,26 @@ describe('居場所を変える口は 1 本(着地前レビュー 7)', () => {
     document.body.textContent = '';
   });
 
-  it('🔴 編集中は帯の選択でも断る(無言で捨てない)', async () => {
-    const { moveTo, d, q } = setup(METAS, []);
-    q<HTMLElement>('tbody [data-pkc-entry="n1"]')!.click();
+  it('🔴 編集中は「移す…」でも断る(無言で捨てない)', async () => {
+    const { pickRows, d, q, enter } = setup(METAS, []);
+    // ⚠ **行の右クリックには、そもそも「移す…」が出ない**(#690 ④ A′ ──
+    //    編集中の行のメニューは「別の窓で開く」1 行だけ)。だから
+    //    **編集中でも押せる口**(パンくずの「移す…」)で断りを見る。
+    enter('f1');
     await tick();
+    q<HTMLElement>('tbody [data-pkc-entry="n1"]')?.click();
     d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '' });
     d.dispatch({ type: 'START_EDIT' });
-    moveTo('f1');
+    const move = q<HTMLElement>('[data-pkc-field="crumb-move"]');
+    expect(move, '編集中に押せる口が消えた(この test が何も見ていない)').not.toBeNull();
+    move!.click();
     await tick();
+    // ⚠ **窓すら開かない**(開いてから断ると、選ばせておいて捨てることになる)
+    expect(pickRows(), '編集中なのに入れ先の窓が開いた').toBeNull();
     expect(d.getState().error ?? '', '編集中に黙って捨てた').toContain('編集を終了');
     // 🔴 **動いていないのに画面だけ移動する**を作らない
-    expect(d.getState().scopeLid, '動いていないのに現在地だけ動いた').toBeNull();
+    //    ⚠ この台は f1 の中に居るので、現在地は f1 の**まま**が正しい
+    expect(d.getState().scopeLid, '動いていないのに現在地だけ動いた').toBe('f1');
     expect(
       getStructuralChildren('f1', d.getState().entryMetas, d.getState().relations),
     ).toHaveLength(0);
