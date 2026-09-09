@@ -1,5 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
-import { clickReal, collectPageErrors, createEntry, dismissAnnounce } from './helpers';
+import { expect, test } from '@playwright/test';
+import { bootedHere, clickReal, collectPageErrors, createEntry, dismissAnnounce } from './helpers';
 
 /**
  * #532 S1: **どこに置いても動く**ことを、実際に置いて確かめる。
@@ -35,39 +35,6 @@ function subBase(testInfo: Info): { origin: string; prefix: string } {
     throw new Error('subPathBaseURL / subPathPrefix が config に無い');
   }
   return { origin, prefix };
-}
-
-/**
- * ⚠ `error` を「起動した」と読まない(`coi.smoke.spec.ts` と同じ理由)。
- *
- * 🔑 **落ちたときに原因が名前で分かる形にする**(CLAUDE.md「回すものの粒度」③)。
- * この spec が落ちる主因は「絶対 path が prefix の外を叩いて 404」だが、
- * 素直に書くと **`waitForSelector` の時間切れ**しか出ず、読んだ人は
- * 「起動が遅い」と誤読する ── 実際に変異試験でその顔を見た。だから
- * **prefix の外へ出た要求を控えておき、時間切れのときに添える**。
- */
-async function booted(page: Page, outside: readonly string[]): Promise<void> {
-  try {
-    await page.waitForSelector('[data-pkc-boot="ready"], [data-pkc-boot="error"]', {
-      timeout: 40_000,
-    });
-  } catch (e) {
-    if (outside.length > 0) {
-      throw new Error(
-        `起動しない ── prefix の外を ${outside.length} 件叩いて 404 になっている` +
-          `(絶対 path で参照している):\n  ${[...new Set(outside)].slice(0, 8).join('\n  ')}`,
-        { cause: e },
-      );
-    }
-    throw e;
-  }
-  const state = await page.evaluate(
-    () => document.querySelector('[data-pkc-boot]')?.getAttribute('data-pkc-boot') ?? null,
-  );
-  if (state !== 'ready') {
-    const why = await page.evaluate(() => document.body.innerText.slice(0, 300));
-    throw new Error(`起動に失敗した(data-pkc-boot=${String(state)}): ${why}`);
-  }
 }
 
 test('🔴 根を配らない場所(sub-path)に置いても、PKC3 は起動して書ける (#532 S1)', async ({
@@ -117,7 +84,12 @@ test('🔴 根を配らない場所(sub-path)に置いても、PKC3 は起動し
 
   // ── ② 置いた場所で起動する
   await page.goto(`${origin}${prefix}`);
-  await booted(page, outside);
+  await bootedHere(page, () =>
+    outside.length === 0
+      ? null
+      : `起動しない ── prefix の外を ${String(outside.length)} 件叩いて 404 になっている` +
+        `(絶対 path で参照している):\n  ${[...new Set(outside)].slice(0, 8).join('\n  ')}`,
+  );
   expect(
     await page.evaluate(() => location.pathname),
     '根へ落ちている ── prefix で開けていない',
@@ -174,7 +146,12 @@ test('🔴 根を配らない場所(sub-path)に置いても、PKC3 は起動し
   await expect(page.getByText('置いた先で書いたノート').first()).toBeVisible();
 
   await page.reload();
-  await booted(page, outside);
+  await bootedHere(page, () =>
+    outside.length === 0
+      ? null
+      : `起動しない ── prefix の外を ${String(outside.length)} 件叩いて 404 になっている` +
+        `(絶対 path で参照している):\n  ${[...new Set(outside)].slice(0, 8).join('\n  ')}`,
+  );
   await expect(
     page.getByText('置いた先で書いたノート').first(),
     '読み直したら消えた ── 保存先が置いた場所の下に無い',
