@@ -269,11 +269,37 @@ describe('絞りが全部の面に届いている', () => {
     'src/adapter/ui/actions/binder.ts',
   ];
 
+  /**
+   * 🔴 **寄せた先が、本当に state から取っているか**(2026-09-11、#215 残り①)。
+   * ⚠ 上の検査は「`listViewOptions(state)` と書いてある」までしか言わない ──
+   *   その中で `kinds: NO_KINDS` と書いても素通りする(§1「救い手が変わっただけ」)。
+   */
+  it('🔴 寄せた `listViewOptions` は、絞りと開いた時刻を state から取っている', () => {
+    const src = readFileSync('src/adapter/state/list-view-options.ts', 'utf8');
+    for (const [field, from] of [
+      ['kinds', 'state.kindFilter'],
+      ['openedAt', 'state.openedAt'],
+      ['sort', 'state.entrySort'],
+      ['sortDesc', 'state.entrySortDesc'],
+    ])
+      expect(src, `${field} が ${from} から来ていない`).toContain(`${field}: ${from},`);
+  });
+
   it('`filerRows` を呼ぶ面は、数えた数だけ `kindFilter` を渡している', () => {
     for (const f of FACES) {
       const src = readFileSync(f, 'utf8');
       const calls = (src.match(/filerRows\(/g) ?? []).length;
-      const passed = (src.match(/kinds: (st|state)\.kindFilter,/g) ?? []).length;
+      /**
+       * ⚠ **綴りは 2 通りある**(2026-09-11、#215 残り①)── 同じ 3 つ
+       *   (`sort` / `sortDesc` / `kinds`)を 7 か所で書いていたので
+       *   `listViewOptions(state)` へ寄せた。⚠ そのとき**この検査が落ちた** ──
+       *   落ちたのが正しい(字面が変わったので、渡っているかを言えなくなった)。
+       * 🔑 寄せた側は下の `it` が「`state.kindFilter` を渡していること」を見る ──
+       *   だから**ここは両方の綴りを数える**(寄せ切れていない面も落とせる)。
+       */
+      const passed =
+        (src.match(/kinds: (st|state)\.kindFilter,/g) ?? []).length +
+        (src.match(/\.\.\.listViewOptions\((st|state)\),/g) ?? []).length;
       expect(calls, `${f}: 前提が崩れている(呼び出しが 1 つも無い)`).toBeGreaterThan(0);
       expect(passed, `${f}: ${calls} 回呼んでいるのに ${passed} 回しか渡していない`).toBe(
         calls,

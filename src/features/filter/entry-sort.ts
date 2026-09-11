@@ -10,7 +10,12 @@
  */
 import type { EntryMeta } from '@core/model/entry-meta';
 
-export const ENTRY_SORTS = ['manual', 'updated', 'title', 'archetype', 'size'] as const;
+/**
+ * ⚠ **`opened`(最近開いた順)だけは `EntryMeta` から引けない**(#215 残り①)──
+ *   開いた時刻は**端末ごとの記録**であって、ノートのデータではない
+ *   (`features/history/opened-log.ts`)。だから `sortOrder` は引数でもう 1 本受ける。
+ */
+export const ENTRY_SORTS = ['manual', 'updated', 'opened', 'title', 'archetype', 'size'] as const;
 export type EntrySort = (typeof ENTRY_SORTS)[number];
 export const DEFAULT_ENTRY_SORT: EntrySort = 'manual';
 
@@ -30,6 +35,7 @@ export function isEntrySort(v: string): v is EntrySort {
 export const NATURAL_DESC: Readonly<Record<EntrySort, boolean>> = {
   manual: false,
   updated: true, // 更新は**新しい順**から見たい
+  opened: true, // 最近開いた順 ── 「さっき見ていたあれ」が先頭に来る
   title: false,
   archetype: false,
   size: true, // 大きさは**大きい順**から見たい(整理の面で探すのは大物である)
@@ -47,12 +53,16 @@ export const NATURAL_DESC: Readonly<Record<EntrySort, boolean>> = {
  * @param desc 降順にするか。⚠ **省略可にしない** ── 既定を持たせると
  *   「渡し忘れ = 昇順」が静かに通り、**列見出しの矢印と実際の並びが食い違う**
  *   (CLAUDE.md §7)。呼び側は `NATURAL_DESC` から引くか、state の向きを渡す。
+ * @param openedAt その lid を最後に開いた時刻(epoch ミリ秒。無ければ `0`)。
+ *   ⚠ **これも省略可にしない** ── 既定を `() => 0` にすると、渡し忘れた面では
+ *   「最近開いた順」が**静かに lid 順**になる(選べるのに効かない = 無言の dead click)。
  */
 export function sortOrder(
   order: readonly string[],
   metaOf: (lid: string) => EntryMeta | undefined,
   sort: EntrySort,
   desc: boolean,
+  openedAt: (lid: string) => number,
 ): string[] {
   if (sort === 'manual') return [...order];
   /**
@@ -61,6 +71,12 @@ export function sortOrder(
    */
   const key = (lid: string): string | number => {
     const m = metaOf(lid);
+    /**
+     * ⚠ **`opened` は `metaOf` より先に見る** ── 一度も開いていないノートも
+     *   (`0` で)並びに残す。⚠ ここで `m` を要求すると、記録の無いノートが
+     *   「未知」として末尾の文字キーへ落ち、**数と文字が混ざる**(上の注記)。
+     */
+    if (sort === 'opened') return openedAt(lid);
     if (sort === 'size') {
       // ⚠ 未知 / 未計算は**いちばん小さい**扱い(末尾でも先頭でもなく、0 と同列)
       return m?.bodyChars ?? -1;

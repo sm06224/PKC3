@@ -102,6 +102,10 @@ export const SKIPPED_KEYS: readonly { readonly key: string; readonly why: string
     why: 'コピーした物である ── その端末で、いま貼りたい物。別の端末へ運ぶ物でも、誰かに渡す物でもない(#678)',
   },
   {
+    key: 'pkc3.opened',
+    why: '中身が lid そのもの(#215 残り①)── 別の container へ運ぶと、そこに居ないノートを「最近開いた」に並べる。そのうえ「何を読んでいたか」は設定ではなく行動の記録なので、渡す物でもない',
+  },
+  {
     key: 'pkc3.external-images',
     why: '許可である ── その端末でその中身を見て許したもの',
   },

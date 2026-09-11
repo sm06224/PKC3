@@ -12,7 +12,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import {
-  sortOrder,
+  sortOrder as sortOrderRaw,
   isEntrySort,
   DEFAULT_ENTRY_SORT,
   NATURAL_DESC,
@@ -39,6 +39,20 @@ function meta(lid: string, over: Partial<EntryMeta> = {}): EntryMeta {
     ...over,
   };
 }
+
+/**
+ * ⚠ **`openedAt` を既定つきで包む** ── 本物は省略可にしていない(渡し忘れた面だけ
+ *   「最近開いた順」が静かに lid 順になるため)。ここは**その並びを見ない test** が
+ *   大半なので、台としてだけ既定を置く。⚠ 「最近開いた順」を見る test は
+ *   **必ず自分で渡す**(既定のままでは何も主張できない)。
+ */
+const sortOrder = (
+  order: readonly string[],
+  metaOf: (lid: string) => EntryMeta | undefined,
+  sort: Parameters<typeof sortOrderRaw>[2],
+  desc: boolean,
+  openedAt: (lid: string) => number = () => 0,
+): string[] => sortOrderRaw(order, metaOf, sort, desc, openedAt);
 
 const metasOf = (list: EntryMeta[]) => {
   const m = new Map(list.map((x) => [x.lid, x]));
@@ -87,6 +101,44 @@ describe('並び順の規則', () => {
   it('未知の lid は落とさず末尾へ(黙って消えるほうが害が大きい)', () => {
     const list = [meta('a', { title: 'あ' })];
     expect(sortOrder(['ghost', 'a'], metasOf(list), 'title', NATURAL_DESC['title'])).toEqual(['a', 'ghost']);
+  });
+
+  /**
+   * 🔴 **最近開いた順**(#215 残り①)。⚠ 「更新が新しい順」とは**別物** ──
+   *   更新は書いたときに動くので、**読み返しただけ**のノートは上がってこない。
+   * ⚠ だから**対照群を同じ it に置く**:更新の時刻を逆向きに持たせて、
+   *   「更新順なら A が先、最近開いた順なら B が先」まで見る。置かないと、
+   *   `opened` が実は `updated` を読んでいても緑になる。
+   */
+  it('🔴 最近開いた順は、更新順とは別の答えを返す', () => {
+    const list = [
+      meta('a', { updatedAt: '2026-08-15T00:00:00Z' }), // 更新は新しい
+      meta('b', { updatedAt: '2026-01-01T00:00:00Z' }), // 更新は古いが、さっき開いた
+    ];
+    const opened = new Map([
+      ['a', 100],
+      ['b', 900],
+    ]);
+    expect(
+      sortOrder(['a', 'b'], metasOf(list), 'updated', NATURAL_DESC['updated']),
+      '対照群(更新順)が崩れている',
+    ).toEqual(['a', 'b']);
+    expect(
+      sortOrder(['a', 'b'], metasOf(list), 'opened', NATURAL_DESC['opened'], (l) => opened.get(l) ?? 0),
+      '最近開いた順が、更新順と同じ答えを返した(別の値を読んでいない)',
+    ).toEqual(['b', 'a']);
+  });
+
+  /**
+   * ⚠ **一度も開いていないノートも並びに残す** ── 落とすと、一覧から
+   *   黙って消える(`metaOf` の未知と同じ約束)。
+   */
+  it('🔴 記録の無いノートは末尾へ回る(消えない)', () => {
+    const list = [meta('seen'), meta('never')];
+    const opened = new Map([['seen', 5]]);
+    expect(
+      sortOrder(['never', 'seen'], metasOf(list), 'opened', true, (l) => opened.get(l) ?? 0),
+    ).toEqual(['seen', 'never']);
   });
 
   it('isEntrySort は登録した並びだけを通す', () => {
@@ -192,6 +244,18 @@ describe('並び順の配線(選ぶ → 画面が変わる)', () => {
 
     const sel = root.querySelector<HTMLSelectElement>('[data-pkc-field="entry-sort"]');
     expect(sel, '並び順の選択欄が画面に無い').not.toBeNull();
+    /**
+     * 🔴 **選べる並びと、登録した並びが 1 対 1**(2026-09-11、#215 残り①)。
+     *
+     * ⚠ 選択欄の中身は**手で並べてある** ── `ENTRY_SORTS` に足して欄に足し忘れると
+     *   **選べない並び**(押す所が無い)、欄に足して一覧に足し忘れると
+     *   **`isEntrySort` が弾く並び**(押しても何も起きない無言の dead click)になる。
+     * 🔑 どちらも字面では気づけないので、**集合で突き合わせる**(§7)。
+     */
+    expect(
+      [...sel!.options].map((o) => o.value),
+      '選べる並びと ENTRY_SORTS が食い違う(足し忘れ / 消し忘れ)',
+    ).toEqual([...ENTRY_SORTS]);
     sel!.value = 'title';
     sel!.dispatchEvent(new Event('change', { bubbles: true }));
 

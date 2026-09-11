@@ -18,6 +18,7 @@
  */
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
 import { TAG_INPUT_FIELDS, type AppState, type TagInputField } from '@adapter/state/app-state';
+import { listViewOptions } from '@adapter/state/list-view-options';
 // ⚠ `resolveCanonicalParents` / `listMoveTargets` は #813(2026-09-09)で
 //    「居場所」のプルダウンを外したときに、この面から要らなくなった ──
 //    どちらも `move-to-folder`(探して選ぶ窓)と D&D の側で生きている
@@ -776,9 +777,7 @@ export class FilerRenderer {
       smartLids: smartLidsOf(scopeLid, state.smartHits),
       filterQuery: state.filterQuery,
       searchHits: state.searchHits,
-      sort: state.entrySort,
-      sortDesc: state.entrySortDesc,
-      kinds: state.kindFilter,
+      ...listViewOptions(state),
     });
 
     /**

@@ -10,6 +10,7 @@
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
 import { DEFAULT_ENTRY_SORT, NATURAL_DESC, type EntrySort } from '@features/filter/entry-sort';
 import { checkReadOnlySql } from '@features/query/sql-guard';
+import { listViewOptions } from './list-view-options';
 import { resolveCanonicalParents, reorderSibling } from '@features/relation/tree';
 import { extractMeta, seedBodyFor } from '@features/flavor';
 import { isAppendable } from '@features/flavor/append-spec';
@@ -847,6 +848,17 @@ export interface AppState {
    */
   entrySortDesc: boolean;
   /**
+   * 🔴 **最近開いたノート**(#215 残り①)── lid → 最後に開いた時刻(epoch ミリ秒)。
+   *
+   * ⚠ **ノートのデータではない**(端末ごとの記録)ので container には入れない ──
+   *   入れると書き出しに同乗し、**渡した相手にこちらの読んだ順が並ぶ**
+   *   (`adapter/platform/opened-store.ts` の冒頭)。
+   * 🔑 **それでも state に載せる理由**:並べ替えが読む値なので、ここに無いと
+   *   描画器が store を直に読むことになり、**記録が増えても再描画が起きない**
+   *   (指紋に入らないため ── §7「同じ値が複数の場所にある」の入口)。
+   */
+  openedAt: ReadonlyMap<string, number>;
+  /**
    * `searchHits` が**どの問い合わせの結果か**。⚠ これが無いと、遅れて返った
    * 古い結果を新しい問い合わせの答えとして表示してしまう(打鍵は結果より速い)。
    */
@@ -1119,6 +1131,8 @@ export const initialState: AppState = {
   selectionHistory: EMPTY_HISTORY,
   entrySort: DEFAULT_ENTRY_SORT,
   entrySortDesc: NATURAL_DESC[DEFAULT_ENTRY_SORT],
+  // ⚠ 空の Map を**使い回さない**(凍らせていないので、誰かが書くと全部に効く)
+  openedAt: new Map<string, number>(),
   searchHitsQuery: '',
   searchHitsTruncated: false,
   searchPage: { query: '', rows: [], rowsQuery: '', truncated: false, failed: false },
@@ -1262,6 +1276,11 @@ export type UserAction =
   | { type: 'SQL_RUN_FAILED'; token: number; sql: string; error: string }
   /** 本文の当たりが SQL から返った(#181)。⚠ `query` は**どの問い合わせの答えか**。 */
   | { type: 'SET_SEARCH_HITS'; query: string; lids: string[]; truncated: boolean }
+  /**
+   * 最近開いた記録が入れ替わった(#215 残り①)。
+   * ⚠ **時刻は呼び側(effect)が読む** ── reducer は純粋なので `Date.now()` を持たない。
+   */
+  | { type: 'SET_OPENED_AT'; openedAt: ReadonlyMap<string, number> }
   /** 一覧の並び順を変える(#183)。⚠ 選択は消さない(絞り込みと同じ規約)。 */
   | {
       type: 'SET_ENTRY_SORT';
@@ -2674,6 +2693,27 @@ function reduceCore(
     case 'CLEAR_KIND_FILTER':
       if (state.kindFilter.size === 0) return { state, events: [] };
       return { state: { ...state, kindFilter: NO_KINDS }, events: [] };
+    /**
+     * 🔴 **最近開いた記録が入れ替わった**(#215 残り①)。
+     * ⚠ **時刻はここで作らない**(reducer は純粋)── 呼び側(effect)が
+     *   `Date.now()` を読んで、出来上がった表を渡す。
+     * ⚠ 同じ中身なら**新しい参照を作らない** ── 指紋が毎回変わると、
+     *   一覧が 1 文字も変わっていないのに描き直される。
+     */
+    case 'SET_OPENED_AT': {
+      const now = state.openedAt;
+      if (now.size === action.openedAt.size) {
+        let same = true;
+        for (const [lid, at] of action.openedAt) {
+          if (now.get(lid) !== at) {
+            same = false;
+            break;
+          }
+        }
+        if (same) return { state, events: [] };
+      }
+      return { state: { ...state, openedAt: action.openedAt }, events: [] };
+    }
     case 'SET_ENTRY_SORT': {
       // ⚠ 選択は消さない ── 並び替えただけで開いているノートが変わると驚く
       const desc = action.desc ?? NATURAL_DESC[action.sort];
@@ -4445,9 +4485,7 @@ function reduceCore(
         smartLids: smartLidsOf(state.scopeLid, state.smartHits),
         filterQuery: state.filterQuery,
         searchHits: state.searchHits,
-        sort: state.entrySort,
-        sortDesc: state.entrySortDesc,
-        kinds: state.kindFilter,
+        ...listViewOptions(state),
       });
       const range = rangeInRows(rows, state.selectionAnchor, action.lid);
       if (range.length === 0) return { state, events: [] };
@@ -4461,9 +4499,7 @@ function reduceCore(
         smartLids: smartLidsOf(state.scopeLid, state.smartHits),
         filterQuery: state.filterQuery,
         searchHits: state.searchHits,
-        sort: state.entrySort,
-        sortDesc: state.entrySortDesc,
-        kinds: state.kindFilter,
+        ...listViewOptions(state),
       }).map((m) => m.lid);
       if (rows.length === 0) return { state, events: [] };
       return {
@@ -5078,9 +5114,7 @@ function reduceCore(
         smartLids: smartLidsOf(paneScope(pane), state.smartHits),
         // 🔑 **絞り込みの規則は 1 本**(`paneFilterOptions`)── 描く側と同じものを見る
         ...paneFilterOptions(pane, state.filterQuery, state.searchHits),
-        sort: state.entrySort,
-        sortDesc: state.entrySortDesc,
-        kinds: state.kindFilter,
+        ...listViewOptions(state),
       });
       let next: DualPaneState;
       if (action.mode === 'range') {

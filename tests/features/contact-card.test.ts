@@ -189,6 +189,8 @@ describe('並べ方と絞り込み(#278)', () => {
       (lid) => metas.get(lid),
       'title',
       false,
+      // ⚠ 題名順を見る台なので、開いた時刻は使わない(#215 残り①で増えた引数)
+      () => 0,
     );
     const out = sortContacts(names.map(([lid, name]) => card(lid, name)));
     expect(out.map((c) => c.lid), '一覧と並びが違う').toEqual(expected);

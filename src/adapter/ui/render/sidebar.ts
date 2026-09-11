@@ -159,7 +159,14 @@ export class SidebarRenderer {
     // 一覧に**存在する** lid(絞り込み前)── 行キャッシュの掃除はこちらで判定する
     const alive = new Set<string>();
     // 🔴 並び順(#183)── 規則は `sortOrder` 1 か所。既定は手動の順
-    for (const lid of sortOrder(state.order, (l) => state.entryMetas.get(l), state.entrySort, state.entrySortDesc)) {
+    for (const lid of sortOrder(
+      state.order,
+      (l) => state.entryMetas.get(l),
+      state.entrySort,
+      state.entrySortDesc,
+      // ⚠ 端末ごとの記録(#215 残り①)── 無い lid は 0(末尾へ回る)
+      (l) => state.openedAt.get(l) ?? 0,
+    )) {
       const meta = state.entryMetas.get(lid);
       if (!meta) continue;
       alive.add(lid);

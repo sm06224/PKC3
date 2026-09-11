@@ -58,6 +58,8 @@ import {
   type AppState,
   type ViewMode,
 } from '@adapter/state/app-state';
+import { listViewOptions } from '@adapter/state/list-view-options';
+import { appOpenedStore } from '@adapter/platform/opened-store';
 import type { EntryMeta } from '@core/model/entry-meta';
 import {
   filerRows,
@@ -434,9 +436,7 @@ const visibleFilerRows = (st: AppState): EntryMeta[] =>
     smartLids: smartLidsOf(st.scopeLid, st.smartHits),
     filterQuery: st.filterQuery,
     searchHits: st.searchHits,
-    sort: st.entrySort,
-    sortDesc: st.entrySortDesc,
-    kinds: st.kindFilter,
+    ...listViewOptions(st),
   });
 
 /** その entry が**既にそこに居る**か(動かす必要が無い)。 */
@@ -484,9 +484,7 @@ const dualPaneRows = (st: AppState, side: DualSide): EntryMeta[] => {
   return filerRows(paneScope(pane), st.entryMetas, st.relations, {
     smartLids: smartLidsOf(paneScope(pane), st.smartHits),
     ...paneFilterOptions(pane, st.filterQuery, st.searchHits),
-    sort: st.entrySort,
-    sortDesc: st.entrySortDesc,
-    kinds: st.kindFilter,
+    ...listViewOptions(st),
   });
 };
 
@@ -4861,6 +4859,18 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'undo-move': (dispatcher) => {
     dispatcher.dispatch({ type: 'UNDO_MOVE' });
+  },
+  /**
+   * 🔴 **最近開いた記録を消す**(#215 残り①)。口は設定の中。
+   * ⚠ **画面にも反映する** ── store だけ消すと、いま「最近開いた順」で並べている
+   *   一覧が**古い並びのまま**残る(消したのに効いていないように見える)。
+   * ⚠ **消えたことを字で言う** ── 押しても何も変わらない画面(既に空のとき)で
+   *   無言だと、押せていないのか消えたのか読めない。
+   */
+  'clear-opened-history': (dispatcher, _target, services) => {
+    appOpenedStore.clear();
+    dispatcher.dispatch({ type: 'SET_OPENED_AT', openedAt: new Map<string, number>() });
+    services.showStatus?.('最近開いたノートの記録を消しました');
   },
   'append-entry': (dispatcher, _target, _services, root) => {
     const s = dispatcher.getState();

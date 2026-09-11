@@ -25,6 +25,7 @@
  */
 import type { EntryMeta } from '@core/model/entry-meta';
 import type { AppState } from '@adapter/state/app-state';
+import { listViewOptions } from '@adapter/state/list-view-options';
 import type { DualPaneState, DualSide } from '@features/relation/dual-pane';
 import {
   MAX_TABS,
@@ -399,9 +400,7 @@ export class DualFilerRenderer {
         smartLids: smartLidsOf(paneScope(pane), state.smartHits),
         // 🔑 **絞り込みの規則は 1 本**(reducer / binder と同じ `paneFilterOptions`)
         ...paneFilterOptions(pane, state.filterQuery, state.searchHits),
-        sort: state.entrySort,
-        sortDesc: state.entrySortDesc,
-        kinds: state.kindFilter,
+        ...listViewOptions(state),
       });
       this.renderPane(frame.panes[side], side, state, pane, rows, bookmarks);
     }
