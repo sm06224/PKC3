@@ -1402,7 +1402,16 @@ test('🔴 フォルダ面は行の頭に種別、右端に更新日を出す', 
       e ? Math.round(e.getBoundingClientRect().width) : -1;
     return {
       cellWidths: cells.map((c) => w(c)),
-      chip: tr.querySelector('[data-pkc-chip] svg path') !== null,
+      /**
+       * ⚠ 図案は**書体の 1 文字**になった(#770 段①)ので `svg path` はもう無い。
+       * 🔑 「絵が出ている」は **`::before` の中身**で見る(規則が焼かれている証拠)。
+       */
+      chip: ((): boolean => {
+        const c = tr.querySelector('[data-pkc-chip]');
+        if (c === null) return false;
+        const v = getComputedStyle(c, '::before').content;
+        return v !== '' && v !== 'none' && v !== 'normal';
+      })(),
       last: cells[cells.length - 1]?.textContent ?? '',
     };
   });

@@ -655,8 +655,14 @@ test('folder-export 取込 → filer で階層が実際にたどれる', async (
   // 種別は行の頭の図案が示す(P9 段③ で全種別に出すようにした)。
   // ⚠ **フォルダの印**を名指しで数える ── 「図案が 2 つ」だと、この fixture が
   //    たまたま 2 行ともフォルダなので、種別を取り違える変異が素通りする
+  // ⚠ 図案は**書体の 1 文字**になった(#770 段①)ので `svg` はもう無い ──
+  //    見るのは器が持つ**名前**(`data-pkc-symbol`)である。
+  //    🔑 種別の印(`data-pkc-chip`)と絵の名前が**両方 folder** であることを見る
+  //    ── 片方だけだと「色は folder なのに絵は text」が素通りする
   expect(
-    await rows.locator('[data-pkc-field="title"] [data-pkc-chip="folder"] svg').count(),
+    await rows
+      .locator('[data-pkc-field="title"] [data-pkc-chip="folder"][data-pkc-symbol="folder"]')
+      .count(),
     'フォルダの印が消えている',
   ).toBe(2);
 
