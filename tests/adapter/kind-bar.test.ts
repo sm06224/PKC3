@@ -37,6 +37,7 @@ const PANE_FILES: Readonly<Record<BrowseMode, readonly string[]>> = {
   launcher: ['launcher.ts'],
   schedule: ['schedule.ts'],
   contacts: ['contacts.ts'],
+  captures: ['captures.ts'],
 };
 
 const readsKindFilter = (mode: BrowseMode): boolean =>

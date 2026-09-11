@@ -221,7 +221,8 @@ describe('本文の塊を別のノートへ持っていく(#684 段③)', () => 
     h.d.dispatch({ type: 'HANDOFF_BLOCK', fromLid: 'a', ...PARA_A, toLid: 'b', toBefore: null });
     await tick();
     expect(h.d.getState().notice ?? '', 'どこへ行ったかを言っていない').toBe(
-      '本文の塊を「さき」のいちばん下へ持っていきました(戻すには、そこで同じ ⠿ を掴んで持ち帰ってください)',
+      // ⚠ #809-3 でノートの名前を『』へ揃えた(file を落とした回の知らせと同じ括弧)
+      '本文の塊を『さき』のいちばん下へ持っていきました(戻すには、そこで同じ ⠿ を掴んで持ち帰ってください)',
     );
     expect(h.d.getState().noticeOpen, '行ける口が添えられていない').toBe('b');
     expect(

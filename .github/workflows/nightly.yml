@@ -43,10 +43,13 @@ permissions:
   issues: write
 jobs:
   # ── smoke は 2 つのブラウザ両方で回す ────────────────────────────────
-  # 🔴 CLAUDE.md「実ブラウザ依存の spec は両方で通してから push する」。PR gate は
-  # 速さのため headless_shell 片方だけなので、**両方を突き合わせる場所は nightly
-  # しかない**。だから 2 つを別 job に割った ── 落ちたとき、どちらのブラウザで
-  # 壊れたのかが **job の名前で分かる**。
+  # 🔴 CLAUDE.md「実ブラウザ依存の spec は両方で通してから push する」。手で押す
+  # `smoke.yml` は速さのため headless_shell 片方だけなので、**両方を突き合わせる
+  # 場所は nightly しかない**。だから 2 つを別 job に割った ── 落ちたとき、
+  # どちらのブラウザで壊れたのかが **job の名前で分かる**。
+  # ⚠ 2026-09-09: **PR gate から全量 smoke が消えた**(user 指示「自動実行は禁止 /
+  #   全て任意起動」)ので、**自動で全量が回るのはこの夜だけ**になった ──
+  #   ここを弱めると、押し忘れた日は**誰も全量を確かめていない**ことになる。
   #
   # 🔑 **全 step に id を付ける**(2026-08-17 のレビュー 🔴-1)。台帳が読むのは
   #   job の結果になったが、id は今も 2 つの役に立つ ── ① `setup_ok` の gate は
@@ -71,7 +74,7 @@ jobs:
         id: build
       - run: npx playwright install chromium --with-deps
         id: pw_install
-      - name: Visual smoke (headless_shell ── PR gate と同じ)
+      - name: Visual smoke (headless_shell ── 手で押す smoke.yml と同じ)
         id: smoke
         run: npm run test:smoke
 
@@ -127,9 +130,12 @@ jobs:
         env:
           PKC3_CHROMIUM: ${{ steps.pw.outputs.path }}
         run: npm run test:smoke
-      # 🔴 **図の全数(22 種)は 2026-09-05 から PR gate で走る** ── ここに別 step を
+      # 🔴 **図の全数(22 種)は環境変数の門を持たない** ── ここに別 step を
       #    置かない。⚠ 置くと**同じ検査を夜に 2 度**走らせることになる(上の
       #    「フル chromium」の step が全量を回すので、この spec もそこに入っている)。
+      #    ⚠ 2026-09-09 訂正: かつてここは「2026-09-05 から **PR gate で**走る」と
+      #    書いていたが、PR gate から全量が外れたので**事実ではなくなった** ──
+      #    いま焼かれるのは**この夜**と、手で押した `smoke.yml` である。
       #    実測の根拠と経緯は `tests/smoke/mermaid-all.smoke.spec.ts` の冒頭に在る。
 
   # 🔴 product bundle は **PR gate が一度もビルドしない別成果物**である

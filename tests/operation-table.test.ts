@@ -164,12 +164,20 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   ── SQL の面の中の選択欄(登記は増えない)
       // ⚠ 2026-09-09(#278 段②): 本文の電話番号(`set-phone-links`)で受け手 +1
       //   ── 設定の checkbox が受ける(`set-alarm-enabled` と同じ形。登記は増えない)
-      total: 269,
-      receivers: 220,
+      // ⚠ 2026-09-09(#683 段①): 録ったものの面 ── 受け手 +2
+      //   (`capture-play` / `capture-stop`)。登記は増えない ── 面そのものは
+      //   `set-browse` / `set-view` で開き、押し所はその面の中にしか無い
+      // ⚠ 2026-09-09(#809-4): 知らせの隣の「開く」が `select-entry` から
+      //   `swap-open` へ分かれて受け手 +1(登記は増えない ── 押し口は状態の行の
+      //   隣 1 か所で、そこは登記の対象ではない)
+      // ⚠ 2026-09-09(#813): 「居場所」のプルダウンを外して `move-entry` の受け手が
+      //   消え、受け手 −1(登記は動かない ── 押し口は面の中にしか無かった)
+      total: 271,
+      receivers: 222,
       registered: 85,
       both: 36,
       outsideActionsTable: 49,
-      unregistered: 184,
+      unregistered: 186,
     });
   });
 

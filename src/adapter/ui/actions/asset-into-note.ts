@@ -254,8 +254,14 @@ export function putAssetIntoNote(args: PutAssetArgs): void {
      *   (一覧は絞りで隠れていることがある ── 押して行ける口が 1 つも無い)。
      * ⚠ 種類の名前が引けない回(meta が消えた)だけ、元の言い方に落ちる。
      */
+    /**
+     * 🔴 **種類には括弧を付けない**(#809-3、2026-09-09。user 推薦 A)。
+     * ⚠ 直す前は `『フォルダ』` で、**ノートの名前と同じ括弧**だった ──
+     *   `『◯◯』` が「ノートの名前」なのか「種類」なのか、字だけでは読めない。
+     * 🔑 括弧は**名前にだけ**使う(ノート = `『』` / ファイル・字 = `「」`)。
+     */
     const kind =
-      into.archetype === undefined ? '追記できない種類' : `『${archetypeLabel(into.archetype)}』`;
+      into.archetype === undefined ? '追記できない種類' : archetypeLabel(into.archetype);
     notify(
       `${why}「${name}」を添付にしました(開いているのは${kind}なので、本文には入れていません。本文に入れられるのは${appendableKindsLabel()}だけです)`,
       attachedLid,

@@ -94,6 +94,18 @@ const OBJECT_LONE: readonly string[] = [
    */
   'browse-archive',
   'bulk-tag-add',
+  /**
+   * ⚠ **2026-09-09(#683 段①)に足した。** ⚠ #582 の「増やさない」に**触れていない** ──
+   *   ここが止めたい害は「**その面を畳む・狭くすると画面から消える**」ことだが、
+   *   録ったものの面は **入口が 2 つ**在る(左の列のタブ / 組み込みタイルの別窓)。
+   * 🔑 この台帳が 1 と数えるのは**出口の file 数**であって画面の数ではない ──
+   *   `captures.ts` 1 本を左の列と中央の器が**両方**描くので、file では 1、
+   *   画面では 2 になる(不可侵指示「面を 1 つ足すたびに ①左に置き場 ②別窓
+   *   ③塞がれたら①へ戻す」を満たしている)。
+   * ⚠ **触れていないことを字で残す** ── 残さないと、次に読む人が
+   *   「体系の外で足した 1 つ」と読む(`browse-archive` と同じ扱い)。
+   */
+  'capture-play',
   'clear-entry-date',
   'cycle-read-columns',
   'deliver-to-extension',
@@ -108,7 +120,8 @@ const OBJECT_LONE: readonly string[] = [
   'launch-asset',
   'launch-asset-extension',
   'launch-asset-raw',
-  'move-entry',
+  // ⚠ `move-entry` は #813(2026-09-09)で受け手ごと外した ── プルダウンを消したので
+  //    焼く所が 0 件になった(残る口は `move-to-folder` と D&D)
   'navigate-entry-ref',
   'open-alarm',
   /**
@@ -138,6 +151,16 @@ const OBJECT_LONE: readonly string[] = [
    *   `KEY_COMMANDS` へ ── 増えた日にここが落ちて気づく。
    */
   'stack-save',
+  /**
+   * ⚠ **2026-09-09(#809-4)に足した。** ⚠ #582 の「増やさない」に**触れていない** ──
+   *   ここが止めたい害は「**その面を畳む・狭くすると画面から消える**」ことだが、
+   *   これは**状態の行の隣**(`shell.ts`)に出る押し口で、状態の行は畳めない。
+   * 🔑 そして**出るのは直前の 1 手の直後だけ**である ── user が「どこから押すか」を
+   *   探す種類の操作ではない(探す先が 1 か所しか無いことが害になる形ではない)。
+   * ⚠ 中身は `select-entry` から**名前を変えただけ**(入れ替えを足した)──
+   *   操作を 1 つ増やしたのではない。
+   */
+  'swap-open',
   'storage-profile',
   'toggle-app-tile',
   'unschedule-task',

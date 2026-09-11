@@ -169,7 +169,8 @@ const EXPECTED_LABELS = {
   // 探し方は**左の列**が持つ
   // ⚠ 2026-08-23 に「予定」を足した(#292 段③)── 等値なので足し忘れると落ちる
   // ⚠ 2026-08-27 に「連絡先」を足した(#278 段①)
-  'set-browse': ['一覧', 'フォルダ', 'アプリ', '予定', '連絡先'],
+  // ⚠ 録ったもの(#683 段①、2026-09-09)── 左の列の 6 枚目のタブ
+  'set-browse': ['一覧', 'フォルダ', 'アプリ', '予定', '連絡先', '音/動画'],
   'export-archive': ['バックアップ'],
   'import-file': ['取り込む'],
   'attach-file': ['添付'],
@@ -1254,6 +1255,12 @@ describe('移行ガイドと実装の突合', () => {
  * 「probe 6 本(…かんばん)」と、**1 か月前の実態**を書いたままだった ── 版は
  * `package.json`、job は `ci.yml`、probe は `nightly.yml` の step 名が正本なので、
  * そこから出して README に在ることを見る。
+ *
+ * ⚠ **2026-09-09**: 全量 smoke を `ci.yml` から `smoke.yml`(任意起動)へ出した
+ * (user 指示「**自動実行は禁止したはず / 約束では全て任意起動のはず**」)。
+ * 🔴 **出した先も README に在ることを見る** ── 出しただけだと、README を読んだ人には
+ * 「実ブラウザの検査が消えた」ようにしか見えない(CLAUDE.md「外したら、外したぶんの
+ * 門を置き直す」の doc 版)。
  */
 describe('README と実体の突合(#696)', () => {
   const README = readFileSync('README.md', 'utf-8');
@@ -1271,10 +1278,22 @@ describe('README と実体の突合(#696)', () => {
     const jobsAt = CI.indexOf('\njobs:\n');
     expect(jobsAt, 'ci.yml に jobs: が無い(空振り)').toBeGreaterThan(0);
     const jobs = [...CI.slice(jobsAt).matchAll(/^ {2}([a-z][a-z0-9-]*):$/gm)].map((m) => m[1]!);
-    expect(jobs.length, 'job を読めていない(空振り)').toBeGreaterThanOrEqual(3);
+    // ⚠ 2026-09-09: `smoke` を出したので PR gate は 2 job(`audit` / `verify`)。
+    //   この下限は**空振り防止**であって「2 つ以上あるべき」という主張ではない
+    //   ── 切り出しが壊れて 0 件になった形で「全部載っている」と言わないためのもの。
+    expect(jobs.length, 'job を読めていない(空振り)').toBeGreaterThanOrEqual(2);
     for (const j of jobs) {
       expect(README, `README の CI の表に job「${j}」が無い`).toContain(`\`${j}\``);
     }
+  });
+
+  it('🔴 README に、任意起動へ出した全量 smoke の行が在る', () => {
+    // 🔑 実体(workflow の `name:`)を正本にして、README がそれを写しているかを見る
+    const SMOKE = readFileSync('.github/workflows/smoke.yml', 'utf-8');
+    const name = /^name: (.+)$/m.exec(SMOKE)?.[1]?.trim() ?? '';
+    expect(name, 'smoke.yml の name: が読めていない(空振り)').not.toBe('');
+    expect(README, `README に「${name}」の行が無い(押す口が doc から消えた)`).toContain(name);
+    expect(README, 'README が smoke.yml の在り処を書いていない').toContain('smoke.yml');
   });
 
   it('🔴 README の nightly の行に、nightly.yml の Probe の step 名が全部載っている', () => {
@@ -2090,6 +2109,21 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    /**
+     * ⚠ **2026-09-09(#813)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-08-manual-jump" …` → bcc0b0a
+     */
+    'マニュアルの中の「→「設定」」のような字が、押せるようになりました',
+    /**
+     * ⚠ **2026-09-09(#809 の 4 件)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-08-manual-terms" …` → 8e8684b
+     */
+    'マニュアルに用語集が付き、「設定」と「ランチャー」が章になりました',
+    /**
+     * ⚠ **2026-09-09(#683 段①)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-08-manual-otherwise-split" …` → c8bda7e
+     */
+    'マニュアルの「書く」にあった「そのほか」が、7 つの名前の付いた節に分かれました',
     /**
      * ⚠ **2026-09-09(#837 K1/K2/K3)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-08-dev-build-stamp" …` → 90d02df

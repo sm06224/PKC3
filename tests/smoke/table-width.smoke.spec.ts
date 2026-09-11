@@ -17,18 +17,28 @@ import { gotoApp, clickReal, createEntry, dismissAnnounce, useSplitEditor } from
 
 /**
  * ⚠ **狭い器で表が押し込まれる本文**にする(2 つとも、直す前は数字が割れた形)。
- * - markdown の表: 数字 8 列 + 長い文の列。文の列が伸びるので、数字の列は
+ * - markdown の表: 数字の列 + 長い文の列。文の列が伸びるので、数字の列は
  *   `anywhere` だと 1 文字幅まで縮められる(`120` → `12` / `0`)
- * - csv の fence: 8 列の `1234`(#699 の報告そのもの)
+ * - csv の fence: 同じ列数の `1234`(#699 の報告そのもの)
+ *
+ * 🔴 **列数は余裕を持たせる**(2026-09-11。夜の検査が落ちて判明)── かつては
+ *   **8 列**で、390px の器に対し超過が**ほぼ 0px** だった。つまり「器より広い」を
+ *   字幅の端数で成り立たせており、playwright 1.62 → 1.63 の Chromium 更新(153)で
+ *   **ちょうど収まってしまい**、前提の assert が落ちた(製品は無傷 ── `120` が
+ *   1 行に収まる主張のほうは 8 件とも通っていた)。
+ * 🔑 **12 列にして差を桁で稼ぐ** ── 押し込む力が強くなるので、#699 の症状
+ *   (数字が割れる)を見る条件としても**厳しくなる**。⚠ 下の前提 assert にも
+ *   余裕(24px)を置いた ── 端数で成り立つ日が来たら、そこで落とす。
  */
+const NUM_COLS = 12;
 const BODY = [
-  '| 項目 | 1 月 | 2 月 | 3 月 | 4 月 | 5 月 | 6 月 | 7 月 | 8 月 |',
-  '|---|---|---|---|---|---|---|---|---|',
-  '| この列には長い説明の文が入っていて、表を器の幅いっぱいまで押し広げます | 120 | 120 | 120 | 120 | 120 | 120 | 120 | 120 |',
+  '| 項目 | ' + Array.from({ length: NUM_COLS }, (_, i) => `${i + 1} 月`).join(' | ') + ' |',
+  '|' + '---|'.repeat(NUM_COLS + 1),
+  '| この列には長い説明の文が入っていて、表を器の幅いっぱいまで押し広げます | ' + Array.from({ length: NUM_COLS }, () => '120').join(' | ') + ' |',
   '',
   '```csv',
-  'a,b,c,d,e,f,g,h',
-  '1234,1234,1234,1234,1234,1234,1234,1234',
+  Array.from({ length: NUM_COLS }, (_, i) => String.fromCharCode(97 + i)).join(','),
+  Array.from({ length: NUM_COLS }, () => '1234').join(','),
   '```',
   '',
 ].join('\n');
@@ -87,13 +97,13 @@ test.describe('スマホ(390 幅・DPR 3)', () => {
 
     // ── markdown の表: `120` が 8 つとも 1 行
     const md = await linesOfCell(page, '120', 'md');
-    expect(md.length, '`120` のセルが 8 つ無い(台の空振り)').toBe(8);
+    expect(md.length, `\`120\` のセルが ${NUM_COLS} つ無い(台の空振り)`).toBe(NUM_COLS);
     expect(md, 'markdown の表で「120」が途中から折れている(「12 / 0」に割れる)').toEqual(
       md.map(() => 1),
     );
     // ── csv の表: `1234` が 8 つとも 1 行
     const csv = await linesOfCell(page, '1234', 'csv');
-    expect(csv.length, '`1234` のセルが 8 つ無い(台の空振り)').toBe(8);
+    expect(csv.length, `\`1234\` のセルが ${NUM_COLS} つ無い(台の空振り)`).toBe(NUM_COLS);
     expect(csv, 'csv の表で「1234」が途中から折れている').toEqual(csv.map(() => 1));
 
     /**
@@ -130,7 +140,10 @@ test.describe('スマホ(390 幅・DPR 3)', () => {
     for (const [i, b] of flow.blocks.entries()) {
       const name = i === 0 ? 'markdown' : 'csv';
       expect(b, `${name} の表の器が無い`).not.toBeNull();
-      expect(b!.over, `${name} の表が器より広くなっていない(前提が崩れている)`).toBeGreaterThan(0);
+      expect(
+        b!.over,
+        `${name} の表が器より広くなっていない(前提が崩れている。器 ${b!.w}px / 超過 ${b!.over}px)`,
+      ).toBeGreaterThan(24);
       expect(b!.leaks, `${name} の表の超過が器の外へ漏れている(面ごと横に流れる)`).toEqual([]);
     }
     expect(flow.page, '画面が横に広がっている(表の超過が器の外へ漏れている)').toBeLessThanOrEqual(0);

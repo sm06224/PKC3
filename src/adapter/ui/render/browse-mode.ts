@@ -24,7 +24,15 @@
  */
 import type { ViewMode } from '@adapter/state/app-state';
 
-export const BROWSE_MODES = ['list', 'filer', 'launcher', 'schedule', 'contacts'] as const;
+export const BROWSE_MODES = [
+  'list',
+  'filer',
+  'launcher',
+  'schedule',
+  'contacts',
+  // 🔴 **録ったもの**(#683 段①)── 音と動画の添付だけを集める面
+  'captures',
+] as const;
 
 export type BrowseMode = (typeof BROWSE_MODES)[number];
 
@@ -71,6 +79,8 @@ const HOME_TAB: Readonly<Partial<Record<ViewMode, BrowseMode>>> = {
   schedule: 'schedule',
   // 🔴 連絡先も同じ形(#278 段③)── 左の「連絡先」タブが退避先
   contacts: 'contacts',
+  // 🔴 録ったものも同じ形(#683 段①)── 別窓が塞がれたら左のタブへ送る
+  captures: 'captures',
 };
 
 export function homeTabOf(view: ViewMode): BrowseMode | null {
@@ -100,12 +110,16 @@ export function homeTabOf(view: ViewMode): BrowseMode | null {
 export type BrowseScan =
   | 'REFRESH_LAUNCHER_TILES'
   | 'REFRESH_TASK_SCAN'
-  | 'REFRESH_CONTACT_SCAN';
+  | 'REFRESH_CONTACT_SCAN'
+  | 'REFRESH_CAPTURE_SCAN';
 
 const OPEN_SCAN: Readonly<Partial<Record<BrowseMode, BrowseScan>>> = {
   launcher: 'REFRESH_LAUNCHER_TILES',
   schedule: 'REFRESH_TASK_SCAN',
   contacts: 'REFRESH_CONTACT_SCAN',
+  // 🔴 録ったものも開いたときに集める(#683 段①)── 添付の本文を読むので、
+  //    この面を使わない user には払わせない
+  captures: 'REFRESH_CAPTURE_SCAN',
 };
 
 /**

@@ -831,12 +831,17 @@ export function buildShell(root: HTMLElement): ShellRegions {
    * (一覧は絞りで隠れていることがある)。
    * ⚠ **常設で置いて、要るときだけ出す**(`status-open.ts` が `hidden` と
    *   `data-pkc-entry` を書く)── 器を作り直さない理由は下の断り書きと同じ。
-   * 🔑 実行の口は新しく作らない ── `select-entry` の受け手がそのまま拾う(§7)。
+   * 🔴 **押すと「入れ替え」になる**(#809-4、2026-09-09。user 推薦 A)。
+   *   ⚠ 直す前は素の `select-entry` だったので、行き先が**横に留めた枠**に居ると
+   *   ①それまで読んでいた本文が中央から消え ②同じノートが中央と枠の 2 か所に並んだ。
+   *   🔑 いまは `swap-open` ── 行き先が中央へ、中央に居たものがその枠へ入る
+   *   (**どちらも画面に残る**)。⚠ 枠に居ない行き先(作った添付など)は、
+   *   これまでどおり**ただ開く**(判定は reducer の `SWAP_OPEN_ENTRY`)。
    */
   const statusOpen = document.createElement('button');
   statusOpen.type = 'button';
   statusOpen.setAttribute('data-pkc-field', 'status-open');
-  statusOpen.setAttribute('data-pkc-action', 'select-entry');
+  statusOpen.setAttribute('data-pkc-action', 'swap-open');
   statusOpen.textContent = '開く';
   statusOpen.hidden = true;
   /**

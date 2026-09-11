@@ -244,6 +244,10 @@ describe('書出し中に本文を書き換えられない', () => {
       '<button data-pkc-action="delete-entry">削除</button>' +
       '<button data-pkc-action="restore-trash" data-pkc-rev-id="r1" data-pkc-trash-lid="n1">復元</button>' +
       '<button data-pkc-action="purge-trash">空にする</button>' +
+      // 🔴 **居場所を変えるのも disk への書込**(#813、2026-09-09)── 取込は
+      //    relations を総入れ替えするので、走っている最中に動かすと片方が消える。
+      //    ⚠ プルダウン(`move-entry`)を外したとき、門ごと消える所だった
+      '<button data-pkc-action="move-to-folder">移す…</button>' +
       '</div>';
     document.body.append(root);
     const d = new Dispatcher();
@@ -254,7 +258,7 @@ describe('書出し中に本文を書き換えられない', () => {
       return orig(a);
     };
     bindActions(root, d, { busy: () => busy });
-    return { root, events };
+    return { root, events, d };
   }
 
   const ENTRIES = [
@@ -265,13 +269,26 @@ describe('書出し中に本文を書き換えられない', () => {
     'delete-entry',
     'restore-trash',
     'purge-trash',
+    'move-to-folder',
   ];
 
+  /**
+   * ⚠ **`OP_FAILED` が出たことだけを見ない**(2026-09-09、変異試験 E が SURVIVED で教えた)。
+   *
+   * 🔴 この台の dispatcher は `initializing` なので、**多くの受け手は
+   *   `phase !== 'ready'` でどのみち断る** ── つまり `toContain('OP_FAILED')` は
+   *   **書出しの門を外しても満たされる**(`move-to-folder` を門から外しても緑だった)。
+   * 🔑 だから**断りの字**まで見る ── 書出しの門は 1 つの文言を持っている。
+   */
   it.each(ENTRIES)('🔴 書出しの実行中は「%s」を可視に断る', (action) => {
     vi.stubGlobal('confirm', () => true);
-    const { root, events } = setupAll(true);
+    const { root, events, d } = setupAll(true);
     root.querySelector<HTMLElement>(`[data-pkc-action="${action}"]`)!.click();
     expect(events, `${action} が無言で素通りしている`).toContain('OP_FAILED');
+    expect(
+      d.getState().error ?? '',
+      `${action} が書出しの門を通っていない(別の理由で断っている)`,
+    ).toContain('書き出し / 取込が実行中です');
     vi.unstubAllGlobals();
   });
 

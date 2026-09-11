@@ -431,7 +431,23 @@ test('🔴 まとめ操作の帯は 2 段に収まり、ボタンは 1 つも消
   expect(seen.length, '幅を 1 つも測っていない').toBe(4);
 });
 
-const TAB_ONE_ROW_FROM = 1280;
+/**
+ * 🔴 **ここから上は 1 段**。
+ * ⚠ **1280 → 1366 に上げた**(2026-09-09、#683 段① で 6 枚目「音/動画」が加わった)。
+ *   実測(手元・`chromium`・左の列 = `minmax(200px, 18vw)`):
+ *
+ *   | 幅 | 左の列 | 6 枚の段数 |
+ *   |---|---|---|
+ *   | 1440 | 259px | 1 |
+ *   | 1366 | 246px | **1**(タブの詰めを 2px → 1px にして戻した) |
+ *   | 1280 | 230px | 2 |
+ *
+ * 🔑 **これが分かったら覆る**:タブが 5 枚以下に戻ったら 1280 へ下げてよい
+ *   ── 6 枚目を足す前は 1280 で 1 段だった。
+ * ⚠ **上げ続けない** ── 7 枚目を足すときは、上げるのではなく
+ *   **タブの並べ方そのもの**を見直す(語を縮めるか、置き場を変えるか)。
+ */
+const TAB_ONE_ROW_FROM = 1366;
 
 test('🔴 どの幅でも探し方のタブの語が隣に重ならない', async ({ page }) => {
   const seen: { w: number; rows: number; worst: number }[] = [];
@@ -1674,10 +1690,16 @@ test('🔴 フォルダに入れる → 読み込み直しても中に居る', a
 
   const rows = page.locator('[data-pkc-region="filer-table"] tbody tr');
   const titles = rows.locator('[data-pkc-field="title"]');
-  const move = page.locator('[data-pkc-field="move-target"]');
-  /** 帯は**いつも選択を指している** ── 作った直後の lid はここから読める。 */
+  /**
+   * 作った直後の lid。
+   * ⚠ **帯の `<select>` からは読めなくなった**(#813、2026-09-09 で外した)──
+   *   いまは**並べ替えの押し口**が同じ役目を持つ(帯はいつも選択を指している)。
+   */
   const selectedLid = async (): Promise<string> => {
-    const lid = await move.getAttribute('data-pkc-entry');
+    const lid = await page
+      .locator('[data-pkc-field="order-nudge"] [data-pkc-entry]')
+      .first()
+      .getAttribute('data-pkc-entry');
     expect(lid, '帯が選んでいるものを指していない').toBeTruthy();
     return lid!;
   };
@@ -1701,19 +1723,29 @@ test('🔴 フォルダに入れる → 読み込み直しても中に居る', a
    */
   expect(await lidsOf(), '作っただけで中に入っている').toEqual([noteLid, folderLid]);
 
-  // ── 選ぶ → 居場所を変える
+  /**
+   * ── 選ぶ → 移す
+   * 🔴 **口は「行を右クリック →『移す…』→ 探して選ぶ」**(#813、2026-09-09)。
+   * ⚠ 直す前はここで帯の `<select data-pkc-field="move-target">` を回していたが、
+   *   user 指示「**移動先指定プルダウン邪魔、利便性悪いし整理アプリに移行しよう**」で
+   *   その口は外した。⚠ 主張(入る / 画面は動かない / 行き先を名乗る)は変えていない。
+   */
   await clickReal(page, `[data-pkc-region="filer-table"] [data-pkc-entry="${noteLid}"]`);
-  // ① 実際に届く(座標の最前面である)ことを確かめてから使う。
-  //    ⚠ `<select>` は**押さない** ── 実ブラウザでは一覧が開いて後続を邪魔する
-  await expectReachable(page, '[data-pkc-field="move-target"]');
-  // 帯は**選んだ行の題名**を名指しする(誰を動かすのかが読める)
-  const rowTitle = await titles
-    .nth((await lidsOf()).indexOf(noteLid))
-    .textContent();
-  await expect(page.locator('[data-pkc-field="move-caption"]')).toHaveText(
-    `\u300c${rowTitle}\u300d\u306e\u5c45\u5834\u6240`,
-  );
-  await move.selectOption(folderLid); // ⚠ 値 = lid で選ぶ(題名に依存しない)
+  const rowTitle = await titles.nth((await lidsOf()).indexOf(noteLid)).textContent();
+  await page
+    .locator(`[data-pkc-region="filer-table"] [data-pkc-entry="${noteLid}"]`)
+    .click({ button: 'right' });
+  const menu = page.locator('[data-pkc-region="context-menu"]');
+  await expect(menu, '行の右クリックでメニューが出ない').toBeVisible();
+  // ⚠ 押す口は**メニューの中**から取る(パンくずの「移す…」に当たらない)
+  // ① 実際に届く(座標の最前面である)ことを確かめてから押す
+  await expectReachable(page, '[data-pkc-region="context-menu"] [data-pkc-action="move-to-folder"]');
+  await menu.locator('[data-pkc-action="move-to-folder"]').click();
+  // 窓は「探して選ぶ」── 題名で絞ってから 1 行押す(実ブラウザでも同じ手)
+  const pick = page.locator('[data-pkc-field="entry-pick-list"]');
+  await expect(pick, '入れ先の窓が開かない').toBeVisible();
+  await pick.locator(`[data-pkc-lid="${folderLid}"]`).click();
+  void rowTitle;
 
   /**
    * 🔴 **画面は動かない**(user 裁定 2026-08-18「OS のファイラ動作に似せる」)──
@@ -1725,7 +1757,8 @@ test('🔴 フォルダに入れる → 読み込み直しても中に居る', a
   // 中に入る(2 クリック)── ここから「いま見ているフォルダの中に作る」を見る
   await page.locator(`[data-pkc-region="filer-table"] [data-pkc-entry="${folderLid}"]`).dblclick();
   await expect(
-    page.locator('[data-pkc-region="filer-breadcrumb"] [data-pkc-entry]'),
+    // ⚠ 道の**段**だけを見る(#813 で「移す…」も `data-pkc-entry` を持つようになった)
+    page.locator('[data-pkc-region="filer-breadcrumb"] [data-pkc-action="enter-folder"][data-pkc-entry]'),
     '入れた先のフォルダが道に出ていない',
   ).toHaveAttribute('data-pkc-entry', folderLid);
   expect(await lidsOf()).toEqual([noteLid]);

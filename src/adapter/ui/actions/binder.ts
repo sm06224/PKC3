@@ -1442,9 +1442,15 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'restore-revision',
   'restore-trash',
   'purge-trash',
-  // ⚠ 本文は書かないが **disk への書込**である(取込は relations を総入れ替えする
-  //    ので、走っている最中に居場所を変えると片方が消える)
-  'move-entry',
+  /**
+   * ⚠ 本文は書かないが **disk への書込**である(取込は relations を総入れ替えする
+   *   ので、走っている最中に居場所を変えると片方が消える)。
+   * 🔴 **`move-entry` から `move-to-folder` へ移した**(#813、2026-09-09)──
+   *   プルダウンを外して受け手ごと消えたので、**残った口をここへ載せ直す**。
+   * ⚠ 載せ直さないと、**門だけが静かに消える**(受け手を消したときに
+   *   いちばん起きやすい形。CLAUDE.md「片側を直したら対称の反対側を疑う」)。
+   */
+  'move-to-folder',
   // ⚠ user の**ファイル**を上書きする ── 取込・書出しの最中に走らせない
   'write-back-file',
 ]);
@@ -3293,6 +3299,36 @@ const ACTIONS: Record<string, ActionHandler> = {
   'select-entry': (dispatcher, target) => {
     const lid = target.getAttribute('data-pkc-entry');
     if (lid) selectEntryOrExplain(dispatcher, lid, 'ノート');
+  },
+  /**
+   * 🔴 **開くときに、いま中央に居るノートと入れ替える**(#809-4)。
+   *
+   * ⚠ **知らせの隣の「開く」専用**である ── 一覧の行を押したときは今までどおり
+   *   ただ開く(押すたびに枠が組み替わるのは、user が頼んでいない動きである)。
+   * 🔑 判定(入れ替えられるか)は **reducer が持つ**(`SWAP_OPEN_ENTRY`)──
+   *   ここに書くと、`main.ts` と同じで test の届かない所に判断が入る。
+   */
+  'swap-open': (dispatcher, target) => {
+    const lid = target.getAttribute('data-pkc-entry');
+    if (lid) dispatcher.dispatch({ type: 'SWAP_OPEN_ENTRY', lid });
+  },
+  /**
+   * 🔴 **録ったものを、その場で鳴らす / やめる**(#683 段①)。
+   *
+   * ⚠ **借りるのはここではない** ── bytes を借りるのは描画器(`captures.ts`)の
+   *   `syncBorrow` で、ここは「**どれを鳴らすか**」を state へ置くだけである。
+   *   🔑 そうしないと、同じ面が 2 つ生きている(左のタブ / 別窓)ときに
+   *   **2 本同時に鳴りうる**(CLAUDE.md §7:同じ問いに答える口を 2 つ作らない)。
+   * ⚠ **編集中でも押せる** ── 聞くのは読むだけの操作で、下書きに 1 バイトも触らない
+   *   (`BLOCKABLE_FIELDS` に入れない ── 入れると「動く物まで薄くなる」)。
+   */
+  'capture-play': (dispatcher, target) => {
+    const lid = target.getAttribute('data-pkc-entry');
+    if (lid) dispatcher.dispatch({ type: 'SET_CAPTURE_PLAYING', lid });
+  },
+  /** 🔴 **やめる**(#683 段①)── 器へ返すのは描画器の `syncBorrow` が引き取る。 */
+  'capture-stop': (dispatcher) => {
+    dispatcher.dispatch({ type: 'SET_CAPTURE_PLAYING', lid: null });
   },
   /**
    * ✏️ 編集に入る。#177: 多重タブでは**先に編集権を取ってから**入る。
@@ -5350,13 +5386,13 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 空値 = ルートへ出す。⚠ 動かす当人は**帯自身**が持っている
    * (`selectedLid` を読み直すと、選び直した直後に別のものを動かす)。
    */
-  'move-entry': (dispatcher, target, services) => {
-    const lid = target.getAttribute('data-pkc-entry');
-    if (!lid) return;
-    const value = target instanceof HTMLSelectElement ? target.value : '';
-    // 🔴 実体は `moveEntries` 1 本(D&D と同じ ── 断り方も知らせ方も揃う)
-    moveEntries(dispatcher, [lid], value === '' ? null : value, services.showStatus);
-  },
+  /*
+   * ⚠ ここに在った `move-entry` は **#813(2026-09-09)で外した** ──
+   *   焼く所(フォルダの面の「居場所」の `<select>`)が 0 件になったからである
+   *   (user 指示「**移動先指定プルダウン邪魔、利便性悪いし整理アプリに移行しよう**」)。
+   * 🔑 実体は `moveEntries` **1 本**のままで、残る呼び手は
+   *   `move-to-folder`(右クリック / パンくず)と D&D(`moveDropped`)である。
+   */
   /**
    * 🔴 **行の名前を、その場で打ち替え始める**(#215。行の右クリック / 情報ペイン / `F2`)。
    *
@@ -9285,12 +9321,23 @@ export function bindActions(
     let host = target.closest<HTMLElement>(BODY_DROP_HOST);
     let ground = false;
     if (host === null) {
-      // 面の地 ── その面の本文の器の**下**なら、最後の塊の後として受ける
+      /**
+       * 面の地 ── その面の本文の器の外なら、**最後の塊の後**として受ける。
+       *
+       * 🔴 **上も受ける**(#809-1、2026-09-09。user 推薦 A)。
+       * ⚠ 直す前は `de.clientY < host.bottom` で**器より上を捨てて**いた ──
+       *   つまり留めた枠の**題名**(「さきの予定」)や `← 左で開く` の帯へ落とすと
+       *   線が出ず、写真は**中央のノートのいちばん下**へ入った。
+       * 🔴 **枠 1 つの中で、数 px 上か下かで行き先のノートが変わる**のに、
+       *   外したことが画面に 1 ドットも出ない ── いちばん気づけない外し方である。
+       * 🔑 だから**その枠のどこへ落としても、その枠のノートへ入れる**
+       *   (狙った枠に入るのが、覚え直しがいちばん少ない)。
+       */
       const pane = target.closest<HTMLElement>(
         '[data-pkc-region="split-frame"], [data-pkc-view-pane="detail"]',
       );
       host = pane?.querySelector<HTMLElement>(BODY_DROP_HOST) ?? null;
-      if (host === null || de.clientY < host.getBoundingClientRect().bottom) return null;
+      if (host === null) return null;
       ground = true;
     }
     if (!host.hasAttribute(PAINTED_ATTR) || host.classList.contains('pkc-board-host')) return null;

@@ -24,6 +24,7 @@ import {
 } from '@features/markdown/line-move';
 import { replaceTaskCards, type TaskScan } from '@features/schedule/task-cards';
 import type { ContactScan } from '@features/contact/contact-card';
+import type { CaptureItem } from '@features/capture/capture-item';
 import type { SnippetScan } from '@features/snippet/snippet-table';
 import type { SearchDetailRow } from '@features/filter/search-snippet';
 import {
@@ -275,6 +276,13 @@ export const VIEW_MODES = [
    */
   'contacts',
   /**
+   * 🔴 **録ったもの**(#683 段①。user 要望 2026-09-03
+   * 「時間を測る・画面録画・録音も…組み込みアプリにしたい」)。
+   * ⚠ 連絡先と同じ形 ── 左の列の「録ったもの」タブは残し、同じ
+   *   `CapturesRenderer` を中央の器(別窓)にも描く。
+   */
+  'captures',
+  /**
    * 🔴 **探す面**(#680。user 要望「検索専用の組み込みアプリ」/ 裁定 2026-09-04
    * 「アプリの基本は別窓」)。
    *
@@ -367,6 +375,7 @@ const VIEW_LABELS: Record<ViewMode, string> = {
   query: '集計',
   schedule: '予定表',
   contacts: '連絡先',
+  captures: '音/動画',
   search: '探す',
   dual: '2 ペインで整理',
   sql: 'SQL で調べる',
@@ -939,6 +948,27 @@ export interface AppState {
   /** 🔴 **集められなかった**(`taskScanFailed` と同じ理由 ── 「まだ」と区別する)。 */
   contactScanFailed: boolean;
   /**
+   * 🔴 **録ったもの**(#683 段①)。⚠ `null` = **まだ集めていない**(0 件ではない)。
+   *
+   * ⚠ 中身は**目録だけ**で、bytes は 1 バイトも入らない(聞くときに借りる ──
+   *   不可侵指示 2026-07-27「ゼロコピー・ライフサイクル終端での即破棄」)。
+   * ⚠ **タブを開くまで集めない**(連絡先と同じ規律)── ただし母集団は
+   *   `archetype='attachment'` で先に絞れるので、連絡先ほど高くはつかない。
+   */
+  captureItems: CaptureItem[] | null;
+  /** 🔴 **集められなかった**(`contactScanFailed` と同じ理由 ── 「まだ」と区別する)。 */
+  captureScanFailed: boolean;
+  /**
+   * 🔴 **いまその場で鳴らしている 1 件**(#683 段①)。`null` = 鳴らしていない。
+   *
+   * 🔑 **判定を state に置く理由**:この面の描画器は**同じ document に 2 つ生きうる**
+   *   (左のタブと別窓)。描画器が自分で覚えると、片方で押した結果がもう片方に
+   *   届かず、**2 本同時に鳴りうる**(§7:同じ問いに答える口を 2 つ作らない)。
+   * ⚠ **同時に 1 件だけ** ── 録音 1 本で数百 MB になりうるので、
+   *   複数を借りたままにしない(不可侵指示 2026-07-27)。
+   */
+  capturePlayingLid: string | null;
+  /**
    * 🔴 **保存が「消えない扱い」か**(#347、user 裁定 2026-08-23)。
    *
    * ⚠ 出すのは**設定の面だけ**である ── 帯にもダイアログにもしない
@@ -1117,6 +1147,9 @@ export const initialState: AppState = {
   taskScanFailed: false,
   contactScan: null,
   contactScanFailed: false,
+  captureItems: null,
+  captureScanFailed: false,
+  capturePlayingLid: null,
   snippetScan: null,
   persistState: 'unknown',
   backlinks: null,
@@ -1149,6 +1182,18 @@ export type UserAction =
    * ── 置けるのに外せないと、間違えて留めた物を戻す道が無い。
    */
   | { type: 'PIN_SPLIT_ENTRY'; lid: string }
+  /**
+   * 🔴 **開くときに、いま中央に居るノートと入れ替える**(#809-4、2026-09-09。user 推薦 A)。
+   *
+   * ⚠ 直す前、知らせの隣の **開く** は素の `SELECT_ENTRY` だったので:
+   *   ① それまで読んでいた本文が**中央から消える**(留めていないので、戻るには
+   *      左の一覧で探し直し)② 留めた枠は外れないので、**同じノートが中央と
+   *      枠の 2 か所に並ぶ**。
+   * 🔑 だから**入れ替える** ── 行き先が中央へ、いま中央に居たものがその枠へ。
+   *   左右が入れ替わるだけで、**どちらも画面に残る**。
+   * ⚠ 行き先が枠に居ないとき(添付を作った回など)は、ただ開く ── 入れ替える相手が無い。
+   */
+  | { type: 'SWAP_OPEN_ENTRY'; lid: string }
   /**
    * `gone: true` = **ノートが消えていたので降ろす**(効果層の自己修復。#633 段①)。
    * ⚠ user が × を押したときは付けない ── 付けると「消えた」と嘘を言う。
@@ -1248,6 +1293,14 @@ export type UserAction =
   | { type: 'SET_TASK_SCAN'; scan: TaskScan }
   | { type: 'SET_CONTACT_SCAN'; scan: ContactScan }
   | { type: 'CONTACT_SCAN_FAILED' }
+  /** 🔴 録ったものが集まった(#683 段①)。 */
+  | { type: 'SET_CAPTURE_ITEMS'; items: CaptureItem[] }
+  | { type: 'CAPTURE_SCAN_FAILED' }
+  /**
+   * 🔴 **その場で鳴らす / やめる**(#683 段①)。`lid: null` = やめる。
+   * ⚠ 借りるのは描画器(`captures.ts`)── ここは**どれを鳴らすか**だけを持つ。
+   */
+  | { type: 'SET_CAPTURE_PLAYING'; lid: string | null }
   /** 🔴 雛形を集め終えた(#196 / B-2)。⚠ `null` は失敗 ── **帯は出さず静かに畳む**。 */
   | { type: 'SET_SNIPPET_SCAN'; scan: SnippetScan | null }
   /** 札が集められなかった(#277 段②-b)。⚠ 「まだ」と区別する ── 文言が違う。 */
@@ -1285,6 +1338,7 @@ export type UserAction =
    */
   | { type: 'REFRESH_TASK_SCAN' }
   | { type: 'REFRESH_CONTACT_SCAN' }
+  | { type: 'REFRESH_CAPTURE_SCAN' }
   | { type: 'REFRESH_SNIPPET_SCAN' }
   /**
    * タイル設定を書き戻した ack(P8 段⑭)。⚠ **開いている body も差し替える**。
@@ -2001,6 +2055,13 @@ export type DomainEvent =
    */
   | { type: 'REQUEST_TASK_SCAN' }
   | { type: 'REQUEST_CONTACT_SCAN' }
+  /**
+   * 🔴 **録ったものを集める**(#683 段①)。⚠ **どれを読むかを載せる**
+   *   (`REQUEST_LAUNCHER_TILES` と同じ ── effect 層は実行時に state を見ない)。
+   * ⚠ 載せるのは**添付だけ** ── 全 entry の本文を読むと、タブを開くたびに
+   *   全文を舐めることになる(5,000 件持つ user には致命的)。
+   */
+  | { type: 'REQUEST_CAPTURE_ITEMS'; entries: Array<{ lid: string; title: string }> }
   | { type: 'REQUEST_SNIPPET_SCAN' }
   /** ⚠ **どれを読むかを載せる** ── effect 層は実行時に state を見ない(review L-6)。 */
   | {
@@ -2416,6 +2477,13 @@ function reduceCore(
            *   `selection` に対して既にやっている形と同じである(`keepMarks`)。
            */
           contactScan: keepContacts(state, sameCid, metas),
+          /**
+           * 🔴 **録ったものも同じ扱い**(#683 段①。上の `contactScan` と対)。
+           * ⚠ 丸ごと `null` にしない ── `SYS_BOOTED` は別タブが書くたびに飛ぶので、
+           *   捨てると一覧が「集めています…」へ落ちて**行が飛ぶ**。
+           * ⚠ 落とさないと、**消したノートの行が残って押しても何も起きない**。
+           */
+          captureItems: keepCaptures(state, sameCid, metas),
         },
         events: [
           ...(keepLid === null
@@ -2450,6 +2518,26 @@ function reduceCore(
            *   連絡先を使わない user に負わせない ── 予定・集計と同じ流儀)。
            */
           ...(state.contactScan === null ? [] : [{ type: 'REQUEST_CONTACT_SCAN' as const }]),
+          /**
+           * 🔴 **録ったものも頼み直す**(#683 段①。上の連絡先と対)。
+           * ⚠ 落とすだけでは、**取り込んだ録音が 1 件も現れない** ── 集め直しの
+           *   合図は「タブを開いたとき」しか無いので、開いたままの user には届かない。
+           * ⚠ 一度も開いていない user には撃たない(添付の本文の走査を、
+           *   この面を使わない user に負わせない ── 予定・連絡先と同じ流儀)。
+           */
+          ...(state.captureItems === null
+            ? []
+            : [
+                {
+                  type: 'REQUEST_CAPTURE_ITEMS' as const,
+                  /**
+                   * ⚠ **新しい `metas` / `order` で数える** ── `state`(古い方)から
+                   *   採ると、いま取り込んだ添付が 1 件も載らない
+                   *   (取込はこの枝を通るので、それが本命の場面である)。
+                   */
+                  entries: attachmentEntriesOf(order, metas),
+                },
+              ]),
         ],
       };
     }
@@ -2635,6 +2723,22 @@ function reduceCore(
       };
     case 'CONTACT_SCAN_FAILED':
       return { state: { ...state, contactScanFailed: true }, events: [] };
+    case 'SET_CAPTURE_ITEMS':
+      return {
+        state: { ...state, captureItems: action.items, captureScanFailed: false },
+        events: [],
+      };
+    case 'CAPTURE_SCAN_FAILED':
+      return { state: { ...state, captureScanFailed: true }, events: [] };
+    case 'SET_CAPTURE_PLAYING':
+      // ⚠ 同じ行をもう一度押したら**やめる**(押す口を 2 つ作らない)
+      return {
+        state: {
+          ...state,
+          capturePlayingLid: state.capturePlayingLid === action.lid ? null : action.lid,
+        },
+        events: [],
+      };
     /**
      * 🔴 **雛形は「集められなかった」を帯に出さない**(#196 / B-2)。
      *
@@ -3004,6 +3108,15 @@ function reduceCore(
      */
     case 'REFRESH_CONTACT_SCAN':
       return { state, events: [{ type: 'REQUEST_CONTACT_SCAN' }] };
+    /**
+     * 🔴 **録ったものを集め直す**(#683 段①)。⚠ **毎回要求する**が、前の一覧は
+     *   消さない(連絡先・アプリと同じ ── 集め直すたびに空白を出さない)。
+     */
+    case 'REFRESH_CAPTURE_SCAN':
+      return {
+        state,
+        events: [{ type: 'REQUEST_CAPTURE_ITEMS', entries: attachmentEntries(state) }],
+      };
     case 'REFRESH_SNIPPET_SCAN':
       return { state, events: [{ type: 'REQUEST_SNIPPET_SCAN' }] };
     case 'REFRESH_LAUNCHER_TILES':
@@ -5190,6 +5303,45 @@ function reduceCore(
     }
     case 'SMART_RESCAN':
       return { state, events: smartScanFor(state, action.lid) };
+    case 'SWAP_OPEN_ENTRY': {
+      const i = state.splitLids.indexOf(action.lid);
+      const old = state.selectedLid;
+      /**
+       * ⚠ **入れ替えられないときは、ただ開く**(3 通り)──
+       *   ①行き先が枠に居ない ②中央が空 ③同じもの。
+       * ⚠ そして **`folder` は枠に置けない**(`PIN_SPLIT_ENTRY` が断る)ので、
+       *   中央がフォルダなら入れ替えない ── 入れ替えると**枠が永久に空**になる。
+       */
+      if (
+        i < 0 ||
+        old === null ||
+        old === action.lid ||
+        state.entryMetas.get(old)?.archetype === 'folder'
+      )
+        return reduce(state, { type: 'SELECT_ENTRY', lid: action.lid });
+      const swapped = [...state.splitLids];
+      swapped[i] = old;
+      /**
+       * 🔑 **選択の遷移は `SELECT_ENTRY` に任せる**(§7:開く判定を 2 か所に書かない)──
+       *   ここがやるのは**枠の中身の差し替え**だけである。
+       * ⚠ 枠の本文は**入れ替えた側を捨て、入った側を頼む** ── 捨てないと、
+       *   降ろしたノートの本文が器に残り続ける(常駐が積み上がる)。
+       */
+      const r = reduce(
+        {
+          ...state,
+          splitLids: swapped,
+          splitBodies: dropSplitBody(state.splitBodies, action.lid),
+        },
+        { type: 'SELECT_ENTRY', lid: action.lid },
+      );
+      return {
+        state: r.state,
+        events: r.state.splitBodies.has(old)
+          ? r.events
+          : [...r.events, { type: 'REQUEST_SPLIT_BODY', lid: old }],
+      };
+    }
     case 'PIN_SPLIT_ENTRY': {
       const meta = state.entryMetas.get(action.lid);
       // ⚠ 居ないものは留めない(消えた lid を指す枠を作らない)
@@ -5523,9 +5675,21 @@ function reduceCore(
  * ⚠ 選ぶのは reducer 側 ── effect 層は実行時に state を見ない(review L-6)。
  */
 function attachmentEntries(state: AppState): Array<{ lid: string; title: string }> {
+  return attachmentEntriesOf(state.order, state.entryMetas);
+}
+
+/**
+ * 🔴 **並びと目録を直に受ける版**(#683 段①)。
+ * ⚠ `SYS_BOOTED` の枝は**まだ state に入れていない** `order` / `metas` を持つので、
+ *   `state` から採ると**いま取り込んだ添付が 1 件も載らない**。
+ */
+function attachmentEntriesOf(
+  order: readonly string[],
+  metas: ReadonlyMap<string, EntryMeta>,
+): Array<{ lid: string; title: string }> {
   const out: Array<{ lid: string; title: string }> = [];
-  for (const lid of state.order) {
-    const meta = state.entryMetas.get(lid);
+  for (const lid of order) {
+    const meta = metas.get(lid);
     if (meta?.archetype === 'attachment') out.push({ lid, title: meta.title });
   }
   return out;
@@ -5721,6 +5885,23 @@ function keepContacts(
   if (!sameCid) return null;
   const cards = scan.cards.filter((c) => metas.has(c.lid));
   return cards.length === scan.cards.length ? scan : { ...scan, cards };
+}
+
+/**
+ * 🔴 **消えたノートの録ったものを落とす**(#683 段①。`keepContacts` と同じ作法)。
+ * ⚠ 別 container なら全部捨てる ── lid の偶然衝突を持ち越さない。
+ * ⚠ 変化が無いなら**同じ参照**を返す(描画の指紋を無駄に壊さない)。
+ */
+function keepCaptures(
+  state: AppState,
+  sameCid: boolean,
+  metas: ReadonlyMap<string, EntryMeta>,
+): CaptureItem[] | null {
+  const items = state.captureItems;
+  if (items === null) return null;
+  if (!sameCid) return null;
+  const left = items.filter((i) => metas.has(i.lid));
+  return left.length === items.length ? items : left;
 }
 
 /**

@@ -625,8 +625,12 @@ select:focus-visible {
   min-width: max-content;
   /* ⚠ 詰めるのは**下限**であって見た目ではない ── `flex: 1 1 auto` で伸びるので、
    *   余りが有る幅では左右に余白が付く。効くのは「あと少しで折り返す」幅だけで、
-   *   実測ではここが 2px か 8px かで **1024px が 1 段か 2 段か**を分けた。 */
-  padding: 0 2px;
+   *   実測ではここが 2px か 8px かで **1024px が 1 段か 2 段か**を分けた。
+   * 🔴 **2px → 1px にした**(2026-09-09、#683 段① で 6 枚目「音/動画」が加わった)。
+   *   ⚠ 6 枚では 2px のとき **1366px で 2 段**になる(実測)── 1px なら 1 段に戻る。
+   *   ⚠ 余りが有る幅では `flex` が伸ばすので、**見た目は 1px も変わらない** ──
+   *   変わるのは「あと少しで折り返す」幅だけである。 */
+  padding: 0 1px;
   border: none;
   border-radius: 0;
   justify-content: center;
@@ -3634,6 +3638,71 @@ li[data-pkc-row-slot] {
   flex-direction: column;
   gap: var(--s2);
   min-height: 0;
+}
+
+/* ══ 録ったもの(#683 段①、2026-09-09)══════════════════════════
+ * 🔴 **左の列と中央の面(別窓)に同じ規則**(連絡先と同じ形。user 裁定 2026-09-04
+ *   「アプリの基本は別窓」+ #300「中央を占有するな」を両立させる置き方)。
+ * ⚠ 左の列は `minmax(200px, 18vw)` なので**縦に積む** ── 名前・種類・押し所を
+ *   横に並べると 200px で名前が切れる。 */
+[data-pkc-browse-pane='captures'],
+[data-pkc-view-pane='captures'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s2);
+  min-height: 0;
+  overflow: auto;
+}
+[data-pkc-field='captures-note'] {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+[data-pkc-field='captures-list'] {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: var(--border);
+}
+[data-pkc-field='captures-list'] > li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--s2);
+  background: var(--surface);
+}
+/* ⚠ 名前は**行いっぱいの押せる場所**にする(`contact-name` と同じ理由 ──
+ * 200px の列で字だけを的にすると狙いにくい)。 */
+[data-pkc-field='capture-name'] {
+  justify-content: flex-start;
+  width: 100%;
+  height: auto;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--fg);
+  font-weight: 600;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+[data-pkc-field='capture-about'] {
+  color: var(--muted);
+  font-size: 12px;
+}
+/* ⚠ 押し所は**左寄せの小さいボタン**(行いっぱいにすると名前と的が競合する)。 */
+[data-pkc-field='capture-play'],
+[data-pkc-field='capture-stop'] {
+  align-self: flex-start;
+}
+/* 🔴 **器からはみ出させない** ── 動画は固有寸法(既定 300×150 以上)を持つので、
+ * 200px の列では**横スクロールが出る**。音は高さが固定なので幅だけで足りる。 */
+[data-pkc-field='capture-media'] {
+  width: 100%;
+  max-width: 100%;
 }
 
 /* ══ 探す面(#680、2026-09-05)═════════════════════════════════════

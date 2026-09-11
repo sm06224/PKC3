@@ -50,6 +50,9 @@ export function openView(dispatcher: Dispatcher, mode: ViewMode): boolean {
   // 🔴 連絡先も同じ流儀(#278 段③)── 開いたときに集める(boot では集めない)
   if (state.viewMode === 'contacts' && mode === 'contacts')
     dispatcher.dispatch({ type: 'REFRESH_CONTACT_SCAN' });
+  // 🔴 録ったものも同じ流儀(#683 段①)── 開いたときに集める(boot では集めない)
+  if (state.viewMode === 'captures' && mode === 'captures')
+    dispatcher.dispatch({ type: 'REFRESH_CAPTURE_SCAN' });
   return state.viewMode === mode;
 }
 

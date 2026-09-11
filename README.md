@@ -105,6 +105,7 @@ npm run lint       # eslint src tests build scripts
 
 | いつ | 何を |
 |---|---|
-| PR / main push | `audit`(依存の脆弱性監査 ── prod 依存の high 以上で止める)/ `verify`(型 / lint / unit / build / 生成物の検品)/ `smoke`(実ブラウザ。spec を 3 つの shard に割って並列)── 3 種を**並列**に。どれも 10 分の timeout が速度予算の tripwire |
+| PR / main push | `audit`(依存の脆弱性監査 ── prod 依存の high 以上で止める)/ `verify`(型 / lint / unit / build / 生成物の検品)── 2 種を**並列**に。どちらも 10 分の timeout が速度予算の tripwire。🔴 **実ブラウザの全量 smoke はここに無い**(下の行) |
+| 🔴 押したときだけ(`workflow_dispatch`) | `Smoke (手動)`(`.github/workflows/smoke.yml`)── 実ブラウザの**全量**を 3 つの shard に割って並列。⚠ **自動では走らない**(user 指示 2026-09-09「自動実行は禁止 / 全て任意起動」)ので、着地の直前に Actions の **Run workflow** を押す |
 | nightly | smoke を**2 つの Chromium ビルド**で / 図の全数(マニュアルの 22 種が焼けるか)/ product ビルドの検品と smoke(PR gate が触らない成果物)/ Rust wasm の再ビルド一致 / probe 6 本(`Probe — store` / `Probe — sahpool` / `Probe — sidebar` / `Probe — editor / live` / `Probe — editor / split` / `Probe — schedule`)/ 赤い間は issue に積む |
 | tag(`v*`)または `workflow_dispatch` | release(SBOM / provenance / `pkc3-dist.zip` ── 中に `portable-template.html` も入る)→ Pages の `/` が入れ替わる |

@@ -48,6 +48,7 @@ export interface LauncherTile {
     | 'dual'
     | 'schedule'
     | 'contacts'
+    | 'captures'
     | 'search'
     | 'sql'
     | 'manual'
@@ -235,6 +236,17 @@ export function contactsTile(): LauncherTile {
 }
 
 /**
+ * 🔴 **録ったものの組み込みタイル**(#683 段①。user 要望 2026-09-03
+ * 「時間を測る・画面録画・録音も…組み込みアプリにしたい」)── 連絡先と同じ形。
+ * 左の列の「録ったもの」タブは残し、同じ面を別窓で開く 2 つ目の入口である。
+ */
+export const CAPTURES_TILE_LID = 'builtin:captures';
+
+export function capturesTile(): LauncherTile {
+  return { lid: CAPTURES_TILE_LID, title: '音/動画', group: BUILTIN_GROUP, kind: 'captures' };
+}
+
+/**
  * 🔴 **探す面の組み込みタイル**(#680。user 要望「検索専用の組み込みアプリ」/
  * 裁定 2026-09-04「アプリの基本は別窓」)。
  *
@@ -359,6 +371,11 @@ export function withBuiltinTiles(
    */
   builtin.push(sqlTile());
   /**
+   * ⚠ **録ったものも末尾**(#683 段①)── SQL と同じ判断で、
+   *   足しても**既に在るタイルの位置が 1 つも動かない**。
+   */
+  builtin.push(capturesTile());
+  /**
    * 🔴 **組み込みは末尾へ「収納」する**(#531 段② / #281。user 指示 2026-08-28
    * 「組み込みアプリをグループに**収納して**整理する」)。
    *
@@ -392,6 +409,7 @@ export const BUILTIN_KINDS: ReadonlySet<LauncherTile['kind']> = new Set([
   'dual',
   'schedule',
   'contacts',
+  'captures',
   'search',
   'sql',
   'manual',

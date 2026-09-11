@@ -355,7 +355,8 @@ describe('添付を開いていたノートへ入れる(#666)', () => {
     expect(appendsSeen, '追記できない種類なのに本文へ書いた').toHaveLength(0);
     expect(h.d.getState().selectedLid, '開いていた添付へ戻っていない').toBe(first);
     // ⚠ #668 A で字が変わった ── 「追記できない種類」ではなく、開いている物の種類を名指す
-    expect(h.d.getState().notice ?? '', '黙って終わっている').toContain('『添付』');
+    // ⚠ #809-3 で括弧を外した ── 種類には付けない(名前と見分けられなくなる)
+    expect(h.d.getState().notice ?? '', '黙って終わっている').toContain('開いているのは添付なので');
   });
 
   /**
@@ -387,7 +388,7 @@ describe('添付を開いていたノートへ入れる(#666)', () => {
     expect(appendsSeen, 'フォルダの本文へ書いた').toHaveLength(0);
     // ① 字 ── 種類の名前は `archetypeLabel`、入れられる種類は `appendableKindsLabel` から来る
     expect(st.notice).toBe(
-      '「見積.pdf」を添付にしました(開いているのは『フォルダ』なので、本文には入れていません。本文に入れられるのはノートとログだけです)',
+      '「見積.pdf」を添付にしました(開いているのはフォルダなので、本文には入れていません。本文に入れられるのはノートとログだけです)',
     );
     // ② 身元 ── 作られた添付を指し、押すと選ばれる
     const attached = [...st.entryMetas.values()].find((m) => m.archetype === 'attachment');
@@ -790,6 +791,44 @@ describe('落とした所へ入れる(#684 段④)', () => {
     expect(rows.indexOf('パン'), '「パン」の下(= 末尾寄り)へ落ちた').toBeGreaterThan(i);
     // ⚠ **どこに入ったかを字で言う**(押した場所と文言が対 ── 着地前レビュー G)
     expect(h.d.getState().notice ?? '', 'どこに入ったかを言っていない').toContain('落とした所');
+  });
+
+  /**
+   * 🔴 **横に枠を留めているときは、中央へ入った回も名前を言う**(#809-2、2026-09-09)。
+   *
+   * ## 直す前、画面で何が起きていたか
+   *
+   * 中央のノートへ入った回の字は「「猫.png」を落とした所に入れました」で、
+   * **どのノートかを 1 文字も言わなかった** ── 枠を 2〜3 枚並べていると、
+   * 画面には本文が 3 つ出ているので、**どの本文に入ったのか字から読めない**。
+   */
+  it('🔴 枠を留めているときは、中央へ入った回も名前を言う', async () => {
+    const h = withBody();
+    h.d.dispatch({ type: 'CREATE_ENTRY', archetype: 'text', lid: 'n2', title: 'さきの予定', body: 'あ\n', edit: false });
+    h.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    h.d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'n2' });
+    expect(h.d.getState().splitLids, '台の前提: 枠が留まっていない').toEqual(['n2']);
+    await attachFiles(h.d, h.deps, [png('猫.png', 'a')], '', AFTER_MILK);
+    await tick();
+    expect(
+      h.d.getState().notice ?? '',
+      '本文が 3 つ出ているのに、どれに入ったかを言っていない',
+    ).toContain('『買い物メモ』');
+  });
+
+  /**
+   * 🔴 **対照群 ── 枠を留めていないときは、1 語も増やさない**。
+   * ⚠ これが無いと「いつも名前を言う」実装(推薦 B)と区別がつかない ──
+   *   本文が 1 つしか無いなら「どれに入ったか」は自明で、要らない字である。
+   */
+  it('🔴 枠を留めていなければ、名前は出ない(字を増やさない)', async () => {
+    const h = withBody();
+    expect(h.d.getState().splitLids, '台の前提: 枠が留まっている').toEqual([]);
+    await attachFiles(h.d, h.deps, [png('猫.png', 'a')], '', AFTER_MILK);
+    await tick();
+    const said = h.d.getState().notice ?? '';
+    expect(said, '入った知らせが出ていない(空振り)').toContain('落とした所に入れました');
+    expect(said, '枠を使わない user にまで名前が出ている').not.toContain('『買い物メモ』');
   });
 
   it('🔴 ② まとめて落とした 2 枚目は 1 枚目の下(落とした順と並びが揃う)', async () => {

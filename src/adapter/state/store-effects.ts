@@ -49,6 +49,10 @@ import type {
 // ⚠ 「未設定」の綴りは features 側の 1 か所(`''`)── ここで書き写さない(§7)
 import { TAGS_KEY, UNSET as QUERY_UNSET } from '@features/query/group-by';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
+import {
+  captureItemsFrom,
+  type CaptureSource,
+} from '@features/capture/capture-item';
 import { collectEntryTags } from '@features/flavor/entry-tags';
 import { MAX_TAGS, sameTag } from '@features/flavor/tags';
 import type { TaskScan } from '@features/schedule/task-cards';
@@ -1625,6 +1629,41 @@ export function connectStoreEffects(
           }
         });
         break;
+      /**
+       * 🔴 **録ったものを集める**(#683 段①)。
+       *
+       * 🔑 **新しい worker op は要らない** ── `REQUEST_LAUNCHER_TILES` と同じ形で、
+       *   **添付だけ**の本文を `getBodies` の**1 往復**で読む。
+       *   ⚠ `getBody` を件数ぶん呼ぶと、その回数だけ単一 queue の store が塞がる。
+       * ⚠ 判定(音か動画か)は `features/capture/capture-item.ts` が持つ ──
+       *   この層に条件を書くと、拡張子で代用する誤りが**test の届かない所**へ入る。
+       */
+      case 'REQUEST_CAPTURE_ITEMS':
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            const titles = new Map(ev.entries.map((e) => [e.lid, e.title]));
+            const rows = await store.getBodies(ev.entries.map((e) => e.lid));
+            if (disposed) return;
+            const sources: CaptureSource[] = [];
+            for (const row of rows) {
+              const title = titles.get(row.lid);
+              if (title !== undefined) sources.push({ lid: row.lid, title, body: row.body });
+            }
+            dispatcher.dispatch({
+              type: 'SET_CAPTURE_ITEMS',
+              items: captureItemsFrom(sources),
+            });
+          } catch {
+            /**
+             * ⚠ **帯を出さず、面の中で言う**(連絡先と同じ)── 集め直しは
+             *   タブを開くたびに走るので、赤い帯を出すと**開くたびに出る**。
+             *   「まだ」と「駄目だった」の区別は面が `captureScanFailed` で出す。
+             */
+            if (!disposed) dispatcher.dispatch({ type: 'CAPTURE_SCAN_FAILED' });
+          }
+        });
+        break;
       case 'REQUEST_LAUNCHER_TILES':
         enqueue(async () => {
           if (disposed) return;
@@ -2356,8 +2395,15 @@ export function connectStoreEffects(
                */
               message:
                 ev.to.toBefore === null
-                  ? `本文の塊を「${ev.to.title}」のいちばん下へ持っていきました(戻すには、そこで同じ ⠿ を掴んで持ち帰ってください)`
-                  : `本文の塊を「${ev.to.title}」へ持っていきました(戻すには、そこで同じ ⠿ を掴んで持ち帰ってください)`,
+                  /**
+                   * 🔴 **ノートの名前は `『』`**(#809-3、2026-09-09。user 推薦 A)。
+                   * ⚠ 直す前はここだけ `「」` で、file を落とした回の知らせ
+                   *   (`asset-into-note.ts`)は `『』` だった ── **同じ「行き先の
+                   *   ノートの名前」なのに括弧が 2 系統**あった。
+                   * 🔑 揃え方:**ノートの名前 = `『』` / ファイル名・字の名前 = `「」`**。
+                   */
+                  ? `本文の塊を『${ev.to.title}』のいちばん下へ持っていきました(戻すには、そこで同じ ⠿ を掴んで持ち帰ってください)`
+                  : `本文の塊を『${ev.to.title}』へ持っていきました(戻すには、そこで同じ ⠿ を掴んで持ち帰ってください)`,
               open: ev.to.lid,
             });
           } catch (e) {

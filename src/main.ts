@@ -955,15 +955,39 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   //    `SettingsRenderer.syncTheme()` の仕事 ── ここに 2 本目を置かない
   //    (P8 段㉕:帯を探す死んだ同期が残っており、常に空振りしていた)
   // 🔑 左の列は**探し方**で切り替わる(P8 段⑤)。中央は常に「開いているノート」
-  const browse = new BrowseRouter(regions.sidebar, regions.browseHost, appBrowseMode.get());
+  // assets: bytes は IDB Blob(sqlite には meta のみ)。表示は lend/dispose 規律
+  // ⚠ **左の列より先に作る** ── 録ったものの面(#683 段①)が中身を借りるので、
+  //    渡せないと「聞く」が出ない(押せない口を出すより、出さないほうが正しい)
+  const blobs = new AssetBlobStore();
+  /**
+   * 🔴 **借りる口は 1 つ**(#683 段①)。⚠ 面ごとに object literal を書くと、
+   *   cid の束ね方が 2 か所に散る(§7)── 中央の面も左の列もこれを使う。
+   */
+  const assetLender = {
+    lend: (key: string) => blobs.lendObjectUrl(cid, key),
+    getBlob: (key: string) => blobs.get(cid, key),
+  };
+  /**
+   * 🔴 **借り終えたら面を描き直す口**(#683 段①)。⚠ 借りは非同期なので、
+   *   届いた時点で誰かが `render` を呼び直さないと**器が出ない**。
+   * ⚠ `browse` / `center` はここより後で組まれるので、繋がるまでは何もしない口
+   *   にしておく(`repaintStatus` / `repaintOnLayout` と同じ形)。
+   */
+  let repaintPanes: () => void = () => undefined;
+  const browse = new BrowseRouter(
+    regions.sidebar,
+    regions.browseHost,
+    appBrowseMode.get(),
+    undefined,
+    assetLender,
+    () => repaintPanes(),
+  );
   const inspector = new InspectorRenderer(regions.inspector);
   /**
    * 🔴 **既定はフォルダ、前回の選択を覚える**(#240 段⑤。user 指示 2026-08-17)。
    * ⚠ 既定は `browse-mode.ts` 1 か所が持つ ── ここに書くと、また 4 か所に散る。
    */
   let browseMode: BrowseMode = appBrowseMode.get();
-  // assets: bytes は IDB Blob(sqlite には meta のみ)。表示は lend/dispose 規律
-  const blobs = new AssetBlobStore();
   /**
    * 🔴 **可搬単一 HTML に焼かれた添付を器へ戻す**(#400 段④)。
    *
@@ -1027,10 +1051,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const center = new CenterRouter(
     regions.detail,
     undefined,
-    {
-      lend: (key) => blobs.lendObjectUrl(cid, key),
-      getBlob: (key) => blobs.get(cid, key),
-    },
+    assetLender,
     markdown,
     /**
      * 🔴 **ライブエディタの本文書込**(2026-08-05。S5)。renderer は dispatch
@@ -1047,6 +1068,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   (この file はどの test からも実行されない ── CLAUDE.md §2)。
      */
     () => storageWhereLine(init.vfs, init.fallbackReason),
+    // 🔴 録ったものの中身を借り終えた合図(#683 段①)── 左の列と同じ口を渡す
+    () => repaintPanes(),
   );
   // いま居る場所の印(変わったときだけ属性を触る)
   let markedView: string | null = null;
@@ -1081,6 +1104,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   (`dual-filer.ts` の `paintSwitch` が `appPhone` に聞く)。
    */
   repaintOnLayout = () => center.render(dispatcher.getState());
+  /**
+   * 🔴 **ここで初めて繋がる**(#683 段①)── 録ったものの中身が借り終えたときに
+   *   呼ばれる。⚠ **両方描き直す** ── 同じ面が左のタブと別窓の 2 か所に在りうる
+   *   ので、片方だけ描くと**もう片方は「聞く」を押したまま器が出ない**。
+   */
+  repaintPanes = () => {
+    const st = dispatcher.getState();
+    browse.render(st, browseMode);
+    center.render(st);
+  };
   dispatcher.onState((state) => {
     browse.render(state, browseMode);
     center.render(state);

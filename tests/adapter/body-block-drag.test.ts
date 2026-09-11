@@ -897,6 +897,53 @@ describe('外から落とした file は落とした所へ入る(#684 段④)', 
     expect(got.calls[0]![2], '本文の外なのに位置が渡った').toBeUndefined();
   });
 
+  /**
+   * 🔴 **枠の題名・帯・余白へ落としても、その枠のノートへ入る**(#809-1、2026-09-09)。
+   *
+   * ## 直す前、画面で何が起きていたか
+   *
+   * 留めた枠を狙って**上のほう**(題名「さき」や `← 左で開く` の帯)へ写真を落とすと、
+   * 線は出ず、写真は**中央のノートのいちばん下**に入った ──
+   * ⚠ **枠 1 つの中で、数 px 上か下かで行き先のノートが変わる**のに、
+   *   外したことが画面に 1 ドットも出ない。
+   */
+  it('🔴 枠の帯(本文の器より上)へ落としても、その枠のノートの末尾へ入る', () => {
+    const got = at();
+    const s = setup({ attachFiles: (...a) => void got.calls.push(a) });
+    teardown = s.unbind;
+    const body2 = '# さき\n\n牛乳\n\nパン\n';
+    const p = pinned(s, body2);
+    // 枠の帯(題名の行)── **本文の器より上**に在る
+    const bar = document.createElement('div');
+    bar.setAttribute('data-pkc-field', 'split-title');
+    p.frame.prepend(bar);
+    rect(bar, 0, 24);
+    // ⚠ 器は帯の**下**(y=24〜)── 直す前はここより上を捨てていた
+    rect(p.host, 24, 300);
+    const dt = filesDt([new File(['x'], '猫.png', { type: 'image/png' })]);
+    bar.dispatchEvent(dragEv('drop', dt, 10));
+    expect(got.calls, '添付へ渡っていない').toHaveLength(1);
+    const at0 = got.calls[0]![2] as { lid: string; toBefore: number } | undefined;
+    expect(at0, '枠の帯へ落としたのに位置が渡っていない(中央の末尾へ落ちる)').toBeDefined();
+    expect(at0!.lid, '中央のノートへ入れている(狙った枠ではない)').toBe('n2');
+    // ⚠ 末尾(最後の塊の後)── 帯には「どの塊か」が無いので、その枠の**いちばん下**
+    expect(at0!.toBefore, 'その枠のいちばん下ではない').toBe(body2.split('\n').length - 1);
+  });
+
+  /** 🔴 **対照群 ── 面の外(一覧)は今までどおり受けない**(何でも受けるようにしていない)。 */
+  it('🔴 面の外(一覧)は、これまでどおり位置を渡さない', () => {
+    const got = at();
+    const s = setup({ attachFiles: (...a) => void got.calls.push(a) });
+    teardown = s.unbind;
+    pinned(s);
+    const outside = document.createElement('div');
+    outside.setAttribute('data-pkc-region', 'entry-list');
+    s.root.append(outside);
+    const dt = filesDt([new File(['x'], 'a.png', { type: 'image/png' })]);
+    outside.dispatchEvent(dragEv('drop', dt, 5));
+    expect(got.calls[0]![2], '面の外なのに位置が渡った').toBeUndefined();
+  });
+
   it('🔴 囲みは丸ごと 1 つの落とし先 ── 中へは入らない(書く側の門と同じ 1 本)', () => {
     const got = at();
     const s = setup({ attachFiles: (...a) => void got.calls.push(a) });

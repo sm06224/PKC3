@@ -460,8 +460,14 @@ describe('nightly の job と step', () => {
    * ⚠ 3 つで 1 組:① spec が環境変数を読んでいない ② `test.skip` を持たない
    *   ③ **repo のどこも `PKC3_HEAVY` を渡していない**(nightly に step が残ったまま
    *   だと、同じ検査を夜に 2 度走らせることになる = 半端な移行を止める)。
+   *
+   * ⚠ **2026-09-09 訂正:「PR gate で走る」はもう事実ではない。** user 指示
+   *   「**自動実行は禁止したはず / 約束では全て任意起動のはず**」で全量 smoke を
+   *   `ci.yml` から出したので、22 種が焼かれるのは **夜(`nightly.yml`)** と
+   *   **手で押した `smoke.yml`** である。🔑 **この検査が守る主張は変わらない** ──
+   *   見ているのは「走る場所」ではなく「**回る回に、門で止まっていないこと**」。
    */
-  it('🔴 図の全数は PR gate で走る(環境変数の門を持たない)', () => {
+  it('🔴 図の全数は門を持たない(回る回では必ず焼かれる)', () => {
     const spec = readFileSync('tests/smoke/mermaid-all.smoke.spec.ts', 'utf-8');
     // ⚠ 空振り防止 ── spec そのものが在って、22 種を焼く主張を持っていること
     expect(spec, '図の全数の spec が読めない').toContain('MERMAID_FORMS');
@@ -701,15 +707,24 @@ describe('office-wasm のパッチ', () => {
 });
 
 /**
- * 🔴 **PR gate は 2 job のまま**(2026-08-18)。
+ * 🔴 **PR gate は速い lane だけ**(2026-08-18 → 2026-09-09)。
  *
- * ⚠ 直す前は smoke が `verify` に同居しており、`playwright install --with-deps` が
- * **22 秒 / 291 秒 / 390 秒**(3 回測った)とぶれるせいで、**10 分の speed budget を
- * 2 度踏んで job ごと cancel** された ── 緑だったはずの PR が赤に見えた。
- * 🔑 守る主張は「**遅い install が速い lane の budget を食わない**」なので、
- *   検査も**その形**で書く(job 数だけ数えても、install が verify に戻れば素通りする)。
+ * ⚠ 2026-08-18 の時点では smoke が `verify` に同居しており、
+ * `playwright install --with-deps` が **22 秒 / 291 秒 / 390 秒**(3 回測った)と
+ * ぶれるせいで、**10 分の speed budget を 2 度踏んで job ごと cancel** された ──
+ * 緑だったはずの PR が赤に見えた。だから別 job へ割った。
+ *
+ * 🔴 **2026-09-09、その smoke ごと PR gate から出した**(user 指示。不可侵):
+ *
+ * > 「**自動CIにフルスモークテスト入ってない？/ 自動実行は禁止したはず /
+ * >   約束では全て任意起動のはず**」
+ *
+ * 🔑 だからこの describe が守る主張は 2 つある:
+ *   ① **遅い install が速い lane の budget を食わない**(2026-08-18 の教訓 ──
+ *      job 数だけ数えても、install が verify に戻れば素通りするので形で書く)
+ *   ② 🔴 **全量 smoke は push / PR では起動しない**(2026-09-09 の指示)
  */
-describe('PR gate の形(2026-08-18)', () => {
+describe('PR gate の形(2026-08-18 / 2026-09-09)', () => {
   /**
    * ⚠ **コメントを落としてから見る**(1 稿目で踏んだ)。job の切り出しは
    * 「次の job の見出しまで」なので、**次の job の直前に置いた解説コメント**が
@@ -722,6 +737,8 @@ describe('PR gate の形(2026-08-18)', () => {
       .filter((l) => !/^\s*#/.test(l))
       .join('\n');
   const CI = codeOnly(readFileSync(join(DIR, 'ci.yml'), 'utf8'));
+  /** 🔴 全量 smoke の置き場(2026-09-09 に `ci.yml` から出した ── 任意起動だけ)。 */
+  const SMOKE = codeOnly(readFileSync(join(DIR, 'smoke.yml'), 'utf8'));
   /** job 名 → その job の本文(次の job の見出しまで)。 */
   const jobsOf = (text: string): Map<string, string> => {
     const body = text.slice(text.indexOf('\njobs:'));
@@ -745,16 +762,54 @@ describe('PR gate の形(2026-08-18)', () => {
      *   🔑 分けると並列に走るので**壁時計は伸びず**、赤が出たときに
      *   「依存の話か、コードの話か」が **job の名前で分かる**(1 job = 1 主張)。
      */
-    expect([...jobs.keys()], 'job の切り出しが壊れている').toEqual([
-      'audit',
-      'verify',
-      'smoke',
-    ]);
-    expect(jobs.get('smoke'), 'smoke に install が無い').toContain('playwright install');
+    expect([...jobs.keys()], 'job の切り出しが壊れている').toEqual(['audit', 'verify']);
+    // ⚠ 空振り防止 ── 本文が取れていない形で「含まない」と言わない(下の 2 つは
+    //   `not.toContain` なので、空文字でも通ってしまう)
+    expect(jobs.get('verify'), 'verify の本文が取れていない').toContain('npm run typecheck');
     expect(jobs.get('verify'), '遅い install が速い lane へ戻っている').not.toContain(
       'playwright install',
     );
     expect(jobs.get('verify'), 'smoke が速い lane へ戻っている').not.toContain('test:smoke');
+    // 🔴 移した先に install が在る(出しただけで壊れていないこと)
+    expect(jobsOf(SMOKE).get('smoke'), 'smoke.yml に install が無い').toContain(
+      'playwright install',
+    );
+  });
+
+  /**
+   * 🔴 **全量 smoke は「押したときだけ」走る**(user 指示 2026-09-09。不可侵)。
+   *
+   * > 「**自動CIにフルスモークテスト入ってない？/ 自動実行は禁止したはず /
+   * >   約束では全て任意起動のはず**」
+   *
+   * ⚠ 直す前は `ci.yml` の `smoke` job が **PR への push / main への push のたび**に
+   *   全量を回していた ── 同じ日の「**改修一件で増えるテストが毎ターンの負荷に
+   *   積み上がる / o(n2) を回避しろ**」の CI 側の実体である。
+   *
+   * 🔑 **見るのは file 名ではなく「引き金」である**(CLAUDE.md「guard を file 名指しで
+   *   書かない」)── `ci.yml` に戻す形だけを止めても、`pages.yml` や新しい file に
+   *   書けば素通りする。だから **`test:smoke` を実行する workflow を全数走査**して、
+   *   その `on:` に `push` / `pull_request` が無いことを見る。
+   * ⚠ `schedule` は落とさない ── 夜(`nightly.yml`)は user 自身が決めた
+   *   「重い検証の受け皿」であり、**毎ターンの負荷ではない**。ここまで止めると
+   *   「赤が届く先」(#221)ごと消える。
+   * ⚠ 見るのは**実行する行**(`codeOnly`)── この test の解説にも、workflow の
+   *   注記にも `test:smoke` の字が在るので、コメントを落とさないと必ず落ちる。
+   */
+  it('🔴 全量 smoke は push / PR では起動しない(任意起動と夜だけ)', () => {
+    let seen = 0;
+    for (const file of readdirSync(DIR).filter((f) => /\.ya?ml$/.test(f))) {
+      const text = codeOnly(readFileSync(join(DIR, file), 'utf8'));
+      if (!text.includes('test:smoke')) continue;
+      seen += 1;
+      const head = text.slice(text.indexOf('\non:'), text.indexOf('\njobs:'));
+      expect(head, `${file}: on: の塊が読めていない`).toContain('workflow_dispatch');
+      for (const trigger of ['push:', 'pull_request:'])
+        expect(head, `${file} が ${trigger} で全量 smoke を自動起動する`).not.toContain(trigger);
+    }
+    // ⚠ 空振り防止は**等値**にする ── 「1 件以上」だと、全量を回す口が
+    //   1 つ増えても気づけない(増やすなら、ここを直しながら考えること)
+    expect(seen, '全量を回す workflow の数が変わった(smoke.yml / nightly.yml の 2 つ)').toBe(2);
   });
 
   /**
@@ -772,8 +827,9 @@ describe('PR gate の形(2026-08-18)', () => {
    *   片方だけ直すのがまさに事故の形である。
    */
   it('🔴 smoke の shard は、全部合わせて全量になる', () => {
-    const jobs = jobsOf(CI);
-    const smoke = jobs.get('smoke') ?? '';
+    // ⚠ 2026-09-09: 見る先が `ci.yml` から `smoke.yml` へ移った(任意起動)。
+    //   守る主張は同じ ── **割っても 1 件も減らない**。
+    const smoke = jobsOf(SMOKE).get('smoke') ?? '';
     // 空振り防止 ── job が取れていない形で「一致した」と言わない
     expect(smoke, 'smoke の本文が取れていない').toContain('test:smoke');
 
