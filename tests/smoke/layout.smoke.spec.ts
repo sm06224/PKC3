@@ -756,14 +756,29 @@ test('🔴 図案つきボタンの高さが揃っている', async ({ page }) =
   const sizes = await page.evaluate(() =>
     [...document.querySelectorAll('[data-pkc-region="collection-bar"] button')].map((b) => ({
       h: Math.round(b.getBoundingClientRect().height),
-      // ⚠ 図案は **SVG** になった(P9 段③)── `textContent` は空なので、
-      //    「描かれている物が在る」を **svg の path 数**で見る(空振り防止の要)
-      icon: (b.querySelector('[data-pkc-icon] svg')?.querySelectorAll('path').length ?? 0) > 0,
+      /**
+       * ⚠ 図案は **書体の 1 文字**になった(#770 段①)── 器の `textContent` は**空**で、
+       *   絵を出しているのは CSS の `::before` である。だから**規則が焼かれているか**を
+       *   `::before` の中身で見る(属性が在るだけでは、焼き忘れた日に空振りする)。
+       * 🔴 **「描かれている」とは書かない**(2026-09-11、着地前レビュー 7)── この帯の
+       *   器は `app.css` の `[data-pkc-region='collection-bar'] [data-pkc-icon]` で
+       *   **`display: none`** である(狭い帯なので図案を出さない)。⚠ `::before` の
+       *   `content` は `display: none` でも計算されるので値は返るが、
+       *   **画面には 1 ドットも出ていない**。
+       * 🔑 ここが守るのは「**この帯のボタンが全部同じ高さか**」であって、
+       *   絵が見えることではない ── 見えることは `icon-font.smoke.spec.ts` が見る。
+       */
+      icon: ((): boolean => {
+        const span = b.querySelector('[data-pkc-icon]');
+        if (span === null) return false;
+        const content = getComputedStyle(span, '::before').content;
+        return content !== '' && content !== 'none' && content !== 'normal';
+      })(),
     })),
   );
   expect(sizes.length).toBeGreaterThanOrEqual(5);
-  // ① 図案が**実際に入っている**(空振り防止 ── 図案なしなら高さは当然揃う)
-  expect(sizes.every((s) => s.icon), '図案の入っていないボタンがある').toBe(true);
+  // ① 図案の**規則が焼かれている**(空振り防止 ── 器ごと無ければ高さは当然揃う)
+  expect(sizes.every((s) => s.icon), '図案の規則が当たっていないボタンがある').toBe(true);
   // ② 高さが**全部同じ**
   expect(new Set(sizes.map((s) => s.h)).size, `高さがばらついている: ${JSON.stringify(sizes.map((s) => s.h))}`).toBe(1);
 });
@@ -1387,7 +1402,16 @@ test('🔴 フォルダ面は行の頭に種別、右端に更新日を出す', 
       e ? Math.round(e.getBoundingClientRect().width) : -1;
     return {
       cellWidths: cells.map((c) => w(c)),
-      chip: tr.querySelector('[data-pkc-chip] svg path') !== null,
+      /**
+       * ⚠ 図案は**書体の 1 文字**になった(#770 段①)ので `svg path` はもう無い。
+       * 🔑 「絵が出ている」は **`::before` の中身**で見る(規則が焼かれている証拠)。
+       */
+      chip: ((): boolean => {
+        const c = tr.querySelector('[data-pkc-chip]');
+        if (c === null) return false;
+        const v = getComputedStyle(c, '::before').content;
+        return v !== '' && v !== 'none' && v !== 'normal';
+      })(),
       last: cells[cells.length - 1]?.textContent ?? '',
     };
   });
@@ -1484,14 +1508,24 @@ test('🔴 新規の分割ボタン: 選ぶと文言・図案・Ctrl+N の対象
   await expect(run.locator('[data-pkc-field="label"]')).toHaveText('+ ノート');
   expect(await menu.isVisible(), '一覧が最初から開いている').toBe(false);
 
-  // ① ▼ で開いて「表」を選ぶ → 文言と図案が変わり、一覧は畳まれる
-  const iconBefore = await run.locator('[data-pkc-icon] svg path').first().getAttribute('d');
+  /**
+   * ① ▼ で開いて「表」を選ぶ → 文言と図案が変わり、一覧は畳まれる。
+   *
+   * ⚠ 図案は **書体の 1 文字**になった(#770 段①)ので、`svg path` の `d` はもう無い。
+   * 🔑 見るのは **`::before` が出している字** ── user が実際に見ている絵そのものである
+   *   (器の属性だけ見ると、規則が焼かれていない日に「変わった」と読めてしまう)。
+   */
+  const glyph = async (): Promise<string> =>
+    run.locator('[data-pkc-icon]').first().evaluate((el) => getComputedStyle(el, '::before').content);
+  const iconBefore = await glyph();
   await clickReal(page, '[data-pkc-field="create-pick"]');
   expect(await menu.isVisible(), '▼ を押しても一覧が出ない').toBe(true);
   await clickReal(page, '[data-pkc-region="create-menu"] [data-pkc-archetype="spreadsheet"]');
   await expect(run.locator('[data-pkc-field="label"]')).toHaveText('+ 表');
   expect(await menu.isVisible(), '選んだのに一覧が閉じない').toBe(false);
-  const iconAfter = await run.locator('[data-pkc-icon] svg path').first().getAttribute('d');
+  const iconAfter = await glyph();
+  // ⚠ 空振り防止 ── 絵が出ていること(両方 `none` なら「違わない」で緑になる)
+  expect(iconBefore, '図案が 1 つも出ていない(台の空振り)').not.toBe('none');
   expect(iconAfter, '図案が種類に追従していない').not.toBe(iconBefore);
 
   /**

@@ -1303,9 +1303,27 @@ describe('README と実体の突合(#696)', () => {
       expect(README, `README に「${p}」が無い`).toContain(`\`${p}\``);
     }
     expect(README, 'README が probe の本数を数えていない').toContain(`probe ${probes.length} 本`);
-    // 図の全数(nightly だけで回す重い検査)も README の nightly の行に在る
-    expect(NIGHTLY).toContain('図の全数');
-    expect(README).toContain('図の全数');
+  });
+
+  /**
+   * 🔴 **「図の全数」の在り処が変わった**(2026-09-11、user 指示
+   * 「フルスモークCIを自動起動しないように設定しろ」)。
+   *
+   * ⚠ かつては `nightly.yml` の注記に在り、この test も夜を見ていた ── いまは
+   *   **全量 smoke ごと `smoke.yml`(押したときだけ)へ移った**。
+   * 🔑 ここで見るのは「**doc が在り処を言い当てているか**」である ── 22 種の焼きは
+   *   重いので、**どこを押せば回るのか**が読めないと誰も回さない。
+   * ⚠ 空振り防止に**夜に戻っていないこと**も併せて見る(両方に書くと、
+   *   次に読む人が「夜が回している」と誤解する)。
+   */
+  it('🔴 図の全数は「押したときだけ」の側に在り、README もそう書いている', () => {
+    const SMOKE = readFileSync('.github/workflows/smoke.yml', 'utf-8');
+    const spec = readFileSync('tests/smoke/mermaid-all.smoke.spec.ts', 'utf-8');
+    // ⚠ 空振り防止 ── 当の spec が実在する(消えていたら「全量に入っている」が嘘になる)
+    expect(spec, '図の全数の spec が読めていない').toContain('mermaid');
+    expect(SMOKE, '押す口が全量を回していない(図の全数もここに入る)').toContain('test:smoke');
+    expect(NIGHTLY, '図の全数が夜へ戻っている').not.toContain('図の全数');
+    expect(README, 'README が図の全数の在り処を書いていない').toContain('図の全数');
   });
 });
 
@@ -2109,6 +2127,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    /**
+     * ⚠ **2026-09-11(マテリアルの図案)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-08-blocked-why-and-calc-palette" …` → 980000c
+     */
+    'スマホでも「作る」が押せない理由が出るようになり、その場で計算を「操作を探す」から呼べます',
     /**
      * ⚠ **2026-09-11(最近開いた順)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-08-notice-keep-and-table" …` → 7c3f801

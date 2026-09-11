@@ -1,13 +1,13 @@
 /** @vitest-environment happy-dom */
 /**
- * 図案(P9 段③)。**絵文字を捨てて単色 SVG にした**ことの pin。
+ * 図案の**配線**(P9 段③ → **#770 段① で書体にした**)。
  *
- * 🔴 なぜ捨てたか ── user 指示 2026-08-03 の 2 件に同時に反していた:
- *   ① 「地は無彩色、色は情報にだけ使う」── 絵文字は多色で `color` を無視する
- *   ② 「絵文字を使うとボタンの高さが合わない」── 書体ごとに字幅・行送りが違う
+ * 🔴 経緯:絵文字 → 単色 SVG(2026-08-03 の 2 件に同時に反していたため)→
+ *   **Material Symbols の部分集合**(user 要望 2026-09-07)。
  *
- * ⚠ 見るのは「SVG が出た」ではなく、**方針が守られていること**である:
- *   色を持たない / 表が 1 つに寄っている / 差し替えで空にならない。
+ * ⚠ **書体そのもの**(豆腐を出さない)は `tests/features/icon-symbols.test.ts` が見る。
+ *   ここで見るのは**画面に出るまでの配線**である:
+ *   読み上げに出さない / 表が 1 つに寄っている / 差し替えで空にならない。
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -20,8 +20,9 @@ import {
   iconButton,
   iconSpan,
   setIcon,
-  svgIcon,
 } from '../../src/adapter/ui/render/icons';
+import { PKC_SYMBOLS } from '../../src/features/icon/symbols';
+import { blocksFor, stripComments, withoutMedia } from '../helpers/css-blocks';
 import { SidebarRenderer } from '../../src/adapter/ui/render/sidebar';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { initialState, reduce } from '../../src/adapter/state/app-state';
@@ -35,65 +36,53 @@ const ALL_NAMES = [
   ]),
 ];
 
-describe('図案は単色の線画である', () => {
-  it('🔴 図案がすべて描かれている(空の枠が無い)', () => {
+describe('図案は書体の 1 文字である(#770 段①)', () => {
+  /**
+   * 🔴 **器は名前だけ持ち、絵は CSS が出す**(2026-09-11。全量 smoke が 5 件落ちて確定)。
+   *
+   * ⚠ 1 稿目は `span.textContent` に符号位置の 1 文字を入れていた ── 動きはするが、
+   *   **ボタン丸ごとの `textContent` に目に見えない 1 文字が混ざる**(下の pin を見よ)。
+   * 🔑 いま器に在るのは `data-pkc-symbol` だけで、絵は
+   *   `src/styles/icons.generated.css` の `::before { content }` が出す。
+   * ⚠ **happy-dom は `::before` を計算しない**ので、ここで見られるのは
+   *   「名前が付いていること」まで ── 名前 → 符号位置 → 書体の鎖は
+   *   `tests/features/icon-symbols.test.ts` が、実際に描けることは
+   *   `tests/smoke/icon-font.smoke.spec.ts` が見る。
+   */
+  it('🔴 表に在る図案が、全部 名前つきの空の器になる', () => {
     expect(ALL_NAMES.length, '図案の表が空(前提が崩れている)').toBeGreaterThan(10);
     for (const name of ALL_NAMES) {
-      const svg = svgIcon(name);
-      expect(svg.tagName.toLowerCase(), `${name} が svg でない`).toBe('svg');
-      expect(svg.getAttribute('viewBox'), `${name} に viewBox が無い`).toBe('0 0 24 24');
-      const paths = svg.querySelectorAll('path');
-      expect(paths.length, `${name} に線が 1 本も無い(空の図案)`).toBeGreaterThan(0);
-      for (const p of paths) {
-        // 形が入っていること ── `d` が空の path は描かれない
-        expect((p.getAttribute('d') ?? '').length, `${name} に空の path がある`).toBeGreaterThan(3);
-      }
+      const span = iconSpan(name);
+      // ⚠ **どの絵か**は名前で言う(符号位置は目で読めない)
+      expect(span.getAttribute('data-pkc-symbol'), `${name} の名前が器に無い`).toBe(name);
+      // 🔴 器に字を入れない ── ここが崩れると、文言を読む側が静かに外れる
+      expect(span.textContent ?? '', `${name} の器に字が入っている`).toBe('');
+      // ⚠ 空振り防止 ── 表にその名前が実在すること(名前を打ち間違えたら鳴る)
+      expect(PKC_SYMBOLS[name], `${name} が図案の表に無い`).toBeDefined();
     }
   });
 
-  it('🔴 図案に色を書いていない(値ではなく意味の名前だけ持つ)', () => {
-    // 🔑 P10 で**塗りは使えるようにした**が、色の**値**は CSS が決める。
-    //    ここに色を書くと、テーマや選択中の行で追従しない
+  it('🔴 器に色も大きさも書いていない(値は CSS が決める)', () => {
     for (const name of ALL_NAMES) {
-      const svg = svgIcon(name);
-      for (const el of [svg, ...svg.querySelectorAll('*')]) {
-        for (const attr of ['fill', 'stroke', 'color', 'style', 'fill-opacity']) {
-          expect(
-            el.getAttribute(attr),
-            `${name} が ${attr} を持っている(色は CSS が決める)`,
-          ).toBeNull();
-        }
-        const marker = el.getAttribute('data-pkc-fill');
-        if (marker !== null) {
-          // ⚠ 意味の名前だけ(色名・色値が紛れ込んでいないこと)
-          expect(['solid', 'soft'], `${name} の塗りの名前が未知: ${marker}`).toContain(marker);
-        }
-      }
+      const span = iconSpan(name);
+      for (const attr of ['style', 'color', 'class'])
+        expect(span.getAttribute(attr), `${name} の器が ${attr} を持っている`).toBeNull();
     }
   });
 
-  it('🔴 塗りの名前が CSS で実際に描かれる(死んだ印を置かない)', () => {
-    const css = readFileSync('src/styles/app.css', 'utf-8');
-    const used = new Set<string>();
-    for (const name of ALL_NAMES)
-      for (const p of svgIcon(name).querySelectorAll('[data-pkc-fill]'))
-        used.add(p.getAttribute('data-pkc-fill') ?? '');
-    // ⚠ 使っている印が CSS に無ければ、その path は**何も塗られない**
-    //    (= 中空の細線に戻る。見やすさのための塗りが黙って無効化される)
-    expect(used.size, '塗りを使っている図案が 1 つも無い(前提が崩れている)').toBeGreaterThan(0);
-    for (const marker of used)
-      expect(css, `data-pkc-fill="${marker}" を描く規則が CSS に無い`).toContain(
-        `path[data-pkc-fill='${marker}']`,
-      );
-  });
-
-  it('🔴 線の太さを CSS px で決めている(場所によって細さが変わらない)', () => {
-    const css = readFileSync('src/styles/app.css', 'utf-8');
-    // viewBox 24 の中の値で決めると、13.3px の 設定 と 16px のチップで
-    // 0.97px / 1.17px と散る ── `non-scaling-stroke` が外側の座標系で揃える
-    expect(css, '`non-scaling-stroke` が無い(太さが場所で変わる)').toContain(
-      'vector-effect: non-scaling-stroke',
-    );
+  /**
+   * 🔴 **図案の大きさを器の字に載せない**(#770 段①)。
+   * ⚠ 帯のボタンは 12px なので、`em` で載せると枠の字が 12.6px(12 × 1.05)、
+   *   **描く絵は 14.5px**(さらに 1.15em)まで縮む ── Material は 20px 前提の
+   *   設計なので、そこまで縮むと潰れる。
+   */
+  it('🔴 図案の大きさが px で固定されている(帯の 12px に引きずられない)', () => {
+    // 🔑 **構文で拾う**(注釈に満たされない / 子孫選択子に当たらない)──
+    //    理由は `tests/features/icon-symbols.test.ts` の同じ形の検査に書いた
+    const css = withoutMedia(stripComments(readFileSync('src/styles/app.css', 'utf-8')));
+    const blocks = blocksFor(css, '[data-pkc-icon]');
+    expect(blocks.length, '図案の枠の規則が読めていない(空振り)').toBe(1);
+    expect(blocks[0], '大きさが器の字に載っている(帯で潰れる)').toMatch(/font-size:\s*\d+px/);
   });
 
   it('🔴 危険な操作と種別に色が付いている(意味を持つ色は使う)', () => {
@@ -112,8 +101,8 @@ describe('図案は単色の線画である', () => {
   it('🔴 読み上げに出さない(意味は隣の文字が持つ)', () => {
     const span = iconSpan('page');
     expect(span.getAttribute('data-pkc-icon')).toBe('');
+    // ⚠ `::before` の字も読み上げに拾われる ── これが無いと私用領域の 1 文字を読もうとする
     expect(span.getAttribute('aria-hidden')).toBe('true');
-    expect(span.firstElementChild?.getAttribute('aria-hidden')).toBe('true');
     // 器は **span**(大きさを決める CSS がそこに当たっている)
     expect(span.tagName.toLowerCase()).toBe('span');
   });
@@ -121,7 +110,10 @@ describe('図案は単色の線画である', () => {
   it('🔴 図案つきボタンは 図案 + 文字 の 2 つで組む(文言は第 2 引数)', () => {
     const btn = iconButton('delete-entry', '削除');
     expect(btn.getAttribute('data-pkc-action')).toBe('delete-entry');
-    expect(btn.querySelector('[data-pkc-icon] svg path')).not.toBeNull();
+    expect(
+      btn.querySelector('[data-pkc-icon]')?.getAttribute('data-pkc-symbol') ?? '',
+      '図案の名前が無い(ACTION_ICONS の鍵がずれている)',
+    ).toBe('trash');
     expect(btn.querySelector('[data-pkc-field="label"]')?.textContent).toBe('削除');
     // ⚠ 図案の無い action は**器ごと出さない**(空の枠を置かない)
     const plain = iconButton('append-entry', '追記');
@@ -129,11 +121,38 @@ describe('図案は単色の線画である', () => {
     expect(plain.querySelector('[data-pkc-field="label"]')?.textContent).toBe('追記');
   });
 
-  it('🔴 差し替えで空にならない(textContent 代入の罠)', () => {
+  /**
+   * 🔴 **ボタン丸ごとの `textContent` は、文言そのもの**(#770 段①、2026-09-11)。
+   *
+   * ⚠ ここは**実害から生まれた pin** である。1 稿目は図案を器の字として入れたので、
+   *   `button.textContent` が「**目に見えない 1 文字** + 文言」になった ──
+   *   `toHaveText` で文言を比べる smoke が **4 本**、種別の一覧が **1 本**落ちた
+   *   (見た目は 1 ドットも違わないので、落ちた字面を並べても違いが読めない)。
+   * 🔑 直したのは test ではなく**器**である:絵は CSS の `::before` が出すので、
+   *   読み手が読む値は SVG だった頃と**同じ形**に戻った。
+   * ⚠ この検査が落ちたら、直すのは**この test ではなく `setIcon`** である
+   *   (CLAUDE.md §10「器を替えても、読み取れる値を変えない」)。
+   */
+  it('🔴 ボタン丸ごとの字は文言そのもの(器に図案の字を入れない)', () => {
+    const btn = iconButton('delete-entry', '削除');
+    const label = btn.querySelector('[data-pkc-field="label"]')?.textContent ?? '';
+    expect(label, '文言の欄が読めない').toBe('削除');
+    // ⚠ 空振り防止 ── 図案の器は**在る**(器ごと消えて「字が同じ」になっていない)
+    expect(btn.querySelector('[data-pkc-icon]'), '図案の器が無い(空振り)').not.toBeNull();
+    // 🔴 **等値**で見る ── 「含む」だと、字が 1 つ混ざっても静かに通る
+    expect(btn.textContent ?? '', 'ボタンの字に図案が混ざっている').toBe(label);
+  });
+
+  it('🔴 差し替えると名前が入れ替わる(古い絵が残らない)', () => {
     const span = iconSpan('page');
     setIcon(span, 'folder');
-    expect(span.querySelectorAll('svg').length, '差し替えで svg が増えている').toBe(1);
-    expect(span.querySelector('svg path'), '差し替えで中身が消えた').not.toBeNull();
+    expect(span.getAttribute('data-pkc-symbol'), '差し替えで絵が変わっていない').toBe('folder');
+    // ⚠ 差し替えでも器の字は空のまま(ここで字を入れると上の pin が崩れる)
+    expect(span.textContent ?? '', '差し替えで器に字が入った').toBe('');
+    // 🔑 2 つの名前が**別の絵**を指していること ── 同じなら上の assert は何も守らない
+    expect(PKC_SYMBOLS['folder'].cp, 'page と folder が同じ絵(前提が崩れている)').not.toBe(
+      PKC_SYMBOLS['page'].cp,
+    );
   });
 });
 
@@ -163,14 +182,19 @@ describe('一覧のチップ ── 行を作り直さずに種別が変わっ�
     sidebar.render(stateWith(meta('a', 'text')));
     const chip = root.querySelector('[data-pkc-chip]');
     expect(chip, 'チップが出ていない').not.toBeNull();
-    expect(chip!.querySelector('svg path'), '初回描画でチップが空').not.toBeNull();
+    expect(chip!.getAttribute('data-pkc-symbol') ?? '', '初回描画でチップに絵が無い').toBe('page');
 
-    // 🔴 **行は作り直さない**(同じ lid なので patch 経路に入る)。ここが
-    //    `chip.textContent = …` のままだと **svg ごと消えて空になる**
+    /**
+     * 🔴 **行は作り直さない**(同じ lid なので patch 経路に入る)。
+     * ⚠ 中身が `<svg>` 要素だった頃は `chip.textContent = …` が **svg ごと消して
+     *   空にした**。いまは絵が CSS 側なので消えようが無いが、
+     *   **印(`data-pkc-chip`)と名前(`data-pkc-symbol`)が揃って動くこと**は変わらず見る
+     *   ── 片方だけ直すと、行の色は folder なのに絵は text のまま、が静かに出る。
+     */
     sidebar.render(stateWith(meta('a', 'folder')));
     const after = root.querySelector('[data-pkc-chip]');
     expect(after!.getAttribute('data-pkc-chip'), '種別の印が変わっていない').toBe('folder');
-    expect(after!.querySelector('svg path'), 'patch でチップが空になった').not.toBeNull();
+    expect(after!.getAttribute('data-pkc-symbol'), 'patch で絵が古いまま').toBe('folder');
   });
 
   it('🔴 未知の種別でもチップが空にならない(行の頭が揃う)', () => {
@@ -178,7 +202,11 @@ describe('一覧のチップ ── 行を作り直さずに種別が変わっ�
     const regions = buildShell(root);
     const sidebar = new SidebarRenderer(regions.sidebar);
     sidebar.render(stateWith(meta('a', 'なにか未知')));
-    expect(root.querySelector('[data-pkc-chip] svg path')).not.toBeNull();
+    // ⚠ 未知は `dot`(表に無い種別で器ごと消えると、行の頭が 1 件だけ揃わない)
+    expect(
+      root.querySelector('[data-pkc-chip]')?.getAttribute('data-pkc-symbol') ?? '',
+      '未知の種別でチップに絵が無い',
+    ).toBe('dot');
   });
 });
 
@@ -234,19 +262,21 @@ describe('図案の登記に死んだ行を残さない', () => {
      */
     const FOLDED = ['box'];
 
-    const src = readFileSync('src/adapter/ui/render/icons.ts', 'utf-8');
+    const src = readFileSync('src/features/icon/symbols.ts', 'utf-8');
     const bare = (t: string): string => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
     const between = (text: string, from: string, to: string): string => {
       const a = text.indexOf(from);
-      expect(a, `icons.ts に ${from} が無い(形が変わった)`).toBeGreaterThanOrEqual(0);
+      expect(a, `symbols.ts に ${from} が無い(形が変わった)`).toBeGreaterThanOrEqual(0);
       const b = text.indexOf(to, a);
-      expect(b, `icons.ts の ${from} が閉じていない`).toBeGreaterThan(a);
+      expect(b, `symbols.ts の ${from} が閉じていない`).toBeGreaterThan(a);
       return text.slice(a, b);
     };
 
-    // ⚠ 図案の key は**引用符なし**(`settings: [`)── 引用符ありで探すと 0 件になる
+    // ⚠ 図案の key は**引用符あり / なしが混ざる**(`settings: {` と `'arrow-in': {`)
     const names = [
-      ...bare(between(src, 'const ICON_PATHS', '\nexport type IconName')).matchAll(/^ {2}'?([a-z0-9-]+)'?:/gm),
+      ...bare(between(src, 'export const PKC_SYMBOLS', '\n} as const')).matchAll(
+        /^ {2}'?([a-z0-9-]+)'?: \{/gm,
+      ),
     ].map((m) => m[1] as string);
     expect(names.length, '図案を拾えていない(空振り)').toBeGreaterThan(10);
 
@@ -258,7 +288,7 @@ describe('図案の登記に死んだ行を残さない', () => {
     ]);
     const literals = new Set<string>();
     for (const f of tsFiles('src')) {
-      if (f.endsWith('render/icons.ts')) continue;
+      if (f.endsWith('render/icons.ts') || f.endsWith('features/icon/symbols.ts')) continue;
       for (const m of bare(readFileSync(f, 'utf-8')).matchAll(/'([a-z0-9-]+)'/g))
         literals.add(m[1] as string);
     }

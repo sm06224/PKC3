@@ -369,8 +369,9 @@ export class SidebarRenderer {
       const chip = row.querySelector('[data-pkc-chip]');
       if (chip) {
         chip.setAttribute('data-pkc-chip', meta.archetype);
-        // 🔴 **`textContent` で書かない** ── 中身が要素になったので、代入すると
-        //    SVG ごと消えてチップが空になる(`setIcon` は replaceChildren で入れ替える)
+        // 🔴 **`textContent` で書かない** ── 絵を出しているのは CSS の `::before`
+        //    なので、器の字を書き換えても 1 ドットも変わらない。差し替えるのは
+        //    器の**名前**(`data-pkc-symbol`)だけである(`setIcon` がそれをやる)
         setIcon(chip, chipIcon(meta.archetype));
         (chip as HTMLElement).title = archetypeLabel(meta.archetype);
       }

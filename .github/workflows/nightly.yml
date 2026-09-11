@@ -1,5 +1,9 @@
 # PKC3 nightly — 重い検証の受け皿(CLAUDE.md プロセス指示: PR gate は速い lane
-# 限定、視覚全量・ベンチ・大規模 probe はここへ)。schedule + 手動 dispatch。
+# 限定、ベンチ・大規模 probe はここへ)。schedule + 手動 dispatch。
+#
+# 🔴 **全量 smoke はここに無い**(user 指示 2026-09-11。不可侵)── 下の
+#   「全量 smoke は、ここには無い」の節を読むこと。夜が回すのは
+#   **product の焼きと検品 / Rust wasm の等価性 / probe** である。
 #
 # 🔴 **1 つ落ちても、後ろを止めない**(#221、2026-08-17)。
 #
@@ -42,101 +46,25 @@ permissions:
   # 「夜が赤いまま放置される導線」を直すのが目的で、書くのは issue 1 本だけ)
   issues: write
 jobs:
-  # ── smoke は 2 つのブラウザ両方で回す ────────────────────────────────
-  # 🔴 CLAUDE.md「実ブラウザ依存の spec は両方で通してから push する」。手で押す
-  # `smoke.yml` は速さのため headless_shell 片方だけなので、**両方を突き合わせる
-  # 場所は nightly しかない**。だから 2 つを別 job に割った ── 落ちたとき、
-  # どちらのブラウザで壊れたのかが **job の名前で分かる**。
-  # ⚠ 2026-09-09: **PR gate から全量 smoke が消えた**(user 指示「自動実行は禁止 /
-  #   全て任意起動」)ので、**自動で全量が回るのはこの夜だけ**になった ──
-  #   ここを弱めると、押し忘れた日は**誰も全量を確かめていない**ことになる。
+  # 🔴 **全量 smoke は、ここには無い**(user 指示 2026-09-11。不可侵)
   #
-  # 🔑 **全 step に id を付ける**(2026-08-17 のレビュー 🔴-1)。台帳が読むのは
-  #   job の結果になったが、id は今も 2 つの役に立つ ── ① `setup_ok` の gate は
-  #   `steps` context を読むので、id が無いと成立しない ② run を開いた人が
-  #   step を名前で指せる。`tests/workflow-steps.test.ts` が pin する。
-  smoke_headless_shell:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-        id: checkout
-      - uses: actions/setup-node@v7
-        id: node
-        with:
-          node-version: 24
-          cache: npm
-      - run: npm ci
-        id: npm_ci
-      # ⚠ smoke は `vite preview` で **`dist/` を配信する**ので build が要る
-      #   (source を書き換えただけでは smoke に一切届かない ── CLAUDE.md §3)
-      - run: npm run build
-        id: build
-      - run: npx playwright install chromium --with-deps
-        id: pw_install
-      - name: Visual smoke (headless_shell ── 手で押す smoke.yml と同じ)
-        id: smoke
-        run: npm run test:smoke
-
-  smoke_chromium:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-        id: checkout
-      - uses: actions/setup-node@v7
-        id: node
-        with:
-          node-version: 24
-          cache: npm
-      - run: npm ci
-        id: npm_ci
-      - run: npm run build
-        id: build
-      - run: npx playwright install chromium --with-deps
-        id: pw_install
-      # 🔴 **path を `$GITHUB_ENV` へ書かない**(2026-08-07)。
-      #
-      # かつてここで `PKC3_CHROMIUM` を `$GITHUB_ENV` へ書いていた ── これは
-      # **以降の全 step に効く**ので、無関係な step の**検査対象まで変える**
-      # (当時は smoke まで巻き添えでフル chromium になり、「両方で通している」
-      #  つもりのまま片方しか検査していなかった)。
-      # ⚠ この job は smoke に**わざと**フル chromium を渡すが、渡す先は step の
-      #   `env:` で名指しする(下の「図の全数」は headless_shell のまま)。
-      # 🔴 **`echo "$(…)"` は「取れなかった」を食べる**(2026-08-17 のレビュー ⚠-5。
-      #   CLAUDE.md §6 の顔違い)── `node` が死んでも `echo` の終了コードが勝つので
-      #   step は緑で、`path=` が空のまま渡る。受け側は空文字を素通りする =
-      #   「どのブラウザで測ったか分からない回」が緑になる。
-      - name: Resolve chromium path
-        id: pw
-        run: |
-          P=$(node -e "const {chromium}=require('@playwright/test'); console.log(chromium.executablePath())")
-          if [ -z "$P" ]; then
-            echo "::error::chromium の path が取れない ── smoke がどのブラウザで走るか決まらない"
-            exit 1
-          fi
-          echo "path=$P" >> "$GITHUB_OUTPUT"
-      # 🔴 **仕込みと検証の間では止める**(2026-08-17 のレビュー ⚠-4)。
-      #   検証 step は `!cancelled()` を持つので、仕込みが落ちた晩でも**全部走って
-      #   全部落ちる** ── 赤が並び、**本当の原因(npm ci)が名前で出ない**。
-      # 🔑 この step は guard を持たない = 手前が落ちれば **skip** される。だから
-      #   `outputs.ok` が空になり、下の検証 step は 1 つも走らない。
-      - name: 仕込みが揃った
-        id: setup_ok
-        run: echo "ok=1" >> "$GITHUB_OUTPUT"
-      - name: Visual smoke (フル chromium ── 実挙動が違う箇所を突き合わせる)
-        id: smoke_chromium
-        if: ${{ !cancelled() && steps.setup_ok.outputs.ok == '1' }}
-        env:
-          PKC3_CHROMIUM: ${{ steps.pw.outputs.path }}
-        run: npm run test:smoke
-      # 🔴 **図の全数(22 種)は環境変数の門を持たない** ── ここに別 step を
-      #    置かない。⚠ 置くと**同じ検査を夜に 2 度**走らせることになる(上の
-      #    「フル chromium」の step が全量を回すので、この spec もそこに入っている)。
-      #    ⚠ 2026-09-09 訂正: かつてここは「2026-09-05 から **PR gate で**走る」と
-      #    書いていたが、PR gate から全量が外れたので**事実ではなくなった** ──
-      #    いま焼かれるのは**この夜**と、手で押した `smoke.yml` である。
-      #    実測の根拠と経緯は `tests/smoke/mermaid-all.smoke.spec.ts` の冒頭に在る。
+  # > 「**フルスモークCIを自動起動しないように設定しろ /
+  # >   基本的には単体テストを自分で行い、サブエージェントに対象範囲のみの
+  # >   スモークテストをさせろ / UI導線のテストをフルスモークで誤魔化すな**」
+  #
+  # ⚠ 直す前はここに `smoke_headless_shell` / `smoke_chromium` の 2 job が居て、
+  #   **毎晩 18:00 UTC に全量が 2 周**していた。2026-09-09 に PR gate から外したとき、
+  #   私は夜を残し、`tests/workflow-steps.test.ts` に
+  #   「⚠ `schedule` は落とさない」と**わざわざ carve-out まで書いた** ──
+  #   🔴 **`schedule` は「押していない」の側である。** user の言う「任意起動」に
+  #   夜は入らない。禁止の目的(押していないのに全量が走らないこと)に照らせば、
+  #   あの carve-out は**目的ではなく対象**で書いた誤りだった。
+  #
+  # 🔑 **1 件も減らしていない ── 起動する条件だけを変えた**(前回と同じ作法):
+  #   - 2 つのブラウザの突き合わせ → `smoke.yml` の `browser: both`(押したとき)
+  #   - product 版の全量 → `smoke.yml` の `kind: product`(押したとき)
+  #   ⚠ product の**ビルドと検品**は夜に残す(下の `product` job)── これは
+  #     全量 smoke ではなく、**PR gate が一度も焼かない成果物**の検査である。
 
   # 🔴 product bundle は **PR gate が一度もビルドしない別成果物**である
   # (`BUILD_KIND` が焼き込まれるので entry chunk の中身も content hash も
@@ -170,9 +98,10 @@ jobs:
       - name: Product 検品 (map の有無 / 参照の実在 / 配る量 / manual.html)
         id: product_check
         run: node scripts/check-dist.mjs product --require-manual --require-precache-list
-      - name: Product smoke
-        id: product_smoke
-        run: npm run test:smoke
+      # 🔴 **ここに smoke を置かない**(2026-09-11)── product 版の全量は
+      #   `smoke.yml` の `kind: product` で**押したときだけ**回す。
+      # ⚠ この job が今も夜に居てよいのは、**全量 smoke ではないから**である
+      #   (焼いて、検品する ── 1 分で終わり、毎ターンの負荷にならない)。
 
   rust_and_probes:
     runs-on: ubuntu-latest
@@ -302,7 +231,7 @@ jobs:
   #   かつてここに `node -e '…outcome==="failure"…'` と書いていたので、
   #   **`skipped` を緑と読む**うえ、その 1 行は**どの test からも実行されなかった**。
   ledger:
-    needs: [smoke_headless_shell, smoke_chromium, product, rust_and_probes]
+    needs: [product, rust_and_probes]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10

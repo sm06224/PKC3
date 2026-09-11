@@ -18,6 +18,7 @@
     "smoke:record": "node scripts/smoke-record.mjs",
     "smoke:map": "node scripts/smoke-map.mjs",
     "typecheck": "tsc --noEmit",
+    "icons:font": "node scripts/build-icon-font.mjs",
     "lint": "eslint src tests build scripts",
     "build:portable": "vite build --config build/portable.config.ts && node build/portable/fold.mjs"
   },

@@ -220,16 +220,24 @@ describe('揃わなかった step の数え方', () => {
    *   **毎晩静かに緑**になる、いちばん気づけない壊れ方だった。
    */
   it('🔴 needs の形(result)を 4 値とも数える', () => {
+    /**
+     * ⚠ **job の名前は台になっているだけ**(この script は名前を見ない)。
+     *   ⚠ ただし**実在しない job 名を台に書かない** ── 2026-09-11 まで
+     *   `smoke_headless_shell` / `smoke_chromium` と書いてあったが、
+     *   その 2 つは **`smoke.yml` へ引っ越して夜から消えている**ので、
+     *   読んだ人が「夜はまだ全量 smoke を回している」と誤解する。
+     *   🔑 台に置く名前も、実物から採る(いまの夜は `product` と `rust_and_probes`)。
+     */
     expect(
       unmetSteps(
         json({
-          smoke_headless_shell: { result: 'success' },
-          smoke_chromium: { result: 'failure' },
-          product: { result: 'cancelled' },
-          rust_and_probes: { result: 'skipped' },
+          product: { result: 'success' },
+          rust_and_probes: { result: 'failure' },
+          extra_a: { result: 'cancelled' },
+          extra_b: { result: 'skipped' },
         }),
       ),
-    ).toEqual(['smoke_chromium:failure', 'product:cancelled', 'rust_and_probes:skipped']);
+    ).toEqual(['rust_and_probes:failure', 'extra_a:cancelled', 'extra_b:skipped']);
   });
 
   it('🔴 timeout で切られた job(cancelled)を緑にしない ── #695 の当の症状', () => {
