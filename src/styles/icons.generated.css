@@ -1,0 +1,124 @@
+/* 🔴 **自動生成**(`npm run icons:font`)── 手で直さない。
+ * 絵の表は `src/features/icon/symbols.ts`、書体は `fonts/pkc-symbols.woff2`。
+ * ⚠ **器に字を入れない**ので、絵はここが出す(そうしないとボタンの `textContent` に
+ *   目に見えない 1 文字が混ざり、文言を読む側が静かに外れる)。 */
+[data-pkc-icon][data-pkc-symbol='settings']::before {
+  content: '\e8b8';
+}
+[data-pkc-icon][data-pkc-symbol='flag']::before {
+  content: '\f0c6';
+}
+[data-pkc-icon][data-pkc-symbol='help']::before {
+  content: '\e8fd';
+}
+[data-pkc-icon][data-pkc-symbol='search']::before {
+  content: '\ef7a';
+}
+[data-pkc-icon][data-pkc-symbol='arrow-in']::before {
+  content: '\f090';
+}
+[data-pkc-icon][data-pkc-symbol='arrow-out']::before {
+  content: '\f09b';
+}
+[data-pkc-icon][data-pkc-symbol='arrow-down']::before {
+  content: '\e5db';
+}
+[data-pkc-icon][data-pkc-symbol='archive']::before {
+  content: '\e149';
+}
+[data-pkc-icon][data-pkc-symbol='globe']::before {
+  content: '\e80b';
+}
+[data-pkc-icon][data-pkc-symbol='page']::before {
+  content: '\e873';
+}
+[data-pkc-icon][data-pkc-symbol='printer']::before {
+  content: '\e8ad';
+}
+[data-pkc-icon][data-pkc-symbol='broom']::before {
+  content: '\e28d';
+}
+[data-pkc-icon][data-pkc-symbol='plus']::before {
+  content: '\e145';
+}
+[data-pkc-icon][data-pkc-symbol='clip']::before {
+  content: '\e226';
+}
+[data-pkc-icon][data-pkc-symbol='pencil']::before {
+  content: '\f097';
+}
+[data-pkc-icon][data-pkc-symbol='check']::before {
+  content: '\e668';
+}
+[data-pkc-icon][data-pkc-symbol='close']::before {
+  content: '\e5cd';
+}
+[data-pkc-icon][data-pkc-symbol='clock']::before {
+  content: '\efd6';
+}
+[data-pkc-icon][data-pkc-symbol='trash']::before {
+  content: '\e92e';
+}
+[data-pkc-icon][data-pkc-symbol='list']::before {
+  content: '\e896';
+}
+[data-pkc-icon][data-pkc-symbol='folder']::before {
+  content: '\e2c7';
+}
+[data-pkc-icon][data-pkc-symbol='folder-smart']::before {
+  content: '\e617';
+}
+[data-pkc-icon][data-pkc-symbol='stack']::before {
+  content: '\e53b';
+}
+[data-pkc-icon][data-pkc-symbol='apps']::before {
+  content: '\e5c3';
+}
+[data-pkc-icon][data-pkc-symbol='timeline']::before {
+  content: '\e922';
+}
+[data-pkc-icon][data-pkc-symbol='grid']::before {
+  content: '\e3ec';
+}
+[data-pkc-icon][data-pkc-symbol='box']::before {
+  content: '\e156';
+}
+[data-pkc-icon][data-pkc-symbol='check-box']::before {
+  content: '\e9de';
+}
+[data-pkc-icon][data-pkc-symbol='form']::before {
+  content: '\e85d';
+}
+[data-pkc-icon][data-pkc-symbol='play']::before {
+  content: '\e037';
+}
+[data-pkc-icon][data-pkc-symbol='chevron-down']::before {
+  content: '\e5cf';
+}
+[data-pkc-icon][data-pkc-symbol='chevron-up']::before {
+  content: '\e5ce';
+}
+[data-pkc-icon][data-pkc-symbol='chevron-left']::before {
+  content: '\e5cb';
+}
+[data-pkc-icon][data-pkc-symbol='chevron-right']::before {
+  content: '\e5cc';
+}
+[data-pkc-icon][data-pkc-symbol='calendar']::before {
+  content: '\ebcc';
+}
+[data-pkc-icon][data-pkc-symbol='dot']::before {
+  content: '\ef4a';
+}
+[data-pkc-icon][data-pkc-symbol='person']::before {
+  content: '\f0d3';
+}
+[data-pkc-icon][data-pkc-symbol='mic']::before {
+  content: '\e31d';
+}
+[data-pkc-icon][data-pkc-symbol='monitor']::before {
+  content: '\ef5b';
+}
+[data-pkc-icon][data-pkc-symbol='stop']::before {
+  content: '\e047';
+}

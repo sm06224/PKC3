@@ -6676,7 +6676,8 @@ const ACTIONS: Record<string, ActionHandler> = {
       const picked = target.querySelector('[data-pkc-field="label"]')?.textContent ?? archetype;
       if (label) label.textContent = `+ ${picked}`;
       const icon = run.querySelector('[data-pkc-icon]');
-      // ⚠ `textContent` で書かない(図案は要素)── `setIcon` で入れ替える
+      // ⚠ `textContent` で書かない ── 絵は CSS の `::before` が出すので、器の字を
+      //    書き換えても 1 ドットも変わらない。差し替えるのは名前(`data-pkc-symbol`)
       if (icon) setIcon(icon, ARCHETYPE_ICONS[archetype] ?? 'dot');
     }
     const menu = root.querySelector<HTMLElement>('[data-pkc-region="create-menu"]');

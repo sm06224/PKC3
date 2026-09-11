@@ -54,20 +54,18 @@ test('🔴 図は PNG の img で置かれ、SVG を DOM に残さない', async
 
   // ③ 🔴 **図の SVG を DOM に残さない**(これが「スクロールが GPU に乗る」の実体)
   //
-  // ⚠ 以前は `querySelectorAll('svg').length === 0` と書いていたが、P9 段③ で
-  //    **UI の図案が単色 SVG になった**(絵文字は多色で `color` を無視し、
-  //    書体ごとに大きさが変わるため。user 指示 2026-08-03 の 2 件に反していた)。
-  //    「1 つも無い」では図案まで落ちてしまうので、**在ってよい場所を名指しする**形へ
-  //    書き換えた ── これは弱めているのではなく、**強めている**:
-  //    「図案の中に無い `<svg>` は 1 つも許さない」なので、mermaid が SVG を
-  //    残した瞬間に落ちる(図の器の中でも、本文でも、プレビューでも)。
+  // ⚠ 一時期ここは「図案(`data-pkc-icon`)の中の SVG は除く」と書いてあった ──
+  //    P9 段③ で UI の図案が単色 SVG だったからである。**#770 段① で図案は書体に
+  //    なった**(SVG を 1 つも作らない)ので、除外は**効かない行**になった。
+  //    🔑 だから消して「`<svg>` は 1 つも許さない」へ戻した ── 弱めたのではなく、
+  //    **強めている**(図案が SVG へ戻った日にもここが鳴る)。
   expect(
     await page.evaluate(() =>
-      [...document.querySelectorAll('svg')]
-        .filter((s) => !s.closest('[data-pkc-icon]'))
-        .map((s) => s.parentElement?.getAttribute('data-pkc-field') ?? s.parentElement?.tagName),
+      [...document.querySelectorAll('svg')].map(
+        (s) => s.parentElement?.getAttribute('data-pkc-field') ?? s.parentElement?.tagName,
+      ),
     ),
-    '図案の外に SVG が残っている(図が SVG で置かれている?)',
+    'SVG が残っている(図が SVG で置かれている?)',
   ).toEqual([]);
 
   // ④ 🔴 焼いた画素が表示幅以上(Retina でボケない ── 等倍で焼く実装を落とす)
@@ -138,11 +136,9 @@ test('🔴 図を保存すると、画面の PNG ではなくベクタが落ち�
   expect(text, '図の中身が入っていない').toContain('終わり');
 
   // ⑤ 画面のほうは PNG のまま(書き出しのために SVG へ差し替わっていない)
-  //    ⚠ 図案(`data-pkc-icon`)の SVG は別物なので除く ── 上の ③ と同じ規則
+  //    ⚠ 除外は置かない ── 図案は書体なので SVG を 1 つも作らない(上の ③ と同じ規則)
   expect(
-    await page.evaluate(() =>
-      [...document.querySelectorAll('svg')].filter((s) => !s.closest('[data-pkc-icon]')).length,
-    ),
+    await page.evaluate(() => document.querySelectorAll('svg').length),
     '書き出しのあと画面に SVG が残っている',
   ).toBe(0);
 

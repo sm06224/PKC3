@@ -20,6 +20,9 @@
  */
 
 @import './tokens.css';
+/* 🔴 **図案の絵**(自動生成 ── `npm run icons:font`)。⚠ 手で直さない。
+ * 器に字を入れないので、絵はこの規則が `::before` で出す(`render/icons.ts` の戒め)。 */
+@import './icons.generated.css';
 
 * {
   box-sizing: border-box;
@@ -412,8 +415,9 @@ button {
   width: 1.15em;
   text-align: center;
   line-height: 1;
-  /* ⚠ **器の字の大きさに載せない** ── 帯のボタンは 12px なので、載せると図案が
-   * 12.6px まで縮んで潰れる(Material は 20px 前提の設計)。16px で固定する。 */
+  /* ⚠ **器の字の大きさに載せない** ── 帯のボタンは 12px なので、載せると枠の字が
+   * 12.6px(12 × 1.05)= 描く絵は **14.5px**(さらに 1.15em)まで縮む。
+   * Material は 20px 前提の設計なので、そこまで縮むと潰れる。16px で固定する。 */
   font-size: 16px;
   /* ⚠ 絵文字は書体で行送りが伸びる ── 枠の高さも固定して押し出させない */
   height: 1.15em;

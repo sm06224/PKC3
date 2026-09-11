@@ -1058,7 +1058,7 @@ describe('お知らせの文面は固定(#220-7)', () => {
      *   `git log --oneline origin/main -S"2026-09-08-manual-jump" -- src/features/notice/notice-log.ts`
      *   → bcc0b0a。原本は CHANGELOG.md に在る。
      */
-    ['2026-09-11-material-icons', 'e553739c'],
+    ['2026-09-11-material-icons', '07745698'],
     ['2026-09-11-recent-sort', '5dbf4394'],
     ['2026-09-11-help-toc-all', '63954e8e'],
     ['2026-09-09-move-picker', 'd1bd6424'],

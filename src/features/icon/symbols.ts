@@ -92,7 +92,14 @@ export const PKC_SYMBOLS = {
 /** 図案名の全数。⚠ 表から引く(手で並べない ── 足した日に片方だけ古くなる)。 */
 export const ICON_NAMES = Object.keys(PKC_SYMBOLS) as readonly IconName[];
 
-/** その名前の絵を描く 1 文字。⚠ **符号位置**であって、絵の名前ではない(上の戒め)。 */
-export function symbolChar(name: IconName): string {
-  return String.fromCodePoint(PKC_SYMBOLS[name].cp);
-}
+/**
+ * 🔴 **符号位置を字に変える口は置かない**(2026-09-11)。
+ *
+ * ⚠ 1 稿目には `symbolChar(name)` が在り、器の `textContent` に 1 文字を入れていた ──
+ *   それが**ボタン丸ごとの `textContent` に目に見えない 1 文字を混ぜ**、文言を読む側を
+ *   静かに外した(全量 smoke が 5 件落ちて判明)。
+ * 🔑 いま絵を出すのは **CSS だけ**(`src/styles/icons.generated.css` の
+ *   `::before { content }`。`npm run icons:font` がこの表から焼く)。
+ * ⚠ ここに字を作る口を戻すと、**また器へ入れる道ができる** ── だから置かない。
+ *   `icons.ts` は名前(`data-pkc-symbol`)しか扱わない。
+ */

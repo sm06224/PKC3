@@ -37,6 +37,8 @@ const SYMBOLS = 'src/features/icon/symbols.ts';
 const OUT = 'src/styles/fonts/pkc-symbols.woff2';
 /** ⚠ 焼いた中身の目録(test が読む ── woff2 は畳まれていて読めない)。 */
 const LIST = 'src/styles/fonts/pkc-symbols.codepoints';
+/** ⚠ 絵を出す規則。**字は器に入れない**ので、`::before` の `content` がここに要る。 */
+const CSS_OUT = 'src/styles/icons.generated.css';
 /** 焼く形。⚠ **`symbols.ts` の注記と揃える**(片方だけ変えると見た目が変わる)。 */
 const AXES = 'opsz,wght,FILL,GRAD@24,500,0,0';
 const CODEPOINTS =
@@ -107,16 +109,51 @@ if (woff2.subarray(0, 4).toString('latin1') !== 'wOF2')
 writeFileSync(OUT, woff2);
 
 /**
- * ④ 🔴 **焼いた中身を、読める形で隣に置く**(`.codepoints`)。
+ * ④ **要求した一覧を、読める形で隣に置く**(`.codepoints`)。
  *
- * ⚠ woff2 は brotli で畳まれているので、**test から中身を読めない** ── だから
- *   「この書体には何が入っているか」を**この script が知っている形**で書き出す。
- * 🔑 これで `tests/features/icon-symbols.test.ts` が
- *   「表に足したのに書体を焼き直していない」を落とせる ── **それが豆腐の原因である**。
- * ⚠ 書き出すのは**要求した名前**ではなく**焼いた行そのもの**(上で上流と突き合わせ済み)。
+ * 🔴 **これは「焼いた書体の中身」ではない**(2026-09-11 に訂正。着地前レビュー 1)。
+ *
+ * ⚠ かつてここには「⚠ 書き出すのは**要求した名前**ではなく**焼いた行そのもの**」と
+ *   書いてあったが、**事実と逆だった** ── 下の `rows` は `symbols.ts` から読んだ
+ *   **表そのもの**で、落としてきた woff2 は **1 バイトも読んでいない**。
+ * ⚠ 実測(fontTools):この書体の cmap は **95 符号位置**在る(表は 40)──
+ *   Google Fonts の部分集合は ASCII と、絵が内部で使う PUA を巻き込んで返す。
+ * 🔴 だから **`.codepoints` と表を比べても、配る書体については何も言えない** ──
+ *   「書体からだけ 1 つ消す」変異は、ここと生成 CSS が**両方 `rows` から書かれる**
+ *   ので、unit を 1 件も落とさずに通る(= そのボタンだけ豆腐で出荷)。
+ * 🔑 **書体そのものを見るのは実ブラウザだけ**(`tests/smoke/icon-font.smoke.spec.ts`)──
+ *   この一覧の 40 件を**全部**測り、送り幅が 1em でなければ落ちる。
+ * 🔑 ここが守れるのは 1 つだけ:**表に足したのに `npm run icons:font` を回し忘れた**
+ *   (= この file が古いまま)。それも豆腐の原因なので、門としては残す。
  */
 writeFileSync(
   LIST,
   rows.map((r) => `${r.icon} ${r.cp.toString(16)}`).join('\n') + '\n',
 );
+/**
+ * ⑤ 🔴 **絵を出す規則も、ここで作る**(2026-09-11)。
+ *
+ * ⚠ 器に字を入れると、**ボタン丸ごとの `textContent` に見えない 1 文字が混ざる**
+ *   ── 直す前は `<svg>` で字を持たなかったので、読み手はそれに頼っていた
+ *   (実測:全量 smoke が 5 本落ちた)。だから**絵は `::before` が出す**。
+ * 🔑 符号位置を手で 2 か所に書かないため、**表から機械で作る**(§7)。
+ *   ⚠ 名前(PKC 側)も要るので、`symbols.ts` の鍵ごと拾い直す。
+ */
+const keys = [
+  ...readFileSync(SYMBOLS, 'utf8').matchAll(/^ {2}'?([a-z0-9-]+)'?: \{ icon: '([a-z0-9_]+)', cp: 0x([0-9a-f]+) \}/gm),
+].map((m) => ({ key: m[1], icon: m[2], cp: m[3] }));
+if (keys.length !== rows.length)
+  throw new Error(`鍵を ${keys.length} 件しか拾えなかった(絵は ${rows.length} 件)`);
+writeFileSync(
+  CSS_OUT,
+  [
+    '/* 🔴 **自動生成**(`npm run icons:font`)── 手で直さない。',
+    ' * 絵の表は `src/features/icon/symbols.ts`、書体は `fonts/pkc-symbols.woff2`。',
+    ' * ⚠ **器に字を入れない**ので、絵はここが出す(そうしないとボタンの `textContent` に',
+    ' *   目に見えない 1 文字が混ざり、文言を読む側が静かに外れる)。 */',
+    ...keys.map((k) => `[data-pkc-icon][data-pkc-symbol='${k.key}']::before {\n  content: '\\${k.cp}';\n}`),
+    '',
+  ].join('\n'),
+);
 console.log(`✓ ${OUT} ── ${rows.length} 種 / ${woff2.length} バイト`);
+console.log(`✓ ${CSS_OUT} ── ${keys.length} 規則`);
