@@ -38,9 +38,19 @@ test('🔴 紙面を変えると散文の幅が変わる(表に読み幅の cap 
    * (2026-08-08 に実際に踏んだ ── 2 列の短い表で落ちた)。
    * 🔑 だから **読み幅を超える内容**を持たせる ── これで「掛かっていれば 672px で
    * 切られ、掛かっていなければ超える」が初めて判定になる。
+   *
+   * 🔴 **その「超え方」に余裕を持たせる**(2026-09-11。夜の検査が落ちて判明)──
+   *   直す前は **6 列**で、表の内容の幅が **1034.81px**・器が **1036px** だった
+   *   (= 差 **1.19px**)。つまりこの fixture は「内容が器より広い」を
+   *   **字 1 つ分にも満たない差**で成り立たせており、ブラウザが字幅を 0.2% 変えるだけで
+   *   裏返る ── playwright 1.62 → 1.63 の Chromium 更新(153)で**実際に裏返った**。
+   * 🔑 **列を増やして差を桁で稼ぐ** ── 9 列なら内容の幅は器の 1.5 倍を超えるので、
+   *   字幅が数 % 動いても「器いっぱいに張る」は変わらない。
+   * ⚠ そして**超えていること自体を下で assert する** ── 次に裏返る日が来たら、
+   *   「1px 足りない」ではなく「**前提が崩れている**」と読める形で落とす。
    */
-  const WIDE_ROW = '| ' + ['とても長い見出しの列'.repeat(2)].concat(Array.from({ length: 5 }, (_, i) => `第 ${i + 1} 列の値がここに入る`)).join(' | ') + ' |';
-  const SEP = '|' + '---|'.repeat(6);
+  const WIDE_ROW = '| ' + ['とても長い見出しの列'.repeat(2)].concat(Array.from({ length: 8 }, (_, i) => `第 ${i + 1} 列の値がここに入る`)).join(' | ') + ' |';
+  const SEP = '|' + '---|'.repeat(9);
   await ta.fill(`よく読む段落。\n\n${WIDE_ROW}\n${SEP}\n${WIDE_ROW}\n`);
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
@@ -80,6 +90,20 @@ test('🔴 紙面を変えると散文の幅が変わる(表に読み幅の cap 
    *   ⚠ そして**フル HD では余白が 0 になる**ので、表は器いっぱいまで戻る。
    */
   const tableWide = await widthOf(table);
+  /**
+   * ⚠ **前提を先に検める** ── 「器いっぱいに張る」が言えるのは、**内容が器より広い**
+   *   ときだけである(狭ければ表は縮み、器に届かないのが正しい)。
+   * 🔑 観測点は**升が折れているか** ── 折れていれば、その表は器に押し込まれている。
+   *   ⚠ 幅どうしの引き算で見ない(それが 1.19px 差で裏返った当のものである)。
+   */
+  const foldedLines = await page.evaluate(() => {
+    const cell = document.querySelector('[data-pkc-field="detail-body"] table td');
+    if (cell === null) return -1;
+    const r = document.createRange();
+    r.selectNodeContents(cell);
+    return r.getClientRects().length;
+  });
+  expect(foldedLines, '表の升が 1 つも折れていない = 内容が器より狭い(前提が崩れている)').toBeGreaterThan(1);
   expect(tableWide, '表に読み幅が掛かっている(器に cap を掛けた実装)').toBeGreaterThan(wide - 1);
   expect(
     tableWide,
