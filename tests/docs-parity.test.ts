@@ -2110,6 +2110,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-11(マテリアルの図案)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-08-blocked-why-and-calc-palette" …` → 980000c
+     */
+    'スマホでも「作る」が押せない理由が出るようになり、その場で計算を「操作を探す」から呼べます',
+    /**
      * ⚠ **2026-09-11(最近開いた順)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-08-notice-keep-and-table" …` → 7c3f801
      */

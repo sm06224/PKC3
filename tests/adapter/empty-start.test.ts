@@ -61,8 +61,15 @@ const box = (root: HTMLElement, mode: Mode): HTMLElement | null =>
     '[data-pkc-region="sidebar"] [data-pkc-field="entry-list-empty"] [data-pkc-field="empty-start"]',
   );
 
+/**
+ * ⚠ **文言は `label` の欄から採る**(2026-09-11、#770 段①)── 図案が**書体の 1 文字**に
+ *   なったので、ボタン丸ごとの `textContent` には**目に見えない 1 文字**が混ざる。
+ * 🔑 見たいのは「何と書いてあるか」なので、器ではなく**文言の欄**を読む。
+ */
 const labels = (el: HTMLElement | null): string[] =>
-  [...(el?.querySelectorAll('button') ?? [])].map((b) => b.textContent ?? '');
+  [...(el?.querySelectorAll('button') ?? [])].map(
+    (b) => b.querySelector('[data-pkc-field="label"]')?.textContent ?? b.textContent ?? '',
+  );
 
 beforeEach(() => {
   document.body.textContent = '';

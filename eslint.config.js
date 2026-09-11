@@ -32,6 +32,10 @@ export default tseslint.config(
         MessageEvent: 'readonly',
         URL: 'readonly',
         Response: 'readonly',
+        // ⚠ 焼き直しの script(`scripts/build-icon-font.mjs`)は node 24 の
+        //    `fetch` / `Buffer` を使う ── node 18 以降は大域に在る
+        fetch: 'readonly',
+        Buffer: 'readonly',
         // ⚠ 計器(`tests/bench/*.mjs`)は page.evaluate の中で
         //    ブラウザ側の API を使う ── そちらの global もここに要る
         PerformanceObserver: 'readonly',

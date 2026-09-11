@@ -356,7 +356,7 @@ describe('添付の詳細から起動する(P10)', () => {
     expect(run!.getAttribute('title')).toContain('PKC3 から切り離して開きます');
     expect(raw!.getAttribute('title')).toContain('PKC3 のノートを全部読めます');
     // 図案が入っている(押せる物だと分かる)
-    expect(run!.querySelector('[data-pkc-icon] svg path')).not.toBeNull();
+    expect(run!.querySelector('[data-pkc-icon]')?.textContent ?? '', '図案が空').not.toBe('');
   });
 
   /**
@@ -470,9 +470,9 @@ describe('PDF の添付(窓内 + 別窓)', () => {
     expect(view!.getAttribute('title')).toContain('PDF');
     // ⚠ 図案の鍵(`ACTION_ICONS`)を壊すと**黙って図案なし**になる ── ここで鳴らす
     expect(
-      view!.querySelector('[data-pkc-icon] svg path'),
+      view!.querySelector('[data-pkc-icon]')?.textContent ?? '',
       '図案が付いていない(ACTION_ICONS の鍵がずれている)',
-    ).not.toBeNull();
+    ).not.toBe('');
   });
 
   it('別窓に出せない種類には「別の窓で見る」を出さない(押せない導線を置かない)', async () => {
