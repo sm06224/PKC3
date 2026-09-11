@@ -1058,6 +1058,7 @@ describe('お知らせの文面は固定(#220-7)', () => {
      *   `git log --oneline origin/main -S"2026-09-08-manual-jump" -- src/features/notice/notice-log.ts`
      *   → bcc0b0a。原本は CHANGELOG.md に在る。
      */
+    ['2026-09-11-help-toc-all', '63954e8e'],
     ['2026-09-09-move-picker', 'd1bd6424'],
     ['2026-09-09-drop-and-notice', 'a266379f'],
     ['2026-09-09-captures', '43c08c69'],
@@ -1137,7 +1138,6 @@ describe('お知らせの文面は固定(#220-7)', () => {
      */
     ['2026-09-08-blocked-why-and-calc-palette', '85df4d35'],
     ['2026-09-08-notice-keep-and-table', '77dfc01d'],
-    ['2026-09-08-split-and-office-size', '06dc6971', 'main'],
     // ⚠ 下の 3 件は 91b1d00(2026-09-08 05:03)で main へ入った = 配ってある
     // ⚠ 2026-09-09(#681 の着地前レビューの直し): 枠を超えたので
     //    `2026-09-08-note-button-blocked` を登記表から落とした(この表は登記表と同じ件数)

@@ -1075,8 +1075,11 @@ describe('マニュアルの中を探す(#636)', () => {
  * cowork 実測 2026-09-05:「本文 **106,339 字 / `scrollHeight` 5455px**、
  * **面の中のリンク 0 件**」── 10 万字を目次なしで探す形だった。
  *
- * ⚠ **飛び先が在る見出しだけ並べる**(無言の dead click を作らない)── 描画器が
- *   `id` を焼くのは h1〜h3 だけなので、h4 以下は行にしない。
+ * 🔴 **段は全部並べる**(2026-09-11、#531)。⚠ かつてここは「`id` が焼かれるのは
+ *   h1〜h3 だけだから h4 以下は行にしない」だった ── 結果、**`####` の 94 本が
+ *   面の目次に出ない**のに**別窓の目次には出る**という食い違いになっていた。
+ * 🔑 飛ぶのに `id` は要らない(器の `scrollTop` で送る)ので、**何番目の見出しか**で
+ *   引く形にした。⚠ だから行の数は「`id` を持つ見出し」ではなく**見出しの全数**である。
  */
 describe('ヘルプの面の目次(#719)', () => {
   it('🔴 目次の行が出て、押すとその見出しへ飛ぶ', async () => {
@@ -1094,20 +1097,42 @@ describe('ヘルプの面の目次(#719)', () => {
     expect(rows.length, '目次の行が 1 つも出ていない').toBeGreaterThan(10);
 
     /**
-     * 🔴 **行の数 = `id` を持つ見出しの数**(等値)。
+     * 🔴 **行の数 = 見出しの全数**(等値)。
      * ⚠ 「1 つ以上」だと、**先頭 1 件だけ出す**実装でも緑になる。
      */
-    const withId = [...host.querySelectorAll('h1[id], h2[id], h3[id]')];
-    expect(rows.length, '目次の行と、飛び先のある見出しの数が合わない').toBe(withId.length);
-    // ⚠ 対照群 ── `id` の無い見出しは行にしない(押しても飛べないので)
+    const heads = [...host.querySelectorAll('h1, h2, h3, h4, h5, h6')];
+    expect(rows.length, '目次の行と、マニュアルの見出しの数が合わない').toBe(heads.length);
+    /**
+     * 🔴 **対照群 ── `####` が実際に混ざっている**(2026-09-11、#531)。
+     * ⚠ これが 0 だと、上の等値は「h1〜h3 しか描かれていない」でも満たされる
+     *   ── つまり**直す前の実装でも緑になる**(§1「救い手が変わっただけ」)。
+     */
     expect(
-      host.querySelectorAll('h4[id], h5[id], h6[id]').length,
-      '前提が崩れている: h4 以下に id が焼かれている(目次の切り方を見直す)',
-    ).toBe(0);
+      host.querySelectorAll('h4').length,
+      '前提が崩れている: マニュアルに `####` が 1 つも無い(段を広げた意味が測れない)',
+    ).toBeGreaterThan(10);
+
+    /**
+     * 🔴 **目次の上の断り文と、実際に並ぶものを対で留める**(2026-09-11。変異 M6 が
+     *   SURVIVED で教えた)。⚠ 直す前の断り文は「**大きい見出しだけ出ます。細かい見出しは
+     *   別のウィンドウの目次から**」で、段を全部出すようにした瞬間**嘘になった** ──
+     *   それでも **unit も smoke も 1 つも落ちなかった**。
+     * 🔴 嘘の断り文は「無いもの」より悪い ── **在る道を隠す**(user は別窓を開きに行く)。
+     * 🔑 だから**行の数と断り文を同じ `it` で見る**:全部並んでいるのに
+     *   「だけ」と書いてあったら落とす。⚠ 字面の等値では pin しない
+     *   (言い回しを直すたびに落ちる検査は、いずれ中身ごと消される)。
+     */
+    const note = region.querySelector<HTMLElement>('[data-pkc-region="help-toc"]')!
+      .previousElementSibling;
+    expect(note?.textContent ?? '', '目次の上に断り文が無い(空振り)').toContain('目次');
+    expect(
+      note?.textContent ?? '',
+      '目次は全部並んでいるのに、断り文が「一部だけ」と言っている(在る道を隠す)',
+    ).not.toMatch(/だけ|3 段|大きい見出し/);
 
     // 押すと、その見出しへ飛ぶ
     const seen: HTMLElement[] = [];
-    for (const h of withId)
+    for (const h of heads)
       (h as HTMLElement).scrollIntoView = function (this: HTMLElement): void {
         seen.push(this);
       };
@@ -1116,7 +1141,7 @@ describe('ヘルプの面の目次(#719)', () => {
     //    `manualReady` を待ってから飛ぶようになった ── 待たないと空振りになる)
     for (let i = 0; i < 8; i++) await Promise.resolve();
     expect(seen, '押しても飛んでいない').toHaveLength(1);
-    expect(seen[0], '押した行と違う見出しへ飛んだ').toBe(withId[3]);
+    expect(seen[0], '押した行と違う見出しへ飛んだ').toBe(heads[3]);
 
     /**
      * 🔴 **行の字と段を、見出しと 1 本ずつ突き合わせる**(着地前レビュー・実装 ⚠-5)。
@@ -1128,11 +1153,11 @@ describe('ヘルプの面の目次(#719)', () => {
     expect(
       rows.map((r) => r.textContent),
       '目次の字が、見出しの字と違う',
-    ).toEqual(withId.map((h) => h.textContent));
+    ).toEqual(heads.map((h) => h.textContent));
     expect(
       rows.map((r) => r.getAttribute('data-pkc-level')),
       '目次の段が、見出しの段と違う(段付けの当たる先が消える)',
-    ).toEqual(withId.map((h) => h.tagName.slice(1)));
+    ).toEqual(heads.map((h) => h.tagName.slice(1)));
     // ⚠ 空振り防止 ── 段が 1 種類しか出ていないなら、上の等値は何も見ていない
     expect(
       new Set(rows.map((r) => r.getAttribute('data-pkc-level'))).size,
@@ -1154,7 +1179,7 @@ describe('ヘルプの面の目次(#719)', () => {
      *   ここで通せるようになった ── 壊れうる状態そのものが消えている(§7)。
      * ⚠ 上の `rows[3]` は**英字始まり**なので、そこだけでは通らない穴である。
      */
-    const digits = withId.filter((h) => /^[0-9]/.test(h.id));
+    const digits = heads.filter((h) => /^[0-9]/.test(h.id));
     expect(
       digits.length,
       '前提が崩れている: 数字で始まる見出しが 1 つも無い(この段は何も見ていない)',
@@ -1162,7 +1187,7 @@ describe('ヘルプの面の目次(#719)', () => {
     // ⚠ **いちばん後ろ**を採る ── 先頭は「上から 2 番目の見出し」で、
     //    前置きが縮んだ日に別の理由で落ちる(着地前レビュー 2 巡目・[軽] 6)
     const last = digits[digits.length - 1]!;
-    const digitAt = withId.indexOf(last);
+    const digitAt = heads.indexOf(last);
     seen.length = 0;
     rows[digitAt]!.click();
     for (let i = 0; i < 8; i++) await Promise.resolve();

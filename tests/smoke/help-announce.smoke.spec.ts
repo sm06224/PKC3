@@ -117,11 +117,16 @@ test('🔴 ヘルプの面が開き、マニュアルが描かれる', async ({ 
   const digitAt = await page.evaluate(() => {
     const host = document.querySelector('[data-pkc-region="help-manual"]');
     if (host === null) throw new Error('前提が崩れている: マニュアルの箱が無い');
-    const ids = [...host.querySelectorAll('h1[id], h2[id], h3[id]')].map((h) => h.id);
+    /**
+     * 🔴 **列挙は見出しの全数**(2026-09-11、#531)── 目次の行は `id` を持つものだけ
+     *   ではなく**全段**並ぶようになったので、`h1[id],h2[id],h3[id]` で数えると
+     *   **行の番号とずれる**(= 別の節へ飛んで、この段が嘘の主張になる)。
+     */
+    const heads = [...host.querySelectorAll('h1, h2, h3, h4, h5, h6')];
     // ⚠ **いちばん後ろ**を採る(着地前レビュー 2 巡目・[軽] 6)── 先頭の 1 件は
     //    上から 2 番目の見出しで `scrollTop` の余裕がいちばん小さく、前置きが
     //    縮んだ日に**この件と無関係な理由で**赤くなる(そして「数字始まりが壊れた」と読まれる)
-    return ids.map((id, i) => (/^[0-9]/.test(id) ? i : -1)).filter((i) => i >= 0).pop() ?? -1;
+    return heads.map((h, i) => (/^[0-9]/.test(h.id) ? i : -1)).filter((i) => i >= 0).pop() ?? -1;
   });
   expect(digitAt, '前提が崩れている: 数字で始まる見出しが 1 つも無い').toBeGreaterThanOrEqual(0);
   await page.locator('[data-pkc-field="help-toc-row"]').nth(digitAt).click();
@@ -131,9 +136,9 @@ test('🔴 ヘルプの面が開き、マニュアルが描かれる', async ({ 
 
   /**
    * 🔴 **目次は「別のウィンドウで開く」と「探す欄」の後ろに在る**
-   * (着地前レビュー・動線 1)。⚠ 目次の行は**素の button が 85 個**(実測 ──
-   *   原文の `^#` を数えると 91 になるが、囲みの中の `#` が混ざる)なので、
-   *   前に置くと `Tab` を 85 回押さないとその 2 つに届かない。
+   * (着地前レビュー・動線 1)。⚠ 目次の行は**素の button が何十個も**在る
+   *   (2026-09-11 に全段を並べるようにしたので更に増えた)ので、
+   *   前に置くとその回数だけ `Tab` を押さないとその 2 つに届かない。
    * 🔑 DOM の並びで見る(`Tab` の順はこれで決まる)。
    */
   const tabOrder = await page.evaluate(() => {
@@ -142,7 +147,7 @@ test('🔴 ヘルプの面が開き、マニュアルが描かれる', async ({ 
     const els = [...host.querySelectorAll('[data-pkc-action="open-manual-window"], [data-pkc-field="help-find"], [data-pkc-field="help-toc-row"]')];
     return els.map((e) => e.getAttribute('data-pkc-action') ?? e.getAttribute('data-pkc-field') ?? '');
   });
-  expect(tabOrder.slice(0, 2), '目次が別窓ボタン・探す欄より前に居る(Tab が 85 回になる)').toEqual([
+  expect(tabOrder.slice(0, 2), '目次が別窓ボタン・探す欄より前に居る(Tab が何十回にもなる)').toEqual([
     'open-manual-window',
     'help-find',
   ]);
