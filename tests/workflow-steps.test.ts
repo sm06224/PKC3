@@ -335,7 +335,11 @@ describe('nightly の job と step', () => {
     const raw = lines
       .slice(start + 1)
       .filter((l) => /^ {2}\S+:\s*$/.test(l) && !/^\s*#/.test(l)).length;
-    expect(raw, 'job を 1 つも見つけられていない').toBeGreaterThanOrEqual(5);
+    // ⚠ **床は 3**(2026-09-11 に 5 から下げた)── 全量 smoke の 2 job を
+    //    `smoke.yml`(押したときだけ)へ引っ越したためである。
+    //    🔑 床を下げるのは、「取りこぼしを検出できない」側へ倒れるので、
+    //    減らすときは**理由を 1 行書く**(書けないなら、それは事故である)。
+    expect(raw, 'job を 1 つも見つけられていない').toBeGreaterThanOrEqual(3);
     expect(jobs.length).toBe(raw);
   });
 
@@ -407,7 +411,10 @@ describe('nightly の job と step', () => {
       .map((j) => j.name)
       .sort();
     // 空振り防止 ── 検証 job を 1 つも見つけられていないなら検査になっていない
-    expect(others.length, '検証 job を見つけられていない').toBeGreaterThanOrEqual(4);
+    // ⚠ **床は 2**(2026-09-11 に 4 から下げた)── 全量 smoke の 2 job が
+    //    `smoke.yml` へ移った。⚠ 夜が見るのは **product の焼きと検品** と
+    //    **Rust wasm / probe** の 2 つである。
+    expect(others.length, '検証 job を見つけられていない').toBeGreaterThanOrEqual(2);
     // 🔴 needs から漏れた job の赤は**永久に台帳へ出ない**(step 版の
     //    「台帳は最後に置く」と同じ罠)。集合で突き合わせる ── 件数だけだと
     //    1 つ足して 1 つ落とす取り違えが通る
@@ -789,14 +796,26 @@ describe('PR gate の形(2026-08-18 / 2026-09-09)', () => {
    * 🔑 **見るのは file 名ではなく「引き金」である**(CLAUDE.md「guard を file 名指しで
    *   書かない」)── `ci.yml` に戻す形だけを止めても、`pages.yml` や新しい file に
    *   書けば素通りする。だから **`test:smoke` を実行する workflow を全数走査**して、
-   *   その `on:` に `push` / `pull_request` が無いことを見る。
-   * ⚠ `schedule` は落とさない ── 夜(`nightly.yml`)は user 自身が決めた
-   *   「重い検証の受け皿」であり、**毎ターンの負荷ではない**。ここまで止めると
-   *   「赤が届く先」(#221)ごと消える。
+   *   その `on:` が **`workflow_dispatch` だけ**であることを見る。
+   *
+   * 🔴 **`schedule` も自動起動である**(user 指示 2026-09-11 で確定):
+   *
+   * > 「**フルスモークCIを自動起動しないように設定しろ**」
+   *
+   * ⚠ 2026-09-09 のこの test には、私が書いた carve-out が在った ──
+   *   「⚠ `schedule` は落とさない ── 夜は user 自身が決めた重い検証の受け皿であり、
+   *   毎ターンの負荷ではない」。🔴 **これが誤りだった。** 禁止の目的は
+   *   「**押していないのに全量が走らない**」ことなので、**夜は押していない側**である。
+   * 🔑 CLAUDE.md「戒めには何のための禁止かを書く」の**読む側の失敗**である ──
+   *   目的(押していない全量を止める)ではなく**対象**(push / PR)で書いたので、
+   *   同じ目的に当たる 3 つ目の引き金を、自分で例外にしてしまった。
+   * ⚠ 夜から消えた 2 つ(2 つのブラウザの突き合わせ / product 版の全量)は
+   *   **`smoke.yml` の入力になっている** ── 減らしたのではなく、押したときだけにした。
+   *
    * ⚠ 見るのは**実行する行**(`codeOnly`)── この test の解説にも、workflow の
    *   注記にも `test:smoke` の字が在るので、コメントを落とさないと必ず落ちる。
    */
-  it('🔴 全量 smoke は push / PR では起動しない(任意起動と夜だけ)', () => {
+  it('🔴 全量 smoke は自動では起動しない(押したときだけ)', () => {
     let seen = 0;
     for (const file of readdirSync(DIR).filter((f) => /\.ya?ml$/.test(f))) {
       const text = codeOnly(readFileSync(join(DIR, file), 'utf8'));
@@ -804,12 +823,35 @@ describe('PR gate の形(2026-08-18 / 2026-09-09)', () => {
       seen += 1;
       const head = text.slice(text.indexOf('\non:'), text.indexOf('\njobs:'));
       expect(head, `${file}: on: の塊が読めていない`).toContain('workflow_dispatch');
-      for (const trigger of ['push:', 'pull_request:'])
+      // 🔴 **3 つとも「押していない」側である**(schedule を含む)
+      for (const trigger of ['push:', 'pull_request:', 'schedule:'])
         expect(head, `${file} が ${trigger} で全量 smoke を自動起動する`).not.toContain(trigger);
     }
     // ⚠ 空振り防止は**等値**にする ── 「1 件以上」だと、全量を回す口が
     //   1 つ増えても気づけない(増やすなら、ここを直しながら考えること)
-    expect(seen, '全量を回す workflow の数が変わった(smoke.yml / nightly.yml の 2 つ)').toBe(2);
+    expect(seen, '全量を回す workflow の数が変わった(いまは smoke.yml だけ)').toBe(1);
+  });
+
+  /**
+   * 🔴 **夜から全量 smoke が消えている**(user 指示 2026-09-11)。
+   *
+   * ⚠ 上の全数走査は「`test:smoke` を持つ workflow」しか見ないので、
+   *   **夜から消えたこと自体は 1 つも主張していない** ── `nightly.yml` に
+   *   戻した瞬間、上の test は「seen が 2 になった」で落ちるが、
+   *   ⚠ **落ちる理由が「数が変わった」としか出ない**(どこへ戻ったか読めない)。
+   * 🔑 だから夜を名指しで見る ── 落ちたときに **file の名前で**分かる。
+   * ⚠ そして**空振り防止**に「夜が今も何かを回していること」を併せて見る
+   *   (`nightly.yml` を空にしても「smoke が無い」は真になる)。
+   */
+  it('🔴 夜は全量 smoke を回さない(焼きと検品と probe だけ)', () => {
+    const night = codeOnly(readFileSync(join(DIR, 'nightly.yml'), 'utf8'));
+    expect(night, '夜に全量 smoke が戻っている(押したときだけ = smoke.yml)').not.toContain(
+      'test:smoke',
+    );
+    // ⚠ 空振り防止 ── 夜が空になっていない(消したのは smoke だけである)
+    expect(night, '夜が product を焼かなくなった').toContain('VITE_PKC_KIND=product');
+    expect(night, '夜が検品しなくなった').toContain('check-dist.mjs product');
+    expect(night, '夜が probe を回さなくなった').toContain('tests/probe/');
   });
 
   /**
@@ -829,33 +871,63 @@ describe('PR gate の形(2026-08-18 / 2026-09-09)', () => {
   it('🔴 smoke の shard は、全部合わせて全量になる', () => {
     // ⚠ 2026-09-09: 見る先が `ci.yml` から `smoke.yml` へ移った(任意起動)。
     //   守る主張は同じ ── **割っても 1 件も減らない**。
-    const smoke = jobsOf(SMOKE).get('smoke') ?? '';
-    // 空振り防止 ── job が取れていない形で「一致した」と言わない
-    expect(smoke, 'smoke の本文が取れていない').toContain('test:smoke');
+    // ⚠ 2026-09-11: 夜から引っ越した `smoke_chromium` が増えたので、
+    //   **全量を回す job を数え上げて 1 つずつ**見る(代表 1 つだけ見ると、
+    //    増えた側が静かに `shard: [1]` でも通る ── CLAUDE.md §7)。
+    const smokeJobs = [...jobsOf(SMOKE)].filter(([, body]) => body.includes('test:smoke'));
+    expect(smokeJobs.map(([n]) => n), '全量を回す job の顔ぶれが変わった').toEqual([
+      'smoke',
+      'smoke_chromium',
+    ]);
 
-    const list = /shard:\s*\[([^\]]+)\]/.exec(smoke);
-    expect(list, 'matrix.shard の一覧が無い(割るのをやめた?)').not.toBeNull();
-    const shards = list![1]!.split(',').map((x) => Number(x.trim()));
-    expect(shards, 'shard の番号が数字でない').not.toContain(NaN);
+    for (const [name, smoke] of smokeJobs) {
+      const list = /shard:\s*\[([^\]]+)\]/.exec(smoke);
+      expect(list, `${name}: matrix.shard の一覧が無い(割るのをやめた?)`).not.toBeNull();
+      const shards = list![1]!.split(',').map((x) => Number(x.trim()));
+      expect(shards, `${name}: shard の番号が数字でない`).not.toContain(NaN);
 
-    const uses = [...smoke.matchAll(/--shard=\$\{\{\s*matrix\.shard\s*\}\}\/(\d+)/g)];
-    expect(uses.length, '`--shard=${{ matrix.shard }}/N` が 1 か所に無い').toBe(1);
-    const total = Number(uses[0]![1]);
+      const uses = [...smoke.matchAll(/--shard=\$\{\{\s*matrix\.shard\s*\}\}\/(\d+)/g)];
+      expect(uses.length, `${name}: \`--shard=\${{ matrix.shard }}/N\` が 1 か所に無い`).toBe(1);
+      const total = Number(uses[0]![1]);
 
-    // 🔴 ここが本題:matrix の個数 = 分母
-    expect(shards.length, `matrix は ${shards.length} 個なのに分母は ${total}`).toBe(total);
-    // ⚠ 番号は 1..N が 1 つずつ(重複・抜けを落とす)
-    expect([...shards].sort((a, b) => a - b)).toEqual(
-      Array.from({ length: total }, (_, i) => i + 1),
+      // 🔴 ここが本題:matrix の個数 = 分母
+      expect(shards.length, `${name}: matrix は ${shards.length} 個なのに分母は ${total}`).toBe(
+        total,
+      );
+      // ⚠ 番号は 1..N が 1 つずつ(重複・抜けを落とす)
+      expect([...shards].sort((a, b) => a - b)).toEqual(
+        Array.from({ length: total }, (_, i) => i + 1),
+      );
+
+      // ⚠ 片方が落ちても**もう片方を最後まで走らせる**(走らなかった shard は
+      //    「確かめていない」であって「緑」ではない ── 2026-08-17 の nightly)
+      expect(smoke, `${name}: fail-fast を切っていない`).toContain('fail-fast: false');
+      // ⚠ tripwire は残す(割ったのは budget を上げないためである)
+      expect(smoke, `${name}: 速度予算の tripwire が消えている`).toContain('timeout-minutes: 10');
+    }
+  });
+
+  /**
+   * 🔴 **2 つ目のブラウザは「押したときだけ」走る**(2026-09-11)。
+   *
+   * ⚠ 夜から引っ越したので、**既定のまま押すと 1 つのブラウザしか回らない** ──
+   *   そこを黙って既定 ON にすると、押すたびに倍の時間がかかる(そして
+   *   「毎ターンの負荷」が別の形で戻る)。
+   * 🔑 だから `if:` で入力に紐づけ、**既定は headless_shell 片方**にする。
+   * ⚠ ここが壊れると「両方で確かめた」という**嘘の主張**が残るので、
+   *   入力の選択肢に `both` が在ることまで見る(選べないと突き合わせ自体ができない)。
+   */
+  it('🔴 2 つのブラウザの突き合わせは、入力で選んだときだけ走る', () => {
+    const jobs = jobsOf(SMOKE);
+    expect(jobs.get('smoke_chromium'), '2 つ目のブラウザの job が無い').toContain(
+      "inputs.browser == 'both'",
     );
-
-    // ⚠ 片方が落ちても**もう片方を最後まで走らせる**(走らなかった shard は
-    //    「確かめていない」であって「緑」ではない ── 2026-08-17 の nightly)
-    expect(smoke, 'fail-fast を切っていない(片方が落ちたら残りが走らない)').toContain(
-      'fail-fast: false',
-    );
-    // ⚠ tripwire は残す(割ったのは budget を上げないためである)
-    expect(smoke, '速度予算の tripwire が消えている').toContain('timeout-minutes: 10');
+    // ⚠ 既定側も条件を持つ(`chromium` だけを選んだときに 2 周させない)
+    expect(jobs.get('smoke'), '既定の job が入力を見ていない').toContain("inputs.browser !=");
+    const head = SMOKE.slice(SMOKE.indexOf('\non:'), SMOKE.indexOf('\njobs:'));
+    expect(head, '突き合わせを選ぶ口が無い').toContain('[headless_shell, chromium, both]');
+    // 🔴 既定は片方 ── 押すたびに倍かかる形にしない
+    expect(head, '既定が片方のブラウザでない').toContain('default: headless_shell');
   });
 
   it('🔴 2 つは並列(直列にすると budget の問題が解けない)', () => {

@@ -1,36 +1,55 @@
-# PKC3 全量 smoke ── 🔴 **任意起動だけ**(user 指示 2026-09-09。不可侵)
+# PKC3 全量 smoke ── 🔴 **押したときだけ**(user 指示 2026-09-09 / 2026-09-11。不可侵)
 #
 # > 「**自動CIにフルスモークテスト入ってない？/ 自動実行は禁止したはず /
-# >   約束では全て任意起動のはず**」
+# >   約束では全て任意起動のはず**」(2026-09-09)
 #
-# ⚠ 直す前は `ci.yml` の中に居て、**PR へ push するたび / main へ push するたび**に
-#   全量が 3 shard で回っていた ── 同じ日に出た
-#   「**改修一件で増えるテストが毎ターンの負荷に積み上がる / o(n2) のテストケース
-#   広がりを回避しろ**」の、**CI 側の実体**である。手元は `scripts/pick-smoke.mjs` で
-#   引く形に直したのに、**CI は毎 push でフルのまま**だった。
+# > 「**フルスモークCIを自動起動しないように設定しろ / 基本的には単体テストを自分で行い、
+# >   サブエージェントに対象範囲のみのスモークテストをさせろ /
+# >   UI導線のテストをフルスモークで誤魔化すな**」(2026-09-11)
+#
+# ⚠ 直す前(2026-09-09 まで)は `ci.yml` の中に居て、**PR へ push するたび / main へ
+#   push するたび**に全量が 3 shard で回っていた。⚠ そして 2026-09-11 まで、
+#   **`nightly.yml` が毎晩 18:00 UTC に全量を 2 周**していた ── 「任意起動」に夜は
+#   入らない(押していないので)。🔴 **いま全量を回す口は、この file しか無い。**
 #
 # 🔑 **禁止の目的は「押していないのに全量が走らないこと」**であって、全量を回さない
 #   ことではない ── 回すときは Actions の「Run workflow」を押す。
 #   ⚠ 着地の直前の 1 回(CLAUDE.md「フルは 1 PR に 1 回」)は、ここで押す。
-# 🔑 夜の全量は `nightly.yml` に在る(2 つのブラウザで突き合わせる唯一の場所)──
-#   こちらは「押したときだけ」の口であって、夜の検査を置き換えるものではない。
+#
+# 🔑 **夜から持ってきたものは、1 件も捨てていない ── 起動する条件だけを変えた**:
+#   - 2 つのブラウザの突き合わせ → `browser: both`
+#   - product 版(PR gate が焼かない成果物)の全量 → `kind: product`
 #
 # ⚠ **`on:` に `push` / `pull_request` / `schedule` を足さない。**
 #   足した瞬間に上の指示が破れるので、`tests/workflow-steps.test.ts` が機械で止める。
 name: Smoke (手動)
 on:
   workflow_dispatch:
+    inputs:
+      browser:
+        description: 'どのブラウザで回すか(both = 2 つを突き合わせる。実挙動が違う所を見る唯一の場)'
+        required: false
+        default: headless_shell
+        type: choice
+        options: [headless_shell, chromium, both]
+      kind:
+        description: '何を焼いて配るか(product = Pages の / に出る成果物。dev とは別物)'
+        required: false
+        default: dev
+        type: choice
+        options: [dev, product]
 permissions:
   contents: read
 jobs:
-  # 🔴 **3 shard のまま移した** ── 割っても **1 件も減らない**(playwright の
-  #   `--shard` は spec を分けるだけで、3 つ合わせれば全量である)。
+  # 🔴 **3 shard のまま** ── 割っても **1 件も減らない**(playwright の `--shard` は
+  #   spec を分けるだけで、3 つ合わせれば全量である)。
   # ⚠ `timeout-minutes: 10` は速度予算の tripwire なので**上げない**
   #   (2026-08-28 に smoke 本体が 9 分 25 秒まで伸びて job ごと切られた ──
   #    上げると「次に本当に遅くなったとき」に鳴らなくなる)。
   # ⚠ `fail-fast: false` ── 1 つ落ちても残りを最後まで走らせる
   #   (走らなかった shard は「確かめていない」であって「緑」ではない)。
   smoke:
+    if: ${{ inputs.browser != 'chromium' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
@@ -48,8 +67,52 @@ jobs:
       #   (source を書き換えただけでは smoke に一切届かない ── CLAUDE.md §3)
       # ⚠ kind を**明示**する(`ci.yml` の verify と同じ理由 ── 既定が変わると
       #   「検品した物」と「配る物」が静かに別物になる)
-      - run: VITE_PKC_KIND=dev npm run build
+      - run: VITE_PKC_KIND=${{ inputs.kind || 'dev' }} npm run build
       - run: npx playwright install chromium --with-deps
       # ⚠ 3 つ合わせて全量。1 つだけ緑でも**全量が通ったことにはならない**
-      - name: Visual smoke (${{ matrix.shard }}/3 ── もう 1 つのブラウザは nightly)
+      - name: Visual smoke (${{ matrix.shard }}/3 ── headless_shell)
+        run: npm run test:smoke -- --shard=${{ matrix.shard }}/3
+
+  # 🔴 **もう 1 つのブラウザ**(2026-09-11 に夜から引っ越した)。
+  #
+  # CLAUDE.md §5「CI と手元で別のブラウザが動いている」── `window.print()` の
+  # `afterprint` のように**実挙動が違う**所が実在するので、突き合わせる場が要る。
+  # ⚠ その場は**夜だった**が、夜は「押していない」= 自動起動なので畳んだ。
+  # 🔑 だから `browser: both` を押したときに、ここが走る。
+  # ⚠ **既定では走らない** ── 既定の 1 周だけで「両方で確かめた」と書かないこと。
+  smoke_chromium:
+    if: ${{ inputs.browser == 'chromium' || inputs.browser == 'both' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: VITE_PKC_KIND=${{ inputs.kind || 'dev' }} npm run build
+      - run: npx playwright install chromium --with-deps
+      # 🔴 **path を `$GITHUB_ENV` へ書かない**(2026-08-07)── それは**以降の全 step**に
+      #   効くので、無関係な step の**検査対象まで変える**(当時は片方しか検査して
+      #   いないのに「両方で通している」つもりになっていた)。⚠ 渡す先は step の `env:`。
+      # 🔴 **`echo "$(…)"` は「取れなかった」を食べる**(CLAUDE.md §6)── `node` が
+      #   死んでも `echo` の終了コードが勝つので、`path=` が空のまま渡り、
+      #   「どのブラウザで測ったか分からない回」が緑になる。
+      - name: Resolve chromium path
+        id: pw
+        run: |
+          P=$(node -e "const {chromium}=require('@playwright/test'); console.log(chromium.executablePath())")
+          if [ -z "$P" ]; then
+            echo "::error::chromium の path が取れない ── smoke がどのブラウザで走るか決まらない"
+            exit 1
+          fi
+          echo "path=$P" >> "$GITHUB_OUTPUT"
+      - name: Visual smoke (${{ matrix.shard }}/3 ── フル chromium)
+        env:
+          PKC3_CHROMIUM: ${{ steps.pw.outputs.path }}
         run: npm run test:smoke -- --shard=${{ matrix.shard }}/3
