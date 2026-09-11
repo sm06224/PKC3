@@ -16,6 +16,7 @@ import { loadSplitLids, saveSplitLids } from '@adapter/platform/split-store';
 import { isAsidePane, viewModeLabel, type ViewMode } from '@adapter/state/app-state';
 import { bindEditLockRelease } from '@adapter/state/edit-lock-release';
 import { connectStoreEffects, type StoreEffects } from '@adapter/state/store-effects';
+import { connectOpenedEffects } from '@adapter/platform/opened-effects';
 import { tileSelectsEntry } from '@features/launcher/tiles';
 import { appEditorMode } from '@adapter/ui/render/editor-mode';
 import { applyTextScale, chosenTextScale, initialTextScale } from '@adapter/ui/render/text-scale';
@@ -3404,6 +3405,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     const lid = dispatcher.getState().selectedLid;
     if (lid) center.noteBlockedBox(lid, blocked, kinds);
   });
+  /**
+   * 🔴 **最近開いたノートを憶える**(#215 残り①)。⚠ 判断は
+   *   `opened-effects.ts` が持つ ── この file はどの test からも実行されない
+   *   (CLAUDE.md §2)ので、ここは**繋ぐだけ**にする。
+   */
+  connectOpenedEffects(dispatcher);
   storeEffects = connectStoreEffects(dispatcher, createStorePort(client, cid), {
     // #148 組み込みタイル ── 一式が入っている端末にだけ Office のタイルを出す。
     // 控えは起動時と設置/削除の直後に setMeta で合っている(officeOpener と同じ値)

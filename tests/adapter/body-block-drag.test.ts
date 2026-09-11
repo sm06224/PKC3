@@ -691,6 +691,46 @@ describe('一覧の行を本文へ落とすとリンクになる(#684 段②)', 
     expect(folder.hasAttribute('data-pkc-dropping')).toBe(true);
     expect(s.root.querySelectorAll('[data-pkc-drop-edge]')).toHaveLength(0);
   });
+
+  /**
+   * 🔴 **開いているのが「入れられない種類」でも、一覧の行のリンクは入る**
+   *   (#809-5 の記録、2026-09-11)。
+   *
+   * ⚠ 塊(段①③)と外の file(段④)は `canPutIntoBody` で断るが、**この経路だけは
+   *   通していない** ── 入るのは**リンク 1 行の字**だけで、元は 1 つも動かないからである。
+   * 🔑 **これを「揃え忘れ」と読んで門を足すと、動線が 1 つ消える**
+   *   (フォルダの本文も画面に出て編集できる)。だから**わざとであることを検査で留める** ──
+   *   ⚠ 検査が無いと、次の人が揃えた日に**誰も気づかない**(CLAUDE.md §7 の例外の記録)。
+   * ⚠ **対照群を同じ `it` に置く** ── 同じ本文・同じ塊へ **file** を落とす側は
+   *   断ること。置かないと「この種類ではそもそも線が出ない」と区別が付かない。
+   */
+  it('🔴 フォルダの本文でも一覧の行は受ける(対照群: 同じ所へ file は受けない)', () => {
+    const s = setup({}, 'folder');
+    teardown = s.unbind;
+    const target = s.block(19); // ## 章 C(生 22)
+    rect(target, 500, 40);
+
+    // ① 一覧の行 ── 受ける
+    const rows = dtStub({ [PKC_LIDS]: 'n2' });
+    const overRow = dragEv('dragover', rows, 505);
+    target.dispatchEvent(overRow);
+    expect(overRow.defaultPrevented, 'フォルダの本文で一覧の行を受けていない').toBe(true);
+    expect(target.getAttribute('data-pkc-drop-edge'), '線が出ていない').toBe('before');
+    target.dispatchEvent(dragEv('drop', rows, 505));
+    expect(
+      s.events.find((e) => e.type === 'REQUEST_BODY_REWRITE'),
+      'リンクが入っていない(門を足した?)',
+    ).toMatchObject({ lid: 'n1', rewrite: { kind: 'insert-lines', lines: ['[相手](entry:n2)'] } });
+
+    // ② 対照群 ── 同じ塊へ file を落とす側は断る(線も出ない)
+    const files = filesDt([new File(['x'], 'a.png', { type: 'image/png' })]);
+    const overFile = dragEv('dragover', files, 505);
+    target.dispatchEvent(overFile);
+    expect(
+      target.hasAttribute('data-pkc-drop-edge'),
+      '前提が崩れている: file の側まで受けている(この種類では断るはず)',
+    ).toBe(false);
+  });
 });
 
 /**

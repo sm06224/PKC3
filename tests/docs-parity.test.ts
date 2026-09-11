@@ -2110,6 +2110,16 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-11(最近開いた順)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-08-notice-keep-and-table" …` → 7c3f801
+     */
+    'お知らせが 30 件まで読めるようになり、表は作った直後からセルに打てます',
+    /**
+     * ⚠ **2026-09-11(ヘルプの目次)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-08-split-and-office-size" …` → 6ddae0f
+     */
+    '横に留めた枠が古いまま残るのを直し、Office の大きさの字を実際の量に直し、アプリの一覧に「組み込みアプリ」の見出しを付けました',
+    /**
      * ⚠ **2026-09-09(#813)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-08-manual-jump" …` → bcc0b0a
      */

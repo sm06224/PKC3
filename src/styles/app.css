@@ -5703,6 +5703,22 @@ li[data-pkc-row-slot] {
   padding-inline-start: var(--s5);
   color: var(--muted);
 }
+/* 🔴 **`####` 以下も並ぶ**(2026-09-11、#531)。⚠ 段付けは **4 で止める** ──
+   h5 / h6 を更に押し込むと、30vh の箱の中で見出しの字が折れて読めなくなる。
+   ⚠ **3 段とも名指しする**(選択子リストで 1 つに書かない)── `data-pkc-level` の
+   値ごとに在ることを検査が数えるので、まとめると「段 5 が無い」と読めてしまう。 */
+[data-pkc-region='help-toc'] [data-pkc-field='help-toc-row'][data-pkc-level='4'] {
+  padding-inline-start: var(--s6);
+  color: var(--muted);
+}
+[data-pkc-region='help-toc'] [data-pkc-field='help-toc-row'][data-pkc-level='5'] {
+  padding-inline-start: var(--s6);
+  color: var(--muted);
+}
+[data-pkc-region='help-toc'] [data-pkc-field='help-toc-row'][data-pkc-level='6'] {
+  padding-inline-start: var(--s6);
+  color: var(--muted);
+}
 /**
  * 🔴 **数式**(#707。user 裁定 2026-09-06「入れる」)。
  *

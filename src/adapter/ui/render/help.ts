@@ -422,9 +422,10 @@ export class HelpRenderer {
      * 🔴 **面の中の目次**(#719 案 A)。⚠ 直す前は面の中のリンクが **0 件**で、
      * 10 万字を目次なしで探す形だった(別窓のほうには #648 で目次が在る)。
      *
-     * ⚠ **飛び先が在る見出しだけ並べる**(dead click を作らない)── 描画器が
-     *   `id` を焼くのは **h1〜h3 だけ**(`markdown-render.ts` の `heading_open`)なので、
-     *   h4 以下は**押せる物として出さない**。
+     * 🔴 **段は全部並べる**(2026-09-11、#531 の残り)。⚠ 直す前は h1〜h3 の 85 本だけで、
+     *   `####` の **94 本が目次に出なかった** ── **同じマニュアルなのに別窓の目次には
+     *   全部出る**ので、面と窓で中身が違っていた(user から見れば「窓では見つかるのに
+     *   面では見つからない」)。飛ぶのに `id` は要らない(器の `scrollTop` で送る)。
      * ⚠ **`data-pkc-action` を足さない** ── `operation-table.test.ts` が等値 pin
      *   しており、足すと 5 つ鳴る。押した所は**ここで直に受ける**
      *   (探す欄・`app-dialog` の `palette-filter` と同じ前例)。
@@ -433,9 +434,9 @@ export class HelpRenderer {
      *   だから `<button>` + 器の `scrollTop` で送る。
      *
      * 🔴 **置き場所は「別窓ボタンと探す欄の後ろ」**(着地前レビュー・動線 1、実測)。
-     *   ⚠ 目次の行は**素の `<button>` が 85 個**(描いた DOM の `h1[id],h2[id],h3[id]` を
-     *   数えた実数。⚠ 原文の `^#` を数えると 91 になるが、囲みの中の `#` が混ざる)なので、
-     *   前に置くと **`Tab` を 85 回押さないと**「別のウィンドウで開く」と
+     *   ⚠ 目次の行は**素の `<button>`**(描いた DOM の見出しの実数。⚠ 原文の `^#` を
+     *   数えると多く出るが、囲みの中の `#` が混ざる)なので、
+     *   前に置くと **その回数だけ `Tab` を押さないと**「別のウィンドウで開く」と
      *   「マニュアルの中を探す」に届かない ── **目次を使わない人には壁**になる。
      * ⚠ 副産物:目次はマニュアルを描き終えてから中身が入るので、前に置くと
      *   **入った瞬間に下のボタンが 250px ほど飛ぶ**(押そうとした物が指の下から逃げる)。
@@ -444,14 +445,14 @@ export class HelpRenderer {
      * 🔴 **見える名前を付ける**(着地前レビュー・動線 3)。⚠ 直す前は `aria-label` だけ
      *   だったので、**読み上げには名前が届き、目で見ている人には届かない**という
      *   逆転が起きていた ── 版のすぐ下に「枠だけの箱」が出る形だった。
-     * 🔑 **段数の断りも画面に出す** ── 出るのは h1〜h3 の **85 本**(実測)で、
-     *   h4 以下は出ない(飛び先が無いため)。⚠ その断りが**マニュアルの中にしか無い**のは、
-     *   探せない人に「マニュアルを読め」と言っているのと同じである。
+       * ⚠ **かつてここには「大きい見出しだけ出ます」と断りが在った** ── 段を全部並べる
+     *   ようにしたので**嘘になった**ので外した(#531)。🔑 **断りは、断る中身が在るときだけ置く**
+     *   ── 残しておくと「細かい見出しは別窓へ」と**在る道を隠す**案内になる。
      */
     const tocHead = document.createElement('p');
     tocHead.setAttribute('data-pkc-field', 'settings-note');
     tocHead.textContent =
-      '目次 ── 大きい見出しだけ出ます。細かい見出しは下の「マニュアルの中を探す」か、別のウィンドウの目次(全部出ます)から探してください';
+      '目次 ── 見出しを全部並べます。言葉で探すときは下の「マニュアルの中を探す」へ';
     body.append(tocHead);
     this.tocHost = document.createElement('nav');
     this.tocHost.setAttribute('data-pkc-region', 'help-toc');
@@ -828,56 +829,64 @@ export class HelpRenderer {
   }
 
   /**
-   * 目次を組む(#719)。⚠ **描いた DOM から拾う** ── 原文を別に走査すると、
-   * 描画器が id を焼く規則(h1〜h3 / 重複の連番)と**二重に持つ**ことになる(§7)。
+   * 🔴 **マニュアルの見出しの全数**(2026-09-11、#531 の残り)。
    *
-   * ⚠ **`id` を持つ見出しだけ**を行にする ── 持たない見出し(h4 以下)を出すと
-   *   押しても飛べない(無言の dead click)。
+   * ⚠ ここが**目次を組む側と、押されて飛ぶ側の唯一の列挙**である ── 2 通りに書くと、
+   *   片方だけ段数を変えた日に「並ぶのに飛べない行」が出る(§7)。
+   * 🔑 **`id` を条件にしない** ── 直す前は `h1[id], h2[id], h3[id]` で拾っており、
+   *   描画器が `id` を焼くのが h1〜h3 だけなので、**`####` の 94 本が目次に出なかった**。
+   *   ⚠ 同じマニュアルなのに**別窓の目次には全部出る**ので、面と窓で中身が違っていた。
+   * ⚠ `id` を焼く規則のほうを広げる手もあったが、**そちらは血管が太い**
+   *   (書き出す HTML・`:::toc`・追記の見出し選び・textlog の錨が同じ規則を読む)。
+   *   飛ぶのに `id` は要らない(器の `scrollTop` で送る)ので、**ここだけで閉じる**。
+   */
+  private manualHeadings(): HTMLElement[] {
+    const host = this.manualHost;
+    if (host === null) return [];
+    return [...host.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6')];
+  }
+
+  /**
+   * 目次を組む(#719)。⚠ **描いた DOM から拾う** ── 原文を別に走査すると、
+   * 描画器が id を焼く規則(重複の連番)と**二重に持つ**ことになる(§7)。
    */
   private syncToc(): void {
     const nav = this.tocHost;
-    const host = this.manualHost;
-    if (nav === null || host === null) return;
+    if (nav === null || this.manualHost === null) return;
     nav.textContent = '';
-    const heads = [...host.querySelectorAll<HTMLElement>('h1[id], h2[id], h3[id]')];
-    for (const h of heads) {
+    const heads = this.manualHeadings();
+    for (const [at, h] of heads.entries()) {
       const row = document.createElement('button');
       row.type = 'button';
-      // ⚠ **id だけ控える**(要素を掴まない)── 掴むと `dropManual` の後も
-      //    外れた見出しノードが 85 個保持される(2026-07-27 の不可侵指示と逆向き)
-      const id = h.id;
+      /**
+       * ⚠ **要素を掴まない**(控えるのは**何番目か**だけ)── 掴むと `dropManual` の後も
+       *   外れた見出しノードが全数ぶん保持される(2026-07-27 の不可侵指示と逆向き)。
+       * 🔑 **番号で引く**理由:`id` は h1〜h3 にしか焼かれず、`#slug` の選択子は
+       *   数字で始まる見出し(85 本中 30 本)で `SyntaxError` を投げ、しかも
+       *   **happy-dom は escape 済みの選択子を解決しない**ので unit から通せなかった。
+       *   番号なら構文解析そのものが要らない(§7「検出するより起こらなくする」)。
+       */
+      const label = h.textContent ?? '';
       row.setAttribute('data-pkc-field', 'help-toc-row');
       row.setAttribute('data-pkc-level', h.tagName.slice(1));
-      row.textContent = h.textContent ?? '';
+      row.textContent = label;
       row.addEventListener('click', () => {
         /**
          * 🔴 **描き終わるのを待つ**(着地前レビュー・動線 2)。⚠ 5 分使わないと
          *   `dropManual()` が**本文だけ**捨てる(目次の行は残る)ので、開き直した直後の
-         *   250ms ほどは `#id` が引けず、**押しても何も起きず理由も出ない**。
+         *   250ms ほどは見出しが 1 本も無く、**押しても何も起きず理由も出ない**。
          * 🔑 同じ file の探す欄(`jumpToSection`)は既に `await this.manualReady` している
          *   ── 新しく足した目次だけ、その 1 行が無かった。
          */
         void this.manualReady?.then(() => {
-          // ⚠ **id で引き直す**(参照を持たない)── 描き直しで器が入れ替わっても迷子にならない
           /**
-           * 🔴 **選択子を組まない**(着地前レビュー 2 巡目)。
-           *
-           * ⚠ 1 稿目は `` `#${CSS.escape(id)}` `` だった。動きは正しいが、
-           *   **escape を落とした日に 30 本が無言で死ぬ**(マニュアルの見出し
-           *   85 本のうち 30 本が `1-はじめる` のように数字で始まり、素の `#1-…` は
-           *   `SyntaxError` を投げる)── いちばん気づけない壊れ方である。
-           * 🔴 そして **happy-dom は escape 済みの選択子を解決しない**(実測:
-           *   `#\31 -はじめる` に `null` が返る)ので、**その 35% を unit から
-           *   1 度も通せなかった**(守れるのは smoke 1 本だけ ── CLAUDE.md §2)。
-           * 🔑 `syncToc` と**同じ列挙**で拾って id で突き合わせれば、構文解析が
-           *   要らなくなる ── 壊れうる状態そのものが消える(§7「検出するより
-           *   起こらなくする」)。⚠ 見出し以外は拾わないので、user が本文に
-           *   同じ id を書いても迷子にならない。
+           * ⚠ **同じ列挙をもう一度引く**(要素を掴まない)── 組み直しで器が
+           *   入れ替わっても迷子にならない。
+           * 🔑 番号が動かない根拠:マニュアルの原文は**焼き込みの定数**で、
+           *   `dropManual()` の後も**同じ字から同じ順で**組み直される。版が変われば
+           *   頁ごと読み込み直しになるので、目次も一緒に組み直る。
            */
-          const target =
-            [...host.querySelectorAll<HTMLElement>('h1[id], h2[id], h3[id]')].find(
-              (h) => h.id === id,
-            ) ?? null;
+          const target = this.manualHeadings()[at] ?? null;
           if (target === null) return;
           // ⚠ 送り方は `jumpTo` 1 か所(§7)── 目次と本文の参照で 2 通りに書かない
           this.jumpTo(target, false);

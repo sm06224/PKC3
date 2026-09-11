@@ -172,12 +172,14 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   隣 1 か所で、そこは登記の対象ではない)
       // ⚠ 2026-09-09(#813): 「居場所」のプルダウンを外して `move-entry` の受け手が
       //   消え、受け手 −1(登記は動かない ── 押し口は面の中にしか無かった)
-      total: 271,
-      receivers: 222,
+      // ⚠ 2026-09-11(#215 残り①): 最近開いた記録を消す(`clear-opened-history`)で
+      //   受け手 +1(登記は増えない ── 押し口は設定の面の中にしか無い)
+      total: 272,
+      receivers: 223,
       registered: 85,
       both: 36,
       outsideActionsTable: 49,
-      unregistered: 186,
+      unregistered: 187,
     });
   });
 

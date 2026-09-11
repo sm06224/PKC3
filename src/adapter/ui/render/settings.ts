@@ -662,6 +662,7 @@ export class SettingsRenderer {
     this.keymapPanel?.dispose();
     this.keymapPanel = buildKeymapPanel();
     body.append(this.keymapPanel.root);
+    body.append(this.buildOpenedHistory());
     body.append(this.buildExternalImages());
     body.append(this.buildPasteSource());
     body.append(this.buildSameOrigin());
@@ -717,6 +718,36 @@ export class SettingsRenderer {
    *   (`same-origin-grants.ts` 冒頭の判断と同じ向き)。
    * ⚠ 「表示」には入れない ── 見た目の好みではなく**外へ何を渡すか**の判断である。
    */
+  /**
+   * 🔴 **最近開いた記録を消す**(#215 残り①)。
+   *
+   * ⚠ **記録を作ったら、消す口も作る** ── 一覧の並びに「最近開いた順」を足した
+   *   ということは、**この端末に「何を読んだか」が積まれる**ということである。
+   *   ⚠ 積むだけ積んで消せないのは、user から物を取り上げているのと同じ。
+   * ⚠ 「表示」の節には入れない ── 見た目の好みではなく、**この端末に何を残すか**の
+   *   判断である(外部画像・ノートを渡して開く、と同じ並び)。
+   * 🔑 押すと**その場で消える**(確かめを挟まない)── 消えて困る物ではないうえ、
+   *   また開けば積み直る。⚠ 消えたことは字で言う(無言にしない)。
+   */
+  private buildOpenedHistory(): HTMLElement {
+    const wrap = document.createElement('section');
+    wrap.setAttribute('data-pkc-region', 'settings-opened');
+    const h = document.createElement('h3');
+    h.textContent = '最近開いたノートの記録';
+    const note = document.createElement('p');
+    note.setAttribute('data-pkc-field', 'settings-note');
+    note.textContent =
+      '一覧の並び順で「最近開いた順」を選ぶと、この記録を使って並べます。' +
+      'この端末にだけ残り、書き出しにも、ほかの端末にも持っていきません。' +
+      '消すと、次に開いたものから積み直します。';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.setAttribute('data-pkc-action', 'clear-opened-history');
+    btn.textContent = '最近開いた記録を消す';
+    wrap.append(h, note, btn);
+    return wrap;
+  }
+
   private buildSameOrigin(): HTMLElement {
     const wrap = document.createElement('section');
     wrap.setAttribute('data-pkc-region', 'settings-same-origin');

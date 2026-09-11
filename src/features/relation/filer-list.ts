@@ -29,6 +29,12 @@ export interface FilerListOptions {
    */
   readonly sortDesc: boolean;
   /**
+   * 🔴 **最近開いた時刻**(#215 残り①)── lid → epoch ミリ秒。無い lid は `0`。
+   * ⚠ **省略可にしない** ── `sortDesc` / `kinds` と同じ理由で、渡し忘れた面だけ
+   *   「最近開いた順」が静かに lid 順になる(選べるのに効かない)。
+   */
+  readonly openedAt: ReadonlyMap<string, number>;
+  /**
    * 🔴 **種類の絞り(#411)。空 = 絞らない。**
    * ⚠ **省略可にしない** ── `sortDesc` と同じ理由である。渡し忘れた面だけ
    *   絞りが黙って外れ、「面を変えたら全部出た」という形で user に届く。
@@ -88,6 +94,7 @@ export function filerRows(
     (lid) => byLid.get(lid),
     opts.sort,
     opts.sortDesc,
+    (lid) => opts.openedAt.get(lid) ?? 0,
   )
     .map((lid) => byLid.get(lid))
     .filter((m): m is EntryMeta => m !== undefined);

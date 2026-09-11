@@ -58,6 +58,8 @@ import {
   type AppState,
   type ViewMode,
 } from '@adapter/state/app-state';
+import { listViewOptions } from '@adapter/state/list-view-options';
+import { appOpenedStore } from '@adapter/platform/opened-store';
 import type { EntryMeta } from '@core/model/entry-meta';
 import {
   filerRows,
@@ -434,9 +436,7 @@ const visibleFilerRows = (st: AppState): EntryMeta[] =>
     smartLids: smartLidsOf(st.scopeLid, st.smartHits),
     filterQuery: st.filterQuery,
     searchHits: st.searchHits,
-    sort: st.entrySort,
-    sortDesc: st.entrySortDesc,
-    kinds: st.kindFilter,
+    ...listViewOptions(st),
   });
 
 /** その entry が**既にそこに居る**か(動かす必要が無い)。 */
@@ -484,9 +484,7 @@ const dualPaneRows = (st: AppState, side: DualSide): EntryMeta[] => {
   return filerRows(paneScope(pane), st.entryMetas, st.relations, {
     smartLids: smartLidsOf(paneScope(pane), st.smartHits),
     ...paneFilterOptions(pane, st.filterQuery, st.searchHits),
-    sort: st.entrySort,
-    sortDesc: st.entrySortDesc,
-    kinds: st.kindFilter,
+    ...listViewOptions(st),
   });
 };
 
@@ -4862,6 +4860,18 @@ const ACTIONS: Record<string, ActionHandler> = {
   'undo-move': (dispatcher) => {
     dispatcher.dispatch({ type: 'UNDO_MOVE' });
   },
+  /**
+   * 🔴 **最近開いた記録を消す**(#215 残り①)。口は設定の中。
+   * ⚠ **画面にも反映する** ── store だけ消すと、いま「最近開いた順」で並べている
+   *   一覧が**古い並びのまま**残る(消したのに効いていないように見える)。
+   * ⚠ **消えたことを字で言う** ── 押しても何も変わらない画面(既に空のとき)で
+   *   無言だと、押せていないのか消えたのか読めない。
+   */
+  'clear-opened-history': (dispatcher, _target, services) => {
+    appOpenedStore.clear();
+    dispatcher.dispatch({ type: 'SET_OPENED_AT', openedAt: new Map<string, number>() });
+    services.showStatus?.('最近開いたノートの記録を消しました');
+  },
   'append-entry': (dispatcher, _target, _services, root) => {
     const s = dispatcher.getState();
     const lid = s.selectedLid;
@@ -8835,6 +8845,27 @@ export function bindActions(
    */
   const canPutIntoBody = (lid: string): boolean =>
     isAppendable(dispatcher.getState().entryMetas.get(lid)?.archetype);
+  /**
+   * 🔴 **ここを読む所は 3 つではなく 2 つである**(#809-5 の記録、2026-09-11)。
+   *
+   * ⚠ **一覧の行 → 本文**(段②、`INSERT_LINES`)だけは、わざとこの門を通していない。
+   *   次に読む人が「3 か所目を足し忘れている」と読んで**揃えにいく**のを止めるために、
+   *   理由をここに置く(CLAUDE.md §7「同じ判定が複数の場所にある」の**例外の記録**):
+   *
+   * | 落とすもの | この門を通すか | なぜ |
+   * |---|---|---|
+   * | **塊**(段①③) | 🟢 通す | 行ごと**移す**ので、入れられない種類へ持っていくと元から消える |
+   * | **外の file**(段④) | 🟢 通す | 添付を作って本文へ**書き足す** ── 追記そのものである |
+   * | **一覧の行**(段②) | 🔴 **通さない** | 入るのは**リンクの 1 行の字**だけで、元は 1 つも動かない |
+   *
+   * 🔑 **判定を足すと、動線が 1 つ消える** ── フォルダ・添付・スタックの本文も
+   *   **画面に出て、編集できる**(`detail.ts` は `attachment` と stack 以外に分岐を
+   *   持たない)ので、いまは落とすと線が出て、実際に 1 行入る。
+   *   ⚠ これを揃えるのは**こちら側の一貫性のため**であって、user のためではない
+   *   (CLAUDE.md「判定は『誰のための削除か』1 つ」)。
+   * ⚠ だから**種類を増やしたとき**も、ここへは足さない ── 足すべきは
+   *   `APPENDABLE_ARCHETYPES`(`features/flavor/append-spec.ts`)の 1 か所だけである。
+   */
   /**
    * 🔴 **一覧の行(どのノートでも)**(#684 段③)。
    *
