@@ -266,6 +266,27 @@ export class DetailRenderer {
   private readonly blockedKinds = new Map<string, Set<SandboxBlockedKind>>();
   private bodyHost: HTMLElement | null = null;
   /**
+   * いま焦点が**絵の一覧の中**に在れば、その絵の名前(「なし」は空文字)を返す。
+   * ⚠ 面の外に焦点があるときは `null` ── 打っている欄から焦点を奪わないため。
+   */
+  private focusedPickName(): string | null {
+    const active = this.region.ownerDocument.activeElement;
+    if (!(active instanceof HTMLElement) || !this.region.contains(active)) return null;
+    return active
+      .closest('[data-pkc-action="pick-app-icon"]')
+      ?.getAttribute('data-pkc-icon-name') ?? null;
+  }
+
+  /** 組み直したあと、同じ絵のボタンへ焦点を戻す(消えていれば何もしない)。 */
+  private refocusPick(name: string): void {
+    this.bodyHost
+      ?.querySelector<HTMLElement>(
+        `[data-pkc-action="pick-app-icon"][data-pkc-icon-name="${name}"]`,
+      )
+      ?.focus();
+  }
+
+  /**
    * 本文の出し方(markdown / 添付)。変わったら器ごと作り直す。
    * ⚠ かつて `'plain'`(記法が無い本文を `<pre>` で出す)が在ったが、
    *   **面ごとに見え方が違う**原因だったので落とした(2026-08-06。user 報告 2-6)。
@@ -690,11 +711,25 @@ export class DetailRenderer {
       //    **lend 7 回 / dispose 0 回**、画面の `<img>` は 1 枚。
       //    ⚠ `hydrateToken` も進むので、飛んでいる hydratePreview が stale と
       //    判定されて detached な器へ描かなくなる(こちらも同じ穴だった)
+      /**
+       * 🔴 **押した絵にカーソルを残す**(2026-09-12、#770 段② の動線レビュー 2)。
+       *
+       * ⚠ 絵を 1 つ選ぶと本文が変わるので、この面は**丸ごと組み直される** ──
+       *   押したボタンごと消えるので `document.activeElement` は `body` へ落ち、
+       *   **鍵だけで使う人は、次の絵まで画面の頭から Tab で戻ることになる**
+       *   (マウスなら 2 回目もその場で押せるのに、片方だけ往復が要る)。
+       * 🔑 **壊す側が直す** ── 組み直す直前に「絵の一覧に焦点があったか」を採り、
+       *   組み直したあとに**同じ絵**へ戻す(`filer.ts` の前例と同じ作法)。
+       * ⚠ 外に焦点があるときは**触らない**(打っている欄から奪わない)。
+       * ⚠ 「なし」は名前が空文字なので、**`null` と区別する**(`?? null` で畳まない)。
+       */
+      const keepPick = this.focusedPickName();
       this.disposeLends();
       this.bodyKind = 'attachment';
       this.bodyView = EMPTY_VIEW;
       this.bodyHost!.textContent = '';
       this.renderAttachment(body, shown, lid, selfContainerId(state), meta.title);
+      if (keepPick !== null) this.refocusPick(keepPick);
       this.restoreScroll();
       return;
     }
@@ -2020,17 +2055,36 @@ export class DetailRenderer {
      *   「**操作は対象の隣**」(`inspector.ts:9-13`)と自己矛盾していた。
      * ⚠ **新しい改名の規則を作らない** ── 既存の action を撃つだけ。
      */
-    const rename = document.createElement('input');
-    rename.type = 'text';
-    rename.setAttribute('data-pkc-action', 'rename-attachment');
-    rename.setAttribute('data-pkc-field', 'attachment-rename');
-    rename.setAttribute('aria-label', 'この添付の名前');
-    rename.value = entryTitle;
-    // ⚠ 文言は**起きること**で書く(user 指示 2026-08-21)
-    rename.title = '名前を書き換えて、この欄の外を押すと保存されます';
-    host.append(rename);
+    /**
+     * 🔴 **設定の口は、留めた枠には出さない**(2026-09-12、#770 段② の動線レビュー 1)。
+     *
+     * ⚠ ここに在る 5 つ(名前 / 登録 / グループ / アイコン / 絵の一覧)は、
+     *   どれも **`selectedLid`(主の枠のノート)**へ撃つ ── 留めた枠は
+     *   **選択と関係なく「その 1 件」**を出す面なので、そこで押すと
+     *   **押していないノートの frontmatter が黙って書き換わる**
+     *   (相手が別の登録済みアプリなら、**関係ないタイルの目印が入れ替わる**)。
+     * 🔑 **同じ面が、同じ事故を 1 か所で既に止めている** ── 帯は `renderBar` が
+     *   `pinnedLid !== null` で出さない(「押した物と効く先が食い違う」)。
+     *   添付の設定だけが、その門を通っていなかった。
+     * ⚠ **捨てているのは「効かない口」**であって動線ではない ── 留めた枠から
+     *   設定できるようにするには、書けた本文を `splitBodies` へ戻す経路が別に要る
+     *   (それを足すまでは、**押せて効かない**より**出さない**ほうが害が小さい)。
+     * ⚠ 読む側(起動 / ダウンロード / 参照をコピー / 下見)は**そのまま出る** ──
+     *   留めた枠は「読むための枠」なので、読む道は 1 本も減らさない。
+     */
+    if (this.pinnedLid === null) {
+      const rename = document.createElement('input');
+      rename.type = 'text';
+      rename.setAttribute('data-pkc-action', 'rename-attachment');
+      rename.setAttribute('data-pkc-field', 'attachment-rename');
+      rename.setAttribute('aria-label', 'この添付の名前');
+      rename.value = entryTitle;
+      // ⚠ 文言は**起きること**で書く(user 指示 2026-08-21)
+      rename.title = '名前を書き換えて、この欄の外を押すと保存されます';
+      host.append(rename);
 
-    if (isAppMime(meta.mime)) host.append(appTileControls(rawBody));
+      if (isAppMime(meta.mime)) host.append(appTileControls(rawBody));
+    }
 
     const previewHost = document.createElement('div');
     previewHost.setAttribute('data-pkc-field', 'attachment-preview');

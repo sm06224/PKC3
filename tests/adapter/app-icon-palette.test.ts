@@ -80,13 +80,21 @@ function setup(icon: string) {
   }) as typeof d.dispatch;
   d.onState((s) => detail.render(s));
   bindActions(root, d);
+  /**
+   * ⚠ **disk を持つ**(書いたら読み直せる形)── 押した結果が本文に着地して、
+   *   面が組み直されるところまで通したいので、固定値を返す fake では足りない。
+   */
+  const bodies: Record<string, string> = { a1: body(icon) };
   connectStoreEffects(d, {
     ...stubRevisionOps(),
-    getBody: async () => body(icon),
+    getBody: async (lid) => bodies[lid] ?? null,
     renameEntry: async () => stubStamps(),
     replaceAssetRefs: () => Promise.reject(new Error('使わない')),
     reorderEntry: async () => stubStamps(),
-    persistEntry: async () => stubStamps(),
+    persistEntry: async (e) => {
+      bodies[e.lid] = e.body;
+      return stubStamps();
+    },
     deleteEntry: async () => {},
     setEntryParent: async () => {},
   });
@@ -151,6 +159,28 @@ describe('目印を絵から選ぶ(#770 段②)', () => {
   });
 
   /**
+   * 🔴 **押した絵にカーソルが残る**(2026-09-12、動線レビュー 2)。
+   *
+   * ⚠ 絵を選ぶと本文が変わり、この面は**丸ごと組み直される** ── 直す前は
+   *   押したボタンごと消えて焦点が `body` へ落ちたので、**鍵だけで使う人は
+   *   次の絵まで画面の頭から Tab で戻る**ことになっていた。
+   */
+  it('🔴 押した絵にカーソルが残る(鍵だけで次の絵へ移れる)', async () => {
+    const h = setup('');
+    await tick(20);
+    const before = h.btn('calculator')!;
+    before.focus();
+    expect(document.activeElement, '押す前から焦点が無い(前提が崩れている)').toBe(before);
+    before.click();
+    await tick(40);
+    const after = h.btn('calculator')!;
+    // ⚠ 空振り防止 ── **本当に組み直された**ことを先に見る(同じ要素なら何も証明しない)
+    expect(after, '面が組み直されていない(前提が崩れている)').not.toBe(before);
+    expect(after.getAttribute('aria-pressed'), '押したのに書けていない').toBe('true');
+    expect(document.activeElement, '組み直しで焦点が落ちた').toBe(after);
+  });
+
+  /**
    * 🔴 **押す前に何か分かる**(`icons.ts` の「図案だけのボタンを作らない」から外れる所)。
    * ⚠ 外す代わりに、**日本語の名前**を `title` と読み上げに必ず持たせる。
    */
@@ -162,6 +192,86 @@ describe('目印を絵から選ぶ(#770 段②)', () => {
     expect(b.getAttribute('aria-label')).toBe('電卓');
     // ⚠ 図案の器は読み上げに出さない(名前はボタンが持つ)
     expect(b.querySelector('[data-pkc-icon]')?.getAttribute('aria-hidden')).toBe('true');
+  });
+});
+
+/**
+ * 🔴 **横に並べた枠(留めた枠)には、この一覧を出さない**(2026-09-12、動線レビュー 1)。
+ *
+ * ⚠ 留めた枠は**選択と関係なく「その 1 件」**を出す面だが、`pick-app-icon` /
+ *   `set-app-icon` / `set-app-group` / `toggle-app-tile` / `rename-attachment` は
+ *   **`selectedLid`(主の枠のノート)**へ撃つ ── つまり留めた枠で押すと、
+ *   **押していないノートの frontmatter が黙って書き換わる**。
+ * 🔑 同じ面が**同じ事故を 1 か所で既に止めている** ── 帯は `pinnedLid !== null` で
+ *   出さない(`detail.ts` の `renderBar`:「押した物と効く先が食い違う」)。
+ *   添付の設定だけがその門を通っていなかった。
+ * ⚠ ここで**捨てているのは「効かない口」**であって、動線ではない
+ *   (留めた枠から設定したいなら、`splitBodies` を書き戻す経路が別に要る ── #770 に残す)。
+ */
+describe('留めた枠(横に並べた枠)', () => {
+  function pinned() {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const host = document.createElement('div');
+    root.append(host);
+    const d = new Dispatcher();
+    // ⚠ 8 番目が `pinnedLid` ── 留めた枠として描く
+    const detail = new DetailRenderer(
+      host,
+      lender,
+      undefined,
+      null,
+      undefined,
+      undefined,
+      undefined,
+      'a1',
+    );
+    d.onState((s) => detail.render(s));
+    d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [meta('a1'), { ...meta('a2'), lid: 'a2', title: '別のノート' }],
+      relations: [],
+    });
+    // ⚠ **主の枠は別のノートを選んでいる**(これが事故の前提)
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a2' });
+    // ⚠ 留めていない lid の本文は reducer が**黙って捨てる** ── 先に留める
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'a1' });
+    d.dispatch({ type: 'SPLIT_BODY_LOADED', lid: 'a1', body: body('calculator') });
+    return { root };
+  }
+
+  it('🔴 留めた枠に、絵の一覧も登録の欄も出ない', () => {
+    const { root } = pinned();
+    // ⚠ 空振り防止 ── 留めた枠が**そもそも描けている**ことを先に見る
+    expect(
+      root.querySelector('[data-pkc-field="attachment-info"]'),
+      '留めた枠に添付の面が描けていない(前提が崩れている)',
+    ).not.toBeNull();
+    expect(
+      root.querySelector('[data-pkc-field="app-icon-palette"]'),
+      '留めた枠に絵の一覧が出ている(押すと別のノートに書き込まれる)',
+    ).toBeNull();
+    expect(
+      root.querySelector('[data-pkc-action="pick-app-icon"]'),
+      '留めた枠に選ぶ口が出ている',
+    ).toBeNull();
+    expect(
+      root.querySelector('[data-pkc-field="app-register"]'),
+      '留めた枠に登録のチェックが出ている(押すと別のノートが登録される)',
+    ).toBeNull();
+    expect(
+      root.querySelector('[data-pkc-action="rename-attachment"]'),
+      '留めた枠に名前の欄が出ている(打つと別のノートが改名される)',
+    ).toBeNull();
+  });
+
+  it('⚠ 主の枠では、いままでどおり全部出る(門を広げすぎていない)', async () => {
+    const h = setup('calculator');
+    await tick(20);
+    expect(h.q('[data-pkc-field="app-icon-palette"]')).not.toBeNull();
+    expect(h.q('[data-pkc-field="app-register"]')).not.toBeNull();
+    expect(h.q('[data-pkc-action="rename-attachment"]')).not.toBeNull();
   });
 });
 
