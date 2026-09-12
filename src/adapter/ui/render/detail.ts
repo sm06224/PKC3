@@ -2104,7 +2104,18 @@ export class DetailRenderer {
       rename.title = '名前を書き換えて、この欄の外を押すと保存されます';
       host.append(rename);
 
-      if (isAppMime(meta.mime)) host.append(appTileControls(rawBody));
+      /**
+       * 🔴 **出すかどうかは `appTileControls` が 1 か所で決める**(#856 段①、2026-09-12)。
+       * ⚠ 直す前はここで `isAppMime(meta.mime)` を見ていたが、
+       *   `readAttachmentMeta` は **mime が無いとき `'application/octet-stream'` を返す**
+       *   ので、**URL タイル(mime を持たない)は false に落ちて設定が出なかった**。
+       *   ⚠ `isAppMime(undefined)` は `true` なので**名前からは通るように読める** ──
+       *   値を呼び側まで追うまで気づけない形だった(CLAUDE.md §1「数えている対象が
+       *   名前と違う」)。
+       * 🔑 判定を 2 か所に置かない ── 器を出すかは 1 つの関数が答える。
+       */
+      const tileBox = appTileControls(rawBody, meta.mime);
+      if (tileBox !== null) host.append(tileBox);
     }
 
     const previewHost = document.createElement('div');
@@ -2733,24 +2744,55 @@ function renderHistoryPanel(
  * ⚠ **汎用の frontmatter エディタは作らない**。ここに要るのは 3 つだけで、
  * 汎用にすると「何を書いていいか分からない欄」になる。
  */
-function appTileControls(rawBody: string): HTMLElement {
+function appTileControls(rawBody: string, mime: string): HTMLElement | null {
   const fm = parseFrontmatter(rawBody).meta;
+  /**
+   * 🔴 **URL のタイルも受ける**(#856 段①)── `attachment.launcher_url` が在れば、
+   * mime を持たなくても**すでにアプリの一覧に出ている**(`tiles.ts` の `tileFrom`)。
+   */
+  const byUrl = typeof fm['attachment.launcher_url'] === 'string';
+  // ⚠ どちらでもない添付(画像 / PDF 等)には**何も出さない**(押せない欄を並べない)
+  if (!byUrl && !isAppMime(mime)) return null;
   const box = document.createElement('div');
   box.setAttribute('data-pkc-field', 'app-tile-controls');
 
-  const label = document.createElement('label');
-  const check = document.createElement('input');
-  check.type = 'checkbox';
-  check.setAttribute('data-pkc-action', 'toggle-app-tile');
-  check.setAttribute('data-pkc-field', 'app-register');
-  check.checked = fm['attachment.registered_as_app'] === true;
-  const text = document.createElement('span');
-  text.textContent = 'アプリとして登録';
-  label.append(check, text);
-  box.append(label);
+  /**
+   * 🔴 **URL のタイルには「登録」のチェックを出さない**(#856 段①、2026-09-12。
+   * user 指示「**自分で追加したアプリのアイコン設定したい**」)。
+   *
+   * ⚠ 直す前は**チェックを入れるまで中の設定が出なかった**ので、
+   *   「リンクを足す」で作ったタイルに絵を付ける道が**画面から見えなかった**。
+   * 🔴 そして**チェックを出すほうが害が大きい** ── `tiles.ts` は
+   *   `if (!registered && url === undefined) return null;` なので、
+   *   **URL が書いてあればチェックと無関係にタイルになる**。つまりチェックを
+   *   外しても**タイルは消えない**のに、字は「登録を外した」と読める
+   *   = **無言の dead click**(この repo がいちばん嫌う形)。
+   * 🔑 **動線は 1 つも減らない** ── チェックを入れて書かれる
+   *   `registered_as_app: true` は、URL タイルでは**何も変えない**値である
+   *   (タイルを消すのはノートごと消すこと。そこは変えていない)。
+   * ⚠ 添付の HTML(本当に登録が要るもの)の画面は **1 ドットも変わらない**。
+   */
+  if (byUrl) {
+    const why = document.createElement('p');
+    why.setAttribute('data-pkc-field', 'app-tile-why');
+    // ⚠ 文言は**起きていること**で書く(user 指示 2026-08-21)
+    why.textContent = 'アドレスが書いてあるので、アプリの一覧に出ています';
+    box.append(why);
+  } else {
+    const label = document.createElement('label');
+    const check = document.createElement('input');
+    check.type = 'checkbox';
+    check.setAttribute('data-pkc-action', 'toggle-app-tile');
+    check.setAttribute('data-pkc-field', 'app-register');
+    check.checked = fm['attachment.registered_as_app'] === true;
+    const text = document.createElement('span');
+    text.textContent = 'アプリとして登録';
+    label.append(check, text);
+    box.append(label);
 
-  // ⚠ 登録していないときは中の設定を出さない(押せない欄を並べない)
-  if (!check.checked) return box;
+    // ⚠ 登録していないときは中の設定を出さない(押せない欄を並べない)
+    if (!check.checked) return box;
+  }
 
   const field = (
     name: string,

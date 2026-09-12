@@ -443,3 +443,103 @@ describe('タイルに出る目印(#770 段②)', () => {
     expect(icon?.textContent).toBe('↗');
   });
 });
+
+/**
+ * 🔴 **URL のタイルにも、絵を選ぶ道が在る**(#856 段①、2026-09-12。
+ * user 指示「**自分で追加したアプリのアイコン設定したい**」)。
+ *
+ * ⚠ 直す前は**チェックを入れるまで中の設定が出なかった**ので、「リンクを足す」で
+ *   作ったタイルに絵を付ける道が**画面から見えなかった**。
+ * 🔴 そして**チェックを出すほうが害が大きい** ── `tiles.ts` は
+ *   `!registered && url === undefined` でしか落とさないので、**URL が在れば
+ *   チェックと無関係にタイルになる**。外しても消えないのに字は「登録を外した」と
+ *   読める = **無言の dead click**。
+ * 🔑 だから **URL タイルにはチェックを出さず、理由を 1 行出して設定をそのまま出す。**
+ */
+describe('URL のタイルの目印(#856 段①)', () => {
+  /** 「リンクを足す」が書く本文そのまま(mime も asset_key も `registered_as_app` も無い)。 */
+  const urlBody = (icon: string): string =>
+    [
+      '---',
+      'attachment.launcher_url: https://example.com/',
+      ...(icon === '' ? [] : [`attachment.app_icon: ${icon}`]),
+      '---',
+      '',
+    ].join('\n');
+
+  /** 添付の HTML(登録していない)── **対照群**。規則そのものが生きていることを見る。 */
+  const htmlBody = (): string =>
+    ['---', 'attachment.mime: text/html', 'attachment.asset_key: k', '---', ''].join('\n');
+
+  function setupWith(raw: string) {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const regions = buildShell(root);
+    const detail = new DetailRenderer(regions.detail, lender);
+    const d = new Dispatcher();
+    d.onState((st) => detail.render(st));
+    bindActions(root, d);
+    const bodies: Record<string, string> = { a1: raw };
+    connectStoreEffects(d, {
+      ...stubRevisionOps(),
+      getBody: async (lid) => bodies[lid] ?? null,
+      renameEntry: async () => stubStamps(),
+      replaceAssetRefs: () => Promise.reject(new Error('使わない')),
+      reorderEntry: async () => stubStamps(),
+      persistEntry: async (e) => {
+        bodies[e.lid] = e.body;
+        return stubStamps();
+      },
+      deleteEntry: async () => {},
+      setEntryParent: async () => {},
+    });
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a1')], relations: [] });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+    const q = <T extends HTMLElement>(sel: string): T | null => root.querySelector<T>(sel);
+    return { root, d, q, bodies };
+  }
+
+  it('🔴 チェックを押さずに、アイコンの欄と絵の一覧が出る', async () => {
+    const h = setupWith(urlBody(''));
+    await tick(20);
+    expect(h.q('[data-pkc-field="app-icon"]'), 'アイコンの欄が出ていない').not.toBeNull();
+    expect(h.q('[data-pkc-field="app-icon-palette"]'), '絵の一覧が出ていない').not.toBeNull();
+    // ⚠ グループの欄も同じ門の内側に在った ── 一緒に出ることを見る
+    expect(h.q('[data-pkc-field="app-group"]'), 'グループの欄が出ていない').not.toBeNull();
+    // 🔴 **効かないチェックを出さない**
+    expect(h.q('[data-pkc-field="app-register"]'), '効かないチェックが出ている').toBeNull();
+    // 🔑 代わりに**なぜ一覧に出ているか**を字で出す(無言にしない)
+    expect(h.q('[data-pkc-field="app-tile-why"]')?.textContent ?? '').toContain('アドレス');
+  });
+
+  it('🔴 選んだ絵が本文に着地する(下流まで)', async () => {
+    const h = setupWith(urlBody(''));
+    await tick(20);
+    const pick = h.q<HTMLElement>(
+      '[data-pkc-action="pick-app-icon"][data-pkc-icon-name="globe"]',
+    );
+    expect(pick, '「ウェブ」の絵が一覧に無い').not.toBeNull();
+    pick!.click();
+    await tick(30);
+    expect(h.bodies['a1'] ?? '', '選んだ絵が本文に着地していない').toContain(
+      'attachment.app_icon: globe',
+    );
+    // ⚠ **URL は消えていない**(書き戻しで frontmatter の別の行を落としていない)
+    expect(h.bodies['a1'] ?? '', 'アドレスの行が消えた').toContain('attachment.launcher_url:');
+  });
+
+  /**
+   * ⚠ **対照群** ── 添付の HTML(登録していない)は**今までどおり**。
+   * 🔑 これが無いと、「どんな添付でも設定が出る」ように壊しても緑になる
+   *   (= 規則そのものを殺した変異が生き延びる)。
+   */
+  it('🔴 登録していない添付の HTML では、今までどおり設定を出さない', async () => {
+    const h = setupWith(htmlBody());
+    await tick(20);
+    expect(h.q('[data-pkc-field="app-register"]'), '登録のチェックが出ていない').not.toBeNull();
+    expect(h.q('[data-pkc-field="app-icon"]'), '登録前なのに設定が出ている').toBeNull();
+    expect(h.q('[data-pkc-field="app-icon-palette"]'), '登録前なのに一覧が出ている').toBeNull();
+    // ⚠ URL タイルの理由書きは、こちらには出さない
+    expect(h.q('[data-pkc-field="app-tile-why"]'), '添付に URL の理由書きが出ている').toBeNull();
+  });
+});
