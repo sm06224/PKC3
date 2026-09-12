@@ -1067,6 +1067,14 @@ describe('お知らせの文面は固定(#220-7)', () => {
      *   `git log --oneline origin/main -S"2026-09-08-capture-split-12h" …` → b77cb10。
      *   原本は CHANGELOG に在る(`tests/docs-parity.test.ts` の `DROPPED` が等値で見る)。
      */
+    /**
+     * ⚠ **#281(組み込みタイルの目印)で足した**(2026-09-12。user 裁定
+     *   「案のとおりでいい、Office は文書で」)。
+     * 🔑 **枠を空けた** ── `NOTICE_SHOW_MAX`(30)が満杯だったので、
+     *   **配布済みの最古 1 件**(`2026-09-08-prose-align-and-keys`、bc738d2)を
+     *   登記表から落とした。原本は CHANGELOG に在る。
+     */
+    ['2026-09-12-builtin-tile-icons', '6ec16ca8'],
     ['2026-09-12-app-tile-icons', '11b7e42f'],
     ['2026-09-11-material-icons', '07745698'],
     ['2026-09-11-recent-sort', '5dbf4394'],
@@ -1134,11 +1142,6 @@ describe('お知らせの文面は固定(#220-7)', () => {
      */
     ['2026-09-08-file-drop-place', '1fa04a76', 'main'],
     ['2026-09-08-cell-tap-hint', '86346c92'],
-    /**
-     * ⚠ **#722(本文の置き場所)/ #779 段⑤ で足した**(2026-09-08)。
-     * 🔑 **枠を空けていない** ── `NOTICE_SHOW_MAX` は 30 なので、まだ余っている。
-     */
-    ['2026-09-08-prose-align-and-keys', 'fc108989'],
     /**
      * ⚠ **#791 ③ / #766 D-2 で足した**(2026-09-08)。
      * 🔑 **枠を空けていない** ── `NOTICE_SHOW_MAX` は 30 なので、まだ余っている。

@@ -6,6 +6,7 @@
  * 判断基準は「PKC2 で見えていたものが、同じ順で見えるか」である。
  */
 import { describe, expect, it } from 'vitest';
+import { BROWSE_ICONS } from '../../src/adapter/ui/render/icons';
 import {
   buildTiles,
   dualTile,
@@ -178,6 +179,7 @@ describe('組み込みタイルの合流 (#148)', () => {
       title: '2 ペインで整理',
       group: BUILTIN_GROUP,
       kind: 'dual',
+      symbol: 'tools',
     });
     /**
      * ⚠ **カレンダー / やることの板は #292 段⑤ でここから外れた**(2026-08-23)──
@@ -192,6 +194,7 @@ describe('組み込みタイルの合流 (#148)', () => {
       title: '予定表',
       group: BUILTIN_GROUP,
       kind: 'schedule',
+      symbol: 'calendar',
     });
     // ⚠ 連絡先(#278 段③)は予定表の次 ── 同じく「アプリに最初から在る」側
     expect(b[2]).toEqual({
@@ -199,6 +202,7 @@ describe('組み込みタイルの合流 (#148)', () => {
       title: '連絡先',
       group: BUILTIN_GROUP,
       kind: 'contacts',
+      symbol: 'person',
     });
     // ⚠ 探す(#680)は連絡先の次 ── 同じく「アプリに最初から在る」側(Office より前)
     expect(b[3]).toEqual({
@@ -206,12 +210,14 @@ describe('組み込みタイルの合流 (#148)', () => {
       title: '探す',
       group: BUILTIN_GROUP,
       kind: 'search',
+      symbol: 'search',
     });
     expect(b[4]).toEqual({
       lid: OFFICE_TILE_LID,
       title: 'Office',
       group: BUILTIN_GROUP,
       kind: 'office',
+      symbol: 'page',
     });
     /**
      * 🔴 **マニュアルは最後**(#645、2026-08-31)── 2 ペインと Office は
@@ -223,6 +229,7 @@ describe('組み込みタイルの合流 (#148)', () => {
       title: 'マニュアル',
       group: BUILTIN_GROUP,
       kind: 'manual',
+      symbol: 'book',
     });
     /**
      * 🔴 **自分のパソコンで動かす は最後**(#532 段 B、2026-09-09)。
@@ -234,6 +241,7 @@ describe('組み込みタイルの合流 (#148)', () => {
       title: '自分のパソコンで動かす',
       group: BUILTIN_GROUP,
       kind: 'selfhost',
+      symbol: 'computer',
     });
     /**
      * 🔴 **SQL の面も最後**(#681 段②、2026-09-09)── 支度の口と同じ理由で、
@@ -244,6 +252,7 @@ describe('組み込みタイルの合流 (#148)', () => {
       title: 'SQL で調べる',
       group: BUILTIN_GROUP,
       kind: 'sql',
+      symbol: 'database',
     });
     // ⚠ 録ったもの(#683 段①)も末尾 ── SQL と同じ理由(位置を動かさない)
     expect(b[8]).toEqual({
@@ -251,6 +260,7 @@ describe('組み込みタイルの合流 (#148)', () => {
       title: '音/動画',
       group: BUILTIN_GROUP,
       kind: 'captures',
+      symbol: 'mic',
     });
     // ⚠ entry 由来の並びには触らない(合流は**後置**だけ ── 2026-09-08 に前置から変えた)
     expect(b, '組み込みが 9 枚ちょうどでない').toHaveLength(9);
@@ -311,6 +321,61 @@ describe('組み込みタイルの合流 (#148)', () => {
       'sql',
       'captures',
     ]);
+  });
+
+  /**
+   * 🔴 **組み込みタイルの目印**(#281。user 裁定 2026-09-12)。
+   *
+   * ⚠ 直す前は **9 枚とも空**で、自分で登録したアプリだけ絵が付いていた。
+   * 🔑 見るのは 3 つ:**①全部が持っている ②どれが何か ③左のタブと同じ絵か**。
+   *   ⚠ ①だけだと「9 枚とも同じ絵」で素通りし、②だけだと**次に足した 1 枚が
+   *   空のまま**でも緑になる(この repo の作法は「新しいタイルは末尾へ足す」)。
+   */
+  it('🔴 組み込みタイルは 1 枚残らず目印を持つ', () => {
+    const merged = withBuiltinTiles([], { office: true });
+    const missing = merged.filter((t) => t.symbol === undefined).map((t) => t.title);
+    expect(missing, `目印の無い組み込みタイル: ${missing.join(' / ')}`).toEqual([]);
+    // ⚠ **空振り防止** ── 組み込みが 1 枚も無ければ上は常に真
+    expect(merged.length).toBeGreaterThanOrEqual(9);
+    // ⚠ 打った字の目印(`icon`)とは**同時に立たない**
+    expect(merged.filter((t) => t.icon !== undefined)).toEqual([]);
+  });
+
+  it('🔴 どの絵を割り当てたか(user 裁定 2026-09-12)', () => {
+    const merged = withBuiltinTiles([], { office: true });
+    expect(new Map(merged.map((t) => [t.kind, t.symbol]))).toEqual(
+      new Map([
+        ['dual', 'tools'],
+        ['schedule', 'calendar'],
+        ['contacts', 'person'],
+        ['search', 'search'],
+        // 🔑 user 裁定で「仕事」ではなく**「文書」**になった
+        ['office', 'page'],
+        ['manual', 'book'],
+        ['selfhost', 'computer'],
+        ['sql', 'database'],
+        ['captures', 'mic'],
+      ]),
+    );
+  });
+
+  /**
+   * 🔴 **左の列に同じ面が在るものは、そのタブと同じ絵**(#281)。
+   * ⚠ 同じ面の 2 つ目の入口なので、絵が違うと**別物に見える** ──
+   *   `BROWSE_ICONS` を直した日に、こちらだけ古い絵で残るのを止める。
+   * ⚠ そして **`folder` を使っていない**ことも見る ── 左の「フォルダ」タブが
+   *   その絵なので、2 ペインに使うと**同じ絵が 2 つの違うものを指す**。
+   */
+  it('🔴 左のタブと同じ面のタイルは、同じ絵である', () => {
+    const merged = withBuiltinTiles([], { office: true });
+    const symbolOf = (kind: string): string | undefined =>
+      merged.find((t) => t.kind === kind)?.symbol;
+    for (const kind of ['schedule', 'contacts', 'captures']) {
+      expect(symbolOf(kind), `${kind} の絵が左のタブと違う`).toBe(BROWSE_ICONS[kind]);
+    }
+    // ⚠ 空振り防止 ── 表そのものが空なら上は 3 回とも undefined 同士で通る
+    expect(Object.keys(BROWSE_ICONS).length).toBeGreaterThanOrEqual(6);
+    expect(merged.map((t) => t.symbol)).not.toContain(BROWSE_ICONS['filer']);
   });
 
   /**

@@ -120,6 +120,30 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   // ⚠ 空振り防止：組み込みは同じ一覧に居る（除いたことを確かめる）
   await expect(page.locator(builtinTile('dual'))).toHaveCount(1);
 
+  /**
+   * 🔴 **組み込みにも目印が出る**(#281。user 裁定 2026-09-12「案のとおりでいい」)。
+   *
+   * ⚠ `tiles.ts` の unit が見るのは**値**だけなので、**描く側が `symbol` を
+   *   読まなくなっても緑のまま**である ── だから画面で見る。
+   * ⚠ 見るのは「字が出ている」ではない ── **器が名前を持ち、字は入っていない**
+   *   (CLAUDE.md §10「器を替えると読み取れる値が変わる」)。
+   * 🔑 **起動を 1 つも足していない** ── 既に一覧を開いている道中に assert を足した。
+   */
+  const dualIcon = page.locator(`${builtinTile('dual')} [data-pkc-field="tile-icon"]`);
+  await expect(dualIcon, '組み込みタイルに目印が出ていない').toHaveAttribute(
+    'data-pkc-symbol',
+    'tools',
+  );
+  await expect(dualIcon, '器に目に見えない字が混ざっている').toHaveText('');
+  /**
+   * ⚠ **左の列に同じ面が在るものは、そのタブと同じ絵**(#281)── 同じものを開く
+   *   2 つ目の入口なので、絵が違うと別物に見える。
+   */
+  await expect(
+    page.locator(`${builtinTile('schedule')} [data-pkc-field="tile-icon"]`),
+    '予定表の絵が左のタブと違う',
+  ).toHaveAttribute('data-pkc-symbol', 'calendar');
+
   // ② 🔴 **PKC2 と同じ順** ── 既定群が先頭、グループ内は app_order 順
   await expect(tiles.nth(0)).toContainText('電卓');
   await expect(tiles.nth(1)).toContainText('先のリンク');
