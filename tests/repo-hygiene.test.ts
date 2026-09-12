@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { codeOnly as stripComments } from './helpers/code-only';
 // ⚠ 配色の正本(#718)── `index.html` の inline script が持つ写しを突き合わせる
@@ -1488,5 +1488,65 @@ describe('\u{1f534} 起動より前に配色を当てる(#718)', () => {
       expect(run('solarized', prefersDark)).toBe('solarized');
       expect(run('nosuchtheme', prefersDark)).toBe(initialTheme(prefersDark));
     }
+  });
+});
+
+describe('\u{1f534} 手元の commit が main に載らないための hook', () => {
+  /**
+   * \u{1f534} **2026-09-12 に指定 branch を外して main へ 2 commit 直に積んだ。**
+   * 経緯に判断は無い \u2500\u2500 PR を squash merge して main へ checkout し、同期した
+   * **そのまま**次の実装に入った(commit 15:06 / 15:09、branch を戻したのは 15:10)。
+   * \u{1f511} つまり危ないのは「作業の開始」ではなく **merge の直後**である。
+   *
+   * \u26a0 「気をつける」は 3 か所目の文言になるだけなので、**hook に断らせる**。
+   * \u26a0 ただし hook は**置いただけでは動かない**(`core.hooksPath` が要る)し、
+   * **常に断る hook** も同じ緑を返すので、断る側・**断らない側(対照群)**・抜け道の
+   * 3 方向を**実際に走らせて**見る。
+   */
+  const HOOK = '.githooks/pre-commit';
+  const run = (branch: string, allow?: string): { code: number; err: string } => {
+    const extra = allow === undefined ? {} : { PKC3_ALLOW_MAIN_COMMIT: allow };
+    const res = spawnSync('sh', [HOOK], {
+      encoding: 'utf8',
+      // \u26a0 同じ file の上の検査が要求している(子の stderr を画面へ漏らさない)
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, PKC3_HOOK_BRANCH: branch, ...extra },
+    });
+    return { code: res.status ?? -1, err: res.stderr };
+  };
+
+  it('hook が在って、実行ビットが立っている', () => {
+    const st = statSync(HOOK);
+    expect(st.isFile()).toBe(true);
+    // \u26a0 実行ビットが無いと git は**黙って飛ばす**(赤も警告も出ない)
+    expect(st.mode % 0o1000 & 0o111).not.toBe(0);
+  });
+
+  it('\u{1f534} main / master の上では断る(理由と、禁止が解ける条件を言う)', () => {
+    for (const branch of ['main', 'master']) {
+      const { code, err } = run(branch);
+      expect(code).toBe(1);
+      expect(err).toContain(branch);
+      // \u{1f511} 「この禁止が解ける条件」を画面に出す(出さない禁止は「できない」と読まれる)
+      expect(err).toContain('PKC3_ALLOW_MAIN_COMMIT=1');
+    }
+  });
+
+  it('\u26a0 対照群 \u2500\u2500 指定 branch の上では通る(常に断る hook を合格と読まないため)', () => {
+    expect(run('claude/trusting-knuth-sctnu5').code).toBe(0);
+    expect(run('claude/whatever-branch').code).toBe(0);
+  });
+
+  it('\u{1f511} 抜け道は効く(塞ぐのは惰性であって、必要な操作ではない)', () => {
+    const { code, err } = run('main', '1');
+    expect(code).toBe(0);
+    expect(err).toContain('PKC3_ALLOW_MAIN_COMMIT=1');
+  });
+
+  it('\u26a0 有効化の 1 行が資産から消えない(置いただけでは動かないので)', () => {
+    expect(readFileSync('.claude/skills/sandbox-hygiene/SKILL.md', 'utf8')).toContain(
+      'git config core.hooksPath .githooks',
+    );
+    expect(readFileSync(HOOK, 'utf8')).toContain('core.hooksPath .githooks');
   });
 });

@@ -51,6 +51,26 @@ git checkout -B <branch> origin/<branch>
 ls node_modules/.bin/vitest >/dev/null 2>&1 || npm ci
 ```
 
+### 🔴 箱を立て直したら、commit を守る hook を掛け直す
+
+```bash
+git config core.hooksPath .githooks   # ⚠ 箱ごと・clone ごとに消える(設定は .git/config に在る)
+```
+
+`.githooks/pre-commit` は **`main` の上の commit を断る**(2026-09-12 に指定 branch を
+外して main へ 2 commit 直に積んだ)。⚠ **hook は置いてあるだけでは動かない** ──
+`core.hooksPath` が立っていない箱では**黙って素通りする**(赤も警告も出ない)。
+
+🔑 **掛かっているかを 1 行で確かめる**:
+
+```bash
+git config core.hooksPath                                   # → .githooks
+PKC3_HOOK_BRANCH=main sh .githooks/pre-commit; echo $?       # → 1(断った)
+```
+
+⚠ 禁止が解ける条件も憶えておく:**`PKC3_ALLOW_MAIN_COMMIT=1`** を付ければ通る。
+門は `tests/repo-hygiene.test.ts`(5 通り実際に走らせている)。
+
 ## 🔴 bash の cwd が `/home/user` へ戻ることがある
 
 2026-09-02 に**同じセッションで 2 回**踏んだ ── `not a git repository` が返り、

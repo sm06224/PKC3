@@ -1,0 +1,33 @@
+#!/bin/sh
+# PKC3: main の上に直に commit するのを断る。
+#
+# 🔑 何のための禁止か ── 「**指定 branch を外したまま惰性で積む**」を止めるためである。
+#    main を触らせないためではない:main への着地は GitHub の squash merge で起きるので、
+#    この hook は通らない。つまり**手元の commit が main に載るのは、ほぼ常に事故**である。
+#    (2026-09-12 に 2 commit 直に積んだ ── PR を merge して main へ checkout し、
+#     同期した「そのまま」次の実装に入ったため。危ないのは作業の開始ではなく merge の直後)
+#
+# 🔑 この禁止が解ける条件:`PKC3_ALLOW_MAIN_COMMIT=1` を付ける。
+# 🔑 hook 自身を走らせて試せるように、branch は `PKC3_HOOK_BRANCH` で差せる
+#    (`tests/repo-hygiene.test.ts` が 5 通り実際に走らせて pin している)。
+#
+# 有効化 ── ⚠ 箱は作り直されるので、その都度打つ:
+#    git config core.hooksPath .githooks
+
+branch="${PKC3_HOOK_BRANCH:-$(git symbolic-ref --short HEAD 2>/dev/null)}"
+
+case "$branch" in
+main | master)
+	if [ "$PKC3_ALLOW_MAIN_COMMIT" = "1" ]; then
+		echo "pre-commit: $branch へ積みます(PKC3_ALLOW_MAIN_COMMIT=1)" >&2
+		exit 0
+	fi
+	echo "pre-commit: 🔴 $branch の上には commit しません。" >&2
+	echo "  指定 branch へ移ってから積んでください:" >&2
+	echo "    git checkout -B claude/<指定 branch> $branch" >&2
+	echo "  どうしても $branch へ積むなら PKC3_ALLOW_MAIN_COMMIT=1 を付けてください。" >&2
+	exit 1
+	;;
+esac
+
+exit 0
