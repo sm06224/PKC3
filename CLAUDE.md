@@ -2013,6 +2013,19 @@ P4 assets → P5 revisions → P6 import/export → P7 v3.0.0(Pages product + PW
   ⚠ **読み側を疑う前に、書き側で往復を確かめる** ── 今回は同じ口で書き直したら
   末尾まで戻ってきたので、切っていたのは**読み手ではなく自分**だと確定した。
 
+- 🔴 **`git reset --hard` / `git checkout --` を「後片付け」に使わない**(2026-09-12。
+  ⚠ CLAUDE.md が既に戒めている「変異試験の後始末に `git checkout` を使って未 commit の
+  変更を失った」の**3 度目**である)。
+  実例:hook が本当に効くかを **`git commit --allow-empty` で試し**、戻すのに
+  `git reset --hard HEAD~1` / `git reset --hard origin/main` を打った ──
+  🔴 **作業ツリーの未 commit の編集が、それで消えた**(`package.json` の 1 行。
+  ⚠ 追跡されていない新 file は残るので、**消えた物と残る物が混ざって**気づきにくい)。
+  🔑 **空 commit を戻すなら `git reset --soft`** ── 空なので staged も増えず、
+  **作業ツリーを 1 byte も触らない**。⚠ `--hard` は「commit を戻す」道具ではなく
+  **「作業ツリーを捨てる」道具**である(名前からは読めない)。
+  🔑 手順:**確かめる操作(probe)の前に、手元の編集を `git add` しておく** ──
+  stage してあれば `--hard` でも残る。⚠ 気づけたのは**別の test が落ちたから**で、
+  落ちなければ**消えたことに気づかないまま push していた**
 - 🔴 **整形ツールを既存 file に掛けない**。`npx prettier` を掛けて `main.ts` を全面リフォーマット
   (302 行差分)し、リポジトリで唯一 double quote の file にした。diff が読めなくなり、
   次に触る PR が全部 conflict する
@@ -2284,12 +2297,26 @@ P4 assets → P5 revisions → P6 import/export → P7 v3.0.0(Pages product + PW
   (`git push -u origin <指定 branch>`)── main に居ても**押すのはローカルの指定 branch**
   なので「Everything up-to-date」で済み、**事故にならない**。⚠ 危ないのは素の `git push`。
   🔴 **そして文言を 3 か所目にしない** ── `.githooks/pre-commit` が
-  **`main` の上の commit を断る**(門は `tests/repo-hygiene.test.ts` ── 断る / 断らない /
-  抜け道の 3 方向を**実際に走らせている**)。⚠ **hook は置いただけでは動かない** ──
-  箱を立て直したら `git config core.hooksPath .githooks` を打つ
-  (`.claude/skills/sandbox-hygiene/SKILL.md`)。
+  **`main` の上の commit を断る**(`npm ci` の `prepare` が `.git/hooks/` へ写す。
+  門は `tests/repo-hygiene.test.ts`)。
   ⚠ 禁止が解ける条件も書く:**`PKC3_ALLOW_MAIN_COMMIT=1`** を付ければ通る ──
   塞ぎたいのは**惰性**であって、必要な操作ではない
+
+  - 🔴 **その門の 1 稿目は、守るべき場所でだけ居なくなる形だった**(同日。
+    **書いた 10 分後に、実際に commit が通って分かった**)。
+    1 稿目は `git config core.hooksPath .githooks` で掛けたが、⚠ **hooksPath は
+    作業ツリーの中を指す** ── `git checkout main` すると `.githooks/pre-commit` ごと
+    消えるので、**main の上でだけ hook が居ない**(⚠ git は「hook が無い」を
+    **黙って通す**)。🔑 写す先を **`.git/hooks/`**(checkout で変わらない)にして解けた。
+    🔴 **test は緑だった** ── hook を `sh .githooks/pre-commit` と**手で走らせて**
+    いたので、**git を通る本物の経路を 1 度も通っていなかった**(§2「経路が一度も
+    通っていない」)。⚠ 3 方向(断る / 通す / 抜け道)を揃えても、**経路が違えば
+    全部同じ嘘**である。
+    🔑 検算は 1 つ:**その門が止めるはずの操作を、本物の道具で 1 回やってみる**
+    (`git switch main && git commit --allow-empty`)── 手で関数を呼ぶのは、
+    門が在ることの確認であって、**門が掛かっていることの確認ではない**。
+    ⚠ そして**この誤りは「対策済み」の顔で残る**(commit も CLAUDE.md も
+    「hook で断る」と書いてある)── 自分で通してみるまで、誰も気づけない
 
 > ⚠ **この節は 2026-08-07 まで「⏸ user の裁定待ち」と書いていたが、嘘だった。**
 > GO は 2026-07-30(プロセス指示「品質はサブエージェント・スキルで守る」)/

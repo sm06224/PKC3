@@ -11,8 +11,11 @@
 # 🔑 hook 自身を走らせて試せるように、branch は `PKC3_HOOK_BRANCH` で差せる
 #    (`tests/repo-hygiene.test.ts` が 5 通り実際に走らせて pin している)。
 #
-# 有効化 ── ⚠ 箱は作り直されるので、その都度打つ:
-#    git config core.hooksPath .githooks
+# 有効化 ── `npm ci` / `npm install` が `prepare` 経由で **`.git/hooks/` へ写す**
+#    (手で打つなら `node scripts/install-hooks.mjs`)。
+# 🔴 `git config core.hooksPath .githooks` では**動かない** ── hooksPath は作業ツリーの
+#    中を指すので、`git checkout main` するとこの file ごと消え、**守るべき場所でだけ
+#    hook が居なくなる**(git は「無い」を黙って通す)。2026-09-12 に実際に踏んだ。
 
 branch="${PKC3_HOOK_BRANCH:-$(git symbolic-ref --short HEAD 2>/dev/null)}"
 
