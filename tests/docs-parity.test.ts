@@ -2269,6 +2269,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-12(#858 ── スクロールバー)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-08-cell-tap-hint" …` → 9295f06
+     */
+    'スマホ・タブレットで、表のセルが押せることが字で出るようになりました',
+    /**
      * ⚠ **2026-09-12(#281 ── 組み込みタイルの目印)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-08-prose-align-and-keys" …` → bc738d2
      */

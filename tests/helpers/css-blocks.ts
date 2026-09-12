@@ -37,41 +37,60 @@ export function blocksFor(css: string, sel: string): string[] {
  * ⚠ 「最初の `@media` で切る」では足りない ── `@media` 群の**後にも**素の規則が続く。
  */
 export function withoutMedia(css: string): string {
-  let out = css;
-  for (let at = out.indexOf('@media'); at !== -1; at = out.indexOf('@media')) {
-    const open = out.indexOf('{', at);
-    if (open < 0) throw new Error('@media に { が無い(構文が壊れている)');
-    let depth = 1;
-    let i = open + 1;
-    for (; i < out.length && depth > 0; i++) {
-      if (out[i] === '{') depth++;
-      else if (out[i] === '}') depth--;
-    }
-    if (depth !== 0) throw new Error('@media の閉じ } が無い(構文が壊れている)');
-    out = out.slice(0, at) + out.slice(i);
-  }
-  return out;
+  return withoutAtRule(css, 'media');
 }
 
 /**
- * `@media <query> { … }` の**中だけ**と、その開始位置を返す。
+ * `@<なにか> … { … }` の**中だけ**と、その開始位置を返す(brace を数えて対応する閉じまで)。
  *
  * ⚠ **コメントを剥いでから渡すこと** ── `app.css` の print 節の直上には
  *   「`@media print` は 0 件だった」という**散文**が在り、素の `indexOf` は
  *   そちらに当たる(#303 の変異ハーネスで実際に踏み、build を落とした)。
  */
-export function mediaBlock(css: string, query: string): { body: string; at: number } {
-  const at = css.indexOf(`@media ${query}`);
-  if (at < 0) throw new Error(`@media ${query} が無い`);
+export function atBlock(css: string, header: string): { body: string; at: number } {
+  const at = css.indexOf(header);
+  if (at < 0) throw new Error(`${header} が無い`);
   const open = css.indexOf('{', at);
+  if (open < 0) throw new Error(`${header} に { が無い(構文が壊れている)`);
   let depth = 1;
   let i = open + 1;
   for (; i < css.length && depth > 0; i++) {
     if (css[i] === '{') depth++;
     else if (css[i] === '}') depth--;
   }
-  if (depth !== 0) throw new Error(`@media ${query} の閉じ } が無い`);
+  if (depth !== 0) throw new Error(`${header} の閉じ } が無い(構文が壊れている)`);
   return { body: css.slice(open + 1, i - 1), at };
+}
+
+/** `@media <query> { … }` の中だけ(`atBlock` の言い換え ── 呼び側を壊さないため残す)。 */
+export function mediaBlock(css: string, query: string): { body: string; at: number } {
+  return atBlock(css, `@media ${query}`);
+}
+
+/**
+ * `@<name>` のブロックを**構文で**取り除く(`withoutMedia` の一般形)。
+ *
+ * 🔴 これが要るのは「**その規則が、条件の外に在ること**」を見たいときである ──
+ * 2026-09-12 の実例:`scrollbar-width` は **Firefox 向けの `@supports` の中にだけ**
+ * 在らねばならない(素で書くと Chromium が `::-webkit-scrollbar` を丸ごと無視して、
+ * 「見える 6px / 掴める 14px」が死ぬ)。⚠ 中まで拾う走査では**外に出す変異を殺せない**。
+ */
+export function withoutAtRule(css: string, name: string): string {
+  const head = `@${name}`;
+  let out = css;
+  for (let at = out.indexOf(head); at !== -1; at = out.indexOf(head)) {
+    const open = out.indexOf('{', at);
+    if (open < 0) throw new Error(`${head} に { が無い(構文が壊れている)`);
+    let depth = 1;
+    let i = open + 1;
+    for (; i < out.length && depth > 0; i++) {
+      if (out[i] === '{') depth++;
+      else if (out[i] === '}') depth--;
+    }
+    if (depth !== 0) throw new Error(`${head} の閉じ } が無い(構文が壊れている)`);
+    out = out.slice(0, at) + out.slice(i);
+  }
+  return out;
 }
 
 /**
