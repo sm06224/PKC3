@@ -439,3 +439,62 @@ test('🔴 予定の面で「足す」を押すと、今日の束に出る (#499
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **ずっと前から「毎日」と書いた行が、今日の予定に出る**(#855 段 0 の欠陥①)。
+ *
+ * ## 何が壊れていたか
+ *
+ * 展開は開始日から 1 回ずつ数え上げる形で、上限(`max * 8` = 1600)に当たると
+ * **1 件も出さずに止まっていた**。⚠ `truncated` も立たないので、画面は
+ * 「その日は何も無い」と**静かに**言う ── 4 年前から書いてある人には、
+ * **毎日の予定が丸ごと消えている**ように見える。
+ *
+ * ## ⚠ なぜ既に在る道中に載せられないのか(`scripts/smoke-budget.mjs`)
+ *
+ * この面の既存の道中(上の「毎週」の test)は **1 本の規則しか置いていない**前提で
+ * 数を数えている(`toHaveCount(1)` / `toHaveCount(0)`)。⚠ `毎日` を同じ本文へ足すと
+ * **窓の全部の日に札が増える**ので、あちらの数の assert が 4 か所とも意味を変える
+ * ── 別の主張を同じ test に混ぜることになる(1 test = 1 主張)。
+ * 🔑 だから起動を 1 つ使う(488 → 489。予算 500 の内側なので上限は動かさない)。
+ *
+ * 🔴 **unit では届かない層**:`tests/features/repeat.test.ts` は展開の関数を直に
+ * 呼ぶが、⚠ そこから**画面の升目に札が出る**までには `agenda.ts` の窓の切り方と
+ * 描画が挟まる ── 「関数は返しているのに画面には出ない」を見るのはここだけである。
+ */
+test('🔴 4 年前から「毎日」と書いた行が、今日の予定に出る (#855)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+
+  const key = (d: Date): string =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const now = new Date();
+  const today = key(now);
+  const tomorrow = key(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1));
+  /** ⚠ 4 年前の**同じ日**(2/29 を踏まないよう 1 日ずらす ── 日付の妥当性は別の test の主張)。 */
+  const longAgo = key(new Date(now.getFullYear() - 4, now.getMonth(), Math.min(now.getDate(), 28)));
+
+  await createEntry(page, 'text');
+  const ta = page.locator('[data-pkc-field="editor-body"]');
+  await ta.fill(`- [ ] 体操 @${longAgo} 毎日`);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  await clickReal(page, '[data-pkc-browse="schedule"]');
+  const pane = page.locator('[data-pkc-browse-pane="schedule"]');
+  const cardsOn = (date: string) =>
+    pane.locator(
+      `[data-pkc-region="schedule-group"][data-pkc-drop-date="${date}"] [data-pkc-region="schedule-cards"] > [data-pkc-entry]`,
+    );
+
+  // 🔴 直す前はここが **0** だった(開始日から数え上げて上限に当たり、1 件も出ない)
+  await expect(cardsOn(today), '今日の札が無い(古い開始の毎日が展開されていない)').toHaveCount(1);
+  await expect(cardsOn(today), '札に刻みが出ていない').toContainText('毎日');
+  /**
+   * 🔑 **明日も出る**(対照群)── 「たまたま今日 1 枚だけ出た」と区別する。
+   * ⚠ これが無いと、窓の起点だけ特別扱いする実装でも緑になる。
+   */
+  await expect(cardsOn(tomorrow), '明日の札が無い(1 日ぶんしか展開していない)').toHaveCount(1);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

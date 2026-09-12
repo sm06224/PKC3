@@ -127,6 +127,56 @@ describe('窓の中へ展開する', () => {
     expect(r.days).toEqual(['2026-09-07', '2026-09-14', '2026-09-21', '2026-09-28']);
   });
 
+  /**
+   * 🔴 **`毎日` の古い開始**(2026-09-12 に見つけた欠陥の当の次元)。
+   *
+   * ⚠ 直す前は anchor から 1 回ずつ窓へ近づいており、空回りの上限
+   *   (`max * 8` = 1600)を超えると **1 件も出ない**のに `truncated` も立たなかった
+   *   ── つまり**画面に何も出ない**。
+   * 🔑 上の「ずっと前から」の test は **`週`**(348 週 < 1600)で書かれていたので、
+   *   **`日` だけが落ちる**形を 1 つも見ていなかった(fixture のゼロ件次元)。
+   */
+  it('🔴 `毎日` がずっと前から始まっていても、窓の分だけ出る(1600 回を超えても)', () => {
+    const r = expandRepeat({ anchor: '2020-01-06', unit: 'day', until: null, ...win });
+    // ⚠ 2020-01-06 から窓の始まりまでは 2,400 日を超える(= 直す前の上限の外)
+    expect(r.days.length).toBe(30); // 窓は 9/01〜9/30
+    expect(r.days[0]).toBe(win.from); // 🔑 先頭が窓の始まりに**ちょうど**当たる
+    expect(r.days[r.days.length - 1]).toBe(win.to);
+    expect(r.truncated).toBe(false);
+  });
+
+  it('🔴 `毎月` / `毎年` の古い開始も、窓の分だけ出る', () => {
+    const m = expandRepeat({ anchor: '2015-09-03', unit: 'month', until: null, ...win });
+    expect(m.days).toEqual(['2026-09-03']);
+    const y = expandRepeat({ anchor: '1999-09-21', unit: 'year', until: null, ...win });
+    expect(y.days).toEqual(['2026-09-21']);
+  });
+
+  /**
+   * 🔑 **数えて出しても、月末の寄せは anchor から数えたまま**であること
+   * (⚠ 窓の先頭を「前の回から 1 つ進める」形で出すと、ここが 2/28 に固定される)。
+   */
+  it('🔑 古い開始でも、月末は anchor の日に戻る', () => {
+    const r = expandRepeat({
+      anchor: '2020-01-31',
+      unit: 'month',
+      until: null,
+      from: '2026-02-01',
+      to: '2026-04-30',
+    });
+    expect(r.days).toEqual(['2026-02-28', '2026-03-31', '2026-04-30']);
+  });
+
+  /**
+   * ⚠ **対照群** ── 窓より後から始まる繰り返しは、1 件も出さない
+   *   (「数えて出す」を足したせいで窓の前へ溢れていないこと)。
+   */
+  it('⚠ 窓より後に始まる繰り返しは 1 件も出さない', () => {
+    const r = expandRepeat({ anchor: '2026-10-05', unit: 'day', until: null, ...win });
+    expect(r.days).toEqual([]);
+    expect(r.truncated).toBe(false);
+  });
+
   it('🔴 上限で切ったら、そう言う', () => {
     const r = expandRepeat({
       anchor: '2026-09-01',
