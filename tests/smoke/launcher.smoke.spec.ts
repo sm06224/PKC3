@@ -245,7 +245,7 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
    */
   await expect(
     page.locator(`${builtinTile('schedule')} [data-pkc-field="tile-icon"]`),
-    '予定表の絵が左のタブと違う',
+    '予定表の目印が `calendar` でない(左のタブと同じ図案の名前を使う ── タブ自身の絵は app.css で隠してある)',
   ).toHaveAttribute('data-pkc-symbol', 'calendar');
 
   /**

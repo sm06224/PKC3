@@ -371,6 +371,36 @@ describe('絵文字を UI に置かない', () => {
     expect(new Set(used).size, `隣り合う図案が同じ: ${used.join(' / ')}`).toBe(used.length);
   });
 
+  /**
+   * 🔴 **左のタブが `BROWSE_ICONS` を読んでいる**(2026-09-12、#851 の着地前レビュー 変異 A)。
+   *
+   * ⚠ 直す前は **1 件も pin が無かった** ── `shell.ts` の `iconSpan(BROWSE_ICONS[mode] …)`
+   *   を `iconSpan('dot')` に潰しても、**全量 unit が 1 件も落ちなかった**(実測)。
+   * ⚠ いまタブの図案は `app.css` で隠してあるので画面は変わらないが、
+   *   **その CSS 自身が「タブが 4 枚以下に戻ったら図案を戻してよい」と書いている** ──
+   *   戻した日、タブが全部同じ絵になっていても誰も気づかない形だった。
+   * 🔑 ここが見るのは**値の一致ではなく、シェルが表を読んでいること**である
+   *   (期待側も同じ表を読むので、値そのものは保証しない ── そこは
+   *   `tests/features/launcher-tiles.test.ts` がタイル側と突き合わせる)。
+   */
+  it('🔴 左のタブの図案は、表(`BROWSE_ICONS`)から来ている', () => {
+    const root = document.createElement('div');
+    buildShell(root);
+    const seen = new Map<string, string>();
+    for (const btn of root.querySelectorAll('[data-pkc-region="browse-tabs"] [data-pkc-browse]')) {
+      const mode = btn.getAttribute('data-pkc-browse') ?? '';
+      const icon = btn.querySelector('[data-pkc-icon]');
+      if (icon !== null) seen.set(mode, icon.getAttribute('data-pkc-symbol') ?? '');
+    }
+    // ⚠ 空振り防止 ── タブを 1 つも拾えていないなら、下の比較は 1 度も回らない
+    expect(seen.size, 'タブの図案を 1 つも拾えていない(空振り)').toBeGreaterThanOrEqual(5);
+    for (const [mode, symbol] of seen) {
+      const want = BROWSE_ICONS[mode];
+      expect(want, `タブ(${mode})の図案が表に無い ── 前提が崩れている`).toBeDefined();
+      expect(symbol, `タブ(${mode})が表を読んでいない`).toBe(want);
+    }
+  });
+
   it('🔴 この検査が空振りしていない(合成した違反を捕まえる)', () => {
     // ⚠ 検査する側も変異試験の対象(CLAUDE.md)
     const emoji = /[\u{1F000}-\u{1FAFF}]/u;

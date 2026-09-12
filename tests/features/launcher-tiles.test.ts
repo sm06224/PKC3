@@ -372,14 +372,38 @@ describe('組み込みタイルの合流 (#148)', () => {
    */
   it('🔴 左のタブと同じ面のタイルは、同じ図案の名前を使う', () => {
     const merged = withBuiltinTiles([], { office: true });
-    const symbolOf = (kind: string): string | undefined =>
-      merged.find((t) => t.kind === kind)?.symbol;
-    for (const kind of ['schedule', 'contacts', 'captures']) {
-      expect(symbolOf(kind), `${kind} の絵が左のタブと違う`).toBe(BROWSE_ICONS[kind]);
+    /**
+     * 🔑 **対になる組み込みは導出する**(2026-09-12、着地前レビュー ⚠3)。
+     * ⚠ 直す前は `['schedule','contacts','captures']` と**手書き**で、
+     *   同じ 3 件が `tiles.ts` の注記・マニュアル・ここの 3 か所に散っていた ──
+     *   **4 組目を足した日に、この loop だけ 3 件のまま**で誰も見ない。
+     * ⚠ この repo の作法は「新しいタイルは末尾へ足す」なので、穴は
+     *   **いちばん足しやすい場所**に開いていた。
+     */
+    const mirrored = merged.filter((t) => Object.hasOwn(BROWSE_ICONS, t.kind));
+    expect(
+      mirrored.map((t) => t.kind),
+      '左のタブと対になる組み込みが増減した ── `tiles.ts` の注記とマニュアルも直す',
+    ).toEqual(['schedule', 'contacts', 'captures']);
+    for (const t of mirrored) {
+      const tab = BROWSE_ICONS[t.kind];
+      /**
+       * ⚠ **空振り防止はここ**(着地前レビュー ⚠2)── 直す前は loop の**後ろ**に
+       *   「表が空でないこと」を置いていたが、タイル側の `symbol` は直書きなので
+       *   **loop が先に落ち、その行は一度も評価されない**。しかも落ちたときの文言が
+       *   「タイルの絵が違う」と読めて、**崩れているのは前提(表)**だと分からない。
+       */
+      expect(tab, `左のタブ(${t.kind})の図案が表に無い ── 前提が崩れている`).toBeDefined();
+      expect(t.symbol, `${t.kind} の図案の名前が ${String(tab)} でない`).toBe(tab);
     }
-    // ⚠ 空振り防止 ── 表そのものが空なら上は 3 回とも undefined 同士で通る
-    expect(Object.keys(BROWSE_ICONS).length).toBeGreaterThanOrEqual(6);
-    expect(merged.map((t) => t.symbol)).not.toContain(BROWSE_ICONS['filer']);
+    /**
+     * ⚠ **前提を先に検める**(着地前レビュー 変異 C)── `filer` の鍵が改名されると
+     *   `BROWSE_ICONS['filer']` は `undefined` になり、`not.toContain(undefined)` は
+     *   **常に真**になって無言化する。
+     */
+    const filerIcon = BROWSE_ICONS['filer'];
+    expect(filerIcon, 'フォルダのタブの図案が引けない ── 前提が崩れている').toBeDefined();
+    expect(merged.map((t) => t.symbol)).not.toContain(filerIcon);
   });
 
   /**

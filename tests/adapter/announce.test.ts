@@ -1074,7 +1074,7 @@ describe('お知らせの文面は固定(#220-7)', () => {
      *   **配布済みの最古 1 件**(`2026-09-08-prose-align-and-keys`、bc738d2)を
      *   登記表から落とした。原本は CHANGELOG に在る。
      */
-    ['2026-09-12-builtin-tile-icons', 'b7e7ad9f'],
+    ['2026-09-12-builtin-tile-icons', '075e4fa1'],
     ['2026-09-12-app-tile-icons', '11b7e42f'],
     ['2026-09-11-material-icons', '07745698'],
     ['2026-09-11-recent-sort', '5dbf4394'],
