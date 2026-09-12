@@ -2128,6 +2128,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-12(#770 段② ── タイルの目印)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-08-capture-split-12h" …` → b77cb10
+     */
+    '録音・画面収録が途中で止まらなくなり、最大 12 時間まで録れます',
+    /**
      * ⚠ **2026-09-11(マテリアルの図案)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-08-blocked-why-and-calc-palette" …` → 980000c
      */

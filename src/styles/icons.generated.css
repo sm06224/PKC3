@@ -122,3 +122,111 @@
 [data-pkc-icon][data-pkc-symbol='stop']::before {
   content: '\e047';
 }
+[data-pkc-icon][data-pkc-symbol='terminal']::before {
+  content: '\eb8e';
+}
+[data-pkc-icon][data-pkc-symbol='computer']::before {
+  content: '\e31e';
+}
+[data-pkc-icon][data-pkc-symbol='phone']::before {
+  content: '\e7ba';
+}
+[data-pkc-icon][data-pkc-symbol='code']::before {
+  content: '\e86f';
+}
+[data-pkc-icon][data-pkc-symbol='database']::before {
+  content: '\f20e';
+}
+[data-pkc-icon][data-pkc-symbol='tools']::before {
+  content: '\f8cd';
+}
+[data-pkc-icon][data-pkc-symbol='calculator']::before {
+  content: '\ea5f';
+}
+[data-pkc-icon][data-pkc-symbol='chart']::before {
+  content: '\e26b';
+}
+[data-pkc-icon][data-pkc-symbol='dashboard']::before {
+  content: '\e871';
+}
+[data-pkc-icon][data-pkc-symbol='note']::before {
+  content: '\e66d';
+}
+[data-pkc-icon][data-pkc-symbol='book']::before {
+  content: '\ea19';
+}
+[data-pkc-icon][data-pkc-symbol='news']::before {
+  content: '\eb81';
+}
+[data-pkc-icon][data-pkc-symbol='mail']::before {
+  content: '\e159';
+}
+[data-pkc-icon][data-pkc-symbol='chat']::before {
+  content: '\e0c9';
+}
+[data-pkc-icon][data-pkc-symbol='timer']::before {
+  content: '\e425';
+}
+[data-pkc-icon][data-pkc-symbol='map']::before {
+  content: '\e55b';
+}
+[data-pkc-icon][data-pkc-symbol='flight']::before {
+  content: '\e539';
+}
+[data-pkc-icon][data-pkc-symbol='music']::before {
+  content: '\e405';
+}
+[data-pkc-icon][data-pkc-symbol='movie']::before {
+  content: '\e404';
+}
+[data-pkc-icon][data-pkc-symbol='camera']::before {
+  content: '\e412';
+}
+[data-pkc-icon][data-pkc-symbol='palette']::before {
+  content: '\e40a';
+}
+[data-pkc-icon][data-pkc-symbol='game']::before {
+  content: '\ea28';
+}
+[data-pkc-icon][data-pkc-symbol='cart']::before {
+  content: '\e8cc';
+}
+[data-pkc-icon][data-pkc-symbol='money']::before {
+  content: '\f041';
+}
+[data-pkc-icon][data-pkc-symbol='work']::before {
+  content: '\e943';
+}
+[data-pkc-icon][data-pkc-symbol='school']::before {
+  content: '\e80c';
+}
+[data-pkc-icon][data-pkc-symbol='home']::before {
+  content: '\e9b2';
+}
+[data-pkc-icon][data-pkc-symbol='food']::before {
+  content: '\e56c';
+}
+[data-pkc-icon][data-pkc-symbol='sunny']::before {
+  content: '\e81a';
+}
+[data-pkc-icon][data-pkc-symbol='science']::before {
+  content: '\ea4b';
+}
+[data-pkc-icon][data-pkc-symbol='pets']::before {
+  content: '\e91d';
+}
+[data-pkc-icon][data-pkc-symbol='fitness']::before {
+  content: '\eb43';
+}
+[data-pkc-icon][data-pkc-symbol='star']::before {
+  content: '\f09a';
+}
+[data-pkc-icon][data-pkc-symbol='key']::before {
+  content: '\e73c';
+}
+[data-pkc-icon][data-pkc-symbol='link']::before {
+  content: '\e250';
+}
+[data-pkc-icon][data-pkc-symbol='translate']::before {
+  content: '\e8e2';
+}

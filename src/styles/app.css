@@ -4379,7 +4379,42 @@ li[data-pkc-row-slot] {
   cursor: pointer;
 }
 [data-pkc-field='app-icon'] {
-  width: 4em;
+  /* ⚠ 名前(`calendar` / `check-box`)も打てるので、字が隠れない幅にする
+   * (#770 段②。絵文字 1 字だけだった頃は 4em で足りていた) */
+  width: 8em;
+}
+
+/* 🔴 目印を絵から選ぶ(#770 段②)── 上の欄は**残したまま隣に足した**口。
+ * ⚠ 行を丸ごと使う ── 同じ行に混ぜると、49 個の絵が欄を押し出す */
+[data-pkc-field='app-icon-palette'] {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1);
+}
+[data-pkc-field='app-icon-palette'] button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  /* ⚠ 字の大きさは**書かない** ── 器から継ぐ(ボタンの段を増やさない。
+   * 門は `tests/adapter/button-font-size.test.ts`) */
+  cursor: pointer;
+}
+[data-pkc-field='app-icon-palette'] button:hover {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+/* 🔑 いま選んでいる物は**枠と地**で示す(字を足さない ── 押し口の大きさが動かない) */
+[data-pkc-field='app-icon-palette'] button[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--surface-2);
+  color: var(--fg);
 }
 
 /* ── ファイラ ───────────────────────────────────── */

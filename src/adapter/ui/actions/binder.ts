@@ -6055,6 +6055,22 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'SET_APP_TILE', lid, icon: target.value.trim() });
   },
   /**
+   * 🔴 **目印を絵から選ぶ**(#770 段②、2026-09-12)。
+   *
+   * ⚠ **押した物が何かは、押した要素が持つ**(`data-pkc-icon-name`)──
+   *   ここで一覧を引き直すと、並べる側と選ぶ側で表が 2 つになる(§7)。
+   * 🔑 撃つのは `set-app-icon`(欄に打つ)と**同じ書込** ── 空文字は
+   *   reducer が「目印なし」に畳むので、`なし` の口も同じ 1 本で足りる。
+   */
+  'pick-app-icon': (dispatcher, target) => {
+    const lid = dispatcher.getState().selectedLid;
+    if (!lid) return;
+    const name = target.getAttribute('data-pkc-icon-name');
+    // ⚠ 属性が無いときは撃たない(押した物が分からないまま目印を消さない)
+    if (name === null) return;
+    dispatcher.dispatch({ type: 'SET_APP_TILE', lid, icon: name });
+  },
+  /**
    * 添付の参照(`asset:<key>`)をコピーする(P8 段⑱)。
    * ⚠ 本文に貼れる形そのものを渡す ── key だけ渡すと user が書式を覚える必要がある
    */

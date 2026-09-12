@@ -55,7 +55,10 @@ import {
   stepFor,
   undo,
 } from '@features/markdown/edit-journal';
-import { CANCEL_EDIT_HINT, COMMIT_EDIT_HINT, iconButton, markPrimary } from './icons';
+import { CANCEL_EDIT_HINT, COMMIT_EDIT_HINT, iconButton, iconSpan, markPrimary } from './icons';
+// 🔑 目印に選べる絵の一覧(#770 段②)── 順番と日本語の名前は features 側の正本が持つ
+import { TILE_ICON_CHOICES } from '@features/icon/tile-icons';
+import type { IconName } from '@features/icon/symbols';
 import { buildFormatBar } from './format-bar';
 import { hasSourceSelection } from '../actions/copy-source';
 import {
@@ -2692,7 +2695,69 @@ function appTileControls(rawBody: string): HTMLElement {
   };
   // ⚠ グループ名は**並び順そのもの**(名前順に並ぶ)── placeholder でそう言う
   field('app-group', 'set-app-group', 'グループ(名前順に並びます)', fm['attachment.app_group'], 16);
-  field('app-icon', 'set-app-icon', 'アイコン', fm['attachment.app_icon'], 3);
+  field('app-icon', 'set-app-icon', 'アイコン', fm['attachment.app_icon'], 8);
+  box.append(appIconPalette(fm['attachment.app_icon']));
+  return box;
+}
+
+/**
+ * 🔴 **目印を絵から選ぶ**(#770 段②、2026-09-12)。
+ *
+ * > user 要望 2026-09-07:「**アプリで使えるアイコンにも使用したい /
+ * > なので、アイコン入力の補助としてパレット機能も欲しい**」
+ *
+ * ## ⚠ 上の欄は**消さない**
+ *
+ * 🔑 選ぶ口は**隣に足す**。欄を置き換えると「**絵文字を直に貼る**」道が消える ──
+ *   記法や口を減らすのは user の動線を減らすことである(user 裁定 2026-08-07)。
+ *   ⚠ いま 🧮 を書いている人の画面は **1 ドットも変わらない**。
+ *
+ * ## ⚠ 図案だけのボタンにしている(`icons.ts` の作法から外れる)
+ *
+ * `icons.ts` には「**図案だけのボタンを作らない ── 意味は隣の文字が持つ**」と
+ * 書いてある。ここはそこから外れるが、**外す理由が在る**:
+ * この一覧の押し口は「操作」ではなく「**選ぶ対象そのもの**」で、
+ * 文字を隣に置くと 49 個ぶんの名前で面が埋まる(選ぶより読む面になる)。
+ * 🔑 代わりに **`title` と読み上げの名前を必ず日本語で持たせる**
+ *   ── 押す前に何か分かる道は残す。
+ *
+ * ## ⚠ 外す口を必ず置く(`なし`)
+ *
+ * 🔑 **置けるなら、外せなければならない**(user 指示 2026-08-23)──
+ *   置くだけだと、間違えて選んだ絵を本文の欄まで戻って消すことになる。
+ */
+function appIconPalette(current: unknown): HTMLElement {
+  const now = typeof current === 'string' ? current.trim() : '';
+  const box = document.createElement('div');
+  box.setAttribute('data-pkc-field', 'app-icon-palette');
+  box.setAttribute('role', 'group');
+  box.setAttribute('aria-label', 'タイルの目印を選ぶ');
+
+  const pick = (name: string, label: string, symbol: IconName | null): void => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.setAttribute('data-pkc-action', 'pick-app-icon');
+    // ⚠ **押した物が何かは、押した要素が持つ**(組み立て直さない ── §7)
+    btn.setAttribute('data-pkc-icon-name', name);
+    // 🔑 いま選んでいる物を**字ではなく状態で**示す(読み上げにも出る)
+    btn.setAttribute('aria-pressed', now === name ? 'true' : 'false');
+    btn.title = label;
+    if (symbol === null) {
+      const text = document.createElement('span');
+      text.setAttribute('data-pkc-field', 'label');
+      text.textContent = label;
+      btn.append(text);
+    } else {
+      // ⚠ 読み上げの名前は**ここ**が持つ(図案の器は `aria-hidden`)
+      btn.setAttribute('aria-label', label);
+      btn.append(iconSpan(symbol));
+    }
+    box.append(btn);
+  };
+
+  // ⚠ 先頭に外す口 ── 一覧の中に在るほうが、押した所と同じ場所で戻せる
+  pick('', 'なし', null);
+  for (const c of TILE_ICON_CHOICES) pick(c.name, c.label, c.name);
   return box;
 }
 

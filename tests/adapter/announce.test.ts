@@ -1058,6 +1058,16 @@ describe('お知らせの文面は固定(#220-7)', () => {
      *   `git log --oneline origin/main -S"2026-09-08-manual-jump" -- src/features/notice/notice-log.ts`
      *   → bcc0b0a。原本は CHANGELOG.md に在る。
      */
+    /**
+     * ⚠ **#770 段②(タイルの目印を絵から選ぶ)で足した**(2026-09-12)。
+     * ⚠ 枠(30 件)は満杯だったので、**いちばん古い 1 件**
+     *   (`2026-09-08-capture-split-12h`)を落として空けた ──
+     *   user 裁定 2026-09-06「これでよい(古い順に出す)」。
+     * 🔑 落とす相手は**配ってある物**から選んだ:
+     *   `git log --oneline origin/main -S"2026-09-08-capture-split-12h" …` → b77cb10。
+     *   原本は CHANGELOG に在る(`tests/docs-parity.test.ts` の `DROPPED` が等値で見る)。
+     */
+    ['2026-09-12-app-tile-icons', '11b7e42f'],
     ['2026-09-11-material-icons', '07745698'],
     ['2026-09-11-recent-sort', '5dbf4394'],
     ['2026-09-11-help-toc-all', '63954e8e'],
@@ -1129,11 +1139,6 @@ describe('お知らせの文面は固定(#220-7)', () => {
      * 🔑 **枠を空けていない** ── `NOTICE_SHOW_MAX` は 30 なので、まだ余っている。
      */
     ['2026-09-08-prose-align-and-keys', 'fc108989'],
-    /**
-     * ⚠ **#771(収録の分割 / 12 時間)で足した**(2026-09-08)。
-     * 🔑 **枠を空けていない** ── `NOTICE_SHOW_MAX` は 30 なので、まだ余っている。
-     */
-    ['2026-09-08-capture-split-12h', 'f6961fc6'],
     /**
      * ⚠ **#791 ③ / #766 D-2 で足した**(2026-09-08)。
      * 🔑 **枠を空けていない** ── `NOTICE_SHOW_MAX` は 30 なので、まだ余っている。

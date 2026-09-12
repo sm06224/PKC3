@@ -369,6 +369,60 @@ describe('タイルの目印', () => {
     expect(iconOf('🧮📅🖩')).toBe('🧮📅');
   });
 
+  /**
+   * 🔴 **図案の名前を書くと、絵になる**(#770 段②)。
+   *
+   * ⚠ 直す前は `calendar` と打つと **`ca`** と出ていた(上の「2 字に切る」に当たる)──
+   *   豆腐でも無反応でもなく、**それらしく壊れる**いちばん読みにくい形だった。
+   */
+  const symbolOf = (icon: string): string | undefined =>
+    tileFrom({
+      lid: 'i',
+      title: 'アプリ',
+      body: body({
+        'attachment.registered_as_app': true,
+        'attachment.asset_key': 'k',
+        'attachment.mime': 'text/html',
+        'attachment.app_icon': icon,
+      }),
+    })?.symbol;
+
+  it('🔴 図案の名前を丸ごと書くと、絵で置く(`ca` と出さない)', () => {
+    expect(symbolOf('calendar')).toBe('calendar');
+    // ⚠ **字のほうは立てない** ── 2 つ立つと、出す側が「どちらを描くか」を持つ
+    expect(iconOf('calendar'), '字と絵が両方立っている').toBeUndefined();
+  });
+
+  it('🔴 いま絵文字を書いている人は 1 ドットも変わらない', () => {
+    expect(iconOf('🧮')).toBe('🧮');
+    expect(symbolOf('🧮')).toBeUndefined();
+  });
+
+  it('🔴 丸ごと一致だけ ── 途中まで同じ字は化けない', () => {
+    // ⚠ 前方一致で拾うと、`ca` と打った人の字が予定表の絵になる
+    expect(symbolOf('ca')).toBeUndefined();
+    expect(iconOf('ca')).toBe('ca');
+    // ⚠ 後ろに伸びた名前も別物(CLAUDE.md §1「頭と尻を両方留める」)
+    expect(symbolOf('calendarx')).toBeUndefined();
+    expect(iconOf('calendarx')).toBe('ca');
+  });
+
+  it('前後の空白は落として見る(frontmatter に空白が残っていても絵になる)', () => {
+    expect(symbolOf('  calendar  ')).toBe('calendar');
+  });
+
+  /**
+   * 🔴 **表に無い名前が「在る」ことにならない**(原型の鍵)。
+   * ⚠ `raw in PKC_SYMBOLS` や `PKC_SYMBOLS[raw] !== undefined` で書くと、
+   *   `constructor` / `toString` が**真になる** ── そのとき `data-pkc-symbol` に
+   *   その字が入り、CSS に規則が無いので**何も出ない**(無言で消える)。
+   */
+  it('🔴 `constructor` のような原型の鍵は図案にしない', () => {
+    for (const bad of ['constructor', 'toString', 'hasOwnProperty', '__proto__']) {
+      expect(symbolOf(bad), `${bad} が図案として通った`).toBeUndefined();
+    }
+  });
+
   it('目印が無いときは持たない(既定の絵を勝手に置かない)', () => {
     expect(iconOf('')).toBeUndefined();
     expect(
