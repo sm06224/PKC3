@@ -55,7 +55,10 @@ import {
   stepFor,
   undo,
 } from '@features/markdown/edit-journal';
-import { CANCEL_EDIT_HINT, COMMIT_EDIT_HINT, iconButton, markPrimary } from './icons';
+import { CANCEL_EDIT_HINT, COMMIT_EDIT_HINT, iconButton, iconSpan, markPrimary } from './icons';
+// 🔑 目印に選べる絵の一覧(#770 段②)── 順番と日本語の名前は features 側の正本が持つ
+import { TILE_ICON_CHOICES } from '@features/icon/tile-icons';
+import type { IconName } from '@features/icon/symbols';
 import { buildFormatBar } from './format-bar';
 import { hasSourceSelection } from '../actions/copy-source';
 import {
@@ -262,6 +265,27 @@ export class DetailRenderer {
    */
   private readonly blockedKinds = new Map<string, Set<SandboxBlockedKind>>();
   private bodyHost: HTMLElement | null = null;
+  /**
+   * いま焦点が**絵の一覧の中**に在れば、その絵の名前(「なし」は空文字)を返す。
+   * ⚠ 面の外に焦点があるときは `null` ── 打っている欄から焦点を奪わないため。
+   */
+  private focusedPickName(): string | null {
+    const active = this.region.ownerDocument.activeElement;
+    if (!(active instanceof HTMLElement) || !this.region.contains(active)) return null;
+    return active
+      .closest('[data-pkc-action="pick-app-icon"]')
+      ?.getAttribute('data-pkc-icon-name') ?? null;
+  }
+
+  /** 組み直したあと、同じ絵のボタンへ焦点を戻す(消えていれば何もしない)。 */
+  private refocusPick(name: string): void {
+    this.bodyHost
+      ?.querySelector<HTMLElement>(
+        `[data-pkc-action="pick-app-icon"][data-pkc-icon-name="${name}"]`,
+      )
+      ?.focus();
+  }
+
   /**
    * 本文の出し方(markdown / 添付)。変わったら器ごと作り直す。
    * ⚠ かつて `'plain'`(記法が無い本文を `<pre>` で出す)が在ったが、
@@ -687,11 +711,25 @@ export class DetailRenderer {
       //    **lend 7 回 / dispose 0 回**、画面の `<img>` は 1 枚。
       //    ⚠ `hydrateToken` も進むので、飛んでいる hydratePreview が stale と
       //    判定されて detached な器へ描かなくなる(こちらも同じ穴だった)
+      /**
+       * 🔴 **押した絵にカーソルを残す**(2026-09-12、#770 段② の動線レビュー 2)。
+       *
+       * ⚠ 絵を 1 つ選ぶと本文が変わるので、この面は**丸ごと組み直される** ──
+       *   押したボタンごと消えるので `document.activeElement` は `body` へ落ち、
+       *   **鍵だけで使う人は、次の絵まで画面の頭から Tab で戻ることになる**
+       *   (マウスなら 2 回目もその場で押せるのに、片方だけ往復が要る)。
+       * 🔑 **壊す側が直す** ── 組み直す直前に「絵の一覧に焦点があったか」を採り、
+       *   組み直したあとに**同じ絵**へ戻す(`filer.ts` の前例と同じ作法)。
+       * ⚠ 外に焦点があるときは**触らない**(打っている欄から奪わない)。
+       * ⚠ 「なし」は名前が空文字なので、**`null` と区別する**(`?? null` で畳まない)。
+       */
+      const keepPick = this.focusedPickName();
       this.disposeLends();
       this.bodyKind = 'attachment';
       this.bodyView = EMPTY_VIEW;
       this.bodyHost!.textContent = '';
       this.renderAttachment(body, shown, lid, selfContainerId(state), meta.title);
+      if (keepPick !== null) this.refocusPick(keepPick);
       this.restoreScroll();
       return;
     }
@@ -1948,7 +1986,24 @@ export class DetailRenderer {
         info.append(view);
       }
       if (isAppMime(meta.mime)) {
-        const run = iconButton('launch-asset', '起動', 'launch-asset');
+        /**
+         * 🔴 **起動する相手は、押したボタンが持つ**(2026-09-12、#770 段②の
+         *   着地前レビュー B)。
+         *
+         * ⚠ 直す前は 3 本とも `selectedLid` だけを見ていた ── **留めた枠**
+         *   (横に並べた枠)は選択と関係なく「その 1 件」を出す面なので、
+         *   そこで「起動」を押すと**主の枠のノートが開く**。
+         *   🔴 とくに「ノートを渡して起動」は**確認に出る題名まで別のノート**に
+         *   なる(許してよいか判断する材料が、押した物と食い違う)。
+         * 🔑 だから `download-asset` / `open-office` と**同じ作法**にする ──
+         *   **押した要素が対象を持つ**。⚠ 属性が無い版(古い DOM)でも壊れないよう、
+         *   受け手は「属性 → 無ければ `selectedLid`」の順で読む。
+         */
+        const launchOf = (b: HTMLElement): HTMLElement => {
+          b.setAttribute('data-pkc-launch-lid', lid);
+          return b;
+        };
+        const run = launchOf(iconButton('launch-asset', '起動', 'launch-asset'));
         run.title = 'PKC3 から切り離して開きます(PKC3 の中身には触れません)';
         info.append(run);
         /**
@@ -1959,7 +2014,9 @@ export class DetailRenderer {
          *   保存領域に手が届くので、自分の許可記録を自分で書ける)。
          * 設計: `docs/development/p10-launcher-same-origin-2026-08.md`
          */
-        const rawRun = iconButton('launch-asset-raw', 'ノートを渡して起動', 'launch-asset-raw');
+        const rawRun = launchOf(
+          iconButton('launch-asset-raw', 'ノートを渡して起動', 'launch-asset-raw'),
+        );
         rawRun.title =
           'PKC3 と同じ保存領域で開きます。自分でデータを保存するアプリも動きますが、このアプリは PKC3 のノートを全部読めますし、書き換えもできます';
         info.append(rawRun);
@@ -1977,10 +2034,8 @@ export class DetailRenderer {
           run.title =
             'PKC3 から切り離して開きます(PKC3 の中身には触れません)。このアプリにはノートの目次を見せます ── 取り消しは設定から';
         } else {
-          const extRun = iconButton(
-            'launch-asset-extension',
-            '目次を見せて起動',
-            'launch-asset-extension',
+          const extRun = launchOf(
+            iconButton('launch-asset-extension', '目次を見せて起動', 'launch-asset-extension'),
           );
           extRun.title =
             'ノートの題名・種類・日付の一覧だけを見せて開きます。本文と添付は渡りません';
@@ -2017,17 +2072,40 @@ export class DetailRenderer {
      *   「**操作は対象の隣**」(`inspector.ts:9-13`)と自己矛盾していた。
      * ⚠ **新しい改名の規則を作らない** ── 既存の action を撃つだけ。
      */
-    const rename = document.createElement('input');
-    rename.type = 'text';
-    rename.setAttribute('data-pkc-action', 'rename-attachment');
-    rename.setAttribute('data-pkc-field', 'attachment-rename');
-    rename.setAttribute('aria-label', 'この添付の名前');
-    rename.value = entryTitle;
-    // ⚠ 文言は**起きること**で書く(user 指示 2026-08-21)
-    rename.title = '名前を書き換えて、この欄の外を押すと保存されます';
-    host.append(rename);
+    /**
+     * 🔴 **設定の口は、留めた枠には出さない**(2026-09-12、#770 段② の動線レビュー 1)。
+     *
+     * ⚠ ここに在る 5 つ(名前 / 登録 / グループ / アイコン / 絵の一覧)は、
+     *   どれも **`selectedLid`(主の枠のノート)**へ撃つ ── 留めた枠は
+     *   **選択と関係なく「その 1 件」**を出す面なので、そこで押すと
+     *   **押していないノートの frontmatter が黙って書き換わる**
+     *   (相手が別の登録済みアプリなら、**関係ないタイルの目印が入れ替わる**)。
+     * 🔑 **同じ面が、同じ事故を 1 か所で既に止めている** ── 帯は `renderBar` が
+     *   `pinnedLid !== null` で出さない(「押した物と効く先が食い違う」)。
+     *   添付の設定だけが、その門を通っていなかった。
+     * ⚠ **捨てているのは「効かない口」**であって動線ではない ── 留めた枠から
+     *   設定できるようにするには、書けた本文を `splitBodies` へ戻す経路が別に要る
+     *   (それを足すまでは、**押せて効かない**より**出さない**ほうが害が小さい)。
+     * ⚠ 読む側(起動 / ダウンロード / 参照をコピー / 下見)は**そのまま出る** ──
+     *   留めた枠は「読むための枠」なので、読む道は 1 本も減らさない。
+     * 🔴 **ただし「そのまま出る = 安全」ではなかった**(2026-09-12、着地前レビュー B)──
+     *   起動の 3 本も `selectedLid` を読んでいたので、**押した物と効く先が食い違う**
+     *   側に居た。いまは**押したボタンが対象を持つ**(上の `launchOf`)。
+     *   🔑 CLAUDE.md「門は面ごとではなく**口ごとに**要る」の、まさにその形である。
+     */
+    if (this.pinnedLid === null) {
+      const rename = document.createElement('input');
+      rename.type = 'text';
+      rename.setAttribute('data-pkc-action', 'rename-attachment');
+      rename.setAttribute('data-pkc-field', 'attachment-rename');
+      rename.setAttribute('aria-label', 'この添付の名前');
+      rename.value = entryTitle;
+      // ⚠ 文言は**起きること**で書く(user 指示 2026-08-21)
+      rename.title = '名前を書き換えて、この欄の外を押すと保存されます';
+      host.append(rename);
 
-    if (isAppMime(meta.mime)) host.append(appTileControls(rawBody));
+      if (isAppMime(meta.mime)) host.append(appTileControls(rawBody));
+    }
 
     const previewHost = document.createElement('div');
     previewHost.setAttribute('data-pkc-field', 'attachment-preview');
@@ -2692,7 +2770,69 @@ function appTileControls(rawBody: string): HTMLElement {
   };
   // ⚠ グループ名は**並び順そのもの**(名前順に並ぶ)── placeholder でそう言う
   field('app-group', 'set-app-group', 'グループ(名前順に並びます)', fm['attachment.app_group'], 16);
-  field('app-icon', 'set-app-icon', 'アイコン', fm['attachment.app_icon'], 3);
+  field('app-icon', 'set-app-icon', 'アイコン', fm['attachment.app_icon'], 8);
+  box.append(appIconPalette(fm['attachment.app_icon']));
+  return box;
+}
+
+/**
+ * 🔴 **目印を絵から選ぶ**(#770 段②、2026-09-12)。
+ *
+ * > user 要望 2026-09-07:「**アプリで使えるアイコンにも使用したい /
+ * > なので、アイコン入力の補助としてパレット機能も欲しい**」
+ *
+ * ## ⚠ 上の欄は**消さない**
+ *
+ * 🔑 選ぶ口は**隣に足す**。欄を置き換えると「**絵文字を直に貼る**」道が消える ──
+ *   記法や口を減らすのは user の動線を減らすことである(user 裁定 2026-08-07)。
+ *   ⚠ いま 🧮 を書いている人の画面は **1 ドットも変わらない**。
+ *
+ * ## ⚠ 図案だけのボタンにしている(`icons.ts` の作法から外れる)
+ *
+ * `icons.ts` には「**図案だけのボタンを作らない ── 意味は隣の文字が持つ**」と
+ * 書いてある。ここはそこから外れるが、**外す理由が在る**:
+ * この一覧の押し口は「操作」ではなく「**選ぶ対象そのもの**」で、
+ * 文字を隣に置くと 49 個ぶんの名前で面が埋まる(選ぶより読む面になる)。
+ * 🔑 代わりに **`title` と読み上げの名前を必ず日本語で持たせる**
+ *   ── 押す前に何か分かる道は残す。
+ *
+ * ## ⚠ 外す口を必ず置く(`なし`)
+ *
+ * 🔑 **置けるなら、外せなければならない**(user 指示 2026-08-23)──
+ *   置くだけだと、間違えて選んだ絵を本文の欄まで戻って消すことになる。
+ */
+function appIconPalette(current: unknown): HTMLElement {
+  const now = typeof current === 'string' ? current.trim() : '';
+  const box = document.createElement('div');
+  box.setAttribute('data-pkc-field', 'app-icon-palette');
+  box.setAttribute('role', 'group');
+  box.setAttribute('aria-label', 'タイルの目印を選ぶ');
+
+  const pick = (name: string, label: string, symbol: IconName | null): void => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.setAttribute('data-pkc-action', 'pick-app-icon');
+    // ⚠ **押した物が何かは、押した要素が持つ**(組み立て直さない ── §7)
+    btn.setAttribute('data-pkc-icon-name', name);
+    // 🔑 いま選んでいる物を**字ではなく状態で**示す(読み上げにも出る)
+    btn.setAttribute('aria-pressed', now === name ? 'true' : 'false');
+    btn.title = label;
+    if (symbol === null) {
+      const text = document.createElement('span');
+      text.setAttribute('data-pkc-field', 'label');
+      text.textContent = label;
+      btn.append(text);
+    } else {
+      // ⚠ 読み上げの名前は**ここ**が持つ(図案の器は `aria-hidden`)
+      btn.setAttribute('aria-label', label);
+      btn.append(iconSpan(symbol));
+    }
+    box.append(btn);
+  };
+
+  // ⚠ 先頭に外す口 ── 一覧の中に在るほうが、押した所と同じ場所で戻せる
+  pick('', 'なし', null);
+  for (const c of TILE_ICON_CHOICES) pick(c.name, c.label, c.name);
   return box;
 }
 

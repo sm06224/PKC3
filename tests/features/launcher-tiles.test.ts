@@ -333,3 +333,117 @@ describe('組み込みタイルの合流 (#148)', () => {
     for (const t of entryTiles) expect(tileSelectsEntry(t)).toBe(true);
   });
 });
+
+/**
+ * 🔴 **目印(`attachment.app_icon`)の門**(#770 段②、2026-09-12)。
+ *
+ * ⚠ ここには **`icon` の検査が 1 件も無かった**(実測)。目印は
+ *   `[...iconRaw].slice(0, 2).join('')` と書いてあり、
+ *   **2 字に切る**判断も **サロゲートペアを割らない**判断も、
+ *   **外しても全 test が緑**の状態で置かれていた。
+ * 🔑 段② はこの行を必ず通る(名前を打つと `ca` と出るのを直す)ので、
+ *   触る前に**いまの振る舞いを字で留める**。
+ */
+describe('タイルの目印', () => {
+  const iconOf = (icon: string): string | undefined =>
+    tileFrom({
+      lid: 'i',
+      title: 'アプリ',
+      body: body({
+        'attachment.registered_as_app': true,
+        'attachment.asset_key': 'k',
+        'attachment.mime': 'text/html',
+        'attachment.app_icon': icon,
+      }),
+    })?.icon;
+
+  it('🔴 長い字は 2 字までに切る(行の高さを崩させない)', () => {
+    // ⚠ 切る処理を外すと 'abcd' がそのまま入る = この行が落ちる
+    expect(iconOf('abcd')).toBe('ab');
+  });
+
+  it('🔴 絵文字を割らない(`slice` ではなく符号位置で数える)', () => {
+    // ⚠ `iconRaw.slice(0, 2)` に退化すると、🧮(2 符号単位)が**半分**で切れて
+    //    文字化けする ── 「2 字」の数え方が字ではなく符号単位になる
+    expect(iconOf('🧮a')).toBe('🧮a');
+    expect(iconOf('🧮📅🖩')).toBe('🧮📅');
+  });
+
+  /**
+   * 🔴 **図案の名前を書くと、絵になる**(#770 段②)。
+   *
+   * ⚠ 直す前は `calendar` と打つと **`ca`** と出ていた(上の「2 字に切る」に当たる)──
+   *   豆腐でも無反応でもなく、**それらしく壊れる**いちばん読みにくい形だった。
+   */
+  const symbolOf = (icon: string): string | undefined =>
+    tileFrom({
+      lid: 'i',
+      title: 'アプリ',
+      body: body({
+        'attachment.registered_as_app': true,
+        'attachment.asset_key': 'k',
+        'attachment.mime': 'text/html',
+        'attachment.app_icon': icon,
+      }),
+    })?.symbol;
+
+  it('🔴 図案の名前を丸ごと書くと、絵で置く(`ca` と出さない)', () => {
+    expect(symbolOf('calendar')).toBe('calendar');
+    // ⚠ **字のほうは立てない** ── 2 つ立つと、出す側が「どちらを描くか」を持つ
+    expect(iconOf('calendar'), '字と絵が両方立っている').toBeUndefined();
+  });
+
+  it('🔴 いま絵文字を書いている人は 1 ドットも変わらない', () => {
+    expect(iconOf('🧮')).toBe('🧮');
+    expect(symbolOf('🧮')).toBeUndefined();
+  });
+
+  it('🔴 丸ごと一致だけ ── 途中まで同じ字は化けない', () => {
+    // ⚠ 前方一致で拾うと、`ca` と打った人の字が予定表の絵になる
+    expect(symbolOf('ca')).toBeUndefined();
+    expect(iconOf('ca')).toBe('ca');
+    // ⚠ 後ろに伸びた名前も別物(CLAUDE.md §1「頭と尻を両方留める」)
+    expect(symbolOf('calendarx')).toBeUndefined();
+    expect(iconOf('calendarx')).toBe('ca');
+  });
+
+  it('前後の空白は落として見る(frontmatter に空白が残っていても絵になる)', () => {
+    /**
+     * ⚠ **引用符つきで書く**(2026-09-12、着地前レビュー C)。
+     * 🔑 引用符なしの値は `parseFrontmatter` が**既に落としている**ので、
+     *   `'  calendar  '` では `trim()` を外しても緑 ── この道を 1 度も通らない
+     *   (CLAUDE.md §2「経路が一度も通っていない」)。
+     * ⚠ 引用符つきなら空白は**値の一部として残る**(実測)ので、ここで初めて
+     *   `trim()` が効いているかを見られる。
+     */
+    expect(symbolOf('"  calendar  "')).toBe('calendar');
+    expect(symbolOf("'  calendar  '")).toBe('calendar');
+  });
+
+  /**
+   * 🔴 **表に無い名前が「在る」ことにならない**(原型の鍵)。
+   * ⚠ `raw in PKC_SYMBOLS` や `PKC_SYMBOLS[raw] !== undefined` で書くと、
+   *   `constructor` / `toString` が**真になる** ── そのとき `data-pkc-symbol` に
+   *   その字が入り、CSS に規則が無いので**何も出ない**(無言で消える)。
+   */
+  it('🔴 `constructor` のような原型の鍵は図案にしない', () => {
+    for (const bad of ['constructor', 'toString', 'hasOwnProperty', '__proto__']) {
+      expect(symbolOf(bad), `${bad} が図案として通った`).toBeUndefined();
+    }
+  });
+
+  it('目印が無いときは持たない(既定の絵を勝手に置かない)', () => {
+    expect(iconOf('')).toBeUndefined();
+    expect(
+      tileFrom({
+        lid: 'j',
+        title: 'アプリ',
+        body: body({
+          'attachment.registered_as_app': true,
+          'attachment.asset_key': 'k',
+          'attachment.mime': 'text/html',
+        }),
+      })?.icon,
+    ).toBeUndefined();
+  });
+});

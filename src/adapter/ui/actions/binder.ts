@@ -1315,6 +1315,14 @@ const TAG_INPUT_ADD: ReadonlyMap<string, string> = new Map([
   ['smart-cond', 'smart-cond-add'],
 ]);
 
+/**
+ * 起動する相手の lid。**押したボタンの属性**を先に見る(2026-09-12)。
+ * ⚠ 属性が無いときだけ `selectedLid` に落とす ── 古い DOM でも壊さないため。
+ */
+function launchLid(dispatcher: Dispatcher, target: HTMLElement): string | null {
+  return target.getAttribute('data-pkc-launch-lid') ?? dispatcher.getState().selectedLid;
+}
+
 const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'start-edit',
   // 🔑 **行の右クリックからフォルダの中に作る**(#215)── `create-entry` と同じ
@@ -6055,6 +6063,22 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'SET_APP_TILE', lid, icon: target.value.trim() });
   },
   /**
+   * 🔴 **目印を絵から選ぶ**(#770 段②、2026-09-12)。
+   *
+   * ⚠ **押した物が何かは、押した要素が持つ**(`data-pkc-icon-name`)──
+   *   ここで一覧を引き直すと、並べる側と選ぶ側で表が 2 つになる(§7)。
+   * 🔑 撃つのは `set-app-icon`(欄に打つ)と**同じ書込** ── 空文字は
+   *   reducer が「目印なし」に畳むので、`なし` の口も同じ 1 本で足りる。
+   */
+  'pick-app-icon': (dispatcher, target) => {
+    const lid = dispatcher.getState().selectedLid;
+    if (!lid) return;
+    const name = target.getAttribute('data-pkc-icon-name');
+    // ⚠ 属性が無いときは撃たない(押した物が分からないまま目印を消さない)
+    if (name === null) return;
+    dispatcher.dispatch({ type: 'SET_APP_TILE', lid, icon: name });
+  },
+  /**
    * 添付の参照(`asset:<key>`)をコピーする(P8 段⑱)。
    * ⚠ 本文に貼れる形そのものを渡す ── key だけ渡すと user が書式を覚える必要がある
    */
@@ -6686,21 +6710,30 @@ const ACTIONS: Record<string, ActionHandler> = {
       .querySelector('[data-pkc-field="create-pick"]')
       ?.setAttribute('aria-expanded', 'false');
   },
-  // ⚠ 対象は**いま選んでいる添付** ── 詳細画面のボタンなので lid は state が持つ
-  'launch-asset': (dispatcher, _target, services) => {
-    const lid = dispatcher.getState().selectedLid;
+  /**
+   * 🔴 **対象は、押したボタンが持つ**(2026-09-12、#770 段②の着地前レビュー B)。
+   *
+   * ⚠ 直す前は 3 本とも `selectedLid` だけを見ていた ── **留めた枠**(横に並べた枠)は
+   *   選択と関係なく「その 1 件」を出す面なので、そこで押すと**主の枠のノート**が
+   *   開いていた。🔴 「ノートを渡して起動」は**確認に出る題名まで別のノート**になる。
+   * 🔑 `download-asset` / `open-office` と同じ作法へ寄せた(`detail.ts` が
+   *   `data-pkc-launch-lid` を載せる)。⚠ 属性が無い版でも壊れないよう、
+   *   **属性 → 無ければ `selectedLid`** の順で読む。
+   */
+  'launch-asset': (dispatcher, target, services) => {
+    const lid = launchLid(dispatcher, target);
     if (lid) services.launchAsset?.(lid, { sameOrigin: false });
   },
-  'launch-asset-raw': (dispatcher, _target, services) => {
-    const lid = dispatcher.getState().selectedLid;
+  'launch-asset-raw': (dispatcher, target, services) => {
+    const lid = launchLid(dispatcher, target);
     if (lid) services.launchAsset?.(lid, { sameOrigin: true });
   },
   /**
    * 🔴 **目次を見せて起動**(#195 / C-5 段①)。⚠ ボタンは**まだ許していないとき
    * だけ**出る(許してあれば普通の「起動」で口が開く ── `detail.ts`)。
    */
-  'launch-asset-extension': (dispatcher, _target, services) => {
-    const lid = dispatcher.getState().selectedLid;
+  'launch-asset-extension': (dispatcher, target, services) => {
+    const lid = launchLid(dispatcher, target);
     if (lid) services.launchAsset?.(lid, { extension: true });
   },
   /**

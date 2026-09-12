@@ -78,6 +78,8 @@ function srcFiles(dir = 'src', out: string[] = []): string[] {
  * 広く拾うほうが安全側(コメントで誤検知して落ちるのは、見逃すよりずっとよい)。
  */
 
+import { TILE_ICON_CHOICES } from '../src/features/icon/tile-icons';
+
 const MANUAL = readFileSync('docs/manual.md', 'utf-8');
 
 /**
@@ -2033,6 +2035,28 @@ describe('情報ペインの説明が実装と合っている(2026-08-18)', () =
  * **登記表と CHANGELOG の対応をここで縛る**。
  */
 /**
+ * 🔴 **選べる絵の数も、マニュアルと突き合わせる**(2026-09-12、#770 段② の
+ * 着地前レビュー I)。
+ *
+ * ⚠ 「**49 種**」は 4 か所に手書きされている(マニュアル / お知らせ / CHANGELOG /
+ *   実装の注記)。お知らせと CHANGELOG は**その日の記録**なので凍ってよいが、
+ *   **マニュアルは「いまどうなっているか」を言う** ── 50 個目を足した日に、
+ *   そこだけ静かに嘘になる(CLAUDE.md §7)。
+ */
+describe('選べる絵の数が、マニュアルと一致する', () => {
+  it('🔴 マニュアルの「N 種」が実装と同じ', () => {
+    const manual = readFileSync('docs/manual.md', 'utf8');
+    const m = /ゲーム・鍵 など \*\*(\d+) 種\*\*/.exec(manual);
+    // ⚠ 空振り防止 ── 引けていないなら、下の比較は何も見ていない
+    expect(m, 'マニュアルに選べる絵の数の記述が無い(字が変わった?)').not.toBeNull();
+    expect(
+      Number(m![1]),
+      `実装は ${TILE_ICON_CHOICES.length} 種だが、マニュアルの数字が違う`,
+    ).toBe(TILE_ICON_CHOICES.length);
+  });
+});
+
+/**
  * 🔴 **数字を 2 か所に書いたら、突き合わせる**(2026-08-18、着地前レビューの指摘)。
  * ⚠ マニュアルの「12 枚まで」は**直書き**で、実装の `MAX_TABS` を上げても
  *   誰も気づかない ── いま一致しているうちに縛る。
@@ -2127,6 +2151,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    /**
+     * ⚠ **2026-09-12(#770 段② ── タイルの目印)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-08-capture-split-12h" …` → b77cb10
+     */
+    '録音・画面収録が途中で止まらなくなり、最大 12 時間まで録れます',
     /**
      * ⚠ **2026-09-11(マテリアルの図案)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-08-blocked-why-and-calc-palette" …` → 980000c

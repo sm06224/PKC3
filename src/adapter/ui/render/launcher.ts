@@ -14,6 +14,7 @@
 import type { AppState } from '@adapter/state/app-state';
 import type { LauncherTile } from '@features/launcher/tiles';
 import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
+import { setIcon } from './icons';
 
 export class LauncherRenderer {
   private lastTiles: LauncherTile[] | null | undefined = undefined;
@@ -179,7 +180,19 @@ export class LauncherRenderer {
     const icon = document.createElement('span');
     icon.setAttribute('data-pkc-field', 'tile-icon');
     icon.setAttribute('aria-hidden', 'true');
-    icon.textContent = tile.icon ?? (tile.kind === 'url' ? '↗' : '');
+    /**
+     * 🔴 **図案で置いた目印は、書体が描く**(#770 段②)。
+     * ⚠ **字を器に入れない** ── 入れるとボタン丸ごとの `textContent` に
+     *   目に見えない 1 文字が混ざり、文言を読む側が静かに外れる
+     *   (2026-09-11 に全量 smoke が 5 本落ちて学んだ形。CLAUDE.md §10)。
+     *   絵を出すのは CSS の `::before` である。
+     */
+    if (tile.symbol !== undefined) {
+      icon.setAttribute('data-pkc-icon', '');
+      setIcon(icon, tile.symbol);
+    } else {
+      icon.textContent = tile.icon ?? (tile.kind === 'url' ? '↗' : '');
+    }
     btn.append(icon);
 
     const name = document.createElement('span');

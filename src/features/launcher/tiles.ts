@@ -18,6 +18,7 @@
  * adapter 側の責務で、ここは「何を・どの順で並べるか」だけを決める。
  */
 import { parseFrontmatter } from '../markdown/frontmatter';
+import { isIconName, type IconName } from '../icon/symbols';
 
 export interface LauncherTile {
   lid: string;
@@ -34,6 +35,15 @@ export interface LauncherTile {
    * 貸し借りが要るので、1 字の目印だけで識別価値が足りるうちは足さない。
    */
   icon?: string;
+  /**
+   * 🔴 **図案で置いた目印**(#770 段②)── `attachment.app_icon` に**図案の名前**
+   * (`calendar` など)が書いてあるときだけ立つ。
+   *
+   * ⚠ 直す前は名前を書くと **`ca`** と出ていた(下の「2 字に切る」に当たるため)──
+   *   豆腐でも無反応でもなく、**それらしく壊れる**いちばん読みにくい形だった。
+   * 🔑 `icon`(打った字)と**同時には立たない** ── 出す側が 2 つの規則を持たずに済む。
+   */
+  symbol?: IconName;
   /**
    * 起動の仕方。⚠ `url` は外部サイト、`app` は同梱 HTML、
    * `office` / `dual` / `schedule` / `contacts` / `search` / `manual` は**組み込み**
@@ -106,11 +116,27 @@ export function tileFrom(src: TileSource): LauncherTile | null {
   const group = str(fm['attachment.app_group']) ?? '';
   const orderRaw = fm['attachment.app_order'];
   const order = typeof orderRaw === 'number' && Number.isFinite(orderRaw) ? orderRaw : undefined;
-  // ⚠ 2 字までに切る ── 長い文字列を入れられると行の高さが崩れる。
-  //    `[...]` で切る(サロゲートペアを割らない ── 絵文字が壊れる)
+  /**
+   * 目印は **2 通りの書き方**を受ける(#770 段②)。
+   *
+   * | 打った字 | 出る物 |
+   * |---|---|
+   * | `\u{1F9EE}`(絵文字) | そのまま(**1 ドットも変えない**) |
+   * | `calendar`(図案の名前) | 予定表の絵 ── 直す前は **`ca`** と出ていた |
+   *
+   * ⚠ 2 字までに切るのは**字のほう**だけ ── 長い文字列を入れられると行の高さが崩れる。
+   *    `[...]` で切る(サロゲートペアを割らない ── 絵文字が壊れる)。
+   * ⚠ 図案のときは `icon` を**立てない** ── 2 つ立つと、出す側が
+   *    「どちらを描くか」の規則をもう 1 つ持つことになる(§7)。
+   */
   const iconRaw = str(fm['attachment.app_icon']);
-  const icon = iconRaw === undefined ? undefined : [...iconRaw].slice(0, 2).join('');
-  const base = { lid: src.lid, title: src.title, group, order, icon };
+  const trimmed = iconRaw?.trim();
+  const symbol = trimmed !== undefined && isIconName(trimmed) ? trimmed : undefined;
+  const icon =
+    symbol !== undefined || iconRaw === undefined
+      ? undefined
+      : [...iconRaw].slice(0, 2).join('');
+  const base = { lid: src.lid, title: src.title, group, order, icon, symbol };
 
   if (url !== undefined) {
     // ⚠ 開けない URL は**タイルにしない**(押しても何も起きないタイルを出さない)

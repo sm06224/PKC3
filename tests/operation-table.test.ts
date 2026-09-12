@@ -174,12 +174,15 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   消え、受け手 −1(登記は動かない ── 押し口は面の中にしか無かった)
       // ⚠ 2026-09-11(#215 残り①): 最近開いた記録を消す(`clear-opened-history`)で
       //   受け手 +1(登記は増えない ── 押し口は設定の面の中にしか無い)
-      total: 272,
-      receivers: 223,
+      // ⚠ 2026-09-12(#770 段②): タイルの目印を絵から選ぶ(`pick-app-icon`)で
+      //   受け手 +1(登記は増えない ── 押し所は添付の詳細面の中にしか無い。
+      //   `set-app-icon` と同じ置き場である)
+      total: 273,
+      receivers: 224,
       registered: 85,
       both: 36,
       outsideActionsTable: 49,
-      unregistered: 187,
+      unregistered: 188,
     });
   });
 

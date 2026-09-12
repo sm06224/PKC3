@@ -386,7 +386,8 @@ button {
 /* 🔴 **図案は書体の 1 文字**(#770 段①、2026-09-11)。
  * ⚠ 直す前は inline SVG で、`stroke: currentColor` と `stroke-width` を CSS が決めていた。
  *   いまは**字**なので `color` がそのまま効く ── 選択中の行でも 9 テーマでも器の字色に追従する。
- * 🔴 **同梱する**(`src/styles/fonts/pkc-symbols.woff2`、6,180 バイト = 40 種だけの部分集合)。
+ * 🔴 **同梱する**(`src/styles/fonts/pkc-symbols.woff2`、10,640 バイト = 76 種だけの部分集合。
+ *   ⚠ 2026-09-12 に 40 → 76 へ増やした ── #770 段② でアプリの目印に選べる絵を足したため)。
  *   ⚠ 外から取りに行かない ── 取れない端末で**図案が全部消える**形にしない。
  * ⚠ `font-display: block` ── 届くまでは**何も出さない**(字が出るより良い)。同一出荷物なので
  *   待ちは実質ゼロである。
@@ -4332,7 +4333,11 @@ li[data-pkc-row-slot] {
 /* 目印。⚠ 無いときも**幅は取る**(有無で題名の左端がずれない) */
 [data-pkc-field='tile-icon'] {
   flex: none;
-  width: 1.25em;
+  /* 🔴 **px で固定する**(#770 段②、2026-09-12)。⚠ `em` だと、図案の目印のときだけ
+   * 器の字が 16px になる(`[data-pkc-icon]`)ので、1.25em = 20px と 15px の
+   * **2 種類の幅**ができ、絵文字のタイルと図案のタイルで**題名の左端が 5px ずれる**
+   * ── 上の 1 行が守っているのはまさにそれである。 */
+  width: 20px;
   text-align: center;
   color: var(--muted);
 }
@@ -4379,7 +4384,45 @@ li[data-pkc-row-slot] {
   cursor: pointer;
 }
 [data-pkc-field='app-icon'] {
-  width: 4em;
+  /* ⚠ 名前(`calendar` / `check-box`)も打てるので、字が隠れない幅にする
+   * (#770 段②。絵文字 1 字だけだった頃は 4em で足りていた) */
+  width: 8em;
+}
+
+/* 🔴 目印を絵から選ぶ(#770 段②)── 上の欄は**残したまま隣に足した**口。
+ * ⚠ 行を丸ごと使う ── 同じ行に混ぜると、49 個の絵が欄を押し出す */
+[data-pkc-field='app-icon-palette'] {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1);
+}
+[data-pkc-field='app-icon-palette'] button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  /* ⚠ **高さは書かない**(2026-09-12、着地前レビュー J)── 素の `button` が
+   * `min-height` / `max-height` を `--row-h` で留めているので、ここに書いた
+   * `height: 28px` は**一度も効いていなかった**(効く値は 26px / スマホ 34px)。
+   * 🔑 効かない値を置くと、次に読む人が「ここで決まっている」と誤読する。 */
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  /* ⚠ 字の大きさは**書かない** ── 器から継ぐ(ボタンの段を増やさない。
+   * 門は `tests/adapter/button-font-size.test.ts`) */
+  cursor: pointer;
+}
+[data-pkc-field='app-icon-palette'] button:hover {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+/* 🔑 いま選んでいる物は**枠と地**で示す(字を足さない ── 押し口の大きさが動かない) */
+[data-pkc-field='app-icon-palette'] button[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--surface-2);
+  color: var(--fg);
 }
 
 /* ── ファイラ ───────────────────────────────────── */

@@ -1,6 +1,15 @@
 import { test, expect } from '@playwright/test';
 import { gzipSync } from 'node:zlib';
-import { answerAppDialog, gotoApp, clickReal, collectPageErrors, createEntry, useSplitEditor, useListBrowse } from './helpers';
+import {
+  answerAppDialog,
+  gotoApp,
+  clickReal,
+  collectPageErrors,
+  createEntry,
+  expectReachable,
+  useSplitEditor,
+  useListBrowse,
+} from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -398,6 +407,121 @@ test('🔴 登録 → タイル → SPA が動き、開き直しても続きが�
   const groups = page.locator('[data-pkc-field="launcher-group"]');
   await expect(groups).toHaveText(['道具', '組み込みアプリ']);
   await expect(tile.locator('[data-pkc-field="tile-icon"]')).toHaveText('🧮');
+
+  /**
+   * 🔴 **目印を絵から選べる**（#770 段②、2026-09-12）。
+   *
+   * ⚠ **全量 smoke はここを 1 件も見ていなかった** ── `app-icon-palette` /
+   *   `pick-app-icon` は `tests/smoke` 全体で **0 件**だったので、選ぶ口を丸ごと
+   *   消しても全部緑になる（CLAUDE.md「全量は回帰の網であって、その
+   *   変更で何が変わるかを考えた証拠ではない」）。
+   * ⚠ 起動を 1 つも足さず、この道中で見る（`scripts/smoke-budget.mjs`）。
+   */
+  // ④ ⚠ **欄そのものが消えていない** ── 一覧を足しても、直に打つ道は残る
+  const iconField = page.locator('[data-pkc-field="app-icon"]');
+  await expect(iconField, 'アイコンの欄が消えている').toBeVisible();
+  await expect(iconField).toHaveValue('🧮');
+  const palette = page.locator('[data-pkc-field="app-icon-palette"]');
+  await expect(palette, '選ぶ口が出ていない').toBeVisible();
+  /**
+   * ⚠ **一覧の端まで押せる**(49 + `なし` = 50 個ある)。
+   * 🔑 先頭（`なし`）と途中（`calendar`）だけ押しても、**面からはみ出して
+   *   最後の数個が押せない**形は見つからない ── だから**最後の 1 つ**も見る
+   *   （`expectReachable` は dead click と occlusion まで見る）。
+   */
+  await expect(palette.locator('[data-pkc-action="pick-app-icon"]')).toHaveCount(50);
+  await expectReachable(page, palette.locator('[data-pkc-action="pick-app-icon"]').last());
+
+  const tileIcon = tile.locator('[data-pkc-field="tile-icon"]');
+  /**
+   * ① 絵を 1 つ押す → タイルに**その絵**が出る。
+   * ⚠ 見るのは「字が出ている」ではない ── **器が名前を持ち**、
+   *   **字は入っておらず**（CLAUDE.md §10）、**画面に絵が見えている**ことである。
+   */
+  await clickReal(page, '[data-pkc-action="pick-app-icon"][data-pkc-icon-name="calendar"]');
+  await expect(tileIcon, '選んだ絵の名前が器に乗っていない').toHaveAttribute(
+    'data-pkc-symbol',
+    'calendar',
+    { timeout: 15000 },
+  );
+  // 🔴 器に**字を入れない**（入れると文言を読む側が静かに外れる）
+  await expect(tileIcon, '器に目に見えない字が混ざっている').toHaveText('');
+  // 選んだものが**押した側にも**残る（どれを選んだか分からなくならない）
+  await expect(
+    palette.locator('[data-pkc-icon-name="calendar"]'),
+    'いま選んでいる絵が画面に残っていない',
+  ).toHaveAttribute('aria-pressed', 'true');
+
+  /**
+   * 🔴 **豆腐ではないことを画素で見る**（`icon-font.smoke.spec.ts` の作法）。
+   * ⚠ 送り幅は当てにならない ── この書体の `.notdef` も **1em** である。
+   * 🔑 だから**書体に必ず無い符号位置**（U+E000）を同じ大きさで描き、
+   *   **画素の指紋**を比べる。⚠ 値は pin しない（環境で変わる）──
+   *   見るのは**同じ回の中での違い**だけである。
+   */
+  const seen = await tileIcon.evaluate(async (el) => {
+    await document.fonts.ready;
+    const cs = getComputedStyle(el, '::before');
+    const raw = cs.content;
+    // `"\ebcc"` の形で返る ── 引用符を剥いて 1 字を取る
+    const ch = raw.replace(/^["']|["']$/g, '');
+    const box = el.getBoundingClientRect();
+    const SIZE = 64;
+    const cv = document.createElement('canvas');
+    cv.width = SIZE;
+    cv.height = SIZE;
+    const g = cv.getContext('2d')!;
+    const sig = (s: string): number => {
+      g.clearRect(0, 0, SIZE, SIZE);
+      // 🔑 **器に実際に当てられている書体**で描く（family を直に書かない）
+      g.font = `48px ${cs.fontFamily}`;
+      g.textBaseline = 'top';
+      g.fillStyle = '#000';
+      g.fillText(s, 4, 4);
+      const px = g.getImageData(0, 0, SIZE, SIZE).data;
+      let h = 0x811c9dc5;
+      let ink = 0;
+      for (let i = 3; i < px.length; i += 4) {
+        const a = px[i]! > 8 ? 1 : 0;
+        ink += a;
+        h = ((h ^ a) * 0x01000193) >>> 0;
+      }
+      return (h % 1000000) * 1000000 + ink;
+    };
+    return {
+      ch,
+      family: cs.fontFamily,
+      w: Math.round(box.width),
+      h: Math.round(box.height),
+      glyph: sig(ch),
+      // ⚠ 対照群 = この書体に必ず無い符号位置（豆腐そのもの）
+      tofu: sig(String.fromCodePoint(0xe000)),
+      ink: sig(ch) % 1000000,
+    };
+  });
+  // ⚠ 空振り防止 ── `::before` が空なら以下の比較は全部無意味になる
+  expect(seen.ch, `目印の絵が置かれていない（content=${JSON.stringify(seen.ch)}）`).toHaveLength(1);
+  expect(seen.family, '器に配る書体が当たっていない').toContain('PKC Symbols');
+  // 🔴 **画面に見えている**（器の幅と高さが 0 でない）
+  expect(seen.w, `目印の器の幅が 0（${seen.w}x${seen.h}）`).toBeGreaterThan(0);
+  expect(seen.h, `目印の器の高さが 0（${seen.w}x${seen.h}）`).toBeGreaterThan(0);
+  // 🔴 **豆腐ではない**（書体に無い符号位置と同じ絵になっていない）
+  expect(seen.ink, '目印が 1 画素も描かれていない').toBeGreaterThan(0);
+  expect(seen.glyph, '目印が豆腐（書体にその絵が無い）').not.toBe(seen.tofu);
+
+  /**
+   * ③ 🔴 **外せる**（user 指示 2026-08-23「置けるなら、外せなければならない」）。
+   * ⚠ 一覧の先頭の `なし` を押す → タイルの目印が消える。
+   */
+  await clickReal(page, '[data-pkc-action="pick-app-icon"][data-pkc-icon-name=""]');
+  await expect(tileIcon, '「なし」を押しても目印が消えない').not.toHaveAttribute(
+    'data-pkc-symbol',
+    /.*/,
+    { timeout: 15000 },
+  );
+  await expect(tileIcon).toHaveText('');
+  // ⚠ 欄のほうも空になる（画面と本文が食い違わない）
+  await expect(iconField, '欄に古い値が残っている').toHaveValue('');
 
   // ③ 🔴 押すと**アプリが動く**
   const open = async (): Promise<Record<string, string | null>> => {

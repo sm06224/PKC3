@@ -14,7 +14,8 @@
  *
  * ## ⚠ 書体は**部分集合を同梱する**(外から取りに行かない)
  *
- * `src/styles/fonts/pkc-symbols.woff2` は**ここに並ぶ絵だけ**を含む版で、**6,180 バイト**。
+ * `src/styles/fonts/pkc-symbols.woff2` は**ここに並ぶ絵だけ**を含む版で、**10,640 バイト**
+ * (⚠ 2026-09-12 に 40 → **76 種**へ増やした ── #770 段②)。
  * ⚠ 素の Material Symbols は **5.37 MB**(4,284 種の可変書体)なので、**868 分の 1** である。
  * 🔑 作り直しは `npm run icons:font`(`scripts/build-icon-font.mjs`)── ⚠ **絵を足したら
  * 必ず回す**(回さないと、その絵だけ豆腐になる)。門は `tests/features/icon-symbols.test.ts`。
@@ -87,7 +88,72 @@ export const PKC_SYMBOLS = {
   mic: { icon: 'mic', cp: 0xe31d },
   monitor: { icon: 'monitor', cp: 0xef5b },
   stop: { icon: 'stop', cp: 0xe047 },
+  /**
+   * 🔴 **ここから下は「アプリの目印」用**(#770 段②、2026-09-12)。
+   *
+   * > user 要望 2026-09-07:「**アプリで使えるアイコンにも使用したい**」
+   *
+   * ⚠ 上の 40 種は**アプリ自身のボタン**が使う絵で、**アプリらしい絵が 1 つも無かった**
+   *   (実測:端末 / 電卓 / 地図 / 音楽 / 写真 / メール / チャット / 買い物 / 本 /
+   *   動画 / グラフ / 天気 / ゲーム / 鍵 の **14 分類すべて 0 件**)。
+   *   ⚠ 皮肉なことに、既存の test はタイルの目印に **🧮** を使っていたが、
+   *   **その絵は表に無かった**。
+   * 🔑 だから足す。⚠ **足したら `npm run icons:font` を回す**(回さないと豆腐になる)。
+   * 🔑 どれを選ばせるかは `src/features/icon/tile-icons.ts`(順番と日本語の名前)──
+   *   ここは**絵の在処**だけを持ち、画面に出す言葉は持たない。
+   */
+  terminal: { icon: 'terminal', cp: 0xeb8e },
+  computer: { icon: 'computer', cp: 0xe31e },
+  phone: { icon: 'smartphone', cp: 0xe7ba },
+  code: { icon: 'code', cp: 0xe86f },
+  database: { icon: 'database', cp: 0xf20e },
+  tools: { icon: 'build', cp: 0xf8cd },
+  calculator: { icon: 'calculate', cp: 0xea5f },
+  chart: { icon: 'bar_chart', cp: 0xe26b },
+  dashboard: { icon: 'dashboard', cp: 0xe871 },
+  note: { icon: 'note', cp: 0xe66d },
+  book: { icon: 'menu_book', cp: 0xea19 },
+  news: { icon: 'newspaper', cp: 0xeb81 },
+  mail: { icon: 'mail', cp: 0xe159 },
+  chat: { icon: 'chat', cp: 0xe0c9 },
+  timer: { icon: 'timer', cp: 0xe425 },
+  map: { icon: 'map', cp: 0xe55b },
+  flight: { icon: 'flight', cp: 0xe539 },
+  music: { icon: 'music_note', cp: 0xe405 },
+  movie: { icon: 'movie', cp: 0xe404 },
+  camera: { icon: 'photo_camera', cp: 0xe412 },
+  palette: { icon: 'palette', cp: 0xe40a },
+  game: { icon: 'sports_esports', cp: 0xea28 },
+  cart: { icon: 'shopping_cart', cp: 0xe8cc },
+  money: { icon: 'paid', cp: 0xf041 },
+  work: { icon: 'work', cp: 0xe943 },
+  school: { icon: 'school', cp: 0xe80c },
+  home: { icon: 'home', cp: 0xe9b2 },
+  food: { icon: 'restaurant', cp: 0xe56c },
+  sunny: { icon: 'sunny', cp: 0xe81a },
+  science: { icon: 'science', cp: 0xea4b },
+  pets: { icon: 'pets', cp: 0xe91d },
+  fitness: { icon: 'fitness_center', cp: 0xeb43 },
+  star: { icon: 'star', cp: 0xf09a },
+  key: { icon: 'key', cp: 0xe73c },
+  link: { icon: 'link', cp: 0xe250 },
+  translate: { icon: 'translate', cp: 0xe8e2 },
 } as const satisfies Readonly<Record<string, { readonly icon: string; readonly cp: number }>>;
+
+/**
+ * 🔴 **その字は図案の名前か**(#770 段②、2026-09-12)。
+ *
+ * アプリのタイルの目印(`attachment.app_icon`)は、**絵文字 1 字**でも
+ * **図案の名前**でも受ける ── どちらかを見分けるのがここである。
+ *
+ * ⚠ **丸ごと一致だけ**にする。部分一致や前方一致にすると、目印に打った
+ *   ただの字(`ma`)まで絵に化ける ── **打った字がそのまま出る**のが既定で、
+ *   化けるのは**名前を丸ごと書いたとき**だけにする。
+ * ⚠ 符号位置を返す口は作らない(下の注記)── これは**名前を検める**だけである。
+ */
+export function isIconName(raw: string): raw is IconName {
+  return Object.prototype.hasOwnProperty.call(PKC_SYMBOLS, raw);
+}
 
 /** 図案名の全数。⚠ 表から引く(手で並べない ── 足した日に片方だけ古くなる)。 */
 export const ICON_NAMES = Object.keys(PKC_SYMBOLS) as readonly IconName[];
