@@ -74,6 +74,20 @@ describe('タイルの目印に選べる絵(#770 段②)', () => {
     }
   });
 
+  /**
+   * 🔴 **名前は選択子に直に埋められる字だけ**(2026-09-12)。
+   *
+   * ⚠ 押した絵へ焦点を戻す所(`detail.ts` の `refocusPick`)が
+   *   `[data-pkc-icon-name="<名前>"]` を組むので、引用符や空白が混じると
+   *   **選択子が壊れて、静かに焦点が戻らなくなる**(例外も出ない)。
+   * 🔑 だから**表の側で字を縛る** ── 逃がす処理を足すより、入れない。
+   */
+  it('🔴 名前は英小文字・数字・ハイフンだけ(選択子に直に埋めるため)', () => {
+    for (const c of TILE_ICON_CHOICES) {
+      expect(c.name, `${c.name} に選択子を壊す字が混ざっている`).toMatch(/^[a-z0-9-]+$/);
+    }
+  });
+
   it('🔴 名前も日本語の名も重複しない(同じ物が 2 つ並ぶ)', () => {
     expect(new Set(TILE_ICON_CHOICES.map((c) => c.name)).size).toBe(TILE_ICON_CHOICES.length);
     expect(new Set(TILE_ICON_CHOICES.map((c) => c.label)).size).toBe(TILE_ICON_CHOICES.length);
