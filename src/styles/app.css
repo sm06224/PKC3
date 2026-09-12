@@ -52,6 +52,63 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* ── スクロールバー ─────────────────────────────
+ * 🔴 **user 裁定 2026-09-12**(#858):見える太さは **細い 6px**(乗せると 10px)/
+ * **常に見える**。⚠ 直す前は**この面を触る CSS が 1 行も無く**、
+ * スクロールする面 **49 か所**(実測)が全部 OS の既定で描かれていた ──
+ * 9 種のどのテーマを選んでも**そこだけ地から浮く**ので、
+ * 「地は無彩色、色は情報にだけ」(2026-08-03)と正面から当たっていた。
+ *
+ * 🔑 **掴みやすさと見栄えは両立する** ── 帯の幅は 14px のままにして、
+ * **透明な枠の内側だけを塗る**(`background-clip: padding-box`):
+ *   押し所 = **14px**(指でもマウスでも掴める)/ 見える太さ = 14 − 4×2 = **6px**
+ *
+ * 🔴 **標準プロパティ(`scrollbar-width` / `scrollbar-color`)を素で書いてはいけない。**
+ * Chromium は**どちらか 1 つでも既定以外の値が在ると `::-webkit-scrollbar` の指定を
+ * 丸ごと無視する** ── 素で書くと上の「6px 見えて 14px 掴める」が死んで、
+ * ブラウザ既定の「細い = 掴みにくい」バーへ落ちる。だから **Firefox だけに届く
+ * `@supports` の中**へ閉じ込める(Firefox に `::-webkit-scrollbar` は無い)。
+ * ⚠ ここを外へ出す変異は `tests/features/scrollbar-css.test.ts` が落とす。
+ *
+ * ⚠ **色は token から採る**(`--border` / 乗せたら `--muted`)── 9 テーマ全部に
+ * 既に在る値なので、テーマを足した日に**ここだけ初期値へ落ちる**ことが無い
+ * (`--surface-hover` を足した日に踏んだ形を避ける)。
+ *
+ * ⚠ **macOS では見え方が変わる**:既定の重なって出るバー(版面を奪わない)ではなく
+ * **常に場所を取る細いバー**になる。user の求めは「掴みやすく」なので向きは
+ * 合っているが、**実機で見るまで確かなことは言えない**(#438 へ回す)。 */
+::-webkit-scrollbar {
+  width: 14px;
+  height: 14px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: var(--border);
+  /* 🔑 枠の内側だけ塗る = **見える太さだけ**を細くする(押し所は 14px のまま) */
+  background-clip: padding-box;
+  border: 4px solid transparent;
+  border-radius: 8px;
+}
+/* 乗せている間だけ太く見せる(14 − 2×2 = 10px)── 押し所は変わらない */
+*:hover::-webkit-scrollbar-thumb,
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--muted);
+  border-width: 2px;
+}
+
+/* 🔴 **Firefox にだけ届かせる**(上の理由 ── 素で書くと Chromium 側が
+ * `::-webkit-scrollbar` を丸ごと無視して「6px 見えて 14px 掴める」が死ぬ)。
+ * ⚠ Firefox では**見える太さと押し所を分けられない**ので、細くして色だけ揃える
+ * (同じ見え方は作れない、と #858 に明記した)。 */
+@supports (-moz-appearance: none) {
+  html {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+}
+
 /* boot 前 / boot 失敗のときは shell が無く、素のテキストが root に入る */
 [data-pkc-slot='root'] {
   height: 100%;
