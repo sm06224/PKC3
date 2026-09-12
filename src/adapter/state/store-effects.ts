@@ -1563,6 +1563,100 @@ export function connectStoreEffects(
           }
         });
         break;
+      /**
+       * 🔴 **並べ替えを disk へ書く**(#857 段①)── N 件を**1 つの仕事**として。
+       *
+       * ⚠ `REQUEST_TILE_UPDATE` を N 個出す形にしないのは、あちらが 1 件ごとに
+       *   **ack と読み直し**を撃つからである ── 一覧が N 回作り直され、
+       *   **掴んでいる手の下で器が入れ替わる**(`filer.ts` が実測で踏んだ罠)。
+       * 🔑 ここは ack も読み直しも**最後に 1 回だけ**。
+       *
+       * 🔴 **どの出口でも読み直す**(成功でも失敗でも)── 画面は既に楽観で
+       *   動かしてあるので、途中で止まったまま読み直さないと
+       *   **画面と disk が食い違ったまま残る**(いちばん気づけない形)。
+       */
+      case 'REQUEST_TILE_ORDER':
+        enqueue(async () => {
+          if (disposed) return;
+          /** 動かした当人の新しい本文(開いていれば `APP_TILE_SAVED` が使う)。 */
+          let movedBody: string | null = null;
+          let failed: string | null = null;
+          try {
+            for (const row of ev.rows) {
+              // 🔴 **disk から読んで書き戻す**(`REQUEST_TILE_UPDATE` と同じ)──
+              //    添付は開いていないことのほうが多く、開いていても古いことがある
+              const body = await store.getBody(row.lid);
+              if (disposed) return;
+              if (body === null) {
+                failed = 'ノートが見つかりません';
+                break;
+              }
+              // ⚠ **原文 splice** ── 全文を組み直すと本文・他の key・空行が byte 単位で変わる
+              const next = spliceFrontmatterKeys(body, row.updates);
+              if (next === body) continue;
+              const ext = extractMeta(row.archetype, next);
+              /**
+               * 🔴 **読んでから書くまでの間に別の窓が書いていたら、1 バイトも書かない**
+               * (#178)── `expectHash` を渡さない書込は amend なので、消した版は
+               * **履歴にも入らない**。
+               */
+              const stamps = await store.persistEntry(
+                {
+                  lid: row.lid,
+                  title: row.title,
+                  archetype: row.archetype,
+                  body: next,
+                  entryOrder: row.entryOrder,
+                  status: ext.status,
+                  date: ext.date,
+                  archived: ext.archived,
+                },
+                { expectHash: contentHash64Hex(body) },
+              );
+              if (disposed) return;
+              if (stamps.conflict === true) {
+                failed = '別のウィンドウがこのノートを書き替えました';
+                break;
+              }
+              stamp(row.lid, stamps);
+              if (row.lid === ev.lid) movedBody = next;
+            }
+          } catch (e) {
+            failed = String(e);
+          }
+          if (disposed) return;
+          if (failed !== null)
+            dispatcher.dispatch({
+              type: 'OP_FAILED',
+              error: `並べ替えを保存できませんでした: ${failed}(一覧を読み直します)`,
+            });
+          // 🔴 **ロックは必ず 1 回だけ解く**(数えているのは 1 つ)
+          dispatcher.dispatch({
+            type: 'APP_TILE_SAVED',
+            lid: ev.lid,
+            gen: ev.gen,
+            body: movedBody,
+          });
+          // 🔴 **ack のあとの仕事は別の try**(P8 段㉕ ── 2 回目の ack を撃たない)
+          try {
+            const titles = new Map(ev.entries.map((e) => [e.lid, e.title]));
+            const rows = await store.getBodies(ev.entries.map((e) => e.lid));
+            if (disposed) return;
+            const sources: TileSource[] = [];
+            for (const row of rows) {
+              const title = titles.get(row.lid);
+              if (title !== undefined) sources.push({ lid: row.lid, title, body: row.body });
+            }
+            dispatchTiles(sources);
+          } catch (e) {
+            if (!disposed)
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: `アプリの一覧を読み直せませんでした: ${String(e)}`,
+              });
+          }
+        });
+        break;
       case 'REQUEST_ASSET_REPLACE':
         enqueue(async () => {
           if (disposed) return;

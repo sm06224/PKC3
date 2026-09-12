@@ -39,6 +39,12 @@ import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import type { PersistState } from '@adapter/platform/storage-persist';
 import type { OpenExtension } from '@adapter/platform/extension-links';
 import type { LauncherTile } from '@features/launcher/tiles';
+import {
+  applyTileWrites,
+  isMovableTile,
+  planTileMove,
+  type TileMoveTarget,
+} from '@features/launcher/tile-order';
 import type {
   GroupResult as QueryGroups,
   KeyResult as QueryKeys,
@@ -1565,6 +1571,16 @@ export type UserAction =
       icon?: string | null;
     }
   /**
+   * 🔴 **タイルを並べ替える**(#857 段①。user 指示 2026-09-12「並び替えしたい」/
+   * 裁定 A「**またげる**」)。
+   *
+   * ⚠ `SET_APP_TILE` を N 回撃つ形にはしない ── あちらは
+   * **別の lid の書込が飛んでいると無言で落とす**(すぐ下の門)ので、
+   * 2 件目以降が**画面も出さずに消える**(user から見ると「並べ替えたのに戻る」)。
+   * 🔑 計画は `planTileMove`(純関数)が立て、**1 つの event**で effect へ渡す。
+   */
+  | { type: 'MOVE_APP_TILE'; lid: string; target: TileMoveTarget }
+  /**
    * 🔴 **ロックの強制解放**(user 指示 2026-08-03)。応答が返らない書込 /
    * 抱えたままの draft で**永久に追記できなくなる**のを防ぐ最後の出口。
    * ⚠ `discardDraft` = 編集中の draft も捨てる(編集が握っているときの解放)。
@@ -2094,6 +2110,31 @@ export type DomainEvent =
       archetype: string;
       entryOrder: number;
       /** 書き換えた後にタイルを読み直すための材料(同上)。 */
+      entries: Array<{ lid: string; title: string }>;
+    }
+  /**
+   * 🔴 **並べ替えを disk へ書く**(#857 段①)── N 件を**1 つの仕事**として渡す。
+   *
+   * ⚠ `REQUEST_TILE_UPDATE` を N 個出す形にしない:あちらは 1 件ごとに
+   *   **ack と読み直し**を撃つので、N 件ぶん一覧が作り直され、
+   *   **掴んでいる手の下で器が入れ替わる**(`filer.ts` が実測で踏んだ罠 ──
+   *   30 回中 2 回は `dragstart` しか出ず、3 回は狙いと違う行へ落ちた)。
+   * 🔑 ここは**最後に 1 回だけ** ack と読み直しを撃つ。
+   */
+  | {
+      type: 'REQUEST_TILE_ORDER';
+      /** 動かしたタイル。⚠ ack の宛先(ロックを数える鍵)もこれ。 */
+      lid: string;
+      gen: number;
+      /** ⚠ **書く順**に並んでいる(`planTileMove` が返した順)。 */
+      rows: Array<{
+        lid: string;
+        updates: Record<string, string | number | undefined>;
+        title: string;
+        archetype: string;
+        entryOrder: number;
+      }>;
+      /** 書き換えた後にタイルを読み直すための材料。 */
       entries: Array<{ lid: string; title: string }>;
     }
   /**
@@ -3305,6 +3346,84 @@ function reduceCore(
             title: meta.title,
             archetype: meta.archetype,
             entryOrder: meta.entryOrder,
+            entries: attachmentEntries(state),
+          },
+        ],
+      };
+    }
+    /**
+     * 🔴 **タイルを並べ替える**(#857 段①)。
+     *
+     * 🔑 計画は `planTileMove`(純関数)── **どこへ入るか**の規則をここに書かない。
+     * 🔑 画面は**先に**動かす(`applyTileWrites`)── 掴んだ手を離してから disk の
+     *   往復を待つと数百 ms 動かず、「掴めたのに動かない」になる。
+     */
+    case 'MOVE_APP_TILE': {
+      const tiles = state.launcherTiles;
+      // ⚠ まだ読み込んでいない(タブを開いた直後)── 掴めないので、ここへは来ない
+      if (tiles === null) return { state, events: [] };
+      const moved = tiles.find((t) => t.lid === action.lid);
+      if (moved === undefined) return { state, events: [] };
+      /**
+       * 🔴 **断るときは理由を出す**(無言の操作拒否を作らない)。
+       * ⚠ `SET_APP_TILE` は黙って落とすが、あちらは**押し直せば済む設定**である。
+       *   並べ替えは**掴んで離した後**なので、黙って元へ戻ると「壊れている」に見える。
+       */
+      const refuse = (error: string): ReduceResult => ({ state: { ...state, error }, events: [] });
+      // ⚠ 組み込みは entry を持たない ── 掴ませない側でも止めるが、門は 2 枚置く
+      if (!isMovableTile(moved)) return refuse('最初から入っているアプリは並べ替えられません');
+      if (state.phase !== 'ready') return refuse('編集を終えてから並べ替えてください');
+      if (state.writeLock)
+        return refuse('いま保存しています。少し待ってから、もう一度動かしてください');
+      if (state.tileWrite)
+        return refuse('いま並べ替えを保存しています。終わってから、もう一度動かしてください');
+
+      const plan = planTileMove(tiles, action.lid, action.target);
+      // ⚠ 元の位置へ落とし戻した回 ── **断りではない**ので、理由は出さない
+      if (plan.length === 0) return { state, events: [] };
+
+      const rows: Array<{
+        lid: string;
+        updates: Record<string, string | number | undefined>;
+        title: string;
+        archetype: string;
+        entryOrder: number;
+      }> = [];
+      for (const w of plan) {
+        const meta = state.entryMetas.get(w.lid);
+        /**
+         * ⚠ 素性の読めない行が 1 つでもあれば**丸ごとやめる** ── 途中まで書くと
+         *   並びが中途半端に変わり、user は何が起きたのか読めない。
+         */
+        if (meta === undefined) return refuse('並べ替えられません(ノートが見つかりません)');
+        const updates: Record<string, string | number | undefined> = {
+          'attachment.app_order': w.order,
+        };
+        // ⚠ 群は**変わるときだけ**書く。既定群(空文字)へ移すのは**行ごと消す**
+        //    (`SET_APP_TILE` と同じ意味論 ── 既定値で frontmatter を埋めない)
+        if (w.group !== undefined)
+          updates['attachment.app_group'] = w.group === '' ? undefined : w.group;
+        rows.push({
+          lid: w.lid,
+          updates,
+          title: meta.title,
+          archetype: meta.archetype,
+          entryOrder: meta.entryOrder,
+        });
+      }
+      return {
+        state: {
+          ...state,
+          launcherTiles: applyTileWrites(tiles, plan),
+          // ⚠ 数えるのは 1 つ ── effect は最後に 1 回だけ ack を撃つ
+          tileWrite: { lid: action.lid, n: 1 },
+        },
+        events: [
+          {
+            type: 'REQUEST_TILE_ORDER',
+            lid: action.lid,
+            gen: state.lockGen,
+            rows,
             entries: attachmentEntries(state),
           },
         ],
