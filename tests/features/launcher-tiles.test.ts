@@ -333,3 +333,54 @@ describe('組み込みタイルの合流 (#148)', () => {
     for (const t of entryTiles) expect(tileSelectsEntry(t)).toBe(true);
   });
 });
+
+/**
+ * 🔴 **目印(`attachment.app_icon`)の門**(#770 段②、2026-09-12)。
+ *
+ * ⚠ ここには **`icon` の検査が 1 件も無かった**(実測)。目印は
+ *   `[...iconRaw].slice(0, 2).join('')` と書いてあり、
+ *   **2 字に切る**判断も **サロゲートペアを割らない**判断も、
+ *   **外しても全 test が緑**の状態で置かれていた。
+ * 🔑 段② はこの行を必ず通る(名前を打つと `ca` と出るのを直す)ので、
+ *   触る前に**いまの振る舞いを字で留める**。
+ */
+describe('タイルの目印', () => {
+  const iconOf = (icon: string): string | undefined =>
+    tileFrom({
+      lid: 'i',
+      title: 'アプリ',
+      body: body({
+        'attachment.registered_as_app': true,
+        'attachment.asset_key': 'k',
+        'attachment.mime': 'text/html',
+        'attachment.app_icon': icon,
+      }),
+    })?.icon;
+
+  it('🔴 長い字は 2 字までに切る(行の高さを崩させない)', () => {
+    // ⚠ 切る処理を外すと 'abcd' がそのまま入る = この行が落ちる
+    expect(iconOf('abcd')).toBe('ab');
+  });
+
+  it('🔴 絵文字を割らない(`slice` ではなく符号位置で数える)', () => {
+    // ⚠ `iconRaw.slice(0, 2)` に退化すると、🧮(2 符号単位)が**半分**で切れて
+    //    文字化けする ── 「2 字」の数え方が字ではなく符号単位になる
+    expect(iconOf('🧮a')).toBe('🧮a');
+    expect(iconOf('🧮📅🖩')).toBe('🧮📅');
+  });
+
+  it('目印が無いときは持たない(既定の絵を勝手に置かない)', () => {
+    expect(iconOf('')).toBeUndefined();
+    expect(
+      tileFrom({
+        lid: 'j',
+        title: 'アプリ',
+        body: body({
+          'attachment.registered_as_app': true,
+          'attachment.asset_key': 'k',
+          'attachment.mime': 'text/html',
+        }),
+      })?.icon,
+    ).toBeUndefined();
+  });
+});
