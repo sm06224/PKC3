@@ -45,10 +45,18 @@ on:
         description: 'emsdk の版(LibreOffice の README.wasm.md が指定する版に合わせる)'
         default: '4.0.10'
       lo_ref:
-        # 🔴 既定は master。⚠ **建てるたびに別物**になるので、解決した SHA を
-        #    必ず出力し release notes にも書く ── 再現したいときはここへ渡す(#117)。
-        description: 'LibreOffice core の ref(空 = master。再現したいときは SHA を渡す)'
-        default: 'master'
+        # 🔴 **既定は安定メジャーの枝**(2026-09-12 に `master` から変えた)。
+        #    ⚠ 直す前の既定は `master` = **未リリースの 27.2 alpha** だった ──
+        #    user 裁定 2026-08-29 で**配るのは 26.8** と決まり #511 を閉じたのに、
+        #    既定はそのまま残っていた。つまり**何も渡さずに焼くと alpha へ静かに逆戻り**し、
+        #    その一式が `lo-wasm-dev`(tag 使い回し)を上書きするので、
+        #    office-pack を回した日に **user が alpha を受け取る**形だった。
+        #    🔑 2026-08-30 の 2 本は実際にこの既定で焼かれている(配られてはいない)。
+        # ⚠ **建てるたびに別物**になるので、解決した SHA を必ず出力し
+        #    release notes にも書く ── 再現したいときはここへ渡す(#117)。
+        # 🔑 alpha を測りたいときは `master` と**明示して**渡す(既定に戻さない)。
+        description: 'LibreOffice core の ref(既定 = 安定メジャーの枝。alpha を測るときは master と明示する)'
+        default: 'libreoffice-26-8'
       safe_heap:
         # 🔴 **調査用**(#134)。`-sSAFE_HEAP=1` を足して焼く ── 範囲外アクセスが
         #    起きた瞬間に**どのポインタか**が出る。⚠ 実行が数倍遅くなるので配布向きでない。
