@@ -4332,7 +4332,11 @@ li[data-pkc-row-slot] {
 /* 目印。⚠ 無いときも**幅は取る**(有無で題名の左端がずれない) */
 [data-pkc-field='tile-icon'] {
   flex: none;
-  width: 1.25em;
+  /* 🔴 **px で固定する**(#770 段②、2026-09-12)。⚠ `em` だと、図案の目印のときだけ
+   * 器の字が 16px になる(`[data-pkc-icon]`)ので、1.25em = 20px と 15px の
+   * **2 種類の幅**ができ、絵文字のタイルと図案のタイルで**題名の左端が 5px ずれる**
+   * ── 上の 1 行が守っているのはまさにそれである。 */
+  width: 20px;
   text-align: center;
   color: var(--muted);
 }

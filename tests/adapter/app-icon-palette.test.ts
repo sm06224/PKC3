@@ -13,6 +13,8 @@
  *   ④外す口が在る ⑤タイルが**字ではなく書体**で出る。
  */
 import { beforeEach, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { blocksFor, stripComments, withoutMedia } from '../helpers/css-blocks';
 import type { Dispatchable } from '../../src/adapter/state/app-state';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
@@ -198,6 +200,26 @@ describe('タイルに出る目印(#770 段②)', () => {
     const icon = launcher().paint({ icon: '🧮' });
     expect(icon?.textContent).toBe('🧮');
     expect(icon?.hasAttribute('data-pkc-symbol'), '絵文字に図案の名前が付いた').toBe(false);
+  });
+
+  /**
+   * 🔴 **題名の左端が、目印の種類でずれない**(#770 段②)。
+   *
+   * ⚠ 器の幅を `em` で書くと、**図案のときだけ字が 16px になる**(`[data-pkc-icon]`)ので
+   *   1.25em = 20px、絵文字のときは 15px ── 同じ一覧の中で**題名の左端が 5px ずれる**。
+   * 🔑 `tile-icon` の 1 行はもともと「有無で題名の左端がずれない」ために在るので、
+   *   **種類でずれる**のは同じ約束を破っている。
+   */
+  it('🔴 目印の器の幅は px で固定(絵文字と図案で題名の左端がずれない)', () => {
+    const css = withoutMedia(stripComments(readFileSync('src/styles/app.css', 'utf-8')));
+    const blocks = blocksFor(css, "[data-pkc-field='tile-icon']");
+    // ⚠ 空振り防止 ── 規則を引けていないなら、下は何も見ていない
+    expect(blocks.length, '目印の規則を引けていない(選択子が変わった)').toBe(1);
+    const width = /(?:^|;)\s*width:\s*([^;]+)/.exec(blocks[0]!)?.[1]?.trim();
+    expect(width, '目印の幅が書かれていない').toBeDefined();
+    expect(width, `幅が em で書かれている(図案のときだけ広がる): ${width ?? ''}`).toMatch(
+      /^\d+(?:\.\d+)?px$/,
+    );
   });
 
   it('外のサイトのタイルは、目印が無ければ ↗ のまま', () => {
