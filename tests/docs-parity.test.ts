@@ -2269,6 +2269,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-12(#281 ── 組み込みタイルの目印)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-08-prose-align-and-keys" …` → bc738d2
+     */
+    '本文を「中央」か「左」から選べるようになりました',
+    /**
      * ⚠ **2026-09-12(#770 段② ── タイルの目印)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-08-capture-split-12h" …` → b77cb10
      */

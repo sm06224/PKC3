@@ -208,13 +208,41 @@ export function buildTiles(sources: readonly TileSource[]): LauncherTile[] {
  * ⚠ **並び順は変えない** ── 組み込みが先、自分のものが後(`withBuiltinTiles`)。
  *   順番まで動かすと「いつものタイルが下へ消えた」を起こす(`sortTiles` の注記と同じ向き)。
  */
+/**
+ * 🔴 **組み込みタイルの目印**(#281。user 裁定 2026-09-12 ── 出した案のとおり、
+ * ただし Office は「仕事」ではなく**「文書」**)。
+ *
+ * ⚠ 直す前は **9 枚とも目印が空**だった ── 自分で登録したアプリには絵が付くので
+ *   (#770 段②)、**組み込みだけ枠が抜けて見えていた**。
+ *
+ * 🔑 **左の列に同じ面が在るものは、`BROWSE_ICONS` と同じ名前を使う**:
+ *   予定表 = `calendar` / 連絡先 = `person` / 音・動画 = `mic`。
+ *   ⚠ **いま画面では確かめられない** ── 左のタブの図案は
+ *   `app.css` の `[data-pkc-region='browse-tabs'] [data-pkc-icon] { display: none }` で
+ *   隠してある(2026-08-27、タブが 5 枚を超えて 1440px でも 2 段になったため)。
+ *   🔑 それでも揃えるのは、**戻した日にずれない**ためである(その規則の注記が
+ *   「印は消さずに残す ── 戻すときに作り直さないため」と言っているのと同じ向き)。
+ *   ⚠ だから **user 向けの字に「タブと同じ絵」と書かない** ── 画面に出ていない
+ *   ものを根拠にすると、user は探して見つけられない(2026-09-12 の動線レビュー)。
+ * ⚠ 逆に **`folder` は使わない** ── **一覧の行のフォルダのノート**が既にその絵を
+ *   色付きで使っている(`app.css` の `[data-pkc-chip='folder']`)ので、
+ *   同じ絵が 2 つの違うものを指すことになる(2 ペインは `tools` = 整理の道具)。
+ * ⚠ **`search` と `database` を分けた理由**:探す も SQL も「調べる」なので、
+ *   SQL は**調べ方ではなく見る物**(データ)の側の絵にした。
+ */
 export const BUILTIN_GROUP = '組み込みアプリ';
 
 export const OFFICE_TILE_LID = 'builtin:office';
 
 /** Office(Start Center)を開く組み込みタイル。 */
 export function officeTile(): LauncherTile {
-  return { lid: OFFICE_TILE_LID, title: 'Office', group: BUILTIN_GROUP, kind: 'office' };
+  return {
+    lid: OFFICE_TILE_LID,
+    title: 'Office',
+    group: BUILTIN_GROUP,
+    kind: 'office',
+    symbol: 'page',
+  };
 }
 
 /**
@@ -230,7 +258,13 @@ export function officeTile(): LauncherTile {
 export const DUAL_TILE_LID = 'builtin:dual';
 
 export function dualTile(): LauncherTile {
-  return { lid: DUAL_TILE_LID, title: '2 ペインで整理', group: BUILTIN_GROUP, kind: 'dual' };
+  return {
+    lid: DUAL_TILE_LID,
+    title: '2 ペインで整理',
+    group: BUILTIN_GROUP,
+    kind: 'dual',
+    symbol: 'tools',
+  };
 }
 
 /**
@@ -247,7 +281,13 @@ export function dualTile(): LauncherTile {
 export const SCHEDULE_TILE_LID = 'builtin:schedule';
 
 export function scheduleTile(): LauncherTile {
-  return { lid: SCHEDULE_TILE_LID, title: '予定表', group: BUILTIN_GROUP, kind: 'schedule' };
+  return {
+    lid: SCHEDULE_TILE_LID,
+    title: '予定表',
+    group: BUILTIN_GROUP,
+    kind: 'schedule',
+    symbol: 'calendar',
+  };
 }
 
 /**
@@ -258,7 +298,13 @@ export function scheduleTile(): LauncherTile {
 export const CONTACTS_TILE_LID = 'builtin:contacts';
 
 export function contactsTile(): LauncherTile {
-  return { lid: CONTACTS_TILE_LID, title: '連絡先', group: BUILTIN_GROUP, kind: 'contacts' };
+  return {
+    lid: CONTACTS_TILE_LID,
+    title: '連絡先',
+    group: BUILTIN_GROUP,
+    kind: 'contacts',
+    symbol: 'person',
+  };
 }
 
 /**
@@ -269,7 +315,13 @@ export function contactsTile(): LauncherTile {
 export const CAPTURES_TILE_LID = 'builtin:captures';
 
 export function capturesTile(): LauncherTile {
-  return { lid: CAPTURES_TILE_LID, title: '音/動画', group: BUILTIN_GROUP, kind: 'captures' };
+  return {
+    lid: CAPTURES_TILE_LID,
+    title: '音/動画',
+    group: BUILTIN_GROUP,
+    kind: 'captures',
+    symbol: 'mic',
+  };
 }
 
 /**
@@ -284,7 +336,13 @@ export function capturesTile(): LauncherTile {
 export const SEARCH_TILE_LID = 'builtin:search';
 
 export function searchTile(): LauncherTile {
-  return { lid: SEARCH_TILE_LID, title: '探す', group: BUILTIN_GROUP, kind: 'search' };
+  return {
+    lid: SEARCH_TILE_LID,
+    title: '探す',
+    group: BUILTIN_GROUP,
+    kind: 'search',
+    symbol: 'search',
+  };
 }
 
 /**
@@ -298,7 +356,13 @@ export function searchTile(): LauncherTile {
 export const SQL_TILE_LID = 'builtin:sql';
 
 export function sqlTile(): LauncherTile {
-  return { lid: SQL_TILE_LID, title: 'SQL で調べる', group: BUILTIN_GROUP, kind: 'sql' };
+  return {
+    lid: SQL_TILE_LID,
+    title: 'SQL で調べる',
+    group: BUILTIN_GROUP,
+    kind: 'sql',
+    symbol: 'database',
+  };
 }
 
 /**
@@ -315,7 +379,13 @@ export function sqlTile(): LauncherTile {
 export const MANUAL_TILE_LID = 'builtin:manual';
 
 export function manualTile(): LauncherTile {
-  return { lid: MANUAL_TILE_LID, title: 'マニュアル', group: BUILTIN_GROUP, kind: 'manual' };
+  return {
+    lid: MANUAL_TILE_LID,
+    title: 'マニュアル',
+    group: BUILTIN_GROUP,
+    kind: 'manual',
+    symbol: 'book',
+  };
 }
 
 /**
@@ -340,6 +410,7 @@ export function selfhostTile(): LauncherTile {
     title: '自分のパソコンで動かす',
     group: BUILTIN_GROUP,
     kind: 'selfhost',
+    symbol: 'computer',
   };
 }
 

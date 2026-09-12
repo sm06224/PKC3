@@ -6,6 +6,7 @@
  * 判断基準は「PKC2 で見えていたものが、同じ順で見えるか」である。
  */
 import { describe, expect, it } from 'vitest';
+import { BROWSE_ICONS } from '../../src/adapter/ui/render/icons';
 import {
   buildTiles,
   dualTile,
@@ -178,6 +179,7 @@ describe('組み込みタイルの合流 (#148)', () => {
       title: '2 ペインで整理',
       group: BUILTIN_GROUP,
       kind: 'dual',
+      symbol: 'tools',
     });
     /**
      * ⚠ **カレンダー / やることの板は #292 段⑤ でここから外れた**(2026-08-23)──
@@ -192,6 +194,7 @@ describe('組み込みタイルの合流 (#148)', () => {
       title: '予定表',
       group: BUILTIN_GROUP,
       kind: 'schedule',
+      symbol: 'calendar',
     });
     // ⚠ 連絡先(#278 段③)は予定表の次 ── 同じく「アプリに最初から在る」側
     expect(b[2]).toEqual({
@@ -199,6 +202,7 @@ describe('組み込みタイルの合流 (#148)', () => {
       title: '連絡先',
       group: BUILTIN_GROUP,
       kind: 'contacts',
+      symbol: 'person',
     });
     // ⚠ 探す(#680)は連絡先の次 ── 同じく「アプリに最初から在る」側(Office より前)
     expect(b[3]).toEqual({
@@ -206,12 +210,14 @@ describe('組み込みタイルの合流 (#148)', () => {
       title: '探す',
       group: BUILTIN_GROUP,
       kind: 'search',
+      symbol: 'search',
     });
     expect(b[4]).toEqual({
       lid: OFFICE_TILE_LID,
       title: 'Office',
       group: BUILTIN_GROUP,
       kind: 'office',
+      symbol: 'page',
     });
     /**
      * 🔴 **マニュアルは最後**(#645、2026-08-31)── 2 ペインと Office は
@@ -223,6 +229,7 @@ describe('組み込みタイルの合流 (#148)', () => {
       title: 'マニュアル',
       group: BUILTIN_GROUP,
       kind: 'manual',
+      symbol: 'book',
     });
     /**
      * 🔴 **自分のパソコンで動かす は最後**(#532 段 B、2026-09-09)。
@@ -234,6 +241,7 @@ describe('組み込みタイルの合流 (#148)', () => {
       title: '自分のパソコンで動かす',
       group: BUILTIN_GROUP,
       kind: 'selfhost',
+      symbol: 'computer',
     });
     /**
      * 🔴 **SQL の面も最後**(#681 段②、2026-09-09)── 支度の口と同じ理由で、
@@ -244,6 +252,7 @@ describe('組み込みタイルの合流 (#148)', () => {
       title: 'SQL で調べる',
       group: BUILTIN_GROUP,
       kind: 'sql',
+      symbol: 'database',
     });
     // ⚠ 録ったもの(#683 段①)も末尾 ── SQL と同じ理由(位置を動かさない)
     expect(b[8]).toEqual({
@@ -251,6 +260,7 @@ describe('組み込みタイルの合流 (#148)', () => {
       title: '音/動画',
       group: BUILTIN_GROUP,
       kind: 'captures',
+      symbol: 'mic',
     });
     // ⚠ entry 由来の並びには触らない(合流は**後置**だけ ── 2026-09-08 に前置から変えた)
     expect(b, '組み込みが 9 枚ちょうどでない').toHaveLength(9);
@@ -311,6 +321,89 @@ describe('組み込みタイルの合流 (#148)', () => {
       'sql',
       'captures',
     ]);
+  });
+
+  /**
+   * 🔴 **組み込みタイルの目印**(#281。user 裁定 2026-09-12)。
+   *
+   * ⚠ 直す前は **9 枚とも空**で、自分で登録したアプリだけ絵が付いていた。
+   * 🔑 見るのは 3 つ:**①全部が持っている ②どれが何か ③左のタブと同じ絵か**。
+   *   ⚠ ①だけだと「9 枚とも同じ絵」で素通りし、②だけだと**次に足した 1 枚が
+   *   空のまま**でも緑になる(この repo の作法は「新しいタイルは末尾へ足す」)。
+   */
+  it('🔴 組み込みタイルは 1 枚残らず目印を持つ', () => {
+    const merged = withBuiltinTiles([], { office: true });
+    const missing = merged.filter((t) => t.symbol === undefined).map((t) => t.title);
+    expect(missing, `目印の無い組み込みタイル: ${missing.join(' / ')}`).toEqual([]);
+    // ⚠ **空振り防止** ── 組み込みが 1 枚も無ければ上は常に真
+    expect(merged.length).toBeGreaterThanOrEqual(9);
+    // ⚠ 打った字の目印(`icon`)とは**同時に立たない**
+    expect(merged.filter((t) => t.icon !== undefined)).toEqual([]);
+  });
+
+  it('🔴 どの絵を割り当てたか(user 裁定 2026-09-12)', () => {
+    const merged = withBuiltinTiles([], { office: true });
+    expect(new Map(merged.map((t) => [t.kind, t.symbol]))).toEqual(
+      new Map([
+        ['dual', 'tools'],
+        ['schedule', 'calendar'],
+        ['contacts', 'person'],
+        ['search', 'search'],
+        // 🔑 user 裁定で「仕事」ではなく**「文書」**になった
+        ['office', 'page'],
+        ['manual', 'book'],
+        ['selfhost', 'computer'],
+        ['sql', 'database'],
+        ['captures', 'mic'],
+      ]),
+    );
+  });
+
+  /**
+   * 🔴 **左の列に同じ面が在るものは、`BROWSE_ICONS` と同じ名前を使う**(#281)。
+   *
+   * ⚠ **これは「画面で揃って見える」ことの検査ではない** ── 左のタブの図案は
+   *   `app.css` で `display: none` にしてあり、いま画面には 1 つも出ていない
+   *   (2026-08-27、タブが 5 枚を超えて 2 段になったため)。
+   * 🔑 それでも縛るのは、**図案を戻した日にずれない**ためである
+   *   (その規則の注記が「印は消さずに残す」と言っているのと同じ向き)。
+   * ⚠ そして **`folder` を使っていない**ことも見る ── **一覧の行のフォルダのノート**が
+   *   既にその絵を色付きで使っているので、2 ペインに使うと**同じ絵が 2 つの違うものを指す**。
+   */
+  it('🔴 左のタブと同じ面のタイルは、同じ図案の名前を使う', () => {
+    const merged = withBuiltinTiles([], { office: true });
+    /**
+     * 🔑 **対になる組み込みは導出する**(2026-09-12、着地前レビュー ⚠3)。
+     * ⚠ 直す前は `['schedule','contacts','captures']` と**手書き**で、
+     *   同じ 3 件が `tiles.ts` の注記・マニュアル・ここの 3 か所に散っていた ──
+     *   **4 組目を足した日に、この loop だけ 3 件のまま**で誰も見ない。
+     * ⚠ この repo の作法は「新しいタイルは末尾へ足す」なので、穴は
+     *   **いちばん足しやすい場所**に開いていた。
+     */
+    const mirrored = merged.filter((t) => Object.hasOwn(BROWSE_ICONS, t.kind));
+    expect(
+      mirrored.map((t) => t.kind),
+      '左のタブと対になる組み込みが増減した ── `tiles.ts` の注記とマニュアルも直す',
+    ).toEqual(['schedule', 'contacts', 'captures']);
+    for (const t of mirrored) {
+      const tab = BROWSE_ICONS[t.kind];
+      /**
+       * ⚠ **空振り防止はここ**(着地前レビュー ⚠2)── 直す前は loop の**後ろ**に
+       *   「表が空でないこと」を置いていたが、タイル側の `symbol` は直書きなので
+       *   **loop が先に落ち、その行は一度も評価されない**。しかも落ちたときの文言が
+       *   「タイルの絵が違う」と読めて、**崩れているのは前提(表)**だと分からない。
+       */
+      expect(tab, `左のタブ(${t.kind})の図案が表に無い ── 前提が崩れている`).toBeDefined();
+      expect(t.symbol, `${t.kind} の図案の名前が ${String(tab)} でない`).toBe(tab);
+    }
+    /**
+     * ⚠ **前提を先に検める**(着地前レビュー 変異 C)── `filer` の鍵が改名されると
+     *   `BROWSE_ICONS['filer']` は `undefined` になり、`not.toContain(undefined)` は
+     *   **常に真**になって無言化する。
+     */
+    const filerIcon = BROWSE_ICONS['filer'];
+    expect(filerIcon, 'フォルダのタブの図案が引けない ── 前提が崩れている').toBeDefined();
+    expect(merged.map((t) => t.symbol)).not.toContain(filerIcon);
   });
 
   /**

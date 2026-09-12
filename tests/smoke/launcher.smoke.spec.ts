@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { gzipSync } from 'node:zlib';
 import {
   answerAppDialog,
@@ -33,6 +33,110 @@ const USER_TILES =
 /** 組み込みタイルを名指す（空振り防止 ── 一覧そのものが消えていないことを見る）。 */
 const builtinTile = (id: string): string =>
   `[data-pkc-region="launcher-grid"] [data-pkc-tile="builtin:${id}"]`;
+
+/**
+ * 🔴 **タイルの目印を「画素で」測る**(#281。`icon-font.smoke.spec.ts` の作法)。
+ *
+ * ⚠ **属性を見る assert では言えない。** `data-pkc-symbol` が付いていることと、
+ *   絵が出ていることは別である ── 名前が付いたまま豆腐(□)/ 無地になる形が 2 つ在る:
+ *   ① 書体にその符号位置が無い ② `data-pkc-icon` が付かず `::before` が 1 度も
+ *   発火しない(CSS は `[data-pkc-icon][data-pkc-symbol=…]` の **2 つ**を要求する)。
+ *   ⚠ どちらも属性の assert では **1 ビットも動かない**(実測:②に当てた変異は
+ *   既存の 2 つを素通りした)。
+ * 🔑 だから**書体に必ず無い符号位置**(U+E000)を、**器に実際に当たっている書体**で
+ *   同じ大きさに描き、**画素の指紋**を比べる。⚠ 値は pin しない(環境で変わる)──
+ *   見るのは**同じ回の中での違い**だけである。
+ * 🔑 **起動を 1 つも足さない** ── 既に一覧を開いている道中から呼ぶ。
+ */
+async function tileMarks(page: Page, sel: string) {
+  return page.evaluate(async (sel) => {
+    await document.fonts.ready;
+    const SIZE = 64;
+    const cv = document.createElement('canvas');
+    cv.width = SIZE;
+    cv.height = SIZE;
+    const g = cv.getContext('2d')!;
+    const sig = (s: string, family: string): { hash: number; ink: number } => {
+      g.clearRect(0, 0, SIZE, SIZE);
+      // 🔑 **器に実際に当てられている書体**で描く(family を直に書かない)
+      g.font = `48px ${family}`;
+      g.textBaseline = 'top';
+      g.fillStyle = '#000';
+      g.fillText(s, 4, 4);
+      const px = g.getImageData(0, 0, SIZE, SIZE).data;
+      let h = 0x811c9dc5;
+      let ink = 0;
+      for (let i = 3; i < px.length; i += 4) {
+        const a = px[i]! > 8 ? 1 : 0;
+        ink += a;
+        h = ((h ^ a) * 0x01000193) >>> 0;
+      }
+      return { hash: h, ink };
+    };
+    const out: {
+      lid: string;
+      symbol: string;
+      hasIconAttr: boolean;
+      ch: string;
+      family: string;
+      w: number;
+      h: number;
+      hash: number;
+      ink: number;
+      tofu: number;
+      tofuInk: number;
+    }[] = [];
+    for (const btn of document.querySelectorAll(sel)) {
+      const el = btn.querySelector('[data-pkc-field="tile-icon"]');
+      if (!(el instanceof HTMLElement)) continue;
+      const cs = getComputedStyle(el, '::before');
+      const ch = cs.content.replace(/^["']|["']$/g, '');
+      const box = el.getBoundingClientRect();
+      const mine = sig(ch, cs.fontFamily);
+      // ⚠ 対照群 = この書体に必ず無い符号位置(豆腐そのもの)
+      const tofu = sig(String.fromCodePoint(0xe000), cs.fontFamily);
+      out.push({
+        lid: btn.getAttribute('data-pkc-tile') ?? '',
+        symbol: el.getAttribute('data-pkc-symbol') ?? '',
+        hasIconAttr: el.hasAttribute('data-pkc-icon'),
+        ch,
+        family: cs.fontFamily,
+        w: Math.round(box.width),
+        h: Math.round(box.height),
+        hash: mine.hash,
+        ink: mine.ink,
+        tofu: tofu.hash,
+        tofuInk: tofu.ink,
+      });
+    }
+    return out;
+  }, sel);
+}
+
+/** 測った目印が**全部ちゃんと描かれている**ことを見る(`floor` 枚以上あること込み)。 */
+function expectRealGlyphs(marks: Awaited<ReturnType<typeof tileMarks>>, floor: number): void {
+  // 🔑 空振り防止 ── 数え切れていないなら、下の for は 1 件も回らずに緑になる
+  expect(marks.length, `目印を数え切れていない(${marks.length} 枚)`).toBeGreaterThanOrEqual(floor);
+  for (const m of marks) {
+    const at = `${m.lid}(${m.symbol})`;
+    // ⚠ 対照群そのものが描けていないなら、以下の比較は無意味
+    expect(
+      m.tofuInk,
+      `${at}: 豆腐が 1 画素も描かれていない(指紋の仕掛けが動いていない)`,
+    ).toBeGreaterThan(0);
+    expect(m.symbol, `${at}: 目印の名前が無い`).not.toBe('');
+    // 🔴 `::before` を撃つには **2 つの属性**が要る ── 片方でも欠けると絵は出ない
+    expect(m.hasIconAttr, `${at}: data-pkc-icon が無い(::before が発火しない)`).toBe(true);
+    expect(m.ch, `${at}: 絵が置かれていない(content=${JSON.stringify(m.ch)})`).toHaveLength(1);
+    expect(m.family, `${at}: 器に配る書体が当たっていない(${m.family})`).toContain('PKC Symbols');
+    // 🔴 **画面に見えている**
+    expect(m.w, `${at}: 目印の器の幅が 0(${m.w}x${m.h})`).toBeGreaterThan(0);
+    expect(m.h, `${at}: 目印の器の高さが 0(${m.w}x${m.h})`).toBeGreaterThan(0);
+    expect(m.ink, `${at}: 目印が 1 画素も描かれていない`).toBeGreaterThan(0);
+    // 🔴 **豆腐ではない**(書体に無い符号位置と同じ絵になっていない)
+    expect(m.hash, `${at}: 目印が豆腐(書体にその絵が無い)`).not.toBe(m.tofu);
+  }
+}
 
 /**
  * P7b 段⑩: **取り込んだランチャーのタイルが見えて、押すと開く**。
@@ -119,6 +223,48 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   await expect(tiles).toHaveCount(3);
   // ⚠ 空振り防止：組み込みは同じ一覧に居る（除いたことを確かめる）
   await expect(page.locator(builtinTile('dual'))).toHaveCount(1);
+
+  /**
+   * 🔴 **組み込みにも目印が出る**(#281。user 裁定 2026-09-12「案のとおりでいい」)。
+   *
+   * ⚠ `tiles.ts` の unit が見るのは**値**だけなので、**描く側が `symbol` を
+   *   読まなくなっても緑のまま**である ── だから画面で見る。
+   * ⚠ 見るのは「字が出ている」ではない ── **器が名前を持ち、字は入っていない**
+   *   (CLAUDE.md §10「器を替えると読み取れる値が変わる」)。
+   * 🔑 **起動を 1 つも足していない** ── 既に一覧を開いている道中に assert を足した。
+   */
+  const dualIcon = page.locator(`${builtinTile('dual')} [data-pkc-field="tile-icon"]`);
+  await expect(dualIcon, '組み込みタイルに目印が出ていない').toHaveAttribute(
+    'data-pkc-symbol',
+    'tools',
+  );
+  await expect(dualIcon, '器に目に見えない字が混ざっている').toHaveText('');
+  /**
+   * ⚠ **左の列に同じ面が在るものは、そのタブと同じ絵**(#281)── 同じものを開く
+   *   2 つ目の入口なので、絵が違うと別物に見える。
+   */
+  await expect(
+    page.locator(`${builtinTile('schedule')} [data-pkc-field="tile-icon"]`),
+    '予定表の目印が `calendar` でない(左のタブと同じ図案の名前を使う ── タブ自身の絵は app.css で隠してある)',
+  ).toHaveAttribute('data-pkc-symbol', 'calendar');
+
+  /**
+   * 🔴 **組み込みの絵が豆腐になっていない**(#281)。
+   * ⚠ 上の 2 つ(属性と空文字)では言えない ── 理由は `tileMarks` の docstring。
+   * 🔑 **条件なしに出る組み込みは 8 枚**(`withBuiltinTiles`: 2 ペイン / 予定表 /
+   *   連絡先 / 探す / マニュアル / 自分のパソコン / SQL / 音・動画)──
+   *   Office だけは端末次第なので、ここでは数に入れない(#148 の test で見る)。
+   */
+  const marks = await tileMarks(page, '[data-pkc-tile^="builtin:"]');
+  expectRealGlyphs(marks, 8);
+  /**
+   * ⚠ **指紋が潰れていないか** ── 8 枚が全部同じ絵なら測れていない。
+   * 🔑 割り当ては 8 枚とも違う絵なので、種類数は枚数と同じだけ出るはずである。
+   */
+  expect(
+    new Set(marks.map((m) => m.hash)).size,
+    `絵が 1 種類しか出ていない(指紋が潰れている?${marks.map((m) => m.symbol).join(',')})`,
+  ).toBeGreaterThanOrEqual(8);
 
   // ② 🔴 **PKC2 と同じ順** ── 既定群が先頭、グループ内は app_order 順
   await expect(tiles.nth(0)).toContainText('電卓');
@@ -1037,6 +1183,16 @@ test('🔴 一式を入れた端末では Office タイルが出て、押すと�
   await expect(office).toHaveCount(1);
   await expect(office).toContainText('Office');
   expect(await office.getAttribute('data-pkc-tile-kind')).toBe('office');
+  /**
+   * 🔴 **9 枚目の目印**(#281)── Office は**端末次第**で出るので、組み込み 9 枚のうち
+   * ここだけが上の test に居ない。⚠ 名指しで見ないと、9 枚目だけ豆腐で出荷されても
+   * 鳴る計器が 1 つも無い。🔑 起動は足していない(この test は既に一覧を開いている)。
+   */
+  await expect(
+    office.locator('[data-pkc-field="tile-icon"]'),
+    'Office の目印が「文書」でない(user 裁定 2026-09-12「Office は文書で」)',
+  ).toHaveAttribute('data-pkc-symbol', 'page');
+  expectRealGlyphs(await tileMarks(page, builtinTile('office')), 1);
 
   // 🔴 押すと **Office の窓**が開く
   const popup = context.waitForEvent('page');
