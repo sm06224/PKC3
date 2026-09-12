@@ -81,6 +81,7 @@ function srcFiles(dir = 'src', out: string[] = []): string[] {
 import { TILE_ICON_CHOICES } from '../src/features/icon/tile-icons';
 import { withBuiltinTiles } from '../src/features/launcher/tiles';
 import { RELATION_MAP_DEPTH } from '../src/adapter/ui/render/relation-map';
+import { MAX_DEPTH } from '../src/features/relation/neighbourhood';
 
 const MANUAL = readFileSync('docs/manual.md', 'utf-8');
 
@@ -2069,11 +2070,29 @@ describe('選べる絵の数が、マニュアルと一致する', () => {
  */
 describe('つながりの図の手数が、マニュアルと一致する', () => {
   it('🔴 マニュアルの「N 手先まで」が実装と同じ', () => {
-    const m = /\*\*(\d+) 手先まで\*\*/.exec(MANUAL);
-    expect(m, 'マニュアルに手数の記述が無い(字が変わった?)').not.toBeNull();
-    expect(Number(m![1]), `実装は ${RELATION_MAP_DEPTH} 手だが、マニュアルの数字が違う`).toBe(
-      RELATION_MAP_DEPTH,
-    );
+    /**
+     * ⚠ **太字に依存しない**(2026-09-12、着地前レビュー)── マニュアルには
+     *   「2 手先まで」が **2 か所**あり、`docs/manual.md:1973` は太字が付いていない。
+     *   太字だけを見ると、手数を上げた日に**片方だけ直って片方が残る**。
+     * 🔑 だから**全部拾って、全部同じ数であること**を見る。
+     */
+    const all = [...MANUAL.matchAll(/(\d+) 手先まで/g)].map((x) => Number(x[1]));
+    expect(all.length, 'マニュアルに手数の記述が無い(字が変わった?)').toBeGreaterThan(0);
+    expect(
+      new Set(all),
+      `実装は ${RELATION_MAP_DEPTH} 手だが、マニュアルの数字が違う(拾った値: ${all.join(' / ')})`,
+    ).toEqual(new Set([RELATION_MAP_DEPTH]));
+  });
+
+  it('🔴 正本が上限を超えていない(超えると、マニュアルだけが嘘になる)', () => {
+    /**
+     * ⚠ 画面に出るのは **`min(RELATION_MAP_DEPTH, MAX_DEPTH)`**
+     *   (`neighbourhood.ts` が `Math.min` で切り詰める)。
+     * 🔴 上限を超えた値を正本にすると、上の門が「マニュアルを大きい数へ直せ」と
+     *   要求するのに**図は増えない** ── この PR が直した「注記だけ嘘」と同じ型を、
+     *   門の形で作り直すことになる(2026-09-12、着地前レビュー)。
+     */
+    expect(RELATION_MAP_DEPTH).toBeLessThanOrEqual(MAX_DEPTH);
   });
 
   it('🔴 呼び側が数字を直書きしていない(正本は 1 つ)', () => {
@@ -2101,7 +2120,17 @@ describe('組み込みアプリの枚数と並びが、マニュアルと一致�
   /** ⚠ 一覧を書いている段落だけを切り出す(全文で探すと別の節に満たされる)。 */
   const listPara = ((): string => {
     const from = MANUAL.indexOf('⚠ ランチャーに出るのは');
-    const to = MANUAL.indexOf('最初から入っている', from);
+    /**
+     * 🔴 **次の文まで入れない**(2026-09-12、着地前レビュー)。
+     * ⚠ 直す前は「最初から入っている」まで切っていたので、続く文
+     *   (「**予定表** / **連絡先** / **音/動画** のタイルは…」)が段落に入り、
+     *   **同じ名前が 2 回出ていた** ── `indexOf` は最初の 1 つを返すので、
+     *   **一覧から末尾のタイルを消しても 2 文目の位置が拾われて緑**だった
+     *   (変異試験で実際に生き延びた)。
+     * ⚠ そして**次に足すタイルは必ず末尾に来る**(`tiles.ts` の注記が 3 回そう書いている)
+     *   ので、穴はいちばん危ない場所に開いていた。
+     */
+    const to = MANUAL.indexOf('のタイルだけです', from);
     return from < 0 || to < 0 ? '' : MANUAL.slice(from, to);
   })();
 
