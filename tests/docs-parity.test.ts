@@ -2269,6 +2269,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-12(#855 段 0 ── 繰り返しの直し)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-08-file-drop-place" …` → 88d1a1f
+     */
+    'パソコンの中のファイルを、本文の落とした所へ入れられるようになりました',
+    /**
      * ⚠ **2026-09-12(#858 ── スクロールバー)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-08-cell-tap-hint" …` → 9295f06
      */

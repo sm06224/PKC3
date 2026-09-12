@@ -28,7 +28,7 @@
  * だから**例外日の記法を別に作らなくてよい**。
  */
 
-import { addDays } from '@features/datetime/date-math';
+import { addDays, daysBetween } from '@features/datetime/date-math';
 import { isScheduleDate } from './schedule-date';
 import { storedDateParts } from '@features/datetime/stored-date';
 import { pad2 } from '@features/datetime/datetime-format';
@@ -119,6 +119,47 @@ export function occurrenceAt(anchor: string, unit: RepeatUnit, n: number): strin
   return `${ny}-${pad2(nm)}-${pad2(Math.min(d, last))}`;
 }
 
+/**
+ * 🔴 **窓の先頭に当たる回の番号を、数えて出す**(1 回ずつ近づかない)。
+ *
+ * 🔴 直す前は anchor から 1 回ずつ回して窓へ近づいており、空回りの上限
+ * (`max * 8` = 1600)を超えると **1 件も出ないのに `truncated` も立たない** ──
+ * つまり**画面に何も出ない**。実測(2026-09-12):`@2020-01-06 毎日` は今日との差が
+ * **2,441 日**で、**札が 0 枚**だった(この module の docstring が例に挙げている字である)。
+ * ⚠ test はこの次元を持っていなかった ── 該当の test は `週`(348 週 < 1600)で
+ * 書かれており、**`日` の古い開始だけが落ちる**形だった。
+ *
+ * 🔑 見積もりは刻みごとの算術で出し、**両側へ少しだけ直す** ── 月末の寄せ
+ * (1/31 → 2/28)や端数で **±1 ずれる**ことがあるため。
+ */
+function firstIndexFrom(anchor: string, unit: RepeatUnit, from: string): number {
+  let n = 0;
+  if (unit === 'day' || unit === 'week') {
+    const gap = daysBetween(anchor, from);
+    if (gap !== null && gap > 0) n = Math.ceil(gap / (unit === 'week' ? 7 : 1));
+  } else {
+    const a = storedDateParts(anchor);
+    const f = storedDateParts(from);
+    if (a !== null && f !== null) {
+      const months =
+        (Number(f.year) - Number(a.year)) * 12 + (Number(f.month) - Number(a.month));
+      const step = unit === 'month' ? months : Math.floor(months / 12);
+      if (step > 0) n = step;
+    }
+  }
+  for (let i = 0; i < 4 && n > 0; i += 1) {
+    const prev = occurrenceAt(anchor, unit, n - 1);
+    if (prev === null || prev < from) break;
+    n -= 1;
+  }
+  for (let i = 0; i < 4; i += 1) {
+    const at = occurrenceAt(anchor, unit, n);
+    if (at === null || at >= from) break;
+    n += 1;
+  }
+  return n;
+}
+
 export interface RepeatExpansion {
   /** 出す日(昇順・重複なし)。 */
   readonly days: readonly string[];
@@ -167,14 +208,17 @@ export function expandRepeat(input: {
   /**
    * ⚠ **回数で回す**(日付で回さない)── `occurrenceAt` は anchor から数えるので、
    *   ここで前の回を持ち回ると上の「寄った日が固定される」を再現してしまう。
-   * ⚠ **窓へ届くまでの空回りにも上限**を掛ける ── `@2020-01-06 毎日` を
-   *   2026 年の窓で見ると、届くまでに 2,400 回まわる。
+   * 🔑 **窓の先頭から回す**(`firstIndexFrom`)── 空回りが無くなったので、
+   *   回す数は「出す数 + 飛ばす数」で足りる(直す前は 1600 回で打ち切っていた)。
    */
-  const spin = max * 8;
-  for (let n = 0; n < spin; n += 1) {
-    const at = occurrenceAt(anchor, unit, n);
+  const start = firstIndexFrom(anchor, unit, from);
+  const spin = max + skip.size + 8;
+  for (let i = 0; i < spin; i += 1) {
+    const at = occurrenceAt(anchor, unit, start + i);
     if (at === null) break;
     if (at > stop) break;
+    // ⚠ 保険 ── `firstIndexFrom` の直しが 4 回で届かなかったときだけ通る
+    //    (届いていることは test が「先頭の日 = 窓の始まり」で pin している)
     if (at < from) continue;
     if (skip.has(at)) continue;
     if (days.length >= max) {

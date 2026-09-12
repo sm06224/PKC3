@@ -21,6 +21,8 @@
 import type { TaskCard } from '../schedule/task-cards';
 import { isScheduleDate, isScheduleTime } from '../schedule/schedule-date';
 import { storedDateParts } from '../datetime/stored-date';
+import { pad2 } from '../datetime/datetime-format';
+import { expandRepeat, materializedDates, repeatMateKey } from '../schedule/repeat';
 
 /** 鳴る 1 件。⚠ `TaskCard` そのものは運ばない(必要なのはこの 4 つだけ)。 */
 export interface AlarmDue {
@@ -67,6 +69,44 @@ export function alarmKey(card: { lid: string; line: number }, date: string, time
   return `${card.lid} ${card.line} ${date} ${time}`;
 }
 
+/** その瞬間の「その端末の日付」。⚠ `alarmAtMs` と同じく**現地の時計**で読む。 */
+function localDateOf(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+/**
+ * その札が、窓に当たる日として**いつ来るか**。
+ *
+ * - 繰り返しでない札 … 書かれた日そのもの(1 つ)
+ * - 🔴 繰り返しの札 … **窓に入っている日のうち、規則が出す日だけ**
+ *   (⚠ 済んだ回 = 実体の行になった日は `skip` で落ちる ── 押した回で鳴らさない)
+ */
+function datesOf(
+  c: TaskCard,
+  windowDates: readonly string[],
+  mates: ReadonlyMap<string, ReadonlySet<string>>,
+): readonly string[] {
+  const anchor = c.date;
+  const unit = c.repeat;
+  if (anchor === null) return [];
+  if (unit === null) return [anchor];
+  const skip = mates.get(repeatMateKey(c.lid, c.text));
+  const out: string[] = [];
+  for (const date of windowDates) {
+    const r = expandRepeat({
+      anchor,
+      unit,
+      until: c.until,
+      from: date,
+      to: date,
+      ...(skip === undefined ? {} : { skip }),
+    });
+    if (r.days.length > 0) out.push(date);
+  }
+  return out;
+}
+
 /**
  * 🔴 **`(from, to]` に来た予定を返す**(左は開・右は閉)。
  *
@@ -86,6 +126,19 @@ export function dueAlarms(
   toMs: number,
 ): AlarmDue[] {
   const out: AlarmDue[] = [];
+  /**
+   * 🔴 **繰り返しは「規則の行」のまま来る**(展開は窓を知っている側の仕事)。
+   * ⚠ 直す前はここが `c.date`(= 開始日)だけを見ていたので、
+   *   `@2026-08-31 14:00 毎週` は **8/31 にしか鳴らなかった**。
+   *   ⚠ しかも押して増えた実体の行は `- [x]` なので、そちらも `done` で落ちる
+   *   ── つまり **2 回目以降は 1 度も鳴らない**(2026-09-12 に実測)。
+   * 🔑 展開は `expandRepeat` に任せる(判定を 2 か所に増やさない)──
+   *   窓は刻みぶん(既定 30 秒)なので、当たりうる日は**高々 2 つ**である。
+   */
+  const mates = materializedDates(cards);
+  const windowDates = [localDateOf(fromMs), localDateOf(toMs)].filter(
+    (d, i, a) => a.indexOf(d) === i,
+  );
   for (const c of cards) {
     if (c.done) continue;
     /**
@@ -97,10 +150,13 @@ export function dueAlarms(
      *   ではなく「**そもそも書けない変異**」。
      */
     if (c.date === null || c.time === null) continue;
-    const at = alarmAtMs(c.date, c.time);
-    if (at === null) continue;
-    if (at <= fromMs || at > toMs) continue;
-    out.push({ key: alarmKey(c, c.date, c.time), lid: c.lid, line: c.line, text: c.text, time: c.time });
+    const time = c.time;
+    for (const date of datesOf(c, windowDates, mates)) {
+      const at = alarmAtMs(date, time);
+      if (at === null) continue;
+      if (at <= fromMs || at > toMs) continue;
+      out.push({ key: alarmKey(c, date, time), lid: c.lid, line: c.line, text: c.text, time });
+    }
   }
   // ⚠ **時刻の早い順**(同じ回に 2 件来たら、先の用事を上に出す)
   return out.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : a.key < b.key ? -1 : 1));
