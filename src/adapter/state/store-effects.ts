@@ -1581,6 +1581,13 @@ export function connectStoreEffects(
           /** 動かした当人の新しい本文(開いていれば `APP_TILE_SAVED` が使う)。 */
           let movedBody: string | null = null;
           let failed: string | null = null;
+          /**
+           * 🔴 **何件まで書けたか**(着地前レビュー 🔴3)。
+           * ⚠ 途中で止まると**元でも狙いでもない第 3 の並び**が disk に残る ──
+           *   それを「保存できませんでした」と言うと、user は「何も変わっていない」と
+           *   読む。**起きたことを言う**ために数える。
+           */
+          let wrote = 0;
           try {
             for (const row of ev.rows) {
               // 🔴 **disk から読んで書き戻す**(`REQUEST_TILE_UPDATE` と同じ)──
@@ -1619,6 +1626,7 @@ export function connectStoreEffects(
                 break;
               }
               stamp(row.lid, stamps);
+              wrote += 1;
               if (row.lid === ev.lid) movedBody = next;
             }
           } catch (e) {
@@ -1628,7 +1636,12 @@ export function connectStoreEffects(
           if (failed !== null)
             dispatcher.dispatch({
               type: 'OP_FAILED',
-              error: `並べ替えを保存できませんでした: ${failed}(一覧を読み直します)`,
+              // ⚠ **起きたことを言う** ── 途中まで書けた回を「保存できませんでした」と
+              //    言うと、user は「何も変わっていない」と読む(並びは変わっている)
+              error:
+                wrote === 0
+                  ? `並べ替えを保存できませんでした: ${failed}`
+                  : `並べ替えを途中までしか保存できませんでした(${String(wrote)} 件): ${failed}。一覧を読み直しました`,
             });
           // 🔴 **ロックは必ず 1 回だけ解く**(数えているのは 1 つ)
           dispatcher.dispatch({

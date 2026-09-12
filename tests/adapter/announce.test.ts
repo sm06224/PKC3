@@ -1091,7 +1091,7 @@ describe('お知らせの文面は固定(#220-7)', () => {
      *   **いちばん古い 1 件**(`2026-09-08-block-handoff`)を落として空けた。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-08-block-handoff" …` → f9a3d79
      */
-    ['2026-09-12-tile-reorder', '48f8051f'],
+    ['2026-09-12-tile-reorder', '2d163d39'],
     ['2026-09-12-repeat-fixes', '984b158d'],
     ['2026-09-12-scrollbar-thin', '3d04337c'],
     ['2026-09-12-builtin-tile-icons', '075e4fa1'],

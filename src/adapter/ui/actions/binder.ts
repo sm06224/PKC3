@@ -8779,9 +8779,7 @@ export function bindActions(
       }
       e.preventDefault();
       de.dataTransfer.dropEffect = 'move';
-      // ⚠ 群そのもの(末尾へ)は**枠を光らせる**、タイルの間は**線 1 本**
-      if (to.edge === null) markDropTarget(to.mark);
-      else markDropEdge(to.mark, to.edge);
+      markDropEdge(to.mark, to.edge);
       return;
     }
     /**
@@ -9003,7 +9001,7 @@ export function bindActions(
       dispatcher.dispatch({
         type: 'MOVE_APP_TILE',
         lid,
-        target: { kind: 'edge', group: to.group, before: to.before },
+        target: { kind: 'edge', group: to.group, anchor: to.anchor, edge: to.edge },
       });
       return;
     }
@@ -9549,7 +9547,13 @@ export function bindActions(
   };
   /**
    * 並べ替えの落とし先の印(#215)。⚠ 属性名 `data-pkc-drop-edge` は本文の D&D(#684)と
-   * 同じ綴りを使う予定 ── CSS の規則はフォルダの表の行に限ってある(`app.css`)。
+   * 同じ綴りを使う。
+   *
+   * ⚠ **2026-09-12 に訂正** ── ここには「CSS の規則はフォルダの表の行に限ってある」と
+   *   書いてあったが、`app.css` には **総称の `[data-pkc-drop-edge]`** が在り、
+   *   どの要素にも線が出る(`filer-table` の `tr`→`td` は、`tr` に `box-shadow` が
+   *   描かれないための**迂回**であって、限定ではない)。
+   *   🔑 実測:アプリのタイル(`<button>`)には**そのまま線が出る**(実ブラウザで確認)。
    */
   let edgeMark: HTMLElement | null = null;
   const markDropEdge = (el: HTMLElement, edge: 'before' | 'after'): void => {
@@ -9592,32 +9596,39 @@ export function bindActions(
    *   ⚠ **`reorderTargetOf` は使い回せない** ── あちらは行き先を
    *   `[data-pkc-region="filer-table"] tbody` に固定しており、器も意味も違う
    *   (あちらは「兄弟の間」、こちらは「**群の中**」で、群は落とす先にもなる)。
-   * ⚠ 器の高さが測れない環境(happy-dom の素の要素)は `null` ではなく
-   *   **群の末尾**へ倒す ── タイルの上に居るのに「落ちない」を作らない。
+   * ⚠ 器の高さが測れない環境(happy-dom の素の要素)は **そのタイルの手前**へ倒す
+   *   ── タイルの上に居るのに「落ちない」を作らない。
+   *   ⚠ **2026-09-12 に訂正**:1 稿目はここに「群の末尾へ倒す」と書いてあったが、
+   *   実際は `edge` が `'before'` になるので**手前**である(倒す向きが真逆だった)。
    * 🔑 `dragover` と `drop` が**同じ関数**で判定する(光った所と落ちる所が割れない)。
    */
   const tileDropTargetOf = (
     de: DragEvent,
-  ): { group: string; before: string | null; mark: HTMLElement; edge: 'before' | 'after' | null } | null => {
+  ): { group: string; anchor: string; mark: HTMLElement; edge: 'before' | 'after' } | null => {
     const t = de.target as HTMLElement | null;
-    const grid = t?.closest<HTMLElement>('[data-pkc-tile-group]');
-    if (!grid || !root.contains(grid)) return null;
-    const group = grid.getAttribute('data-pkc-tile-group') ?? '';
     const tile = t?.closest<HTMLElement>('[data-pkc-tile][draggable="true"]');
-    // ⚠ タイルの無い所(群の下の余白)へ落としたら**末尾**
-    if (!tile || !grid.contains(tile)) return { group, before: null, mark: grid, edge: null };
+    if (!tile || !root.contains(tile)) return null;
+    /**
+     * ⚠ **受けるのはタイルの上だけ**(動線レビュー D9、2026-09-12 に直した)。
+     * 1 稿目は「群の器の余白は末尾」という枝を持っていたが、⚠ **その余白は 0px** ──
+     * 器は `flex-direction: column` で `padding` も `gap` も持たず、タイルが
+     * **隙間なく埋めている**ので、この枝は**一度も通らない**(しかも枠を光らせる
+     * CSS も無かった = 通っても何も出ない)。
+     * 🔑 **末尾はいちばん下のタイルの下半分**で表せる(下を見よ)ので、枝は要らない。
+     */
+    const grid = tile.closest<HTMLElement>('[data-pkc-tile-group]');
+    if (!grid) return null;
+    const group = grid.getAttribute('data-pkc-tile-group') ?? '';
     const r = tile.getBoundingClientRect();
     const edge: 'before' | 'after' = r.height > 0 && de.clientY - r.top > r.height / 2 ? 'after' : 'before';
     const lid = tile.getAttribute('data-pkc-tile');
-    if (lid === null || lid === '') return { group, before: null, mark: grid, edge: null };
-    if (edge === 'before') return { group, before: lid, mark: tile, edge };
+    if (lid === null || lid === '') return null;
     /**
-     * ⚠ 「この下へ」は「**次のタイルの手前へ**」と同じ意味にする ── 計画側
-     *   (`planTileMove`)の言葉を 1 つにするため(`before` だけで表す)。
-     * ⚠ 次が無ければ末尾(`null`)。
+     * 🔑 **見たものをそのまま渡す** ── 「この下へ」を*次の兄弟の手前*へ読み替えない。
+     * ⚠ 1 稿目はそれをやっていたので、**画面の順**(絞り込みで間が抜ける)と
+     *   **`sortTiles` の順**という 2 つの真実ができていた(§7)。
      */
-    const next = tile.nextElementSibling?.getAttribute('data-pkc-tile') ?? null;
-    return { group, before: next === '' ? null : next, mark: tile, edge };
+    return { group, anchor: lid, mark: tile, edge };
   };
   /**
    * 落としたものを動かす。⚠ **断る理由を出す**(無言の操作拒否を作らない)──

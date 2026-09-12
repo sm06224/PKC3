@@ -104,6 +104,18 @@ export class LauncherRenderer {
     // 規則は `title-filter.ts` の 1 本 ── 面ごとに書くと必ずずれる(review M-1/M-3)
     const q = normalizeQuery(state.filterQuery);
     const tiles = state.launcherTiles.filter((t) => matchesTitle(t.title, q));
+    /**
+     * 🔴 **絞り込んでいる間は掴ませない**(#857 段①、動線レビュー D3)。
+     *
+     * ⚠ 画面に出ているのは絞った後のタイルだが、並び順の正本は**全件**である ──
+     *   隠れたタイルをまたぐ移動になるので、「上へ」を 1 回押しても**画面が
+     *   1 ドットも動かない**(隣の隠れた 1 枚と入れ替わっただけ)。落とすほうも、
+     *   線を引いた所と**違う場所に着く**。
+     * 🔑 **掴めなくすれば、線も右クリックのメニューも出ない**(どちらも
+     *   `[draggable="true"]` を鍵にしている)── 断られる前に、勧めない。
+     * ⚠ 門は reducer にも在る(2 枚目)── あちらは理由を声に出す。
+     */
+    const canReorder = q === '';
 
     if (tiles.length === 0) {
       const empty = document.createElement('p');
@@ -154,7 +166,7 @@ export class LauncherRenderer {
          * ⚠ **群の末尾へ落とす**のはこの器が受ける(タイルとタイルの間は
          *   タイル自身が受ける)── 器が無いと、いちばん下へは落とせない。
          */
-        if (tiles.some((t) => t.group === group && isMovableTile(t)))
+        if (canReorder && tiles.some((t) => t.group === group && isMovableTile(t)))
           grid.setAttribute('data-pkc-tile-group', group);
         // 🔴 **既定グループは見出しを出さない**(P8 段⑭)。かつては「よく使う」と
         //    書いていたが、画面はそんな情報(頻度)を持っていない ── 名乗った
@@ -168,7 +180,7 @@ export class LauncherRenderer {
           list.append(head, grid);
         }
       }
-      grid?.append(this.tile(tile, state.selectedLid));
+      grid?.append(this.tile(tile, state.selectedLid, canReorder));
     }
   }
 
@@ -181,7 +193,7 @@ export class LauncherRenderer {
    * 階層が無い、という状態。一覧と同じ流儀(1 行・共有 1px 線・普通の太さ・
    * はみ出しは畳む)へ寄せる。
    */
-  private tile(tile: LauncherTile, selectedLid: string | null): HTMLElement {
+  private tile(tile: LauncherTile, selectedLid: string | null, canReorder: boolean): HTMLElement {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.setAttribute('data-pkc-action', 'open-tile');
@@ -192,7 +204,7 @@ export class LauncherRenderer {
      * ⚠ 組み込みは **entry を持たない**(並び順を書く先が無い)ので掴ませない ──
      *   掴めるのに落とせないと「壊れている」に見える。
      */
-    if (isMovableTile(tile)) btn.setAttribute('draggable', 'true');
+    if (canReorder && isMovableTile(tile)) btn.setAttribute('draggable', 'true');
     // ⚠ 押した対象は**選択状態にもなる**(main.ts)── その印をここで出す
     if (tile.lid === selectedLid) btn.setAttribute('data-pkc-selected', '');
 

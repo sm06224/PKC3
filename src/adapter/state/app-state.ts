@@ -49,7 +49,7 @@ import type {
   GroupResult as QueryGroups,
   KeyResult as QueryKeys,
 } from '@features/query/group-by';
-import { NO_KINDS, entryFilterOf, visibleOrder } from '@features/filter/title-filter';
+import { NO_KINDS, entryFilterOf, normalizeQuery, visibleOrder } from '@features/filter/title-filter';
 import { toggleKind } from '@features/filter/kind-filter';
 import { STRUCTURAL, type RelationKind } from '@features/relation/kinds';
 import { replaceAll } from '@features/markdown/body-replace';
@@ -3372,15 +3372,52 @@ function reduceCore(
       const refuse = (error: string): ReduceResult => ({ state: { ...state, error }, events: [] });
       // ⚠ 組み込みは entry を持たない ── 掴ませない側でも止めるが、門は 2 枚置く
       if (!isMovableTile(moved)) return refuse('最初から入っているアプリは並べ替えられません');
-      if (state.phase !== 'ready') return refuse('編集を終えてから並べ替えてください');
+      /**
+       * 🔴 **`phase !== 'ready'` を「編集中」と読み替えない**(この file の
+       * `phaseBlockReason` が戒めている当のもの ── 1 稿目はそれを踏んでいた)。
+       * ⚠ `phase` には `'error'`(保存に失敗したときの保護)も `'initializing'` も
+       *   在るので、一律に「編集を終えてから」と出すと**嘘になる** ── user は
+       *   編集していないのに、**存在しない編集画面を探す**。
+       */
+      const blocked = phaseBlockReason(state.phase);
+      if (blocked !== null) return refuse(`${blocked}並べ替えられます`);
+      /**
+       * 🔴 **絞り込んでいる間は並べ替えない**(動線レビュー D3)。
+       *
+       * ⚠ 画面に出ているのは絞った後のタイルだが、並び順の正本は**全件**である ──
+       *   隠れたタイルをまたぐ移動になるので、「上へ」を 1 回押しても
+       *   **画面が 1 ドットも動かない**(隣の隠れた 1 枚と入れ替わっただけ)。
+       *   落とすほうも、線を引いた所と**違う場所に着く**。
+       * 🔑 どちらも「効いていないように見えて、実は書いている」という
+       *   いちばん読めない形なので、**受けずに理由を言う**側へ倒す。
+       *   ⚠ 掴ませない門は `launcher.ts` にも置いてある(門は 2 枚)。
+       */
+      if (normalizeQuery(state.filterQuery) !== '')
+        return refuse('絞り込みを消してから並べ替えられます(いまは一部しか出ていません)');
       if (state.writeLock)
         return refuse('いま保存しています。少し待ってから、もう一度動かしてください');
       if (state.tileWrite)
         return refuse('いま並べ替えを保存しています。終わってから、もう一度動かしてください');
 
       const plan = planTileMove(tiles, action.lid, action.target);
-      // ⚠ 元の位置へ落とし戻した回 ── **断りではない**ので、理由は出さない
-      if (plan.length === 0) return { state, events: [] };
+      if (plan.length === 0) {
+        /**
+         * 🔴 **端で押したときは理由を言う**(動線レビュー D2)。
+         * ⚠ 「上へ」を押して**画面も言葉も動かない**のは、この repo がいちばん嫌う
+         *   無言の dead click である(フォルダの帯は同じ場面で押せなくして
+         *   「すでに先頭です」と出している)。
+         * 🔑 **落とし戻した回とは分ける** ── あちらは「動かさないと決めた」操作なので
+         *   断りではない。⚠ 刻みの移動で計画が空になるのは**端のときだけ**である。
+         */
+        if (action.target.kind === 'step')
+          return refuse(
+            action.target.by < 0
+              ? 'すでにこのまとまりのいちばん上です'
+              : 'すでにこのまとまりのいちばん下です',
+          );
+        // ⚠ 元の位置へ落とし戻した回 ── **断りではない**ので、理由は出さない
+        return { state, events: [] };
+      }
 
       const rows: Array<{
         lid: string;
@@ -3392,8 +3429,15 @@ function reduceCore(
       for (const w of plan) {
         const meta = state.entryMetas.get(w.lid);
         /**
-         * ⚠ 素性の読めない行が 1 つでもあれば**丸ごとやめる** ── 途中まで書くと
-         *   並びが中途半端に変わり、user は何が起きたのか読めない。
+         * ⚠ 素性の読めない行が 1 つでもあれば、**1 件も書かずにやめる**。
+         *
+         * 🔴 **これが守れるのは「書き始める前」までである**(2026-09-12 に訂正)。
+         *   1 稿目はここに「丸ごとやめる」と書いていたが、⚠ 書き始めた後に
+         *   別の窓との衝突が起きた回は **effect が途中で止まり、書いた分は戻らない**
+         *   (`store-effects.ts` の `REQUEST_TILE_ORDER`)── 元でも狙いでもない
+         *   第 3 の並びが disk に残る。
+         * 🔑 だから断り文のほうを事実に合わせてある(「途中まで」と言う)。
+         *   ⚠ 本当に全か無かにするには worker の 1 tx が要る ── そこまでは今やらない。
          */
         if (meta === undefined) return refuse('並べ替えられません(ノートが見つかりません)');
         const updates: Record<string, string | number | undefined> = {

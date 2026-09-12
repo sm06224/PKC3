@@ -46,7 +46,23 @@ export interface TileOrderWrite {
  * | `step` | **右クリックの「上へ / 下へ」** ── 掴めない端末・掴めない人の道 |
  */
 export type TileMoveTarget =
-  | { readonly kind: 'edge'; readonly group: string; readonly before: string | null }
+  /**
+   * 🔴 **掴んで落とした** ── `anchor` のタイルの手前 / 後ろ。
+   *
+   * ⚠ 1 稿目は `before`(どのタイルの手前か)だけを受けており、呼び側が
+   *   「この下へ」を **DOM の次の兄弟**へ読み替えていた。🔴 それは
+   *   **判定が 2 か所に分かれている**ということで(§7)、画面の順と
+   *   `sortTiles` の順がずれた日(絞り込み・将来の見出しの入れ子)に
+   *   **線を引いた所と違う場所へ着く**。
+   * 🔑 だから**見たものをそのまま渡す** ── 読み替えるのはここ 1 か所にする。
+   * ⚠ 末尾は「**いちばん下のタイルの `after`**」で表せるので、`null` は要らない。
+   */
+  | {
+      readonly kind: 'edge';
+      readonly group: string;
+      readonly anchor: string;
+      readonly edge: 'before' | 'after';
+    }
   | { readonly kind: 'step'; readonly by: -1 | 1 };
 
 /** 並べ替えの対象になるのは **entry を持つタイル**だけ(組み込みは末尾に固定)。 */
@@ -82,17 +98,28 @@ export function planTileMove(
   let at: number;
   if (target.kind === 'step') {
     const i = source.findIndex((t) => t.lid === lid);
-    // ⚠ 端では何もしない(**輪にしない** ── 一番上で「上へ」を押して末尾へ飛ぶと驚く)
     const to = i + target.by;
-    if (i < 0 || to < 0 || to >= source.length) return [];
+    /**
+     * ⚠ 一番上で「上へ」は**何もしない**(輪にしない ── 末尾へ飛ぶと驚く)。
+     *
+     * 🔑 **下の端に門は要らない**(2026-09-12、着地前レビュー ⚠8 の実測)──
+     *   `to === source.length` になると `at` が末尾を指し、`next` が `source` と
+     *   同じ並びになるので、下の「**変わらないなら 1 件も書かない**」が空を返す。
+     *   ⚠ `i < 0` も起きない(`source` は `moved` の群で絞ってあり、`moved` は
+     *   そこに必ず居る)。**外しても振る舞いが 1 つも変わらない門は持たない**
+     *   ── 持つと「これが守っている」と誤読される(CLAUDE.md §1)。
+     */
+    if (to < 0) return [];
     at = to;
-  } else if (target.before === null) {
-    at = rest.length;
   } else {
-    const i = rest.findIndex((t) => t.lid === target.before);
-    // ⚠ 知らない lid の手前へは入れない(**末尾へ落とさない** ── 狙いと違う所へ動く)
+    const i = rest.findIndex((t) => t.lid === target.anchor);
+    /**
+     * ⚠ 見つからないときは**何もしない**(末尾へ落とさない ── 狙いと違う所へ動く)。
+     * 当たるのは 2 つ:掴んだ物**そのもの**の上へ落とした(= 動いていない)か、
+     * 知らない lid。どちらも「動かさない」が正しい。
+     */
     if (i < 0) return [];
-    at = i;
+    at = target.edge === 'before' ? i : i + 1;
   }
 
   const next = [...rest.slice(0, at), moved, ...rest.slice(at)];

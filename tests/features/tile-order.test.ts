@@ -31,15 +31,15 @@ describe('掴んで落とす(同じ群)', () => {
   const abc = [t('a', { order: 0 }), t('b', { order: 1 }), t('c', { order: 2 })];
 
   it('🔴 いちばん下を先頭へ落とすと、その群に連番が振り直る', () => {
-    expect(planTileMove(abc, 'c', { kind: 'edge', group: '', before: 'a' })).toEqual([
+    expect(planTileMove(abc, 'c', { kind: 'edge', group: '', anchor: 'a', edge: 'before' })).toEqual([
       { lid: 'c', order: 0 },
       { lid: 'a', order: 1 },
       { lid: 'b', order: 2 },
     ]);
   });
 
-  it('🔴 末尾へ落とす(`before: null`)', () => {
-    expect(planTileMove(abc, 'a', { kind: 'edge', group: '', before: null })).toEqual([
+  it('🔴 末尾へ落とす(いちばん下のタイルの `after`)', () => {
+    expect(planTileMove(abc, 'a', { kind: 'edge', group: '', anchor: 'c', edge: 'after' })).toEqual([
       { lid: 'b', order: 0 },
       { lid: 'c', order: 1 },
       { lid: 'a', order: 2 },
@@ -52,11 +52,13 @@ describe('掴んで落とす(同じ群)', () => {
    *   増える**(履歴も動く)。
    */
   it('🔴 並びが変わらない回は 1 件も書かない', () => {
-    expect(planTileMove(abc, 'b', { kind: 'edge', group: '', before: 'c' })).toEqual([]);
+    expect(planTileMove(abc, 'b', { kind: 'edge', group: '', anchor: 'c', edge: 'before' })).toEqual([]);
     // ⚠ 自分の手前へ落とす(= 動いていない)も同じ
-    expect(planTileMove(abc, 'b', { kind: 'edge', group: '', before: 'b' })).toEqual([]);
+    expect(planTileMove(abc, 'b', { kind: 'edge', group: '', anchor: 'b', edge: 'before' })).toEqual([]);
     // ⚠ 末尾の物を末尾へ
-    expect(planTileMove(abc, 'c', { kind: 'edge', group: '', before: null })).toEqual([]);
+    expect(planTileMove(abc, 'c', { kind: 'edge', group: '', anchor: 'c', edge: 'after' })).toEqual([]);
+    // ⚠ 自分の 1 つ上の「下半分」= いまの位置そのもの
+    expect(planTileMove(abc, 'c', { kind: 'edge', group: '', anchor: 'b', edge: 'after' })).toEqual([]);
   });
 
   /**
@@ -67,15 +69,28 @@ describe('掴んで落とす(同じ群)', () => {
    */
   it('🔴 番号を持たない群は、1 回の並べ替えで全件に連番が付く', () => {
     const raw = [t('a'), t('b'), t('c')];
-    expect(planTileMove(raw, 'c', { kind: 'edge', group: '', before: 'a' })).toEqual([
+    expect(planTileMove(raw, 'c', { kind: 'edge', group: '', anchor: 'a', edge: 'before' })).toEqual([
       { lid: 'c', order: 0 },
       { lid: 'a', order: 1 },
       { lid: 'b', order: 2 },
     ]);
   });
 
+  /**
+   * 🔴 **渡された配列の並びに寄りかからない**(着地前レビュー ⚠8)。
+   * ⚠ `planTileMove` は中で `sortTiles` を通しているが、**崩した配列を渡す test が
+   *   1 件も無い**と、その 1 行を消しても全部緑になる(何も守っていない)。
+   */
+  it('🔴 順が崩れた配列を渡しても、`app_order` の順で読む', () => {
+    const shuffled = [t('c', { order: 2 }), t('a', { order: 0 }), t('b', { order: 1 })];
+    expect(planTileMove(shuffled, 'c', { kind: 'step', by: -1 })).toEqual([
+      { lid: 'c', order: 1 },
+      { lid: 'b', order: 2 },
+    ]);
+  });
+
   it('⚠ 知らない lid の手前へは入れない(末尾へ落とさない)', () => {
-    expect(planTileMove(abc, 'a', { kind: 'edge', group: '', before: 'zzz' })).toEqual([]);
+    expect(planTileMove(abc, 'a', { kind: 'edge', group: '', anchor: 'zzz', edge: 'before' })).toEqual([]);
   });
 });
 
@@ -88,7 +103,7 @@ describe('群をまたいで落とす(user 裁定 2026-09-12「またげる」)'
   ];
 
   it('🔴 別の群の途中へ落とすと、群も一緒に書き替わる', () => {
-    const plan = planTileMove(mixed, 'a', { kind: 'edge', group: '仕事', before: 'y' });
+    const plan = planTileMove(mixed, 'a', { kind: 'edge', group: '仕事', anchor: 'y', edge: 'before' });
     // ⚠ `x` は既に 0 番なので**書かない**(値が変わる行だけ書く)
     expect(plan).toEqual([
       { lid: 'a', order: 1, group: '仕事' },
@@ -99,7 +114,7 @@ describe('群をまたいで落とす(user 裁定 2026-09-12「またげる」)'
   });
 
   it('⚠ 元居た群は振り直さない(触っていない物を書かない)', () => {
-    const plan = planTileMove(mixed, 'a', { kind: 'edge', group: '仕事', before: null });
+    const plan = planTileMove(mixed, 'a', { kind: 'edge', group: '仕事', anchor: 'y', edge: 'after' });
     expect(plan.map((w) => w.lid), '元の群の b まで書いている').not.toContain('b');
   });
 
@@ -110,7 +125,7 @@ describe('群をまたいで落とす(user 裁定 2026-09-12「またげる」)'
    */
   it('🔴 落とした先での位置が同じでも、群が変われば書く', () => {
     const one = [t('a', { order: 0 }), t('x', { group: '仕事', order: 0 })];
-    expect(planTileMove(one, 'a', { kind: 'edge', group: '仕事', before: 'x' })).toEqual([
+    expect(planTileMove(one, 'a', { kind: 'edge', group: '仕事', anchor: 'x', edge: 'before' })).toEqual([
       { lid: 'a', order: 0, group: '仕事' },
       { lid: 'x', order: 1 },
     ]);
@@ -148,7 +163,7 @@ describe('組み込みは並べ替えの対象外', () => {
     const all = withBuiltinTiles([t('a', { order: 0 })], { office: false });
     expect(planTileMove(all, dualTile().lid, { kind: 'step', by: -1 })).toEqual([]);
     expect(
-      planTileMove(all, dualTile().lid, { kind: 'edge', group: '', before: 'a' }),
+      planTileMove(all, dualTile().lid, { kind: 'edge', group: '', anchor: 'a', edge: 'before' }),
     ).toEqual([]);
   });
 
@@ -167,16 +182,27 @@ describe('組み込みは並べ替えの対象外', () => {
     const plan = planTileMove(all, 'a', {
       kind: 'edge',
       group: dualTile().group,
-      before: dualTile().lid,
+      anchor: dualTile().lid,
+      edge: 'before',
     });
-    // ⚠ 組み込みは `movable` から落ちるので、`before` が見つからず何も書かない
+    // ⚠ 組み込みは `movable` から落ちるので、行き先の目印が見つからず何も書かない
     expect(plan).toEqual([]);
   });
 });
 
 describe('画面へ先に当てる(楽観)', () => {
+  /**
+   * 🔴 **群の名前が「組み込みアプリ」より後ろに並ぶ物を入れる**(着地前レビュー ⚠8)。
+   * ⚠ 1 稿目の fixture は `''` と `'仕事'` だけで、**どちらも `組` より前**に並ぶ ──
+   *   だから組み込みを `sortTiles` に混ぜる変異を当てても**位置が変わらず**、
+   *   この検査は何も守っていなかった。`資料`(資 > 組)なら、混ぜた版では
+   *   組み込みが user のタイルの**間**へ割り込む。
+   */
   it('🔴 組み込みは末尾のまま動かない(群の名前で混ざらない)', () => {
-    const all = withBuiltinTiles([t('a', { order: 0 }), t('b', { order: 1 })], { office: false });
+    const all = withBuiltinTiles(
+      [t('a', { order: 0 }), t('b', { order: 1 }), t('z', { group: '資料', order: 0 })],
+      { office: false },
+    );
     const plan: TileOrderWrite[] = [
       { lid: 'b', order: 0 },
       { lid: 'a', order: 1 },

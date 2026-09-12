@@ -455,6 +455,134 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   await expect(capability).toHaveCount(0);
   await appTab.close();
 
+  /**
+   * ⑦ 🔴 **タイルを掴んで並べ替える**(#857 段①)。
+   *
+   * ## ⚠ ここでしか見られないもの
+   *
+   * | 見る | なぜ unit では見えないか |
+   * |---|---|
+   * | 掴んで落とすと**その場で並びが変わり、読み直しても同じ** | 本物の HTML5 D&D(`DataTransfer` / dragover の座標)と disk の往復は happy-dom に無い |
+   * | 落とす前に**線が出て、上半分 / 下半分で向きが変わる** | `tileDropTargetOf` は `getBoundingClientRect` で分けるので、採寸しない環境では**必ず「手前」へ倒れる**(上下の割れ方は実レイアウトにしか無い) |
+   * | 掴んで落としても**窓が開かない** | drag とクリックの切り分けは実ブラウザの判定である(タイルは押すと窓が開く面) |
+   *
+   * 🔑 **新しい起動を 1 つも足していない** ── 既にアプリの一覧を開いている道中に
+   *   assert を足した(`smoke-budget` の予算は 489 / 500 のまま)。
+   * ⚠ 作法は `body-block-drag.smoke.spec.ts` に合わせる ── **落とす前に**線を見る
+   *   (落ちた瞬間に印は消えるので、後から見ても何も分からない)。
+   * ⚠ ④⑤ が URL タイルの 1 枚目を押すので、並べ替えは**その後**に置く
+   *   (先にやると「1 枚目の URL タイル」が入れ替わり、④ の `tile=1` が別物になる)。
+   */
+  const tileTitles = (): Promise<string[]> =>
+    page.locator(`${USER_TILES} [data-pkc-field="title"]`).allTextContents();
+  expect(await tileTitles(), '前提: 並べ替える前の並びが崩れている').toEqual([
+    '電卓',
+    '先のリンク',
+    '後のリンク',
+  ]);
+
+  // ⑦-1 🔴 **組み込みは掴めない**(entry を持たないので並び順を書く先が無い)
+  expect(
+    await page.locator(builtinTile('dual')).getAttribute('draggable'),
+    '最初から入っているアプリが掴める(掴めるのに落とせないと「壊れている」に見える)',
+  ).toBeNull();
+  // ⚠ 空振り防止の対照群 ── 自分のタイルは掴める(これが false なら以下の drag は無意味)
+  expect(
+    await tiles.nth(2).getAttribute('draggable'),
+    '対照群: 自分のタイルが掴めない(この後の drag が空振りする)',
+  ).toBe('true');
+
+  // ⑦-2 🔴 **いちばん下を掴んで、いちばん上の「上半分」へ**(群をまたぐ = 裁定 A)
+  const pagesBeforeDrag = context.pages().length;
+  const from = (await tiles.nth(2).boundingBox())!;
+  const onto = tiles.nth(0);
+  const to = (await onto.boundingBox())!;
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2 - 10, { steps: 4 });
+  await page.mouse.move(to.x + to.width / 2, to.y + to.height * 0.25, { steps: 8 });
+  await expect(onto, '上半分に乗せても「手前」の線が出ない').toHaveAttribute(
+    'data-pkc-drop-edge',
+    'before',
+  );
+  /**
+   * 🔴 **属性だけでは「線が出た」と言えない**(`app.css` の当の規則が戒めている形)──
+   *   `data-pkc-drop-edge` が付いても、当たる規則が無ければ**画面は 1px も変わらない**
+   *   (フォルダの行は `tr` に付くので `td` へ引き直した、という前例がすぐ隣に在る)。
+   * 🔑 だから**当たっている影**を読む。⚠ 値は pin しない(環境で色が変わる)──
+   *   見るのは「無地でないこと」と、**同じ回の中で上下が違うこと**だけである。
+   */
+  const shadowBefore = await onto.evaluate((el) => getComputedStyle(el).boxShadow);
+  expect(shadowBefore, 'タイルに線の規則が当たっていない(属性は付くが画面は変わらない)').not.toBe(
+    'none',
+  );
+  /**
+   * 🔴 **下半分へ動かすと向きが変わる** ── 同じ要素・別の値である。
+   * ⚠ 要素だけ見て早期 return する印の実装だと、ここが `before` のまま動かない
+   *   (`markDropEdge` が属性の値まで持っている理由そのもの)。
+   */
+  await page.mouse.move(to.x + to.width / 2, to.y + to.height * 0.75, { steps: 4 });
+  await expect(onto, '下半分へ動かしても線の向きが変わらない').toHaveAttribute(
+    'data-pkc-drop-edge',
+    'after',
+  );
+  const shadowAfter = await onto.evaluate((el) => getComputedStyle(el).boxShadow);
+  expect(shadowAfter, '下半分でも線の規則が当たっていない').not.toBe('none');
+  expect(
+    shadowAfter,
+    `上半分と下半分で線の出る辺が同じ(上=${shadowBefore} 下=${shadowAfter})`,
+  ).not.toBe(shadowBefore);
+  await page.mouse.move(to.x + to.width / 2, to.y + to.height * 0.25, { steps: 4 });
+  await expect(onto).toHaveAttribute('data-pkc-drop-edge', 'before');
+  await page.mouse.up();
+
+  // ⑦-3 🔴 **その場で並びが変わる**(掴んだ手を離してから待たされない)
+  await expect
+    .poll(tileTitles, { timeout: 5000, message: '落としても並びが変わらない' })
+    .toEqual(['後のリンク', '電卓', '先のリンク']);
+  // ⚠ 線は消えている ── 残ると「まだ掴んでいる」に見える
+  await expect(page.locator('[data-pkc-drop-edge]'), '落とした後も線が残っている').toHaveCount(0);
+
+  // ⑦-4 🔴 **掴んだだけでは起動しない**(このタイルは押すと別のウィンドウが開く)
+  expect(
+    context.pages().length,
+    '掴んで落としただけでウィンドウが開いた(drag がクリックとしても届いている)',
+  ).toBe(pagesBeforeDrag);
+
+  /**
+   * ⑦-5 🔴 **添付ノートに書かれている** ── 読み直しても同じ並び。
+   * ⚠ 画面は**楽観で先に**動かしてあるので、⑦-3 だけでは「画面が動いた」しか言えない
+   *   (disk に 1 バイトも書けていなくても ⑦-3 は緑になる)。
+   */
+  await page.reload();
+  await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
+  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await expect
+    .poll(tileTitles, {
+      timeout: 10_000,
+      message: '読み直すと並びが戻る(添付ノートの frontmatter に書けていない)',
+    })
+    .toEqual(['後のリンク', '電卓', '先のリンク']);
+
+  /**
+   * ⑦-6 🔴 **掴めない人の道**(右クリック →「上へ」/「下へ」)。
+   * ⚠ 併せて「押した物と効く先が食い違う」を見る ── タイルの上で**行のメニュー**が
+   *   出ると「削除」で添付ごと消える(#677 と同じ型)。
+   */
+  await tiles.nth(1).click({ button: 'right' });
+  const tileMenu = page.locator('[data-pkc-region="context-menu"]');
+  await expect(tileMenu, 'タイルを右クリックしてもメニューが出ない').toBeVisible();
+  await expect(tileMenu, '「上へ」が出ていない').toContainText('上へ');
+  await expect(tileMenu, '「下へ」が出ていない').toContainText('下へ');
+  await expect(
+    tileMenu,
+    'タイルの上に行のメニューが出ている(「削除」を押すと添付ごと消える)',
+  ).not.toContainText('削除');
+  await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="move-tile-up"]');
+  await expect
+    .poll(tileTitles, { timeout: 5000, message: '「上へ」を押しても 1 つも動かない' })
+    .toEqual(['電卓', '後のリンク', '先のリンク']);
+
   // ⑥ サイドバーの絞り込みがここでも効く(探し方を 2 通り覚えさせない)
   await page.locator('[data-pkc-field="entry-filter"]').fill('リンク');
   await expect(tiles).toHaveCount(2);
