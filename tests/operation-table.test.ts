@@ -177,12 +177,15 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-09-12(#770 段②): タイルの目印を絵から選ぶ(`pick-app-icon`)で
       //   受け手 +1(登記は増えない ── 押し所は添付の詳細面の中にしか無い。
       //   `set-app-icon` と同じ置き場である)
-      total: 273,
-      receivers: 224,
+      // ⚠ 2026-09-12(#857 段①): タイルの「上へ / 下へ」(`move-tile-up` /
+      //   `move-tile-down`)で受け手 +2 ── 登記は増えない(押した 1 枚が要る P1 で、
+      //   名前だけでは呼べない。`stack-link-up` / `stack-link-down` と同じ仕分け)
+      total: 275,
+      receivers: 226,
       registered: 85,
       both: 36,
       outsideActionsTable: 49,
-      unregistered: 188,
+      unregistered: 190,
     });
   });
 

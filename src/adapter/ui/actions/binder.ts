@@ -182,6 +182,7 @@ import {
   noteToolActions,
   tableMenuActions,
   tableConvertPickLabel,
+  TILE_MENU_ACTIONS,
   withTrailingLast,
 } from '@features/entry-actions';
 import {
@@ -1623,6 +1624,17 @@ function moveOrder(
   const lid = target.getAttribute('data-pkc-entry');
   if (!lid) return;
   dispatcher.dispatch({ type: 'MOVE_ENTRY_ORDER', lid, direction });
+}
+
+/**
+ * 🔴 **アプリのタイルを 1 つ上 / 下へ**(#857 段①)。
+ * ⚠ 端では reducer が**何もしない**(輪にしない ── 一番上で「上へ」を押して
+ *   末尾へ飛ぶと驚く)。
+ */
+function moveTile(dispatcher: Dispatcher, target: HTMLElement, by: -1 | 1): void {
+  const lid = target.getAttribute('data-pkc-tile');
+  if (lid === null || lid === '') return;
+  dispatcher.dispatch({ type: 'MOVE_APP_TILE', lid, target: { kind: 'step', by } });
 }
 
 /**
@@ -5519,6 +5531,12 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'move-order-up': (dispatcher, target) => moveOrder(dispatcher, target, 'up'),
   'move-order-down': (dispatcher, target) => moveOrder(dispatcher, target, 'down'),
+  /**
+   * 🔴 **アプリのタイルを 1 つ動かす**(#857 段①)── 掴めない人の道。
+   * ⚠ 身元はメニューが写した属性から引く(押したボタンはタイルの中に居ない)。
+   */
+  'move-tile-up': (dispatcher, target) => moveTile(dispatcher, target, -1),
+  'move-tile-down': (dispatcher, target) => moveTile(dispatcher, target, 1),
   'attach-file': (_dispatcher, _target, _services, root) => {
     // 常設の hidden input を開く(動的生成にしない ── smoke の setInputFiles と
     // ブラウザの user-gesture 要件の両方に効く)
@@ -7413,6 +7431,15 @@ const DROP_EDGE_ATTR = 'data-pkc-drop-edge';
  *   (画面に出ている物と同じ出どころにする。§7)。
  */
 const PKC_TASK_DRAG = 'application/x-pkc-task';
+/**
+ * 🔴 **アプリのタイルを運ぶ**(#857 段①)。
+ *
+ * ⚠ **`PKC_DRAG` を流用しない** ── あちらは「ノートをフォルダへ移す」で、
+ *   フォルダの行・パンくず・本文・2 ペインの地が**全部受ける**。タイルを
+ *   そこへ落としたときに**ノートが移る**(予定の札・本文の塊と同じ理由で別の型)。
+ * 荷物は `lid` 1 つ。行き先(群と、どのタイルの手前か)は**落とした座標**から決める。
+ */
+const PKC_TILE_DRAG = 'application/x-pkc-tile';
 
 /**
  * 🔴 **鍵 → ボタン**の橋。⚠ **export しているのは、畳んだときの不変条件を
@@ -8741,6 +8768,21 @@ export function bindActions(
     }
     cancelTabHover();
     /**
+     * 🔴 **アプリのタイル**(#857 段①)── 落とし先は**群の中**の、タイルの前 / 後。
+     * ⚠ 受けられない所では `preventDefault` を**呼ばない**(線を出してから断らない)。
+     */
+    if (de.dataTransfer?.types?.includes(PKC_TILE_DRAG) === true) {
+      const to = tileDropTargetOf(de);
+      if (to === null) {
+        clearDropTarget();
+        return;
+      }
+      e.preventDefault();
+      de.dataTransfer.dropEffect = 'move';
+      markDropEdge(to.mark, to.edge);
+      return;
+    }
+    /**
      * 🔴 **本文の塊**(#684 段①)── 落とし先は**同じノートの本文**の塊の前 / 後。
      * ⚠ 自分の中(`start..end+1`)へは受けない(`dropEffect` は既定の `none` のまま = 印も
      *   出ない)── 落としても 1 byte も変わらない所に「入る」と見せない。
@@ -8943,6 +8985,26 @@ export function bindActions(
   let dragFromSide: DualSide | null = null;
   const onDrop = (e: Event): void => {
     const de = e as DragEvent;
+    /**
+     * 🔴 **アプリのタイルを落としたら、その順に並ぶ**(#857 段①)。
+     * ⚠ どこへ入るかの規則は `planTileMove`(純関数)── ここは座標を渡すだけ。
+     *   断る理由も reducer が声に出す(落とすまで phase を見ない)。
+     */
+    if (de.dataTransfer?.types?.includes(PKC_TILE_DRAG) === true) {
+      const to = tileDropTargetOf(de);
+      clearDropTarget();
+      if (to === null) return;
+      e.preventDefault();
+      const lid = de.dataTransfer.getData(PKC_TILE_DRAG);
+      // ⚠ 自分の手前 / 自分の直後は「動いていない」── 計画側が空を返す(ここでは弾かない)
+      if (lid === '') return;
+      dispatcher.dispatch({
+        type: 'MOVE_APP_TILE',
+        lid,
+        target: { kind: 'edge', group: to.group, anchor: to.anchor, edge: to.edge },
+      });
+      return;
+    }
     /**
      * 🔴 **本文の塊を落としたら、その塊が動く**(#684 段①)。
      * ⚠ 書くのは reducer(`MOVE_BLOCK`)→ `line-move.ts` ── ここは座標を渡すだけ。
@@ -9185,6 +9247,26 @@ export function bindActions(
     const pressedRow = (de.target as HTMLElement | null)?.closest<HTMLElement>(LONG_PRESS_ROW);
     if (pressedRow !== null && pressedRow !== undefined && longPress.pendingTouch(pressedRow)) {
       e.preventDefault();
+      return;
+    }
+    /**
+     * 🔴 **アプリのタイルを掴んだ**(#857 段①)── 荷物は `lid` 1 つ。
+     * ⚠ `draggable` が付くのは**動かせるタイルだけ**(組み込みには付かない)なので、
+     *   ここは「付いている物を運ぶ」だけでよい ── 種別の判定を 2 か所に置かない(§7)。
+     */
+    const tileEl = (de.target as HTMLElement | null)?.closest<HTMLElement>(
+      '[data-pkc-tile][draggable="true"]',
+    );
+    if (tileEl !== null && tileEl !== undefined && de.dataTransfer) {
+      const lid = tileEl.getAttribute('data-pkc-tile');
+      if (lid === null || lid === '') {
+        e.preventDefault(); // 指す物が無いタイルは掴ませない
+        return;
+      }
+      blockDrag = null;
+      dragFromSide = null;
+      de.dataTransfer.setData(PKC_TILE_DRAG, lid);
+      de.dataTransfer.effectAllowed = 'move';
       return;
     }
     /**
@@ -9465,7 +9547,13 @@ export function bindActions(
   };
   /**
    * 並べ替えの落とし先の印(#215)。⚠ 属性名 `data-pkc-drop-edge` は本文の D&D(#684)と
-   * 同じ綴りを使う予定 ── CSS の規則はフォルダの表の行に限ってある(`app.css`)。
+   * 同じ綴りを使う。
+   *
+   * ⚠ **2026-09-12 に訂正** ── ここには「CSS の規則はフォルダの表の行に限ってある」と
+   *   書いてあったが、`app.css` には **総称の `[data-pkc-drop-edge]`** が在り、
+   *   どの要素にも線が出る(`filer-table` の `tr`→`td` は、`tr` に `box-shadow` が
+   *   描かれないための**迂回**であって、限定ではない)。
+   *   🔑 実測:アプリのタイル(`<button>`)には**そのまま線が出る**(実ブラウザで確認)。
    */
   let edgeMark: HTMLElement | null = null;
   const markDropEdge = (el: HTMLElement, edge: 'before' | 'after'): void => {
@@ -9500,6 +9588,47 @@ export function bindActions(
     const y = (de.clientY - r.top) / r.height;
     if (row.hasAttribute('data-pkc-drop') && y >= 0.25 && y <= 0.75) return null;
     return { row, edge: y < 0.5 ? 'before' : 'after' };
+  };
+  /**
+   * 🔴 **アプリのタイルの落とし先**(#857 段①)── 群と「どのタイルの手前か」。
+   *
+   * 🔑 規則はフォルダの行と**同じ形**(要素の上半分 / 下半分)だが、
+   *   ⚠ **`reorderTargetOf` は使い回せない** ── あちらは行き先を
+   *   `[data-pkc-region="filer-table"] tbody` に固定しており、器も意味も違う
+   *   (あちらは「兄弟の間」、こちらは「**群の中**」で、群は落とす先にもなる)。
+   * ⚠ 器の高さが測れない環境(happy-dom の素の要素)は **そのタイルの手前**へ倒す
+   *   ── タイルの上に居るのに「落ちない」を作らない。
+   *   ⚠ **2026-09-12 に訂正**:1 稿目はここに「群の末尾へ倒す」と書いてあったが、
+   *   実際は `edge` が `'before'` になるので**手前**である(倒す向きが真逆だった)。
+   * 🔑 `dragover` と `drop` が**同じ関数**で判定する(光った所と落ちる所が割れない)。
+   */
+  const tileDropTargetOf = (
+    de: DragEvent,
+  ): { group: string; anchor: string; mark: HTMLElement; edge: 'before' | 'after' } | null => {
+    const t = de.target as HTMLElement | null;
+    const tile = t?.closest<HTMLElement>('[data-pkc-tile][draggable="true"]');
+    if (!tile || !root.contains(tile)) return null;
+    /**
+     * ⚠ **受けるのはタイルの上だけ**(動線レビュー D9、2026-09-12 に直した)。
+     * 1 稿目は「群の器の余白は末尾」という枝を持っていたが、⚠ **その余白は 0px** ──
+     * 器は `flex-direction: column` で `padding` も `gap` も持たず、タイルが
+     * **隙間なく埋めている**ので、この枝は**一度も通らない**(しかも枠を光らせる
+     * CSS も無かった = 通っても何も出ない)。
+     * 🔑 **末尾はいちばん下のタイルの下半分**で表せる(下を見よ)ので、枝は要らない。
+     */
+    const grid = tile.closest<HTMLElement>('[data-pkc-tile-group]');
+    if (!grid) return null;
+    const group = grid.getAttribute('data-pkc-tile-group') ?? '';
+    const r = tile.getBoundingClientRect();
+    const edge: 'before' | 'after' = r.height > 0 && de.clientY - r.top > r.height / 2 ? 'after' : 'before';
+    const lid = tile.getAttribute('data-pkc-tile');
+    if (lid === null || lid === '') return null;
+    /**
+     * 🔑 **見たものをそのまま渡す** ── 「この下へ」を*次の兄弟の手前*へ読み替えない。
+     * ⚠ 1 稿目はそれをやっていたので、**画面の順**(絞り込みで間が抜ける)と
+     *   **`sortTiles` の順**という 2 つの真実ができていた(§7)。
+     */
+    return { group, anchor: lid, mark: tile, edge };
   };
   /**
    * 落としたものを動かす。⚠ **断る理由を出す**(無言の操作拒否を作らない)──
@@ -9683,6 +9812,31 @@ export function bindActions(
       // ⚠ **選択範囲の中で押したときだけ**残す(別の場所の選択は関係ない)
       const range = sel.getRangeAt(0);
       if (range.intersectsNode(target)) return;
+    }
+
+    /**
+     * 🔴 **アプリのタイルの上で右クリック**(#857 段①)── 「上へ / 下へ」。
+     *
+     * ⚠ **行の一覧を出さない** ── タイルは `data-pkc-entry` を持たないので
+     *   下の判定には当たらないが、当たっていたら「削除」が出て**添付ごと消える**
+     *   所だった(押した物と効く先が食い違う ── #677 と同じ型)。
+     * 🔑 身元は `carry` でボタン自身へ写す ── メニューの器は root の直下に出るので、
+     *   押したボタンは**タイルの中に居ない**(`context-menu.ts` の戒め)。
+     */
+    const tileHit = target.closest('[data-pkc-tile][draggable="true"]');
+    if (tileHit !== null) {
+      const tileLid = tileHit.getAttribute('data-pkc-tile') ?? '';
+      if (tileLid !== '') {
+        ev.preventDefault();
+        openContextMenu(
+          root,
+          { x: ev.clientX, y: ev.clientY },
+          [...TILE_MENU_ACTIONS],
+          root.ownerDocument.activeElement,
+          { 'data-pkc-tile': tileLid },
+        );
+        return;
+      }
     }
 
     /**
