@@ -69,7 +69,7 @@ export const RELATION_CANDIDATE_MAX = 200;
  */
 export { EDITING_NOTE } from '@adapter/state/app-state';
 import { getAncestorFolders } from '@features/relation/tree';
-import { BODY_LINK_KIND, renderRelationMap } from './relation-map';
+import { BODY_LINK_KIND, RELATION_MAP_DEPTH, renderRelationMap } from './relation-map';
 import { bodyLinkTargets } from '@features/entry-ref/body-links';
 import {
   ADOPT_IMAGES_LABEL,
@@ -684,7 +684,7 @@ export class InspectorRenderer {
       }
       const drawn = renderRelationMap(mapBox, {
         center: meta.lid,
-        depth: 2,
+        depth: RELATION_MAP_DEPTH,
         // ⚠ **居場所(親子)は出さない** ── 上の「関係」行と同じ判断である。
         //    入れると図がフォルダの木になり、「つながり」を見に来た user が
         //    見たい物(意味の関係)が埋もれる。

@@ -12,7 +12,9 @@
  *
  * ## ⚠ 依存を 1 つも足さない
  *
- * 局所の図は小さい(既定 1 手)ので、**節点は `<button>`、辺は 1 枚の `<svg>`** で足りる。
+ * 局所の図は小さい(`RELATION_MAP_DEPTH` 手まで)ので、**節点は `<button>`、辺は 1 枚の
+ * `<svg>`** で足りる。⚠ 直す前ここは「既定 1 手」と書いていたが、**呼び側は最初から 2 を渡していた**
+ * ── 数だけ書いた注記は、呼び側が変わっても誰も直さない(CLAUDE.md §7)。
  * ⚠ mermaid には**載せられない** ── あちらは不可侵指示(2026-08-03「図は描いたら焼く」)
  * どおり **PNG の `<img>` 1 枚**で埋めるので、**節点を押せない**。
  * 「形は見えるが辿れない図」は、競合の全体グラフが抱えている当の不満そのものである。
@@ -24,6 +26,16 @@
 
 import { buildNeighbourhood, type GraphEdge } from '@features/relation/neighbourhood';
 import { relationLabel } from '@features/relation/kinds';
+
+/**
+ * 🔴 **図が届く手数**(情報ペインの「つながりの図」の既定)。
+ *
+ * ⚠ **呼び側に直書きしない** ── マニュアルも「**2 手先まで**」と書いており、
+ *   数字が 2 か所に在る(CLAUDE.md §7)。ここを正本にして
+ *   `tests/docs-parity.test.ts` が突き合わせる。
+ * ⚠ 上限は `neighbourhood.ts` の `MAX_DEPTH`(これを超えて渡しても切り詰められる)。
+ */
+export const RELATION_MAP_DEPTH = 2;
 
 /** 図の器の比(高さ / 幅)。⚠ 正方に近いほうが環が潰れない。 */
 const ASPECT = 0.82;

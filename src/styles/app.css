@@ -4506,23 +4506,23 @@ li[data-pkc-row-slot] {
   border-bottom: 1px solid var(--border);
   font-size: 12px;
 }
+/* ⚠ この帯の `<label>` は、いまは**絞り込みの欄**(`smart-field`)だけである ──
+ * 移し先のプルダウンは #813 で外した(`filer.ts` の注記)。
+ * ⚠ **この規則は「器の並び」を作っていない**(2026-09-12 実測)── `display: block` に
+ *   潰しても、器の**高さ 26 / 幅 222 / はみ出し 0** は 1 ドットも動かなかった
+ *   (親の `smart-bar` には規則が 1 つも無い素の block なので、`<label>` は
+ *   どちらでもブロックレベルで幅いっぱいを取る)。
+ * 🔑 効いているのは**中身の側**である ── `gap` と `align-items` は flex の中でしか
+ *   効かないので、潰すと `<select>` が 4px 左へ寄り、揃えが baseline に落ちる。
+ *   ⚠ **その 4px は測っていない**(外寸しか測っていない)── 測るなら
+ *   `select.left - span.right` を見ること。
+ * 🔑 **数字を書くときは、その数字が何を支えているかまで書く** ── 「1 ドットも
+ *   動かなかった」は「規則が無駄」の証拠にはならず、**その量では測れていない**という
+ *   意味でしかない(CLAUDE.md §4「自分が測った量と、user が見る量が違う」)。 */
 [data-pkc-region='filer-move'] label {
   display: flex;
   align-items: center;
   gap: var(--s2);
-  min-width: 0;
-}
-[data-pkc-field='move-caption'] {
-  /* ⚠ 題名は長い ── 畳まないと選ぶ欄がペインの外へ押し出される */
-  min-width: 0;
-  max-width: 11em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--muted);
-}
-[data-pkc-field='move-target'] {
-  flex: 1 1 auto;
   min-width: 0;
 }
 /* 🔴 **並べ替え**(2026-08-06。user 報告 2-10)。居場所の欄の**すぐ下**に
