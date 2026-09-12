@@ -6,9 +6,10 @@
  * 気づかなかった)。注意書きは 3 回とも効かなかったので、test にする。
  */
 import { describe, expect, it } from 'vitest';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
-import { join } from 'node:path';
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { join, resolve } from 'node:path';
 import { codeOnly as stripComments } from './helpers/code-only';
 // ⚠ 配色の正本(#718)── `index.html` の inline script が持つ写しを突き合わせる
 import { THEMES, THEME_STORAGE_KEY, initialTheme } from '../src/adapter/ui/render/theme';
@@ -1488,5 +1489,143 @@ describe('\u{1f534} 起動より前に配色を当てる(#718)', () => {
       expect(run('solarized', prefersDark)).toBe('solarized');
       expect(run('nosuchtheme', prefersDark)).toBe(initialTheme(prefersDark));
     }
+  });
+});
+
+describe('\u{1f534} 手元の commit が main に載らないための hook', () => {
+  /**
+   * \u{1f534} **2026-09-12 に指定 branch を外して main へ 2 commit 直に積んだ。**
+   * 経緯に判断は無い \u2500\u2500 PR を squash merge して main へ checkout し、同期した
+   * **そのまま**次の実装に入った(commit 15:06 / 15:09、branch を戻したのは 15:10)。
+   * \u{1f511} つまり危ないのは「作業の開始」ではなく **merge の直後**である。
+   *
+   * \u26a0 「気をつける」は 3 か所目の文言になるだけなので、**hook に断らせる**。
+   * \u26a0 ただし hook は**置いただけでは動かない**(`core.hooksPath` が要る)し、
+   * **常に断る hook** も同じ緑を返すので、断る側・**断らない側(対照群)**・抜け道の
+   * 3 方向を**実際に走らせて**見る。
+   */
+  const HOOK = '.githooks/pre-commit';
+  /**
+   * \u26a0 **これは hook の「中身」を見るだけで、「掛かっていること」は見ていない。**
+   * \u{1f534} 1 稿目はここが緑なのに**本物の commit は素通りした** \u2500\u2500 掛け方が
+   * `core.hooksPath .githooks`(= 作業ツリーの中)で、`git checkout main` すると
+   * hook ごと消えていたためである。掛け方のほうは下の「入れる script」で見る。
+   */
+  const run = (branch: string, allow?: string): { code: number; err: string } => {
+    const extra = allow === undefined ? {} : { PKC3_ALLOW_MAIN_COMMIT: allow };
+    const res = spawnSync('sh', [HOOK], {
+      encoding: 'utf8',
+      // \u26a0 同じ file の上の検査が要求している(子の stderr を画面へ漏らさない)
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, PKC3_HOOK_BRANCH: branch, ...extra },
+    });
+    return { code: res.status ?? -1, err: res.stderr };
+  };
+
+  it('hook が在って、実行ビットが立っている', () => {
+    const st = statSync(HOOK);
+    expect(st.isFile()).toBe(true);
+    // \u26a0 実行ビットが無いと git は**黙って飛ばす**(赤も警告も出ない)
+    expect(st.mode % 0o1000 & 0o111).not.toBe(0);
+  });
+
+  it('\u{1f534} main / master の上では断る(理由と、禁止が解ける条件を言う)', () => {
+    for (const branch of ['main', 'master']) {
+      const { code, err } = run(branch);
+      expect(code).toBe(1);
+      expect(err).toContain(branch);
+      // \u{1f511} 「この禁止が解ける条件」を画面に出す(出さない禁止は「できない」と読まれる)
+      expect(err).toContain('PKC3_ALLOW_MAIN_COMMIT=1');
+    }
+  });
+
+  it('\u26a0 対照群 \u2500\u2500 指定 branch の上では通る(常に断る hook を合格と読まないため)', () => {
+    expect(run('claude/trusting-knuth-sctnu5').code).toBe(0);
+    expect(run('claude/whatever-branch').code).toBe(0);
+  });
+
+  it('\u{1f511} 抜け道は効く(塞ぐのは惰性であって、必要な操作ではない)', () => {
+    const { code, err } = run('main', '1');
+    expect(code).toBe(0);
+    expect(err).toContain('PKC3_ALLOW_MAIN_COMMIT=1');
+  });
+
+  it('\u{1f534} 入れる script が、作業ツリーの外へ写す(写した物が本当に断る)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pkc3-hooks-'));
+    const res = spawnSync('node', ['scripts/install-hooks.mjs', '--dir', dir, '--quiet'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    expect(res.status).toBe(0);
+    const dest = join(dir, 'pre-commit');
+    // \u{1f511} 写した物が原本と 1 byte も違わない(綴りを写し間違える経路を塞ぐ)
+    expect(readFileSync(dest, 'utf8')).toBe(readFileSync(HOOK, 'utf8'));
+    expect(statSync(dest).mode % 0o1000 & 0o111).not.toBe(0);
+    // \u{1f534} **写した物**を走らせて、断る側と通す側の両方を見る
+    const fire = (branch: string): number =>
+      spawnSync('sh', [dest], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, PKC3_HOOK_BRANCH: branch },
+      }).status ?? -1;
+    expect(fire('main')).toBe(1);
+    expect(fire('claude/whatever-branch')).toBe(0);
+  });
+
+  it('\u{1f534} 捨て repo で、本物の `git commit` が main で断られる(掛け方ごと見る)', () => {
+    /**
+     * \u{1f534} **`--dir` を渡す上の test は、今日の欠陥を殺せない** \u2500\u2500 壊れていたのは
+     * **写す先を決める所**(`core.hooksPath` を外す前に git へ聞いていた)で、
+     * `--dir` はそこを通らない。だから **捨て repo を 1 個立てて、掛け方ごと**見る。
+     * \u26a0 1 稿目の掛け方(hooksPath = 作業ツリーの中)を**わざと先に立てて**再現する。
+     */
+    const repo = mkdtempSync(join(tmpdir(), 'pkc3-hookrepo-'));
+    const git = (...a: string[]): { code: number; out: string } => {
+      const r = spawnSync('git', ['-C', repo, ...a], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      return { code: r.status ?? -1, out: r.stdout };
+    };
+    expect(git('init', '-q', '-b', 'main').code).toBe(0);
+    git('config', 'user.email', 'zz@example.invalid');
+    git('config', 'user.name', 'zz');
+    mkdirSync(join(repo, '.githooks'), { recursive: true });
+    copyFileSync(HOOK, join(repo, '.githooks', 'pre-commit'));
+    git('config', 'core.hooksPath', '.githooks'); // \u26a0 1 稿目の掛け方
+
+    const install = spawnSync('node', [resolve('scripts/install-hooks.mjs')], {
+      cwd: repo,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    expect(install.status).toBe(0);
+    // \u{1f511} 写る先は **作業ツリーの外**(checkout で消えない場所)
+    expect(statSync(join(repo, '.git', 'hooks', 'pre-commit')).isFile()).toBe(true);
+    // \u{1f511} hooksPath が残っていると git はそこだけを見るので、外れていること
+    expect(git('config', '--get', 'core.hooksPath').out.trim()).toBe('');
+
+    // \u{1f534} ここが本物の経路 \u2500\u2500 git 自身に commit させる
+    expect(git('commit', '--allow-empty', '-m', 'zz').code).toBe(1);
+    expect(git('log', '--oneline').code).not.toBe(0); // 1 件も積まれていない(HEAD が無い)
+    // \u26a0 対照群 \u2500\u2500 指定 branch では通る(常に断る hook を合格と読まないため)
+    expect(git('checkout', '-q', '-b', 'claude/zz').code).toBe(0);
+    expect(git('commit', '--allow-empty', '-m', 'zz').code).toBe(0);
+  });
+
+  it('\u26a0 掛け直しが忘れられない形になっている(npm が呼ぶ)', () => {
+    const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as {
+      scripts: Record<string, string>;
+    };
+    // \u{1f511} `npm ci` は箱を立て直したら必ず打つ命令なので、そこへ相乗りさせる
+    expect(pkg.scripts.prepare).toContain('scripts/install-hooks.mjs');
+  });
+
+  it('\u{1f534} 掛け方の落とし穴が資産に残っている(core.hooksPath では動かない)', () => {
+    const skill = readFileSync('.claude/skills/sandbox-hygiene/SKILL.md', 'utf8');
+    expect(skill).toContain('node scripts/install-hooks.mjs');
+    // \u26a0 「なぜ hooksPath では駄目か」が消えると、次に読む人が同じ掛け方へ戻る
+    expect(skill).toContain('core.hooksPath');
+    expect(readFileSync(HOOK, 'utf8')).toContain('core.hooksPath');
   });
 });

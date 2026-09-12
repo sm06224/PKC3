@@ -51,6 +51,34 @@ git checkout -B <branch> origin/<branch>
 ls node_modules/.bin/vitest >/dev/null 2>&1 || npm ci
 ```
 
+### 🔴 箱を立て直したら、commit を守る hook が入っているかを見る
+
+```bash
+npm ci                                   # ← `prepare` が hook を .git/hooks へ写す
+# 手で入れるなら:
+node scripts/install-hooks.mjs
+```
+
+`.githooks/pre-commit` は **`main` の上の commit を断る**(2026-09-12 に指定 branch を
+外して main へ 2 commit 直に積んだ)。
+
+🔴 **写す先が肝である** ── `git config core.hooksPath .githooks` では**動かない**:
+hooksPath は**作業ツリーの中**を指すので、`git checkout main` すると
+`.githooks/pre-commit` ごと消え、**守るべき場所でだけ hook が居なくなる**
+(⚠ git は「hook が無い」を**黙って通す**)。🔑 `.git/hooks/` は checkout で
+変わらないので、そこへ写す(`scripts/install-hooks.mjs` が `core.hooksPath` も外す)。
+
+🔑 **掛かっているかを 1 行で確かめる** ── ⚠ 手で `sh` に渡して試しても分からない
+(1 稿目はそれで緑だった)。**git に通す**:
+
+```bash
+git switch main && git commit --allow-empty -m zz; echo $?   # → 1(断った / 何も積まれない)
+git switch -                                                  # 指定 branch へ戻る
+```
+
+⚠ 禁止が解ける条件も憶えておく:**`PKC3_ALLOW_MAIN_COMMIT=1`** を付ければ通る。
+門は `tests/repo-hygiene.test.ts`(**入れる script を走らせて、入った物を走らせる**)。
+
 ## 🔴 bash の cwd が `/home/user` へ戻ることがある
 
 2026-09-02 に**同じセッションで 2 回**踏んだ ── `not a git repository` が返り、
