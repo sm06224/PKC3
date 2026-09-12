@@ -14,7 +14,8 @@
  *
  * ## ⚠ 書体は**部分集合を同梱する**(外から取りに行かない)
  *
- * `src/styles/fonts/pkc-symbols.woff2` は**ここに並ぶ絵だけ**を含む版で、**6,180 バイト**。
+ * `src/styles/fonts/pkc-symbols.woff2` は**ここに並ぶ絵だけ**を含む版で、**10,640 バイト**
+ * (⚠ 2026-09-12 に 40 → **76 種**へ増やした ── #770 段②)。
  * ⚠ 素の Material Symbols は **5.37 MB**(4,284 種の可変書体)なので、**868 分の 1** である。
  * 🔑 作り直しは `npm run icons:font`(`scripts/build-icon-font.mjs`)── ⚠ **絵を足したら
  * 必ず回す**(回さないと、その絵だけ豆腐になる)。門は `tests/features/icon-symbols.test.ts`。
