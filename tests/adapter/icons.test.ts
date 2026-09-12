@@ -22,6 +22,7 @@ import {
   setIcon,
 } from '../../src/adapter/ui/render/icons';
 import { PKC_SYMBOLS } from '../../src/features/icon/symbols';
+import { TILE_ICON_CHOICES } from '../../src/features/icon/tile-icons';
 import { blocksFor, stripComments, withoutMedia } from '../helpers/css-blocks';
 import { SidebarRenderer } from '../../src/adapter/ui/render/sidebar';
 import { buildShell } from '../../src/adapter/ui/render/shell';
@@ -281,10 +282,18 @@ describe('図案の登記に死んだ行を残さない', () => {
     expect(names.length, '図案を拾えていない(空振り)').toBeGreaterThan(10);
 
     // どこかから指されているか ── 3 つの表の値、または src の字面(icons.ts 以外)
+    /**
+     * ⚠ **構造化された出どころから数える**(2026-09-12、#770 段② の着地前レビュー G)。
+     * 🔑 `TILE_ICON_CHOICES` を**表として**足す ── 足さないと、この 49 種は
+     *   下の「素の literal 走査」に拾われることになり、`code` / `note` / `key` /
+     *   `link` のような**汎用語 8 件**は**別の file の無関係な literal**に満たされる
+     *   (= 一覧から消えても「指されている」ことになり、死んだ図案が残る。§1)。
+     */
     const pointed = new Set<string>([
       ...Object.values(ACTION_ICONS),
       ...Object.values(ARCHETYPE_ICONS),
       ...Object.values(BROWSE_ICONS),
+      ...TILE_ICON_CHOICES.map((c) => c.name),
     ]);
     const literals = new Set<string>();
     for (const f of tsFiles('src')) {

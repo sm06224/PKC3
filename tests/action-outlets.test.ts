@@ -32,8 +32,20 @@ const r = (): Report => (report as () => Report)();
 const bodies = (): Map<string, string> => (handlers as () => Map<string, string>)();
 const names = (): string[] => (receivers as () => string[])();
 
-/** 対象(選んだノート / 押した行)を読むか。⚠ 判定は 1 か所に書く。 */
+/**
+ * 対象(選んだノート / 押した行)を読むか。⚠ 判定は 1 か所に書く。
+ *
+ * 🔴 **注釈を落としてから当てる**(2026-09-12、#770 段② で踏んだ)。
+ * ⚠ 受け手の本文は**次の受け手の手前まで**を切るので、**次の受け手に付けた
+ *   docstring** もその中に入る ── そこに `selectedLid` という**字**を書いた瞬間、
+ *   **隣の受け手**(`pick-create-kind`)が「対象を読む」と数えられて、下の
+ *   等値 pin が落ちた。⚠ 実行する行は 1 行も変わっていないのに、である。
+ * 🔑 CLAUDE.md §1「自分の解説コメントに満たされる」── **見るのは実行する行**。
+ *   ⚠ この file は #738 で**出口の走査**に同じ直しを当てている(`codeOnlyForScan`)。
+ *   同じ罠が**本文の走査**にも在った。
+ */
 const OBJECT = /selectedLid|data-pkc-entry|data-pkc-lid|multiSelected/;
+const readsObject = (body: string): boolean => OBJECT.test(codeOnlyForScan(body));
 
 /**
  * 🔴 **`ACTIONS` の**外**にしか無い綴り**。⚠ これが受け手に混ざったら、
@@ -80,6 +92,18 @@ const UNRESOLVED: readonly string[] = [
  *   ⚠ 増えたらこの test が落ちる = 「体系の外でまた 1 つ足した」と分かる。
  */
 const OBJECT_LONE: readonly string[] = [
+  /**
+   * 🔴 **2026-09-12 に 7 件減った**(#770 段②)。⚠ **減った理由が 2 通りある**ので分けて書く:
+   *
+   * | 落ちたもの | なぜ |
+   * |---|---|
+   * | `bulk-tag-add` / `cycle-read-columns` / `retry-persist` / `stack-save` | 🔴 **最初から嘘だった** ── 実行する行は対象を 1 つも読んでおらず、**注釈の字**(`selectedLid` / `data-pkc-entry`)に満たされて数えられていた |
+   * | `launch-asset` / `launch-asset-raw` / `launch-asset-extension` | 🟢 **直した** ── 押したボタンが対象を持つようになった(`data-pkc-launch-lid`) |
+   *
+   * 🔑 上の 4 件は**この日まで誰も気づかなかった** ── 上の `readsObject` が
+   *   注釈を落とすようになって初めて出た(CLAUDE.md §1「自分の解説コメントに満たされる」)。
+   * ⚠ つまりこの台帳は **4 件ぶん多く見えていた**(30 → 実際は 26)。
+   */
   'add-relation',
   'add-tag',
   'append-entry',
@@ -93,7 +117,6 @@ const OBJECT_LONE: readonly string[] = [
    *   残さないと、次に読む人が「体系の外で足した 1 つ」と読む。
    */
   'browse-archive',
-  'bulk-tag-add',
   /**
    * ⚠ **2026-09-09(#683 段①)に足した。** ⚠ #582 の「増やさない」に**触れていない** ──
    *   ここが止めたい害は「**その面を畳む・狭くすると画面から消える**」ことだが、
@@ -107,7 +130,6 @@ const OBJECT_LONE: readonly string[] = [
    */
   'capture-play',
   'clear-entry-date',
-  'cycle-read-columns',
   'deliver-to-extension',
   'dual-bookmark-open',
   'dual-bookmark-remove',
@@ -117,9 +139,6 @@ const OBJECT_LONE: readonly string[] = [
   //    2 つ目の出口になったので外した(csv の表は `csv-table.ts`)
   'enter-folder',
   'insert-entry-link',
-  'launch-asset',
-  'launch-asset-extension',
-  'launch-asset-raw',
   // ⚠ `move-entry` は #813(2026-09-09)で受け手ごと外した ── プルダウンを消したので
   //    焼く所が 0 件になった(残る口は `move-to-folder` と D&D)
   'navigate-entry-ref',
@@ -151,16 +170,8 @@ const OBJECT_LONE: readonly string[] = [
    *   本文の上の**スタックの帯**の札から押せる(= 一番上へ上げる)。
    */
   'rename-attachment',
-  'retry-persist',
   'set-entry-date',
   'shape-cell',
-  /**
-   * 🔴 **スタックの「保存…」は帯にしか無い**(#633 段③)── 帯は載せているときだけ出る
-   *   本文の上の 1 行で、保存の対象(いまの並び)もそこにしか見えない。⚠ 鍵の口は
-   *   置いていない(載せる / 開く / 全部降ろす の 3 手は #633 段②)。増やすなら
-   *   `KEY_COMMANDS` へ ── 増えた日にここが落ちて気づく。
-   */
-  'stack-save',
   /**
    * ⚠ **2026-09-09(#809-4)に足した。** ⚠ #582 の「増やさない」に**触れていない** ──
    *   ここが止めたい害は「**その面を畳む・狭くすると画面から消える**」ことだが、
@@ -241,7 +252,7 @@ describe('操作 → 出口の対応表(#582)', () => {
   it('🔴 「対象が要るのに出口が 1 か所」の顔ぶれが変わっていない(#582 が決まるまで増やさない)', () => {
     const h = bodies();
     const got = r()
-      .rows.filter((x) => x.screens.length === 1 && OBJECT.test(h.get(x.action) ?? ''))
+      .rows.filter((x) => x.screens.length === 1 && readsObject(h.get(x.action) ?? ''))
       .map((x) => x.action)
       .sort();
     expect(got).toEqual([...OBJECT_LONE].sort());

@@ -1315,6 +1315,14 @@ const TAG_INPUT_ADD: ReadonlyMap<string, string> = new Map([
   ['smart-cond', 'smart-cond-add'],
 ]);
 
+/**
+ * 起動する相手の lid。**押したボタンの属性**を先に見る(2026-09-12)。
+ * ⚠ 属性が無いときだけ `selectedLid` に落とす ── 古い DOM でも壊さないため。
+ */
+function launchLid(dispatcher: Dispatcher, target: HTMLElement): string | null {
+  return target.getAttribute('data-pkc-launch-lid') ?? dispatcher.getState().selectedLid;
+}
+
 const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'start-edit',
   // 🔑 **行の右クリックからフォルダの中に作る**(#215)── `create-entry` と同じ
@@ -6702,21 +6710,30 @@ const ACTIONS: Record<string, ActionHandler> = {
       .querySelector('[data-pkc-field="create-pick"]')
       ?.setAttribute('aria-expanded', 'false');
   },
-  // ⚠ 対象は**いま選んでいる添付** ── 詳細画面のボタンなので lid は state が持つ
-  'launch-asset': (dispatcher, _target, services) => {
-    const lid = dispatcher.getState().selectedLid;
+  /**
+   * 🔴 **対象は、押したボタンが持つ**(2026-09-12、#770 段②の着地前レビュー B)。
+   *
+   * ⚠ 直す前は 3 本とも `selectedLid` だけを見ていた ── **留めた枠**(横に並べた枠)は
+   *   選択と関係なく「その 1 件」を出す面なので、そこで押すと**主の枠のノート**が
+   *   開いていた。🔴 「ノートを渡して起動」は**確認に出る題名まで別のノート**になる。
+   * 🔑 `download-asset` / `open-office` と同じ作法へ寄せた(`detail.ts` が
+   *   `data-pkc-launch-lid` を載せる)。⚠ 属性が無い版でも壊れないよう、
+   *   **属性 → 無ければ `selectedLid`** の順で読む。
+   */
+  'launch-asset': (dispatcher, target, services) => {
+    const lid = launchLid(dispatcher, target);
     if (lid) services.launchAsset?.(lid, { sameOrigin: false });
   },
-  'launch-asset-raw': (dispatcher, _target, services) => {
-    const lid = dispatcher.getState().selectedLid;
+  'launch-asset-raw': (dispatcher, target, services) => {
+    const lid = launchLid(dispatcher, target);
     if (lid) services.launchAsset?.(lid, { sameOrigin: true });
   },
   /**
    * 🔴 **目次を見せて起動**(#195 / C-5 段①)。⚠ ボタンは**まだ許していないとき
    * だけ**出る(許してあれば普通の「起動」で口が開く ── `detail.ts`)。
    */
-  'launch-asset-extension': (dispatcher, _target, services) => {
-    const lid = dispatcher.getState().selectedLid;
+  'launch-asset-extension': (dispatcher, target, services) => {
+    const lid = launchLid(dispatcher, target);
     if (lid) services.launchAsset?.(lid, { extension: true });
   },
   /**

@@ -1986,7 +1986,24 @@ export class DetailRenderer {
         info.append(view);
       }
       if (isAppMime(meta.mime)) {
-        const run = iconButton('launch-asset', '起動', 'launch-asset');
+        /**
+         * 🔴 **起動する相手は、押したボタンが持つ**(2026-09-12、#770 段②の
+         *   着地前レビュー B)。
+         *
+         * ⚠ 直す前は 3 本とも `selectedLid` だけを見ていた ── **留めた枠**
+         *   (横に並べた枠)は選択と関係なく「その 1 件」を出す面なので、
+         *   そこで「起動」を押すと**主の枠のノートが開く**。
+         *   🔴 とくに「ノートを渡して起動」は**確認に出る題名まで別のノート**に
+         *   なる(許してよいか判断する材料が、押した物と食い違う)。
+         * 🔑 だから `download-asset` / `open-office` と**同じ作法**にする ──
+         *   **押した要素が対象を持つ**。⚠ 属性が無い版(古い DOM)でも壊れないよう、
+         *   受け手は「属性 → 無ければ `selectedLid`」の順で読む。
+         */
+        const launchOf = (b: HTMLElement): HTMLElement => {
+          b.setAttribute('data-pkc-launch-lid', lid);
+          return b;
+        };
+        const run = launchOf(iconButton('launch-asset', '起動', 'launch-asset'));
         run.title = 'PKC3 から切り離して開きます(PKC3 の中身には触れません)';
         info.append(run);
         /**
@@ -1997,7 +2014,9 @@ export class DetailRenderer {
          *   保存領域に手が届くので、自分の許可記録を自分で書ける)。
          * 設計: `docs/development/p10-launcher-same-origin-2026-08.md`
          */
-        const rawRun = iconButton('launch-asset-raw', 'ノートを渡して起動', 'launch-asset-raw');
+        const rawRun = launchOf(
+          iconButton('launch-asset-raw', 'ノートを渡して起動', 'launch-asset-raw'),
+        );
         rawRun.title =
           'PKC3 と同じ保存領域で開きます。自分でデータを保存するアプリも動きますが、このアプリは PKC3 のノートを全部読めますし、書き換えもできます';
         info.append(rawRun);
@@ -2015,10 +2034,8 @@ export class DetailRenderer {
           run.title =
             'PKC3 から切り離して開きます(PKC3 の中身には触れません)。このアプリにはノートの目次を見せます ── 取り消しは設定から';
         } else {
-          const extRun = iconButton(
-            'launch-asset-extension',
-            '目次を見せて起動',
-            'launch-asset-extension',
+          const extRun = launchOf(
+            iconButton('launch-asset-extension', '目次を見せて起動', 'launch-asset-extension'),
           );
           extRun.title =
             'ノートの題名・種類・日付の一覧だけを見せて開きます。本文と添付は渡りません';
@@ -2071,6 +2088,10 @@ export class DetailRenderer {
      *   (それを足すまでは、**押せて効かない**より**出さない**ほうが害が小さい)。
      * ⚠ 読む側(起動 / ダウンロード / 参照をコピー / 下見)は**そのまま出る** ──
      *   留めた枠は「読むための枠」なので、読む道は 1 本も減らさない。
+     * 🔴 **ただし「そのまま出る = 安全」ではなかった**(2026-09-12、着地前レビュー B)──
+     *   起動の 3 本も `selectedLid` を読んでいたので、**押した物と効く先が食い違う**
+     *   側に居た。いまは**押したボタンが対象を持つ**(上の `launchOf`)。
+     *   🔑 CLAUDE.md「門は面ごとではなく**口ごとに**要る」の、まさにその形である。
      */
     if (this.pinnedLid === null) {
       const rename = document.createElement('input');

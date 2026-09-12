@@ -408,7 +408,16 @@ describe('タイルの目印', () => {
   });
 
   it('前後の空白は落として見る(frontmatter に空白が残っていても絵になる)', () => {
-    expect(symbolOf('  calendar  ')).toBe('calendar');
+    /**
+     * ⚠ **引用符つきで書く**(2026-09-12、着地前レビュー C)。
+     * 🔑 引用符なしの値は `parseFrontmatter` が**既に落としている**ので、
+     *   `'  calendar  '` では `trim()` を外しても緑 ── この道を 1 度も通らない
+     *   (CLAUDE.md §2「経路が一度も通っていない」)。
+     * ⚠ 引用符つきなら空白は**値の一部として残る**(実測)ので、ここで初めて
+     *   `trim()` が効いているかを見られる。
+     */
+    expect(symbolOf('"  calendar  "')).toBe('calendar');
+    expect(symbolOf("'  calendar  '")).toBe('calendar');
   });
 
   /**

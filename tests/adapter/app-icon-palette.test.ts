@@ -122,6 +122,32 @@ describe('目印を絵から選ぶ(#770 段②)', () => {
     ).toBe(TILE_ICON_CHOICES.length + 1);
   });
 
+  /**
+   * 🔴 **押す絵と、書き込む名前が同じ**(2026-09-12、着地前レビュー A)。
+   *
+   * ⚠ 直す前はここを**誰も見ていなかった** ── 一覧が全部同じ絵を描いても、
+   *   隣の絵を 1 つずつずらして描いても、**unit も smoke も緑**だった
+   *   (どちらも「押したあとタイルに何が出たか」しか見ないので、
+   *   ずれた版では正しい名前が飛び、タイルも正しく出る)。
+   * 🔑 だから**押す前の見た目**を見る ── ボタンの中の器が、そのボタンが
+   *   書き込む名前と同じ絵を描いているか。
+   */
+  it('🔴 押す絵と、書き込む名前が同じ(49 件とも)', async () => {
+    const h = setup('');
+    await tick(20);
+    const wrong: string[] = [];
+    for (const c of TILE_ICON_CHOICES) {
+      const drawn = h
+        .btn(c.name)
+        ?.querySelector('[data-pkc-icon]')
+        ?.getAttribute('data-pkc-symbol');
+      if (drawn !== c.name) wrong.push(`${c.name} のボタンが ${String(drawn)} を描いている`);
+    }
+    // ⚠ 空振り防止 ── 1 つも見ていないなら、この test は何も守っていない
+    expect(TILE_ICON_CHOICES.length, '選べる絵が空(前提が崩れている)').toBeGreaterThan(20);
+    expect(wrong, '押す絵と書き込む名前が食い違っている').toEqual([]);
+  });
+
   it('🔴 押すと、その絵で書込が飛ぶ', async () => {
     const h = setup('');
     await tick(20);
@@ -130,6 +156,24 @@ describe('目印を絵から選ぶ(#770 段②)', () => {
     expect(h.sent, '押しても何も飛ばない(無言の dead click)').toEqual([
       { type: 'SET_APP_TILE', lid: 'a1', icon: 'calculator' },
     ]);
+  });
+
+  /**
+   * ⚠ **属性を持たない `pick-app-icon` では撃たない**(着地前レビュー F)。
+   * 🔑 いまの画面には**必ず属性が付く**ので、この門に入る場面は
+   *   「**次に足す人が属性を忘れた**」ときだけである ── その 1 件を字で残す
+   *   (CLAUDE.md「その `catch` に入る場面を 1 つ書けるか」)。
+   * ⚠ 門が無いと、忘れた口を押したとき**目印が黙って消える**(`icon: ''` が飛ぶ)。
+   */
+  it('⚠ 目印の名前を持たない口を押しても、目印を消さない', async () => {
+    const h = setup('calculator');
+    await tick(20);
+    const stray = document.createElement('button');
+    stray.setAttribute('data-pkc-action', 'pick-app-icon');
+    h.root.append(stray);
+    h.sent.length = 0;
+    stray.click();
+    expect(h.sent, '名前を持たない口で書込が飛んだ').toEqual([]);
   });
 
   it('🔴 外す口が在る(置けるなら外せなければならない)', async () => {
@@ -147,6 +191,28 @@ describe('目印を絵から選ぶ(#770 段②)', () => {
     expect(h.btn('map')!.getAttribute('aria-pressed')).toBe('false');
     // 🔑 目印が無いときだけ「なし」が押されている
     expect(h.btn('')!.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  /**
+   * 🔴 **目印が無いときは「なし」が押された形になる**(着地レビュー D)。
+   * ⚠ 直す前はここを見ておらず、「なし」を**常に押されていない**形にしても緑だった
+   *   ── つまり「いまの状態が分かる」という主張の**半分**しか守っていなかった。
+   */
+  it('🔴 目印が無いときは「なし」が押された形になる', async () => {
+    const h = setup('');
+    await tick(20);
+    expect(h.btn('')!.getAttribute('aria-pressed'), '目印が無いのに「なし」が選ばれていない').toBe(
+      'true',
+    );
+    expect(h.btn('calculator')!.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  /** ⚠ 外す口は**先頭**に置く(押した所と同じ場所で戻せる)。 */
+  it('外す口は一覧の先頭に在る', async () => {
+    const h = setup('');
+    await tick(20);
+    const first = h.root.querySelector('[data-pkc-action="pick-app-icon"]');
+    expect(first?.getAttribute('data-pkc-icon-name'), '先頭が「なし」ではない').toBe('');
   });
 
   it('⚠ 絵文字を書いている人は、一覧のどれも押された形にならない', async () => {
@@ -178,6 +244,24 @@ describe('目印を絵から選ぶ(#770 段②)', () => {
     expect(after, '面が組み直されていない(前提が崩れている)').not.toBe(before);
     expect(after.getAttribute('aria-pressed'), '押したのに書けていない').toBe('true');
     expect(document.activeElement, '組み直しで焦点が落ちた').toBe(after);
+  });
+
+  /**
+   * 🔴 **「なし」でも焦点が残る**(着地前レビュー E)。
+   * ⚠ 「なし」の名前は**空文字**なので、採る所を `?? null` から `|| null` へ
+   *   書き換えると**ここだけ**焦点が落ちる(他の 49 個は落ちない)──
+   *   実装の注記が名指しで警告していたのに、守る検査が無かった。
+   */
+  it('🔴 「なし」を押しても焦点が残る(空文字を null と混ぜない)', async () => {
+    const h = setup('calculator');
+    await tick(20);
+    const before = h.btn('')!;
+    before.focus();
+    before.click();
+    await tick(40);
+    const after = h.btn('')!;
+    expect(after, '面が組み直されていない(前提が崩れている)').not.toBe(before);
+    expect(document.activeElement, '「なし」を押したときだけ焦点が落ちた').toBe(after);
   });
 
   /**
@@ -264,6 +348,28 @@ describe('留めた枠(横に並べた枠)', () => {
       root.querySelector('[data-pkc-action="rename-attachment"]'),
       '留めた枠に名前の欄が出ている(打つと別のノートが改名される)',
     ).toBeNull();
+  });
+
+  /**
+   * 🔴 **留めた枠の「起動」は、その枠のノートを開く**(2026-09-12、着地前レビュー B)。
+   *
+   * ⚠ 書く口は門で塞いだが、**読む側に残した起動の 3 本も `selectedLid` を読んでいた**
+   *   ── 留めた枠で押すと**主の枠のノート**が開く。
+   * 🔴 とくに「ノートを渡して起動」は、**確認に出る題名まで別のノート**になる
+   *   (許してよいか判断する材料が、押した物と食い違う)。
+   * 🔑 いまは**押したボタンが対象を持つ**(`data-pkc-launch-lid`)。
+   */
+  it('🔴 留めた枠の「起動」は、留めたノートを開く(選んでいる別のノートではない)', () => {
+    const { root } = pinned();
+    const calls: string[] = [];
+    const d2 = new Dispatcher();
+    bindActions(root, d2, { launchAsset: (lid) => calls.push(lid) });
+    const run = root.querySelector<HTMLElement>('[data-pkc-action="launch-asset"]');
+    // ⚠ 空振り防止 ── 起動の口が出ていないなら、この test は何も見ていない
+    expect(run, '留めた枠に起動の口が無い(前提が崩れている)').not.toBeNull();
+    expect(run!.getAttribute('data-pkc-launch-lid'), '押す物が対象を持っていない').toBe('a1');
+    run!.click();
+    expect(calls, '留めた枠で押したのに、別のノートが開いた').toEqual(['a1']);
   });
 
   it('⚠ 主の枠では、いままでどおり全部出る(門を広げすぎていない)', async () => {

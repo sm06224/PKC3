@@ -4402,7 +4402,10 @@ li[data-pkc-row-slot] {
   align-items: center;
   justify-content: center;
   min-width: 28px;
-  height: 28px;
+  /* ⚠ **高さは書かない**(2026-09-12、着地前レビュー J)── 素の `button` が
+   * `min-height` / `max-height` を `--row-h` で留めているので、ここに書いた
+   * `height: 28px` は**一度も効いていなかった**(効く値は 26px / スマホ 34px)。
+   * 🔑 効かない値を置くと、次に読む人が「ここで決まっている」と誤読する。 */
   padding: 0 4px;
   border: 1px solid var(--border);
   background: transparent;
