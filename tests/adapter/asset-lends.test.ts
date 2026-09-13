@@ -28,7 +28,8 @@ function fakeLender(opts: { missing?: ReadonlySet<string> } = {}) {
     const url = `blob:${key}#${String(n)}`;
     return { url, dispose: () => disposed.push(url) };
   });
-  const getBlob = vi.fn(async (_key: string) => null);
+  // ⚠ この file が使うのは `lend` だけだが、型を満たすために置く(甘い stub にしない)
+  const getBlob = vi.fn((): Promise<Blob | null> => Promise.resolve(null));
   return { lender: { lend, getBlob }, disposed };
 }
 
