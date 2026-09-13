@@ -1660,67 +1660,57 @@ describe('\u{1f534} 手元の commit が main に載らないための hook', ()
 });
 
 /**
- * 🔴 **張った聞き耳は、張った名前で外す**(2026-09-13、着地前レビューが掘った)。
+ * 🔴 **張った聞き耳を、畳むときに必ず外す**(#876、2026-09-13)。
  *
  * ## 何が起きていたか
  *
- * #875 の直しで `scroll` の受け口を `onCloseMenu` から **`onScrollCloseMenu`** へ分けたとき、
- * **張る側だけ改名して、外す側を忘れた**:
- *
- * ```
- * root.addEventListener('scroll', onScrollCloseMenu, true);     // 新しい名前
- * root.removeEventListener('scroll', onCloseMenu, true);        // 🔴 古い名前のまま
- * ```
+ * `bindActions` は `addEventListener` と `removeEventListener` を**手で 2 か所に
+ * 並べて**いたので、⚠ **7 件が外されないまま残っていた**(`paste` と掴んで落とす 6 本)。
+ * きっかけは改名の片側忘れ ── #875 で `scroll` の受け口を分けたとき、
+ * **張る側だけ改名して外す側を忘れた**。
  *
  * ⚠ `removeEventListener` は**参照が一致しないと黙って何もしない** ── 例外も警告も出ない。
- * ⚠ しかも**いまの本番では畳む口を呼んでいない**ので、**画面には何も出ない**
- *   (`main.ts` は `bindActions` の戻り値を捨てている)。
- * 🔑 CLAUDE.md「**片側を直したら、対称の反対側を必ず疑う**」の型そのものである。
+ * ⚠ しかも**いまの本番では畳む口を呼んでいない**ので、**画面には何も出ない**。
  *
- * ## だから機械で見る
+ * ## だから並べるのをやめた
  *
- * 🔑 `root` へ張った物は、**同じ名前で外している**ことを全数で突き合わせる。
- * ⚠ **名前でしか見られない**(参照の同一性は原文からは読めない)ので弱い形だが、
- *   **改名の片側忘れ**はこれで必ず落ちる ── それが今回の実際の壊れ方である。
+ * 🔑 いまは `listen(target, type, handler, capture?)` が**張ると同時に外す手を作る**ので、
+ * 外し忘れは**構造から消えた**(CLAUDE.md §7「規則を 1 つに寄せる」)。
+ * 🔑 この門が見るのは**そこを迂回していないこと**である ── 迂回した瞬間、
+ * 「手で 2 か所」が戻ってくる。
  */
-describe('張った聞き耳を、張った名前で外す(2026-09-13)', () => {
-  it('🔴 `root` へ張った物は、同じ名前で外している', () => {
-    const src = readFileSync('src/adapter/ui/actions/binder.ts', 'utf-8');
-    const added = new Map<string, string>();
-    for (const m of src.matchAll(/root\.addEventListener\(\s*'([a-z]+)',\s*([A-Za-z_$][\w$]*)/g))
-      added.set(`${m[1]!}:${m[2]!}`, m[2]!);
-    const removed = new Set<string>();
-    for (const m of src.matchAll(/root\.removeEventListener\(\s*'([a-z]+)',\s*([A-Za-z_$][\w$]*)/g))
-      removed.add(`${m[1]!}:${m[2]!}`);
+describe('張った聞き耳を、畳むときに必ず外す(#876)', () => {
+  it('🔴 `root` / 文書へ直に張らない(必ず `listen` を通す)', () => {
+    const src = stripComments(readFileSync('src/adapter/ui/actions/binder.ts', 'utf-8'));
 
-    // ⚠ 空振り防止 ── 走査が壊れていたら、下の突き合わせは何も見ていない
-    expect(added.size, '張っている所が 1 つも見つからない(走査が壊れている)').toBeGreaterThan(5);
-    expect(removed.size, '外している所が 1 つも見つからない(走査が壊れている)').toBeGreaterThan(5);
+    // ⚠ 空振り防止 ── `listen` を 1 つも通していないなら、この門は何も見ていない
+    const through = [...src.matchAll(/\blisten\(\s*(root|doc)\b/g)];
+    expect(through.length, '`listen` を 1 つも通していない(走査が壊れている)').toBeGreaterThan(5);
 
     /**
-     * 🔴 **既に外していない物は、等値の既知リストで持つ**(`KNOWN_DEAD` と同じ作法)。
-     *
-     * ⚠ 走査を書いた日に **7 件**出た ── どれも**この PR より前から**在る
-     *   (`paste` と掴んで落とす 6 本)。⚠ **いまの本番では畳む口を呼んでいない**ので
-     *   画面には出ないが、**畳んだのに残る**ことに変わりはない。
-     * 🔑 ここに並べておけば、**直した日に消さないと落ちる**ので忘れられない。
-     *   ⚠ そして**新しく足した物**がここに無ければ落ちる ── それがこの門の主眼である
-     *   (2026-09-13 に私が `scroll` の改名で片側を忘れた、その型を止める)。
-     * ⚠ 別件として起票する ── この PR の主題ではない。
+     * 🔴 **直に張っている所は 0 件**。
+     * ⚠ `root.ownerDocument.addEventListener` のような**間に何か挟む形**も拾う
+     *   ── 頭を `root` / `doc` で留め、尻を `.addEventListener(` で留める。
      */
-    const KNOWN_UNREMOVED: readonly string[] = [
-      'paste:onPaste',
-      'dragenter:onDragOver',
-      'dragover:onDragOver',
-      'drop:onDrop',
-      'dragstart:onDragStart',
-      'dragend:onDragEnd',
-      'dragleave:onDragLeave',
-    ];
-    const orphan = [...added.keys()].filter((k) => !removed.has(k));
+    const direct = [...src.matchAll(/\b(?:root|doc)[\w.]*\.addEventListener\(/g)].map((m) => m[0]);
     expect(
-      orphan.slice().sort(),
-      `張った名前で外していない(改名の片側忘れ ── 外し口は黙って no-op になる):\n${orphan.join('\n')}`,
-    ).toEqual(KNOWN_UNREMOVED.slice().sort());
+      direct,
+      `畳む口を通らない聞き耳を張っている(外し忘れが戻る):\n${direct.join('\n')}`,
+    ).toEqual([]);
+  });
+
+  /**
+   * 🔴 **外し忘れは 0 件**(2026-09-13 に 7 → 0)。
+   * ⚠ かつてここは**既知リスト**で 7 件を通していた ── `listen` へ寄せて空になったので、
+   *   **空のまま等値で pin する**(「1 件も無い」を主張に変える)。
+   */
+  it('🔴 張った物と外す物が、1 件残らず対応している', () => {
+    const src = stripComments(readFileSync('src/adapter/ui/actions/binder.ts', 'utf-8'));
+    // ⚠ `listen` を通っていれば、張る = 外すは**同じ 1 行**が持つ(対応は構造で保証される)
+    const added = new Set([...src.matchAll(/\blisten\(\s*(?:root|doc)[\w.]*,\s*'([a-z]+)',\s*([A-Za-z_$][\w$]*)/g)]
+      .map((m) => `${m[1]!}:${m[2]!}`));
+    expect(added.size, '張っている所が 1 つも見つからない(走査が壊れている)').toBeGreaterThan(5);
+    // 🔑 畳む口が**記録した物を全部走らせる**形であることを、字で留める
+    expect(src, '畳む口が、記録した物を走らせる形になっていない').toContain('for (const off of undo) off();');
   });
 });
