@@ -46,6 +46,7 @@ import { appPaneSizes, applyPaneSizes } from '@adapter/ui/render/pane-size';
 import { appGroupFold } from '@adapter/ui/render/group-fold';
 import { installPaneResize } from '@adapter/ui/render/pane-resize';
 import { installPlaceDrag } from '@adapter/ui/render/place-drag';
+import { installScheduleDrag } from '@adapter/ui/render/schedule-drag';
 import { appKeymap } from '@adapter/ui/render/keymap';
 import { wireShortcutHints } from '@adapter/ui/render/shortcut-hint';
 import { startEmbedBridge } from '@adapter/transport/embed-bridge';
@@ -942,6 +943,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   installPaneResize(root);
   /** 🔴 板の塊を掴んで動かす配線(#283 P4-b)。⚠ 外さない(アプリと同寿命)。 */
   installPlaceDrag(root, dispatcher);
+  /**
+   * 🔴 **予定の札を、指でも掴んで動かせるようにする配線**(#855 決1)。
+   * ⚠ マウスは既存の HTML5 drag(`binder.ts`)のまま ── ここは指・ペンだけを
+   *   受ける(`schedule-drag.ts` の docstring)。⚠ 外さない(アプリと同寿命)。
+   */
+  installScheduleDrag(root, dispatcher);
   /**
    * 🔴 **別のタブで変えたキー割当を、このタブにも効かせる**(#256)。
    * ⚠ これが無いと「2 枚目のタブで割り当て直したのに、1 枚目は再読込まで古いまま」に

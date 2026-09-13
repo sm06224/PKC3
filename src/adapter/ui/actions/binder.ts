@@ -111,7 +111,8 @@ import { formatEntryLink, formatSectionLink } from '@features/entry-ref/entry-re
 import { knownSplitLids } from '@features/split-frames';
 import { STACK_ARCHETYPE, stackBody } from '@features/flavor/stack-flavor';
 import { insertionForLineDate } from '@features/schedule/line-date';
-import { addDays, dayStamp, daysBetween } from '@features/datetime/date-math';
+import { dayStamp } from '@features/datetime/date-math';
+import { dropTaskCard } from '@adapter/ui/render/schedule-drag';
 import {
   DATE_SHORTCUTS,
   isDateShortcut,
@@ -9761,10 +9762,11 @@ export function bindActions(
       return;
     }
     /**
-     * 🔴 **落としたら、その行の日付が変わる**(双方向の出口)。
+     * 🔴 **落としたら、その行の日付が変わる**(双方向の出口。マウス = HTML5 drag)。
      * ⚠ 空文字の落とし先は「日付なし」= **外す**(消すのではない)。
-     * ⚠ 時刻は**持ち越す** ── 日を動かしただけで 14:00 が消えたら、
-     *   user は「勝手に消された」と読む。
+     * 🔑 **判定は `dropTaskCard`(`schedule-drag.ts`)1 本**(#855 決1)── 指で
+     *   掴む `installScheduleDrag` からも同じ関数を呼ぶ(CLAUDE.md §7「口を
+     *   2 つ作らない」/「落とし先の判定は 1 本に保つ」)。
      */
     if (de.dataTransfer?.types?.includes(PKC_TASK_DRAG) === true) {
       const drop = dateTargetOf(de.target);
@@ -9775,84 +9777,11 @@ export function bindActions(
         de.dataTransfer.getData(PKC_TASK_DRAG) || ''
       ).split(' ');
       if (lid === undefined || lid === '') return;
-      /**
-       * 🔴 **繰り返しの回は日を動かせない ── 黙って何もしないのではなく、断る**
-       *   (#344 段②)。
-       *
-       * ⚠ 動かす意味が **2 通り**ある(「規則ごとずらす」/「この回だけずらす」)ので、
-       *   どちらかを勝手に選ぶと**もう片方を頼んだ user のデータが壊れる**。
-       * ⚠ 「この回だけ」は**例外日の記法**が要る ── 記法を増やさずに済ませたのが
-       *   この設計の要なので(`repeat.ts` の頭)、そこは開けない。
-       * 🔑 だから**どこを直せばよいかまで言う**(本文の `@… 毎週` を直す)。
-       */
-      if (every !== undefined && every !== '') {
-        dispatcher.dispatch({
-          type: 'OP_FAILED',
-          error: '繰り返しの予定はドラッグで動かせません。本文の「@日付 毎週」を書き直してください',
-        });
-        return;
-      }
-      const date = drop.date === '' ? null : drop.date;
-      /**
-       * 🔴 **単位が 2 つある**(段④)── 行番号が空なら
-       *   **ノート 1 件が丸ごと予定**で、書き換えるのは frontmatter の `date:` である。
-       * ⚠ 同じ落とし先に、書き換える場所が違う 2 種類が落ちてくる ── だから
-       *   ここで分ける(面ごとに 2 つの落とし先を作らない)。
-       */
-      if (rawLine === undefined || rawLine === '') {
-        dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date });
-        return;
-      }
-      const line = Number(rawLine);
-      if (!Number.isInteger(line)) return;
-      const card = dispatcher
-        .getState()
-        .taskScan?.cards.find((c) => c.lid === lid && c.line === line);
-      /**
-       * 🔴 **期間は「長さを保ったまま」ずらす**(#344 段①)。
-       *
-       * ⚠ 掴んだ日(`grabbedOn`)と落とした日の差だけ、開始と終わりを**両方**動かす。
-       *   開始だけ動かすと、user は「1 日ずらした」つもりなのに**期間が伸び縮みする**。
-       * ⚠ 日付を**外す**とき(`date === null`)は期間ごと剥がす ── 記法まるごと消えるので
-       *   `until` も `null` を渡す(渡さないと「頼んでいない指示」になる、下の reducer)。
-       * ⚠ 差が読めなかった回は**ずらさない**(`until` を据え置く)── 当てずっぽうで
-       *   user の期間を書き換えない。
-       */
-      /**
-       * ⚠ 掴んだ日が取れなかった回(荷物が古い / 板から掴んだ)は、**開始を基準にする** ──
-       *   1 稿目は `null` にして「開始だけ落とした日へ」動かしていたが、それだと
-       *   **期間の長さが変わる**(頼んでいないのに出張が伸び縮みする)。
-       * ⚠ 差が計算できなければ **0**(= 何も動かさない)── 当てずっぽうで期間を書き換えない。
-       *   書き換えが 0 なら `rewriteLineDate` が `null` を返すので、保存も走らない。
-       */
-      const from = grabbedOn !== undefined && grabbedOn !== '' ? grabbedOn : (card?.date ?? null);
-      const shift =
-        card?.until != null && date !== null && from !== null
-          ? (daysBetween(from, date) ?? 0)
-          : null;
-      const until =
-        date === null
-          ? null
-          : card?.until == null
-            ? null
-            : shift === null
-              ? card.until
-              : (addDays(card.until, shift) ?? card.until);
-      /**
-       * ⚠ 開始も同じ差で動かす ── 落とした日は「**掴んだ札**が来る日」であって、
-       *   期間の開始ではない(掴んだのが 3 日目なら、開始は落とした日の 2 日前になる)。
-       */
-      const start =
-        shift === null || card?.date == null ? date : (addDays(card.date, shift) ?? date);
-      dispatcher.dispatch({
-        type: 'SET_TASK_DATE',
-        lid,
-        line,
-        date: start,
-        // ⚠ 外すときは時刻も一緒に落ちる(記法ごと剥がすため)
-        time: card?.time ?? null,
-        until,
-      });
+      dropTaskCard(
+        dispatcher,
+        { lid, line: rawLine ?? '', from: grabbedOn ?? '', repeat: every ?? '' },
+        drop.date,
+      );
       return;
     }
     if (de.dataTransfer?.types?.includes(PKC_DRAG) === true) {

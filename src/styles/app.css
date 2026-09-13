@@ -4093,6 +4093,13 @@ li[data-pkc-row-slot] {
   flex-direction: column;
   gap: 1px;
 }
+/**
+ * 🔴 **長押しで指でも掴めるようにする**(#855 決1)── 押している間に字が
+ *   選ばれたり、iOS の吹き出し(コピー / 共有)が出たりすると、`schedule-drag.ts`
+ *   の長押しがブラウザの選択に奪われる(実測 ── `pointercancel` が飛んで
+ *   落とし先が 1 度も光らなかった)。⚠ `dual-table tbody tr`(#687 D-1)と
+ *   **同じ理由・同じ書き方**。`touch-action` は書かない(スクロールを殺す)。
+ */
 [data-pkc-region='schedule-cards'] > [data-pkc-entry] {
   display: grid;
   /* ⚠ 3 列目は「予定から外す」(#498)── 幅は `auto` なので、
@@ -4103,6 +4110,8 @@ li[data-pkc-row-slot] {
   padding: 2px var(--s2);
   border-radius: var(--radius);
   cursor: pointer;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 [data-pkc-region='schedule-cards'] > [data-pkc-entry]:hover {
   background: var(--surface-2);

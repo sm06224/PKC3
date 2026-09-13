@@ -2285,6 +2285,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-13(#855 決1 ── 予定の札を指で動かす)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-09-saving-line" …` → 9d118e3
+     */
+    '保存に時間がかかっているとき、画面の下に「保存中…」と出るようになりました',
+    /**
      * ⚠ **2026-09-13(#854 段① ── 添付の csv)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-09-phone-links" …` → 0d29fee
      */
