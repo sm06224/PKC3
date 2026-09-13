@@ -1672,6 +1672,21 @@ function pressedTileAgain(root: Element, lid: string): boolean {
  * ⚠ 端では reducer が**何もしない**(輪にしない ── 一番上で「上へ」を押して
  *   末尾へ飛ぶと驚く)。
  */
+/**
+ * 🔴 **アプリのタブを離れたら、並べ替えモードは終える**(#857 段①b-2。
+ * 着地前の動線レビュー 欠陥 1、2026-09-13)。
+ *
+ * ⚠ 直す前:並べ替えモードのまま「一覧」へ行き、しばらくして「アプリ」へ戻ると
+ *   **タイルを 2 回押しても開かない**。頼んでいないのにモードが続いており、
+ *   しかも user は自分が何をしたのか憶えていない ── 「壊れている」に見える。
+ * 🔑 **判定はこの 1 か所**(§7)── 探し方(`browseMode`)は state に持たないので
+ *   reducer からは見えない。呼ぶ口は下に 3 つあるが、**条件はここだけ**が持つ。
+ * ⚠ **入るときは何もしない** ── 戻ってきた瞬間に勝手に入らない。
+ */
+function leaveLauncherIf(dispatcher: Dispatcher, mode: string): void {
+  if (mode !== 'launcher') dispatcher.dispatch({ type: 'SET_LAUNCHER_REORDER', on: false });
+}
+
 function moveTile(dispatcher: Dispatcher, target: HTMLElement, by: -1 | 1): void {
   const lid = target.getAttribute('data-pkc-tile');
   if (lid === null || lid === '') return;
@@ -5058,9 +5073,12 @@ const ACTIONS: Record<string, ActionHandler> = {
     region.focus();
   },
   /** 左の列の**探し方**を切り替える(P8 段⑤)。⚠ 中央のビューとは別の軸。 */
-  'set-browse': (_dispatcher, target, services) => {
+  'set-browse': (dispatcher, target, services) => {
     const mode = target.closest('[data-pkc-browse]')?.getAttribute('data-pkc-browse');
-    if (mode) services.setBrowse?.(mode);
+    if (mode) {
+      leaveLauncherIf(dispatcher, mode);
+      services.setBrowse?.(mode);
+    }
   },
   'set-view': (dispatcher, target) => {
     const view = target.getAttribute('data-pkc-view') ?? '';
@@ -5491,7 +5509,10 @@ const ACTIONS: Record<string, ActionHandler> = {
     dispatcher.dispatch({ type: 'ROW_RENAME_BEGIN', lid });
     const fieldShown = (): boolean =>
       root.querySelector('[data-pkc-field="row-rename"]') !== null;
-    if (!fieldShown()) services.setBrowse?.('list');
+    if (!fieldShown()) {
+      leaveLauncherIf(dispatcher, 'list');
+      services.setBrowse?.('list');
+    }
     if (!fieldShown()) {
       dispatcher.dispatch({ type: 'ROW_RENAME_END' });
       dispatcher.dispatch({
@@ -8933,6 +8954,7 @@ export function bindActions(
           mode,
           timer: setTimeout(() => {
             hoverTab = null;
+            leaveLauncherIf(dispatcher, mode);
             services.setBrowse?.(mode);
           }, TAB_HOVER_MS),
         };

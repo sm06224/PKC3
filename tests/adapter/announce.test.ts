@@ -1097,7 +1097,7 @@ describe('お知らせの文面は固定(#220-7)', () => {
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-09-file-drop-pinned" …` → e793190
      */
     ['2026-09-13-task-repeat-menu', '53684f35'],
-    ['2026-09-13-tile-reorder-mode', '35e37f83'],
+    ['2026-09-13-tile-reorder-mode', '49c8eab3'],
     ['2026-09-13-tile-double-press', '11a21bb5'],
     ['2026-09-12-tile-reorder', '2d163d39'],
     ['2026-09-12-repeat-fixes', '984b158d'],

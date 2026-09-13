@@ -181,8 +181,15 @@ export class LauncherRenderer {
       done.type = 'button';
       done.setAttribute('data-pkc-action', 'end-tile-reorder');
       done.setAttribute('data-pkc-field', 'launcher-reorder-done');
-      done.title = '並べ替えをやめます(タイルは 2 回押すと開くように戻ります)';
-      done.textContent = '完了';
+      /**
+       * ⚠ 字は**右クリックのメニューと同じ**にする(着地前の動線レビュー 改善、
+       *   2026-09-13)── 同じことをする 2 つの押し所で呼び名が違うと、user は
+       *   別の操作だと思う(「上へ」「下へ」は既に揃えてある)。
+       * ⚠ 「やめる」にしない ── **直した並びが元へ戻ると読める**(戻らない。
+       *   動かしたぶんは既に保存されている)。「終える」はモードの出口だけを言う。
+       */
+      done.title = '並べ替えを終えます(タイルは 2 回押すと開くように戻ります)';
+      done.textContent = '並べ替えを終える';
       list.append(done);
     }
 

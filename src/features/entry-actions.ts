@@ -371,15 +371,19 @@ export function repeatMenuActions(current: RepeatUnit | null): RepeatMenuItem[] 
  *   受けない**(`long-press.ts` の既定 ── 押しっぱなしは drag の始まりである)。
  *   🔑 だからマウスの入口を右クリックに置く ── **同じモードへ、器だけ 2 つ**。
  * ⚠ **出口も同じ場所に置く**(`片道の操作を作らない`、CLAUDE.md 2026-08-23)──
- *   帯の「完了」だけだと、帯が画面の外へスクロールしたとき出られない。
- * ⚠ 字は**起きること**で書く:「並べ替える」で入り、「並べ替えをやめる」で出る
+ *   一覧の出口だけだと、マウスの人が一覧の頭まで戻ることになる。
+ * ⚠ 字は**起きること**で書く:「並べ替える」で入り、「並べ替えを終える」で出る
  *   ── 同じ字で切り替える(トグル)にすると、いまどちらなのか読めない。
+ * ⚠ **一覧のボタンと同じ字にする**(2026-09-13 の動線レビュー 改善)── 同じことを
+ *   する 2 つの押し所で呼び名が違うと、user は別の操作だと思う。
+ * ⚠ 「やめる」にしない ── **直した並びが元へ戻る**と読める(戻らない ── 動かした
+ *   ぶんは既に保存されている)。「終える」はモードの出口だけを言う。
  */
 export function tileMenuActions(reordering: boolean): EntryAction[] {
   return [
     ...TILE_MENU_ACTIONS,
     reordering
-      ? { action: 'end-tile-reorder', label: '並べ替えをやめる' }
+      ? { action: 'end-tile-reorder', label: '並べ替えを終える' }
       : { action: 'start-tile-reorder', label: '並べ替える' },
   ];
 }

@@ -218,8 +218,54 @@ describe('並べ替えモード(#857 段①b-2)', () => {
     expect(menuLabels(), 'マウスの入口が無い').toContain('並べ替える');
     d.dispatch({ type: 'SET_LAUNCHER_REORDER', on: true });
     rightClick('a1');
-    expect(menuLabels(), '出口がメニューに無い(片道の操作)').toContain('並べ替えをやめる');
+    expect(menuLabels(), '出口がメニューに無い(片道の操作)').toContain('並べ替えを終える');
     expect(menuLabels(), '入口と出口が同時に出ている').not.toContain('並べ替える');
+  });
+
+  /**
+   * 🔴 **編集中は入らない**(2026-09-13、変異試験 M2 が SURVIVED で教えた)。
+   *
+   * ⚠ 直す前、`app-tile-order.test.ts` の「編集中は断る」は **`MOVE_APP_TILE`**
+   *   (動かす側)を見ており、**モードへ入る側の `phaseBlockReason` は
+   *   1 度も通っていなかった**(CLAUDE.md §2「経路が一度も通っていない」)。
+   * ⚠ 門を丸ごと外しても、12 件の test が全部緑だった。
+   */
+  it('🔴 ⑩ 編集中は長押ししても入らず、理由を言う', () => {
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+    // ⚠ この台は store を持たないので、本文の到着を手で撃つ(`START_EDIT` は
+    //    下書きの元が無いと断られる ── そこで前提が崩れる)
+    d.dispatch({ type: 'BODY_LOADED', lid: 'a1', body: '本文' });
+    d.dispatch({ type: 'START_EDIT' });
+    expect(d.getState().phase, '前提が崩れている(編集に入れていない)').toBe('editing');
+    longPress('a1');
+    expect(d.getState().launcherReorder, '編集中でも入れてしまった').toBe(false);
+    expect(d.getState().error, '無言で断った').toContain('編集を終了してから');
+  });
+
+  /**
+   * 🔴 **アプリのタブを離れたら終える**(2026-09-13、着地前の動線レビュー 欠陥 1)。
+   *
+   * ⚠ 直す前:並べ替えモードのまま「一覧」へ行き、戻ってくると**タイルを 2 回
+   *   押しても開かない**。頼んでいないのにモードが続いていた。
+   */
+  it('🔴 ⑪ 左のタブを別のものに切り替えると終わる', () => {
+    d.dispatch({ type: 'SET_LAUNCHER_REORDER', on: true });
+    const tab = document.createElement('button');
+    tab.setAttribute('data-pkc-action', 'set-browse');
+    tab.setAttribute('data-pkc-browse', 'list');
+    root.append(tab);
+    tab.click();
+    expect(d.getState().launcherReorder, 'タブを離れてもモードが続いた').toBe(false);
+  });
+
+  it('⚠ ⑪b 同じ「アプリ」タブを押し直しただけでは終わらない(対照群)', () => {
+    d.dispatch({ type: 'SET_LAUNCHER_REORDER', on: true });
+    const tab = document.createElement('button');
+    tab.setAttribute('data-pkc-action', 'set-browse');
+    tab.setAttribute('data-pkc-browse', 'launcher');
+    root.append(tab);
+    tab.click();
+    expect(d.getState().launcherReorder, '同じタブを押しただけで終わった').toBe(true);
   });
 
   it('🔴 ⑨ 長押しの直後の click は捨てる(離しただけで数が進まない)', () => {
