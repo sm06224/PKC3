@@ -7983,6 +7983,28 @@ export function bindActions(
      * ⚠ 断るときの理由は reducer が出す(絞り込み中 / 編集中)── ここでは
      *   受けるだけにして、**無言の dead press を作らない**。
      */
+    /**
+     * 🔴 **グループの見出しの長押しは「目印を選ぶ」メニュー**(#857 段②。
+     * 着地前の動線レビュー)。
+     *
+     * ⚠ 右クリックにしか口が無いと、**指だけの端末には入口が 1 つも無い** ──
+     *   すぐ下のタイルと同じ理由である。
+     * 🔑 **右クリックと同じメニューを出す**(別の口を作らない)── 位置は
+     *   見出しの外形から採る(長押しには座標が無い ── `open-repeat-menu` と同じ作法)。
+     */
+    if (row.getAttribute('data-pkc-action') === 'toggle-app-group') {
+      const groupName = row.getAttribute('data-pkc-group') ?? '';
+      if (groupName === '') return;
+      const box = row.getBoundingClientRect();
+      openContextMenu(
+        root,
+        { x: box.left, y: box.bottom },
+        APP_GROUP_MENU_ACTIONS,
+        row,
+        { 'data-pkc-group': groupName },
+      );
+      return;
+    }
     const tile = row.getAttribute('data-pkc-tile');
     if (tile !== null) {
       dispatcher.dispatch({ type: 'PICK_APP_TILE', lid: tile });
@@ -8142,7 +8164,14 @@ export function bindActions(
      */
     const pressedAction = el.getAttribute('data-pkc-action');
     if (
-      (pressedAction === 'dual-row' || pressedAction === 'open-tile') &&
+      (pressedAction === 'dual-row' ||
+        pressedAction === 'open-tile' ||
+        /**
+         * ⚠ **見出しも捨てる**(#857 段②)── 足さないと、長押しでメニューが
+         *   出たうえに、**指を離した瞬間にそのグループが畳まれる**
+         *   (押した物と効く先が食い違う)。
+         */
+        pressedAction === 'toggle-app-group') &&
       longPress.swallowsClick()
     ) {
       ev.preventDefault();
