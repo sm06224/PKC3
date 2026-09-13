@@ -31,6 +31,34 @@ test.beforeEach(async ({ page }) => {
  */
 async function copyAndWait(page: Page, action: string): Promise<void> {
   const sel = `[data-pkc-action="${action}"]`;
+  /**
+   * 🔴 **仕掛ける前に「押し所が在る」ことを確かめる**(#878 ②、2026-09-13)。
+   *
+   * ⚠ 直す前は次の行がいきなり `document.querySelector(sel)!` を読んでいたので、
+   *   まだ無い回は **non-null の `!` に隠れて** `MutationObserver.observe` が
+   *   `TypeError: parameter 1 is not of type 'Node'` で死んだ ── 画面に何が
+   *   起きていたのかが、その字からは 1 つも読めない。
+   *
+   * 🔑 **これは閾値の緩和ではない**(#878 が戒めている「症状の隠蔽」ではない):
+   *
+   * | | |
+   * |---|---|
+   * | 面が**開かない**(製品の不具合) | 🔴 2 秒で落ちる ── **文言がそう言う** |
+   * | 面が**開くのが 1 拍遅い**(台の都合) | 🟢 待って進む |
+   *
+   * ⚠ **原因はまだ確定していない。** 有力なのは「`page.evaluate` が、直前に投げた
+   *   マウス入力を追い越す」── 入力は**ブラウザ処理**を経て描画側へ渡るのに対し、
+   *   `evaluate` は描画側へ直に入るので、**順番が保証されない**(全量のときだけ
+   *   出るのは、描画側が忙しいほど差が開くから、と読める)。
+   * 🔑 ⚠ **これは仮説である** ── 確かめていないので、ここには**待ちしか置かない**
+   *   (仮説を後条件に固めない。CLAUDE.md §1「後条件は確かめた事実の上にだけ書く」)。
+   * ⚠ 待ちを**短く**切ってあるのは、「開くのが遅くなった」という別の壊れ方を
+   *   この待ちで飲み込まないためである。
+   */
+  await expect(
+    page.locator(sel),
+    `${action}: 押し所が画面に無い(面が開いていないか、出し分けが壊れている)`,
+  ).toBeAttached({ timeout: 2_000 });
   // 押す前に仕掛ける ── 700ms で消える属性を後から探すと落ちる
   await page.evaluate((s) => {
     const el = document.querySelector(s)!;

@@ -336,6 +336,46 @@ describe('留めた枠への追随(#848)', () => {
     );
   });
 
+  /**
+   * 🔴 **主の枠が別のノートを開いていても、留めた枠には映す**(2026-09-13、#848 の残り)。
+   *
+   * ⚠ 直す前は `ob?.lid !== action.lid` で**丸ごと捨てて**いた ── 留めた枠に出した
+   *   設定を押すと、**disk には書けるのに画面が 1 ドットも変わらない**。
+   * 🔑 押した物と効く先を揃えた口を出す以上、**結果が戻る経路も同じ数だけ要る**。
+   * ⚠ **主の枠が無傷であること**も同じ it で見る ── 見ないと「両方に書く実装」と
+   *   区別が付かない(それは元の事故そのものである)。
+   */
+  it('🔴 主の枠が別のノートでも、留めた枠の本文は新しくなる', async () => {
+    const h = setup();
+    // ⚠ 2 件目を足す ── 既定の fixture は `a1` しか持たないので、
+    //    そのままだと「主の枠が移らない」= 前提が崩れる(1 稿目はそれで落ちた)
+    h.bodies['a2'] = '別のノートの本文';
+    h.d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [meta('a1', 'メモ帳'), meta('a2', '別のノート')],
+      relations: [],
+    });
+    h.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+    await tick(20);
+    h.d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'a1' });
+    await tick(20);
+    // ⚠ 主の枠を**別のノート**へ移す(これが事故の前提)
+    h.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a2' });
+    await tick(20);
+    const mainBefore = h.d.getState().openBody?.body ?? null;
+    expect(h.d.getState().openBody?.lid, '主の枠が移っていない(前提が崩れている)').toBe('a2');
+    expect(h.d.getState().splitLids, '留められていない(前提が崩れている)').toContain('a1');
+    h.d.dispatch({ type: 'APP_TILE_SAVED', lid: 'a1', gen: 0, body: '留めた枠の新しい本文' });
+    expect(
+      h.d.getState().splitBodies.get('a1'),
+      '留めた枠が古い本文のまま(押しても何も変わらないように見える)',
+    ).toBe('留めた枠の新しい本文');
+    // ⚠ 対照群 ── 主の枠は 1 バイトも変わらない
+    expect(h.d.getState().openBody?.lid, '主の枠が別のノートへすり替わった').toBe('a2');
+    expect(h.d.getState().openBody?.body ?? null, '主の枠の本文が書き換わった').toBe(mainBefore);
+  });
+
   it('⚠ 留めていない lid では、枠の中身を作り直さない(面が毎回組み直る)', async () => {
     const h = setup();
     h.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });

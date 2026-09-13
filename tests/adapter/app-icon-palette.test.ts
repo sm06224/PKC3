@@ -289,8 +289,13 @@ describe('目印を絵から選ぶ(#770 段②)', () => {
  * 🔑 同じ面が**同じ事故を 1 か所で既に止めている** ── 帯は `pinnedLid !== null` で
  *   出さない(`detail.ts` の `renderBar`:「押した物と効く先が食い違う」)。
  *   添付の設定だけがその門を通っていなかった。
- * ⚠ ここで**捨てているのは「効かない口」**であって、動線ではない
- *   (留めた枠から設定したいなら、`splitBodies` を書き戻す経路が別に要る ── #770 に残す)。
+ *
+ * 🔴 **2026-09-13(#848)に、塞いだ物を戻した。** 🔑 直したのは**出す / 出さない**では
+ *   なく「**効く先を何で決めるか**」である ── 押した欄が `data-pkc-target-lid` を持ち、
+ *   受け手はそれを読む。書けた結果は `APP_TILE_SAVED` が `splitBodies` へ戻す。
+ * ⚠ **検査の向きが裏返ったので、書き直した**(CLAUDE.md §1「向きを変えたら作法も裏返る」)
+ *   ── 「出ない」を見ていた 1 本を「**出て、押した物に効く**」へ置き換え、
+ *   **対照群**(主の枠で押すと主のノートに効く)を同じ describe に置いた。
  */
 describe('留めた枠(横に並べた枠)', () => {
   function pinned() {
@@ -325,29 +330,80 @@ describe('留めた枠(横に並べた枠)', () => {
     return { root };
   }
 
-  it('🔴 留めた枠に、絵の一覧も登録の欄も出ない', () => {
+  it('🔴 留めた枠にも設定が出て、口が 1 つ残らず「効く先」を持っている(#848)', () => {
     const { root } = pinned();
     // ⚠ 空振り防止 ── 留めた枠が**そもそも描けている**ことを先に見る
     expect(
       root.querySelector('[data-pkc-field="attachment-info"]'),
       '留めた枠に添付の面が描けていない(前提が崩れている)',
     ).not.toBeNull();
-    expect(
-      root.querySelector('[data-pkc-field="app-icon-palette"]'),
-      '留めた枠に絵の一覧が出ている(押すと別のノートに書き込まれる)',
-    ).toBeNull();
-    expect(
-      root.querySelector('[data-pkc-action="pick-app-icon"]'),
-      '留めた枠に選ぶ口が出ている',
-    ).toBeNull();
-    expect(
-      root.querySelector('[data-pkc-field="app-register"]'),
-      '留めた枠に登録のチェックが出ている(押すと別のノートが登録される)',
-    ).toBeNull();
-    expect(
-      root.querySelector('[data-pkc-action="rename-attachment"]'),
-      '留めた枠に名前の欄が出ている(打つと別のノートが改名される)',
-    ).toBeNull();
+    /**
+     * 🔴 **数え上げて、全部に付いているかを見る**(1 つでも欠けると、その口だけが
+     *   主の枠のノートを書き換える ── いちばん気づけない壊れ方)。
+     * ⚠ **代表 1 つでは足りない** ── 付け忘れた口はいつも「数えなかった 1 つ」である。
+     */
+    const writers = [...root.querySelectorAll('[data-pkc-action]')].filter((el) =>
+      ['rename-attachment', 'toggle-app-tile', 'set-app-group', 'set-app-icon', 'pick-app-icon'].includes(
+        el.getAttribute('data-pkc-action') ?? '',
+      ),
+    );
+    // ⚠ 空振り防止 ── 絵が 49 個 + 欄 4 つなので、10 未満なら描けていない
+    expect(writers.length, '設定の口が出ていない(前提が崩れている)').toBeGreaterThan(10);
+    const bare = writers
+      .filter((el) => el.getAttribute('data-pkc-target-lid') !== 'a1')
+      .map((el) => el.getAttribute('data-pkc-action'));
+    expect(bare, '効く先を持たない口が在る(押すと主の枠のノートが書き換わる)').toEqual([]);
+  });
+
+  /**
+   * 🔴 **押すと「留めたノート」に飛ぶ**(属性が在るだけでは、受け手が読んでいる証拠に
+   *   ならない ── 受け手が `selectedLid` を読んだままでも、上の test は緑になる)。
+   */
+  it('🔴 留めた枠で絵を押すと、留めたノートに書かれる(選んでいる別のノートではない)', () => {
+    const { root } = pinned();
+    const sent: Dispatchable[] = [];
+    const d2 = new Dispatcher();
+    d2.dispatch = ((a: Dispatchable) => sent.push(a)) as typeof d2.dispatch;
+    bindActions(root, d2, {});
+    const pick = root.querySelector<HTMLElement>('[data-pkc-action="pick-app-icon"][data-pkc-icon-name="folder"]');
+    expect(pick, '絵の押し所が無い(前提が崩れている)').not.toBeNull();
+    pick!.click();
+    expect(sent, '留めた枠で押したのに、別のノートへ書き込まれた').toEqual([
+      { type: 'SET_APP_TILE', lid: 'a1', icon: 'folder' },
+    ]);
+  });
+
+  /**
+   * ⚠ **対照群** ── 属性が無ければ `selectedLid` に落ちる。これが無いと
+   *   「いつでも `a1` を返す実装」と区別が付かない。
+   */
+  it('⚠ 効く先を持たない口は、いままでどおり選んでいるノートに効く(対照群)', () => {
+    const { root } = pinned();
+    const d2 = new Dispatcher();
+    d2.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [meta('a1'), { ...meta('a2'), lid: 'a2', title: '別のノート' }],
+      relations: [],
+    });
+    d2.dispatch({ type: 'SELECT_ENTRY', lid: 'a2' });
+    // 🔑 **本物をくぐらせたまま控える** ── 差し替えると `getState()` が動かず、
+    //    「落ちた先が a2 である」という当の主張が見られない(空振り)
+    const real = d2.dispatch.bind(d2);
+    const sent: Dispatchable[] = [];
+    d2.dispatch = ((a: Dispatchable) => {
+      sent.push(a);
+      real(a);
+    }) as typeof d2.dispatch;
+    bindActions(root, d2, {});
+    const pick = root.querySelector<HTMLElement>(
+      '[data-pkc-action="pick-app-icon"][data-pkc-icon-name="folder"]',
+    );
+    pick!.removeAttribute('data-pkc-target-lid');
+    pick!.click();
+    expect(sent, '属性が無いのに、留めた枠のノートへ落ちた').toEqual([
+      { type: 'SET_APP_TILE', lid: 'a2', icon: 'folder' },
+    ]);
   });
 
   /**
@@ -357,7 +413,7 @@ describe('留めた枠(横に並べた枠)', () => {
    *   ── 留めた枠で押すと**主の枠のノート**が開く。
    * 🔴 とくに「ノートを渡して起動」は、**確認に出る題名まで別のノート**になる
    *   (許してよいか判断する材料が、押した物と食い違う)。
-   * 🔑 いまは**押したボタンが対象を持つ**(`data-pkc-launch-lid`)。
+   * 🔑 いまは**押したボタンが対象を持つ**(`data-pkc-target-lid`)。
    */
   it('🔴 留めた枠の「起動」は、留めたノートを開く(選んでいる別のノートではない)', () => {
     const { root } = pinned();
@@ -367,7 +423,7 @@ describe('留めた枠(横に並べた枠)', () => {
     const run = root.querySelector<HTMLElement>('[data-pkc-action="launch-asset"]');
     // ⚠ 空振り防止 ── 起動の口が出ていないなら、この test は何も見ていない
     expect(run, '留めた枠に起動の口が無い(前提が崩れている)').not.toBeNull();
-    expect(run!.getAttribute('data-pkc-launch-lid'), '押す物が対象を持っていない').toBe('a1');
+    expect(run!.getAttribute('data-pkc-target-lid'), '押す物が対象を持っていない').toBe('a1');
     run!.click();
     expect(calls, '留めた枠で押したのに、別のノートが開いた').toEqual(['a1']);
   });

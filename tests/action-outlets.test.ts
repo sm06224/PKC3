@@ -98,7 +98,14 @@ const OBJECT_LONE: readonly string[] = [
    * | 落ちたもの | なぜ |
    * |---|---|
    * | `bulk-tag-add` / `cycle-read-columns` / `retry-persist` / `stack-save` | 🔴 **最初から嘘だった** ── 実行する行は対象を 1 つも読んでおらず、**注釈の字**(`selectedLid` / `data-pkc-entry`)に満たされて数えられていた |
-   * | `launch-asset` / `launch-asset-raw` / `launch-asset-extension` | 🟢 **直した** ── 押したボタンが対象を持つようになった(`data-pkc-launch-lid`) |
+   * | `launch-asset` / `launch-asset-raw` / `launch-asset-extension` | 🟢 **直した** ── 押したボタンが対象を持つようになった(`data-pkc-target-lid`) |
+   *
+   * 🔴 **2026-09-13 にさらに 3 件減った**(#848)── `toggle-app-tile` /
+   *   `rename-attachment` / `pick-app-icon` が **押した欄から対象を採る**ようになった。
+   * ⚠ **これは「出口を増やした」ではない** ── 画面に足した口は 0 個で、
+   *   変えたのは「効く先を何で決めるか」だけである(`selectedLid` → `data-pkc-target-lid`)。
+   * 🔑 だから #582 の「増やさない」に触れていない ── **触れていないことを字で残す**
+   *   (残さないと、次に読む人が「体系の外で足した」と読む)。
    *
    * 🔑 上の 4 件は**この日まで誰も気づかなかった** ── 上の `readsObject` が
    *   注釈を落とすようになって初めて出た(CLAUDE.md §1「自分の解説コメントに満たされる」)。
@@ -179,12 +186,10 @@ const OBJECT_LONE: readonly string[] = [
    *   #582 が置き場の規則を決めるとき、この 3 行(`set-app-group` / `set-app-icon` /
    *   これ)は**まとめて**動く。
    */
-  'pick-app-icon',
   /**
    * 🟢 **`pin-split` は 2026-09-02 に 2 本目の道ができた**(#633 段①)──
    *   本文の上の**スタックの帯**の札から押せる(= 一番上へ上げる)。
    */
-  'rename-attachment',
   'set-entry-date',
   // ⚠ 上の `open-repeat-menu` と 1 組(2 段目の受け手。理由はそちらに書いた)
   'set-task-repeat',
@@ -200,7 +205,6 @@ const OBJECT_LONE: readonly string[] = [
    */
   'swap-open',
   'storage-profile',
-  'toggle-app-tile',
   'unschedule-task',
   /**
    * ⚠ **この計器は「出口の数」を file で数える**(`scripts/action-outlets.mjs` の
