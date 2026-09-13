@@ -967,6 +967,57 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   const box = (await table.boundingBox())!;
   expect(box.height, '表の高さが無い').toBeGreaterThan(20);
 
+  /**
+   * ④ 🔴 **同じ添付は、SQL で調べる相手にもなる**(#854 段①)。動線:
+   *   「.csv を添付として取り込む → SQL で調べる を開く → 選び所でその file を
+   *   選ぶ → `SELECT * FROM csv` で中身が引ける」。
+   * ⚠ この面は押しボタンを持たない(binder.ts「SQL の面も押しボタンを持たない」)
+   *   ので、アドレスで開く(`view=sql` は `SEALED_VIEWS` に無い ── 開ける面)。
+   *   同じ道具(`openViewPane`)が `dual` / `query` で使っているのと同じやり方。
+   */
+  await page.evaluate(() => {
+    location.hash = '#pkc?view=sql';
+  });
+  const sqlPane = page.locator('[data-pkc-view-pane="sql"]');
+  await expect(sqlPane, 'SQL の面が開かない').toBeVisible({ timeout: 15_000 });
+
+  const source = page.locator('[data-pkc-field="sql-source"]');
+  await expect(
+    source.locator('option', { hasText: 'uriage.csv' }),
+    '.sqlite の下に .csv が並んでいない',
+  ).toHaveCount(1);
+  await source.selectOption({ label: 'uriage.csv' });
+  // ⚠ 開くのは非同期(worker が bytes を読んで表を作る)── 開き終わるまで待つ。
+  //   ここを待たずに走らせると、まだ `guest === null` のうちに走って
+  //   **「この PKC」を調べた答えが csv の答えの顔をして出る**(いちばん気づけない外し方)。
+  const note = page.locator('[data-pkc-field="sql-note"]');
+  await expect(note, '添付が開いたことが画面に出ない').toContainText('uriage.csv を調べています');
+
+  await page.fill('[data-pkc-field="sql-input"]', 'SELECT * FROM csv');
+  await clickReal(page, '[data-pkc-action="run-sql"]');
+
+  const sqlTable = page.locator('[data-pkc-field="sql-table"]');
+  await expect(sqlTable, '添付の csv から行が返らない').toBeVisible({ timeout: 10_000 });
+  const headers = await sqlTable.locator('thead th').allTextContents();
+  expect(headers.slice(0, 2), '先頭の列が _note / _lid でない').toEqual(['_note', '_lid']);
+  await expect(sqlTable.locator('tbody tr'), '行の数が合わない').toHaveCount(2);
+  await expect(sqlTable).toContainText('りんご');
+  await expect(sqlTable).toContainText('120');
+
+  /**
+   * ⑤ ⚠ **対照群** ── 「この PKC のノート」へ戻すと、csv の表はもう引けない
+   *   (入れ物が別であること ── #854 段①ノート行「別窓の入れ物」の裏取り)。
+   */
+  await source.selectOption({ label: 'この PKC のノート' });
+  await expect(source, '選び所が「この PKC」へ戻っていない').toHaveValue('');
+  await page.fill('[data-pkc-field="sql-input"]', 'SELECT * FROM csv');
+  await clickReal(page, '[data-pkc-action="run-sql"]');
+  await expect(
+    note,
+    '「この PKC」に戻したのに csv の表がまだ引ける(入れ物が分かれていない)',
+  ).toContainText('no such table');
+  await expect(sqlTable, '対照群のはずが csv の表がまだ出ている').toHaveCount(0);
+
   expect(errors).toEqual([]);
 });
 
