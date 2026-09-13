@@ -691,13 +691,25 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
    * 🔑 **新しく起動しない** ── いま開いている道中に足す(起動 1 つ = 以後すべての回に 1.63 秒)。
    * ⚠ 差し替えは**この一手のためだけ**に当て、押した直後に**必ず戻す**
    *   (戻さないと、以降の ⑤ が「塞がれている」側で走る)。
+   *
+   * 🔴 **押すのは「アプリ」のタイルである ──「リンク」のタイルでは成り立たない**
+   *   (2026-09-13、1 稿目はそこを押して落ちた)。
+   *
+   * | 押す物 | 塞がれたと**分かるか** | なぜ |
+   * |---|---|---|
+   * | **アプリ**(`tile-kind="app"`) | 🟢 分かる | 先に**空の窓**を開いて handle を見るので、`null` で判定できる |
+   * | **リンク**(`tile-kind="url"`) | 🔴 **原理的に分からない** | 外部サイトには `noopener,noreferrer` を渡す約束で、**その指定だと戻り値は常に `null`** |
+   *
+   * ⚠ だから「リンクのタイルが無言なのは**わざと**」である(`launch-tile.ts` の
+   *   `tile.kind === 'url'` 分岐に実測つきで書いてある ── 検出を買うと referrer が漏れる)。
+   *   🔑 **成り立たない主張を検査に書かない**(CLAUDE.md §1「主張そのものが成り立たない」)。
    */
   await page.evaluate(() => {
     const w = window as unknown as { __pkcRealOpen?: typeof window.open };
     w.__pkcRealOpen = window.open.bind(window);
     window.open = (() => null) as typeof window.open;
   });
-  await openTile(page, '[data-pkc-tile-kind="url"]');
+  await openTile(page, '[data-pkc-tile-kind="app"]');
   await expect(
     page.locator('[data-pkc-region="status"]'),
     'ポップアップを塞がれたのに、理由が画面に出ない(無言で終わっている)',
