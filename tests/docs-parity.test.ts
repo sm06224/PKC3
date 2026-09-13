@@ -2269,6 +2269,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-13(#857 段② ── 目印の表)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-09-sql-pane" …` → da1670f
+     */
+    'SQL で自分のノートを調べられるようになりました',
+    /**
      * ⚠ **2026-09-13(#857 段③ ── 群そのものの並べ替え)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-09-archive-window" …` → 4e2f94f
      */

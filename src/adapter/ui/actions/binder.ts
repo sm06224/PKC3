@@ -54,6 +54,7 @@ import { stripDialect } from '@features/markdown/strip-dialect';
 import {
   hasAppGroupNote,
   hasAppGroupOrder,
+  appGroupIconName,
   isViewMode,
   nextViewMode,
   screenBodyOf,
@@ -962,7 +963,13 @@ export interface BinderServices {
    * 🔴 **グループの目印を選ぶ小窓を出す**(#857 段②)。
    * @returns 図案の名前。**空文字 = なし(外す)**。やめたら `null`
    */
-  pickAppGroupIcon?(groupName: string): Promise<string | null>;
+  /**
+   * 🔴 **グループの目印を選ぶ小窓を出す**(#857 段②)。
+   * ⚠ **いま付いている絵**も渡す(2026-09-13、裁定「絵を並べた表にする」)──
+   *   渡さないと、表は出せても**どれが選ばれているか**を描けない。
+   * @returns 図案の名前。**空文字 = なし(外す)**。やめたら `null`
+   */
+  pickAppGroupIcon?(groupName: string, current: string): Promise<string | null>;
   /**
    * 添付の携帯参照(`pkc://<自分>/asset/<key>`)から**所有ノートへ飛ぶ**(#100 段②)。
    * ⚠ 見つからないときは黙らない(OP_FAILED で断る ── 無言の dead click を作らない)。
@@ -7199,7 +7206,14 @@ const ACTIONS: Record<string, ActionHandler> = {
   'pick-app-group-icon': (dispatcher, target, services) => {
     const name = target.getAttribute('data-pkc-group') ?? '';
     if (name === '') return;
-    void services.pickAppGroupIcon?.(name).then((picked) => {
+    /**
+     * ⚠ **いま付いている絵を渡す** ── `appGroupIcons` は state が持っている
+     *   (描画と同じ物を見るので、画面と小窓が食い違わない)。
+     * ⚠ 絵文字を直に貼った群は `symbol` を持たない ── そのときは空で渡す
+     *   (表の中に該当が無いので、「なし」に枠が付く)。
+     */
+    const now = appGroupIconName(dispatcher.getState(), name);
+    void services.pickAppGroupIcon?.(name, now).then((picked) => {
       // ⚠ `null` = やめた(何もしない)/ `''` = 「なし」(外す)── 混ぜない
       if (picked === null) return;
       dispatcher.dispatch({

@@ -512,12 +512,45 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   await expect(groupMenu, '見出しを右クリックしてもメニューが出ない(2 度目)').toBeVisible();
   await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="pick-app-group-icon"]');
 
-  const iconRows = page.locator('[data-pkc-field="pick-group-icon"]');
-  await expect(iconRows.first(), '目印の一覧が出ない').toBeVisible();
+  /**
+   * 🔴 **絵を並べた表になっている**(user 裁定 2026-09-13)。
+   * ⚠ 直す前は**字だけの行**が縦に並んでいた ── タイル側は絵の表なので、
+   *   同じことをする 2 か所で見た目が違っていた。
+   */
+  const iconBox = page.locator('[data-pkc-field="pick-group-icon"]');
+  await expect(iconBox, '目印の表が出ない').toBeVisible();
+  await expect(iconBox, 'タイル側と同じ表になっていない(見た目の印が無い)').toHaveAttribute(
+    'data-pkc-palette',
+    '',
+  );
+  const iconRows = iconBox.locator('button');
   await expect(iconRows.first(), '先頭が「なし」でない(外す口が先頭に無い)').toHaveText('なし');
+  // ⚠ 空振り防止 ── 表そのものが 49 種 +「なし」で出ている(1 つだけ出て緑にしない)
+  await expect(iconRows, '表の数が合わない(タイルと同じ 49 種 +「なし」)').toHaveCount(50);
   // ⚠ index 0 = 「なし」。index 1 を選ぶ(タイルと同じ 49 種の 1 つ)。
   await clickReal(page, iconRows.nth(1));
-  await expect(iconRows.first(), '選んでも小窓が閉じない').toBeHidden();
+  await expect(iconBox, '選んでも小窓が閉じない').toBeHidden();
+
+  /**
+   * 🔴 **いま付いている絵に枠が付く**(裁定の 2 つ目)。
+   * ⚠ 直す前は**何も印が無く**、「何を選んでいるか」が画面から読めなかった。
+   * 🔑 開き直して見る ── 状態(`aria-pressed`)なので、**選んだ後に開いた表**でしか
+   *   確かめられない。
+   */
+  await toolToggle.click({ button: 'right' });
+  await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="pick-app-group-icon"]');
+  await expect(iconBox, '表がもう一度出ない').toBeVisible();
+  await expect(
+    iconBox.locator('button[aria-pressed="true"]'),
+    'いま付いている絵に枠が付いていない(何を選んでいるか画面から読めない)',
+  ).toHaveCount(1);
+  await expect(
+    iconRows.nth(1),
+    '枠が付いているのが、さっき選んだ絵ではない',
+  ).toHaveAttribute('aria-pressed', 'true');
+  // ⚠ 後始末 ── 開いたまま進むと、その先の押し所を小窓が覆う
+  await page.keyboard.press('Escape');
+  await expect(iconBox, 'Escape で閉じない').toBeHidden();
 
   await expect(
     page.locator('[data-pkc-field="entry-filter"]'),

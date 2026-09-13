@@ -279,7 +279,6 @@ import {
   pickAppGroupIconInApp,
   type ConfirmOptions,
 } from '@adapter/ui/render/app-dialog';
-import { TILE_ICON_CHOICES } from '@features/icon/tile-icons';
 import { printNote } from '@adapter/platform/print-note';
 
 const DB_NAME = 'pkc3';
@@ -2952,7 +2951,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * ⚠ 並ぶ物は `TILE_ICON_CHOICES` が正本(タイルと**同じ 49 種**)── ここで
      *   選り分けない。器は「1 行選ぶ」の 1 本(`app-dialog.ts`)。
      */
-    pickAppGroupIcon: (groupName) => pickAppGroupIconInApp(root, groupName, TILE_ICON_CHOICES),
+    pickAppGroupIcon: (groupName, current) => pickAppGroupIconInApp(root, groupName, current),
     /**
      * 🔴 **ノートが N 枚増えることを、押す前に聞く**(#857 段③)。
      * ⚠ 聞くのは**初めての並べ替えのときだけ** ── 2 回目からは増えないので出ない。

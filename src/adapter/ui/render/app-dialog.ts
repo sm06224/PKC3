@@ -39,6 +39,7 @@ import type { EntryPickRow } from '@features/entry-ref/entry-pick';
 import type { SnippetChoice } from '@features/snippet/snippet-menu';
 import { moveMark, toggleMark } from '@features/clipboard/scrap';
 import { toggleArchiveMark } from '@features/archive/zip-browse';
+import { buildIconPalette } from './icon-palette';
 
 export type DialogAnswer = 'ok' | 'cancel';
 
@@ -545,26 +546,38 @@ export function pickDiagramInApp(
 }
 
 /**
- * 🔴 **グループの見出しの目印を選ぶ**(#857 段②)。
+ * 🔴 **グループの見出しの目印を選ぶ**(#857 段②、2026-09-13 に表へ差し替え)。
  *
- * ⚠ 器は雛形・図・表の一覧と**同じ 1 本**(`pickRowInApp`)── 「押した行がそのまま
- *   答え」「`Escape` / やめる / 外を押すと `null`」「焦点を返す」を食い違わせない(§7)。
- * ⚠ **タイルの目印は絵の一覧(49 個の押し所)**だが、こちらは**行の一覧**にした ──
- *   出す場所が右クリックのメニューの先なので、面を作らずに開ける器のほうが素直で、
- *   器を 2 本目に増やさずに済む(絵は行の左に出る)。
- * 🔑 **外す口を先頭に置く**(user 指示 2026-08-23「置けるなら、外せなければならない」)。
+ * ## user 裁定(2026-09-13)── **絵を並べた表にする**
  *
- * @returns 選んだ図案の名前。**空文字 = なし(外す)**。`Escape` / やめる / 外なら `null`
+ * ⚠ 直す前は「1 行選ぶ」の汎用の器へ**字だけの行**を流していた ── タイル側は
+ *   **絵の並んだ表**なので、**同じことをする 2 か所で見た目が違って**いた。
+ *   ⚠ しかも**いま付いている絵に印が無く**、「何を選んでいるか」が画面から読めなかった。
+ *
+ * 🔑 表そのものは `render/icon-palette.ts` の**共有の 1 本** ── ここが付けるのは
+ *   **出口だけ**(押したらその場で閉じて、選んだ値が返る)。
+ *   ⚠ 2 つ目の表を書くと、次に絵を 1 つ足した日に**片方だけ増える**(§7)。
+ * 🔑 **いま付いている絵に枠**(`aria-pressed`)は、共有したことで**そのまま付いてくる**。
+ *
+ * ## ⚠ 器の作法は「1 行選ぶ」と同じに揃える
+ *
+ * ⚠ 閉じ方は器の 1 本を通す(`f.ok.click()` / `f.cancel.click()`)── どこから閉じても
+ *   **焦点を返す後始末が 1 か所**で走る(CLAUDE.md §10 ③)。
+ * ⚠ **外(暗い地)を押したら「やめる」** ── 選ぶだけの器だからである。
+ * ⚠ 受ける側のボタンは**隠す**(押した絵がそのまま答え)。消さずに隠す(器を捨てない)。
+ *
+ * @returns 図案の名前。**空文字 = なし(外す)**。やめたら `null`
  */
 export function pickAppGroupIconInApp(
   host: HTMLElement,
   groupName: string,
-  choices: readonly { readonly name: string; readonly label: string }[],
+  current: string,
 ): Promise<string | null> {
-  return pickRowInApp(host, {
-    title: `「${groupName}」の目印を選ぶ`,
-    field: 'pick-group-icon',
-    indexAttr: 'data-pkc-group-icon-index',
+  return enqueue(async () => {
+    const f = ensureFrame(host);
+    f.title.textContent = `「${groupName}」の目印を選ぶ`;
+    f.body.textContent = '';
+
     /**
      * 🔴 **副作用を、押す前に言う**(#857 段②。着地前の動線レビュー)。
      *
@@ -574,16 +587,54 @@ export function pickAppGroupIconInApp(
      * ⚠ 「作ります」と言い切らない ── 既に在れば作らないので、**どちらでも嘘に
      *   ならない字**にする。
      */
-    note: '目印は、このグループ専用のノートに憶えます(無ければ 1 枚作ります)。「なし」にしても、そのノートは残ります。',
-    rows: [
-      { label: 'なし', value: '' },
-      ...choices.map((c, i) => ({
-        label: c.label,
-        value: c.name,
-        // ⚠ 外す口と選ぶ口の間だけ区切る(やることが違う)
-        ...(i === 0 ? { separatorBefore: true } : {}),
-      })),
-    ],
+    const line = document.createElement('p');
+    line.setAttribute('data-pkc-field', 'pick-group-icon-note');
+    line.textContent =
+      '目印は、このグループ専用のノートに憶えます(無ければ 1 枚作ります)。「なし」にしても、そのノートは残ります。';
+    f.body.append(line);
+
+    let chosen: string | null = null;
+    const picks: HTMLButtonElement[] = [];
+    const palette = buildIconPalette({
+      current,
+      field: 'pick-group-icon',
+      ariaLabel: `「${groupName}」の目印を選ぶ`,
+      each: (btn, name) => {
+        picks.push(btn);
+        btn.addEventListener('click', () => {
+          chosen = name;
+          // ⚠ 隠してあっても `click()` は届く(閉じ口を 1 本に保つための呼び方)
+          f.ok.click();
+        });
+      },
+    });
+    f.body.append(palette);
+
+    const onOutside = (ev: MouseEvent): void => {
+      // 🔑 暗い地を押すと `target` は `<dialog>` 自身になる(中身を押せば中身が target)
+      if (ev.target === f.dialog) f.cancel.click();
+    };
+    f.dialog.addEventListener('click', onOutside);
+
+    f.ok.textContent = '入れる';
+    f.ok.removeAttribute('data-pkc-danger');
+    f.ok.hidden = true;
+    f.cancel.textContent = 'やめる';
+    f.cancel.hidden = false;
+
+    const answered = open(f, 'cancel');
+    /**
+     * 🔑 焦点は**いま付いている絵**へ(無ければ先頭の「なし」)── 開いた直後に
+     *   「いま何が選ばれているか」が**焦点の位置でも分かる**。
+     * ⚠ 字だけの行だった頃は先頭固定でよかったが、表では**どこに居るか**が要る。
+     */
+    const at = picks.find((b) => b.getAttribute('aria-pressed') === 'true');
+    (at ?? picks[0])?.focus();
+    const answer = await answered;
+    f.dialog.removeEventListener('click', onOutside);
+    // ⚠ 隠したままにしない ── 器は使い回すので、次の確認で受ける側が消える
+    f.ok.hidden = false;
+    return answer === 'ok' ? chosen : null;
   });
 }
 

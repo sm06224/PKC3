@@ -43,6 +43,7 @@ import type { LauncherTile } from '@features/launcher/tiles';
 import { planGroupMove } from '@features/launcher/group-order';
 import {
   APP_GROUP_ARCHETYPE,
+  appGroupIconOf,
   appGroupName,
   appGroupSeed,
   writeAppGroupIcon,
@@ -6435,6 +6436,16 @@ export function hasAppGroupNote(state: AppState, name: string): boolean {
  */
 export function hasAppGroupOrder(state: AppState): boolean {
   return Object.keys(state.appGroupOrders).length > 0;
+}
+
+/**
+ * 🔴 **その群にいま付いている図案の名前**(#857 段②、2026-09-13)。
+ * ⚠ 目印を選ぶ小窓が「**どれが選ばれているか**」を描くために要る。
+ * ⚠ 絵文字を直に貼った群は図案ではないので **空文字**を返す
+ *   ── 表の中に該当が無いので「なし」に枠が付く(嘘の枠を付けない)。
+ */
+export function appGroupIconName(state: AppState, name: string): string {
+  return appGroupIconOf(state.appGroupIcons, appGroupName(name))?.symbol ?? '';
 }
 
 function appGroupEntriesOf(
