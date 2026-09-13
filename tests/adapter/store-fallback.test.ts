@@ -40,6 +40,7 @@ import { PaneSizeStore } from '@adapter/ui/render/pane-size';
 import { QueryKeyStore } from '@adapter/ui/render/query-key-store';
 import { BrowseModeStore } from '@adapter/ui/render/browse-mode';
 import { PaneVisibilityStore } from '@adapter/ui/render/pane-visibility';
+import { GroupFoldStore } from '@adapter/ui/render/group-fold';
 
 /**
  * 「保存が無い状態で書いて、読み直したら同じ値が返る」を 1 組で見る。
@@ -127,6 +128,25 @@ const CASES: readonly {
     },
     a: 'apps',
     b: 'filer',
+  },
+  {
+    name: 'GroupFoldStore',
+    make: () => {
+      const s = new GroupFoldStore(null);
+      /**
+       * ⚠ この store の口は**押すたびに裏返る**(`set` ではない)ので、
+       *   台が渡す「あるべき集合」へ**差分だけ**押す。
+       * 🔑 こうすると、控えが死んでいる実装では **2 回目の読みで食い違う**
+       *   (`read` が毎回空を返すので、差分が永久に埋まらない)。
+       */
+      const setTo = (want: readonly string[]): void => {
+        for (const g of new Set([...s.get(), ...want]))
+          if (want.includes(g) !== s.get().includes(g)) s.toggle(g);
+      };
+      return { write: (v) => setTo(v as string[]), read: () => [...s.get()] };
+    },
+    a: ['資料'],
+    b: [],
   },
   {
     name: 'PaneVisibilityStore',

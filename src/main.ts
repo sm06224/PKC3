@@ -43,6 +43,7 @@ import { appPhoneLinks } from '@adapter/ui/render/phone-links';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { installAppendAutofold } from '@adapter/ui/render/append-autofold';
 import { appPaneSizes, applyPaneSizes } from '@adapter/ui/render/pane-size';
+import { appGroupFold } from '@adapter/ui/render/group-fold';
 import { installPaneResize } from '@adapter/ui/render/pane-resize';
 import { installPlaceDrag } from '@adapter/ui/render/place-drag';
 import { appKeymap } from '@adapter/ui/render/keymap';
@@ -2930,6 +2931,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * 編集の入りでしか組まれず、開いている編集は壊さない(効くのは次から。
      * 設定の説明文がそう約束している)。判断(検証・保存)は store 側が持つ。
      */
+    /**
+     * 🔴 **グループを畳む / 開く**(#857 段④)。
+     * ⚠ 畳みは**この端末の見え方**なので container に入れない(`pane-size` と同じ側)。
+     * 🔑 保存へ書いてから**描き直す** ── 描画器は保存を指紋に入れているので、
+     *   同じ state のままでも組み直る(`launcher.ts`)。
+     */
+    toggleAppGroup: (group) => {
+      appGroupFold.toggle(group);
+      browse.render(dispatcher.getState(), browseMode);
+    },
     setEditorMode: (mode) => {
       appEditorMode.setMode(mode);
     },

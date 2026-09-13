@@ -4354,6 +4354,35 @@ li[data-pkc-row-slot] {
 [data-pkc-field='launcher-group']:first-child {
   margin-top: 0;
 }
+/* 🔴 **見出しを押すと畳める**(#857 段④)。⚠ 見出しの字の見え方は変えない ──
+ * 押せるようになっただけで字が太る / 色が変わると、user は別の物だと思う。
+ * ⚠ 印(▾ / ▸)は `::before` が描く ── 器の字に混ぜると、見出しの字を読む側が外れる。 */
+[data-pkc-field='launcher-group'] button {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+[data-pkc-field='launcher-group'] button::before {
+  content: '▾';
+  flex: none;
+  font-size: 9px;
+  line-height: 1;
+}
+[data-pkc-field='launcher-group'] button[aria-expanded='false']::before {
+  content: '▸';
+}
+[data-pkc-field='launcher-group'] button:hover {
+  color: var(--fg);
+}
 [data-pkc-region='launcher-grid'] {
   display: flex;
   flex-direction: column;
