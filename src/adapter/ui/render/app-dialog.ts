@@ -383,6 +383,18 @@ function open(f: Frame, onDismiss: DialogAnswer): Promise<DialogAnswer> {
  * `{ date, time }`(時刻は空なら `null`)。⚠ **記法の字は組み立てない** ──
  * 組み立ては `formatLineDate` 1 本(`features/schedule/line-date.ts`)である。
  * ここが字を作ると、読む形と書く形が 2 か所で決まる(CLAUDE.md §7)。
+ *
+ * ## 🔴 時刻の欄は、**受け取る相手のときだけ**出す(#865、2026-09-13)
+ *
+ * ⚠ この小窓は口が 2 つある ── **本文の行に入れる**(`insert-date`。時刻を
+ *   `@2026-08-25 14:00` として**本当に書く**)と、**ノート 1 件に付ける**
+ *   (`set-entry-date`。frontmatter の `date:` で、**時刻を持てない**)。
+ * 🔴 直す前は**どちらにも時刻の欄を出していた**ので、後者で `14:00` と打って
+ *   「入れる」を押すと、受け手が `picked.time` を**黙って捨てていた** ──
+ *   打った字が何も言わずに消える、この repo がいちばん嫌う形である。
+ * 🔑 **捨てるのは正しい**(書く先が無い)── 間違っているのは、**捨てる物を
+ *   user に打たせていること**のほうである。だから**出さない**。
+ * ⚠ 既定は `true` ── 既存の呼び側(本文の行)の意味を 1 バイトも変えない。
  */
 export interface PickedDate {
   /** `YYYY-MM-DD`。 */
@@ -397,7 +409,13 @@ export function pickDateInApp(
   /** ⚠ 近道の表は features 側が持つ(画面の並びと規則を 2 か所に書かない)。 */
   shortcuts: readonly { id: string; label: string }[],
   toDate: (id: string, now: Date) => string,
+  /**
+   * 時刻の欄を出すか(#865)。⚠ **受け取る相手のときだけ `true`** ──
+   * 出したのに捨てる形にしない(上の docstring)。
+   */
+  opts: { readonly withTime?: boolean } = {},
 ): Promise<PickedDate | null> {
+  const withTime = opts.withTime !== false;
   return enqueue(async () => {
     const f = ensureFrame(host);
     f.title.textContent = '日付を入れる';
@@ -434,10 +452,13 @@ export function pickDateInApp(
     }
     const dateLabel = document.createElement('label');
     dateLabel.append(document.createTextNode('日付 '), date);
-    const timeLabel = document.createElement('label');
-    // ⚠ 「任意」と書く ── 空欄で通ることが分からないと、user は何か入れようとする
-    timeLabel.append(document.createTextNode('時刻(任意) '), time);
-    f.body.append(dateLabel, timeLabel);
+    f.body.append(dateLabel);
+    if (withTime) {
+      const timeLabel = document.createElement('label');
+      // ⚠ 「任意」と書く ── 空欄で通ることが分からないと、user は何か入れようとする
+      timeLabel.append(document.createTextNode('時刻(任意) '), time);
+      f.body.append(timeLabel);
+    }
 
     f.ok.textContent = '入れる';
     f.ok.removeAttribute('data-pkc-danger');
@@ -455,7 +476,9 @@ export function pickDateInApp(
     const answer = await answered;
     if (answer !== 'ok') return null;
     // ⚠ 日付が空なら**入れない**(空の記法を本文へ挿すと、読めない字が残る)
-    return date.value === '' ? null : { date: date.value, time: time.value === '' ? null : time.value };
+    // ⚠ 欄を出していないときは **`null` で返す**(器に残った値を拾わない)
+    const picked = withTime && time.value !== '' ? time.value : null;
+    return date.value === '' ? null : { date: date.value, time: picked };
   });
 }
 

@@ -67,6 +67,18 @@ test('🔴 別窓が同じノートを書いたら、保存時に理由が出る
   await win.bringToFront();
   await clickReal(win, '[data-pkc-action="set-entry-date"]');
   await expect(win.locator('[data-pkc-field="pick-date"]')).toBeVisible({ timeout: 10_000 });
+  /**
+   * 🔴 **ノートに付ける口には、時刻の欄が無い**(#865、2026-09-13)。
+   * ⚠ この小窓は口が 2 つあり(本文の行に入れる / ノート 1 件に付ける)、
+   *   ここは**後者**(`set-entry-date`)── frontmatter の `date:` は
+   *   `YYYY-MM-DD` しか受けないので、時刻を打たせると黙って捨てられる
+   *   (無言の dead input)。既存の対照群は `format-bar.smoke.spec.ts`
+   *   (`insert-date` = 本文の行 ── 時刻の欄が **在る**ことを見ている)。
+   */
+  await expect(
+    win.locator('[data-pkc-field="pick-time"]'),
+    '書く先が無いのに時刻の欄が出た(打った字が黙って捨てられる)',
+  ).toHaveCount(0);
   await clickReal(win, '[data-pkc-field="dialog-ok"]');
   // ⚠ **入ったことを確かめてから先へ進む**(入っていなければ以降は判定不能)──
   //    「外す」が押せる = frontmatter に `date:` が在る、である
