@@ -1037,6 +1037,19 @@ export interface AppState {
    */
   appGroupOrders: AppGroupOrders;
   /**
+   * 🔴 **グループ用ノートの読み直しの世代**(#857 段③)。
+   *
+   * ⚠ 並べ替えや目印は**画面を先に動かしてから書く**ので、その間に
+   *   **1 つ前の操作が積んだ読み直し**が戻ってくることがある ──
+   *   それは**書き換える前の本文**を読んでいるので、当てると画面が巻き戻る。
+   * 🔑 だから `APP_TILE_SAVED` と同じ作法を取る ──
+   *   **世代が違う読み直しは画面に当てない**。
+   * ⚠ **世代を進める側は、必ず自分で読み直しを 1 本積む**(積まないと、
+   *   飛んでいる読み直しを捨てた分だけ disk の値が画面へ届かなくなる)──
+   *   `tests/adapter/app-group-order.test.ts` が全数で見る。
+   */
+  appGroupGen: number;
+  /**
    * 🔴 **本文を書き換える経路のロック**(P8 段⑧。user 指示 2026-08-03
    * 「**編集競合は競合ロックと強制解放も念頭にしてください**」)。
    *
@@ -1227,6 +1240,7 @@ export const initialState: AppState = {
   launcherTiles: null,
   appGroupIcons: {},
   appGroupOrders: {},
+  appGroupGen: 0,
   calendarMonth: null,
   showArchived: false,
   showDoneTasks: false,
@@ -1406,7 +1420,7 @@ export type UserAction =
    * ⚠ 名前を `…_ICONS_LOADED` のままにしない ── **番号も運ぶ**ので、
    *   計器の名前が中身より狭くなる(CLAUDE.md「計器の名前を主張として読む」)。
    */
-  | { type: 'APP_GROUP_NOTES_LOADED'; icons: AppGroupIcons; orders: AppGroupOrders }
+  | { type: 'APP_GROUP_NOTES_LOADED'; icons: AppGroupIcons; orders: AppGroupOrders; gen: number }
   /**
    * 🔴 **グループの目印を選んだ**(#857 段②)。
    * ⚠ **在るものを探して、無いときだけ作る** ── 同じ名前のノートを 2 つ作らない
@@ -2309,6 +2323,12 @@ export type DomainEvent =
        */
       type: 'REQUEST_APP_GROUP_NOTES';
       entries: Array<{ lid: string; title: string }>;
+      /**
+       * 🔴 **この読み直しを発行したときの世代**(`AppState.appGroupGen`)。
+       * ⚠ 必須にしてある ── 読み直しを積む口を後から足す人が
+       *   世代を書き忘れたら、tsc がその場で落とす。
+       */
+      gen: number;
     }
   | {
       /** 居場所の永続化。⚠ 判定(循環・folder か)は reduce で済んでいる。 */
@@ -3365,10 +3385,7 @@ function reduceCore(
            * ⚠ **引き金は同じでも、読み筋は別**(#857 段②)── 混ぜると
            *   `tileFrom` が両方を同じ土俵で処理することになる。
            */
-          {
-            type: 'REQUEST_APP_GROUP_NOTES',
-            entries: appGroupEntriesOf(state.order, state.entryMetas),
-          },
+          readAppGroupNotes(state),
         ],
       };
     /**
@@ -3410,6 +3427,19 @@ function reduceCore(
     case 'LAUNCHER_TILES_LOADED':
       return { state: { ...state, launcherTiles: action.tiles }, events: [] };
     case 'APP_GROUP_NOTES_LOADED':
+      /**
+       * 🔴 **世代が違う読み直しは画面に当てない**(#857 段③。
+       * 実ブラウザ smoke が 3 回に 1 回落ちて見つかった)。
+       *
+       * ⚠ 落ちていたのは「**名前順へ戻したのに、まだ『すべて名前順に戻す』が出ている**」。
+       *   並べ替えが積んだ読み直しが**戻す操作のあとに**返ってきて、
+       *   **戻す前の本文**(= まだ番号が載っている)を画面へ当てていた。
+       * 🔑 `APP_TILE_SAVED` が既に持っている作法を、こちらにも置いた
+       *   (**片側にしか無い門**は §7 の型である)。
+       * ⚠ 捨てても画面は置き去りにならない ── 世代を進めた側が必ず読み直しを
+       *   1 本積むので、**すぐ後ろに正しい答えが来る**。
+       */
+      if (action.gen !== state.appGroupGen) return { state, events: [] };
       return {
         state: { ...state, appGroupIcons: action.icons, appGroupOrders: action.orders },
         events: [],
@@ -3518,18 +3548,22 @@ function reduceCore(
         next = made.state;
         created.push(...made.events);
       }
+      /**
+       * 🔑 **画面は先に動かす**(タイルと同じ)── disk の往復を待つと数百 ms 動かず、
+       *   「押したのに動かない」になる。⚠ 番号は state に持つので、書き戻しは要らない。
+       * 🔴 **世代を 1 つ進める**(#857 段③)── 画面を先に動かした以上、
+       *   **この瞬間より前に積んだ読み直しは、書き換える前の本文を読む**ので当ててはいけない。
+       */
+      const moved: AppState = {
+        ...next,
+        appGroupOrders: Object.fromEntries([
+          ...Object.entries(next.appGroupOrders),
+          ...plan.map((w) => [w.name, w.order] as const),
+        ]),
+        appGroupGen: next.appGroupGen + 1,
+      };
       return {
-        /**
-         * 🔑 **画面は先に動かす**(タイルと同じ)── disk の往復を待つと数百 ms 動かず、
-         *   「押したのに動かない」になる。⚠ 番号は state に持つので、書き戻しは要らない。
-         */
-        state: {
-          ...next,
-          appGroupOrders: Object.fromEntries([
-            ...Object.entries(next.appGroupOrders),
-            ...plan.map((w) => [w.name, w.order] as const),
-          ]),
-        },
+        state: moved,
         events: [
           ...created,
           { type: 'REQUEST_APP_GROUP_ORDER', rows },
@@ -3543,10 +3577,7 @@ function reduceCore(
            *   成功でも衝突でも `appGroupOrders` を disk の実値へ戻す
            *   (`REQUEST_TILE_ORDER` が同じことをしている)。
            */
-          {
-            type: 'REQUEST_APP_GROUP_NOTES',
-            entries: appGroupEntriesOf(next.order, next.entryMetas),
-          },
+          readAppGroupNotes(moved),
         ],
       };
     }
@@ -3598,16 +3629,16 @@ function reduceCore(
        *   画面の番号を落として名前順へ戻すのが正しい(書く先が無いだけである)。
        */
       if (Object.keys(state.appGroupOrders).length === 0) return { state, events: [] };
+      // 🔑 画面は先に戻す(書き戻しを待たない ── 動かすときと同じ流儀)。
+      // 🔴 世代を進める理由は `MOVE_APP_GROUP` と同じ ── ここが**当の症状**が出た所で、
+      //    「戻したのに、また『すべて名前順に戻す』が出る」は飛んでいた読み直しの仕業だった。
+      const cleared: AppState = { ...state, appGroupOrders: {}, appGroupGen: state.appGroupGen + 1 };
       return {
-        // 🔑 画面は先に戻す(書き戻しを待たない ── 動かすときと同じ流儀)
-        state: { ...state, appGroupOrders: {} },
+        state: cleared,
         events: [
           { type: 'REQUEST_APP_GROUP_ORDER', rows },
           // 🔴 書いたあとに読み直す(上の `MOVE_APP_GROUP` と同じ理由)
-          {
-            type: 'REQUEST_APP_GROUP_NOTES',
-            entries: appGroupEntriesOf(state.order, state.entryMetas),
-          },
+          readAppGroupNotes(cleared),
         ],
       };
     }
@@ -3634,10 +3665,7 @@ function reduceCore(
             },
             // ⚠ 書いた**あと**に読み直す(effect の列は 1 本なので順番は保たれる)──
             //    読み直さないと、押した結果が出るのは「次にタブを開き直したとき」になる
-            {
-              type: 'REQUEST_APP_GROUP_NOTES',
-              entries: appGroupEntriesOf(state.order, state.entryMetas),
-            },
+            readAppGroupNotes(state),
           ],
         };
       }
@@ -3673,10 +3701,7 @@ function reduceCore(
         events: [
           ...created.events,
           // ⚠ **作った後の並び**で読む(作りたてのノートが入っていないと、目印が出ない)
-          {
-            type: 'REQUEST_APP_GROUP_NOTES',
-            entries: appGroupEntriesOf(created.state.order, created.state.entryMetas),
-          },
+          readAppGroupNotes(created.state),
         ],
       };
     }
@@ -6474,6 +6499,21 @@ function appGroupEntriesOf(
     if (meta?.archetype === APP_GROUP_ARCHETYPE) out.push({ lid, title: meta.title });
   }
   return out;
+}
+
+/**
+ * 🔴 **グループ用ノートの読み直しを 1 本積む**(#857 段③)。
+ *
+ * 🔑 **封筒を組む口はここ 1 つ**(CLAUDE.md §7)── 世代を書き忘れる場所を作らない。
+ * ⚠ 渡すのは**変更を当てた後の state** である ── 並びも世代もそこから読む
+ *   (当てる前の state を渡すと、作りたてのノートが入らない / 世代が 1 つ古くなる)。
+ */
+function readAppGroupNotes(s: AppState): DomainEvent {
+  return {
+    type: 'REQUEST_APP_GROUP_NOTES',
+    entries: appGroupEntriesOf(s.order, s.entryMetas),
+    gen: s.appGroupGen,
+  };
 }
 
 function attachmentEntriesOf(

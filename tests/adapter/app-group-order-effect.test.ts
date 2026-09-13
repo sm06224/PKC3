@@ -204,6 +204,9 @@ describe('③ 同じ名前のノートが 2 枚あるときは先勝ち(M3)', ()
 
     h.fire({
       type: 'REQUEST_APP_GROUP_NOTES',
+      // ⚠ 実物と同じく**いまの世代**で発行する(#857 段③)── 世代が合わないと
+      //    reducer が答えを捨てるので、ここを固定値にすると静かに空振りする
+      gen: h.d.getState().appGroupGen,
       entries: [
         { lid: 'dup1', title: '仕事' },
         { lid: 'dup2', title: '仕事' },
@@ -293,6 +296,9 @@ describe('⑥ 書いたあとに読み直す ── APP_GROUP_NOTES_LOADED が d
     });
     h.fire({
       type: 'REQUEST_APP_GROUP_NOTES',
+      // ⚠ 実物と同じく**いまの世代**で発行する(#857 段③)── 世代が合わないと
+      //    reducer が答えを捨てるので、ここを固定値にすると静かに空振りする
+      gen: h.d.getState().appGroupGen,
       entries: [{ lid: 'g1', title: '仕事' }],
     });
     await tick(60);
@@ -315,6 +321,9 @@ describe('⑥ 書いたあとに読み直す ── APP_GROUP_NOTES_LOADED が d
     });
     h.fire({
       type: 'REQUEST_APP_GROUP_NOTES',
+      // ⚠ 実物と同じく**いまの世代**で発行する(#857 段③)── 世代が合わないと
+      //    reducer が答えを捨てるので、ここを固定値にすると静かに空振りする
+      gen: h.d.getState().appGroupGen,
       entries: [
         { lid: 'g1', title: 'A' },
         { lid: 'g2', title: 'B' },
@@ -329,5 +338,34 @@ describe('⑥ 書いたあとに読み直す ── APP_GROUP_NOTES_LOADED が d
       Object.prototype.hasOwnProperty.call(orders, 'B'),
       '書けなかったのに、狙った値が state に入っている',
     ).toBe(false);
+  });
+});
+
+/**
+ * 🔴 **読み直しの世代は、そのまま返す**(#857 段③)。
+ *
+ * ⚠ 世代を見て捨てるのは reducer の仕事だが、**この層が世代を運ばなければ
+ *   判定材料が届かない** ── しかも届かない側の顔は「`gen: 0`」なので、
+ *   世代がまだ 0 の test では**壊しても気づけない**(CLAUDE.md §1「代替物で満たせる条件」)。
+ * 🔑 だから **state を経由せず、返ってきた action を直に見る** ── 0 ではない値で撃つ。
+ */
+describe('🔴 読み直しの世代(#857 段③)', () => {
+  it('🔴 発行したときの世代を、そのまま返す', async () => {
+    const h = setup({ g1: appGroupSeed('仕事') });
+    const seen: Array<{ type: string; gen?: number }> = [];
+    const raw = h.d.dispatch.bind(h.d);
+    h.d.dispatch = ((a: Parameters<typeof raw>[0]) => {
+      seen.push(a as unknown as { type: string; gen?: number });
+      return raw(a);
+    }) as typeof h.d.dispatch;
+
+    // ⚠ **0 ではない**世代で撃つ ── 0 だと「運んでいない」と見分けが付かない
+    h.fire({ type: 'REQUEST_APP_GROUP_NOTES', gen: 7, entries: [{ lid: 'g1', title: '仕事' }] });
+    await tick();
+
+    const got = seen.filter((a) => a.type === 'APP_GROUP_NOTES_LOADED');
+    // 空振り防止 ── 本当に答えが返っているか
+    expect(got, '読み直しの答えが 1 度も返っていない').toHaveLength(1);
+    expect(got[0]!.gen, '発行した世代を運んでいない(reducer が判定できない)').toBe(7);
   });
 });

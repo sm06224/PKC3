@@ -1925,6 +1925,10 @@ export function connectStoreEffects(
               type: 'APP_GROUP_NOTES_LOADED',
               icons: appGroupIconsOf(notes),
               orders: appGroupOrdersOf(notes),
+              // 🔴 **発行したときの世代をそのまま返す**(#857 段③)── 画面が
+              //    その後に動いていたら、この答えは**古い本文**なので当ててはいけない。
+              //    判定は reducer 側(この層は state を見ない、という file 冒頭の宣言)。
+              gen: ev.gen,
             });
           } catch (e) {
             if (!disposed)

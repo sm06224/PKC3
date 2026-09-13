@@ -238,6 +238,7 @@ describe('ノートが増えることを、押す前に聞く(#857 段③)', () 
       type: 'APP_GROUP_NOTES_LOADED',
       icons: {},
       orders: { 仕事: 0, 資料: 1, 道具: 2 },
+      gen: d.getState().appGroupGen,
     });
 
     const asked = vi.fn(() => Promise.resolve(true));
@@ -457,5 +458,92 @@ describe('「すべて名前順に戻す」は範囲を言う(#857 段③)', () 
     await Promise.resolve();
     expect(d.getState().appGroupOrders, '戻っていない').toEqual({});
     detach();
+  });
+});
+
+/**
+ * 🔴 **飛んでいる読み直しが、あとから画面を巻き戻す**(#857 段③。
+ * 実ブラウザ smoke が 3 回に 1 回落ちたので、**推測で直さず 10 行で決着させた**)。
+ *
+ * ⚠ 症状は「**名前順へ戻したのに、まだ『すべて名前順に戻す』が出ている**」。
+ * 🔑 仕組みはこうである ──
+ *
+ * | | 何が起きるか |
+ * |---|---|
+ * | ① 「上へ」を押す | 画面はその場で並び替わり、**書く**指示と**読み直す**指示が積まれる |
+ * | ② すぐ「すべて名前順に戻す」を押す | 画面はその場で番号を捨てる(`appGroupOrders = {}`) |
+ * | 🔴 ③ ①の**読み直し**が返ってくる | **まだ番号が載っている**本文を読んでいるので、②で捨てた番号が**戻る** |
+ * | ④ ②の読み直しが返ってくる | やっと消える |
+ *
+ * ⚠ つまり③と④の間だけ、押し所が**生き返る**。実ブラウザは③に当たると落ちる。
+ * 🔑 ここは `APP_TILE_SAVED` が既に持っている作法(**世代が違う ack は触らない**)が
+ *   `APP_GROUP_NOTES_LOADED` にだけ無かった、という**片側の抜け**である(CLAUDE.md §7)。
+ */
+describe('🔴 古い読み直しに巻き戻されない(#857 段③)', () => {
+  it('🔴 戻した直後に、戻す前の本文を読んだ結果が来ても、番号は戻らない', () => {
+    const moved = move(st, '道具', -1).state;
+    // 前提 ── ①で番号が付いている(ゼロ件の次元を作らない)
+    const stale = moved.appGroupOrders;
+    expect(Object.keys(stale).length, '前提が崩れている(番号が付いていない)').toBeGreaterThan(0);
+    // ⚠ ①が積んだ読み直しは、**この世代**で飛んでいる
+    const flying = moved.appGroupGen;
+
+    const after = reduce(moved, { type: 'RESET_APP_GROUP_ORDER' }).state;
+    expect(after.appGroupOrders, '前提が崩れている(戻せていない)').toEqual({});
+    // 前提 ── ②は世代を進めている(進めていなければ、この test は何も見ていない)
+    expect(after.appGroupGen, '前提が崩れている(世代が進んでいない)').not.toBe(flying);
+
+    // 🔴 ここが本題 ── ①の読み直しが、**戻す前の本文**を持って返ってくる
+    const late = reduce(after, {
+      type: 'APP_GROUP_NOTES_LOADED',
+      icons: after.appGroupIcons,
+      orders: stale,
+      gen: flying,
+    }).state;
+    expect(late.appGroupOrders, '古い読み直しに巻き戻された(押し所が生き返る)').toEqual({});
+  });
+
+  /**
+   * ⚠ **対照群** ── 何でも捨てるようにしたら、**本当の読み直しが効かなくなる**。
+   * 🔑 ②が積んだ読み直し(= 最後の変更より後に発行されたもの)は、必ず受ける。
+   */
+  it('⚠ 新しい読み直しは、ちゃんと画面に効く', () => {
+    const moved = move(st, '道具', -1).state;
+    const fresh = { 道具: 0, 資料: 1 };
+    const got = reduce(moved, {
+      type: 'APP_GROUP_NOTES_LOADED',
+      icons: moved.appGroupIcons,
+      orders: fresh,
+      gen: moved.appGroupGen,
+    }).state;
+    expect(got.appGroupOrders, '新しい読み直しが画面に効いていない').toEqual(fresh);
+  });
+
+  /**
+   * 🔴 **世代を進めた側は、必ず読み直しを 1 本積む**(#857 段③)。
+   *
+   * ⚠ これが崩れると、**捨てた読み直しの代わりが来ない** ── 画面は
+   *   楽観更新のまま disk と食い違い、`F5` まで誰も気づかない
+   *   (門を足したことで**新しく生まれうる壊れ方**なので、門と対で置く)。
+   * 🔑 全数で見る ── 世代を進める case を後から足した人が、
+   *   読み直しを積み忘れたらここが落ちる。
+   */
+  it('🔴 世代を進める操作は、必ず読み直しを 1 本積む', () => {
+    const bumps: Array<{ name: string; r: ReturnType<typeof reduce> }> = [
+      { name: 'MOVE_APP_GROUP', r: move(st, '道具', -1) },
+      { name: 'RESET_APP_GROUP_ORDER', r: reduce(move(st, '道具', -1).state, { type: 'RESET_APP_GROUP_ORDER' }) },
+    ];
+    // ⚠ 空振り防止 ── 1 件でも世代が動いていなければ、この test は何も見ていない
+    expect(bumps.filter((b) => b.r.state.appGroupGen > st.appGroupGen).length, '前提が崩れている').toBe(
+      bumps.length,
+    );
+    for (const b of bumps) {
+      const reads = b.r.events.filter((e) => e.type === 'REQUEST_APP_GROUP_NOTES');
+      expect(reads.length, `${b.name} が世代だけ進めて読み直しを積んでいない`).toBe(1);
+      expect(
+        (reads[0] as { gen: number }).gen,
+        `${b.name} の読み直しが、進めた後の世代で飛んでいない(出た瞬間に捨てられる)`,
+      ).toBe(b.r.state.appGroupGen);
+    }
   });
 });
