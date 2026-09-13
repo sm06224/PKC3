@@ -15,6 +15,8 @@ import { stubStamps } from '../helpers/store-stamps';
 import { describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
+import type { AppState } from '../../src/adapter/state/app-state';
+import { initialState, reduce } from '../../src/adapter/state/app-state';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
@@ -1029,6 +1031,30 @@ describe('札の右クリックから繰り返しを付け替える(#855 段 0)'
   });
 
   /**
+   * 🔴 **知らない綴りが来ても本文を書き換えない**(2026-09-13、変異試験 M11 が
+   * SURVIVED で教えた)。
+   *
+   * ⚠ 正規の経路では `repeatMenuActions` が正しい綴りしか焼かないので、
+   *   `isRepeatUnit` の門は**1 度も通っていなかった** ── 門を外しても全部緑だった。
+   * 🔑 だから**器を直に汚して**通す(綴りが化けるのは、将来この属性を別の所から
+   *   書いたときに起きる ── そのとき止めるのがこの門である)。
+   */
+  it('⚠ 刻みの綴りが化けていたら、何も書かない', async () => {
+    const { root, store } = setup({ e1: '- [ ] ゴミ出し @2026-08-25\n' });
+    const card = cardsOf(root, '2026-08-25')[0]!;
+    openMenu(root, card);
+    press(root, '繰り返す…');
+    const btn = [
+      ...root.querySelectorAll<HTMLElement>('[data-pkc-region="context-menu"] button'),
+    ].find((b) => b.textContent === '毎週');
+    expect(btn, '前提が崩れている(毎週が出ていない)').not.toBeUndefined();
+    btn!.setAttribute('data-pkc-repeat', 'bogus');
+    btn!.click();
+    await tick(20);
+    expect(store['e1'], '知らない綴りで本文を書き換えた').toBe('- [ ] ゴミ出し @2026-08-25\n');
+  });
+
+  /**
    * 🔴 **ノート 1 件の予定には出さない** ── 日付は frontmatter の `date:` に在り、
    * **繰り返しの記法が無い**(出すと押しても何も起きない)。
    */
@@ -1038,5 +1064,69 @@ describe('札の右クリックから繰り返しを付け替える(#855 段 0)'
     expect(card, '前提が崩れている(ノートの札が出ていない)').not.toBeUndefined();
     expect(card!.hasAttribute('data-pkc-whole-note'), '前提が崩れている').toBe(true);
     expect(openMenu(root, card!), '押しても何も起きない口を出した').not.toContain('繰り返す…');
+  });
+
+  /**
+   * 🔴 **門は 2 枚。①だけが鳴る場面を作る**(2026-09-13、変異試験 M12)。
+   *
+   * ⚠ いまの札の作りでは、ノート 1 件の予定に `data-pkc-task-line` が**1 つも
+   *   無い**ので、②(行番号が読めるか)だけで止まっている ── つまり①を外しても
+   *   **今日は壊れない**(CLAUDE.md §1「これが無いと壊れる、と書く前に外して見る」)。
+   * 🔑 ①が守っているのは「**frontmatter の行を指す番号を札へ焼いた日**」である。
+   *   その日を器の汚しで先取りして、①だけが鳴ることを見る。
+   */
+  it('⚠ ノートの札に行番号が焼かれる日が来ても、「繰り返す…」は出さない', () => {
+    const { root } = setup({}, { e9: '2026-08-25' });
+    const card = cardsOf(root, '2026-08-25')[0]!;
+    expect(card.hasAttribute('data-pkc-whole-note'), '前提が崩れている').toBe(true);
+    // ⚠ 前提の裏取り ── いまは②で止まっている(この子が無い)
+    expect(
+      card.querySelector('[data-pkc-task-line]'),
+      '前提が崩れている(もう行番号が焼かれている)',
+    ).toBeNull();
+    const fake = document.createElement('span');
+    fake.setAttribute('data-pkc-task-line', '0');
+    card.append(fake);
+    expect(openMenu(root, card), '①の門が効いていない').not.toContain('繰り返す…');
+  });
+});
+
+/**
+ * 🔴 **`SET_TASK_REPEAT` の門を、reducer で直に見る**(2026-09-13、変異試験
+ * M5 / M7 が SURVIVED で教えた)。
+ *
+ * ⚠ 上の右クリックの test は**いつも `phase: 'ready'` / 実在する lid** で回すので、
+ *   断る側の 2 つの枝を**1 度も通っていなかった** ── 門を丸ごと外しても
+ *   全部緑だった(CLAUDE.md §2「経路が一度も通っていない」)。
+ * 🔑 画面を通さずに reducer を直に叩く ── 画面から作れない状態(編集中に
+ *   右クリックのメニューを開いたまま押す / 消えたノートの札を押す)を作るため。
+ */
+describe('繰り返しを断る 2 つの門(#855 段 0)', () => {
+  const ready = (): AppState => {
+    const booted = reduce(initialState, {
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [meta('e1')],
+      relations: [],
+    }).state;
+    return booted;
+  };
+
+  it('🔴 編集中は断る ── 理由は `phaseBlockReason` 1 本から出る', () => {
+    const editing: AppState = { ...ready(), phase: 'editing' };
+    const r = reduce(editing, { type: 'SET_TASK_REPEAT', lid: 'e1', line: 0, repeat: 'week' });
+    expect(r.events, '編集中なのに本文を書きに行った').toEqual([]);
+    expect(r.state.error, '無言で捨てた').toContain('編集を終了してから');
+    // ⚠ 対照群 ── `ready` なら同じ 1 手が通る(門だけが効いていることの裏取り)
+    expect(
+      reduce(ready(), { type: 'SET_TASK_REPEAT', lid: 'e1', line: 0, repeat: 'week' }).events,
+    ).toHaveLength(1);
+  });
+
+  it('⚠ 消えたノートでは何もしない(当てずっぽうで別の本文を書かない)', () => {
+    const r = reduce(ready(), { type: 'SET_TASK_REPEAT', lid: 'no-such', line: 0, repeat: 'week' });
+    expect(r.events, '知らない lid で本文を書きに行った').toEqual([]);
+    // ⚠ **理由は出さない** ── 押した物が消えているので、言うことが無い
+    expect(r.state.error).toBeNull();
   });
 });
