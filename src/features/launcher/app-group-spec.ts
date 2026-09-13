@@ -85,6 +85,28 @@ export function appGroupSeed(name: string): string {
   );
 }
 
+/** 並び順の鍵。⚠ 目印(`appgroup.icon`)と**同じノート**に、別の鍵として持つ。 */
+export const APP_GROUP_ORDER_KEY = 'appgroup.order';
+
+/**
+ * 本文から並び順を読む。⚠ 数でないもの・有限でないものは**無い**扱い
+ * (壊れた保存で並びを崩さない ── 読めない値は「番号が無い」と同じ)。
+ */
+export function readAppGroupOrder(body: string): number | undefined {
+  const raw = parseFrontmatter(body).meta[APP_GROUP_ORDER_KEY];
+  return typeof raw === 'number' && Number.isFinite(raw) ? raw : undefined;
+}
+
+/** 並び順を本文へ書き戻す(**原文 splice**)。⚠ `null` は key ごと消す。 */
+export function writeAppGroupOrder(body: string, order: number | null): string {
+  return spliceFrontmatterKeys(body, {
+    [APP_GROUP_ORDER_KEY]: order === null ? undefined : order,
+  });
+}
+
+/** 名前 → 並び順。⚠ **番号を持たない群は入れない**(「無い」と「0 番」を混ぜない)。 */
+export type AppGroupOrders = Readonly<Record<string, number>>;
+
 /** 名前 → 目印。⚠ state に載るので**素の object**(Map は JSON にならない)。 */
 export type AppGroupIcons = Readonly<Record<string, IconValue>>;
 
@@ -114,4 +136,54 @@ export function appGroupIconsOf(
 /** その群の目印。⚠ 引くのはここ 1 か所(`obj[name]` を呼び側に書かせない)。 */
 export function appGroupIconOf(icons: AppGroupIcons, name: string): IconValue | undefined {
   return Object.prototype.hasOwnProperty.call(icons, name) ? icons[name] : undefined;
+}
+
+/**
+ * 名前 → 並び順の対応を作る。⚠ 目印と**同じ作法**(先勝ち / 持たない群は入れない /
+ * `Object.fromEntries` で組む ── `__proto__` という名前の群で入れ物を壊さない)。
+ */
+export function appGroupOrdersOf(
+  notes: readonly { readonly title: string; readonly body: string }[],
+): AppGroupOrders {
+  const out = new Map<string, number>();
+  for (const n of notes) {
+    const name = appGroupName(n.title);
+    if (name === '' || out.has(name)) continue;
+    const v = readAppGroupOrder(n.body);
+    if (v === undefined) continue;
+    out.set(name, v);
+  }
+  return Object.fromEntries(out);
+}
+
+/** その群の並び順。⚠ 引くのはここ 1 か所。 */
+export function appGroupOrderOf(orders: AppGroupOrders, name: string): number | undefined {
+  return Object.prototype.hasOwnProperty.call(orders, name) ? orders[name] : undefined;
+}
+
+/**
+ * 🔴 **群を並べる**(#857 段③)。番号のある群が**番号の順**で先、その後ろに
+ * 番号の無い群が**名前の順**で続く。
+ *
+ * ⚠ **この規則が「部分的に番号を付けられない」理由そのもの**である ──
+ *   `A / B / C` の `C` にだけ番号を付けると、`C` は**全部の先頭へ飛ぶ**。
+ *   だから「動かした先より上に在る群」にも番号が要る(`planGroupMove`)。
+ * ⚠ 名前の無い群(`''`)は**必ず先頭**(番号を持てない ── 見出しが無いので
+ *   動かす口もそもそも出ない)。
+ */
+export function sortGroupNames(
+  names: readonly string[],
+  orders: AppGroupOrders,
+): readonly string[] {
+  return [...names].sort((a, b) => {
+    if (a === b) return 0;
+    if (a === '') return -1;
+    if (b === '') return 1;
+    const ao = appGroupOrderOf(orders, a);
+    const bo = appGroupOrderOf(orders, b);
+    if (ao !== undefined && bo !== undefined) return ao !== bo ? ao - bo : a < b ? -1 : 1;
+    if (ao !== undefined) return -1;
+    if (bo !== undefined) return 1;
+    return a < b ? -1 : 1;
+  });
 }

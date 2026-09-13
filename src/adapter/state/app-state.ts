@@ -40,12 +40,16 @@ import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import type { PersistState } from '@adapter/platform/storage-persist';
 import type { OpenExtension } from '@adapter/platform/extension-links';
 import type { LauncherTile } from '@features/launcher/tiles';
+import { planGroupMove } from '@features/launcher/group-order';
 import {
   APP_GROUP_ARCHETYPE,
+  appGroupIconOf,
   appGroupName,
   appGroupSeed,
   writeAppGroupIcon,
+  writeAppGroupOrder,
   type AppGroupIcons,
+  type AppGroupOrders,
 } from '@features/launcher/app-group-spec';
 import {
   applyTileWrites,
@@ -1027,6 +1031,25 @@ export interface AppState {
    */
   appGroupIcons: AppGroupIcons;
   /**
+   * グループの並び順(#857 段③)。名前 → 番号。
+   * ⚠ **番号を持たない群は入っていない**(「無い」と「0 番」を混ぜない)──
+   *   並べる規則は `sortGroupNames` 1 本。
+   */
+  appGroupOrders: AppGroupOrders;
+  /**
+   * 🔴 **グループ用ノートの読み直しの世代**(#857 段③)。
+   *
+   * ⚠ 並べ替えや目印は**画面を先に動かしてから書く**ので、その間に
+   *   **1 つ前の操作が積んだ読み直し**が戻ってくることがある ──
+   *   それは**書き換える前の本文**を読んでいるので、当てると画面が巻き戻る。
+   * 🔑 だから `APP_TILE_SAVED` と同じ作法を取る ──
+   *   **世代が違う読み直しは画面に当てない**。
+   * ⚠ **世代を進める側は、必ず自分で読み直しを 1 本積む**(積まないと、
+   *   飛んでいる読み直しを捨てた分だけ disk の値が画面へ届かなくなる)──
+   *   `tests/adapter/app-group-order.test.ts` が全数で見る。
+   */
+  appGroupGen: number;
+  /**
    * 🔴 **本文を書き換える経路のロック**(P8 段⑧。user 指示 2026-08-03
    * 「**編集競合は競合ロックと強制解放も念頭にしてください**」)。
    *
@@ -1216,6 +1239,8 @@ export const initialState: AppState = {
   backlinks: null,
   launcherTiles: null,
   appGroupIcons: {},
+  appGroupOrders: {},
+  appGroupGen: 0,
   calendarMonth: null,
   showArchived: false,
   showDoneTasks: false,
@@ -1390,7 +1415,12 @@ export type UserAction =
   /** 関係を消す(#185)。⚠ **id で消す**(同じ組が複数あっても迷わない)。 */
   | { type: 'REMOVE_RELATION'; id: string }
   | { type: 'LAUNCHER_TILES_LOADED'; tiles: LauncherTile[] }
-  | { type: 'APP_GROUP_ICONS_LOADED'; icons: AppGroupIcons }
+  /**
+   * 🔴 **グループ用ノートから読んだもの**(#857 段②③)。
+   * ⚠ 名前を `…_ICONS_LOADED` のままにしない ── **番号も運ぶ**ので、
+   *   計器の名前が中身より狭くなる(CLAUDE.md「計器の名前を主張として読む」)。
+   */
+  | { type: 'APP_GROUP_NOTES_LOADED'; icons: AppGroupIcons; orders: AppGroupOrders; gen: number }
   /**
    * 🔴 **グループの目印を選んだ**(#857 段②)。
    * ⚠ **在るものを探して、無いときだけ作る** ── 同じ名前のノートを 2 つ作らない
@@ -1398,6 +1428,13 @@ export type UserAction =
    * ⚠ `newLid` は呼び側が採る(reducer は純関数 ── 乱数を持たない)。
    */
   | { type: 'SET_APP_GROUP_ICON'; name: string; icon: string | null; newLid: string }
+  /**
+   * 🔴 **グループを 1 つ上へ / 下へ**(#857 段③)。
+   * ⚠ `newLids` は**書く群の数だけ**呼び側が採る(reducer は乱数を持たない)──
+   *   足りなければその群は書かない(黙って別の群の lid を使い回さない)。
+   */
+  | { type: 'MOVE_APP_GROUP'; name: string; by: -1 | 1; newLids: readonly string[] }
+  | { type: 'RESET_APP_GROUP_ORDER' }
   /**
    * アプリの一覧を読み直す(P8 段⑱)。
    *
@@ -2244,6 +2281,27 @@ export type DomainEvent =
     }
   | {
       /**
+       * 🔴 **グループの並び順を書く**(#857 段③)。
+       * ⚠ **N 件を 1 つの仕事**として渡す(`REQUEST_TILE_ORDER` と同じ作法)──
+       *   N 個の event に割ると、途中の失敗がどこまで効いたか読めなくなる。
+       * 🔴 **ここに載るのは「既に在るノート」だけ**(2026-09-13)── まだ無い群は
+       *   reducer が `CREATE_ENTRY` を通して作るので、番号は雛形に入って届く。
+       *   ⚠ effect に行を作らせない ── 作った物が `entryMetas` に入らず、
+       *   **サイドバーにも目録にも出ない**(刻みも `ENTRY_STAMPED` が捨てる)。
+       */
+      type: 'REQUEST_APP_GROUP_ORDER';
+      rows: Array<{
+        name: string;
+        /** ⚠ `null` は**番号を外す**(名前順へ戻す)。 */
+        order: number | null;
+        lid: string;
+        title: string;
+        archetype: string;
+        entryOrder: number;
+      }>;
+    }
+  | {
+      /**
        * 🔴 **グループ用ノートの目印を書く**(#857 段②)。
        * ⚠ `REQUEST_TILE_UPDATE` と**同じことをする別の口**に見えるが、あちらは
        *   書いたあとに**タイルを読み直す** ── こちらは**目印を読み直す**ので、
@@ -2259,12 +2317,18 @@ export type DomainEvent =
     }
   | {
       /**
-       * 🔴 **グループ用ノートの目印を読む**(#857 段②)。
+       * 🔴 **グループ用ノートを読む**(#857 段②③ ── 目印と並び順)。
        * ⚠ `REQUEST_LAUNCHER_TILES` と**引き金は同じでも別の event** ── 混ぜると
        *   `tileFrom` が両方を同じ土俵で処理する(`app-group-spec.ts` の火種)。
        */
-      type: 'REQUEST_APP_GROUP_ICONS';
+      type: 'REQUEST_APP_GROUP_NOTES';
       entries: Array<{ lid: string; title: string }>;
+      /**
+       * 🔴 **この読み直しを発行したときの世代**(`AppState.appGroupGen`)。
+       * ⚠ 必須にしてある ── 読み直しを積む口を後から足す人が
+       *   世代を書き忘れたら、tsc がその場で落とす。
+       */
+      gen: number;
     }
   | {
       /** 居場所の永続化。⚠ 判定(循環・folder か)は reduce で済んでいる。 */
@@ -3321,10 +3385,7 @@ function reduceCore(
            * ⚠ **引き金は同じでも、読み筋は別**(#857 段②)── 混ぜると
            *   `tileFrom` が両方を同じ土俵で処理することになる。
            */
-          {
-            type: 'REQUEST_APP_GROUP_ICONS',
-            entries: appGroupEntriesOf(state.order, state.entryMetas),
-          },
+          readAppGroupNotes(state),
         ],
       };
     /**
@@ -3365,8 +3426,222 @@ function reduceCore(
     }
     case 'LAUNCHER_TILES_LOADED':
       return { state: { ...state, launcherTiles: action.tiles }, events: [] };
-    case 'APP_GROUP_ICONS_LOADED':
-      return { state: { ...state, appGroupIcons: action.icons }, events: [] };
+    case 'APP_GROUP_NOTES_LOADED':
+      /**
+       * 🔴 **世代が違う読み直しは画面に当てない**(#857 段③。
+       * 実ブラウザ smoke が 3 回に 1 回落ちて見つかった)。
+       *
+       * ⚠ 落ちていたのは「**名前順へ戻したのに、まだ『すべて名前順に戻す』が出ている**」。
+       *   並べ替えが積んだ読み直しが**戻す操作のあとに**返ってきて、
+       *   **戻す前の本文**(= まだ番号が載っている)を画面へ当てていた。
+       * 🔑 `APP_TILE_SAVED` が既に持っている作法を、こちらにも置いた
+       *   (**片側にしか無い門**は §7 の型である)。
+       * ⚠ 捨てても画面は置き去りにならない ── 世代を進めた側が必ず読み直しを
+       *   1 本積むので、**すぐ後ろに正しい答えが来る**。
+       */
+      if (action.gen !== state.appGroupGen) return { state, events: [] };
+      return {
+        state: { ...state, appGroupIcons: action.icons, appGroupOrders: action.orders },
+        events: [],
+      };
+    /**
+     * 🔴 **グループを 1 つ上へ / 下へ**(#857 段③)。
+     *
+     * 🔑 計画は `planGroupMove`(純関数)── **どこへ入るか**の規則をここに書かない。
+     * ⚠ **書くのは「動かした先より上に在る群」まで** ── 番号のある群は必ず先に来るので、
+     *   部分的には付けられない(`group-order.ts` の説明)。
+     * ⚠ 動かせるのは**名前の付いた、動かせるタイルを持つ群**だけ ── 組み込みは末尾に固定。
+     */
+    case 'MOVE_APP_GROUP': {
+      // ⚠ 門は `MOVE_APP_TILE` と同じ 2 つ(保存中は触らせない / 絞り込み中は動かさない)
+      if (state.phase !== 'ready' || state.writeLock) return { state, events: [] };
+      if (normalizeQuery(state.filterQuery) !== '')
+        return {
+          state: {
+            ...state,
+            error: '絞り込みを消してから並べ替えられます(いまは一部しか出ていません)',
+          },
+          events: [],
+        };
+      const tiles = state.launcherTiles;
+      if (tiles === null) return { state, events: [] };
+      /**
+       * ⚠ **動かせる群だけを渡す** ── 組み込みしか居ない群を混ぜると、
+       *   「押せるのに末尾から動かない」という食い違いになる。
+       */
+      const movable: string[] = [];
+      for (const t of tiles)
+        if (t.group !== '' && isMovableTile(t) && !movable.includes(t.group)) movable.push(t.group);
+      const plan = planGroupMove(movable, state.appGroupOrders, appGroupName(action.name), action.by);
+      if (plan.length === 0) return { state, events: [] };
+      /**
+       * ⚠ **lid が足りなければ書かない** ── 呼び側が採り損ねたぶんを別の群の lid で
+       *   埋めると、**別のノートを書き潰す**(いちばん戻せない壊れ方)。
+       */
+      const rows: Array<{
+        name: string;
+        order: number;
+        lid: string;
+        title: string;
+        archetype: string;
+        entryOrder: number;
+      }> = [];
+      /**
+       * 🔴 **無い群のノートは、ここで `CREATE_ENTRY` を通して作る**
+       *   ── effect に作らせない(2026-09-13。CI の全数門が入口になって判った)。
+       *
+       * ⚠ 直す前は effect が `store.persistEntry` で直に行を作っていた。門は
+       *   「書込 1 回に刻み 1 回」を**数える**だけなので、刻みを 1 つ足せば緑になる
+       *   ── ⚠ **ところがその刻みは届かない**:`ENTRY_STAMPED` は
+       *   **`entryMetas` に居ない lid を捨てる**ので、作ったばかりの行には当たらない。
+       * 🔴 つまり本当の欠陥は刻みではなく、**作った物が state に入らないこと**だった
+       *   ── サイドバーにも目録にも出ず、**次に開き直すまで存在しないように見える**。
+       * 🔑 だから作り方を目印(`SET_APP_GROUP_ICON`)と揃える ── 作る口は
+       *   **既存の 1 本**(`CREATE_ENTRY`)。⚠ `CREATE_ENTRY` は本文ごと書くので、
+       *   新しく作る群は `REQUEST_APP_GROUP_ORDER` の行に**入れなくてよい**
+       *   (番号は雛形に入っている)。
+       */
+      let next = state;
+      let fresh = 0;
+      const created: DomainEvent[] = [];
+      for (const w of plan) {
+        const lid = findAppGroupLid(next.order, next.entryMetas, w.name);
+        if (lid !== null) {
+          const meta = next.entryMetas.get(lid)!;
+          rows.push({
+            name: w.name,
+            order: w.order,
+            lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+          });
+          continue;
+        }
+        const newLid = action.newLids[fresh];
+        fresh += 1;
+        /**
+         * ⚠ **lid が足りなければ 1 バイトも書かない** ── 呼び側が採り損ねたぶんを
+         *   別の群の lid で埋めると、**別のノートを書き潰す**(いちばん戻せない壊れ方)。
+         * 🔴 **黙って止まらない**(2026-09-13、着地前レビュー)── 呼び側は確認の小窓を
+         *   出す**前**に lid を採るので、user が「はい」を押すまでの間に別のタブが群を
+         *   増やすと、ここで足りなくなる。⚠ 何も言わずに返すと
+         *   **「はい」を押したのに画面が 1 ドットも変わらない**(無言の dead click)。
+         */
+        if (newLid === undefined)
+          return {
+            state: {
+              ...state,
+              error: '一覧が変わったため、並べ替えを保存しませんでした(もう一度押してください)',
+            },
+            events: [],
+          };
+        const made = reduce(next, {
+          type: 'CREATE_ENTRY',
+          archetype: APP_GROUP_ARCHETYPE,
+          lid: newLid,
+          title: w.name,
+          body: writeAppGroupOrder(appGroupSeed(w.name), w.order),
+          // 🔴 見ていた物を退かさない(目印と同じ ── user は並べ替えたいだけである)
+          keepSelection: true,
+        });
+        next = made.state;
+        created.push(...made.events);
+      }
+      /**
+       * 🔑 **画面は先に動かす**(タイルと同じ)── disk の往復を待つと数百 ms 動かず、
+       *   「押したのに動かない」になる。⚠ 番号は state に持つので、書き戻しは要らない。
+       * 🔴 **世代を 1 つ進める**(#857 段③)── 画面を先に動かした以上、
+       *   **この瞬間より前に積んだ読み直しは、書き換える前の本文を読む**ので当ててはいけない。
+       */
+      const moved: AppState = {
+        ...next,
+        appGroupOrders: Object.fromEntries([
+          ...Object.entries(next.appGroupOrders),
+          ...plan.map((w) => [w.name, w.order] as const),
+        ]),
+        appGroupGen: next.appGroupGen + 1,
+      };
+      return {
+        state: moved,
+        events: [
+          ...created,
+          { type: 'REQUEST_APP_GROUP_ORDER', rows },
+          /**
+           * 🔴 **書いた「あと」に必ず読み直す**(2026-09-13、着地前レビュー)。
+           *
+           * ⚠ 画面は先に動かす(上)ので、**書込が途中で止まると画面と disk が食い違う** ──
+           *   別の窓が先に書いていれば `expectHash` が弾いて 1 行目までしか書けないのに、
+           *   画面は最後まで動いた姿を出し続ける(`F5` まで誰も気づかない)。
+           * 🔑 effect の列は 1 本なので、ここへ置けば**書込のあと**に走り、
+           *   成功でも衝突でも `appGroupOrders` を disk の実値へ戻す
+           *   (`REQUEST_TILE_ORDER` が同じことをしている)。
+           */
+          readAppGroupNotes(moved),
+        ],
+      };
+    }
+    /**
+     * 🔴 **並べ替えをやめて名前順へ戻す**(#857 段③。着地前の動線レビューが出した)。
+     *
+     * ⚠ **片道の操作を作らない**(CLAUDE.md 不可侵)── 「上へ / 下へ」を逆に押せば
+     *   見た目は戻るが、**番号はノートに残り続ける**ので「番号の付いていない状態」へは
+     *   帰れなかった。目印は「なし」で 1 回で外せるのに、並びだけ戻せないのは
+     *   釣り合いが崩れている。
+     * 🔑 **ノートは消さない** ── 消すのは `appgroup.order` の 1 行だけである
+     *   (目印や説明が同じノートに載っているので、丸ごと片付けない)。
+     */
+    case 'RESET_APP_GROUP_ORDER': {
+      if (state.phase !== 'ready' || state.writeLock) return { state, events: [] };
+      const rows: Array<{
+        name: string;
+        order: number | null;
+        lid: string;
+        title: string;
+        archetype: string;
+        entryOrder: number;
+      }> = [];
+      for (const name of Object.keys(state.appGroupOrders)) {
+        const lid = findAppGroupLid(state.order, state.entryMetas, name);
+        // ⚠ ノートが消えていれば書く先が無い ── その群は state から落ちるだけでよい
+        if (lid === null) continue;
+        const meta = state.entryMetas.get(lid)!;
+        rows.push({
+          name,
+          order: null,
+          lid,
+          title: meta.title,
+          archetype: meta.archetype,
+          entryOrder: meta.entryOrder,
+        });
+      }
+      /**
+       * ⚠ **番号が 1 つも無ければ何も起きない**(押し所はそもそも出ないが、門は両側に置く)。
+       *
+       * 🔴 **`rows.length === 0 &&` を外した**(2026-09-13。自分の diff を読み直して検算)。
+       * ⚠ `rows` は `appGroupOrders` の key から作るので、**番号が空なら rows も必ず空** ──
+       *   前半は後半に含まれる、**書いても何も守らない条件**だった。
+       * ⚠ 実測で両方向を見た:**前半だけ外すと緑のまま**(= 冗長)/
+       *   **門を丸ごと外すと落ちる**(= 門そのものは効いている)。
+       * 🔑 CLAUDE.md「『これが無いと壊れる』と書いたら、外して壊れることを 1 度は見る。
+       *   見ないなら書かない」── 見たら、前半は書いてはいけない側だった。
+       * ⚠ 番号は在るのにノートが消えている(`rows` だけ空)ときは、**通してよい** ──
+       *   画面の番号を落として名前順へ戻すのが正しい(書く先が無いだけである)。
+       */
+      if (Object.keys(state.appGroupOrders).length === 0) return { state, events: [] };
+      // 🔑 画面は先に戻す(書き戻しを待たない ── 動かすときと同じ流儀)。
+      // 🔴 世代を進める理由は `MOVE_APP_GROUP` と同じ ── ここが**当の症状**が出た所で、
+      //    「戻したのに、また『すべて名前順に戻す』が出る」は飛んでいた読み直しの仕業だった。
+      const cleared: AppState = { ...state, appGroupOrders: {}, appGroupGen: state.appGroupGen + 1 };
+      return {
+        state: cleared,
+        events: [
+          { type: 'REQUEST_APP_GROUP_ORDER', rows },
+          // 🔴 書いたあとに読み直す(上の `MOVE_APP_GROUP` と同じ理由)
+          readAppGroupNotes(cleared),
+        ],
+      };
+    }
     case 'SET_APP_GROUP_ICON': {
       // ⚠ 書込が飛んでいる間は触らせない(`SET_APP_TILE` と同じ規律 ── 読んで
       //    書き戻す操作なので、途中に別の書込が挟まると片方が消える)
@@ -3390,10 +3665,7 @@ function reduceCore(
             },
             // ⚠ 書いた**あと**に読み直す(effect の列は 1 本なので順番は保たれる)──
             //    読み直さないと、押した結果が出るのは「次にタブを開き直したとき」になる
-            {
-              type: 'REQUEST_APP_GROUP_ICONS',
-              entries: appGroupEntriesOf(state.order, state.entryMetas),
-            },
+            readAppGroupNotes(state),
           ],
         };
       }
@@ -3429,10 +3701,7 @@ function reduceCore(
         events: [
           ...created.events,
           // ⚠ **作った後の並び**で読む(作りたてのノートが入っていないと、目印が出ない)
-          {
-            type: 'REQUEST_APP_GROUP_ICONS',
-            entries: appGroupEntriesOf(created.state.order, created.state.entryMetas),
-          },
+          readAppGroupNotes(created.state),
         ],
       };
     }
@@ -6176,6 +6445,50 @@ function findAppGroupLid(
   return null;
 }
 
+/**
+ * 🔴 **その群のノートが在るか**(#857 段③)。
+ * 🔑 判定は `findAppGroupLid` 1 本を通す ── 呼び側(binder)が同じ走査を
+ *   書き直すと、探し方が 2 つになる(§7)。
+ */
+export function hasAppGroupNote(state: AppState, name: string): boolean {
+  return findAppGroupLid(state.order, state.entryMetas, appGroupName(name)) !== null;
+}
+
+/**
+ * 🔴 **番号の付いた群が 1 つでも在るか**(#857 段③)。
+ * ⚠ メニューに「名前順に戻す」を出すかの判定に使う ── 0 件のときに出すと、
+ *   押しても何も起きない(無言の dead click)。
+ */
+export function hasAppGroupOrder(state: AppState): boolean {
+  return Object.keys(state.appGroupOrders).length > 0;
+}
+
+/** 🔴 **いま番号の付いている群の数**(#857 段③)── 押す前に範囲を言うために要る。 */
+export function appGroupOrderCount(state: AppState): number {
+  return Object.keys(state.appGroupOrders).length;
+}
+
+/**
+ * 🔴 **その群にいま付いている図案の名前**(#857 段②、2026-09-13)。
+ * ⚠ 目印を選ぶ小窓が「**どれが選ばれているか**」を描くために要る。
+ * ⚠ 絵文字を直に貼った群は図案ではないので **空文字**を返す
+ *   ── 表の中に該当が無いので「なし」に枠が付く(嘘の枠を付けない)。
+ */
+export function appGroupIconName(state: AppState, name: string): string {
+  const got = appGroupIconOf(state.appGroupIcons, appGroupName(name));
+  /**
+   * 🔴 **絵文字を握り潰さない**(2026-09-13、着地前の動線レビュー)。
+   *
+   * ⚠ 直す前は `?.symbol ?? ''` だった ── グループ用のノートは**普通のノート**なので、
+   *   user は本文の `appgroup.icon:` へ 🧮 のような字を**直に書ける**(見出しにも出る)。
+   * 🔴 ところが `symbol` しか見ないので、小窓へ渡る値が **空になる** ──
+   *   空は「なし」の合図と**同じ字**なので、表は**「なし」に枠を付けて焦点まで合わせる**。
+   *   user は「何も付いていない」と読んで **Enter を押し**、🧮 が**黙って消える**。
+   * 🔑 生の字も返す ── 表の中に無ければ**どこにも枠が付かない**(それが正確な答え)。
+   */
+  return got?.symbol ?? got?.icon ?? '';
+}
+
 function appGroupEntriesOf(
   order: readonly string[],
   metas: ReadonlyMap<string, EntryMeta>,
@@ -6186,6 +6499,21 @@ function appGroupEntriesOf(
     if (meta?.archetype === APP_GROUP_ARCHETYPE) out.push({ lid, title: meta.title });
   }
   return out;
+}
+
+/**
+ * 🔴 **グループ用ノートの読み直しを 1 本積む**(#857 段③)。
+ *
+ * 🔑 **封筒を組む口はここ 1 つ**(CLAUDE.md §7)── 世代を書き忘れる場所を作らない。
+ * ⚠ 渡すのは**変更を当てた後の state** である ── 並びも世代もそこから読む
+ *   (当てる前の state を渡すと、作りたてのノートが入らない / 世代が 1 つ古くなる)。
+ */
+function readAppGroupNotes(s: AppState): DomainEvent {
+  return {
+    type: 'REQUEST_APP_GROUP_NOTES',
+    entries: appGroupEntriesOf(s.order, s.entryMetas),
+    gen: s.appGroupGen,
+  };
 }
 
 function attachmentEntriesOf(

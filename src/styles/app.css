@@ -4558,14 +4558,18 @@ li[data-pkc-row-slot] {
 }
 
 /* 🔴 目印を絵から選ぶ(#770 段②)── 上の欄は**残したまま隣に足した**口。
- * ⚠ 行を丸ごと使う ── 同じ行に混ぜると、49 個の絵が欄を押し出す */
-[data-pkc-field='app-icon-palette'] {
+ * ⚠ 行を丸ごと使う ── 同じ行に混ぜると、49 個の絵が欄を押し出す
+ * 🔴 **当てるのは印 1 つ**(`data-pkc-palette`。2026-09-13)── 出る所が
+ *   **添付の設定**と**グループの小窓**の 2 つになったので、`data-pkc-field` の
+ *   名前で当てると**次に足した日に付け忘れて、そこだけ崩れる**。
+ *   ⚠ `data-pkc-field` は**探すための名前**なので、面ごとに違うままでよい。 */
+[data-pkc-palette] {
   flex-basis: 100%;
   display: flex;
   flex-wrap: wrap;
   gap: var(--s1);
 }
-[data-pkc-field='app-icon-palette'] button {
+[data-pkc-palette] button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -4582,12 +4586,12 @@ li[data-pkc-row-slot] {
    * 門は `tests/adapter/button-font-size.test.ts`) */
   cursor: pointer;
 }
-[data-pkc-field='app-icon-palette'] button:hover {
+[data-pkc-palette] button:hover {
   background: var(--surface-2);
   color: var(--fg);
 }
 /* 🔑 いま選んでいる物は**枠と地**で示す(字を足さない ── 押し口の大きさが動かない) */
-[data-pkc-field='app-icon-palette'] button[aria-pressed='true'] {
+[data-pkc-palette] button[aria-pressed='true'] {
   border-color: var(--accent);
   background: var(--surface-2);
   color: var(--fg);

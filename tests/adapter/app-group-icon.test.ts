@@ -74,7 +74,7 @@ describe('目印を選ぶ(#857 段②)', () => {
     expect(r.state.selectedLid, '選んでいた物が退かされた').toBe(before.selectedLid);
     expect(r.state.filterQuery, '絞り込みの欄が消された').toBe('探しもの');
     // 🔑 作った**後の並び**で読み直す ── 作りたてが入っていないと目印が出ない
-    const req = r.events.find((e) => e.type === 'REQUEST_APP_GROUP_ICONS');
+    const req = r.events.find((e) => e.type === 'REQUEST_APP_GROUP_NOTES');
     expect(req, '作った後に読み直していない').toBeDefined();
     expect(
       (req as { entries: { lid: string }[] }).entries.map((e) => e.lid),

@@ -450,18 +450,107 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   const groupMenu = page.locator('[data-pkc-region="context-menu"]');
   await expect(groupMenu, '見出しを右クリックしてもメニューが出ない').toBeVisible();
   await expect(groupMenu, '「目印を選ぶ…」が出ていない').toContainText('目印を選ぶ');
+  /**
+   * 🔴 **見分けるのは「字」ではなく「受け手の名前」**(2026-09-13、段③ で書き直した)。
+   *
+   * ⚠ 直す前は **`not.toContainText('上へ')`** と字で見ていた ── 段② の時点では
+   *   「上へ」はタイルのメニューにしか無かったので、それで
+   *   「見出しにタイルのメニューが出ている」を捕まえられた。
+   * 🔴 段③ が**わざと同じ字**を見出しにも足した(同じことをする 2 つの押し所で
+   *   呼び名を変えない、という段①b-2 の動線レビューの結論)ので、
+   *   **この assert は成り立たなくなった**(実ブラウザの smoke が落ちて分かった)。
+   * 🔑 効く先が違うことは**受け手の名前**で見分けられる ──
+   *   タイルは `move-tile-*`、グループは `move-app-group-*` である。
+   *   ⚠ 字で見分ける検査は、**字を揃えた日に必ず嘘になる**。
+   */
+  await expect(
+    groupMenu.locator('[data-pkc-action="move-tile-up"]'),
+    '見出しの上にタイルのメニューが出ている(押した物と効く先が食い違う。#677 の型)',
+  ).toHaveCount(0);
+  // ⚠ 対照群 ── グループ側の口は出ている(上の 0 件が「メニューが空」で成り立たない)
+  await expect(
+    groupMenu.locator('[data-pkc-action="move-app-group-up"]'),
+    'グループの「上へ」が出ていない',
+  ).toHaveCount(1);
+  await expect(
+    groupMenu.locator('[data-pkc-action="move-app-group-down"]'),
+    'グループの「下へ」が出ていない',
+  ).toHaveCount(1);
+  /**
+   * ⚠ **「名前順に戻す」は、番号がまだ 1 つも付いていないので出ない**
+   *   ── 出ていたら「押しても何も起きない」行を出していることになる。
+   */
+  await expect(
+    groupMenu.locator('[data-pkc-action="reset-app-group-order"]'),
+    '番号が 1 つも無いのに「名前順に戻す」が出ている(押しても何も起きない)',
+  ).toHaveCount(0);
+  /**
+   * 🔴 **一覧の下のほうの見出しでも、メニューが自分で閉じない**(#875、2026-09-13)。
+   *
+   * ⚠ 実測:器の見える高さ 298px に対し、この見出しは上端から **303.7px**
+   *   (**5.7px はみ出している**)。クリックで焦点を受けるとブラウザが**真ん中へ寄せ**、
+   *   `scrollTop` が **0 → 168** になる ── その `scroll` を拾って
+   *   **開いた直後のメニューが閉じていた**(押す間が無い)。
+   * 🔑 直しは「**開いた時点の巻き位置と同じなら閉じない**」── 時間ではなく位置で見る。
+   * ⚠ **待ってから見る** ── 出た瞬間だけ見ると、閉じる前の一瞬を捕まえて緑になる。
+   */
+  const lastToggle = page.locator(
+    '[data-pkc-action="toggle-app-group"][data-pkc-group="組み込みアプリ"]',
+  );
+  await lastToggle.click({ button: 'right' });
+  await expect(groupMenu, '下のほうの見出しでメニューが出ない').toBeVisible();
+  await page.waitForTimeout(300);
   await expect(
     groupMenu,
-    '見出しの上にタイルのメニューが出ている(押した物と効く先が食い違う。#677 の型)',
-  ).not.toContainText('上へ');
+    '下のほうの見出しのメニューが、押す間も無く自分で閉じた(#875)',
+  ).toBeVisible();
+  // ⚠ 後始末 ── 開いたまま次へ進むと、その先の押し所をメニューが覆う
+  await page.locator('[data-pkc-field="launcher-lead"]').click();
+  await expect(groupMenu, '見出しの外を押しても閉じない').toBeHidden();
+
+  await toolToggle.click({ button: 'right' });
+  await expect(groupMenu, '見出しを右クリックしてもメニューが出ない(2 度目)').toBeVisible();
   await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="pick-app-group-icon"]');
 
-  const iconRows = page.locator('[data-pkc-field="pick-group-icon"]');
-  await expect(iconRows.first(), '目印の一覧が出ない').toBeVisible();
+  /**
+   * 🔴 **絵を並べた表になっている**(user 裁定 2026-09-13)。
+   * ⚠ 直す前は**字だけの行**が縦に並んでいた ── タイル側は絵の表なので、
+   *   同じことをする 2 か所で見た目が違っていた。
+   */
+  const iconBox = page.locator('[data-pkc-field="pick-group-icon"]');
+  await expect(iconBox, '目印の表が出ない').toBeVisible();
+  await expect(iconBox, 'タイル側と同じ表になっていない(見た目の印が無い)').toHaveAttribute(
+    'data-pkc-palette',
+    '',
+  );
+  const iconRows = iconBox.locator('button');
   await expect(iconRows.first(), '先頭が「なし」でない(外す口が先頭に無い)').toHaveText('なし');
+  // ⚠ 空振り防止 ── 表そのものが 49 種 +「なし」で出ている(1 つだけ出て緑にしない)
+  await expect(iconRows, '表の数が合わない(タイルと同じ 49 種 +「なし」)').toHaveCount(50);
   // ⚠ index 0 = 「なし」。index 1 を選ぶ(タイルと同じ 49 種の 1 つ)。
   await clickReal(page, iconRows.nth(1));
-  await expect(iconRows.first(), '選んでも小窓が閉じない').toBeHidden();
+  await expect(iconBox, '選んでも小窓が閉じない').toBeHidden();
+
+  /**
+   * 🔴 **いま付いている絵に枠が付く**(裁定の 2 つ目)。
+   * ⚠ 直す前は**何も印が無く**、「何を選んでいるか」が画面から読めなかった。
+   * 🔑 開き直して見る ── 状態(`aria-pressed`)なので、**選んだ後に開いた表**でしか
+   *   確かめられない。
+   */
+  await toolToggle.click({ button: 'right' });
+  await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="pick-app-group-icon"]');
+  await expect(iconBox, '表がもう一度出ない').toBeVisible();
+  await expect(
+    iconBox.locator('button[aria-pressed="true"]'),
+    'いま付いている絵に枠が付いていない(何を選んでいるか画面から読めない)',
+  ).toHaveCount(1);
+  await expect(
+    iconRows.nth(1),
+    '枠が付いているのが、さっき選んだ絵ではない',
+  ).toHaveAttribute('aria-pressed', 'true');
+  // ⚠ 後始末 ── 開いたまま進むと、その先の押し所を小窓が覆う
+  await page.keyboard.press('Escape');
+  await expect(iconBox, 'Escape で閉じない').toBeHidden();
 
   await expect(
     page.locator('[data-pkc-field="entry-filter"]'),
@@ -860,6 +949,160 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   await expect(tiles).toHaveCount(2);
   await page.locator('[data-pkc-field="entry-filter"]').fill('存在しない');
   await expect(page.locator('[data-pkc-field="launcher-empty"]')).toBeVisible();
+
+  expect(errors).toEqual([]);
+});
+
+/**
+ * 🔴 **グループそのものを動かすと、実際に並びが入れ替わる所まで**(#857 段③)。
+ *
+ * ⚠ 段③の smoke 報告(自分)が「fixture に名前付きグループが『ツール』1 つしか
+ *   無いので、実際に順序が入れ替わる所・初回だけ確認が出る所は検査できない」と
+ *   書いた穴を、ここで埋める。
+ * 🔑 **起動を 1 つ増やす**(予算 490/500 → 491/500。理由: 既存の巨大な test
+ *   ─「取り込んだタイルが同じ順で見えて、押すと開く」は 700 行超先まで
+ *   その fixture のタイル件数・位置をハードコードして検査しており、
+ *   そこへ 2 つ目の名前付きグループを混ぜると影響範囲が読めない)。
+ *
+ * 物語: 名前付きグループを 2 つ持つ → 見出しを右クリック →「上へ」→
+ * 初めては確認が出る →「やめる」なら並びは変わらない → もう一度「上へ」→
+ * 「並べ替える」で並びが入れ替わる → もう一度動かしても確認は出ない
+ * (もう番号が付いている)→「名前順に戻す」が出る → 押すと名前順へ戻る。
+ */
+function pkc2WithTwoGroups(): string {
+  const attachment = (lid: string, title: string, group: string): Record<string, unknown> => ({
+    lid,
+    title,
+    archetype: 'attachment',
+    body: JSON.stringify({
+      name: title,
+      mime: 'text/html',
+      registered_as_app: true,
+      asset_key: 'app-key',
+      size: HTML_APP.length,
+      app_group: group,
+    }),
+  });
+  const container = {
+    meta: { container_id: 'c-2g', title: '2群', entry_order: ['g1', 'g2'] },
+    entries: [attachment('g1', '資料アプリ', '資料'), attachment('g2', '道具アプリ', '道具')],
+    relations: [],
+    assets: { 'app-key': gzipSync(HTML_APP).toString('base64') },
+  };
+  const data = JSON.stringify({
+    container,
+    export_meta: { mode: 'full', mutability: 'editable', asset_encoding: 'gzip+base64' },
+  }).replace(/<\/script>/gi, '<\\/script>');
+  return `<!doctype html><html><head><meta charset="utf-8">
+    <script id="pkc-meta" type="application/json">{"app":"pkc2","schema":1}</script>
+  </head><body>
+    <script id="pkc-data" type="application/json">${data}</script>
+  </body></html>`;
+}
+
+test('🔴 グループを実際に動かすと並びが入れ替わり、初回だけ確認が出る (#857 段③)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  await clickReal(page, '[data-pkc-region="collection-bar"] [data-pkc-action="import-file"]');
+  await page.locator('[data-pkc-field="import-input"]').setInputFiles({
+    name: 'container.html',
+    mimeType: 'text/html',
+    buffer: Buffer.from(pkc2WithTwoGroups(), 'utf-8'),
+  });
+  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(2);
+
+  await clickReal(page, '[data-pkc-browse="launcher"]');
+  const groups = page.locator('[data-pkc-field="launcher-group"]');
+  // 前提: 番号がまだ無いので名前順(資 < 道)。組み込みは常に末尾。
+  await expect(groups, '前提が崩れている(群の数が違う)').toHaveCount(3);
+  await expect(groups.nth(0), '前提が崩れている(名前順になっていない)').toHaveText('資料');
+  await expect(groups.nth(1), '前提が崩れている(名前順になっていない)').toHaveText('道具');
+  await expect(groups.nth(2)).toHaveText('組み込みアプリ');
+
+  const groupMenu = page.locator('[data-pkc-region="context-menu"]');
+  const dialog = page.locator('[data-pkc-region="app-dialog"]');
+  const toolHeading = page.locator('[data-pkc-action="toggle-app-group"][data-pkc-group="道具"]');
+  const dataHeading = page.locator('[data-pkc-action="toggle-app-group"][data-pkc-group="資料"]');
+
+  // ① 初回の「上へ」→ 確認が出る →「やめる」で並びは変わらない
+  await toolHeading.click({ button: 'right' });
+  await expect(groupMenu, '見出しを右クリックしてもメニューが出ない').toBeVisible();
+  await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="move-app-group-up"]');
+  await expect(dialog, '初めての並べ替えなのに確認が出ない').toBeVisible();
+  const cancelMsg = await answerAppDialog(page, 'cancel');
+  expect(cancelMsg, '増えるノートの枚数を言っていない').toContain('2');
+  await expect(groups.nth(0), 'やめたのに並びが動いている').toHaveText('資料');
+  await expect(groups.nth(1), 'やめたのに並びが動いている').toHaveText('道具');
+
+  // ② 同じ操作 →「並べ替える」→ 並びが入れ替わる(道具, 資料)
+  await toolHeading.click({ button: 'right' });
+  await expect(groupMenu, '2 回目の右クリックでメニューが出ない').toBeVisible();
+  await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="move-app-group-up"]');
+  await expect(dialog, '断った後、もう一度押しても確認が出ない').toBeVisible();
+  await answerAppDialog(page, 'ok');
+  await expect(groups.nth(0), '受けたのに並びが入れ替わらない').toHaveText('道具');
+  await expect(groups.nth(1), '受けたのに並びが入れ替わらない').toHaveText('資料');
+  await expect(groups.nth(2), '組み込みの位置が動いている').toHaveText('組み込みアプリ');
+
+  // ③ もう一度動かす(両方に番号が付いている)→ 確認は出ない(資料, 道具 に戻る)
+  await dataHeading.click({ button: 'right' });
+  await expect(groupMenu, '3 回目の右クリックでメニューが出ない').toBeVisible();
+  await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="move-app-group-up"]');
+  await expect(dialog, '2 回目以降なのに確認が出た(番号が既に付いているはず)').toBeHidden();
+  await expect(groups.nth(0), '確認なしで動いたはずが、並びが変わっていない').toHaveText('資料');
+  await expect(groups.nth(1)).toHaveText('道具');
+
+  // ④ さらにもう一度(道具, 資料 へ)── 確認なしを重ねて確かめる
+  await toolHeading.click({ button: 'right' });
+  await expect(groupMenu, '4 回目の右クリックでメニューが出ない').toBeVisible();
+  await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="move-app-group-up"]');
+  await expect(dialog, '4 回目なのに確認が出た').toBeHidden();
+  await expect(groups.nth(0), '確認なしで動いたはずが、並びが変わっていない').toHaveText('道具');
+  await expect(groups.nth(1)).toHaveText('資料');
+
+  /**
+   * ⑤「すべて名前順に戻す」が出る → **押すと確認が出る** → やめれば 1 つも戻らない /
+   *   はいなら名前順(資料, 道具)へ戻る。
+   *
+   * 🔴 **ここは 2026-09-13 に 2 時間ほど「動線の最後まで到達していなかった」**
+   *   ── 同日 `67520c0` が確認の小窓を足したのに、この spec は押した直後に
+   *   並びを見ていたので、**小窓が出たまま止まって必ず落ちる**状態だった。
+   * ⚠ CI は全量 smoke を回さない(user 指示 2026-09-11)ので、**鳴る計器が 1 つも無い**。
+   * 🔑 だから「押した後に何が出るか」を**この spec 自身が持つ** ──
+   *   小窓を足す変更は、ここを直さないと通らない。
+   */
+  await toolHeading.click({ button: 'right' });
+  await expect(groupMenu, '5 回目の右クリックでメニューが出ない').toBeVisible();
+  await expect(
+    groupMenu.locator('[data-pkc-action="reset-app-group-order"]'),
+    '番号が付いているのに「すべて名前順に戻す」が出ていない',
+  ).toHaveCount(1);
+  await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="reset-app-group-order"]');
+  /**
+   * 🔴 **やめたら 1 つも戻らない**(片道の操作を作らない、の裏返し)。
+   * ⚠ そして確認は**効く範囲**を言わなければならない(`67520c0` の当の主題)──
+   *   「押した見出しだけ」と読めると、見てもいない群の並びが黙って消える。
+   */
+  const resetAsk = await answerAppDialog(page, 'cancel');
+  expect(resetAsk, '確認が「まとめて」効くことを言っていない').toContain('まとめて');
+  await expect(groups.nth(0), 'やめたのに並びが戻ってしまった').toHaveText('道具');
+  await expect(groups.nth(1)).toHaveText('資料');
+
+  await toolHeading.click({ button: 'right' });
+  await expect(groupMenu, 'やめた後の右クリックでメニューが出ない').toBeVisible();
+  await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="reset-app-group-order"]');
+  await answerAppDialog(page, 'ok');
+  await expect(groups.nth(0), '「すべて名前順に戻す」を押しても名前順に戻らない').toHaveText('資料');
+  await expect(groups.nth(1)).toHaveText('道具');
+
+  // ⚠ 空振り防止 ── 戻した後は番号が無いので、もう出ない
+  await toolHeading.click({ button: 'right' });
+  await expect(groupMenu, '戻した後の右クリックでメニューが出ない').toBeVisible();
+  await expect(
+    groupMenu.locator('[data-pkc-action="reset-app-group-order"]'),
+    '名前順へ戻したのに、まだ「名前順に戻す」が出ている(番号が残っている)',
+  ).toHaveCount(0);
 
   expect(errors).toEqual([]);
 });

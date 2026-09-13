@@ -39,6 +39,7 @@ import type { EntryPickRow } from '@features/entry-ref/entry-pick';
 import type { SnippetChoice } from '@features/snippet/snippet-menu';
 import { moveMark, toggleMark } from '@features/clipboard/scrap';
 import { toggleArchiveMark } from '@features/archive/zip-browse';
+import { buildIconPalette, isTableIcon } from './icon-palette';
 
 export type DialogAnswer = 'ok' | 'cancel';
 
@@ -545,26 +546,38 @@ export function pickDiagramInApp(
 }
 
 /**
- * 🔴 **グループの見出しの目印を選ぶ**(#857 段②)。
+ * 🔴 **グループの見出しの目印を選ぶ**(#857 段②、2026-09-13 に表へ差し替え)。
  *
- * ⚠ 器は雛形・図・表の一覧と**同じ 1 本**(`pickRowInApp`)── 「押した行がそのまま
- *   答え」「`Escape` / やめる / 外を押すと `null`」「焦点を返す」を食い違わせない(§7)。
- * ⚠ **タイルの目印は絵の一覧(49 個の押し所)**だが、こちらは**行の一覧**にした ──
- *   出す場所が右クリックのメニューの先なので、面を作らずに開ける器のほうが素直で、
- *   器を 2 本目に増やさずに済む(絵は行の左に出る)。
- * 🔑 **外す口を先頭に置く**(user 指示 2026-08-23「置けるなら、外せなければならない」)。
+ * ## user 裁定(2026-09-13)── **絵を並べた表にする**
  *
- * @returns 選んだ図案の名前。**空文字 = なし(外す)**。`Escape` / やめる / 外なら `null`
+ * ⚠ 直す前は「1 行選ぶ」の汎用の器へ**字だけの行**を流していた ── タイル側は
+ *   **絵の並んだ表**なので、**同じことをする 2 か所で見た目が違って**いた。
+ *   ⚠ しかも**いま付いている絵に印が無く**、「何を選んでいるか」が画面から読めなかった。
+ *
+ * 🔑 表そのものは `render/icon-palette.ts` の**共有の 1 本** ── ここが付けるのは
+ *   **出口だけ**(押したらその場で閉じて、選んだ値が返る)。
+ *   ⚠ 2 つ目の表を書くと、次に絵を 1 つ足した日に**片方だけ増える**(§7)。
+ * 🔑 **いま付いている絵に枠**(`aria-pressed`)は、共有したことで**そのまま付いてくる**。
+ *
+ * ## ⚠ 器の作法は「1 行選ぶ」と同じに揃える
+ *
+ * ⚠ 閉じ方は器の 1 本を通す(`f.ok.click()` / `f.cancel.click()`)── どこから閉じても
+ *   **焦点を返す後始末が 1 か所**で走る(CLAUDE.md §10 ③)。
+ * ⚠ **外(暗い地)を押したら「やめる」** ── 選ぶだけの器だからである。
+ * ⚠ 受ける側のボタンは**隠す**(押した絵がそのまま答え)。消さずに隠す(器を捨てない)。
+ *
+ * @returns 図案の名前。**空文字 = なし(外す)**。やめたら `null`
  */
 export function pickAppGroupIconInApp(
   host: HTMLElement,
   groupName: string,
-  choices: readonly { readonly name: string; readonly label: string }[],
+  current: string,
 ): Promise<string | null> {
-  return pickRowInApp(host, {
-    title: `「${groupName}」の目印を選ぶ`,
-    field: 'pick-group-icon',
-    indexAttr: 'data-pkc-group-icon-index',
+  return enqueue(async () => {
+    const f = ensureFrame(host);
+    f.title.textContent = `「${groupName}」の目印を選ぶ`;
+    f.body.textContent = '';
+
     /**
      * 🔴 **副作用を、押す前に言う**(#857 段②。着地前の動線レビュー)。
      *
@@ -574,16 +587,114 @@ export function pickAppGroupIconInApp(
      * ⚠ 「作ります」と言い切らない ── 既に在れば作らないので、**どちらでも嘘に
      *   ならない字**にする。
      */
-    note: '目印は、このグループ専用のノートに憶えます(無ければ 1 枚作ります)。「なし」にしても、そのノートは残ります。',
-    rows: [
-      { label: 'なし', value: '' },
-      ...choices.map((c, i) => ({
-        label: c.label,
-        value: c.name,
-        // ⚠ 外す口と選ぶ口の間だけ区切る(やることが違う)
-        ...(i === 0 ? { separatorBefore: true } : {}),
-      })),
-    ],
+    const line = document.createElement('p');
+    line.setAttribute('data-pkc-field', 'pick-group-icon-note');
+    line.textContent =
+      '目印は、このグループ専用のノートに憶えます(無ければ 1 枚作ります)。「なし」にしても、そのノートは残ります。';
+    f.body.append(line);
+
+    /**
+     * 🔴 **いま付いている字が、この表に無いことを言う**(同レビュー)。
+     * ⚠ 言わないと、見出しには 🧮 が出ているのに小窓は「何も選ばれていない」顔をする
+     *   ── **画面どうしが食い違う**。
+     * ⚠ 出すのは**表に無いときだけ** ── いつも出すと、49 種から選んだ人にも
+     *   読む必要のない 1 行が増える。
+     */
+    if (!isTableIcon(current)) {
+      const odd = document.createElement('p');
+      odd.setAttribute('data-pkc-field', 'pick-group-icon-odd');
+      odd.textContent = `いまは「${current.trim()}」が付いています。この表には無い字なので、どれにも枠が付いていません(選ぶと置き換わります)。`;
+      f.body.append(odd);
+    }
+
+    let chosen: string | null = null;
+    const picks: HTMLButtonElement[] = [];
+    const palette = buildIconPalette({
+      current,
+      field: 'pick-group-icon',
+      ariaLabel: `「${groupName}」の目印を選ぶ`,
+      each: (btn, name) => {
+        picks.push(btn);
+        btn.addEventListener('click', () => {
+          chosen = name;
+          // ⚠ 隠してあっても `click()` は届く(閉じ口を 1 本に保つための呼び方)
+          f.ok.click();
+        });
+      },
+    });
+    f.body.append(palette);
+
+    /**
+     * 🔴 **矢印で絵を移れる**(2026-09-13。**置き換えで落としかけた**)。
+     *
+     * ⚠ ここは「1 行選ぶ」の器(`pickRowInApp`)から**表へ置き換えた**所である。
+     *   あちらは `↑` `↓` で行を移れたが、**その性質は仕様書のどこにも無かった**ので、
+     *   表に替えたときに**黙って落ちていた**(CLAUDE.md §10「置き換えられる側が
+     *   "ついでに" 提供していた性質」)。
+     * ⚠ 落ちると、鍵だけで使う人は **`Tab` を 49 回**押すことになる。
+     * 🔑 表なので**横向きも受ける** ── `←` `↑` で前、`→` `↓` で次(並びは 1 本なので、
+     *   折り返しは数えない ── 幅で変わる物を鍵の意味にしない)。
+     * ⚠ `Enter` は書かない ── 焦点の在るボタンはブラウザが `click` にしてくれる
+     *   (2 か所に書かない)。
+     */
+    const onArrow = (ev: KeyboardEvent): void => {
+      const by =
+        ev.key === 'ArrowDown' || ev.key === 'ArrowRight'
+          ? 1
+          : ev.key === 'ArrowUp' || ev.key === 'ArrowLeft'
+            ? -1
+            : 0;
+      if (by === 0) return;
+      const at = picks.findIndex((b) => b === f.dialog.ownerDocument.activeElement);
+      if (at < 0) return;
+      const next = picks[at + by];
+      if (next === undefined) return;
+      ev.preventDefault();
+      next.focus();
+    };
+    const onOutside = (ev: MouseEvent): void => {
+      // 🔑 暗い地を押すと `target` は `<dialog>` 自身になる(中身を押せば中身が target)
+      if (ev.target === f.dialog) f.cancel.click();
+    };
+    f.dialog.addEventListener('keydown', onArrow);
+    f.dialog.addEventListener('click', onOutside);
+
+    f.ok.textContent = '入れる';
+    f.ok.removeAttribute('data-pkc-danger');
+    f.ok.hidden = true;
+    f.cancel.textContent = 'やめる';
+    f.cancel.hidden = false;
+
+    const answered = open(f, 'cancel');
+    /**
+     * 🔑 焦点は**いま付いている絵**へ(無ければ先頭の「なし」)── 開いた直後に
+     *   「いま何が選ばれているか」が**焦点の位置でも分かる**。
+     * ⚠ 字だけの行だった頃は先頭固定でよかったが、表では**どこに居るか**が要る。
+     */
+    /**
+     * 🔴 **表に無い字が付いているときは、消しを 1 押しの所に置かない**
+     *   (2026-09-13、着地前の動線レビュー)。
+     *
+     * ⚠ グループ用のノートは**普通のノート**なので、user は `appgroup.icon:` へ
+     *   🧮 のような字を**直に書ける**(見出しにも出る)。
+     * 🔴 その字は表の 49 種に無いので**どこにも枠が付かない** ── そこで焦点を
+     *   先頭(=「なし」)へ置くと、**Enter を押しただけで 🧮 が消える**。
+     *   ⚠ user は「何も選ばれていないから、このままでいい」と読んでいる。
+     * 🔑 だから**やめる側へ焦点を置く** ── 何も起きないのが正しい既定である。
+     * 🔑 そして**見えている物と食い違わないよう、字で言う**(下の 1 行)。
+     */
+    const at = picks.find((b) => b.getAttribute('aria-pressed') === 'true');
+    if (at !== undefined) at.focus();
+    else if (current.trim() === '') picks[0]?.focus();
+    else f.cancel.focus();
+    const answer = await answered;
+    // ⚠ 器に付けた物は**必ず外す** ── 器は使い回すので、外し忘れると
+    //    次の確認でも矢印が絵を探しにいく
+    f.dialog.removeEventListener('keydown', onArrow);
+    f.dialog.removeEventListener('click', onOutside);
+    // ⚠ 隠したままにしない ── 器は使い回すので、次の確認で受ける側が消える
+    f.ok.hidden = false;
+    return answer === 'ok' ? chosen : null;
   });
 }
 

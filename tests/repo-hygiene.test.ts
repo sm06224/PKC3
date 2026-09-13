@@ -1390,7 +1390,15 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
       //    (`context.pages()` の枚数)は happy-dom からは見えない。
       //    ⚠ 起動を 1 つ増やした(490/500)── 既存の道中はどれも指の pointer を
       //    撃っておらず、600 行の状態遷移の途中へ割り込むほうが壊す危険が大きい
-    ).toBe(498);
+      // ⚠ 2026-09-13(#857 段③): **グループそのものを動かす**ところを通す 1 本
+      //    → 498 → 499。🔴 ここでしか見えない層:**この動線に検査が 1 つも無かった**
+      //    ── いままでの fixture は**名前付きグループが 1 つしかなく**、
+      //    `planGroupMove` が端で必ず空の計画を返すので、「上へ」を押しても
+      //    **確認の小窓の経路に一度も入らない**(全量を回しても緑になる型の穴)。
+      //    ⚠ 既存の道中には載せられない ── あの test は 700 行先まで
+      //    タイルの数と位置を直に書いているので、群をもう 1 つ足すと全部意味が変わる。
+      //    ⚠ 起動を 1 つ増やした(490 → 491/500)
+    ).toBe(499);
   });
 });
 
@@ -1639,5 +1647,71 @@ describe('\u{1f534} 手元の commit が main に載らないための hook', ()
     // \u26a0 「なぜ hooksPath では駄目か」が消えると、次に読む人が同じ掛け方へ戻る
     expect(skill).toContain('core.hooksPath');
     expect(readFileSync(HOOK, 'utf8')).toContain('core.hooksPath');
+  });
+});
+
+/**
+ * 🔴 **張った聞き耳は、張った名前で外す**(2026-09-13、着地前レビューが掘った)。
+ *
+ * ## 何が起きていたか
+ *
+ * #875 の直しで `scroll` の受け口を `onCloseMenu` から **`onScrollCloseMenu`** へ分けたとき、
+ * **張る側だけ改名して、外す側を忘れた**:
+ *
+ * ```
+ * root.addEventListener('scroll', onScrollCloseMenu, true);     // 新しい名前
+ * root.removeEventListener('scroll', onCloseMenu, true);        // 🔴 古い名前のまま
+ * ```
+ *
+ * ⚠ `removeEventListener` は**参照が一致しないと黙って何もしない** ── 例外も警告も出ない。
+ * ⚠ しかも**いまの本番では畳む口を呼んでいない**ので、**画面には何も出ない**
+ *   (`main.ts` は `bindActions` の戻り値を捨てている)。
+ * 🔑 CLAUDE.md「**片側を直したら、対称の反対側を必ず疑う**」の型そのものである。
+ *
+ * ## だから機械で見る
+ *
+ * 🔑 `root` へ張った物は、**同じ名前で外している**ことを全数で突き合わせる。
+ * ⚠ **名前でしか見られない**(参照の同一性は原文からは読めない)ので弱い形だが、
+ *   **改名の片側忘れ**はこれで必ず落ちる ── それが今回の実際の壊れ方である。
+ */
+describe('張った聞き耳を、張った名前で外す(2026-09-13)', () => {
+  it('🔴 `root` へ張った物は、同じ名前で外している', () => {
+    const src = readFileSync('src/adapter/ui/actions/binder.ts', 'utf-8');
+    const added = new Map<string, string>();
+    for (const m of src.matchAll(/root\.addEventListener\(\s*'([a-z]+)',\s*([A-Za-z_$][\w$]*)/g))
+      added.set(`${m[1]!}:${m[2]!}`, m[2]!);
+    const removed = new Set<string>();
+    for (const m of src.matchAll(/root\.removeEventListener\(\s*'([a-z]+)',\s*([A-Za-z_$][\w$]*)/g))
+      removed.add(`${m[1]!}:${m[2]!}`);
+
+    // ⚠ 空振り防止 ── 走査が壊れていたら、下の突き合わせは何も見ていない
+    expect(added.size, '張っている所が 1 つも見つからない(走査が壊れている)').toBeGreaterThan(5);
+    expect(removed.size, '外している所が 1 つも見つからない(走査が壊れている)').toBeGreaterThan(5);
+
+    /**
+     * 🔴 **既に外していない物は、等値の既知リストで持つ**(`KNOWN_DEAD` と同じ作法)。
+     *
+     * ⚠ 走査を書いた日に **7 件**出た ── どれも**この PR より前から**在る
+     *   (`paste` と掴んで落とす 6 本)。⚠ **いまの本番では畳む口を呼んでいない**ので
+     *   画面には出ないが、**畳んだのに残る**ことに変わりはない。
+     * 🔑 ここに並べておけば、**直した日に消さないと落ちる**ので忘れられない。
+     *   ⚠ そして**新しく足した物**がここに無ければ落ちる ── それがこの門の主眼である
+     *   (2026-09-13 に私が `scroll` の改名で片側を忘れた、その型を止める)。
+     * ⚠ 別件として起票する ── この PR の主題ではない。
+     */
+    const KNOWN_UNREMOVED: readonly string[] = [
+      'paste:onPaste',
+      'dragenter:onDragOver',
+      'dragover:onDragOver',
+      'drop:onDrop',
+      'dragstart:onDragStart',
+      'dragend:onDragEnd',
+      'dragleave:onDragLeave',
+    ];
+    const orphan = [...added.keys()].filter((k) => !removed.has(k));
+    expect(
+      orphan.slice().sort(),
+      `張った名前で外していない(改名の片側忘れ ── 外し口は黙って no-op になる):\n${orphan.join('\n')}`,
+    ).toEqual(KNOWN_UNREMOVED.slice().sort());
   });
 });

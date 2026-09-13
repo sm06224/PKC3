@@ -152,7 +152,15 @@ feature branch だけを持っていることがあり、そこで `git log main
 1. `NOTICES` の先頭に 1 件足す
 2. **マニュアルも同じ commit で直す**(`docs/manual.md`)── お知らせは気づかせる
    だけで、正本はマニュアルである。`tests/docs-parity.test.ts` が食い違いを落とす
-3. `npm test`(書式の test が回る)
+3. 🔴 **決まりの test を 3 つとも回す** ── `tests/adapter/announce.test.ts` /
+   **`tests/adapter/help-pane.test.ts`** / `tests/docs-parity.test.ts`
+
+   ⚠ **2026-09-13 に、3 つのうち 2 つしか回さずに CI を赤くした。**
+   直した後に `announce`(文面の pin)と `docs-parity`(CHANGELOG との等値)だけを
+   回して緑を見たが、**項目数と字数の門は `help-pane.test.ts` に在る** ──
+   1 件に 7 項目書いていたことに、CI で落ちるまで気づかなかった。
+   🔑 **上の表は 3 つ並べて書いてあった**(情報は在った)── 足りなかったのは
+   「**3 つとも**回す」という手順のほうである。⚠ 迷うくらいなら `npm test` を回す。
 
 ⚠ **user に見える変更なのにお知らせを書かない**、が既定の失敗である。
 UI・挙動・既定値が変わったら 1 行足す。

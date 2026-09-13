@@ -279,7 +279,6 @@ import {
   pickAppGroupIconInApp,
   type ConfirmOptions,
 } from '@adapter/ui/render/app-dialog';
-import { TILE_ICON_CHOICES } from '@features/icon/tile-icons';
 import { printNote } from '@adapter/platform/print-note';
 
 const DB_NAME = 'pkc3';
@@ -2952,7 +2951,40 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * ⚠ 並ぶ物は `TILE_ICON_CHOICES` が正本(タイルと**同じ 49 種**)── ここで
      *   選り分けない。器は「1 行選ぶ」の 1 本(`app-dialog.ts`)。
      */
-    pickAppGroupIcon: (groupName) => pickAppGroupIconInApp(root, groupName, TILE_ICON_CHOICES),
+    pickAppGroupIcon: (groupName, current) => pickAppGroupIconInApp(root, groupName, current),
+    /**
+     * 🔴 **ノートが N 枚増えることを、押す前に聞く**(#857 段③)。
+     * ⚠ 聞くのは**初めての並べ替えのときだけ** ── 2 回目からは増えないので出ない。
+     * 🔑 字は「何が起きるか」で書く ── 「番号を付けます」ではなく「ノートができます」。
+     */
+    /**
+     * 🔴 **すべての群の並び順をやめてよいか聞く**(#857 段③、2026-09-13)。
+     * ⚠ 押した見出し**以外**にも効くので、**範囲を字に出す** ── 戻すには
+     *   「上へ / 下へ」を押し直すしかなく、何回押したかは user も憶えていない。
+     */
+    confirmResetAppGroupOrder: async (count) =>
+      (await confirmInApp(
+        root,
+        `並べ替えをやめて、名前順に戻します。いま並べ替えている ${String(count)} つのグループが、まとめて名前順になります(押した見出しだけではありません)。`,
+        { okLabel: '名前順に戻す', cancelLabel: 'やめる' },
+      )) === 'ok',
+    confirmAppGroupNotes: async (names) => {
+      /**
+       * ⚠ **名前を出す**(2026-09-13、動線レビュー D1)── 枚数だけだと
+       *   「1 つ動かしただけなのに、なぜか複数のノートが増える」に見える。
+       * ⚠ 長い一覧にしない ── 4 つまで並べて、あとは数で言う。
+       */
+      const listed = names.slice(0, 4).join(' / ');
+      const rest = names.length > 4 ? ` ほか ${String(names.length - 4)} 件` : '';
+      return (
+        (await confirmInApp(
+          root,
+          `グループの並び順は、グループごとのノートに憶えます。順番は全部のグループの位置がそろって決まるので、` +
+            `まだノートの無い ${String(names.length)} つにも 1 枚ずつできます(${listed}${rest})。`,
+          { okLabel: '並べ替える', cancelLabel: 'やめる' },
+        )) === 'ok'
+      );
+    },
     setEditorMode: (mode) => {
       appEditorMode.setMode(mode);
     },

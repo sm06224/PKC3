@@ -52,12 +52,18 @@ import { quoteOnEnter } from '@features/markdown/quote-assist';
 import { renumberLists } from '@features/markdown/list-renumber';
 import { stripDialect } from '@features/markdown/strip-dialect';
 import {
+  hasAppGroupNote,
+  appGroupIconName,
+  appGroupOrderCount,
+  hasAppGroupOrder,
   isViewMode,
   nextViewMode,
   screenBodyOf,
   type AppState,
   type ViewMode,
 } from '@adapter/state/app-state';
+import { groupsNeedingNote, planGroupMove } from '@features/launcher/group-order';
+import { isMovableTile } from '@features/launcher/tile-order';
 import { listViewOptions } from '@adapter/state/list-view-options';
 import { appOpenedStore } from '@adapter/platform/opened-store';
 import type { EntryMeta } from '@core/model/entry-meta';
@@ -182,7 +188,7 @@ import {
   noteToolActions,
   tableMenuActions,
   tableConvertPickLabel,
-  APP_GROUP_MENU_ACTIONS,
+  appGroupMenuActions,
   tileMenuActions,
   TASK_REPEAT_MENU_ACTION,
   repeatMenuActions,
@@ -192,6 +198,7 @@ import {
 import {
   type MenuItem,
   closeContextMenu,
+  scrollUnchangedSinceOpen,
   contextMenuOpen,
   openContextMenu,
 } from '../render/context-menu';
@@ -943,10 +950,34 @@ export interface BinderServices {
    */
   toggleAllAppGroups?(groups: readonly string[]): void;
   /**
+   * 🔴 **グループ用のノートが増えることを、押す前に聞く**(#857 段③)。
+   *
+   * ⚠ **枚数だけでなく、どの群かを渡す**(2026-09-13、動線レビュー D1)──
+   *   直す前は「ノートが 4 枚できます」とだけ出ており、**押した群以外まで
+   *   巻き込まれる理由が 1 語も書いていなかった** ── user からは
+   *   「1 つ動かしただけなのに、なぜか複数のノートが増える」としか見えない。
+   * @param names ノートができる群の名前(押した群とは限らない)
+   * @returns 進めてよければ `true`
+   */
+  confirmAppGroupNotes?(names: readonly string[]): Promise<boolean>;
+  /**
+   * 🔴 **すべての群の並び順をやめてよいか聞く**(2026-09-13、着地前の動線レビュー)。
+   * ⚠ 押した見出し**以外**にも効くので、押す前に範囲を言う ── 戻すには
+   *   「上へ / 下へ」を押し直すしかなく、**何回押したかは user も憶えていない**。
+   * @param count いま番号の付いている群の数
+   */
+  confirmResetAppGroupOrder?(count: number): Promise<boolean>;
+  /**
    * 🔴 **グループの目印を選ぶ小窓を出す**(#857 段②)。
    * @returns 図案の名前。**空文字 = なし(外す)**。やめたら `null`
    */
-  pickAppGroupIcon?(groupName: string): Promise<string | null>;
+  /**
+   * 🔴 **グループの目印を選ぶ小窓を出す**(#857 段②)。
+   * ⚠ **いま付いている絵**も渡す(2026-09-13、裁定「絵を並べた表にする」)──
+   *   渡さないと、表は出せても**どれが選ばれているか**を描けない。
+   * @returns 図案の名前。**空文字 = なし(外す)**。やめたら `null`
+   */
+  pickAppGroupIcon?(groupName: string, current: string): Promise<string | null>;
   /**
    * 添付の携帯参照(`pkc://<自分>/asset/<key>`)から**所有ノートへ飛ぶ**(#100 段②)。
    * ⚠ 見つからないときは黙らない(OP_FAILED で断る ── 無言の dead click を作らない)。
@@ -3357,6 +3388,45 @@ async function tocJump(
     hit.scrollIntoView({ block: 'start' });
 }
 
+
+/**
+ * 🔴 **グループを 1 つ動かす**(#857 段③)。⚠ 上へ / 下へで**同じ 1 本**を通す ──
+ * 2 本書くと、片方だけ直した日にずれる(§7)。
+ *
+ * 🔑 **増えるノートの枚数を先に数えて、初回だけ聞く** ── 番号は「動かした先より
+ *   上に在る群」全部に要るので、まとめて増えることがある(最大で群の数 − 1 枚)。
+ * ⚠ 数えるのも計画も**純関数 1 本**(`planGroupMove`)── ここで規則を書かない。
+ */
+function moveAppGroup(
+  dispatcher: Dispatcher,
+  target: HTMLElement,
+  services: BinderServices,
+  by: -1 | 1,
+): void {
+  const name = target.getAttribute('data-pkc-group') ?? '';
+  if (name === '') return;
+  const st = dispatcher.getState();
+  const tiles = st.launcherTiles ?? [];
+  const movable: string[] = [];
+  for (const t of tiles)
+    if (t.group !== '' && isMovableTile(t) && !movable.includes(t.group)) movable.push(t.group);
+  const plan = planGroupMove(movable, st.appGroupOrders, name, by);
+  // ⚠ 端では何もしない(reducer も同じ判定を持つが、ここで止めれば小窓すら出さない)
+  if (plan.length === 0) return;
+  const need = groupsNeedingNote(plan, (n) => hasAppGroupNote(st, n));
+  // ⚠ lid は**書く群の数だけ**採る(足りないと reducer が何も書かない)
+  const newLids = plan.map(() => generateLid());
+  const go = (): void => {
+    dispatcher.dispatch({ type: 'MOVE_APP_GROUP', name, by, newLids });
+  };
+  if (need.length === 0 || services.confirmAppGroupNotes === undefined) {
+    go();
+    return;
+  }
+  void services.confirmAppGroupNotes(need).then((ok) => {
+    if (ok) go();
+  });
+}
 
 const ACTIONS: Record<string, ActionHandler> = {
   /**
@@ -7144,7 +7214,14 @@ const ACTIONS: Record<string, ActionHandler> = {
   'pick-app-group-icon': (dispatcher, target, services) => {
     const name = target.getAttribute('data-pkc-group') ?? '';
     if (name === '') return;
-    void services.pickAppGroupIcon?.(name).then((picked) => {
+    /**
+     * ⚠ **いま付いている絵を渡す** ── `appGroupIcons` は state が持っている
+     *   (描画と同じ物を見るので、画面と小窓が食い違わない)。
+     * ⚠ 絵文字を直に貼った群は `symbol` を持たない ── そのときは空で渡す
+     *   (表の中に該当が無いので、「なし」に枠が付く)。
+     */
+    const now = appGroupIconName(dispatcher.getState(), name);
+    void services.pickAppGroupIcon?.(name, now).then((picked) => {
       // ⚠ `null` = やめた(何もしない)/ `''` = 「なし」(外す)── 混ぜない
       if (picked === null) return;
       dispatcher.dispatch({
@@ -7153,6 +7230,38 @@ const ACTIONS: Record<string, ActionHandler> = {
         icon: picked === '' ? null : picked,
         newLid: generateLid(),
       });
+    });
+  },
+  /**
+   * 🔴 **グループを 1 つ上へ / 下へ**(#857 段③)。
+   *
+   * ⚠ **最初の 1 回だけ聞く** ── 番号は「動かした先より上に在る群」全部に要るので、
+   *   グループ用のノートが**まとめて増える**ことがある(最大で群の数 − 1 枚)。
+   *   黙って増やすと、数日後にサイドバーで見覚えのない題名を見つけることになる。
+   * 🔑 2 回目からは何も出ない(もう番号が付いているので、増えるノートが 0 枚になる)。
+   * ⚠ `newLids` は**書く群の数だけ**採る(足りないと reducer が何も書かない)。
+   */
+  'move-app-group-up': (dispatcher, target, services) => moveAppGroup(dispatcher, target, services, -1),
+  'move-app-group-down': (dispatcher, target, services) => moveAppGroup(dispatcher, target, services, 1),
+  /**
+   * 🔴 **並べ替えをやめて名前順へ戻す**(#857 段③)。
+   * ⚠ 押し所は**番号が在るときだけ**出る(`appGroupMenuActions`)ので、ここへ来た
+   *   時点で 1 つ以上在る ── ⚠ それでも reducer 側でも見る(押し所の出し分けは
+   *   **見せ方**であって、門ではない)。
+   */
+  'reset-app-group-order': (dispatcher, _target, services) => {
+    const count = appGroupOrderCount(dispatcher.getState());
+    // ⚠ 押し所は番号が在るときだけ出るが、門は両側に置く(出し分けは**見せ方**である)
+    if (count === 0) return;
+    const go = (): void => {
+      dispatcher.dispatch({ type: 'RESET_APP_GROUP_ORDER' });
+    };
+    if (services.confirmResetAppGroupOrder === undefined) {
+      go();
+      return;
+    }
+    void services.confirmResetAppGroupOrder(count).then((ok) => {
+      if (ok) go();
     });
   },
   'toggle-all-app-groups': (_dispatcher, target, services) => {
@@ -7999,7 +8108,7 @@ export function bindActions(
       openContextMenu(
         root,
         { x: box.left, y: box.bottom },
-        APP_GROUP_MENU_ACTIONS,
+        appGroupMenuActions(hasAppGroupOrder(dispatcher.getState())),
         row,
         { 'data-pkc-group': groupName },
       );
@@ -10163,7 +10272,7 @@ export function bindActions(
         openContextMenu(
           root,
           { x: ev.clientX, y: ev.clientY },
-          APP_GROUP_MENU_ACTIONS,
+          appGroupMenuActions(hasAppGroupOrder(dispatcher.getState())),
           root.ownerDocument.activeElement,
           { 'data-pkc-group': groupName },
         );
@@ -10539,7 +10648,23 @@ export function bindActions(
   // 🔴 **`onClick` より後に登録する**(上の docstring)── 先に登録すると
   //    メニューが消えてから委譲が走り、押しても無言になる。
   root.addEventListener('click', onCloseMenu);
-  root.addEventListener('scroll', onCloseMenu, true);
+  /**
+   * 🔴 **スクロールで閉じるのは、開いた「後に」動いたときだけ**(#875、2026-09-13)。
+   *
+   * ⚠ 直す前は `onCloseMenu` をそのまま張っていたので、**メニューを開く前に済んだ
+   *   スクロールの、遅れて来た通知**でも閉じていた ── 押した器が器の見える範囲から
+   *   はみ出していると、クリックの焦点で**ブラウザが真ん中へ寄せる**ためである
+   *   (実測:`scrollTop` 0 → 168。`pointerdown` の時点で既に動き終わっている)。
+   * 🔴 症状は「**メニューは出るのに、押す間も無く消える**」── 一覧の下のほうの
+   *   タイルや見出しで起きるので、**アプリが増えるほど当たる**。
+   * 🔑 判定は `context-menu.ts` の 1 か所が持つ ── **どの口から開いても同じに効く**
+   *   (見出しのときだけ焦点を止める形にすると、**タイル側が残る** ── §7)。
+   */
+  const onScrollCloseMenu = (ev: Event): void => {
+    if (scrollUnchangedSinceOpen(root, ev.target)) return;
+    closeContextMenu(root);
+  };
+  root.addEventListener('scroll', onScrollCloseMenu, true);
   root.ownerDocument.addEventListener('keydown', onMenuKey);
   root.addEventListener('paste', onPaste);
   /**
@@ -11316,7 +11441,11 @@ export function bindActions(
     root.removeEventListener('click', onClick);
     root.removeEventListener('contextmenu', onContextMenu);
     root.removeEventListener('click', onCloseMenu);
-    root.removeEventListener('scroll', onCloseMenu, true);
+    // ⚠ **張った名前で外す**(2026-09-13、着地前レビュー)── #875 で `scroll` の
+    //    受け口を `onCloseMenu` から分けたとき、**張る側だけ改名して外す側を忘れた**。
+    //    `removeEventListener` は**参照が一致しないと何もしない**ので、これは
+    //    恒久の no-op になり、畳んだ後も `scroll` の聞き耳が残る。
+    root.removeEventListener('scroll', onScrollCloseMenu, true);
     root.ownerDocument.removeEventListener('keydown', onMenuKey);
     closeContextMenu(root);
     root.removeEventListener('mousedown', onMousedown);
