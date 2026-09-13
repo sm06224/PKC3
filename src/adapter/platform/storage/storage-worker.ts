@@ -65,9 +65,12 @@ import {
   csvCellsOverBudget,
   mergeCsvTables,
   csvTablesMentioned,
+  CSV_TABLE_CELLS_MAX,
   type CsvTable,
   type CsvTableReject,
 } from '@features/query/csv-tables';
+// 🔴 添付の .csv / .tsv を「客の DB」として開けるようにする(#854 段①)
+import { buildCsvAttachmentTable, type CsvAttachmentTable } from '@features/query/csv-attachment';
 import { createSmartScan } from '@features/smart/smart-spec';
 import {
   applyLinePatch,
@@ -1838,6 +1841,23 @@ function createCsvTable(database: Database, t: CsvTable, fresh: (name: string) =
 }
 
 /**
+ * 🔴 **添付の `.csv` / `.tsv` を、客の DB に 1 つの表として作る**(#854 段①)。
+ *
+ * ⚠ `createCsvTable`(本文の囲み用)とは**別**にしてある ── あちらは
+ *   「毎回の走らせるたびに作り直して `finally` で落とす」temp 表だが、
+ *   こちらは**客の DB そのものに 1 回だけ**作る(sqlite guest と同じ寿命 ──
+ *   選び直すか窓を閉じるまで残る)。同じ関数に条件を足すと、
+ *   「いつ落とすか」が 2 つの異なる寿命で混線する。
+ */
+function createCsvGuestTable(database: Database, t: CsvAttachmentTable): void {
+  const cols = t.columns.map((c) => `"${c}" TEXT`).join(', ');
+  database.exec({ sql: `CREATE TABLE "${t.name}" (${cols})` });
+  const marks = t.columns.map(() => '?').join(', ');
+  const insert = `INSERT INTO "${t.name}" VALUES (${marks})`;
+  for (const row of t.rows) database.exec({ sql: insert, bind: [...row] });
+}
+
+/**
  * 🔴 **取り込んだ `.sqlite` の接続**(#681 段③ の 2 つ目)。
  *
  * ⚠ **ノートの DB とは別**である(issue の指示「混ぜない」)── 同じ接続へ
@@ -2106,6 +2126,35 @@ const handlers: Handlers = {
     }
     const oo1 = (api as unknown as { oo1: { DB: new (name: string) => Database } }).oo1;
     const db = new oo1.DB(':memory:');
+    /**
+     * 🔴 **添付の `.csv` / `.tsv` を開く**(#854 段①)。
+     *
+     * ⚠ **拡張子の判定はしない** ── `req.csv` の有無だけを見る(呼び側の
+     *   `store-effects.ts` が既に見分けている。§7「判定を 2 か所に置かない」)。
+     * ⚠ **重い処理はここ(worker)で完結させる**(不可侵指示)── bytes を
+     *   main スレッドへ戻して組み立て直す形にしない。
+     */
+    if (req.csv !== undefined) {
+      try {
+        const text = new TextDecoder('utf-8', { fatal: false }).decode(req.image);
+        const built = buildCsvAttachmentTable(
+          text,
+          req.csv.lang,
+          { lid: req.csv.lid, title: req.csv.name },
+          CSV_TABLE_CELLS_MAX,
+        );
+        if (built === null) {
+          throw new Error('空か、区切りの見つかる行が 1 つもありません');
+        }
+        createCsvGuestTable(db, built);
+        guestDbs.set(req.guest, db);
+        return { tables: [built.name], bytes: req.image.byteLength, truncated: built.truncated };
+      } catch (e) {
+        // ⚠ **読めなかった器も閉じる**(下の sqlite 側と同じ理由)
+        db.close();
+        throw new Error(`この file は csv として読めませんでした(${String(e)})`, { cause: e });
+      }
+    }
     try {
       deserializeInto(
         api as unknown as Parameters<typeof deserializeInto>[0],
@@ -2118,7 +2167,7 @@ const handlers: Handlers = {
         ) as unknown as Array<{ name: string }>
       ).map((r) => r.name);
       guestDbs.set(req.guest, db);
-      return { tables, bytes: req.image.byteLength };
+      return { tables, bytes: req.image.byteLength, truncated: false };
     } catch (e) {
       /**
        * ⚠ **読めなかった器も閉じる**(同上 ── 変異試験 G4 も SURVIVED)。

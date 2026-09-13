@@ -272,6 +272,14 @@ export type StorageRequest =
        *   もう誰も名乗らないので、その客は次の追い出しで畳まれる。
        */
       guest: string;
+      /**
+       * 🔴 **添付の `.csv` / `.tsv` を開くときだけ渡す**(#854 段①)。
+       *
+       * ⚠ **省略 = 今までどおり `.sqlite` の image として開く**(後方互換)。
+       * 渡すのは呼び側(`store-effects.ts`)が題名の拡張子で見分けた結果 ──
+       * ここでもう一度見分け直さない(判定を 2 か所に置かない)。
+       */
+      csv?: { readonly lang: 'csv' | 'tsv'; readonly lid: string; readonly name: string };
     }
   | { op: 'closeSqlGuest'; guest: string }
   | {
@@ -710,12 +718,18 @@ export interface ResultMap {
    * ⚠ `truncated` = **上限で切った**(黙って切ると user は「これで全部」と読む)。
    * ⚠ 値は `postMessage` に載る形だけ ── `Uint8Array`(BLOB)は**大きさの字**へ畳む。
    */
-  /** 取り込んだ `.sqlite` を開いた結果(#681 段③ の 2 つ目)。 */
+  /** 取り込んだ `.sqlite` / `.csv` / `.tsv` を開いた結果(#681 段③ の 2 つ目、#854 段①)。 */
   openSqlGuest: {
     /** 中に在る表の名前(打つ前に「何が在るか」を見せる)。 */
     tables: string[];
     /** 画像の大きさ(バイト)。⚠ 常駐メモリの目安として画面に出す。 */
     bytes: number;
+    /**
+     * 🔴 **上限を超えて打ち切ったか**(#854 段①)。⚠ `.sqlite` は常に `false`
+     *   (打ち切りは csv / tsv だけの話 ── 中身は開いた時点で丸ごと読める形である)。
+     *   黙って切ると user は「これで全部」と読む。
+     */
+    truncated: boolean;
   };
   closeSqlGuest: null;
   runReadOnlySql: {

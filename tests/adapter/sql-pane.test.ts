@@ -84,20 +84,36 @@ function setup(
       return reply(sql);
     },
   );
-  /** 取り込んだ `.sqlite` の口(#681 段③ の 2 つ目)。⚠ 実物は worker の別接続。 */
+  /** 取り込んだ `.sqlite` / `.csv` / `.tsv` の口(#681 段③ の 2 つ目、#854 段①)。
+   *  ⚠ 実物は worker の別接続 ── ここは**渡された引数**だけを見る fake である。 */
   /** 開くのを**手で止められる**門(遅れて届く答えを作るため)。 */
   let holdOpen: null | (() => void) = null;
-  const openSqlGuest = vi.fn(async (image: Uint8Array) => {
-    if (image.byteLength === 0) throw new Error('この file は sqlite の DB として読めませんでした');
-    if (holdOpen !== null) {
-      const gate = new Promise<void>((r) => (holdOpen = r as unknown as () => void));
-      await gate;
-    }
-    return { tables: ['売上', '客'], bytes: image.byteLength };
-  });
+  const openSqlGuest = vi.fn(
+    async (
+      image: Uint8Array,
+      csv?: { lang: 'csv' | 'tsv'; lid: string; name: string },
+    ) => {
+      if (image.byteLength === 0) {
+        throw new Error(
+          csv === undefined
+            ? 'この file は sqlite の DB として読めませんでした'
+            : 'この file は csv として読めませんでした(空か、区切りの見つかる行が 1 つもありません)',
+        );
+      }
+      if (holdOpen !== null) {
+        const gate = new Promise<void>((r) => (holdOpen = r as unknown as () => void));
+        await gate;
+      }
+      if (csv !== undefined) {
+        // 🔑 「大きい.tsv」だけ打ち切ったことにする(#854 段①ノート行の test 用)
+        return { tables: ['csv'], bytes: image.byteLength, truncated: csv.lid === 'db6' };
+      }
+      return { tables: ['売上', '客'], bytes: image.byteLength, truncated: false };
+    },
+  );
   const closeSqlGuest = vi.fn(async () => null);
   const readAssetBytes = vi.fn(async (key: string) =>
-    key === 'ast-ng' ? null : new Uint8Array([1, 2, 3, 4]),
+    key === 'ast-ng' ? null : key === 'ast-csv-broken' ? new Uint8Array([]) : new Uint8Array([1, 2, 3, 4]),
   );
   connectStoreEffects(d, {
     ...stubRevisionOps(),
@@ -120,7 +136,13 @@ function setup(
           : lid === 'db3'
             ? // ⚠ **key を持たない添付**(本文が壊れている / 取り込みが途中で終わった)
               '---\nattachment.name: 中身なし.sqlite\n---\n'
-            : '',
+            : lid === 'db4'
+              ? '---\nattachment.name: 売上.csv\nattachment.asset_key: ast-csv-ok\n---\n'
+              : lid === 'db5'
+                ? '---\nattachment.name: 壊れ.csv\nattachment.asset_key: ast-csv-broken\n---\n'
+                : lid === 'db6'
+                  ? '---\nattachment.name: 大きい.tsv\nattachment.asset_key: ast-tsv-ok\n---\n'
+                  : '',
     ...(opts.withOp === false ? {} : { runReadOnlySql, openSqlGuest, closeSqlGuest }),
   }, opts.withOp === false ? {} : { readAssetBytes });
   bindActions(root, d, {});
@@ -133,7 +155,11 @@ function setup(
       { ...meta('db1', '売上.sqlite'), archetype: 'attachment' },
       { ...meta('db2', '壊れ.sqlite'), archetype: 'attachment' },
       { ...meta('db3', '中身なし.sqlite'), archetype: 'attachment' },
-      // ⚠ **対照群** ── 添付でも `.sqlite` でないものは並ばない
+      // 🔑 取り込んだ `.csv` / `.tsv`(#854 段①)── `.sqlite` の下に並ぶはず
+      { ...meta('db4', '売上.csv'), archetype: 'attachment' },
+      { ...meta('db5', '壊れ.csv'), archetype: 'attachment' },
+      { ...meta('db6', '大きい.tsv'), archetype: 'attachment' },
+      // ⚠ **対照群** ── 添付でも `.sqlite` / `.csv` / `.tsv` でないものは並ばない
       { ...meta('png1', 'ねこ.png'), archetype: 'attachment' },
     ],
     relations: [],
@@ -678,12 +704,12 @@ describe('答えをノートへ書き出す(#681 段③ の 3 つ目)', () => {
  * 6. 相手を変えたら**前の答えは消す**(別の DB の話が残らない)
  */
 describe('取り込んだ .sqlite を調べる(#681 段③ の 2 つ目)', () => {
-  it('🔴 選び所に、添付の .sqlite だけが並ぶ', () => {
+  it('🔴 選び所に、添付の .sqlite が並ぶ(対照群 ── #854 段① で拾い方を広げても壊れていない)', () => {
     const { sourceSel } = setup();
     const names = [...sourceSel.options].map((o) => o.textContent);
     expect(names[0], '既定が「この PKC」でない').toBe('この PKC のノート');
     expect(names, '取り込んだ DB が並んでいない').toContain('売上.sqlite');
-    // ⚠ **対照群** ── 添付でも DB でないものは並ばない
+    // ⚠ **対照群** ── 添付でも DB / csv / tsv でないものは並ばない
     expect(names, '写真まで並んでいる').not.toContain('ねこ.png');
   });
 
@@ -786,6 +812,76 @@ describe('取り込んだ .sqlite を調べる(#681 段③ の 2 つ目)', () =>
     await settle();
     expect(cells(), '別の DB を選んだのに、前の答えが残っている').toEqual([]);
     expect(note(), '前の件数が残っている').not.toContain('1 行');
+  });
+});
+
+/**
+ * 🔴 **添付の `.csv` / `.tsv` を調べる**(#854 段①)。
+ *
+ * user の言葉(2026-09-12)の「csv や sqliteDB のクエリアプリ」の csv の側 ──
+ * 段①② は本文に書いた csv の囲みだけを引けた。ここでは**添付として取り込んだ
+ * `.csv` / `.tsv` そのもの**を、上の `.sqlite` と同じ選び所から選べるようにする。
+ *
+ * 守る主張:
+ * 1. 選び所に、`.sqlite` の**下に** `.csv` / `.tsv` が並ぶ
+ * 2. 選ぶと `openSqlGuest` に**拡張子から見分けた `csv` 引数**が渡る
+ *   (`.sqlite` を選んだときは渡らない ── 対照群)
+ * 3. 空 / 読めない file を選んだら、理由が画面に出る(黙って終わらない)
+ * 4. 上限で打ち切ったら、選んでいる間ずっと画面の字で言う(黙って一部だけ返さない)
+ */
+describe('添付の csv / tsv を調べる(#854 段①)', () => {
+  it('🔴 選び所に、.sqlite の下に .csv / .tsv が並ぶ', () => {
+    const { sourceSel } = setup();
+    const names = [...sourceSel.options].map((o) => o.textContent);
+    const at = (n: string): number => names.indexOf(n);
+    expect(at('売上.csv'), '.csv が並んでいない').toBeGreaterThan(-1);
+    expect(at('大きい.tsv'), '.tsv が並んでいない').toBeGreaterThan(-1);
+    expect(at('売上.csv'), '.sqlite より上に出ている').toBeGreaterThan(at('売上.sqlite'));
+  });
+
+  it('🔴 選ぶと、拡張子から見分けた csv 引数が openSqlGuest へ渡る', async () => {
+    const { pick, openSqlGuest, readAssetBytes } = setup();
+    pick('db4'); // 売上.csv
+    await settle();
+    expect(readAssetBytes).toHaveBeenCalledWith('ast-csv-ok');
+    const call = openSqlGuest.mock.calls[0];
+    expect(call?.[1], '.csv なのに csv 引数が渡っていない').toEqual({
+      lang: 'csv',
+      lid: 'db4',
+      name: '売上.csv',
+    });
+  });
+
+  it('⚠ .tsv も同様に見分けられる(対照群)', async () => {
+    const { pick, openSqlGuest } = setup();
+    pick('db6'); // 大きい.tsv
+    await settle();
+    expect(openSqlGuest.mock.calls[0]?.[1]?.lang, '.tsv を .csv と取り違えている').toBe('tsv');
+  });
+
+  it('⚠ .sqlite を選んだときは csv 引数を渡さない(対照群 ── 既存の口を壊していない)', async () => {
+    const { pick, openSqlGuest } = setup();
+    pick('db1'); // 売上.sqlite
+    await settle();
+    expect(openSqlGuest.mock.calls[0]?.[1], '.sqlite なのに csv 引数が付いた').toBeUndefined();
+  });
+
+  it('🔴 空 / 読めない csv を選ぶと、理由が画面に出る(黙って終わらない)', async () => {
+    const { pick, note, sourceSel } = setup();
+    pick('db5'); // 壊れ.csv(bytes が空)
+    await settle();
+    expect(note(), '理由を言っていない').toContain('開けませんでした');
+    // 🔴 開けなかったので、選び所も「この PKC」へ戻る(sqlite と同じ作法)
+    expect(sourceSel.value, '開けていないのに選んだ顔をしている').toBe('');
+  });
+
+  it('🔴 上限で打ち切ったら、選んでいる間ずっと画面の字で言う', async () => {
+    const { pick, note } = setup();
+    pick('db6'); // 大きい.tsv(fake が truncated: true を返す)
+    await settle();
+    expect(note(), '打ち切ったことを言っていない(開いた直後)').toContain(
+      '行が多いので、先頭だけを表にしています',
+    );
   });
 });
 

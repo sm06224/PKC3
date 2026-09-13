@@ -187,6 +187,11 @@ export interface SqlPageState {
     readonly tables: readonly string[];
     /** 画像の大きさ(バイト)。⚠ 常駐メモリの目安。 */
     readonly bytes: number;
+    /**
+     * 🔴 **csv / tsv を上限で打ち切ったか**(#854 段①)。⚠ `.sqlite` は常に `false`
+     *   (打ち切りうるのは csv / tsv だけ)。黙って切ると user は「これで全部」と読む。
+     */
+    readonly truncated: boolean;
   } | null;
   /** 開こうとして失敗した理由(空 = 無い)。⚠ 黙って何も起きない形を作らない。 */
   readonly guestError: string;
@@ -1336,7 +1341,15 @@ export type UserAction =
    * ⚠ 選び直しは**前の相手を必ず手放す**(常駐メモリを返す)。
    */
   | { type: 'SET_SQL_SOURCE'; lid: string; name: string }
-  | { type: 'SQL_GUEST_OPENED'; lid: string; name: string; tables: string[]; bytes: number }
+  | {
+      type: 'SQL_GUEST_OPENED';
+      lid: string;
+      name: string;
+      tables: string[];
+      bytes: number;
+      /** 🔴 csv / tsv を上限で打ち切ったか(#854 段①)。`.sqlite` は常に `false`。 */
+      truncated: boolean;
+    }
   | { type: 'SQL_GUEST_FAILED'; lid: string; error: string }
   | {
       type: 'SET_SQL_RESULT';
@@ -3203,6 +3216,7 @@ function reduceCore(
               name: action.name,
               tables: action.tables,
               bytes: action.bytes,
+              truncated: action.truncated,
             },
             guestError: '',
             guestPending: '',

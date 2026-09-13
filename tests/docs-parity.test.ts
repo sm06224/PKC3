@@ -2285,6 +2285,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-13(#854 段① ── 添付の csv)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-09-phone-links" …` → 0d29fee
+     */
+    '本文に書いた電話番号を、押すとかけられるようにできます(設定から)',
+    /**
      * ⚠ **2026-09-13(#884 段② ── その場だけの開き方)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-09-sql-guest" …` → b1979e5
      */

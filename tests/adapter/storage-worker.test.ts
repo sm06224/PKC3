@@ -3117,6 +3117,100 @@ describe('取り込んだ .sqlite を調べる(#681 段③ の 2 つ目)', () =>
 });
 
 /**
+ * 🔴 **添付の `.csv` / `.tsv` を客の DB として開く**(#854 段①)。
+ *
+ * user の言葉(2026-09-12)の「csv や sqliteDB のクエリアプリ」の csv の側 ──
+ * `.sqlite` は画像をそのまま読めるが、`.csv` / `.tsv` は**この worker が
+ * その場で 1 つの表へ組み立てる**(`store-effects.ts` が拡張子から見分けて
+ * `csv` を渡したときだけ、この経路を通る)。
+ *
+ * 守る主張:
+ * 1. 固定名 `csv` の表になり、`_note` / `_lid` 付きで引ける
+ * 2. tsv も同じ規則で開ける
+ * 3. 空 / 読める行が無い file は、その場で断る(常駐を残さない)
+ * 4. 書けない(`query_only` が sqlite guest と同じ境で効く)
+ * 5. 客の DB はこちらの表(`entries` など)と混ざらない
+ */
+describe('添付の .csv / .tsv を客の DB として開く(#854 段①)', () => {
+  const W = 'csv-w1';
+  const enc = (s: string): Uint8Array => new TextEncoder().encode(s);
+  const runGuest = (sql: string) =>
+    request({
+      op: 'runReadOnlySql',
+      sql,
+      maxRows: 100,
+      maxSteps: 1_000_000,
+      maxMs: 60_000,
+      guest: W,
+    });
+
+  it('🔴 開くと固定名 csv の表になり、_note / _lid 付きで引ける', async () => {
+    const opened = await request({
+      op: 'openSqlGuest',
+      image: enc('name,age\n太郎,20\n花子,30\n'),
+      guest: W,
+      csv: { lang: 'csv', lid: 'att-1', name: '売上.csv' },
+    });
+    expect(opened.tables, '固定名 csv になっていない').toEqual(['csv']);
+    expect(opened.truncated, '小さい file なのに切ったことにしている').toBe(false);
+    const r = await runGuest('SELECT _note, _lid, name, age FROM csv ORDER BY age');
+    expect(r.rows).toEqual([
+      ['売上.csv', 'att-1', '太郎', '20'],
+      ['売上.csv', 'att-1', '花子', '30'],
+    ]);
+    await request({ op: 'closeSqlGuest', guest: W });
+  });
+
+  it('⚠ tsv も同じ規則で開ける(対照群 ── 区切り字だけが違う)', async () => {
+    const opened = await request({
+      op: 'openSqlGuest',
+      image: enc('a\tb\n1\t2\n'),
+      guest: W,
+      csv: { lang: 'tsv', lid: 'att-2', name: '客.tsv' },
+    });
+    expect(opened.tables).toEqual(['csv']);
+    expect((await runGuest('SELECT a, b FROM csv')).rows).toEqual([['1', '2']]);
+    await request({ op: 'closeSqlGuest', guest: W });
+  });
+
+  it('🔴 空 / 読める行が無い file は、その場で断る(常駐を残さない)', async () => {
+    await expect(
+      request({
+        op: 'openSqlGuest',
+        image: enc(''),
+        guest: W,
+        csv: { lang: 'csv', lid: 'att-3', name: '空.csv' },
+      }),
+      '.csv に見えるが中身が壊れている(空)file を、そのまま開けたことにしている',
+    ).rejects.toThrow(/csv として読めませんでした/);
+    // ⚠ 断った後は開かれていない(黙って前の器が残っていない ── sqlite 側と同じ作法)
+    await expect(runGuest('SELECT 1')).rejects.toThrow(/開かれていません/);
+  });
+
+  it('🔴 書けない(query_only が効く。sqlite guest と同じ境)', async () => {
+    await request({
+      op: 'openSqlGuest',
+      image: enc('a\n1\n'),
+      guest: W,
+      csv: { lang: 'csv', lid: 'att-4', name: '数.csv' },
+    });
+    await expect(runGuest("INSERT INTO csv (a) VALUES ('x')")).rejects.toThrow(/readonly/i);
+    await request({ op: 'closeSqlGuest', guest: W });
+  });
+
+  it('⚠ 客の DB は、こちらの表(entries など)と混ざらない(器が違う)', async () => {
+    await request({
+      op: 'openSqlGuest',
+      image: enc('a\n1\n'),
+      guest: W,
+      csv: { lang: 'csv', lid: 'att-5', name: '数.csv' },
+    });
+    await expect(runGuest('SELECT * FROM entries')).rejects.toThrow(/no such table/i);
+    await request({ op: 'closeSqlGuest', guest: W });
+  });
+});
+
+/**
  * 🔴 **SQL の窓を 2 枚開いても、取り合わない**(#836)。
  *
  * ## 直す前、画面で何が起きていたか
