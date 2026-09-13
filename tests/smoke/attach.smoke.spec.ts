@@ -1031,6 +1031,9 @@ test('🔴 添付から読んだ mermaid が、絵として出る(#444 段①)',
  *   (親の DOM から読める唯一の観測点)。
  */
 test('🔴 添付の HTML が、本文に書いたのと同じ箱で描かれる(#444 段①)', async ({ page }) => {
+  // ⚠ この test の後半で添付を横に留める(#848)── 狭いと自動で畳むので窓を広く取る
+  //   (`split-frames.smoke.spec.ts` と同じ作法。`gotoApp` の前に決める)
+  await page.setViewportSize({ width: 1600, height: 900 });
   await gotoApp(page);
   await page.setInputFiles('[data-pkc-field="attach-input"]', {
     name: 'card.html',
@@ -1042,6 +1045,40 @@ test('🔴 添付の HTML が、本文に書いたのと同じ箱で描かれる
     .first()
     .getAttribute('data-pkc-asset-key');
   expect(assetKey, '添付の鍵が取れない(この先は測れない)').toBeTruthy();
+
+  /**
+   * 🔴 **留めた枠でも添付の設定を触れる**(#848 の実ブラウザ確認)。
+   *
+   * ⚠ ここに新しい `gotoApp` は足していない ── 上の HTML 添付を作る journey の
+   *   途中から続ける(`scripts/smoke-budget.mjs` の門)。
+   *
+   * 🔑 本文を右クリックして「スタックに載せる」を出すには
+   *   `[data-pkc-field="detail-body"]` が要る(`entry-actions.ts` の
+   *   `BODY_MENU_ACTIONS`)。添付は**説明が空だと持たない**
+   *   (`renderAttachment` ── `description.trim() !== ''` の中でしか描かない)ので、
+   *   ここで 1 行だけ足す。⚠ **frontmatter は 1 バイトも書き換えない** ──
+   *   textarea の現在値をそのまま読み、末尾に段落を足すだけ。
+   */
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  const attachEditor = page.locator('[data-pkc-field="editor-body"]');
+  const attachRawBefore = await attachEditor.inputValue();
+  await attachEditor.fill(`${attachRawBefore}\n\n留めて確かめる用の説明。`);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(
+    page.locator('[data-pkc-field="detail-body"] p'),
+    '添付に足した説明が描かれていない(この先は測れない)',
+  ).toContainText('留めて確かめる用の説明');
+
+  // 本文(説明)を右クリック →「このノートをスタックに載せる」で横に留める
+  // (`split-frames.smoke.spec.ts` と同じ導線 ── 行ではなく本文から留める)
+  await page.locator('[data-pkc-field="detail-body"] p').first().click({ button: 'right' });
+  const menu = page.locator('[data-pkc-region="context-menu"]');
+  await expect(menu, '本文で右クリックしてもメニューが出ない').toBeVisible();
+  await menu.locator('button[data-pkc-action="pin-split"]').click();
+  await expect(page.locator('[data-pkc-split-lid]')).toHaveCount(1);
+  // ⚠ 以後の 5 つの操作は**この枠の中でだけ**行う ── field 名は主の枠と同じ字なので、
+  //   区別できるのはこの region による scope だけである
+  const pinned = page.locator('[data-pkc-region="split-frame"][data-pkc-split-lid]');
 
   await createEntry(page, 'text');
   await page.locator('[data-pkc-field="editor-body"]').click();
@@ -1055,6 +1092,55 @@ test('🔴 添付の HTML が、本文に書いたのと同じ箱で描かれる
   // 🔴 添付の字が箱に入っている
   expect(await box.getAttribute('srcdoc')).toContain('添付から来た字');
   await expect(page.locator('[data-pkc-fence-asset-key]')).toHaveCount(0);
+
+  /**
+   * 🔴 **ここからが #848 の確認**(留めた枠 → 主の枠は別のノート → 5 つの設定)。
+   *
+   * 🔑 対照群 ── 押す前に、主の枠(いま開いているテキストのノート)の生の本文を控える。
+   *   `[data-pkc-field="editor-body"]` は主・留めた枠のどちらでも同じ field 名なので、
+   *   ここは**編集に入っているのが主の枠だけ**(留めた枠は編集に入らない)という前提で読む。
+   */
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  const mainBodyBefore = await page.locator('[data-pkc-field="editor-body"]').inputValue();
+  await clickReal(page, '[data-pkc-action="cancel-edit"]');
+  await expect(box, '編集から戻った後、主の枠の描画が前提と違う').toBeAttached({ timeout: 10_000 });
+
+  // ① アプリとして登録 ── 主はテキストのノートなので、この口は留めた枠にしか無い
+  const register = pinned.locator('[data-pkc-field="app-register"]');
+  await expect(register, '留めた枠に登録の口が出ていない').toHaveCount(1);
+  await register.check();
+  const group = pinned.locator('[data-pkc-field="app-group"]');
+  await expect(group, '登録すると出るはずの設定欄が出ていない').toBeVisible();
+
+  // ② グループ
+  await group.fill('留めた枠の道具');
+  await group.blur();
+
+  // ③ アイコン(欄に直に打つ)
+  const iconField = pinned.locator('[data-pkc-field="app-icon"]');
+  await iconField.fill('📌');
+  await iconField.blur();
+
+  // ④ 絵の一覧(押すと欄にも同じ字が反映される ── `launcher.smoke.spec.ts` と同じ観測点)
+  const iconBtn = pinned.locator('[data-pkc-action="pick-app-icon"][data-pkc-icon-name="calendar"]');
+  await iconBtn.click();
+  await expect(iconBtn, '選んだ絵が留めた枠に残っていない').toHaveAttribute('aria-pressed', 'true');
+  await expect(iconField).toHaveValue('calendar');
+
+  // ⑤ 名前
+  const rename = pinned.locator('[data-pkc-field="attachment-rename"]');
+  await rename.fill('留めた枠から改名した添付');
+  await rename.blur();
+
+  /**
+   * 🔴 対照群 ── 主の枠(いま開いている別のノート)は 1 バイトも変わっていない。
+   * ⚠ 上の 5 つがどれか 1 つでも `selectedLid`(主の枠)へ撃っていれば、
+   *   ここで frontmatter が増えて食い違う(#848 が塞いだ事故そのもの)。
+   */
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  const mainBodyAfter = await page.locator('[data-pkc-field="editor-body"]').inputValue();
+  expect(mainBodyAfter, '主の枠のノートが、留めた枠の操作で書き換わった').toBe(mainBodyBefore);
+  await clickReal(page, '[data-pkc-action="cancel-edit"]');
 });
 
 /**
