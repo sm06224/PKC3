@@ -42,6 +42,7 @@ import {
 } from '@features/smart/smart-spec';
 import { spliceFrontmatterKeys } from '@features/markdown/frontmatter';
 import { buildTiles, withBuiltinTiles, type TileSource } from '@features/launcher/tiles';
+import { appGroupIconsOf } from '@features/launcher/app-group-spec';
 import type {
   GroupResult as QueryGroups,
   KeyResult as QueryKeys,
@@ -1768,6 +1769,42 @@ export function connectStoreEffects(
              *   「まだ」と「駄目だった」の区別は面が `captureScanFailed` で出す。
              */
             if (!disposed) dispatcher.dispatch({ type: 'CAPTURE_SCAN_FAILED' });
+          }
+        });
+        break;
+      /**
+       * 🔴 **グループ用ノートの目印を読む**(#857 段②)。
+       *
+       * ⚠ **タイルの読み筋に相乗りさせていない** ── `tileFrom` は archetype を
+       *   見ないので、同じ経路へ混ぜた瞬間に「グループを表すノート」と
+       *   「そのグループに入っているタイル」が同じ土俵に乗る。
+       * 🔑 読むのは **`appgroup` の本文だけ**(どれを読むかは event が持って来る ──
+       *   この層は実行時に state を見ない、という file 冒頭の宣言どおり)。
+       * 🔑 **1 往復で読む**(`getBody` を件数ぶん呼ぶと、その回数だけ store が塞がる)。
+       */
+      case 'REQUEST_APP_GROUP_ICONS':
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            // ⚠ 0 件でも**撃つ** ── 最後のグループ用ノートを消したときに
+            //    画面から目印が消えないと、「消したのに残る」になる
+            const titles = new Map(ev.entries.map((e) => [e.lid, e.title]));
+            const rows = ev.entries.length === 0 ? [] : await store.getBodies(ev.entries.map((e) => e.lid));
+            if (disposed) return;
+            const notes: { title: string; body: string }[] = [];
+            // ⚠ **event の並び**で組む(先勝ちの「最初」を、画面の並びと一致させる)
+            for (const e of ev.entries) {
+              const row = rows.find((r) => r.lid === e.lid);
+              const title = titles.get(e.lid);
+              if (row !== undefined && title !== undefined) notes.push({ title, body: row.body });
+            }
+            dispatcher.dispatch({ type: 'APP_GROUP_ICONS_LOADED', icons: appGroupIconsOf(notes) });
+          } catch (e) {
+            if (!disposed)
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: `グループの目印の読込に失敗しました: ${String(e)}`,
+              });
           }
         });
         break;

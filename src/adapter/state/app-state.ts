@@ -41,6 +41,10 @@ import type { PersistState } from '@adapter/platform/storage-persist';
 import type { OpenExtension } from '@adapter/platform/extension-links';
 import type { LauncherTile } from '@features/launcher/tiles';
 import {
+  APP_GROUP_ARCHETYPE,
+  type AppGroupIcons,
+} from '@features/launcher/app-group-spec';
+import {
   applyTileWrites,
   isMovableTile,
   planTileMove,
@@ -1012,6 +1016,14 @@ export interface AppState {
    */
   launcherTiles: LauncherTile[] | null;
   /**
+   * グループの見出しに出す目印(#857 段②)。名前 → 目印。
+   * ⚠ **タイルとは別に読む**(`app-group-spec.ts` の火種)。
+   * ⚠ 空の `{}` = 目印を持つグループが 1 つも無い(`null` を持たない ──
+   *   「まだ読んでいない」と「1 つも無い」で見出しの出方は変わらないので、
+   *   区別できる状態を作ると**使われない分岐**が増える)。
+   */
+  appGroupIcons: AppGroupIcons;
+  /**
    * 🔴 **本文を書き換える経路のロック**(P8 段⑧。user 指示 2026-08-03
    * 「**編集競合は競合ロックと強制解放も念頭にしてください**」)。
    *
@@ -1200,6 +1212,7 @@ export const initialState: AppState = {
   persistState: 'unknown',
   backlinks: null,
   launcherTiles: null,
+  appGroupIcons: {},
   calendarMonth: null,
   showArchived: false,
   showDoneTasks: false,
@@ -1374,6 +1387,7 @@ export type UserAction =
   /** 関係を消す(#185)。⚠ **id で消す**(同じ組が複数あっても迷わない)。 */
   | { type: 'REMOVE_RELATION'; id: string }
   | { type: 'LAUNCHER_TILES_LOADED'; tiles: LauncherTile[] }
+  | { type: 'APP_GROUP_ICONS_LOADED'; icons: AppGroupIcons }
   /**
    * アプリの一覧を読み直す(P8 段⑱)。
    *
@@ -2216,6 +2230,15 @@ export type DomainEvent =
     }
   | {
       type: 'REQUEST_LAUNCHER_TILES';
+      entries: Array<{ lid: string; title: string }>;
+    }
+  | {
+      /**
+       * 🔴 **グループ用ノートの目印を読む**(#857 段②)。
+       * ⚠ `REQUEST_LAUNCHER_TILES` と**引き金は同じでも別の event** ── 混ぜると
+       *   `tileFrom` が両方を同じ土俵で処理する(`app-group-spec.ts` の火種)。
+       */
+      type: 'REQUEST_APP_GROUP_ICONS';
       entries: Array<{ lid: string; title: string }>;
     }
   | {
@@ -3267,7 +3290,17 @@ function reduceCore(
       //    読み直し、届いたら差し替える ── 「読み込んでいます…」を挟まない)
       return {
         state,
-        events: [{ type: 'REQUEST_LAUNCHER_TILES', entries: attachmentEntries(state) }],
+        events: [
+          { type: 'REQUEST_LAUNCHER_TILES', entries: attachmentEntries(state) },
+          /**
+           * ⚠ **引き金は同じでも、読み筋は別**(#857 段②)── 混ぜると
+           *   `tileFrom` が両方を同じ土俵で処理することになる。
+           */
+          {
+            type: 'REQUEST_APP_GROUP_ICONS',
+            entries: appGroupEntriesOf(state.order, state.entryMetas),
+          },
+        ],
       };
     /**
      * 🔴 **1 回目の押し ── 印を付けるだけ**(#857 段①b)。
@@ -3307,6 +3340,8 @@ function reduceCore(
     }
     case 'LAUNCHER_TILES_LOADED':
       return { state: { ...state, launcherTiles: action.tiles }, events: [] };
+    case 'APP_GROUP_ICONS_LOADED':
+      return { state: { ...state, appGroupIcons: action.icons }, events: [] };
     case 'APP_TILE_SAVED': {
       // 🔴 **世代が違う ack は本文に触らない**が、**ロックは必ず解く**
       //    (追記と同じ ── 握ったままにすると user は二度と設定を変えられない)
@@ -6017,6 +6052,27 @@ function attachmentEntries(state: AppState): Array<{ lid: string; title: string 
  * ⚠ `SYS_BOOTED` の枝は**まだ state に入れていない** `order` / `metas` を持つので、
  *   `state` から採ると**いま取り込んだ添付が 1 件も載らない**。
  */
+/**
+ * 🔴 **グループ用のノートだけを引く**(#857 段②)。
+ *
+ * ⚠ **添付の読み筋に相乗りさせない** ── `tileFrom` は archetype を見ないので、
+ *   同じ経路へ混ぜた瞬間に「グループを表すノート」と「そのグループに入っている
+ *   タイル」が同じ土俵に乗る(`app-group-spec.ts` の火種)。
+ * 🔑 `entryMetas` が `archetype` を**生の列**で持つので、走査だけで引ける
+ *   (本文も SQL も要らない ── 本文は effect 層がこの一覧だけを読む)。
+ */
+function appGroupEntriesOf(
+  order: readonly string[],
+  metas: ReadonlyMap<string, EntryMeta>,
+): Array<{ lid: string; title: string }> {
+  const out: Array<{ lid: string; title: string }> = [];
+  for (const lid of order) {
+    const meta = metas.get(lid);
+    if (meta?.archetype === APP_GROUP_ARCHETYPE) out.push({ lid, title: meta.title });
+  }
+  return out;
+}
+
 function attachmentEntriesOf(
   order: readonly string[],
   metas: ReadonlyMap<string, EntryMeta>,
