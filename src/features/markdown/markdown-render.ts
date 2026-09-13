@@ -64,6 +64,7 @@ import {
   classifyDirectiveOpen,
 } from './directive-open';
 import { parseInlineRoleAt, type InlineRoleMatch } from './inline-role-parser';
+import { iconShortcodeAt } from '../icon/icon-shortcode';
 import { readMathAt } from './math-delims';
 import {
   isCardPresentationLabel,
@@ -2027,15 +2028,26 @@ function scanContainerDirective<T>(
   return { transformed: out.join('\n'), registry, lineMap: lineMapOut };
 }
 
-md.inline.ruler.after('emphasis', 'pkc_simple_inline', function simpleInlineRule(state, silent) {
-  if (silent) return false;
-  const src = state.src;
-  const start = state.pos;
-  if (src.charCodeAt(start) !== 0x3A /* : */) return false;
+/**
+ * 🔴 **`:content:attrs:`(L-6)が、この位置から当たるか**(#853 段①、2026-09-13 に切り出した)。
+ *
+ * ⚠ **切り出した理由は §7 である** ── 本文の図案(`:home:`)は、この記法と
+ *   **同じ `:` から始まる**。図案の側が「L-6 なら譲る」を**自前の綴りで**判定すると、
+ *   同じ問いに答える口が 2 つになり、片方だけ直した日に**既存の本文の見た目が割れる**。
+ * 🔑 だから**判定はここ 1 本**にして、図案の規則はこれを呼ぶ。
+ *
+ * @returns 当たるなら中身と、消費し終わる位置。当たらなければ `null`
+ */
+function findSimpleInline(
+  src: string,
+  start: number,
+  posMax: number,
+): { content: string; inlineStyle: string; end: number } | null {
+  if (src.charCodeAt(start) !== 0x3A /* : */) return null;
   // Scan forward to find a `:<attrs>:` boundary。
-  for (let i = start + 1; i < state.posMax; i++) {
+  for (let i = start + 1; i < posMax; i++) {
     const ch = src.charCodeAt(i);
-    if (ch === 0x0A /* newline */) return false;
+    if (ch === 0x0A /* newline */) return null;
     if (ch !== 0x3A /* : */) continue;
     // 候補境界。i から `:<attrs>:` を試行。
     // `:` 以後 attrs 部分を抽出。
@@ -2048,21 +2060,81 @@ md.inline.ruler.after('emphasis', 'pkc_simple_inline', function simpleInlineRule
     if (!parsed.valid) continue;
     const content = src.slice(start + 1, i);
     if (!content) continue;
-    // Match found:`<span style="...">content</span>` を出力。
-    // inner content は inline markup を保持したいので state.md.inline.parse で
-    // tokenize したいところだが、Phase 1 は plain text で。
-    const tokenOpen = state.push('simple_inline_open', 'span', 1);
-    tokenOpen.attrSet('class', 'pkc-inline-mark');
-    if (parsed.inlineStyle) tokenOpen.attrSet('style', parsed.inlineStyle);
-    const tokenText = state.push('text', '', 0);
-    tokenText.content = content;
-    state.push('simple_inline_close', 'span', -1);
-    state.pos = i + 1 + closeIdx + 1;  // skip past closing `:`
-    return true;
+    return { content, inlineStyle: parsed.inlineStyle, end: i + 1 + closeIdx + 1 };
   }
-  return false;
+  return null;
+}
 
+md.inline.ruler.after('emphasis', 'pkc_simple_inline', function simpleInlineRule(state, silent) {
+  if (silent) return false;
+  const hit = findSimpleInline(state.src, state.pos, state.posMax);
+  if (hit === null) return false;
+  // Match found:`<span style="...">content</span>` を出力。
+  // inner content は inline markup を保持したいので state.md.inline.parse で
+  // tokenize したいところだが、Phase 1 は plain text で。
+  const tokenOpen = state.push('simple_inline_open', 'span', 1);
+  tokenOpen.attrSet('class', 'pkc-inline-mark');
+  if (hit.inlineStyle) tokenOpen.attrSet('style', hit.inlineStyle);
+  const tokenText = state.push('text', '', 0);
+  tokenText.content = hit.content;
+  state.push('simple_inline_close', 'span', -1);
+  state.pos = hit.end;  // skip past closing `:`
+  return true;
 });
+
+// ── #853 段①(2026-09-13):本文に図案を置く `:home:` ──
+//
+// > user 指示 2026-09-12:「**マテリアルデザインのアイコンはユーザーのメモ内でも
+// > 使用できるように動線を追加して欲しい**」
+//
+// 受ける語は `features/icon/icon-shortcode.ts` が持つ(押して選べる 49 種だけ)。
+// ⚠ ここで表を読まない ── 挿す側(書式パネル)と読む側で綴りが分かれる(§7)。
+//
+// 🔑 **並びは `pkc_inline_role` の後、`pkc_simple_inline` の前**になる
+//    (`before('emphasis')` を、役の登録より後に呼ぶため)。
+//    ⚠ この順が要る理由は 2 つ:
+//      ① `:code:[x]` は**役**である(`code` は図案の名前でもある)── 役を先に通し、
+//         こちらは `[` / `{` が続く形を**受けない**(2 段で守る)
+//      ② `:text:attrs:`(簡易 inline)より**前**に置く ── 後ろに置くと
+//         `:home:` の後ろに `:` が来る行で、簡易 inline が先に食べる
+md.inline.ruler.before('emphasis', 'pkc_icon', function iconRule(state, silent) {
+  const hit = iconShortcodeAt(state.src, state.pos);
+  if (hit === null) return false;
+  /**
+   * 🔴 **先に在る記法に譲る**(着地前レビューが実測で出した。2026-09-13)。
+   *
+   * ⚠ `:content:attrs:`(L-6 簡易 inline)は**同じ `:` から始まる**ので、
+   *   `:home:bold:`(= 太字の「home」)を書いていた本文が、こちらを先に通すと
+   *   **家の絵 + 裸の `bold:`** に化けた(実測)。
+   * 🔴 **既存の本文の見た目を勝手に変えない** ── 受ける語を 49 に絞った理由
+   *   (#853 の「既存の `:foo:` が勝手に絵に変わらないか」)は、こちらにも同じだけ効く。
+   * 🔑 判定は `findSimpleInline` の 1 本を呼ぶ ── 自前で綴りを写さない(§7)。
+   * ⚠ 図案の字が当たった**後**に問う ── `:` の位置ごとに L-6 の走査を回さない。
+   */
+  if (findSimpleInline(state.src, state.pos, state.posMax) !== null) return false;
+  // ⚠ `silent` は「試すだけ」── 位置だけ進めて token を積まない(markdown-it の作法)
+  if (!silent) {
+    const token = state.push('pkc_icon', 'span', 0);
+    token.meta = { name: hit.name, label: hit.label };
+  }
+  state.pos += hit.length;
+  return true;
+});
+
+/**
+ * 🔴 **器の形は画面と同じ**(`render/icons.ts` の `iconSpan`)。
+ *
+ * ⚠ **字を器に入れない**(#770 段① の戒め)── 絵は CSS の `::before` が出す。
+ *   入れると本文の `textContent` に目に見えない 1 文字が混ざり、文言を読む側が静かに外れる。
+ * 🔑 **読み上げの名前は持たせる** ── ボタンの図案は隣の文字が意味を持つので
+ *   `aria-hidden` だが、本文の図案は**それ自体が中身**である(隠すと読み上げから消える)。
+ */
+md.renderer.rules.pkc_icon = function (tokens, idx) {
+  const meta = tokens[idx]!.meta as { name: string; label: string };
+  const label = md.utils.escapeHtml(meta.label);
+  // ⚠ 名前は `[a-z0-9-]` しか通らない(`iconShortcodeAt`)ので、属性値は安全
+  return `<span data-pkc-icon data-pkc-symbol="${meta.name}" role="img" aria-label="${label}" title="${label}"></span>`;
+};
 
 // ── Inline `<br>` 改行(2026-06-22 user バグレポ)────────────────
 //

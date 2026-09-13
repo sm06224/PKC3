@@ -37,6 +37,16 @@ export interface IconPaletteSpec {
   /** 読み上げのための、この表の名前。 */
   readonly ariaLabel: string;
   /**
+   * 先頭に「なし」を出すか(既定は出す)。
+   *
+   * ⚠ **出さないのは「入れる」ときだけ**(#853 段① ── 本文へ図案を挿し込む表)。
+   *   そこには**外す物が無い**ので、「なし」は `::` という空の字を入れる押し所に
+   *   なってしまう。
+   * 🔑 **付ける表では必ず出す** ── 置けるなら外せなければならない(user 指示
+   *   2026-08-23)。だから既定は `true` で、外す側が名乗る形にする。
+   */
+  readonly withNone?: boolean;
+  /**
    * 押し所 1 つずつに呼ばれる ── **受け方は呼び側が決める**
    * (`data-pkc-action` を書くか、`click` を聞くか)。
    */
@@ -53,6 +63,8 @@ export interface IconPaletteSpec {
  *   道は残す。
  * ⚠ **先頭に「なし」** ── 置けるなら外せなければならない(user 指示 2026-08-23)。
  *   一覧の中に在るほうが、**押した所と同じ場所で戻せる**。
+ *   ⚠ 出さないのは**入れるだけの表**(`withNone: false`)── 外す物が無いので、
+ *     「なし」は空の字を入れる押し所になる(#853 段①)。
  * 🔑 いま選んでいる物は **`aria-pressed`(状態)で示す** ── 字を足さない
  *   (読み上げにも出るし、CSS が枠を描く)。
  */
@@ -103,7 +115,7 @@ export function buildIconPalette(spec: IconPaletteSpec): HTMLElement {
     box.append(btn);
   };
 
-  add('', 'なし', false);
+  if (spec.withNone !== false) add('', 'なし', false);
   for (const c of TILE_ICON_CHOICES) add(c.name, c.label, true);
   return box;
 }

@@ -308,7 +308,7 @@ test('🔴 日付の道具が実機で開き、選んだ日付が本文に入る
  * ⚠ 先に `Escape` の側を通す ── 「閉じて何も入らない」が通ってから「選ぶと入る」を
  *   見ないと、後者が「何かの理由で常に入る」実装でも緑になる。
  */
-test('🔴 「図」を押すと 5 種の一覧が出て、Esc なら入らず、↓ Enter で選んだ雛形が入る', async ({ page }) => {
+test('🔴 「図」は Esc で入らず ↓ Enter で雛形が入り、「図案」は絵を選ぶと本文で絵になる', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
@@ -346,6 +346,72 @@ test('🔴 「図」を押すと 5 種の一覧が出て、Esc なら入らず�
   await expect(ta, 'クラス図の雛形が caret の位置に入っていない').toHaveValue(
     /^まえ\n```mermaid\nclassDiagram\n[\s\S]*```\n\nうしろ$/,
   );
+
+  /**
+   * ── ④ 同じ帯の「図案」(#853 段①、2026-09-13)。
+   *
+   * 🔴 **新しく起動しない** ── 既に開いている編集の道中に足す(起動 1 つ = 以後すべての
+   *   回に 1.63 秒。CLAUDE.md「増える向きを変える」)。
+   * ⚠ 図の雛形は捨てる ── 残すと保存で mermaid の焼きが走り、**この動線と無関係な
+   *   時間と揺れ**を抱き込む。
+   */
+  await ta.fill('きょうは ');
+  await ta.evaluate((el) => {
+    const t = el as HTMLTextAreaElement;
+    t.setSelectionRange(t.value.length, t.value.length);
+  });
+
+  await clickReal(page, '[data-pkc-action="insert-icon"]');
+  const picks = page.locator('[data-pkc-field="pick-body-icon"] button');
+  // ⚠ 数を名指しで pin しない(絵は増える)── **「なし」が無いこと**が主張である
+  await expect(picks, '絵の表が出ていない').not.toHaveCount(0);
+  await expect(
+    page.locator('[data-pkc-field="pick-body-icon"] button[data-pkc-icon-name=""]'),
+    '入れる表に「なし」が出ている(空の字を入れる押し所になる)',
+  ).toHaveCount(0);
+  await expect(picks.first(), '焦点が先頭の絵に無い(鍵だけで選べない)').toBeFocused();
+
+  // Esc で閉じて、何も入らない ── 先にこちらを通す(後の「入る」が常に真でないこと)
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-pkc-region="app-dialog"]')).toBeHidden();
+  await expect(ta, 'Esc で閉じたのに何か入った').toHaveValue('きょうは ');
+
+  // もう一度開いて、家の絵を押す ── caret の位置に `:home:` が入る
+  await clickReal(page, '[data-pkc-action="insert-icon"]');
+  await clickReal(page, '[data-pkc-field="pick-body-icon"] button[data-pkc-icon-name="home"]');
+  await expect(page.locator('[data-pkc-region="app-dialog"]')).toBeHidden();
+  await expect(ta, '選んだ絵の字が caret の位置に入っていない').toHaveValue('きょうは :home:');
+  // ⚠ **対照群を同じ本文に置く** ── 表に無い語は字のまま出ること(次の assert と対で読む)
+  await page.keyboard.type(' と :smile:');
+
+  /**
+   * ── ⑤ 保存すると、閲覧の面でその場所が**絵になる**。
+   *
+   * 🔴 ここが実ブラウザでしか通らない所である ── 絵を出すのは CSS の `::before` なので、
+   *   unit(happy-dom)では「器が在る」までしか言えない。
+   */
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  const body = page.locator('[data-pkc-field="detail-body"]');
+  const glyph = body.locator('[data-pkc-symbol="home"]');
+  await expect(glyph, '本文の図案が出ていない').toHaveCount(1);
+  await expect(glyph, '読み上げの名前が無い(本文の図案は中身そのもの)').toHaveAttribute(
+    'aria-label',
+    '家',
+  );
+  await expect(body, '打った字がそのまま残っている(絵になっていない)').not.toContainText(':home:');
+  // 🔴 対照群 ── 表に無い語は**字のまま**(何でも絵にする実装なら、ここで落ちる)
+  await expect(body, '表に無い語まで絵にした').toContainText(':smile:');
+
+  /**
+   * 🔴 **周りの字に載っている**(`.pkc-md-rendered [data-pkc-icon]` の主張)。
+   * ⚠ 器の既定は **16px 固定**(帯のボタン向けの値)なので、その規則を外すと比が 1.0 になる
+   *   ── つまりこの 1 行が、規則を消す変異を殺す。
+   */
+  const ratio = await glyph.evaluate((el) => {
+    const host = el.closest('p') ?? el.parentElement!;
+    return parseFloat(getComputedStyle(el).fontSize) / parseFloat(getComputedStyle(host).fontSize);
+  });
+  expect(ratio, `図案が周りの字に載っていない(比 ${String(ratio)})`).toBeCloseTo(1.15, 2);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
