@@ -2269,6 +2269,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-13(#857 段② ── 見出しの目印)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-09-selfhost-update" …` → 09cc6e7
+     */
+    '自分のパソコンで動かす一式に、「どこから作ったか」が書かれるようになりました',
+    /**
      * ⚠ **2026-09-13(#870 ── スマートフォルダの取り込み)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-09-copy-history" …` → 4ea9636
      */

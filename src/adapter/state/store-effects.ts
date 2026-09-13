@@ -42,7 +42,7 @@ import {
 } from '@features/smart/smart-spec';
 import { spliceFrontmatterKeys } from '@features/markdown/frontmatter';
 import { buildTiles, withBuiltinTiles, type TileSource } from '@features/launcher/tiles';
-import { appGroupIconsOf } from '@features/launcher/app-group-spec';
+import { appGroupIconsOf, writeAppGroupIcon } from '@features/launcher/app-group-spec';
 import type {
   GroupResult as QueryGroups,
   KeyResult as QueryKeys,
@@ -1769,6 +1769,65 @@ export function connectStoreEffects(
              *   「まだ」と「駄目だった」の区別は面が `captureScanFailed` で出す。
              */
             if (!disposed) dispatcher.dispatch({ type: 'CAPTURE_SCAN_FAILED' });
+          }
+        });
+        break;
+      /**
+       * 🔴 **グループ用ノートの目印を書く**(#857 段②)。
+       *
+       * ⚠ **disk から読んで書き戻す** ── state の本文を使わない(このノートは
+       *   開いていないことのほうが多く、開いていても古いことがある)。
+       * ⚠ **原文 splice** で書き換える(全文を組み直すと、説明文も他の key も
+       *   byte 単位で変わる ── この repo の規律)。
+       * 🔴 **読んでから書くまでの間に別の窓が書いていたら、1 バイトも書かない**
+       *   (`expectHash`)── 消した版は履歴にも入らないため。
+       */
+      case 'REQUEST_APP_GROUP_ICON_WRITE':
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            const body = await store.getBody(ev.lid);
+            if (disposed) return;
+            if (body === null) {
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: 'グループの目印を変えられません(ノートが見つかりません)',
+              });
+              return;
+            }
+            const next = writeAppGroupIcon(body, ev.icon);
+            // ⚠ 変わらないなら書かない(同じ目印をもう一度選んだとき)
+            if (next === body) return;
+            const ext = extractMeta(ev.archetype, next);
+            const stamps = await store.persistEntry(
+              {
+                lid: ev.lid,
+                title: ev.title,
+                archetype: ev.archetype,
+                body: next,
+                entryOrder: ev.entryOrder,
+                status: ext.status,
+                date: ext.date,
+                archived: ext.archived,
+              },
+              { expectHash: contentHash64Hex(body) },
+            );
+            if (disposed) return;
+            if (stamps.conflict === true) {
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error:
+                  '別のウィンドウがこのノートを書き替えたため、目印を保存できませんでした(もう一度押してください)',
+              });
+              return;
+            }
+            stamp(ev.lid, stamps);
+          } catch (e) {
+            if (!disposed)
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: `グループの目印を保存できませんでした: ${String(e)}`,
+              });
           }
         });
         break;

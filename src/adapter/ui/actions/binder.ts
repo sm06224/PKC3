@@ -182,6 +182,7 @@ import {
   noteToolActions,
   tableMenuActions,
   tableConvertPickLabel,
+  APP_GROUP_MENU_ACTIONS,
   tileMenuActions,
   TASK_REPEAT_MENU_ACTION,
   repeatMenuActions,
@@ -941,6 +942,11 @@ export interface BinderServices {
    *   (別の端末から運んだ畳みを、こちらの画面の操作で消さない)。
    */
   toggleAllAppGroups?(groups: readonly string[]): void;
+  /**
+   * 🔴 **グループの目印を選ぶ小窓を出す**(#857 段②)。
+   * @returns 図案の名前。**空文字 = なし(外す)**。やめたら `null`
+   */
+  pickAppGroupIcon?(groupName: string): Promise<string | null>;
   /**
    * 添付の携帯参照(`pkc://<自分>/asset/<key>`)から**所有ノートへ飛ぶ**(#100 段②)。
    * ⚠ 見つからないときは黙らない(OP_FAILED で断る ── 無言の dead click を作らない)。
@@ -7126,6 +7132,29 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ **面へスコープする** ── 一覧(`launcher-list`)の中だけを見る。document 全体を
    *   走ると、別の面に同じ名前の押し所が生えた日に静かに巻き込む(§1)。
    */
+  /**
+   * 🔴 **グループの目印を選ぶ**(#857 段②)。
+   *
+   * ⚠ 押した所から要るのは**群の名前だけ** ── どのノートに書くかは reducer が
+   *   探す(在れば使い、無ければ作る)。ここで探すと、探す口が 2 つになる(§7)。
+   * 🔑 **`newLid` は呼び側が採る**(reducer は純関数 ── 乱数を持たない)。
+   *   ⚠ 使われないこともある(既に在るとき / 「なし」を押して作らないとき)が、
+   *   採るだけなら副作用は無い。
+   */
+  'pick-app-group-icon': (dispatcher, target, services) => {
+    const name = target.getAttribute('data-pkc-group') ?? '';
+    if (name === '') return;
+    void services.pickAppGroupIcon?.(name).then((picked) => {
+      // ⚠ `null` = やめた(何もしない)/ `''` = 「なし」(外す)── 混ぜない
+      if (picked === null) return;
+      dispatcher.dispatch({
+        type: 'SET_APP_GROUP_ICON',
+        name,
+        icon: picked === '' ? null : picked,
+        newLid: generateLid(),
+      });
+    });
+  },
   'toggle-all-app-groups': (_dispatcher, target, services) => {
     const list = target.closest('[data-pkc-field="launcher-list"]');
     if (!list) return;
@@ -10087,6 +10116,32 @@ export function bindActions(
      * 🔑 身元は `carry` でボタン自身へ写す ── メニューの器は root の直下に出るので、
      *   押したボタンは**タイルの中に居ない**(`context-menu.ts` の戒め)。
      */
+    /**
+     * 🔴 **グループの見出しの上で右クリック**(#857 段②)── 「目印を選ぶ…」。
+     *
+     * ⚠ **タイルのメニューを出さない** ── 押した物(見出し)と効く先(その群)が
+     *   違うので、「上へ / 下へ」が混ざると押した物と効く先が食い違う(#677 の型)。
+     * 🔑 身元(群の名前)は `carry` でボタン自身へ写す ── メニューの器は root の
+     *   直下に出るので、押したボタンは**見出しの中に居ない**(`context-menu.ts` の戒め)。
+     * ⚠ **絞り込み中は見出しが押し所ではない**(段④ の仕上げ)ので、この枝も
+     *   自然に当たらない ── 出す条件を 2 か所に書かない。
+     */
+    const groupHit = target.closest('[data-pkc-action="toggle-app-group"]');
+    if (groupHit !== null) {
+      const groupName = groupHit.getAttribute('data-pkc-group') ?? '';
+      if (groupName !== '') {
+        ev.preventDefault();
+        openContextMenu(
+          root,
+          { x: ev.clientX, y: ev.clientY },
+          APP_GROUP_MENU_ACTIONS,
+          root.ownerDocument.activeElement,
+          { 'data-pkc-group': groupName },
+        );
+        return;
+      }
+    }
+
     const tileHit = target.closest('[data-pkc-tile][draggable="true"]');
     if (tileHit !== null) {
       const tileLid = tileHit.getAttribute('data-pkc-tile') ?? '';

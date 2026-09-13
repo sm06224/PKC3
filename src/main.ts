@@ -276,8 +276,10 @@ import {
 import {
   alertInApp,
   confirmInApp,
+  pickAppGroupIconInApp,
   type ConfirmOptions,
 } from '@adapter/ui/render/app-dialog';
+import { TILE_ICON_CHOICES } from '@features/icon/tile-icons';
 import { printNote } from '@adapter/platform/print-note';
 
 const DB_NAME = 'pkc3';
@@ -2945,6 +2947,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       appGroupFold.toggleAll(groups);
       browse.render(dispatcher.getState(), browseMode);
     },
+    /**
+     * 🔴 **グループの目印を選ぶ小窓**(#857 段②)。
+     * ⚠ 並ぶ物は `TILE_ICON_CHOICES` が正本(タイルと**同じ 49 種**)── ここで
+     *   選り分けない。器は「1 行選ぶ」の 1 本(`app-dialog.ts`)。
+     */
+    pickAppGroupIcon: (groupName) => pickAppGroupIconInApp(root, groupName, TILE_ICON_CHOICES),
     setEditorMode: (mode) => {
       appEditorMode.setMode(mode);
     },

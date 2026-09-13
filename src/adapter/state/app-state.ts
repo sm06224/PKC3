@@ -42,6 +42,9 @@ import type { OpenExtension } from '@adapter/platform/extension-links';
 import type { LauncherTile } from '@features/launcher/tiles';
 import {
   APP_GROUP_ARCHETYPE,
+  appGroupName,
+  appGroupSeed,
+  writeAppGroupIcon,
   type AppGroupIcons,
 } from '@features/launcher/app-group-spec';
 import {
@@ -1389,6 +1392,13 @@ export type UserAction =
   | { type: 'LAUNCHER_TILES_LOADED'; tiles: LauncherTile[] }
   | { type: 'APP_GROUP_ICONS_LOADED'; icons: AppGroupIcons }
   /**
+   * 🔴 **グループの目印を選んだ**(#857 段②)。
+   * ⚠ **在るものを探して、無いときだけ作る** ── 同じ名前のノートを 2 つ作らない
+   *   (CLAUDE.md「衝突は、検出するより起こらなくするほうが強い」)。
+   * ⚠ `newLid` は呼び側が採る(reducer は純関数 ── 乱数を持たない)。
+   */
+  | { type: 'SET_APP_GROUP_ICON'; name: string; icon: string | null; newLid: string }
+  /**
    * アプリの一覧を読み直す(P8 段⑱)。
    *
    * 🔴 かつては「アプリ」タブで `SET_VIEW_MODE 'launcher'` を撃っていたが、
@@ -2231,6 +2241,21 @@ export type DomainEvent =
   | {
       type: 'REQUEST_LAUNCHER_TILES';
       entries: Array<{ lid: string; title: string }>;
+    }
+  | {
+      /**
+       * 🔴 **グループ用ノートの目印を書く**(#857 段②)。
+       * ⚠ `REQUEST_TILE_UPDATE` と**同じことをする別の口**に見えるが、あちらは
+       *   書いたあとに**タイルを読み直す** ── こちらは**目印を読み直す**ので、
+       *   同じ event に相乗りさせると「タイルを直したのに見出しが古い」が出る。
+       */
+      type: 'REQUEST_APP_GROUP_ICON_WRITE';
+      lid: string;
+      title: string;
+      archetype: string;
+      entryOrder: number;
+      /** `null` = 外す(key ごと消える)。 */
+      icon: string | null;
     }
   | {
       /**
@@ -3342,6 +3367,75 @@ function reduceCore(
       return { state: { ...state, launcherTiles: action.tiles }, events: [] };
     case 'APP_GROUP_ICONS_LOADED':
       return { state: { ...state, appGroupIcons: action.icons }, events: [] };
+    case 'SET_APP_GROUP_ICON': {
+      // ⚠ 書込が飛んでいる間は触らせない(`SET_APP_TILE` と同じ規律 ── 読んで
+      //    書き戻す操作なので、途中に別の書込が挟まると片方が消える)
+      if (state.phase !== 'ready' || state.writeLock) return { state, events: [] };
+      const name = appGroupName(action.name);
+      // ⚠ 名前の無い群は見出しを持たない ── 目印を置く場所がそもそも無い
+      if (name === '') return { state, events: [] };
+      const found = findAppGroupLid(state.order, state.entryMetas, name);
+      if (found !== null) {
+        const meta = state.entryMetas.get(found)!;
+        return {
+          state,
+          events: [
+            {
+              type: 'REQUEST_APP_GROUP_ICON_WRITE',
+              lid: found,
+              title: meta.title,
+              archetype: meta.archetype,
+              entryOrder: meta.entryOrder,
+              icon: action.icon,
+            },
+            // ⚠ 書いた**あと**に読み直す(effect の列は 1 本なので順番は保たれる)──
+            //    読み直さないと、押した結果が出るのは「次にタブを開き直したとき」になる
+            {
+              type: 'REQUEST_APP_GROUP_ICONS',
+              entries: appGroupEntriesOf(state.order, state.entryMetas),
+            },
+          ],
+        };
+      }
+      /**
+       * ⚠ **外すだけなら作らない** ── 目印の無いグループで「なし」を押したときに
+       *   空のノートが生えると、user は**頼んでいない物**を片付ける羽目になる。
+       */
+      if (action.icon === null) return { state, events: [] };
+      /**
+       * 🔑 **作る口は既存の 1 本を通す**(`CREATE_ENTRY`)── ここで並びも目録も
+       *   自分で組むと、作り方が 2 つになる(§7)。
+       */
+      const created = reduce(state, {
+        type: 'CREATE_ENTRY',
+        archetype: APP_GROUP_ARCHETYPE,
+        lid: action.newLid,
+        title: name,
+        body: writeAppGroupIcon(appGroupSeed(name), action.icon),
+        /**
+         * 🔴 **見ていた物を退かさない**(`keepSelection`)。
+         *
+         * ⚠ 既定の `CREATE_ENTRY` は「作って開く」なので、そのまま呼ぶと
+         *   **目印を選んだだけで右の面が作りたてのノートに変わり、絞り込みの欄と
+         *   種類の絞りまで消える** ── user は見出しに絵を置きたかっただけである
+         *   (CLAUDE.md「欠陥の多くは『さっきまでやっていたことが消える』形で出る」)。
+         * 🔑 `keepSelection` は選択・絞り込み・開いている本文を**そのまま残し**、
+         *   編集にも入らない(この case の docstring がそう書いている)。
+         */
+        keepSelection: true,
+      });
+      return {
+        state: created.state,
+        events: [
+          ...created.events,
+          // ⚠ **作った後の並び**で読む(作りたてのノートが入っていないと、目印が出ない)
+          {
+            type: 'REQUEST_APP_GROUP_ICONS',
+            entries: appGroupEntriesOf(created.state.order, created.state.entryMetas),
+          },
+        ],
+      };
+    }
     case 'APP_TILE_SAVED': {
       // 🔴 **世代が違う ack は本文に触らない**が、**ロックは必ず解く**
       //    (追記と同じ ── 握ったままにすると user は二度と設定を変えられない)
@@ -6061,6 +6155,24 @@ function attachmentEntries(state: AppState): Array<{ lid: string; title: string 
  * 🔑 `entryMetas` が `archetype` を**生の列**で持つので、走査だけで引ける
  *   (本文も SQL も要らない ── 本文は effect 層がこの一覧だけを読む)。
  */
+/**
+ * 🔴 **その名前のグループ用ノートを 1 件引く**(#857 段②)。
+ * ⚠ **先勝ち**(同じ題名が 2 つあっても迷わない)── 題名に一意制約が無いので、
+ *   手で同じ字にすれば 2 つ作れる。決め方を機械で読める形にしておく
+ *   (`appGroupIconsOf` の畳み方と**同じ向き**)。
+ */
+function findAppGroupLid(
+  order: readonly string[],
+  metas: ReadonlyMap<string, EntryMeta>,
+  name: string,
+): string | null {
+  for (const lid of order) {
+    const meta = metas.get(lid);
+    if (meta?.archetype === APP_GROUP_ARCHETYPE && appGroupName(meta.title) === name) return lid;
+  }
+  return null;
+}
+
 function appGroupEntriesOf(
   order: readonly string[],
   metas: ReadonlyMap<string, EntryMeta>,
