@@ -719,3 +719,53 @@ if (process.env['PKC3_SMOKE_COVERAGE'] === '1') {
     );
   });
 }
+
+/**
+ * 🔴 **メインが止まっていないことを、対照群と比べて見る**(#878 ①)。
+ *
+ * ## なぜ 1 つの口にまとめてあるか
+ *
+ * 🔑 **測った値を、落ちた回だけでなく毎回 log へ残す。**
+ * ⚠ 2026-09-13 までは値が `expect` の文言にしか無かったので、
+ *   **閾値を跨いだ回しか記録が残らなかった** ── #878 ① は全量 smoke で
+ *   2 度落ちているのに、手元にある観測点は **94ms と 109ms の 2 点だけ**である。
+ *   (どちらも門が捕まえる壊れ方 = **500〜726ms** とは桁が違う。)
+ * 🔑 記録は **1 行の `console.log`** なので、**起動も assert も増えない**
+ *   (`scripts/smoke-budget.mjs` の予算に当たらない)── 全量を 1 回回せば、
+ *   その log がそのまま分布になる。
+ * ⚠ **記録は assert より前**でなければ意味が無い(欲しいのは落ちた回である)。
+ *   順番を後から崩されないように、**記録と assert を 1 つの関数にしてある**。
+ *
+ * ## ⚠ 予算(80ms)の正本もここである
+ *
+ * ⚠ 2 か所に書くと**片方だけが腐る**(CLAUDE.md §7)。
+ * ⚠ **この値を上げて緑にしない** ── #878 が名指しで戒めている
+ *   (「flake を閾値上げで隠す」)。門が捕まえるのは桁違いの壊れ方なので、
+ *   上げた瞬間に**何も守らなくなる**。
+ */
+export const MAIN_GAP_BUDGET_MS = 80;
+
+export interface MainGapSample {
+  /** 測りたい操作の間の、いちばん長い欠測(ms) */
+  readonly maxGap: number;
+  /** **同じ計器**で採った「何もしていない間」の欠測(ms) */
+  readonly base: number;
+  /** 操作中に心拍が何回打ったか(0 なら計器が死んでいる) */
+  readonly ticks: number;
+  /** 対照群で心拍が何回打ったか */
+  readonly baseTicks: number;
+}
+
+export function expectMainGapUnderBudget(label: string, m: MainGapSample): void {
+  // ⚠ 機械で拾える 1 行にする(全量の log から `grep '\[#878\] gap'` で分布が出る)
+  console.log(
+    `[#878] gap ${label} maxGap=${m.maxGap} base=${m.base} over=${m.maxGap - m.base} budget=${MAIN_GAP_BUDGET_MS} ticks=${m.ticks}/${m.baseTicks}`,
+  );
+  // ⚠ 空振り防止 ── 心拍が回っていなければ最大欠測は 0 になり、門は常に通る
+  expect(m.ticks, `${label}: 心拍が取れていない(計器が死んでいる)`).toBeGreaterThan(5);
+  expect(m.baseTicks, `${label}: 対照群の心拍が取れていない(比べる相手が無い)`).toBeGreaterThan(5);
+  expect(
+    m.maxGap,
+    `${label}: メインスレッドが ${m.maxGap}ms 止まった(何もしていない間は ${m.base}ms)`,
+  ).toBeLessThan(m.base + MAIN_GAP_BUDGET_MS);
+}
