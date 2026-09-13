@@ -17,8 +17,13 @@
  *   ここで取りこぼしても「開けない」が正しく出る ── **広めに拾ってよい**側である。
  */
 
-/** それらしい拡張子。⚠ 大文字で書く人も居るので、比べる前に小文字へ落とす。 */
-const SQLITE_EXTS = ['.sqlite', '.sqlite3', '.db', '.db3'] as const;
+/**
+ * それらしい拡張子。⚠ 大文字で書く人も居るので、比べる前に小文字へ落とす。
+ * ⚠ **export している**(#854 段②)── 手持ちのファイルを選ぶ `<input accept>` が
+ *   同じ一覧を使う(§7「同じ値は 1 回だけ作って両方へ配る」。判定そのものは
+ *   `looksLikeSqliteName` のまま 1 か所)。
+ */
+export const SQLITE_EXTS = ['.sqlite', '.sqlite3', '.db', '.db3'] as const;
 
 /** その題名は `.sqlite` の添付か。 */
 export function looksLikeSqliteName(name: string): boolean {

@@ -405,6 +405,8 @@ const adoptingLinkIcons = new Set<string>();
 import { effectiveOpenPlace } from '@features/open-place';
 import { joinCopied, pickMarked } from '@features/clipboard/scrap';
 import { sqlNoteBody, sqlNoteTitle } from '@features/query/sql-to-note';
+// 🔴 手持ちのファイルを開く選び所の印(#854 段②)
+import { SQL_PICK_LOCAL_FILE_VALUE } from '@features/query/sql-local-file';
 import {
   confirmInApp,
   pickDateInApp,
@@ -950,6 +952,13 @@ export interface BinderServices {
   installOfficePack?(): void;
   installOfficePackFromFile?(file: File): void;
   removeOfficePack?(): void;
+  /**
+   * 🔴 **SQL の面で、手持ちのファイルを選んだ**(#854 段②)。
+   * ⚠ **憶えない**(user 裁定 2026-09-12)── 呼ぶたびに新しく選ばせる。
+   *   実体(合成 lid を発行して `SET_SQL_SOURCE` を投げる)は `main.ts` が持つ ──
+   *   この file はどの test からも実行されない(CLAUDE.md §2)。
+   */
+  pickSqlLocalFile?(file: File): void;
   /**
    * 🔴 **Office 側の設定を初期状態に戻す**(#634)。
    * ⚠ `removeOfficePack` では戻らない ── あれは一式(IndexedDB)だけを消し、
@@ -7334,15 +7343,30 @@ const ACTIONS: Record<string, ActionHandler> = {
     dispatcher.dispatch({ type: 'RUN_SQL' });
   },
   /**
-   * 🔴 **調べる相手を選ぶ**(#681 段③ の 2 つ目)。
+   * 🔴 **調べる相手を選ぶ**(#681 段③ の 2 つ目、#854 段②)。
    * ⚠ `<select>` でもボタンでも通す(`set-prose-align` と同じ受け方)。
    * ⚠ **名前も一緒に渡す** ── 画面に出すのは lid ではなく file の名前である。
    */
-  'set-sql-source': (dispatcher, target) => {
+  'set-sql-source': (dispatcher, target, services, root) => {
     const lid =
       target instanceof HTMLSelectElement
         ? target.value
         : (target.getAttribute('data-pkc-sql-source') ?? '');
+    /**
+     * 🔴 **「手持ちのファイルを開く…」は選択ではなく操作**(#854 段②)。
+     * ⚠ ここで `SET_SQL_SOURCE` を投げると、実体の無い lid を開こうとして
+     *   必ず断られる ── 代わりに隠した `<input type=file>` を開く。
+     * ⚠ **選び所は即座に元へ戻す** ── 戻さないと、file 選択画面を閉じた
+     *   (選ばなかった)後も選び所が「手持ちのファイルを開く…」のまま**居座る**
+     *   (次に何か別の理由で描き直るまで、画面が実体と食い違う)。
+     */
+    if (lid === SQL_PICK_LOCAL_FILE_VALUE) {
+      if (target instanceof HTMLSelectElement) {
+        target.value = dispatcher.getState().sqlPage.guest?.lid ?? '';
+      }
+      root.querySelector<HTMLInputElement>('[data-pkc-field="sql-file-input"]')?.click();
+      return;
+    }
     const name =
       target instanceof HTMLSelectElement
         ? (target.selectedOptions[0]?.textContent ?? '')
@@ -8737,6 +8761,17 @@ export function bindActions(
       const file = el.files?.[0] ?? null;
       el.value = ''; // 同じファイルの再選択でも change が発火するように
       if (file) services.installOfficePackFromFile?.(file);
+    } else if (field === 'sql-file-input') {
+      /**
+       * 🔴 **SQL の相手として、手持ちのファイルを選んだ**(#854 段②)。
+       * ⚠ **1 件だけ**(調べる相手は 1 つ)── `office-pack-input` と同じ作法。
+       * ⚠ **値は必ず空へ戻す**(#854 段②)── 戻さないと、同じ file をもう一度
+       *   選んでも `change` が発火せず、「押しても選び直せない」という
+       *   dead click になる(user 裁定「毎回選び直す」を、同じ file でも守る)。
+       */
+      const file = el.files?.[0] ?? null;
+      el.value = '';
+      if (file) services.pickSqlLocalFile?.(file);
     }
   };
   const onKeydown = (ev: Event) => {

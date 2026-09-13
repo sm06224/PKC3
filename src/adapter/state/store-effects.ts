@@ -57,6 +57,8 @@ import { TAGS_KEY, UNSET as QUERY_UNSET } from '@features/query/group-by';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 // 🔴 添付の .csv / .tsv を「調べる相手」として選べるようにする(#854 段①)
 import { looksLikeCsvAttachmentName } from '@features/query/csv-attachment';
+// 🔴 手持ちのファイルも同じ選び所から開く(#854 段②)
+import { isSqlLocalFileLid } from '@features/query/sql-local-file';
 import {
   captureItemsFrom,
   type CaptureSource,
@@ -413,6 +415,12 @@ export function connectStoreEffects(
      * ⚠ 渡されなければ**機能が減るだけ**(選んでも理由を出して断る)。
      */
     readAssetBytes?: (assetKey: string) => Promise<Uint8Array | null>;
+    /**
+     * 🔴 **手持ちのファイルの bytes を読む口**(#854 段②)。
+     * ⚠ `lid` は `sql-local-file.ts` が発行した合成の物 ── 呼ぶと控えは 1 回で
+     *   消える(即破棄)。渡されなければ**機能が減るだけ**(選んでも理由を出して断る)。
+     */
+    readLocalSqlFile?: (lid: string) => Promise<Uint8Array | null>;
   } = {},
 ): StoreEffects {
   let queue: Promise<void> = Promise.resolve();
@@ -725,13 +733,28 @@ export function connectStoreEffects(
        */
       case 'REQUEST_SQL_GUEST_OPEN': {
         const open = store.openSqlGuest;
-        const read = opts.readAssetBytes;
         const { lid, name } = ev;
-        if (!open || !read) {
+        /**
+         * 🔴 **手持ちのファイルは、添付を介さず bytes を直接読む**(#854 段②)。
+         * ⚠ 判定は `lid` の頭だけ(`isSqlLocalFileLid`)── 開く手順・拡張子の
+         *   判定(`csvLang`)・断り文はこの先**1 本の経路**を通す
+         *   (§7「同じ問いに答える口を 2 つ作らない」)。
+         * ⚠ **`afterWrites` の中で、余分な async 関数越しに読まない** ──
+         *   1 層挟むだけで await が 1 回増え、`settled()` を待つ側の
+         *   tick 数が変わる(実測で踏んだ:`sql-pane.test.ts` の `settle()` が
+         *   3 tick 前提で書かれており、1 tick 増えると**表が空のまま**になる)。
+         *   だから下の `afterWrites` 本体に**直接**分岐を書く。
+         */
+        const local = isSqlLocalFileLid(lid);
+        const readLocal = opts.readLocalSqlFile;
+        const readAsset = opts.readAssetBytes;
+        if (!open || (local ? readLocal === undefined : readAsset === undefined)) {
           dispatcher.dispatch({
             type: 'SQL_GUEST_FAILED',
-            lid: ev.lid,
-            error: 'この版では取り込んだ .sqlite を開けません(アプリを読み直すと直ることがあります)',
+            lid,
+            error: local
+              ? 'この版では手持ちのファイルを開けません(アプリを読み直すと直ることがあります)'
+              : 'この版では取り込んだ .sqlite を開けません(アプリを読み直すと直ることがあります)',
           });
           break;
         }
@@ -739,16 +762,28 @@ export function connectStoreEffects(
          * 🔴 **`.csv` / `.tsv` かどうかは、ここで題名の拡張子だけを見て決める**
          *   (#854 段①)。⚠ **判定を 2 か所に置かない** ── worker 側は渡された
          *   `csv` の有無だけで分岐し、拡張子をもう一度見ない(§7)。
+         *   手持ちのファイルも file 名(`name`)は同じ形で来るので、ここは
+         *   添付のときと**まったく同じ 1 行**で足りる。
          */
         const csvLang = looksLikeCsvAttachmentName(name);
         afterWrites(async () => {
           if (disposed) return;
           try {
-            const body = await store.getBody(lid);
-            const key = readAttachmentMeta(body ?? '').assetKey;
-            if (key === null) throw new Error('添付の中身が見つかりません');
-            const bytes = await read(key);
-            if (bytes === null) throw new Error('添付の中身が見つかりません');
+            let bytes: Uint8Array | null;
+            if (local) {
+              // ⚠ 上の門で readLocal は必ず在る(non-null assertion は検証済みの合図)
+              bytes = await readLocal!(lid);
+            } else {
+              const body = await store.getBody(lid);
+              const key = readAttachmentMeta(body ?? '').assetKey;
+              if (key === null) throw new Error('添付の中身が見つかりません');
+              bytes = await readAsset!(key);
+            }
+            if (bytes === null) {
+              throw new Error(
+                local ? '選んだ file を読めませんでした' : '添付の中身が見つかりません',
+              );
+            }
             const opened = await open(
               bytes,
               csvLang === null ? undefined : { lang: csvLang, lid, name },

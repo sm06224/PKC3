@@ -79,6 +79,8 @@ import {
   REVISION_KEEP_LATEST,
 } from '@adapter/platform/storage/store-port';
 import { acquireWriterLease } from '@adapter/platform/storage/writer-lease';
+// 🔴 SQL の面で「手持ちのファイル」を開く(#854 段②)
+import { registerSqlLocalFile, takeSqlLocalFileBytes } from '@adapter/state/sql-local-file';
 import { bundleChannelName, bundleLockName } from '@features/portable/bundle';
 import { readBundle, resolvePortableStart, type PortableStart } from '@adapter/platform/portable-boot';
 import { restoreEmbeddedAssets } from '@adapter/platform/portable-assets';
@@ -2938,6 +2940,19 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     installOfficePackFromFile: (file) => {
       void officeInstaller.installFromZip(file, file.name).then(finishOfficePack);
     },
+    /**
+     * 🔴 **SQL の面で、手持ちのファイルを選んだ**(#854 段②)。
+     *
+     * ⚠ **憶えない**(user 裁定 2026-09-12)── ここでやるのは「合成の lid を
+     *   発行して bytes を控え、いつもの選び方(`SET_SQL_SOURCE`)へ渡す」だけ。
+     *   選んだ file をどこかへ書き残す処理は 1 行も無い(リロードすれば消える)。
+     * ⚠ 開く手順・拡張子の判定・断り文は**添付を開くときと同じ 1 本の経路**
+     *   (`store-effects.ts` の `REQUEST_SQL_GUEST_OPEN`)を通る。
+     */
+    pickSqlLocalFile: (file) => {
+      const lid = registerSqlLocalFile(file);
+      dispatcher.dispatch({ type: 'SET_SQL_SOURCE', lid, name: file.name });
+    },
     removeOfficePack: () => {
       void officeInstaller.remove().then(finishOfficePack);
     },
@@ -3576,6 +3591,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       const blob = await blobs.get(cid, assetKey);
       return blob === null ? null : new Uint8Array(await blob.arrayBuffer());
     },
+    /**
+     * 🔴 **手持ちのファイルの bytes を読む口**(#854 段②)。
+     * ⚠ 判断(控えの持ち方 / 即破棄)は `sql-local-file.ts` が持つ ── この file は
+     *   どの test からも実行されない(CLAUDE.md §2)ので、ここは渡すだけ。
+     */
+    readLocalSqlFile: (lid) => takeSqlLocalFileBytes(lid),
   });
   /**
    * 🔴 **一式が入っているかを 1 度だけ読み、控えに写す**(#88 / O3-c)。
