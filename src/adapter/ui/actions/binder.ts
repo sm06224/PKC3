@@ -182,7 +182,7 @@ import {
   noteToolActions,
   tableMenuActions,
   tableConvertPickLabel,
-  TILE_MENU_ACTIONS,
+  tileMenuActions,
   withTrailingLast,
 } from '@features/entry-actions';
 import {
@@ -216,7 +216,7 @@ import {
 import { parseLinkTarget } from '@features/entry-ref/link-target';
 import { flashCopied, handleCopyMdBlock } from './copy-md-block';
 import { finishCopy, selectedMarkdown } from './copy-source';
-import { installLongPress, LONG_PRESS_TARGET } from './long-press';
+import { installLongPress, LONG_PRESS_TARGET, LONG_PRESS_TARGETS } from './long-press';
 import { copyMarkdownAndHtml, copyPlainText } from '@adapter/platform/clipboard';
 import { appCopyHistory } from '@adapter/platform/copy-history-store';
 import {
@@ -5563,6 +5563,20 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'move-tile-up': (dispatcher, target) => moveTile(dispatcher, target, -1),
   'move-tile-down': (dispatcher, target) => moveTile(dispatcher, target, 1),
+  /**
+   * 🔴 **並べ替えモードへ入る / 出る**(#857 段①b-2)。
+   * ⚠ 入口は 2 つ(長押し / 右クリック)だが、**撃つ action は 1 つ**にする ──
+   *   器ごとに別の action を作ると、門を足すとき片方だけ通る(CLAUDE.md §7)。
+   * 🔑 入るときは、押したタイルに印も付ける(どれを動かすのか画面に残す)。
+   */
+  'start-tile-reorder': (dispatcher, target) => {
+    const lid = target.getAttribute('data-pkc-tile');
+    if (lid !== null && lid !== '') dispatcher.dispatch({ type: 'PICK_APP_TILE', lid });
+    dispatcher.dispatch({ type: 'SET_LAUNCHER_REORDER', on: true });
+  },
+  'end-tile-reorder': (dispatcher) => {
+    dispatcher.dispatch({ type: 'SET_LAUNCHER_REORDER', on: false });
+  },
   'attach-file': (_dispatcher, _target, _services, root) => {
     // 常設の hidden input を開く(動的生成にしない ── smoke の setInputFiles と
     // ブラウザの user-gesture 要件の両方に効く)
@@ -6717,6 +6731,18 @@ const ACTIONS: Record<string, ActionHandler> = {
   'open-tile': (dispatcher, target, services, root) => {
     const lid = target.closest('[data-pkc-tile]')?.getAttribute('data-pkc-tile');
     if (lid === null || lid === undefined || lid === '') return;
+    /**
+     * 🔴 **並べ替え中は開かない**(#857 段①b-2。user 裁定 2026-09-13)。
+     * ⚠ 並べ替えている最中に別のウィンドウが開くと、**中央に読んでいた本文まで
+     *   入れ替わる**(段①b でこれを止めたのと同じ事故が、モード中は 2 回押しで
+     *   起きてしまう)。⚠ **印は付ける** ── 押しても何も起きないのは無反応に見える。
+     * ⚠ `pressedTileAgain` を**通さない** ── 通すと「1 回目」が記録され、
+     *   モードを抜けた直後の 1 タップが**いきなり窓を開く**。
+     */
+    if (dispatcher.getState().launcherReorder) {
+      dispatcher.dispatch({ type: 'PICK_APP_TILE', lid });
+      return;
+    }
     if (!pressedTileAgain(root, lid)) {
       dispatcher.dispatch({ type: 'PICK_APP_TILE', lid });
       // ⚠ 組み込みは entry を持たない ── 立てると右の列が「見つからない」になる
@@ -7770,6 +7796,23 @@ export function bindActions(
    * ⚠ 側と lid は**押した行から辿る**(`dualSide`)── 他の `dual-row` の経路と同じ。
    */
   const longPress = installLongPress(root, (row) => {
+    /**
+     * 🔴 **アプリのタイルの長押しは「並べ替えモード」**(#857 段①b-2。
+     * user 裁定 2026-09-13「長押しで並べ替えモード」)。
+     *
+     * ⚠ **指だけの端末には入口が 1 つも無かった** ── 掴んで落とすのも
+     *   右クリックの「上へ / 下へ」も、どちらもマウスが要る。
+     * 🔑 掴んだ 1 枚に**印も付ける** ── どれを長押ししたのか画面に残らないと、
+     *   「入ったこと」だけ分かって「何を動かすのか」が分からない。
+     * ⚠ 断るときの理由は reducer が出す(絞り込み中 / 編集中)── ここでは
+     *   受けるだけにして、**無言の dead press を作らない**。
+     */
+    const tile = row.getAttribute('data-pkc-tile');
+    if (tile !== null) {
+      dispatcher.dispatch({ type: 'PICK_APP_TILE', lid: tile });
+      dispatcher.dispatch({ type: 'SET_LAUNCHER_REORDER', on: true });
+      return;
+    }
     const side = dualSide(row);
     const lid = row.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
     if (side !== null && lid !== null)
@@ -7916,7 +7959,16 @@ export function bindActions(
      *   **足したばかりの印が 1 件に戻り**、さらに `maybeEnterFolder` が
      *   「1 回目」を数えて、次のタップでフォルダへ入る。**両方を素通りさせない**。
      */
-    if (el.getAttribute('data-pkc-action') === 'dual-row' && longPress.swallowsClick()) {
+    /**
+     * ⚠ **タイルも同じ**(#857 段①b-2)── 長押しで並べ替えモードへ入った直後に
+     *   `click` が流れると `open-tile` が「1 回目」を数え、指を離しただけで
+     *   **次のタップが窓を開く**。受け口の名前を 2 つ数え上げて捨てる。
+     */
+    const pressedAction = el.getAttribute('data-pkc-action');
+    if (
+      (pressedAction === 'dual-row' || pressedAction === 'open-tile') &&
+      longPress.swallowsClick()
+    ) {
       ev.preventDefault();
       return;
     }
@@ -9314,6 +9366,15 @@ export function bindActions(
       '[data-pkc-tile][draggable="true"]',
     );
     if (tileEl !== null && tileEl !== undefined && de.dataTransfer) {
+      /**
+       * 🔴 **指で押さえている間は掴ませない**(#857 段①b-2)── 2 ペインの行と
+       * **同じ門**(すぐ上)。⚠ 指で長押しを待っている最中に drag が始まると、
+       * 並べ替えモードへ入るつもりの指が**タイルを運び出す**。
+       */
+      if (longPress.pendingTouch(tileEl)) {
+        e.preventDefault();
+        return;
+      }
       const lid = tileEl.getAttribute('data-pkc-tile');
       if (lid === null || lid === '') {
         e.preventDefault(); // 指す物が無いタイルは掴ませない
@@ -9843,7 +9904,7 @@ export function bindActions(
      * ⚠ マウスの右クリックは `pointerType === 'mouse'` なので時計が掛からず、
      *   ここは通らない(これまでどおりメニューが出る)。
      */
-    const pressed = target.closest(LONG_PRESS_ROW);
+    const pressed = target.closest(LONG_PRESS_TARGETS);
     if (pressed !== null && longPress.holds(pressed)) {
       ev.preventDefault();
       return;
@@ -9887,7 +9948,8 @@ export function bindActions(
         openContextMenu(
           root,
           { x: ev.clientX, y: ev.clientY },
-          [...TILE_MENU_ACTIONS],
+          // ⚠ 出口も同じメニューに置く(#857 段①b-2)── 入口だけ作らない
+          tileMenuActions(dispatcher.getState().launcherReorder),
           root.ownerDocument.activeElement,
           { 'data-pkc-tile': tileLid },
         );

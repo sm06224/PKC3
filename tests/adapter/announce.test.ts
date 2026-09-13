@@ -1096,6 +1096,7 @@ describe('お知らせの文面は固定(#220-7)', () => {
      *   **いちばん古い 1 件**(`2026-09-09-file-drop-pinned`)を落として空けた。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-09-file-drop-pinned" …` → e793190
      */
+    ['2026-09-13-tile-reorder-mode', '35e37f83'],
     ['2026-09-13-tile-double-press', '11a21bb5'],
     ['2026-09-12-tile-reorder', '2d163d39'],
     ['2026-09-12-repeat-fixes', '984b158d'],
@@ -1149,7 +1150,6 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-09-09-zip-peek', 'bc1069c2'],
     ['2026-09-09-selfhost-bundle', '0a1314ef'],
     ['2026-09-09-manual-toc-fold', '879eb2ed'],
-    ['2026-09-09-storage-fallback-line', 'b3cdbb87'],
     /**
      * ⚠ **#684 段③(別のノートへ持っていく)で足した**(2026-09-08)。枠(30 件)は
      *   16 件しか埋まっていないので、押し出す相手は無い。

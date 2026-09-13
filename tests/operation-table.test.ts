@@ -125,6 +125,9 @@ describe('操作の全数台帳(#582 段①)', () => {
       outsideActionsTable: x.outsideActionsTable.length,
       unregistered: x.unregistered,
     }).toEqual({
+      // ⚠ 2026-09-13(#857 段①b-2): 並べ替えモードの出入り(`start-tile-reorder` /
+      //   `end-tile-reorder`)で受け手 +2(登記は増えない ── 押し口はタイルの右クリックと
+      //   一覧の「完了」だけで、鍵も持たない)
       // ⚠ 2026-08-31: `open-manual-window`(#645)で 1 増えた
       // ⚠ 2026-09-02: `phone-page` / `phone-menu`(#632 段①)で 2 増えた
       // ⚠ 2026-09-04: 小窓・板・章コピー・図の一覧・断り書きの設定など(#690 #677 #676 #528 #687 #278)で 8 増えた(229 → 237。別 worktree の合算 ── #724 ③で実測に合わせた)
@@ -180,12 +183,12 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-09-12(#857 段①): タイルの「上へ / 下へ」(`move-tile-up` /
       //   `move-tile-down`)で受け手 +2 ── 登記は増えない(押した 1 枚が要る P1 で、
       //   名前だけでは呼べない。`stack-link-up` / `stack-link-down` と同じ仕分け)
-      total: 275,
-      receivers: 226,
+      total: 277,
+      receivers: 228,
       registered: 85,
       both: 36,
       outsideActionsTable: 49,
-      unregistered: 190,
+      unregistered: 192,
     });
   });
 
