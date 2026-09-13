@@ -52,7 +52,13 @@
  * 🔑 **pure module**。DOM も DB も知らない。
  */
 import { isScheduleDate, isScheduleRange, isScheduleTime } from './schedule-date';
-import { REPEAT_WORDS, readRepeatTail, type RepeatUnit } from './repeat';
+import {
+  REPEAT_WORDS,
+  SUBSTITUTE_WORD,
+  readRepeatTail,
+  readSubstituteTail,
+  type RepeatUnit,
+} from './repeat';
 
 /**
  * 走査の網。⚠ **判定はしない**(取るだけ)── 判定は `isScheduleDate` /
@@ -106,6 +112,17 @@ export interface LineDate {
    *   期間と違って「その時刻がどの日のものか」が回ごとに決まる。
    */
   readonly repeat: RepeatUnit | null;
+  /**
+   * 🔴 **この行が代わりになっている、元の回の日**(`@2026-09-22 振替2026-09-20` の
+   * `2026-09-20`)。振替でなければ `null`(#855 決4。user 裁定 2026-09-13)。
+   *
+   * ⚠ **繰り返しの行には付かない** ── 規則の行が同時に「誰かの代わり」であることは
+   *   意味を成さないので、`repeat !== null` のときは読まない(字はそのまま札に残る)。
+   * ⚠ **期間にも付けない** ── 期間の札は複数の日に出るので「どの回の代わりか」が決まらない。
+   * 🔑 この値は `materializedDates` が **規則の側で塞ぐ日**として使う ──
+   *   これが無いと、動かした先と元の日の**両方に札が出る**。
+   */
+  readonly substitutes: string | null;
   /** 記法そのものの範囲(`@` から)。⚠ **時刻が読めなかったときは日付までで終わる**。 */
   readonly start: number;
   readonly end: number;
@@ -151,6 +168,8 @@ export function readLineDate(line: string): LineDate | null {
         // 🔴 期間に時刻は付けない(上の docstring)── 後ろの字は食べずに残す
         time: null,
         repeat: tail === null ? null : tail.unit,
+        // ⚠ 期間には振替を付けない(上の docstring)── 字は札に残る
+        substitutes: null,
         start,
         end: tail === null ? base : base + tail.length,
       };
@@ -169,13 +188,29 @@ export function readLineDate(line: string): LineDate | null {
      */
     const base = time === null ? afterDate : afterDate + 1 + time.length;
     const tail = readRepeatTail(line.slice(base));
+    /**
+     * 🔴 **振替は「刻みが無いとき」だけ読む**(#855 決4)。
+     * ⚠ 規則の行(`毎週`)が同時に「誰かの代わり」であることは意味を成さない ──
+     *   両方書いてある行は**振替を読まない**(字は札にそのまま残るので、見て直せる)。
+     *
+     * ⚠ **いまこの門は no-op である**(2026-09-13、変異試験が **SURVIVED** で教えた)──
+     *   `SUBSTITUTE_TAIL` は日付の直後に `振替` が**隣接**していることを求めるので、
+     *   間に `毎週` が挟まれば門が無くても読まれない。
+     * 🔑 **それでも残す** ── 守っているのは「読む順の偶然」ではなく
+     *   **「規則の行は誰かの代わりではない」という意味**である。⚠ 次に読む順を
+     *   変える人(例:刻みの**後ろ**からも尻を読むようにする)が、この 1 行を
+     *   消さなければ意味は保たれる(CLAUDE.md「これが無いと壊れる、と書く前に
+     *   外して壊れるのを見る」── 見たうえで、理由を書いて残している)。
+     */
+    const sub = tail === null ? readSubstituteTail(line.slice(base)) : null;
     return {
       date,
       until: null,
       time,
       repeat: tail === null ? null : tail.unit,
+      substitutes: sub === null ? null : sub.date,
       start,
-      end: tail === null ? base : base + tail.length,
+      end: tail !== null ? base + tail.length : sub !== null ? base + sub.length : base,
     };
   }
   return null;
@@ -210,6 +245,12 @@ export function formatLineDate(
   time?: string | null,
   until?: string | null,
   repeat?: RepeatUnit | null,
+  /**
+   * 🔴 **振替の元の日**(#855 決4)。⚠ **刻みと同時には書けない** ── 読む側が
+   * 刻みの在る行では振替を読まないので、書いても往復で消える。だから**ここで落とす**
+   * (この file の作法:往復しない字を出力しない)。
+   */
+  substitutes?: string | null,
 ): string {
   const head =
     until !== undefined && until !== null && until !== ''
@@ -222,7 +263,16 @@ export function formatLineDate(
    *   詰めても通る(`repeat.ts` の `REPEAT_TAIL`)が、**書きは整える**
    *   (この file の頭「読みは緩く、書きは整える」)。
    */
-  return repeat === undefined || repeat === null ? head : `${head} ${REPEAT_WORDS[repeat]}`;
+  if (repeat !== undefined && repeat !== null) return `${head} ${REPEAT_WORDS[repeat]}`;
+  /**
+   * 🔴 **振替は刻みの代わりに尻へ付く**(#855 決4)。⚠ 期間にも付けない ──
+   *   読む側が期間の枝で読まないので、書けば往復で消える。
+   */
+  const isRange = until !== undefined && until !== null && until !== '';
+  if (!isRange && substitutes !== undefined && substitutes !== null && substitutes !== '') {
+    return `${head} ${SUBSTITUTE_WORD}${substitutes}`;
+  }
+  return head;
 }
 
 /**

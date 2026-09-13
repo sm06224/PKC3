@@ -5,6 +5,7 @@ import {
   itemOfCard,
   itemOfNote,
 } from '../../src/features/schedule/agenda';
+import { materializedDates } from '../../src/features/schedule/repeat';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 
 const card = (
@@ -14,7 +15,7 @@ const card = (
   time: string | null = null,
   text = 'x',
   until: string | null = null,
-) => itemOfCard({ lid, line, text, done: false, date, time, until, repeat: null });
+) => itemOfCard({ lid, line, text, done: false, date, time, until, repeat: null, substitutes: null });
 
 /** ノート 1 件が丸ごと予定(frontmatter の `date:`)。 */
 const noteMeta = (lid: string, date: string | null, title = 'n-' + lid): EntryMeta => ({
@@ -293,7 +294,7 @@ describe('繰り返し(#344 段②)', () => {
     until: string | null = null,
     text = 'ゴミ出し',
     lid = 'a',
-  ) => itemOfCard({ lid, line: 0, text, done: false, date, time: null, until, repeat: unit });
+  ) => itemOfCard({ lid, line: 0, text, done: false, date, time: null, until, repeat: unit, substitutes: null });
 
   const days = (groups: { date: string | null }[]): (string | null)[] =>
     groups.map((g) => g.date);
@@ -405,6 +406,7 @@ describe('繰り返し(#344 段②)', () => {
       time: null,
       until: null,
       repeat: 'week',
+      substitutes: null,
     });
     const g = buildAgenda([rule], TODAY, false, { horizonDays: 8 });
     expect(g.flatMap((x) => x.cards).every((c) => !c.done)).toBe(true);
@@ -413,5 +415,65 @@ describe('繰り返し(#344 段②)', () => {
   it('⚠ 対照群 ── 刻みが無ければ 1 日にしか出ない(既存の札は変わらない)', () => {
     const g = buildAgenda([card('a', 0, '2026-08-23')], TODAY, false, { horizonDays: 30 });
     expect(days(g)).toEqual(['2026-08-23']);
+  });
+
+  /**
+   * 🔴 **振替 ── この回だけ動かす**(#855 決4。user 裁定 2026-09-13「1 回か全部か」)。
+   *
+   * 🔑 仕掛けは**済んだ回と同じ** ── 「その日はこの行が引き受けた」を
+   *   `skip` に足すだけで、展開の側に新しい分岐は要らない。
+   * ⚠ **対照群を必ず置く** ── 振替を書かずに同じ日へ札を足しただけだと
+   *   **元の回は残る**。置かないと「動かした先に出た」だけを見て
+   *   「効いている」と読み違える(CLAUDE.md §1「救い手が変わっただけ」)。
+   */
+  describe('振替(#855 決4)', () => {
+    const rule = itemOfCard({
+      lid: 'a',
+      line: 0,
+      text: 'ゴミ出し',
+      done: false,
+      date: '2026-08-23',
+      time: null,
+      until: null,
+      repeat: 'week',
+      substitutes: null,
+    });
+    /** 動かした先の実体。⚠ **字と lid が規則と同じ**でないと結び付かない。 */
+    const moved = (substitutes: string | null) => ({
+      lid: 'a',
+      line: 1,
+      text: 'ゴミ出し',
+      done: false,
+      date: '2026-09-01',
+      time: null,
+      until: null,
+      repeat: null,
+      substitutes,
+    });
+    const run = (sub: string | null): (string | null)[] => {
+      const m = moved(sub);
+      return days(
+        buildAgenda([rule, itemOfCard(m)], TODAY, false, {
+          horizonDays: 20,
+          skip: materializedDates([m]),
+        }),
+      );
+    };
+
+    it('🔴 振替を書くと、元の日の回が出なくなる', () => {
+      const got = run('2026-08-30');
+      expect(got, '元の 8/30 の回が残っている(予定が 1 つ増えて見える)').not.toContain(
+        '2026-08-30',
+      );
+      expect(got, '動かした先に出ていない').toContain('2026-09-01');
+    });
+
+    it('⚠ 対照群 ── 振替を書かなければ、元の日の回は残る', () => {
+      const got = run(null);
+      expect(got, '振替を書いていないのに元の回が消えた(別の理由で消えている)').toContain(
+        '2026-08-30',
+      );
+      expect(got).toContain('2026-09-01');
+    });
   });
 });

@@ -83,6 +83,57 @@ export function repeatUnitOf(word: string): RepeatUnit | null {
  */
 const REPEAT_TAIL = /^[ \t]*(毎[日週月年])/;
 
+/**
+ * 🔴 **振替の記法**(#855 決4。user 裁定 2026-09-13「1 回か全部か選択する」)。
+ *
+ * `- [ ] 定例会 @2026-09-22 振替2026-09-20`
+ * = 「この行は **9/20 の回の代わり**です」。
+ *
+ * ## なぜ規則の行に「除く」を足さないか
+ *
+ * 素直な形は規則の行へ `除く2026-09-20` を足すことだが、**採らない** ──
+ * 🔴 **動かした行を消したときに、元の回が戻ってこない**(規則に「除く」だけが残り、
+ *   その回は静かに消えたままになる = **片道の操作**。user 裁定 2026-08-23)。
+ * 🔑 **動かした行のほうに書く**と、行を消せば元の回がそのまま戻る ──
+ *   取り消しのための仕掛けが要らない。
+ *
+ * ## 🔑 展開の側に新しい分岐は要らない
+ *
+ * 済んだ回の実体が `skip` として渡る仕掛け(`materializedDates`)が既に在るので、
+ * **その集合に「元の日」を足すだけ**である。
+ *
+ * ⚠ **繰り返しの行には付けない** ── 規則の行が同時に「誰かの代わり」であることは
+ *   意味を成さない(`line-date.ts` が `repeat === null` のときだけ読む)。
+ */
+const SUBSTITUTE_TAIL = /^[ \t]*振替(\d{4}-\d{2}-\d{2})/;
+
+/** 画面と本文に出る語。⚠ 表は 1 つ(綴りを 2 か所に書かない ── CLAUDE.md §7)。 */
+export const SUBSTITUTE_WORD = '振替';
+
+export interface SubstituteTail {
+  /** 代わりになっている**元の回の日**。 */
+  readonly date: string;
+  /** 語までの長さ(前の空白を含む)。⚠ **記法の範囲を伸ばす**のに使う。 */
+  readonly length: number;
+}
+
+/**
+ * 日付(と時刻)の直後から「振替<日>」を読む。読めなければ `null`。
+ *
+ * ⚠ **見るのは「形」だけ**である(`isScheduleDate`)── `2026-13-45` は**通る**。
+ *   🔑 これは `schedule-date.ts` の方針どおりで、実在しない日を弾くと
+ *   **user が書いた字が黙って消える**(見て直せなくなる)。
+ * ⚠ 通しても害は無い ── 塞ぐ日の集合に入るだけで、**その日には回が落ちない**ので
+ *   何も起きない。⚠ 1 稿目はここに「実在しない日は読まない」と**書いていたが嘘**で、
+ *   test が落ちて分かった(CLAUDE.md「これが無いと壊れる、と書く前に外して壊れるのを見る」)。
+ */
+export function readSubstituteTail(rest: string): SubstituteTail | null {
+  const m = SUBSTITUTE_TAIL.exec(rest);
+  if (m === null) return null;
+  const date = m[1]!;
+  return isScheduleDate(date) ? { date, length: m[0].length } : null;
+}
+
 export interface RepeatTail {
   readonly unit: RepeatUnit;
   /** 語までの長さ(前の空白を含む)。⚠ **記法の範囲を伸ばす**のに使う。 */
@@ -263,16 +314,32 @@ export function materializedDates(
     readonly text: string;
     readonly date: string | null;
     readonly repeat: RepeatUnit | null;
+    /**
+     * 🔴 **その行が代わりになっている、元の回の日**(#855 決4)。
+     * ⚠ optional にしてある ── 呼び側(`alarm-due.ts` / `schedule.ts`)が
+     *   別々の形の札を渡すためで、**持たない側は今までどおり**動く。
+     */
+    readonly substitutes?: string | null;
   }[],
 ): Map<string, Set<string>> {
   const out = new Map<string, Set<string>>();
+  const add = (key: string, day: string): void => {
+    const set = out.get(key);
+    if (set === undefined) out.set(key, new Set([day]));
+    else set.add(day);
+  };
   for (const c of cards) {
     // ⚠ 繰り返しの行そのものは実体ではない(規則の行である)
     if (c.repeat !== null || c.date === null) continue;
     const key = repeatMateKey(c.lid, c.text);
-    const set = out.get(key);
-    if (set === undefined) out.set(key, new Set([c.date]));
-    else set.add(c.date);
+    add(key, c.date);
+    /**
+     * 🔴 **振替は「元の日」も塞ぐ**(#855 決4)── これが無いと、動かした先と
+     *   元の日の**両方に札が出る**(user から見れば予定が 1 つ増えている)。
+     * 🔑 塞ぐ理由は済んだ回と同じ ── 「その日はこの行が引き受けた」である。
+     */
+    const from = c.substitutes ?? null;
+    if (from !== null && from !== c.date) add(key, from);
   }
   return out;
 }
