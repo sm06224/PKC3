@@ -343,4 +343,36 @@ describe('名前順に戻す(#857 段③)', () => {
     const r = reduce(st, { type: 'RESET_APP_GROUP_ORDER' });
     expect(r.events, '番号が無いのに書いた').toEqual([]);
   });
+
+  /**
+   * 🔴 **番号は在るのに、ノートが消えている**(2026-09-13。自分の diff を読み直して
+   * 見つけた、**誰も通っていなかった枝**)。
+   *
+   * ⚠ 別の端末で、あるいはサイドバーから、グループ用のノートを**普通のノートとして
+   *   消せる** ── そのとき画面の番号だけが残る。
+   * 🔑 ここで止めてはいけない ── **書く先が無いだけ**で、画面は名前順へ戻すのが正しい
+   *   (止めると「押しても何も起きない」が残り、しかも**戻す手が他に無い**)。
+   */
+  it('🔴 ノートが消えていても、画面の並びは名前順へ戻る(書く先が無いだけ)', () => {
+    const before = ordered();
+    // グループ用のノートだけを落とす(番号は state に残ったまま)
+    const metas = new Map(before.entryMetas);
+    for (const [lid, m] of metas) if (m.archetype === APP_GROUP_ARCHETYPE) metas.delete(lid);
+    const orphan: AppState = {
+      ...before,
+      entryMetas: metas,
+      order: before.order.filter((lid) => metas.has(lid)),
+    };
+    // 前提を assert ── 番号は在るが、書く先のノートは 1 枚も無い
+    expect(Object.keys(orphan.appGroupOrders).length, '前提が崩れている').toBeGreaterThan(0);
+    expect(
+      [...orphan.entryMetas.values()].filter((m) => m.archetype === APP_GROUP_ARCHETYPE),
+      '前提が崩れている(ノートが残っている)',
+    ).toEqual([]);
+
+    const r = reduce(orphan, { type: 'RESET_APP_GROUP_ORDER' });
+    expect(r.state.appGroupOrders, '画面の番号が残った(名前順へ戻れない)').toEqual({});
+    const w = r.events.find((e) => e.type === 'REQUEST_APP_GROUP_ORDER');
+    expect((w as { rows: unknown[] } | undefined)?.rows, '消えたノートへ書こうとした').toEqual([]);
+  });
 });

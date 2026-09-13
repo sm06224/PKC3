@@ -3583,9 +3583,20 @@ function reduceCore(
           entryOrder: meta.entryOrder,
         });
       }
-      // ⚠ 1 件も無ければ**何も起きない**(押し所はそもそも出ないが、門は両側に置く)
-      if (rows.length === 0 && Object.keys(state.appGroupOrders).length === 0)
-        return { state, events: [] };
+      /**
+       * ⚠ **番号が 1 つも無ければ何も起きない**(押し所はそもそも出ないが、門は両側に置く)。
+       *
+       * 🔴 **`rows.length === 0 &&` を外した**(2026-09-13。自分の diff を読み直して検算)。
+       * ⚠ `rows` は `appGroupOrders` の key から作るので、**番号が空なら rows も必ず空** ──
+       *   前半は後半に含まれる、**書いても何も守らない条件**だった。
+       * ⚠ 実測で両方向を見た:**前半だけ外すと緑のまま**(= 冗長)/
+       *   **門を丸ごと外すと落ちる**(= 門そのものは効いている)。
+       * 🔑 CLAUDE.md「『これが無いと壊れる』と書いたら、外して壊れることを 1 度は見る。
+       *   見ないなら書かない」── 見たら、前半は書いてはいけない側だった。
+       * ⚠ 番号は在るのにノートが消えている(`rows` だけ空)ときは、**通してよい** ──
+       *   画面の番号を落として名前順へ戻すのが正しい(書く先が無いだけである)。
+       */
+      if (Object.keys(state.appGroupOrders).length === 0) return { state, events: [] };
       return {
         // 🔑 画面は先に戻す(書き戻しを待たない ── 動かすときと同じ流儀)
         state: { ...state, appGroupOrders: {} },
