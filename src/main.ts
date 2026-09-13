@@ -70,7 +70,7 @@ import {
 import { isOpenPlace } from '@features/open-place';
 import { chooseOpenPlace } from '@adapter/ui/render/open-place';
 import { chooseAppOpenTarget, currentAppOpenTarget } from '@adapter/ui/render/app-open-target';
-import { isAppOpenTarget } from '@features/launcher/open-target';
+import { isAppOpenTarget, type AppOpenTarget } from '@features/launcher/open-target';
 import { assetWindowKind } from '@features/asset/asset-preview-kind';
 import {
   createStorePort,
@@ -2182,6 +2182,81 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   alarmService.start();
   if (appAlarmEnabled.enabled()) dispatcher.dispatch({ type: 'REFRESH_TASK_SCAN' });
 
+  /**
+   * 🔴 **タイルを起動する ── 配線は 1 か所**(#884 段②)。
+   *
+   * ⚠ `openTile`(ふだんの起動)と `openTileAs`(その 1 回だけ違う開き方)は、
+   *   **同じ配線**(`readBlob` / `open` / `createUrl` / … 全部)を必要とする。
+   *   2 か所に書き写すと、片方だけ直した日に同じ穴が 2 つになる
+   *   (CLAUDE.md §7「片側を直したら、対称の反対側を必ず疑う」)。
+   * @param openTargetOverride **その 1 回だけ**の出し先(#884 段②)。
+   *   渡さなければ `currentAppOpenTarget()`(= 設定どおり)。
+   */
+  const launchLauncherTile = (lid: string, openTargetOverride?: AppOpenTarget): void => {
+    const tile = dispatcher.getState().launcherTiles?.find((t) => t.lid === lid);
+    if (!tile) return;
+    /**
+     * 🔴 **タイルは許可を「使う」だけ。「与える」ことはしない**(#301。user 裁定 2026-08-21)。
+     *
+     * user 裁定は「アプリ登録済みのものは永続化(= 次から聞かれない)」であって、
+     * 「タイルから許可を出せるようにする」ではない。⚠ **その差は大きい** ──
+     * タイルは一覧から 1 クリックで押せる場所なので、ここを許可の入口にすると
+     * 「押しただけで全ノートを渡すか聞かれる」形になる(`detail.ts` が
+     * **対象の素性が見えている画面からだけ**入れる、と決めた理由)。
+     * 🔑 だから: **与えるのは添付の画面で 1 回だけ。以後はタイルがそれを使う。**
+     * ⚠ 許可が無ければ**今までどおり囲いの中**で開く(黙って素のままにはしない)。
+     */
+    const granted =
+      tile.kind === 'app' &&
+      sameOriginGate.allows({ lid, assetKey: tile.assetKey, registered: true });
+    launchTile(
+      tile,
+      {
+        readBlob: (assetKey) => blobs.get(cid, assetKey),
+        open: (url, features) => window.open(url, '_blank', features),
+        // 🔴 どこに出すか(#884 段①)── **同期に読む**(gesture の中で使う)
+        openTarget: currentAppOpenTarget,
+        createUrl: (blob) => URL.createObjectURL(blob),
+        revokeUrl: (url) => URL.revokeObjectURL(url),
+        whenClosed: waitForWindowClose,
+        // 🔑 このアプリが前回保存した中身(P8 段⑭)。**PKC3 と外殻は同じ origin**
+        //    なので、ここで読んだものがそのまま外殻の localStorage の中身になる
+        readSeed: readAppStorage,
+        baseUrl: document.baseURI,
+        fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
+        // #148 組み込みタイル ── 文書なしで開く = Start Center(#174 の一言込み)
+        openOffice: openOfficeTile,
+        // 🔴 **自分のパソコンで動かす**(#532 段 B)── 配線は 1 つ(下も同じ物を渡す)
+        downloadSelfhost: runSelfhostDownload,
+        // 🔴 **組み込みタイルは別窓で開く**(#300 段③)。⚠ 判断と文言は
+        //    `view-window.ts` に在る ── この file はどの test からも実行されない
+        //    ので、配線だけ置く。⚠ 窓が塞がれたときの退避は `openInPane`(段⑤)。
+        //    そちらは `open-view.ts` を通す(開いた後の後始末を落とさない)
+        // ⚠ 2 ペインに**予定表が加わった**(#673 段②、user 裁定 2026-09-04)──
+        //    何が来るかは `tiles.ts` の組み込みタイルが決める(`isViewMode(kind)`)。
+        //    予定表の退避先は**左の列の「予定」タブ**(`openViewHere`)なので、
+        //    タブを開く口(`services.setBrowse`)を渡す
+        openView: (view) =>
+          void openViewTile(dispatcher, cid, view, (m) => services.setBrowse?.(m), focusSearch),
+        openManual: () => void openManualTile(dispatcher, markdown, showStatus),
+        // ⚠ **聞かない。憶えているものを確かめるだけ**(上の granted と同じ判定を
+        //    通す ── ここで別の式を書くと、片方だけ直した日に食い違う)
+        confirmSameOrigin: async () => granted,
+      },
+      {
+        sameOrigin: granted,
+        // 🔑 **その 1 回だけ**(#884 段②)── 渡っていなければ `undefined` のまま
+        //    (`launchTile` 側が `currentAppOpenTarget()` を使う)
+        ...(openTargetOverride === undefined ? {} : { openTarget: openTargetOverride }),
+      },
+    );
+    // ⚠ 押した対象を**選択状態にもする**(P8 段⑭)── 起動しただけだと右の列が
+    //    空文のままで、いま何を触ったのかが画面に残らない。「押す = 起動」の
+    //    意味は変えず、選択は同時に立つ副作用として入れる。
+    // ⚠ 組み込みタイル(#148)は entry を持たないので立てない(tileSelectsEntry)
+    if (tileSelectsEntry(tile)) dispatcher.dispatch({ type: 'SELECT_ENTRY', lid });
+  };
+
   const services: BinderServices = {
     attachFiles: (files, why, at, intoLid) =>
       void withAssetGate(() => attachFiles(dispatcher, attachDeps, files, why, at, intoLid)),
@@ -2675,60 +2750,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         fail: (text) => showArchiveWindowError(got.win, title, text),
       };
     },
-    openTile: (lid) => {
-      const tile = dispatcher.getState().launcherTiles?.find((t) => t.lid === lid);
-      if (!tile) return;
-      /**
-       * 🔴 **タイルは許可を「使う」だけ。「与える」ことはしない**(#301。user 裁定 2026-08-21)。
-       *
-       * user 裁定は「アプリ登録済みのものは永続化(= 次から聞かれない)」であって、
-       * 「タイルから許可を出せるようにする」ではない。⚠ **その差は大きい** ──
-       * タイルは一覧から 1 クリックで押せる場所なので、ここを許可の入口にすると
-       * 「押しただけで全ノートを渡すか聞かれる」形になる(`detail.ts` が
-       * **対象の素性が見えている画面からだけ**入れる、と決めた理由)。
-       * 🔑 だから: **与えるのは添付の画面で 1 回だけ。以後はタイルがそれを使う。**
-       * ⚠ 許可が無ければ**今までどおり囲いの中**で開く(黙って素のままにはしない)。
-       */
-      const granted =
-        tile.kind === 'app' &&
-        sameOriginGate.allows({ lid, assetKey: tile.assetKey, registered: true });
-      launchTile(tile, {
-        readBlob: (assetKey) => blobs.get(cid, assetKey),
-        open: (url, features) => window.open(url, '_blank', features),
-        // 🔴 どこに出すか(#884 段①)── **同期に読む**(gesture の中で使う)
-        openTarget: currentAppOpenTarget,
-        createUrl: (blob) => URL.createObjectURL(blob),
-        revokeUrl: (url) => URL.revokeObjectURL(url),
-        whenClosed: waitForWindowClose,
-        // 🔑 このアプリが前回保存した中身(P8 段⑭)。**PKC3 と外殻は同じ origin**
-        //    なので、ここで読んだものがそのまま外殻の localStorage の中身になる
-        readSeed: readAppStorage,
-        baseUrl: document.baseURI,
-        fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
-        // #148 組み込みタイル ── 文書なしで開く = Start Center(#174 の一言込み)
-        openOffice: openOfficeTile,
-        // 🔴 **自分のパソコンで動かす**(#532 段 B)── 配線は 1 つ(下も同じ物を渡す)
-        downloadSelfhost: runSelfhostDownload,
-        // 🔴 **組み込みタイルは別窓で開く**(#300 段③)。⚠ 判断と文言は
-        //    `view-window.ts` に在る ── この file はどの test からも実行されない
-        //    ので、配線だけ置く。⚠ 窓が塞がれたときの退避は `openInPane`(段⑤)。
-        //    そちらは `open-view.ts` を通す(開いた後の後始末を落とさない)
-        // ⚠ 2 ペインに**予定表が加わった**(#673 段②、user 裁定 2026-09-04)──
-        //    何が来るかは `tiles.ts` の組み込みタイルが決める(`isViewMode(kind)`)。
-        //    予定表の退避先は**左の列の「予定」タブ**(`openViewHere`)なので、
-        //    タブを開く口(`services.setBrowse`)を渡す
-        openView: (view) =>
-          void openViewTile(dispatcher, cid, view, (m) => services.setBrowse?.(m), focusSearch),
-        openManual: () => void openManualTile(dispatcher, markdown, showStatus),
-        // ⚠ **聞かない。憶えているものを確かめるだけ**(上の granted と同じ判定を
-        //    通す ── ここで別の式を書くと、片方だけ直した日に食い違う)
-        confirmSameOrigin: async () => granted,
-      }, { sameOrigin: granted });
-      // ⚠ 押した対象を**選択状態にもする**(P8 段⑭)── 起動しただけだと右の列が
-      //    空文のままで、いま何を触ったのかが画面に残らない。「押す = 起動」の
-      //    意味は変えず、選択は同時に立つ副作用として入れる。
-      // ⚠ 組み込みタイル(#148)は entry を持たないので立てない(tileSelectsEntry)
-      if (tileSelectsEntry(tile)) dispatcher.dispatch({ type: 'SELECT_ENTRY', lid });
+    openTile: (lid) => launchLauncherTile(lid),
+    /**
+     * 🔴 **その 1 回だけ、選んだ開き方で開く**(#884 段②。右クリックのメニュー)。
+     * ⚠ **設定は書き換えない** ── `chooseAppOpenTarget` を呼ばない。配線は
+     *   `openTile` と共有する(`launchLauncherTile`。§7「同じ判定が 2 か所」)。
+     */
+    openTileAs: (lid, target) => {
+      if (isAppOpenTarget(target)) launchLauncherTile(lid, target);
     },
     /**
      * 🔴 **詳細画面から添付を起動する**(P10、user 指示 2026-08-05)。

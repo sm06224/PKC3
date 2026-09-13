@@ -196,6 +196,37 @@ describe('タイルの起動', () => {
     expect(tab.opened[0]!.features, '選んでいないのに変わった').toBe('noopener,noreferrer');
   });
 
+  /**
+   * 🔴 **その 1 回だけ、設定より優先して開く**(#884 段②。user 要望 2026-09-13
+   * 「デフォルト選択の他に右クリックからの起動が選べるとなお良い」)。
+   *
+   * 🔑 **守っているのは「1 回だけ効いて、設定は変わらないこと」**である ──
+   *   同じ `deps`(= 同じ設定)へ、①その場の指定つきで 1 回 ②指定なしでもう 1 回
+   *   `launchTile` を呼び、②が①に引きずられず**設定どおりに戻る**ことまで見る。
+   *   ここだけを見ると「その場の指定を渡せば効く」しか分からない
+   *   (実際に設定が書き換わっていないことは main.ts 側の原文 pin で見る)。
+   */
+  it('🔴 その 1 回だけの指定(#884 段②)は設定より優先し、次の回は設定へ戻る', () => {
+    const tile = {
+      lid: 'u1',
+      title: 'サイト',
+      group: '',
+      kind: 'url',
+      url: 'https://example.com/x',
+    } as const;
+    // 設定は「タブ」── その 1 回だけ「別の窓」を指定する
+    const h = harness(null, { target: 'tab' });
+    launchTile(tile, h.deps, { openTarget: 'window' });
+    expect(h.opened[0]!.features, 'その場の指定より設定が勝っている').toContain('popup');
+
+    // 🔑 同じ deps(= 同じ設定)へ、指定なしでもう一度 ── 設定どおり(タブ)に戻る
+    launchTile(tile, h.deps);
+    expect(
+      h.opened[1]!.features,
+      '1 回だけのはずが、次の回にも指定が残っている(= 設定を書き換えたのと同じ結果)',
+    ).toBe('noopener,noreferrer');
+  });
+
   it('🔴 取り込んだアプリの窓にも効く(空の窓を開く側)', () => {
     const win = harness('<p>hi</p>', { target: 'window' });
     launchTile(appTile, win.deps);
@@ -204,6 +235,13 @@ describe('タイルの起動', () => {
     const tab = harness('<p>hi</p>', { target: 'tab' });
     launchTile(appTile, tab.deps);
     expect(tab.opened[0]!.features, '既定なのに何か足した').toBe('');
+  });
+
+  /** ⚠ **対称の反対側**(#884 段②)── 上のは URL タイル、こちらは取り込んだアプリ。 */
+  it('🔴 その 1 回だけの指定は、取り込んだアプリの窓にも効く', () => {
+    const h = harness('<p>hi</p>', { target: 'tab' });
+    launchTile(appTile, h.deps, { openTarget: 'window' });
+    expect(h.opened[0]!.features, 'その場の指定が届いていない').toContain('popup');
   });
 
   it('🔴 取り込んだ HTML は **隔離した外殻**に載せて開く(同じ origin で走らせない)', async () => {
@@ -595,5 +633,30 @@ describe('main.ts の配線(原文 pin ── #174)', () => {
     expect(h.officeOpens.n).toBe(0);
     expect(h.opened, '窓を開いている(zip が落ちるだけのはず)').toEqual([]);
     expect(h.failures, '理由が出た').toEqual([]);
+  });
+
+  /**
+   * 🔴 **右クリックの「その 1 回だけ」は、設定を書き換えない**(#884 段②)。
+   *
+   * ⚠ `launchTile` の unit(上の describe)が見られるのは「その場の指定が効くこと」
+   *   までで、「main.ts が設定を保存する口(`chooseAppOpenTarget`)を呼んでいないこと」
+   *   は main.ts 側でしか確かめられない(§2「どの test からも実行されない file に
+   *   判断を書かない」── ここは原文 pin と自覚して使う)。
+   * 🔑 `chooseAppOpenTarget` の出現数を数える ── import 文 + `setAppOpenTarget` の
+   *   **2 か所のまま**であること。増えていたら、どこかが設定を書き換える経路を
+   *   足したということである。
+   */
+  it('🔴 その 1 回だけの開き方(#884 段②)は、設定を保存する口を呼ばない', () => {
+    const calls = [...MAIN.matchAll(/\bchooseAppOpenTarget\b/g)].length;
+    expect(
+      calls,
+      '`chooseAppOpenTarget` の出現数が変わった(設定を書き換える経路が増えた可能性)',
+    ).toBe(2);
+    expect(
+      MAIN,
+      'openTileAs が共有の起動関数へ、その場の指定を渡していない',
+    ).toMatch(
+      /openTileAs: \(lid, target\) => \{\s*if \(isAppOpenTarget\(target\)\) launchLauncherTile\(lid, target\);\s*\},/,
+    );
   });
 });

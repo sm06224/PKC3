@@ -191,11 +191,13 @@ import {
   tableConvertPickLabel,
   appGroupMenuActions,
   tileMenuActions,
+  TILE_OPEN_TARGET_ATTR,
   TASK_REPEAT_MENU_ACTION,
   repeatMenuActions,
   REPEAT_ATTR,
   withTrailingLast,
 } from '@features/entry-actions';
+import { currentAppOpenTarget } from '@adapter/ui/render/app-open-target';
 import {
   type MenuItem,
   closeContextMenu,
@@ -870,6 +872,16 @@ export interface BinderServices {
    * ⚠ blob の貸し出し・`window.open` は実体側 ── binder は DOM を触らない。
    */
   openTile?(lid: string): void;
+  /**
+   * 🔴 **その 1 回だけ、選んだ開き方で開く**(#884 段②)。
+   *
+   * ⚠ **`openTile` とは別の口にする** ── あちらは**設定どおり**に開くが、
+   *   こちらは**設定を書き換えずに**その場だけ違う開き方で開く。「いまの
+   *   出し先は何か」の判定は 1 か所(`launch-tile.ts` の
+   *   `opts.openTarget ?? deps.openTarget()`)に寄せ、ここは値を運ぶだけ(§7)。
+   * ⚠ 綴りの検めは実体側(`isAppOpenTarget`)── `setAppOpenTarget` と同じ作法。
+   */
+  openTileAs?(lid: string, target: string): void;
   /**
    * 🔴 **マニュアルを独立した窓で開く**(#645。user 要望 2026-08-31
    * 「**ヘルプの中からマニュアルをアプリとして出してください**」)。
@@ -7081,6 +7093,26 @@ const ACTIONS: Record<string, ActionHandler> = {
     services.openTile?.(lid);
   },
   /**
+   * 🔴 **その 1 回だけ、右クリックで選んだ開き方で開く**(#884 段②。user 要望
+   *   2026-09-13「デフォルト選択の他に右クリックからの起動が選べるとなお良い」)。
+   *
+   * ⚠ **設定は書き換えない** ── `services.setAppOpenTarget` を呼ばない。次に
+   *   ふつうにタイルを押したときは、また設定どおりの開き方に戻る
+   *   (`tests/adapter/tile-open-target-menu.test.ts` が「選んだ後、設定は
+   *   変わっていない」を見る)。
+   * ⚠ **`open-tile` の「並べ替え中は開かない」/「1 回目は印を付けるだけ」を
+   *   通さない** ── メニューから選ぶのは「掴もうとして離れた」誤操作ではなく、
+   *   user が明示にこの項目を選んだ操作である。二重の待ちを作らない。
+   * ⚠ 綴りの検めは実体側(`isAppOpenTarget`)── `setAppOpenTarget` と同じ作法
+   *   (binder は `data-pkc-open-target` の値をそのまま渡す)。
+   */
+  'open-tile-as': (_dispatcher, target, services) => {
+    const lid = target.getAttribute('data-pkc-tile');
+    const openTarget = target.getAttribute(TILE_OPEN_TARGET_ATTR);
+    if (lid === null || lid === '' || openTarget === null || openTarget === '') return;
+    services.openTileAs?.(lid, openTarget);
+  },
+  /**
    * 🔴 **マニュアルの窓を開く**(#645)。⚠ ヘルプの中の口(`help.ts`)と
    *   アプリの一覧のタイル(`tiles.ts` の `builtin:manual`)は、どちらも
    *   最後は同じ 1 本(`platform/manual-window.ts`)へ落ちる。
@@ -10490,7 +10522,8 @@ export function bindActions(
           root,
           { x: ev.clientX, y: ev.clientY },
           // ⚠ 出口も同じメニューに置く(#857 段①b-2)── 入口だけ作らない
-          tileMenuActions(dispatcher.getState().launcherReorder),
+          // 🔴 その 1 回だけの開き方(#884 段②)── いまの設定を先頭 2 項目に足す
+          tileMenuActions(dispatcher.getState().launcherReorder, currentAppOpenTarget()),
           root.ownerDocument.activeElement,
           { 'data-pkc-tile': tileLid },
         );

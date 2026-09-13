@@ -69,8 +69,9 @@ describe('右クリックに出す操作', () => {
       ...ENTRY_MENU_ACTIONS,
       ...TILE_MENU_ACTIONS,
       // ⚠ 2026-09-13(#857 段①b-2): モードの出入りも同じ表から出る
-      ...tileMenuActions(false),
-      ...tileMenuActions(true),
+      // ⚠ 2026-09-13(#884 段②): その 1 回だけの開き方も同じ表から出る
+      ...tileMenuActions(false, 'tab'),
+      ...tileMenuActions(true, 'window'),
       // ⚠ 2026-09-13(#855 段 0): 札の「繰り返す…」と、その 2 段目
       TASK_REPEAT_MENU_ACTION,
       ...repeatMenuActions(null),

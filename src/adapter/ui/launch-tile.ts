@@ -159,6 +159,18 @@ export interface LaunchOptions {
    *   既に許してあるなら普通の起動でも口が開くので、この旗は要らない。
    */
   extension?: boolean;
+  /**
+   * 🔴 **その 1 回だけの出し先**(#884 段②。user 要望 2026-09-13
+   * 「デフォルト選択の他に右クリックからの起動が選べるとなお良い」)。
+   *
+   * ⚠ 渡さなければ `deps.openTarget()`(= 設定どおり)を使う。⚠ **渡しても
+   *   設定は 1 バイトも書き換わらない** ── 呼び側(`main.ts`)が
+   *   `chooseAppOpenTarget` を呼ばない限り、次にこの口を通らずに開いたときは
+   *   また `deps.openTarget()` に戻る。「いまの出し先」を決める場所を
+   *   ここ 1 か所(下の `appWindowFeatures` の呼び出し)に寄せる ── 呼び側で
+   *   `deps.openTarget` を差し替える形にすると、同じ判定が 2 か所に生える(§7)。
+   */
+  openTarget?: AppOpenTarget;
 }
 
 /**
@@ -182,6 +194,12 @@ export async function launchTile(
   opts: LaunchOptions = {},
 ): Promise<void> {
   const raw = opts.sameOrigin === true;
+  /**
+   * 🔴 **いまの出し先を、ここ 1 か所で決める**(#884 段②)。
+   * ⚠ `opts.openTarget`(その 1 回だけの指定)が無ければ `deps.openTarget()`
+   *   (= 設定どおり)── 「いまの出し先は何か」に答える口を増やさない(§7)。
+   */
+  const openTarget = opts.openTarget ?? deps.openTarget();
   // 🔴 **開く前に聞く**(fail closed)。⚠ `window.open` より前に聞く ──
   //    後にすると、断ったのに空のタブが残る
   if (raw && deps.confirmSameOrigin !== undefined && !(await deps.confirmSameOrigin(tile.title)))
@@ -265,7 +283,7 @@ export async function launchTile(
      */
     // ⚠ 約束(`noopener,noreferrer`)は残したまま、大きさだけを足す(#884 段①)
     if (tile.url !== undefined)
-      deps.open(tile.url, appWindowFeatures(deps.openTarget(), EXTERNAL_WINDOW_FEATURES));
+      deps.open(tile.url, appWindowFeatures(openTarget, EXTERNAL_WINDOW_FEATURES));
     return;
   }
   if (tile.assetKey === undefined) return;
@@ -274,7 +292,7 @@ export async function launchTile(
   // 🔑 先に窓を開ける(gesture を切らさない・塞がれたら**その場で分かる**)。
   // ⚠ ここでは `noopener` を付けない ── 付けると戻り値が null になって
   // 「塞がれた」と区別できず、この後の遷移もできない。代わりに **opener を切る**
-  const win = deps.open('', appWindowFeatures(deps.openTarget(), ''));
+  const win = deps.open('', appWindowFeatures(openTarget, ''));
   if (!win) {
     deps.fail(`「${tile.title}」を開けませんでした(ブラウザがポップアップを塞いでいます)`);
     return;
