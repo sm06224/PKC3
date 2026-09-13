@@ -142,7 +142,7 @@ describe('attachment view (P4a)', () => {
 
     // 履歴の開閉 = 同じノートのまま再描画(骨組みは作り直されない)
     for (let i = 0; i < 3; i++) {
-      d.dispatch({ type: 'SHOW_HISTORY' });
+      d.dispatch({ type: 'SHOW_HISTORY', lid: 'a1' });
       await tick(20);
       d.dispatch({ type: 'HIDE_HISTORY' });
       await tick(20);

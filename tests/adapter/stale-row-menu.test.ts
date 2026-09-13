@@ -171,6 +171,49 @@ describe('スマホの「⋯」メニューも、開いた瞬間のノートに�
   });
 });
 
+/**
+ * 🔴 **「履歴」も、開いた瞬間の行に効く**(#891)。
+ *
+ * ⚠ #877 を直した時点で、行のメニュー 16 件のうち**ここだけが残っていた** ──
+ *   受け手が `target` を 1 つも受け取っておらず、reducer が `state.selectedLid` を
+ *   直に読んでいたので、`binder.ts` の中だけでは閉じなかった。
+ * 🔑 `SHOW_HISTORY` に `lid` を持たせ(**optional にしない** ── 省けると口を
+ *   後から足す人が渡し忘れても tsc が黙る)、受け手は隣の 15 件と同じ
+ *   `rowLidOrSelected` で解決する。
+ */
+describe('「履歴」も、開いた瞬間の行に効く(#891)', () => {
+  it('🔴 メニューを開いたまま選択が動いても、開いた行の履歴を引く', async () => {
+    const r = setup();
+    const asked: string[] = [];
+    r.d.onEvent((e) => {
+      if (e.type === 'REQUEST_REVISION_LIST') asked.push(e.lid);
+    });
+    rightClick(r.row('n1'));
+    // ⚠ `Alt+←`(戻る)相当 ── メニューが開いたまま選択が動く
+    r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+    expect(r.d.getState().selectedLid, '前提が崩れている(選択が動いていない)').toBe('n2');
+    r.press('show-history');
+    await tick();
+    expect(asked, '開いた行(n1)ではなく、選択が動いた先の履歴を引いている').toEqual(['n1']);
+  });
+
+  /**
+   * ⚠ **対照群** ── 選択を動かさなければ、これまでどおり開いた行の履歴を引く。
+   * これが無いと、「何も引かなくなった」実装でも上の test だけでは分からない。
+   */
+  it('⚠ 対照群 ── 選択を動かさなければ、開いた行の履歴を引く', async () => {
+    const r = setup();
+    const asked: string[] = [];
+    r.d.onEvent((e) => {
+      if (e.type === 'REQUEST_REVISION_LIST') asked.push(e.lid);
+    });
+    rightClick(r.row('n1'));
+    r.press('show-history');
+    await tick();
+    expect(asked, '選択を動かしていないのに引けていない').toEqual(['n1']);
+  });
+});
+
 describe('行の右クリックメニューは、開いた瞬間の行に効く(#877)', () => {
   it('🔴 メニューを開いたまま選択が動いても、開いた行が消える(別の行を消さない)', async () => {
     const r = setup();

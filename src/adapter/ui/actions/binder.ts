@@ -7868,7 +7868,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       ?.click();
   },
   // ── P5b: 履歴 / ゴミ箱 ──
-  'show-history': (dispatcher) => {
+  'show-history': (dispatcher, target) => {
     // 🔴 **無言で断らない**(P8 段⑲)── `SHOW_HISTORY` は `phase !== 'ready'` で
     //    何も返さず、押しても panel も理由も出なかった
     if (dispatcher.getState().phase !== 'ready') {
@@ -7878,7 +7878,19 @@ const ACTIONS: Record<string, ActionHandler> = {
       });
       return;
     }
-    dispatcher.dispatch({ type: 'SHOW_HISTORY' });
+    /**
+     * 🔴 **効く先はここで解決する**(#891)── 隣の 15 件と同じ `rowLidOrSelected`。
+     * ⚠ 直す前はここが `target` を**1 つも受け取っておらず**、reducer が
+     *   `selectedLid` を直に読んでいた ── 行のメニューを開いたまま `Alt+←` を
+     *   押すと、**A の履歴を見るはずが B の履歴が開く**(#877 と同じ引き金で、
+     *   行のメニュー 16 件のうちここだけが残っていた)。
+     */
+    const lid = rowLidOrSelected(dispatcher.getState(), target);
+    if (lid === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'ノートを選んでから開いてください' });
+      return;
+    }
+    dispatcher.dispatch({ type: 'SHOW_HISTORY', lid });
   },
   'hide-history': (dispatcher) => dispatcher.dispatch({ type: 'HIDE_HISTORY' }),
   /**

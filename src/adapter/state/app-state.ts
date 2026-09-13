@@ -1865,7 +1865,16 @@ export type UserAction =
   | { type: 'ASK_TAG_SUGGESTIONS' }
   /** 集まったタグ(#494 段②)。⚠ 空配列は「0 件だった」= 集め直さない。 */
   | { type: 'SET_TAG_SUGGESTIONS'; tags: readonly string[] }
-  | { type: 'SHOW_HISTORY' }
+  /**
+   * 🔴 **どのノートの履歴かを、撃つ側が持つ**(#891)。
+   *
+   * ⚠ 直す前は `lid` が無く、reducer が `state.selectedLid` を直に読んでいた ──
+   *   だから**行のメニューを開いたまま選択が動く**と(`Alt+←` はメニューの有無を
+   *   見ない)、**A の履歴を見るはずが B の履歴が開いた**(#877 と同じ引き金)。
+   * 🔑 **optional にしない** ── 省けると、口を後から足す人が渡し忘れても
+   *   tsc が黙り、同じ穴が静かに戻る(CLAUDE.md §7)。
+   */
+  | { type: 'SHOW_HISTORY'; lid: string }
   /** 🔴 **その版の中身を見る**(#398 段②)。⚠ 復元ではない ── 1 バイトも書かない。 */
   | { type: 'PREVIEW_REVISION'; revId: string }
   | { type: 'HIDE_REVISION_PREVIEW' }
@@ -5699,12 +5708,16 @@ function reduceCore(
       };
     }
     case 'SHOW_HISTORY': {
-      // ready + 選択ありのみ。一覧は要求時に引く(boot で revisions に触れない)
-      if (state.phase !== 'ready' || !state.selectedLid)
-        return { state, events: [] };
+      /**
+       * ready のみ。一覧は要求時に引く(boot で revisions に触れない)。
+       * 🔴 **引く相手は `action.lid`**(#891)── ⚠ ここで `state.selectedLid` を
+       *   読み直すと、**押した物と効く先が食い違う**(メニューが開いている間に
+       *   選択が動くと、別のノートの履歴が開く)。撃つ側が既に解決している。
+       */
+      if (state.phase !== 'ready' || !action.lid) return { state, events: [] };
       return {
         state,
-        events: [{ type: 'REQUEST_REVISION_LIST', lid: state.selectedLid }],
+        events: [{ type: 'REQUEST_REVISION_LIST', lid: action.lid }],
       };
     }
     /**
