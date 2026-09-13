@@ -1061,20 +1061,44 @@ test('🔴 グループを実際に動かすと並びが入れ替わり、初回
   await expect(groups.nth(0), '確認なしで動いたはずが、並びが変わっていない').toHaveText('道具');
   await expect(groups.nth(1)).toHaveText('資料');
 
-  // ⑤「名前順に戻す」が出る → 押すと名前順(資料, 道具)へ戻る
+  /**
+   * ⑤「すべて名前順に戻す」が出る → **押すと確認が出る** → やめれば 1 つも戻らない /
+   *   はいなら名前順(資料, 道具)へ戻る。
+   *
+   * 🔴 **ここは 2026-09-13 に 2 時間ほど「動線の最後まで到達していなかった」**
+   *   ── 同日 `67520c0` が確認の小窓を足したのに、この spec は押した直後に
+   *   並びを見ていたので、**小窓が出たまま止まって必ず落ちる**状態だった。
+   * ⚠ CI は全量 smoke を回さない(user 指示 2026-09-11)ので、**鳴る計器が 1 つも無い**。
+   * 🔑 だから「押した後に何が出るか」を**この spec 自身が持つ** ──
+   *   小窓を足す変更は、ここを直さないと通らない。
+   */
   await toolHeading.click({ button: 'right' });
   await expect(groupMenu, '5 回目の右クリックでメニューが出ない').toBeVisible();
   await expect(
     groupMenu.locator('[data-pkc-action="reset-app-group-order"]'),
-    '番号が付いているのに「名前順に戻す」が出ていない',
+    '番号が付いているのに「すべて名前順に戻す」が出ていない',
   ).toHaveCount(1);
   await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="reset-app-group-order"]');
-  await expect(groups.nth(0), '「名前順に戻す」を押しても名前順に戻らない').toHaveText('資料');
+  /**
+   * 🔴 **やめたら 1 つも戻らない**(片道の操作を作らない、の裏返し)。
+   * ⚠ そして確認は**効く範囲**を言わなければならない(`67520c0` の当の主題)──
+   *   「押した見出しだけ」と読めると、見てもいない群の並びが黙って消える。
+   */
+  const resetAsk = await answerAppDialog(page, 'cancel');
+  expect(resetAsk, '確認が「まとめて」効くことを言っていない').toContain('まとめて');
+  await expect(groups.nth(0), 'やめたのに並びが戻ってしまった').toHaveText('道具');
+  await expect(groups.nth(1)).toHaveText('資料');
+
+  await toolHeading.click({ button: 'right' });
+  await expect(groupMenu, 'やめた後の右クリックでメニューが出ない').toBeVisible();
+  await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="reset-app-group-order"]');
+  await answerAppDialog(page, 'ok');
+  await expect(groups.nth(0), '「すべて名前順に戻す」を押しても名前順に戻らない').toHaveText('資料');
   await expect(groups.nth(1)).toHaveText('道具');
 
   // ⚠ 空振り防止 ── 戻した後は番号が無いので、もう出ない
   await toolHeading.click({ button: 'right' });
-  await expect(groupMenu, '6 回目の右クリックでメニューが出ない').toBeVisible();
+  await expect(groupMenu, '戻した後の右クリックでメニューが出ない').toBeVisible();
   await expect(
     groupMenu.locator('[data-pkc-action="reset-app-group-order"]'),
     '名前順へ戻したのに、まだ「名前順に戻す」が出ている(番号が残っている)',
