@@ -54,6 +54,32 @@ export function toggleFolded(groups: FoldedGroups, name: string): FoldedGroups {
 }
 
 /**
+ * 🔴 **画面に出ている群が、1 つ残らず畳んであるか**(#857 段④ の「すべて開く」)。
+ *
+ * ⚠ **0 件のときは false** ── 押し所そのものを出さないため(畳む物が 1 つも
+ *   無いのに「すべて畳む」が在ると、押しても何も起きない)。
+ */
+export function allFolded(groups: FoldedGroups, names: readonly string[]): boolean {
+  const named = names.filter((n) => n !== '');
+  return named.length > 0 && named.every((n) => groups.includes(n));
+}
+
+/**
+ * 🔴 **すべて畳む / すべて開く**(#857 段④)。押し所は 1 つで、いまの状態で裏返る ──
+ * ⚠ 2 つ並べると**いつも片方が空振り**する(全部開いている画面に「すべて開く」が在る)。
+ *
+ * 🔑 **一覧に居ない名前は触らない** ── 畳みは設定として別の端末へ運べるので、
+ *   ここで全部消すと**別の container で畳んでおいた群まで開いてしまう**
+ *   (画面に出ていない物を、画面の操作で変えない)。
+ */
+export function toggleAllFolded(groups: FoldedGroups, names: readonly string[]): FoldedGroups {
+  const named = names.filter((n) => n !== '');
+  if (named.length === 0) return groups;
+  if (allFolded(groups, named)) return groups.filter((g) => !named.includes(g));
+  return [...new Set([...groups, ...named])];
+}
+
+/**
  * その群を畳んでいるか。
  *
  * ⚠ **絞り込み中は畳みを無視する**(呼び側が `filtering` を渡す)── 絞った結果が

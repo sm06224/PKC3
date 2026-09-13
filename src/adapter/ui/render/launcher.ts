@@ -11,7 +11,7 @@
  * 🔑 持ち込まなかった理由は「見えない状態の解消が先」という**段取り**であって、
  *   要らないという判断ではなかった ── 段取りが済んだので戻す向きが正しい
  *   (CLAUDE.md「PKC2 は機能の袋ではない。動線で読む」)。
- * ⚠ **折り畳みはまだ無い**(#857 段④)── 在ると書かないこと。
+ * ⚠ **折り畳みも戻した**(#857 段④、2026-09-13)── 見出しを押すと畳める。
  *
  * ⚠ 起動そのものはここでやらない。`data-pkc-action="open-tile"` を置くだけで、
  * blob の貸し出しと `window.open` は adapter の service が持つ ──
@@ -21,7 +21,7 @@ import type { AppState } from '@adapter/state/app-state';
 import type { LauncherTile } from '@features/launcher/tiles';
 import { isMovableTile } from '@features/launcher/tile-order';
 import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
-import { encodeFolded, isFolded } from '@features/launcher/group-fold';
+import { allFolded, encodeFolded, isFolded } from '@features/launcher/group-fold';
 import { appGroupFold, type GroupFoldStore } from './group-fold';
 import { setIcon } from './icons';
 
@@ -216,6 +216,33 @@ export class LauncherRenderer {
      *   打ったのに何も出ないように見える(「無い」と「畳んである」の区別が付かない)。
      */
     const countOf = (name: string): number => tiles.filter((t) => t.group === name).length;
+    const filtering = q !== '';
+
+    /**
+     * 🔴 **「すべて畳む / すべて開く」**(#857 段④)── 20 個あるグループを
+     * 1 つずつ押させないため。
+     *
+     * 🔑 **押し所は 1 つ**で、いまの状態で字が裏返る ── 2 つ並べると
+     *   **いつも片方が空振り**する(全部開いている画面に「すべて開く」が在る)。
+     * ⚠ **名前の付いた群が 1 つも無ければ出さない** ── 名前の無いまとまりは
+     *   畳めないので、出すと押しても何も起きない押し所になる。
+     * ⚠ **絞り込み中も出さない** ── 見出しと同じ理由(絞り込み中は畳みを無視するので、
+     *   押しても画面が変わらない)。
+     */
+    const named: string[] = [];
+    for (const t of tiles) if (t.group !== '' && !named.includes(t.group)) named.push(t.group);
+    if (!filtering && named.length > 0) {
+      const all = document.createElement('button');
+      all.type = 'button';
+      all.setAttribute('data-pkc-action', 'toggle-all-app-groups');
+      all.setAttribute('data-pkc-field', 'launcher-fold-all');
+      const opens = allFolded(folded, named);
+      all.title = opens
+        ? '畳んであるグループを全部開きます'
+        : 'グループを全部畳みます(中のアプリが隠れます)';
+      all.textContent = opens ? 'すべて開く' : 'すべて畳む';
+      list.append(all);
+    }
 
     let group: string | null = null;
     let grid: HTMLElement | null = null;
@@ -253,17 +280,30 @@ export class LauncherRenderer {
            */
           const head = document.createElement('h3');
           head.setAttribute('data-pkc-field', 'launcher-group');
-          const btn = document.createElement('button');
-          btn.type = 'button';
-          btn.setAttribute('data-pkc-action', 'toggle-app-group');
-          btn.setAttribute('data-pkc-group', group);
-          const off = isFolded(folded, group, q !== '');
-          btn.setAttribute('aria-expanded', off ? 'false' : 'true');
-          btn.title = off
-            ? `${group} を開きます(いまは畳んであります)`
-            : `${group} を畳みます(中のアプリが隠れます)`;
-          btn.textContent = off ? `${group}(${countOf(group)})` : group;
-          head.append(btn);
+          const off = isFolded(folded, group, filtering);
+          if (filtering) {
+            /**
+             * 🔴 **絞り込み中は、見出しを押し所にしない**(#857 段④ の仕上げ)。
+             *
+             * ⚠ 絞り込み中は畳みを**無視して出す**ので、ここで押せると
+             *   **押しても画面が 1 ドットも変わらない**(この repo がいちばん嫌う
+             *   無言の dead click)。しかも欄を空にした瞬間に畳まれるので、
+             *   **忘れた頃に効く**という、いちばん結び付けにくい形になる。
+             * 🔑 探している間は畳みの話を画面から消す ── 字は出す(どの群かは要る)。
+             */
+            head.textContent = group;
+          } else {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.setAttribute('data-pkc-action', 'toggle-app-group');
+            btn.setAttribute('data-pkc-group', group);
+            btn.setAttribute('aria-expanded', off ? 'false' : 'true');
+            btn.title = off
+              ? `${group} を開きます(いまは畳んであります)`
+              : `${group} を畳みます(中のアプリが隠れます)`;
+            btn.textContent = off ? `${group}(${countOf(group)})` : group;
+            head.append(btn);
+          }
           list.append(head);
           // ⚠ 畳んだ群は器ごと出さない ── 落とし先も消える(掴んで入れるには先に開く)
           if (!off) list.append(grid);

@@ -2269,6 +2269,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-13(#857 段④の仕上げ ── すべて畳む)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-09-zip-peek" …` → b665c99
+     */
+    'zip の中を見て、選んだ物だけ取り出せるようになりました',
+    /**
      * ⚠ **2026-09-13(#857 段④ ── グループを畳む)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-09-scrap-paste" …` → feee82a
      */
