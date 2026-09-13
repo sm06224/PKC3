@@ -58,7 +58,10 @@ import {
 import { CANCEL_EDIT_HINT, COMMIT_EDIT_HINT, iconButton, markPrimary } from './icons';
 // 🔑 目印の表は**共有の 1 本**(2026-09-13)── 絵の一覧・「なし」・いま選んでいる物の
 //    示し方は、この面と小窓で**同じ物**を使う(2 か所に散らさない ── §7)
-import { buildIconPalette } from './icon-palette';
+// ⚠ 件数(「絵から選ぶ(49)」)も**同じ file から採る**(#770 ④)── 字で書くと絵を
+//    1 つ足した日に嘘になる。⚠ 絵の一覧そのものをここで読むと表が 2 本になるので、
+//    数だけを受け取る(門は `tests/adapter/icon-palette.test.ts`)
+import { buildIconPalette, ICON_CHOICE_COUNT } from './icon-palette';
 import { markTargetLid } from './target-lid';
 import { buildFormatBar } from './format-bar';
 import { hasSourceSelection } from '../actions/copy-source';
@@ -2854,7 +2857,48 @@ function appTileControls(rawBody: string, mime: string, lid: string): HTMLElemen
     adopt.title = '押したときに 1 回だけ、そのサイトへ取りに行きます';
     box.append(adopt);
   }
-  box.append(appIconPalette(fm['attachment.app_icon'], lid));
+  box.append(appIconPick(fm['attachment.app_icon'], lid));
+  return box;
+}
+
+/**
+ * 🔴 **絵の一覧は畳んでおく。ただし既に選んであるときは開く**
+ * (#770 ④。user 裁定 2026-09-13)。
+ *
+ * ## なぜ
+ *
+ * ⚠ 直す前、この欄には **50 個(「なし」+ 49)が常に並んでいた** ── 添付の設定は
+ *   「名前 / 登録 / グループ / アイコン」を触りに来る所なのに、**その下の絵の表が
+ *   面の大半を占めて**いた(補助的な物が主の作業領域を奪っている)。
+ * 🔑 同じ表を出す他の 2 か所(本文へ図案を挿す / グループの目印を選ぶ)は
+ *   **押すまで出ない小窓**で、ここだけが出っぱなしだった。
+ *
+ * ## ⚠ なぜ小窓にしないか
+ *
+ * 小窓にすると**設定を触っている最中に別の窓が重なり、いま触っている欄が隠れる**。
+ * 🔑 だから畳むだけにする(`<details>`。`render/query.ts` に前例が在る)。
+ *
+ * ## 🔑 既に選んであるときは開く
+ *
+ * ⚠ 畳んだままにすると「**いま何を選んでいるか**」が隠れる ── 選んだ絵は
+ *   枠と地で示しているので、畳むとその印ごと見えなくなる。
+ * ⚠ **開き方を憶えない**(user が開いた状態を覚える仕掛けは置かない)── 覚えると
+ *   「選んでいないのに開いている」状態が生まれ、**畳んだ理由が消える**。
+ *   🔑 代わりに**選べば開いたままになる**(選んだ瞬間 `current` が埋まる)。
+ */
+function appIconPick(current: unknown, lid: string): HTMLElement {
+  const now = typeof current === 'string' ? current.trim() : '';
+  const box = document.createElement('details');
+  box.setAttribute('data-pkc-field', 'app-icon-pick');
+  box.open = now !== '';
+  const head = document.createElement('summary');
+  /**
+   * ⚠ **件数を書く**(「絵から選ぶ」だけにしない)── 開く前に「どれだけ出るか」が
+   *   分かると、押すかどうかを決められる。
+   * 🔑 数は表を組む file から採る ── 字で書くと、絵を 1 つ足した日に嘘になる。
+   */
+  head.textContent = `絵から選ぶ(${ICON_CHOICE_COUNT})`;
+  box.append(head, appIconPalette(current, lid));
   return box;
 }
 
