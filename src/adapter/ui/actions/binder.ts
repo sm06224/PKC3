@@ -10509,6 +10509,23 @@ export function bindActions(
      *   (2026-08-27 に `onCloseMenu` を作ったときの docstring と同じ罠)。
      * 🔑 開く側は自分で toggle するので、2 度目の ⋯ は閉じる。
      */
+    /**
+     * 🔴 **長押しの尻尾の `click` では閉じない**(#857 段②。実ブラウザの smoke が掘った)。
+     *
+     * ⚠ 長押しでメニューを開く口を足したとき、**捨てる一覧**(`onClick` の
+     *   `pressedAction` の並び)には足したが、**ここには足していなかった** ──
+     *   結果、長押しでメニューが出た直後、**指を離した合図で選ぶ前に閉じていた**。
+     * ⚠ 右クリックで無事だったのは、**右ボタンの離しが `click` を撃たない**からで、
+     *   穴が無かったのではなく**踏む経路が無かっただけ**である(指はボタン 0 なので撃つ)。
+     *
+     * 🔑 **`MENU_OPENERS` に名前を足さない。** あれは「**押すとメニューが開くボタン**」の
+     *   一覧で、見出しの押しは**畳む**のであってメニューを開かない ── 足すと
+     *   「メニューが出ている間に見出しを押しても閉じない」という別の穴になる。
+     * 🔑 代わりに**事実そのもの**を聞く:この `click` は、いま終わった長押しの尻尾か。
+     *   ⚠ こう書けば、次に長押しでメニューを開く口が増えても**足し忘れが起きない**
+     *   (手で並べる一覧を 2 本目にしない ── CLAUDE.md §7)。
+     */
+    if (longPress.swallowsClick()) return;
     const el = (ev.target as HTMLElement | null)?.closest<HTMLElement>('[data-pkc-action]');
     if (el !== null && el !== undefined && MENU_OPENERS.has(el.getAttribute('data-pkc-action') ?? ''))
       return;

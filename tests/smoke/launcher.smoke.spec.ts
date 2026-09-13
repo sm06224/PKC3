@@ -492,6 +492,60 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   );
   await expect(groups.nth(0), '外した後も見出しの字が変わっている').toHaveText('ツール');
 
+  /**
+   * 🔴 **指で長押ししても、同じメニューに届くか**(#857 段②、着地前の動線
+   * レビュー「指で触る端末には入口が 1 つも無かった」の直し)。
+   * ⚠ **`page.mouse` ではなく `pointerType: 'touch'` の合成 PointerEvent で撃つ**
+   *   ── `long-press.ts` は `pointerType === 'mouse'` を受けない。撃ち方は
+   *   同じ file の「タイルを長押しすると並べ替えモードに入る」(下の test)に合わせた
+   *   (pointerdown → 600ms 待つ → pointerup)。
+   * ⚠ **実機は `pointerup` の後に `click` を合成する**(`preventDefault` していないので
+   *   抑止されない)── `tests/adapter/tile-reorder-mode.test.ts`「⑨ 長押しの直後の
+   *   click は捨てる」と同じ作法で、その `click` も手で足す。
+   * 🔑 起動を 1 つも足していない ── 直前で「なし」に戻した同じ見出しで続ける。
+   */
+  await expect(toolToggle, '前提が崩れている(見出しが畳まれている)').toHaveAttribute(
+    'aria-expanded',
+    'true',
+  );
+  await toolToggle.dispatchEvent('pointerdown', {
+    bubbles: true,
+    pointerType: 'touch',
+    button: 0,
+    isPrimary: true,
+  });
+  await page.waitForTimeout(600); // LONG_PRESS_MS(500ms)を跨ぐ
+  await expect(groupMenu, '見出しを長押ししてもメニューが出ない').toBeVisible();
+  await expect(groupMenu, '長押しで出たのがタイルのメニュー(上へ/下へ)になっている').toContainText(
+    '目印を選ぶ',
+  );
+  await toolToggle.dispatchEvent('pointerup', { bubbles: true, pointerType: 'touch' });
+  /**
+   * 🔴 **指を離しても、そのグループは畳まれない**(押しを捨てる一覧
+   * `pressedAction === 'toggle-app-group'` への足し忘れで起きる形 ──
+   * メニューが出たうえに畳まれる = 押した物と効く先が食い違う)。
+   */
+  await expect(
+    toolToggle,
+    '指を離した瞬間にグループが畳まれた(押した物と効く先が食い違う)',
+  ).toHaveAttribute('aria-expanded', 'true');
+  await expect(
+    tiles,
+    '指を離した瞬間にグループが畳まれてタイルが消えた',
+  ).toHaveCount(3);
+  /**
+   * 🔴 **指を離した合図(`click`)そのものが、開いたばかりのメニューを閉じないか**。
+   * ⚠ `onCloseMenu`(`binder.ts`)は `MENU_OPENERS`(`phone-menu` / `open-repeat-menu`)
+   *   に載っていない押し所からの `click` を**無条件で「外を押した」として畳む** ──
+   *   `toggle-app-group` は捨てる一覧(`swallowsClick` の対象)には足されたが、
+   *   **この一覧には足されていない**。口が違う(§7「同じ判定は複数の場所にある」)。
+   */
+  await toolToggle.dispatchEvent('click', { bubbles: true, cancelable: true });
+  await expect(
+    groupMenu,
+    '指を離した合図(click)だけでメニューが閉じ、選ぶ前に消える',
+  ).toBeVisible();
+
   // ③ 外部へ飛ぶタイルは**行き先が見えている**(押す前に分かる)
   await expect(tiles.nth(1).locator('[data-pkc-field="tile-url"]')).not.toHaveText('');
 
