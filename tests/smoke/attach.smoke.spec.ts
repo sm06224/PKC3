@@ -1017,6 +1017,45 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   ).toContainText('no such table');
   await expect(sqlTable, '対照群のはずが csv の表がまだ出ている').toHaveCount(0);
 
+  /**
+   * ⑥ 🔴 **手持ちのファイルも、同じ選び所から開ける**(#854 段②)。動線:
+   *   「選び所で『手持ちのファイルを開く…』を選ぶ → **本物の file 選択が開く** →
+   *   選んだ file が表になり、`SELECT * FROM csv` で中身が引ける」。
+   *
+   * ⚠ **`<input type=file>` の本物の挙動は unit では再現できない**
+   *   (happy-dom は `.click()` でダイアログを開かない)── だから
+   *   **ここが唯一この動線を通す検査**である。
+   * 🔑 中身は**添付の csv とわざと別の物**にする ── 同じ字にすると、
+   *   「開いたつもりで、さっきの添付をまだ調べている」と区別が付かない
+   *   (§4「観測点が放っておいても変わるなら、変化は届いた証拠にならない」)。
+   * ⚠ **新しい起動は増やしていない**(`scripts/smoke-budget.mjs` の予算に当たらない)
+   *   ── 既に在る道中に足す、が #820 の作法である。
+   */
+  const chooser = page.waitForEvent('filechooser');
+  await source.selectOption({ label: '手持ちのファイルを開く…' });
+  await (
+    await chooser
+  ).setFiles({
+    name: 'tebiki.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from('しなもの,かず\nぶどう,300\n', 'utf8'),
+  });
+  await expect(
+    note,
+    '手持ちのファイルを開いたことが画面に出ない',
+  ).toContainText('tebiki.csv を調べています');
+
+  await page.fill('[data-pkc-field="sql-input"]', 'SELECT * FROM csv');
+  await clickReal(page, '[data-pkc-action="run-sql"]');
+  await expect(sqlTable, '手持ちのファイルから行が返らない').toBeVisible({ timeout: 10_000 });
+  // 🔑 **さっきの添付ではなく、いま選んだ file を調べている**(字で見分ける)
+  await expect(sqlTable, 'いま選んだ file の中身が出ていない').toContainText('ぶどう');
+  await expect(
+    sqlTable,
+    'さっきの添付をまだ調べている(開いたつもりで差し替わっていない)',
+  ).not.toContainText('りんご');
+  await expect(sqlTable.locator('tbody tr'), '行の数が合わない').toHaveCount(1);
+
   expect(errors).toEqual([]);
 });
 
