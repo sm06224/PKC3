@@ -89,6 +89,7 @@ import { buildVcf, isVcfFileName, vcfNoteOf } from '@features/contact/vcard';
 import { isMarkdownFileName } from '@features/import/plain-markdown';
 import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
 import { insertBlockText, insertText, OWN_MEANING } from '@adapter/ui/render/row-swap';
+import { iconShortcodeFor } from '@features/icon/icon-shortcode';
 import { HOLD_ATTR, neighborCell, openCellAt } from '@adapter/ui/render/cell-input';
 import { resolveAppendAt, sectionAt } from '@features/markdown/append-target';
 import { isTextScale } from '@features/text-scale';
@@ -408,6 +409,7 @@ import {
   pickEntryInApp,
   pickSnippetInApp,
   pickDiagramInApp,
+  pickBodyIconInApp,
   pickArchiveInApp,
   pickCopyFormatInApp,
   pickScrapInApp,
@@ -5031,6 +5033,35 @@ const ACTIONS: Record<string, ActionHandler> = {
       writeBack(ta, insertBlock(sel, tpl.block));
     });
   },
+  /**
+   * 🔴 **図案を本文に入れる**(#853 段①、2026-09-13)。
+   *
+   * > user 指示 2026-09-12:「**マテリアルデザインのアイコンはユーザーのメモ内でも
+   * > 使用できるように動線を追加して欲しい**」
+   *
+   * ⚠ 作りは `insert-diagram` と同じ ── **caret を先に控え**、器が焦点を返した後に
+   *   **欄を引き直して**から挿す(器は選択位置までは返さない ── `insert-date` の注記)。
+   * ⚠ 入るのは**絵そのものではなく字**(`:home:`)── 保存も検索も原文のままなので、
+   *   「home」で引ける(#853 の「検索に引っかかるか」)。
+   */
+  'insert-icon': (_dispatcher, _target, _services, root) => {
+    const opened = formatTarget(root);
+    if (opened === null) return;
+    const at = { start: opened.selectionStart, end: opened.selectionEnd };
+    void pickBodyIconInApp(root).then((name) => {
+      // ⚠ 空文字は来ない(「なし」を出していない)が、来ても**何もしない**
+      //    ── `::` という空の字を本文に入れない
+      if (name === null || name === '') return;
+      // ⚠ 欄は引き直す(開いている間に面が組み直されると、最初の節点は繋がっていない)
+      const ta = formatTarget(root);
+      if (ta === null) return;
+      // ⚠ `execCommand('insertText')` は**焦点が要る**
+      ta.focus();
+      // ⚠ 範囲外は `setSelectionRange` が丸める(短くなっていても落ちない)
+      ta.setSelectionRange(at.start, at.end);
+      insertText(ta, iconShortcodeFor(name));
+    });
+  },
   'format-text': (_dispatcher, target, _services, root) => {
     const op = target.getAttribute('data-pkc-format') as FormatOp | null;
     // ⚠ live の 1 面では活性の行(`row-source`)に効く(`formatTarget` の注記)
@@ -8109,6 +8140,8 @@ export const CARET_TOOLS: ReadonlySet<string> = new Set([
   'insert-snippet',
   // ⚠ 2026-09-04(#528 案 B): 図の一覧 ── 同じく編集中の本文へ挿す
   'insert-diagram',
+  // ⚠ 2026-09-13(#853 段①): 図案の表 ── 同じく編集中の本文へ挿す
+  'insert-icon',
   'renumber-lists',
 ]);
 

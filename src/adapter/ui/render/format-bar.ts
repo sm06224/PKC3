@@ -138,6 +138,31 @@ export function buildFormatBar(): HTMLElement {
   bar.append(insertSnippet);
 
   /**
+   * 🔴 **図案を本文に入れる**(#853 段①、2026-09-13)。
+   *
+   * > user 指示 2026-09-12:「**マテリアルデザインのアイコンはユーザーのメモ内でも
+   * > 使用できるように動線を追加して欲しい**」
+   *
+   * ⚠ 直す前、図案が使えるのは **PKC が描く所**(ボタン / タブ / 一覧の行の頭 /
+   *   アプリのタイル)だけで、**本文に置く道が 1 つも無かった**。
+   * 🔑 ここに置く理由は日付・雛形と同じ ── ①**本文を打っている場所**に在る
+   *   ②**押せる形**なので、打つ字を覚えなくてもマウスだけで完結する。
+   * ⚠ `FORMAT_OPS` には入れない ── あちらは**その場で字を変える**表で、
+   *   こちらは**先に聞く**(日付・ノート・雛形と同じ)。
+   * ⚠ 鍵は付けない ── 「図」と同じく、これまで鍵を持っていなかったので増やさない。
+   */
+  const insertIcon = document.createElement('button');
+  insertIcon.type = 'button';
+  insertIcon.setAttribute('data-pkc-action', 'insert-icon');
+  // ⚠ 文言は**起きること**で書く(user 指示 2026-08-21)
+  insertIcon.title = '図案を入れます。押すと絵の一覧が出て、選ぶと打っている場所に入ります';
+  const insertIconLabel = document.createElement('span');
+  insertIconLabel.setAttribute('data-pkc-field', 'label');
+  insertIconLabel.textContent = '図案';
+  insertIcon.append(insertIconLabel);
+  bar.append(insertIcon);
+
+  /**
    * 🔴 **番号を振り直す**(#396)。
    *
    * ⚠ PKC2 は frontmatter で**常時かかる設定**にしていたが、PKC3 は

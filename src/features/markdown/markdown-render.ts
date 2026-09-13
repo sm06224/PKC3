@@ -64,6 +64,7 @@ import {
   classifyDirectiveOpen,
 } from './directive-open';
 import { parseInlineRoleAt, type InlineRoleMatch } from './inline-role-parser';
+import { iconShortcodeAt } from '../icon/icon-shortcode';
 import { readMathAt } from './math-delims';
 import {
   isCardPresentationLabel,
@@ -2063,6 +2064,48 @@ md.inline.ruler.after('emphasis', 'pkc_simple_inline', function simpleInlineRule
   return false;
 
 });
+
+// ── #853 段①(2026-09-13):本文に図案を置く `:home:` ──
+//
+// > user 指示 2026-09-12:「**マテリアルデザインのアイコンはユーザーのメモ内でも
+// > 使用できるように動線を追加して欲しい**」
+//
+// 受ける語は `features/icon/icon-shortcode.ts` が持つ(押して選べる 49 種だけ)。
+// ⚠ ここで表を読まない ── 挿す側(書式パネル)と読む側で綴りが分かれる(§7)。
+//
+// 🔑 **並びは `pkc_inline_role` の後、`pkc_simple_inline` の前**になる
+//    (`before('emphasis')` を、役の登録より後に呼ぶため)。
+//    ⚠ この順が要る理由は 2 つ:
+//      ① `:code:[x]` は**役**である(`code` は図案の名前でもある)── 役を先に通し、
+//         こちらは `[` / `{` が続く形を**受けない**(2 段で守る)
+//      ② `:text:attrs:`(簡易 inline)より**前**に置く ── 後ろに置くと
+//         `:home:` の後ろに `:` が来る行で、簡易 inline が先に食べる
+md.inline.ruler.before('emphasis', 'pkc_icon', function iconRule(state, silent) {
+  const hit = iconShortcodeAt(state.src, state.pos);
+  if (hit === null) return false;
+  // ⚠ `silent` は「試すだけ」── 位置だけ進めて token を積まない(markdown-it の作法)
+  if (!silent) {
+    const token = state.push('pkc_icon', 'span', 0);
+    token.meta = { name: hit.name, label: hit.label };
+  }
+  state.pos += hit.length;
+  return true;
+});
+
+/**
+ * 🔴 **器の形は画面と同じ**(`render/icons.ts` の `iconSpan`)。
+ *
+ * ⚠ **字を器に入れない**(#770 段① の戒め)── 絵は CSS の `::before` が出す。
+ *   入れると本文の `textContent` に目に見えない 1 文字が混ざり、文言を読む側が静かに外れる。
+ * 🔑 **読み上げの名前は持たせる** ── ボタンの図案は隣の文字が意味を持つので
+ *   `aria-hidden` だが、本文の図案は**それ自体が中身**である(隠すと読み上げから消える)。
+ */
+md.renderer.rules.pkc_icon = function (tokens, idx) {
+  const meta = tokens[idx]!.meta as { name: string; label: string };
+  const label = md.utils.escapeHtml(meta.label);
+  // ⚠ 名前は `[a-z0-9-]` しか通らない(`iconShortcodeAt`)ので、属性値は安全
+  return `<span data-pkc-icon data-pkc-symbol="${meta.name}" role="img" aria-label="${label}" title="${label}"></span>`;
+};
 
 // ── Inline `<br>` 改行(2026-06-22 user バグレポ)────────────────
 //

@@ -36,6 +36,8 @@ import { stubRevisionOps } from '../helpers/revision-stub';
 import { resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
 import { answerDialog, openDialog } from './dialog-helper';
 import { DATE_SHORTCUTS, shortcutDate } from '../../src/features/schedule/date-shortcuts';
+import { TILE_ICON_CHOICES } from '../../src/features/icon/tile-icons';
+import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import { readLineDate } from '../../src/features/schedule/line-date';
 
 function meta(lid: string, archetype = 'text'): EntryMeta {
@@ -702,5 +704,126 @@ describe('日付を入れる道具(user 指示 2026-08-23)', () => {
     s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
     await tick();
     expect(s.q('[data-pkc-action="insert-date"]'), '閲覧中に押せる口が出ている').toBeNull();
+  });
+});
+
+/**
+ * 🔴 **図案を本文に入れる**(#853 段①、2026-09-13)。
+ *
+ * > user 指示 2026-09-12:「**マテリアルデザインのアイコンはユーザーのメモ内でも
+ * > 使用できるように動線を追加して欲しい**」
+ *
+ * 🔴 見るのは**繋がり**である ── 押した所から絵の表が開き、選んだ字が **caret の
+ *   位置**に入り、**state まで届くか**。何が並ぶか(表)は
+ *   `tests/features/icon-shortcode.test.ts`。
+ * ⚠ 観測点を textarea の `value` だけにしない ── state に届いていないと
+ *   **保存した瞬間に消える**。
+ */
+describe('「図案」を押すと絵の表から選ぶ(#853 段①)', () => {
+  beforeEach(() => {
+    localStorage.setItem('pkc3.editor-mode', 'split');
+  });
+  afterEach(() => {
+    resetAppDialogForTest();
+  });
+
+  const picks = (): HTMLButtonElement[] => [
+    ...(openDialog()?.querySelectorAll<HTMLButtonElement>(
+      '[data-pkc-field="pick-body-icon"] button',
+    ) ?? []),
+  ];
+
+  /** 編集に入って本文と caret を作り、帯の「図案」を押して表を開く。 */
+  async function openPicker(body = '', caret = body.length) {
+    const s = setup([meta('a')], { a: body });
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    s.q('[data-pkc-action="start-edit"]')!.click();
+    await tick();
+    const ta = s.q<HTMLTextAreaElement>('[data-pkc-field="editor-body"]')!;
+    ta.setSelectionRange(caret, caret);
+    s.q('[data-pkc-action="insert-icon"]')!.click();
+    await tick();
+    return { ...s, ta };
+  }
+
+  it('🔴 帯に「図案」が在り、表を開くボタンになっている', async () => {
+    const { q, root } = await openPicker();
+    const buttons = [...root.querySelectorAll('[data-pkc-region="format-bar"] button')];
+    const labels = buttons.map((b) => b.querySelector('[data-pkc-field="label"]')?.textContent);
+    const at = labels.indexOf('図案');
+    expect(at, '帯に「図案」が無い').toBeGreaterThan(0);
+    // ⚠ **入れる道具の並びの末尾**(日付 / ノート / 雛形 の後)── 既に在る 3 つを動かさない
+    expect(labels[at - 1], '「図案」が雛形の隣に居ない').toBe('雛形');
+    expect(buttons[at]!.hasAttribute('data-pkc-format'), 'format-text の口が付いている').toBe(false);
+    expect(q('[data-pkc-action="insert-icon"]')).not.toBeNull();
+  });
+
+  it('🔴 押しても編集欄から focus を奪わない(live の 1 面で無言 no-op にならない)', async () => {
+    const { d, q } = setup([meta('a')], { a: 'あ' });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    q('[data-pkc-action="start-edit"]')!.click();
+    const ev = new Event('mousedown', { bubbles: true, cancelable: true });
+    q('[data-pkc-action="insert-icon"]')!.dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(true);
+  });
+
+  it('🔴 押すと 49 種の表が出る ── 「なし」は出さない(入れる物しか無い)', async () => {
+    await openPicker();
+    expect(openDialog(), '絵の表が開いていない').not.toBeNull();
+    expect(picks()).toHaveLength(TILE_ICON_CHOICES.length);
+    const names = picks().map((b) => b.getAttribute('data-pkc-icon-name'));
+    expect(names, '「なし」が混じっている(空の字を入れる押し所になる)').not.toContain('');
+    expect(names[0]).toBe(TILE_ICON_CHOICES[0]!.name);
+  });
+
+  it('🔴 選ぶと `:name:` が caret の位置に入り、state もそろって変わる', async () => {
+    const { d, ta } = await openPicker('まえうしろ', 2);
+    picks().find((b) => b.getAttribute('data-pkc-icon-name') === 'home')!.click();
+    await tick();
+    expect(ta.value).toBe('まえ:home:うしろ');
+    expect(d.getState().openBody?.body, 'state に届いていない(保存すると消える)').toBe(
+      'まえ:home:うしろ',
+    );
+  });
+
+  it('⚠ 入った字は、そのまま絵になる字である(挿す側と読む側が同じ綴り)', async () => {
+    const { ta } = await openPicker();
+    picks().find((b) => b.getAttribute('data-pkc-icon-name') === 'star')!.click();
+    await tick();
+    expect(renderMarkdown(ta.value)).toContain('data-pkc-symbol="star"');
+  });
+
+  it('🔴 やめたら何も入らず、state も動かない', async () => {
+    const { d, ta } = await openPicker('もと');
+    const state = d.getState().openBody?.body;
+    await answerDialog('cancel');
+    await tick();
+    expect(ta.value).toBe('もと');
+    expect(d.getState().openBody?.body).toBe(state);
+    expect(openDialog(), '表が閉じていない').toBeNull();
+  });
+
+  /**
+   * 🔴 **画面から降りた欄に書き込まない**(日付・図の一覧と同じ門)。
+   * ⚠ 引き直さないと、**画面に無い節点へ字を書き `input` まで撃つ**。
+   */
+  it('🔴 編集をやめた後に選んでも、画面から降りた欄に書き込まない', async () => {
+    const s = await openPicker('もと');
+    s.d.dispatch({ type: 'CANCEL_EDIT' });
+    await tick();
+    expect(s.ta.isConnected, '前提が崩れている(欄がまだ画面に在る)').toBe(false);
+    picks()[0]!.click();
+    await tick();
+    expect(s.ta.value, '画面に無い欄へ書き込んでいる').toBe('もと');
+  });
+
+  /** ⚠ 閲覧中は帯そのものが無いので、押す口も無い(dead click を作らない)。 */
+  it('閲覧中は図案のボタンが出ていない', async () => {
+    const s = setup([meta('a')], { a: 'x' });
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    expect(s.q('[data-pkc-action="insert-icon"]'), '閲覧中に押せる口が出ている').toBeNull();
   });
 });

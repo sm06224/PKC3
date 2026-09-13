@@ -17,10 +17,12 @@
  *   (CLAUDE.md §7「同じ値を複数の描画経路へ渡すものは、経路ごとに pin する」)。
  *   だから**両方の呼び側から**見る。
  */
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { TILE_ICON_CHOICES } from '../../src/features/icon/tile-icons';
 import { ICON_NAME_ATTR, buildIconPalette } from '../../src/adapter/ui/render/icon-palette';
+import { pickBodyIconInApp, resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
+import { answerDialog, openDialog } from './dialog-helper';
 
 const palette = (current: string): HTMLElement =>
   buildIconPalette({ current, field: 'f', ariaLabel: 'a', each: () => {} });
@@ -113,28 +115,85 @@ describe('目印の表(#857 段②)', () => {
  *   表に替えたときに**黙って落ちていた**(CLAUDE.md §10)。
  * ⚠ 落ちると、鍵だけで使う人は **`Tab` を 49 回**押すことになる ── 画面は
  *   1 ドットも変わらないので、**誰も気づかない**。
- * 🔑 だから**原文で**門を置く(happy-dom で `<dialog>` の焦点まで再現するより、
- *   ここは「在ること」を確実に留めるほうが強い)。⚠ 弱い形だと自覚して使う。
+ *
+ * 🔴 **原文で見るのをやめた**(2026-09-13、#853 段①)。
+ *
+ * ⚠ 直す前は「`pickAppGroupIconInApp` の原文に `ArrowDown` の字が在るか」を見ていた。
+ *   ところが #853 段① で**同じ小窓を本文へ入れる側でも使う**ことになり、矢印の処理を
+ *   共有の 1 本(`pickIconFrom`)へ寄せた瞬間に**落ちた** ── 🔑 **製品は無傷で、
+ *   壊れたのは検査の当て方**である(字の在処を見ていて、性質を見ていなかった)。
+ * 🔑 いまは**押して確かめる** ── 小窓を開けて `ArrowDown` を撃ち、**焦点が隣へ移る**
+ *   ことを見る。⚠ この形なら、寄せても分けても**性質が生きている限り緑**である。
  */
 describe('置き換えで落とした性質を戻す(§10)', () => {
-  it('🔴 表でも矢印で移れる(器を替える前に在った性質)', () => {
-    const src = readFileSync('src/adapter/ui/render/app-dialog.ts', 'utf-8');
-    const at = src.indexOf('export function pickAppGroupIconInApp(');
-    expect(at, '目印の小窓が見つからない(名前が変わった)').toBeGreaterThan(0);
-    /**
-     * ⚠ **固定の字数で切らない**(2026-09-13 に 1 度踏んだ)── 1 稿目は
-     *   `slice(at, at + 4000)` で切っており、**関数が伸びた日に範囲から外れて落ちた**
-     *   (製品は無傷で、落ちたのは検査の切り方である ── CLAUDE.md §1「範囲の取り方」)。
-     * 🔑 **構造で切る**:次の `export` までが、この関数の範囲である。
-     */
-    const after = src.indexOf('\nexport ', at + 1);
-    const body = src.slice(at, after < 0 ? src.length : after);
-    // ⚠ 空振り防止 ── 切り出せていること(0 字なら、下の検査は何も見ていない)
-    expect(body.length, '関数を切り出せていない(空振り)').toBeGreaterThan(500);
-    for (const key of ['ArrowDown', 'ArrowUp', 'ArrowRight', 'ArrowLeft']) {
-      expect(body, `${key} で移れない(鍵だけの人が Tab を 49 回押す)`).toContain(key);
+  afterEach(() => {
+    resetAppDialogForTest();
+    document.body.textContent = '';
+  });
+
+  /** 小窓を開いて、押し所と `<dialog>` を返す。 */
+  async function openPalette(): Promise<{ dialog: HTMLDialogElement; picks: HTMLButtonElement[] }> {
+    const host = document.createElement('div');
+    document.body.append(host);
+    void pickBodyIconInApp(host);
+    // ⚠ 開くのは非同期(順番待ちの列を通る)── microtask を数周まわす
+    for (let i = 0; i < 8; i += 1) await Promise.resolve();
+    const dialog = openDialog();
+    expect(dialog, '小窓が開いていない(前提が崩れている)').not.toBeNull();
+    const picks = [...dialog!.querySelectorAll<HTMLButtonElement>(`button[${ICON_NAME_ATTR}]`)];
+    expect(picks.length, '絵の押し所が 1 つも無い(空振り)').toBeGreaterThan(10);
+    return { dialog: dialog!, picks };
+  }
+
+  const arrow = (dialog: HTMLDialogElement, key: string): void => {
+    dialog.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+  };
+
+  it('🔴 矢印で隣の絵へ移れる(器を替える前に在った性質)', async () => {
+    const { dialog, picks } = await openPalette();
+    picks[0]!.focus();
+    expect(document.activeElement, '焦点を置けていない(前提が崩れている)').toBe(picks[0]);
+    // 🔑 縦横どちらでも進む / 戻る ── 折り返しは幅で変わるので、鍵の意味にしない
+    for (const [key, want] of [
+      ['ArrowDown', 1],
+      ['ArrowRight', 2],
+      ['ArrowUp', 1],
+      ['ArrowLeft', 0],
+    ] as const) {
+      arrow(dialog, key);
+      expect(document.activeElement, `${key} で移れない(鍵だけの人が Tab を 49 回押す)`).toBe(
+        picks[want],
+      );
     }
-    // ⚠ **外し忘れない** ── 器は使い回すので、次の確認でも矢印が絵を探しにいく
-    expect(body, '器に付けた聞き耳を外していない').toContain("removeEventListener('keydown'");
+    // ⚠ 対照群 ── 関係のない鍵では動かない(「何を押しても進む」ではない)
+    arrow(dialog, 'a');
+    expect(document.activeElement, '関係のない鍵でも動いている').toBe(picks[0]);
+    await answerDialog('cancel');
+  });
+
+  it('🔴 端では止まる(輪にしない ── 押し続けても迷子にならない)', async () => {
+    const { dialog, picks } = await openPalette();
+    picks[0]!.focus();
+    arrow(dialog, 'ArrowUp');
+    expect(document.activeElement, '先頭から上へ出た').toBe(picks[0]);
+    await answerDialog('cancel');
+  });
+
+  /**
+   * ⚠ **外し忘れない** ── 器は使い回すので、次の確認でも矢印が絵を探しにいく。
+   * 🔑 ここは**閉じた後に撃つ**ことで見る(原文ではなく、振る舞いで)。
+   */
+  it('🔴 閉じた後は、矢印の聞き耳が外れている', async () => {
+    const { dialog, picks } = await openPalette();
+    picks[0]!.focus();
+    await answerDialog('cancel');
+    // ⚠ 閉じると**焦点は呼び出し元へ返る**(器の後始末)ので、撃つ前に置き直す
+    //    ── 置き直さないと「焦点がどこにも無いから動かなかった」を合格と読む(空振り)
+    picks[0]!.focus();
+    expect(document.activeElement, '焦点を置き直せていない(空振り)').toBe(picks[0]);
+    const ev = new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true });
+    dialog.dispatchEvent(ev);
+    expect(document.activeElement, '閉じたのに矢印がまだ効いている').toBe(picks[0]);
+    expect(ev.defaultPrevented, '閉じたのに矢印を食べている').toBe(false);
   });
 });

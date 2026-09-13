@@ -546,18 +546,15 @@ export function pickDiagramInApp(
 }
 
 /**
- * 🔴 **グループの見出しの目印を選ぶ**(#857 段②、2026-09-13 に表へ差し替え)。
+ * 🔴 **絵を並べた表から 1 つ選ぶ**(#857 段② = グループの目印 / #853 段① = 本文へ入れる)。
  *
- * ## user 裁定(2026-09-13)── **絵を並べた表にする**
+ * ## ⚠ 器は 1 本。**違うのは題名と、先に言う字と、「なし」を出すかだけ**
  *
- * ⚠ 直す前は「1 行選ぶ」の汎用の器へ**字だけの行**を流していた ── タイル側は
- *   **絵の並んだ表**なので、**同じことをする 2 か所で見た目が違って**いた。
- *   ⚠ しかも**いま付いている絵に印が無く**、「何を選んでいるか」が画面から読めなかった。
- *
- * 🔑 表そのものは `render/icon-palette.ts` の**共有の 1 本** ── ここが付けるのは
- *   **出口だけ**(押したらその場で閉じて、選んだ値が返る)。
- *   ⚠ 2 つ目の表を書くと、次に絵を 1 つ足した日に**片方だけ増える**(§7)。
- * 🔑 **いま付いている絵に枠**(`aria-pressed`)は、共有したことで**そのまま付いてくる**。
+ * 🔑 2 つ目の小窓を書かない ── 矢印で移れること・外を押すとやめること・
+ *   焦点を返すことが **2 か所に散る**と、次に絵の表を足した日に片方だけ古くなる
+ *   (CLAUDE.md §7「同じ判定が複数の場所にある」)。
+ * ⚠ 表そのものは `render/icon-palette.ts` の共有の 1 本(並び・「なし」・いま選んで
+ *   いる物の示し方は、そちらが決める)。
  *
  * ## ⚠ 器の作法は「1 行選ぶ」と同じに揃える
  *
@@ -565,54 +562,42 @@ export function pickDiagramInApp(
  *   **焦点を返す後始末が 1 か所**で走る(CLAUDE.md §10 ③)。
  * ⚠ **外(暗い地)を押したら「やめる」** ── 選ぶだけの器だからである。
  * ⚠ 受ける側のボタンは**隠す**(押した絵がそのまま答え)。消さずに隠す(器を捨てない)。
- *
- * @returns 図案の名前。**空文字 = なし(外す)**。やめたら `null`
  */
-export function pickAppGroupIconInApp(
-  host: HTMLElement,
-  groupName: string,
-  current: string,
-): Promise<string | null> {
+interface IconPickSpec {
+  /** 小窓の題名。 */
+  readonly title: string;
+  /** 表に書く `data-pkc-field`(探すための名前)。 */
+  readonly field: string;
+  /** 読み上げのための、この表の名前。 */
+  readonly ariaLabel: string;
+  /** いま付いている絵(本文へ入れるときは空)。 */
+  readonly current: string;
+  /** 先頭に「なし」を出すか。⚠ **入れる**ときは出さない(外す物が無い)。 */
+  readonly withNone: boolean;
+  /** 押す前に言う字。⚠ **後から知らせない**(やめる道が在るうちに書く)。 */
+  readonly notes: readonly { readonly field: string; readonly text: string }[];
+}
+
+function pickIconFrom(host: HTMLElement, spec: IconPickSpec): Promise<string | null> {
   return enqueue(async () => {
     const f = ensureFrame(host);
-    f.title.textContent = `「${groupName}」の目印を選ぶ`;
+    f.title.textContent = spec.title;
     f.body.textContent = '';
 
-    /**
-     * 🔴 **副作用を、押す前に言う**(#857 段②。着地前の動線レビュー)。
-     *
-     * ⚠ 直す前は、選ぶと**グループ用のノートが 1 枚黙って増え**、「なし」にしても
-     *   **黙って残った** ── 数日後にサイドバーで見覚えのない題名を見つけることになる。
-     * 🔑 **後から知らせるのではなく、選ぶ前に書く**(やめる道がまだ在るうちに)。
-     * ⚠ 「作ります」と言い切らない ── 既に在れば作らないので、**どちらでも嘘に
-     *   ならない字**にする。
-     */
-    const line = document.createElement('p');
-    line.setAttribute('data-pkc-field', 'pick-group-icon-note');
-    line.textContent =
-      '目印は、このグループ専用のノートに憶えます(無ければ 1 枚作ります)。「なし」にしても、そのノートは残ります。';
-    f.body.append(line);
-
-    /**
-     * 🔴 **いま付いている字が、この表に無いことを言う**(同レビュー)。
-     * ⚠ 言わないと、見出しには 🧮 が出ているのに小窓は「何も選ばれていない」顔をする
-     *   ── **画面どうしが食い違う**。
-     * ⚠ 出すのは**表に無いときだけ** ── いつも出すと、49 種から選んだ人にも
-     *   読む必要のない 1 行が増える。
-     */
-    if (!isTableIcon(current)) {
-      const odd = document.createElement('p');
-      odd.setAttribute('data-pkc-field', 'pick-group-icon-odd');
-      odd.textContent = `いまは「${current.trim()}」が付いています。この表には無い字なので、どれにも枠が付いていません(選ぶと置き換わります)。`;
-      f.body.append(odd);
+    for (const n of spec.notes) {
+      const line = document.createElement('p');
+      line.setAttribute('data-pkc-field', n.field);
+      line.textContent = n.text;
+      f.body.append(line);
     }
 
     let chosen: string | null = null;
     const picks: HTMLButtonElement[] = [];
     const palette = buildIconPalette({
-      current,
-      field: 'pick-group-icon',
-      ariaLabel: `「${groupName}」の目印を選ぶ`,
+      current: spec.current,
+      field: spec.field,
+      ariaLabel: spec.ariaLabel,
+      withNone: spec.withNone,
       each: (btn, name) => {
         picks.push(btn);
         btn.addEventListener('click', () => {
@@ -667,11 +652,10 @@ export function pickAppGroupIconInApp(
 
     const answered = open(f, 'cancel');
     /**
-     * 🔑 焦点は**いま付いている絵**へ(無ければ先頭の「なし」)── 開いた直後に
+     * 🔑 焦点は**いま付いている絵**へ(無ければ先頭)── 開いた直後に
      *   「いま何が選ばれているか」が**焦点の位置でも分かる**。
      * ⚠ 字だけの行だった頃は先頭固定でよかったが、表では**どこに居るか**が要る。
-     */
-    /**
+     *
      * 🔴 **表に無い字が付いているときは、消しを 1 押しの所に置かない**
      *   (2026-09-13、着地前の動線レビュー)。
      *
@@ -681,11 +665,11 @@ export function pickAppGroupIconInApp(
      *   先頭(=「なし」)へ置くと、**Enter を押しただけで 🧮 が消える**。
      *   ⚠ user は「何も選ばれていないから、このままでいい」と読んでいる。
      * 🔑 だから**やめる側へ焦点を置く** ── 何も起きないのが正しい既定である。
-     * 🔑 そして**見えている物と食い違わないよう、字で言う**(下の 1 行)。
+     * 🔑 そして**見えている物と食い違わないよう、字で言う**(呼び側が `notes` に足す)。
      */
     const at = picks.find((b) => b.getAttribute('aria-pressed') === 'true');
     if (at !== undefined) at.focus();
-    else if (current.trim() === '') picks[0]?.focus();
+    else if (spec.current.trim() === '') picks[0]?.focus();
     else f.cancel.focus();
     const answer = await answered;
     // ⚠ 器に付けた物は**必ず外す** ── 器は使い回すので、外し忘れると
@@ -695,6 +679,90 @@ export function pickAppGroupIconInApp(
     // ⚠ 隠したままにしない ── 器は使い回すので、次の確認で受ける側が消える
     f.ok.hidden = false;
     return answer === 'ok' ? chosen : null;
+  });
+}
+
+/**
+ * 🔴 **グループの見出しの目印を選ぶ**(#857 段②、2026-09-13 に表へ差し替え)。
+ *
+ * ## user 裁定(2026-09-13)── **絵を並べた表にする**
+ *
+ * ⚠ 直す前は「1 行選ぶ」の汎用の器へ**字だけの行**を流していた ── タイル側は
+ *   **絵の並んだ表**なので、**同じことをする 2 か所で見た目が違って**いた。
+ *   ⚠ しかも**いま付いている絵に印が無く**、「何を選んでいるか」が画面から読めなかった。
+ *
+ * 🔑 いま付いている絵に枠(`aria-pressed`)は、表を共有したことで**そのまま付いてくる**。
+ *
+ * @returns 図案の名前。**空文字 = なし(外す)**。やめたら `null`
+ */
+export function pickAppGroupIconInApp(
+  host: HTMLElement,
+  groupName: string,
+  current: string,
+): Promise<string | null> {
+  /**
+   * 🔴 **副作用を、押す前に言う**(#857 段②。着地前の動線レビュー)。
+   *
+   * ⚠ 直す前は、選ぶと**グループ用のノートが 1 枚黙って増え**、「なし」にしても
+   *   **黙って残った** ── 数日後にサイドバーで見覚えのない題名を見つけることになる。
+   * ⚠ 「作ります」と言い切らない ── 既に在れば作らないので、**どちらでも嘘に
+   *   ならない字**にする。
+   */
+  const notes = [
+    {
+      field: 'pick-group-icon-note',
+      text: '目印は、このグループ専用のノートに憶えます(無ければ 1 枚作ります)。「なし」にしても、そのノートは残ります。',
+    },
+  ];
+  /**
+   * 🔴 **いま付いている字が、この表に無いことを言う**(同レビュー)。
+   * ⚠ 言わないと、見出しには 🧮 が出ているのに小窓は「何も選ばれていない」顔をする
+   *   ── **画面どうしが食い違う**。
+   * ⚠ 出すのは**表に無いときだけ** ── いつも出すと、49 種から選んだ人にも
+   *   読む必要のない 1 行が増える。
+   */
+  if (!isTableIcon(current)) {
+    notes.push({
+      field: 'pick-group-icon-odd',
+      text: `いまは「${current.trim()}」が付いています。この表には無い字なので、どれにも枠が付いていません(選ぶと置き換わります)。`,
+    });
+  }
+  return pickIconFrom(host, {
+    title: `「${groupName}」の目印を選ぶ`,
+    field: 'pick-group-icon',
+    ariaLabel: `「${groupName}」の目印を選ぶ`,
+    current,
+    withNone: true,
+    notes,
+  });
+}
+
+/**
+ * 🔴 **本文へ入れる図案を選ぶ**(#853 段①、2026-09-13)。
+ *
+ * > user 指示 2026-09-12:「**マテリアルデザインのアイコンはユーザーのメモ内でも
+ * > 使用できるように動線を追加して欲しい**」
+ *
+ * ⚠ **「なし」を出さない** ── ここは**入れる**所なので、外す物が無い
+ *   (要らなくなったら、入った字を消せばよい)。
+ * 🔑 **入る字を先に言う**(user 裁定 2026-09-12 = A「書き方を案内する」)──
+ *   押して入れた人が、次からは手でも打てる。
+ *
+ * @returns 図案の名前。やめたら `null`
+ */
+export function pickBodyIconInApp(host: HTMLElement): Promise<string | null> {
+  return pickIconFrom(host, {
+    title: '図案を入れる',
+    field: 'pick-body-icon',
+    ariaLabel: '本文へ入れる図案を選ぶ',
+    current: '',
+    withNone: false,
+    notes: [
+      {
+        field: 'pick-body-icon-note',
+        text: '選ぶと、いま打っている場所に入ります。本文には :home: のような字で入るので、次からは手でも打てます。',
+      },
+    ],
   });
 }
 
