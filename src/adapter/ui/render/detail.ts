@@ -98,6 +98,11 @@ import {
 } from '@adapter/platform/extension-grants';
 import { HINT_BASE, HINT_COMMAND, hintTitle } from './shortcut-hint';
 import { humanBytes } from '@features/human-bytes';
+/**
+ * ⚠ **輪になっているが、実体は一方向である** ── あちらが引くのは `AssetLender` の
+ *   **型だけ**(`import type` なので、走る物には残らない)。
+ */
+import { AssetLends } from './asset-lends';
 
 /** 添付表示のための asset 面(main が AssetBlobStore を cid 束縛で注入)。 */
 export interface AssetLender {
@@ -218,12 +223,15 @@ export class DetailRenderer {
    * 編集中は塊が打鍵ごとに作り直されるので、同じ添付を tick ごとに IDB から
    * 読み直して URL を作り足すことになる(user 指示「効くのは定常」)。
    */
-  private readonly lends: Array<{
-    key: string | null;
-    url: string | null;
-    dispose: () => void;
-    els: Element[];
-  }> = [];
+  /**
+   * 🔴 **帳簿は共有の 1 本**(#880、2026-09-13)。
+   *
+   * ⚠ 直す前は**この面が自前の配列**を持ち、アプリの一覧は `AssetLends` を持っていた ──
+   *   同じ「借りて差して返す」を **2 通りの綴り**で書いていたので、
+   *   片方だけ直した日に**もう片方で bytes が常駐する**(CLAUDE.md §7)。
+   * 🔑 使い回し・剪定・世代の判定は、全部そちらが持つ。
+   */
+  private readonly lends = new AssetLends();
   /** 非同期 hydrate の stale 防止(選択が移ったら結果を捨てて即 dispose)。 */
   private hydrateToken = 0;
   /**
@@ -450,7 +458,7 @@ export class DetailRenderer {
   private disposeMermaid: (() => void) | null = null;
 
   private disposeLends(): void {
-    for (const l of this.lends.splice(0)) l.dispose();
+    this.lends.disposeAll();
     this.hydrateToken += 1;
     // 🔴 **囲みが読み込んだ字も手放す**(#444 段①)── 別のノートへ移るときに
     //    握ったままだと、その本文が常駐する(2026-07-27「速やかな破棄」)
@@ -468,12 +476,7 @@ export class DetailRenderer {
    * 片方が消えただけで返すと生きている `<img>` の src が死ぬ。
    */
   private pruneLends(): void {
-    for (let i = this.lends.length - 1; i >= 0; i--) {
-      const l = this.lends[i]!;
-      if (l.els.some((e) => e.isConnected)) continue;
-      l.dispose();
-      this.lends.splice(i, 1);
-    }
+    this.lends.prune();
   }
 
   /** 骨組みを捨てる(次の描画で組み直す)。 */
@@ -2270,9 +2273,7 @@ export class DetailRenderer {
      * 返してしまい、**画面に出ている新しい `<img>` の src が死ぬ**。
      */
     for (const [key, imgs] of [...byKey]) {
-      const live = this.lends.find(
-        (l) => l.key === key && l.url !== null && l.els.some((e) => e.isConnected),
-      );
+      const live = this.lends.live(key);
       if (!live) continue;
       live.els.push(...imgs);
       for (const img of imgs) img.src = live.url!;
@@ -2291,7 +2292,7 @@ export class DetailRenderer {
             for (const img of imgs) img.setAttribute('data-pkc-asset-missing', '');
             return;
           }
-          this.lends.push({ key, url: lent.url, dispose: lent.dispose, els: imgs });
+          this.lends.track({ key, url: lent.url, dispose: lent.dispose, els: imgs });
           for (const img of imgs) img.src = lent.url;
         } catch {
           if (token === this.hydrateToken)
@@ -2392,7 +2393,7 @@ export class DetailRenderer {
             lent.dispose();
             return;
           }
-          this.lends.push({ key, url: lent.url, dispose: lent.dispose, els: placed });
+          this.lends.track({ key, url: lent.url, dispose: lent.dispose, els: placed });
         } catch {
           /* 読めない添付 ── リンク(保存の導線)はそのまま残す */
         }
@@ -2569,7 +2570,7 @@ export class DetailRenderer {
       if (!lent) return missing();
       // 添付の preview は器ごと作り直す(`disposeLends()` が先に走る)ので、
       // 器そのものを持たせておけば「器が外れたら返す」で同じ規則に乗る
-      this.lends.push({ key: null, url: null, dispose: lent.dispose, els: [host] });
+      this.lends.track({ key: null, url: null, dispose: lent.dispose, els: [host] });
       if (kind === 'image') {
         const img = document.createElement('img');
         img.setAttribute('data-pkc-field', 'attachment-media');
