@@ -73,6 +73,36 @@ for (const [width, height] of VIEWPORTS) {
   await page.goto(BASE, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('[data-pkc-region="shell"]', { timeout: 20000 });
   await page.waitForTimeout(500);
+  /**
+   * 🔴 **罠 0 ── お知らせのカードを先に畳む**(2026-09-13。probe が 2 回続けて
+   *   ここで 30 秒 timeout した)。
+   *
+   * ⚠ **これは製品の不具合ではない** ── 720px 以下では、お知らせは
+   *   **全画面で出る**と決めてある(user 指示「全画面でだせばいいじゃん。
+   *   不要ならみんな設定するでしょ?」)。`tests/smoke/helpers.ts` の
+   *   `dismissAnnounce` が同じことをしている ── この probe だけが
+   *   **その作法を持っていなかった**。
+   * ⚠ **出ていることを先に確かめてから畳む** ── 出ていない回に黙って通すと、
+   *   「畳んだから触れた」のか「最初から出ていなかった」のか読めなくなる
+   *   (`dismissAnnounce` の docstring と同じ理由)。
+   * 🔑 そして**畳む口が見えていたか**を記録する ── 見えていなければ
+   *   「カードが全部を覆って出口も無い」= 製品の行き止まりなので、
+   *   **probe の話ではなく本題の答え**になる。
+   */
+  const announceSeen = await page.locator('[data-pkc-region="announce"]').isVisible();
+  const dismissSeen = await page.locator('[data-pkc-action="dismiss-announce"]').isVisible();
+  if (announceSeen) {
+    if (!dismissSeen) {
+      throw new Error(
+        `${width}x${height}: お知らせが出ているのに畳む口が見えない(製品の行き止まり)`,
+      );
+    }
+    await page.click('[data-pkc-action="dismiss-announce"]');
+    await page.waitForTimeout(200);
+  }
+  console.log(
+    `[お知らせ] ${width}x${height}: 出ていた=${announceSeen} 畳む口が見えた=${dismissSeen}`,
+  );
   // ⚠ 罠 1 ── ノートが 0 件だと追記欄も情報ペインも出ない
   await page.click('[data-pkc-field="create-pick"]');
   await page.click('[data-pkc-region="create-menu"] [data-pkc-archetype="text"]');
