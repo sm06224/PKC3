@@ -133,7 +133,7 @@ describe('revision flow (P5b)', () => {
     );
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
     await tick();
-    d.dispatch({ type: 'SHOW_HISTORY' });
+    d.dispatch({ type: 'SHOW_HISTORY', lid: 'e1' });
     await tick();
     expect(d.getState().revisionPanel?.items).toHaveLength(1);
     const panel = q('[data-pkc-field="history-panel"]')!;

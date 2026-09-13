@@ -99,7 +99,7 @@ function setup(opts: { stats?: { id: string; added: number | null; removed: numb
 async function openHistory(s: ReturnType<typeof setup>): Promise<void> {
   s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
   await tick();
-  s.d.dispatch({ type: 'SHOW_HISTORY' });
+  s.d.dispatch({ type: 'SHOW_HISTORY', lid: 'n1' });
   await tick();
 }
 
@@ -148,7 +148,7 @@ describe('#398 段① 見分けがつく', () => {
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1')], relations: [] });
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
     await tick();
-    d.dispatch({ type: 'SHOW_HISTORY' });
+    d.dispatch({ type: 'SHOW_HISTORY', lid: 'n1' });
     await tick();
     expect(
       root.querySelectorAll('[data-pkc-action="restore-revision"]'),
