@@ -9,6 +9,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { registeredArchetypes } from '../../src/features/flavor';
 import {
   MARKDOWN_EXTENSIONS,
   firstHeading,
@@ -192,14 +193,66 @@ describe('archetype', () => {
   // `generic` / `opaque` は一級の archetype だがフレーバーは text にフォールバック
   // するので、「登録されているか」で判定すると**自分の md ZIP export を
   // 取り込み直したときにフォルダがノートに化ける**
-  it.each(['text', 'todo', 'textlog', 'form', 'spreadsheet', 'snippet', 'stack', 'folder', 'generic', 'opaque'])(
-    '%s は受ける',
-    (archetype) => {
+  it.each([
+    'text',
+    'todo',
+    'textlog',
+    'form',
+    'spreadsheet',
+    'snippet',
+    'stack',
+    // 🔴 **#870(2026-09-13)で足した** ── 雛形・スタックと同じ理由で入れるべきなのに
+    //    **入れ忘れていた**。書き出したスマートフォルダを取り込み直すと普通のノートに化け、
+    //    **条件で集める働きだけが静かに消えていた**(本文は残るので壊れて見えない)
+    'smart',
+    'folder',
+    'generic',
+    'opaque',
+  ])('%s は受ける', (archetype) => {
+    const r = readPlainMarkdown(`---\narchetype: ${archetype}\n---\n`, 'f.md');
+    expect(r.archetype).toBe(archetype);
+    expect(r.warnings).toEqual([]);
+  });
+
+  /**
+   * 🔴 **フレーバーを足した日に鳴る**(#870、2026-09-13)。
+   *
+   * ⚠ **上の一覧は手で並んでいる** ── だから `smart` は**足された日から今日まで
+   *   1 度も入っていなかった**(同じ file に、入れるべき理由が `snippet` と `stack` で
+   *   2 回書いてあったのに、誰も数え直さなかった)。
+   * 🔑 だから**登録済みのフレーバーを全数**で回す ── 一覧ではなく
+   *   `registeredArchetypes()` を母集団にすれば、**足した瞬間に検査の母集団に入る**
+   *   (`tests/features/flavor.test.ts` が同じ理由で同じ形をしている)。
+   * ⚠ 受けない物は**理由つきで名指し**する(件数で緩めない ── 理由の無い除外を作ると、
+   *   次に足す人が「入れ忘れでは?」から始める)。
+   */
+  const NOT_ACCEPTED: ReadonlyMap<string, string> = new Map([
+    [
+      'attachment',
+      '単一 md は bytes を持ってこられない ── 受けると中身の無い添付 entry ができる(開けないのに壊れて見えない)',
+    ],
+  ]);
+
+  it('🔴 登録済みのフレーバーは、理由を書いた物を除いて全部受ける', () => {
+    const all = registeredArchetypes();
+    // 空振り防止 ── 数え上げが壊れて 0 件になっていないこと
+    expect(all.length, 'フレーバーを 1 つも数えられていない(走査が壊れている)').toBeGreaterThan(5);
+    const missing = all
+      .filter((a) => !NOT_ACCEPTED.has(a))
+      .filter((a) => readPlainMarkdown(`---\narchetype: ${a}\n---\n`, 'f.md').archetype !== a);
+    expect(
+      missing,
+      '書き出して取り込み直すと普通のノートに化ける archetype が在る ── 受けるなら一覧へ、受けないなら理由つきで NOT_ACCEPTED へ',
+    ).toEqual([]);
+  });
+
+  it('⚠ 受けないと書いた物は、本当に受けていない(除外表が飾りになっていない)', () => {
+    for (const [archetype, why] of NOT_ACCEPTED) {
+      expect(why.length, `${archetype} に理由が無い`).toBeGreaterThan(10);
       const r = readPlainMarkdown(`---\narchetype: ${archetype}\n---\n`, 'f.md');
-      expect(r.archetype).toBe(archetype);
-      expect(r.warnings).toEqual([]);
-    },
-  );
+      expect(r.archetype, `${archetype} を受けてしまっている`).toBe('text');
+    }
+  });
 
   it('🔴 `attachment` は受けない(単一 md は bytes を持ってこられない)', () => {
     // 受けると**中身の無い添付 entry**ができる ── 開けないのに壊れて見えない
