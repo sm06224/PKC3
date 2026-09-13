@@ -1670,6 +1670,11 @@ export type UserAction =
       registered?: boolean;
       group?: string | null;
       icon?: string | null;
+      /**
+       * 🔴 **取り込んだ絵の鍵**(#856 段②)。`null` = 外す。
+       * ⚠ 3 値にしないと「絵を外して字に戻す」が表せない。
+       */
+      iconAssetKey?: string | null;
     }
   /**
    * 🔴 **タイルを並べ替える**(#857 段①。user 指示 2026-09-12「並び替えしたい」/
@@ -3822,9 +3827,27 @@ function reduceCore(
         const g = appGroupName(action.group ?? '');
         updates['attachment.app_group'] = g === '' ? undefined : g;
       }
-      if (action.icon !== undefined)
+      if (action.icon !== undefined) {
         updates['attachment.app_icon'] =
           action.icon === null || action.icon === '' ? undefined : action.icon;
+        /**
+         * 🔴 **字や図案を選んだら、取り込んだ絵は外す**(#856 段②)。
+         *
+         * ⚠ 出す側は**絵を字より先に**使うので、外さないと
+         *   **選んだのに画面が変わらない** ── この repo がいちばん嫌う
+         *   無言の dead click になる。
+         * ⚠ 「なし」(空文字)でも外す ── user が求めているのは
+         *   「印を出さない」ことであって、「字だけ消す」ことではない。
+         * 🔑 **規則を 1 つにする**(例外を作らない)── 絵に戻したければ
+         *   もう一度「リンク先の印を取り込む」を押せばよい。
+         */
+        updates['attachment.app_icon_asset_key'] = undefined;
+      }
+      if (action.iconAssetKey !== undefined)
+        updates['attachment.app_icon_asset_key'] =
+          action.iconAssetKey === null || action.iconAssetKey === ''
+            ? undefined
+            : action.iconAssetKey;
       if (Object.keys(updates).length === 0) return { state, events: [] };
       const meta = state.entryMetas.get(action.lid)!;
       return {

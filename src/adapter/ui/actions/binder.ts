@@ -386,6 +386,18 @@ import {
   toggleArchiveMark,
 } from '@features/archive/zip-browse';
 import { currentOpenPlace } from '@adapter/ui/render/open-place';
+import { appExternalImages } from '@adapter/ui/render/external-images';
+import { parseFrontmatter } from '@features/markdown/frontmatter';
+import { externalImageBlockReason } from './adopt-favicon';
+
+/**
+ * 🔴 **いま印を取りに行っているノート**(#856 段②)。
+ *
+ * ⚠ 連打を `disabled` で止めると**焦点が外れる**(下の受け手の注記)。
+ * 🔑 器を触らずに 2 度目を落とすための帳簿である。⚠ `finally` で必ず消す
+ *   ── 消し忘れると、その lid は**二度と取り込めなくなる**。
+ */
+const adoptingLinkIcons = new Set<string>();
 import { effectiveOpenPlace } from '@features/open-place';
 import { joinCopied, pickMarked } from '@features/clipboard/scrap';
 import { sqlNoteBody, sqlNoteTitle } from '@features/query/sql-to-note';
@@ -805,6 +817,14 @@ export interface BinderServices {
    *   `describeAdoptFailures` の 1 本(呼び側で綴り直さない)。
    */
   adoptUrls?(urls: readonly string[], namePrefix: string): Promise<AdoptOutcome>;
+  /**
+   * 🔴 **リンク先の印を取りに行って、置くところまで**(#856 段②)。
+   *
+   * ⚠ **判断はここへ渡さない** ── 取れた / 取れなかったを返すだけで、
+   *   何を dispatch するかは binder が決める(`main.ts` に判断を置かない ── §2)。
+   * ⚠ 呼ぶのは**設定の門を通した後**である(押していないのに通信しない)。
+   */
+  adoptLinkIcon?(url: string): Promise<{ ok: true; assetKey: string } | { ok: false; why: string }>;
   /**
    * 🔴 **添付を別の窓で見る**(#192 で画像、2026-08-15 に PDF を追加)。
    * ⚠ 実体は adapter/platform 側(ObjectURL の寿命が絡むので、binder は**呼ぶだけ**)。
@@ -1423,6 +1443,13 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
    *   困らないよう、少なくとも**押す時点**では止める(検査は `tests/repo-hygiene.test.ts`)。
    */
   'adopt-external-images',
+  /**
+   * 🔴 **リンク先の印を取り込むのも、ノートを書く**(#856 段②)──
+   *   `SET_APP_TILE` を撃つので同じ門をくぐらせる。
+   * ⚠ `adopt-external-images` と同じく**押してから書くまでに通信を挟む**ので、
+   *   少なくとも**押す時点**では止める。
+   */
+  'adopt-link-icon',
   'toggle-todo',
   /**
    * 🔴 **本文を書く点では `toggle-todo` と同じ**(2026-08-19 のレビュー W-4)。
@@ -6267,6 +6294,108 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔑 撃つのは `set-app-icon`(欄に打つ)と**同じ書込** ── 空文字は
    *   reducer が「目印なし」に畳むので、`なし` の口も同じ 1 本で足りる。
    */
+  /**
+   * 🔴 **リンク先の印を取り込む**(#856 段②。user 裁定 2026-09-12 / 09-13)。
+   *
+   * 🔑 **通信が始まるのは、ここに来た瞬間だけ**である(押していないのに外へ出ない)。
+   * ⚠ 門は 3 つ。どれも**黙って終わらない** ── 押して何も起きないのがいちばん悪い:
+   *   ① アドレスが無い(出し分けが壊れている合図)
+   *   ② 🔴 設定で「本文の外部画像」を**常にオフ**にしている(裁定 2026-09-13)
+   *   ③ 取りに行って取れなかった(理由をそのまま出す)
+   * ⚠ **押している間は押せなくする** ── 連打で同じサイトへ何度も出ない
+   *   (`render` が組み直せば戻る ── 状態を増やさずに済ませる)。
+   */
+  'adopt-link-icon': (dispatcher, target, services) => {
+    /**
+     * 🔴 **飛び先は state から引く ── 押した器から読まない**(2026-09-13、CI の全数門)。
+     *
+     * ⚠ 1 稿目は `target` の `data-pkc-url` を読んでいた。それだと
+     *   `tests/action-outlets.test.ts` の **`OBJECT_LONE`**(対象が要るのに出口が
+     *   1 か所しか無い操作)に入る ── **その面を畳むと画面から消える**種類の操作である。
+     * 🔑 ここは**指す先が 1 つしかない**(いま開いているノート)ので、state で足りる。
+     *   ⚠ 器から読むのは「同時に見えている兄弟のうち押した 1 つ」を採るときの作法であって、
+     *   選ぶ余地が無いときにまで使うと、**名前で呼べない操作を 1 つ増やす**ことになる。
+     */
+    const open = dispatcher.getState().openBody;
+    const lid = open?.lid ?? null;
+    if (lid === null) return;
+    const url = String(parseFrontmatter(open?.body ?? '').meta['attachment.launcher_url'] ?? '');
+    if (url === '') {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: 'このノートにはリンク先のアドレスがありません',
+      });
+      return;
+    }
+    const blocked = externalImageBlockReason(appExternalImages.getMode());
+    if (blocked !== null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: blocked });
+      return;
+    }
+    const go = services.adoptLinkIcon;
+    if (go === undefined) return;
+    /**
+     * 🔴 **連打は `disabled` で止めない**(2026-09-13、動線レビュー)。
+     *
+     * ⚠ 立てた瞬間、ブラウザは**焦点を持つ要素を外す** ── そのうえ取り込みが通ると
+     *   本文が変わって**この箱ごと作り直される**ので、鍵だけで使う人の焦点は
+     *   `body` へ落ちて戻らない(画面の先頭から Tab をやり直すことになる)。
+     *   ⚠ 面の側の「組み直しても焦点を戻す」仕掛け(`detail.ts` の `refocusPick`)は
+     *   **組み直しの時点でもう焦点が外れている**ので間に合わない。
+     * 🔑 **止めるのは器ではなく帳簿にする** ── 飛んでいる lid を持てば、
+     *   器を 1 ドットも触らずに 2 度目を落とせる(焦点は乗ったままである)。
+     */
+    if (adoptingLinkIcons.has(lid)) return;
+    adoptingLinkIcons.add(lid);
+    const btn = target instanceof HTMLButtonElement ? target : null;
+    /**
+     * 🔴 **押している間、何をしているかを字で言う**(2026-09-13、動線レビュー)。
+     *
+     * ⚠ 直す前は**薄くなるだけ**だった ── 相手のサイトが遅いと、最大 4 往復を
+     *   直列で待つ間、画面は 1 ドットも動かない。user は「押したのに反応が無い」と
+     *   受け取って連打するか、別の操作へ移って結果を見失う。
+     * ⚠ 字は**起きていること**で書く(user 指示 2026-08-21)。
+     * 🔑 戻すのは `finally` ── 取れても取れなくても、必ず元の字に戻す。
+     */
+    const label = btn?.textContent ?? null;
+    if (btn) btn.textContent = '取りに行っています…';
+    void go(url)
+      .then((got) => {
+        if (!got.ok) {
+          dispatcher.dispatch({
+            type: 'OP_FAILED',
+            error: `リンク先の印を取り込めませんでした: ${got.why}`,
+          });
+          return;
+        }
+        /**
+         * 🔴 **書けたかどうかを、その場で確かめる**(2026-09-13、着地前レビュー)。
+         *
+         * ⚠ `SET_APP_TILE` は **`phase !== 'ready'` や別の lid の書込中を黙って捨てる**
+         *   (押し直せば済む設定のための作法である)。⚠ ところがここは**取りに行った後**
+         *   なので、捨てられると **user から見て「押したのに何も起きない」**になり、
+         *   しかも**もう一度押すと通信がもう 1 往復**する。
+         * ⚠ 窓は実在する:取りに行っている数百ms〜数秒の間に**別のノートの編集を
+         *   始められる**(`START_EDIT` の門は lid 単位だが、`phase` はアプリ全体で 1 つ)。
+         * 🔑 受かったかは**この場で読める** ── 受かれば `tileWrite` がこの lid で
+         *   1 つ進む。進んでいなければ**捨てられた**ので、黙らずに言う。
+         */
+        const was = dispatcher.getState().tileWrite;
+        const mine = was !== null && was.lid === lid ? was.n : 0;
+        dispatcher.dispatch({ type: 'SET_APP_TILE', lid, iconAssetKey: got.assetKey });
+        const now = dispatcher.getState().tileWrite;
+        if (now !== null && now.lid === lid && now.n === mine + 1) return;
+        dispatcher.dispatch({
+          type: 'OP_FAILED',
+          error: 'リンク先の印は取れましたが、ほかの保存が動いているので入れられませんでした(もう一度押してください)',
+        });
+      })
+      .finally(() => {
+        adoptingLinkIcons.delete(lid);
+        // ⚠ `render` が組み直していれば、この器はもう画面に無い(触っても害は無い)
+        if (btn !== null && label !== null) btn.textContent = label;
+      });
+  },
   'pick-app-icon': (dispatcher, target) => {
     const lid = dispatcher.getState().selectedLid;
     if (!lid) return;

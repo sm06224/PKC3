@@ -169,7 +169,8 @@ import { readAppStorage } from '@adapter/platform/app-storage';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import { formatAssetRef } from '@features/asset/asset-ref-format';
 import { pastedImageName } from '@features/asset/pasted-image-name';
-import { adoptUrls, fetchImageBlob } from '@adapter/ui/actions/adopt-urls';
+import { adoptUrls, fetchImageBlob, HttpStatusError } from '@adapter/ui/actions/adopt-urls';
+import { adoptLinkIcon } from '@adapter/ui/actions/adopt-favicon';
 import { waitForWindowClose } from '@adapter/platform/window-close';
 import { copyPlainText } from '@adapter/platform/clipboard';
 import { MarkdownClient } from '@adapter/platform/render/markdown-client';
@@ -2299,6 +2300,31 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         },
         urls,
         namePrefix,
+      ),
+    /**
+     * 🔴 **リンク先の印を取り込む**(#856 段②)。
+     *
+     * ⚠ ここは**配線だけ**である ── 取る / 置く / 断る の判断は
+     *   `adopt-favicon.ts` に在る(`main.ts` は原文を読む test しか持てないので、
+     *   判断を書くと「全 test 緑のまま取り違える」形になる ── CLAUDE.md §2)。
+     * ⚠ `fetch` を直に渡さない ── 404 は例外にならないので、そのままだと
+     *   「画像ではありませんでした」に化けて**直しようが無くなる**(`adoptUrls` と同じ)。
+     * ⚠ ページの原文は `text/html` なので `fetchImageBlob` を通さない(別の口で読む)。
+     */
+    adoptLinkIcon: (url) =>
+      adoptLinkIcon(
+        {
+          gate: withAssetGate,
+          attach: attachDeps,
+          fetchBlob: fetchImageBlob,
+          fetchText: async (u) => {
+            const res = await fetch(u);
+            if (!res.ok) throw new HttpStatusError(res.status);
+            return res.text();
+          },
+          parse: (html) => new DOMParser().parseFromString(html, 'text/html'),
+        },
+        url,
       ),
     /**
      * 🔴 **添付を別の窓で見る**(#192 で画像、2026-08-15 に PDF)。⚠ 貸した ObjectURL は

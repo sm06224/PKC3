@@ -179,7 +179,8 @@ export class BrowseRouter {
     this.list = new SidebarRenderer(sidebar);
     this.kindBar = new KindBarRenderer(sidebar);
     this.filer = new FilerRenderer(this.panes.filer);
-    this.launcher = new LauncherRenderer(this.panes.launcher);
+    // 🔴 取り込んだ絵を出すために貸し口を渡す(#856 段②)── 渡さなければ字と図案だけ出る
+    this.launcher = new LauncherRenderer(this.panes.launcher, undefined, assets);
     this.schedule = new ScheduleRenderer(this.panes.schedule, now);
     this.contacts = new ContactsRenderer(this.panes.contacts);
     this.captures = new CapturesRenderer(this.panes.captures, assets, onCaptureReady);
@@ -218,6 +219,17 @@ export class BrowseRouter {
        * ⚠ タブは行き来されるので、返さないと**切り替えた回数ぶん積み上がる**。
        */
       if (this.last === 'captures') this.captures.dispose();
+      /**
+       * 🔴 **アプリの一覧から出たら、借りた絵を返す**(#856 段②)── 上と同じ理由。
+       *
+       * ⚠ タブを切り替えても**器は残る**(`hidden` にするだけ)ので、
+       *   `<img>` は `isConnected` のままである ── つまり「画面から消えたら返す」の
+       *   仕掛けは**1 つも働かない**。ここで返さないと、**行き来した回数ぶん
+       *   握ったまま**になる。
+       * ⚠ 戻ってきたときは `render` が組み直して借り直す(指紋は `hidden` を見ないが、
+       *   タブが変われば必ず `render` が走る)。
+       */
+      if (this.last === 'launcher') this.launcher.disposeAssets();
       this.last = mode;
     }
     // 🔴 **札の帯は面に関係なく描く**(#478)── 面の中の renderer に持たせると、

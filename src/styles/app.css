@@ -4421,6 +4421,24 @@ li[data-pkc-row-slot] {
   outline-offset: -2px;
 }
 /* 目印。⚠ 無いときも**幅は取る**(有無で題名の左端がずれない) */
+/**
+ * 🔴 **取り込んだ印は、器に収める**(#856 段②、2026-09-13 の動線レビュー)。
+ *
+ * ⚠ 直す前は `width` も `height` も `object-fit` も無かった ── favicon は
+ *   **180x180 を置いているサイトが普通に在る**(`apple-touch-icon`)ので、
+ *   1 つ取り込んだだけで**行の高さが伸び、隣のタイルが読みにくくなる**。
+ * ⚠ 器(下の `tile-icon`)は 20px なので、**16px に収めて中央へ**置く
+ *   ── 絵文字・図案のタイルと**題名の左端が揃う**(下の 20px はそれを守っている)。
+ * 🔑 `contain` は**縦横の比を保つ** ── 潰れた絵を出さない。
+ */
+[data-pkc-field='tile-icon-img'] {
+  display: block;
+  width: 16px;
+  height: 16px;
+  margin: 0 auto;
+  object-fit: contain;
+}
+
 [data-pkc-field='tile-icon'] {
   flex: none;
   /* 🔴 **px で固定する**(#770 段②、2026-09-12)。⚠ `em` だと、図案の目印のときだけ
