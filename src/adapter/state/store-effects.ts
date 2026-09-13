@@ -55,6 +55,8 @@ import type {
 // ⚠ 「未設定」の綴りは features 側の 1 か所(`''`)── ここで書き写さない(§7)
 import { TAGS_KEY, UNSET as QUERY_UNSET } from '@features/query/group-by';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
+// 🔴 添付の .csv / .tsv を「調べる相手」として選べるようにする(#854 段①)
+import { looksLikeCsvAttachmentName } from '@features/query/csv-attachment';
 import {
   captureItemsFrom,
   type CaptureSource,
@@ -109,10 +111,16 @@ export interface StorePort {
     ms: number;
   }>;
   /**
-   * 🔴 **取り込んだ `.sqlite` を開く / 手放す**(#681 段③ の 2 つ目)。
+   * 🔴 **取り込んだ `.sqlite` / `.csv` / `.tsv` を開く / 手放す**
+   *   (#681 段③ の 2 つ目、#854 段①)。
    * ⚠ 古い口(持っていない port)では**機能が減るだけ**にする ── 落とすと画面ごと止まる。
+   * ⚠ `csv` は**省略すれば今までどおり `.sqlite` の image**として開く(後方互換)。
+   *   `truncated` は csv / tsv を上限で切ったときだけ `true`。
    */
-  openSqlGuest?(image: Uint8Array): Promise<{ tables: string[]; bytes: number }>;
+  openSqlGuest?(
+    image: Uint8Array,
+    csv?: { lang: 'csv' | 'tsv'; lid: string; name: string },
+  ): Promise<{ tables: string[]; bytes: number; truncated: boolean }>;
   closeSqlGuest?(): Promise<null>;
   /**
    * 🔴 このノートを参照しているノート(#348)。⚠ **optional** ── 古い worker が
@@ -727,6 +735,12 @@ export function connectStoreEffects(
           });
           break;
         }
+        /**
+         * 🔴 **`.csv` / `.tsv` かどうかは、ここで題名の拡張子だけを見て決める**
+         *   (#854 段①)。⚠ **判定を 2 か所に置かない** ── worker 側は渡された
+         *   `csv` の有無だけで分岐し、拡張子をもう一度見ない(§7)。
+         */
+        const csvLang = looksLikeCsvAttachmentName(name);
         afterWrites(async () => {
           if (disposed) return;
           try {
@@ -735,7 +749,10 @@ export function connectStoreEffects(
             if (key === null) throw new Error('添付の中身が見つかりません');
             const bytes = await read(key);
             if (bytes === null) throw new Error('添付の中身が見つかりません');
-            const opened = await open(bytes);
+            const opened = await open(
+              bytes,
+              csvLang === null ? undefined : { lang: csvLang, lid, name },
+            );
             if (disposed) return;
             dispatcher.dispatch({
               type: 'SQL_GUEST_OPENED',
@@ -743,6 +760,7 @@ export function connectStoreEffects(
               name,
               tables: opened.tables,
               bytes: opened.bytes,
+              truncated: opened.truncated,
             });
           } catch (e) {
             if (disposed) return;

@@ -24,6 +24,8 @@
  */
 import type { AppState } from '@adapter/state/app-state';
 import { sqlSourcesOf } from '@features/query/sqlite-attachment';
+// 🔴 添付の .csv / .tsv も同じ選び所へ並べる(#854 段①)
+import { csvAttachmentSourcesOf } from '@features/query/csv-attachment';
 import { humanBytes } from '@features/human-bytes';
 import { SQL_RULES, sqlExampleText, sqlPlaceholder, sqlTipText } from '@features/query/sql-tip';
 
@@ -158,7 +160,7 @@ export class SqlRenderer {
   }
 
   /**
-   * 🔴 **調べる相手の選び所を揃える**(#681 段③ の 2 つ目)。
+   * 🔴 **調べる相手の選び所を揃える**(#681 段③ の 2 つ目、#854 段①)。
    *
    * ⚠ **選択肢は添付が増減したときだけ組み直す** ── 毎回作り直すと、
    *   開いたまま増えた添付に気づける代わりに、**選んでいる最中に選択肢が
@@ -166,11 +168,17 @@ export class SqlRenderer {
    * ⚠ **いま選ばれている物は state から書き戻す** ── 開けなかった回は
    *   `guest` が `null` に戻るので、選び所も「この PKC」へ戻る
    *   (画面と実体が食い違わない)。
+   * 🔑 **`.sqlite` の下に `.csv` / `.tsv`**(#854 段①)── 開く仕組みは worker が
+   *   `name` の拡張子だけで見分けるので、ここは 2 つの一覧を**連結するだけ**でよい
+   *   (判定を 2 か所に置かない)。
    */
   private paintSource(state: AppState): void {
     const sel = this.source;
     if (sel === null) return;
-    const sources = sqlSourcesOf(state.entryMetas.values());
+    const sources = [
+      ...sqlSourcesOf(state.entryMetas.values()),
+      ...csvAttachmentSourcesOf(state.entryMetas.values()),
+    ];
     const key = sources.map((s) => `${s.lid}:${s.name}`).join('|');
     if (key !== this.sourceKey) {
       this.sourceKey = key;
@@ -299,12 +307,22 @@ function noteLine(p: AppState['sqlPage']): string {
    *   **断りが出た回と書き出した回で名札が消えていた** ── いちばん取り違えやすい
    *   のは断りの直後である。
    */
-  const where = p.guest === null ? '' : ` ── ${p.guest.name} を調べています`;
+  /**
+   * 🔴 **打ち切ったことは、選んでいる間ずっと言う**(#854 段①)。
+   * ⚠ 黙って一部だけ返すと user は「これで全部」と読む ── いちばん気づけない
+   *   外し方(CLAUDE.md §4)。だから**この相手を選んでいる限り毎行に添える**
+   *   (答えが出た後・断られた後でも消えない)。
+   */
+  const truncNote =
+    p.guest !== null && p.guest.truncated ? '(行が多いので、先頭だけを表にしています)' : '';
+  const where = p.guest === null ? '' : ` ── ${p.guest.name} を調べています${truncNote}`;
   /**
    * 🔴 **開けなかったことを、いちばん上で言う**(#681 段③ の 2 つ目)。
    * ⚠ 黙って「この PKC」へ戻ると、選んだ人には**選べなかった**ようにしか見えない。
+   * ⚠ **`.sqlite` に決め打たない**(#854 段①)── `.csv` / `.tsv` も同じ相手選びから
+   *   開くので、字を見て相手を勘違いさせない。
    */
-  if (p.guestError !== '') return `取り込んだ .sqlite を開けませんでした ── ${p.guestError}`;
+  if (p.guestError !== '') return `選んだ file を開けませんでした ── ${p.guestError}`;
   if (p.running) return `走らせています…${where}`;
   if (p.error !== '') return `${p.error}${where}`;
   /**
@@ -321,7 +339,7 @@ function noteLine(p: AppState['sqlPage']): string {
   if (p.ranSql === '')
     return p.guest === null
       ? ''
-      : `${p.guest.name} を調べています(表 ${String(p.guest.tables.length)} 個 / ${humanBytes(p.guest.bytes)})`;
+      : `${p.guest.name} を調べています(表 ${String(p.guest.tables.length)} 個 / ${humanBytes(p.guest.bytes)})${truncNote}`;
 
   const took = `(${String(p.ms)} ミリ秒)`;
   if (p.truncated)

@@ -972,6 +972,55 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   await tiles.nth(1).click({ button: 'right' });
   const tileMenu = page.locator('[data-pkc-region="context-menu"]');
   await expect(tileMenu, 'タイルを右クリックしてもメニューが出ない').toBeVisible();
+
+  /**
+   * 🔴 **その 1 回だけ、右クリックから開き方を選べる**(#884 段②。user 要望
+   * 2026-09-13「デフォルト選択の他に右クリックからの起動が選べるとなお良い」)。
+   *
+   * 動線: タイルを右クリック → メニューの先頭に「ブラウザのタブで開く」
+   * 「別の窓で開く」が出る → いまの設定に合うほうに「(既定)」が付く →
+   * 片方を選ぶ → その 1 回だけその開き方で開く → 設定は変わっていない。
+   * 🔑 起動を 1 つも足していない ── いま出しているこのメニューの道中に足した
+   *   (`scripts/smoke-budget.mjs`)。
+   */
+  await expect(
+    tileMenu.locator('button').nth(0),
+    '1 番目が「ブラウザのタブで開く(既定)」になっていない(先頭 2 項目が開き方でない)',
+  ).toHaveText('ブラウザのタブで開く(既定)');
+  await expect(
+    tileMenu.locator('button').nth(1),
+    '2 番目が「別の窓で開く」になっていない',
+  ).toHaveText('別の窓で開く');
+
+  // 🔑 対照群 ── 選ぶ前の設定を、設定画面そのもので控える(押す前の基準)
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  const openTargetSelect = page.locator('[data-pkc-field="app-open-target-select"]');
+  await expect(openTargetSelect, '前提: 設定の初期値が「タブ」ではない').toHaveValue('tab');
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]'); // 元の画面へ戻る
+
+  // 🔴 既定と違うほう(「別の窓で開く」)を選んでも、窓は 1 枚開く
+  await tiles.nth(1).click({ button: 'right' });
+  await expect(tileMenu, '設定画面を見た後、もう一度メニューが出せない').toBeVisible();
+  const [tileWin] = await Promise.all([
+    context.waitForEvent('page'),
+    clickReal(
+      page,
+      '[data-pkc-region="context-menu"] [data-pkc-action="open-tile-as"][data-pkc-open-target="window"]',
+    ),
+  ]);
+  await tileWin.waitForLoadState('domcontentloaded');
+  await tileWin.close();
+
+  // 🔑 対照群 ── 選んだ後も、設定画面の値は書き換わっていない
+  //   (これが無いと「毎回書き換えてしまう」実装と区別が付かない)
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  await expect(
+    openTargetSelect,
+    '右クリックで選んだだけで設定が書き換わっている(毎回書き換えてしまう実装になっている)',
+  ).toHaveValue('tab');
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]'); // 元の画面へ戻る
+
+  await tiles.nth(1).click({ button: 'right' });
   await expect(tileMenu, '「上へ」が出ていない').toContainText('上へ');
   await expect(tileMenu, '「下へ」が出ていない').toContainText('下へ');
   await expect(

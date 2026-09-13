@@ -27,6 +27,7 @@
 
 import { STACK_ARCHETYPE } from './flavor/stack-flavor';
 import { REPEAT_UNITS, REPEAT_WORDS, type RepeatUnit } from './schedule/repeat';
+import { APP_OPEN_TARGETS, type AppOpenTarget } from './launcher/open-target';
 
 /** 操作 1 つ。`action` は `data-pkc-action` の値と**同じ綴り**である。 */
 export interface EntryAction {
@@ -302,6 +303,35 @@ export const TILE_MENU_ACTIONS: readonly EntryAction[] = [
 ];
 
 /**
+ * 🔴 **その 1 回だけ、開き方を選ぶ**(#884 段②。user 要望 2026-09-13
+ * 「デフォルト選択の他に右クリックからの起動が選べるとなお良い」)。
+ *
+ * ⚠ **設定画面の札をそのまま出さない** ── `APP_OPEN_TARGETS[].label`
+ *   (「ブラウザのタブ(既定)」)は**選ぶための札**であって、メニューは
+ *   「押すと何が起きるか」で読む場所である(CLAUDE.md「設問は画面で
+ *   何が起きるかの言葉で書く」のメニュー版)。だから**動詞**で書く。
+ * 🔑 いまの既定には印を付ける ── 押した後の挙動は 2 つとも同じ「1 回だけ効いて
+ *   設定は変わらない」だが、片方は**ふだんタイルを押したときと同じ**である
+ *   ことが分かるようにする。
+ */
+export const TILE_OPEN_TARGET_ATTR = 'data-pkc-open-target';
+
+const TILE_OPEN_TARGET_VERB: Readonly<Record<AppOpenTarget, string>> = {
+  tab: 'ブラウザのタブで開く',
+  window: '別の窓で開く',
+};
+
+export function tileOpenTargetMenuActions(
+  current: AppOpenTarget,
+): readonly (EntryAction & { readonly attrs: Readonly<Record<string, string>> })[] {
+  return APP_OPEN_TARGETS.map((t) => ({
+    action: 'open-tile-as',
+    label: t.id === current ? `${TILE_OPEN_TARGET_VERB[t.id]}(既定)` : TILE_OPEN_TARGET_VERB[t.id],
+    attrs: { [TILE_OPEN_TARGET_ATTR]: t.id },
+  }));
+}
+
+/**
  * 🔴 **予定の札の上のメニューに出す「繰り返す…」**(#855 段 0 の 3 つ目。
  * user 裁定 2026-09-13「札を右クリック →『繰り返す』」)。
  *
@@ -433,9 +463,16 @@ export function repeatMenuActions(current: RepeatUnit | null): RepeatMenuItem[] 
  *   する 2 つの押し所で呼び名が違うと、user は別の操作だと思う。
  * ⚠ 「やめる」にしない ── **直した並びが元へ戻る**と読める(戻らない ── 動かした
  *   ぶんは既に保存されている)。「終える」はモードの出口だけを言う。
+ *
+ * ⚠ **開き方の 2 項目を頭に足す**(#884 段②)── 「上へ / 下へ」「並べ替える」は
+ *   タイルの**並び**を変える操作、開き方の 2 項目は**このタイルを起動する**
+ *   操作である。押した対象(このタイル)は同じなので**同じメニューへ**置く
+ *   (別に出すと、同じ右クリックで 2 枚メニューが出せることになり、
+ *   閉じ方も 2 通り要る ── §7 と同じ向きの重複)。
  */
-export function tileMenuActions(reordering: boolean): EntryAction[] {
+export function tileMenuActions(reordering: boolean, currentOpenTarget: AppOpenTarget): EntryAction[] {
   return [
+    ...tileOpenTargetMenuActions(currentOpenTarget),
     ...TILE_MENU_ACTIONS,
     reordering
       ? { action: 'end-tile-reorder', label: '並べ替えを終える' }
