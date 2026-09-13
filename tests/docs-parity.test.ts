@@ -2269,6 +2269,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-13(#857 段①b ── ダブルタップ)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-09-file-drop-pinned" …` → e793190
+     */
+    '横に留めた枠へ落としたファイルが、その枠のノートに入るようになりました',
+    /**
      * ⚠ **2026-09-12(#857 段① ── タイルの並べ替え)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-08-block-handoff" …` → f9a3d79
      */

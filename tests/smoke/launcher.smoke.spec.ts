@@ -8,8 +8,7 @@ import {
   createEntry,
   expectReachable,
   useSplitEditor,
-  useListBrowse,
-} from './helpers';
+  useListBrowse, openTile,} from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -297,7 +296,8 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   // ④ 🔴 **押すと新しいタブで開く**(URL タイル)
   const [urlTab] = await Promise.all([
     context.waitForEvent('page'),
-    clickReal(page, '[data-pkc-tile-kind="url"]'),
+    // ⚠ **2 回押す**(#857 段①b)── 1 回目は印が付くだけ
+    openTile(page, '[data-pkc-tile-kind="url"]'),
   ]);
   await urlTab.waitForLoadState('domcontentloaded');
   expect(urlTab.url()).toContain('tile=1');
@@ -323,7 +323,7 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   // ⑤ 🔴 **アプリのタイルは中身が開く**(blob。添付の bytes に届いている)
   const [appTab] = await Promise.all([
     context.waitForEvent('page'),
-    clickReal(page, '[data-pkc-tile-kind="app"]'),
+    openTile(page, '[data-pkc-tile-kind="app"]'),
   ]);
   await appTab.waitForLoadState('domcontentloaded');
 
@@ -799,6 +799,8 @@ test('🔴 登録 → タイル → SPA が動き、開き直しても続きが�
 
   // ③ 🔴 押すと**アプリが動く**
   const open = async (): Promise<Record<string, string | null>> => {
+    // ⚠ **2 回押す**(#857 段①b)── 1 回目は印が付くだけ
+    await tile.click();
     const [tab] = await Promise.all([context.waitForEvent('page'), tile.click()]);
     await tab.waitForLoadState('domcontentloaded');
     const inner = tab.frameLocator('[data-pkc-field="launcher-app"]');
@@ -1324,7 +1326,7 @@ test('🔴 一式を入れた端末では Office タイルが出て、押すと�
 
   // 🔴 押すと **Office の窓**が開く
   const popup = context.waitForEvent('page');
-  await clickReal(page, builtinTile('office'));
+  await openTile(page, builtinTile('office'));
   const win = await popup;
   expect(win.url()).toContain('office/host.html');
   await win.close();
@@ -1488,7 +1490,7 @@ test('🔴 組み込みタイルを押すと別窓が開き、本文の面は残
   ).toHaveText('アプリは別のウィンドウで開きます');
 
   const popup = context.waitForEvent('page');
-  await clickReal(page, builtinTile('dual'));
+  await openTile(page, builtinTile('dual'));
   const win = await popup;
 
   // ③ 窓は PKC のディープリンクで開いている(面 + 連れて行くノート + 合図)

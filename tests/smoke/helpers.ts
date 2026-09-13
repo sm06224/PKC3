@@ -419,6 +419,19 @@ export async function clickReal(page: Page, target: Target): Promise<void> {
 }
 
 /**
+ * 🔴 **アプリのタイルを開く = 2 回押す**(#857 段①b。user 裁定 2026-09-13)。
+ *
+ * ⚠ 1 回目は**印が付くだけ**(掴み損ねで窓が開くのを止めるため)── だから
+ *   spec のあちこちで `clickReal` を 2 回書かない。**規則はここ 1 本**に置く
+ *   (2 回で足りなくなった日に、直す所が 1 か所で済む)。
+ * ⚠ 連続押しの窓は 500ms なので、**間に待ちを挟まない**。
+ */
+export async function openTile(page: Page, target: Target): Promise<void> {
+  await clickReal(page, target);
+  await clickReal(page, target);
+}
+
+/**
  * 🔴 **塊を開くクリック = Ctrl(⌘)+クリック**(#495。user 裁定 2026-08-27)。
  *
  * > 「見出しを押したら編集とかは、**Ctrl+クリックで、その地点から編集**にすれば
