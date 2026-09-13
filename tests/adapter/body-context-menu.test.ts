@@ -1610,3 +1610,55 @@ describe('近道の字の見え方(#587 C 案 2)', () => {
     expect(blocks[0], '案内が説明と同じ濃さ').toMatch(decl('color', 'color-mix\\('));
   });
 });
+
+/**
+ * 🔴 **メニューが、開いた直後に自分で自分を閉じないこと**(2026-09-13。
+ * 範囲を切った実ブラウザ smoke が掘った)。
+ *
+ * ## 何が起きていたか
+ *
+ * 一覧の**下のほう**の見出しを右クリックすると、メニューは出るのに **10〜60ms で
+ * 勝手に閉じる**(押す間も無い)。上のほうの見出しでは起きない。
+ *
+ * 🔑 原因は**自分で引き金を引いていた**こと:
+ *
+ * | 順 | 何が起きるか |
+ * |---|---|
+ * | ① | メニューを出し、鍵だけで使う人のために**先頭のボタンへ焦点を当てる** |
+ * | ② | 🔴 素の `focus()` は、その要素が画面に入りきっていなければ**ブラウザがスクロールして見せる** |
+ * | ③ | `binder.ts` は `root` の `scroll` を capture で拾って**メニューを閉じる** |
+ *
+ * ⚠ ③ 自体は正しい(user が一覧を送ったら、貼り付いたメニューだけ取り残される)──
+ *   直すのは**引き金を自分で引かない**側である。
+ *
+ * ## ⚠ この検査は「実ブラウザで起きること」を直に見られない
+ *
+ * happy-dom は `focus()` でスクロールしない(= **症状そのものが再現しない**)。
+ * 🔑 だから見るのは**渡している約束**である ── `preventScroll` を落とすと落ちる。
+ * ⚠ 弱い形だと自覚して使う:**画面で起きることは実ブラウザの smoke が見る**
+ *   (CLAUDE.md「取り出せないものは原文 pin で妥協するが、弱いと自覚して使う」)。
+ */
+describe('メニューは自分で自分を閉じない(2026-09-13)', () => {
+  it('🔴 焦点を当てるときスクロールさせない(開いた直後の scroll で閉じる)', () => {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const seen: Array<FocusOptions | undefined> = [];
+    const orig = HTMLElement.prototype.focus;
+    HTMLElement.prototype.focus = function patched(opts?: FocusOptions): void {
+      seen.push(opts);
+      orig.call(this, opts);
+    };
+    try {
+      openContextMenu(root, { x: 10, y: 10 }, [...BODY_MENU_ACTIONS], null, {});
+    } finally {
+      HTMLElement.prototype.focus = orig;
+    }
+    // ⚠ 空振り防止 ── 焦点そのものは当てている(当てていなければ鍵だけの人が詰む)
+    expect(seen.length, '先頭へ焦点を当てていない(鍵だけで使う人が動けない)').toBeGreaterThan(0);
+    expect(
+      seen[0]?.preventScroll,
+      '焦点でスクロールしうる ── 開いた直後の scroll で、メニューが自分で閉じる',
+    ).toBe(true);
+    root.remove();
+  });
+});

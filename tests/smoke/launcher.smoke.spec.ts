@@ -450,10 +450,67 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   const groupMenu = page.locator('[data-pkc-region="context-menu"]');
   await expect(groupMenu, '見出しを右クリックしてもメニューが出ない').toBeVisible();
   await expect(groupMenu, '「目印を選ぶ…」が出ていない').toContainText('目印を選ぶ');
+  /**
+   * 🔴 **見分けるのは「字」ではなく「受け手の名前」**(2026-09-13、段③ で書き直した)。
+   *
+   * ⚠ 直す前は **`not.toContainText('上へ')`** と字で見ていた ── 段② の時点では
+   *   「上へ」はタイルのメニューにしか無かったので、それで
+   *   「見出しにタイルのメニューが出ている」を捕まえられた。
+   * 🔴 段③ が**わざと同じ字**を見出しにも足した(同じことをする 2 つの押し所で
+   *   呼び名を変えない、という段①b-2 の動線レビューの結論)ので、
+   *   **この assert は成り立たなくなった**(実ブラウザの smoke が落ちて分かった)。
+   * 🔑 効く先が違うことは**受け手の名前**で見分けられる ──
+   *   タイルは `move-tile-*`、グループは `move-app-group-*` である。
+   *   ⚠ 字で見分ける検査は、**字を揃えた日に必ず嘘になる**。
+   */
+  await expect(
+    groupMenu.locator('[data-pkc-action="move-tile-up"]'),
+    '見出しの上にタイルのメニューが出ている(押した物と効く先が食い違う。#677 の型)',
+  ).toHaveCount(0);
+  // ⚠ 対照群 ── グループ側の口は出ている(上の 0 件が「メニューが空」で成り立たない)
+  await expect(
+    groupMenu.locator('[data-pkc-action="move-app-group-up"]'),
+    'グループの「上へ」が出ていない',
+  ).toHaveCount(1);
+  await expect(
+    groupMenu.locator('[data-pkc-action="move-app-group-down"]'),
+    'グループの「下へ」が出ていない',
+  ).toHaveCount(1);
+  /**
+   * ⚠ **「名前順に戻す」は、番号がまだ 1 つも付いていないので出ない**
+   *   ── 出ていたら「押しても何も起きない」行を出していることになる。
+   */
+  await expect(
+    groupMenu.locator('[data-pkc-action="reset-app-group-order"]'),
+    '番号が 1 つも無いのに「名前順に戻す」が出ている(押しても何も起きない)',
+  ).toHaveCount(0);
+  /**
+   * 🔴 **一覧の下のほうの見出しでも、メニューが自分で閉じない**
+   *   (2026-09-13。範囲を切った smoke が掘った)。
+   *
+   * ⚠ 症状:**組み込みアプリ**(いちばん下の見出し)を右クリックすると、メニューは
+   *   出るのに **10〜60ms で勝手に閉じ**、押す間が無かった。上のほうの見出しでは起きない。
+   * 🔑 原因は**自分で引き金を引いていた**こと ── 先頭のボタンへ焦点を当てるときに
+   *   ブラウザが**画面へスクロールして見せる**ので、`root` の `scroll` を拾う
+   *   「閉じる」が発火していた(`context-menu.ts` の `preventScroll` で直した)。
+   * ⚠ **待ってから見る** ── 出た瞬間だけ見ると、閉じる前の一瞬を捕まえて緑になる。
+   */
+  const lastToggle = page.locator(
+    '[data-pkc-action="toggle-app-group"][data-pkc-group="組み込みアプリ"]',
+  );
+  await lastToggle.click({ button: 'right' });
+  await expect(groupMenu, '下のほうの見出しでメニューが出ない').toBeVisible();
+  await page.waitForTimeout(300);
   await expect(
     groupMenu,
-    '見出しの上にタイルのメニューが出ている(押した物と効く先が食い違う。#677 の型)',
-  ).not.toContainText('上へ');
+    '下のほうの見出しのメニューが、押す間も無く自分で閉じた(焦点のスクロールが引き金)',
+  ).toBeVisible();
+  // ⚠ 後始末 ── 開いたまま次へ進むと、その先の押し所をメニューが覆う(段② で 1 度踏んだ)
+  await page.locator('[data-pkc-field="launcher-lead"]').click();
+  await expect(groupMenu, '見出しの外を押しても閉じない').toBeHidden();
+
+  await toolToggle.click({ button: 'right' });
+  await expect(groupMenu, '見出しを右クリックしてもメニューが出ない(2 度目)').toBeVisible();
   await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="pick-app-group-icon"]');
 
   const iconRows = page.locator('[data-pkc-field="pick-group-icon"]');
