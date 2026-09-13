@@ -26,6 +26,7 @@ import { appGroupIconOf, sortGroupNames } from '@features/launcher/app-group-spe
 import type { IconValue } from '@features/icon/icon-value';
 import { appGroupFold, type GroupFoldStore } from './group-fold';
 import { setIcon } from './icons';
+import { AssetLends, type AssetLender } from './asset-lends';
 
 export class LauncherRenderer {
   private lastTiles: LauncherTile[] | null | undefined = undefined;
@@ -45,11 +46,28 @@ export class LauncherRenderer {
   /** ⚠ **並び順も指紋に要る**(#857 段③)── 入れないと動かしても画面が変わらない。 */
   private lastOrders: string | undefined = undefined;
 
+  /**
+   * 🔴 **取り込んだ絵の貸出**(#856 段②)。
+   * ⚠ 一覧は**組み直すたびに `<img>` を捨てる**ので、返す手が無いと
+   *   画面に無い絵の bytes が残る(不可侵指示 2026-07-27)。
+   */
+  private readonly lends = new AssetLends();
+
   constructor(
     private readonly region: HTMLElement,
     /** ⚠ test は自分で `new GroupFoldStore(null)` して渡す(`appEditorMode` と同じ作法)。 */
     private readonly folds: GroupFoldStore = appGroupFold,
+    /** ⚠ **渡されなければ絵は出さない**(字と図案はそのまま出る ── 段①の逃げ道)。 */
+    private readonly assets: AssetLender | null = null,
   ) {}
+
+  /**
+   * 🔴 **面を畳む / 器ごと捨てるときに、借りた絵を全部返す**(#856 段②)。
+   * ⚠ 呼ばないと、閉じた面の絵が heap に残る。
+   */
+  disposeAssets(): void {
+    this.lends.disposeAll();
+  }
 
   /**
    * 🔴 **器は 1 度だけ組む**(#401 ①)。
@@ -372,6 +390,16 @@ export class LauncherRenderer {
       }
       grid?.append(this.row(tile, state.selectedLid, canReorder, state.launcherPick, reordering));
     }
+
+    /**
+     * 🔴 **取り込んだ絵を差す**(#856 段②)── 器を組み直した**この回だけ**呼ぶ。
+     *
+     * ⚠ 上の指紋で早期 return する回には来ない ── 来ると、同じ絵をもう一度借りることになる。
+     * ⚠ 借りるのは非同期なので、**戻ってきたときに画面がもう違う**ことがある
+     *   (`AssetLends` が世代で弾く)。
+     */
+    if (this.assets !== null) void this.lends.hydrate(list, this.assets);
+    else this.lends.prune();
   }
 
   /**
@@ -476,7 +504,22 @@ export class LauncherRenderer {
      *   (2026-09-11 に全量 smoke が 5 本落ちて学んだ形。CLAUDE.md §10)。
      *   絵を出すのは CSS の `::before` である。
      */
-    if (tile.symbol !== undefined) {
+    /**
+     * 🔴 **取り込んだ絵が在れば、それを出す**(#856 段②)。
+     *
+     * ⚠ ここでは **`src` を入れない** ── bytes は IDB に在り、借りるのは非同期である。
+     *   鍵だけを属性で置き、`hydrateTileIcons` が後から差して**寿命の終わりに返す**
+     *   (不可侵指示 2026-07-27「生成物のライフサイクル終端での即破棄」)。
+     * ⚠ **器の字は空のまま**にする ── `<img>` は字を持たないので、ボタン丸ごとの
+     *   `textContent` は 1 文字も変わらない(CLAUDE.md §10「読み取れる値が変わる」)。
+     */
+    if (tile.iconAssetKey !== undefined) {
+      const img = document.createElement('img');
+      img.setAttribute('data-pkc-asset-key', tile.iconAssetKey);
+      img.setAttribute('data-pkc-field', 'tile-icon-img');
+      img.alt = '';
+      icon.append(img);
+    } else if (tile.symbol !== undefined) {
       icon.setAttribute('data-pkc-icon', '');
       setIcon(icon, tile.symbol);
     } else {

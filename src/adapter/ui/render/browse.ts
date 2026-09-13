@@ -179,7 +179,8 @@ export class BrowseRouter {
     this.list = new SidebarRenderer(sidebar);
     this.kindBar = new KindBarRenderer(sidebar);
     this.filer = new FilerRenderer(this.panes.filer);
-    this.launcher = new LauncherRenderer(this.panes.launcher);
+    // 🔴 取り込んだ絵を出すために貸し口を渡す(#856 段②)── 渡さなければ字と図案だけ出る
+    this.launcher = new LauncherRenderer(this.panes.launcher, undefined, assets);
     this.schedule = new ScheduleRenderer(this.panes.schedule, now);
     this.contacts = new ContactsRenderer(this.panes.contacts);
     this.captures = new CapturesRenderer(this.panes.captures, assets, onCaptureReady);

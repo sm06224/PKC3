@@ -33,10 +33,19 @@ export interface LauncherTile {
    * 目印の 1 字(emoji)。
    * 🔴 取込は `app_icon` を**欠損なく写していた**のに、出す側が無かった
    * (P8 段⑭ で判明)── PKC2 で付けた目印が全部消えて見えていた。
-   * ⚠ 画像アイコン(`app_icon_asset_key`)はまだ出さない ── IDB Blob の
-   * 貸し借りが要るので、1 字の目印だけで識別価値が足りるうちは足さない。
    */
   icon?: string;
+  /**
+   * 🔴 **絵そのものを目印にする**(#856 段②)── `attachment.app_icon_asset_key`。
+   *
+   * ⚠ ここは**鍵だけ**で、bytes は載せない(不可侵指示 2026-07-27)── 出す側が
+   *   IDB から借りて `<img>` に差し、**表示の寿命の終わりに返す**。
+   * 🔑 **絵が在れば、字や図案より優先する** ── user が「リンク先の印を取り込む」を
+   *   押して取れたなら、それが**いちばん新しく選んだ物**である。
+   * ⚠ 逆に**字や図案を選んだら、この鍵は消える**(書く側の責務)── 消さないと
+   *   「絵を選んだのに変わらない」という**無言の dead click** になる。
+   */
+  iconAssetKey?: string;
   /**
    * 🔴 **図案で置いた目印**(#770 段②)── `attachment.app_icon` に**図案の名前**
    * (`calendar` など)が書いてあるときだけ立つ。
@@ -134,7 +143,9 @@ export function tileFrom(src: TileSource): LauncherTile | null {
    *   見出しでは `ca` と出る、という形で割れる)。
    */
   const { icon, symbol } = parseIconValue(str(fm['attachment.app_icon']));
-  const base = { lid: src.lid, title: src.title, group, order, icon, symbol };
+  // 🔴 取り込んだ絵(#856 段②)。⚠ 鍵だけを運ぶ ── bytes は出す側が IDB から借りる
+  const iconAssetKey = str(fm['attachment.app_icon_asset_key']);
+  const base = { lid: src.lid, title: src.title, group, order, icon, symbol, iconAssetKey };
 
   if (url !== undefined) {
     // ⚠ 開けない URL は**タイルにしない**(押しても何も起きないタイルを出さない)
