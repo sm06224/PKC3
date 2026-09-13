@@ -17,6 +17,7 @@ import {
   writeAppGroupIcon,
 } from '../../src/features/launcher/app-group-spec';
 import { parseIconValue } from '../../src/features/icon/icon-value';
+import { tileFrom } from '../../src/features/launcher/tiles';
 
 const body = (icon: string): string => `---\n${APP_GROUP_ICON_KEY}: ${icon}\n---\n説明\n`;
 
@@ -110,5 +111,42 @@ describe('名前 → 目印の対応', () => {
     });
     // ⚠ 対照群 ── 別の名前を引いても、親から拾ってこない
     expect(appGroupIconOf(icons, '資料')).toBeUndefined();
+  });
+});
+
+/**
+ * 🔴 **見出しの字と、ノートの題名が食い違わない**(#857 段② の直し、2026-09-13)。
+ *
+ * ⚠ frontmatter の読み手は**裸の値だけ**を trim する ── `app_group: " 資料 "` のように
+ *   **引用符つき**だと空白が残る。⚠ そのままだと**見出しは「 資料 」・ノートの題名は
+ *   「資料」**になり、目印を選んでも引けない(押しても何も出ない = 無言の dead click)。
+ */
+describe('群の名前は、読む側でも書く側でも前後の空白を落とす', () => {
+  it('🔴 引用符つきで空白が残っていても、目印が引ける', () => {
+    const t = tileFrom({
+      lid: 'a1',
+      title: '地図',
+      body:
+        '---\nattachment.launcher_url: https://a.test/\nattachment.app_group: " 資料 "\n---\n',
+    });
+    expect(t, '前提が崩れている(タイルとして読めていない)').not.toBeNull();
+    expect(t!.group, '群の名前に空白が残っている').toBe('資料');
+
+    const icons = appGroupIconsOf([
+      { title: '資料', body: `---\n${APP_GROUP_ICON_KEY}: calendar\n---\n` },
+    ]);
+    expect(
+      appGroupIconOf(icons, t!.group),
+      '目印が引けない(見出しの字とノートの題名が食い違っている)',
+    ).toEqual({ symbol: 'calendar' });
+  });
+
+  it('⚠ 空白だけの名前は「名前なし」と同じ(畳めない群へ落ちる)', () => {
+    const t = tileFrom({
+      lid: 'a2',
+      title: '電卓',
+      body: '---\nattachment.launcher_url: https://b.test/\nattachment.app_group: "   "\n---\n',
+    });
+    expect(t!.group, '空白だけの名前が群として残っている').toBe('');
   });
 });

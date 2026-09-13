@@ -20,6 +20,7 @@
 import { parseFrontmatter } from '../markdown/frontmatter';
 import { type IconName } from '../icon/symbols';
 import { parseIconValue } from '../icon/icon-value';
+import { appGroupName } from './app-group-spec';
 
 export interface LauncherTile {
   lid: string;
@@ -114,7 +115,16 @@ export function tileFrom(src: TileSource): LauncherTile | null {
   const registered = fm['attachment.registered_as_app'] === true;
   if (!registered && url === undefined) return null;
 
-  const group = str(fm['attachment.app_group']) ?? '';
+  /**
+   * 🔴 **群の名前は前後の空白を落とす**(#857 段② の直し、2026-09-13)。
+   *
+   * ⚠ frontmatter の読み手は**裸の値だけ**を trim する ── `app_group: " 資料 "` の
+   *   ように**引用符つき**だと空白が残る。⚠ そのままだと
+   *   **見出しは「 資料 」、グループ用のノートの題名は「資料」**になり、
+   *   目印を選んでも**引けない**(押しても何も出ない ── 無言の dead click)。
+   * 🔑 **正本は `appGroupName` 1 本**(書く側もこれを通す)── 2 つ目の綴りを作らない。
+   */
+  const group = appGroupName(str(fm['attachment.app_group']) ?? '');
   const orderRaw = fm['attachment.app_order'];
   const order = typeof orderRaw === 'number' && Number.isFinite(orderRaw) ? orderRaw : undefined;
   /**

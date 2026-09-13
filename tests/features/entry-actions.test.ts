@@ -20,6 +20,7 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
+  APP_GROUP_MENU_ACTIONS,
   tableConvertPickLabel,
   tableMenuActions,
   ADOPT_IMAGES_LABEL,
@@ -73,6 +74,13 @@ describe('右クリックに出す操作', () => {
       TASK_REPEAT_MENU_ACTION,
       ...repeatMenuActions(null),
       ...repeatMenuActions('week'),
+      /**
+       * ⚠ 2026-09-13(#857 段②): グループの見出しのメニュー。
+       * 🔴 **足した日にここへ入れ忘れていた** ── 調査が拾った。入れるまでは
+       *   「メニューには出るのに押しても無言」を**この門が 1 件も見ていなかった**
+       *   (すぐ上の 2026-09-12 の戒めと、まったく同じ抜け方である)。
+       */
+      ...APP_GROUP_MENU_ACTIONS,
     ]
       .filter((a) => !have.has(a.action))
       .map((a) => a.action);
@@ -80,6 +88,10 @@ describe('右クリックに出す操作', () => {
     // ⚠ 空振り防止 ── 足した表が空なら、上の走査は増えていないのと同じ
     expect(TILE_MENU_ACTIONS.length, 'タイルのメニューが空(空振り)').toBeGreaterThanOrEqual(2);
     expect(repeatMenuActions(null).length, '刻みの一覧が空(空振り)').toBe(4);
+    expect(
+      APP_GROUP_MENU_ACTIONS.length,
+      'グループの見出しのメニューが空(空振り)',
+    ).toBeGreaterThanOrEqual(1);
   });
 
   it('⚠ 空振り防止 ── 綴りを 1 つ壊せば、この検査は落ちる', () => {
