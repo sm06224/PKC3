@@ -79,6 +79,15 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
    *   読み方の好みなので運ぶ(`pkc3.alarm` と同じ考え方)。
    */
   { key: 'pkc3.phone-links', label: '本文の電話番号を押せるようにするか' },
+  /**
+   * ⚠ **`pkc3.panes`(列の畳み方)と同じ扱い**(#857 段④)── 「畳んでおきたい」は
+   *   **人に付く**好みである。
+   * 🔑 中身はグループの**名前**であって lid ではない ── だから `pkc3.split-lids`
+   *   (運ばない)と違い、別の container へ運んでも**当たらないだけ**である
+   *   (居ないノートを指す枠が復活する、が起きない)。`pkc3.query-key`
+   *   (集計の束ね方 = 本文の鍵の名前)と同じ型である。
+   */
+  { key: 'pkc3.app-group-folded', label: 'アプリのグループの畳み方' },
 ];
 
 /**

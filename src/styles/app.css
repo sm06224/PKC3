@@ -4374,7 +4374,6 @@ li[data-pkc-row-slot] {
 [data-pkc-field='launcher-group'] button::before {
   content: '▾';
   flex: none;
-  font-size: 9px;
   line-height: 1;
 }
 [data-pkc-field='launcher-group'] button[aria-expanded='false']::before {

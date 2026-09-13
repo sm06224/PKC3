@@ -1096,7 +1096,7 @@ describe('お知らせの文面は固定(#220-7)', () => {
      *   **いちばん古い 1 件**(`2026-09-09-file-drop-pinned`)を落として空けた。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-09-file-drop-pinned" …` → e793190
      */
-    ['2026-09-13-app-group-fold', '99b9060d'],
+    ['2026-09-13-app-group-fold', 'a89a95ba'],
     ['2026-09-13-note-date-no-time', 'c508bbb4'],
     ['2026-09-13-task-repeat-menu', '53684f35'],
     ['2026-09-13-tile-reorder-mode', '49c8eab3'],

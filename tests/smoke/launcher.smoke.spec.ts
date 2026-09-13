@@ -290,6 +290,67 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   ]);
   expect(mineTop, '自分のタイルが組み込みの見出しより下へ押し下がっている').toBeLessThan(headTop);
 
+  /**
+   * 🔴 **見出しを押すと畳める / 開ける**(#857 段④。動線: アプリのタブを開く →
+   * 「組み込みアプリ」を押す → 中のアプリが消える → もう一度押すと戻る)。
+   * 🔑 起動を 1 つも足していない ── 既に開いている一覧の道中に足した(smoke-budget)。
+   */
+  await expect(
+    page.locator('[data-pkc-action="toggle-app-group"][data-pkc-group=""]'),
+    '名前の無いいちばん上のまとまりに、畳む押し所が出ている(片道の操作になる)',
+  ).toHaveCount(0);
+
+  const builtinToggle = page.locator(
+    '[data-pkc-action="toggle-app-group"][data-pkc-group="組み込みアプリ"]',
+  );
+  await expect(builtinToggle, '既定では開いている').toHaveAttribute('aria-expanded', 'true');
+  await clickReal(page, '[data-pkc-action="toggle-app-group"][data-pkc-group="組み込みアプリ"]');
+  await expect(builtinToggle, '押しても畳んだ印が付かない').toHaveAttribute(
+    'aria-expanded',
+    'false',
+  );
+  await expect(page.locator(builtinTile('dual')), '畳んでも中のアプリが消えない').toHaveCount(0);
+  await expect(builtinToggle, '畳んだのに件数が出ない').toHaveText(/^組み込みアプリ\(\d+\)$/);
+  // ⚠ 別の群(自分のタイル)は無関係 ── 巻き添えで消えていない
+  await expect(tiles, '無関係な群まで巻き添えで消えている').toHaveCount(3);
+
+  /**
+   * 🔴 **絞り込むと、畳んでいても出る**(「無い」と「畳んである」の区別が付かないと
+   * 探せなくなる)。欄を空にすると、押した覚え(畳み)は消えずにまた隠れる。
+   */
+  await page.locator('[data-pkc-field="entry-filter"]').fill('予定表');
+  await expect(
+    page.locator(builtinTile('schedule')),
+    '畳んだ群の中のアプリが、絞り込みを打っても出てこない',
+  ).toHaveCount(1);
+  await page.locator('[data-pkc-field="entry-filter"]').fill('');
+  await expect(
+    page.locator(builtinTile('schedule')),
+    '絞り込みを消したのに開いたままになる(押した覚えの畳みが消えている)',
+  ).toHaveCount(0);
+
+  // 開き直すと戻る
+  await clickReal(page, '[data-pkc-action="toggle-app-group"][data-pkc-group="組み込みアプリ"]');
+  await expect(builtinToggle, 'もう一度押しても開かない').toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator(builtinTile('dual'))).toHaveCount(1);
+
+  /**
+   * 🔴 **畳んだ状態で読み込み直しても、畳んだまま**(端末に憶えている ──
+   * container ではなく `localStorage` に置く設計。`group-fold.ts` の docstring)。
+   */
+  await clickReal(page, '[data-pkc-action="toggle-app-group"][data-pkc-group="組み込みアプリ"]');
+  await expect(page.locator(builtinTile('dual'))).toHaveCount(0);
+  await page.reload();
+  await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
+  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await expect(
+    page.locator(builtinTile('dual')),
+    '読み込み直すと畳みが忘れられている(端末に憶えていない)',
+  ).toHaveCount(0);
+  // 後続の assert に影響しないよう開き直しておく
+  await clickReal(page, '[data-pkc-action="toggle-app-group"][data-pkc-group="組み込みアプリ"]');
+  await expect(page.locator(builtinTile('dual'))).toHaveCount(1);
+
   // ③ 外部へ飛ぶタイルは**行き先が見えている**(押す前に分かる)
   await expect(tiles.nth(1).locator('[data-pkc-field="tile-url"]')).not.toHaveText('');
 
