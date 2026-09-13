@@ -124,12 +124,19 @@ export function planTileMove(
 
   const next = [...rest.slice(0, at), moved, ...rest.slice(at)];
 
+  const groupChanged = moved.group !== toGroup;
   /**
    * 🔴 **並びが 1 つも変わらない回は、1 件も書かない**(上の注記)。
-   * ⚠ 群が変わる回は、並びが同じでも書く(`app_group` を書かないと移らない)。
+   *
+   * 🔑 **群が変わる回は、ここで止まらない** ── そのとき `moved` は `source`
+   *   (行き先の群)に**居ない**ので `next` は必ず 1 件多く、どこへ挿しても
+   *   どこかで lid が食い違う。⚠ だから `!groupChanged &&` は**要らない**
+   *   (2026-09-13 の変異試験が「外しても振る舞いが 1 つも変わらない」と教えた)。
+   *   **持つと「これが守っている」と誤読される**(CLAUDE.md §1)。
+   * ⚠ 群が変わる回に書かねばならないこと自体は、test が別に pin している
+   *   (「落とした先での位置が同じでも、群が変われば書く」)。
    */
-  const groupChanged = moved.group !== toGroup;
-  if (!groupChanged && next.every((t, i) => t.lid === source[i]?.lid)) return [];
+  if (next.every((t, i) => t.lid === source[i]?.lid)) return [];
 
   const writes: TileOrderWrite[] = [];
   for (const [i, t] of next.entries()) {

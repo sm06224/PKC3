@@ -13,6 +13,7 @@ import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { stubRevisionOps } from '../helpers/revision-stub';
 import { parseFrontmatter } from '../../src/features/markdown/frontmatter';
+import { contentHash64Hex } from '../../src/adapter/platform/storage/content-hash';
 import { withBuiltinTiles, type LauncherTile } from '../../src/features/launcher/tiles';
 import { LauncherRenderer } from '../../src/adapter/ui/render/launcher';
 
@@ -66,6 +67,8 @@ function setup(
 ): Harness {
   const bodies: Record<string, string> = { ...initial };
   const writeLids: string[] = [];
+  /** ⚠ 別の窓が割り込むのは**1 回だけ**(毎回やると再試行が永久に通らない)。 */
+  const bumped = new Set<string>();
   const d = new Dispatcher();
   /**
    * 🔴 **ロックを解く ack の回数を数える**(着地前レビュー ⚠9)。
@@ -91,10 +94,28 @@ function setup(
     renameEntry: async () => stubStamps(),
     replaceAssetRefs: () => Promise.reject(new Error('この test では使わない')),
     reorderEntry: async () => stubStamps(),
-    persistEntry: async (e) => {
+    /**
+     * 🔴 **stub は本物の意味論を真似る**(CLAUDE.md §3。2026-09-13 の変異試験が教えた)。
+     *
+     * ⚠ 1 稿目は**第 2 引数(`expectHash`)を受け取っていなかった** ── 衝突は
+     *   `conflictOn` という**明示の旗**だけで作っていたので、実装から
+     *   `{ expectHash: … }` を丸ごと外す変異が **SURVIVED** した。つまり
+     *   「読んでから書くまでの間に別の窓が書いていたら弾く」(#178)は、
+     *   **この test 群では 1 バイトも守られていなかった**。
+     * 🔑 だから**本物と同じ形**にする:別の窓が先に書いた状態を実際に作り、
+     *   **`expectHash` でしか気づけない**ようにする ── 渡さない実装なら
+     *   その書込は素通りし、衝突の test が落ちる。
+     */
+    persistEntry: async (e, po) => {
       writeLids.push(e.lid);
-      // 🔴 **別の窓が書き替えた**を作る(`expectHash` の断りを見るため)
-      if (opts.conflictOn === e.lid) return { ...stubStamps(), conflict: true };
+      if (opts.conflictOn === e.lid && !bumped.has(e.lid)) {
+        // ⚠ **別の窓が本文を書き替えた** ── 以後、読んだときの hash と食い違う
+        bumped.add(e.lid);
+        bodies[e.lid] = `${bodies[e.lid] ?? ''}別の窓が足した行\n`;
+      }
+      const now = bodies[e.lid];
+      if (po?.expectHash !== undefined && now !== undefined && po.expectHash !== contentHash64Hex(now))
+        return { ...stubStamps(), conflict: true };
       bodies[e.lid] = e.body;
       return stubStamps();
     },
@@ -257,6 +278,24 @@ describe('断るときは理由を出す(無言の操作拒否を作らない)',
       target: { kind: 'step', by: -1 },
     });
     expect(h.d.getState().error).toContain('最初から入っているアプリ');
+  });
+
+  /**
+   * 🔴 **絞り込んでいる間は、reducer も断る**(門は 2 枚 ── 2026-09-13 の変異試験)。
+   * ⚠ 掴ませない門は `launcher.ts` に在るが(別の it が pin)、**それだけだと
+   *   reducer の門を外しても全部緑**だった ── 右クリックや鍵など、
+   *   `draggable` を通らない口が後から生えた日に静かに抜ける。
+   */
+  it('🔴 絞り込んでいる間は断る(隠れた 1 枚をまたいで動かさない)', async () => {
+    const h = setup({ a: body('a.html', 0), b: body('b.html', 1) });
+    await tick();
+    h.d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'a' });
+    await tick();
+    const before = h.writes;
+    h.d.dispatch({ type: 'MOVE_APP_TILE', lid: 'a', target: { kind: 'step', by: 1 } });
+    await tick(40);
+    expect(h.d.getState().error).toContain('絞り込みを消してから');
+    expect(h.writes - before, '絞り込み中なのに disk へ書いた').toBe(0);
   });
 
   it('🔴 編集中は断る(黙って元へ戻さない)', async () => {
