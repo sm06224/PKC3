@@ -278,6 +278,23 @@ describe('グループを畳む(#857 段④)', () => {
         root.querySelector('[data-pkc-region="context-menu"]'),
         '指を離した合図でメニューが閉じた(選ぶ前に消える)',
       ).not.toBeNull();
+      /**
+       * 🔴 **対照群 ── 緩めすぎていないこと。**
+       * ⚠ 直しは「閉じる条件」を 1 つ緩めているので、**緩めすぎると今度は
+       *   メニューが居座り、下に在る物を覆い隠す**(実ブラウザで実際にそうなった)。
+       * 🔑 **本物の押し方で撃つ** ── `pointerdown` が先に来るので、長押しの窓は
+       *   その時点で閉じている(合成 `click` だけでは、この門は何も見ない)。
+       */
+      const other = region.querySelector<HTMLElement>('[data-pkc-field="launcher-lead"]');
+      expect(other, '前提が崩れている(押す先が無い)').not.toBeNull();
+      other!.dispatchEvent(
+        new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch', button: 0 }),
+      );
+      other!.click();
+      expect(
+        root.querySelector('[data-pkc-region="context-menu"]'),
+        'メニューの外を普通に押しても閉じない(閉じる条件を緩めすぎている)',
+      ).toBeNull();
     } finally {
       vi.useRealTimers();
     }
