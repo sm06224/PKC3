@@ -125,6 +125,9 @@ describe('操作の全数台帳(#582 段①)', () => {
       outsideActionsTable: x.outsideActionsTable.length,
       unregistered: x.unregistered,
     }).toEqual({
+      // ⚠ 2026-09-13(#855 段 0 の 3 つ目): 札の繰り返し(`open-repeat-menu` /
+      //   `set-task-repeat`)で受け手 +2(登記は増えない ── 押し口は札の右クリックの
+      //   中にしか無く、鍵も持たない)
       // ⚠ 2026-09-13(#857 段①b-2): 並べ替えモードの出入り(`start-tile-reorder` /
       //   `end-tile-reorder`)で受け手 +2(登記は増えない ── 押し口はタイルの右クリックと
       //   一覧の「完了」だけで、鍵も持たない)
@@ -183,12 +186,12 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-09-12(#857 段①): タイルの「上へ / 下へ」(`move-tile-up` /
       //   `move-tile-down`)で受け手 +2 ── 登記は増えない(押した 1 枚が要る P1 で、
       //   名前だけでは呼べない。`stack-link-up` / `stack-link-down` と同じ仕分け)
-      total: 277,
-      receivers: 228,
+      total: 279,
+      receivers: 230,
       registered: 85,
       both: 36,
       outsideActionsTable: 49,
-      unregistered: 192,
+      unregistered: 194,
     });
   });
 

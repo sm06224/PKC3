@@ -24,6 +24,7 @@ import {
   type MoveLines,
 } from '@features/markdown/line-move';
 import { replaceTaskCards, type TaskScan } from '@features/schedule/task-cards';
+import type { RepeatUnit } from '@features/schedule/repeat';
 import type { ContactScan } from '@features/contact/contact-card';
 import type { CaptureItem } from '@features/capture/capture-item';
 import type { SnippetScan } from '@features/snippet/snippet-table';
@@ -1504,6 +1505,18 @@ export type UserAction =
       /** 🔴 期間の終わり(#344 段①)。単日にするなら渡さないか `null`。 */
       until?: string | null;
     }
+  /**
+   * 🔴 **その行の繰り返しを付け替える**(#855 段 0 の 3 つ目。user 裁定 2026-09-13
+   * 「札を右クリック →『繰り返す』」)。
+   *
+   * ⚠ **`SET_TASK_DATE` と分ける** ── あちらは `date` を**必ず**受け、
+   *   `null` かどうかで「外す / 付ける」を言い分けている。日付を省ける形にすると
+   *   その判定が濁るので、**刻みだけを言う action**を別に立てる。
+   * ⚠ 書く先は**同じ 1 本**(`REQUEST_BODY_REWRITE` の `kind: 'line-date'`)──
+   *   面が独自の書込経路を持たない(§7)。
+   * ⚠ `repeat: null` は**繰り返しをやめる**(日付は残る)。
+   */
+  | { type: 'SET_TASK_REPEAT'; lid: string; line: number; repeat: RepeatUnit | null }
   /**
    * 🔴 **チェックの印を付け外しする**(#277)。`line` は**原文の行番号**。
    * ⚠ 索引(何番目のチェックか)ではなく**行**で指す ── 索引だと、数え方が
@@ -4024,6 +4037,45 @@ function reduceCore(
               //    「期間を外す」という**頼んでいない指示**になる)
               ...(action.until === undefined ? {} : { until: action.until }),
             },
+          },
+        ],
+      };
+    }
+    /**
+     * 🔴 **その行の繰り返しを付け替える**(#855 段 0 の 3 つ目)。
+     *
+     * ⚠ 断り方は上の `SET_TASK_DATE` と**同じ形**(黙って捨てない)。
+     * 🔑 「日付が無い行では何もしない」は `rewriteLineDate` が持つ ── ここでは
+     *   本文を読まない(右クリックのたびに worker を叩く経路を増やさない)。
+     */
+    case 'SET_TASK_REPEAT': {
+      const blocked = phaseBlockReason(state.phase);
+      if (blocked !== null)
+        return {
+          state: {
+            ...state,
+            error: `${blocked}${action.repeat === null ? '繰り返しをやめられます' : '繰り返しにできます'}`,
+          },
+          events: [],
+        };
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta) return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_BODY_REWRITE',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            /**
+             * ⚠ **`date` を渡さない** ── 渡すと「日付も書き換える」意味になる。
+             *   ⚠ とくに**繰り返しの回の札**は、札に焼いてある日が
+             *   **その回の日**であって規則の開始日ではないので、渡すと
+             *   **開始日がその回の日へずれる**(静かに予定がまるごと動く)。
+             */
+            rewrite: { kind: 'line-date', line: action.line, repeat: action.repeat },
           },
         ],
       };

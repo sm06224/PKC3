@@ -951,3 +951,92 @@ describe('予定表を中央の面に描く(#673 段②)', () => {
     );
   });
 });
+
+/**
+ * 🔴 **札を右クリック →「繰り返す…」**(#855 段 0 の 3 つ目。user 裁定 2026-09-13)。
+ *
+ * ⚠ 直す前、札の `×` は `毎週` を**記法ごと剥がせる**のに、**面から戻す口が 1 つも
+ *   無かった**(本文を開いて手で打ち直すしかない)── 不可侵「置けるなら外せる」の
+ *   逆向きの破れである。
+ *
+ * 🔑 観測点は**保存された本文**にする ── 「メニューが出た」だけを見ると、
+ *   押しても本文が変わらない実装が緑で通る(この file の頭の規律)。
+ */
+describe('札の右クリックから繰り返しを付け替える(#855 段 0)', () => {
+  /** 右クリックして、出たメニューの字を読む。 */
+  const openMenu = (root: HTMLElement, card: HTMLElement): string[] => {
+    card.dispatchEvent(
+      new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 4, clientY: 4 }),
+    );
+    return [...root.querySelectorAll('[data-pkc-region="context-menu"] button')].map(
+      (b) => b.textContent ?? '',
+    );
+  };
+  const press = (root: HTMLElement, label: string): void => {
+    const btn = [...root.querySelectorAll<HTMLElement>('[data-pkc-region="context-menu"] button')].find(
+      (b) => b.textContent === label,
+    );
+    // ⚠ 空振り防止 ── 出ていない字を押したことにしない
+    expect(btn, `メニューに「${label}」が無い`).not.toBeUndefined();
+    btn!.click();
+  };
+
+  it('🔴 札を右クリックすると「繰り返す…」が出て、刻みを選ぶと本文に書かれる', async () => {
+    const { root, store } = setup({ e1: '- [ ] ゴミ出し @2026-08-25\n' });
+    const card = cardsOf(root, '2026-08-25')[0]!;
+    expect(openMenu(root, card), '「繰り返す…」が出ていない').toContain('繰り返す…');
+    press(root, '繰り返す…');
+    const units = [...root.querySelectorAll('[data-pkc-region="context-menu"] button')].map(
+      (b) => b.textContent,
+    );
+    // ⚠ いまは繰り返していない ── 4 つ出て、「やめる」は出ない
+    expect(units).toEqual(['毎日', '毎週', '毎月', '毎年']);
+    press(root, '毎週');
+    await tick(20);
+    expect(store['e1'], '本文に刻みが書かれていない').toBe('- [ ] ゴミ出し @2026-08-25 毎週\n');
+  });
+
+  it('🔴 繰り返している札では「やめる」が出て、押すと刻みだけ外れる', async () => {
+    const { root, store } = setup({ e1: '- [ ] ゴミ出し @2026-08-25 毎週\n' });
+    const card = cardsOf(root, '2026-08-25')[0]!;
+    openMenu(root, card);
+    press(root, '繰り返す…');
+    const units = [...root.querySelectorAll('[data-pkc-region="context-menu"] button')].map(
+      (b) => b.textContent,
+    );
+    // ⚠ **いまの刻みは出さない**(押しても何も起きない項目を並べない)
+    expect(units).toEqual(['毎日', '毎月', '毎年', 'やめる']);
+    press(root, 'やめる');
+    await tick(20);
+    expect(store['e1'], '日付まで消えた').toBe('- [ ] ゴミ出し @2026-08-25\n');
+  });
+
+  /**
+   * 🔴 **繰り返しの回の札を押しても、開始日がその回の日へずれない**。
+   * ⚠ 札に焼いてあるのは**その回の日**なので、日付を渡す実装だと
+   *   「毎週の開始が今日に化ける」= 予定がまるごと動く。
+   */
+  it('🔴 2 回目以降の回から変えても、開始日が動かない', async () => {
+    // 8/23(日)が「今日」── 8/16 開始の毎週は、8/23 と 8/30 に回が出る
+    const { root, store } = setup({ e1: '- [ ] 朝会 @2026-08-16 毎週\n' });
+    const card = cardsOf(root, '2026-08-23')[0];
+    expect(card, '前提が崩れている(2 回目の回が出ていない)').not.toBeUndefined();
+    openMenu(root, card!);
+    press(root, '繰り返す…');
+    press(root, '毎月');
+    await tick(20);
+    expect(store['e1'], '開始日が回の日へずれた').toBe('- [ ] 朝会 @2026-08-16 毎月\n');
+  });
+
+  /**
+   * 🔴 **ノート 1 件の予定には出さない** ── 日付は frontmatter の `date:` に在り、
+   * **繰り返しの記法が無い**(出すと押しても何も起きない)。
+   */
+  it('🔴 ノート 1 件の予定の札には「繰り返す…」を出さない', () => {
+    const { root } = setup({}, { e9: '2026-08-25' });
+    const card = cardsOf(root, '2026-08-25')[0];
+    expect(card, '前提が崩れている(ノートの札が出ていない)').not.toBeUndefined();
+    expect(card!.hasAttribute('data-pkc-whole-note'), '前提が崩れている').toBe(true);
+    expect(openMenu(root, card!), '押しても何も起きない口を出した').not.toContain('繰り返す…');
+  });
+});

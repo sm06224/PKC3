@@ -26,6 +26,7 @@
  */
 
 import { STACK_ARCHETYPE } from './flavor/stack-flavor';
+import { REPEAT_UNITS, REPEAT_WORDS, type RepeatUnit } from './schedule/repeat';
 
 /** 操作 1 つ。`action` は `data-pkc-action` の値と**同じ綴り**である。 */
 export interface EntryAction {
@@ -299,6 +300,67 @@ export const TILE_MENU_ACTIONS: readonly EntryAction[] = [
   { action: 'move-tile-up', label: '上へ' },
   { action: 'move-tile-down', label: '下へ' },
 ];
+
+/**
+ * 🔴 **予定の札の上のメニューに出す「繰り返す…」**(#855 段 0 の 3 つ目。
+ * user 裁定 2026-09-13「札を右クリック →『繰り返す』」)。
+ *
+ * ## なぜ要るか
+ *
+ * ⚠ 札の `×` は `毎週` を**記法ごと剥がせる**のに、**面から戻す口が 1 つも無かった**
+ *   ── 本文を開いて手で打ち直すしかない。🔑 不可侵「**置けるなら外せる**」の
+ *   逆向きの破れである(2026-08-23)。外す所と置く所を**同じ札の上**に揃える。
+ *
+ * ⚠ **1 段目は 1 行だけ**にする ── 刻み 4 つ + やめるを行のメニューへ直に並べると、
+ *   ノートの操作(削除 / 書き出す …)に**毎回 5 行**が割り込む。
+ */
+/**
+ * 刻みを項目へ焼く属性。⚠ **名前は 1 か所**(`binder.ts` が同じ名前で読む)──
+ * 綴りが 2 か所に散ると、片方を直した日に**押しても無言**になる(§7)。
+ * ⚠ 空文字は「やめる」である(`null` を属性に書けないため)。
+ */
+export const REPEAT_ATTR = 'data-pkc-repeat';
+
+export const TASK_REPEAT_MENU_ACTION: EntryAction & { readonly hint: string } = {
+  action: 'open-repeat-menu',
+  label: '繰り返す…',
+  hint: 'この行を毎日・毎週・毎月・毎年にします(やめることもできます)',
+};
+
+/**
+ * 2 段目 ── 刻みの一覧。
+ *
+ * ⚠ **いまの刻みは出さない** ── 押しても何も起きない項目を並べない
+ *   (この repo がいちばん嫌う無言の dead click)。札には `毎週` と出ているので、
+ *   いま何なのかは**一覧に無いこと**ではなく**札**が言う。
+ * ⚠ **「やめる」は繰り返しているときだけ** ── 繰り返していない行に出すと、
+ *   押しても何も起きない。
+ */
+export type RepeatMenuItem = EntryAction & {
+  readonly hint: string;
+  readonly attrs: Readonly<Record<string, string>>;
+};
+
+export function repeatMenuActions(current: RepeatUnit | null): RepeatMenuItem[] {
+  const out: RepeatMenuItem[] = [];
+  for (const u of REPEAT_UNITS) {
+    if (u === current) continue;
+    out.push({
+      action: 'set-task-repeat',
+      label: REPEAT_WORDS[u],
+      hint: `この行を${REPEAT_WORDS[u]}くり返します(本文に「${REPEAT_WORDS[u]}」と書かれます)`,
+      attrs: { [REPEAT_ATTR]: u },
+    });
+  }
+  if (current !== null)
+    out.push({
+      action: 'set-task-repeat',
+      label: 'やめる',
+      hint: 'くり返しをやめます(日付は残ります。ノートも本文も消えません)',
+      attrs: { [REPEAT_ATTR]: '' },
+    });
+  return out;
+}
 
 /**
  * 🔴 **タイルの上のメニュー**(#857 段①b-2)── 上の 2 つ + **モードの出入り**。

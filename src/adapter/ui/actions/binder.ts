@@ -183,6 +183,9 @@ import {
   tableMenuActions,
   tableConvertPickLabel,
   tileMenuActions,
+  TASK_REPEAT_MENU_ACTION,
+  repeatMenuActions,
+  REPEAT_ATTR,
   withTrailingLast,
 } from '@features/entry-actions';
 import {
@@ -217,6 +220,7 @@ import { parseLinkTarget } from '@features/entry-ref/link-target';
 import { flashCopied, handleCopyMdBlock } from './copy-md-block';
 import { finishCopy, selectedMarkdown } from './copy-source';
 import { installLongPress, LONG_PRESS_TARGET, LONG_PRESS_TARGETS } from './long-press';
+import { isRepeatUnit } from '@features/schedule/repeat';
 import { copyMarkdownAndHtml, copyPlainText } from '@adapter/platform/clipboard';
 import { appCopyHistory } from '@adapter/platform/copy-history-store';
 import {
@@ -1411,6 +1415,17 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
    */
   'unschedule-task',
   /**
+   * 🔴 **繰り返しを付け替えるのも本文を書く**(#855 段 0 の 3 つ目)── 行の
+   *   `@2026-08-31 毎週` の尻を書き換える(`SET_TASK_REPEAT`)。
+   * 🔑 外す口(`unschedule-task`)と**同じ門**をくぐらせる ── 片方だけ通ると、
+   *   取り込みの最中に「やめる」は断られて「毎週にする」は通る、という
+   *   説明のつかない差が生まれる(§7)。
+   * ⚠ 1 段目の `open-repeat-menu` は**載せない** ── 開くだけで本文を書かない
+   *   (`copy-md-block` と同じ判断:書かない口を名前で断ると、忙しい間は
+   *   「何ができるか見る」ことまで止まる)。
+   */
+  'set-task-repeat',
+  /**
    * 🔴 **ノート 1 件の日付も disk への書込**(#292 段④)── frontmatter を書く。
    * ⚠ 取り込みが entry を総入れ替えしている裏で frontmatter を書かせない、が理由。
    *   機械検査は `tests/repo-hygiene.test.ts`。
@@ -2152,7 +2167,7 @@ const MENU_PREV_LID_ATTR = 'data-pkc-menu-prev-lid';
  * その受け手は**押しても無反応**になる(同じクリックで片づけ役が閉じる)。
  * ⚠ 右クリック(`contextmenu`)で開く経路はここに載らない ── あちらは別の event。
  */
-const MENU_OPENERS: ReadonlySet<string> = new Set(['phone-menu']);
+const MENU_OPENERS: ReadonlySet<string> = new Set(['phone-menu', 'open-repeat-menu']);
 
 /**
  * メニューが出た時のノートと、いま開いているノートが同じか。
@@ -7244,6 +7259,58 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     dispatcher.dispatch({ type: 'SET_TASK_DATE', lid, line, date: null, until: null });
   },
+  /**
+   * 🔴 **札の「繰り返す…」を押した ── 刻みの一覧を出す**(#855 段 0 の 3 つ目。
+   * user 裁定 2026-09-13「札を右クリック →『繰り返す』」)。
+   *
+   * ⚠ **2 段にする** ── 刻み 4 つ + やめるを行のメニューへ直に並べると、
+   *   ノートの操作(削除 / 書き出す …)に毎回 5 行が割り込む。
+   * ⚠ **`MENU_OPENERS` に載せてある** ── 載せないと、同じ 1 回のクリックで
+   *   ここが開き `onCloseMenu` が閉じるので、**押しても何も出ない**
+   *   (`phone-menu` が踏んだのと同じ罠)。
+   * 🔑 身元は**押したボタン自身**から読む ── メニューの器は root の直下に出るので、
+   *   `closest` では札まで辿れない(`context-menu.ts` の戒め)。
+   */
+  'open-repeat-menu': (_dispatcher, target, _services, root) => {
+    const lid = target.getAttribute('data-pkc-entry') ?? '';
+    const raw = target.getAttribute('data-pkc-task-line');
+    const line = Number(raw);
+    if (lid === '' || raw === null || !Number.isInteger(line)) return;
+    const cur = target.getAttribute('data-pkc-task-repeat');
+    const r = target.getBoundingClientRect();
+    openContextMenu(
+      root,
+      // ⚠ **押した項目の真下**に出す(右クリックの座標はもう持っていない)
+      { x: r.left, y: r.bottom },
+      repeatMenuActions(isRepeatUnit(cur) ? cur : null),
+      root.ownerDocument.activeElement,
+      // 🔑 どの行かは**全項目**に要る(`carry` はそのための仕組み)
+      { 'data-pkc-entry': lid, 'data-pkc-task-line': raw },
+    );
+  },
+  /**
+   * 🔴 **刻みを付け替える**(#855 段 0 の 3 つ目)。
+   * ⚠ **日付は渡さない** ── 渡すと、繰り返しの回の札では**開始日がその回の日へ
+   *   ずれる**(札に焼いてあるのは回の日である)。判断は reducer と
+   *   `rewriteLineDate` が持つ。
+   * ⚠ 知らない綴りなら**何もしない**(当てずっぽうで本文を書き換えない)。
+   */
+  'set-task-repeat': (dispatcher, target) => {
+    const lid = target.getAttribute('data-pkc-entry') ?? '';
+    const raw = target.getAttribute('data-pkc-task-line');
+    const line = Number(raw);
+    if (lid === '' || raw === null || !Number.isInteger(line)) return;
+    const key = target.getAttribute(REPEAT_ATTR);
+    if (key === null) return;
+    // ⚠ 空文字は「やめる」── 属性に `null` は書けないので、こちらで戻す
+    if (key !== '' && !isRepeatUnit(key)) return;
+    dispatcher.dispatch({
+      type: 'SET_TASK_REPEAT',
+      lid,
+      line,
+      repeat: key === '' ? null : key,
+    });
+  },
   'export-entry-html': (dispatcher, target, services) => {
     // ⚠ 解決規則は隣の `export-entry` / `delete-entry` と**同じ**にする ── 揃えないと
     //    「A を書き出して B を削除する」が成立する(review M-3 と同じ形)
@@ -10196,13 +10263,46 @@ export function bindActions(
      *   見ないと、1 つ前のノートの種類で判定することになる。
      */
     const st = dispatcher.getState();
+    /**
+     * 🔴 **予定の札の上なら、「繰り返す…」を頭へ足す**(#855 段 0 の 3 つ目。
+     * user 裁定 2026-09-13「札を右クリック →『繰り返す』」)。
+     *
+     * ⚠ **差し替えない** ── 札はノートの行なので、ノートの操作(削除 / 書き出す)も
+     *   要る(見出しのメニューと同じ作法)。
+     * ⚠ 出す条件は **2 つ**:①行の予定であること(`data-pkc-whole-note` が無い ──
+     *   ノート 1 件の予定は frontmatter の `date:` で、**繰り返しの記法が無い**)
+     *   ②**行番号が読めること**(読めない札に出すと、押しても無言になる)。
+     * 🔑 行番号は**札ではなく中の印**に在る(2026-08-23 の罠 ── 札に置くと
+     *   `[data-pkc-task-line]` を押す既存の経路に当たる)。
+     * ⚠ 身元は**その項目だけ**に焼く(`attrs`)── `carry` へ入れると
+     *   「削除」「書き出す」にも行番号が付き、読み手が取り違える(#701 の戒め)。
+     */
+    const taskLine = row.hasAttribute('data-pkc-whole-note')
+      ? null
+      : (row.querySelector('[data-pkc-task-line]')?.getAttribute('data-pkc-task-line') ?? null);
+    const repeatable = taskLine !== null && Number.isInteger(Number(taskLine));
+    const rows = entryMenuActions({
+      archetype: st.entryMetas.get(lid)?.archetype ?? null,
+      linkedFile: st.linkedFiles.get(lid) ?? null,
+    });
+    const items = repeatable
+      ? [
+          {
+            ...TASK_REPEAT_MENU_ACTION,
+            attrs: {
+              'data-pkc-entry': lid,
+              'data-pkc-task-line': taskLine,
+              // ⚠ いまの刻み ── 無ければ空(`repeatMenuActions` が `null` と読む)
+              'data-pkc-task-repeat': row.getAttribute('data-pkc-task-repeat') ?? '',
+            },
+          },
+          ...rows,
+        ]
+      : rows;
     openContextMenu(
       root,
       { x: ev.clientX, y: ev.clientY },
-      entryMenuActions({
-        archetype: st.entryMetas.get(lid)?.archetype ?? null,
-        linkedFile: st.linkedFiles.get(lid) ?? null,
-      }),
+      items,
       root.ownerDocument.activeElement,
       prevLid === null || prevLid === lid ? {} : { [MENU_PREV_LID_ATTR]: prevLid },
     );

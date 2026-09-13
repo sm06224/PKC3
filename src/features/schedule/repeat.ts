@@ -52,6 +52,18 @@ export const REPEAT_WORDS: Readonly<Record<RepeatUnit, string>> = {
  * 語から刻みを読む。知らない語なら `null`。
  * 🔑 **表は 1 つ**(`REPEAT_WORDS`)から引く ── 2 つ持つと、片方に足し忘れる。
  */
+/**
+ * 🔴 **内部の綴り(`week`)が刻みか**(#855 段 0 の 3 つ目、2026-09-13)。
+ *
+ * ⚠ 上の `repeatUnitOf` は**画面の語**(`毎週`)を読む ── こちらは
+ *   **札に焼いた属性**(`data-pkc-task-repeat="week"`)を読み戻すためのもので、
+ *   見ている物が違う。🔑 どちらも表は `REPEAT_UNITS` / `REPEAT_WORDS` の 1 つから引く。
+ * ⚠ `null`(属性が無い)も受けて `false` を返す ── 呼び側に 2 段の判定を書かせない。
+ */
+export function isRepeatUnit(raw: string | null): raw is RepeatUnit {
+  return raw !== null && (REPEAT_UNITS as readonly string[]).includes(raw);
+}
+
 export function repeatUnitOf(word: string): RepeatUnit | null {
   for (const u of REPEAT_UNITS) if (REPEAT_WORDS[u] === word) return u;
   return null;
