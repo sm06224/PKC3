@@ -13,7 +13,8 @@
  * 4. 🔴 **絞り込みを打つと、畳んでいても出る**(打ったのに何も出ない、を作らない)
  * 5. 畳みは**端末ごと**の保存に書かれる(state には入っていない)
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { LONG_PRESS_MS } from '../../src/adapter/ui/actions/long-press';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
@@ -207,6 +208,96 @@ describe('グループを畳む(#857 段④)', () => {
     expect(got, '一覧の外の群まで畳んだ(範囲が面を越えている)').not.toContain('よその面の群');
     // ⚠ 対照群 ── 面の中の群は畳めている(何も畳まずに通る空振りではない)
     expect(got, '前提が崩れている(面の中の群も畳めていない)').toContain('資料');
+  });
+
+  /**
+   * 🔴 **指だけの端末にも入口を置く**(#857 段②。着地前の動線レビュー)。
+   *
+   * ⚠ 目印を選ぶ口が**右クリックにしか無かった** ── 指で触る端末には
+   *   入口が 1 つも無い(タイルの並べ替えで一度直した穴と**同じ形**)。
+   * 🔑 長押しで**右クリックと同じメニュー**を出す(別の口を作らない)。
+   */
+  it('🔴 ⑩ 見出しを長押しすると、右クリックと同じメニューが出る', () => {
+    vi.useFakeTimers();
+    try {
+      headBtn('資料').dispatchEvent(
+        new PointerEvent('pointerdown', {
+          bubbles: true,
+          cancelable: true,
+          pointerType: 'touch',
+          button: 0,
+          clientX: 0,
+          clientY: 0,
+        }),
+      );
+      vi.advanceTimersByTime(LONG_PRESS_MS);
+      const menu = root.querySelector('[data-pkc-region="context-menu"]');
+      expect(menu, '長押ししてもメニューが出ない(指だけの端末に入口が無い)').not.toBeNull();
+      const item = menu!.querySelector('[data-pkc-action="pick-app-group-icon"]');
+      expect(item, '「目印を選ぶ…」が出ていない').not.toBeNull();
+      // 🔑 **効く先は押した見出し**(メニューは root の直下に出るので、身元を写す)
+      expect(item!.getAttribute('data-pkc-group'), '押した群が写っていない').toBe('資料');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * 🔴 **長押しの後の押しで畳まない**(#857 段②)。
+   * ⚠ 押しを捨てる名前の一覧は**手で並んでいる**(`'dual-row' | 'open-tile'`)ので、
+   *   足し忘れると**メニューが出たうえに、指を離した瞬間に畳まれる**。
+   */
+  it('🔴 ⑪ 長押しの直後の押しで、そのグループが畳まれない', () => {
+    vi.useFakeTimers();
+    try {
+      const btn = headBtn('資料');
+      btn.dispatchEvent(
+        new PointerEvent('pointerdown', {
+          bubbles: true,
+          cancelable: true,
+          pointerType: 'touch',
+          button: 0,
+          clientX: 0,
+          clientY: 0,
+        }),
+      );
+      vi.advanceTimersByTime(LONG_PRESS_MS);
+      btn.click();
+      expect(shown('b1'), '長押しの後の押しで畳まれた(押した物と効く先が食い違う)').toBe(true);
+      expect([...folds.get()], '保存にまで畳みが書かれた').toEqual([]);
+      /**
+       * 🔴 **その押しでメニューが閉じない**(実ブラウザの smoke が掘った)。
+       *
+       * ⚠ 「押した物がメニューを開く口か」を見る一覧(`MENU_OPENERS`)は
+       *   **捨てる一覧とは別に手で並んでいる**ので、片方だけ足すと
+       *   **メニューは出るのに、指を離した瞬間に選ぶ前へ閉じる**。
+       * ⚠ 右クリックで無事だったのは、**右ボタンの離しが `click` を撃たない**から ──
+       *   穴が無かったのではなく、踏む経路が無かっただけである。
+       */
+      expect(
+        root.querySelector('[data-pkc-region="context-menu"]'),
+        '指を離した合図でメニューが閉じた(選ぶ前に消える)',
+      ).not.toBeNull();
+      /**
+       * 🔴 **対照群 ── 緩めすぎていないこと。**
+       * ⚠ 直しは「閉じる条件」を 1 つ緩めているので、**緩めすぎると今度は
+       *   メニューが居座り、下に在る物を覆い隠す**(実ブラウザで実際にそうなった)。
+       * 🔑 **本物の押し方で撃つ** ── `pointerdown` が先に来るので、長押しの窓は
+       *   その時点で閉じている(合成 `click` だけでは、この門は何も見ない)。
+       */
+      const other = region.querySelector<HTMLElement>('[data-pkc-field="launcher-lead"]');
+      expect(other, '前提が崩れている(押す先が無い)').not.toBeNull();
+      other!.dispatchEvent(
+        new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch', button: 0 }),
+      );
+      other!.click();
+      expect(
+        root.querySelector('[data-pkc-region="context-menu"]'),
+        'メニューの外を普通に押しても閉じない(閉じる条件を緩めすぎている)',
+      ).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('🔴 ⑤ 畳みは保存の側に在る(state は 1 バイトも動かない)', () => {

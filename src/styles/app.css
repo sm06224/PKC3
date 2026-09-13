@@ -1049,6 +1049,11 @@ select:focus-visible {
 [data-pkc-chip='stack'] {
   color: color-mix(in oklab, var(--fg) 25%, #3a7a9a);
 }
+/* 🔴 **アプリのグループ**(#857 段②)── 添付(タイルの実体)の系から少しずらす。
+ * ⚠ 添付と同じ色にしない ── 一覧で並んだとき「タイルそのもの」と見分けが付かない。 */
+[data-pkc-chip='appgroup'] {
+  color: color-mix(in oklab, var(--fg) 25%, #5a7ac2);
+}
 [data-pkc-chip='attachment'] {
   color: color-mix(in oklab, var(--fg) 25%, #7a5ac2);
 }
@@ -4495,6 +4500,16 @@ li[data-pkc-row-slot] {
   padding: var(--s1) var(--s3);
   background: var(--surface-2);
   cursor: pointer;
+}
+/* 🔴 **グループの見出しの目印**(#857 段②)。
+ * ⚠ **字は要素に持たせない** ── 絵文字も `::before` で出す。器の `textContent` を
+ * 変えないため(#770 段① で、絵を器の字に混ぜて smoke 5 本が静かに落ちた)。 */
+[data-pkc-field='group-icon'] {
+  flex: none;
+  margin-right: var(--s1);
+}
+[data-pkc-field='group-icon'][data-pkc-icon-text]::before {
+  content: attr(data-pkc-icon-text);
 }
 /* 🔴 **すべて畳む / すべて開く**(#857 段④)。⚠ 字の大きさは書かない ──
  * 器(一覧)を継ぐ(「ボタンの字の大きさは 3 段だけ」#722 の段を増やさない)。

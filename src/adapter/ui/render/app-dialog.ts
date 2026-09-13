@@ -545,6 +545,49 @@ export function pickDiagramInApp(
 }
 
 /**
+ * 🔴 **グループの見出しの目印を選ぶ**(#857 段②)。
+ *
+ * ⚠ 器は雛形・図・表の一覧と**同じ 1 本**(`pickRowInApp`)── 「押した行がそのまま
+ *   答え」「`Escape` / やめる / 外を押すと `null`」「焦点を返す」を食い違わせない(§7)。
+ * ⚠ **タイルの目印は絵の一覧(49 個の押し所)**だが、こちらは**行の一覧**にした ──
+ *   出す場所が右クリックのメニューの先なので、面を作らずに開ける器のほうが素直で、
+ *   器を 2 本目に増やさずに済む(絵は行の左に出る)。
+ * 🔑 **外す口を先頭に置く**(user 指示 2026-08-23「置けるなら、外せなければならない」)。
+ *
+ * @returns 選んだ図案の名前。**空文字 = なし(外す)**。`Escape` / やめる / 外なら `null`
+ */
+export function pickAppGroupIconInApp(
+  host: HTMLElement,
+  groupName: string,
+  choices: readonly { readonly name: string; readonly label: string }[],
+): Promise<string | null> {
+  return pickRowInApp(host, {
+    title: `「${groupName}」の目印を選ぶ`,
+    field: 'pick-group-icon',
+    indexAttr: 'data-pkc-group-icon-index',
+    /**
+     * 🔴 **副作用を、押す前に言う**(#857 段②。着地前の動線レビュー)。
+     *
+     * ⚠ 直す前は、選ぶと**グループ用のノートが 1 枚黙って増え**、「なし」にしても
+     *   **黙って残った** ── 数日後にサイドバーで見覚えのない題名を見つけることになる。
+     * 🔑 **後から知らせるのではなく、選ぶ前に書く**(やめる道がまだ在るうちに)。
+     * ⚠ 「作ります」と言い切らない ── 既に在れば作らないので、**どちらでも嘘に
+     *   ならない字**にする。
+     */
+    note: '目印は、このグループ専用のノートに憶えます(無ければ 1 枚作ります)。「なし」にしても、そのノートは残ります。',
+    rows: [
+      { label: 'なし', value: '' },
+      ...choices.map((c, i) => ({
+        label: c.label,
+        value: c.name,
+        // ⚠ 外す口と選ぶ口の間だけ区切る(やることが違う)
+        ...(i === 0 ? { separatorBefore: true } : {}),
+      })),
+    ],
+  });
+}
+
+/**
  * 🔴 **表を持ち出す形を選ぶ**(#708 段①)。
  *
  * ⚠ 器は雛形・図の一覧と**同じ 1 本**(`pickRowInApp`)── 「押した行がそのまま答え」

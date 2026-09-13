@@ -18,7 +18,8 @@
  * adapter 側の責務で、ここは「何を・どの順で並べるか」だけを決める。
  */
 import { parseFrontmatter } from '../markdown/frontmatter';
-import { isIconName, type IconName } from '../icon/symbols';
+import { type IconName } from '../icon/symbols';
+import { parseIconValue } from '../icon/icon-value';
 
 export interface LauncherTile {
   lid: string;
@@ -117,25 +118,12 @@ export function tileFrom(src: TileSource): LauncherTile | null {
   const orderRaw = fm['attachment.app_order'];
   const order = typeof orderRaw === 'number' && Number.isFinite(orderRaw) ? orderRaw : undefined;
   /**
-   * 目印は **2 通りの書き方**を受ける(#770 段②)。
-   *
-   * | 打った字 | 出る物 |
-   * |---|---|
-   * | `\u{1F9EE}`(絵文字) | そのまま(**1 ドットも変えない**) |
-   * | `calendar`(図案の名前) | 予定表の絵 ── 直す前は **`ca`** と出ていた |
-   *
-   * ⚠ 2 字までに切るのは**字のほう**だけ ── 長い文字列を入れられると行の高さが崩れる。
-   *    `[...]` で切る(サロゲートペアを割らない ── 絵文字が壊れる)。
-   * ⚠ 図案のときは `icon` を**立てない** ── 2 つ立つと、出す側が
-   *    「どちらを描くか」の規則をもう 1 つ持つことになる(§7)。
+   * 目印は **2 通りの書き方**を受ける(#770 段②)── 絵文字はそのまま、図案の名前は絵。
+   * 🔑 **読み方の正本は `features/icon/icon-value.ts`**(グループの見出しも同じ口を引く。
+   *   ⚠ ここに 2 つ目の綴りを書かない ── 片方だけ直した日に、タイルでは絵が出るのに
+   *   見出しでは `ca` と出る、という形で割れる)。
    */
-  const iconRaw = str(fm['attachment.app_icon']);
-  const trimmed = iconRaw?.trim();
-  const symbol = trimmed !== undefined && isIconName(trimmed) ? trimmed : undefined;
-  const icon =
-    symbol !== undefined || iconRaw === undefined
-      ? undefined
-      : [...iconRaw].slice(0, 2).join('');
+  const { icon, symbol } = parseIconValue(str(fm['attachment.app_icon']));
   const base = { lid: src.lid, title: src.title, group, order, icon, symbol };
 
   if (url !== undefined) {

@@ -429,6 +429,139 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
     '絞り込みを消しても見出しが押せるようにならない',
   ).toHaveCount(1);
 
+  /**
+   * 🔴 **見出しを右クリック →「目印を選ぶ…」で、群の頭に絵を置ける**
+   * (#857 段②。動線: アプリのタブを開く → 見出しを右クリックする →
+   * 「目印を選ぶ…」を押す → 一覧から 1 つ選ぶ → 見出しの左に絵が出る)。
+   * 🔑 起動を 1 つも足していない ── 既に開いている一覧の道中に足した(smoke-budget)。
+   *
+   * ⚠ **目印を選んでも、見ていたノートと絞り込みの欄がそのまま**でなければならない
+   *   (`keepSelection`)。この画面ではまだ何も選んでいないので、観測点は
+   *   「detail 面の『まだ何も選んでいない』案内が、前後で同じであること」
+   *   (`CREATE_ENTRY` が `keepSelection` を落とすと、ここが**作りたてのノートの
+   *   編集画面**に化ける ── unit で作れない実ブラウザ配線の検算)。
+   */
+  const detailEmpty = page.locator('[data-pkc-field="detail-empty"]');
+  await expect(detailEmpty, '前提が崩れている(何かが既に選ばれている)').toBeVisible();
+  const beforeGuide = await detailEmpty.textContent();
+  const beforeFilterValue = await page.locator('[data-pkc-field="entry-filter"]').inputValue();
+
+  await toolToggle.click({ button: 'right' });
+  const groupMenu = page.locator('[data-pkc-region="context-menu"]');
+  await expect(groupMenu, '見出しを右クリックしてもメニューが出ない').toBeVisible();
+  await expect(groupMenu, '「目印を選ぶ…」が出ていない').toContainText('目印を選ぶ');
+  await expect(
+    groupMenu,
+    '見出しの上にタイルのメニューが出ている(押した物と効く先が食い違う。#677 の型)',
+  ).not.toContainText('上へ');
+  await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="pick-app-group-icon"]');
+
+  const iconRows = page.locator('[data-pkc-field="pick-group-icon"]');
+  await expect(iconRows.first(), '目印の一覧が出ない').toBeVisible();
+  await expect(iconRows.first(), '先頭が「なし」でない(外す口が先頭に無い)').toHaveText('なし');
+  // ⚠ index 0 = 「なし」。index 1 を選ぶ(タイルと同じ 49 種の 1 つ)。
+  await clickReal(page, iconRows.nth(1));
+  await expect(iconRows.first(), '選んでも小窓が閉じない').toBeHidden();
+
+  await expect(
+    page.locator('[data-pkc-field="entry-filter"]'),
+    '目印を選ぶと絞り込みの欄が消える',
+  ).toHaveValue(beforeFilterValue);
+  await expect(
+    detailEmpty,
+    '目印を選んだだけで右の面が作りたてのノートに切り替わっている',
+  ).toHaveText(beforeGuide ?? '');
+
+  // 🔴 見出しの字そのものは 1 バイトも変わらない(絵は `::before` が出す。CLAUDE.md §10)
+  await expect(
+    groups.nth(0),
+    '見出しの textContent が変わっている(絵が字に混ざった)',
+  ).toHaveText('ツール');
+  const groupMark = groups.nth(0).locator('[data-pkc-field="group-icon"]');
+  await expect(groupMark, '見出しの左に目印が出ない').toHaveCount(1);
+
+  // もう一度右クリック →「なし」を選ぶと絵が消える(片道の操作にしない)
+  await toolToggle.click({ button: 'right' });
+  await expect(groupMenu, '2 回目の右クリックでメニューが出ない').toBeVisible();
+  await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="pick-app-group-icon"]');
+  await expect(iconRows.first()).toBeVisible();
+  await clickReal(page, iconRows.nth(0)); // 「なし」
+  await expect(iconRows.first()).toBeHidden();
+  await expect(groupMark, '「なし」を選んでも目印が消えない(片道の操作になっている)').toHaveCount(
+    0,
+  );
+  await expect(groups.nth(0), '外した後も見出しの字が変わっている').toHaveText('ツール');
+
+  /**
+   * 🔴 **指で長押ししても、同じメニューに届くか**(#857 段②、着地前の動線
+   * レビュー「指で触る端末には入口が 1 つも無かった」の直し)。
+   * ⚠ **`page.mouse` ではなく `pointerType: 'touch'` の合成 PointerEvent で撃つ**
+   *   ── `long-press.ts` は `pointerType === 'mouse'` を受けない。撃ち方は
+   *   同じ file の「タイルを長押しすると並べ替えモードに入る」(下の test)に合わせた
+   *   (pointerdown → 600ms 待つ → pointerup)。
+   * ⚠ **実機は `pointerup` の後に `click` を合成する**(`preventDefault` していないので
+   *   抑止されない)── `tests/adapter/tile-reorder-mode.test.ts`「⑨ 長押しの直後の
+   *   click は捨てる」と同じ作法で、その `click` も手で足す。
+   * 🔑 起動を 1 つも足していない ── 直前で「なし」に戻した同じ見出しで続ける。
+   */
+  await expect(toolToggle, '前提が崩れている(見出しが畳まれている)').toHaveAttribute(
+    'aria-expanded',
+    'true',
+  );
+  await toolToggle.dispatchEvent('pointerdown', {
+    bubbles: true,
+    pointerType: 'touch',
+    button: 0,
+    isPrimary: true,
+  });
+  await page.waitForTimeout(600); // LONG_PRESS_MS(500ms)を跨ぐ
+  await expect(groupMenu, '見出しを長押ししてもメニューが出ない').toBeVisible();
+  await expect(groupMenu, '長押しで出たのがタイルのメニュー(上へ/下へ)になっている').toContainText(
+    '目印を選ぶ',
+  );
+  await toolToggle.dispatchEvent('pointerup', { bubbles: true, pointerType: 'touch' });
+  /**
+   * 🔴 **指を離しても、そのグループは畳まれない**(押しを捨てる一覧
+   * `pressedAction === 'toggle-app-group'` への足し忘れで起きる形 ──
+   * メニューが出たうえに畳まれる = 押した物と効く先が食い違う)。
+   */
+  await expect(
+    toolToggle,
+    '指を離した瞬間にグループが畳まれた(押した物と効く先が食い違う)',
+  ).toHaveAttribute('aria-expanded', 'true');
+  await expect(
+    tiles,
+    '指を離した瞬間にグループが畳まれてタイルが消えた',
+  ).toHaveCount(3);
+  /**
+   * 🔴 **指を離した合図(`click`)そのものが、開いたばかりのメニューを閉じないか**。
+   * ⚠ `onCloseMenu`(`binder.ts`)は `MENU_OPENERS`(`phone-menu` / `open-repeat-menu`)
+   *   に載っていない押し所からの `click` を**無条件で「外を押した」として畳む** ──
+   *   `toggle-app-group` は捨てる一覧(`swallowsClick` の対象)には足されたが、
+   *   **この一覧には足されていない**。口が違う(§7「同じ判定は複数の場所にある」)。
+   */
+  await toolToggle.dispatchEvent('click', { bubbles: true, cancelable: true });
+  await expect(
+    groupMenu,
+    '指を離した合図(click)だけでメニューが閉じ、選ぶ前に消える',
+  ).toBeVisible();
+  /**
+   * 🔴 **緩めすぎていないこと ── 別の所を普通に押せば、ちゃんと閉じる**。
+   *
+   * ⚠ 上の直しは「閉じる条件」を 1 つ緩めているので、**緩めすぎると今度は
+   *   メニューが居座る** ── 実際この区画は、閉じずに次へ進んで**次の検査を
+   *   覆い隠していた**(遮蔽で落ちた)。
+   * 🔑 だから**ここで閉じる**:後始末と、無かった門を兼ねる
+   *   (この file には「外を押すと閉じる」を見る検査が 1 本も無かった)。
+   * ⚠ **本物の押し方で撃つ** ── `pointerdown` が先に来るので、長押しの窓は
+   *   その時点で閉じている(合成 `click` だけを撃つと、この門は何も見ない)。
+   */
+  await page.locator('[data-pkc-field="launcher-lead"]').click();
+  await expect(
+    groupMenu,
+    'メニューの外を普通に押しても閉じない(閉じる条件を緩めすぎている)',
+  ).toBeHidden();
+
   // ③ 外部へ飛ぶタイルは**行き先が見えている**(押す前に分かる)
   await expect(tiles.nth(1).locator('[data-pkc-field="tile-url"]')).not.toHaveText('');
 

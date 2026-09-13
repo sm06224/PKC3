@@ -29,6 +29,8 @@ export const ARCHETYPE_LABELS: readonly (readonly [string, string])[] = [
   ['smart', 'スマートフォルダ'],
   // 🔴 スタックを保存した入れ物(#633 段③)── 順序つきの参照だけを持つ
   ['stack', 'スタック'],
+  // 🔴 アプリの一覧のグループの目印を憶えるノート(#857 段②)
+  ['appgroup', 'アプリのグループ'],
   ['attachment', '添付'],
   ['snippet', '雛形'],
   ['todo', 'Todo'],

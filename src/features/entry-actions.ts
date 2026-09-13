@@ -319,6 +319,15 @@ export const TILE_MENU_ACTIONS: readonly EntryAction[] = [
  * 綴りが 2 か所に散ると、片方を直した日に**押しても無言**になる(§7)。
  * ⚠ 空文字は「やめる」である(`null` を属性に書けないため)。
  */
+/**
+ * 🔴 **グループの見出しを右クリックしたときのメニュー**(#857 段②)。
+ * ⚠ **タイルのメニューと混ぜない** ── 押した物(見出し)と効く先(そのグループ)が
+ *   違うので、同じ一覧に「上へ / 下へ」が出ると**押した物と効く先が食い違う**。
+ */
+export const APP_GROUP_MENU_ACTIONS: readonly EntryAction[] = [
+  { action: 'pick-app-group-icon', label: '目印を選ぶ…' },
+];
+
 export const REPEAT_ATTR = 'data-pkc-repeat';
 
 export const TASK_REPEAT_MENU_ACTION: EntryAction & { readonly hint: string } = {

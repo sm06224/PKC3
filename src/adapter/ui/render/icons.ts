@@ -164,6 +164,7 @@ export const ARCHETYPE_ICONS: Readonly<Record<string, IconName>> = {
   folder: 'folder',
   smart: 'folder-smart',
   stack: 'stack',
+  appgroup: 'apps',
   attachment: 'clip',
   todo: 'check-box',
   form: 'form',

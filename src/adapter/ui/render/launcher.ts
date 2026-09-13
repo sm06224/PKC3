@@ -22,6 +22,8 @@ import type { LauncherTile } from '@features/launcher/tiles';
 import { isMovableTile } from '@features/launcher/tile-order';
 import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
 import { allFolded, encodeFolded, isFolded } from '@features/launcher/group-fold';
+import { appGroupIconOf } from '@features/launcher/app-group-spec';
+import type { IconValue } from '@features/icon/icon-value';
 import { appGroupFold, type GroupFoldStore } from './group-fold';
 import { setIcon } from './icons';
 
@@ -36,6 +38,9 @@ export class LauncherRenderer {
 
   /** ⚠ **畳みは端末ごと**なので state ではなく保存から読む(`group-fold.ts`)。 */
   private lastFolded: string | undefined = undefined;
+
+  /** ⚠ **目印も指紋に要る**(#857 段②)── 入れないと選んでも画面が動かない。 */
+  private lastIcons: string | undefined = undefined;
 
   constructor(
     private readonly region: HTMLElement,
@@ -98,6 +103,11 @@ export class LauncherRenderer {
      */
     const folded = this.folds.get();
     const foldKey = encodeFolded(folded);
+    /**
+     * ⚠ **指紋に入れる**(#857 段②)── 入れ忘れると「目印を選んだのに
+     *   見出しが変わらない」になる(段④ の畳みで 1 度踏んだ罠)。
+     */
+    const iconKey = JSON.stringify(state.appGroupIcons);
     // ⚠ 選択も指紋に入れる ── 押した印が出ないと、いま何を触ったのか残らない
     if (
       state.launcherTiles === this.lastTiles &&
@@ -105,7 +115,8 @@ export class LauncherRenderer {
       state.selectedLid === this.lastSelected &&
       state.launcherPick === this.lastPick &&
       state.launcherReorder === this.lastReorder &&
-      foldKey === this.lastFolded
+      foldKey === this.lastFolded &&
+      iconKey === this.lastIcons
     )
       return;
     this.lastTiles = state.launcherTiles;
@@ -114,6 +125,7 @@ export class LauncherRenderer {
     this.lastPick = state.launcherPick;
     this.lastReorder = state.launcherReorder;
     this.lastFolded = foldKey;
+    this.lastIcons = iconKey;
     const list = this.ensureFrame();
     list.textContent = '';
 
@@ -281,6 +293,17 @@ export class LauncherRenderer {
           const head = document.createElement('h3');
           head.setAttribute('data-pkc-field', 'launcher-group');
           const off = isFolded(folded, group, filtering);
+          /**
+           * 🔴 **見出しの目印**(#857 段②)。正本は**グループ用のノート**の
+           * frontmatter(`app-group-spec.ts`)。
+           *
+           * ⚠ **器の字を 1 文字も変えない** ── 絵文字を子の `textContent` に入れると
+           *   `h3.textContent` が `🧮資料` に化け、**字を読む側**(test / 読み上げ /
+           *   写し)が静かに外れる(#770 段① で smoke 5 本が落ちた型)。
+           * 🔑 だから**属性だけ**で描く ── 図案は `data-pkc-symbol`、絵文字は
+           *   `data-pkc-icon-text` を CSS の `::before` が出す。
+           */
+          const mark = appGroupIconOf(state.appGroupIcons, group);
           if (filtering) {
             /**
              * 🔴 **絞り込み中は、見出しを押し所にしない**(#857 段④ の仕上げ)。
@@ -292,6 +315,7 @@ export class LauncherRenderer {
              * 🔑 探している間は畳みの話を画面から消す ── 字は出す(どの群かは要る)。
              */
             head.textContent = group;
+            if (mark !== undefined) head.prepend(groupMark(mark));
           } else {
             const btn = document.createElement('button');
             btn.type = 'button';
@@ -302,6 +326,8 @@ export class LauncherRenderer {
               ? `${group} を開きます(いまは畳んであります)`
               : `${group} を畳みます(中のアプリが隠れます)`;
             btn.textContent = off ? `${group}(${countOf(group)})` : group;
+            // ⚠ `textContent` を入れた**後**に足す(先に足すと代入で消える)
+            if (mark !== undefined) btn.prepend(groupMark(mark));
             head.append(btn);
           }
           list.append(head);
@@ -449,4 +475,25 @@ function hostOf(url: string): string {
   } catch {
     return url;
   }
+}
+
+/**
+ * 🔴 **見出しの目印を 1 つ描く**(#857 段②)。
+ *
+ * ⚠ **字を 1 文字も持たせない** ── 図案は `data-pkc-symbol`、絵文字は
+ *   `data-pkc-icon-text` で、どちらも**出すのは CSS の `::before`** である。
+ * 🔑 こうすると、この span を足しても `h3.textContent` / `button.textContent` が
+ *   **1 バイトも変わらない**(#770 段① の「器を替えると読み取れる値が変わる」を
+ *   起こさない置き方)。
+ */
+function groupMark(v: IconValue): HTMLElement {
+  const el = document.createElement('span');
+  el.setAttribute('data-pkc-field', 'group-icon');
+  if (v.symbol !== undefined) {
+    el.setAttribute('data-pkc-icon', '');
+    setIcon(el, v.symbol);
+  } else if (v.icon !== undefined) {
+    el.setAttribute('data-pkc-icon-text', v.icon);
+  }
+  return el;
 }

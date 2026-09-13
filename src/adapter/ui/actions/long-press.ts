@@ -64,11 +64,19 @@ export const LONG_PRESS_TARGET = '[data-pkc-action="dual-row"]';
  */
 export const LONG_PRESS_TILE = '[data-pkc-tile]';
 /**
- * 実際に `closest` へ渡す綴り。⚠ **2 つを 1 つの器で受ける** ──
+ * 🔴 **アプリのグループの見出しも受ける**(#857 段②。着地前の動線レビュー)。
+ *
+ * ⚠ **同じ穴を 2 度作りかけた** ── 目印を選ぶ口は**右クリックにしか無く**、
+ *   指だけの端末には入口が 1 つも無かった(すぐ上のタイルと**同じ理由**)。
+ * 🔑 長押しで**同じメニュー**を出す ── 別の口を作らない(覚えることを増やさない)。
+ */
+export const LONG_PRESS_GROUP = '[data-pkc-action="toggle-app-group"]';
+/**
+ * 実際に `closest` へ渡す綴り。⚠ **3 つを 1 つの器で受ける** ──
  * 2 本目の `installLongPress` を足すと、`swallowsClick` / `holds` を
  * **両方に聞いて回る**ことになり、聞き忘れた 1 か所が静かに残る(CLAUDE.md §7)。
  */
-export const LONG_PRESS_TARGETS = `${LONG_PRESS_TARGET}, ${LONG_PRESS_TILE}`;
+export const LONG_PRESS_TARGETS = `${LONG_PRESS_TARGET}, ${LONG_PRESS_TILE}, ${LONG_PRESS_GROUP}`;
 
 export interface LongPress {
   /** 配線を解く(`bindActions` の teardown から呼ぶ)。 */
