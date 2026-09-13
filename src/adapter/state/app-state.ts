@@ -1076,6 +1076,16 @@ export interface AppState {
    */
   tileWrite: { lid: string; n: number } | null;
   /**
+   * 🔴 **アプリの一覧で、いま印を付けたタイル**(#857 段①b。user 裁定 2026-09-13
+   * 「開くのはダブルタップ」)。
+   *
+   * ⚠ **`selectedLid` では足りない** ── 組み込みのタイルは entry を持たないので、
+   *   1 回押しても `selectedLid` は 1 ミリも動かない。印が出ないと、
+   *   **1 回目の押しが無反応に見える**(この repo がいちばん嫌う形)。
+   * 🔑 だから**タイルの印だけを持つ** ── 右の列に何を出すかは `selectedLid` のまま。
+   */
+  launcherPick: string | null;
+  /**
    * ロックの世代。**強制解放のたびに増える**(P8 段⑧)。
    * ⚠ これが無いと強制解放は**危険な操作になる** ── 解放したあとに古い書込の
    * ack が着いて、user が見ている本文を巻き戻す。世代の合わない ack は捨てる。
@@ -1190,6 +1200,7 @@ export const initialState: AppState = {
   lastMove: null,
   editOpenAt: null,
   tileWrite: null,
+  launcherPick: null,
   lockGen: 0,
   error: null,
 };
@@ -1580,6 +1591,12 @@ export type UserAction =
    * 🔑 計画は `planTileMove`(純関数)が立て、**1 つの event**で effect へ渡す。
    */
   | { type: 'MOVE_APP_TILE'; lid: string; target: TileMoveTarget }
+  /**
+   * 🔴 **タイルに印を付ける**(#857 段①b)── **1 回目の押し**が撃つ。
+   * ⚠ 開くのは**2 回目**(`open-tile` の受け手が数える)── 掴もうとして
+   *   少し動かして離しただけで窓が開き、中央の本文まで入れ替わるのを止める。
+   */
+  | { type: 'PICK_APP_TILE'; lid: string }
   /**
    * 🔴 **ロックの強制解放**(user 指示 2026-08-03)。応答が返らない書込 /
    * 抱えたままの draft で**永久に追記できなくなる**のを防ぐ最後の出口。
@@ -3207,6 +3224,15 @@ function reduceCore(
         state,
         events: [{ type: 'REQUEST_LAUNCHER_TILES', entries: attachmentEntries(state) }],
       };
+    /**
+     * 🔴 **1 回目の押し ── 印を付けるだけ**(#857 段①b)。
+     * ⚠ 右の列に何を出すかは `selectedLid` のままなので、**ここでは触らない**
+     *   (entry を持つタイルは呼び側が `SELECT_ENTRY` も撃つ ── 判定の正本は
+     *   `tileSelectsEntry` 1 本で、ここに 2 つ目を書かない)。
+     */
+    case 'PICK_APP_TILE':
+      if (state.launcherPick === action.lid) return { state, events: [] };
+      return { state: { ...state, launcherPick: action.lid }, events: [] };
     case 'LAUNCHER_TILES_LOADED':
       return { state: { ...state, launcherTiles: action.tiles }, events: [] };
     case 'APP_TILE_SAVED': {

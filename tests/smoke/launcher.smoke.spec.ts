@@ -8,8 +8,7 @@ import {
   createEntry,
   expectReachable,
   useSplitEditor,
-  useListBrowse,
-} from './helpers';
+  useListBrowse, openTile,} from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -297,7 +296,8 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   // ④ 🔴 **押すと新しいタブで開く**(URL タイル)
   const [urlTab] = await Promise.all([
     context.waitForEvent('page'),
-    clickReal(page, '[data-pkc-tile-kind="url"]'),
+    // ⚠ **2 回押す**(#857 段①b)── 1 回目は印が付くだけ
+    openTile(page, '[data-pkc-tile-kind="url"]'),
   ]);
   await urlTab.waitForLoadState('domcontentloaded');
   expect(urlTab.url()).toContain('tile=1');
@@ -323,7 +323,7 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   // ⑤ 🔴 **アプリのタイルは中身が開く**(blob。添付の bytes に届いている)
   const [appTab] = await Promise.all([
     context.waitForEvent('page'),
-    clickReal(page, '[data-pkc-tile-kind="app"]'),
+    openTile(page, '[data-pkc-tile-kind="app"]'),
   ]);
   await appTab.waitForLoadState('domcontentloaded');
 
@@ -799,6 +799,8 @@ test('🔴 登録 → タイル → SPA が動き、開き直しても続きが�
 
   // ③ 🔴 押すと**アプリが動く**
   const open = async (): Promise<Record<string, string | null>> => {
+    // ⚠ **2 回押す**(#857 段①b)── 1 回目は印が付くだけ
+    await tile.click();
     const [tab] = await Promise.all([context.waitForEvent('page'), tile.click()]);
     await tab.waitForLoadState('domcontentloaded');
     const inner = tab.frameLocator('[data-pkc-field="launcher-app"]');
@@ -842,6 +844,8 @@ test('🔴 登録 → タイル → SPA が動き、開き直しても続きが�
   //    `event.origin` は正規も攻撃も一律 `"null"`、外殻自身の攻撃だけは
   //    **アプリ origin を名乗った** ── つまり origin は両方向に嘘をつく。
   //    ここでは「外殻自身から撃つ」を再現する(source が iframe ではない一通)
+  // ⚠ **2 回押す**(#857 段①b)── 1 回目は印が付くだけ
+  await tile.click();
   const [attackTab] = await Promise.all([context.waitForEvent('page'), tile.click()]);
   await attackTab.waitForLoadState('domcontentloaded');
   await attackTab.frameLocator('[data-pkc-field="launcher-app"]').locator('#app').waitFor();
@@ -921,6 +925,8 @@ test('🔴 行儀の悪いアプリが保管庫を占有できない(上限は�
   await clickReal(page, '[data-pkc-browse="launcher"]');
   const tile = page.locator(USER_TILES);
   await expect(tile).toHaveCount(1, { timeout: 15000 });
+  // ⚠ **2 回押す**(#857 段①b)── 1 回目は印が付くだけ
+  await tile.click();
   const [tab] = await Promise.all([context.waitForEvent('page'), tile.click()]);
   await tab.waitForLoadState('domcontentloaded');
   // ⚠ `evaluate` で待たない ── 外殻は `location.replace` で遷移するので
@@ -963,6 +969,8 @@ test('🔴 行儀の悪いアプリが保管庫を占有できない(上限は�
   // 🔴 **開き直しても埋め直せない**(P8 段⑰)。外殻は起動のたびに前置きを走査して
   //    使用量を作り直す ── 覚えているだけだと、タブを開くたびに 0 から数え直して
   //    上限ぶんずつ積み増せる
+  // ⚠ **2 回押す**(#857 段①b)── 1 回目は印が付くだけ
+  await tile.click();
   const [tab2] = await Promise.all([context.waitForEvent('page'), tile.click()]);
   await tab2.waitForLoadState('domcontentloaded');
   await expect(tab2.locator('[data-pkc-field="app-note"]')).toBeVisible({ timeout: 20000 });
@@ -1324,7 +1332,7 @@ test('🔴 一式を入れた端末では Office タイルが出て、押すと�
 
   // 🔴 押すと **Office の窓**が開く
   const popup = context.waitForEvent('page');
-  await clickReal(page, builtinTile('office'));
+  await openTile(page, builtinTile('office'));
   const win = await popup;
   expect(win.url()).toContain('office/host.html');
   await win.close();
@@ -1413,6 +1421,8 @@ test('🔴 一度許した素のまま起動は、読み込み直しても聞か
   const tile = page.locator(USER_TILES).first();
   await expect(tile, 'タイルが並んでいない').toBeVisible({ timeout: 15000 });
   const again = context.waitForEvent('page');
+  // ⚠ **2 回押す**(#857 段①b)── 1 回目は印が付くだけ
+  await tile.click();
   await tile.click();
   const againWin = await again;
   expect(await modeOf(againWin), '読み込み直したら忘れている(永続化していない)').toBe(
@@ -1443,6 +1453,8 @@ test('🔴 一度許した素のまま起動は、読み込み直しても聞か
   const after = page.locator(USER_TILES).first();
   await expect(after).toBeVisible({ timeout: 15000 });
   const boxedTab = context.waitForEvent('page');
+  // ⚠ **2 回押す**(#857 段①b)── 1 回目は印が付くだけ
+  await after.click();
   await after.click();
   const boxedWin = await boxedTab;
   expect(await modeOf(boxedWin), '取り消したのに素のままで開いた(fail open)').not.toBe(
@@ -1485,10 +1497,29 @@ test('🔴 組み込みタイルを押すと別窓が開き、本文の面は残
   await expect(
     page.locator('[data-pkc-field="launcher-lead"]'),
     '別の窓で開くと書いていない',
-  ).toHaveText('アプリは別のウィンドウで開きます');
+  ).toHaveText('アプリは 2 回押すと別のウィンドウで開きます');
 
   const popup = context.waitForEvent('page');
-  await clickReal(page, builtinTile('dual'));
+  /**
+   * 🔴 **組み込みタイルも「1 回目は印だけ、2 回目で開く」**(#857 段①b-1)。
+   * ⚠ 組み込みは entry を持たないので `selectedLid` が 1 ミリも動かない ──
+   *   `data-pkc-selected` を見ないと、**1 回目の押しが無反応に見える**のを
+   *   この面で確かめられない。
+   * 🔑 新しい起動は増やさない ── この test が既に開いている一覧の道中に足す。
+   */
+  const dualTile = page.locator(builtinTile('dual'));
+  const pagesBeforePick = context.pages().length;
+  await dualTile.click();
+  await expect(dualTile, '組み込みタイルを 1 回押しても印が付かない').toHaveAttribute(
+    'data-pkc-selected',
+    '',
+  );
+  expect(
+    context.pages().length,
+    '組み込みタイルを 1 回押しただけで別窓が開いた',
+  ).toBe(pagesBeforePick);
+  // ⚠ 2 回目で開く(上の 1 回目と合わせて 2 回)
+  await dualTile.click();
   const win = await popup;
 
   // ③ 窓は PKC のディープリンクで開いている(面 + 連れて行くノート + 合図)

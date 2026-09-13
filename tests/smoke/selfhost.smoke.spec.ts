@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { clickReal, collectPageErrors, dismissAnnounce, gotoApp } from './helpers';
+import { clickReal, collectPageErrors, dismissAnnounce, gotoApp, openTile } from './helpers';
 
 /**
  * #532 段 B: **押すと、自分のパソコンで動かす一式が本当に落ちる**。
@@ -30,7 +30,8 @@ test('🔴 「自分のパソコンで動かす」を押すと、一式の zip �
   await expect(page.locator(tile), 'タイルが出ていない').toBeVisible();
 
   const wait = page.waitForEvent('download', { timeout: 30_000 });
-  await clickReal(page, tile);
+  // ⚠ **2 回押す**(#857 段①b)── 1 回目は印が付くだけ
+  await openTile(page, tile);
   const dl = await wait;
 
   /**

@@ -27,6 +27,8 @@ export class LauncherRenderer {
   private lastTiles: LauncherTile[] | null | undefined = undefined;
   private lastQuery: string | null = null;
   private lastSelected: string | null | undefined = undefined;
+  /** ⚠ **1 回目の押しの印**(#857 段①b)── 指紋に入れないと印が出ない。 */
+  private lastPick: string | null | undefined = undefined;
 
   constructor(private readonly region: HTMLElement) {}
 
@@ -83,12 +85,14 @@ export class LauncherRenderer {
     if (
       state.launcherTiles === this.lastTiles &&
       state.filterQuery === this.lastQuery &&
-      state.selectedLid === this.lastSelected
+      state.selectedLid === this.lastSelected &&
+      state.launcherPick === this.lastPick
     )
       return;
     this.lastTiles = state.launcherTiles;
     this.lastQuery = state.filterQuery;
     this.lastSelected = state.selectedLid;
+    this.lastPick = state.launcherPick;
     const list = this.ensureFrame();
     list.textContent = '';
 
@@ -146,7 +150,11 @@ export class LauncherRenderer {
      */
     const lead = document.createElement('p');
     lead.setAttribute('data-pkc-field', 'launcher-lead');
-    lead.textContent = 'アプリは別のウィンドウで開きます';
+    /**
+     * ⚠ **2 回押すことを、押す前に言う**(#857 段①b)── 1 回目で印が付くだけだと、
+     *   知らない人には「押したのに開かない」に見える。
+     */
+    lead.textContent = 'アプリは 2 回押すと別のウィンドウで開きます';
     list.append(lead);
 
     let group: string | null = null;
@@ -180,7 +188,7 @@ export class LauncherRenderer {
           list.append(head, grid);
         }
       }
-      grid?.append(this.tile(tile, state.selectedLid, canReorder));
+      grid?.append(this.tile(tile, state.selectedLid, canReorder, state.launcherPick));
     }
   }
 
@@ -193,7 +201,12 @@ export class LauncherRenderer {
    * 階層が無い、という状態。一覧と同じ流儀(1 行・共有 1px 線・普通の太さ・
    * はみ出しは畳む)へ寄せる。
    */
-  private tile(tile: LauncherTile, selectedLid: string | null, canReorder: boolean): HTMLElement {
+  private tile(
+    tile: LauncherTile,
+    selectedLid: string | null,
+    canReorder: boolean,
+    pick: string | null,
+  ): HTMLElement {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.setAttribute('data-pkc-action', 'open-tile');
@@ -205,8 +218,13 @@ export class LauncherRenderer {
      *   掴めるのに落とせないと「壊れている」に見える。
      */
     if (canReorder && isMovableTile(tile)) btn.setAttribute('draggable', 'true');
-    // ⚠ 押した対象は**選択状態にもなる**(main.ts)── その印をここで出す
-    if (tile.lid === selectedLid) btn.setAttribute('data-pkc-selected', '');
+    /**
+     * ⚠ 押した対象は**選択状態にもなる**(main.ts)── その印をここで出す。
+     * 🔴 **`launcherPick` も見る**(#857 段①b)── 組み込みのタイルは entry を
+     *   持たないので `selectedLid` は 1 ミリも動かない。見ないと
+     *   **1 回目の押しが無反応に見える**。
+     */
+    if (tile.lid === selectedLid || tile.lid === pick) btn.setAttribute('data-pkc-selected', '');
 
     // 🔑 目印(取込は写していたのに、出す側が無かった)。⚠ 無いときも**幅は取る**
     //    ── 有無で題名の左端がずれると、縦に並べたときに読みにくい。

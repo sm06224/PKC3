@@ -16,7 +16,7 @@ import type { Dispatcher } from '@adapter/state/dispatcher';
 import { lidOfNode } from './lid-of-node';
 import type { DroppedAt } from './asset-into-note';
 import { deliveredEntryOf, type ExtDeliveredEntry } from '@features/extension/ext-delivery';
-import { isLaunchableUrl } from '@features/launcher/tiles';
+import { isLaunchableUrl, tileSelectsEntry } from '@features/launcher/tiles';
 import {
   chapterSpanOf,
   headingAtSourceLine,
@@ -1624,6 +1624,32 @@ function moveOrder(
   const lid = target.getAttribute('data-pkc-entry');
   if (!lid) return;
   dispatcher.dispatch({ type: 'MOVE_ENTRY_ORDER', lid, direction });
+}
+
+/**
+ * 🔴 **同じタイルを続けて押したか**(#857 段①b)。
+ *
+ * ⚠ `maybeEnterFolder` と**同じ作法**(`dblclick` に頼らず、同じ lid への連続押しで
+ *   見る)。⚠ **3 回目を「もう一度」と数えない** ── 数えると、素早く 3 回押したときに
+ *   窓が 2 枚開く。
+ *
+ * 🔴 **数は器(root)ごとに持つ**(2026-09-13、test が教えた)。
+ * ⚠ 1 稿目は module の中に 1 つだけ置いていたので、**別の器の押しと混ざった** ──
+ *   test では前の it が残した「1 回目」を次の it が「2 回目」と読み、
+ *   **1 回押しただけで窓が開いた**(しかも通る it と落ちる it が混在して、
+ *   原因が 2 つに見えた)。
+ * 🔑 `maybeEnterFolder` が**閉包の中**に数を持っているのと同じ形へ寄せる ──
+ *   あちらは `bindActions` の中の `let`、こちらは `ACTIONS` が module に在るので
+ *   **器を鍵にした `WeakMap`** にする(器が消えれば数も消える)。
+ */
+const TILE_DOUBLE_MS = 500;
+const lastTilePress = new WeakMap<Element, { lid: string; at: number }>();
+function pressedTileAgain(root: Element, lid: string): boolean {
+  const now = Date.now();
+  const last = lastTilePress.get(root) ?? { lid: '', at: 0 };
+  const again = last.lid === lid && now - last.at <= TILE_DOUBLE_MS;
+  lastTilePress.set(root, again ? { lid: '', at: 0 } : { lid, at: now });
+  return again;
 }
 
 /**
@@ -6667,9 +6693,39 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (lid === null || lid === undefined || lid === '') return;
     dispatcher.dispatch({ type: 'UNPIN_SPLIT_ENTRY', lid });
   },
-  'open-tile': (_dispatcher, target, services) => {
+  /**
+   * 🔴 **アプリは 2 回押すと開く**(#857 段①b。user 裁定 2026-09-13
+   * 「開くのはダブルタップに変更」)。
+   *
+   * ## なぜ 1 回でやめたか
+   *
+   * タイルは**掴んで並べ替えられる**(段①)ので、掴もうとして数 px 動かして
+   * 離すとブラウザは drag を始めず、**ただの押し**になる。⚠ 直す前はそれで
+   * **別のウィンドウが開き、中央に読んでいた本文まで入れ替わった**
+   * ── user は並べ替えたかっただけなので、窓を閉じてノートを探し直すことになる。
+   *
+   * ## ⚠ ネイティブの `dblclick` に頼らない
+   *
+   * フォルダの 2 回押し(`maybeEnterFolder`)と**同じ理由**である ── ブラウザは
+   * 「同じ node を 2 回」でしか `dblclick` を出さないが、この一覧は書込の ack で
+   * **丸ごと組み直る**(`launcher.ts` は `textContent = ''` から描く)。
+   * 🔑 だから**同じ lid への連続押し**で見る ── node が入れ替わっても lid は同じ。
+   *
+   * 🔑 1 回目は**印を付ける**(`PICK_APP_TILE`)── 無反応にしない。
+   *   entry を持つタイルは右の列にも出す(判定の正本は `tileSelectsEntry` 1 本)。
+   */
+  'open-tile': (dispatcher, target, services, root) => {
     const lid = target.closest('[data-pkc-tile]')?.getAttribute('data-pkc-tile');
-    if (lid) services.openTile?.(lid);
+    if (lid === null || lid === undefined || lid === '') return;
+    if (!pressedTileAgain(root, lid)) {
+      dispatcher.dispatch({ type: 'PICK_APP_TILE', lid });
+      // ⚠ 組み込みは entry を持たない ── 立てると右の列が「見つからない」になる
+      const tile = dispatcher.getState().launcherTiles?.find((t) => t.lid === lid);
+      if (tile !== undefined && tileSelectsEntry(tile))
+        dispatcher.dispatch({ type: 'SELECT_ENTRY', lid });
+      return;
+    }
+    services.openTile?.(lid);
   },
   /**
    * 🔴 **マニュアルの窓を開く**(#645)。⚠ ヘルプの中の口(`help.ts`)と
