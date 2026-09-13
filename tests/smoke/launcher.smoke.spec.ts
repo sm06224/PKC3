@@ -712,6 +712,109 @@ test('🔴 タイルを長押しすると並べ替えモードに入り、開か
   await reopened.waitForLoadState('domcontentloaded');
   await reopened.close();
 
+  /**
+   * ⑥ 🔴 **左のタブを離れると並べ替えモードが終わる**(`leaveLauncherIf`。
+   *   着地前の動線レビュー 欠陥 3、2026-09-13)。
+   *
+   * ⚠ 頼んでいないのにモードが続くと、戻ってきた user は「2 回押しても
+   *   開かない」だけを見て、自分が何をしたのか分からない(`binder.ts` の
+   *   `leaveLauncherIf` docstring)。
+   * 🔑 起動を増やさない ── もう一度長押しして、同じ道中で確かめる。
+   */
+  await page
+    .locator(mainTile)
+    .dispatchEvent('pointerdown', {
+      bubbles: true,
+      pointerType: 'touch',
+      button: 0,
+      isPrimary: true,
+    });
+  await page.waitForTimeout(600);
+  await page.locator(mainTile).dispatchEvent('pointerup', { bubbles: true, pointerType: 'touch' });
+  await expect(done, '2 度目の長押しで並べ替えモードに入らない').toBeVisible();
+
+  await clickReal(page, '[data-pkc-browse="list"]');
+  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await expect(
+    done,
+    '一覧タブへ移ってアプリタブへ戻っても、並べ替えモードが終わっていない',
+  ).toHaveCount(0);
+  await expect(
+    lead,
+    'タブを離れて戻っても、文言が「2 回押すと開く」に戻らない',
+  ).toHaveText('アプリは 2 回押すと別のウィンドウで開きます');
+
+  // モードが終わっているので、タイルは通常どおり 2 回押すと開く
+  const pagesBeforeLeaveCheck = context.pages().length;
+  await clickReal(page, mainTile);
+  await page.waitForTimeout(300);
+  expect(
+    context.pages().length,
+    'タブを離れてモードが終わった直後、1 回目のタップでウィンドウが開いた',
+  ).toBe(pagesBeforeLeaveCheck);
+  const [reopened2] = await Promise.all([
+    context.waitForEvent('page'),
+    clickReal(page, mainTile),
+  ]);
+  await reopened2.waitForLoadState('domcontentloaded');
+  await reopened2.close();
+
+  /**
+   * ⑦ ⚠ **出口はスクロールしても画面に残る**(`position: sticky`。
+   *   着地前の動線レビュー 欠陥 2、2026-09-13)。
+   *
+   * 🔑 起動を増やさない ── 一覧の**器**(`browse-host`)を直接縮めて溢れさせる
+   *   (viewport を縮めない ── `@media (max-width: 900px|1100px)` の版面切替を
+   *   踏むと、この面自体が見えなくなる恐れがある)。
+   * ⚠ **溢れていること自体を確かめる**(空振り防止、CLAUDE.md §2)── 縮めても
+   *   溢れなければ、以下の位置検査は何も見ていないのと同じになる。
+   * ⚠ 値は pin しない(環境で変わる)── 見るのは「器の見えている範囲に入っているか」。
+   */
+  await page
+    .locator(mainTile)
+    .dispatchEvent('pointerdown', {
+      bubbles: true,
+      pointerType: 'touch',
+      button: 0,
+      isPrimary: true,
+    });
+  await page.waitForTimeout(600);
+  await page.locator(mainTile).dispatchEvent('pointerup', { bubbles: true, pointerType: 'touch' });
+  await expect(done, '3 度目の長押しで並べ替えモードに入らない').toBeVisible();
+
+  const host = page.locator('[data-pkc-region="browse-host"]');
+  await host.evaluate((el) => {
+    (el as HTMLElement).style.maxHeight = '160px';
+  });
+  const scrolled = await host.evaluate((el) => {
+    const before = el.scrollTop;
+    const overflows = el.scrollHeight > el.clientHeight;
+    el.scrollTop = el.scrollHeight;
+    return { before, overflows, after: el.scrollTop };
+  });
+  expect(
+    scrolled.overflows,
+    '一覧を縮めても溢れない(スクロール自体が起きていない ── この先の検査は空振りする)',
+  ).toBe(true);
+  expect(scrolled.after, '縮めた器がスクロールしていない').toBeGreaterThan(scrolled.before);
+
+  const [hostBox, doneBox] = await Promise.all([host.boundingBox(), done.boundingBox()]);
+  expect(hostBox, '一覧の器が測れない').not.toBeNull();
+  expect(doneBox, 'スクロール後に出口が測れない(消えている)').not.toBeNull();
+  if (hostBox && doneBox) {
+    expect(
+      doneBox.y,
+      `スクロールすると出口が器の上へ流れて画面から消える(host.y=${hostBox.y} done.y=${doneBox.y})`,
+    ).toBeGreaterThanOrEqual(hostBox.y - 1);
+    expect(
+      doneBox.y + doneBox.height,
+      `出口が器の下へはみ出す(host=${hostBox.y}+${hostBox.height} done=${doneBox.y}+${doneBox.height})`,
+    ).toBeLessThanOrEqual(hostBox.y + hostBox.height + 1);
+  }
+  await host.evaluate((el) => {
+    (el as HTMLElement).style.maxHeight = '';
+  });
+
   expect(errors, `console/pageerror: ${errors.join(' | ')}`).toEqual([]);
 });
 

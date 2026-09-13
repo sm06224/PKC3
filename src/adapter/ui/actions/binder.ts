@@ -1679,11 +1679,21 @@ function pressedTileAgain(root: Element, lid: string): boolean {
  * ⚠ 直す前:並べ替えモードのまま「一覧」へ行き、しばらくして「アプリ」へ戻ると
  *   **タイルを 2 回押しても開かない**。頼んでいないのにモードが続いており、
  *   しかも user は自分が何をしたのか憶えていない ── 「壊れている」に見える。
- * 🔑 **判定はこの 1 か所**(§7)── 探し方(`browseMode`)は state に持たないので
- *   reducer からは見えない。呼ぶ口は下に 3 つあるが、**条件はここだけ**が持つ。
  * ⚠ **入るときは何もしない** ── 戻ってきた瞬間に勝手に入らない。
+ *
+ * ## 🔴 呼ぶのは `main.ts` の `setBrowse` **1 か所**である(2026-09-13 に訂正)
+ *
+ * ⚠ 1 稿目はここ(`binder.ts`)の **3 か所**で呼んでいた ── 着地前レビューが
+ *   **4 本目の口**を見つけた:`deep-link.ts` の「引っ越した面」
+ *   (`#pkc?view=calendar` → 予定)は `main.ts` の `openBrowse` を通るので、
+ *   **アドレスが変わっただけで左のタブが動き、モードだけ残る**。
+ * 🔑 探し方(`browseMode`)は state に持たないので reducer からは見えない ──
+ *   だから**タブを実際に切り替える唯一の実装**(`main.ts` の `setBrowse`)へ寄せる。
+ *   ⚠ 呼び側ごとに対で書かせる形は、**足した人が書き忘れた日に静かに破れる**。
+ * ⚠ 門が掛かっていることは `tests/adapter/tile-reorder-mode.test.ts` が
+ *   **`main.ts` の原文**で pin する(この関数自体の test と対で読む)。
  */
-function leaveLauncherIf(dispatcher: Dispatcher, mode: string): void {
+export function leaveLauncherIf(dispatcher: Dispatcher, mode: string): void {
   if (mode !== 'launcher') dispatcher.dispatch({ type: 'SET_LAUNCHER_REORDER', on: false });
 }
 
@@ -5075,10 +5085,8 @@ const ACTIONS: Record<string, ActionHandler> = {
   /** 左の列の**探し方**を切り替える(P8 段⑤)。⚠ 中央のビューとは別の軸。 */
   'set-browse': (dispatcher, target, services) => {
     const mode = target.closest('[data-pkc-browse]')?.getAttribute('data-pkc-browse');
-    if (mode) {
-      leaveLauncherIf(dispatcher, mode);
-      services.setBrowse?.(mode);
-    }
+    // ⚠ 並べ替えモードを終えるのは `main.ts` の `setBrowse` 1 か所(上の docstring)
+    if (mode) services.setBrowse?.(mode);
   },
   'set-view': (dispatcher, target) => {
     const view = target.getAttribute('data-pkc-view') ?? '';
@@ -5509,10 +5517,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     dispatcher.dispatch({ type: 'ROW_RENAME_BEGIN', lid });
     const fieldShown = (): boolean =>
       root.querySelector('[data-pkc-field="row-rename"]') !== null;
-    if (!fieldShown()) {
-      leaveLauncherIf(dispatcher, 'list');
-      services.setBrowse?.('list');
-    }
+    if (!fieldShown()) services.setBrowse?.('list');
     if (!fieldShown()) {
       dispatcher.dispatch({ type: 'ROW_RENAME_END' });
       dispatcher.dispatch({
@@ -8954,7 +8959,6 @@ export function bindActions(
           mode,
           timer: setTimeout(() => {
             hoverTab = null;
-            leaveLauncherIf(dispatcher, mode);
             services.setBrowse?.(mode);
           }, TAB_HOVER_MS),
         };

@@ -121,10 +121,70 @@ test('🔴 予定のタブで札を掴んで日へ落とすと、本文の日付
   await clickReal(page, '[data-pkc-action="cancel-edit"]');
 
   // ⑤ 札も新しい日の束に居る(本文だけ直って画面が古い、を作らない)
-  await expect(
-    pane.locator(`[data-pkc-region="schedule-group"][data-pkc-drop-date="${D3}"] [data-pkc-entry]`),
-    '札が新しい日へ移っていない',
-  ).toHaveCount(1);
+  const d3Card = pane.locator(
+    `[data-pkc-region="schedule-group"][data-pkc-drop-date="${D3}"] [data-pkc-entry]`,
+  );
+  await expect(d3Card, '札が新しい日へ移っていない').toHaveCount(1);
+
+  /**
+   * ⑥ 🔴 **繰り返していない札を右クリック →「繰り返す…」→ 刻みを選ぶと、
+   *   札の字に出て、本文にも書かれる**(#855 段 0 の 3 つ目。着地前の動線
+   *   レビュー、2026-09-13)。
+   *
+   * ⚠ 下の「毎週の予定」test は**最初から `毎週` を書いた本文**で組んでいる ──
+   *   「繰り返していない札」から入る動線はここでしか見られない。
+   * 🔑 起動を増やさない ── 既に開いている予定の面・既に在る札の道中に足す。
+   * ⚠ **この段より前に足さない** ── 先に繰り返しにすると、上の③の「掴んで
+   *   動かす drag」が繰り返しの札を相手にすることになり、掴めるかどうかが
+   *   変わってしまう(繰り替えの回は掴むと断られる ── `task-card.ts` の docstring)。
+   * ⚠ 右クリックは**字の上**を狙う ── 札の中には `input[type=checkbox]` が
+   *   在り、そこで右クリックすると `binder.ts` の `onContextMenu` が
+   *   `input` を見て**素通り**する(この面のメニューが出ない)。
+   * ⚠ **`card`(全束を跨ぐ選手)ではなく、D3 の束に絞った `d3Card` を使う** ──
+   *   「毎週」にした瞬間、agenda はこの窓(今日から数か月)に**何回も**展開する
+   *   ので、絞らない選手は要素数が 1 → 9 に増えて strict mode で落ちる
+   *   (実測。CLAUDE.md §2「fixture のゼロ件の次元」の逆 ── 増える次元を
+   *   1 つに絞らないと壊れる)。
+   */
+  const cardText = d3Card.locator('[data-pkc-field="text"]');
+  await cardText.click({ button: 'right' });
+  const repeatMenu = page.locator('[data-pkc-region="context-menu"]');
+  await expect(repeatMenu, '札を右クリックしてもメニューが出ない').toBeVisible();
+  await expect(repeatMenu, '「繰り返す…」が出ていない').toContainText('繰り返す…');
+  await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="open-repeat-menu"]');
+  await expect(repeatMenu, '刻みの一覧に「毎週」が出ていない').toContainText('毎週');
+  await clickReal(
+    page,
+    '[data-pkc-region="context-menu"] [data-pkc-action="set-task-repeat"][data-pkc-repeat="week"]',
+  );
+  await expect(repeatMenu, '刻みを選んでもメニューが閉じない').toHaveCount(0);
+  await expect(d3Card, '刻みを選んでも札に「毎週」が出ない').toContainText('毎週');
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await expect(ta, '繰り返しの刻みが本文に書かれていない').toHaveValue(
+    `- [ ] 見積を送る @${D3} 毎週\n- [ ] 体裁のチェック`,
+  );
+  await clickReal(page, '[data-pkc-action="cancel-edit"]');
+
+  /**
+   * ⑦ 🔴 **もう一度「繰り返す…」を開くと「やめる」が出て、押すと消える**
+   *   (片道の操作を作らない ── CLAUDE.md 2026-08-23)。
+   */
+  await expect(d3Card, '毎週にした直後、D3 の束の札が 1 枚でなくなった').toHaveCount(1);
+  await cardText.click({ button: 'right' });
+  await expect(repeatMenu, '2 度目の右クリックでメニューが出ない').toBeVisible();
+  await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="open-repeat-menu"]');
+  await expect(repeatMenu, '繰り返している行に「やめる」が出ていない').toContainText('やめる');
+  await clickReal(
+    page,
+    '[data-pkc-region="context-menu"] [data-pkc-action="set-task-repeat"][data-pkc-repeat=""]',
+  );
+  await expect(repeatMenu, '「やめる」を押してもメニューが閉じない').toHaveCount(0);
+  await expect(d3Card, '「やめる」を押しても札から「毎週」が消えない').not.toContainText('毎週');
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await expect(ta, '「やめる」を押しても本文の「毎週」が消えない').toHaveValue(
+    `- [ ] 見積を送る @${D3}\n- [ ] 体裁のチェック`,
+  );
+  await clickReal(page, '[data-pkc-action="cancel-edit"]');
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

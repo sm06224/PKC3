@@ -29,6 +29,9 @@ import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { LauncherRenderer } from '../../src/adapter/ui/render/launcher';
 import { LONG_PRESS_MS } from '../../src/adapter/ui/actions/long-press';
 import { withBuiltinTiles, type LauncherTile } from '../../src/features/launcher/tiles';
+import { leaveLauncherIf } from '../../src/adapter/ui/actions/binder';
+import { codeOnly } from '../helpers/code-only';
+import { readFileSync } from 'node:fs';
 
 function meta(lid: string, order: number): EntryMeta {
   return {
@@ -248,24 +251,42 @@ describe('並べ替えモード(#857 段①b-2)', () => {
    * ⚠ 直す前:並べ替えモードのまま「一覧」へ行き、戻ってくると**タイルを 2 回
    *   押しても開かない**。頼んでいないのにモードが続いていた。
    */
-  it('🔴 ⑪ 左のタブを別のものに切り替えると終わる', () => {
+  it('🔴 ⑪ 別の探し方へ切り替えると終わる', () => {
     d.dispatch({ type: 'SET_LAUNCHER_REORDER', on: true });
-    const tab = document.createElement('button');
-    tab.setAttribute('data-pkc-action', 'set-browse');
-    tab.setAttribute('data-pkc-browse', 'list');
-    root.append(tab);
-    tab.click();
+    leaveLauncherIf(d, 'list');
     expect(d.getState().launcherReorder, 'タブを離れてもモードが続いた').toBe(false);
   });
 
-  it('⚠ ⑪b 同じ「アプリ」タブを押し直しただけでは終わらない(対照群)', () => {
+  it('⚠ ⑪b 同じ「アプリ」なら終わらない(対照群 ── 戻ってきただけで勝手に切らない)', () => {
     d.dispatch({ type: 'SET_LAUNCHER_REORDER', on: true });
-    const tab = document.createElement('button');
-    tab.setAttribute('data-pkc-action', 'set-browse');
-    tab.setAttribute('data-pkc-browse', 'launcher');
-    root.append(tab);
-    tab.click();
-    expect(d.getState().launcherReorder, '同じタブを押しただけで終わった').toBe(true);
+    leaveLauncherIf(d, 'launcher');
+    expect(d.getState().launcherReorder, '同じ探し方なのに終わった').toBe(true);
+  });
+
+  /**
+   * 🔴 **門が「掛かっている」ことを、原文で pin する**(2026-09-13、着地前レビュー 1)。
+   *
+   * ⚠ 1 稿目は `binder.ts` の **3 か所**で呼んでいたが、レビューが**4 本目の口**を
+   *   見つけた ── `deep-link.ts` の「引っ越した面」(`#pkc?view=calendar` → 予定)は
+   *   `main.ts` の `openBrowse` を通るので、**アドレスが変わっただけでタブが動き、
+   *   モードだけ残る**。🔑 だから**タブを実際に切り替える唯一の実装**へ寄せた。
+   * ⚠ 関数の test(上の 2 本)は「**門が在る**」ことしか言わない ──
+   *   「**門が掛かっている**」は別の主張なので、ここで原文を読む
+   *   (CLAUDE.md「手で関数を呼ぶのは、門が掛かっていることの確認ではない」)。
+   * ⚠ **注釈を落としてから**探す ── 解説コメントに満たされると常に緑になる(§1)。
+   */
+  it('🔴 ⑪c `main.ts` の `setBrowse` が、切り替える前にモードを終えている', () => {
+    const src = codeOnly(readFileSync('src/main.ts', 'utf-8'));
+    const at = src.indexOf('setBrowse: (mode) => {');
+    expect(at, '前提が崩れている(`setBrowse` の実装が見つからない)').toBeGreaterThan(0);
+    // ⚠ 実装の**中**だけを見る(file 全体で探すと、import の 1 行に満たされる)
+    const body = src.slice(at, at + 900);
+    expect(body, '`setBrowse` がモードを終えていない').toContain('leaveLauncherIf(dispatcher, mode)');
+    // 🔑 **切り替えるより前**に呼んでいること ── 後だと 1 描画ぶん残る
+    expect(
+      body.indexOf('leaveLauncherIf(dispatcher, mode)'),
+      'タブを切り替えた後に終えている',
+    ).toBeLessThan(body.indexOf('browseMode = mode'));
   });
 
   it('🔴 ⑨ 長押しの直後の click は捨てる(離しただけで数が進まない)', () => {
