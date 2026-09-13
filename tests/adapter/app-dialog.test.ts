@@ -604,3 +604,53 @@ describe('書庫の選び方(#818)', () => {
     expect(okBtn().disabled).toBe(false);
   });
 });
+
+/**
+ * 🔴 **時刻の欄は、受け取る相手のときだけ出す**(#865、2026-09-13)。
+ *
+ * ⚠ この小窓は口が 2 つある ── **本文の行に入れる**(時刻を本当に書く)と、
+ *   **ノート 1 件に付ける**(frontmatter の `date:` で、時刻を持てない)。
+ * 🔴 直す前はどちらにも出していたので、後者で `14:00` と打って「入れる」を
+ *   押すと、受け手が**黙って捨てていた** ── 打った字が何も言わずに消える。
+ */
+describe('日付の小窓の時刻欄(#865)', () => {
+  /**
+   * ⚠ **この describe にも要る**(上の 2026-08-23 の注記と同じ)── 掃除しないと
+   *   `okBtn()`(document の先頭)が**前の it が残したダイアログ**に当たり、
+   *   押しても自分の Promise が解けない(症状は「5 秒で timeout」)。
+   */
+  beforeEach(() => {
+    resetAppDialogForTest();
+    document.body.innerHTML = '';
+  });
+
+  const HOST = (): HTMLElement => {
+    const el = document.createElement('div');
+    document.body.append(el);
+    return el;
+  };
+  const SHORT = [{ id: 'today', label: '今日' }];
+  const timeField = (): Element | null => document.querySelector('[data-pkc-field="pick-time"]');
+
+  it('🔴 既定では出る(本文の行に入れる口 ── 意味を変えない)', async () => {
+    const h = HOST();
+    const p = pickDateInApp(h, new Date(2026, 7, 23), SHORT, () => '2026-08-23');
+    await tick();
+    expect(timeField(), '時刻の欄が消えた(本文の行では時刻を書ける)').not.toBeNull();
+    cancelBtn().click();
+    await p;
+  });
+
+  it('🔴 `withTime: false` なら出さない(ノートに付ける口)', async () => {
+    const h = HOST();
+    const p = pickDateInApp(h, new Date(2026, 7, 23), SHORT, () => '2026-08-23', {
+      withTime: false,
+    });
+    await tick();
+    expect(timeField(), '書く先が無いのに時刻の欄を出した(打った字が捨てられる)').toBeNull();
+    // ⚠ 空振り防止 ── 小窓ごと空になっていない(日付の欄は残る)
+    expect(document.querySelector('[data-pkc-field="pick-date"]')).not.toBeNull();
+    okBtn().click();
+    expect(await p, '時刻を `null` で返していない').toEqual({ date: '2026-08-23', time: null });
+  });
+});

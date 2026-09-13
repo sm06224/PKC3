@@ -2269,6 +2269,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-13(#865 ── 日付の小窓の時刻欄)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-09-selfhost-bundle" …` → 096944d
+     */
+    'PKC を自分のパソコンで動かす一式を、ここから落とせるようになりました',
+    /**
      * ⚠ **2026-09-13(#855 段 0 の 3 つ目 ── 札の繰り返し)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-09-manual-toc-fold" …` → 7ef7bb5
      */

@@ -5421,11 +5421,20 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     const lid = dispatcher.getState().selectedLid;
     if (lid === null) return;
-    void pickDateInApp(root, new Date(), DATE_SHORTCUTS, (id, now) =>
-      isDateShortcut(id) ? shortcutDate(id, now) : '',
+    void pickDateInApp(
+      root,
+      new Date(),
+      DATE_SHORTCUTS,
+      (id, now) => (isDateShortcut(id) ? shortcutDate(id, now) : ''),
+      /**
+       * 🔴 **時刻の欄を出さない**(#865、2026-09-13)。
+       * ⚠ ノートの日付に時刻は無い(抽出列が `YYYY-MM-DD` だけを受ける)ので、
+       *   出すと**打った字が黙って捨てられる**(無言の dead input)。
+       * 🔑 捨てるのは正しい ── 捨てる物を打たせるのが間違いだった。
+       */
+      { withTime: false },
     ).then((picked) => {
       if (picked === null) return;
-      // ⚠ ノートの日付に時刻は無い(抽出列が `YYYY-MM-DD` だけを受ける)
       dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: picked.date });
     });
   },
