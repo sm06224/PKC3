@@ -24,7 +24,13 @@ import { appPanes } from '../../src/adapter/ui/render/pane-visibility';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { bindActions, type BinderServices } from '../../src/adapter/ui/actions/binder';
 import { BODY_MENU_ACTIONS, ENTRY_ACTION_HINTS } from '../../src/features/entry-actions';
-import { MENU_HINT_FIELD, MENU_SHORTCUT_ATTR, openContextMenu } from '../../src/adapter/ui/render/context-menu';
+import {
+  MENU_HINT_FIELD,
+  MENU_SHORTCUT_ATTR,
+  contextMenuOpen,
+  openContextMenu,
+  scrollUnchangedSinceOpen,
+} from '../../src/adapter/ui/render/context-menu';
 import { chordHint } from '../../src/adapter/ui/render/shortcut-hint';
 import { sectionAt } from '../../src/features/markdown/append-target';
 import { applyHeadingFold } from '../../src/adapter/ui/render/heading-fold';
@@ -1608,5 +1614,83 @@ describe('近道の字の見え方(#587 C 案 2)', () => {
     expect(blocks[0], '案内の字が違う').toMatch(decl('content', "'項目に乗せると説明が出ます'"));
     // 案内は説明より薄く(説明と同じ濃さだと「説明」に読める)
     expect(blocks[0], '案内が説明と同じ濃さ').toMatch(decl('color', 'color-mix\\('));
+  });
+});
+
+/**
+ * 🔴 **メニューが、開いた直後に自分で自分を閉じない**(#875、2026-09-13)。
+ *
+ * ## 何が起きていたか(実測)
+ *
+ * 押した器が**スクロールする器の見える範囲からはみ出している**と、クリックで焦点を
+ * 受けた瞬間に**ブラウザが真ん中へ寄せる**:
+ *
+ * | 測ったこと | 値 |
+ * |---|---|
+ * | 器の見える高さ | **298px** |
+ * | 押したボタンの位置(器の上端から) | **303.7px**(= **5.7px はみ出している**) |
+ * | `scrollTop` | **0 → 168**(`303.7 + 26/2 − 298/2 = 167.7` ≒ 168 = **真ん中寄せ**) |
+ *
+ * 🔴 `binder.ts` は `root` の `scroll` を拾ってメニューを閉じるので、
+ *   **開く前に済んだスクロールの、遅れて来た通知**で閉じていた ──
+ *   症状は「**出るのに押す間も無く消える**」。
+ *
+ * ## ⚠ 1 度、外した直しを入れた
+ *
+ * 最初は「**メニュー側の `focus()` が引き金**」と読み、`preventScroll` を当てて
+ * 「直した」と書いた ── **間違い**で、実ブラウザは症状をそのまま再現した。
+ * 🔑 引き金は**押した器自身**がネイティブに受ける焦点で、`preventDefault` では止まらない
+ * (実測のタイムライン:`pointerdown` の時点で既に動き終わっている)。
+ * だから**閉じる側で見分ける**形にした。
+ */
+describe('メニューは自分で自分を閉じない(#875)', () => {
+  const build = (): { root: HTMLElement; scroller: HTMLElement; btn: HTMLElement } => {
+    const root = document.createElement('div');
+    const scroller = document.createElement('div');
+    const btn = document.createElement('button');
+    scroller.append(btn);
+    root.append(scroller);
+    document.body.append(root);
+    return { root, scroller, btn };
+  };
+
+  it('🔴 開く前に済んだスクロールの通知では閉じない(押す間が無くならない)', () => {
+    const { root, scroller, btn } = build();
+    // ⚠ 焦点の送りは**開く前**に終わっている ── 実測どおり、その後の値で開く
+    scroller.scrollTop = 168;
+    openContextMenu(root, { x: 0, y: 0 }, [...BODY_MENU_ACTIONS], btn, {});
+    expect(contextMenuOpen(root), '前提が崩れている(そもそも開いていない)').toBe(true);
+
+    expect(
+      scrollUnchangedSinceOpen(root, scroller),
+      '開いた時点から動いていないのに「動いた」と答えた(メニューが押す間も無く消える)',
+    ).toBe(true);
+    root.remove();
+  });
+
+  it('🔴 user が本当に送ったら閉じる(緩めすぎていない)', () => {
+    const { root, scroller, btn } = build();
+    scroller.scrollTop = 168;
+    openContextMenu(root, { x: 0, y: 0 }, [...BODY_MENU_ACTIONS], btn, {});
+    // ⚠ ここで初めて **user が送る**
+    scroller.scrollTop = 200;
+    expect(
+      scrollUnchangedSinceOpen(root, scroller),
+      '送ったのに「動いていない」と答えた ── メニューが貼り付いたまま取り残される',
+    ).toBe(false);
+    root.remove();
+  });
+
+  it('⚠ 控えていない器の scroll は、いつでも閉じる側に倒す', () => {
+    const { root, btn } = build();
+    const other = document.createElement('div');
+    document.body.append(other);
+    openContextMenu(root, { x: 0, y: 0 }, [...BODY_MENU_ACTIONS], btn, {});
+    expect(
+      scrollUnchangedSinceOpen(root, other),
+      '知らない器の scroll を「動いていない」と答えた(閉じ損ねる)',
+    ).toBe(false);
+    other.remove();
+    root.remove();
   });
 });

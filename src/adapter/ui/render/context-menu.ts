@@ -73,6 +73,57 @@ export interface OpenMenu {
 /** 説明の欄の印(`data-pkc-field`)。⚠ smoke / unit はこの印で見る。 */
 export const MENU_HINT_FIELD = 'context-menu-hint';
 
+/**
+ * 🔴 **メニューを開いた時点の「巻き位置」**(#875、2026-09-13)。
+ *
+ * ## なぜ要るか(実測で分かった筋)
+ *
+ * 押した器が**スクロールする器の見える範囲からはみ出している**と、クリックで焦点を
+ * 受けた瞬間に**ブラウザが真ん中へ寄せる** ── 実測:器の見える高さ 298px に対し
+ * 押したボタンは上端から 303.7px、`scrollTop` は **0 → 168**
+ * (`303.7 + 26/2 − 298/2 = 167.7` ≒ 168 で、**真ん中寄せ**の式と一致する)。
+ *
+ * 🔴 ところが `binder.ts` は `root` の `scroll` を capture で拾って**メニューを閉じる**。
+ * ⚠ **スクロールはメニューを開く前に終わっている**(実測のタイムライン:
+ *   `pointerdown` の時点で既に 168)が、**`scroll` のイベントだけが遅れて飛ぶ**ので、
+ *   開いた直後のメニューがそれで閉じる ── **押す間が無い**。
+ *
+ * ## だから「時間」ではなく「位置」で見分ける
+ *
+ * 🔑 開いた時点の巻き位置を控えておき、**変わっていなければ閉じない**。
+ * ⚠ 「開いた直後の N ミリ秒は無視する」形にはしない ── `scroll` が飛ぶ時期は
+ *   環境で変わるので、**測れない物に賭ける**ことになる。
+ * 🔑 user が本当に一覧を送れば位置は変わるので、**閉じる動きはそのまま残る**。
+ *
+ * ⚠ **スクロールしそうな器だけに絞らない** ── 器かどうかの判定
+ *   (`scrollHeight > clientHeight`)は環境で答えが変わるので、
+ *   **祖先を全部控える**(数は高々 20 で、費用は無視できる)。
+ */
+const scrollBase = new WeakMap<HTMLElement, ReadonlyArray<{ el: Element; top: number; left: number }>>();
+
+function snapshotScroll(from: Element | null, stop: HTMLElement): Array<{ el: Element; top: number; left: number }> {
+  const out: Array<{ el: Element; top: number; left: number }> = [];
+  let el: Element | null = from;
+  for (let i = 0; el !== null && i < 64; i += 1) {
+    out.push({ el, top: el.scrollTop, left: el.scrollLeft });
+    if (el === stop) break;
+    el = el.parentElement;
+  }
+  return out;
+}
+
+/**
+ * 🔑 **その `scroll` は、メニューを開いた「後に」動いたものか**(#875)。
+ * @returns `true` = 開いた時点から**1px も動いていない**(= 閉じる理由が無い)
+ */
+export function scrollUnchangedSinceOpen(root: HTMLElement, target: EventTarget | null): boolean {
+  const base = scrollBase.get(root);
+  if (base === undefined) return false;
+  const hit = base.find((b) => b.el === target);
+  if (hit === undefined) return false;
+  return hit.el.scrollTop === hit.top && hit.el.scrollLeft === hit.left;
+}
+
 export function openContextMenu(
   root: HTMLElement,
   at: { x: number; y: number },
@@ -194,6 +245,12 @@ export function openContextMenu(
   // 🔑 開いた直後の欄は、この `focus()` が同期で出す `focusin` が先頭の説明で埋める
   //    (明示の呼びは no-op だった ── 変異試験 H4 が SURVIVED で教えた。2 か所に書かない)
   if (first instanceof HTMLElement) first.focus();
+
+  /**
+   * 🔴 **開いた時点の巻き位置を控える**(#875)── 上の docstring のとおり、
+   *   焦点の送りは**ここへ来る前に済んでいる**ので、いま読めば「送った後」の値になる。
+   */
+  scrollBase.set(root, snapshotScroll(restoreTo, root));
 
   const close = (): void => {
     el.remove();

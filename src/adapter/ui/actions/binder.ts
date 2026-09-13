@@ -196,6 +196,7 @@ import {
 import {
   type MenuItem,
   closeContextMenu,
+  scrollUnchangedSinceOpen,
   contextMenuOpen,
   openContextMenu,
 } from '../render/context-menu';
@@ -10613,7 +10614,23 @@ export function bindActions(
   // 🔴 **`onClick` より後に登録する**(上の docstring)── 先に登録すると
   //    メニューが消えてから委譲が走り、押しても無言になる。
   root.addEventListener('click', onCloseMenu);
-  root.addEventListener('scroll', onCloseMenu, true);
+  /**
+   * 🔴 **スクロールで閉じるのは、開いた「後に」動いたときだけ**(#875、2026-09-13)。
+   *
+   * ⚠ 直す前は `onCloseMenu` をそのまま張っていたので、**メニューを開く前に済んだ
+   *   スクロールの、遅れて来た通知**でも閉じていた ── 押した器が器の見える範囲から
+   *   はみ出していると、クリックの焦点で**ブラウザが真ん中へ寄せる**ためである
+   *   (実測:`scrollTop` 0 → 168。`pointerdown` の時点で既に動き終わっている)。
+   * 🔴 症状は「**メニューは出るのに、押す間も無く消える**」── 一覧の下のほうの
+   *   タイルや見出しで起きるので、**アプリが増えるほど当たる**。
+   * 🔑 判定は `context-menu.ts` の 1 か所が持つ ── **どの口から開いても同じに効く**
+   *   (見出しのときだけ焦点を止める形にすると、**タイル側が残る** ── §7)。
+   */
+  const onScrollCloseMenu = (ev: Event): void => {
+    if (scrollUnchangedSinceOpen(root, ev.target)) return;
+    closeContextMenu(root);
+  };
+  root.addEventListener('scroll', onScrollCloseMenu, true);
   root.ownerDocument.addEventListener('keydown', onMenuKey);
   root.addEventListener('paste', onPaste);
   /**

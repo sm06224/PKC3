@@ -484,6 +484,32 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
     groupMenu.locator('[data-pkc-action="reset-app-group-order"]'),
     '番号が 1 つも無いのに「名前順に戻す」が出ている(押しても何も起きない)',
   ).toHaveCount(0);
+  /**
+   * 🔴 **一覧の下のほうの見出しでも、メニューが自分で閉じない**(#875、2026-09-13)。
+   *
+   * ⚠ 実測:器の見える高さ 298px に対し、この見出しは上端から **303.7px**
+   *   (**5.7px はみ出している**)。クリックで焦点を受けるとブラウザが**真ん中へ寄せ**、
+   *   `scrollTop` が **0 → 168** になる ── その `scroll` を拾って
+   *   **開いた直後のメニューが閉じていた**(押す間が無い)。
+   * 🔑 直しは「**開いた時点の巻き位置と同じなら閉じない**」── 時間ではなく位置で見る。
+   * ⚠ **待ってから見る** ── 出た瞬間だけ見ると、閉じる前の一瞬を捕まえて緑になる。
+   */
+  const lastToggle = page.locator(
+    '[data-pkc-action="toggle-app-group"][data-pkc-group="組み込みアプリ"]',
+  );
+  await lastToggle.click({ button: 'right' });
+  await expect(groupMenu, '下のほうの見出しでメニューが出ない').toBeVisible();
+  await page.waitForTimeout(300);
+  await expect(
+    groupMenu,
+    '下のほうの見出しのメニューが、押す間も無く自分で閉じた(#875)',
+  ).toBeVisible();
+  // ⚠ 後始末 ── 開いたまま次へ進むと、その先の押し所をメニューが覆う
+  await page.locator('[data-pkc-field="launcher-lead"]').click();
+  await expect(groupMenu, '見出しの外を押しても閉じない').toBeHidden();
+
+  await toolToggle.click({ button: 'right' });
+  await expect(groupMenu, '見出しを右クリックしてもメニューが出ない(2 度目)').toBeVisible();
   await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="pick-app-group-icon"]');
 
   const iconRows = page.locator('[data-pkc-field="pick-group-icon"]');
