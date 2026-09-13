@@ -193,7 +193,15 @@ export type BodyRewrite =
        */
       kind: 'line-date';
       line: number;
-      date: string | null;
+      /**
+       * ⚠ `null` は**日付を外す**。
+       * 🔴 **省くと「その行に書かれている日付をそのまま保つ」**(#855 段 0 の 3 つ目、
+       *   2026-09-13)── 刻みだけ付け替えるための形である。
+       * ⚠ このとき `time` / `until` も**書かれているものを保つ**(渡しても無視する)
+       *   ── 「刻みを変える」以外のことを、頼まれていないのにしない。
+       * ⚠ 日付が 1 つも書かれていない行では**何もしない**(繰り返しは開始日が要る)。
+       */
+      date?: string | null;
       /** ⚠ `date` が `null` なら無視される。⚠ `until` が在るときも無視される(期間に時刻は無い)。 */
       time?: string | null;
       /**
@@ -516,7 +524,7 @@ function rewriteLineDate(
   body: string,
   rewrite: {
     line: number;
-    date: string | null;
+    date?: string | null;
     time?: string | null;
     until?: string | null;
     repeat?: RepeatUnit | null;
@@ -528,7 +536,28 @@ function rewriteLineDate(
   if (!TASK_LINE.test(line)) return null;
   const found = readLineDate(line);
   let next: string;
-  if (rewrite.date === null) {
+  if (rewrite.date === undefined) {
+    /**
+     * 🔴 **刻みだけ付け替える**(#855 段 0 の 3 つ目)── 日付・時刻・期間は
+     * **書かれているものをそのまま**書き戻す。
+     *
+     * ⚠ 上の「日付を差し替える」枝と**同じ関数**(`formatLineDate`)で組む ──
+     *   書く口を 2 つ持つと、片方が区切りを変えた日に食い違う(§7)。
+     * ⚠ 日付が無い行では**何もしない** ── 繰り返しは開始日から曜日を取るので、
+     *   日付の無い行に `毎週` だけ書いても読む側は拾わない(`readLineDate` は
+     *   日付の直後からしか刻みを拾わない)= **書いたのに何も起きない**形になる。
+     */
+    if (found === null) return null;
+    next =
+      line.slice(0, found.start) +
+      formatLineDate(
+        found.date,
+        found.time,
+        found.until,
+        rewrite.repeat === undefined ? found.repeat : rewrite.repeat,
+      ) +
+      line.slice(found.end);
+  } else if (rewrite.date === null) {
     // 日付を外す。⚠ 元から無ければ**何も起きていない**
     if (found === null) return null;
     const before = line.slice(0, found.start);

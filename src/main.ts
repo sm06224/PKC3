@@ -185,6 +185,7 @@ import { CenterRouter } from '@adapter/ui/render/center';
 import { AppendBoxRenderer } from '@adapter/ui/render/append-box';
 import {
   bindActions,
+  leaveLauncherIf,
   generateLid,
   runGlobalCommand,
   type BinderServices,
@@ -3052,6 +3053,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       // ⚠ 妥当性の判定も **`browse-mode.ts` 1 か所**(着地前レビュー 記録)──
       //   ここに書き下すと、探し方を足したときに必ず取りこぼす
       if (!isBrowseMode(mode)) return;
+      /**
+       * 🔴 **アプリのタブを離れたら、並べ替えモードは終える**(#857 段①b-2)。
+       * ⚠ **ここが唯一の口である** ── タブの押し / 行の改名の逃げ / タブへの
+       *   ドラッグ / **アドレスの「引っ越した面」**(`deep-link.ts` の `MOVED_VIEWS`)、
+       *   どれも最後はこの関数へ落ちる。⚠ 呼び側ごとに対で書かせると、
+       *   4 本目(アドレス)のように**足した人が書き忘れた口**が静かに残る。
+       * 🔑 判定そのものは `leaveLauncherIf`(`binder.ts`)1 本 ── ここは呼ぶだけ。
+       */
+      leaveLauncherIf(dispatcher, mode);
       browseMode = mode;
       appBrowseMode.set(mode); // 次に開いたときも同じ探し方で出す(#240 段⑤)
       markBrowse(mode);

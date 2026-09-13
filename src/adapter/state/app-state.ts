@@ -24,6 +24,7 @@ import {
   type MoveLines,
 } from '@features/markdown/line-move';
 import { replaceTaskCards, type TaskScan } from '@features/schedule/task-cards';
+import type { RepeatUnit } from '@features/schedule/repeat';
 import type { ContactScan } from '@features/contact/contact-card';
 import type { CaptureItem } from '@features/capture/capture-item';
 import type { SnippetScan } from '@features/snippet/snippet-table';
@@ -1086,6 +1087,21 @@ export interface AppState {
    */
   launcherPick: string | null;
   /**
+   * 🔴 **アプリの一覧が「並べ替えモード」か**(#857 段①b-2。user 裁定 2026-09-13
+   * 「長押しで並べ替えモード」)。
+   *
+   * ⚠ **指だけの端末には、並べ替えの入口が 1 つも無かった** ── 掴んで落とすのは
+   *   HTML5 の drag、「上へ / 下へ」は右クリックで、どちらもマウスが要る
+   *   (`long-press.ts` は `pointerType === 'mouse'` を**受けない**と決めており、
+   *   裏を返せばマウス以外の入口が無いということである)。
+   * 🔑 モードに入ると、タイルの右に**「上へ」「下へ」**が出て、**押しても開かない**
+   *   ── 並べ替えている最中に別のウィンドウが開くのが、いちばん困る事故である。
+   * ⚠ 絞り込みを打つと `SET_ENTRY_FILTER` が**落とす** ── 画面に出ているのは
+   *   絞った後だが並び順の正本は全件なので、モードに居ても何もできない
+   *   (`MOVE_APP_TILE` が理由つきで断る)。**できない物を出したままにしない**。
+   */
+  launcherReorder: boolean;
+  /**
    * ロックの世代。**強制解放のたびに増える**(P8 段⑧)。
    * ⚠ これが無いと強制解放は**危険な操作になる** ── 解放したあとに古い書込の
    * ack が着いて、user が見ている本文を巻き戻す。世代の合わない ack は捨てる。
@@ -1201,6 +1217,7 @@ export const initialState: AppState = {
   editOpenAt: null,
   tileWrite: null,
   launcherPick: null,
+  launcherReorder: false,
   lockGen: 0,
   error: null,
 };
@@ -1489,6 +1506,18 @@ export type UserAction =
       until?: string | null;
     }
   /**
+   * 🔴 **その行の繰り返しを付け替える**(#855 段 0 の 3 つ目。user 裁定 2026-09-13
+   * 「札を右クリック →『繰り返す』」)。
+   *
+   * ⚠ **`SET_TASK_DATE` と分ける** ── あちらは `date` を**必ず**受け、
+   *   `null` かどうかで「外す / 付ける」を言い分けている。日付を省ける形にすると
+   *   その判定が濁るので、**刻みだけを言う action**を別に立てる。
+   * ⚠ 書く先は**同じ 1 本**(`REQUEST_BODY_REWRITE` の `kind: 'line-date'`)──
+   *   面が独自の書込経路を持たない(§7)。
+   * ⚠ `repeat: null` は**繰り返しをやめる**(日付は残る)。
+   */
+  | { type: 'SET_TASK_REPEAT'; lid: string; line: number; repeat: RepeatUnit | null }
+  /**
    * 🔴 **チェックの印を付け外しする**(#277)。`line` は**原文の行番号**。
    * ⚠ 索引(何番目のチェックか)ではなく**行**で指す ── 索引だと、数え方が
    *   描画側と原文側で 1 つでもずれた瞬間に**別の行を書き換える**。
@@ -1597,6 +1626,13 @@ export type UserAction =
    *   少し動かして離しただけで窓が開き、中央の本文まで入れ替わるのを止める。
    */
   | { type: 'PICK_APP_TILE'; lid: string }
+  /**
+   * 🔴 **並べ替えモードの出入り**(#857 段①b-2)。
+   * ⚠ 入口は 2 つ ── **長押し**(指・ペン)と**右クリックの「並べ替える」**(マウス)。
+   *   出口も 2 つ ── 一覧の「並べ替えを終える」と、右クリックの同じ字。
+   * ⚠ 絞り込みを打つと落ちる(`SET_ENTRY_FILTER`)。
+   */
+  | { type: 'SET_LAUNCHER_REORDER'; on: boolean }
   /**
    * 🔴 **ロックの強制解放**(user 指示 2026-08-03)。応答が返らない書込 /
    * 抱えたままの draft で**永久に追記できなくなる**のを防ぐ最後の出口。
@@ -2734,6 +2770,15 @@ function reduceCore(
           searchHitsQuery: '',
           // ⚠ 前の語の「ほかにもあります」を持ち越さない(#680)
           searchHitsTruncated: false,
+          /**
+           * 🔴 **絞り込んだら並べ替えモードは落とす**(#857 段①b-2)。
+           * ⚠ 出ているのは絞った後のタイルだが、並び順の正本は**全件**なので、
+           *   そのまま「上へ」を押しても**画面が 1 ドットも動かない**
+           *   (隠れた隣と入れ替わっただけ)。⚠ 判定を 2 か所に置かない ──
+           *   ここで落とすので、描く側も押す側も `launcherReorder` 1 つを読む。
+           */
+          launcherReorder:
+            normalizeQuery(action.query) === '' ? state.launcherReorder : false,
         },
         events: [{ type: 'REQUEST_SEARCH', query: action.query }],
       };
@@ -3233,6 +3278,33 @@ function reduceCore(
     case 'PICK_APP_TILE':
       if (state.launcherPick === action.lid) return { state, events: [] };
       return { state: { ...state, launcherPick: action.lid }, events: [] };
+    /**
+     * 🔴 **並べ替えモードへ入る / 出る**(#857 段①b-2)。
+     *
+     * ⚠ **入るときだけ門を通す** ── 出るのはいつでもできる(閉じ込めない)。
+     * 🔑 門は `MOVE_APP_TILE` と**同じ 2 つ**(`phase` と絞り込み)だけにする ──
+     *   保存中(`writeLock` / `tileWrite`)は**数百ミリ秒で消える**ので、入口で
+     *   断ると「押しても入れない」が偶発的に起きる。**動かすときに断れば足りる**。
+     */
+    case 'SET_LAUNCHER_REORDER': {
+      if (!action.on) {
+        if (!state.launcherReorder) return { state, events: [] };
+        return { state: { ...state, launcherReorder: false }, events: [] };
+      }
+      const blocked = phaseBlockReason(state.phase);
+      if (blocked !== null)
+        return { state: { ...state, error: `${blocked}並べ替えられます` }, events: [] };
+      if (normalizeQuery(state.filterQuery) !== '')
+        return {
+          state: {
+            ...state,
+            error: '絞り込みを消してから並べ替えられます(いまは一部しか出ていません)',
+          },
+          events: [],
+        };
+      if (state.launcherReorder) return { state, events: [] };
+      return { state: { ...state, launcherReorder: true }, events: [] };
+    }
     case 'LAUNCHER_TILES_LOADED':
       return { state: { ...state, launcherTiles: action.tiles }, events: [] };
     case 'APP_TILE_SAVED': {
@@ -3965,6 +4037,45 @@ function reduceCore(
               //    「期間を外す」という**頼んでいない指示**になる)
               ...(action.until === undefined ? {} : { until: action.until }),
             },
+          },
+        ],
+      };
+    }
+    /**
+     * 🔴 **その行の繰り返しを付け替える**(#855 段 0 の 3 つ目)。
+     *
+     * ⚠ 断り方は上の `SET_TASK_DATE` と**同じ形**(黙って捨てない)。
+     * 🔑 「日付が無い行では何もしない」は `rewriteLineDate` が持つ ── ここでは
+     *   本文を読まない(右クリックのたびに worker を叩く経路を増やさない)。
+     */
+    case 'SET_TASK_REPEAT': {
+      const blocked = phaseBlockReason(state.phase);
+      if (blocked !== null)
+        return {
+          state: {
+            ...state,
+            error: `${blocked}${action.repeat === null ? '繰り返しをやめられます' : '繰り返しにできます'}`,
+          },
+          events: [],
+        };
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta) return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_BODY_REWRITE',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            /**
+             * ⚠ **`date` を渡さない** ── 渡すと「日付も書き換える」意味になる。
+             *   ⚠ とくに**繰り返しの回の札**は、札に焼いてある日が
+             *   **その回の日**であって規則の開始日ではないので、渡すと
+             *   **開始日がその回の日へずれる**(静かに予定がまるごと動く)。
+             */
+            rewrite: { kind: 'line-date', line: action.line, repeat: action.repeat },
           },
         ],
       };

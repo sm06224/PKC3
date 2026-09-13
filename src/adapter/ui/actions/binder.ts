@@ -182,7 +182,10 @@ import {
   noteToolActions,
   tableMenuActions,
   tableConvertPickLabel,
-  TILE_MENU_ACTIONS,
+  tileMenuActions,
+  TASK_REPEAT_MENU_ACTION,
+  repeatMenuActions,
+  REPEAT_ATTR,
   withTrailingLast,
 } from '@features/entry-actions';
 import {
@@ -216,7 +219,8 @@ import {
 import { parseLinkTarget } from '@features/entry-ref/link-target';
 import { flashCopied, handleCopyMdBlock } from './copy-md-block';
 import { finishCopy, selectedMarkdown } from './copy-source';
-import { installLongPress, LONG_PRESS_TARGET } from './long-press';
+import { installLongPress, LONG_PRESS_TARGET, LONG_PRESS_TARGETS } from './long-press';
+import { isRepeatUnit } from '@features/schedule/repeat';
 import { copyMarkdownAndHtml, copyPlainText } from '@adapter/platform/clipboard';
 import { appCopyHistory } from '@adapter/platform/copy-history-store';
 import {
@@ -1411,6 +1415,17 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
    */
   'unschedule-task',
   /**
+   * 🔴 **繰り返しを付け替えるのも本文を書く**(#855 段 0 の 3 つ目)── 行の
+   *   `@2026-08-31 毎週` の尻を書き換える(`SET_TASK_REPEAT`)。
+   * 🔑 外す口(`unschedule-task`)と**同じ門**をくぐらせる ── 片方だけ通ると、
+   *   取り込みの最中に「やめる」は断られて「毎週にする」は通る、という
+   *   説明のつかない差が生まれる(§7)。
+   * ⚠ 1 段目の `open-repeat-menu` は**載せない** ── 開くだけで本文を書かない
+   *   (`copy-md-block` と同じ判断:書かない口を名前で断ると、忙しい間は
+   *   「何ができるか見る」ことまで止まる)。
+   */
+  'set-task-repeat',
+  /**
    * 🔴 **ノート 1 件の日付も disk への書込**(#292 段④)── frontmatter を書く。
    * ⚠ 取り込みが entry を総入れ替えしている裏で frontmatter を書かせない、が理由。
    *   機械検査は `tests/repo-hygiene.test.ts`。
@@ -1657,6 +1672,31 @@ function pressedTileAgain(root: Element, lid: string): boolean {
  * ⚠ 端では reducer が**何もしない**(輪にしない ── 一番上で「上へ」を押して
  *   末尾へ飛ぶと驚く)。
  */
+/**
+ * 🔴 **アプリのタブを離れたら、並べ替えモードは終える**(#857 段①b-2。
+ * 着地前の動線レビュー 欠陥 1、2026-09-13)。
+ *
+ * ⚠ 直す前:並べ替えモードのまま「一覧」へ行き、しばらくして「アプリ」へ戻ると
+ *   **タイルを 2 回押しても開かない**。頼んでいないのにモードが続いており、
+ *   しかも user は自分が何をしたのか憶えていない ── 「壊れている」に見える。
+ * ⚠ **入るときは何もしない** ── 戻ってきた瞬間に勝手に入らない。
+ *
+ * ## 🔴 呼ぶのは `main.ts` の `setBrowse` **1 か所**である(2026-09-13 に訂正)
+ *
+ * ⚠ 1 稿目はここ(`binder.ts`)の **3 か所**で呼んでいた ── 着地前レビューが
+ *   **4 本目の口**を見つけた:`deep-link.ts` の「引っ越した面」
+ *   (`#pkc?view=calendar` → 予定)は `main.ts` の `openBrowse` を通るので、
+ *   **アドレスが変わっただけで左のタブが動き、モードだけ残る**。
+ * 🔑 探し方(`browseMode`)は state に持たないので reducer からは見えない ──
+ *   だから**タブを実際に切り替える唯一の実装**(`main.ts` の `setBrowse`)へ寄せる。
+ *   ⚠ 呼び側ごとに対で書かせる形は、**足した人が書き忘れた日に静かに破れる**。
+ * ⚠ 門が掛かっていることは `tests/adapter/tile-reorder-mode.test.ts` が
+ *   **`main.ts` の原文**で pin する(この関数自体の test と対で読む)。
+ */
+export function leaveLauncherIf(dispatcher: Dispatcher, mode: string): void {
+  if (mode !== 'launcher') dispatcher.dispatch({ type: 'SET_LAUNCHER_REORDER', on: false });
+}
+
 function moveTile(dispatcher: Dispatcher, target: HTMLElement, by: -1 | 1): void {
   const lid = target.getAttribute('data-pkc-tile');
   if (lid === null || lid === '') return;
@@ -2152,7 +2192,7 @@ const MENU_PREV_LID_ATTR = 'data-pkc-menu-prev-lid';
  * その受け手は**押しても無反応**になる(同じクリックで片づけ役が閉じる)。
  * ⚠ 右クリック(`contextmenu`)で開く経路はここに載らない ── あちらは別の event。
  */
-const MENU_OPENERS: ReadonlySet<string> = new Set(['phone-menu']);
+const MENU_OPENERS: ReadonlySet<string> = new Set(['phone-menu', 'open-repeat-menu']);
 
 /**
  * メニューが出た時のノートと、いま開いているノートが同じか。
@@ -5043,8 +5083,9 @@ const ACTIONS: Record<string, ActionHandler> = {
     region.focus();
   },
   /** 左の列の**探し方**を切り替える(P8 段⑤)。⚠ 中央のビューとは別の軸。 */
-  'set-browse': (_dispatcher, target, services) => {
+  'set-browse': (dispatcher, target, services) => {
     const mode = target.closest('[data-pkc-browse]')?.getAttribute('data-pkc-browse');
+    // ⚠ 並べ替えモードを終えるのは `main.ts` の `setBrowse` 1 か所(上の docstring)
     if (mode) services.setBrowse?.(mode);
   },
   'set-view': (dispatcher, target) => {
@@ -5563,6 +5604,20 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'move-tile-up': (dispatcher, target) => moveTile(dispatcher, target, -1),
   'move-tile-down': (dispatcher, target) => moveTile(dispatcher, target, 1),
+  /**
+   * 🔴 **並べ替えモードへ入る / 出る**(#857 段①b-2)。
+   * ⚠ 入口は 2 つ(長押し / 右クリック)だが、**撃つ action は 1 つ**にする ──
+   *   器ごとに別の action を作ると、門を足すとき片方だけ通る(CLAUDE.md §7)。
+   * 🔑 入るときは、押したタイルに印も付ける(どれを動かすのか画面に残す)。
+   */
+  'start-tile-reorder': (dispatcher, target) => {
+    const lid = target.getAttribute('data-pkc-tile');
+    if (lid !== null && lid !== '') dispatcher.dispatch({ type: 'PICK_APP_TILE', lid });
+    dispatcher.dispatch({ type: 'SET_LAUNCHER_REORDER', on: true });
+  },
+  'end-tile-reorder': (dispatcher) => {
+    dispatcher.dispatch({ type: 'SET_LAUNCHER_REORDER', on: false });
+  },
   'attach-file': (_dispatcher, _target, _services, root) => {
     // 常設の hidden input を開く(動的生成にしない ── smoke の setInputFiles と
     // ブラウザの user-gesture 要件の両方に効く)
@@ -6717,6 +6772,18 @@ const ACTIONS: Record<string, ActionHandler> = {
   'open-tile': (dispatcher, target, services, root) => {
     const lid = target.closest('[data-pkc-tile]')?.getAttribute('data-pkc-tile');
     if (lid === null || lid === undefined || lid === '') return;
+    /**
+     * 🔴 **並べ替え中は開かない**(#857 段①b-2。user 裁定 2026-09-13)。
+     * ⚠ 並べ替えている最中に別のウィンドウが開くと、**中央に読んでいた本文まで
+     *   入れ替わる**(段①b でこれを止めたのと同じ事故が、モード中は 2 回押しで
+     *   起きてしまう)。⚠ **印は付ける** ── 押しても何も起きないのは無反応に見える。
+     * ⚠ `pressedTileAgain` を**通さない** ── 通すと「1 回目」が記録され、
+     *   モードを抜けた直後の 1 タップが**いきなり窓を開く**。
+     */
+    if (dispatcher.getState().launcherReorder) {
+      dispatcher.dispatch({ type: 'PICK_APP_TILE', lid });
+      return;
+    }
     if (!pressedTileAgain(root, lid)) {
       dispatcher.dispatch({ type: 'PICK_APP_TILE', lid });
       // ⚠ 組み込みは entry を持たない ── 立てると右の列が「見つからない」になる
@@ -7217,6 +7284,58 @@ const ACTIONS: Record<string, ActionHandler> = {
      *   「頼んでいない指示」になる(落とす経路と同じ渡し方)。
      */
     dispatcher.dispatch({ type: 'SET_TASK_DATE', lid, line, date: null, until: null });
+  },
+  /**
+   * 🔴 **札の「繰り返す…」を押した ── 刻みの一覧を出す**(#855 段 0 の 3 つ目。
+   * user 裁定 2026-09-13「札を右クリック →『繰り返す』」)。
+   *
+   * ⚠ **2 段にする** ── 刻み 4 つ + やめるを行のメニューへ直に並べると、
+   *   ノートの操作(削除 / 書き出す …)に毎回 5 行が割り込む。
+   * ⚠ **`MENU_OPENERS` に載せてある** ── 載せないと、同じ 1 回のクリックで
+   *   ここが開き `onCloseMenu` が閉じるので、**押しても何も出ない**
+   *   (`phone-menu` が踏んだのと同じ罠)。
+   * 🔑 身元は**押したボタン自身**から読む ── メニューの器は root の直下に出るので、
+   *   `closest` では札まで辿れない(`context-menu.ts` の戒め)。
+   */
+  'open-repeat-menu': (_dispatcher, target, _services, root) => {
+    const lid = target.getAttribute('data-pkc-entry') ?? '';
+    const raw = target.getAttribute('data-pkc-task-line');
+    const line = Number(raw);
+    if (lid === '' || raw === null || !Number.isInteger(line)) return;
+    const cur = target.getAttribute('data-pkc-task-repeat');
+    const r = target.getBoundingClientRect();
+    openContextMenu(
+      root,
+      // ⚠ **押した項目の真下**に出す(右クリックの座標はもう持っていない)
+      { x: r.left, y: r.bottom },
+      repeatMenuActions(isRepeatUnit(cur) ? cur : null),
+      root.ownerDocument.activeElement,
+      // 🔑 どの行かは**全項目**に要る(`carry` はそのための仕組み)
+      { 'data-pkc-entry': lid, 'data-pkc-task-line': raw },
+    );
+  },
+  /**
+   * 🔴 **刻みを付け替える**(#855 段 0 の 3 つ目)。
+   * ⚠ **日付は渡さない** ── 渡すと、繰り返しの回の札では**開始日がその回の日へ
+   *   ずれる**(札に焼いてあるのは回の日である)。判断は reducer と
+   *   `rewriteLineDate` が持つ。
+   * ⚠ 知らない綴りなら**何もしない**(当てずっぽうで本文を書き換えない)。
+   */
+  'set-task-repeat': (dispatcher, target) => {
+    const lid = target.getAttribute('data-pkc-entry') ?? '';
+    const raw = target.getAttribute('data-pkc-task-line');
+    const line = Number(raw);
+    if (lid === '' || raw === null || !Number.isInteger(line)) return;
+    const key = target.getAttribute(REPEAT_ATTR);
+    if (key === null) return;
+    // ⚠ 空文字は「やめる」── 属性に `null` は書けないので、こちらで戻す
+    if (key !== '' && !isRepeatUnit(key)) return;
+    dispatcher.dispatch({
+      type: 'SET_TASK_REPEAT',
+      lid,
+      line,
+      repeat: key === '' ? null : key,
+    });
   },
   'export-entry-html': (dispatcher, target, services) => {
     // ⚠ 解決規則は隣の `export-entry` / `delete-entry` と**同じ**にする ── 揃えないと
@@ -7770,6 +7889,23 @@ export function bindActions(
    * ⚠ 側と lid は**押した行から辿る**(`dualSide`)── 他の `dual-row` の経路と同じ。
    */
   const longPress = installLongPress(root, (row) => {
+    /**
+     * 🔴 **アプリのタイルの長押しは「並べ替えモード」**(#857 段①b-2。
+     * user 裁定 2026-09-13「長押しで並べ替えモード」)。
+     *
+     * ⚠ **指だけの端末には入口が 1 つも無かった** ── 掴んで落とすのも
+     *   右クリックの「上へ / 下へ」も、どちらもマウスが要る。
+     * 🔑 掴んだ 1 枚に**印も付ける** ── どれを長押ししたのか画面に残らないと、
+     *   「入ったこと」だけ分かって「何を動かすのか」が分からない。
+     * ⚠ 断るときの理由は reducer が出す(絞り込み中 / 編集中)── ここでは
+     *   受けるだけにして、**無言の dead press を作らない**。
+     */
+    const tile = row.getAttribute('data-pkc-tile');
+    if (tile !== null) {
+      dispatcher.dispatch({ type: 'PICK_APP_TILE', lid: tile });
+      dispatcher.dispatch({ type: 'SET_LAUNCHER_REORDER', on: true });
+      return;
+    }
     const side = dualSide(row);
     const lid = row.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
     if (side !== null && lid !== null)
@@ -7916,7 +8052,16 @@ export function bindActions(
      *   **足したばかりの印が 1 件に戻り**、さらに `maybeEnterFolder` が
      *   「1 回目」を数えて、次のタップでフォルダへ入る。**両方を素通りさせない**。
      */
-    if (el.getAttribute('data-pkc-action') === 'dual-row' && longPress.swallowsClick()) {
+    /**
+     * ⚠ **タイルも同じ**(#857 段①b-2)── 長押しで並べ替えモードへ入った直後に
+     *   `click` が流れると `open-tile` が「1 回目」を数え、指を離しただけで
+     *   **次のタップが窓を開く**。受け口の名前を 2 つ数え上げて捨てる。
+     */
+    const pressedAction = el.getAttribute('data-pkc-action');
+    if (
+      (pressedAction === 'dual-row' || pressedAction === 'open-tile') &&
+      longPress.swallowsClick()
+    ) {
       ev.preventDefault();
       return;
     }
@@ -9314,6 +9459,15 @@ export function bindActions(
       '[data-pkc-tile][draggable="true"]',
     );
     if (tileEl !== null && tileEl !== undefined && de.dataTransfer) {
+      /**
+       * 🔴 **指で押さえている間は掴ませない**(#857 段①b-2)── 2 ペインの行と
+       * **同じ門**(すぐ上)。⚠ 指で長押しを待っている最中に drag が始まると、
+       * 並べ替えモードへ入るつもりの指が**タイルを運び出す**。
+       */
+      if (longPress.pendingTouch(tileEl)) {
+        e.preventDefault();
+        return;
+      }
       const lid = tileEl.getAttribute('data-pkc-tile');
       if (lid === null || lid === '') {
         e.preventDefault(); // 指す物が無いタイルは掴ませない
@@ -9843,7 +9997,7 @@ export function bindActions(
      * ⚠ マウスの右クリックは `pointerType === 'mouse'` なので時計が掛からず、
      *   ここは通らない(これまでどおりメニューが出る)。
      */
-    const pressed = target.closest(LONG_PRESS_ROW);
+    const pressed = target.closest(LONG_PRESS_TARGETS);
     if (pressed !== null && longPress.holds(pressed)) {
       ev.preventDefault();
       return;
@@ -9887,7 +10041,8 @@ export function bindActions(
         openContextMenu(
           root,
           { x: ev.clientX, y: ev.clientY },
-          [...TILE_MENU_ACTIONS],
+          // ⚠ 出口も同じメニューに置く(#857 段①b-2)── 入口だけ作らない
+          tileMenuActions(dispatcher.getState().launcherReorder),
           root.ownerDocument.activeElement,
           { 'data-pkc-tile': tileLid },
         );
@@ -10134,13 +10289,53 @@ export function bindActions(
      *   見ないと、1 つ前のノートの種類で判定することになる。
      */
     const st = dispatcher.getState();
+    /**
+     * 🔴 **予定の札の上なら、「繰り返す…」を頭へ足す**(#855 段 0 の 3 つ目。
+     * user 裁定 2026-09-13「札を右クリック →『繰り返す』」)。
+     *
+     * ⚠ **差し替えない** ── 札はノートの行なので、ノートの操作(削除 / 書き出す)も
+     *   要る(見出しのメニューと同じ作法)。
+     * ⚠ 出す条件は **2 つ**:①行の予定であること(`data-pkc-whole-note` が無い ──
+     *   ノート 1 件の予定は frontmatter の `date:` で、**繰り返しの記法が無い**)
+     *   ②**行番号が読めること**(読めない札に出すと、押しても無言になる)。
+     * ⚠ **①は、いまの札の作りでは②に含まれている**(2026-09-13 に実測。変異試験 M12 が
+     *   SURVIVED で教えた)── `task-card.ts` は `line === null` の札に
+     *   `data-pkc-task-line` を**1 つも置かない**ので、①を外しても今日は壊れない。
+     *   🔑 それでも残すのは、**①と②が別の問いだから**である ── ②は「行番号が
+     *   読めるか」、①は「そもそも行の予定か」。frontmatter の行を指す番号を札へ
+     *   焼く日が来たら、**①だけが止める**。⚠ その日のために、①だけが鳴る場面を
+     *   test に持たせてある(`schedule-view.test.ts`)。
+     * 🔑 行番号は**札ではなく中の印**に在る(2026-08-23 の罠 ── 札に置くと
+     *   `[data-pkc-task-line]` を押す既存の経路に当たる)。
+     * ⚠ 身元は**その項目だけ**に焼く(`attrs`)── `carry` へ入れると
+     *   「削除」「書き出す」にも行番号が付き、読み手が取り違える(#701 の戒め)。
+     */
+    const taskLine = row.hasAttribute('data-pkc-whole-note')
+      ? null
+      : (row.querySelector('[data-pkc-task-line]')?.getAttribute('data-pkc-task-line') ?? null);
+    const repeatable = taskLine !== null && Number.isInteger(Number(taskLine));
+    const rows = entryMenuActions({
+      archetype: st.entryMetas.get(lid)?.archetype ?? null,
+      linkedFile: st.linkedFiles.get(lid) ?? null,
+    });
+    const items = repeatable
+      ? [
+          {
+            ...TASK_REPEAT_MENU_ACTION,
+            attrs: {
+              'data-pkc-entry': lid,
+              'data-pkc-task-line': taskLine,
+              // ⚠ いまの刻み ── 無ければ空(`repeatMenuActions` が `null` と読む)
+              'data-pkc-task-repeat': row.getAttribute('data-pkc-task-repeat') ?? '',
+            },
+          },
+          ...rows,
+        ]
+      : rows;
     openContextMenu(
       root,
       { x: ev.clientX, y: ev.clientY },
-      entryMenuActions({
-        archetype: st.entryMetas.get(lid)?.archetype ?? null,
-        linkedFile: st.linkedFiles.get(lid) ?? null,
-      }),
+      items,
       root.ownerDocument.activeElement,
       prevLid === null || prevLid === lid ? {} : { [MENU_PREV_LID_ATTR]: prevLid },
     );

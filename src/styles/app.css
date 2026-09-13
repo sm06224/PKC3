@@ -4416,6 +4416,58 @@ li[data-pkc-row-slot] {
   font-size: 11px;
   color: var(--muted);
 }
+/* 🔴 **並べ替えモードの 1 行**(#857 段①b-2)── タイル + 「上へ」「下へ」。
+ * ⚠ この器が出るのは**モードのときだけ**なので、ふだんの DOM は変わらない。
+ * ⚠ 行どうしの 1 本線は**器**が持つ(タイル側から降ろす)── 器が持たないと、
+ *   線がタイルの幅までしか引かれず、右端の 2 つのボタンの下だけ切れる。 */
+[data-pkc-field='tile-row'] {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+}
+[data-pkc-field='tile-row'] [data-pkc-tile] {
+  /* ⚠ タイルは `width: 100%` を持つ ── flex の行に置くと器いっぱいに伸びて
+   *    ボタンを押し出すので、ここで**伸び縮みする側**へ変える */
+  width: auto;
+  flex: 1;
+  min-width: 0;
+  border-bottom: none;
+}
+[data-pkc-field='tile-move'] {
+  flex: none;
+  height: var(--row-h);
+  padding: 0 var(--s2);
+  border: none;
+  border-left: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+[data-pkc-field='tile-move']:hover {
+  background: var(--surface-2);
+  color: inherit;
+}
+/* 出口。⚠ **帯ではなくボタン 1 つ**にする ── 一覧の頭に案内文が既に在るので、
+ * 2 段の帯を積むと、狭い画面でタイルが 1 枚も見えなくなる */
+/* 🔴 **どこまでスクロールしても画面に残す**(着地前の動線レビュー 欠陥 2、2026-09-13)。
+ * ⚠ アプリが 40 枚あって下のほうを並べ替えている人に、一覧の頭にしか無い出口は
+ *   **見えない**。⚠ そして**指の端末には出口がもう 1 つ無い** ── 長押しは
+ *   並べ替えモードに使われ、`binder.ts` がその間の `contextmenu` を止めるので、
+ *   右クリックの「並べ替えを終える」は指では開けない。
+ * ⚠ 地色を敷く ── 透けると下のタイルの字と重なって読めない。 */
+[data-pkc-field='launcher-reorder-done'] {
+  display: block;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0 var(--s2) var(--s2);
+  padding: var(--s1) var(--s3);
+  background: var(--surface-2);
+  cursor: pointer;
+}
 [data-pkc-field='launcher-loading'],
 [data-pkc-field='launcher-empty'] {
   margin: var(--s2);

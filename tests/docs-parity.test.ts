@@ -2269,6 +2269,16 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-13(#855 段 0 の 3 つ目 ── 札の繰り返し)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-09-manual-toc-fold" …` → 7ef7bb5
+     */
+    'スマホでマニュアルを開くと、目次が畳まれて出るようになりました',
+    /**
+     * ⚠ **2026-09-13(#857 段①b-2 ── 並べ替えモード)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-09-storage-fallback-line" …` → 7ef7bb5
+     */
+    '保存先が使えないときに、何が起きているかを画面が言うようになりました',
+    /**
      * ⚠ **2026-09-13(#857 段①b ── ダブルタップ)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-09-file-drop-pinned" …` → e793190
      */

@@ -29,6 +29,8 @@ export class LauncherRenderer {
   private lastSelected: string | null | undefined = undefined;
   /** ⚠ **1 回目の押しの印**(#857 段①b)── 指紋に入れないと印が出ない。 */
   private lastPick: string | null | undefined = undefined;
+  /** ⚠ **並べ替えモード**(#857 段①b-2)── 入れないと「上へ / 下へ」が出ない。 */
+  private lastReorder: boolean | undefined = undefined;
 
   constructor(private readonly region: HTMLElement) {}
 
@@ -86,13 +88,15 @@ export class LauncherRenderer {
       state.launcherTiles === this.lastTiles &&
       state.filterQuery === this.lastQuery &&
       state.selectedLid === this.lastSelected &&
-      state.launcherPick === this.lastPick
+      state.launcherPick === this.lastPick &&
+      state.launcherReorder === this.lastReorder
     )
       return;
     this.lastTiles = state.launcherTiles;
     this.lastQuery = state.filterQuery;
     this.lastSelected = state.selectedLid;
     this.lastPick = state.launcherPick;
+    this.lastReorder = state.launcherReorder;
     const list = this.ensureFrame();
     list.textContent = '';
 
@@ -120,6 +124,14 @@ export class LauncherRenderer {
      * ⚠ 門は reducer にも在る(2 枚目)── あちらは理由を声に出す。
      */
     const canReorder = q === '';
+    /**
+     * 🔴 **並べ替えモード**(#857 段①b-2。user 裁定 2026-09-13「長押しで並べ替えモード」)。
+     *
+     * ⚠ **絞り込みとの兼ね合いはここで見ない** ── `SET_ENTRY_FILTER` が絞り込みを
+     *   受けた時点で `launcherReorder` を落とすので、判定は**この 1 つ**で足りる
+     *   (描く側と押す側が別々に判定すると、片方だけずれる ── CLAUDE.md §7)。
+     */
+    const reordering = state.launcherReorder;
 
     if (tiles.length === 0) {
       const empty = document.createElement('p');
@@ -154,8 +166,32 @@ export class LauncherRenderer {
      * ⚠ **2 回押すことを、押す前に言う**(#857 段①b)── 1 回目で印が付くだけだと、
      *   知らない人には「押したのに開かない」に見える。
      */
-    lead.textContent = 'アプリは 2 回押すと別のウィンドウで開きます';
+    lead.textContent = reordering
+      ? // ⚠ モード中は**開かない**ので、開く話を出したままにしない(嘘になる)
+        '並べ替え中です。「上へ」「下へ」で動かします(押しても開きません)'
+      : 'アプリは 2 回押すと別のウィンドウで開きます';
     list.append(lead);
+    /**
+     * 🔴 **出口を必ず画面に置く**(#857 段①b-2)。
+     * ⚠ 入口は長押しと右クリックの 2 つあるが、**出口が右クリックだけ**だと
+     *   指の端末は入ったきり出られない(片道の操作を作らない ── CLAUDE.md 2026-08-23)。
+     */
+    if (reordering) {
+      const done = document.createElement('button');
+      done.type = 'button';
+      done.setAttribute('data-pkc-action', 'end-tile-reorder');
+      done.setAttribute('data-pkc-field', 'launcher-reorder-done');
+      /**
+       * ⚠ 字は**右クリックのメニューと同じ**にする(着地前の動線レビュー 改善、
+       *   2026-09-13)── 同じことをする 2 つの押し所で呼び名が違うと、user は
+       *   別の操作だと思う(「上へ」「下へ」は既に揃えてある)。
+       * ⚠ 「やめる」にしない ── **直した並びが元へ戻ると読める**(戻らない。
+       *   動かしたぶんは既に保存されている)。「終える」はモードの出口だけを言う。
+       */
+      done.title = '並べ替えを終えます(タイルは 2 回押すと開くように戻ります)';
+      done.textContent = '並べ替えを終える';
+      list.append(done);
+    }
 
     let group: string | null = null;
     let grid: HTMLElement | null = null;
@@ -188,8 +224,60 @@ export class LauncherRenderer {
           list.append(head, grid);
         }
       }
-      grid?.append(this.tile(tile, state.selectedLid, canReorder, state.launcherPick));
+      grid?.append(this.row(tile, state.selectedLid, canReorder, state.launcherPick, reordering));
     }
+  }
+
+  /**
+   * 🔴 **1 行を組む**(#857 段①b-2)── ふだんは**タイルそのもの**、
+   * 並べ替えモードでは**タイル + 「上へ」「下へ」**。
+   *
+   * ## ⚠ なぜモードのときだけ器を増やすのか
+   *
+   * タイルは `<button>` なので、その**中**にボタンは置けない(入れ子の button は
+   * 不正で、ブラウザが勝手に外へ出す)。🔑 だから**外側に器を 1 枚**足す。
+   * ⚠ ただし**ふだんは足さない** ── 器が増えると `launcher-grid > button` を
+   * 前提にした読み手(CSS・test・smoke)が静かに外れる(CLAUDE.md §10
+   * 「器を替えると読み取れる値が変わる」)。モードのときだけなら、**既定の DOM は
+   * 1 バイトも変わらない**。
+   *
+   * ⚠ 組み込みのタイルには出さない ── 動かせないものに押し所を置くと、
+   *   押して「並べ替えられません」と断られる(勧めてから断らない)。
+   */
+  private row(
+    tile: LauncherTile,
+    selectedLid: string | null,
+    canReorder: boolean,
+    pick: string | null,
+    reordering: boolean,
+  ): HTMLElement {
+    const btn = this.tile(tile, selectedLid, canReorder, pick);
+    if (!reordering || !isMovableTile(tile)) return btn;
+
+    const row = document.createElement('div');
+    row.setAttribute('data-pkc-field', 'tile-row');
+    row.append(btn);
+    /**
+     * ⚠ 字は**右クリックのメニューと同じ**にする(「上へ」「下へ」)── 同じことを
+     *   する 2 つの口で呼び名を変えると、user は別の操作だと思う。
+     * ⚠ **図案だけのボタンにしない**(`icons.ts` の戒め)── 意味は字が持つ。
+     * 🔑 身元(`data-pkc-tile`)は**このボタン自身**に写す ── 受け手(`moveTile`)は
+     *   押された物からしか辿らない(右クリックのメニューと同じ作法)。
+     */
+    for (const [action, label, hint] of [
+      ['move-tile-up', '上へ', '1 つ上へ動かします'],
+      ['move-tile-down', '下へ', '1 つ下へ動かします'],
+    ] as const) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.setAttribute('data-pkc-action', action);
+      b.setAttribute('data-pkc-tile', tile.lid);
+      b.setAttribute('data-pkc-field', 'tile-move');
+      b.title = `${tile.title} を${hint}`;
+      b.textContent = label;
+      row.append(b);
+    }
+    return row;
   }
 
   /**

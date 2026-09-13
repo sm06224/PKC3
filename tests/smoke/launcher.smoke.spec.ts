@@ -593,6 +593,272 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
 });
 
 /**
+ * 🔴 **タイルを指で長押しすると並べ替えモードに入る**(#857 段①b-2。
+ * user 裁定 2026-09-13「長押しで並べ替えモード」)。
+ *
+ * ⚠ **`page.mouse` ではなく `pointerType: 'touch'` の合成 PointerEvent で撃つ**
+ *   ── `long-press.ts` は `pointerType === 'mouse'` を受けない(マウスは
+ *   右クリックの「並べ替える」が入口)。unit(`tests/adapter/tile-reorder-mode.test.ts`)
+ *   も happy-dom で同じ形の PointerEvent を手で撃っているが、**実ブラウザで
+ *   `window.open` が本当に呼ばれないこと**(popup の枚数)は unit からは見えない
+ *   ── ここでしか見られない一線。
+ * 🔑 **起動を増やさない** ── 既に在る「取り込んだタイル」fixture(`pkc2WithTiles`)
+ *   をそのまま使い、同じ道中(import → launcher)に乗せる。
+ */
+test('🔴 タイルを長押しすると並べ替えモードに入り、開かず「上へ」で動く (#857 段①b-2)', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  await clickReal(page, '[data-pkc-region="collection-bar"] [data-pkc-action="import-file"]');
+  await page.locator('[data-pkc-field="import-input"]').setInputFiles({
+    name: 'container.html',
+    mimeType: 'text/html',
+    buffer: Buffer.from(pkc2WithTiles(baseURL ?? 'http://localhost'), 'utf-8'),
+  });
+  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(4);
+  await clickReal(page, '[data-pkc-browse="launcher"]');
+
+  // 🔑 題名だけを読む(`[data-pkc-field="title"]`)── タイル丸ごとの textContent は
+  //   行き先の URL(`↗…`)まで含むので、並び順ではなく文字列の一致で壊れる。
+  const tileTitles = (): Promise<string[]> =>
+    page.locator(`${USER_TILES} [data-pkc-field="title"]`).allTextContents();
+  await expect
+    .poll(tileTitles, { message: '前提が崩れている(取り込んだ並びが違う)' })
+    .toEqual(['電卓', '先のリンク', '後のリンク']);
+
+  const mainTile = '[data-pkc-action="open-tile"][data-pkc-tile="t2"]'; // 「後のリンク」
+  const done = page.locator('[data-pkc-field="launcher-reorder-done"]');
+  const lead = page.locator('[data-pkc-field="launcher-lead"]');
+
+  /**
+   * ① 🔴 **長押し(指)で並べ替えモードに入る**。
+   * ⚠ `bubbles: true` を明示する ── 受け口は root に 1 本(委譲)なので、
+   *   上がらない event は誰にも届かない(`touch.smoke.spec.ts` と同じ注意)。
+   */
+  await page
+    .locator(mainTile)
+    .dispatchEvent('pointerdown', { bubbles: true, pointerType: 'touch', button: 0, isPrimary: true });
+  await page.waitForTimeout(600); // LONG_PRESS_MS(500ms)を跨ぐ
+  await page.locator(mainTile).dispatchEvent('pointerup', { bubbles: true, pointerType: 'touch' });
+
+  await expect(done, '長押ししても並べ替えモードに入らない(完了ボタンが出ない)').toBeVisible();
+  await expect(
+    lead,
+    'モード中の文言に変わっていない(押しても開かないことを伝えていない)',
+  ).toHaveText('並べ替え中です。「上へ」「下へ」で動かします(押しても開きません)');
+  await expect(
+    page.locator('[data-pkc-action="move-tile-up"][data-pkc-tile="t2"]'),
+    '長押し後もタイルの右に「上へ」が出ない',
+  ).toBeVisible();
+  await expect(
+    page.locator('[data-pkc-action="move-tile-down"][data-pkc-tile="t2"]'),
+    '長押し後もタイルの右に「下へ」が出ない',
+  ).toBeVisible();
+  /**
+   * 🔑 **対照群 ── 組み込みタイルには出さない**(「動かせるタイルにだけ」の実害面)。
+   * ⚠ 出したまま押すと「並べ替えられません」と断られる(勧めてから断らない、CLAUDE.md §7 型)。
+   */
+  await expect(
+    page.locator('[data-pkc-action="move-tile-up"][data-pkc-tile="builtin:dual"]'),
+    '組み込みタイルにまで「上へ」が出ている',
+  ).toHaveCount(0);
+
+  /**
+   * ② 🔴 **モード中はタイルを 2 回押しても開かない**(並べ替え中に本文が入れ替わらない)。
+   * ⚠ `openTile`(既定の 2 回押しの規則)をそのまま使う ── 別の規則を書かない。
+   */
+  const pagesBeforeReorderPress = context.pages().length;
+  await openTile(page, mainTile);
+  await page.waitForTimeout(300);
+  expect(
+    context.pages().length,
+    '並べ替え中にタイルを 2 回押したらウィンドウが開いた',
+  ).toBe(pagesBeforeReorderPress);
+
+  // ③ 🔴 「上へ」を押すと実際に並びが変わる(押し所と受け手が繋がっている)
+  await clickReal(page, '[data-pkc-action="move-tile-up"][data-pkc-tile="t2"]');
+  await expect
+    .poll(tileTitles, { message: '「上へ」を押しても並びが変わらない' })
+    .toEqual(['電卓', '後のリンク', '先のリンク']);
+
+  // ④ 🔴 「完了」で抜ける ── 出口は片道にしない(CLAUDE.md 2026-08-23)
+  await clickReal(page, '[data-pkc-field="launcher-reorder-done"]');
+  await expect(done, '「完了」を押しても並べ替えモードから抜けていない').toHaveCount(0);
+  await expect(
+    page.locator('[data-pkc-field="tile-move"]'),
+    '「完了」を押しても「上へ / 下へ」が残っている',
+  ).toHaveCount(0);
+  await expect(lead, '「完了」を押しても元の文言に戻らない').toHaveText(
+    'アプリは 2 回押すと別のウィンドウで開きます',
+  );
+
+  /**
+   * ⑤ 🔴 **抜けた直後の 1 タップでは開かない。もう 1 回押すと開く**
+   *   (`pressedTileAgain` の数がモード中の押しで汚れていないこと)。
+   */
+  const pagesBeforeSingle = context.pages().length;
+  await clickReal(page, mainTile);
+  await page.waitForTimeout(300);
+  expect(
+    context.pages().length,
+    '「完了」の直後、1 回目のタップでウィンドウが開いた(数が汚れている)',
+  ).toBe(pagesBeforeSingle);
+
+  const [reopened] = await Promise.all([context.waitForEvent('page'), clickReal(page, mainTile)]);
+  await reopened.waitForLoadState('domcontentloaded');
+  await reopened.close();
+
+  /**
+   * ⑥ 🔴 **左のタブを離れると並べ替えモードが終わる**(`leaveLauncherIf`。
+   *   着地前の動線レビュー 欠陥 3、2026-09-13)。
+   *
+   * ⚠ 頼んでいないのにモードが続くと、戻ってきた user は「2 回押しても
+   *   開かない」だけを見て、自分が何をしたのか分からない(`binder.ts` の
+   *   `leaveLauncherIf` docstring)。
+   * 🔑 起動を増やさない ── もう一度長押しして、同じ道中で確かめる。
+   */
+  await page
+    .locator(mainTile)
+    .dispatchEvent('pointerdown', {
+      bubbles: true,
+      pointerType: 'touch',
+      button: 0,
+      isPrimary: true,
+    });
+  await page.waitForTimeout(600);
+  await page.locator(mainTile).dispatchEvent('pointerup', { bubbles: true, pointerType: 'touch' });
+  await expect(done, '2 度目の長押しで並べ替えモードに入らない').toBeVisible();
+
+  await clickReal(page, '[data-pkc-browse="list"]');
+  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await expect(
+    done,
+    '一覧タブへ移ってアプリタブへ戻っても、並べ替えモードが終わっていない',
+  ).toHaveCount(0);
+  await expect(
+    lead,
+    'タブを離れて戻っても、文言が「2 回押すと開く」に戻らない',
+  ).toHaveText('アプリは 2 回押すと別のウィンドウで開きます');
+
+  // モードが終わっているので、タイルは通常どおり 2 回押すと開く
+  const pagesBeforeLeaveCheck = context.pages().length;
+  await clickReal(page, mainTile);
+  await page.waitForTimeout(300);
+  expect(
+    context.pages().length,
+    'タブを離れてモードが終わった直後、1 回目のタップでウィンドウが開いた',
+  ).toBe(pagesBeforeLeaveCheck);
+  const [reopened2] = await Promise.all([
+    context.waitForEvent('page'),
+    clickReal(page, mainTile),
+  ]);
+  await reopened2.waitForLoadState('domcontentloaded');
+  await reopened2.close();
+
+  /**
+   * ⑦ ⚠ **出口はスクロールしても画面に残る**(`position: sticky`。
+   *   着地前の動線レビュー 欠陥 2、2026-09-13)。
+   *
+   * 🔑 起動を増やさない ── 一覧の**器**(`browse-host`)を直接縮めて溢れさせる
+   *   (viewport を縮めない ── `@media (max-width: 900px|1100px)` の版面切替を
+   *   踏むと、この面自体が見えなくなる恐れがある)。
+   * ⚠ **溢れていること自体を確かめる**(空振り防止、CLAUDE.md §2)── 縮めても
+   *   溢れなければ、以下の位置検査は何も見ていないのと同じになる。
+   * ⚠ 値は pin しない(環境で変わる)── 見るのは「器の見えている範囲に入っているか」。
+   */
+  await page
+    .locator(mainTile)
+    .dispatchEvent('pointerdown', {
+      bubbles: true,
+      pointerType: 'touch',
+      button: 0,
+      isPrimary: true,
+    });
+  await page.waitForTimeout(600);
+  await page.locator(mainTile).dispatchEvent('pointerup', { bubbles: true, pointerType: 'touch' });
+  await expect(done, '3 度目の長押しで並べ替えモードに入らない').toBeVisible();
+
+  const host = page.locator('[data-pkc-region="browse-host"]');
+  await host.evaluate((el) => {
+    (el as HTMLElement).style.maxHeight = '160px';
+  });
+  const scrolled = await host.evaluate((el) => {
+    const before = el.scrollTop;
+    const overflows = el.scrollHeight > el.clientHeight;
+    el.scrollTop = el.scrollHeight;
+    return { before, overflows, after: el.scrollTop };
+  });
+  expect(
+    scrolled.overflows,
+    '一覧を縮めても溢れない(スクロール自体が起きていない ── この先の検査は空振りする)',
+  ).toBe(true);
+  expect(scrolled.after, '縮めた器がスクロールしていない').toBeGreaterThan(scrolled.before);
+
+  const [hostBox, doneBox] = await Promise.all([host.boundingBox(), done.boundingBox()]);
+  expect(hostBox, '一覧の器が測れない').not.toBeNull();
+  expect(doneBox, 'スクロール後に出口が測れない(消えている)').not.toBeNull();
+  if (hostBox && doneBox) {
+    expect(
+      doneBox.y,
+      `スクロールすると出口が器の上へ流れて画面から消える(host.y=${hostBox.y} done.y=${doneBox.y})`,
+    ).toBeGreaterThanOrEqual(hostBox.y - 1);
+    expect(
+      doneBox.y + doneBox.height,
+      `出口が器の下へはみ出す(host=${hostBox.y}+${hostBox.height} done=${doneBox.y}+${doneBox.height})`,
+    ).toBeLessThanOrEqual(hostBox.y + hostBox.height + 1);
+  }
+  await host.evaluate((el) => {
+    (el as HTMLElement).style.maxHeight = '';
+  });
+
+  /**
+   * ⑧ 🔴 **アドレスから「引っ越した面」を開いても、並べ替えモードが終わる**
+   *   (#857 段①b-2。着地前レビューが見つけた「4 本目の口」の当の直し)。
+   *
+   * ⚠ `#pkc?view=calendar` は #292 段⑤ で予定タブへ引っ越しており、
+   *   `deep-link.ts` の `MOVED_VIEWS` が `main.ts` の `openBrowse` → `setBrowse` を
+   *   呼ぶ。タブの押し / 改名の逃げ / タブへのドラッグ(`binder.ts` の旧 3 か所)は
+   *   **この経路を 1 つも通らない** ── ここでしか検められない。
+   * 🔑 起動を増やさない ── 既存の道中の末尾で、もう一度長押ししてから確かめる。
+   */
+  await page
+    .locator(mainTile)
+    .dispatchEvent('pointerdown', {
+      bubbles: true,
+      pointerType: 'touch',
+      button: 0,
+      isPrimary: true,
+    });
+  await page.waitForTimeout(600);
+  await page.locator(mainTile).dispatchEvent('pointerup', { bubbles: true, pointerType: 'touch' });
+  await expect(done, '4 度目の長押しで並べ替えモードに入らない').toBeVisible();
+
+  await page.evaluate(() => {
+    location.hash = '#pkc?view=calendar';
+  });
+  await expect(
+    page.locator('[data-pkc-browse-pane="schedule"]'),
+    '前提が崩れている(アドレスから引っ越した面「予定」へ移っていない)',
+  ).toBeVisible();
+
+  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await expect(
+    done,
+    'アドレスから引っ越した面を開いても、並べ替えモードが終わっていない',
+  ).toHaveCount(0);
+  await expect(
+    lead,
+    'アドレスから引っ越した面を経由して戻っても、文言が「2 回押すと開く」に戻らない',
+  ).toHaveText('アプリは 2 回押すと別のウィンドウで開きます');
+
+  expect(errors, `console/pageerror: ${errors.join(' | ')}`).toEqual([]);
+});
+
+/**
  * P8 段⑭: 🔴 **PKC3 の中だけでタイルを作り、SPA が動いて、状態が残る**。
  *
  * > user 報告 2026-08-03

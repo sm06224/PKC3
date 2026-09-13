@@ -10,11 +10,15 @@
  * 🔑 だから**長押し = Ctrl クリック**(`toggle`)にする。OS のファイラ
  * (Android / iOS の「ファイル」)が例外なくこの形で複数選択に入る。
  *
+ * ⚠ **2026-09-13 に受け口が 1 つ増えた**(#857 段①b-2)── アプリのタイルの
+ * 長押しは**並べ替えモード**に入る。⚠ この file は「どの行で発火したか」を
+ * 呼び手へ渡すだけで、**何を撃つかは持たない**(`binder.ts` が押した物で分ける)。
+ *
  * ## 何を受けて、何を捨てるか
  *
  * | 何 | どうする | なぜ |
  * |---|---|---|
- * | `pointerdown`(**指 / ペン**、主ボタン) | 時計を掛ける | マウスは Ctrl クリックが在るので**受けない**(長押しは右クリックの慣習) |
+ * | `pointerdown`(**指 / ペン**、主ボタン) | 時計を掛ける | マウスは Ctrl クリック / 右クリックが在るので**受けない**(長押しは右クリックの慣習) |
  * | `pointermove` が **10px** を超えた | 取り消す | 指は震えるので 0px にしない / スクロールし始めたら長押しではない |
  * | `pointerup` / `pointercancel` | 取り消す | 500ms 前に離したら**ただのタップ**(`click` が `set` を撃つ) |
  * | 500ms 経った | 発火(`toggle`)+ 700ms の**消費窓** | 直後に来る `click` を捨てる ── 捨てないと `set` で印が 1 件に戻る |
@@ -46,6 +50,25 @@ export const LONG_PRESS_SLOP_PX = 10;
 export const LONG_PRESS_CONSUME_MS = 700;
 /** 受ける行。⚠ 2 ペインの行だけ(左の列は印の面ではない ── #240 段② の規律)。 */
 export const LONG_PRESS_TARGET = '[data-pkc-action="dual-row"]';
+/**
+ * 🔴 **アプリのタイルも受ける**(#857 段①b-2。user 裁定 2026-09-13
+ * 「長押しで並べ替えモード」)。
+ *
+ * ⚠ **指だけの端末には、タイルを並べ替える入口が 1 つも無かった** ──
+ *   掴んで落とすのは HTML5 の drag、「上へ / 下へ」は右クリックで、
+ *   どちらもマウスが要る。この file 自身が `pointerType === 'mouse'` を
+ *   受けないと決めているので、**裏を返せばマウス以外の入口が無い**。
+ * ⚠ **動かせるタイルに絞らない**(`[draggable="true"]` にしない)── 絞ると、
+ *   組み込みのタイルや絞り込み中に長押ししたとき**何も起きない**
+ *   (無言の dead press)。受けたうえで、reducer が理由を声に出す。
+ */
+export const LONG_PRESS_TILE = '[data-pkc-tile]';
+/**
+ * 実際に `closest` へ渡す綴り。⚠ **2 つを 1 つの器で受ける** ──
+ * 2 本目の `installLongPress` を足すと、`swallowsClick` / `holds` を
+ * **両方に聞いて回る**ことになり、聞き忘れた 1 か所が静かに残る(CLAUDE.md §7)。
+ */
+export const LONG_PRESS_TARGETS = `${LONG_PRESS_TARGET}, ${LONG_PRESS_TILE}`;
 
 export interface LongPress {
   /** 配線を解く(`bindActions` の teardown から呼ぶ)。 */
@@ -111,7 +134,7 @@ export function installLongPress(
      * ⚠ 主ボタンだけ(ペンの側面ボタンは既に「右クリック」の意味を持つ)。
      */
     if (ev.pointerType === 'mouse' || ev.button !== 0) return;
-    const row = (ev.target as Element | null)?.closest<HTMLElement>(LONG_PRESS_TARGET) ?? null;
+    const row = (ev.target as Element | null)?.closest<HTMLElement>(LONG_PRESS_TARGETS) ?? null;
     cancel();
     if (row === null || !root.contains(row)) return;
     const el = row;

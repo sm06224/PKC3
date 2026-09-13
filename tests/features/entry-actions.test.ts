@@ -34,6 +34,10 @@ import {
   entryActionHint,
   entryMenuActions,
   TILE_MENU_ACTIONS,
+  tileMenuActions,
+  TASK_REPEAT_MENU_ACTION,
+  repeatMenuActions,
+  REPEAT_ATTR,
 } from '../../src/features/entry-actions';
 
 /** `binder.ts` の受け手の表を読む。⚠ 集め方は `repo-hygiene` と**同じ形**にする。 */
@@ -59,12 +63,23 @@ describe('右クリックに出す操作', () => {
      * 🔑 表が増えたらここへ足す ── `data-pkc-action` を**変数で渡す**メニューは、
      *   `repo-hygiene` の字面の走査に 1 件も当たらない(この file の冒頭の戒め)。
      */
-    const dead = [...ENTRY_MENU_ACTIONS, ...TILE_MENU_ACTIONS]
+    const dead = [
+      ...ENTRY_MENU_ACTIONS,
+      ...TILE_MENU_ACTIONS,
+      // ⚠ 2026-09-13(#857 段①b-2): モードの出入りも同じ表から出る
+      ...tileMenuActions(false),
+      ...tileMenuActions(true),
+      // ⚠ 2026-09-13(#855 段 0): 札の「繰り返す…」と、その 2 段目
+      TASK_REPEAT_MENU_ACTION,
+      ...repeatMenuActions(null),
+      ...repeatMenuActions('week'),
+    ]
       .filter((a) => !have.has(a.action))
       .map((a) => a.action);
     expect(dead, '受け手のいない操作をメニューに出している(押しても無言)').toEqual([]);
     // ⚠ 空振り防止 ── 足した表が空なら、上の走査は増えていないのと同じ
     expect(TILE_MENU_ACTIONS.length, 'タイルのメニューが空(空振り)').toBeGreaterThanOrEqual(2);
+    expect(repeatMenuActions(null).length, '刻みの一覧が空(空振り)').toBe(4);
   });
 
   it('⚠ 空振り防止 ── 綴りを 1 つ壊せば、この検査は落ちる', () => {
@@ -588,5 +603,32 @@ describe('表の形を変える字(#708)', () => {
       expect(pick, `本文が変わると読めない(${from})`).toContain('本文を');
       expect(pick, `書き換えると読めない(${from})`).toContain('書き換える');
     }
+  });
+});
+
+/**
+ * 🔴 **刻みの一覧は「押しても何も起きない項目」を並べない**(#855 段 0 の 3 つ目)。
+ */
+describe('繰り返しの一覧(#855 段 0)', () => {
+  it('🔴 いまの刻みは出さない / 繰り返していなければ「やめる」も出さない', () => {
+    expect(repeatMenuActions(null).map((a) => a.label)).toEqual(['毎日', '毎週', '毎月', '毎年']);
+    expect(repeatMenuActions('week').map((a) => a.label)).toEqual([
+      '毎日',
+      '毎月',
+      '毎年',
+      'やめる',
+    ]);
+  });
+
+  it('🔴 どの項目も、刻みの綴りを属性で持つ(「やめる」は空)', () => {
+    const items = repeatMenuActions('week');
+    expect(items.map((a) => a.attrs[REPEAT_ATTR])).toEqual(['day', 'month', 'year', '']);
+    // ⚠ 空振り防止 ── 属性の名前そのものが変わったら落ちる
+    expect(REPEAT_ATTR).toBe('data-pkc-repeat');
+  });
+
+  it('⚠ 説明は 1 件残らず付いている(右クリックの項目が黙らない)', () => {
+    for (const a of [TASK_REPEAT_MENU_ACTION, ...repeatMenuActions('week')])
+      expect(a.hint, `「${a.label}」に説明が無い`).not.toBe('');
   });
 });

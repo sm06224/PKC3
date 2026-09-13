@@ -144,6 +144,21 @@ const OBJECT_LONE: readonly string[] = [
   'navigate-entry-ref',
   'open-alarm',
   /**
+   * ⚠ **2026-09-13(#855 段 0 の 3 つ目)に足した 2 件**(下の `set-task-repeat` と 1 組)。
+   *   ⚠ #582 の「増やさない」に**触れていない** ── ここが止めたい害は
+   *   「**その面を畳む・狭くすると画面から消える**」ことだが、この 2 つの出口は
+   *   **予定の札そのもの**である。
+   * 🔑 札を描くのは `render/task-card.ts` **1 本**で、それを使う `render/schedule.ts` を
+   *   **左の列の「予定」タブ**と**別窓**(`ViewMode` の `schedule`)が**両方**描く ──
+   *   file では 1、画面では 2 になる(`capture-play` と同じ形)。
+   * ⚠ 実測(2026-09-13):`createTaskCard` を呼ぶのは `schedule.ts` **1 か所だけ**
+   *   ── かんばんは #292 段⑤ で `VIEW_MODES` ごと外れているので、
+   *   「2 つの面が同じ札を出す」は**もう成り立たない**(`task-card.ts` の頭を直した)。
+   * ⚠ **触れていないことを字で残す** ── 残さないと、次に読む人が
+   *   「体系の外で足した 2 つ」と読む(`browse-archive` / `capture-play` と同じ扱い)。
+   */
+  'open-repeat-menu',
+  /**
    * 🔴 **スマホ用画面の 2 つは「1 か所しかない」が設計である**(#632 段①)。
    *
    * ⚠ 出口はどちらも**本文ページの帯**(`shell.ts` の `phone-bar`)1 か所しか無い ──
@@ -171,6 +186,8 @@ const OBJECT_LONE: readonly string[] = [
    */
   'rename-attachment',
   'set-entry-date',
+  // ⚠ 上の `open-repeat-menu` と 1 組(2 段目の受け手。理由はそちらに書いた)
+  'set-task-repeat',
   'shape-cell',
   /**
    * ⚠ **2026-09-09(#809-4)に足した。** ⚠ #582 の「増やさない」に**触れていない** ──
