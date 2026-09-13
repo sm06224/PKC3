@@ -667,15 +667,31 @@ const createAndEdit = (
 };
 
 /**
- * 押した物の行の lid。無ければ**いま選んでいるノート**(#215)。
+ * 押した物の行の lid。
  *
- * ⚠ 右クリックのメニューのボタンは行の中に居ない(器は root の直下)が、行のメニューは
- *   開く前に `selectEntryOrExplain` でその行を選んでいるので `selectedLid` が押した行である。
- *   情報ペインのボタンも同じ規則(選んでいるノートに効く)。
- * ⚠ 鍵(`runFilerKey`)は焦点の行を target として渡すので、こちらは行から取れる。
+ * 🔴 **優先順位は 3 段**(#877)。
+ *   ① **メニューを開いた瞬間の lid**(`MENU_LID_ATTR` の carry)
+ *   ② 押した物が行の中に居れば、その行の lid(情報ペインのボタン等)
+ *   ③ 無ければ**いま選んでいるノート**
+ *
+ * ⚠ ②だけでは足りない ── 行のメニューのボタンは**行の中に居ない**(器は root
+ *   直下)。だから直す前は③(`selectedLid` が押した行だと仮定)に頼っていたが、
+ *   メニューが開いたまま `Alt+←`(`contexts: ['global']` ── メニューの有無を
+ *   見ない)を押すと `selectedLid` が**別のノートへ動く**。行のメニューは
+ *   `openContextMenu` の carry へ①を焼くことで、この動きに引きずられなくなる
+ *   (`open-note-window` の `MENU_PREV_LID_ATTR` と同じ「開いた瞬間を運ぶ」作法)。
+ * ⚠ ①を持たない呼び手(情報ペインのボタン・鍵)は②③のまま ── `runFilerKey` は
+ *   焦点の行を target として渡すので②で取れる。
  */
 const rowLidOrSelected = (st: AppState, target: HTMLElement): string | null =>
-  target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? st.selectedLid;
+  // ⚠ ①は `??` ではなく **`||`** ── 本文のメニューは `[MENU_LID_ATTR]: ob?.lid ?? ''`
+  //   を運ぶので、**空文字**が来ることがある(`??` だとそれを lid として通してしまう
+  //   ── `''` を受けた先は「無言で何もしない」か、`entryMetas.get('')` で undefined に
+  //   なる。どちらも §「無言の dead click」)。同じ理由で `adopt-link-icon`(下の方)も
+  //   既に `||` で読んでいる ── **読み方をそちらへ揃える**。
+  target.getAttribute(MENU_LID_ATTR) ||
+  target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ||
+  st.selectedLid;
 
 /** UI サービス面(storage 依存の操作は main が実体を注入。test は fake)。 */
 /**
@@ -4715,11 +4731,15 @@ const ACTIONS: Record<string, ActionHandler> = {
       });
       return;
     }
-    // 属性はボタン自身ではなく「entry を表す要素」(行 / カード)から closest で
-    // 引く ── ボタン直付けだと selectedLid fallback が別 entry を消す罠になる
-    const lid =
-      target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ??
-      dispatcher.getState().selectedLid;
+    /**
+     * 🔴 **解決規則は `rowLidOrSelected` の 1 本**(#877)── 属性はボタン自身では
+     *   なく「entry を表す要素」(行 / カード)から closest で引き、それも無ければ
+     *   **メニューを開いた瞬間の lid**(`MENU_LID_ATTR`)、最後に選んでいるノート。
+     *   ⚠ 直す前は closest → `selectedLid` の 2 段しか無く、メニューが開いたまま
+     *   `selectedLid` が動くと**別のノート**を消せた(行のメニューは行の中に
+     *   居ないので closest が必ず外れ、常に `selectedLid` へ落ちていた)。
+     */
+    const lid = rowLidOrSelected(dispatcher.getState(), target);
     if (!lid) return;
     const title = dispatcher.getState().entryMetas.get(lid)?.title ?? lid;
     /**
@@ -5985,7 +6005,11 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'copy-plain-markdown': (dispatcher, target, services) => {
     const st = dispatcher.getState();
-    const lid = st.selectedLid;
+    // 🔴 解決規則は `rowLidOrSelected` の 1 本(#877)── 直す前は常に
+    //   `selectedLid` だったので、行のメニューを開いたまま選択が動くと
+    //   **別のノートの本文**を写してしまえた(下の `openBody` 一致で本文自体は
+    //   守られていたが、`lid` が動けば一致の基準ごとズレる)
+    const lid = rowLidOrSelected(st, target);
     // ⚠ 本文は**開いているノートの物**でなければならない(別のノートを写さない)
     const body = st.openBody?.lid === lid ? st.openBody.body : null;
     if (lid === null || body === null) {
@@ -6757,8 +6781,9 @@ const ACTIONS: Record<string, ActionHandler> = {
       .closest<HTMLElement>('[data-pkc-entry-ref]')
       ?.getAttribute('data-pkc-entry-ref');
     const st = dispatcher.getState();
-    const lid =
-      target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? st.selectedLid;
+    // 🔴 解決規則は `rowLidOrSelected` の 1 本(#877)── メニューを開いた瞬間の
+    //   lid が読めれば、開いたままの間に `selectedLid` が動いても引きずられない
+    const lid = rowLidOrSelected(st, target);
     const meta = lid === null ? undefined : st.entryMetas.get(lid);
     const ref =
       carried ?? (meta === undefined || lid === null ? null : formatEntryLink(meta.title, lid));
@@ -7025,9 +7050,8 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   積み方(上に積む・見つからない物を数える)は reducer(`LOAD_STACK`)が 1 か所で持つ。
    */
   'stack-load': (dispatcher, target) => {
-    const lid =
-      target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ??
-      dispatcher.getState().selectedLid;
+    // 🔴 解決規則は `rowLidOrSelected` の 1 本(#877)
+    const lid = rowLidOrSelected(dispatcher.getState(), target);
     if (lid === null) return;
     dispatcher.dispatch({ type: 'LOAD_STACK', lid });
   },
@@ -7645,32 +7669,27 @@ const ACTIONS: Record<string, ActionHandler> = {
     services.exportPortable?.();
   },
   'export-entry-pdf': (dispatcher, target, services) => {
-    // ⚠ 解決規則は隣の 2 つと**同じ**にする(片方だけ `selectedLid` 固定だと
-    //    「A を刷って B を消す」が成立する)
-    const lid = target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry')
-      ?? dispatcher.getState().selectedLid;
+    // 🔴 解決規則は `rowLidOrSelected` の 1 本(#877)── 隣の 2 つと揃える
+    //   (片方だけ `selectedLid` 固定だと「A を刷って B を消す」が成立する)
+    const lid = rowLidOrSelected(dispatcher.getState(), target);
     if (lid) services.printNote?.(lid);
   },
   'export-entry-docx': (dispatcher, target, services) => {
-    // ⚠ 解決規則は `export-entry` と**同じ**にする(隣に並ぶボタンなので、
-    //    片方だけ `selectedLid` 固定だと「A を Word にして B を消す」が成立する)
-    const lid = target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry')
-      ?? dispatcher.getState().selectedLid;
+    // 🔴 解決規則は `export-entry` と**同じ**(#877。隣に並ぶボタンなので、
+    //   片方だけ `selectedLid` 固定だと「A を Word にして B を消す」が成立する)
+    const lid = rowLidOrSelected(dispatcher.getState(), target);
     if (lid) services.exportEntryDocx?.(lid);
   },
   'export-entry-pptx': (dispatcher, target, services) => {
-    // ⚠ 解決規則は隣の 3 つ(`export-entry` / `-docx` / `-pdf`)と**同じ**にする
-    const lid = target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry')
-      ?? dispatcher.getState().selectedLid;
+    // 🔴 解決規則は隣の 3 つ(`export-entry` / `-docx` / `-pdf`)と**同じ**(#877)
+    const lid = rowLidOrSelected(dispatcher.getState(), target);
     if (lid) services.exportEntryPptx?.(lid);
   },
   'export-entry': (dispatcher, target, services) => {
-    // ⚠ 解決規則は `delete-entry` と**同じ**にする(review M-3)── 隣に並べる
+    // 🔴 解決規則は `delete-entry` と**同じ**(review M-3 / #877)── 隣に並べる
     // ボタンなので、片方だけ `selectedLid` 固定だと filer / sidebar の行に
     // 並べた瞬間に「A を書き出して B を削除する」が成立する
-    const lid =
-      target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ??
-      dispatcher.getState().selectedLid;
+    const lid = rowLidOrSelected(dispatcher.getState(), target);
     if (lid) services.exportEntry?.(lid);
   },
   /**
@@ -7761,23 +7780,19 @@ const ACTIONS: Record<string, ActionHandler> = {
     });
   },
   'export-entry-html': (dispatcher, target, services) => {
-    // ⚠ 解決規則は隣の `export-entry` / `delete-entry` と**同じ**にする ── 揃えないと
+    // 🔴 解決規則は隣の `export-entry` / `delete-entry` と**同じ**(#877)── 揃えないと
     //    「A を書き出して B を削除する」が成立する(review M-3 と同じ形)
-    const lid =
-      target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ??
-      dispatcher.getState().selectedLid;
+    const lid = rowLidOrSelected(dispatcher.getState(), target);
     if (lid) services.exportEntryHtml?.(lid);
   },
   /**
    * 🔴 **このノートを別の窓で開く**(#685 段②)。
-   * ⚠ 解決規則は隣の `export-entry` / `delete-entry` と**同じ**にする ── 揃えないと
+   * ⚠ 解決規則は隣の `export-entry` / `delete-entry` と**同じ**(#877)── 揃えないと
    *   「A を書き出して B を開く」が成立する。
    * ⚠ **同期に呼ぶ**(`window.open` は gesture の中でしか通らない)。
    */
   'open-note-window': (dispatcher, target, services) => {
-    const lid =
-      target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ??
-      dispatcher.getState().selectedLid;
+    const lid = rowLidOrSelected(dispatcher.getState(), target);
     if (lid === null) {
       // 🔑 無言で終わらせない(押した人に理由が要る)
       dispatcher.dispatch({
@@ -7799,11 +7814,9 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
   },
   'export-folder': (dispatcher, target, services) => {
-    // ⚠ 解決規則は隣の `export-entry` / `delete-entry` と**同じ**にする ── 揃えないと
+    // 🔴 解決規則は隣の `export-entry` / `delete-entry` と**同じ**(#877)── 揃えないと
     //    「A を書き出して B を削除する」が成立する(review M-3 と同じ形)
-    const lid =
-      target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ??
-      dispatcher.getState().selectedLid;
+    const lid = rowLidOrSelected(dispatcher.getState(), target);
     if (lid) services.exportFolder?.(lid);
   },
   'purge-orphan-assets': (_dispatcher, _target, services) => {
@@ -7929,9 +7942,8 @@ const ACTIONS: Record<string, ActionHandler> = {
     dispatcher.dispatch({ type: 'RESTORE_REVISION', revId });
   },
   'write-back-file': (dispatcher, target, services) => {
-    const lid =
-      target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ??
-      dispatcher.getState().selectedLid;
+    // 🔴 解決規則は `rowLidOrSelected` の 1 本(#877)
+    const lid = rowLidOrSelected(dispatcher.getState(), target);
     if (lid) services.writeBackFile?.(lid);
   },
   'show-trash': (dispatcher) => dispatcher.dispatch({ type: 'SHOW_TRASH' }),
@@ -10818,7 +10830,21 @@ export function bindActions(
       { x: ev.clientX, y: ev.clientY },
       items,
       root.ownerDocument.activeElement,
-      prevLid === null || prevLid === lid ? {} : { [MENU_PREV_LID_ATTR]: prevLid },
+      /**
+       * 🔴 **開いた瞬間の lid を必ず運ぶ**(#877)。
+       *
+       * ⚠ 直す前はここに `MENU_LID_ATTR` が無く、行の各ボタンは**行の中に
+       *   居ない**(器は root 直下)ので、受け手は `rowLidOrSelected` の②③
+       *   (`.closest` → `selectedLid`)しか読めなかった。メニューを開いたまま
+       *   `Alt+←` 等で `selectedLid` が動くと、③が**別のノート**を指す ──
+       *   「A の削除」を押したつもりで **B が消える**。
+       * 🔑 `MENU_PREV_LID_ATTR`(戻す相手)とは別物 ── こちらは
+       *   「どのノートに効かせるか」、あちらは「どこへ戻すか」。
+       */
+      {
+        [MENU_LID_ATTR]: lid,
+        ...(prevLid === null || prevLid === lid ? {} : { [MENU_PREV_LID_ATTR]: prevLid }),
+      },
     );
   };
   /**
