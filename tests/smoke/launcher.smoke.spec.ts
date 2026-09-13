@@ -1453,6 +1453,8 @@ test('🔴 一度許した素のまま起動は、読み込み直しても聞か
   const after = page.locator(USER_TILES).first();
   await expect(after).toBeVisible({ timeout: 15000 });
   const boxedTab = context.waitForEvent('page');
+  // ⚠ **2 回押す**(#857 段①b)── 1 回目は印が付くだけ
+  await after.click();
   await after.click();
   const boxedWin = await boxedTab;
   expect(await modeOf(boxedWin), '取り消したのに素のままで開いた(fail open)').not.toBe(
