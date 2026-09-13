@@ -4496,6 +4496,22 @@ li[data-pkc-row-slot] {
   background: var(--surface-2);
   cursor: pointer;
 }
+/* 🔴 **すべて畳む / すべて開く**(#857 段④)。⚠ 字の大きさは書かない ──
+ * 器(一覧)を継ぐ(「ボタンの字の大きさは 3 段だけ」#722 の段を増やさない)。
+ * ⚠ 右端に寄せる ── 見出しは左に並ぶので、同じ列に置くと「その群の押し所」に見える。 */
+[data-pkc-field='launcher-fold-all'] {
+  display: block;
+  margin: 0 var(--s2) var(--s2) auto;
+  padding: var(--s1) var(--s2);
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+[data-pkc-field='launcher-fold-all']:hover {
+  color: var(--fg);
+  text-decoration: underline;
+}
 [data-pkc-field='launcher-loading'],
 [data-pkc-field='launcher-empty'] {
   margin: var(--s2);

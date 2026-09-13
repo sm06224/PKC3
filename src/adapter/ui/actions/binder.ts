@@ -935,6 +935,13 @@ export interface BinderServices {
    */
   toggleAppGroup?(group: string): void;
   /**
+   * 🔴 **画面に出ているグループを、全部畳む / 全部開く**(#857 段④)。
+   * ⚠ 名前は**画面から採る**(呼び側が数え直さない)── 「すべて」の意味は
+   *   「いま一覧に出ている群」であって、保存に残っている名前ではない
+   *   (別の端末から運んだ畳みを、こちらの画面の操作で消さない)。
+   */
+  toggleAllAppGroups?(groups: readonly string[]): void;
+  /**
    * 添付の携帯参照(`pkc://<自分>/asset/<key>`)から**所有ノートへ飛ぶ**(#100 段②)。
    * ⚠ 見つからないときは黙らない(OP_FAILED で断る ── 無言の dead click を作らない)。
    */
@@ -7109,6 +7116,29 @@ const ACTIONS: Record<string, ActionHandler> = {
   'toggle-app-group': (_dispatcher, target, services) => {
     const group = target.getAttribute('data-pkc-group') ?? '';
     if (group !== '') services.toggleAppGroup?.(group);
+  },
+  /**
+   * 🔴 **すべて畳む / すべて開く**(#857 段④)。
+   *
+   * 🔑 **名前は画面から採る** ── 畳む口(`toggle-app-group`)を持っている見出しが、
+   *   そのまま「いま畳める群」の一覧である。数え直す口を 2 つ目に作らない
+   *   (CLAUDE.md §7「同じ問いに答える口が 2 つあると、片方だけ壊れる」)。
+   * ⚠ **面へスコープする** ── 一覧(`launcher-list`)の中だけを見る。document 全体を
+   *   走ると、別の面に同じ名前の押し所が生えた日に静かに巻き込む(§1)。
+   */
+  'toggle-all-app-groups': (_dispatcher, target, services) => {
+    const list = target.closest('[data-pkc-field="launcher-list"]');
+    if (!list) return;
+    const groups = [...list.querySelectorAll('[data-pkc-action="toggle-app-group"]')].map(
+      (el) => el.getAttribute('data-pkc-group') ?? '',
+    );
+    /**
+     * ⚠ ここで**間引かない** ── 空の名前も 0 件も、判定は
+     *   `toggleAllFolded` 1 か所が持つ(`features/launcher/group-fold.ts`)。
+     * 🔑 ここに同じ `if` を書くと、**守っているつもりの死んだ枝**が増える
+     *   (畳む口は名前の付いた群にしか出ないので、ここの間引きは一度も効かない)。
+     */
+    services.toggleAllAppGroups?.(groups);
   },
   'set-editor-mode': (_dispatcher, target, services) => {
     // ⚠ `set-theme` と同じ受け方(`<select>` でもボタンでも通す)

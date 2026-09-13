@@ -351,6 +351,84 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   await clickReal(page, '[data-pkc-action="toggle-app-group"][data-pkc-group="組み込みアプリ"]');
   await expect(page.locator(builtinTile('dual'))).toHaveCount(1);
 
+  /**
+   * 🔴 **「すべて畳む / すべて開く」**(#857 段④。動線: 一覧の右上の「すべて畳む」を
+   * 押す → 名前の付いたグループの中身が全部消える → 字が「すべて開く」に変わる →
+   * もう一度押すと全部戻る)。
+   * 🔑 起動を 1 つも足していない ── 既に開いている一覧の道中に足した(smoke-budget)。
+   */
+  const foldAll = page.locator('[data-pkc-field="launcher-fold-all"]');
+  await expect(
+    foldAll,
+    '既定で「すべて畳む」が出ていない(20 個あるグループを 1 つずつ押させることになる)',
+  ).toHaveText('すべて畳む');
+  const toolToggle = page.locator('[data-pkc-action="toggle-app-group"][data-pkc-group="ツール"]');
+  await clickReal(page, '[data-pkc-field="launcher-fold-all"]');
+  await expect(foldAll, '畳んだのに字が「すべて開く」へ裏返らない').toHaveText('すべて開く');
+  await expect(builtinToggle, '「すべて畳む」を押しても組み込みが畳まれない').toHaveAttribute(
+    'aria-expanded',
+    'false',
+  );
+  await expect(toolToggle, '「すべて畳む」を押してもツールが畳まれない').toHaveAttribute(
+    'aria-expanded',
+    'false',
+  );
+  await expect(page.locator(builtinTile('dual')), '畳んだのに組み込みタイルが残っている').toHaveCount(
+    0,
+  );
+  await expect(
+    tiles.filter({ hasText: '後のリンク' }),
+    '畳んだのにツールのタイルが残っている',
+  ).toHaveCount(0);
+  /**
+   * 🔴 **名前の無いいちばん上のまとまりは、「すべて畳む」を押しても畳まれない**
+   * (畳むと開く口が画面から消えるため、片道の操作になってしまう)。
+   */
+  await expect(
+    tiles.filter({ hasText: '電卓' }),
+    '名前の無い群まで「すべて畳む」の巻き添えで消えている',
+  ).toHaveCount(1);
+  await clickReal(page, '[data-pkc-field="launcher-fold-all"]');
+  await expect(foldAll, 'もう一度押しても字が「すべて畳む」へ戻らない').toHaveText('すべて畳む');
+  await expect(page.locator(builtinTile('dual')), 'もう一度押しても組み込みが開かない').toHaveCount(
+    1,
+  );
+  await expect(
+    tiles.filter({ hasText: '後のリンク' }),
+    'もう一度押してもツールが開かない',
+  ).toHaveCount(1);
+
+  /**
+   * 🔴 **絞り込み中は見出しが押し所でなくなる / 「すべて畳む」も消える**
+   * (#857 段④ の仕上げ。動線: 絞り込みの欄に何か打つ → グループの見出しが押し所で
+   * なくなる(押せる物が無い)/「すべて畳む」も消える → 欄を空にすると両方戻る)。
+   * ⚠ 直す前は押しても画面が 1 ドットも変わらない無言の dead click だった
+   * (絞り込み中は畳みを無視して出すので、押しても何も起きない ── そのうえ
+   * 欄を空にした瞬間に畳まれるので、忘れた頃に効くいちばん結び付けにくい形だった)。
+   */
+  await page.locator('[data-pkc-field="entry-filter"]').fill('予定表');
+  await expect(
+    foldAll,
+    '絞り込み中に「すべて畳む」が消えていない(押しても効かない口が残っている)',
+  ).toHaveCount(0);
+  const builtinHeadDuringFilter = page.locator('[data-pkc-field="launcher-group"]', {
+    hasText: '組み込みアプリ',
+  });
+  await expect(
+    builtinHeadDuringFilter,
+    '絞り込み中に見出しの字が消えている(どの群か探せない)',
+  ).toHaveText('組み込みアプリ');
+  await expect(
+    page.locator('[data-pkc-action="toggle-app-group"][data-pkc-group="組み込みアプリ"]'),
+    '絞り込み中も見出しが押し所のまま(押しても画面が変わらない dead click)',
+  ).toHaveCount(0);
+  await page.locator('[data-pkc-field="entry-filter"]').fill('');
+  await expect(foldAll, '絞り込みを消しても「すべて畳む」が戻らない').toHaveCount(1);
+  await expect(
+    page.locator('[data-pkc-action="toggle-app-group"][data-pkc-group="組み込みアプリ"]'),
+    '絞り込みを消しても見出しが押せるようにならない',
+  ).toHaveCount(1);
+
   // ③ 外部へ飛ぶタイルは**行き先が見えている**(押す前に分かる)
   await expect(tiles.nth(1).locator('[data-pkc-field="tile-url"]')).not.toHaveText('');
 

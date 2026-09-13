@@ -2941,6 +2941,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       appGroupFold.toggle(group);
       browse.render(dispatcher.getState(), browseMode);
     },
+    toggleAllAppGroups: (groups) => {
+      appGroupFold.toggleAll(groups);
+      browse.render(dispatcher.getState(), browseMode);
+    },
     setEditorMode: (mode) => {
       appEditorMode.setMode(mode);
     },

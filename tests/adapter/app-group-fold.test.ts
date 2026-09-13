@@ -71,6 +71,10 @@ beforeEach(() => {
       folds.toggle(g);
       r.render(d.getState());
     },
+    toggleAllAppGroups: (gs) => {
+      folds.toggleAll(gs);
+      r.render(d.getState());
+    },
   });
   d.dispatch({
     type: 'SYS_BOOTED',
@@ -90,6 +94,8 @@ const headBtn = (name: string): HTMLElement => {
   expect(el, `「${name}」の見出しに押し所が無い`).not.toBeNull();
   return el!;
 };
+const foldAll = (): HTMLElement | null =>
+  region.querySelector<HTMLElement>('[data-pkc-field="launcher-fold-all"]');
 const shown = (lid: string): boolean =>
   region.querySelector(`[data-pkc-tile="${lid}"]`) !== null;
 const heads = (): string[] =>
@@ -127,6 +133,80 @@ describe('グループを畳む(#857 段④)', () => {
     // ⚠ 対照群 ── 絞り込みを消したら、畳みは効いたまま(押した覚えが消えない)
     d.dispatch({ type: 'SET_ENTRY_FILTER', query: '' });
     expect(shown('b1'), '絞り込みを消したら畳みまで解けた').toBe(false);
+  });
+
+  /**
+   * 🔴 **すべて畳む / すべて開く**(#857 段④ の仕上げ)。
+   * ⚠ 押し所は 1 つで、いまの状態で字が裏返る ── 2 つ並べるとどちらかが常に空振りする。
+   */
+  it('🔴 ⑥ 「すべて畳む」で名前の付いた群が全部畳まれ、字が裏返る', () => {
+    const btn = foldAll();
+    expect(btn, '「すべて畳む」の押し所が無い').not.toBeNull();
+    expect(btn!.textContent, '全部開いているのに「すべて開く」と出ている').toBe('すべて畳む');
+
+    btn!.click();
+    expect(shown('b1') || shown('b2'), '「すべて畳む」で畳まれていない').toBe(false);
+    // ⚠ 名前の無い群は畳めない ── 巻き込まれていないこと(開く口が消えないため)
+    expect(shown('a1'), '名前の無い群まで畳んだ(開く口が画面から消える)').toBe(true);
+    expect([...folds.get()].includes('資料'), '保存に書かれていない').toBe(true);
+    expect(foldAll()?.textContent, '全部畳んだのに字が裏返らない').toBe('すべて開く');
+
+    foldAll()!.click();
+    expect(shown('b1') && shown('b2'), '「すべて開く」で開かない(片道の操作)').toBe(true);
+    expect(foldAll()?.textContent, '全部開いたのに字が戻らない').toBe('すべて畳む');
+  });
+
+  it('🔴 ⑦ 名前の付いた群が 1 つも無ければ、押し所を出さない', () => {
+    // ⚠ 名前の無いまとまりは畳めないので、出すと**押しても何も起きない**押し所になる
+    d.dispatch({
+      type: 'LAUNCHER_TILES_LOADED',
+      tiles: [{ lid: 'a1', title: '電卓', group: '', kind: 'url', url: 'https://a.test/', order: 0 }],
+    });
+    expect(shown('a1'), '前提が崩れている(タイルが出ていない)').toBe(true);
+    expect(foldAll(), '畳める群が無いのに「すべて畳む」を出した').toBeNull();
+  });
+
+  /**
+   * 🔴 **絞り込み中は押し所を出さない**(#857 段④ の仕上げ)。
+   *
+   * ⚠ 絞り込み中は畳みを**無視して出す**(上の④)ので、ここで押せてしまうと
+   *   **押しても画面が 1 ドットも変わらない**(無言の dead click)。しかも
+   *   欄を空にした瞬間に畳まれるので、**忘れた頃に効く**という結び付けにくい形になる。
+   */
+  it('🔴 ⑧ 絞り込み中は、見出しにも「すべて畳む」にも押し所を出さない', () => {
+    expect(foldAll(), '前提が崩れている').not.toBeNull();
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: '地図' });
+    expect(
+      region.querySelector('[data-pkc-action="toggle-app-group"]'),
+      '絞り込み中に畳む口が出ている(押しても何も起きない)',
+    ).toBeNull();
+    expect(foldAll(), '絞り込み中に「すべて畳む」が出ている').toBeNull();
+    // ⚠ 字は出す ── どの群かは探している間も要る
+    expect(heads().join(' '), '群の見出しの字まで消えた').toContain('資料');
+    // 対照群 ── 欄を空にすれば押し所が戻る
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: '' });
+    expect(foldAll(), '絞り込みを消しても押し所が戻らない').not.toBeNull();
+  });
+
+  /**
+   * 🔴 **「すべて」は、この面の中だけ**(#857 段④ の仕上げ。変異試験 M9 が教えた)。
+   *
+   * ⚠ 直す前は、範囲(`closest`)を document 全体の走査に変えても
+   *   **20 件とも緑のまま**だった ── 面が 1 枚しか無いので区別が付かない。
+   * 🔑 だから**おとりを 1 つ置く** ── 一覧の外に同じ押し所を生やし、
+   *   それが巻き込まれないことを見る(別窓で 2 枚目の一覧が出た日に鳴る)。
+   */
+  it('🔴 ⑨ 一覧の外に同じ押し所が在っても、巻き込まない', () => {
+    const decoy = document.createElement('button');
+    decoy.setAttribute('data-pkc-action', 'toggle-app-group');
+    decoy.setAttribute('data-pkc-group', 'よその面の群');
+    root.append(decoy); // ⚠ **一覧(launcher-list)の外**に置く
+
+    foldAll()!.click();
+    const got = [...folds.get()];
+    expect(got, '一覧の外の群まで畳んだ(範囲が面を越えている)').not.toContain('よその面の群');
+    // ⚠ 対照群 ── 面の中の群は畳めている(何も畳まずに通る空振りではない)
+    expect(got, '前提が崩れている(面の中の群も畳めていない)').toContain('資料');
   });
 
   it('🔴 ⑤ 畳みは保存の側に在る(state は 1 バイトも動かない)', () => {

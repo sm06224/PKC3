@@ -7,7 +7,13 @@
  *   `?.` は例外を投げずに `undefined` を返すので `catch` へ入らず、
  *   控え(`fallback`)が**死んだ枝**になる。先に `null` を見る。
  */
-import { decodeFolded, encodeFolded, toggleFolded, type FoldedGroups } from '@features/launcher/group-fold';
+import {
+  decodeFolded,
+  encodeFolded,
+  toggleAllFolded,
+  toggleFolded,
+  type FoldedGroups,
+} from '@features/launcher/group-fold';
 
 const KEY = 'pkc3.app-group-folded';
 
@@ -39,7 +45,16 @@ export class GroupFoldStore {
   }
 
   toggle(name: string): FoldedGroups {
-    const next = toggleFolded(this.get(), name);
+    return this.write(toggleFolded(this.get(), name));
+  }
+
+  /** すべて畳む / すべて開く。⚠ 渡された名前(= いま画面に出ている群)だけを動かす。 */
+  toggleAll(names: readonly string[]): FoldedGroups {
+    return this.write(toggleAllFolded(this.get(), names));
+  }
+
+  /** ⚠ 書く口は 1 つ ── 控えの更新を書き手ごとに繰り返さない(片方だけ忘れる形を作らない)。 */
+  private write(next: FoldedGroups): FoldedGroups {
     this.fallback = next;
     try {
       this.storage?.setItem(KEY, encodeFolded(next));
