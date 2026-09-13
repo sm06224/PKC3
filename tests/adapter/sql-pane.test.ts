@@ -34,6 +34,9 @@ import { homeTabOf } from '../../src/adapter/ui/render/browse-mode';
 import { readFileSync } from 'node:fs';
 import { stubStamps } from '../helpers/store-stamps';
 import { stubRevisionOps } from '../helpers/revision-stub';
+// 🔴 手持ちのファイルを開く(#854 段②)── main.ts と**同じ実物**を配線する
+import { registerSqlLocalFile, takeSqlLocalFileBytes } from '../../src/adapter/state/sql-local-file';
+import { SQL_PICK_LOCAL_FILE_VALUE } from '../../src/features/query/sql-local-file';
 
 type SqlAnswer = {
   columns: string[];
@@ -69,7 +72,15 @@ function meta(lid: string, title: string): EntryMeta {
  */
 function setup(
   reply: (sql: string) => Promise<SqlAnswer> = async () => answer(['a'], [[1]]),
-  opts: { withOp?: boolean } = {},
+  opts: {
+    withOp?: boolean;
+    /**
+     * 🔴 **`readLocalSqlFile` だけを外す**(#854 段②)。⚠ `withOp: false` とは別 ──
+     *   あちらは worker の口ごと無い版、こちらは**手持ちのファイルの口だけ無い版**
+     *   (添付の `.sqlite` / `.csv` は今までどおり開ける)。
+     */
+    withLocal?: boolean;
+  } = {},
 ) {
   const root = document.createElement('div');
   document.body.append(root);
@@ -144,8 +155,21 @@ function setup(
                   ? '---\nattachment.name: 大きい.tsv\nattachment.asset_key: ast-tsv-ok\n---\n'
                   : '',
     ...(opts.withOp === false ? {} : { runReadOnlySql, openSqlGuest, closeSqlGuest }),
-  }, opts.withOp === false ? {} : { readAssetBytes });
-  bindActions(root, d, {});
+  }, opts.withOp === false
+    ? {}
+    : {
+        readAssetBytes,
+        // 🔴 手持ちのファイル(#854 段②)── 実物の控えをそのまま繋ぐ
+        //    (⚠ `withLocal: false` のときは**この口だけ**外す)
+        ...(opts.withLocal === false ? {} : { readLocalSqlFile: (lid: string) => takeSqlLocalFileBytes(lid) }),
+      });
+  bindActions(root, d, {
+    // 🔴 main.ts と**同じ実物の配線**(#854 段②)── ここだけ fake にしない
+    pickSqlLocalFile: (file: File) => {
+      const lid = registerSqlLocalFile(file);
+      d.dispatch({ type: 'SET_SQL_SOURCE', lid, name: file.name });
+    },
+  });
   d.dispatch({
     type: 'SYS_BOOTED',
     cid: 'c1',
@@ -190,6 +214,19 @@ function setup(
     sourceSel.value = lid;
     sourceSel.dispatchEvent(new Event('change', { bubbles: true }));
   };
+  const fileInput = pane.querySelector<HTMLInputElement>('[data-pkc-field="sql-file-input"]')!;
+  /**
+   * 🔴 **「手持ちのファイルを開く…」を選んで、file を選ぶところまで**(#854 段②)。
+   * ⚠ **2 段で行う**(選び所を「開く…」にしてから、隠した `<input>` へ file を渡す)
+   *   ── 実機で user が辿る 2 段と同じ形にする(1 段にまとめると、選び所が
+   *   `binder.ts` の `set-sql-source` を実際に通るかを見落とす)。
+   */
+  const pickLocalFile = (file: File): void => {
+    sourceSel.value = SQL_PICK_LOCAL_FILE_VALUE;
+    sourceSel.dispatchEvent(new Event('change', { bubbles: true }));
+    Object.defineProperty(fileInput, 'files', { value: [file], configurable: true });
+    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+  };
   return {
     root,
     d,
@@ -206,6 +243,8 @@ function setup(
     persisted,
     sourceSel,
     pick,
+    fileInput,
+    pickLocalFile,
     openSqlGuest,
     closeSqlGuest,
     readAssetBytes,
@@ -950,11 +989,15 @@ describe('着地前レビューの直し(#681)', () => {
   });
 
   /**
-   * 🔴 **F5: `.sqlite` を 1 つも取り込んでいない人に、中身が空の選び所が出ていた。**
+   * 🔴 **F5(元): `.sqlite` を 1 つも取り込んでいない人に、中身が空の選び所が出ていた。**
    * ⚠ 「選べる相手が 1 つも無いときは出さない」と**書いてある行**が、
    *   初回だけ走っていなかった(指紋の初期値が空文字で、0 件の指紋と同じ)。
+   *
+   * 🔴 **#854 段②でこの前提が変わった**:添付が 1 つも無くても
+   *   **「手持ちのファイルを開く…」だけは常に押せる**ので、選び所そのものは
+   *   もう「押しても何も無い口」ではない ── だから隠さない。
    */
-  it('🔴 F5 取り込んだ DB が 1 つも無ければ、選び所を出さない', () => {
+  it('⚠ 取り込んだ DB が 1 つも無くても、選び所は出る(#854 段②。手持ちのファイルは常に開ける)', () => {
     const root = document.createElement('div');
     document.body.append(root);
     const d = new Dispatcher();
@@ -965,9 +1008,14 @@ describe('着地前レビューの直し(#681)', () => {
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1', '会議メモ')], relations: [] });
     d.dispatch({ type: 'SET_VIEW_MODE', mode: 'sql' });
     const sel = root.querySelector<HTMLSelectElement>('[data-pkc-field="sql-source"]')!;
-    expect(sel.hidden, '押しても何も無い選び所が出ている').toBe(true);
-    // ⚠ 空振り防止 ── 選び所そのものは在る(取り込めば出る)
-    expect(sel, '選び所ごと消えている').not.toBeNull();
+    expect(sel.hidden, '押しても何も無いのに隠している(F5 の裏返し)').toBe(false);
+    const names = [...sel.options].map((o) => o.textContent);
+    expect(names, '手持ちのファイルを開く口が無い').toContain('手持ちのファイルを開く…');
+    // ⚠ 対照群 ── 添付は 0 件のまま(取り込んでいない DB 名は出ない)
+    expect(names, '前提が崩れている(添付を持たせていないのに何か並んでいる)').toEqual([
+      'この PKC のノート',
+      '手持ちのファイルを開く…',
+    ]);
   });
 
   /**
@@ -1120,5 +1168,131 @@ describe('#837 の改善(K1 / K2 / K3)', () => {
     await settle();
     const body = persisted.at(-1)?.body ?? '';
     expect(body, 'どこを調べたか書いていない').toContain('売上.sqlite を調べました');
+  });
+});
+
+/**
+ * 🔴 **SQL の面から、手持ちのファイルを開く**(#854 段②)。
+ *
+ * user 裁定 2026-09-12(こちらの解釈):**開いたファイルは憶えない。毎回選び直す。**
+ *
+ * 守る主張:
+ * 1. 選ぶと開いて、添付のときと**同じ経路**(`openSqlGuest` / 拡張子の見分け)を通る
+ * 2. `.sqlite` と `.csv`、両方で通る道が成立する
+ * 3. 開けない file を選んだら、理由が画面に出る(黙って終わらない)
+ * 4. **憶えない** ── もう一度「開く…」を選ぶと file 選択が**また**開き、
+ *    前に開いた file が自動で選ばれ直すことはない
+ */
+describe('SQL の面から、手持ちのファイルを開く(#854 段②)', () => {
+  it('🔴 選び所に「手持ちのファイルを開く…」が、いつも一番下に在る', () => {
+    const { sourceSel } = setup();
+    const names = [...sourceSel.options].map((o) => o.textContent);
+    expect(names.at(-1), '常に押せる項目が末尾に無い').toBe('手持ちのファイルを開く…');
+  });
+
+  it('🔴 .sqlite を選ぶと、添付と同じ経路(openSqlGuest)で開いて、SELECT が引ける', async () => {
+    const { pickLocalFile, note, openSqlGuest, runReadOnlySql, type, runBtn, d } = setup();
+    const file = new File(['dummy .sqlite bytes'], '自分の帳簿.sqlite', {
+      type: 'application/octet-stream',
+    });
+    pickLocalFile(file);
+    await settle();
+    // 🔴 「通る道」1: 表ができる前提(開けたこと)が画面に出ている
+    expect(note(), 'どちらを調べているか言っていない').toContain('自分の帳簿.sqlite');
+    expect(note(), '中に何が在るか言っていない').toContain('表 2 個');
+    // ⚠ 拡張子が .sqlite なので、csv 引数は渡らない(添付と同じ判定 1 本)
+    expect(openSqlGuest.mock.calls[0]?.[1], '.sqlite なのに csv 引数が付いた').toBeUndefined();
+    // 🔴 「通る道」2: SELECT が実際に客の DB へ飛ぶ
+    type('SELECT 1 AS a');
+    runBtn.click();
+    await settle();
+    expect(runReadOnlySql.mock.calls[0]?.[1]?.guest, '客へ打っていない').toBe(true);
+    // ⚠ 選び所の値は、開いた file を表す合成 lid になっている(実体と画面が一致)
+    const lid = d.getState().sqlPage.guest?.lid ?? '';
+    expect(lid, '合成 lid が発行されていない').not.toBe('');
+  });
+
+  it('🔴 口が無い版(readLocalSqlFile 無し)では、理由を言って断る(押して無反応にしない)', async () => {
+    const { pickLocalFile, note, sourceSel, openSqlGuest } = setup(undefined, { withLocal: false });
+    const file = new File(['dummy'], '手元.sqlite');
+    pickLocalFile(file);
+    await settle();
+    expect(note(), 'この版では…と言っていない').toContain('この版では手持ちのファイルを開けません');
+    expect(sourceSel.value, '開けていないのに選んだ顔をしている').toBe('');
+    // ⚠ 対照群 ── worker 自体は生きている(添付の .sqlite はいつもどおり開ける)
+    openSqlGuest.mockClear();
+    sourceSel.value = 'db1';
+    sourceSel.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(openSqlGuest, '添付まで巻き添えで止めた').toHaveBeenCalledTimes(1);
+  });
+
+  it('🔴 .csv を選ぶと、拡張子から見分けた csv 引数が渡り、SELECT が引ける', async () => {
+    const { pickLocalFile, note, openSqlGuest, d } = setup();
+    const file = new File(['id,name\n1,あ\n'], '手元の一覧.csv', { type: 'text/csv' });
+    pickLocalFile(file);
+    await settle();
+    expect(note(), 'どちらを調べているか言っていない').toContain('手元の一覧.csv');
+    const lid = d.getState().sqlPage.guest?.lid ?? '';
+    expect(openSqlGuest.mock.calls[0]?.[1], '.csv なのに csv 引数が渡っていない').toEqual({
+      lang: 'csv',
+      lid,
+      name: '手元の一覧.csv',
+    });
+  });
+
+  it('🔴 開けない file を選ぶと、理由が画面に出て、この PKC へ戻る(黙って終わらない)', async () => {
+    const { pickLocalFile, note, sourceSel } = setup();
+    // ⚠ 空(0 バイト)── fake の openSqlGuest が「読めませんでした」で断る形
+    const file = new File([], '空.sqlite');
+    pickLocalFile(file);
+    await settle();
+    expect(note(), '理由を言っていない').toContain('選んだ file を開けませんでした');
+    expect(note(), 'engine の言い分が消えている').toContain('読めませんでした');
+    // 🔴 添付と同じ作法 ── 開けなかったら選び所も「この PKC」へ戻る
+    expect(sourceSel.value, '開けていないのに選んだ顔をしている').toBe('');
+  });
+
+  /**
+   * 🔴 **「憶えない」の直接の証拠**(user 裁定 2026-09-12)。
+   *
+   * ⚠ 実機の file 選択ダイアログはここでは開けない(headless の unit test)ので、
+   *   「隠した `<input>` が**もう一度** `click()` されること」を証拠にする ──
+   *   これが無い実装(前に選んだ file を控えて自動で開き直す実装)を書くと、
+   *   ここで `click` が呼ばれず、この test は落ちる。
+   */
+  it('🔴 もう一度「開く…」を選んでも、前に開いた file が自動で選ばれ直さない', async () => {
+    const { sourceSel, fileInput, pickLocalFile, openSqlGuest, d } = setup();
+    const fileA = new File(['a'.repeat(8)], '最初.sqlite');
+    pickLocalFile(fileA);
+    await settle();
+    const lidA = d.getState().sqlPage.guest?.lid ?? '';
+    expect(lidA, '前提が崩れている(1 回目が開けていない)').not.toBe('');
+    expect(openSqlGuest, '1 回目で開いていない').toHaveBeenCalledTimes(1);
+
+    const clickSpy = vi.spyOn(fileInput, 'click');
+    // ⚠ ここでは file を渡さない(実機なら OS のダイアログが出ている最中に当たる)
+    sourceSel.value = SQL_PICK_LOCAL_FILE_VALUE;
+    sourceSel.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+
+    expect(clickSpy, '選び直す口(file 選択)を開いていない').toHaveBeenCalledTimes(1);
+    // 🔑 file を渡していないので、何も変わっていない(自動で何かを開き直していない)
+    expect(openSqlGuest, '選んだ覚えの無い file を勝手に開いた').toHaveBeenCalledTimes(1);
+    expect(d.getState().sqlPage.guest?.lid, '前に開いていた相手が変わった').toBe(lidA);
+    // ⚠ 選び所も、実体(まだ最初の file のまま)へ戻っている
+    expect(sourceSel.value, '選び所が「開く…」のまま居座っている').toBe(lidA);
+
+    // 🔑 別の file を**改めて**選べば、そのときは新しく開く(=控えていた物の再利用ではない)
+    const fileB = new File(['b'.repeat(8)], '次.sqlite');
+    pickLocalFile(fileB);
+    await settle();
+    expect(openSqlGuest, '2 回目に新しく開いていない').toHaveBeenCalledTimes(2);
+    const lidB = d.getState().sqlPage.guest?.lid ?? '';
+    expect(lidB, '合成 lid が使い回されている(別物のはず)').not.toBe(lidA);
+    // ⚠ 前に開いていた file(最初.sqlite)は、選び所からもう並ばない(憶えていない)
+    const names = [...sourceSel.options].map((o) => o.textContent);
+    expect(names, '前に開いた file がまだ選び所に残っている').not.toContain('最初.sqlite');
+    expect(names, '今開いている file が選び所に無い').toContain('次.sqlite');
   });
 });

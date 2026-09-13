@@ -23,9 +23,11 @@
  *   面を閉じて戻っても消えない。
  */
 import type { AppState } from '@adapter/state/app-state';
-import { sqlSourcesOf } from '@features/query/sqlite-attachment';
+import { SQLITE_EXTS, sqlSourcesOf } from '@features/query/sqlite-attachment';
 // 🔴 添付の .csv / .tsv も同じ選び所へ並べる(#854 段①)
 import { csvAttachmentSourcesOf } from '@features/query/csv-attachment';
+// 🔴 手持ちのファイルを開く(#854 段②)
+import { isSqlLocalFileLid, SQL_PICK_LOCAL_FILE_VALUE } from '@features/query/sql-local-file';
 import { humanBytes } from '@features/human-bytes';
 import { SQL_RULES, sqlExampleText, sqlPlaceholder, sqlTipText } from '@features/query/sql-tip';
 
@@ -113,7 +115,20 @@ export class SqlRenderer {
     source.setAttribute('data-pkc-action', 'set-sql-source');
     source.setAttribute('data-pkc-field', 'sql-source');
     source.setAttribute('aria-label', '調べる相手');
-    bar.append(run, save, source);
+    /**
+     * 🔴 **「手持ちのファイルを開く…」が押した先**(#854 段②)。
+     * ⚠ **隠したまま置く** ── 選び所の一項目を選ぶと `binder.ts` がここを
+     *   `click()` する(`office-pack-input` / `settings-file-input` と同じ作法)。
+     * ⚠ **憶えない**(user 裁定 2026-09-12)── ここは選ぶたびに使い捨てる口で、
+     *   選んだ file を溜める仕組みはどこにも持たない。
+     */
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = `${[...SQLITE_EXTS].join(',')},.csv,.tsv`;
+    fileInput.hidden = true;
+    fileInput.setAttribute('data-pkc-field', 'sql-file-input');
+    fileInput.setAttribute('aria-label', '手持ちのファイルを選ぶ');
+    bar.append(run, save, source, fileInput);
     const tip = document.createElement('p');
     tip.setAttribute('data-pkc-field', 'sql-tip');
     /**
@@ -160,7 +175,7 @@ export class SqlRenderer {
   }
 
   /**
-   * 🔴 **調べる相手の選び所を揃える**(#681 段③ の 2 つ目、#854 段①)。
+   * 🔴 **調べる相手の選び所を揃える**(#681 段③ の 2 つ目、#854 段①②)。
    *
    * ⚠ **選択肢は添付が増減したときだけ組み直す** ── 毎回作り直すと、
    *   開いたまま増えた添付に気づける代わりに、**選んでいる最中に選択肢が
@@ -179,6 +194,17 @@ export class SqlRenderer {
       ...sqlSourcesOf(state.entryMetas.values()),
       ...csvAttachmentSourcesOf(state.entryMetas.values()),
     ];
+    /**
+     * 🔴 **いま開いている手持ちのファイルも一覧へ足す**(#854 段②)。
+     * ⚠ 足さないと、開いた file を表す `<option>` が一覧に無いまま `want` だけ
+     *   それを指し、すぐ下の「いま選ばれている物は state から書き戻す」が
+     *   選び所を「この PKC」へ戻してしまう(画面と実体が食い違う ── この file
+     *   自身のいちばん上のコメントが戒めている形)。
+     * ⚠ **entryMetas には出てこない** ── ノートでも添付でもないので、
+     *   開いている間だけこの場で足す(閉じれば消える。「憶えない」の裁定どおり)。
+     */
+    const guest = state.sqlPage.guest;
+    if (guest !== null && isSqlLocalFileLid(guest.lid)) sources.push(guest);
     const key = sources.map((s) => `${s.lid}:${s.name}`).join('|');
     if (key !== this.sourceKey) {
       this.sourceKey = key;
@@ -193,8 +219,18 @@ export class SqlRenderer {
         opt.textContent = s.name;
         sel.append(opt);
       }
-      // ⚠ 選べる相手が 1 つも無いときは**出さない**(押しても何も無い口を作らない)
-      sel.hidden = sources.length === 0;
+      /**
+       * 🔴 **「手持ちのファイルを開く…」は常に置く**(#854 段②)。
+       * ⚠ 添付が 1 つも無くても**この項目だけは押せる**ので、上の
+       *   「選べる相手が 1 つも無いときは出さない」は成り立たなくなった ──
+       *   選び所そのものは**もう隠さない**(実体の無い口ではなく、押せば file
+       *   選択画面が開く実在する操作である)。
+       */
+      const pick = document.createElement('option');
+      pick.value = SQL_PICK_LOCAL_FILE_VALUE;
+      pick.textContent = '手持ちのファイルを開く…';
+      sel.append(pick);
+      sel.hidden = false;
     }
     const want = state.sqlPage.guest?.lid ?? '';
     if (sel.value !== want) sel.value = want;
