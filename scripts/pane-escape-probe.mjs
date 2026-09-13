@@ -55,6 +55,25 @@ const SELS = {
   戻す口_inspector: '[data-pkc-action="toggle-pane"][data-pkc-pane="inspector"]',
   戻す口_append: '[data-pkc-action="toggle-pane"][data-pkc-pane="append"]',
   パレットを開く: '[data-pkc-action="open-palette"]',
+  /**
+   * 🔴 **スマホでは、パレットへは `⋯` から届く**(2026-09-13 に足した)。
+   *
+   * ⚠ 足す前、この probe は狭い窓で**必ず「判定不能」**になっていた ──
+   *   `open-palette` のボタンは左の列(`collectionBar`)の中に在り、
+   *   スマホでは本文ページを見ている間ずっと出ない。
+   *   🔑 だが**届かないわけではない**:`⋯`(`phone-menu`)を押すと開く menu に
+   *   「操作を探す」が在る(`binder.ts` の `'phone-menu'`)。
+   * ⚠ **同じ列には足さない** ── `⋯` は「パレットを開くボタン」ではなく
+   *   「パレットへ届く menu」である。混ぜると、直の口が消えた日に気づけない
+   *   (CLAUDE.md §4「計器の名前を、計器の見ている範囲より広く書かない」)。
+   */
+  'パレットへ届く⋯': '[data-pkc-field="phone-menu"]',
+  /**
+   * 🔴 **スマホでは、一覧へは「← 一覧」で戻る**(同日)。
+   * ⚠ 狭い窓に `toggle-pane[data-pkc-pane=sidebar]` は出ない ── 一覧は
+   *   畳まれているのではなく**別の頁**なので、戻す口の綴りが違う。
+   */
+  '戻す口_一覧ページ': '[data-pkc-field="phone-back"]',
   掴む帯: '[data-pkc-region="pane-grip"]',
   'shell の押せるもの': '[data-pkc-region="shell"] button:not([disabled])',
 };
@@ -136,10 +155,24 @@ if (control.length !== VIEWPORTS.length) {
   console.error(`⚠ 対照群が ${control.length} 行しか無い(窓は ${VIEWPORTS.length} 通り)`);
   process.exit(2);
 }
-const brokenGauge = control.filter((r) => r['パレットを開く'] === 0);
+/**
+ * 🔴 **判定不能でも、採った記録は必ず出す**(2026-09-13)。
+ *
+ * ⚠ 直す前は `process.exit(2)` が先だったので、**最後まで採れていた窓の行まで
+ *   捨てていた** ── 次に回す人は「何が起きたか」を 1 行も読めない。
+ * 🔑 記録は無条件に出し、**読んでよいかどうかを後ろに書く**。
+ */
+console.log(JSON.stringify(rows, null, 1));
+
+/**
+ * 🔴 **パレットへ「届く」かで見る**(直のボタンの有無ではない)。
+ * ⚠ 狭い窓では直の口が常に 0 なので、直の口だけを見ると
+ *   **製品の話ではなく計器の話**で毎回止まる(2026-09-13 に実際に止まった)。
+ */
+const reachPalette = (r) => r['パレットを開く'] + r['パレットへ届く⋯'];
+const brokenGauge = control.filter((r) => reachPalette(r) === 0);
 if (brokenGauge.length > 0) {
-  console.error('⚠ 判定不能: 畳む前にパレットが 0 件の窓がある(計器か描画の待ちが足りない)');
+  console.error('⚠ 判定不能: 畳む前からパレットへ届く口が 0 の窓がある(計器か描画の待ちが足りない)');
   console.error(JSON.stringify(brokenGauge, null, 1));
   process.exit(2);
 }
-console.log(JSON.stringify(rows, null, 1));

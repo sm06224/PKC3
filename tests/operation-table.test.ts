@@ -59,7 +59,11 @@ const reg = (): Record<string, { id: string }[]> =>
   (registries as () => Record<string, { id: string }[]>)();
 
 /**
- * 🔴 **押し所へ辿る道が、この走査から見えない登記**(26 件)。
+ * 🔴 **押し所へ辿る道が、この走査から見えない登記**。
+ *
+ * ⚠ **件数をここに書かない**(2026-09-13 に直した ── 「26 件」と書いてあったが
+ *   実際は 34 件だった)。🔑 **一覧そのものが正本**である
+ *   ── 数を 2 か所に書くと、足した日に片方が嘘になる(CLAUDE.md §7)。
  *
  * ⚠ **「押せない」ではない** ── 専用の listener で受けている物が居る。
  * 🔑 **身元で pin する**(件数ではなく)── 同じ数だけ取り違えても件数は合う。
@@ -112,6 +116,87 @@ const UNBRIDGED: readonly string[] = [
   'view-dual',
   // ⚠ 2026-09-09(#681 段②)── SQL の面も押しボタンを持たない(組み込みタイルから別窓)
   'view-sql',
+];
+
+/**
+ * 🔴 **名前で呼べるはずなのに、まだ登記していない操作**(#582 段②-1)。
+ *
+ * ## なぜ身元で pin するか
+ *
+ * ⚠ ここは **2026-09-13 まで件数だけ**(`unregistered: 204`)を見ていた ──
+ *   だから押し所を足した人は**数字を 1 つ上げてコメントを 1 行足す**だけで通り、
+ *   実測で **2 週間に +51 件**増えた(153 → 204)。
+ * 🔑 身元で pin すると、**その id をここへ書き足す**ことになる ── 書けば
+ *   「名前で呼べない操作をまた 1 つ増やした」が diff に出る。
+ *   `UNBRIDGED` と同じ作法である(等値 pin の既知リストは、直したら消さないと落ちる)。
+ *
+ * ## なぜ 2 つに割るか
+ *
+ * 🔑 **こちらは「段③ の在庫」である。** `scripts/action-scope-survey.mjs` の仕分けで
+ *   `N`(押した所から何も要らない)/ `E` / `P2`(state に「いまのそれ」が在る)/ `V` は、
+ *   **押した 1 つを指さなくても実行できる** ── つまりパレットから撃てる。
+ * ⚠ 下の `UNREGISTERED_POINT`(`P1` = 真の点)は指さないと始められないので、
+ *   登記しても**パレットからは撃てない**。混ぜると「在庫がいくつか」が読めなくなる。
+ *
+ * ⚠ **この一覧は減る方向にしか動かないのが望ましい** ── 増やすなら、
+ *   なぜ名前で呼べないままにするのかを 1 行添えること。
+ */
+const UNREGISTERED_NAMEABLE: readonly string[] = [
+  'add-place', 'add-relation', 'add-tag', 'add-url-tile', 'adopt-external-images',
+  'adopt-link-icon', 'allow-external-images', 'append-entry', 'apply-plan', 'apply-settings',
+  'apply-update', 'attach-file', 'bulk-tag-add', 'bulk-tag-remove', 'capture-stop',
+  'choose-office-pack', 'clear-copy-history', 'clear-entry-date', 'clear-entry-filter',
+  'clear-kind-filter', 'clear-opened-history', 'clear-selection', 'close-pane',
+  'contacts-quick-add', 'copy-block-md', 'copy-chapter-md', 'copy-note-md', 'copy-note-rich',
+  'copy-section-ref', 'copy-selection-md', 'delete-selected', 'deny-external-images',
+  'discard-capture', 'dismiss-announce', 'dismiss-notices', 'dismiss-update', 'dual-back',
+  'dual-bookmark', 'dual-copy', 'dual-delete', 'dual-focus', 'dual-forward', 'dual-mkdir',
+  'dual-mknote', 'dual-move', 'dual-preview-toggle', 'dual-rename-begin', 'dual-row',
+  'dual-sort', 'dual-tab-add', 'dual-tab-close', 'end-tile-reorder', 'enter-folder',
+  'export-settings', 'export-vcards', 'force-release', 'format-text', 'hide-history',
+  'hide-revision-preview', 'hide-trash', 'insert-diagram', 'insert-icon', 'install-office-pack',
+  'launch-asset', 'launch-asset-extension', 'launch-asset-raw', 'move-order-down',
+  'move-order-up', 'mute-announce', 'next-announce', 'open-manual-window', 'open-today',
+  'paste-many-copied', 'phone-menu', 'phone-page', 'pick-app-icon', 'pick-create-kind',
+  'purge-trash', 'raise-place', 'refresh-query', 'remove-office-pack', 'remove-place',
+  'rename-attachment', 'renumber-lists', 'replace-all', 'reset-app-group-order', 'reset-flags',
+  'reset-office-profile', 'retry-persist', 'run-sql', 'schedule-nav', 'schedule-quick-add',
+  'schedule-today', 'select-entry', 'set-alarm-enabled', 'set-app-group', 'set-app-icon',
+  'set-app-open-target', 'set-browse', 'set-column-rule', 'set-editor-mode', 'set-entry-date',
+  'set-entry-sort', 'set-external-images', 'set-flag', 'set-notices-enabled', 'set-open-in-edit',
+  'set-open-place', 'set-page-format', 'set-paste-source', 'set-phone-links', 'set-prose-align',
+  'set-query-key', 'set-read-columns', 'set-sql-source', 'set-sql-text', 'set-tag-badge',
+  'set-text-scale', 'set-theme', 'set-too-narrow-enabled', 'set-view', 'show-trash', 'skip-to',
+  'smart-cond-add', 'smart-evict', 'smart-field', 'sql-to-note', 'stack-save',
+  'start-audio-capture', 'start-edit', 'start-screen-capture', 'start-tile-reorder',
+  'start-timer', 'stop-capture', 'storage-profile', 'swap-open', 'table-to-csv',
+  'table-to-markdown', 'toggle-all-app-groups', 'toggle-app-tile', 'toggle-create-menu',
+  'toggle-kind-filter', 'toggle-pane', 'toggle-show-archived', 'toggle-show-done',
+  'toggle-show-undated', 'toggle-todo', 'undo-append', 'undo-import', 'undo-move', 'use-copied',
+];
+
+/**
+ * 🔴 **真の点 ── 押した 1 つを指さないと始められない操作**(#582 段②-1)。
+ *
+ * ⚠ **登記していないのは欠陥ではない。** パレットは「名前で呼ぶ」口なので、
+ *   「どのセルか」「どの日か」「どの履歴の行か」が要る操作は、そこから撃てない。
+ * 🔑 それでも**身元で持つ**理由は 2 つ:
+ *   ① 上の在庫との境目を機械で見張る(仕分けが変わったら落ちる)
+ *   ② 受け手が増えたとき、**どちらの箱に入れたか**を書かせる
+ */
+const UNREGISTERED_POINT: readonly string[] = [
+  'append-at-heading', 'browse-archive', 'capture-play', 'copy-asset-ref', 'copy-md-block',
+  'deliver-to-extension', 'discard-timer', 'dismiss-alarm', 'download-asset',
+  'dual-bookmark-open', 'dual-bookmark-remove', 'dual-crumb', 'dual-tab-activate', 'edit-cell',
+  'edit-from-heading', 'export-diagram', 'filter-by-tag', 'move-app-group-down',
+  'move-app-group-up', 'move-tile-down', 'move-tile-up', 'navigate-asset-ref',
+  'navigate-card-ref', 'navigate-entry-ref', 'open-alarm', 'open-office', 'open-repeat-menu',
+  'open-tile', 'open-tile-as', 'pick-app-group-icon', 'preview-revision', 'remove-relation',
+  'restore-revision', 'restore-trash', 'revoke-extension', 'revoke-same-origin',
+  'schedule-pick-day', 'schedule-quick-here', 'set-task-repeat', 'shape-cell',
+  'smart-cond-remove', 'stack-link-down', 'stack-link-up', 'stop-timer', 'toc-jump',
+  'toggle-app-group', 'toggle-heading-fold', 'toggle-task', 'unschedule-task', 'unsplit-entry',
+  'untag-entry', 'view-asset', 'view-big',
 ];
 
 describe('操作の全数台帳(#582 段①)', () => {
@@ -285,5 +370,46 @@ describe('操作の全数台帳(#582 段①)', () => {
      *   `!receiver && screens>0` が**空虚に真**になり、**検査ごと消える**。
      */
     expect(s().scanned).toBe(s().total);
+  });
+
+  /**
+   * 🔴 **未登記を、件数ではなく身元で pin する**(#582 段②-1)。
+   *
+   * ⚠ 直す前は `unregistered: 204` という**数だけ**だったので、押し所を足した人は
+   *   数字を 1 つ上げれば通った ── 実測で 2 週間に **+51 件**増えた。
+   * 🔑 身元にすると、増やす人は**その id を書き足す**ことになる。
+   */
+  it('🔴 名前で呼べない操作を、身元で pin する', () => {
+    const un = rows().filter((r) => r.receiver && r.books.length === 0);
+    /**
+     * 🔴 **空振り防止 ── 数え方が 2 つに割れていないこと。**
+     * ⚠ ここで自分で数え直しているので、`summary()` 側の絞り込みを壊しても
+     *   この test だけは緑になりうる(CLAUDE.md §7「同じ問いに答える口が 2 つ」)。
+     */
+    expect(un.length, '未登記の数え方が summary と食い違っている').toBe(s().unregistered);
+    expect([...un.map((r) => r.id)].sort()).toEqual(
+      [...UNREGISTERED_NAMEABLE, ...UNREGISTERED_POINT].sort(),
+    );
+  });
+
+  /**
+   * 🔴 **2 つの箱の境目は、仕分け(`classify`)と一致していること。**
+   *
+   * ⚠ これが無いと、在庫(名前で呼べる側)を**黙って「真の点」へ移して**
+   *   減らせてしまう ── 数だけ見ていると「進んだ」に見える。
+   */
+  it('🔴 在庫と「真の点」を取り違えていない', () => {
+    const argOf = new Map(rows().map((r) => [r.id, r.arg]));
+    expect(
+      UNREGISTERED_NAMEABLE.filter((id) => argOf.get(id) === 'P1'),
+      '名前で呼べる側に、真の点(P1)が混じっている',
+    ).toEqual([]);
+    expect(
+      UNREGISTERED_POINT.filter((id) => argOf.get(id) !== 'P1'),
+      '「真の点」の箱に、指さなくても呼べる操作が混じっている',
+    ).toEqual([]);
+    // ⚠ 空振り防止 ── どちらかを空にしても上の 2 つは通る
+    expect(UNREGISTERED_NAMEABLE.length, '在庫が空').toBeGreaterThan(100);
+    expect(UNREGISTERED_POINT.length, '「真の点」が空').toBeGreaterThan(10);
   });
 });
