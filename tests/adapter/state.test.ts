@@ -959,7 +959,14 @@ describe('カンバンの札(#277 段②-b)', () => {
     raw: Array<{ lid: string; line: number; text: string; done: boolean; date?: string | null; time?: string | null }>,
   ) => ({
     // ⚠ 日付は既定 `null`(= 日付のないチェック項目)── 書く test だけが渡す
-    cards: raw.map((c) => ({ date: null, time: null, until: null, repeat: null, ...c })),
+    cards: raw.map((c) => ({
+      date: null,
+      time: null,
+      until: null,
+      repeat: null,
+      substitutes: null,
+      ...c,
+    })),
     totalNotes: 1,
     scannedNotes: 1,
     truncated: false,

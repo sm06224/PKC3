@@ -65,6 +65,14 @@ export interface TaskCard extends TaskItem {
    *   (`repeat.ts` の頭 ── 終了条件の記法を新しく作らない)。
    */
   readonly repeat: RepeatUnit | null;
+  /**
+   * 🔴 **この札が代わりになっている、元の回の日**(#855 決4。
+   * user 裁定 2026-09-13「1 回か全部か選択する」)。振替でなければ `null`。
+   *
+   * ⚠ **運ぶだけ**である ── 使うのは `materializedDates`(規則の側で
+   *   「その日は出さない」を作る)。ここで展開の判断はしない。
+   */
+  readonly substitutes: string | null;
 }
 
 /**
@@ -149,6 +157,7 @@ export function taskCardsOf(lid: string, body: string): TaskCard[] {
       time: when === null ? null : when.time,
       until: when === null ? null : when.until,
       repeat: when === null ? null : when.repeat,
+      substitutes: when === null ? null : when.substitutes,
     };
   });
 }
@@ -236,7 +245,10 @@ function sameCards(a: readonly TaskCard[], b: readonly TaskCard[]): boolean {
       x.until !== y.until ||
       // ⚠ **刻みも見る**(#344 段②)── 見ないと「毎週」を消した瞬間に
       //    **札が繰り返しのまま**残る(消したのに毎週出続ける = 同じ穴)
-      x.repeat !== y.repeat
+      x.repeat !== y.repeat ||
+      // ⚠ **振替も見る**(#855 決4)── 見ないと、振替を外した瞬間に
+      //    **元の回が塞がれたまま**残る(消したのに出てこない = 刻みと同じ穴)
+      x.substitutes !== y.substitutes
     )
       return false;
   }
