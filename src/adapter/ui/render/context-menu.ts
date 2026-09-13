@@ -193,21 +193,7 @@ export function openContextMenu(
   const first = el.querySelector('button');
   // 🔑 開いた直後の欄は、この `focus()` が同期で出す `focusin` が先頭の説明で埋める
   //    (明示の呼びは no-op だった ── 変異試験 H4 が SURVIVED で教えた。2 か所に書かない)
-  /**
-   * 🔴 **焦点を当てるときにスクロールさせない**(2026-09-13。範囲を切った smoke が掘った)。
-   *
-   * ⚠ 症状:一覧の**下のほう**の見出しを右クリックすると、メニューは出るのに
-   *   **10〜60ms で勝手に閉じる**(押す間も無い)。上のほうの見出しでは起きない。
-   * 🔑 原因は**自分で自分を閉じていた**こと ── 素の `focus()` は、その要素が
-   *   画面に入りきっていなければ**ブラウザがスクロールして見せる**。
-   *   ところが `binder.ts` は **`root` の `scroll` を capture で拾ってメニューを閉じる**
-   *   (`onCloseMenu`)ので、**開いた直後の自分のスクロールが引き金を引く**。
-   * ⚠ `scroll` で閉じること自体は正しい(user が一覧を送ったら、貼り付いた
-   *   メニューだけ取り残される)── 直すのは**引き金を自分で引かない**側である。
-   * 🔑 `preventScroll` なら、位置はもともとポインタの所に決めてある(上の `x` / `y` は
-   *   画面内へ収めてある)ので、**見えなくなることはない**。
-   */
-  if (first instanceof HTMLElement) first.focus({ preventScroll: true });
+  if (first instanceof HTMLElement) first.focus();
 
   const close = (): void => {
     el.remove();
