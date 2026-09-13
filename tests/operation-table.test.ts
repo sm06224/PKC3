@@ -193,12 +193,14 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   アプリの一覧の中にしか無く、`toggle-app-group` と同じ置き場である)
       // ⚠ 2026-09-13(#857 段②): グループの目印を選ぶ(`pick-app-group-icon`)で
       //   受け手 +1 ── 登記は増えない(押し所は見出しの右クリックの中にしか無い)
-      total: 282,
-      receivers: 233,
+      // ⚠ 2026-09-13(#857 段③): グループの「上へ / 下へ」で受け手 +2 ──
+      //   登記は増えない(押し所は見出しのメニューの中にしか無い)
+      total: 284,
+      receivers: 235,
       registered: 85,
       both: 36,
       outsideActionsTable: 49,
-      unregistered: 197,
+      unregistered: 199,
     });
   });
 

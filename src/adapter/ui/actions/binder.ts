@@ -52,12 +52,15 @@ import { quoteOnEnter } from '@features/markdown/quote-assist';
 import { renumberLists } from '@features/markdown/list-renumber';
 import { stripDialect } from '@features/markdown/strip-dialect';
 import {
+  hasAppGroupNote,
   isViewMode,
   nextViewMode,
   screenBodyOf,
   type AppState,
   type ViewMode,
 } from '@adapter/state/app-state';
+import { groupsNeedingNote, planGroupMove } from '@features/launcher/group-order';
+import { isMovableTile } from '@features/launcher/tile-order';
 import { listViewOptions } from '@adapter/state/list-view-options';
 import { appOpenedStore } from '@adapter/platform/opened-store';
 import type { EntryMeta } from '@core/model/entry-meta';
@@ -942,6 +945,11 @@ export interface BinderServices {
    *   (別の端末から運んだ畳みを、こちらの画面の操作で消さない)。
    */
   toggleAllAppGroups?(groups: readonly string[]): void;
+  /**
+   * 🔴 **グループ用のノートが N 枚増えることを、押す前に聞く**(#857 段③)。
+   * @returns 進めてよければ `true`
+   */
+  confirmAppGroupNotes?(count: number): Promise<boolean>;
   /**
    * 🔴 **グループの目印を選ぶ小窓を出す**(#857 段②)。
    * @returns 図案の名前。**空文字 = なし(外す)**。やめたら `null`
@@ -3357,6 +3365,45 @@ async function tocJump(
     hit.scrollIntoView({ block: 'start' });
 }
 
+
+/**
+ * 🔴 **グループを 1 つ動かす**(#857 段③)。⚠ 上へ / 下へで**同じ 1 本**を通す ──
+ * 2 本書くと、片方だけ直した日にずれる(§7)。
+ *
+ * 🔑 **増えるノートの枚数を先に数えて、初回だけ聞く** ── 番号は「動かした先より
+ *   上に在る群」全部に要るので、まとめて増えることがある(最大で群の数 − 1 枚)。
+ * ⚠ 数えるのも計画も**純関数 1 本**(`planGroupMove`)── ここで規則を書かない。
+ */
+function moveAppGroup(
+  dispatcher: Dispatcher,
+  target: HTMLElement,
+  services: BinderServices,
+  by: -1 | 1,
+): void {
+  const name = target.getAttribute('data-pkc-group') ?? '';
+  if (name === '') return;
+  const st = dispatcher.getState();
+  const tiles = st.launcherTiles ?? [];
+  const movable: string[] = [];
+  for (const t of tiles)
+    if (t.group !== '' && isMovableTile(t) && !movable.includes(t.group)) movable.push(t.group);
+  const plan = planGroupMove(movable, st.appGroupOrders, name, by);
+  // ⚠ 端では何もしない(reducer も同じ判定を持つが、ここで止めれば小窓すら出さない)
+  if (plan.length === 0) return;
+  const need = groupsNeedingNote(plan, (n) => hasAppGroupNote(st, n));
+  // ⚠ lid は**書く群の数だけ**採る(足りないと reducer が何も書かない)
+  const newLids = plan.map(() => generateLid());
+  const go = (): void => {
+    dispatcher.dispatch({ type: 'MOVE_APP_GROUP', name, by, newLids });
+  };
+  if (need.length === 0 || services.confirmAppGroupNotes === undefined) {
+    go();
+    return;
+  }
+  void services.confirmAppGroupNotes(need.length).then((ok) => {
+    if (ok) go();
+  });
+}
 
 const ACTIONS: Record<string, ActionHandler> = {
   /**
@@ -7155,6 +7202,17 @@ const ACTIONS: Record<string, ActionHandler> = {
       });
     });
   },
+  /**
+   * 🔴 **グループを 1 つ上へ / 下へ**(#857 段③)。
+   *
+   * ⚠ **最初の 1 回だけ聞く** ── 番号は「動かした先より上に在る群」全部に要るので、
+   *   グループ用のノートが**まとめて増える**ことがある(最大で群の数 − 1 枚)。
+   *   黙って増やすと、数日後にサイドバーで見覚えのない題名を見つけることになる。
+   * 🔑 2 回目からは何も出ない(もう番号が付いているので、増えるノートが 0 枚になる)。
+   * ⚠ `newLids` は**書く群の数だけ**採る(足りないと reducer が何も書かない)。
+   */
+  'move-app-group-up': (dispatcher, target, services) => moveAppGroup(dispatcher, target, services, -1),
+  'move-app-group-down': (dispatcher, target, services) => moveAppGroup(dispatcher, target, services, 1),
   'toggle-all-app-groups': (_dispatcher, target, services) => {
     const list = target.closest('[data-pkc-field="launcher-list"]');
     if (!list) return;

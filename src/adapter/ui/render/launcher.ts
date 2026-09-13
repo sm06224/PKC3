@@ -22,7 +22,7 @@ import type { LauncherTile } from '@features/launcher/tiles';
 import { isMovableTile } from '@features/launcher/tile-order';
 import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
 import { allFolded, encodeFolded, isFolded } from '@features/launcher/group-fold';
-import { appGroupIconOf } from '@features/launcher/app-group-spec';
+import { appGroupIconOf, sortGroupNames } from '@features/launcher/app-group-spec';
 import type { IconValue } from '@features/icon/icon-value';
 import { appGroupFold, type GroupFoldStore } from './group-fold';
 import { setIcon } from './icons';
@@ -41,6 +41,9 @@ export class LauncherRenderer {
 
   /** ⚠ **目印も指紋に要る**(#857 段②)── 入れないと選んでも画面が動かない。 */
   private lastIcons: string | undefined = undefined;
+
+  /** ⚠ **並び順も指紋に要る**(#857 段③)── 入れないと動かしても画面が変わらない。 */
+  private lastOrders: string | undefined = undefined;
 
   constructor(
     private readonly region: HTMLElement,
@@ -108,6 +111,8 @@ export class LauncherRenderer {
      *   見出しが変わらない」になる(段④ の畳みで 1 度踏んだ罠)。
      */
     const iconKey = JSON.stringify(state.appGroupIcons);
+    // ⚠ 並び順も指紋に入れる ── 入れ忘れると「並べ替えたのに画面が動かない」(段② と同じ罠)
+    const orderKey = JSON.stringify(state.appGroupOrders);
     // ⚠ 選択も指紋に入れる ── 押した印が出ないと、いま何を触ったのか残らない
     if (
       state.launcherTiles === this.lastTiles &&
@@ -116,7 +121,8 @@ export class LauncherRenderer {
       state.launcherPick === this.lastPick &&
       state.launcherReorder === this.lastReorder &&
       foldKey === this.lastFolded &&
-      iconKey === this.lastIcons
+      iconKey === this.lastIcons &&
+      orderKey === this.lastOrders
     )
       return;
     this.lastTiles = state.launcherTiles;
@@ -126,6 +132,7 @@ export class LauncherRenderer {
     this.lastReorder = state.launcherReorder;
     this.lastFolded = foldKey;
     this.lastIcons = iconKey;
+    this.lastOrders = orderKey;
     const list = this.ensureFrame();
     list.textContent = '';
 
@@ -241,8 +248,35 @@ export class LauncherRenderer {
      * ⚠ **絞り込み中も出さない** ── 見出しと同じ理由(絞り込み中は畳みを無視するので、
      *   押しても画面が変わらない)。
      */
+    /**
+     * 🔴 **群を並べ替えて出す**(#857 段③)。
+     *
+     * ⚠ **組み込みは末尾のまま**(#281 の実害 ── 自分のものが下へ押し下がって見える、
+     *   を崩さない)。🔑 タイルの一覧は「entry のぶん + 組み込み」の順で来るので、
+     *   **前半だけ**を群ごとに並べ直し、後半はそのまま繋ぐ ── ここに組み込みの
+     *   **名前**を書かない(user が同じ名前を付けた日にずれる。判定は `isMovableTile`)。
+     * ⚠ 群の中のタイルの並びは `sortTiles` のまま(ここでは触らない)。
+     */
+    const ordered = ((): readonly LauncherTile[] => {
+      const head: LauncherTile[] = [];
+      const tail: LauncherTile[] = [];
+      let inTail = false;
+      for (const t of tiles) {
+        if (!isMovableTile(t)) inTail = true;
+        (inTail ? tail : head).push(t);
+      }
+      const byGroup = new Map<string, LauncherTile[]>();
+      for (const t of head) {
+        const got = byGroup.get(t.group);
+        if (got) got.push(t);
+        else byGroup.set(t.group, [t]);
+      }
+      const names = sortGroupNames([...byGroup.keys()], state.appGroupOrders);
+      return [...names.flatMap((n) => byGroup.get(n) ?? []), ...tail];
+    })();
+
     const named: string[] = [];
-    for (const t of tiles) if (t.group !== '' && !named.includes(t.group)) named.push(t.group);
+    for (const t of ordered) if (t.group !== '' && !named.includes(t.group)) named.push(t.group);
     if (!filtering && named.length > 0) {
       const all = document.createElement('button');
       all.type = 'button';
@@ -258,7 +292,7 @@ export class LauncherRenderer {
 
     let group: string | null = null;
     let grid: HTMLElement | null = null;
-    for (const tile of tiles) {
+    for (const tile of ordered) {
       if (tile.group !== group) {
         group = tile.group;
         grid = document.createElement('div');
@@ -273,7 +307,7 @@ export class LauncherRenderer {
          * ⚠ **群の末尾へ落とす**のはこの器が受ける(タイルとタイルの間は
          *   タイル自身が受ける)── 器が無いと、いちばん下へは落とせない。
          */
-        if (canReorder && tiles.some((t) => t.group === group && isMovableTile(t)))
+        if (canReorder && ordered.some((t) => t.group === group && isMovableTile(t)))
           grid.setAttribute('data-pkc-tile-group', group);
         // 🔴 **既定グループは見出しを出さない**(P8 段⑭)。かつては「よく使う」と
         //    書いていたが、画面はそんな情報(頻度)を持っていない ── 名乗った

@@ -42,7 +42,13 @@ import {
 } from '@features/smart/smart-spec';
 import { spliceFrontmatterKeys } from '@features/markdown/frontmatter';
 import { buildTiles, withBuiltinTiles, type TileSource } from '@features/launcher/tiles';
-import { appGroupIconsOf, writeAppGroupIcon } from '@features/launcher/app-group-spec';
+import {
+  appGroupIconsOf,
+  appGroupOrdersOf,
+  appGroupSeed,
+  writeAppGroupIcon,
+  writeAppGroupOrder,
+} from '@features/launcher/app-group-spec';
 import type {
   GroupResult as QueryGroups,
   KeyResult as QueryKeys,
@@ -1773,6 +1779,77 @@ export function connectStoreEffects(
         });
         break;
       /**
+       * 🔴 **グループの並び順を書く**(#857 段③)。
+       *
+       * ⚠ **N 件を 1 つの仕事**として回す(`REQUEST_TILE_ORDER` と同じ作法)──
+       *   N 個の event に割ると、途中の失敗がどこまで効いたか読めなくなる。
+       * ⚠ **全か無かではない**(worker の 1 tx が要る ── そこまではやらない)。
+       *   途中で衝突したら**そこで打ち切って理由を言う**(黙って半端にしない)。
+       * ⚠ ノートがまだ無い群は**作る** ── 本文は目印と同じ雛形に番号だけ書いたもの。
+       */
+      case 'REQUEST_APP_GROUP_ORDER':
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            for (const row of ev.rows) {
+              if (disposed) return;
+              if (row.lid === null) {
+                // ⚠ **作る** ── 目印と同じ雛形に番号だけ入れる(空のノートを作らない)
+                const body = writeAppGroupOrder(appGroupSeed(row.name), row.order);
+                const ext = extractMeta(row.archetype, body);
+                await store.persistEntry({
+                  lid: row.newLid,
+                  title: row.title,
+                  archetype: row.archetype,
+                  body,
+                  entryOrder: row.entryOrder,
+                  status: ext.status,
+                  date: ext.date,
+                  archived: ext.archived,
+                });
+                continue;
+              }
+              const body = await store.getBody(row.lid);
+              if (disposed) return;
+              // ⚠ 消えていたら**その 1 件を飛ばす**(残りは進める ── 全部やめない)
+              if (body === null) continue;
+              const next = writeAppGroupOrder(body, row.order);
+              if (next === body) continue;
+              const ext = extractMeta(row.archetype, next);
+              const stamps = await store.persistEntry(
+                {
+                  lid: row.lid,
+                  title: row.title,
+                  archetype: row.archetype,
+                  body: next,
+                  entryOrder: row.entryOrder,
+                  status: ext.status,
+                  date: ext.date,
+                  archived: ext.archived,
+                },
+                { expectHash: contentHash64Hex(body) },
+              );
+              if (disposed) return;
+              if (stamps.conflict === true) {
+                dispatcher.dispatch({
+                  type: 'OP_FAILED',
+                  error:
+                    '別のウィンドウがグループのノートを書き替えたため、並べ替えを最後まで保存できませんでした(もう一度押してください)',
+                });
+                return;
+              }
+              stamp(row.lid, stamps);
+            }
+          } catch (e) {
+            if (!disposed)
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: `グループの並べ替えを保存できませんでした: ${String(e)}`,
+              });
+          }
+        });
+        break;
+      /**
        * 🔴 **グループ用ノートの目印を書く**(#857 段②)。
        *
        * ⚠ **disk から読んで書き戻す** ── state の本文を使わない(このノートは
@@ -1832,7 +1909,7 @@ export function connectStoreEffects(
         });
         break;
       /**
-       * 🔴 **グループ用ノートの目印を読む**(#857 段②)。
+       * 🔴 **グループ用ノートを読む**(#857 段②③ ── 目印と並び順)。
        *
        * ⚠ **タイルの読み筋に相乗りさせていない** ── `tileFrom` は archetype を
        *   見ないので、同じ経路へ混ぜた瞬間に「グループを表すノート」と
@@ -1841,7 +1918,7 @@ export function connectStoreEffects(
        *   この層は実行時に state を見ない、という file 冒頭の宣言どおり)。
        * 🔑 **1 往復で読む**(`getBody` を件数ぶん呼ぶと、その回数だけ store が塞がる)。
        */
-      case 'REQUEST_APP_GROUP_ICONS':
+      case 'REQUEST_APP_GROUP_NOTES':
         enqueue(async () => {
           if (disposed) return;
           try {
@@ -1857,12 +1934,20 @@ export function connectStoreEffects(
               const title = titles.get(e.lid);
               if (row !== undefined && title !== undefined) notes.push({ title, body: row.body });
             }
-            dispatcher.dispatch({ type: 'APP_GROUP_ICONS_LOADED', icons: appGroupIconsOf(notes) });
+            /**
+             * 🔑 **目印も番号も、この 1 回の読みから作る**(#857 段③)── 同じ本文を
+             *   2 度読まない(読む口が 2 つに割れると、片方だけ古くなる ── §7)。
+             */
+            dispatcher.dispatch({
+              type: 'APP_GROUP_NOTES_LOADED',
+              icons: appGroupIconsOf(notes),
+              orders: appGroupOrdersOf(notes),
+            });
           } catch (e) {
             if (!disposed)
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: `グループの目印の読込に失敗しました: ${String(e)}`,
+                error: `グループの設定の読込に失敗しました: ${String(e)}`,
               });
           }
         });

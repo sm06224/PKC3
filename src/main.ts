@@ -2953,6 +2953,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   選り分けない。器は「1 行選ぶ」の 1 本(`app-dialog.ts`)。
      */
     pickAppGroupIcon: (groupName) => pickAppGroupIconInApp(root, groupName, TILE_ICON_CHOICES),
+    /**
+     * 🔴 **ノートが N 枚増えることを、押す前に聞く**(#857 段③)。
+     * ⚠ 聞くのは**初めての並べ替えのときだけ** ── 2 回目からは増えないので出ない。
+     * 🔑 字は「何が起きるか」で書く ── 「番号を付けます」ではなく「ノートができます」。
+     */
+    confirmAppGroupNotes: async (count) =>
+      (await confirmInApp(
+        root,
+        `グループの並び順を憶えるため、グループ用のノートが ${String(count)} 枚できます。`,
+        { okLabel: '並べ替える', cancelLabel: 'やめる' },
+      )) === 'ok',
     setEditorMode: (mode) => {
       appEditorMode.setMode(mode);
     },

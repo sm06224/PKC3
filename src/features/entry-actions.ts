@@ -326,6 +326,15 @@ export const TILE_MENU_ACTIONS: readonly EntryAction[] = [
  */
 export const APP_GROUP_MENU_ACTIONS: readonly EntryAction[] = [
   { action: 'pick-app-group-icon', label: '目印を選ぶ…' },
+  /**
+   * 🔴 **グループ自体を動かす**(#857 段③)。
+   * ⚠ 字は**タイルの「上へ / 下へ」と同じ**にする ── 同じことをする 2 つの押し所で
+   *   呼び名が違うと、user は別の操作だと思う(段①b-2 の動線レビュー)。
+   * ⚠ **掴んで落とす道は作っていない** ── 見出しの掴みは受け口をゼロから作るうえ、
+   *   **長押し(= このメニュー)と取り合い**になる。まずここから。
+   */
+  { action: 'move-app-group-up', label: '上へ' },
+  { action: 'move-app-group-down', label: '下へ' },
 ];
 
 export const REPEAT_ATTR = 'data-pkc-repeat';

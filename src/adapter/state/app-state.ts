@@ -40,12 +40,14 @@ import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import type { PersistState } from '@adapter/platform/storage-persist';
 import type { OpenExtension } from '@adapter/platform/extension-links';
 import type { LauncherTile } from '@features/launcher/tiles';
+import { planGroupMove } from '@features/launcher/group-order';
 import {
   APP_GROUP_ARCHETYPE,
   appGroupName,
   appGroupSeed,
   writeAppGroupIcon,
   type AppGroupIcons,
+  type AppGroupOrders,
 } from '@features/launcher/app-group-spec';
 import {
   applyTileWrites,
@@ -1027,6 +1029,12 @@ export interface AppState {
    */
   appGroupIcons: AppGroupIcons;
   /**
+   * グループの並び順(#857 段③)。名前 → 番号。
+   * ⚠ **番号を持たない群は入っていない**(「無い」と「0 番」を混ぜない)──
+   *   並べる規則は `sortGroupNames` 1 本。
+   */
+  appGroupOrders: AppGroupOrders;
+  /**
    * 🔴 **本文を書き換える経路のロック**(P8 段⑧。user 指示 2026-08-03
    * 「**編集競合は競合ロックと強制解放も念頭にしてください**」)。
    *
@@ -1216,6 +1224,7 @@ export const initialState: AppState = {
   backlinks: null,
   launcherTiles: null,
   appGroupIcons: {},
+  appGroupOrders: {},
   calendarMonth: null,
   showArchived: false,
   showDoneTasks: false,
@@ -1390,7 +1399,12 @@ export type UserAction =
   /** 関係を消す(#185)。⚠ **id で消す**(同じ組が複数あっても迷わない)。 */
   | { type: 'REMOVE_RELATION'; id: string }
   | { type: 'LAUNCHER_TILES_LOADED'; tiles: LauncherTile[] }
-  | { type: 'APP_GROUP_ICONS_LOADED'; icons: AppGroupIcons }
+  /**
+   * 🔴 **グループ用ノートから読んだもの**(#857 段②③)。
+   * ⚠ 名前を `…_ICONS_LOADED` のままにしない ── **番号も運ぶ**ので、
+   *   計器の名前が中身より狭くなる(CLAUDE.md「計器の名前を主張として読む」)。
+   */
+  | { type: 'APP_GROUP_NOTES_LOADED'; icons: AppGroupIcons; orders: AppGroupOrders }
   /**
    * 🔴 **グループの目印を選んだ**(#857 段②)。
    * ⚠ **在るものを探して、無いときだけ作る** ── 同じ名前のノートを 2 つ作らない
@@ -1398,6 +1412,12 @@ export type UserAction =
    * ⚠ `newLid` は呼び側が採る(reducer は純関数 ── 乱数を持たない)。
    */
   | { type: 'SET_APP_GROUP_ICON'; name: string; icon: string | null; newLid: string }
+  /**
+   * 🔴 **グループを 1 つ上へ / 下へ**(#857 段③)。
+   * ⚠ `newLids` は**書く群の数だけ**呼び側が採る(reducer は乱数を持たない)──
+   *   足りなければその群は書かない(黙って別の群の lid を使い回さない)。
+   */
+  | { type: 'MOVE_APP_GROUP'; name: string; by: -1 | 1; newLids: readonly string[] }
   /**
    * アプリの一覧を読み直す(P8 段⑱)。
    *
@@ -2244,6 +2264,26 @@ export type DomainEvent =
     }
   | {
       /**
+       * 🔴 **グループの並び順を書く**(#857 段③)。
+       * ⚠ **N 件を 1 つの仕事**として渡す(`REQUEST_TILE_ORDER` と同じ作法)──
+       *   N 個の event に割ると、途中の失敗がどこまで効いたか読めなくなる。
+       * ⚠ ノートがまだ無い群は `create` が真 ── effect が本文ごと作る。
+       */
+      type: 'REQUEST_APP_GROUP_ORDER';
+      rows: Array<{
+        name: string;
+        order: number;
+        /** 在るときはその lid(無ければ作る)。 */
+        lid: string | null;
+        /** 作るときに使う lid(reducer は乱数を持たないので呼び側が採る)。 */
+        newLid: string;
+        title: string;
+        archetype: string;
+        entryOrder: number;
+      }>;
+    }
+  | {
+      /**
        * 🔴 **グループ用ノートの目印を書く**(#857 段②)。
        * ⚠ `REQUEST_TILE_UPDATE` と**同じことをする別の口**に見えるが、あちらは
        *   書いたあとに**タイルを読み直す** ── こちらは**目印を読み直す**ので、
@@ -2259,11 +2299,11 @@ export type DomainEvent =
     }
   | {
       /**
-       * 🔴 **グループ用ノートの目印を読む**(#857 段②)。
+       * 🔴 **グループ用ノートを読む**(#857 段②③ ── 目印と並び順)。
        * ⚠ `REQUEST_LAUNCHER_TILES` と**引き金は同じでも別の event** ── 混ぜると
        *   `tileFrom` が両方を同じ土俵で処理する(`app-group-spec.ts` の火種)。
        */
-      type: 'REQUEST_APP_GROUP_ICONS';
+      type: 'REQUEST_APP_GROUP_NOTES';
       entries: Array<{ lid: string; title: string }>;
     }
   | {
@@ -3322,7 +3362,7 @@ function reduceCore(
            *   `tileFrom` が両方を同じ土俵で処理することになる。
            */
           {
-            type: 'REQUEST_APP_GROUP_ICONS',
+            type: 'REQUEST_APP_GROUP_NOTES',
             entries: appGroupEntriesOf(state.order, state.entryMetas),
           },
         ],
@@ -3365,8 +3405,98 @@ function reduceCore(
     }
     case 'LAUNCHER_TILES_LOADED':
       return { state: { ...state, launcherTiles: action.tiles }, events: [] };
-    case 'APP_GROUP_ICONS_LOADED':
-      return { state: { ...state, appGroupIcons: action.icons }, events: [] };
+    case 'APP_GROUP_NOTES_LOADED':
+      return {
+        state: { ...state, appGroupIcons: action.icons, appGroupOrders: action.orders },
+        events: [],
+      };
+    /**
+     * 🔴 **グループを 1 つ上へ / 下へ**(#857 段③)。
+     *
+     * 🔑 計画は `planGroupMove`(純関数)── **どこへ入るか**の規則をここに書かない。
+     * ⚠ **書くのは「動かした先より上に在る群」まで** ── 番号のある群は必ず先に来るので、
+     *   部分的には付けられない(`group-order.ts` の説明)。
+     * ⚠ 動かせるのは**名前の付いた、動かせるタイルを持つ群**だけ ── 組み込みは末尾に固定。
+     */
+    case 'MOVE_APP_GROUP': {
+      // ⚠ 門は `MOVE_APP_TILE` と同じ 2 つ(保存中は触らせない / 絞り込み中は動かさない)
+      if (state.phase !== 'ready' || state.writeLock) return { state, events: [] };
+      if (normalizeQuery(state.filterQuery) !== '')
+        return {
+          state: {
+            ...state,
+            error: '絞り込みを消してから並べ替えられます(いまは一部しか出ていません)',
+          },
+          events: [],
+        };
+      const tiles = state.launcherTiles;
+      if (tiles === null) return { state, events: [] };
+      /**
+       * ⚠ **動かせる群だけを渡す** ── 組み込みしか居ない群を混ぜると、
+       *   「押せるのに末尾から動かない」という食い違いになる。
+       */
+      const movable: string[] = [];
+      for (const t of tiles)
+        if (t.group !== '' && isMovableTile(t) && !movable.includes(t.group)) movable.push(t.group);
+      const plan = planGroupMove(movable, state.appGroupOrders, appGroupName(action.name), action.by);
+      if (plan.length === 0) return { state, events: [] };
+      /**
+       * ⚠ **lid が足りなければ書かない** ── 呼び側が採り損ねたぶんを別の群の lid で
+       *   埋めると、**別のノートを書き潰す**(いちばん戻せない壊れ方)。
+       */
+      const rows: Array<{
+        name: string;
+        order: number;
+        lid: string | null;
+        newLid: string;
+        title: string;
+        archetype: string;
+        entryOrder: number;
+      }> = [];
+      let fresh = 0;
+      for (const w of plan) {
+        const lid = findAppGroupLid(state.order, state.entryMetas, w.name);
+        if (lid !== null) {
+          const meta = state.entryMetas.get(lid)!;
+          rows.push({
+            name: w.name,
+            order: w.order,
+            lid,
+            newLid: '',
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+          });
+          continue;
+        }
+        const newLid = action.newLids[fresh];
+        fresh += 1;
+        if (newLid === undefined) return { state, events: [] };
+        rows.push({
+          name: w.name,
+          order: w.order,
+          lid: null,
+          newLid,
+          title: w.name,
+          archetype: APP_GROUP_ARCHETYPE,
+          entryOrder: 0,
+        });
+      }
+      return {
+        /**
+         * 🔑 **画面は先に動かす**(タイルと同じ)── disk の往復を待つと数百 ms 動かず、
+         *   「押したのに動かない」になる。⚠ 番号は state に持つので、書き戻しは要らない。
+         */
+        state: {
+          ...state,
+          appGroupOrders: Object.fromEntries([
+            ...Object.entries(state.appGroupOrders),
+            ...plan.map((w) => [w.name, w.order] as const),
+          ]),
+        },
+        events: [{ type: 'REQUEST_APP_GROUP_ORDER', rows }],
+      };
+    }
     case 'SET_APP_GROUP_ICON': {
       // ⚠ 書込が飛んでいる間は触らせない(`SET_APP_TILE` と同じ規律 ── 読んで
       //    書き戻す操作なので、途中に別の書込が挟まると片方が消える)
@@ -3391,7 +3521,7 @@ function reduceCore(
             // ⚠ 書いた**あと**に読み直す(effect の列は 1 本なので順番は保たれる)──
             //    読み直さないと、押した結果が出るのは「次にタブを開き直したとき」になる
             {
-              type: 'REQUEST_APP_GROUP_ICONS',
+              type: 'REQUEST_APP_GROUP_NOTES',
               entries: appGroupEntriesOf(state.order, state.entryMetas),
             },
           ],
@@ -3430,7 +3560,7 @@ function reduceCore(
           ...created.events,
           // ⚠ **作った後の並び**で読む(作りたてのノートが入っていないと、目印が出ない)
           {
-            type: 'REQUEST_APP_GROUP_ICONS',
+            type: 'REQUEST_APP_GROUP_NOTES',
             entries: appGroupEntriesOf(created.state.order, created.state.entryMetas),
           },
         ],
@@ -6174,6 +6304,15 @@ function findAppGroupLid(
     if (meta?.archetype === APP_GROUP_ARCHETYPE && appGroupName(meta.title) === name) return lid;
   }
   return null;
+}
+
+/**
+ * 🔴 **その群のノートが在るか**(#857 段③)。
+ * 🔑 判定は `findAppGroupLid` 1 本を通す ── 呼び側(binder)が同じ走査を
+ *   書き直すと、探し方が 2 つになる(§7)。
+ */
+export function hasAppGroupNote(state: AppState, name: string): boolean {
+  return findAppGroupLid(state.order, state.entryMetas, appGroupName(name)) !== null;
 }
 
 function appGroupEntriesOf(
