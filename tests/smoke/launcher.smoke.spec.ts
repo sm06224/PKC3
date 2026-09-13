@@ -681,6 +681,33 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   });
   await urlTab.close();
 
+  /**
+   * ④-b 🔴 **ポップアップを塞がれたら、理由が画面に出る**(#438 Q7 を実機から外す)。
+   *
+   * ⚠ この動線は長く「**実機でしか確かめられない**」として cowork への依頼に載っていたが、
+   *   `capture.smoke.spec.ts` が**同じ手口**(`window.open` を差し替える)で既に実ブラウザの
+   *   `null` 分岐を検めていた ── **数えた経路が足りていなかった**だけである
+   *   (CLAUDE.md §4「『取れない』で終わらせる前に、取り方を数え上げる」)。
+   * 🔑 **新しく起動しない** ── いま開いている道中に足す(起動 1 つ = 以後すべての回に 1.63 秒)。
+   * ⚠ 差し替えは**この一手のためだけ**に当て、押した直後に**必ず戻す**
+   *   (戻さないと、以降の ⑤ が「塞がれている」側で走る)。
+   */
+  await page.evaluate(() => {
+    const w = window as unknown as { __pkcRealOpen?: typeof window.open };
+    w.__pkcRealOpen = window.open.bind(window);
+    window.open = (() => null) as typeof window.open;
+  });
+  await openTile(page, '[data-pkc-tile-kind="url"]');
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    'ポップアップを塞がれたのに、理由が画面に出ない(無言で終わっている)',
+  ).toContainText('ポップアップ');
+  await page.evaluate(() => {
+    const w = window as unknown as { __pkcRealOpen?: typeof window.open };
+    if (w.__pkcRealOpen) window.open = w.__pkcRealOpen;
+  });
+  // ⚠ 対照群 ── 戻した後は本当に開く(戻し忘れをここで捕まえる)
+
   // ⑤ 🔴 **アプリのタイルは中身が開く**(blob。添付の bytes に届いている)
   const [appTab] = await Promise.all([
     context.waitForEvent('page'),

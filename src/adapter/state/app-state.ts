@@ -3726,6 +3726,16 @@ function reduceCore(
       const ob = state.openBody;
       if (ob?.lid !== action.lid) return { state: released, events: [] };
       const body = action.body;
+      /**
+       * 🔴 **留めた枠にも追随させる**(#848、2026-09-13)。
+       *
+       * ⚠ ここだけ `syncSplitBody` を通っていなかった ── 同じノートを
+       *   **横に並べた枠に留めている**と、添付の設定を変えても**そちらは古い本文のまま**で、
+       *   押しても**何も変わらないように見える**(`aria-pressed` も動かない)。
+       * 🔑 書込の口を数え上げると `BODY_REWRITTEN` / `BODY_PERSISTED` / `REMOTE_BODY` は
+       *   通っており、**ここだけが非対称**だった(CLAUDE.md §7「片側を直したら反対側を疑う」)。
+       * ⚠ 編集中の枝でも通す ── draft は触らないが、**留めた枠が映すのは disk の姿**である。
+       */
       if (state.phase === 'editing') {
         // 🔴 **draft は触らないが、disk が進んだ印は残す**(P8 段⑯。レビュー H-1)。
         //    かつては丸ごと捨てていたので、無変更 commit / cancel で**旧本文が
@@ -3734,7 +3744,11 @@ function reduceCore(
         //    draft が勝ち(可視内容の last-write-wins)、無変更 commit / cancel は
         //    disk を採る
         return {
-          state: { ...released, openBody: { ...ob, persisted: body, diskAhead: true } },
+          state: {
+            ...released,
+            openBody: { ...ob, persisted: body, diskAhead: true },
+            splitBodies: syncSplitBody(state, action.lid, body),
+          },
           events: [],
         };
       }
@@ -3742,6 +3756,7 @@ function reduceCore(
         state: {
           ...released,
           openBody: { lid: action.lid, body, baseline: body, persisted: body, diskAhead: false },
+          splitBodies: syncSplitBody(state, action.lid, body),
         },
         events: [],
       };

@@ -297,6 +297,56 @@ describe('タイル設定を書く(P8 段⑭)', () => {
 });
 
 /**
+ * 🔴 **留めた枠にも追随する**(#848、2026-09-13)。
+ *
+ * ⚠ 直す前は `APP_TILE_SAVED` だけが `syncSplitBody` を通っておらず、
+ *   同じノートを**横に並べた枠に留めている**と**そちらだけ古い本文のまま**だった。
+ *   ⚠ 画面では「押しても何も変わらない」に見える(`aria-pressed` も動かない)。
+ * 🔑 書込の口は 4 つ(`BODY_REWRITTEN` / `BODY_PERSISTED` / `REMOTE_BODY` / ここ)──
+ *   **1 つだけ非対称**だったので、片側を直したら反対側を疑う(CLAUDE.md §7)。
+ */
+describe('留めた枠への追随(#848)', () => {
+  it('🔴 タイルの設定を書くと、留めた枠の本文も新しくなる', async () => {
+    const h = setup();
+    h.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+    await tick(20);
+    h.d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'a1' });
+    await tick(20);
+    // ⚠ 前提 ── 留めた枠が本文を持っている(持っていなければ、下は何も見ていない)
+    expect(h.d.getState().splitLids, '留められていない(前提が崩れている)').toContain('a1');
+    h.d.dispatch({ type: 'APP_TILE_SAVED', lid: 'a1', gen: 0, body: '新しい本文' });
+    expect(
+      h.d.getState().splitBodies.get('a1'),
+      '留めた枠が古い本文のまま(押しても何も変わらないように見える)',
+    ).toBe('新しい本文');
+  });
+
+  it('🔴 編集中でも、留めた枠は disk の姿を映す(draft は触らない)', async () => {
+    const h = setup();
+    h.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+    await tick(20);
+    h.d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'a1' });
+    await tick(20);
+    h.d.dispatch({ type: 'START_EDIT' });
+    h.d.dispatch({ type: 'UPDATE_OPEN_BODY', body: '打ちかけ' });
+    h.d.dispatch({ type: 'APP_TILE_SAVED', lid: 'a1', gen: 0, body: 'よそから来た' });
+    expect(h.d.getState().openBody?.body, '打ちかけが消えた').toBe('打ちかけ');
+    expect(h.d.getState().splitBodies.get('a1'), '留めた枠が disk を映していない').toBe(
+      'よそから来た',
+    );
+  });
+
+  it('⚠ 留めていない lid では、枠の中身を作り直さない(面が毎回組み直る)', async () => {
+    const h = setup();
+    h.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+    await tick(20);
+    const before = h.d.getState().splitBodies;
+    h.d.dispatch({ type: 'APP_TILE_SAVED', lid: 'a1', gen: 0, body: '新しい本文' });
+    expect(h.d.getState().splitBodies, '触っていない Map を作り直した').toBe(before);
+  });
+});
+
+/**
  * P8 段㉕: 🔴 **1 要求に ack は 1 回**。
  *
  * 🔴 直す前は「書けた」の ack を撃ったあと、同じ `try` の中で
