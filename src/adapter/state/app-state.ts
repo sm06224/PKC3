@@ -3547,9 +3547,12 @@ function reduceCore(
       //    frontmatter が「登録していない」行で埋まる
       if (action.registered !== undefined)
         updates['attachment.registered_as_app'] = action.registered ? true : undefined;
-      if (action.group !== undefined)
-        updates['attachment.app_group'] =
-          action.group === null || action.group === '' ? undefined : action.group;
+      if (action.group !== undefined) {
+        // ⚠ **書くときも前後の空白を落とす**(#857 段②)── 残すと、見出しの字と
+        //    グループ用のノートの題名が食い違い、目印が引けなくなる(読む側も同じ口を通す)
+        const g = appGroupName(action.group ?? '');
+        updates['attachment.app_group'] = g === '' ? undefined : g;
+      }
       if (action.icon !== undefined)
         updates['attachment.app_icon'] =
           action.icon === null || action.icon === '' ? undefined : action.icon;
