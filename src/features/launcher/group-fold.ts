@@ -74,7 +74,14 @@ export function allFolded(groups: FoldedGroups, names: readonly string[]): boole
  */
 export function toggleAllFolded(groups: FoldedGroups, names: readonly string[]): FoldedGroups {
   const named = names.filter((n) => n !== '');
-  if (named.length === 0) return groups;
+  /**
+   * ⚠ **0 件を弾く `if` は置かない**(変異試験 M3 が SURVIVED で教えた、2026-09-13)。
+   * 🔑 `named` が空なら `allFolded` は false を返し、下の足し算も**何も足さない**ので、
+   *   結果は自然に元のままになる ── そこへ `if (named.length === 0) return groups;` を
+   *   置くと、**外しても誰も鳴らない死んだ枝**が 1 本増える
+   *   (CLAUDE.md「『これが無いと壊れる』と書く前に、外して壊れるのを見る」)。
+   * ⚠ 0 件のときに書き換えないこと自体は、下の test が**挙動として**見ている。
+   */
   if (allFolded(groups, named)) return groups.filter((g) => !named.includes(g));
   return [...new Set([...groups, ...named])];
 }

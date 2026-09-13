@@ -188,6 +188,27 @@ describe('グループを畳む(#857 段④)', () => {
     expect(foldAll(), '絞り込みを消しても押し所が戻らない').not.toBeNull();
   });
 
+  /**
+   * 🔴 **「すべて」は、この面の中だけ**(#857 段④ の仕上げ。変異試験 M9 が教えた)。
+   *
+   * ⚠ 直す前は、範囲(`closest`)を document 全体の走査に変えても
+   *   **20 件とも緑のまま**だった ── 面が 1 枚しか無いので区別が付かない。
+   * 🔑 だから**おとりを 1 つ置く** ── 一覧の外に同じ押し所を生やし、
+   *   それが巻き込まれないことを見る(別窓で 2 枚目の一覧が出た日に鳴る)。
+   */
+  it('🔴 ⑨ 一覧の外に同じ押し所が在っても、巻き込まない', () => {
+    const decoy = document.createElement('button');
+    decoy.setAttribute('data-pkc-action', 'toggle-app-group');
+    decoy.setAttribute('data-pkc-group', 'よその面の群');
+    root.append(decoy); // ⚠ **一覧(launcher-list)の外**に置く
+
+    foldAll()!.click();
+    const got = [...folds.get()];
+    expect(got, '一覧の外の群まで畳んだ(範囲が面を越えている)').not.toContain('よその面の群');
+    // ⚠ 対照群 ── 面の中の群は畳めている(何も畳まずに通る空振りではない)
+    expect(got, '前提が崩れている(面の中の群も畳めていない)').toContain('資料');
+  });
+
   it('🔴 ⑤ 畳みは保存の側に在る(state は 1 バイトも動かない)', () => {
     /**
      * ⚠ **「state に `資料` の字が無い」では見られない** ── 群の名前は
