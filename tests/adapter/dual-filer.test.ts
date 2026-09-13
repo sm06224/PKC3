@@ -899,6 +899,7 @@ describe('2 ペインの導線(#241。アプリの組み込みタイル)', () =>
         revokeUrl: () => undefined,
         whenClosed: async () => undefined,
         readSeed: () => ({}),
+        openTarget: () => 'tab' as const,
         baseUrl: 'https://example.test/',
         fail: (m) => {
           throw new Error(`断られた: ${m}`);

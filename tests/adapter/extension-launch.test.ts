@@ -53,6 +53,7 @@ function harness(opts: { granted?: boolean; answer?: boolean } = {}) {
     whenClosed: () => new Promise<void>((r) => void (release = r)),
     baseUrl: 'http://x.test/',
     readSeed: () => ({}),
+    openTarget: () => 'tab' as const,
     fail: () => {},
     downloadSelfhost: () => {
       throw new Error('この台では押されないはず(自分のパソコンで動かす)');

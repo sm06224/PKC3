@@ -954,6 +954,11 @@ export interface BinderServices {
    */
   setOpenPlace?(place: string): void;
   /**
+   * 🔴 **アプリの開き方**(#884 段①)。⚠ 綴りの検めは実体側(`isAppOpenTarget`)──
+   *   binder は `<select>` の値をそのまま渡す(`setOpenPlace` と同じ作法)。
+   */
+  setAppOpenTarget?(target: string): void;
+  /**
    * 編集の仕方(#104 第 2 弾。user 裁定 2026-08-08)。
    * ⚠ **flag ではない**(正規設定)── 効くのは次に編集を開いたとき。
    */
@@ -7343,6 +7348,17 @@ const ACTIONS: Record<string, ActionHandler> = {
         ? target.value
         : target.getAttribute('data-pkc-open-place-value');
     if (place) services.setOpenPlace?.(place);
+  },
+  /**
+   * 🔴 **アプリの開き方**(#884 段①)。⚠ `set-open-place` と同じ受け方
+   *   (`<select>` でもボタンでも通す)── 同じことをする 2 つの口で作法を分けない。
+   */
+  'set-app-open-target': (_dispatcher, target, services) => {
+    const value =
+      target instanceof HTMLSelectElement
+        ? target.value
+        : target.getAttribute('data-pkc-app-open-target-value');
+    if (value) services.setAppOpenTarget?.(value);
   },
   /**
    * 🔴 **グループの見出しを押して畳む / 開く**(#857 段④)。
