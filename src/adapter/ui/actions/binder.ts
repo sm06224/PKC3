@@ -10772,11 +10772,38 @@ export function bindActions(
   const onMenuKey = (ev: KeyboardEvent): void => {
     if (ev.key === 'Escape' && contextMenuOpen(root)) closeContextMenu(root);
   };
-  root.addEventListener('contextmenu', onContextMenu);
-  root.addEventListener('click', onClick);
+  /**
+   * 🔴 **張ったら、外す手も同時に作る**(#876、2026-09-13)。
+   *
+   * ⚠ 直す前は `addEventListener` と `removeEventListener` を**手で 2 か所に並べて**
+   *   いたので、**7 件が外されないまま残っていた**(`paste` / drag の 6 つ)。
+   *   ⚠ `removeEventListener` は**参照が一致しないと黙って何もしない**ので、
+   *   例外も警告も出ない ── 機械の門を置いて初めて数が出た。
+   * 🔑 だから**並べるのをやめる** ── ここを通せば、外し忘れは**構造から消える**
+   *   (CLAUDE.md §7「同じ判定が 2 か所に生えたら、規則を 1 つに寄せる」)。
+   * ⚠ `Document` も受ける ── 近道の鍵は `root` ではなく文書に張るためである。
+   */
+  const undo: Array<() => void> = [];
+  const listen = <K extends keyof HTMLElementEventMap>(
+    target: HTMLElement | Document,
+    type: K,
+    handler: (ev: HTMLElementEventMap[K]) => void,
+    capture?: boolean,
+  ): void => {
+    // ⚠ ここだけ型を緩める ── `Document` と `HTMLElement` で event の表が別なので。
+    //    渡す物は上の型で留めてあるので、緩むのは**器の側だけ**である。
+    const t = target as HTMLElement;
+    t.addEventListener(type, handler, capture);
+    undo.push(() => {
+      t.removeEventListener(type, handler, capture);
+    });
+  };
+
+  listen(root, 'contextmenu', onContextMenu);
+  listen(root, 'click', onClick);
   // 🔴 **`onClick` より後に登録する**(上の docstring)── 先に登録すると
   //    メニューが消えてから委譲が走り、押しても無言になる。
-  root.addEventListener('click', onCloseMenu);
+  listen(root, 'click', onCloseMenu);
   /**
    * 🔴 **スクロールで閉じるのは、開いた「後に」動いたときだけ**(#875、2026-09-13)。
    *
@@ -10793,9 +10820,9 @@ export function bindActions(
     if (scrollUnchangedSinceOpen(root, ev.target)) return;
     closeContextMenu(root);
   };
-  root.addEventListener('scroll', onScrollCloseMenu, true);
-  root.ownerDocument.addEventListener('keydown', onMenuKey);
-  root.addEventListener('paste', onPaste);
+  listen(root, 'scroll', onScrollCloseMenu, true);
+  listen(root.ownerDocument, 'keydown', onMenuKey);
+  listen(root, 'paste', onPaste);
   /**
    * 🔴 **`dragenter` でも受理を宣言する**(2026-08-21、cowork #15)。
    *
@@ -10809,16 +10836,16 @@ export function bindActions(
    *   コード上で名指しできる唯一の穴がここだった。
    * 🔑 同じ handler を足すだけ(副作用ゼロの保険)。
    */
-  root.addEventListener('dragenter', onDragOver);
-  root.addEventListener('dragover', onDragOver);
-  root.addEventListener('drop', onDrop);
-  root.addEventListener('dragstart', onDragStart);
-  root.addEventListener('dragend', onDragEnd);
+  listen(root, 'dragenter', onDragOver);
+  listen(root, 'dragover', onDragOver);
+  listen(root, 'drop', onDrop);
+  listen(root, 'dragstart', onDragStart);
+  listen(root, 'dragend', onDragEnd);
   // 🔴 外から来た荷物は `dragend` を投げない ── 窓の外へ抜けた回はここが印を畳む
-  root.addEventListener('dragleave', onDragLeave);
-  root.addEventListener('mousedown', onMousedown);
-  root.addEventListener('input', onInput);
-  root.addEventListener('change', onChange);
+  listen(root, 'dragleave', onDragLeave);
+  listen(root, 'mousedown', onMousedown);
+  listen(root, 'input', onInput);
+  listen(root, 'change', onChange);
   /**
    * 🔴 **全域のコマンドを実行する ── または「いま実行できるか」だけ答える**(#425 段①)。
    *
@@ -11561,30 +11588,19 @@ export function bindActions(
     if (field === null || field === undefined || !TAG_INPUT_ADD.has(field)) return;
     dispatcher.dispatch({ type: 'ASK_TAG_SUGGESTIONS' });
   };
-  root.addEventListener('focusin', onTagFocusIn);
-  root.addEventListener('focusin', onDualFocusIn);
-  root.addEventListener('focusout', onRenameBlur);
-  doc.addEventListener('keydown', onShortcut);
-  root.addEventListener('keydown', onKeydown);
+  listen(root, 'focusin', onTagFocusIn);
+  listen(root, 'focusin', onDualFocusIn);
+  listen(root, 'focusout', onRenameBlur);
+  listen(doc, 'keydown', onShortcut);
+  listen(root, 'keydown', onKeydown);
   return () => {
-    root.removeEventListener('click', onClick);
-    root.removeEventListener('contextmenu', onContextMenu);
-    root.removeEventListener('click', onCloseMenu);
-    // ⚠ **張った名前で外す**(2026-09-13、着地前レビュー)── #875 で `scroll` の
-    //    受け口を `onCloseMenu` から分けたとき、**張る側だけ改名して外す側を忘れた**。
-    //    `removeEventListener` は**参照が一致しないと何もしない**ので、これは
-    //    恒久の no-op になり、畳んだ後も `scroll` の聞き耳が残る。
-    root.removeEventListener('scroll', onScrollCloseMenu, true);
-    root.ownerDocument.removeEventListener('keydown', onMenuKey);
+    /**
+     * 🔑 **張った順に、張った物だけを外す**(#876)── 手で並べ直さない。
+     * ⚠ かつてここは 19 行の `removeEventListener` で、**7 件足りなかった**。
+     */
+    for (const off of undo) off();
+    undo.length = 0;
     closeContextMenu(root);
-    root.removeEventListener('mousedown', onMousedown);
-    root.removeEventListener('input', onInput);
-    root.removeEventListener('change', onChange);
-    root.removeEventListener('focusin', onTagFocusIn);
-    root.removeEventListener('focusin', onDualFocusIn);
-    root.removeEventListener('focusout', onRenameBlur);
-    doc.removeEventListener('keydown', onShortcut);
-    root.removeEventListener('keydown', onKeydown);
     longPress.dispose();
   };
 }

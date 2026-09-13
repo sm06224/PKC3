@@ -316,6 +316,18 @@ describe('マニュアルと実装の突合', () => {
     }
   });
 
+  /**
+   * 🔴 **張り方の綴りに依らず「受けている」を拾う**(#876、2026-09-13)。
+   *
+   * ⚠ 直す前は `addEventListener('drop'` の**字だけ**を見ていた ── #876 で
+   *   `bindActions` が **`listen(root, 'drop', …)` 経由**へ変わった瞬間、
+   *   「受ける実装が無い」と落ちた(**製品は無傷**。落ちたのは計器のほうである)。
+   * 🔑 CLAUDE.md §10「器を替えたら、読み取れる値が変わる」の、**検査側**の顔。
+   *   だから**両方の綴り**を受ける ── 次に張り方が変わったら、ここへ 1 つ足す。
+   */
+  const registers = (type: string): RegExp =>
+    new RegExp(`(?:addEventListener\\(\\s*|listen\\(\\s*[\\w.]+,\\s*)['"]${type}['"]`);
+
   it('🔴 ドラッグ&ドロップの記述が実態と合う(#250 で受けるようになった)', () => {
     // ⚠ 2026-08-18 まで「**受けません**」と書いてあり、この test がそれを pin して
     // いた ── #250 で drop を足した瞬間に落ちて気づけた。**同じ向きのまま裏返す**:
@@ -327,12 +339,12 @@ describe('マニュアルと実装の突合', () => {
     //   `root.addEventListener('drop', …)` を**コメントアウトしても緑**になる
     //   (この file の `codeOnly` の docstring がまさにそう戒めている)
     const receivers = srcFiles().filter((f) =>
-      /addEventListener\(\s*['"]drop['"]/.test(codeOnly(readFileSync(f, 'utf-8'))),
+      registers('drop').test(codeOnly(readFileSync(f, 'utf-8'))),
     );
     expect(receivers, 'drop を受ける実装が無い ── マニュアルの記述が嘘になる').not.toEqual([]);
     // ⚠ `dragover` を止めないと `drop` は**来ない** ── 片方だけでは動かない
     const over = srcFiles().filter((f) =>
-      /addEventListener\(\s*['"]dragover['"]/.test(codeOnly(readFileSync(f, 'utf-8'))),
+      registers('dragover').test(codeOnly(readFileSync(f, 'utf-8'))),
     );
     expect(over, 'dragover を受けていない ── drop は来ない').not.toEqual([]);
     expect(MANUAL).toContain('ドラッグ&ドロップでも入ります');
@@ -342,7 +354,7 @@ describe('マニュアルと実装の突合', () => {
   it('🔴 スクショの貼付の記述が実態と合う(#250)', () => {
     // ⚠ 「貼れます」はマニュアルの**約束**なので、受け口が消えたら嘘になる
     const receivers = srcFiles().filter((f) =>
-      /addEventListener\(\s*['"]paste['"]/.test(codeOnly(readFileSync(f, 'utf-8'))),
+      registers('paste').test(codeOnly(readFileSync(f, 'utf-8'))),
     );
     expect(receivers, '貼付を受ける実装が無い').not.toEqual([]);
     expect(MANUAL, 'マニュアルに貼付の導線が無い').toContain('`Ctrl+V`');
