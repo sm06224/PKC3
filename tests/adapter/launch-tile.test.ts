@@ -14,6 +14,11 @@ import { launchTile, EXTERNAL_WINDOW_FEATURES } from '../../src/adapter/ui/launc
 import { LAUNCHER_APP_SANDBOX } from '../../src/features/launcher/app-shell';
 import { officeTile, withBuiltinTiles, type LauncherTile } from '../../src/features/launcher/tiles';
 import { isViewMode } from '../../src/adapter/state/app-state';
+import {
+  APP_WINDOW_SIZE,
+  DEFAULT_APP_OPEN_TARGET,
+  type AppOpenTarget,
+} from '../../src/features/launcher/open-target';
 
 interface FakeWin {
   closed: boolean;
@@ -63,7 +68,7 @@ interface Harness {
 
 function harness(
   body: string | null,
-  opts: { blocked?: boolean; seed?: Record<string, string> } = {},
+  opts: { blocked?: boolean; seed?: Record<string, string>; target?: AppOpenTarget } = {},
 ): Harness {
   const opened: Array<{ url: string; features: string }> = [];
   const created: string[] = [];
@@ -101,6 +106,8 @@ function harness(
         opened.push({ url, features });
         return opts.blocked === true ? null : (win as unknown as Window);
       },
+      // 🔴 どこに出すか(#884 段①)── 既定は user が何も選んでいない状態
+      openTarget: () => opts.target ?? DEFAULT_APP_OPEN_TARGET,
       createUrl: (blob) => {
         created.push(blob.type);
         return `blob:fake-${++seq}`;
@@ -159,6 +166,44 @@ describe('タイルの起動', () => {
     ]);
     // 文言そのものが約束 ── 定数の側も固定する
     expect(EXTERNAL_WINDOW_FEATURES).toBe('noopener,noreferrer');
+  });
+
+  /**
+   * 🔴 **アプリをどこに出すか**(#884 段①。user 要望 2026-09-13)。
+   *
+   * ⚠ 見るのは**窓の指定そのもの**である ── 「タブか窓か」を決めるのはブラウザで、
+   *   こちらが渡せるのはこの字だけだからである。
+   * 🔴 **約束(`noopener,noreferrer`)は、大きさを足しても残る**(引かない)。
+   */
+  it('🔴 「別の窓」を選ぶと、約束を残したまま大きさが付く(外部 URL)', () => {
+    const tile = {
+      lid: 'u1',
+      title: 'サイト',
+      group: '',
+      kind: 'url',
+      url: 'https://example.com/x',
+    } as const;
+    const win = harness(null, { target: 'window' });
+    launchTile(tile, win.deps);
+    const f = win.opened[0]!.features;
+    expect(f, '約束が消えた').toContain('noopener,noreferrer');
+    expect(f, '窓だと名乗っていない').toContain('popup');
+    expect(f).toContain(`width=${String(APP_WINDOW_SIZE.width)}`);
+
+    // 🔴 対照群 ── 選んでいない人は 1 バイトも変わらない
+    const tab = harness(null, { target: 'tab' });
+    launchTile(tile, tab.deps);
+    expect(tab.opened[0]!.features, '選んでいないのに変わった').toBe('noopener,noreferrer');
+  });
+
+  it('🔴 取り込んだアプリの窓にも効く(空の窓を開く側)', () => {
+    const win = harness('<p>hi</p>', { target: 'window' });
+    launchTile(appTile, win.deps);
+    expect(win.opened[0]!.features, '窓だと名乗っていない').toContain('popup');
+    // 🔴 対照群 ── 既定では空のまま(⚠ noopener を付けると戻り値が null になる)
+    const tab = harness('<p>hi</p>', { target: 'tab' });
+    launchTile(appTile, tab.deps);
+    expect(tab.opened[0]!.features, '既定なのに何か足した').toBe('');
   });
 
   it('🔴 取り込んだ HTML は **隔離した外殻**に載せて開く(同じ origin で走らせない)', async () => {

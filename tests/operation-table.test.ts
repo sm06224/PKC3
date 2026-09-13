@@ -125,6 +125,8 @@ describe('操作の全数台帳(#582 段①)', () => {
       outsideActionsTable: x.outsideActionsTable.length,
       unregistered: x.unregistered,
     }).toEqual({
+      // ⚠ 2026-09-13(#884 段①): アプリの開き方(`set-app-open-target`)で受け手 +1
+      //   (登記は増えない ── 押し口は設定の欄にしか無く、鍵も持たない)
       // ⚠ 2026-09-13(#853 段①): 本文へ図案を入れる(`insert-icon`)で受け手 +1
       //   (登記は増えない ── 押し口は書式パネルにしか無く、鍵も持たない)
       // ⚠ 2026-09-13(#856 段②): リンク先の印を取り込む(`adopt-link-icon`)で受け手 +1
@@ -202,12 +204,12 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-09-13(#857 段③): 「名前順に戻す」で受け手 +1 ── 登記は増えない。
       //   🔑 仕分けは **N(名詞)** ── 全部の群に効くので、どの見出しを押したかに依らない
       //   (押し所は見出しのメニューに在るが、**効く先は target で決まらない**)
-      total: 287,
-      receivers: 238,
+      total: 288,
+      receivers: 239,
       registered: 85,
       both: 36,
       outsideActionsTable: 49,
-      unregistered: 202,
+      unregistered: 203,
     });
   });
 

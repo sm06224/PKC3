@@ -69,6 +69,8 @@ import {
 } from '@adapter/platform/archive-window';
 import { isOpenPlace } from '@features/open-place';
 import { chooseOpenPlace } from '@adapter/ui/render/open-place';
+import { chooseAppOpenTarget, currentAppOpenTarget } from '@adapter/ui/render/app-open-target';
+import { isAppOpenTarget } from '@features/launcher/open-target';
 import { assetWindowKind } from '@features/asset/asset-preview-kind';
 import {
   createStorePort,
@@ -2693,6 +2695,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       launchTile(tile, {
         readBlob: (assetKey) => blobs.get(cid, assetKey),
         open: (url, features) => window.open(url, '_blank', features),
+        // 🔴 どこに出すか(#884 段①)── **同期に読む**(gesture の中で使う)
+        openTarget: currentAppOpenTarget,
         createUrl: (blob) => URL.createObjectURL(blob),
         revokeUrl: (url) => URL.revokeObjectURL(url),
         whenClosed: waitForWindowClose,
@@ -2769,6 +2773,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           {
             readBlob: (assetKey) => blobs.get(cid, assetKey),
             open: (url, features) => window.open(url, '_blank', features),
+            // 🔴 どこに出すか(#884 段①)── **同期に読む**(gesture の中で使う)
+            openTarget: currentAppOpenTarget,
             createUrl: (blob) => URL.createObjectURL(blob),
             revokeUrl: (url) => URL.revokeObjectURL(url),
             whenClosed: waitForWindowClose,
@@ -2952,6 +2958,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      */
     setOpenPlace: (place) => {
       if (isOpenPlace(place)) chooseOpenPlace(place);
+    },
+    /**
+     * 🔴 **アプリの開き方**(#884 段①)。⚠ **描き直さない** ── 画面は 1px も変わらず、
+     *   次にタイルを押したときから効く(設定の説明文がそう約束している)。
+     */
+    setAppOpenTarget: (target) => {
+      if (isAppOpenTarget(target)) chooseAppOpenTarget(target);
     },
     /**
      * ✏️ 編集の仕方(#104 第 2 弾)。⚠ **描き直さない** ── 編集の面は

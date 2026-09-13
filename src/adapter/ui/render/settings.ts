@@ -18,9 +18,11 @@ import { THEMES } from './theme';
 import { PAGE_FORMATS } from '@features/page-format';
 import { PROSE_ALIGNS } from '@features/prose-align';
 import { OPEN_PLACES } from '@features/open-place';
+import { APP_OPEN_TARGETS } from '@features/launcher/open-target';
 import { currentPageFormat } from './page-format';
 import { currentProseAlign } from './prose-align';
 import { currentOpenPlace } from './open-place';
+import { currentAppOpenTarget } from './app-open-target';
 import { EDITOR_MODES } from '@features/editor-mode';
 import { TEXT_SCALES } from '@features/text-scale';
 import { COLUMN_RULES } from '@features/column-rule';
@@ -137,6 +139,7 @@ export class SettingsRenderer {
       this.syncEditorMode();
       this.syncOpenInEdit();
       this.syncOpenPlace();
+      this.syncAppOpenTarget();
       this.syncAlarmEnabled();
       this.syncPhoneLinks();
       this.syncExternalImages();
@@ -534,6 +537,39 @@ export class SettingsRenderer {
     dl.append(plt, pld);
 
     /**
+     * 🔴 **アプリをどこに出すか**(#884 段①。user 要望 2026-09-13)。
+     *
+     * ⚠ **flag ではない**(正規設定)── 恒久の好みで、畳む予定が無い。
+     * ⚠ すぐ上の「書庫を開く場所」の**下**に置く ── どちらも「開く」の話である。
+     * 🔑 **いま効く先を書く** ── 効かない所まで効くと読まれると、
+     *   「設定したのに変わらない」になる。
+     */
+    const att = document.createElement('dt');
+    att.textContent = 'アプリの開き方';
+    const atd = document.createElement('dd');
+    const atselect = document.createElement('select');
+    atselect.setAttribute('data-pkc-action', 'set-app-open-target');
+    atselect.setAttribute('data-pkc-field', 'app-open-target-select');
+    atselect.setAttribute('aria-label', 'アプリの開き方');
+    for (const o of APP_OPEN_TARGETS) {
+      const opt = document.createElement('option');
+      opt.value = o.id;
+      opt.textContent = o.label;
+      atselect.append(opt);
+    }
+    atd.append(atselect);
+    const atnote = document.createElement('p');
+    atnote.setAttribute('data-pkc-field', 'settings-note');
+    atnote.textContent =
+      'アプリの一覧のタイルを押したとき、ブラウザのタブに出すか、別の窓に出すかが決まります。' +
+      'PKC を「アプリとして追加」して使っている場合、別の窓にすると、その窓は PKC の仲間として並びます。' +
+      '別の窓は大きさを指定して開くので、画面より大きいときはブラウザが縮めます。' +
+      '⚠ ブラウザが窓を止めているときは、これまでどおり止められた理由が画面の下に出ます。' +
+      '組み込みのアプリ(予定表・連絡先など)とマニュアルの窓は、ここでは変わりません。';
+    atd.append(atnote);
+    dl.append(att, atd);
+
+    /**
      * 🔴 **予定の時刻に知らせるか**(#280。user 指示 2026-08-19「アラートは
      * 組み込みアプリでリリースしたい」)。
      * ⚠ **既定は切** ── 音は割り込みであり、入にすると起動のたびに予定を数える。
@@ -684,6 +720,7 @@ export class SettingsRenderer {
     this.syncEditorMode();
     this.syncOpenInEdit();
     this.syncOpenPlace();
+    this.syncAppOpenTarget();
     this.syncAlarmEnabled();
     this.syncPhoneLinks();
     this.syncSameOrigin(state);
@@ -1205,6 +1242,18 @@ export class SettingsRenderer {
       '[data-pkc-field="open-place-select"]',
     );
     const cur = currentOpenPlace();
+    if (select && select.value !== cur) select.value = cur;
+  }
+
+  /**
+   * ⚠ 画面の値を**いまの出し先に合わせる**(#884 段①)── `syncOpenPlace` と同じ理由。
+   * ⚠ ここも **DOM ではなく保存が正本**である(画面に出ない設定なので、当てる先が無い)。
+   */
+  private syncAppOpenTarget(): void {
+    const select = this.region.querySelector<HTMLSelectElement>(
+      '[data-pkc-field="app-open-target-select"]',
+    );
+    const cur = currentAppOpenTarget();
     if (select && select.value !== cur) select.value = cur;
   }
 

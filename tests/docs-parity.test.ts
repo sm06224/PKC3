@@ -2285,6 +2285,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-13(#884 段① ── アプリの開き方)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-09-sql-to-note" …` → 51d2a59
+     */
+    'SQL の答えを、そのままノートに書き出せるようになりました',
+    /**
      * ⚠ **2026-09-13(#853 段① ── 本文の図案)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-09-sql-csv" …` → 8368eb9
      */

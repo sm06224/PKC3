@@ -17,6 +17,7 @@ import { buildLauncherAppShell, launcherAppBase } from '@features/launcher/app-s
 import { decodeHtml } from '@features/launcher/html-charset';
 import type { LauncherTile } from '@features/launcher/tiles';
 import { isViewMode, type ViewMode } from '@adapter/state/app-state';
+import { appWindowFeatures, type AppOpenTarget } from '@features/launcher/open-target';
 
 /** 外部サイトを開くときの窓の指定。⚠ 文言そのものが user への約束である。 */
 export const EXTERNAL_WINDOW_FEATURES = 'noopener,noreferrer';
@@ -26,6 +27,15 @@ export interface LaunchDeps {
   readBlob: (assetKey: string) => Promise<Blob | null>;
   /** `window.open` 相当。⚠ `noopener` を付けると**戻り値は必ず null**。 */
   open: (url: string, features: string) => Window | null;
+  /**
+   * 🔴 **どこに出すか**(#884 段①)── user が設定で選んだもの。
+   *
+   * ⚠ **同期に読む**(`readSeed` と同じ理由 ── `window.open` を `await` の後ろに
+   *   落とすと、Safari が transient activation を失って窓を開かない)。
+   * ⚠ **optional にしない** ── 配線を落としても tsc が黙ると、戻ってくる症状は
+   *   「設定を変えたのに何も変わらない」という**いちばん気づけない形**である。
+   */
+  openTarget: () => AppOpenTarget;
   createUrl: (blob: Blob) => string;
   revokeUrl: (url: string) => void;
   /** 開いた窓が閉じる(= 寿命の終端)まで待つ。 */
@@ -253,7 +263,9 @@ export async function launchTile(
      * 検出は買わない ── アプリの起動側(下)は窓の handle が要るので検出できる、
      * という非対称はここに由来する。
      */
-    if (tile.url !== undefined) deps.open(tile.url, EXTERNAL_WINDOW_FEATURES);
+    // ⚠ 約束(`noopener,noreferrer`)は残したまま、大きさだけを足す(#884 段①)
+    if (tile.url !== undefined)
+      deps.open(tile.url, appWindowFeatures(deps.openTarget(), EXTERNAL_WINDOW_FEATURES));
     return;
   }
   if (tile.assetKey === undefined) return;
@@ -262,7 +274,7 @@ export async function launchTile(
   // 🔑 先に窓を開ける(gesture を切らさない・塞がれたら**その場で分かる**)。
   // ⚠ ここでは `noopener` を付けない ── 付けると戻り値が null になって
   // 「塞がれた」と区別できず、この後の遷移もできない。代わりに **opener を切る**
-  const win = deps.open('', '');
+  const win = deps.open('', appWindowFeatures(deps.openTarget(), ''));
   if (!win) {
     deps.fail(`「${tile.title}」を開けませんでした(ブラウザがポップアップを塞いでいます)`);
     return;
