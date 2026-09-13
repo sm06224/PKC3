@@ -429,6 +429,69 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
     '絞り込みを消しても見出しが押せるようにならない',
   ).toHaveCount(1);
 
+  /**
+   * 🔴 **見出しを右クリック →「目印を選ぶ…」で、群の頭に絵を置ける**
+   * (#857 段②。動線: アプリのタブを開く → 見出しを右クリックする →
+   * 「目印を選ぶ…」を押す → 一覧から 1 つ選ぶ → 見出しの左に絵が出る)。
+   * 🔑 起動を 1 つも足していない ── 既に開いている一覧の道中に足した(smoke-budget)。
+   *
+   * ⚠ **目印を選んでも、見ていたノートと絞り込みの欄がそのまま**でなければならない
+   *   (`keepSelection`)。この画面ではまだ何も選んでいないので、観測点は
+   *   「detail 面の『まだ何も選んでいない』案内が、前後で同じであること」
+   *   (`CREATE_ENTRY` が `keepSelection` を落とすと、ここが**作りたてのノートの
+   *   編集画面**に化ける ── unit で作れない実ブラウザ配線の検算)。
+   */
+  const detailEmpty = page.locator('[data-pkc-field="detail-empty"]');
+  await expect(detailEmpty, '前提が崩れている(何かが既に選ばれている)').toBeVisible();
+  const beforeGuide = await detailEmpty.textContent();
+  const beforeFilterValue = await page.locator('[data-pkc-field="entry-filter"]').inputValue();
+
+  await toolToggle.click({ button: 'right' });
+  const groupMenu = page.locator('[data-pkc-region="context-menu"]');
+  await expect(groupMenu, '見出しを右クリックしてもメニューが出ない').toBeVisible();
+  await expect(groupMenu, '「目印を選ぶ…」が出ていない').toContainText('目印を選ぶ');
+  await expect(
+    groupMenu,
+    '見出しの上にタイルのメニューが出ている(押した物と効く先が食い違う。#677 の型)',
+  ).not.toContainText('上へ');
+  await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="pick-app-group-icon"]');
+
+  const iconRows = page.locator('[data-pkc-field="pick-group-icon"]');
+  await expect(iconRows.first(), '目印の一覧が出ない').toBeVisible();
+  await expect(iconRows.first(), '先頭が「なし」でない(外す口が先頭に無い)').toHaveText('なし');
+  // ⚠ index 0 = 「なし」。index 1 を選ぶ(タイルと同じ 49 種の 1 つ)。
+  await clickReal(page, iconRows.nth(1));
+  await expect(iconRows.first(), '選んでも小窓が閉じない').toBeHidden();
+
+  await expect(
+    page.locator('[data-pkc-field="entry-filter"]'),
+    '目印を選ぶと絞り込みの欄が消える',
+  ).toHaveValue(beforeFilterValue);
+  await expect(
+    detailEmpty,
+    '目印を選んだだけで右の面が作りたてのノートに切り替わっている',
+  ).toHaveText(beforeGuide ?? '');
+
+  // 🔴 見出しの字そのものは 1 バイトも変わらない(絵は `::before` が出す。CLAUDE.md §10)
+  await expect(
+    groups.nth(0),
+    '見出しの textContent が変わっている(絵が字に混ざった)',
+  ).toHaveText('ツール');
+  const groupMark = groups.nth(0).locator('[data-pkc-field="group-icon"]');
+  await expect(groupMark, '見出しの左に目印が出ない').toHaveCount(1);
+
+  // もう一度右クリック →「なし」を選ぶと絵が消える(片道の操作にしない)
+  await toolToggle.click({ button: 'right' });
+  await expect(groupMenu, '2 回目の右クリックでメニューが出ない').toBeVisible();
+  await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="pick-app-group-icon"]');
+  await expect(iconRows.first()).toBeVisible();
+  await clickReal(page, iconRows.nth(0)); // 「なし」
+  await expect(iconRows.first()).toBeHidden();
+  await expect(groupMark, '「なし」を選んでも目印が消えない(片道の操作になっている)').toHaveCount(
+    0,
+  );
+  await expect(groups.nth(0), '外した後も見出しの字が変わっている').toHaveText('ツール');
+
   // ③ 外部へ飛ぶタイルは**行き先が見えている**(押す前に分かる)
   await expect(tiles.nth(1).locator('[data-pkc-field="tile-url"]')).not.toHaveText('');
 
