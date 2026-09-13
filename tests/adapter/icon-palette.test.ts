@@ -171,6 +171,22 @@ describe('置き換えで落とした性質を戻す(§10)', () => {
     await answerDialog('cancel');
   });
 
+  /**
+   * 🔴 **外(暗い地)を押したらやめる**(変異試験 M25 が教えた ── この動線を見る test が
+   *   repo 全体に 1 本も無く、口を塞いでも誰も落ちなかった)。
+   * ⚠ 選ぶだけの器なので、外を押したときに「何も選ばずに閉じる」以外の答えは無い。
+   */
+  it('🔴 外(暗い地)を押すとやめる', async () => {
+    const { dialog, picks } = await openPalette();
+    // 🔑 暗い地を押すと `target` は `<dialog>` 自身になる(中身を押せば中身が target)
+    dialog.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    for (let i = 0; i < 4; i += 1) await Promise.resolve();
+    expect(openDialog(), '外を押しても閉じていない').toBeNull();
+    // ⚠ 対照群 ── **中身**を押したときは閉じ方が違う(選んだ値が返る道)。
+    //    ここで「何を押しても閉じる」実装なら、上の assert は無条件に真になる。
+    expect(picks[0]!.isConnected, '前提が崩れている(器ごと捨てられた)').toBe(true);
+  });
+
   it('🔴 端では止まる(輪にしない ── 押し続けても迷子にならない)', async () => {
     const { dialog, picks } = await openPalette();
     picks[0]!.focus();

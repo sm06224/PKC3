@@ -55,6 +55,23 @@ describe('字を読む(#853 段①)', () => {
     expect(iconShortcodeAt('あ:home:', 1)?.name).toBe('home');
   });
 
+  /**
+   * ⚠ **長い `:…:` も字のまま**。
+   *
+   * 🔴 **この test は、字数の上限(24 字)を守っていない** ── 上限を 51 字へ緩めても
+   *   緑のままである(実測)。緩んだぶんは**表の門**が受け止めるので、
+   *   **外から見た出力が 1 ビットも変わらない**からである。
+   * 🔑 上限が守っているのは**速さ**であって振る舞いではない ──
+   *   だから「これが無いと壊れる」とは書かない(`icon-shortcode.ts` の注記)。
+   * 🔑 ここが留めているのは「**表に無い長い語は字のまま**」という振る舞いだけである。
+   */
+  it('⚠ 長い語も、表に無ければ字のまま', () => {
+    expect(iconShortcodeAt(`:${'a'.repeat(30)}:`, 0)).toBeNull();
+    // ⚠ 空振り防止 ── 表の名前が上限を超えていたら、門は**使える語を殺している**
+    const longest = Math.max(...TILE_ICON_CHOICES.map((c) => c.name.length));
+    expect(longest, '表の名前が上限に近すぎる(門が動線を殺しうる)').toBeLessThanOrEqual(23);
+  });
+
   it('挿す字と読む字は同じ綴り', () => {
     const s = iconShortcodeFor('home');
     expect(iconShortcodeAt(s, 0)?.name).toBe('home');
@@ -82,6 +99,25 @@ describe('本文に描く(#853 段①)', () => {
     expect(html, '器に字が入っている').toContain('></span>');
   });
 
+  /**
+   * 🔴 **読んだ字数ぶんだけ消費する**(変異試験 M13 が教えた)。
+   *
+   * ⚠ 消費長を `1` に固定する変異を当てると、出力は
+   *   `<span …></span>home: へ帰る` になる ── **`home:` が本文へ漏れる**。
+   *   ところがこの file の assert は**全部 `toContain`** だったので、
+   *   「器が出た」ことしか見ておらず、**19 件とも緑のまま**だった
+   *   (CLAUDE.md §1「きれいな条件ほど成り立たないまま素通りする」)。
+   * 🔑 だから**残らないこと**を見る ── 完全一致にしない(markdown-it の版で
+   *   空白が動くと、製品と無関係に落ちる)。
+   */
+  it('🔴 読んだぶんだけ消費する(余った字を本文へ漏らさない)', () => {
+    const html = renderMarkdown(':home: へ帰る');
+    expect(html, '消費長が足りず、語の残りが本文に出ている').not.toContain('home:');
+    expect(html, '本文の字が消えた').toContain('へ帰る');
+    // ⚠ 対照群 ── 器そのものは出ている(出ていなければ上の 2 つは無条件で真)
+    expect(html).toContain('data-pkc-symbol="home"');
+  });
+
   it('🔴 表に無い語は字のまま出る', () => {
     const html = renderMarkdown('やった :smile: ね');
     expect(html).toContain(':smile:');
@@ -102,6 +138,40 @@ describe('本文に描く(#853 段①)', () => {
 
   it('⚠ 日本語に挟まれても出る(空白を要求しない)', () => {
     expect(renderMarkdown('家:home:へ')).toContain('data-pkc-symbol="home"');
+  });
+
+  /**
+   * 🔴 **先に在る記法に譲る**(着地前レビューが実測で見つけた。2026-09-13)。
+   *
+   * ⚠ `:content:attrs:`(L-6 簡易 inline ── 色や太字を付ける書き方)は
+   *   **同じ `:` から始まる**。図案を先に通すと `:home:bold:` が
+   *   **家の絵 + 裸の `bold:`** に化けた ── つまり **user が前から書いていた本文の
+   *   見た目が、ある日勝手に変わる**。#853 で「49 語に絞る」と決めた理由そのものが、
+   *   語の側ではなく**記法の側**でも起きていた。
+   * 🔑 だから図案は**当たっても譲る**(`findSimpleInline` が当たる位置では出ない)。
+   */
+  it('🔴 `:語:装飾:` は、これまでどおり装飾のまま(既存の本文を変えない)', () => {
+    for (const [src, want] of [
+      [':home:bold:', 'font-weight: bold'],
+      [':code:bold:', 'font-weight: bold'],
+      [':link:blue:', 'color: blue'],
+    ] as const) {
+      const html = renderMarkdown(src);
+      expect(html, `${src} が図案に化けた(既存の本文の見た目が変わる)`).not.toContain(
+        'data-pkc-symbol',
+      );
+      expect(html, `${src} の装飾が消えた`).toContain(want);
+    }
+    // ⚠ 対照群 ── 図案の名前でない語でも同じに出る(この記法が生きていること)
+    expect(renderMarkdown(':重要:bold:'), '前提が崩れている').toContain('font-weight: bold');
+  });
+
+  it('🔴 譲るのは「その記法が当たるとき」だけ ── 単独なら絵になる', () => {
+    // ⚠ この 2 つが両方成り立って初めて「譲る」が正しい(片方だけなら潰しただけ)
+    expect(renderMarkdown(':home:')).toContain('data-pkc-symbol="home"');
+    expect(renderMarkdown(':home: と :star:'), '1 行に 2 つ置けない').toContain(
+      'data-pkc-symbol="star"',
+    );
   });
 
   it('⚠ 時刻は変わらない', () => {

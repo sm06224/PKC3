@@ -2028,15 +2028,26 @@ function scanContainerDirective<T>(
   return { transformed: out.join('\n'), registry, lineMap: lineMapOut };
 }
 
-md.inline.ruler.after('emphasis', 'pkc_simple_inline', function simpleInlineRule(state, silent) {
-  if (silent) return false;
-  const src = state.src;
-  const start = state.pos;
-  if (src.charCodeAt(start) !== 0x3A /* : */) return false;
+/**
+ * 🔴 **`:content:attrs:`(L-6)が、この位置から当たるか**(#853 段①、2026-09-13 に切り出した)。
+ *
+ * ⚠ **切り出した理由は §7 である** ── 本文の図案(`:home:`)は、この記法と
+ *   **同じ `:` から始まる**。図案の側が「L-6 なら譲る」を**自前の綴りで**判定すると、
+ *   同じ問いに答える口が 2 つになり、片方だけ直した日に**既存の本文の見た目が割れる**。
+ * 🔑 だから**判定はここ 1 本**にして、図案の規則はこれを呼ぶ。
+ *
+ * @returns 当たるなら中身と、消費し終わる位置。当たらなければ `null`
+ */
+function findSimpleInline(
+  src: string,
+  start: number,
+  posMax: number,
+): { content: string; inlineStyle: string; end: number } | null {
+  if (src.charCodeAt(start) !== 0x3A /* : */) return null;
   // Scan forward to find a `:<attrs>:` boundary。
-  for (let i = start + 1; i < state.posMax; i++) {
+  for (let i = start + 1; i < posMax; i++) {
     const ch = src.charCodeAt(i);
-    if (ch === 0x0A /* newline */) return false;
+    if (ch === 0x0A /* newline */) return null;
     if (ch !== 0x3A /* : */) continue;
     // 候補境界。i から `:<attrs>:` を試行。
     // `:` 以後 attrs 部分を抽出。
@@ -2049,20 +2060,26 @@ md.inline.ruler.after('emphasis', 'pkc_simple_inline', function simpleInlineRule
     if (!parsed.valid) continue;
     const content = src.slice(start + 1, i);
     if (!content) continue;
-    // Match found:`<span style="...">content</span>` を出力。
-    // inner content は inline markup を保持したいので state.md.inline.parse で
-    // tokenize したいところだが、Phase 1 は plain text で。
-    const tokenOpen = state.push('simple_inline_open', 'span', 1);
-    tokenOpen.attrSet('class', 'pkc-inline-mark');
-    if (parsed.inlineStyle) tokenOpen.attrSet('style', parsed.inlineStyle);
-    const tokenText = state.push('text', '', 0);
-    tokenText.content = content;
-    state.push('simple_inline_close', 'span', -1);
-    state.pos = i + 1 + closeIdx + 1;  // skip past closing `:`
-    return true;
+    return { content, inlineStyle: parsed.inlineStyle, end: i + 1 + closeIdx + 1 };
   }
-  return false;
+  return null;
+}
 
+md.inline.ruler.after('emphasis', 'pkc_simple_inline', function simpleInlineRule(state, silent) {
+  if (silent) return false;
+  const hit = findSimpleInline(state.src, state.pos, state.posMax);
+  if (hit === null) return false;
+  // Match found:`<span style="...">content</span>` を出力。
+  // inner content は inline markup を保持したいので state.md.inline.parse で
+  // tokenize したいところだが、Phase 1 は plain text で。
+  const tokenOpen = state.push('simple_inline_open', 'span', 1);
+  tokenOpen.attrSet('class', 'pkc-inline-mark');
+  if (hit.inlineStyle) tokenOpen.attrSet('style', hit.inlineStyle);
+  const tokenText = state.push('text', '', 0);
+  tokenText.content = hit.content;
+  state.push('simple_inline_close', 'span', -1);
+  state.pos = hit.end;  // skip past closing `:`
+  return true;
 });
 
 // ── #853 段①(2026-09-13):本文に図案を置く `:home:` ──
@@ -2083,6 +2100,18 @@ md.inline.ruler.after('emphasis', 'pkc_simple_inline', function simpleInlineRule
 md.inline.ruler.before('emphasis', 'pkc_icon', function iconRule(state, silent) {
   const hit = iconShortcodeAt(state.src, state.pos);
   if (hit === null) return false;
+  /**
+   * 🔴 **先に在る記法に譲る**(着地前レビューが実測で出した。2026-09-13)。
+   *
+   * ⚠ `:content:attrs:`(L-6 簡易 inline)は**同じ `:` から始まる**ので、
+   *   `:home:bold:`(= 太字の「home」)を書いていた本文が、こちらを先に通すと
+   *   **家の絵 + 裸の `bold:`** に化けた(実測)。
+   * 🔴 **既存の本文の見た目を勝手に変えない** ── 受ける語を 49 に絞った理由
+   *   (#853 の「既存の `:foo:` が勝手に絵に変わらないか」)は、こちらにも同じだけ効く。
+   * 🔑 判定は `findSimpleInline` の 1 本を呼ぶ ── 自前で綴りを写さない(§7)。
+   * ⚠ 図案の字が当たった**後**に問う ── `:` の位置ごとに L-6 の走査を回さない。
+   */
+  if (findSimpleInline(state.src, state.pos, state.posMax) !== null) return false;
   // ⚠ `silent` は「試すだけ」── 位置だけ進めて token を積まない(markdown-it の作法)
   if (!silent) {
     const token = state.push('pkc_icon', 'span', 0);

@@ -39,8 +39,19 @@ const LABELS: ReadonlyMap<string, string> = new Map(
   TILE_ICON_CHOICES.map((c) => [c.name as string, c.label]),
 );
 
-/** 語に使える字。⚠ **小文字と数字と `-` だけ**(`check-box` が唯一の `-` 入り)。 */
-const NAME_RE = /^:([a-z][a-z0-9-]{0,23}):/;
+/**
+ * 語に使える字。⚠ **小文字と数字と `-` だけ**(`check-box` が唯一の `-` 入り)。
+ *
+ * 🔑 **`y`(sticky)で当てる** ── `src.slice(start)` を作ると、**本文の 1 文字ごとに
+ *   残り全部の写しができる**(この規則は位置ごとに呼ばれる)。`lastIndex` を置けば
+ *   写さずにその場所から当たる。
+ * ⚠ `lastIndex` は**呼ぶたびに必ず置く**(状態を持ち回る正規表現なので、
+ *   置き忘れると前回の続きから当たる)。
+ * ⚠ 長さの上限(24 字)は**守る意味がある** ── 表のいちばん長い名前は `check-box` の
+ *   9 字なので、これを緩めても結果は変わらないように見えるが、緩めると
+ *   **本文中の長い `:…:` を 1 つずつ表に問い合わせる**ことになる(門の意味は速さである)。
+ */
+const NAME_RE = /:([a-z][a-z0-9-]{0,23}):/y;
 
 export interface IconShortcode {
   /** 図案の名前(内部語)。 */
@@ -63,8 +74,15 @@ export interface IconShortcode {
  *   🔑 先に在る記法を壊さない ── 動線を 1 つも減らさない(user 裁定 2026-08-07)。
  */
 export function iconShortcodeAt(src: string, start: number): IconShortcode | null {
+  /**
+   * ⚠ **正しさには要らない**(下の `NAME_RE` が `:` から始まることを要求している)──
+   *   1 文字ごとに正規表現を回さないための**早道**である。
+   * 🔑 no-op ではないが「これが無いと壊れる」でもない ── 外しても出力は 1 バイトも
+   *   変わらない(だから変異試験では必ず生き延びる。CLAUDE.md §3)。
+   */
   if (src.charCodeAt(start) !== 0x3a /* : */) return null;
-  const m = NAME_RE.exec(src.slice(start));
+  NAME_RE.lastIndex = start;
+  const m = NAME_RE.exec(src);
   if (m === null) return null;
   const name = m[1]!;
   const label = LABELS.get(name);

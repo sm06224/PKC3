@@ -788,6 +788,22 @@ describe('「図案」を押すと絵の表から選ぶ(#853 段①)', () => {
     );
   });
 
+  /**
+   * 🔴 **開いている間に選択位置が動いても、控えた元の位置に入る**
+   *   (変異試験 M20 が教えた ── 控えを使わず「いまの選択位置」を読む変異が生き延びた。
+   *   **差が出る入力が 1 つも無かった**ため)。
+   * ⚠ 実物では `<dialog>` が焦点を借りて返すが、**選択位置までは返さない** ──
+   *   だから開く前に控える(`insert-date` が実ブラウザで踏んだのと同じ形)。
+   */
+  it('🔴 開いている間に選択位置が動いても、控えた元の位置に入る', async () => {
+    const { ta } = await openPicker('まえうしろ', 2);
+    // ⚠ 器が開いている間に選択位置が動く(実機では焦点の貸し借りで起きる)
+    ta.setSelectionRange(0, 0);
+    picks().find((b) => b.getAttribute('data-pkc-icon-name') === 'home')!.click();
+    await tick();
+    expect(ta.value, '控えた位置ではなく、動いた後の位置に入った').toBe('まえ:home:うしろ');
+  });
+
   it('⚠ 入った字は、そのまま絵になる字である(挿す側と読む側が同じ綴り)', async () => {
     const { ta } = await openPicker();
     picks().find((b) => b.getAttribute('data-pkc-icon-name') === 'star')!.click();
