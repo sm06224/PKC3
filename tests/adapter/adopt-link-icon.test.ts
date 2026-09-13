@@ -25,6 +25,9 @@ import { stubStamps } from '../helpers/store-stamps';
 
 const tick = (ms = 20): Promise<unknown> => new Promise((r) => setTimeout(r, ms));
 
+/** 取り込みの答え(binder の service の戻り)。 */
+type AdoptResult = { ok: true; assetKey: string } | { ok: false; why: string };
+
 function meta(lid: string, title: string): EntryMeta {
   return {
     lid,
@@ -115,7 +118,14 @@ describe('押し所の出し分け(#856 段②)', () => {
     const h = setup(urlBody());
     await tick();
     expect(h.btn(), '押し所が出ていない').not.toBeNull();
-    expect(h.btn()!.getAttribute('data-pkc-url'), '飛び先を器が持っていない').toBe('https://e.test/');
+    /**
+     * ⚠ **器は飛び先を持たない**(2026-09-13 に直した)── 押した器から読むと
+     *   `OBJECT_LONE`(対象が要るのに出口が 1 か所)に入り、**その面を畳むと
+     *   画面から消える**種類の操作になる。飛び先は state(いま開いているノート)から引く。
+     * 🔑 「本当に飛び先が届いているか」は、下の「取りに行く」の test が
+     *   `toHaveBeenCalledWith` で見る。
+     */
+    expect(h.btn()!.getAttribute('data-pkc-url'), '器が飛び先を持ってしまっている').toBeNull();
   });
 
   it('⚠ 添付の HTML には出ない(取りに行く先が無い)', async () => {
@@ -168,7 +178,7 @@ describe('押したときに何が起きるか(#856 段②)', () => {
     expect(h.bodies.a1, '取れていないのに鍵を書いた').not.toContain('app_icon_asset_key');
   });
 
-  it('⚠ 押している間は押せない(連打で同じサイトへ何度も出ない)', async () => {
+  it('⚠ 連打しても、同じサイトへ 2 度出ない', async () => {
     /**
      * ⚠ **箱に入れて受ける** ── 素の変数に入れると、tsc は「閉包が走った」ことを
      *   見ないので `null` に絞り、呼べなくなる(`Type 'never' has no call signatures`)。
@@ -185,10 +195,92 @@ describe('押したときに何が起きるか(#856 段②)', () => {
     const b = h.btn()!;
     b.click();
     await tick();
-    expect(b.disabled, '飛んでいる間も押せる').toBe(true);
+    /**
+     * ⚠ **`disabled` で見ない**(2026-09-13 に作りを変えた)── 立てると
+     *   **焦点が外れる**ので、いまは帳簿で止めている。見るのは**振る舞い**である。
+     */
     b.click();
     expect(adopt, '連打で 2 度出た').toHaveBeenCalledTimes(1);
+    // ⚠ 空振り防止 ── 器を触っていないこと(焦点が生きる形)も見る
+    expect(b.disabled, '押せなくして焦点を落としている').toBe(false);
     held.release?.();
+  });
+});
+
+describe('押している間・押した後に、user が置き去りにならない(#856 段②)', () => {
+  /**
+   * 飛んでいる取り込みを、こちらの好きなときに終わらせる台。
+   * ⚠ **箱に入れて受ける** ── 素の変数だと tsc が `null` に絞って呼べなくなる。
+   */
+  function inFlight() {
+    const held: { done: ((r: AdoptResult) => void) | null } = { done: null };
+    const adopt = vi.fn(
+      () =>
+        new Promise<AdoptResult>((r) => {
+          held.done = r;
+        }),
+    );
+    return { adopt, held };
+  }
+
+  it('🔴 押している間、何をしているかを字で言う(薄くなるだけにしない)', async () => {
+    const f = inFlight();
+    const h = setup(urlBody(), f.adopt);
+    await tick();
+    const b = h.btn()!;
+    const before = b.textContent;
+    b.click();
+    await tick();
+    expect(b.textContent, '押しても字が変わらない(反応が無いように見える)').not.toBe(before);
+    expect(b.textContent ?? '', '何をしているか言っていない').toContain('取りに行っています');
+    f.held.done?.({ ok: true, assetKey: 'k1' });
+    await tick(40);
+  });
+
+  /**
+   * 🔴 **鍵だけで使う人の焦点を、置き去りにしない**(2026-09-13、動線レビュー)。
+   *
+   * ⚠ `disabled` を立てた瞬間に焦点は外れ、取り込みが通ると**箱ごと作り直される** ──
+   *   戻さないと `body` へ落ちて、**画面の先頭から Tab をやり直す**ことになる。
+   * ⚠ 面の側の仕掛け(`refocusPick`)は**ここでは効かない**(組み直しの前に
+   *   もう焦点が外れている)ので、**押した所で預かって、終わったところで戻す**。
+   */
+  it('🔴 押した後、焦点がその押し所へ戻る', async () => {
+    const h = setup(urlBody(), async () => ({ ok: true as const, assetKey: 'k1' }));
+    await tick();
+    const b = h.btn()!;
+    b.focus();
+    // 前提 ── 本当に焦点が在る(ここが崩れると以降は何も見ていない)
+    expect(document.activeElement, '前提が崩れている(焦点が乗っていない)').toBe(b);
+    b.click();
+    await tick(40);
+    const now = h.btn();
+    expect(now, '押し所が消えた').not.toBeNull();
+    expect(document.activeElement, '焦点が置き去りになった(先頭から Tab をやり直す)').toBe(now);
+  });
+
+  /**
+   * 🔴 **取れたのに入れられないことがある**(2026-09-13、着地前レビュー)。
+   *
+   * ⚠ `SET_APP_TILE` は `phase !== 'ready'` を**黙って捨てる**(押し直せば済む設定の
+   *   ための作法)。⚠ ところがここは**取りに行った後**なので、捨てられると
+   *   「押したのに何も起きない」になり、しかも押し直すと**通信がもう 1 往復**する。
+   * 🔑 窓は実在する ── 取りに行っている間に**別のノートの編集を始められる**。
+   */
+  it('🔴 取れたのに入れられなかったら、そう言う(黙って捨てない)', async () => {
+    const f = inFlight();
+    const h = setup(urlBody(), f.adopt);
+    await tick();
+    h.btn()!.click();
+    await tick();
+    // ⚠ 取りに行っている間に、別のノートの編集が始まる(`phase` はアプリ全体で 1 つ)
+    h.d.dispatch({ type: 'START_EDIT' });
+    // 前提 ── 本当に `ready` でなくなった(ここが崩れると以降は何も見ていない)
+    expect(h.d.getState().phase, '前提が崩れている').not.toBe('ready');
+
+    f.held.done?.({ ok: true, assetKey: 'k1' });
+    await tick(40);
+    expect(errorOf(h) ?? '', '黙って捨てた(押したのに何も起きない)').toContain('入れられませんでした');
   });
 });
 

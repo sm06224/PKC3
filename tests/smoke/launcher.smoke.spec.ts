@@ -2467,3 +2467,67 @@ test('🔴 目次を見せて起動すると、アプリがノートの一覧を
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **リンクを足して、リンク先の印を取り込む**(#856 段②)。
+ *
+ * ⚠ **この動線には検査が 1 件も無かった** ── 「リンクを足す」(#401)も、
+ *   段② で足した「リンク先の印を取り込む」も、smoke を全数 grep して **0 件**だった。
+ *   🔑 CLAUDE.md の「**新しく作った動線に検査が 1 つも無くても、全量は緑**」そのもの。
+ *
+ * 🔑 **足し先はこのアプリ自身のアドレス**にした ── 外へ 1 バイトも出ないので
+ *   結果が揺れない。そして `index.html` は自分で
+ *   `<link rel="icon" href="./icon.svg">` を宣言しているので、
+ *   **2 段構えの 2 段目(ページを読んで、サイトが指している印を取る)が本当に通る**。
+ * ⚠ 1 段目(`/favicon.ico`)は preview には無いので、そこは**外れる側**を通る ──
+ *   つまりこの 1 本で **2 段とも**踏んでいる。
+ *
+ * ⚠ **起動を 1 つ増やした**(491 → 492 / 予算 500)。理由:URL のタイルを作る
+ *   smoke が**1 本も無い**ので、既に在る道中に assert を足すことができない。
+ */
+test('🔴 リンクを足して、リンク先の印を取り込む (#856 段②)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+  await clickReal(page, '[data-pkc-browse="launcher"]');
+
+  // ① 「リンクを足す」── 足し先はこのアプリ自身(外へ出ない)
+  const here = new URL(page.url()).origin + new URL(page.url()).pathname;
+  await page.locator('[data-pkc-field="launcher-add-name"]').fill('じぶん');
+  await page.locator('[data-pkc-field="launcher-add-url"]').fill(here);
+  await clickReal(page, '[data-pkc-field="launcher-add-go"]');
+
+  const tile = page.locator('[data-pkc-field="launcher-list"] [data-pkc-tile-kind="url"]');
+  await expect(tile, 'リンクを足したのにタイルが出ない').toHaveCount(1);
+
+  // ② 1 回押すと、右の列にそのノートが出る(2 回押すと開く、の 1 回目)
+  await tile.first().click();
+  const adopt = page.locator('[data-pkc-field="adopt-link-icon"]');
+  await expect(adopt, '押し所が出ていない(アドレスの在るノートなのに)').toHaveCount(1);
+  // ⚠ 対照群 ── アドレスが在るので「アプリとして登録」のチェックは出さない
+  await expect(
+    page.locator('[data-pkc-field="app-register"]'),
+    '効かないチェックを出している',
+  ).toHaveCount(0);
+
+  // ③ 押す ── 押している間は押せない
+  await adopt.click();
+  // ④ 取り込めたら、一覧のタイルに絵が出る
+  await expect(
+    tile.first().locator('img[data-pkc-asset-key]'),
+    '取り込んだのに、一覧に絵が出ない',
+  ).toHaveCount(1, { timeout: 15_000 });
+  // ⚠ **`toBeEnabled()` では見ない** ── いまは `disabled` を立てない作りなので、
+  //    それは**常に真**(空振り)である。見るのは**字が戻ったか**である。
+  await expect(adopt, '終わったのに「取りに行っています…」のまま').toHaveText('リンク先の印を取り込む');
+
+  /**
+   * ⚠ **1 段目の空振りは出る** ── preview に `/favicon.ico` は無いので、
+   *   ブラウザ自身が 404 を console へ出す。**それは製品の誤りではない**。
+   * 🔑 名指しで 1 種類だけ外す(全体の既知ノイズに足すと、**どの spec でも
+   *   本物の 404 が消える**)。
+   */
+  expect(
+    errors.filter((e) => !e.includes('favicon.ico')),
+    '思っていない誤りが出た',
+  ).toEqual([]);
+});

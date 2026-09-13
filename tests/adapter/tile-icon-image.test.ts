@@ -17,6 +17,8 @@ import { BrowseRouter } from '../../src/adapter/ui/render/browse';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { GroupFoldStore } from '../../src/adapter/ui/render/group-fold';
 import { withBuiltinTiles, type LauncherTile } from '../../src/features/launcher/tiles';
+import { readFileSync } from 'node:fs';
+import { blocksFor, stripComments, withoutMedia } from '../helpers/css-blocks';
 
 const tile = (over: Partial<LauncherTile>): LauncherTile => ({
   lid: 'u1',
@@ -217,5 +219,40 @@ describe('タブを出たら、借りた絵を返す(#856 段②)', () => {
 
     browse.render(state, 'list');
     expect(disposed, 'タブを出たのに握ったまま(行き来した回数ぶん積み上がる)').toEqual(['k1']);
+  });
+});
+
+/**
+ * 🔴 **取り込んだ印は、器に収まっている**(#856 段②、2026-09-13 の動線レビュー)。
+ *
+ * ⚠ 直す前は `width` も `height` も `object-fit` も無かった ── favicon は
+ *   **180x180 を置いているサイトが普通に在る**(`apple-touch-icon`)ので、
+ *   1 つ取り込んだだけで**行の高さが伸び、隣のタイルが読みにくくなる**。
+ * ⚠ happy-dom は**版面を組まない**ので、崩れそのものは unit では見えない ──
+ *   だから**規則が在ること**を見る(CLAUDE.md「計器の名前を主張として読む」)。
+ */
+describe('取り込んだ印が器を壊さない(#856 段②)', () => {
+  const decls = (): string => {
+    const css = withoutMedia(stripComments(readFileSync('src/styles/app.css', 'utf-8')));
+    const got = blocksFor(css, "[data-pkc-field='tile-icon-img']");
+    // ⚠ 空振り防止 ── 規則が 1 つも引けていないなら、下は何も見ていない
+    expect(got.length, '絵を収める規則が 1 つも無い').toBe(1);
+    return got[0]!;
+  };
+
+  it('🔴 大きさを決めている(器からはみ出さない)', () => {
+    const d = decls();
+    expect(d, '幅を決めていない').toMatch(/width:\s*\d+px/);
+    expect(d, '高さを決めていない(行が伸びる)').toMatch(/height:\s*\d+px/);
+  });
+
+  it('🔴 縦横の比を保つ(潰れた絵を出さない)', () => {
+    expect(decls(), '比を保っていない').toMatch(/object-fit:\s*contain/);
+  });
+
+  it('⚠ 器(20px)より小さい ── 題名の左端が他のタイルと揃う', () => {
+    const w = /width:\s*(\d+)px/.exec(decls())?.[1];
+    expect(w, '幅が読めない').toBeDefined();
+    expect(Number(w), '器(20px)からはみ出す大きさを指定している').toBeLessThanOrEqual(20);
   });
 });

@@ -163,6 +163,16 @@ export const PAINTED_ATTR = 'data-pkc-painted';
  */
 const READ_POSITION_CAP = 200;
 
+/**
+ * 🔴 **組み直しをまたいで焦点を戻す押し所**(#856 段②で 1 つ増えた)。
+ *
+ * ⚠ ここに載っていない押し所は、押した後に焦点が `body` へ落ちる ──
+ *   鍵だけで使う人は**画面の先頭から Tab をやり直す**ことになる。
+ * ⚠ ただし**押した瞬間に焦点を外す作り**(`disabled` を立てる等)にすると、
+ *   ここへ足しても**間に合わない**(組み直しの時点で、もう外れている)。
+ */
+const REFOCUS_ACTIONS: readonly string[] = ['pick-app-icon', 'adopt-link-icon'];
+
 export class DetailRenderer {
   private readonly region: HTMLElement;
   private readonly assets: AssetLender | null;
@@ -266,24 +276,33 @@ export class DetailRenderer {
   private readonly blockedKinds = new Map<string, Set<SandboxBlockedKind>>();
   private bodyHost: HTMLElement | null = null;
   /**
-   * いま焦点が**絵の一覧の中**に在れば、その絵の名前(「なし」は空文字)を返す。
+   * いま焦点が**添付の設定の押し所**に在れば、それを指す鍵を返す。
+   *
    * ⚠ 面の外に焦点があるときは `null` ── 打っている欄から焦点を奪わないため。
+   * 🔴 **絵の一覧だけを見ていた**(2026-09-13、動線レビュー)── 同じ箱に在る
+   *   「リンク先の印を取り込む」(#856 段②)も押すと本文が変わって箱ごと作り直される
+   *   ので、**鍵だけで使う人の焦点が `body` へ落ちて戻らなかった**。
+   * 🔑 だから**押し所の名前で拾う** ── 同じ箱へ押し所を足す人は、
+   *   `REFOCUS_ACTIONS` に 1 行足すだけでよくなる。
    */
-  private focusedPickName(): string | null {
+  private focusedPickName(): { action: string; name: string | null } | null {
     const active = this.region.ownerDocument.activeElement;
     if (!(active instanceof HTMLElement) || !this.region.contains(active)) return null;
-    return active
-      .closest('[data-pkc-action="pick-app-icon"]')
-      ?.getAttribute('data-pkc-icon-name') ?? null;
+    const hit = active.closest<HTMLElement>('[data-pkc-action]');
+    if (hit === null || !this.region.contains(hit)) return null;
+    const action = hit.getAttribute('data-pkc-action') ?? '';
+    if (!REFOCUS_ACTIONS.includes(action)) return null;
+    return { action, name: hit.getAttribute('data-pkc-icon-name') };
   }
 
-  /** 組み直したあと、同じ絵のボタンへ焦点を戻す(消えていれば何もしない)。 */
-  private refocusPick(name: string): void {
-    this.bodyHost
-      ?.querySelector<HTMLElement>(
-        `[data-pkc-action="pick-app-icon"][data-pkc-icon-name="${name}"]`,
-      )
-      ?.focus();
+  /** 組み直したあと、同じ押し所へ焦点を戻す(消えていれば何もしない)。 */
+  private refocusPick(at: { action: string; name: string | null }): void {
+    // ⚠ 絵の一覧は**同じ名前の押し所が 50 個**在るので、絵の名前まで見て引く
+    const sel =
+      at.name === null
+        ? `[data-pkc-action="${at.action}"]`
+        : `[data-pkc-action="${at.action}"][data-pkc-icon-name="${at.name}"]`;
+    this.bodyHost?.querySelector<HTMLElement>(sel)?.focus();
   }
 
   /**
@@ -2826,8 +2845,6 @@ function appTileControls(rawBody: string, mime: string): HTMLElement | null {
     adopt.type = 'button';
     adopt.setAttribute('data-pkc-action', 'adopt-link-icon');
     adopt.setAttribute('data-pkc-field', 'adopt-link-icon');
-    // ⚠ **押した物が何かは、押した要素が持つ**(§7)── 受け手が本文を引き直さない
-    adopt.setAttribute('data-pkc-url', String(fm['attachment.launcher_url'] ?? ''));
     adopt.textContent = 'リンク先の印を取り込む';
     // ⚠ 押す前に**何が起きるか**を言う(勝手に外へ出ないことを、押す前に伝える)
     adopt.title = '押したときに 1 回だけ、そのサイトへ取りに行きます';

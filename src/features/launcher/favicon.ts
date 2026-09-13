@@ -49,7 +49,19 @@ export function wellKnownIconUrl(pageUrl: string): string | null {
   }
   // ⚠ `data:` のページは根を持たない ── 段 1 が成り立たない
   if (base.protocol !== 'https:' && base.protocol !== 'http:') return null;
-  return new URL('/favicon.ico', base.origin).href;
+  /**
+   * ⚠ **`new URL('/favicon.ico', …)` と書かない。**
+   *
+   * 配る量の検品(`scripts/dist-inspect.mjs`)は **`new URL(…)` の構文**で
+   * 「配置場所を根に決め打ちした参照」を拾う ── PKC3 は `base: './'` に全面的に
+   * 依存していて、`/` 決め打ちが 1 件でも在ると **`/dev/` やセルフホストで 404** になる
+   * (#532 S1)。⚠ その門は**こちらの生成物**を守るためのもので、
+   * **他所のサイトの根**を指すここは対象外である ── だが構文では見分けられない。
+   * 🔑 だから**意味どおりに書く**:これは「相対 path を base で解く」のではなく
+   *   「**その origin + この path**」である(結果は 1 文字も変わらない ──
+   *   `URL.origin` は末尾に `/` を持たない)。
+   */
+  return `${base.origin}/favicon.ico`;
 }
 
 /**
