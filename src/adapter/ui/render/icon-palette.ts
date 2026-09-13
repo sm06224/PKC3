@@ -29,6 +29,16 @@ import { iconSpan } from './icons';
 /** 押し所に書く「どの絵か」。⚠ **空文字 = なし(外す)**。 */
 export const ICON_NAME_ATTR = 'data-pkc-icon-name';
 
+/**
+ * 🔴 **選べる絵の数**(「なし」は数えない)。
+ *
+ * ⚠ **呼び側に `TILE_ICON_CHOICES` を読ませない** ── 読ませると表が 2 本になり、
+ *   絵を 1 つ足した日に片方だけ増える(`tests/adapter/icon-palette.test.ts` が落とす)。
+ * 🔑 使い所は**畳んだときの見出し**(「絵から選ぶ(49)」)── 開く前に
+ *   「どれだけ出るか」が分かると、押すかどうかを決められる(#770 ④)。
+ */
+export const ICON_CHOICE_COUNT = TILE_ICON_CHOICES.length;
+
 export interface IconPaletteSpec {
   /** いま付いている絵の名前(空なら「なし」に枠が付く)。 */
   readonly current: string;

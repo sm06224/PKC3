@@ -148,6 +148,47 @@ describe('目印を絵から選ぶ(#770 段②)', () => {
     expect(wrong, '押す絵と書き込む名前が食い違っている').toEqual([]);
   });
 
+  /**
+   * 🔴 **絵の一覧は畳んでおく。ただし既に選んであるときは開く**
+   * (#770 ④。user 裁定 2026-09-13「畳む。選んである時は開く」)。
+   *
+   * ⚠ 直す前は **50 個が常に並んでいた** ── 添付の設定は「名前 / 登録 / グループ /
+   *   アイコン」を触りに来る所なのに、その下の絵の表が面の大半を占めていた。
+   * 🔑 **両方向を見る** ── 畳む側だけだと、「常に畳む」実装でも緑になる
+   *   (選んでいるのに隠れる = いま何を選んでいるか見えない、が通る)。
+   */
+  it('🔴 まだ選んでいないときは、絵の一覧が畳まれている', async () => {
+    const h = setup('');
+    await tick(20);
+    const pick = h.q<HTMLDetailsElement>('[data-pkc-field="app-icon-pick"]');
+    expect(pick, '畳む器が無い').not.toBeNull();
+    expect(pick!.open, '選んでいないのに 50 個が開いている').toBe(false);
+    /**
+     * ⚠ **表そのものは組んである**(畳んでいるだけ)── 組まない実装にすると、
+     *   開いた瞬間に組む待ちが入り、`aria-pressed` を読む既存の検査が空振りする。
+     */
+    expect(
+      pick!.querySelectorAll('[data-pkc-action="pick-app-icon"]').length,
+      '畳んだら表ごと消えている',
+    ).toBe(TILE_ICON_CHOICES.length + 1);
+    // 🔑 開く前に「どれだけ出るか」が字で分かる(押すかどうかを決められる)
+    expect(pick!.querySelector('summary')?.textContent, '件数が出ていない').toBe(
+      `絵から選ぶ(${TILE_ICON_CHOICES.length})`,
+    );
+  });
+
+  it('🔴 既に選んであるときは、最初から開いている(何を選んだか隠れない)', async () => {
+    const h = setup('calendar');
+    await tick(20);
+    const pick = h.q<HTMLDetailsElement>('[data-pkc-field="app-icon-pick"]');
+    expect(pick!.open, '選んであるのに畳まれている(いま何を選んでいるか隠れる)').toBe(true);
+    // ⚠ 空振り防止 ── 開いているだけでなく、選んだ絵に印が付いていること
+    expect(
+      h.btn('calendar')?.getAttribute('aria-pressed'),
+      '開いているのに、選んだ絵に印が無い',
+    ).toBe('true');
+  });
+
   it('🔴 押すと、その絵で書込が飛ぶ', async () => {
     const h = setup('');
     await tick(20);

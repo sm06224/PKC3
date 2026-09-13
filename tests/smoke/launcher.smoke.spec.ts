@@ -1666,6 +1666,40 @@ test('🔴 登録 → タイル → SPA が動き、開き直しても続きが�
   // ⚠ 欄のほうも空になる（画面と本文が食い違わない）
   await expect(iconField, '欄に古い値が残っている').toHaveValue('');
 
+  /**
+   * 🔴 **外した直後は、絵の一覧が畳まれる ── そこから開いて選び直せる**
+   * (#770 ④。user 裁定 2026-09-13「畳む。選んである時は開く」)。
+   *
+   * ⚠ **この経路は、足した日には 1 本も検査が無かった** ── 既存の smoke は
+   *   どちらも**先にアイコンを埋めてから**表を見るので、表は自動で開いている。
+   *   つまり「**畳まれた状態から `summary` を押して開く**」を、
+   *   unit も smoke も**一度も通していなかった**(着地前の smoke が指摘した)。
+   * 🔑 起動は 1 つも足さない ── 「なし」を押した直後が**畳まれている唯一の場面**
+   *   なので、この道中で見る(`scripts/smoke-budget.mjs`)。
+   */
+  const pick = page.locator('[data-pkc-field="app-icon-pick"]');
+  await expect(pick, '畳む器が出ていない').toBeVisible();
+  // ⚠ 対照群 ── さっきまでは開いていた(外した結果として畳まれた、が言える)
+  await expect(pick, '外したのに畳まれていない').not.toHaveAttribute('open', /.*/);
+  const folded = () => pick.locator('[data-pkc-action="pick-app-icon"]');
+  // 🔴 畳んでいる間は、絵は**押せない所に在る**(見えていない)
+  await expect(folded().first(), '畳んでいるのに絵が見えている').toBeHidden();
+  await clickReal(page, '[data-pkc-field="app-icon-pick"] > summary');
+  await expect(pick, '「絵から選ぶ」を押しても開かない').toHaveAttribute('open', /.*/);
+  // 🔴 開いたら**端まで押せる**(dead click と occlusion まで見る)
+  await expectReachable(page, folded().last());
+  await clickReal(page, '[data-pkc-action="pick-app-icon"][data-pkc-icon-name="map"]');
+  await expect(tileIcon, '畳んだ所から選んだ絵がタイルに出ない').toHaveAttribute(
+    'data-pkc-symbol',
+    'map',
+    { timeout: 15000 },
+  );
+  // ⚠ 選んだので、次の描画では**開いたまま**になる(いま何を選んでいるかが隠れない)
+  await expect(pick, '選んだのに畳まれた(何を選んだか隠れる)').toHaveAttribute('open', /.*/);
+  // 🔑 後の段は「目印なし」を前提にしているので、戻しておく
+  await clickReal(page, '[data-pkc-action="pick-app-icon"][data-pkc-icon-name=""]');
+  await expect(tileIcon, '戻せない').not.toHaveAttribute('data-pkc-symbol', /.*/);
+
   // ③ 🔴 押すと**アプリが動く**
   const open = async (): Promise<Record<string, string | null>> => {
     // ⚠ **2 回押す**(#857 段①b)── 1 回目は印が付くだけ

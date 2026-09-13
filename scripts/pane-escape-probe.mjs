@@ -55,6 +55,25 @@ const SELS = {
   戻す口_inspector: '[data-pkc-action="toggle-pane"][data-pkc-pane="inspector"]',
   戻す口_append: '[data-pkc-action="toggle-pane"][data-pkc-pane="append"]',
   パレットを開く: '[data-pkc-action="open-palette"]',
+  /**
+   * 🔴 **スマホでは、パレットへは `⋯` から届く**(2026-09-13 に足した)。
+   *
+   * ⚠ 足す前、この probe は狭い窓で**必ず「判定不能」**になっていた ──
+   *   `open-palette` のボタンは左の列(`collectionBar`)の中に在り、
+   *   スマホでは本文ページを見ている間ずっと出ない。
+   *   🔑 だが**届かないわけではない**:`⋯`(`phone-menu`)を押すと開く menu に
+   *   「操作を探す」が在る(`binder.ts` の `'phone-menu'`)。
+   * ⚠ **同じ列には足さない** ── `⋯` は「パレットを開くボタン」ではなく
+   *   「パレットへ届く menu」である。混ぜると、直の口が消えた日に気づけない
+   *   (CLAUDE.md §4「計器の名前を、計器の見ている範囲より広く書かない」)。
+   */
+  'パレットへ届く⋯': '[data-pkc-field="phone-menu"]',
+  /**
+   * 🔴 **スマホでは、一覧へは「← 一覧」で戻る**(同日)。
+   * ⚠ 狭い窓に `toggle-pane[data-pkc-pane=sidebar]` は出ない ── 一覧は
+   *   畳まれているのではなく**別の頁**なので、戻す口の綴りが違う。
+   */
+  '戻す口_一覧ページ': '[data-pkc-field="phone-back"]',
   掴む帯: '[data-pkc-region="pane-grip"]',
   'shell の押せるもの': '[data-pkc-region="shell"] button:not([disabled])',
 };
@@ -73,6 +92,36 @@ for (const [width, height] of VIEWPORTS) {
   await page.goto(BASE, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('[data-pkc-region="shell"]', { timeout: 20000 });
   await page.waitForTimeout(500);
+  /**
+   * 🔴 **罠 0 ── お知らせのカードを先に畳む**(2026-09-13。probe が 2 回続けて
+   *   ここで 30 秒 timeout した)。
+   *
+   * ⚠ **これは製品の不具合ではない** ── 720px 以下では、お知らせは
+   *   **全画面で出る**と決めてある(user 指示「全画面でだせばいいじゃん。
+   *   不要ならみんな設定するでしょ?」)。`tests/smoke/helpers.ts` の
+   *   `dismissAnnounce` が同じことをしている ── この probe だけが
+   *   **その作法を持っていなかった**。
+   * ⚠ **出ていることを先に確かめてから畳む** ── 出ていない回に黙って通すと、
+   *   「畳んだから触れた」のか「最初から出ていなかった」のか読めなくなる
+   *   (`dismissAnnounce` の docstring と同じ理由)。
+   * 🔑 そして**畳む口が見えていたか**を記録する ── 見えていなければ
+   *   「カードが全部を覆って出口も無い」= 製品の行き止まりなので、
+   *   **probe の話ではなく本題の答え**になる。
+   */
+  const announceSeen = await page.locator('[data-pkc-region="announce"]').isVisible();
+  const dismissSeen = await page.locator('[data-pkc-action="dismiss-announce"]').isVisible();
+  if (announceSeen) {
+    if (!dismissSeen) {
+      throw new Error(
+        `${width}x${height}: お知らせが出ているのに畳む口が見えない(製品の行き止まり)`,
+      );
+    }
+    await page.click('[data-pkc-action="dismiss-announce"]');
+    await page.waitForTimeout(200);
+  }
+  console.log(
+    `[お知らせ] ${width}x${height}: 出ていた=${announceSeen} 畳む口が見えた=${dismissSeen}`,
+  );
   // ⚠ 罠 1 ── ノートが 0 件だと追記欄も情報ペインも出ない
   await page.click('[data-pkc-field="create-pick"]');
   await page.click('[data-pkc-region="create-menu"] [data-pkc-archetype="text"]');
@@ -106,10 +155,24 @@ if (control.length !== VIEWPORTS.length) {
   console.error(`⚠ 対照群が ${control.length} 行しか無い(窓は ${VIEWPORTS.length} 通り)`);
   process.exit(2);
 }
-const brokenGauge = control.filter((r) => r['パレットを開く'] === 0);
+/**
+ * 🔴 **判定不能でも、採った記録は必ず出す**(2026-09-13)。
+ *
+ * ⚠ 直す前は `process.exit(2)` が先だったので、**最後まで採れていた窓の行まで
+ *   捨てていた** ── 次に回す人は「何が起きたか」を 1 行も読めない。
+ * 🔑 記録は無条件に出し、**読んでよいかどうかを後ろに書く**。
+ */
+console.log(JSON.stringify(rows, null, 1));
+
+/**
+ * 🔴 **パレットへ「届く」かで見る**(直のボタンの有無ではない)。
+ * ⚠ 狭い窓では直の口が常に 0 なので、直の口だけを見ると
+ *   **製品の話ではなく計器の話**で毎回止まる(2026-09-13 に実際に止まった)。
+ */
+const reachPalette = (r) => r['パレットを開く'] + r['パレットへ届く⋯'];
+const brokenGauge = control.filter((r) => reachPalette(r) === 0);
 if (brokenGauge.length > 0) {
-  console.error('⚠ 判定不能: 畳む前にパレットが 0 件の窓がある(計器か描画の待ちが足りない)');
+  console.error('⚠ 判定不能: 畳む前からパレットへ届く口が 0 の窓がある(計器か描画の待ちが足りない)');
   console.error(JSON.stringify(brokenGauge, null, 1));
   process.exit(2);
 }
-console.log(JSON.stringify(rows, null, 1));

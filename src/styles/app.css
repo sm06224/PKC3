@@ -4639,6 +4639,26 @@ li[data-pkc-row-slot] {
   color: var(--fg);
 }
 
+/* 🔴 **添付の設定では、絵の一覧を畳んでおく**(#770 ④。user 裁定 2026-09-13
+ * 「畳む。選んである時は開く」)。
+ * ⚠ 出っぱなしだったのは**ここ 1 か所**で、同じ表を出す他の 2 か所
+ *   (本文へ図案を挿す / グループの目印を選ぶ)は押すまで出ない小窓である。
+ * ⚠ **`flex-basis` は器の側へ移す** ── 畳む器を挟んだので、親の flex が見るのは
+ *   `[data-pkc-palette]` ではなく `<details>` のほうになった
+ *   (移し忘れると、表が欄と同じ行へ回り込んで押し出す)。 */
+[data-pkc-field='app-icon-pick'] {
+  flex-basis: 100%;
+}
+[data-pkc-field='app-icon-pick'] > summary {
+  cursor: pointer;
+  padding: var(--s1) 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+[data-pkc-field='app-icon-pick'] > summary:hover {
+  color: var(--fg);
+}
+
 /* ── ファイラ ───────────────────────────────────── */
 [data-pkc-region='filer-breadcrumb'] {
   display: flex;
