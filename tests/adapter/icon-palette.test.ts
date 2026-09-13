@@ -104,3 +104,28 @@ describe('目印の表(#857 段②)', () => {
     );
   });
 });
+
+/**
+ * 🔴 **置き換えで落ちかけた性質**(#857 段②、2026-09-13)。
+ *
+ * ⚠ グループの小窓は「1 行選ぶ」の器(`pickRowInApp`)から**表へ置き換えた**。
+ *   あちらは **`↑` `↓` で行を移れた**が、**その性質は仕様書のどこにも無かった**ので、
+ *   表に替えたときに**黙って落ちていた**(CLAUDE.md §10)。
+ * ⚠ 落ちると、鍵だけで使う人は **`Tab` を 49 回**押すことになる ── 画面は
+ *   1 ドットも変わらないので、**誰も気づかない**。
+ * 🔑 だから**原文で**門を置く(happy-dom で `<dialog>` の焦点まで再現するより、
+ *   ここは「在ること」を確実に留めるほうが強い)。⚠ 弱い形だと自覚して使う。
+ */
+describe('置き換えで落とした性質を戻す(§10)', () => {
+  it('🔴 表でも矢印で移れる(器を替える前に在った性質)', () => {
+    const src = readFileSync('src/adapter/ui/render/app-dialog.ts', 'utf-8');
+    const at = src.indexOf('export function pickAppGroupIconInApp(');
+    expect(at, '目印の小窓が見つからない(名前が変わった)').toBeGreaterThan(0);
+    const body = src.slice(at, at + 4000);
+    for (const key of ['ArrowDown', 'ArrowUp', 'ArrowRight', 'ArrowLeft']) {
+      expect(body, `${key} で移れない(鍵だけの人が Tab を 49 回押す)`).toContain(key);
+    }
+    // ⚠ **外し忘れない** ── 器は使い回すので、次の確認でも矢印が絵を探しにいく
+    expect(body, '器に付けた聞き耳を外していない').toContain("removeEventListener('keydown'");
+  });
+});

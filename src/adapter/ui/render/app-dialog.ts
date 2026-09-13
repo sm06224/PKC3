@@ -610,10 +610,39 @@ export function pickAppGroupIconInApp(
     });
     f.body.append(palette);
 
+    /**
+     * 🔴 **矢印で絵を移れる**(2026-09-13。**置き換えで落としかけた**)。
+     *
+     * ⚠ ここは「1 行選ぶ」の器(`pickRowInApp`)から**表へ置き換えた**所である。
+     *   あちらは `↑` `↓` で行を移れたが、**その性質は仕様書のどこにも無かった**ので、
+     *   表に替えたときに**黙って落ちていた**(CLAUDE.md §10「置き換えられる側が
+     *   "ついでに" 提供していた性質」)。
+     * ⚠ 落ちると、鍵だけで使う人は **`Tab` を 49 回**押すことになる。
+     * 🔑 表なので**横向きも受ける** ── `←` `↑` で前、`→` `↓` で次(並びは 1 本なので、
+     *   折り返しは数えない ── 幅で変わる物を鍵の意味にしない)。
+     * ⚠ `Enter` は書かない ── 焦点の在るボタンはブラウザが `click` にしてくれる
+     *   (2 か所に書かない)。
+     */
+    const onArrow = (ev: KeyboardEvent): void => {
+      const by =
+        ev.key === 'ArrowDown' || ev.key === 'ArrowRight'
+          ? 1
+          : ev.key === 'ArrowUp' || ev.key === 'ArrowLeft'
+            ? -1
+            : 0;
+      if (by === 0) return;
+      const at = picks.findIndex((b) => b === f.dialog.ownerDocument.activeElement);
+      if (at < 0) return;
+      const next = picks[at + by];
+      if (next === undefined) return;
+      ev.preventDefault();
+      next.focus();
+    };
     const onOutside = (ev: MouseEvent): void => {
       // 🔑 暗い地を押すと `target` は `<dialog>` 自身になる(中身を押せば中身が target)
       if (ev.target === f.dialog) f.cancel.click();
     };
+    f.dialog.addEventListener('keydown', onArrow);
     f.dialog.addEventListener('click', onOutside);
 
     f.ok.textContent = '入れる';
@@ -631,6 +660,9 @@ export function pickAppGroupIconInApp(
     const at = picks.find((b) => b.getAttribute('aria-pressed') === 'true');
     (at ?? picks[0])?.focus();
     const answer = await answered;
+    // ⚠ 器に付けた物は**必ず外す** ── 器は使い回すので、外し忘れると
+    //    次の確認でも矢印が絵を探しにいく
+    f.dialog.removeEventListener('keydown', onArrow);
     f.dialog.removeEventListener('click', onOutside);
     // ⚠ 隠したままにしない ── 器は使い回すので、次の確認で受ける側が消える
     f.ok.hidden = false;
