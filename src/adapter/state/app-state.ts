@@ -3723,9 +3723,20 @@ function reduceCore(
       if (action.gen !== state.lockGen) return { state: released, events: [] };
       // 失敗(書けなかった)── ロックだけ解いて本文は触らない
       if (action.body === null) return { state: released, events: [] };
-      const ob = state.openBody;
-      if (ob?.lid !== action.lid) return { state: released, events: [] };
       const body = action.body;
+      const ob = state.openBody;
+      /**
+       * 🔴 **主の枠が別のノートを開いていても、留めた枠には映す**(#848、2026-09-13)。
+       *
+       * ⚠ 直す前はここで丸ごと捨てていた ── 留めた枠に出した設定を押すと、
+       *   **disk には書けるのに画面が 1 ドットも変わらない**(主の枠が別のノートを
+       *   開いていると `ob?.lid !== action.lid` で返っていたため)。
+       * 🔑 押した物と効く先を揃えた口(`data-pkc-target-lid`)を出す以上、
+       *   **その結果が戻る経路も同じ数だけ要る**(CLAUDE.md §7)。
+       */
+      if (ob?.lid !== action.lid) {
+        return { state: { ...released, splitBodies: syncSplitBody(state, action.lid, body) }, events: [] };
+      }
       /**
        * 🔴 **留めた枠にも追随させる**(#848、2026-09-13)。
        *

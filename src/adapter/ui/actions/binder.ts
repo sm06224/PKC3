@@ -204,6 +204,7 @@ import {
   openContextMenu,
 } from '../render/context-menu';
 import { chordHint, HINT_BLOCKED } from '../render/shortcut-hint';
+import { TARGET_LID_ATTR } from '../render/target-lid';
 import { structureText } from '@features/structure/structure-text';
 import {
   profileLineText,
@@ -1398,11 +1399,16 @@ const TAG_INPUT_ADD: ReadonlyMap<string, string> = new Map([
 ]);
 
 /**
- * 起動する相手の lid。**押したボタンの属性**を先に見る(2026-09-12)。
+ * **その口が効く先の lid**。**押した要素の属性**を先に見る(2026-09-12 / 2026-09-13)。
+ *
  * ⚠ 属性が無いときだけ `selectedLid` に落とす ── 古い DOM でも壊さないため。
+ * 🔴 **留めた枠(横に並べた枠)は選択と関係なく「その 1 件」を出す面**なので、
+ *   そこに在る口が `selectedLid` へ撃つと**押していないノートが書き換わる**。
+ *   だから起動だけでなく**設定の口も**ここを通す(#848)。
+ * 🔑 綴りは `render/target-lid.ts` の 1 か所(§7)。
  */
-function launchLid(dispatcher: Dispatcher, target: HTMLElement): string | null {
-  return target.getAttribute('data-pkc-launch-lid') ?? dispatcher.getState().selectedLid;
+function targetLid(dispatcher: Dispatcher, target: HTMLElement): string | null {
+  return target.getAttribute(TARGET_LID_ATTR) ?? dispatcher.getState().selectedLid;
 }
 
 const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
@@ -6293,7 +6299,8 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   (`binder.ts` の別の 2 か所と同じ action)。
    */
   'rename-attachment': (dispatcher, target) => {
-    const lid = dispatcher.getState().selectedLid;
+    // 🔴 **押した欄が対象を持つ**(#848)── 留めた枠でも、その枠のノートを改名する
+    const lid = targetLid(dispatcher, target);
     if (!lid || !(target instanceof HTMLInputElement)) return;
     const title = target.value.trim();
     // ⚠ 空にはしない(無題の添付を作らない)── 元の字へ戻す
@@ -6305,20 +6312,24 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   /**
    * ランチャーのタイル設定(P8 段⑭)。
-   * ⚠ 対象は**いま選んでいるノート** ── この 3 つは添付の画面にしか出ない
+   * 🔴 **対象は「押した欄」が持つ**(#848、2026-09-13)── 直す前は
+   *   `selectedLid` を読んでいたので、**留めた枠に出すと押していないノートが
+   *   書き換わる**。だから 2026-09-12 には**出さない**ことで塞いでいた。
+   *   いまは `APP_TILE_SAVED` が留めた枠の本文にも追随する(#848 の土台)ので、
+   *   **出したうえで、押した物へ撃つ**。
    */
   'toggle-app-tile': (dispatcher, target) => {
-    const lid = dispatcher.getState().selectedLid;
+    const lid = targetLid(dispatcher, target);
     if (lid && target instanceof HTMLInputElement)
       dispatcher.dispatch({ type: 'SET_APP_TILE', lid, registered: target.checked });
   },
   'set-app-group': (dispatcher, target) => {
-    const lid = dispatcher.getState().selectedLid;
+    const lid = targetLid(dispatcher, target);
     if (lid && target instanceof HTMLInputElement)
       dispatcher.dispatch({ type: 'SET_APP_TILE', lid, group: target.value.trim() });
   },
   'set-app-icon': (dispatcher, target) => {
-    const lid = dispatcher.getState().selectedLid;
+    const lid = targetLid(dispatcher, target);
     if (lid && target instanceof HTMLInputElement)
       dispatcher.dispatch({ type: 'SET_APP_TILE', lid, icon: target.value.trim() });
   },
@@ -6348,14 +6359,25 @@ const ACTIONS: Record<string, ActionHandler> = {
      * ⚠ 1 稿目は `target` の `data-pkc-url` を読んでいた。それだと
      *   `tests/action-outlets.test.ts` の **`OBJECT_LONE`**(対象が要るのに出口が
      *   1 か所しか無い操作)に入る ── **その面を畳むと画面から消える**種類の操作である。
-     * 🔑 ここは**指す先が 1 つしかない**(いま開いているノート)ので、state で足りる。
-     *   ⚠ 器から読むのは「同時に見えている兄弟のうち押した 1 つ」を採るときの作法であって、
-     *   選ぶ余地が無いときにまで使うと、**名前で呼べない操作を 1 つ増やす**ことになる。
+     * ⚠ 器から読むのは「同時に見えている兄弟のうち押した 1 つ」を採るときの作法である。
+     *
+     * 🔴 **2026-09-13 に「指す先は 1 つ」が成り立たなくなった**(#848)── 添付の設定を
+     *   **留めた枠にも出す**ようにしたので、主の枠とは**別のノート**の設定が同時に
+     *   画面へ出る。だから *lid* は押した要素から採る(= 兄弟のうち押した 1 つ)。
+     * ⚠ ただし **URL は相変わらず器から読まない** ── 飛び先を DOM に持たせると
+     *   `OBJECT_LONE` の意味(対象が要るのに出口が 1 か所)が壊れるうえ、
+     *   **本文と DOM のどちらが正しいか**が 2 か所になる。本文から引く。
      */
-    const open = dispatcher.getState().openBody;
-    const lid = open?.lid ?? null;
+    const st = dispatcher.getState();
+    const lid = targetLid(dispatcher, target);
     if (lid === null) return;
-    const url = String(parseFrontmatter(open?.body ?? '').meta['attachment.launcher_url'] ?? '');
+    /**
+     * 🔑 **本文は lid から引く** ── 主の枠が別のノートを開いていることがあるので、
+     *   `openBody` を無条件に読むと**別のノートのアドレス**を取りに行く。
+     */
+    const body =
+      st.openBody?.lid === lid ? st.openBody.body : (st.splitBodies.get(lid) ?? '');
+    const url = String(parseFrontmatter(body).meta['attachment.launcher_url'] ?? '');
     if (url === '') {
       dispatcher.dispatch({
         type: 'OP_FAILED',
@@ -6433,7 +6455,8 @@ const ACTIONS: Record<string, ActionHandler> = {
       });
   },
   'pick-app-icon': (dispatcher, target) => {
-    const lid = dispatcher.getState().selectedLid;
+    // 🔴 押した絵が「効く先」も持つ(#848)── 表は留めた枠にも出る
+    const lid = targetLid(dispatcher, target);
     if (!lid) return;
     const name = target.getAttribute('data-pkc-icon-name');
     // ⚠ 属性が無いときは撃たない(押した物が分からないまま目印を消さない)
@@ -7121,15 +7144,15 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   選択と関係なく「その 1 件」を出す面なので、そこで押すと**主の枠のノート**が
    *   開いていた。🔴 「ノートを渡して起動」は**確認に出る題名まで別のノート**になる。
    * 🔑 `download-asset` / `open-office` と同じ作法へ寄せた(`detail.ts` が
-   *   `data-pkc-launch-lid` を載せる)。⚠ 属性が無い版でも壊れないよう、
+   *   `data-pkc-target-lid` を載せる)。⚠ 属性が無い版でも壊れないよう、
    *   **属性 → 無ければ `selectedLid`** の順で読む。
    */
   'launch-asset': (dispatcher, target, services) => {
-    const lid = launchLid(dispatcher, target);
+    const lid = targetLid(dispatcher, target);
     if (lid) services.launchAsset?.(lid, { sameOrigin: false });
   },
   'launch-asset-raw': (dispatcher, target, services) => {
-    const lid = launchLid(dispatcher, target);
+    const lid = targetLid(dispatcher, target);
     if (lid) services.launchAsset?.(lid, { sameOrigin: true });
   },
   /**
@@ -7137,7 +7160,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    * だけ**出る(許してあれば普通の「起動」で口が開く ── `detail.ts`)。
    */
   'launch-asset-extension': (dispatcher, target, services) => {
-    const lid = launchLid(dispatcher, target);
+    const lid = targetLid(dispatcher, target);
     if (lid) services.launchAsset?.(lid, { extension: true });
   },
   /**

@@ -59,6 +59,7 @@ import { CANCEL_EDIT_HINT, COMMIT_EDIT_HINT, iconButton, markPrimary } from './i
 // 🔑 目印の表は**共有の 1 本**(2026-09-13)── 絵の一覧・「なし」・いま選んでいる物の
 //    示し方は、この面と小窓で**同じ物**を使う(2 か所に散らさない ── §7)
 import { buildIconPalette } from './icon-palette';
+import { markTargetLid } from './target-lid';
 import { buildFormatBar } from './format-bar';
 import { hasSourceSelection } from '../actions/copy-source';
 import {
@@ -2021,10 +2022,7 @@ export class DetailRenderer {
          *   **押した要素が対象を持つ**。⚠ 属性が無い版(古い DOM)でも壊れないよう、
          *   受け手は「属性 → 無ければ `selectedLid`」の順で読む。
          */
-        const launchOf = (b: HTMLElement): HTMLElement => {
-          b.setAttribute('data-pkc-launch-lid', lid);
-          return b;
-        };
+        const launchOf = (b: HTMLElement): HTMLElement => markTargetLid(b, lid);
         const run = launchOf(iconButton('launch-asset', '起動', 'launch-asset'));
         run.title = 'PKC3 から切り離して開きます(PKC3 の中身には触れません)';
         info.append(run);
@@ -2115,12 +2113,14 @@ export class DetailRenderer {
      *   側に居た。いまは**押したボタンが対象を持つ**(上の `launchOf`)。
      *   🔑 CLAUDE.md「門は面ごとではなく**口ごとに**要る」の、まさにその形である。
      */
-    if (this.pinnedLid === null) {
+    {
       const rename = document.createElement('input');
       rename.type = 'text';
       rename.setAttribute('data-pkc-action', 'rename-attachment');
       rename.setAttribute('data-pkc-field', 'attachment-rename');
       rename.setAttribute('aria-label', 'この添付の名前');
+      // 🔴 **押した欄が対象を持つ**(#848)── 留めた枠でも、その枠のノートに効く
+      markTargetLid(rename, lid);
       rename.value = entryTitle;
       // ⚠ 文言は**起きること**で書く(user 指示 2026-08-21)
       rename.title = '名前を書き換えて、この欄の外を押すと保存されます';
@@ -2136,7 +2136,7 @@ export class DetailRenderer {
        *   名前と違う」)。
        * 🔑 判定を 2 か所に置かない ── 器を出すかは 1 つの関数が答える。
        */
-      const tileBox = appTileControls(rawBody, meta.mime);
+      const tileBox = appTileControls(rawBody, meta.mime, lid);
       if (tileBox !== null) host.append(tileBox);
     }
 
@@ -2764,7 +2764,7 @@ function renderHistoryPanel(
  * ⚠ **汎用の frontmatter エディタは作らない**。ここに要るのは 3 つだけで、
  * 汎用にすると「何を書いていいか分からない欄」になる。
  */
-function appTileControls(rawBody: string, mime: string): HTMLElement | null {
+function appTileControls(rawBody: string, mime: string, lid: string): HTMLElement | null {
   const fm = parseFrontmatter(rawBody).meta;
   /**
    * 🔴 **URL のタイルも受ける**(#856 段①)── `attachment.launcher_url` が在れば、
@@ -2804,6 +2804,7 @@ function appTileControls(rawBody: string, mime: string): HTMLElement | null {
     check.type = 'checkbox';
     check.setAttribute('data-pkc-action', 'toggle-app-tile');
     check.setAttribute('data-pkc-field', 'app-register');
+    markTargetLid(check, lid);
     check.checked = fm['attachment.registered_as_app'] === true;
     const text = document.createElement('span');
     text.textContent = 'アプリとして登録';
@@ -2825,6 +2826,7 @@ function appTileControls(rawBody: string, mime: string): HTMLElement | null {
     input.type = 'text';
     input.setAttribute('data-pkc-action', action);
     input.setAttribute('data-pkc-field', name);
+    markTargetLid(input, lid);
     input.placeholder = placeholder;
     input.size = size;
     input.value = typeof value === 'string' ? value : '';
@@ -2846,12 +2848,13 @@ function appTileControls(rawBody: string, mime: string): HTMLElement | null {
     adopt.type = 'button';
     adopt.setAttribute('data-pkc-action', 'adopt-link-icon');
     adopt.setAttribute('data-pkc-field', 'adopt-link-icon');
+    markTargetLid(adopt, lid);
     adopt.textContent = 'リンク先の印を取り込む';
     // ⚠ 押す前に**何が起きるか**を言う(勝手に外へ出ないことを、押す前に伝える)
     adopt.title = '押したときに 1 回だけ、そのサイトへ取りに行きます';
     box.append(adopt);
   }
-  box.append(appIconPalette(fm['attachment.app_icon']));
+  box.append(appIconPalette(fm['attachment.app_icon'], lid));
   return box;
 }
 
@@ -2873,13 +2876,15 @@ function appTileControls(rawBody: string, mime: string): HTMLElement | null {
  *   2 つになった ── 器を `render/icon-palette.ts` へ取り出し、**出口だけここが付ける**
  *   (`data-pkc-action="pick-app-icon"` を binder が受ける)。
  */
-function appIconPalette(current: unknown): HTMLElement {
+function appIconPalette(current: unknown, lid: string): HTMLElement {
   return buildIconPalette({
     current: typeof current === 'string' ? current : '',
     field: 'app-icon-palette',
     ariaLabel: 'タイルの目印を選ぶ',
     each: (btn) => {
       btn.setAttribute('data-pkc-action', 'pick-app-icon');
+      // 🔴 **絵の 1 つ 1 つが効く先を持つ**(#848)── 表は留めた枠にも出る
+      markTargetLid(btn, lid);
     },
   });
 }
