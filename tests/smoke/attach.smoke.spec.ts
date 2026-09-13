@@ -5,7 +5,7 @@
 import { test, expect } from '@playwright/test';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { answerAppDialog, gotoApp, collectPageErrors, clickReal, expectImageRendered, createEntry, useSplitEditor, useListBrowse } from './helpers';
+import { answerAppDialog, gotoApp, collectPageErrors, clickReal, expectImageRendered, createEntry, useSplitEditor, useListBrowse, expectMainGapUnderBudget } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -221,6 +221,8 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
     gaps.sort((a, b) => b - a);
     return { max: Math.round(gaps[0] ?? 0), ticks: gaps.length };
   });
+  // ⚠ **下の `expectMainGapUnderBudget` も同じことを見るが、ここは残す** ──
+  //    対照群が死んでいるなら、**20 秒かかる取り出しを始める前に**落としたい
   expect(base.ticks, '対照群の心拍が取れていない(比べる相手が無い)').toBeGreaterThan(5);
   await page.evaluate(() => {
     const w = window as unknown as { __gaps: number[]; __hb: number };
@@ -248,11 +250,13 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
     const g = [...w.__gaps].sort((a, b) => b - a);
     return { max: Math.round(g[0] ?? 0), ticks: g.length };
   });
-  expect(load.ticks, '取り出し中の心拍が取れていない').toBeGreaterThan(5);
-  expect(
-    load.max,
-    `取り出し中にメインが ${load.max}ms 止まった(何もしていない間は ${base.max}ms)`,
-  ).toBeLessThan(base.max + 80);
+  // 🔑 **値は毎回 log に残る**(#878 ①)── 門も予算も `expectMainGapUnderBudget` が正本
+  expectMainGapUnderBudget('取り出し', {
+    maxGap: load.max,
+    base: base.max,
+    ticks: load.ticks,
+    baseTicks: base.ticks,
+  });
   await expect(page.locator('[data-pkc-region="entry-list"]')).toContainText('海.jpg');
   await expect(page.locator('[data-pkc-region="entry-list"]')).toContainText('山.jpg');
 
@@ -466,11 +470,9 @@ test('🔴 大きい添付を貼ってもメインスレッドが固まらない
 
   // ① 🔴 **実際に添付された**(空振り防止 ── 何も起きなければ当然止まらない)
   expect(m.added, '添付が作られていない(この次元を測れていない)').toBe(1);
-  // ② 心拍が回っていた(計器が死んでいたら最大欠測は 0 になる)
-  expect(m.ticks, '心拍が取れていない').toBeGreaterThan(5);
-  expect(m.baseTicks, '対照群の心拍が取れていない(比べる相手が無い)').toBeGreaterThan(5);
   /**
-   * ③ 🔴 **メインが止まっていない ── 対照群より目立って止まっていない**。
+   * ②③ 🔴 **心拍が回っていた + メインが止まっていない**(どちらも
+   * `expectMainGapUnderBudget` が見る ── 測った値は**毎回 log に残る**。#878 ①)。
    *
    * ⚠ ここは長らく `< 80` の**絶対値**だった。2026-09-09 に smoke を 4 本並べたら
    *   **112ms** で落ちた ── 4 つのブラウザが 4 コアを分け合うので、
@@ -482,10 +484,7 @@ test('🔴 大きい添付を貼ってもメインスレッドが固まらない
    * ⚠ 守る力は落ちない:壊れたときのメインは **500〜726ms**(ワーカーは 10〜14ms)
    *   なので、床が 100ms 級に上がっても**余裕をもって落ちる**。
    */
-  expect(
-    m.maxGap,
-    `メインスレッドが ${m.maxGap}ms 止まった(何もしていない間は ${m.base}ms)`,
-  ).toBeLessThan(m.base + 80);
+  expectMainGapUnderBudget('大きい添付を貼る', m);
 
   expect(errors).toEqual([]);
 });
