@@ -166,11 +166,49 @@ describe('割当の検め', () => {
     expect(contextsOverlap(['global'], ['row'])).toBe(true);
   });
 
+  /**
+   * 🔴 **鍵を持たない操作**(= 名前で呼ぶだけの操作。#582 段②-2)。
+   *
+   * ## なぜ「空にしない」を緩めたか
+   *
+   * 🔑 元の戒めの**目的**は「user が割当を変えたとき元へ戻せなくなる」ことの予防で、
+   *   **一度も鍵を持たない操作には当たらない**(戻る先が「割当なし」なので失われない)。
+   * 🔴 一方で、パレット(`palette-rows.ts`)は **この表だけを回して行を作る** ──
+   *   鍵を要求すると「**名前で呼べる = 鍵が割り当ててある**」になり、
+   *   鍵を付けられない操作(実測 **151 件**)が 1 つもパレットに出せない。
+   *
+   * ## ⚠ 身元で持つ(数で縛らない)
+   *
+   * 数で縛ると「**うっかり既定を消した**」と「**名前で呼ぶだけの操作を足した**」が
+   * 区別できない ── 足す人はここに id を書く。
+   *
+   * 🔑 **いまは空である**(段②-2 は器を開けるだけで、行は 1 つも増やさない)。
+   * ⚠ 空でも下の検査は空振りしない ── `KEYLESS` に載っていない全員が
+   *   「既定を持つ」側で検められる(= 62 件が実際に見られている)。
+   */
+  const KEYLESS: readonly string[] = [];
+
+  it('🔴 鍵を持たない操作の一覧は、身元で持つ', () => {
+    const ids = new Set(KEY_COMMANDS.map((c) => c.id));
+    for (const id of KEYLESS) {
+      expect(ids.has(id), `${id} は KEY_COMMANDS に無い(一覧が腐っている)`).toBe(true);
+    }
+    // ⚠ 空振り防止 ── 表そのものが空なら、下の「既定を持つ」検査も何も見ていない
+    expect(KEY_COMMANDS.length, '表が空(前提が崩れている)').toBeGreaterThan(20);
+  });
+
   it('🔴 既定そのものが検めを通る(守れない条件を書いていない)', () => {
     // ⚠ CLAUDE.md §1「主張そのものが成り立たない」の予防 ──
     //    既定が自分の検査に落ちる状態を、機械で止める
     for (const cmd of KEY_COMMANDS) {
-      expect(cmd.defaults.length, `${cmd.id} に既定が無い`).toBeGreaterThan(0);
+      if (KEYLESS.includes(cmd.id)) {
+        expect(
+          cmd.defaults.length,
+          `${cmd.id} は「鍵を持たない」側に挙げてあるのに、既定が在る`,
+        ).toBe(0);
+      } else {
+        expect(cmd.defaults.length, `${cmd.id} に既定が無い`).toBeGreaterThan(0);
+      }
       for (const chord of cmd.defaults) {
         const problem = validateBinding(cmd.id, chord, base);
         expect(problem, `${cmd.id} の既定 ${chord} が断られる: ${problem?.message ?? ''}`).toBeNull();
