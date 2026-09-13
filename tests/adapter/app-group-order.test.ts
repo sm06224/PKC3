@@ -16,6 +16,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
 import { APP_GROUP_ARCHETYPE } from '../../src/features/launcher/app-group-spec';
+import { APP_GROUP_RESET_ACTION } from '../../src/features/entry-actions';
 import { withBuiltinTiles, type LauncherTile } from '../../src/features/launcher/tiles';
 
 function meta(lid: string, title: string, archetype: string, order: number): EntryMeta {
@@ -374,5 +375,87 @@ describe('名前順に戻す(#857 段③)', () => {
     expect(r.state.appGroupOrders, '画面の番号が残った(名前順へ戻れない)').toEqual({});
     const w = r.events.find((e) => e.type === 'REQUEST_APP_GROUP_ORDER');
     expect((w as { rows: unknown[] } | undefined)?.rows, '消えたノートへ書こうとした').toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **「すべて名前順に戻す」は、押した見出し以外にも効く**(2026-09-13、
+ * 着地前の動線レビュー 欠陥 1)。
+ *
+ * ⚠ 直す前は字が「**名前順に戻す**」で、**押す前に何も聞かなかった** ──
+ *   同じメニューの「上へ / 下へ」は押した見出しだけに効くので、user はこれも
+ *   「この群だけ」と読む。🔴 実際は**番号を持つ群を全部**戻す
+ *   (「資料」から押したのに、見てもいない「作業」の並びが消える。#677 の型)。
+ * 🔑 群ごとに戻す形にはしない ── 1 群だけ番号を外すと**その群だけ末尾へ飛ぶ**
+ *   (番号のある群が先に来る規則なので)。**全部戻すのが正しい**が、
+ *   **そう書いていなかった**のが欠陥である。
+ */
+describe('「すべて名前順に戻す」は範囲を言う(#857 段③)', () => {
+  /** 番号が付いた状態の画面を組む(押し所は「戻す」1 つだけ置く)。 */
+  const mounted = async (): Promise<{
+    root: HTMLElement;
+    d: InstanceType<typeof import('../../src/adapter/state/dispatcher').Dispatcher>;
+    btn: HTMLElement;
+  }> => {
+    const { Dispatcher } = await import('../../src/adapter/state/dispatcher');
+    document.body.innerHTML = '';
+    const root = document.createElement('div');
+    document.body.append(root);
+    const btn = document.createElement('button');
+    btn.setAttribute('data-pkc-action', 'reset-app-group-order');
+    root.append(btn);
+
+    const d = new Dispatcher();
+    d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [meta('a1', 'a', 'attachment', 1), meta('b1', 'b', 'attachment', 2), meta('c1', 'c', 'attachment', 3)],
+      relations: [],
+    });
+    d.dispatch({ type: 'LAUNCHER_TILES_LOADED', tiles: TILES() });
+    // 番号を付ける(lid は使われないこともあるが、足りないと 1 行も書かない)
+    d.dispatch({ type: 'MOVE_APP_GROUP', name: '道具', by: -1, newLids: ['n1', 'n2', 'n3'] });
+    return { root, d, btn };
+  };
+
+  it('🔴 字に「すべて」が入っている(押した見出しだけだと読ませない)', () => {
+    expect(APP_GROUP_RESET_ACTION.label, '効く範囲が字から読めない').toContain('すべて');
+  });
+
+  it('🔴 押す前に聞く。やめたら 1 つも戻さない', async () => {
+    const { bindActions } = await import('../../src/adapter/ui/actions/binder');
+    const { root, d, btn } = await mounted();
+    const before = { ...d.getState().appGroupOrders };
+    // 前提 ── 戻す前に番号が在る(ゼロ件の次元を作らない)
+    expect(Object.keys(before).length, '前提が崩れている').toBeGreaterThan(0);
+
+    const asked: number[] = [];
+    const detach = bindActions(root, d, {
+      confirmResetAppGroupOrder: (count) => {
+        asked.push(count);
+        return Promise.resolve(false); // やめる
+      },
+    });
+    btn.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(asked, '聞かずに全部戻した').toHaveLength(1);
+    // ⚠ **いくつ戻るのか**を渡している(数を言わないと範囲が読めない)
+    expect(asked[0], '戻る群の数を言っていない').toBe(Object.keys(before).length);
+    expect(d.getState().appGroupOrders, 'やめたのに戻した').toEqual(before);
+    detach();
+  });
+
+  it('🔴 はいなら、番号を持つ群が全部戻る', async () => {
+    const { bindActions } = await import('../../src/adapter/ui/actions/binder');
+    const { root, d, btn } = await mounted();
+    const detach = bindActions(root, d, {
+      confirmResetAppGroupOrder: () => Promise.resolve(true),
+    });
+    btn.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(d.getState().appGroupOrders, '戻っていない').toEqual({});
+    detach();
   });
 });

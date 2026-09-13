@@ -6438,6 +6438,11 @@ export function hasAppGroupOrder(state: AppState): boolean {
   return Object.keys(state.appGroupOrders).length > 0;
 }
 
+/** 🔴 **いま番号の付いている群の数**(#857 段③)── 押す前に範囲を言うために要る。 */
+export function appGroupOrderCount(state: AppState): number {
+  return Object.keys(state.appGroupOrders).length;
+}
+
 /**
  * 🔴 **その群にいま付いている図案の名前**(#857 段②、2026-09-13)。
  * ⚠ 目印を選ぶ小窓が「**どれが選ばれているか**」を描くために要る。
@@ -6445,7 +6450,18 @@ export function hasAppGroupOrder(state: AppState): boolean {
  *   ── 表の中に該当が無いので「なし」に枠が付く(嘘の枠を付けない)。
  */
 export function appGroupIconName(state: AppState, name: string): string {
-  return appGroupIconOf(state.appGroupIcons, appGroupName(name))?.symbol ?? '';
+  const got = appGroupIconOf(state.appGroupIcons, appGroupName(name));
+  /**
+   * 🔴 **絵文字を握り潰さない**(2026-09-13、着地前の動線レビュー)。
+   *
+   * ⚠ 直す前は `?.symbol ?? ''` だった ── グループ用のノートは**普通のノート**なので、
+   *   user は本文の `appgroup.icon:` へ 🧮 のような字を**直に書ける**(見出しにも出る)。
+   * 🔴 ところが `symbol` しか見ないので、小窓へ渡る値が **空になる** ──
+   *   空は「なし」の合図と**同じ字**なので、表は**「なし」に枠を付けて焦点まで合わせる**。
+   *   user は「何も付いていない」と読んで **Enter を押し**、🧮 が**黙って消える**。
+   * 🔑 生の字も返す ── 表の中に無ければ**どこにも枠が付かない**(それが正確な答え)。
+   */
+  return got?.symbol ?? got?.icon ?? '';
 }
 
 function appGroupEntriesOf(

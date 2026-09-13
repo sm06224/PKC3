@@ -53,8 +53,9 @@ import { renumberLists } from '@features/markdown/list-renumber';
 import { stripDialect } from '@features/markdown/strip-dialect';
 import {
   hasAppGroupNote,
-  hasAppGroupOrder,
   appGroupIconName,
+  appGroupOrderCount,
+  hasAppGroupOrder,
   isViewMode,
   nextViewMode,
   screenBodyOf,
@@ -959,6 +960,13 @@ export interface BinderServices {
    * @returns 進めてよければ `true`
    */
   confirmAppGroupNotes?(names: readonly string[]): Promise<boolean>;
+  /**
+   * 🔴 **すべての群の並び順をやめてよいか聞く**(2026-09-13、着地前の動線レビュー)。
+   * ⚠ 押した見出し**以外**にも効くので、押す前に範囲を言う ── 戻すには
+   *   「上へ / 下へ」を押し直すしかなく、**何回押したかは user も憶えていない**。
+   * @param count いま番号の付いている群の数
+   */
+  confirmResetAppGroupOrder?(count: number): Promise<boolean>;
   /**
    * 🔴 **グループの目印を選ぶ小窓を出す**(#857 段②)。
    * @returns 図案の名前。**空文字 = なし(外す)**。やめたら `null`
@@ -7241,8 +7249,20 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   時点で 1 つ以上在る ── ⚠ それでも reducer 側でも見る(押し所の出し分けは
    *   **見せ方**であって、門ではない)。
    */
-  'reset-app-group-order': (dispatcher) => {
-    dispatcher.dispatch({ type: 'RESET_APP_GROUP_ORDER' });
+  'reset-app-group-order': (dispatcher, _target, services) => {
+    const count = appGroupOrderCount(dispatcher.getState());
+    // ⚠ 押し所は番号が在るときだけ出るが、門は両側に置く(出し分けは**見せ方**である)
+    if (count === 0) return;
+    const go = (): void => {
+      dispatcher.dispatch({ type: 'RESET_APP_GROUP_ORDER' });
+    };
+    if (services.confirmResetAppGroupOrder === undefined) {
+      go();
+      return;
+    }
+    void services.confirmResetAppGroupOrder(count).then((ok) => {
+      if (ok) go();
+    });
   },
   'toggle-all-app-groups': (_dispatcher, target, services) => {
     const list = target.closest('[data-pkc-field="launcher-list"]');
@@ -11421,7 +11441,11 @@ export function bindActions(
     root.removeEventListener('click', onClick);
     root.removeEventListener('contextmenu', onContextMenu);
     root.removeEventListener('click', onCloseMenu);
-    root.removeEventListener('scroll', onCloseMenu, true);
+    // ⚠ **張った名前で外す**(2026-09-13、着地前レビュー)── #875 で `scroll` の
+    //    受け口を `onCloseMenu` から分けたとき、**張る側だけ改名して外す側を忘れた**。
+    //    `removeEventListener` は**参照が一致しないと何もしない**ので、これは
+    //    恒久の no-op になり、畳んだ後も `scroll` の聞き耳が残る。
+    root.removeEventListener('scroll', onScrollCloseMenu, true);
     root.ownerDocument.removeEventListener('keydown', onMenuKey);
     closeContextMenu(root);
     root.removeEventListener('mousedown', onMousedown);

@@ -39,7 +39,7 @@ import type { EntryPickRow } from '@features/entry-ref/entry-pick';
 import type { SnippetChoice } from '@features/snippet/snippet-menu';
 import { moveMark, toggleMark } from '@features/clipboard/scrap';
 import { toggleArchiveMark } from '@features/archive/zip-browse';
-import { buildIconPalette } from './icon-palette';
+import { buildIconPalette, isTableIcon } from './icon-palette';
 
 export type DialogAnswer = 'ok' | 'cancel';
 
@@ -593,6 +593,20 @@ export function pickAppGroupIconInApp(
       '目印は、このグループ専用のノートに憶えます(無ければ 1 枚作ります)。「なし」にしても、そのノートは残ります。';
     f.body.append(line);
 
+    /**
+     * 🔴 **いま付いている字が、この表に無いことを言う**(同レビュー)。
+     * ⚠ 言わないと、見出しには 🧮 が出ているのに小窓は「何も選ばれていない」顔をする
+     *   ── **画面どうしが食い違う**。
+     * ⚠ 出すのは**表に無いときだけ** ── いつも出すと、49 種から選んだ人にも
+     *   読む必要のない 1 行が増える。
+     */
+    if (!isTableIcon(current)) {
+      const odd = document.createElement('p');
+      odd.setAttribute('data-pkc-field', 'pick-group-icon-odd');
+      odd.textContent = `いまは「${current.trim()}」が付いています。この表には無い字なので、どれにも枠が付いていません(選ぶと置き換わります)。`;
+      f.body.append(odd);
+    }
+
     let chosen: string | null = null;
     const picks: HTMLButtonElement[] = [];
     const palette = buildIconPalette({
@@ -657,8 +671,22 @@ export function pickAppGroupIconInApp(
      *   「いま何が選ばれているか」が**焦点の位置でも分かる**。
      * ⚠ 字だけの行だった頃は先頭固定でよかったが、表では**どこに居るか**が要る。
      */
+    /**
+     * 🔴 **表に無い字が付いているときは、消しを 1 押しの所に置かない**
+     *   (2026-09-13、着地前の動線レビュー)。
+     *
+     * ⚠ グループ用のノートは**普通のノート**なので、user は `appgroup.icon:` へ
+     *   🧮 のような字を**直に書ける**(見出しにも出る)。
+     * 🔴 その字は表の 49 種に無いので**どこにも枠が付かない** ── そこで焦点を
+     *   先頭(=「なし」)へ置くと、**Enter を押しただけで 🧮 が消える**。
+     *   ⚠ user は「何も選ばれていないから、このままでいい」と読んでいる。
+     * 🔑 だから**やめる側へ焦点を置く** ── 何も起きないのが正しい既定である。
+     * 🔑 そして**見えている物と食い違わないよう、字で言う**(下の 1 行)。
+     */
     const at = picks.find((b) => b.getAttribute('aria-pressed') === 'true');
-    (at ?? picks[0])?.focus();
+    if (at !== undefined) at.focus();
+    else if (current.trim() === '') picks[0]?.focus();
+    else f.cancel.focus();
     const answer = await answered;
     // ⚠ 器に付けた物は**必ず外す** ── 器は使い回すので、外し忘れると
     //    次の確認でも矢印が絵を探しにいく

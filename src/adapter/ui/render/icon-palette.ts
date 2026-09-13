@@ -56,6 +56,18 @@ export interface IconPaletteSpec {
  * 🔑 いま選んでいる物は **`aria-pressed`(状態)で示す** ── 字を足さない
  *   (読み上げにも出るし、CSS が枠を描く)。
  */
+/**
+ * 🔑 **その字は、この表の中に在るか**(2026-09-13)。
+ *
+ * ⚠ 呼び側が `TILE_ICON_CHOICES` を直に読むと、**表を知っている所が 2 つ**になる
+ *   ── 絵を 1 つ足した日に、片方だけが増える(§7)。だから判定もここが持つ。
+ * ⚠ 空文字(= なし)は**表の中**である(先頭に在る)。
+ */
+export function isTableIcon(name: string): boolean {
+  const n = name.trim();
+  return n === '' || TILE_ICON_CHOICES.some((c) => c.name === n);
+}
+
 export function buildIconPalette(spec: IconPaletteSpec): HTMLElement {
   const now = spec.current.trim();
   const box = document.createElement('div');

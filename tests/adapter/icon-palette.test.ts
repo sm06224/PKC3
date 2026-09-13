@@ -121,7 +121,16 @@ describe('置き換えで落とした性質を戻す(§10)', () => {
     const src = readFileSync('src/adapter/ui/render/app-dialog.ts', 'utf-8');
     const at = src.indexOf('export function pickAppGroupIconInApp(');
     expect(at, '目印の小窓が見つからない(名前が変わった)').toBeGreaterThan(0);
-    const body = src.slice(at, at + 4000);
+    /**
+     * ⚠ **固定の字数で切らない**(2026-09-13 に 1 度踏んだ)── 1 稿目は
+     *   `slice(at, at + 4000)` で切っており、**関数が伸びた日に範囲から外れて落ちた**
+     *   (製品は無傷で、落ちたのは検査の切り方である ── CLAUDE.md §1「範囲の取り方」)。
+     * 🔑 **構造で切る**:次の `export` までが、この関数の範囲である。
+     */
+    const after = src.indexOf('\nexport ', at + 1);
+    const body = src.slice(at, after < 0 ? src.length : after);
+    // ⚠ 空振り防止 ── 切り出せていること(0 字なら、下の検査は何も見ていない)
+    expect(body.length, '関数を切り出せていない(空振り)').toBeGreaterThan(500);
     for (const key of ['ArrowDown', 'ArrowUp', 'ArrowRight', 'ArrowLeft']) {
       expect(body, `${key} で移れない(鍵だけの人が Tab を 49 回押す)`).toContain(key);
     }
