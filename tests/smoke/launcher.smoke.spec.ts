@@ -815,6 +815,46 @@ test('🔴 タイルを長押しすると並べ替えモードに入り、開か
     (el as HTMLElement).style.maxHeight = '';
   });
 
+  /**
+   * ⑧ 🔴 **アドレスから「引っ越した面」を開いても、並べ替えモードが終わる**
+   *   (#857 段①b-2。着地前レビューが見つけた「4 本目の口」の当の直し)。
+   *
+   * ⚠ `#pkc?view=calendar` は #292 段⑤ で予定タブへ引っ越しており、
+   *   `deep-link.ts` の `MOVED_VIEWS` が `main.ts` の `openBrowse` → `setBrowse` を
+   *   呼ぶ。タブの押し / 改名の逃げ / タブへのドラッグ(`binder.ts` の旧 3 か所)は
+   *   **この経路を 1 つも通らない** ── ここでしか検められない。
+   * 🔑 起動を増やさない ── 既存の道中の末尾で、もう一度長押ししてから確かめる。
+   */
+  await page
+    .locator(mainTile)
+    .dispatchEvent('pointerdown', {
+      bubbles: true,
+      pointerType: 'touch',
+      button: 0,
+      isPrimary: true,
+    });
+  await page.waitForTimeout(600);
+  await page.locator(mainTile).dispatchEvent('pointerup', { bubbles: true, pointerType: 'touch' });
+  await expect(done, '4 度目の長押しで並べ替えモードに入らない').toBeVisible();
+
+  await page.evaluate(() => {
+    location.hash = '#pkc?view=calendar';
+  });
+  await expect(
+    page.locator('[data-pkc-browse-pane="schedule"]'),
+    '前提が崩れている(アドレスから引っ越した面「予定」へ移っていない)',
+  ).toBeVisible();
+
+  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await expect(
+    done,
+    'アドレスから引っ越した面を開いても、並べ替えモードが終わっていない',
+  ).toHaveCount(0);
+  await expect(
+    lead,
+    'アドレスから引っ越した面を経由して戻っても、文言が「2 回押すと開く」に戻らない',
+  ).toHaveText('アプリは 2 回押すと別のウィンドウで開きます');
+
   expect(errors, `console/pageerror: ${errors.join(' | ')}`).toEqual([]);
 });
 
