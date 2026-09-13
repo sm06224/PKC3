@@ -21,6 +21,8 @@ import type { AppState } from '@adapter/state/app-state';
 import type { LauncherTile } from '@features/launcher/tiles';
 import { isMovableTile } from '@features/launcher/tile-order';
 import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
+import { encodeFolded, isFolded } from '@features/launcher/group-fold';
+import { appGroupFold, type GroupFoldStore } from './group-fold';
 import { setIcon } from './icons';
 
 export class LauncherRenderer {
@@ -32,7 +34,14 @@ export class LauncherRenderer {
   /** ⚠ **並べ替えモード**(#857 段①b-2)── 入れないと「上へ / 下へ」が出ない。 */
   private lastReorder: boolean | undefined = undefined;
 
-  constructor(private readonly region: HTMLElement) {}
+  /** ⚠ **畳みは端末ごと**なので state ではなく保存から読む(`group-fold.ts`)。 */
+  private lastFolded: string | undefined = undefined;
+
+  constructor(
+    private readonly region: HTMLElement,
+    /** ⚠ test は自分で `new GroupFoldStore(null)` して渡す(`appEditorMode` と同じ作法)。 */
+    private readonly folds: GroupFoldStore = appGroupFold,
+  ) {}
 
   /**
    * 🔴 **器は 1 度だけ組む**(#401 ①)。
@@ -83,13 +92,20 @@ export class LauncherRenderer {
   }
 
   render(state: AppState): void {
+    /**
+     * ⚠ **畳みも指紋に入れる**(#857 段④)── 入れないと、畳んでも画面が動かない。
+     * 🔑 保存は state の外に在るので、**読んだ値を字にして**比べる(参照では比べられない)。
+     */
+    const folded = this.folds.get();
+    const foldKey = encodeFolded(folded);
     // ⚠ 選択も指紋に入れる ── 押した印が出ないと、いま何を触ったのか残らない
     if (
       state.launcherTiles === this.lastTiles &&
       state.filterQuery === this.lastQuery &&
       state.selectedLid === this.lastSelected &&
       state.launcherPick === this.lastPick &&
-      state.launcherReorder === this.lastReorder
+      state.launcherReorder === this.lastReorder &&
+      foldKey === this.lastFolded
     )
       return;
     this.lastTiles = state.launcherTiles;
@@ -97,6 +113,7 @@ export class LauncherRenderer {
     this.lastSelected = state.selectedLid;
     this.lastPick = state.launcherPick;
     this.lastReorder = state.launcherReorder;
+    this.lastFolded = foldKey;
     const list = this.ensureFrame();
     list.textContent = '';
 
@@ -193,6 +210,13 @@ export class LauncherRenderer {
       list.append(done);
     }
 
+    /**
+     * 🔴 **畳んだ群は、見出しだけ出す**(#857 段④)。
+     * ⚠ **絞り込み中は畳みを無視する** ── 絞った結果が畳んだ群の中に在ると、
+     *   打ったのに何も出ないように見える(「無い」と「畳んである」の区別が付かない)。
+     */
+    const countOf = (name: string): number => tiles.filter((t) => t.group === name).length;
+
     let group: string | null = null;
     let grid: HTMLElement | null = null;
     for (const tile of tiles) {
@@ -218,10 +242,32 @@ export class LauncherRenderer {
         if (group === '') {
           list.append(grid);
         } else {
+          /**
+           * 🔴 **見出しを押すと畳める**(#857 段④)。
+           *
+           * ⚠ **名前の無い群には出さない** ── 見出しが無いので、畳んだら
+           *   **開く口が画面から消える**(片道の操作を作らない)。
+           * ⚠ 印は `::before` が描く ── 器の字に混ぜると、見出しの字を読む
+           *   側(test / 読み上げ / 写し)が静かに外れる(CLAUDE.md §10)。
+           * 🔑 件数は**畳んだときだけ**出す ── 開いていれば数えなくても見える。
+           */
           const head = document.createElement('h3');
           head.setAttribute('data-pkc-field', 'launcher-group');
-          head.textContent = group;
-          list.append(head, grid);
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.setAttribute('data-pkc-action', 'toggle-app-group');
+          btn.setAttribute('data-pkc-group', group);
+          const off = isFolded(folded, group, q !== '');
+          btn.setAttribute('aria-expanded', off ? 'false' : 'true');
+          btn.title = off
+            ? `${group} を開きます(いまは畳んであります)`
+            : `${group} を畳みます(中のアプリが隠れます)`;
+          btn.textContent = off ? `${group}(${countOf(group)})` : group;
+          head.append(btn);
+          list.append(head);
+          // ⚠ 畳んだ群は器ごと出さない ── 落とし先も消える(掴んで入れるには先に開く)
+          if (!off) list.append(grid);
+          else grid = null;
         }
       }
       grid?.append(this.row(tile, state.selectedLid, canReorder, state.launcherPick, reordering));

@@ -929,6 +929,12 @@ export interface BinderServices {
    */
   setEditorMode?(mode: string): void;
   /**
+   * 🔴 **アプリの一覧でグループを畳む / 開く**(#857 段④)。
+   * ⚠ 畳みは**端末ごと**(`localStorage`)なので state に入れない ──
+   *   `setEditorMode` と同じく、保存へ書いて描き直すのは `main.ts` である。
+   */
+  toggleAppGroup?(group: string): void;
+  /**
    * 添付の携帯参照(`pkc://<自分>/asset/<key>`)から**所有ノートへ飛ぶ**(#100 段②)。
    * ⚠ 見つからないときは黙らない(OP_FAILED で断る ── 無言の dead click を作らない)。
    */
@@ -7094,6 +7100,15 @@ const ACTIONS: Record<string, ActionHandler> = {
         ? target.value
         : target.getAttribute('data-pkc-open-place-value');
     if (place) services.setOpenPlace?.(place);
+  },
+  /**
+   * 🔴 **グループの見出しを押して畳む / 開く**(#857 段④)。
+   * ⚠ 名前が空なら何もしない ── 名前の無い群は見出しを持たないので、
+   *   畳むと**開く口が画面から消える**(片道の操作を作らない)。
+   */
+  'toggle-app-group': (_dispatcher, target, services) => {
+    const group = target.getAttribute('data-pkc-group') ?? '';
+    if (group !== '') services.toggleAppGroup?.(group);
   },
   'set-editor-mode': (_dispatcher, target, services) => {
     // ⚠ `set-theme` と同じ受け方(`<select>` でもボタンでも通す)
