@@ -123,6 +123,20 @@ const MANUAL_HEADINGS: readonly MdHeading[] = scanHeadings(MANUAL);
 
 const SHELL = readFileSync('src/adapter/ui/render/shell.ts', 'utf-8');
 const COMMANDS = readFileSync('src/adapter/ui/render/commands.ts', 'utf-8');
+
+/**
+ * 🔴 **左の探す欄の字を、マニュアルが引いているか**(#852、2026-09-13)。
+ *
+ * ⚠ この欄の字を「探す」→「本文ごと探す」に変えた日、**4 つの門は 1 つも鳴らなかった** ──
+ *   マニュアルには「欄には『探す』と出ています」と書いてあったので、
+ *   **その瞬間に嘘になった**のに誰も止めなかった。
+ * 🔑 だから**画面に出る字そのもの**を source から引き、マニュアルに在ることを見る
+ *   (⚠ 字を決め打ちで pin しない ── 次に変える人が**両方**直す形にする)。
+ */
+const ENTRY_FILTER_PLACEHOLDER = /filter\.placeholder = '([^']+)'/.exec(
+  readFileSync('src/adapter/ui/render/shell.ts', 'utf-8'),
+)?.[1];
+
 const DETAIL = readFileSync('src/adapter/ui/render/detail.ts', 'utf-8');
 const BINDER = readFileSync('src/adapter/ui/actions/binder.ts', 'utf-8');
 /**
@@ -190,6 +204,23 @@ const EXPECTED_OPTIONS = {
 } as const;
 
 describe('マニュアルと実装の突合', () => {
+  /**
+   * 🔴 **左の探す欄の字は、マニュアルにそのまま出ていること**(#852)。
+   *
+   * ⚠ 2026-09-13 にこの字を変えたとき、**既存の 4 つの門は 1 つも鳴らなかった**
+   *   ── マニュアルの「欄には『探す』と出ています」が**その瞬間に嘘**になったのに、
+   *   誰も止めなかった。🔑 この検査はその穴を塞ぐ。
+   * ⚠ **字を決め打ちしない** ── source から引いた実物を探すので、次に変える人は
+   *   **画面とマニュアルの両方**を直すことになる(片方だけ直せば落ちる)。
+   */
+  it('🔴 左の探す欄の字が、マニュアルに出ている', () => {
+    expect(ENTRY_FILTER_PLACEHOLDER, '欄の字を source から引けていない(空振り)').toBeTruthy();
+    expect(
+      MANUAL,
+      `マニュアルが左の欄の字(${ENTRY_FILTER_PLACEHOLDER})を引いていない ── 画面の字を変えたら、ここも直す`,
+    ).toContain(ENTRY_FILTER_PLACEHOLDER!);
+  });
+
   it.each(Object.entries(EXPECTED_LABELS))(
     '🔴 %s のボタン文言が pin と一致し、マニュアルにも在る',
     (action, expected) => {
@@ -2284,6 +2315,7 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    'SQL で調べる が、打ちやすく・読みやすくなりました',
     /**
      * ⚠ **2026-09-13(#855 決1 ── 予定の札を指で動かす)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-09-saving-line" …` → 9d118e3
