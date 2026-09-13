@@ -28,19 +28,51 @@ import type { AssetLender } from './detail';
 
 export type { AssetLender };
 
-interface Lend {
-  readonly key: string;
-  readonly url: string;
+export interface Lend {
+  /**
+   * 何のための貸出か。
+   *
+   * ⚠ **`null` は「鍵で探さない」**(#880 で本文の面から寄せた形)── 添付の下見のように
+   *   **器そのものの寿命に乗る**貸出は、使い回す相手が居ないので鍵を持たない。
+   */
+  readonly key: string | null;
+  /** 差してある URL。⚠ 鍵を持たない貸出は `null`(差す先を自分で持たない)。 */
+  readonly url: string | null;
   readonly dispose: () => void;
-  /** この URL を差してある `<img>`。⚠ **1 つも画面に残っていなければ返す**。 */
-  els: HTMLImageElement[];
+  /** この貸出が生きている根拠の要素。⚠ **1 つも画面に残っていなければ返す**。 */
+  els: Element[];
 }
 
-/** 画面に出ていない `<img>` を指す貸出を返す。 */
+/** 画面に出ていない要素を指す貸出を返す。 */
 export class AssetLends {
   private lends: Lend[] = [];
   /** ⚠ 組み直すたびに進める ── 飛んでいる借用が**古い DOM** に差すのを止める。 */
   private token = 0;
+
+  /**
+   * 🔴 **借りた物を帳簿へ載せる**(#880)。
+   *
+   * ⚠ 呼ぶ側が `dispose` を自分で握らない ── 握ると「返す所」が 2 つになり、
+   *   片方が返し忘れた日に**bytes が常駐する**(2026-07-27 の不可侵指示)。
+   */
+  track(lend: Lend): void {
+    this.lends.push(lend);
+  }
+
+  /**
+   * 🔴 **生きている貸出を鍵で探す**(#880)。
+   *
+   * ⚠ 「生きている」は**画面に 1 つでも残っている**こと ── 1 つも残っていない貸出を
+   *   使い回すと、`prune` が返した後の URL を差すことになる。
+   * ⚠ 鍵を持たない貸出(`key: null`)は**探さない**(使い回す相手が居ない)。
+   */
+  live(key: string): Lend | null {
+    return (
+      this.lends.find(
+        (l) => l.key === key && l.url !== null && l.els.some((e) => e.isConnected),
+      ) ?? null
+    );
+  }
 
   /**
    * 🔴 **`img[data-pkc-asset-key]` を全部埋める。**
@@ -70,8 +102,8 @@ export class AssetLends {
      *   **画面に出ている新しい `<img>` の src が死ぬ**。
      */
     for (const [key, imgs] of [...byKey]) {
-      const live = this.lends.find((l) => l.key === key && l.els.some((e) => e.isConnected));
-      if (!live) continue;
+      const live = this.live(key);
+      if (!live || live.url === null) continue;
       live.els.push(...imgs);
       for (const img of imgs) img.src = live.url;
       byKey.delete(key);
@@ -97,13 +129,13 @@ export class AssetLends {
           for (const img of imgs) img.setAttribute('data-pkc-asset-missing', '');
           return;
         }
-        this.lends.push({ key, url: lent.url, dispose: lent.dispose, els: imgs });
+        this.track({ key, url: lent.url, dispose: lent.dispose, els: imgs });
         for (const img of imgs) img.src = lent.url;
       }),
     );
   }
 
-  /** 画面から消えた `<img>` だけを指す貸出を返す。 */
+  /** 画面から消えた要素だけを指す貸出を返す。 */
   prune(): void {
     const keep: Lend[] = [];
     for (const l of this.lends) {

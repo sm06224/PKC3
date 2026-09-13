@@ -18,8 +18,10 @@
  * step を取りこぼしたら、その瞬間に数が合わなくなる。
  */
 import { describe, expect, it } from 'vitest';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
 
 const DIR = '.github/workflows';
 
@@ -381,6 +383,80 @@ describe('nightly の job と step', () => {
       .filter((s) => !s.ifExpr.includes(GUARD))
       .map((s) => `${YML}:${s.line} ${s.name}`);
     expect(offenders).toEqual([]);
+  });
+
+  /**
+   * 🔴 **図案の符号位置を、上流と夜だけ突き合わせる step が在る**(#849、2026-09-13)。
+   *
+   * ⚠ いままでは焼くとき(`npm run icons:font`)にしか検めておらず、上流が符号位置を
+   * 動かしても焼き直すまで気づけなかった。⚠ **見るのは実行する行**(`run:` の中身)
+   * ── コメントに「回している」と書くだけでは、この検査は満たせない(CLAUDE.md §1
+   * 「範囲が広すぎて無関係な散文に満たされる」の 5 度目・10 度目と同型)。
+   */
+  it('🔴 図案の符号位置を、上流と夜だけ突き合わせる step が在る(#849)', () => {
+    const checks = allSteps.filter((s) => s.id === 'icon_codepoints_check');
+    // 空振り防止 ── 見つからないなら検査になっていない
+    expect(checks.length, 'icon_codepoints_check の step が見つからない').toBe(1);
+    const step = checks[0]!;
+    // 🔴 見るのは `run:` の中身であって、`name:` や周りのコメントではない
+    expect(step.run, '焼く物(icons:font)ではなく検める物(--check)を回していない').toContain(
+      'build-icon-font.mjs --check',
+    );
+    expect(step.ifExpr, '前が落ちると走らない(#221 の教訓)').toContain(GUARD);
+    // 🔴 「上流を取得できなかった」(exit 2)を、赤(exit 1)と混ぜていない ──
+    //    CLAUDE.md §4「対照群が届かない回は『判定不能』と書く。結果を読まない」
+    expect(step.run, '「測れなかった」(exit 2)を仕分けていない').toContain('-eq 2');
+    expect(step.run, '測れなかった回を warning に落としていない(赤のまま)').toContain(
+      '::warning::',
+    );
+    expect(step.run, '測れなかった回でも exit 0 にしていない(赤のまま)').toContain('exit 0');
+  });
+
+  /**
+   * 🔴 **その仕分けが、本当に走るのかを見る**(2026-09-13、#849)。
+   *
+   * ⚠ すぐ上の検査は**字面を pin しているだけ**なので、**1 度も到達しない仕分け**でも
+   * 緑になる(CLAUDE.md §2「経路が一度も通っていない」)。実際 1 稿目は
+   * `node … --check; code=$?` と書いてあり、GitHub Actions の既定の shell が
+   * **`bash -e`** なので、**`node` が 0 以外で終わった瞬間に打ち切られて
+   * `code=$?` へ 1 度も来ない** ── つまり「exit 2 は warning」は死んだ枝で、
+   * **上流を取りに行けなかった晩が赤になる**。字面の検査はどちらでも緑だった。
+   *
+   * 🔑 だから**本物の道具で 1 回やってみる**(CLAUDE.md「門が掛かっていることの
+   * 確認」)── `run:` の中身を `bash -e` で実際に走らせ、`node` を差し替えて
+   * **3 通りの終わり方**を見る。⚠ 3 通り揃えるのが肝で、`0` だけ見ると
+   * 「何をしても 0 で終わる」実装と区別が付かない。
+   */
+  it('🔴 その run を bash -e で実際に走らせると、0 / 1 / 2 が仕分けられる(#849)', () => {
+    const step = allSteps.find((s) => s.id === 'icon_codepoints_check');
+    expect(step, 'step が見つからない(空振り)').toBeDefined();
+    const dir = mkdtempSync(join(tmpdir(), 'pkc3-nightly-'));
+    // 🔑 `node` を差し替える ── 実物を呼ぶと網へ出てしまうので、終わり方だけ真似る
+    writeFileSync(join(dir, 'node'), '#!/bin/sh\nexit "$PKC3_FAKE_EXIT"\n', { mode: 0o755 });
+    // ⚠ 抜き出した `run` の 1 行目は YAML の塊の印(`|`)である ── そのまま
+    //   走らせると `|` だけの行が構文エラーになり、**どの入力でも同じ終わり方**に
+    //   なってしまう(= 3 通りを見ているつもりで 1 通りも見ていない)。
+    const script = step!.run.replace(/^\|-?\n/, '');
+    expect(script, '塊の印が落ちていない(空振り)').not.toMatch(/^\|/);
+    writeFileSync(join(dir, 'step.sh'), script);
+    const run = (fake: string): { status: number | null; out: string } => {
+      const r = spawnSync('bash', ['-e', join(dir, 'step.sh')], {
+        env: { ...process.env, PATH: `${dir}:${process.env['PATH'] ?? ''}`, PKC3_FAKE_EXIT: fake },
+        encoding: 'utf-8',
+        // ⚠ 子の出力を画面へ漏らさない(`tests/repo-hygiene.test.ts` の門)──
+        //   ここでは中身(`::warning::`)を読むので `pipe` で受ける
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      return { status: r.status, out: `${r.stdout}${r.stderr}` };
+    };
+    expect(run('0').status, '一致した晩なのに赤くなる').toBe(0);
+    expect(run('1').status, '🔴 食い違った晩が赤にならない(気づけない)').toBe(1);
+    const unknown = run('2');
+    expect(unknown.status, '🔴 上流を取れなかった晩が赤になる(判定不能と赤を混ぜている)').toBe(
+      0,
+    );
+    expect(unknown.out, '測れなかったことを何も言っていない').toContain('::warning::');
+    rmSync(dir, { recursive: true, force: true });
   });
 
   it('🔴 仕込みの gate を持つ job では、後ろの step が全部 guard を持つ', () => {

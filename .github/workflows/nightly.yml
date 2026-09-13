@@ -134,11 +134,46 @@ jobs:
             exit 1
           fi
           echo "path=$P" >> "$GITHUB_OUTPUT"
-      # 🔑 仕込みと検証の境目(上の job と同じ)。この job は検証 step を 9 本
+      # 🔑 仕込みと検証の境目(上の job と同じ)。この job は検証 step を 10 本
       #   持っており、1 本落ちても残りを走らせたいので `!cancelled()` で回す。
       - name: 仕込みが揃った
         id: setup_ok
         run: echo "ok=1" >> "$GITHUB_OUTPUT"
+      # 🔴 **図案の符号位置を、上流と夜だけ突き合わせる**(#849、2026-09-13)。
+      #
+      # ⚠ いままでは焼くとき(`npm run icons:font`、手で回す・CI では回さない)にしか
+      #   検めていなかった ── 上流が符号位置を動かしても、焼き直すまで気づけない。
+      #   `--check` は焼かない・書かないので、ここ(CI)で回してよい。
+      #
+      # 🔴 **exit code は 3 通り**(`scripts/build-icon-font.mjs` の docstring)。
+      #   `2`(上流を取得できなかった = 測れなかった)は**赤にしない** ── CLAUDE.md
+      #   §4「対照群が届かない回は『判定不能』と書く。結果を読まない」と同じ向きで、
+      #   ✗(落ちた)と「測れなかった」を混ぜると夜の赤が意味を失う。
+      - name: 図案の符号位置 — 上流と突き合わせる(--check。#849)
+        id: icon_codepoints_check
+        if: ${{ !cancelled() && steps.setup_ok.outputs.ok == '1' }}
+        # 🔴 **`cmd; code=$?` と書かない**(2026-09-13 に実測で分かった)── GitHub
+        #   Actions の既定の shell は **`bash -e`** なので、`node` が 0 以外で
+        #   終わった瞬間にそこで打ち切られ、**`code=$?` の行に 1 度も到達しない**。
+        #   ⚠ つまり下の「exit 2 は warning にする」は**死んだ枝**になり、
+        #   「上流を取りに行けなかった晩」が**赤**になる(CLAUDE.md §2)。
+        #   🔑 `|| code=$?` なら失敗が条件の側に入るので `-e` は打ち切らない。
+        #   ⚠ 字面を pin するだけでは、この誤りは 1 つも鳴らない ── だから
+        #   `tests/workflow-steps.test.ts` は**この run を実際に `bash -e` で走らせて**
+        #   3 通りの終わり方を見る。
+        # ⚠ **`if` の中身も 10 字下げのまま**(入れ子で 12 字下げにしない) ──
+        #   `tests/workflow-steps.test.ts` の `run:` 抜き出しは `^ {10}\S` だけを
+        #   見るので、深く字下げした行は**静かに読み落とされる**
+        #   (`Resolve chromium path for probes` step の入れ子行がまさにそれで、
+        #   誰にも読まれていない)。ここは検査対象なので、あえて平らに書く。
+        run: |
+          code=0
+          node scripts/build-icon-font.mjs --check || code=$?
+          if [ "$code" -eq 2 ]; then
+          echo "::warning::上流の符号位置を取得できなかった(測れなかった) ── 赤にしない"
+          exit 0
+          fi
+          exit $code
       # Rust core: **出荷 .wasm を source から再ビルドして一致を見る**
       # (PR gate では cargo を走らせない ── 再ビルド漏れをここで捕まえる。
       #  rust-toolchain.toml が rustc を pin しているのでバイト一致が期待値)
