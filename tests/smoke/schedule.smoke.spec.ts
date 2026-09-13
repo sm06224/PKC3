@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type CDPSession, type Page } from '@playwright/test';
 import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
 import { peek, withStateOnFail } from './state-dump';
 
@@ -46,6 +46,38 @@ const D2 = inMonth(BASE_DAY + 2); // 8/27
 const D3 = inMonth(BASE_DAY + 3); // 8/28
 const D5 = inMonth(BASE_DAY + 5); // 8/30
 const D6 = inMonth(BASE_DAY + 6); // 8/31
+
+/**
+ * 🔴 **指で掴んで動かす**(#855 決1。本物の touch)。
+ *
+ * ⚠ `page.touchscreen` は `tap` しか持たないので、CDP の `Input.dispatchTouchEvent`
+ *   を使う(`phone.smoke.spec.ts` の長押し test と同じ道具)。
+ * 🔑 `schedule-drag.ts` は**長押しで確定する**(スクロールと区別するため)ので、
+ *   `touchStart` の後は**確定に要る時間より確実に長く**待ってから動かす。
+ */
+async function touchDragCard(
+  page: Page,
+  cdp: CDPSession,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+): Promise<void> {
+  await cdp.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [{ x: from.x, y: from.y, id: 0 }],
+  });
+  await page.waitForTimeout(600); // ⚠ `LONG_PRESS_MS`(500ms)を確実に越える
+  // ⚠ **途中を経由する** ── 1 回の move では拾わないブラウザが在る(mouse の③と同じ配慮)
+  const steps = 6;
+  for (let i = 1; i <= steps; i += 1) {
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [
+        { x: from.x + ((to.x - from.x) * i) / steps, y: from.y + ((to.y - from.y) * i) / steps, id: 0 },
+      ],
+    });
+    await page.waitForTimeout(30);
+  }
+}
 
 test('🔴 予定のタブで札を掴んで日へ落とすと、本文の日付が変わる', async ({ page }) => {
   const errors = collectPageErrors(page);
@@ -125,6 +157,98 @@ test('🔴 予定のタブで札を掴んで日へ落とすと、本文の日付
     `[data-pkc-region="schedule-group"][data-pkc-drop-date="${D3}"] [data-pkc-entry]`,
   );
   await expect(d3Card, '札が新しい日へ移っていない').toHaveCount(1);
+
+  /**
+   * 🔴 ⑤.5 **指でも掴んで動かせる**(#855 決1)。
+   *
+   * > 実測(私が測った。信じてよい): マウスは掴んで通ると `data-pkc-dropping` が
+   * > 光り、本文が書き替わる。**指(CDP の本物の touch)は 1 度も光らず、
+   * > 本文も変わらなかった**(原因は `task-card.ts` の `card.draggable = true`
+   * > ── HTML5 の drag は大半の携帯ブラウザで指の押下から始まらない)。
+   * > 観測点はこの 2 つ(光る印 / 保存された本文)そのもの。
+   *
+   * 🔑 起動を増やさない ── この test の道中に足す(D3 の札を D6 へ、指で)。
+   * ⚠ **グリッドの升目を明示的に選ぶ**(`[data-pkc-field="schedule-week"]` の
+   *   直下)── `[data-pkc-drop-date]` だけだと、束の見出しが在る日は**升目と
+   *   見出しの 2 件に当たって** strict mode で落ちる(升目の無い日は無関係)。
+   */
+  const cdp = await page.context().newCDPSession(page);
+  const gridCell = (date: string) =>
+    pane.locator(`[data-pkc-field="schedule-week"] > button[data-pkc-drop-date="${date}"]`);
+  const centerOf = async (loc: ReturnType<typeof gridCell>): Promise<{ x: number; y: number }> => {
+    const b = (await loc.boundingBox())!;
+    return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+  };
+  const d3Box = (await d3Card.boundingBox())!;
+  await touchDragCard(
+    page,
+    cdp,
+    { x: d3Box.x + d3Box.width / 2, y: d3Box.y + d3Box.height / 2 },
+    await centerOf(gridCell(D6)),
+  );
+  await expect(gridCell(D6), '指で押さえ続けても落とし先が光らない').toHaveAttribute(
+    'data-pkc-dropping',
+    '',
+  );
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await expect(ta, '指で掴んでも本文の日付が変わらない').toHaveValue(
+    `- [ ] 見積を送る @${D6}\n- [ ] 体裁のチェック`,
+  );
+  await clickReal(page, '[data-pkc-action="cancel-edit"]');
+
+  // ⑤.6 指でもう一度 D3 へ戻す(⑥⑦ は D3 の札を前提にしているので元へ戻す)
+  const d6Card = pane.locator(
+    `[data-pkc-region="schedule-group"][data-pkc-drop-date="${D6}"] [data-pkc-entry]`,
+  );
+  await expect(d6Card, '指で D6 へ移った札が見当たらない').toHaveCount(1);
+  const d6Box = (await d6Card.boundingBox())!;
+  await touchDragCard(
+    page,
+    cdp,
+    { x: d6Box.x + d6Box.width / 2, y: d6Box.y + d6Box.height / 2 },
+    await centerOf(gridCell(D3)),
+  );
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await expect(ta, '指で D3 へ戻しても本文が変わらない').toHaveValue(
+    `- [ ] 見積を送る @${D3}\n- [ ] 体裁のチェック`,
+  );
+  await clickReal(page, '[data-pkc-action="cancel-edit"]');
+  await expect(d3Card, '指で戻した後、D3 の札が 1 枚でない').toHaveCount(1);
+
+  /**
+   * 🔴 ⑤.7 **指で縦になぞっても、掴みが始まらない**(#855 決1。
+   * 「指で予定表をスクロールできなくなったら、直すより悪い」という要件そのもの)。
+   *
+   * ⚠ 観測点は「掴みが始まらないこと」── `data-pkc-dropping` が 1 件も立たず、
+   *   本文も変わらない。実機の縦スクロールそのもの(headless では信頼できる
+   *   観測点にならない)は測っていない ── 下の報告に正直に書く。
+   */
+  const swipeBox = (await d3Card.boundingBox())!;
+  const sx = swipeBox.x + swipeBox.width / 2;
+  const sy = swipeBox.y + swipeBox.height / 2;
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: sx, y: sy }] });
+  // ⚠ 確定(500ms)より前に、大きく縦へなぞる ── これはスクロールのつもりである
+  await cdp.send('Input.dispatchTouchEvent', {
+    type: 'touchMove',
+    touchPoints: [{ x: sx, y: sy - 120 }],
+  });
+  await page.waitForTimeout(50);
+  await cdp.send('Input.dispatchTouchEvent', {
+    type: 'touchMove',
+    touchPoints: [{ x: sx, y: sy - 220 }],
+  });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await expect(
+    page.locator('[data-pkc-dropping]'),
+    '縦になぞっただけなのに、どこかを掴んでしまった',
+  ).toHaveCount(0);
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await expect(ta, '縦になぞっただけなのに本文が変わった').toHaveValue(
+    `- [ ] 見積を送る @${D3}\n- [ ] 体裁のチェック`,
+  );
+  await clickReal(page, '[data-pkc-action="cancel-edit"]');
 
   /**
    * ⑥ 🔴 **繰り返していない札を右クリック →「繰り返す…」→ 刻みを選ぶと、
