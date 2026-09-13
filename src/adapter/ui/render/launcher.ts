@@ -4,8 +4,14 @@
  * > user 指示 2026-08-03「**ランチャーも使いやすければ、なんでもいいよ**」
  *
  * 🔑 **PKC3 の流儀に寄せる** ── 上のサイドバーと同じ「絞り込みで探して、押す」。
- * PKC2 のグループ折り畳み / drag & drop 並べ替えは持ち込まない
- * (「見えない状態の解消」が先で、足りなければ次の段で足せる)。
+ *
+ * ⚠ **2026-09-12 に訂正**(#857 段①)。ここには
+ * 「PKC2 のグループ折り畳み / drag & drop 並べ替えは持ち込まない」と書いてあったが、
+ * 🔴 **user 指示で並べ替えは戻した**(掴んで落とす + 右クリックの「上へ / 下へ」)。
+ * 🔑 持ち込まなかった理由は「見えない状態の解消が先」という**段取り**であって、
+ *   要らないという判断ではなかった ── 段取りが済んだので戻す向きが正しい
+ *   (CLAUDE.md「PKC2 は機能の袋ではない。動線で読む」)。
+ * ⚠ **折り畳みはまだ無い**(#857 段④)── 在ると書かないこと。
  *
  * ⚠ 起動そのものはここでやらない。`data-pkc-action="open-tile"` を置くだけで、
  * blob の貸し出しと `window.open` は adapter の service が持つ ──
@@ -13,6 +19,7 @@
  */
 import type { AppState } from '@adapter/state/app-state';
 import type { LauncherTile } from '@features/launcher/tiles';
+import { isMovableTile } from '@features/launcher/tile-order';
 import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
 import { setIcon } from './icons';
 
@@ -97,6 +104,18 @@ export class LauncherRenderer {
     // 規則は `title-filter.ts` の 1 本 ── 面ごとに書くと必ずずれる(review M-1/M-3)
     const q = normalizeQuery(state.filterQuery);
     const tiles = state.launcherTiles.filter((t) => matchesTitle(t.title, q));
+    /**
+     * 🔴 **絞り込んでいる間は掴ませない**(#857 段①、動線レビュー D3)。
+     *
+     * ⚠ 画面に出ているのは絞った後のタイルだが、並び順の正本は**全件**である ──
+     *   隠れたタイルをまたぐ移動になるので、「上へ」を 1 回押しても**画面が
+     *   1 ドットも動かない**(隣の隠れた 1 枚と入れ替わっただけ)。落とすほうも、
+     *   線を引いた所と**違う場所に着く**。
+     * 🔑 **掴めなくすれば、線も右クリックのメニューも出ない**(どちらも
+     *   `[draggable="true"]` を鍵にしている)── 断られる前に、勧めない。
+     * ⚠ 門は reducer にも在る(2 枚目)── あちらは理由を声に出す。
+     */
+    const canReorder = q === '';
 
     if (tiles.length === 0) {
       const empty = document.createElement('p');
@@ -137,6 +156,18 @@ export class LauncherRenderer {
         group = tile.group;
         grid = document.createElement('div');
         grid.setAttribute('data-pkc-region', 'launcher-grid');
+        /**
+         * 🔴 **その群が落とし先になるか**(#857 段①)。
+         *
+         * 🔑 印を付ける条件は「**動かせるタイルが 1 枚でも居るか**」── 群の名前で
+         *   判定しない(`BUILTIN_GROUP` を書くと、user が同じ名前を付けた日にずれる)。
+         * ⚠ 組み込みだけの群を落とし先にすると、user のタイルに
+         *   `app_group: 組み込みアプリ` が書かれ、**最初から在る物の中へ紛れる**。
+         * ⚠ **群の末尾へ落とす**のはこの器が受ける(タイルとタイルの間は
+         *   タイル自身が受ける)── 器が無いと、いちばん下へは落とせない。
+         */
+        if (canReorder && tiles.some((t) => t.group === group && isMovableTile(t)))
+          grid.setAttribute('data-pkc-tile-group', group);
         // 🔴 **既定グループは見出しを出さない**(P8 段⑭)。かつては「よく使う」と
         //    書いていたが、画面はそんな情報(頻度)を持っていない ── 名乗った
         //    ぶんだけ嘘になる。名前の付いた群だけが見出しを持つ
@@ -149,7 +180,7 @@ export class LauncherRenderer {
           list.append(head, grid);
         }
       }
-      grid?.append(this.tile(tile, state.selectedLid));
+      grid?.append(this.tile(tile, state.selectedLid, canReorder));
     }
   }
 
@@ -162,12 +193,18 @@ export class LauncherRenderer {
    * 階層が無い、という状態。一覧と同じ流儀(1 行・共有 1px 線・普通の太さ・
    * はみ出しは畳む)へ寄せる。
    */
-  private tile(tile: LauncherTile, selectedLid: string | null): HTMLElement {
+  private tile(tile: LauncherTile, selectedLid: string | null, canReorder: boolean): HTMLElement {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.setAttribute('data-pkc-action', 'open-tile');
     btn.setAttribute('data-pkc-tile', tile.lid);
     btn.setAttribute('data-pkc-tile-kind', tile.kind);
+    /**
+     * 🔴 **掴んで並べ替えられる**(#857 段①)。
+     * ⚠ 組み込みは **entry を持たない**(並び順を書く先が無い)ので掴ませない ──
+     *   掴めるのに落とせないと「壊れている」に見える。
+     */
+    if (canReorder && isMovableTile(tile)) btn.setAttribute('draggable', 'true');
     // ⚠ 押した対象は**選択状態にもなる**(main.ts)── その印をここで出す
     if (tile.lid === selectedLid) btn.setAttribute('data-pkc-selected', '');
 

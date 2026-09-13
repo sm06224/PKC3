@@ -33,6 +33,7 @@ import {
   ENTRY_MENU_ACTIONS,
   entryActionHint,
   entryMenuActions,
+  TILE_MENU_ACTIONS,
 } from '../../src/features/entry-actions';
 
 /** `binder.ts` の受け手の表を読む。⚠ 集め方は `repo-hygiene` と**同じ形**にする。 */
@@ -50,8 +51,20 @@ describe('右クリックに出す操作', () => {
     expect(have.size, '受け手の表を読めていない(空振り)').toBeGreaterThan(20);
     expect(ENTRY_MENU_ACTIONS.length, 'メニューが空(空振り)').toBeGreaterThanOrEqual(3);
 
-    const dead = ENTRY_MENU_ACTIONS.filter((a) => !have.has(a.action)).map((a) => a.action);
+    /**
+     * ⚠ **右クリックに出す表を、1 つ残らず当てる**(2026-09-12、#857 段① の
+     *   着地前レビュー)── 1 稿目は `ENTRY_MENU_ACTIONS` だけを見ており、
+     *   あとから足した `TILE_MENU_ACTIONS`(アプリのタイルの「上へ / 下へ」)は
+     *   **綴りを 1 つ壊しても全部緑**だった(メニューには出るのに押すと無言)。
+     * 🔑 表が増えたらここへ足す ── `data-pkc-action` を**変数で渡す**メニューは、
+     *   `repo-hygiene` の字面の走査に 1 件も当たらない(この file の冒頭の戒め)。
+     */
+    const dead = [...ENTRY_MENU_ACTIONS, ...TILE_MENU_ACTIONS]
+      .filter((a) => !have.has(a.action))
+      .map((a) => a.action);
     expect(dead, '受け手のいない操作をメニューに出している(押しても無言)').toEqual([]);
+    // ⚠ 空振り防止 ── 足した表が空なら、上の走査は増えていないのと同じ
+    expect(TILE_MENU_ACTIONS.length, 'タイルのメニューが空(空振り)').toBeGreaterThanOrEqual(2);
   });
 
   it('⚠ 空振り防止 ── 綴りを 1 つ壊せば、この検査は落ちる', () => {
