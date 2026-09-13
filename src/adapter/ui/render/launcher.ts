@@ -67,6 +67,17 @@ export class LauncherRenderer {
    */
   disposeAssets(): void {
     this.lends.disposeAll();
+    /**
+     * 🔴 **指紋も捨てる**(2026-09-13、自分の配線を読み直して見つけた)。
+     *
+     * ⚠ 返した URL は**もう開けない**のに、`<img>` はその `src` を持ったまま
+     *   画面に残っている。⚠ `render` は指紋が同じなら**何もせずに返す**ので、
+     *   タブを行って戻ってくると**絵が壊れたまま**になる
+     *   (state は 1 ビットも変わっていないため)。
+     * 🔑 だから「まだ 1 度も描いていない」へ戻す ── 次の `render` が
+     *   器ごと組み直し、借り直す。
+     */
+    this.lastTiles = undefined;
   }
 
   /**

@@ -13,6 +13,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { initialState, type AppState } from '../../src/adapter/state/app-state';
 import { LauncherRenderer } from '../../src/adapter/ui/render/launcher';
+import { BrowseRouter } from '../../src/adapter/ui/render/browse';
+import { buildShell } from '../../src/adapter/ui/render/shell';
 import { GroupFoldStore } from '../../src/adapter/ui/render/group-fold';
 import { withBuiltinTiles, type LauncherTile } from '../../src/features/launcher/tiles';
 
@@ -133,6 +135,38 @@ describe('取り込んだ絵を一覧に出す(#856 段②)', () => {
     expect(disposed, '画面から消えた絵を返していない(bytes が残る)').toEqual(['k1']);
   });
 
+  /**
+   * 🔴 **返した後に戻ってきたら、借り直す**(2026-09-13)。
+   *
+   * ⚠ タブを切り替えても器は残る(`hidden` にするだけ)ので、返した URL を持った
+   *   `<img>` が**画面に残る**。⚠ そして `render` は指紋が同じなら**何もしない** ──
+   *   state は 1 ビットも変わっていないので、**戻ってくると絵が壊れたまま**になる。
+   * 🔑 だから返すときに**指紋も捨てる**。この test はその往復を見る。
+   */
+  it('🔴 返した後にもう一度描くと、借り直す(絵が壊れたまま残らない)', async () => {
+    let n = 0;
+    const lend = vi.fn(async (k: string) => {
+      n += 1;
+      return { url: `blob:${k}#${String(n)}`, dispose: () => {} };
+    });
+    const m = mount({ lend });
+    const state = stateWith(tile({ iconAssetKey: 'k1' }));
+    m.renderer.render(state);
+    await Promise.resolve();
+    await Promise.resolve();
+    const first = userTile(m.region).querySelector<HTMLImageElement>('img')!.src;
+    expect(first, '前提が崩れている(1 回目で借りていない)').toBe('blob:k1#1');
+
+    m.renderer.disposeAssets();
+    // ⚠ **state は 1 ビットも変えない** ── ここが要である(指紋が同じ回を作る)
+    m.renderer.render(state);
+    await Promise.resolve();
+    await Promise.resolve();
+    const again = userTile(m.region).querySelector<HTMLImageElement>('img')!.src;
+    expect(again, '返した URL を差したまま(絵が壊れて見える)').toBe('blob:k1#2');
+    expect(lend, '借り直していない').toHaveBeenCalledTimes(2);
+  });
+
   it('🔴 面を畳むときに、借りているものを全部返す', async () => {
     const disposed: string[] = [];
     const lend = vi.fn(async (k: string) => ({
@@ -146,5 +180,42 @@ describe('取り込んだ絵を一覧に出す(#856 段②)', () => {
     expect(disposed, '前提が崩れている').toEqual([]);
     m.renderer.disposeAssets();
     expect(disposed, '畳んでも返していない').toEqual(['k1']);
+  });
+});
+
+/**
+ * 🔴 **タブを出たら返す、の配線**(2026-09-13。変異試験 M9 が SURVIVED で教えた)。
+ *
+ * ⚠ `LauncherRenderer.disposeAssets()` は**それ自体の test**を持っていたが、
+ *   **誰も呼んでいなくても緑**だった(実際、書いた直後は `grep` で 1 件 ──
+ *   定義だけの死んだ口だった)。
+ * ⚠ そして返さないと**行き来した回数ぶん握ったまま**になる ── タブの切替は
+ *   器を消さず `hidden` にするだけなので、「画面から消えたら返す」の仕掛けは
+ *   **1 つも働かない**。
+ */
+describe('タブを出たら、借りた絵を返す(#856 段②)', () => {
+  it('🔴 アプリの一覧から別のタブへ移ると、返す', async () => {
+    const disposed: string[] = [];
+    const lend = vi.fn(async (k: string) => ({
+      url: `blob:${k}`,
+      dispose: () => disposed.push(k),
+    }));
+    const root = document.createElement('div');
+    document.body.append(root);
+    const regions = buildShell(root);
+    const browse = new BrowseRouter(regions.sidebar, regions.browseHost, 'launcher', undefined, {
+      lend,
+      getBlob: async () => null,
+    });
+    const state = stateWith(tile({ iconAssetKey: 'k1' }));
+    browse.render(state, 'launcher');
+    await Promise.resolve();
+    await Promise.resolve();
+    // 前提 ── 借りている(ここが崩れると以降は何も見ていない)
+    expect(lend, '前提が崩れている(借りていない)').toHaveBeenCalledWith('k1');
+    expect(disposed, '前提が崩れている(もう返している)').toEqual([]);
+
+    browse.render(state, 'list');
+    expect(disposed, 'タブを出たのに握ったまま(行き来した回数ぶん積み上がる)').toEqual(['k1']);
   });
 });
