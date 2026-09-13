@@ -22,8 +22,11 @@
  *   判断を置くと「全 test 緑のまま取り違える」形になる(CLAUDE.md §2)。
  */
 import { isImageAssetMime } from '@features/asset/asset-ref-format';
+import type { ExternalImageMode } from '@features/markdown/external-images';
 import { iconPicksFromDocument, wellKnownIconUrl } from '@features/launcher/favicon';
 import { HttpStatusError } from './adopt-urls';
+import type { AssetGate } from './asset-gate';
+import { storeAsset, type AttachDeps } from './attach';
 
 /**
  * 段 2 で叩く候補の数。
@@ -114,4 +117,92 @@ export async function fetchFavicon(pageUrl: string, deps: FaviconDeps): Promise<
     }
   }
   return { ok: false, why: last };
+}
+
+/**
+ * 🔴 **設定で止めている人には、取りに行かない**(#856 段②。user 裁定 2026-09-13)。
+ *
+ * ⚠ 求められていたのは「設定を favicon にも効かせる」ことである。押しても外へ通信しない。
+ * ⚠ そのとき**黙って終わらない** ── 押して何も起きないのがいちばん悪い。
+ *
+ * 🔑 **判定をここに置く理由**:配線(`main.ts` / `binder.ts` の handler)へ書くと、
+ *   `main.ts` は原文を読む test しか持てないので「全 test 緑のまま取り違える」形になる
+ *   (CLAUDE.md §2)。
+ *
+ * ⚠ 既存の「外部の画像を取り込む」ボタン(`adopt-urls.ts`)は**この設定を見ていない**
+ *   (押したことが同意、という設計)── 揃えるかどうかは別途伺う、と裁定に書いてある。
+ *
+ * @returns 止める理由(user が読む 1 行)。止めないなら `null`。
+ */
+export function externalImageBlockReason(mode: ExternalImageMode): string | null {
+  // ⚠ `ask` は止めない ── **押したこと自体が、その 1 回の同意**である
+  if (mode !== 'never') return null;
+  return '設定で「本文の外部画像」を常にオフにしているので、取りに行きませんでした(下の絵から選べます)';
+}
+
+/** 取り込んだ印の名乗り(#856 段②)。⚠ 添付の一覧に**何の絵か**が出る。 */
+export const LINK_ICON_PREFIX = 'リンクの印';
+
+export interface AdoptLinkIconDeps extends FaviconDeps {
+  /**
+   * ⚠ **整理(未参照 GC)と排他にする** ── 置いた直後はまだ誰も参照していないので、
+   *   その窓で整理が走ると**置いたばかりの bytes を消される**(貼付と同じ理由)。
+   */
+  readonly gate: AssetGate;
+  readonly attach: AttachDeps;
+}
+
+export type AdoptLinkIconOutcome =
+  | { readonly ok: true; readonly assetKey: string }
+  | { readonly ok: false; readonly why: string };
+
+/**
+ * 🔴 **取りに行って、置くところまで**(#856 段②)。
+ *
+ * ⚠ **ノートには書かない** ── 鍵を返すだけで、本文へ差すのは呼び側(reducer)の仕事。
+ *   ここで書くと、書込の門(`SET_APP_TILE` の `writeLock` / 世代)を迂回することになる。
+ * ⚠ **設定の門はここに無い** ── 押す前に見るものなので、押し所の側(binder)が持つ。
+ */
+export async function adoptLinkIcon(
+  deps: AdoptLinkIconDeps,
+  pageUrl: string,
+): Promise<AdoptLinkIconOutcome> {
+  const got = await fetchFavicon(pageUrl, deps);
+  if (!got.ok) return got;
+
+  /**
+   * ⚠ **箱に入れて受ける** ── 素の変数に代入すると、tsc は
+   *   「閉包が走った」ことを見ないので `never` に絞り、`as` で嘘をつく羽目になる。
+   */
+  const out: { assetKey: string | null; failed: string | null } = { assetKey: null, failed: null };
+  await deps.gate(async () => {
+    try {
+      const stored = await storeAsset(deps.attach, {
+        // ⚠ 名前は**どこから来たか**が読める形にする(添付の一覧に出る)
+        name: `${LINK_ICON_PREFIX} ${hostOf(pageUrl)}`,
+        type: got.blob.type,
+        size: got.blob.size,
+        blob: got.blob,
+      });
+      out.assetKey = stored.assetKey;
+    } catch (e) {
+      // ⚠ 空き容量が足りない等は**投げてくる** ── user が読める 1 行へ直す
+      out.failed = e instanceof Error ? e.message : String(e);
+    }
+  });
+  if (out.assetKey !== null) return { ok: true, assetKey: out.assetKey };
+  // ⚠ `gate` が**走らせずに断った**ときも、ここへ来る(理由を落とさない)
+  return {
+    ok: false,
+    why: out.failed ?? 'いま別の片付けが動いているので、少し待ってからもう一度押してください',
+  };
+}
+
+/** 名前に出す宛先。⚠ 読めない綴りでも**落とさない**(名前が空になるだけ)。 */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
 }

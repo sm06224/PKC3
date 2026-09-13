@@ -386,6 +386,8 @@ import {
   toggleArchiveMark,
 } from '@features/archive/zip-browse';
 import { currentOpenPlace } from '@adapter/ui/render/open-place';
+import { appExternalImages } from '@adapter/ui/render/external-images';
+import { externalImageBlockReason } from './adopt-favicon';
 import { effectiveOpenPlace } from '@features/open-place';
 import { joinCopied, pickMarked } from '@features/clipboard/scrap';
 import { sqlNoteBody, sqlNoteTitle } from '@features/query/sql-to-note';
@@ -805,6 +807,14 @@ export interface BinderServices {
    *   `describeAdoptFailures` の 1 本(呼び側で綴り直さない)。
    */
   adoptUrls?(urls: readonly string[], namePrefix: string): Promise<AdoptOutcome>;
+  /**
+   * 🔴 **リンク先の印を取りに行って、置くところまで**(#856 段②)。
+   *
+   * ⚠ **判断はここへ渡さない** ── 取れた / 取れなかったを返すだけで、
+   *   何を dispatch するかは binder が決める(`main.ts` に判断を置かない ── §2)。
+   * ⚠ 呼ぶのは**設定の門を通した後**である(押していないのに通信しない)。
+   */
+  adoptLinkIcon?(url: string): Promise<{ ok: true; assetKey: string } | { ok: false; why: string }>;
   /**
    * 🔴 **添付を別の窓で見る**(#192 で画像、2026-08-15 に PDF を追加)。
    * ⚠ 実体は adapter/platform 側(ObjectURL の寿命が絡むので、binder は**呼ぶだけ**)。
@@ -1423,6 +1433,13 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
    *   困らないよう、少なくとも**押す時点**では止める(検査は `tests/repo-hygiene.test.ts`)。
    */
   'adopt-external-images',
+  /**
+   * 🔴 **リンク先の印を取り込むのも、ノートを書く**(#856 段②)──
+   *   `SET_APP_TILE` を撃つので同じ門をくぐらせる。
+   * ⚠ `adopt-external-images` と同じく**押してから書くまでに通信を挟む**ので、
+   *   少なくとも**押す時点**では止める。
+   */
+  'adopt-link-icon',
   'toggle-todo',
   /**
    * 🔴 **本文を書く点では `toggle-todo` と同じ**(2026-08-19 のレビュー W-4)。
@@ -6267,6 +6284,51 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔑 撃つのは `set-app-icon`(欄に打つ)と**同じ書込** ── 空文字は
    *   reducer が「目印なし」に畳むので、`なし` の口も同じ 1 本で足りる。
    */
+  /**
+   * 🔴 **リンク先の印を取り込む**(#856 段②。user 裁定 2026-09-12 / 09-13)。
+   *
+   * 🔑 **通信が始まるのは、ここに来た瞬間だけ**である(押していないのに外へ出ない)。
+   * ⚠ 門は 3 つ。どれも**黙って終わらない** ── 押して何も起きないのがいちばん悪い:
+   *   ① アドレスが無い(出し分けが壊れている合図)
+   *   ② 🔴 設定で「本文の外部画像」を**常にオフ**にしている(裁定 2026-09-13)
+   *   ③ 取りに行って取れなかった(理由をそのまま出す)
+   * ⚠ **押している間は押せなくする** ── 連打で同じサイトへ何度も出ない
+   *   (`render` が組み直せば戻る ── 状態を増やさずに済ませる)。
+   */
+  'adopt-link-icon': (dispatcher, target, services) => {
+    const lid = dispatcher.getState().selectedLid;
+    if (lid === null) return;
+    const url = target.getAttribute('data-pkc-url') ?? '';
+    if (url === '') {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: 'このノートにはリンク先のアドレスがありません',
+      });
+      return;
+    }
+    const blocked = externalImageBlockReason(appExternalImages.getMode());
+    if (blocked !== null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: blocked });
+      return;
+    }
+    const go = services.adoptLinkIcon;
+    if (go === undefined) return;
+    const btn = target instanceof HTMLButtonElement ? target : null;
+    if (btn) btn.disabled = true;
+    void go(url)
+      .then((got) => {
+        if (got.ok) dispatcher.dispatch({ type: 'SET_APP_TILE', lid, iconAssetKey: got.assetKey });
+        else
+          dispatcher.dispatch({
+            type: 'OP_FAILED',
+            error: `リンク先の印を取り込めませんでした: ${got.why}`,
+          });
+      })
+      .finally(() => {
+        // ⚠ `render` が組み直していれば、この器はもう画面に無い(触っても害は無い)
+        if (btn) btn.disabled = false;
+      });
+  },
   'pick-app-icon': (dispatcher, target) => {
     const lid = dispatcher.getState().selectedLid;
     if (!lid) return;

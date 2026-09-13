@@ -2269,6 +2269,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-13(#856 段② ── リンク先の印)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-09-storage-where" …` → f557f5f
+     */
+    '保存先が「いまどこか」を、ヘルプで確かめられるようになりました',
+    /**
      * ⚠ **2026-09-13(#857 段② ── 目印の表)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-09-sql-pane" …` → da1670f
      */

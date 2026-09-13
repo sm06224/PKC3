@@ -2813,6 +2813,26 @@ function appTileControls(rawBody: string, mime: string): HTMLElement | null {
   // ⚠ グループ名は**並び順そのもの**(名前順に並ぶ)── placeholder でそう言う
   field('app-group', 'set-app-group', 'グループ(名前順に並びます)', fm['attachment.app_group'], 16);
   field('app-icon', 'set-app-icon', 'アイコン', fm['attachment.app_icon'], 8);
+  /**
+   * 🔴 **リンク先の印を取り込む**(#856 段②。user 裁定 2026-09-12)。
+   *
+   * ⚠ **アドレスの在るタイルにだけ出す** ── 添付の HTML には取りに行く先が無い。
+   * 🔑 **絵の一覧のすぐ上に置く** ── 取れなかったときの逃げ道
+   *   (絵を選ぶ)が**同じ画面に在る**ようにする、というのが裁定の要である。
+   * ⚠ 押すまで 1 バイトも通信しない ── 押した後どうなるかは `binder.ts` が持つ。
+   */
+  if (byUrl) {
+    const adopt = document.createElement('button');
+    adopt.type = 'button';
+    adopt.setAttribute('data-pkc-action', 'adopt-link-icon');
+    adopt.setAttribute('data-pkc-field', 'adopt-link-icon');
+    // ⚠ **押した物が何かは、押した要素が持つ**(§7)── 受け手が本文を引き直さない
+    adopt.setAttribute('data-pkc-url', String(fm['attachment.launcher_url'] ?? ''));
+    adopt.textContent = 'リンク先の印を取り込む';
+    // ⚠ 押す前に**何が起きるか**を言う(勝手に外へ出ないことを、押す前に伝える)
+    adopt.title = '押したときに 1 回だけ、そのサイトへ取りに行きます';
+    box.append(adopt);
+  }
   box.append(appIconPalette(fm['attachment.app_icon']));
   return box;
 }
