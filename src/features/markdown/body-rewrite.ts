@@ -235,6 +235,29 @@ export type BodyRewrite =
     }
   | {
       /**
+       * 🔴 **繰り返しの「その回だけ」を、別の日へ動かす**(#855 決4。
+       * user 裁定 2026-09-13「1 回か全部か選択する(Outlook 模倣で OK)」)。
+       *
+       * ⚠ すぐ上の `repeat-done` と**兄弟**である ── どちらも
+       *   「規則の行は触らず、その回ぶんの行を 1 本増やす」。違いは 2 つだけ:
+       *   ① 増える行の日付が**落とした日**(その回の日ではない)
+       *   ② **`振替<元の回の日>`** が付く(= 元の日は規則から出さない)
+       * 🔑 だから**印は押さない**(済ませたのではなく、動かしただけである)。
+       *
+       * ⚠ **「全部ずらす」はこの kind ではない** ── あちらは規則の行の日付を
+       *   書き換えるだけなので、既存の `kind: 'line-date'` で足りる
+       *   (新しい口を作らない ── CLAUDE.md §7)。
+       */
+      kind: 'repeat-move';
+      /** 規則の行。 */
+      line: number;
+      /** どの回を動かすか(`YYYY-MM-DD`)。⚠ 規則の行の日付ではない。 */
+      from: string;
+      /** どこへ動かすか(`YYYY-MM-DD`)。 */
+      to: string;
+    }
+  | {
+      /**
        * 🔴 **外部の画像を手元の添付へ差し替える**(#264 段①)。
        *
        * ⚠ **行番号を持たない** ── 取りに行っている間に別の窓が行を足していれば
@@ -459,6 +482,7 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
     return applyTagsToBody(body, rewrite.tags, rewrite.mode).body;
   }
   if (rewrite.kind === 'repeat-done') return materializeRepeat(body, rewrite);
+  if (rewrite.kind === 'repeat-move') return moveRepeatOccurrence(body, rewrite);
   if (rewrite.kind === 'place-move') return movePlace(body, rewrite);
   if (rewrite.kind === 'place-size') return resizePlace(body, rewrite);
   if (rewrite.kind === 'place-remove') return removePlace(body, rewrite);
@@ -640,6 +664,46 @@ function materializeRepeat(
    */
   if (lines.includes(done)) return null;
   lines.splice(rewrite.line + 1, 0, done);
+  return lines.join('\n');
+}
+
+/**
+ * 🔴 **繰り返しの「その回だけ」を別の日へ動かす**(#855 決4)。
+ *
+ * 🔑 作りは `materializeRepeat` と**同じ形**(規則の行は触らず、下に 1 本増やす)。
+ *   違うのは**書く日**と**振替が付くこと**、そして**印を押さないこと**である。
+ *
+ * ⚠ **同じ日へ落としたら何もしない** ── `null` を返す(本文を書き換えて
+ *   更新日時だけ動かさない。`adopt-images` と同じ作法)。
+ * ⚠ **同じ行が既に在るなら増やさない**(二度落としの相打ち)── 判定は
+ *   **作った字そのもの**で見る(`materializeRepeat` と同じ理由)。
+ */
+function moveRepeatOccurrence(
+  body: string,
+  rewrite: { line: number; from: string; to: string },
+): string | null {
+  const lines = body.split('\n');
+  const line = lines[rewrite.line];
+  if (line === undefined) return null;
+  if (!TASK_LINE.test(line)) return null;
+  const found = readLineDate(line);
+  // ⚠ 繰り返しの行でなければ**何もしない**(普通の項目は `kind: 'line-date'` の仕事)
+  if (found === null || found.repeat === null) return null;
+  // ⚠ 読めない日は書かない(当てずっぽうの日付を本文へ残さない)
+  if (!isScheduleDate(rewrite.from) || !isScheduleDate(rewrite.to)) return null;
+  // 🔑 動いていないなら書かない
+  if (rewrite.from === rewrite.to) return null;
+  /**
+   * ⚠ 記法を**落とした日の単日 + 振替**へ差し替える(刻みは落とす ── 増えた行が
+   *   また繰り返したら回が無限に増える)。⚠ 時刻は**持ち越す**
+   *   (`14:00 毎週` の回は 14:00 の予定である)。
+   */
+  const moved =
+    line.slice(0, found.start) +
+    formatLineDate(rewrite.to, found.time, null, null, rewrite.from) +
+    line.slice(found.end);
+  if (lines.includes(moved)) return null;
+  lines.splice(rewrite.line + 1, 0, moved);
   return lines.join('\n');
 }
 
