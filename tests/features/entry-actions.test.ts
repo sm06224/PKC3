@@ -21,6 +21,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
   APP_GROUP_MENU_ACTIONS,
+  appGroupMenuActions,
   tableConvertPickLabel,
   tableMenuActions,
   ADOPT_IMAGES_LABEL,
@@ -81,6 +82,14 @@ describe('右クリックに出す操作', () => {
        *   (すぐ上の 2026-09-12 の戒めと、まったく同じ抜け方である)。
        */
       ...APP_GROUP_MENU_ACTIONS,
+      /**
+       * ⚠ 2026-09-13(#857 段③): 「名前順に戻す」は**組み立てる関数の側**に在る
+       *   (番号が付いているときだけ出す)ので、素の表を並べただけでは**漏れる**。
+       * 🔑 だから **`appGroupMenuActions` を両方の答えで**呼ぶ ── 出る側も出ない側も
+       *   数え上げる(引数で消える行を、この門から消さない)。
+       */
+      ...appGroupMenuActions(false),
+      ...appGroupMenuActions(true),
     ]
       .filter((a) => !have.has(a.action))
       .map((a) => a.action);
@@ -92,6 +101,14 @@ describe('右クリックに出す操作', () => {
       APP_GROUP_MENU_ACTIONS.length,
       'グループの見出しのメニューが空(空振り)',
     ).toBeGreaterThanOrEqual(1);
+    /**
+     * ⚠ **引数で行が増えることを pin する** ── 増えないなら、上の 2 回呼びは
+     *   同じ物を 2 度数えているだけで、**何も守っていない**。
+     */
+    expect(
+      appGroupMenuActions(true).length - appGroupMenuActions(false).length,
+      '番号が在るときの行が増えていない(2 回呼ぶ意味が無い)',
+    ).toBe(1);
   });
 
   it('⚠ 空振り防止 ── 綴りを 1 つ壊せば、この検査は落ちる', () => {

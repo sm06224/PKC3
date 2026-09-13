@@ -337,6 +337,31 @@ export const APP_GROUP_MENU_ACTIONS: readonly EntryAction[] = [
   { action: 'move-app-group-down', label: '下へ' },
 ];
 
+/**
+ * 🔴 **並べ替えをやめて名前順へ戻す**(#857 段③。着地前の動線レビューが出した)。
+ *
+ * ⚠ **片道の操作を作らない**(CLAUDE.md 不可侵)── 「上へ / 下へ」を逆に同じ回数
+ *   押せば**見た目**は戻るが、**番号そのものはノートに残り続ける**ので
+ *   「番号の付いていない状態」には二度と帰れなかった。
+ * ⚠ 何回押せば戻るかを user に数えさせるのも、目印の「なし」(1 回で外せる)と
+ *   釣り合わない。
+ * 🔑 **番号が 1 つも付いていないときは出さない** ── 出すと、押しても何も起きない
+ *   (この repo がいちばん嫌う無言の dead click)。
+ */
+export const APP_GROUP_RESET_ACTION: EntryAction = {
+  action: 'reset-app-group-order',
+  label: '名前順に戻す',
+};
+
+/**
+ * グループの見出しのメニュー。⚠ **並べ替えをやめる行は、番号が在るときだけ**。
+ * 🔑 組み立てをここ 1 か所に置く ── 呼び側(右クリックと長押しの 2 か所)で
+ *   別々に組むと、片方だけ行が欠ける(§7「同じ判定が 2 か所」)。
+ */
+export function appGroupMenuActions(hasOrder: boolean): readonly EntryAction[] {
+  return hasOrder ? [...APP_GROUP_MENU_ACTIONS, APP_GROUP_RESET_ACTION] : APP_GROUP_MENU_ACTIONS;
+}
+
 export const REPEAT_ATTR = 'data-pkc-repeat';
 
 export const TASK_REPEAT_MENU_ACTION: EntryAction & { readonly hint: string } = {

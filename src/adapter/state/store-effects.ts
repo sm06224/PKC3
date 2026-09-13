@@ -45,7 +45,6 @@ import { buildTiles, withBuiltinTiles, type TileSource } from '@features/launche
 import {
   appGroupIconsOf,
   appGroupOrdersOf,
-  appGroupSeed,
   writeAppGroupIcon,
   writeAppGroupOrder,
 } from '@features/launcher/app-group-spec';
@@ -1793,22 +1792,6 @@ export function connectStoreEffects(
           try {
             for (const row of ev.rows) {
               if (disposed) return;
-              if (row.lid === null) {
-                // ⚠ **作る** ── 目印と同じ雛形に番号だけ入れる(空のノートを作らない)
-                const body = writeAppGroupOrder(appGroupSeed(row.name), row.order);
-                const ext = extractMeta(row.archetype, body);
-                await store.persistEntry({
-                  lid: row.newLid,
-                  title: row.title,
-                  archetype: row.archetype,
-                  body,
-                  entryOrder: row.entryOrder,
-                  status: ext.status,
-                  date: ext.date,
-                  archived: ext.archived,
-                });
-                continue;
-              }
               const body = await store.getBody(row.lid);
               if (disposed) return;
               // ⚠ 消えていたら**その 1 件を飛ばす**(残りは進める ── 全部やめない)

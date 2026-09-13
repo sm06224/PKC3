@@ -2958,12 +2958,23 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * ⚠ 聞くのは**初めての並べ替えのときだけ** ── 2 回目からは増えないので出ない。
      * 🔑 字は「何が起きるか」で書く ── 「番号を付けます」ではなく「ノートができます」。
      */
-    confirmAppGroupNotes: async (count) =>
-      (await confirmInApp(
-        root,
-        `グループの並び順を憶えるため、グループ用のノートが ${String(count)} 枚できます。`,
-        { okLabel: '並べ替える', cancelLabel: 'やめる' },
-      )) === 'ok',
+    confirmAppGroupNotes: async (names) => {
+      /**
+       * ⚠ **名前を出す**(2026-09-13、動線レビュー D1)── 枚数だけだと
+       *   「1 つ動かしただけなのに、なぜか複数のノートが増える」に見える。
+       * ⚠ 長い一覧にしない ── 4 つまで並べて、あとは数で言う。
+       */
+      const listed = names.slice(0, 4).join(' / ');
+      const rest = names.length > 4 ? ` ほか ${String(names.length - 4)} 件` : '';
+      return (
+        (await confirmInApp(
+          root,
+          `グループの並び順は、グループごとのノートに憶えます。順番は全部のグループの位置がそろって決まるので、` +
+            `まだノートの無い ${String(names.length)} つにも 1 枚ずつできます(${listed}${rest})。`,
+          { okLabel: '並べ替える', cancelLabel: 'やめる' },
+        )) === 'ok'
+      );
+    },
     setEditorMode: (mode) => {
       appEditorMode.setMode(mode);
     },

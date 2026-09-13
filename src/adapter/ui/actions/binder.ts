@@ -53,6 +53,7 @@ import { renumberLists } from '@features/markdown/list-renumber';
 import { stripDialect } from '@features/markdown/strip-dialect';
 import {
   hasAppGroupNote,
+  hasAppGroupOrder,
   isViewMode,
   nextViewMode,
   screenBodyOf,
@@ -185,7 +186,7 @@ import {
   noteToolActions,
   tableMenuActions,
   tableConvertPickLabel,
-  APP_GROUP_MENU_ACTIONS,
+  appGroupMenuActions,
   tileMenuActions,
   TASK_REPEAT_MENU_ACTION,
   repeatMenuActions,
@@ -946,10 +947,16 @@ export interface BinderServices {
    */
   toggleAllAppGroups?(groups: readonly string[]): void;
   /**
-   * 🔴 **グループ用のノートが N 枚増えることを、押す前に聞く**(#857 段③)。
+   * 🔴 **グループ用のノートが増えることを、押す前に聞く**(#857 段③)。
+   *
+   * ⚠ **枚数だけでなく、どの群かを渡す**(2026-09-13、動線レビュー D1)──
+   *   直す前は「ノートが 4 枚できます」とだけ出ており、**押した群以外まで
+   *   巻き込まれる理由が 1 語も書いていなかった** ── user からは
+   *   「1 つ動かしただけなのに、なぜか複数のノートが増える」としか見えない。
+   * @param names ノートができる群の名前(押した群とは限らない)
    * @returns 進めてよければ `true`
    */
-  confirmAppGroupNotes?(count: number): Promise<boolean>;
+  confirmAppGroupNotes?(names: readonly string[]): Promise<boolean>;
   /**
    * 🔴 **グループの目印を選ぶ小窓を出す**(#857 段②)。
    * @returns 図案の名前。**空文字 = なし(外す)**。やめたら `null`
@@ -3400,7 +3407,7 @@ function moveAppGroup(
     go();
     return;
   }
-  void services.confirmAppGroupNotes(need.length).then((ok) => {
+  void services.confirmAppGroupNotes(need).then((ok) => {
     if (ok) go();
   });
 }
@@ -7213,6 +7220,15 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'move-app-group-up': (dispatcher, target, services) => moveAppGroup(dispatcher, target, services, -1),
   'move-app-group-down': (dispatcher, target, services) => moveAppGroup(dispatcher, target, services, 1),
+  /**
+   * 🔴 **並べ替えをやめて名前順へ戻す**(#857 段③)。
+   * ⚠ 押し所は**番号が在るときだけ**出る(`appGroupMenuActions`)ので、ここへ来た
+   *   時点で 1 つ以上在る ── ⚠ それでも reducer 側でも見る(押し所の出し分けは
+   *   **見せ方**であって、門ではない)。
+   */
+  'reset-app-group-order': (dispatcher) => {
+    dispatcher.dispatch({ type: 'RESET_APP_GROUP_ORDER' });
+  },
   'toggle-all-app-groups': (_dispatcher, target, services) => {
     const list = target.closest('[data-pkc-field="launcher-list"]');
     if (!list) return;
@@ -8057,7 +8073,7 @@ export function bindActions(
       openContextMenu(
         root,
         { x: box.left, y: box.bottom },
-        APP_GROUP_MENU_ACTIONS,
+        appGroupMenuActions(hasAppGroupOrder(dispatcher.getState())),
         row,
         { 'data-pkc-group': groupName },
       );
@@ -10221,7 +10237,7 @@ export function bindActions(
         openContextMenu(
           root,
           { x: ev.clientX, y: ev.clientY },
-          APP_GROUP_MENU_ACTIONS,
+          appGroupMenuActions(hasAppGroupOrder(dispatcher.getState())),
           root.ownerDocument.activeElement,
           { 'data-pkc-group': groupName },
         );

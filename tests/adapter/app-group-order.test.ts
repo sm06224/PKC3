@@ -100,11 +100,58 @@ describe('グループを動かす(#857 段③)', () => {
       relations: [],
     }).state;
     const s2 = reduce(withNote, { type: 'LAUNCHER_TILES_LOADED', tiles: TILES() }).state;
-    const w = move(s2, '道具', -1).events.find((e) => e.type === 'REQUEST_APP_GROUP_ORDER');
-    const rows = (w as { rows: { name: string; lid: string | null }[] }).rows;
+    const r = move(s2, '道具', -1);
+    const w = r.events.find((e) => e.type === 'REQUEST_APP_GROUP_ORDER');
+    const rows = (w as { rows: { name: string; lid: string }[] }).rows;
     expect(rows.find((x) => x.name === '道具')?.lid, '在るノートを使っていない').toBe('g1');
-    // ⚠ 対照群 ── ノートの無い群は作る側になる
-    expect(rows.find((x) => x.name === '資料')?.lid, '無い群に lid が付いている').toBeNull();
+    /**
+     * 🔴 **対照群 ── ノートの無い群は「書く行」ではなく「作る」側へ回る**
+     *   (2026-09-13 に作り方を変えた)。
+     * ⚠ 直す前は effect が `store.persistEntry` で直に行を作っていたが、
+     *   作った物が `entryMetas` に入らないので**サイドバーにも目録にも出なかった**。
+     * 🔑 いまは `CREATE_ENTRY` を通すので、**その場で state に入る**。
+     */
+    expect(rows.some((x) => x.name === '資料'), '無い群が書く行に混ざっている').toBe(false);
+    // ⚠ **増えた分だけ**を見る(元から在る `g1` も同じ archetype なので、
+    //    素の絞り込みでは「作った物」と「在った物」が混ざる)
+    const made = [...r.state.entryMetas.values()]
+      .filter((m) => !s2.entryMetas.has(m.lid))
+      .map((m) => m.title);
+    expect(made, '作った群のノートが state に入っていない').toContain('資料');
+    expect(made, '既に在る群のノートを二重に作った').not.toContain('道具');
+  });
+
+  /**
+   * 🔴 **動線レビューが出した D2 の検算**(2026-09-13)。
+   *
+   * ⚠ レビューの読み:「ノートが在るか」は `entryMetas` で見るが、**保存は非同期**なので
+   *   届く前にもう一度動かすと**同じ名前のノートがもう 1 枚**できるのではないか。
+   * 🔑 いまは `CREATE_ENTRY` を reducer の中で通すので、**次の dispatch の時点で
+   *   既に `entryMetas` に居る** ── disk を待たない。だから重複しない。
+   * ⚠ この test は「速いか」ではなく「**disk の往復を 1 度も挟まずに 2 回押す**」形で見る
+   *   (待ちを挟むと、この当の経路を通らない)。
+   */
+  it('🔴 ⑨ 保存を待たずに続けて動かしても、同じ群のノートは 2 枚にならない', () => {
+    const first = move(st, '道具', -1);
+    const made = [...first.state.entryMetas.values()].filter(
+      (m) => m.archetype === APP_GROUP_ARCHETYPE,
+    );
+    // 前提を assert(ゼロ件の次元を作らない ── 1 回目で本当に作られている)
+    expect(made.length, '1 回目で 1 枚も作られていない(前提が崩れている)').toBeGreaterThan(0);
+
+    const second = reduce(first.state, {
+      type: 'MOVE_APP_GROUP',
+      name: '道具',
+      by: 1,
+      // ⚠ **別の lid を渡す** ── 使い回すと「重複しなかった」の理由が lid になる
+      newLids: ['m1', 'm2', 'm3'],
+    });
+    const after = [...second.state.entryMetas.values()].filter(
+      (m) => m.archetype === APP_GROUP_ARCHETYPE,
+    );
+    expect(after.length, '2 回目でノートが増えた(同じ群のノートが 2 枚)').toBe(made.length);
+    const names = after.map((m) => m.title);
+    expect(new Set(names).size, '同じ名前のノートが 2 枚ある').toBe(names.length);
   });
 
   it('⚠ ⑥ 組み込みしか居ない群は動かせない(末尾に固定のまま)', () => {
@@ -138,10 +185,10 @@ describe('ノートが増えることを、押す前に聞く(#857 段③)', () 
     });
     d.dispatch({ type: 'LAUNCHER_TILES_LOADED', tiles: TILES() });
 
-    const asked: number[] = [];
+    const asked: Array<readonly string[]> = [];
     const detach = bindActions(root, d, {
-      confirmAppGroupNotes: (count) => {
-        asked.push(count);
+      confirmAppGroupNotes: (names) => {
+        asked.push(names);
         return Promise.resolve(false); // やめる
       },
     });
@@ -149,7 +196,13 @@ describe('ノートが増えることを、押す前に聞く(#857 段③)', () 
     await Promise.resolve();
     await Promise.resolve();
     expect(asked, '聞かずに増やした').toHaveLength(1);
-    expect(asked[0], '増える枚数を言っていない').toBeGreaterThan(0);
+    expect(asked[0]!.length, '増える枚数を言っていない').toBeGreaterThan(0);
+    /**
+     * 🔴 **どの群が巻き込まれるかを渡している**(2026-09-13、動線レビュー D1)。
+     * ⚠ 枚数だけだと「1 つ動かしただけなのに、なぜか複数のノートが増える」に見える ──
+     *   押した群(道具)以外も並ぶことが、この assert の当の主張である。
+     */
+    expect(asked[0], '押した群しか渡していない(文面に名前を出せない)').toContain('仕事');
     expect(d.getState().appGroupOrders, 'やめたのに書いた').toEqual({});
     detach();
   });
@@ -193,5 +246,101 @@ describe('ノートが増えることを、押す前に聞く(#857 段③)', () 
     expect(asked, 'もうノートが在るのに聞いた').not.toHaveBeenCalled();
     expect(d.getState().appGroupOrders['道具'], '動いていない').toBe(1);
     detach();
+  });
+  /**
+   * 🔴 **保存が飛んでいる間・起動中は動かさない**(変異試験 M11 が SURVIVED で教えた、
+   * 2026-09-13)。
+   * ⚠ 門は在ったが、**この状態を作って押す test が 1 本も無かった** ── 「弱い」ではなく
+   *   **その枝を 1 度も通っていない**(CLAUDE.md §2)。
+   * ⚠ 門を 2 つ置いたので、**2 つ目だけが鳴る場面**も作る(片方が死んでも気づけるように)。
+   */
+  it('🔴 ⑩ 保存中・起動中は動かさない(門を 2 つとも通す)', () => {
+    const locked = { ...st, writeLock: { kind: 'save' } } as unknown as AppState;
+    expect(move(locked, '道具', -1).events, '保存が飛んでいる間に動かした').toEqual([]);
+    expect(move(locked, '道具', -1).state.appGroupOrders, '保存中なのに番号が動いた').toEqual({});
+
+    const booting = { ...st, phase: 'initializing' } as unknown as AppState;
+    expect(move(booting, '道具', -1).events, '起動中に動かした').toEqual([]);
+
+    // 対照群 ── 門が外れているときは動く(規則そのものが生きている)
+    expect(move(st, '道具', -1).events.length, '普通の状態でも動かない').toBeGreaterThan(0);
+  });
+
+  /**
+   * 🔴 **書いた「あと」に読み直す**(2026-09-13、着地前レビューが出した)。
+   * ⚠ 画面は先に動かすので、**書込が途中で止まると画面と disk が食い違う** ──
+   *   読み直しが無いと `F5` まで誰も気づかない。
+   */
+  it('🔴 ⑪ 並べ替えたら、書いたあとに読み直す(画面と disk を離さない)', () => {
+    const evs = move(st, '道具', -1).events;
+    const write = evs.findIndex((e) => e.type === 'REQUEST_APP_GROUP_ORDER');
+    const read = evs.findIndex((e) => e.type === 'REQUEST_APP_GROUP_NOTES');
+    expect(write, '書く指示が出ていない').toBeGreaterThanOrEqual(0);
+    expect(read, '読み直していない(衝突すると画面と disk が食い違ったまま残る)').toBeGreaterThan(
+      write,
+    );
+  });
+
+  /**
+   * 🔴 **lid が足りないときに黙って止まらない**(2026-09-13、着地前レビュー)。
+   * ⚠ 呼び側は確認の小窓を出す**前**に lid を採るので、「はい」を押すまでの間に
+   *   別のタブが群を増やすと足りなくなる ── 黙って返すと
+   *   **「はい」を押したのに画面が 1 ドットも変わらない**。
+   */
+  it('🔴 ⑫ lid が足りないときは、理由を言う(無言で止まらない)', () => {
+    const r = reduce(st, { type: 'MOVE_APP_GROUP', name: '道具', by: -1, newLids: [] });
+    expect(r.events, 'lid が足りないのに書いた').toEqual([]);
+    expect(r.state.error, '黙って止まった(user には何も起きなかったように見える)').not.toBeNull();
+    expect(r.state.error, '理由が読めない').toContain('もう一度');
+  });
+});
+
+/**
+ * 🔴 **並べ替えをやめて名前順へ戻す**(#857 段③。着地前の動線レビューが出した)。
+ *
+ * ⚠ **片道の操作を作らない**(CLAUDE.md 不可侵)── 「上へ / 下へ」を逆に押せば
+ *   見た目は戻るが、**番号はノートに残り続ける**ので「番号の付いていない状態」へは
+ *   帰れなかった(目印は「なし」で 1 回で外せるのに、並びだけ戻せない)。
+ */
+describe('名前順に戻す(#857 段③)', () => {
+  const ordered = (): AppState => {
+    const r = move(st, '道具', -1);
+    // 前提を assert ── 番号が本当に付いている(ゼロ件の次元を作らない)
+    expect(Object.keys(r.state.appGroupOrders).length, '前提が崩れている').toBeGreaterThan(0);
+    return r.state;
+  };
+
+  it('🔴 番号を全部外す(画面はその場で名前順へ戻る)', () => {
+    const r = reduce(ordered(), { type: 'RESET_APP_GROUP_ORDER' });
+    expect(r.state.appGroupOrders, '番号が残っている').toEqual({});
+  });
+
+  it('🔴 ノートからも番号を消す指示を出す(画面だけ戻して disk を放置しない)', () => {
+    const r = reduce(ordered(), { type: 'RESET_APP_GROUP_ORDER' });
+    const w = r.events.find((e) => e.type === 'REQUEST_APP_GROUP_ORDER');
+    expect(w, '書く指示が出ていない').toBeDefined();
+    const rows = (w as { rows: { name: string; order: number | null }[] }).rows;
+    expect(rows.length, '1 行も書かない(画面だけ戻して disk が置き去り)').toBeGreaterThan(0);
+    for (const row of rows)
+      expect(row.order, `${row.name} の番号を消していない`).toBeNull();
+    // ⚠ 書いたあとに読み直す(動かすときと同じ)
+    const read = r.events.findIndex((e) => e.type === 'REQUEST_APP_GROUP_NOTES');
+    expect(read, '読み直していない').toBeGreaterThan(
+      r.events.findIndex((e) => e.type === 'REQUEST_APP_GROUP_ORDER'),
+    );
+  });
+
+  it('⚠ 保存中・起動中は戻さない', () => {
+    const locked = { ...ordered(), writeLock: { kind: 'save' } } as unknown as AppState;
+    expect(reduce(locked, { type: 'RESET_APP_GROUP_ORDER' }).events, '保存中に戻した').toEqual([]);
+    expect(
+      reduce(locked, { type: 'RESET_APP_GROUP_ORDER' }).state.appGroupOrders,
+      '保存中なのに番号が消えた',
+    ).not.toEqual({});
+  });
+
+  it('⚠ 番号が 1 つも無ければ、何も起きない(押し所もそもそも出ない)', () => {
+    const r = reduce(st, { type: 'RESET_APP_GROUP_ORDER' });
+    expect(r.events, '番号が無いのに書いた').toEqual([]);
   });
 });
