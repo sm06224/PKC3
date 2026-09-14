@@ -2353,8 +2353,16 @@ P4 assets → P5 revisions → P6 import/export → P7 v3.0.0(Pages product + PW
   🔑 **危ないのは「作業の開始」ではなく「merge の直後」**である ── 始めるときには
   branch を確かめるが、**merge の後にもう一度確かめる習慣が無かった**。
   🔑 手順 ①**同期を checkout で終わらせない**:
-  `git fetch origin main && git checkout -B <指定 branch> origin/main` まで 1 息で打つ
-  (**main に立っている時間を作らない**)②🔑 **push は branch 名を明示して打つ**
+  `git fetch --prune origin && git checkout -B <指定 branch> origin/main` まで 1 息で打つ
+  (**main に立っている時間を作らない**)。
+  🔴 **`--prune` に refspec を付けない**(2026-09-14 に**この 1 語で 3 手溶かした**)──
+  merge した瞬間に GitHub は remote の branch を消すが、手元の `origin/<branch>` は
+  **消える前の sha を指したまま残る**。⚠ `git fetch --prune origin main` と書くと
+  **`origin/main` しか掃除しない**ので残骸が生き、次の push が `(stale info)` で断られる
+  ── そこから `--force-with-lease` を撃っても、**相手が居ないので永久に通らない**。
+  🔑 **refspec を落とすだけで、この経路が構造から消える**(戒めを覚えていなくてよい)。
+  症状と診断は `.claude/skills/pr-landing/SKILL.md`(**5 度踏んでいる**)。
+  ②🔑 **push は branch 名を明示して打つ**
   (`git push -u origin <指定 branch>`)── main に居ても**押すのはローカルの指定 branch**
   なので「Everything up-to-date」で済み、**事故にならない**。⚠ 危ないのは素の `git push`。
   🔴 **そして文言を 3 か所目にしない** ── `.githooks/pre-commit` が
