@@ -260,9 +260,18 @@ function cellText(
   if (v === undefined) return null;
   const raw = textOf(v);
   if (kind === 's') {
-    const at = Number(raw);
-    // ⚠ 番号が表の外なら `null` ── 壊れた file で別の字を出さない
-    return Number.isInteger(at) && at >= 0 && at < shared.length ? (shared[at] ?? null) : null;
+    /**
+     * 🔴 **範囲の検査は書かない**(2026-09-14 の変異試験 M8 が教えた)。
+     *
+     * ⚠ 直す前は `Number.isInteger(at) && at >= 0 && at < shared.length` を先に
+     *   置き、「⚠ 番号が表の外なら `null`」と**効いているかのように**注釈していた。
+     * 🔴 **外しても 1 ビットも変わらない** ── JS の配列は範囲の外でも例外を投げず
+     *   `undefined` を返し、それを下の `?? null` が握り潰すので、**行き先が同じ**である
+     *   (負の数も `NaN` も小数も同じ)。
+     * 🔑 CLAUDE.md「『これが無いと壊れる』と書く前に、外して壊れるのを見る」──
+     *   見たら壊れなかったので、**注釈ごと消す**(在るだけの門を残さない)。
+     */
+    return shared[Number(raw)] ?? null;
   }
   if (kind === 'b') return raw === '1' ? 'TRUE' : 'FALSE';
   // ⚠ `str`(式の答えの字)と `e`(エラー)は**そのまま**

@@ -167,6 +167,40 @@ describe('シートを格子にする', () => {
     ]);
   });
 
+  /**
+   * 🔴 **`<row>` に `r` が無い file が実在する**(2026-09-14 の変異試験 M9)。
+   *
+   * ⚠ 直す前の test は**全部 `<row r="1">` のように番号を書いていた**ので、
+   *   `Number(...) || fallbackRow` の**右辺が 1 度も評価されていなかった**
+   *   (CLAUDE.md「`A || B` を足したら、`B` が false になる場面で見る」)。
+   * ⚠ 落ちると `rowNo = 0` になり、**先頭行が丸ごと消える**(手書きや古い道具の
+   *   file を開くと、1 行目が無いように見える)。
+   */
+  it('🔴 `<row>` に番号が無くても、出てきた順に行を振る', () => {
+    const xml = sheet('<row><c r="A1"><v>1</v></c></row><row><c r="A2"><v>2</v></c></row>');
+    expect(xlsxSheetGrid(xml, [], NO_DATES)).toEqual([['1'], ['2']]);
+  });
+
+  /**
+   * 🔴 **後の行が狭いときに、先に出た広い行の幅を失わない**(変異試験 M10)。
+   *
+   * ⚠ 直す前の test は「後の行のほうが狭い」形を 1 つも持っていなかったので、
+   *   幅を**覚え続ける**(`Math.max`)ことを誰も見ていなかった。
+   * ⚠ 覚えないと、最後に見た行の幅で全部を組み直すので、
+   *   **1 行目の `C1` が消える**(落ちずに、静かに)。
+   */
+  it('🔴 後の行が狭くても、先に出た広い行の幅を保つ', () => {
+    const xml = sheet(
+      '<row r="1"><c r="A1"><v>1</v></c><c r="C1"><v>3</v></c></row>' +
+        '<row r="3"><c r="A3"><v>9</v></c></row>',
+    );
+    expect(xlsxSheetGrid(xml, [], NO_DATES)).toEqual([
+      ['1', null, '3'],
+      [null, null, null],
+      ['9', null, null],
+    ]);
+  });
+
   it('⚠ 番号が共有文字列の外なら空(壊れた file で別の字を出さない)', () => {
     const xml = sheet('<row r="1"><c r="A1" t="s"><v>9</v></c></row>');
     expect(xlsxSheetGrid(xml, ['あ'], NO_DATES)).toEqual([[null]]);
