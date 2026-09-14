@@ -17,6 +17,7 @@ import { isAppendable } from '@features/flavor/append-spec';
 import { applyBodyRewrite, type BodyRewrite } from '@features/markdown/body-rewrite';
 import type { TableFormat } from '@features/markdown/table-convert';
 import { isPlaceOpen } from '@features/markdown/place-notation';
+import { isPlaceShape, type PlaceShape } from '@features/markdown/place-shape';
 import {
   BLOCK_MOVED_NOTICE,
   moveLinesWithInverse,
@@ -1547,6 +1548,11 @@ export type UserAction =
   | { type: 'ADD_PLACE'; lid: string; x: number; y: number }
   /** 板を前へ出す(#676 段②)── 他の板の z= の最大 + 1 を書く。同じ門。 */
   | { type: 'RAISE_PLACE'; lid: string; line: number }
+  /**
+   * 板の形を変える(#530 案 A。user 裁定 2026-09-14)── 開き行の `shape=` を書く。同じ門。
+   * ⚠ 綴りは `PlaceShape` に閉じる ── 知らない字は reducer で断る(下の case)。
+   */
+  | { type: 'SET_PLACE_SHAPE'; lid: string; line: number; shape: PlaceShape }
   /**
    * 🔴 **本文の塊を、本文の中で掴んで並べ替える**(#684 段①。user 要望 2026-09-03)。
    * `start..end` の行(**生の body** の行番号 = 描画の刻印 + frontmatter)を `toBefore` の
@@ -4826,6 +4832,15 @@ function reduceCore(
         const openLine = placeOpenLineOf(shown, action.line);
         if (openLine === null) return null;
         return { kind: 'place-raise', line: action.line, openLine };
+      });
+    case 'SET_PLACE_SHAPE':
+      return bodyRewriteGate(state, action.lid, '編集を終了してから、板の形を変えてください', (shown) => {
+        if (shown === null) return null; // 画面に無い本文の行番号は信じない
+        // ⚠ 綴りは**ここでも**検める ── 型は境界(postMessage / test の手組み)では効かない
+        if (!isPlaceShape(action.shape)) return null;
+        const openLine = placeOpenLineOf(shown, action.line);
+        if (openLine === null) return null;
+        return { kind: 'place-shape', line: action.line, openLine, shape: action.shape };
       });
     /**
      * 🔴 **本文の塊を掴んで並べ替える**(#684 段①)── 板と**同じ門**。

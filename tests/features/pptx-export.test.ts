@@ -9,6 +9,7 @@
  * 3. **黙って落とさない** ── 表・画像・写せなかったものは**本文に理由が出る**
  * 4. **PowerPoint に縮めさせる**(`<a:normAutofit/>`)── 切り捨てない
  */
+import type { PlaceShape } from '../../src/features/markdown/place-shape';
 import { describe, expect, it } from 'vitest';
 import { buildPptx, splitIntoSlides, type ExportBlock, type ExportCell } from '@features/export/pptx';
 
@@ -31,7 +32,9 @@ const place = (
   w: number | null,
   h: number | null,
   span: number,
-): ExportBlock => ({ kind: 'place', x, y, w, h, span });
+  // ⚠ 既定は四角(#530 案 A)── 既存の筋書きは 1 つも形を持たない
+  shape: PlaceShape = 'rect',
+): ExportBlock => ({ kind: 'place', x, y, w, h, shape, span });
 
 describe('\u{1f534} 自由配置の板が「置いたとおりの場所」で出る(#530 段①)', () => {
   /**
@@ -109,6 +112,71 @@ describe('\u{1f534} 自由配置の板が「置いたとおりの場所」で出
       expect(x + cx, '図形がスライドの右へはみ出した').toBeLessThanOrEqual(12192000);
       expect(y + cy, '図形がスライドの下へはみ出した').toBeLessThanOrEqual(6858000);
     }
+  });
+
+  /**
+   * 🔴 **形が PowerPoint の図形として出る**(#530 案 A。user 裁定 2026-09-14)。
+   * ⚠ 見るのは**渡した形の図形名**である ── 「`prstGeom` が在る」は
+   *   題名の箱でも真なので、**形を無視する実装でも通る**(CLAUDE.md §1)。
+   */
+  it('🔴 形を付けた板は、その図形で出る(掴んで動かせる図形のまま)', () => {
+    const r = buildPptx([place(0, 0, 200, 100, 1, 'diamond'), p('判断')], { title: 'T' });
+    const xml = partOf(r, 'ppt/slides/slide1.xml');
+    expect(xml, 'ひし形で出ていない').toContain('<a:prstGeom prst="diamond">');
+    // 🔑 縁を引く ── 引かないと「何も無い所に字が浮いている」ようにしか見えない
+    expect(xml, '形にしたのに縁が無い').toContain('<a:ln w="9525">');
+  });
+
+  it('🔴 四角の板は**今までどおり**(1 バイトも変えない)', () => {
+    const r = buildPptx([place(0, 0, 200, 100, 1), p('ふつう')], { title: 'T' });
+    const xml = partOf(r, 'ppt/slides/slide1.xml');
+    expect(xml).toContain('<a:prstGeom prst="rect">');
+    expect(xml, '四角に縁を足してしまった').not.toContain('<a:ln w=');
+    expect(xml, 'ひし形が漏れている').not.toContain('prst="diamond"');
+  });
+
+  /**
+   * 🔴 **題名・本文の箱は、板の形に巻き込まれない**(変異試験 M5 が SURVIVED で教えた)。
+   *
+   * ⚠ `textBox` は題名・副題・本文・板の**全部**が通る 1 本なので、形の既定を
+   *   1 つ書き換えるだけで**全部のスライドがひし形に化ける** ── それでも
+   *   「板が四角で出る」を見る test は**1 件も落ちない**(板は実値を渡すので)。
+   * 🔑 だから**板を 1 枚も置かない筋書き**で、題名の箱そのものを見る。
+   */
+  it('🔴 題名の箱は必ず四角で、縁も出ない(板の形に巻き込まれない)', () => {
+    const r = buildPptx([h(1, '章'), p('本文')], { title: 'T' });
+    const xml = partOf(r, 'ppt/slides/slide1.xml');
+    expect(xml, '題名の箱が四角でない').toContain('<a:prstGeom prst="rect">');
+    // ⚠ 空振り防止 ── 題名の箱が本当に出ている
+    expect(xml, '題名の箱が出ていない').toContain('name="題名"');
+    expect(xml, '板が 1 枚も無いのに縁が出ている').not.toContain('<a:ln w=');
+    expect(xml).not.toMatch(/prst="(?!rect)/);
+  });
+
+  /**
+   * 🔴 **扉と内容で、題名を出す口が**別**である**(変異試験 M5' が SURVIVED で教えた)。
+   * ⚠ 上の test は `h(1)` を使うので**扉**(`FRAME.coverTitle`)しか通らない ──
+   *   `h(2)` / `h(3)` の**内容のスライド**は `FRAME.title` という**別の呼び出し**で、
+   *   そちらは誰も形を検めていなかった(通ってはいるのに見ていない)。
+   */
+  it('🔴 内容のスライドの題名も必ず四角(扉とは別の呼び出し)', () => {
+    const r = buildPptx([h(3, '節'), p('本文')], { title: 'T' });
+    const xml = partOf(r, 'ppt/slides/slide1.xml');
+    expect(xml, '題名の箱が出ていない(空振り)').toContain('name="題名"');
+    expect(xml, '題名の箱が四角でない').toContain('<a:prstGeom prst="rect">');
+    expect(xml, '板が 1 枚も無いのに縁が出ている').not.toContain('<a:ln w=');
+    expect(xml, '四角でない図形が混じっている').not.toMatch(/prst="(?!rect)/);
+  });
+
+  it('⚠ 形は板ごとに効く(1 枚目の形が 2 枚目へ漏れない)', () => {
+    const r = buildPptx(
+      [place(0, 0, 200, 100, 1, 'ellipse'), p('丸'), place(0, 200, 200, 100, 1), p('四角')],
+      { title: 'T' },
+    );
+    const xml = partOf(r, 'ppt/slides/slide1.xml');
+    expect([...xml.matchAll(/prst="ellipse"/g)], '丸が 1 枚ではない').toHaveLength(1);
+    // ⚠ 題名の箱も rect なので「rect が在る」では測れない ── 板の 2 枚目まで数える
+    expect([...xml.matchAll(/<a:ln w="9525">/g)], '縁が丸以外にも付いた').toHaveLength(1);
   });
 });
 

@@ -14,6 +14,7 @@
  * (docx と同じ形。不可侵指示 2026-07-27「ゼロコピー」)。
  */
 
+import type { PlaceShape } from '../markdown/place-shape';
 import type { DocxBlock, DocxCell, DocxRun } from './docx';
 import { xmlEscape } from './docx';
 
@@ -102,8 +103,24 @@ export interface BoardItem {
   readonly y: number;
   readonly w: number | null;
   readonly h: number | null;
+  /** 🔴 板の形(#530 案 A)。⚠ `rect` は**今までどおり**(枠も地も出さない)。 */
+  readonly shape: PlaceShape;
   readonly lines: readonly SlideLine[];
 }
+
+/**
+ * 🔴 **形 → PowerPoint の図形名**(#530 案 A)。
+ * 🔑 `Record<PlaceShape, …>` で受ける ── **形を足して書き忘れたら tsc が落とす**
+ *   (綴りの表は `place-shape.ts` の 1 本。§7)。
+ * ⚠ 生の字を `prst=` へ流さない ── 知らない図形名は**壊れた .pptx** になる。
+ */
+const PRST_OF: Record<PlaceShape, string> = {
+  rect: 'rect',
+  round: 'roundRect',
+  ellipse: 'ellipse',
+  diamond: 'diamond',
+  arrow: 'rightArrow',
+};
 
 export type SlideBox =
   | { readonly kind: 'table'; readonly rows: readonly (readonly ExportCell[])[] }
@@ -202,7 +219,7 @@ export function splitIntoSlides(
         if (p.kind !== 'place') break;
         const inner = blocks.slice(i + 1, i + 1 + p.span);
         items.push({
-          x: p.x, y: p.y, w: p.w, h: p.h,
+          x: p.x, y: p.y, w: p.w, h: p.h, shape: p.shape,
           lines: inner.flatMap((x) => blockToLines(x)),
         });
         i += 1 + p.span;
@@ -355,12 +372,26 @@ function textBox(
   frame: { x: number; y: number; w: number; h: number },
   body: string,
   anchor: 'ctr' | 't',
+  /**
+   * 🔴 **板の形**(#530 案 A)。⚠ **既定を持たせない** ── 題名・副題・本文の箱も
+   *   ここを通るので、既定を 1 つ書き換えるだけで**全部のスライドの見え方が変わる**
+   *   (変異試験 M5 が SURVIVED で教えた:既定は板からは一度も使われないので、
+   *   板の test では 1 件も落ちない)。🔑 **呼び側に必ず書かせる**と、
+   *   その事故は**構造から消える**(書き忘れたら tsc が落ちる)。
+   * 🔑 `rect` 以外だけ**縁を引く** ── 引かないと、図形にしても画面には
+   *   「何も無い所に字が浮いている」ようにしか見えない(`noFill` のままなので)。
+   */
+  shape: PlaceShape,
 ): string {
+  const line =
+    shape === 'rect'
+      ? ''
+      : `<a:ln w="9525"><a:solidFill><a:srgbClr val="808080"/></a:solidFill></a:ln>`;
   return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${xmlEscape(name)}"/>`
     + `<p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>`
     + `<p:spPr><a:xfrm><a:off x="${frame.x}" y="${frame.y}"/>`
     + `<a:ext cx="${frame.w}" cy="${frame.h}"/></a:xfrm>`
-    + `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr>`
+    + `<a:prstGeom prst="${PRST_OF[shape]}"><a:avLst/></a:prstGeom><a:noFill/>${line}</p:spPr>`
     + `<p:txBody><a:bodyPr wrap="square" anchor="${anchor}"><a:normAutofit/></a:bodyPr>`
     + `<a:lstStyle/>${body}</p:txBody></p:sp>`;
 }
@@ -666,6 +697,7 @@ function boardShapes(
         },
         it.lines.map((l) => lineXml(l, SZ.body, linkOf)).join(''),
         't',
+        it.shape,
       ),
     );
   });
@@ -704,10 +736,10 @@ function slideXml(s: SlideDraft): { xml: string; rels: SlideRel[] } {
   };
   if (s.kind === 'section') {
     shapes.push(textBox(2, '題名', FRAME.coverTitle,
-      lineXml({ runs: [{ text: s.title, bold: true }], bullet: null }, SZ.coverTitle), 'ctr'));
+      lineXml({ runs: [{ text: s.title, bold: true }], bullet: null }, SZ.coverTitle), 'ctr', 'rect'));
     if (s.subtitle !== undefined) {
       shapes.push(textBox(3, '副題', FRAME.coverSubtitle,
-        lineXml({ runs: [{ text: s.subtitle }], bullet: null }, SZ.coverSubtitle), 'ctr'));
+        lineXml({ runs: [{ text: s.subtitle }], bullet: null }, SZ.coverSubtitle), 'ctr', 'rect'));
     }
     /**
      * 🔴 **扉に落ちた本文と箱も出す**(2026-08-24)。
@@ -722,19 +754,19 @@ function slideXml(s: SlideDraft): { xml: string; rels: SlideRel[] } {
     const lay = layout(FRAME.coverBody, s.lines.length, s.boxes);
     if (lay.text !== null) {
       shapes.push(textBox(4, '本文', lay.text,
-        s.lines.map((l) => lineXml(l, SZ.body, linkOf)).join(''), 't'));
+        s.lines.map((l) => lineXml(l, SZ.body, linkOf)).join(''), 't', 'rect'));
     }
     putBoxes(lay.boxes, 5);
   } else {
     if (s.title !== '') {
       shapes.push(textBox(2, '題名', FRAME.title,
-        lineXml({ runs: [{ text: s.title, bold: true }], bullet: null }, SZ.title), 'ctr'));
+        lineXml({ runs: [{ text: s.title, bold: true }], bullet: null }, SZ.title), 'ctr', 'rect'));
     }
     // 🔴 本文と箱を、本文の枠に**縦へ積む**(重ならないことを保証する)
     const lay = layout(FRAME.body, s.lines.length, s.boxes);
     if (lay.text !== null) {
       shapes.push(textBox(3, '本文', lay.text,
-        s.lines.map((l) => lineXml(l, SZ.body, linkOf)).join(''), 't'));
+        s.lines.map((l) => lineXml(l, SZ.body, linkOf)).join(''), 't', 'rect'));
     }
     // ⚠ id は 4 から(2 = 題名 / 3 = 本文)── 重複した id は PowerPoint が拒む
     putBoxes(lay.boxes, 4);

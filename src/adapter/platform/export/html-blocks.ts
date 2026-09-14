@@ -19,6 +19,7 @@
  * ⚠ PKC2 は失敗を `console.warn` にしか書かず、user から見ると
  *   「ボタンを押して何も起きない」が正常動作だった。
  */
+import { placeShapeOf } from '@features/markdown/place-shape';
 import type { DocxBlock, DocxCell, DocxRun } from '@features/export/docx';
 
 /** 走りに掛かる装飾(親から受け継ぐ)。 */
@@ -383,7 +384,7 @@ export function htmlToDocxBlocks(doc: Document): {
       if (el.classList.contains('pkc-place')) {
         const at = blocks.length;
         // ⚠ 先に場所を取る(中身を写す前)── 後から `splice` すると添字が狂う
-        blocks.push({ kind: 'place', x: 0, y: 0, w: null, h: null, span: 0 });
+        blocks.push({ kind: 'place', x: 0, y: 0, w: null, h: null, shape: 'rect', span: 0 });
         walkBlocks(el);
         blocks[at] = {
           kind: 'place',
@@ -391,6 +392,8 @@ export function htmlToDocxBlocks(doc: Document): {
           y: pxAttr(el, 'data-pkc-y') ?? 0,
           w: pxAttr(el, 'data-pkc-w'),
           h: pxAttr(el, 'data-pkc-h'),
+          // 🔑 形の既定(札が無い / 知らない字 = 四角)は `placeShapeOf` の 1 か所(§7)
+          shape: placeShapeOf(el.getAttribute('data-pkc-shape')),
           span: blocks.length - at - 1,
         };
         continue;

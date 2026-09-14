@@ -315,6 +315,36 @@ describe('書換の門(MOVE_PLACE)', () => {
     expect(events.filter((e) => e.type === 'REQUEST_BODY_REWRITE')).toHaveLength(0);
   });
 
+  it('🔴 SET_PLACE_SHAPE ── 開き行を捕えた place-shape の依頼になる(#530 案 A)', () => {
+    const { d, events } = booted();
+    d.dispatch({ type: 'SET_PLACE_SHAPE', lid: 'n1', line: 0, shape: 'diamond' });
+    expect(events.find((e) => e.type === 'REQUEST_BODY_REWRITE')).toMatchObject({
+      lid: 'n1',
+      rewrite: { kind: 'place-shape', line: 0, openLine: BOARD.split('\n')[0], shape: 'diamond' },
+    });
+    // 🔴 編集中は**声に出して**断る(黙って捨てない)
+    events.length = 0;
+    d.dispatch({ type: 'START_EDIT' });
+    d.dispatch({ type: 'SET_PLACE_SHAPE', lid: 'n1', line: 0, shape: 'ellipse' });
+    expect(d.getState().error ?? '').toContain('形');
+    expect(events.filter((e) => e.type === 'REQUEST_BODY_REWRITE')).toHaveLength(0);
+  });
+
+  it('🔴 SET_PLACE_SHAPE ── 知らない綴りは依頼を作らない(#530)', () => {
+    const { d, events } = booted();
+    // ⚠ 型では止まらない経路(境界を越えてきた値)を模す
+    d.dispatch({
+      type: 'SET_PLACE_SHAPE',
+      lid: 'n1',
+      line: 0,
+      shape: 'wedgeEllipseCallout' as never,
+    });
+    expect(
+      events.filter((e) => e.type === 'REQUEST_BODY_REWRITE'),
+      '知らない図形名が PowerPoint まで流れる',
+    ).toHaveLength(0);
+  });
+
   it('🔴 ADD_PLACE ── 座標だけを持つ place-add の依頼になる(行番号を持たない)', () => {
     const { d, events } = booted();
     d.dispatch({ type: 'ADD_PLACE', lid: 'n1', x: 30, y: 50 });

@@ -158,6 +158,15 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'launch-asset', 'launch-asset-extension', 'launch-asset-raw', 'move-order-down',
   'move-order-up', 'mute-announce', 'next-announce', 'open-manual-window', 'open-today',
   'paste-many-copied', 'phone-menu', 'phone-page', 'pick-app-icon', 'pick-create-kind',
+  /**
+   * ⚠ **2026-09-14(#530 案 A)で 5 件増やした** ── 板の形(四角 / 角丸 / 丸 /
+   *   ひし形 / 矢印)。⚠ **名前で呼べないままにする理由**:押し口は
+   *   **板の右クリック**だけで、`menuCarriedBlock` が運ぶ**その板の行**が要る
+   *   ── パレットから「ひし形にする」と呼んでも、どの板かが決まらない。
+   * 🔑 同じ理由で `raise-place` / `remove-place` も未登記である(並びを揃えた)。
+   */
+  'place-shape-arrow', 'place-shape-diamond', 'place-shape-ellipse', 'place-shape-rect',
+  'place-shape-round',
   'purge-trash', 'raise-place', 'refresh-query', 'remove-office-pack', 'remove-place',
   'rename-attachment', 'renumber-lists', 'replace-all', 'reset-app-group-order', 'reset-flags',
   'reset-office-profile', 'retry-persist', 'run-sql', 'schedule-nav', 'schedule-quick-add',
@@ -291,12 +300,14 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   (押し所は見出しのメニューに在るが、**効く先は target で決まらない**)
       // ⚠ 2026-09-13(#884 段②): その場だけの開き方(`open-tile-as`)で受け手 +1
       //   ── 登記は増えない(押し所はタイルの右クリックの中にしか無い)
-      total: 289,
-      receivers: 240,
+      // ⚠ 2026-09-14(#530 案 A): 板の形 5 つ(`place-shape-*`)で受け手 +5
+      //   (登記は増えない ── 押し口は板の右クリックの中にしか無く、鍵も持たない)
+      total: 294,
+      receivers: 245,
       registered: 85,
       both: 36,
       outsideActionsTable: 49,
-      unregistered: 204,
+      unregistered: 209,
     });
   });
 

@@ -25,6 +25,7 @@
  *   `zip-writer.ts` が並べるだけにする(不可侵指示 2026-07-27「ゼロコピー」)
  */
 
+import type { PlaceShape } from '../markdown/place-shape';
 import { DEFAULT_PAGE_FORMAT, pageFormatSpec, type PageFormat } from '../page-format';
 
 /** 文字の並び(強調・傾き・等幅・リンク)。⚠ 入れ子は**畳んで**持つ。 */
@@ -89,6 +90,11 @@ export type DocxBlock =
       /** 省略可 ── 描画側の既定に合わせる(ここで数え直さない)。 */
       readonly w: number | null;
       readonly h: number | null;
+      /**
+       * 🔴 **板の形**(#530 案 A)。⚠ Word は**読まない**(位置と同じで、使うのは
+       * PowerPoint 側だけ)── ここは運ぶだけの印である。
+       */
+      readonly shape: PlaceShape;
       /** 後ろに続く「中身の塊」の数。⚠ 0 なら中身が無い(空の付箋)。 */
       readonly span: number;
     }
