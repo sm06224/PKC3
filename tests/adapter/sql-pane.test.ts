@@ -1544,6 +1544,68 @@ describe('打つ所(#918 段②a)', () => {
     expect(d.getState().sqlPage.sql).toBe('select 1');
   });
 
+  /**
+   * 🔴 **呼び戻した字を直してから、もう一度遡っても、直した分が消えない**
+   *   (2026-09-14 の動線レビューが出した。**直す前は黙って消えていた**)。
+   *
+   * ⚠ 物語:`select 2` を `↑` で呼び戻す → `where id=3` を付け足す →
+   *   「もう少し前のも見よう」ともう一度 `↑`。⚠ 直す前は、付け足した字が
+   *   **どこにも控えられておらず**、`↓` で帰ってくるのは**直す前**の `select 2` だった。
+   * 🔑 観測点は 2 つ:①**帰ってきた字に手直しが残っている**
+   *   ②**打ちかけの字も別に残っている**(片方を直して、もう片方を壊していない)。
+   */
+  it('🔴 履歴の中で直した字が、遡っても消えない', async () => {
+    const { d, type, key, runBtn, box } = setup();
+    for (const sql of ['select 1', 'select 2']) {
+      type(sql);
+      runBtn.click();
+      await settle();
+    }
+    type('打ちかけ');
+    caret(box, 0);
+    key({ key: 'ArrowUp' });
+    expect(d.getState().sqlPage.sql, '前提が崩れている(↑ で戻っていない)').toBe('select 2');
+
+    // ⚠ 呼び戻した字を**手で直す**(打鍵は `input` = `SET_SQL_TEXT` を通る)
+    type('select 2 where id=3');
+
+    caret(box, 0);
+    key({ key: 'ArrowUp' });
+    expect(d.getState().sqlPage.sql, 'さらに前へ遡れていない').toBe('select 1');
+    // ① 🔴 本題 ── 戻ると、直した字が在る
+    key({ key: 'ArrowDown' });
+    expect(d.getState().sqlPage.sql, '直した字が消えた').toBe('select 2 where id=3');
+    // ② 打ちかけの字も無事
+    key({ key: 'ArrowDown' });
+    expect(d.getState().sqlPage.sql, '打ちかけの字まで壊した').toBe('打ちかけ');
+  });
+
+  /**
+   * ⚠ **手直しの控えは、走らせたら捨てる** ── 走った字は履歴に積まれるので、
+   *   持ち越すと**次に同じ所を呼び戻した人に、前の回の手直しが出る**。
+   */
+  it('⚠ 走らせたら、前の回の手直しは残らない', async () => {
+    const { d, type, key, runBtn, box } = setup();
+    for (const sql of ['select 1', 'select 2']) {
+      type(sql);
+      runBtn.click();
+      await settle();
+    }
+    caret(box, 0);
+    key({ key: 'ArrowUp' });
+    type('select 2 -- 手直し');
+    // 🔑 走らせる ── ここで控えは捨てられる
+    runBtn.click();
+    await settle();
+    expect(d.getState().sqlPage.historyEdits, '手直しの控えが残っている').toEqual([]);
+    caret(box, 0);
+    key({ key: 'ArrowUp' });
+    expect(d.getState().sqlPage.sql, '走った字が積まれていない').toBe('select 2 -- 手直し');
+    caret(box, 0);
+    key({ key: 'ArrowUp' });
+    expect(d.getState().sqlPage.sql, '前の回の手直しが混ざった').toBe('select 2');
+  });
+
   it('⚠ 履歴が空なら、↑ を押しても何も起きない', () => {
     const { d, type, key, box } = setup();
     type('打ちかけ');

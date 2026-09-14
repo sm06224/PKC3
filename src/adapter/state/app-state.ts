@@ -186,6 +186,16 @@ export interface SqlPageState {
   /** ⚠ 履歴を遡る前の**打ちかけの字**(↓ でここへ戻る)。 */
   readonly historyDraft: string;
   /**
+   * 🔴 **履歴の中で手直しした字**(添字は `history` と同じ)。
+   *
+   * ⚠ これが無いと、**呼び戻した字を直してからもう一度 `↑` を押した人が、
+   *   直した分を黙って失う**(2026-09-14 の動線レビューが実測で出した)──
+   *   直した字はどこにも控えられず、`↓` で帰ってくるのは**直す前**の字だった。
+   * 🔑 走らせたら捨てる(`RUN_SQL` で `[]` に戻す)── 走った字は `history` に
+   *   積まれるので、手直しの控えを持ち越す理由が無い。
+   */
+  readonly historyEdits: readonly (string | undefined)[];
+  /**
    * 🔴 **いま調べている相手**(#681 段③ の 2 つ目)。`null` = この PKC のノート。
    *
    * ⚠ **どちらを調べているかが画面から読めない**と、user は
@@ -1296,6 +1306,7 @@ export const initialState: AppState = {
     history: [],
     historyAt: -1,
     historyDraft: '',
+    historyEdits: [],
     guest: null,
     guestError: '',
     guestPending: '',
@@ -2691,6 +2702,16 @@ function historyPush(
   return { history: [sql, ...history].slice(0, SQL_HISTORY_MAX) };
 }
 
+/**
+ * 履歴の**いま見ている所**へ、手直しした字を控える。
+ * ⚠ 呼ぶのは `historyAt >= 0` のときだけ(打ちかけの側は `sql` 自身が正本)。
+ */
+function withHistoryEdit(p: SqlPageState, sql: string): readonly (string | undefined)[] {
+  const edits = [...p.historyEdits];
+  edits[p.historyAt] = sql;
+  return edits;
+}
+
 export function reduce(state: AppState, action: Dispatchable): ReduceResult {
   if (action.type === 'NAV_HISTORY') return navHistory(state, action.dir);
   const result = reduceCore(state, action);
@@ -3263,7 +3284,24 @@ function reduceCore(
       return {
         state: {
           ...state,
-          sqlPage: { ...state.sqlPage, sql: action.sql, error: '', saved: '', guestError: '' },
+          sqlPage: {
+            ...state.sqlPage,
+            sql: action.sql,
+            error: '',
+            saved: '',
+            guestError: '',
+            /**
+             * 🔴 **履歴の中で直した字は、その場に控える**(#918 段②a、動線レビュー)。
+             * ⚠ 控えないと、**直してからもう一度 `↑` を押した瞬間に消える**
+             *   (`↓` で帰ってくるのは直す前の字になる)── この repo が
+             *   いちばん嫌う「さっきまでやっていたことが消える」形である。
+             * ⚠ `-1`(打ちかけ)のときは何もしない ── そこは `sql` 自身が
+             *   打ちかけの字であり、控えは `↑` を押す瞬間に取る。
+             */
+            ...(state.sqlPage.historyAt < 0
+              ? {}
+              : { historyEdits: withHistoryEdit(state.sqlPage, action.sql) }),
+          },
         },
         events: [],
       };
@@ -3309,6 +3347,7 @@ function reduceCore(
             ...historyPush(state.sqlPage.history, checked.sql),
             historyAt: -1,
             historyDraft: '',
+            historyEdits: [],
             running: true,
             error: '',
             saved: '',
@@ -3349,7 +3388,8 @@ function reduceCore(
       if (at === p.historyAt) return { state, events: [] };
       // ⚠ 遡り始める 1 回だけ、打ちかけの字を控える
       const draft = p.historyAt === -1 && action.back ? p.sql : p.historyDraft;
-      const sql = at < 0 ? draft : (p.history[at] ?? p.sql);
+      // 🔑 **手直しした字が在ればそちら**(無ければ走らせた字そのもの)
+      const sql = at < 0 ? draft : (p.historyEdits[at] ?? p.history[at] ?? p.sql);
       return {
         state: {
           ...state,
