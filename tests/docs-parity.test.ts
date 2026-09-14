@@ -2316,6 +2316,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-14(#854 段③ ── xlsx を SQL で調べる)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-09-move-picker" …` → 99e4465
+     */
+    'フォルダの「居場所」の選ぶ欄をやめ、「移す…」に一本化しました',
+    /**
      * ⚠ **2026-09-14(#855 決4 ── 繰り返しを掴んで動かす)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-09-drop-and-notice" …` → 99e4465
      */

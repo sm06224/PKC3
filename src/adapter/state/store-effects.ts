@@ -55,8 +55,8 @@ import type {
 // ⚠ 「未設定」の綴りは features 側の 1 か所(`''`)── ここで書き写さない(§7)
 import { TAGS_KEY, UNSET as QUERY_UNSET } from '@features/query/group-by';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
-// 🔴 添付の .csv / .tsv を「調べる相手」として選べるようにする(#854 段①)
-import { looksLikeCsvAttachmentName } from '@features/query/csv-attachment';
+// 🔴 添付の .csv / .tsv / .xlsx を「調べる相手」として選べるようにする(#854 段① / 段③)
+import { sqlGuestSourceOf, type SqlGuestSource } from '@features/query/sql-guest-source';
 // 🔴 手持ちのファイルも同じ選び所から開く(#854 段②)
 import { isSqlLocalFileLid } from '@features/query/sql-local-file';
 import {
@@ -116,12 +116,12 @@ export interface StorePort {
    * 🔴 **取り込んだ `.sqlite` / `.csv` / `.tsv` を開く / 手放す**
    *   (#681 段③ の 2 つ目、#854 段①)。
    * ⚠ 古い口(持っていない port)では**機能が減るだけ**にする ── 落とすと画面ごと止まる。
-   * ⚠ `csv` は**省略すれば今までどおり `.sqlite` の image**として開く(後方互換)。
-   *   `truncated` は csv / tsv を上限で切ったときだけ `true`。
+   * ⚠ `source` は**省略すれば今までどおり `.sqlite` の image**として開く(後方互換)。
+   *   `truncated` は上限で切ったときだけ `true`(`.sqlite` は常に `false`)。
    */
   openSqlGuest?(
     image: Uint8Array,
-    csv?: { lang: 'csv' | 'tsv'; lid: string; name: string },
+    source?: SqlGuestSource,
   ): Promise<{ tables: string[]; bytes: number; truncated: boolean }>;
   closeSqlGuest?(): Promise<null>;
   /**
@@ -759,13 +759,13 @@ export function connectStoreEffects(
           break;
         }
         /**
-         * 🔴 **`.csv` / `.tsv` かどうかは、ここで題名の拡張子だけを見て決める**
-         *   (#854 段①)。⚠ **判定を 2 か所に置かない** ── worker 側は渡された
-         *   `csv` の有無だけで分岐し、拡張子をもう一度見ない(§7)。
+         * 🔴 **何の file かは、ここで題名の拡張子だけを見て決める**
+         *   (#854 段① / 段③)。⚠ **判定を 2 か所に置かない** ── worker 側は
+         *   渡された `source` の `kind` だけで分岐し、拡張子をもう一度見ない(§7)。
          *   手持ちのファイルも file 名(`name`)は同じ形で来るので、ここは
          *   添付のときと**まったく同じ 1 行**で足りる。
          */
-        const csvLang = looksLikeCsvAttachmentName(name);
+        const source = sqlGuestSourceOf(lid, name);
         afterWrites(async () => {
           if (disposed) return;
           try {
@@ -784,10 +784,7 @@ export function connectStoreEffects(
                 local ? '選んだ file を読めませんでした' : '添付の中身が見つかりません',
               );
             }
-            const opened = await open(
-              bytes,
-              csvLang === null ? undefined : { lang: csvLang, lid, name },
-            );
+            const opened = await open(bytes, source ?? undefined);
             if (disposed) return;
             dispatcher.dispatch({
               type: 'SQL_GUEST_OPENED',

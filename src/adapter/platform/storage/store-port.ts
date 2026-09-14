@@ -101,13 +101,13 @@ export function createStorePort(client: StoreClientLike, cid: string): StorePort
      * 🔑 渡すのは**窓の合言葉**だけ(#836)── 上の層は「窓が 2 枚ある」ことを
      *   1 つも知らずに済む(知っているのはここと worker だけ)。
      */
-    openSqlGuest: (image, csv) =>
+    openSqlGuest: (image, source) =>
       client.request({
         op: 'openSqlGuest',
         image,
         guest: guestKey,
-        // 🔴 添付の .csv / .tsv を開くときだけ渡す(#854 段①、後方互換のため省略可)
-        ...(csv === undefined ? {} : { csv }),
+        // 🔴 .sqlite 以外を開くときだけ渡す(#854 段① / 段③、後方互換のため省略可)
+        ...(source === undefined ? {} : { source }),
       }),
     closeSqlGuest: () => client.request({ op: 'closeSqlGuest', guest: guestKey }),
     /**

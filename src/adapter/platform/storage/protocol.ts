@@ -14,6 +14,8 @@ import type { TaskScan } from '@features/schedule/task-cards';
 import type { ContactScan } from '@features/contact/contact-card';
 import type { SnippetScan } from '@features/snippet/snippet-table';
 import type { SearchDetailRow } from '@features/filter/search-snippet';
+// 🔴 「これは何の file か」の正本は features 層に 1 つだけ在る(§7)
+import type { SqlGuestSource } from '@features/query/sql-guest-source';
 
 export type StorageRequest =
   /**
@@ -273,13 +275,19 @@ export type StorageRequest =
        */
       guest: string;
       /**
-       * 🔴 **添付の `.csv` / `.tsv` を開くときだけ渡す**(#854 段①)。
+       * 🔴 **`.sqlite` 以外を開くときだけ渡す**(#854 段① / 段③)。
        *
        * ⚠ **省略 = 今までどおり `.sqlite` の image として開く**(後方互換)。
        * 渡すのは呼び側(`store-effects.ts`)が題名の拡張子で見分けた結果 ──
        * ここでもう一度見分け直さない(判定を 2 か所に置かない)。
+       *
+       * 🔴 **種類は 1 つの field で名乗る** ── `csv?` と `xlsx?` を並べて持たない。
+       *   並べると①**両方渡せてしまう**(どちらが勝つかは worker の `if` の順番次第)
+       *   ②種類が増えるたびに worker 側の分岐が**独立に**増え、書き忘れても tsc が黙る。
+       *   🔑 `kind` で割った 1 つの field なら、増やしたときに **worker の `switch` が
+       *   落ちる**(網羅が型で守られる)。
        */
-      csv?: { readonly lang: 'csv' | 'tsv'; readonly lid: string; readonly name: string };
+      source?: SqlGuestSource;
     }
   | { op: 'closeSqlGuest'; guest: string }
   | {

@@ -70,7 +70,8 @@ import {
   type CsvTableReject,
 } from '@features/query/csv-tables';
 // 🔴 添付の .csv / .tsv を「客の DB」として開けるようにする(#854 段①)
-import { buildCsvAttachmentTable, type CsvAttachmentTable } from '@features/query/csv-attachment';
+import { buildCsvAttachmentTable } from '@features/query/csv-attachment';
+import { readXlsxBook } from '@features/query/xlsx-book';
 import { createSmartScan } from '@features/smart/smart-spec';
 import {
   applyLinePatch,
@@ -1841,7 +1842,18 @@ function createCsvTable(database: Database, t: CsvTable, fresh: (name: string) =
 }
 
 /**
- * 🔴 **添付の `.csv` / `.tsv` を、客の DB に 1 つの表として作る**(#854 段①)。
+ * 客の DB に作る表 1 つ。⚠ **形だけで受ける** ── `.csv` の 1 つも、`.xlsx` の
+ * 枚ごとの 1 枚も、ここから見れば「名前・列・行」でしかない(どちらの型を
+ * import しても、もう片方が通らなくなるだけである)。
+ */
+interface GuestTable {
+  readonly name: string;
+  readonly columns: readonly string[];
+  readonly rows: readonly (readonly (string | null)[])[];
+}
+
+/**
+ * 🔴 **添付の `.csv` / `.xlsx` を、客の DB に表として作る**(#854 段① / 段③)。
  *
  * ⚠ `createCsvTable`(本文の囲み用)とは**別**にしてある ── あちらは
  *   「毎回の走らせるたびに作り直して `finally` で落とす」temp 表だが、
@@ -1849,7 +1861,7 @@ function createCsvTable(database: Database, t: CsvTable, fresh: (name: string) =
  *   選び直すか窓を閉じるまで残る)。同じ関数に条件を足すと、
  *   「いつ落とすか」が 2 つの異なる寿命で混線する。
  */
-function createCsvGuestTable(database: Database, t: CsvAttachmentTable): void {
+function createGuestTable(database: Database, t: GuestTable): void {
   const cols = t.columns.map((c) => `"${c}" TEXT`).join(', ');
   database.exec({ sql: `CREATE TABLE "${t.name}" (${cols})` });
   const marks = t.columns.map(() => '?').join(', ');
@@ -2109,7 +2121,7 @@ const handlers: Handlers = {
    *   rc = 0 を返す**ので、ここで読まないと「開けたのに打つと落ちる」になる
    *   (`init` の画像と同じ罠。同じ形で言い直す)。
    */
-  openSqlGuest: (req) => {
+  openSqlGuest: async (req) => {
     const api = sqliteApi;
     if (api === null) throw new Error('sqlite が初期化されていません');
     // ⚠ **この窓の前の客だけ**を閉じる(ほかの窓の客は触らない ── #836)
@@ -2134,25 +2146,46 @@ const handlers: Handlers = {
      * ⚠ **重い処理はここ(worker)で完結させる**(不可侵指示)── bytes を
      *   main スレッドへ戻して組み立て直す形にしない。
      */
-    if (req.csv !== undefined) {
+    const src = req.source;
+    if (src !== undefined) {
+      const note = { lid: src.lid, title: src.name };
       try {
-        const text = new TextDecoder('utf-8', { fatal: false }).decode(req.image);
-        const built = buildCsvAttachmentTable(
-          text,
-          req.csv.lang,
-          { lid: req.csv.lid, title: req.csv.name },
-          CSV_TABLE_CELLS_MAX,
-        );
-        if (built === null) {
-          throw new Error('空か、区切りの見つかる行が 1 つもありません');
+        /**
+         * ⚠ **`switch` で網羅する** ── 種類を足した人が枝を書き忘れたら
+         *   `never` の代入で **tsc が落ちる**(`if` を並べると黙って素通りする)。
+         */
+        let built: { tables: readonly GuestTable[]; truncated: boolean };
+        switch (src.kind) {
+          case 'csv': {
+            const text = new TextDecoder('utf-8', { fatal: false }).decode(req.image);
+            const one = buildCsvAttachmentTable(text, src.lang, note, CSV_TABLE_CELLS_MAX);
+            if (one === null) throw new Error('空か、区切りの見つかる行が 1 つもありません');
+            built = { tables: [one], truncated: one.truncated };
+            break;
+          }
+          case 'xlsx': {
+            // 🔴 zip を解くのはここ(worker)である ── bytes を主スレッドへ戻さない
+            built = await readXlsxBook(req.image, note);
+            break;
+          }
+          default: {
+            const never: never = src;
+            throw new Error(`知らない開き方です: ${JSON.stringify(never)}`);
+          }
         }
-        createCsvGuestTable(db, built);
+        for (const t of built.tables) createGuestTable(db, t);
         guestDbs.set(req.guest, db);
-        return { tables: [built.name], bytes: req.image.byteLength, truncated: built.truncated };
+        return {
+          tables: built.tables.map((t) => t.name),
+          bytes: req.image.byteLength,
+          truncated: built.truncated,
+        };
       } catch (e) {
         // ⚠ **読めなかった器も閉じる**(下の sqlite 側と同じ理由)
         db.close();
-        throw new Error(`この file は csv として読めませんでした(${String(e)})`, { cause: e });
+        throw new Error(`この file は ${src.kind} として読めませんでした(${String(e)})`, {
+          cause: e,
+        });
       }
     }
     try {

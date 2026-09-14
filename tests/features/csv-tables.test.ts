@@ -21,6 +21,7 @@ import {
   validCsvTableName,
   CSV_TABLE_NAME_MAX,
   CSV_TABLE_CELLS_MAX,
+  CSV_SOURCE_COLUMNS,
 } from '../../src/features/query/csv-tables';
 
 const fence = (info: string, lines: readonly string[]): string =>
@@ -84,7 +85,7 @@ describe('列の名前を直す', () => {
    *   **user が打っていない SQL の文句**である。
    */
   it('🔴 重なった見出し・空の見出しでも、打てる列名になる', () => {
-    expect(csvColumnNames(['a', 'a', '', ' ', 'a'])).toEqual(['a', 'a_2', 'col3', 'col4', 'a_3']);
+    expect(csvColumnNames(['a', 'a', '', ' ', 'a'], CSV_SOURCE_COLUMNS)).toEqual(['a', 'a_2', 'col3', 'col4', 'a_3']);
   });
 
   /**
@@ -93,11 +94,11 @@ describe('列の名前を直す', () => {
    *   `duplicate column name` で落ち、user が打っていない SQL の文句が出る。
    */
   it('🔴 _note / _lid と同じ見出しでも重ならない', () => {
-    expect(csvColumnNames(['_note', '_lid'])).toEqual(['_note_2', '_lid_2']);
+    expect(csvColumnNames(['_note', '_lid'], CSV_SOURCE_COLUMNS)).toEqual(['_note_2', '_lid_2']);
   });
 
   it('⚠ 記号は _ に直し、頭の _ は落とす(打てる字にする)', () => {
-    expect(csvColumnNames(['売上(円)', '1月'])).toEqual(['売上_円_', '1月']);
+    expect(csvColumnNames(['売上(円)', '1月'], CSV_SOURCE_COLUMNS)).toEqual(['売上_円_', '1月']);
   });
 });
 

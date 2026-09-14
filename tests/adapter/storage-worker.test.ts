@@ -22,6 +22,7 @@ import { parseFrontmatter } from '../../src/features/markdown/frontmatter';
 import { FRONTMATTER_SCAN_CHARS } from '../../src/features/query/group-by';
 import { createSmartScan, EMPTY_SMART } from '../../src/features/smart/smart-spec';
 import { CSV_TABLE_CELLS_MAX } from '../../src/features/query/csv-tables';
+import { buildXlsx } from '../features/xlsx-fixture';
 
 type Op = StorageRequest['op'];
 
@@ -3149,7 +3150,7 @@ describe('添付の .csv / .tsv を客の DB として開く(#854 段①)', () =
       op: 'openSqlGuest',
       image: enc('name,age\n太郎,20\n花子,30\n'),
       guest: W,
-      csv: { lang: 'csv', lid: 'att-1', name: '売上.csv' },
+      source: { kind: 'csv', lang: 'csv', lid: 'att-1', name: '売上.csv' },
     });
     expect(opened.tables, '固定名 csv になっていない').toEqual(['csv']);
     expect(opened.truncated, '小さい file なのに切ったことにしている').toBe(false);
@@ -3166,7 +3167,7 @@ describe('添付の .csv / .tsv を客の DB として開く(#854 段①)', () =
       op: 'openSqlGuest',
       image: enc('a\tb\n1\t2\n'),
       guest: W,
-      csv: { lang: 'tsv', lid: 'att-2', name: '客.tsv' },
+      source: { kind: 'csv', lang: 'tsv', lid: 'att-2', name: '客.tsv' },
     });
     expect(opened.tables).toEqual(['csv']);
     expect((await runGuest('SELECT a, b FROM csv')).rows).toEqual([['1', '2']]);
@@ -3179,7 +3180,7 @@ describe('添付の .csv / .tsv を客の DB として開く(#854 段①)', () =
         op: 'openSqlGuest',
         image: enc(''),
         guest: W,
-        csv: { lang: 'csv', lid: 'att-3', name: '空.csv' },
+        source: { kind: 'csv', lang: 'csv', lid: 'att-3', name: '空.csv' },
       }),
       '.csv に見えるが中身が壊れている(空)file を、そのまま開けたことにしている',
     ).rejects.toThrow(/csv として読めませんでした/);
@@ -3192,7 +3193,7 @@ describe('添付の .csv / .tsv を客の DB として開く(#854 段①)', () =
       op: 'openSqlGuest',
       image: enc('a\n1\n'),
       guest: W,
-      csv: { lang: 'csv', lid: 'att-4', name: '数.csv' },
+      source: { kind: 'csv', lang: 'csv', lid: 'att-4', name: '数.csv' },
     });
     await expect(runGuest("INSERT INTO csv (a) VALUES ('x')")).rejects.toThrow(/readonly/i);
     await request({ op: 'closeSqlGuest', guest: W });
@@ -3203,8 +3204,88 @@ describe('添付の .csv / .tsv を客の DB として開く(#854 段①)', () =
       op: 'openSqlGuest',
       image: enc('a\n1\n'),
       guest: W,
-      csv: { lang: 'csv', lid: 'att-5', name: '数.csv' },
+      source: { kind: 'csv', lang: 'csv', lid: 'att-5', name: '数.csv' },
     });
+    await expect(runGuest('SELECT * FROM entries')).rejects.toThrow(/no such table/i);
+    await request({ op: 'closeSqlGuest', guest: W });
+  });
+});
+
+/**
+ * 🔴 **添付の `.xlsx` を客の DB として開く**(#854 段③)。
+ *
+ * ⚠ csv との違いは 1 つ ── **1 file が表 1 つとは限らない**。枚(シート)ごとに
+ *   `sheet1` / `sheet2` … の表になり、**本当の枚の名前は `_sheet` の列**で引ける。
+ *
+ * 守る主張:
+ * 1. 枚の数だけ表ができ、`_note` / `_lid` / `_sheet` 付きで引ける
+ * 2. 読めない本は、その場で断る(常駐を残さない)
+ * 3. 書けない / こちらの表と混ざらない(csv・sqlite と同じ境)
+ */
+describe('添付の .xlsx を客の DB として開く(#854 段③)', () => {
+  const W = 'xlsx-w1';
+  const runGuest = (sql: string) =>
+    request({
+      op: 'runReadOnlySql',
+      sql,
+      maxRows: 100,
+      maxSteps: 1_000_000,
+      maxMs: 60_000,
+      guest: W,
+    });
+  const open = async (image: Uint8Array) =>
+    request({
+      op: 'openSqlGuest',
+      image,
+      guest: W,
+      source: { kind: 'xlsx', lid: 'att-x1', name: '台帳.xlsx' },
+    });
+
+  it('🔴 枚の数だけ表ができ、_sheet で本当の枚の名前が引ける', async () => {
+    const opened = await open(
+      await buildXlsx([
+        { name: '売上', rows: [['品', '額'], ['りんご', '100']] },
+        { name: '経費', rows: [['費目', '額'], ['交通', '300']] },
+      ]),
+    );
+    // 🔴 枚が 2 つ以上なので、いちばん前に**目録**が付く(どれが何の枚か読める)
+    expect(opened.tables, '2 枚目、または目録が落ちている').toEqual([
+      'xlsx_sheets',
+      'sheet1',
+      'sheet2',
+    ]);
+    expect(
+      (await runGuest('SELECT name, sheet FROM xlsx_sheets ORDER BY name')).rows,
+      '目録から枚の名前を引けない',
+    ).toEqual([
+      ['sheet1', '売上'],
+      ['sheet2', '経費'],
+    ]);
+    expect(opened.truncated, '小さい本なのに切ったことにしている').toBe(false);
+    expect((await runGuest('SELECT _note, _lid, _sheet, 品, 額 FROM sheet1')).rows).toEqual([
+      ['台帳.xlsx', 'att-x1', '売上', 'りんご', '100'],
+    ]);
+    // 🔑 user が書ける形 ── 枚の名前で絞れる(名前を捨てていない)
+    expect((await runGuest("SELECT 費目 FROM sheet2 WHERE _sheet = '経費'")).rows).toEqual([
+      ['交通'],
+    ]);
+    await request({ op: 'closeSqlGuest', guest: W });
+  });
+
+  it('🔴 読めない本は、その場で断る(常駐を残さない)', async () => {
+    await expect(
+      open(new TextEncoder().encode('ただの字')),
+      '.xlsx に見えるが zip ですらない file を、そのまま開けたことにしている',
+    ).rejects.toThrow(/xlsx として読めませんでした/);
+    // ⚠ 断った後は開かれていない(csv / sqlite と同じ作法)
+    await expect(runGuest('SELECT 1')).rejects.toThrow(/開かれていません/);
+  });
+
+  it('🔴 書けない / こちらの表と混ざらない(csv・sqlite と同じ境)', async () => {
+    // ⚠ 枚 1 つの本 ── 目録は付かない(`sheet1` がそのまま 1 つ目)
+    const opened = await open(await buildXlsx([{ name: 'a', rows: [['n'], ['1']] }]));
+    expect(opened.tables, '枚が 1 つなのに目録を足している').toEqual(['sheet1']);
+    await expect(runGuest("INSERT INTO sheet1 (n) VALUES ('x')")).rejects.toThrow(/readonly/i);
     await expect(runGuest('SELECT * FROM entries')).rejects.toThrow(/no such table/i);
     await request({ op: 'closeSqlGuest', guest: W });
   });
