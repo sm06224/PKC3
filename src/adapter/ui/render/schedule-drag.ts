@@ -93,8 +93,10 @@
  * `[data-pkc-drop-date][data-pkc-dropping]`)そのもの ── 新しい装飾は足していない。
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
+import type { AppState, UserAction } from '@adapter/state/app-state';
 import { addDays, daysBetween } from '@features/datetime/date-math';
 import { LONG_PRESS_MS, LONG_PRESS_SLOP_PX } from '@adapter/ui/actions/long-press';
+import { pickRepeatMoveInApp } from './app-dialog';
 
 /** 掴める札。⚠ `kanban-cards` は #292 段⑤で外れた死んだ綴り(`app.css` に残骸あり) ──
  *  ただし `binder.ts` の HTML5 dragstart と選び方を揃え、勝手に狭めない。 */
@@ -149,11 +151,114 @@ interface Armed extends GrabbedTask {
  * (振る舞いは 1 バイトも変えていない ── `tests/adapter/schedule-view.test.ts`
  * の `dragTo` 系がこの関数を通って緑のままなら、移し違いは無い)。
  */
+/**
+ * 🔴 **繰り返しの回を動かす ── 1 回か全部かを聞いてから書く**(#855 決4。
+ * user 裁定 2026-09-13「1 回か全部か選択する(Outlook 模倣で OK)」)。
+ *
+ * ⚠ **直す前はここで断っていた**(「ドラッグでは動かせません」)── 動かす意味が
+ *   2 通りあり、勝手に選ぶともう片方を頼んだ user のデータが壊れるためである。
+ *   🔑 **聞けば両方できる**、というのが裁定の中身である。
+ *
+ * ## ⚠ 断るのは 2 つだけ
+ *
+ * ① **日付なしへ外す**(`dropDate === ''`)── 繰り返しの回 1 つだけを
+ *    「日付なし」にする意味が定まらない(規則は日付で成り立っている)。
+ *    🔑 外したいなら札の「**この繰り返しをやめる**」を押す(既に在る口)。
+ * ② **掴んだ日が分からない**回 ── どの回を動かすのか決まらない。
+ *
+ * ## 🔑 どちらを選んでも、書換は既存の口を通る
+ *
+ * | 押した所 | 何を書くか | 使う口 |
+ * |---|---|---|
+ * | この回だけ | 落とした日に `振替<元の日>` つきの行を 1 本増やす | `MOVE_REPEAT_OCCURRENCE` |
+ * | 全部 | **規則の行の日付**を同じ差だけずらす | `SET_TASK_DATE`(既存) |
+ *
+ * ⚠ 「全部」で新しい口を作らない(CLAUDE.md §7)。
+ */
+function moveRepeat(
+  dispatcher: Dispatcher,
+  grabbed: GrabbedTask,
+  dropDate: string,
+  host: HTMLElement,
+): void {
+  const deny = (error: string): void => {
+    dispatcher.dispatch({ type: 'OP_FAILED', error });
+  };
+  if (dropDate === '') {
+    deny('繰り返しの予定は「日付なし」へは動かせません(札の「この繰り返しをやめる」で外せます)');
+    return;
+  }
+  const line = Number(grabbed.line);
+  if (!Number.isInteger(line)) return;
+  const from = grabbed.from;
+  if (from === '') {
+    deny('どの回を動かすのか分かりませんでした(もう一度、札を掴み直してください)');
+    return;
+  }
+  const days = daysBetween(from, dropDate);
+  // ⚠ 同じ日・読めない日は**何も起きない**(断り文も出さない ── 動いていないので)
+  if (days === null || days === 0) return;
+  void pickRepeatMoveInApp(host, days).then((pick) => {
+    const action = repeatMoveAction(dispatcher.getState(), grabbed, line, from, dropDate, days, pick);
+    if (action !== null) dispatcher.dispatch(action);
+  });
+}
+
+/**
+ * 🔴 **押した答えを、書換の 1 手へ翻訳する**(#855 決4)。
+ *
+ * 🔑 **判断はここ 1 か所**(小窓の外へ出す)── 小窓の開き方は環境ごとに違うので、
+ *   そこに判断を埋めると**何を書くかが unit から届かなくなる**
+ *   (CLAUDE.md §2「経路が一度も通っていない」を作らない)。
+ *
+ * @returns 撃つ 1 手。`null` = 何もしない(やめた / 読めない)
+ */
+export function repeatMoveAction(
+  state: AppState,
+  grabbed: GrabbedTask,
+  line: number,
+  /** 動かす回の日。 */
+  from: string,
+  /** 落とした日。 */
+  to: string,
+  /** 何日ぶんずれるか。 */
+  days: number,
+  pick: 'one' | 'all' | null,
+): UserAction | null {
+  if (pick === null) return null; // やめる
+  if (pick === 'one') return { type: 'MOVE_REPEAT_OCCURRENCE', lid: grabbed.lid, line, from, to };
+  /**
+   * 🔴 **全部ずらす = 規則の行の日付を同じ差だけ動かす。**
+   * ⚠ **落とした日そのものを書かない** ── 落とした日は「**掴んだ回**」が来る日で
+   *   あって、規則の開始日ではない(3 回目を掴んだなら、開始は 2 回ぶん前である)。
+   * ⚠ 開始が読めなければ **`null`**(当てずっぽうの日付を本文へ残さない)。
+   */
+  const card = state.taskScan?.cards.find((c) => c.lid === grabbed.lid && c.line === line);
+  const anchor = card?.date == null ? null : addDays(card.date, days);
+  if (anchor === null) return null;
+  return {
+    type: 'SET_TASK_DATE',
+    lid: grabbed.lid,
+    line,
+    date: anchor,
+    time: card?.time ?? null,
+    // ⚠ `until` は**繰り返しの終わり**である ── 同じ差だけ動かす(期間と同じ作法)
+    until: card?.until == null ? null : (addDays(card.until, days) ?? card.until),
+  };
+}
+
 export function dropTaskCard(
   dispatcher: Dispatcher,
   grabbed: GrabbedTask,
   /** 落ちた日(`data-pkc-drop-date` の値)。空文字 = 日付なしへ外す。 */
   dropDate: string,
+  /**
+   * 🔴 **小窓を出す器**(#855 決4)。⚠ **optional にしない** ── 渡し忘れても
+   * tsc が黙る形にすると、戻ってくる症状は「**繰り返しを落としても何も起きない**」
+   * という、まさにこの変更が直そうとしているものになる
+   * (CLAUDE.md「待ちの口は optional にしない」)。
+   */
+  host: HTMLElement,
 ): void {
   /**
    * 🔴 **繰り返しの回は日を動かせない ── 黙って何もしないのではなく、断る**
@@ -166,10 +271,7 @@ export function dropTaskCard(
    * 🔑 だから**どこを直せばよいかまで言う**(本文の `@… 毎週` を直す)。
    */
   if (grabbed.repeat !== '') {
-    dispatcher.dispatch({
-      type: 'OP_FAILED',
-      error: '繰り返しの予定はドラッグで動かせません。本文の「@日付 毎週」を書き直してください',
-    });
+    moveRepeat(dispatcher, grabbed, dropDate, host);
     return;
   }
   const date = dropDate === '' ? null : dropDate;
@@ -355,7 +457,7 @@ export function installScheduleDrag(root: HTMLElement, dispatcher: Dispatcher): 
     clearDrop();
     const drop = dateTargetOf(underPointer(e));
     if (drop === null) return;
-    dropTaskCard(dispatcher, a, drop.date);
+    dropTaskCard(dispatcher, a, drop.date, root);
   };
 
   const onPointerCancel = (e: PointerEvent): void => {

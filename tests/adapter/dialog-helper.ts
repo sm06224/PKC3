@@ -47,3 +47,24 @@ export async function answerDialog(
   await Promise.resolve();
   await Promise.resolve();
 }
+
+/**
+ * 🔴 **microtask を数周ぶん進める**。
+ *
+ * ⚠ 小窓は `enqueue`(待ち行列)の中の `async` 関数なので、押してから
+ *   呼び側の `.then` が走るまでに **microtask が何段か挟まる** ──
+ *   2 周では足りず、「押したのに何も起きない」と読み違える(実際に踏んだ)。
+ * ⚠ `setTimeout` は使わない ── test が**偽の時計**を使っていると進まない。
+ */
+async function settle(): Promise<void> {
+  for (let i = 0; i < 40; i += 1) await Promise.resolve();
+}
+
+/** 小窓を「やめる」で閉じる(行を押さずに離れる)。 */
+export async function cancelDialogRows(doc: Document = document): Promise<void> {
+  const frames = doc.querySelectorAll<HTMLDialogElement>(`[data-pkc-region="${DIALOG_REGION}"]`);
+  const live = frames[frames.length - 1] ?? null;
+  expect(live, 'やめる口の器が無い').not.toBeNull();
+  live?.querySelector<HTMLButtonElement>('[data-pkc-field="dialog-cancel"]')?.click();
+  await settle();
+}

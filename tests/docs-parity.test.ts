@@ -2316,6 +2316,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-14(#855 決4 ── 繰り返しを掴んで動かす)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-09-drop-and-notice" …` → 99e4465
+     */
+    '横に並べて使うときの、落とし先と知らせを揃えました',
+    /**
      * ⚠ **2026-09-13(#770 ④ ── 絵の一覧を畳む)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-09-captures" …` → 99e4465
      */
