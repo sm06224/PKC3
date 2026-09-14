@@ -130,7 +130,19 @@ export class SqlRenderer {
     fileInput.hidden = true;
     fileInput.setAttribute('data-pkc-field', 'sql-file-input');
     fileInput.setAttribute('aria-label', '手持ちのファイルを選ぶ');
-    bar.append(run, save, source, fileInput);
+    /**
+     * 🔴 **構造をノートへ**(#918 段①。user 要望 2026-09-14「ai向けに構造吐き出したり」)。
+     * ⚠ **答えが無くても押せる**(「ノートへ」との違い)── 構造は**打つ前**に要る物だから。
+     * 🔑 字で「構造」と言い切る ── 「ノートへ」が 2 つ並ぶと、どちらが何か読めない。
+     */
+    const schema = document.createElement('button');
+    schema.type = 'button';
+    schema.setAttribute('data-pkc-action', 'sql-schema-to-note');
+    schema.setAttribute('data-pkc-field', 'sql-schema-to-note');
+    schema.textContent = '構造をノートへ';
+    schema.title =
+      'いま調べている相手の表・列・型・鍵・繋がり・行数を、ノート 1 枚にします(中身は入りません)。AI に貼るのに使えます。';
+    bar.append(run, save, schema, source, fileInput);
     const tip = document.createElement('p');
     tip.setAttribute('data-pkc-field', 'sql-tip');
     /**

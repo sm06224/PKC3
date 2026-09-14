@@ -2316,6 +2316,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-14(#918 段① ── 構造をノートへ)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-12-builtin-tile-icons" …` → 793152d
+     */
+    '組み込みアプリのタイルにも目印が付きました',
+    /**
      * ⚠ **2026-09-14(#772 段① B ── 音を聞きやすくする)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-12-app-tile-icons" …` → bebb24b
      */

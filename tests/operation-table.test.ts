@@ -185,7 +185,8 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'set-query-key', 'set-read-columns', 'set-sql-source', 'set-sql-text', 'set-tag-badge',
   'set-text-scale', 'set-theme', 'set-too-narrow-enabled', 'set-view', 'set-voice-boost',
   'show-trash', 'skip-to',
-  'smart-cond-add', 'smart-evict', 'smart-field', 'sql-to-note', 'stack-save',
+  'smart-cond-add', 'smart-evict', 'smart-field', 'sql-schema-to-note', 'sql-to-note',
+  'stack-save',
   'start-audio-capture', 'start-edit', 'start-screen-capture', 'start-tile-reorder',
   'start-timer', 'stop-capture', 'storage-profile', 'swap-open', 'table-to-csv',
   'table-to-markdown', 'toggle-all-app-groups', 'toggle-app-tile', 'toggle-create-menu',
@@ -318,12 +319,15 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-09-14(#772 段① B): 聞くときだけ音を整える(`set-voice-boost`)で
       //   受け手 +1 ── 登記は増えない(押し口は設定の checkbox にしか無く、鍵も持たない。
       //   `set-alarm-enabled` / `set-phone-links` と同じ形)
-      total: 299,
-      receivers: 250,
+      // ⚠ 2026-09-14(#918 段①): 構造をノートへ(`sql-schema-to-note`)で受け手 +1
+      //   ── 登記は増えない(押し所は SQL の面の中にしか無く、鍵も持たない。
+      //   `run-sql` / `sql-to-note` と同じ仕分け)
+      total: 300,
+      receivers: 251,
       registered: 85,
       both: 36,
       outsideActionsTable: 49,
-      unregistered: 214,
+      unregistered: 215,
     });
   });
 
