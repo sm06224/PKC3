@@ -76,6 +76,24 @@ describe('答えを file へ(#918 段④)', () => {
     expect(json).toEqual([{ a: 1, b: null }]);
   });
 
+  /**
+   * 🔴 **JSON も、足りない升は `null` で埋める**(着地前レビュー 2026-09-14)。
+   *
+   * ⚠ ここには test が 1 本も無く、`r[i] ?? null` を `r[i]` にする変異が
+   *   **生き延びた**(csv 側は「升が足りない行でも列の数は揃う」で見ていたのに、
+   *   **json 側だけ非対称に空いていた** ── CLAUDE.md「片側を直したら、
+   *   対称の反対側を必ず疑う」)。
+   * 🔑 `JSON.stringify` は **値が `undefined` の key を丸ごと省く**ので、
+   *   埋めないと**升が消えた形**で渡る(読む側は列が無いのか値が無いのか分からない)。
+   */
+  it('🔴 JSON ── 升が足りない行でも、列は消えず null で埋まる', () => {
+    const one: unknown = JSON.parse(sqlExportFileText(['a', 'b'], [['x']], 'json'));
+    expect(one).toEqual([{ a: 'x', b: null }]);
+    // 🔑 空振り防止 ── key そのものが在ること(`toEqual` は key の欠けを見逃さないが、
+    //   ここを読む人に「何が守られているか」を字で残す)
+    expect(Object.keys((one as Record<string, unknown>[])[0]!)).toEqual(['a', 'b']);
+  });
+
   it('⚠ 0 行でも見出しだけは出る(受け取った側が列を読める)', () => {
     expect(sqlExportFileText(['a', 'b'], [], 'csv')).toBe(`${BOM}a,b\r\n`);
     expect(JSON.parse(sqlExportFileText(['a'], [], 'json'))).toEqual([]);
