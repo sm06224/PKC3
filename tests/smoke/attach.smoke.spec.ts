@@ -1364,10 +1364,9 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
    * ⚠ **新しい起動は増やしていない**(#820 の規律)── ⑩ が開いたままの
    *   同じ SQL の面の道中に続ける(`gotoApp` / `page.goto` を足さない)。
    */
-  await page.fill(
-    '[data-pkc-field="sql-input"]',
-    "with recursive s(i) as (select 1 union all select i+1 from s where i < 5000) select i, 'あ' || i as a, 'い' || i as b, i*2 as c from s",
-  );
+  const fiveKSql =
+    "with recursive s(i) as (select 1 union all select i+1 from s where i < 5000) select i, 'あ' || i as a, 'い' || i as b, i*2 as c from s";
+  await page.fill('[data-pkc-field="sql-input"]', fiveKSql);
   await clickReal(page, '[data-pkc-action="run-sql"]');
   await expect(sqlTable, '5000 行の答えが返らない').toBeVisible({ timeout: 10_000 });
   await expect(
@@ -1406,6 +1405,24 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   expect(bottomCount, '下端で窓が 0 行になっている').toBeGreaterThan(0);
   expect(bottomCount, '下端でも 5000 行丸ごと描かれている').toBeLessThan(1000);
 
+  /**
+   * 🔴 **切られて見えなくなった字も、`title` には全文が入っている**
+   *   (#918 段③。読める道を 1 つ残す)。⚠ ここ(下端・`あ5000` 等の 4〜5 桁行)は
+   *   `table-layout: fixed` で列幅が固定された**後**なので、初期の幅より
+   *   長い値が来て切られうる場所である。
+   */
+  const lastTitles = await sqlTable
+    .locator('tbody td')
+    .evaluateAll((tds) =>
+      tds
+        .filter((td) => (td as HTMLElement).getAttribute('title') !== null)
+        .map((td) => ({ title: (td as HTMLElement).title, text: td.textContent ?? '' })),
+    );
+  expect(lastTitles.length, '升に title が 1 つも無い(読める道が無い)').toBeGreaterThan(0);
+  for (const { title, text } of lastTitles) {
+    expect(title, `title が全文でない(升の字「${text}」)`).toBe(text);
+  }
+
   // ③ 転がしても列の幅は動かない(幅は転がる前に固定してある)
   const widthsAfter = await sqlTable
     .locator('thead th')
@@ -1424,6 +1441,44 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
     sqlTable.locator('tbody'),
     '上へ戻ったのに末尾の行がまだ残っている',
   ).not.toContainText('あ5000');
+
+  /**
+   * ⑤ 🔴 **器が広がったら、窓も広げる**(#918 段③ その 3。着地前レビューが出した)。
+   *
+   * 🔴 **窓そのものを縦に伸ばす**のが肝である。
+   * ⚠ 最初の稿は「打つ欄を伸ばして → 戻す」で作ったが、**それでは落ちない** ──
+   *   戻した先が**元の大きさ**なので、そのときの窓は元から足りている
+   *   (実際に変異を当てたら **SURVIVED** だった)。
+   * 🔑 だから **1 度も無かった大きさ**にする ── 窓を縦 2 倍にすれば、
+   *   描き直さない限り**必ず**下に白い帯が出る。
+   * 🔑 ここは `ResizeObserver` の経路そのものである(state は 1 ミリも動かない ──
+   *   `render()` も `scroll` も呼ばれない)。
+   */
+  const before = page.viewportSize()!;
+  try {
+    const rowH = (await drawnRows.first().boundingBox())!.height;
+    expect(rowH, '行の高さが測れていない(以降の比較が無意味)').toBeGreaterThan(0);
+    await page.setViewportSize({ width: before.width, height: before.height * 2 });
+    // 🔑 転がさない ── 転がすと `scroll` が拾ってしまい、この経路を見ない
+    await expect
+      .poll(
+        async () => {
+          const n = await drawnRows.count();
+          const h = await sqlBody.evaluate((el) => el.clientHeight);
+          return n * rowH - h;
+        },
+        {
+          message:
+            '窓を広げたのに描く行が増えない ── 下に白い帯が残る' +
+            '(`repaint()` が指紋の門より前に在るか / ResizeObserver を張っているか)',
+          timeout: 5_000,
+        },
+      )
+      .toBeGreaterThanOrEqual(-rowH);
+  } finally {
+    // ⚠ 次の段へ大きさを持ち越さない(この test はまだ続きうる)
+    await page.setViewportSize(before);
+  }
 
   expect(errors).toEqual([]);
 });
