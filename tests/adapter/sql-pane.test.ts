@@ -1575,4 +1575,35 @@ describe('打つ所(#918 段②a)', () => {
     box.dispatchEvent(esc);
     expect(esc.defaultPrevented, 'Esc で外れない(逃げ道が 1 つしか無い)').toBe(true);
   });
+
+  /**
+   * 🔴 **`Esc` は取り合いになる** ── メニューが出ている間、user が押す `Esc` は
+   *   「**いま出した右クリックを取り消す**」の意味である。⚠ そこで焦点まで外すと、
+   *   **打っていた所を失う**(「さっきまでやっていたことが消える」型)。
+   *
+   * 🔑 観測点は 2 つ:①**握っていない**(= メニューを閉じる聞き手へ届く)
+   *   ②**焦点が欄に残っている**。⚠ ①だけだと、握らずに `blur()` していても通る。
+   */
+  it('🔴 メニューが出ている間の Esc は握らない(焦点も外さない)', () => {
+    const { root, box } = setup();
+    box.value = 'select';
+    caret(box, 6);
+    box.focus();
+    // ⚠ 実物の `openContextMenu` と**同じ目印**で出す(判定は `contextMenuOpen` 1 か所)
+    const menu = document.createElement('div');
+    menu.setAttribute('data-pkc-region', 'context-menu');
+    root.append(menu);
+
+    const esc = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    box.dispatchEvent(esc);
+    expect(esc.defaultPrevented, 'メニューが出ているのに Esc を握った').toBe(false);
+    expect(document.activeElement, 'メニューを閉じるだけのつもりが焦点まで外れた').toBe(box);
+
+    // 🔑 対照群 ── メニューを畳めば、同じ `Esc` が今度は欄から出す
+    menu.remove();
+    const esc2 = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    box.dispatchEvent(esc2);
+    expect(esc2.defaultPrevented, 'メニューが無いのに Esc が効かない').toBe(true);
+    expect(document.activeElement, 'Esc を押しても欄から出ていない').not.toBe(box);
+  });
 });

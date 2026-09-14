@@ -8962,8 +8962,17 @@ export function bindActions(
         insertText(ta, '  ');
         return;
       }
-      // 🔑 **この欄から出る**(`Shift`+`Tab` と対の逃げ道)
-      if (ke.key === 'Escape' && plain && !ke.shiftKey) {
+      /**
+       * 🔑 **この欄から出る**(`Shift`+`Tab` と対の逃げ道)。
+       *
+       * ⚠ **メニューが出ている間は握らない** ── `Escape` は別の聞き手
+       *   (`onMenuKey`)が**メニューを閉じる**のにも使う。ここで焦点まで外すと、
+       *   「右クリックを取り消しただけ」のつもりの user が**打っていた所を失う**
+       *   (CLAUDE.md「欠陥の多くは『さっきまでやっていたことが消える』形で出る」)。
+       * 🔑 判定は `onMenuKey` と**同じ口**(`contextMenuOpen`)で聞く ──
+       *   2 つ目の数え方を作らない(§7)。
+       */
+      if (ke.key === 'Escape' && plain && !ke.shiftKey && !contextMenuOpen(root)) {
         ke.preventDefault();
         ta.blur();
         return;
