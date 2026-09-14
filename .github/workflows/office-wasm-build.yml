@@ -348,20 +348,30 @@ jobs:
 
       # 🔴 **どの版を建てたのかを残す**(#117 で困った)。`--depth 1` の master は
       #    **建てるたびに別物**なので、「直った / 壊れた」を比べられない。
-      #    ⚠ 既定は master のまま(上流の修正を取り込みたいので固定はしない)。
-      #    代わりに **解決した SHA を必ず出力し、成果物にも同梱する** ──
+      #    ⚠ 既定は **安定メジャーの枝**(2026-09-12 に `master` から変えた。上の入力を見よ)。
+      #    **解決した SHA を必ず出力し、成果物にも同梱する** ──
       #    再現したいときは `lo_ref` にその SHA を渡せば同じ版が建つ。
+      #    🔴 **頼んだ枝の名前も残す**(2026-09-14)── SHA だけだと
+      #    「その SHA は 26.8 の枝か」を後から言えない(#431 で上流を clone して
+      #    `git merge-base --is-ancestor` を打つ羽目になった)。
       - name: LibreOffice を取る
         run: |
           set -euxo pipefail
           ref='${{ github.event.inputs.lo_ref }}'
-          ref="${ref:-master}"
+          # 🔴 **渡されなかったときの落ち先を alpha にしない**(2026-09-14)。
+          #    ⚠ 上の入力の既定は 2026-09-12 に `libreoffice-26-8` へ直したのに、
+          #    **この行だけ `master` のまま**だった ── 同じ問いに答える口が 2 つ在り、
+          #    片方しか直していない形である(CLAUDE.md §7)。
+          #    🔑 2 つが揃っていることは `tests/workflow-steps.test.ts` が見る。
+          ref="${ref:-libreoffice-26-8}"
           git clone --depth 1 --branch "$ref" https://github.com/LibreOffice/core.git ~/lo-core \
             || git clone https://github.com/LibreOffice/core.git ~/lo-core
           cd ~/lo-core
           if [ "$ref" != master ]; then git checkout -q "$ref"; fi
           sha=$(git rev-parse HEAD)
           echo "LO_SHA=$sha" >> "$GITHUB_ENV"
+          # ⚠ **頼んだ枝の名前**も渡す(成果物の `build-info.json` に載せる)
+          echo "LO_REF=$ref" >> "$GITHUB_ENV"
           echo "建てる LibreOffice: $ref ($sha)"
           # 🔴 **翻訳の実体を取る**(#158)。`--with-lang` を渡すと configure は
           #    `translations/` を要求するが、**`git clone` では付いてこない**
@@ -927,6 +937,8 @@ jobs:
           #    **clone が失敗した回にも走る**。そこで落ちると、いちばん欲しい
           #    「落ちた回の成果物」が publish されない
           sha="${LO_SHA:-unknown}"
+          # ⚠ 同じ理由で裸で使わない(clone が落ちた回にも走る step である)
+          lo_ref="${LO_REF:-unknown}"
           # ⚠ 調査ビルドは**版の字面で見分けが付く**ようにする(設定画面に出る)。
           #    🔑 **tag も版も、この 1 つの接尾辞から導く** ── 2 か所で組み立てると
           #    「版は素なのに tag は調査用」がいつか起きる
@@ -939,6 +951,7 @@ jobs:
           printf '%s\n' "{
             \"version\": \"lo-${sha:0:12}-run${GITHUB_RUN_ID}${SAFE_SUFFIX}\",
             \"lo_sha\": \"${sha}\",
+            \"lo_ref\": \"${lo_ref}\",
             \"qt_ref\": \"${{ github.event.inputs.qt_ref || '6.9' }}\",
             \"emsdk\": \"${{ github.event.inputs.emsdk || '4.0.10' }}\",
             \"run_id\": \"${GITHUB_RUN_ID}\",

@@ -1216,3 +1216,60 @@ describe('#400 段④ ── 雛形を置く順番', () => {
     ).toEqual([]);
   });
 });
+
+/**
+ * 🔴 **焼いた一式が「どの枝を頼んだか」を自分で言えること**(2026-09-14、#431 の後始末)。
+ *
+ * ⚠ 成果物に在ったのは `lo_sha` だけだった ── だから「その SHA は 26.8 の枝の物か」を
+ *   後から言うには、**上流を clone して `git merge-base --is-ancestor` を打つ**しかなかった
+ *   (#431 で実際にやった)。🔑 焼いた側は知っているのだから、**その場で書き残す**。
+ *
+ * ⚠ ここで見るのは**実行する行だけ**である(CLAUDE.md §1 の 5 度目・10 度目)──
+ *   この file の注記にも上の workflow の注記にも `master` / `libreoffice-26-8` の字が在るので、
+ *   yml 全体を `toContain` で見ると**自分の解説に満たされる**。
+ */
+describe('office-wasm ── 焼いた一式に「頼んだ枝」を残す', () => {
+  const YML = join(DIR, 'office-wasm-build.yml');
+
+  /** `printf '%s\n' "{ … }" > build-info.json` の**中身だけ**を抜き出す。 */
+  function buildInfoBlock(): string {
+    const yml = readFileSync(YML, 'utf-8');
+    const m = /printf '%s\\n' "\{([\s\S]*?)\}" > build-info\.json/.exec(yml);
+    // ⚠ 空振り防止 ── 抜き出せていなければ、下の検査は何も見ていない
+    expect(m, 'build-info.json を組む行を引けない(形が変わった?)').not.toBeNull();
+    return m![1]!;
+  }
+
+  it('🔴 build-info.json が、頼んだ枝の名前を持つ', () => {
+    const block = buildInfoBlock();
+    // ⚠ 空振り防止 ── 既に在る field が引けることを先に見る
+    expect(block, 'lo_sha が引けない(抜き出しが外れている)').toContain('\\"lo_sha\\"');
+    expect(block, '頼んだ枝を残していない').toContain('\\"lo_ref\\"');
+  });
+
+  it('🔴 その値は、実際に clone した ref から来る(入力を読み直さない)', () => {
+    const block = buildInfoBlock();
+    const m = /\\"lo_ref\\": \\"([^\\]+)\\"/.exec(block);
+    expect(m, 'lo_ref の値を引けない').not.toBeNull();
+    // 🔑 `${lo_ref}` = clone の step が `$GITHUB_ENV` へ書いた**解決済みの ref**。
+    // ⚠ ここで `${{ github.event.inputs.lo_ref }}` を読み直すと、**渡されなかった回**に
+    //    clone は既定の枝を建てたのに、記録は空になる(食い違いが静かに残る)。
+    expect(m![1], '入力を読み直している(clone が使った ref と食い違いうる)').toBe('${lo_ref}');
+  });
+
+  /**
+   * 🔴 **既定が 2 か所に在る**(CLAUDE.md §7)。入力の `default:` と、
+   * 渡されなかったときの shell の落ち先 ── **2026-09-12 は前者しか直さなかった**ので、
+   * 渡さずに焼くと `master`(未リリースの alpha)が建つ形が残っていた。
+   */
+  it('🔴 渡されなかったときの落ち先が、入力の既定と同じ', () => {
+    const yml = readFileSync(YML, 'utf-8');
+    const fallback = /^\s*ref="\$\{ref:-([^}]+)\}"/m.exec(yml);
+    expect(fallback, '落ち先を引けない(clone の step の形が変わった?)').not.toBeNull();
+    const declared = /lo_ref:[\s\S]{0,900}?default: '([^']+)'/.exec(yml);
+    expect(declared, '入力の既定を引けない').not.toBeNull();
+    expect(fallback![1], '落ち先と入力の既定が食い違っている').toBe(declared![1]);
+    // ⚠ 対照群 ── 揃っていても、揃った先が alpha なら意味が無い
+    expect(fallback![1], '落ち先が master(未リリースの alpha)').not.toBe('master');
+  });
+});
