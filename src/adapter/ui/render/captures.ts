@@ -62,6 +62,8 @@ export class CapturesRenderer {
    *   ── 面は 2 つ生きうるので、判定を描画器に置くと片方だけ印が付く(§7)。
    */
   private trim: AppState['captureTrim'] = null;
+  /** ⚠ いま画面に出ている行(印の帯だけを差し替えるときに引く)。 */
+  private shown: readonly CaptureItem[] = [];
   /** ⚠ 切り出している最中か(#683 段②a)。**state の写し**。 */
   private trimBusy = false;
   /**
@@ -120,15 +122,23 @@ export class CapturesRenderer {
       // ⚠ **借り終えたか**も入れる ── 借りている間は器を作り直せない(URL がまだ無い)
       this.playing?.url ?? '',
       /**
-       * 🔴 **印も指紋に入れる**(#683 段②a)── 入れないと「ここから」を押しても
-       *   **時刻が画面に出ない**(state は動いているのに描き直されない)。
+       * 🔴 **印は指紋に入れない**(#683 段②a、着地前の実ブラウザ smoke で判明)。
+       *
+       * ⚠ 入れると「ここから」を押すたびに**一覧を組み直す**ことになり、
+       *   その中の `<audio>` も作り直される ── **聞いている音が止まって頭へ戻る**。
+       *   🔴 印を付けるのは**聞きながら**する操作なので、これは動線ごと壊す
+       *   (「補助的な物が主の作業を奪う」#300 と同じ形)。
+       * 🔑 だから印と「切り出しています…」は、**その場所だけ差し替える**
+       *   (下の `syncTrimBar`)。
        */
-      `${state.captureTrim?.startMs ?? -1}:${state.captureTrim?.endMs ?? -1}`,
-      // ⚠ 走っているかも入れる ── 入れないと「切り出しています…」が画面に出ない
-      state.captureTrimBusy ? 'busy' : '',
       shown.map((i) => `${i.lid}|${i.name}|${String(i.size ?? -1)}`).join(''),
     ].join('');
-    if (print === this.last) return;
+    this.shown = shown;
+    if (print === this.last) {
+      // ⚠ 組み直さない回でも**印は追う**(state だけ動いて画面が変わらない、を作らない)
+      this.syncTrimBar();
+      return;
+    }
     this.last = print;
 
     this.host.textContent = '';
@@ -227,6 +237,27 @@ export class CapturesRenderer {
    * | 印が片方だけ | 「切り出す」を**出さない** ── 押しても範囲が決まらない |
    * | 動画 | 何も出さない(いまは音だけ) |
    */
+  /**
+   * 🔴 **印の帯だけを差し替える**(#683 段②a)。
+   *
+   * ⚠ 一覧ごと組み直すと `<audio>` が作り直され、**聞いている音が止まる** ──
+   *   印は「聞きながら」押すものなので、それでは動線が成り立たない。
+   * 🔑 だから**その 1 か所の中身だけ**を捨てて組み直す(器は触らない)。
+   */
+  private syncTrimBar(): void {
+    const lid = this.playing?.lid ?? null;
+    for (const bar of this.host.querySelectorAll<HTMLElement>('[data-pkc-region="capture-trim-bar"]')) {
+      const row = bar.closest('[data-pkc-capture]');
+      const rowLid = row?.getAttribute('data-pkc-capture') ?? null;
+      if (rowLid === null) continue;
+      const item = this.shown.find((i) => i.lid === rowLid);
+      bar.textContent = '';
+      // ⚠ 鳴らしていない行には 1 つも出さない(押しても時刻が無い)
+      if (item === undefined || rowLid !== lid) continue;
+      this.fillTrimBar(bar, item);
+    }
+  }
+
   private trimControls(li: HTMLLIElement, item: CaptureItem): void {
     if (!canTrimCapture(item)) {
       const why = trimUnavailableText(item);
@@ -237,6 +268,20 @@ export class CapturesRenderer {
       li.append(note);
       return;
     }
+    /**
+     * 🔑 **帯を 1 つの器にまとめる** ── 印が動いたら**この中だけ**を捨てて組み直す
+     *   (`syncTrimBar`)。⚠ 一覧ごと組み直すと `<audio>` が作り直され、
+     *   **聞いている音が止まって頭へ戻る**。
+     */
+    const bar = document.createElement('span');
+    bar.setAttribute('data-pkc-region', 'capture-trim-bar');
+    this.fillTrimBar(bar, item);
+    li.append(bar);
+  }
+
+  /** 帯の中身(印の 2 つ・切り出す・印を消す・いまの印の字)。 */
+  private fillTrimBar(bar: HTMLElement, item: CaptureItem): void {
+    if (!canTrimCapture(item)) return;
     const mark = document.createElement('button');
     mark.type = 'button';
     mark.setAttribute('data-pkc-action', 'capture-trim-start');
@@ -248,7 +293,7 @@ export class CapturesRenderer {
      */
     mark.disabled = this.trimBusy;
     mark.title = 'いま鳴っている所を、切り出しの始まりにします。';
-    li.append(mark);
+    bar.append(mark);
 
     const until = document.createElement('button');
     until.type = 'button';
@@ -257,7 +302,7 @@ export class CapturesRenderer {
     until.textContent = 'ここまで';
     until.disabled = this.trimBusy;
     until.title = 'いま鳴っている所を、切り出しの終わりにします。';
-    li.append(until);
+    bar.append(until);
 
     const startMs = this.trim?.startMs ?? null;
     const endMs = this.trim?.endMs ?? null;
@@ -265,9 +310,7 @@ export class CapturesRenderer {
       /**
        * 🔴 **走っている間は、押した所で分かるようにする**(着地前の動線レビュー 欠陥 3)。
        * ⚠ 長い録音は数秒かかる ── ボタンが何も言わないと「効かなかった」と読まれ、
-       *   もう一度押される(押しても段取りが断るので実害は無いが、**押した所が語らない**)。
-       * ⚠ `disabled` にする ── 見た目だけ変えて押せるままにすると、断り文が出る
-       *   (押せるのに断られるのは、押せないのと同じくらい分かりにくい)。
+       *   もう一度押される。⚠ `disabled` にする(見た目だけ変えて押せるままにしない)。
        */
       const run = document.createElement('button');
       run.type = 'button';
@@ -278,7 +321,7 @@ export class CapturesRenderer {
       run.title = this.trimBusy
         ? 'いま切り出しています。終わるまでお待ちください。'
         : 'この範囲だけを新しい録音として保存します(元はそのまま残ります)。';
-      li.append(run);
+      bar.append(run);
 
       const clear = document.createElement('button');
       clear.type = 'button';
@@ -289,13 +332,13 @@ export class CapturesRenderer {
       //   「消したのに増えた」という読めない結果になる
       clear.disabled = this.trimBusy;
       clear.title = '「ここから」「ここまで」の印を消します。';
-      li.append(clear);
+      bar.append(clear);
     }
 
     const about = document.createElement('span');
     about.setAttribute('data-pkc-field', 'capture-trim');
     about.textContent = trimMarkText(startMs, endMs);
-    li.append(about);
+    bar.append(about);
   }
 
   private row(item: CaptureItem): HTMLLIElement {

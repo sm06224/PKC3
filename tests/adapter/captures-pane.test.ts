@@ -484,20 +484,37 @@ describe('前後を削る ── 画面に何が出るか(#683 段②a)', () => 
   });
 
   /**
-   * 🔴 **印は指紋に入っている** ── 入れないと、押しても state だけ動いて
-   *   **画面の時刻が変わらない**(§1「描いていないのに緑」の画面版)。
+   * 🔴 **印を付けても、聞いている器は作り直さない**(#683 段②a、実ブラウザ smoke で判明)。
+   *
+   * ⚠ 直す前は印を**一覧の指紋**に入れていたので、「ここから」を押すたびに
+   *   一覧ごと組み直し、その中の `<audio>` も作り直されていた ──
+   *   **聞いている音が止まって頭へ戻る**。🔴 印は「聞きながら」押すものなので、
+   *   これは動線そのものを壊す(#300「補助的な物が主の作業を奪う」と同じ形)。
+   * 🔑 だから見るのは 2 つ ── **字は変わる**こと、**器は同じ物のまま**であること。
    */
-  it('🔴 印を付けると、画面の字がその場で変わる', async () => {
+  it('🔴 印を付けると字は変わり、聞いている器は作り直されない', async () => {
     const p = pane(playing('a'), lender());
     await Promise.resolve();
     await Promise.resolve();
     p.paint();
     expect(field(p.host, 'a', 'capture-trim')?.textContent).toContain('「ここから」');
+    const before = field(p.host, 'a', 'capture-media');
+    expect(before, '前提が崩れている(器が出ていない)').not.toBeNull();
+
     p.paint({ captureTrim: { lid: 'a', startMs: 12_000, endMs: null } });
     expect(
       field(p.host, 'a', 'capture-trim')?.textContent,
-      '印が指紋に入っていない(押しても画面が変わらない)',
+      '押しても画面の字が変わらない',
     ).toContain('ここから 0:12');
+    expect(
+      field(p.host, 'a', 'capture-media'),
+      '印を付けたら器が作り直された ── 聞いている音が止まる',
+    ).toBe(before);
+
+    // ⚠ 「切り出しています…」でも同じ(こちらも帯だけ差し替える)
+    p.paint({ captureTrim: { lid: 'a', startMs: 12_000, endMs: 65_000 }, captureTrimBusy: true });
+    expect(field(p.host, 'a', 'capture-trim-run')?.textContent).toBe('切り出しています…');
+    expect(field(p.host, 'a', 'capture-media'), '走り出したら器が作り直された').toBe(before);
   });
 
   /** 🔴 **切り出せない形には口を出さず、理由を書く**(押したら断る、にしない)。 */

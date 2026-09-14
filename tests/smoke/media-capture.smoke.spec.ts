@@ -242,7 +242,7 @@ ${(e as Error).message}`,
    *   reducer が片方を落とすので、**この段の失敗が「印が付かない」に化ける**
    *   (CLAUDE.md §4「対照群が届かない回は判定不能と書く」)。
    */
-  const seek = async (to: number): Promise<void> => {
+  const seek = async (to: number): Promise<number> => {
     await player.evaluate((el: HTMLMediaElement, t) => {
       el.pause();
       el.currentTime = t;
@@ -252,13 +252,28 @@ ${(e as Error).message}`,
         message: `再生位置を ${to} 秒へ動かせない(前提が崩れている)`,
       })
       .toBeCloseTo(to, 1);
+    // 🔑 **押す直前の実測値を返す** ── 切り出しの長さは「頼んだ 2 秒」ではなく
+    //    **押した所の差**で決まる(`toBeCloseTo(…, 1)` は ±0.05 を許すので、
+    //    2.0 と突き合わせると**計器の遊びのぶんで落ちる**)
+    return player.evaluate((el: HTMLMediaElement) => el.currentTime);
   };
 
-  await seek(1.0);
+  const at0 = await seek(1.0);
   await clickReal(page, '[data-pkc-field="capture-trim-start"]');
   await expect(mark, '「ここから」の印が付いていない').toContainText('ここから 0:01');
+  /**
+   * 🔴 **印を付けても、聞いている器は作り直されない**(この段で見つけた欠陥)。
+   * ⚠ 作り直されると `<audio>` が**頭へ戻って鳴り出す** ── 印は「聞きながら」
+   *   押すものなので、それでは動線が成り立たない。
+   * 🔑 観測点は**同じ器か**(`currentTime` が保たれているか)。
+   */
+  await expect
+    .poll(() => player.evaluate((el: HTMLMediaElement) => el.currentTime), {
+      message: '印を付けたら、聞いていた所が頭へ戻った(器が作り直されている)',
+    })
+    .toBeCloseTo(at0, 1);
 
-  await seek(3.0);
+  const at1 = await seek(3.0);
   await clickReal(page, '[data-pkc-field="capture-trim-end"]');
   await expect(mark, '両方の印がそろっていない').toContainText('0:01〜0:03(0:02)');
 
@@ -293,18 +308,35 @@ ${(e as Error).message}`,
     .toBeGreaterThanOrEqual(1);
   const cutInfo = await cutPlayer.evaluate(async (el: HTMLMediaElement) => {
     const bytes = await (await fetch(el.src)).arrayBuffer();
+    /**
+     * 🔴 **大きさは復号の前に採る**(この段で見つけた空振り)。
+     * ⚠ `decodeAudioData` は渡された `ArrayBuffer` を**手放させる**(detach)ので、
+     *   後から `byteLength` を読むと**必ず 0** ── 「元より小さい」を見る assert が
+     *   **中身に関わらず通る**(§1 空振り)。
+     */
+    const size = bytes.byteLength;
     const ctx = new OfflineAudioContext(1, 48000, 48000);
     const buf = await ctx.decodeAudioData(bytes);
     const ch = buf.getChannelData(0);
     let sum = 0;
     for (let i = 0; i < ch.length; i += 1) sum += Math.abs(ch[i]!);
-    return { duration: el.duration, bytes: bytes.byteLength, energy: sum / ch.length };
+    return { duration: el.duration, bytes: size, energy: sum / ch.length };
   });
-  // 🔑 長さは `<audio>` が言う値で見る(頼んだのは 1.0〜3.0 秒 = 2 秒)
-  expect(cutInfo.duration, `切り出した長さが違う(${JSON.stringify(cutInfo)})`).toBeCloseTo(2.0, 1);
+  /**
+   * 🔑 **長さは「押した所の差」と突き合わせる**(「頼んだ 2 秒」ではない)。
+   * ⚠ `seek` の門は ±0.05 を許すので、2.0 と直に比べると**計器の遊びで落ちる**
+   *   ── 実際 1 度それで赤くなった(2.1 対 2.0)。製品の約束は
+   *   「**押した所のとおりに切れる**」であって「ちょうど 2 秒」ではない。
+   */
+  const wanted = at1 - at0;
+  expect(
+    cutInfo.duration,
+    `押した所(${at0.toFixed(3)}〜${at1.toFixed(3)} = ${wanted.toFixed(3)} 秒)のとおりに切れていない(${JSON.stringify(cutInfo)})`,
+  ).toBeCloseTo(wanted, 1);
   // 🔑 **音が入っている**(無音を作っていない)
   expect(cutInfo.energy, `音が入っていない(${JSON.stringify(cutInfo)})`).toBeGreaterThan(0);
-  // ⚠ **元より小さい**(丸ごと写していない)
+  // ⚠ **元より小さい**(丸ごと写していない)。⚠ 0 でないことも見る(空振り防止)
+  expect(cutInfo.bytes, '大きさを測れていない(復号の後に読んでいる)').toBeGreaterThan(0);
   expect(cutInfo.bytes, '切り出したのに元と同じ大きさ').toBeLessThan(38_000);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
