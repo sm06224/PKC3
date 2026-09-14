@@ -32,6 +32,11 @@ import { xlsxAttachmentSourcesOf } from '@features/query/xlsx-attachment';
 import { isSqlLocalFileLid, SQL_PICK_LOCAL_FILE_VALUE } from '@features/query/sql-local-file';
 import { humanBytes } from '@features/human-bytes';
 import { SQL_RULES, sqlExampleText, sqlPlaceholder, sqlTipText } from '@features/query/sql-tip';
+import {
+  SQL_WINDOW_MIN,
+  sqlWindowOf,
+  type SqlWindow,
+} from '@features/query/sql-window';
 
 /** 表の値を字にする。⚠ `null` と空文字を**見分けられる**ようにする。 */
 const cellText = (v: string | number | null): string => (v === null ? '(なし)' : String(v));
@@ -79,6 +84,20 @@ export class SqlRenderer {
    * 打つたびに引き戻すと、掴んで広げた操作が**毎回取り消される**
    * (片道の操作を作らない ── user 指示 2026-08-23)。
    */
+  /**
+   * 🔴 **窓で描くための持ち物**(#918 段③)。
+   * ⚠ `rows` は `AppState` の配列を**そのまま指す**(写さない)── 数万行を
+   *   もう 1 本持つと、それだけで常駐が倍になる(2026-07-27 の不可侵指示)。
+   */
+  private rows: readonly (readonly (string | number | null)[])[] = [];
+  private table: HTMLTableElement | null = null;
+  private head: HTMLTableRowElement | null = null;
+  private tbody: HTMLTableSectionElement | null = null;
+  /** 実測した 1 行の高さ。⚠ **0 は「測れていない」** = 窓に入らない印である。 */
+  private rowH = 0;
+  /** いま描いてある窓。⚠ 同じ窓なら描き直さない(転がすたびの作り直しを避ける)。 */
+  private drawn: SqlWindow | null = null;
+
   private handSized = false;
   /** 最後に高さを合わせたときの字。⚠ 同じ字で測り直さない(打鍵ごとの再計測を避ける)。 */
   private fitted: string | null = null;
@@ -276,6 +295,30 @@ export class SqlRenderer {
     this.toFile = toFile;
     this.note = note;
     this.body = body;
+    /**
+     * 🔴 **転がったら窓を描き直す**(#918 段③)。
+     * ⚠ 張るのは**器を作るときの 1 度だけ** ── 答えごとに張り替えると、
+     *   外し忘れた 1 本が古い表を掴んだまま残る(#195 と同じ形)。
+     * 🔑 `repaint()` は**窓が変わっていなければ何もしない**ので、
+     *   転がすたびに表を作り直すことにはならない。
+     * ⚠ `passive` にする ── ここで転がりを止めることは無い。
+     */
+    body.addEventListener('scroll', () => {
+      this.repaint();
+    }, { passive: true });
+    /**
+     * 🔴 **state が 1 ミリも動かない変化も拾う**(#918 段③、着地前レビュー)。
+     * ⚠ 窓そのものを広げる / 面を出し入れする / 開発者ツールを閉じる ──
+     *   どれも `render()` を呼ばないので、上の 2 つ(答えが来た / 転がした)では
+     *   **1 度も届かない**。
+     * ⚠ 持たない環境がある(古い箱)ので**在るときだけ**張る ── 無くても
+     *   `render()` 側と `scroll` 側が拾うので、落ちるのは「触らずに器だけ変わった」場合だけ。
+     */
+    if (typeof ResizeObserver === 'function') {
+      new ResizeObserver(() => {
+        this.repaint();
+      }).observe(body);
+    }
     return body;
   }
 
@@ -367,6 +410,19 @@ export class SqlRenderer {
       this.fitted = p.sql;
       fitSqlInput(this.box);
     }
+    /**
+     * 🔴 **器の高さが変わったら窓を見直す**(#918 段③、着地前レビューが出した)。
+     *
+     * 🔴 **指紋の門より前に置く。** ⚠ ここを門の後ろに置くと、いちばん多い経路で
+     *   効かない ── すぐ上の `fitSqlInput` は**打つたびに欄の高さを変える**ので、
+     *   同じ flex 列に居る `sql-body` の高さも一緒に動く。答えは変わっていないので
+     *   指紋は動かず、門の後ろでは 1 度も通らない。
+     * 🔴 実害は**打った字を消したとき**に出る ── 欄が縮んで器が広がるのに、
+     *   描いてある行は狭かった頃のままなので、**広がった分が白い帯**になる
+     *   (1px でも転がせば直るが、それまでは「答えが足りない」ように見える)。
+     * 🔑 `repaint()` は**窓が変わっていなければ何もしない**ので、毎回呼んでよい。
+     */
+    this.repaint();
     if (this.history !== null) this.history.disabled = p.history.length === 0;
     if (this.historyNote !== null) {
       const line = historyNoteLine(p);
@@ -441,6 +497,10 @@ export class SqlRenderer {
     }
 
     body.textContent = '';
+    this.rows = p.rows;
+    this.tbody = null;
+    this.rowH = 0;
+    this.drawn = null;
     if (p.columns.length === 0) return;
     const table = document.createElement('table');
     table.setAttribute('data-pkc-field', 'sql-table');
@@ -453,20 +513,146 @@ export class SqlRenderer {
     }
     thead.append(hr);
     const tbody = document.createElement('tbody');
-    for (const row of p.rows) {
+    table.append(thead, tbody);
+    body.append(table);
+    this.table = table;
+    this.head = hr;
+    this.tbody = tbody;
+    /**
+     * 🔴 **まず 1 度描く ── ただし `SQL_WINDOW_MIN` 行までに留める**(#918 段③)。
+     * 🔑 描かないと **1 行の高さ**も**列の幅**も測れない(CSS からは読めない)。
+     *
+     * 🔴 **ここで全部描いてはいけない**(自分の差分を読み直して見つけた)──
+     *   測れるのは**画面に出ているときだけ**で、この面が `hidden` で常駐している
+     *   間は `offsetHeight` が **0** を返す。全部描いてから測りに行く形にすると、
+     *   **測れなかった回だけ 10 万行が DOM に残る**(いちばん重い場面で、
+     *   いちばん効かない)。
+     * 🔑 だから**先に上限を掛けてから**描く ── 測れなくても、残るのは
+     *   「引っかかり 0 本」と実測した行数までである。
+     */
+    const total = p.rows.length;
+    const seed = Math.min(total, SQL_WINDOW_MIN);
+    this.paintRows({ from: 0, to: seed, above: 0, below: 0 });
+    if (total <= SQL_WINDOW_MIN) return;
+    this.measureAndPin();
+    this.repaint();
+  }
+
+  /**
+   * 🔴 **窓のぶんだけ `<tbody>` を描き直す**(#918 段③)。
+   *
+   * ⚠ 上下に空ける高さは **`<tr>` 1 本 + `<td colspan>`** で持つ ──
+   *   `<tr>` に直接 `height` を当てても、升が 1 つも無い行は**潰れる**。
+   * ⚠ 空け行には `aria-hidden` を付ける ── 読み上げに「空の行」を読ませない。
+   */
+  private paintRows(w: SqlWindow): void {
+    const tbody = this.tbody;
+    if (tbody === null) return;
+    const cols = this.head?.childElementCount ?? 1;
+    tbody.textContent = '';
+    if (w.above > 0) tbody.append(spacerRow(cols, w.above));
+    for (let i = w.from; i < w.to; i += 1) {
+      const row = this.rows[i];
+      if (row === undefined) continue;
       const tr = document.createElement('tr');
       for (const v of row) {
         const td = document.createElement('td');
         // ⚠ **字として入れる**(worker から来た値を HTML として注入しない)
-        td.textContent = cellText(v);
+        const text = cellText(v);
+        td.textContent = text;
+        /**
+         * 🔴 **切られた字を読む道を残す**(#918 段③、着地前レビュー)。
+         * ⚠ 窓に入ると列の幅を固定するので、**後ろの窓に長い値が出ると切られる**。
+         *   直す前は `table-layout: auto` だったので表が広がって横に転がせた ──
+         *   つまり**この PR で「読めなくなる」を作った**(CLAUDE.md §10)。
+         * 🔑 だから升そのものに全文を持たせる(マウスを乗せると出る)。
+         * ⚠ これでも触る端末では読めないので、**全部が要るなら
+         *   「ノートへ」/「ファイルへ」**(どちらも全行・全文)である。
+         */
+        td.title = text;
         if (v === null) td.setAttribute('data-pkc-sql-null', 'yes');
         tr.append(td);
       }
       tbody.append(tr);
     }
-    table.append(thead, tbody);
-    body.append(table);
+    if (w.below > 0) tbody.append(spacerRow(cols, w.below));
+    this.drawn = w;
   }
+
+  /**
+   * 🔴 **1 行の高さと列の幅を実測して、幅のほうは固定する**(#918 段③)。
+   *
+   * ⚠ **幅を固定しないと、転がすたびに列が動く** ── 表の幅は
+   *   「いま描いてある行の中身」から決まるので、窓が入れ替わると幅も変わる。
+   *   🔑 `CLAUDE.md §10`「置き換えられる側がついでに提供していた性質」の 1 つで、
+   *   これは**こちらで置き直せる**(だから置き直す)。
+   * ⚠ 測れない所(happy-dom は 0 を返す)では**何もしない** ── 当てると
+   *   幅 0 の表になる(段②b の `fitSqlInput` と同じ作法)。
+   */
+  private measureAndPin(): void {
+    const tbody = this.tbody;
+    const table = this.table;
+    const head = this.head;
+    if (tbody === null || table === null || head === null) return;
+    /**
+     * ⚠ `tbody.rows` は**使わない** ── happy-dom が持っていないので、
+     *   そこへ書くと **unit からこの段が 1 度も通れない**(実際に踏んだ)。
+     * 🔑 ここは**空け行を作る前**に呼ばれるので、先頭の要素が必ず実データの行である。
+     */
+    const first = tbody.firstElementChild;
+    this.rowH = first instanceof HTMLElement ? first.offsetHeight : 0;
+    if (this.rowH <= 0) return;
+    const widths = [...head.children].map((th) => (th as HTMLElement).offsetWidth);
+    if (widths.some((n) => n <= 0)) return;
+    for (const [i, th] of [...head.children].entries()) {
+      (th as HTMLElement).style.width = `${String(widths[i] ?? 0)}px`;
+    }
+    table.style.tableLayout = 'fixed';
+    /**
+     * 🔴 **表そのものの幅も決める**(#918 段③。実ブラウザが 3/3 で再現して分かった)。
+     *
+     * ⚠ **`table-layout: fixed` だけでは効かない** ── 表の `width` が `auto` のままだと、
+     *   ブラウザは中身から幅を決め直す。実測(5000 行・列 4 が `i*2`):
+     *   上端(4 桁「4000」まで)で **40px** → 下端(5 桁「10000」)で **47px** に**動いた**。
+     * 🔑 測った幅の**合計**を表の幅に当てると、そこで初めて固定が効く。
+     * ⚠ 器より広ければ横に転がる ── それは窓に入る前と同じ振る舞いである。
+     */
+    table.style.width = `${String(widths.reduce((a, b) => a + b, 0))}px`;
+  }
+
+  /**
+   * いまの転がり位置から窓を出し直す。⚠ **変わっていなければ描かない**。
+   *
+   * 🔴 **測れていなければ、ここで測り直す** ── 面が `hidden` のうちに答えが
+   *   届いた回は高さが 0 なので、**見えるようになった最初の転がり**で測る。
+   *   ⚠ そこで測り直さないと、その答えは**最後まで窓に入らない**
+   *   (指紋の門があるので `render()` はもう来ない)。
+   */
+  private repaint(): void {
+    const body = this.body;
+    if (body === null || this.tbody === null) return;
+    if (this.rows.length <= SQL_WINDOW_MIN) return;
+    if (this.rowH <= 0) this.measureAndPin();
+    if (this.rowH <= 0) return;
+    const w = sqlWindowOf(this.rows.length, this.rowH, body.scrollTop, body.clientHeight);
+    const had = this.drawn;
+    if (had !== null && had.from === w.from && had.to === w.to) return;
+    this.paintRows(w);
+  }
+}
+
+/** 上下に空ける 1 本。⚠ 升を 1 つ入れないと `<tr>` の高さは効かない。 */
+function spacerRow(cols: number, px: number): HTMLTableRowElement {
+  const tr = document.createElement('tr');
+  tr.setAttribute('aria-hidden', 'true');
+  tr.setAttribute('data-pkc-field', 'sql-row-spacer');
+  const td = document.createElement('td');
+  td.colSpan = Math.max(1, cols);
+  td.style.height = `${String(px)}px`;
+  td.style.padding = '0';
+  td.style.border = 'none';
+  tr.append(td);
+  return tr;
 }
 
 /**
@@ -570,7 +756,25 @@ function noteLine(p: AppState['sqlPage']): string {
     return `${String(p.rows.length)} 行${took} ── 多すぎるので途中まで出しています(LIMIT や条件で絞ると全部見えます)${where}`;
   if (p.rows.length === 0)
     return `0 行${took} ── 条件に当たるものがありませんでした${zeroHint(p.ranSql)}${where}`;
-  return `${String(p.rows.length)} 行${took}${where}`;
+  return `${String(p.rows.length)} 行${took}${windowNote(p.rows.length)}${where}`;
+}
+
+/**
+ * 🔴 **「見えている分だけ描いている」を、画面に常に出す**(#918 段③、動線レビュー)。
+ *
+ * ⚠ 窓で描くと、ブラウザの「ページ内を探す」と「表を全部選んでコピー」が
+ *   **見えている行にしか効かなくなる**。それを知らせているのは
+ *   ①起動時に 1 度だけ出るお知らせ ②マニュアル ── **どちらも読んだ人にしか届かない**。
+ * 🔴 帰結が重い:user は「**無い**」と読むが、実際は「**見えていないだけ**」である。
+ *   SQL は「データが本当にどうなっているか」を確かめる道具なので、
+ *   **在るデータを無いと結論させる**のは、迷わせるより悪い。
+ * 🔑 だから**表の上の帯**(常に出ている所)に 1 文足す ── 新しい部品は増やさない。
+ * ⚠ **代わりを同じ文に書く**(「ノートへ / ファイルへ」)── 落ちた動線を
+ *   言いっぱなしにしない(CLAUDE.md「捨てるものの表には、代わりに何ができるかを書く」)。
+ */
+function windowNote(rows: number): string {
+  if (rows <= SQL_WINDOW_MIN) return '';
+  return ' ── 見えている分だけ描いています(全部を探す・写すには ノートへ / ファイルへ)';
 }
 
 /**

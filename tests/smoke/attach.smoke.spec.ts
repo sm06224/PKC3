@@ -1353,6 +1353,133 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   expect(text, '答えの中身が入っていない').toContain('ぶどう');
   expect(text, '画面の字が file へ漏れている').not.toContain('(なし)');
 
+  /**
+   * ⑪ 🔴 **答えの表を「見えている分だけ」描く**(#918 段③。動線:
+   *   「SQL の面を開く → select を打つ → 実行 → 答えの表が出る →
+   *   表を下まで転がす → 上へ戻す」)。
+   *
+   * 🔴 **ここでしか測れない** ── 窓に入るかどうかは `offsetHeight` /
+   *   `scrollTop` の実測に懸かっていて、happy-dom はどちらも **0** を返す
+   *   (CLAUDE.md §2「本命の分岐を unit は 1 度も通らない」)。
+   * ⚠ **新しい起動は増やしていない**(#820 の規律)── ⑩ が開いたままの
+   *   同じ SQL の面の道中に続ける(`gotoApp` / `page.goto` を足さない)。
+   */
+  const fiveKSql =
+    "with recursive s(i) as (select 1 union all select i+1 from s where i < 5000) select i, 'あ' || i as a, 'い' || i as b, i*2 as c from s";
+  await page.fill('[data-pkc-field="sql-input"]', fiveKSql);
+  await clickReal(page, '[data-pkc-action="run-sql"]');
+  await expect(sqlTable, '5000 行の答えが返らない').toBeVisible({ timeout: 10_000 });
+  await expect(
+    page.locator('[data-pkc-field="sql-note"]'),
+    '5000 行と画面が言わない',
+  ).toContainText('5000 行');
+
+  const sqlBody = page.locator('[data-pkc-field="sql-body"]');
+  const drawnRows = sqlTable.locator(
+    'tbody tr:not([data-pkc-field="sql-row-spacer"])',
+  );
+
+  // ① <tbody> の <tr> は 5000 本ではなく、窓に入る分だけ
+  const topCount = await drawnRows.count();
+  expect(topCount, '窓が 1 行も描かれていない(測れていない)').toBeGreaterThan(0);
+  expect(topCount, '窓に入らず 5000 行が丸ごと描かれている').toBeLessThan(1000);
+  // 上端では先頭の行(i=1)が見え、末尾の行(i=5000)はまだ見えていない
+  await expect(sqlTable.locator('tbody')).toContainText('あ1');
+  await expect(sqlTable.locator('tbody'), '転がる前から末尾の行が見えている').not.toContainText(
+    'あ5000',
+  );
+
+  const widthsBefore = await sqlTable
+    .locator('thead th')
+    .evaluateAll((ths) => ths.map((th) => (th as HTMLElement).offsetWidth));
+
+  // ② 下まで転がす → 末尾の行(5000)が見える
+  await sqlBody.evaluate((el) => {
+    el.scrollTop = el.scrollHeight;
+  });
+  await expect(
+    sqlTable.locator('tbody'),
+    '下まで転がしても末尾の行(5000)が見えない',
+  ).toContainText('あ5000', { timeout: 5_000 });
+  const bottomCount = await drawnRows.count();
+  expect(bottomCount, '下端で窓が 0 行になっている').toBeGreaterThan(0);
+  expect(bottomCount, '下端でも 5000 行丸ごと描かれている').toBeLessThan(1000);
+
+  /**
+   * 🔴 **切られて見えなくなった字も、`title` には全文が入っている**
+   *   (#918 段③。読める道を 1 つ残す)。⚠ ここ(下端・`あ5000` 等の 4〜5 桁行)は
+   *   `table-layout: fixed` で列幅が固定された**後**なので、初期の幅より
+   *   長い値が来て切られうる場所である。
+   */
+  const lastTitles = await sqlTable
+    .locator('tbody td')
+    .evaluateAll((tds) =>
+      tds
+        .filter((td) => (td as HTMLElement).getAttribute('title') !== null)
+        .map((td) => ({ title: (td as HTMLElement).title, text: td.textContent ?? '' })),
+    );
+  expect(lastTitles.length, '升に title が 1 つも無い(読める道が無い)').toBeGreaterThan(0);
+  for (const { title, text } of lastTitles) {
+    expect(title, `title が全文でない(升の字「${text}」)`).toBe(text);
+  }
+
+  // ③ 転がしても列の幅は動かない(幅は転がる前に固定してある)
+  const widthsAfter = await sqlTable
+    .locator('thead th')
+    .evaluateAll((ths) => ths.map((th) => (th as HTMLElement).offsetWidth));
+  expect(widthsAfter, '転がしたら列の幅が動いた').toEqual(widthsBefore);
+
+  // ④ 上へ戻すと、先頭の行(1)が戻る(片道の操作ではない)
+  await sqlBody.evaluate((el) => {
+    el.scrollTop = 0;
+  });
+  await expect(
+    sqlTable.locator('tbody'),
+    '上へ戻しても先頭の行(1)が戻らない',
+  ).toContainText('あ1', { timeout: 5_000 });
+  await expect(
+    sqlTable.locator('tbody'),
+    '上へ戻ったのに末尾の行がまだ残っている',
+  ).not.toContainText('あ5000');
+
+  /**
+   * ⑤ 🔴 **器が広がったら、窓も広げる**(#918 段③ その 3。着地前レビューが出した)。
+   *
+   * 🔴 **窓そのものを縦に伸ばす**のが肝である。
+   * ⚠ 最初の稿は「打つ欄を伸ばして → 戻す」で作ったが、**それでは落ちない** ──
+   *   戻した先が**元の大きさ**なので、そのときの窓は元から足りている
+   *   (実際に変異を当てたら **SURVIVED** だった)。
+   * 🔑 だから **1 度も無かった大きさ**にする ── 窓を縦 2 倍にすれば、
+   *   描き直さない限り**必ず**下に白い帯が出る。
+   * 🔑 ここは `ResizeObserver` の経路そのものである(state は 1 ミリも動かない ──
+   *   `render()` も `scroll` も呼ばれない)。
+   */
+  const before = page.viewportSize()!;
+  try {
+    const rowH = (await drawnRows.first().boundingBox())!.height;
+    expect(rowH, '行の高さが測れていない(以降の比較が無意味)').toBeGreaterThan(0);
+    await page.setViewportSize({ width: before.width, height: before.height * 2 });
+    // 🔑 転がさない ── 転がすと `scroll` が拾ってしまい、この経路を見ない
+    await expect
+      .poll(
+        async () => {
+          const n = await drawnRows.count();
+          const h = await sqlBody.evaluate((el) => el.clientHeight);
+          return n * rowH - h;
+        },
+        {
+          message:
+            '窓を広げたのに描く行が増えない ── 下に白い帯が残る' +
+            '(`repaint()` が指紋の門より前に在るか / ResizeObserver を張っているか)',
+          timeout: 5_000,
+        },
+      )
+      .toBeGreaterThanOrEqual(-rowH);
+  } finally {
+    // ⚠ 次の段へ大きさを持ち越さない(この test はまだ続きうる)
+    await page.setViewportSize(before);
+  }
+
   expect(errors).toEqual([]);
 });
 

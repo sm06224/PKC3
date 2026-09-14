@@ -4015,11 +4015,25 @@ li[data-pkc-row-slot] {
   font-size: 12px;
   white-space: pre;
 }
+/**
+ * 🔴 **溢れた字は「…」で切る**(#918 段③、着地前レビューが出した)。
+ *
+ * ⚠ 窓で描くときは列の幅を**実測して固定**する(`table-layout: fixed`)。
+ *   固定しないと転がすたびに列が動くが、固定すると**後ろの窓に出た長い値が
+ *   隣の列へ溢れて、両方読めなくなる** ── `white-space: pre` なので折り返しもしない。
+ * 🔑 この file の他の表(ファイラ・2 ペイン・暦)は**12 か所とも**同じ 2 行を
+ *   持っている ── **この表だけ持っていなかった**所へ固定幅を当てたのが誤りだった。
+ * ⚠ **2000 行以下では 1 ドットも変わらない** ── 幅は中身から決まるので、そもそも溢れない。
+ * 🔑 切られた字は**升の `title`**(描画器が入れる)で読める。全文が要るなら
+ *   「ノートへ」/「ファイルへ」。
+ */
 [data-pkc-field='sql-table'] th,
 [data-pkc-field='sql-table'] td {
   padding: 2px var(--s2);
   border: 1px solid var(--border);
   text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /**
  * 🔴 **列の名前を、表の上に貼り付ける**(#837 K2、2026-09-09)。
