@@ -205,6 +205,7 @@ import { createTimerService } from '@adapter/ui/actions/timer';
 import { createAlarmService } from '@adapter/ui/actions/alarm';
 import { createChime } from '@adapter/platform/chime';
 import { appAlarmEnabled } from '@adapter/ui/render/alarm-enabled';
+import { appVoiceBoost, appVoiceBoostRouter } from '@adapter/ui/render/voice-boost';
 import {
   armLaunchQueue,
   type LaunchTarget,
@@ -2316,6 +2317,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * ⚠ 切にしたら**鳴っている知らせも畳む** ── 切ったのに残っていると、
      *   「切れていない」と読まれる。
      */
+    /**
+     * 🔴 **その場で繋ぎ替える**(#772 段① B)── 保存しただけでは、
+     *   いま開いているノートの再生機は素のままである(設定が嘘になる)。
+     * ⚠ **切ったら出口へ繋ぎ直す**のも `refresh` の仕事 ── 外したままだと**無音**になる。
+     */
+    setVoiceBoost: (on) => {
+      appVoiceBoost.setEnabled(on);
+      appVoiceBoostRouter.refresh();
+    },
     setAlarmEnabled: (on) => {
       appAlarmEnabled.setEnabled(on);
       if (!on) {

@@ -192,7 +192,7 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
      *   ⚠ **`P2` でもない**:P2 は `selectedLid` で代替する形だが、こちらは
      *   選択とは無関係の `capturePlayingLid` で決まる。
      */
-    expect(counts()).toEqual({ P1: 53, P2: 33, E: 23, V: 10, N: 130 });
+    expect(counts()).toEqual({ P1: 53, P2: 33, E: 23, V: 10, N: 131 });
   });
 
   it('🔴 名指しの錨 ── 件数が同じまま入れ替わっても落ちる', () => {

@@ -96,6 +96,7 @@ import type { AppState, AppPhase } from '@adapter/state/app-state';
 import { appEditorMode } from './editor-mode';
 import { appKeymap, type KeymapStore } from './keymap';
 import { appPhoneLinks } from './phone-links';
+import { appVoiceBoostRouter } from './voice-boost';
 import {
   appExtensionGrants,
   type ExtensionGrants,
@@ -2389,6 +2390,8 @@ export class DetailRenderer {
             el.preload = 'metadata';
             el.src = lent.url;
             a.after(el);
+            // 🔑 **設定が入なら、出口を整える鎖へ通す**(#772 段① B)
+            appVoiceBoostRouter.watch(el);
             placed.push(el);
           }
           // ⚠ 1 枚も置けなかった回は**その場で返す**(誰も見ていない URL を残さない)
@@ -2585,6 +2588,9 @@ export class DetailRenderer {
         media.controls = true;
         media.src = lent.url;
         host.append(media);
+        // 🔑 **本文の再生機と同じ扱いにする**(#772 段① B)── 片方だけ整うと、
+        //   同じ音が場所で違って聞こえる
+        appVoiceBoostRouter.watch(media);
       } else {
         /**
          * 🔴 **PDF はブラウザ内蔵ビューアに委ねる**(依存を足さない)。

@@ -33,6 +33,7 @@ import { codeOnly } from '../helpers/code-only';
 import { join } from 'node:path';
 import { OpenInEditStore } from '@adapter/ui/render/open-in-edit';
 import { AlarmEnabledStore } from '@adapter/ui/render/alarm-enabled';
+import { VoiceBoostStore } from '@adapter/ui/render/voice-boost';
 import { PhoneLinksStore } from '@adapter/ui/render/phone-links';
 import { TooNarrowOkStore } from '@adapter/ui/render/too-narrow';
 import { EditorModeStore } from '@adapter/ui/render/editor-mode';
@@ -65,6 +66,15 @@ const CASES: readonly {
     name: 'AlarmEnabledStore',
     make: () => {
       const s = new AlarmEnabledStore(null);
+      return { write: (v) => s.setEnabled(v as boolean), read: () => s.enabled() };
+    },
+    a: true,
+    b: false,
+  },
+  {
+    name: 'VoiceBoostStore',
+    make: () => {
+      const s = new VoiceBoostStore(null);
       return { write: (v) => s.setEnabled(v as boolean), read: () => s.enabled() };
     },
     a: true,
