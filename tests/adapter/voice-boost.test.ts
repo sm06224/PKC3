@@ -140,6 +140,16 @@ describe('聞くときだけ音を整える(繋ぎ替え)', () => {
     expect(host.resumed, '同じ要素に聞き手が重なっている').toBe(mid + 1);
   });
 
+  /**
+   * ⚠ **この test で `wire` の `if (host === null) return;` は殺せない**
+   *   (2026-09-14 の変異試験 M4 が SURVIVED で教えた)。
+   * 🔑 守っているのは **`tsc`** である ── 外すと `'host' is possibly 'null'` が
+   *   **4 件**出てコンパイルが通らない(実測)。⚠ `vitest` は型を見ないので、
+   *   外した版でも走ってしまい、`null.source(el)` の `TypeError` が実装の
+   *   `catch` に飲まれて**外から見た結果が同じ**になる。
+   * ⚠ **だから、わざとらしい assert を足して殺しにいかない** ── 足しても
+   *   守りは 1 ミリも増えず、「殺せた」という見かけだけが残る。
+   */
   it('🔴 器が作れない端末では何もしない(整わないだけで、素のまま鳴る)', () => {
     const r = new VoiceBoostRouter(() => null, () => true);
     expect(() => r.watch(media())).not.toThrow();

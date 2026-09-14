@@ -136,7 +136,16 @@ export class VoiceBoostRouter {
 
   private wire(el: HTMLMediaElement): void {
     const host = this.ensureHost();
-    // ⚠ 器が無い端末は**触らない** ── 整わないだけで、素のまま鳴る
+    /**
+     * ⚠ 器が無い端末は**触らない** ── 整わないだけで、素のまま鳴る。
+     * 🔑 **この 1 行の門は `tsc` が持っている** ── 外すと
+     *   `'host' is possibly 'null'` が **4 件**出てコンパイルが通らない(2026-09-14 実測)。
+     * ⚠ **変異試験で殺せないのは、この理由である** ── `vitest` は型を見ないので
+     *   外した版でも走ってしまい、`host.source(el)` の `TypeError` が
+     *   下の `catch` に飲まれて**外から見た結果が同じ**になる。
+     *   🔑 だから**わざとらしい assert を足して殺しにいかない**
+     *   (守っているのは型検査であって、この test ではない)。
+     */
     if (host === null) return;
     let src = this.wired.get(el);
     if (src === undefined) {
