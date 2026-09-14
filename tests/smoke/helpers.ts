@@ -754,12 +754,29 @@ export interface MainGapSample {
   readonly ticks: number;
   /** 対照群で心拍が何回打ったか */
   readonly baseTicks: number;
+  /**
+   * 🔴 **いちばん長い欠測の上位 5 件**(#878、2026-09-14)。
+   *
+   * ⚠ **`maxGap` 1 点では「外れ値が 1 個」と「裾ごと持ち上がった」が見分けられない。**
+   *   そこがこの現象の分かれ目である ── 前者は**他の spec と場所を取り合った**
+   *   (この箱の都合)、後者は**製品が本当に重くなった**を疑う所である。
+   * 🔑 **足すのに追加の走りが要らない** ── collector は既に降順で並べており、
+   *   先頭しか読んでいなかった(捨てていた物を拾うだけ)。
+   * ⚠ **門はこれを見ない**(`maxGap` のままである)── これは**診断のための記録**で
+   *   あって、判定を増やすものではない。
+   */
+  readonly top: readonly number[];
+  /** 対照群の上位 5 件。⚠ **両方無いと「箱が忙しかった」が言えない**。 */
+  readonly baseTop: readonly number[];
 }
 
 export function expectMainGapUnderBudget(label: string, m: MainGapSample): void {
   // ⚠ 機械で拾える 1 行にする(全量の log から `grep '\[#878\] gap'` で分布が出る)
   console.log(
-    `[#878] gap ${label} maxGap=${m.maxGap} base=${m.base} over=${m.maxGap - m.base} budget=${MAIN_GAP_BUDGET_MS} ticks=${m.ticks}/${m.baseTicks}`,
+    `[#878] gap ${label} maxGap=${m.maxGap} base=${m.base} over=${m.maxGap - m.base}` +
+      ` budget=${MAIN_GAP_BUDGET_MS} ticks=${m.ticks}/${m.baseTicks}` +
+      // 🔑 上位 5 件(#878)── 1 回の走りで**裾の形**が読める(走りを増やさずに済む)
+      ` top=[${m.top.join(',')}] baseTop=[${m.baseTop.join(',')}]`,
   );
   // ⚠ 空振り防止 ── 心拍が回っていなければ最大欠測は 0 になり、門は常に通る
   expect(m.ticks, `${label}: 心拍が取れていない(計器が死んでいる)`).toBeGreaterThan(5);

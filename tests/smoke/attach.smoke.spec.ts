@@ -219,7 +219,7 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
     await new Promise<void>((r) => setTimeout(r, 500));
     clearInterval(hb);
     gaps.sort((a, b) => b - a);
-    return { max: Math.round(gaps[0] ?? 0), ticks: gaps.length };
+    return { max: Math.round(gaps[0] ?? 0), ticks: gaps.length, top: gaps.slice(0, 5).map((n) => Math.round(n)) };
   });
   // ⚠ **下の `expectMainGapUnderBudget` も同じことを見るが、ここは残す** ──
   //    対照群が死んでいるなら、**20 秒かかる取り出しを始める前に**落としたい
@@ -248,7 +248,7 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
     const w = window as unknown as { __gaps: number[]; __hb: number };
     clearInterval(w.__hb);
     const g = [...w.__gaps].sort((a, b) => b - a);
-    return { max: Math.round(g[0] ?? 0), ticks: g.length };
+    return { max: Math.round(g[0] ?? 0), ticks: g.length, top: g.slice(0, 5).map((n) => Math.round(n)) };
   });
   // 🔑 **値は毎回 log に残る**(#878 ①)── 門も予算も `expectMainGapUnderBudget` が正本
   expectMainGapUnderBudget('取り出し', {
@@ -256,6 +256,8 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
     base: base.max,
     ticks: load.ticks,
     baseTicks: base.ticks,
+    top: load.top,
+    baseTop: base.top,
   });
   await expect(page.locator('[data-pkc-region="entry-list"]')).toContainText('海.jpg');
   await expect(page.locator('[data-pkc-region="entry-list"]')).toContainText('山.jpg');
@@ -413,7 +415,9 @@ test('🔴 大きい添付を貼ってもメインスレッドが固まらない
      * **対照群**にする(CLAUDE.md 計測規律「対照群は『何もしない』ではなく
      * 『測りたい操作以外を全部同じにしたもの』」)。
      */
-    const beat = (): { stop: () => { max: number; ticks: number } } => {
+    const beat = (): {
+      stop: () => { max: number; ticks: number; top: number[] };
+    } => {
       const gaps: number[] = [];
       let last = performance.now();
       const hb = setInterval(() => {
@@ -425,7 +429,12 @@ test('🔴 大きい添付を貼ってもメインスレッドが固まらない
         stop: () => {
           clearInterval(hb);
           gaps.sort((a, b) => b - a);
-          return { max: Math.round(gaps[0] ?? 0), ticks: gaps.length };
+          return {
+            max: Math.round(gaps[0] ?? 0),
+            ticks: gaps.length,
+            // 🔑 上位 5 件(#878)── 1 点だと「外れ値 1 個」と「裾ごと持ち上がった」が見分けられない
+            top: gaps.slice(0, 5).map((n) => Math.round(n)),
+          };
         },
       };
     };
@@ -465,6 +474,8 @@ test('🔴 大きい添付を貼ってもメインスレッドが固まらない
       ticks: load.ticks,
       base: base.max,
       baseTicks: base.ticks,
+      top: load.top,
+      baseTop: base.top,
     };
   }, SIZE_MB);
 
