@@ -300,3 +300,79 @@ function cellText(
   }
   return raw;
 }
+
+/**
+ * 🔴 **その本にどんな枚(シート)が在るか**(#854 段③)。
+ *
+ * ## なぜ「1 枚目だけ」にしないか
+ *
+ * ⚠ 売上と経費が別の枚に入っている本は普通に在る ── 1 枚目だけ読むと、
+ *   **残りが黙って消える**。この repo がいちばん嫌う形(落ちずに、無いことになる)である。
+ * 🔑 だから**全部の枚を、それぞれ別の表にする**(枚ごとに見出しが違うので、
+ *   1 つの表に混ぜることはできない)。
+ *
+ * ## ⚠ 表の名前に、枚の名前を使わない
+ *
+ * 🔑 `csv-attachment.ts` が同じ理由で**固定の名前**にしている ──
+ *   「全角の字や記号を含む題名から作ると**打てない名前**ができる」。
+ *   枚の名前(`売上 2026`・`Sheet 1 (旧)`)も同じなので、表は **`sheet1` / `sheet2` …**
+ *   と数える。⚠ 代わりに**本当の名前は `_sheet` の列で引ける**ようにする
+ *   (`WHERE _sheet = '売上'` が書ける ── 名前を捨てない)。
+ *
+ * ## ⚠ 並びと名前は `workbook.xml` にしか無い
+ *
+ * 🔴 **zip の中の file 名(`sheet1.xml`)と、画面の枚の順番は一致しない。**
+ *   結び付けは `workbook.xml` の `<sheet r:id>` → `workbook.xml.rels` の
+ *   `<Relationship Id Target>` と **2 段**辿る。
+ * ⚠ **file 名から推測しない** ── 当たることが多いだけで、外すと
+ *   **「売上」と書いてある表に経費が入る**(いちばん質の悪い間違い方)。
+ *
+ * @param workbookXml `xl/workbook.xml`
+ * @param relsXml `xl/_rels/workbook.xml.rels`
+ * @returns 画面の順番どおりの `{ name, path }`。`path` は zip の中の位置(`xl/` から)
+ */
+export function sheetsOf(
+  workbookXml: string,
+  relsXml: string,
+): { readonly name: string; readonly path: string }[] {
+  const target = new Map<string, string>();
+  try {
+    for (const { node } of walk(parseXml(relsXml))) {
+      if (node.tag !== 'Relationship') continue;
+      const id = node.attrs['Id'];
+      const to = node.attrs['Target'];
+      if (id !== undefined && to !== undefined) target.set(id, to);
+    }
+  } catch {
+    // ⚠ 結び付けが読めないときは**空を返す**(呼び側が「読めません」と断る)──
+    //    推測で並べると、名前と中身が食い違う
+    return [];
+  }
+  const out: { name: string; path: string }[] = [];
+  try {
+    for (const { node } of walk(parseXml(workbookXml))) {
+      if (node.tag !== 'sheet') continue;
+      const name = node.attrs['name'] ?? '';
+      // ⚠ 綴りは `r:id`(名前空間つき)── `xml-lite` は属性をそのままの字で持つ
+      const rid = node.attrs['r:id'] ?? node.attrs['id'] ?? '';
+      const to = target.get(rid);
+      if (to === undefined) continue;
+      out.push({ name, path: zipPathOf(to) });
+    }
+  } catch {
+    return [];
+  }
+  return out;
+}
+
+/**
+ * `Target` を zip の中の位置に直す。
+ *
+ * ⚠ `workbook.xml.rels` の `Target` は **`xl/` から見た相対**(`worksheets/sheet1.xml`)
+ *   だが、**`/xl/worksheets/sheet1.xml` と絶対で書く道具も在る**。
+ * 🔑 どちらでも同じ所を指すように、頭の `/` と `xl/` を落としてから付け直す。
+ */
+function zipPathOf(rawTarget: string): string {
+  const bare = rawTarget.replace(/^\/+/, '').replace(/^xl\//, '');
+  return `xl/${bare}`;
+}
