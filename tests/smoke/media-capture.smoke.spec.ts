@@ -394,12 +394,35 @@ ${(e as Error).message}`,
      *   **中身に関わらず通る**(§1 空振り)。
      */
     const size = bytes.byteLength;
+    /**
+     * 🔴 **長さは「読み終えた器」で測る**(この段で 5 回赤くして分かった)。
+     *
+     * ⚠ 画面の器は `autoplay` で鳴らしながら読んでいるので、`readyState` が
+     *   メタデータまで来た時点の `duration` は **最後の block の時刻**である ──
+     *   最後の packet の長さも、頭と尻の札も、まだ効いていない。
+     *   実測(同じ file、2 回とも一致):
+     *   **最後の block 2100ms → 2.10 と答え / 2040ms → 2.04 と答える**。
+     *   ⚠ そして**読み終えると 2 ちょうど**になる(器を作り直して測ると一致)。
+     * 🔑 だから**この file だけを読む器を 1 つ作って**測る ── 見たいのは
+     *   「**作った file が頼んだ長さか**」であって、画面の器の読み込み具合ではない。
+     * ⚠ `new Blob([bytes])` は**写しを作る**ので、この後の復号で `bytes` が
+     *   手放されても、こちらの器には効かない。
+     */
+    const probe = document.createElement('audio');
+    probe.src = URL.createObjectURL(new Blob([bytes], { type: 'audio/webm' }));
+    const duration = await new Promise<number>((res) => {
+      probe.onloadedmetadata = (): void => res(probe.duration);
+      probe.onerror = (): void => res(Number.NaN);
+      setTimeout(() => res(Number.NaN), 5000);
+    });
+    URL.revokeObjectURL(probe.src);
     const ctx = new OfflineAudioContext(1, 48000, 48000);
     const buf = await ctx.decodeAudioData(bytes);
     const ch = buf.getChannelData(0);
     let sum = 0;
     for (let i = 0; i < ch.length; i += 1) sum += Math.abs(ch[i]!);
-    return { duration: el.duration, bytes: size, energy: sum / ch.length };
+    // ⚠ `screenDuration` は診断用 ── 画面の器が途中の値を返すことの記録
+    return { duration, screenDuration: el.duration, bytes: size, energy: sum / ch.length };
   });
   /**
    * 🔑 **長さは「押した所の差」と突き合わせる**(「頼んだ 2 秒」ではない)。
