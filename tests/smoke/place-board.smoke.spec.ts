@@ -78,7 +78,29 @@ test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き
   expect(Number.isFinite(x1Before) && x1Before > 0, `線の座標が読めない(x1=${x1Before})`).toBe(
     true,
   );
-  // 🔴 層が掴む口を塞いでいない ── **実マウスが届く物**が grip 自身であること
+  /**
+   * 🔴 **層が「板の無い所」で最前面に来ていない**(= `pointer-events: none` が効いている)。
+   *
+   * ⚠ 1 稿目はここで**掴む口の上**を見ていたが、変異試験が **SURVIVED** で教えた ──
+   *   掴む口は `host.prepend(svg)` の帰結で**そもそも層より前面**に居るので、
+   *   `pointer-events` を外しても値が 1 ビットも動かない(CLAUDE.md §1「救い手が変わっただけ」)。
+   * 🔑 層が本当に守っているのは**流れの中の中身**(本文の段落・リンク)である ──
+   *   層は `inset: 0` で器いっぱいに広がり、位置を持たない中身は層より後ろに描かれる。
+   *   だから見るのは「**板の無い所で、いちばん上に居るのは層ではない**」。
+   */
+  const hostBox = (await page.locator('[data-pkc-field="detail-body"]').boundingBox())!;
+  const gapField = await page.evaluate(
+    ([x, y]) => {
+      const el = document.elementFromPoint(x as number, y as number);
+      return el?.closest('[data-pkc-field]')?.getAttribute('data-pkc-field') ?? null;
+    },
+    // ⚠ 板は x=120..440 / y=40..240 と x=460..660 に居るので、**その下**の空き地を採る
+    [hostBox.x + 40, hostBox.y + hostBox.height - 12],
+  );
+  expect(gapField, '板の無い所で線の層が最前面に来ている(本文が押せなくなる)').not.toBe(
+    'place-lines',
+  );
+  // ⚠ 対照群: 掴む口の上では grip が採れる(この観測点そのものが死んでいない証拠)
   const gripBox = (await page.locator('#p1 [data-pkc-field="place-grip"]').boundingBox())!;
   const onGrip = await page.evaluate(
     ([x, y]) => {
@@ -87,7 +109,7 @@ test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き
     },
     [gripBox.x + gripBox.width / 2, gripBox.y + gripBox.height / 2],
   );
-  expect(onGrip, '掴む口の上に線の層が乗っている(無言の dead click)').toBe('place-grip');
+  expect(onGrip, '掴む口が採れない(この検査が空振りしている)').toBe('place-grip');
 
   // 🔴 掴んで動かす ── grip を実マウスで掴み、+100 / +60 動かして離す
   const grip = page.locator('#p1 [data-pkc-field="place-grip"]');

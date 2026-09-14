@@ -164,11 +164,18 @@ describe('板どうしを繋ぐ線(#530 段③a)', () => {
   });
 
   /**
-   * 🔴 **線の層が、板の押し所を塞がない**(無言の dead click を作らない)。
-   * ⚠ 規則は CSS が持つので、ここで見るのは**規則が在ること**である
-   *   (`pointer-events` は happy-dom では効き目を測れない)。
+   * 🔴 **線の層が、流れの中の中身を塞がない**(無言の dead click を作らない)。
+   *
+   * ⚠ この docstring は 1 稿目で「**掴む口**を塞がない」と書いていたが、
+   *   **実ブラウザの変異試験が SURVIVED で嘘だと教えた** ── 掴む口は
+   *   `host.prepend(svg)` の帰結で**そもそも層より前面**に居るので、この規則は効いていない。
+   * 🔑 本当に守っているのは**位置を持たない中身**(本文の段落・リンク・下の断りの 1 行)──
+   *   層は `inset: 0` で器いっぱいに広がるので、当てないと**本文が全部押せなくなる**。
+   * ⚠ ここで見るのは**規則が在ること**だけである(`pointer-events` の効き目は
+   *   happy-dom では測れない)── **効いていること**は
+   *   `tests/smoke/place-board.smoke.spec.ts` が「板の無い所で層が最前面に来ていない」で見る。
    */
-  it('🔴 線の層は押しを通す(掴む口を塞がない)', () => {
+  it('🔴 線の層は押しを通す(流れの中の中身を塞がない)', () => {
     const css = stripComments(readFileSync('src/styles/app.css', 'utf-8'));
     const rule = blocksFor(withoutMedia(css), "[data-pkc-field='place-lines']").join(' ');
     expect(rule, '線の層に pointer-events の規則が無い(掴む口が押せなくなる)').toContain(
