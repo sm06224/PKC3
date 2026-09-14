@@ -306,6 +306,19 @@ export class SqlRenderer {
     body.addEventListener('scroll', () => {
       this.repaint();
     }, { passive: true });
+    /**
+     * 🔴 **state が 1 ミリも動かない変化も拾う**(#918 段③、着地前レビュー)。
+     * ⚠ 窓そのものを広げる / 面を出し入れする / 開発者ツールを閉じる ──
+     *   どれも `render()` を呼ばないので、上の 2 つ(答えが来た / 転がした)では
+     *   **1 度も届かない**。
+     * ⚠ 持たない環境がある(古い箱)ので**在るときだけ**張る ── 無くても
+     *   `render()` 側と `scroll` 側が拾うので、落ちるのは「触らずに器だけ変わった」場合だけ。
+     */
+    if (typeof ResizeObserver === 'function') {
+      new ResizeObserver(() => {
+        this.repaint();
+      }).observe(body);
+    }
     return body;
   }
 
@@ -397,6 +410,19 @@ export class SqlRenderer {
       this.fitted = p.sql;
       fitSqlInput(this.box);
     }
+    /**
+     * 🔴 **器の高さが変わったら窓を見直す**(#918 段③、着地前レビューが出した)。
+     *
+     * 🔴 **指紋の門より前に置く。** ⚠ ここを門の後ろに置くと、いちばん多い経路で
+     *   効かない ── すぐ上の `fitSqlInput` は**打つたびに欄の高さを変える**ので、
+     *   同じ flex 列に居る `sql-body` の高さも一緒に動く。答えは変わっていないので
+     *   指紋は動かず、門の後ろでは 1 度も通らない。
+     * 🔴 実害は**打った字を消したとき**に出る ── 欄が縮んで器が広がるのに、
+     *   描いてある行は狭かった頃のままなので、**広がった分が白い帯**になる
+     *   (1px でも転がせば直るが、それまでは「答えが足りない」ように見える)。
+     * 🔑 `repaint()` は**窓が変わっていなければ何もしない**ので、毎回呼んでよい。
+     */
+    this.repaint();
     if (this.history !== null) this.history.disabled = p.history.length === 0;
     if (this.historyNote !== null) {
       const line = historyNoteLine(p);
@@ -532,7 +558,18 @@ export class SqlRenderer {
       for (const v of row) {
         const td = document.createElement('td');
         // ⚠ **字として入れる**(worker から来た値を HTML として注入しない)
-        td.textContent = cellText(v);
+        const text = cellText(v);
+        td.textContent = text;
+        /**
+         * 🔴 **切られた字を読む道を残す**(#918 段③、着地前レビュー)。
+         * ⚠ 窓に入ると列の幅を固定するので、**後ろの窓に長い値が出ると切られる**。
+         *   直す前は `table-layout: auto` だったので表が広がって横に転がせた ──
+         *   つまり**この PR で「読めなくなる」を作った**(CLAUDE.md §10)。
+         * 🔑 だから升そのものに全文を持たせる(マウスを乗せると出る)。
+         * ⚠ これでも触る端末では読めないので、**全部が要るなら
+         *   「ノートへ」/「ファイルへ」**(どちらも全行・全文)である。
+         */
+        td.title = text;
         if (v === null) td.setAttribute('data-pkc-sql-null', 'yes');
         tr.append(td);
       }
@@ -571,6 +608,16 @@ export class SqlRenderer {
       (th as HTMLElement).style.width = `${String(widths[i] ?? 0)}px`;
     }
     table.style.tableLayout = 'fixed';
+    /**
+     * 🔴 **表そのものの幅も決める**(#918 段③。実ブラウザが 3/3 で再現して分かった)。
+     *
+     * ⚠ **`table-layout: fixed` だけでは効かない** ── 表の `width` が `auto` のままだと、
+     *   ブラウザは中身から幅を決め直す。実測(5000 行・列 4 が `i*2`):
+     *   上端(4 桁「4000」まで)で **40px** → 下端(5 桁「10000」)で **47px** に**動いた**。
+     * 🔑 測った幅の**合計**を表の幅に当てると、そこで初めて固定が効く。
+     * ⚠ 器より広ければ横に転がる ── それは窓に入る前と同じ振る舞いである。
+     */
+    table.style.width = `${String(widths.reduce((a, b) => a + b, 0))}px`;
   }
 
   /**
@@ -709,7 +756,25 @@ function noteLine(p: AppState['sqlPage']): string {
     return `${String(p.rows.length)} 行${took} ── 多すぎるので途中まで出しています(LIMIT や条件で絞ると全部見えます)${where}`;
   if (p.rows.length === 0)
     return `0 行${took} ── 条件に当たるものがありませんでした${zeroHint(p.ranSql)}${where}`;
-  return `${String(p.rows.length)} 行${took}${where}`;
+  return `${String(p.rows.length)} 行${took}${windowNote(p.rows.length)}${where}`;
+}
+
+/**
+ * 🔴 **「見えている分だけ描いている」を、画面に常に出す**(#918 段③、動線レビュー)。
+ *
+ * ⚠ 窓で描くと、ブラウザの「ページ内を探す」と「表を全部選んでコピー」が
+ *   **見えている行にしか効かなくなる**。それを知らせているのは
+ *   ①起動時に 1 度だけ出るお知らせ ②マニュアル ── **どちらも読んだ人にしか届かない**。
+ * 🔴 帰結が重い:user は「**無い**」と読むが、実際は「**見えていないだけ**」である。
+ *   SQL は「データが本当にどうなっているか」を確かめる道具なので、
+ *   **在るデータを無いと結論させる**のは、迷わせるより悪い。
+ * 🔑 だから**表の上の帯**(常に出ている所)に 1 文足す ── 新しい部品は増やさない。
+ * ⚠ **代わりを同じ文に書く**(「ノートへ / ファイルへ」)── 落ちた動線を
+ *   言いっぱなしにしない(CLAUDE.md「捨てるものの表には、代わりに何ができるかを書く」)。
+ */
+function windowNote(rows: number): string {
+  if (rows <= SQL_WINDOW_MIN) return '';
+  return ' ── 見えている分だけ描いています(全部を探す・写すには ノートへ / ファイルへ)';
 }
 
 /**
