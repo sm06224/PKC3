@@ -19,6 +19,9 @@
  *   守りたいのは**繋ぎ替えの順番**であって音そのものではない。
  */
 import { describe, expect, it } from 'vitest';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { codeOnly } from '../helpers/code-only';
 import { VoiceBoostRouter, type BoostHost, type BoostNode } from '@adapter/platform/audio/voice-boost';
 
 /** 繋いだ相手を憶えるだけの節。⚠ `disconnect` で `to` を `null` に戻す。 */
@@ -170,5 +173,50 @@ describe('聞くときだけ音を整える(繋ぎ替え)', () => {
     on = true;
     r.refresh();
     expect(host.sources).toHaveLength(1);
+  });
+});
+
+/**
+ * 🔴 **再生機を 1 枚足した人が、繋ぎ忘れても鳴らない**(#772 段① B。CLAUDE.md §7)。
+ *
+ * ⚠ この改修は**書いた当日に 1 か所落とした** ── 2026-09-08 に数えた「音の再生は
+ *   4 か所」は**「音と動画」の面ができる前の数**で、いちばん聞く所が抜けていた。
+ *   🔑 実害は「**設定を入れたのに、いちばん聞く所だけ整わない**」という、
+ *   user からは**設定が壊れて見える**形である。
+ *
+ * 🔑 だから**手で並べた一覧ではなく、機械で数える** ── 再生機を作る file は
+ *   `controls` を立てるので、**それを印にして全数走査**する。
+ * ⚠ 書き出した HTML(`src/features/export/`)は**対象外** ── あちらは設定を
+ *   持ち歩かない別の script なので、この走査の外に在る(面の説明もそう書いてある)。
+ */
+describe('再生機を作る面は、全部つなぎに通している(全数)', () => {
+  const dir = join(process.cwd(), 'src/adapter/ui/render');
+  const players = (): string[] => {
+    const out: string[] = [];
+    for (const f of readdirSync(dir)) {
+      if (!f.endsWith('.ts')) continue;
+      // ⚠ **注釈を落としてから見る**(CLAUDE.md §1 の 5 度目 ── 自分の解説に満たされる)
+      const src = codeOnly(readFileSync(join(dir, f), 'utf-8'));
+      if (/\.controls = true/.test(src)) out.push(f);
+    }
+    return out.sort();
+  };
+
+  it('🔴 `controls` を立てる file は、全部 `appVoiceBoostRouter.watch` を呼ぶ', () => {
+    const found = players();
+    // 空振り防止 ── 走査が壊れて 0 件になっていないこと
+    expect(found.length, '再生機を作る file を 1 つも拾えていない(前処理が壊れている)').toBeGreaterThan(1);
+    const missing = found.filter((f) => {
+      const src = codeOnly(readFileSync(join(dir, f), 'utf-8'));
+      return !src.includes('appVoiceBoostRouter.watch(');
+    });
+    expect(
+      missing,
+      '再生機を作っているのに、整える鎖へ通していない面が在る ── 設定を入れてもそこだけ整わない',
+    ).toEqual([]);
+  });
+
+  it('⚠ いま在る面の名前を pin する(面が増えた日に、繋いだかを問う)', () => {
+    expect(players()).toEqual(['captures.ts', 'detail.ts']);
   });
 });

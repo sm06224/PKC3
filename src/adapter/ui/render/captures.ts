@@ -35,6 +35,7 @@ import { canTrimCapture, trimUnavailableText } from '@features/capture/capture-t
 import { trimMarkText } from '@features/audio/trim-text';
 import { humanBytes } from '@features/human-bytes';
 import type { AssetLender } from './detail';
+import { appVoiceBoostRouter } from './voice-boost';
 
 /**
  * 借りている 1 件(押した行)。⚠ **同時に 1 つだけ**。
@@ -375,6 +376,12 @@ export class CapturesRenderer {
         media.autoplay = true;
         media.src = this.playing.url;
         li.append(media);
+        /**
+         * 🔑 **本文の再生機と同じ扱いにする**(#772 段① B)。
+         * 🔴 **ここを落とすと、いちばん聞く所だけ整わない** ── 録ったものを
+         *   聞くのは普通この面であって、本文に貼った後ではない。
+         */
+        appVoiceBoostRouter.watch(media);
         const stop = document.createElement('button');
         stop.type = 'button';
         stop.setAttribute('data-pkc-action', 'capture-stop');
