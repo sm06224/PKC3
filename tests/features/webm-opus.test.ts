@@ -63,6 +63,11 @@ interface Fixture {
   readonly originMs?: number;
   /** ⚠ **もう 1 本 track を混ぜる**(番号 2。opus ではない側)。 */
   readonly extraTrack?: 'before' | 'after';
+  /**
+   * ⚠ **頭の 1 つだけ間隔を変える**(実測で起きた形 ── `MediaRecorder` の 1 本目の
+   *   塊に、他と違う間隔の packet が混じる)。
+   */
+  readonly oddFirstGapMs?: number;
 }
 
 /** 最小の webm を手で組む。 */
@@ -89,16 +94,22 @@ function webm(f: Fixture = {}): Uint8Array {
     ...mine,
     ...(f.extraTrack === 'after' ? other : []),
   ]);
+  /**
+   * ⚠ 頭の 1 つだけ間隔を変えられるようにする ── 実測で、そこを掴むと
+   *   **file 全体の物差しが狂った**(切り出しが 0.1 秒長くなる)。
+   */
+  const odd = f.oddFirstGapMs ?? step;
+  const msAt = (i: number): number => (i === 0 ? 0 : odd + (i - 1) * step);
   const clusters: number[] = [];
   let at = 0;
   while (at < count) {
-    const baseMs = Math.floor((at * step) / clusterMs) * clusterMs;
+    const baseMs = Math.floor(msAt(at) / clusterMs) * clusterMs;
     const blocks: number[] = [];
-    while (at < count && at * step - baseMs < clusterMs) {
+    while (at < count && msAt(at) - baseMs < clusterMs) {
       blocks.push(
         ...el('a3', [
           0x81,
-          ...i16(at * step - baseMs),
+          ...i16(msAt(at) - baseMs),
           ((f.lacing ?? 0) << 1) | 0x80,
           // ⚠ 中身は**位置が分かる**ようにする(並べ替えや取り違えを見るため)
           ...Array.from({ length: payload }, (_, k) => (at * 16 + k) & 0xff),
@@ -189,24 +200,28 @@ describe('切り出す(trimWebmOpus)', () => {
     const t = trimWebmOpus(src(), 1000, 2000);
     expect(t.ok).toBe(true);
     if (!t.ok) return;
-    // 1000ms は packet 16(960ms)の中 → 前置き 2 つ戻って packet 14(840ms)から
-    expect(t.result.codecDelayNs, '頭で捨てる量').toBe(160_000_000);
-    // 最後に残すのは packet 33(1980ms)── 終わりは 2040ms なので 40ms 捨てる
+    /**
+     * 🔑 **算数**:1000ms を含むのは packet 16(960ms)。前置きは**時間で**戻るので、
+     *   80ms 以上さかのぼる最初の packet 15(900ms)が基点 → 頭で **100ms** 捨てる。
+     *   尻は「次の packet の時刻」= packet 34(2040ms)なので **40ms** 捨てる。
+     */
+    expect(t.result.codecDelayNs, '頭で捨てる量').toBe(100_000_000);
     expect(t.result.discardPaddingNs, '尻で捨てる量').toBe(40_000_000);
     expect(t.result.durationMs, '鳴らしたときの長さ').toBe(1000);
-    expect(t.result.keptPackets).toBe(20);
+    expect(t.result.keptPackets).toBe(19);
   });
 
   it('🔴 前置きを必ず取る(いきなり切ると頭が濁る)', () => {
     const t = trimWebmOpus(src(), 1000, 2000);
     if (!t.ok) throw new Error('切れない');
-    // 🔑 80ms 以上が要る ── 60ms の packet なら 2 つ = 120ms
+    // 🔑 80ms 以上が要る(packet の長さに依らず、**時間で**戻る)
     expect(t.result.codecDelayNs / 1e6, '前置きが 80ms を下回っている').toBeGreaterThanOrEqual(80);
   });
 
   it('⚠ 端が packet の境目にぴったり当たっても、前置きは取る', () => {
     const t = trimWebmOpus(src(), 600, 1200);
     if (!t.ok) throw new Error('切れない');
+    // ⚠ 600ms は packet 10 の頭 ── 80ms 以上戻るので packet 8(480ms)が基点
     expect(t.result.codecDelayNs).toBe(120_000_000);
     expect(t.result.durationMs).toBe(600);
   });
@@ -231,9 +246,9 @@ describe('切り出す(trimWebmOpus)', () => {
     const back = demuxWebmOpus(t.result.bytes);
     expect(back.ok).toBe(true);
     if (!back.ok) return;
-    expect(back.source.packets).toHaveLength(20);
+    expect(back.source.packets).toHaveLength(19);
     // ⚠ **中身が写っている**(並べ替えも取り違えもしていない)
-    expect([...back.source.packets[0]!.data]).toEqual([224, 225, 226, 227]); // packet 14
+    expect([...back.source.packets[0]!.data]).toEqual([240, 241, 242, 243]); // packet 15
   });
 
   it('🔴 元の OpusHead をそのまま写す(音を作り直していない証拠)', () => {
@@ -261,6 +276,36 @@ describe('切り出す(trimWebmOpus)', () => {
     expect(back.source.packets.map((p) => p.ms)).toEqual(
       Array.from({ length: 60 }, (_, i) => i * 1000),
     );
+  });
+
+  /**
+   * 🔴 **頭の間隔が例外でも、切り口がずれない**(#683 段②a、実ブラウザ smoke が教えた)。
+   *
+   * ⚠ 直す前は **1 packet の長さを「最初の 2 つの差」だけ**で決め、それを
+   *   **尻の位置**(最後の packet + 1 つぶん)にも使っていた。⚠ だから頭が例外的な
+   *   file では物差しが狂い、**頼んだより 0.1 秒長い**物ができた
+   *   (実測:in-app で 2.10〜2.12 秒。頼んだのは 2.00)。
+   * 🔑 いまは ①長さは**間隔のまん中**で採り ②尻は**次の packet の時刻**で採る
+   *   ── ②は見積もりを 1 つも使わない。
+   */
+  it('🔴 頭の間隔だけ違っても、頼んだ長さがそのまま出る', () => {
+    // ⚠ 先頭だけ 170ms 空き、以降は 60ms(実測で読み違えた値)
+    const odd = webm({ count: 60, stepMs: 60, oddFirstGapMs: 170 });
+    const d = demuxWebmOpus(odd);
+    if (!d.ok) throw new Error('ほどけない');
+    expect(d.source.packetMs, '頭の 1 つに引きずられている').toBe(60);
+
+    const t = trimWebmOpus(odd, 1000, 3000);
+    if (!t.ok) throw new Error('切れない');
+    expect(t.result.durationMs, '頼んだより長い / 短い物ができている').toBe(2000);
+    // ⚠ 前置きは**時間で**確かめる(数ではない)
+    expect(t.result.codecDelayNs / 1e6).toBeGreaterThanOrEqual(80);
+  });
+
+  it('⚠ 対照群 ── 間隔が揃っていれば、もちろん合う', () => {
+    const t = trimWebmOpus(webm({ count: 60, stepMs: 60 }), 1000, 3000);
+    if (!t.ok) throw new Error('切れない');
+    expect(t.result.durationMs).toBe(2000);
   });
 
   it('🔴 範囲が逆・同じなら断る', () => {
@@ -293,7 +338,7 @@ describe('切り出す(trimWebmOpus)', () => {
     if (!t.ok) throw new Error('切れない');
     const back = demuxWebmOpus(t.result.bytes);
     if (!back.ok) throw new Error('ほどけない');
-    expect(back.source.codecDelayMs, '頭の札が書かれていない').toBe(160);
+    expect(back.source.codecDelayMs, '頭の札が書かれていない').toBe(100);
   });
 
   it('🔴 尻の札(DiscardPadding)が bytes に書かれている', () => {

@@ -298,8 +298,7 @@ export function demuxWebmOpus(bytes: Uint8Array): DemuxResult {
   // 🔑 `OpusHead` から読む(無ければ `Audio` の値 → 既定)
   const opusHead = opus.codecPrivate;
   const headChannels = opusHead !== null && opusHead.length > 9 ? opusHead[9]! : 0;
-  const packetMs =
-    packets.length > 1 ? Math.max(1, packets[1]!.ms - packets[0]!.ms) : FALLBACK_PACKET_MS;
+  const packetMs = medianGap(packets);
 
   return {
     ok: true,
@@ -314,6 +313,28 @@ export function demuxWebmOpus(bytes: Uint8Array): DemuxResult {
       discardPaddingMs: discardPaddingNs / 1e6,
     },
   };
+}
+
+/**
+ * 🔴 **1 packet の長さ ── 間隔の「まん中」を採る**(#683 段②a、実ブラウザ smoke が教えた)。
+ *
+ * ⚠ 直す前は**最初の 2 つの差**だけで決めていた。⚠ 録音の**頭は例外的**なことがあり
+ *   (`MediaRecorder` の 1 本目の塊に、他と違う間隔の packet が混じる)、そこを掴むと
+ *   **file 全体の物差しが狂う** ── 実測で 60ms のはずが 160〜170ms と読め、
+ *   **切り出しが 0.1 秒長くなった**(CLAUDE.md §2「1 つに潰れた次元」の親戚 ──
+ *   **1 標本から全体を決めていた**)。
+ * 🔑 まん中なら、端のいくつが変でも動かない。
+ */
+function medianGap(packets: readonly OpusPacket[]): number {
+  if (packets.length < 2) return FALLBACK_PACKET_MS;
+  const gaps: number[] = [];
+  for (let i = 1; i < packets.length; i += 1) {
+    const g = packets[i]!.ms - packets[i - 1]!.ms;
+    if (g > 0) gaps.push(g);
+  }
+  if (gaps.length === 0) return FALLBACK_PACKET_MS;
+  gaps.sort((a, b) => a - b);
+  return Math.max(1, gaps[gaps.length >> 1]!);
 }
 
 /** block の頭(track 番号 + 相対時刻 + 旗)を読む。 */
@@ -397,12 +418,22 @@ export function trimWebmOpus(bytes: Uint8Array, startMs: number, endMs: number):
   const from0 = startMs + src.codecDelayMs;
   const to0 = endMs + src.codecDelayMs;
 
-  // ── 範囲の始まり「以前」でいちばん近い境目
-  const first = packets.findIndex((p) => p.ms + packetMs > from0);
-  if (first < 0) return { ok: false, reason: 'empty-range' };
-  // 🔑 前置きを packet の数へ直す(実測 60ms なら 2 つ前から)
-  const pre = Math.ceil(PRE_ROLL_MS / packetMs);
-  const from = Math.max(0, first - pre);
+  /**
+   * 🔴 **範囲の始まりを含む packet**。⚠ **`packetMs` を使わない** ──
+   *   「次の packet より前」で決まるので、1 packet の長さを見積もる必要が無い
+   *   (見積もりを挟むと、その誤差がそのまま切り口の誤差になる)。
+   */
+  // 🔴 **範囲が録音の外なら断る**(空の file / 末尾の 1 packet だけ、を作らない)
+  if (from0 >= src.durationMs) return { ok: false, reason: 'empty-range' };
+  const after = packets.findIndex((p) => p.ms > from0);
+  const first = Math.max(0, (after < 0 ? packets.length : after) - 1);
+  /**
+   * 🔑 **前置きは「時間で」戻る**(数ではなく)── packet の長さが揃っていなくても、
+   *   **必ず 80ms 以上**さかのぼる。⚠ 数で戻ると、長さの見積もりがずれたときに
+   *   前置きごと足りなくなる。
+   */
+  let from = first;
+  while (from > 0 && from0 - packets[from]!.ms < PRE_ROLL_MS) from -= 1;
 
   let last = packets.findIndex((p) => p.ms >= to0);
   if (last < 0) last = packets.length;
@@ -410,7 +441,16 @@ export function trimWebmOpus(bytes: Uint8Array, startMs: number, endMs: number):
   if (kept.length === 0) return { ok: false, reason: 'empty-range' };
 
   const base = kept[0]!.ms;
-  const tailMs = kept[kept.length - 1]!.ms + packetMs;
+  /**
+   * 🔴 **尻は「次の packet の時刻」で採る**(実ブラウザ smoke が教えた)。
+   *
+   * ⚠ 直す前は `最後の packet + 見積もった 1 つぶんの長さ` だった ── 見積もりが
+   *   実際より長いと**尻が伸び**、頼んだより長い物ができる(実測 0.1 秒)。
+   * 🔑 次の packet が在るなら、その時刻が**正確な終わり**である。
+   *   ⚠ 録音の末尾まで採ったときだけ、見積もりに頼る(次が無いので)。
+   */
+  const next = packets[Math.max(last, from + 1)];
+  const tailMs = next !== undefined ? next.ms : kept[kept.length - 1]!.ms + packetMs;
   const codecDelayNs = Math.max(0, Math.round((from0 - base) * 1e6));
   const discardPaddingNs = Math.max(0, Math.round((tailMs - to0) * 1e6));
   const durationMs = tailMs - base - codecDelayNs / 1e6 - discardPaddingNs / 1e6;

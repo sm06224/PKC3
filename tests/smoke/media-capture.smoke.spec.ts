@@ -1,3 +1,4 @@
+import { writeFileSync } from 'node:fs';
 import { test, expect } from '@playwright/test';
 import { gotoApp, clickReal, createEntry, collectPageErrors } from './helpers';
 import { chromiumLaunch } from './playwright.config';
@@ -323,6 +324,20 @@ ${(e as Error).message}`,
   ).toBeCloseTo(at1, 1);
   await expect(mark, '両方の印がそろっていない').toContainText('0:01〜0:03(0:02)');
 
+  // ⚠ **一時の診断** ── 切り出す前に、元の録音の bytes も落としておく
+  {
+    const b64 = await player.evaluate(async (el: HTMLMediaElement) => {
+      const buf = new Uint8Array(await (await fetch(el.src)).arrayBuffer());
+      let out = '';
+      for (const x of buf) out += String.fromCharCode(x);
+      return btoa(out);
+    });
+    const at = '/tmp/claude-0/-home-user/d42ee7b7-f8c8-5e44-bfc7-e2165548f4e3/scratchpad/probe/inapp-src.webm';
+    writeFileSync(at, Buffer.from(b64, 'base64'));
+    // eslint-disable-next-line no-console
+    console.log(`[診断] inapp-src.webm = ${Buffer.from(b64, 'base64').length} バイト → ${at}`);
+  }
+
   await clickReal(page, '[data-pkc-field="capture-trim-run"]');
 
   // 🔴 **一覧に 1 件増え、元も残っている**(上書きしない ── 裁定)
@@ -352,6 +367,24 @@ ${(e as Error).message}`,
       message: '切り出した物を鳴らせない(器が中身を読めていない)',
     })
     .toBeGreaterThanOrEqual(1);
+  /**
+   * ⚠ **一時の診断**(#683 段②a)── 実ブラウザでだけ出る 0.1 秒のずれを追うため、
+   *   **元の録音と切り出しの bytes を落とす**。⚠ 原因が決まったら**この塊は消す**。
+   */
+  const dump = async (loc: typeof cutPlayer, name: string): Promise<void> => {
+    const b64 = await loc.evaluate(async (el: HTMLMediaElement) => {
+      const buf = new Uint8Array(await (await fetch(el.src)).arrayBuffer());
+      let out = '';
+      for (const x of buf) out += String.fromCharCode(x);
+      return btoa(out);
+    });
+    const at = `/tmp/claude-0/-home-user/d42ee7b7-f8c8-5e44-bfc7-e2165548f4e3/scratchpad/probe/${name}`;
+    writeFileSync(at, Buffer.from(b64, 'base64'));
+    // eslint-disable-next-line no-console
+    console.log(`[診断] ${name} = ${Buffer.from(b64, 'base64').length} バイト → ${at}`);
+  };
+  await dump(cutPlayer, 'inapp-cut.webm');
+
   const cutInfo = await cutPlayer.evaluate(async (el: HTMLMediaElement) => {
     const bytes = await (await fetch(el.src)).arrayBuffer();
     /**
