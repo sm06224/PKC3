@@ -20,7 +20,28 @@
  * host の直下であることを前提にしている。位置は style で当てるだけ。
  */
 
+import {
+  placeLineOf,
+  placeLineTargetId,
+  type PlaceRect,
+} from '@features/markdown/place-line';
+
+/**
+ * 🔑 **測れない所で使う大きさ**(happy-dom / まだ画面に出ていない面)。
+ * ⚠ CSS の `min-width` / `min-height` と**同じ数**にする ── 別の数を書くと、
+ *   測れる所と測れない所で線の行き先が変わる(§7「同じ値が 2 か所」)。
+ */
+const PLACE_FALLBACK_W = 120;
+const PLACE_FALLBACK_H = 40;
+
 const PLACE_SELECTOR = '.pkc-format-block.pkc-place';
+
+/** 線の宣言の塊。⚠ **中身を描かない**(座標を持たない「指すだけ」の塊である)。 */
+const LINE_SELECTOR = '.pkc-format-block.pkc-line';
+
+/** 引いた線を入れる 1 枚。⚠ **線ごとに `<svg>` を作らない**(重ねると当たり判定が塞がる)。 */
+const LINE_LAYER = 'data-pkc-field="place-lines"';
+const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /**
  * 🔴 **矢印キーで動かした後、焦点を返す先**(#676 段②)── 器に焼く印(値 = 開き行の行番号)。
@@ -69,7 +90,17 @@ function ensureGrip(el: HTMLElement): void {
     el.prepend(grip);
   }
   // ⚠ 文言は**起きること**で書く(user 指示 2026-08-21)
-  const label = '掴んで動かします(離した位置が本文に書かれます)';
+  /**
+   * 🔴 **名前が付いているなら、そう言う**(#530 段③a の動線レビュー)。
+   *
+   * ⚠ 名前(`#…`)は**画面のどこにも出ていなかった** ── 線が引けないとき、user が
+   *   「この付箋の名前は何だったか」を確かめる術が**本文を開くことだけ**だった。
+   * 🔑 掴む口は**その付箋を名指しする唯一の押し所**なので、ここに置く。
+   */
+  const label =
+    el.id === ''
+      ? '掴んで動かします(離した位置が本文に書かれます)'
+      : `掴んで動かします(離した位置が本文に書かれます)。この付箋の名前は「${el.id}」です`;
   grip.title = label;
   grip.setAttribute('aria-label', label);
 }
@@ -123,6 +154,130 @@ function ensureCard(
 }
 
 /**
+ * 🔴 **板 1 枚の場所と大きさを採る**(#530 段③a)。
+ *
+ * 🔑 **測れるなら測る** ── `w=` / `h=` を省いた板は、大きさが**中身と CSS で決まる**
+ *   (`min-width: 120px` / `min-height: 40px` + 中身)ので、札だけ読むと線が外れる。
+ * ⚠ **測れない所では札へ落とす**(happy-dom は 0 を返す ── そこで 0 を信じると、
+ *   線が全部左上の 1 点へ集まる)。CLAUDE.md §2 の「本命の分岐を unit は通らない」型なので、
+ *   **落とし先まで含めて** unit で見る。
+ */
+function rectOf(el: HTMLElement): PlaceRect {
+  const w = el.offsetWidth;
+  const h = el.offsetHeight;
+  return {
+    x: intAttr(el, 'data-pkc-x') ?? 0,
+    y: intAttr(el, 'data-pkc-y') ?? 0,
+    w: w > 0 ? w : (intAttr(el, 'data-pkc-w') ?? PLACE_FALLBACK_W),
+    h: h > 0 ? h : (intAttr(el, 'data-pkc-h') ?? PLACE_FALLBACK_H),
+  };
+}
+
+/**
+ * 🔴 **引けない線は、その行を画面に出して理由を言う**(#530 段③a、動線レビュー)。
+ *
+ * ⚠ 1 稿目は「指す先が無い線は**黙って飛ばす**」だった ── **同じ file の 15 行上**で
+ *   `ensureCard` が「相手が消えていても**黙って空にしない**」と決めているのに、
+ *   **正反対の判断を理由も書かずにしていた**。user から見れば「名前で指す」という
+ *   同じ操作なのに、板は教えてくれて線は黙る、という説明できない差になる。
+ * 🔑 だから言い方も `ensureCard` に揃える ── **いちばん多い原因を先に言う**。
+ * ⚠ 名前に ASCII 以外を書くと、`#名前` は**綴りの検査で黙って落ちる**
+ *   (`block-directive-attrs.ts`)ので、`from=`/`to=` から見ると「その名前の付箋が無い」
+ *   と区別が付かない ── **その形だけは名指しで言う**(いちばん踏みやすい)。
+ */
+function lineTrouble(raw: string | null, byId: ReadonlyMap<string, HTMLElement>): string | null {
+  const id = placeLineTargetId(raw);
+  if (id === null) return '行き先が書かれていません(from= と to= の両方が要ります)';
+  if (byId.has(id)) return null;
+  if (!/^[A-Za-z_][\w-]*$/.test(id)) {
+    return `名前に「${id}」は使えません ── 名前は英数字で書きます(#today のように)`;
+  }
+  return `「${id}」という名前の付箋がありません`;
+}
+
+/** 引けない理由を、その宣言の塊の中に 1 行置く(冪等)。⚠ 置いた塊は CSS が隠さない。 */
+function ensureLineNote(el: HTMLElement, why: string): void {
+  let note = el.querySelector<HTMLElement>(':scope > [data-pkc-field="place-line-note"]');
+  if (note === null) {
+    note = el.ownerDocument.createElement('span');
+    note.setAttribute('data-pkc-field', 'place-line-note');
+    el.prepend(note);
+  }
+  const shown = `線が引けません:${why}`;
+  if (note.textContent !== shown) note.textContent = shown;
+  note.title = 'from= と to= には、付箋の開き行に書いた #名前 を書きます(# は含めません)';
+  el.setAttribute('data-pkc-line-missing', '');
+}
+
+/** 引けたら、前に置いた断りを外す(冪等)。 */
+function clearLineNote(el: HTMLElement): void {
+  el.querySelector(':scope > [data-pkc-field="place-line-note"]')?.remove();
+  el.removeAttribute('data-pkc-line-missing');
+}
+
+/**
+ * 🔴 **`from=` / `to=` の線を 1 枚の `<svg>` に引く**(#530 段③a)。
+ *
+ * ⚠ 引けなかった線は**本文からは消さない**(user が書いた字を、こちらの都合で
+ *   書き換えない)── 代わりに**その行を画面に出して理由を言う**(上の `lineTrouble`)。
+ * ⚠ **`pointer-events: none`** を層に当てる ── 当てないと、線の層が板の上に載って
+ *   **掴む口が押せなくなる**(無言の dead click)。規則は CSS 側が持つ。
+ */
+function applyPlaceLines(host: HTMLElement, boards: readonly HTMLElement[]): number {
+  const old = host.querySelector(`[${LINE_LAYER}]`);
+  const decls = [...host.querySelectorAll<HTMLElement>(LINE_SELECTOR)];
+  if (decls.length === 0) {
+    old?.remove();
+    return 0;
+  }
+  // ⚠ 板が 1 枚も無いときも**断りは出す** ── 黙って消すと、user は
+  //   「線の機能そのものが無い」と読む(それがこの節を書き直した理由である)
+  if (boards.length === 0) {
+    old?.remove();
+    for (const d of decls) ensureLineNote(d, '板(付箋)が 1 枚もありません');
+    return 0;
+  }
+  const byId = new Map<string, HTMLElement>();
+  for (const el of boards) if (el.id !== '') byId.set(el.id, el);
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('data-pkc-field', 'place-lines');
+  let drawn = 0;
+  for (const d of decls) {
+    const rawFrom = d.getAttribute('data-pkc-from');
+    const rawTo = d.getAttribute('data-pkc-to');
+    const why = lineTrouble(rawFrom, byId) ?? lineTrouble(rawTo, byId);
+    if (why !== null) {
+      ensureLineNote(d, why);
+      continue;
+    }
+    const from = byId.get(placeLineTargetId(rawFrom)!)!;
+    const to = byId.get(placeLineTargetId(rawTo)!)!;
+    // ⚠ 自分自身を指す線は、断りも出さない ── 引けないのではなく**引く物が無い**
+    if (from === to) {
+      clearLineNote(d);
+      continue;
+    }
+    clearLineNote(d);
+    const ln = placeLineOf(rectOf(from), rectOf(to));
+    const el = document.createElementNS(SVG_NS, 'line');
+    el.setAttribute('x1', String(ln.x1));
+    el.setAttribute('y1', String(ln.y1));
+    el.setAttribute('x2', String(ln.x2));
+    el.setAttribute('y2', String(ln.y2));
+    // 🔑 どの辺から出たかを焼く ── 段③b(束ねる)と smoke の観測点になる
+    el.setAttribute('data-pkc-line-from', ln.from);
+    el.setAttribute('data-pkc-line-to', ln.to);
+    svg.append(el);
+    drawn += 1;
+  }
+  old?.remove();
+  if (drawn === 0) return 0;
+  // ⚠ **いちばん先頭へ置く** ── 板より後ろに敷く(線が板の上に乗ると字が読めない)
+  host.prepend(svg);
+  return drawn;
+}
+
+/**
  * 描画済みの本文に、板の配置を当てる。⚠ **描画のたびに呼ぶ**(冪等)。
  *
  * @param lineOffset 描画の `data-pkc-source-line`(frontmatter を剥がした本文の
@@ -140,6 +295,10 @@ export function applyPlaceLayout(
     host.classList.remove('pkc-board-host');
     host.style.removeProperty('min-height');
     host.removeAttribute(PLACE_FOCUS_ATTR); // 返す先が無い ── 印だけ残さない
+    // ⚠ **前に引いた線を残さない** ── 板を全部消した本文で、線だけが宙に残る。
+    //   🔑 ただし**線の宣言そのものには断りを出す** ── 板を全部消した user に
+    //   「線の機能ごと無くなった」と読ませない(動線レビュー ①と同じ向き)。
+    applyPlaceLines(host, []);
     return 0;
   }
   host.classList.add('pkc-board-host');
@@ -186,6 +345,8 @@ export function applyPlaceLayout(
     if (lid !== null && lid !== '') ensureCard(el, lid, resolveTitle);
     bottom = Math.max(bottom, y + (h ?? 160));
   }
+  // 🔑 **線は板を置いた後に引く**(位置が当たっていないと行き先が決まらない)
+  applyPlaceLines(host, blocks);
   // ⚠ いちばん下の塊まで scroll で届く高さを器に持たせる(絶対配置は流れに乗らない)
   host.style.minHeight = `${bottom + 40}px`;
   // 🔑 口を作り直した**後**に返す(前に返すと、返した先が次の行で差し替わる)

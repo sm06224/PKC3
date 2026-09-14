@@ -2874,6 +2874,54 @@ li[data-pkc-row-slot] {
   background: var(--surface);
   overflow: auto;
 }
+/* 🔴 **板どうしを繋ぐ線**(#530 段③a)。
+ *
+ * ⚠ 層は `z-index` を持たない ── `place-board.ts` が**いちばん先頭へ置く**ので、
+ *   `z=` を書いた板より必ず後ろに敷かれる(線が字の上に乗らない)。
+ *
+ * 🔴 **`pointer-events: none` が守っているのは「流れの中の中身」である。**
+ *
+ * ⚠ 1 稿目はここに「当てないと**掴む口が押せなくなる**」と書いていたが、
+ *   **実測すると嘘だった** ── 外して実ブラウザで回しても smoke は 4/4 緑のまま。
+ *   掴む口は**そもそも層より前面**に居る(板は層より後ろの DOM 順 = 前面に描かれる)ので、
+ *   `pointer-events` は 1 ビットも効いていなかった(CLAUDE.md §1「救い手が変わっただけ」)。
+ * 🔑 **本当に守っているのはこちら**:層は `inset: 0` で器いっぱいに広がり、
+ *   **位置を持たない流れの中の中身**(本文の段落・リンク・下の「線が引けません」の 1 行)は
+ *   **層より後ろ**に描かれる ── 当てないと、板のノートの**普通の本文が全部押せなくなる**。
+ * ⚠ だから見るのは「掴む口が押せるか」ではなく「**板の無い所で層が最前面に来ていないか**」。
+ *
+ * 🔑 色は地ではなく**文字色**から採る ── テーマを変えても線が消えない。 */
+[data-pkc-field='place-lines'] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+[data-pkc-field='place-lines'] line {
+  stroke: var(--muted);
+  stroke-width: 2;
+}
+/* ⚠ 線の宣言そのものは**中身を持たない** ── 出すと空の枠が流れに並ぶ。
+ *   🔑 板が置けない面(編集の 2 面・書き出した HTML)でも同じく出さない
+ *   (そこでは線も引けないので、宣言だけ見えても読む人には意味が無い)。 */
+.pkc-md-rendered .pkc-format-block.pkc-line {
+  display: none;
+}
+/* 🔴 **引けなかった線だけは出す**(#530 段③a、動線レビュー)。
+ *
+ * ⚠ 印(`data-pkc-line-missing`)を付けるのは `place-board.ts` = **読む面だけ**なので、
+ *   編集の 2 面・書き出した HTML では**今までどおり出ない**(印が付かないため)。
+ * 🔑 だから既定は上の `display: none` のまま ── ここは**例外を 1 つ開けている**。 */
+.pkc-md-rendered .pkc-format-block.pkc-line[data-pkc-line-missing] {
+  display: block;
+}
+[data-pkc-field='place-line-note'] {
+  display: block;
+  color: var(--muted);
+  font-size: 0.85em;
+}
 /* 位置 ── `place-board.ts` が印(`pkc-board-host`)を付けた面(読む面)だけ。
  * ⚠ `max-width: none` ── 板の上では w= がそのまま効く(散文の読み幅
  * `--read-w` = 672px の上限で黙って頭打ちにしない。UX レビュー所見 6)。 */

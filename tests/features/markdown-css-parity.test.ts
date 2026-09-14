@@ -120,6 +120,10 @@ const CORPUS: ReadonlyArray<readonly [string, string]> = [
   // 🔴 板の塊(#283 P4)── `.pkc-place` は user が書く class だが、
   //    位置の CSS(絶対配置)が誰にも当たらないと板ごと壊れるので corpus で数える
   ['板(自由配置)', ':::format{.pkc-place x=40 y=40 w=320 h=200}\n付箋\n:::\n'],
+  // 🔴 板どうしを繋ぐ線の宣言(#530 段③a)── `.pkc-line` も user が書く class だが、
+  //    **この塊を隠す規則**が当たらないと「指すだけの塊」が本文にそのまま出る
+  //    (中身を持たないので、画面には空の箱が 1 つ増えたようにしか見えない)
+  ['板どうしを繋ぐ線', ':::format{#a .pkc-line to=b}\n線\n:::\n'],
   ['region ブロック', ':::frontmatter\nメタ\n:::\n\n:::body\n本体\n:::\n'],
   // ⚠ **AI が書きがちな崩れ形**(寛容 parse。PKC2005〜2008)も見た目を持つ ──
   //    崩れて入ってきた文書が素のまま出ると、user は「壊れた」と読む
