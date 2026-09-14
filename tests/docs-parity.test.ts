@@ -2316,6 +2316,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-14(#918 段②c/②d ── 行番号と色分け)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-13-task-repeat-menu" …` → 61ff45e
+     */
+    '予定の札から、繰り返しを付けられるようになりました',
+    /**
      * ⚠ **2026-09-14(#530 段③a ── 付箋どうしを線で繋ぐ)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-13-tile-reorder-mode" …` → 61ff45e
      */
