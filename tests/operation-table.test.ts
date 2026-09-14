@@ -185,7 +185,14 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'set-query-key', 'set-read-columns', 'set-sql-source', 'set-sql-text', 'set-tag-badge',
   'set-text-scale', 'set-theme', 'set-too-narrow-enabled', 'set-view', 'set-voice-boost',
   'show-trash', 'skip-to',
-  'smart-cond-add', 'smart-evict', 'smart-field', 'sql-schema-to-note', 'sql-to-note',
+  'smart-cond-add', 'smart-evict', 'smart-field',
+  /**
+   * ⚠ **2026-09-14(#918 段②a)で 1 件増やした** ── 前に打った SQL の一覧を出す
+   *   (`sql-history-menu`)。⚠ **名前で呼べないままにする理由**:この面の中だけの
+   *   憶え(20 件・読み込み直すと消える)を開く口で、**面を開いていないと意味が無い**。
+   *   🔑 撃つ相手(`sql-history-pick`)のほうは `UNREGISTERED_POINT` に居る。
+   */
+  'sql-history-menu', 'sql-schema-to-note', 'sql-to-note',
   'stack-save',
   'start-audio-capture', 'start-edit', 'start-screen-capture', 'start-tile-reorder',
   'start-timer', 'stop-capture', 'storage-profile', 'swap-open', 'table-to-csv',
@@ -213,7 +220,13 @@ const UNREGISTERED_POINT: readonly string[] = [
   'open-tile', 'open-tile-as', 'pick-app-group-icon', 'preview-revision', 'remove-relation',
   'restore-revision', 'restore-trash', 'revoke-extension', 'revoke-same-origin',
   'schedule-pick-day', 'schedule-quick-here', 'set-task-repeat', 'shape-cell',
-  'smart-cond-remove', 'stack-link-down', 'stack-link-up', 'stop-timer', 'toc-jump',
+  'smart-cond-remove',
+  /**
+   * ⚠ **2026-09-14(#918 段②a)で 1 件増やした** ── 履歴の一覧から 1 件選ぶ。
+   *   🔑 **真の点である** ── 並んだ兄弟(前に打った字)のうち**押した 1 つ**で
+   *   どれかが決まり、state に「いまのその 1 件」は無い。
+   */
+  'sql-history-pick', 'stack-link-down', 'stack-link-up', 'stop-timer', 'toc-jump',
   'toggle-app-group', 'toggle-heading-fold', 'toggle-task', 'unschedule-task', 'unsplit-entry',
   'untag-entry', 'view-asset', 'view-big',
 ];
@@ -322,12 +335,16 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-09-14(#918 段①): 構造をノートへ(`sql-schema-to-note`)で受け手 +1
       //   ── 登記は増えない(押し所は SQL の面の中にしか無く、鍵も持たない。
       //   `run-sql` / `sql-to-note` と同じ仕分け)
-      total: 300,
-      receivers: 251,
+      // ⚠ 2026-09-14(#918 段②a): 履歴の一覧(`sql-history-menu` / `sql-history-pick`)で
+      //   受け手 +2 ── 登記は増えない(押し所は SQL の面の中にしか無く、鍵も持たない)。
+      //   🔑 2 つに割れているのは**出す口**と**選ぶ口**が別だから ── 選ぶ口は
+      //   メニューの中に並ぶので「押した 1 つ」でしか対象が決まらない(P1)。
+      total: 302,
+      receivers: 253,
       registered: 85,
       both: 36,
       outsideActionsTable: 49,
-      unregistered: 215,
+      unregistered: 217,
     });
   });
 

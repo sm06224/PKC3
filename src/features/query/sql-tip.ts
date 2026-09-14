@@ -35,6 +35,23 @@ export const SQL_RULES =
   'REGEXP は使えません(LIKE と GLOB は使えます)。' +
   '日本語入力のままでも打てます(ただし LIKE の ％ と ＿ は半角で打ってください)。';
 
+/**
+ * 🔴 **履歴の一覧に出す 1 行**(#918 段②a。user 裁定 2026-09-14)。
+ *
+ * ⚠ 打った字はそのままでは一覧に載らない ── **改行を含む**し、**いくらでも長い**。
+ *   1 件で画面を埋めると「新しい順に並んでいる」という一覧の値打ちが消える。
+ * 🔑 改行は `⏎` 1 文字へ畳み、続く空白も 1 つへ詰めてから、上限で切る
+ *   (切ったことは `…` で言う ── 黙って切らない)。
+ * ⚠ 空は返さない ── 空の押し所は「押せるのに何も起きない口」になる。
+ */
+export const SQL_MENU_LABEL_MAX = 48;
+
+export function sqlMenuLabel(sql: string): string {
+  const one = sql.replace(/\s*\n\s*/g, ' ⏎ ').replace(/[ \t]+/g, ' ').trim();
+  if (one === '') return '(空)';
+  return one.length <= SQL_MENU_LABEL_MAX ? one : `${one.slice(0, SQL_MENU_LABEL_MAX)}…`;
+}
+
 /** 表の名前を、上限まで並べる。 */
 function tableList(tables: readonly string[]): string {
   if (tables.length === 0) return '(表が 1 つもありません)';

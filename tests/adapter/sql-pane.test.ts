@@ -1632,6 +1632,92 @@ describe('打つ所(#918 段②a)', () => {
     expect(history.at(-1), '落とす向きが逆(新しいほうを捨てている)').toBe('select 2');
   });
 
+  /**
+   * 🔴 **押しても画面が 1 バイトも動かない、をやめる**(user 裁定 2026-09-14
+   *   「欄の下に 2/3 と出す」)。
+   *
+   * ⚠ 直す前は、いちばん古い所まで来ても**無言**だった ── user には
+   *   「これ以上前が無い」のか「鍵が効いていない」のか区別が付かない。
+   * 🔑 観測点は**画面の行**(`sql-history-note`)である ── state だけ見ると、
+   *   描画器が指紋の門で止めていても気づけない(`↑` は指紋を動かさない)。
+   */
+  it('🔴 いま何番目を見ているかが、欄の下に出る', async () => {
+    const { d, pane, type, key, runBtn, box } = setup();
+    const line = (): string =>
+      pane.querySelector('[data-pkc-field="sql-history-note"]')?.textContent ?? '';
+    const shown = (): boolean =>
+      pane.querySelector<HTMLElement>('[data-pkc-field="sql-history-note"]')?.hidden === false;
+    // ⚠ まだ 1 度も遡っていない ── 行は出さない(意味の無い行で場所を取らない)
+    expect(shown(), '押していないのに行が出ている').toBe(false);
+    for (const sql of ['select 1', 'select 2']) {
+      type(sql);
+      runBtn.click();
+      await settle();
+    }
+    type('打ちかけ');
+    expect(shown(), '走らせただけで行が出ている').toBe(false);
+
+    caret(box, 0);
+    key({ key: 'ArrowUp' });
+    expect(line(), '何番目かが出ていない').toBe('前に打った字(1 / 2)');
+    caret(box, 0);
+    key({ key: 'ArrowUp' });
+    // 🔴 **端に着いたことを字で言う**(これが無いと「鍵が効かない」と区別が付かない)
+    expect(line(), '端に着いたことを言っていない').toBe(
+      '前に打った字(2 / 2) ── これより前はありません',
+    );
+    // ⚠ もう一度押しても、字は変わらない(= 端で止まっていることが読める)
+    caret(box, 0);
+    key({ key: 'ArrowUp' });
+    expect(line()).toBe('前に打った字(2 / 2) ── これより前はありません');
+
+    key({ key: 'ArrowDown' });
+    key({ key: 'ArrowDown' });
+    expect(d.getState().sqlPage.sql, '打ちかけへ帰っていない').toBe('打ちかけ');
+    expect(line(), '打ちかけへ帰ったことを言っていない').toBe('打ちかけの字を見ています');
+    // ⚠ そこから打ち直したら合図は消える(戻る先はもう無いので、残すと嘘になる)
+    type('打ち直し');
+    expect(shown(), '打ち直しても合図が残っている').toBe(false);
+  });
+
+  /**
+   * 🔴 **指で触る端末にも道を作る**(user 裁定 2026-09-14「履歴ボタンを 1 つ足す」)。
+   *
+   * ⚠ スマホ / タブレットには `↑` `↓` が**無い** ── 押し所が無ければ、
+   *   前に打った SQL は**毎回打ち直し**になる。
+   * ⚠ **憶えている字が無いうちは押せない**(押せるのに何も起きない口を作らない)。
+   */
+  it('🔴 履歴ボタンから、前に打った字を選べる', async () => {
+    const { d, pane, root, type, runBtn } = setup();
+    const btn = pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-history"]')!;
+    expect(btn.disabled, '憶えている字が無いのに押せる').toBe(true);
+    for (const sql of ['select 1', 'select 2\n  from t']) {
+      type(sql);
+      runBtn.click();
+      await settle();
+    }
+    type('打ちかけ');
+    expect(btn.disabled, '憶えているのに押せない').toBe(false);
+
+    btn.click();
+    const items = [...root.querySelectorAll<HTMLElement>('[data-pkc-region="context-menu"] button')];
+    // 🔑 新しい順。⚠ 改行は行を伸ばすので 1 文字へ畳む
+    expect(items.map((b) => b.textContent)).toEqual(['select 2 ⏎ from t', 'select 1']);
+
+    items[1]!.click();
+    expect(d.getState().sqlPage.sql, '選んだ字が欄に入っていない').toBe('select 1');
+    // ⚠ 打ちかけの字は控えられている(↓ で帰れる)
+    expect(d.getState().sqlPage.historyDraft, '打ちかけを控えていない').toBe('打ちかけ');
+    expect(d.getState().sqlPage.historyAt, 'いま何番目かを持っていない').toBe(1);
+    // ⚠ 2 度目の押しは閉じる(片道の操作を作らない)
+    btn.click();
+    btn.click();
+    expect(
+      root.querySelector('[data-pkc-region="context-menu"]'),
+      '2 度目の押しで閉じない',
+    ).toBeNull();
+  });
+
   it('⚠ 履歴が空なら、↑ を押しても何も起きない', () => {
     const { d, type, key, box } = setup();
     type('打ちかけ');

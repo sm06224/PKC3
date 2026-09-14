@@ -1205,9 +1205,19 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   await input.fill(draft);
   await input.focus();
 
+  /**
+   * 🔴 **いま何番目を見ているかが、欄の下に出る**(user 裁定 2026-09-14)。
+   * ⚠ 直す前は**画面が 1 バイトも動かなかった** ── 「これ以上前が無い」のか
+   *   「鍵が効いていない」のか、user に区別が付かなかった。
+   * ⚠ **押す前は出ていない**ことを先に見る ── 常に出ていたら、下の assert は空振りである。
+   */
+  const histNote = page.locator('[data-pkc-field="sql-history-note"]');
+  await expect(histNote, '押していないのに合図が出ている').toBeHidden();
+
   // 🔴 1 行目で ↑ → いちばん新しい「走らせた字」が戻る
   await page.keyboard.press('ArrowUp');
   await expect(input, '↑ で前に走らせた字が戻らない').toHaveValue('SELECT * FROM csv');
+  await expect(histNote, 'いま何番目かが出ていない').toContainText('前に打った字(1 / ');
   // 🔴 もう一度 ↑ → さらに前へ(⚠ 同じ字は 2 つ並ばないので、次は sheet1)
   await page.keyboard.press('ArrowUp');
   await expect(input, '2 度目の ↑ でさらに前へ遡らない').toHaveValue('SELECT * FROM sheet1');
@@ -1217,6 +1227,9 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   // 🔴 いちばん新しい所からさらに ↓ → **打ちかけだった字**に帰る(消えていない)
   await page.keyboard.press('ArrowDown');
   await expect(input, '打ちかけだった字に帰らない(打った字が消えた)').toHaveValue(draft);
+  await expect(histNote, '打ちかけへ帰ったことを言っていない').toHaveText(
+    '打ちかけの字を見ています',
+  );
 
   // 🔴 Tab で字下げ(空白 2 つ)が**本当に入る**(⚠ execCommand 側はここでしか走らない)
   await page.keyboard.press('End');
@@ -1229,6 +1242,30 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
     ),
     'Tab で欄から飛ばされた(字下げにならない)',
   ).toBe('sql-input');
+
+  /**
+   * 🔴 **押し所からも呼び戻せる**(user 裁定 2026-09-14「履歴ボタンを 1 つ足す」)。
+   * ⚠ スマホ / タブレットには `↑` が**無い** ── ここが唯一の入口である。
+   * ⚠ **同じ 1 回の押しで開いて閉じる**罠(`MENU_OPENERS` の載せ忘れ)を、
+   *   実ブラウザで踏むのはここだけ ── unit は `click()` を直に撃つので、
+   *   document 側の「外を押したら畳む」聞き手を通らない経路もありうる。
+   */
+  const histBtn = page.locator('[data-pkc-field="sql-history"]');
+  await expect(histBtn, '憶えているのに押せない').toBeEnabled();
+  await clickReal(page, '[data-pkc-field="sql-history"]');
+  const histMenu = page.locator('[data-pkc-region="context-menu"]');
+  await expect(histMenu, '履歴の一覧が出ない(押した 1 回で閉じている)').toBeVisible();
+  // 🔑 新しい順 ── 先頭はいちばん最後に走らせた字
+  await expect(histMenu.locator('button').first(), '新しい順に並んでいない').toHaveText(
+    'SELECT * FROM csv',
+  );
+  await clickReal(page, histMenu.locator('button').first());
+  await expect(input, '選んだ字が欄に入らない').toHaveValue('SELECT * FROM csv');
+  await expect(histMenu, '選んでも一覧が畳まれない').toHaveCount(0);
+  // ⚠ 打ちかけの字は控えられている ── ↓ で帰れる(片道の操作を作らない)
+  await input.focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(input, '押し所から選んだ後、打ちかけへ帰れない').toHaveValue(draft + '  ');
 
   // 🔴 Esc で**この欄から出る**(鍵盤だけで使う人の逃げ道)
   await page.keyboard.press('Escape');

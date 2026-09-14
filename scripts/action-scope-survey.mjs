@@ -49,7 +49,7 @@ preview-revision restore-revision restore-trash stop-timer discard-timer open-al
 open-tile deliver-to-extension navigate-entry-ref navigate-card-ref
 dual-bookmark-open dual-bookmark-remove dual-tab-activate unsplit-entry dual-crumb
 stack-link-up stack-link-down capture-play move-tile-up move-tile-down
-open-repeat-menu set-task-repeat toggle-app-group pick-app-group-icon
+open-repeat-menu set-task-repeat toggle-app-group pick-app-group-icon sql-history-pick
 move-app-group-up move-app-group-down open-tile-as`.split(/\s+/);
 
 /** 点を取るが、state の現在値(`selectedLid` / `dual.focus`)で代替できる。 */

@@ -3970,6 +3970,7 @@ li[data-pkc-row-slot] {
 [data-pkc-field='sql-tip'],
 [data-pkc-field='sql-rules'],
 [data-pkc-field='sql-example'],
+[data-pkc-field='sql-history-note'],
 [data-pkc-field='sql-note'] {
   margin: 0;
   color: var(--muted);

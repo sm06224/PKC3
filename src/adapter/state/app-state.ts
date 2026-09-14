@@ -1418,6 +1418,15 @@ export type UserAction =
    */
   | { type: 'SQL_HISTORY_STEP'; back: boolean }
   /**
+   * 🔴 **一覧から選んで呼び戻す**(#918 段②a、user 裁定 2026-09-14「履歴ボタンを 1 つ足す」)。
+   *
+   * ⚠ 指で触る端末には `↑` `↓` が**無い** ── 鍵盤だけの近道にすると、
+   *   スマホの user は前に打った SQL を**毎回打ち直す**ことになる
+   *   (CLAUDE.md「マウスだけで完結し、キーボードは近道」)。
+   * 🔑 `at` は `history` の添字(`0` = いちばん新しい)。範囲の外は黙って捨てる。
+   */
+  | { type: 'SQL_HISTORY_PICK'; at: number }
+  /**
    * 🔴 **構造 1 枚をノートへ**(#918 段①。user 要望 2026-09-14「ai向けに構造吐き出したり」)。
    * ⚠ 中身は 1 文字も出さない ── 出すのは表・列・型・鍵・繋がり・行数だけである。
    */
@@ -2712,6 +2721,21 @@ function withHistoryEdit(p: SqlPageState, sql: string): readonly (string | undef
   return edits;
 }
 
+/**
+ * 履歴の `at` 番目(**`-1` = 打ちかけ**)を欄へ出す。
+ *
+ * ⚠ **遡り始める 1 回だけ**打ちかけの字を控える ── 2 回目に控えると、
+ *   1 つ前の履歴で打ちかけが潰れる。
+ * 🔑 `↑` `↓`(`SQL_HISTORY_STEP`)と一覧から選ぶ(`SQL_HISTORY_PICK`)が
+ *   **同じ 1 か所**を通る ── 2 つ目の数え方を作らない(CLAUDE.md §7)。
+ */
+function goHistory(p: SqlPageState, at: number, from: number): SqlPageState {
+  const draft = from === -1 && at >= 0 ? p.sql : p.historyDraft;
+  // 🔑 **手直しした字が在ればそちら**(無ければ走らせた字そのもの)
+  const sql = at < 0 ? draft : (p.historyEdits[at] ?? p.history[at] ?? p.sql);
+  return { ...p, sql, historyAt: at < 0 ? -1 : at, historyDraft: draft };
+}
+
 export function reduce(state: AppState, action: Dispatchable): ReduceResult {
   if (action.type === 'NAV_HISTORY') return navHistory(state, action.dir);
   const result = reduceCore(state, action);
@@ -3299,7 +3323,9 @@ function reduceCore(
              *   打ちかけの字であり、控えは `↑` を押す瞬間に取る。
              */
             ...(state.sqlPage.historyAt < 0
-              ? {}
+              ? // ⚠ 打ちかけを打ち直したら、控えは**古い**ので捨てる ── 残すと
+                //   画面の「打ちかけの字を見ています」が嘘になる(戻る先はもう無い)
+                { historyDraft: '' }
               : { historyEdits: withHistoryEdit(state.sqlPage, action.sql) }),
           },
         },
@@ -3386,17 +3412,13 @@ function reduceCore(
         ? Math.min(p.historyAt + 1, p.history.length - 1)
         : p.historyAt - 1;
       if (at === p.historyAt) return { state, events: [] };
-      // ⚠ 遡り始める 1 回だけ、打ちかけの字を控える
-      const draft = p.historyAt === -1 && action.back ? p.sql : p.historyDraft;
-      // 🔑 **手直しした字が在ればそちら**(無ければ走らせた字そのもの)
-      const sql = at < 0 ? draft : (p.historyEdits[at] ?? p.history[at] ?? p.sql);
-      return {
-        state: {
-          ...state,
-          sqlPage: { ...p, sql, historyAt: at < 0 ? -1 : at, historyDraft: draft },
-        },
-        events: [],
-      };
+      return { state: { ...state, sqlPage: goHistory(p, at, p.historyAt) }, events: [] };
+    }
+    case 'SQL_HISTORY_PICK': {
+      const p = state.sqlPage;
+      // ⚠ 範囲の外は黙って捨てる(一覧を組み直す前の押しが飛んでくる)
+      if (action.at < 0 || action.at >= p.history.length) return { state, events: [] };
+      return { state: { ...state, sqlPage: goHistory(p, action.at, p.historyAt) }, events: [] };
     }
     case 'SQL_SCHEMA_TO_NOTE': {
       if (state.sqlPage.running) return { state, events: [] };
