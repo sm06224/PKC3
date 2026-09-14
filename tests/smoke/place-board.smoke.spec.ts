@@ -72,6 +72,51 @@ test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き
   // ⚠ 対照群: 掴んでいない塊は動いていない
   await expect(p2).toHaveAttribute('data-pkc-x', '460');
 
+  /**
+   * 🔴 **形を変えても、掴む口は押せる**(#530 案 A。user 裁定 2026-09-14)。
+   *
+   * ⚠ **ここが実ブラウザでしか見られない所である。** 掴む口(右上)と大きさの
+   *   持ち手(右下)は板の**子**なので、板そのものを切り抜く実装にすると
+   *   **四隅ごと切り取られて押せなくなる**(無言の dead click)── unit の DOM では
+   *   `clip-path` が効かないので、この壊れ方は 1 件も落ちない。
+   * 🔑 **新しい起動は増やさない**(#820 の規律)── この筋書きの続きで確かめる。
+   */
+  await p1.click({ button: 'right' });
+  const blockMenu = page.locator('[data-pkc-region="context-menu"]');
+  await expect(blockMenu, '板の右クリックで一覧が出ない').toBeVisible();
+  // ⚠ **いま四角なので「四角にする」は出ない**(押しても変わらない口を作らない)
+  await expect(
+    blockMenu.locator('[data-pkc-action="place-shape-rect"]'),
+    'いまの形が一覧に出ている',
+  ).toHaveCount(0);
+  await blockMenu.locator('[data-pkc-action="place-shape-diamond"]').click();
+
+  // 🔴 観測点は**本文から描き直された属性**(見た目だけ変えた実装では真にならない)
+  await expect(p1, 'ひし形が本文に書き戻されていない').toHaveAttribute(
+    'data-pkc-shape',
+    'diamond',
+    { timeout: 5000 },
+  );
+  // ⚠ 対照群: 隣の板は四角のまま(形が板をまたいで漏れていない)
+  await expect(p2).not.toHaveAttribute('data-pkc-shape', 'diamond');
+
+  /**
+   * 🔴 **ひし形にした板を、もう一度掴んで動かす** ── これが本題である。
+   * ⚠ `boundingBox()` は「見えているか」を見ない ── **実マウスで掴んで、
+   *   本文の `x=` が動くこと**まで見て初めて「押せる」と言える。
+   */
+  const grip2 = page.locator('#p1 [data-pkc-field="place-grip"]');
+  const g2 = (await grip2.boundingBox())!;
+  await page.mouse.move(g2.x + g2.width / 2, g2.y + g2.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(g2.x + g2.width / 2 + 40, g2.y + g2.height / 2, { steps: 5 });
+  await page.mouse.up();
+  await expect(p1, 'ひし形にしたら掴む口が押せなくなった(切り取られている)').toHaveAttribute(
+    'data-pkc-x',
+    '260',
+    { timeout: 5000 },
+  );
+
   expect(errors, 'pageerror が出た').toEqual([]);
 });
 
