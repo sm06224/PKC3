@@ -126,6 +126,36 @@ test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き
     { timeout: 5000 },
   );
 
+  /**
+   * 🔴 **残りの 3 形も、掴む口が生きていることまで見る**(#530 案 A)。
+   *
+   * ⚠ ひし形だけ見て「形を変えても掴める」と書くのは**測った範囲より広い主張**である。
+   *   4 形は同じ仕掛け(`::before` / `::after` の層 + `pointer-events: none`)だが、
+   *   ⚠ **同じはずだから測らない**は判断ではなく横着である。
+   * 🔑 ここは**起動も往復も増やさない** ── 形を選び直して、
+   *   掴む口の真ん中に**掴む口そのものが乗っているか**を 1 回ずつ見るだけ。
+   */
+  for (const shape of ['round', 'ellipse', 'arrow'] as const) {
+    await p2.click({ button: 'right' });
+    await blockMenu.locator(`[data-pkc-action="place-shape-${shape}"]`).click();
+    await expect(p2, `${shape} が本文に書き戻されていない`).toHaveAttribute(
+      'data-pkc-shape',
+      shape,
+      { timeout: 5000 },
+    );
+    const box = (await page.locator('#p2 [data-pkc-field="place-grip"]').boundingBox())!;
+    const hit = await page.evaluate(
+      ([x, y]) =>
+        document.elementFromPoint(x as number, y as number)?.getAttribute('data-pkc-field') ?? null,
+      [box.x + box.width / 2, box.y + box.height / 2],
+    );
+    expect(hit, `${shape} にしたら、掴む口の上に別の物が乗っている`).toBe('place-grip');
+  }
+  // ⚠ 最後は四角へ戻せる(片道の操作を作らない)
+  await p2.click({ button: 'right' });
+  await blockMenu.locator('[data-pkc-action="place-shape-rect"]').click();
+  await expect(p2, '四角へ戻せない').toHaveAttribute('data-pkc-shape', 'rect', { timeout: 5000 });
+
   expect(errors, 'pageerror が出た').toEqual([]);
 });
 
