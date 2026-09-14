@@ -23,9 +23,11 @@
  *   面を閉じて戻っても消えない。
  */
 import type { AppState } from '@adapter/state/app-state';
-import { SQLITE_EXTS, sqlSourcesOf } from '@features/query/sqlite-attachment';
-// 🔴 添付の .csv / .tsv も同じ選び所へ並べる(#854 段①)
+import { sqlSourcesOf } from '@features/query/sqlite-attachment';
+import { SQL_GUEST_EXTS } from '@features/query/sql-guest-source';
+// 🔴 添付の .csv / .tsv / .xlsx も同じ選び所へ並べる(#854 段① / 段③)
 import { csvAttachmentSourcesOf } from '@features/query/csv-attachment';
+import { xlsxAttachmentSourcesOf } from '@features/query/xlsx-attachment';
 // 🔴 手持ちのファイルを開く(#854 段②)
 import { isSqlLocalFileLid, SQL_PICK_LOCAL_FILE_VALUE } from '@features/query/sql-local-file';
 import { humanBytes } from '@features/human-bytes';
@@ -124,7 +126,7 @@ export class SqlRenderer {
      */
     const fileInput = document.createElement('input');
     fileInput.type = 'file';
-    fileInput.accept = `${[...SQLITE_EXTS].join(',')},.csv,.tsv`;
+    fileInput.accept = SQL_GUEST_EXTS.join(',');
     fileInput.hidden = true;
     fileInput.setAttribute('data-pkc-field', 'sql-file-input');
     fileInput.setAttribute('aria-label', '手持ちのファイルを選ぶ');
@@ -183,9 +185,13 @@ export class SqlRenderer {
    * ⚠ **いま選ばれている物は state から書き戻す** ── 開けなかった回は
    *   `guest` が `null` に戻るので、選び所も「この PKC」へ戻る
    *   (画面と実体が食い違わない)。
-   * 🔑 **`.sqlite` の下に `.csv` / `.tsv`**(#854 段①)── 開く仕組みは worker が
-   *   `name` の拡張子だけで見分けるので、ここは 2 つの一覧を**連結するだけ**でよい
-   *   (判定を 2 か所に置かない)。
+   * 🔑 **`.sqlite` の下に `.csv` / `.tsv`、その下に `.xlsx`**(#854 段① / 段③)──
+   *   開く仕組みは `sqlGuestSourceOf` が `name` の拡張子だけで見分けるので、
+   *   ここは一覧を**連結するだけ**でよい(判定を 2 か所に置かない)。
+   * ⚠ **並べたものは必ず開けなければならない** ── 選び所に出したのに
+   *   `sqlGuestSourceOf` が知らない拡張子だと、押した瞬間に断られる
+   *   (無言の dead click に近い)。両者が同じ 1 つの判定を見ていることは
+   *   `tests/adapter/sql-source-parity.test.ts` が見る。
    */
   private paintSource(state: AppState): void {
     const sel = this.source;
@@ -193,6 +199,7 @@ export class SqlRenderer {
     const sources = [
       ...sqlSourcesOf(state.entryMetas.values()),
       ...csvAttachmentSourcesOf(state.entryMetas.values()),
+      ...xlsxAttachmentSourcesOf(state.entryMetas.values()),
     ];
     /**
      * 🔴 **いま開いている手持ちのファイルも一覧へ足す**(#854 段②)。

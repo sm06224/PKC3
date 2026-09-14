@@ -34,6 +34,7 @@ import { homeTabOf } from '../../src/adapter/ui/render/browse-mode';
 import { readFileSync } from 'node:fs';
 import { stubStamps } from '../helpers/store-stamps';
 import { stubRevisionOps } from '../helpers/revision-stub';
+import type { SqlGuestSource } from '../../src/features/query/sql-guest-source';
 // 🔴 手持ちのファイルを開く(#854 段②)── main.ts と**同じ実物**を配線する
 import { registerSqlLocalFile, takeSqlLocalFileBytes } from '../../src/adapter/state/sql-local-file';
 import { SQL_PICK_LOCAL_FILE_VALUE } from '../../src/features/query/sql-local-file';
@@ -99,29 +100,26 @@ function setup(
    *  ⚠ 実物は worker の別接続 ── ここは**渡された引数**だけを見る fake である。 */
   /** 開くのを**手で止められる**門(遅れて届く答えを作るため)。 */
   let holdOpen: null | (() => void) = null;
-  const openSqlGuest = vi.fn(
-    async (
-      image: Uint8Array,
-      csv?: { lang: 'csv' | 'tsv'; lid: string; name: string },
-    ) => {
-      if (image.byteLength === 0) {
-        throw new Error(
-          csv === undefined
-            ? 'この file は sqlite の DB として読めませんでした'
-            : 'この file は csv として読めませんでした(空か、区切りの見つかる行が 1 つもありません)',
-        );
-      }
-      if (holdOpen !== null) {
-        const gate = new Promise<void>((r) => (holdOpen = r as unknown as () => void));
-        await gate;
-      }
-      if (csv !== undefined) {
-        // 🔑 「大きい.tsv」だけ打ち切ったことにする(#854 段①ノート行の test 用)
-        return { tables: ['csv'], bytes: image.byteLength, truncated: csv.lid === 'db6' };
-      }
-      return { tables: ['売上', '客'], bytes: image.byteLength, truncated: false };
-    },
-  );
+  const openSqlGuest = vi.fn(async (image: Uint8Array, source?: SqlGuestSource) => {
+    if (image.byteLength === 0) {
+      throw new Error(
+        source === undefined
+          ? 'この file は sqlite の DB として読めませんでした'
+          : `この file は ${source.kind} として読めませんでした(空か、区切りの見つかる行が 1 つもありません)`,
+      );
+    }
+    if (holdOpen !== null) {
+      const gate = new Promise<void>((r) => (holdOpen = r as unknown as () => void));
+      await gate;
+    }
+    if (source !== undefined) {
+      // 🔑 「大きい.tsv」だけ打ち切ったことにする(#854 段①ノート行の test 用)
+      // ⚠ `.xlsx` は**枚ごとに表が増える**ので、名前も枚の数だけ返す(#854 段③)
+      const tables = source.kind === 'xlsx' ? ['sheet1', 'sheet2'] : ['csv'];
+      return { tables, bytes: image.byteLength, truncated: source.lid === 'db6' };
+    }
+    return { tables: ['売上', '客'], bytes: image.byteLength, truncated: false };
+  });
   const closeSqlGuest = vi.fn(async () => null);
   const readAssetBytes = vi.fn(async (key: string) =>
     key === 'ast-ng' ? null : key === 'ast-csv-broken' ? new Uint8Array([]) : new Uint8Array([1, 2, 3, 4]),
@@ -884,7 +882,8 @@ describe('添付の csv / tsv を調べる(#854 段①)', () => {
     await settle();
     expect(readAssetBytes).toHaveBeenCalledWith('ast-csv-ok');
     const call = openSqlGuest.mock.calls[0];
-    expect(call?.[1], '.csv なのに csv 引数が渡っていない').toEqual({
+    expect(call?.[1], '.csv なのに csv として名乗っていない').toEqual({
+      kind: 'csv',
       lang: 'csv',
       lid: 'db4',
       name: '売上.csv',
@@ -895,14 +894,15 @@ describe('添付の csv / tsv を調べる(#854 段①)', () => {
     const { pick, openSqlGuest } = setup();
     pick('db6'); // 大きい.tsv
     await settle();
-    expect(openSqlGuest.mock.calls[0]?.[1]?.lang, '.tsv を .csv と取り違えている').toBe('tsv');
+    const got = openSqlGuest.mock.calls[0]?.[1];
+    expect(got?.kind === 'csv' ? got.lang : null, '.tsv を .csv と取り違えている').toBe('tsv');
   });
 
-  it('⚠ .sqlite を選んだときは csv 引数を渡さない(対照群 ── 既存の口を壊していない)', async () => {
+  it('⚠ .sqlite を選んだときは何も名乗らない(対照群 ── 既存の口を壊していない)', async () => {
     const { pick, openSqlGuest } = setup();
     pick('db1'); // 売上.sqlite
     await settle();
-    expect(openSqlGuest.mock.calls[0]?.[1], '.sqlite なのに csv 引数が付いた').toBeUndefined();
+    expect(openSqlGuest.mock.calls[0]?.[1], '.sqlite なのに、別の読み方を名乗っている').toBeUndefined();
   });
 
   it('🔴 空 / 読めない csv を選ぶと、理由が画面に出る(黙って終わらない)', async () => {
@@ -1200,8 +1200,8 @@ describe('SQL の面から、手持ちのファイルを開く(#854 段②)', ()
     // 🔴 「通る道」1: 表ができる前提(開けたこと)が画面に出ている
     expect(note(), 'どちらを調べているか言っていない').toContain('自分の帳簿.sqlite');
     expect(note(), '中に何が在るか言っていない').toContain('表 2 個');
-    // ⚠ 拡張子が .sqlite なので、csv 引数は渡らない(添付と同じ判定 1 本)
-    expect(openSqlGuest.mock.calls[0]?.[1], '.sqlite なのに csv 引数が付いた').toBeUndefined();
+    // ⚠ 拡張子が .sqlite なので、読み方は名乗らない(添付と同じ判定 1 本)
+    expect(openSqlGuest.mock.calls[0]?.[1], '.sqlite なのに、別の読み方を名乗っている').toBeUndefined();
     // 🔴 「通る道」2: SELECT が実際に客の DB へ飛ぶ
     type('SELECT 1 AS a');
     runBtn.click();
@@ -1227,14 +1227,15 @@ describe('SQL の面から、手持ちのファイルを開く(#854 段②)', ()
     expect(openSqlGuest, '添付まで巻き添えで止めた').toHaveBeenCalledTimes(1);
   });
 
-  it('🔴 .csv を選ぶと、拡張子から見分けた csv 引数が渡り、SELECT が引ける', async () => {
+  it('🔴 .csv を選ぶと、拡張子から見分けて csv として名乗り、SELECT が引ける', async () => {
     const { pickLocalFile, note, openSqlGuest, d } = setup();
     const file = new File(['id,name\n1,あ\n'], '手元の一覧.csv', { type: 'text/csv' });
     pickLocalFile(file);
     await settle();
     expect(note(), 'どちらを調べているか言っていない').toContain('手元の一覧.csv');
     const lid = d.getState().sqlPage.guest?.lid ?? '';
-    expect(openSqlGuest.mock.calls[0]?.[1], '.csv なのに csv 引数が渡っていない').toEqual({
+    expect(openSqlGuest.mock.calls[0]?.[1], '.csv なのに csv として名乗っていない').toEqual({
+      kind: 'csv',
       lang: 'csv',
       lid,
       name: '手元の一覧.csv',

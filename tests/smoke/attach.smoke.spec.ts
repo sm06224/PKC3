@@ -6,6 +6,8 @@ import { test, expect } from '@playwright/test';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { answerAppDialog, gotoApp, collectPageErrors, clickReal, expectImageRendered, createEntry, useSplitEditor, useListBrowse, expectMainGapUnderBudget } from './helpers';
+// ⚠ 段⑤(xlsx を SQL で調べる)の bytes は Node 側でこの 1 本から組む(#854 段③)。
+import { buildXlsx } from '../features/xlsx-fixture';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -959,6 +961,26 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
     .getAttribute('data-pkc-asset-key');
   expect(assetKey, '添付の鍵が取れない(この先は測れない)').toBeTruthy();
 
+  /**
+   * 🔴 **`.xlsx` も、この時点(まだノートを開いていない)で添付として取り込む**
+   *   (段⑤ の下ごしらえ。#854 段③)。
+   * ⚠ **ノートを開いた後で添付すると別の動線に化ける** ── 開いているノートへ
+   *   添付すると `SELECT_ENTRY` が飛び、`sql` は aside 面(P8 段⑲)なので
+   *   **画面が detail へ戻される**(「設定を開いたまま一覧を押すと中央へ戻る」の
+   *   副作用がここにも掛かる)。だから**他の添付と同じ、ノートを開く前**に済ませる。
+   * 🔑 枚を **2 枚**にする ── 1 枚だと `xlsx_sheets`(目録)が作られない
+   *   (`readXlsxBook` の「見分けるものが 2 つ以上あるときだけ足す」)。
+   */
+  const xlsxBytes = await buildXlsx([
+    { name: '売上', rows: [['商品', '個数'], ['りんご', '5'], ['みかん', '3']] },
+    { name: '経費', rows: [['費目', '金額'], ['交通費', '1000']] },
+  ]);
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: 'uriage.xlsx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    buffer: Buffer.from(xlsxBytes),
+  });
+
   await createEntry(page, 'text');
   const ta = page.locator('[data-pkc-field="editor-body"]');
   await expect(ta).toBeVisible();
@@ -1015,7 +1037,59 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   await expect(sqlTable).toContainText('120');
 
   /**
-   * ⑤ ⚠ **対照群** ── 「この PKC のノート」へ戻すと、csv の表はもう引けない
+   * ⑤ 🔴 **添付の `.xlsx` も、同じ選び所から SQL で調べられる**(#854 段③)。動線:
+   *   「.xlsx を添付として取り込む(上で済ませた)→ 選び所で `.csv` の下に並ぶ →
+   *   選ぶと『◯◯.xlsx を調べています』と出る → `xlsx_sheets` で
+   *   **どの表がどの枚か**分かる → `sheet1` で 1 枚目の中身が引ける
+   *   (`_note` / `_lid` / `_sheet` 付き)」。
+   * ⚠ **新しい起動は増やさない**(#820 の規律)── ④ が開いた同じ SQL の面の
+   *   道中に続ける(`gotoApp` / `page.goto` を足さない)。
+   * ⚠ **ここで添付しない** ── ノートを開いた後に添付すると `SELECT_ENTRY` が
+   *   飛んで aside 面(`sql`)から detail へ戻される(上の下ごしらえのコメント)。
+   */
+  await expect(
+    source.locator('option', { hasText: 'uriage.xlsx' }),
+    '.csv の下に .xlsx が並んでいない',
+  ).toHaveCount(1);
+  // 🔴 **`.xlsx` は `.csv` の下**(#854 段①②③、`paintSource` の並び順)
+  const optionLabels = await source.locator('option').allTextContents();
+  const csvIndex = optionLabels.indexOf('uriage.csv');
+  const xlsxIndex = optionLabels.indexOf('uriage.xlsx');
+  expect(csvIndex, '.csv が選び所に見つからない').toBeGreaterThanOrEqual(0);
+  expect(xlsxIndex, '.xlsx が .csv より下(後ろ)に並んでいない').toBeGreaterThan(csvIndex);
+
+  await source.selectOption({ label: 'uriage.xlsx' });
+  await expect(note, '.xlsx が開いたことが画面に出ない').toContainText('uriage.xlsx を調べています');
+
+  // 🔴 どの表がどの枚か ── 目録(`xlsx_sheets`)が引ける
+  await page.fill('[data-pkc-field="sql-input"]', 'SELECT * FROM xlsx_sheets');
+  await clickReal(page, '[data-pkc-action="run-sql"]');
+  await expect(sqlTable, 'xlsx_sheets から行が返らない').toBeVisible({ timeout: 10_000 });
+  const sheetHeaders = await sqlTable.locator('thead th').allTextContents();
+  expect(sheetHeaders, 'xlsx_sheets の列名が違う').toEqual(['name', 'sheet', 'rows']);
+  await expect(sqlTable.locator('tbody tr'), '枚の数が合わない').toHaveCount(2);
+  await expect(sqlTable).toContainText('sheet1');
+  await expect(sqlTable).toContainText('売上');
+  await expect(sqlTable).toContainText('sheet2');
+  await expect(sqlTable).toContainText('経費');
+
+  // 🔴 1 枚目(sheet1)の中身が引け、`_note` / `_lid` / `_sheet` が付いている
+  await page.fill('[data-pkc-field="sql-input"]', 'SELECT * FROM sheet1');
+  await clickReal(page, '[data-pkc-action="run-sql"]');
+  await expect(sqlTable, 'sheet1 から行が返らない').toBeVisible({ timeout: 10_000 });
+  const xlsxHeaders = await sqlTable.locator('thead th').allTextContents();
+  expect(xlsxHeaders.slice(0, 3), '先頭の列が _note / _lid / _sheet でない').toEqual([
+    '_note',
+    '_lid',
+    '_sheet',
+  ]);
+  await expect(sqlTable.locator('tbody tr'), '行の数が合わない').toHaveCount(2);
+  await expect(sqlTable).toContainText('りんご');
+  // _sheet 列に本当の枚の名前(売上)が入っている
+  await expect(sqlTable).toContainText('売上');
+
+  /**
+   * ⑥ ⚠ **対照群** ── 「この PKC のノート」へ戻すと、csv / xlsx の表はもう引けない
    *   (入れ物が別であること ── #854 段①ノート行「別窓の入れ物」の裏取り)。
    */
   await source.selectOption({ label: 'この PKC のノート' });
@@ -1029,7 +1103,7 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   await expect(sqlTable, '対照群のはずが csv の表がまだ出ている').toHaveCount(0);
 
   /**
-   * ⑥ 🔴 **手持ちのファイルも、同じ選び所から開ける**(#854 段②)。動線:
+   * ⑦ 🔴 **手持ちのファイルも、同じ選び所から開ける**(#854 段②)。動線:
    *   「選び所で『手持ちのファイルを開く…』を選ぶ → **本物の file 選択が開く** →
    *   選んだ file が表になり、`SELECT * FROM csv` で中身が引ける」。
    *

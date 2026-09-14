@@ -99,7 +99,7 @@ export function buildCsvAttachmentTable(
   // ⚠ `parseCsv` は空 / 白紙だけの入力に `null` を返す(`csv-tables.ts` と同じ前提)
   if (grid === null) return null;
   const header = grid[0] ?? [];
-  const columns = [...CSV_SOURCE_COLUMNS, ...csvColumnNames(header)];
+  const columns = [...CSV_SOURCE_COLUMNS, ...csvColumnNames(header, CSV_SOURCE_COLUMNS)];
   const body = grid.slice(1);
   // ⚠ 列数は必ず 1 以上(`csvColumnNames` は見出しが 1 升でも 1 列返す) ──
   //   それでも割り算の分母を 1 で床にして、将来の変更に備える。

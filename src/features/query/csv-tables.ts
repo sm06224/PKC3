@@ -193,10 +193,19 @@ export function validCsvTableName(name: string): boolean {
  * ⚠ 空の見出し・重なった見出しをそのまま使うと、engine が
  *   `duplicate column name` で落ちる ── そのとき user に出るのは
  *   **自分が打っていない SQL の文句**なので、ここで必ず直す。
+ *
+ * @param reserved 🔴 **こちらが先に使う列の名前**(`_note` / `_lid` …)。
+ *   見出しがこれに当たったら `_note_2` のように逃がす。
+ *   ⚠ **省略可にしない** ── 呼び手ごとに先取りする列が違う(xlsx は `_sheet` も
+ *   持つ)ので、既定を置くと**足した人が渡し忘れた面だけ静かにぶつかる**
+ *   (`duplicate column name` は user の SQL の文句として出る)。
  */
-export function csvColumnNames(header: readonly string[]): string[] {
+export function csvColumnNames(
+  header: readonly string[],
+  reserved: readonly string[],
+): string[] {
   const out: string[] = [];
-  const seen = new Set<string>(CSV_SOURCE_COLUMNS);
+  const seen = new Set<string>(reserved);
   header.forEach((raw, i) => {
     const base = raw.trim().replace(/[^\p{L}\p{N}_]/gu, '_') || `col${String(i + 1)}`;
     let name = base;
@@ -289,7 +298,7 @@ export function collectCsvTables(
       name: raw,
       lid: note.lid,
       noteTitle: note.title,
-      columns: csvColumnNames(header),
+      columns: csvColumnNames(header, CSV_SOURCE_COLUMNS),
       rows,
     });
   }
