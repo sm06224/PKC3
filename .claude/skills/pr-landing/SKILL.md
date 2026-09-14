@@ -196,6 +196,34 @@ npm run typecheck && npm run lint && npm test                              # 載
 > ⚠ 「落ちたら読む」は、**落ちた時に読むことを覚えていないと効かない**。
 > 🔑 `--force-with-lease` を使う前に **`git ls-remote origin <branch>` で相手の実在を見る**
 > ── 0 行なら lease は**原理的に成立しない**(force を重ねても永久に通らない)。
+>
+> 🔴 **2026-09-14 に 4 度目 ── 今度は「読まなかった」のではなく、道具が消した。**
+> ⚠ 上の 3 回は**引く条件**の話だったが、この日は条件が発火する手前で潰れた ──
+> 私の push は**どんな失敗でも 5 回まで指数 backoff で撃ち直す包み**に入っており、
+> `(stale info)` を**通信の不調と同じ扱い**で 5 回投げ直した(**全部同じ理由で落ちる**)。
+> 🔴 **画面に出たのは同じ 1 行が 5 回**で、そのぶん「相手が消えている」という
+> 手掛かりが**流れて見えなくなった**。
+> 🔑 **だから直すのは戒めではなく、包みのほうである** ── 再試行してよいのは
+> **通信の形をした失敗だけ**(`Could not resolve host` / `503` /
+> `credential service temporarily unavailable` / `Connection reset` / タイムアウト)。
+> ⚠ **`rejected` が出たら 1 回目で止める** ── `(stale info)` /
+> `(non-fast-forward)` / `(fetch first)` は**待っても消えない**。
+>
+> ```bash
+> # 🔑 再試行してよいのは通信の形だけ。`rejected` は 1 回目で止める
+> for i in 1 2 3 4 5; do
+>   git push -u origin "$BR" > /tmp/push.log 2>&1 && break
+>   if grep -q '! \[rejected\]' /tmp/push.log; then
+>     echo "🔴 rejected ── 待っても消えない。この節の先頭へ戻る"; cat /tmp/push.log; break
+>   fi
+>   sleep $((2 ** i))
+> done
+> ```
+>
+> 🔑 一般形:**「落ちたらこれを読む」という戒めは、落ちたことが見える形でしか効かない。**
+> ⚠ 再試行の包みは**失敗を 1 行から N 行に増やすだけで、内容は同じ**なので、
+> **診断すべき失敗ほど埋もれる**(CLAUDE.md §6「shell と CI が『失敗した』を食べる」の
+> **再試行版**である ── あちらは exit code、こちらは**画面の可読性**が食われる)。
 
 squash merge のあと、GitHub は **remote の branch を消す**。ところが手元の
 `origin/<branch>` は**消える前の commit を指したまま**残るので:
