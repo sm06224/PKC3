@@ -2316,6 +2316,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-14(#906 ── SQL の面を残す)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-11-help-toc-all" …` → e80ba89
+     */
+    'ヘルプの目次に、細かい見出しまで全部出るようになりました',
+    /**
      * ⚠ **2026-09-14(#854 段③ ── xlsx を SQL で調べる)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-09-move-picker" …` → 99e4465
      */
