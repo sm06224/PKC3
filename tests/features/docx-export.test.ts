@@ -297,6 +297,26 @@ describe('\u{1f534} 自由配置の板の印(#530 段①)', () => {
     expect(r.blocks[0]).toEqual({ kind: 'place', x: 8, y: 0, w: null, h: null, shape: 'rect', span: 1 });
   });
 
+  /**
+   * 🔴 **形の札を読む**(#530 案 A。変異試験 M7 が SURVIVED で教えた)。
+   * ⚠ ここまでの fixture は `data-pkc-shape` を **1 件も持っていなかった**ので、
+   *   読み取りを `'rect'` 固定に潰しても 1 件も落ちなかった
+   *   (CLAUDE.md §2「fixture のゼロ件次元は測っていない次元」)。
+   */
+  it('🔴 data-pkc-shape を読む(既定でない形が PowerPoint まで届く道)', () => {
+    const r = blocksOf(
+      '<div class="pkc-place" data-pkc-x="0" data-pkc-y="0" data-pkc-shape="diamond"><p>判断</p></div>',
+    );
+    expect(r.blocks[0]).toMatchObject({ kind: 'place', shape: 'diamond' });
+  });
+
+  it('⚠ 知らない綴りは四角として読む(壊れた .pptx を作らない)', () => {
+    const r = blocksOf(
+      '<div class="pkc-place" data-pkc-x="0" data-pkc-shape="wedgeEllipseCallout"><p>あ</p></div>',
+    );
+    expect(r.blocks[0]).toMatchObject({ shape: 'rect' });
+  });
+
   it('\u{1f534} Word の出力は 1 バイトも変わらない（印は何も出さない）', () => {
     /**
      * \u{1f511} **これが「印にした」ことの意味である** ── docx 側は位置を持たないので、

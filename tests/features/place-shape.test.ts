@@ -102,15 +102,40 @@ describe('記法へ書く(setPlaceShape)', () => {
 describe('画面の規則(app.css)と、綴りの表が揃っている', () => {
   const cssNoComments = readFileSync('src/styles/app.css', 'utf-8').replace(/\/\*[\s\S]*?\*\//g, '');
 
-  it('🔴 四角でない形は、全部 app.css に規則が在る', () => {
+  /**
+   * 🔴 **選択子ではなく「その形にしかない宣言」を見る**(変異試験 M9 が SURVIVED で教えた)。
+   *
+   * ⚠ 1 稿目は `[data-pkc-shape='diamond']` が在るかだけを見ていたが、同じ綴りは
+   *   **同じ file に 6 か所**出る(地を透明にする / 足場 / 層 / 余白 …)ので、
+   *   **形そのものを作る `clip-path` の 1 行だけ**を消しても隣の規則に救われて緑だった
+   *   (CLAUDE.md §1「別の面の文字に満たされる」の CSS 版)。
+   * 🔑 だから**形ごとに、その形にしか無い宣言**を pin する。
+   *   ⚠ `Record<…, string>` なので、**形を足して書き忘れたら tsc が落ちる**。
+   */
+  const MARK: Record<Exclude<PlaceShape, 'rect'>, string> = {
+    round: 'border-radius: 12px',
+    ellipse: 'border-radius: 50%',
+    diamond: 'clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%)',
+    arrow: 'clip-path: polygon(0 25%, 62% 25%, 62% 0, 100% 50%, 62% 100%, 62% 75%, 0 75%)',
+  };
+
+  it('🔴 四角でない形は、全部 app.css に「その形を作る宣言」が在る', () => {
     const shaped = PLACE_SHAPES.filter((s) => s !== 'rect');
     expect(shaped.length, '形が 1 つも無い(空振り)').toBeGreaterThan(0);
     for (const sh of shaped) {
       expect(
         cssNoComments,
-        `${sh} の規則が app.css に無い ── 選んでも見た目が 1 ドットも変わらない`,
+        `${sh} の選択子が app.css に無い ── 選んでも見た目が 1 ドットも変わらない`,
       ).toContain(`[data-pkc-shape='${sh}']`);
+      expect(
+        cssNoComments,
+        `${sh} を作る宣言(${MARK[sh as Exclude<PlaceShape, 'rect'>]})が無い ── 選択子だけでは形にならない`,
+      ).toContain(MARK[sh as Exclude<PlaceShape, 'rect'>]);
     }
+  });
+
+  it('⚠ 空振り防止 ── 在りもしない宣言は当たらない', () => {
+    expect(cssNoComments).not.toContain('clip-path: polygon(0 0, 100% 0, 50% 100%)');
   });
 
   it('⚠ 空振り防止 ── 在りもしない形は当たらない', () => {

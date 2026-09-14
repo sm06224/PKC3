@@ -135,6 +135,24 @@ describe('\u{1f534} 自由配置の板が「置いたとおりの場所」で出
     expect(xml, 'ひし形が漏れている').not.toContain('prst="diamond"');
   });
 
+  /**
+   * 🔴 **題名・本文の箱は、板の形に巻き込まれない**(変異試験 M5 が SURVIVED で教えた)。
+   *
+   * ⚠ `textBox` は題名・副題・本文・板の**全部**が通る 1 本なので、形の既定を
+   *   1 つ書き換えるだけで**全部のスライドがひし形に化ける** ── それでも
+   *   「板が四角で出る」を見る test は**1 件も落ちない**(板は実値を渡すので)。
+   * 🔑 だから**板を 1 枚も置かない筋書き**で、題名の箱そのものを見る。
+   */
+  it('🔴 題名の箱は必ず四角で、縁も出ない(板の形に巻き込まれない)', () => {
+    const r = buildPptx([h(1, '章'), p('本文')], { title: 'T' });
+    const xml = partOf(r, 'ppt/slides/slide1.xml');
+    expect(xml, '題名の箱が四角でない').toContain('<a:prstGeom prst="rect">');
+    // ⚠ 空振り防止 ── 題名の箱が本当に出ている
+    expect(xml, '題名の箱が出ていない').toContain('name="題名"');
+    expect(xml, '板が 1 枚も無いのに縁が出ている').not.toContain('<a:ln w=');
+    expect(xml).not.toMatch(/prst="(?!rect)/);
+  });
+
   it('⚠ 形は板ごとに効く(1 枚目の形が 2 枚目へ漏れない)', () => {
     const r = buildPptx(
       [place(0, 0, 200, 100, 1, 'ellipse'), p('丸'), place(0, 200, 200, 100, 1), p('四角')],

@@ -703,6 +703,22 @@ export function headingMenuActions(ctx: {
  * @param board 板の塊か(`place-notation.ts` の `isPlaceOpen` が決める)
  * @param shape いま付いている形(#530。板でなければ `null`)
  */
+/**
+ * 🔴 **形の項目**(#530 案 A)。⚠ **綴りを字で書く** ── `` `place-shape-${sh}` `` と
+ *   組み立てると、**出口の全数走査**(`scripts/action-outlets.mjs` は
+ *   `action: '…'` の字を読む)から見えなくなり、「静的に追えない出口をまた足した」
+ *   として `tests/action-outlets.test.ts` が落ちる(受け手側も同じ理由で字で書いてある)。
+ * 🔑 呼び名は `PLACE_SHAPE_LABELS` の 1 本から採る(§7)。
+ * 🔑 `Record<PlaceShape, …>` なので、**形を足して書き忘れたら tsc が落ちる**。
+ */
+const SHAPE_ACTION: Record<PlaceShape, EntryAction> = {
+  rect: { action: 'place-shape-rect', label: `${PLACE_SHAPE_LABELS.rect}にする` },
+  round: { action: 'place-shape-round', label: `${PLACE_SHAPE_LABELS.round}にする` },
+  ellipse: { action: 'place-shape-ellipse', label: `${PLACE_SHAPE_LABELS.ellipse}にする` },
+  diamond: { action: 'place-shape-diamond', label: `${PLACE_SHAPE_LABELS.diamond}にする` },
+  arrow: { action: 'place-shape-arrow', label: `${PLACE_SHAPE_LABELS.arrow}にする` },
+};
+
 export function blockMenuActions(ctx: {
   readonly board: boolean;
   readonly shape?: PlaceShape | null;
@@ -727,10 +743,7 @@ export function blockMenuActions(ctx: {
      * ⚠ サブメニューの機構がまだ無いので**平らに並べる** ── 出るのは板の上だけで、
      *   本文の右クリック(いつも出る方)は 1 項目も増えない。
      */
-    ...PLACE_SHAPES.filter((sh) => sh !== (ctx.shape ?? 'rect')).map((sh) => ({
-      action: `place-shape-${sh}`,
-      label: `${PLACE_SHAPE_LABELS[sh]}にする`,
-    })),
+    ...PLACE_SHAPES.filter((sh) => sh !== (ctx.shape ?? 'rect')).map((sh) => SHAPE_ACTION[sh]),
     { action: 'remove-place', label: 'この板を消す' },
   ];
 }
