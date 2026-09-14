@@ -251,15 +251,32 @@ ${(e as Error).message}`,
    *   **2 ちょうど**と答えるのを実測済み)。⚠ だから**緩めずに、前提のほうを検める**。
    */
   const seek = async (to: number): Promise<number> => {
-    await player.evaluate((el: HTMLMediaElement, t) => {
-      el.pause();
-      el.currentTime = t;
-    }, to);
+    /**
+     * 🔴 **合わせ終わるまで待つ**(`seeked`)。
+     *
+     * ⚠ `currentTime` に代入すると、**その値がすぐ読み返せる**が、
+     *   それは「頼んだ値」であって「落ち着いた値」ではない ── `MediaRecorder` の
+     *   webm は `Cues` を持たないので、ブラウザは近い所から**前へ解いて**落ち着く。
+     *   🔑 だから合わせた直後に読むと、後から動く値を掴む。
+     */
+    await player.evaluate(
+      async (el: HTMLMediaElement, t) =>
+        new Promise<void>((done) => {
+          el.pause();
+          if (Math.abs(el.currentTime - t) < 0.001) {
+            done();
+            return;
+          }
+          el.addEventListener('seeked', () => done(), { once: true });
+          el.currentTime = t;
+        }),
+      to,
+    );
     await expect
-      .poll(() => player.evaluate((el: HTMLMediaElement) => el.currentTime), {
-        message: `再生位置を ${to} 秒へ動かせない(前提が崩れている)`,
+      .poll(() => player.evaluate((el: HTMLMediaElement) => el.seeking), {
+        message: `再生位置を ${to} 秒へ動かし終えていない`,
       })
-      .toBeCloseTo(to, 1);
+      .toBe(false);
     const at = await player.evaluate((el: HTMLMediaElement) => ({
       currentTime: el.currentTime,
       paused: el.paused,
@@ -268,6 +285,11 @@ ${(e as Error).message}`,
       at.paused,
       `止めたのに鳴っている(${at.currentTime.toFixed(3)} 秒)── 押すまでに位置が進むので、印が読んだ値とずれる`,
     ).toBe(true);
+    // ⚠ **落ち着いた値が頼んだ所の近くに在る**(`Cues` が無いので、ぴったりとは限らない)
+    expect(at.currentTime, `${to} 秒へ合わせたのに ${at.currentTime.toFixed(3)} 秒に居る`).toBeCloseTo(
+      to,
+      1,
+    );
     // 🔑 **押す直前の実測値を返す** ── 切り出しの長さは「頼んだ 2 秒」ではなく
     //    **押した所の差**で決まる
     return at.currentTime;
