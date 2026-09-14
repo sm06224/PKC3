@@ -12,6 +12,7 @@ import {
   SCHEMA_FK_SQL,
   countsSql,
   renderSchemaDigest,
+  schemaModel,
   type Grid,
 } from '../../src/features/query/schema-digest';
 import { checkReadOnlySql } from '../../src/features/query/sql-guard';
@@ -124,5 +125,173 @@ describe('打つ字が、いまの門をそのまま通る', () => {
 
   it('⚠ 対照群 ── 書き込む字はちゃんと断られる(門が生きている)', () => {
     expect(checkReadOnlySql('drop table entries').ok).toBe(false);
+  });
+});
+
+/**
+ * 🔴 **構造そのものを値で返す口**(#918 段⑤a)。
+ *
+ * ⚠ ここを作った理由は ER(段⑤b)だが、守りたいのは**取り出しで段① を壊さないこと**である
+ *   ── `renderSchemaDigest` は**この値を読むだけ**にしたので、
+ *   模型が狂えば段① の字も狂う。
+ */
+describe('構造そのものを値で返す(#918 段⑤a)', () => {
+  it('表・列・鍵・行数が、採ってきた順のまま入る', () => {
+    const m = schemaModel({ source: 'x', columns: COLS, fks: FKS, counts: COUNTS });
+    expect(
+      m.tables.map((t) => t.name),
+      '採ってきた順が変わっている(ここでは並べ替えない)',
+    ).toEqual(['entries', 'tags', 'recent']);
+    expect(m.tables[0]!.columns.map((c) => c.name)).toEqual(['lid', 'title']);
+    expect(m.tables[0]!.columns[0]).toEqual({
+      name: 'lid',
+      type: 'TEXT',
+      notNull: true,
+      primaryKey: true,
+    });
+    // ⚠ 型は**採れた字のまま**(「(型なし)」に飾るのは見せる側の仕事)
+    expect(m.tables[1]!.columns[0]!.type, '模型の側で飾っている').toBe('');
+  });
+
+  it('🔴 ビューと表を見分ける(綴りの正規化はここ 1 か所)', () => {
+    const m = schemaModel({ source: 'x', columns: COLS, fks: FKS });
+    expect(m.tables.map((t) => t.kind)).toEqual(['table', 'table', 'view']);
+  });
+
+  it('🔴 「0 行」と「採れなかった」を区別する', () => {
+    const withCounts = schemaModel({ source: 'x', columns: COLS, fks: FKS, counts: COUNTS });
+    expect(withCounts.tables[0]!.rows, '採れた行数が入っていない').toBe(3);
+    // 🔑 ここが肝 ── `0` は「採れて 0 行」であって、採れなかったのではない
+    expect(withCounts.tables[1]!.rows, '0 行が「採れなかった」に潰れている').toBe(0);
+    // ⚠ counts に居ない表(ビュー)は採れていない
+    expect(withCounts.tables[2]!.rows).toBeNull();
+
+    const without = schemaModel({ source: 'x', columns: COLS, fks: FKS });
+    expect(without.tables.every((t) => t.rows === null), '採れていないのに数が入る').toBe(true);
+  });
+
+  it('⚠ 数として読めない行数は「採れなかった」扱い(嘘の「N 行」を書かない)', () => {
+    // ⚠ `count(*)` は必ず整数なので普通は起きない ── 起きたときに**嘘を書かない**ための門
+    const m = schemaModel({
+      source: 'x',
+      columns: COLS,
+      fks: FKS,
+      counts: grid(['tbl', 'n'], [['entries', 'よんじゅう']]),
+    });
+    expect(m.tables[0]!.rows).toBeNull();
+    const out = renderSchemaDigest({
+      source: 'x',
+      columns: COLS,
+      fks: FKS,
+      counts: grid(['tbl', 'n'], [['entries', 'よんじゅう']]),
+    });
+    expect(out, '読めない字をそのまま「N 行」と書いている').not.toContain('よんじゅう');
+    // ⚠ 空振り防止 ── そもそもこの入力で表の見出しは出ている
+    expect(out).toContain('## entries(表)');
+  });
+
+  it('🔴 繋がりは両端を持つ / 読めない行は落とす', () => {
+    const m = schemaModel({
+      source: 'x',
+      columns: COLS,
+      fks: grid(
+        ['tbl', 'ref', 'col', 'refcol'],
+        [
+          ['tags', 'entries', 'lid', 'lid'],
+          // ⚠ 自分の表が空の行は、繋がりとして読めない
+          ['', 'entries', 'lid', 'lid'],
+        ],
+      ),
+    });
+    expect(m.links).toEqual([
+      { from: 'tags', fromColumn: 'lid', to: 'entries', toColumn: 'lid' },
+    ]);
+  });
+});
+
+/**
+ * 🔴 **段① の字は、模型から出ている**(#918 段⑤a)。
+ *
+ * ⚠ ここが落ちるときは、`renderSchemaDigest` が模型を読まずに**もう 1 度組み立てている**
+ *   ── CLAUDE.md §7「同じ問いに答える口が 2 つ」そのものである。
+ * 🔑 期待値を別の綴りで組まず、**模型に在る物が字にも在る**という対応だけを見る。
+ */
+describe('段① の字と模型が食い違わない', () => {
+  it('🔴 表の数・名前・行数が、字の側と一致する', () => {
+    const input = { source: 'x', columns: COLS, fks: FKS, counts: COUNTS };
+    const m = schemaModel(input);
+    const out = renderSchemaDigest(input);
+    const heads = out.split('\n').filter((l) => l.startsWith('## ') && l !== '## 表どうしの繋がり');
+    expect(heads.length, '見出しの数が模型の表の数と違う').toBe(m.tables.length);
+    for (const t of m.tables) {
+      const kind = t.kind === 'view' ? 'ビュー' : '表';
+      const want = t.rows === null ? `## ${t.name}(${kind})` : `## ${t.name}(${kind}・${t.rows} 行)`;
+      expect(heads, `模型に在る表が字に無い: ${t.name}`).toContain(want);
+      for (const c of t.columns) {
+        expect(out, `模型に在る列が字に無い: ${t.name}.${c.name}`).toContain(`| ${c.name} | `);
+      }
+    }
+  });
+
+  it('🔴 繋がりが、模型と字で 1 本ずつ対応する', () => {
+    const input = { source: 'x', columns: COLS, fks: FKS, counts: COUNTS };
+    const m = schemaModel(input);
+    const lines = renderSchemaDigest(input)
+      .split('\n')
+      .filter((l) => l.startsWith('- ') && l.includes('→'));
+    expect(lines.length, '線の本数が違う').toBe(m.links.length);
+    expect(lines.length, '空振り ── そもそも繋がりが 0 本').toBeGreaterThan(0);
+    for (const f of m.links) {
+      const to = f.toColumn === '' ? f.to : `${f.to}.${f.toColumn}`;
+      expect(lines).toContain(`- ${f.from}.${f.fromColumn} → ${to}`);
+    }
+  });
+
+  /**
+   * 🔴 **取り出しで 1 バイトも変えていないことの錨**(#918 段⑤a)。
+   *
+   * ⚠ この字は**取り出す前の実装**(`e7d7948` 時点)を走らせて採った物である ──
+   *   別の綴りで組み直した期待値ではない(CLAUDE.md §1「同じ盲点を共有する」回避)。
+   * ⚠ 段① の見せ方を**わざと**変えるときは、ここも同時に直す(直さずに通ることはない)。
+   */
+  it('🔴 段① の字を丸ごと pin する', () => {
+    const out = renderSchemaDigest({
+      source: 'この PKC のノート',
+      columns: COLS,
+      fks: FKS,
+      counts: COUNTS,
+    });
+    expect(out).toBe(
+      `# この PKC のノート の構造
+
+表 / ビュー: 3 件
+
+## entries(表・3 行)
+
+| 列 | 型 | 空を許すか | 鍵 |
+|---|---|---|---|
+| lid | TEXT | 不可 | 主キー |
+| title | TEXT | 可 |  |
+
+## tags(表・0 行)
+
+| 列 | 型 | 空を許すか | 鍵 |
+|---|---|---|---|
+| name | (型なし) | 可 |  |
+
+## recent(ビュー)
+
+| 列 | 型 | 空を許すか | 鍵 |
+|---|---|---|---|
+| lid | TEXT | 可 |  |
+
+## 表どうしの繋がり
+
+- tags.lid → entries.lid
+
+---
+
+⚠ ここに在るのは構造だけです(中身は 1 行も含まれていません)。`,
+    );
   });
 });

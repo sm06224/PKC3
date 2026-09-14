@@ -103,6 +103,105 @@ function asMaps(g: Grid): Record<string, Cell>[] {
 const text = (v: Cell | undefined): string => (v === null || v === undefined ? '' : String(v));
 
 /**
+ * 行数を**数**にする。⚠ 数として読めない字は `null`(= 採れなかった扱い)にする ──
+ * `count(*)` は必ず整数なので普通は起きないが、**読めない字を「N 行」と書くのは嘘**である。
+ */
+function rowCount(v: Cell | undefined): number | null {
+  if (v === null || v === undefined) return null;
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * 表 1 つぶんの列。
+ * ⚠ **飾らない** ── `type` は採れた字のまま(空なら空)。「(型なし)」のような
+ *   **見せ方は読み手が決める**(markdown と ER で違ってよい)。
+ */
+export interface SchemaColumn {
+  readonly name: string;
+  readonly type: string;
+  readonly notNull: boolean;
+  readonly primaryKey: boolean;
+}
+
+/** 表(またはビュー)1 つ。 */
+export interface SchemaTable {
+  readonly name: string;
+  readonly kind: 'table' | 'view';
+  /** ⚠ 採れなかった回は `null`。**0 と区別する** ── `0` は「採れて 0 行」である。 */
+  readonly rows: number | null;
+  readonly columns: readonly SchemaColumn[];
+}
+
+/** 外部キー 1 本。⚠ `toColumn` は空のことがある(相手の主キーを指す書き方)。 */
+export interface SchemaLink {
+  readonly from: string;
+  readonly fromColumn: string;
+  readonly to: string;
+  readonly toColumn: string;
+}
+
+export interface SchemaModel {
+  readonly tables: readonly SchemaTable[];
+  readonly links: readonly SchemaLink[];
+}
+
+/**
+ * 🔴 **採ってきた 3 枚の表を「構造そのもの」へ畳む**(#918 段⑤a)。
+ *
+ * ⚠ **markdown も ER も、ここから作る** ── 同じ問いに答える口を 2 つ作らないため
+ *   (CLAUDE.md §7「同じ値・同じ判定が複数の場所にある」)。
+ *   `renderSchemaDigest` は**この値を読むだけ**にしてある。
+ *
+ * ⚠ 並びは**採ってきた順のまま**(`SCHEMA_COLUMNS_SQL` の
+ *   `order by m.type, m.name, p.cid` が決めている)── ここでは並べ替えない。
+ * 🔑 ER の並べ替えは**この値を受け取ってから**やる(`erLayout()`、段⑤b)。
+ */
+export function schemaModel(input: SchemaDigestInput): SchemaModel {
+  const countOf = new Map<string, number | null>();
+  for (const c of input.counts ? asMaps(input.counts) : []) {
+    countOf.set(text(c['tbl']), rowCount(c['n']));
+  }
+
+  const order: string[] = [];
+  const byTable = new Map<string, SchemaColumn[]>();
+  const kindOf = new Map<string, 'table' | 'view'>();
+  for (const c of asMaps(input.columns)) {
+    const t = text(c['tbl']);
+    if (!byTable.has(t)) {
+      byTable.set(t, []);
+      order.push(t);
+      // ⚠ `view` 以外は全部「表」へ寄せる(綴りの正規化はここ 1 か所でやる)
+      kindOf.set(t, text(c['kind']) === 'view' ? 'view' : 'table');
+    }
+    byTable.get(t)!.push({
+      name: text(c['col']),
+      type: text(c['typ']),
+      notNull: String(c['nn']) === '1',
+      primaryKey: String(c['pk']) !== '0' && text(c['pk']) !== '',
+    });
+  }
+
+  return {
+    tables: order.map((t) => ({
+      name: t,
+      kind: kindOf.get(t) ?? 'table',
+      rows: countOf.get(t) ?? null,
+      columns: byTable.get(t) ?? [],
+    })),
+    // ⚠ 相手の名前が空の行は落とす(繋がりとして読めない)
+    links: asMaps(input.fks)
+      .filter((f) => text(f['tbl']) !== '')
+      .map((f) => ({
+        from: text(f['tbl']),
+        fromColumn: text(f['col']),
+        to: text(f['ref']),
+        toColumn: text(f['refcol']),
+      })),
+  };
+}
+
+/**
  * 構造を **markdown 1 枚**にする。
  *
  * ⚠ **AI にそのまま貼れること**が目的なので、飾りではなく**情報の密度**で書く ──
@@ -110,60 +209,42 @@ const text = (v: Cell | undefined): string => (v === null || v === undefined ? '
  * 🔑 **行数を先に書く**(AI は「どれが本体か」をそれで当てる)。
  */
 export function renderSchemaDigest(input: SchemaDigestInput): string {
-  const cols = asMaps(input.columns);
-  const fks = asMaps(input.fks);
-  const counts = input.counts ? asMaps(input.counts) : null;
-  const countOf = new Map<string, Cell>();
-  for (const c of counts ?? []) countOf.set(text(c['tbl']), c['n'] ?? null);
-
-  const order: string[] = [];
-  const byTable = new Map<string, Record<string, Cell>[]>();
-  const kindOf = new Map<string, string>();
-  for (const c of cols) {
-    const t = text(c['tbl']);
-    if (!byTable.has(t)) {
-      byTable.set(t, []);
-      order.push(t);
-      kindOf.set(t, text(c['kind']));
-    }
-    byTable.get(t)!.push(c);
-  }
+  // 🔑 組み立ては `schemaModel()` 1 か所。ここは**見せ方だけ**を持つ
+  const model = schemaModel(input);
 
   const out: string[] = [];
   out.push(`# ${input.source} の構造`);
   out.push('');
-  if (order.length === 0) {
+  if (model.tables.length === 0) {
     // ⚠ **空でも 1 枚を出す** ── 押して無反応にしない(理由を字で言う)
     out.push('表もビューも 1 つもありません。');
     return out.join('\n');
   }
-  out.push(`表 / ビュー: ${order.length} 件`);
+  out.push(`表 / ビュー: ${model.tables.length} 件`);
   out.push('');
 
-  for (const t of order) {
-    const kind = kindOf.get(t) === 'view' ? 'ビュー' : '表';
-    const n = countOf.get(t);
-    const head = n === undefined || n === null ? `## ${t}(${kind})` : `## ${t}(${kind}・${n} 行)`;
+  for (const t of model.tables) {
+    const kind = t.kind === 'view' ? 'ビュー' : '表';
+    const head = t.rows === null ? `## ${t.name}(${kind})` : `## ${t.name}(${kind}・${t.rows} 行)`;
     out.push(head);
     out.push('');
     out.push('| 列 | 型 | 空を許すか | 鍵 |');
     out.push('|---|---|---|---|');
-    for (const c of byTable.get(t) ?? []) {
-      const typ = text(c['typ']) === '' ? '(型なし)' : text(c['typ']);
-      const nn = String(c['nn']) === '1' ? '不可' : '可';
-      const pk = String(c['pk']) !== '0' && text(c['pk']) !== '' ? '主キー' : '';
-      out.push(`| ${text(c['col'])} | ${typ} | ${nn} | ${pk} |`);
+    for (const c of t.columns) {
+      const typ = c.type === '' ? '(型なし)' : c.type;
+      const nn = c.notNull ? '不可' : '可';
+      const pk = c.primaryKey ? '主キー' : '';
+      out.push(`| ${c.name} | ${typ} | ${nn} | ${pk} |`);
     }
     out.push('');
   }
 
-  const mine = fks.filter((f) => text(f['tbl']) !== '');
-  if (mine.length > 0) {
+  if (model.links.length > 0) {
     out.push('## 表どうしの繋がり');
     out.push('');
-    for (const f of mine) {
-      const to = text(f['refcol']) === '' ? text(f['ref']) : `${text(f['ref'])}.${text(f['refcol'])}`;
-      out.push(`- ${text(f['tbl'])}.${text(f['col'])} → ${to}`);
+    for (const f of model.links) {
+      const to = f.toColumn === '' ? f.to : `${f.to}.${f.toColumn}`;
+      out.push(`- ${f.from}.${f.fromColumn} → ${to}`);
     }
     out.push('');
   }
@@ -175,6 +256,8 @@ export function renderSchemaDigest(input: SchemaDigestInput): string {
   out.push('---');
   out.push('');
   out.push('⚠ ここに在るのは構造だけです(中身は 1 行も含まれていません)。');
-  if (counts === null) out.push('⚠ 行数は採れませんでした。');
+  // ⚠ 見るのは**渡されたか**であって、模型の `rows` ではない ── 表が 0 件の DB でも
+  //    「採れなかった」とは書かない(採れて 0 件と、採れなかったのは別の話である)
+  if (!input.counts) out.push('⚠ 行数は採れませんでした。');
   return out.join('\n');
 }
