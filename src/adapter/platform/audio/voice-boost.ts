@@ -147,6 +147,18 @@ export class VoiceBoostRouter {
         return;
       }
       this.wired.set(el, src);
+      /**
+       * 🔴 **鳴らし始める瞬間にも器を起こす**(#772 段① B)。
+       *
+       * ⚠ ブラウザは「user が触っていないページ」の音の器を**止めたまま**にする。
+       *   🔴 そして**鎖を通している要素は、器が止まっていると進まない** ──
+       *   押したのに再生機が動かない、という形で出る。
+       * 🔑 `play` は**押した流れの中**なので、ここで起こせば必ず通る
+       *   (`local-office-files.ts` の「許可は user の操作の中で」と同じ考え方)。
+       * ⚠ 付けるのは**作った 1 度だけ**(`wired` に入る前)── `refresh` のたびに
+       *   足すと、同じ要素に何枚も重なる。
+       */
+      el.addEventListener('play', () => host.resume());
     }
     src.disconnect();
     src.connect(host.head);

@@ -408,5 +408,62 @@ ${(e as Error).message}`,
   expect(cutInfo.bytes, '大きさを測れていない(復号の後に読んでいる)').toBeGreaterThan(0);
   expect(cutInfo.bytes, '切り出したのに元と同じ大きさ').toBeLessThan(38_000);
 
+  /**
+   * ## 段⑥ ── **聞きやすくする を入れても、音が止まらない**(#772 段① B)
+   *
+   * 🔴 **ここでしか通らない道が在る。** 整える鎖は `AudioContext` の上に組むが、
+   *   **happy-dom に `AudioContext` は無い**ので、`webAudioHost()` は
+   *   **単体テストから 1 度も実行されない**(CLAUDE.md §2「経路が一度も通っていない」)。
+   *
+   * 🔴 そして**この機能がいちばん恐れているのは無音**である ── 鎖を通した要素は、
+   *   器が止まっていると**進まない**(再生機は押せるのに動かない)。
+   *
+   * ⚠ **対照群を先に採る**(CLAUDE.md §4)── 切のまま進むことを見てから入にする。
+   *   ⚠ 対照群が進まない回は「**この箱では鳴らせない**」であって、製品の判定はできない
+   *   ── そう読める文言で落とす。
+   *
+   * 🔑 起動は増やさない ── **同じ窓の続き**で面を行き来するだけである。
+   */
+  /** 押してから `currentTime` が動くまで待つ。⚠ 返すのは**進んだ秒数**。 */
+  const playsOn = async (label: string): Promise<number> => {
+    await clickReal(
+      page,
+      '[data-pkc-capture]:has-text("(0:01〜0:03)") [data-pkc-field="capture-play"]',
+    );
+    const el = cutRow.locator('[data-pkc-field="capture-media"]');
+    await expect
+      .poll(() => el.evaluate((m: HTMLMediaElement) => m.currentTime), {
+        message: `${label}:押したのに再生機が進まない`,
+        timeout: 8000,
+      })
+      .toBeGreaterThan(0.02);
+    const at = await el.evaluate((m: HTMLMediaElement) => m.currentTime);
+    await el.evaluate((m: HTMLMediaElement) => m.pause());
+    return at;
+  };
+  // ⚠ **対照群**(切のまま)── ここが落ちたら、以降は判定不能である
+  const plainAt = await playsOn('この箱では音が進まない(以降は判定不能)');
+
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  await clickReal(page, '[data-pkc-field="voice-boost"]');
+  await expect(
+    page.locator('[data-pkc-field="voice-boost"]'),
+    '設定を押したのに印が付かない',
+  ).toBeChecked();
+
+  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  const boostedAt = await playsOn('🔴 聞きやすくする を入れたら音が止まった(無音の形)');
+  expect(
+    boostedAt,
+    `対照群 ${plainAt.toFixed(3)} は進んだのに、入にしたら進まない`,
+  ).toBeGreaterThan(0.02);
+
+  // 🔴 **切に戻しても進む**(外して終わりにしていない = 無音にしていない)
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  await clickReal(page, '[data-pkc-field="voice-boost"]');
+  await expect(page.locator('[data-pkc-field="voice-boost"]')).not.toBeChecked();
+  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  await playsOn('🔴 切に戻したら音が止まった(出口へ繋ぎ直していない)');
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

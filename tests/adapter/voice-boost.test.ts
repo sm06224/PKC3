@@ -121,6 +121,22 @@ describe('聞くときだけ音を整える(繋ぎ替え)', () => {
     expect(host.sources, '同じ要素の `source` を作り直している').toHaveLength(1);
   });
 
+  it('🔴 鳴らし始める瞬間にも器を起こす(止まった器では再生機が進まない)', () => {
+    const host = fakeHost();
+    const r = new VoiceBoostRouter(() => host, () => true);
+    const el = media();
+    r.watch(el);
+    const before = host.resumed;
+    el.dispatchEvent(new Event('play'));
+    expect(host.resumed, '押して鳴らし始めても器を起こしていない').toBe(before + 1);
+    // ⚠ **重ねない** ── 何度 `refresh` しても、聞き手は 1 枚だけ
+    r.refresh();
+    r.refresh();
+    const mid = host.resumed;
+    el.dispatchEvent(new Event('play'));
+    expect(host.resumed, '同じ要素に聞き手が重なっている').toBe(mid + 1);
+  });
+
   it('🔴 器が作れない端末では何もしない(整わないだけで、素のまま鳴る)', () => {
     const r = new VoiceBoostRouter(() => null, () => true);
     expect(() => r.watch(media())).not.toThrow();
