@@ -18,6 +18,14 @@ import { contentHash64Hex } from '@adapter/platform/storage/content-hash';
 import { REQUEST_TIMEOUT_MS } from '@adapter/platform/storage/store-proxy';
 import { appendBlock } from '@features/markdown/text-ops';
 import {
+  SCHEMA_COLUMNS_SQL,
+  SCHEMA_FK_SQL,
+  countsSql,
+  renderSchemaDigest,
+  schemaNoteTitle,
+  type Cell as SqlCell,
+} from '@features/query/schema-digest';
+import {
   appendIntoSection,
   insertedLines,
   resolveAppendAt,
@@ -809,6 +817,77 @@ export function connectStoreEffects(
       case 'REQUEST_SQL_GUEST_CLOSE': {
         const shut = store.closeSqlGuest;
         if (shut) void shut().catch(() => undefined);
+        break;
+      }
+      /**
+       * 🔴 **調べている相手の構造を 1 枚にする**(#918 段①。user 要望 2026-09-14)。
+       *
+       * ⚠ **門にも worker にも 1 行も足していない** ── 3 本とも `select` である
+       *   (`pragma_table_info(...)` は**表の形**なので `select` から引ける)。
+       * 🔑 だから `PRAGMA query_only` の境は 1 ミリも緩んでいない。
+       *
+       * ⚠ **行数だけは落ちても進む** ── 表の名前が分かってから数えるので、
+       *   ここで諦めても**構造そのものは出せる**(`counts` を渡さなければ
+       *   「行数は採れませんでした」と出る ── **嘘を書かない**)。
+       */
+      case 'REQUEST_SQL_SCHEMA': {
+        const ask = store.runReadOnlySql;
+        const { where, lid, relationId } = ev;
+        const guest = ev.guest === true ? { guest: true } : {};
+        if (!ask) {
+          dispatcher.dispatch({
+            type: 'SQL_SAVE_FAILED',
+            error: 'この版では構造を採れません(アプリを読み直すと直ることがあります)',
+          });
+          break;
+        }
+        const opts = { maxRows: SQL_MAX_ROWS, maxSteps: SQL_MAX_STEPS, maxMs: SQL_MAX_MS, ...guest };
+        void (async (): Promise<void> => {
+          const columns = await ask(SCHEMA_COLUMNS_SQL, opts);
+          const fks = await ask(SCHEMA_FK_SQL, opts);
+          /**
+           * ⚠ **数えるのは表だけ**(ビューは数えない)── ビューを数えると
+           *   **その場でビューが走る**ので、重い相手で刺さる。
+           */
+          const names = [
+            ...new Set(
+              columns.rows
+                .filter((r) => r[columns.columns.indexOf('kind')] === 'table')
+                .map((r) => String(r[columns.columns.indexOf('tbl')] ?? '')),
+            ),
+          ].filter((n) => n !== '');
+          const sql = countsSql(names);
+          let counts: { columns: readonly string[]; rows: readonly (readonly SqlCell[])[] } | null =
+            null;
+          if (sql !== null) {
+            // ⚠ 行数が採れなくても**構造は出す**(ここだけ握り潰してよい)
+            counts = await ask(sql, opts).catch(() => null);
+          }
+          if (disposed) return;
+          const title = schemaNoteTitle(new Date(), where);
+          dispatcher.dispatch({
+            type: 'CREATE_ENTRY',
+            archetype: 'text',
+            lid,
+            title,
+            body: renderSchemaDigest({
+              source: where ?? 'この PKC のノート',
+              columns,
+              fks,
+              ...(counts === null ? {} : { counts }),
+            }),
+            parentLid: null,
+            relationId,
+          });
+          dispatcher.dispatch({ type: 'SQL_SAVED', title });
+        })().catch((e: unknown) => {
+          if (disposed) return;
+          const raw = e instanceof Error ? e.message : String(e);
+          dispatcher.dispatch({
+            type: 'SQL_SAVE_FAILED',
+            error: `構造を採れませんでした(${raw})`,
+          });
+        });
         break;
       }
       case 'REQUEST_SQL_RUN': {

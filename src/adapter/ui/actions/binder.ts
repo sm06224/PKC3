@@ -7480,6 +7480,30 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   升の逃がし方をここに書くと、判定が 2 か所になる(§7)。
    * ⚠ **編集の面へ入らない**(`edit: false`)── 打っている途中の SQL を退かさない。
    */
+  /**
+   * 🔴 **調べている相手の構造を、ノート 1 枚にする**(#918 段①。user 要望 2026-09-14)。
+   *
+   * ⚠ **答えが無くても押せる**(`sql-to-note` との違い)── 構造は**打つ前**に要る物である。
+   * ⚠ **中身は 1 文字も出ない**(表・列・型・鍵・繋がり・行数だけ)。
+   * 🔑 id をここで作るのは `sql-to-note` と同じ作法 ── 純粋な reducer も effect も乱数を持たない。
+   */
+  'sql-schema-to-note': (dispatcher) => {
+    const state = dispatcher.getState();
+    if (state.sqlPage.running) return;
+    // 🔑 **編集中は断って理由を出す**(`sql-to-note` と同じ ── 黙って捨てない)
+    if (state.phase !== 'ready') {
+      dispatcher.dispatch({
+        type: 'SQL_SAVE_FAILED',
+        error: '編集中は書き出せません(本文の編集を終えてから押してください)',
+      });
+      return;
+    }
+    dispatcher.dispatch({
+      type: 'SQL_SCHEMA_TO_NOTE',
+      lid: generateLid(),
+      relationId: generateLid(),
+    });
+  },
   'sql-to-note': (dispatcher) => {
     const state = dispatcher.getState();
     const p = state.sqlPage;

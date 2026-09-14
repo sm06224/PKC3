@@ -207,6 +207,8 @@ function setup(
       [...tr.querySelectorAll('td')].map((td) => td.textContent ?? ''),
     );
   const saveBtn = pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-to-note"]')!;
+  // 🔑 **構造をノートへ**(#918 段①)── 答えが無くても押せる側
+  const schemaBtn = pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-schema-to-note"]')!;
   const sourceSel = pane.querySelector<HTMLSelectElement>('[data-pkc-field="sql-source"]')!;
   const pick = (lid: string): void => {
     sourceSel.value = lid;
@@ -237,6 +239,7 @@ function setup(
     note,
     heads,
     cells,
+    schemaBtn,
     runReadOnlySql,
     persisted,
     sourceSel,
@@ -1295,5 +1298,120 @@ describe('SQL の面から、手持ちのファイルを開く(#854 段②)', ()
     const names = [...sourceSel.options].map((o) => o.textContent);
     expect(names, '前に開いた file がまだ選び所に残っている').not.toContain('最初.sqlite');
     expect(names, '今開いている file が選び所に無い').toContain('次.sqlite');
+  });
+});
+
+/**
+ * 🔴 **構造 1 枚をノートへ**(#918 段①。user 要望 2026-09-14「ai向けに構造吐き出したり」)。
+ *
+ * 守る主張:
+ * 1. **打つ前でも押せる**(答えが無くても構造は採れる ── 「ノートへ」との違い)
+ * 2. 🔴 **門を 1 ミリも緩めない** ── 打つのは `select` 3 本だけ
+ * 3. 🔴 **2 回押しても 1 枚**(走っている間は受けない)
+ * 4. 行数が採れなくても**構造は出る**(採れなかったと**言う**)
+ * 5. 編集中は**断って理由を出す**
+ */
+describe('構造をノートへ(#918 段①)', () => {
+  /**
+   * ⚠ **3 本を順に打つので、`settle()` の 3 巡では足りない**(1 稿目はここで
+   *   5 件とも落ちた ── `persisted` が 0 のままだった)。
+   * 🔑 余裕を持って回す ── **待ちの回数を増やしても、遅い実装は速くならない**ので、
+   *   これで通ったなら「届いている」と言ってよい。
+   */
+  const settleAll = async (): Promise<void> => {
+    for (let i = 0; i < 16; i += 1) await Promise.resolve();
+  };
+
+  /** 3 本の `select` に、それぞれの形で答える fake。 */
+  const schemaReply = (opts: { countsFail?: boolean } = {}) => {
+    const seen: string[] = [];
+    const reply = async (sql: string): Promise<SqlAnswer> => {
+      seen.push(sql);
+      if (sql.includes('pragma_table_info')) {
+        return answer(
+          ['kind', 'tbl', 'cid', 'col', 'typ', 'nn', 'pk'],
+          [
+            ['table', 'entries', 0, 'lid', 'TEXT', 1, 1],
+            ['table', 'entries', 1, 'title', 'TEXT', 0, 0],
+          ],
+        );
+      }
+      if (sql.includes('pragma_foreign_key_list')) return answer(['tbl', 'ref', 'col', 'refcol'], []);
+      if (sql.includes('count(*)')) {
+        if (opts.countsFail === true) throw new Error('数えられない');
+        return answer(['tbl', 'n'], [['entries', 7]]);
+      }
+      return answer(['a'], [[1]]);
+    };
+    return { reply, seen };
+  };
+
+  it('🔴 打つ前でも押せて、構造 1 枚がノートになる', async () => {
+    const { reply, seen } = schemaReply();
+    const { schemaBtn, persisted, d } = setup(reply);
+    expect(schemaBtn.disabled, '答えが無いと押せない(構造は打つ前に要る)').toBe(false);
+    schemaBtn.click();
+    await settleAll();
+    expect(persisted.length, 'ノートが 1 枚も作られていない').toBe(1);
+    const body = persisted[0]?.body ?? '';
+    expect(body, '表が出ていない').toContain('## entries(表・7 行)');
+    expect(body, '列が出ていない').toContain('| lid | TEXT | 不可 | 主キー |');
+    expect(body, '中身を出していないと言っていない').toContain('中身は 1 行も含まれていません');
+    expect(d.getState().sqlPage.saved, '書き出したと言っていない').toContain('DB の構造');
+    // 🔴 **門を緩めていない** ── 打ったのは `select` だけ
+    expect(seen.length, '打った数が違う(列 / 繋がり / 行数の 3 本のはず)').toBe(3);
+    for (const q of seen) expect(q.trimStart().slice(0, 6).toLowerCase()).toBe('select');
+  });
+
+  it('🔴 2 回押しても 1 枚(同じノートを 2 つ作らない)', async () => {
+    const { reply } = schemaReply();
+    const { schemaBtn, persisted } = setup(reply);
+    schemaBtn.click();
+    schemaBtn.click();
+    await settleAll();
+    expect(persisted.length, '2 回押したら 2 枚できた').toBe(1);
+  });
+
+  it('🔴 行数が採れなくても構造は出る(採れなかったと言う)', async () => {
+    const { reply } = schemaReply({ countsFail: true });
+    const { schemaBtn, persisted } = setup(reply);
+    schemaBtn.click();
+    await settleAll();
+    const body = persisted[0]?.body ?? '';
+    expect(body, '構造ごと落ちている').toContain('## entries(表)');
+    expect(body, '採れなかったと言っていない').toContain('行数は採れませんでした');
+    expect(body, '採れていない行数を書いている').not.toContain('7 行');
+  });
+
+  /**
+   * 🔴 **錠は必ず降りる**(押した後にまた押せる状態へ戻る)。
+   * ⚠ 降りないと、**以後ずっと押せない**(押しても無反応)という最悪の形になる。
+   */
+  it('🔴 書き出した後、錠が降りている', async () => {
+    const { reply } = schemaReply();
+    const { schemaBtn, d } = setup(reply);
+    schemaBtn.click();
+    await settleAll();
+    expect(d.getState().sqlPage.running, '錠が降りていない(以後ずっと押せなくなる)').toBe(false);
+    expect(d.getState().sqlPage.error, '成功したのに断り文が出ている').toBe('');
+  });
+
+  /**
+   * 🔴 **編集中は断って、理由を画面に出す**。
+   * 🔑 わざわざ作らなくても、**1 回押せばその状態になる** ── `CREATE_ENTRY` は
+   *   作ったノートを開くので、押した直後は `editing` である(`sql-to-note` と同じ)。
+   * ⚠ **黙って捨てない**ことがこの test の主張である(`CREATE_ENTRY` は
+   *   `phase !== 'ready'` を無言で落とすので、断り文が無いと「壊れている」と読まれる)。
+   */
+  it('🔴 編集中は断って、理由を画面に出す', async () => {
+    const { reply } = schemaReply();
+    const { schemaBtn, persisted, d } = setup(reply);
+    schemaBtn.click();
+    await settleAll();
+    expect(d.getState().phase, '前提が崩れている(作った後は編集中のはず)').toBe('editing');
+    schemaBtn.click();
+    await settleAll();
+    expect(persisted.length, '編集中なのに 2 枚目を作った').toBe(1);
+    expect(d.getState().sqlPage.error, '理由を言っていない').toContain('編集中');
   });
 });

@@ -1385,6 +1385,11 @@ export type UserAction =
   | { type: 'SET_SQL_TEXT'; sql: string }
   | { type: 'RUN_SQL' }
   /**
+   * 🔴 **構造 1 枚をノートへ**(#918 段①。user 要望 2026-09-14「ai向けに構造吐き出したり」)。
+   * ⚠ 中身は 1 文字も出さない ── 出すのは表・列・型・鍵・繋がり・行数だけである。
+   */
+  | { type: 'SQL_SCHEMA_TO_NOTE'; lid: string; relationId: string }
+  /**
    * 🔴 **答えをノートへ書き出した**(#681 段③ の 3 つ目)。
    * ⚠ ノートを作るのは `CREATE_ENTRY` の仕事 ── ここは**言うだけ**である
    *   (2 つの仕事を 1 つの action に持たせない)。
@@ -2302,6 +2307,20 @@ export type DomainEvent =
        *   1 回が**前の相手へ飛ぶ**(読む時点が違う)。
        */
       guest?: boolean;
+    }
+  /**
+   * 🔴 **調べている相手の構造を採ってきてほしい**(#918 段①)。
+   * ⚠ **打つ字はこちらが持たない** ── 3 本の `select` を組むのは `schema-digest.ts` で、
+   *   effect はそれを順に打って 1 枚にまとめる。
+   * 🔑 **門にも worker にも 1 行も足していない**(ぜんぶ `select` で採れる)。
+   */
+  | {
+      type: 'REQUEST_SQL_SCHEMA';
+      where: string | null;
+      guest?: boolean;
+      /** ⚠ **id は押した側が作る** ── 純粋な reducer も effect も乱数を持たない。 */
+      lid: string;
+      relationId: string;
     }
   /** 取り込んだ `.sqlite` を開く / 手放す(#681 段③ の 2 つ目)。 */
   | { type: 'REQUEST_SQL_GUEST_OPEN'; lid: string; name: string }
@@ -3261,6 +3280,27 @@ function reduceCore(
       };
     }
     /**
+     * 🔴 **構造 1 枚をノートへ**(#918 段①)。
+     * ⚠ 走っている間は**受けない**(2 本走らせると同じノートが 2 つできる)。
+     * 🔑 `running` を立てるので、**終わりを言う 2 つ**(`SQL_SAVED` / `SQL_SAVE_FAILED`)が
+     *   必ず降ろす ── 降ろし忘れると、以後ずっと押せなくなる。
+     */
+    case 'SQL_SCHEMA_TO_NOTE': {
+      if (state.sqlPage.running) return { state, events: [] };
+      return {
+        state: { ...state, sqlPage: { ...state.sqlPage, running: true, error: '', saved: '' } },
+        events: [
+          {
+            type: 'REQUEST_SQL_SCHEMA',
+            where: state.sqlPage.guest?.name ?? null,
+            lid: action.lid,
+            relationId: action.relationId,
+            ...(state.sqlPage.guest === null ? {} : { guest: true }),
+          },
+        ],
+      };
+    }
+    /**
      * 🔴 **古い回の答えは捨てる**(#681 の着地前レビュー F3-A)。
      * ⚠ 走っている最中に相手を変えられるので、受けると**新しい名札のまま
      *   古い DB の中身**が出る ── 数字は本物なので気づけない。
@@ -3288,8 +3328,9 @@ function reduceCore(
      * ⚠ 別の窓で開いている面なので、**言わないと押せなかったように見える**。
      */
     case 'SQL_SAVED':
+      // ⚠ **`running` を必ず降ろす**(#918 段①)── `SQL_SAVE_FAILED` と対である
       return {
-        state: { ...state, sqlPage: { ...state.sqlPage, saved: action.title } },
+        state: { ...state, sqlPage: { ...state.sqlPage, running: false, saved: action.title } },
         events: [],
       };
     /**
@@ -3378,8 +3419,13 @@ function reduceCore(
      * ⚠ 断りの色が付く行(`error`)へ出す ── 黙って何も起きない形を作らない。
      */
     case 'SQL_SAVE_FAILED':
+      // ⚠ **`running` を必ず降ろす**(#918 段①)── 構造の書き出しはここを終わりにするので、
+      //    降ろさないと以後ずっと押せなくなる。⚠ 元から false の回に書いても害は無い。
       return {
-        state: { ...state, sqlPage: { ...state.sqlPage, error: action.error, saved: '' } },
+        state: {
+          ...state,
+          sqlPage: { ...state.sqlPage, running: false, error: action.error, saved: '' },
+        },
         events: [],
       };
     case 'SQL_RUN_FAILED':
