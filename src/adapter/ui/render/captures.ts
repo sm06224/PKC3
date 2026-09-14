@@ -62,6 +62,8 @@ export class CapturesRenderer {
    *   ── 面は 2 つ生きうるので、判定を描画器に置くと片方だけ印が付く(§7)。
    */
   private trim: AppState['captureTrim'] = null;
+  /** ⚠ 切り出している最中か(#683 段②a)。**state の写し**。 */
+  private trimBusy = false;
   /**
    * ⚠ **借りの世代**。押してから bytes が届くまでの間に別の行を押されたら、
    *   届いた側は**借りた瞬間に返す**(古い音が後から鳴らない)。
@@ -104,6 +106,7 @@ export class CapturesRenderer {
     this.syncBorrow(state, shown);
     // ⚠ 描く直前に写す(`row` は state を受け取らない)
     this.trim = state.captureTrim;
+    this.trimBusy = state.captureTrimBusy;
     /**
      * ⚠ **指紋に「失敗」を先に入れる**(`contacts.ts` の 2 巡目レビューで判明した形)
      *   ── 入れないと、初回の走査が失敗した回(`captureItems` は `null` のまま)が
@@ -121,6 +124,8 @@ export class CapturesRenderer {
        *   **時刻が画面に出ない**(state は動いているのに描き直されない)。
        */
       `${state.captureTrim?.startMs ?? -1}:${state.captureTrim?.endMs ?? -1}`,
+      // ⚠ 走っているかも入れる ── 入れないと「切り出しています…」が画面に出ない
+      state.captureTrimBusy ? 'busy' : '',
       shown.map((i) => `${i.lid}|${i.name}|${String(i.size ?? -1)}`).join(''),
     ].join('');
     if (print === this.last) return;
@@ -237,6 +242,11 @@ export class CapturesRenderer {
     mark.setAttribute('data-pkc-action', 'capture-trim-start');
     mark.setAttribute('data-pkc-field', 'capture-trim-start');
     mark.textContent = 'ここから';
+    /**
+     * ⚠ **走っている間は印も打たせない**(着地前レビュー 2-C)── 打てても、
+     *   走っている物が終わった瞬間に `CLEAR_CAPTURE_TRIM` で**打ち直した印ごと消える**。
+     */
+    mark.disabled = this.trimBusy;
     mark.title = 'いま鳴っている所を、切り出しの始まりにします。';
     li.append(mark);
 
@@ -245,18 +255,29 @@ export class CapturesRenderer {
     until.setAttribute('data-pkc-action', 'capture-trim-end');
     until.setAttribute('data-pkc-field', 'capture-trim-end');
     until.textContent = 'ここまで';
+    until.disabled = this.trimBusy;
     until.title = 'いま鳴っている所を、切り出しの終わりにします。';
     li.append(until);
 
     const startMs = this.trim?.startMs ?? null;
     const endMs = this.trim?.endMs ?? null;
     if (startMs !== null && endMs !== null) {
+      /**
+       * 🔴 **走っている間は、押した所で分かるようにする**(着地前の動線レビュー 欠陥 3)。
+       * ⚠ 長い録音は数秒かかる ── ボタンが何も言わないと「効かなかった」と読まれ、
+       *   もう一度押される(押しても段取りが断るので実害は無いが、**押した所が語らない**)。
+       * ⚠ `disabled` にする ── 見た目だけ変えて押せるままにすると、断り文が出る
+       *   (押せるのに断られるのは、押せないのと同じくらい分かりにくい)。
+       */
       const run = document.createElement('button');
       run.type = 'button';
       run.setAttribute('data-pkc-action', 'capture-trim-run');
       run.setAttribute('data-pkc-field', 'capture-trim-run');
-      run.textContent = 'この範囲で切り出す';
-      run.title = 'この範囲だけを新しい録音として保存します(元はそのまま残ります)。';
+      run.textContent = this.trimBusy ? '切り出しています…' : 'この範囲で切り出す';
+      run.disabled = this.trimBusy;
+      run.title = this.trimBusy
+        ? 'いま切り出しています。終わるまでお待ちください。'
+        : 'この範囲だけを新しい録音として保存します(元はそのまま残ります)。';
       li.append(run);
 
       const clear = document.createElement('button');
@@ -264,6 +285,9 @@ export class CapturesRenderer {
       clear.setAttribute('data-pkc-action', 'capture-trim-clear');
       clear.setAttribute('data-pkc-field', 'capture-trim-clear');
       clear.textContent = '印を消す';
+      // ⚠ 走っている間は印を消させない ── 消しても走っている物は止まらないので、
+      //   「消したのに増えた」という読めない結果になる
+      clear.disabled = this.trimBusy;
       clear.title = '「ここから」「ここまで」の印を消します。';
       li.append(clear);
     }

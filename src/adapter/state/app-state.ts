@@ -1054,6 +1054,15 @@ export interface AppState {
    */
   captureTrim: { readonly lid: string; readonly startMs: number | null; readonly endMs: number | null } | null;
   /**
+   * 🔴 **いま切り出している最中か**(#683 段②a、着地前の動線レビュー 欠陥 3)。
+   *
+   * ⚠ **押した所に手がかりを出すため**に state へ置く ── 長い録音は数秒かかるので、
+   *   ボタンが何も言わないと「効かなかった」と読まれて、もう一度押される。
+   * 🔑 描画器に持たせない ── 同じ document に 2 つ生きうるので、片方の面だけ
+   *   「切り出しています…」になる(§7)。
+   */
+  captureTrimBusy: boolean;
+  /**
    * 🔴 **保存が「消えない扱い」か**(#347、user 裁定 2026-08-23)。
    *
    * ⚠ 出すのは**設定の面だけ**である ── 帯にもダイアログにもしない
@@ -1290,6 +1299,7 @@ export const initialState: AppState = {
   captureScanFailed: false,
   capturePlayingLid: null,
   captureTrim: null,
+  captureTrimBusy: false,
   snippetScan: null,
   persistState: 'unknown',
   backlinks: null,
@@ -1471,6 +1481,8 @@ export type UserAction =
   | { type: 'SET_CAPTURE_TRIM_MARK'; edge: 'start' | 'end'; ms: number }
   /** 切り出す範囲の印を消す(#683 段②a)。 */
   | { type: 'CLEAR_CAPTURE_TRIM' }
+  /** 切り出しが走っているか(#683 段②a)。⚠ 押した所に「切り出しています…」を出すため。 */
+  | { type: 'SET_CAPTURE_TRIM_BUSY'; busy: boolean }
   /** 🔴 雛形を集め終えた(#196 / B-2)。⚠ `null` は失敗 ── **帯は出さず静かに畳む**。 */
   | { type: 'SET_SNIPPET_SCAN'; scan: SnippetScan | null }
   /** 札が集められなかった(#277 段②-b)。⚠ 「まだ」と区別する ── 文言が違う。 */
@@ -3132,6 +3144,8 @@ function reduceCore(
     }
     case 'CLEAR_CAPTURE_TRIM':
       return { state: { ...state, captureTrim: null }, events: [] };
+    case 'SET_CAPTURE_TRIM_BUSY':
+      return { state: { ...state, captureTrimBusy: action.busy }, events: [] };
     /**
      * 🔴 **雛形は「集められなかった」を帯に出さない**(#196 / B-2)。
      *

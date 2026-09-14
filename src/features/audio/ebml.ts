@@ -23,44 +23,38 @@
  * 🔑 だから読む側は**入れ物(master)の大きさを使わない**(中へ降りるだけ)。
  */
 
-/** 読んだ可変長整数。`length` は**読んだバイト数**(値ではない)。 */
-export interface Vint {
-  readonly value: number;
-  readonly length: number;
-}
-
 /** vint の最大の長さ。⚠ これを超える先頭バイト(`0x00`)は EBML ではない。 */
 const VINT_MAX_LEN = 8;
 
 /**
- * 可変長整数を読む。⚠ **読めなければ `null`**(例外にしない ── 壊れた file は
+ * 可変長整数の**長さ**を読む。⚠ **読めなければ `null`**(例外にしない ── 壊れた file は
  * 想定内で、断り文へ落とす)。
  *
- * @param stripMarker 長さの印を落とすか。**大きさなら `true`、id なら `false`**。
+ * ⚠ **値は返さない。** 値が要るのは「大きさ」だけで、そちらは `readSizeAt` が
+ *   別に読む(印を落とす / 不明を扱う、という別の作法が要るため)。
+ * 🔴 直す前はここが `stripMarker` を取って値も返していたが、**唯一の呼び側**
+ *   (`readId`)は値を使わず**生バイト**から id を組んでいたので、その引数は
+ *   **どう変えても出力が変わらなかった**(変異試験 E1 が SURVIVED で教えた)。
+ *   🔑 test を足すのではなく**引数ごと消した** ── 使われない旗は、次に読む人に
+ *   「ここで切り替えられる」と誤解させる。
  */
-export function readVint(bytes: Uint8Array, pos: number, stripMarker: boolean): Vint | null {
+export function readVintLength(bytes: Uint8Array, pos: number): number | null {
   if (pos < 0 || pos >= bytes.length) return null;
   const first = bytes[pos]!;
   if (first === 0) return null; // ⚠ 9 バイト以上の vint は無い
   let length = 1;
   for (let mask = 0x80; mask > 0 && (first & mask) === 0; mask >>= 1) length += 1;
   if (length > VINT_MAX_LEN || pos + length > bytes.length) return null;
-  let value = stripMarker ? first & (0xff >> length) : first;
-  for (let i = 1; i < length; i += 1) {
-    // ⚠ `* 256` で伸ばす(`<<` は 32 ビットで折り返す)
-    value = value * 256 + bytes[pos + i]!;
-    if (!Number.isSafeInteger(value)) return null;
-  }
-  return { value, length };
+  return length;
 }
 
 /** 要素の id を 16 進の字で読む。⚠ **印を落とさない**(落とすと別の id になる)。 */
 export function readId(bytes: Uint8Array, pos: number): { readonly id: string; readonly length: number } | null {
-  const v = readVint(bytes, pos, false);
-  if (v === null || v.length > 4) return null;
+  const length = readVintLength(bytes, pos);
+  if (length === null || length > 4) return null;
   let id = '';
-  for (let i = 0; i < v.length; i += 1) id += bytes[pos + i]!.toString(16).padStart(2, '0');
-  return { id, length: v.length };
+  for (let i = 0; i < length; i += 1) id += bytes[pos + i]!.toString(16).padStart(2, '0');
+  return { id, length };
 }
 
 /**

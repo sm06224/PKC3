@@ -9,7 +9,7 @@
  * 🔑 だからここの `el()` は **1〜2 バイトの大きさしか書けない別物**で、
  *   バイトは手で数えられる形にしてある。
  * 🔑 書く側は**往復**(自分で書いた物を自分でほどく)と、
- *   **実ブラウザ**(`tests/smoke/audio-trim.smoke.spec.ts` ── `<audio>.duration`)で見る。
+ *   **実ブラウザ**(`tests/smoke/media-capture.smoke.spec.ts` の段⑤ ── `<audio>.duration`)で見る。
  */
 import { describe, expect, it } from 'vitest';
 import { demuxWebmOpus, trimWebmOpus, TRIM_REFUSAL_TEXT } from '../../src/features/audio/webm-opus';
@@ -57,6 +57,12 @@ interface Fixture {
   readonly channels?: number;
   /** ⚠ `Cluster` を何 ms ごとに切るか(元の file も分かれていることが在る)。 */
   readonly clusterMs?: number;
+  /** ⚠ `CodecID` に詰め物を足す(上流が偶数長に揃える形)。 */
+  readonly padCodecId?: boolean;
+  /** ⚠ 最初の `Cluster` の時刻(外から来た webm は 0 から始まらないことが在る)。 */
+  readonly originMs?: number;
+  /** ⚠ **もう 1 本 track を混ぜる**(番号 2。opus ではない側)。 */
+  readonly extraTrack?: 'before' | 'after';
 }
 
 /** 最小の webm を手で組む。 */
@@ -66,17 +72,23 @@ function webm(f: Fixture = {}): Uint8Array {
   const step = f.stepMs ?? 60;
   const payload = f.payload ?? 4;
   const clusterMs = f.clusterMs ?? 1e9;
+  const origin = f.originMs ?? 0;
 
   const head = el('1a45dfa3', el('4282', ascii('webm')));
   const info = el('1549a966', el('2ad7b1', hex('0f4240'))); // TimestampScale = 1000000
-  const tracks = el(
-    '1654ae6b',
-    el('ae', [
-      ...el('d7', [1]),
-      ...el('86', ascii(codecId)),
-      ...el('63a2', opusHead(f.channels ?? 1)),
-    ]),
-  );
+  /** ⚠ 混ぜ物の track(番号 2)。opus ではない ── 選ばれてはいけない側。 */
+  const other = el('ae', [...el('d7', [2]), ...el('86', ascii('V_VP8'))]);
+  const mine = el('ae', [
+    ...el('d7', [1]),
+    // ⚠ **詰め物を足す** ── 上流は id を偶数長に揃えて埋めることがある
+    ...el('86', [...ascii(codecId), ...(f.padCodecId === true ? [0, 0] : [])]),
+    ...el('63a2', opusHead(f.channels ?? 1)),
+  ]);
+  const tracks = el('1654ae6b', [
+    ...(f.extraTrack === 'before' ? other : []),
+    ...mine,
+    ...(f.extraTrack === 'after' ? other : []),
+  ]);
   const clusters: number[] = [];
   let at = 0;
   while (at < count) {
@@ -92,9 +104,13 @@ function webm(f: Fixture = {}): Uint8Array {
           ...Array.from({ length: payload }, (_, k) => (at * 16 + k) & 0xff),
         ]),
       );
+      // ⚠ **別の track の block を同じ Cluster に混ぜる**(番号 2)
+      if (f.extraTrack !== undefined)
+        blocks.push(...el('a3', [0x82, ...i16(at * step - baseMs), 0x80, 0xee, 0xee, 0xee, 0xee]));
       at += 1;
     }
-    clusters.push(...el('1f43b675', [...el('e7', [baseMs & 0xff, (baseMs >> 8) & 0xff].reverse()), ...blocks]));
+    const ts = baseMs + origin;
+    clusters.push(...el('1f43b675', [...el('e7', i16(ts)), ...blocks]));
   }
   return Uint8Array.from([...head, ...el('18538067', [...info, ...tracks, ...clusters])]);
 }
@@ -264,6 +280,123 @@ describe('切り出す(trimWebmOpus)', () => {
   });
 
   /** 🔑 **記憶の門**(設計 doc §8)── 切り出しは範囲に比例した量しか作らない。 */
+  /**
+   * 🔴 **札が本当に bytes へ書けているか**(変異試験 W9 / W10 が SURVIVED で教えた)。
+   *
+   * ⚠ 返り値の `codecDelayNs` / `discardPaddingNs` は**書く前に計算した値**なので、
+   *   それを見ても「書けたか」は 1 ビットも分からない ── 実際、札を書かない変異も
+   *   0 で書く変異も**両方生き延びた**。
+   * 🔑 だから**書いた物を読み戻す**(`demuxWebmOpus` が両方の札を読む)。
+   */
+  it('🔴 頭の札(CodecDelay)が bytes に書かれている', () => {
+    const t = trimWebmOpus(src(), 1000, 2000);
+    if (!t.ok) throw new Error('切れない');
+    const back = demuxWebmOpus(t.result.bytes);
+    if (!back.ok) throw new Error('ほどけない');
+    expect(back.source.codecDelayMs, '頭の札が書かれていない').toBe(160);
+  });
+
+  it('🔴 尻の札(DiscardPadding)が bytes に書かれている', () => {
+    const t = trimWebmOpus(src(), 1000, 2000);
+    if (!t.ok) throw new Error('切れない');
+    const back = demuxWebmOpus(t.result.bytes);
+    if (!back.ok) throw new Error('ほどけない');
+    expect(back.source.discardPaddingMs, '尻の札が書かれていない').toBe(40);
+  });
+
+  it('⚠ 空振り防止 ── 捨てる物が無い切り出しには尻の札を書かない', () => {
+    // 3 秒ちょうどで切れば余りが無い ── 札が 0 なら書かない側に倒れる
+    const t = trimWebmOpus(src(), 0, 3000);
+    if (!t.ok) throw new Error('切れない');
+    const back = demuxWebmOpus(t.result.bytes);
+    if (!back.ok) throw new Error('ほどけない');
+    expect(back.source.discardPaddingMs).toBe(0);
+    expect(back.source.codecDelayMs).toBe(0);
+  });
+
+  /**
+   * 🔴 **切り出した物を、もう一度切る**(同じ変異から見つかった実害)。
+   *
+   * ⚠ 切り出した物には札が付いているので、`<audio>` が見せる時刻は
+   *   **packet の時刻より札のぶん手前**である。札を読まずに切ると、
+   *   **2 回目だけ 0.16 秒ずれる**(user から見ると「少し手前から始まる」)。
+   */
+  it('🔴 2 回目の切り出しが、札のぶんずれない', () => {
+    const once = trimWebmOpus(src(), 1000, 2000);
+    if (!once.ok) throw new Error('1 回目が切れない');
+    expect(once.result.durationMs).toBe(1000);
+    // 🔑 1 回目の結果の「鳴らして 0.2〜0.8 秒」を切る
+    const twice = trimWebmOpus(once.result.bytes, 200, 800);
+    if (!twice.ok) throw new Error('2 回目が切れない');
+    expect(twice.result.durationMs, '2 回目の長さが頼んだとおりでない').toBe(600);
+    const back = demuxWebmOpus(twice.result.bytes);
+    if (!back.ok) throw new Error('ほどけない');
+    /**
+     * 🔑 **算数**:1 回目の file は packet を 60ms 刻みで持ち、札は 160ms。
+     *   だから「鳴らして 200ms」は packet の物差しで **360ms**。前置き 2 つ戻って
+     *   base は **240ms** なので、新しい札は **360 − 240 = 120ms** になる。
+     * ⚠ 札を足さずに切ると `from0` が 200 のままになり、**別の packet から**
+     *   始まって **160ms 手前の音**が混ざる(user には「少し手前から始まる」と見える)。
+     */
+    expect(back.source.codecDelayMs, '元の札を足していない(札のぶんずれる)').toBe(120);
+    // ⚠ **選んだ packet そのもの**も見る(札だけ合って中身がずれる形を弾く)
+    expect(back.source.packets).toHaveLength(12);
+  });
+
+  it('🔴 頼んだ始まりが録音より手前でも、捨てる量は負にならない', () => {
+    // ⚠ 負の札を書くと、読み手は**頭を伸ばす**(音が増える)か、file ごと壊れる
+    const t = trimWebmOpus(src(), -50, 500);
+    if (!t.ok) throw new Error('切れない');
+    expect(t.result.codecDelayNs).toBeGreaterThanOrEqual(0);
+  });
+
+  /**
+   * 🔴 **外から来た webm は 0 から始まらないことが在る**(着地前レビュー 1-B)。
+   *
+   * ⚠ 印は `<audio>.currentTime` から採るが、**ブラウザは最初の時刻を 0 と見せる**
+   *   (実測 2026-09-14:`Cluster` を +5000ms ずらしても `currentTime` は 0 起点で、
+   *   `seekable` も `[0, …]` だった)。揃えないと、**まるで違う所を、黙って**切る。
+   */
+  it('🔴 0 から始まらない webm でも、頼んだ所が切れる', () => {
+    const shifted = webm({ count: 50, stepMs: 60, originMs: 5000 });
+    const d = demuxWebmOpus(shifted);
+    if (!d.ok) throw new Error('ほどけない');
+    expect(d.source.packets[0]!.ms, '0 起点に直していない').toBe(0);
+
+    const t = trimWebmOpus(shifted, 1000, 2000);
+    if (!t.ok) throw new Error('切れない');
+    // ⚠ 0 から始まる file と**同じ結果**になる(起点は切り出しに影響しない)
+    const plain = trimWebmOpus(src(), 1000, 2000);
+    if (!plain.ok) throw new Error('切れない');
+    expect(t.result.keptPackets).toBe(plain.result.keptPackets);
+    expect(t.result.codecDelayNs).toBe(plain.result.codecDelayNs);
+    expect(t.result.durationMs).toBe(plain.result.durationMs);
+  });
+
+  /**
+   * 🔴 **track が 2 本あっても、opus のほうだけ採る**(着地前レビュー 1-C)。
+   *
+   * ⚠ 直す前は ①最後に読んだ track で上書きしていたので **`not-opus` で断り**
+   *   ②block を track で分けていなかったので、**別の track の中身が混ざった**
+   *   壊れた音を「切り出せました」と出していた。
+   */
+  it('🔴 opus でない track が混ざっていても、opus だけを切り出す', () => {
+    for (const where of ['before', 'after'] as const) {
+      const two = webm({ count: 20, stepMs: 60, extraTrack: where });
+      const d = demuxWebmOpus(two);
+      expect(d.ok, `${where}: opus の track が在るのに断った`).toBe(true);
+      if (!d.ok) continue;
+      expect(d.source.packets, `${where}: 別の track の block が混ざった`).toHaveLength(20);
+      // ⚠ 中身も見る(数が合っていても、混ざれば内容が変わる)
+      expect([...d.source.packets[0]!.data]).toEqual([0, 1, 2, 3]);
+    }
+  });
+
+  it('⚠ CodecID に詰め物が付いていても opus と読める', () => {
+    const d = demuxWebmOpus(webm({ padCodecId: true }));
+    expect(d.ok, '末尾の \0 を落としていない').toBe(true);
+  });
+
   it('🔴 出る bytes は範囲に比例する(丸ごと展開していない)', () => {
     const whole = trimWebmOpus(src(), 0, 3000);
     const part = trimWebmOpus(src(), 1000, 2000);
