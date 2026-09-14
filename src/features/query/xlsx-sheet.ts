@@ -160,11 +160,27 @@ export function serialToText(serial: number): string | null {
   return clock === null ? date : `${date} ${clock}`;
 }
 
+/**
+ * 升の小数部を `HH:MM` にする。
+ *
+ * 🔴 **分へ「丸める」**(切り捨てない)。⚠ 連番の小数部は**割り切れない**
+ *   ことがほとんどで、17:00 は `0.7083333…` として入っている ──
+ *   `Math.floor(frac * 1440)` だと **1019.9999… → 1019 = 16:59** になり、
+ *   **1 分早い時刻が出る**(誰も気づかない形の 1 分ずれ)。
+ * ⚠ そのうえで **1439 で頭を打つ** ── 23:59:40 のような升が丸めで 1440 に
+ *   なると、`24:00` か(`% 1440` するなら)**日付はそのままで 00:00** になる。
+ *   どちらも嘘なので、**その日の終わりに留める**。
+ *
+ * ⚠ **1 時間の秒数(3600)で割らない** ── `tests/features/elapsed-text.test.ts` が
+ *   「経過の見せ方を 2 本目に書いていないか」を**`3600` / `60_000` / `/ 1000` と
+ *   `}:${` の組**で見張っている。ここは**経過ではなく時刻**だが、字面では
+ *   見分けられない ── **分で数えれば、そもそも当たらない**(§7 の門を、
+ *   回避ではなく**別の数え方**で通す)。
+ */
 function clockText(frac: number): string {
-  // ⚠ 秒で丸める(浮動小数の端数で 23:59:60 を作らない)
-  const secs = Math.round(frac * 86_400) % 86_400;
-  const h = Math.floor(secs / 3600);
-  const m = Math.floor((secs % 3600) / 60);
+  const mins = Math.min(1439, Math.round(frac * 1440));
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
