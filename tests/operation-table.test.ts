@@ -183,7 +183,8 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'set-entry-sort', 'set-external-images', 'set-flag', 'set-notices-enabled', 'set-open-in-edit',
   'set-open-place', 'set-page-format', 'set-paste-source', 'set-phone-links', 'set-prose-align',
   'set-query-key', 'set-read-columns', 'set-sql-source', 'set-sql-text', 'set-tag-badge',
-  'set-text-scale', 'set-theme', 'set-too-narrow-enabled', 'set-view', 'show-trash', 'skip-to',
+  'set-text-scale', 'set-theme', 'set-too-narrow-enabled', 'set-view', 'set-voice-boost',
+  'show-trash', 'skip-to',
   'smart-cond-add', 'smart-evict', 'smart-field', 'sql-to-note', 'stack-save',
   'start-audio-capture', 'start-edit', 'start-screen-capture', 'start-tile-reorder',
   'start-timer', 'stop-capture', 'storage-profile', 'swap-open', 'table-to-csv',
@@ -314,12 +315,15 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   受け手 +4 ── 登記は増えない。🔑 押し所は**鳴らしている行の中**にしか無く、
       //   印は「いま鳴っている所」の時刻なので、名前だけでは呼べない
       //   (`capture-play` / `capture-stop` と同じ仕分け)
-      total: 298,
-      receivers: 249,
+      // ⚠ 2026-09-14(#772 段① B): 聞くときだけ音を整える(`set-voice-boost`)で
+      //   受け手 +1 ── 登記は増えない(押し口は設定の checkbox にしか無く、鍵も持たない。
+      //   `set-alarm-enabled` / `set-phone-links` と同じ形)
+      total: 299,
+      receivers: 250,
       registered: 85,
       both: 36,
       outsideActionsTable: 49,
-      unregistered: 213,
+      unregistered: 214,
     });
   });
 

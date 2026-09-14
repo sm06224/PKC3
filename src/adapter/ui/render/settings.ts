@@ -41,6 +41,7 @@ import { currentReadColumns, lastReadPaneMetrics } from './read-columns';
 import { appEditorMode, EditorModeStore } from './editor-mode';
 import { appOpenInEdit, OpenInEditStore } from './open-in-edit';
 import { appAlarmEnabled, AlarmEnabledStore } from './alarm-enabled';
+import { appVoiceBoost, VoiceBoostStore } from './voice-boost';
 import { appPhoneLinks, PhoneLinksStore } from './phone-links';
 import { EXTERNAL_IMAGE_MODES } from '@features/markdown/external-images';
 import { NOTICE_READABLE_TEXT } from '@features/notice/notice-log';
@@ -123,6 +124,12 @@ export class SettingsRenderer {
      *   直後に入れて、位置引数で渡している test を 1 件落とした。
      */
     private readonly phoneLinks: PhoneLinksStore = appPhoneLinks,
+    /**
+     * 🔴 **聞くときだけ音を整えるか**(#772 段① B)。
+     * ⚠ **末尾に足す**(すぐ上の戒めのとおり)── 途中に入れると、位置引数で
+     *   渡している test が**静かに別の物を受け取る**。
+     */
+    private readonly voiceBoost: VoiceBoostStore = appVoiceBoost,
   ) {}
 
   private sameOriginList: HTMLElement | null = null;
@@ -141,6 +148,7 @@ export class SettingsRenderer {
       this.syncOpenPlace();
       this.syncAppOpenTarget();
       this.syncAlarmEnabled();
+      this.syncVoiceBoost();
       this.syncPhoneLinks();
       this.syncExternalImages();
       this.syncPasteSource();
@@ -599,6 +607,34 @@ export class SettingsRenderer {
     dl.append(at, ad);
 
     /**
+     * 🔴 **聞くときだけ音を整える**(#772 段① B)。
+     * ⚠ **録った音そのものは変わらない** ── 変えているのは出口だけなので、
+     *   切れば元の聞こえ方へ戻る。⚠ ここを曖昧にすると「録り直さないと戻せない」と
+     *   読まれるので、字で言い切る。
+     */
+    const vt = document.createElement('dt');
+    vt.textContent = '音を聞きやすくする';
+    const vd = document.createElement('dd');
+    const vlabel = document.createElement('label');
+    const vcheck = document.createElement('input');
+    vcheck.type = 'checkbox';
+    vcheck.setAttribute('data-pkc-action', 'set-voice-boost');
+    vcheck.setAttribute('data-pkc-field', 'voice-boost');
+    vlabel.append(vcheck, document.createTextNode(' 再生するとき、声を聞き取りやすく整える'));
+    vd.append(vlabel);
+    const vnote = document.createElement('p');
+    vnote.setAttribute('data-pkc-field', 'settings-note');
+    vnote.textContent =
+      '低い唸り(空調や机の振動)を削り、小さい声を持ち上げ、大きすぎる所を抑えます。' +
+      '効くのは PKC の中で鳴らすときだけです(音と動画 の面、本文に出る再生機、添付の下見の 3 か所)。' +
+      '録った音そのものは変わらないので、切ればいつでも元の聞こえ方に戻りますし、' +
+      '書き出したファイルや、閲覧用に書き出した HTML は元のままです。' +
+      '入れている間は音を通す仕組みが 1 つ常駐します(切っている間は作られません)。' +
+      'お使いのブラウザがこの仕組みを持っていない場合は、整わずにそのまま鳴ります。';
+    vd.append(vnote);
+    dl.append(vt, vd);
+
+    /**
      * 🔴 **本文の素の電話番号を押せる字にするか**(#278 段②)。
      *
      * ⚠ **既定は切** ── 入れると、いま読めている数字が**押せる字**になる
@@ -723,6 +759,7 @@ export class SettingsRenderer {
     this.syncOpenPlace();
     this.syncAppOpenTarget();
     this.syncAlarmEnabled();
+    this.syncVoiceBoost();
     this.syncPhoneLinks();
     this.syncSameOrigin(state);
     this.syncExtensions(state);
@@ -1182,6 +1219,11 @@ export class SettingsRenderer {
   private syncAlarmEnabled(): void {
     const box = this.region.querySelector<HTMLInputElement>('[data-pkc-field="alarm-enabled"]');
     if (box) box.checked = this.alarmEnabled.enabled();
+  }
+
+  private syncVoiceBoost(): void {
+    const box = this.region.querySelector<HTMLInputElement>('[data-pkc-field="voice-boost"]');
+    if (box) box.checked = this.voiceBoost.enabled();
   }
 
   private syncPhoneLinks(): void {

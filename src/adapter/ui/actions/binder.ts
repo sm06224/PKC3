@@ -814,6 +814,12 @@ export interface BinderServices {
   /** 🔴 予定の知らせを入 / 切にする(#280)。⚠ 入にした瞬間に予定を数え直す。 */
   setAlarmEnabled?(on: boolean): void;
   /**
+   * 🔴 **聞くときだけ音を整えるか**(#772 段① B)。⚠ **省略可**。
+   * ⚠ 切り替えたら**いま画面に在る再生機も**その場で繋ぎ替える ──
+   *   保存しただけでは、開いているノートの音は変わらない(設定が嘘になる)。
+   */
+  setVoiceBoost?(on: boolean): void;
+  /**
    * 🔴 **本文の素の電話番号を押せる字にするか**(#278 段②)。⚠ **省略可**。
    * ⚠ 切り替えたら**その場で本文を描き直す** ── 保存しただけでは、
    *   いま読んでいるノートは変わらない(設定が嘘になる)。
@@ -7749,6 +7755,10 @@ const ACTIONS: Record<string, ActionHandler> = {
   'set-alarm-enabled': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
     if (target instanceof HTMLInputElement) services.setAlarmEnabled?.(target.checked);
+  },
+  'set-voice-boost': (_dispatcher, target, services) => {
+    // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
+    if (target instanceof HTMLInputElement) services.setVoiceBoost?.(target.checked);
   },
   'set-phone-links': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)

@@ -33,6 +33,36 @@ test.use({
 
 test('🔴 録音を止めると本文に入り、その場で聞ける (#413 段①②)', async ({ page }) => {
   const errors = collectPageErrors(page);
+  /**
+   * 🔴 **「繋いだこと」を数える計器**(#772 段① B)。
+   *
+   * ⚠ 段⑥ の「入にしても進む」だけでは**空振りする** ── **1 度も繋がなくても**
+   *   音は普通に進むので、`currentTime` が動いたことは
+   *   「整える鎖を通った」証拠に**ならない**(CLAUDE.md §1)。
+   * 🔑 だから**器と横取りの回数を数える** ── アプリより先にこれを仕込むので、
+   *   アプリ側のコードは 1 行も変えずに観測できる。
+   * ⚠ 数えるだけで、**素の `AudioContext` の振る舞いは変えない**。
+   */
+  await page.addInitScript(() => {
+    const w = window as unknown as {
+      AudioContext: typeof AudioContext;
+      __pkcAudio?: { ctx: number; src: number };
+    };
+    const mark = { ctx: 0, src: 0 };
+    w.__pkcAudio = mark;
+    const Real = w.AudioContext;
+    w.AudioContext = class extends Real {
+      constructor(...args: ConstructorParameters<typeof AudioContext>) {
+        super(...args);
+        mark.ctx += 1;
+        const orig = this.createMediaElementSource.bind(this);
+        this.createMediaElementSource = (el: HTMLMediaElement): MediaElementAudioSourceNode => {
+          mark.src += 1;
+          return orig(el);
+        };
+      }
+    } as unknown as typeof AudioContext;
+  });
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
 
@@ -407,6 +437,107 @@ ${(e as Error).message}`,
   // ⚠ **元より小さい**(丸ごと写していない)。⚠ 0 でないことも見る(空振り防止)
   expect(cutInfo.bytes, '大きさを測れていない(復号の後に読んでいる)').toBeGreaterThan(0);
   expect(cutInfo.bytes, '切り出したのに元と同じ大きさ').toBeLessThan(38_000);
+
+  /**
+   * ## 段⑥ ── **聞きやすくする を入れても、音が止まらない**(#772 段① B)
+   *
+   * 🔴 **ここでしか通らない道が在る。** 整える鎖は `AudioContext` の上に組むが、
+   *   **happy-dom に `AudioContext` は無い**ので、`webAudioHost()` は
+   *   **単体テストから 1 度も実行されない**(CLAUDE.md §2「経路が一度も通っていない」)。
+   *
+   * 🔴 そして**この機能がいちばん恐れているのは無音**である ── 鎖を通した要素は、
+   *   器が止まっていると**進まない**(再生機は押せるのに動かない)。
+   *
+   * ⚠ **対照群を先に採る**(CLAUDE.md §4)── 切のまま進むことを見てから入にする。
+   *   ⚠ 対照群が進まない回は「**この箱では鳴らせない**」であって、製品の判定はできない
+   *   ── そう読める文言で落とす。
+   *
+   * 🔑 起動は増やさない ── **同じ窓の続き**で面を行き来するだけである。
+   */
+  /**
+   * 鳴らして、`currentTime` が動くまで待つ。⚠ 返すのは**進んだ秒数**。
+   *
+   * ⚠ **鳴らす口は 2 通りある**(1 稿目はここを外して 3 回とも赤くした)── この面は
+   *   `this.playing?.lid === item.lid` で**排他に**描くので、
+   *   **既に開いている行に「聞く」は無い**(在るのは器と「閉じる」)。
+   *   🔑 だから**在るほうを使う**:押していなければ「聞く」、開いていれば器そのもの。
+   */
+  const playsOn = async (label: string): Promise<number> => {
+    if ((await cutRow.locator('[data-pkc-field="capture-play"]').count()) > 0) {
+      await clickReal(
+        page,
+        '[data-pkc-capture]:has-text("(0:01〜0:03)") [data-pkc-field="capture-play"]',
+      );
+    }
+    const el = cutRow.locator('[data-pkc-field="capture-media"]');
+    await expect(el, `${label}:再生機が画面に出ていない`).toBeVisible();
+    /**
+     * ⚠ **鳴らせなかったのか、鳴っているのに進まないのか**を分ける ──
+     *   前者は**この箱の都合**(ブラウザが音を止めた)、後者は**製品の欠陥**である。
+     */
+    const started = await el.evaluate((m: HTMLMediaElement) => {
+      m.currentTime = 0;
+      return m.play().then(
+        () => 'ok',
+        (e: unknown) => String(e),
+      );
+    });
+    expect(started, `${label}:ブラウザが再生を断った(この箱の都合 ── 判定不能)`).toBe('ok');
+    await expect
+      .poll(() => el.evaluate((m: HTMLMediaElement) => m.currentTime), {
+        message: `${label}:鳴らし始めたのに再生機が進まない`,
+        timeout: 8000,
+      })
+      .toBeGreaterThan(0.02);
+    const at = await el.evaluate((m: HTMLMediaElement) => m.currentTime);
+    await el.evaluate((m: HTMLMediaElement) => m.pause());
+    return at;
+  };
+  const counts = async (): Promise<{ ctx: number; src: number }> =>
+    page.evaluate(
+      () => (window as unknown as { __pkcAudio: { ctx: number; src: number } }).__pkcAudio,
+    );
+
+  // ⚠ **対照群**(切のまま)── ここが落ちたら、以降は判定不能である
+  const plainAt = await playsOn('この箱では音が進まない(以降は判定不能)');
+  /**
+   * 🔴 **切のままなら、音の通り道に触っていない**(この機能の最重要の約束)。
+   * ⚠ 触ってしまうと、その再生機は以後**鎖なしでは鳴らない**体になる。
+   */
+  expect(
+    await counts(),
+    '切のままなのに音の通り道を横取りしている(以後、鎖なしでは鳴らない体になる)',
+  ).toEqual({ ctx: 0, src: 0 });
+
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  await clickReal(page, '[data-pkc-field="voice-boost"]');
+  await expect(
+    page.locator('[data-pkc-field="voice-boost"]'),
+    '設定を押したのに印が付かない',
+  ).toBeChecked();
+
+  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  const boostedAt = await playsOn('🔴 聞きやすくする を入れたら音が止まった(無音の形)');
+  expect(
+    boostedAt,
+    `対照群 ${plainAt.toFixed(3)} は進んだのに、入にしたら進まない`,
+  ).toBeGreaterThan(0.02);
+  /**
+   * 🔴 **空振り防止** ── 上の「進んだ」は、**1 度も繋がなくても**成り立つ。
+   * 🔑 だから「本当に鎖を通したこと」を、数えた回数で確かめる。
+   */
+  const on = await counts();
+  expect(on.src, '入にしたのに、音の通り道を 1 度も通していない(整っていない)').toBeGreaterThan(0);
+  expect(on.ctx, '器を作っていない / 再生機ごとに作り直している').toBe(1);
+
+  // 🔴 **切に戻しても進む**(外して終わりにしていない = 無音にしていない)
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  await clickReal(page, '[data-pkc-field="voice-boost"]');
+  await expect(page.locator('[data-pkc-field="voice-boost"]')).not.toBeChecked();
+  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  await playsOn('🔴 切に戻したら音が止まった(出口へ繋ぎ直していない)');
+  // ⚠ 切に戻しても**器は捨てない**(捨てると、通している音が無音になる)
+  expect(await counts(), '切に戻したときに器を作り直している').toEqual({ ...on, src: on.src });
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
