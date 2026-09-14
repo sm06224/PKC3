@@ -34,6 +34,7 @@ import { fitSqlInput } from '../../src/adapter/ui/render/sql';
 import { SQL_WINDOW_MIN } from '../../src/features/query/sql-window';
 import { homeTabOf } from '../../src/adapter/ui/render/browse-mode';
 import { readFileSync } from 'node:fs';
+import { blocksFor, stripComments, withoutMedia } from '../helpers/css-blocks';
 import { stubStamps } from '../helpers/store-stamps';
 import { stubRevisionOps } from '../helpers/revision-stub';
 import type { SqlGuestSource } from '../../src/features/query/sql-guest-source';
@@ -2198,5 +2199,127 @@ describe('打つ所(#918 段②a)', () => {
     box.dispatchEvent(esc2);
     expect(esc2.defaultPrevented, 'メニューが無いのに Esc が効かない').toBe(true);
     expect(document.activeElement, 'Esc を押しても欄から出ていない').not.toBe(box);
+  });
+});
+
+/**
+ * 🔴 **打つ欄の色分けと行番号**(#918 段②c/②d)。
+ *
+ * 🔑 **打つ所は `textarea` のまま** ── 後ろに層を敷き、字だけ透明にする。
+ *   器を替えると IME・取り消し・選択・スマホの鍵盤、そして段②a / 段②b が落ちる
+ *   (CLAUDE.md §10「置き換えの作法」)。
+ * ⚠ **色が実際に見えているか**は happy-dom では測れない ── ここで見るのは
+ *   **層の組み立て**と、**揃っていなければ必ず崩れる値**である。
+ */
+describe('打つ欄の色分けと行番号(#918 段②c/②d)', () => {
+  const layerOf = (root: HTMLElement): HTMLElement =>
+    root.querySelector<HTMLElement>('[data-pkc-field="sql-input-layer"]')!;
+
+  it('🔴 論理行 1 本につき升が 1 つ出て、番号が 1 から順に付く', () => {
+    const { root, box } = setup();
+    box.value = 'select 1\nfrom t\nwhere a = 2';
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    const nos = [...layerOf(root).querySelectorAll('[data-pkc-field="sql-line-no"]')];
+    expect(nos.map((n) => n.textContent), '番号が行数ぶん出ていない').toEqual(['1', '2', '3']);
+    // ⚠ 対照群: 1 行に戻したら升も 1 つに戻る(増えっぱなしにしない)
+    box.value = 'select 1';
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(
+      layerOf(root).querySelectorAll('[data-pkc-field="sql-line-no"]').length,
+      '升が減っていない',
+    ).toBe(1);
+  });
+
+  it('🔴 色が付いている(空振り防止)', () => {
+    const { root, box } = setup();
+    box.value = 'select 1';
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    const code = layerOf(root).querySelector('[data-pkc-field="sql-line-code"]')!;
+    expect(code.innerHTML, 'keyword に色が付いていない').toContain('pkc-tok-keyword');
+  });
+
+  /**
+   * 🔴 **番号は字とは別の升に置く。**
+   * ⚠ 同じ升へ字で足すと、**選んで写したときに番号まで一緒に写る**
+   *   (打った SQL を人へ渡せなくなる)。
+   */
+  it('🔴 番号は、字の升の中に入っていない', () => {
+    const { root, box } = setup();
+    box.value = 'select 1';
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    const code = layerOf(root).querySelector<HTMLElement>('[data-pkc-field="sql-line-code"]')!;
+    expect(code.textContent, '字の升に番号が混ざっている').not.toContain('1	');
+    expect(code.textContent?.startsWith('1'), '字の升が番号で始まっている').toBe(false);
+  });
+
+  /**
+   * 🔴 **日本語入力の最中は、層を退けて字の色を戻す**(#764 の型)。
+   * ⚠ 打っている途中の字は `value` に入らないので、透明のままだと**何も見えない**。
+   */
+  it('🔴 日本語を打っている間だけ、層が退く印が付く', () => {
+    const { root, box } = setup();
+    const wrap = root.querySelector<HTMLElement>('[data-pkc-field="sql-input-wrap"]')!;
+    expect(wrap.hasAttribute('data-pkc-composing'), '打つ前から印が付いている').toBe(false);
+    box.dispatchEvent(new Event('compositionstart', { bubbles: true }));
+    expect(wrap.hasAttribute('data-pkc-composing'), '打ち始めても印が付かない').toBe(true);
+    box.dispatchEvent(new Event('compositionend', { bubbles: true }));
+    expect(wrap.hasAttribute('data-pkc-composing'), '打ち終わっても印が残っている').toBe(false);
+  });
+
+  /**
+   * 🔴 **層が欄を塞がない。** ⚠ 層は打つ所の**真上**に重なるので、この規則が
+   *   消えると **欄がまるごと死ぬ**(#530 段③a の層と違い、逃げ場が無い)。
+   */
+  it('🔴 層は押しを通す(欄が死なない)', () => {
+    const css = withoutMedia(stripComments(readFileSync('src/styles/app.css', 'utf-8')));
+    const rule = blocksFor(css, "[data-pkc-field='sql-input-layer']").join(' ');
+    expect(rule, '層の規則が引けていない(この検査は空振り)').toContain('position: absolute');
+    expect(rule, '層に pointer-events の規則が無い(欄が押せなくなる)').toContain(
+      'pointer-events: none',
+    );
+  });
+
+  /**
+   * 🔴 **層と欄で、折り返しと字の形が 1 つ残らず揃っている**(§7「同じ値が 2 か所」)。
+   *
+   * ⚠ どれか 1 つでもずれると**色と字が重ならない** ── いちばん気づかれる壊れ方で、
+   *   しかも happy-dom では**測れない**(だから字面で pin する)。
+   */
+  it('🔴 層と欄で、字の形・行の高さ・折り返し方が同じ値である', () => {
+    const css = withoutMedia(stripComments(readFileSync('src/styles/app.css', 'utf-8')));
+    const layer = blocksFor(css, "[data-pkc-field='sql-input-layer']").join(' ');
+    /**
+     * ⚠ **欄に当たる規則は 2 本ある** ── 素の `[data-pkc-field='sql-input']`(字の形・大きさ)と、
+     *   層の中だけの上書き(透明・左余白・折り返し)。**両方を足して見る**。
+     * 🔑 値を片方へ写して 1 本で見る形にはしない ── それこそ §7「同じ値が 2 か所」である。
+     */
+    const input = [
+      ...blocksFor(css, "[data-pkc-field='sql-input']"),
+      ...blocksFor(css, "[data-pkc-field='sql-input-wrap'] [data-pkc-field='sql-input']"),
+    ].join(' ');
+    expect(input, '欄の規則が引けていない(この検査は空振り)').toContain('background: transparent');
+    for (const decl of [
+      'font-size: 13px',
+      'line-height: 1.6',
+      'white-space: pre-wrap',
+      'overflow-wrap: break-word',
+    ]) {
+      expect(layer, `層に ${decl} が無い`).toContain(decl);
+      expect(input, `欄に ${decl} が無い`).toContain(decl);
+    }
+    /**
+     * 🔴 **欄は `display: block`**(実ブラウザで実測して足した)。
+     * ⚠ `<textarea>` の UA 既定は `inline-block` なので、素のまま器へ置くと
+     *   **器のほうが descender ぶん高くなり、層が下へ 6px はみ出す**
+     *   (headless_shell で 3/3 再現:欄 97px / 層 103px)。
+     * ⚠ happy-dom では**測れない** ── だから字面で pin する。
+     *   効いていること自体は `tests/smoke/attach.smoke.spec.ts` が高さを比べて見る。
+     */
+    expect(input, '欄が display: block でない(層が下へはみ出す)').toContain('display: block');
+    // ⚠ 字の形は**同じ変数**を読む(別の綴りにすると、片方だけ差し替えられる)
+    expect(layer, '層が等幅の変数を読んでいない').toContain('font-family: var(--font-mono)');
+    // 🔴 番号の幅は 1 か所で持つ ── 層の升と欄の左余白が**同じ変数**を読む
+    expect(layer, '層の升が番号の幅の変数を読んでいない').toContain('var(--sql-gutter)');
+    expect(input, '欄の左余白が番号の幅の変数を読んでいない').toContain('var(--sql-gutter)');
   });
 });

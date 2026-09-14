@@ -24,6 +24,7 @@
  */
 import type { AppState } from '@adapter/state/app-state';
 import { sqlSourcesOf } from '@features/query/sqlite-attachment';
+import { sqlLineHtml } from '@features/query/sql-lines';
 import { SQL_GUEST_EXTS } from '@features/query/sql-guest-source';
 // 🔴 添付の .csv / .tsv / .xlsx も同じ選び所へ並べる(#854 段① / 段③)
 import { csvAttachmentSourcesOf } from '@features/query/csv-attachment';
@@ -45,6 +46,10 @@ export class SqlRenderer {
   private readonly host: HTMLElement;
   /** 打つ欄。⚠ 1 度だけ組む ── 表の描き直しで作り直さない(打ちかけを失わせない)。 */
   private box: HTMLTextAreaElement | null = null;
+  /** 色分けと行番号の層(#918 段②c/②d)。⚠ 打つ所ではない ── 見せるだけ。 */
+  private layer: HTMLElement | null = null;
+  /** 層に塗ってある字(⚠ 同じ字では組み直さない ── 打鍵ごとに DOM を捨てない)。 */
+  private painted: string | null = null;
   private run: HTMLButtonElement | null = null;
   private note: HTMLElement | null = null;
   private body: HTMLElement | null = null;
@@ -282,9 +287,49 @@ export class SqlRenderer {
     note.setAttribute('data-pkc-field', 'sql-note');
     const body = document.createElement('div');
     body.setAttribute('data-pkc-field', 'sql-body');
-    head.append(title, box, historyNote, bar, tip, rules, example);
+    /**
+     * 🔴 **色分けと行番号の層**(#918 段②c/②d)。
+     *
+     * 🔑 **打つ所は `textarea` のまま** ── 後ろにこの層を敷き、`textarea` の字だけ
+     *   透明にする。器を替えると **IME・取り消し・選択・スマホの鍵盤**、そして
+     *   段②a / 段②b が全部落ちる(CLAUDE.md §10「置き換えの作法」)。
+     * 🔑 層は**論理行 1 本 = 升 1 つ**の格子にする ── 折り返した行は升ごと伸びるので、
+     *   番号は自然に先頭へ揃う。⚠ 番号を「行の高さぶんずつ」積む形にすると、
+     *   **折り返した瞬間にずれる**。
+     * ⚠ **押しを通す**(`pointer-events: none`)── 当てないと `textarea` を押せない。
+     *   ⚠ ここは #530 段③a と違い、**層が打つ所の真上に重なる**ので、
+     *   規則が消えた瞬間に**欄がまるごと死ぬ**(無言の dead click そのもの)。
+     */
+    const wrap = document.createElement('div');
+    wrap.setAttribute('data-pkc-field', 'sql-input-wrap');
+    const layer = document.createElement('pre');
+    layer.setAttribute('data-pkc-field', 'sql-input-layer');
+    layer.setAttribute('aria-hidden', 'true');
+    wrap.append(layer, box);
+    /**
+     * 🔴 **日本語入力の最中は、層を退けて字の色を戻す**(#918 段②c/②d)。
+     *
+     * ⚠ 打っている途中の字は **`value` に入らない** ── ブラウザが `textarea` の中へ
+     *   直に描く。だから字を透明にしたままだと、**打っている字が 1 文字も見えない**。
+     * 🔑 CLAUDE.md §2「入力を受ける機能は、日本語で打った形を fixture に必ず 1 つ持つ」
+     *   (#764)と同じ型 ── ASCII だけで組むと、この経路を 1 度も通らない。
+     * ⚠ **実 IME はこちらでは測れない** ── 実機確認は #438 Q3 に足す。
+     */
+    box.addEventListener('compositionstart', () => {
+      wrap.setAttribute('data-pkc-composing', '');
+    });
+    box.addEventListener('compositionend', () => {
+      wrap.removeAttribute('data-pkc-composing');
+    });
+    // ⚠ 欄が転がったら層も同じだけ動かす(上限に当たると欄自身が転がる)
+    box.addEventListener('scroll', () => {
+      layer.scrollTop = box.scrollTop;
+      layer.scrollLeft = box.scrollLeft;
+    });
+    head.append(title, wrap, historyNote, bar, tip, rules, example);
     this.host.append(head, note, body);
     this.box = box;
+    this.layer = layer;
     this.run = run;
     this.save = save;
     this.source = source;
@@ -409,6 +454,16 @@ export class SqlRenderer {
     if (this.box !== null && !this.handSized && this.fitted !== p.sql) {
       this.fitted = p.sql;
       fitSqlInput(this.box);
+    }
+    /**
+     * 🔴 **層を塗り直す**(#918 段②c/②d)。⚠ **指紋の門より前**
+     *   ── 打っただけでは答えの指紋が動かない(段②a / 段②b と同じ理由)。
+     * ⚠ **同じ字では組み直さない** ── 打鍵ごとに升を作り直すと、
+     *   選択や焦点とは無関係でも**毎回 layout が走る**。
+     */
+    if (this.layer !== null && this.painted !== p.sql) {
+      this.painted = p.sql;
+      paintSqlLayer(this.layer, p.sql);
     }
     /**
      * 🔴 **器の高さが変わったら窓を見直す**(#918 段③、着地前レビューが出した)。
@@ -676,6 +731,32 @@ function spacerRow(cols: number, px: number): HTMLTableRowElement {
  * @returns 実際に付いた高さ(px)。⚠ 手で動かしたかの見分けに使うので、
  *   **上限で切られた後の値**を返す(当てた値ではない)。
  */
+/**
+ * 🔴 **色分けと行番号の層を塗る**(#918 段②c/②d)。
+ *
+ * 🔑 **升 1 つ = 論理行 1 本。** 番号は升の先頭に置くので、折り返して背が高くなっても
+ *   番号は上端に揃う(行の高さぶんずつ積む形は、折り返した瞬間にずれる)。
+ * ⚠ 中身は `sqlLineHtml` が返す**色付け済みの HTML** ── 素の字は escape 済みで、
+ *   出てくる印は `<span class="pkc-tok-…">` だけである(`code-highlight.ts`)。
+ * ⚠ **番号は `<span>` に入れて、字の列とは別の升にする** ── 同じ升へ字で足すと、
+ *   選んで写したときに**番号まで一緒に写る**。
+ */
+export function paintSqlLayer(layer: HTMLElement, text: string): void {
+  const lines = sqlLineHtml(text);
+  const doc = layer.ownerDocument;
+  layer.replaceChildren();
+  for (let i = 0; i < lines.length; i++) {
+    const no = doc.createElement('span');
+    no.setAttribute('data-pkc-field', 'sql-line-no');
+    no.textContent = String(i + 1);
+    const code = doc.createElement('span');
+    code.setAttribute('data-pkc-field', 'sql-line-code');
+    // ⚠ 空の行にも高さが要る(升が潰れると番号がずれる)
+    code.innerHTML = lines[i] === '' ? '&#8203;' : lines[i]!;
+    layer.append(no, code);
+  }
+}
+
 export function fitSqlInput(ta: HTMLTextAreaElement): number {
   ta.style.height = 'auto';
   const want = ta.scrollHeight;
@@ -683,7 +764,28 @@ export function fitSqlInput(ta: HTMLTextAreaElement): number {
     ta.style.height = '';
     return 0;
   }
-  ta.style.height = `${String(want)}px`;
+  /**
+   * 🔴 **枠のぶんを足す**(2026-09-14 に実ブラウザの実測で判明)。
+   *
+   * ⚠ `scrollHeight` は**中身 + 内側の余白**で、**枠を含まない**。ところが欄は
+   *   `box-sizing: border-box` なので、その値をそのまま `height` に当てると
+   *   **枠のぶん(上下 1px ずつ)が中に食い込み、常に 2px 足りない**。
+   * 🔑 実測:`scrollHeight 141` に対し `clientHeight 139` ── **欄が 2px 転がる**
+   *   状態になっていた(段②b `7a92990` から在った。当時は気づけなかった)。
+   *
+   * ⚠ **枠の太さを直に読む** ── 数を書くと、枠を変えた日に片方だけ古くなる(§7)。
+   * ⚠ **`offsetHeight - clientHeight` では採らない** ── あれは**横の転がし棒**も
+   *   含むので、出た日に高さが増え、次の回でまた増える**伸びる一方の輪**になる。
+   *   ⚠ しかも happy-dom は `clientHeight` に 0 を返すので、差が**高さ全部**になる
+   *   (1 稿目はそれで unit が 3 件落ちた)。
+   * ⚠ **`content-box` のときは足さない** ── そこでは枠は中に食い込まない。
+   */
+  const cs = ta.ownerDocument.defaultView?.getComputedStyle(ta);
+  const frame =
+    cs !== undefined && cs.boxSizing === 'border-box'
+      ? (Number.parseFloat(cs.borderTopWidth) || 0) + (Number.parseFloat(cs.borderBottomWidth) || 0)
+      : 0;
+  ta.style.height = `${String(want + frame)}px`;
   return ta.offsetHeight;
 }
 

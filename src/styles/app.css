@@ -4024,6 +4024,108 @@ li[data-pkc-row-slot] {
   font-size: 13px;
   resize: vertical;
 }
+/**
+ * 🔴 **色分けと行番号の層**(#918 段②c/②d)。
+ *
+ * 🔑 **打つ所は `textarea` のまま**で、後ろにこの層を敷き、字だけ透明にする ──
+ *   器を替えると IME・取り消し・選択・スマホの鍵盤、そして段②a / 段②b が落ちる。
+ * 🔑 **升 1 つ = 論理行 1 本**の格子にする ── 折り返した行は升ごと背が伸びるので、
+ *   番号は上端へ自然に揃う(行の高さぶんずつ積む形は、折り返した瞬間にずれる)。
+ * 🔴 **層と欄で、字の形・行の高さ・折り返し方・余白・枠を 1 つ残らず揃える。**
+ *   ⚠ どれか 1 つでもずれると、**色と字が重ならない**(いちばん気づかれる壊れ方)。
+ * 🔴 **`pointer-events: none` が無いと、欄そのものが押せなくなる** ── 層は打つ所の
+ *   真上に重なるので、ここは #530 段③a と違って**欄がまるごと死ぬ**。
+ */
+[data-pkc-field='sql-input-wrap'] {
+  position: relative;
+  /* ⚠ 番号の幅は**この 1 か所**で持つ ── 層の升と、欄の左余白の両方がこれを読む */
+  --sql-gutter: 3ch;
+  --sql-gap: var(--s2);
+}
+[data-pkc-field='sql-input-layer'] {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  margin: 0;
+  box-sizing: border-box;
+  /* ⚠ 枠は**透明で同じ太さ** ── 無いと中身が 1px ずれる */
+  border: 1px solid transparent;
+  padding: var(--s3);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  display: grid;
+  grid-template-columns: var(--sql-gutter) 1fr;
+  column-gap: var(--sql-gap);
+  align-content: start;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  overflow: hidden;
+  pointer-events: none;
+}
+[data-pkc-field='sql-line-no'] {
+  text-align: right;
+  color: var(--muted);
+  user-select: none;
+}
+[data-pkc-field='sql-line-code'] {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  /**
+   * 🔴 **`min-width: 0` が無いと、折り返しが欄と食い違う**(実ブラウザで実測)。
+   *
+   * ⚠ 格子の升は既定で **`min-width: auto`**(= 中身の最小幅)を持つ。
+   *   `overflow-wrap: break-word` は**あふれたときの最終手段**であって
+   *   **最小幅の計算には効かない**ので、空白の無い長い塊(`xxxx…`)があると
+   *   **升の列が器の外まで育ち**、`overflow: hidden` で黙って切れる。
+   * 🔑 実測(headless_shell):器 800px に対し**升の列が 3130px** まで育ち、
+   *   欄は約 **5.9 行**に折り返っているのに層は **3 行**しか折り返っていなかった
+   *   ── つまり**色が字とずれる**。`min-width: 0` で列が `1fr` に従い、一致する。
+   * ⚠ この壊れ方は**1 行目だけは上端が揃う**ので、短い行では気づけない。
+   */
+  min-width: 0;
+}
+[data-pkc-field='sql-input-wrap'] [data-pkc-field='sql-input'] {
+  position: relative;
+  z-index: 1;
+  /**
+   * 🔴 **`display: block` が無いと、層が欄より数 px 高くなる**(実ブラウザで実測)。
+   *
+   * ⚠ `<textarea>` の UA 既定は `inline-block` なので、`position: relative` の器へ
+   *   素のまま置くと**行ボックスの descender ぶん器のほうが高くなる**。
+   *   層は `inset: 0` で**器の高さ**に合わせるので、そのぶん下へはみ出す。
+   * 🔑 実測(headless_shell、3/3 再現):欄 97px に対し層 103px(**差 6px**)。
+   *   `display: block` にすると器の高さ = 欄の高さになり、差が消える。
+   * ⚠ **折り返しの位置はずれていなかった**(字幅は両方 756px で一致)── ずれるのは高さだけ。
+   */
+  display: block;
+  background: transparent;
+  color: transparent;
+  /* ⚠ 字を透明にすると**打つ場所の印まで消える** ── 別に色を持たせる */
+  caret-color: var(--fg);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  line-height: 1.6;
+  padding-left: calc(var(--s3) + var(--sql-gutter) + var(--sql-gap));
+}
+/* ⚠ 手本の字も透明になってしまうので、別に色を戻す(空の欄が真っ白に見える) */
+[data-pkc-field='sql-input-wrap'] [data-pkc-field='sql-input']::placeholder {
+  color: var(--muted);
+}
+/**
+ * 🔴 **日本語入力の最中は、層を退けて字の色を戻す**(#918 段②c/②d)。
+ *
+ * ⚠ 打っている途中の字は **`value` に入らない**(ブラウザが `textarea` の中へ直に描く)──
+ *   透明のままだと、**打っている字が 1 文字も見えない**。
+ * ⚠ CLAUDE.md §2「入力を受ける機能は、日本語で打った形を fixture に必ず 1 つ持つ」(#764)。
+ *   ⚠ **実 IME はこちらでは測れない** ── 実機確認は #438 Q3 に足す。
+ */
+[data-pkc-field='sql-input-wrap'][data-pkc-composing] [data-pkc-field='sql-input-layer'] {
+  visibility: hidden;
+}
+[data-pkc-field='sql-input-wrap'][data-pkc-composing] [data-pkc-field='sql-input'] {
+  color: var(--fg);
+}
 [data-pkc-field='sql-bar'] {
   display: flex;
   align-items: center;

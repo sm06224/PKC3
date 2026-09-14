@@ -1027,6 +1027,76 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   await expect(note, '添付が開いたことが画面に出ない').toContainText('uriage.csv を調べています');
 
   await page.fill('[data-pkc-field="sql-input"]', 'SELECT * FROM csv');
+
+  /**
+   * 🔴 **色と行番号の層が、欄とぴったり重なっている**(#918 段②c/②d)。
+   *
+   * ⚠ ここが**実ブラウザでしか見えない所**である ── happy-dom は大きさを 0 で返すので、
+   *   unit は「同じ値が**書いてあるか**」までしか言えない。
+   * ⚠ **折り返すほど長い 1 行**で見る ── 短い字だと 1 行ぶんで、
+   *   ずれていても差が出ない(CLAUDE.md §2「その次元が非ゼロか」)。
+   * 🔑 **新しい起動は増やさない**(#820 の規律)── この筋書きの続きで確かめる。
+   *
+   * ## 実測で見つけた欠陥 3 つ(どれもここで殺す)
+   *
+   * ① **器が欄より 6px 高かった** ── `<textarea>` の UA 既定は `inline-block` なので、
+   *    素のまま器へ置くと descender ぶん器が高くなり、層が下へはみ出す
+   *    (実測 3/3:欄 141px / 器 147px)。`display: block` で消える。
+   * ② 🔴 **折り返しの数が食い違っていた** ── 格子の升は既定で `min-width: auto` を持ち、
+   *    `overflow-wrap: break-word` は**最小幅に効かない**ので、空白の無い長い塊で
+   *    **升の列が器の外まで育つ**(実測:器 800px に対し **3130px**)。
+   *    欄は約 5.9 行、層は 3 行 ── **色が字とずれる**。`min-width: 0` で消える。
+   * ③ **欄が 2px 転がっていた** ── `fitSqlInput` が `scrollHeight` をそのまま当てるが、
+   *    欄は `border-box` なので**枠が中に食い込む**(段②b から在った)。
+   *
+   * 🔴 **1 稿目の観測点は②を見抜けなかった** ── `layer.scrollHeight` は中身ではなく
+   *   **箱の高さ**を返すので、`ta` と近い数字が出て「揃っている」ように見えていた
+   *   (CLAUDE.md §4「計器の名前が、見ている範囲より広い」)。
+   * 🔑 だから比べるのは**折り返しの数**である ── それが「重なっている」の本体。
+   */
+  const longSql = `SELECT ${'x'.repeat(400)} FROM csv`;
+  await page.fill('[data-pkc-field="sql-input"]', longSql);
+  const fit = await page.evaluate(() => {
+    const px = (v: string): number => Number.parseFloat(v) || 0;
+    const ta = document.querySelector<HTMLTextAreaElement>('[data-pkc-field="sql-input"]')!;
+    const wrap = document.querySelector<HTMLElement>('[data-pkc-field="sql-input-wrap"]')!;
+    const cells = [
+      ...document.querySelectorAll<HTMLElement>('[data-pkc-field="sql-line-code"]'),
+    ];
+    const cs = getComputedStyle(ta);
+    const lineH = px(cs.lineHeight);
+    // ⚠ 欄の中身の高さ = scrollHeight から**内側の余白**を引く(枠は含まれない)
+    const taInner = ta.scrollHeight - px(cs.paddingTop) - px(cs.paddingBottom);
+    const layerInner = cells.reduce((sum, el) => sum + el.offsetHeight, 0);
+    return {
+      lineH,
+      taInner,
+      layerInner,
+      taLines: Math.round(taInner / lineH),
+      layerLines: Math.round(layerInner / lineH),
+      ta: ta.offsetHeight,
+      wrap: wrap.offsetHeight,
+      taScroll: ta.scrollHeight,
+      taClient: ta.clientHeight,
+      cells: cells.length,
+    };
+  });
+  // ⚠ 空振り防止 ── そもそも折り返していること(1 行ぶんなら、ずれていても差が出ない)
+  expect(fit.cells, '層に升が出ていない(この検査は空振り)').toBe(1);
+  expect(fit.taLines, `欄が折り返していない(この検査は空振り): ${JSON.stringify(fit)}`,).toBeGreaterThanOrEqual(3);
+  // 🔴 ①器が欄より高くない(`display: block` が無いと descender ぶん高くなる)
+  expect(fit.wrap, `器が欄より高い(層が下へはみ出す): ${JSON.stringify(fit)}`).toBe(fit.ta);
+  // 🔴 ②**折り返しの数が同じ** ── これが「色が字と重なっている」の本体である
+  expect(fit.layerLines, `層と欄で折り返しの数が違う(色が字とずれる): ${JSON.stringify(fit)}`).toBe(
+    fit.taLines,
+  );
+  // 🔴 ③欄が転がっていない(`fitSqlInput` が枠のぶんを足していないと 2px 足りない)
+  expect(
+    fit.taScroll - fit.taClient,
+    `欄の高さが中身に足りていない: ${JSON.stringify(fit)}`,
+  ).toBeLessThanOrEqual(1);
+
+  await page.fill('[data-pkc-field="sql-input"]', 'SELECT * FROM csv');
   await clickReal(page, '[data-pkc-action="run-sql"]');
 
   const sqlTable = page.locator('[data-pkc-field="sql-table"]');
