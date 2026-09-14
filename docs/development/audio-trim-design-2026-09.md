@@ -59,6 +59,27 @@ isConfigSupported({codec:'opus', 48kHz, 1ch, 64kbps}) → true
 
 ⚠ **WebCodecs が要らない**のは大きい ── Safari / Firefox で「押せるのに使えない」を作らずに済みます。
 
+### ③ 前提を測った(2026-09-14、この箱の Chromium)
+
+⚠ 上の道は「**録ったものは webm の中の opus**」が前提なので、**書く前に測りました**:
+
+```
+MediaRecorder（製品と同じく mime を指定しない）→ recMimeType = "audio/webm;codecs=opus"
+先頭 4 バイト = 1a 45 df a3（EBML）/ CodecID = A_OPUS / CodecPrivate に OpusHead 在り
+```
+
+再生できる入れ物も測りました(`canPlayType`):
+
+| | |
+|---|---|
+| `audio/webm; codecs=opus` | **probably** |
+| `audio/ogg; codecs=opus` | **probably** |
+| `audio/mp4; codecs="mp4a.40.2"` | **(空)= 再生できない** |
+
+⚠ `MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')` は **false** ですが、
+それは「**録る**ときに選べない」だけで、**こちらが組んだ ogg を再生できるか**とは別の話です
+(上の表のとおり再生はできます)。⚠ 2 つを混同すると、出す入れ物の判断を誤ります。
+
 ---
 
 ## 3. ⚠ 丸ごと PCM にする道は採れない(なぜ書くか)
@@ -80,9 +101,9 @@ isConfigSupported({codec:'opus', 48kHz, 1ch, 64kbps}) → true
 ## 4. 段取り(3 段)
 
 ```
-元の添付(webm/opus)            切り出した添付(ogg/opus)
+元の添付(webm/opus)           切り出した添付(webm/opus)
         │                                 ▲
-        │ ① ほどく(WebM/EBML)            │ ③ 詰める(Ogg)
+        │ ① ほどく(WebM/EBML)            │ ③ 詰める(WebM/EBML)
         ▼                                 │
    packet の列 + OpusHead  ──② 選ぶ──▶  要る packet だけ
                             （範囲）
@@ -108,19 +129,34 @@ isConfigSupported({codec:'opus', 48kHz, 1ch, 64kbps}) → true
 - 範囲の**始まり以前で、いちばん近い packet 境界**から取る
 - 🔑 **80ms ぶん余分に前から取る** ── opus の復号器は立ち上がりに前の音を要るので、
   いきなり切ると**頭が濁ります**(仕様が 80ms 以上を推奨)
-- 余分に取ったぶんと、境界と範囲のずれは **`pre-skip` で捨てさせる**(下の §5)
+- 余分に取ったぶんと、境界と範囲のずれは **`CodecDelay` で捨てさせる**(下の §5)
 
-### ③ 詰める(Ogg / Opus)
+### ③ 詰める(WebM / EBML)── ⚠ **Ogg ではなく WebM にする**
 
-Ogg のページを組みます(素の JS。外の部品は使いません):
+裁定の言葉は「**元と同じ形**」です。opus のままでも **入れ物を変えると拡張子も mime も変わる**
+(`.webm` → `.opus`)ので、**入れ物も元と同じ WebM にします**。
 
-| ページ | 中身 |
+| 何を書くか | 中身 |
 |---|---|
-| 1 枚目 | **`OpusHead`** ── 🔑 **元の `CodecPrivate` を写して `pre-skip` だけ書き換える** |
-| 2 枚目 | `OpusTags`(作った物の名前だけ) |
-| 以降 | packet を順に。最後のページの `granulepos` で**終わりを詰める** |
+| `EBML` 頭 / `Segment` | 最小限(`DocType = webm`) |
+| `Info` | `TimestampScale`(1ms)/ `Duration` |
+| `Tracks` → `TrackEntry` | 🔑 **元の `CodecID` / `CodecPrivate`(= `OpusHead`)をそのまま写す** |
+| `Cluster` | `Timestamp` + packet を並べる |
 
-⚠ ページごとに **CRC32**(Ogg 独自の多項式 `0x04c11db7`、初期値 0)が要ります。
+🔑 **ほどく側と同じ EBML の道具**(可変長整数の読み書き)を使い回すので、
+別の入れ物を覚えるより**足す行が少ない**。
+
+#### ⚠ Ogg を選ばなかった理由(測ったうえで)
+
+| | Ogg/Opus | 🔑 **WebM/Opus** |
+|---|---|---|
+| 再生できるか | probably | probably |
+| 拡張子・mime | **変わる**(`.opus`) | **変わらない**(`.webm`) |
+| 書く量 | 少ない(ページ + CRC32) | 少し多い(EBML) |
+| 下流 | ⚠ `EXT_MIME` の逆引きに `audio/ogg` を足す必要が出る(書き出しの名前が `.bin` になる罠。`capture.ts` に前例) | **そのまま** |
+
+⚠ Ogg のほうが**書く量は少ない**ので、実装を始めて WebM の側で詰まったら
+**ここへ戻って選び直します**(そのときは拡張子と `EXT_MIME` の手当てが要る、と分かっている)。
 
 ---
 
@@ -129,14 +165,17 @@ Ogg のページを組みます(素の JS。外の部品は使いません):
 opus の 1 packet は普通 **20ms**(録り方によって 2.5〜120ms)です。
 packet の境目でしか切れないと、**最大 20ms ずれます** ── それを 2 つの仕掛けで消します:
 
-| 端 | 仕掛け | 効き方 |
+| 端 | 仕掛け(WebM) | 効き方 |
 |---|---|---|
-| **始まり** | `OpusHead` の **`pre-skip`** を増やす | 復号器が頭の N サンプルを**捨てて**から出す |
-| **終わり** | 最後のページの **`granulepos`** を望む位置にする | 復号器が尻の余りを**出さない** |
+| **始まり** | `TrackEntry` の **`CodecDelay`**(ナノ秒) | 復号器が頭の N サンプルを**捨てて**から出す |
+| **終わり** | 最後の block の **`DiscardPadding`**(ナノ秒) | 復号器が尻の余りを**出さない** |
 
-- `pre-skip` は **u16**(最大 65535 サンプル = 1.365 秒)── 余分に取る 80ms(3840)と
-  境界のずれ(最大 5760)を足しても**収まります**
-- 🔑 だから **サンプル 1 つの精度で切れます**(符号化し直さずに)
+⚠ `DiscardPadding` は `SimpleBlock` には書けません ── **最後の 1 つだけ `BlockGroup`** にします
+(前の block は `SimpleBlock` のままでよい)。
+🔑 これで **サンプル 1 つの精度で切れます**(符号化し直さずに)。
+
+⚠ Ogg なら同じことを `OpusHead` の `pre-skip`(u16)と最後のページの `granulepos` でやります
+── **どちらの入れ物でも精度は落ちません**。
 
 ---
 
@@ -175,8 +214,8 @@ packet の境目でしか切れないと、**最大 20ms ずれます** ── �
 |---|---|
 | ほどけたか | 自作の最小 webm を組んで、packet の数と時刻が合う |
 | 🔴 **空振り防止** | ⚠ **opus でない webm**・**lacing 有り**を入れたら**断る**ことを見る |
-| 端の精度 | `pre-skip` と最後の `granulepos` が**計算どおりの値**になる |
-| 🔴 **入れ物が本物か** | 組んだ ogg を**ブラウザの `<audio>` に食わせて `duration` が合う**(実ブラウザ smoke) |
+| 端の精度 | `CodecDelay` と最後の `DiscardPadding` が**計算どおりの値**になる |
+| 🔴 **入れ物が本物か** | 組んだ webm を**ブラウザの `<audio>` に食わせて `duration` が合う**(実ブラウザ smoke) |
 | 記憶 | ⚠ 元が長くても、**読んだバイト数が範囲に比例する**ことを数える |
 | 動線 | 「ここから → ここまで → 切り出す → 一覧に 1 件増える → 元も残っている」 |
 
@@ -219,3 +258,4 @@ packet の境目でしか切れないと、**最大 20ms ずれます** ── �
 - 実地調査 2026-09-14(`pkc3-surveyor`、read-only)── 録る所・添付にする口・`captures` の面・
   `WorkerLease` の実例・添付の大きさの門・当たる test
 - WebCodecs の実測 2026-09-14(この箱の Chromium 2 種。⚠ `https:` の文脈で測り直した値)
+- `MediaRecorder` が吐く物と、再生できる入れ物の実測 2026-09-14(偽マイクで 0.9 秒録って中を見た)
