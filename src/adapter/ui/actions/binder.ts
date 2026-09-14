@@ -790,6 +790,14 @@ export interface BinderServices {
   stopCapture?(): void;
   discardCapture?(): void;
   /**
+   * 🔴 **録った音の前後を削る**(#683 段②a。user 裁定 2026-09-14)。
+   *
+   * ⚠ **省略可** ── 無い配線では「この版では切り出せません」と断るだけで、
+   *   他は壊れない(収録と同じ規律)。
+   * ⚠ 元は**上書きしない** ── 新しい添付が 1 件増える(裁定)。
+   */
+  trimCapture?(lid: string, startMs: number, endMs: number): void;
+  /**
    * 🔴 **タイマー**(#279。user 指示 2026-08-19「…タイマー…は組み込みアプリで
    * リリースしたい」)。⚠ **省略可**(収録と同じ規律)。
    * ⚠ 止める / 捨てるは**どの計測か**を渡す ── 複数同時に走るので、
@@ -3528,6 +3536,23 @@ function placeShapeHandler(shape: PlaceShape): ActionHandler {
   };
 }
 
+/**
+ * 🔴 **鳴っている所を印にする**(#683 段②a)。
+ *
+ * ⚠ **器が無ければ何もしない** ── 鳴っていない行では `<audio>` が描かれていない
+ *   (押し所も出ていないので、ここへは来ないはずだが、黙って 0 秒を書かない)。
+ * 🔑 **どの録音かは渡さない** ── 鳴っているのは常に 1 件なので、state が持つ
+ *   (押した所からも採ると、同じ問いに答える口が 2 つになる ── §7)。
+ * ⚠ 器は**同じ行の中**だけで探す ── 行を跨ぐと別の録音の位置を取る。
+ */
+function markTrim(dispatcher: Dispatcher, target: HTMLElement, edge: 'start' | 'end'): void {
+  const media = target
+    .closest('[data-pkc-capture]')
+    ?.querySelector<HTMLMediaElement>('[data-pkc-field="capture-media"]');
+  if (!media) return;
+  dispatcher.dispatch({ type: 'SET_CAPTURE_TRIM_MARK', edge, ms: media.currentTime * 1000 });
+}
+
 const ACTIONS: Record<string, ActionHandler> = {
   /**
    * 🔴 **本文のリンクで別のノートへ飛ぶ**(2026-08-08。user 裁定「任せます」)。
@@ -3602,6 +3627,34 @@ const ACTIONS: Record<string, ActionHandler> = {
   /** 🔴 **やめる**(#683 段①)── 器へ返すのは描画器の `syncBorrow` が引き取る。 */
   'capture-stop': (dispatcher) => {
     dispatcher.dispatch({ type: 'SET_CAPTURE_PLAYING', lid: null });
+  },
+  /**
+   * 🔴 **切り出しの端を、いま鳴っている所で決める**(#683 段②a)。
+   *
+   * ⚠ **時刻は画面の器から読む** ── state は再生位置を持たない(持たせると
+   *   1 秒ごとに dispatch が飛んで、面ごと描き直しになる)。
+   * 🔑 読む器は**同じ行の中**だけ ── 行を跨いで探すと、別の録音の位置を取る。
+   */
+  'capture-trim-start': (dispatcher, target) => markTrim(dispatcher, target, 'start'),
+  'capture-trim-end': (dispatcher, target) => markTrim(dispatcher, target, 'end'),
+  'capture-trim-clear': (dispatcher) => {
+    dispatcher.dispatch({ type: 'CLEAR_CAPTURE_TRIM' });
+  },
+  /**
+   * 🔴 **切り出す**(#683 段②a)。⚠ 段取りは `capture-trim.ts` が持つ ──
+   *   binder は `data-pkc-action` を撃つだけ(収録・タイマーと同じ規律)。
+   * ⚠ **印が揃っていなければ撃たない** ── 描画側も揃うまで口を出さないが、
+   *   **門を 2 つ持つのはわざと**である(別窓が印を消した直後に押されうる)。
+   */
+  'capture-trim-run': (dispatcher, _target, services) => {
+    // 🔑 **対象は印が持つ** ── 押した所から採らない(§7:同じ問いに答える口を 2 つ作らない)
+    const trim = dispatcher.getState().captureTrim;
+    if (trim === null || trim.startMs === null || trim.endMs === null) return;
+    if (!services.trimCapture) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この版では切り出せません。' });
+      return;
+    }
+    services.trimCapture(trim.lid, trim.startMs, trim.endMs);
   },
   /**
    * ✏️ 編集に入る。#177: 多重タブでは**先に編集権を取ってから**入る。

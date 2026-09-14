@@ -198,6 +198,8 @@ import {
   type BinderServices,
 } from '@adapter/ui/actions/binder';
 import { createCaptureService } from '@adapter/ui/actions/capture';
+import { createCaptureTrimmer } from '@adapter/ui/actions/capture-trim';
+import { AudioClient } from '@adapter/platform/audio/audio-client';
 import { writeBackEntry } from '@adapter/ui/actions/write-back';
 import { createTimerService } from '@adapter/ui/actions/timer';
 import { createAlarmService } from '@adapter/ui/actions/alarm';
@@ -2162,6 +2164,29 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   });
 
   /**
+   * 🔴 **録った音の前後を削る**(#683 段②a)。段取りは `capture-trim.ts` が持ち、
+   * ここは口を渡すだけ(CLAUDE.md §2:この file はどの test からも実行されない)。
+   *
+   * ⚠ **重い所はワーカー**(`AudioClient`)── 12 時間の録音でも、メインは
+   *   `Blob` を参照で渡すだけで bytes を 1 バイトも開かない。
+   * ⚠ 取り込みは収録と同じ **`queued`**(切り出しも取り直しが利かない)。
+   */
+  const audioClient = new AudioClient();
+  const captureTrimmer = createCaptureTrimmer({
+    dispatcher,
+    readBlob: (assetKey) => blobs.get(cid, assetKey),
+    trim: (blob, startMs, endMs) => audioClient.trim(blob, startMs, endMs),
+    attach: async (item) => {
+      let out: Awaited<ReturnType<typeof attachOne>> = null;
+      await withAssetGate.queued(async () => {
+        out = await attachOne(dispatcher, attachDeps, item);
+      });
+      return out;
+    },
+    notify: showStatus,
+  });
+
+  /**
    * 🔴 **タイマー**(#279)。段取りは `timer.ts` が持ち、ここは口を渡すだけ。
    * ⚠ 帯は**走っている間だけ**描き直される(`timer.ts` が刻みを張り外しする)──
    *   ここで `setInterval` を張らない(常駐を作らない ── 不可侵指示 2026-08-03)。
@@ -2273,6 +2298,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     startCapture: (kind) => void captureService.start(kind),
     stopCapture: () => captureService.stop(),
     discardCapture: () => captureService.discard(),
+    trimCapture: (lid, startMs, endMs) => void captureTrimmer.run(lid, startMs, endMs),
     // 🔴 タイマー(#279)── 押す口は左の列の「画面」の隣に在る
     startTimer: () => timerService.start(),
     stopTimer: (lid) => timerService.stop(lid),
