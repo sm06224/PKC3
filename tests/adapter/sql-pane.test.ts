@@ -1469,3 +1469,110 @@ describe('構造をノートへ(#918 段①)', () => {
     expect(d.getState().sqlPage.error, '理由を言っていない').toContain('編集中');
   });
 });
+
+/**
+ * 🔴 **打つ所を道具にする**(#918 段②a。user 要望 2026-09-14「打つ所がお粗末」)。
+ *
+ * 守る主張:
+ * 1. **↑ で前に打った字が戻る**(走った字だけ・新しい順)
+ * 2. 🔴 **打ちかけの字を潰さない** ── ↓ で戻ってくる
+ * 3. 🔴 **複数行の中では、ふつうに上下できる**(1 行目 / 最後の行でだけ握る)
+ * 4. **Tab は字下げ**。🔴 ただし **`Shift`+`Tab` と `Esc` は逃げ道**として残す
+ * 5. 同じ字を 2 つ並べない / 打ちかけは積まない
+ */
+describe('打つ所(#918 段②a)', () => {
+  const caret = (box: HTMLTextAreaElement, at: number): void => {
+    box.selectionStart = at;
+    box.selectionEnd = at;
+  };
+
+  it('🔴 ↑ で前に打った字が戻り、↓ で打ちかけの字へ帰る', async () => {
+    const { d, type, key, runBtn, box } = setup();
+    type('select 1');
+    runBtn.click();
+    await settle();
+    type('select 2');
+    runBtn.click();
+    await settle();
+    // ⚠ 打ちかけ(まだ走らせていない字)
+    type('select 3 -- 打ちかけ');
+    caret(box, 0);
+    key({ key: 'ArrowUp' });
+    expect(d.getState().sqlPage.sql, '前に打った字が戻らない').toBe('select 2');
+    caret(box, 0);
+    key({ key: 'ArrowUp' });
+    expect(d.getState().sqlPage.sql, 'もう 1 つ前へ戻らない').toBe('select 1');
+    // 🔴 打ちかけの字は潰れていない
+    key({ key: 'ArrowDown' });
+    expect(d.getState().sqlPage.sql).toBe('select 2');
+    key({ key: 'ArrowDown' });
+    expect(d.getState().sqlPage.sql, '打ちかけの字が消えた').toBe('select 3 -- 打ちかけ');
+  });
+
+  it('🔴 複数行の途中では握らない(ふつうに上下できる)', async () => {
+    const { d, type, key, runBtn, box } = setup();
+    type('select 1');
+    runBtn.click();
+    await settle();
+    type('select a\nfrom t\nwhere b');
+    // ⚠ 2 行目の頭(1 行目でも最後の行でもない)
+    caret(box, 'select a\n'.length);
+    key({ key: 'ArrowUp' });
+    expect(d.getState().sqlPage.sql, '途中なのに履歴へ飛んだ').toBe('select a\nfrom t\nwhere b');
+    key({ key: 'ArrowDown' });
+    expect(d.getState().sqlPage.sql, '途中なのに履歴へ飛んだ').toBe('select a\nfrom t\nwhere b');
+    // ⚠ **対照群** ── 1 行目なら握る(この test 自体が空振りでないこと)
+    caret(box, 0);
+    key({ key: 'ArrowUp' });
+    expect(d.getState().sqlPage.sql, '1 行目でも握っていない').toBe('select 1');
+  });
+
+  it('⚠ 走った字だけを憶える / 同じ字を 2 つ並べない', async () => {
+    const { d, type, key, runBtn, box } = setup();
+    type('select 1');
+    runBtn.click();
+    await settle();
+    type('select 1');
+    runBtn.click();
+    await settle();
+    expect(d.getState().sqlPage.history, '同じ字が 2 つ並んだ').toEqual(['select 1']);
+    // ⚠ 打ちかけは積まれない
+    type('select 9');
+    expect(d.getState().sqlPage.history).toEqual(['select 1']);
+    caret(box, 0);
+    key({ key: 'ArrowUp' });
+    expect(d.getState().sqlPage.sql).toBe('select 1');
+  });
+
+  it('⚠ 履歴が空なら、↑ を押しても何も起きない', () => {
+    const { d, type, key, box } = setup();
+    type('打ちかけ');
+    caret(box, 0);
+    key({ key: 'ArrowUp' });
+    expect(d.getState().sqlPage.sql, '空の履歴で字が消えた').toBe('打ちかけ');
+  });
+
+  /**
+   * 🔴 **逃げ道を潰さない** ── `Tab` を握る欄は、鍵盤だけで使う人を
+   *   閉じ込めうる。⚠ だから `Shift`+`Tab` は**握らない**(既定のまま焦点が動く)。
+   */
+  it('🔴 Tab は字下げ / Shift+Tab と Esc は逃げ道として残す', () => {
+    const { box } = setup();
+    box.value = 'select';
+    caret(box, 6);
+    const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+    box.dispatchEvent(tab);
+    expect(tab.defaultPrevented, 'Tab を握っていない(字下げが入らない)').toBe(true);
+    const back = new KeyboardEvent('keydown', {
+      key: 'Tab',
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    box.dispatchEvent(back);
+    expect(back.defaultPrevented, 'Shift+Tab を握った(この欄から出られなくなる)').toBe(false);
+    const esc = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    box.dispatchEvent(esc);
+    expect(esc.defaultPrevented, 'Esc で外れない(逃げ道が 1 つしか無い)').toBe(true);
+  });
+});

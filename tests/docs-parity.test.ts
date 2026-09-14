@@ -2316,6 +2316,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-14(#918 段②a ── 打つ欄の ↑ ↓ と字下げ)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-12-scrollbar-thin" …` → f521e19
+     */
+    'スクロールバーが細くなり、掴みやすくなりました',
+    /**
      * ⚠ **2026-09-14(#918 段① ── 構造をノートへ)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-12-builtin-tile-icons" …` → 793152d
      */

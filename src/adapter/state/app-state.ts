@@ -173,6 +173,19 @@ export interface SqlPageState {
    */
   readonly saved: string;
   /**
+   * 🔴 **前に打った字**(#918 段②a。user 要望 2026-09-14「打つ所がお粗末」)。
+   * ⚠ **新しいものが先頭**。⚠ **この窓の中だけ**(読み直したら消える)──
+   *   打った SQL は user のデータではなく、その場の手なので憶えない。
+   */
+  readonly history: readonly string[];
+  /**
+   * 履歴のどこを見ているか。**`-1` = 打ちかけの字**(履歴に入っていない)。
+   * ⚠ これが無いと **↓ で打ちかけの字へ戻れない**(前の字で潰してしまう)。
+   */
+  readonly historyAt: number;
+  /** ⚠ 履歴を遡る前の**打ちかけの字**(↓ でここへ戻る)。 */
+  readonly historyDraft: string;
+  /**
    * 🔴 **いま調べている相手**(#681 段③ の 2 つ目)。`null` = この PKC のノート。
    *
    * ⚠ **どちらを調べているかが画面から読めない**と、user は
@@ -1280,6 +1293,9 @@ export const initialState: AppState = {
     running: false,
     error: '',
     saved: '',
+    history: [],
+    historyAt: -1,
+    historyDraft: '',
     guest: null,
     guestError: '',
     guestPending: '',
@@ -1384,6 +1400,12 @@ export type UserAction =
   | { type: 'SET_SEARCH_PAGE_QUERY'; query: string }
   | { type: 'SET_SQL_TEXT'; sql: string }
   | { type: 'RUN_SQL' }
+  /**
+   * 🔴 **前に打った字を戻す / 進む**(#918 段②a)。
+   * ⚠ **どこで押したかは呼び側が見る** ── 1 行目で ↑、最後の行で ↓ のときだけ来る
+   *   (でないと、複数行の中を動けなくなる)。
+   */
+  | { type: 'SQL_HISTORY_STEP'; back: boolean }
   /**
    * 🔴 **構造 1 枚をノートへ**(#918 段①。user 要望 2026-09-14「ai向けに構造吐き出したり」)。
    * ⚠ 中身は 1 文字も出さない ── 出すのは表・列・型・鍵・繋がり・行数だけである。
@@ -2651,6 +2673,24 @@ export interface ReduceResult {
  * ⚠ 戻る・進む自身は積まない(積むと戻れなくなる)。
  * ⚠ entry が消えた回は履歴も掃除する ── 残すと「戻る」が居ないノートへ飛ぶ。
  */
+/**
+ * 🔴 **履歴の上限**(#918 段②a)。⚠ 打つほど重くなる形にしない。
+ * 🔑 20 は「1 回の作業で遡りたい範囲」── これを超えたら、ふつうは思い出せない。
+ */
+export const SQL_HISTORY_MAX = 20;
+
+/**
+ * 走った字を履歴へ積む。⚠ **同じ字を 2 つ並べない**(直前と同じなら積み直さない)。
+ * 🔑 純粋な関数にしてあるので、reducer の中で `if` を増やさずに済む。
+ */
+function historyPush(
+  history: readonly string[],
+  sql: string,
+): { readonly history: readonly string[] } {
+  if (sql === '' || history[0] === sql) return { history };
+  return { history: [sql, ...history].slice(0, SQL_HISTORY_MAX) };
+}
+
 export function reduce(state: AppState, action: Dispatchable): ReduceResult {
   if (action.type === 'NAV_HISTORY') return navHistory(state, action.dir);
   const result = reduceCore(state, action);
@@ -3261,6 +3301,14 @@ function reduceCore(
           sqlPage: {
             ...state.sqlPage,
             sql: checked.sql,
+            /**
+             * 🔴 **走った字だけを憶える**(#918 段②a)── 打ちかけは積まない。
+             * ⚠ **同じ字を 2 つ並べない**(直前と同じなら積み直さない)。
+             * ⚠ 上限 `SQL_HISTORY_MAX` で切る ── 打つほど重くなる形にしない。
+             */
+            ...historyPush(state.sqlPage.history, checked.sql),
+            historyAt: -1,
+            historyDraft: '',
             running: true,
             error: '',
             saved: '',
@@ -3285,6 +3333,31 @@ function reduceCore(
      * 🔑 `running` を立てるので、**終わりを言う 2 つ**(`SQL_SAVED` / `SQL_SAVE_FAILED`)が
      *   必ず降ろす ── 降ろし忘れると、以後ずっと押せなくなる。
      */
+    /**
+     * 🔴 **前に打った字を戻す / 進む**(#918 段②a)。
+     *
+     * ⚠ **打ちかけの字を潰さない** ── 遡る前に控え、いちばん新しい所から
+     *   さらに ↓ を押したら**それを返す**(shell と同じ手触り)。
+     * ⚠ 履歴が空の回は**何も起きない**(押しても字が消えたりしない)。
+     */
+    case 'SQL_HISTORY_STEP': {
+      const p = state.sqlPage;
+      if (p.history.length === 0) return { state, events: [] };
+      const at = action.back
+        ? Math.min(p.historyAt + 1, p.history.length - 1)
+        : p.historyAt - 1;
+      if (at === p.historyAt) return { state, events: [] };
+      // ⚠ 遡り始める 1 回だけ、打ちかけの字を控える
+      const draft = p.historyAt === -1 && action.back ? p.sql : p.historyDraft;
+      const sql = at < 0 ? draft : (p.history[at] ?? p.sql);
+      return {
+        state: {
+          ...state,
+          sqlPage: { ...p, sql, historyAt: at < 0 ? -1 : at, historyDraft: draft },
+        },
+        events: [],
+      };
+    }
     case 'SQL_SCHEMA_TO_NOTE': {
       if (state.sqlPage.running) return { state, events: [] };
       return {

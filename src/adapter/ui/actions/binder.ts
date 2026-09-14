@@ -8943,6 +8943,51 @@ export function bindActions(
       return;
     }
     /**
+     * 🔴 **打つ所を道具にする**(#918 段②a。user 要望 2026-09-14「打つ所がお粗末」)。
+     *
+     * ⚠ **握るのは 3 つだけ**(`↑` / `↓` / `Tab`)── 増やすほど、
+     *   ふつうの編集が効かなくなる。
+     */
+    if (field === 'sql-input' && ke.target instanceof HTMLTextAreaElement) {
+      const ta = ke.target;
+      const plain = !ke.ctrlKey && !ke.metaKey && !ke.altKey;
+      /**
+       * 🔴 **Tab で字下げ**。⚠ **`Shift`+`Tab` は握らない** ── 鍵盤だけで使う人の
+       *   **逃げ道**である(握ると、この欄から二度と出られなくなる)。
+       * ⚠ `Esc` でも外れる(下)── 逃げ道を 2 つ置く。
+       * 🔑 差し込みは `insertText` を通す ── **元に戻す(Undo)が効く**形を壊さない。
+       */
+      if (ke.key === 'Tab' && plain && !ke.shiftKey) {
+        ke.preventDefault();
+        insertText(ta, '  ');
+        return;
+      }
+      // 🔑 **この欄から出る**(`Shift`+`Tab` と対の逃げ道)
+      if (ke.key === 'Escape' && plain && !ke.shiftKey) {
+        ke.preventDefault();
+        ta.blur();
+        return;
+      }
+      /**
+       * 🔴 **前に打った字を戻す / 進む**。
+       * ⚠ **1 行目で `↑`、最後の行で `↓`** のときだけ握る ── でないと
+       *   **複数行の中を上下に動けなくなる**(打つのは何行にもなる問い合わせである)。
+       * ⚠ 選んでいる途中(範囲選択)は握らない(選び直しの邪魔をしない)。
+       */
+      if ((ke.key === 'ArrowUp' || ke.key === 'ArrowDown') && plain && !ke.shiftKey) {
+        const at = ta.selectionStart ?? 0;
+        const to = ta.selectionEnd ?? 0;
+        if (at !== to) return;
+        const back = ke.key === 'ArrowUp';
+        const onFirst = ta.value.lastIndexOf('\n', Math.max(0, at - 1)) === -1;
+        const onLast = ta.value.indexOf('\n', at) === -1;
+        if (back ? !onFirst : !onLast) return;
+        ke.preventDefault();
+        dispatcher.dispatch({ type: 'SQL_HISTORY_STEP', back });
+        return;
+      }
+    }
+    /**
      * 🔴 **その場で計算する**(#764。user 裁定 2026-09-06「**PKC2と同じで！**」)。
      *
      * `2+3=` まで打って `Enter` を押すと、その場が `2+3=5` になって改行する。
