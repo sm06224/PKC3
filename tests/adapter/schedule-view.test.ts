@@ -28,7 +28,7 @@ import { stubRevisionOps } from '../helpers/revision-stub';
 import { taskCardsOf } from '../../src/features/schedule/task-cards';
 import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
 import { resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
-import { answerDialog } from './dialog-helper';
+import { answerDialog, cancelDialogRows, openDialog } from './dialog-helper';
 
 const TODAY = new Date(2026, 7, 23); // 2026-08-23(日)
 
@@ -610,6 +610,25 @@ describe('期間(#344 段①)', () => {
  * ⚠ 観測点は**保存された本文**にする(「札が消えた」で止めない ──
  *   それだと画面だけ動いて本文は元のまま、が緑で通る)。
  */
+/**
+ * 🔴 **繰り返しの小窓の行を押す**(#855 決4)。
+ *
+ * ⚠ **開いていなければ落とす** ── 「小窓が出ていない」を静かに通すと、
+ *   小窓ごと消す変異が生き延びる(空振り防止)。
+ * ⚠ 行数も見る ── 1 行しか出ていなければ、それは「聞いている」ではなく
+ *   「片方を勝手に選んでいる」である。
+ */
+async function pickRepeatMove(which: 'one' | 'all'): Promise<void> {
+  const dialog = openDialog();
+  expect(dialog, '「この回だけか、全部か」の小窓が開いていない').not.toBeNull();
+  const rows = [
+    ...dialog!.querySelectorAll<HTMLButtonElement>('[data-pkc-field="pick-repeat-move"]'),
+  ];
+  expect(rows, '選べる行が 2 つ並んでいない').toHaveLength(2);
+  rows[which === 'one' ? 0 : 1]!.click();
+  await tick(20);
+}
+
 describe('繰り返し(#344 段②)', () => {
   const BIN = 'e1';
   // ⚠ TODAY は 2026-08-23(日)── 毎週なので 8/23 / 8/30 / 9/6 … に出る
@@ -693,17 +712,70 @@ describe('繰り返し(#344 段②)', () => {
   });
 
   /**
-   * 🔴 **掴んで動かせないことを、断りで伝える**(黙って何もしない、にしない)。
-   * ⚠ 「規則ごとずらす」と「この回だけずらす」の 2 通りが在るので、
-   *   勝手にどちらかを選ぶと**もう片方を頼んだ user の本文が壊れる**。
+   * 🔴 **掴んで落とすと、「この回だけか、全部か」を聞いてから書く**(#855 決4。
+   *   user 裁定 2026-09-13「1 回か全部か選択する」)。
+   *
+   * ⚠ 直す前はここで**断っていた** ── 動かす意味が 2 通り在るので、勝手に
+   *   どちらかを選ぶと**もう片方を頼んだ user の本文が壊れる**からである。
+   *   🔑 裁定で**聞く**ことになったので、断りは消えた(2 通りのまま user が選ぶ)。
+   *
+   * 🔴 **ここが見るのは、小窓から本文までの繋がりである。**
+   *   ⚠ 押した答えを 1 手へ翻訳する規則そのものは
+   *   `tests/adapter/schedule-drag.test.ts`(`repeatMoveAction` を直に当てる)、
+   *   記法は `tests/features/{line-date,repeat,body-rewrite}.test.ts` が見ている ──
+   *   **その間の配線**は、実物の小窓を押さないと 1 度も通らない(CLAUDE.md §7)。
    */
-  it('🔴 回を掴んで落とすと、理由を出して本文は変えない', async () => {
-    const { root, q, d, store } = setup({ [BIN]: body });
+  it('🔴 「この回だけ動かす」を押すと、落とした日に「振替」つきの行が増える', async () => {
+    const { root, q, store } = setup({ [BIN]: body });
+    resetAppDialogForTest();
     dragTo(cardsOf(root, '2026-08-30')[0]!, q('[data-pkc-drop-date="2026-08-27"]')!);
     await tick(20);
-    expect(store[BIN], '本文が書き替わっている').toBe(body);
-    // ⚠ 断りは**言葉で**出す ── 黙って何もしないと、user は壊れたと読む
-    expect(d.getState().error).toContain('繰り返しの予定はドラッグで動かせません');
+    // 🔑 **聞いている間は本文を 1 バイトも変えない**(先に書いてから聞かない)
+    expect(store[BIN], '聞く前に本文が書き替わっている').toBe(body);
+    await pickRepeatMove('one');
+    expect(store[BIN]).toBe(
+      '- [ ] ゴミ出し @2026-08-23 毎週\n- [ ] ゴミ出し @2026-08-27 振替2026-08-30\n',
+    );
+    // 🔑 画面まで届く ── 元の日から消え、落とした日に出る
+    expect(cardsOf(root, '2026-08-30'), '動かした元の日に回が残っている').toHaveLength(0);
+    expect(cardsOf(root, '2026-08-27'), '落とした日に札が出ていない').toHaveLength(1);
+    // ⚠ 対照群 ── 他の回は動かない(「この回だけ」である)
+    expect(cardsOf(root, '2026-09-06'), '関係のない回まで動いた').toHaveLength(1);
+  });
+
+  /**
+   * 🔴 **「全部」は、規則の行の日そのものを同じ差だけ動かす**。
+   * ⚠ **落とした日を書かない** ── 落とした日は「掴んだ回」が来る日であって、
+   *   規則の開始日ではない(2 回目を掴んだなら、開始は 1 回ぶん前である)。
+   */
+  it('🔴 「全部動かす」を押すと、規則の行の日そのものが動く', async () => {
+    const { root, q, store } = setup({ [BIN]: body });
+    resetAppDialogForTest();
+    dragTo(cardsOf(root, '2026-08-30')[0]!, q('[data-pkc-drop-date="2026-08-27"]')!);
+    await tick(20);
+    await pickRepeatMove('all');
+    // 🔑 3 日まえへ動かしたので、**開始**が 8/23 → 8/20(落とした 8/27 ではない)
+    expect(store[BIN]).toBe('- [ ] ゴミ出し @2026-08-20 毎週\n');
+    // ⚠ 以後の回も同じ差だけ動く(1 回目だけ動く、にならない)
+    expect(cardsOf(root, '2026-08-27'), '次の回が動いていない').toHaveLength(1);
+    expect(cardsOf(root, '2026-09-03'), 'その次の回が動いていない').toHaveLength(1);
+    expect(cardsOf(root, '2026-08-30'), '元の刻みに札が残っている').toHaveLength(0);
+  });
+
+  /**
+   * 🔴 **対照群 ── 書換を起こしているのは「押した答え」である。**
+   * ⚠ これが無いと、上の 2 件は「落とした時点で書いていた」でも緑になる。
+   */
+  it('🔴 「やめる」で閉じると、本文は 1 バイトも変わらない', async () => {
+    const { root, q, d, store } = setup({ [BIN]: body });
+    resetAppDialogForTest();
+    dragTo(cardsOf(root, '2026-08-30')[0]!, q('[data-pkc-drop-date="2026-08-27"]')!);
+    await tick(20);
+    await cancelDialogRows();
+    await tick(20);
+    expect(store[BIN], 'やめたのに本文が書き替わった').toBe(body);
+    // ⚠ 断り文も出さない ── 断っていないので(黙って捨てた、と読ませない)
+    expect(d.getState().error, 'やめただけなのに理由が出ている').toBe(null);
   });
 
   /**
@@ -749,18 +821,20 @@ describe('予定から外す(#498)', () => {
   });
 
   /**
-   * 🔴 **これが #498 の芯** ── 繰り返しは**掴んでも動かせない**(断られる)ので、
+   * 🔴 **これが #498 の芯** ── 繰り返しは**掴んで「日付なし」へ落とせない**ので、
    *   × が無いと**外す道が 1 つも無い**。
-   * ⚠ 同じ it に**掴んだら断られる**ほうも置く ── 置かないと
+   * ⚠ **日を動かすほうは #855 決4 で開いた**(小窓で「この回だけ / 全部」を聞く)──
+   *   ここで残っている非対称は「**外す**」だけである。
+   * ⚠ 同じ it に**掴んで外そうとすると断られる**ほうも置く ── 置かないと
    *   「たまたま両方できる札」を見ているだけかもしれない(非対称が要点である)。
    */
-  it('🔴 繰り返しの札も外せる(掴んでは動かせないのに)', async () => {
+  it('🔴 繰り返しの札も外せる(掴んでは外せないのに)', async () => {
     const s = setup({ e1: '- [ ] 週次 @2026-08-24 毎週\n' });
     const card = cardsOf(s.root, '2026-08-24')[0];
     expect(card, '繰り返しの札が出ていない(空振り)').toBeDefined();
     expect(card!.getAttribute('data-pkc-task-repeat'), '繰り返しの印が無い').toBe('week');
 
-    // ⚠ 対照群:掴んで落とすと**断られる**(この非対称が問題そのもの)
+    // ⚠ 対照群:掴んで「日付なし」へ落とすと**断られる**(この非対称が問題そのもの)
     const undated = s.q<HTMLElement>('[data-pkc-drop-date=""]');
     if (undated !== null) {
       dragTo(card!, undated);
