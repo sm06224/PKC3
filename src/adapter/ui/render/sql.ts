@@ -72,6 +72,14 @@ export class SqlRenderer {
   private history: HTMLButtonElement | null = null;
   /** いま何番目を見ているかの行(#918 段②a)。⚠ 空なら畳む。 */
   private historyNote: HTMLElement | null = null;
+  /**
+   * 🔴 **手で高さを決めたか**(#918 段②b)。決めたら**そちらが強い** ──
+   * 打つたびに引き戻すと、掴んで広げた操作が**毎回取り消される**
+   * (片道の操作を作らない ── user 指示 2026-08-23)。
+   */
+  private handSized = false;
+  /** 最後に高さを合わせたときの字。⚠ 同じ字で測り直さない(打鍵ごとの再計測を避ける)。 */
+  private fitted: string | null = null;
 
   constructor(host: HTMLElement) {
     this.host = host;
@@ -103,6 +111,25 @@ export class SqlRenderer {
       'Tab で字下げが入ります。この欄から出るには Shift+Tab か Esc。↑ ↓ で前に打った字が戻ります。';
     box.rows = 4;
     box.spellcheck = false;
+    /**
+     * 🔴 **掴んで高さを変えたら、そちらが強い**(#918 段②b)。
+     *
+     * ⚠ 見分けは**押して離したときの差**で採る ── `ResizeObserver` で高さの変化を
+     *   見る形にすると、**窓の幅が変わっただけ**(= 折り返しが変わって高さが動く)でも
+     *   「手で決めた」と読んでしまう(CLAUDE.md §4「観測点が放っておいても変わるなら、
+     *   変化は届いた証拠にならない」)。
+     * ⚠ 離すのは欄の外のことがある(速く引くと外れる)ので、**離すのは document で聞く**。
+     */
+    let grabbedAt = -1;
+    box.addEventListener('pointerdown', () => {
+      grabbedAt = box.offsetHeight;
+    });
+    box.ownerDocument.addEventListener('pointerup', () => {
+      if (grabbedAt < 0) return;
+      const moved = Math.abs(box.offsetHeight - grabbedAt) > 2;
+      grabbedAt = -1;
+      if (moved) this.handSized = true;
+    });
     const bar = document.createElement('div');
     bar.setAttribute('data-pkc-field', 'sql-bar');
     const run = document.createElement('button');
@@ -312,6 +339,16 @@ export class SqlRenderer {
      * ⚠ 下の `fingerprint` は「答えが変わったか」を見る物で、`↑` `↓` では
      *   **1 バイトも動かない** ── 門の後ろに置くと、押しても行が出ない。
      */
+    /**
+     * 🔴 **打った行数に合わせて伸ばす**(#918 段②b)。
+     * ⚠ **指紋の門より前**で塗る ── 打っただけでは答えの指紋が動かない(段②a と同じ)。
+     * ⚠ **同じ字では測り直さない** ── 打鍵ごとに `scrollHeight` を読むと毎回 layout が走る。
+     * ⚠ 手で決めた高さが在るなら、こちらは何もしない。
+     */
+    if (this.box !== null && !this.handSized && this.fitted !== p.sql) {
+      this.fitted = p.sql;
+      fitSqlInput(this.box);
+    }
     if (this.history !== null) this.history.disabled = p.history.length === 0;
     if (this.historyNote !== null) {
       const line = historyNoteLine(p);
@@ -412,6 +449,32 @@ export class SqlRenderer {
  * 🔴 **数だけで終えない ── 次の一手まで言う**(2026-09-09 の動線レビュー)。
  * ⚠ 「500 行」「0 行」で止めると、マニュアルを開いていない人はそこで手が止まる。
  */
+/**
+ * 🔴 **打った行数に合わせて高さを合わせる**(#918 段②b。user 裁定 2026-09-14)。
+ *
+ * 🔑 **下限と上限は CSS が持つ**(`min-height: 5em` / `max-height: min(40vh, 22em)`)──
+ *   ここは「中身の高さ」を当てるだけで、**縮める向きの判断を持たない**
+ *   (選んでいただいた札は「伸びる」なので、いまより小さくはならない)。
+ * ⚠ 一度 `auto` に戻してから測る ── `scrollHeight` は**いまの高さに引きずられる**ので、
+ *   そうしないと**伸びる一方**になって二度と戻らない。
+ * ⚠ **測れない所では触らない** ── happy-dom は `scrollHeight` に **0** を返すので、
+ *   そのまま当てると**欄が消える**(CLAUDE.md §2「本命の分岐を unit は通らない」の裏返しで、
+ *   ここは**unit が通る側で壊れる**)。
+ *
+ * @returns 実際に付いた高さ(px)。⚠ 手で動かしたかの見分けに使うので、
+ *   **上限で切られた後の値**を返す(当てた値ではない)。
+ */
+export function fitSqlInput(ta: HTMLTextAreaElement): number {
+  ta.style.height = 'auto';
+  const want = ta.scrollHeight;
+  if (want <= 0) {
+    ta.style.height = '';
+    return 0;
+  }
+  ta.style.height = `${String(want)}px`;
+  return ta.offsetHeight;
+}
+
 /**
  * 🔴 **いま何番目を見ているか**(#918 段②a。user 裁定 2026-09-14)。
  *

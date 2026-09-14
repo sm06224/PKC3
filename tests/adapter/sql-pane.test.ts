@@ -30,6 +30,7 @@ import { REQUEST_TIMEOUT_MS } from '../../src/adapter/platform/storage/store-pro
 import { CenterRouter } from '../../src/adapter/ui/render/center';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { isAsidePane, SQL_HISTORY_MAX, viewModeLabel } from '../../src/adapter/state/app-state';
+import { fitSqlInput } from '../../src/adapter/ui/render/sql';
 import { homeTabOf } from '../../src/adapter/ui/render/browse-mode';
 import { readFileSync } from 'node:fs';
 import { stubStamps } from '../helpers/store-stamps';
@@ -1716,6 +1717,94 @@ describe('打つ所(#918 段②a)', () => {
       root.querySelector('[data-pkc-region="context-menu"]'),
       '2 度目の押しで閉じない',
     ).toBeNull();
+  });
+
+  /**
+   * 🔴 **打った行数に合わせて伸びる**(#918 段②b。user 裁定 2026-09-14)。
+   *
+   * ⚠ **下限と上限は CSS が持つ**(`min-height` / `max-height`)ので、ここで見るのは
+   *   「**中身の高さを当てているか**」だけである。
+   * 🔴 **`scrollHeight` が 0 の所では触らない**のが肝 ── happy-dom は 0 を返すので、
+   *   そのまま当てると**欄が消える**。⚠ これは「unit が通る側で壊れる」型なので、
+   *   実ブラウザではなく**ここで**押さえる必要がある。
+   */
+  it('🔴 高さを中身に合わせる / 測れない所では触らない', () => {
+    const { box } = setup();
+    // ⚠ happy-dom の既定(= 測れない)。触らずに返ること
+    box.style.height = '';
+    expect(fitSqlInput(box), '測れないのに高さを返した').toBe(0);
+    expect(box.style.height, '測れないのに高さを当てた(欄が消える)').toBe('');
+
+    /**
+     * 🔑 測れる所を作って、中身の高さが当たること。
+     * 🔴 **測る前に `auto` へ戻していること**も見る ── 戻さないと `scrollHeight` は
+     *   **いまの高さに引きずられる**ので、**伸びる一方になって二度と戻らない**。
+     * ⚠ happy-dom の `scrollHeight` は高さを映さないので、**読まれた瞬間の
+     *   `style.height` を控える**ことで順番を観測する(値では見分けられない)。
+     */
+    box.style.height = '999px';
+    const whenRead: string[] = [];
+    Object.defineProperty(box, 'scrollHeight', {
+      configurable: true,
+      get: () => {
+        whenRead.push(box.style.height);
+        return 137;
+      },
+    });
+    Object.defineProperty(box, 'offsetHeight', { configurable: true, value: 137 });
+    expect(fitSqlInput(box)).toBe(137);
+    expect(box.style.height, '中身の高さが当たっていない').toBe('137px');
+    expect(whenRead, '測る前に auto へ戻していない(伸びる一方になる)').toEqual(['auto']);
+  });
+
+  /**
+   * 🔴 **掴んで高さを変えたら、そちらが強い**(片道の操作を作らない ── user 指示 2026-08-23)。
+   *
+   * ⚠ 打つたびに引き戻すと、**掴んで広げた操作が毎回取り消される**。
+   * 🔑 観測点は**こちらが高さを当てたか**(`style.height`)── 打った後に
+   *   当たっていなければ、手で決めた高さが生きている。
+   */
+  it('🔴 掴んで高さを変えたら、打っても引き戻さない', () => {
+    const { type, box } = setup();
+    let h = 80;
+    Object.defineProperty(box, 'scrollHeight', { configurable: true, get: () => h });
+    Object.defineProperty(box, 'offsetHeight', { configurable: true, get: () => h });
+
+    type('select 1');
+    expect(box.style.height, '打っても高さを合わせていない').toBe('80px');
+
+    // ⚠ **掴んで引いた**(押した高さと離した高さが違う)
+    box.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    h = 300;
+    box.ownerDocument.dispatchEvent(new Event('pointerup', { bubbles: true }));
+
+    box.style.height = '300px';
+    /**
+     * 🔴 **中身の高さを、手で決めた高さと**別の値**にする**(2026-09-14、変異試験が教えた)。
+     * ⚠ 1 稿目はここを `300` のままにしていたので、**引き戻す実装でも `300px` になり**、
+     *   `handSized` を丸ごと外した変異が 2 件とも生き延びた
+     *   (CLAUDE.md §1「挙動を変えたのに test が前も後も通るなら、守っていない」)。
+     */
+    h = 90;
+    type('select 1 from t');
+    expect(box.style.height, '手で決めた高さを打鍵が引き戻した').toBe('300px');
+  });
+
+  /**
+   * ⚠ **対照群** ── 掴んでも**動かさなかった**なら、これまでどおり合わせる
+   *   (上の test が「押したら常に止まる」で通ってしまわないように)。
+   */
+  it('⚠ 掴んだだけで動かさなければ、これまでどおり合わせる', () => {
+    const { type, box } = setup();
+    let h = 80;
+    Object.defineProperty(box, 'scrollHeight', { configurable: true, get: () => h });
+    Object.defineProperty(box, 'offsetHeight', { configurable: true, get: () => h });
+    type('select 1');
+    box.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    box.ownerDocument.dispatchEvent(new Event('pointerup', { bubbles: true }));
+    h = 120;
+    type('select 1 from t');
+    expect(box.style.height, '掴んだだけで合わせなくなった').toBe('120px');
   });
 
   it('⚠ 履歴が空なら、↑ を押しても何も起きない', () => {

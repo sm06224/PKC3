@@ -1278,6 +1278,42 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   // ⚠ 出ただけで、打った字は消えていない
   await expect(input, 'Esc で打った字まで消えた').toHaveValue(draft + '  ');
 
+  /**
+   * ⑨ 🔴 **打った行数に合わせて伸びる**(#918 段②b。user 裁定 2026-09-14)。
+   *
+   * 🔴 **ここでしか測れない** ── happy-dom は `scrollHeight` に **0** を返すので、
+   *   unit は「高さを当てない」側の枝しか通らない(CLAUDE.md §2)。
+   * 🔑 1 行の高さは**その場で実測する**(font も DPR も環境で変わるので、
+   *   値を pin しない ── 見るのは**同じ回の中での差**だけ)。
+   * ⚠ **新しい起動は増やしていない** ── ⑧ の続きである。
+   */
+  await input.fill('select 1');
+  const h1 = (await input.boundingBox())!.height;
+  const eight = Array.from({ length: 8 }, (_, i) => `select ${String(i)}`).join('\n');
+  await input.fill(eight);
+  const h8 = (await input.boundingBox())!.height;
+  const lineH = (h8 - h1) / 7;
+  // ⚠ **前提を assert する** ── 伸びていなければ「一致しない」ではなく「前提が崩れている」と読める
+  expect(
+    lineH,
+    `1 行ぶん伸びていない(1 行 ${String(h1)}px → 8 行 ${String(h8)}px)`,
+  ).toBeGreaterThan(8);
+
+  // 🔴 **上限で止まる** ── 止まらないと、答えの表が画面から押し出される
+  const many = Array.from({ length: 60 }, (_, i) => `select ${String(i)}`).join('\n');
+  await input.fill(many);
+  const h60 = (await input.boundingBox())!.height;
+  const wouldBe = h1 + lineH * 59;
+  expect(
+    h60,
+    `上限が効いていない(切らなければ ${String(Math.round(wouldBe))}px になる)`,
+  ).toBeLessThan(wouldBe * 0.7);
+  // ⚠ 上限に当たっても**打てなくならない**(欄自身が転がる)
+  const scrolls = await input.evaluate(
+    (el) => (el as HTMLTextAreaElement).scrollHeight > (el as HTMLTextAreaElement).clientHeight,
+  );
+  expect(scrolls, '上限で切られたのに、欄の中を転がせない(打った字が読めない)').toBe(true);
+
   expect(errors).toEqual([]);
 });
 
