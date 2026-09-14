@@ -1027,6 +1027,43 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   await expect(note, '添付が開いたことが画面に出ない').toContainText('uriage.csv を調べています');
 
   await page.fill('[data-pkc-field="sql-input"]', 'SELECT * FROM csv');
+
+  /**
+   * 🔴 **色と行番号の層が、欄とぴったり重なっている**(#918 段②c/②d)。
+   *
+   * ⚠ ここが**実ブラウザでしか見えない所**である ── happy-dom は大きさを 0 で返すので、
+   *   unit は「同じ値が書いてあるか」までしか言えない。
+   * 🔑 見つかった実害:`<textarea>` の UA 既定は `inline-block` なので、素のまま器へ置くと
+   *   **器のほうが descender ぶん高くなり、層が下へ 6px はみ出していた**
+   *   (実測 3/3:欄 97px / 層 103px)。`display: block` で消える。
+   * ⚠ **折り返すほど長い 1 行**で見る ── 短い字だと器も欄も 1 行ぶんで、
+   *   ずれていても差が出ない(CLAUDE.md §2「その次元が非ゼロか」)。
+   * 🔑 **新しい起動は増やさない**(#820 の規律)── この筋書きの続きで確かめる。
+   */
+  const longSql = `SELECT ${'x'.repeat(400)} FROM csv`;
+  await page.fill('[data-pkc-field="sql-input"]', longSql);
+  const fit = await page.evaluate(() => {
+    const ta = document.querySelector<HTMLElement>('[data-pkc-field="sql-input"]')!;
+    const wrap = document.querySelector<HTMLElement>('[data-pkc-field="sql-input-wrap"]')!;
+    const layer = document.querySelector<HTMLElement>('[data-pkc-field="sql-input-layer"]')!;
+    return {
+      ta: ta.offsetHeight,
+      wrap: wrap.offsetHeight,
+      layerScroll: layer.scrollHeight,
+      taScroll: ta.scrollHeight,
+      rows: layer.querySelectorAll('[data-pkc-field="sql-line-no"]').length,
+    };
+  });
+  // ⚠ 空振り防止 ── そもそも折り返して背が伸びていること(1 行ぶんなら差は出ない)
+  expect(fit.ta, `欄が伸びていない(この検査は空振り): ${JSON.stringify(fit)}`).toBeGreaterThan(60);
+  expect(fit.rows, '層に升が出ていない(この検査は空振り)').toBe(1);
+  expect(fit.wrap, `器が欄より高い(層が下へはみ出す): ${JSON.stringify(fit)}`).toBe(fit.ta);
+  expect(
+    Math.abs(fit.layerScroll - fit.taScroll),
+    `層と欄で中身の高さが違う(色が字とずれる): ${JSON.stringify(fit)}`,
+  ).toBeLessThanOrEqual(1);
+
+  await page.fill('[data-pkc-field="sql-input"]', 'SELECT * FROM csv');
   await clickReal(page, '[data-pkc-action="run-sql"]');
 
   const sqlTable = page.locator('[data-pkc-field="sql-table"]');

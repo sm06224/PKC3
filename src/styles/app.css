@@ -4075,6 +4075,17 @@ li[data-pkc-row-slot] {
 [data-pkc-field='sql-input-wrap'] [data-pkc-field='sql-input'] {
   position: relative;
   z-index: 1;
+  /**
+   * 🔴 **`display: block` が無いと、層が欄より数 px 高くなる**(実ブラウザで実測)。
+   *
+   * ⚠ `<textarea>` の UA 既定は `inline-block` なので、`position: relative` の器へ
+   *   素のまま置くと**行ボックスの descender ぶん器のほうが高くなる**。
+   *   層は `inset: 0` で**器の高さ**に合わせるので、そのぶん下へはみ出す。
+   * 🔑 実測(headless_shell、3/3 再現):欄 97px に対し層 103px(**差 6px**)。
+   *   `display: block` にすると器の高さ = 欄の高さになり、差が消える。
+   * ⚠ **折り返しの位置はずれていなかった**(字幅は両方 756px で一致)── ずれるのは高さだけ。
+   */
+  display: block;
   background: transparent;
   color: transparent;
   /* ⚠ 字を透明にすると**打つ場所の印まで消える** ── 別に色を持たせる */

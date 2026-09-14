@@ -2307,6 +2307,15 @@ describe('打つ欄の色分けと行番号(#918 段②c/②d)', () => {
       expect(layer, `層に ${decl} が無い`).toContain(decl);
       expect(input, `欄に ${decl} が無い`).toContain(decl);
     }
+    /**
+     * 🔴 **欄は `display: block`**(実ブラウザで実測して足した)。
+     * ⚠ `<textarea>` の UA 既定は `inline-block` なので、素のまま器へ置くと
+     *   **器のほうが descender ぶん高くなり、層が下へ 6px はみ出す**
+     *   (headless_shell で 3/3 再現:欄 97px / 層 103px)。
+     * ⚠ happy-dom では**測れない** ── だから字面で pin する。
+     *   効いていること自体は `tests/smoke/attach.smoke.spec.ts` が高さを比べて見る。
+     */
+    expect(input, '欄が display: block でない(層が下へはみ出す)').toContain('display: block');
     // ⚠ 字の形は**同じ変数**を読む(別の綴りにすると、片方だけ差し替えられる)
     expect(layer, '層が等幅の変数を読んでいない').toContain('font-family: var(--font-mono)');
     // 🔴 番号の幅は 1 か所で持つ ── 層の升と欄の左余白が**同じ変数**を読む
