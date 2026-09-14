@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   columnIndexOf,
+  sheetsOf,
   dateStyleIndexesOf,
   looksLikeDateFormat,
   serialToText,
@@ -225,5 +226,50 @@ describe('シートを格子にする', () => {
 
   it('⚠ 壊れたシートは空の格子(落とさない)', () => {
     expect(xlsxSheetGrid('<<<', [], NO_DATES)).toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **枚(シート)の並びと名前**(#854 段③)。
+ *
+ * ⚠ ここを外すと「**『売上』と書いてある表に経費が入る**」という、いちばん質の
+ *   悪い間違い方になる ── zip の file 名と画面の順番は**一致しない**。
+ */
+describe('枚の並びと名前', () => {
+  const WB =
+    '<workbook><sheets>' +
+    '<sheet name="売上" sheetId="1" r:id="rId3"/>' +
+    '<sheet name="経費 2026" sheetId="2" r:id="rId1"/>' +
+    '</sheets></workbook>';
+  const RELS =
+    '<Relationships>' +
+    '<Relationship Id="rId1" Target="worksheets/sheet2.xml"/>' +
+    '<Relationship Id="rId3" Target="worksheets/sheet1.xml"/>' +
+    '</Relationships>';
+
+  it('🔴 file 名ではなく、`workbook.xml` の順番で並べる', () => {
+    // ⚠ **`rId` の番号順でも file 名順でもない** ── 画面の順番は `<sheet>` の並び
+    expect(sheetsOf(WB, RELS)).toEqual([
+      { name: '売上', path: 'xl/worksheets/sheet1.xml' },
+      { name: '経費 2026', path: 'xl/worksheets/sheet2.xml' },
+    ]);
+  });
+
+  it('⚠ `Target` が絶対でも同じ所を指す', () => {
+    const rels = '<Relationships><Relationship Id="rId3" Target="/xl/worksheets/sheet7.xml"/></Relationships>';
+    const wb = '<workbook><sheets><sheet name="A" r:id="rId3"/></sheets></workbook>';
+    expect(sheetsOf(wb, rels)).toEqual([{ name: 'A', path: 'xl/worksheets/sheet7.xml' }]);
+  });
+
+  it('🔴 結び付かない枚は落とす(推測で並べない)', () => {
+    // ⚠ `rId9` はどこにも無い ── ここで file 名から当てずっぽうに繋ぐと、
+    //    名前と中身が食い違う(落ちないので誰も気づけない)
+    const wb = '<workbook><sheets><sheet name="迷子" r:id="rId9"/></sheets></workbook>';
+    expect(sheetsOf(wb, RELS)).toEqual([]);
+  });
+
+  it('⚠ 結び付けが壊れていたら空(呼び側が断る)', () => {
+    expect(sheetsOf(WB, '<<<')).toEqual([]);
+    expect(sheetsOf('<<<', RELS)).toEqual([]);
   });
 });
