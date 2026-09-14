@@ -29,7 +29,7 @@ import {
 import { REQUEST_TIMEOUT_MS } from '../../src/adapter/platform/storage/store-proxy';
 import { CenterRouter } from '../../src/adapter/ui/render/center';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
-import { isAsidePane, viewModeLabel } from '../../src/adapter/state/app-state';
+import { isAsidePane, SQL_HISTORY_MAX, viewModeLabel } from '../../src/adapter/state/app-state';
 import { homeTabOf } from '../../src/adapter/ui/render/browse-mode';
 import { readFileSync } from 'node:fs';
 import { stubStamps } from '../helpers/store-stamps';
@@ -1604,6 +1604,32 @@ describe('打つ所(#918 段②a)', () => {
     caret(box, 0);
     key({ key: 'ArrowUp' });
     expect(d.getState().sqlPage.sql, '前の回の手直しが混ざった').toBe('select 2');
+  });
+
+  /**
+   * ⚠ **上限(`SQL_HISTORY_MAX`)を、誰も測っていなかった**(2026-09-14、着地前レビュー)。
+   *
+   * 🔑 定数は `src` に 2 か所在るだけで、**test は 1 度も参照していなかった** ──
+   *   `.slice(0, SQL_HISTORY_MAX)` を丸ごと外しても全件緑だった
+   *   (CLAUDE.md §2「fixture のゼロ件の次元は測っていない次元」)。
+   * ⚠ 上限が外れても user には見えない(履歴が伸び続けるだけ)ので、
+   *   **誰も気づかないまま打つほど重くなる**。
+   * 🔑 観測点は 3 つ:①件数が頭打ち ②いちばん新しい字が頭 ③**いちばん古い字が落ちた**。
+   *   ⚠ ①だけだと、`slice` が違う向き(新しいほうを捨てる)でも通る。
+   */
+  it('⚠ 憶えるのは上限まで ── 溢れたら古いほうから落ちる', async () => {
+    const { d, type, runBtn } = setup();
+    const n = SQL_HISTORY_MAX + 1;
+    for (let i = 1; i <= n; i += 1) {
+      type(`select ${String(i)}`);
+      runBtn.click();
+      await settle();
+    }
+    const { history } = d.getState().sqlPage;
+    expect(history.length, '上限で頭打ちになっていない').toBe(SQL_HISTORY_MAX);
+    expect(history[0], 'いちばん新しい字が頭に無い').toBe(`select ${String(n)}`);
+    expect(history, 'いちばん古い字が落ちていない').not.toContain('select 1');
+    expect(history.at(-1), '落とす向きが逆(新しいほうを捨てている)').toBe('select 2');
   });
 
   it('⚠ 履歴が空なら、↑ を押しても何も起きない', () => {
