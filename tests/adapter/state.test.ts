@@ -6,6 +6,7 @@ import { extractMeta } from '../../src/features/flavor';
 import {
   VIEW_MODES,
   initialState,
+  isAsidePane,
   nextViewMode,
   reduce,
   type AppState,
@@ -894,8 +895,22 @@ describe('effect layer: serialized store I/O', () => {
  * (CLAUDE.md「片側を直したら対称の反対側を疑う」)。
  */
 describe('ノートでない面から、一覧を押したら中央が戻る', () => {
-  // ⚠ **面を足したらここにも足す** ── 足さないと、その面だけ取りこぼす
-  for (const view of ['settings', 'flags', 'help'] as const) {
+  /**
+   * ⚠ **手で書く** ── `leavesOnSelect` から作ると、**実装と同じ綴りで期待値を組む**
+   *   ことになり、実装が間違える形では期待値も同じように間違える(CLAUDE.md §1)。
+   * 🔑 面を足した人がここへ足し忘れても、下の**全数の突き合わせ**が落とす。
+   */
+  const LEAVES = ['settings', 'flags', 'help', 'dual'] as const;
+  /**
+   * 🔴 **わきの面なのに退かない、唯一の例外**(#906。user 裁定 2026-09-14)。
+   *
+   * 「SQL で調べる」は**調べる面**なので、`.csv` を見ている最中に
+   * 「もう 1 つ入れて見比べよう」と添付しても、**選び所と打ちかけの SQL を
+   * 画面から消さない**(直す前は `SELECT_ENTRY` が飛んで両方消えていた)。
+   */
+  const STAYS = ['sql'] as const;
+
+  for (const view of LEAVES) {
     it(`🔴 ${view} を開いたまま別のノートを押すと detail へ戻る`, () => {
       let s: AppState = { ...booted(), viewMode: view };
       s = reduce(s, { type: 'SELECT_ENTRY', lid: 'a' }).state;
@@ -910,6 +925,40 @@ describe('ノートでない面から、一覧を押したら中央が戻る', (
       expect(s.viewMode, `${view} のまま取り残された(同一 lid の枝)`).toBe('detail');
     });
   }
+
+  for (const view of STAYS) {
+    it(`🔴 ${view} を開いたまま別のノートを押しても ${view} のまま`, () => {
+      let s: AppState = { ...booted(), viewMode: view };
+      s = reduce(s, { type: 'SELECT_ENTRY', lid: 'a' }).state;
+      expect(s.viewMode, `${view} を勝手に畳んだ`).toBe(view);
+      // 🔑 **選択は動く** ── 残るのは面だけであり、押したことを無視するのではない
+      expect(s.selectedLid, '選んだノートが変わっていない').toBe('a');
+    });
+
+    it(`🔴 ${view} を開いたまま「いま開いているノート」を押しても ${view} のまま`, () => {
+      // ⚠ 同じ lid を押す枝は**別の return** を通る
+      let s: AppState = { ...loadedA(), viewMode: view };
+      s = reduce(s, { type: 'SELECT_ENTRY', lid: 'a' }).state;
+      expect(s.viewMode, `${view} を勝手に畳んだ(同一 lid の枝)`).toBe(view);
+    });
+  }
+
+  /**
+   * 🔴 **わきの面を、2 つに残らず分類する**(#906)。
+   *
+   * ⚠ これが無いと 2 方向へ静かに壊れる:
+   * ① 面を足した人が上の表へ足し忘れる → **その面だけ誰も見ていない**
+   * ② 🔴 `STAY_ON_SELECT` へ**わきの面でない**名前を書く → `leavesOnSelect` は
+   *    `ASIDE_PANES` との AND なので**何も起きない**(= 空振り。§1)。
+   *    ここで「`sql` がわきの面であること」ごと pin する。
+   */
+  it('⚠ わきの面は「退く」か「残る」のどちらかに必ず入る', () => {
+    const asides = VIEW_MODES.filter((v) => isAsidePane(v));
+    expect(asides.length, 'わきの面が 1 つも無い(空振り)').toBeGreaterThan(0);
+    expect([...asides].sort(), 'わきの面と、上の 2 つの表が食い違っている').toEqual(
+      [...LEAVES, ...STAYS].sort(),
+    );
+  });
 
   it('⚠ ノートを映している面(detail)では viewMode を触らない', () => {
     // 空振り防止 ── 何でも detail に戻す実装でも上は通ってしまう

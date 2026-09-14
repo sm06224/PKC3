@@ -964,10 +964,10 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   /**
    * 🔴 **`.xlsx` も、この時点(まだノートを開いていない)で添付として取り込む**
    *   (段⑤ の下ごしらえ。#854 段③)。
-   * ⚠ **ノートを開いた後で添付すると別の動線に化ける** ── 開いているノートへ
-   *   添付すると `SELECT_ENTRY` が飛び、`sql` は aside 面(P8 段⑲)なので
-   *   **画面が detail へ戻される**(「設定を開いたまま一覧を押すと中央へ戻る」の
-   *   副作用がここにも掛かる)。だから**他の添付と同じ、ノートを開く前**に済ませる。
+   * ⚠ **他の添付と同じ、ノートを開く前**に済ませる(この筋書きを揃えるため)。
+   *   🔑 2026-09-14 まではここに「後から添付すると `SELECT_ENTRY` が飛んで
+   *   画面が detail へ戻される」と書いてあったが、**#906 で直っている** ──
+   *   いまは SQL の面が残る(その動線は下の段⑤-b が pin する)。
    * 🔑 枚を **2 枚**にする ── 1 枚だと `xlsx_sheets`(目録)が作られない
    *   (`readXlsxBook` の「見分けるものが 2 つ以上あるときだけ足す」)。
    */
@@ -1087,6 +1087,47 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   await expect(sqlTable).toContainText('りんご');
   // _sheet 列に本当の枚の名前(売上)が入っている
   await expect(sqlTable).toContainText('売上');
+
+  /**
+   * ⑤-b 🔴 **調べている最中にノートを押しても、SQL の面は残る**(#906。user 裁定 2026-09-14)。
+   *
+   * ⚠ 直す前は `SELECT_ENTRY` が `sql` を aside 面として畳んでいたので、
+   *   一覧のノートを押した瞬間に **打ちかけの SQL も選び所も画面から消えていた**
+   *   (「もう 1 つ入れて見比べよう」が、そのたびに最初からやり直しになる)。
+   * 🔑 **新しい起動は増やさない** ── 段⑤ が開いたままの面で、そのまま押す。
+   * ⚠ **対照群を同じ段に置く** ── 「面が残った」だけを見ると、
+   *   **押しが 1 件も届いていない**回と区別が付かない(行に印が付くことまで見る)。
+   */
+  const sqlBefore = await page.inputValue('[data-pkc-field="sql-input"]');
+  const sourceBefore = await source.inputValue();
+  expect(sqlBefore, '打ちかけの字が空(この先は測れない)').not.toBe('');
+  expect(sourceBefore, '相手を選んでいない(この先は測れない)').not.toBe('');
+  // ⚠ **いま選ばれていない行**を押す ── 既に選ばれている行だと、下の「印が付く」が
+  //   押す前から真で、**押しが届いていない回を見逃す**(対照群が空振りになる)
+  const fresh = page
+    .locator(
+      '[data-pkc-region="sidebar"] [data-pkc-action="select-entry"][data-pkc-entry]:not([data-pkc-selected])',
+    )
+    .first();
+  await expect(fresh, '選ばれていない行が一覧に無い(空振り)').toBeVisible();
+  // 🔴 **lid で掴み直す** ── `:not([data-pkc-selected])` のまま待つと、印が付いた
+  //   瞬間にこの locator は**別の行**を指す(押した行を見失う)
+  const lid = await fresh.getAttribute('data-pkc-entry');
+  expect(lid, '行から lid が読めない').toBeTruthy();
+  const row = page.locator(`[data-pkc-region="sidebar"] [data-pkc-entry="${lid ?? ''}"]`).first();
+  await clickReal(page, row);
+  // 🔑 **押しが届いた証拠**(対照群)── 押した行に印が付く
+  await expect(row, '押したのに行へ印が付かない ── 届いていない').toHaveAttribute(
+    'data-pkc-selected',
+    '',
+  );
+  // 🔴 本題:面が残り、打ちかけの字も選び所もそのまま
+  await expect(sqlPane, 'ノートを押したら SQL の面が畳まれた(#906)').toBeVisible();
+  expect(
+    await page.inputValue('[data-pkc-field="sql-input"]'),
+    '打ちかけの SQL が消えた',
+  ).toBe(sqlBefore);
+  expect(await source.inputValue(), '選んでいた相手が外れた').toBe(sourceBefore);
 
   /**
    * ⑥ ⚠ **対照群** ── 「この PKC のノート」へ戻すと、csv / xlsx の表はもう引けない

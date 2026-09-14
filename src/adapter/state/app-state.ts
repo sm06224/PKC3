@@ -387,6 +387,45 @@ export function isAsidePane(view: ViewMode): boolean {
 }
 
 /**
+ * 🔴 **ノートを選んだときに、中央を本文へ戻す面**(#906。user 裁定 2026-09-14)。
+ *
+ * ## なぜ `isAsidePane` と分けたか
+ *
+ * ⚠ `isAsidePane` は **3 つの別々の問い**に使われていた:
+ *
+ * | 読み手 | 問い |
+ * |---|---|
+ * | `SELECT_ENTRY`(下) | **ノートを選んだら本文へ退くか** |
+ * | `main.ts` の `setBrowse` | 左のタブを押したら畳むか |
+ * | `SET_VIEW_MODE` | 編集中でも開いてよいか |
+ *
+ * 🔴 user 裁定は**1 つ目だけ**を変えるものである ── 「**SQL で調べる を開いたまま
+ *   添付を取り込んでも、SQL の面はそのまま**」。⚠ `ASIDE_PANES` から `sql` を
+ *   丸ごと外すと**残り 2 つの意味も変わる**(タブで畳めなくなる / 編集中の扱いが変わる)。
+ *
+ * ## ⚠ 既定は「退く」側 ── 例外を名指しする
+ *
+ * 🔑 `ASIDE_PANES` から**引き算**で作る ── 面を足した人は自動で「退く」側に入るので、
+ *   **書き忘れても安全な向き**へ倒れる(足し算で作ると、忘れた面だけ退かなくなる)。
+ * ⚠ 例外はここに 1 つだけ書く。増やすときは**画面で何が起きるか**を添える。
+ */
+const STAY_ON_SELECT: ReadonlySet<ViewMode> = new Set<ViewMode>([
+  /**
+   * 🔴 **SQL で調べる**(#906)。⚠ この面は「本文を読む面」ではなく「**調べる面**」
+   *   なので、ノートが選ばれても退く理由が無い。
+   * 🔑 実害は「**調べながら足す**」で出ていた ── `.csv` を見ている最中に
+   *   「もう 1 つ入れて見比べよう」と添付すると、`SELECT_ENTRY` が飛んで
+   *   **選び所も打ちかけの SQL も画面から消えていた**。
+   */
+  'sql',
+]);
+
+/** ノートを選んだら本文へ戻す面か。⚠ 判定はここ 1 か所(上の docstring)。 */
+export function leavesOnSelect(view: ViewMode): boolean {
+  return ASIDE_PANES.has(view) && !STAY_ON_SELECT.has(view);
+}
+
+/**
  * 🔴 **面の呼び名**(user 目線レビュー U-2 / U-7)。
  *
  * ⚠ **user が画面で見ている字と同じにする** ── 断り文に内部の名前(`kanban`)が
@@ -2818,7 +2857,8 @@ function reduceCore(
       //    直す前は右の情報ペインだけ切り替わり、中央は設定のまま・追記欄も
       //    消えたままで、ノートが開かない理由が画面のどこにも無かった
       //    (マニュアル「行の右クリックから整理する」の「中央は常にいま開いているノート」の当の破れ)
-      const leaveSettings = isAsidePane(state.viewMode);
+      // 🔴 **`isAsidePane` ではない**(#906)── SQL の面は退かない(上の `leavesOnSelect`)
+      const leaveSettings = leavesOnSelect(state.viewMode);
       if (state.selectedLid === action.lid && state.openBody?.lid === action.lid) {
         /**
          * 🔴 **すでに開いている行を素で押したときも、印は 1 件へ戻す**(#240 段②)。
