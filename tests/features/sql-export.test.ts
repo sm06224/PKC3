@@ -11,11 +11,17 @@ import { describe, expect, it } from 'vitest';
 import {
   asSqlExportKind,
   SQL_EXPORT_KINDS,
-  sqlAnswerToText,
+  sqlExportFileText,
   sqlExportFileName,
   sqlExportLabel,
   sqlExportMime,
 } from '../../src/features/query/sql-export';
+
+/**
+ * 🔴 **Excel が日本語を読めるようにする印**(BOM)。⚠ **生バイトで書かない**
+ *   (CLAUDE.md §9 ── 見えない字なので、次に触る人が消したことに気づけない)。
+ */
+const BOM = '\uFEFF';
 
 const COLS = ['名前', 'メモ', '数'];
 const ROWS: readonly (readonly (string | number | null)[])[] = [
@@ -31,8 +37,8 @@ describe('答えを file へ(#918 段④)', () => {
    *   (`!v` で書くと 3 つとも空になる ── いちばんやりがちな外し方)。
    */
   it('🔴 CSV ── null は空 / 0 と空の字は残る', () => {
-    const csv = sqlAnswerToText(['a', 'b', 'c'], [[null, 0, '']], 'csv');
-    expect(csv).toBe('a,b,c\r\n,0,\r\n');
+    const csv = sqlExportFileText(['a', 'b', 'c'], [[null, 0, '']], 'csv');
+    expect(csv).toBe(`${BOM}a,b,c\r\n,0,\r\n`);
     expect(csv, '画面の字が file へ漏れている').not.toContain('なし');
   });
 
@@ -43,9 +49,9 @@ describe('答えを file へ(#918 段④)', () => {
    *   ── 混ざると 1 行が 2 行に割れる。
    */
   it('🔴 CSV ── 見出しが 1 行目 / 危ない升は包む / 升の中の改行は割れない', () => {
-    const csv = sqlAnswerToText(COLS, ROWS, 'csv');
+    const csv = sqlExportFileText(COLS, ROWS, 'csv');
     const [head, ...rest] = csv.split('\r\n');
-    expect(head, '1 行目が列の名前でない').toBe('名前,メモ,数');
+    expect(head, '1 行目が列の名前でない').toBe(`${BOM}名前,メモ,数`);
     expect(rest[0]).toBe('りんご,"あま, すっぱい",120');
     // ⚠ 引用符は 2 つ重ねて逃がす / 升の中の改行は包みの内側に残る
     expect(csv, '引用符と改行を包んでいない').toContain(
@@ -56,7 +62,7 @@ describe('答えを file へ(#918 段④)', () => {
   });
 
   it('⚠ TSV ── 区切りはタブ(カンマは包まない)', () => {
-    const tsv = sqlAnswerToText(['a', 'b'], [['x,y', 'z']], 'tsv');
+    const tsv = sqlExportFileText(['a', 'b'], [['x,y', 'z']], 'tsv');
     expect(tsv).toBe('a\tb\r\nx,y\tz\r\n');
   });
 
@@ -66,13 +72,13 @@ describe('答えを file へ(#918 段④)', () => {
    * ⚠ `null` は `null` のまま(空の字にしない ── 読む側が区別できなくなる)。
    */
   it('🔴 JSON ── 列の名前で組む / null は null のまま', () => {
-    const json: unknown = JSON.parse(sqlAnswerToText(['a', 'b'], [[1, null]], 'json'));
+    const json: unknown = JSON.parse(sqlExportFileText(['a', 'b'], [[1, null]], 'json'));
     expect(json).toEqual([{ a: 1, b: null }]);
   });
 
   it('⚠ 0 行でも見出しだけは出る(受け取った側が列を読める)', () => {
-    expect(sqlAnswerToText(['a', 'b'], [], 'csv')).toBe('a,b\r\n');
-    expect(JSON.parse(sqlAnswerToText(['a'], [], 'json'))).toEqual([]);
+    expect(sqlExportFileText(['a', 'b'], [], 'csv')).toBe(`${BOM}a,b\r\n`);
+    expect(JSON.parse(sqlExportFileText(['a'], [], 'json'))).toEqual([]);
   });
 
   /**
@@ -80,7 +86,31 @@ describe('答えを file へ(#918 段④)', () => {
    *   列の数が揃っていないと受け取った表計算で列がずれる。
    */
   it('⚠ 升が足りない行でも、列の数は揃う', () => {
-    expect(sqlAnswerToText(['a', 'b', 'c'], [['x']], 'csv')).toBe('a,b,c\r\nx,,\r\n');
+    expect(sqlExportFileText(['a', 'b', 'c'], [['x']], 'csv')).toBe(`${BOM}a,b,c\r\nx,,\r\n`);
+  });
+
+  /**
+   * 🔴 **BOM は `csv` だけに付く**(動線レビュー 2026-09-14 が実バグとして出した)。
+   *
+   * ⚠ 直す前は **1 つも付いていなかった** ── ボタンには「**表計算で開く**」と
+   *   書いてあるのに、Windows の Excel で開くと**日本語の升が文字化けする**。
+   * 🔑 前例は `copy-md-block.ts` の `CSV_BOM`(#708 段①)── **同じ判断に揃えた**。
+   *
+   * ⚠ **3 つとも見る**(csv だけ見ると、間違って json に付けた日に気づけない):
+   *   - `json` に付けると **`JSON.parse` が例外を投げる**
+   *   - `tsv` に付けると **`pandas` の既定で 1 列目の名前に残る**
+   */
+  it('🔴 BOM は csv だけ ── tsv と json には付けない(全数)', () => {
+    const got = SQL_EXPORT_KINDS.map((k) => [k, sqlExportFileText(['a'], [[1]], k).startsWith(BOM)]);
+    expect(got).toEqual([
+      ['csv', true],
+      ['tsv', false],
+      ['json', false],
+    ]);
+    // 🔑 空振り防止 ── BOM そのものが 1 度は当たっていること
+    expect(sqlExportFileText(['a'], [[1]], 'csv').startsWith(BOM)).toBe(true);
+    // ⚠ json は読める形のまま(BOM を付けるとここが落ちる)
+    expect(() => JSON.parse(sqlExportFileText(['a'], [[1]], 'json'))).not.toThrow();
   });
 
   it('⚠ 読めない形は捨てる / 一覧の 3 つは受ける', () => {

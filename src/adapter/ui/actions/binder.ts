@@ -413,8 +413,8 @@ import { sqlMenuLabel } from '@features/query/sql-tip';
 import {
   asSqlExportKind,
   SQL_EXPORT_KINDS,
-  sqlAnswerToText,
   sqlExportFileName,
+  sqlExportFileText,
   sqlExportLabel,
   sqlExportMime,
 } from '@features/query/sql-export';
@@ -7599,7 +7599,7 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     downloadBlob(
       name,
-      new Blob([sqlAnswerToText(p.columns, p.rows, kind)], { type: sqlExportMime(kind) }),
+      new Blob([sqlExportFileText(p.columns, p.rows, kind)], { type: sqlExportMime(kind) }),
     );
     /**
      * 🔴 **書き出したことを画面で言う**(#681 段③ の 3 つ目と同じ理由)。

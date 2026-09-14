@@ -1339,6 +1339,14 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   const where = await got.path();
   expect(where, 'file が落ちてこない').toBeTruthy();
   const text = await readFile(where, 'utf8');
+  /**
+   * 🔴 **落ちた file の先頭が BOM である**(動線レビュー 2026-09-14)。
+   * ⚠ 無いと Windows の Excel が**その環境の既定の文字集合**で読むので、
+   *   日本語の升が文字化けする ── ボタンには「表計算で開く」と書いてある。
+   * 🔑 ここで見るのは**ブラウザが実際に書いた byte** ── unit は
+   *   「返した字」までしか言えない(途中で落ちても気づけない)。
+   */
+  expect(text.charCodeAt(0), '落ちた csv の先頭に BOM が無い').toBe(0xfeff);
   // 🔑 1 行目は列の名前 ── 受け取った側が見出しを読める
   expect(text.split('\r\n')[0], '1 行目が列の名前でない').toContain('_note');
   // 🔑 ⑦ で引いた「手持ちのファイル」の中身がそのまま入っている

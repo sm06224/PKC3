@@ -1849,7 +1849,15 @@ describe('打つ所(#918 段②a)', () => {
       expect(names, 'file の名前が渡っていない').toHaveLength(1);
       expect(names[0], '拡張子が付いていない').toMatch(/\.csv$/);
       expect(names[0], '相手の名前(この PKC)が入っていない').toContain('この PKC');
-      expect(await blobs[0]!.text(), '中身が渡っていない').toBe('名前,数\r\nりんご,12\r\n');
+      /**
+       * 🔴 **`Blob` に BOM ごと入っている**(動線レビュー 2026-09-14)。
+       * 🔑 ここは**配線**を見る場所である ── 中身の規則は
+       *   `tests/features/sql-export.test.ts` が形ごとに全数で見る。
+       *   ⚠ だから「BOM を付ける口」を呼び忘れた変異は、**ここでだけ**死ぬ。
+       */
+      expect(await blobs[0]!.text(), '中身が渡っていない').toBe(
+        '\uFEFF名前,数\r\nりんご,12\r\n',
+      );
     } finally {
       make.mockRestore();
       revoke.mockRestore();
