@@ -424,16 +424,38 @@ ${(e as Error).message}`,
    *
    * 🔑 起動は増やさない ── **同じ窓の続き**で面を行き来するだけである。
    */
-  /** 押してから `currentTime` が動くまで待つ。⚠ 返すのは**進んだ秒数**。 */
+  /**
+   * 鳴らして、`currentTime` が動くまで待つ。⚠ 返すのは**進んだ秒数**。
+   *
+   * ⚠ **鳴らす口は 2 通りある**(1 稿目はここを外して 3 回とも赤くした)── この面は
+   *   `this.playing?.lid === item.lid` で**排他に**描くので、
+   *   **既に開いている行に「聞く」は無い**(在るのは器と「閉じる」)。
+   *   🔑 だから**在るほうを使う**:押していなければ「聞く」、開いていれば器そのもの。
+   */
   const playsOn = async (label: string): Promise<number> => {
-    await clickReal(
-      page,
-      '[data-pkc-capture]:has-text("(0:01〜0:03)") [data-pkc-field="capture-play"]',
-    );
+    if ((await cutRow.locator('[data-pkc-field="capture-play"]').count()) > 0) {
+      await clickReal(
+        page,
+        '[data-pkc-capture]:has-text("(0:01〜0:03)") [data-pkc-field="capture-play"]',
+      );
+    }
     const el = cutRow.locator('[data-pkc-field="capture-media"]');
+    await expect(el, `${label}:再生機が画面に出ていない`).toBeVisible();
+    /**
+     * ⚠ **鳴らせなかったのか、鳴っているのに進まないのか**を分ける ──
+     *   前者は**この箱の都合**(ブラウザが音を止めた)、後者は**製品の欠陥**である。
+     */
+    const started = await el.evaluate((m: HTMLMediaElement) => {
+      m.currentTime = 0;
+      return m.play().then(
+        () => 'ok',
+        (e: unknown) => String(e),
+      );
+    });
+    expect(started, `${label}:ブラウザが再生を断った(この箱の都合 ── 判定不能)`).toBe('ok');
     await expect
       .poll(() => el.evaluate((m: HTMLMediaElement) => m.currentTime), {
-        message: `${label}:押したのに再生機が進まない`,
+        message: `${label}:鳴らし始めたのに再生機が進まない`,
         timeout: 8000,
       })
       .toBeGreaterThan(0.02);
