@@ -3955,9 +3955,23 @@ li[data-pkc-row-slot] {
   font-size: 14px;
 }
 /* ⚠ 打つ欄は**等幅** ── SQL は桁を数える字である(記号の見分けもつく) */
+/**
+ * 🔴 **打った行数に合わせて伸びる**(#918 段②b。user 裁定 2026-09-14)。
+ *
+ * 🔑 **下限はこれまでの既定のまま**(`min-height: 5em`)── 選んでいただいた札は
+ *   「**伸びる**」なので、**縮む向きへは動かさない**(いまより小さくならない)。
+ * 🔑 **上限はここで持つ** ── 高さを決めるのは描画器(`fitSqlInput`)だが、
+ *   `max-height` を CSS に置けば**器が狭い日**にも答えの表の場所が残る
+ *   (行数で切ると、縦の狭い窓で表が画面から消える)。
+ * ⚠ 上限に当たったら**この欄自身が転がる**(`overflow-y: auto`)── 打てなくならない。
+ * ⚠ `resize: vertical` は**残す** ── 手で決めた高さのほうが強い
+ *   (片道の操作を作らない ── user 指示 2026-08-23)。
+ */
 [data-pkc-field='sql-input'] {
   width: 100%;
   min-height: 5em;
+  max-height: min(40vh, 22em);
+  overflow-y: auto;
   font-family: var(--font-mono);
   font-size: 13px;
   resize: vertical;

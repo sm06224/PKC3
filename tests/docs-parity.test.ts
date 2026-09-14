@@ -2316,6 +2316,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-14(#918 段②b ── 打つ欄が伸びる)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-12-repeat-fixes" …` → 115c6be
+     */
+    '繰り返しの予定が、正しく出て・正しく鳴るようになりました',
+    /**
      * ⚠ **2026-09-14(#918 段②a ── 打つ欄の ↑ ↓ と字下げ)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-12-scrollbar-thin" …` → f521e19
      */
