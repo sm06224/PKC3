@@ -1557,12 +1557,27 @@ describe('打つ所(#918 段②a)', () => {
    *   閉じ込めうる。⚠ だから `Shift`+`Tab` は**握らない**(既定のまま焦点が動く)。
    */
   it('🔴 Tab は字下げ / Shift+Tab と Esc は逃げ道として残す', () => {
-    const { box } = setup();
+    const { d, box } = setup();
     box.value = 'select';
     caret(box, 6);
     const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
     box.dispatchEvent(tab);
     expect(tab.defaultPrevented, 'Tab を握っていない(字下げが入らない)').toBe(true);
+    /**
+     * 🔴 **握ったことと、字が入ったことは別の主張である**(2026-09-14、smoke が教えた)。
+     *
+     * ⚠ 初稿はここで `defaultPrevented` しか見ておらず、**`insertText(ta, '  ')` を
+     *   丸ごと消しても緑だった**(変異試験 SURVIVED)── つまり守っていたのは
+     *   「`Tab` で焦点が飛ばないこと」だけで、**字下げは誰も見ていなかった**。
+     * 🔑 観測点は**下流まで**通す(CLAUDE.md「『動く』の観測点は下流まで」)──
+     *   欄の字 / caret / **state に届いたか**の 3 つ。⚠ 3 つ目が肝で、
+     *   `insertText` の控えが `input` を撃たなければ**画面には見えて保存されない**。
+     */
+    expect(box.value, '字下げが入っていない').toBe('select  ');
+    expect(box.selectionStart, 'caret が進んでいない(2 度目が前に入る)').toBe(8);
+    expect(d.getState().sqlPage.sql, '字下げが state に届いていない(走らせる字に入らない)').toBe(
+      'select  ',
+    );
     const back = new KeyboardEvent('keydown', {
       key: 'Tab',
       shiftKey: true,

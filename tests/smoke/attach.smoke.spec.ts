@@ -1182,6 +1182,65 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   ).not.toContainText('りんご');
   await expect(sqlTable.locator('tbody tr'), '行の数が合わない').toHaveCount(1);
 
+  /**
+   * ⑧ 🔴 **打つ欄の鍵盤**(#918 段②a)── 前に打った字(`↑` `↓`)と字下げ(`Tab`)。
+   *
+   * 🔴 **ここが唯一この動線を通す検査である。**
+   * ⚠ `Tab` の字下げは `insertText` = `document.execCommand('insertText')` を通るが、
+   *   **happy-dom に `execCommand` は無い**ので unit は**必ず控えの手splice を通る**
+   *   (CLAUDE.md §2「本命の分岐を unit は 1 度も通らない」)── つまり
+   *   **本物の `execCommand` 側は、ここでしか走らない**。
+   * ⚠ `Esc` で焦点が本当に外れるかも、実ブラウザでしか言えない。
+   * 🔑 **新しい起動は増やしていない**(#820 の規律)── ⑦ が開いたままの
+   *   同じ SQL の面の道中に続ける(`gotoApp` / `page.goto` を足さない)。
+   *
+   * ⚠ ここまでに**走らせた字**(= 履歴に積まれた字。新しい順):
+   *   `SELECT * FROM csv`(⑥/⑦。⚠ ⑦ は直前と同じなので積まれない)/
+   *   `SELECT * FROM sheet1`(⑤)/ `SELECT * FROM xlsx_sheets`(⑤)/
+   *   `SELECT * FROM csv`(④)。
+   */
+  const input = page.locator('[data-pkc-field="sql-input"]');
+  // 🔑 **打ちかけの字**を置く ── 走らせない(履歴には積まれない字である)
+  const draft = 'SELECT 2 -- うちかけ';
+  await input.fill(draft);
+  await input.focus();
+
+  // 🔴 1 行目で ↑ → いちばん新しい「走らせた字」が戻る
+  await page.keyboard.press('ArrowUp');
+  await expect(input, '↑ で前に走らせた字が戻らない').toHaveValue('SELECT * FROM csv');
+  // 🔴 もう一度 ↑ → さらに前へ(⚠ 同じ字は 2 つ並ばないので、次は sheet1)
+  await page.keyboard.press('ArrowUp');
+  await expect(input, '2 度目の ↑ でさらに前へ遡らない').toHaveValue('SELECT * FROM sheet1');
+  // 🔴 ↓ で新しいほうへ戻る
+  await page.keyboard.press('ArrowDown');
+  await expect(input, '↓ で新しいほうへ戻らない').toHaveValue('SELECT * FROM csv');
+  // 🔴 いちばん新しい所からさらに ↓ → **打ちかけだった字**に帰る(消えていない)
+  await page.keyboard.press('ArrowDown');
+  await expect(input, '打ちかけだった字に帰らない(打った字が消えた)').toHaveValue(draft);
+
+  // 🔴 Tab で字下げ(空白 2 つ)が**本当に入る**(⚠ execCommand 側はここでしか走らない)
+  await page.keyboard.press('End');
+  await page.keyboard.press('Tab');
+  await expect(input, 'Tab で字下げが入らない').toHaveValue(draft + '  ');
+  // ⚠ 焦点は**まだこの欄に在る**(Tab で飛んでいない)
+  expect(
+    await page.evaluate(
+      () => document.activeElement?.getAttribute('data-pkc-field') ?? '',
+    ),
+    'Tab で欄から飛ばされた(字下げにならない)',
+  ).toBe('sql-input');
+
+  // 🔴 Esc で**この欄から出る**(鍵盤だけで使う人の逃げ道)
+  await page.keyboard.press('Escape');
+  expect(
+    await page.evaluate(
+      () => document.activeElement?.getAttribute('data-pkc-field') ?? '',
+    ),
+    'Esc を押しても欄から出ていない(閉じ込めている)',
+  ).not.toBe('sql-input');
+  // ⚠ 出ただけで、打った字は消えていない
+  await expect(input, 'Esc で打った字まで消えた').toHaveValue(draft + '  ');
+
   expect(errors).toEqual([]);
 });
 
