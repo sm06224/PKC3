@@ -1807,6 +1807,61 @@ describe('打つ所(#918 段②a)', () => {
     expect(box.style.height, '掴んだだけで合わせなくなった').toBe('120px');
   });
 
+  /**
+   * 🔴 **答えを file へ書き出す**(#918 段④。user 要望「`copy to` 使えないし」)。
+   *
+   * 🔑 観測点は**下流まで**通す ── 押した(`defaultPrevented`)ではなく、
+   *   **どんな名前で / どんな中身が**渡ったかまで見る。
+   * ⚠ `downloadBlob` は `URL.createObjectURL` → `<a download>` → `click()` の 3 段なので、
+   *   1 段目で**中身**を、3 段目で**名前**を採る。
+   */
+  it('🔴 ファイルへ ── 名前と中身が渡る / 答えが無いうちは押せない', async () => {
+    const { pane, root, type, runBtn } = setup(async () => answer(['名前', '数'], [['りんご', 12]]));
+    const btn = pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-to-file"]')!;
+    expect(btn.disabled, '答えが無いのに押せる').toBe(true);
+
+    type('select 1');
+    runBtn.click();
+    await settle();
+    expect(btn.disabled, '答えが出たのに押せない').toBe(false);
+
+    const blobs: Blob[] = [];
+    const names: string[] = [];
+    const make = vi.spyOn(URL, 'createObjectURL').mockImplementation((b: Blob | MediaSource) => {
+      blobs.push(b as Blob);
+      return 'blob:fake';
+    });
+    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        names.push(this.download);
+      });
+    try {
+      btn.click();
+      const items = [
+        ...root.querySelectorAll<HTMLElement>('[data-pkc-region="context-menu"] button'),
+      ];
+      // 🔑 3 つの形(csv / tsv / json)が並ぶ
+      expect(items.length, '形の一覧が出ていない').toBe(3);
+      items[0]!.click();
+
+      expect(names, 'file の名前が渡っていない').toHaveLength(1);
+      expect(names[0], '拡張子が付いていない').toMatch(/\.csv$/);
+      expect(names[0], '相手の名前(この PKC)が入っていない').toContain('この PKC');
+      expect(await blobs[0]!.text(), '中身が渡っていない').toBe('名前,数\r\nりんご,12\r\n');
+    } finally {
+      make.mockRestore();
+      revoke.mockRestore();
+      click.mockRestore();
+    }
+    // 🔴 書き出したことを画面で言う(この面は別窓なので、言わないと「押せなかった」に見える)
+    expect(
+      pane.querySelector('[data-pkc-field="sql-note"]')?.textContent ?? '',
+      'file へ書き出したのに、ノートの話をしている',
+    ).toContain('という file に書き出しました');
+  });
+
   it('⚠ 履歴が空なら、↑ を押しても何も起きない', () => {
     const { d, type, key, box } = setup();
     type('打ちかけ');

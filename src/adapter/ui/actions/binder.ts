@@ -411,6 +411,14 @@ import { sqlNoteBody, sqlNoteTitle } from '@features/query/sql-to-note';
 import { SQL_PICK_LOCAL_FILE_VALUE } from '@features/query/sql-local-file';
 import { sqlMenuLabel } from '@features/query/sql-tip';
 import {
+  asSqlExportKind,
+  SQL_EXPORT_KINDS,
+  sqlAnswerToText,
+  sqlExportFileName,
+  sqlExportLabel,
+  sqlExportMime,
+} from '@features/query/sql-export';
+import {
   confirmInApp,
   pickDateInApp,
   pickCommandInApp,
@@ -2349,6 +2357,8 @@ const MENU_OPENERS: ReadonlySet<string> = new Set([
   'open-repeat-menu',
   // 🔑 #918 段②a ── 前に打った SQL の一覧(指で触る端末の唯一の入口)
   'sql-history-menu',
+  // 🔑 #918 段④ ── 答えを file へ出す形(csv / tsv / json)の一覧
+  'sql-export-menu',
 ]);
 
 /**
@@ -7550,6 +7560,54 @@ const ACTIONS: Record<string, ActionHandler> = {
       target,
     );
   },
+  /**
+   * 🔴 **答えを file へ書き出す**(#918 段④。user 要望 2026-09-14「`copy to` 使えないし」)。
+   *
+   * 🔑 押し所は 1 つ、形は一覧から ── 帯にボタンを 3 つ並べない。
+   * ⚠ 2 度目の押しは**閉じる**(片道の操作を作らない ── user 指示 2026-08-23)。
+   */
+  'sql-export-menu': (dispatcher, target, _services, root) => {
+    if (contextMenuOpen(root)) {
+      closeContextMenu(root);
+      return;
+    }
+    const p = dispatcher.getState().sqlPage;
+    // ⚠ まだ答えが無い回は何もしない(押せる印は renderer 側が消しているが、鍵からも来うる)
+    if (p.ranSql === '' || p.columns.length === 0) return;
+    const rect = target.getBoundingClientRect();
+    openContextMenu(
+      root,
+      { x: rect.left, y: rect.bottom },
+      SQL_EXPORT_KINDS.map((kind) => ({
+        action: 'sql-export-pick',
+        label: sqlExportLabel(kind),
+        attrs: { 'data-pkc-sql-export': kind },
+      })),
+      target,
+    );
+  },
+  'sql-export-pick': (dispatcher, target) => {
+    const kind = asSqlExportKind(target.getAttribute('data-pkc-sql-export'));
+    // ⚠ 読めない印は黙って捨てる(器を作り直す前の押しが飛んでくる)
+    if (kind === null) return;
+    const p = dispatcher.getState().sqlPage;
+    if (p.ranSql === '' || p.columns.length === 0) return;
+    const name = sqlExportFileName(new Date(), p.guest?.name ?? null, kind);
+    /**
+     * ⚠ **字は heap に長く置かない**(不可侵指示 2026-07-27)── 作ってすぐ `Blob` へ移し、
+     *   `downloadBlob` が寿命の終端で `ObjectURL` を revoke する。
+     */
+    downloadBlob(
+      name,
+      new Blob([sqlAnswerToText(p.columns, p.rows, kind)], { type: sqlExportMime(kind) }),
+    );
+    /**
+     * 🔴 **書き出したことを画面で言う**(#681 段③ の 3 つ目と同じ理由)。
+     * ⚠ この面は**別の窓**なので、落ちた file は窓の中に 1 ドットも出ない ──
+     *   言わないと「押せなかった」に見える。
+     */
+    dispatcher.dispatch({ type: 'SQL_SAVED', title: name, kind: 'file' });
+  },
   'sql-history-pick': (dispatcher, target) => {
     const at = Number(target.getAttribute('data-pkc-sql-history-at') ?? '');
     // ⚠ 読めない印は黙って捨てる(器を作り直す前の押しが飛んでくる)
@@ -7613,7 +7671,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       });
       return;
     }
-    dispatcher.dispatch({ type: 'SQL_SAVED', title });
+    dispatcher.dispatch({ type: 'SQL_SAVED', title, kind: 'note' });
   },
   /**
    * 🔴 **開く場所**(#826)。⚠ `set-prose-align` と同じ受け方(`<select>` でもボタンでも通す)。

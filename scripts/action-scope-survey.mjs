@@ -64,7 +64,7 @@ rename-entry-begin move-to-folder create-in-folder swap-open`
 export const E = `set-view set-browse format-text create-entry pick-create-kind toggle-kind-filter dual-sort
 schedule-nav toggle-pane set-theme set-paste-source set-external-images set-page-format set-prose-align set-open-place
 set-editor-mode set-text-scale set-read-columns set-column-rule set-tag-badge set-flag skip-to
-pick-app-icon`.split(/\s+/);
+pick-app-icon sql-export-pick`.split(/\s+/);
 
 /** 欄の値そのもの ── パレットからは「その欄へ連れて行く」形になる。 */
 export const V = `smart-field set-open-in-edit set-alarm-enabled set-notices-enabled

@@ -70,6 +70,8 @@ export class SqlRenderer {
   private example: HTMLElement | null = null;
   /** 履歴の押し所(#918 段②a)。⚠ 憶えている字が無いうちは押させない。 */
   private history: HTMLButtonElement | null = null;
+  /** file へ書き出す押し所(#918 段④)。⚠ 答えが無いうちは押させない。 */
+  private toFile: HTMLButtonElement | null = null;
   /** いま何番目を見ているかの行(#918 段②a)。⚠ 空なら畳む。 */
   private historyNote: HTMLElement | null = null;
   /**
@@ -201,7 +203,22 @@ export class SqlRenderer {
     history.setAttribute('data-pkc-field', 'sql-history');
     history.textContent = '履歴';
     history.title = '前に走らせた SQL を一覧から選びます(↑ ↓ でも戻せます)';
-    bar.append(run, save, schema, history, source, fileInput);
+    /**
+     * 🔴 **答えを file へ書き出す**(#918 段④。user 要望 2026-09-14「`copy to` 使えないし」)。
+     *
+     * ⚠ 直す前の持ち帰り方は「**ノートへ**」の 1 本だけで、表計算や別の道具へ渡したい人は
+     *   **画面から手で写す**しかなかった。
+     * 🔑 **押し所は 1 つ**にして、形(csv / tsv / json)は**一覧から選ばせる** ──
+     *   帯にボタンを 3 つ並べると、いちばんよく使う「走らせる」が押しにくくなる。
+     * ⚠ **答えが無いうちは押せない**(「ノートへ」と同じ ── 押せるのに何も起きない口を作らない)。
+     */
+    const toFile = document.createElement('button');
+    toFile.type = 'button';
+    toFile.setAttribute('data-pkc-action', 'sql-export-menu');
+    toFile.setAttribute('data-pkc-field', 'sql-to-file');
+    toFile.textContent = 'ファイルへ';
+    toFile.title = 'いま出ている答えを、file に書き出します(CSV / TSV / JSON)';
+    bar.append(run, save, toFile, schema, history, source, fileInput);
     const tip = document.createElement('p');
     tip.setAttribute('data-pkc-field', 'sql-tip');
     /**
@@ -256,6 +273,7 @@ export class SqlRenderer {
     this.tip = tip;
     this.history = history;
     this.historyNote = historyNote;
+    this.toFile = toFile;
     this.note = note;
     this.body = body;
     return body;
@@ -359,7 +377,15 @@ export class SqlRenderer {
      * ⚠ **押せるのに何も起きない口を作らない** ── まだ走らせていない回と、
      *   走っている最中は押させない(押した後に「何も起きなかった」を作らない)。
      */
-    if (this.save !== null) this.save.disabled = p.running || p.ranSql === '' || p.columns.length === 0;
+    /**
+     * ⚠ **押せるのに何も起きない口を作らない** ── まだ走らせていない回と、
+     *   走っている最中は押させない(押した後に「何も起きなかった」を作らない)。
+     * 🔑 **「ノートへ」と「ファイルへ」は同じ 1 本から採る**(§7)── 片方だけ
+     *   押せる状態を作らない(どちらも「いま出ている答え」を持ち帰る口である)。
+     */
+    const canTakeAnswer = !p.running && p.ranSql !== '' && p.columns.length > 0;
+    if (this.save !== null) this.save.disabled = !canTakeAnswer;
+    if (this.toFile !== null) this.toFile.disabled = !canTakeAnswer;
     this.paintSource(state);
     /**
      * 🔴 **案内も手本も、いま調べている相手へ揃える**(#681 の着地前レビュー F2)。
@@ -526,7 +552,10 @@ function noteLine(p: AppState['sqlPage']): string {
    *   言わないと「押せなかった」に見える。
    */
   if (p.saved !== '')
-    return `「${p.saved}」というノートに書き出しました(左の一覧に出ています)${where}`;
+    return p.savedKind === 'file'
+      ? // ⚠ **落ちた先は言えない** ── ブラウザの設定(既定の保存先 / 毎回聞く)で変わる
+        `「${p.saved}」という file に書き出しました(ブラウザの保存先をご覧ください)${where}`
+      : `「${p.saved}」というノートに書き出しました(左の一覧に出ています)${where}`;
   /**
    * 🔴 **どちらを調べているかを、打つ前から言う**(#681 段③ の 2 つ目)。
    * ⚠ 言わないと「ノートを数えたつもりで、よその DB を数えていた」に気づけない。

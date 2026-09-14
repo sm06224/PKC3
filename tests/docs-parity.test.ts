@@ -2316,6 +2316,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-14(#918 段④ ── 答えを file へ)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-12-tile-reorder" …` → 60be7c9
+     */
+    'アプリのタイルを、自分で並べ替えられるようになりました',
+    /**
      * ⚠ **2026-09-14(#918 段②b ── 打つ欄が伸びる)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-12-repeat-fixes" …` → 115c6be
      */

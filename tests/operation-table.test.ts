@@ -192,7 +192,14 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    *   憶え(20 件・読み込み直すと消える)を開く口で、**面を開いていないと意味が無い**。
    *   🔑 撃つ相手(`sql-history-pick`)のほうは `UNREGISTERED_POINT` に居る。
    */
-  'sql-history-menu', 'sql-schema-to-note', 'sql-to-note',
+  'sql-history-menu',
+  /**
+   * ⚠ **2026-09-14(#918 段④)で 2 件増やした** ── 答えを file へ書き出す
+   *   (出す口 `sql-export-menu` と、形を選ぶ口 `sql-export-pick`)。
+   *   ⚠ **名前で呼べないままにする理由**:どちらも「**いま出ている答え**」に効くので、
+   *   SQL の面を開いて走らせていないと意味が無い(`sql-to-note` と同じ仕分け)。
+   */
+  'sql-export-menu', 'sql-export-pick', 'sql-schema-to-note', 'sql-to-note',
   'stack-save',
   'start-audio-capture', 'start-edit', 'start-screen-capture', 'start-tile-reorder',
   'start-timer', 'stop-capture', 'storage-profile', 'swap-open', 'table-to-csv',
@@ -339,12 +346,15 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   受け手 +2 ── 登記は増えない(押し所は SQL の面の中にしか無く、鍵も持たない)。
       //   🔑 2 つに割れているのは**出す口**と**選ぶ口**が別だから ── 選ぶ口は
       //   メニューの中に並ぶので「押した 1 つ」でしか対象が決まらない(P1)。
-      total: 302,
-      receivers: 253,
+      // ⚠ 2026-09-14(#918 段④): 答えを file へ(`sql-export-menu` / `sql-export-pick`)で
+      //   受け手 +2 ── 登記は増えない。🔑 こちらの選ぶ口は**閉じた 3 つ**なので `E`
+      //   (履歴の選ぶ口が `P1` なのと違う ── 並ぶ物が user の打った字ではない)。
+      total: 304,
+      receivers: 255,
       registered: 85,
       both: 36,
       outsideActionsTable: 49,
-      unregistered: 217,
+      unregistered: 219,
     });
   });
 

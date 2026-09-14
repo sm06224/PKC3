@@ -4,6 +4,7 @@
  */
 import { test, expect } from '@playwright/test';
 import { join } from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { answerAppDialog, gotoApp, collectPageErrors, clickReal, expectImageRendered, createEntry, useSplitEditor, useListBrowse, expectMainGapUnderBudget } from './helpers';
 // ⚠ 段⑤(xlsx を SQL で調べる)の bytes は Node 側でこの 1 本から組む(#854 段③)。
@@ -1313,6 +1314,36 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
     (el) => (el as HTMLTextAreaElement).scrollHeight > (el as HTMLTextAreaElement).clientHeight,
   );
   expect(scrolls, '上限で切られたのに、欄の中を転がせない(打った字が読めない)').toBe(true);
+
+  /**
+   * ⑩ 🔴 **答えを file へ書き出す**(#918 段④。user 要望「`copy to` 使えないし」)。
+   *
+   * 🔴 **ここでしか通らない** ── `downloadBlob` は `URL.createObjectURL` →
+   *   `<a download>` → `click()` の 3 段で、unit はその 1 段目と 3 段目を**差し替える**。
+   *   つまり**本物のブラウザが file を受け取る所**は、実ブラウザでしか走らない。
+   * ⚠ **名前は見ない** ── この headless Chromium は**非 ASCII の `<a download>` 名を
+   *   丸ごと捨てる**(CLAUDE.md §4)ので、`suggestedFilename()` は観測点にならない。
+   *   🔑 見るのは**中身**である(そちらが本題でもある)。
+   * ⚠ **新しい起動は増やしていない** ── ⑦ が開いたままの面の続きで、
+   *   ⑦ の答え(`tebiki.csv` の 1 行)がそのまま出る。
+   */
+  const toFile = page.locator('[data-pkc-field="sql-to-file"]');
+  await expect(toFile, '答えが出ているのに押せない').toBeEnabled();
+  await clickReal(page, '[data-pkc-field="sql-to-file"]');
+  const kinds = page.locator('[data-pkc-region="context-menu"]');
+  await expect(kinds, '形の一覧が出ない(押した 1 回で閉じている)').toBeVisible();
+  await expect(kinds.locator('button'), '形が 3 つ並んでいない').toHaveCount(3);
+  const started = page.waitForEvent('download');
+  await clickReal(page, kinds.locator('button').first());
+  const got = await started;
+  const where = await got.path();
+  expect(where, 'file が落ちてこない').toBeTruthy();
+  const text = await readFile(where, 'utf8');
+  // 🔑 1 行目は列の名前 ── 受け取った側が見出しを読める
+  expect(text.split('\r\n')[0], '1 行目が列の名前でない').toContain('_note');
+  // 🔑 ⑦ で引いた「手持ちのファイル」の中身がそのまま入っている
+  expect(text, '答えの中身が入っていない').toContain('ぶどう');
+  expect(text, '画面の字が file へ漏れている').not.toContain('(なし)');
 
   expect(errors).toEqual([]);
 });
