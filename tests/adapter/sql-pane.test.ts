@@ -1403,6 +1403,60 @@ describe('構造をノートへ(#918 段①)', () => {
    * ⚠ **黙って捨てない**ことがこの test の主張である(`CREATE_ENTRY` は
    *   `phase !== 'ready'` を無言で落とすので、断り文が無いと「壊れている」と読まれる)。
    */
+  /**
+   * 🔴 **調べている相手の名前が、題名にも本文にも載る**(変異試験 M9 が SURVIVED で教えた)。
+   *
+   * ⚠ この describe の他の test は**どれも相手を選んでいない**ので、
+   *   `where` を**常に `null`** に固定しても 1 件も落ちなかった ──
+   *   つまり「選んだ相手の名前が載る」という軸を**1 度も通っていなかった**
+   *   (CLAUDE.md §2「fixture のゼロ件の次元は、測っていない次元」)。
+   */
+  it('🔴 調べる相手を選んでいるとき、その名前が題名と本文に出る', async () => {
+    const { reply } = schemaReply();
+    const { schemaBtn, persisted, pick, d } = setup(reply);
+    pick('db1');
+    await settleAll();
+    const where = d.getState().sqlPage.guest?.name ?? '';
+    expect(where, '前提が崩れている(相手を選べていない)').not.toBe('');
+    schemaBtn.click();
+    await settleAll();
+    expect(persisted.length).toBe(1);
+    expect(persisted[0]?.body ?? '', '本文に相手の名前が無い').toContain(where);
+    expect(d.getState().sqlPage.saved, '題名に相手の名前が無い').toContain(where);
+  });
+
+  /**
+   * 🔴 **reducer 自身も、走っている間は受けない**(変異試験 M5 が SURVIVED で教えた)。
+   *
+   * ⚠ 上の「2 回押しても 1 枚」は **binder の門だけで通ってしまう** ──
+   *   押し所から来る道には門が 2 つ在り、**手前の 1 つで止まる**ので、
+   *   奥の門(reducer)を**1 度も試していなかった**(CLAUDE.md §1「救い手が変わっただけ」)。
+   * 🔑 だから**押し所を通さずに**、reducer へ直に当てる。
+   */
+  it('🔴 押し所を通さずに 2 度当てても、2 本目は出さない(奥の門)', async () => {
+    const { reply } = schemaReply();
+    const { d } = setup(reply);
+    /**
+     * ⚠ **見るのは state ではなく、出た依頼の数**(1 稿目はここで外した)。
+     * 🔑 門が消えても **state は同じ**(2 度目も `running: true` を置くだけ)なので、
+     *   state を見比べる assert は**門が在っても無くても通る**(§1 の空振り)。
+     *   実際に出る違いは「**依頼が 2 本飛ぶ**」ことだけである。
+     */
+    let asks = 0;
+    const off = d.onEvent((e) => {
+      if (e.type === 'REQUEST_SQL_SCHEMA') asks += 1;
+    });
+    try {
+      d.dispatch({ type: 'SQL_SCHEMA_TO_NOTE', lid: 'a1', relationId: 'r1' });
+      expect(d.getState().sqlPage.running, '前提が崩れている(1 本目で走っていない)').toBe(true);
+      d.dispatch({ type: 'SQL_SCHEMA_TO_NOTE', lid: 'a2', relationId: 'r2' });
+      expect(asks, '走っている間に 2 本目の依頼が飛んだ').toBe(1);
+    } finally {
+      off();
+      await settleAll();
+    }
+  });
+
   it('🔴 編集中は断って、理由を画面に出す', async () => {
     const { reply } = schemaReply();
     const { schemaBtn, persisted, d } = setup(reply);
