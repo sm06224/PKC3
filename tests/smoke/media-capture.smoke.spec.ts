@@ -242,6 +242,14 @@ ${(e as Error).message}`,
    *   reducer が片方を落とすので、**この段の失敗が「印が付かない」に化ける**
    *   (CLAUDE.md §4「対照群が届かない回は判定不能と書く」)。
    */
+  /**
+   * 🔴 **止めてから合わせる**。⚠ **止まっていることまで見る** ──
+   *   鳴ったままだと、`clickReal`(要素まで送って押す)の**数十〜百数十ミリ秒**の
+   *   あいだに位置が進み、**押した所が読んだ値と違う**。
+   *   🔑 実際、これで 1 度 0.12 秒ずれた(2.12 対 2.00)── ⚠ **切り出しの側は
+   *   正しい**(本物の録音 2 本を 1.0〜3.0 で切って、ブラウザが `duration` を
+   *   **2 ちょうど**と答えるのを実測済み)。⚠ だから**緩めずに、前提のほうを検める**。
+   */
   const seek = async (to: number): Promise<number> => {
     await player.evaluate((el: HTMLMediaElement, t) => {
       el.pause();
@@ -252,10 +260,17 @@ ${(e as Error).message}`,
         message: `再生位置を ${to} 秒へ動かせない(前提が崩れている)`,
       })
       .toBeCloseTo(to, 1);
+    const at = await player.evaluate((el: HTMLMediaElement) => ({
+      currentTime: el.currentTime,
+      paused: el.paused,
+    }));
+    expect(
+      at.paused,
+      `止めたのに鳴っている(${at.currentTime.toFixed(3)} 秒)── 押すまでに位置が進むので、印が読んだ値とずれる`,
+    ).toBe(true);
     // 🔑 **押す直前の実測値を返す** ── 切り出しの長さは「頼んだ 2 秒」ではなく
-    //    **押した所の差**で決まる(`toBeCloseTo(…, 1)` は ±0.05 を許すので、
-    //    2.0 と突き合わせると**計器の遊びのぶんで落ちる**)
-    return player.evaluate((el: HTMLMediaElement) => el.currentTime);
+    //    **押した所の差**で決まる
+    return at.currentTime;
   };
 
   const at0 = await seek(1.0);
@@ -275,6 +290,15 @@ ${(e as Error).message}`,
 
   const at1 = await seek(3.0);
   await clickReal(page, '[data-pkc-field="capture-trim-end"]');
+  // ⚠ **押した後も止まったまま**(押す前後で位置が動いていないことを、その場で採る)
+  const after = await player.evaluate((el: HTMLMediaElement) => ({
+    currentTime: el.currentTime,
+    paused: el.paused,
+  }));
+  expect(
+    after.currentTime,
+    `押している間に位置が動いた(${at1.toFixed(3)} → ${after.currentTime.toFixed(3)} 秒、paused=${String(after.paused)})`,
+  ).toBeCloseTo(at1, 1);
   await expect(mark, '両方の印がそろっていない').toContainText('0:01〜0:03(0:02)');
 
   await clickReal(page, '[data-pkc-field="capture-trim-run"]');
