@@ -2316,6 +2316,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-14(#683 段②a ── 録音の切り出し)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-11-material-icons" …` → 76a01ab
+     */
+    'ボタンやタブの絵が、マテリアルデザインの絵になりました',
+    /**
      * ⚠ **2026-09-14(#530 案 A ── 付箋の形)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-11-recent-sort" …` → e80ba89
      */

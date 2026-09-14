@@ -1044,6 +1044,25 @@ export interface AppState {
    */
   capturePlayingLid: string | null;
   /**
+   * 🔴 **切り出す範囲の印**(#683 段②a。user 裁定 2026-09-14)。`null` = 印が無い。
+   *
+   * 🔑 **鳴らしている 1 件にだけ付く** ── `lid` を持たせて、別の行に古い印が
+   *   見えないようにする(印は画面に**時刻の字**で出るので、行が違うと嘘になる)。
+   * ⚠ `startMs` / `endMs` は**どちらか片方だけ**でも在りうる(順に押すので)。
+   *   🔴 **逆転は残さない** ── 後から押したほうを採り、矛盾する側を `null` へ戻す
+   *   (残すと「切り出す」が押せるのに中身が空になる = 無言の失敗)。
+   */
+  captureTrim: { readonly lid: string; readonly startMs: number | null; readonly endMs: number | null } | null;
+  /**
+   * 🔴 **いま切り出している最中か**(#683 段②a、着地前の動線レビュー 欠陥 3)。
+   *
+   * ⚠ **押した所に手がかりを出すため**に state へ置く ── 長い録音は数秒かかるので、
+   *   ボタンが何も言わないと「効かなかった」と読まれて、もう一度押される。
+   * 🔑 描画器に持たせない ── 同じ document に 2 つ生きうるので、片方の面だけ
+   *   「切り出しています…」になる(§7)。
+   */
+  captureTrimBusy: boolean;
+  /**
    * 🔴 **保存が「消えない扱い」か**(#347、user 裁定 2026-08-23)。
    *
    * ⚠ 出すのは**設定の面だけ**である ── 帯にもダイアログにもしない
@@ -1279,6 +1298,8 @@ export const initialState: AppState = {
   captureItems: null,
   captureScanFailed: false,
   capturePlayingLid: null,
+  captureTrim: null,
+  captureTrimBusy: false,
   snippetScan: null,
   persistState: 'unknown',
   backlinks: null,
@@ -1448,6 +1469,20 @@ export type UserAction =
    * ⚠ 借りるのは描画器(`captures.ts`)── ここは**どれを鳴らすか**だけを持つ。
    */
   | { type: 'SET_CAPTURE_PLAYING'; lid: string | null }
+  /**
+   * 🔴 **切り出す範囲の端を、いま鳴っている所で決める**(#683 段②a)。
+   *
+   * ⚠ `ms` は**その場の再生位置**(ミリ秒)── 画面の `<audio>` から binder が読む。
+   * 🔑 **どの録音か**は渡さない ── 鳴っているのは**常に 1 件**(`capturePlayingLid`)
+   *   なので、押した所からも採ると**同じ問いに答える口が 2 つ**になる(§7)。
+   *   ⚠ そのうえ「食い違っていないか」の門は、**同じ値を渡すので永久に真**になり、
+   *   空振りの門が 1 つ増えるだけである(§1)。
+   */
+  | { type: 'SET_CAPTURE_TRIM_MARK'; edge: 'start' | 'end'; ms: number }
+  /** 切り出す範囲の印を消す(#683 段②a)。 */
+  | { type: 'CLEAR_CAPTURE_TRIM' }
+  /** 切り出しが走っているか(#683 段②a)。⚠ 押した所に「切り出しています…」を出すため。 */
+  | { type: 'SET_CAPTURE_TRIM_BUSY'; busy: boolean }
   /** 🔴 雛形を集め終えた(#196 / B-2)。⚠ `null` は失敗 ── **帯は出さず静かに畳む**。 */
   | { type: 'SET_SNIPPET_SCAN'; scan: SnippetScan | null }
   /** 札が集められなかった(#277 段②-b)。⚠ 「まだ」と区別する ── 文言が違う。 */
@@ -3076,9 +3111,41 @@ function reduceCore(
         state: {
           ...state,
           capturePlayingLid: state.capturePlayingLid === action.lid ? null : action.lid,
+          // 🔴 鳴らす物が変わったら印は消す ── 別の録音の時刻を残さない
+          captureTrim: null,
         },
         events: [],
       };
+    case 'SET_CAPTURE_TRIM_MARK': {
+      // 🔴 **鳴っていなければ印は付かない** ── 時刻は「いま鳴っている所」の話なので、
+      //   鳴っていなければ意味を持たない(押し所を出さないのは描画側の仕事)
+      const lid = state.capturePlayingLid;
+      if (lid === null) return { state, events: [] };
+      const ms = Math.max(0, Math.round(action.ms));
+      const prev = state.captureTrim?.lid === lid ? state.captureTrim : null;
+      const startMs = action.edge === 'start' ? ms : prev?.startMs ?? null;
+      const endMs = action.edge === 'end' ? ms : prev?.endMs ?? null;
+      return {
+        state: {
+          ...state,
+          captureTrim: {
+            lid,
+            // ⚠ **逆転を残さない** ── いま押していない側を落とす(次に押せば戻る)
+            startMs: endMs !== null && startMs !== null && startMs >= endMs
+              ? (action.edge === 'start' ? startMs : null)
+              : startMs,
+            endMs: endMs !== null && startMs !== null && startMs >= endMs
+              ? (action.edge === 'end' ? endMs : null)
+              : endMs,
+          },
+        },
+        events: [],
+      };
+    }
+    case 'CLEAR_CAPTURE_TRIM':
+      return { state: { ...state, captureTrim: null }, events: [] };
+    case 'SET_CAPTURE_TRIM_BUSY':
+      return { state: { ...state, captureTrimBusy: action.busy }, events: [] };
     /**
      * 🔴 **雛形は「集められなかった」を帯に出さない**(#196 / B-2)。
      *

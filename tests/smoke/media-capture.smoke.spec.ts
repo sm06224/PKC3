@@ -76,6 +76,19 @@ test('🔴 録音を止めると本文に入り、その場で聞ける (#413 �
     { timeout: 15_000 },
   );
 
+  /**
+   * 🔴 **4 秒まで録る**(#683 段②a のため)。
+   *
+   * ⚠ 断片が 1 つ届いた所で止めると、録音は **1 秒ほど**しかない ── その中で
+   *   前後を削っても、印の字は**両方 `0:00`** になり、**どちらの印が付いたのか
+   *   test から見分けられない**(`elapsedText` は秒どまり)。
+   * 🔑 4 秒あれば `0:01`〜`0:03` を指せるので、**印も名前も見分けが付く**。
+   * ⚠ 足したのは**待ち時間 3 秒**だけで、起動は 1 つも増えていない。
+   */
+  await expect(status, '4 秒まで録れていない').toContainText(/録音中 0:0[4-9]/, {
+    timeout: 20_000,
+  });
+
   await clickReal(page, '[data-pkc-field="stop-capture"]');
   await expect(bar, '止めたのに帯が残っている').toBeHidden();
 
@@ -194,6 +207,206 @@ ${(e as Error).message}`,
     .toBeGreaterThanOrEqual(1);
   // ⚠ **保存の道は残っている**(器を置き換えていない)
   await expect(ref, '再生機を置いたらリンクが消えた').toHaveCount(1);
+
+  /**
+   * 🔴 **⑤ 録った音の前後を削る**(#683 段②a。user 裁定 2026-09-14)。
+   *
+   * 🔴 **unit では原理的に届かない層**:unit は**自分で組んだ最小の webm**しか
+   *   相手にできない(`tests/features/webm-opus.test.ts`)── ここでしか言えないのは
+   *   **本物の `MediaRecorder` が吐いた物を切り出して、ブラウザがそれを鳴らせる**
+   *   ことである。
+   * 🔑 **計器を分ける**(実測 2026-09-14)── 長さは **`<audio>.duration`**、
+   *   音が入っているかは**復号**。⚠ `decodeAudioData` は端の指示
+   *   (`CodecDelay` / `DiscardPadding`)を**読まない**ので、長さを訊いてはいけない。
+   * ⚠ **起動を増やさない** ── 同じ窓の続きでやる(`scripts/smoke-budget.mjs`)。
+   */
+  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  const rows = page.locator('[data-pkc-capture]');
+  await expect(rows, '録ったものが一覧に出ていない').toHaveCount(1);
+
+  await clickReal(page, '[data-pkc-field="capture-play"]');
+  const player = page.locator('[data-pkc-capture] [data-pkc-field="capture-media"]');
+  await expect(player, 'その場で聞く器が出ていない').toHaveCount(1);
+  await expect
+    .poll(() => player.evaluate((el: HTMLMediaElement) => el.readyState), {
+      message: '器は出たが中身を読めていない',
+    })
+    .toBeGreaterThanOrEqual(1);
+
+  const mark = page.locator('[data-pkc-field="capture-trim"]');
+  await expect(mark, '押し方の案内が出ていない').toContainText('「ここから」');
+
+  /**
+   * ⚠ **印は「いま鳴っている所」なので、位置を動かしてから押す。**
+   * 🔑 動かせたことを**先に確かめる** ── 動かせていなければ 2 つの印が同じ値になり、
+   *   reducer が片方を落とすので、**この段の失敗が「印が付かない」に化ける**
+   *   (CLAUDE.md §4「対照群が届かない回は判定不能と書く」)。
+   */
+  /**
+   * 🔴 **止めてから合わせる**。⚠ **止まっていることまで見る** ──
+   *   鳴ったままだと、`clickReal`(要素まで送って押す)の**数十〜百数十ミリ秒**の
+   *   あいだに位置が進み、**押した所が読んだ値と違う**。
+   *   🔑 実際、これで 1 度 0.12 秒ずれた(2.12 対 2.00)── ⚠ **切り出しの側は
+   *   正しい**(本物の録音 2 本を 1.0〜3.0 で切って、ブラウザが `duration` を
+   *   **2 ちょうど**と答えるのを実測済み)。⚠ だから**緩めずに、前提のほうを検める**。
+   */
+  const seek = async (to: number): Promise<number> => {
+    /**
+     * 🔴 **合わせ終わるまで待つ**(`seeked`)。
+     *
+     * ⚠ `currentTime` に代入すると、**その値がすぐ読み返せる**が、
+     *   それは「頼んだ値」であって「落ち着いた値」ではない ── `MediaRecorder` の
+     *   webm は `Cues` を持たないので、ブラウザは近い所から**前へ解いて**落ち着く。
+     *   🔑 だから合わせた直後に読むと、後から動く値を掴む。
+     */
+    await player.evaluate(
+      async (el: HTMLMediaElement, t) =>
+        new Promise<void>((done) => {
+          el.pause();
+          if (Math.abs(el.currentTime - t) < 0.001) {
+            done();
+            return;
+          }
+          el.addEventListener('seeked', () => done(), { once: true });
+          el.currentTime = t;
+        }),
+      to,
+    );
+    await expect
+      .poll(() => player.evaluate((el: HTMLMediaElement) => el.seeking), {
+        message: `再生位置を ${to} 秒へ動かし終えていない`,
+      })
+      .toBe(false);
+    const at = await player.evaluate((el: HTMLMediaElement) => ({
+      currentTime: el.currentTime,
+      paused: el.paused,
+    }));
+    expect(
+      at.paused,
+      `止めたのに鳴っている(${at.currentTime.toFixed(3)} 秒)── 押すまでに位置が進むので、印が読んだ値とずれる`,
+    ).toBe(true);
+    // ⚠ **落ち着いた値が頼んだ所の近くに在る**(`Cues` が無いので、ぴったりとは限らない)
+    expect(at.currentTime, `${to} 秒へ合わせたのに ${at.currentTime.toFixed(3)} 秒に居る`).toBeCloseTo(
+      to,
+      1,
+    );
+    // 🔑 **押す直前の実測値を返す** ── 切り出しの長さは「頼んだ 2 秒」ではなく
+    //    **押した所の差**で決まる
+    return at.currentTime;
+  };
+
+  const at0 = await seek(1.0);
+  await clickReal(page, '[data-pkc-field="capture-trim-start"]');
+  await expect(mark, '「ここから」の印が付いていない').toContainText('ここから 0:01');
+  /**
+   * 🔴 **印を付けても、聞いている器は作り直されない**(この段で見つけた欠陥)。
+   * ⚠ 作り直されると `<audio>` が**頭へ戻って鳴り出す** ── 印は「聞きながら」
+   *   押すものなので、それでは動線が成り立たない。
+   * 🔑 観測点は**同じ器か**(`currentTime` が保たれているか)。
+   */
+  await expect
+    .poll(() => player.evaluate((el: HTMLMediaElement) => el.currentTime), {
+      message: '印を付けたら、聞いていた所が頭へ戻った(器が作り直されている)',
+    })
+    .toBeCloseTo(at0, 1);
+
+  const at1 = await seek(3.0);
+  await clickReal(page, '[data-pkc-field="capture-trim-end"]');
+  // ⚠ **押した後も止まったまま**(押す前後で位置が動いていないことを、その場で採る)
+  const after = await player.evaluate((el: HTMLMediaElement) => ({
+    currentTime: el.currentTime,
+    paused: el.paused,
+  }));
+  expect(
+    after.currentTime,
+    `押している間に位置が動いた(${at1.toFixed(3)} → ${after.currentTime.toFixed(3)} 秒、paused=${String(after.paused)})`,
+  ).toBeCloseTo(at1, 1);
+  await expect(mark, '両方の印がそろっていない').toContainText('0:01〜0:03(0:02)');
+
+  await clickReal(page, '[data-pkc-field="capture-trim-run"]');
+
+  // 🔴 **一覧に 1 件増え、元も残っている**(上書きしない ── 裁定)
+  await expect(rows, '切り出したものが一覧に増えていない').toHaveCount(2, { timeout: 15_000 });
+  /**
+   * 🔴 **さっきまで見ていたノートが退いていない**(着地前の動線レビュー 欠陥 1)。
+   * ⚠ `CREATE_ENTRY` は**選択を作った添付へ移す**ので、返さないと中央が
+   *   「定例会議」から**切り出したばかりの添付**に化ける ── user は
+   *   「録音を切っただけなのに、読んでいたノートが閉じられた」と読む(#300 / #666)。
+   */
+  await expect(detail, '切り出したら、読んでいたノートが画面から消えた').toContainText('定例会議');
+  await expect(
+    page.locator('[data-pkc-field="capture-name"]', { hasText: '(0:01〜0:03)' }),
+    '名前に範囲が入っていない',
+  ).toHaveCount(1);
+
+  /**
+   * 🔴 **切り出した物が本当に鳴らせる**(この段の本命)。
+   * ⚠ `duration` だけでは足りない ── **中身が無音でも合う**。だから
+   *   **復号して音が入っていること**まで見る(#683 設計 doc §8)。
+   */
+  const cutRow = page.locator('[data-pkc-capture]', { hasText: '(0:01〜0:03)' });
+  await clickReal(page, '[data-pkc-capture]:has-text("(0:01〜0:03)") [data-pkc-field="capture-play"]');
+  const cutPlayer = cutRow.locator('[data-pkc-field="capture-media"]');
+  await expect
+    .poll(() => cutPlayer.evaluate((el: HTMLMediaElement) => el.readyState), {
+      message: '切り出した物を鳴らせない(器が中身を読めていない)',
+    })
+    .toBeGreaterThanOrEqual(1);
+  const cutInfo = await cutPlayer.evaluate(async (el: HTMLMediaElement) => {
+    const bytes = await (await fetch(el.src)).arrayBuffer();
+    /**
+     * 🔴 **大きさは復号の前に採る**(この段で見つけた空振り)。
+     * ⚠ `decodeAudioData` は渡された `ArrayBuffer` を**手放させる**(detach)ので、
+     *   後から `byteLength` を読むと**必ず 0** ── 「元より小さい」を見る assert が
+     *   **中身に関わらず通る**(§1 空振り)。
+     */
+    const size = bytes.byteLength;
+    /**
+     * 🔴 **長さは「読み終えた器」で測る**(この段で 5 回赤くして分かった)。
+     *
+     * ⚠ 画面の器は `autoplay` で鳴らしながら読んでいるので、`readyState` が
+     *   メタデータまで来た時点の `duration` は **最後の block の時刻**である ──
+     *   最後の packet の長さも、頭と尻の札も、まだ効いていない。
+     *   実測(同じ file、2 回とも一致):
+     *   **最後の block 2100ms → 2.10 と答え / 2040ms → 2.04 と答える**。
+     *   ⚠ そして**読み終えると 2 ちょうど**になる(器を作り直して測ると一致)。
+     * 🔑 だから**この file だけを読む器を 1 つ作って**測る ── 見たいのは
+     *   「**作った file が頼んだ長さか**」であって、画面の器の読み込み具合ではない。
+     * ⚠ `new Blob([bytes])` は**写しを作る**ので、この後の復号で `bytes` が
+     *   手放されても、こちらの器には効かない。
+     */
+    const probe = document.createElement('audio');
+    probe.src = URL.createObjectURL(new Blob([bytes], { type: 'audio/webm' }));
+    const duration = await new Promise<number>((res) => {
+      probe.onloadedmetadata = (): void => res(probe.duration);
+      probe.onerror = (): void => res(Number.NaN);
+      setTimeout(() => res(Number.NaN), 5000);
+    });
+    URL.revokeObjectURL(probe.src);
+    const ctx = new OfflineAudioContext(1, 48000, 48000);
+    const buf = await ctx.decodeAudioData(bytes);
+    const ch = buf.getChannelData(0);
+    let sum = 0;
+    for (let i = 0; i < ch.length; i += 1) sum += Math.abs(ch[i]!);
+    // ⚠ `screenDuration` は診断用 ── 画面の器が途中の値を返すことの記録
+    return { duration, screenDuration: el.duration, bytes: size, energy: sum / ch.length };
+  });
+  /**
+   * 🔑 **長さは「押した所の差」と突き合わせる**(「頼んだ 2 秒」ではない)。
+   * ⚠ `seek` の門は ±0.05 を許すので、2.0 と直に比べると**計器の遊びで落ちる**
+   *   ── 実際 1 度それで赤くなった(2.1 対 2.0)。製品の約束は
+   *   「**押した所のとおりに切れる**」であって「ちょうど 2 秒」ではない。
+   */
+  const wanted = at1 - at0;
+  expect(
+    cutInfo.duration,
+    `押した所(${at0.toFixed(3)}〜${at1.toFixed(3)} = ${wanted.toFixed(3)} 秒)のとおりに切れていない(${JSON.stringify(cutInfo)})`,
+  ).toBeCloseTo(wanted, 1);
+  // 🔑 **音が入っている**(無音を作っていない)
+  expect(cutInfo.energy, `音が入っていない(${JSON.stringify(cutInfo)})`).toBeGreaterThan(0);
+  // ⚠ **元より小さい**(丸ごと写していない)。⚠ 0 でないことも見る(空振り防止)
+  expect(cutInfo.bytes, '大きさを測れていない(復号の後に読んでいる)').toBeGreaterThan(0);
+  expect(cutInfo.bytes, '切り出したのに元と同じ大きさ').toBeLessThan(38_000);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

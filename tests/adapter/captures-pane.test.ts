@@ -431,3 +431,222 @@ describe('読み直し(取込・別タブの書込)でどうなるか(#683 段�
     ).toBe(false);
   });
 });
+
+/**
+ * 🔴 **前後を削る**(#683 段②a。user 裁定 2026-09-14)。
+ *
+ * ⚠ 見るのは 3 つ ──
+ *   ①**押し所は切り出せる行にだけ出る**(出さない代わりに理由を書く)
+ *   ②**印が片方だけなら「切り出す」を出さない**(範囲が決まらない)
+ *   ③**印は鳴らしている 1 件にだけ付く**(別の行に古い時刻が見えない)。
+ */
+describe('前後を削る ── 画面に何が出るか(#683 段②a)', () => {
+  const playing = (lid: string, trim?: AppState['captureTrim']): Partial<AppState> => ({
+    captureItems: ITEMS(),
+    capturePlayingLid: lid,
+    ...(trim === undefined ? {} : { captureTrim: trim }),
+  });
+  /** ⚠ **借り終わるまで `<audio>` は出ない** ── 借りを 1 往復させてから見る。 */
+  async function paneReady(state: Partial<AppState>): Promise<HTMLElement> {
+    const p = pane(state, lender());
+    await Promise.resolve();
+    await Promise.resolve();
+    p.paint();
+    return p.host;
+  }
+  const field = (h: HTMLElement, lid: string, name: string): HTMLElement | null =>
+    h.querySelector<HTMLElement>(`[data-pkc-capture="${lid}"] [data-pkc-field="${name}"]`);
+
+  it('🔴 鳴らしている音の行に「ここから」「ここまで」が出る', async () => {
+    const host = await paneReady(playing('a'));
+    expect(field(host, 'a', 'capture-media'), '器がまだ出ていない(前提が崩れている)').not.toBeNull();
+    expect(field(host, 'a', 'capture-trim-start')?.textContent).toBe('ここから');
+    expect(field(host, 'a', 'capture-trim-end')?.textContent).toBe('ここまで');
+    expect(field(host, 'a', 'capture-trim')?.textContent).toContain('「ここから」');
+  });
+
+  it('🔴 鳴らしていない行には 1 つも出ない(押しても時刻が無い)', async () => {
+    const host = await paneReady(playing('a'));
+    expect(field(host, 'b', 'capture-trim-start')).toBeNull();
+  });
+
+  it('🔴 印が片方だけなら「切り出す」を出さない(範囲が決まらない)', async () => {
+    const host = await paneReady(playing('a', { lid: 'a', startMs: 12_000, endMs: null }));
+    expect(field(host, 'a', 'capture-trim')?.textContent).toContain('ここから 0:12');
+    expect(field(host, 'a', 'capture-trim-run'), '範囲が決まっていないのに押せる').toBeNull();
+  });
+
+  it('🔴 両方そろったら「切り出す」と「印を消す」が出る(片道にしない)', async () => {
+    const host = await paneReady(playing('a', { lid: 'a', startMs: 12_000, endMs: 65_000 }));
+    expect(field(host, 'a', 'capture-trim-run')?.textContent).toContain('切り出す');
+    expect(field(host, 'a', 'capture-trim-clear'), '印を消す道が無い').not.toBeNull();
+    expect(field(host, 'a', 'capture-trim')?.textContent).toBe('0:12〜1:05(0:53)');
+  });
+
+  /**
+   * 🔴 **印を付けても、聞いている器は作り直さない**(#683 段②a、実ブラウザ smoke で判明)。
+   *
+   * ⚠ 直す前は印を**一覧の指紋**に入れていたので、「ここから」を押すたびに
+   *   一覧ごと組み直し、その中の `<audio>` も作り直されていた ──
+   *   **聞いている音が止まって頭へ戻る**。🔴 印は「聞きながら」押すものなので、
+   *   これは動線そのものを壊す(#300「補助的な物が主の作業を奪う」と同じ形)。
+   * 🔑 だから見るのは 2 つ ── **字は変わる**こと、**器は同じ物のまま**であること。
+   */
+  it('🔴 印を付けると字は変わり、聞いている器は作り直されない', async () => {
+    const p = pane(playing('a'), lender());
+    await Promise.resolve();
+    await Promise.resolve();
+    p.paint();
+    expect(field(p.host, 'a', 'capture-trim')?.textContent).toContain('「ここから」');
+    const before = field(p.host, 'a', 'capture-media');
+    expect(before, '前提が崩れている(器が出ていない)').not.toBeNull();
+
+    p.paint({ captureTrim: { lid: 'a', startMs: 12_000, endMs: null } });
+    expect(
+      field(p.host, 'a', 'capture-trim')?.textContent,
+      '押しても画面の字が変わらない',
+    ).toContain('ここから 0:12');
+    expect(
+      field(p.host, 'a', 'capture-media'),
+      '印を付けたら器が作り直された ── 聞いている音が止まる',
+    ).toBe(before);
+
+    // ⚠ 「切り出しています…」でも同じ(こちらも帯だけ差し替える)
+    p.paint({ captureTrim: { lid: 'a', startMs: 12_000, endMs: 65_000 }, captureTrimBusy: true });
+    expect(field(p.host, 'a', 'capture-trim-run')?.textContent).toBe('切り出しています…');
+    expect(field(p.host, 'a', 'capture-media'), '走り出したら器が作り直された').toBe(before);
+  });
+
+  /** 🔴 **切り出せない形には口を出さず、理由を書く**(押したら断る、にしない)。 */
+  /**
+   * 🔴 **走っている間は、押した所で分かる**(着地前の動線レビュー 欠陥 3)。
+   * ⚠ 長い録音は数秒かかる ── ボタンが何も言わないと「効かなかった」と読まれる。
+   */
+  it('🔴 切り出している間はボタンがそう言い、押せない', async () => {
+    const p = pane(playing('a', { lid: 'a', startMs: 12_000, endMs: 65_000 }), lender());
+    await Promise.resolve();
+    await Promise.resolve();
+    p.paint();
+    const run = (): HTMLButtonElement | null =>
+      p.host.querySelector<HTMLButtonElement>('[data-pkc-field="capture-trim-run"]');
+    expect(run()?.textContent).toBe('この範囲で切り出す');
+    expect(run()?.disabled, '走っていないのに押せない').toBe(false);
+
+    p.paint({ captureTrimBusy: true });
+    expect(
+      run()?.textContent,
+      '走っているのに、押した所が何も言わない(指紋に入っていない)',
+    ).toBe('切り出しています…');
+    expect(run()?.disabled, '走っている最中も押せてしまう').toBe(true);
+    expect(
+      p.host.querySelector<HTMLButtonElement>('[data-pkc-field="capture-trim-clear"]')?.disabled,
+      '走っている最中に印を消せる ── 消したのに増える、が起きる',
+    ).toBe(true);
+
+    // ⚠ 対照群 ── 終われば戻る(押せなくなったままにしない)
+    p.paint({ captureTrimBusy: false });
+    expect(run()?.disabled, '終わったのに押せないまま').toBe(false);
+  });
+
+  it('🔴 切り出せない形の音は、理由が 1 行出るだけ', async () => {
+    const items = captureItemsFrom([
+      { lid: 'a', title: 'a', body: body('録音.m4a', 'audio/mp4') },
+    ]);
+    const host = await paneReady({ captureItems: items, capturePlayingLid: 'a' });
+    expect(field(host, 'a', 'capture-trim-start'), '切れないのに押し所が出ている').toBeNull();
+    expect(field(host, 'a', 'capture-trim-note')?.textContent).toContain('まだ切り出せません');
+  });
+
+  /**
+   * 🔴 **鳴らしていない「音」の行**(変異試験 C4 が SURVIVED で教えた)。
+   *
+   * ⚠ `ITEMS()` は音 1 件・動画 1 件しか無いので、「鳴らしていない**音**の行」が
+   *   fixture に 1 つも無かった ── 動画の行は `trimUnavailableText` が
+   *   無条件に `null` を返すので、**押し所を出す / 出さないの判定を壊しても
+   *   DOM が 1 ドットも変わらない**(§2「fixture のゼロ件次元」)。
+   */
+  it('🔴 鳴らしていない音の行には、切り出しの字が 1 つも出ない', async () => {
+    const items = captureItemsFrom([
+      { lid: 'a', title: 'a', body: body('録音A.webm', 'audio/webm') },
+      { lid: 'c', title: 'c', body: body('録音C.webm', 'audio/webm', 'k-3') },
+    ]);
+    const host = await paneReady({ captureItems: items, capturePlayingLid: 'a' });
+    // 対照群 ── 鳴らしている側には出ている(空振りでないこと)
+    expect(field(host, 'a', 'capture-trim-start'), '鳴らしている行にも出ていない').not.toBeNull();
+    expect(field(host, 'c', 'capture-trim-start'), '鳴っていない音の行に押し所が出ている').toBeNull();
+    expect(field(host, 'c', 'capture-trim'), '鳴っていない行に印の字が出ている').toBeNull();
+  });
+
+  it('🔴 走っている間は「ここから」「ここまで」も押せない(打ち直しが消える)', async () => {
+    const p = pane(playing('a', { lid: 'a', startMs: 12_000, endMs: 65_000 }), lender());
+    await Promise.resolve();
+    await Promise.resolve();
+    p.paint();
+    const mark = (): HTMLButtonElement | null =>
+      p.host.querySelector<HTMLButtonElement>('[data-pkc-field="capture-trim-start"]');
+    expect(mark()?.disabled, '走っていないのに押せない').toBe(false);
+    p.paint({ captureTrimBusy: true });
+    // ⚠ 打ち直しても、走っている物が終わると `CLEAR_CAPTURE_TRIM` で消える
+    expect(mark()?.disabled, '走っている間に印を打ち直せる').toBe(true);
+  });
+
+  it('⚠ 動画には切り出しの字を 1 つも出さない(いまは音だけ)', async () => {
+    const host = await paneReady(playing('b'));
+    expect(field(host, 'b', 'capture-trim-start')).toBeNull();
+    expect(field(host, 'b', 'capture-trim-note')).toBeNull();
+  });
+});
+
+/** 🔴 **印の決まり**(#683 段②a)── reducer 側。 */
+describe('前後を削る ── 印の決まり(#683 段②a)', () => {
+  const play = (lid: string): AppState =>
+    reduce({ ...initialState, captureItems: ITEMS() } as AppState, {
+      type: 'SET_CAPTURE_PLAYING',
+      lid,
+    }).state;
+
+  it('🔴 鳴らしている行にだけ印が付く', () => {
+    const s = reduce(play('a'), { type: 'SET_CAPTURE_TRIM_MARK', edge: 'start', ms: 1234 }).state;
+    expect(s.captureTrim).toEqual({ lid: 'a', startMs: 1234, endMs: null });
+  });
+
+  it('🔴 何も鳴っていなければ印は付かない(時刻が意味を持たない)', () => {
+    const s = reduce({ ...initialState, captureItems: ITEMS() } as AppState, {
+      type: 'SET_CAPTURE_TRIM_MARK',
+      edge: 'start',
+      ms: 1234,
+    }).state;
+    expect(s.captureTrim, '鳴っていないのに印が付いた').toBeNull();
+  });
+
+  it('🔴 鳴らす物を変えたら印は消える(別の録音の時刻を残さない)', () => {
+    let s = reduce(play('a'), { type: 'SET_CAPTURE_TRIM_MARK', edge: 'start', ms: 1234 }).state;
+    s = reduce(s, { type: 'SET_CAPTURE_PLAYING', lid: 'b' }).state;
+    expect(s.captureTrim, '別の行へ移っても印が残っている').toBeNull();
+  });
+
+  it('🔴 逆転は残さない ── 後から押したほうを採る', () => {
+    let s = reduce(play('a'), { type: 'SET_CAPTURE_TRIM_MARK', edge: 'start', ms: 5000 }).state;
+    s = reduce(s, { type: 'SET_CAPTURE_TRIM_MARK', edge: 'end', ms: 9000 }).state;
+    expect(s.captureTrim).toEqual({ lid: 'a', startMs: 5000, endMs: 9000 });
+    // ⚠ 始まりを終わりより後ろへ動かしたら、終わりが落ちる(押し直せば戻る)
+    s = reduce(s, { type: 'SET_CAPTURE_TRIM_MARK', edge: 'start', ms: 12_000 }).state;
+    expect(s.captureTrim).toEqual({ lid: 'a', startMs: 12_000, endMs: null });
+    // 対照群 ── 終わりを始まりより前へ動かしたら、始まりが落ちる
+    s = reduce(s, { type: 'SET_CAPTURE_TRIM_MARK', edge: 'end', ms: 3000 }).state;
+    expect(s.captureTrim).toEqual({ lid: 'a', startMs: null, endMs: 3000 });
+  });
+
+  it('⚠ 時刻は 0 より下へ行かない / 整数に丸める', () => {
+    const s = reduce(play('a'), { type: 'SET_CAPTURE_TRIM_MARK', edge: 'start', ms: -5.4 }).state;
+    expect(s.captureTrim?.startMs).toBe(0);
+    const t = reduce(play('a'), { type: 'SET_CAPTURE_TRIM_MARK', edge: 'end', ms: 1234.6 }).state;
+    expect(t.captureTrim?.endMs).toBe(1235);
+  });
+
+  it('🔴 印を消す道が在る(片道の操作を作らない)', () => {
+    let s = reduce(play('a'), { type: 'SET_CAPTURE_TRIM_MARK', edge: 'start', ms: 1234 }).state;
+    s = reduce(s, { type: 'CLEAR_CAPTURE_TRIM' }).state;
+    expect(s.captureTrim).toBeNull();
+  });
+});

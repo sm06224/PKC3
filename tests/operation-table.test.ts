@@ -145,6 +145,14 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'add-place', 'add-relation', 'add-tag', 'add-url-tile', 'adopt-external-images',
   'adopt-link-icon', 'allow-external-images', 'append-entry', 'apply-plan', 'apply-settings',
   'apply-update', 'attach-file', 'bulk-tag-add', 'bulk-tag-remove', 'capture-stop',
+  /**
+   * ⚠ **2026-09-14(#683 段②a)で 4 件増やした** ── 録った音の前後を削る
+   *   (印を付ける 2 つ・消す・切り出す)。⚠ **名前で呼べないままにする理由**:
+   *   印は**いま鳴っている所**の時刻なので、**鳴らしていなければ意味を持たない**
+   *   ── パレットから「ここから」と呼んでも、何時何分が入るのか決まらない。
+   * 🔑 `capture-play` / `capture-stop` と同じ扱いである(並びを揃えた)。
+   */
+  'capture-trim-clear', 'capture-trim-end', 'capture-trim-run', 'capture-trim-start',
   'choose-office-pack', 'clear-copy-history', 'clear-entry-date', 'clear-entry-filter',
   'clear-kind-filter', 'clear-opened-history', 'clear-selection', 'close-pane',
   'contacts-quick-add', 'copy-block-md', 'copy-chapter-md', 'copy-note-md', 'copy-note-rich',
@@ -302,12 +310,16 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   ── 登記は増えない(押し所はタイルの右クリックの中にしか無い)
       // ⚠ 2026-09-14(#530 案 A): 板の形 5 つ(`place-shape-*`)で受け手 +5
       //   (登記は増えない ── 押し口は板の右クリックの中にしか無く、鍵も持たない)
-      total: 294,
-      receivers: 245,
+      // ⚠ 2026-09-14(#683 段②a): 録った音の前後を削る 4 つ(`capture-trim-*`)で
+      //   受け手 +4 ── 登記は増えない。🔑 押し所は**鳴らしている行の中**にしか無く、
+      //   印は「いま鳴っている所」の時刻なので、名前だけでは呼べない
+      //   (`capture-play` / `capture-stop` と同じ仕分け)
+      total: 298,
+      receivers: 249,
       registered: 85,
       both: 36,
       outsideActionsTable: 49,
-      unregistered: 209,
+      unregistered: 213,
     });
   });
 
