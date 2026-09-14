@@ -415,6 +415,58 @@ if (inside > 0) trail.push(['rows-detached', at(), inside]);
 (name section だけが載る。実行は遅くならない)。⚠ `-sSAFE_HEAP=1` は**別物**で、
 JS の heap view 越しの load/store しか見ない ── wasm 内部の参照は捕まえない。
 
+## 🔴 **鳴らしている `<audio>` の `duration` は、読み終わるまで「途中の値」である**(2026-09-14、#683 段②a)
+
+⚠ **5 回赤くして、そのたびに製品を疑った。** 実体は**計器**だった。
+
+録音を切り出した file の長さを、**画面に出ている器**から読んでいた:
+
+```ts
+await expect.poll(() => player.evaluate((el: HTMLMediaElement) => el.readyState)).toBeGreaterThanOrEqual(1);
+const info = await player.evaluate((el: HTMLMediaElement) => ({ duration: el.duration }));
+```
+
+🔴 **`readyState >= 1`(メタデータまで読めた)では足りない。** その器は
+`autoplay` で**鳴らしながら読んでいる**ので、そこで返る `duration` は
+**最後の block の時刻**であって、①最後の 1 packet の長さ ②頭と尻の札
+(opus の `CodecDelay` / `DiscardPadding`)が**まだ効いていない**。
+
+実測(同じ file、2 通りの録音で完全に一致):
+
+| 最後の block の時刻 | 器が答えた `duration` | 本当の長さ |
+|---|---|---|
+| 2100ms | **2.10** | 2.00 |
+| 2040ms | **2.04** | 2.00 |
+
+⚠ **緑の回も 2.04 で、2.00 ではなかった** ── つまり**緑の側も間違った値を読んでいた**。
+🔑 「赤い回だけおかしい」ではなく「**全部おかしくて、たまたま許容に入る回があった**」。
+⚠ だから **1 回の緑を「直った」と読んではいけない**(この件では 4 回中 1 回赤という
+出方をして、原因が 5 回目まで分からなかった)。
+
+🔑 **直し:見たい物だけを読む器を、その場で 1 つ作る。**
+
+```ts
+const probe = document.createElement('audio');
+probe.src = URL.createObjectURL(new Blob([bytes], { type: 'audio/webm' }));
+const duration = await new Promise<number>((res) => {
+  probe.onloadedmetadata = (): void => res(probe.duration);
+  probe.onerror = (): void => res(Number.NaN);
+  setTimeout(() => res(Number.NaN), 5000);
+});
+```
+
+⚠ 見たいのは「**作った file が頼んだ長さか**」であって、
+**画面の器の読み込み具合**ではない ── 2 つを混ぜると、製品の欠陥と
+計器の途中経過が同じ 1 つの数字になる(§「計器の名前が範囲より広い」の音版)。
+🔑 画面の器の値も**捨てずに併記する**(`screenDuration`)── 次に同じ形で
+外したとき、**2 つ並んでいれば 1 回で分かる**。
+
+### ⚠ そして **`decodeAudioData` は端の札を見ない**
+
+同じ file を復号すると、`CodecDelay` を引かない**生の長さ**が返る
+(実測 2.16 / 2.13)。🔑 だから **長さは `<audio>.duration`、音が入っているかは復号**、
+と**計器を分ける** ── 片方で両方を測ろうとすると、必ずどちらかで嘘になる。
+
 ## 🔴 `expect.poll` は「最初の一読で当たれば通る」(2026-08-27)
 
 遷移(`transition`)のある値を `expect.poll` で読むと、**変わり始めの値をそのまま採る**。
