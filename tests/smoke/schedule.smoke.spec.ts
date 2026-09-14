@@ -1,4 +1,4 @@
-import { test, expect, type CDPSession, type Page } from '@playwright/test';
+import { test, expect, type CDPSession, type Locator, type Page } from '@playwright/test';
 import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
 import { peek, withStateOnFail } from './state-dump';
 
@@ -77,6 +77,19 @@ async function touchDragCard(
     });
     await page.waitForTimeout(30);
   }
+}
+
+/**
+ * 🔴 **マウスの本物の drag**(#855 決4)。`page.mouse` で掴んで離すところまで ──
+ * `data-pkc-dropping` の点検は呼び側でやる(場面ごとに見たい所が違うため)。
+ */
+async function mouseDragTo(page: Page, source: Locator, target: Locator): Promise<void> {
+  const from = (await source.boundingBox())!;
+  const to = (await target.boundingBox())!;
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  // ⚠ **途中を経由する** ── 1 回の move では `dragover` が出ないブラウザが在る
+  await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 12 });
 }
 
 test('🔴 予定のタブで札を掴んで日へ落とすと、本文の日付が変わる', async ({ page }) => {
@@ -309,6 +322,99 @@ test('🔴 予定のタブで札を掴んで日へ落とすと、本文の日付
     `- [ ] 見積を送る @${D3}\n- [ ] 体裁のチェック`,
   );
   await clickReal(page, '[data-pkc-action="cancel-edit"]');
+
+  /**
+   * ⑧ 🔴 **繰り返しの札を掴んで動かすと、聞かれる**(#855 決4)。
+   *
+   * ⚠ **起動を増やさない** ── ⑥⑦ で付けて外した「毎週」を、ここでもう一度
+   *   付け直して使う(`d3Card` / `cardText` / `repeatMenu` は既に在る道中)。
+   */
+  await cardText.click({ button: 'right' });
+  await expect(repeatMenu, '付け直しの右クリックでメニューが出ない').toBeVisible();
+  await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="open-repeat-menu"]');
+  await clickReal(
+    page,
+    '[data-pkc-region="context-menu"] [data-pkc-action="set-task-repeat"][data-pkc-repeat="week"]',
+  );
+  await expect(repeatMenu, '刻みを選んでもメニューが閉じない').toHaveCount(0);
+  await expect(d3Card, '付け直しても札に「毎週」が出ない').toContainText('毎週');
+
+  const dlg = page.locator('[data-pkc-region="app-dialog"][open]');
+  const dlgTitle = page.locator('[data-pkc-field="dialog-title"]');
+  const moveRows = page.locator('[data-pkc-field="pick-repeat-move"]');
+
+  /**
+   * ⑨ 🔴 **「やめる」を押すと、本文は 1 バイトも変わらない(対照群①)**。
+   *   ⚠ **落とし先は `gridCell`(升目そのもの)** ── 束の見出しの有無に関わらず
+   *   1 件に定まる(既存の道具に揃えて衝突の心配そのものを消す)。
+   */
+  await mouseDragTo(page, d3Card, gridCell(D5));
+  await page.mouse.up();
+  await expect(dlg, '繰り返しの札を落としても小窓が出ない').toBeVisible();
+  await expect(dlgTitle, '小窓の題名が違う').toHaveText('繰り返しの予定を動かします');
+  await expect(moveRows, '選択肢が 2 つでない').toHaveCount(2);
+  await clickReal(page, '[data-pkc-field="dialog-cancel"]');
+  await expect(dlg, '「やめる」を押しても小窓が閉じない').toHaveCount(0);
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await expect(ta, '「やめる」を押したのに本文が変わった').toHaveValue(
+    `- [ ] 見積を送る @${D3} 毎週\n- [ ] 体裁のチェック`,
+  );
+  await clickReal(page, '[data-pkc-action="cancel-edit"]');
+  await expect(
+    pane.locator(`[data-pkc-region="schedule-group"][data-pkc-drop-date="${D5}"] [data-pkc-entry]`),
+    '「やめる」を押したのに D5 へ札が来た',
+  ).toHaveCount(0);
+
+  /**
+   * ⑩ 🔴 **「全部動かす」を押すと、規則の行の日付そのものが動く(対照群②)**。
+   */
+  await mouseDragTo(page, d3Card, gridCell(D5));
+  await page.mouse.up();
+  await expect(dlg, '2 度目の小窓が出ない').toBeVisible();
+  await clickReal(page, '[data-pkc-field="pick-repeat-move"][data-pkc-repeat-move-index="1"]');
+  await expect(dlg, '「全部動かす」を選んでも小窓が閉じない').toHaveCount(0);
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await expect(ta, '「全部動かす」を選んでも規則の日付が動かない').toHaveValue(
+    `- [ ] 見積を送る @${D5} 毎週\n- [ ] 体裁のチェック`,
+  );
+  await clickReal(page, '[data-pkc-action="cancel-edit"]');
+  const d5Card = pane.locator(
+    `[data-pkc-region="schedule-group"][data-pkc-drop-date="${D5}"] [data-pkc-entry]`,
+  );
+  await expect(d5Card, '「全部動かす」のあと D5 に札が来ない').toHaveCount(1);
+  await expect(
+    pane.locator(`[data-pkc-region="schedule-group"][data-pkc-drop-date="${D3}"] [data-pkc-entry]`),
+    '「全部動かす」のあとも D3 に札が残っている',
+  ).toHaveCount(0);
+
+  /**
+   * ⑪ 🔴 **「この回だけ動かす」を押すと、本文に振替の行が 1 本増える**
+   *   (依頼の本命。#855 決4)。
+   */
+  await mouseDragTo(page, d5Card, gridCell(D6));
+  await page.mouse.up();
+  await expect(dlg, '3 度目の小窓が出ない').toBeVisible();
+  await clickReal(page, '[data-pkc-field="pick-repeat-move"][data-pkc-repeat-move-index="0"]');
+  await expect(dlg, '「この回だけ動かす」を選んでも小窓が閉じない').toHaveCount(0);
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await expect(ta, '「この回だけ動かす」を選んでも振替の行が増えない').toHaveValue(
+    `- [ ] 見積を送る @${D5} 毎週\n- [ ] 見積を送る @${D6} 振替${D5}\n- [ ] 体裁のチェック`,
+  );
+  await clickReal(page, '[data-pkc-action="cancel-edit"]');
+  /**
+   * 🔴 **振替は「元の日」も塞ぐ**(`repeat.ts` の docstring どおり)── 塞がないと
+   *   D5 と D6 の**両方**に同じ回の札が出て二重になる。ここで D5 が 0 件のまま
+   *   なら、本文の `@${D5} 毎週` が消えていないことと合わせて
+   *   「規則そのものは動いていない(D6 だけの例外)」が言える。
+   */
+  await expect(
+    pane.locator(`[data-pkc-region="schedule-group"][data-pkc-drop-date="${D5}"] [data-pkc-entry]`),
+    '「この回だけ動かす」のあと元の日にも札が残って二重になった',
+  ).toHaveCount(0);
+  await expect(
+    pane.locator(`[data-pkc-region="schedule-group"][data-pkc-drop-date="${D6}"] [data-pkc-entry]`),
+    '「この回だけ動かす」のあと落とした日に札が出ない',
+  ).toHaveCount(1);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
