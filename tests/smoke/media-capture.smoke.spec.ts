@@ -407,6 +407,10 @@ ${(e as Error).message}`,
    *   ── 実際 1 度それで赤くなった(2.1 対 2.0)。製品の約束は
    *   「**押した所のとおりに切れる**」であって「ちょうど 2 秒」ではない。
    */
+  // ⚠ **一時の診断** ── 緑の回も値を残す(赤の回だけ見ても、ぶれの幅が分からない)
+  // eslint-disable-next-line no-console
+  console.log(`[診断] 押した所 ${at0.toFixed(3)}〜${at1.toFixed(3)} / 出来た物 ${JSON.stringify(cutInfo)}`);
+
   const wanted = at1 - at0;
   expect(
     cutInfo.duration,
