@@ -90,7 +90,17 @@ function ensureGrip(el: HTMLElement): void {
     el.prepend(grip);
   }
   // ⚠ 文言は**起きること**で書く(user 指示 2026-08-21)
-  const label = '掴んで動かします(離した位置が本文に書かれます)';
+  /**
+   * 🔴 **名前が付いているなら、そう言う**(#530 段③a の動線レビュー)。
+   *
+   * ⚠ 名前(`#…`)は**画面のどこにも出ていなかった** ── 線が引けないとき、user が
+   *   「この付箋の名前は何だったか」を確かめる術が**本文を開くことだけ**だった。
+   * 🔑 掴む口は**その付箋を名指しする唯一の押し所**なので、ここに置く。
+   */
+  const label =
+    el.id === ''
+      ? '掴んで動かします(離した位置が本文に書かれます)'
+      : `掴んで動かします(離した位置が本文に書かれます)。この付箋の名前は「${el.id}」です`;
   grip.title = label;
   grip.setAttribute('aria-label', label);
 }
@@ -164,19 +174,67 @@ function rectOf(el: HTMLElement): PlaceRect {
 }
 
 /**
+ * 🔴 **引けない線は、その行を画面に出して理由を言う**(#530 段③a、動線レビュー)。
+ *
+ * ⚠ 1 稿目は「指す先が無い線は**黙って飛ばす**」だった ── **同じ file の 15 行上**で
+ *   `ensureCard` が「相手が消えていても**黙って空にしない**」と決めているのに、
+ *   **正反対の判断を理由も書かずにしていた**。user から見れば「名前で指す」という
+ *   同じ操作なのに、板は教えてくれて線は黙る、という説明できない差になる。
+ * 🔑 だから言い方も `ensureCard` に揃える ── **いちばん多い原因を先に言う**。
+ * ⚠ 名前に ASCII 以外を書くと、`#名前` は**綴りの検査で黙って落ちる**
+ *   (`block-directive-attrs.ts`)ので、`from=`/`to=` から見ると「その名前の付箋が無い」
+ *   と区別が付かない ── **その形だけは名指しで言う**(いちばん踏みやすい)。
+ */
+function lineTrouble(raw: string | null, byId: ReadonlyMap<string, HTMLElement>): string | null {
+  const id = placeLineTargetId(raw);
+  if (id === null) return '行き先が書かれていません(from= と to= の両方が要ります)';
+  if (byId.has(id)) return null;
+  if (!/^[A-Za-z_][\w-]*$/.test(id)) {
+    return `名前に「${id}」は使えません ── 名前は英数字で書きます(#today のように)`;
+  }
+  return `「${id}」という名前の付箋がありません`;
+}
+
+/** 引けない理由を、その宣言の塊の中に 1 行置く(冪等)。⚠ 置いた塊は CSS が隠さない。 */
+function ensureLineNote(el: HTMLElement, why: string): void {
+  let note = el.querySelector<HTMLElement>(':scope > [data-pkc-field="place-line-note"]');
+  if (note === null) {
+    note = el.ownerDocument.createElement('span');
+    note.setAttribute('data-pkc-field', 'place-line-note');
+    el.prepend(note);
+  }
+  const shown = `線が引けません:${why}`;
+  if (note.textContent !== shown) note.textContent = shown;
+  note.title = 'from= と to= には、付箋の開き行に書いた #名前 を書きます(# は含めません)';
+  el.setAttribute('data-pkc-line-missing', '');
+}
+
+/** 引けたら、前に置いた断りを外す(冪等)。 */
+function clearLineNote(el: HTMLElement): void {
+  el.querySelector(':scope > [data-pkc-field="place-line-note"]')?.remove();
+  el.removeAttribute('data-pkc-line-missing');
+}
+
+/**
  * 🔴 **`from=` / `to=` の線を 1 枚の `<svg>` に引く**(#530 段③a)。
  *
- * ⚠ **指す先が無い線は、黙って飛ばす**(描かない)── 板を消したのに線が残った本文で、
- *   画面のどこにも行かない線を出さないため。⚠ ただし**本文からは消さない**
- *   (user が書いた字を、こちらの都合で書き換えない)。
+ * ⚠ 引けなかった線は**本文からは消さない**(user が書いた字を、こちらの都合で
+ *   書き換えない)── 代わりに**その行を画面に出して理由を言う**(上の `lineTrouble`)。
  * ⚠ **`pointer-events: none`** を層に当てる ── 当てないと、線の層が板の上に載って
  *   **掴む口が押せなくなる**(無言の dead click)。規則は CSS 側が持つ。
  */
 function applyPlaceLines(host: HTMLElement, boards: readonly HTMLElement[]): number {
   const old = host.querySelector(`[${LINE_LAYER}]`);
   const decls = [...host.querySelectorAll<HTMLElement>(LINE_SELECTOR)];
-  if (decls.length === 0 || boards.length === 0) {
+  if (decls.length === 0) {
     old?.remove();
+    return 0;
+  }
+  // ⚠ 板が 1 枚も無いときも**断りは出す** ── 黙って消すと、user は
+  //   「線の機能そのものが無い」と読む(それがこの節を書き直した理由である)
+  if (boards.length === 0) {
+    old?.remove();
+    for (const d of decls) ensureLineNote(d, '板(付箋)が 1 枚もありません');
     return 0;
   }
   const byId = new Map<string, HTMLElement>();
@@ -185,9 +243,21 @@ function applyPlaceLines(host: HTMLElement, boards: readonly HTMLElement[]): num
   svg.setAttribute('data-pkc-field', 'place-lines');
   let drawn = 0;
   for (const d of decls) {
-    const from = byId.get(placeLineTargetId(d.getAttribute('data-pkc-from')) ?? '');
-    const to = byId.get(placeLineTargetId(d.getAttribute('data-pkc-to')) ?? '');
-    if (from === undefined || to === undefined || from === to) continue;
+    const rawFrom = d.getAttribute('data-pkc-from');
+    const rawTo = d.getAttribute('data-pkc-to');
+    const why = lineTrouble(rawFrom, byId) ?? lineTrouble(rawTo, byId);
+    if (why !== null) {
+      ensureLineNote(d, why);
+      continue;
+    }
+    const from = byId.get(placeLineTargetId(rawFrom)!)!;
+    const to = byId.get(placeLineTargetId(rawTo)!)!;
+    // ⚠ 自分自身を指す線は、断りも出さない ── 引けないのではなく**引く物が無い**
+    if (from === to) {
+      clearLineNote(d);
+      continue;
+    }
+    clearLineNote(d);
     const ln = placeLineOf(rectOf(from), rectOf(to));
     const el = document.createElementNS(SVG_NS, 'line');
     el.setAttribute('x1', String(ln.x1));
@@ -225,8 +295,10 @@ export function applyPlaceLayout(
     host.classList.remove('pkc-board-host');
     host.style.removeProperty('min-height');
     host.removeAttribute(PLACE_FOCUS_ATTR); // 返す先が無い ── 印だけ残さない
-    // ⚠ **前に引いた線を残さない** ── 板を全部消した本文で、線だけが宙に残る
-    host.querySelector(`[${LINE_LAYER}]`)?.remove();
+    // ⚠ **前に引いた線を残さない** ── 板を全部消した本文で、線だけが宙に残る。
+    //   🔑 ただし**線の宣言そのものには断りを出す** ── 板を全部消した user に
+    //   「線の機能ごと無くなった」と読ませない(動線レビュー ①と同じ向き)。
+    applyPlaceLines(host, []);
     return 0;
   }
   host.classList.add('pkc-board-host');

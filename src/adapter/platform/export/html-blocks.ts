@@ -381,6 +381,19 @@ export function htmlToDocxBlocks(doc: Document): {
        * ⚠ **入れ子にしない** ── `images` / `figures` が持つ添字が狂うため
        * (`docx.ts` の `place` の注記)。
        */
+      /**
+       * 🔴 **線の宣言は、中身ごと捨てる**(#530 段③a。着地前レビューが実測で出した)。
+       *
+       * ⚠ `.pkc-line` は**読む画面では `display: none`** なので、そこに字を書いても
+       *   **画面には 1 文字も出ない**。ところが下の「知らない器は中へ降りる」に落ちると、
+       *   その字が Word / PowerPoint に**普通の段落として突然出てくる**
+       *   (実測: `[…, {p:"board A"}, …, {p:"混入したテキスト"}]`)。
+       * 🔑 **画面に出ない物は、書き出しにも出さない** ── 見えない字が配る物にだけ
+       *   現れるのは、user がいちばん気づけない壊れ方である。
+       * ⚠ `.pkc-place` より**前**に見る ── 板の class を両方書いた塊は線として捨てる
+       *   (位置を持つ線は在りえない)。
+       */
+      if (el.classList.contains('pkc-line')) continue;
       if (el.classList.contains('pkc-place')) {
         const at = blocks.length;
         // ⚠ 先に場所を取る(中身を写す前)── 後から `splice` すると添字が狂う

@@ -18,6 +18,17 @@ test.beforeEach(async ({ page }) => {
   await useSplitEditor(page);
 });
 
+/**
+ * 🔴 **線の宣言を末尾に持つ**(#530 段③a)。
+ *
+ * ⚠ 足す前、この spec は `from=` / `to=` を **1 件も持っていなかった** ──
+ *   `applyPlaceLines` は線が 0 本なら `<svg>` を作らずに戻るので、
+ *   **層が板の上に敷かれた状態**は実ブラウザで 1 度も作られていなかった
+ *   (CLAUDE.md §2「経路が一度も通っていない」)。掴む口が層に塞がれないことは、
+ *   層が在って初めて確かめられる。
+ * ⚠ **末尾に置く** ── 既存の test が当てにしている `#p1` / `#p2` の
+ *   `data-pkc-source-line` を動かさないため。
+ */
 const BOARD = [
   ':::format{#p1 .pkc-place x=120 y=40 w=320 h=200}',
   '### 買い出し',
@@ -26,6 +37,9 @@ const BOARD = [
   '',
   ':::format{#p2 .pkc-place x=460 y=40 w=200 h=120}',
   'めも',
+  ':::',
+  '',
+  ':::format{.pkc-line from=p1 to=p2}',
   ':::',
 ].join('\n');
 
@@ -50,6 +64,31 @@ test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き
   expect(Math.round(b2.y - b1.y), '縦の並びが記法どおりでない').toBe(0);
   expect(Math.round(b1.width), '幅が記法どおりでない').toBe(320);
 
+  /**
+   * 🔴 **線が実際に引かれ、層が掴む口を塞がない**(#530 段③a)。
+   *
+   * ⚠ ここが**実ブラウザでしか見られない所**である ── happy-dom は
+   *   `offsetWidth` に 0 を返すので、unit が通るのは「測れないときは札へ落とす」枝だけ。
+   *   **測って引く枝**はこの 1 行でしか走らない。
+   * 🔑 **新しい起動は増やさない**(#820 の規律)── この筋書きの続きで確かめる。
+   */
+  const line = page.locator('[data-pkc-field="place-lines"] line');
+  await expect(line, '線が 1 本も引かれていない').toHaveCount(1);
+  const x1Before = Number(await line.getAttribute('x1'));
+  expect(Number.isFinite(x1Before) && x1Before > 0, `線の座標が読めない(x1=${x1Before})`).toBe(
+    true,
+  );
+  // 🔴 層が掴む口を塞いでいない ── **実マウスが届く物**が grip 自身であること
+  const gripBox = (await page.locator('#p1 [data-pkc-field="place-grip"]').boundingBox())!;
+  const onGrip = await page.evaluate(
+    ([x, y]) => {
+      const el = document.elementFromPoint(x as number, y as number);
+      return el?.closest('[data-pkc-field]')?.getAttribute('data-pkc-field') ?? null;
+    },
+    [gripBox.x + gripBox.width / 2, gripBox.y + gripBox.height / 2],
+  );
+  expect(onGrip, '掴む口の上に線の層が乗っている(無言の dead click)').toBe('place-grip');
+
   // 🔴 掴んで動かす ── grip を実マウスで掴み、+100 / +60 動かして離す
   const grip = page.locator('#p1 [data-pkc-field="place-grip"]');
   const g = (await grip.boundingBox())!;
@@ -71,6 +110,14 @@ test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き
 
   // ⚠ 対照群: 掴んでいない塊は動いていない
   await expect(p2).toHaveAttribute('data-pkc-x', '460');
+
+  // 🔴 **線は板に付いてくる**(座標を持たず、毎回引き直している証拠)
+  await expect
+    .poll(async () => Number(await line.getAttribute('x1')), {
+      message: '板を動かしたのに線が置き去りになっている',
+      timeout: 5000,
+    })
+    .not.toBe(x1Before);
 
   /**
    * 🔴 **形を変えても、掴む口は押せる**(#530 案 A。user 裁定 2026-09-14)。

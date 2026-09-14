@@ -317,6 +317,29 @@ describe('\u{1f534} 自由配置の板の印(#530 段①)', () => {
     expect(r.blocks[0]).toMatchObject({ shape: 'rect' });
   });
 
+  /**
+   * 🔴 **線の宣言は、中身ごと捨てる**(#530 段③a。着地前レビューが実測で出した)。
+   *
+   * ⚠ `.pkc-line` は読む画面では `display: none` なので、そこに字を書いても
+   *   **画面には 1 文字も出ない**。直す前はそれが Word / PowerPoint に
+   *   **普通の段落として**出ていた(実測: `{p:"混入したテキスト"}`)──
+   *   見えない字が配る物にだけ現れる、いちばん気づけない壊れ方である。
+   * 🔑 **空振り防止**:同じ入力で、隣の板の字は**ちゃんと出る**ことも見る
+   *   (そうしないと「全部捨てる」実装でも緑になる)。
+   */
+  it('🔴 線の宣言に書いた字は、書き出しに出ない(隣の板の字は出る)', () => {
+    const r = blocksOf(
+      '<div class="pkc-place" data-pkc-x="0" data-pkc-y="0"><p>板の字</p></div>' +
+        '<div class="pkc-format-block pkc-line" data-pkc-from="a" data-pkc-to="b">' +
+        '<p>混入したテキスト</p></div>',
+    );
+    const texts = r.blocks.flatMap((b) =>
+      b.kind === 'p' ? b.runs.map((run) => run.text).join('') : [],
+    );
+    expect(texts, '画面に出ない字が書き出しに漏れている').not.toContain('混入したテキスト');
+    expect(texts, '板の字まで捨てている(この検査が空振りしていない証拠)').toContain('板の字');
+  });
+
   it('\u{1f534} Word の出力は 1 バイトも変わらない（印は何も出さない）', () => {
     /**
      * \u{1f511} **これが「印にした」ことの意味である** ── docx 側は位置を持たないので、

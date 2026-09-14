@@ -175,6 +175,131 @@ describe('板どうしを繋ぐ線(#530 段③a)', () => {
       'pointer-events: none',
     );
   });
+
+  /**
+   * 🔴 **線は板より後ろに敷く**(着地前レビュー #3。変異試験が SURVIVED で教えた)。
+   *
+   * ⚠ `z-index` を持たない絶対配置は **DOM 順**で重なるので、`prepend` を `append` へ
+   *   変えると**線が字の上に乗る** ── コメントが名指ししている当の事故である。
+   * 🔑 だから見るのは「層が在る」ではなく「**層が先頭に在る**」。
+   */
+  it('🔴 線の層は、いちばん先頭に敷かれる(線が字の上に乗らない)', () => {
+    const host = board(LINES);
+    expect(
+      host.firstElementChild?.getAttribute('data-pkc-field'),
+      '線の層が先頭に無い(板より前面に来ると字が読めなくなる)',
+    ).toBe('place-lines');
+  });
+
+  /**
+   * 🔴 **引けない線は、理由を画面に出す**(動線レビュー ①)。
+   *
+   * ⚠ 1 稿目は**黙って飛ばして**いた ── 同じ file の `ensureCard` が
+   *   「相手が消えていても黙って空にしない」と決めているのに、正反対だった。
+   * 🔑 見るのは 3 つ:**断りが出る / その行が画面に出る(隠す規則の例外印が付く) /
+   *   本文の字は消えていない**。
+   */
+  it('🔴 行き先の名前が無い線は、理由をその場に出す(黙って消さない)', () => {
+    const host = board(
+      LINES.replace('data-pkc-to="b"', 'data-pkc-to="zzz"'),
+    );
+    expect(drawn(host).length, '引けないのに線が引かれている').toBe(0);
+    const decl = host.querySelector<HTMLElement>('.pkc-line')!;
+    const note = decl.querySelector('[data-pkc-field="place-line-note"]');
+    expect(note?.textContent, '引けない理由が出ていない').toBe(
+      '線が引けません:「zzz」という名前の付箋がありません',
+    );
+    // ⚠ 隠す規則の**例外印**が付いていないと、断りを書いても画面には出ない
+    expect(decl.hasAttribute('data-pkc-line-missing'), '断りが CSS に隠されたままである').toBe(
+      true,
+    );
+    // ⚠ 対照群: 引ける線には断りが出ない(= 出しっぱなしではない)
+    const ok = board(LINES);
+    expect(
+      ok.querySelector('[data-pkc-field="place-line-note"]'),
+      '引けている線にまで断りが出ている',
+    ).toBeNull();
+  });
+
+  /**
+   * 🔴 **いちばん踏みやすい形は名指しで言う**(実測: `#今日` は綴りの検査で黙って落ちる)。
+   * ⚠ `from=今日` から見ると「その名前の板が無い」と区別が付かないので、
+   *   **名前の綴りのほうを言う** ── そうしないと user は在る付箋を探し続ける。
+   */
+  it('🔴 名前に英数字以外を書いたときは、その理由を言う', () => {
+    const host = board(LINES.replace('data-pkc-to="b"', 'data-pkc-to="明日"'));
+    const note = host.querySelector('[data-pkc-field="place-line-note"]');
+    expect(note?.textContent, '名前の綴りの断りが出ていない').toBe(
+      '線が引けません:名前に「明日」は使えません ── 名前は英数字で書きます(#today のように)',
+    );
+  });
+
+  /** ⚠ 板が 1 枚も無いときも黙らない(「機能そのものが無い」と読まれる)。 */
+  it('🔴 板が 1 枚も無い本文でも、線の宣言は理由を出す', () => {
+    const only = LINES.split('\n')[2]!;
+    const host = board(only);
+    expect(
+      host.querySelector('[data-pkc-field="place-line-note"]')?.textContent,
+      '板が無いときに黙っている',
+    ).toBe('線が引けません:板(付箋)が 1 枚もありません');
+  });
+
+  /**
+   * 🔴 **付箋の名前を、掴む口が言う**(動線レビュー ②)。
+   * ⚠ 名前は画面のどこにも出ていなかった ── 線が引けないとき、確かめる術が
+   *   本文を開くことだけだった。
+   */
+  it('🔴 掴む口のホバーに、その付箋の名前が出る', () => {
+    const host = board(LINES);
+    const grip = host.querySelector<HTMLElement>('#a [data-pkc-field="place-grip"]')!;
+    expect(grip.title, '掴む口が名前を言っていない').toContain('名前は「a」です');
+    // ⚠ 対照群: 名前の無い板では言わない(「名前は「」です」と出さない)
+    const noId = board(LINES.replace(' id="a"', ''));
+    const g2 = noId.querySelector<HTMLElement>('.pkc-place [data-pkc-field="place-grip"]')!;
+    expect(g2.title, '名前が無いのに名前を言っている').not.toContain('名前は');
+  });
+
+  /**
+   * 🔴 **測れない所で使う数は、CSS と同じでなければならない**(着地前レビュー #4)。
+   *
+   * ⚠ `place-board.ts` のコメントは「CSS の `min-width`/`min-height` と同じ数にする」と
+   *   明言しているのに、**それを機械で突き合わせる検査が 1 つも無かった**
+   *   (999/777 に変えても全 10344 件が緑だった)。
+   * 🔑 §7「同じ値が 2 か所」は、**片方だけ動かせる形のまま放っておかない**。
+   */
+  it('🔴 測れないときの大きさが、CSS の下限と同じ数である', () => {
+    const src = stripComments(readFileSync('src/adapter/ui/render/place-board.ts', 'utf-8'));
+    const w = /PLACE_FALLBACK_W = (\d+)/.exec(src);
+    const h = /PLACE_FALLBACK_H = (\d+)/.exec(src);
+    expect(w, '落とし先の幅が読めない(この検査は空振り)').not.toBeNull();
+    expect(h, '落とし先の高さが読めない(この検査は空振り)').not.toBeNull();
+    const css = withoutMedia(stripComments(readFileSync('src/styles/app.css', 'utf-8')));
+    const rule = blocksFor(css, '.pkc-md-rendered .pkc-format-block.pkc-place').join(' ');
+    expect(rule, '板の規則が引けていない(この検査は空振り)').toContain('min-width');
+    expect(rule, `落とし先の幅 ${w![1]}px が CSS の min-width と違う`).toContain(
+      `min-width: ${w![1]}px`,
+    );
+    expect(rule, `落とし先の高さ ${h![1]}px が CSS の min-height と違う`).toContain(
+      `min-height: ${h![1]}px`,
+    );
+  });
+
+  /**
+   * 🔴 **宣言の塊を隠す規則が、本当に隠しているか**(着地前レビュー #5)。
+   * ⚠ `markdown-css-parity` は「その class 名が CSS のどこかに在るか」しか見ないので、
+   *   `display: none` を `color: red` に変えても緑だった(= 宣言が本文に赤字で出る)。
+   */
+  it('🔴 線の宣言の塊は、規則で隠されている', () => {
+    const css = withoutMedia(stripComments(readFileSync('src/styles/app.css', 'utf-8')));
+    const hide = blocksFor(css, '.pkc-md-rendered .pkc-format-block.pkc-line').join(' ');
+    expect(hide, '宣言の塊を隠す規則が無い(指すだけの行が本文に出る)').toContain('display: none');
+    // ⚠ そして**引けなかった線だけは出す**(上の断りが隠れたままにならない)
+    const show = blocksFor(
+      css,
+      '.pkc-md-rendered .pkc-format-block.pkc-line[data-pkc-line-missing]',
+    ).join(' ');
+    expect(show, '断りを出すための例外の規則が無い').toContain('display: block');
+  });
 });
 
 describe('位置を当てる(applyPlaceLayout)', () => {

@@ -2900,6 +2900,19 @@ li[data-pkc-row-slot] {
 .pkc-md-rendered .pkc-format-block.pkc-line {
   display: none;
 }
+/* 🔴 **引けなかった線だけは出す**(#530 段③a、動線レビュー)。
+ *
+ * ⚠ 印(`data-pkc-line-missing`)を付けるのは `place-board.ts` = **読む面だけ**なので、
+ *   編集の 2 面・書き出した HTML では**今までどおり出ない**(印が付かないため)。
+ * 🔑 だから既定は上の `display: none` のまま ── ここは**例外を 1 つ開けている**。 */
+.pkc-md-rendered .pkc-format-block.pkc-line[data-pkc-line-missing] {
+  display: block;
+}
+[data-pkc-field='place-line-note'] {
+  display: block;
+  color: var(--muted);
+  font-size: 0.85em;
+}
 /* 位置 ── `place-board.ts` が印(`pkc-board-host`)を付けた面(読む面)だけ。
  * ⚠ `max-width: none` ── 板の上では w= がそのまま効く(散文の読み幅
  * `--read-w` = 672px の上限で黙って頭打ちにしない。UX レビュー所見 6)。 */
