@@ -2874,6 +2874,32 @@ li[data-pkc-row-slot] {
   background: var(--surface);
   overflow: auto;
 }
+/* 🔴 **板どうしを繋ぐ線**(#530 段③a)。
+ *
+ * ⚠ **`pointer-events: none` が肝** ── 層は板の上に広がるので、当てないと
+ *   掴む口(`place-grip`)も大きさの持ち手(`place-size`)も**押せなくなる**
+ *   (この repo がいちばん嫌う無言の dead click)。
+ * ⚠ 層は `z-index` を持たない ── `place-board.ts` が**いちばん先頭へ置く**ので、
+ *   `z=` を書いた板より必ず後ろに敷かれる(線が字の上に乗らない)。
+ * 🔑 色は地ではなく**文字色**から採る ── テーマを変えても線が消えない。 */
+[data-pkc-field='place-lines'] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+[data-pkc-field='place-lines'] line {
+  stroke: var(--muted);
+  stroke-width: 2;
+}
+/* ⚠ 線の宣言そのものは**中身を持たない** ── 出すと空の枠が流れに並ぶ。
+ *   🔑 板が置けない面(編集の 2 面・書き出した HTML)でも同じく出さない
+ *   (そこでは線も引けないので、宣言だけ見えても読む人には意味が無い)。 */
+.pkc-md-rendered .pkc-format-block.pkc-line {
+  display: none;
+}
 /* 位置 ── `place-board.ts` が印(`pkc-board-host`)を付けた面(読む面)だけ。
  * ⚠ `max-width: none` ── 板の上では w= がそのまま効く(散文の読み幅
  * `--read-w` = 672px の上限で黙って頭打ちにしない。UX レビュー所見 6)。 */

@@ -61,6 +61,122 @@ beforeEach(() => {
   document.body.innerHTML = '';
 });
 
+/**
+ * 🔴 **板どうしを繋ぐ線**(#530 段③a)。
+ *
+ * ⚠ **線は座標を持たない** ── `from=` / `to=` で 2 枚を指すだけで、引く場所は
+ *   2 枚の位置から毎回計算する(板を動かせば線も付いてくる)。
+ * ⚠ **happy-dom は `offsetWidth` に 0 を返す**ので、ここで通るのは
+ *   「測れないときは札へ落とす」枝である ── その落とし先まで見る(CLAUDE.md §2)。
+ */
+describe('板どうしを繋ぐ線(#530 段③a)', () => {
+  const LINES = [
+    '<div class="pkc-format-block pkc-place" id="a" data-pkc-format-block data-pkc-w="100" data-pkc-h="60" data-pkc-x="0" data-pkc-y="0" data-pkc-source-line="0" data-pkc-source-end="1"></div>',
+    '<div class="pkc-format-block pkc-place" id="b" data-pkc-format-block data-pkc-w="100" data-pkc-h="60" data-pkc-x="300" data-pkc-y="0" data-pkc-source-line="2" data-pkc-source-end="3"></div>',
+    '<div class="pkc-format-block pkc-line" data-pkc-format-block data-pkc-from="a" data-pkc-to="b" data-pkc-source-line="4" data-pkc-source-end="5"></div>',
+  ].join('\n');
+
+  function board(html: string) {
+    const host = document.createElement('div');
+    host.className = 'pkc-md-rendered';
+    host.innerHTML = html;
+    document.body.append(host);
+    applyPlaceLayout(host, () => null, 0);
+    return host;
+  }
+  const drawn = (host: HTMLElement): SVGLineElement[] => [
+    ...host.querySelectorAll<SVGLineElement>('[data-pkc-field="place-lines"] line'),
+  ];
+
+  it('🔴 from= と to= の板の間に、いちばん近い辺どうしで線が引かれる', () => {
+    const host = board(LINES);
+    const ls = drawn(host);
+    expect(ls.length, '線が 1 本も引かれていない').toBe(1);
+    const l = ls[0]!;
+    // 🔑 横に並べたので「右 → 左」── 中心へ刺すと板の上を横切る
+    expect(l.getAttribute('data-pkc-line-from')).toBe('right');
+    expect(l.getAttribute('data-pkc-line-to')).toBe('left');
+    expect([l.getAttribute('x1'), l.getAttribute('y1')], '出る所が右辺の真ん中でない').toEqual([
+      '100',
+      '30',
+    ]);
+    expect([l.getAttribute('x2'), l.getAttribute('y2')], '入る所が左辺の真ん中でない').toEqual([
+      '300',
+      '30',
+    ]);
+  });
+
+  /**
+   * 🔴 **層は 1 枚だけ**(描き直しのたびに増えない)。
+   * ⚠ 増えると、古い線が下に残ったまま新しい線が重なる ──
+   *   「描画のたびに呼ぶ(冪等)」という、この file 冒頭の約束が破れる。
+   */
+  it('🔴 何度描き直しても、線の層は 1 枚しか無い', () => {
+    const host = board(LINES);
+    for (let i = 0; i < 3; i += 1) applyPlaceLayout(host, () => null, 0);
+    expect(
+      host.querySelectorAll('[data-pkc-field="place-lines"]').length,
+      '描き直すたびに層が増えている',
+    ).toBe(1);
+    expect(drawn(host).length, '線が増えている / 消えている').toBe(1);
+  });
+
+  /**
+   * ⚠ **指す先が無い線は、黙って飛ばす**(描かない)。
+   * 🔑 ただし**本文からは消さない** ── user が書いた字を、こちらの都合で書き換えない。
+   */
+  it('⚠ 行き先が無い / 自分自身を指す線は描かない', () => {
+    const bad = LINES.replace('data-pkc-to="b"', 'data-pkc-to="zzz"');
+    expect(drawn(board(bad)).length, '居ない板へ線を引いている').toBe(0);
+    document.body.innerHTML = '';
+    const self = LINES.replace('data-pkc-from="a"', 'data-pkc-from="b"');
+    expect(drawn(board(self)).length, '同じ板どうしに線を引いている').toBe(0);
+    document.body.innerHTML = '';
+    // 🔑 空振り防止 ── 正しい綴りでは 1 本出る(上の 0 が「いつも 0」ではない)
+    expect(drawn(board(LINES)).length).toBe(1);
+  });
+
+  /**
+   * 🔑 **`from=a:right` の綴りも受ける**(接続点は段③b まで効かない)。
+   * ⚠ 受けないと「設計どおり書いたのに線が出ない」になり、綴りを間違えたと読む。
+   */
+  it('🔑 接続点つきの綴り(a:right)でも線が出る', () => {
+    const withAnchor = LINES.replace('data-pkc-from="a"', 'data-pkc-from="a:right"').replace(
+      'data-pkc-to="b"',
+      'data-pkc-to="b:left"',
+    );
+    expect(drawn(board(withAnchor)).length, '接続点つきの綴りを捨てている').toBe(1);
+  });
+
+  /**
+   * 🔴 **板が 1 枚も無くなったら、線も残さない**。
+   * ⚠ 残ると、板を全部消した本文で**線だけが宙に浮く**。
+   */
+  it('🔴 板を全部消すと、線の層ごと消える', () => {
+    const host = board(LINES);
+    expect(host.querySelector('[data-pkc-field="place-lines"]')).not.toBeNull();
+    for (const el of host.querySelectorAll('.pkc-place')) el.remove();
+    applyPlaceLayout(host, () => null, 0);
+    expect(
+      host.querySelector('[data-pkc-field="place-lines"]'),
+      '板が無いのに線の層が残っている',
+    ).toBeNull();
+  });
+
+  /**
+   * 🔴 **線の層が、板の押し所を塞がない**(無言の dead click を作らない)。
+   * ⚠ 規則は CSS が持つので、ここで見るのは**規則が在ること**である
+   *   (`pointer-events` は happy-dom では効き目を測れない)。
+   */
+  it('🔴 線の層は押しを通す(掴む口を塞がない)', () => {
+    const css = stripComments(readFileSync('src/styles/app.css', 'utf-8'));
+    const rule = blocksFor(withoutMedia(css), "[data-pkc-field='place-lines']").join(' ');
+    expect(rule, '線の層に pointer-events の規則が無い(掴む口が押せなくなる)').toContain(
+      'pointer-events: none',
+    );
+  });
+});
+
 describe('位置を当てる(applyPlaceLayout)', () => {
   function mounted() {
     const host = document.createElement('div');

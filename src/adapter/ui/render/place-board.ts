@@ -20,7 +20,28 @@
  * host の直下であることを前提にしている。位置は style で当てるだけ。
  */
 
+import {
+  placeLineOf,
+  placeLineTargetId,
+  type PlaceRect,
+} from '@features/markdown/place-line';
+
+/**
+ * 🔑 **測れない所で使う大きさ**(happy-dom / まだ画面に出ていない面)。
+ * ⚠ CSS の `min-width` / `min-height` と**同じ数**にする ── 別の数を書くと、
+ *   測れる所と測れない所で線の行き先が変わる(§7「同じ値が 2 か所」)。
+ */
+const PLACE_FALLBACK_W = 120;
+const PLACE_FALLBACK_H = 40;
+
 const PLACE_SELECTOR = '.pkc-format-block.pkc-place';
+
+/** 線の宣言の塊。⚠ **中身を描かない**(座標を持たない「指すだけ」の塊である)。 */
+const LINE_SELECTOR = '.pkc-format-block.pkc-line';
+
+/** 引いた線を入れる 1 枚。⚠ **線ごとに `<svg>` を作らない**(重ねると当たり判定が塞がる)。 */
+const LINE_LAYER = 'data-pkc-field="place-lines"';
+const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /**
  * 🔴 **矢印キーで動かした後、焦点を返す先**(#676 段②)── 器に焼く印(値 = 開き行の行番号)。
@@ -123,6 +144,70 @@ function ensureCard(
 }
 
 /**
+ * 🔴 **板 1 枚の場所と大きさを採る**(#530 段③a)。
+ *
+ * 🔑 **測れるなら測る** ── `w=` / `h=` を省いた板は、大きさが**中身と CSS で決まる**
+ *   (`min-width: 120px` / `min-height: 40px` + 中身)ので、札だけ読むと線が外れる。
+ * ⚠ **測れない所では札へ落とす**(happy-dom は 0 を返す ── そこで 0 を信じると、
+ *   線が全部左上の 1 点へ集まる)。CLAUDE.md §2 の「本命の分岐を unit は通らない」型なので、
+ *   **落とし先まで含めて** unit で見る。
+ */
+function rectOf(el: HTMLElement): PlaceRect {
+  const w = el.offsetWidth;
+  const h = el.offsetHeight;
+  return {
+    x: intAttr(el, 'data-pkc-x') ?? 0,
+    y: intAttr(el, 'data-pkc-y') ?? 0,
+    w: w > 0 ? w : (intAttr(el, 'data-pkc-w') ?? PLACE_FALLBACK_W),
+    h: h > 0 ? h : (intAttr(el, 'data-pkc-h') ?? PLACE_FALLBACK_H),
+  };
+}
+
+/**
+ * 🔴 **`from=` / `to=` の線を 1 枚の `<svg>` に引く**(#530 段③a)。
+ *
+ * ⚠ **指す先が無い線は、黙って飛ばす**(描かない)── 板を消したのに線が残った本文で、
+ *   画面のどこにも行かない線を出さないため。⚠ ただし**本文からは消さない**
+ *   (user が書いた字を、こちらの都合で書き換えない)。
+ * ⚠ **`pointer-events: none`** を層に当てる ── 当てないと、線の層が板の上に載って
+ *   **掴む口が押せなくなる**(無言の dead click)。規則は CSS 側が持つ。
+ */
+function applyPlaceLines(host: HTMLElement, boards: readonly HTMLElement[]): number {
+  const old = host.querySelector(`[${LINE_LAYER}]`);
+  const decls = [...host.querySelectorAll<HTMLElement>(LINE_SELECTOR)];
+  if (decls.length === 0 || boards.length === 0) {
+    old?.remove();
+    return 0;
+  }
+  const byId = new Map<string, HTMLElement>();
+  for (const el of boards) if (el.id !== '') byId.set(el.id, el);
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('data-pkc-field', 'place-lines');
+  let drawn = 0;
+  for (const d of decls) {
+    const from = byId.get(placeLineTargetId(d.getAttribute('data-pkc-from')) ?? '');
+    const to = byId.get(placeLineTargetId(d.getAttribute('data-pkc-to')) ?? '');
+    if (from === undefined || to === undefined || from === to) continue;
+    const ln = placeLineOf(rectOf(from), rectOf(to));
+    const el = document.createElementNS(SVG_NS, 'line');
+    el.setAttribute('x1', String(ln.x1));
+    el.setAttribute('y1', String(ln.y1));
+    el.setAttribute('x2', String(ln.x2));
+    el.setAttribute('y2', String(ln.y2));
+    // 🔑 どの辺から出たかを焼く ── 段③b(束ねる)と smoke の観測点になる
+    el.setAttribute('data-pkc-line-from', ln.from);
+    el.setAttribute('data-pkc-line-to', ln.to);
+    svg.append(el);
+    drawn += 1;
+  }
+  old?.remove();
+  if (drawn === 0) return 0;
+  // ⚠ **いちばん先頭へ置く** ── 板より後ろに敷く(線が板の上に乗ると字が読めない)
+  host.prepend(svg);
+  return drawn;
+}
+
+/**
  * 描画済みの本文に、板の配置を当てる。⚠ **描画のたびに呼ぶ**(冪等)。
  *
  * @param lineOffset 描画の `data-pkc-source-line`(frontmatter を剥がした本文の
@@ -140,6 +225,8 @@ export function applyPlaceLayout(
     host.classList.remove('pkc-board-host');
     host.style.removeProperty('min-height');
     host.removeAttribute(PLACE_FOCUS_ATTR); // 返す先が無い ── 印だけ残さない
+    // ⚠ **前に引いた線を残さない** ── 板を全部消した本文で、線だけが宙に残る
+    host.querySelector(`[${LINE_LAYER}]`)?.remove();
     return 0;
   }
   host.classList.add('pkc-board-host');
@@ -186,6 +273,8 @@ export function applyPlaceLayout(
     if (lid !== null && lid !== '') ensureCard(el, lid, resolveTitle);
     bottom = Math.max(bottom, y + (h ?? 160));
   }
+  // 🔑 **線は板を置いた後に引く**(位置が当たっていないと行き先が決まらない)
+  applyPlaceLines(host, blocks);
   // ⚠ いちばん下の塊まで scroll で届く高さを器に持たせる(絶対配置は流れに乗らない)
   host.style.minHeight = `${bottom + 40}px`;
   // 🔑 口を作り直した**後**に返す(前に返すと、返した先が次の行で差し替わる)
