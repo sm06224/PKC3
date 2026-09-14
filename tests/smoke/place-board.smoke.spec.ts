@@ -80,8 +80,17 @@ test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き
    *   **四隅ごと切り取られて押せなくなる**(無言の dead click)── unit の DOM では
    *   `clip-path` が効かないので、この壊れ方は 1 件も落ちない。
    * 🔑 **新しい起動は増やさない**(#820 の規律)── この筋書きの続きで確かめる。
+   *
+   * 🔴 **相手は `#p2` である**(1 稿目は `#p1` でやって落ちた。2026-09-14 の実測)。
+   * ⚠ 理由は形とは**何の関係も無い** ── 上で `#p1` を (220,100) へ動かすと
+   *   幅 320 の `#p1` は `#p2`(x=460)と**画面上で重なる**。重なった所では
+   *   **本文で後に書かれた `#p2` が前に来る**(`z-index: auto` の兄弟は DOM 順)ので、
+   *   `#p1` の掴む口の上に居るのは `#p2` であり、掴めない。
+   *   🔑 これは**製品の仕様**である(だから「前へ出す」が在る)── 形を変えずに
+   *   同じ手順を踏んでも同じように掴めないことを、対照群で確かめてある。
+   * ⚠ だから**動かしていない `#p2`**(いちばん前に居る)で見る。
    */
-  await p1.click({ button: 'right' });
+  await p2.click({ button: 'right' });
   const blockMenu = page.locator('[data-pkc-region="context-menu"]');
   await expect(blockMenu, '板の右クリックで一覧が出ない').toBeVisible();
   // ⚠ **いま四角なので「四角にする」は出ない**(押しても変わらない口を作らない)
@@ -92,28 +101,28 @@ test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き
   await blockMenu.locator('[data-pkc-action="place-shape-diamond"]').click();
 
   // 🔴 観測点は**本文から描き直された属性**(見た目だけ変えた実装では真にならない)
-  await expect(p1, 'ひし形が本文に書き戻されていない').toHaveAttribute(
+  await expect(p2, 'ひし形が本文に書き戻されていない').toHaveAttribute(
     'data-pkc-shape',
     'diamond',
     { timeout: 5000 },
   );
   // ⚠ 対照群: 隣の板は四角のまま(形が板をまたいで漏れていない)
-  await expect(p2).not.toHaveAttribute('data-pkc-shape', 'diamond');
+  await expect(p1).not.toHaveAttribute('data-pkc-shape', 'diamond');
 
   /**
-   * 🔴 **ひし形にした板を、もう一度掴んで動かす** ── これが本題である。
+   * 🔴 **ひし形にした板を、掴んで動かす** ── これが本題である。
    * ⚠ `boundingBox()` は「見えているか」を見ない ── **実マウスで掴んで、
    *   本文の `x=` が動くこと**まで見て初めて「押せる」と言える。
    */
-  const grip2 = page.locator('#p1 [data-pkc-field="place-grip"]');
+  const grip2 = page.locator('#p2 [data-pkc-field="place-grip"]');
   const g2 = (await grip2.boundingBox())!;
   await page.mouse.move(g2.x + g2.width / 2, g2.y + g2.height / 2);
   await page.mouse.down();
   await page.mouse.move(g2.x + g2.width / 2 + 40, g2.y + g2.height / 2, { steps: 5 });
   await page.mouse.up();
-  await expect(p1, 'ひし形にしたら掴む口が押せなくなった(切り取られている)').toHaveAttribute(
+  await expect(p2, 'ひし形にしたら掴む口が押せなくなった(切り取られている)').toHaveAttribute(
     'data-pkc-x',
-    '260',
+    '500',
     { timeout: 5000 },
   );
 

@@ -153,6 +153,21 @@ describe('\u{1f534} 自由配置の板が「置いたとおりの場所」で出
     expect(xml).not.toMatch(/prst="(?!rect)/);
   });
 
+  /**
+   * 🔴 **扉と内容で、題名を出す口が**別**である**(変異試験 M5' が SURVIVED で教えた)。
+   * ⚠ 上の test は `h(1)` を使うので**扉**(`FRAME.coverTitle`)しか通らない ──
+   *   `h(2)` / `h(3)` の**内容のスライド**は `FRAME.title` という**別の呼び出し**で、
+   *   そちらは誰も形を検めていなかった(通ってはいるのに見ていない)。
+   */
+  it('🔴 内容のスライドの題名も必ず四角(扉とは別の呼び出し)', () => {
+    const r = buildPptx([h(3, '節'), p('本文')], { title: 'T' });
+    const xml = partOf(r, 'ppt/slides/slide1.xml');
+    expect(xml, '題名の箱が出ていない(空振り)').toContain('name="題名"');
+    expect(xml, '題名の箱が四角でない').toContain('<a:prstGeom prst="rect">');
+    expect(xml, '板が 1 枚も無いのに縁が出ている').not.toContain('<a:ln w=');
+    expect(xml, '四角でない図形が混じっている').not.toMatch(/prst="(?!rect)/);
+  });
+
   it('⚠ 形は板ごとに効く(1 枚目の形が 2 枚目へ漏れない)', () => {
     const r = buildPptx(
       [place(0, 0, 200, 100, 1, 'ellipse'), p('丸'), place(0, 200, 200, 100, 1), p('四角')],
