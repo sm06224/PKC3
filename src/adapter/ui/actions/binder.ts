@@ -9781,6 +9781,7 @@ export function bindActions(
         dispatcher,
         { lid, line: rawLine ?? '', from: grabbedOn ?? '', repeat: every ?? '' },
         drop.date,
+        root,
       );
       return;
     }

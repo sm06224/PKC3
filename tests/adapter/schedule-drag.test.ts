@@ -26,9 +26,12 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
-import { installScheduleDrag } from '../../src/adapter/ui/render/schedule-drag';
+import { installScheduleDrag, repeatMoveAction } from '../../src/adapter/ui/render/schedule-drag';
 import { LONG_PRESS_MS, LONG_PRESS_SLOP_PX } from '../../src/adapter/ui/actions/long-press';
-import type { UserAction } from '../../src/adapter/state/app-state';
+import { cancelDialogRows } from './dialog-helper';
+import { resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
+import type { AppState, UserAction } from '../../src/adapter/state/app-state';
+import type { TaskCard } from '../../src/features/schedule/task-cards';
 
 let root: HTMLElement;
 let group27: HTMLElement; // 落とし先(2026-08-27)
@@ -118,6 +121,13 @@ beforeEach(() => {
 afterEach(() => {
   detach();
   vi.useRealTimers();
+  /**
+   * 🔴 **小窓は器を 1 つ使い回して、出す順を待ち行列で守っている**
+   * (`app-dialog.ts` の `enqueue`)── 答えずに終わった it が在ると、
+   * **次の it の小窓が永久に出ない**(実際に踏んだ:行が 0 件になる)。
+   * 🔑 だから毎回ここで畳む。
+   */
+  resetAppDialogForTest();
 });
 
 type Pointer = 'touch' | 'mouse' | 'pen';
@@ -245,17 +255,177 @@ describe('installScheduleDrag(#855 決1)', () => {
     expect(dispatched, 'キャンセルしたのに後から確定して書かれた').toEqual([]);
   });
 
-  it('🔴 繰り返しの回は動かさず、断る(規則ごとずらす/この回だけずらす、を勝手に選ばない)', () => {
+  /**
+   * 🔴 **繰り返しの回は「1 回か全部か」を聞いてから動かす**(#855 決4。
+   * user 裁定 2026-09-13「1 回か全部か選択する(Outlook 模倣で OK)」)。
+   *
+   * ⚠ **主張の向きが裏返った** ── 直す前ここは「**断る**」を pin していた。
+   *   検査を書き直すときは前処理・範囲・空振り防止を**全部**見直す
+   *   (CLAUDE.md §1「主張の向きを変えたら、別の検査を書いていると考える」)。
+   * 🔑 だから **3 つとも見る**:①聞くまで書かない ②この回だけ ③全部。
+   */
+  const dropRepeatOn27 = (): void => {
     const repeating = makeTaskCard('e1', { repeat: 'week' });
     rebuild([mountGroup('2026-08-23', repeating), group27]);
-
     pressUntilArmed(repeating);
     pointer(group27, 'pointermove', 'touch', 200, 200);
     pointer(group27, 'pointerup', 'touch', 200, 200);
+  };
+
+  it('🔴 聞くまでは 1 バイトも書かない(勝手にどちらかを選ばない)', async () => {
+    dropRepeatOn27();
+    await Promise.resolve();
+    expect(dispatched, '聞く前に書いた').toEqual([]);
+    // ⚠ 空振り防止 ── 小窓が出ていないなら、この test は何も守っていない
+    expect(
+      document.querySelectorAll('[data-pkc-field="pick-repeat-move"]').length,
+      '小窓が出ていない(押しても何も起きない)',
+    ).toBe(2);
+    /**
+     * ⚠ **開けたら必ず閉じる** ── 小窓は器を 1 つ使い回して出す順を待ち行列で
+     *   守っているので、答えずに終わると**次の it の小窓が出ない**
+     *   (実際に踏んだ:行が 0 件になり「押しても何も起きない」と読み違えた)。
+     */
+    await cancelDialogRows();
+  });
+
+  /**
+   * 🔴 **押した答えを、書換の 1 手へ翻訳する所**(#855 決4)。
+   *
+   * ⚠ **小窓を押す形では検められない** ── 器の開き方(`showModal` / `close` の
+   *   意味論)は happy-dom と実ブラウザで違い、この台では行を押しても
+   *   器が閉じない。🔑 だから**判断を小窓の外へ出して**、そこを直に当てる
+   *   (小窓が出ること自体は 1 つ上の it が見ている)。
+   * ⚠ 押した先が本当に効くか(小窓 → 書換)は**実ブラウザの smoke** が見る。
+   */
+  describe('押した答えを 1 手へ翻訳する', () => {
+    const grabbed = { lid: 'e1', line: '0', from: '2026-08-23', repeat: 'week' };
+    const state = (card: Partial<TaskCard> | null): AppState =>
+      ({
+        taskScan:
+          card === null
+            ? null
+            : {
+                cards: [
+                  {
+                    lid: 'e1',
+                    line: 0,
+                    text: 'x',
+                    done: false,
+                    date: '2026-08-23',
+                    time: null,
+                    until: null,
+                    repeat: 'week',
+                    substitutes: null,
+                    ...card,
+                  },
+                ],
+                totalNotes: 1,
+                scannedNotes: 1,
+                truncated: false,
+              },
+      }) as AppState;
+
+    it('🔴 「この回だけ」── その回だけを動かす 1 手になる', () => {
+      expect(
+        repeatMoveAction(state({}), grabbed, 0, '2026-08-23', '2026-08-27', 4, 'one'),
+      ).toEqual({
+        type: 'MOVE_REPEAT_OCCURRENCE',
+        lid: 'e1',
+        line: 0,
+        from: '2026-08-23',
+        to: '2026-08-27',
+      });
+    });
+
+    /**
+     * 🔴 **「全部」は規則の行の日付を、同じ差だけずらす。**
+     * ⚠ **落とした日そのものを書かない** ── 掴んだのが 3 回目なら、開始は
+     *   落とした日の 2 回ぶん前である。ここでは掴んだ回 = 開始日なので一致する。
+     */
+    it('🔴 「全部」── 規則の行の日付が同じ差だけずれる', () => {
+      expect(
+        repeatMoveAction(state({}), grabbed, 0, '2026-08-23', '2026-08-27', 4, 'all'),
+      ).toEqual({
+        type: 'SET_TASK_DATE',
+        lid: 'e1',
+        line: 0,
+        date: '2026-08-27',
+        time: null,
+        until: null,
+      });
+    });
+
+    it('🔴 「全部」── 掴んだのが 2 回目なら、開始は落とした日より 1 週間前になる', () => {
+      // 8/30 の回(2 回目)を 9/2 へ落とした = 3 日ぶん。開始 8/23 も 3 日動く
+      expect(
+        repeatMoveAction(state({}), grabbed, 0, '2026-08-30', '2026-09-02', 3, 'all'),
+      ).toMatchObject({ date: '2026-08-26' });
+    });
+
+    it('🔴 「全部」── 繰り返しの終わり(`..`)も同じ差だけ動く', () => {
+      expect(
+        repeatMoveAction(
+          state({ until: '2026-12-31' }),
+          grabbed,
+          0,
+          '2026-08-23',
+          '2026-08-27',
+          4,
+          'all',
+        ),
+      ).toMatchObject({ until: '2027-01-04' });
+    });
+
+    it('🔴 時刻は持ち越す(14:00 の回は 14:00 の予定である)', () => {
+      expect(
+        repeatMoveAction(state({ time: '14:00' }), grabbed, 0, '2026-08-23', '2026-08-27', 4, 'all'),
+      ).toMatchObject({ time: '14:00' });
+    });
+
+    it('🔴 やめたら何もしない', () => {
+      expect(
+        repeatMoveAction(state({}), grabbed, 0, '2026-08-23', '2026-08-27', 4, null),
+      ).toBeNull();
+    });
+
+    /**
+     * ⚠ **開始が読めなければ何もしない**(当てずっぽうの日付を本文へ残さない)。
+     * 🔑 「この回だけ」は**開始を要らない**ので、同じ状態でも 1 手が出る ──
+     *   この対称の差が、2 つの枝が本当に別であることの印である。
+     */
+    it('⚠ 「全部」は開始が読めないと何もしない ── ただし「この回だけ」は動く', () => {
+      expect(
+        repeatMoveAction(state(null), grabbed, 0, '2026-08-23', '2026-08-27', 4, 'all'),
+        '開始が読めないのに規則を書き換えた',
+      ).toBeNull();
+      expect(
+        repeatMoveAction(state(null), grabbed, 0, '2026-08-23', '2026-08-27', 4, 'one'),
+        'この回だけは開始が要らないのに、止まっている',
+      ).not.toBeNull();
+    });
+  });
+
+
+  /**
+   * ⚠ **日付なしへは動かせない** ── 繰り返しの回 1 つだけを「日付なし」にする
+   *   意味が定まらない(規則は日付で成り立っている)。
+   * 🔑 外す口は札に既に在る(「この繰り返しをやめる」)ので、そちらを案内する。
+   */
+  it('⚠ 「日付なし」へ落としたときだけは、いまも断る', async () => {
+    const repeating = makeTaskCard('e1', { repeat: 'week' });
+    // ⚠ 「日付なし」の束は `data-pkc-drop-date` が**空文字**である
+    const undated = mountGroup('');
+    rebuild([mountGroup('2026-08-23', repeating), undated]);
+    pressUntilArmed(repeating);
+    pointer(undated, 'pointermove', 'touch', 200, 200);
+    pointer(undated, 'pointerup', 'touch', 200, 200);
+    await Promise.resolve();
     expect(dispatched).toEqual([
       {
         type: 'OP_FAILED',
-        error: '繰り返しの予定はドラッグで動かせません。本文の「@日付 毎週」を書き直してください',
+        error:
+          '繰り返しの予定は「日付なし」へは動かせません(札の「この繰り返しをやめる」で外せます)',
       },
     ]);
   });

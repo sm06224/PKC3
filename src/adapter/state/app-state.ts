@@ -1630,6 +1630,18 @@ export type UserAction =
    */
   | { type: 'MATERIALIZE_REPEAT'; lid: string; line: number; date: string }
   /**
+   * 🔴 **繰り返しの「その回だけ」を別の日へ動かす**(#855 決4。
+   * user 裁定 2026-09-13「1 回か全部か選択する(Outlook 模倣で OK)」)。
+   *
+   * ⚠ すぐ上の `MATERIALIZE_REPEAT` と**兄弟**である ── 規則の行は触らず、
+   *   その回ぶんの行を 1 本増やす。違うのは**書く日**と**振替が付くこと**、
+   *   そして**印を押さないこと**(理由は `body-rewrite.ts` の `repeat-move`)。
+   * ⚠ 「**全部ずらす**」はこの action ではない ── あちらは規則の行の日付を
+   *   書き換えるだけなので `SET_TASK_DATE` で足りる(口を増やさない ── §7)。
+   * ⚠ `line` は**規則の行**、`from` は**動かす回の日**、`to` は**落とした日**。
+   */
+  | { type: 'MOVE_REPEAT_OCCURRENCE'; lid: string; line: number; from: string; to: string }
+  /**
    * 🔴 **外部の画像を手元へ取り込んだ結果を本文へ当てる**(#264 段①)。
    *
    * ⚠ **取りに行くのは binder(adapter)** ── ここに届くのは
@@ -4696,6 +4708,35 @@ function reduceCore(
             archetype: meta.archetype,
             entryOrder: meta.entryOrder,
             rewrite: { kind: 'repeat-done', line: action.line, date: action.date },
+          },
+        ],
+      };
+    }
+    /**
+     * 🔴 **繰り返しの「その回だけ」を動かす**(#855 決4)。
+     * ⚠ すぐ上と**同じ形** ── 書換は 1 本(`REQUEST_BODY_REWRITE`)を通り、
+     *   何をするかの判断は `body-rewrite.ts` が持つ。
+     */
+    case 'MOVE_REPEAT_OCCURRENCE': {
+      // ready 限定(編集中の裏書換を作らない)。未知 lid は no-op
+      if (state.phase !== 'ready') return { state, events: [] };
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta) return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_BODY_REWRITE',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            rewrite: {
+              kind: 'repeat-move',
+              line: action.line,
+              from: action.from,
+              to: action.to,
+            },
           },
         ],
       };

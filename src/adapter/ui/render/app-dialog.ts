@@ -815,6 +815,46 @@ export function pickCopyFormatInApp(
   });
 }
 
+/**
+ * 🔴 **繰り返しの回を動かすとき、1 回か全部かを聞く**(#855 決4。
+ * user 裁定 2026-09-13「**1 回か全部か選択する(Outlook 模倣で OK)**」)。
+ *
+ * ## なぜ聞くのか
+ *
+ * ⚠ 動かす意味が **2 通り**あり、どちらかを勝手に選ぶと
+ *   **もう片方を頼んだ user のデータが壊れる**。だから聞く。
+ * 🔑 直す前は「**ドラッグでは動かせません**」と断っていた ──
+ *   いちばん目につく予定が、いちばん動かせなかった。
+ *
+ * ## ⚠ 字は「画面で何が起きるか」で書く
+ *
+ * 「この回のみ」「シリーズ」のような内部の言い方をしない ──
+ * **次の回がどうなるか**を行に書く(user 指示 2026-08-21)。
+ *
+ * @returns `'one'` = この回だけ / `'all'` = 全部 / `null` = やめる
+ */
+export function pickRepeatMoveInApp(
+  host: HTMLElement,
+  /** 何日ぶんずれるか(画面の字に出す)。 */
+  days: number,
+): Promise<'one' | 'all' | null> {
+  /**
+   * ⚠ **向きを字にする**(「3 日後ろへ」)── 「3 日ずらす」だけだと
+   *   前へか後ろへか読めない。0 日は呼び側が弾く(同じ日には落とせない)。
+   */
+  const move = days > 0 ? `${days} 日あと` : `${-days} 日まえ`;
+  return pickRowInApp<'one' | 'all'>(host, {
+    title: '繰り返しの予定を動かします',
+    field: 'pick-repeat-move',
+    indexAttr: 'data-pkc-repeat-move-index',
+    note: `${move}へ動かします。次の回からはどうしますか。`,
+    rows: [
+      { label: `この回だけ動かす(次の回からは元のまま)`, value: 'one' },
+      { label: `全部動かす(以後ずっと ${move}へ)`, value: 'all' },
+    ],
+  });
+}
+
 /** 「一覧から 1 行選ぶ」器の中身。⚠ `field` は行の `data-pkc-field`(test / smoke が見る)。 */
 interface PickRowsSpec<T> {
   readonly title: string;
