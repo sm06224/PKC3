@@ -2316,6 +2316,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-14(#530 案 A ── 付箋の形)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-11-recent-sort" …` → e80ba89
+     */
+    '一覧を「最近開いた順」で並べられるようになりました',
+    /**
      * ⚠ **2026-09-14(#906 ── SQL の面を残す)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-11-help-toc-all" …` → e80ba89
      */

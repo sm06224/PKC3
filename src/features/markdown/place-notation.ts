@@ -34,6 +34,7 @@
 import type { BlockDirectiveAttrs } from './block-directive-attrs';
 import { parseBlockDirectiveOpen, parseTier1FormatOpen } from './block-directive-attrs';
 import { frontmatterLineCount } from './frontmatter';
+import { isPlaceShape, placeShapeOf, type PlaceShape } from './place-shape';
 import { blockSpanAt, scanContainers } from './source-blocks';
 
 /**
@@ -221,6 +222,34 @@ export function raisePlace(body: string, target: PlaceTarget): string | null {
   return spliceOpenLine(body, target, { z: maxOther + 1 });
 }
 
+/**
+ * 🔴 **板の形を変える**(#530 案 A。user 裁定 2026-09-14)── 開き行の `shape=` **だけ**を書く。
+ *
+ * 🔑 門も「変わらなければ body をそのまま返す」も `movePlace` / `raisePlace` と同じ
+ *   (板を書き換える口は 4 つになったが、**検める所は `placeLinesAt` の 1 本**である)。
+ * ⚠ **知らない綴りは断る**(`null`)── 素通しにすると、PowerPoint の XML へ
+ *   知らない図形名が漏れる(`place-shape.ts`)。
+ * ⚠ 四角へ戻すのも**札を消すのではなく `shape=rect` を書く** ── 消す経路を
+ *   新しく作らない(経路が 1 本減れば、そこで起きる失敗も 1 つ減る)。
+ */
+export function setPlaceShape(
+  body: string,
+  target: PlaceTarget,
+  shape: PlaceShape,
+): string | null {
+  if (!isPlaceShape(shape)) return null;
+  return spliceOpenLine(body, target, { shape });
+}
+
+/**
+ * その行が板なら、いま付いている形。板でなければ `null`。
+ * 🔑 読む側の既定(札が無い = 四角)は `placeShapeOf` の 1 か所(§7)。
+ */
+export function placeShapeAt(line: string): PlaceShape | null {
+  const attrs = placeOpenAttrs(line);
+  return attrs === null ? null : placeShapeOf(attrs.kvs.shape);
+}
+
 /** 開き行の z=(整数 ≥0)。無い・読めないときは 0(描画の `intAttr` が捨てる値と同じ扱い)。 */
 function zOf(attrs: BlockDirectiveAttrs): number {
   const raw = attrs.kvs.z;
@@ -253,9 +282,21 @@ export function addPlace(body: string, x: number, y: number): string | null {
 }
 
 /** 開き行に書ける札。⚠ `entry=` は書かない(題名の札は user が書く物)。 */
-type PlaceKey = 'x' | 'y' | 'w' | 'h' | 'z';
-type PlaceTokens = Partial<Record<PlaceKey, number>>;
-const PLACE_KEYS: readonly PlaceKey[] = ['x', 'y', 'w', 'h', 'z'];
+type PlaceKey = 'x' | 'y' | 'w' | 'h' | 'z' | 'shape';
+/**
+ * 書き換える札。⚠ **座標は数、形は決まった綴りだけ**(#530)──
+ * 値を `string` で素通しにすると、空白や引用符を含む字が開き行へ入って
+ * **札の並びが壊れる**(`place-shape.ts` の docstring)。
+ */
+type PlaceTokens = {
+  readonly x?: number;
+  readonly y?: number;
+  readonly w?: number;
+  readonly h?: number;
+  readonly z?: number;
+  readonly shape?: PlaceShape;
+};
+const PLACE_KEYS: readonly PlaceKey[] = ['x', 'y', 'w', 'h', 'z', 'shape'];
 
 /**
  * 開き行の札(x= y= w= h= z= のうち渡された物)を書き換える。
@@ -287,7 +328,7 @@ function spliceTokens(line: string, tokens: PlaceTokens): string | null {
  *   数字だけを狙うと、変な値の隣に **2 つ目の x=** を作る(そちらの害が大きい。
  *   描画は属性を数として読むだけなので、引用なしの整数へ揃えて同じに描ける)。
  */
-function setToken(attrs: string, key: PlaceKey, value: number): string {
+function setToken(attrs: string, key: PlaceKey, value: number | string): string {
   const re = new RegExp(`(^|\\s)${key}=(?:"[^"]*"|\\S*)`);
   if (re.test(attrs)) return attrs.replace(re, `$1${key}=${value}`);
   return attrs === '' ? `${key}=${value}` : `${attrs} ${key}=${value}`;

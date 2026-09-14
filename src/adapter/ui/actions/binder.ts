@@ -32,7 +32,8 @@ import {
   tsvFenceFromPlain,
   type TableFormat,
 } from '@features/markdown/table-convert';
-import { isPlaceOpen } from '@features/markdown/place-notation';
+import { isPlaceOpen, placeShapeAt } from '@features/markdown/place-notation';
+import type { PlaceShape } from '@features/markdown/place-shape';
 import { insertionBlocked } from '@features/markdown/line-move';
 import {
   BLOCK_END_ATTR,
@@ -2480,12 +2481,14 @@ function directiveBlockAt(
   host: HTMLElement,
   target: Element,
   fmBody: string,
-): { line: number; board: boolean } | null {
+): { line: number; board: boolean; shape: PlaceShape | null } | null {
   let el: Element | null = target.closest('[data-pkc-source-line]');
   while (el !== null && el !== host && host.contains(el)) {
     const line = Number(el.getAttribute('data-pkc-source-line'));
     if (Number.isInteger(line) && line >= 0 && blockSpanAt(fmBody, line) !== null) {
-      return { line, board: isPlaceOpen(fmBody.split('\n')[line] ?? '') };
+      const open = fmBody.split('\n')[line] ?? '';
+      // 🔑 形も**原文**から読む(#530)── 板かどうかと同じ 1 本(`place-notation.ts`)
+      return { line, board: isPlaceOpen(open), shape: placeShapeAt(open) };
     }
     el = el.parentElement?.closest('[data-pkc-source-line]') ?? null;
   }
@@ -3504,6 +3507,25 @@ function moveAppGroup(
   void services.confirmAppGroupNotes(need).then((ok) => {
     if (ok) go();
   });
+}
+
+/**
+ * 🔴 **板の形を変える受け手を 1 本作る**(#530 案 A)。
+ * ⚠ 行の座標は `raise-place` と同じ(メニューが運んだ刻印 + frontmatter ぶん)。
+ */
+function placeShapeHandler(shape: PlaceShape): ActionHandler {
+  return (dispatcher, target) => {
+    const line = menuCarriedBlock(target);
+    if (line === null || refuseStaleMenu(dispatcher, target)) return;
+    const ob = dispatcher.getState().openBody;
+    if (ob === null) return;
+    dispatcher.dispatch({
+      type: 'SET_PLACE_SHAPE',
+      lid: ob.lid,
+      line: line + frontmatterLineCount(ob.body),
+      shape,
+    });
+  };
 }
 
 const ACTIONS: Record<string, ActionHandler> = {
@@ -6240,6 +6262,21 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (ob === null) return;
     dispatcher.dispatch({ type: 'RAISE_PLACE', lid: ob.lid, line: line + frontmatterLineCount(ob.body) });
   },
+  /**
+   * 🔴 **右クリックした板の形を変える**(#530 案 A。user 裁定 2026-09-14)。
+   *
+   * 🔑 **形の数だけ受け手を書く**(`placeShapeHandler` の 1 本を 5 回呼ぶ)──
+   *   ⚠ `Object.fromEntries` で生やすと綴りが**字として file に残らない**ので、
+   *   `repo-hygiene` の「受け手がいない action」の全数走査から**見えなくなる**
+   *   (受け手は在るのに、在ることを機械が確かめられない = §1 の空振り)。
+   * ⚠ 書き忘れは `tests/adapter/place-shape-menu.test.ts` が全数で落とす。
+   * 確認は要らない(見た目が変わるだけで、もう一度別の形を選べば戻る ── `raise-place` と同じ)。
+   */
+  'place-shape-rect': placeShapeHandler('rect'),
+  'place-shape-round': placeShapeHandler('round'),
+  'place-shape-ellipse': placeShapeHandler('ellipse'),
+  'place-shape-diamond': placeShapeHandler('diamond'),
+  'place-shape-arrow': placeShapeHandler('arrow'),
   /**
    * 🔴 **右クリックした表の形を変える**(#708 段②。user 裁定 2026-09-04)。
    *
@@ -10656,7 +10693,7 @@ export function bindActions(
               linkable: heading.id !== '',
               // 🔴 近道の字を右に添える(#587 C 案 2)── 見出しの項目だけ(塊 / 板 / 本文には無い)
             }).map(withShortcut)),
-        ...(block === null ? [] : blockMenuActions({ board: block.board })),
+        ...(block === null ? [] : blockMenuActions({ board: block.board, shape: block.shape })),
         /**
          * 🔴 **表の形を変える**(#708 段②)。⚠ 行番号は**この項目にだけ**載せる
          *   (`attrs`)── `carry` に混ぜると、表と関係の無い項目まで同じ属性を持ち、

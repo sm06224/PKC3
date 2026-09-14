@@ -287,14 +287,14 @@ describe('\u{1f534} 自由配置の板の印(#530 段①)', () => {
 
   it('\u{1f534} 位置を印として残し、中身は後ろの塊として写す', () => {
     const r = blocksOf(BOARD);
-    expect(r.blocks[0]).toEqual({ kind: 'place', x: 12, y: 34, w: 240, h: 96, span: 2 });
+    expect(r.blocks[0]).toEqual({ kind: 'place', x: 12, y: 34, w: 240, h: 96, shape: 'rect', span: 2 });
     // \u{1f511} 中身は**入れ子にしない** ── 後ろに並ぶ(images / figures の添字を狂わせない)
     expect(r.blocks.slice(1).map((b) => b.kind)).toEqual(['p', 'p']);
   });
 
   it('⚠ 大きさが書いていなければ null（既定を数え直さない）', () => {
     const r = blocksOf('<div class="pkc-place" data-pkc-x="8"><p>あ</p></div>');
-    expect(r.blocks[0]).toEqual({ kind: 'place', x: 8, y: 0, w: null, h: null, span: 1 });
+    expect(r.blocks[0]).toEqual({ kind: 'place', x: 8, y: 0, w: null, h: null, shape: 'rect', span: 1 });
   });
 
   it('\u{1f534} Word の出力は 1 バイトも変わらない（印は何も出さない）', () => {

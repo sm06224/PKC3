@@ -17,7 +17,16 @@ import { formatLineDate, insertionForLineDate, readLineDate } from '../schedule/
 import { isScheduleDate } from '../schedule/schedule-date';
 import type { RepeatUnit } from '../schedule/repeat';
 import { removeInsertedLines } from './append-target';
-import { addPlace, insideFence, movePlace, raisePlace, removePlace, resizePlace } from './place-notation';
+import {
+  addPlace,
+  insideFence,
+  movePlace,
+  raisePlace,
+  removePlace,
+  resizePlace,
+  setPlaceShape,
+} from './place-notation';
+import type { PlaceShape } from './place-shape';
 import { readTags, withTagResult } from '../flavor/tags';
 import { acceptsExternalImage, rewriteAdopted } from '../asset/inline-url-adopt';
 import { DELIMITER, csvEscapeField, parseCsv, type CsvPositions } from './csv-table';
@@ -131,6 +140,17 @@ export type BodyRewrite =
       kind: 'place-raise';
       line: number;
       openLine: string;
+    }
+  | {
+      /**
+       * 🔴 **板の形を変える**(#530 案 A)── 開き行の `shape=` だけ。
+       * `line` / `openLine` の意味と門は `place-move` と同じ(`place-notation.ts` の 1 本)。
+       * ⚠ 綴りは `PlaceShape` に閉じている ── 知らない字は型で入らない。
+       */
+      kind: 'place-shape';
+      line: number;
+      openLine: string;
+      shape: PlaceShape;
     }
   | {
       /**
@@ -487,6 +507,7 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
   if (rewrite.kind === 'place-size') return resizePlace(body, rewrite);
   if (rewrite.kind === 'place-remove') return removePlace(body, rewrite);
   if (rewrite.kind === 'place-raise') return raisePlace(body, rewrite);
+  if (rewrite.kind === 'place-shape') return setPlaceShape(body, rewrite, rewrite.shape);
   if (rewrite.kind === 'place-add') return addPlace(body, rewrite.x, rewrite.y);
   if (rewrite.kind === 'link-move') return moveLinkLine(body, rewrite);
   if (rewrite.kind === 'csv-cell') return rewriteCsvCell(body, rewrite);

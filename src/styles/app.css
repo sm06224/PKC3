@@ -2882,6 +2882,90 @@ li[data-pkc-row-slot] {
   margin: 0;
   max-width: none;
 }
+/* 🔴 **板の形**(#530 案 A。user 裁定 2026-09-14)── 札が無いときは四角(既定)。
+ *
+ * ⚠ **板そのものを丸めたり切り抜いたりしない。** 掴む口(`place-grip` = 右上)と
+ *   大きさの持ち手(`place-size` = 右下)は板の**子**なので、親を切り抜くと
+ *   **四隅ごと切り取られて押せなくなる**(無言の dead click)。
+ * 🔑 だから見た目は `::before` / `::after` の**層**に持たせ、板そのものは
+ *   枠も地も透明にする ── 子は 1 つも切り取られない。
+ * ⚠ 綴りの表は `src/features/markdown/place-shape.ts` の 1 本。
+ *   ここに規則の無い形を足すと `tests/features/place-shape.test.ts` が落とす。 */
+.pkc-md-rendered .pkc-format-block.pkc-place[data-pkc-shape='round'],
+.pkc-md-rendered .pkc-format-block.pkc-place[data-pkc-shape='ellipse'],
+.pkc-md-rendered .pkc-format-block.pkc-place[data-pkc-shape='diamond'],
+.pkc-md-rendered .pkc-format-block.pkc-place[data-pkc-shape='arrow'] {
+  border-color: transparent;
+  background: transparent;
+}
+/* 🔑 **形の層の足場**。⚠ **`.pkc-md-rendered` 起点で書かない** ── あちらは
+ * 「位置を混ぜない」規則(`markdown-css-parity` が全数で見ている。2026-08-28 に
+ * 絶対配置が編集面へ漏れて付箋が積み重なった)。
+ * 🔑 ここを弱い選択子(`.pkc-place[…]`)に留めると、板の面の
+ * `.pkc-board-host .pkc-format-block.pkc-place`(より強い)が **`absolute` のまま勝つ** ──
+ * つまり**板の面の位置には 1 ドットも触らず**、位置を持たない面(編集の 2 面 /
+ * 書き出した閲覧用 HTML)でだけ層の足場になる。
+ * ⚠ `isolation` が要る理由:層は `z-index: -1` で本文の後ろへ置くので、
+ * 閉じ込めないとノートの地まで潜って**形が見えなくなる**。 */
+.pkc-place[data-pkc-shape='round'],
+.pkc-place[data-pkc-shape='ellipse'],
+.pkc-place[data-pkc-shape='diamond'],
+.pkc-place[data-pkc-shape='arrow'] {
+  position: relative;
+  isolation: isolate;
+}
+.pkc-place[data-pkc-shape='round']::before,
+.pkc-place[data-pkc-shape='ellipse']::before,
+.pkc-place[data-pkc-shape='diamond']::before,
+.pkc-place[data-pkc-shape='diamond']::after,
+.pkc-place[data-pkc-shape='arrow']::before,
+.pkc-place[data-pkc-shape='arrow']::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+/* 角丸・丸 ── 枠線がそのまま引けるので 1 層でよい */
+.pkc-place[data-pkc-shape='round']::before,
+.pkc-place[data-pkc-shape='ellipse']::before {
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+.pkc-place[data-pkc-shape='round']::before {
+  border-radius: 12px;
+}
+.pkc-place[data-pkc-shape='ellipse']::before {
+  border-radius: 50%;
+}
+/* ⚠ ひし形・矢印は**切り抜く**ので枠線も一緒に切れる ── 外(枠の色)と
+ * 内(地の色)の **2 層**で縁を作る。`inset: 1px` が縁の太さである。 */
+.pkc-place[data-pkc-shape='diamond']::before,
+.pkc-place[data-pkc-shape='arrow']::before {
+  background: var(--border);
+}
+.pkc-place[data-pkc-shape='diamond']::after,
+.pkc-place[data-pkc-shape='arrow']::after {
+  inset: 1px;
+  background: var(--surface);
+}
+.pkc-place[data-pkc-shape='diamond']::before,
+.pkc-place[data-pkc-shape='diamond']::after {
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+}
+.pkc-place[data-pkc-shape='arrow']::before,
+.pkc-place[data-pkc-shape='arrow']::after {
+  clip-path: polygon(0 25%, 62% 25%, 62% 0, 100% 50%, 62% 100%, 62% 75%, 0 75%);
+}
+/* ⚠ 切り抜いた形は**内側が狭い** ── 既定の余白のままだと字が形からはみ出す。
+ * 🔑 掴む口(右上)と持ち手(右下)は層の外なので、余白を広げても押せる。 */
+.pkc-md-rendered .pkc-format-block.pkc-place[data-pkc-shape='diamond'] {
+  padding: 16px 22px;
+}
+.pkc-md-rendered .pkc-format-block.pkc-place[data-pkc-shape='arrow'] {
+  padding: 12px 48px 12px 14px;
+}
+
 /* 掴む口 ── 印は CSS で出す(字を textContent に入れると写しが汚れる) */
 .pkc-place > [data-pkc-field='place-grip'] {
   position: absolute;

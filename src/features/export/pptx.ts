@@ -14,6 +14,7 @@
  * (docx と同じ形。不可侵指示 2026-07-27「ゼロコピー」)。
  */
 
+import type { PlaceShape } from '../markdown/place-shape';
 import type { DocxBlock, DocxCell, DocxRun } from './docx';
 import { xmlEscape } from './docx';
 
@@ -102,8 +103,24 @@ export interface BoardItem {
   readonly y: number;
   readonly w: number | null;
   readonly h: number | null;
+  /** 🔴 板の形(#530 案 A)。⚠ `rect` は**今までどおり**(枠も地も出さない)。 */
+  readonly shape: PlaceShape;
   readonly lines: readonly SlideLine[];
 }
+
+/**
+ * 🔴 **形 → PowerPoint の図形名**(#530 案 A)。
+ * 🔑 `Record<PlaceShape, …>` で受ける ── **形を足して書き忘れたら tsc が落とす**
+ *   (綴りの表は `place-shape.ts` の 1 本。§7)。
+ * ⚠ 生の字を `prst=` へ流さない ── 知らない図形名は**壊れた .pptx** になる。
+ */
+const PRST_OF: Record<PlaceShape, string> = {
+  rect: 'rect',
+  round: 'roundRect',
+  ellipse: 'ellipse',
+  diamond: 'diamond',
+  arrow: 'rightArrow',
+};
 
 export type SlideBox =
   | { readonly kind: 'table'; readonly rows: readonly (readonly ExportCell[])[] }
@@ -202,7 +219,7 @@ export function splitIntoSlides(
         if (p.kind !== 'place') break;
         const inner = blocks.slice(i + 1, i + 1 + p.span);
         items.push({
-          x: p.x, y: p.y, w: p.w, h: p.h,
+          x: p.x, y: p.y, w: p.w, h: p.h, shape: p.shape,
           lines: inner.flatMap((x) => blockToLines(x)),
         });
         i += 1 + p.span;
@@ -355,12 +372,23 @@ function textBox(
   frame: { x: number; y: number; w: number; h: number },
   body: string,
   anchor: 'ctr' | 't',
+  /**
+   * 🔴 **板の形**(#530 案 A)。⚠ 省略 = `rect` で、**出る XML は今までと 1 バイトも同じ**
+   *   (題名・本文の箱がここを通るので、既定を変えると全部の見え方が変わる)。
+   * 🔑 `rect` 以外だけ**縁を引く** ── 引かないと、図形にしても画面には
+   *   「何も無い所に字が浮いている」ようにしか見えない(`noFill` のままなので)。
+   */
+  shape: PlaceShape = 'rect',
 ): string {
+  const line =
+    shape === 'rect'
+      ? ''
+      : `<a:ln w="9525"><a:solidFill><a:srgbClr val="808080"/></a:solidFill></a:ln>`;
   return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${xmlEscape(name)}"/>`
     + `<p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>`
     + `<p:spPr><a:xfrm><a:off x="${frame.x}" y="${frame.y}"/>`
     + `<a:ext cx="${frame.w}" cy="${frame.h}"/></a:xfrm>`
-    + `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr>`
+    + `<a:prstGeom prst="${PRST_OF[shape]}"><a:avLst/></a:prstGeom><a:noFill/>${line}</p:spPr>`
     + `<p:txBody><a:bodyPr wrap="square" anchor="${anchor}"><a:normAutofit/></a:bodyPr>`
     + `<a:lstStyle/>${body}</p:txBody></p:sp>`;
 }
@@ -666,6 +694,7 @@ function boardShapes(
         },
         it.lines.map((l) => lineXml(l, SZ.body, linkOf)).join(''),
         't',
+        it.shape,
       ),
     );
   });

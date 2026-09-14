@@ -25,6 +25,11 @@
  * ⚠ **pure module**。browser API を持たない。
  */
 
+import {
+  PLACE_SHAPES,
+  PLACE_SHAPE_LABELS,
+  type PlaceShape,
+} from './markdown/place-shape';
 import { STACK_ARCHETYPE } from './flavor/stack-flavor';
 import { REPEAT_UNITS, REPEAT_WORDS, type RepeatUnit } from './schedule/repeat';
 import { APP_OPEN_TARGETS, type AppOpenTarget } from './launcher/open-target';
@@ -696,8 +701,12 @@ export function headingMenuActions(ctx: {
  * ⚠ 綴り(`copy-block-md`)は 1 つ ── 受け手は同じである。
  *
  * @param board 板の塊か(`place-notation.ts` の `isPlaceOpen` が決める)
+ * @param shape いま付いている形(#530。板でなければ `null`)
  */
-export function blockMenuActions(ctx: { readonly board: boolean }): readonly EntryAction[] {
+export function blockMenuActions(ctx: {
+  readonly board: boolean;
+  readonly shape?: PlaceShape | null;
+}): readonly EntryAction[] {
   if (!ctx.board) return [{ action: 'copy-block-md', label: 'この塊をコピー' }];
   /**
    * 🔴 **板だけの物**(#676。user 裁定 2026-09-04)── 置けるなら消せる(user 指示
@@ -709,6 +718,19 @@ export function blockMenuActions(ctx: { readonly board: boolean }): readonly Ent
     // 🔴 前へ出す(#676 段②)。⚠ 「後ろへ送る」は無い ── 負の z を描画が捨てるので、
     //    下げる向きは触っていない板の行まで書き換えることになる
     { action: 'raise-place', label: '前へ出す' },
+    /**
+     * 🔴 **形を変える**(#530 案 A。user 裁定 2026-09-14)── 置けるのが四角だけだと、
+     *   「ここは判断」「ここは始まり」を図の中で書き分けられない。
+     *
+     * ⚠ **いま付いている形は出さない** ── 押しても 1 ドットも変わらない口を作らない
+     *   (この repo がいちばん嫌う無言の dead click)。
+     * ⚠ サブメニューの機構がまだ無いので**平らに並べる** ── 出るのは板の上だけで、
+     *   本文の右クリック(いつも出る方)は 1 項目も増えない。
+     */
+    ...PLACE_SHAPES.filter((sh) => sh !== (ctx.shape ?? 'rect')).map((sh) => ({
+      action: `place-shape-${sh}`,
+      label: `${PLACE_SHAPE_LABELS[sh]}にする`,
+    })),
     { action: 'remove-place', label: 'この板を消す' },
   ];
 }
