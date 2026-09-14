@@ -203,7 +203,19 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
      * 🔑 **`sql-history-menu` は `N`** ── 押した所から**対象を取らない**
      *   (`target` は**どこに出すか**を測るためだけに読む)。
      */
-    expect(counts()).toEqual({ P1: 54, P2: 33, E: 23, V: 10, N: 133 });
+    /**
+     * ⚠ 2026-09-14(#918 段④): 答えを file へ(`sql-export-menu` / `sql-export-pick`)で
+     *   **`E` が +1(23 → 24)、`N` が +1(133 → 134)**。
+     *
+     * 🔑 **`sql-export-pick` は `E`** ── 選ぶのは**閉じた 3 つ**(csv / tsv / json)で、
+     *   一覧は `SQL_EXPORT_KINDS` に固定されている(`set-page-format` / `pick-app-icon` と同じ側)。
+     *   ⚠ **`P1` ではない**:同じ「メニューから選ぶ」形でも、`sql-history-pick` は
+     *   **並んだ物が user の打った字**なので押した 1 つでしか決まらない ── こちらは
+     *   **値ごとに 1 行**をパレットへ出せる。
+     * 🔑 **`sql-export-menu` は `N`**(`sql-history-menu` と同じ ── `target` は
+     *   **どこに出すか**を測るためだけに読む)。
+     */
+    expect(counts()).toEqual({ P1: 54, P2: 33, E: 24, V: 10, N: 134 });
   });
 
   it('🔴 名指しの錨 ── 件数が同じまま入れ替わっても落ちる', () => {

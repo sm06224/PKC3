@@ -173,6 +173,12 @@ export interface SqlPageState {
    */
   readonly saved: string;
   /**
+   * 🔴 **何へ書き出したか**(#918 段④)。⚠ `saved` と**必ず一緒に**動かす ──
+   *   別々に置くと、「ノートへ」の後に「ファイルへ」を押した回で**字だけ入れ替わる**。
+   * 🔑 `SQL_SAVED` が両方を 1 度に書くので、2 か所へ散らない(§7)。
+   */
+  readonly savedKind: 'note' | 'file';
+  /**
    * 🔴 **前に打った字**(#918 段②a。user 要望 2026-09-14「打つ所がお粗末」)。
    * ⚠ **新しいものが先頭**。⚠ **この窓の中だけ**(読み直したら消える)──
    *   打った SQL は user のデータではなく、その場の手なので憶えない。
@@ -1303,6 +1309,7 @@ export const initialState: AppState = {
     running: false,
     error: '',
     saved: '',
+    savedKind: 'note',
     history: [],
     historyAt: -1,
     historyDraft: '',
@@ -1436,7 +1443,12 @@ export type UserAction =
    * ⚠ ノートを作るのは `CREATE_ENTRY` の仕事 ── ここは**言うだけ**である
    *   (2 つの仕事を 1 つの action に持たせない)。
    */
-  | { type: 'SQL_SAVED'; title: string }
+  /**
+   * 🔴 **書き出した**(#681 段③ / #918 段④)。
+   * ⚠ `kind` は**必須**にしてある ── optional にすると、次に書き出す口を足した人が
+   *   黙って落とし、**ノートを作っていないのに「ノートに書き出しました」と出る**。
+   */
+  | { type: 'SQL_SAVED'; title: string; kind: 'note' | 'file' }
   /**
    * 🔴 **書き出せなかった理由**(#681 の着地前レビュー F1)。
    * ⚠ 直す前は編集中に押すと**画面が 1 ドットも動かなかった** ── `CREATE_ENTRY` は
@@ -3465,7 +3477,15 @@ function reduceCore(
     case 'SQL_SAVED':
       // ⚠ **`running` を必ず降ろす**(#918 段①)── `SQL_SAVE_FAILED` と対である
       return {
-        state: { ...state, sqlPage: { ...state.sqlPage, running: false, saved: action.title } },
+        state: {
+          ...state,
+          sqlPage: {
+            ...state.sqlPage,
+            running: false,
+            saved: action.title,
+            savedKind: action.kind,
+          },
+        },
         events: [],
       };
     /**

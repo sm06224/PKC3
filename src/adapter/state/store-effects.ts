@@ -879,7 +879,7 @@ export function connectStoreEffects(
             parentLid: null,
             relationId,
           });
-          dispatcher.dispatch({ type: 'SQL_SAVED', title });
+          dispatcher.dispatch({ type: 'SQL_SAVED', title, kind: 'note' });
         })().catch((e: unknown) => {
           if (disposed) return;
           const raw = e instanceof Error ? e.message : String(e);

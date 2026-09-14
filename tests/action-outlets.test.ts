@@ -23,6 +23,7 @@
  * 🔑 だから本文を切るのは `handlers()` **1 か所**にした(§7)。
  */
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 // @ts-expect-error -- CI script は素の .mjs(ビルド対象外)
 import { codeOnlyForScan, handlers, receivers, report } from '../scripts/action-outlets.mjs';
 
@@ -85,6 +86,12 @@ const UNRESOLVED: readonly string[] = [
    *   `data-pkc-action="sql-history-pick"` が source のどこにも無い
    *   (`set-app-icon` / `move-order-up` と同じ ── 出口は在るが、字では追えない)。
    */
+  /**
+   * ⚠ **2026-09-14(#918 段④)で 1 件増えた** ── 書き出す形を選ぶ。
+   * 🔑 `sql-history-pick` と同じ理由 ── `openContextMenu` が**その場で組む**ので、
+   *   静的な `data-pkc-action="sql-export-pick"` が source のどこにも無い。
+   */
+  'sql-export-pick',
   'sql-history-pick',
   'toggle-todo',
   'view-big',
@@ -271,6 +278,33 @@ describe('操作 → 出口の対応表(#582)', () => {
       where,
       'コメントしか無い file を出口に数えている(説明を書くと台帳が動く)',
     ).not.toContain('adapter/ui/actions/copy-md-block.ts');
+  });
+
+  /**
+   * 🔴 **メニューを開く受け手は、`MENU_OPENERS` に載っていなければならない**
+   *   (#918 段④、2026-09-14。**同じ罠を 2 回踏んだので機械の門にした**)。
+   *
+   * ⚠ 載せないと、**同じ 1 回のクリック**でメニューが開き、続けて `onCloseMenu` が
+   *   閉じる ── user から見ると**押しても何も出ない**(無言の dead click)。
+   * ⚠ `phone-menu` が一度踏み、#918 段②a(`sql-history-menu`)と段④
+   *   (`sql-export-menu`)でも**2 回とも踏んだ** ── 手で並べる一覧なので、
+   *   次に開く口を足す人も必ず忘れる(CLAUDE.md §7)。
+   * 🔑 だから**受け手の本文から数える** ── `openContextMenu(` を呼ぶ受け手を全数で拾い、
+   *   一覧と**集合で**突き合わせる。
+   * ⚠ 注釈は落としてから当てる(説明に綴りを書いた瞬間、自分の字で満たされる ── §1)。
+   */
+  it('🔴 メニューを開く受け手は、1 つ残らず MENU_OPENERS に在る', () => {
+    const src = readFileSync('src/adapter/ui/actions/binder.ts', 'utf8');
+    const list = /const MENU_OPENERS: ReadonlySet<string> = new Set\(\[([^\]]*)\]\)/.exec(src);
+    expect(list, 'MENU_OPENERS の一覧が読めない(綴りが変わった)').not.toBeNull();
+    const declared = new Set([...(list?.[1] ?? '').matchAll(/'([a-z0-9-]+)'/g)].map((m) => m[1]!));
+    const opens = [...bodies()]
+      .filter(([, body]) => (codeOnlyForScan as (s: string) => string)(body).includes('openContextMenu('))
+      .map(([action]) => action)
+      .sort();
+    // ⚠ 空振り防止 ── 切り出しが壊れたら 0 件になって「全部載っている」と読める
+    expect(opens.length, 'メニューを開く受け手が 1 つも見つからない(切り出しが壊れた)').toBeGreaterThanOrEqual(3);
+    expect([...opens].filter((a) => !declared.has(a)), 'MENU_OPENERS に載っていない').toEqual([]);
   });
 
   it('🔴 静的に追えない出口の顔ぶれが変わっていない', () => {
