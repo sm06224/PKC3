@@ -173,6 +173,29 @@ export interface SqlPageState {
    */
   readonly saved: string;
   /**
+   * 🔴 **前に打った字**(#918 段②a。user 要望 2026-09-14「打つ所がお粗末」)。
+   * ⚠ **新しいものが先頭**。⚠ **この窓の中だけ**(読み直したら消える)──
+   *   打った SQL は user のデータではなく、その場の手なので憶えない。
+   */
+  readonly history: readonly string[];
+  /**
+   * 履歴のどこを見ているか。**`-1` = 打ちかけの字**(履歴に入っていない)。
+   * ⚠ これが無いと **↓ で打ちかけの字へ戻れない**(前の字で潰してしまう)。
+   */
+  readonly historyAt: number;
+  /** ⚠ 履歴を遡る前の**打ちかけの字**(↓ でここへ戻る)。 */
+  readonly historyDraft: string;
+  /**
+   * 🔴 **履歴の中で手直しした字**(添字は `history` と同じ)。
+   *
+   * ⚠ これが無いと、**呼び戻した字を直してからもう一度 `↑` を押した人が、
+   *   直した分を黙って失う**(2026-09-14 の動線レビューが実測で出した)──
+   *   直した字はどこにも控えられず、`↓` で帰ってくるのは**直す前**の字だった。
+   * 🔑 走らせたら捨てる(`RUN_SQL` で `[]` に戻す)── 走った字は `history` に
+   *   積まれるので、手直しの控えを持ち越す理由が無い。
+   */
+  readonly historyEdits: readonly (string | undefined)[];
+  /**
    * 🔴 **いま調べている相手**(#681 段③ の 2 つ目)。`null` = この PKC のノート。
    *
    * ⚠ **どちらを調べているかが画面から読めない**と、user は
@@ -1280,6 +1303,10 @@ export const initialState: AppState = {
     running: false,
     error: '',
     saved: '',
+    history: [],
+    historyAt: -1,
+    historyDraft: '',
+    historyEdits: [],
     guest: null,
     guestError: '',
     guestPending: '',
@@ -1384,6 +1411,21 @@ export type UserAction =
   | { type: 'SET_SEARCH_PAGE_QUERY'; query: string }
   | { type: 'SET_SQL_TEXT'; sql: string }
   | { type: 'RUN_SQL' }
+  /**
+   * 🔴 **前に打った字を戻す / 進む**(#918 段②a)。
+   * ⚠ **どこで押したかは呼び側が見る** ── 1 行目で ↑、最後の行で ↓ のときだけ来る
+   *   (でないと、複数行の中を動けなくなる)。
+   */
+  | { type: 'SQL_HISTORY_STEP'; back: boolean }
+  /**
+   * 🔴 **一覧から選んで呼び戻す**(#918 段②a、user 裁定 2026-09-14「履歴ボタンを 1 つ足す」)。
+   *
+   * ⚠ 指で触る端末には `↑` `↓` が**無い** ── 鍵盤だけの近道にすると、
+   *   スマホの user は前に打った SQL を**毎回打ち直す**ことになる
+   *   (CLAUDE.md「マウスだけで完結し、キーボードは近道」)。
+   * 🔑 `at` は `history` の添字(`0` = いちばん新しい)。範囲の外は黙って捨てる。
+   */
+  | { type: 'SQL_HISTORY_PICK'; at: number }
   /**
    * 🔴 **構造 1 枚をノートへ**(#918 段①。user 要望 2026-09-14「ai向けに構造吐き出したり」)。
    * ⚠ 中身は 1 文字も出さない ── 出すのは表・列・型・鍵・繋がり・行数だけである。
@@ -2651,6 +2693,49 @@ export interface ReduceResult {
  * ⚠ 戻る・進む自身は積まない(積むと戻れなくなる)。
  * ⚠ entry が消えた回は履歴も掃除する ── 残すと「戻る」が居ないノートへ飛ぶ。
  */
+/**
+ * 🔴 **履歴の上限**(#918 段②a)。⚠ 打つほど重くなる形にしない。
+ * 🔑 20 は「1 回の作業で遡りたい範囲」── これを超えたら、ふつうは思い出せない。
+ */
+export const SQL_HISTORY_MAX = 20;
+
+/**
+ * 走った字を履歴へ積む。⚠ **同じ字を 2 つ並べない**(直前と同じなら積み直さない)。
+ * 🔑 純粋な関数にしてあるので、reducer の中で `if` を増やさずに済む。
+ */
+function historyPush(
+  history: readonly string[],
+  sql: string,
+): { readonly history: readonly string[] } {
+  if (sql === '' || history[0] === sql) return { history };
+  return { history: [sql, ...history].slice(0, SQL_HISTORY_MAX) };
+}
+
+/**
+ * 履歴の**いま見ている所**へ、手直しした字を控える。
+ * ⚠ 呼ぶのは `historyAt >= 0` のときだけ(打ちかけの側は `sql` 自身が正本)。
+ */
+function withHistoryEdit(p: SqlPageState, sql: string): readonly (string | undefined)[] {
+  const edits = [...p.historyEdits];
+  edits[p.historyAt] = sql;
+  return edits;
+}
+
+/**
+ * 履歴の `at` 番目(**`-1` = 打ちかけ**)を欄へ出す。
+ *
+ * ⚠ **遡り始める 1 回だけ**打ちかけの字を控える ── 2 回目に控えると、
+ *   1 つ前の履歴で打ちかけが潰れる。
+ * 🔑 `↑` `↓`(`SQL_HISTORY_STEP`)と一覧から選ぶ(`SQL_HISTORY_PICK`)が
+ *   **同じ 1 か所**を通る ── 2 つ目の数え方を作らない(CLAUDE.md §7)。
+ */
+function goHistory(p: SqlPageState, at: number, from: number): SqlPageState {
+  const draft = from === -1 && at >= 0 ? p.sql : p.historyDraft;
+  // 🔑 **手直しした字が在ればそちら**(無ければ走らせた字そのもの)
+  const sql = at < 0 ? draft : (p.historyEdits[at] ?? p.history[at] ?? p.sql);
+  return { ...p, sql, historyAt: at < 0 ? -1 : at, historyDraft: draft };
+}
+
 export function reduce(state: AppState, action: Dispatchable): ReduceResult {
   if (action.type === 'NAV_HISTORY') return navHistory(state, action.dir);
   const result = reduceCore(state, action);
@@ -3223,7 +3308,26 @@ function reduceCore(
       return {
         state: {
           ...state,
-          sqlPage: { ...state.sqlPage, sql: action.sql, error: '', saved: '', guestError: '' },
+          sqlPage: {
+            ...state.sqlPage,
+            sql: action.sql,
+            error: '',
+            saved: '',
+            guestError: '',
+            /**
+             * 🔴 **履歴の中で直した字は、その場に控える**(#918 段②a、動線レビュー)。
+             * ⚠ 控えないと、**直してからもう一度 `↑` を押した瞬間に消える**
+             *   (`↓` で帰ってくるのは直す前の字になる)── この repo が
+             *   いちばん嫌う「さっきまでやっていたことが消える」形である。
+             * ⚠ `-1`(打ちかけ)のときは何もしない ── そこは `sql` 自身が
+             *   打ちかけの字であり、控えは `↑` を押す瞬間に取る。
+             */
+            ...(state.sqlPage.historyAt < 0
+              ? // ⚠ 打ちかけを打ち直したら、控えは**古い**ので捨てる ── 残すと
+                //   画面の「打ちかけの字を見ています」が嘘になる(戻る先はもう無い)
+                { historyDraft: '' }
+              : { historyEdits: withHistoryEdit(state.sqlPage, action.sql) }),
+          },
         },
         events: [],
       };
@@ -3261,6 +3365,15 @@ function reduceCore(
           sqlPage: {
             ...state.sqlPage,
             sql: checked.sql,
+            /**
+             * 🔴 **走った字だけを憶える**(#918 段②a)── 打ちかけは積まない。
+             * ⚠ **同じ字を 2 つ並べない**(直前と同じなら積み直さない)。
+             * ⚠ 上限 `SQL_HISTORY_MAX` で切る ── 打つほど重くなる形にしない。
+             */
+            ...historyPush(state.sqlPage.history, checked.sql),
+            historyAt: -1,
+            historyDraft: '',
+            historyEdits: [],
             running: true,
             error: '',
             saved: '',
@@ -3285,6 +3398,28 @@ function reduceCore(
      * 🔑 `running` を立てるので、**終わりを言う 2 つ**(`SQL_SAVED` / `SQL_SAVE_FAILED`)が
      *   必ず降ろす ── 降ろし忘れると、以後ずっと押せなくなる。
      */
+    /**
+     * 🔴 **前に打った字を戻す / 進む**(#918 段②a)。
+     *
+     * ⚠ **打ちかけの字を潰さない** ── 遡る前に控え、いちばん新しい所から
+     *   さらに ↓ を押したら**それを返す**(shell と同じ手触り)。
+     * ⚠ 履歴が空の回は**何も起きない**(押しても字が消えたりしない)。
+     */
+    case 'SQL_HISTORY_STEP': {
+      const p = state.sqlPage;
+      if (p.history.length === 0) return { state, events: [] };
+      const at = action.back
+        ? Math.min(p.historyAt + 1, p.history.length - 1)
+        : p.historyAt - 1;
+      if (at === p.historyAt) return { state, events: [] };
+      return { state: { ...state, sqlPage: goHistory(p, at, p.historyAt) }, events: [] };
+    }
+    case 'SQL_HISTORY_PICK': {
+      const p = state.sqlPage;
+      // ⚠ 範囲の外は黙って捨てる(一覧を組み直す前の押しが飛んでくる)
+      if (action.at < 0 || action.at >= p.history.length) return { state, events: [] };
+      return { state: { ...state, sqlPage: goHistory(p, action.at, p.historyAt) }, events: [] };
+    }
     case 'SQL_SCHEMA_TO_NOTE': {
       if (state.sqlPage.running) return { state, events: [] };
       return {

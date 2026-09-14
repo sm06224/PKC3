@@ -68,6 +68,10 @@ export class SqlRenderer {
   private sourceKey: string | null = null;
   /** 打ち始めても消えない手本(#837 K1)。⚠ 器は 1 度しか組まないので控えを持つ。 */
   private example: HTMLElement | null = null;
+  /** 履歴の押し所(#918 段②a)。⚠ 憶えている字が無いうちは押させない。 */
+  private history: HTMLButtonElement | null = null;
+  /** いま何番目を見ているかの行(#918 段②a)。⚠ 空なら畳む。 */
+  private historyNote: HTMLElement | null = null;
 
   constructor(host: HTMLElement) {
     this.host = host;
@@ -85,6 +89,18 @@ export class SqlRenderer {
     box.setAttribute('data-pkc-field', 'sql-input');
     box.setAttribute('aria-label', '打つ SQL');
     box.placeholder = sqlPlaceholder(null);
+    /**
+     * 🔴 **握った鍵は、乗せたら読める所に書く**(user 裁定 2026-09-14
+     *   「マウスを乗せたときだけ出す」)。
+     * ⚠ `Tab` は**ふつう次の部品へ飛ぶ鍵**なので、握ったこと自体が驚きになる ──
+     *   驚いた人がまず動かすのはマウスである。
+     * ⚠ 案内文(`sql-rules`)へは足さない ── あの段落は 2026-09-09 に
+     *   「6 文が続いて読み飛ばされる」ので 2 行に割った経緯がある(#837 K1)。
+     * ⚠ ここは**割当を変えられない鍵**なので直書きでよい(`applyShortcutHints` は
+     *   `data-pkc-hint-command` を持つ物だけを書き換える ── 上の「走らせる」と同じ)。
+     */
+    box.title =
+      'Tab で字下げが入ります。この欄から出るには Shift+Tab か Esc。↑ ↓ で前に打った字が戻ります。';
     box.rows = 4;
     box.spellcheck = false;
     const bar = document.createElement('div');
@@ -142,7 +158,23 @@ export class SqlRenderer {
     schema.textContent = '構造をノートへ';
     schema.title =
       'いま調べている相手の表・列・型・鍵・繋がり・行数を、ノート 1 枚にします(中身は入りません)。AI に貼るのに使えます。';
-    bar.append(run, save, schema, source, fileInput);
+    /**
+     * 🔴 **前に打った字を、押して選べる**(#918 段②a。user 裁定 2026-09-14)。
+     *
+     * ⚠ `↑` `↓` は**鍵盤のある人だけの近道**である ── スマホ / タブレットには
+     *   その鍵が無いので、押し所が無いと**毎回打ち直し**になる
+     *   (CLAUDE.md「マウスだけで完結し、キーボードは近道」)。
+     * 🔑 一覧で出すと、**いま何番目を見ているか**が分からない問題も同時に消える
+     *   (選ぶ前に全部見えるので)。
+     * ⚠ **憶えている字が無いうちは押せない**(押せるのに何も起きない口を作らない)。
+     */
+    const history = document.createElement('button');
+    history.type = 'button';
+    history.setAttribute('data-pkc-action', 'sql-history-menu');
+    history.setAttribute('data-pkc-field', 'sql-history');
+    history.textContent = '履歴';
+    history.title = '前に走らせた SQL を一覧から選びます(↑ ↓ でも戻せます)';
+    bar.append(run, save, schema, history, source, fileInput);
     const tip = document.createElement('p');
     tip.setAttribute('data-pkc-field', 'sql-tip');
     /**
@@ -171,11 +203,23 @@ export class SqlRenderer {
     const example = document.createElement('p');
     example.setAttribute('data-pkc-field', 'sql-example');
     example.textContent = sqlExampleText(null);
+    /**
+     * 🔴 **いま何番目を見ているか**(#918 段②a。user 裁定 2026-09-14
+     *   「欄の下に 2/3 と出す」)。
+     *
+     * ⚠ 直す前は `↑` を押しても画面が **1 バイトも動かなかった** ──
+     *   いちばん古い所まで来ても無言なので、「これ以上前が無い」のか
+     *   「鍵が効いていない」のか user には区別が付かない(無言の dead click)。
+     * 🔑 **空なら畳む**(`hidden`)── 何も起きていないときに行を占めない。
+     */
+    const historyNote = document.createElement('p');
+    historyNote.setAttribute('data-pkc-field', 'sql-history-note');
+    historyNote.hidden = true;
     const note = document.createElement('p');
     note.setAttribute('data-pkc-field', 'sql-note');
     const body = document.createElement('div');
     body.setAttribute('data-pkc-field', 'sql-body');
-    head.append(title, box, bar, tip, rules, example);
+    head.append(title, box, historyNote, bar, tip, rules, example);
     this.host.append(head, note, body);
     this.box = box;
     this.run = run;
@@ -183,6 +227,8 @@ export class SqlRenderer {
     this.source = source;
     this.example = example;
     this.tip = tip;
+    this.history = history;
+    this.historyNote = historyNote;
     this.note = note;
     this.body = body;
     return body;
@@ -261,6 +307,17 @@ export class SqlRenderer {
     // ⚠ 打ちかけの字は**上書きしない**(state が直した字を返したときだけ揃える)
     if (this.box !== null && this.box.value !== p.sql) this.box.value = p.sql;
     if (this.run !== null) this.run.disabled = p.running;
+    /**
+     * 🔴 **履歴の合図は指紋の門より前で塗る**(#918 段②a)。
+     * ⚠ 下の `fingerprint` は「答えが変わったか」を見る物で、`↑` `↓` では
+     *   **1 バイトも動かない** ── 門の後ろに置くと、押しても行が出ない。
+     */
+    if (this.history !== null) this.history.disabled = p.history.length === 0;
+    if (this.historyNote !== null) {
+      const line = historyNoteLine(p);
+      if (this.historyNote.textContent !== line) this.historyNote.textContent = line;
+      this.historyNote.hidden = line === '';
+    }
     /**
      * ⚠ **押せるのに何も起きない口を作らない** ── まだ走らせていない回と、
      *   走っている最中は押させない(押した後に「何も起きなかった」を作らない)。
@@ -355,6 +412,26 @@ export class SqlRenderer {
  * 🔴 **数だけで終えない ── 次の一手まで言う**(2026-09-09 の動線レビュー)。
  * ⚠ 「500 行」「0 行」で止めると、マニュアルを開いていない人はそこで手が止まる。
  */
+/**
+ * 🔴 **いま何番目を見ているか**(#918 段②a。user 裁定 2026-09-14)。
+ *
+ * ⚠ 何も起きていないときは**空**を返す ── 空なら呼び側が行ごと畳む
+ *   (常に出すと、`↑` を 1 度も押していない人の画面に意味の無い行が残る)。
+ * 🔑 **端に着いたことを字で言う** ── 直す前は、いちばん古い所まで来ても
+ *   画面が 1 バイトも動かず、「これ以上前が無い」のか「鍵が効いていない」のか
+ *   区別が付かなかった。
+ */
+export function historyNoteLine(p: AppState['sqlPage']): string {
+  const n = p.history.length;
+  if (n === 0) return '';
+  if (p.historyAt < 0) {
+    // ⚠ 控えが空 = まだ 1 度も遡っていない(戻ってきた人にだけ言う)
+    return p.historyDraft === '' ? '' : '打ちかけの字を見ています';
+  }
+  const at = `前に打った字(${String(p.historyAt + 1)} / ${String(n)})`;
+  return p.historyAt === n - 1 ? `${at} ── これより前はありません` : at;
+}
+
 function noteLine(p: AppState['sqlPage']): string {
   /**
    * 🔴 **どちらを調べているかは、どの行にも添える**(#681 の着地前レビュー F2)。

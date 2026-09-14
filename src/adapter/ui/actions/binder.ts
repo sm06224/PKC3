@@ -409,6 +409,7 @@ import { joinCopied, pickMarked } from '@features/clipboard/scrap';
 import { sqlNoteBody, sqlNoteTitle } from '@features/query/sql-to-note';
 // 🔴 手持ちのファイルを開く選び所の印(#854 段②)
 import { SQL_PICK_LOCAL_FILE_VALUE } from '@features/query/sql-local-file';
+import { sqlMenuLabel } from '@features/query/sql-tip';
 import {
   confirmInApp,
   pickDateInApp,
@@ -2335,7 +2336,20 @@ const MENU_PREV_LID_ATTR = 'data-pkc-menu-prev-lid';
  * その受け手は**押しても無反応**になる(同じクリックで片づけ役が閉じる)。
  * ⚠ 右クリック(`contextmenu`)で開く経路はここに載らない ── あちらは別の event。
  */
-const MENU_OPENERS: ReadonlySet<string> = new Set(['phone-menu', 'open-repeat-menu']);
+/**
+ * 🔴 **押すとメニューが開くボタン**の一覧。
+ *
+ * ⚠ 載せないと、**同じ 1 回のクリック**でここが開き `onCloseMenu` が閉じるので、
+ *   **押しても何も出ない**(`phone-menu` が踏んだ罠)。
+ * ⚠ 逆に、**押すと畳む**だけの物(見出しの頭)は載せない ── 載せると
+ *   「メニューが出ている間に見出しを押しても閉じない」という別の穴になる。
+ */
+const MENU_OPENERS: ReadonlySet<string> = new Set([
+  'phone-menu',
+  'open-repeat-menu',
+  // 🔑 #918 段②a ── 前に打った SQL の一覧(指で触る端末の唯一の入口)
+  'sql-history-menu',
+]);
 
 /**
  * メニューが出た時のノートと、いま開いているノートが同じか。
@@ -7504,6 +7518,44 @@ const ACTIONS: Record<string, ActionHandler> = {
       relationId: generateLid(),
     });
   },
+  /**
+   * 🔴 **前に打った字を一覧から選ぶ**(#918 段②a。user 裁定 2026-09-14
+   *   「履歴ボタンを 1 つ足す」)。
+   *
+   * ⚠ 指で触る端末には `↑` `↓` が**無い** ── ここが唯一の入口である。
+   * ⚠ 2 度目の押しは**閉じる**(片道の操作を作らない ── user 指示 2026-08-23)。
+   * 🔑 器は右クリックの menu を使い回す ── 一覧を出す仕組みを 2 つ持たない(§7)。
+   */
+  'sql-history-menu': (dispatcher, target, _services, root) => {
+    if (contextMenuOpen(root)) {
+      closeContextMenu(root);
+      return;
+    }
+    const { history } = dispatcher.getState().sqlPage;
+    if (history.length === 0) return;
+    const rect = target.getBoundingClientRect();
+    openContextMenu(
+      root,
+      { x: rect.left, y: rect.bottom },
+      history.map((sql, at) => ({
+        action: 'sql-history-pick',
+        /**
+         * ⚠ **長い字は折り返さず切る** ── 1 件で画面を埋めると、
+         *   「新しい順に並んでいる」という一覧の値打ちが消える。
+         * ⚠ 改行は字にすると**行が伸びる**ので、`⏎` 1 文字へ畳む。
+         */
+        label: sqlMenuLabel(sql),
+        attrs: { 'data-pkc-sql-history-at': String(at) },
+      })),
+      target,
+    );
+  },
+  'sql-history-pick': (dispatcher, target) => {
+    const at = Number(target.getAttribute('data-pkc-sql-history-at') ?? '');
+    // ⚠ 読めない印は黙って捨てる(器を作り直す前の押しが飛んでくる)
+    if (!Number.isInteger(at)) return;
+    dispatcher.dispatch({ type: 'SQL_HISTORY_PICK', at });
+  },
   'sql-to-note': (dispatcher) => {
     const state = dispatcher.getState();
     const p = state.sqlPage;
@@ -8941,6 +8993,60 @@ export function bindActions(
       ke.preventDefault();
       dispatcher.dispatch({ type: 'RUN_SQL' });
       return;
+    }
+    /**
+     * 🔴 **打つ所を道具にする**(#918 段②a。user 要望 2026-09-14「打つ所がお粗末」)。
+     *
+     * ⚠ **握るのは 3 つだけ**(`↑` / `↓` / `Tab`)── 増やすほど、
+     *   ふつうの編集が効かなくなる。
+     */
+    if (field === 'sql-input' && ke.target instanceof HTMLTextAreaElement) {
+      const ta = ke.target;
+      const plain = !ke.ctrlKey && !ke.metaKey && !ke.altKey;
+      /**
+       * 🔴 **Tab で字下げ**。⚠ **`Shift`+`Tab` は握らない** ── 鍵盤だけで使う人の
+       *   **逃げ道**である(握ると、この欄から二度と出られなくなる)。
+       * ⚠ `Esc` でも外れる(下)── 逃げ道を 2 つ置く。
+       * 🔑 差し込みは `insertText` を通す ── **元に戻す(Undo)が効く**形を壊さない。
+       */
+      if (ke.key === 'Tab' && plain && !ke.shiftKey) {
+        ke.preventDefault();
+        insertText(ta, '  ');
+        return;
+      }
+      /**
+       * 🔑 **この欄から出る**(`Shift`+`Tab` と対の逃げ道)。
+       *
+       * ⚠ **メニューが出ている間は握らない** ── `Escape` は別の聞き手
+       *   (`onMenuKey`)が**メニューを閉じる**のにも使う。ここで焦点まで外すと、
+       *   「右クリックを取り消しただけ」のつもりの user が**打っていた所を失う**
+       *   (CLAUDE.md「欠陥の多くは『さっきまでやっていたことが消える』形で出る」)。
+       * 🔑 判定は `onMenuKey` と**同じ口**(`contextMenuOpen`)で聞く ──
+       *   2 つ目の数え方を作らない(§7)。
+       */
+      if (ke.key === 'Escape' && plain && !ke.shiftKey && !contextMenuOpen(root)) {
+        ke.preventDefault();
+        ta.blur();
+        return;
+      }
+      /**
+       * 🔴 **前に打った字を戻す / 進む**。
+       * ⚠ **1 行目で `↑`、最後の行で `↓`** のときだけ握る ── でないと
+       *   **複数行の中を上下に動けなくなる**(打つのは何行にもなる問い合わせである)。
+       * ⚠ 選んでいる途中(範囲選択)は握らない(選び直しの邪魔をしない)。
+       */
+      if ((ke.key === 'ArrowUp' || ke.key === 'ArrowDown') && plain && !ke.shiftKey) {
+        const at = ta.selectionStart ?? 0;
+        const to = ta.selectionEnd ?? 0;
+        if (at !== to) return;
+        const back = ke.key === 'ArrowUp';
+        const onFirst = ta.value.lastIndexOf('\n', Math.max(0, at - 1)) === -1;
+        const onLast = ta.value.indexOf('\n', at) === -1;
+        if (back ? !onFirst : !onLast) return;
+        ke.preventDefault();
+        dispatcher.dispatch({ type: 'SQL_HISTORY_STEP', back });
+        return;
+      }
     }
     /**
      * 🔴 **その場で計算する**(#764。user 裁定 2026-09-06「**PKC2と同じで！**」)。

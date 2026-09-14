@@ -29,7 +29,7 @@ import {
 import { REQUEST_TIMEOUT_MS } from '../../src/adapter/platform/storage/store-proxy';
 import { CenterRouter } from '../../src/adapter/ui/render/center';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
-import { isAsidePane, viewModeLabel } from '../../src/adapter/state/app-state';
+import { isAsidePane, SQL_HISTORY_MAX, viewModeLabel } from '../../src/adapter/state/app-state';
 import { homeTabOf } from '../../src/adapter/ui/render/browse-mode';
 import { readFileSync } from 'node:fs';
 import { stubStamps } from '../helpers/store-stamps';
@@ -1467,5 +1467,332 @@ describe('構造をノートへ(#918 段①)', () => {
     await settleAll();
     expect(persisted.length, '編集中なのに 2 枚目を作った').toBe(1);
     expect(d.getState().sqlPage.error, '理由を言っていない').toContain('編集中');
+  });
+});
+
+/**
+ * 🔴 **打つ所を道具にする**(#918 段②a。user 要望 2026-09-14「打つ所がお粗末」)。
+ *
+ * 守る主張:
+ * 1. **↑ で前に打った字が戻る**(走った字だけ・新しい順)
+ * 2. 🔴 **打ちかけの字を潰さない** ── ↓ で戻ってくる
+ * 3. 🔴 **複数行の中では、ふつうに上下できる**(1 行目 / 最後の行でだけ握る)
+ * 4. **Tab は字下げ**。🔴 ただし **`Shift`+`Tab` と `Esc` は逃げ道**として残す
+ * 5. 同じ字を 2 つ並べない / 打ちかけは積まない
+ */
+describe('打つ所(#918 段②a)', () => {
+  const caret = (box: HTMLTextAreaElement, at: number): void => {
+    box.selectionStart = at;
+    box.selectionEnd = at;
+  };
+
+  it('🔴 ↑ で前に打った字が戻り、↓ で打ちかけの字へ帰る', async () => {
+    const { d, type, key, runBtn, box } = setup();
+    type('select 1');
+    runBtn.click();
+    await settle();
+    type('select 2');
+    runBtn.click();
+    await settle();
+    // ⚠ 打ちかけ(まだ走らせていない字)
+    type('select 3 -- 打ちかけ');
+    caret(box, 0);
+    key({ key: 'ArrowUp' });
+    expect(d.getState().sqlPage.sql, '前に打った字が戻らない').toBe('select 2');
+    caret(box, 0);
+    key({ key: 'ArrowUp' });
+    expect(d.getState().sqlPage.sql, 'もう 1 つ前へ戻らない').toBe('select 1');
+    // 🔴 打ちかけの字は潰れていない
+    key({ key: 'ArrowDown' });
+    expect(d.getState().sqlPage.sql).toBe('select 2');
+    key({ key: 'ArrowDown' });
+    expect(d.getState().sqlPage.sql, '打ちかけの字が消えた').toBe('select 3 -- 打ちかけ');
+  });
+
+  it('🔴 複数行の途中では握らない(ふつうに上下できる)', async () => {
+    const { d, type, key, runBtn, box } = setup();
+    type('select 1');
+    runBtn.click();
+    await settle();
+    type('select a\nfrom t\nwhere b');
+    // ⚠ 2 行目の頭(1 行目でも最後の行でもない)
+    caret(box, 'select a\n'.length);
+    key({ key: 'ArrowUp' });
+    expect(d.getState().sqlPage.sql, '途中なのに履歴へ飛んだ').toBe('select a\nfrom t\nwhere b');
+    key({ key: 'ArrowDown' });
+    expect(d.getState().sqlPage.sql, '途中なのに履歴へ飛んだ').toBe('select a\nfrom t\nwhere b');
+    // ⚠ **対照群** ── 1 行目なら握る(この test 自体が空振りでないこと)
+    caret(box, 0);
+    key({ key: 'ArrowUp' });
+    expect(d.getState().sqlPage.sql, '1 行目でも握っていない').toBe('select 1');
+  });
+
+  it('⚠ 走った字だけを憶える / 同じ字を 2 つ並べない', async () => {
+    const { d, type, key, runBtn, box } = setup();
+    type('select 1');
+    runBtn.click();
+    await settle();
+    type('select 1');
+    runBtn.click();
+    await settle();
+    expect(d.getState().sqlPage.history, '同じ字が 2 つ並んだ').toEqual(['select 1']);
+    // ⚠ 打ちかけは積まれない
+    type('select 9');
+    expect(d.getState().sqlPage.history).toEqual(['select 1']);
+    caret(box, 0);
+    key({ key: 'ArrowUp' });
+    expect(d.getState().sqlPage.sql).toBe('select 1');
+  });
+
+  /**
+   * 🔴 **呼び戻した字を直してから、もう一度遡っても、直した分が消えない**
+   *   (2026-09-14 の動線レビューが出した。**直す前は黙って消えていた**)。
+   *
+   * ⚠ 物語:`select 2` を `↑` で呼び戻す → `where id=3` を付け足す →
+   *   「もう少し前のも見よう」ともう一度 `↑`。⚠ 直す前は、付け足した字が
+   *   **どこにも控えられておらず**、`↓` で帰ってくるのは**直す前**の `select 2` だった。
+   * 🔑 観測点は 2 つ:①**帰ってきた字に手直しが残っている**
+   *   ②**打ちかけの字も別に残っている**(片方を直して、もう片方を壊していない)。
+   */
+  it('🔴 履歴の中で直した字が、遡っても消えない', async () => {
+    const { d, type, key, runBtn, box } = setup();
+    for (const sql of ['select 1', 'select 2']) {
+      type(sql);
+      runBtn.click();
+      await settle();
+    }
+    type('打ちかけ');
+    caret(box, 0);
+    key({ key: 'ArrowUp' });
+    expect(d.getState().sqlPage.sql, '前提が崩れている(↑ で戻っていない)').toBe('select 2');
+
+    // ⚠ 呼び戻した字を**手で直す**(打鍵は `input` = `SET_SQL_TEXT` を通る)
+    type('select 2 where id=3');
+
+    caret(box, 0);
+    key({ key: 'ArrowUp' });
+    expect(d.getState().sqlPage.sql, 'さらに前へ遡れていない').toBe('select 1');
+    // ① 🔴 本題 ── 戻ると、直した字が在る
+    key({ key: 'ArrowDown' });
+    expect(d.getState().sqlPage.sql, '直した字が消えた').toBe('select 2 where id=3');
+    // ② 打ちかけの字も無事
+    key({ key: 'ArrowDown' });
+    expect(d.getState().sqlPage.sql, '打ちかけの字まで壊した').toBe('打ちかけ');
+  });
+
+  /**
+   * ⚠ **手直しの控えは、走らせたら捨てる** ── 走った字は履歴に積まれるので、
+   *   持ち越すと**次に同じ所を呼び戻した人に、前の回の手直しが出る**。
+   */
+  it('⚠ 走らせたら、前の回の手直しは残らない', async () => {
+    const { d, type, key, runBtn, box } = setup();
+    for (const sql of ['select 1', 'select 2']) {
+      type(sql);
+      runBtn.click();
+      await settle();
+    }
+    caret(box, 0);
+    key({ key: 'ArrowUp' });
+    type('select 2 -- 手直し');
+    // 🔑 走らせる ── ここで控えは捨てられる
+    runBtn.click();
+    await settle();
+    expect(d.getState().sqlPage.historyEdits, '手直しの控えが残っている').toEqual([]);
+    caret(box, 0);
+    key({ key: 'ArrowUp' });
+    expect(d.getState().sqlPage.sql, '走った字が積まれていない').toBe('select 2 -- 手直し');
+    caret(box, 0);
+    key({ key: 'ArrowUp' });
+    expect(d.getState().sqlPage.sql, '前の回の手直しが混ざった').toBe('select 2');
+  });
+
+  /**
+   * ⚠ **上限(`SQL_HISTORY_MAX`)を、誰も測っていなかった**(2026-09-14、着地前レビュー)。
+   *
+   * 🔑 定数は `src` に 2 か所在るだけで、**test は 1 度も参照していなかった** ──
+   *   `.slice(0, SQL_HISTORY_MAX)` を丸ごと外しても全件緑だった
+   *   (CLAUDE.md §2「fixture のゼロ件の次元は測っていない次元」)。
+   * ⚠ 上限が外れても user には見えない(履歴が伸び続けるだけ)ので、
+   *   **誰も気づかないまま打つほど重くなる**。
+   * 🔑 観測点は 3 つ:①件数が頭打ち ②いちばん新しい字が頭 ③**いちばん古い字が落ちた**。
+   *   ⚠ ①だけだと、`slice` が違う向き(新しいほうを捨てる)でも通る。
+   */
+  it('⚠ 憶えるのは上限まで ── 溢れたら古いほうから落ちる', async () => {
+    const { d, type, runBtn } = setup();
+    const n = SQL_HISTORY_MAX + 1;
+    for (let i = 1; i <= n; i += 1) {
+      type(`select ${String(i)}`);
+      runBtn.click();
+      await settle();
+    }
+    const { history } = d.getState().sqlPage;
+    expect(history.length, '上限で頭打ちになっていない').toBe(SQL_HISTORY_MAX);
+    expect(history[0], 'いちばん新しい字が頭に無い').toBe(`select ${String(n)}`);
+    expect(history, 'いちばん古い字が落ちていない').not.toContain('select 1');
+    expect(history.at(-1), '落とす向きが逆(新しいほうを捨てている)').toBe('select 2');
+  });
+
+  /**
+   * 🔴 **押しても画面が 1 バイトも動かない、をやめる**(user 裁定 2026-09-14
+   *   「欄の下に 2/3 と出す」)。
+   *
+   * ⚠ 直す前は、いちばん古い所まで来ても**無言**だった ── user には
+   *   「これ以上前が無い」のか「鍵が効いていない」のか区別が付かない。
+   * 🔑 観測点は**画面の行**(`sql-history-note`)である ── state だけ見ると、
+   *   描画器が指紋の門で止めていても気づけない(`↑` は指紋を動かさない)。
+   */
+  it('🔴 いま何番目を見ているかが、欄の下に出る', async () => {
+    const { d, pane, type, key, runBtn, box } = setup();
+    const line = (): string =>
+      pane.querySelector('[data-pkc-field="sql-history-note"]')?.textContent ?? '';
+    const shown = (): boolean =>
+      pane.querySelector<HTMLElement>('[data-pkc-field="sql-history-note"]')?.hidden === false;
+    // ⚠ まだ 1 度も遡っていない ── 行は出さない(意味の無い行で場所を取らない)
+    expect(shown(), '押していないのに行が出ている').toBe(false);
+    for (const sql of ['select 1', 'select 2']) {
+      type(sql);
+      runBtn.click();
+      await settle();
+    }
+    type('打ちかけ');
+    expect(shown(), '走らせただけで行が出ている').toBe(false);
+
+    caret(box, 0);
+    key({ key: 'ArrowUp' });
+    expect(line(), '何番目かが出ていない').toBe('前に打った字(1 / 2)');
+    caret(box, 0);
+    key({ key: 'ArrowUp' });
+    // 🔴 **端に着いたことを字で言う**(これが無いと「鍵が効かない」と区別が付かない)
+    expect(line(), '端に着いたことを言っていない').toBe(
+      '前に打った字(2 / 2) ── これより前はありません',
+    );
+    // ⚠ もう一度押しても、字は変わらない(= 端で止まっていることが読める)
+    caret(box, 0);
+    key({ key: 'ArrowUp' });
+    expect(line()).toBe('前に打った字(2 / 2) ── これより前はありません');
+
+    key({ key: 'ArrowDown' });
+    key({ key: 'ArrowDown' });
+    expect(d.getState().sqlPage.sql, '打ちかけへ帰っていない').toBe('打ちかけ');
+    expect(line(), '打ちかけへ帰ったことを言っていない').toBe('打ちかけの字を見ています');
+    // ⚠ そこから打ち直したら合図は消える(戻る先はもう無いので、残すと嘘になる)
+    type('打ち直し');
+    expect(shown(), '打ち直しても合図が残っている').toBe(false);
+  });
+
+  /**
+   * 🔴 **指で触る端末にも道を作る**(user 裁定 2026-09-14「履歴ボタンを 1 つ足す」)。
+   *
+   * ⚠ スマホ / タブレットには `↑` `↓` が**無い** ── 押し所が無ければ、
+   *   前に打った SQL は**毎回打ち直し**になる。
+   * ⚠ **憶えている字が無いうちは押せない**(押せるのに何も起きない口を作らない)。
+   */
+  it('🔴 履歴ボタンから、前に打った字を選べる', async () => {
+    const { d, pane, root, type, runBtn } = setup();
+    const btn = pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-history"]')!;
+    expect(btn.disabled, '憶えている字が無いのに押せる').toBe(true);
+    for (const sql of ['select 1', 'select 2\n  from t']) {
+      type(sql);
+      runBtn.click();
+      await settle();
+    }
+    type('打ちかけ');
+    expect(btn.disabled, '憶えているのに押せない').toBe(false);
+
+    btn.click();
+    const items = [...root.querySelectorAll<HTMLElement>('[data-pkc-region="context-menu"] button')];
+    // 🔑 新しい順。⚠ 改行は行を伸ばすので 1 文字へ畳む
+    expect(items.map((b) => b.textContent)).toEqual(['select 2 ⏎ from t', 'select 1']);
+
+    items[1]!.click();
+    expect(d.getState().sqlPage.sql, '選んだ字が欄に入っていない').toBe('select 1');
+    // ⚠ 打ちかけの字は控えられている(↓ で帰れる)
+    expect(d.getState().sqlPage.historyDraft, '打ちかけを控えていない').toBe('打ちかけ');
+    expect(d.getState().sqlPage.historyAt, 'いま何番目かを持っていない').toBe(1);
+    // ⚠ 2 度目の押しは閉じる(片道の操作を作らない)
+    btn.click();
+    btn.click();
+    expect(
+      root.querySelector('[data-pkc-region="context-menu"]'),
+      '2 度目の押しで閉じない',
+    ).toBeNull();
+  });
+
+  it('⚠ 履歴が空なら、↑ を押しても何も起きない', () => {
+    const { d, type, key, box } = setup();
+    type('打ちかけ');
+    caret(box, 0);
+    key({ key: 'ArrowUp' });
+    expect(d.getState().sqlPage.sql, '空の履歴で字が消えた').toBe('打ちかけ');
+  });
+
+  /**
+   * 🔴 **逃げ道を潰さない** ── `Tab` を握る欄は、鍵盤だけで使う人を
+   *   閉じ込めうる。⚠ だから `Shift`+`Tab` は**握らない**(既定のまま焦点が動く)。
+   */
+  it('🔴 Tab は字下げ / Shift+Tab と Esc は逃げ道として残す', () => {
+    const { d, box } = setup();
+    box.value = 'select';
+    caret(box, 6);
+    const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+    box.dispatchEvent(tab);
+    expect(tab.defaultPrevented, 'Tab を握っていない(字下げが入らない)').toBe(true);
+    /**
+     * 🔴 **握ったことと、字が入ったことは別の主張である**(2026-09-14、smoke が教えた)。
+     *
+     * ⚠ 初稿はここで `defaultPrevented` しか見ておらず、**`insertText(ta, '  ')` を
+     *   丸ごと消しても緑だった**(変異試験 SURVIVED)── つまり守っていたのは
+     *   「`Tab` で焦点が飛ばないこと」だけで、**字下げは誰も見ていなかった**。
+     * 🔑 観測点は**下流まで**通す(CLAUDE.md「『動く』の観測点は下流まで」)──
+     *   欄の字 / caret / **state に届いたか**の 3 つ。⚠ 3 つ目が肝で、
+     *   `insertText` の控えが `input` を撃たなければ**画面には見えて保存されない**。
+     */
+    expect(box.value, '字下げが入っていない').toBe('select  ');
+    expect(box.selectionStart, 'caret が進んでいない(2 度目が前に入る)').toBe(8);
+    expect(d.getState().sqlPage.sql, '字下げが state に届いていない(走らせる字に入らない)').toBe(
+      'select  ',
+    );
+    const back = new KeyboardEvent('keydown', {
+      key: 'Tab',
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    box.dispatchEvent(back);
+    expect(back.defaultPrevented, 'Shift+Tab を握った(この欄から出られなくなる)').toBe(false);
+    const esc = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    box.dispatchEvent(esc);
+    expect(esc.defaultPrevented, 'Esc で外れない(逃げ道が 1 つしか無い)').toBe(true);
+  });
+
+  /**
+   * 🔴 **`Esc` は取り合いになる** ── メニューが出ている間、user が押す `Esc` は
+   *   「**いま出した右クリックを取り消す**」の意味である。⚠ そこで焦点まで外すと、
+   *   **打っていた所を失う**(「さっきまでやっていたことが消える」型)。
+   *
+   * 🔑 観測点は 2 つ:①**握っていない**(= メニューを閉じる聞き手へ届く)
+   *   ②**焦点が欄に残っている**。⚠ ①だけだと、握らずに `blur()` していても通る。
+   */
+  it('🔴 メニューが出ている間の Esc は握らない(焦点も外さない)', () => {
+    const { root, box } = setup();
+    box.value = 'select';
+    caret(box, 6);
+    box.focus();
+    // ⚠ 実物の `openContextMenu` と**同じ目印**で出す(判定は `contextMenuOpen` 1 か所)
+    const menu = document.createElement('div');
+    menu.setAttribute('data-pkc-region', 'context-menu');
+    root.append(menu);
+
+    const esc = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    box.dispatchEvent(esc);
+    expect(esc.defaultPrevented, 'メニューが出ているのに Esc を握った').toBe(false);
+    expect(document.activeElement, 'メニューを閉じるだけのつもりが焦点まで外れた').toBe(box);
+
+    // 🔑 対照群 ── メニューを畳めば、同じ `Esc` が今度は欄から出す
+    menu.remove();
+    const esc2 = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    box.dispatchEvent(esc2);
+    expect(esc2.defaultPrevented, 'メニューが無いのに Esc が効かない').toBe(true);
+    expect(document.activeElement, 'Esc を押しても欄から出ていない').not.toBe(box);
   });
 });

@@ -79,6 +79,13 @@ const UNRESOLVED: readonly string[] = [
   'reset-office-profile',
   'set-app-group',
   'set-app-icon',
+  /**
+   * ⚠ **2026-09-14(#918 段②a)で 1 件増えた** ── 履歴の一覧から 1 件選ぶ。
+   * 🔑 押し所は `openContextMenu` が**その場で組む**ので、静的な
+   *   `data-pkc-action="sql-history-pick"` が source のどこにも無い
+   *   (`set-app-icon` / `move-order-up` と同じ ── 出口は在るが、字では追えない)。
+   */
+  'sql-history-pick',
   'toggle-todo',
   'view-big',
 ];
