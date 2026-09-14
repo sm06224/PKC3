@@ -764,7 +764,28 @@ export function fitSqlInput(ta: HTMLTextAreaElement): number {
     ta.style.height = '';
     return 0;
   }
-  ta.style.height = `${String(want)}px`;
+  /**
+   * 🔴 **枠のぶんを足す**(2026-09-14 に実ブラウザの実測で判明)。
+   *
+   * ⚠ `scrollHeight` は**中身 + 内側の余白**で、**枠を含まない**。ところが欄は
+   *   `box-sizing: border-box` なので、その値をそのまま `height` に当てると
+   *   **枠のぶん(上下 1px ずつ)が中に食い込み、常に 2px 足りない**。
+   * 🔑 実測:`scrollHeight 141` に対し `clientHeight 139` ── **欄が 2px 転がる**
+   *   状態になっていた(段②b `7a92990` から在った。当時は気づけなかった)。
+   *
+   * ⚠ **枠の太さを直に読む** ── 数を書くと、枠を変えた日に片方だけ古くなる(§7)。
+   * ⚠ **`offsetHeight - clientHeight` では採らない** ── あれは**横の転がし棒**も
+   *   含むので、出た日に高さが増え、次の回でまた増える**伸びる一方の輪**になる。
+   *   ⚠ しかも happy-dom は `clientHeight` に 0 を返すので、差が**高さ全部**になる
+   *   (1 稿目はそれで unit が 3 件落ちた)。
+   * ⚠ **`content-box` のときは足さない** ── そこでは枠は中に食い込まない。
+   */
+  const cs = ta.ownerDocument.defaultView?.getComputedStyle(ta);
+  const frame =
+    cs !== undefined && cs.boxSizing === 'border-box'
+      ? (Number.parseFloat(cs.borderTopWidth) || 0) + (Number.parseFloat(cs.borderBottomWidth) || 0)
+      : 0;
+  ta.style.height = `${String(want + frame)}px`;
   return ta.offsetHeight;
 }
 

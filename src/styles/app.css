@@ -4071,6 +4071,19 @@ li[data-pkc-row-slot] {
 [data-pkc-field='sql-line-code'] {
   white-space: pre-wrap;
   overflow-wrap: break-word;
+  /**
+   * 🔴 **`min-width: 0` が無いと、折り返しが欄と食い違う**(実ブラウザで実測)。
+   *
+   * ⚠ 格子の升は既定で **`min-width: auto`**(= 中身の最小幅)を持つ。
+   *   `overflow-wrap: break-word` は**あふれたときの最終手段**であって
+   *   **最小幅の計算には効かない**ので、空白の無い長い塊(`xxxx…`)があると
+   *   **升の列が器の外まで育ち**、`overflow: hidden` で黙って切れる。
+   * 🔑 実測(headless_shell):器 800px に対し**升の列が 3130px** まで育ち、
+   *   欄は約 **5.9 行**に折り返っているのに層は **3 行**しか折り返っていなかった
+   *   ── つまり**色が字とずれる**。`min-width: 0` で列が `1fr` に従い、一致する。
+   * ⚠ この壊れ方は**1 行目だけは上端が揃う**ので、短い行では気づけない。
+   */
+  min-width: 0;
 }
 [data-pkc-field='sql-input-wrap'] [data-pkc-field='sql-input'] {
   position: relative;
