@@ -31,6 +31,7 @@ import { CenterRouter } from '../../src/adapter/ui/render/center';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { isAsidePane, SQL_HISTORY_MAX, viewModeLabel } from '../../src/adapter/state/app-state';
 import { fitSqlInput } from '../../src/adapter/ui/render/sql';
+import { SQL_WINDOW_MIN } from '../../src/features/query/sql-window';
 import { homeTabOf } from '../../src/adapter/ui/render/browse-mode';
 import { readFileSync } from 'node:fs';
 import { stubStamps } from '../helpers/store-stamps';
@@ -1717,6 +1718,169 @@ describe('打つ所(#918 段②a)', () => {
       root.querySelector('[data-pkc-region="context-menu"]'),
       '2 度目の押しで閉じない',
     ).toBeNull();
+  });
+
+  /**
+   * 🔴 **答えが多いときは、見えている分だけ描く**(#918 段③)。
+   *
+   * ⚠ **この枝は、素の happy-dom では 1 度も通らない** ── 高さが全部 0 なので
+   *   `sqlWindowOf` が「測れない = 全部描く」へ倒れる(CLAUDE.md §2)。
+   *   🔑 だから**高さを持たせてから**通す。持たせずに書いた test は、
+   *   窓の機構を丸ごと消しても緑のままである。
+   * ⚠ 実際の転がり(GPU・慣性・列幅の見え方)は実ブラウザにしか無い ──
+   *   ここで見るのは「**どの行を作ったか**」だけである。
+   */
+  it('🔴 行が多いと、窓のぶんだけ描く / 転がすと中身が入れ替わる', async () => {
+    const N = SQL_WINDOW_MIN + 3000;
+    const big = answer(
+      ['i'],
+      Array.from({ length: N }, (_, i) => [i]),
+    );
+    const { pane, type, runBtn } = setup(async () => big);
+    const rowH = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight');
+    const rowW = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth');
+    try {
+      // 🔑 測れる所を作る(行 20px / 列 50px)
+      Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+        configurable: true,
+        get: () => 20,
+      });
+      Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {
+        configurable: true,
+        get: () => 50,
+      });
+      const body = pane.querySelector<HTMLElement>('[data-pkc-field="sql-body"]')!;
+      let top = 0;
+      Object.defineProperty(body, 'clientHeight', { configurable: true, get: () => 400 });
+      Object.defineProperty(body, 'scrollTop', { configurable: true, get: () => top });
+
+      type('select i from s');
+      runBtn.click();
+      await settle();
+
+      const drawn = (): string[] =>
+        [...pane.querySelectorAll('[data-pkc-field="sql-table"] tbody tr')]
+          .filter((tr) => tr.getAttribute('data-pkc-field') !== 'sql-row-spacer')
+          .map((tr) => tr.querySelector('td')?.textContent ?? '');
+      const spacers = (): number =>
+        pane.querySelectorAll('[data-pkc-field="sql-row-spacer"]').length;
+
+      const first = drawn();
+      expect(first.length, '窓に入っていない(全部描いている)').toBeLessThan(200);
+      expect(first[0], '上端なのに先頭から描いていない').toBe('0');
+      // 🔑 上端では上に空ける物が無い(下だけ 1 本)
+      expect(spacers(), '下に空けていない').toBe(1);
+
+      const table = pane.querySelector<HTMLElement>('[data-pkc-field="sql-table"]')!;
+      expect(table.style.tableLayout, '列幅を固定していない(転がすたびに列が動く)').toBe('fixed');
+      const th = pane.querySelector<HTMLElement>('[data-pkc-field="sql-table"] th')!;
+      expect(th.style.width, '列の幅を当てていない').toBe('50px');
+
+      // 🔴 転がすと中身が入れ替わる(上下 2 本とも空く)
+      top = 20_000;
+      body.dispatchEvent(new Event('scroll'));
+      const mid = drawn();
+      expect(mid[0], '転がしたのに先頭の行が変わっていない').not.toBe('0');
+      expect(Number(mid[0]), '描き始めが転がり位置と合っていない').toBeGreaterThan(900);
+      expect(spacers(), '上下の両方に空けていない').toBe(2);
+
+      // 🔑 下端まで送ると最後の行が出る(高さの計算がずれていれば足りない)
+      top = N * 20;
+      body.dispatchEvent(new Event('scroll'));
+      expect(drawn().at(-1), '下端なのに最後の行が出ていない').toBe(String(N - 1));
+    } finally {
+      if (rowH) Object.defineProperty(HTMLElement.prototype, 'offsetHeight', rowH);
+      if (rowW) Object.defineProperty(HTMLElement.prototype, 'offsetWidth', rowW);
+    }
+  });
+
+  /**
+   * 🔴 **測れないときに、全部描いてしまわない**(#918 段③。自分の差分を読み直して見つけた)。
+   *
+   * ⚠ この面は `hidden` で常駐するので、**答えが届いた瞬間に画面へ出ているとは限らない**
+   *   ── そのとき `offsetHeight` は **0** を返す。
+   * 🔴 直す前は「まず全部描いてから測る」形だったので、**測れなかった回だけ
+   *   10 万行が DOM に残った**(いちばん重い場面で、いちばん効かない)。
+   * 🔑 いまは**先に上限を掛けてから**描く ── 測れなくても、残るのは
+   *   「引っかかり 0 本」と実測した行数までである。
+   * 🔑 そして**見えるようになった最初の転がりで測り直す** ── 指紋の門があるので
+   *   `render()` はもう来ない(そこで測らないと、その答えは最後まで窓に入らない)。
+   */
+  it('🔴 高さが測れない回でも、境目より多くは描かない / 見えたら窓に入る', async () => {
+    const N = SQL_WINDOW_MIN + 3000;
+    const big = answer(
+      ['i'],
+      Array.from({ length: N }, (_, i) => [i]),
+    );
+    const { pane, type, runBtn } = setup(async () => big);
+    const body = pane.querySelector<HTMLElement>('[data-pkc-field="sql-body"]')!;
+    const drawn = (): number =>
+      [...pane.querySelectorAll('[data-pkc-field="sql-table"] tbody tr')].filter(
+        (tr) => tr.getAttribute('data-pkc-field') !== 'sql-row-spacer',
+      ).length;
+
+    // ⚠ 測れない(happy-dom の既定 = 0)ままで答えを受ける
+    type('select i from s');
+    runBtn.click();
+    await settle();
+    expect(drawn(), '測れないのに境目より多く描いた').toBe(SQL_WINDOW_MIN);
+
+    // 🔑 見えるようになった(測れる)あと、最初の転がりで窓に入る
+    const rowH = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight');
+    const rowW = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth');
+    try {
+      Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+        configurable: true,
+        get: () => 20,
+      });
+      Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {
+        configurable: true,
+        get: () => 50,
+      });
+      Object.defineProperty(body, 'clientHeight', { configurable: true, get: () => 400 });
+      Object.defineProperty(body, 'scrollTop', { configurable: true, get: () => 0 });
+      body.dispatchEvent(new Event('scroll'));
+      expect(drawn(), '見えるようになっても窓に入らない').toBeLessThan(200);
+    } finally {
+      if (rowH) Object.defineProperty(HTMLElement.prototype, 'offsetHeight', rowH);
+      if (rowW) Object.defineProperty(HTMLElement.prototype, 'offsetWidth', rowW);
+    }
+  });
+
+  /**
+   * 🔴 **境目までは、いまと 1 ドットも同じ**(#918 段③)。
+   * ⚠ ここが窓に入ると、`Ctrl+F` と「全部を選んでコピー」と列幅の代償を
+   *   **払う理由が無いのに払う**(CLAUDE.md §10)。
+   * 🔑 上の test と**同じ高さを持たせて**回す ── 持たせないと
+   *   「測れないから全部描いた」のか「境目が効いた」のか**見分けられない**。
+   */
+  it('🔴 境目までは窓に入らない(空け行も列幅の固定も無い)', async () => {
+    const big = answer(
+      ['i'],
+      Array.from({ length: SQL_WINDOW_MIN }, (_, i) => [i]),
+    );
+    const { pane, type, runBtn } = setup(async () => big);
+    const rowH = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight');
+    try {
+      Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+        configurable: true,
+        get: () => 20,
+      });
+      const body = pane.querySelector<HTMLElement>('[data-pkc-field="sql-body"]')!;
+      Object.defineProperty(body, 'clientHeight', { configurable: true, get: () => 400 });
+      type('select i from s');
+      runBtn.click();
+      await settle();
+      expect(
+        pane.querySelectorAll('[data-pkc-field="sql-table"] tbody tr').length,
+        '境目ちょうどで窓に入れている',
+      ).toBe(SQL_WINDOW_MIN);
+      expect(pane.querySelectorAll('[data-pkc-field="sql-row-spacer"]').length).toBe(0);
+      const table = pane.querySelector<HTMLElement>('[data-pkc-field="sql-table"]')!;
+      expect(table.style.tableLayout, '境目以下なのに列幅を固定している').toBe('');
+    } finally {
+      if (rowH) Object.defineProperty(HTMLElement.prototype, 'offsetHeight', rowH);
+    }
   });
 
   /**

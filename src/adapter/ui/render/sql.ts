@@ -32,6 +32,11 @@ import { xlsxAttachmentSourcesOf } from '@features/query/xlsx-attachment';
 import { isSqlLocalFileLid, SQL_PICK_LOCAL_FILE_VALUE } from '@features/query/sql-local-file';
 import { humanBytes } from '@features/human-bytes';
 import { SQL_RULES, sqlExampleText, sqlPlaceholder, sqlTipText } from '@features/query/sql-tip';
+import {
+  SQL_WINDOW_MIN,
+  sqlWindowOf,
+  type SqlWindow,
+} from '@features/query/sql-window';
 
 /** 表の値を字にする。⚠ `null` と空文字を**見分けられる**ようにする。 */
 const cellText = (v: string | number | null): string => (v === null ? '(なし)' : String(v));
@@ -79,6 +84,20 @@ export class SqlRenderer {
    * 打つたびに引き戻すと、掴んで広げた操作が**毎回取り消される**
    * (片道の操作を作らない ── user 指示 2026-08-23)。
    */
+  /**
+   * 🔴 **窓で描くための持ち物**(#918 段③)。
+   * ⚠ `rows` は `AppState` の配列を**そのまま指す**(写さない)── 数万行を
+   *   もう 1 本持つと、それだけで常駐が倍になる(2026-07-27 の不可侵指示)。
+   */
+  private rows: readonly (readonly (string | number | null)[])[] = [];
+  private table: HTMLTableElement | null = null;
+  private head: HTMLTableRowElement | null = null;
+  private tbody: HTMLTableSectionElement | null = null;
+  /** 実測した 1 行の高さ。⚠ **0 は「測れていない」** = 窓に入らない印である。 */
+  private rowH = 0;
+  /** いま描いてある窓。⚠ 同じ窓なら描き直さない(転がすたびの作り直しを避ける)。 */
+  private drawn: SqlWindow | null = null;
+
   private handSized = false;
   /** 最後に高さを合わせたときの字。⚠ 同じ字で測り直さない(打鍵ごとの再計測を避ける)。 */
   private fitted: string | null = null;
@@ -276,6 +295,17 @@ export class SqlRenderer {
     this.toFile = toFile;
     this.note = note;
     this.body = body;
+    /**
+     * 🔴 **転がったら窓を描き直す**(#918 段③)。
+     * ⚠ 張るのは**器を作るときの 1 度だけ** ── 答えごとに張り替えると、
+     *   外し忘れた 1 本が古い表を掴んだまま残る(#195 と同じ形)。
+     * 🔑 `repaint()` は**窓が変わっていなければ何もしない**ので、
+     *   転がすたびに表を作り直すことにはならない。
+     * ⚠ `passive` にする ── ここで転がりを止めることは無い。
+     */
+    body.addEventListener('scroll', () => {
+      this.repaint();
+    }, { passive: true });
     return body;
   }
 
@@ -441,6 +471,10 @@ export class SqlRenderer {
     }
 
     body.textContent = '';
+    this.rows = p.rows;
+    this.tbody = null;
+    this.rowH = 0;
+    this.drawn = null;
     if (p.columns.length === 0) return;
     const table = document.createElement('table');
     table.setAttribute('data-pkc-field', 'sql-table');
@@ -453,7 +487,47 @@ export class SqlRenderer {
     }
     thead.append(hr);
     const tbody = document.createElement('tbody');
-    for (const row of p.rows) {
+    table.append(thead, tbody);
+    body.append(table);
+    this.table = table;
+    this.head = hr;
+    this.tbody = tbody;
+    /**
+     * 🔴 **まず 1 度描く ── ただし `SQL_WINDOW_MIN` 行までに留める**(#918 段③)。
+     * 🔑 描かないと **1 行の高さ**も**列の幅**も測れない(CSS からは読めない)。
+     *
+     * 🔴 **ここで全部描いてはいけない**(自分の差分を読み直して見つけた)──
+     *   測れるのは**画面に出ているときだけ**で、この面が `hidden` で常駐している
+     *   間は `offsetHeight` が **0** を返す。全部描いてから測りに行く形にすると、
+     *   **測れなかった回だけ 10 万行が DOM に残る**(いちばん重い場面で、
+     *   いちばん効かない)。
+     * 🔑 だから**先に上限を掛けてから**描く ── 測れなくても、残るのは
+     *   「引っかかり 0 本」と実測した行数までである。
+     */
+    const total = p.rows.length;
+    const seed = Math.min(total, SQL_WINDOW_MIN);
+    this.paintRows({ from: 0, to: seed, above: 0, below: 0 });
+    if (total <= SQL_WINDOW_MIN) return;
+    this.measureAndPin();
+    this.repaint();
+  }
+
+  /**
+   * 🔴 **窓のぶんだけ `<tbody>` を描き直す**(#918 段③)。
+   *
+   * ⚠ 上下に空ける高さは **`<tr>` 1 本 + `<td colspan>`** で持つ ──
+   *   `<tr>` に直接 `height` を当てても、升が 1 つも無い行は**潰れる**。
+   * ⚠ 空け行には `aria-hidden` を付ける ── 読み上げに「空の行」を読ませない。
+   */
+  private paintRows(w: SqlWindow): void {
+    const tbody = this.tbody;
+    if (tbody === null) return;
+    const cols = this.head?.childElementCount ?? 1;
+    tbody.textContent = '';
+    if (w.above > 0) tbody.append(spacerRow(cols, w.above));
+    for (let i = w.from; i < w.to; i += 1) {
+      const row = this.rows[i];
+      if (row === undefined) continue;
       const tr = document.createElement('tr');
       for (const v of row) {
         const td = document.createElement('td');
@@ -464,9 +538,74 @@ export class SqlRenderer {
       }
       tbody.append(tr);
     }
-    table.append(thead, tbody);
-    body.append(table);
+    if (w.below > 0) tbody.append(spacerRow(cols, w.below));
+    this.drawn = w;
   }
+
+  /**
+   * 🔴 **1 行の高さと列の幅を実測して、幅のほうは固定する**(#918 段③)。
+   *
+   * ⚠ **幅を固定しないと、転がすたびに列が動く** ── 表の幅は
+   *   「いま描いてある行の中身」から決まるので、窓が入れ替わると幅も変わる。
+   *   🔑 `CLAUDE.md §10`「置き換えられる側がついでに提供していた性質」の 1 つで、
+   *   これは**こちらで置き直せる**(だから置き直す)。
+   * ⚠ 測れない所(happy-dom は 0 を返す)では**何もしない** ── 当てると
+   *   幅 0 の表になる(段②b の `fitSqlInput` と同じ作法)。
+   */
+  private measureAndPin(): void {
+    const tbody = this.tbody;
+    const table = this.table;
+    const head = this.head;
+    if (tbody === null || table === null || head === null) return;
+    /**
+     * ⚠ `tbody.rows` は**使わない** ── happy-dom が持っていないので、
+     *   そこへ書くと **unit からこの段が 1 度も通れない**(実際に踏んだ)。
+     * 🔑 ここは**空け行を作る前**に呼ばれるので、先頭の要素が必ず実データの行である。
+     */
+    const first = tbody.firstElementChild;
+    this.rowH = first instanceof HTMLElement ? first.offsetHeight : 0;
+    if (this.rowH <= 0) return;
+    const widths = [...head.children].map((th) => (th as HTMLElement).offsetWidth);
+    if (widths.some((n) => n <= 0)) return;
+    for (const [i, th] of [...head.children].entries()) {
+      (th as HTMLElement).style.width = `${String(widths[i] ?? 0)}px`;
+    }
+    table.style.tableLayout = 'fixed';
+  }
+
+  /**
+   * いまの転がり位置から窓を出し直す。⚠ **変わっていなければ描かない**。
+   *
+   * 🔴 **測れていなければ、ここで測り直す** ── 面が `hidden` のうちに答えが
+   *   届いた回は高さが 0 なので、**見えるようになった最初の転がり**で測る。
+   *   ⚠ そこで測り直さないと、その答えは**最後まで窓に入らない**
+   *   (指紋の門があるので `render()` はもう来ない)。
+   */
+  private repaint(): void {
+    const body = this.body;
+    if (body === null || this.tbody === null) return;
+    if (this.rows.length <= SQL_WINDOW_MIN) return;
+    if (this.rowH <= 0) this.measureAndPin();
+    if (this.rowH <= 0) return;
+    const w = sqlWindowOf(this.rows.length, this.rowH, body.scrollTop, body.clientHeight);
+    const had = this.drawn;
+    if (had !== null && had.from === w.from && had.to === w.to) return;
+    this.paintRows(w);
+  }
+}
+
+/** 上下に空ける 1 本。⚠ 升を 1 つ入れないと `<tr>` の高さは効かない。 */
+function spacerRow(cols: number, px: number): HTMLTableRowElement {
+  const tr = document.createElement('tr');
+  tr.setAttribute('aria-hidden', 'true');
+  tr.setAttribute('data-pkc-field', 'sql-row-spacer');
+  const td = document.createElement('td');
+  td.colSpan = Math.max(1, cols);
+  td.style.height = `${String(px)}px`;
+  td.style.padding = '0';
+  td.style.border = 'none';
+  tr.append(td);
+  return tr;
 }
 
 /**
