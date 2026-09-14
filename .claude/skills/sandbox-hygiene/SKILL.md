@@ -135,3 +135,59 @@ until grep -qE "Tests  " .../scratchpad/full3.log; do sleep 5; done
 
 🔑 一般形:**file 名は「いつの走りか」を持たない** ── 中身が本物に見える計器ほど、
 **どの走りの物か**を先に確かめる(`stat -c %y`)。
+
+## 🔴 サブエージェントの worktree は**積み上がる** ── 減らすのは `node_modules` だけでよい
+
+⚠ `isolation: "worktree"` で投げたエージェントの作業ツリーは `.claude/worktrees/` に残る。
+**自動で消えるのは「1 バイトも変えなかった」物だけ**なので、実際にはほぼ全部残る。
+
+実測(2026-09-14、1 セッションの終盤):
+
+| | |
+|---|---|
+| worktree の数 | **82** |
+| `.claude/worktrees` 全体 | **14G** |
+| うち `node_modules` | **9.9G**(59 個) |
+| うち `dist` | **2.1G** |
+| **残り(= 実体の checkout)** | **約 2G** |
+| そのときの空き | **15G** ── ⚠ 箱が作り直される引き金はディスクである(上の節) |
+
+🔑 **消してよいのは `node_modules` と `dist` だけ**(`npm ci` / `npm run build` で戻る):
+
+```bash
+cd /home/user/PKC3
+rm -rf .claude/worktrees/*/node_modules .claude/worktrees/*/dist
+# 実測: 空き 15G → 27G(12G 解放)。checkout 本体は 2.1G 残る
+```
+
+🔴 **worktree ごと消さない。** ⚠ 「未回収の仕事が無いこと」は**安く判定できない**:
+
+- `git rev-list --count <head> ^origin/main` は**役に立たない** ── squash merge だと
+  元の commit は**永久に main の祖先にならない**ので、着地済みでも「N commit 先行」と出る
+- `git diff origin/main <head>` も**役に立たない** ── 古い commit に居るだけで
+  巨大な差が出る(実測: 82 個すべてが「差が在る」と判定された)
+
+🔑 判定できないものを消さない。**中身(2G)は残しても箱は保つ**ので、
+**作り直せる物だけ落とす**のが釣り合っている。
+
+### ⚠ 「走っているエージェントが居ない」は `pgrep` では確かめられない
+
+`pgrep -af "vite[s]t|playwright"` は**自分の命令行に当たる**(CLAUDE.md §6 ──
+ブラケットを入れても、`|` で並べた**別の語**が素通りする)。
+🔑 **cwd で引く**:
+
+```bash
+for p in /proc/[0-9]*; do
+  cw=$(readlink "$p/cwd" 2>/dev/null) || continue
+  case "$cw" in */\.claude/worktrees/*) echo "$p $cw";; esac
+done
+```
+
+⚠ 0 件を確かめてから消す ── 走っている最中の `node_modules` を抜くと、
+そのエージェントは**原因の分からない失敗**を返す。
+
+### ⚠ worktree が指定 branch を掴んでいて checkout できないことがある
+
+終わったエージェントの worktree が `claude/<branch>` を持ったままだと、
+`git checkout <branch>` が **`is already used by worktree at …`** で断られる。
+🔑 **`git switch --ignore-other-worktrees <branch>`** で通る(worktree を消さなくてよい)。
