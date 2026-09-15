@@ -84,6 +84,11 @@ function setup(
      *   (添付の `.sqlite` / `.csv` は今までどおり開ける)。
      */
     withLocal?: boolean;
+    /**
+     * 🔴 **DuckDB の口だけを外す**(#682 段②)。⚠ 上の 2 つと別 ──
+     *   選び所には DuckDB が出るのに、押すと断る版を作るため。
+     */
+    withDuck?: boolean;
   } = {},
 ) {
   const root = document.createElement('div');
@@ -97,6 +102,22 @@ function setup(
     async (sql: string, limits: { maxRows: number; maxSteps: number; guest?: boolean }) => {
       void limits;
       return reply(sql);
+    },
+  );
+  /**
+   * 🔴 **DuckDB で引く口**(#682 段②)。⚠ 実物は別ワーカーで走る ── ここは
+   *   「**どんな相手で、どんな字で呼ばれたか**」と「**中身を読みに来たか**」を見る fake。
+   */
+  const duckSeen: Array<{ sql: string; source: { lid: string; name: string }; bytes: number | null }> = [];
+  const runDuckDbSql = vi.fn(
+    async (input: {
+      sql: string;
+      source: { lid: string; name: string };
+      readBytes: () => Promise<Uint8Array | null>;
+    }) => {
+      const bytes = await input.readBytes();
+      duckSeen.push({ sql: input.sql, source: input.source, bytes: bytes?.byteLength ?? null });
+      return { columns: ['g'], rows: [['duck']] as Array<Array<string | number | null>>, truncated: false, ms: 2 };
     },
   );
   /** 取り込んだ `.sqlite` / `.csv` / `.tsv` の口(#681 段③ の 2 つ目、#854 段①)。
@@ -163,6 +184,8 @@ function setup(
         // 🔴 手持ちのファイル(#854 段②)── 実物の控えをそのまま繋ぐ
         //    (⚠ `withLocal: false` のときは**この口だけ**外す)
         ...(opts.withLocal === false ? {} : { readLocalSqlFile: (lid: string) => takeSqlLocalFileBytes(lid) }),
+        // 🔴 DuckDB の口(#682 段②)── 実物は別ワーカー。ここは**渡された引数**だけを見る
+        ...(opts.withDuck === false ? {} : { runDuckDbSql }),
       });
   bindActions(root, d, {
     // 🔴 main.ts と**同じ実物の配線**(#854 段②)── ここだけ fake にしない
@@ -213,8 +236,24 @@ function setup(
   // 🔑 **構造をノートへ**(#918 段①)── 答えが無くても押せる側
   const schemaBtn = pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-schema-to-note"]')!;
   const sourceSel = pane.querySelector<HTMLSelectElement>('[data-pkc-field="sql-source"]')!;
+  /**
+   * 相手を選ぶ。
+   * 🔴 **`value` に代入するのではなく、`selected` を立てる**(2026-09-15、#682 段②)。
+   * ⚠ happy-dom は `select.value = x` で `selectedOptions` を**更新しない**(実測:
+   *   代入直後に読むと**前に選ばれていた項目**が返る)── `binder.ts` は
+   *   そこから file の名前を採るので、**2 回目の選び直しだけが前の名前で飛ぶ**。
+   * 🔑 実機の user は項目を押す = `selected` が立つ ── 台をその形へ揃える。
+   */
+  /**
+   * 相手を選ぶ。
+   * ⚠ **happy-dom の `selectedOptions` は、2 回目以降の選択に追随しない**(実測
+   *   2026-09-15:`value` も `selectedIndex` も `selected` も効かず、**最初に選んだ
+   *   項目を返し続ける**)。🔑 だから `binder.ts` は名前を**state から**引くようにした
+   *   ── 画面の字に頼っていた頃は、**相手を選び直した回だけ前の名前が飛んでいた**
+   *   (lid は正しいので、どの test も落ちない形だった)。
+   */
   const pick = (lid: string): void => {
-    sourceSel.value = lid;
+    sourceSel.selectedIndex = [...sourceSel.options].findIndex((o) => o.value === lid);
     sourceSel.dispatchEvent(new Event('change', { bubbles: true }));
   };
   const fileInput = pane.querySelector<HTMLInputElement>('[data-pkc-field="sql-file-input"]')!;
@@ -225,17 +264,32 @@ function setup(
    *   `binder.ts` の `set-sql-source` を実際に通るかを見落とす)。
    */
   const pickLocalFile = (file: File): void => {
-    sourceSel.value = SQL_PICK_LOCAL_FILE_VALUE;
+    sourceSel.selectedIndex = [...sourceSel.options].findIndex((o) => o.value === SQL_PICK_LOCAL_FILE_VALUE);
     sourceSel.dispatchEvent(new Event('change', { bubbles: true }));
     Object.defineProperty(fileInput, 'files', { value: [file], configurable: true });
     fileInput.dispatchEvent(new Event('change', { bubbles: true }));
   };
+  const engineSel = pane.querySelector<HTMLSelectElement>('[data-pkc-field="sql-engine"]')!;
+  /** どのエンジンで引くかを選ぶ(実機と同じく `change` を通す)。 */
+  const pickEngine = (engine: string): void => {
+    // ⚠ 上の `pick` と同じ理由(happy-dom は `value` の代入で選択を更新しない)
+    engineSel.selectedIndex = [...engineSel.options].findIndex((o) => o.value === engine);
+    engineSel.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  const rules = (): string => pane.querySelector('[data-pkc-field="sql-rules"]')?.textContent ?? '';
+  const tipText = (): string => pane.querySelector('[data-pkc-field="sql-tip"]')?.textContent ?? '';
   return {
     root,
     d,
     pane,
     box,
     runBtn,
+    engineSel,
+    pickEngine,
+    rules,
+    tipText,
+    runDuckDbSql,
+    duckSeen,
     saveBtn,
     type,
     key,
@@ -273,10 +327,21 @@ afterEach(() => {
 });
 
 /** worker の答えが state を通って画面へ届くまで待つ。 */
+/**
+ * 飛んでいる非同期が落ち着くまで待つ。
+ *
+ * 🔴 **数を数えない**(2026-09-15、#682 段②)。⚠ 初稿は `await Promise.resolve()` を
+ *   **3 回**だった ── そのため `store-effects.ts` 側に
+ *   「`afterWrites` の中で余分な async 関数越しに読むな(1 層挟むと tick が 1 増える)」
+ *   という**製品コードの書き方の縛り**が生まれていた。
+ *   🔑 縛られていたのは**製品の側**で、直すべきはこの 1 行のほうである。
+ * 🔑 **macrotask を 1 つ挟めば、積まれている microtask は全部流れる** ──
+ *   何段の `await` を挟んでも数え直さなくてよい。
+ * ⚠ 本物の時計で待つ物(`REQUEST_SEARCH_DETAIL` の 300ms など)はここでは流れない ──
+ *   それを待つ test は、自分で時計を進める。
+ */
 const settle = async (): Promise<void> => {
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
 };
 
 describe('SQL を調べる面(#681 段②)', () => {
@@ -2490,5 +2555,165 @@ describe('表のつながり図(#918 段⑤)', () => {
     await settleEr();
     expect(region(pane).hidden, '採れなくても器は開いたまま').toBe(false);
     expect(erNote(pane), '採れなかった理由が出ていない').toContain('構造を採れませんでした');
+  });
+});
+
+describe('🔴 どのエンジンで引くか(#682 段②。user 裁定 2026-09-15 = §9 は A)', () => {
+  it('🔴 最初は出ていない ── そのかわり、在ることを案内が言う', () => {
+    const { engineSel, tipText } = setup();
+    // ⚠ この PKC のノートは sqlite だけ。1 つしか選べない口を画面に出さない
+    expect(engineSel.hidden, '選べるものが 1 つなのに選び所が出ている').toBe(true);
+    // 🔑 隠すなら、在ることはどこかで言う(user の動機は「DuckDB を分かち合いたい」)
+    expect(tipText(), 'DuckDB が在ることを、どこにも書いていない').toContain('DuckDB');
+  });
+
+  it('🔴 取り込んだ csv を選ぶと出てきて、既定は今までの sqlite のまま', async () => {
+    const { pick, engineSel, d } = setup();
+    pick('db4'); // 売上.csv
+    await settle();
+    expect(engineSel.hidden, 'csv を選んだのに選び所が出ない').toBe(false);
+    expect([...engineSel.options].map((o) => o.value)).toEqual(['sqlite', 'duckdb']);
+    expect(engineSel.value, '既定が sqlite でない(選ばなければ今までどおり、が崩れる)').toBe('sqlite');
+    expect(d.getState().sqlPage.engine).toBe('sqlite');
+  });
+
+  it('🔴 .sqlite や .xlsx では出ない(押せて効かない口を作らない)', async () => {
+    const { pick, engineSel } = setup();
+    pick('db1'); // 売上.sqlite
+    await settle();
+    expect(engineSel.hidden, '.sqlite で DuckDB を選ばせている').toBe(true);
+  });
+
+  it('🔴 DuckDB を選んで走らせると、DuckDB で引く ── sqlite は 1 度も叩かない', async () => {
+    const { pick, pickEngine, type, runBtn, runReadOnlySql, duckSeen, cells } = setup();
+    pick('db4');
+    await settle();
+    pickEngine('duckdb');
+    type('FROM csv SELECT *');
+    runBtn.click();
+    await settle();
+    expect(duckSeen, 'DuckDB を選んだのに引いていない').toHaveLength(1);
+    expect(duckSeen[0]?.sql).toBe('FROM csv SELECT *');
+    expect(duckSeen[0]?.source).toEqual({ lid: 'db4', name: '売上.csv' });
+    // 🔴 相手の中身を読みに来ている(読まなければ、表は空のままになる)
+    expect(duckSeen[0]?.bytes, '相手の中身を読みに来ていない').toBeGreaterThan(0);
+    // ⚠ 空振り防止 ── sqlite の口が 1 度でも叩かれていたら、engine を取り違えている
+    expect(runReadOnlySql, 'sqlite も叩いている(engine を分けていない)').toHaveBeenCalledTimes(0);
+    expect(cells()).toEqual([['duck']]);
+  });
+
+  it('🔴 sqlite に戻せば sqlite で引く(対照群)', async () => {
+    const { pick, pickEngine, type, runBtn, runReadOnlySql, duckSeen } = setup();
+    pick('db4');
+    await settle();
+    pickEngine('duckdb');
+    pickEngine('sqlite');
+    type('SELECT * FROM csv');
+    runBtn.click();
+    await settle();
+    expect(duckSeen).toHaveLength(0);
+    expect(runReadOnlySql).toHaveBeenCalledTimes(1);
+  });
+
+  it('🔴 DuckDB でだけ打てる字が、DuckDB のときだけ通る', async () => {
+    const { pick, pickEngine, type, runBtn, note, duckSeen } = setup();
+    pick('db4');
+    await settle();
+    // ⚠ まず sqlite のまま打つ ── FROM 先行は sqlite では打てないので断られる
+    type('FROM csv SELECT *');
+    runBtn.click();
+    await settle();
+    expect(note(), 'sqlite なのに FROM 先行が通っている').toContain('FROM');
+    expect(duckSeen, '断ったのに引きに行った').toHaveLength(0);
+    // 🔑 engine を替えると、同じ字が通る
+    pickEngine('duckdb');
+    runBtn.click();
+    await settle();
+    expect(duckSeen, 'DuckDB でも FROM 先行が通らない').toHaveLength(1);
+  });
+
+  it('🔴 外へ取りに行く字は、DuckDB でも断る(引きに行かない)', async () => {
+    const { pick, pickEngine, type, runBtn, note, duckSeen } = setup();
+    pick('db4');
+    await settle();
+    pickEngine('duckdb');
+    type('INSTALL parquet');
+    runBtn.click();
+    await settle();
+    expect(note()).toContain('外から');
+    expect(duckSeen, '断ったのに引きに行った').toHaveLength(0);
+  });
+
+  it('🔴 相手を .sqlite へ替えると、選んだ DuckDB は画面から消えて sqlite で引く', async () => {
+    const { pick, pickEngine, engineSel, type, runBtn, runReadOnlySql, duckSeen, d } = setup();
+    pick('db4');
+    await settle();
+    pickEngine('duckdb');
+    pick('db1'); // 売上.sqlite ── DuckDB では引けない相手
+    await settle();
+    expect(engineSel.hidden).toBe(true);
+    type('SELECT 1');
+    runBtn.click();
+    await settle();
+    expect(duckSeen, '画面に無い engine で引いている').toHaveLength(0);
+    expect(runReadOnlySql).toHaveBeenCalledTimes(1);
+    // 🔑 **選んだ物は消さない** ── csv へ戻れば DuckDB が戻る(選択が黙って消えない)
+    expect(d.getState().sqlPage.engine).toBe('duckdb');
+    pick('db4');
+    await settle();
+    expect(engineSel.value, 'csv へ戻ったのに、選んでいた DuckDB が戻らない').toBe('duckdb');
+  });
+
+  it('🔴 相手の名前は state から引く ── 画面の字が古くても取り違えない', async () => {
+    const { pick, sourceSel, d } = setup();
+    pick('db4');
+    await settle();
+    /**
+     * ⚠ **画面の字をわざと嘘にする** ── 実機では起きないが、happy-dom の
+     *   `selectedOptions` が腐る形(2026-09-15 実測)と**同じ嘘**である。
+     * 🔑 名前を DOM から採っていた頃は、ここで「売上.csv」が飛んでいた ──
+     *   lid は正しいので**どの test も落ちず**、案内文と engine だけが前の相手の物になった。
+     */
+    for (const o of sourceSel.options) if (o.value === 'db1') o.textContent = 'ぜんぜん違う名前';
+    pick('db1');
+    await settle();
+    expect(d.getState().sqlPage.guest?.name, '画面の字を信じて相手を取り違えている').toBe('売上.sqlite');
+  });
+
+  it('🔴 口が無い版では理由を言って断る(黙って sqlite で引かない)', async () => {
+    const { pick, pickEngine, type, runBtn, note, runReadOnlySql } = setup(undefined, { withDuck: false });
+    pick('db4');
+    await settle();
+    pickEngine('duckdb');
+    type('FROM csv SELECT *');
+    runBtn.click();
+    await settle();
+    expect(note(), '押して無反応になっている').toContain('DuckDB');
+    // 🔴 いちばん気づけない外し方 ── 選んだ物と違う所で引く
+    expect(runReadOnlySql, '黙って sqlite で引いている').toHaveBeenCalledTimes(0);
+  });
+
+  it('🔴 打ち方の約束が engine で入れ替わる(sqlite の字を DuckDB に出さない)', async () => {
+    const { pick, pickEngine, rules } = setup();
+    pick('db4');
+    await settle();
+    // ⚠ sqlite の約束は**実測した字** ── DuckDB には当たらない
+    expect(rules()).toContain('REGEXP');
+    pickEngine('duckdb');
+    await settle();
+    expect(rules(), 'DuckDB なのに sqlite の癖を出している').not.toContain('REGEXP');
+    expect(rules()).toContain('FROM');
+  });
+
+  it('DuckDB の断りは、そのまま画面に出る(黙って消さない)', async () => {
+    const { pick, pickEngine, type, runBtn, note, runDuckDbSql } = setup();
+    runDuckDbSql.mockRejectedValueOnce(new Error('DuckDB の一式を取ってこられませんでした'));
+    pick('db4');
+    await settle();
+    pickEngine('duckdb');
+    type('FROM csv SELECT *');
+    runBtn.click();
+    await settle();
+    expect(note()).toContain('取ってこられませんでした');
   });
 });

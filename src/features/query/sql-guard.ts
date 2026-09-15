@@ -143,7 +143,21 @@ export function stripSqlNoise(sql: string): string {
  *   見つからず、**丸ごと直る**(それが望みの動きである)。
  */
 export function normalizeSqlInput(sql: string): string {
-  const mask = stripSqlNoise(sql);
+  return normalizeOutsideMask(sql, stripSqlNoise(sql));
+}
+
+/**
+ * 🔴 **塗り潰されなかった所だけ**を全角 → 半角にする。
+ *
+ * 🔑 **`mask` を引数にした理由は 1 つ** ── DuckDB は sqlite に無い
+ *   `$$…$$`(ドル引用符)を持つので、**塗り潰し方が違う**(`duckdb-guard.ts`)。
+ *   ⚠ 直し方まで 2 本に割ると、**片方だけ全角を直す**という食い違いが生まれる
+ *   (CLAUDE.md §7「同じ問いに答える口を 2 つ作らない」)── 直し方はここ 1 本、
+ *   塗り潰し方だけを engine ごとに差す。
+ * ⚠ `mask` は**長さを保った**物でなければならない(`stripSqlNoise` の約束)──
+ *   ずれると、直す位置が 1 字ずつ狂う。
+ */
+export function normalizeOutsideMask(sql: string, mask: string): string {
   return sql
     .split('')
     .map((ch, i) => {

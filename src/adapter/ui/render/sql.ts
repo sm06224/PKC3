@@ -33,7 +33,8 @@ import { xlsxAttachmentSourcesOf } from '@features/query/xlsx-attachment';
 // 🔴 手持ちのファイルを開く(#854 段②)
 import { isSqlLocalFileLid, SQL_PICK_LOCAL_FILE_VALUE } from '@features/query/sql-local-file';
 import { humanBytes } from '@features/human-bytes';
-import { SQL_RULES, sqlExampleText, sqlPlaceholder, sqlTipText } from '@features/query/sql-tip';
+import { sqlExampleText, sqlPlaceholder, sqlRulesText, sqlTipText } from '@features/query/sql-tip';
+import { enginesForSource, SQL_ENGINE_LABEL, sqlEngineOf, type SqlEngine } from '@features/query/sql-engine';
 import {
   SQL_WINDOW_MIN,
   sqlWindowOf,
@@ -67,8 +68,19 @@ export class SqlRenderer {
   private save: HTMLButtonElement | null = null;
   /** 調べる相手の選び所(#681 段③ の 2 つ目)。 */
   private source: HTMLSelectElement | null = null;
+  /**
+   * 🔴 **どのエンジンで引くかの選び所**(#682 段②。user 裁定 2026-09-15 = §9 は A)。
+   * ⚠ **選べるものが 2 つ以上あるときだけ出す** ── 1 つしか無い相手で出すと、
+   *   押せるのに何も変わらない口になる(この repo がいちばん嫌う形)。
+   *   🔑 在ることは案内文(`sqlTipText`)が知らせる。
+   */
+  private engine: HTMLSelectElement | null = null;
+  /** 直前に組んだエンジンの選択肢の指紋(相手が変わったときだけ組み直す)。 */
+  private engineKey: string | null = null;
   /** 案内の 1 段落(#681 F2 ── 相手に合わせて書き換える)。 */
   private tip: HTMLElement | null = null;
+  /** 打ち方の約束(#682 段② ── engine に合わせて書き換える)。 */
+  private rules: HTMLElement | null = null;
   /**
    * 直前に組んだ選択肢の指紋(添付が増減したときだけ組み直す)。
    * 🔴 **初期値は `null`**(#681 の着地前レビュー F5)── `''` にすると
@@ -199,6 +211,16 @@ export class SqlRenderer {
     source.setAttribute('data-pkc-field', 'sql-source');
     source.setAttribute('aria-label', '調べる相手');
     /**
+     * 🔴 **どのエンジンで引くか**(#682 段②)。
+     * ⚠ 既定は**いまの sqlite** ── 選ばなければ、これまでどおり 1 ドットも変わらない。
+     * 🔑 置き場は**調べる相手のすぐ隣**(裁定 A の字そのもの)。
+     */
+    const engine = document.createElement('select');
+    engine.setAttribute('data-pkc-action', 'set-sql-engine');
+    engine.setAttribute('data-pkc-field', 'sql-engine');
+    engine.setAttribute('aria-label', 'どのエンジンで引くか');
+    engine.hidden = true;
+    /**
      * 🔴 **「手持ちのファイルを開く…」が押した先**(#854 段②)。
      * ⚠ **隠したまま置く** ── 選び所の一項目を選ぶと `binder.ts` がここを
      *   `click()` する(`office-pack-input` / `settings-file-input` と同じ作法)。
@@ -272,7 +294,7 @@ export class SqlRenderer {
     toFile.setAttribute('data-pkc-field', 'sql-to-file');
     toFile.textContent = 'ファイルへ';
     toFile.title = 'いま出ている答えを、file に書き出します(CSV / TSV / JSON)';
-    bar.append(run, save, toFile, schema, er, history, source, fileInput);
+    bar.append(run, save, toFile, schema, er, history, source, engine, fileInput);
     const tip = document.createElement('p');
     tip.setAttribute('data-pkc-field', 'sql-tip');
     /**
@@ -292,7 +314,9 @@ export class SqlRenderer {
      */
     const rules = document.createElement('p');
     rules.setAttribute('data-pkc-field', 'sql-rules');
-    rules.textContent = SQL_RULES;
+    // 🔴 中身は `render` が揃える(#682 段② ── engine ごとに約束が違う)
+    rules.textContent = sqlRulesText('sqlite');
+    this.rules = rules;
     /**
      * 🔴 **打ち始めても消えない手本**(#837 K1)。
      * ⚠ 薄字(`placeholder`)は **1 文字打った瞬間に消える**ので、
@@ -363,6 +387,7 @@ export class SqlRenderer {
     this.run = run;
     this.save = save;
     this.source = source;
+    this.engine = engine;
     this.example = example;
     this.tip = tip;
     this.history = history;
@@ -466,6 +491,36 @@ export class SqlRenderer {
     if (sel.value !== want) sel.value = want;
   }
 
+  /**
+   * 🔴 **どのエンジンで引くかの選び所を揃える**(#682 段②)。
+   *
+   * ⚠ **選べるものが 2 つ以上あるときだけ出す** ── 1 つしか無い相手で出すと、
+   *   選んでも何も変わらない口になる。🔑 在ることは案内文が知らせる
+   *   (`sqlTipText` の「取り込んだ .csv や .tsv を選ぶと、DuckDB でも引けます」)。
+   * ⚠ **いま選ばれている物は `sqlEngineOf` から書き戻す** ── state が持つのは
+   *   「user が選んだ物」で、相手によっては成り立たない。画面には**実際に引く物**を出す
+   *   (画面と実体を食い違わせない ── この file の上のほうと同じ規律)。
+   */
+  private paintEngine(state: AppState): void {
+    const sel = this.engine;
+    if (sel === null) return;
+    const choices = enginesForSource(state.sqlPage.guest?.name ?? null);
+    const key = choices.join('|');
+    if (key !== this.engineKey) {
+      this.engineKey = key;
+      sel.textContent = '';
+      for (const e of choices) {
+        const opt = document.createElement('option');
+        opt.value = e;
+        opt.textContent = SQL_ENGINE_LABEL[e];
+        sel.append(opt);
+      }
+      sel.hidden = choices.length < 2;
+    }
+    const want = sqlEngineOf(state.sqlPage);
+    if (sel.value !== want) sel.value = want;
+  }
+
   render(state: AppState): void {
     const body = this.ensureFrame();
     const p = state.sqlPage;
@@ -552,13 +607,22 @@ export class SqlRenderer {
      * ⚠ 直す前は静的な字だったので、取り込んだ `.sqlite` を選んでも
      *   「調べられるのは entries …」のままで、**そのとおり打つと英語で断られた**。
      */
+    this.paintEngine(state);
     const target = p.guest === null ? null : { name: p.guest.name, tables: p.guest.tables };
-    const tipText = sqlTipText(target);
+    /**
+     * 🔴 **案内も手本も約束も、いま引く engine へ揃える**(#682 段②)。
+     * ⚠ `SQL_RULES` は**同梱の sqlite を実測した字**なので、DuckDB のまま出すと嘘になる
+     *   (「REGEXP は使えません」は DuckDB では誤り)。
+     */
+    const engine: SqlEngine = sqlEngineOf(p);
+    const tipText = sqlTipText(target, engine);
     if (this.tip !== null && this.tip.textContent !== tipText) this.tip.textContent = tipText;
-    const hint = sqlPlaceholder(target);
+    const rulesText = sqlRulesText(engine);
+    if (this.rules !== null && this.rules.textContent !== rulesText) this.rules.textContent = rulesText;
+    const hint = sqlPlaceholder(target, engine);
     if (this.box !== null && this.box.placeholder !== hint) this.box.placeholder = hint;
     // 🔴 **消えない手本も相手へ揃える**(#837 K1)── 薄字と同じ 1 本から採る
-    const example = sqlExampleText(target);
+    const example = sqlExampleText(target, engine);
     if (this.example !== null && this.example.textContent !== example) {
       this.example.textContent = example;
     }

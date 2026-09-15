@@ -510,10 +510,46 @@ export function connectStoreEffects(
      *   消える(即破棄)。渡されなければ**機能が減るだけ**(選んでも理由を出して断る)。
      */
     readLocalSqlFile?: (lid: string) => Promise<Uint8Array | null>;
+    /**
+     * 🔴 **DuckDB で引く口**(#682 段②)。
+     * ⚠ **storage worker を通さない** ── DuckDB は別の使い捨てワーカーで走る
+     *   (ノートの DB の錠を握る worker に相乗りさせない ── 不可侵指示 2026-08-03)。
+     * ⚠ 渡されなければ**機能が減るだけ** ── 選び所に DuckDB は出るが、押すと
+     *   「この版では引けません」と断る(黙って sqlite で引かない ── 選んだ物と
+     *   違う所で引くのが、いちばん気づけない外し方である)。
+     */
+    runDuckDbSql?: (input: {
+      sql: string;
+      source: { lid: string; name: string };
+      /** ⚠ 呼ばれるのは**器へ入れ直すときだけ**(同じ相手を打鍵のたびに読み直さない)。 */
+      readBytes: () => Promise<Uint8Array | null>;
+    }) => Promise<{ columns: string[]; rows: Array<Array<string | number | null>>; truncated: boolean; ms: number }>;
   } = {},
 ): StoreEffects {
   let queue: Promise<void> = Promise.resolve();
   let disposed = false;
+  /**
+   * 🔴 **調べる相手の中身を読む、たった 1 か所**(#854 段② / #682 段②)。
+   *
+   * ⚠ 添付なら**本文から鍵を読んで IDB を引き**、手持ちの file なら**控えを 1 回で
+   *   使い捨てる** ── 道が 2 本あるが、**呼ぶ側はそれを知らなくてよい**。
+   * 🔑 sqlite で開く道(`REQUEST_SQL_GUEST_OPEN`)と DuckDB で引く道が
+   *   **同じ 1 本**を通る(§7「同じ問いに答える口を 2 つ作らない」)── 分けると、
+   *   片方だけが添付を読めない、という user から見て理由の無い形になる。
+   * ⚠ 読めない理由は**返さない**(`null` 1 つ)── 断り文は呼ぶ側が、その場の
+   *   言葉で組む(「選んだ file を読めませんでした」/「添付の中身が見つかりません」)。
+   */
+  const sqlSourceBytes = async (lid: string): Promise<Uint8Array | null> => {
+    if (isSqlLocalFileLid(lid)) {
+      const readLocal = opts.readLocalSqlFile;
+      return readLocal === undefined ? null : readLocal(lid);
+    }
+    const readAsset = opts.readAssetBytes;
+    if (readAsset === undefined) return null;
+    const body = await store.getBody(lid);
+    const key = readAttachmentMeta(body ?? '').assetKey;
+    return key === null ? null : readAsset(key);
+  };
   /** 探す面の debounce の手(#680)。⚠ 解くときに止める ── 解いた後に撃たない。 */
   let detailTimer: ReturnType<typeof setTimeout> | null = null;
   const officeInstalled = opts.officeInstalled ?? ((): boolean => false);
@@ -828,11 +864,13 @@ export function connectStoreEffects(
          * ⚠ 判定は `lid` の頭だけ(`isSqlLocalFileLid`)── 開く手順・拡張子の
          *   判定(`csvLang`)・断り文はこの先**1 本の経路**を通す
          *   (§7「同じ問いに答える口を 2 つ作らない」)。
-         * ⚠ **`afterWrites` の中で、余分な async 関数越しに読まない** ──
-         *   1 層挟むだけで await が 1 回増え、`settled()` を待つ側の
-         *   tick 数が変わる(実測で踏んだ:`sql-pane.test.ts` の `settle()` が
-         *   3 tick 前提で書かれており、1 tick 増えると**表が空のまま**になる)。
-         *   だから下の `afterWrites` 本体に**直接**分岐を書く。
+         * ⚠ **2026-09-15 に、この縛りは外れた**(#682 段②)。ここには
+         *   「`afterWrites` の中で余分な async 関数越しに読むな(1 層挟むと
+         *   `sql-pane.test.ts` の `settle()` の tick が合わなくなる)」と書いてあったが、
+         *   🔑 **縛られていたのは製品の側で、直すべきは test の 1 行だった** ──
+         *   `settle()` を macrotask 1 つに変えたら、何段挟んでも流れるようになった。
+         *   ⚠ **読む道は 1 本へ寄せてある**(`sqlSourceBytes`)── 添付と手持ちの
+         *   file で道が 2 本に割れると、片方だけ読めない形が生まれる(§7)。
          */
         const local = isSqlLocalFileLid(lid);
         const readLocal = opts.readLocalSqlFile;
@@ -858,16 +896,7 @@ export function connectStoreEffects(
         afterWrites(async () => {
           if (disposed) return;
           try {
-            let bytes: Uint8Array | null;
-            if (local) {
-              // ⚠ 上の門で readLocal は必ず在る(non-null assertion は検証済みの合図)
-              bytes = await readLocal!(lid);
-            } else {
-              const body = await store.getBody(lid);
-              const key = readAttachmentMeta(body ?? '').assetKey;
-              if (key === null) throw new Error('添付の中身が見つかりません');
-              bytes = await readAsset!(key);
-            }
+            const bytes = await sqlSourceBytes(lid);
             if (bytes === null) {
               throw new Error(
                 local ? '選んだ file を読めませんでした' : '添付の中身が見つかりません',
@@ -995,6 +1024,41 @@ export function connectStoreEffects(
         const sql = ev.sql;
         // 🔴 走らせた回の札(#681 F3-A)── 答えと一緒に返す。古い回は reducer が捨てる
         const token = ev.token;
+        /**
+         * 🔴 **DuckDB で引く**(#682 段②)。⚠ **event が運んだ engine で分ける** ──
+         *   ここで state を読み直すと、選び直した直後の 1 回が前の engine へ飛ぶ。
+         * ⚠ 断りの字は**そのまま出す** ── DuckDB の断りは読める日本語ではないが、
+         *   消すと「何も起きない」になる(`sql-guard.ts` と同じ判断)。
+         */
+        if (ev.engine === 'duckdb') {
+          const duck = opts.runDuckDbSql;
+          const source = ev.duck;
+          if (duck === undefined || source === undefined) {
+            dispatcher.dispatch({
+              type: 'SQL_RUN_FAILED',
+              token,
+              sql,
+              error: 'この版では DuckDB で引けません(アプリを読み直すと直ることがあります)',
+            });
+            break;
+          }
+          void duck({ sql, source, readBytes: () => sqlSourceBytes(source.lid) }).then(
+            ({ columns, rows, truncated, ms }) => {
+              if (disposed) return;
+              dispatcher.dispatch({ type: 'SET_SQL_RESULT', token, sql, columns, rows, truncated, ms });
+            },
+            (e: unknown) => {
+              if (disposed) return;
+              dispatcher.dispatch({
+                type: 'SQL_RUN_FAILED',
+                token,
+                sql,
+                error: e instanceof Error ? e.message : String(e),
+              });
+            },
+          );
+          break;
+        }
         if (!ask) {
           dispatcher.dispatch({
             type: 'SQL_RUN_FAILED',
