@@ -77,6 +77,17 @@ const BOARD = [
   '',
   ':::format{.pkc-line from=a.b to=今日}',
   ':::',
+  /**
+   * 🔴 **接続点の綴りが読めないときの断り**(#530 段③b)。
+   * ⚠ 上の `a.b` とは**別の分岐**である ── あちらは「その名前の付箋が無い」
+   *   (`lineTrouble`)、こちらは「つなぎ目の字が読めない」(`anchorTrouble`)で、
+   *   `lineTrouble` が先に判定されるので**名前が正しいときだけ**ここへ来る。
+   * 🔑 だから**名前は実在する物**(`今日` / `明日`)を書く ── 名前を間違えると
+   *   あちらの断りに救われて、この分岐を 1 度も通らない(CLAUDE.md §2)。
+   */
+  '',
+  ':::format{.pkc-line from=今日:righ to=明日}',
+  ':::',
 ].join('\n');
 
 test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き替わる (#283 P4)', async ({ page }) => {
@@ -117,8 +128,7 @@ test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き
   await expect(lines, '線の本数が違う(日本語の名前が引けていないか、断るはずの線を引いた)')
     .toHaveCount(4);
   /**
-   * 🔴 **4 本が 4 か所から出る**(user 裁定 2026-09-15 ──
-   * 「経路が同一ではない繋がりも表現できる必要がある」)。
+   * 🔴 **4 本が 4 か所から出る**(user 裁定 2026-09-15)。
    * ⚠ 散らさないと 2 本目以降が**1 本目の真下に完全に重なって消える** ──
    *   引いた本人には「1 本しか引けない」としか見えない。
    * 🔑 見るのは**出口の座標そのもの**である(辺の名前ではない)── 同じ辺の
@@ -162,13 +172,18 @@ test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き
     '日本語の名前が id として載っていない',
   ).toBeVisible();
   /** ⚠ 使えない名前(`a.b`)には、断りの 1 行が出る ── 黙って消えない。 */
-  await expect(
-    page.locator('[data-pkc-field="place-line-note"]'),
-    '使えない名前の断りが出ていない(または、要らない断りが出ている)',
-  ).toHaveCount(1);
-  await expect(page.locator('[data-pkc-field="place-line-note"]')).toContainText(
-    '名前に「a.b」は使えません',
-  );
+  const notes = page.locator('[data-pkc-field="place-line-note"]');
+  await expect(notes, '断りの数が違う(要らない断りが出ているか、出るべき断りが出ていない)')
+    .toHaveCount(2);
+  /**
+   * 🔑 **2 つの断りを字で見分ける**(#530 段③b)── 数だけ見ると、
+   *   片方の分岐が死んでいて**もう片方が 2 回出た**日に緑のままになる
+   *   (CLAUDE.md §1「門を N 個置いたら、N 個目だけが鳴る場面を N 通り作る」)。
+   */
+  const noteTexts = (await notes.allTextContents()).join(' / ');
+  expect(noteTexts, `名前の断りが出ていない: ${noteTexts}`).toContain('名前に「a.b」は使えません');
+  expect(noteTexts, `つなぎ目の断りが出ていない: ${noteTexts}`)
+    .toContain('つなぎ目に「righ」は使えません');
 
   /**
    * 🔴 **層が「板の無い所」で最前面に来ていない**(= `pointer-events: none` が効いている)。
