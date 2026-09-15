@@ -1108,6 +1108,40 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   await expect(sqlTable).toContainText('120');
 
   /**
+   * 🔴 **つながり図から、押して SQL を組む**(#918 段⑤。裁定 2026-09-15 = この窓の中)。
+   *
+   * 動線:「**構造を見る を押す → 四角が出る → 表の名前を押す → 下の欄に SQL が入る →
+   * 走らせると答えが出る**」。
+   * ⚠ ここが**実ブラウザでしか言えない所**である ── 四角は `position: absolute` で
+   *   置くので、happy-dom では**全部 0px の同じ場所**に積み上がり、
+   *   「押せる所に在るか」を 1 つも見られない(unit は「字が在るか」までしか言えない)。
+   * 🔑 **新しい起動は増やさない**(#820 の規律)── この筋書きの続きで確かめる。
+   */
+  await clickReal(page, '[data-pkc-action="sql-er-toggle"]');
+  const erBox = page.locator('[data-pkc-field="sql-er-box"]');
+  await expect(erBox, 'つながり図の四角が出ない').toHaveCount(1, { timeout: 15_000 });
+  // ⚠ **大きさを持っている**ことまで見る(0px の箱は「出ている」と言えない)
+  const erRect = (await erBox.first().boundingBox())!;
+  expect(erRect.width, `四角に幅が無い: ${JSON.stringify(erRect)}`).toBeGreaterThan(80);
+  expect(erRect.height, `四角に高さが無い: ${JSON.stringify(erRect)}`).toBeGreaterThan(30);
+
+  // 🔑 欄を空にしてから押す ── 「空 + 表」が `select * from 表` になる道である
+  await page.fill('[data-pkc-field="sql-input"]', '');
+  await clickReal(page, '[data-pkc-field="sql-er-table"]');
+  await expect(
+    page.locator('[data-pkc-field="sql-input"]'),
+    '図の表を押しても、打つ欄に SQL が入らない',
+  ).toHaveValue('select * from csv');
+
+  // ⚠ 組んだ字が**本当に走る**ところまで見る(組めただけでは「取得できた」と言えない)
+  await clickReal(page, '[data-pkc-action="run-sql"]');
+  await expect(sqlTable.locator('tbody tr'), '図から組んだ SQL で行が返らない').toHaveCount(2);
+
+  // 🔴 畳めること ── 帰り道が無い面を作らない(#300)
+  await clickReal(page, '[data-pkc-action="sql-er-toggle"]');
+  await expect(erBox, 'もう一度押しても畳めない').toHaveCount(0);
+
+  /**
    * ⑤ 🔴 **添付の `.xlsx` も、同じ選び所から SQL で調べられる**(#854 段③)。動線:
    *   「.xlsx を添付として取り込む(上で済ませた)→ 選び所で `.csv` の下に並ぶ →
    *   選ぶと『◯◯.xlsx を調べています』と出る → `xlsx_sheets` で

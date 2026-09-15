@@ -4131,6 +4131,109 @@ li[data-pkc-row-slot] {
   align-items: center;
   gap: var(--s2);
 }
+/**
+ * 🔴 **表のつながり図**(#918 段⑤。置き場の裁定 2026-09-15 = SQL の窓の中に畳める欄)。
+ *
+ * ⚠ **開いている間だけ場所を取る** ── 閉じているときは `hidden` で 1px も取らない
+ *   (#300「補助的な物が主の作業領域を奪わない」)。
+ * 🔑 **境目を掴んで変えられる**(`resize: vertical`)── 裁定で挙げた弱点
+ *   「答えの表が下へ押される」を、user 自身の手で吸収できる形にする。
+ *   ⚠ `resize` は `overflow` が `visible` でないときだけ効く(下の `auto` が要る)。
+ */
+[data-pkc-region='sql-er'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+}
+[data-pkc-field='sql-er-scroll'] {
+  overflow: auto;
+  resize: vertical;
+  /* ⚠ 初めは器の 3 割ほど。掴んで変えられるので、ここは出発点にすぎない */
+  height: 30vh;
+  min-height: 80px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: var(--s2);
+}
+[data-pkc-field='sql-er-canvas'] {
+  position: relative;
+}
+/* ⚠ 押しを通す ── 当てないと、線の下に来た四角を押せない */
+[data-pkc-field='sql-er-lines'] {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+[data-pkc-field='sql-er-lines'] line {
+  stroke: var(--border);
+  stroke-width: 2;
+}
+[data-pkc-field='sql-er-box'] {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  overflow: hidden;
+}
+[data-pkc-field='sql-er-table'],
+[data-pkc-field='sql-er-column'] {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  padding: 2px 6px;
+  cursor: pointer;
+  /* ⚠ 名前が長い表でも四角を突き抜けない(折り返さずに畳む) */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+[data-pkc-field='sql-er-table'] {
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+}
+[data-pkc-field='sql-er-column'] {
+  font-size: 12px;
+}
+[data-pkc-field='sql-er-table']:hover,
+[data-pkc-field='sql-er-column']:hover,
+[data-pkc-field='sql-er-link']:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+[data-pkc-field='sql-er-more'] {
+  padding: 2px 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+/**
+ * 🔴 **線は「押せる札」で押す** ── `<line>` は太さ 1px ぶんしか当たり判定が無く、
+ *   指でも鍵盤でも押せない。札には繋ぐ列が書いてあるので、押す前に何が起きるか読める。
+ */
+[data-pkc-field='sql-er-link'] {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  padding: 1px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+[data-pkc-field='sql-er-note'],
+[data-pkc-field='sql-er-dropped'] {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
 [data-pkc-field='sql-tip'],
 [data-pkc-field='sql-rules'],
 [data-pkc-field='sql-example'],

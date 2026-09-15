@@ -2316,6 +2316,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-15(#918 段⑤ ── 表のつながり図)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-13-note-date-no-time" …` → 14191cc
+     */
+    'ノートに日付を付ける画面から、使われない「時刻」の欄をなくしました',
+    /**
      * ⚠ **2026-09-14(#918 段②c/②d ── 行番号と色分け)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-13-task-repeat-menu" …` → 61ff45e
      */

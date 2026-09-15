@@ -22,9 +22,10 @@
  * ⚠ **描画器は状態を持たない** ── 打ちかけの字は state に在るので、
  *   面を閉じて戻っても消えない。
  */
-import type { AppState } from '@adapter/state/app-state';
+import type { AppState, SqlPageState } from '@adapter/state/app-state';
 import { sqlSourcesOf } from '@features/query/sqlite-attachment';
 import { sqlLineHtml } from '@features/query/sql-lines';
+import { paintSqlEr } from './sql-er';
 import { SQL_GUEST_EXTS } from '@features/query/sql-guest-source';
 // 🔴 添付の .csv / .tsv / .xlsx も同じ選び所へ並べる(#854 段① / 段③)
 import { csvAttachmentSourcesOf } from '@features/query/csv-attachment';
@@ -84,6 +85,17 @@ export class SqlRenderer {
   private toFile: HTMLButtonElement | null = null;
   /** いま何番目を見ているかの行(#918 段②a)。⚠ 空なら畳む。 */
   private historyNote: HTMLElement | null = null;
+  /** つながり図の器(#918 段⑤)。⚠ 畳んでいる間は中を組まない。 */
+  private erHost: HTMLElement | null = null;
+  /** 図を開く / 閉じる押し所(#918 段⑤)。 */
+  private erToggle: HTMLButtonElement | null = null;
+  /**
+   * 直前に描いた図の中身。⚠ **模型は同一性で見る**(中身の比較は表の数だけ走る)──
+   * 採り直したときだけ別の物になるので、これで足りる。
+   */
+  private erModel: SqlPageState['er']['model'] | undefined = undefined;
+  /** 図の見え方の指紋(開閉 / 採っている最中か / 断りの字)。 */
+  private erKey = '';
   /**
    * 🔴 **手で高さを決めたか**(#918 段②b)。決めたら**そちらが強い** ──
    * 打つたびに引き戻すと、掴んで広げた操作が**毎回取り消される**
@@ -221,6 +233,24 @@ export class SqlRenderer {
      *   (選ぶ前に全部見えるので)。
      * ⚠ **憶えている字が無いうちは押せない**(押せるのに何も起きない口を作らない)。
      */
+    /**
+     * 🔴 **つながり図を開く**(#918 段⑤。裁定 2026-09-15 = この窓の中に畳める欄)。
+     *
+     * ⚠ 「構造をノートへ」の**隣**に置く ── どちらも「打つ前に構造を見る」道具なので、
+     *   離すと片方しか見つからない。
+     * 🔑 字は「**見る**」と「**閉じる**」で入れ替える ── 同じ字のままだと、
+     *   開いているのにもう一度押して**閉じる**ことに気づけない(#300 の帰り道と同じ形)。
+     */
+    const er = document.createElement('button');
+    er.type = 'button';
+    er.setAttribute('data-pkc-action', 'sql-er-toggle');
+    er.setAttribute('data-pkc-field', 'sql-er-toggle');
+    er.textContent = '構造を見る';
+    er.title = '表のつながりを図で出します。四角や線を押すと、下の欄に SQL が書かれます。';
+    const erHost = document.createElement('div');
+    erHost.setAttribute('data-pkc-region', 'sql-er');
+    erHost.hidden = true;
+
     const history = document.createElement('button');
     history.type = 'button';
     history.setAttribute('data-pkc-action', 'sql-history-menu');
@@ -242,7 +272,7 @@ export class SqlRenderer {
     toFile.setAttribute('data-pkc-field', 'sql-to-file');
     toFile.textContent = 'ファイルへ';
     toFile.title = 'いま出ている答えを、file に書き出します(CSV / TSV / JSON)';
-    bar.append(run, save, toFile, schema, history, source, fileInput);
+    bar.append(run, save, toFile, schema, er, history, source, fileInput);
     const tip = document.createElement('p');
     tip.setAttribute('data-pkc-field', 'sql-tip');
     /**
@@ -326,7 +356,7 @@ export class SqlRenderer {
       layer.scrollTop = box.scrollTop;
       layer.scrollLeft = box.scrollLeft;
     });
-    head.append(title, wrap, historyNote, bar, tip, rules, example);
+    head.append(title, erHost, wrap, historyNote, bar, tip, rules, example);
     this.host.append(head, note, body);
     this.box = box;
     this.layer = layer;
@@ -337,6 +367,8 @@ export class SqlRenderer {
     this.tip = tip;
     this.history = history;
     this.historyNote = historyNote;
+    this.erHost = erHost;
+    this.erToggle = er;
     this.toFile = toFile;
     this.note = note;
     this.body = body;
@@ -464,6 +496,23 @@ export class SqlRenderer {
     if (this.layer !== null && this.painted !== p.sql) {
       this.painted = p.sql;
       paintSqlLayer(this.layer, p.sql);
+    }
+    /**
+     * 🔴 **つながり図を塗り直す**(#918 段⑤)。⚠ **指紋の門より前**
+     *   ── 図を開いても答えの指紋は 1 バイトも動かない(段②a〜②d と同じ理由)。
+     * ⚠ **同じ図を組み直さない** ── 模型は採り直したときだけ別の物になるので、
+     *   同一性で足りる(中身を比べると表の数だけ走る)。
+     */
+    if (this.erToggle !== null) {
+      const label = p.er.open ? '構造を閉じる' : '構造を見る';
+      if (this.erToggle.textContent !== label) this.erToggle.textContent = label;
+      this.erToggle.setAttribute('aria-expanded', p.er.open ? 'true' : 'false');
+    }
+    const erKey = `${String(p.er.open)} ${String(p.er.loading)} ${p.er.note}`;
+    if (this.erHost !== null && (this.erModel !== p.er.model || this.erKey !== erKey)) {
+      this.erModel = p.er.model;
+      this.erKey = erKey;
+      paintSqlEr(this.erHost, p.er);
     }
     /**
      * 🔴 **器の高さが変わったら窓を見直す**(#918 段③、着地前レビューが出した)。

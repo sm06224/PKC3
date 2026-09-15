@@ -10,6 +10,8 @@
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
 import { DEFAULT_ENTRY_SORT, NATURAL_DESC, type EntrySort } from '@features/filter/entry-sort';
 import { checkReadOnlySql } from '@features/query/sql-guard';
+import { schemaModel, type Grid, type SchemaModel } from '@features/query/schema-digest';
+import { erSql, type ErAction } from '@features/query/er-sql';
 import { listViewOptions } from './list-view-options';
 import { resolveCanonicalParents, reorderSibling } from '@features/relation/tree';
 import { extractMeta, seedBodyFor } from '@features/flavor';
@@ -244,6 +246,68 @@ export interface SqlPageState {
    *   (`guestPending` と同じ作法)。
    */
   readonly runToken: number;
+  /**
+   * 🔴 **表のつながり図(ER)**(#918 段⑤。user 要望 2026-09-14「er でグラフィカルに
+   * 取得する方法も欲しいな」/ 置き場の裁定 2026-09-15 = **この窓の中に畳める欄**)。
+   *
+   * ⚠ **`model` は「採った構造」そのもの**で、絵ではない ── 並べ方(`erLayout`)は
+   *   描く側が組む。state に絵を持つと、窓の幅が変わるたびに state が動く。
+   * ⚠ **相手を変えたら捨てる**(`guest` を切り替えた回に古い図を出さない)──
+   *   出すと、名札は新しいのに**中身は前の DB**という、いちばん気づけない形になる。
+   */
+  readonly er: {
+    /** 開いているか(閉じているときは 1px も場所を取らない)。 */
+    readonly open: boolean;
+    /** 採っている最中か。⚠ 開いた直後の無反応を作らない。 */
+    readonly loading: boolean;
+    /** 採れた構造(`null` = まだ採っていない)。 */
+    readonly model: SchemaModel | null;
+    /**
+     * 🔴 **押したのに足せなかった理由**(空 = 無い)。
+     * ⚠ **そのまま画面に出す字**である ── 黙って何もしないと無言の dead click になる。
+     */
+    readonly note: string;
+    /** どの相手の構造か(`guest?.lid ?? ''`)。⚠ 変わったら `model` を捨てる印。 */
+    readonly source: string;
+    /**
+     * 🔴 **採ってきた回の札**。⚠ 採っている間に相手を変えられるので、
+     *   **札が違う答えは捨てる**(`runToken` と同じ作法。走らせる札とは別に持つ ──
+     *   1 つにすると、走らせただけで図の取得が無効になる)。
+     */
+    readonly token: number;
+  };
+}
+
+/**
+ * 🔴 **調べる相手が変わった回に、つながり図をどう持ち替えるか**(#918 段⑤)。
+ *
+ * ⚠ **判定をここ 1 か所に置く**(CLAUDE.md §7)── 相手が変わる口は 3 つある
+ *   (選び直す / 開けた / 開けなかった)ので、それぞれに書くと**片方だけ直す**形になる。
+ * 🔴 いちばん危ないのは「**名札は新しいのに、図は前の DB**」である ── 数字も名前も
+ *   本物なので、user には間違いの手がかりが 1 つも無い。だから**必ず捨てる**。
+ *
+ * @param emit いま頼んでよい回か(⚠ 相手を**開き終えた**回だけ真 ── 開く前に頼むと
+ *   前の相手へ飛ぶ)。偽なら「採っています」のまま待つ。
+ */
+function erForSource(
+  er: SqlPageState['er'],
+  source: string,
+  guest: boolean,
+  emit: boolean,
+): { er: SqlPageState['er']; events: DomainEvent[] } {
+  if (er.source === source && er.model !== null) return { er, events: [] };
+  // ⚠ 閉じているなら捨てるだけ(開くときに採り直す)
+  if (!er.open) {
+    return { er: { ...er, loading: false, model: null, note: '', source: '' }, events: [] };
+  }
+  if (!emit) {
+    return { er: { ...er, loading: true, model: null, note: '', source: '' }, events: [] };
+  }
+  const token = er.token + 1;
+  return {
+    er: { open: true, loading: true, model: null, note: '', source, token },
+    events: [{ type: 'REQUEST_SQL_ER', token, ...(guest ? { guest: true } : {}) }],
+  };
 }
 
 /**
@@ -1318,6 +1382,7 @@ export const initialState: AppState = {
     guestError: '',
     guestPending: '',
     runToken: 0,
+    er: { open: false, loading: false, model: null, note: '', source: '', token: 0 },
   },
   queryKey: null,
   smartHits: new Map<string, SmartHitState>(),
@@ -1438,6 +1503,27 @@ export type UserAction =
    * ⚠ 中身は 1 文字も出さない ── 出すのは表・列・型・鍵・繋がり・行数だけである。
    */
   | { type: 'SQL_SCHEMA_TO_NOTE'; lid: string; relationId: string }
+  /**
+   * 🔴 **つながり図を開く / 閉じる**(#918 段⑤。裁定 2026-09-15 = この窓の中)。
+   * ⚠ 開いたとき構造をまだ採っていなければ、採ってくるよう頼む。
+   */
+  | { type: 'SQL_ER_TOGGLE' }
+  /**
+   * 🔴 **図の中を押した**(#918 段⑤c)── 表 / 列 / 繋がり。
+   * ⚠ **打っている字は捨てない** ── `erSql` が「足せるか」を決め、
+   *   足せないときは**理由**を画面へ出す(黙って何もしない形を作らない)。
+   */
+  | { type: 'SQL_ER_PRESS'; press: ErAction }
+  /** 構造が採れた(#918 段⑤)。⚠ 札が古ければ捨てる。 */
+  | {
+      type: 'SQL_ER_LOADED';
+      token: number;
+      columns: Grid;
+      fks: Grid;
+      counts: Grid | null;
+    }
+  /** 構造を採れなかった(#918 段⑤)。⚠ 黙って空の図を出さない。 */
+  | { type: 'SQL_ER_FAILED'; token: number; error: string }
   /**
    * 🔴 **答えをノートへ書き出した**(#681 段③ の 3 つ目)。
    * ⚠ ノートを作るのは `CREATE_ENTRY` の仕事 ── ここは**言うだけ**である
@@ -2376,6 +2462,13 @@ export type DomainEvent =
       lid: string;
       relationId: string;
     }
+  /**
+   * 🔴 **つながり図のために構造を採ってきてほしい**(#918 段⑤)。
+   * 🔑 打つ字は `REQUEST_SQL_SCHEMA` と**同じ 3 本**(`schema-digest.ts`)── effect が
+   *   1 か所にまとめて持つので、採り方が 2 つに分かれない(CLAUDE.md §7)。
+   * ⚠ **札を付ける** ── 採っている間に相手を変えられるので、古い答えは捨てる。
+   */
+  | { type: 'REQUEST_SQL_ER'; token: number; guest?: boolean }
   /** 取り込んだ `.sqlite` を開く / 手放す(#681 段③ の 2 つ目)。 */
   | { type: 'REQUEST_SQL_GUEST_OPEN'; lid: string; name: string }
   | { type: 'REQUEST_SQL_GUEST_CLOSE' }
@@ -3448,6 +3541,103 @@ function reduceCore(
       };
     }
     /**
+     * 🔴 **つながり図を開く / 閉じる**(#918 段⑤。裁定 2026-09-15 = この窓の中)。
+     * ⚠ **開いたら畳める** ── 開きっぱなしにすると答えの表を押し下げ続ける
+     *   (#300「補助的な物が主の作業領域を奪わない」)。
+     * 🔑 採ってあるのが**いまの相手の構造なら採り直さない**(開くたびに DB を舐めない)。
+     */
+    case 'SQL_ER_TOGGLE': {
+      const p = state.sqlPage;
+      if (p.er.open) {
+        return {
+          state: { ...state, sqlPage: { ...p, er: { ...p.er, open: false, note: '' } } },
+          events: [],
+        };
+      }
+      const source = p.guest?.lid ?? '';
+      if (p.er.model !== null && p.er.source === source) {
+        return {
+          state: { ...state, sqlPage: { ...p, er: { ...p.er, open: true, note: '' } } },
+          events: [],
+        };
+      }
+      const token = p.er.token + 1;
+      return {
+        state: {
+          ...state,
+          sqlPage: {
+            ...p,
+            er: { open: true, loading: true, model: null, note: '', source, token },
+          },
+        },
+        events: [
+          { type: 'REQUEST_SQL_ER', token, ...(p.guest === null ? {} : { guest: true }) },
+        ],
+      };
+    }
+    /**
+     * 🔴 **図の中を押した**(#918 段⑤c)。
+     * ⚠ **打っている字は捨てない** ── 足せるかを決めるのは `erSql`(pure)で、
+     *   足せないときは**理由**を控えて画面へ出す(黙って何もしない形を作らない)。
+     * 🔑 履歴の手直しの控えは `SET_SQL_TEXT` と**同じ作法**で取る ── ここだけ
+     *   忘れると、図から足した字が `↑` を押した瞬間に消える。
+     */
+    case 'SQL_ER_PRESS': {
+      const p = state.sqlPage;
+      const r = erSql(p.sql, action.press);
+      if (!r.ok) {
+        return {
+          state: { ...state, sqlPage: { ...p, er: { ...p.er, note: r.why } } },
+          events: [],
+        };
+      }
+      return {
+        state: {
+          ...state,
+          sqlPage: {
+            ...p,
+            sql: r.sql,
+            error: '',
+            er: { ...p.er, note: '' },
+            ...(p.historyAt < 0 ? {} : { historyEdits: withHistoryEdit(p, r.sql) }),
+          },
+        },
+        events: [],
+      };
+    }
+    /**
+     * 構造が採れた(#918 段⑤)。
+     * ⚠ **札が違えば捨てる** ── 採っている間に相手を変えられる(`SQL_RUN_DONE` と同じ)。
+     * 🔑 **模型を組むのはここ** ── `schemaModel` は pure なので reducer に置ける。
+     *   effect に置くと、採る側と組む側が 2 か所に分かれる(§7)。
+     */
+    case 'SQL_ER_LOADED': {
+      const p = state.sqlPage;
+      if (p.er.token !== action.token) return { state, events: [] };
+      const model = schemaModel({
+        source: p.guest?.name ?? '',
+        columns: action.columns,
+        fks: action.fks,
+        ...(action.counts === null ? {} : { counts: action.counts }),
+      });
+      return {
+        state: { ...state, sqlPage: { ...p, er: { ...p.er, loading: false, model } } },
+        events: [],
+      };
+    }
+    /** 構造を採れなかった(#918 段⑤)。⚠ 黙って空の図を出さない ── 理由を言う。 */
+    case 'SQL_ER_FAILED': {
+      const p = state.sqlPage;
+      if (p.er.token !== action.token) return { state, events: [] };
+      return {
+        state: {
+          ...state,
+          sqlPage: { ...p, er: { ...p.er, loading: false, model: null, note: action.error } },
+        },
+        events: [],
+      };
+    }
+    /**
      * 🔴 **古い回の答えは捨てる**(#681 の着地前レビュー F3-A)。
      * ⚠ 走っている最中に相手を変えられるので、受けると**新しい名札のまま
      *   古い DB の中身**が出る ── 数字は本物なので気づけない。
@@ -3501,6 +3691,13 @@ function reduceCore(
       if (action.lid !== '') {
         events.push({ type: 'REQUEST_SQL_GUEST_OPEN', lid: action.lid, name: action.name });
       }
+      /**
+       * 🔴 **前の相手の図を持ち越さない**(#918 段⑤)。
+       * ⚠ ノートへ戻る回(`lid === ''`)は**その場で採り直せる**が、よその DB へ移る回は
+       *   **まだ開いていない**ので頼めない ── 開けた回(`SQL_GUEST_OPENED`)が頼む。
+       */
+      const er = erForSource(state.sqlPage.er, action.lid === '' ? '' : action.lid, action.lid !== '', action.lid === '');
+      events.push(...er.events);
       return {
         state: {
           ...state,
@@ -3524,6 +3721,7 @@ function reduceCore(
             ms: 0,
             error: '',
             saved: '',
+            er: er.er,
           },
         },
         events,
@@ -3534,8 +3732,10 @@ function reduceCore(
      * ⚠ 選び直した直後は、**前の相手の「開けました」が後から届く** ── 受けると
      *   選んでいない DB を「調べています」と出し、打った SQL はそちらへ飛ぶ。
      */
-    case 'SQL_GUEST_OPENED':
+    case 'SQL_GUEST_OPENED': {
       if (state.sqlPage.guestPending !== action.lid) return { state, events: [] };
+      // 🔴 開けた相手の構造を採り直す(図を開いているときだけ ── §7 の 1 か所)
+      const er = erForSource(state.sqlPage.er, action.lid, true, true);
       return {
         state: {
           ...state,
@@ -3550,10 +3750,12 @@ function reduceCore(
             },
             guestError: '',
             guestPending: '',
+            er: er.er,
           },
         },
-        events: [],
+        events: er.events,
       };
+    }
     case 'SQL_GUEST_FAILED':
       // ⚠ 断りも**いま選んでいる相手の分だけ**受ける(古い断りで新しい選択を消さない)
       if (state.sqlPage.guestPending !== action.lid) return { state, events: [] };
@@ -3565,7 +3767,17 @@ function reduceCore(
       return {
         state: {
           ...state,
-          sqlPage: { ...state.sqlPage, guestError: action.error, guestPending: '' },
+          sqlPage: {
+            ...state.sqlPage,
+            guestError: action.error,
+            guestPending: '',
+            /**
+             * ⚠ **「採っています」で止めない**(#918 段⑤)── 開けなかったので
+             *   構造は永久に来ない。⚠ 理由は `guestError` が言うので、ここでは繰り返さない
+             *   (同じ断りが 2 行出ると、別々のことが起きたように見える)。
+             */
+            er: { ...state.sqlPage.er, loading: false, model: null, source: '' },
+          },
         },
         events: [],
       };
