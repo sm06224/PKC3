@@ -18,6 +18,7 @@
 import { describe, expect, it } from 'vitest';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import {
+  connectPlaces,
   addPlace,
   isPlaceOpen,
   movePlace,
@@ -362,5 +363,119 @@ describe('板を前へ出す(raisePlace)(#676 段②)', () => {
     expect(raisePlace(BODY, { line: 3, openLine: A })).toBeNull();
     expect(raisePlace(BODY, { line: 2, openLine: '' })).toBeNull();
     expect(raisePlace(BODY, { line: 6, openLine: FENCED })).toBeNull();
+  });
+});
+
+/**
+ * 🔴 **掴んで繋ぐ**(#530 段③d)── 本文へ線の塊を足し、名前が無ければ付ける。
+ *
+ * **① 何を直しているか** ── 実測(2026-09-15):板は画面から**置く / 動かす /
+ * 大きさ / 形 / 消す**ができるのに、**線を作る口は 0 件**で、`:::format{.pkc-line …}` を
+ * **手で打つしかなかった**。だから段③b・③c で増やした接続点も通り方も、
+ * **マニュアルを読んだ人にしか届いていない**。
+ *
+ * ⚠ **これは本文が増える操作である** ── だから門は移動と同じだけ持つ。
+ */
+describe('🔴 板を線で繋ぐ(connectPlaces)(#530 段③d)', () => {
+  const two = [
+    ':::format{.pkc-place x=0 y=0}',
+    '左',
+    ':::',
+    '',
+    ':::format{.pkc-place x=300 y=0}',
+    '右',
+    ':::',
+    '',
+  ].join('\n');
+  const at = (body: string, line: number): { line: number; openLine: string } => ({
+    line,
+    openLine: body.split('\n')[line]!,
+  });
+
+  it('🔴 名前が無ければ付けて、線の塊を末尾へ足す', () => {
+    const next = connectPlaces(two, { from: at(two, 0), to: at(two, 4) })!;
+    expect(next, '繋げなかった').not.toBeNull();
+    const lines = next.split('\n');
+    // 🔑 名前は開き行の頭に入り、**ほかの札は 1 byte も動かない**
+    expect(lines[0]).toBe(':::format{#板1 .pkc-place x=0 y=0}');
+    expect(lines[4]).toBe(':::format{#板2 .pkc-place x=300 y=0}');
+    expect(next.endsWith(':::format{.pkc-line from=板1 to=板2}\n:::\n'), '線の塊が末尾に無い')
+      .toBe(true);
+    // ⚠ 中身の行は触っていない
+    expect(lines[1]).toBe('左');
+    expect(lines[5]).toBe('右');
+  });
+
+  it('🔴 既に名前が在る板は改名しない(勝手に書き換えない)', () => {
+    const named = two.replace('{.pkc-place x=0', '{#今日 .pkc-place x=0');
+    const next = connectPlaces(named, { from: at(named, 0), to: at(named, 4) })!;
+    expect(next.split('\n')[0], '名前が在るのに書き換えた').toBe(':::format{#今日 .pkc-place x=0 y=0}');
+    // 🔑 名前の無いほうにだけ付く。⚠ 既に在る名前とぶつからない番号を選ぶ
+    expect(next.split('\n')[4]).toBe(':::format{#板1 .pkc-place x=300 y=0}');
+    expect(next.endsWith('from=今日 to=板1}\n:::\n')).toBe(true);
+  });
+
+  it('🔴 番号は本文の中で重ならない(図の名前ともぶつからない)', () => {
+    // ⚠ 板ではない塊(図)の名前も数える ── `[@板1]` の呼び先が 2 つになる
+    const busy = `:::figure{#板1}\n![](a.png)\n:::\n\n${two}`;
+    const next = connectPlaces(busy, { from: at(busy, 4), to: at(busy, 8) })!;
+    expect(next.split('\n')[4], '既に在る名前を 2 つ目に作った')
+      .toBe(':::format{#板2 .pkc-place x=0 y=0}');
+    expect(next.split('\n')[8]).toBe(':::format{#板3 .pkc-place x=300 y=0}');
+  });
+
+  it('🔑 接続点を書いた側は、その綴りが線の行に出る', () => {
+    const next = connectPlaces(two, {
+      from: at(two, 0),
+      to: at(two, 4),
+      fromAnchor: 'right@1/4',
+      toAnchor: 'left',
+    })!;
+    expect(next.endsWith('from=板1:right@1/4 to=板2:left}\n:::\n')).toBe(true);
+  });
+
+  /**
+   * 🔴 **読めない接続点は書かずに断る**(#689 の「読む側と書く側で門の段数が違う」)。
+   * ⚠ 書いてしまうと、**本文は変わったのに線は出ない** ── いちばん気づけない壊れ方。
+   */
+  it('🔴 読めない接続点は 1 byte も書かない', () => {
+    expect(connectPlaces(two, { from: at(two, 0), to: at(two, 4), fromAnchor: 'righ' }))
+      .toBeNull();
+    expect(connectPlaces(two, { from: at(two, 0), to: at(two, 4), toAnchor: 'right@4/4' }))
+      .toBeNull();
+    // ⚠ 空振り防止 ── 読める綴りなら通る
+    expect(connectPlaces(two, { from: at(two, 0), to: at(two, 4), fromAnchor: 'top@1/8' }))
+      .not.toBeNull();
+  });
+
+  it('🔴 門は移動と同じだけ持つ(ずれた開き行 / 板でない行 / 同じ板)', () => {
+    // ⚠ 掴んだ時点の開き行と byte 一致しなければ書かない
+    expect(connectPlaces(two, {
+      from: { line: 0, openLine: ':::format{.pkc-place x=1 y=0}' },
+      to: at(two, 4),
+    }), 'ずれた開き行で書いた').toBeNull();
+    // ⚠ 板でない行
+    expect(connectPlaces(two, { from: at(two, 1), to: at(two, 4) }), '板でない行で書いた')
+      .toBeNull();
+    // ⚠ 2 枚目も同じ門を通す(片方だけ検めない)
+    expect(connectPlaces(two, { from: at(two, 0), to: at(two, 5) }), '2 枚目を検めていない')
+      .toBeNull();
+    // ⚠ 自分自身は繋がない(本文だけ増えて線は出ない)
+    expect(connectPlaces(two, { from: at(two, 0), to: at(two, 0) })).toBeNull();
+  });
+
+  /**
+   * 🔴 **描画との合意をここで見る** ── 書いた綴りを実物の描画器に渡し、
+   * **線の宣言として**読まれることまで確かめる(綴りが描画から外れたら、
+   * 繋いだのに画面に出ない)。
+   */
+  it('🔴 書いた線の塊を、描画が線として読む', () => {
+    const next = connectPlaces(two, { from: at(two, 0), to: at(two, 4) })!;
+    const html = renderMarkdown(next, { sourceLineAnchors: true } as never);
+    expect(html, '線の塊として描かれていない').toContain('pkc-line');
+    expect(html, '繋ぎ先が焼かれていない').toContain('data-pkc-from="板1"');
+    expect(html, '繋ぎ先が焼かれていない').toContain('data-pkc-to="板2"');
+    // 🔑 名前も id として焼かれる(線の描画がこの id を引く)
+    expect(html).toContain('id="板1"');
   });
 });

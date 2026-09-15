@@ -19,6 +19,7 @@ import type { RepeatUnit } from '../schedule/repeat';
 import { removeInsertedLines } from './append-target';
 import {
   addPlace,
+  connectPlaces,
   insideFence,
   movePlace,
   raisePlace,
@@ -151,6 +152,18 @@ export type BodyRewrite =
       line: number;
       openLine: string;
       shape: PlaceShape;
+    }
+  | {
+      /**
+       * 🔴 **板どうしを線で繋ぐ**(#530 段③d)── 掴んで引いた結果。
+       * ⚠ **本文が増える**(名前の無い板には `#板1` が足される)ので、
+       *   門は移動と同じだけ持つ ── 判定は `place-notation.ts` の 1 本。
+       */
+      kind: 'place-connect';
+      from: { line: number; openLine: string };
+      to: { line: number; openLine: string };
+      fromAnchor: string | null;
+      toAnchor: string | null;
     }
   | {
       /**
@@ -509,6 +522,14 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
   if (rewrite.kind === 'place-raise') return raisePlace(body, rewrite);
   if (rewrite.kind === 'place-shape') return setPlaceShape(body, rewrite, rewrite.shape);
   if (rewrite.kind === 'place-add') return addPlace(body, rewrite.x, rewrite.y);
+  if (rewrite.kind === 'place-connect') {
+    return connectPlaces(body, {
+      from: rewrite.from,
+      to: rewrite.to,
+      fromAnchor: rewrite.fromAnchor,
+      toAnchor: rewrite.toAnchor,
+    });
+  }
   if (rewrite.kind === 'link-move') return moveLinkLine(body, rewrite);
   if (rewrite.kind === 'csv-cell') return rewriteCsvCell(body, rewrite);
   if (rewrite.kind === 'csv-shape') return rewriteCsvShape(body, rewrite);
