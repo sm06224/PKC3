@@ -21,8 +21,12 @@
  */
 
 import {
+  anchorSpell,
+  ANCHOR_DEN_MAX,
+  placeLineAnchorOf,
   placeLineOf,
   placeLineTargetId,
+  type PlaceAnchor,
   type PlaceRect,
 } from '@features/markdown/place-line';
 // 🔑 名前に使える字は 1 か所から読む(#530、§7 ── 綴りを写して増やさない)
@@ -199,6 +203,20 @@ function lineTrouble(raw: string | null, byId: ReadonlyMap<string, HTMLElement>)
   return `「${id}」という名前の付箋がありません`;
 }
 
+/**
+ * 🔴 **接続点の綴りが読めないときは、黙って真ん中へ繋がない**(#530 段③b)。
+ *
+ * ⚠ `righ` と打った人に黙って真ん中へ繋ぐと、**線は出る**ので誤りに気づけない
+ *   ── 「なんとなく違う所から出ている」としか見えない(いちばん気づけない外し方)。
+ * 🔑 だから読めない字は**名指しで断る** ── 綴りは `place-line.ts` の 1 本から読む。
+ */
+function anchorTrouble(raw: string | null): string | null {
+  const a = placeLineAnchorOf(raw);
+  if (a.kind !== 'bad') return null;
+  return `つなぎ目に「${a.raw}」は使えません ── top / right / bottom / left か、`
+    + `辺のどこかなら right@1/4 のように書きます(分母は ${ANCHOR_DEN_MAX} まで)`;
+}
+
 /** 引けない理由を、その宣言の塊の中に 1 行置く(冪等)。⚠ 置いた塊は CSS が隠さない。 */
 function ensureLineNote(el: HTMLElement, why: string): void {
   let note = el.querySelector<HTMLElement>(':scope > [data-pkc-field="place-line-note"]');
@@ -245,32 +263,73 @@ function applyPlaceLines(host: HTMLElement, boards: readonly HTMLElement[]): num
   for (const el of boards) if (el.id !== '') byId.set(el.id, el);
   const svg = document.createElementNS(SVG_NS, 'svg');
   svg.setAttribute('data-pkc-field', 'place-lines');
-  let drawn = 0;
+  /**
+   * 🔴 **2 巡する**(#530 段③b)── 1 巡目で「同じ 2 枚の間に何本あるか」を数え、
+   * 2 巡目でその数に応じて辺の上に散らす。
+   * ⚠ 1 巡で書こうとすると**総数が最後まで分からない**ので、先に描いた線を
+   *   後から動かすことになる(描くたびに位置が変わる = 冪等でない)。
+   * 🔑 並び順は**本文の順**である ── 順番を決めないと、同じ本文が
+   *   描くたびに違う並びになる。
+   */
+  const ready: Array<{
+    readonly d: HTMLElement;
+    readonly from: HTMLElement;
+    readonly to: HTMLElement;
+    readonly pinFrom: PlaceAnchor | null;
+    readonly pinTo: PlaceAnchor | null;
+    readonly pair: string;
+  }> = [];
   for (const d of decls) {
     const rawFrom = d.getAttribute('data-pkc-from');
     const rawTo = d.getAttribute('data-pkc-to');
-    const why = lineTrouble(rawFrom, byId) ?? lineTrouble(rawTo, byId);
+    const why =
+      lineTrouble(rawFrom, byId)
+      ?? lineTrouble(rawTo, byId)
+      ?? anchorTrouble(rawFrom)
+      ?? anchorTrouble(rawTo);
     if (why !== null) {
       ensureLineNote(d, why);
       continue;
     }
-    const from = byId.get(placeLineTargetId(rawFrom)!)!;
-    const to = byId.get(placeLineTargetId(rawTo)!)!;
-    // ⚠ 自分自身を指す線は、断りも出さない ── 引けないのではなく**引く物が無い**
-    if (from === to) {
-      clearLineNote(d);
-      continue;
-    }
+    const idFrom = placeLineTargetId(rawFrom)!;
+    const idTo = placeLineTargetId(rawTo)!;
+    const from = byId.get(idFrom)!;
+    const to = byId.get(idTo)!;
     clearLineNote(d);
-    const ln = placeLineOf(rectOf(from), rectOf(to));
+    // ⚠ 自分自身を指す線は、断りも出さない ── 引けないのではなく**引く物が無い**
+    if (from === to) continue;
+    const a = placeLineAnchorOf(rawFrom);
+    const b = placeLineAnchorOf(rawTo);
+    ready.push({
+      d,
+      from,
+      to,
+      pinFrom: a.kind === 'ok' ? a.anchor : null,
+      pinTo: b.kind === 'ok' ? b.anchor : null,
+      // 🔑 向きに依らず同じ組として数える ── a→b と b→a は「同じ 2 枚の間」である
+      pair: idFrom < idTo ? `${idFrom}\u0000${idTo}` : `${idTo}\u0000${idFrom}`,
+    });
+  }
+  const total = new Map<string, number>();
+  for (const r of ready) total.set(r.pair, (total.get(r.pair) ?? 0) + 1);
+  const seen = new Map<string, number>();
+  let drawn = 0;
+  for (const r of ready) {
+    const index = seen.get(r.pair) ?? 0;
+    seen.set(r.pair, index + 1);
+    const ln = placeLineOf(rectOf(r.from), rectOf(r.to), {
+      from: r.pinFrom,
+      to: r.pinTo,
+      spread: { index, count: total.get(r.pair) ?? 1 },
+    });
     const el = document.createElementNS(SVG_NS, 'line');
     el.setAttribute('x1', String(ln.x1));
     el.setAttribute('y1', String(ln.y1));
     el.setAttribute('x2', String(ln.x2));
     el.setAttribute('y2', String(ln.y2));
-    // 🔑 どの辺から出たかを焼く ── 段③b(束ねる)と smoke の観測点になる
-    el.setAttribute('data-pkc-line-from', ln.from);
-    el.setAttribute('data-pkc-line-to', ln.to);
+    // 🔑 どこから出たかを焼く ── 綴りは記法と**同じ字**(`right` / `right@1/4`)
+    el.setAttribute('data-pkc-line-from', anchorSpell(ln.from));
+    el.setAttribute('data-pkc-line-to', anchorSpell(ln.to));
     svg.append(el);
     drawn += 1;
   }

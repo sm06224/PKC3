@@ -114,7 +114,18 @@ export type DocxBlock =
    * 🔑 名前は**板の `#名前` と同じ綴り**で持つ ── 突き合わせは書き出し側でやる
    *   (ここで解決すると、指す先が無い線を捨ててよいかの判断が 2 か所に散る)。
    */
-  | { readonly kind: 'place-line'; readonly from: string; readonly to: string }
+  | {
+      readonly kind: 'place-line';
+      readonly from: string;
+      readonly to: string;
+      /**
+       * 🔑 **手で書いた接続点の綴り**(`right` / `right@1/4`)。書いていなければ `null`。
+       * ⚠ 字のまま運ぶ ── ここは docx と共通の入れ物なので、`place-line.ts` の
+       *   型を持ち込まない(綴りを読むのは pptx の側 1 か所である)。
+       */
+      readonly fromAnchor: string | null;
+      readonly toAnchor: string | null;
+    }
   | { readonly kind: 'table'; readonly rows: readonly (readonly DocxCell[])[] }
   /**
    * 🔴 **画像**(#187 段②)。⚠ **縦横比を保つ** ── PKC2 は全画像を 480×360 px に

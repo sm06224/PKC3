@@ -20,7 +20,11 @@
  *   「ボタンを押して何も起きない」が正常動作だった。
  */
 import { placeShapeOf } from '@features/markdown/place-shape';
-import { placeLineTargetId } from '@features/markdown/place-line';
+import {
+  anchorSpell,
+  placeLineAnchorOf,
+  placeLineTargetId,
+} from '@features/markdown/place-line';
 import type { DocxBlock, DocxCell, DocxRun } from '@features/export/docx';
 
 /** 走りに掛かる装飾(親から受け継ぐ)。 */
@@ -405,9 +409,24 @@ export function htmlToDocxBlocks(doc: Document): {
          *   PowerPoint へ出すと、そこで**繋がっていない線**になる
          *   (画面では理由が出るが、配った先では出ない)。
          */
-        const from = placeLineTargetId(el.getAttribute('data-pkc-from'));
-        const to = placeLineTargetId(el.getAttribute('data-pkc-to'));
-        if (from !== null && to !== null) blocks.push({ kind: 'place-line', from, to });
+        const rawFrom = el.getAttribute('data-pkc-from');
+        const rawTo = el.getAttribute('data-pkc-to');
+        const from = placeLineTargetId(rawFrom);
+        const to = placeLineTargetId(rawTo);
+        /**
+         * 🔑 **手で書いた接続点は、辺だけ運ぶ**(#530 段③b)。
+         * ⚠ 読めない綴りは**運ばない**(`null`)── 画面は理由を出すが、
+         *   配った先では出せないので、こちらで決めた辺に付く。
+         */
+        const spell = (raw: string | null): string | null => {
+          const a = placeLineAnchorOf(raw);
+          return a.kind === 'ok' ? anchorSpell(a.anchor) : null;
+        };
+        if (from !== null && to !== null) {
+          blocks.push({
+            kind: 'place-line', from, to, fromAnchor: spell(rawFrom), toAnchor: spell(rawTo),
+          });
+        }
         continue;
       }
       if (el.classList.contains('pkc-place')) {

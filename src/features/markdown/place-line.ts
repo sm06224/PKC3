@@ -1,6 +1,5 @@
 /**
- * 🔴 **板どうしを繋ぐ線の計算**(#530 段③a。user 裁定 2026-09-14
- *   「線の形は選べるように / 曲線も / 束ねるためのアンカーも」)。
+ * 🔴 **板どうしを繋ぐ線の計算**(#530 段③a〜③b。user 裁定 2026-09-14 / 2026-09-15)。
  *
  * ## 🔑 線は「置いた物」ではない
  *
@@ -9,16 +8,26 @@
  * 🔑 だから**板を動かせば線も付いてくる**。座標を書く形にすると、
  *   板を動かした日に線だけ置き去りになる(そして本文には気づく手がかりが無い)。
  *
- * ## ⚠ 段③a が持たないもの(設計 doc の段の切り方どおり)
+ * ## 🔴 接続点は「辺 + 辺のどこか」である(user 裁定 2026-09-15)
  *
- * | | いま | いつ |
- * |---|---|---|
- * | 接続点を**手で**指す(`from=a:right`) | 🔑 **綴りは受けるが、まだ効かない**(自動で選ぶ) | 段③b |
- * | 同じ接続点へ来た線を**束ねる** | 無し | 段③b |
- * | 形(直角 / 曲線) | **まっすぐ 1 本**だけ | 段③c |
+ * user が求めていたこと(こちらの言葉で):**4 辺の真ん中だけでは足りない。
+ * 必要に応じて「その中点」「さらにその中点」と細かくできること。そして、
+ * 同じ 2 枚の板の間でも、経路が違う繋がりは違う物として描けること。**
  *
- * 🔑 **綴りだけ先に受ける**のは、書いた人に「何も起きない」を見せないためである
- *   ── 設計 doc に載っている字なので、user は先に書きうる。
+ * 🔑 だから接続点は `辺` ではなく **`辺 + 分数`** を持つ:
+ *
+ * ```
+ *          top@1/4   top   top@3/4
+ *              │      │      │
+ *   left@1/4 ──┼──────┼──────┼── right@1/4
+ *              │      │      │
+ *       left ──┼─────[板]────┼── right
+ * ```
+ *
+ * ⚠ **分数で持つ**(`0.25` のような小数ではない)── 小数にすると
+ *   `1/3` が往復で `0.333…` になり、**書いた字と焼いた字が食い違う**。
+ * ⚠ **角(0 と 1)は持たない** ── 角は 2 通りに綴れてしまう
+ *   (`top@1` と `right@0` が同じ点)ので、綴りが 1 つに決まらない。
  *
  * ## ⚠ ここは計算だけを持つ(features 層)
  *
@@ -35,22 +44,88 @@ export interface PlaceRect {
 }
 
 /**
- * 線が止まる所。⚠ **中心は持たない** ── 中心へ刺すと線が板の上を横切る
+ * 線が止まる**辺**。⚠ **中心は持たない** ── 中心へ刺すと線が板の上を横切る
  * (設計 doc §8.1 が名指しで挙げた、アンカーが無いときの実害そのもの)。
  */
-export type PlaceAnchor = 'top' | 'right' | 'bottom' | 'left';
+export type PlaceEdge = 'top' | 'right' | 'bottom' | 'left';
 
 /** ⚠ **並び順が tie-break である**(同じ距離なら先に在るほうを採る)。 */
-export const PLACE_ANCHORS: readonly PlaceAnchor[] = ['top', 'right', 'bottom', 'left'];
+export const PLACE_EDGES: readonly PlaceEdge[] = ['top', 'right', 'bottom', 'left'];
 
-/** その接続点の座標(辺の真ん中)。 */
+/** 分母の上限。⚠ これより細かい点は**画面で押し分けられない**ので受けない。 */
+export const ANCHOR_DEN_MAX = 64;
+
+/**
+ * 接続点 1 つ ── **辺のどこか**。`num / den` は **0 と 1 の間**(既約)。
+ *
+ * ⚠ 辺を進む向きは **上下の辺 = 左から右 / 左右の辺 = 上から下**
+ *   (字を読む向き)。ここを揃えないと `top@1/4` と `bottom@1/4` が
+ *   **反対側**を指し、斜めの線だけ理由の分からないねじれ方をする。
+ */
+export interface PlaceAnchor {
+  readonly edge: PlaceEdge;
+  readonly num: number;
+  readonly den: number;
+}
+
+const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
+
+/**
+ * 接続点を作る(既約にして返す)。既定は**辺の真ん中**。
+ *
+ * ⚠ **受けられない値は真ん中へ倒す** ── ここは内部の組み立て口なので、
+ *   落とすのではなく**必ず 1 点を返す**(描画が途中で止まらない)。
+ * 🔑 user が書いた字の検査は `parseAnchorSpell` の側でやる ── そちらは
+ *   `null` を返すので、描画器が**理由を画面に出せる**。
+ */
+export function anchorOf(edge: PlaceEdge, num = 1, den = 2): PlaceAnchor {
+  const n = Math.round(num);
+  const d = Math.round(den);
+  if (!Number.isFinite(n) || !Number.isFinite(d) || d < 2 || n < 1 || n >= d) {
+    return { edge, num: 1, den: 2 };
+  }
+  const g = gcd(n, d);
+  return { edge, num: n / g, den: d / g };
+}
+
+/** 辺のどこか(0〜1)。⚠ 割り算はここ 1 か所 ── 呼ぶ側で `num/den` と書かない。 */
+export function anchorRatio(a: PlaceAnchor): number {
+  return a.num / a.den;
+}
+
+/** その接続点の座標。 */
 export function anchorPoint(r: PlaceRect, a: PlaceAnchor): { x: number; y: number } {
-  const cx = r.x + r.w / 2;
-  const cy = r.y + r.h / 2;
-  if (a === 'top') return { x: cx, y: r.y };
-  if (a === 'bottom') return { x: cx, y: r.y + r.h };
-  if (a === 'left') return { x: r.x, y: cy };
-  return { x: r.x + r.w, y: cy };
+  const t = anchorRatio(a);
+  if (a.edge === 'top') return { x: r.x + r.w * t, y: r.y };
+  if (a.edge === 'bottom') return { x: r.x + r.w * t, y: r.y + r.h };
+  if (a.edge === 'left') return { x: r.x, y: r.y + r.h * t };
+  return { x: r.x + r.w, y: r.y + r.h * t };
+}
+
+/**
+ * 🔑 **綴りは 1 か所で作る**(`right` / `right@1/4`)。
+ *
+ * ⚠ 真ん中は**辺の名前だけ**で綴る ── `right@1/2` と `right` が別物に見えると、
+ *   本文と焼いた印を突き合わせる人が**2 通りの字を覚える**羽目になる。
+ * ⚠ 画面に焼く `data-pkc-line-from` も**この字**である ── 記法と焼き印で
+ *   別の綴りを使うと、検査が「どちらの字か」を毎回選ぶことになる(CLAUDE.md §7)。
+ */
+export function anchorSpell(a: PlaceAnchor): string {
+  return a.num * 2 === a.den ? a.edge : `${a.edge}@${a.num}/${a.den}`;
+}
+
+const SPELL_RE = /^(top|right|bottom|left)(?:@(\d{1,3})\/(\d{1,3}))?$/;
+
+/** 綴りを読む。⚠ **受けられない字は `null`**(黙って真ん中へ倒さない)。 */
+export function parseAnchorSpell(raw: string): PlaceAnchor | null {
+  const m = SPELL_RE.exec(raw.trim());
+  if (m === null) return null;
+  const edge = m[1] as PlaceEdge;
+  if (m[2] === undefined) return anchorOf(edge);
+  const n = Number(m[2]);
+  const d = Number(m[3]);
+  if (d < 2 || d > ANCHOR_DEN_MAX || n < 1 || n >= d) return null;
+  return anchorOf(edge, n, d);
 }
 
 /** 引く線 1 本。 */
@@ -64,42 +139,93 @@ export interface PlaceLine {
 }
 
 /**
- * 🔴 **いちばん近い接続点どうしを結ぶ**(段③a の「接続点は自動」)。
+ * 同じ 2 枚の間に何本あるか。`index` は 0 始まり、`count` はその総数。
  *
- * 🔑 **16 通り(4 × 4)を総当たりする** ── 板は動くので、向きを決め打つと
- *   動かした瞬間に線が板を横切る。⚠ 総当たりといっても 16 回である。
- * ⚠ **同じ距離のときは `PLACE_ANCHORS` の並び順で決める**(`<` で比べる)──
- *   決めないと、描くたびに違う辺から出る形になりうる。
+ * 🔑 **n 本なら `k/(n+1)`** に置く(1 本なら真ん中 = これまでと 1px も変わらない)。
+ * ⚠ user 裁定の「経路が同一ではない繋がり」がこれ ── 散らさないと、
+ *   2 本目以降が**1 本目の真下に完全に重なって消える**。
  */
-export function placeLineOf(from: PlaceRect, to: PlaceRect): PlaceLine {
-  let best: PlaceLine | null = null;
-  let bestD = Infinity;
-  for (const a of PLACE_ANCHORS) {
-    const p = anchorPoint(from, a);
-    for (const b of PLACE_ANCHORS) {
-      const q = anchorPoint(to, b);
-      const d = (p.x - q.x) ** 2 + (p.y - q.y) ** 2;
-      if (d < bestD) {
-        bestD = d;
-        best = { x1: p.x, y1: p.y, x2: q.x, y2: q.y, from: a, to: b };
-      }
-    }
-  }
-  // ⚠ `PLACE_ANCHORS` が空でない限り必ず入るが、型のために既定を置く
-  return best ?? { x1: from.x, y1: from.y, x2: to.x, y2: to.y, from: 'top', to: 'top' };
+export interface PlaceSpread {
+  readonly index: number;
+  readonly count: number;
+}
+
+/** 手で書いた接続点(片側だけでもよい)と、散らし方。 */
+export interface PlacePin {
+  readonly from?: PlaceAnchor | null;
+  readonly to?: PlaceAnchor | null;
+  readonly spread?: PlaceSpread | null;
 }
 
 /**
- * 🔑 **`from=a:right` の「どの板か」だけを取り出す**(段③a)。
+ * 🔴 **いちばん近い辺どうしを結び、同じ 2 枚の線は辺の上で散らす**(段③b)。
  *
- * ⚠ 接続点(`:right`)は**段③b まで効かない**が、**綴りは受ける** ──
- *   設計 doc に載っている字なので user は先に書きうる。受けないと
- *   「書いたのに線が 1 本も出ない」になり、**綴りを間違えたと読む**
- *   (いちばん気づけない外し方)。
+ * 🔑 手順は **2 段**である:
+ * 1. **辺を決める**(16 通りを総当たり)── ⚠ このとき使うのは
+ *    **辺の真ん中**であって、散らした後の点ではない。
+ *    🔑 そうしないと、同じ 2 枚の間の線が**本ごとに違う辺**から出て、
+ *    平行に並ばない(1 本目だけ横から、2 本目は下から、という見え方になる)。
+ * 2. **辺の上を滑らせる**(`k/(n+1)`)── 手で書いた側は滑らせない。
+ *
+ * ⚠ **同じ距離のときは `PLACE_EDGES` の並び順で決める**(`<` で比べる)──
+ *   決めないと、描くたびに違う辺から出る形になりうる。
+ */
+export function placeLineOf(from: PlaceRect, to: PlaceRect, pin: PlacePin = {}): PlaceLine {
+  const fromEdges = pin.from ? [pin.from.edge] : PLACE_EDGES;
+  const toEdges = pin.to ? [pin.to.edge] : PLACE_EDGES;
+  let bestA: PlaceEdge = fromEdges[0]!;
+  let bestB: PlaceEdge = toEdges[0]!;
+  let bestD = Infinity;
+  for (const ea of fromEdges) {
+    const p = anchorPoint(from, pin.from ?? anchorOf(ea));
+    for (const eb of toEdges) {
+      const q = anchorPoint(to, pin.to ?? anchorOf(eb));
+      const d = (p.x - q.x) ** 2 + (p.y - q.y) ** 2;
+      if (d < bestD) {
+        bestD = d;
+        bestA = ea;
+        bestB = eb;
+      }
+    }
+  }
+  const s = pin.spread ?? null;
+  const num = s !== null && s.count >= 1 ? s.index + 1 : 1;
+  const den = s !== null && s.count >= 1 ? s.count + 1 : 2;
+  const a = pin.from ?? anchorOf(bestA, num, den);
+  const b = pin.to ?? anchorOf(bestB, num, den);
+  const p = anchorPoint(from, a);
+  const q = anchorPoint(to, b);
+  return { x1: p.x, y1: p.y, x2: q.x, y2: q.y, from: a, to: b };
+}
+
+/**
+ * 🔑 **`from=a:right@1/4` の「どの板か」だけを取り出す**(段③a)。
+ *
  * ⚠ 空の名前は `null`(id を持たない板は指せない)。
  */
 export function placeLineTargetId(raw: string | null): string | null {
   if (raw === null) return null;
   const id = raw.split(':')[0]?.trim() ?? '';
   return id === '' ? null : id;
+}
+
+/**
+ * `from=` / `to=` に書かれた接続点。⚠ **3 つに分ける**(2 値にしない)──
+ * 「書いていない」と「書いたが読めない」を混ぜると、`righ` と打った人に
+ * **何も言わずに真ん中へ繋ぐ**ことになり、綴りの誤りが永久に見つからない。
+ */
+export type AnchorRead =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'ok'; readonly anchor: PlaceAnchor }
+  | { readonly kind: 'bad'; readonly raw: string };
+
+/** `a:right@1/4` の後ろ半分を読む。 */
+export function placeLineAnchorOf(raw: string | null): AnchorRead {
+  if (raw === null) return { kind: 'none' };
+  const i = raw.indexOf(':');
+  if (i < 0) return { kind: 'none' };
+  const rest = raw.slice(i + 1).trim();
+  if (rest === '') return { kind: 'none' };
+  const a = parseAnchorSpell(rest);
+  return a === null ? { kind: 'bad', raw: rest } : { kind: 'ok', anchor: a };
 }

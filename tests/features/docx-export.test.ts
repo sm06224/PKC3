@@ -355,15 +355,33 @@ describe('\u{1f534} 自由配置の板の印(#530 段①)', () => {
     const r = blocksOf(
       '<div class="pkc-format-block pkc-line" data-pkc-from="今日" data-pkc-to="明日"></div>',
     );
-    expect(r.blocks).toEqual([{ kind: 'place-line', from: '今日', to: '明日' }]);
+    expect(r.blocks).toEqual([
+      { kind: 'place-line', from: '今日', to: '明日', fromAnchor: null, toAnchor: null },
+    ]);
   });
 
-  it('⚠ 接続点つきの綴り(`a:right`)でも、板の名前だけを運ぶ', () => {
-    const r = blocksOf(
-      '<div class="pkc-format-block pkc-line" data-pkc-from="今日:right" data-pkc-to="明日:left">'
-        + '</div>',
+  /**
+   * 🔴 **手で書いた接続点は、書いたまま運ぶ**(#530 段③b)。
+   * 🔑 **分数まで運ぶ** ── 「PowerPoint は 4 点しか持たないので辺へ寄せる」のは
+   *   **pptx の側の事情**である。ここで先に削ると、同じ判断が 2 か所に散る(§7)。
+   * ⚠ 読めない綴りは `null`(= 自動)── 配った先では理由を出せないので、
+   *   黙って辺を決めるしかない。画面の側は名指しで断る。
+   */
+  it('🔴 接続点つきの綴りは書いたまま運ぶ / 読めない字は自動へ倒す(#530 段③b)', () => {
+    const one = blocksOf(
+      '<div class="pkc-format-block pkc-line" data-pkc-from="今日:right@1/4" '
+        + 'data-pkc-to="明日:left"></div>',
     );
-    expect(r.blocks).toEqual([{ kind: 'place-line', from: '今日', to: '明日' }]);
+    expect(one.blocks).toEqual([
+      { kind: 'place-line', from: '今日', to: '明日', fromAnchor: 'right@1/4', toAnchor: 'left' },
+    ]);
+    const bad = blocksOf(
+      '<div class="pkc-format-block pkc-line" data-pkc-from="今日:righ" '
+        + 'data-pkc-to="明日"></div>',
+    );
+    expect(bad.blocks, '読めない綴りを接続点として運んでいる').toEqual([
+      { kind: 'place-line', from: '今日', to: '明日', fromAnchor: null, toAnchor: null },
+    ]);
   });
 
   it('⚠ 片方でも読めない線は運ばない(繋がらない線を配らない)', () => {
@@ -390,7 +408,7 @@ describe('\u{1f534} 自由配置の板の印(#530 段①)', () => {
   it('🔴 線の宣言は Word の本文を 1 バイトも増やさない(#530 段③e)', () => {
     const body: DocxBlock[] = [{ kind: 'p', runs: [{ text: '本文' }] }];
     const withLine = part(
-      buildDocx([...body, { kind: 'place-line', from: 'a', to: 'b' }], '題名', ISO),
+      buildDocx([...body, { kind: 'place-line', from: 'a', to: 'b', fromAnchor: null, toAnchor: null }], '題名', ISO),
       'word/document.xml',
     );
     const without = part(buildDocx(body, '題名', ISO), 'word/document.xml');

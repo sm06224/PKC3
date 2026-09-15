@@ -38,8 +38,13 @@ const place = (
   name: string | null = null,
 ): ExportBlock => ({ kind: 'place', x, y, w, h, shape, name, span });
 
-/** 板どうしを繋ぐ線の宣言(#530 段③e)。 */
-const pline = (from: string, to: string): ExportBlock => ({ kind: 'place-line', from, to });
+/** 板どうしを繋ぐ線の宣言(#530 段③e / 段③b で接続点が付いた)。 */
+const pline = (
+  from: string,
+  to: string,
+  fromAnchor: string | null = null,
+  toAnchor: string | null = null,
+): ExportBlock => ({ kind: 'place-line', from, to, fromAnchor, toAnchor });
 
 describe('\u{1f534} 自由配置の板が「置いたとおりの場所」で出る(#530 段①)', () => {
   /**
@@ -893,6 +898,75 @@ describe('🔴 板どうしの線が PowerPoint でも繋がる(#530 段③e)', 
     expect(c.st[1], '楕円の右辺が 6 でない(四角の番号を使っている)').toBe(6);
     // ⚠ 対照群: 相手の四角は今までどおり 1(= 形ごとに引けている)
     expect(c.end[1], '四角の左辺が 1 でない').toBe(1);
+  });
+
+  /**
+   * 🔴 **手で書いた接続点の「辺」は、配った先でも守る**(#530 段③b)。
+   *
+   * ⚠ ここが無いと、画面では左から出ているのに PowerPoint では右から出る ──
+   *   **同じ本文なのに見え方が違う**という、いちばん説明のつかない食い違いになる。
+   * 🔑 対照群を同じ it に置く ── 書かなければ自動(右 → 左)である。
+   */
+  it('🔴 手で書いた辺が、配った先でも効く(#530 段③b)', () => {
+    const boards: readonly ExportBlock[] = [
+      place(0, 0, 200, 100, 1, 'rect', 'a'), p('左'),
+      place(400, 0, 200, 100, 1, 'rect', 'b'), p('右'),
+    ];
+    const pinned = cxns(partOf(
+      buildPptx([...boards, pline('a', 'b', 'top', 'bottom')], { title: 'T' }),
+      'ppt/slides/slide1.xml',
+    ))[0]!;
+    expect(pinned.st[1], '手で書いた「上」(0)が効いていない').toBe(0);
+    expect(pinned.end[1], '手で書いた「下」(2)が効いていない').toBe(2);
+    // ⚠ 対照群 ── 書かなければ自動で右(3) → 左(1)
+    const auto = cxns(partOf(
+      buildPptx([...boards, pline('a', 'b')], { title: 'T' }),
+      'ppt/slides/slide1.xml',
+    ))[0]!;
+    expect([auto.st[1], auto.end[1]], '書かなくても同じ辺になっている').toEqual([3, 1]);
+  });
+
+  /**
+   * 🔴 **辺のどこか(分数)は、辺の真ん中へ寄せる**(#530、実測 2026-09-15)。
+   *
+   * ⚠ PowerPoint の図形は接続点を **4 つ**しか持たない ── `idx` を 4 以上にすると
+   *   実測で **(0,0) へ潰れる**(= 線が原点へ飛ぶ)。だから寄せる。
+   * 🔑 だから同じ 2 枚の間の 2 本は、配った先では**重なって見える** ──
+   *   それを「線が 1 本に減る」と読まないよう、**本数**も併せて見る。
+   */
+  it('🔴 分数つきの接続点は、辺の真ん中へ寄せる(原点へ飛ばさない)', () => {
+    const r = buildPptx(
+      [
+        place(0, 0, 200, 100, 1, 'rect', 'a'), p('左'),
+        place(400, 0, 200, 100, 1, 'rect', 'b'), p('右'),
+        pline('a', 'b', 'right@1/4', 'left@3/4'),
+        pline('a', 'b', 'right@7/8', 'left@1/8'),
+      ],
+      { title: 'T' },
+    );
+    const cs = cxns(partOf(r, 'ppt/slides/slide1.xml'));
+    expect(cs, '線の本数が減っている(寄せたついでに捨てている)').toHaveLength(2);
+    for (const c of cs) {
+      expect(c.st[1], '右辺(3)へ寄せていない ── 4 以上は配った先で原点へ飛ぶ').toBe(3);
+      expect(c.end[1], '左辺(1)へ寄せていない').toBe(1);
+    }
+  });
+
+  /**
+   * ⚠ **読めない綴りは自動へ倒す**(配った先では理由を出せない)。
+   * 🔑 画面の側は名指しで断る ── `place-board.test.ts` がそちらを見ている。
+   */
+  it('⚠ 読めない接続点は、自動で選んだ辺になる', () => {
+    const r = buildPptx(
+      [
+        place(0, 0, 200, 100, 1, 'rect', 'a'), p('左'),
+        place(400, 0, 200, 100, 1, 'rect', 'b'), p('右'),
+        pline('a', 'b', 'righ', null),
+      ],
+      { title: 'T' },
+    );
+    const c = cxns(partOf(r, 'ppt/slides/slide1.xml'))[0]!;
+    expect([c.st[1], c.end[1]], '読めない綴りで線が壊れた').toEqual([3, 1]);
   });
 
   it('⚠ 指す先が無い線は出さない(配った先では理由を出せないため)', () => {

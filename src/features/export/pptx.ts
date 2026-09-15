@@ -15,7 +15,13 @@
  */
 
 import type { PlaceShape } from '../markdown/place-shape';
-import { placeLineOf, type PlaceAnchor } from '../markdown/place-line';
+import {
+  anchorOf,
+  parseAnchorSpell,
+  placeLineOf,
+  type PlaceAnchor,
+  type PlaceEdge,
+} from '../markdown/place-line';
 import type { DocxBlock, DocxCell, DocxRun } from './docx';
 import { xmlEscape } from './docx';
 
@@ -115,6 +121,18 @@ export interface BoardItem {
 export interface BoardLink {
   readonly from: string;
   readonly to: string;
+  /**
+   * 🔑 **手で書いた接続点の綴り**(`right` / `right@1/4`)。書いていなければ `null`。
+   *
+   * 🔴 **辺だけ効く ── 辺のどこか(分数)は「辺の真ん中」へ寄せる**
+   *   (#530、実測 2026-09-15)。⚠ PowerPoint の図形は接続点を **4 つ**しか
+   *   持たないので、`right@1/4` を書いても配った先では右辺の真ん中に付く。
+   * ⚠ 自前の接続点一覧(`custGeom` + `cxnLst`)なら 5 つ目以降も**書ける**が、
+   *   LibreOffice はそれを**角へずらして描いた**(実測)── いま 4/4 が正確に
+   *   当たっている物を、確かめていない物と交換しないので**寄せる側**にしてある。
+   */
+  readonly fromAnchor: string | null;
+  readonly toAnchor: string | null;
 }
 
 /**
@@ -133,7 +151,7 @@ export interface BoardLink {
  * **少しずれた所へ刺さる** ── 線は引けているので**見た目では気づけない**。
  * 🔑 `Record<PlaceShape, …>` で受ける ── 形を足して書き忘れたら tsc が落とす。
  */
-const CXN_IDX: Record<PlaceShape, Record<PlaceAnchor, number>> = {
+const CXN_IDX: Record<PlaceShape, Record<PlaceEdge, number>> = {
   rect: { top: 0, left: 1, bottom: 2, right: 3 },
   round: { top: 0, left: 1, bottom: 2, right: 3 },
   ellipse: { top: 0, left: 2, bottom: 4, right: 6 },
@@ -264,7 +282,9 @@ export function splitIntoSlides(
       while (i < blocks.length) {
         const p = blocks[i]!;
         if (p.kind === 'place-line') {
-          links.push({ from: p.from, to: p.to });
+          links.push({
+            from: p.from, to: p.to, fromAnchor: p.fromAnchor, toAnchor: p.toAnchor,
+          });
           i += 1;
           continue;
         }
@@ -821,15 +841,28 @@ function boardShapes(
     const b = byName.get(link.to);
     // ⚠ 指す先が無い線は**出さない**(画面は理由を出すが、配った先では出せない)
     if (a === undefined || b === undefined || a === b) continue;
-    const line = placeLineOf(rectOf(a), rectOf(b));
+    /**
+     * 🔑 **手で書いた辺は守る**(#530 段③b)── 書いていなければこれまでどおり自動。
+     * ⚠ 分数は**捨てる**(辺の真ん中へ寄せる)── 上の `BoardLink` の注記のとおり、
+     *   PowerPoint の図形は接続点を 4 つしか持たない。
+     */
+    const edgeOf = (spell: string | null): PlaceAnchor | null => {
+      if (spell === null) return null;
+      const parsed = parseAnchorSpell(spell);
+      return parsed === null ? null : anchorOf(parsed.edge);
+    };
+    const line = placeLineOf(rectOf(a), rectOf(b), {
+      from: edgeOf(link.fromAnchor),
+      to: edgeOf(link.toAnchor),
+    });
     drawn += 1;
     wires.push(
       connectorXml(
         // ⚠ 板の番号(`base + 100 + n`)と衝突させない ── 線は 300 番台から
         base + 300 + drawn,
         `線 ${drawn}`,
-        { id: base + 100 + a, idx: CXN_IDX[items[a]!.shape][line.from] },
-        { id: base + 100 + b, idx: CXN_IDX[items[b]!.shape][line.to] },
+        { id: base + 100 + a, idx: CXN_IDX[items[a]!.shape][line.from.edge] },
+        { id: base + 100 + b, idx: CXN_IDX[items[b]!.shape][line.to.edge] },
         toEmu({ x: line.x1, y: line.y1 }),
         toEmu({ x: line.x2, y: line.y2 }),
       ),
