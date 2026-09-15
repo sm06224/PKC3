@@ -25,6 +25,8 @@ import {
   placeLineTargetId,
   type PlaceRect,
 } from '@features/markdown/place-line';
+// 🔑 名前に使える字は 1 か所から読む(#530、§7 ── 綴りを写して増やさない)
+import { NAME_RE } from '@features/markdown/block-directive-attrs';
 
 /**
  * 🔑 **測れない所で使う大きさ**(happy-dom / まだ画面に出ていない面)。
@@ -181,16 +183,18 @@ function rectOf(el: HTMLElement): PlaceRect {
  *   **正反対の判断を理由も書かずにしていた**。user から見れば「名前で指す」という
  *   同じ操作なのに、板は教えてくれて線は黙る、という説明できない差になる。
  * 🔑 だから言い方も `ensureCard` に揃える ── **いちばん多い原因を先に言う**。
- * ⚠ 名前に ASCII 以外を書くと、`#名前` は**綴りの検査で黙って落ちる**
- *   (`block-directive-attrs.ts`)ので、`from=`/`to=` から見ると「その名前の付箋が無い」
- *   と区別が付かない ── **その形だけは名指しで言う**(いちばん踏みやすい)。
+ * ⚠ 名前に**使えない字**(空白・`.`・`=`・`{`・`}`・引用符)を書くと、`#名前` は
+ *   **綴りの検査で黙って落ちる**(`block-directive-attrs.ts`)ので、`from=`/`to=` から
+ *   見ると「その名前の付箋が無い」と区別が付かない ── **その形だけは名指しで言う**。
+ * 🔑 **日本語は使える**(#530、user 裁定 2026-09-15)── 判定は
+ *   `block-directive-attrs.ts` の `NAME_RE` **1 か所**から読む(綴りを写さない。§7)。
  */
 function lineTrouble(raw: string | null, byId: ReadonlyMap<string, HTMLElement>): string | null {
   const id = placeLineTargetId(raw);
   if (id === null) return '行き先が書かれていません(from= と to= の両方が要ります)';
   if (byId.has(id)) return null;
-  if (!/^[A-Za-z_][\w-]*$/.test(id)) {
-    return `名前に「${id}」は使えません ── 名前は英数字で書きます(#today のように)`;
+  if (!NAME_RE.test(id)) {
+    return `名前に「${id}」は使えません ── 空白・記号(. = { } " ')・数で始まる名前は使えません。日本語は使えます`;
   }
   return `「${id}」という名前の付箋がありません`;
 }

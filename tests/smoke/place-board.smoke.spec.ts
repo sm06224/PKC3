@@ -41,6 +41,27 @@ const BOARD = [
   '',
   ':::format{.pkc-line from=p1 to=p2}',
   ':::',
+  /**
+   * 🔴 **日本語の名前**(#530、user 裁定 2026-09-15)。
+   * ⚠ 上の `#p1` / `#p2` が**対照群**である ── 同じ筋書きの中に ASCII と日本語が
+   *   並ぶので、「両方まとめて壊れた日」を緑と読めない。
+   * 🔑 **新しい起動は増やさない**(#820 の規律)── 既に在る道中に足す。
+   */
+  '',
+  ':::format{#今日 .pkc-place x=120 y=300 w=200 h=120}',
+  'にほんご',
+  ':::',
+  '',
+  ':::format{#明日 .pkc-place x=460 y=300 w=200 h=120}',
+  'となり',
+  ':::',
+  '',
+  ':::format{.pkc-line from=今日 to=明日}',
+  ':::',
+  /** ⚠ 使えない名前は今までどおり断る ── 広げたのは**字の種類だけ**である。 */
+  '',
+  ':::format{.pkc-line from=a.b to=今日}',
+  ':::',
 ].join('\n');
 
 test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き替わる (#283 P4)', async ({ page }) => {
@@ -72,12 +93,41 @@ test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き
    *   **測って引く枝**はこの 1 行でしか走らない。
    * 🔑 **新しい起動は増やさない**(#820 の規律)── この筋書きの続きで確かめる。
    */
-  const line = page.locator('[data-pkc-field="place-lines"] line');
-  await expect(line, '線が 1 本も引かれていない').toHaveCount(1);
+  const lines = page.locator('[data-pkc-field="place-lines"] line');
+  /**
+   * ⚠ **2 本である** ── ASCII の `p1 → p2` と、日本語の `今日 → 明日`(#530)。
+   * 🔑 3 本目(`from=a.b`)は**引けてはいけない** ── 等値で見るので、
+   *   使えない名前を黙って通した日にここが落ちる。
+   */
+  await expect(lines, '線の本数が違う(日本語の名前が引けていないか、断るはずの線を引いた)')
+    .toHaveCount(2);
+  const line = lines.first();
   const x1Before = Number(await line.getAttribute('x1'));
   expect(Number.isFinite(x1Before) && x1Before > 0, `線の座標が読めない(x1=${x1Before})`).toBe(
     true,
   );
+  /**
+   * 🔴 **日本語の名前が、そのまま `id` として実ブラウザの DOM に載る**(#530)。
+   *
+   * ⚠ unit(happy-dom)では「名前を受けたか」しか見られない ── ここで見るのは
+   *   **実ブラウザが非 ASCII の `id` を素直に持つか**と、
+   *   **その名前で線が引けたか**(= 引く側が `Map` の鍵として名前を使えている)。
+   * 🔑 名前は `place-board.ts:244-245` で `el.id` から `Map` を作るだけで、
+   *   **選択子を組み立てる所は 1 つも無い**(実測)── だから risk はここに閉じる。
+   */
+  await expect(
+    page.locator('[data-pkc-region="detail"] [id="今日"]'),
+    '日本語の名前が id として載っていない',
+  ).toBeVisible();
+  /** ⚠ 使えない名前(`a.b`)には、断りの 1 行が出る ── 黙って消えない。 */
+  await expect(
+    page.locator('[data-pkc-field="place-line-note"]'),
+    '使えない名前の断りが出ていない(または、要らない断りが出ている)',
+  ).toHaveCount(1);
+  await expect(page.locator('[data-pkc-field="place-line-note"]')).toContainText(
+    '名前に「a.b」は使えません',
+  );
+
   /**
    * 🔴 **層が「板の無い所」で最前面に来ていない**(= `pointer-events: none` が効いている)。
    *
@@ -94,7 +144,15 @@ test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き
       const el = document.elementFromPoint(x as number, y as number);
       return el?.closest('[data-pkc-field]')?.getAttribute('data-pkc-field') ?? null;
     },
-    // ⚠ 板は x=120..440 / y=40..240 と x=460..660 に居るので、**その下**の空き地を採る
+    /**
+     * ⚠ 板が居るのは **x=120..440 と x=460..660 の 2 本の縦帯**(y=40..240 と y=300..420)。
+     * 🔑 だから空き地を **x で稼ぐ** ── `x≒40` は**いちばん左の板より 80px 左**で、
+     *   どの高さでも板に当たらない(実ブラウザで実測: 器 x=270 / 板の左端 x=390)。
+     * ⚠ **y に賭けない** ── #530 で日本語の板を y=300 に足した時点で「板の下が空き地」
+     *   ではなくなった。y を頼りにすると、板を 1 枚足した日に静かに裏返る
+     *   (CLAUDE.md §2「差は桁で稼ぐ」)。
+     * ⚠ 板を足す変更が来たら、**この式をもう一度読む**(左の帯に板を置いたら破れる)。
+     */
     [hostBox.x + 40, hostBox.y + hostBox.height - 12],
   );
   expect(gapField, '板の無い所で線の層が最前面に来ている(本文が押せなくなる)').not.toBe(

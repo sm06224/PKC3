@@ -646,13 +646,18 @@ describe('id の無い図表(user 報告 minor)', () => {
 
   /**
    * ⚠ **「不正な id」と「id を書いていない」を分ける**。
-   * `{id="あ"}` は **id を書いたのに使えない**形なので、今までどおり素のままで出す
-   * (打ち間違いの合図を黙って飲まない)。⚠ `{#あ い}` は属性の parser が
+   * `{id="a.b"}` は **id を書いたのに使えない**形なので、今までどおり素のままで出す
+   * (打ち間違いの合図を黙って飲まない)。⚠ `{#a b}` は属性の parser が
    * id として拾わない = 「書いていない」に落ちるので、こちらの経路には来ない
    * (実測。判定を 2 か所に持たないので、parser の寛容さがそのまま効く)。
+   *
+   * 🔴 **ここは 2026-09-15 まで `{id="あ"}` で pin していた**が、#530 の裁定
+   *   (名前に日本語を使えるように)で `あ` は**使える名前になった**。
+   * ⚠ つまりこの検査が実際に見ていたのは「使えない名前を断る」ではなく
+   *   「**ASCII でない名前を断る**」だった ── 代表を記号入りへ差し替えてある。
    */
   it('🔴 使えない id を書いたときは今までどおり素のまま', () => {
-    const html = renderMarkdown(':::figure{id="あ"}\n^^^ 説明\n:::\n', {
+    const html = renderMarkdown(':::figure{id="a.b"}\n^^^ 説明\n:::\n', {
       silentHallucinationWarnings: true,
     });
     expect(html).toContain(':::figure');
@@ -669,11 +674,113 @@ describe('id の無い図表(user 報告 minor)', () => {
     expect(html).toContain('[@]');
   });
 
+  /**
+   * 🔴 **2 つの形は、落ち方が違う**(#530 の変異試験 M5 が SURVIVED で教えた)。
+   *
+   * | 書き方 | 名前として | 画面に出るもの |
+   * |---|---|---|
+   * | `{#1st}`(`#` の形) | **書いていない**に落ちる | 🟢 **名無しの図**(描かれる) |
+   * | `{id="a.b"}`(`key=値` の形) | **書いたのに使えない** | ⚠ `:::figure` の**字のまま** |
+   *
+   * ⚠ この非対称は上の it のコメントに**書いてはあった**が、**見る検査が無かった** ──
+   *   だから `block-directive-attrs.ts` の `if (NAME_RE.test(id))` を `if (true)` に
+   *   する変異が、2 file 104 件を全部緑のまま**生き延びた**。
+   * 🔴 実測(変異を当てて測った):`if (true)` にすると `#1st` は **`<figure>` が消えて
+   *   `:::figure` が字のまま出る** ── user から見れば「記法が壊れた」である。
+   * 🔑 だから**描いた HTML の側**にも観測点を置く ── 判定を直に当てる test
+   *   (`tests/features/block-directive-attrs.test.ts`)とは**別の観測**である(§1)。
+   */
+  it('🔴 `#` の形で使えない名前を書いても、図は描かれる(名無し扱い)', () => {
+    for (const id of ['1st', 'a.b']) {
+      const html = renderMarkdown(`:::figure{#${id}}\n^^^ 説明\n:::\n`, {
+        silentHallucinationWarnings: true,
+      });
+      expect(html, `名無しの図にならない: #${id}`).toContain('<figure');
+      expect(html, `記法が字のまま出ている: #${id}`).not.toContain(':::figure');
+      expect(html, `使えない名前が id として付いた: #${id}`).not.toContain(`id="${id}"`);
+    }
+  });
+
   it('sentinel が漏れていない(PUA の文字が画面に出ない)', () => {
     const html = renderMarkdown(':::figure\n^^^ 説明\n:::\n', {
       silentHallucinationWarnings: true,
     });
     // ⚠ 2026-05-08 に実際に踏んだ形 ── 置換に当たらないと私用領域の文字が残る
     expect(/[-]/.test(html), 'sentinel が HTML に残っている').toBe(false);
+  });
+});
+
+/**
+ * 🔴 **名前に日本語が使える**(#530。裁定 2026-09-15)。
+ *
+ * ## ⚠ 何が起きていたか
+ *
+ * 名前を `[\w-]`(= **ASCII だけ**)で見ていたので、`:::figure{#今日}` と書くと
+ * 図にならないどころか、**内部の目印ごと素のテキストで画面に出た**
+ * (実測 `<p>OPENfigure今日1</p>`)。⚠ user は「今日」と名付けただけである。
+ *
+ * ## 🔑 門は 1 つではない ── grep は 3、実測は 5
+ *
+ * ⚠ `grep` で数えたら 3 か所だったが、**ASCII と日本語を並べて描いて比べたら 5 か所**
+ *   だった ── 通す門を広げても、**目印を外す側が狭いまま**なら画面には出ない。
+ * 🔑 だからここで見るのは**出来上がった HTML** である(途中の判定関数を呼ばない)。
+ *
+ * ## 🔑 対照群を必ず並べる
+ *
+ * ⚠ 日本語だけを見る検査は、**ASCII も日本語も等しく壊れた日**に緑のままになる。
+ *   だから同じ本文を名前だけ差し替えて **ASCII (`today`) と並べて**測る。
+ */
+describe('図の名前に日本語が使える(#530)', () => {
+  /** 図 1 枚 + それへの参照。⚠ 変えるのは**名前だけ**(他は 1 文字も動かさない)。 */
+  const doc = (id: string) => `:::figure{#${id}}\n^^^ 説明\n:::\n\n本文から [@${id}] を見る\n`;
+
+  /** ⚠ 先頭が対照群(ASCII)── ここが落ちる回は、以降の判定が全部無意味である。 */
+  const NAMES = ['today', '今日', '買い物-1', 'ｶﾅ', '図A'] as const;
+
+  it('🔴 日本語の名前でも図になる(記法が素のまま出ない)', () => {
+    for (const id of NAMES) {
+      const html = renderMarkdown(doc(id), { silentHallucinationWarnings: true });
+      expect(html, `図になっていない: ${id}`).toContain(`<figure id="${id}"`);
+      expect(html, `記法が素のまま出ている: ${id}`).not.toContain(':::figure');
+      expect(html, `説明が付いていない: ${id}`).toContain('図 1: 説明');
+    }
+  });
+
+  it('🔴 日本語の名前でも `[@…]` がその図を指す', () => {
+    for (const id of NAMES) {
+      const html = renderMarkdown(doc(id), { silentHallucinationWarnings: true });
+      expect(html, `参照が解決していない: ${id}`).toContain(`href="#${id}"`);
+      expect(html, `参照の字が出ていない: ${id}`).toContain('>図 1</a>');
+      expect(html, `参照が素のまま出ている: ${id}`).not.toContain(`[@${id}]`);
+    }
+  });
+
+  /**
+   * 🔴 **ここが本体である。** 直す前の壊れ方は「図にならない」ではなく
+   * 「**目印ごと画面に出る**」だった ── 目印を外す 2 か所も同じ字の定義を読む。
+   * ⚠ 上の 2 つだけでは足りない:目印が残っていても `<figure` と `href` は出る。
+   */
+  it('🔴 内部の目印(私用領域の字)が 1 つも残らない', () => {
+    for (const id of NAMES) {
+      const html = renderMarkdown(doc(id), { silentHallucinationWarnings: true });
+      expect(/[-]/.test(html), `目印が残っている: ${id}`).toBe(false);
+      // ⚠ 目印の字が消えても、間の綴り(`OPEN` / 種類 / 番号)が残ることがある
+      expect(html, `目印の綴りが残っている: ${id}`).not.toContain('OPENfigure');
+    }
+  });
+
+  /**
+   * ⚠ **対照群 ── 広げたのは「字の種類」だけ**。
+   * 🔑 記号・空白・先頭の数字は**今までどおり断る**(打ち間違いの合図を飲まない)。
+   *   ⚠ ここが緑にならないと、上の 3 つは「何でも通している」だけかもしれない。
+   */
+  it('⚠ 記号や数で始まる名前は、日本語でも使えないまま', () => {
+    for (const id of ['あ.い', 'a.b', '1st', '今日 明日', '今日"']) {
+      const html = renderMarkdown(`:::figure{id="${id}"}\n^^^ 説明\n:::\n`, {
+        silentHallucinationWarnings: true,
+      });
+      expect(html, `使えない名前を通した: ${id}`).toContain(':::figure');
+      expect(html, `使えない名前を通した: ${id}`).not.toContain('<figure');
+    }
   });
 });
