@@ -10,6 +10,7 @@
  */
 import {
   columnsFit,
+  crispColumnsWidth,
   effectiveColumns,
   minWidthForColumns,
   nextReadColumns,
@@ -24,6 +25,7 @@ import {
 import { TEXT_SCALE_ATTR } from './text-scale';
 import { sayFolded } from './fold-notify';
 import { appPhone } from './phone-layout';
+import { watchDevicePixelRatio } from './dpr-watch';
 
 const KEY = 'pkc3.read-columns';
 
@@ -267,6 +269,11 @@ export function fitColumnHeight(root: ParentNode, doc: Document = document): num
     // ⚠ **高さの変数も外す**(#527)── 残すと、段組みを切った後の縦送りの面でも
     //    図が段の高さに縮む(印だけ外して変数を残す = DOM が嘘をつく形)
     host?.style.removeProperty(COLUMN_H_VAR);
+    /**
+     * ⚠ **詰めた `padding-right` も外す**(#953)── 残すと、段組みを切った後の
+     *   ふつうの縦送りの本文が、理由もなく右へ数 px 狭くなる。
+     */
+    host?.style.removeProperty('padding-right');
     return null;
   };
   // ⚠ 切るときは**印も高さも外す** ── どちらかが残ると、縦送りの面が刈られる
@@ -329,6 +336,30 @@ export function fitColumnHeight(root: ParentNode, doc: Document = document): num
     return `段組みに戻しました(${eff} 段)`;
   });
   pane.setAttribute(COLUMNS_ON_ATTR, '');
+  /**
+   * 🔴 **段の境目が拡大率で滲まないよう、器の幅を数 px 詰める**(#953 / #551 C。
+   * 意味論は `features/read-columns.ts` の `crispColumnsWidth`)。
+   *
+   * ⚠ 詰めるのは `width` ではなく **`padding-right`**。`host` は flex の子で
+   *   幅を明示していない(cross-axis の stretch で決まる)ので、ここに `width`
+   *   を直に書くと**次に測る `paneWidth`(= `host.clientWidth`)が、
+   *   自分がさっき詰めた値を読み返してしまう** ── 測る値と書く値が同じ器を
+   *   奪い合うので、測り直すたびにさらに詰まっていく(輪になる)。
+   * 🔑 `padding-right` は `clientWidth`(border box − border)に**含まれる**
+   *   ので、いくら詰めても `clientWidth` は変わらない ──
+   *   `paneWidth` は常に「詰める前」の値のまま測れる。
+   *   ⚠ 一方 `columns` レイアウトが段の幅を割り出すのに使うのは
+   *   content box(`clientWidth` から padding を引いた分)なので、
+   *   ここで削った分がそのまま段の幅から削れる ── measure と write が
+   *   同じ値を取り合わない、この 2 つの違いが直しの要である。
+   */
+  {
+    const dpr = window.devicePixelRatio || 1;
+    const crispWidth = crispColumnsWidth(paneWidth, count, fp, dpr);
+    const pad = paneWidth - crispWidth;
+    const padNext = pad > 0 ? `${pad}px` : '';
+    if (host.style.paddingRight !== padNext) host.style.paddingRight = padNext;
+  }
   /**
    * 🔴 **印を付けた「後で」採り直す**(#505。ここで 1 度外した)。
    *
@@ -424,13 +455,20 @@ export function cycleReadColumns(
 /**
  * 🔴 **段の高さを、器の変化に追随させる**(#505)。
  *
- * ⚠ 見張るものが **3 つ**要る。1 つでも欠けると足りない:
+ * ⚠ 見張るものが **4 つ**要る。1 つでも欠けると足りない:
  *   ① **器の大きさ**(窓のリサイズ・ペインの畳み)── `ResizeObserver`
  *   ② 🔴 **本文の器の入れ替え**(ノートを開き直すと `detail.ts` が骨組みごと
  *      作り直す)── 新しい器には inline の高さが無いので、**そのままだと刈られる**。
  *      `MutationObserver` の `childList` で捕まえる
  *   ③ 🔴 **判定の入力そのもの**(#509)── 段数(`data-pkc-read-columns`)と
  *      **文字の大きさ**(`data-pkc-text-scale`)である。
+ *   ④ 🔴 **拡大率(`devicePixelRatio`)**(#953)── 段の境目を物理画素へ詰める
+ *      `crispColumnsWidth` の入力なので、拡大率だけが変わっても測り直さないと
+ *      **前の拡大率のまま詰めた幅**が残る。⚠ ①の `ResizeObserver` は当てにならない
+ *      ── ブラウザのズームは CSS px の器の幅も一緒に変わることが多いので偶然
+ *      拾えるが、**窓を別の密度の画面へ動かしただけ**では CSS px は 1px も動かず、
+ *      `ResizeObserver` は鳴らない。`watchDevicePixelRatio`(`dpr-watch.ts`)で
+ *      直接聞く。
  *
  *      🔴 **段数のほうは載っていなかった**(実測 2026-08-28)── これを外すと
  *      「段数を選んだ直後」の印が**付かない**(器も骨組みも変わらないので①②が
@@ -518,13 +556,22 @@ export function installColumnFit(root: HTMLElement, doc: Document = document): (
    * ⚠ かつて `resize` も聞いていたが、**変異試験 P が KILLED / Q が SURVIVED** で
    *   「窓を狭めたら `ResizeObserver` が先に鳴る」= 聞く必要が無いと分かった
    *   (2026-08-28)。⚠ 同じ物を 2 か所で見張らない(CLAUDE.md §7)。
+   *
+   * 🔴 **拡大率が変わったら測り直す**(#953。④)。
+   * ⚠ `mermaid-hydrate.ts` が図の焼き直しに使っている仕掛けと**同じ関数**を呼ぶ
+   *   (`dpr-watch.ts`)── 2 つ目の `matchMedia` 監視を自分で書かない(CLAUDE.md §7)。
+   *   ⚠ ただし観測器そのものは共有しない(呼び出しごとに独立した問いを 1 本張る)
+   *   ── ここは起動時に張って畳まない長命な監視、図の焼き直しは render のたびに
+   *   作っては畳む短命な監視で、**寿命が違う**(`dpr-watch.ts` の docstring)。
    */
+  const unwatchDpr = watchDevicePixelRatio(fit);
   rewatch();
   return () => {
     ro?.disconnect();
     inner?.disconnect();
     outer?.disconnect();
     rootAttrs?.disconnect();
+    unwatchDpr();
   };
 }
 

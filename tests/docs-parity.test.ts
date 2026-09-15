@@ -2316,6 +2316,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-15(#953 / #551 C ── 段組みの罫線)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-13-link-favicon" …` → 2ac66ea
+     */
+    'リンクのアプリに、リンク先の印を取り込めるようになりました',
+    /**
      * ⚠ **2026-09-15(#682 段② ── DuckDB)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-13-app-group-order" …` → 29103d8
      */

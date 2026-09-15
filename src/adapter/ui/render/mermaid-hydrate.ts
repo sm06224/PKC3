@@ -16,6 +16,7 @@
 import { cacheKey, renderToPng, readPalette, type Raster, type RasterKey } from './mermaid-raster';
 import { ACTION_ICONS, iconSpan } from './icons';
 import { markViewBig } from './view-big';
+import { watchDevicePixelRatio } from './dpr-watch';
 
 /** 1 つの器を埋めるのに要る情報。 */
 interface Pending {
@@ -362,21 +363,10 @@ export function hydrateDiagrams(
 
   /**
    * 🔑 **dpr が変わったら**(段㉘。ブラウザのズーム / 別の密度の画面へ移動)。
-   * ⚠ `matchMedia` に「dpr が変わった」を直接聞く口は無いので、**いまの値に
-   * 一致する問い**を張り、外れたら**張り直す**(外れた = 変わった)。
+   * ⚠ 仕掛けの中身は `dpr-watch.ts` へ出した(#953。段組みの罫線にも同じ入力が
+   *   要ると分かった ── 同じ判定を 2 か所に書かない、CLAUDE.md §7)。
    */
-  let mq: MediaQueryList | null = null;
-  const onDpr = (): void => {
-    armDpr();
-    schedule();
-  };
-  function armDpr(): void {
-    if (disposed || typeof window.matchMedia !== 'function') return;
-    mq?.removeEventListener('change', onDpr);
-    mq = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
-    mq.addEventListener('change', onDpr);
-  }
-  armDpr();
+  const unwatchDpr = watchDevicePixelRatio(schedule);
 
   // 🔑 見えたら描く
   const io = new IntersectionObserver((entries) => {
@@ -419,8 +409,7 @@ export function hydrateDiagrams(
       // ⚠ 段㉘ で足した引き金も**全部畳む**(観測器と待ち時間を残さない)
       ro?.disconnect();
       clearTimeout(settle);
-      mq?.removeEventListener('change', onDpr);
-      mq = null;
+      unwatchDpr();
       if (idle !== 0 && typeof cancelIdleCallback === 'function') cancelIdleCallback(idle);
       // ⚠ **表示の寿命終端で捨てる**(生成物を残さない)
       for (const u of urlOf.values()) URL.revokeObjectURL(u);

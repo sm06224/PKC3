@@ -9,7 +9,7 @@
  * ④ 🔴 **CSS の 3 本が揃っている**(1 本でも欠けると横送りにならない)
  * ⑤ 🔴 **縦のホイールが横送りになる**(無いとマウスだけで読めない)
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setFoldNotify } from '../../src/adapter/ui/render/fold-notify';
 import { initialState } from '../../src/adapter/state/app-state';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
@@ -21,6 +21,7 @@ import {
   isReadColumns,
   READ_COLUMN_CHOICES,
   columnsFit,
+  crispColumnsWidth,
   effectiveColumns,
   minWidthForColumns,
   nextReadColumns,
@@ -39,6 +40,7 @@ import {
   columnScroller,
   currentReadColumns,
   fitColumnHeight,
+  installColumnFit,
   installColumnWheel,
   READ_COLUMNS_ATTR,
   READ_COLUMNS_VAR,
@@ -545,6 +547,142 @@ describe('文字の大きさが段の下限に載る', () => {
 });
 
 /**
+ * 🔴 **段の境目を、拡大率で滲ませない**(#953 / #551 C。user 報告
+ * 「段組みの罫線が、拡大率によって線ごとに滲む」)。
+ *
+ * 実測(DPR 1.25・器 1679px・3 段): 1 本目は物理画素 696.0(整数・くっきり)、
+ * 2 本目は 1402.5(端数・滲む)── 原因は「段の幅」が物理画素の整数に乗らないこと。
+ * `crispColumnsWidth` は器の幅を数 px 詰めて、詰めた後の段の幅 × dpr が
+ * 整数になるようにする(線は描かない)。
+ */
+describe('🔴 段の境目を拡大率で滲ませない(#953 / #551 C)', () => {
+  const GAP = READ_COLUMN_GAP_PX;
+  const FP = READ_COLUMN_BASE_FONT_PX;
+
+  /**
+   * 🔑 「段の幅 × dpr が整数」を、浮動小数の誤差を許して見る。
+   * ⚠ `Number.isInteger` ではなく丸め差で見る ── `492 * 1.25` のような掛け算は
+   *   二進浮動小数点で厳密な整数にならないことがある(実測で 1e-10 未満の誤差)。
+   */
+  function isPhysicallyCrisp(colWidth: number, dpr: number): boolean {
+    const physical = colWidth * dpr;
+    return Math.abs(Math.round(physical) - physical) < 1e-6;
+  }
+
+  it('⚠ 空振り防止 ── 詰める前の幅は、そもそも端数が出ている', () => {
+    // 🔑 この前提が崩れていたら、下の test は「何も直っていなくても通る」。
+    const raw = (1000.4 - GAP) / 2; // n=2 のときの詰める前の段の幅
+    expect(isPhysicallyCrisp(raw, 1.25), '前提が崩れている(既に整数)').toBe(false);
+  });
+
+  /**
+   * 🔴 **本題**。dpr ∈ {1, 1.25, 1.5, 2, 2.5} × 段数 ∈ {1,2,3,4} ×
+   *   いくつかの器幅を全数当てる。⚠ 幅は境目から十分離れている
+   *   (最大の詰め幅 `4/1 = 4px` より 100px 以上余裕がある)ので、
+   *   「段数の頭打ちを跨ぐ」分岐はここでは 1 度も通らない
+   *   (跨ぐ分岐は下の別 test で名指しする)。
+   */
+  const DPRS = [1, 1.25, 1.5, 2, 2.5];
+  const COUNTS = [1, 2, 3, 4];
+  // ⚠ 端数を持たせる(.4 / .7 / .13)── 整数幅だと偶然クリスプになりやすい
+  const WIDTHS = [700, 1000.4, 1500.7, 2000.13];
+
+  for (const dpr of DPRS) {
+    for (const count of COUNTS) {
+      for (const width of WIDTHS) {
+        it(`dpr=${dpr} count=${count} width=${width}`, () => {
+          const n = effectiveColumns(width, count, FP);
+          const result = crispColumnsWidth(width, count, FP, dpr);
+
+          // 🔑 詰めても広げない(常に元の幅以下)
+          expect(result, '詰めたはずが広がった').toBeLessThanOrEqual(width);
+
+          if (!Number.isFinite(dpr) || dpr <= 0 || Number.isInteger(dpr) || n <= 1) {
+            expect(result, 'dpr が整数 / 1 段なのに詰めた').toBe(width);
+            return;
+          }
+
+          const rawColWidth = (width - (n - 1) * GAP) / n;
+          if (isPhysicallyCrisp(rawColWidth, dpr)) {
+            // 🔑 既に整数に乗っている ── 詰める量が無いので、そのまま返す
+            expect(result, '既に整数なのに詰めた').toBe(width);
+            return;
+          }
+
+          // 🔴 詰める量は必ず n/dpr px 未満(Math.floor の性質。実測ではなく式で保証)
+          const delta = width - result;
+          expect(delta, '詰める量が n/dpr を超えた').toBeLessThan(n / dpr + 1e-9);
+          expect(delta, '詰めていない(前提の端数が生きているのに no-op)').toBeGreaterThan(0);
+
+          // 🔑 後条件:詰めた後の段の幅 × dpr が整数
+          const colWidth = (result - (n - 1) * GAP) / n;
+          expect(isPhysicallyCrisp(colWidth, dpr), `${colWidth} * ${dpr} が整数でない`).toBe(true);
+
+          // 🔴 詰めたせいで段数の頭打ちを跨いでいない(この幅では余裕があるはず)
+          expect(effectiveColumns(result, count, FP), '詰めたら段数が変わった').toBe(n);
+        });
+      }
+    }
+  }
+
+  /**
+   * 🔴 **段数の頭打ちを跨ぐなら、詰めない**(#953 の必須条件)。
+   *
+   * 🔑 `READ_COLUMN_MIN_PX` は 13px 換算でぴったり 448 なので、標準の文字では
+   *   境目そのものが dpr 1.25 / 1.5 / 2.5 のどれでも偶然クリスプになる
+   *   (448 が高度に割り切れる数のため)── だから**大きい文字**(15px)を使い、
+   *   境目 `minWidthForColumns(2, 15)` を意図的に割り切れない値にする。
+   *
+   * 計算(fontPx=15・dpr=1.25):
+   * - `readColumnMinPx(15)` ≈ 516.923077(境目そのものは 1.25 の 0.8 刻みに乗らない)
+   * - 0.8 刻みで見ると、境目のすぐ下は 516.8、すぐ上は 517.6
+   * - つまり詰める前の段の幅が **(516.923077, 517.6)** に入っていれば、
+   *   詰めた結果は必ず 516.8 まで落ち、**境目を割り込む**
+   * - 器の幅にすると **(1049.846154, 1051.2)** ── 1.35px の窓があるので、
+   *   境目ぎりぎりを狙わなくても安定して踏める
+   */
+  it('🔴 詰めると 2 段が 1 段に落ちる幅では、詰めない(にじむほうがまだよい)', () => {
+    const fontPx = 15;
+    const dpr = 1.25;
+    const width = 1050.5; // ⚠ 上の (1049.846154, 1051.2) の窓の中央
+    const threshold = minWidthForColumns(2, fontPx);
+
+    // ⚠ 前提の検算 ── この幅で今は確かに 2 段組まれている
+    expect(effectiveColumns(width, 2, fontPx), '前提が崩れている(既に 1 段)').toBe(2);
+    expect(width, '前提が崩れている(境目未満)').toBeGreaterThan(threshold);
+
+    // ⚠ 前提の検算 ── 素直に詰めると 2 段の境目を割り込む(このケースの核心)
+    const n = 2;
+    const rawColWidth = (width - (n - 1) * READ_COLUMN_GAP_PX) / n;
+    const naiveSnap = Math.floor(rawColWidth * dpr) / dpr;
+    const naiveCandidate = naiveSnap * n + (n - 1) * READ_COLUMN_GAP_PX;
+    expect(naiveCandidate, '前提が崩れている(素直に詰めても境目を割らない)').toBeLessThan(
+      threshold,
+    );
+
+    const result = crispColumnsWidth(width, 2, fontPx, dpr);
+    expect(result, '段数の頭打ちを跨いで詰めた').toBe(width);
+    expect(effectiveColumns(result, 2, fontPx), '結果として段数が変わった').toBe(2);
+  });
+
+  it('⚠ dpr が整数(1 / 2)のときは、無駄に幅を削らない', () => {
+    for (const dpr of [1, 2]) {
+      expect(crispColumnsWidth(2000.13, 4, FP, dpr)).toBe(2000.13);
+    }
+  });
+
+  it('⚠ dpr が異常値でも壊れない(詰めずに元の幅を返す)', () => {
+    for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      expect(crispColumnsWidth(2000.13, 4, FP, bad), `dpr=${bad} で壊れた`).toBe(2000.13);
+    }
+  });
+
+  it('1 段(境界そのものが無い)は、幅がどれだけ広くても詰めない', () => {
+    expect(crispColumnsWidth(99_999, 1, FP, 1.25)).toBe(99_999);
+  });
+});
+
+/**
  * 🔴 **縦のホイールで横へ送れる**(#505。実測で必須と分かった ──
  *   段組みでは縦ホイールが 1px も動かさない: 1727 → 1727)。
  */
@@ -1031,5 +1169,151 @@ describe('🔴 段組みを畳んだら理由を言う(#551)', () => {
     live.remove(); // 器が消える = 2 ペインへ入った
     fitColumnHeight(root, document);
     expect(said, '面が消えただけで帯が出た').toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **DOM 側 ── 段の境目を拡大率で滲ませない**(#953 / #551 C)。
+ *
+ * ⚠ 上の describe とは別に置く ── 意味論(値の計算)は既に見たので、ここは
+ *   「本当に `host` へ当たるか / 畳んだら外れるか / 拡大率が変わったら測り直すか」
+ *   という**配線**だけを見る。
+ */
+describe('🔴 段の境目を拡大率で滲ませない(DOM 側。#953)', () => {
+  const setupPane = (): { root: HTMLElement; live: HTMLElement; wide: (w: number) => void } => {
+    const root = document.createElement('div');
+    const pane = document.createElement('div');
+    pane.setAttribute('data-pkc-view-pane', 'detail');
+    pane.setAttribute('data-pkc-detail-mode', 'editor');
+    const live = document.createElement('div');
+    live.setAttribute('data-pkc-region', 'editor-live');
+    pane.append(live);
+    root.append(pane);
+    document.body.append(root);
+    const wide = (w: number): void => {
+      for (const el of [pane, live])
+        Object.defineProperty(el, 'getBoundingClientRect', {
+          value: () => ({ top: 0, bottom: 600, left: 0, right: w, width: w, height: 600 }),
+          configurable: true,
+        });
+      Object.defineProperty(live, 'clientWidth', { value: w, configurable: true });
+    };
+    return { root, live, wide };
+  };
+
+  beforeEach(() => {
+    resetColumnFoldState();
+    setFoldNotify(null);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /**
+   * 🔑 詰める前提を先に検算する。
+   *
+   * ⚠ ここは happy-dom ── `getComputedStyle` は本文の CSS(13px)を持たず、
+   *   UA 既定の **16px** を返す(実測。既定へ落ちる `READ_COLUMN_BASE_FONT_PX`
+   *   の分岐には入らない ── `16` は有効な値なので、そのまま使われる)。
+   *   だから境目は `minWidthForColumns(2, 16)` ≈ **1118.77px** になる
+   *   (13px 換算の 912px ではない)。
+   * 🔑 詰める前の段の幅 `(1200.4 - 16) / 2 = 592.2` は 1.25 の刻み(0.8)に
+   *   乗らない(592.2 / 0.8 = 740.25、整数でない)── 前提が崩れていたら、
+   *   下の test は「何もしなくても通る」。
+   */
+  const SQUEEZE_WIDTH = 1200.4;
+
+  it('🔴 dpr が非整数で段の幅が滲む器では、`padding-right` で詰める', () => {
+    vi.stubGlobal('devicePixelRatio', 1.25);
+    const { root, live, wide } = setupPane();
+    applyReadColumns(document.documentElement, '2');
+    wide(SQUEEZE_WIDTH);
+    fitColumnHeight(root, document);
+
+    expect(live.style.paddingRight, '詰めていない(padding-right が空)').not.toBe('');
+    const pad = Number.parseFloat(live.style.paddingRight);
+    expect(pad, '詰めた量が 0 以下').toBeGreaterThan(0);
+    // 🔴 詰める量は n/dpr(= 2/1.25)未満(式で保証される上限。実測ではない)
+    expect(pad, '詰めすぎ(n/dpr を超えた)').toBeLessThan(2 / 1.25 + 1e-9);
+  });
+
+  /**
+   * 🔴 **dpr が整数へ戻ったら、詰めを外す**(残すと理由もなく本文が狭くなる)。
+   */
+  it('⚠ dpr が整数になったら、詰めた `padding-right` を外す', () => {
+    vi.stubGlobal('devicePixelRatio', 1.25);
+    const { root, live, wide } = setupPane();
+    applyReadColumns(document.documentElement, '2');
+    wide(SQUEEZE_WIDTH);
+    fitColumnHeight(root, document);
+    expect(live.style.paddingRight, '前提が崩れている(最初から詰まっていない)').not.toBe('');
+
+    vi.stubGlobal('devicePixelRatio', 2);
+    fitColumnHeight(root, document);
+    expect(live.style.paddingRight, 'dpr が整数に戻ったのに詰めたまま').toBe('');
+  });
+
+  /**
+   * 🔴 **段組みを畳んだら、詰めた `padding-right` も外す**(#953)。
+   *
+   * ⚠ 残すと、段組みを切った後の**ふつうの縦送りの本文**が、理由もなく
+   *   右へ数 px 狭くなる ── #527 の「印だけ外して変数を残す」と同じ形の穴。
+   */
+  it('🔴 段組みを畳んだら、詰めた `padding-right` も外す', () => {
+    vi.stubGlobal('devicePixelRatio', 1.25);
+    const { root, live, wide } = setupPane();
+    applyReadColumns(document.documentElement, '2');
+    wide(SQUEEZE_WIDTH);
+    fitColumnHeight(root, document);
+    expect(live.style.paddingRight, '前提が崩れている(最初から詰まっていない)').not.toBe('');
+
+    wide(700); // 912px を割る → 段組みそのものが畳まれる
+    fitColumnHeight(root, document);
+    expect(live.style.paddingRight, '畳んだのに padding-right が残っている').toBe('');
+  });
+
+  /**
+   * 🔴 **拡大率が変わったら、`installColumnFit` が測り直す**(#953。見張るもの④)。
+   *
+   * ⚠ `ResizeObserver` は当てにならない ── 窓を別の密度の画面へ動かしただけでは
+   *   CSS px の器の幅は 1px も動かないので、ここだけは `devicePixelRatio` を
+   *   直に聞く仕掛け(`dpr-watch.ts`)が要る。
+   */
+  describe('拡大率が変わったら測り直す(installColumnFit)', () => {
+    let fireDpr: (() => void) | null = null;
+
+    function installMatchMedia(): void {
+      vi.stubGlobal('matchMedia', (q: string) => ({
+        media: q,
+        matches: true,
+        addEventListener: (_t: string, cb: () => void) => {
+          fireDpr = cb;
+        },
+        removeEventListener: () => {},
+      }));
+    }
+
+    beforeEach(() => {
+      fireDpr = null;
+      installMatchMedia();
+    });
+
+    it('🔴 dpr が変わったら、新しい dpr で詰め直す', () => {
+      vi.stubGlobal('devicePixelRatio', 1.25);
+      const { root, live, wide } = setupPane();
+      applyReadColumns(document.documentElement, '2');
+      wide(SQUEEZE_WIDTH);
+      const dispose = installColumnFit(root, document);
+      expect(live.style.paddingRight, '起動直後の詰めが効いていない(この test の前提)').not.toBe(
+        '',
+      );
+
+      // ⚠ dpr を整数(2)へ変える ── 詰める理由が無くなるはず
+      vi.stubGlobal('devicePixelRatio', 2);
+      expect(fireDpr, 'dpr の問いを張っていない').not.toBeNull();
+      fireDpr!();
+      expect(live.style.paddingRight, 'dpr が変わったのに測り直していない').toBe('');
+      dispose();
+    });
   });
 });
