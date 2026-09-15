@@ -200,6 +200,13 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    *   SQL の面を開いて走らせていないと意味が無い(`sql-to-note` と同じ仕分け)。
    */
   'sql-export-menu', 'sql-export-pick', 'sql-schema-to-note', 'sql-to-note',
+  /**
+   * ⚠ **2026-09-15(#918 段⑤)で 1 件増やした** ── つながり図を開く / 閉じる。
+   *   ⚠ **名前で呼べないままにする理由**:SQL の面を開いていないと出す先が無い
+   *   (`sql-schema-to-note` と同じ仕分け)。🔑 押した 1 つは要らないので、
+   *   こちら(在庫)の側である ── 図の中の 3 つは `UNREGISTERED_POINT` に居る。
+   */
+  'sql-er-toggle',
   'stack-save',
   'start-audio-capture', 'start-edit', 'start-screen-capture', 'start-tile-reorder',
   'start-timer', 'stop-capture', 'storage-profile', 'swap-open', 'table-to-csv',
@@ -228,6 +235,12 @@ const UNREGISTERED_POINT: readonly string[] = [
   'restore-revision', 'restore-trash', 'revoke-extension', 'revoke-same-origin',
   'schedule-pick-day', 'schedule-quick-here', 'set-task-repeat', 'shape-cell',
   'smart-cond-remove',
+  /**
+   * ⚠ **2026-09-15(#918 段⑤)で 3 件増やした** ── つながり図の中の押し所
+   *   (四角の表の名前 / 列 / 線の札)。🔑 **押した 1 つでしか対象が決まらない**
+   *   ので、登記してもパレットからは撃てない(`edit-cell` と同じ仕分け)。
+   */
+  'sql-er-column', 'sql-er-link', 'sql-er-table',
   /**
    * ⚠ **2026-09-14(#918 段②a)で 1 件増やした** ── 履歴の一覧から 1 件選ぶ。
    *   🔑 **真の点である** ── 並んだ兄弟(前に打った字)のうち**押した 1 つ**で
@@ -349,12 +362,15 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-09-14(#918 段④): 答えを file へ(`sql-export-menu` / `sql-export-pick`)で
       //   受け手 +2 ── 登記は増えない。🔑 こちらの選ぶ口は**閉じた 3 つ**なので `E`
       //   (履歴の選ぶ口が `P1` なのと違う ── 並ぶ物が user の打った字ではない)。
-      total: 304,
-      receivers: 255,
+      // ⚠ 2026-09-15(#918 段⑤): つながり図(`sql-er-toggle` / `-table` / `-column` /
+      //   `-link`)で受け手 +4 ── 登記は増えない。🔑 開く口は SQL の面の中にしか
+      //   無く、図の中の 3 つは**押した 1 つ**でしか対象が決まらない(P1)
+      total: 308,
+      receivers: 259,
       registered: 85,
       both: 36,
       outsideActionsTable: 49,
-      unregistered: 219,
+      unregistered: 223,
     });
   });
 
