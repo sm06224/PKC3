@@ -11,7 +11,7 @@
  * 🔑 観測点は **data-pkc-x(本文の記法から描き直された値)** ── style だけ見ると
  *   「見た目は動いたが本文に書けていない」を素通りする(#513 の「成功と同じ見た目」の型)。
  */
-import { test, expect } from '@playwright/test';
+import { test, expect, type Locator } from '@playwright/test';
 import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
 
 test.beforeEach(async ({ page }) => {
@@ -172,11 +172,20 @@ test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き
     await pinned.evaluate((el) => getComputedStyle(el).fill),
     '曲がる線が塗り潰されている(fill: none が効いていない)',
   ).toBe('none');
+  /**
+   * ⚠ **器を `<path>` へ替えたので `x1` はもう無い**(#530 段③c)── `d` の頭から読む。
+   * 🔴 1 稿目はここと下の `.poll` の **2 か所で `x1` を読み残していた** ──
+   *   `getAttribute('x1')` は `null` を返し、`Number(null)` は **0** になるので、
+   *   下の「線が付いてくる」は**永久に 0 のまま**になる(CLAUDE.md §10「器を替えると、
+   *   読み取れる値が変わる」)。⚠ unit も型検査も 1 件も鳴らない ── 対象範囲の
+   *   実ブラウザ smoke だけが拾った。
+   * 🔑 読み方は 1 か所に寄せる(`startOf`)── 2 つ目を足す人が同じ罠を踏まない。
+   */
+  const startOf = async (l: Locator): Promise<string> =>
+    ((await l.getAttribute('d')) ?? '').split(' ').slice(0, 3).join(' ');
   const line = lines.first();
-  const x1Before = Number(await line.getAttribute('x1'));
-  expect(Number.isFinite(x1Before) && x1Before > 0, `線の座標が読めない(x1=${x1Before})`).toBe(
-    true,
-  );
+  const startBefore = await startOf(line);
+  expect(startBefore, `線の座標が読めない(d の頭=${startBefore})`).toMatch(/^M \d/);
   /**
    * 🔴 **日本語の名前が、そのまま `id` として実ブラウザの DOM に載る**(#530)。
    *
@@ -269,11 +278,11 @@ test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き
 
   // 🔴 **線は板に付いてくる**(座標を持たず、毎回引き直している証拠)
   await expect
-    .poll(async () => Number(await line.getAttribute('x1')), {
+    .poll(async () => startOf(line), {
       message: '板を動かしたのに線が置き去りになっている',
       timeout: 5000,
     })
-    .not.toBe(x1Before);
+    .not.toBe(startBefore);
 
   /**
    * 🔴 **形を変えても、掴む口は押せる**(#530 案 A。user 裁定 2026-09-14)。
