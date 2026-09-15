@@ -156,8 +156,27 @@ const ctlAwake = mem();
 await page.evaluate(() => {
   delete globalThis.__ballast;
 });
-await settle(4000);
-const ctlFreed = mem();
+/**
+ * 🔴 **対照群の 200MB が返り切るまで待つ**(2026-09-15 の実測で踏んだ)。
+ *
+ * ⚠ 待たずに巡を始めたら、**3 巡目で `-202.8MB`** という値が出た ── DuckDB が
+ *   返したのではなく、**対照群の重しが遅れて OS へ返った**だけである。
+ * 🔑 自分の対照群が、自分の測定を汚していた ── 次に読む人は
+ *   その 1 行を見て**全部の数字を疑う**ので、待って消す。
+ */
+let ctlFreed = mem();
+for (let i = 0; i < 20 && ctlFreed.pssMb > ctlBefore.pssMb + 40; i += 1) {
+  await settle(3000);
+  ctlFreed = mem();
+}
+if (ctlFreed.pssMb > ctlBefore.pssMb + 40) {
+  console.error(
+    `🔴 対照群の重しが返り切らない(${ctlBefore.pssMb} → ${ctlFreed.pssMb}MB)── 以降の数字は汚れるので読まない`,
+  );
+  await browser.close();
+  server.close();
+  process.exit(1);
+}
 const ctlRise = +(ctlAwake.pssMb - ctlBefore.pssMb).toFixed(1);
 console.log(`\n[対照群] 200MB を確保して触る → +${ctlRise}MB / 捨てると ${+(ctlAwake.pssMb - ctlFreed.pssMb).toFixed(1)}MB 返る`);
 if (ctlRise < 100) {
