@@ -182,7 +182,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'set-app-open-target', 'set-browse', 'set-column-rule', 'set-editor-mode', 'set-entry-date',
   'set-entry-sort', 'set-external-images', 'set-flag', 'set-notices-enabled', 'set-open-in-edit',
   'set-open-place', 'set-page-format', 'set-paste-source', 'set-phone-links', 'set-prose-align',
-  'set-query-key', 'set-read-columns', 'set-sql-source', 'set-sql-text', 'set-tag-badge',
+  'set-query-key', 'set-read-columns', 'set-sql-engine', 'set-sql-source', 'set-sql-text', 'set-tag-badge',
   'set-text-scale', 'set-theme', 'set-too-narrow-enabled', 'set-view', 'set-voice-boost',
   'show-trash', 'skip-to',
   'smart-cond-add', 'smart-evict', 'smart-field',
@@ -365,12 +365,15 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-09-15(#918 段⑤): つながり図(`sql-er-toggle` / `-table` / `-column` /
       //   `-link`)で受け手 +4 ── 登記は増えない。🔑 開く口は SQL の面の中にしか
       //   無く、図の中の 3 つは**押した 1 つ**でしか対象が決まらない(P1)
-      total: 308,
-      receivers: 259,
+      // ⚠ 2026-09-15(#682 段②): どのエンジンで引くか(`set-sql-engine`)で受け手 +1
+      //   ── 登記は増えない(押し口は SQL の面の中にしか無く、鍵も持たない。
+      //   すぐ隣の `set-sql-source` と同じ扱い)
+      total: 309,
+      receivers: 260,
       registered: 85,
       both: 36,
       outsideActionsTable: 49,
-      unregistered: 223,
+      unregistered: 224,
     });
   });
 
