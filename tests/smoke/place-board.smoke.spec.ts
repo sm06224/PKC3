@@ -58,9 +58,35 @@ const BOARD = [
   '',
   ':::format{.pkc-line from=今日 to=明日}',
   ':::',
+  /**
+   * 🔴 **同じ 2 枚の間にもう 2 本**(#530 段③b、user 裁定 2026-09-15)。
+   * ⚠ ここが**実ブラウザでしか見られない所**である ── 散らす割合は
+   *   `offsetWidth` で測った実寸に当たるので、happy-dom(0 を返す)では
+   *   「散らした結果どこに出るか」が 1 度も走らない。
+   * 🔑 3 本目は**辺の中点の中点**(`今日:top@1/4`)を手で書く ──
+   *   散らしと手書きが同じ束の中で両立することを、同じ筋書きで見る。
+   * 🔑 **新しい起動は増やさない**(#820 の規律)── 既に在る道中に足す。
+   */
+  '',
+  ':::format{.pkc-line from=今日 to=明日}',
+  ':::',
+  '',
+  ':::format{.pkc-line from=今日:top@1/4 to=明日}',
+  ':::',
   /** ⚠ 使えない名前は今までどおり断る ── 広げたのは**字の種類だけ**である。 */
   '',
   ':::format{.pkc-line from=a.b to=今日}',
+  ':::',
+  /**
+   * 🔴 **接続点の綴りが読めないときの断り**(#530 段③b)。
+   * ⚠ 上の `a.b` とは**別の分岐**である ── あちらは「その名前の付箋が無い」
+   *   (`lineTrouble`)、こちらは「つなぎ目の字が読めない」(`anchorTrouble`)で、
+   *   `lineTrouble` が先に判定されるので**名前が正しいときだけ**ここへ来る。
+   * 🔑 だから**名前は実在する物**(`今日` / `明日`)を書く ── 名前を間違えると
+   *   あちらの断りに救われて、この分岐を 1 度も通らない(CLAUDE.md §2)。
+   */
+  '',
+  ':::format{.pkc-line from=今日:righ to=明日}',
   ':::',
 ].join('\n');
 
@@ -95,12 +121,38 @@ test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き
    */
   const lines = page.locator('[data-pkc-field="place-lines"] line');
   /**
-   * ⚠ **2 本である** ── ASCII の `p1 → p2` と、日本語の `今日 → 明日`(#530)。
-   * 🔑 3 本目(`from=a.b`)は**引けてはいけない** ── 等値で見るので、
-   *   使えない名前を黙って通した日にここが落ちる。
+   * ⚠ **4 本である** ── ASCII の `p1 → p2` と、日本語の `今日 → 明日` **3 本**
+   *   (#530 段③b)。🔑 最後の 1 本(`from=a.b`)は**引けてはいけない** ──
+   *   等値で見るので、使えない名前を黙って通した日にここが落ちる。
    */
   await expect(lines, '線の本数が違う(日本語の名前が引けていないか、断るはずの線を引いた)')
-    .toHaveCount(2);
+    .toHaveCount(4);
+  /**
+   * 🔴 **4 本が 4 か所から出る**(user 裁定 2026-09-15)。
+   * ⚠ 散らさないと 2 本目以降が**1 本目の真下に完全に重なって消える** ──
+   *   引いた本人には「1 本しか引けない」としか見えない。
+   * 🔑 見るのは**出口の座標そのもの**である(辺の名前ではない)── 同じ辺の
+   *   上で散らすので、辺の名前を数えると 3 本が同じに見えてしまう。
+   */
+  const starts = await lines.evaluateAll((els) =>
+    els.map((el) => `${el.getAttribute('x1')},${el.getAttribute('y1')}`),
+  );
+  expect(new Set(starts).size, `線が同じ所から出ている(重なって消える): ${starts.join(' / ')}`)
+    .toBe(4);
+  /**
+   * 🔴 **手で書いた「辺の中点の中点」が、実寸の 1/4 の所に出る**(#530 段③b)。
+   * ⚠ ここは実寸に当たる ── `w=200` と書いてあっても、実ブラウザでは
+   *   枠線や余白で測った幅が違いうるので、**測った箱から出す**。
+   */
+  const pinned = page.locator('[data-pkc-field="place-lines"] line[data-pkc-line-from="top@1/4"]');
+  await expect(pinned, '手で書いた接続点(top@1/4)が焼かれていない').toHaveCount(1);
+  const svgBox = (await page.locator('[data-pkc-field="place-lines"]').boundingBox())!;
+  const kyouBox = (await page.locator('[data-pkc-region="detail"] [id="今日"]').boundingBox())!;
+  const pinnedX1 = Number(await pinned.getAttribute('x1'));
+  expect(
+    Math.abs(pinnedX1 - (kyouBox.x - svgBox.x + kyouBox.width / 4)),
+    `上辺の 1/4 から出ていない(x1=${pinnedX1})`,
+  ).toBeLessThan(2);
   const line = lines.first();
   const x1Before = Number(await line.getAttribute('x1'));
   expect(Number.isFinite(x1Before) && x1Before > 0, `線の座標が読めない(x1=${x1Before})`).toBe(
@@ -120,13 +172,18 @@ test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き
     '日本語の名前が id として載っていない',
   ).toBeVisible();
   /** ⚠ 使えない名前(`a.b`)には、断りの 1 行が出る ── 黙って消えない。 */
-  await expect(
-    page.locator('[data-pkc-field="place-line-note"]'),
-    '使えない名前の断りが出ていない(または、要らない断りが出ている)',
-  ).toHaveCount(1);
-  await expect(page.locator('[data-pkc-field="place-line-note"]')).toContainText(
-    '名前に「a.b」は使えません',
-  );
+  const notes = page.locator('[data-pkc-field="place-line-note"]');
+  await expect(notes, '断りの数が違う(要らない断りが出ているか、出るべき断りが出ていない)')
+    .toHaveCount(2);
+  /**
+   * 🔑 **2 つの断りを字で見分ける**(#530 段③b)── 数だけ見ると、
+   *   片方の分岐が死んでいて**もう片方が 2 回出た**日に緑のままになる
+   *   (CLAUDE.md §1「門を N 個置いたら、N 個目だけが鳴る場面を N 通り作る」)。
+   */
+  const noteTexts = (await notes.allTextContents()).join(' / ');
+  expect(noteTexts, `名前の断りが出ていない: ${noteTexts}`).toContain('名前に「a.b」は使えません');
+  expect(noteTexts, `つなぎ目の断りが出ていない: ${noteTexts}`)
+    .toContain('つなぎ目に「righ」は使えません');
 
   /**
    * 🔴 **層が「板の無い所」で最前面に来ていない**(= `pointer-events: none` が効いている)。

@@ -2316,6 +2316,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-15(#530 段③b ── 線の付く場所)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-13-import-smart" …` → f3e3d5b
+     */
+    '書き出したスマートフォルダを取り込み直しても、スマートフォルダのままになりました',
+    /**
      * ⚠ **2026-09-15(#530 段③e ── 線を PowerPoint へ)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-13-app-group-fold-all" …` → f9b8965
      */

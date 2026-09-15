@@ -137,15 +137,97 @@ describe('板どうしを繋ぐ線(#530 段③a)', () => {
   });
 
   /**
-   * 🔑 **`from=a:right` の綴りも受ける**(接続点は段③b まで効かない)。
-   * ⚠ 受けないと「設計どおり書いたのに線が出ない」になり、綴りを間違えたと読む。
+   * 🔴 **手で書いた接続点が効く**(#530 段③b、user 裁定 2026-09-15)。
+   * ⚠ 段③a のときは「綴りは受けるが効かない」だった ── 効かないままだと、
+   *   書いた人には**書いた所と違う所から線が出る**としか見えない。
    */
-  it('🔑 接続点つきの綴り(a:right)でも線が出る', () => {
-    const withAnchor = LINES.replace('data-pkc-from="a"', 'data-pkc-from="a:right"').replace(
+  it('🔴 接続点つきの綴り(a:top)は、書いた辺から出る(#530 段③b)', () => {
+    const withAnchor = LINES.replace('data-pkc-from="a"', 'data-pkc-from="a:top"').replace(
       'data-pkc-to="b"',
-      'data-pkc-to="b:left"',
+      'data-pkc-to="b:bottom"',
     );
-    expect(drawn(board(withAnchor)).length, '接続点つきの綴りを捨てている').toBe(1);
+    const l = drawn(board(withAnchor))[0]!;
+    expect(l.getAttribute('data-pkc-line-from'), '書いた辺から出ていない').toBe('top');
+    expect(l.getAttribute('data-pkc-line-to'), '書いた辺へ入っていない').toBe('bottom');
+    // 🔑 座標も見る(上辺の真ん中 = x 50 / y 0)
+    expect([l.getAttribute('x1'), l.getAttribute('y1')]).toEqual(['50', '0']);
+    // ⚠ 対照群 ── 書かなければ右 → 左(上の it)。書いたことで変わっている
+  });
+
+  /**
+   * 🔴 **辺のどこか(分数)まで書ける**(user 裁定 2026-09-15)。
+   * 🔑 **細かさに上限を作らない** ── 足りなければ、その間をさらに割れる。
+   */
+  it('🔴 辺の中点の、さらに中点を指せる(a:top@1/4)', () => {
+    const withAnchor = LINES.replace('data-pkc-from="a"', 'data-pkc-from="a:top@1/4"');
+    const l = drawn(board(withAnchor))[0]!;
+    expect(l.getAttribute('data-pkc-line-from'), '分数が効いていない').toBe('top@1/4');
+    // 板 a は x=0 幅 100 ── 上辺の 1/4 は x=25
+    expect([l.getAttribute('x1'), l.getAttribute('y1')], '1/4 の所から出ていない')
+      .toEqual(['25', '0']);
+  });
+
+  /**
+   * 🔴 **読めない接続点は、黙って真ん中へ繋がない**(#530 段③b)。
+   * ⚠ 黙って繋ぐと**線は出る**ので、打ち間違いに気づく手がかりが 1 つも残らない。
+   */
+  it('🔴 読めない接続点(a:righ)は、理由を言って線を引かない', () => {
+    const bad = LINES.replace('data-pkc-from="a"', 'data-pkc-from="a:righ"');
+    const host = board(bad);
+    expect(drawn(host).length, '読めない綴りのまま線を引いている').toBe(0);
+    const note = host.querySelector('[data-pkc-field="place-line-note"]');
+    expect(note?.textContent ?? '', '断りが出ていない').toContain('righ');
+    expect(note?.textContent ?? '', '直し方を言っていない').toContain('right@1/4');
+    // 🔑 空振り防止 ── 読める綴りなら断りは出ない
+    document.body.innerHTML = '';
+    const ok = board(LINES.replace('data-pkc-from="a"', 'data-pkc-from="a:right@1/4"'));
+    expect(ok.querySelector('[data-pkc-field="place-line-note"]'), '読める綴りを断っている')
+      .toBeNull();
+  });
+
+  /**
+   * 🔴 **同じ 2 枚の間に何本も引いたら、辺の上で散らす**(user 裁定 2026-09-15)。
+   * ⚠ 散らさないと 2 本目以降が**1 本目の真下に完全に重なって消える**
+   *   ── 引いた本人には「1 本しか引けない」としか見えず、
+   *   「A と B は別々の理由でつながっている」を図で言えない。
+   */
+  it('🔴 同じ 2 枚の間の 3 本が、別々の所に付く(#530 段③b)', () => {
+    const three = LINES
+      + '\n<div class="pkc-format-block pkc-line" data-pkc-format-block data-pkc-from="a"'
+      + ' data-pkc-to="b" data-pkc-source-line="6" data-pkc-source-end="7"></div>'
+      // ⚠ 逆向きに書いた線も「同じ 2 枚の間」である(向きで数を分けない)
+      + '\n<div class="pkc-format-block pkc-line" data-pkc-format-block data-pkc-from="b"'
+      + ' data-pkc-to="a" data-pkc-source-line="8" data-pkc-source-end="9"></div>';
+    const ls = drawn(board(three));
+    expect(ls.length, '線が 3 本引かれていない').toBe(3);
+    /**
+     * 🔴 **「散った」ではなく「どこに散ったか」を見る**(変異試験 M11 が SURVIVED で教えた)。
+     * ⚠ 1 稿目は「3 本の `y1` が全部違う」しか見ておらず、**向きを揃える正規化を
+     *   外しても緑**だった ── a→b の 2 本が `1/3, 2/3`(= 20, 40)、逆向きの b→a が
+     *   単独の組になって `1/2`(= 30)になり、**たまたま 3 つとも違う値**になるからである。
+     * 🔑 3 本が**同じ組**なら、板の高さ 60 の `1/4 / 2/4 / 3/4` = **15 / 30 / 45** に並ぶ。
+     *   ⚠ 値そのものを書く ── 「違う」だけでは、違う散り方と見分けられない。
+     */
+    const ys = ls.map((l) => Number(l.getAttribute('y1')));
+    expect([...ys].sort((a, b) => a - b), `3 本が同じ組として散っていない: ${ys.join(',')}`)
+      .toEqual([15, 30, 45]);
+    /**
+     * 🔑 **3 本とも「右辺と左辺の間」を通る**(平行に並ぶ)。
+     * ⚠ 出る辺の名前で数えてはいけない ── 3 本目は `b→a` と逆向きに書いたので
+     *   出るのは **b の左辺**である(向きが違うだけで、通る道は同じ)。
+     */
+    const edge = (l: SVGLineElement, k: 'from' | 'to'): string =>
+      (l.getAttribute(`data-pkc-line-${k}`) ?? '').split('@')[0]!;
+    for (const l of ls) {
+      expect(new Set([edge(l, 'from'), edge(l, 'to')]), '右辺と左辺の間を通っていない')
+        .toEqual(new Set(['right', 'left']));
+    }
+  });
+
+  it('🔴 1 本しか無いときは、これまでどおり辺の真ん中(位置が動かない)', () => {
+    const l = drawn(board(LINES))[0]!;
+    expect(l.getAttribute('data-pkc-line-from'), '1 本なのに分数が焼かれている').toBe('right');
+    expect([l.getAttribute('x1'), l.getAttribute('y1')]).toEqual(['100', '30']);
   });
 
   /**
