@@ -45,6 +45,28 @@ test('🔴 情報ペインの PowerPoint で .pptx が落ちてきて、見出�
       '| 見出し | 値 |',
       '| --- | --- |',
       '| 行 | 1 |',
+      '',
+      /**
+       * 🔴 **板 2 枚と、その間の線**(#530 段③e)。
+       * ⚠ **この筋書きに足した理由**:ここまで、書き出しの smoke の fixture に
+       *   `.pkc-place` も `.pkc-line` も **1 つも無かった** ── つまり
+       *   「板と線を書いたノートを書き出す」という当の動線は、実ブラウザで
+       *   **1 度も通っていなかった**(緑だったのは別の物の回帰である)。
+       * 🔑 **新しい起動は増やさない** ── 既に在るこの筋書きの末尾へ伸ばす。
+       * ⚠ 線の塊の中に**字**を入れてある ── 読む画面に 1 文字も出ない字が
+       *   書き出しにだけ現れる、という段③a の実害をここで止める。
+       */
+      ':::format{#今日 .pkc-place x=0 y=0 w=200 h=100}',
+      '今日',
+      ':::',
+      '',
+      ':::format{#明日 .pkc-place x=400 y=0 w=200 h=100}',
+      '明日',
+      ':::',
+      '',
+      ':::format{.pkc-line from=今日 to=明日}',
+      '線の中の見えない字',
+      ':::',
     ].join('\n'),
   );
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
@@ -72,15 +94,28 @@ test('🔴 情報ペインの PowerPoint で .pptx が落ちてきて、見出�
     'ppt/slides/slide1.xml',
     // 🔴 **見出しで切れている** ── 1 枚しか無ければ切れ方が死んでいる
     'ppt/slides/slide2.xml',
+    // 🔴 **板は 1 枚で 1 スライド**(#530 段①)── 3 枚目がそれである
+    'ppt/slides/slide3.xml',
   ])
     expect(text, `${part} が入っていない`).toContain(part);
-  // ⚠ 3 枚目は無い(扉 + 節 の 2 枚)── 空のスライドを挟んでいないこと(段④)
-  expect(text, '空のスライドが挟まっている').not.toContain('ppt/slides/slide3.xml');
+  // ⚠ 4 枚目は無い(扉 + 節 + 板 の 3 枚)── 空のスライドを挟んでいないこと(段④)
+  expect(text, '空のスライドが挟まっている').not.toContain('ppt/slides/slide4.xml');
   expect(text, '扉の題が入っていない').toContain('扉の題');
   expect(text, '副題が入っていない').toContain('扉の副題');
   expect(text, '本文が入っていない').toContain('ふつうの段落と');
   expect(text, '番号付きが点に化けている').toContain('buAutoNum');
   expect(text, '表が格子になっていない').toContain('<a:tbl>');
+  /**
+   * 🔴 **板の線が、繋がったコネクタとして入っている**(#530 段③e)。
+   * ⚠ **`<p:cxnSp>` が在るだけでは足りない** ── 座標だけの線でも見た目は同じだが、
+   *   受け取った人が付箋を動かしても**付いてこない**(user が求めているのは
+   *   「ぐりぐり動かせる」ことなので、それでは要望を 1 つも満たさない)。
+   */
+  expect(text, '線が図形として入っていない').toContain('<p:cxnSp>');
+  expect(text, '線が板に繋がっていない(座標だけの線になっている)').toContain('<a:stCxn');
+  expect(text, '線の行き先が繋がっていない').toContain('<a:endCxn');
+  // 🔴 読む画面に 1 文字も出ない字が、配る物にだけ現れていないこと(段③a の実害)
+  expect(text, '画面に出ない字が書き出しに漏れている').not.toContain('線の中の見えない字');
   expect(errors, 'pageerror が出た').toEqual([]);
 });
 
