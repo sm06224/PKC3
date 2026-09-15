@@ -35,7 +35,14 @@ const args = Object.fromEntries(
 );
 const ROUNDS = Number(args.rounds ?? 3);
 const WORK = '/tmp/claude-0/duckdb-mem-probe';
-const PORT = Number(args.port ?? 45777);
+/**
+ * 🔴 **port は OS に選ばせる**（既定 0）。
+ * ⚠ 固定にしていた頃、**前の走りが握ったまま**だと
+ *   `EADDRINUSE` で落ちた ── しかも直すには名前でプロセスを探すことになり、
+ *   その grep は**自分の命令行にも当たる**（CLAUDE.md §6）。
+ * 🔑 0 にすればこの経路が**構造から消える**。
+ */
+const PORT = Number(args.port ?? 0);
 
 if (!existsSync('dist/duckdb/duckdb-eh.wasm')) {
   console.error('🔴 dist/duckdb/ が無い ── 先に `npm run build` を回してください');
@@ -84,7 +91,8 @@ const server = createServer((req, res) => {
   res.writeHead(200, { 'content-type': MIME[extname(f)] ?? 'application/octet-stream' });
   res.end(readFileSync(f));
 });
-await new Promise((r) => server.listen(PORT, r));
+await new Promise((r) => server.listen(PORT, '127.0.0.1', r));
+const port = server.address().port;
 
 const profile = `${WORK}/profile`;
 /**
@@ -103,7 +111,12 @@ page.on('console', (m) => {
 });
 page.on('pageerror', (e) => console.error('  [pageerror]', e.message));
 page.on('requestfailed', (r) => console.error('  [failed]', r.url(), r.failure()?.errorText));
-await page.goto(`http://127.0.0.1:${PORT}/`);
+// ⚠ 404 は requestfailed には来ない ── **どの URL が無いのか**を出さないと、
+//   「404」だけが残って次に読む人が同じ所で止まる。
+page.on('response', (r) => {
+  if (r.status() >= 400) console.error('  [http]', r.status(), r.url());
+});
+await page.goto(`http://127.0.0.1:${port}/`);
 await page.waitForFunction(() => globalThis.__pkcDuck !== undefined, null, { timeout: 60_000 });
 
 const root = findBrowserPid(profile);
@@ -127,7 +140,7 @@ for (let i = 1; i <= ROUNDS; i += 1) {
   await page.evaluate(async () => {
     const { openDuckDb, DuckDbLease } = globalThis.__pkcDuck;
     globalThis.__lease = new DuckDbLease({
-      open: () => openDuckDb({ wasmUrl: 'duckdb/duckdb-eh.wasm', workerUrl: 'duckdb/duckdb-browser-eh.worker.js' }),
+      open: () => openDuckDb({ wasmUrl: '/duckdb/duckdb-eh.wasm', workerUrl: '/duckdb/duckdb-browser-eh.worker.js' }),
       idleMs: 60_000,
     });
     globalThis.__answer = await globalThis.__lease.run('select 42 as n');
