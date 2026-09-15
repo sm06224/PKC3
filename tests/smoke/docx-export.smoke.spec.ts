@@ -30,7 +30,31 @@ test('🔴 情報ペインの Word で .docx が落ちてきて、本文が中�
   await page.fill('[data-pkc-field="editor-title"]', 'ワード試験');
   await page.fill(
     '[data-pkc-field="editor-body"]',
-    ['# 見出し', '', 'ふつうの段落と **太字**。', '', '- 箇条書き', '  - 入れ子'].join('\n'),
+    [
+      '# 見出し',
+      '',
+      'ふつうの段落と **太字**。',
+      '',
+      '- 箇条書き',
+      '  - 入れ子',
+      '',
+      /**
+       * 🔴 **板 2 枚と、その間の線**(#530 段①/段③e)。
+       * ⚠ ここまで、書き出しの smoke の fixture に `.pkc-place` も `.pkc-line` も
+       *   **1 つも無かった** ── つまり「板と線を書いたノートを Word へ出す」という
+       *   当の動線は、実ブラウザで**1 度も通っていなかった**。
+       * 🔑 **新しい起動は増やさない** ── 既に在るこの筋書きの末尾へ伸ばす。
+       * ⚠ 線の塊に**字**を入れてある ── 読む画面に 1 文字も出ない字が
+       *   Word にだけ現れる、という段③a の実害をここで止める。
+       */
+      ':::format{#今日 .pkc-place x=0 y=0 w=200 h=100}',
+      '今日',
+      ':::',
+      '',
+      ':::format{.pkc-line from=今日 to=明日}',
+      '線の中の見えない字',
+      ':::',
+    ].join('\n'),
   );
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
   await page.waitForSelector('[data-pkc-action="start-edit"]');
@@ -65,6 +89,14 @@ test('🔴 情報ペインの Word で .docx が落ちてきて、本文が中�
   expect(text, '見出しが入っていない').toContain('見出し');
   expect(text, '本文が入っていない').toContain('ふつうの段落と');
   expect(text, '箇条書きが numbering を指していない').toContain('<w:numId');
+  /**
+   * 🔴 **板と線は Word に何も足さない**(#530 段①/段③e)。
+   * ⚠ Word に自由配置の面は無いので、位置も線も出さない ── だが**中身の字は出る**。
+   * 🔑 線の塊に書いた字は**読む画面に 1 文字も出ない**ので、Word にだけ現れたら
+   *   それは user がいちばん気づけない壊れ方である(段③a の実害)。
+   */
+  expect(text, '板の字が落ちている').toContain('今日');
+  expect(text, '画面に出ない字が Word に漏れている').not.toContain('線の中の見えない字');
   expect(errors, 'pageerror が出た').toEqual([]);
 });
 

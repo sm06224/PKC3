@@ -376,6 +376,29 @@ describe('\u{1f534} 自由配置の板の印(#530 段①)', () => {
     ).blocks).toEqual([]);
   });
 
+  /**
+   * 🔴 **線の宣言は、Word の中身を 1 バイトも増やさない**(#530 段③e)。
+   *
+   * ⚠ 上の 3 つは `htmlToDocxBlocks` の**出力(塊の並び)**しか見ておらず、
+   *   その塊を `buildDocx` に**通した結果**は 1 度も見ていなかった ──
+   *   だから `case 'place-line'` が空の段落を返す変異が**生き延びた**
+   *   (変異試験 M12。CLAUDE.md §2「その行を 1 度も実行していない」)。
+   * 🔑 **比べる**のが肝である ── 「空の段落が出ていない」を字で探すと、
+   *   別の空の段落に満たされる(§1)。線を入れた版と抜いた版が
+   *   **1 バイトも違わない**ことを見る。
+   */
+  it('🔴 線の宣言は Word の本文を 1 バイトも増やさない(#530 段③e)', () => {
+    const body: DocxBlock[] = [{ kind: 'p', runs: [{ text: '本文' }] }];
+    const withLine = part(
+      buildDocx([...body, { kind: 'place-line', from: 'a', to: 'b' }], '題名', ISO),
+      'word/document.xml',
+    );
+    const without = part(buildDocx(body, '題名', ISO), 'word/document.xml');
+    expect(withLine, '線の宣言が Word の中身を変えている').toBe(without);
+    // ⚠ 空振り防止 ── 本文そのものは出ている(「両方とも空」と区別する)
+    expect(without, '本文が出ていない').toContain('本文');
+  });
+
   it('🔴 板の `#名前` が印として運ばれる(線の繋ぎ先になるため)', () => {
     const r = blocksOf('<div class="pkc-place" id="今日" data-pkc-x="0"><p>あ</p></div>');
     expect(r.blocks[0]).toMatchObject({ kind: 'place', name: '今日' });
