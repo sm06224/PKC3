@@ -22,7 +22,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error -- 検品規則は素の .mjs(ビルド対象外の CI script 群)
-import { inspectDist, PRECACHE_LIST_FILE } from '../scripts/dist-inspect.mjs';
+import { inspectDist, PRECACHE_LIST_FILE, DUCKDB_DIR } from '../scripts/dist-inspect.mjs';
 
 type File = { path: string; bytes: number };
 type Input = {
@@ -38,6 +38,11 @@ type Input = {
   requireManual?: boolean;
   /** 焼きたての一式で `precache.json` の実在を要求する(2026-09-09)。 */
   requirePrecacheList?: boolean;
+  /** DuckDB の一式だけの予算(#682)。⚠ 一式が在るのに欠けたら鳴る。 */
+  duckdbCapKb?: number;
+  duckdbFloorKb?: number;
+  /** 焼きたての一式で DuckDB の実在を要求する(#682)。 */
+  requireDuckdb?: boolean;
   files: File[];
   text: Map<string, string>;
 };
@@ -770,5 +775,92 @@ describe('🔴 持ち歩ける 1 枚の雛形(#400 段④ / 2026-08-29 に本番
     // ⚠ 空振り防止 ── 別立ての行はちゃんと出ている(黙って消していない)
     expect(withIt).toContain('別立て: portable-template.html');
     expect(base, '雛形が無いのに別立ての行が出ている').not.toContain('別立て:');
+  });
+});
+
+/**
+ * 🔴 **DuckDB の一式は「precache に載せず、別立てで見る」**(#682。裁定 2026-09-15)。
+ *
+ * ⚠ アプリの cap から外した瞬間、この中身は **0 バイトでも 100 MB でも通る**ように
+ *   なる ── 外したぶんの門を置き直したので、**その門が鳴ること**をここで見る。
+ * 🔑 いちばん大事なのは最後の 2 本 ── 旗を立てた回だけ実在を要求し、
+ *   **旗なしなら無くても通る**(`pages.yml` が検品する**過去の zip** には DuckDB が
+ *   無いので、無条件にすると `/dev/` の配信ごと止まる。2026-09-09 に実際に 2 回止めた)。
+ */
+describe('🔴 DuckDB の一式(#682)', () => {
+  const WASM_BYTES = 35_913_747;
+  const WORKER_BYTES = 773_223;
+  const CAP = 39_000;
+  const FLOOR = 20_000;
+
+  /** 健全な形に DuckDB を足す。⚠ precache には**載せない**。 */
+  const withDuckdb = (bytes = WASM_BYTES + WORKER_BYTES): Input => {
+    const i = healthy('dev');
+    return {
+      ...i,
+      duckdbCapKb: CAP,
+      duckdbFloorKb: FLOOR,
+      files: [
+        ...i.files,
+        { path: `${DUCKDB_DIR}duckdb-eh.wasm`, bytes: bytes - WORKER_BYTES },
+        { path: `${DUCKDB_DIR}duckdb-browser-eh.worker.js`, bytes: WORKER_BYTES },
+        { path: `${DUCKDB_DIR}pack.json`, bytes: 200 },
+      ],
+    };
+  };
+
+  it('🟢 予算の内なら通り、配る量には数えない', () => {
+    const out = inspect(withDuckdb());
+    expect(out.errors).toEqual([]);
+    // ⚠ 空振り防止 ── 「別立て」の行が実際に出ていること(出ていなければ、
+    //    上の 0 件は「見ていないから 0 件」である)
+    expect(out.lines.join('\n')).toContain(`別立て: ${DUCKDB_DIR}`);
+    // 🔑 アプリの cap の行は、DuckDB を足す前と 1 バイトも変わらない
+    const before = inspect(healthy('dev')).lines.find((l) => l.startsWith('  配る量:'));
+    expect(out.lines.find((l) => l.startsWith('  配る量:'))).toBe(before);
+  });
+
+  it('🔴 予算が渡っていなければ鳴る(optional にすると門ごと消える)', () => {
+    const i = withDuckdb();
+    const errs = run({ ...i, duckdbCapKb: undefined, duckdbFloorKb: undefined });
+    expect(errs.join('\n')).toContain('予算が渡っていない');
+  });
+
+  it('🔴 cap を超えたら鳴る(別の版を誤って取り込んだ形)', () => {
+    // `mvp`(39.4 MiB)を間違えて足した想定
+    const errs = run(withDuckdb(41_300_000 + WORKER_BYTES));
+    expect(errs.join('\n')).toContain('cap を');
+  });
+
+  it('🔴 下限を割ったら鳴る(空 / 途中で切れた一式)', () => {
+    const errs = run(withDuckdb(WORKER_BYTES + 1_000));
+    expect(errs.join('\n')).toContain('下限を');
+  });
+
+  it('🔴 precache に載っていたら鳴る(install で 35MB 落とさせない)', () => {
+    const i = withDuckdb();
+    // ⚠ **二重帳簿を両方書き換える** ── 片方だけ足すと
+    //    「`precache.json` と `sw.js` の一覧が食い違う」の門が**先に鳴る**ので、
+    //    ここで見たい門が 1 度も通らない（CLAUDE.md §2「経路が一度も通っていない」）。
+    const listed = JSON.parse(i.text.get(LIST) as string) as string[];
+    const withWasm = [...listed, `./${DUCKDB_DIR}duckdb-eh.wasm`];
+    const text = new Map(i.text);
+    text.set(LIST, JSON.stringify(withWasm));
+    text.set(
+      'sw.js',
+      `const PRECACHE = ${JSON.stringify(withWasm)};\nself.addEventListener("fetch", () => {});`,
+    );
+    const errs = run({ ...i, text });
+    expect(errs.join('\n')).toContain(`precache に ${DUCKDB_DIR}`);
+  });
+
+  it('🔴 旗を立てたのに無ければ鳴る(plugin が外れた版を配らせない)', () => {
+    const errs = run({ ...healthy('dev'), requireDuckdb: true });
+    expect(errs.join('\n')).toContain(`dist に ${DUCKDB_DIR} が無い`);
+  });
+
+  it('🟢 旗が無ければ、無くても通る ── 過去の zip を今の規則で落とさない', () => {
+    // ⚠ ここが `/dev/` の配信を守っている唯一の行である(2026-09-09 に 2 回止めた形)
+    expect(run(healthy('dev'))).toEqual([]);
   });
 });

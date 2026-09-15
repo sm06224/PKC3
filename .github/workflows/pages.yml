@@ -36,7 +36,7 @@ jobs:
         run: |
           npm ci
           VITE_PKC_KIND=dev npm run build
-          node scripts/check-dist.mjs dev --require-precache-list
+          node scripts/check-dist.mjs dev --require-precache-list --require-duckdb
           mkdir -p _site/dev
           cp -r dist/. _site/dev/
       - name: 可搬単一 HTML の雛形(#400 段④)

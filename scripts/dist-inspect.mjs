@@ -103,6 +103,18 @@ export const PORTABLE_TEMPLATE = 'portable-template.html';
 export const MANUAL_PAGE = 'manual.html';
 
 /**
+ * 🔴 **DuckDB の実体を置く所**(#682。裁定 2026-09-15 = PKC3 自身が配る)。
+ *
+ * ⚠ `portable-template.html` と同じ扱い ── **押したときだけ取りに行く**物なので、
+ *   precache にも**アプリの配る量にも数えない**。
+ * 🔴 だが**数えないことと見ないことは別**である ── 外した瞬間、この中身は
+ *   **0 バイトでも 100 MB でも通る**ようになるので、下に**別立ての予算**を置く。
+ * ⚠ 綴りの正本は `build/duckdb-assets-plugin.ts` の `DUCKDB_DIR`
+ *   (`tests/dist-inspect.test.ts` が突き合わせる ── 片方だけ改名すると黙って混ざる)。
+ */
+export const DUCKDB_DIR = 'duckdb/';
+
+/**
  * 配る物の一覧を data でも置く file(#532 段 B)。⚠ 綴りの正本は
  * `src/features/selfhost/precache-list.ts` の `PRECACHE_LIST_FILE`
  * (`tests/dist-inspect.test.ts` が突き合わせる)。
@@ -125,6 +137,9 @@ export function inspectDist({
   manualFloorKb,
   requireManual = false,
   requirePrecacheList = false,
+  duckdbCapKb,
+  duckdbFloorKb,
+  requireDuckdb = false,
   files,
   text,
 }) {
@@ -151,7 +166,10 @@ export function inspectDist({
    *   (成り立たない条件を書かない。§1)。
    */
   const sidecar = files.filter((f) => f.path === PORTABLE_TEMPLATE);
-  const shipped = files.filter((f) => !f.path.endsWith('.map') && f.path !== PORTABLE_TEMPLATE);
+  const duckdb = files.filter((f) => f.path.startsWith(DUCKDB_DIR));
+  const shipped = files.filter(
+    (f) => !f.path.endsWith('.map') && f.path !== PORTABLE_TEMPLATE && !f.path.startsWith(DUCKDB_DIR),
+  );
   const kb = (b) => (b / 1024).toFixed(1);
   const shippedBytes = shipped.reduce((a, f) => a + f.bytes, 0);
   const mapBytes = maps.reduce((a, f) => a + f.bytes, 0);
@@ -282,6 +300,13 @@ export function inspectDist({
        *   「載っていない」しか守れない ── **載せてしまった**ときに鳴らない。
        * ⚠ 載せると install のたびに 7 MB 落ちる(しかも二重に持つ)。
        */
+      const duckdbInPrecache = [...have].filter((f) => f.startsWith(DUCKDB_DIR));
+      if (duckdbInPrecache.length > 0) {
+        errors.push(
+          `precache に ${DUCKDB_DIR} が ${duckdbInPrecache.length} 件載っている ── ` +
+            'これは押したときだけ取りに行く物で、install で 35MB 落とす物ではない',
+        );
+      }
       if (have.has(PORTABLE_TEMPLATE)) {
         errors.push(
           `precache に ${PORTABLE_TEMPLATE} が載っている ── ` +
@@ -441,6 +466,43 @@ export function inspectDist({
           `(下限 ${sidecarFloorKb} KB)── 空 / 途中で切れた雛形を配ろうとしている`,
       );
     }
+  }
+
+  /**
+   * 🔴 **DuckDB だけの予算**(#682)。⚠ 上の雛形と同じ理屈 ── アプリの cap から
+   *   外した以上、外したぶんの門をここに置き直す。
+   * 🔴 **下限は旗が立った回だけ**見る ── `pages.yml` は**過去の release の zip**を
+   *   検品するので、DuckDB を持たない版(v3.2.0 など)が**落ちて当然**になる。
+   *   ⚠ 2026-09-09 に `precache.json` で**この形を踏んで `/dev/` の配信を 2 回止めた**。
+   *   🔑 だから「焼きたてを見る経路」だけが `--require-duckdb` を立てる。
+   * ⚠ 予算が**渡っていない**ときは黙って通さない(optional にすると門ごと消える)。
+   */
+  if (duckdb.length > 0) {
+    const bytes = duckdb.reduce((a2, f) => a2 + f.bytes, 0);
+    lines.push(
+      `  別立て: ${DUCKDB_DIR} ${duckdb.length} 件 / ${kb(bytes)} KB(precache しない / cap の外)`,
+    );
+    if (duckdbCapKb === undefined || duckdbFloorKb === undefined) {
+      errors.push(
+        `${DUCKDB_DIR} が在るのに、その予算が渡っていない ── ` +
+          '呼び側が `duckdbCapKb` / `duckdbFloorKb` を渡していない(門が消えている)',
+      );
+    } else if (bytes > duckdbCapKb * 1024) {
+      errors.push(
+        `${DUCKDB_DIR} が cap を ${kb(bytes - duckdbCapKb * 1024)} KB 超過` +
+          `(cap ${duckdbCapKb} KB)。取り違えでなければ引き上げてよい`,
+      );
+    } else if (bytes < duckdbFloorKb * 1024) {
+      errors.push(
+        `${DUCKDB_DIR} が下限を ${kb(duckdbFloorKb * 1024 - bytes)} KB 下回る` +
+          `(下限 ${duckdbFloorKb} KB)── 空 / 途中で切れた一式を配ろうとしている`,
+      );
+    }
+  } else if (requireDuckdb) {
+    errors.push(
+      `焼きたてなのに dist に ${DUCKDB_DIR} が無い ── DuckDB を選んでも` +
+        '「取ってきて入れる」が空振りする(plugin が emit していない)',
+    );
   }
 
   // ── ⑥ 焼いたマニュアル(#645 段②)── **届いたか**を出力の側で見る

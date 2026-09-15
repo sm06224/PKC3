@@ -27,7 +27,11 @@ import { inspectDist, MANUAL_PAGE, PORTABLE_TEMPLATE } from './dist-inspect.mjs'
  * ⚠ 綴りを間違えた旗を黙って捨てると、「要求したつもり」で門が消える ── 呼び側が
  *   `--require-manaul` と打った日に、release が manual.html 無しで通る。
  */
-const KNOWN_FLAGS = new Set(['--require-manual', '--require-precache-list']);
+const KNOWN_FLAGS = new Set([
+  '--require-manual',
+  '--require-precache-list',
+  '--require-duckdb',
+]);
 const flags = process.argv.slice(2).filter((a) => a.startsWith('--'));
 const positional = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const unknownFlags = flags.filter((f) => !KNOWN_FLAGS.has(f));
@@ -152,6 +156,24 @@ const PORTABLE_CAP_KB = 9800;
 const PORTABLE_FLOOR_KB = 3000;
 
 /**
+ * 🔴 **DuckDB の一式だけの予算**(#682。裁定 2026-09-15 = PKC3 自身が配る)。
+ *
+ * ⚠ これも**アプリの配る量ではない** ── 訪問者は落とさない(DuckDB を選んで
+ *   押したときだけ取りに行き、IDB へ置く)。だから上の cap には数えない。
+ * 🔴 だが**数えないことと見ないことは別**である ── 外した瞬間、この中身は
+ *   0 バイトでも 100 MB でも通るようになるので、ここで別に見る。
+ * 🔑 実測 **35827.1 KB**(2026-09-15、`@duckdb/duckdb-wasm@1.33.1-dev57.0`):
+ *   `duckdb-eh.wasm` **35072.0 KB** + `duckdb-browser-eh.worker.js` **755.1 KB**。
+ *   ⚠ 素の版(`eh`)だけ ── スレッド版(`coi`)は実測で遅く・重く・壊れやすかった
+ *   (設計 doc §5)ので配らない。
+ * ⚠ 余裕は約 3170 KB ── 上流の版上げは吸うが、**もう 1 つの版を誤って取り込む**
+ *   (`mvp` 39.4 MiB / `coi` 34.0 MiB のどちらか)は止まる。
+ * ⚠ 下限は「空 / 途中で切れた一式」だけを狙う(実測の 6 割弱)。
+ */
+const DUCKDB_CAP_KB = 39000;
+const DUCKDB_FLOOR_KB = 20000;
+
+/**
  * 🔴 **焼いたマニュアル(`manual.html`)の下限**(#645 段②)。
  * ⚠ 上限は要らない(アプリの cap の内で数える)。下限だけ ── 描画が空振りして
  *   見出し 0 本の page を配ろうとしたとき、plugin の門(見出しの本数)が**外された日**にも
@@ -178,7 +200,10 @@ function walk(dir) {
 const kind = positional[0];
 if ((kind !== 'product' && kind !== 'dev') || unknownFlags.length > 0) {
   if (unknownFlags.length > 0) console.error(`知らない旗: ${unknownFlags.join(' ')}`);
-  console.error('usage: node scripts/check-dist.mjs <product|dev> [dir] [--require-manual]');
+  console.error(
+    'usage: node scripts/check-dist.mjs <product|dev> [dir] ' +
+      '[--require-manual] [--require-precache-list] [--require-duckdb]',
+  );
   process.exit(2);
 }
 
@@ -221,6 +246,15 @@ const { lines, errors } = inspectDist({
    *   #532 段 B より前に切った release(v3.2.0)が落ちて `/dev/` が止まる。
    */
   requirePrecacheList: flags.includes('--require-precache-list'),
+  duckdbCapKb: DUCKDB_CAP_KB,
+  duckdbFloorKb: DUCKDB_FLOOR_KB,
+  /**
+   * 🔴 **焼きたての一式だけ DuckDB の実在を要求する**(#682)。
+   * ⚠ `pages.yml` の product の検品は**過去の zip** なので付けない ── 付けると
+   *   DuckDB より前に切った release(v3.2.0 / v3.3.0)が落ちて `/dev/` が止まる
+   *   (2026-09-09 に `precache.json` で**実際に 2 回止めた**形である)。
+   */
+  requireDuckdb: flags.includes('--require-duckdb'),
   files,
   text,
 });

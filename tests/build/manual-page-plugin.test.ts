@@ -171,13 +171,42 @@ describe('dev の middleware', () => {
   });
 });
 
+/**
+ * `plugins: [ … ]` の**中身だけ**を切り出す。
+ *
+ * 🔴 **2026-09-15 に「1 行の中を見る」形から直した**(#682)── plugins を
+ * **複数行に整形しただけ**で、この検査は対象を見失って落ちた
+ * (`manualPagePlugin が plugins に無い: expected -1`)。
+ * ⚠ 主張は「**配列の中での順番**」であって「1 行の中での位置」ではない ──
+ * 整形に依る形で書くと、**中身を 1 バイトも変えていないのに落ちる**。
+ * 🔑 括弧を数えて塊で取る(弱めてはいない ── 同じ主張を形式非依存にしただけ)。
+ */
+function pluginsBlock(src: string): string {
+  const at = src.indexOf('plugins: [');
+  if (at < 0) return '';
+  let depth = 0;
+  for (let i = src.indexOf('[', at); i < src.length; i += 1) {
+    if (src[i] === '[') depth += 1;
+    else if (src[i] === ']') {
+      depth -= 1;
+      if (depth === 0) return src.slice(at, i + 1);
+    }
+  }
+  return '';
+}
+
 describe('🔴 vite.config.ts での順番', () => {
   it('manualPagePlugin は swPlugin より前(後ろだと precache から漏れる)', () => {
     const src = readFileSync('vite.config.ts', 'utf8');
-    const line = src.split('\n').find((l) => /^\s*plugins:\s*\[/u.test(l));
-    expect(line, 'plugins の行が読めない(空振り)').toBeDefined();
-    const a = line!.indexOf('manualPagePlugin(');
-    const b = line!.indexOf('swPlugin(');
+    const block = pluginsBlock(src);
+    // ⚠ 空振り防止 ── 塊が取れていること(取れていなければ、以下は全部 -1 になる)
+    expect(block, 'plugins の塊が読めない(空振り)').not.toBe('');
+    expect(
+      (block.match(/\w+Plugin\(/gu) ?? []).length,
+      'plugins の塊に plugin が 2 つ未満(切り出しが短すぎる)',
+    ).toBeGreaterThanOrEqual(2);
+    const a = block.indexOf('manualPagePlugin(');
+    const b = block.indexOf('swPlugin(');
     expect(a, 'manualPagePlugin が plugins に無い').toBeGreaterThanOrEqual(0);
     expect(b, 'swPlugin が plugins に無い(前提が崩れている)').toBeGreaterThanOrEqual(0);
     expect(a, 'manualPagePlugin が swPlugin より後ろ ── manual.html が precache から漏れる').toBeLessThan(b);
