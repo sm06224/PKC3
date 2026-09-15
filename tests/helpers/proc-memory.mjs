@@ -95,3 +95,43 @@ export function treeMemoryMb(rootPid) {
   }
   return { pssMb: +(pss / 1024).toFixed(1), rssMb: +(rss / 1024).toFixed(1), procs };
 }
+
+/**
+ * 🔴 **profile を握っているプロセスを全部足す**(#682 段①b で足した)。
+ *
+ * ⚠ `treeMemoryMb`(親子で辿る)は **Chromium では取りこぼす** ── 描画プロセスは
+ * **zygote 経由で親が付け替わる**ので、ブラウザ本体からの木に入らないことがある。
+ * 🔴 実測(2026-09-15):200MB を確保して触っても **−2.2MB** しか動かなかった
+ * (= 描画プロセスを 1 つも見ていない)。
+ *
+ * 🔑 だから**木ではなく `--user-data-dir` で選ぶ** ── 本体も描画も GPU も
+ * 同じ profile を命令行に持つので、付け替えに影響されない。
+ *
+ * ⚠ **自分と親は除く**(`$$` / `$PPID` に当たる形にしない ── CLAUDE.md §6)。
+ */
+export function profileMemoryMb(profileDir) {
+  let pss = 0;
+  let rss = 0;
+  let procs = 0;
+  const self = process.pid;
+  const parent = process.ppid;
+  for (const name of readdirSync('/proc')) {
+    if (!/^\d+$/.test(name)) continue;
+    const pid = Number(name);
+    if (pid === self || pid === parent) continue;
+    let cmd;
+    try {
+      cmd = readFileSync(`/proc/${pid}/cmdline`, 'utf8');
+    } catch {
+      continue;
+    }
+    if (!cmd.includes(`--user-data-dir=${profileDir}`)) continue;
+    const m = memKb(pid);
+    if (m) {
+      pss += m.pss;
+      rss += m.rss;
+      procs += 1;
+    }
+  }
+  return { pssMb: +(pss / 1024).toFixed(1), rssMb: +(rss / 1024).toFixed(1), procs };
+}

@@ -25,7 +25,7 @@ import { createServer } from 'node:http';
 import { readFileSync, existsSync, mkdirSync, writeFileSync, rmSync, cpSync } from 'node:fs';
 import { join, extname } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { treeMemoryMb, findBrowserPid } from '../helpers/proc-memory.mjs';
+import { profileMemoryMb, findBrowserPid } from '../helpers/proc-memory.mjs';
 
 const args = Object.fromEntries(
   process.argv.slice(2).map((a) => {
@@ -119,18 +119,53 @@ page.on('response', (r) => {
 await page.goto(`http://127.0.0.1:${port}/`);
 await page.waitForFunction(() => globalThis.__pkcDuck !== undefined, null, { timeout: 60_000 });
 
-const root = findBrowserPid(profile);
-if (root === null) {
+if (findBrowserPid(profile) === null) {
   console.error('🔴 ブラウザの pid が引けない ── 計器が死んでいる(結果は読まない)');
   await browser.close();
   server.close();
   process.exit(1);
 }
-const mem = () => treeMemoryMb(root);
+/**
+ * 🔑 **profile で選ぶ**(木で辿らない)── Chromium の描画プロセスは zygote 経由で
+ * 親が付け替わるので、木では取りこぼす(実測で 200MB が **−2.2MB** に見えた)。
+ */
+const mem = () => profileMemoryMb(profile);
 const settle = async (ms = 2500) => {
   await page.evaluate(() => new Promise((r) => setTimeout(r, 0)));
   await new Promise((r) => setTimeout(r, ms));
 };
+
+/**
+ * 🔴 **対照群①:計器が動くことを先に見る**(CLAUDE.md §4)。
+ *
+ * ⚠ これが無いと「DuckDB は軽かった」と「計器が見ていない」を**区別できない** ──
+ * 1 回目の走りで実際に **+0.2MB** が出て、どちらか読めなかった。
+ * 🔑 200MB を確保して**触る**(触らないと確保されただけで常駐に出ない)。
+ */
+await settle();
+const ctlBefore = mem();
+console.log(`[診断] profile を握るプロセス ${ctlBefore.procs} 個 / Pss ${ctlBefore.pssMb}MB`);
+await page.evaluate(() => {
+  const N = 200 * 1024 * 1024;
+  const b = new Uint8Array(N);
+  for (let i = 0; i < N; i += 4096) b[i] = 1;
+  globalThis.__ballast = b;
+});
+await settle();
+const ctlAwake = mem();
+await page.evaluate(() => {
+  delete globalThis.__ballast;
+});
+await settle(4000);
+const ctlFreed = mem();
+const ctlRise = +(ctlAwake.pssMb - ctlBefore.pssMb).toFixed(1);
+console.log(`\n[対照群] 200MB を確保して触る → +${ctlRise}MB / 捨てると ${+(ctlAwake.pssMb - ctlFreed.pssMb).toFixed(1)}MB 返る`);
+if (ctlRise < 100) {
+  console.error(`🔴 計器が動いていない ── 200MB 確保して +${ctlRise}MB しか出ない。以降の数字は読まない`);
+  await browser.close();
+  server.close();
+  process.exit(1);
+}
 
 const rows = [];
 for (let i = 1; i <= ROUNDS; i += 1) {
@@ -143,7 +178,11 @@ for (let i = 1; i <= ROUNDS; i += 1) {
       open: () => openDuckDb({ wasmUrl: '/duckdb/duckdb-eh.wasm', workerUrl: '/duckdb/duckdb-browser-eh.worker.js' }),
       idleMs: 60_000,
     });
-    globalThis.__answer = await globalThis.__lease.run('select 42 as n');
+    // 🔴 **設計 doc と同じ仕事に揃える**(+182.5MB は 10 万行の集計で測った値)。
+    //   ⚠ `select 42` はデータを 1 行も読まないので、比べる相手になっていなかった。
+    globalThis.__answer = await globalThis.__lease.run(
+      'select k % 100 as g, count(*) as c, sum(k) as s from range(100000) t(k) group by 1 order by 1 limit 3',
+    );
   });
   const answer = await page.evaluate(() => globalThis.__answer);
   await settle();
@@ -172,8 +211,8 @@ console.log('\n=== DuckDB は畳んだら返るか(Pss / MB)===');
 console.table(rows);
 const last = rows[rows.length - 1];
 // ⚠ 空振り防止 ── 答えが返っていない回の数字は読まない
-if (!last.answer.includes('42')) {
-  console.error('🔴 select 42 が返っていない ── 起こせていないので、上の数字は判定に使えない');
+if (!last.answer.includes('"c"')) {
+  console.error('🔴 集計が返っていない ── 起こせていないので、上の数字は判定に使えない');
   process.exit(1);
 }
 console.log(`\n🔑 起こすと +${last.起こした差}MB / 畳むと ${last.畳んで返った}MB 返り、${last.返らなかった}MB 残る`);
