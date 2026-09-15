@@ -674,6 +674,33 @@ describe('id の無い図表(user 報告 minor)', () => {
     expect(html).toContain('[@]');
   });
 
+  /**
+   * 🔴 **2 つの形は、落ち方が違う**(#530 の変異試験 M5 が SURVIVED で教えた)。
+   *
+   * | 書き方 | 名前として | 画面に出るもの |
+   * |---|---|---|
+   * | `{#1st}`(`#` の形) | **書いていない**に落ちる | 🟢 **名無しの図**(描かれる) |
+   * | `{id="a.b"}`(`key=値` の形) | **書いたのに使えない** | ⚠ `:::figure` の**字のまま** |
+   *
+   * ⚠ この非対称は上の it のコメントに**書いてはあった**が、**見る検査が無かった** ──
+   *   だから `block-directive-attrs.ts` の `if (NAME_RE.test(id))` を `if (true)` に
+   *   する変異が、2 file 104 件を全部緑のまま**生き延びた**。
+   * 🔴 実測(変異を当てて測った):`if (true)` にすると `#1st` は **`<figure>` が消えて
+   *   `:::figure` が字のまま出る** ── user から見れば「記法が壊れた」である。
+   * 🔑 だから**描いた HTML の側**にも観測点を置く ── 判定を直に当てる test
+   *   (`tests/features/block-directive-attrs.test.ts`)とは**別の観測**である(§1)。
+   */
+  it('🔴 `#` の形で使えない名前を書いても、図は描かれる(名無し扱い)', () => {
+    for (const id of ['1st', 'a.b']) {
+      const html = renderMarkdown(`:::figure{#${id}}\n^^^ 説明\n:::\n`, {
+        silentHallucinationWarnings: true,
+      });
+      expect(html, `名無しの図にならない: #${id}`).toContain('<figure');
+      expect(html, `記法が字のまま出ている: #${id}`).not.toContain(':::figure');
+      expect(html, `使えない名前が id として付いた: #${id}`).not.toContain(`id="${id}"`);
+    }
+  });
+
   it('sentinel が漏れていない(PUA の文字が画面に出ない)', () => {
     const html = renderMarkdown(':::figure\n^^^ 説明\n:::\n', {
       silentHallucinationWarnings: true,
