@@ -16,6 +16,7 @@ import {
   duckDbFileNameOf,
   duckDbLoadSql,
   sqlQuote,
+  type DuckDbRunnerDeps,
 } from '../../src/adapter/platform/duckdb/duckdb-runner';
 
 const PACK = JSON.stringify({
@@ -46,7 +47,14 @@ function fakeHandle(answer: DuckDbRaw) {
   return { h, steps };
 }
 
-function make(opts: { answer?: DuckDbRaw; bytes?: Uint8Array | null; pack?: string } = {}) {
+function make(
+  opts: {
+    answer?: DuckDbRaw;
+    bytes?: Uint8Array | null;
+    pack?: string;
+    lendInstalled?: DuckDbRunnerDeps['lendInstalled'];
+  } = {},
+) {
   const answer = opts.answer ?? { columns: ['n'], types: ['Int32'], rows: [[1]] };
   const made: Array<ReturnType<typeof fakeHandle>> = [];
   const open = vi.fn(() => {
@@ -56,7 +64,14 @@ function make(opts: { answer?: DuckDbRaw; bytes?: Uint8Array | null; pack?: stri
   });
   const fetchText = vi.fn(() => Promise.resolve(opts.pack ?? PACK));
   const readBytes = vi.fn(() => Promise.resolve(opts.bytes === undefined ? new Uint8Array([1, 2, 3]) : opts.bytes));
-  const runner = new DuckDbRunner({ fetchText, open, baseUrl: 'https://example.test/app/' });
+  const runner = new DuckDbRunner({
+    fetchText,
+    open,
+    baseUrl: 'https://example.test/app/',
+    // ⚠ 未指定なら key ごと渡さない ── `lendInstalled: undefined` を明示するのと
+    //   実害は無いが、既存 test の deps 形をそのまま保つ
+    ...(opts.lendInstalled === undefined ? {} : { lendInstalled: opts.lendInstalled }),
+  });
   return { runner, open, fetchText, readBytes, made };
 }
 
@@ -207,5 +222,97 @@ describe('🔴 DuckDB で引く(#682 段②)', () => {
     // 🔴 BigInt のまま流すと、書き出しが落ちる
     expect(r.rows).toEqual([[3]]);
     expect(typeof r.ms).toBe('number');
+  });
+});
+
+describe('🔴 入っていれば端末の一式、無ければ fetch(#682 段③b)', () => {
+  it('🔴 端末に入っていれば、同一オリジンへの fetch は 0 回', async () => {
+    const dispose = vi.fn();
+    const lendInstalled = vi.fn(async () => ({ wasmUrl: 'blob:w', workerUrl: 'blob:k', dispose }));
+    const { runner, fetchText, open, readBytes } = make({ lendInstalled });
+    await runner.run({ sql: 'SELECT 1', source: SRC, readBytes });
+    expect(lendInstalled, '毎回問うはず').toHaveBeenCalledTimes(1);
+    expect(fetchText, '端末に入っているのに目録を取りに行っている').not.toHaveBeenCalled();
+    expect(open).toHaveBeenCalledWith({ wasmUrl: 'blob:w', workerUrl: 'blob:k' });
+    expect(dispose, '起こし終えたら借りた URL を返している').toHaveBeenCalledTimes(1);
+  });
+
+  it('⚠ 対照群 ── 入っていなければ、いまどおり同一オリジンへ fetch する', async () => {
+    const lendInstalled = vi.fn(async () => null);
+    const { runner, fetchText, open, readBytes } = make({ lendInstalled });
+    await runner.run({ sql: 'SELECT 1', source: SRC, readBytes });
+    expect(lendInstalled).toHaveBeenCalledTimes(1);
+    expect(fetchText, '未設置なのに fetch していない').toHaveBeenCalledWith('https://example.test/app/duckdb/pack.json');
+    expect(open).toHaveBeenCalledWith({
+      wasmUrl: 'https://example.test/app/duckdb/duckdb-eh.wasm',
+      workerUrl: 'https://example.test/app/duckdb/duckdb-browser-eh.worker.js',
+    });
+  });
+
+  it('🔴 `lendInstalled` を渡さない既存の呼び方は、そのまま同一オリジンへ倒れる(後方互換)', async () => {
+    // ⚠ opts.lendInstalled を渡さない ── deps に `lendInstalled` キー自体が無い形
+    const { runner, fetchText, open, readBytes } = make();
+    await runner.run({ sql: 'SELECT 1', source: SRC, readBytes });
+    expect(fetchText).toHaveBeenCalledWith('https://example.test/app/duckdb/pack.json');
+    expect(open).toHaveBeenCalledWith({
+      wasmUrl: 'https://example.test/app/duckdb/duckdb-eh.wasm',
+      workerUrl: 'https://example.test/app/duckdb/duckdb-browser-eh.worker.js',
+    });
+  });
+
+  it('🔴 器を起こすたびに借り直す(前回の blob: URL を使い回さない)', async () => {
+    let n = 0;
+    const disposes: Array<ReturnType<typeof vi.fn>> = [];
+    const lendInstalled = vi.fn(async () => {
+      n += 1;
+      const dispose = vi.fn();
+      disposes.push(dispose);
+      return { wasmUrl: `blob:w${n}`, workerUrl: `blob:k${n}`, dispose };
+    });
+    const { runner, open, readBytes } = make({ lendInstalled });
+    await runner.run({ sql: 'SELECT 1', source: SRC, readBytes });
+    // ⚠ 相手を替えて器を作り直させる(既存の「相手を替えたら器ごと作り直す」規律)
+    await runner.run({ sql: 'SELECT 2', source: { lid: 'l2', name: '別.csv' }, readBytes });
+
+    expect(lendInstalled, '器を作り直した回数だけ借り直しているはず').toHaveBeenCalledTimes(2);
+    expect(open).toHaveBeenNthCalledWith(1, { wasmUrl: 'blob:w1', workerUrl: 'blob:k1' });
+    expect(open).toHaveBeenNthCalledWith(2, { wasmUrl: 'blob:w2', workerUrl: 'blob:k2' });
+    expect(disposes[0], '1 回目に借りた分を返している').toHaveBeenCalledTimes(1);
+    expect(disposes[1], '2 回目に借りた分も返している').toHaveBeenCalledTimes(1);
+  });
+
+  it('🔴 `dispose` は `deps.open()` が終わった後に呼ぶ(順番)', async () => {
+    const order: string[] = [];
+    const dispose = vi.fn(() => order.push('dispose'));
+    const lendInstalled = vi.fn(async () => ({ wasmUrl: 'blob:w', workerUrl: 'blob:k', dispose }));
+    const answer: DuckDbRaw = { columns: ['n'], types: ['Int32'], rows: [[1]] };
+    const open = vi.fn(async (urls: { wasmUrl: string; workerUrl: string }) => {
+      order.push('open:' + urls.wasmUrl);
+      return fakeHandle(answer).h;
+    });
+    const runner = new DuckDbRunner({
+      fetchText: vi.fn(async () => ''),
+      open,
+      baseUrl: 'https://example.test/app/',
+      lendInstalled,
+    });
+    const readBytes = vi.fn(() => Promise.resolve(new Uint8Array([1])));
+    await runner.run({ sql: 'SELECT 1', source: SRC, readBytes });
+    expect(order, 'open が終わる前に dispose している').toEqual(['open:blob:w', 'dispose']);
+  });
+
+  it('🔴 `deps.open` が失敗しても、借りた URL は返す(try/finally)', async () => {
+    const dispose = vi.fn();
+    const lendInstalled = vi.fn(async () => ({ wasmUrl: 'blob:w', workerUrl: 'blob:k', dispose }));
+    const open = vi.fn(() => Promise.reject(new Error('壊れた wasm')));
+    const runner = new DuckDbRunner({
+      fetchText: vi.fn(async () => ''),
+      open,
+      baseUrl: 'https://example.test/app/',
+      lendInstalled,
+    });
+    const readBytes = vi.fn(() => Promise.resolve(new Uint8Array([1])));
+    await expect(runner.run({ sql: 'SELECT 1', source: SRC, readBytes })).rejects.toThrow('壊れた wasm');
+    expect(dispose, 'open が失敗しても借りた URL を返しているはず').toHaveBeenCalledTimes(1);
   });
 });

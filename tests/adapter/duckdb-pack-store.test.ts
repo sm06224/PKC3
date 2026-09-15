@@ -13,7 +13,11 @@
  *   **主張に必要な順序だけ**を再現する最小の偽物を差す(依存を増やさない)。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DuckDbPackStore } from '../../src/adapter/platform/duckdb/duckdb-pack-store';
+import {
+  DuckDbPackStore,
+  DuckDbPackStoreError,
+  type DuckDbPackMeta,
+} from '../../src/adapter/platform/duckdb/duckdb-pack-store';
 
 type Handler = (() => void) | null;
 
@@ -216,6 +220,167 @@ describe('DuckDbPackStore', () => {
     const store = new DuckDbPackStore();
     await store.writeAll(completePack(), { version: 'v1' });
     expect(await store.readFile('no-such-file')).toBeNull();
+  });
+
+  it('🔴 記録(meta.bytes)と実際の大きさが一致していれば、そのまま読める(対照群)', async () => {
+    installFakeIdb('commit');
+    const store = new DuckDbPackStore();
+    const meta = await store.writeAll(completePack(), { version: 'v1' });
+    const wasmMeta = meta.files.find((f) => f.name === 'duckdb-eh.wasm')!;
+    const blob = await store.readFile('duckdb-eh.wasm');
+    expect(blob).not.toBeNull();
+    expect(blob!.size, '記録した bytes と実際の Blob.size が一致するはず').toBe(wasmMeta.bytes);
+  });
+
+  it('🔴 記録と実際の大きさが食い違えば、null ではなく例外を投げる(照合)', async () => {
+    const fake = installFakeIdb('commit');
+    const store = new DuckDbPackStore();
+    await store.writeAll(completePack(), { version: 'v1' });
+    // ⚠ meta の bytes が実際の Blob.size と食い違った(=壊れた)状態を模す
+    const meta = fake.meta.data.get('pack') as DuckDbPackMeta;
+    const broken: DuckDbPackMeta = {
+      ...meta,
+      files: meta.files.map((f) => (f.name === 'duckdb-eh.wasm' ? { ...f, bytes: f.bytes + 1 } : f)),
+    };
+    fake.meta.data.set('pack', broken);
+
+    await expect(store.readFile('duckdb-eh.wasm')).rejects.toThrow(DuckDbPackStoreError);
+    // 🔑 文言に「記録した値」と「実際の値」の両方が入っている(検算できる形にする)
+    const wantBytes = broken.files.find((f) => f.name === 'duckdb-eh.wasm')!.bytes;
+    const gotBytes = (meta.files.find((f) => f.name === 'duckdb-eh.wasm')!).bytes;
+    await expect(store.readFile('duckdb-eh.wasm')).rejects.toThrow(
+      new RegExp(`記録: ${wantBytes} byte.*実際: ${gotBytes} byte`),
+    );
+  });
+
+  it('🔴 meta に記録の無い名前は、blob が在っても壊れているとは言わず null(照合の基準が無いので)', async () => {
+    const fake = installFakeIdb('commit');
+    const store = new DuckDbPackStore();
+    await store.writeAll(completePack(), { version: 'v1' });
+    // meta には無いのに files にだけ紛れ込んだ、管理外の名前を模す
+    fake.files.data.set('unknown.bin', new Blob(['x']));
+    expect(await store.readFile('unknown.bin')).toBeNull();
+  });
+
+  it('🔴 借りて dispose すると revoke される(ObjectURL の貸出)', async () => {
+    installFakeIdb('commit');
+    const store = new DuckDbPackStore();
+    await store.writeAll(completePack(), { version: 'v1' });
+
+    const created: string[] = [];
+    const revoked: string[] = [];
+    const create = vi.spyOn(URL, 'createObjectURL').mockImplementation(() => {
+      const u = `blob:${created.length}`;
+      created.push(u);
+      return u;
+    });
+    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation((u: string) => void revoked.push(u));
+    try {
+      const lent = await store.lendObjectUrl('duckdb-eh.wasm');
+      expect(lent).not.toBeNull();
+      expect(created).toEqual([lent!.url]);
+      expect(revoked, 'まだ dispose していない').toEqual([]);
+      lent!.dispose();
+      expect(revoked, 'dispose すると revoke される').toEqual([lent!.url]);
+    } finally {
+      create.mockRestore();
+      revoke.mockRestore();
+    }
+  });
+
+  it('🔴 lendObjectUrl は無い名前に null を返す(revoke する物が無い)', async () => {
+    installFakeIdb('commit');
+    const store = new DuckDbPackStore();
+    await store.writeAll(completePack(), { version: 'v1' });
+    const revoke = vi.spyOn(URL, 'revokeObjectURL');
+    try {
+      expect(await store.lendObjectUrl('no-such-file')).toBeNull();
+      expect(revoke, '貸していないのに revoke している').not.toHaveBeenCalled();
+    } finally {
+      revoke.mockRestore();
+    }
+  });
+
+  it('🔴 lendObjectUrl は readFile の照合を迂回しない(壊れていれば例外が伝わる)', async () => {
+    const fake = installFakeIdb('commit');
+    const store = new DuckDbPackStore();
+    await store.writeAll(completePack(), { version: 'v1' });
+    const meta = fake.meta.data.get('pack') as DuckDbPackMeta;
+    fake.meta.data.set('pack', {
+      ...meta,
+      files: meta.files.map((f) => (f.name === 'duckdb-eh.wasm' ? { ...f, bytes: f.bytes + 1 } : f)),
+    });
+    const create = vi.spyOn(URL, 'createObjectURL');
+    try {
+      await expect(store.lendObjectUrl('duckdb-eh.wasm')).rejects.toThrow(DuckDbPackStoreError);
+      expect(create, '照合に失敗したのに URL を作っている').not.toHaveBeenCalled();
+    } finally {
+      create.mockRestore();
+    }
+  });
+
+  it('🔴 lendInstalledPack: 入っていなければ null(URL を 1 つも作らない)', async () => {
+    installFakeIdb('commit');
+    const store = new DuckDbPackStore();
+    const create = vi.spyOn(URL, 'createObjectURL');
+    try {
+      expect(await store.lendInstalledPack()).toBeNull();
+      expect(create).not.toHaveBeenCalled();
+    } finally {
+      create.mockRestore();
+    }
+  });
+
+  it('🔴 lendInstalledPack: 揃っていれば両方を貸し、dispose で両方 revoke する', async () => {
+    installFakeIdb('commit');
+    const store = new DuckDbPackStore();
+    await store.writeAll(completePack(), { version: 'v1' });
+
+    const created: string[] = [];
+    const revoked: string[] = [];
+    const create = vi.spyOn(URL, 'createObjectURL').mockImplementation(() => {
+      const u = `blob:${created.length}`;
+      created.push(u);
+      return u;
+    });
+    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation((u: string) => void revoked.push(u));
+    try {
+      const lent = await store.lendInstalledPack();
+      expect(lent).not.toBeNull();
+      expect(lent!.wasmUrl).not.toBe(lent!.workerUrl);
+      expect(created).toHaveLength(2);
+      expect(revoked, 'まだ dispose していない').toEqual([]);
+      lent!.dispose();
+      expect(revoked, '両方 revoke されている').toHaveLength(2);
+    } finally {
+      create.mockRestore();
+      revoke.mockRestore();
+    }
+  });
+
+  it('🔴 lendInstalledPack: 片方だけ読めなければ、借りた分を revoke してから null', async () => {
+    const fake = installFakeIdb('commit');
+    const store = new DuckDbPackStore();
+    await store.writeAll(completePack(), { version: 'v1' });
+    // worker の実体だけ消す(meta は揃ったまま ── files 側だけが壊れた状態を模す)
+    fake.files.data.delete('duckdb-browser-eh.worker.js');
+
+    const created: string[] = [];
+    const revoked: string[] = [];
+    const create = vi.spyOn(URL, 'createObjectURL').mockImplementation(() => {
+      const u = `blob:${created.length}`;
+      created.push(u);
+      return u;
+    });
+    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation((u: string) => void revoked.push(u));
+    try {
+      expect(await store.lendInstalledPack()).toBeNull();
+      expect(created, '先に借りた wasm 側は 1 度は貸している').toHaveLength(1);
+      expect(revoked, '借りっぱなしにせず revoke している').toEqual(created);
+    } finally {
+      create.mockRestore();
+      revoke.mockRestore();
+    }
   });
 
   it('進捗は file 単位で最後まで刻まれる', async () => {

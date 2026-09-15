@@ -24,6 +24,7 @@
  * 「meta は書けたが files が半端(= 入っていると嘘をつく)」のどちらかになる。
  * ⚠ ここは分割せず同じ tx に入れる ── quota で落ちるなら丸ごと落ちる。
  */
+import { DUCKDB_WASM, DUCKDB_WORKER } from '@features/query/duckdb-pack';
 
 const DB_NAME = 'pkc3-duckdb-pack';
 const FILES = 'files';
@@ -152,16 +153,85 @@ export class DuckDbPackStore {
   /**
    * 入れてある実体を 1 つ読む。
    *
-   * ⏸ **段③b への申し送り**:ここは**まだ照合していない** ── `meta` に `sha256` と
-   *   `bytes` を控えてあるのに、読み出すときに突き合わせていない。
-   * 🔴 **控えただけの材料は、誰も読まなければ「在るだけ」である**(CLAUDE.md §1)──
-   *   段③b で DuckDB へ渡す手前に、**少なくとも `bytes` の一致**を見ること
-   *   (sha256 は 36MB を読み直すので、いつ見るかは測ってから決める)。
-   * ⚠ ここで見ないのは「まだ渡す先が無い」からであって、**要らないからではない**。
+   * 🔴 **`bytes` を照合する**(#682 段③b。⏸ 段③a からの申し送りに応える)──
+   *   `meta` に控えた大きさと、実際に読めた Blob の大きさを突き合わせ、
+   *   食い違えば **`null` ではなく `DuckDbPackStoreError` を投げる**。
+   *   ⚠ `null` は呼び側(`lendObjectUrl` / DuckDB を起こす側)から見ると
+   *   「**入っていない**」と同じ意味になる ── 壊れているのに `null` を返すと、
+   *   「取り直せば直る」という理由が消えて**黙って「無い」ことにされる**
+   *   (CLAUDE.md §1「控えただけの材料は、誰も読まなければ在るだけ」)。
+   * ⚠ **sha256 はまだ見ない**(#682 段③b の指示どおり)── 36MB を読み直す
+   *   コストが要るので、いつ見るかは測ってから決める。`meta.files[].sha256` は
+   *   控えたまま、まだ照合していない事実ごと次の段へ引き継ぐ。
+   * ⚠ **`meta` にその名前の記録が無い**(= 一式の構成外の名前を求められた、
+   *   または `meta` 自体が無い)ときは、照合する基準が無いので**素の「無い」
+   *   として `null` を返す** ── これは「壊れている」ではなく「管理していない
+   *   名前を渡された」なので、例外にしない。
    */
   async readFile(name: string): Promise<Blob | null> {
-    const v = await read(await this.need(), FILES, (s) => s.get(name));
-    return v instanceof Blob ? v : null;
+    const db = await this.need();
+    const blob = await read(db, FILES, (s) => s.get(name));
+    if (!(blob instanceof Blob)) return null;
+    const meta = await this.readMeta();
+    const fileMeta = meta?.files.find((f) => f.name === name);
+    if (fileMeta === undefined) return null;
+    if (blob.size !== fileMeta.bytes) {
+      throw new DuckDbPackStoreError(
+        `${name} の中身が壊れています(記録: ${fileMeta.bytes} byte / 実際: ${blob.size} byte。入れ直してください)`,
+      );
+    }
+    return blob;
+  }
+
+  /**
+   * 引き渡し用の ObjectURL の貸出(#682 段③b)。返る `dispose` を**寿命の終わりに
+   * 必ず呼ぶ**(revoke は借りた側の責務 ── 不可侵「ObjectURL は表示の寿命終端で
+   * revoke」)。`office-pack-store.ts` の `lendObjectUrl` と同じ形。
+   *
+   * 🔑 **`readFile` の照合を通してから貸す**(迂回しない)── ここで `FILES` を
+   *   直に読む別経路を作ると、上の `readFile` に足した検査の意味が消える
+   *   (CLAUDE.md §7「同じ問いに答える口を 2 つ作らない」)。壊れていれば
+   *   `readFile` が投げる `DuckDbPackStoreError` がそのまま外へ伝わる。
+   * 🔑 **blob: URL が DuckDB のワーカー / wasm 起動で使えることは実測済み**
+   *   (2026-09-15、実ブラウザ):`new Worker(blobUrl)` も
+   *   `db.instantiate(blobWasmUrl, …)` も通り、外への要求は 0 件だった ──
+   *   ここで「動くか分からない」とは書かない。
+   */
+  async lendObjectUrl(name: string): Promise<{ url: string; dispose: () => void } | null> {
+    const blob = await this.readFile(name);
+    if (!blob) return null;
+    const url = URL.createObjectURL(blob);
+    return { url, dispose: () => URL.revokeObjectURL(url) };
+  }
+
+  /**
+   * 起動に要る 2 file(wasm / worker)を、`DuckDbRunnerDeps.lendInstalled` が
+   * 求める形でまとめて貸す(#682 段③b。`main.ts` の配線口)。
+   *
+   * 🔑 **判断はここへ寄せる** ── `main.ts` はどの test からも実行されない
+   *   (CLAUDE.md §2)ので、main.ts には「揃っているか」「貸す/貸さない」を書かない。
+   * ⚠ **2 file のうち片方だけ貸せた回は、先に借りた分を revoke してから `null` を
+   *   返す** ── 借りっぱなしにしない(不可侵「ObjectURL は寿命終端で revoke」)。
+   *   通常は `readMeta()` が meta の有無で「揃っている」を判定しているのでここへは
+   *   来ないが、`readFile` は名前ごとに独立して照合するため、念のため両方を見る。
+   */
+  async lendInstalledPack(): Promise<{ wasmUrl: string; workerUrl: string; dispose: () => void } | null> {
+    if ((await this.readMeta()) === null) return null;
+    const wasm = await this.lendObjectUrl(DUCKDB_WASM);
+    if (wasm === null) return null;
+    const worker = await this.lendObjectUrl(DUCKDB_WORKER);
+    if (worker === null) {
+      wasm.dispose();
+      return null;
+    }
+    return {
+      wasmUrl: wasm.url,
+      workerUrl: worker.url,
+      dispose: () => {
+        wasm.dispose();
+        worker.dispose();
+      },
+    };
   }
 
   /**
