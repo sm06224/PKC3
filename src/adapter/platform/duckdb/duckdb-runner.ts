@@ -61,6 +61,18 @@ export interface DuckDbRunnerDeps {
   open(input: { wasmUrl: string; workerUrl: string }): Promise<DuckDbHandle>;
   /** 基点。既定は `document.baseURI`。 */
   baseUrl?: string;
+  /**
+   * 一式の置き場。既定は `DUCKDB_BASE`(= 相対の `duckdb/`)。
+   *
+   * 🔴 **差せる形にしてあるのは、門が本当に効くことを検められるようにするため**である
+   *   (#682 段③a、変異試験 2026-09-15)。⚠ `DUCKDB_BASE` は**相対の定数**なので、
+   *   差せないと `resolveDuckDbBase()` を**外しても結果が 1 バイトも変わらない** ──
+   *   実測で変異 A4(門を `new URL(...).href` に戻す)が **SURVIVED** した。
+   *   🔑 つまり守っていたのは「門が在ること」であって「門が効くこと」ではなかった。
+   * ⚠ **製品からは差しません**(既定のまま)── 差す口が要るからではなく、
+   *   **門の通り道を test から通せるようにする**ためだけに在ります。
+   */
+  packBase?: string;
   idleMs?: number;
 }
 
@@ -194,11 +206,13 @@ export class DuckDbRunner {
     /**
      * 🔴 **門は 1 つ**(#682 段③a、2026-09-15)── 取得元が同じ場所かを検めるのは
      *   `resolveDuckDbBase()` だけにする(§7「同じ問いに答える口を 2 つ作らない」)。
-     * ⚠ ここは相対の `duckdb/` しか渡さないので今は必ず通るが、**通る理由を
-     *   「渡す物が相対だから」に頼らない** ── 次に書く人が別の字を渡した日に、
-     *   門が無ければ外の宛先がそのまま組める。
+     * ⚠ 製品が渡すのは相対の `duckdb/` だけなので、**そこだけ見ていると必ず通る** ──
+     *   だから「渡す物が相対だから安全」に**寄りかからない**。次に書く人が別の字を
+     *   渡した日に、門が無ければ外の宛先がそのまま組める。
+     * 🔑 その「別の字を渡した日」を **いま test から作れる**ようにしてある
+     *   (`deps.packBase`)── 作れないと、門を外しても何も落ちない。
      */
-    const base = resolveDuckDbBase(DUCKDB_BASE, this.deps.baseUrl ?? document.baseURI);
+    const base = resolveDuckDbBase(this.deps.packBase ?? DUCKDB_BASE, this.deps.baseUrl ?? document.baseURI);
     let text: string;
     try {
       text = await this.deps.fetchText(duckDbAssetUrl(base, 'pack.json'));
