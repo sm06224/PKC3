@@ -203,6 +203,82 @@ export function minWidthForColumns(count: number, fontPx: number): number {
 }
 
 /**
+ * 🔴 **段の境目を、拡大率で滲ませない**(#953 / #551 C。user 報告
+ * 「段組みの罫線が、拡大率によって線ごとに滲む」)。
+ *
+ * ## 何が起きていたか(実測。実ブラウザ・DPR 1.25・器 1679px・3 段)
+ *
+ * | | 境界の位置(物理画素) | 幅 | いちばん濃い値 |
+ * |---|---|---|---|
+ * | 1 本目 | **696.0**(整数) | 1px | `[205,210,217]` ← くっきり |
+ * | 2 本目 | **1402.5**(端数 .5) | **2px** | `[217,221,226]` ← **にじんで薄い** |
+ *
+ * 境界 k の位置は `余白 + k × (段の幅 + 段間) − 段間 ÷ 2` で決まる。
+ * 段間(`READ_COLUMN_GAP_PX` = 16px)は多くの dpr で `× dpr` が整数になる
+ * (例: 1.25 なら 20 物理画素、その半分は 10)── 🔑 **端数を作っているのは
+ * 「段の幅」だけ**である。ここが物理画素の整数に乗らないと、k が進むごとに
+ * 端数が積み上がり、**線ごとに滲み方が変わる**(1 本目はくっきり、2 本目は滲む)。
+ *
+ * ## 直し方 ── 線は描かない。器の幅を数 px だけ詰める
+ *
+ * 詰めた後の段の幅 `(器 − (n−1)×段間) / n` が `× dpr` で整数になるところまで、
+ * 器の幅を**下へ**詰める(呼び側は詰めた幅を器の content box(padding 等)へ
+ * 反映させる ── DOM 側は `src/adapter/ui/render/read-columns.ts` の
+ * `fitColumnHeight` を見よ)。
+ *
+ * ⚠ **詰めるのは「実際に組まれる段数(`effectiveColumns`)」ぶん**である ──
+ *   選んだ段数(`count`)そのものではない。器が狭くて 3 段のうち 2 段しか
+ *   組まれていないのに 3 段ぶんで詰めると、詰める量も境界の位置も
+ *   実際の画面と食い違う。
+ *
+ * 🔴 **段数の頭打ちを跨がない**(#953 の必須条件)。詰めた結果
+ *   `effectiveColumns` が変わる(= 段が 1 本減る)なら、**詰めない**。
+ *   にじむほうが、段そのものが消えるより実害が小さい。
+ *
+ * ⚠ **`dpr` が整数(1 / 2 …)のときは、何もしない**。物理画素の整数に乗らない
+ *   端数は理屈のうえでは整数 dpr でも起こりうるが、ここで直すのは
+ *   「拡大率によって滲む」という報告どおり **非整数 dpr の場合だけ**にする ──
+ *   等倍・整数倍の画面まで理由なく幅を削ると、**選んだ覚えのない詰め方**が
+ *   常時掛かることになる(CLAUDE.md「見え方を変える判断は user のもの」)。
+ *
+ * 🔑 **詰める量は必ず `n / dpr` px 未満**である。これは実測ではなく
+ *   `Math.floor` の性質から**式として**保証される ── 段 1 本あたりの詰め幅は
+ *   `1/dpr` px 未満なので、`n` 本の合計もそれを超えない。
+ *
+ * ⚠ **異常値(`dpr` が 0 以下・`NaN`・`Infinity`)でも壊れない** ── そのときは
+ *   詰めずに `paneWidth` をそのまま返す。
+ *
+ * @param paneWidth 詰める前の器の幅(px)
+ * @param count 選ばれている段数
+ * @param fontPx 本文の器の `font-size`(px)
+ * @param dpr `devicePixelRatio`
+ * @returns 詰めた後の幅(px)。詰める必要が無い / できないときは `paneWidth` のまま
+ */
+export function crispColumnsWidth(
+  paneWidth: number,
+  count: number,
+  fontPx: number,
+  dpr: number,
+): number {
+  // ⚠ 異常値・整数倍率では詰めない(壊れない・無駄に削らない)
+  if (!Number.isFinite(dpr) || dpr <= 0 || Number.isInteger(dpr)) return paneWidth;
+  const n = effectiveColumns(paneWidth, count, fontPx);
+  // ⚠ 1 段(境界そのものが無い)は詰める意味が無い
+  if (n <= 1) return paneWidth;
+  const gap = READ_COLUMN_GAP_PX;
+  const rawColWidth = (paneWidth - (n - 1) * gap) / n;
+  if (!(rawColWidth > 0)) return paneWidth;
+  // 🔑 浮動小数の誤差で「僅かに届いていない整数」を切り捨てないよう、ごく小さく足す
+  const snappedColWidth = Math.floor(rawColWidth * dpr + 1e-9) / dpr;
+  const candidate = Math.min(paneWidth, snappedColWidth * n + (n - 1) * gap);
+  // ⚠ 既に整数に乗っている(詰める量がほぼ 0)なら、そのまま返す
+  if (paneWidth - candidate <= 1e-6) return paneWidth;
+  // 🔴 詰めたせいで段数の頭打ちを跨ぐなら、詰めない(にじむほうがまだよい)
+  if (effectiveColumns(candidate, count, fontPx) !== n) return paneWidth;
+  return candidate;
+}
+
+/**
  * 🔴 **順ぐりに次の段数へ**(#522。user 指示 2026-08-28
  * 「**段組表示を表示変更導線をセンターペインもしくはショートカット、
  * コンテキストメニューに用意したいくらいには気に入った**」)。
