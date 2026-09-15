@@ -35,6 +35,7 @@
     "vitest": "^4.1.11"
   },
   "dependencies": {
+    "@duckdb/duckdb-wasm": "^1.33.1-dev57.0",
     "@sqlite.org/sqlite-wasm": "^3.53.0-build1",
     "chart.js": "^4.5.1",
     "katex": "^0.18.7",

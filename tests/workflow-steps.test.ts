@@ -1109,11 +1109,23 @@ describe('#648 💭 ── manual.html の実在を要求する経路', () => {
  *   「過去の zip を検品する経路には、新しい要求を無条件で足さない」を機械で留める。
  * ⚠ 見るのは**実行する行**(コメントに満たされない)。
  */
-describe('過去の zip を、新しい要求で落とさない(precache.json)', () => {
+describe('過去の zip を、新しい要求で落とさない(旗の名前に依らない)', () => {
+  /**
+   * 🔴 **この節は 2026-09-15 に「旗の名前に依らない」形へ書き直した**(#682)。
+   *
+   * ⚠ 直す前は `--require-precache-list` という**綴りで**書いてあった ── つまり
+   *   **次に足した旗には 1 件も当たらない**。実際 `--require-duckdb` を足したとき、
+   *   この節は 44 件すべて緑のまま通った(= 何も守っていなかった)。
+   * 🔑 CLAUDE.md「戒めは**対象**ではなく**目的**で書く」の test 版である ──
+   *   守りたいのは「precache.json」ではなく「**過去の成果物に効く要求を増やさない**」。
+   */
   const distLines = (file: string, mode: 'product' | 'dev'): string[] =>
     readFileSync(join(DIR, file), 'utf-8')
       .split('\n')
       .filter((l) => !l.trim().startsWith('#') && l.includes(`check-dist.mjs ${mode}`));
+
+  /** その行が渡している `--require-*` を全部拾う。 */
+  const flagsOf = (line: string): string[] => line.match(/--require-[a-z-]+/g) ?? [];
 
   /** 焼きたての一式を見る経路 ── ここは要求する(要求しないと、欠けた版を配れる)。 */
   const FRESH = [
@@ -1123,27 +1135,39 @@ describe('過去の zip を、新しい要求で落とさない(precache.json)',
     { file: 'pages.yml', mode: 'dev' },
   ] as const;
 
+  /**
+   * 🔴 **焼きたてのどの経路にも要る旗。** ⚠ 1 本でも忘れると、そこだけ検品が緩む
+   *   (「覆いを狭めない」)。⚠ `--require-manual` は product だけなのでここには入れない。
+   */
+  const EVERY_FRESH = ['--require-precache-list', '--require-duckdb'];
+
   for (const c of FRESH) {
-    it(`${c.file}(${c.mode}): 焼きたての検品に --require-precache-list が付いている`, () => {
+    it(`${c.file}(${c.mode}): 焼きたての検品に、要る旗が全部付いている`, () => {
       const lines = distLines(c.file, c.mode);
       expect(lines, `${c.file} に ${c.mode} の検品が無い(空振り)`).toHaveLength(1);
-      expect(lines[0], '旗が無い(plugin が emit を止めた版をそのまま配れる)').toContain(
-        '--require-precache-list',
-      );
+      const got = flagsOf(lines[0] as string);
+      for (const want of EVERY_FRESH) {
+        expect(got, `${want} が無い(plugin が emit を止めた版をそのまま配れる)`).toContain(want);
+      }
     });
   }
 
-  it('🔴 pages.yml: 過去の zip の検品には付いていない(/dev/ を止めない)', () => {
+  it('🔴 pages.yml: 過去の zip の検品には、要求の旗が 1 つも付いていない', () => {
     const lines = distLines('pages.yml', 'product');
     expect(lines, 'pages.yml に product の検品が無い(空振り)').toHaveLength(1);
-    expect(lines[0], '過去の release を新しい要求で落としている').not.toContain(
-      '--require-precache-list',
-    );
+    // ⚠ **名前で見ない** ── 「`--require-` で始まる物が 0 件」で見る。
+    //    これが `/dev/` の配信を守っている唯一の行である(2026-09-09 に 2 回止めた)。
+    expect(flagsOf(lines[0] as string), '過去の release を新しい要求で落としている').toEqual([]);
   });
 
-  it('🔴 旗の綴りが check-dist.mjs の受け口と同じ', () => {
+  it('🔴 workflow が渡す旗は、全部 check-dist.mjs の受け口に在る', () => {
     const cli = readFileSync('scripts/check-dist.mjs', 'utf-8');
-    expect(cli, '受け口に無い綴りを workflow が渡している').toContain("'--require-precache-list'");
+    const used = new Set(FRESH.flatMap((c) => flagsOf(distLines(c.file, c.mode)[0] as string)));
+    // ⚠ 空振り防止 ── 実際に旗を拾えていること
+    expect(used.size).toBeGreaterThanOrEqual(EVERY_FRESH.length);
+    for (const f of used) {
+      expect(cli, `受け口に無い綴りを workflow が渡している: ${f}`).toContain(`'${f}'`);
+    }
   });
 });
 

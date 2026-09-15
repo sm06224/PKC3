@@ -108,8 +108,23 @@ export function isStaleCache(name: string, scope: string, buildId: string): bool
 export function shouldPrecache(path: string): boolean {
   if (path.endsWith('.map')) return false;
   if (path === 'sw.js') return false; // SW 自身は SW が配らない
+  if (path.startsWith(DUCKDB_PRECACHE_SKIP)) return false;
   return true;
 }
+
+/**
+ * 🔴 **DuckDB の実体は precache に載せない**（#682。裁定 2026-09-15）。
+ *
+ * ⚠ 実測（2026-09-15）：いまの precache は **137 file / 8.2 MiB**、DuckDB は **約 35 MiB**。
+ * 載せると **5.2 倍**になり、**DuckDB を選ばない user が全部払う**。
+ * 🔑 これは「押したときだけ取りに行って IDB へ置く」物なので、`portable-template.html`
+ * と同じ扱いにする（`scripts/dist-inspect.mjs` が **別立ての予算**で見る）。
+ *
+ * ⚠ 綴りの正本は `build/duckdb-assets-plugin.ts` の `DUCKDB_DIR` ──
+ * `tests/adapter/sw-source.test.ts` が両者を突き合わせて pin する
+ * （片方だけ改名すると、また黙って precache に載る）。
+ */
+export const DUCKDB_PRECACHE_SKIP = 'duckdb/';
 
 /** hash 付きの生成物(名前が変われば別 URL)。cache-first にしてよい。 */
 export const HASHED_ASSET = /-[A-Za-z0-9_-]{8}\.(?:js|mjs|cjs|wasm|css)$/;

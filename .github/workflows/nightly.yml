@@ -97,7 +97,7 @@ jobs:
       # 🔴 焼きたてなので manual.html の実在も要求する(#648 💭)
       - name: Product 検品 (map の有無 / 参照の実在 / 配る量 / manual.html)
         id: product_check
-        run: node scripts/check-dist.mjs product --require-manual --require-precache-list
+        run: node scripts/check-dist.mjs product --require-manual --require-precache-list --require-duckdb
       # 🔴 **ここに smoke を置かない**(2026-09-11)── product 版の全量は
       #   `smoke.yml` の `kind: product` で**押したときだけ**回す。
       # ⚠ この job が今も夜に居てよいのは、**全量 smoke ではないから**である
