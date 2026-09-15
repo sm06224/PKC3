@@ -199,9 +199,9 @@ for (let i = 1; i <= ROUNDS; i += 1) {
     });
     // 🔴 **設計 doc と同じ仕事に揃える**(+182.5MB は 10 万行の集計で測った値)。
     //   ⚠ `select 42` はデータを 1 行も読まないので、比べる相手になっていなかった。
-    globalThis.__answer = await globalThis.__lease.run(
-      'select k % 100 as g, count(*) as c, sum(k) as s from range(100000) t(k) group by 1 order by 1 limit 3',
-    );
+    globalThis.__answer = await globalThis.__lease.run({
+      sql: 'select k % 100 as g, count(*) as c, sum(k) as s from range(100000) t(k) group by 1 order by 1 limit 3',
+    });
   });
   const answer = await page.evaluate(() => globalThis.__answer);
   await settle();

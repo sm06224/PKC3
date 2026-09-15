@@ -7488,11 +7488,40 @@ const ACTIONS: Record<string, ActionHandler> = {
       root.querySelector<HTMLInputElement>('[data-pkc-field="sql-file-input"]')?.click();
       return;
     }
-    const name =
+    /**
+     * 🔴 **名前は state から引く。画面の字は最後の手段**(2026-09-15、#682 段②)。
+     *
+     * ⚠ 直す前は `selectedOptions[0].textContent` だけを見ていた ── つまり
+     *   **user に見える名前の出どころが DOM** だった(§7「同じ問いに答える口を
+     *   2 つ作らない」の、いちばん気づけない形)。
+     * 🔴 実害は「相手を選び直したとき」に出る:名前だけが**前の相手のまま**飛ぶと、
+     *   画面は新しい相手を指しているのに、案内文も、拡張子で決まる振る舞い
+     *   (#682 の「どのエンジンで引けるか」)も**前の相手の物**になる。
+     * ⚠ そして `lid` は正しいので、**どの test も落ちない**(状態は整合して見える)。
+     * 🔑 添付なら `entryMetas`、いま開いている手持ちの file なら `sqlPage.guest` が
+     *   名前を持っている ── どちらも**選ぶ前から分かっている**。
+     * ⚠ 画面の字へ落ちるのは、その 2 つが答えられないときだけ
+     *   (押し所から来た `data-pkc-sql-source-name` の道も同じ)。
+     */
+    const st = dispatcher.getState();
+    const known =
+      st.entryMetas.get(lid)?.title ?? (st.sqlPage.guest?.lid === lid ? st.sqlPage.guest.name : undefined);
+    const shown =
       target instanceof HTMLSelectElement
         ? (target.selectedOptions[0]?.textContent ?? '')
         : (target.getAttribute('data-pkc-sql-source-name') ?? '');
-    dispatcher.dispatch({ type: 'SET_SQL_SOURCE', lid, name });
+    dispatcher.dispatch({ type: 'SET_SQL_SOURCE', lid, name: known ?? shown });
+  },
+  /**
+   * 🔴 **どのエンジンで引くかを選ぶ**(#682 段②。user 裁定 2026-09-15 = §9 は A)。
+   * ⚠ **知らない字は捨てる** ── 選び所は `<select>` だが、`data-pkc-action` は
+   *   誰でも付けられるので、受ける側で必ず検める(知らない値で reducer を汚さない)。
+   */
+  'set-sql-engine': (dispatcher, target) => {
+    const want =
+      target instanceof HTMLSelectElement ? target.value : (target.getAttribute('data-pkc-sql-engine') ?? '');
+    if (want !== 'sqlite' && want !== 'duckdb') return;
+    dispatcher.dispatch({ type: 'SET_SQL_ENGINE', engine: want });
   },
   /**
    * 🔴 **答えをノートへ書き出す**(#681 段③ の 3 つ目)。

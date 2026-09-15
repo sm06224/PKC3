@@ -1026,6 +1026,22 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   const note = page.locator('[data-pkc-field="sql-note"]');
   await expect(note, '添付が開いたことが画面に出ない').toContainText('uriage.csv を調べています');
 
+  /**
+   * 🔴 **どのエンジンで引くかの選び所が、csv のときだけ出る**(#682 段②)。
+   *
+   * 🔑 **新しい起動は増やさない**(#820 の規律)── 既に csv を開いているこの道中で見る。
+   * ⚠ unit(`sql-pane.test.ts`)は happy-dom なので「`hidden` が立っているか」までしか
+   *   言えない ── **実ブラウザで本当に見えるか**はここでしか分からない。
+   */
+  const engine = page.locator('[data-pkc-field="sql-engine"]');
+  await expect(engine, 'csv を選んだのに、エンジンの選び所が出ていない').toBeVisible();
+  await expect(
+    engine.locator('option'),
+    'エンジンの選び所に 2 つ並んでいない(sqlite と DuckDB)',
+  ).toHaveCount(2);
+  // ⚠ **既定は今までの sqlite** ── ここが変わると、選ばない人の道が変わる
+  await expect(engine, '既定が sqlite でない').toHaveValue('sqlite');
+
   await page.fill('[data-pkc-field="sql-input"]', 'SELECT * FROM csv');
 
   /**
@@ -1165,6 +1181,14 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
 
   await source.selectOption({ label: 'uriage.xlsx' });
   await expect(note, '.xlsx が開いたことが画面に出ない').toContainText('uriage.xlsx を調べています');
+
+  /**
+   * 🔴 **`.xlsx` では、エンジンの選び所そのものが消える**(#682 段②)。
+   * ⚠ ここが**対照群**である ── 上で「出る」だけを見ると、**いつも出す**変異が生き延びる。
+   * 🔑 出さない理由:DuckDB から `.xlsx` を読むには**外の拡張**が要る(設計 doc §4 と当たる)。
+   *   押せるのに必ず断られる口を画面に出さない。
+   */
+  await expect(engine, '.xlsx なのにエンジンを選ばせている').toBeHidden();
 
   // 🔴 どの表がどの枚か ── 目録(`xlsx_sheets`)が引ける
   await page.fill('[data-pkc-field="sql-input"]', 'SELECT * FROM xlsx_sheets');

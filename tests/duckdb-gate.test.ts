@@ -77,3 +77,48 @@ describe('🔴 外の CDN を呼ぶ口が無い(#682)', () => {
     expect(found.length).toBeGreaterThan(0);
   });
 });
+
+/**
+ * 🔴 **「外へ出ない」を守る 3 つの門が、全部実装に在る**(#682 段②)。
+ *
+ * 実測(2026-09-15、実ブラウザ)で分かったこと ──
+ * ① 拡張の自動取得を切らないと、`read_parquet` が `extensions.duckdb.org` へ **XHR を出す**
+ * ② 切っただけでは、`read_csv_auto('https://…')` が**素で外へ出る**(拡張を挟まない)
+ * ③ `enable_external_access=false` は外を塞ぐが、**差し込んだ file の読みも塞ぐ** ──
+ *    だから**写し切ってから**掛ける
+ *
+ * ⚠ どれか 1 つでも消えると、**落ちずに外へ出るようになる**(user にも test にも見えない)。
+ * 🔑 だから 3 つとも、**実行する行**の側で留める(注釈は落としてから当てる)。
+ */
+describe('🔴 外へ出ない門が 3 つとも在る(#682 段②)', () => {
+  const open = () => codeOnly(readFileSync('src/adapter/platform/duckdb/duckdb-open.ts', 'utf-8'));
+  const runner = () => codeOnly(readFileSync('src/adapter/platform/duckdb/duckdb-runner.ts', 'utf-8'));
+
+  it('① 起こすときに、拡張の自動取得を切っている', () => {
+    const code = open();
+    expect(code).toContain('SET autoinstall_known_extensions=false');
+    expect(code).toContain('SET autoload_known_extensions=false');
+  });
+
+  it('② 外を塞ぐ 1 文が在り、③ それは「写し切る 1 文」の後にしか打たれない', () => {
+    const code = runner();
+    const seal = code.indexOf('SET enable_external_access=false');
+    expect(seal, '外を塞ぐ門が消えている').toBeGreaterThan(-1);
+    /**
+     * 🔴 **順番そのものを見る** ── 先に塞ぐと写せない(実測で `Permission Error`)。
+     * ⚠ ここは字の並びしか見ていない ── **本当の順番は
+     *   `tests/adapter/duckdb-runner.test.ts` が、打たれた字を積んで見る**。
+     *   こちらは「門そのものが消えていないか」の錨である。
+     */
+    expect(code).toContain('CREATE OR REPLACE TABLE');
+    // ⚠ VIEW にすると、塞いだ後に引けなくなる(実測)
+    expect(code).not.toContain('CREATE OR REPLACE VIEW');
+  });
+
+  it('🔴 字の門が、門を打ち直す語を断っている(engine の①は打ち直せる ── 実測)', () => {
+    const guard = codeOnly(readFileSync('src/features/query/duckdb-guard.ts', 'utf-8'));
+    for (const word of ['install', 'load', 'set', 'reset']) {
+      expect(guard, `${word} が断る語の一覧から消えている`).toContain(`'${word}'`);
+    }
+  });
+});

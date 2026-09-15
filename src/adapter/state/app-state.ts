@@ -10,6 +10,8 @@
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
 import { DEFAULT_ENTRY_SORT, NATURAL_DESC, type EntrySort } from '@features/filter/entry-sort';
 import { checkReadOnlySql } from '@features/query/sql-guard';
+import { checkDuckDbSql } from '@features/query/duckdb-guard';
+import { DEFAULT_SQL_ENGINE, sqlEngineOf, type SqlEngine } from '@features/query/sql-engine';
 import { schemaModel, type Grid, type SchemaModel } from '@features/query/schema-digest';
 import { erSql, type ErAction } from '@features/query/er-sql';
 import { listViewOptions } from './list-view-options';
@@ -210,6 +212,17 @@ export interface SqlPageState {
    *   「ノートを数えたつもりで、よその DB を数えていた」を**気づけない**。
    *   だから面の上に必ず出す(CLAUDE.md §4)。
    */
+  /**
+   * 🔴 **どのエンジンで引くか**(#682 段②。user 裁定 2026-09-15 = §9 は A)。
+   *
+   * ⚠ ここに入るのは「**user が選んだ物**」であって、「いま実際に引く物」ではない。
+   * 🔑 実際に引く物は **`sqlEngineOf(state.sqlPage)` が毎回決める**
+   *   (`features/query/sql-engine.ts`)── 相手を選び直すと選べなくなることが
+   *   あるので、**その場で落とす**。
+   * ⚠ ここへ「落とした後の値」を書き戻さない ── 書き戻すと、csv → .sqlite → csv と
+   *   選び直した人の**選択が黙って消える**(戻ってこない)。
+   */
+  readonly engine: SqlEngine;
   readonly guest: {
     /** 添付のノートの lid(選び直しの照合に使う)。 */
     readonly lid: string;
@@ -1364,6 +1377,7 @@ export const initialState: AppState = {
   searchHitsTruncated: false,
   searchPage: { query: '', rows: [], rowsQuery: '', truncated: false, failed: false },
   sqlPage: {
+    engine: DEFAULT_SQL_ENGINE,
     sql: '',
     ranSql: '',
     columns: [],
@@ -1547,6 +1561,12 @@ export type UserAction =
    * ⚠ 選び直しは**前の相手を必ず手放す**(常駐メモリを返す)。
    */
   | { type: 'SET_SQL_SOURCE'; lid: string; name: string }
+  /**
+   * 🔴 **どのエンジンで引くかを選んだ**(#682 段②)。
+   * ⚠ **走っている答えを捨てない** ── 相手は変わっていないので、いま出ている表は
+   *   そのまま正しい(`SET_SQL_SOURCE` と違う所である)。
+   */
+  | { type: 'SET_SQL_ENGINE'; engine: SqlEngine }
   | {
       type: 'SQL_GUEST_OPENED';
       lid: string;
@@ -2459,6 +2479,18 @@ export type DomainEvent =
        *   1 回が**前の相手へ飛ぶ**(読む時点が違う)。
        */
       guest?: boolean;
+      /**
+       * 🔴 **どのエンジンで引くか**(#682 段②)。⚠ **event が運ぶ** ── 上の `guest` と
+       *   同じ理由で、effect 側が state を読み直すと 1 回ぶん食い違う。
+       * ⚠ **省略しない**(optional にしない)── 省けるようにすると、書き忘れた口が
+       *   黙って sqlite へ落ちる(選んだ物と違う所で引く、いちばん気づけない形)。
+       */
+      engine: SqlEngine;
+      /**
+       * DuckDB で引くときの相手(csv / tsv の 1 件)。⚠ `engine === 'duckdb'` の
+       * ときだけ在る ── DuckDB は**選んだ相手の bytes 1 つ**しか受け取らない。
+       */
+      duck?: { lid: string; name: string };
     }
   /**
    * 🔴 **調べている相手の構造を採ってきてほしい**(#918 段①)。
@@ -3456,7 +3488,17 @@ function reduceCore(
      */
     case 'RUN_SQL': {
       if (state.sqlPage.running) return { state, events: [] };
-      const checked = checkReadOnlySql(state.sqlPage.sql);
+      /**
+       * 🔴 **engine ごとに門が違う**(#682 段②)。
+       * ⚠ DuckDB には sqlite に無い書き方(`FROM t SELECT x` / `PIVOT`)と、
+       *   sqlite に無い危ない語(`INSTALL` / `LOAD` / `SET`)が在るので、
+       *   **同じ門では見られない**(`duckdb-guard.ts` の冒頭)。
+       * 🔑 どちらで引くかは `sqlEngineOf` **1 か所**が決める ── ここで
+       *   `state.sqlPage.engine` を直に読むと、選べない相手のときに
+       *   「画面は sqlite なのに DuckDB の門を通す」が起きる。
+       */
+      const engine = sqlEngineOf(state.sqlPage);
+      const checked = engine === 'duckdb' ? checkDuckDbSql(state.sqlPage.sql) : checkReadOnlySql(state.sqlPage.sql);
       if (!checked.ok) {
         return {
           state: {
@@ -3504,7 +3546,17 @@ function reduceCore(
             type: 'REQUEST_SQL_RUN',
             sql: checked.sql,
             token,
+            engine,
             ...(state.sqlPage.guest === null ? {} : { guest: true }),
+            /**
+             * ⚠ **相手は「いま開いている物」から採る** ── `engine` が `duckdb` に
+             *   なるのは相手が csv / tsv のときだけなので(`enginesForSource`)、
+             *   ここで `guest` が `null` になることは無い。⚠ それでも `?.` で書くのは、
+             *   将来 engine の表が変わった日に**落ちるのではなく sqlite へ落ちる**ため。
+             */
+            ...(engine === 'duckdb' && state.sqlPage.guest !== null
+              ? { duck: { lid: state.sqlPage.guest.lid, name: state.sqlPage.guest.name } }
+              : {}),
           },
         ],
       };
@@ -3698,6 +3750,16 @@ function reduceCore(
      * ⚠ **前の答えも消す** ── 相手が変われば、出ている表は**別の DB の話**である
      *   (残すと「新しい相手を調べた答え」に見える ── いちばん気づけない外し方)。
      */
+    /**
+     * 🔴 **どのエンジンで引くかを選んだ**(#682 段②)。
+     *
+     * ⚠ **表も断りも消さない** ── 相手は変わっていないので、いま出ている答えは
+     *   そのまま正しい(`SET_SQL_SOURCE` は相手ごと変わるので消す ── 役目が違う)。
+     * ⚠ 走っている最中でも受ける ── 次に押したときから効く(押した印は必ず付く)。
+     */
+    case 'SET_SQL_ENGINE':
+      if (state.sqlPage.engine === action.engine) return { state, events: [] };
+      return { state: { ...state, sqlPage: { ...state.sqlPage, engine: action.engine } }, events: [] };
     case 'SET_SQL_SOURCE': {
       const events: DomainEvent[] = [{ type: 'REQUEST_SQL_GUEST_CLOSE' }];
       if (action.lid !== '') {

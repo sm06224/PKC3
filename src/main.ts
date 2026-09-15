@@ -16,6 +16,8 @@ import { loadSplitLids, saveSplitLids } from '@adapter/platform/split-store';
 import { isAsidePane, viewModeLabel, type ViewMode } from '@adapter/state/app-state';
 import { bindEditLockRelease } from '@adapter/state/edit-lock-release';
 import { connectStoreEffects, type StoreEffects } from '@adapter/state/store-effects';
+import { DuckDbRunner } from '@adapter/platform/duckdb/duckdb-runner';
+import { openDuckDb } from '@adapter/platform/duckdb/duckdb-open';
 import { connectOpenedEffects } from '@adapter/platform/opened-effects';
 import { tileSelectsEntry } from '@features/launcher/tiles';
 import { appEditorMode } from '@adapter/ui/render/editor-mode';
@@ -3602,6 +3604,21 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   (CLAUDE.md §2)ので、ここは**繋ぐだけ**にする。
    */
   connectOpenedEffects(dispatcher);
+  /**
+   * 🔴 **DuckDB は「使うときだけ」載る**(#682 段②。user 裁定 2026-09-15)。
+   * ⚠ ここで作るのは**取っ手だけ** ── 実体(35MB)は、最初に押されるまで取りに行かない。
+   * 🔑 しばらく使わなければ自分で畳んで記憶を返す(`DuckDbLease`)。
+   * ⚠ **判断は渡さない** ── 目録を検めるのも、写してから塞ぐ順番も、畳む規律も
+   *   `duckdb-runner.ts` が持つ(この file はどの test からも実行されない ── §2)。
+   */
+  const duckDbRunner = new DuckDbRunner({
+    fetchText: async (url) => {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(String(res.status));
+      return res.text();
+    },
+    open: (urls) => openDuckDb(urls),
+  });
   storeEffects = connectStoreEffects(dispatcher, createStorePort(client, cid), {
     // #148 組み込みタイル ── 一式が入っている端末にだけ Office のタイルを出す。
     // 控えは起動時と設置/削除の直後に setMeta で合っている(officeOpener と同じ値)
@@ -3640,6 +3657,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   どの test からも実行されない(CLAUDE.md §2)ので、ここは渡すだけ。
      */
     readLocalSqlFile: (lid) => takeSqlLocalFileBytes(lid),
+    /**
+     * 🔴 **DuckDB で引く口**(#682 段②。user 裁定 2026-09-15)。
+     * ⚠ **渡さない版では機能が減るだけ**(選び所には出るが、押すと理由を言って断る)──
+     *   黙って sqlite で引かない(選んだ物と違う所で引くのが、いちばん気づけない外し方)。
+     */
+    runDuckDbSql: (input) => duckDbRunner.run(input),
   });
   /**
    * 🔴 **一式が入っているかを 1 度だけ読み、控えに写す**(#88 / O3-c)。

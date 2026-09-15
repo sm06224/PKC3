@@ -23,9 +23,42 @@
 
 /** 起こした DuckDB の取っ手。⚠ 実体は adapter が差す(この層は上流を import しない)。 */
 export interface DuckDbHandle {
-  query(sql: string): Promise<unknown>;
+  /**
+   * file を器へ差し込む。⚠ 同じ名前は入れ替える。
+   * 🔑 **bytes を渡すのはここだけ** ── 打つ字(`query`)に中身を混ぜない
+   *   (混ぜると、大きい csv が SQL の字として組み立てられる)。
+   */
+  put(name: string, bytes: Uint8Array): Promise<void>;
+  query(sql: string): Promise<DuckDbRaw>;
   /** 畳む。⚠ 例外を投げても貸し出しは「畳んだ」ものとして進む(下の理由)。 */
   terminate(): Promise<void>;
+}
+
+import type { DuckDbRaw } from '@features/query/duckdb-rows';
+
+/**
+ * 🔴 **時間の門に掛かったときの断り**(#682 段②)。
+ * ⚠ **字を 1 か所で持つ** ── 呼び側が「時間切れか」を字で見分けるので、
+ *   2 か所に書くと、片方を直した日に見分けが静かに壊れる(§7)。
+ */
+export const DUCKDB_TOO_LONG = '時間がかかりすぎたので止めました(条件を絞ってください)';
+
+/** 1 件の依頼。 */
+export interface DuckDbJob {
+  readonly sql: string;
+  /**
+   * 🔴 **時間の門(ms)**。⚠ 超えたら**ワーカーごと畳んで**止める ──
+   *   sqlite と違い、上流には**問い合わせを中断する口が無い**。
+   * ⚠ だから同時に飛んでいる別の問い合わせも道連れになる(面は 1 度に 1 本しか
+   *   走らせないので、いまは起きない)。省くと**永久に待つ**形が作れてしまう。
+   */
+  readonly maxMs?: number;
+  /**
+   * 打つ前に差し込む相手。⚠ **`key` が同じ間は差し直さない** ── 同じ csv を
+   *   打鍵のたびに読み直すと、大きい file で毎回待たされる。
+   * 🔑 畳んだら控えも捨てる(起こし直した器には何も入っていない)。
+   */
+  readonly data?: { readonly key: string; readonly load: (h: DuckDbHandle) => Promise<void> };
 }
 
 export interface DuckDbLeaseOptions {
@@ -47,6 +80,8 @@ const DEFAULT_IDLE_MS = 30_000;
 export class DuckDbLease {
   private handle: DuckDbHandle | null = null;
   private opening: Promise<DuckDbHandle> | null = null;
+  /** いま差し込んである相手(`null` = 何も入っていない)。 */
+  private loadedKey: string | null = null;
   private flying = 0;
   private timer: unknown = null;
   private readonly idleMs: number;
@@ -68,17 +103,84 @@ export class DuckDbLease {
    * 1 件打つ。起きていなければ起こし、**起こしている間に来た分は溜まる**
    * (`opening` を共有するので、`open` は 1 度しか走らない)。
    */
-  async run(sql: string): Promise<unknown> {
+  async run(job: DuckDbJob): Promise<DuckDbRaw> {
     this.cancelIdle();
     this.flying += 1;
     try {
+      /**
+       * 🔴 **相手が変わったら器ごと作り直す**(#682 段②)。
+       *
+       * ⚠ 差し込んだ後に**外への口を engine ごと塞ぐ**設計なので(`duckdb-runner.ts`)、
+       *   同じ器へ 2 件目を差し込むことは**できない**(塞いだ後は file を読めない)。
+       * 🔑 実測(2026-09-15):一度塞ぐと同じ DB では二度と開けられない ──
+       *   「Cannot enable external access while database is running」。
+       *   つまり**作り直すのが唯一の道**である。
+       * ⚠ ここは既に `flying` を 1 つ数えた後なので `release()` は早期 return する ──
+       *   だから控えを直に捨てる `forget` を使う。
+       */
+      const stale = this.handle;
+      if (job.data !== undefined && stale !== null && this.loadedKey !== null && this.loadedKey !== job.data.key) {
+        this.forget(stale);
+      }
       const h = await this.ensure();
-      return await h.query(sql);
+      /**
+       * ⚠ **差し込みも時間の門の内側に置かない** ── 相手を読むのは呼び側の仕事で、
+       *   ここでやるのは器へ入れることだけ。入れる所で止まる形は作らない。
+       */
+      if (job.data !== undefined && this.loadedKey !== job.data.key) {
+        await job.data.load(h);
+        // ⚠ **入れ終わってから控える** ── 先に控えると、落ちた回に「入っている」と嘘をつく
+        this.loadedKey = job.data.key;
+      }
+      return job.maxMs === undefined ? await h.query(job.sql) : await this.raceQuery(h, job.sql, job.maxMs);
     } finally {
       this.flying -= 1;
       // ⚠ **飛んでいる間は畳まない** ── 0 になった回だけ時計を張り直す
       if (this.flying === 0) this.armIdle();
     }
+  }
+
+  /**
+   * 🔴 **時間で切る** ── 上流に中断の口が無いので、**畳むのが唯一の手**である。
+   * ⚠ 畳んだ取っ手を**控えから外す**(外さないと、死んだ器へ次の問い合わせが飛ぶ)。
+   */
+  private raceQuery(h: DuckDbHandle, sql: string, maxMs: number): Promise<DuckDbRaw> {
+    return new Promise<DuckDbRaw>((resolve, reject) => {
+      let settled = false;
+      const timer = this.setTimer(() => {
+        if (settled) return;
+        settled = true;
+        this.forget(h);
+        reject(new Error(DUCKDB_TOO_LONG));
+      }, maxMs);
+      h.query(sql).then(
+        (v) => {
+          if (settled) return;
+          settled = true;
+          this.clearTimer(timer);
+          resolve(v);
+        },
+        (e: unknown) => {
+          if (settled) return;
+          settled = true;
+          this.clearTimer(timer);
+          reject(e instanceof Error ? e : new Error(String(e)));
+        },
+      );
+    });
+  }
+
+  /**
+   * その取っ手を捨てる。⚠ **いま持っている物と同じときだけ**控えを消す ──
+   *   既に起こし直した後なら、新しいほうを巻き添えにしない。
+   */
+  private forget(h: DuckDbHandle): void {
+    if (this.handle === h) {
+      this.handle = null;
+      this.opening = null;
+      this.loadedKey = null;
+    }
+    void h.terminate().catch(() => undefined);
   }
 
   /**
@@ -91,6 +193,8 @@ export class DuckDbLease {
     const h = this.handle;
     this.handle = null;
     this.opening = null;
+    // ⚠ 畳んだら**差し込んだ物も消える** ── 起こし直した器は空である
+    this.loadedKey = null;
     if (h === null) return;
     /**
      * ⚠ 畳む側の例外は**飲む** ── ここで投げると、呼び側は「畳めなかった」と

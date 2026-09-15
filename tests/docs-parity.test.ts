@@ -2316,6 +2316,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-15(#682 段② ── DuckDB)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-13-app-group-order" …` → 29103d8
+     */
+    'アプリのグループそのものを、並べ替えられるようになりました',
+    /**
      * ⚠ **2026-09-15(#530 段③c ── 線の通り方)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-13-app-group-icon" …` → 1295a5d
      */
