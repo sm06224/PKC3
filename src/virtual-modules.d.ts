@@ -13,3 +13,13 @@ declare module 'virtual:pkc-body-css' {
   const css: string;
   export default css;
 }
+
+declare module 'virtual:pkc-oss-notices' {
+  /**
+   * 実体は `build/oss-notices-plugin.ts` が `package.json` の `dependencies`
+   * から焼く(#948)。`help.ts` が「使っているオープンソース」の一覧を描くのに読む。
+   */
+  import type { OssNotice } from './features/oss-notices/oss-notices';
+  const notices: readonly OssNotice[];
+  export default notices;
+}

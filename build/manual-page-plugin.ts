@@ -52,6 +52,7 @@ import { join } from 'node:path';
 import { createServer, type Plugin, type ResolvedConfig } from 'vite';
 import { bodyCssPlugin } from './body-css-plugin.ts';
 import { extractBodyCss } from './body-css.ts';
+import { ossNoticesPlugin } from './oss-notices-plugin.ts';
 
 /**
  * 見出しの下限。実測 163 本(2026-09-02)。
@@ -148,8 +149,11 @@ async function bakeWithServer(config: ResolvedConfig): Promise<BakedManual> {
     server: { middlewareMode: true },
     resolve: { alias: config.resolve.alias },
     optimizeDeps: { noDiscovery: true, include: [] },
-    // ⚠ 描画の import 木に `virtual:pkc-body-css` が現れても解決できるようにする
-    plugins: [bodyCssPlugin()],
+    // ⚠ 描画の import 木に `virtual:pkc-body-css` / `virtual:pkc-oss-notices` が
+    //    現れても解決できるようにする(#948。`help.ts` が後者を import するので、
+    //    渡し忘れると `ssrLoadModule('/src/adapter/ui/render/help.ts')` が
+    //    「Failed to resolve import」で落ちる)
+    plugins: [bodyCssPlugin(), ossNoticesPlugin()],
   });
   try {
     return await bakeManualPage(server, config.root, kindOf(config));

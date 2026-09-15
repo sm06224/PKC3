@@ -28,10 +28,25 @@
  * `#slug` は**先に作られた本文面の見出し**に当たる。マニュアルに `[…](#…)` や
  * `:::toc` を書くと、そこから壊れる ── `tests/adapter/help-pane.test.ts` が
  * 「マニュアルに文書内アンカーが 0 件」を機械で守る。
+ *
+ * ## 🔴 このアプリについて(#948。user 裁定 2026-09-15)
+ *
+ * 開発者名・AI との共作の併記・GitHub への導線・使っている OSS の一覧を、
+ * 版のすぐ下に出す。⚠ **OSS の一覧は手書きしない** ──
+ * `virtual:pkc-oss-notices`(`build/oss-notices-plugin.ts`)が `package.json` の
+ * `dependencies` を読んで焼く。依存を 1 つ足すだけで、一覧にも自動で載る。
  */
 import { APP_ID, APP_VERSION, BUILD_KIND, BUILT_AT } from '@runtime/release-meta';
 import { formatBuildStamp } from '@features/datetime/datetime-format';
 import { NOTICES, noticeDate, recentNotices, type Notice } from '@features/notice/notice-log';
+import {
+  OSS_SCOPE_NOTE,
+  OSS_SOURCE_URL,
+  ossDeveloperLine,
+  ossNoticesLabel,
+  ossNoticesMissingText,
+} from '@features/oss-notices/oss-notices';
+import OSS_NOTICES from 'virtual:pkc-oss-notices';
 import manualText from '../../../../docs/manual.md?raw';
 import { KEY_COMMANDS, chordLabel } from '@features/keymap';
 import { appKeymap, type KeymapStore } from './keymap';
@@ -340,6 +355,69 @@ export class HelpRenderer {
       body.append(where);
     }
 
+    /**
+     * 🔴 **開発者名・AI との共作・GitHub への導線・使っている OSS**(#948。
+     * user 裁定 2026-09-15)。
+     *
+     * ⚠ **版のすぐ下に置く**(#719 の裁定「版は沈めない」と同じ理由)── 「困ったときに
+     * 見に来る事実」を版・保存先とまとめて置く。⚠ **`<h3>` を足さない**
+     * (`help-pane.test.ts` が h3 の並びを等値 pin している ── この節の冒頭の戒め)。
+     */
+    const dev = document.createElement('p');
+    dev.setAttribute('data-pkc-field', 'help-developer');
+    dev.textContent = ossDeveloperLine();
+    body.append(dev);
+
+    const src = document.createElement('p');
+    src.setAttribute('data-pkc-field', 'help-source');
+    src.append('ソース: ');
+    const srcLink = document.createElement('a');
+    srcLink.href = OSS_SOURCE_URL;
+    // ⚠ 外部リンクの作法は既存の書式に揃える(`markdown-render.ts` の素の外部 URL と同じ)
+    srcLink.target = '_blank';
+    srcLink.rel = 'noopener noreferrer';
+    srcLink.textContent = OSS_SOURCE_URL;
+    src.append(srcLink);
+    body.append(src);
+
+    /**
+     * 🔴 **使っている OSS(自動生成。手書きの一覧ではない)**。
+     * ⚠ **全文は畳んでおく**(`<details>`)── 一覧だけで面が埋まらないように。
+     *   このやり方は同じ file の「これまでのお知らせ」と同じ前例。
+     */
+    const ossRegion = document.createElement('div');
+    ossRegion.setAttribute('data-pkc-region', 'help-oss');
+    const ossHead = document.createElement('p');
+    ossHead.setAttribute('data-pkc-field', 'settings-note');
+    ossHead.textContent = ossNoticesLabel(OSS_NOTICES);
+    ossRegion.append(ossHead);
+    const ossList = document.createElement('ul');
+    for (const n of OSS_NOTICES) {
+      const li = document.createElement('li');
+      li.setAttribute('data-pkc-oss', n.name);
+      const name = document.createElement('span');
+      name.setAttribute('data-pkc-field', 'oss-name');
+      name.textContent = n.name;
+      const license = document.createElement('span');
+      license.setAttribute('data-pkc-field', 'oss-license');
+      license.textContent = n.license;
+      const details = document.createElement('details');
+      const summary = document.createElement('summary');
+      summary.textContent = '全文を開く';
+      const pre = document.createElement('pre');
+      pre.setAttribute('data-pkc-field', 'oss-text');
+      // ⚠ **捏造しない** ── 同梱されていなければ、そのことと種別だけを言う
+      pre.textContent = n.text ?? ossNoticesMissingText(n.license);
+      details.append(summary, pre);
+      li.append(name, document.createTextNode(' '), license, document.createTextNode(' '), details);
+      ossList.append(li);
+    }
+    ossRegion.append(ossList);
+    const ossScope = document.createElement('p');
+    ossScope.setAttribute('data-pkc-field', 'settings-note');
+    ossScope.textContent = OSS_SCOPE_NOTE;
+    ossRegion.append(ossScope);
+    body.append(ossRegion);
 
     /**
      * 🔴 **アプリとして開く口**(#645。user 要望 2026-08-31)。
