@@ -35,6 +35,7 @@ import { CSV_SOURCE_COLUMNS } from '@features/query/csv-tables';
 import { duckDbTable } from '@features/query/duckdb-rows';
 import { DUCKDB_WASM, DUCKDB_WORKER, duckDbAssetUrl, readDuckDbPack } from '@features/query/duckdb-pack';
 import { DuckDbLease, type DuckDbHandle } from './duckdb-lease';
+import { resolveDuckDbBase } from './duckdb-pack-acquire';
 
 /** 配る一式の置き場(`build/duckdb-assets-plugin.ts` の `DUCKDB_DIR` と同じ)。 */
 export const DUCKDB_BASE = 'duckdb/';
@@ -190,7 +191,14 @@ export class DuckDbRunner {
   private async resolveUrls(): Promise<{ wasmUrl: string; workerUrl: string }> {
     const known = this.urls;
     if (known !== null) return known;
-    const base = new URL(DUCKDB_BASE, this.deps.baseUrl ?? document.baseURI).href;
+    /**
+     * 🔴 **門は 1 つ**(#682 段③a、2026-09-15)── 取得元が同じ場所かを検めるのは
+     *   `resolveDuckDbBase()` だけにする(§7「同じ問いに答える口を 2 つ作らない」)。
+     * ⚠ ここは相対の `duckdb/` しか渡さないので今は必ず通るが、**通る理由を
+     *   「渡す物が相対だから」に頼らない** ── 次に書く人が別の字を渡した日に、
+     *   門が無ければ外の宛先がそのまま組める。
+     */
+    const base = resolveDuckDbBase(DUCKDB_BASE, this.deps.baseUrl ?? document.baseURI);
     let text: string;
     try {
       text = await this.deps.fetchText(duckDbAssetUrl(base, 'pack.json'));
