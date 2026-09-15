@@ -950,6 +950,30 @@ describe('🔴 板どうしの線が PowerPoint でも繋がる(#530 段③e)', 
       expect(c.st[1], '右辺(3)へ寄せていない ── 4 以上は配った先で原点へ飛ぶ').toBe(3);
       expect(c.end[1], '左辺(1)へ寄せていない').toBe(1);
     }
+    /**
+     * 🔴 **番号だけでは足りない ── 焼く座標も寄せる**(変異試験 M16 が SURVIVED で教えた)。
+     * ⚠ `idx` は `.edge` だけで引くので、**分数を捨てる処理を外しても 1 ビットも動かない**。
+     *   動くのは `<a:off>` / `<a:ext>` のほう ── そこが辺の 1/4 のままだと、
+     *   **PowerPoint が描く所(辺の真ん中)と、file に控えた座標が食い違う**。
+     * 🔑 観測は**別の綴りとの突き合わせ**にする ── 「`right@1/4` で焼いた線」と
+     *   「`right` で焼いた線」の `<a:xfrm>` が**1 バイトも違わない**こと。
+     */
+    const xfrmOf = (block: ExportBlock): string[] => {
+      const xml = partOf(buildPptx(
+        [
+          place(0, 0, 200, 100, 1, 'rect', 'a'), p('左'),
+          place(400, 0, 200, 100, 1, 'rect', 'b'), p('右'),
+          block,
+        ],
+        { title: 'T' },
+      ), 'ppt/slides/slide1.xml');
+      return [...xml.matchAll(/<p:cxnSp>.*?(<a:xfrm[^>]*>[^!]*?<\/a:xfrm>)/g)].map((m) => m[1]!);
+    };
+    const quarter = xfrmOf(pline('a', 'b', 'right@1/4', 'left@3/4'));
+    const middle = xfrmOf(pline('a', 'b', 'right', 'left'));
+    // ⚠ 空振り防止 ── 取り出せていなければ、下の一致は「空と空」である
+    expect(quarter.length, 'コネクタの位置を取り出せていない').toBe(1);
+    expect(quarter, '分数つきの線が、辺の真ん中と違う所へ焼かれている').toEqual(middle);
   });
 
   /**

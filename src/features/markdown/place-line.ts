@@ -127,7 +127,15 @@ export function parseAnchorSpell(raw: string): PlaceAnchor | null {
   if (m[2] === undefined) return anchorOf(edge);
   const n = Number(m[2]);
   const d = Number(m[3]);
-  if (d < 2 || d > ANCHOR_DEN_MAX || n < 1 || n >= d) return null;
+  /**
+   * ⚠ **`d < 2` は書かない** ── 死に節だからである(変異試験 M7 が SURVIVED で教えた)。
+   * 🔑 `n >= 1` かつ `n < d` なら **必ず `d >= 2`** なので、分母 0 / 1 は
+   *   下の 2 つが先に捕まえる(`right@1/0` は `n >= d`、`right@1/1` も `n >= d`)。
+   * ⚠ 実測:正規表現が通す **`n, d` の 10^6 通り**を当てて、
+   *   「`d < 2` だけが断る入力」は **0 件**だった。
+   *   「これが無いと壊れる」と書く前に、外して壊れるのを見る(CLAUDE.md §1)。
+   */
+  if (d > ANCHOR_DEN_MAX || n < 1 || n >= d) return null;
   return anchorOf(edge, n, d);
 }
 
