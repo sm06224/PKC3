@@ -95,9 +95,26 @@ export type DocxBlock =
        * PowerPoint 側だけ)── ここは運ぶだけの印である。
        */
       readonly shape: PlaceShape;
+      /**
+       * 🔴 **その板の名前**(`:::format{#今日 .pkc-place …}` の `#今日`。#530 段③e)。
+       * ⚠ 名前は**線の繋ぎ先**にしか使わない ── 無い板は指せないので `null`。
+       * ⚠ Word は読まない(位置・形と同じで、使うのは PowerPoint 側だけ)。
+       */
+      readonly name: string | null;
       /** 後ろに続く「中身の塊」の数。⚠ 0 なら中身が無い(空の付箋)。 */
       readonly span: number;
     }
+  /**
+   * 🔴 **板どうしを繋ぐ線の宣言**(`:::format{.pkc-line from=… to=…}`。#530 段③e)。
+   *
+   * ⚠ **中身は運ばない** ── `.pkc-line` の塊は読む画面で `display: none` なので、
+   *   そこに書いた字は**画面に 1 文字も出ない**。運ぶと Word / PowerPoint にだけ
+   *   突然現れる(段③a の着地前レビューが実測で出した形)。
+   * ⚠ Word は**何も出さない**(`place` と同じ ── 印を運ぶだけ)。
+   * 🔑 名前は**板の `#名前` と同じ綴り**で持つ ── 突き合わせは書き出し側でやる
+   *   (ここで解決すると、指す先が無い線を捨ててよいかの判断が 2 か所に散る)。
+   */
+  | { readonly kind: 'place-line'; readonly from: string; readonly to: string }
   | { readonly kind: 'table'; readonly rows: readonly (readonly DocxCell[])[] }
   /**
    * 🔴 **画像**(#187 段②)。⚠ **縦横比を保つ** ── PKC2 は全画像を 480×360 px に
@@ -295,6 +312,14 @@ function blockXml(block: DocxBlock, rels: Map<string, string>): string {
        * 🔴 **Word では何も出さない**(#530 段①)。中身は後ろの塊が出すので、
        * ここで何か出すと**二重に**なる。⚠ 「位置を無視して普通に流す」が
        * Word 側の正しい振る舞いである(Word に自由配置の面は無い)。
+       */
+      return '';
+    case 'place-line':
+      /**
+       * 🔴 **線の宣言も、Word では何も出さない**(#530 段③e)。
+       * ⚠ `place` と違って**中身すら無い**(運んでいるのは繋ぎ先の名前だけ)。
+       * 🔑 ここを `''` 以外にすると、読む画面に 1 文字も出ない字が
+       *   **Word にだけ現れる**(段③a の着地前レビューが実測で出した形)。
        */
       return '';
     case 'pagebreak':

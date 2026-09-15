@@ -34,7 +34,12 @@ const place = (
   span: number,
   // ⚠ 既定は四角(#530 案 A)── 既存の筋書きは 1 つも形を持たない
   shape: PlaceShape = 'rect',
-): ExportBlock => ({ kind: 'place', x, y, w, h, shape, span });
+  // ⚠ 既定は名無し(#530 段③e)── 名前は線の繋ぎ先にしか要らない
+  name: string | null = null,
+): ExportBlock => ({ kind: 'place', x, y, w, h, shape, name, span });
+
+/** 板どうしを繋ぐ線の宣言(#530 段③e)。 */
+const pline = (from: string, to: string): ExportBlock => ({ kind: 'place-line', from, to });
 
 describe('\u{1f534} 自由配置の板が「置いたとおりの場所」で出る(#530 段①)', () => {
   /**
@@ -789,5 +794,173 @@ describe('段④:空のスライドを畳む', () => {
 
   it('全部が空でも 1 枚は残す(0 枚の pptx は開けない)', () => {
     expect(splitIntoSlides([{ kind: 'hr' }, { kind: 'hr' }], '')).toHaveLength(1);
+  });
+});
+
+/**
+ * 🔴 **板どうしの線が PowerPoint でも繋がる**(#530 段③e)。
+ *
+ * ## ⚠ 「線が見える」では足りない
+ *
+ * 座標だけの線でも**見た目は同じ**になる ── だが板を掴んで動かしても
+ * **付いてこない**。user が求めているのは「**ぐりぐり動かせる**」ことなので、
+ * 付いてこない線は要望を 1 つも満たさない。
+ * 🔑 だから見るのは `<a:stCxn>` / `<a:endCxn>` が**実在する図形 id を指すこと**である。
+ *
+ * ## 🔴 番号は実測から来ている(推測ではない)
+ *
+ * `idx` は「その図形の何番目の接続点か」で、**形ごとに違う**。
+ * 5 つの形へ idx 0〜3 の線を出して LibreOffice に読ませたところ、
+ * **楕円だけ `top=0 / left=2 / bottom=4 / right=6`** だった(奇数は 45° の斜め)。
+ * ⚠ 推測のまま `0,1,2,3` と書いていたら、**丸い付箋の線だけ少しずれた所へ刺さる**
+ * ── 線は引けているので**見た目では気づけない**。下の楕円の it がそれを止める。
+ */
+describe('🔴 板どうしの線が PowerPoint でも繋がる(#530 段③e)', () => {
+  /** その slide の `<p:cxnSp>` を、繋ぎ先の id と idx で読む。 */
+  const cxns = (xml: string): { st: [number, number]; end: [number, number] }[] =>
+    [...xml.matchAll(
+      /<a:stCxn id="(\d+)" idx="(\d+)"\/><a:endCxn id="(\d+)" idx="(\d+)"\/>/g,
+    )].map((m) => ({
+      st: [Number(m[1]), Number(m[2])],
+      end: [Number(m[3]), Number(m[4])],
+    }));
+
+  /** その slide に在る図形(`<p:sp>`)の id。 */
+  const shapeIds = (xml: string): number[] =>
+    [...xml.matchAll(/<p:sp><p:nvSpPr><p:cNvPr id="(\d+)"/g)].map((m) => Number(m[1]));
+
+  it('🔴 線が `<p:cxnSp>` として出て、実在する 2 枚の板を指す', () => {
+    const r = buildPptx(
+      [
+        place(0, 0, 200, 100, 1, 'rect', 'a'), p('左'),
+        place(400, 0, 200, 100, 1, 'rect', 'b'), p('右'),
+        pline('a', 'b'),
+      ],
+      { title: 'T' },
+    );
+    const xml = partOf(r, 'ppt/slides/slide1.xml');
+    // ⚠ 空振り防止 ── 板が 2 枚出ていなければ、下の主張は何も見ていない
+    const ids = shapeIds(xml);
+    expect(ids.length, '板が 2 枚出ていない').toBeGreaterThanOrEqual(2);
+    const cs = cxns(xml);
+    expect(cs, '線が 1 本も出ていない').toHaveLength(1);
+    // 🔴 指し先が**実在する図形**であること(適当な番号を書いたら落ちる)
+    expect(ids, '線の出どころが実在しない図形を指している').toContain(cs[0]!.st[0]);
+    expect(ids, '線の行き先が実在しない図形を指している').toContain(cs[0]!.end[0]);
+    expect(cs[0]!.st[0], '線が同じ図形を指している').not.toBe(cs[0]!.end[0]);
+  });
+
+  it('🔴 どの辺から出るかは、画面と同じ規則(横に並べたら右 → 左)', () => {
+    const r = buildPptx(
+      [
+        place(0, 0, 200, 100, 1, 'rect', 'a'), p('左'),
+        place(400, 0, 200, 100, 1, 'rect', 'b'), p('右'),
+        pline('a', 'b'),
+      ],
+      { title: 'T' },
+    );
+    const c = cxns(partOf(r, 'ppt/slides/slide1.xml'))[0]!;
+    expect(c.st[1], '出どころが右辺(3)でない').toBe(3);
+    expect(c.end[1], '行き先が左辺(1)でない').toBe(1);
+  });
+
+  it('🔴 縦に並べたら上下の辺になる(向きを決め打っていない)', () => {
+    // ⚠ これが無いと「いつも右 → 左」と書いた実装が上の it を通ってしまう
+    const r = buildPptx(
+      [
+        place(0, 0, 200, 100, 1, 'rect', 'a'), p('上'),
+        place(0, 400, 200, 100, 1, 'rect', 'b'), p('下'),
+        pline('a', 'b'),
+      ],
+      { title: 'T' },
+    );
+    const c = cxns(partOf(r, 'ppt/slides/slide1.xml'))[0]!;
+    expect(c.st[1], '出どころが下辺(2)でない').toBe(2);
+    expect(c.end[1], '行き先が上辺(0)でない').toBe(0);
+  });
+
+  it('🔴 楕円の接続点は 0/2/4/6(実測。四角と同じ番号を書いたら落ちる)', () => {
+    const r = buildPptx(
+      [
+        place(0, 0, 200, 100, 1, 'ellipse', 'a'), p('丸'),
+        place(400, 0, 200, 100, 1, 'rect', 'b'), p('四角'),
+        pline('a', 'b'),
+      ],
+      { title: 'T' },
+    );
+    const c = cxns(partOf(r, 'ppt/slides/slide1.xml'))[0]!;
+    // 🔴 楕円の「右」は **6**(四角なら 3)── ここが本体である
+    expect(c.st[1], '楕円の右辺が 6 でない(四角の番号を使っている)').toBe(6);
+    // ⚠ 対照群: 相手の四角は今までどおり 1(= 形ごとに引けている)
+    expect(c.end[1], '四角の左辺が 1 でない').toBe(1);
+  });
+
+  it('⚠ 指す先が無い線は出さない(配った先では理由を出せないため)', () => {
+    const r = buildPptx(
+      [
+        place(0, 0, 200, 100, 1, 'rect', 'a'), p('左'),
+        pline('a', 'そんな板は無い'),
+        pline('a', 'a'),
+      ],
+      { title: 'T' },
+    );
+    const xml = partOf(r, 'ppt/slides/slide1.xml');
+    expect(cxns(xml), '繋がらない線を出している').toHaveLength(0);
+    // ⚠ 空振り防止 ── 板そのものは出ている(「何も出ない」と区別する)
+    expect(shapeIds(xml).length, '板が出ていない').toBeGreaterThanOrEqual(1);
+  });
+
+  it('⚠ 名前の無い板は指せない(`#名前` を書いていない板)', () => {
+    const r = buildPptx(
+      [
+        place(0, 0, 200, 100, 1, 'rect'), p('名無し'),
+        place(400, 0, 200, 100, 1, 'rect', 'b'), p('右'),
+        pline('a', 'b'),
+      ],
+      { title: 'T' },
+    );
+    expect(cxns(partOf(r, 'ppt/slides/slide1.xml'))).toHaveLength(0);
+  });
+
+  /**
+   * 🔴 **線は板の後ろに敷く**(`spTree` の並びがそのまま z 順である)。
+   *
+   * ⚠ 画面はそうなっている(`place-board.ts` が `host.prepend(svg)`)し、
+   *   マニュアルにも「線は付箋の後ろに敷かれる」と書いてある ──
+   *   ここで裏返すと**配った先だけ見え方が違う**(しかも user は
+   *   PowerPoint を開くまで気づけない)。
+   * ⚠ 実測: 板より前に置いても LibreOffice は繋がったまま読む(順番は
+   *   読めるかどうかの話ではなく、**重なり順**の話である)。
+   */
+  it('🔴 線は板より前に並ぶ(= 板の後ろに敷かれる。画面と同じ向き)', () => {
+    const r = buildPptx(
+      [
+        place(0, 0, 200, 100, 1, 'rect', 'a'), p('左'),
+        place(400, 0, 200, 100, 1, 'rect', 'b'), p('右'),
+        pline('a', 'b'),
+      ],
+      { title: 'T' },
+    );
+    const xml = partOf(r, 'ppt/slides/slide1.xml');
+    const cx = xml.indexOf('<p:cxnSp>');
+    const sp = xml.indexOf('<p:sp><p:nvSpPr>');
+    // ⚠ 空振り防止 ── どちらかが無ければ、この比較は何も見ていない
+    expect(cx, '線が 1 本も出ていない').toBeGreaterThanOrEqual(0);
+    expect(sp, '板が 1 枚も出ていない').toBeGreaterThanOrEqual(0);
+    expect(cx, '線が板の上に乗っている(字が読めなくなる)').toBeLessThan(sp);
+  });
+
+  it('🔴 右から左へ引く線は `flipH`(負の `ext` は壊れた .pptx である)', () => {
+    const r = buildPptx(
+      [
+        place(0, 0, 200, 100, 1, 'rect', 'a'), p('左'),
+        place(400, 0, 200, 100, 1, 'rect', 'b'), p('右'),
+        pline('b', 'a'),
+      ],
+      { title: 'T' },
+    );
+    const xml = partOf(r, 'ppt/slides/slide1.xml');
+    expect(xml, '向きの反転が書かれていない').toContain('flipH="1"');
+    expect(xml, '負の大きさを書いている').not.toMatch(/<a:ext cx="-/);
   });
 });

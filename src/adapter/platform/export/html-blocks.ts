@@ -20,6 +20,7 @@
  *   「ボタンを押して何も起きない」が正常動作だった。
  */
 import { placeShapeOf } from '@features/markdown/place-shape';
+import { placeLineTargetId } from '@features/markdown/place-line';
 import type { DocxBlock, DocxCell, DocxRun } from '@features/export/docx';
 
 /** 走りに掛かる装飾(親から受け継ぐ)。 */
@@ -393,11 +394,28 @@ export function htmlToDocxBlocks(doc: Document): {
        * ⚠ `.pkc-place` より**前**に見る ── 板の class を両方書いた塊は線として捨てる
        *   (位置を持つ線は在りえない)。
        */
-      if (el.classList.contains('pkc-line')) continue;
+      if (el.classList.contains('pkc-line')) {
+        /**
+         * 🔴 **中身は捨てるが、繋ぎ先は運ぶ**(#530 段③e)。
+         * ⚠ 上の注記のとおり**字は 1 文字も運ばない**(`walkBlocks` を呼ばない)──
+         *   運ぶのは `from=` / `to=` の名前だけである。
+         * 🔑 綴りの解き方は `placeLineTargetId` の **1 本**(§7)── `a:right` の
+         *   接続点つきの書き方も、板の名前だけを取り出せる。
+         * ⚠ どちらか一方でも読めない線は**運ばない** ── 指す先が無い線を
+         *   PowerPoint へ出すと、そこで**繋がっていない線**になる
+         *   (画面では理由が出るが、配った先では出ない)。
+         */
+        const from = placeLineTargetId(el.getAttribute('data-pkc-from'));
+        const to = placeLineTargetId(el.getAttribute('data-pkc-to'));
+        if (from !== null && to !== null) blocks.push({ kind: 'place-line', from, to });
+        continue;
+      }
       if (el.classList.contains('pkc-place')) {
         const at = blocks.length;
         // ⚠ 先に場所を取る(中身を写す前)── 後から `splice` すると添字が狂う
-        blocks.push({ kind: 'place', x: 0, y: 0, w: null, h: null, shape: 'rect', span: 0 });
+        blocks.push({
+          kind: 'place', x: 0, y: 0, w: null, h: null, shape: 'rect', name: null, span: 0,
+        });
         walkBlocks(el);
         blocks[at] = {
           kind: 'place',
@@ -407,6 +425,11 @@ export function htmlToDocxBlocks(doc: Document): {
           h: pxAttr(el, 'data-pkc-h'),
           // 🔑 形の既定(札が無い / 知らない字 = 四角)は `placeShapeOf` の 1 か所(§7)
           shape: placeShapeOf(el.getAttribute('data-pkc-shape')),
+          /**
+           * 🔴 **板の名前**(#530 段③e)── 線の繋ぎ先はこれで引く。
+           * ⚠ 名前の無い板は `null`(`id=""` は「書いていない」と同じ)。
+           */
+          name: el.id === '' ? null : el.id,
           span: blocks.length - at - 1,
         };
         continue;

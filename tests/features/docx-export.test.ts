@@ -287,14 +287,18 @@ describe('\u{1f534} 自由配置の板の印(#530 段①)', () => {
 
   it('\u{1f534} 位置を印として残し、中身は後ろの塊として写す', () => {
     const r = blocksOf(BOARD);
-    expect(r.blocks[0]).toEqual({ kind: 'place', x: 12, y: 34, w: 240, h: 96, shape: 'rect', span: 2 });
+    expect(r.blocks[0]).toEqual({
+      kind: 'place', x: 12, y: 34, w: 240, h: 96, shape: 'rect', name: null, span: 2,
+    });
     // \u{1f511} 中身は**入れ子にしない** ── 後ろに並ぶ(images / figures の添字を狂わせない)
     expect(r.blocks.slice(1).map((b) => b.kind)).toEqual(['p', 'p']);
   });
 
   it('⚠ 大きさが書いていなければ null（既定を数え直さない）', () => {
     const r = blocksOf('<div class="pkc-place" data-pkc-x="8"><p>あ</p></div>');
-    expect(r.blocks[0]).toEqual({ kind: 'place', x: 8, y: 0, w: null, h: null, shape: 'rect', span: 1 });
+    expect(r.blocks[0]).toEqual({
+      kind: 'place', x: 8, y: 0, w: null, h: null, shape: 'rect', name: null, span: 1,
+    });
   });
 
   /**
@@ -338,6 +342,46 @@ describe('\u{1f534} 自由配置の板の印(#530 段①)', () => {
     );
     expect(texts, '画面に出ない字が書き出しに漏れている').not.toContain('混入したテキスト');
     expect(texts, '板の字まで捨てている(この検査が空振りしていない証拠)').toContain('板の字');
+  });
+
+  /**
+   * 🔴 **字は捨てるが、繋ぎ先の名前は運ぶ**(#530 段③e)。
+   *
+   * ⚠ 上の it と**対で読む** ── あちらは「運びすぎない」、こちらは「運び足りない」。
+   *   片方だけだと、**線を丸ごと捨てる実装**(段③a のまま)が緑で通る。
+   * 🔑 運ぶのは `from` / `to` の**名前だけ**である(座標も字も持たない)。
+   */
+  it('🔴 線の宣言は、繋ぎ先の名前だけを印として運ぶ(#530 段③e)', () => {
+    const r = blocksOf(
+      '<div class="pkc-format-block pkc-line" data-pkc-from="今日" data-pkc-to="明日"></div>',
+    );
+    expect(r.blocks).toEqual([{ kind: 'place-line', from: '今日', to: '明日' }]);
+  });
+
+  it('⚠ 接続点つきの綴り(`a:right`)でも、板の名前だけを運ぶ', () => {
+    const r = blocksOf(
+      '<div class="pkc-format-block pkc-line" data-pkc-from="今日:right" data-pkc-to="明日:left">'
+        + '</div>',
+    );
+    expect(r.blocks).toEqual([{ kind: 'place-line', from: '今日', to: '明日' }]);
+  });
+
+  it('⚠ 片方でも読めない線は運ばない(繋がらない線を配らない)', () => {
+    // ⚠ 対照群つき ── 上の 2 つが「何でも運ぶ」実装でも通らないようにする
+    expect(blocksOf(
+      '<div class="pkc-format-block pkc-line" data-pkc-to="明日"></div>',
+    ).blocks).toEqual([]);
+    expect(blocksOf(
+      '<div class="pkc-format-block pkc-line" data-pkc-from="今日"></div>',
+    ).blocks).toEqual([]);
+  });
+
+  it('🔴 板の `#名前` が印として運ばれる(線の繋ぎ先になるため)', () => {
+    const r = blocksOf('<div class="pkc-place" id="今日" data-pkc-x="0"><p>あ</p></div>');
+    expect(r.blocks[0]).toMatchObject({ kind: 'place', name: '今日' });
+    // ⚠ 対照群 ── 名前を書いていない板は `null`(`id=""` と同じ扱い)
+    const bare = blocksOf('<div class="pkc-place" data-pkc-x="0"><p>あ</p></div>');
+    expect(bare.blocks[0]).toMatchObject({ kind: 'place', name: null });
   });
 
   it('\u{1f534} Word の出力は 1 バイトも変わらない（印は何も出さない）', () => {

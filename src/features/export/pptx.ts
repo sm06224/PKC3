@@ -15,6 +15,7 @@
  */
 
 import type { PlaceShape } from '../markdown/place-shape';
+import { placeLineOf, type PlaceAnchor } from '../markdown/place-line';
 import type { DocxBlock, DocxCell, DocxRun } from './docx';
 import { xmlEscape } from './docx';
 
@@ -105,8 +106,40 @@ export interface BoardItem {
   readonly h: number | null;
   /** 🔴 板の形(#530 案 A)。⚠ `rect` は**今までどおり**(枠も地も出さない)。 */
   readonly shape: PlaceShape;
+  /** 🔴 板の名前(#530 段③e)── 線の繋ぎ先はこれで引く。無ければ `null`。 */
+  readonly name: string | null;
   readonly lines: readonly SlideLine[];
 }
+
+/** 板どうしを繋ぐ線 1 本(#530 段③e)。⚠ **名前で持つ**(解決は描く側)。 */
+export interface BoardLink {
+  readonly from: string;
+  readonly to: string;
+}
+
+/**
+ * 🔴 **辺 → PowerPoint の接続点の番号**(#530 段③e。**実測 2026-09-15**)。
+ *
+ * ⚠ **推測で `0,1,2,3` と書いてはいけない** ── 5 つの形へ idx 0〜3 の線を出して
+ *   LibreOffice に読ませたら、**楕円だけ番号が違った**:
+ *
+ * | 形 | top | left | bottom | right |
+ * |---|---|---|---|---|
+ * | `rect` / `round` / `diamond` / `arrow` | 0 | 1 | 2 | 3 |
+ * | 🔴 `ellipse` | **0** | **2** | **4** | **6** |
+ *
+ * 楕円は接続点を **8 つ**持ち、**奇数は 45° の斜め**である(実測: idx1 は
+ * 左上の斜めに落ちた)。⚠ 推測のまま出していたら、丸い付箋の線だけ
+ * **少しずれた所へ刺さる** ── 線は引けているので**見た目では気づけない**。
+ * 🔑 `Record<PlaceShape, …>` で受ける ── 形を足して書き忘れたら tsc が落とす。
+ */
+const CXN_IDX: Record<PlaceShape, Record<PlaceAnchor, number>> = {
+  rect: { top: 0, left: 1, bottom: 2, right: 3 },
+  round: { top: 0, left: 1, bottom: 2, right: 3 },
+  ellipse: { top: 0, left: 2, bottom: 4, right: 6 },
+  diamond: { top: 0, left: 1, bottom: 2, right: 3 },
+  arrow: { top: 0, left: 1, bottom: 2, right: 3 },
+};
 
 /**
  * 🔴 **形 → PowerPoint の図形名**(#530 案 A)。
@@ -128,7 +161,12 @@ export type SlideBox =
    * 🔴 **板ごと 1 つの箱**(#530 段①)。⚠ 中身は**縦に積まない** ──
    * 置いた場所のまま並べるのが、この機能の全部である。
    */
-  | { readonly kind: 'board'; readonly items: readonly BoardItem[] }
+  | {
+      readonly kind: 'board';
+      readonly items: readonly BoardItem[];
+      /** 🔴 その板に書かれた線(#530 段③e)。⚠ 指す先が無い線もここに来る。 */
+      readonly links: readonly BoardLink[];
+    }
   | {
       readonly kind: 'image';
       readonly media: string;
@@ -214,12 +252,26 @@ export function splitIntoSlides(
      */
     if (b.kind === 'place') {
       const items: BoardItem[] = [];
+      /**
+       * 🔴 **線の宣言も、同じ板の塊として拾う**(#530 段③e)。
+       * ⚠ 線は**板と板の間にも、後ろにも**書ける(`.pkc-line` は位置を持たないので
+       *   user はどこへでも置く)── だから `place` と `place-line` の**どちらかが
+       *   続く限り**同じ 1 枚に集める。
+       * ⚠ 線だけで板が 1 枚も無い塊は、下の `items.length === 0` で何も描かない
+       *   (`boardShapes` が空を返す)。
+       */
+      const links: BoardLink[] = [];
       while (i < blocks.length) {
         const p = blocks[i]!;
+        if (p.kind === 'place-line') {
+          links.push({ from: p.from, to: p.to });
+          i += 1;
+          continue;
+        }
         if (p.kind !== 'place') break;
         const inner = blocks.slice(i + 1, i + 1 + p.span);
         items.push({
-          x: p.x, y: p.y, w: p.w, h: p.h, shape: p.shape,
+          x: p.x, y: p.y, w: p.w, h: p.h, shape: p.shape, name: p.name,
           lines: inner.flatMap((x) => blockToLines(x)),
         });
         i += 1 + p.span;
@@ -228,7 +280,7 @@ export function splitIntoSlides(
       const reuse =
         current !== null && current.lines.length === 0 && current.boxes.length === 0;
       if (!reuse) current = open('content', '');
-      current!.boxes.push({ kind: 'board', items });
+      current!.boxes.push({ kind: 'board', items, links });
       current = null; // ⚠ 板の後ろの本文を、板の上へ流し込まない
       continue;
     }
@@ -664,11 +716,42 @@ function picXml(id: number, rect: Rect, relId: string, alt: string): string {
  * @param base 図形 id の始まり。⚠ 板は 1 枚で 1 スライドなので、
  *   他の箱と衝突しない**離れた番号**から採る(題名は 2 / 本文は 3)。
  */
+/**
+ * 🔴 **繋がっている線 1 本**(#530 段③e)。
+ *
+ * ⚠ **`stCxn` / `endCxn` を必ず書く** ── 座標だけの線でも見た目は同じだが、
+ *   **板を掴んで動かしても付いてこない**(user が求めているのは「ぐりぐり動かせる」
+ *   ことなので、付いてこない線は要望を満たさない)。
+ * ⚠ `<a:xfrm>` は**受け手が引き直す**が、2 点から組んで書いておく。
+ * 🔑 **右上へ向かう線は `flipH` / `flipV`** ── `off` は左上、`ext` は正でなければ
+ *   ならないので、向きは反転の印で持つ(負の `ext` は壊れた .pptx である)。
+ */
+function connectorXml(
+  id: number,
+  name: string,
+  st: { id: number; idx: number },
+  end: { id: number; idx: number },
+  p1: { x: number; y: number },
+  p2: { x: number; y: number },
+): string {
+  const flip = (p2.x < p1.x ? ' flipH="1"' : '') + (p2.y < p1.y ? ' flipV="1"' : '');
+  return `<p:cxnSp><p:nvCxnSpPr><p:cNvPr id="${id}" name="${xmlEscape(name)}"/>`
+    + `<p:cNvCxnSpPr><a:stCxn id="${st.id}" idx="${st.idx}"/>`
+    + `<a:endCxn id="${end.id}" idx="${end.idx}"/></p:cNvCxnSpPr><p:nvPr/></p:nvCxnSpPr>`
+    + `<p:spPr><a:xfrm${flip}><a:off x="${Math.min(p1.x, p2.x)}" y="${Math.min(p1.y, p2.y)}"/>`
+    + `<a:ext cx="${Math.max(1, Math.abs(p2.x - p1.x))}" `
+    + `cy="${Math.max(1, Math.abs(p2.y - p1.y))}"/></a:xfrm>`
+    + '<a:prstGeom prst="straightConnector1"><a:avLst/></a:prstGeom>'
+    + '<a:ln w="19050"><a:solidFill><a:srgbClr val="808080"/></a:solidFill></a:ln>'
+    + '</p:spPr></p:cxnSp>';
+}
+
 function boardShapes(
   base: number,
   frame: Rect,
   items: readonly BoardItem[],
   linkOf: (r: ExportRun) => string | undefined,
+  links: readonly BoardLink[] = [],
 ): string[] {
   if (items.length === 0) return [];
   const box = boardBounds(items);
@@ -701,7 +784,59 @@ function boardShapes(
       ),
     );
   });
-  return out;
+  /**
+   * 🔴 **線を引く**(#530 段③e)。
+   *
+   * ⚠ 🔴 **線は板より「前」へ並べる = 板の後ろに敷かれる**(`spTree` の並びが z 順)。
+   *   画面と同じ向きである(`place-board.ts:280` が `host.prepend(svg)` ── 線が板の
+   *   上に乗ると字が読めない)。⚠ マニュアルにも「線は付箋の後ろに敷かれる」と
+   *   書いてあるので、ここで裏返すと**配った先だけ見え方が違う**。
+   * ⚠ **1 稿目は「後に足さないと開けない実装がある」と書いていたが、嘘だった** ──
+   *   実測すると、板より前に置いても LibreOffice は 2 本とも**繋がったまま**読んだ
+   *   (CLAUDE.md「『これが無いと壊れる』と書いたら、外して壊れることを 1 度は見る」)。
+   *
+   * 🔑 **どの辺どうしを結ぶかは `placeLineOf` の 1 本から引く**(§7)──
+   *   画面・ER 図・ここが**同じ関数**を読むので、「画面では上から出るのに
+   *   PowerPoint では横から出る」が構造から起きない。
+   * ⚠ 位置は**縮める前の px** で渡す ── 縮尺は全部の板で同じなので、
+   *   どの辺が近いかは変わらない(EMU へ直すのは座標を書くときだけ)。
+   */
+  const byName = new Map<string, number>();
+  items.forEach((it, n) => {
+    // ⚠ 名前が重なったら**先に書いたほう**を採る(後から上書きしない)
+    if (it.name !== null && !byName.has(it.name)) byName.set(it.name, n);
+  });
+  const rectOf = (n: number): { x: number; y: number; w: number; h: number } => {
+    const it = items[n]!;
+    return { x: it.x, y: it.y, w: it.w ?? box.card.w, h: it.h ?? box.card.h };
+  };
+  const toEmu = (px: { x: number; y: number }): { x: number; y: number } => ({
+    x: originX + Math.round(px.x * EMU_PER_PX * k),
+    y: originY + Math.round(px.y * EMU_PER_PX * k),
+  });
+  const wires: string[] = [];
+  let drawn = 0;
+  for (const link of links) {
+    const a = byName.get(link.from);
+    const b = byName.get(link.to);
+    // ⚠ 指す先が無い線は**出さない**(画面は理由を出すが、配った先では出せない)
+    if (a === undefined || b === undefined || a === b) continue;
+    const line = placeLineOf(rectOf(a), rectOf(b));
+    drawn += 1;
+    wires.push(
+      connectorXml(
+        // ⚠ 板の番号(`base + 100 + n`)と衝突させない ── 線は 300 番台から
+        base + 300 + drawn,
+        `線 ${drawn}`,
+        { id: base + 100 + a, idx: CXN_IDX[items[a]!.shape][line.from] },
+        { id: base + 100 + b, idx: CXN_IDX[items[b]!.shape][line.to] },
+        toEmu({ x: line.x1, y: line.y1 }),
+        toEmu({ x: line.x2, y: line.y2 }),
+      ),
+    );
+  }
+  // 🔑 線が先(= 後ろに敷かれる)── 上の注記のとおり、画面と同じ向きである
+  return [...wires, ...out];
 }
 
 function slideXml(s: SlideDraft): { xml: string; rels: SlideRel[] } {
@@ -726,7 +861,7 @@ function slideXml(s: SlideDraft): { xml: string; rels: SlideRel[] } {
       const rect = rects[i]!;
       if (b.kind === 'table') shapes.push(tableXml(first + i, rect, b.rows));
       else if (b.kind === 'board') {
-        for (const sp of boardShapes(first + i, rect, b.items, linkOf)) shapes.push(sp);
+        for (const sp of boardShapes(first + i, rect, b.items, linkOf, b.links)) shapes.push(sp);
       } else {
         shapes.push(picXml(
           first + i, fit(rect, b.widthPx, b.heightPx), relFor('image', b.media), b.alt,
