@@ -194,7 +194,9 @@ for (let i = 1; i <= ROUNDS; i += 1) {
 
   rows.push({
     round: i,
-    answer: JSON.stringify(answer),
+    // ⚠ DuckDB の `count(*)` は **BigInt** を返す ── `JSON.stringify` はそのままだと落ちる。
+    //   🔑 これは probe だけの話ではない ── SQL の面へ繋ぐときも同じ所で落ちる（段②）。
+    answer: JSON.stringify(answer, (_k, v) => (typeof v === 'bigint' ? `${v}n` : v)),
     beforeMb: before.pssMb,
     awakeMb: awake.pssMb,
     foldedMb: folded.pssMb,
