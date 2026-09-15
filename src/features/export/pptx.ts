@@ -784,7 +784,14 @@ function connectorXml(
   end: { id: number; idx: number },
   p1: { x: number; y: number },
   p2: { x: number; y: number },
-  route: PlaceRoute = 'straight',
+  /**
+   * ⚠ **既定値を置かない** ── 死に値だからである(変異試験 M17 が SURVIVED で教えた)。
+   * 🔑 呼ぶ所は **1 か所だけ**で、そこは必ず明示して渡す(実測: 定義 1 / 呼び出し 1 /
+   *   file の外からの参照 0)── 既定を置くと**どの経路からも読まれない字**が残り、
+   *   「ここを変えても何も起きない」を test で守れなくなる。
+   * 🔑 必須にすれば、口を後から足す人が書き忘れたとき **tsc が落とす**。
+   */
+  route: PlaceRoute,
 ): string {
   const flip = (p2.x < p1.x ? ' flipH="1"' : '') + (p2.y < p1.y ? ' flipV="1"' : '');
   return `<p:cxnSp><p:nvCxnSpPr><p:cNvPr id="${id}" name="${xmlEscape(name)}"/>`
