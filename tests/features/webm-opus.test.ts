@@ -12,7 +12,13 @@
  *   **実ブラウザ**(`tests/smoke/media-capture.smoke.spec.ts` の段⑤ ── `<audio>.duration`)で見る。
  */
 import { describe, expect, it } from 'vitest';
-import { demuxWebmOpus, trimWebmOpus, TRIM_REFUSAL_TEXT } from '../../src/features/audio/webm-opus';
+import {
+  demuxWebmOpus,
+  trimWebmOpus,
+  TRIM_REFUSAL_TEXT,
+  insertMissingDuration,
+} from '../../src/features/audio/webm-opus';
+import { readId, readSizeAt } from '../../src/features/audio/ebml';
 
 /** 16 進の字 → バイト列。 */
 const hex = (s: string): number[] => {
@@ -447,5 +453,215 @@ describe('切り出す(trimWebmOpus)', () => {
     const part = trimWebmOpus(src(), 1000, 2000);
     if (!whole.ok || !part.ok) throw new Error('切れない');
     expect(part.result.bytes.length).toBeLessThan(whole.result.bytes.length * 0.6);
+  });
+});
+
+/**
+ * 🔴 **長さを容器へ書く(insertMissingDuration)**(#952 A3)。
+ *
+ * ⚠ **`Segment` の大きさを「不明」にした fixture**(`liveWebm`)を新しく持つ ──
+ *   上の `webm()` は `el()` で組むので**必ず大きさが決まっている**。実物の
+ *   `MediaRecorder` は録りながら書くので**不明のまま**出る。ここを違えると、
+ *   実物ではまったく通らない枝(「不明のまま書き直さない」)を 1 度も試さない
+ *   (CLAUDE.md §2「『旧い形』の fixture が、ここまで古くないことがある」の
+ *   親戚 ── 「今どきの形」の fixture が、実物ほど今どきでないことがある)。
+ */
+describe('長さを容器へ書く(insertMissingDuration)', () => {
+  /**
+   * `Segment` の大きさを**不明**にした webm(実物の `MediaRecorder` と同じ形)。
+   * ⚠ `el()` は使えない(必ず大きさを書く)── ここだけ手で組む。
+   * 🔑 **音の packet を実際に持たせる**(`Cluster` まで足す)── 持たせないと
+   *   `demuxWebmOpus` が `no-audio` で断り、Duration を足したせいで読めなく
+   *   なったのか、fixture が最初から音を持たないのかが**区別できない**。
+   */
+  function liveWebm(f: { extraTrack?: 'before' | 'after'; count?: number } = {}): Uint8Array {
+    const head = el('1a45dfa3', el('4282', ascii('webm')));
+    const info = el('1549a966', el('2ad7b1', hex('0f4240'))); // TimestampScale
+    const video = el('ae', [...el('d7', [2]), ...el('86', ascii('V_VP8'))]);
+    const audio = el('ae', [...el('d7', [1]), ...el('86', ascii('A_OPUS')), ...el('63a2', opusHead())]);
+    const tracks = el('1654ae6b', [
+      ...(f.extraTrack === 'before' ? video : []),
+      ...audio,
+      ...(f.extraTrack === 'after' ? video : []),
+    ]);
+    const count = f.count ?? 5;
+    const blocks: number[] = [];
+    for (let i = 0; i < count; i += 1) {
+      blocks.push(...el('a3', [0x81, ...i16(i * 60), 0x80, ...Array.from({ length: 4 }, (_, k) => (i * 16 + k) & 0xff)]));
+    }
+    const cluster = el('1f43b675', [...el('e7', i16(0)), ...blocks]);
+    // ⚠ Segment の大きさを不明のまま出す(8 バイト vint、全ビット 1)
+    const segHeader = [...hex('18538067'), 0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
+    return Uint8Array.from([...head, ...segHeader, ...info, ...tracks, ...cluster]);
+  }
+
+  /** `Info` の後に何も無い(`Tracks` すら無い)最小形 ── 途切れの実験に使う。 */
+  function liveWebmInfoOnly(): Uint8Array {
+    const head = el('1a45dfa3', el('4282', ascii('webm')));
+    const info = el('1549a966', el('2ad7b1', hex('0f4240')));
+    const segHeader = [...hex('18538067'), 0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
+    return Uint8Array.from([...head, ...segHeader, ...info]);
+  }
+
+  /** `Info` が無く、`Tracks` の後にいきなり `Cluster` が来る形。 */
+  function liveWebmNoInfo(): Uint8Array {
+    const head = el('1a45dfa3', el('4282', ascii('webm')));
+    const tracks = el('1654ae6b', el('ae', [...el('d7', [1]), ...el('86', ascii('A_OPUS')), ...el('63a2', opusHead())]));
+    const cluster = el('1f43b675', el('e7', i16(0)));
+    const segHeader = [...hex('18538067'), 0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
+    return Uint8Array.from([...head, ...segHeader, ...tracks, ...cluster]);
+  }
+
+  /** `Info` に既に `Duration` が書かれている形(二重書きの検算に使う)。 */
+  function liveWebmWithDuration(): Uint8Array {
+    const head = el('1a45dfa3', el('4282', ascii('webm')));
+    const info = el('1549a966', [...el('2ad7b1', hex('0f4240')), ...el('4489', [0, 0, 0, 0, 0, 0, 0, 0])]);
+    const tracks = el('1654ae6b', el('ae', [...el('d7', [1]), ...el('86', ascii('A_OPUS')), ...el('63a2', opusHead())]));
+    const segHeader = [...hex('18538067'), 0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
+    return Uint8Array.from([...head, ...segHeader, ...info, ...tracks]);
+  }
+
+  /**
+   * 🔑 **検算は実装と別に歩く**(CLAUDE.md §1「期待値は『別の綴り』ではなく
+   *   『別の観測』から作る」)── `readId` / `readSizeAt` は `ebml.test.ts` が
+   *   独立に守っている低い層なので、ここで使っても
+   *   `insertMissingDuration` 自身の「どこへ挿すか」のロジックとは共有しない。
+   */
+  function readDurationMs(bytes: Uint8Array): number | null {
+    const head = readId(bytes, 0);
+    if (head === null) return null;
+    const headSize = readSizeAt(bytes, head.length);
+    if (headSize === null || headSize.value === null) return null;
+    let pos = head.length + headSize.length + headSize.value;
+    const seg = readId(bytes, pos);
+    if (seg === null) return null;
+    const segSizeStart = pos + seg.length;
+    const segSize = readSizeAt(bytes, segSizeStart);
+    if (segSize === null) return null;
+    pos = segSizeStart + segSize.length;
+    while (pos < bytes.length) {
+      const id = readId(bytes, pos);
+      if (id === null) return null;
+      const sizeStart = pos + id.length;
+      const size = readSizeAt(bytes, sizeStart);
+      if (size === null || size.value === null) return null;
+      const bodyStart = sizeStart + size.length;
+      if (id.id === '1549a966') {
+        let q = bodyStart;
+        const end = bodyStart + size.value;
+        while (q < end) {
+          const cid = readId(bytes, q);
+          if (cid === null) return null;
+          const cSizeStart = q + cid.length;
+          const cSize = readSizeAt(bytes, cSizeStart);
+          if (cSize === null || cSize.value === null) return null;
+          const cBodyStart = cSizeStart + cSize.length;
+          if (cid.id === '4489') {
+            const dv = new DataView(bytes.buffer, bytes.byteOffset + cBodyStart, cSize.value);
+            return dv.getFloat64(0, false);
+          }
+          q = cBodyStart + cSize.value;
+        }
+        return null;
+      }
+      pos = bodyStart + size.value;
+    }
+    return null;
+  }
+
+  it('🔴 空振り防止 ── 書く前には Duration が無い', () => {
+    expect(readDurationMs(liveWebm()), '検算そのものが空振りしている').toBeNull();
+  });
+
+  it('🔴 Duration を書き足す(容器の見出しだけが伸びる)', () => {
+    const src = liveWebm();
+    const out = insertMissingDuration(src, 2500);
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    // ⚠ 増えたのは Duration の 11 バイト(id 2 + size 1 + payload 8)ぶんだけ
+    expect(out.bytes.length, '中身まで増減している(足すだけのはず)').toBe(src.length + 11);
+    expect(readDurationMs(out.bytes)).toBe(2500);
+  });
+
+  it('🔴 中身(Tracks / packet)は写るだけ ── demux できる(作り直していない)', () => {
+    const out = insertMissingDuration(liveWebm({ count: 5 }), 2500);
+    if (!out.ok) throw new Error('書けない');
+    const back = demuxWebmOpus(out.bytes);
+    expect(back.ok, 'Duration を足したら opus の track ごと読めなくなった').toBe(true);
+    if (!back.ok) return;
+    expect(back.source.packets, 'packet の数が変わっている').toHaveLength(5);
+  });
+
+  it('🔴 Segment の大きさが決まっていても書ける(往復した file を、もう一度通す)', () => {
+    // ⚠ `webm()`(既存の fixture)は大きさが決まっている ── その枝を通す
+    const known = webm({ count: 5 });
+    expect(readDurationMs(known), '前提が崩れている(既に Duration が在る)').toBeNull();
+    const out = insertMissingDuration(known, 300);
+    if (!out.ok) throw new Error('書けない');
+    expect(readDurationMs(out.bytes)).toBe(300);
+    // 🔑 packet は 1 つも変わっていない(音を作り直していない)
+    const back = demuxWebmOpus(out.bytes);
+    if (!back.ok) throw new Error('ほどけない');
+    expect(back.source.packets).toHaveLength(5);
+  });
+
+  it('🔴 動画の track が混ざっていても効く(#952。機構は track の中身を見ない)', () => {
+    for (const where of ['before', 'after'] as const) {
+      const out = insertMissingDuration(liveWebm({ extraTrack: where, count: 5 }), 1234);
+      expect(out.ok, `${where}: 動画 track があると書けない`).toBe(true);
+      if (!out.ok) continue;
+      expect(readDurationMs(out.bytes), `${where}: 値が違う`).toBe(1234);
+      // ⚠ 動画 track の中身にも触っていない(opus の packet 数が保たれていれば
+      //   track を壊していない目安になる ── §「別窓の混ざり」と同じ検算の形)
+      const back = demuxWebmOpus(out.bytes);
+      expect(back.ok, `${where}: track を壊した`).toBe(true);
+      if (!back.ok) continue;
+      expect(back.source.packets, `${where}: packet 数が変わった`).toHaveLength(5);
+    }
+  });
+
+  it('⚠ 既に Duration が在れば断る(二重に足さない)', () => {
+    expect(insertMissingDuration(liveWebmWithDuration(), 999)).toEqual({
+      ok: false,
+      reason: 'has-duration',
+    });
+  });
+
+  it('🔴 webm ですらなければ not-webm', () => {
+    expect(insertMissingDuration(Uint8Array.of(1, 2, 3, 4), 100)).toEqual({
+      ok: false,
+      reason: 'not-webm',
+    });
+  });
+
+  it('🔴 Info の前に Cluster が来たら no-info(音・映像のデータへ踏み込まない)', () => {
+    expect(insertMissingDuration(liveWebmNoInfo(), 100)).toEqual({ ok: false, reason: 'no-info' });
+  });
+
+  it('🔴 途中で切れていたら incomplete(no-info / broken と混同しない)', () => {
+    const full = liveWebmInfoOnly();
+    const out = insertMissingDuration(full.subarray(0, full.length - 3), 100);
+    expect(out).toEqual({ ok: false, reason: 'incomplete' });
+  });
+
+  it('⚠ 対照群 ── 切っていない同じ file はもちろん書ける', () => {
+    expect(insertMissingDuration(liveWebmInfoOnly(), 100).ok).toBe(true);
+  });
+
+  it('🔴 長い録音(12 時間ぶんのミリ秒)でも壊れない', () => {
+    const twelveHoursMs = 12 * 60 * 60 * 1000;
+    const out = insertMissingDuration(liveWebm(), twelveHoursMs);
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(readDurationMs(out.bytes)).toBe(twelveHoursMs);
+  });
+
+  it('🔴 壊れた長さは書かない(Infinity / NaN / 負)', () => {
+    expect(insertMissingDuration(liveWebm(), Number.NaN)).toEqual({ ok: false, reason: 'broken' });
+    expect(insertMissingDuration(liveWebm(), Number.POSITIVE_INFINITY)).toEqual({
+      ok: false,
+      reason: 'broken',
+    });
+    expect(insertMissingDuration(liveWebm(), -1)).toEqual({ ok: false, reason: 'broken' });
   });
 });
