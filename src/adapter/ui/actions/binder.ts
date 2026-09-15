@@ -7511,6 +7511,46 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ **中身は 1 文字も出ない**(表・列・型・鍵・繋がり・行数だけ)。
    * 🔑 id をここで作るのは `sql-to-note` と同じ作法 ── 純粋な reducer も effect も乱数を持たない。
    */
+  /**
+   * 🔴 **つながり図を開く / 閉じる**(#918 段⑤。裁定 2026-09-15 = この窓の中)。
+   * ⚠ 採るのは effect の仕事 ── ここは合図を投げるだけである。
+   */
+  'sql-er-toggle': (dispatcher) => {
+    dispatcher.dispatch({ type: 'SQL_ER_TOGGLE' });
+  },
+  /**
+   * 🔴 **図の四角(表の名前)を押した**(#918 段⑤c)── `SELECT * FROM 表` を足す。
+   * ⚠ 名前は**要素が持つ**(`data-pkc-name`)── state から引き直すと、
+   *   描いた図と押した先が食い違いうる(描き直しの最中に押されたとき)。
+   */
+  'sql-er-table': (dispatcher, target) => {
+    const table = target.getAttribute('data-pkc-name') ?? '';
+    if (table === '') return;
+    dispatcher.dispatch({ type: 'SQL_ER_PRESS', press: { kind: 'table', table } });
+  },
+  /** 🔴 **図の列を押した**(#918 段⑤c)── 選ぶ列に足す。 */
+  'sql-er-column': (dispatcher, target) => {
+    const table = target.getAttribute('data-pkc-name') ?? '';
+    const column = target.getAttribute('data-pkc-col') ?? '';
+    if (table === '' || column === '') return;
+    dispatcher.dispatch({ type: 'SQL_ER_PRESS', press: { kind: 'column', table, column } });
+  },
+  /**
+   * 🔴 **図の繋がり(線の札)を押した**(#918 段⑤c)── `JOIN` を足す。
+   * ⚠ 4 つとも要る ── 1 つでも欠けたら**押しても何も起きない**ので、
+   *   その場合は何も投げない(理由は `erSql` が言える形にならないため)。
+   */
+  'sql-er-link': (dispatcher, target) => {
+    const from = target.getAttribute('data-pkc-from') ?? '';
+    const fromColumn = target.getAttribute('data-pkc-fromcol') ?? '';
+    const to = target.getAttribute('data-pkc-to') ?? '';
+    const toColumn = target.getAttribute('data-pkc-tocol') ?? '';
+    if (from === '' || to === '') return;
+    dispatcher.dispatch({
+      type: 'SQL_ER_PRESS',
+      press: { kind: 'link', link: { from, fromColumn, to, toColumn } },
+    });
+  },
   'sql-schema-to-note': (dispatcher) => {
     const state = dispatcher.getState();
     if (state.sqlPage.running) return;

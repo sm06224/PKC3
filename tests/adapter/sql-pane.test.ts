@@ -2323,3 +2323,172 @@ describe('打つ欄の色分けと行番号(#918 段②c/②d)', () => {
     expect(input, '欄の左余白が番号の幅の変数を読んでいない').toContain('var(--sql-gutter)');
   });
 });
+
+/**
+ * 🔴 **表のつながり図**(#918 段⑤。user 要望 2026-09-14「er でグラフィカルに取得する方法も
+ * 欲しいな」/ 置き場の裁定 2026-09-15 = **この窓の中に畳める欄**)。
+ *
+ * 守る主張:
+ * 1. 閉じているときは **1px も場所を取らない**(押すと開き、もう一度押すと畳む)
+ * 2. 開くと**採ってくる** ── 2 度目は採り直さない(開くたびに DB を舐めない)
+ * 3. 四角と線が出て、**押せる**(表 / 列 / 繋がり)
+ * 4. 🔴 押した結果が**打つ欄に入る**(図を見ながら組める)
+ * 5. 🔴 足せないときは**理由が出る**(無言の dead click を作らない)
+ * 6. 🔴 **相手を変えたら前の図を持ち越さない**(名札は新しいのに中身が前の DB、を作らない)
+ */
+describe('表のつながり図(#918 段⑤)', () => {
+  /**
+   * ⚠ **`settle` では足りない** ── 構造は 3 本を**順に**打つので、
+   *   その数だけ microtask を回さないと答えが state に届かない
+   *   (1 稿目はここを外して 7 件とも落ちた ── 計器が短かっただけで、製品は無事だった)。
+   */
+  const settleEr = async (): Promise<void> => {
+    for (let i = 0; i < 20; i += 1) await Promise.resolve();
+  };
+  /** 構造を採る 3 本にだけ答える worker。⚠ それ以外は普通の答えを返す。 */
+  const schemaReply = async (sql: string): Promise<SqlAnswer> => {
+    if (sql.includes('pragma_table_info')) {
+      return answer(
+        ['kind', 'tbl', 'cid', 'col', 'typ', 'nn', 'pk'],
+        [
+          ['table', '売上', 0, 'id', 'INTEGER', 1, 1],
+          ['table', '売上', 1, '客id', 'INTEGER', 0, 0],
+          ['table', '売上', 2, '金額', 'INTEGER', 0, 0],
+          ['table', '客', 0, 'id', 'INTEGER', 1, 1],
+          ['table', '客', 1, '名前', 'TEXT', 0, 0],
+        ],
+      );
+    }
+    if (sql.includes('pragma_foreign_key_list')) {
+      return answer(['tbl', 'ref', 'col', 'refcol'], [['売上', '客', '客id', 'id']]);
+    }
+    if (sql.includes('count(*)')) return answer(['tbl', 'n'], [['売上', 3], ['客', 2]]);
+    return answer(['a'], [[1]]);
+  };
+
+  const region = (pane: HTMLElement): HTMLElement =>
+    pane.querySelector<HTMLElement>('[data-pkc-region="sql-er"]')!;
+  const erBtn = (pane: HTMLElement): HTMLButtonElement =>
+    pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-er-toggle"]')!;
+  const tables = (pane: HTMLElement): string[] =>
+    [...pane.querySelectorAll('[data-pkc-field="sql-er-table"]')].map((e) => e.textContent ?? '');
+  const erNote = (pane: HTMLElement): string =>
+    pane.querySelector('[data-pkc-field="sql-er-note"]')?.textContent ?? '';
+
+  it('🔴 閉じているうちは 1px も場所を取らない(押すと開き、もう一度で畳む)', async () => {
+    const { pane } = setup(schemaReply);
+    expect(region(pane).hidden, '閉じているのに器が出ている').toBe(true);
+    expect(erBtn(pane).textContent).toBe('構造を見る');
+
+    erBtn(pane).click();
+    await settleEr();
+    expect(region(pane).hidden, '押しても開かない').toBe(false);
+    expect(erBtn(pane).textContent, '帰り道が字で分からない').toBe('構造を閉じる');
+
+    erBtn(pane).click();
+    expect(region(pane).hidden, 'もう一度押しても畳めない').toBe(true);
+  });
+
+  it('🔴 四角と線と押し所が出る(指されている表が左上)', async () => {
+    const { pane } = setup(schemaReply);
+    erBtn(pane).click();
+    await settleEr();
+    // 🔑 「客」は外部キーで指されているので先頭(= 左上)
+    expect(tables(pane)).toEqual(['客(表・2 行)', '売上(表・3 行)']);
+    expect(
+      pane.querySelectorAll('[data-pkc-field="sql-er-column"]').length,
+      '列の押し所が出ていない',
+    ).toBe(5);
+    expect(pane.querySelectorAll('[data-pkc-field="sql-er-lines"] line').length, '線が無い').toBe(1);
+    const chip = pane.querySelector('[data-pkc-field="sql-er-link"]');
+    expect(chip?.textContent, '繋がりの札に、どの列どうしかが書かれていない').toBe(
+      '売上.客id → 客.id',
+    );
+  });
+
+  it('🔴 2 度目に開くときは採り直さない(開くたびに DB を舐めない)', async () => {
+    const { pane, runReadOnlySql } = setup(schemaReply);
+    erBtn(pane).click();
+    await settleEr();
+    const first = runReadOnlySql.mock.calls.length;
+    expect(first, '構造を採っていない').toBeGreaterThanOrEqual(2);
+    erBtn(pane).click();
+    erBtn(pane).click();
+    await settleEr();
+    expect(runReadOnlySql.mock.calls.length, '開くたびに採り直している').toBe(first);
+  });
+
+  it('🔴 表 → 列 → 繋がり と押すと、打つ欄に SQL が組まれる', async () => {
+    const { pane, box } = setup(schemaReply);
+    erBtn(pane).click();
+    await settleEr();
+    const press = (field: string, name: string): void => {
+      const el = [...pane.querySelectorAll<HTMLElement>(`[data-pkc-field="${field}"]`)].find(
+        (e) => (e.textContent ?? '').includes(name),
+      );
+      expect(el, `押し所が無い: ${field} / ${name}`).toBeDefined();
+      el!.click();
+    };
+    press('sql-er-table', '売上');
+    expect(box.value, '表を押しても欄に入らない').toBe('select * from 売上');
+    press('sql-er-column', '金額');
+    expect(box.value).toBe('select 金額 from 売上');
+    press('sql-er-link', '売上.客id');
+    expect(box.value).toBe('select 金額 from 売上\n  join 客 on 客.id = 売上.客id');
+  });
+
+  it('🔴 足せないときは理由が出て、打っている字は 1 文字も変わらない', async () => {
+    const { pane, box, type } = setup(schemaReply);
+    erBtn(pane).click();
+    await settleEr();
+    type('update t set a = 1');
+    const before = box.value;
+    pane.querySelector<HTMLElement>('[data-pkc-field="sql-er-table"]')!.click();
+    expect(box.value, '読めない字を書き換えた').toBe(before);
+    expect(erNote(pane), '足さなかった理由が出ていない').toContain('足せません');
+  });
+
+  it('⚠ 押して足せた回は、前の理由が消える', async () => {
+    const { pane, type } = setup(schemaReply);
+    erBtn(pane).click();
+    await settleEr();
+    type('update t set a = 1');
+    pane.querySelector<HTMLElement>('[data-pkc-field="sql-er-table"]')!.click();
+    expect(erNote(pane)).not.toBe('');
+    type('');
+    pane.querySelector<HTMLElement>('[data-pkc-field="sql-er-table"]')!.click();
+    expect(erNote(pane), '足せたのに前の断りが残っている').toBe('');
+  });
+
+  it('🔴 調べる相手を変えたら、前の図を持ち越さない', async () => {
+    const { pane, pick, runReadOnlySql } = setup(schemaReply);
+    erBtn(pane).click();
+    await settleEr();
+    expect(tables(pane).length).toBe(2);
+    const before = runReadOnlySql.mock.calls.length;
+
+    // 取り込んだ `.sqlite` へ切り替える(開けたら採り直すはず)
+    pick('db1');
+    await settleEr();
+    await settleEr();
+    expect(runReadOnlySql.mock.calls.length, '相手を変えたのに採り直していない').toBeGreaterThan(
+      before,
+    );
+    // ⚠ 採っている間に**前の DB の図**を出したままにしない
+    expect(
+      runReadOnlySql.mock.calls.some((c) => c[1].guest === true),
+      'よその DB へ向けて採っていない',
+    ).toBe(true);
+  });
+
+  it('⚠ 構造を採れなかったら、黙らずに理由を出す', async () => {
+    const { pane } = setup(async (sql) => {
+      if (sql.includes('pragma_table_info')) throw new Error('だめでした');
+      return answer(['a'], [[1]]);
+    });
+    erBtn(pane).click();
+    await settleEr();
+    expect(region(pane).hidden, '採れなくても器は開いたまま').toBe(false);
+    expect(erNote(pane), '採れなかった理由が出ていない').toContain('構造を採れませんでした');
+  });
+});

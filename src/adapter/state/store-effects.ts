@@ -432,6 +432,44 @@ export const SQL_MAX_MS = REQUEST_TIMEOUT_MS - 2_000;
 /** `settled()` が待つ最大の巡回数(積まれ続ける相手で永久に待たないための上限)。 */
 const SETTLE_ROUNDS_MAX = 20;
 
+/** 採ってきた表 1 枚(`runReadOnlySql` が返す形のうち、構造に要る所だけ)。 */
+type SchemaGrid = { columns: string[]; rows: Array<Array<SqlCell>> };
+
+/**
+ * 🔴 **構造を採る 3 本を、1 か所で打つ**(#918 段① / 段⑤)。
+ *
+ * ⚠ 構造ノート(段①)と**つながり図**(段⑤)は、採る物が**同じ**である ──
+ *   別々に書くと「同じ問いに答える口が 2 つ」になり、片方だけ直す形が必ず起きる
+ *   (CLAUDE.md §7)。
+ * ⚠ **行数だけは落ちても進む** ── 表の名前が分かってから数えるので、諦めても
+ *   構造そのものは出せる(`counts` が `null` なら「行数は採れませんでした」と出る)。
+ */
+async function fetchSchemaGrids(
+  ask: (
+    sql: string,
+    limits: { maxRows: number; maxSteps: number; maxMs: number; guest?: boolean },
+  ) => Promise<SchemaGrid & { truncated: boolean; ms: number }>,
+  opts: { maxRows: number; maxSteps: number; maxMs: number; guest?: boolean },
+): Promise<{ columns: SchemaGrid; fks: SchemaGrid; counts: SchemaGrid | null }> {
+  const columns = await ask(SCHEMA_COLUMNS_SQL, opts);
+  const fks = await ask(SCHEMA_FK_SQL, opts);
+  /**
+   * ⚠ **数えるのは表だけ**(ビューは数えない)── ビューを数えると
+   *   **その場でビューが走る**ので、重い相手で刺さる。
+   */
+  const names = [
+    ...new Set(
+      columns.rows
+        .filter((r) => r[columns.columns.indexOf('kind')] === 'table')
+        .map((r) => String(r[columns.columns.indexOf('tbl')] ?? '')),
+    ),
+  ].filter((n) => n !== '');
+  const sql = countsSql(names);
+  // ⚠ 行数が採れなくても**構造は出す**(ここだけ握り潰してよい)
+  const counts = sql === null ? null : await ask(sql, opts).catch(() => null);
+  return { columns, fks, counts };
+}
+
 export function connectStoreEffects(
   dispatcher: Dispatcher,
   store: StorePort,
@@ -863,6 +901,44 @@ export function connectStoreEffects(
         break;
       }
       /**
+       * 🔴 **つながり図のために構造を採る**(#918 段⑤)。
+       *
+       * 🔑 採る物は段① と**同じ**(`fetchSchemaGrids` 1 か所)── ここは
+       *   ノートを作らず、**採った表をそのまま state へ返す**だけである。
+       * ⚠ **札をそのまま返す** ── 採っている間に相手を変えられるので、
+       *   古い答えは reducer が捨てる。
+       * ⚠ 落ちたら**黙らない** ── 「採っています」のまま止まると、
+       *   開いた図が永久に空になる(無言の dead click と同じ形)。
+       */
+      case 'REQUEST_SQL_ER': {
+        const ask = store.runReadOnlySql;
+        const { token } = ev;
+        const guest = ev.guest === true ? { guest: true } : {};
+        if (!ask) {
+          dispatcher.dispatch({
+            type: 'SQL_ER_FAILED',
+            token,
+            error: 'この版では構造を採れません(アプリを読み直すと直ることがあります)',
+          });
+          break;
+        }
+        const opts = { maxRows: SQL_MAX_ROWS, maxSteps: SQL_MAX_STEPS, maxMs: SQL_MAX_MS, ...guest };
+        void (async (): Promise<void> => {
+          const { columns, fks, counts } = await fetchSchemaGrids(ask, opts);
+          if (disposed) return;
+          dispatcher.dispatch({ type: 'SQL_ER_LOADED', token, columns, fks, counts });
+        })().catch((e: unknown) => {
+          if (disposed) return;
+          const raw = e instanceof Error ? e.message : String(e);
+          dispatcher.dispatch({
+            type: 'SQL_ER_FAILED',
+            token,
+            error: `構造を採れませんでした: ${raw}`,
+          });
+        });
+        break;
+      }
+      /**
        * 🔴 **調べている相手の構造を 1 枚にする**(#918 段①。user 要望 2026-09-14)。
        *
        * ⚠ **門にも worker にも 1 行も足していない** ── 3 本とも `select` である
@@ -886,26 +962,7 @@ export function connectStoreEffects(
         }
         const opts = { maxRows: SQL_MAX_ROWS, maxSteps: SQL_MAX_STEPS, maxMs: SQL_MAX_MS, ...guest };
         void (async (): Promise<void> => {
-          const columns = await ask(SCHEMA_COLUMNS_SQL, opts);
-          const fks = await ask(SCHEMA_FK_SQL, opts);
-          /**
-           * ⚠ **数えるのは表だけ**(ビューは数えない)── ビューを数えると
-           *   **その場でビューが走る**ので、重い相手で刺さる。
-           */
-          const names = [
-            ...new Set(
-              columns.rows
-                .filter((r) => r[columns.columns.indexOf('kind')] === 'table')
-                .map((r) => String(r[columns.columns.indexOf('tbl')] ?? '')),
-            ),
-          ].filter((n) => n !== '');
-          const sql = countsSql(names);
-          let counts: { columns: readonly string[]; rows: readonly (readonly SqlCell[])[] } | null =
-            null;
-          if (sql !== null) {
-            // ⚠ 行数が採れなくても**構造は出す**(ここだけ握り潰してよい)
-            counts = await ask(sql, opts).catch(() => null);
-          }
+          const { columns, fks, counts } = await fetchSchemaGrids(ask, opts);
           if (disposed) return;
           const title = schemaNoteTitle(new Date(), where);
           dispatcher.dispatch({
