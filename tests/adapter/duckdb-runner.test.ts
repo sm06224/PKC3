@@ -134,6 +134,35 @@ describe('🔴 DuckDB で引く(#682 段②)', () => {
     });
   });
 
+  /**
+   * 🔴 **門が「効いている」ことを、runner の経路で見る**(#682 段③a、2026-09-15)。
+   *
+   * ⚠ 変異試験 A4(`resolveDuckDbBase()` を `new URL(...).href` に戻す)が **SURVIVED**
+   *   したので足した。生き延びた理由は「検査が弱い」ではなく **経路が届いていない**
+   *   ことだった ── 製品が渡す `DUCKDB_BASE` は**相対の定数**なので、門を通しても
+   *   通さなくても結果が 1 バイトも変わらない(CLAUDE.md §2)。
+   * 🔑 だから `deps.packBase` で**別の場所を渡せる形**にし、そこで断ることを見る。
+   * ⚠ 観測点は 2 つ:**断り文**と、**取りに行っていないこと**。文言だけだと、
+   *   組んでから落ちる実装でも通ってしまう(外の宛先へ 1 回飛んだ後に断るのでは遅い)。
+   */
+  it('🔴 別の場所を置き場に渡したら、取りに行く前に断る', async () => {
+    const { runner, fetchText, open, readBytes } = make();
+    const evil = new DuckDbRunner({
+      fetchText,
+      open,
+      baseUrl: 'https://example.test/app/',
+      packBase: 'https://evil.test/duckdb/',
+    });
+    await expect(evil.run({ sql: 'SELECT 1', source: SRC, readBytes })).rejects.toThrow('同じ場所');
+    expect(fetchText, '断ったのに、外の宛先へ取りに行っている').toHaveBeenCalledTimes(0);
+    expect(open, '断ったのに器を起こしている').toHaveBeenCalledTimes(0);
+
+    // ⚠ **対照群** ── 同じ口を既定のまま使えば通る(断りが「いつも出る」形になっていない)
+    await runner.run({ sql: 'SELECT 1', source: SRC, readBytes });
+    expect(fetchText).toHaveBeenCalledWith('https://example.test/app/duckdb/pack.json');
+    expect(open).toHaveBeenCalledTimes(1);
+  });
+
   it('⚠ 目録を取ってこられなければ、つながりの話として断る', async () => {
     const { runner, open, readBytes } = make();
     const bad = new DuckDbRunner({

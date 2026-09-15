@@ -82,8 +82,19 @@ export function readDuckDbPack(text: string): PackRead {
 }
 
 /**
- * 実体の在り処。⚠ **同一オリジンの相対 path だけ**を組む ──
- * 🔴 外の宛先を組める形にしない(組めるようにした瞬間、次に書く人が CDN を渡せる)。
+ * 実体の在り処を組む(`base` + `path`)。
+ *
+ * 🔴 **⚠ ここは「同一オリジン」を守っていない**(2026-09-15 に読み直して判明)。
+ *   直す前のこの docstring は「**同一オリジンの相対 path だけ**を組む ── 外の宛先を
+ *   組める形にしない」と書いていたが、中身は**ただの文字列の連結**である ──
+ *   `base` に `https://…` を渡せば、外の宛先が**そのまま組める**。
+ * ⚠ つまり**守っていない物を守っていると書いていた**(CLAUDE.md §1「後条件は、
+ *   確かめた事実の上にだけ書く」)。⚠ 悪いのは、その字を読んだ次の人が
+ *   **検めずに `base` を渡す**ことである。
+ * 🔑 **本物の門は adapter 側に置いた** ── `duckdb-pack-acquire.ts` の
+ *   `resolveDuckDbBase()` が `document.baseURI` と origin を突き合わせて断る
+ *   (Office の `resolveBase()` と同じ形)。⚠ ここは**その門を通った base** を
+ *   受け取る前提の、組み立てだけの関数である。
  */
 export function duckDbAssetUrl(base: string, path: string): string {
   const b = base.endsWith('/') ? base : `${base}/`;
