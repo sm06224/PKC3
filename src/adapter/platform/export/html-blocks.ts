@@ -22,6 +22,7 @@
 import { placeShapeOf } from '@features/markdown/place-shape';
 import {
   anchorSpell,
+  parseRouteSpell,
   placeLineAnchorOf,
   placeLineTargetId,
 } from '@features/markdown/place-line';
@@ -423,8 +424,16 @@ export function htmlToDocxBlocks(doc: Document): {
           return a.kind === 'ok' ? anchorSpell(a.anchor) : null;
         };
         if (from !== null && to !== null) {
+          // ⚠ 読めない綴りは運ばない(`null` = 既定のまっすぐ)── 画面は理由を出すが、
+          //    配った先では出せないので、こちらで決めた形になる
+          const r = parseRouteSpell(el.getAttribute('data-pkc-route'));
           blocks.push({
-            kind: 'place-line', from, to, fromAnchor: spell(rawFrom), toAnchor: spell(rawTo),
+            kind: 'place-line',
+            from,
+            to,
+            fromAnchor: spell(rawFrom),
+            toAnchor: spell(rawTo),
+            route: r.kind === 'ok' ? r.route : null,
           });
         }
         continue;

@@ -356,7 +356,7 @@ describe('\u{1f534} 自由配置の板の印(#530 段①)', () => {
       '<div class="pkc-format-block pkc-line" data-pkc-from="今日" data-pkc-to="明日"></div>',
     );
     expect(r.blocks).toEqual([
-      { kind: 'place-line', from: '今日', to: '明日', fromAnchor: null, toAnchor: null },
+      { kind: 'place-line', from: '今日', to: '明日', fromAnchor: null, toAnchor: null, route: null },
     ]);
   });
 
@@ -373,15 +373,44 @@ describe('\u{1f534} 自由配置の板の印(#530 段①)', () => {
         + 'data-pkc-to="明日:left"></div>',
     );
     expect(one.blocks).toEqual([
-      { kind: 'place-line', from: '今日', to: '明日', fromAnchor: 'right@1/4', toAnchor: 'left' },
+      {
+        kind: 'place-line', from: '今日', to: '明日',
+        fromAnchor: 'right@1/4', toAnchor: 'left', route: null,
+      },
     ]);
     const bad = blocksOf(
       '<div class="pkc-format-block pkc-line" data-pkc-from="今日:righ" '
         + 'data-pkc-to="明日"></div>',
     );
     expect(bad.blocks, '読めない綴りを接続点として運んでいる').toEqual([
-      { kind: 'place-line', from: '今日', to: '明日', fromAnchor: null, toAnchor: null },
+      { kind: 'place-line', from: '今日', to: '明日', fromAnchor: null, toAnchor: null, route: null },
     ]);
+  });
+
+  /**
+   * 🔴 **線の通り方も運ぶ**(#530 段③c)。
+   * ⚠ **曲がる所(`bend=`)は運ばない** ── PowerPoint の折れ線は曲がる所を
+   *   自分で決める(実測: 2 点の真ん中)ので、運んでも使えない。
+   *   運ぶ物と使える物を揃えておかないと、次に読む人が「効くはず」と読む。
+   */
+  it('🔴 route= は運ぶ / bend= は運ばない(#530 段③c)', () => {
+    const r = blocksOf(
+      '<div class="pkc-format-block pkc-line" data-pkc-from="今日" data-pkc-to="明日" '
+        + 'data-pkc-route="curve" data-pkc-bend="v:320"></div>',
+    );
+    expect(r.blocks).toEqual([
+      {
+        kind: 'place-line', from: '今日', to: '明日',
+        fromAnchor: null, toAnchor: null, route: 'curve',
+      },
+    ]);
+    // ⚠ 読めない綴りは運ばない(= 配った先ではまっすぐ)
+    const bad = blocksOf(
+      '<div class="pkc-format-block pkc-line" data-pkc-from="今日" data-pkc-to="明日" '
+        + 'data-pkc-route="elbo"></div>',
+    );
+    expect((bad.blocks[0] as { route: string | null }).route, '読めない通り方を運んでいる')
+      .toBeNull();
   });
 
   it('⚠ 片方でも読めない線は運ばない(繋がらない線を配らない)', () => {
@@ -408,7 +437,7 @@ describe('\u{1f534} 自由配置の板の印(#530 段①)', () => {
   it('🔴 線の宣言は Word の本文を 1 バイトも増やさない(#530 段③e)', () => {
     const body: DocxBlock[] = [{ kind: 'p', runs: [{ text: '本文' }] }];
     const withLine = part(
-      buildDocx([...body, { kind: 'place-line', from: 'a', to: 'b', fromAnchor: null, toAnchor: null }], '題名', ISO),
+      buildDocx([...body, { kind: 'place-line', from: 'a', to: 'b', fromAnchor: null, toAnchor: null, route: null }], '題名', ISO),
       'word/document.xml',
     );
     const without = part(buildDocx(body, '題名', ISO), 'word/document.xml');

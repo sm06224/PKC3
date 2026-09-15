@@ -23,11 +23,17 @@
 import {
   anchorSpell,
   ANCHOR_DEN_MAX,
+  parseBendSpell,
+  parseRouteSpell,
   placeLineAnchorOf,
   placeLineOf,
+  placePathOf,
   placeLineTargetId,
+  PLACE_ROUTES,
   type PlaceAnchor,
+  type PlaceBend,
   type PlaceRect,
+  type PlaceRoute,
 } from '@features/markdown/place-line';
 // 🔑 名前に使える字は 1 か所から読む(#530、§7 ── 綴りを写して増やさない)
 import { NAME_RE } from '@features/markdown/block-directive-attrs';
@@ -210,6 +216,25 @@ function lineTrouble(raw: string | null, byId: ReadonlyMap<string, HTMLElement>)
  *   ── 「なんとなく違う所から出ている」としか見えない(いちばん気づけない外し方)。
  * 🔑 だから読めない字は**名指しで断る** ── 綴りは `place-line.ts` の 1 本から読む。
  */
+/**
+ * 🔴 **線の通り方 / 曲がる所の綴りも、読めなければ名指しで断る**(#530 段③c)。
+ *
+ * ⚠ `route=elbo` を黙って `straight` に倒すと、**線は出る**ので誤りに気づけない
+ *   ── 接続点(`anchorTrouble`)とまったく同じ型の実害である。
+ */
+function routeTrouble(raw: string | null): string | null {
+  const r = parseRouteSpell(raw);
+  if (r.kind !== 'bad') return null;
+  return `線の通り方に「${r.raw}」は使えません ── ${PLACE_ROUTES.join(' / ')} のどれかです`;
+}
+
+/** ⚠ 同上。`bend=` は **v:(縦線の x)** か **h:(横線の y)** だけを受ける。 */
+function bendTrouble(raw: string | null): string | null {
+  const b = parseBendSpell(raw);
+  if (b.kind !== 'bad') return null;
+  return `曲がる所に「${b.raw}」は使えません ── 縦線なら v:320、横線なら h:240 のように書きます`;
+}
+
 function anchorTrouble(raw: string | null): string | null {
   const a = placeLineAnchorOf(raw);
   if (a.kind !== 'bad') return null;
@@ -277,16 +302,22 @@ function applyPlaceLines(host: HTMLElement, boards: readonly HTMLElement[]): num
     readonly to: HTMLElement;
     readonly pinFrom: PlaceAnchor | null;
     readonly pinTo: PlaceAnchor | null;
+    readonly route: PlaceRoute;
+    readonly bend: PlaceBend | null;
     readonly pair: string;
   }> = [];
   for (const d of decls) {
     const rawFrom = d.getAttribute('data-pkc-from');
     const rawTo = d.getAttribute('data-pkc-to');
+    const rawRoute = d.getAttribute('data-pkc-route');
+    const rawBend = d.getAttribute('data-pkc-bend');
     const why =
       lineTrouble(rawFrom, byId)
       ?? lineTrouble(rawTo, byId)
       ?? anchorTrouble(rawFrom)
-      ?? anchorTrouble(rawTo);
+      ?? anchorTrouble(rawTo)
+      ?? routeTrouble(rawRoute)
+      ?? bendTrouble(rawBend);
     if (why !== null) {
       ensureLineNote(d, why);
       continue;
@@ -300,12 +331,17 @@ function applyPlaceLines(host: HTMLElement, boards: readonly HTMLElement[]): num
     if (from === to) continue;
     const a = placeLineAnchorOf(rawFrom);
     const b = placeLineAnchorOf(rawTo);
+    const r = parseRouteSpell(rawRoute);
+    const bn = parseBendSpell(rawBend);
     ready.push({
       d,
       from,
       to,
       pinFrom: a.kind === 'ok' ? a.anchor : null,
       pinTo: b.kind === 'ok' ? b.anchor : null,
+      // ⚠ 省いたときは **まっすぐ** ── 書かなくても必ず届く形である
+      route: r.kind === 'ok' ? r.route : 'straight',
+      bend: bn.kind === 'ok' ? bn.bend : null,
       // 🔑 向きに依らず同じ組として数える ── a→b と b→a は「同じ 2 枚の間」である
       pair: idFrom < idTo ? `${idFrom}\u0000${idTo}` : `${idTo}\u0000${idFrom}`,
     });
@@ -322,14 +358,18 @@ function applyPlaceLines(host: HTMLElement, boards: readonly HTMLElement[]): num
       to: r.pinTo,
       spread: { index, count: total.get(r.pair) ?? 1 },
     });
-    const el = document.createElementNS(SVG_NS, 'line');
-    el.setAttribute('x1', String(ln.x1));
-    el.setAttribute('y1', String(ln.y1));
-    el.setAttribute('x2', String(ln.x2));
-    el.setAttribute('y2', String(ln.y2));
+    /**
+     * 🔴 **器は `<path>` 1 種類にする**(#530 段③c)。
+     * ⚠ まっすぐだけ `<line>`、折れる線だけ `<path>` という分け方にすると、
+     *   **`line` を数える検査が、折れる線を 1 本も見なくなる**(黙って穴が空く)。
+     * 🔑 端点は `d` の中に在る ── 別の属性へ写さない(2 か所に持つと片方が腐る)。
+     */
+    const el = document.createElementNS(SVG_NS, 'path');
+    el.setAttribute('d', placePathOf(ln, r.route, r.bend));
     // 🔑 どこから出たかを焼く ── 綴りは記法と**同じ字**(`right` / `right@1/4`)
     el.setAttribute('data-pkc-line-from', anchorSpell(ln.from));
     el.setAttribute('data-pkc-line-to', anchorSpell(ln.to));
+    el.setAttribute('data-pkc-line-route', r.route);
     svg.append(el);
     drawn += 1;
   }

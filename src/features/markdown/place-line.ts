@@ -211,6 +211,107 @@ export function placeLineOf(from: PlaceRect, to: PlaceRect, pin: PlacePin = {}):
 }
 
 /**
+ * 🔴 **線の通り方**(#530 段③c。user 裁定 2026-09-15)。
+ *
+ * ⚠ **「どこで曲がるか」(`PlaceBend`)とは別の軸である** ── 形を選べても
+ *   折れる位置を決められないと、線が何本もある図で**同じ幹を通せない**
+ *   (= 線が増えるほどばらける)。だから 2 つの key に分けてある。
+ */
+export type PlaceRoute = 'straight' | 'elbow' | 'curve';
+
+/** ⚠ 空振り防止 ── 一覧が空なら、綴りの検査は何も見ていない。 */
+export const PLACE_ROUTES: readonly PlaceRoute[] = ['straight', 'elbow', 'curve'];
+
+/**
+ * 曲がる所。`axis: 'v'` は**縦線 x = `at`** の上で、`'h'` は**横線 y = `at`** の上で折れる。
+ *
+ * 🔑 **同じ `bend=` を書いた線は、同じ幹を通る** ── これが「図の動線を単純にする」
+ *   の実体である(配線図のように揃う)。
+ */
+export interface PlaceBend {
+  readonly axis: 'v' | 'h';
+  readonly at: number;
+}
+
+/** ⚠ 接続点と同じく **3 つに分ける**(書いていない / 読めない / 読めた)。 */
+export type RouteRead =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'ok'; readonly route: PlaceRoute }
+  | { readonly kind: 'bad'; readonly raw: string };
+
+/** 同上。 */
+export type BendRead =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'ok'; readonly bend: PlaceBend }
+  | { readonly kind: 'bad'; readonly raw: string };
+
+/** `route=elbow` を読む。⚠ 読めない字は `bad`(黙って `straight` に倒さない)。 */
+export function parseRouteSpell(raw: string | null): RouteRead {
+  if (raw === null) return { kind: 'none' };
+  const v = raw.trim();
+  if (v === '') return { kind: 'none' };
+  const hit = PLACE_ROUTES.find((r) => r === v);
+  return hit === undefined ? { kind: 'bad', raw: v } : { kind: 'ok', route: hit };
+}
+
+const BEND_RE = /^([vh]):(\d{1,6})$/;
+
+/** `bend=v:320` を読む。⚠ 読めない字は `bad`。 */
+export function parseBendSpell(raw: string | null): BendRead {
+  if (raw === null) return { kind: 'none' };
+  const v = raw.trim();
+  if (v === '') return { kind: 'none' };
+  const m = BEND_RE.exec(v);
+  if (m === null) return { kind: 'bad', raw: v };
+  return { kind: 'ok', bend: { axis: m[1] as 'v' | 'h', at: Number(m[2]) } };
+}
+
+/**
+ * 🔑 **書かなかったときの曲がり所** ── 出る辺の向きで軸を決め、2 点の**真ん中**で折る。
+ *
+ * ⚠ 軸を「出る辺」から採る ── 右の辺から出た線を**横線**で折ると、
+ *   出た直後に板の中へ戻る形になる(辺から離れる向きに折らないと通れない)。
+ */
+function defaultBend(ln: PlaceLine): PlaceBend {
+  return ln.from.edge === 'left' || ln.from.edge === 'right'
+    ? { axis: 'v', at: (ln.x1 + ln.x2) / 2 }
+    : { axis: 'h', at: (ln.y1 + ln.y2) / 2 };
+}
+
+/** ⚠ 端数を丸める ── 同じ線を描き直すたびに `d` の字が揺れると、検査が読めない。 */
+const n2 = (v: number): string => String(Math.round(v * 100) / 100);
+
+/**
+ * 🔴 **引く形そのもの(SVG の `d`)**(#530 段③c)。
+ *
+ * 🔑 **曲線は「控えめ」にする**(user 裁定 2026-09-15)── 制御点を
+ *   **曲がる線の上に置く**ので、ふくらみが **2 点の間から外へ出ない**。
+ *   ⚠ 外向きに突き出す描き方(接続点の向きへ大きく出てから回り込む)は採らない ──
+ *   線が何本もあるとき、ふくらみ同士が重なってどれがどれか読めなくなる。
+ * 🔑 だから `elbow` と `curve` は**同じ曲がり所を共有する** ── 角を丸めるかどうかの
+ *   違いしかない(形を変えても幹は動かない)。
+ */
+export function placePathOf(
+  ln: PlaceLine,
+  route: PlaceRoute = 'straight',
+  bend: PlaceBend | null = null,
+): string {
+  const head = `M ${n2(ln.x1)} ${n2(ln.y1)}`;
+  if (route === 'straight') return `${head} L ${n2(ln.x2)} ${n2(ln.y2)}`;
+  const b = bend ?? defaultBend(ln);
+  if (b.axis === 'v') {
+    const x = n2(b.at);
+    return route === 'elbow'
+      ? `${head} L ${x} ${n2(ln.y1)} L ${x} ${n2(ln.y2)} L ${n2(ln.x2)} ${n2(ln.y2)}`
+      : `${head} C ${x} ${n2(ln.y1)} ${x} ${n2(ln.y2)} ${n2(ln.x2)} ${n2(ln.y2)}`;
+  }
+  const y = n2(b.at);
+  return route === 'elbow'
+    ? `${head} L ${n2(ln.x1)} ${y} L ${n2(ln.x2)} ${y} L ${n2(ln.x2)} ${n2(ln.y2)}`
+    : `${head} C ${n2(ln.x1)} ${y} ${n2(ln.x2)} ${y} ${n2(ln.x2)} ${n2(ln.y2)}`;
+}
+
+/**
  * 🔑 **`from=a:right@1/4` の「どの板か」だけを取り出す**(段③a)。
  *
  * ⚠ 空の名前は `null`(id を持たない板は指せない)。
