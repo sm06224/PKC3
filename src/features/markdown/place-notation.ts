@@ -34,6 +34,7 @@
 import type { BlockDirectiveAttrs } from './block-directive-attrs';
 import { parseBlockDirectiveOpen, parseTier1FormatOpen } from './block-directive-attrs';
 import { frontmatterLineCount } from './frontmatter';
+import { parseAnchorSpell } from './place-line';
 import { isPlaceShape, placeShapeOf, type PlaceShape } from './place-shape';
 import { blockSpanAt, scanContainers } from './source-blocks';
 
@@ -332,4 +333,113 @@ function setToken(attrs: string, key: PlaceKey, value: number | string): string 
   const re = new RegExp(`(^|\\s)${key}=(?:"[^"]*"|\\S*)`);
   if (re.test(attrs)) return attrs.replace(re, `$1${key}=${value}`);
   return attrs === '' ? `${key}=${value}` : `${attrs} ${key}=${value}`;
+}
+
+/**
+ * 🔴 **板どうしを線で繋ぐ**(#530 段③d)── 掴んで引いた結果を本文へ書く。
+ *
+ * ⚠ **本文が増える操作である** ── 名前の無い板には `#板1` が足される。
+ *   だから門は**移動と同じだけ**持つ(行番号 + 開き行の byte 一致 + 板の開き行 +
+ *   frontmatter の外 + fence の外)。1 つでも緩むと、**押していない板の行が書き換わる**。
+ */
+export interface PlaceConnect {
+  readonly from: PlaceTarget;
+  readonly to: PlaceTarget;
+  /**
+   * 手で選んだ接続点の綴り(`right` / `right@1/4`)。無ければ自動(書かない)。
+   * 🔴 **読めない綴りは書かずに断る** ── 読む側(`place-line.ts`)が受けない字を
+   *   書き込むと、**本文は変わったのに線は出ない**という、いちばん気づけない
+   *   壊れ方になる(#689 の「読む側と書く側で門の段数が違う」)。
+   */
+  readonly fromAnchor?: string | null;
+  readonly toAnchor?: string | null;
+}
+
+/** 付ける名前の頭。⚠ 日本語が使える(#530、user 裁定 2026-09-15)。 */
+const AUTO_NAME_STEM = '板';
+/** ⚠ 上限を置く ── 見つからなければ**作らずに断る**(当て推量の名前を書かない)。 */
+const AUTO_NAME_MAX = 999;
+
+/** 本文で既に使われている名前(板・図・その他の `:::` の塊すべて)。 */
+function takenNames(lines: readonly string[]): Set<string> {
+  const out = new Set<string>();
+  for (const l of lines) {
+    const named = parseBlockDirectiveOpen(l.trim());
+    if (named !== null) {
+      if (named.attrs.id !== undefined) out.add(named.attrs.id);
+      continue;
+    }
+    const tier1 = parseTier1FormatOpen(l);
+    if (tier1?.id !== undefined) out.add(tier1.id);
+  }
+  return out;
+}
+
+/** まだ使われていない `板N` を 1 つ。⚠ 無ければ `null`(名前を作らない)。 */
+function freeName(taken: ReadonlySet<string>): string | null {
+  for (let i = 1; i <= AUTO_NAME_MAX; i += 1) {
+    const n = `${AUTO_NAME_STEM}${i}`;
+    if (!taken.has(n)) return n;
+  }
+  return null;
+}
+
+/**
+ * その行の板に名前を付ける(既に在ればそれを返す)。⚠ `lines` をその場で書き換える。
+ * 🔑 Tier 1 の寛容形は `spliceTokens` と同じく**括弧つきへ整える**(書ける場所を作る)。
+ */
+function ensureName(lines: string[], line: number, taken: Set<string>): string | null {
+  const cur = lines[line];
+  if (cur === undefined) return null;
+  const attrs = placeOpenAttrs(cur);
+  if (attrs === null) return null;
+  if (attrs.id !== undefined) return attrs.id;
+  const name = freeName(taken);
+  if (name === null) return null;
+  const braced = spliceTokens(cur, {});
+  if (braced === null) return null;
+  const open = braced.indexOf('{');
+  const close = braced.lastIndexOf('}');
+  if (open === -1 || close <= open) return null;
+  const inner = braced.slice(open + 1, close);
+  lines[line] = `${braced.slice(0, open + 1)}#${name}${inner === '' ? '' : ' '}${inner}`
+    + braced.slice(close);
+  taken.add(name);
+  return name;
+}
+
+/** `a` / `a:right@1/4`。⚠ 読めない綴りは `null`(呼び側が断る)。 */
+function connectSpell(id: string, anchor: string | null | undefined): string | null {
+  if (anchor === null || anchor === undefined || anchor === '') return id;
+  return parseAnchorSpell(anchor) === null ? null : `${id}:${anchor}`;
+}
+
+/**
+ * 🔴 2 枚の板を線で繋いだ本文を返す(名前が無ければ付ける)。断るときは `null`。
+ *
+ * ⚠ **同じ板どうしは繋がない** ── 引く物が無いので、本文だけ増えて線は出ない。
+ * ⚠ 線の塊は**本文のいちばん後ろ**へ足す(`addPlace` と同じ作法)── 板の塊の
+ *   途中へ差し込むと、後ろの板の行番号が全部ずれる。
+ */
+export function connectPlaces(body: string, c: PlaceConnect): string | null {
+  if (c.from.line === c.to.line) return null;
+  const a = placeLinesAt(body, c.from);
+  if (a === null) return null;
+  // ⚠ 2 枚目も**同じ門**を通す(片方だけ検めると、もう片方は別の塊でも書ける)
+  if (placeLinesAt(body, c.to) === null) return null;
+  const lines = a.lines;
+  const taken = takenNames(lines);
+  const from = ensureName(lines, c.from.line, taken);
+  const to = ensureName(lines, c.to.line, taken);
+  if (from === null || to === null) return null;
+  const fromSpell = connectSpell(from, c.fromAnchor);
+  const toSpell = connectSpell(to, c.toAnchor);
+  if (fromSpell === null || toSpell === null) return null;
+  const next = lines.join('\n');
+  // ⚠ 閉じていない塊の中へ足さない(`addPlace` と同じ門)
+  const spans = scanContainers(next);
+  const last = spans[spans.length - 1];
+  if (last !== undefined && last.open) return null;
+  const block = `:::format{.pkc-line from=${fromSpell} to=${toSpell}}\n:::\n`;
+  return next + (next.endsWith('\n') ? '\n' : '\n\n') + block;
 }

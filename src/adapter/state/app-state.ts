@@ -1724,6 +1724,18 @@ export type UserAction =
    * ⚠ `ADD_PLACE` だけ行番号を持たない(足す先は常に末尾)。
    */
   | { type: 'RESIZE_PLACE'; lid: string; line: number; w: number; h: number }
+  /**
+   * 🔴 **板を線で繋ぐ**(#530 段③d)── 掴んで引いて離した結果。
+   * ⚠ 接続点の綴りは `null` でよい(自動)。読めない字は `place-notation.ts` が断る。
+   */
+  | {
+      type: 'CONNECT_PLACE';
+      lid: string;
+      line: number;
+      toLine: number;
+      fromAnchor: string | null;
+      toAnchor: string | null;
+    }
   | { type: 'REMOVE_PLACE'; lid: string; line: number }
   | { type: 'ADD_PLACE'; lid: string; x: number; y: number }
   /** 板を前へ出す(#676 段②)── 他の板の z= の最大 + 1 を書く。同じ門。 */
@@ -5291,6 +5303,25 @@ function reduceCore(
         const openLine = placeOpenLineOf(shown, action.line);
         if (openLine === null) return null;
         return { kind: 'place-size', line: action.line, openLine, w: action.w, h: action.h };
+      });
+    /**
+     * 🔴 **板を線で繋ぐ**(#530 段③d)── ⚠ **本文が増える**操作である
+     *   (名前の無い板には `#板1` が足される)ので、門は動かすときと同じだけ通す。
+     * 🔑 **2 枚とも**開き行を捕える ── 片方だけだと、もう片方が別の塊でも書ける。
+     */
+    case 'CONNECT_PLACE':
+      return bodyRewriteGate(state, action.lid, '編集を終了してから、板を線で繋いでください', (shown) => {
+        if (shown === null) return null; // 画面に無い本文の行番号は信じない
+        const from = placeOpenLineOf(shown, action.line);
+        const to = placeOpenLineOf(shown, action.toLine);
+        if (from === null || to === null) return null;
+        return {
+          kind: 'place-connect',
+          from: { line: action.line, openLine: from },
+          to: { line: action.toLine, openLine: to },
+          fromAnchor: action.fromAnchor,
+          toAnchor: action.toAnchor,
+        };
       });
     case 'REMOVE_PLACE':
       return bodyRewriteGate(state, action.lid, '編集を終了してから、板を消してください', (shown) => {
