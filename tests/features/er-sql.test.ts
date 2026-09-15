@@ -62,6 +62,14 @@ describe('こちらが組んだ形かどうかを読む', () => {
     for (const bad of [
       'update t set a = 1',
       'select 1',
+      /**
+       * 🔴 **先頭が `select` かどうかを、本当に見ているか**(変異試験 S2 が SURVIVED で教えた)。
+       * ⚠ ほかの 7 つは**別の門**(`from` が無い / 列が空 / 閉じていない引用符 / `join` の
+       *   相手や `on` が無い)で先に落ちるので、**先頭語の判定を丸ごと外しても緑**だった
+       *   ── 守っているつもりの物と、実際に守られている物が違う形である(CLAUDE.md §1)。
+       * 🔑 だから「**先頭だけが違って、後ろは正しい `… from …` の形**」を 1 つ置く。
+       */
+      'foo bar from t',
       'select * from t junk 2',
       'select * from t join u',
       'select * from t join u on',

@@ -215,7 +215,7 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
      * 🔑 **`sql-export-menu` は `N`**(`sql-history-menu` と同じ ── `target` は
      *   **どこに出すか**を測るためだけに読む)。
      */
-    expect(counts()).toEqual({ P1: 54, P2: 33, E: 24, V: 10, N: 134 });
+    expect(counts()).toEqual({ P1: 57, P2: 33, E: 24, V: 10, N: 135 });
   });
 
   it('🔴 名指しの錨 ── 件数が同じまま入れ替わっても落ちる', () => {
