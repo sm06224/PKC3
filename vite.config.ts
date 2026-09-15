@@ -7,6 +7,7 @@ import { bodyCssPlugin } from './build/body-css-plugin.ts';
 import { duckdbAssetsPlugin } from './build/duckdb-assets-plugin.ts';
 import { katexWoff2Plugin } from './build/katex-woff2-plugin.ts';
 import { manualPagePlugin } from './build/manual-page-plugin.ts';
+import { ossNoticesPlugin } from './build/oss-notices-plugin.ts';
 import { COI_HEADERS as SHARED_COI_HEADERS } from './src/adapter/platform/sw/coi-headers.ts';
 
 /**
@@ -50,9 +51,9 @@ export default defineConfig({
    */
   define: { __PKC_BUILT_AT__: JSON.stringify(Date.now()) },
   base: './',
-  // ⚠ bodyCssPlugin は `apply` を付けない ── dev / build / **vitest** の 3 つで
-  //    同じものを配る必要がある(test だけ virtual module が解決できないと、
-  //    書き出し HTML の検査が丸ごと動かない)
+  // ⚠ bodyCssPlugin / ossNoticesPlugin は `apply` を付けない ── dev / build /
+  //    **vitest** の 3 つで同じものを配る必要がある(test だけ virtual module が
+  //    解決できないと、`help.ts` の import が丸ごと落ちる)
   // 🔴 manualPagePlugin は **swPlugin より前**(#645 段②)── `generateBundle` で emit した
   //    `manual.html` を swPlugin の precache 一覧が拾うには、先に bundle に載っている必要がある。
   //    順番は `tests/build/manual-page-plugin.test.ts` がこの字面で pin する
@@ -60,6 +61,7 @@ export default defineConfig({
     manualPagePlugin(),
     swPlugin(buildIdFor),
     bodyCssPlugin(),
+    ossNoticesPlugin(),
     katexWoff2Plugin(),
     duckdbAssetsPlugin(),
   ],

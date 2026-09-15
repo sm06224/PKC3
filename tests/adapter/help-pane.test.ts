@@ -326,6 +326,10 @@ describe('ヘルプの面', () => {
     expect(labels, 'ヘルプの面の並びが変わった(#719 の裁定と食い違う)').toEqual([
       'H3:マニュアル',
       'help-version',
+      // 🔴 #948:開発者名・ソース・使っている OSS は版のすぐ下(沈めない)
+      'help-developer',
+      'help-source',
+      'help-oss',
       'help-manual-open',
       'help-find-bar',
       'settings-note:目次 ── ',

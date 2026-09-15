@@ -4,6 +4,12 @@
   "private": true,
   "type": "module",
   "description": "PKC3 — portable single-HTML knowledge container, PKC-Markdown native, wasm-sqlite storage",
+  "license": "MIT",
+  "author": "sm06224",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sm06224/PKC3"
+  },
   "engines": {
     "node": ">=24"
   },

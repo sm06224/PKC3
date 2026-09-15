@@ -9,12 +9,15 @@ import { defineConfig } from 'vite';
 import { bodyCssPlugin } from './body-css-plugin.ts';
 import { manualPagePlugin } from './manual-page-plugin.ts';
 import { katexWoff2Plugin } from './katex-woff2-plugin.ts';
+import { ossNoticesPlugin } from './oss-notices-plugin.ts';
 
 export default defineConfig({
   base: './',
   // 🔴 `manual.html` もここで焼く(#648 段③)── `fold.mjs` が 1 枚の中へ焼き込む。
   //    ⚠ 外すと fold が「畳む前にマニュアルの page が焼かれていない」で止まる(黙って落ちない)
-  plugins: [manualPagePlugin(), bodyCssPlugin(), katexWoff2Plugin()],
+  // 🔴 ossNoticesPlugin も要る(#948)── `help.ts` が `virtual:pkc-oss-notices` を
+  //    import するので、無いと `build:portable` が import 解決で落ちる。
+  plugins: [manualPagePlugin(), bodyCssPlugin(), katexWoff2Plugin(), ossNoticesPlugin()],
   optimizeDeps: { exclude: ['@sqlite.org/sqlite-wasm'] },
   resolve: {
     alias: {
