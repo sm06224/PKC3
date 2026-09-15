@@ -61,7 +61,9 @@ describe('🔴 DuckDB は常駐しない(#682)', () => {
   });
 
   it('🔑 起こしている間に来た分を落とさない(open は 1 回だけ)', async () => {
-    let settle: ((h: DuckDbHandle) => void) | null = null;
+    // ⚠ `| null` を持たせない ── TS はコールバックの中の代入を追わないので、
+    //   後で呼ぶとき `never` へ狭まって「呼べない」になる。
+    let settle!: (h: DuckDbHandle) => void;
     const h = handle();
     const open = vi.fn(
       () =>
@@ -74,7 +76,7 @@ describe('🔴 DuckDB は常駐しない(#682)', () => {
     const b = lease.run('select 2');
     const c = lease.run('select 3');
     expect(open, '起こしている間にもう一度起こしている').toHaveBeenCalledTimes(1);
-    settle?.(h);
+    settle(h);
     await Promise.all([a, b, c]);
     // ⚠ 3 本とも届いている(溜めた分を捨てていない)
     expect(h.asked).toEqual(['select 1', 'select 2', 'select 3']);
@@ -95,7 +97,7 @@ describe('🔴 DuckDB は常駐しない(#682)', () => {
   });
 
   it('🔴 飛んでいる問い合わせがある間は畳まない', async () => {
-    let settle: ((v: unknown) => void) | null = null;
+    let settle!: (v: unknown) => void;
     const h: DuckDbHandle & { terminated: number } = {
       terminated: 0,
       query: () =>
@@ -114,7 +116,7 @@ describe('🔴 DuckDB は常駐しない(#682)', () => {
     await Promise.resolve();
     await lease.release();
     expect(h.terminated, '飛んでいる最中に畳んだ ── 答えが消える').toBe(0);
-    settle?.({ rows: 1 });
+    settle({ rows: 1 });
     await flying;
     // ⚠ 返ってきてから初めて時計が張られる
     expect(t.armed).toBe(1);
