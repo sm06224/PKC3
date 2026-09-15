@@ -29,6 +29,25 @@
  *
  * ④ を掛けた器へ 2 件目は差し込めない(file を読めないので)。
  * 🔑 `DuckDbLease` が**鍵が変わったら畳んで起こし直す** ── 使い捨ての規律と同じ向き。
+ *
+ * ## 🔴 入っていれば端末の一式、無ければ同一オリジンの fetch(#682 段③b)
+ *
+ * `resolveUrls()` は**呼ばれるたび**に `deps.lendInstalled` を確かめる ──
+ * 在れば端末の IDB(`DuckDbPackStore`)が貸す **blob: URL** を使い、
+ * `null`(未設置)なら今までどおり同一オリジンへ `fetch` する。
+ *
+ * ⚠ **blob: URL は `this.urls` へ控えない**(同一オリジンの URL とは寿命が違う)。
+ * 理由は 3 つ:
+ * ① blob: URL は貸した側が `dispose()`(`URL.revokeObjectURL`)すると死ぬので、
+ *   2 度目の `open()` で使い回せる保証が無い
+ * ② 不可侵指示「ObjectURL は表示の寿命終端で revoke」に沿うなら、**寿命は
+ *   1 回の `open()` の間だけ**にするのが最短(器を畳んでも握ったままにしない)
+ * ③ 借り直すコスト(IDB の `get` 1 回)は、器を起こす操作(実測 1.28 秒)に
+ *   比べれば無視できる
+ * 🔑 だから**器を起こすたびに借り直す**。`dispose()` は `deps.open(urls)` が
+ * **終わった直後**(`Worker` の生成と wasm の fetch/instantiate が済んだ後)に
+ * 呼ぶ ── この file 冒頭の実測表のとおり、その後は blob: URL が生きている
+ * 必要が無い。
  */
 import { CSV_ATTACHMENT_TABLE_NAME, looksLikeCsvAttachmentName } from '@features/query/csv-attachment';
 import { CSV_SOURCE_COLUMNS } from '@features/query/csv-tables';
@@ -57,7 +76,7 @@ export const DUCKDB_MAX_ROWS = 200_000;
 export interface DuckDbRunnerDeps {
   /** 同一オリジンの字を取ってくる(目録)。 */
   fetchText(url: string): Promise<string>;
-  /** 実体を起こす。⚠ 渡す URL は**こちらが組んだ同一オリジンの物だけ**。 */
+  /** 実体を起こす。⚠ 渡す URL は**こちらが組んだ同一オリジンの物か、端末の一式が貸す blob: URL**。 */
   open(input: { wasmUrl: string; workerUrl: string }): Promise<DuckDbHandle>;
   /** 基点。既定は `document.baseURI`。 */
   baseUrl?: string;
@@ -74,6 +93,15 @@ export interface DuckDbRunnerDeps {
    */
   packBase?: string;
   idleMs?: number;
+  /**
+   * 🔴 **端末に入っている一式を貸す口**(#682 段③b。任意 ── 省けば今までどおり
+   *   同一オリジンへ fetch する)。
+   * ⚠ **呼ぶたびに借り直す**(この file 冒頭の理由)── 返す `dispose` は
+   *   `deps.open()` が終わった直後に必ず呼ぶので、呼び側は握り続けなくてよい。
+   * 🔑 `null` を返せば「入っていない」= 同一オリジン fetch 経路へ倒す
+   *   (`DuckDbPackStore.readMeta()` が `null` を返す形と揃えてある)。
+   */
+  lendInstalled?: () => Promise<{ wasmUrl: string; workerUrl: string; dispose: () => void } | null>;
 }
 
 export interface DuckDbRunInput {
@@ -142,7 +170,21 @@ export class DuckDbRunner {
 
   constructor(private readonly deps: DuckDbRunnerDeps) {
     this.lease = new DuckDbLease({
-      open: async () => this.deps.open(await this.resolveUrls()),
+      open: async () => {
+        const { urls, dispose } = await this.resolveUrls();
+        /**
+         * ⚠ **`dispose` は `deps.open()` が終わってから**呼ぶ ── 早く呼ぶと、
+         *   端末の一式(blob: URL)を貸してもらった回で `Worker` の生成や
+         *   wasm の instantiate がまだ終わっていない可能性がある(この file
+         *   冒頭の「入っていれば端末の一式」節の理由③)。失敗しても畳んで返す
+         *   (借りた URL を握ったままにしない)。
+         */
+        try {
+          return await this.deps.open(urls);
+        } finally {
+          dispose();
+        }
+      },
       ...(deps.idleMs === undefined ? {} : { idleMs: deps.idleMs }),
     });
   }
@@ -196,11 +238,36 @@ export class DuckDbRunner {
   }
 
   /**
-   * 目録を読んで、実体の在り処を決める。
+   * 実体の在り処を決める。**呼ばれるたびに**端末の一式(`lendInstalled`)を
+   * 先に確かめ、無ければ同一オリジンの目録(`resolveNetworkUrls`)へ倒す。
+   *
+   * 🔑 `lendInstalled` の有無は**毎回**問う ── 前回は未設置でも、その後 user が
+   *   設置していれば次の `open()` からは端末の一式へ切り替わる(この runner は
+   *   長生きするので、途中で状態が変わりうる)。
+   * ⚠ 端末側には `this.urls` のような控えを**持たせない** ── 理由はこの file
+   *   冒頭の節。
+   */
+  private async resolveUrls(): Promise<{
+    urls: { wasmUrl: string; workerUrl: string };
+    dispose: () => void;
+  }> {
+    const lend = this.deps.lendInstalled;
+    if (lend !== undefined) {
+      const lent = await lend();
+      if (lent !== null) {
+        return { urls: { wasmUrl: lent.wasmUrl, workerUrl: lent.workerUrl }, dispose: lent.dispose };
+      }
+    }
+    return { urls: await this.resolveNetworkUrls(), dispose: () => undefined };
+  }
+
+  /**
+   * 目録を読んで、同一オリジンの実体の在り処を決める。1 度読めば替わらないので
+   * `this.urls` へ控える(端末の一式とは寿命が違う ── 上の `resolveUrls` を見よ)。
    * ⚠ **信じずに検める**(`readDuckDbPack`)── 壊れた物を渡すと、上流は
    *   wasm の解釈の所で分かりにくく落ちる(user には「開かない」としか見えない)。
    */
-  private async resolveUrls(): Promise<{ wasmUrl: string; workerUrl: string }> {
+  private async resolveNetworkUrls(): Promise<{ wasmUrl: string; workerUrl: string }> {
     const known = this.urls;
     if (known !== null) return known;
     /**

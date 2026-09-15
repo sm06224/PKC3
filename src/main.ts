@@ -18,6 +18,7 @@ import { bindEditLockRelease } from '@adapter/state/edit-lock-release';
 import { connectStoreEffects, type StoreEffects } from '@adapter/state/store-effects';
 import { DuckDbRunner } from '@adapter/platform/duckdb/duckdb-runner';
 import { openDuckDb } from '@adapter/platform/duckdb/duckdb-open';
+import { DuckDbPackStore } from '@adapter/platform/duckdb/duckdb-pack-store';
 import { connectOpenedEffects } from '@adapter/platform/opened-effects';
 import { tileSelectsEntry } from '@features/launcher/tiles';
 import { appEditorMode } from '@adapter/ui/render/editor-mode';
@@ -3610,7 +3611,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * 🔑 しばらく使わなければ自分で畳んで記憶を返す(`DuckDbLease`)。
    * ⚠ **判断は渡さない** ── 目録を検めるのも、写してから塞ぐ順番も、畳む規律も
    *   `duckdb-runner.ts` が持つ(この file はどの test からも実行されない ── §2)。
+   * ⚠ **一式を端末へ置く導線(設定画面)は今回の範囲外**(#682 段③b)── ここで
+   *   作る `DuckDbPackStore` は「もし入っていれば読む」だけの受け口であり、
+   *   まだ何も入れる口を配っていないので、いまは常に同一オリジンへ `fetch` する
+   *   経路のまま変わらない。判断(揃っているかの検め・貸す/貸さない)は
+   *   `duckdb-pack-store.ts` の `lendInstalledPack()` に寄せてある。
    */
+  const duckDbPackStore = new DuckDbPackStore();
   const duckDbRunner = new DuckDbRunner({
     fetchText: async (url) => {
       const res = await fetch(url);
@@ -3618,6 +3625,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       return res.text();
     },
     open: (urls) => openDuckDb(urls),
+    lendInstalled: () => duckDbPackStore.lendInstalledPack(),
   });
   storeEffects = connectStoreEffects(dispatcher, createStorePort(client, cid), {
     // #148 組み込みタイル ── 一式が入っている端末にだけ Office のタイルを出す。
