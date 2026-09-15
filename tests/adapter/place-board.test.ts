@@ -84,9 +84,18 @@ describe('板どうしを繋ぐ線(#530 段③a)', () => {
     applyPlaceLayout(host, () => null, 0);
     return host;
   }
-  const drawn = (host: HTMLElement): SVGLineElement[] => [
-    ...host.querySelectorAll<SVGLineElement>('[data-pkc-field="place-lines"] line'),
+  const drawn = (host: HTMLElement): SVGPathElement[] => [
+    ...host.querySelectorAll<SVGPathElement>('[data-pkc-field="place-lines"] path'),
   ];
+  /**
+   * 🔑 **端点は `d` の中から読む**(#530 段③c)── 器を `<line>` から `<path>` へ
+   *   替えたので、`x1` / `y1` という属性はもう無い。
+   * ⚠ 別の属性へ写して持たせない ── 2 か所に持つと、片方だけ腐っても緑になる。
+   */
+  const ends = (l: SVGPathElement): number[] =>
+    (l.getAttribute('d') ?? '').split(/[^\d.-]+/).filter((t) => t !== '').map(Number);
+  const start = (l: SVGPathElement): number[] => ends(l).slice(0, 2);
+  const finish = (l: SVGPathElement): number[] => ends(l).slice(-2);
 
   it('🔴 from= と to= の板の間に、いちばん近い辺どうしで線が引かれる', () => {
     const host = board(LINES);
@@ -96,14 +105,11 @@ describe('板どうしを繋ぐ線(#530 段③a)', () => {
     // 🔑 横に並べたので「右 → 左」── 中心へ刺すと板の上を横切る
     expect(l.getAttribute('data-pkc-line-from')).toBe('right');
     expect(l.getAttribute('data-pkc-line-to')).toBe('left');
-    expect([l.getAttribute('x1'), l.getAttribute('y1')], '出る所が右辺の真ん中でない').toEqual([
-      '100',
-      '30',
-    ]);
-    expect([l.getAttribute('x2'), l.getAttribute('y2')], '入る所が左辺の真ん中でない').toEqual([
-      '300',
-      '30',
-    ]);
+    expect(start(l), '出る所が右辺の真ん中でない').toEqual([100, 30]);
+    expect(finish(l), '入る所が左辺の真ん中でない').toEqual([300, 30]);
+    // 🔑 省いたら**まっすぐ**(#530 段③c)── 書かなくても必ず届く形である
+    expect(l.getAttribute('data-pkc-line-route')).toBe('straight');
+    expect(l.getAttribute('d')).toBe('M 100 30 L 300 30');
   });
 
   /**
@@ -150,7 +156,7 @@ describe('板どうしを繋ぐ線(#530 段③a)', () => {
     expect(l.getAttribute('data-pkc-line-from'), '書いた辺から出ていない').toBe('top');
     expect(l.getAttribute('data-pkc-line-to'), '書いた辺へ入っていない').toBe('bottom');
     // 🔑 座標も見る(上辺の真ん中 = x 50 / y 0)
-    expect([l.getAttribute('x1'), l.getAttribute('y1')]).toEqual(['50', '0']);
+    expect(start(l)).toEqual([50, 0]);
     // ⚠ 対照群 ── 書かなければ右 → 左(上の it)。書いたことで変わっている
   });
 
@@ -163,8 +169,7 @@ describe('板どうしを繋ぐ線(#530 段③a)', () => {
     const l = drawn(board(withAnchor))[0]!;
     expect(l.getAttribute('data-pkc-line-from'), '分数が効いていない').toBe('top@1/4');
     // 板 a は x=0 幅 100 ── 上辺の 1/4 は x=25
-    expect([l.getAttribute('x1'), l.getAttribute('y1')], '1/4 の所から出ていない')
-      .toEqual(['25', '0']);
+    expect(start(l), '1/4 の所から出ていない').toEqual([25, 0]);
   });
 
   /**
@@ -181,6 +186,54 @@ describe('板どうしを繋ぐ線(#530 段③a)', () => {
     // 🔑 空振り防止 ── 読める綴りなら断りは出ない
     document.body.innerHTML = '';
     const ok = board(LINES.replace('data-pkc-from="a"', 'data-pkc-from="a:right@1/4"'));
+    expect(ok.querySelector('[data-pkc-field="place-line-note"]'), '読める綴りを断っている')
+      .toBeNull();
+  });
+
+  /**
+   * 🔴 **線の通り方と、曲がる所を書ける**(#530 段③c、user 裁定 2026-09-15)。
+   * 🔑 **同じ `bend=` を書いた線は同じ幹を通る** ── それが「図の動線を単純にする」
+   *   の実体なので、**曲がる所が効いていること**を値で見る。
+   */
+  it('🔴 route= と bend= が効く(#530 段③c)', () => {
+    const curved = LINES.replace(
+      'data-pkc-to="b"',
+      'data-pkc-to="b" data-pkc-route="curve" data-pkc-bend="v:260"',
+    );
+    const l = drawn(board(curved))[0]!;
+    expect(l.getAttribute('data-pkc-line-route'), '通り方が焼かれていない').toBe('curve');
+    expect(l.getAttribute('d'), '曲がる所が効いていない').toBe('M 100 30 C 260 30 260 30 300 30');
+    // ⚠ 対照群 ── 書かなければまっすぐ(上の it)。書いたことで変わっている
+    document.body.innerHTML = '';
+    const elbow = LINES.replace('data-pkc-to="b"', 'data-pkc-to="b" data-pkc-route="elbow"');
+    expect(drawn(board(elbow))[0]!.getAttribute('d'), '直角が効いていない')
+      .toBe('M 100 30 L 200 30 L 200 30 L 300 30');
+  });
+
+  /**
+   * 🔴 **読めない綴りは、黙ってまっすぐに倒さない**(#530 段③c)。
+   * ⚠ 倒すと**線は出る**ので、打ち間違いに気づく手がかりが 1 つも残らない
+   *   ── 接続点(`a:righ`)とまったく同じ型の実害である。
+   */
+  it('🔴 読めない route= / bend= は、理由を言って線を引かない', () => {
+    for (const [attr, bad, want] of [
+      ['data-pkc-route', 'elbo', '線の通り方に「elbo」は使えません'],
+      ['data-pkc-bend', '320', '曲がる所に「320」は使えません'],
+    ] as const) {
+      document.body.innerHTML = '';
+      const host = board(LINES.replace('data-pkc-to="b"', `data-pkc-to="b" ${attr}="${bad}"`));
+      expect(drawn(host).length, `読めない ${attr} のまま線を引いている`).toBe(0);
+      expect(
+        host.querySelector('[data-pkc-field="place-line-note"]')?.textContent ?? '',
+        `${attr} の断りが出ていない`,
+      ).toContain(want);
+    }
+    // 🔑 空振り防止 ── 読める綴りなら断りは出ない
+    document.body.innerHTML = '';
+    const ok = board(LINES.replace(
+      'data-pkc-to="b"',
+      'data-pkc-to="b" data-pkc-route="elbow" data-pkc-bend="h:20"',
+    ));
     expect(ok.querySelector('[data-pkc-field="place-line-note"]'), '読める綴りを断っている')
       .toBeNull();
   });
@@ -208,7 +261,7 @@ describe('板どうしを繋ぐ線(#530 段③a)', () => {
      * 🔑 3 本が**同じ組**なら、板の高さ 60 の `1/4 / 2/4 / 3/4` = **15 / 30 / 45** に並ぶ。
      *   ⚠ 値そのものを書く ── 「違う」だけでは、違う散り方と見分けられない。
      */
-    const ys = ls.map((l) => Number(l.getAttribute('y1')));
+    const ys = ls.map((l) => start(l)[1]!);
     expect([...ys].sort((a, b) => a - b), `3 本が同じ組として散っていない: ${ys.join(',')}`)
       .toEqual([15, 30, 45]);
     /**
@@ -216,7 +269,7 @@ describe('板どうしを繋ぐ線(#530 段③a)', () => {
      * ⚠ 出る辺の名前で数えてはいけない ── 3 本目は `b→a` と逆向きに書いたので
      *   出るのは **b の左辺**である(向きが違うだけで、通る道は同じ)。
      */
-    const edge = (l: SVGLineElement, k: 'from' | 'to'): string =>
+    const edge = (l: SVGPathElement, k: 'from' | 'to'): string =>
       (l.getAttribute(`data-pkc-line-${k}`) ?? '').split('@')[0]!;
     for (const l of ls) {
       expect(new Set([edge(l, 'from'), edge(l, 'to')]), '右辺と左辺の間を通っていない')
@@ -227,7 +280,7 @@ describe('板どうしを繋ぐ線(#530 段③a)', () => {
   it('🔴 1 本しか無いときは、これまでどおり辺の真ん中(位置が動かない)', () => {
     const l = drawn(board(LINES))[0]!;
     expect(l.getAttribute('data-pkc-line-from'), '1 本なのに分数が焼かれている').toBe('right');
-    expect([l.getAttribute('x1'), l.getAttribute('y1')]).toEqual(['100', '30']);
+    expect(start(l)).toEqual([100, 30]);
   });
 
   /**
@@ -355,7 +408,7 @@ describe('板どうしを繋ぐ線(#530 段③a)', () => {
       '日本語の名前で断りが出ている',
     ).toBeNull();
     expect(
-      host.querySelectorAll('[data-pkc-field="place-lines"] line').length,
+      host.querySelectorAll('[data-pkc-field="place-lines"] path').length,
       '日本語の名前で線が引けていない',
     ).toBe(1);
   });

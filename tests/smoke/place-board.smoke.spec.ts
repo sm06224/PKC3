@@ -11,7 +11,7 @@
  * 🔑 観測点は **data-pkc-x(本文の記法から描き直された値)** ── style だけ見ると
  *   「見た目は動いたが本文に書けていない」を素通りする(#513 の「成功と同じ見た目」の型)。
  */
-import { test, expect } from '@playwright/test';
+import { test, expect, type Locator } from '@playwright/test';
 import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
 
 test.beforeEach(async ({ page }) => {
@@ -71,7 +71,10 @@ const BOARD = [
   ':::format{.pkc-line from=今日 to=明日}',
   ':::',
   '',
-  ':::format{.pkc-line from=今日:top@1/4 to=明日}',
+  // 🔑 3 本目は**曲がる線**にする(#530 段③c)── 実ブラウザでしか見られないのは
+  //    `fill` である(`<path>` の既定の塗りは黒。まっすぐな線は面積 0 なので
+  //    **見た目が 1px も変わらず**、曲がった線でだけ真っ黒な塊になる)。
+  ':::format{.pkc-line from=今日:top@1/4 to=明日 route=curve bend=v:420}',
   ':::',
   /** ⚠ 使えない名前は今までどおり断る ── 広げたのは**字の種類だけ**である。 */
   '',
@@ -119,7 +122,7 @@ test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き
    *   **測って引く枝**はこの 1 行でしか走らない。
    * 🔑 **新しい起動は増やさない**(#820 の規律)── この筋書きの続きで確かめる。
    */
-  const lines = page.locator('[data-pkc-field="place-lines"] line');
+  const lines = page.locator('[data-pkc-field="place-lines"] path');
   /**
    * ⚠ **4 本である** ── ASCII の `p1 → p2` と、日本語の `今日 → 明日` **3 本**
    *   (#530 段③b)。🔑 最後の 1 本(`from=a.b`)は**引けてはいけない** ──
@@ -134,8 +137,9 @@ test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き
    * 🔑 見るのは**出口の座標そのもの**である(辺の名前ではない)── 同じ辺の
    *   上で散らすので、辺の名前を数えると 3 本が同じに見えてしまう。
    */
+  // 🔑 端点は `d` の頭(`M x y`)から読む ── 器が `<path>` なので `x1` はもう無い
   const starts = await lines.evaluateAll((els) =>
-    els.map((el) => `${el.getAttribute('x1')},${el.getAttribute('y1')}`),
+    els.map((el) => (el.getAttribute('d') ?? '').split(' ').slice(0, 3).join(' ')),
   );
   expect(new Set(starts).size, `線が同じ所から出ている(重なって消える): ${starts.join(' / ')}`)
     .toBe(4);
@@ -144,20 +148,44 @@ test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き
    * ⚠ ここは実寸に当たる ── `w=200` と書いてあっても、実ブラウザでは
    *   枠線や余白で測った幅が違いうるので、**測った箱から出す**。
    */
-  const pinned = page.locator('[data-pkc-field="place-lines"] line[data-pkc-line-from="top@1/4"]');
+  const pinned = page.locator(
+    '[data-pkc-field="place-lines"] path[data-pkc-line-from="top@1/4"]',
+  );
   await expect(pinned, '手で書いた接続点(top@1/4)が焼かれていない').toHaveCount(1);
   const svgBox = (await page.locator('[data-pkc-field="place-lines"]').boundingBox())!;
   const kyouBox = (await page.locator('[data-pkc-region="detail"] [id="今日"]').boundingBox())!;
-  const pinnedX1 = Number(await pinned.getAttribute('x1'));
+  const pinnedD = (await pinned.getAttribute('d')) ?? '';
+  const pinnedX1 = Number(pinnedD.split(' ')[1]);
   expect(
     Math.abs(pinnedX1 - (kyouBox.x - svgBox.x + kyouBox.width / 4)),
     `上辺の 1/4 から出ていない(x1=${pinnedX1})`,
   ).toBeLessThan(2);
+  /**
+   * 🔴 **曲がる線が「塗り潰された塊」になっていない**(#530 段③c)。
+   * ⚠ ここは**実ブラウザでしか見られない** ── `<path>` の既定の塗りは黒なので、
+   *   規則が 1 行外れると**曲がった線だけ**真っ黒になる。まっすぐな線は面積 0 で
+   *   見た目が 1px も変わらないため、この 1 本が無いと誰も気づけない。
+   * 🔑 だから 3 本目を曲がる線にしてある(`route=curve`)。
+   */
+  expect(pinnedD, '曲がる線になっていない(前提が崩れている)').toContain(' C ');
+  expect(
+    await pinned.evaluate((el) => getComputedStyle(el).fill),
+    '曲がる線が塗り潰されている(fill: none が効いていない)',
+  ).toBe('none');
+  /**
+   * ⚠ **器を `<path>` へ替えたので `x1` はもう無い**(#530 段③c)── `d` の頭から読む。
+   * 🔴 1 稿目はここと下の `.poll` の **2 か所で `x1` を読み残していた** ──
+   *   `getAttribute('x1')` は `null` を返し、`Number(null)` は **0** になるので、
+   *   下の「線が付いてくる」は**永久に 0 のまま**になる(CLAUDE.md §10「器を替えると、
+   *   読み取れる値が変わる」)。⚠ unit も型検査も 1 件も鳴らない ── 対象範囲の
+   *   実ブラウザ smoke だけが拾った。
+   * 🔑 読み方は 1 か所に寄せる(`startOf`)── 2 つ目を足す人が同じ罠を踏まない。
+   */
+  const startOf = async (l: Locator): Promise<string> =>
+    ((await l.getAttribute('d')) ?? '').split(' ').slice(0, 3).join(' ');
   const line = lines.first();
-  const x1Before = Number(await line.getAttribute('x1'));
-  expect(Number.isFinite(x1Before) && x1Before > 0, `線の座標が読めない(x1=${x1Before})`).toBe(
-    true,
-  );
+  const startBefore = await startOf(line);
+  expect(startBefore, `線の座標が読めない(d の頭=${startBefore})`).toMatch(/^M \d/);
   /**
    * 🔴 **日本語の名前が、そのまま `id` として実ブラウザの DOM に載る**(#530)。
    *
@@ -250,11 +278,11 @@ test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き
 
   // 🔴 **線は板に付いてくる**(座標を持たず、毎回引き直している証拠)
   await expect
-    .poll(async () => Number(await line.getAttribute('x1')), {
+    .poll(async () => startOf(line), {
       message: '板を動かしたのに線が置き去りになっている',
       timeout: 5000,
     })
-    .not.toBe(x1Before);
+    .not.toBe(startBefore);
 
   /**
    * 🔴 **形を変えても、掴む口は押せる**(#530 案 A。user 裁定 2026-09-14)。

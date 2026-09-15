@@ -18,9 +18,11 @@ import type { PlaceShape } from '../markdown/place-shape';
 import {
   anchorOf,
   parseAnchorSpell,
+  parseRouteSpell,
   placeLineOf,
   type PlaceAnchor,
   type PlaceEdge,
+  type PlaceRoute,
 } from '../markdown/place-line';
 import type { DocxBlock, DocxCell, DocxRun } from './docx';
 import { xmlEscape } from './docx';
@@ -133,6 +135,18 @@ export interface BoardLink {
    */
   readonly fromAnchor: string | null;
   readonly toAnchor: string | null;
+  /**
+   * 🔑 **線の通り方**(`straight` / `elbow` / `curve`。書いていなければ `null` = まっすぐ)。
+   *
+   * 🟢 **実測しました(2026-09-15、LibreOffice)** ── 3 つとも**繋がったまま**読まれ、
+   *   描かれる形も分かれた(まっすぐ / **3 つ折り** / **ベジェ**)。
+   * ⚠ **曲がる所(`bend=`)は運べない** ── 折れる所は PowerPoint の図形が自分で決める
+   *   (実測: 2 点の真ん中で折れた)。だから画面で `bend=v:320` と書いても、
+   *   配った先では真ん中で折れる。
+   * ⚠ **曲がり方も同じではない** ── 画面は制御点を**曲がる線の上**に置くが、
+   *   PowerPoint の曲線は自前の制御点を使う(実測: 2 点が別々の x に出た)。
+   */
+  readonly route: string | null;
 }
 
 /**
@@ -165,6 +179,19 @@ const CXN_IDX: Record<PlaceShape, Record<PlaceEdge, number>> = {
  *   (綴りの表は `place-shape.ts` の 1 本。§7)。
  * ⚠ 生の字を `prst=` へ流さない ── 知らない図形名は**壊れた .pptx** になる。
  */
+/**
+ * 🔴 **線の通り方 → PowerPoint の線の種類**(#530 段③c。**実測 2026-09-15**)。
+ *
+ * ⚠ **推測で書かない** ── 3 つを同じ file に入れて LibreOffice に読ませ、
+ *   **3 つとも `draw:start-shape` / `draw:end-shape` 付き**(= 繋がったまま)で、
+ *   描かれた形が **`L` 1 本 / `L` 3 本 / `C`** と分かれることを見てから書いた。
+ */
+const CXN_PRST: Record<PlaceRoute, string> = {
+  straight: 'straightConnector1',
+  elbow: 'bentConnector3',
+  curve: 'curvedConnector3',
+};
+
 const PRST_OF: Record<PlaceShape, string> = {
   rect: 'rect',
   round: 'roundRect',
@@ -283,7 +310,11 @@ export function splitIntoSlides(
         const p = blocks[i]!;
         if (p.kind === 'place-line') {
           links.push({
-            from: p.from, to: p.to, fromAnchor: p.fromAnchor, toAnchor: p.toAnchor,
+            from: p.from,
+            to: p.to,
+            fromAnchor: p.fromAnchor,
+            toAnchor: p.toAnchor,
+            route: p.route,
           });
           i += 1;
           continue;
@@ -753,6 +784,14 @@ function connectorXml(
   end: { id: number; idx: number },
   p1: { x: number; y: number },
   p2: { x: number; y: number },
+  /**
+   * ⚠ **既定値を置かない** ── 死に値だからである(変異試験 M17 が SURVIVED で教えた)。
+   * 🔑 呼ぶ所は **1 か所だけ**で、そこは必ず明示して渡す(実測: 定義 1 / 呼び出し 1 /
+   *   file の外からの参照 0)── 既定を置くと**どの経路からも読まれない字**が残り、
+   *   「ここを変えても何も起きない」を test で守れなくなる。
+   * 🔑 必須にすれば、口を後から足す人が書き忘れたとき **tsc が落とす**。
+   */
+  route: PlaceRoute,
 ): string {
   const flip = (p2.x < p1.x ? ' flipH="1"' : '') + (p2.y < p1.y ? ' flipV="1"' : '');
   return `<p:cxnSp><p:nvCxnSpPr><p:cNvPr id="${id}" name="${xmlEscape(name)}"/>`
@@ -761,7 +800,7 @@ function connectorXml(
     + `<p:spPr><a:xfrm${flip}><a:off x="${Math.min(p1.x, p2.x)}" y="${Math.min(p1.y, p2.y)}"/>`
     + `<a:ext cx="${Math.max(1, Math.abs(p2.x - p1.x))}" `
     + `cy="${Math.max(1, Math.abs(p2.y - p1.y))}"/></a:xfrm>`
-    + '<a:prstGeom prst="straightConnector1"><a:avLst/></a:prstGeom>'
+    + `<a:prstGeom prst="${CXN_PRST[route]}"><a:avLst/></a:prstGeom>`
     + '<a:ln w="19050"><a:solidFill><a:srgbClr val="808080"/></a:solidFill></a:ln>'
     + '</p:spPr></p:cxnSp>';
 }
@@ -865,6 +904,11 @@ function boardShapes(
         { id: base + 100 + b, idx: CXN_IDX[items[b]!.shape][line.to.edge] },
         toEmu({ x: line.x1, y: line.y1 }),
         toEmu({ x: line.x2, y: line.y2 }),
+        // ⚠ 読めない綴りは既定のまっすぐ(画面は理由を出すが、配った先では出せない)
+        ((): PlaceRoute => {
+          const r = parseRouteSpell(link.route);
+          return r.kind === 'ok' ? r.route : 'straight';
+        })(),
       ),
     );
   }

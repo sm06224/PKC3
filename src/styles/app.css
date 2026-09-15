@@ -2899,7 +2899,12 @@ li[data-pkc-row-slot] {
   overflow: visible;
   pointer-events: none;
 }
-[data-pkc-field='place-lines'] line {
+/* 🔴 **`fill: none` を外すと、曲線が「塗り潰された塊」になる**(#530 段③c)。
+ *   ⚠ `<path>` の既定の塗りは黒である ── まっすぐな線では面積が 0 なので
+ *   **見た目が 1px も変わらず**、折れた線・曲がった線でだけ真っ黒になる。
+ *   🔑 だから「これが無いと壊れる」を、**曲がる線で**確かめること。 */
+[data-pkc-field='place-lines'] path {
+  fill: none;
   stroke: var(--muted);
   stroke-width: 2;
 }

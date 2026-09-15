@@ -202,6 +202,32 @@ PKC3_CHROMIUM=/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headles
 実バグが出た。`chromium` では `afterprint` が来ないので永久に露見しなかった。
 **「CI だけで落ちる」を環境のせいにして test 側だけ緩めない。**
 
+## 🔴 **器を替えたら、smoke の読み手を `grep` で数える**(2026-09-15、#530 段③c)
+
+⚠ CLAUDE.md §10 の「器を替えると**読み取れる値が変わる**」は、
+**smoke でこそ静かに壊れる**。理由は 1 つ ── **鳴る計器が 1 つも無い**:
+
+| | この壊れ方を拾えるか |
+|---|---|
+| `npx tsc` | 🚫 **鳴らない**(`getAttribute` の戻りは器に依らず `string \| null`) |
+| `npm test`(unit) | 🚫 **鳴らない**(smoke は `npm test` に入っていない) |
+| CI の `verify` | 🚫 **鳴らない**(2026-09-09 から全量 smoke は押したときだけ) |
+| 🟢 **対象範囲の smoke** | **ここだけ**が拾う |
+
+実例:線の器を `<line>` → `<path>` へ替え、読み手を直したつもりで
+**2 か所を読み残した**。⚠ `<path>` に `x1` は無いので `getAttribute('x1')` は
+`null` を返し、`Number(null)` は **0** になる ── 「板を動かしたら線も動く」を見る
+`.poll(… ).not.toBe(x1Before)` は **永久に 0 と 0 を比べる**形になっていた。
+⚠ **同じ file の 30 行上に、自分で「器が `<path>` なので `x1` はもう無い」と
+書いてあった**(書いた本人が、その 2 行下で読み残した)。
+
+🔑 **手順は 2 つ**:
+1. **替えた器で消える属性を `grep` で数える**(`x1` / `x2` / `points` / `value` /
+   `textContent` / `innerText`)── ⚠ **`tests/smoke` も範囲に入れる**(`src` と
+   `tests/*.test.ts` だけ見ると、smoke の残骸がまるごと残る)
+2. **読み方を 1 か所へ寄せる**(`startOf(l)` のような小さな関数)──
+   ⚠ 寄せないと、次に 1 本足す人が `getAttribute('x1')` を手で書く
+
 ## 🔴 「unit では原理的に届かない層」を先に数える
 
 smoke は高いので、**unit で届く物は unit に置く**。逆に、**unit が原理的に届かない層**は

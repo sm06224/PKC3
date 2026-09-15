@@ -16,7 +16,11 @@ import {
   anchorSpell,
   ANCHOR_DEN_MAX,
   parseAnchorSpell,
+  parseBendSpell,
+  parseRouteSpell,
   PLACE_EDGES,
+  PLACE_ROUTES,
+  placePathOf,
   placeLineAnchorOf,
   placeLineOf,
   placeLineTargetId,
@@ -260,5 +264,101 @@ describe('🔴 手で書いた接続点が勝つ(#530 段③b)', () => {
     expect(ends(l)).toEqual(['left@1/4', 'bottom@3/4']);
     expect([l.x1, l.y1]).toEqual([0, 15]);
     expect([l.x2, l.y2]).toEqual([375, 60]);
+  });
+});
+
+/**
+ * 🔴 **線の通り方と、曲がる所**(user 裁定 2026-09-15、#530 段③c)。
+ *
+ * **① 何を求めていたのか** ── 曲線は**主張させない**(図の主役は板と関係であって、
+ * 線のふくらみではない)。そのうえで、**線が何本もある図を揃えられる**こと ──
+ * どこで曲がるかを決めて、複数の線で共有できること。
+ * **② そのとき何が問題だったのか** ── 段③a は**まっすぐ 1 種類**しか描けず、
+ * 折れる位置はこちらが毎回 2 点の中間で決めていた。だから**何本かを同じ幹に通せず**、
+ * 線が増えるほど図がばらけた。
+ */
+describe('🔴 線の通り方と曲がる所(#530 段③c)', () => {
+  /** 横に並んだ 2 枚(右 → 左、どちらも辺の真ん中)。 */
+  const side = (): ReturnType<typeof placeLineOf> => placeLineOf(box(0, 0), box(300, 0));
+
+  it('🔑 省いたら、まっすぐ(書かなくても必ず届く形)', () => {
+    expect(placePathOf(side())).toBe('M 100 30 L 300 30');
+    expect(placePathOf(side(), 'straight')).toBe('M 100 30 L 300 30');
+  });
+
+  it('🔴 直角は 3 つ折り / 曲線は同じ所でふくらむ(幹を共有する)', () => {
+    // 🔑 書かなければ 2 点の真ん中(x = 200)で曲がる
+    expect(placePathOf(side(), 'elbow')).toBe('M 100 30 L 200 30 L 200 30 L 300 30');
+    expect(placePathOf(side(), 'curve')).toBe('M 100 30 C 200 30 200 30 300 30');
+    // 🔴 **曲がる所を書くと、そこへ動く**(= 何本かで同じ幹を通せる)
+    const bent = { axis: 'v', at: 260 } as const;
+    expect(placePathOf(side(), 'elbow', bent)).toBe('M 100 30 L 260 30 L 260 30 L 300 30');
+    expect(placePathOf(side(), 'curve', bent)).toBe('M 100 30 C 260 30 260 30 300 30');
+  });
+
+  /**
+   * 🔴 **縦にずれた 2 枚でこそ形が分かれる**(横一直線では 3 つとも同じ線に見える)。
+   * ⚠ 上の it だけだと「形を丸ごと無視する実装」でも緑になりうる。
+   */
+  it('🔴 縦にずれた 2 枚では、3 つの形がはっきり分かれる', () => {
+    const l = placeLineOf(box(0, 0), box(300, 200));
+    expect(anchorSpell(l.from), '前提が崩れている(横の辺から出ていない)').toBe('right');
+    expect(placePathOf(l, 'straight')).toBe('M 100 30 L 300 230');
+    // 🔑 縦線 x=200 の上で折れる ── 出る辺が横なので、既定の軸は「縦線」である
+    expect(placePathOf(l, 'elbow')).toBe('M 100 30 L 200 30 L 200 230 L 300 230');
+    expect(placePathOf(l, 'curve')).toBe('M 100 30 C 200 30 200 230 300 230');
+    // ⚠ 3 つが別物であること(空振り防止)
+    expect(new Set([
+      placePathOf(l, 'straight'), placePathOf(l, 'elbow'), placePathOf(l, 'curve'),
+    ]).size, '形を変えても同じ線が出ている').toBe(3);
+  });
+
+  /**
+   * 🔴 **既定の軸は「出る辺」から採る。**
+   * ⚠ 右の辺から出た線を横線で折ると、出た直後に**板の中へ戻る**形になる。
+   */
+  it('🔴 縦に並べたら、既定の曲がりは「横線」になる', () => {
+    // ⚠ 真下ではなく**少しずらす** ── 真下だと横の辺との差が小さく、前提が脆い
+    const down = placeLineOf(box(0, 0), box(20, 300));
+    expect(anchorSpell(down.from), '前提が崩れている(縦の辺から出ていない)').toBe('bottom');
+    expect(placePathOf(down, 'elbow')).toBe('M 50 60 L 50 180 L 70 180 L 70 300');
+    // 🔑 横線を手で書けば、そこへ動く
+    expect(placePathOf(down, 'elbow', { axis: 'h', at: 100 }))
+      .toBe('M 50 60 L 50 100 L 70 100 L 70 300');
+  });
+
+  /**
+   * 🔴 **ふくらみは 2 点の間から外へ出ない**(= 控えめ)。
+   * ⚠ 制御点を**曲がる線の上**に置くので、外向きに突き出す描き方にはならない ──
+   *   線が何本もあるとき、ふくらみ同士が重なって読めなくなるのを避けるため。
+   */
+  it('🔴 曲線のふくらみが、2 点の間から外へ出ない', () => {
+    const l = placeLineOf(box(0, 0), box(300, 200));
+    const nums = placePathOf(l, 'curve').split(/[^\d.-]+/).filter((t) => t !== '').map(Number);
+    const xs = nums.filter((_, i) => i % 2 === 0);
+    expect(Math.min(...xs), '制御点が左へはみ出している').toBeGreaterThanOrEqual(Math.min(l.x1, l.x2));
+    expect(Math.max(...xs), '制御点が右へはみ出している').toBeLessThanOrEqual(Math.max(l.x1, l.x2));
+  });
+
+  it('🔴 読めない綴りは断る(黙ってまっすぐに倒さない)', () => {
+    expect(parseRouteSpell(null)).toEqual({ kind: 'none' });
+    expect(parseRouteSpell(' ')).toEqual({ kind: 'none' });
+    expect(parseRouteSpell('elbow')).toEqual({ kind: 'ok', route: 'elbow' });
+    expect(parseRouteSpell('elbo'), '読めない字を「書いていない」と読んでいる')
+      .toEqual({ kind: 'bad', raw: 'elbo' });
+    expect(parseRouteSpell('ELBOW')).toEqual({ kind: 'bad', raw: 'ELBOW' });
+    expect(PLACE_ROUTES.length, '通り方の一覧が空(空振り)').toBe(3);
+
+    expect(parseBendSpell(null)).toEqual({ kind: 'none' });
+    expect(parseBendSpell('v:320')).toEqual({ kind: 'ok', bend: { axis: 'v', at: 320 } });
+    expect(parseBendSpell('h:0')).toEqual({ kind: 'ok', bend: { axis: 'h', at: 0 } });
+    // ⚠ 前後の空白は**落としてから**読む(`v:10 ` は受ける)── 記法の値は
+    //    空白で切れるので、ここで断ると「見た目は正しいのに断られる」になる
+    expect(parseBendSpell(' v:10 ')).toEqual({ kind: 'ok', bend: { axis: 'v', at: 10 } });
+    for (const bad of ['320', 'v320', 'x:10', 'v:', 'v:-10', 'v:1.5', 'V:10', 'v:10:20']) {
+      expect(parseBendSpell(bad), `受けてはいけない綴りを受けた: ${bad}`).toMatchObject({
+        kind: 'bad',
+      });
+    }
   });
 });

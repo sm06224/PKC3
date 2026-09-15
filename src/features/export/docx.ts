@@ -125,6 +125,12 @@ export type DocxBlock =
        */
       readonly fromAnchor: string | null;
       readonly toAnchor: string | null;
+      /**
+       * 🔑 **線の通り方の綴り**(`straight` / `elbow` / `curve`)。書いていなければ `null`。
+       * ⚠ **曲がる所(`bend=`)は運ばない** ── PowerPoint の折れ線は曲がる所を
+       *   自分で決める(実測: 2 点の真ん中)ので、運んでも使えない。
+       */
+      readonly route: string | null;
     }
   | { readonly kind: 'table'; readonly rows: readonly (readonly DocxCell[])[] }
   /**

@@ -44,7 +44,8 @@ const pline = (
   to: string,
   fromAnchor: string | null = null,
   toAnchor: string | null = null,
-): ExportBlock => ({ kind: 'place-line', from, to, fromAnchor, toAnchor });
+  route: string | null = null,
+): ExportBlock => ({ kind: 'place-line', from, to, fromAnchor, toAnchor, route });
 
 describe('\u{1f534} 自由配置の板が「置いたとおりの場所」で出る(#530 段①)', () => {
   /**
@@ -974,6 +975,48 @@ describe('🔴 板どうしの線が PowerPoint でも繋がる(#530 段③e)', 
     // ⚠ 空振り防止 ── 取り出せていなければ、下の一致は「空と空」である
     expect(quarter.length, 'コネクタの位置を取り出せていない').toBe(1);
     expect(quarter, '分数つきの線が、辺の真ん中と違う所へ焼かれている').toEqual(middle);
+  });
+
+  /**
+   * 🔴 **線の通り方が、配った先の「線の種類」になる**(#530 段③c。**実測 2026-09-15**)。
+   *
+   * ⚠ **推測で書いていない** ── 3 つを同じ file に入れて LibreOffice に読ませ、
+   *   **3 つとも繋がったまま**で、描かれる形が **`L` 1 本 / `L` 3 本 / `C`** と
+   *   分かれることを見てから書いた。
+   * 🔑 **繋がったままである**ことも同じ it で見る ── 種類を替えたついでに
+   *   繋ぎが外れたら、この段の値が 0 になる(動かしても線が付いてこない)。
+   */
+  it('🔴 route= が PowerPoint の線の種類になる(#530 段③c)', () => {
+    const prstOf = (route: string | null): string[] => {
+      const xml = partOf(buildPptx(
+        [
+          place(0, 0, 200, 100, 1, 'rect', 'a'), p('左'),
+          place(400, 0, 200, 100, 1, 'rect', 'b'), p('右'),
+          pline('a', 'b', null, null, route),
+        ],
+        { title: 'T' },
+      ), 'ppt/slides/slide1.xml');
+      // ⚠ **線の塊の中だけ**を見る ── 線は板より前に並ぶ(z 順)ので、
+      //    先頭から切ると板の `prst`(`rect`)まで拾ってしまう
+      return [...xml.matchAll(/<p:cxnSp>[\s\S]*?<\/p:cxnSp>/g)]
+        .map((m) => /<a:prstGeom prst="([^"]+)"/.exec(m[0])?.[1] ?? '');
+    };
+    expect(prstOf(null), '省いたときがまっすぐでない').toEqual(['straightConnector1']);
+    expect(prstOf('straight')).toEqual(['straightConnector1']);
+    expect(prstOf('elbow'), '直角が配った先で効いていない').toEqual(['bentConnector3']);
+    expect(prstOf('curve'), '曲線が配った先で効いていない').toEqual(['curvedConnector3']);
+    // ⚠ 読めない綴りはまっすぐへ倒す(配った先では理由を出せない)
+    expect(prstOf('elbo')).toEqual(['straightConnector1']);
+    // 🔴 種類を替えても**繋がったまま**であること
+    const xml = partOf(buildPptx(
+      [
+        place(0, 0, 200, 100, 1, 'rect', 'a'), p('左'),
+        place(400, 0, 200, 100, 1, 'rect', 'b'), p('右'),
+        pline('a', 'b', null, null, 'curve'),
+      ],
+      { title: 'T' },
+    ), 'ppt/slides/slide1.xml');
+    expect(cxns(xml), '曲線にしたら繋ぎが外れた').toHaveLength(1);
   });
 
   /**
