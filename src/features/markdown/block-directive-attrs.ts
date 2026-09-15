@@ -12,12 +12,36 @@
  *   - `key="value with sp"` ── double-quoted、空白許容
  *   - `key='value'`        ── single-quoted
  *   - `flag`               ── 単独 word は boolean true 扱い
- *   - `#id`                ── id 指定(slug-safe な英字 / 数字 / `-` / `_`)
+ *   - `#id`                ── id 指定(英字 / 数字 / `-` / `_` / **日本語などの非 ASCII**)
  *   - `.class`             ── class 指定(同上)
  *
  * 設計詳細は `PKC2: docs/development/notation-redesign-2026-05/01-notation-catalog.md`
  * §1.2.4 / §1.2.5 + §1.3.2 を参照。
  */
+
+/**
+ * 🔴 **`#名前` に使える字**(#530。user 裁定 2026-09-15 = **日本語も使えるように広げる**)。
+ *
+ * ## なぜここに置くか
+ *
+ * ⚠ 同じ字を受ける門が **3 か所**ある ── ここ(名付ける側)と、
+ *   `markdown-render.ts` の**図の名前**、**`[@名前]` で呼ぶ側**。
+ * 🔴 **3 つが揃っていないと、別の壊れ方が出る**(実測):
+ *   - ここだけ広げる → `:::figure{#今日}` が**字のまま画面に出る**
+ *   - 図まで広げる → `[@今日]` が**呼べない**(番号に化けない)
+ * 🔑 だから**字の定義はこの 1 か所**にして、3 か所がここを読む(CLAUDE.md §7)。
+ *
+ * ## 何を受けて、何を受けないか
+ *
+ * ⚠ **空白・`{`・`}`・引用符・`=`・`.`・`#` は受けない** ── どれも
+ *   この記法の**区切りとして使っている**字なので、名前に混ぜると別の物を壊す。
+ * 🔑 受けるのは **0x80 以上の字**(日本語・かな・漢字・絵文字)と、英数字・`_`・`-`。
+ *   sqlite が名前の字を同じ規則で決めているのと揃えてある(`er-sql.ts` の `erQuote`)。
+ * ⚠ **先頭に数字は置けない**(`#1st`)── 番号と見分けが付かなくなる。
+ */
+export const NAME_CHARS = 'A-Za-z0-9_\\u0080-\\uffff-';
+/** 名前として使えるか。⚠ 判定はここだけ ── 綴りを写して増やさない。 */
+export const NAME_RE = new RegExp(`^[A-Za-z_\\u0080-\\uffff][${NAME_CHARS}]*$`);
 
 export interface BlockDirectiveAttrs {
   /** `#id` 指定。指定なし時 undefined。 */
@@ -92,7 +116,9 @@ export function parseBlockDirectiveAttrs(inner: string): BlockDirectiveAttrs {
   for (const tok of tokens) {
     if (tok.startsWith('#')) {
       const id = tok.slice(1);
-      if (/^[A-Za-z_][\w-]*$/.test(id)) {
+      // 🔑 名前だけ広い(#530)── class / key は**綴りが CSS や属性名になる**ので
+      //    ここでは広げない(裁定は「付箋の名前」についてである)
+      if (NAME_RE.test(id)) {
         out.id = id;
       }
       continue;

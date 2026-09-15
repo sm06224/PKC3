@@ -2316,6 +2316,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-15(#530 ── 名前に日本語)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-13-app-group-fold" …` → 2 件
+     */
+    'アプリのグループを、畳んでしまえるようになりました',
+    /**
      * ⚠ **2026-09-15(#918 段⑤ ── 表のつながり図)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-13-note-date-no-time" …` → 14191cc
      */

@@ -54,6 +54,8 @@ import {
   parseBlockDirectiveOpen,
   parseTier1FormatOpen,
   isBlockDirectiveClose,
+  NAME_CHARS,
+  NAME_RE,
   type BlockDirectiveAttrs as _BlockDirectiveAttrs,
 } from './block-directive-attrs';
 import { ensureBlankAroundColonBlocksWithLineMap } from './colon-block-normalize';
@@ -3038,7 +3040,9 @@ function processFigureBlocks(source: string, lineMapIn: number[]): {
      * そこは打ち間違いの合図なので、黙って通すと直す機会を奪う。
      * ⚠ id が無い図は registry に入れない(参照できないものを参照させない)。
      */
-    if (idAttr !== undefined && !/^[\w-]+$/.test(idAttr)) {
+    // 🔑 名前の字は `block-directive-attrs.ts` の 1 か所から読む(#530、§7)──
+    //    ⚠ ここが狭いままだと、`:::figure{#今日}` が**字のまま画面に出る**(実測)
+    if (idAttr !== undefined && !NAME_RE.test(idAttr)) {
       out.push(line);
       lineMapOut.push(inputIdx);
       i++;
@@ -3136,7 +3140,10 @@ function processFigureBlocks(source: string, lineMapIn: number[]): {
 
 function processFigureRefs(source: string, registry: Map<string, FigEntry>): string {
   // simple `[@id]` を sentinel に変換
-  let out = source.replace(/\[@([\w-]+)\]/g, (full, id) => {
+  // 🔑 呼ぶ側も同じ字を受ける(#530、§7)── ⚠ ここが狭いままだと、
+  //    名前は付くのに `[@今日]` が番号へ化けない(呼べない名前ができる)
+  const REF_RE = new RegExp(`\\[@([${NAME_CHARS}]+)\\]`, 'g');
+  let out = source.replace(REF_RE, (full, id: string) => {
     const e = registry.get(id);
     if (!e) return full;
     const label = `${FIG_LABEL_PREFIX[e.kind]} ${e.num}`;
@@ -4005,7 +4012,7 @@ function postProcessFigureSentinels(html: string): string {
     // ⚠ id の欄は**空でありうる**(2026-08-06 ── 参照しない図には id を要求しない)。
     //    `[\w-]+` のままだと id 無しの図の sentinel が置換されず、PUA の文字が
     //    そのまま画面に出る(sentinel 漏れ = 2026-05-08 に踏んだ形)
-    new RegExp(`<p([^>]*)>${FIG_SENTINEL_OPEN}OPEN${FIG_SENTINEL_SEP}(figure|table|equation)${FIG_SENTINEL_SEP}([\\w-]*)${FIG_SENTINEL_SEP}(\\d+)${FIG_SENTINEL_OPEN}</p>`, 'g'),
+    new RegExp(`<p([^>]*)>${FIG_SENTINEL_OPEN}OPEN${FIG_SENTINEL_SEP}(figure|table|equation)${FIG_SENTINEL_SEP}([${NAME_CHARS}]*)${FIG_SENTINEL_SEP}(\\d+)${FIG_SENTINEL_OPEN}</p>`, 'g'),
     (_match, attrs, kind, id, num) =>
       `<figure${id === '' ? '' : ` id="${id}"`} class="pkc-fig pkc-fig-${kind}"` +
       ` data-pkc-fig-kind="${kind}" data-pkc-fig-num="${num}"${attrs}>`,
@@ -4026,7 +4033,7 @@ function postProcessFigureSentinels(html: string): string {
   );
   // Inline references
   html = html.replace(
-    new RegExp(`${FIG_REF_OPEN}([\\w-]+)${FIG_REF_SEP}([^${FIG_REF_CLOSE}]+)${FIG_REF_CLOSE}`, 'g'),
+    new RegExp(`${FIG_REF_OPEN}([${NAME_CHARS}]+)${FIG_REF_SEP}([^${FIG_REF_CLOSE}]+)${FIG_REF_CLOSE}`, 'g'),
     (_match, id, label) => `<a href="#${id}" class="pkc-fig-ref">${label}</a>`,
   );
   return html;
