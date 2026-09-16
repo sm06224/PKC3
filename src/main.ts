@@ -2365,6 +2365,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       return client.request({ op: 'storageProfile', cid });
     },
     /**
+     * 🔴 **中身が壊れていないかを調べる**(#971 段③)。
+     * ⚠ 数 GB では分の単位になるので、**待たせている間の字は呼び側が出す**。
+     */
+    checkIntegrity: async () => client.request({ op: 'checkIntegrity' }),
+    /**
+     * 🔴 **壊れていても読める分だけ拾う**(#971 段③)。
+     * ⚠ 1 回で全部返さない ── 数 GB を 1 つの応答に載せると heap に載り切らない。
+     */
+    rescueEntries: async (afterRowid: number, chunks: number) =>
+      client.request({ op: 'rescueEntries', afterRowid, chunks }),
+    /**
      * 🔴 **スクショの貼付**(#250。user 指示 2026-08-18
      * 「PKC3 でスクショ貼付の導線がない。PKC2 と同様以上に実装してください」)。
      *

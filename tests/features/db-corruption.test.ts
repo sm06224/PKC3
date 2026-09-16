@@ -115,6 +115,10 @@ describe('止める op の仕分け(#971)', () => {
     'runReadOnlySql',
     'openSqlGuest',
     'closeSqlGuest',
+    // 🔴 **救出の 2 つ**(#971 段③)── ここが止まると、壊れた DB から
+    //    何も取り出せなくなる。⚠ `rescueEntries` は読むだけ(`SELECT … NOT INDEXED`)
+    'checkIntegrity',
+    'rescueEntries',
   ];
 
   it('🔴 protocol の op は 1 つ残らず、止めるか通すかが決まっている', () => {
@@ -139,9 +143,18 @@ describe('止める op の仕分け(#971)', () => {
     expect(ghosts, 'protocol に無い op を止めようとしている').toEqual([]);
   });
 
-  it('🔴 持ち出しに要る 4 つは、止めない', () => {
+  it('🔴 持ち出しに要る 6 つは、止めない', () => {
     // 🔑 これが止まると「データは在るのに取り出せない」になる
-    for (const o of ['getBody', 'getBodies', 'runReadOnlySql', 'exportImage']) {
+    // ⚠ `checkIntegrity` / `rescueEntries` は **壊れているときにしか押されない** ──
+    //    ここを止めると、この 2 つは**存在しないのと同じ**になる(#971 段③)
+    for (const o of [
+      'getBody',
+      'getBodies',
+      'runReadOnlySql',
+      'exportImage',
+      'checkIntegrity',
+      'rescueEntries',
+    ]) {
       expect(CORRUPT_BLOCKED_OPS, `持ち出す道を塞いだ: ${o}`).not.toContain(o);
     }
   });
