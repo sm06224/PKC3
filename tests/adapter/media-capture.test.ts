@@ -14,11 +14,13 @@
 /** @vitest-environment happy-dom */
 import { describe, expect, it, vi } from 'vitest';
 import {
+  pickClock,
   CaptureRefused,
   startCapture,
   type CaptureDeps,
   type CaptureEnd,
 } from '../../src/adapter/platform/media-capture';
+import { readId, readSizeAt } from '../../src/features/audio/ebml';
 
 /** 既定の上限(12 時間)。⚠ **切る大きさ**とは別の門である(#771)。 */
 const HOURS12 = 12 * 60 * 60 * 1000;
@@ -50,11 +52,24 @@ function fakeStream(tracks: ReturnType<typeof fakeTrack>[]): MediaStream {
  */
 function fakeRecorder(): {
   Recorder: typeof MediaRecorder;
-  last: () => { push: (n: number) => void; state: string; stops: number; fail: () => void };
+  last: () => {
+    push: (n: number) => void;
+    /** 🔴 **本物の形の bytes を積む**(#952 A3)── `push(n)` は webm ですら
+     *   ない中身しか作れないので、容器を読む処理の検算にはこちらが要る。 */
+    pushBytes: (b: Uint8Array) => void;
+    state: string;
+    stops: number;
+    fail: () => void;
+  };
   made: () => number;
 } {
-  let inst: { push: (n: number) => void; state: string; stops: number; fail: () => void } | null =
-    null;
+  let inst: {
+    push: (n: number) => void;
+    pushBytes: (b: Uint8Array) => void;
+    state: string;
+    stops: number;
+    fail: () => void;
+  } | null = null;
   let made = 0;
   class R {
     state = 'inactive';
@@ -69,6 +84,8 @@ function fakeRecorder(): {
       inst = {
         push: (n: number) =>
           this.ondataavailable?.({ data: new Blob(['x'.repeat(n)]) } as BlobEvent),
+        pushBytes: (b: Uint8Array) =>
+          this.ondataavailable?.({ data: new Blob([b as BlobPart]) } as BlobEvent),
         fail: () => this.onerror?.(),
         get state() {
           return (inst as unknown as { _s: string })._s ?? 'inactive';
@@ -182,11 +199,18 @@ describe('収録を始める / 止める(#413)', () => {
     rec.last().push(20); // ここで 30 >= 25 → **切る**
     // 🔴 user の言葉は「**途中終了はしてほしくない**」── 終わりの合図は出ていない
     expect(ends, '切ったのに止まっている').toEqual([]);
-    expect(parts, '1 本目が落ちてこない').toEqual([{ size: 30, n: 1 }]);
     // 🔴 **新しい器で録り続けている**(切っただけで終わっていない)
     expect(rec.made(), '次の器を作っていない').toBe(2);
     rec.last().push(7);
     const blob = await h.stop();
+    /**
+     * ⚠ **`onPart` は #952 A3 から非同期**(容器へ `Duration` を書くのに
+     *   `blob` の先頭を読む一手間が要る ── `finalizeSegment` を見よ)。
+     *   `stop()` を待てば、**先に積まれた `onPart`(同じ形の約束)も片付いている**
+     *   ので、ここで検算できる(CLAUDE.md §2「`async` にした瞬間、それを呼ぶ
+     *   同期の test は全部空振りになる」)。
+     */
+    expect(parts, '1 本目が落ちてこない').toEqual([{ size: 30, n: 1 }]);
     expect(blob!.size, '2 本目が空 ── 新しい器に配線していない').toBe(7);
     // ⚠ 通算は切っても戻さない(帯に出す量)
     expect(h.bytes()).toBe(37);
@@ -220,11 +244,13 @@ describe('収録を始める / 止める(#413)', () => {
     rec.last().push(10); // 1 本目 → 切る
     rec.last().push(11); // 2 本目 → 切る
     rec.last().push(3);
+    const blob = await h.stop();
+    // ⚠ #952 A3 で `onPart` は非同期になった ── `stop()` を待てば片付いている
     expect(parts).toEqual([
       { size: 10, n: 1 },
       { size: 11, n: 2 },
     ]);
-    expect((await h.stop())!.size, '3 本目が返らない').toBe(3);
+    expect(blob!.size, '3 本目が返らない').toBe(3);
     expect(h.parts()).toBe(2);
   });
 
@@ -439,5 +465,225 @@ describe('🔴 bytes を heap に載せない(#413 の芯)', () => {
     await h.stop();
     expect(seen, 'bytes を文字列として読んでいる').toEqual([]);
     spy.mockRestore();
+  });
+});
+
+/**
+ * 🔴 **長さを容器へ書く(#952 A3)**。
+ *
+ * ⚠ 上の test は全部 `push(n)`(webm ですらない中身)を使うので、**この機能を
+ *   丸ごと削っても 1 本も落ちない** ── ここだけは**本物の形をした bytes**を
+ *   積んで、配線(`startCapture` → `withRecordedDuration` → 容器へ書く)を
+ *   通しで見る(`insertMissingDuration` 自身の正しさは
+ *   `tests/features/webm-opus.test.ts` が独立に見ている)。
+ */
+describe('🔴 長さを容器へ書く(#952 A3)', () => {
+  /**
+   * 最小限の webm(`Segment` の大きさは**不明** ── 実物の `MediaRecorder` と
+   * 同じ形)。`Info` は在るが `Duration` はまだ無い。
+   */
+  function minimalWebm(): Uint8Array {
+    return Uint8Array.of(
+      // EBML head: DocType = 'webm'
+      0x1a, 0x45, 0xdf, 0xa3, 0x87, 0x42, 0x82, 0x84, 0x77, 0x65, 0x62, 0x6d,
+      // Segment(大きさ不明 ── 8 バイト vint、全ビット 1)
+      0x18, 0x53, 0x80, 0x67, 0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      // Info: TimestampScale = 1000000 のみ(Duration は無い)
+      0x15, 0x49, 0xa9, 0x66, 0x87, 0x2a, 0xd7, 0xb1, 0x83, 0x0f, 0x42, 0x40,
+    );
+  }
+
+  /**
+   * `Duration`(id `4489`)を Info の中から読む。⚠ 実装とは別に歩く(検算)。
+   * 🔑 **値そのものを読む**(在るかどうかだけでは、「常に 0 を書く」ような
+   *   変異を殺せない)。
+   */
+  function durationOf(bytes: Uint8Array): number | null {
+    const head = readId(bytes, 0);
+    if (head === null) return null;
+    const headSize = readSizeAt(bytes, head.length);
+    if (headSize === null || headSize.value === null) return null;
+    let pos = head.length + headSize.length + headSize.value;
+    const seg = readId(bytes, pos);
+    if (seg === null) return null;
+    const segSizeStart = pos + seg.length;
+    const segSize = readSizeAt(bytes, segSizeStart);
+    if (segSize === null) return null;
+    pos = segSizeStart + segSize.length;
+    while (pos < bytes.length) {
+      const id = readId(bytes, pos);
+      if (id === null) return null;
+      const sizeStart = pos + id.length;
+      const size = readSizeAt(bytes, sizeStart);
+      if (size === null || size.value === null) return null;
+      const bodyStart = sizeStart + size.length;
+      if (id.id === '1549a966') {
+        let q = bodyStart;
+        const end = bodyStart + size.value;
+        while (q < end) {
+          const cid = readId(bytes, q);
+          if (cid === null) return null;
+          const cSizeStart = q + cid.length;
+          const cSize = readSizeAt(bytes, cSizeStart);
+          if (cSize === null || cSize.value === null) return null;
+          const cBodyStart = cSizeStart + cSize.length;
+          if (cid.id === '4489') {
+            return new DataView(bytes.buffer, bytes.byteOffset + cBodyStart, cSize.value).getFloat64(
+              0,
+              false,
+            );
+          }
+          q = cBodyStart + cSize.value;
+        }
+        return null;
+      }
+      pos = bodyStart + size.value;
+    }
+    return null;
+  }
+
+  it('🔴 止めたら、容器に Duration が書き足されている', async () => {
+    const { d, rec } = deps();
+    const h = await startCapture('audio', d, { partBytes: 1_000_000, maxMs: HOURS12 });
+    rec.last().pushBytes(minimalWebm());
+    const blob = await h.stop();
+    expect(blob, '止めたのに何も返らない').not.toBeNull();
+    expect(blob!.size, '長さぶん増えていない(何も書いていない)').toBeGreaterThan(
+      minimalWebm().length,
+    );
+    const bytes = new Uint8Array(await blob!.arrayBuffer());
+    expect(durationOf(bytes), 'Duration が書かれていない').not.toBeNull();
+  });
+
+  /**
+   * 🔴 **切れた 1 本(`onPart`)にも書く**(#952 A3)── 最後の 1 本だけ直して
+   *   途中で切れた本を忘れると、**長い録音ほど直っていない本の割合が増える**。
+   */
+  it('🔴 切れた 1 本(onPart)にも Duration が書き足されている', async () => {
+    const parts: Blob[] = [];
+    const { d, rec } = deps();
+    const h = await startCapture('audio', d, {
+      partBytes: 10,
+      maxMs: HOURS12,
+      onPart: (b) => parts.push(b),
+    });
+    rec.last().pushBytes(minimalWebm()); // ⚠ 36 バイト >= partBytes(10) → 切る
+    /**
+     * ⚠ **#952 A3 で `onPart` は非同期になった**(容器の先頭を読む一手間がある)。
+     * 🔑 ここは `await h.stop()` では**足りない** ── 直後に止めると、
+     *   2 本目(空)の `emit()` は `takeRawSegment` が `null` を返すので
+     *   **同期に解決してしまい**、1 本目の `onPart` より先に片付くことがある。
+     *   `vi.waitFor` で「届くまで」を見る。
+     */
+    await vi.waitFor(() => expect(parts, '切れていない').toHaveLength(1));
+    const bytes = new Uint8Array(await parts[0]!.arrayBuffer());
+    expect(durationOf(bytes), '切れた本には書かれていない').not.toBeNull();
+    await h.stop();
+  });
+
+  /**
+   * 🔴 **書くのは「切ってからの経過」であって、収録全体の経過ではない**
+   *   (#952 A3)。⚠ 1 本目は始まりが `0` なので**収録全体の経過と一致してしまい**、
+   *   この 2 つを区別する検算にならない ── **2 本目**(始まりが `0` でない)で
+   *   初めて言える。
+   */
+  it('🔴 2 本目は「切ってから」の経過を書く(収録全体の経過ではない)', async () => {
+    let t = 0;
+    const parts: Blob[] = [];
+    const { d, rec } = deps({ now: () => t });
+    const h = await startCapture('audio', d, {
+      partBytes: 20,
+      maxMs: HOURS12,
+      onPart: (b) => parts.push(b),
+    });
+    t = 5000;
+    rec.last().pushBytes(minimalWebm()); // 1 本目(0〜5000ms)→ 切る
+    await vi.waitFor(() => expect(parts, '1 本目が切れていない').toHaveLength(1));
+    expect(durationOf(new Uint8Array(await parts[0]!.arrayBuffer())), '1 本目の長さが違う').toBe(
+      5000,
+    );
+
+    t = 8000;
+    rec.last().pushBytes(minimalWebm()); // 2 本目(5000〜8000ms = 3000ms)→ 切る
+    await vi.waitFor(() => expect(parts, '2 本目が切れていない').toHaveLength(2));
+    /**
+     * 🔑 ここが本命 ── 収録全体では `8000`(= `now() - startedAt`)だが、
+     *   2 本目自身は `3000`(= `now() - segStartedAt`)。**この 2 つを取り違える
+     *   変異**は、1 本目だけを見る test では殺せない(1 本目は両方とも一致する)。
+     */
+    expect(
+      durationOf(new Uint8Array(await parts[1]!.arrayBuffer())),
+      '収録全体の経過を書いている(切ってからの経過を書いていない)',
+    ).toBe(3000);
+    await h.stop();
+  });
+
+  /**
+   * 🔴 **画面収録はまだ対象外**(docstring のとおり ── 実ブラウザの画面収録では
+   *   確かめていない)。⚠ ここが `true` に裏返ったら、それは**確かめずに
+   *   「動画でも直った」と言っている**ことになる(依頼の禁止事項そのもの)。
+   */
+  it('⚠ 画面収録はまだ対象外', async () => {
+    const track = fakeTrack();
+    const rec = fakeRecorder();
+    const h = await startCapture(
+      'screen',
+      { getDisplayMedia: async () => fakeStream([track]), Recorder: rec.Recorder },
+      { partBytes: 1_000_000, maxMs: HOURS12 },
+    );
+    rec.last().pushBytes(minimalWebm());
+    const blob = await h.stop();
+    if (blob === null) throw new Error('止めたのに何も返らない');
+    expect(blob.size, '画面収録なのにバイト数が変わっている').toBe(minimalWebm().length);
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    expect(durationOf(bytes), '画面収録にまで効くようになった(docstring と食い違う)').toBeNull();
+  });
+
+  /**
+   * 🔴 **値そのものを検算する**(#952 A3)── 「書いてはいる」だけでは、
+   *   `durationMs` を常に `0` にする・別の変数(`total` 等)を使う、といった
+   *   変異を殺せない(CLAUDE.md §3「印の数では見えない門がある」の親戚)。
+   */
+  it('🔴 12 時間ぶんの録音(長い値)が、そのまま値として書かれる', async () => {
+    let t = 0;
+    const { d, rec } = deps({ now: () => t });
+    const h = await startCapture('audio', d, { partBytes: 1_000_000, maxMs: HOURS12 + 1 });
+    t = HOURS12; // ⚠ この 1 本の壁時計を 12 時間ぶんにする
+    rec.last().pushBytes(minimalWebm());
+    const blob = await h.stop();
+    if (blob === null) throw new Error('止めたのに何も返らない');
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    expect(durationOf(bytes), '長い値がそのまま書かれていない').toBe(HOURS12);
+  });
+
+  /**
+   * 🔴 **時計は単調なほうを既定にする**(#952 A3。着地前レビューで判明)。
+   *
+   * ⚠ `Date.now()` は **NTP の補正・スリープ復帰・user の時計変更**で**前へも飛ぶ**。
+   *   飛んだぶんがそのまま `Duration` になり、**添付へ恒久的に焼き込まれる** ──
+   *   後ろ向きの飛びは `Math.max(0, …)` で既に潰してあったが、**前向きは無防備**だった。
+   * 🔑 `now()` は**差にしか使っていない**ので、既定を `performance.now()` へ替えても
+   *   意味は変わらず、飛びが構造から消える。
+   * ⚠ **この枝は `deps.now` を渡す test からは 1 度も通らない**ので、
+   *   ここで直に当てる(CLAUDE.md §2「経路が一度も通っていない」)。
+   */
+  describe('どの時計を使うか(pickClock)', () => {
+    it('🔴 performance が在るなら、そちらを使う', () => {
+      const perf = { now: vi.fn(() => 1234.5) };
+      expect(pickClock({ performance: perf })()).toBe(1234.5);
+      expect(perf.now, 'performance を持っているのに Date.now へ落ちている').toHaveBeenCalledTimes(1);
+    });
+
+    it('⚠ 対照群 ── performance が無い箱では Date.now へ落ちる(落とさず壊れない)', () => {
+      const before = Date.now();
+      const v = pickClock({})();
+      expect(v, 'Date.now とかけ離れた値が返っている').toBeGreaterThanOrEqual(before);
+      expect(v).toBeLessThanOrEqual(Date.now());
+    });
+
+    it('⚠ now が関数でない相手にも騙されない(あるのに使えない形)', () => {
+      const broken = { performance: { now: undefined } as unknown as { now(): number } };
+      expect(() => pickClock(broken)(), '呼べない now を掴んで落ちている').not.toThrow();
+    });
   });
 });

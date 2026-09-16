@@ -50,6 +50,7 @@ import {
   readSizeAt,
   readUint,
   uintBytes,
+  writeSize,
 } from './ebml';
 
 /** 切り出せない理由。⚠ **どれも「押したのに無言」を作らないためのもの**。 */
@@ -157,6 +158,18 @@ const ID_DISCARD_PADDING = '75a2';
 const ID_CLUSTER_TIMESTAMP = 'e7';
 const ID_SIMPLE_BLOCK = 'a3';
 const ID_BLOCK = 'a1';
+/** ⚠ `insertMissingDuration` だけが使う(#952 A3。他は inline の文字列で書いている)。 */
+const ID_SEGMENT = '18538067';
+const ID_INFO = '1549a966';
+const ID_CLUSTER = '1f43b675';
+const ID_DURATION = '4489';
+/**
+ * 🔴 **位置を指す要素**(#952 A3 のレビューで判明)。`SeekHead` / `Cues` は
+ * `Segment` 本体の先頭からの**バイト位置**を持つ ── その後ろへ bytes を挿すと
+ * **指し先がずれる**(書き直さないかぎり)。だから `Info` より前に居たら断る。
+ */
+const ID_SEEK_HEAD = '114d9b74';
+const ID_CUES = '1c53bb6b';
 
 /** opus の既定。⚠ `OpusHead` を読めないときだけ使う。 */
 const DEFAULT_SAMPLE_RATE = 48000;
@@ -559,4 +572,189 @@ function buildClusters(
   }
   flush();
   return clusters;
+}
+
+/**
+ * 断る理由(#952 A3)。⚠ どれも「触らない」という**安全側**の答えである ──
+ * 書けないと分かったら、元の bytes をそのまま使わせる(録音そのものは壊さない)。
+ */
+export type DurationWriteRefusal =
+  | 'not-webm'
+  | 'no-info'
+  | 'has-duration'
+  | 'incomplete'
+  | 'broken'
+  /**
+   * 🔴 **`Info` より前に位置を指す要素(`SeekHead` / `Cues`)が居る**
+   *   ── 挿すと**指し先がずれて、飛べなくなる**。長さが書けないより悪い。
+   */
+  | 'has-seek-index';
+
+export type DurationWriteResult =
+  | { readonly ok: true; readonly bytes: Uint8Array }
+  | { readonly ok: false; readonly reason: DurationWriteRefusal };
+
+/**
+ * 🔴 **`Duration` が無い webm に書き足す**(#952 A3)。
+ *
+ * `MediaRecorder`(Chrome)が作る webm には**長さ(`Duration`)が書かれていない**
+ * ── 開くと `duration` が `Infinity` になり、シークバーが伸びない。
+ *
+ * ## 🔑 「トラックの中身」を 1 つも知らない ── だから動画にも効くはず
+ *
+ * ここは opus の packet も、映像の frame も**読まない**。触るのは
+ * `Segment`(容器)の直下に 1 つだけ在る `Info`(見出し)だけである。
+ * ⚠ **`trimWebmOpus` と違って、`Tracks` / `Cluster` の中へは 1 歩も降りない**
+ * ── だから音声(opus のみ)でも画面収録(映像 + opus)でも**同じ答えになるはず**
+ * だが、⚠ **実ブラウザの画面収録では確かめていない**(smoke は音だけを見ている)。
+ * `withRecordedDuration`(`media-capture.ts`)が **`kind === 'audio'` のときだけ**
+ * 呼ぶのは、この「はず」を「確かめた」に格上げしていないからである。
+ *
+ * ## 🔑 中身(音・映像のバイト)は 1 バイトも読まない・動かさない
+ *
+ * `Info` の**末尾に 1 つ足すだけ**でよい ── `Segment` の大きさは
+ * `MediaRecorder` が録りながら書くので**不明のまま**出る(`readSizeAt` が
+ * `null` を返す)。⚠ **不明のまま**なら、中へ bytes を足しても大きさを
+ * 書き直す必要が無い(不明は「中へ降りるだけ」で値を使わないから)。
+ * `Info` 自身の大きさだけを、足したぶん伸ばす。
+ * ⚠ **`Segment` の大きさが決まっている**(= もう一度この関数を通した file)
+ * ときは、そちらも同じぶん伸ばす。
+ *
+ * @param bytes ⚠ **file の先頭だけでよい**(呼び側が `Blob.slice` で切り出す
+ *   ── 250MB の 1 本でも、丸ごと読まない)。`Info` の終わりまで入っていなければ
+ *   `incomplete` で断る(足りないだけで、壊れているとは限らない)。
+ */
+export function insertMissingDuration(bytes: Uint8Array, durationMs: number): DurationWriteResult {
+  // 🔴 壊れた値を書かない(退化するくらいなら、書かないほうがまだ良い)
+  if (!Number.isFinite(durationMs) || durationMs < 0) return { ok: false, reason: 'broken' };
+
+  const head = readId(bytes, 0);
+  if (head === null || head.id !== ID_EBML_HEAD) return { ok: false, reason: 'not-webm' };
+  const headSize = readSizeAt(bytes, head.length);
+  if (headSize === null || headSize.value === null) return { ok: false, reason: 'broken' };
+  const segIdPos = head.length + headSize.length + headSize.value;
+
+  const seg = readId(bytes, segIdPos);
+  if (seg === null) return { ok: false, reason: 'incomplete' };
+  if (seg.id !== ID_SEGMENT) return { ok: false, reason: 'not-webm' };
+  const segSizeFieldStart = segIdPos + seg.length;
+  const segSize = readSizeAt(bytes, segSizeFieldStart);
+  if (segSize === null) return { ok: false, reason: 'incomplete' };
+  const segBodyStart = segSizeFieldStart + segSize.length;
+
+  /**
+   * 🔑 `Segment` の直下(top-level)を、`Info` に当たるまで歩く。
+   * ⚠ **`Cluster`(音・映像のデータ)へ着いたら、その先には `Info` は無い** ──
+   *   そこで諦める(丸ごと読んで探しにいかない)。
+   */
+  let p = segBodyStart;
+  let info: {
+    readonly sizeFieldStart: number;
+    readonly sizeFieldLen: number;
+    readonly sizeValue: number;
+    readonly bodyStart: number;
+    readonly bodyEnd: number;
+  } | null = null;
+  while (p < bytes.length) {
+    const id = readId(bytes, p);
+    if (id === null) return { ok: false, reason: 'incomplete' };
+    const sizeFieldStart = p + id.length;
+    const size = readSizeAt(bytes, sizeFieldStart);
+    if (size === null) return { ok: false, reason: 'incomplete' };
+    const bodyStart = sizeFieldStart + size.length;
+    if (id.id === ID_INFO) {
+      if (size.value === null || bodyStart + size.value > bytes.length) {
+        return { ok: false, reason: 'incomplete' };
+      }
+      info = { sizeFieldStart, sizeFieldLen: size.length, sizeValue: size.value, bodyStart, bodyEnd: bodyStart + size.value };
+      break;
+    }
+    if (id.id === ID_CLUSTER) return { ok: false, reason: 'no-info' };
+    /**
+     * 🔴 **位置を指す要素が `Info` より前に在ったら、触らない**。
+     * ⚠ ここへ bytes を挿すと `SeekPosition` / `CueClusterPosition` が
+     *   **挿した長さぶんずれる** ── 長さは正しく出るのに**飛べなくなる**。
+     * 🔑 断っても呼び側は**元の bytes をそのまま使う**ので、退化するだけである
+     *   (この機能が録音そのものを壊してはいけない)。
+     */
+    if (id.id === ID_SEEK_HEAD || id.id === ID_CUES) {
+      return { ok: false, reason: 'has-seek-index' };
+    }
+    if (size.value === null) return { ok: false, reason: 'incomplete' }; // 大きさが不明で先へ飛べない
+    p = bodyStart + size.value;
+  }
+  /**
+   * ⚠ **ここへ来るのは「`Cluster` に当たらず、prefix が尽きた」場合だけ**
+   *   (`Cluster` に当たったら上で `no-info` を返して抜けている)── つまり
+   *   `Info` が無いとは言い切れず、**もっと読めば在るかもしれない**。
+   *   🔑 だから `no-info`(無いと確定)ではなく `incomplete`(足りない)。
+   */
+  if (info === null) return { ok: false, reason: 'incomplete' };
+
+  /**
+   * 🔑 `Info` の中を 1 周して、2 つを同時に見る:
+   *   ① もう `Duration` が在るか(往復・二重書きの検算)
+   *   ② 🔴 **`TimestampScale`**(#952 A3 のレビューで判明)
+   *
+   * 🔴 **`Duration` の単位は ms ではない** ── `TimestampScale`(ナノ秒。既定
+   *   1,000,000 = 1ms)を 1 目盛りとする**目盛りの数**である。⚠ 同じ file の
+   *   `demuxWebmOpus` は正しく `(v * timestampScale) / 1e6` で換算しているのに、
+   *   ここだけ ms を生で書いていた(CLAUDE.md「片側を直したら、対称の反対側を疑う」)。
+   * ⚠ 実測(レビュー時): `TimestampScale = 500000` の webm に 10000ms を書くと、
+   *   仕様どおりの読み手は **5000ms** と読む ── **半分**になる。
+   *   🔴 **失敗せずに、間違った値が書かれる**(この repo がいちばん嫌う形)。
+   */
+  let q = info.bodyStart;
+  let scaleNs: number | null = null;
+  while (q < info.bodyEnd) {
+    const cid = readId(bytes, q);
+    if (cid === null) return { ok: false, reason: 'broken' };
+    const cSizeFieldStart = q + cid.length;
+    const cSize = readSizeAt(bytes, cSizeFieldStart);
+    if (cSize === null || cSize.value === null) return { ok: false, reason: 'broken' };
+    if (cid.id === ID_DURATION) return { ok: false, reason: 'has-duration' };
+    const cBodyStart = cSizeFieldStart + cSize.length;
+    if (cid.id === ID_TIMESTAMP_SCALE) {
+      scaleNs = readUint(bytes.subarray(cBodyStart, cBodyStart + cSize.value));
+    }
+    q = cBodyStart + cSize.value;
+  }
+
+  /**
+   * ⚠ **書いていなければ既定(1,000,000ns = 1ms)** ── 仕様の既定値なので、
+   *   読み手も同じに解釈する。
+   *
+   * 🔴 **門は 1 つだけ置く**(変異試験 M-D が SURVIVED で教えた)。
+   * ⚠ 1 稿目は `scaleNs > 0` を別に検めていたが、**外しても落ちなかった** ──
+   *   `scaleNs` が `0` なら `1e6 / 0 = Infinity` になり、**すぐ下の
+   *   `Number.isFinite` が同じ回を捕まえる**からである(`readUint` は負を返さないので
+   *   「0 以下」は実質 `0` だけ)。CLAUDE.md §1「救い手が変わっただけ」/
+   *   §7「同じ問いに答える口を 2 つ作らない」── **片方を壊しても、もう片方が救う**。
+   * 🔑 だから**換算した結果が数でないなら断る**、の 1 本に寄せた ──
+   *   `0`(→ `Infinity`)も、`0ms × Infinity`(→ `NaN`)も、ここ 1 か所で落ちる。
+   *   ⚠ **当てずっぽうで書かない**(長さが無いより、間違った長さのほうが悪い)。
+   */
+  const durationTicks = durationMs * (1e6 / (scaleNs ?? 1_000_000));
+  if (!Number.isFinite(durationTicks)) return { ok: false, reason: 'broken' };
+
+  const durationElem = element(ID_DURATION, float64Bytes(durationTicks));
+  const newInfoSize = info.sizeValue + durationElem.length;
+  const newInfoSizeBytes = writeSize(newInfoSize);
+  const infoSizeDelta = newInfoSizeBytes.length - info.sizeFieldLen;
+
+  const newSegPrefix =
+    segSize.value === null
+      ? bytes.subarray(segSizeFieldStart, segBodyStart) // ⚠ 不明のまま(書き直さない)
+      : writeSize(segSize.value + infoSizeDelta + durationElem.length);
+
+  const out = concatBytes([
+    bytes.subarray(0, segSizeFieldStart),
+    newSegPrefix,
+    bytes.subarray(segBodyStart, info.sizeFieldStart),
+    newInfoSizeBytes,
+    bytes.subarray(info.bodyStart, info.bodyEnd),
+    durationElem,
+    bytes.subarray(info.bodyEnd),
+  ]);
+  return { ok: true, bytes: out };
 }

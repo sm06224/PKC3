@@ -21,7 +21,25 @@
  * `MediaRecorder` / `getUserMedia` はブラウザの口なので `features/` に置けない。
  * 🔑 代わりに**口を注入できる形**にしてある ── そうしないと
  *   「実ブラウザでしか確かめられない」= 壊れても間欠の赤でしか気づけない。
+ *
+ * ## 🔴 切った 1 本の長さを容器へ書く(#952 A3)
+ *
+ * `MediaRecorder` が作る webm には**長さ(`Duration`)が書かれない** ──
+ * 開くと `duration` が `Infinity` になり、シークバーが伸びない。
+ * 🔑 **容器を走査して求めない**(この 1 本は最大 `partBytes` = 250MB ある。
+ *   丸ごと読むのは高い)。代わりに**録っている側が持っている値**を使う ──
+ *   1 本(= 1 つの `Recorder` インスタンス)の始まりから終わりまでの壁時計。
+ *   容器に書き足すのは `features/audio/webm-opus.ts` の
+ *   `insertMissingDuration`(先頭の数百バイトだけ読む ── 中身は 1 バイトも
+ *   読まない・動かさない)。
+ * ⚠ **画面収録(`kind: 'screen'`)はまだ対象外** ── 機構は track の中身を
+ *   見ないので効くはずだが、実ブラウザの画面収録では確かめていない。
+ * ⚠ **既にある添付は書き換えない**(不可逆 ── 添付を勝手に書き換えるのは
+ *   user のデータへの介入である)。効くのは**これから録る物**だけ。
+ *   `notice-log.ts` の対応する entry でそう伝える。
  */
+
+import { insertMissingDuration } from '@features/audio/webm-opus';
 
 /** どちらを録るか。 */
 export type CaptureKind = 'audio' | 'screen';
@@ -99,6 +117,59 @@ const SLICE_MS = 1000;
 /** 断りの理由を持つ失敗。⚠ **黙って no-op にしない**(#413 の要件)。 */
 export class CaptureRefused extends Error {}
 
+/**
+ * 🔴 **`Duration` を探すための先頭の読み量**(#952 A3)。
+ *
+ * ⚠ `Info`(容器の見出し)は実測で数百バイト以内(`TimestampScale` /
+ *   `MuxingApp` / `WritingApp` くらいしか無い)── 桁で余裕を持たせても、
+ *   1 本が 250MB あっても**ここだけは丸ごと読まない**ので安い。
+ * 🔑 足りなければ `insertMissingDuration` が `incomplete` で断り、
+ *   元の bytes をそのまま使う(退化するだけで、録音は壊れない)。
+ */
+const DURATION_HEADER_PREFIX_BYTES = 65536;
+
+/**
+ * 🔴 **切った 1 本に `Duration` を書き足す**(#952 A3)。
+ *
+ * ⚠ **先頭だけ読む**(`blob.slice` は写さない ── ゼロコピー)。書けなかった
+ *   ときは元の `blob` をそのまま返す(この機能が録音そのものを壊してはいけない)。
+ */
+async function withRecordedDuration(blob: Blob, durationMs: number): Promise<Blob> {
+  try {
+    const prefix = new Uint8Array(await blob.slice(0, DURATION_HEADER_PREFIX_BYTES).arrayBuffer());
+    const patched = insertMissingDuration(prefix, durationMs);
+    if (!patched.ok) return blob;
+    return new Blob([patched.bytes as BlobPart, blob.slice(prefix.length)], { type: blob.type });
+  } catch {
+    // ⚠ 長さが書けなくても、録音そのものは壊さない(退化するだけ)
+    return blob;
+  }
+}
+
+/**
+ * 🔴 **単調な時計を選ぶ**(#952 A3。着地前レビューで判明)。
+ *
+ * ⚠ ここで測った差は `Duration` として**添付へ恒久的に焼き込まれる**。
+ *   `Date.now()` は **NTP の補正・スリープ復帰・user の時計変更**で前後に飛ぶので、
+ *   飛んだぶんがそのまま長さになる ── **12 時間録れる**ので、飛ぶ窓も広い。
+ * 🔑 `now()` は**差にしか使っていない**(`now() - startedAt` /
+ *   `now() - segStartedAt` / `elapsedMs`)ので、既定を `performance.now()` へ
+ *   替えても意味は変わらず、**時計の飛びが構造から消える**。
+ * ⚠ 後ろ向きの飛びは `Math.max(0, …)` で既に潰してあったが、**前向きは無防備**だった
+ *   ── 片側だけ守るのは、守っていないのと同じ形で残る。
+ *
+ * 🔴 **引数で受けるのは、門が本当に効くことを検められるようにするため**である
+ *   ── `globalThis` を直に読むと、**どちらの枝を通ったか test から見えない**
+ *   (CLAUDE.md §2「経路が一度も通っていない」)。⚠ 製品からは `globalThis` を渡す。
+ *
+ * @param host `performance` を持たない環境(古い箱)では `Date.now` へ落ちる。
+ */
+export function pickClock(host: { performance?: { now(): number } }): () => number {
+  const perf = host.performance;
+  if (perf === undefined || typeof perf.now !== 'function') return () => Date.now();
+  return () => perf.now();
+}
+
 function pick(deps: CaptureDeps, kind: CaptureKind): (c: MediaStreamConstraints) => Promise<MediaStream> {
   const md = (globalThis as { navigator?: { mediaDevices?: MediaDevices } }).navigator?.mediaDevices;
   const fn =
@@ -127,7 +198,7 @@ export async function startCapture(
   deps: CaptureDeps,
   opts: CaptureOptions,
 ): Promise<CaptureHandle> {
-  const now = deps.now ?? (() => Date.now());
+  const now = deps.now ?? pickClock(globalThis);
   const found = deps.Recorder ?? (globalThis as { MediaRecorder?: typeof MediaRecorder }).MediaRecorder;
   if (found === undefined) {
     throw new CaptureRefused('この環境では収録できません(ブラウザが対応していません)');
@@ -161,6 +232,12 @@ export async function startCapture(
   /** 🔴 **切って渡した本数**(#771)。⚠ **最後の 1 本は含まない**(`stop()` が返す)。 */
   let part = 0;
   const startedAt = now();
+  /**
+   * 🔴 **いま録っている 1 本(器 1 つぶん)の始まり**(#952 A3)。
+   * ⚠ 切るたびに(次の `Recorder` を起こす直前に)リセットする ── `Duration` は
+   *   **その 1 本自身の長さ**であって、収録全体の経過時間ではない。
+   */
+  let segStartedAt = startedAt;
   /** 捨てた ── 以後の断片も、既に積んだ分も**返さない**。 */
   let abandoned = false;
 
@@ -179,13 +256,24 @@ export async function startCapture(
   /**
    * いま積んでいる分を 1 本にして、**積み場を空ける**。
    * ⚠ 捨てた回・1 バイトも無い回は `null`(呼び側は「渡さない」を選べる)。
+   * 🔴 **`Duration` はここでは書かない**(#952 A3)── 次の器を作る手前で
+   *   呼ばれるので、ここで待つと**録っていない隙間**ができる。長さだけ
+   *   壁時計で持ち帰り、実際に書くのは `finalizeSegment`(非同期)に任せる。
    */
-  const takeSegment = (): Blob | null => {
+  const takeRawSegment = (): { blob: Blob; durationMs: number } | null => {
     if (abandoned || chunks.length === 0) return null;
     const blob = new Blob(chunks, { type: rec.mimeType || chunks[0]!.type });
+    const durationMs = Math.max(0, now() - segStartedAt);
     chunks.length = 0;
-    return blob;
+    return { blob, durationMs };
   };
+
+  /**
+   * 🔴 **長さを容器へ書く**(#952 A3)。⚠ **画面収録はまだ対象外**
+   *   (`media-capture.ts` 冒頭の docstring を見よ)。
+   */
+  const finalizeSegment = (seg: { blob: Blob; durationMs: number }): Promise<Blob> =>
+    kind === 'audio' ? withRecordedDuration(seg.blob, seg.durationMs) : Promise.resolve(seg.blob);
 
   /**
    * 🔴 **「止まった」は 1 本の約束で表す**(`onstop` が解決する)。
@@ -205,7 +293,12 @@ export async function startCapture(
     const resolve = settle;
     if (resolve === null) return;
     settle = null;
-    resolve(takeSegment());
+    const seg = takeRawSegment();
+    if (seg === null) {
+      resolve(null);
+      return;
+    }
+    void finalizeSegment(seg).then(resolve);
   };
 
   /**
@@ -245,13 +338,15 @@ export async function startCapture(
       emit();
       return;
     }
-    const blob = takeSegment();
-    if (blob !== null) {
-      part += 1;
-      opts.onPart?.(blob, part);
-    }
+    // 🔑 **先に取り出す**(次の器の壁時計と混ざらないように、リセットの前に読む)
+    const seg = takeRawSegment();
     segBytes = 0;
     phase = 'recording';
+    /**
+     * 🔴 **次の器を先に起こす**(#952 A3)── `Duration` を書く仕事(次の段落)は
+     *   非同期なので、そちらを待ってから起こすと**その間だけ録っていない隙間**
+     *   ができる。⚠ 順番を変えると、録音そのものが欠ける側の欠陥になる。
+     */
     try {
       rec = new Recorder(stream);
       arm();
@@ -259,6 +354,12 @@ export async function startCapture(
     } catch {
       // 🔴 次の器を作れない ── **録っているふりをしない**(帯だけ伸びるのが最悪)
       finish('failed');
+    }
+    segStartedAt = now();
+    if (seg !== null) {
+      part += 1;
+      const p = part; // ⚠ 非同期の間に `part` がまた進みうるので、値を控える
+      void finalizeSegment(seg).then((blob) => opts.onPart?.(blob, p));
     }
   }
 
