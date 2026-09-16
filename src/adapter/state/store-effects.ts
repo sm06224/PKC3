@@ -597,11 +597,20 @@ export function connectStoreEffects(
    *   それでも画面は「◯◯ を調べています(表 1 個 / 1.2 MB)」と出したいので、
    *   **本文の `attachment.size`** と **`File.size`** から採る。
    * ⚠ 分からなければ `0`(「大きさが出ない」だけで、開くことは止めない)。
+   * 🔴 **投げない。** ⚠ 1 稿目は上の 1 行を書きながら `store.getBody` の失敗を
+   *   受けておらず、**投げると `SQL_GUEST_OPENED` も `SQL_GUEST_FAILED` も出ない**
+   *   (`afterWrites` は rejection を誰も拾わない)── 画面は「調べています」も
+   *   「開けません」も出ないまま止まる = この repo がいちばん嫌う**無言の dead click**。
+   *   🔑 docstring の主張(「開くことは止めない」)を、実装の側で本当にする。
    */
   const sqlSourceSize = async (lid: string): Promise<number> => {
-    if (isSqlLocalFileLid(lid)) return opts.localSqlFileSize?.(lid) ?? 0;
-    const body = await store.getBody(lid);
-    return readAttachmentMeta(body ?? '').size ?? 0;
+    try {
+      if (isSqlLocalFileLid(lid)) return opts.localSqlFileSize?.(lid) ?? 0;
+      const body = await store.getBody(lid);
+      return readAttachmentMeta(body ?? '').size ?? 0;
+    } catch {
+      return 0;
+    }
   };
   /** 探す面の debounce の手(#680)。⚠ 解くときに止める ── 解いた後に撃たない。 */
   let detailTimer: ReturnType<typeof setTimeout> | null = null;
@@ -949,8 +958,9 @@ export function connectStoreEffects(
          *   ①大きい parquet を「選んだだけ」で heap へ載せない
          *    (不可侵指示 2026-07-27)
          *   ②手持ちの file の控えを**ここで消費しない**
-         * 🔑 表の名前は `guestTableNameOf` が答える ── `duckdb-runner.ts` の
-         *   `duckDbTableNameOf` と同じ答えであることを test が突き合わせる(§7)。
+         * 🔑 表の名前は `guestTableNameOf` **1 つ**が答える ── 器が `CREATE TABLE` する
+         *   名前(`duckdb-runner.ts`)も、画面の案内と手本(`sql-tip.ts`)も、
+         *   **同じこの関数**を呼ぶ(§7「同じ問いに答える口を 2 つ作らない」)。
          */
         if (isDuckDbOnlySource(source)) {
           afterWrites(async () => {

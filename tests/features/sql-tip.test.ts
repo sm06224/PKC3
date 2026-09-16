@@ -9,6 +9,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { SQL_RULES, sqlExampleText, sqlPlaceholder, sqlTipText, TIP_TABLES_MAX } from '../../src/features/query/sql-tip';
+import { checkDuckDbSql } from '../../src/features/query/duckdb-guard';
 
 const guest = (tables: string[]) => ({ name: '売上.sqlite', tables });
 
@@ -120,5 +121,72 @@ describe('打ち方の約束(#837 K1 で 2 行目へ分けた)', () => {
      *   6 文が 1 段落に続き、読み飛ばされる長さに逆戻りする。
      */
     expect(sqlTipText(null), '約束が案内文へ戻っている').not.toContain('読むだけ');
+  });
+});
+
+/**
+ * 🔴 **DuckDB の案内と手本は、いまの相手の表の名前で書く**(#682 段④c)。
+ *
+ * ## ⚠ なぜここが落とし穴だったか
+ *
+ * 段② の時点では DuckDB が写す表は**必ず `csv`** だったので、ここは字を直書きして
+ * いた(docstring にも「相手に依らず `csv` 固定」と書いてあった)。
+ * 🔴 `.parquet` を受けた日にそれが嘘になり、**画面のいちばん目立つ手本が
+ * 「打つと英語で断られる字」**になった ── 動線レビューが実測で出した。
+ * 🔑 だから名前は `guestTableNameOf` 1 か所から採る(器が `CREATE TABLE` する名前と同じ)。
+ */
+describe('🔴 DuckDB の案内・手本は相手ごとに変わる(#682 段④c)', () => {
+  const target = (name: string, tables: string[]) => ({ name, tables });
+
+  it('🔴 表の名前が、相手ごとに変わる', () => {
+    const want: Array<[string, string]> = [
+      ['売上.csv', 'csv'],
+      ['ログ.tsv', 'csv'],
+      ['売上.parquet', 'parquet'],
+      ['明細.json', 'json'],
+      ['ログ.ndjson', 'json'],
+    ];
+    for (const [name, table] of want) {
+      expect(sqlTipText(target(name, [table]), 'duckdb'), `${name}: 案内の表の名前が違う`).toContain(
+        `写した表 ${table} です`,
+      );
+      expect(sqlPlaceholder(target(name, [table]), 'duckdb'), `${name}: 手本が違う`).toBe(
+        `FROM ${table} SELECT * LIMIT 20`,
+      );
+    }
+    // ⚠ **空振り防止** ── 5 つが同じ名前に潰れていない
+    expect(new Set(want.map(([, t]) => t)).size).toBe(3);
+  });
+
+  /**
+   * 🔴 **足す列の話も、相手ごとに変わる** ── `.parquet` / `.json` には
+   *   `_note` / `_lid` を足さないので、「足します」と書くと嘘になる。
+   */
+  it('🔴 _note / _lid の話は csv のときだけ', () => {
+    expect(sqlTipText(target('売上.csv', ['csv']), 'duckdb')).toContain('_note と _lid');
+    for (const name of ['売上.parquet', '明細.json']) {
+      expect(sqlTipText(target(name, ['parquet']), 'duckdb'), `${name}: 在りもしない列を約束している`).not.toContain(
+        '_note',
+      );
+      expect(sqlTipText(target(name, ['parquet']), 'duckdb')).toContain('file に書いてある列');
+    }
+  });
+
+  /**
+   * ⚠ **手本は「打てる字」でなければならない** ── いちばん近くに在る見本なので、
+   *   user はそのまま写す。
+   */
+  it('🔴 出した手本が、そのまま打てる(門を通る)', () => {
+    for (const [name, table] of [['売上.parquet', 'parquet'], ['明細.json', 'json'], ['売上.csv', 'csv']] as const) {
+      const example = sqlPlaceholder(target(name, [table]), 'duckdb');
+      expect(checkDuckDbSql(example).ok, `${name}: 画面の手本が門に断られる`).toBe(true);
+    }
+  });
+
+  it('⚠ 相手を選ぶ前の案内は、DuckDB で選べる相手を全部知らせる', () => {
+    const first = sqlTipText(null, 'sqlite');
+    for (const ext of ['.csv', '.parquet', '.json']) {
+      expect(first, `${ext} を知らせていない`).toContain(ext);
+    }
   });
 });

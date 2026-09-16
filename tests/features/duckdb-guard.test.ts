@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { checkDuckDbSql, stripDollarQuotes } from '@features/query/duckdb-guard';
+import { checkReadOnlySql } from '@features/query/sql-guard';
 
 describe('DuckDB の字の門', () => {
   it('DuckDB でだけ読める書き方が通る', () => {
@@ -103,5 +104,35 @@ describe('DuckDB の字の門', () => {
 
   it('空の字は断る', () => {
     expect(checkDuckDbSql('   ')).toMatchObject({ ok: false });
+  });
+});
+
+/**
+ * 🔴 **断り文まで sqlite の物を返さない**(#682 段④c。動線レビューが出した)。
+ *
+ * ⚠ sqlite の門は「SELECT / WITH / VALUES / EXPLAIN のどれかで始めます」と返す ──
+ *   ところが**同じ画面の手本は `FROM … SELECT …` で始まっている**。
+ *   user から見ると「FROM で始めてよいのか、駄目なのか」が読めない。
+ */
+describe('🔴 DuckDB の断り文は、DuckDB で始められる語を挙げる(#682 段④c)', () => {
+  it('🔴 先頭の語で断る回は、FROM も挙げる', () => {
+    const r = checkDuckDbSql('SHOW TABLES');
+    expect(r.ok).toBe(false);
+    expect(r.why, 'どの語で始めればよいかが書いていない').toContain('SHOW では始められません');
+    for (const word of ['SELECT', 'FROM', 'PIVOT', 'DESCRIBE', 'SUMMARIZE']) {
+      expect(r.why, `${word} を挙げていない(画面の手本と食い違う)`).toContain(word);
+    }
+    /**
+     * ⚠ **空振り防止** ── sqlite の側は今までどおり 4 語のまま
+     *   (「どの engine でも同じ字」に潰れていない)。
+     */
+    const lite = checkReadOnlySql('SHOW TABLES');
+    expect(lite.why, 'sqlite の断りにまで FROM を足している').not.toContain('FROM');
+  });
+
+  it('⚠ 理由が違う断りは、sqlite の字のまま(書き込みの語・PRAGMA)', () => {
+    // 🔑 「始められません」ではないので、始められる語を並べ直す意味が無い
+    expect(checkDuckDbSql('DELETE FROM t').why).toContain('読み取り専用です');
+    expect(checkDuckDbSql('DELETE FROM t').why).not.toContain('PIVOT');
   });
 });

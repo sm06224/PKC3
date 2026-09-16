@@ -949,6 +949,16 @@ test('🔴 大きな画像は縮めるか聞き、断れば原寸のまま入る
  *    DOM 上は「置き換わった」ように見えることがある
  */
 test('🔴 囲みの中身を添付から取る ── csv の添付が表になる(#444 段①)', async ({ page }) => {
+  /**
+   * 🔴 **既定の 30 秒では足りない**(#682 段④c で実測した)。
+   *
+   * ⚠ この筋書きは中に **`{ timeout: 60_000 }` を 2 か所**持っているが、
+   *   `playwright.config.ts` の per-test は **30 秒**なので、
+   *   **その 60 秒は原理的に使い切れない**(先に test ごと落ちる)。
+   * 🔑 DuckDB は器(約 35MB)と拡張 3 つを読み込むので、実測で 30 秒に近づく ──
+   *   同じ file の 837 行が既に `test.setTimeout(120_000)` を置いている(前例)。
+   */
+  test.setTimeout(180_000);
   const errors = collectPageErrors(page);
   await gotoApp(page);
 
@@ -982,6 +992,21 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
     mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     buffer: Buffer.from(xlsxBytes),
   });
+  /**
+   * 🔴 **1 件ずつ、取り込めたのを見てから次を渡す**(#682 段④c で踏んだ)。
+   *
+   * ⚠ `attachFiles` は**非同期**で、受け口(`binder.ts`)は読んだ直後に
+   *   `el.value = ''` で入力欄を空にする ── 🔴 **待たずに次の file を渡すと、
+   *   飛んでいる取り込みと重なって、後の 1 件が黙って消える**。
+   * ⚠ 実測(2026-09-16、両ブラウザ同一):csv → xlsx → parquet と続けて渡したら、
+   *   **3 件目の `.parquet` だけが添付にならなかった**(左の一覧は csv / xlsx の 2 件、
+   *   状態の行は「uriage.xlsx を添付にしました」)。page error は **0 件**で、
+   *   選び所で `.parquet` を探す所が 25 秒 retry して落ちた。
+   * 🔑 だから**一覧に出たことを見てから**次へ進む(待ちを伸ばすのではなく、
+   *   **起きたことを観測してから**進む)。
+   */
+  const sidebar = page.locator('[data-pkc-region="sidebar"]');
+  await expect(sidebar, '.xlsx が添付として取り込まれていない').toContainText('uriage.xlsx');
 
   /**
    * 🔴 **`.parquet` も、ここで取り込む**(段⑤-c の下ごしらえ。#682 段④c)。
@@ -998,6 +1023,7 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
       ]),
     ),
   });
+  await expect(sidebar, '.parquet が添付として取り込まれていない').toContainText('uriage.parquet');
 
   await createEntry(page, 'text');
   const ta = page.locator('[data-pkc-field="editor-body"]');
@@ -1473,7 +1499,17 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   ).toBe(true);
   await expect(liteOption, 'なぜ選べないかが書いていない').toContainText('DuckDB');
 
-  await page.fill('[data-pkc-field="sql-input"]', 'SELECT * FROM parquet ORDER BY id');
+  /**
+   * 🔴 **画面に出ている手本を、そのまま走らせる**(#682 段④c、着地前レビューの提案)。
+   *
+   * ⚠ 自分で字を打つと、**画面の案内と手本が嘘でも通ってしまう** ── 実際
+   *   `sql-tip.ts` が `csv` を直書きしていて、`.parquet` を選ぶと
+   *   **手本をそのまま打つと英語で断られる**状態だった(unit も smoke も鳴らなかった)。
+   * 🔑 だから「画面に出ている字で本当に引けるか」を、ここで 1 本に繋ぐ。
+   */
+  const example = (await page.locator('[data-pkc-field="sql-example"]').textContent()) ?? '';
+  expect(example, '手本が parquet の名前で書かれていない').toContain('FROM parquet');
+  await page.fill('[data-pkc-field="sql-input"]', example.replace(/^例:\s*/u, ''));
   await clickReal(page, '[data-pkc-action="run-sql"]');
   /**
    * ⚠ **長めに待つ** ── 初回は器(約 35MB)と拡張 3 つを取りに行くので、
@@ -1486,6 +1522,10 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   ).toEqual(['id', 'shinamono']);
   await expect(sqlTable.locator('tbody tr'), '行の数が合わない').toHaveCount(3);
   await expect(sqlTable, 'parquet の中身が出ていない').toContainText('mikan');
+  // ⚠ 断り文が表の代わりに出ていないこと(「出た」と「正しく出た」を分ける)
+  await expect(page.locator('[data-pkc-field="sql-note"]'), '断り文が出ている').not.toContainText(
+    'does not exist',
+  );
   // ⚠ **外へ出ていない**(段② の柱)── localhost 以外への要求が 1 件も無いこと
   expect(outward, `.parquet を引いたのに外へ出た: ${outward.join(' / ')}`).toEqual([]);
 

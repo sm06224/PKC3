@@ -15,6 +15,27 @@ import { DEFAULT_SQL_ENGINE, sqlEngineOf, type SqlEngine } from '@features/query
 import { schemaModel, type Grid, type SchemaLink, type SchemaModel } from '@features/query/schema-digest';
 import { erSql, type ErAction } from '@features/query/er-sql';
 import { isDuckDbOnlySource, sqlGuestSourceOf } from '@features/query/sql-guest-source';
+
+/**
+ * 🔴 **この相手からは構造を採れない、の理由**(#682 段④c)。
+ *
+ * ⚠ 構造を採る 3 本(`schema-digest.ts`)は**内蔵の sqlite へ**打つ ── ところが
+ *   `.parquet` / `.json` は sqlite worker を 1 度も通らない(中身を読めないので)。
+ *   🔴 そのまま頼むと worker が
+ *   **「取り込んだ .sqlite が開かれていません(先に選んでください)」**と返す ──
+ *   user は `.parquet` を選んだのに `.sqlite` の話をされ、**いまやったばかりの操作を
+ *   もう一度やれと言われる**(動線レビュー 2026-09-16 が実測で出した)。
+ * 🔑 だから**頼まない**。理由はここ 1 か所に持ち、3 つの入口(相手を選んだ / 図を開いた /
+ *   構造をノートへ)が同じ字を出す(§7)。
+ *
+ * @returns `null` = 採れる。文字列 = 採れない理由(画面に出す字)。
+ */
+function schemaUnavailable(guest: { readonly lid: string; readonly name: string } | null): string | null {
+  if (guest === null) return null;
+  return isDuckDbOnlySource(sqlGuestSourceOf(guest.lid, guest.name))
+    ? 'この形式のつながり図は、まだ出せません(DuckDB で引く相手です)'
+    : null;
+}
 import { pickErConnection, type ErPendingFrom } from '@features/query/er-connect';
 import { listViewOptions } from './list-view-options';
 import { resolveCanonicalParents, reorderSibling } from '@features/relation/tree';
@@ -2582,8 +2603,9 @@ export type DomainEvent =
        */
       engine: SqlEngine;
       /**
-       * DuckDB で引くときの相手(csv / tsv の 1 件)。⚠ `engine === 'duckdb'` の
-       * ときだけ在る ── DuckDB は**選んだ相手の bytes 1 つ**しか受け取らない。
+       * DuckDB で引くときの相手(csv / tsv / parquet / json の 1 件。#682 段④c)。
+       * ⚠ `engine === 'duckdb'` のときだけ在る ── DuckDB は**選んだ相手の bytes 1 つ**
+       * しか受け取らない。
        */
       duck?: { lid: string; name: string };
     }
@@ -3657,7 +3679,8 @@ function reduceCore(
             ...(state.sqlPage.guest === null ? {} : { guest: true }),
             /**
              * ⚠ **相手は「いま開いている物」から採る** ── `engine` が `duckdb` に
-             *   なるのは相手が csv / tsv のときだけなので(`enginesForSource`)、
+             *   なるのは**取り込んだ file を選んでいるとき**だけなので
+             *   (`enginesForSource` ── csv / tsv / parquet / json。#682 段④c)、
              *   ここで `guest` が `null` になることは無い。⚠ それでも `?.` で書くのは、
              *   将来 engine の表が変わった日に**落ちるのではなく sqlite へ落ちる**ため。
              */
@@ -3698,6 +3721,15 @@ function reduceCore(
     }
     case 'SQL_SCHEMA_TO_NOTE': {
       if (state.sqlPage.running) return { state, events: [] };
+      /**
+       * 🔴 **採れない相手には頼まない**(#682 段④c)── 頼むと worker が
+       *   `.sqlite` の話で断るので、`.parquet` を選んだ user には意味が通らない。
+       * ⚠ `running` を立てない ── 立てると、答えが来ないまま押せなくなる。
+       */
+      const why = schemaUnavailable(state.sqlPage.guest);
+      if (why !== null) {
+        return { state: { ...state, sqlPage: { ...state.sqlPage, error: why, saved: '' } }, events: [] };
+      }
       return {
         state: { ...state, sqlPage: { ...state.sqlPage, running: true, error: '', saved: '' } },
         events: [
@@ -3729,6 +3761,35 @@ function reduceCore(
       if (p.er.model !== null && p.er.source === source) {
         return {
           state: { ...state, sqlPage: { ...p, er: { ...p.er, open: true, note: '' } } },
+          events: [],
+        };
+      }
+      /**
+       * 🔴 **採れない相手なら、開くけれど頼まない**(#682 段④c)。
+       * ⚠ 直す前はここが `note: ''` で**理由を消してから**頼んでいた ──
+       *   `SQL_GUEST_OPENED` が書いた親切な字は、図が閉じている間は画面に出ないので、
+       *   **物語の順(相手を選ぶ → 図を開く)では 1 度も読めなかった**。
+       * ⚠ 「採っています」のまま止めない(`loading: false`)。
+       */
+      const erWhyOpen = schemaUnavailable(p.guest);
+      if (erWhyOpen !== null) {
+        return {
+          state: {
+            ...state,
+            sqlPage: {
+              ...p,
+              er: {
+                ...p.er,
+                open: true,
+                loading: false,
+                model: null,
+                note: erWhyOpen,
+                source,
+                mine: [],
+                pendingFrom: null,
+              },
+            },
+          },
           events: [],
         };
       }
@@ -4038,10 +4099,8 @@ function reduceCore(
        *   内蔵の sqlite へ打つので、**そこに客の DB が無い**。頼めば生の断り文が
        *   図の所に出るだけなので、**頼まずに理由を書く**。
        */
-      const erWhy = isDuckDbOnlySource(sqlGuestSourceOf(action.lid, action.name))
-        ? 'この形式のつながり図は、まだ出せません(DuckDB で引く相手です)'
-        : undefined;
-      const er = erForSource(state.sqlPage.er, action.lid, true, true, erWhy);
+      const erWhy = schemaUnavailable({ lid: action.lid, name: action.name });
+      const er = erForSource(state.sqlPage.er, action.lid, true, true, erWhy ?? undefined);
       return {
         state: {
           ...state,

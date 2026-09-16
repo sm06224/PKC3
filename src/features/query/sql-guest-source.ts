@@ -129,9 +129,12 @@ export type DuckDbOnlyGuestSource = Exclude<SqlGuestSource, SqliteReadableGuestS
  *   (返していた頃は、呼び側に「`null` のときどうするか」という
  *   **誰も通らない枝**を書かせていた ── CLAUDE.md §7)。
  *
- * 🔑 **`duckdb-runner.ts` も同じこの関数を呼ぶ** ── 画面が「表 ◯ 個」と言う名前と、
- *   器が実際に `CREATE TABLE` する名前が**同じ 1 か所**から出るので、
- *   「画面に出ている名前で引けない」が構造から消えている。
+ * 🔑 **読み手は 2 つとも、この関数を呼ぶ** ── 器が実際に `CREATE TABLE` する名前
+ *   (`duckdb-runner.ts`)と、**画面の案内・薄字の手本・消えない例文**(`sql-tip.ts`)が
+ *   同じ 1 か所から出るので、「**画面に出ている名前で引けない**」が構造から消えている。
+ * ⚠ **1 稿目はここが嘘だった** ── 画面の側は `csv` を直書きしていて、この関数を
+ *   1 度も呼んでいなかった(`.parquet` を選ぶと**手本をそのまま打って英語で断られる**)。
+ *   着地前レビューと動線レビューが、独立に同じ 1 件を挙げた。
  */
 export function guestTableNameOf(src: DuckDbReadableGuestSource): string {
   switch (src.kind) {

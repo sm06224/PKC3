@@ -3414,7 +3414,7 @@ describe('🔴 .parquet / .json を調べる相手として受ける(#682 段④
   });
 
   it('🔴 選ぶと、sqlite worker を 1 度も叩かずに「調べています」になる', async () => {
-    const { pick, note, openSqlGuest, readAssetBytes } = setup();
+    const { pick, note, openSqlGuest, readAssetBytes, d } = setup();
     pick('db7');
     await settle();
     expect(openSqlGuest, '内蔵の sqlite に .parquet を渡している(必ず断られる)').toHaveBeenCalledTimes(0);
@@ -3424,10 +3424,48 @@ describe('🔴 .parquet / .json を調べる相手として受ける(#682 段④
      */
     expect(readAssetBytes, '選んだだけで中身を読みに行っている').toHaveBeenCalledTimes(0);
     expect(note(), '開いたことが画面に出ない').toContain('売上.parquet を調べています');
-    // 🔑 表の名前は `parquet` ── user が打つ字である
     expect(note()).toContain('表 1 個');
+    /**
+     * 🔴 **表の名前そのものを見る**(着地前レビューの変異 2)。
+     * ⚠ 帯に出るのは**個数だけ**なので、`tables: ['csv']` に潰す変異は
+     *   `toContain('表 1 個')` では殺せない ── **state の値**を直に見る。
+     * 🔑 この名前は `guestTableNameOf` から出ており、器が `CREATE TABLE` する名前と
+     *   **同じ 1 か所**である(§7)。
+     */
+    expect(d.getState().sqlPage.guest?.tables, 'user が打つ表の名前が違う').toEqual(['parquet']);
     // ⚠ 大きさは**本文の `attachment.size`** から採る(中身を読まずに)
     expect(note(), '大きさが出ていない(中身を読まずに採れているか)').toContain('4.0 KB');
+  });
+
+  /**
+   * 🔴 **画面の案内と手本が、そのまま打てる字である**(#682 段④c)。
+   *
+   * ⚠ 直す前は `sql-tip.ts` が **`csv` を直書き**していたので、`.parquet` を選ぶと
+   *   **画面のいちばん近くに在る手本が、打つと英語で断られる字**だった
+   *   (着地前レビューと動線レビューが独立に同じ 1 件を挙げた)。
+   * 🔑 だから**画面から読んだ字**を見る ── 関数を直に呼ぶ test では、
+   *   描画器が別の字を出していても気づけない。
+   */
+  it('🔴 画面の案内と手本が、いまの相手の表の名前で書かれている', async () => {
+    const { pick, pane } = setup();
+    pick('db7');
+    await settle();
+    const tip = pane.querySelector('[data-pkc-field="sql-tip"]')?.textContent ?? '';
+    const example = pane.querySelector('[data-pkc-field="sql-example"]')?.textContent ?? '';
+    expect(tip, '案内が前の相手(csv)の話をしている').toContain('写した表 parquet です');
+    expect(tip, '足さない列を約束している').not.toContain('_note');
+    expect(example, '手本が打てない字になっている').toContain('FROM parquet');
+    /**
+     * ⚠ **対照群** ── csv では今までどおり(「どの相手でも parquet」に壊れていない)。
+     * 🔑 `.csv` の既定は**内蔵の sqlite** なので、DuckDB の枝を見るには**選び直す**
+     *   ── 選び直さないと、比べているのは別の engine の字である。
+     */
+    const { pick: pick2, pane: pane2, pickEngine } = setup();
+    pick2('db4');
+    await settle();
+    pickEngine('duckdb');
+    await settle();
+    expect(pane2.querySelector('[data-pkc-field="sql-example"]')?.textContent).toContain('FROM csv');
   });
 
   it('🔴 エンジンは DuckDB になり、内蔵の sqlite は薄い字で理由が出る', async () => {
@@ -3485,6 +3523,65 @@ describe('🔴 .parquet / .json を調べる相手として受ける(#682 段④
    *   生の断り文が図の所に出る。⚠ 頼まないと「採っています」で永久に止まる。
    *   🔑 だから**頼まずに、理由を書く**。
    */
+  /**
+   * 🔴 **物語の順で押しても、理由が出る**(#682 段④c。着地前レビュー F2)。
+   *
+   * ⚠ user は「相手を選ぶ → 図を開く」の順に押す。⚠ ところが直す前の
+   *   `SQL_ER_TOGGLE` は **`note` を空に潰してから** sqlite へ頼んでいたので、
+   *   `SQL_GUEST_OPENED` が書いた親切な字は**この順では 1 度も読めなかった**
+   *   (図が閉じている間は画面に出ないので)。
+   * 🔑 下の test は「図を先に開く」順なので、**この口を 1 度も通らない** ──
+   *   だから**両方の順**を置く(§2「経路が一度も通っていない」)。
+   */
+  it('🔴 相手を選んでから図を開いても、採れない理由が出る(.sqlite の話をしない)', async () => {
+    const { pick, pane, runReadOnlySql } = setup();
+    pick('db7');
+    await settle();
+    runReadOnlySql.mockClear();
+    pane.querySelector<HTMLButtonElement>('[data-pkc-action="sql-er-toggle"]')?.click();
+    await settle();
+    const er = pane.querySelector('[data-pkc-region="sql-er"]')?.textContent ?? '';
+    expect(er, '採れない理由が出ていない').toContain('まだ出せません');
+    expect(er, '選んだばかりなのに「先に選んでください」と言っている').not.toContain('先に選んで');
+    expect(runReadOnlySql, '採れないのに内蔵の sqlite へ聞きに行っている').toHaveBeenCalledTimes(0);
+  });
+
+  /**
+   * 🔴 **「構造をノートへ」も同じ門を通る**(着地前レビュー F2 の 2 つ目)。
+   * ⚠ この押し所は**答えが無くても押せる**ので、`.parquet` を選んだまま押せてしまう。
+   */
+  it('🔴 「構造をノートへ」も、.sqlite の話で断らない', async () => {
+    const { pick, pane, schemaBtn, runReadOnlySql, persisted } = setup();
+    pick('db7');
+    await settle();
+    runReadOnlySql.mockClear();
+    schemaBtn.click();
+    await settle();
+    expect(pane.textContent, '採れない理由が出ていない').toContain('まだ出せません');
+    expect(pane.textContent, '選んだばかりなのに「先に選んでください」と言っている').not.toContain(
+      '先に選んで',
+    );
+    expect(runReadOnlySql, '採れないのに内蔵の sqlite へ聞きに行っている').toHaveBeenCalledTimes(0);
+    expect(persisted, '採れないのにノートを作っている').toHaveLength(0);
+    // ⚠ **押せなくなっていない**(`running` を立てたまま止めていない)
+    expect(schemaBtn.disabled, '押したきり、二度と押せなくなっている').toBe(false);
+  });
+
+  /**
+   * 🔴 **手持ちの `.parquet`**(着地前レビュー F6)── `sqlSourceSize` の
+   *   手持ち file の枝を通る**唯一の場面**である。
+   */
+  it('🔴 手持ちの .parquet も、sqlite を叩かずに開ける', async () => {
+    const { pickLocalFile, note, openSqlGuest, engineSel } = setup();
+    pickLocalFile(new File([new Uint8Array(1234)], 'tegara.parquet'));
+    await settle();
+    expect(openSqlGuest, '手持ちの .parquet を内蔵の sqlite へ渡している').toHaveBeenCalledTimes(0);
+    expect(note(), '開いたことが画面に出ない').toContain('tegara.parquet を調べています');
+    // ⚠ 大きさは `File.size` から採る(中身は 1 バイトも読まない)
+    expect(note(), '大きさが出ていない').toContain('1.2 KB');
+    expect(engineSel.value, '手持ちの .parquet で sqlite を選んでいる').toBe('duckdb');
+  });
+
   it('🔴 つながり図は、採れない理由をその場に出す(永久に「採っています」にしない)', async () => {
     const { pick, pane, runReadOnlySql } = setup();
     // 図を開いてから相手を選ぶ(開いているときだけ採りに行く作り)
