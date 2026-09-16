@@ -34,7 +34,13 @@ import { xlsxAttachmentSourcesOf } from '@features/query/xlsx-attachment';
 import { isSqlLocalFileLid, SQL_PICK_LOCAL_FILE_VALUE } from '@features/query/sql-local-file';
 import { humanBytes } from '@features/human-bytes';
 import { sqlExampleText, sqlPlaceholder, sqlRulesText, sqlTipText } from '@features/query/sql-tip';
-import { enginesForSource, SQL_ENGINE_LABEL, sqlEngineOf, type SqlEngine } from '@features/query/sql-engine';
+import {
+  SQL_ENGINE_LABEL,
+  SQL_ENGINES,
+  sqlEngineHint,
+  sqlEngineOf,
+  type SqlEngine,
+} from '@features/query/sql-engine';
 import {
   SQL_WINDOW_MIN,
   sqlWindowOf,
@@ -496,30 +502,45 @@ export class SqlRenderer {
   }
 
   /**
-   * 🔴 **どのエンジンで引くかの選び所を揃える**(#682 段②)。
+   * 🔴 **どのエンジンで引くかの選び所を揃える**(#682 段② → **段③c で作り替えた**)。
    *
-   * ⚠ **選べるものが 2 つ以上あるときだけ出す** ── 1 つしか無い相手で出すと、
-   *   選んでも何も変わらない口になる。🔑 在ることは案内文が知らせる
-   *   (`sqlTipText` の「取り込んだ .csv や .tsv を選ぶと、DuckDB でも引けます」)。
+   * ## ⚠ 直す前はこうだった ── **選べる物が 1 つの相手では、選び所ごと消えていた**
+   *
+   * 「選んでも何も変わらない口を作らない」という理屈で `hidden` にしていたが、
+   * 🔴 user 報告 2026-09-16 は「**duckdb の導線が無い**」だった ──
+   * 取り込んだ `.csv` を選んでいる間しか存在しないので、**探しても見つからない**。
+   * 🔑 **消す作りが、そのまま「無い」に見えていた。**
+   *
+   * ## いまの形
+   *
+   * **常に全部を並べ、選べない側は薄い字(`disabled`)にして、隣に理由を書く。**
+   * ⚠ `disabled` な `option` は**選べない**ので、無言の dead click にはならない。
    * ⚠ **いま選ばれている物は `sqlEngineOf` から書き戻す** ── state が持つのは
    *   「user が選んだ物」で、相手によっては成り立たない。画面には**実際に引く物**を出す
    *   (画面と実体を食い違わせない ── この file の上のほうと同じ規律)。
+   *
+   * 🔑 **組み直す合図は「理由まで込みの指紋」** ── 相手が `.csv` から `.xlsx` へ
+   *   変わると、並ぶ物の数は同じでも**理由の字が変わる**。数だけを鍵にすると、
+   *   **前の相手の理由が残る**。
    */
   private paintEngine(state: AppState): void {
     const sel = this.engine;
     if (sel === null) return;
-    const choices = enginesForSource(state.sqlPage.guest?.name ?? null);
-    const key = choices.join('|');
+    const name = state.sqlPage.guest?.name ?? null;
+    const hints = SQL_ENGINES.map((e) => sqlEngineHint(e, name));
+    const key = hints.map((h) => h ?? '').join('|');
     if (key !== this.engineKey) {
       this.engineKey = key;
       sel.textContent = '';
-      for (const e of choices) {
+      SQL_ENGINES.forEach((e, i) => {
+        const hint = hints[i] ?? null;
         const opt = document.createElement('option');
         opt.value = e;
-        opt.textContent = SQL_ENGINE_LABEL[e];
+        opt.textContent = hint === null ? SQL_ENGINE_LABEL[e] : `${SQL_ENGINE_LABEL[e]} ── ${hint}`;
+        opt.disabled = hint !== null;
         sel.append(opt);
-      }
-      sel.hidden = choices.length < 2;
+      });
+      sel.hidden = false;
     }
     const want = sqlEngineOf(state.sqlPage);
     if (sel.value !== want) sel.value = want;
