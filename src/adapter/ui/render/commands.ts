@@ -323,6 +323,18 @@ function buildStorageProfile(): HTMLElement {
   note.setAttribute('data-pkc-field', 'storage-profile-shared');
   note.hidden = true;
   box.append(note);
+
+  /**
+   * 🔴 **ブラウザが言う本当の使用量**(#971 段②)。
+   *
+   * ⚠ 直す前は、この面が数えるのは**添付の合計だけ**で、しかもすぐ下に
+   *   「ブラウザの数とは一致しない」と断ってあった ── つまり
+   *   **本当の残りを知る道が 1 つも無かった**。ここがその 1 行である。
+   */
+  const quota = document.createElement('p');
+  quota.setAttribute('data-pkc-field', 'storage-quota');
+  quota.hidden = true;
+  box.append(quota);
   return box;
 }
 
