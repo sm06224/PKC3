@@ -2316,6 +2316,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-16(#971 ── 壊れたときに書き込みを止める)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-13-icon-list-fold" …` → ee1d27d
+     */
+    'アプリの目印を選ぶ絵の一覧が、畳めるようになりました',
+    /**
      * ⚠ **2026-09-16(#918 段⑤d-2/d-3 ── 本文の表と 0 本の理由)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-13-search-field-name" …` → e9defc9
      */

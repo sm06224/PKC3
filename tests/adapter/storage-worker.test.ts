@@ -2862,6 +2862,42 @@ describe('本文の csv を SQL から引く(#681 段③)', () => {
   });
 
   /**
+   * 🔴 **客の file が壊れていても、本体への書き込みを止めない**(#971)。
+   *
+   * ⚠ 見張り(`shouldFlagCorrupt`)を足したとき、**書いている最中に見つけた穴**である ──
+   *   `openSqlGuest` は user が取り込んだ file を開く口なので、壊れた `.sqlite` を
+   *   1 つ選んだだけで `file is not a database` が出る。それを「うちの DB が壊れた」と
+   *   読むと、🔴 **user は何も壊していないのにノートを保存できなくなる**。
+   *
+   * 🔑 ここは**本物の worker**で通す ── 判定そのものは
+   *   `tests/features/db-corruption.test.ts` が全数で見るが、
+   *   **配線(どの op に、どの旗が立つか)はここでしか通らない**(CLAUDE.md §7)。
+   */
+  it('🔴 取り込んだ file が壊れていても、ノートは保存できる(#971)', async () => {
+    // ⚠ わざと sqlite ではない bytes(先頭の魔法が違う)
+    const junk = new Uint8Array(4096);
+    junk.set([0x6e, 0x6f, 0x74, 0x61], 0);
+    await expect(
+      request({ op: 'openSqlGuest', image: junk, guest: 'w-971' }),
+    ).rejects.toThrow();
+
+    // 🔴 **ここが主張** ── 客が壊れていても、本体は書ける
+    await write('after-bad-guest', doc('壊れた客のあとに書く'));
+    expect(await request({ op: 'getBody', cid: 'c1', lid: 'after-bad-guest' })).toContain(
+      '壊れた客のあとに書く',
+    );
+
+    // ⚠ 並び替え(user が踏んだ当の op)も通る
+    const stamps = await request({
+      op: 'reorderEntry',
+      cid: 'c1',
+      lid: 'after-bad-guest',
+      entryOrder: 5,
+    });
+    expect(stamps, '並び替えまで止まっている').not.toBeNull();
+  });
+
+  /**
    * 🔴 **列の名前の目録**(`csv_columns`。#918 段⑤d-2)。
    *
    * ⚠ 本文の csv は **temp の表**なので `sqlite_master` に出ない ── だから
