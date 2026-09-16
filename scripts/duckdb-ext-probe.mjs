@@ -75,9 +75,20 @@ async function main() {
   const db = await createDuckDB(bundles(), new VoidLogger(), NODE_RUNTIME);
   await db.instantiate();
   const conn = db.connect();
+  /**
+   * 🔴 **数を `JSON.stringify` にそのまま渡さない**(2026-09-16 の 1 回目で踏んだ)。
+   *
+   * ⚠ DuckDB の `COUNT(*)` は **BIGINT** なので JS へは `BigInt` で来るが、
+   *   `JSON.stringify` はそれを**払えない**(`Do not know how to serialize a BigInt`)。
+   * 🔴 帰結が悪い ── **問い合わせは通っているのに、印字だけが落ちて
+   *   「🔴 parquet で書いて読み直す」と出た** ── 拡張が使えないように見える。
+   * 🔑 CLAUDE.md §4「計器が壊れているなら、結果を読まずに計器を直す」の実例である。
+   */
   const one = (sql) => {
     const t = conn.query(sql);
-    return JSON.stringify(t.toArray().map((r) => r.toJSON()));
+    return JSON.stringify(t.toArray().map((r) => r.toJSON()), (_k, v) =>
+      typeof v === 'bigint' ? `${v}n` : v,
+    );
   };
 
   console.log(`# 器の版: ${one('SELECT version() AS v')}`);
