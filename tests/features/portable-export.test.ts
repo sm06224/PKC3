@@ -12,6 +12,7 @@ import {
   stampHead,
   writePortableBundle,
 } from '../../src/features/export/portable-bundle';
+import { MAX_EMBED_TEXT_CHARS } from '../../src/features/storage/image-export-limit';
 import { parseBundleTag, type PortableBundle } from '../../src/features/portable/bundle';
 
 const OLD: PortableBundle = { id: 'pkcb-template', exportedAt: 0 };
@@ -218,5 +219,103 @@ describe('断るべきもの', () => {
     expect(html.indexOf('data-pkc-db-image')).toBeLessThan(html.lastIndexOf('</body>'));
     // そして器の外に出ていない
     expect(html.slice(html.lastIndexOf('</body>'))).not.toContain('data-pkc-db-image');
+  });
+});
+
+/**
+ * 🔴 **焼けるが開けない大きさを、焼かせない**(#996)。
+ *
+ * ## ⚠ この test が証明していないこと(先に書く)
+ *
+ * 384 MiB の中身を unit で本当に確保することはできないので、**大きさだけを偽って**
+ * 門に当てている。🔑 だから証明できるのは「**門が `byteLength` / `size` を見て
+ * 断っている**」までで、「**本当に 384 MiB を焼こうとすると断られる**」ではない
+ * (そちらは #996 の残りとして、実際に作って確かめる)。
+ * ⚠ **偽っていることを隠さない** ── 隠すと、次に読む人が「実測済み」と読む。
+ */
+describe('🔴 読み戻せない大きさを焼かせない(#996)', () => {
+  const EDGE = Math.floor((MAX_EMBED_TEXT_CHARS * 3) / 4);
+
+  /** 大きさだけ偽る(中身は 1 バイト)。⚠ 門より後ろへは進まない前提で使う。 */
+  const fakeSize = <T extends object>(o: T, prop: 'byteLength' | 'size', n: number): T => {
+    Object.defineProperty(o, prop, { value: n, configurable: true });
+    // ⚠ **偽れたことを確かめる** ── 偽れていなければ門は小さい値を見るので、
+    //   この test は「常に通る」空振りになる(CLAUDE.md §1)
+    expect((o as unknown as Record<string, number>)[prop], '大きさを偽れていない').toBe(n);
+    return o;
+  };
+
+  const oneAsset = (blob: Blob): AsyncGenerator<{ key: string; mime: string; blob: Blob }> =>
+    (async function* () {
+      yield { key: 'a1b2c3d4', mime: 'image/png', blob };
+    })();
+
+  it('🔴 読み戻せない大きさの中身は、焼く前に断る', async () => {
+    await expect(
+      writePortableBundle({
+        template: template(),
+        bundle: NEW,
+        image: fakeSize(new Uint8Array([1]), 'byteLength', EDGE + 1),
+        assets: nothing,
+      }),
+    ).rejects.toThrow(/二度と開けません/);
+  });
+
+  /**
+   * 🔴 **対照群 ── 門が「いつでも鳴っている」のではないこと。**
+   *
+   * ⚠ 大きさを偽っているので、**門を抜けた先で本物の確保が落ちる**
+   *   (`new Blob([image])` が 384 MiB を積もうとする)。
+   * 🔑 だから見るのは「落ちたかどうか」ではなく「**どの字で落ちたか**」である ──
+   *   門が鳴っていれば断り文が出るし、抜けていれば確保の error が出る。
+   */
+  it('⚠ 境目ちょうどでは門が鳴らない(対照群)', async () => {
+    const err: unknown = await writePortableBundle({
+      template: template(),
+      bundle: NEW,
+      image: fakeSize(new Uint8Array([1]), 'byteLength', EDGE),
+      assets: nothing,
+    }).catch((e: unknown) => e);
+    expect(String(err), '境目ちょうどで門が鳴った').not.toContain('二度と開けません');
+    // ⚠ 空振り防止 ── 本当に門の先(確保)まで進んでいる
+    expect(String(err), '門の先まで進んでいない').toContain(String(EDGE));
+  });
+
+  it('⚠ 普通の大きさは、これまでどおり最後まで焼ける(対照群)', async () => {
+    const out = await writePortableBundle({
+      template: template(),
+      bundle: NEW,
+      image: new Uint8Array([1, 2, 3]),
+      assets: nothing,
+    });
+    expect(out.imageBytes).toBe(3);
+    expect(out.warnings).toEqual([]);
+  });
+
+  it('🔴 大きすぎる添付は、その 1 件だけ落として名指しで言う', async () => {
+    const out = await writePortableBundle({
+      template: template(),
+      bundle: NEW,
+      image: new Uint8Array([1, 2, 3]),
+      assets: oneAsset(fakeSize(new Blob([new Uint8Array([9])]), 'size', EDGE + 1)),
+    });
+    // 🔑 **残りは焼けている**(1 件のために全部を失わせない)
+    expect(out.assets, 'その添付を焼いてしまった').toBe(0);
+    expect(out.warnings).toHaveLength(1);
+    expect(out.warnings[0], '名指ししていない').toContain('a1b2c3d4');
+    expect(out.warnings[0], '代わりの道を書いていない').toContain('.pkc3.zip');
+    // ⚠ 1 枚そのものは出来ている ── 開ける
+    expect(await out.blob.text()).toContain(`"id":"${NEW.id}"`);
+  });
+
+  it('⚠ 普通の大きさの添付は、これまでどおり焼ける(対照群)', async () => {
+    const out = await writePortableBundle({
+      template: template(),
+      bundle: NEW,
+      image: new Uint8Array([1, 2, 3]),
+      assets: oneAsset(new Blob([new Uint8Array([9, 8, 7])])),
+    });
+    expect(out.assets).toBe(1);
+    expect(out.warnings).toEqual([]);
   });
 });
