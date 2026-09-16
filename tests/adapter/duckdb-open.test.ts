@@ -49,7 +49,7 @@ function mockFetch(handler: (url: string) => Response): void {
   vi.stubGlobal('fetch', vi.fn((input: string | URL) => Promise.resolve(handler(String(input)))));
 }
 
-async function open(extensions?: readonly { name: string; url: string }[]) {
+async function open(extensions?: { repository: string; names: readonly string[] }) {
   const { openDuckDb } = await import('../../src/adapter/platform/duckdb/duckdb-open');
   return openDuckDb({ ...URLS, ...(extensions === undefined ? {} : { extensions }) });
 }
@@ -61,61 +61,69 @@ describe('🔴 開いた直後に拡張を読み込む(#682 段④b)', () => {
     vi.unstubAllGlobals();
   });
 
-  it('🔴 外を切ってから読み込む(順番)+ 打ち方は INSTALL → LOAD', async () => {
+  it('🔴 外を切ってから読み込む(順番)+ 打ち方は置き場 → INSTALL → LOAD', async () => {
     vi.stubGlobal('Worker', FakeWorker);
     mockFetch(() => new Response(new Uint8Array(1234)));
-    await open([{ name: 'parquet', url: 'blob:p' }]);
+    await open({ repository: 'https://x.test/app/duckdb/ext', names: ['parquet'] });
 
     expect(sql).toEqual([
       'SET autoinstall_known_extensions=false',
       'SET autoload_known_extensions=false',
-      "INSTALL 'parquet.duckdb_extension.wasm'",
+      "SET custom_extension_repository='https://x.test/app/duckdb/ext'",
+      'INSTALL parquet',
       'LOAD parquet',
     ]);
-    // 🔴 **門より先に読み込んでいない** ── 逆順だと、その間だけ外へ出られる
-    expect(sql.indexOf('SET autoload_known_extensions=false')).toBeLessThan(
-      sql.findIndex((q) => q.startsWith('INSTALL')),
-    );
-    expect(registered, '取ってきた bytes を器へ差し込んでいない').toEqual([
-      { name: 'parquet.duckdb_extension.wasm', bytes: 1234 },
-    ]);
+    /**
+     * 🔴 **門より先に読み込んでいない** ── 逆順だと、その間だけ外へ出られる。
+     * ⚠ 上の `toEqual` は**順番ごと**見ているが、それだけだと「並びが違う」としか
+     *   読めない ── だから**何が守れていないか**が文言に出る形で 1 本足す。
+     */
+    expect(
+      sql.indexOf('SET autoload_known_extensions=false'),
+      '拡張を読み込んでから外を切っている(その間だけ外へ出られる)',
+    ).toBeLessThan(sql.findIndex((q) => q.startsWith('INSTALL')));
   });
 
-  it('🔴 渡された在り処から取る(こちらで組み直さない)', async () => {
-    vi.stubGlobal('Worker', FakeWorker);
-    const seen: string[] = [];
-    vi.stubGlobal(
-      'fetch',
-      vi.fn((u: string) => {
-        seen.push(String(u));
-        return Promise.resolve(new Response(new Uint8Array(9)));
-      }),
-    );
-    await open([
-      { name: 'json', url: 'https://x.test/app/duckdb/ext/json.duckdb_extension.wasm' },
-      { name: 'sqlite_scanner', url: 'blob:sq' },
-    ]);
-    expect(seen).toEqual([
-      'https://x.test/app/duckdb/ext/json.duckdb_extension.wasm',
-      'blob:sq',
-    ]);
-    // ⚠ 渡した順に読み込む(名前と在り処が取り違わっていない)
-    expect(sql.filter((q) => q.startsWith('LOAD '))).toEqual(['LOAD json', 'LOAD sqlite_scanner']);
-  });
-
-  it('🔴 取ってこられなければ、名前を添えて投げる(黙って飲まない)', async () => {
-    vi.stubGlobal('Worker', FakeWorker);
-    mockFetch(() => new Response('nope', { status: 404 }));
-    await expect(open([{ name: 'parquet', url: 'blob:p' }])).rejects.toThrow(/parquet.*404/u);
-  });
-
-  it('⚠ 対照群 ── 拡張を渡さなければ、取りにも行かず INSTALL も打たない', async () => {
+  it('🔴 器の中へ bytes を差し込まない ── 取りに行くのは engine 自身(実測 2026-09-16)', async () => {
     vi.stubGlobal('Worker', FakeWorker);
     const fetchSpy = vi.fn(() => Promise.resolve(new Response(new Uint8Array(9))));
     vi.stubGlobal('fetch', fetchSpy);
+    await open({ repository: 'https://x.test/app/duckdb/ext', names: ['json'] });
+    /**
+     * ⚠ **こちらが取ってきて差し込む道は、実ブラウザで通らなかった**
+     *   (`registerFileBuffer` で置いても素通りして HTTP GET が飛ぶ)。
+     * 🔑 だから**こちらは 1 バイトも取らない** ── ここが変わったら、
+     *   また外へ出る道を作りかけている合図である。
+     */
+    expect(fetchSpy, 'こちらが拡張を取りに行っている(engine に任せる作りのはず)').not
+      .toHaveBeenCalled();
+    expect(registered, '器へ差し込んでいる(その道は通らない)').toEqual([]);
+  });
+
+  it('🔴 名前は engine へそのまま渡るので、受ける字を絞る', async () => {
+    vi.stubGlobal('Worker', FakeWorker);
+    mockFetch(() => new Response(new Uint8Array(9)));
+    await expect(
+      open({ repository: 'https://x.test/app/duckdb/ext', names: ['json; DROP'] }),
+    ).rejects.toThrow(/名前が不正/u);
+  });
+
+  it("⚠ 置き場の `'` は畳む(引用符が閉じない)", async () => {
+    vi.stubGlobal('Worker', FakeWorker);
+    mockFetch(() => new Response(new Uint8Array(9)));
+    // ⚠ 名前を 1 つ渡す ── 0 件だと置き場そのものを打たない(下の対照群がその形)
+    await open({ repository: "https://x.test/a'b", names: ['json'] });
+    expect(sql.find((q) => q.startsWith('SET custom_extension_repository'))).toBe(
+      "SET custom_extension_repository='https://x.test/a''b'",
+    );
+  });
+
+  it('⚠ 対照群 ── 拡張を渡さなければ、置き場も INSTALL も打たない', async () => {
+    vi.stubGlobal('Worker', FakeWorker);
     await open();
-    expect(fetchSpy, '渡していないのに取りに行った').not.toHaveBeenCalled();
-    expect(sql.filter((q) => q.startsWith('INSTALL') || q.startsWith('LOAD '))).toEqual([]);
+    expect(
+      sql.filter((q) => q.startsWith('INSTALL') || q.startsWith('LOAD ') || q.includes('repository')),
+    ).toEqual([]);
     // ⚠ 空振り防止 ── 門の 2 行は打たれている(この test が何も通っていないわけではない)
     expect(sql).toHaveLength(2);
   });

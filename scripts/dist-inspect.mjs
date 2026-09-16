@@ -119,6 +119,8 @@ export const DUCKDB_DIR = 'duckdb/';
  * `src/features/query/duckdb-pack.ts` の `DUCKDB_REQUIRED_FILES`
  * (`tests/duckdb-gate.test.ts` が**集合で**突き合わせる)。
  *
+ * ⚠ **版と台が path に入る** ── engine が `<置き場>/<版>/<台>/<名前>…` を
+ *   GET するので(実測 2026-09-16)、この形でなければ配っても 404 になる。
  * 🔑 **量ではなく集合で見る** ── 下限(KB)は「空 / 途中で切れた」しか止められず、
  *   **拡張が 1 つ落ちた**日は総量がほとんど変わらないので素通りする
  *   (CLAUDE.md §8「件数ではなく集合」)。⚠ そして落ちた拡張は
@@ -127,9 +129,9 @@ export const DUCKDB_DIR = 'duckdb/';
 export const DUCKDB_REQUIRED = [
   'duckdb-eh.wasm',
   'duckdb-browser-eh.worker.js',
-  'ext/json.duckdb_extension.wasm',
-  'ext/parquet.duckdb_extension.wasm',
-  'ext/sqlite_scanner.duckdb_extension.wasm',
+  'ext/v1.5.4/wasm_eh/json.duckdb_extension.wasm',
+  'ext/v1.5.4/wasm_eh/parquet.duckdb_extension.wasm',
+  'ext/v1.5.4/wasm_eh/sqlite_scanner.duckdb_extension.wasm',
 ];
 
 /**

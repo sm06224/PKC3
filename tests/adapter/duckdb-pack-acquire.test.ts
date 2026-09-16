@@ -21,6 +21,7 @@ import {
   fetchDuckDbPackManifest,
 } from '../../src/adapter/platform/duckdb/duckdb-pack-acquire';
 import {
+  DUCKDB_PACK_FILES,
   DUCKDB_REQUIRED_FILES,
   DUCKDB_WASM,
   DUCKDB_WORKER,
@@ -38,7 +39,7 @@ const REAL: Readonly<Record<string, number>> = {
   [duckDbExtensionPath('sqlite_scanner')]: 1_641_696,
 };
 
-/** ⚠ 一式は `DUCKDB_REQUIRED_FILES` から組む(手で並べると足した日に古くなる)。 */
+/** ⚠ 一式は `DUCKDB_PACK_FILES` から組む(手で並べると足した日に古くなる)。 */
 const manifestText = (over: Partial<{ version: string; files: unknown }> = {}): string =>
   JSON.stringify({
     version: '1.33.1-dev57.0',
@@ -107,7 +108,7 @@ describe('fetchDuckDbPackFiles', () => {
    */
   const pack = (bytes: { wasm: number; worker: number }): DuckDbPack => ({
     version: 'v1',
-    files: DUCKDB_REQUIRED_FILES.map((path) => ({
+    files: DUCKDB_PACK_FILES.map((path) => ({
       path,
       bytes: path === DUCKDB_WASM ? bytes.wasm : bytes.worker,
     })),
@@ -132,11 +133,14 @@ describe('fetchDuckDbPackFiles', () => {
     expect(maxInflight, '2 本同時に飛んでいた').toBe(1);
     // ⚠ 上と同じ ── 門を通ると絶対の字になる(相対のままなら素通りしている)
     expect(order).toEqual(
-      DUCKDB_REQUIRED_FILES.map((n) => new URL(`duckdb/${n}`, document.baseURI).href),
+      DUCKDB_PACK_FILES.map((n) => new URL(`duckdb/${n}`, document.baseURI).href),
     );
-    // 🔴 **拡張まで取りに行っている**(#682 段④b)── ここが 2 件のままだと、
-    //    端末へ入れた人だけ parquet / json / sqlite が読めない
-    expect(order, '拡張を取りに行っていない').toHaveLength(5);
+    /**
+     * 🔴 **拡張は取りに行かない**(#682 段④b。実測 2026-09-16)── engine は拡張を
+     *   **HTTP GET** で取りに来るので、`blob:` で貸す端末の一式には置けない。
+     * ⚠ 取ると IDB を食うだけで 1 度も使われない ── だから 2 件のままが正しい。
+     */
+    expect(order, '取る物の数が変わった').toHaveLength(2);
     expect(out.get(DUCKDB_WASM)?.size).toBe(5);
     expect(out.get(DUCKDB_WORKER)?.size).toBe(3);
   });
@@ -162,7 +166,6 @@ describe('fetchDuckDbPackFiles', () => {
     await fetchDuckDbPackFiles('duckdb/', pack({ wasm: 5, worker: 3 }), (phase) => seen.push(phase));
     expect(seen[0]).toContain(DUCKDB_WASM);
     expect(seen[1]).toContain(DUCKDB_WORKER);
-    expect(seen[2], '拡張を刻んでいない').toContain(duckDbExtensionPath('json'));
     expect(seen.at(-1)).toBe('検査中');
   });
 });
@@ -201,7 +204,7 @@ describe('fetchDuckDbPackFromBase', () => {
     });
     const { files, version } = await fetchDuckDbPackFromBase('duckdb/');
     expect(version).toBe('1.33.1-dev57.0');
-    expect(files.size, '拡張まで取れていない').toBe(DUCKDB_REQUIRED_FILES.length);
+    expect(files.size, '取る物の数が変わった').toBe(DUCKDB_PACK_FILES.length);
   });
 
   it('🔴 目録の取得そのものは刻まない ── 進捗は file の取得から始まる', async () => {

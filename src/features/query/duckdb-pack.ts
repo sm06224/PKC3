@@ -63,24 +63,47 @@ export const DUCKDB_EXTENSIONS = ['json', 'parquet', 'sqlite_scanner'] as const;
 export type DuckDbExtensionName = (typeof DUCKDB_EXTENSIONS)[number];
 
 /**
- * 拡張 1 つの、pack の中での path。⚠ **綴りの正本はここ** ── plugin も store も
- * runner も、この関数を通す(§7「同じ値が複数の場所にある」)。
+ * 🔴 **拡張の置き場**(pack の中の相対)。#682 段④b。
  *
- * ⚠ **版を path に入れない** ── 入れると、端末に入れた一式の中で版が変わったとき
- *   **古い方が残ったまま名前だけ増える**。🔑 一式は丸ごと入れ替わる物なので、
- *   版は目録(`pack.json` の `version`)の側が持つ。
+ * ⚠ **この形は engine が決めている。こちらの好みではない。**
+ * 実測(2026-09-16、実ブラウザ・8 通り):DuckDB は `custom_extension_repository` に
+ * 渡した字の下から
+ * **`<置き場>/<版>/<台>/<名前>.duckdb_extension.wasm`** を **HTTP GET** する
+ * (server の log で path を直に確認した)。
+ */
+export const DUCKDB_EXT_DIR = 'ext';
+
+/**
+ * 拡張 1 つの、pack の中での path。⚠ **綴りの正本はここ** ── plugin も検品も
+ * この関数を通す(§7「同じ値が複数の場所にある」)。
+ *
+ * 🔴 **版と台を path に入れる** ── engine がこの形で取りに来るので、入れないと
+ *   **404 になって「読み込めない」だけが残る**(実測 F/G)。
  */
 export function duckDbExtensionPath(name: string): string {
-  return `ext/${name}.duckdb_extension.wasm`;
+  return `${DUCKDB_EXT_DIR}/${DUCKDB_ENGINE.version}/${DUCKDB_ENGINE.platform}/${name}.duckdb_extension.wasm`;
 }
 
 /**
- * 一式に必ず在る file の一覧(起動に要る 2 つ + 同梱する拡張)。
- * 🔑 **数え上げはここ 1 か所** ── 取得も保管も貸し出しもこれを回す。
+ * 🔴 **端末へ入れておける物**(#682 段③b の `DuckDbPackStore` が持つ物)。
+ *
+ * ⚠ **拡張は入らない。** 実測(2026-09-16、実ブラウザ):拡張は
+ * **必ず HTTP GET で取りに来る** ── `registerFileBuffer` で器の中へ先に置いても
+ * 素通りして GET が飛ぶ(案 F / G)。端末の一式が貸せるのは `blob:` URL だけで、
+ * **`blob:` に path は作れない**ので、置き場として成り立たない。
+ * 🔑 だから拡張は**いつも同一オリジンの `duckdb/ext/` から**読む。
+ * ⚠ 帰結:**電波が無いと拡張は読み込めない**(一式を端末へ入れてあっても)。
+ *   ここを塞ぐには SW に `duckdb/ext/` を持たせる必要があり、それは別の段である。
+ */
+export const DUCKDB_PACK_FILES: readonly string[] = [DUCKDB_WASM, DUCKDB_WORKER];
+
+/**
+ * 配る一式に必ず在る file(起動に要る 2 つ + 同梱する拡張)。
+ * 🔑 **目録の検めと、配った物の検品**がこれを回す。
+ * ⚠ **取得と保管は `DUCKDB_PACK_FILES`** のほう ── 集合が違うので分けてある。
  */
 export const DUCKDB_REQUIRED_FILES: readonly string[] = [
-  DUCKDB_WASM,
-  DUCKDB_WORKER,
+  ...DUCKDB_PACK_FILES,
   ...DUCKDB_EXTENSIONS.map(duckDbExtensionPath),
 ];
 

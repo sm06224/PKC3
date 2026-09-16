@@ -74,26 +74,35 @@ const VENDOR_DIR = 'vendor/duckdb-extensions';
  *   🔴 **npm を上げた日に `vendor/` が黙って古くなる**のがいちばん危ない。
  *   その壊れ方は「user が parquet を開こうとした日に、初めて分かる」形で出る。
  *
- * 🔑 検算できる観測点が 1 つある:**engine は拡張の URL を自分で組む**ので、
- *   版と台の名前は**配る wasm の中に字として実在する**(実測 2026-09-16:
- *   `v1.5.4` が 1 件 / `wasm_eh` が 1 件)。だから**それを突き合わせる**。
+ * 🔑 engine は拡張の URL を**この字から**組む(実測 2026-09-16、実ブラウザ:
+ *   `https://extensions.duckdb.org/v1.5.4/wasm_eh/<名前>.duckdb_extension.wasm`)ので、
+ *   **配る wasm の中の字**と `DUCKDB_ENGINE` を突き合わせれば足りる。
  *
- * ⚠ 「在るか」だけでなく**空振りしていないこと**も見る ── でたらめな版が
- *   当たらないことまで見ないと、`includes` が常に真になる作りに気づけない。
+ * 🔴 **`includes` では足りない**(着地前レビューが実測で示した)──
+ *   `'v1.5.4'` は `'v1.5.40'` / `'v1.5.4-rc1'` にも**含まれる**ので、
+ *   **版が上がった日に素通りする**(この門がいちばん恐れている失敗そのもの)。
+ *   🔑 wasm の中の字は **NUL で区切られた C の文字列**なので、`\0…\0` で囲って
+ *   **丸ごと一致**を取る ── 実測:`\0v1.5.4\0` はちょうど **1 件**、
+ *   `\0wasm_eh\0` も **1 件**。
+ *
+ * ⚠ **これは「字が在る」しか言えない。** 「engine が本当にその版で動く」ことは
+ *   `tests/duckdb-engine-version.test.ts` が**器を起こして直に聞いて**いる
+ *   (CLAUDE.md §8「入力を守る検査と、出力が届いたかを見る検査は別物」)。
  */
 function assertEngineMatches(wasm: Buffer): void {
-  const text = wasm.toString('latin1');
   for (const want of [DUCKDB_ENGINE.version, DUCKDB_ENGINE.platform]) {
-    if (!text.includes(want)) {
+    // ⚠ `latin1` で読むと 1 バイト = 1 文字なので、NUL をそのまま挟める
+    const exact = Buffer.from(`\0${want}\0`, 'latin1');
+    if (!wasm.includes(exact)) {
       throw new Error(
-        `duckdb: 配る duckdb-eh.wasm の中に「${want}」が無い ── `
+        `duckdb: 配る duckdb-eh.wasm の中に「${want}」が丸ごとは無い ── `
           + 'engine の版が上がったのに vendor/duckdb-extensions がそのままになっている。'
           + ' 拡張を取り直して DUCKDB_ENGINE を直すこと(vendor/duckdb-extensions/README.md)',
       );
     }
   }
   // ⚠ **空振り防止** ── 在りえない字が「在る」と出るなら、この突合は何も見ていない
-  if (text.includes('v0.0.0-pkc-never')) {
+  if (wasm.includes(Buffer.from('\0v0.0.0-pkc-never\0', 'latin1'))) {
     throw new Error('duckdb: 版の突合が空振りしている(在りえない字が見つかった)');
   }
 }

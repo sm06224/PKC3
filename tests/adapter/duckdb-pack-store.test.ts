@@ -18,10 +18,7 @@ import {
   DuckDbPackStoreError,
   type DuckDbPackMeta,
 } from '../../src/adapter/platform/duckdb/duckdb-pack-store';
-import {
-  DUCKDB_REQUIRED_FILES,
-  duckDbExtensionPath,
-} from '../../src/features/query/duckdb-pack';
+import { DUCKDB_PACK_FILES } from '../../src/features/query/duckdb-pack';
 
 type Handler = (() => void) | null;
 
@@ -109,12 +106,12 @@ function installFakeIdb(outcome: 'commit' | 'abort'): {
 }
 
 /**
- * 最小で「揃っている」一式(#682 段④b で **2 → 5**)。
- * 🔑 名前は `DUCKDB_REQUIRED_FILES` から引く ── 手で並べると、足した日に
+ * 最小で「揃っている」一式。
+ * 🔑 名前は `DUCKDB_PACK_FILES` から引く ── 手で並べると、足した日に
  *   **この fixture だけ古い一式を「揃っている」と呼ぶ**ことになる。
  */
 function completePack(): Map<string, Blob> {
-  return new Map(DUCKDB_REQUIRED_FILES.map((name) => [name, new Blob([`bytes:${name}`])]));
+  return new Map(DUCKDB_PACK_FILES.map((name) => [name, new Blob([`bytes:${name}`])]));
 }
 
 describe('DuckDbPackStore', () => {
@@ -139,9 +136,9 @@ describe('DuckDbPackStore', () => {
     const store = new DuckDbPackStore();
     const meta = await store.writeAll(completePack(), { version: '1.33.1-dev57.0' });
 
-    expect(meta.files.length).toBe(DUCKDB_REQUIRED_FILES.length);
+    expect(meta.files.length).toBe(DUCKDB_PACK_FILES.length);
     expect(fake.meta.data.size, 'meta が 1 件').toBe(1);
-    expect(fake.files.data.size).toBe(DUCKDB_REQUIRED_FILES.length);
+    expect(fake.files.data.size).toBe(DUCKDB_PACK_FILES.length);
     // 🔴 **同じ tx で書いている**ことを直接 pin する ── 分けて書く変異は
     //    「どちらも abort する」偽物では見分けられない ── 数で押さえる
     expect(fake.txCount, 'writeAll が開く書き込み tx は 1 つだけ').toBe(1);
@@ -205,7 +202,7 @@ describe('DuckDbPackStore', () => {
     await store.writeAll(completePack(), { version: 'v1' });
     await store.writeAll(completePack(), { version: 'v2' });
     expect(fake.files.cleared, 'writeAll のたびに clear する').toBe(2);
-    expect(fake.files.data.size).toBe(DUCKDB_REQUIRED_FILES.length);
+    expect(fake.files.data.size).toBe(DUCKDB_PACK_FILES.length);
   });
 
   it('remove すると入っていない状態に戻り、file も読めなくなる', async () => {
@@ -353,21 +350,16 @@ describe('DuckDbPackStore', () => {
       const lent = await store.lendInstalledPack();
       expect(lent).not.toBeNull();
       expect(lent!.wasmUrl).not.toBe(lent!.workerUrl);
-      // 🔴 **拡張も貸している**(#682 段④b)── ここが 2 のままだと、
-      //    端末へ入れた人の器だけ拡張ゼロで起き、parquet が読めない
-      expect(created).toHaveLength(DUCKDB_REQUIRED_FILES.length);
-      expect(lent!.extensions.map((e) => e.name), '拡張を貸していない').toEqual([
-        'json',
-        'parquet',
-        'sqlite_scanner',
-      ]);
-      // ⚠ 名前と在り処が取り違わっていない(全部違う URL を貸している)
-      expect(new Set(lent!.extensions.map((e) => e.url)).size).toBe(3);
+      /**
+       * 🔴 **貸すのは器と worker だけ**(#682 段④b)。
+       * ⚠ 拡張は貸さない ── engine が拡張を **HTTP GET** で取りに来るので、
+       *   `blob:`(path を持てない)では置き場にならない(実測 2026-09-16)。
+       */
+      expect(created).toHaveLength(DUCKDB_PACK_FILES.length);
+      expect(DUCKDB_PACK_FILES.length, '貸す物の数が変わった').toBe(2);
       expect(revoked, 'まだ dispose していない').toEqual([]);
       lent!.dispose();
-      expect(revoked, '貸した分が全部 revoke されている').toHaveLength(
-        DUCKDB_REQUIRED_FILES.length,
-      );
+      expect(revoked, '貸した分が全部 revoke されている').toHaveLength(DUCKDB_PACK_FILES.length);
     } finally {
       create.mockRestore();
       revoke.mockRestore();
@@ -381,7 +373,7 @@ describe('DuckDbPackStore', () => {
    *   置いたら、N 個目だけが鳴る場面を N 通り作る」)。
    */
   it('🔴 lendInstalledPack: 1 つでも読めなければ、借りた分を revoke してから null', async () => {
-    for (const missing of DUCKDB_REQUIRED_FILES) {
+    for (const missing of DUCKDB_PACK_FILES) {
       const fake = installFakeIdb('commit');
       const store = new DuckDbPackStore();
       await store.writeAll(completePack(), { version: 'v1' });
@@ -410,30 +402,27 @@ describe('DuckDbPackStore', () => {
   });
 
   /**
-   * 🔴 **段④b より前に入れた一式は「入っていない」と答える**(#682 段④b)。
+   * 🔴 **要る物が meta に揃っていなければ「入っていない」と答える**(#682 段④b)。
    *
-   * ⚠ 拡張が加わる前の一式は wasm と worker しか持たない。そのまま
-   *   「入っている」と答えると、**その人だけ parquet / json / sqlite が読めない**
-   *   という、いちばん再現しない形になる。
-   * 🔑 判断は `readMeta` 1 か所なので、**画面も貸し出しも同じ答え**になる。
+   * 🔑 判断は `readMeta` 1 か所なので、**画面(入っていますか)も貸し出しも
+   *   同じ答え**になる ── 片方だけが「入っている」と言う形を作らない。
+   * ⚠ **bytes は消さない** ── 消すのは user が押したときだけ(`remove`)。
    */
-  it('🔴 拡張の無い古い一式は、入っていない扱いになる(画面と貸し出しで同じ答え)', async () => {
-    const fake = installFakeIdb('commit');
-    const store = new DuckDbPackStore();
-    await store.writeAll(completePack(), { version: 'v1' });
-    // ⚠ 対照群 ── 揃っていれば「入っている」と答える
-    expect(await store.readMeta(), '前提が崩れている(揃った一式が読めない)').not.toBeNull();
+  it('🔴 要る物が meta に足りなければ、入っていない扱いになる(画面と貸し出しで同じ答え)', async () => {
+    for (const missing of DUCKDB_PACK_FILES) {
+      const fake = installFakeIdb('commit');
+      const store = new DuckDbPackStore();
+      await store.writeAll(completePack(), { version: 'v1' });
+      // ⚠ 対照群 ── 揃っていれば「入っている」と答える
+      expect(await store.readMeta(), '前提が崩れている(揃った一式が読めない)').not.toBeNull();
 
-    // 段④b より前の姿へ戻す(meta から拡張の行だけ落とす)
-    const meta = (await store.readMeta())!;
-    const exts = new Set(['json', 'parquet', 'sqlite_scanner'].map(duckDbExtensionPath));
-    fake.meta.data.set('pack', {
-      ...meta,
-      files: meta.files.filter((f) => !exts.has(f.name)),
-    });
+      const meta = (await store.readMeta())!;
+      fake.meta.data.set('pack', { ...meta, files: meta.files.filter((f) => f.name !== missing) });
 
-    expect(await store.readMeta(), '古い一式を「入っている」と答えた').toBeNull();
-    expect(await store.lendInstalledPack(), '古い一式を貸してしまった').toBeNull();
+      expect(await store.readMeta(), `${missing} が無いのに「入っている」と答えた`).toBeNull();
+      expect(await store.lendInstalledPack(), `${missing} が無いのに貸した`).toBeNull();
+      vi.unstubAllGlobals();
+    }
   });
 
   it('進捗は file 単位で最後まで刻まれる', async () => {

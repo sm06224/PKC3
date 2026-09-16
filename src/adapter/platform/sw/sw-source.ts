@@ -115,8 +115,9 @@ export function shouldPrecache(path: string): boolean {
 /**
  * 🔴 **DuckDB の実体は precache に載せない**（#682。裁定 2026-09-15）。
  *
- * ⚠ 実測（2026-09-15）：いまの precache は **137 file / 8.2 MiB**、DuckDB は **約 35 MiB**。
- * 載せると **5.2 倍**になり、**DuckDB を選ばない user が全部払う**。
+ * ⚠ 実測：いまの precache は **137 file / 8.2 MiB**、DuckDB は **約 41 MiB**
+ * （2026-09-15 の器 35 MiB + 2026-09-16 に足した拡張 3 つ 5.3 MiB）。
+ * 載せると **6 倍**になり、**DuckDB を選ばない user が全部払う**。
  * 🔑 これは「押したときだけ取りに行って IDB へ置く」物なので、`portable-template.html`
  * と同じ扱いにする（`scripts/dist-inspect.mjs` が **別立ての予算**で見る）。
  *

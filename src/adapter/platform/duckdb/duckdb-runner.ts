@@ -54,10 +54,10 @@ import { CSV_SOURCE_COLUMNS } from '@features/query/csv-tables';
 import { duckDbTable } from '@features/query/duckdb-rows';
 import {
   DUCKDB_EXTENSIONS,
+  DUCKDB_EXT_DIR,
   DUCKDB_WASM,
   DUCKDB_WORKER,
   duckDbAssetUrl,
-  duckDbExtensionPath,
   readDuckDbPack,
 } from '@features/query/duckdb-pack';
 import { DuckDbLease, type DuckDbHandle } from './duckdb-lease';
@@ -78,7 +78,11 @@ export const DUCKDB_BASE = 'duckdb/';
 export interface DuckDbOpenUrls {
   readonly wasmUrl: string;
   readonly workerUrl: string;
-  readonly extensions: readonly { readonly name: string; readonly url: string }[];
+  /**
+   * 拡張の置き場と名前。⚠ **必須の field** にしてある ── 省ける形にすると、
+   * 口を後から足す人が書き忘れても tsc が黙る(CLAUDE.md §7)。
+   */
+  readonly extensions: { readonly repository: string; readonly names: readonly string[] };
 }
 
 /**
@@ -123,7 +127,7 @@ export interface DuckDbRunnerDeps {
    * 🔑 `null` を返せば「入っていない」= 同一オリジン fetch 経路へ倒す
    *   (`DuckDbPackStore.readMeta()` が `null` を返す形と揃えてある)。
    */
-  lendInstalled?: () => Promise<(DuckDbOpenUrls & { dispose: () => void }) | null>;
+  lendInstalled?: () => Promise<{ wasmUrl: string; workerUrl: string; dispose: () => void } | null>;
 }
 
 export interface DuckDbRunInput {
@@ -274,11 +278,32 @@ export class DuckDbRunner {
     if (lend !== undefined) {
       const lent = await lend();
       if (lent !== null) {
-        const { dispose, ...urls } = lent;
-        return { urls, dispose };
+        /**
+         * 🔴 **拡張だけは、端末の一式からは貸せない**(#682 段④b。実測 2026-09-16)。
+         * ⚠ engine は拡張を**必ず HTTP GET** で取りに来るので、置き場は
+         *   **path を持つ URL** でなければならない ── `blob:` には path が作れない。
+         * 🔑 だから器と worker は端末から、**拡張はいつも同一オリジンから**。
+         * ⚠ 帰結として、**電波が無いと拡張は読み込めない**(一式を入れてあっても)。
+         */
+        return {
+          urls: { wasmUrl: lent.wasmUrl, workerUrl: lent.workerUrl, extensions: this.extensions() },
+          dispose: lent.dispose,
+        };
       }
     }
     return { urls: await this.resolveNetworkUrls(), dispose: () => undefined };
+  }
+
+  /**
+   * 拡張の置き場(同一オリジン)と名前。
+   * ⚠ **目録を読まずに組める** ── 目録が読めなくても器は起こせるべきだからではなく、
+   *   端末の一式を使う回は**目録を 1 度も引かない**からである(上の `resolveUrls`)。
+   * 🔑 門(`resolveDuckDbBase`)はここでも通す ── 通さない口を 1 つも作らない。
+   */
+  private extensions(): { repository: string; names: readonly string[] } {
+    const base = resolveDuckDbBase(this.deps.packBase ?? DUCKDB_BASE, this.deps.baseUrl ?? document.baseURI);
+    // ⚠ 末尾の `/` は付けない ── engine が `<置き場>/<版>/…` と繋ぐので二重になる
+    return { repository: duckDbAssetUrl(base, DUCKDB_EXT_DIR), names: DUCKDB_EXTENSIONS };
   }
 
   /**
@@ -315,15 +340,7 @@ export class DuckDbRunner {
     const urls: DuckDbOpenUrls = {
       wasmUrl: duckDbAssetUrl(base, DUCKDB_WASM),
       workerUrl: duckDbAssetUrl(base, DUCKDB_WORKER),
-      /**
-       * 🔑 **目録に在ることは `readDuckDbPack` が既に検めている**(下限まで)──
-       * ここは在り処を組むだけ。⚠ ここで「在るものだけ」に絞らない:
-       * 絞ると**欠けた一式が黙って動く**(parquet だけ読めない器が出来る)。
-       */
-      extensions: DUCKDB_EXTENSIONS.map((name) => ({
-        name,
-        url: duckDbAssetUrl(base, duckDbExtensionPath(name)),
-      })),
+      extensions: this.extensions(),
     };
     this.urls = urls;
     return urls;

@@ -792,6 +792,8 @@ describe('🔴 DuckDB の一式(#682)', () => {
   const WORKER_BYTES = 773_223;
   /** 拡張 3 つの実測(2026-09-16)。⚠ 総量では**落ちても分からない**(§集合で見る)。 */
   const EXT_BYTES = 821_413 + 3_218_307 + 1_641_696;
+  /** 拡張の置き場。⚠ **版と台を含む** ── engine がその形で GET する(実測 2026-09-16)。 */
+  const EXT = 'ext/v1.5.4/wasm_eh/';
   const CAP = 46_000;
   const FLOOR = 20_000;
 
@@ -806,9 +808,11 @@ describe('🔴 DuckDB の一式(#682)', () => {
         ...i.files,
         { path: `${DUCKDB_DIR}duckdb-eh.wasm`, bytes: bytes - WORKER_BYTES - EXT_BYTES },
         { path: `${DUCKDB_DIR}duckdb-browser-eh.worker.js`, bytes: WORKER_BYTES },
-        { path: `${DUCKDB_DIR}ext/json.duckdb_extension.wasm`, bytes: 821_413 },
-        { path: `${DUCKDB_DIR}ext/parquet.duckdb_extension.wasm`, bytes: 3_218_307 },
-        { path: `${DUCKDB_DIR}ext/sqlite_scanner.duckdb_extension.wasm`, bytes: 1_641_696 },
+        // ⚠ **版と台が path に入る** ── engine が `<置き場>/<版>/<台>/…` を GET する
+        //    (実測 2026-09-16)。平らに置くと配っても 404 になる
+        { path: `${DUCKDB_DIR}${EXT}json.duckdb_extension.wasm`, bytes: 821_413 },
+        { path: `${DUCKDB_DIR}${EXT}parquet.duckdb_extension.wasm`, bytes: 3_218_307 },
+        { path: `${DUCKDB_DIR}${EXT}sqlite_scanner.duckdb_extension.wasm`, bytes: 1_641_696 },
         { path: `${DUCKDB_DIR}pack.json`, bytes: 200 },
       ],
     };
@@ -855,9 +859,9 @@ describe('🔴 DuckDB の一式(#682)', () => {
   it('🔴 拡張が 1 つでも配られていなければ鳴る(量では止まらない)', () => {
     const full = withDuckdb();
     for (const missing of [
-      'ext/json.duckdb_extension.wasm',
-      'ext/parquet.duckdb_extension.wasm',
-      'ext/sqlite_scanner.duckdb_extension.wasm',
+      `${EXT}json.duckdb_extension.wasm`,
+      `${EXT}parquet.duckdb_extension.wasm`,
+      `${EXT}sqlite_scanner.duckdb_extension.wasm`,
       'duckdb-eh.wasm',
       'duckdb-browser-eh.worker.js',
     ]) {
@@ -873,7 +877,7 @@ describe('🔴 DuckDB の一式(#682)', () => {
        * 🔑 器の 2 つ(35MB / 755KB)は**落ちれば量でも鳴る** ── そちらは
        *   「両方鳴る」が正しい姿なので、この検算の対象にしない。
        */
-      if (missing.startsWith('ext/')) {
+      if (missing.startsWith(EXT)) {
         expect(errs.join('\n'), `${missing}: 量の門で止まっている`).not.toContain('下限を');
       }
     }
