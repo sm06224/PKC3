@@ -822,13 +822,35 @@ describe('取り込んだ .sqlite を調べる(#681 段③ の 2 つ目)', () =>
   });
 
   it('🔴 選ぶと開いて、どちらを調べているかが画面に出る', async () => {
-    const { pick, note, openSqlGuest, readAssetBytes } = setup();
+    const { pick, note, openSqlGuest, readAssetBytes, sourceSel } = setup();
     pick('db1');
     await settle();
     expect(readAssetBytes).toHaveBeenCalledWith('ast-ok');
     expect(openSqlGuest, '客の DB を開いていない').toHaveBeenCalledTimes(1);
     expect(note(), 'どちらを調べているか言っていない').toContain('売上.sqlite');
     expect(note(), '中に何が在るか言っていない').toContain('表 2 個');
+    // 🔴 開いた後も、選び所は選んだ相手を出したまま(user 報告の再現の対照群)
+    expect(sourceSel.value, '開けたのに選び所が選んだ相手を指していない').toBe('db1');
+  });
+
+  /**
+   * 🔴 **user 報告の再現**:「プルダウンリストには出てくるのに、取り込み済みの
+   *   csv が選択できない」。
+   *
+   * ⚠ **開き終わる前の一瞬を捕まえる** ── `SET_SQL_SOURCE` の reducer は
+   *   `guest` を**先に `null` へ落とし**、開けた回だけ後から埋める(非同期)。
+   *   直す前の描画は `guest?.lid` だけを見ていたので、選んだ**その瞬間**に
+   *   選び所が「この PKC のノート」へ戻っていた ── 速い相手では一瞬で
+   *   `SQL_GUEST_OPENED` が上書きして見えなくなるが、遅い相手・失敗する相手では
+   *   **戻ったまま**になる。`Dispatcher.dispatch` は同期に描画まで進むので、
+   *   `pick()` が返った直後(`settle()` を挟む前)がその瞬間である。
+   */
+  it('🔴 選んだ直後(まだ開いていない一瞬)は、選び所に選んだ相手を出したまま', async () => {
+    const { pick, sourceSel } = setup();
+    pick('db1'); // ⚠ ここではまだ SQL_GUEST_OPENED は 1 度も届いていない
+    expect(sourceSel.value, '開いていない一瞬に「この PKC」へ戻った').toBe('db1');
+    await settle();
+    expect(sourceSel.value, '開き終わっても選んだ相手のまま').toBe('db1');
   });
 
   it('🔴 打つ先が客の DB へ切り替わる', async () => {
@@ -850,26 +872,60 @@ describe('取り込んだ .sqlite を調べる(#681 段③ の 2 つ目)', () =>
     expect(runReadOnlySql.mock.calls[0]?.[1]?.guest).toBeUndefined();
   });
 
-  it('🔴 開けなかったら理由を言って、この PKC へ戻る', async () => {
+  /**
+   * 🔴 **失敗しても、選び所は選んだまま**(user 報告の再現の直接の対策)。
+   *
+   * ⚠ 直す前は `guest` が `null` のままなので選び所も「この PKC」へ戻っていた ──
+   *   戻すと、**何を選んで断られたのか**が画面から消える(推薦:「選んだまま +
+   *   断り文」── 戻ると迷子になる)。⚠ **打つ先**(`guest` オブジェクト)は
+   *   これまでどおり `null` のまま ── 選び所の見た目と、実際に打つ相手は別物。
+   */
+  it('🔴 開けなかったら理由を言う。選び所は選んだ相手を出したまま', async () => {
     const { pick, note, sourceSel, type, runBtn, runReadOnlySql } = setup();
     pick('db2'); // ⚠ bytes が取れない添付
     await settle();
     expect(note(), '理由を言っていない').toContain('開けませんでした');
-    expect(sourceSel.value, '開けていないのに、その相手を選んだ顔をしている').toBe('');
-    // 🔴 **打つ先も戻っている**(字だけ戻して中身は客のまま、を作らない)
+    expect(sourceSel.value, '断られたら選び所が「この PKC」へ戻り、何を選んだか消えた').toBe(
+      'db2',
+    );
+    // 🔴 **打つ先は「この PKC」のまま**(選び所の見た目を戻す/戻さないとは無関係)
     type('SELECT 1 AS a');
     runBtn.click();
     await settle();
     expect(runReadOnlySql.mock.calls[0]?.[1]?.guest).toBeUndefined();
   });
 
+  it('⚠ 失敗した後に別の相手を選び直すと、選び所と断りはちゃんと切り替わる', async () => {
+    const { pick, note, sourceSel } = setup();
+    pick('db2'); // 開けない
+    await settle();
+    expect(sourceSel.value, '前提が崩れている(失敗した相手を出していない)').toBe('db2');
+    expect(note()).toContain('開けませんでした');
+    pick('db1'); // 開ける
+    await settle();
+    expect(sourceSel.value, '選び直したのに前の失敗した相手のまま').toBe('db1');
+    expect(note(), '前の断りが消えていない').not.toContain('開けませんでした');
+  });
+
+  it('⚠ 開いた後に「この PKC」へ戻すと、選び所も「この PKC」を出す', async () => {
+    const { pick, sourceSel } = setup();
+    pick('db1');
+    await settle();
+    expect(sourceSel.value, '前提が崩れている(開けていない)').toBe('db1');
+    pick('');
+    await settle();
+    expect(sourceSel.value, '「この PKC」へ戻したのに前の相手のまま').toBe('');
+  });
+
   it('🔴 添付に中身が無いときは、理由を言う(黙って何も起きない形を作らない)', async () => {
-    const { pick, note } = setup();
+    const { pick, note, sourceSel } = setup();
     pick('db3'); // ⚠ key を持たない添付
     await settle();
     expect(note(), '理由が「中身が見つかりません」になっていない').toContain(
       '添付の中身が見つかりません',
     );
+    // ⚠ 対照群 ── この失敗経路でも選び所は選んだ相手のまま
+    expect(sourceSel.value, '別の失敗経路では選び所が戻っている').toBe('db3');
   });
 
   it('🔴 bytes が取れないときも、同じ理由を言う', async () => {
@@ -981,8 +1037,8 @@ describe('添付の csv / tsv を調べる(#854 段①)', () => {
     pick('db5'); // 壊れ.csv(bytes が空)
     await settle();
     expect(note(), '理由を言っていない').toContain('開けませんでした');
-    // 🔴 開けなかったので、選び所も「この PKC」へ戻る(sqlite と同じ作法)
-    expect(sourceSel.value, '開けていないのに選んだ顔をしている').toBe('');
+    // 🔴 開けなくても、選び所は選んだ相手のまま(sqlite と同じ作法。user 報告の再現)
+    expect(sourceSel.value, '開けなかったら選んだ顔が消えた').toBe('db5');
   });
 
   it('🔴 上限で打ち切ったら、選んでいる間ずっと画面の字で言う', async () => {
@@ -1313,7 +1369,7 @@ describe('SQL の面から、手持ちのファイルを開く(#854 段②)', ()
     });
   });
 
-  it('🔴 開けない file を選ぶと、理由が画面に出て、この PKC へ戻る(黙って終わらない)', async () => {
+  it('🔴 開けない file を選ぶと、理由が画面に出る(黙って終わらない)', async () => {
     const { pickLocalFile, note, sourceSel } = setup();
     // ⚠ 空(0 バイト)── fake の openSqlGuest が「読めませんでした」で断る形
     const file = new File([], '空.sqlite');
@@ -1321,8 +1377,14 @@ describe('SQL の面から、手持ちのファイルを開く(#854 段②)', ()
     await settle();
     expect(note(), '理由を言っていない').toContain('選んだ file を開けませんでした');
     expect(note(), 'engine の言い分が消えている').toContain('読めませんでした');
-    // 🔴 添付と同じ作法 ── 開けなかったら選び所も「この PKC」へ戻る
-    expect(sourceSel.value, '開けていないのに選んだ顔をしている').toBe('');
+    /**
+     * ⚠ **添付とは事情が違う**(user 報告の再現の対象は添付)── 手持ちの file は
+     *   選ぶたびに使い捨ての合成 lid で、開けなければその lid の `<option>` は
+     *   選び所に**一度も存在しない**(足すのは開けた回だけ)。だから
+     *   `sel.value` へ当てても一致する項目が無く、native の select は
+     *   「戻す」規則ではなく**選べる項目が無いのでこうなる**(結果は同じ `''`)。
+     */
+    expect(sourceSel.value, '選べる項目が無いはずが、何か選んだ顔をしている').toBe('');
   });
 
   /**
