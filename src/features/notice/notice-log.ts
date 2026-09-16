@@ -162,6 +162,15 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-09-16-sql-engine-always-shown',
+    title: 'どのエンジンで引くかの選び所が、いつも出るようになりました',
+    items: [
+      'SQL で調べる面の「調べる相手」のとなりに、「どのエンジンで引くか」がいつも出ます。これまでは取り込んだ .csv / .tsv を選んでいる間しか出ませんでした。',
+      'いま選べないエンジンは薄い字になり、そのとなりに「取り込んだ .csv / .tsv を選ぶと使えます」と、どうすれば使えるかが出ます。',
+      '既定は今までどおり内蔵の sqlite です。選ばなければ引き方は 1 ドットも変わりません。',
+    ],
+  },
+  {
     id: '2026-09-16-sql-source-stays',
     title: 'SQL の面で、選んだ相手が選び所に残るようになりました',
     items: [
@@ -471,17 +480,9 @@ export const NOTICES: readonly Notice[] = [
       '読むだけです。選んだ file は 1 バイトも書き換わりません。',
     ],
   },
-  {
-    id: '2026-09-13-sql-csv-attachment',
-    title: '取り込んだ .csv / .tsv も、SQL で調べられるようになりました',
-    items: [
-      '「SQL で調べる」の選び所に、取り込んだ .sqlite の下に .csv / .tsv も並びます。',
-      '選ぶと、その file が csv という名前の 1 つの表になり、SELECT * FROM csv で引けます。1 行目が列の名前になります。',
-      'どの行がどの file から来たかが分かるように、_note(file 名)と _lid の列が先頭に付きます。',
-      '行がとても多い file は、先頭だけを表にして「行が多いので、先頭だけを表にしています」と出ます。',
-      '読むだけです。取り込んだ file は 1 バイトも書き換わりません。',
-    ],
-  },
+  // ⚠ 2026-09-16(#682 段③c エンジンの選び所): 枠(30 件)を超えたので
+  //    `2026-09-13-sql-csv-attachment` を登記表から落とした ──
+  //    **原本は CHANGELOG.md に在る**(配布済み: origin/main の 71c808d)
   // ⚠ 2026-09-16(#959 SQL の選び所): 枠(30 件)を超えたので
   //    `2026-09-13-tile-open-target-once` を登記表から落とした ──
   //    **原本は CHANGELOG.md に在る**(配布済み: origin/main の 71c808d)

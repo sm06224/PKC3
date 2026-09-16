@@ -36,6 +36,15 @@ import { sqlGuestSourceOf } from './sql-guest-source';
 export type SqlEngine = 'sqlite' | 'duckdb';
 
 /**
+ * 🔴 **在るエンジンの全部**(#682 段③c)。
+ *
+ * ⚠ **`enginesForSource` はここから絞る** ── 一覧を 2 か所に持つと、
+ *   足した日に片方だけ増えて「**画面には出るのに選べない**」が生まれる
+ *   (CLAUDE.md §7)。
+ */
+export const SQL_ENGINES: readonly SqlEngine[] = ['sqlite', 'duckdb'];
+
+/**
  * ⚠ **既定は sqlite**(裁定 A の字そのもの)── 選ばなければ、これまでどおり。
  */
 export const DEFAULT_SQL_ENGINE: SqlEngine = 'sqlite';
@@ -59,10 +68,38 @@ export const SQL_ENGINE_LABEL: Record<SqlEngine, string> = {
  *   判定がまた 2 つに割れる。
  */
 export function enginesForSource(name: string | null): readonly SqlEngine[] {
-  if (name === null) return ['sqlite'];
+  return SQL_ENGINES.filter((e) => sqlEngineHint(e, name) === null);
+}
+
+/**
+ * 🔴 **選べないエンジンに添える「どうすれば使えるか」**(#682 段③c)。
+ *
+ * ## ① user が何を求めていたのか
+ *
+ * user 報告 2026-09-16:**DuckDB の導線が無い**。
+ *
+ * ## ② そのとき画面で何が起きていたか
+ *
+ * 選び所は `choices.length < 2` のときに**丸ごと消えて**いた ── つまり
+ * **取り込んだ `.csv` を選んでいる間しか存在しない**。⚠ user から見ると
+ * 「DuckDB を載せたと書いてあるのに、画面のどこにも無い」になる。
+ * 🔑 **消す作りが、そのまま「無い」に見えていた**。
+ *
+ * ## ③ だから何を決めたか
+ *
+ * **選び所は常に出し、選べない側は薄い字にして、その隣に「どうすれば使えるか」を書く。**
+ * ⚠ これは「押せるのに必ず断られる口」ではない ── `option` は `disabled` なので
+ *   **選べない**うえ、**なぜ選べないか**がその場に書いてある。
+ *
+ * @returns `null` = **その相手で選べる**。文字列 = 選べない理由(画面に出す字)。
+ */
+export function sqlEngineHint(engine: SqlEngine, name: string | null): string | null {
+  if (engine === 'sqlite') return null;
+  if (name === null) return '取り込んだ .csv / .tsv を選ぶと使えます';
   // ⚠ `lid` は判定に使われない(`sqlGuestSourceOf` は名前の拡張子だけを見る)
   const kind = sqlGuestSourceOf('', name)?.kind ?? null;
-  return kind === 'csv' ? ['sqlite', 'duckdb'] : ['sqlite'];
+  if (kind === 'csv') return null;
+  return '.csv / .tsv のときだけ使えます';
 }
 
 /**

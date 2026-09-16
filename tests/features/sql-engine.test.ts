@@ -11,6 +11,8 @@ import {
   enginesForSource,
   resolveSqlEngine,
   SQL_ENGINE_LABEL,
+  SQL_ENGINES,
+  sqlEngineHint,
   type SqlEngine,
 } from '@features/query/sql-engine';
 
@@ -63,5 +65,45 @@ describe('どのエンジンで引くか', () => {
     }
     // ⚠ 2 つが同じ字だと、選び所で見分けられない
     expect(SQL_ENGINE_LABEL.sqlite).not.toBe(SQL_ENGINE_LABEL.duckdb);
+  });
+});
+
+describe('🔴 選べない側に添える「どうすれば使えるか」(#682 段③c)', () => {
+  /**
+   * 🔴 **等値で並べる** ── 「理由が付く」だけを見ると、**どの相手にも同じ字を返す**
+   *   変異が生き延びる(user は前の相手の理由を読むことになる)。
+   */
+  it('相手ごとに、選べない理由の字が決まっている', () => {
+    const table: Array<[string | null, string | null, string | null]> = [
+      // 相手, sqlite の理由, duckdb の理由 ── `null` = 選べる
+      [null, null, '取り込んだ .csv / .tsv を選ぶと使えます'],
+      ['売上.csv', null, null],
+      ['ログ.TSV', null, null],
+      ['家計.sqlite', null, '.csv / .tsv のときだけ使えます'],
+      ['家計.db', null, '.csv / .tsv のときだけ使えます'],
+      ['表.xlsx', null, '.csv / .tsv のときだけ使えます'],
+      ['memo.txt', null, '.csv / .tsv のときだけ使えます'],
+    ];
+    for (const [name, wantSqlite, wantDuck] of table) {
+      expect(sqlEngineHint('sqlite', name), `sqlite 相手=${String(name)}`).toBe(wantSqlite);
+      expect(sqlEngineHint('duckdb', name), `duckdb 相手=${String(name)}`).toBe(wantDuck);
+    }
+  });
+
+  /**
+   * 🔴 **一覧と理由が食い違わない**(§7「同じ問いに答える口を 2 つ作らない」)。
+   * ⚠ ここが破れると、**選び所には薄い字で出ているのに引ける**(あるいは逆)になる。
+   */
+  it('理由が付かないものだけが、選べる一覧に入る', () => {
+    for (const name of [null, '売上.csv', 'ログ.TSV', '家計.sqlite', '表.xlsx', 'memo.txt', 'a.zzz']) {
+      const byHint = SQL_ENGINES.filter((e) => sqlEngineHint(e, name) === null);
+      expect(enginesForSource(name), `相手=${String(name)}`).toEqual(byHint);
+    }
+  });
+
+  it('⚠ 空振り防止 ── 理由が 1 件も付かない、が全部では成り立たない', () => {
+    const hints = SQL_ENGINES.map((e) => sqlEngineHint(e, null));
+    expect(hints.filter((h) => h !== null).length).toBeGreaterThan(0);
+    expect(hints.filter((h) => h === null).length).toBeGreaterThan(0);
   });
 });

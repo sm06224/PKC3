@@ -2621,11 +2621,25 @@ describe('表のつながり図(#918 段⑤)', () => {
 });
 
 describe('🔴 どのエンジンで引くか(#682 段②。user 裁定 2026-09-15 = §9 は A)', () => {
-  it('🔴 最初は出ていない ── そのかわり、在ることを案内が言う', () => {
+  /**
+   * 🔴 **段③c で裏返した**(user 報告 2026-09-16「duckdb の導線が無い」)。
+   *
+   * ⚠ 直す前は「選べる物が 1 つなら選び所ごと隠す」で、**この test はそれを pin していた** ──
+   *   つまり **user が困っていた当の作りを守っていた**。
+   * 🔑 いまは**常に出して、選べない側を薄い字にし、理由をその場に書く**。
+   */
+  it('🔴 最初から出ている ── DuckDB は薄い字で、どうすれば使えるかが書いてある', () => {
     const { engineSel, tipText } = setup();
-    // ⚠ この PKC のノートは sqlite だけ。1 つしか選べない口を画面に出さない
-    expect(engineSel.hidden, '選べるものが 1 つなのに選び所が出ている').toBe(true);
-    // 🔑 隠すなら、在ることはどこかで言う(user の動機は「DuckDB を分かち合いたい」)
+    expect(engineSel.hidden, '選び所が出ていない(= 導線が無い)').toBe(false);
+    expect([...engineSel.options].map((o) => o.value)).toEqual(['sqlite', 'duckdb']);
+    const duck = [...engineSel.options].find((o) => o.value === 'duckdb');
+    // 🔴 **選べないことと、その理由が、同じ所に在る**
+    expect(duck?.disabled, 'ノートなのに DuckDB を選ばせている').toBe(true);
+    expect(duck?.textContent, 'どうすれば使えるかが書いていない').toContain('.csv');
+    // ⚠ 対照群 ── いま引ける側は薄くしない(全部薄いと、選び所ごと死ぬ)
+    expect([...engineSel.options].find((o) => o.value === 'sqlite')?.disabled).toBe(false);
+    expect(engineSel.value, '引くのは sqlite のまま').toBe('sqlite');
+    // 🔑 案内文も残す(見つけ方は 1 本より 2 本)
     expect(tipText(), 'DuckDB が在ることを、どこにも書いていない').toContain('DuckDB');
   });
 
@@ -2635,15 +2649,29 @@ describe('🔴 どのエンジンで引くか(#682 段②。user 裁定 2026-09-
     await settle();
     expect(engineSel.hidden, 'csv を選んだのに選び所が出ない').toBe(false);
     expect([...engineSel.options].map((o) => o.value)).toEqual(['sqlite', 'duckdb']);
+    // 🔑 csv では**どちらも選べる** ── 薄い字が残っていたら、相手で解いていない
+    expect([...engineSel.options].filter((o) => o.disabled), 'csv なのに選べない側がある').toHaveLength(0);
     expect(engineSel.value, '既定が sqlite でない(選ばなければ今までどおり、が崩れる)').toBe('sqlite');
     expect(d.getState().sqlPage.engine).toBe('sqlite');
   });
 
-  it('🔴 .sqlite や .xlsx では出ない(押せて効かない口を作らない)', async () => {
+  /**
+   * ⚠ この fixture に `.xlsx` の添付は無い(この file の相手は `.sqlite` / `.csv` / `.tsv` だけ)。
+   * 🔑 拡張子ごとの全数は `tests/features/sql-engine.test.ts` が等値で見る ── ここは**配線**を見る。
+   */
+  it('🔴 .sqlite では DuckDB を選べない(薄い字のまま)', async () => {
     const { pick, engineSel } = setup();
     pick('db1'); // 売上.sqlite
     await settle();
-    expect(engineSel.hidden, '.sqlite で DuckDB を選ばせている').toBe(true);
+    expect(engineSel.hidden, '選び所が消えている').toBe(false);
+    const duck = [...engineSel.options].find((o) => o.value === 'duckdb');
+    expect(duck?.disabled, '.sqlite で DuckDB を選ばせている').toBe(true);
+    /**
+     * 🔴 **理由の字が、相手に合わせて変わる**。
+     * ⚠ 組み直す合図を「並ぶ数」で持つと、ノート(1 つ)→ `.sqlite`(1 つ)で
+     *   **数が動かない**ので、**前の相手の理由が残る** ── そこを見る。
+     */
+    expect(duck?.textContent, '前の相手の理由が残っている').toContain('のときだけ');
   });
 
   it('🔴 DuckDB を選んで走らせると、DuckDB で引く ── sqlite は 1 度も叩かない', async () => {
@@ -2706,14 +2734,16 @@ describe('🔴 どのエンジンで引くか(#682 段②。user 裁定 2026-09-
     expect(duckSeen, '断ったのに引きに行った').toHaveLength(0);
   });
 
-  it('🔴 相手を .sqlite へ替えると、選んだ DuckDB は画面から消えて sqlite で引く', async () => {
+  it('🔴 相手を .sqlite へ替えると、選んだ DuckDB は薄い字になって sqlite で引く', async () => {
     const { pick, pickEngine, engineSel, type, runBtn, runReadOnlySql, duckSeen, d } = setup();
     pick('db4');
     await settle();
     pickEngine('duckdb');
     pick('db1'); // 売上.sqlite ── DuckDB では引けない相手
     await settle();
-    expect(engineSel.hidden).toBe(true);
+    expect([...engineSel.options].find((o) => o.value === 'duckdb')?.disabled).toBe(true);
+    // 🔑 画面に出る値は**実際に引く物** ── 選んだ物(duckdb)をそのまま出さない
+    expect(engineSel.value, '画面が、引かない engine を指している').toBe('sqlite');
     type('SELECT 1');
     runBtn.click();
     await settle();
