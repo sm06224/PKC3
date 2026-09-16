@@ -1,0 +1,169 @@
+/**
+ * 🔴 **拾い出したものが、本当にノートとして戻るか**(#986)。
+ *
+ * ⚠ 直す前の拾い出しは **`## 題名` を並べた .md 1 枚**だったので、
+ *   取り込むと**ノートは 1 件**にしかならなかった(4000 件拾って 1 件になる)。
+ * 🔑 だからここで見るのは「書けたか」ではなく **往復して件数と中身が戻るか**である
+ *   ── `pkc3-archive.test.ts` と同じ規律:
+ *   **復元できないバックアップはバックアップではない**。
+ */
+import { describe, expect, it } from 'vitest';
+import { writeArchive, readArchive, ARCHIVE_FORMAT } from '../../src/features/export/pkc3-archive';
+import {
+  rescueArchiveSource,
+  rescueArchiveSummary,
+  type RescuePageLike,
+} from '../../src/features/storage/rescue-archive';
+
+const NOW = '2026-09-16T00:00:00.000Z';
+
+/**
+ * 壊れた DB の代わり ── **区画ごとに「読める / 読めない / 空」**を作れる台。
+ * ⚠ 本物の `rescueEntries` と同じく、読めない区画は**例外ではなく `skipped`** で返る。
+ */
+function fakePick(opts: {
+  rows: Array<{ rowid: number; lid: string; title: string; archetype?: string; body: string }>;
+  maxRowid?: number;
+  /** ⚠ 2 周目だけ挙動を変えたいとき(壊れ方が回ごとに違う場合を作る)。 */
+  onPass?: (pass: number, rows: RescuePageLike['rows']) => RescuePageLike['rows'];
+  skippedPerPage?: number;
+  emptyPerPage?: number;
+  pageSize?: number;
+}): { pick: (after: number, chunks: number) => Promise<RescuePageLike>; passes: () => number } {
+  const max = opts.maxRowid ?? Math.max(0, ...opts.rows.map((r) => r.rowid));
+  const size = opts.pageSize ?? 2;
+  let pass = 0;
+  let lastAfter = Number.POSITIVE_INFINITY;
+  return {
+    passes: () => pass,
+    pick: async (after: number) => {
+      // ⚠ `after` が巻き戻ったら「次の周回」と数える(2 周舐める作りの検算に使う)
+      if (after < lastAfter) pass += 1;
+      lastAfter = after;
+      const hi = Math.min(after + size, max);
+      let rows: RescuePageLike['rows'] = opts.rows
+        .filter((r) => r.rowid > after && r.rowid <= hi)
+        .map((r) => ({
+          rowid: r.rowid,
+          lid: r.lid,
+          title: r.title,
+          archetype: r.archetype ?? 'text',
+          body: r.body,
+        }));
+      if (opts.onPass) rows = opts.onPass(pass, rows);
+      return {
+        rows,
+        lastRowid: hi,
+        skipped: opts.skippedPerPage ?? 0,
+        empty: opts.emptyPerPage ?? 0,
+        maxRowid: max,
+        done: hi >= max,
+      };
+    },
+  };
+}
+
+const THREE = [
+  { rowid: 1, lid: 'a1', title: '牛乳を買う', body: '# 牛乳を買う\n\n近所のスーパーで\n' },
+  { rowid: 2, lid: 'b2', title: '会議のメモ', body: '# 会議のメモ\n\n- 決めたこと\n' },
+  { rowid: 3, lid: 'c3', title: '日本語の題', body: '# 日本語の題\n\nあいうえお\n' },
+];
+
+describe('🔴 拾い出しが「戻せる形」で出る(#986)', () => {
+  it('🔴 拾った 3 件が、3 件のノートとして戻る', async () => {
+    const f = fakePick({ rows: THREE });
+    const { source, stats } = rescueArchiveSource({ cid: 'c1', title: '拾い出し', pick: f.pick });
+    const out = await writeArchive(source, NOW);
+    const got = await readArchive(out.blob);
+
+    expect(got.manifest.format, 'アーカイブとして読めない').toBe(ARCHIVE_FORMAT);
+    // 🔴 ここが本題 ── **1 件に潰れていないこと**
+    expect(got.entries, '3 件が 1 件に潰れている(直す前の症状)').toHaveLength(3);
+    expect(got.entries.map((e) => e.title)).toEqual(['牛乳を買う', '会議のメモ', '日本語の題']);
+    // ⚠ 件数だけ見ると中身が入れ替わっていても通る ── 本文まで見る
+    expect(got.entries.map((e) => e.body)).toEqual(THREE.map((r) => r.body));
+    expect(stats().entries).toBe(3);
+    expect(stats().bodyMissing, '本文が落ちている').toBe(0);
+  });
+
+  /** ⚠ **2 周舐める作り**そのものを留める ── 1 周に変えると本文が空で戻る。 */
+  it('⚠ 一覧と本文で 2 周する(1 周に変えると本文が落ちる)', async () => {
+    const f = fakePick({ rows: THREE });
+    const { source } = rescueArchiveSource({ cid: 'c1', title: 't', pick: f.pick });
+    await writeArchive(source, NOW);
+    expect(f.passes(), '2 周していない').toBe(2);
+  });
+
+  /**
+   * 🔴 **2 周目で読めなくなった本文を、黙って空で埋めない**。
+   * ⚠ 壊れ方は回ごとに変わりうるので、これは想定内の形である。
+   */
+  it('🔴 本文が来なかった件数を数えて外へ出す', async () => {
+    const f = fakePick({
+      rows: THREE,
+      // 2 周目(本文)で b2 だけ読めなくなる
+      onPass: (pass, rows) => (pass >= 2 ? rows.filter((r) => r.lid !== 'b2') : rows),
+    });
+    const { source, stats } = rescueArchiveSource({ cid: 'c1', title: 't', pick: f.pick });
+    const got = await readArchive((await writeArchive(source, NOW)).blob);
+
+    expect(got.entries, '一覧からも消えてしまっている').toHaveLength(3);
+    expect(stats().bodyMissing, '本文が落ちたことを数えていない').toBe(1);
+    expect(rescueArchiveSummary(stats())).toContain('本文が読めなかったノート 1 件');
+    // ⚠ 残りの 2 件は無事であること(1 件落ちたら全部捨てる、にしない)
+    const byLid = new Map(got.entries.map((e) => [e.lid, e.body]));
+    expect(byLid.get('a1')).toBe(THREE[0]!.body);
+    expect(byLid.get('c3')).toBe(THREE[2]!.body);
+    /**
+     * 🔴 **空本文で埋めない** ── 空だと
+     *   「中身が無いノート」と「本文が失われたノート」を user が見分けられない。
+     * ⚠ 題名は残す(何が失われたのかが分かる唯一の手がかりである)。
+     */
+    expect(byLid.get('b2'), '本文が読めなかったことを言っていない').toContain(
+      '読み出せませんでした',
+    );
+    expect(byLid.get('b2'), '題名まで失っている').toContain('会議のメモ');
+  });
+
+  /** 🔴 **拾えなかった区画を、必ず字にする**(「拾えた件数」を「全部」と読ませない)。 */
+  it('🔴 読めなかった区画・空の区画を字に出す', () => {
+    const s = { entries: 10, skipped: 4, empty: 38, bodyMissing: 0 };
+    const line = rescueArchiveSummary(s);
+    expect(line).toContain('読めなかった区画 4');
+    expect(line).toContain('空だった区画 38');
+    // 🔴 つながり・添付・履歴が戻らないことは**必ず**書く(黙って 0 件にしない)
+    expect(line, 'つながり・添付・履歴が戻らないことを言っていない').toContain('戻せません');
+  });
+
+  /** ⚠ 対照群 ── 何も拾えなければ**断る**(「書き出したつもりで空」を作らない)。 */
+  it('⚠ 1 件も拾えなければ断る', async () => {
+    const f = fakePick({ rows: [], maxRowid: 4, emptyPerPage: 2 });
+    const { source } = rescueArchiveSource({ cid: 'c1', title: 't', pick: f.pick });
+    await expect(writeArchive(source, NOW)).rejects.toThrow(/1 件もありません/);
+  });
+
+  /** ⚠ 同じ lid が 2 度来ても、ノートは 1 件にする(壊れた DB では起こりうる)。 */
+  it('⚠ 同じ id が 2 度来ても 1 件にまとめる', async () => {
+    const f = fakePick({
+      rows: [
+        { rowid: 1, lid: 'a1', title: '一つ目', body: 'A\n' },
+        { rowid: 2, lid: 'a1', title: '同じ id', body: 'B\n' },
+        { rowid: 3, lid: 'z9', title: '別の', body: 'C\n' },
+      ],
+    });
+    const { source, stats } = rescueArchiveSource({ cid: 'c1', title: 't', pick: f.pick });
+    const got = await readArchive((await writeArchive(source, NOW)).blob);
+    expect(got.entries).toHaveLength(2);
+    expect(got.entries.map((e) => e.lid)).toEqual(['a1', 'z9']);
+    expect(stats().entries).toBe(2);
+  });
+
+  /** ⚠ **壊れていない DB でも同じ口が通る**(壊れたときだけ動く道にしない)。 */
+  it('⚠ 壊れていなくても同じ口で書き出せる', async () => {
+    const f = fakePick({ rows: THREE, skippedPerPage: 0, emptyPerPage: 0 });
+    const { source, stats } = rescueArchiveSource({ cid: 'c1', title: 't', pick: f.pick });
+    const got = await readArchive((await writeArchive(source, NOW)).blob);
+    expect(got.entries).toHaveLength(3);
+    expect(rescueArchiveSummary(stats())).toContain('3 件を拾って');
+  });
+});
