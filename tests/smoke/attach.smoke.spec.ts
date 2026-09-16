@@ -1027,13 +1027,17 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   await expect(note, '添付が開いたことが画面に出ない').toContainText('uriage.csv を調べています');
 
   /**
-   * 🔴 **どのエンジンで引くかの選び所が、csv のときだけ出る**(#682 段②)。
+   * 🔴 **どのエンジンで引くかの選び所は、いつも出ている**(#682 段③c)。
    *
+   * ⚠ **2026-09-16 に裏返した。** 段② までは「選べる物が 1 つなら選び所ごと隠す」で、
+   *   この検査もそれを pin していた ── 🔴 user 報告「**duckdb の導線が無い**」の正体が
+   *   その作りだったので、**常に出して、選べない側を薄い字にする**形へ変えた。
    * 🔑 **新しい起動は増やさない**(#820 の規律)── 既に csv を開いているこの道中で見る。
-   * ⚠ unit(`sql-pane.test.ts`)は happy-dom なので「`hidden` が立っているか」までしか
+   * ⚠ unit(`sql-pane.test.ts`)は happy-dom なので「属性が立っているか」までしか
    *   言えない ── **実ブラウザで本当に見えるか**はここでしか分からない。
    */
   const engine = page.locator('[data-pkc-field="sql-engine"]');
+  const duckOption = engine.locator('option[value="duckdb"]');
   await expect(engine, 'csv を選んだのに、エンジンの選び所が出ていない').toBeVisible();
   await expect(
     engine.locator('option'),
@@ -1041,6 +1045,17 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   ).toHaveCount(2);
   // ⚠ **既定は今までの sqlite** ── ここが変わると、選ばない人の道が変わる
   await expect(engine, '既定が sqlite でない').toHaveValue('sqlite');
+  /**
+   * 🔴 **csv では、どちらも選べる**(薄い字が 1 つも無い)。
+   * ⚠ これが**下の `.xlsx` の対照群**である ── 「薄い字が付いている」だけを見ると、
+   *   **いつも薄くする**変異が生き延びる。
+   */
+  expect(
+    await engine.locator('option').evaluateAll((os) =>
+      os.filter((o) => (o as HTMLOptionElement).disabled).map((o) => o.getAttribute('value')),
+    ),
+    'csv なのに選べないエンジンがある',
+  ).toEqual([]);
 
   await page.fill('[data-pkc-field="sql-input"]', 'SELECT * FROM csv');
 
@@ -1183,12 +1198,27 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   await expect(note, '.xlsx が開いたことが画面に出ない').toContainText('uriage.xlsx を調べています');
 
   /**
-   * 🔴 **`.xlsx` では、エンジンの選び所そのものが消える**(#682 段②)。
-   * ⚠ ここが**対照群**である ── 上で「出る」だけを見ると、**いつも出す**変異が生き延びる。
-   * 🔑 出さない理由:DuckDB から `.xlsx` を読むには**外の拡張**が要る(設計 doc §4 と当たる)。
-   *   押せるのに必ず断られる口を画面に出さない。
+   * 🔴 **`.xlsx` では DuckDB が薄い字になり、理由がその場に出る**(#682 段③c)。
+   *
+   * ⚠ **2026-09-16 に裏返した。** 段② までは「選び所そのものが消える」で、
+   *   この行は `toBeHidden()` を pin していた ── いまは**消さずに薄くする**。
+   * 🔑 薄くする理由は段② と同じ:DuckDB から `.xlsx` を読むには**外の拡張**が要る
+   *   (設計 doc §4 と当たる)。⚠ ただし**消すと「無い」に見える**ので、
+   *   `disabled` な `option` にして**なぜ選べないか**をその場に書く。
+   * ⚠ ここが**上の csv の対照群**である ── 上で「薄い字が 0 件」を見ているので、
+   *   **いつも薄くする / いつも薄くしない**のどちらの変異も、片方で落ちる。
    */
-  await expect(engine, '.xlsx なのにエンジンを選ばせている').toBeHidden();
+  await expect(engine, '.xlsx で選び所が消えている(= 導線が無い)').toBeVisible();
+  expect(
+    await duckOption.evaluate((o) => (o as HTMLOptionElement).disabled),
+    '.xlsx なのに DuckDB を選ばせている',
+  ).toBe(true);
+  /**
+   * 🔴 **理由の字は、相手に合わせて変わる**。
+   * ⚠ 組み直す合図を「並ぶ数」で持つと、ノート(1 つ)→ `.xlsx`(1 つ)で数が動かず、
+   *   **前の相手の理由が残る** ── そこを見る。
+   */
+  await expect(duckOption, '前の相手の理由が残っている').toContainText('のときだけ使えます');
 
   // 🔴 どの表がどの枚か ── 目録(`xlsx_sheets`)が引ける
   await page.fill('[data-pkc-field="sql-input"]', 'SELECT * FROM xlsx_sheets');
