@@ -1,0 +1,124 @@
+# 🔵 DuckDB の拡張が取れて、配っている wasm に読み込めるかを**測るだけ**(#682 段④a)
+#
+# ⚠ **これは診断であって、門ではない。** 何も pin せず、**起きたことを印字する**
+#   (CLAUDE.md「未確認は assert ではなく診断で出す。通ったのを見てから後条件へ昇格させる」)。
+#
+# 🔴 **なぜ CI でしか測れないか**(実測 2026-09-16):
+#   開発の箱から `extensions.duckdb.org` へ出られない
+#   ── `curl: (56) CONNECT tunnel failed, response 403`(3 つとも)。
+#   ⚠ npm の `@duckdb/duckdb-wasm` にも拡張は **0 件**(`find` で全数)。
+#
+# 🔑 **URL の形は engine 自身が教えてくれた** ── 拡張ゼロの器で `LOAD sqlite_scanner` を
+#   打つと、error に `https://extensions.duckdb.org/v1.5.4/wasm_eh/sqlite_scanner.duckdb_extension.wasm`
+#   と出る。⚠ だからここに書く URL は**推測ではない**。
+#
+# ⚠ **`on:` に `push` / `pull_request` / `schedule` を足さない**(user 指示 2026-09-09 /
+#   2026-09-11。押していないのに重い物が走らない)。
+name: DuckDB の拡張を測る (手動)
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '器の版(`SELECT version()` の値。既定は実測済みの v1.5.4)'
+        required: false
+        default: v1.5.4
+        type: string
+      platform:
+        description: '拡張の platform(wasm の eh 版)'
+        required: false
+        default: wasm_eh
+        type: string
+      names:
+        description: '落とす拡張(空白区切り)'
+        required: false
+        default: parquet json sqlite_scanner
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  # 🔑 **1 job = 1 主張**:「3 つを取ってきて、配っている wasm に読み込ませられるか」。
+  #   ⚠ 落ちたとき何が壊れたか名前で分かるよう、step を主張ごとに割ってある。
+  probe:
+    name: 取ってきて、読み込ませて、使ってみる
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: 依存を入れる
+        id: deps
+        run: npm ci
+
+      # ── ① 取れるか(ここが落ちたら「URL か版が違う」以外の読みは無い)
+      - name: 拡張を落とす
+        id: fetch
+        # 🔴 **押した人の字を、shell へ直に埋めない** ── `env:` 経由で渡す
+        #   (GitHub が勧める形。`${{ }}` を `run:` の中へ展開すると命令に化けうる)
+        env:
+          EXT_VERSION: ${{ inputs.version }}
+          EXT_PLATFORM: ${{ inputs.platform }}
+          EXT_NAMES: ${{ inputs.names }}
+        run: |
+          set -euo pipefail
+          mkdir -p ext
+          for n in $EXT_NAMES; do
+            url="https://extensions.duckdb.org/${EXT_VERSION}/${EXT_PLATFORM}/${n}.duckdb_extension.wasm"
+            echo "→ $url"
+            code=$(curl -sS -L -o "ext/${n}.duckdb_extension.wasm" -w '%{http_code}' "$url")
+            size=$(stat -c %s "ext/${n}.duckdb_extension.wasm")
+            echo "   http=${code} bytes=${size}"
+            if [ "$code" != "200" ]; then
+              echo "::error::${n} が取れない(http=${code})── 版 / platform / 名前のどれかが違う"
+              exit 1
+            fi
+          done
+          echo '## 落とした物' >> "$GITHUB_STEP_SUMMARY"
+          ls -l ext >> "$GITHUB_STEP_SUMMARY"
+
+      # ── ② 本当に wasm か(html の error ページを掴んでいないか)
+      - name: 中身が wasm か見る
+        id: magic
+        if: ${{ !cancelled() && steps.fetch.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          for f in ext/*.wasm; do
+            magic=$(head -c 4 "$f" | od -An -tx1 | tr -d ' \n')
+            echo "$f magic=$magic"
+            [ "$magic" = "0061736d" ] || { echo "::error::$f は wasm ではない"; exit 1; }
+          done
+
+      # ── ③ 配っているのと同じ器に読み込ませて、使ってみる
+      #   ⚠ **repo の外を cwd にする**(書き出しが repo へ落ちない ── 2026-09-16 に踏んだ)
+      - name: 読み込ませて使う
+        id: probe
+        if: ${{ !cancelled() && steps.fetch.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d)"
+          cp ext/*.wasm "$work/"
+          cd "$work"
+          node "$GITHUB_WORKSPACE/scripts/duckdb-ext-probe.mjs" "$work" | tee "$GITHUB_WORKSPACE/probe.log"
+          {
+            echo '## 読み込ませた結果'
+            echo '```'
+            cat "$GITHUB_WORKSPACE/probe.log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ⚠ 前が落ちても**この 2 つは必ず走らせる**(#221 の教訓 ── 走らなかった step は
+      #   「確かめていない」であって「問題なし」ではない)
+      - name: 落とした物を artifact に残す
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: duckdb-ext-${{ inputs.version }}-${{ inputs.platform }}
+          path: |
+            ext/
+            probe.log
+          if-no-files-found: warn
+          retention-days: 7
