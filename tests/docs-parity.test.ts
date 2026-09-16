@@ -2316,6 +2316,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-16(#951 ── 帯の灰色)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-13-app-open-target" …` → 0d9cc03
+     */
+    'アプリを別の窓で開けるようになりました(設定で選べます)',
+    /**
      * ⚠ **2026-09-15(#952 A3 ── 録音の終わり時刻)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-13-body-icons" …` → ddecd62
      */
