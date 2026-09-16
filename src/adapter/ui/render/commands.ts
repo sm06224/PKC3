@@ -346,6 +346,10 @@ function buildStorageProfile(): HTMLElement {
  *   その手順がどこにも無かった(同じ日に見つけて、この節を足した)。
  * 🚫 **「索引を組み直す」は置かない** ── 実測で 12 回とも同じ rc 11 で落ちたので、
  *   置いても**押した人に同じエラーを見せるだけ**である。
+ *
+ * 🔴 **そして「取り出す」だけでは、まだ行き止まりだった**(#986、2026-09-16)──
+ *   出していたのが **.md 1 枚**なので、取り込んでも**ノートは 1 件**にしかならない
+ *   (拾えた 4000 件が、戻すと 1 件になる)。だから**戻せる形**の口を足した。
  */
 function buildDbRescue(): HTMLElement {
   const box = document.createElement('section');
@@ -362,12 +366,35 @@ function buildDbRescue(): HTMLElement {
   check.title = '壊れている所があるかを調べます。中身が多いと数分かかります';
   box.append(check);
 
+  /**
+   * 🔴 **戻せる形で出す**(#986。user 指示 2026-09-16
+   *   「原因がわからなくても復旧できるようにしてください」)。
+   *
+   * ⚠ **ここが先に来る** ── 壊れたときに user がやりたいのは
+   *   「読む」ではなく「**元に戻す**」だからである。
+   */
+  const restore = document.createElement('button');
+  restore.type = 'button';
+  restore.setAttribute('data-pkc-action', 'db-rescue-archive');
+  restore.setAttribute('data-pkc-field', 'db-rescue-archive-run');
+  restore.textContent = '拾って、戻せる形で書き出す';
+  restore.title =
+    '読めるノートを集めて、「取り込む」から読み戻せるファイル(.pkc3.zip)にします';
+  box.append(restore);
+
+  /**
+   * ⚠ **こちらは消さない** ── 壊れているときに
+   *   「とりあえず中身を読みたい」は、戻すのとは別の要求である
+   *   (CLAUDE.md「記法を減らすことは、user の動線を減らすことである」)。
+   * ⚠ ただし **取り込んでも 1 件にしかならない**ので、字でそう言う。
+   */
   const rescue = document.createElement('button');
   rescue.type = 'button';
   rescue.setAttribute('data-pkc-action', 'db-rescue');
   rescue.setAttribute('data-pkc-field', 'db-rescue-run');
-  rescue.textContent = '拾えるだけ取り出す';
-  rescue.title = '読めるノートを集めて 1 つのファイルに書き出します';
+  rescue.textContent = '拾って、読める形で書き出す';
+  rescue.title =
+    '読めるノートを集めて 1 つの文章(.md)にします。⚠ 読むための形なので、取り込んでもノートは 1 件になります';
   box.append(rescue);
 
   const sum = document.createElement('p');

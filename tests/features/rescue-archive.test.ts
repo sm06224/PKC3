@@ -135,6 +135,79 @@ describe('🔴 拾い出しが「戻せる形」で出る(#986)', () => {
     expect(line, 'つながり・添付・履歴が戻らないことを言っていない').toContain('戻せません');
   });
 
+  /**
+   * 🔴 **本文を途中で切って、続きから取る経路**(#986)。
+   *
+   * ⚠ `writeArchive` は本文を **4MB ずつ**取りに来るので、中身が多いと
+   *   `listBodies` は**何度も呼ばれる**。🔴 続きの位置を持っていないと、
+   *   2 回目以降が**毎回はじめから舐め直し**て、既に出した行しか返さない
+   *   ── **2 回目以降の本文が丸ごと落ちる**。
+   * ⚠ 直す前の test はどれも本文が小さく、`listBodies` が **1 回しか
+   *   呼ばれていなかった**(変異試験 M3 が SURVIVED で教えた ── §2 未実行の経路)。
+   */
+  it('🔴 本文が 4MB を超えても、続きから取って全部戻る', async () => {
+    /**
+     * ⚠ **区切り(4MiB)を、最後の行より手前で跨がせる** ── 1 稿目は
+     *   1 件 750K 字 × 6 = 4.5M 字で、**最後の 1 行でしか越えなかった**ので
+     *   `done` が先に立ち、続きから取る経路を**やはり 1 度も通らなかった**
+     *   (変異 M3 / M7 が 2 度とも SURVIVED で教えた)。
+     * 🔑 1 件 150 万字 × 6 = 900 万字 ── **3 件目で越える**ので、
+     *   `listBodies` は必ず 2 回以上呼ばれる。
+     */
+    const big = Array.from({ length: 6 }, (_, i) => ({
+      rowid: i + 1,
+      lid: `big-${i}`,
+      title: `大きいノート ${i}`,
+      body: `# 大きいノート ${i}\n\n${'あ'.repeat(1_500_000)}\n`,
+    }));
+    const f = fakePick({ rows: big, pageSize: 1 });
+    const { source, stats } = rescueArchiveSource({ cid: 'c1', title: 't', pick: f.pick });
+    const got = await readArchive((await writeArchive(source, NOW)).blob);
+
+    expect(got.entries, '途中から落ちている').toHaveLength(6);
+    // 🔴 中身まで見る ── 件数だけだと「印だけ入った空」でも通る
+    for (const b of big) {
+      const e = got.entries.find((x) => x.lid === b.lid);
+      expect(e?.body, `${b.lid} の本文が落ちている`).toBe(b.body);
+    }
+    expect(stats().bodyMissing, '印で埋めた物が混ざっている').toBe(0);
+  }, 60_000);
+
+  /**
+   * 🔴 **前へ進まない相手でも、止まらずに終わる**(2026-09-16)。
+   *
+   * ⚠ `writeArchive` は `done` が立つまで呼び続けるので、**1 行も返さずに
+   *   `done: false`** を返すと**永久に回る**。壊れた DB は「同じ所を返し続ける」
+   *   形もありうるので、ここは**起こらなくする**側で守る(§7 の規律)。
+   * 🔴 変異試験で実際に `HUNG` した ── CLAUDE.md §3:
+   *   「`SURVIVED` より `HUNG` のほうが重い(製品が壊れうる形をしている)」。
+   * ⚠ **timeout を短く置く** ── 戻ったときに「固まる」ではなく「落ちる」で出したい。
+   */
+  it('🔴 同じ所を返し続ける相手でも、回り続けない', async () => {
+    const rows = Array.from({ length: 4 }, (_, i) => ({
+      rowid: i + 1,
+      lid: `s-${i}`,
+      title: `止まらない ${i}`,
+      // ⚠ `archetype` は必須 ── 抜くと tsc が落ちる(1 稿目で落とした)
+      archetype: 'text',
+      body: `# 止まらない ${i}\n\n${'あ'.repeat(1_500_000)}\n`,
+    }));
+    /** ⚠ **進まない台** ── `lastRowid` を動かさず、`done` も立てない。 */
+    const stuck = async (): Promise<RescuePageLike> => ({
+      rows,
+      lastRowid: 1,
+      skipped: 0,
+      empty: 0,
+      maxRowid: 999,
+      done: false,
+    });
+    const { source, stats } = rescueArchiveSource({ cid: 'c1', title: 't', pick: stuck });
+    const got = await readArchive((await writeArchive(source, NOW)).blob);
+    // 🔑 終わること自体が本題(ここへ到達できれば回り続けていない)
+    expect(got.entries, '拾えた物が出ていない').toHaveLength(4);
+    expect(stats().entries).toBe(4);
+  }, 30_000);
+
   /** ⚠ 対照群 ── 何も拾えなければ**断る**(「書き出したつもりで空」を作らない)。 */
   it('⚠ 1 件も拾えなければ断る', async () => {
     const f = fakePick({ rows: [], maxRowid: 4, emptyPerPage: 2 });

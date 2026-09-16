@@ -117,6 +117,18 @@ export function rescueArchiveSource(opts: {
     let after = phase === 'meta' ? 0 : bodyAfter;
     let bytes = 0;
     for (;;) {
+      /**
+       * 🔴 **前へ進まない相手で回り続けない**(2026-09-16。**2 度目の直し**)。
+       *
+       * ⚠ 1 稿目は `listBodies` の側にだけ打ち切りを置いたが、
+       *   🔴 **一覧を集める側(meta)には 1 つも無かった** ── そちらは
+       *   `stopAfterBytes` すら渡らないので、`done` が立たない相手だと
+       *   **永久に回る**(自分で書いた test が固まって分かった)。
+       * 🔑 だから**両方の周回に効く所**、つまりこの輪の中へ置く。
+       * ⚠ 壊れた DB は「同じ所を返し続ける」形もありうる ── 検出ではなく
+       *   **起こらなくする**側で守る(§7「衝突は、起こらなくするほうが強い」)。
+       */
+      const before = after;
       const page = await opts.pick(after, CHUNKS);
       take(page);
       if (phase === 'meta') {
@@ -128,6 +140,11 @@ export function rescueArchiveSource(opts: {
       opts.onProgress?.(after, page.maxRowid, phase);
       // ⚠ 打ち切りは既存の拾い出しと**同じ条件**にする(2 通りの規則を作らない)
       if (page.done || page.lastRowid <= 0) {
+        if (phase === 'body') bodyDone = true;
+        break;
+      }
+      // 🔴 位置が 1 つも進まなかったら、そこで打ち切る(上の docstring)
+      if (after <= before) {
         if (phase === 'body') bodyDone = true;
         break;
       }
@@ -167,6 +184,7 @@ export function rescueArchiveSource(opts: {
     listBodies: async (_after, maxBytes) => {
       if (bodyDone && placeheld.size + gotBody.size >= known.size) return { rows: [], done: true };
       const rows: Array<{ lid: string; body: string }> = [];
+      const wasAt = bodyAfter;
       if (!bodyDone) {
         await drain(
           'body',
@@ -180,6 +198,19 @@ export function rescueArchiveSource(opts: {
           maxBytes,
         );
       }
+      /**
+       * 🔴 **前へ進んでいない回で `done: false` を返さない**(2026-09-16)。
+       *
+       * ⚠ `writeArchive` は `done` が立つまで呼び続けるので、
+       *   **1 行も返さず `done: false`** を返すと**永久に回る**。
+       * 🔴 変異試験で実際に固まった(`HUNG`)── CLAUDE.md §3:
+       *   「**門が 1 つ消えただけで固まるなら、門の置き方が悪い**。
+       *   `SURVIVED` より `HUNG` のほうが重い(製品が壊れうる形をしている)」。
+       * 🔑 だから**輪を構造から消す** ── 位置が進まず行も無ければ、
+       *   そこで打ち切って**下の埋め戻しへ落とす**(黙って回り続けない)。
+       * ⚠ 検出ではなく**起こらなくする**側の直しである(§7 の規律)。
+       */
+      if (!bodyDone && bodyAfter <= wasAt && rows.length === 0) bodyDone = true;
       if (!bodyDone) return { rows, done: false, next: { entryOrder: 0, lid: '' } };
       /**
        * 🔴 **本文が来なかったノートを、題名ごと消さない**(test が捕まえた)。
