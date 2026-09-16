@@ -41,15 +41,54 @@ test('🔴 本文の名前つき csv が図の四角として出て引ける。�
   // ⚠ 見出しの行数は「見出しを除いた行(データ行)」を数える(csv-tables.ts の
   //   `rows: grid.length - 1`)── だから「2 行」を確かめるにはデータ行を 2 つ書く。
   await page.keyboard.type('```csv name=棚卸\n品名,数\nりんご,3\nみかん,5\n```\n');
+  /**
+   * 🔴 **受けられない名前の囲みも 1 つ書く**(#980)。
+   *
+   * ⚠ 名前が受けられないと**表になりません**。そのとき user に見えるのは
+   *   「表が出てこない」だけなので、#681 段③ で**理由**(`csv_tables.why`)を
+   *   出せるようにしてある ── 🔴 **ところが画面に届いているかを
+   *   実ブラウザで 1 度も見ていなかった**。
+   * 🔑 **起動を増やさない** ── 新しい spec を足すと 1 起動 = 以後すべての回に
+   *   約 1.6 秒。だから**この道中に足す**(#980 の設計)。
+   * 🔴 **1 稿目の名前は空振りだった**(2026-09-16。実ブラウザで 0 行が返って分かった)。
+   *   囲みの属性は `info.trim().split(/\s+/)` で割るので、
+   *   `name=だめ な 名前` は **`name=だめ` としか読まれない** ──
+   *   ⚠ そして `だめ` は**通ってしまう名前**である(`why` が空)。
+   *   だから目録は 0 行を返し、**assert が何も守っていなかった**。
+   * 🔑 だから**本当に断られる字を、実装に当てて選んだ**:
+   *
+   *   | 書いた名前 | 読まれる名前 | why |
+   *   |---|---|---|
+   *   | `name=だめ な 名前` | `だめ` | 🔴 **空(通る)** |
+   *   | `name=だめ!` | `だめ!` | 🟢「名前に使えるのは文字・数字・_ だけです」 |
+   *
+   * ⚠ **空白を入れない** ── 入れた時点で、そこから先は名前ではなくなる。
+   */
+  await page.keyboard.type('```csv name=だめ!\na,b\n1,2\n```\n');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
-  // ⚠ 空振り防止 ── 本文の囲みが、そもそも表として読めていること
-  //   (読めていなければ、以降の「図に四角が出ない」が別の理由で起きてしまう)
+  /**
+   * ⚠ 空振り防止 ── 本文の囲みが、そもそも表として読めていること
+   *   (読めていなければ、以降の「図に四角が出ない」が別の理由で起きてしまう)。
+   *
+   * 🔴 **囲みは 2 つとも表になる**(2026-09-16 に実ブラウザで測って分かった)。
+   * ⚠ 直す前のこの行は `toBeVisible()` で、囲みを 1 つ足したら
+   *   **strict mode 違反**(2 要素に解決)で落ちた。
+   * 🔑 そして**それが教えてくれたことのほうが大きい** ── 本文を描く側
+   *   (`features/markdown/csv-table.ts`)は **`name=` を 1 度も検めていない**
+   *   (`csvTableNameWhy` / `validCsvTableName` の呼び口が 0 件)。
+   *   つまり「名前が受けられない」で失うのは**本文の見た目ではなく、
+   *   SQL から名前で引けること**である ── だから理由は
+   *   `csv_tables.why`(= SQL の目録)に出る。
+   */
   const bodyTable = page.locator('[data-pkc-field="detail-body"] table');
-  await expect(bodyTable, '本文の csv が表として描かれていない(前提が崩れている)').toBeVisible({
-    timeout: 10_000,
-  });
-  await expect(bodyTable).toContainText('りんご');
+  await expect(bodyTable, '本文の csv が 2 つとも表になっていない(前提が崩れている)').toHaveCount(
+    2,
+    { timeout: 10_000 },
+  );
+  await expect(bodyTable.first()).toContainText('りんご');
+  // 🔴 受けられない名前の囲みも、**本文には出る**(上の docstring)
+  await expect(bodyTable.nth(1), '受けられない名前の囲みが本文に出ていない').toContainText('ab');
 
   /**
    * ── ① SQL で調べる を開く(この PKC のノートが既定 ── 何も選ばない)。
@@ -145,6 +184,51 @@ test('🔴 本文の名前つき csv が図の四角として出て引ける。�
   await expect(zero, '切に戻したのに誘いが戻らない').toContainText(
     '上の「繋ぐ」を押して列を 2 つ押すと、自分で繋げます。',
   );
+
+  /**
+   * ── ③ 🔴 **受けられなかった理由が、画面に届いている**(#980)。
+   *
+   * ⚠ 単体(`storage-worker.test.ts`)は `why` に理由が入ることを見ているが、
+   *   **画面まで来ているか**は実ブラウザで 1 度も見ていなかった。
+   * 🔑 **同じ道中で見る**(`gotoApp` を増やさない)。
+   */
+  await page.fill('[data-pkc-field="sql-input"]', '');
+  await page.fill(
+    '[data-pkc-field="sql-input"]',
+    "SELECT name, why FROM csv_tables WHERE why <> ''",
+  );
+  await clickReal(page, '[data-pkc-action="run-sql"]');
+
+  /**
+   * ⚠ **空振り防止** ── 受けられない囲みは**この spec の中で作っている**
+   *   (上の本文)。別の spec に頼ると、走る順で対照群が空になり、
+   *   **空の集合は何を assert しても通る**。
+   * 🔑 だから「行が在ること」と「字が合っていること」を**両方**見る。
+   */
+  await expect(sqlTable, '目録が引けない').toBeVisible({ timeout: 10_000 });
+  /**
+   * ⚠ **0 行で通らないようにする** ── 直す前の稿は目録が **0 行**を返し、
+   *   見出し(`name` / `why`)しか無いのに `toContainText` が
+   *   「まだ来ていないだけ」と 5 秒待って落ちた。
+   * 🔑 **まず行が在ることを見る**(`sql-row` を数える)── 0 行なら
+   *   「理由が出ていない」ではなく「**そもそも 1 件も載っていない**」と読める。
+   */
+  const whyRows = page.locator('[data-pkc-field="sql-table"] tbody tr');
+  await expect(whyRows, '目録に 1 行も載っていない(囲みが断られていない = 空振り)').toHaveCount(
+    1,
+    { timeout: 10_000 },
+  );
+  await expect(sqlTable, '受けられなかった名前が目録に出ていない').toContainText('だめ!');
+  await expect(sqlTable, '🔴 なぜ受けられなかったのかが画面に出ていない').toContainText(
+    '名前に使えるのは文字・数字・_ だけです',
+  );
+
+  /**
+   * ⚠ **対照群** ── 受けられた名前(`棚卸`)は、この目録に**出ない**
+   *   (`WHERE why <> ''` なので)。🔑 これが無いと
+   *   「全部の行を出しているだけ」でも通ってしまう。
+   */
+  await expect(sqlTable, '受けられた名前まで「理由あり」に混ざっている').not.toContainText('棚卸');
 
   expect(errors, `想定外の console/pageerror が出た: ${JSON.stringify(errors)}`).toEqual([]);
 });

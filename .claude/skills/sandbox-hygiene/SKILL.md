@@ -287,6 +287,60 @@ for p in /proc/[0-9]*; do
 done
 ```
 
+## 🔴 孫は名前が違う ── 親を止めても生き残る(2026-09-16。実測)
+
+⚠ 上は「**自分を殺さない**」話だが、こちらは「**相手を殺しきれない**」話である。
+
+`npx vitest` を回すと、木はこう伸びる:
+
+```
+npx → sh -c vitest → node …/vitest → forks.js × N   ← worker
+```
+
+🔴 **worker の命令行は `forks.js` で、`vitest run` の字を持っていない。**
+だから `vitest run` で探して止めても、**worker は名前が違うので残る**。
+
+実測の被害(2026-09-16):
+
+| | 値 |
+|---|---|
+| 居残った worker | **4 本**(38 / 34 / 29 / 21 分) |
+| load average | 🔴 **11.5**(4 コア = **3 倍の過負荷**) |
+| その状態で回した全量 | 🔴 **24 件落ち。うち 23 件が `Test timed out in 5000ms`** |
+| 静かな箱で回し直し | 🟢 **439 件すべて緑・16.79 秒** |
+
+⚠ **23 件は無関係な 17 file に散っていた**ので、**製品の欠陥に見えた**
+── 1 つの欠陥が無関係な 17 file を同時に壊すことはない、が見分ける鍵である。
+
+🔑 **直しは「名前で探すのをやめる」** ── 子に**自分の process group** を持たせて、
+**group ごと**殺す。これで「孫は名前が違う」問題が**構造から消える**:
+
+```python
+proc = subprocess.Popen(cmd, shell=True, start_new_session=True, ...)   # 🔑 group の長にする
+try:
+    out, err = proc.communicate(timeout=timeout)
+except subprocess.TimeoutExpired:
+    for sig in (signal.SIGTERM, signal.SIGKILL):      # ⚠ TERM → 待つ → KILL
+        os.killpg(os.getpgid(proc.pid), sig)
+        ...
+```
+
+⚠ **`start_new_session=True` が無いと `killpg` は自分たちまで巻き込む。**
+🔑 雛形は `.claude/skills/mutation-testing/templates/mutate.py` の `run()` に入れてある。
+
+### ⚠ 測り方でも 2 度外した(計器の側)
+
+「本当に孫まで死ぬか」を測る probe が **2 稿とも空振り**した:
+
+| 稿 | 何が起きたか |
+|---|---|
+| 1 | `sh -c "<単一命令>"` は **exec するので木が伸びない** ── 孫が生まれず、対照群が回ごとに 1 本 / 0 本とぶれた |
+| 2 | `exec -a` は **dash に無い** ── 🔑 **前提の assert が「判定不能」と言って、嘘の数字を止めた** |
+| 3 | `& wait` で fork させ、**孫の PID を控えて生死を直に見る** → **直す前 1 本残る / 直した後 0 本** |
+
+🔑 **`& wait` が要る** ── 孫を作る fixture は、**fork を強制**しないと成立しない。
+🔑 そして**数で数えず PID で見る** ── 名前で数えると、自分や別の残骸に当たる。
+
 ⚠ **いちばん良いのは殺さないこと** ── 背景で回した物の完了は**通知で届く**ので、
 待ちも後始末も要らない(CLAUDE.md「`sleep` / ポーリングで待たない」)。
 ⚠ それでも殺すなら、**掴んでいる資源で引く**(`ss -ltnp` の port / `/proc/*/cwd`)──
