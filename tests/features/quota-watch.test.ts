@@ -59,8 +59,8 @@ describe('画面に出す字(#971 段②)', () => {
    */
   it('🔴 余裕があるときでも、実際の数を出す', () => {
     const s = quotaText({ usage: 1 * GB, quota: 10 * GB });
-    expect(s, '使用量を出していない').toContain('1024.0 MB');
-    expect(s, '上限を出していない').toContain('10240.0 MB');
+    expect(s, '使用量を出していない').toContain('1.0 GB');
+    expect(s, '上限を出していない').toContain('10.0 GB');
     expect(s, '割合を出していない').toContain('10 パーセント');
     noMarkup(s);
   });

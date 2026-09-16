@@ -2334,6 +2334,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-16(#978 大きさに GB の段)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-14-sql-rows-window" …` → 44d8553d
+     */
+    'SQL の答えが 500 行で切られなくなりました',
+    /**
      * ⚠ **2026-09-16(#682 段④c parquet / json を調べる)に、いちばん古い 1 件が
      *   枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-14-sql-answer-to-file" …` → a53609b8
