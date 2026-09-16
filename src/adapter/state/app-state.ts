@@ -250,6 +250,21 @@ export interface SqlPageState {
    */
   readonly guestPending: string;
   /**
+   * 🔴 **選び所に出す、いま選ばれている相手**(空 = この PKC。user 報告で判明:
+   *   「プルダウンリストには出てくるのに、取り込み済みの csv が選択できない」)。
+   *
+   * ⚠ **`guest?.lid` だけでは足りない** ── 開いている最中(`guest` はまだ `null`)や、
+   *   開けなかった回(`guest` は `null` のまま)にも、**選んだことは画面に出したい**。
+   *   `guestPending` は「遅れて届いた答えを捨てる」ための札で、開けなかった回は
+   *   その役目を終えて `''` へ戻る(2 つの target を持たせない)── だから
+   *   「選ばれている物」はここへ**専用に**持つ。
+   * 🔑 `SET_SQL_SOURCE` でしか書き換えない(async の答えでは触らない)ので、
+   *   選び直した直後に前の相手の答えが遅れて届いても、ここは動かない。
+   * ⚠ 失敗しても**戻さない**(user 裁定の推薦:「選んだまま + 断り文」)──
+   *   戻すと、何を選んで断られたのかが画面から消える。
+   */
+  readonly guestChosen: string;
+  /**
    * 🔴 **走らせた回の札**(#681 の着地前レビュー F3-A)。
    *
    * ⚠ 走っている最中に**調べる相手を変えられる**ので、前の相手の答えが
@@ -1395,6 +1410,7 @@ export const initialState: AppState = {
     guest: null,
     guestError: '',
     guestPending: '',
+    guestChosen: '',
     runToken: 0,
     er: { open: false, loading: false, model: null, note: '', source: '', token: 0 },
   },
@@ -3780,6 +3796,8 @@ function reduceCore(
             guest: null,
             guestError: '',
             guestPending: action.lid,
+            // 🔴 選び所の見た目は、開けたかどうかに関わらずここで確定させる
+            guestChosen: action.lid,
             /**
              * 🔴 **走っている答えを無効にする**(#681 F3-A)── 札を進めると、
              *   飛んでいる回の答えは捨てられる。

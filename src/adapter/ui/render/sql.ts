@@ -430,9 +430,13 @@ export class SqlRenderer {
    * ⚠ **選択肢は添付が増減したときだけ組み直す** ── 毎回作り直すと、
    *   開いたまま増えた添付に気づける代わりに、**選んでいる最中に選択肢が
    *   差し替わる**(押している指の下で並びが動く)。
-   * ⚠ **いま選ばれている物は state から書き戻す** ── 開けなかった回は
-   *   `guest` が `null` に戻るので、選び所も「この PKC」へ戻る
-   *   (画面と実体が食い違わない)。
+   * ⚠ **いま選ばれている物は `guestChosen` から書き戻す**(`guest?.lid` ではない)。
+   *   開いている最中や、開けなかった回も `guest` は `null` のままなので、
+   *   `guest?.lid` だけを見ると選び所が**開いている最中や失敗した瞬間**に
+   *   「この PKC」へ戻ってしまう(user 報告:「プルダウンには出てくるのに、
+   *   取り込み済みの csv が選択できない」── 実は選べていたが、描画が戻していた)。
+   *   `guestChosen` は `SET_SQL_SOURCE` でしか書き換わらないので、選んだ物は
+   *   開いた・失敗した・まだ開いている、のどれでも画面に出したまま残る。
    * 🔑 **`.sqlite` の下に `.csv` / `.tsv`、その下に `.xlsx`**(#854 段① / 段③)──
    *   開く仕組みは `sqlGuestSourceOf` が `name` の拡張子だけで見分けるので、
    *   ここは一覧を**連結するだけ**でよい(判定を 2 か所に置かない)。
@@ -487,7 +491,7 @@ export class SqlRenderer {
       sel.append(pick);
       sel.hidden = false;
     }
-    const want = state.sqlPage.guest?.lid ?? '';
+    const want = state.sqlPage.guestChosen;
     if (sel.value !== want) sel.value = want;
   }
 
