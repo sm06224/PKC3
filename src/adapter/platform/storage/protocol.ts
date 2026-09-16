@@ -15,7 +15,7 @@ import type { ContactScan } from '@features/contact/contact-card';
 import type { SnippetScan } from '@features/snippet/snippet-table';
 import type { SearchDetailRow } from '@features/filter/search-snippet';
 // 🔴 「これは何の file か」の正本は features 層に 1 つだけ在る(§7)
-import type { SqlGuestSource } from '@features/query/sql-guest-source';
+import type { SqliteReadableGuestSource } from '@features/query/sql-guest-source';
 
 export type StorageRequest =
   /**
@@ -286,8 +286,15 @@ export type StorageRequest =
        *   ②種類が増えるたびに worker 側の分岐が**独立に**増え、書き忘れても tsc が黙る。
        *   🔑 `kind` で割った 1 つの field なら、増やしたときに **worker の `switch` が
        *   落ちる**(網羅が型で守られる)。
+       *
+       * 🔴 **受けるのは「内蔵の sqlite が読める種類」だけ**(#682 段④c)──
+       *   `SqlGuestSource` ではなく `SqliteReadableGuestSource` で受ける。
+       * ⚠ **「渡ってきたら断る」枝を書かない** ── その枝は誰も通らない死んだ枝に
+       *   なり、鳴らない検査が 1 つ増えるだけである。🔑 型で切り出してあるので、
+       *   `.parquet` をここへ渡す道は**構造から消えている**
+       *   (CLAUDE.md §7「検出するより起こらなくする」)。
        */
-      source?: SqlGuestSource;
+      source?: SqliteReadableGuestSource;
     }
   | { op: 'closeSqlGuest'; guest: string }
   | {

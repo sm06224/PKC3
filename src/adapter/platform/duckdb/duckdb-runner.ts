@@ -49,8 +49,12 @@
  * 呼ぶ ── この file 冒頭の実測表のとおり、その後は blob: URL が生きている
  * 必要が無い。
  */
-import { CSV_ATTACHMENT_TABLE_NAME, looksLikeCsvAttachmentName } from '@features/query/csv-attachment';
+import { CSV_ATTACHMENT_TABLE_NAME } from '@features/query/csv-attachment';
 import { CSV_SOURCE_COLUMNS } from '@features/query/csv-tables';
+import {
+  guestTableNameOf,
+  type DuckDbReadableGuestSource,
+} from '@features/query/sql-guest-source';
 import { duckDbTable } from '@features/query/duckdb-rows';
 import {
   DUCKDB_EXTENSIONS,
@@ -132,8 +136,13 @@ export interface DuckDbRunnerDeps {
 
 export interface DuckDbRunInput {
   readonly sql: string;
-  /** 相手(csv / tsv の 1 件)。 */
-  readonly source: { readonly lid: string; readonly name: string };
+  /**
+   * 相手 1 件。
+   * 🔴 **型が `DuckDbReadableGuestSource`** なので、`.xlsx` や `.sqlite` を
+   *   ここへ渡す道は**構造から消えている**(#682 段④c)── だから下の
+   *   `duckDbLoadSql` に「読めない相手が来たら断る」枝が要らない。
+   */
+  readonly source: DuckDbReadableGuestSource;
   /**
    * 🔴 **相手の中身を読む口**(⚠ 呼ばれるのは**器へ入れ直すときだけ**)。
    *
@@ -161,30 +170,81 @@ export function sqlQuote(s: string): string {
 /**
  * 🔴 **器の中での file 名は、こちらが決める固定の字**にする。
  * ⚠ 題名をそのまま使わない ── `'` や改行を含む題名が SQL の字へ混ざる。
- * 🔑 拡張子だけは残す(`read_csv_auto` が区切りを見分ける手がかりになる)。
+ * 🔑 拡張子だけは残す(`read_csv_auto` が区切りを見分ける手がかりになる /
+ *   `read_json_auto` は `.ndjson` で 1 行 1 件を見分ける)。
  * ⚠ **`.csv` は実測済み / `.tsv` は未測** ── 区切りの見分けは上流の推定に任せている。
  *   外した回は上流の断り文がそのまま画面に出る(黙って化けはしない)。
  */
-export function duckDbFileNameOf(name: string): string {
-  return looksLikeCsvAttachmentName(name) === 'tsv' ? 'source.tsv' : 'source.csv';
+export function duckDbFileNameOf(source: DuckDbReadableGuestSource): string {
+  switch (source.kind) {
+    case 'csv':
+      return source.lang === 'tsv' ? 'source.tsv' : 'source.csv';
+    case 'parquet':
+      return 'source.parquet';
+    case 'json':
+      return source.lang === 'ndjson' ? 'source.ndjson' : 'source.json';
+    default: {
+      // ⚠ 種類を足した人がここを書き忘れたら tsc が落とす(`if` を並べると黙って素通りする)
+      const never: never = source;
+      throw new Error(`知らない開き方です: ${JSON.stringify(never)}`);
+    }
+  }
+}
+
+/**
+ * 差し込んだ file を読む `FROM …` の 1 句。
+ * 🔑 **`DUCKDB_READABLE_KINDS` と同じ 3 つ**を網羅する ── 一覧はあちらが正本で、
+ *   ここは `never` の網羅検査で追随を強制される(#682 段④c)。
+ */
+function duckDbReadFrom(source: DuckDbReadableGuestSource, file: string): string {
+  switch (source.kind) {
+    case 'csv':
+      return 'read_csv_auto(' + sqlQuote(file) + ')';
+    case 'parquet':
+      return 'read_parquet(' + sqlQuote(file) + ')';
+    case 'json':
+      return 'read_json_auto(' + sqlQuote(file) + ')';
+    default: {
+      const never: never = source;
+      throw new Error(`知らない読み方です: ${JSON.stringify(never)}`);
+    }
+  }
 }
 
 /**
  * 差し込んだ file から表を組む 1 文。
- * 🔑 **表の名前も、足す 2 列も sqlite 側と同じ**(`csv` / `_note` / `_lid`)──
+ *
+ * 🔑 **csv は、表の名前も足す 2 列も sqlite 側と同じ**(`csv` / `_note` / `_lid`)──
  *   揃えてあるので、**同じ SQL がどちらの engine でも通る**(比べられる)。
+ *
+ * 🔴 **`.parquet` / `.json` には `_note` / `_lid` を足さない**(#682 段④c)。
+ * ⚠ これは手抜きではなく判断である ── 理由は 2 つ:
+ *   ① **比べる相手が居ない**(内蔵の sqlite はこの形式を読めないので、
+ *      「両方の engine で同じ列が出る」という足す理由そのものが無い)
+ *   ② 🔴 **相手の列名を、こちらが勝手に増やさない** ── parquet / json は
+ *      **書いた人が列名を決めている形式**である。`SELECT *` に見覚えのない列が
+ *      2 つ増えるのは驚きであり、⚠ 相手が `_note` という列を持っていたら
+ *      **名前がぶつかって、そもそも開けない**。
+ * 🔑 これが分かったら覆る条件:**複数の相手を 1 つの器へ並べて引けるようにしたとき**
+ *   (どの file の行かを見分ける列が要るようになる)。
+ *
  * ⚠ **VIEW にしない** ── VIEW は打つたびに file を読み直すので、
  *   外を塞いだ後に**引けなくなる**(実測で `Permission Error`)。
  */
-export function duckDbLoadSql(file: string, note: { lid: string; name: string }): string {
+export function duckDbLoadSql(source: DuckDbReadableGuestSource, file: string): string {
+  const from = duckDbReadFrom(source, file);
+  if (source.kind !== 'csv') {
+    return 'CREATE OR REPLACE TABLE ' + guestTableNameOf(source) + ' AS SELECT * FROM ' + from;
+  }
   const noteCol = CSV_SOURCE_COLUMNS[0] ?? '_note';
   const lidCol = CSV_SOURCE_COLUMNS[1] ?? '_lid';
   return (
     'CREATE OR REPLACE TABLE ' + CSV_ATTACHMENT_TABLE_NAME + ' AS SELECT ' +
-    sqlQuote(note.name) + ' AS ' + noteCol + ', ' + sqlQuote(note.lid) + ' AS ' + lidCol + ', * ' +
-    'FROM read_csv_auto(' + sqlQuote(file) + ')'
+    sqlQuote(source.name) + ' AS ' + noteCol + ', ' + sqlQuote(source.lid) + ' AS ' + lidCol + ', * ' +
+    'FROM ' + from
   );
 }
+
 
 /** 🔴 外を塞ぐ 1 文。⚠ **写し切った後に**打つ(前に打つと写せない ── 実測)。 */
 export const DUCKDB_SEAL_SQL = 'SET enable_external_access=false';
@@ -232,7 +292,7 @@ export class DuckDbRunner {
       sql: input.sql,
       maxMs: DUCKDB_MAX_MS,
       // ⚠ 鍵は lid と名前の両方(名前だけだと、同じ題名の別ノートで入れ替わらない)
-      data: { key: lid + '|' + name, load: (h) => this.load(h, input.readBytes, lid, name) },
+      data: { key: lid + '|' + name, load: (h) => this.load(h, input.readBytes, input.source) },
     });
     const table = duckDbTable(raw);
     const truncated = table.rows.length > DUCKDB_MAX_ROWS;
@@ -252,14 +312,13 @@ export class DuckDbRunner {
   private async load(
     h: DuckDbHandle,
     readBytes: () => Promise<Uint8Array | null>,
-    lid: string,
-    name: string,
+    source: DuckDbReadableGuestSource,
   ): Promise<void> {
     const bytes = await readBytes();
-    if (bytes === null) throw new Error(name + ' の中身を読めませんでした');
-    const file = duckDbFileNameOf(name);
+    if (bytes === null) throw new Error(source.name + ' の中身を読めませんでした');
+    const file = duckDbFileNameOf(source);
     await h.put(file, bytes);
-    await h.query(duckDbLoadSql(file, { lid, name }));
+    await h.query(duckDbLoadSql(source, file));
     await h.query(DUCKDB_SEAL_SQL);
   }
 

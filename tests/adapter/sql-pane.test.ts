@@ -37,9 +37,12 @@ import { readFileSync } from 'node:fs';
 import { blocksFor, stripComments, withoutMedia } from '../helpers/css-blocks';
 import { stubStamps } from '../helpers/store-stamps';
 import { stubRevisionOps } from '../helpers/revision-stub';
-import type { SqlGuestSource } from '../../src/features/query/sql-guest-source';
+import type {
+  DuckDbReadableGuestSource,
+  SqliteReadableGuestSource,
+} from '../../src/features/query/sql-guest-source';
 // 🔴 手持ちのファイルを開く(#854 段②)── main.ts と**同じ実物**を配線する
-import { registerSqlLocalFile, takeSqlLocalFileBytes } from '../../src/adapter/state/sql-local-file';
+import { readSqlLocalFileBytes, registerSqlLocalFile } from '../../src/adapter/state/sql-local-file';
 import { SQL_PICK_LOCAL_FILE_VALUE } from '../../src/features/query/sql-local-file';
 
 type SqlAnswer = {
@@ -108,11 +111,11 @@ function setup(
    * 🔴 **DuckDB で引く口**(#682 段②)。⚠ 実物は別ワーカーで走る ── ここは
    *   「**どんな相手で、どんな字で呼ばれたか**」と「**中身を読みに来たか**」を見る fake。
    */
-  const duckSeen: Array<{ sql: string; source: { lid: string; name: string }; bytes: number | null }> = [];
+  const duckSeen: Array<{ sql: string; source: DuckDbReadableGuestSource; bytes: number | null }> = [];
   const runDuckDbSql = vi.fn(
     async (input: {
       sql: string;
-      source: { lid: string; name: string };
+      source: DuckDbReadableGuestSource;
       readBytes: () => Promise<Uint8Array | null>;
     }) => {
       const bytes = await input.readBytes();
@@ -124,7 +127,7 @@ function setup(
    *  ⚠ 実物は worker の別接続 ── ここは**渡された引数**だけを見る fake である。 */
   /** 開くのを**手で止められる**門(遅れて届く答えを作るため)。 */
   let holdOpen: null | (() => void) = null;
-  const openSqlGuest = vi.fn(async (image: Uint8Array, source?: SqlGuestSource) => {
+  const openSqlGuest = vi.fn(async (image: Uint8Array, source?: SqliteReadableGuestSource) => {
     if (image.byteLength === 0) {
       throw new Error(
         source === undefined
@@ -175,7 +178,12 @@ function setup(
                 ? '---\nattachment.name: 壊れ.csv\nattachment.asset_key: ast-csv-broken\n---\n'
                 : lid === 'db6'
                   ? '---\nattachment.name: 大きい.tsv\nattachment.asset_key: ast-tsv-ok\n---\n'
-                  : '',
+                  : lid === 'db7'
+                    ? // 🔑 大きさは**本文の `attachment.size`** から採る(中身は読まない。#682 段④c)
+                      '---\nattachment.name: 売上.parquet\nattachment.size: 4096\nattachment.asset_key: ast-parquet\n---\n'
+                    : lid === 'db8'
+                      ? '---\nattachment.name: 明細.ndjson\nattachment.size: 321\nattachment.asset_key: ast-ndjson\n---\n'
+                      : '',
     ...(opts.withOp === false ? {} : { runReadOnlySql, openSqlGuest, closeSqlGuest }),
   }, opts.withOp === false
     ? {}
@@ -183,7 +191,7 @@ function setup(
         readAssetBytes,
         // 🔴 手持ちのファイル(#854 段②)── 実物の控えをそのまま繋ぐ
         //    (⚠ `withLocal: false` のときは**この口だけ**外す)
-        ...(opts.withLocal === false ? {} : { readLocalSqlFile: (lid: string) => takeSqlLocalFileBytes(lid) }),
+        ...(opts.withLocal === false ? {} : { readLocalSqlFile: (lid: string) => readSqlLocalFileBytes(lid) }),
         // 🔴 DuckDB の口(#682 段②)── 実物は別ワーカー。ここは**渡された引数**だけを見る
         ...(opts.withDuck === false ? {} : { runDuckDbSql }),
       });
@@ -207,7 +215,10 @@ function setup(
       { ...meta('db4', '売上.csv'), archetype: 'attachment' },
       { ...meta('db5', '壊れ.csv'), archetype: 'attachment' },
       { ...meta('db6', '大きい.tsv'), archetype: 'attachment' },
-      // ⚠ **対照群** ── 添付でも `.sqlite` / `.csv` / `.tsv` でないものは並ばない
+      // 🔑 DuckDB でしか読めない相手(#682 段④c)── いちばん下に並ぶはず
+      { ...meta('db7', '売上.parquet'), archetype: 'attachment' },
+      { ...meta('db8', '明細.ndjson'), archetype: 'attachment' },
+      // ⚠ **対照群** ── 添付でも読める拡張子でないものは並ばない
       { ...meta('png1', 'ねこ.png'), archetype: 'attachment' },
     ],
     relations: [],
@@ -3139,7 +3150,11 @@ describe('🔴 どのエンジンで引くか(#682 段②。user 裁定 2026-09-
     await settle();
     expect(duckSeen, 'DuckDB を選んだのに引いていない').toHaveLength(1);
     expect(duckSeen[0]?.sql).toBe('FROM csv SELECT *');
-    expect(duckSeen[0]?.source).toEqual({ lid: 'db4', name: '売上.csv' });
+    /**
+     * 🔴 **`kind` まで渡る**(#682 段④c)── これが無いと
+     *   `read_csv_auto` / `read_parquet` / `read_json_auto` を選び分けられない。
+     */
+    expect(duckSeen[0]?.source).toEqual({ kind: 'csv', lang: 'csv', lid: 'db4', name: '売上.csv' });
     // 🔴 相手の中身を読みに来ている(読まなければ、表は空のままになる)
     expect(duckSeen[0]?.bytes, '相手の中身を読みに来ていない').toBeGreaterThan(0);
     // ⚠ 空振り防止 ── sqlite の口が 1 度でも叩かれていたら、engine を取り違えている
@@ -3262,5 +3277,122 @@ describe('🔴 どのエンジンで引くか(#682 段②。user 裁定 2026-09-
     runBtn.click();
     await settle();
     expect(note()).toContain('取ってこられませんでした');
+  });
+});
+
+/**
+ * 🔴 **`.parquet` / `.json` を調べる相手として受ける**(#682 段④c)。
+ *
+ * ## user の物語(ここを見る)
+ *
+ * ①`.parquet` を取り込む ②「SQL で調べる」を開く ③選び所の**いちばん下**に並ぶ
+ * ④選ぶと「◯◯ を調べています(表 1 個 / …)」と出る ⑤エンジンは **DuckDB** になり、
+ * 「内蔵の sqlite」は薄い字 + 理由 ⑥`SELECT * FROM parquet` が引ける。
+ *
+ * ## ⚠ ここでいちばん大事な 1 件
+ *
+ * 🔴 **sqlite worker を 1 度も叩かない。** 叩けば必ず断られる(中身を解釈できない)ので、
+ *   user には「開けません」としか出ない ── 型でも塞いであるが、
+ *   **配線が本当にそこを通っていないこと**は、この経路でしか見えない。
+ */
+describe('🔴 .parquet / .json を調べる相手として受ける(#682 段④c)', () => {
+  it('🔴 選び所のいちばん下に並び、csv や xlsx より後ろに来る', async () => {
+    const { sourceSel } = setup();
+    await settle();
+    const labels = [...sourceSel.options].map((o) => o.textContent ?? '');
+    const csv = labels.indexOf('売上.csv');
+    const parquet = labels.indexOf('売上.parquet');
+    const ndjson = labels.indexOf('明細.ndjson');
+    expect(parquet, '.parquet が選び所に並んでいない').toBeGreaterThanOrEqual(0);
+    expect(ndjson, '.ndjson が選び所に並んでいない').toBeGreaterThanOrEqual(0);
+    expect(parquet, '.parquet が .csv より前に出ている').toBeGreaterThan(csv);
+    // ⚠ 対照群 ── 読めない添付は並ばない(白名簿の向きが崩れていない)
+    expect(labels, '読めない添付まで並べている').not.toContain('ねこ.png');
+  });
+
+  it('🔴 選ぶと、sqlite worker を 1 度も叩かずに「調べています」になる', async () => {
+    const { pick, note, openSqlGuest, readAssetBytes } = setup();
+    pick('db7');
+    await settle();
+    expect(openSqlGuest, '内蔵の sqlite に .parquet を渡している(必ず断られる)').toHaveBeenCalledTimes(0);
+    /**
+     * 🔴 **中身も読まない**(#682 段④c)── 選んだだけで何十 MB も heap へ載せない
+     *   (不可侵指示 2026-07-27)。読むのは「走らせる」を押したときだけである。
+     */
+    expect(readAssetBytes, '選んだだけで中身を読みに行っている').toHaveBeenCalledTimes(0);
+    expect(note(), '開いたことが画面に出ない').toContain('売上.parquet を調べています');
+    // 🔑 表の名前は `parquet` ── user が打つ字である
+    expect(note()).toContain('表 1 個');
+    // ⚠ 大きさは**本文の `attachment.size`** から採る(中身を読まずに)
+    expect(note(), '大きさが出ていない(中身を読まずに採れているか)').toContain('4.0 KB');
+  });
+
+  it('🔴 エンジンは DuckDB になり、内蔵の sqlite は薄い字で理由が出る', async () => {
+    const { pick, engineSel } = setup();
+    pick('db7');
+    await settle();
+    expect(engineSel.value, '.parquet なのに sqlite で引こうとしている').toBe('duckdb');
+    const lite = [...engineSel.options].find((o) => o.value === 'sqlite');
+    expect(lite?.disabled, '.parquet で内蔵の sqlite を選ばせている').toBe(true);
+    expect(lite?.textContent, 'なぜ選べないかが書いていない').toContain('DuckDB');
+    // ⚠ 対照群 ── csv では sqlite が選べる(「いつも薄い」に壊れていない)
+    const { pick: pick2, engineSel: sel2 } = setup();
+    pick2('db4');
+    await settle();
+    expect([...sel2.options].find((o) => o.value === 'sqlite')?.disabled).toBe(false);
+  });
+
+  it('🔴 走らせると、DuckDB へ kind ごと渡る(読み手を選び分けられる形)', async () => {
+    const { pick, type, runBtn, runReadOnlySql, duckSeen, cells } = setup();
+    pick('db7');
+    await settle();
+    type('SELECT * FROM parquet');
+    runBtn.click();
+    await settle();
+    expect(duckSeen, 'DuckDB へ引きに行っていない').toHaveLength(1);
+    expect(duckSeen[0]?.source, 'kind が渡っていない(読み手を選び分けられない)').toEqual({
+      kind: 'parquet',
+      lid: 'db7',
+      name: '売上.parquet',
+    });
+    // 🔴 **ここで初めて中身を読む**(選んだ時点では読んでいない)
+    expect(duckSeen[0]?.bytes, '相手の中身を読みに来ていない').toBeGreaterThan(0);
+    expect(runReadOnlySql, '内蔵の sqlite でも引いている').toHaveBeenCalledTimes(0);
+    expect(cells()).toEqual([['duck']]);
+  });
+
+  it('🔴 .ndjson は「1 行 1 件」として渡る(.json と別物)', async () => {
+    const { pick, type, runBtn, duckSeen } = setup();
+    pick('db8');
+    await settle();
+    type('SELECT * FROM json');
+    runBtn.click();
+    await settle();
+    expect(duckSeen[0]?.source).toEqual({
+      kind: 'json',
+      lang: 'ndjson',
+      lid: 'db8',
+      name: '明細.ndjson',
+    });
+  });
+
+  /**
+   * 🔴 **つながり図は「採れない理由」を出す**(#682 段④c)。
+   * ⚠ 頼むと、構造を採る 3 本は**内蔵の sqlite へ**飛ぶ ── そこに客の DB は無いので
+   *   生の断り文が図の所に出る。⚠ 頼まないと「採っています」で永久に止まる。
+   *   🔑 だから**頼まずに、理由を書く**。
+   */
+  it('🔴 つながり図は、採れない理由をその場に出す(永久に「採っています」にしない)', async () => {
+    const { pick, pane, runReadOnlySql } = setup();
+    // 図を開いてから相手を選ぶ(開いているときだけ採りに行く作り)
+    pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-er-toggle"]')?.click();
+    await settle();
+    runReadOnlySql.mockClear();
+    pick('db7');
+    await settle();
+    const er = pane.querySelector('[data-pkc-region="sql-er"]')?.textContent ?? '';
+    expect(er, '採れない理由が出ていない').toContain('まだ出せません');
+    expect(er, '採っています、のまま止まっている').not.toContain('採っています');
+    expect(runReadOnlySql, '採れないのに内蔵の sqlite へ聞きに行っている').toHaveBeenCalledTimes(0);
   });
 });

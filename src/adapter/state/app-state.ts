@@ -14,6 +14,7 @@ import { checkDuckDbSql } from '@features/query/duckdb-guard';
 import { DEFAULT_SQL_ENGINE, sqlEngineOf, type SqlEngine } from '@features/query/sql-engine';
 import { schemaModel, type Grid, type SchemaLink, type SchemaModel } from '@features/query/schema-digest';
 import { erSql, type ErAction } from '@features/query/er-sql';
+import { isDuckDbOnlySource, sqlGuestSourceOf } from '@features/query/sql-guest-source';
 import { pickErConnection, type ErPendingFrom } from '@features/query/er-connect';
 import { listViewOptions } from './list-view-options';
 import { resolveCanonicalParents, reorderSibling } from '@features/relation/tree';
@@ -336,13 +337,25 @@ export interface SqlPageState {
  *
  * @param emit いま頼んでよい回か(⚠ 相手を**開き終えた**回だけ真 ── 開く前に頼むと
  *   前の相手へ飛ぶ)。偽なら「採っています」のまま待つ。
+ * @param why 🔴 **採れない相手の理由**(#682 段④c)。渡すと**頼まずに、その字を出す** ──
+ *   ⚠ 「採っています」で止めない/生の断り文も出さない。
+ *   出どころは 1 つ:`.parquet` / `.json` は**内蔵の sqlite が中身を読めない**ので、
+ *   構造を採る `select` 3 本(`schema-digest.ts`)を打つ相手が居ない。
  */
 function erForSource(
   er: SqlPageState['er'],
   source: string,
   guest: boolean,
   emit: boolean,
+  why?: string,
 ): { er: SqlPageState['er']; events: DomainEvent[] } {
+  if (why !== undefined) {
+    // ⚠ 閉じていても `note` は書く(開いた瞬間に理由が読める)
+    return {
+      er: { ...er, loading: false, model: null, note: why, source, mine: [], pendingFrom: null },
+      events: [],
+    };
+  }
   if (er.source === source && er.model !== null) return { er, events: [] };
   // ⚠ 閉じているなら捨てるだけ(開くときに採り直す)
   // 🔑 `mine` / `pendingFrom` も `model` と一緒に捨てる(#918 段⑤d-1)。
@@ -4001,8 +4014,16 @@ function reduceCore(
      */
     case 'SQL_GUEST_OPENED': {
       if (state.sqlPage.guestPending !== action.lid) return { state, events: [] };
-      // 🔴 開けた相手の構造を採り直す(図を開いているときだけ ── §7 の 1 か所)
-      const er = erForSource(state.sqlPage.er, action.lid, true, true);
+      /**
+       * 🔴 開けた相手の構造を採り直す(図を開いているときだけ ── §7 の 1 か所)。
+       * ⚠ **`.parquet` / `.json` は採れない**(#682 段④c)── 構造を採る 3 本は
+       *   内蔵の sqlite へ打つので、**そこに客の DB が無い**。頼めば生の断り文が
+       *   図の所に出るだけなので、**頼まずに理由を書く**。
+       */
+      const erWhy = isDuckDbOnlySource(sqlGuestSourceOf(action.lid, action.name))
+        ? 'この形式のつながり図は、まだ出せません(DuckDB で引く相手です)'
+        : undefined;
+      const er = erForSource(state.sqlPage.er, action.lid, true, true, erWhy);
       return {
         state: {
           ...state,

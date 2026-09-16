@@ -26,7 +26,7 @@ import type { AppState, SqlPageState } from '@adapter/state/app-state';
 import { sqlSourcesOf } from '@features/query/sqlite-attachment';
 import { sqlLineHtml } from '@features/query/sql-lines';
 import { paintSqlEr } from './sql-er';
-import { SQL_GUEST_EXTS } from '@features/query/sql-guest-source';
+import { duckDbOnlySourcesOf, SQL_GUEST_EXTS } from '@features/query/sql-guest-source';
 // 🔴 添付の .csv / .tsv / .xlsx も同じ選び所へ並べる(#854 段① / 段③)
 import { csvAttachmentSourcesOf } from '@features/query/csv-attachment';
 import { xlsxAttachmentSourcesOf } from '@features/query/xlsx-attachment';
@@ -449,7 +449,8 @@ export class SqlRenderer {
    *   取り込み済みの csv が選択できない」── 実は選べていたが、描画が戻していた)。
    *   `guestChosen` は `SET_SQL_SOURCE` でしか書き換わらないので、選んだ物は
    *   開いた・失敗した・まだ開いている、のどれでも画面に出したまま残る。
-   * 🔑 **`.sqlite` の下に `.csv` / `.tsv`、その下に `.xlsx`**(#854 段① / 段③)──
+   * 🔑 **`.sqlite` の下に `.csv` / `.tsv`、その下に `.xlsx`、いちばん下に
+ *   `.parquet` / `.json`**(#854 段① / 段③、#682 段④c)──
    *   開く仕組みは `sqlGuestSourceOf` が `name` の拡張子だけで見分けるので、
    *   ここは一覧を**連結するだけ**でよい(判定を 2 か所に置かない)。
    * ⚠ **並べたものは必ず開けなければならない** ── 選び所に出したのに
@@ -464,6 +465,8 @@ export class SqlRenderer {
       ...sqlSourcesOf(state.entryMetas.values()),
       ...csvAttachmentSourcesOf(state.entryMetas.values()),
       ...xlsxAttachmentSourcesOf(state.entryMetas.values()),
+      // 🔴 DuckDB でしか読めない相手(`.parquet` / `.json` / `.ndjson` / `.jsonl`。#682 段④c)
+      ...duckDbOnlySourcesOf(state.entryMetas.values()),
     ];
     /**
      * 🔴 **いま開いている手持ちのファイルも一覧へ足す**(#854 段②)。

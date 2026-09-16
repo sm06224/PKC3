@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { answerAppDialog, gotoApp, collectPageErrors, clickReal, expectImageRendered, createEntry, useSplitEditor, useListBrowse, expectMainGapUnderBudget } from './helpers';
 // ⚠ 段⑤(xlsx を SQL で調べる)の bytes は Node 側でこの 1 本から組む(#854 段③)。
 import { buildXlsx } from '../features/xlsx-fixture';
+import { buildParquet } from '../features/parquet-fixture';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -982,6 +983,22 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
     buffer: Buffer.from(xlsxBytes),
   });
 
+  /**
+   * 🔴 **`.parquet` も、ここで取り込む**(段⑤-c の下ごしらえ。#682 段④c)。
+   * 🔑 bytes は `tests/features/parquet-fixture.ts` が**その場で組む**
+   *   (`buildXlsx` と同じ向き ── 外から拾ってきた binary を repo へ置かない)。
+   */
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: 'uriage.parquet',
+    mimeType: 'application/octet-stream',
+    buffer: Buffer.from(
+      buildParquet([
+        { name: 'id', type: 'int32', values: [1, 2, 3] },
+        { name: 'shinamono', type: 'utf8', values: ['ringo', 'mikan', 'budou'] },
+      ]),
+    ),
+  });
+
   await createEntry(page, 'text');
   const ta = page.locator('[data-pkc-field="editor-body"]');
   await expect(ta).toBeVisible();
@@ -1422,6 +1439,55 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   // 畳んで元へ戻す ── 以降の筋書きを汚さない
   await clickReal(page, '[data-pkc-action="sql-er-toggle"]');
   await expect(erBox, '図が畳めない').toHaveCount(0);
+
+  /**
+   * ⑤-c 🔴 **`.parquet` を、DuckDB で引く**(#682 段④c)。
+   *
+   * ## 🔑 ここでしか言えないこと
+   *
+   * ⚠ unit は「**どんな SQL の字を組んだか**」までしか言えない
+   *   (`tests/duckdb-read-formats.test.ts` は node で engine に打たせるが、
+   *   それも**ブラウザの経路ではない**)。
+   * 🔴 **実ブラウザでしか言えないのは、この 3 つが 1 本に繋がること**:
+   *   ①配った `parquet` 拡張が**同一オリジンから読み込める**
+   *   ②IDB の添付 bytes が器へ差し込まれる
+   *   ③外を塞いだ後に、写した表から行が返る
+   * 🔑 **新しい起動は増やさない**(#820 の規律)── この筋書きの続きで確かめる。
+   */
+  await source.selectOption({ label: 'uriage.parquet' });
+  await expect(note, '.parquet が開いたことが画面に出ない').toContainText(
+    'uriage.parquet を調べています',
+  );
+  /**
+   * 🔴 **内蔵の sqlite が薄い字になる**(この形式では選べない)。
+   * ⚠ ここが `.csv` / `.xlsx` の**対照群の裏返し**である ── 上の 2 つでは
+   *   sqlite が選べ、DuckDB が薄かった。**薄くする側が入れ替わる**ことを見るので、
+   *   「いつも薄い / いつも薄くない」のどちらの変異も落ちる。
+   */
+  await expect(engine, '.parquet で選び所が消えている').toBeVisible();
+  await expect(engine, '.parquet なのに sqlite で引こうとしている').toHaveValue('duckdb');
+  const liteOption = engine.locator('option[value="sqlite"]');
+  expect(
+    await liteOption.evaluate((o) => (o as HTMLOptionElement).disabled),
+    '.parquet なのに内蔵の sqlite を選ばせている',
+  ).toBe(true);
+  await expect(liteOption, 'なぜ選べないかが書いていない').toContainText('DuckDB');
+
+  await page.fill('[data-pkc-field="sql-input"]', 'SELECT * FROM parquet ORDER BY id');
+  await clickReal(page, '[data-pkc-action="run-sql"]');
+  /**
+   * ⚠ **長めに待つ** ── 初回は器(約 35MB)と拡張 3 つを取りに行くので、
+   *   `.csv` の回(既に器が起きている)より時間がかかる。
+   */
+  await expect(sqlTable, '.parquet から行が返らない').toBeVisible({ timeout: 60_000 });
+  expect(
+    await sqlTable.locator('thead th').allTextContents(),
+    '相手の列を勝手に増やしている(parquet には _note / _lid を足さない)',
+  ).toEqual(['id', 'shinamono']);
+  await expect(sqlTable.locator('tbody tr'), '行の数が合わない').toHaveCount(3);
+  await expect(sqlTable, 'parquet の中身が出ていない').toContainText('mikan');
+  // ⚠ **外へ出ていない**(段② の柱)── localhost 以外への要求が 1 件も無いこと
+  expect(outward, `.parquet を引いたのに外へ出た: ${outward.join(' / ')}`).toEqual([]);
 
   /**
    * ⑤-b 🔴 **調べている最中にノートを押しても、SQL の面は残る**(#906。user 裁定 2026-09-14)。
