@@ -156,7 +156,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'choose-office-pack', 'clear-copy-history', 'clear-entry-date', 'clear-entry-filter',
   'clear-kind-filter', 'clear-opened-history', 'clear-selection', 'close-pane',
   'contacts-quick-add', 'copy-block-md', 'copy-chapter-md', 'copy-note-md', 'copy-note-rich',
-  'copy-section-ref', 'copy-selection-md', 'db-check', 'db-rescue',
+  'copy-section-ref', 'copy-selection-md', 'db-check', 'db-rescue', 'db-rescue-archive',
   'delete-selected', 'deny-external-images',
   'discard-capture', 'dismiss-announce', 'dismiss-notices', 'dismiss-update', 'dual-back',
   'dual-bookmark', 'dual-copy', 'dual-delete', 'dual-focus', 'dual-forward', 'dual-mkdir',
@@ -392,12 +392,16 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-09-16(#918 段⑤d-1): 「繋ぐ」モード(`sql-er-connect-toggle` /
       //   `sql-er-unlink`)で受け手 +2 ── 登記は増えない(押し所はつながり図の
       //   帯 / 札にしか無く、鍵も持たない。`sql-er-toggle` / `sql-er-link` と同じ仕分け)。
-      total: 316,
-      receivers: 264,
+      // ⚠ 2026-09-16(#986 壊れても戻せる): 「拾って、戻せる形で書き出す」
+      //   (`db-rescue-archive`)で受け手 +1 ── 登記は増えない
+      //   (押し所は設定の中にしか無く、鍵も持たない ── すぐ隣の
+      //   `db-rescue` / `db-check` と同じ仕分け)。
+      total: 317,
+      receivers: 265,
       registered: 88,
       both: 36,
       outsideActionsTable: 52,
-      unregistered: 228,
+      unregistered: 229,
     });
   });
 
