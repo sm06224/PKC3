@@ -666,8 +666,11 @@ select:focus-visible {
    *   読む:語が入るうちは 1 段のまま伸び、入らなくなった時だけ段が増える。 */
   flex-wrap: wrap;
   gap: 1px;
-  background: var(--border);
-  padding-bottom: 1px;
+  /* ⚠ 下地は**地の色**(#951)。区切りは共有規則が各ボタンの輪で描く。
+   * 🔴 下端の 1 本線は「**下地を 1px 透かせる**」形から `border-bottom` へ移した
+   *   ── 下地を地の色にした瞬間、透かしても線にならないからである。 */
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
 }
 [data-pkc-region='browse-tabs'] button {
   /* 🔴 **語より細くしない**(2026-08-27)。以前は `flex: 1; min-width: 0` ──
@@ -734,15 +737,14 @@ select:focus-visible {
   display: flex;
   flex-wrap: wrap;
   gap: 1px;
-  padding-top: 1px;
-  background: var(--border);
-  flex: none;
-}
-/* ⚠ 余りは**地の色**で埋める(上の書式パネルと同じ理由) */
-[data-pkc-region='collection-bar']::after {
-  content: '';
-  flex: 1 1 auto;
+  /* 🔴 下地は**地の色**(#951)。上端の 1 本線は `padding-top` の透かしから
+   *   `border-top` へ移した(下地が地の色だと、透かしても線にならない)。
+   * ⚠ 埋め草の `::after` は落とした ── **最後の段にしか居ない**ので、
+   *   2 段以上に折れると上の段の余りが線色のベタ塗りになっていた
+   *   (実測 2026-09-16: 9 テーマ × 4 DPR × 2 幅 = **72/72 で灰色**)。 */
   background: var(--surface);
+  border-top: 1px solid var(--border);
+  flex: none;
 }
 /* 🔴 **図案を出さない**(#475、2026-08-27)。⚠ タブ(#468)・作る帯(#476)と
  * **同じ手の 3 例目**である ── 230px の器に 7 個を並べると図案の分だけ入らない。
@@ -811,7 +813,24 @@ select:focus-visible {
   min-height: 0;
   background: var(--surface);
 }
-[data-pkc-region='find-bar'],
+/**
+ * 🔴 **「探す」欄だけは下地を線色のままにする**(#951)。
+ *
+ * ⚠ ここに並ぶのは**ボタンではなく入力欄と選び所**なので、帯の共有規則
+ *   (`… button:not(:focus-visible)` の 1px の輪)が**当たらない** ──
+ *   下地を地の色にすると、入力欄と選び所の間の区切りが 1 本消える。
+ * 🔑 **そして余りが出ない** ── `entry-filter` が `flex: 1` で行を埋め切るので、
+ *   ほかの帯を壊していた「最後の段以外がベタ塗り」が原理的に起きない。
+ * ⚠ **この理由が崩れたら(欄が伸びなくなったら)、ここも地の色へ移す。**
+ */
+[data-pkc-region='find-bar'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px;
+  align-items: stretch;
+  padding: 0;
+  background: var(--border);
+}
 /* 🔴 **押す口が増えても、潰れない・はみ出さない**(#279 で実測)。
  *
  * ⚠ `flex-wrap` が無いと flex は**縮めて**収めようとするが、縮みには床
@@ -832,10 +851,14 @@ select:focus-visible {
   gap: 1px;
   align-items: stretch;
   padding: 0;
-  background: var(--border);
+  /* 🔴 下地は**地の色**(#951)。⚠ ここは**旧い作りの中でもいちばん悪かった** ──
+   *   埋め草の `::after` すら無いので、実測(2026-09-16、900px)で
+   *   **最後の段まで灰色**だった(9 テーマ × 4 DPR × 2 幅 = **72/72**)。 */
+  background: var(--surface);
+  /* ⚠ 下端の 1 本線は、下地を 1px 透かせる形では描けなくなった(#951) */
+  border-bottom: 1px solid var(--border);
 }
-[data-pkc-region='find-bar'],
-[data-pkc-region='create-bar'] {
+[data-pkc-region='find-bar'] {
   /* 下端に**共有の 1 本線**(地の色を 1px 透かせる) */
   padding-bottom: 1px;
 }
@@ -934,7 +957,10 @@ select:focus-visible {
   display: flex;
   flex-wrap: wrap;
   gap: 1px;
-  background: var(--border);
+  /* ⚠ 下地は**地の色**(#951)。⚠ ここは実測で余りが **0 件**だった
+   *   (ボタンが `flex: 1 1 auto` で行を埋め切る)が、**その理由は見た目の都合で
+   *   いつでも変わる** ── 変わった日に灰色が出る形を残さない。 */
+  background: var(--surface);
   border-top: 1px solid var(--border);
 }
 [data-pkc-region='create-menu'] button {
@@ -1332,8 +1358,27 @@ select:focus-visible {
   gap: 1px;
   background: var(--surface);
 }
+/**
+ * 🔴 **区切りの輪は、折り返す帯 6 本ぜんぶで共有する**(#951、2026-09-16)。
+ *
+ * ⚠ #705② はこの作りを **2 本にしか当てていなかった** ── 残る 4 本は
+ *   「下地 `--border` + `gap` の透かし」の旧い作りのままで、user に
+ *   「**操作ボタンの配置部分のグレー背景がずれて見える**」と報告された。
+ * 🔑 実ブラウザで測ったら、割れ方は**きれいに作りと一致**していた
+ *   (9 テーマ × 4 DPR × 2 幅 = 72 通り):
+ *     - 新しい作り(この規則)… **0/72**(10 段まで折っても出ない)
+ *     - 旧い作り … `collection-bar` **72/72** / `create-bar` **72/72** /
+ *       `inspector-actions` 可視だった **36/36**
+ * ⚠ **`find-bar` はここに入れない** ── 並ぶのが入力欄と選び所なので
+ *   `button` の輪が当たらない(その理由は `find-bar` の規則に書いてある)。
+ */
 [data-pkc-field='detail-toolbar'] button:not(:focus-visible),
-[data-pkc-region='format-bar'] button:not(:focus-visible) {
+[data-pkc-region='format-bar'] button:not(:focus-visible),
+[data-pkc-region='browse-tabs'] button:not(:focus-visible),
+[data-pkc-region='collection-bar'] button:not(:focus-visible),
+[data-pkc-region='create-bar'] button:not(:focus-visible),
+[data-pkc-region='create-menu'] button:not(:focus-visible),
+[data-pkc-region='inspector'] [data-pkc-field='inspector-actions'] button:not(:focus-visible) {
   outline: 1px solid var(--border);
   outline-offset: 0;
 }
@@ -1822,18 +1867,19 @@ li[data-pkc-row-slot] {
   margin: 0;
   overflow-wrap: anywhere;
 }
-/* ⚠ 右の列の操作も**溶け込ませる**(2026-08-15)── 本文の帯と同じ作り */
+/**
+ * ⚠ 右の列の操作も**溶け込ませる**(2026-08-15)── 本文の帯と同じ作り。
+ * 🔴 **2026-09-16(#951)に、その「同じ作り」へ本当に揃えた。**
+ * ⚠ ここは 2026-08-15 から「本文の帯と同じ作り」と注釈が付いていたが、
+ *   **#705② で本文の帯だけが作りを変えた**ので、**注釈が嘘になっていた** ──
+ *   実測(1440px)で **6 段に折れ、最後の段以外の 5 段が毎回灰色**だった。
+ */
 [data-pkc-region='inspector'] [data-pkc-field='inspector-actions'] {
   display: flex;
   flex-wrap: wrap;
   gap: 1px;
-  background: var(--border);
-  border-top: 1px solid var(--border);
-}
-[data-pkc-region='inspector'] [data-pkc-field='inspector-actions']::after {
-  content: '';
-  flex: 1 1 auto;
   background: var(--surface);
+  border-top: 1px solid var(--border);
 }
 [data-pkc-region='inspector'] [data-pkc-field='inspector-actions'] button {
   border: none;
