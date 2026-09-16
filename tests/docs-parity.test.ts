@@ -2325,6 +2325,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-16(#984 並べ替えの重さ)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-14-sql-schema-note" …` → 576c3d1b
+     */
+    'SQL で調べる の面から、DB の構造を 1 枚のノートに書き出せるようになりました',
+    /**
      * ⚠ **2026-09-16(#973 居場所の番号)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-14-voice-boost" …` → 0307debf
      */

@@ -1029,6 +1029,60 @@ describe('P6e ── 鎖を書き出して復元する', () => {
   });
 });
 
+describe('🔴 並べ替えで本文が索引に書き直されない(#984)', () => {
+  const sql = (q: string) =>
+    request({ op: 'runReadOnlySql', sql: q, maxRows: 10, maxSteps: 100_000, maxMs: 30_000 });
+  // ⚠ 返るのは配列ではなく `{ lids, truncated }`(1 稿目はここで落ちた)
+  const found = async (word: string) =>
+    (await request({ op: 'searchEntries', cid: 'c1', query: word })).lids;
+
+  /**
+   * 🔴 **引き金が「題名と本文を書き換えたときだけ」になっている**(#984)。
+   *
+   * ⚠ 直す前は `AFTER UPDATE ON entries`(列の指定なし)なので、
+   *   `UPDATE entries SET entry_order = ?` でも発火し、**本文まるごと**を
+   *   索引から消して入れ直していた(実測:本文 1,000KB で並べ替え 1 回 95.37ms)。
+   * 🔑 ここは**字で見る** ── 速さで見ると端末の速さでぶれるし、
+   *   「書き直していない」は結果からは見えない(同じ字が入り直るだけなので)。
+   */
+  it('🔴 引き金に UPDATE OF title, body が付いている', async () => {
+    const r = await sql(
+      "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'entries_fts_au'",
+    );
+    // ⚠ 前提の assert ── 引き金が無ければ、下の一致は空振りする
+    expect(r.rows, '引き金が 1 本も無い').toHaveLength(1);
+    expect(String(r.rows[0]![0]), '列の指定が無い(並べ替えで本文ごと書き直される)').toMatch(
+      /UPDATE\s+OF\s+title,\s*body/i,
+    );
+  });
+
+  /**
+   * 🟢 **対照群 ── 速くしたぶん、検索が壊れていないこと**を見る。
+   * ⚠ これが無いと「速くなったが検索できない」を配ることになる。
+   */
+  it('🟢 並べ替えた後も、本文で検索して当たる(#984)', async () => {
+    await write('fts-order', '# 並べ替えの的\n\nここに ゆにーくな語 が在る\n');
+    expect(await found('ゆにーくな語'), '書いた直後に当たらない(前提が崩れている)').toContain(
+      'fts-order',
+    );
+    await request({ op: 'reorderEntry', cid: 'c1', lid: 'fts-order', entryOrder: 42 });
+    expect(await found('ゆにーくな語'), '並べ替えたら検索から消えた').toContain('fts-order');
+  });
+
+  /**
+   * 🔴 **本文を実際に変えたときは、これまでどおり索引が追う**(#984)。
+   * ⚠ ここを見ないと、引き金を**丸ごと落としても緑**になる
+   *   ── 上の 2 つは「触らないこと」と「壊れていないこと」しか見ていない。
+   */
+  it('🔴 本文を変えたら索引も変わる(古い語は当たらなくなる)', async () => {
+    await write('fts-edit', '# 書き換えの的\n\nまえのことば\n');
+    expect(await found('まえのことば'), '前提が崩れている').toContain('fts-edit');
+    await write('fts-edit', '# 書き換えの的\n\nあとのことば\n');
+    expect(await found('あとのことば'), '新しい語が索引に入っていない').toContain('fts-edit');
+    expect(await found('まえのことば'), '古い語が索引に残っている').not.toContain('fts-edit');
+  });
+});
+
 describe('🔴 居場所の張り替え(2026-08-05。フォルダ整理)', () => {
   const relsOf = async (toLid: string) =>
     (await request({ op: 'listRelations', cid: 'c1' })).filter((r) => r.to_lid === toLid);
