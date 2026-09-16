@@ -22,10 +22,13 @@ import {
 const SEARCH_LIMIT = 200;
 import type { EntryStamps, EntryUpsert } from './schema';
 import { contentHash64Hex } from './content-hash';
+// 🔑 数だけをここから取る ── 読み解き(日本語)は features 層に置く(#971 段③)
+import { QUICK_CHECK_MAX_ERRORS, RESCUE_CHUNK } from '@features/storage/db-rescue';
 import {
   CORRUPT_BLOCKED_OPS,
   CORRUPT_REFUSAL,
   corruptReport,
+  looksCorrupt,
   shouldFlagCorrupt,
 } from '@features/storage/db-corruption';
 import { assetRefsIn, scanAssetRefsInto } from '@features/asset/asset-ref-scan';
@@ -626,13 +629,6 @@ export function applySchema(database: Database): void {
      * ⚠ 壊れた索引は `count(*)` **すら通らない**ので、読めないときも
      *   「合っていない」として扱う(= 組み直す)。
      */
-    syncFtsIndex(database);
-    if (
-      database.selectValue(`SELECT 1 FROM entries WHERE ${NEEDS_BACKFILL} LIMIT 1`) !== undefined
-    )
-      backfillDerivedColumns(database);
-    // 🔴 **タグの規則を直したら既存行も引き直す**(#550。上の注記)
-    redriveBodyTags(database);
     database.exec(`PRAGMA user_version = ${DB_SCHEMA_VERSION}`);
     database.exec('COMMIT');
   } catch (err) {
@@ -642,6 +638,44 @@ export function applySchema(database: Database): void {
       /* rollback 失敗は元エラーを優先 */
     }
     throw err;
+  }
+
+  /**
+   * 🔴 **「整える」段は、壊れていても起動を止めない**(#971 段③。2026-09-16)。
+   *
+   * ⚠ **直す前はここが上の tx の中に在り、壊れた DB では `init` ごと落ちていた** ──
+   *   帰結は「**アプリが起動しない**」で、🔴 **その日に足した救出の口
+   *   (調べる / 拾えるだけ取り出す)へ、いちばん必要な人が辿り着けない**。
+   *   実測: PK の自動索引を潰した DB を食わせると、埋め戻しの `UPDATE` が rc 11 で
+   *   落ち、`init` が断り文ごと reject していた(`storage-worker-corrupt.test.ts`)。
+   *
+   * 🔑 **段を分けるだけで解ける** ── 器を作る段(上)は落ちたら起動できないが、
+   *   ここは**既にある行を整え直すだけ**なので、できなくても読み書き以外は動く。
+   * ⚠ **握り潰すのは壊れの字だけ**(`looksCorrupt`)── それ以外を隠すと、
+   *   普通の不具合が「静かに整わない」形で残る(いちばん気づけない)。
+   * 🔑 握り潰したら**壊れの旗を立てる** ── 書き込みは止まり、読み出しと救出は通る。
+   *   ⚠ 旗を立てずに素通りさせると、**壊れた DB へ書き続ける**ことになる。
+   * ⚠ `user_version` は上で既に上げているが、埋め戻しの要否は
+   *   **版ではなく「NULL の行が在るか」**で判定するので、次の起動でやり直せる。
+   */
+  try {
+    database.exec('BEGIN IMMEDIATE');
+    syncFtsIndex(database);
+    if (
+      database.selectValue(`SELECT 1 FROM entries WHERE ${NEEDS_BACKFILL} LIMIT 1`) !== undefined
+    )
+      backfillDerivedColumns(database);
+    // 🔴 **タグの規則を直したら既存行も引き直す**(#550。上の注記)
+    redriveBodyTags(database);
+    database.exec('COMMIT');
+  } catch (err) {
+    try {
+      database.exec('ROLLBACK');
+    } catch {
+      /* rollback 失敗は元エラーを優先 */
+    }
+    if (!looksCorrupt(String(err))) throw err;
+    dbCorrupt = true;
   }
 }
 
@@ -3386,6 +3420,114 @@ const handlers: Handlers = {
       relations: one('SELECT COUNT(*) AS n FROM relations WHERE cid = ?'),
       revisions: one('SELECT COUNT(*) AS n FROM revisions WHERE cid = ?'),
       assets: one('SELECT COUNT(*) AS n FROM assets WHERE cid = ?'),
+    };
+  },
+  /**
+   * 🔴 **中身が壊れていないかを調べる**(#971 段③)。
+   *
+   * ⚠ **時間の上限を掛けない** ── 数 GB では分の単位になるが、ここで切ると
+   *   「壊れているかどうか分からない」しか返せない(SQL の面が 8 秒で切れるので、
+   *   救出の口をそこに置けないのが、そもそもこの op を足した理由である)。
+   * 🔑 **読み解きはここでやらない** ── 返すのは測った物(生の行 + root の対応表)
+   *   だけで、日本語に直すのは `features/storage/db-rescue.ts` である。
+   */
+  checkIntegrity: () => {
+    const database = need();
+    const started = Date.now();
+    const rows: string[] = [];
+    database.exec({
+      // ⚠ 埋め込む数はこちらの定数(user の値が SQL に入る口を作らない)
+      sql: `PRAGMA quick_check(${QUICK_CHECK_MAX_ERRORS})`,
+      rowMode: 'array',
+      // ⚠ 式の body にしない ── `push` は number を返すので、`false | void` に当たらない
+      callback: (r: unknown[]): void => {
+        rows.push(String(r[0]));
+      },
+    });
+    /**
+     * ⚠ **schema が読めないほど壊れていることがある** ── そのときは空で返す。
+     *   🔑 投げると「調べる」ごと失敗して、**壊れの報告まで捨てる**ことになる。
+     */
+    const schema: Array<{ type: string; name: string; rootpage: number }> = [];
+    try {
+      database.exec({
+        sql: 'SELECT type, name, rootpage FROM sqlite_schema WHERE rootpage IS NOT NULL',
+        rowMode: 'array',
+        callback: (r: unknown[]): void => {
+          schema.push({ type: String(r[0]), name: String(r[1]), rootpage: Number(r[2]) });
+        },
+      });
+    } catch {
+      /* 空のまま返す ── 名前に直せないことは呼び側が言う */
+    }
+    return { rows, schema, elapsedMs: Date.now() - started };
+  },
+  /**
+   * 🔴 **壊れていても読める分だけノートを拾う**(#971 段③)。
+   *
+   * ⚠ **`NOT INDEXED` を外さない** ── 索引だけ壊れた DB では、索引を使う形で
+   *   引くと**無事なデータでも rc 11 で落ちる**(2026-09-16 実測)。
+   * ⚠ **落ちた区画は飛ばして次へ進む** ── 1 か所で諦めると、その先が全部捨たる。
+   * ⚠ **空で返る区画は「壊れていない」ではない** ── 実測では壊れているときほど
+   *   空が増える(区切り 100 行で 38/40)。だから数えて返し、呼び側が必ず出す。
+   */
+  rescueEntries: (req) => {
+    const database = need();
+    const after = Math.max(0, Math.floor(req.afterRowid ?? 0));
+    const chunks = Math.max(1, Math.min(Math.floor(req.chunks ?? 20), 200));
+    /**
+     * ⚠ 読めなければ `null` ── 進み具合が出せないだけで、拾うのは続けられる。
+     * ⚠ `catch` で `null` を代入し直さない(初期値のまま) ── lint が
+     *   「使われない代入」として落とす。
+     */
+    let maxRowid: number | null = null;
+    try {
+      const v = database.selectValue('SELECT max(rowid) FROM entries NOT INDEXED');
+      maxRowid = v === null || v === undefined ? 0 : Number(v);
+    } catch {
+      /* 読めない = 進み具合を出さない(拾うのは続ける) */
+    }
+    const rows: ResultMap['rescueEntries']['rows'] = [];
+    let skipped = 0;
+    let empty = 0;
+    let lo = after + 1;
+    for (let c = 0; c < chunks; c += 1) {
+      const hi = lo + RESCUE_CHUNK - 1;
+      let got = 0;
+      try {
+        database.exec({
+          sql: `SELECT rowid, cid, lid, title, archetype, body FROM entries NOT INDEXED
+                 WHERE rowid BETWEEN ? AND ?`,
+          bind: [lo, hi],
+          rowMode: 'array',
+          callback: (r: unknown[]): void => {
+            got += 1;
+            rows.push({
+              rowid: Number(r[0]),
+              cid: String(r[1]),
+              lid: String(r[2]),
+              title: String(r[3]),
+              archetype: String(r[4]),
+              body: String(r[5] ?? ''),
+            });
+          },
+        });
+      } catch {
+        // ⚠ ここで throw しない ── 飛ばして先へ進むのが、この op の存在理由である
+        skipped += 1;
+      }
+      if (got === 0) empty += 1;
+      lo = hi + 1;
+      if (maxRowid !== null && lo > maxRowid) break;
+    }
+    const lastRowid = lo - 1;
+    return {
+      rows,
+      lastRowid,
+      skipped,
+      empty,
+      maxRowid,
+      done: maxRowid !== null && lastRowid >= maxRowid,
     };
   },
   close: () => {

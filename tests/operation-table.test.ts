@@ -156,7 +156,8 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'choose-office-pack', 'clear-copy-history', 'clear-entry-date', 'clear-entry-filter',
   'clear-kind-filter', 'clear-opened-history', 'clear-selection', 'close-pane',
   'contacts-quick-add', 'copy-block-md', 'copy-chapter-md', 'copy-note-md', 'copy-note-rich',
-  'copy-section-ref', 'copy-selection-md', 'delete-selected', 'deny-external-images',
+  'copy-section-ref', 'copy-selection-md', 'db-check', 'db-rescue',
+  'delete-selected', 'deny-external-images',
   'discard-capture', 'dismiss-announce', 'dismiss-notices', 'dismiss-update', 'dual-back',
   'dual-bookmark', 'dual-copy', 'dual-delete', 'dual-focus', 'dual-forward', 'dual-mkdir',
   'dual-mknote', 'dual-move', 'dual-preview-toggle', 'dual-rename-begin', 'dual-row',
@@ -275,6 +276,8 @@ describe('操作の全数台帳(#582 段①)', () => {
       outsideActionsTable: x.outsideActionsTable.length,
       unregistered: x.unregistered,
     }).toEqual({
+      // ⚠ 2026-09-16(#971 段③): 壊れを調べる / 拾い出す(`db-check` / `db-rescue`)で
+      //   受け手 +2(登記は増えない ── 押し口は設定の中にしか無く、鍵も持たない)
       // ⚠ 2026-09-13(#884 段①): アプリの開き方(`set-app-open-target`)で受け手 +1
       //   (登記は増えない ── 押し口は設定の欄にしか無く、鍵も持たない)
       // ⚠ 2026-09-13(#853 段①): 本文へ図案を入れる(`insert-icon`)で受け手 +1
@@ -389,12 +392,12 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-09-16(#918 段⑤d-1): 「繋ぐ」モード(`sql-er-connect-toggle` /
       //   `sql-er-unlink`)で受け手 +2 ── 登記は増えない(押し所はつながり図の
       //   帯 / 札にしか無く、鍵も持たない。`sql-er-toggle` / `sql-er-link` と同じ仕分け)。
-      total: 314,
-      receivers: 262,
+      total: 316,
+      receivers: 264,
       registered: 88,
       both: 36,
       outsideActionsTable: 52,
-      unregistered: 226,
+      unregistered: 228,
     });
   });
 

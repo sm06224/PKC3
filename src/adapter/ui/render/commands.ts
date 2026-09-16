@@ -132,6 +132,8 @@ export function buildSettingsCommands(): HTMLElement {
   }
   wrap.append(row);
   wrap.append(buildStorageProfile());
+  // 🔴 容量の隣に置く ── 「壊れた」と言われた人が最初に探すのはこの並びである
+  wrap.append(buildDbRescue());
   wrap.append(buildPlanApply());
   wrap.append(buildSettingsFile());
   return wrap;
@@ -321,5 +323,49 @@ function buildStorageProfile(): HTMLElement {
   note.setAttribute('data-pkc-field', 'storage-profile-shared');
   note.hidden = true;
   box.append(note);
+  return box;
+}
+
+/**
+ * 🔴 **中身が壊れたときの、調べる口と持ち出す口**(#971 段③)。
+ *
+ * ⚠ **ここが無いと「壊れました」で行き止まりになる** ── 2026-09-16 に
+ *   「書き込みだけ止める」門を配ったとき、断り文に「直す手順へ」と書きながら
+ *   その手順がどこにも無かった(同じ日に見つけて、この節を足した)。
+ * 🚫 **「索引を組み直す」は置かない** ── 実測で 12 回とも同じ rc 11 で落ちたので、
+ *   置いても**押した人に同じエラーを見せるだけ**である。
+ */
+function buildDbRescue(): HTMLElement {
+  const box = document.createElement('section');
+  box.setAttribute('data-pkc-region', 'db-rescue');
+  const h = document.createElement('h4');
+  h.textContent = '中身が壊れていないか調べる';
+  box.append(h);
+
+  const check = document.createElement('button');
+  check.type = 'button';
+  check.setAttribute('data-pkc-action', 'db-check');
+  check.setAttribute('data-pkc-field', 'db-check-run');
+  check.textContent = '壊れていないか調べる';
+  check.title = '壊れている所があるかを調べます。中身が多いと数分かかります';
+  box.append(check);
+
+  const rescue = document.createElement('button');
+  rescue.type = 'button';
+  rescue.setAttribute('data-pkc-action', 'db-rescue');
+  rescue.setAttribute('data-pkc-field', 'db-rescue-run');
+  rescue.textContent = '拾えるだけ取り出す';
+  rescue.title = '読めるノートを集めて 1 つのファイルに書き出します';
+  box.append(rescue);
+
+  const sum = document.createElement('p');
+  sum.setAttribute('data-pkc-field', 'db-rescue-summary');
+  sum.hidden = true;
+  box.append(sum);
+
+  const detail = document.createElement('ul');
+  detail.setAttribute('data-pkc-field', 'db-rescue-detail');
+  detail.hidden = true;
+  box.append(detail);
   return box;
 }

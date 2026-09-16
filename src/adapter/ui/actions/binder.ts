@@ -218,6 +218,16 @@ import {
   type StorageProfileResult,
 } from '@features/storage/storage-profile';
 import {
+  integritySummary,
+  parseQuickCheck,
+  rescueSummary,
+} from '@features/storage/db-rescue';
+import { elapsedText } from '@features/elapsed-text';
+import type {
+  IntegrityCheckResult,
+  RescuePage,
+} from '@adapter/platform/storage/protocol';
+import {
   canApplyPlan,
   parsePlan,
   planPreview,
@@ -857,6 +867,16 @@ export interface BinderServices {
    * ⚠ 無い配線では**押しても何も起きない**ので、器は「調べています…」で止めない。
    */
   storageProfile?(): Promise<StorageProfileResult>;
+  /**
+   * 🔴 **中身が壊れていないかを調べる**(#971 段③)。
+   * ⚠ 数 GB では**分の単位**で返らない ── 押した側は待っている字を出し続ける。
+   */
+  checkIntegrity?(): Promise<IntegrityCheckResult>;
+  /**
+   * 🔴 **壊れていても読める分だけノートを拾う**(#971 段③)。
+   * ⚠ 1 回では終わらない ── `done` になるまで呼び側が繰り返す。
+   */
+  rescueEntries?(afterRowid: number, chunks: number): Promise<RescuePage>;
   /**
    * 🔴 **本文の画像を資産にする**(貼付 = #251 / 押して取り込む = #264 段①)。
    * ⚠ `namePrefix` は**名乗り** ── 置けなかったときの断り文に名前が出るので、
@@ -6903,6 +6923,121 @@ const ACTIONS: Record<string, ActionHandler> = {
         dispatcher.dispatch({ type: 'OP_FAILED', error: '容量を数えられませんでした' });
       },
     );
+  },
+  /**
+   * 🔴 **中身が壊れていないかを調べる**(#971 段③)。
+   *
+   * ⚠ **時間がかかる** ── 数 GB では分の単位になるので、押した直後に
+   *   「調べています」を出し、**終わるまで消さない**(無言で待たせない)。
+   * 🔑 読み解きは `features/storage/db-rescue.ts` の 1 本 ── ここは出すだけである。
+   */
+  'db-check': (dispatcher, _target, services, root) => {
+    const sum = root.querySelector<HTMLElement>('[data-pkc-field="db-rescue-summary"]');
+    const list = root.querySelector<HTMLElement>('[data-pkc-field="db-rescue-detail"]');
+    if (sum === null || list === null) return;
+    if (services.checkIntegrity === undefined) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この環境では中身を調べられません' });
+      return;
+    }
+    sum.textContent = '調べています…(中身が多いと数分かかります。閉じずにお待ちください)';
+    sum.hidden = false;
+    list.textContent = '';
+    list.hidden = true;
+    void services.checkIntegrity().then(
+      (res) => {
+        const report = parseQuickCheck(res.rows, res.schema);
+        // ⚠ 経過を自前で組み立てない ── 見せ方は `elapsed-text.ts` の 1 本
+        //    (2 通りの形で出すと、user は「別の量」と読む。#279)
+        sum.textContent = `${integritySummary(report)}(${elapsedText(res.elapsedMs)} かかりました)`;
+        // ⚠ 生の行も出す ── こちらの言い換えが外れていても、user が読める材料を残す
+        const lines = [...report.brokenTables.map((t) => `本文の表: ${t}`),
+          ...report.brokenIndexes.map((i) => `目次: ${i}`),
+          ...report.unresolved];
+        list.textContent = '';
+        for (const l of lines.slice(0, 60)) {
+          const li = document.createElement('li');
+          li.textContent = l;
+          list.append(li);
+        }
+        list.hidden = lines.length === 0;
+      },
+      (e: unknown) => {
+        sum.textContent = '';
+        sum.hidden = true;
+        dispatcher.dispatch({ type: 'OP_FAILED', error: `調べられませんでした: ${String(e)}` });
+      },
+    );
+  },
+  /**
+   * 🔴 **拾えるだけ取り出す**(#971 段③)。
+   *
+   * ⚠ **1 回で全部返させない** ── 数 GB を 1 つの応答に載せると heap に載らない。
+   * 🔴 **「拾えた件数」を「全部」と読ませない** ── 実測では、壊れているとき
+   *   大半の区画が**エラーではなく空**で返る(区切り 100 行で 38/40)。
+   *   だから読み飛ばした数を数えて、必ず一緒に出す。
+   */
+  'db-rescue': (dispatcher, _target, services, root) => {
+    const sum = root.querySelector<HTMLElement>('[data-pkc-field="db-rescue-summary"]');
+    if (sum === null) return;
+    if (services.rescueEntries === undefined) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この環境では取り出せません' });
+      return;
+    }
+    const pick = services.rescueEntries;
+    /** ⚠ 上限 ── 積みすぎると取り出す前に落ちる。届いたらそこで書き出す。 */
+    const MAX_CHARS = 80_000_000;
+    const parts: string[] = [];
+    let chars = 0;
+    let rows = 0;
+    let skipped = 0;
+    let empty = 0;
+    let after = 0;
+    let capped = false;
+
+    const finish = (): void => {
+      const head =
+        `# PKC から拾い出したノート\n\n` +
+        `${rescueSummary({ rows, skipped, empty })}\n` +
+        (capped ? '\n⚠ 量が多いので途中で打ち切りました。\n' : '') +
+        `\n---\n\n`;
+      downloadBlob(
+        // ⚠ `toISOString()` は UTC ── 日付が 1 日ずれる端末が出る(`dayStamp` に寄せる)
+        `pkc-rescue-${dayStamp(new Date())}.md`,
+        new Blob([head, ...parts], { type: 'text/markdown' }),
+      );
+      sum.textContent = rescueSummary({ rows, skipped, empty }) + ' ファイルに書き出しました。';
+      sum.hidden = false;
+    };
+
+    const step = (): void => {
+      void pick(after, 20).then(
+        (page: RescuePage) => {
+          for (const r of page.rows) {
+            const text = `## ${r.title || r.lid}\n\n${r.body}\n\n`;
+            parts.push(text);
+            chars += text.length;
+          }
+          rows += page.rows.length;
+          skipped += page.skipped;
+          empty += page.empty;
+          after = page.lastRowid;
+          if (chars >= MAX_CHARS) capped = true;
+          const at = page.maxRowid === null ? '' : `(${after} / ${page.maxRowid})`;
+          sum.textContent = `拾っています… ${rows} 件 ${at}`;
+          sum.hidden = false;
+          if (page.done || capped || page.lastRowid <= 0) finish();
+          else step();
+        },
+        (e: unknown) => {
+          // ⚠ 途中で落ちても、**そこまでを書き出す** ── 捨てるのがいちばん悪い
+          if (rows > 0) finish();
+          dispatcher.dispatch({ type: 'OP_FAILED', error: `取り出しが止まりました: ${String(e)}` });
+        },
+      );
+    };
+    sum.textContent = '拾っています…';
+    sum.hidden = false;
+    step();
   },
   /**
    * 🔴 **貼れる 1 行を写す**(#427 段①)。

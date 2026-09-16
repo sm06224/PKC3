@@ -478,6 +478,25 @@ export type StorageRequest =
    */
   | { op: 'storageProfile'; cid: string }
   | { op: 'counts'; cid: string }
+  /**
+   * 🔴 **中身が壊れていないかを調べる**(#971 段③)。
+   *
+   * ⚠ **時間の上限を掛けない** ── SQL の面は 8 秒で切るので救出には使えない
+   *   (`store-effects.ts` の `SQL_MAX_MS`)。ここは本体タブが待てる口である
+   *   (`StoreClient` は timeout を持たない ── 中継の `StoreProxy` は持つので、
+   *   この口は**本体タブからしか押せない**)。
+   * 🔑 壊れの報告に出る `Tree <N>` を `sqlite_schema.rootpage` と突き合わせて、
+   *   **目次か本文かを名前で**返す(実測で対応が取れている)。
+   */
+  | { op: 'checkIntegrity' }
+  /**
+   * 🔴 **壊れていても読める分だけノートを拾う**(#971 段③)。
+   *
+   * ⚠ **必ず `NOT INDEXED`** ── 索引だけ壊れている DB では、索引を使う形で引くと
+   *   無事なデータでも rc 11 で落ちる(実測)。
+   * ⚠ **落ちた区画は飛ばして先へ進む** ── 1 か所で諦めると、その先が全部捨たる。
+   */
+  | { op: 'rescueEntries'; afterRowid?: number; chunks?: number }
   | { op: 'close' };
 
 /** assets 表は meta のみ(bytes は AssetBlobStore ── §4.2)。hash は遅延計算可。 */
@@ -660,6 +679,45 @@ export interface CountsResult {
   assets: number;
 }
 
+/**
+ * 🔴 **`PRAGMA quick_check` の生の行と、schema の対応表**(#971 段③)。
+ *
+ * 🔑 **読み解くのは features 層**(`features/storage/db-rescue.ts`)── ここが
+ *   返すのは**測った物だけ**である(worker に日本語の判断を持たせない)。
+ * ⚠ `schema` を必ず添える ── これが無いと `Tree <N>` を名前に直せず、
+ *   「どこが壊れたか分からない」としか言えなくなる。
+ */
+export interface IntegrityCheckResult {
+  /** `PRAGMA quick_check(N)` が返した行(⚠ 1 行に改行で何十件も入る)。 */
+  rows: string[];
+  /** `sqlite_schema` の root page 一覧。⚠ 読めなければ空(隠さない)。 */
+  schema: Array<{ type: string; name: string; rootpage: number }>;
+  /** 掛かった時間(ms)。⚠ 数 GB では分の単位になるので、画面に出す。 */
+  elapsedMs: number;
+}
+
+/** 🔴 **拾えた 1 ページ**(#971 段③)。⚠ 拾えなかった区画の数を必ず載せる。 */
+export interface RescuePage {
+  rows: Array<{
+    rowid: number;
+    cid: string;
+    lid: string;
+    title: string;
+    archetype: string;
+    body: string;
+  }>;
+  /** 次に頼むときの `afterRowid`。 */
+  lastRowid: number;
+  /** 🔴 **読めなかった区画の数**(このページの分)。 */
+  skipped: number;
+  /** 空で返った区画の数(⚠ 壊れているときは**これが大半**になる)。 */
+  empty: number;
+  /** ⚠ 読めなければ `null` ── 進み具合を出せないだけで、拾うのは続けられる。 */
+  maxRowid: number | null;
+  /** `maxRowid` を追い越した = ここで終わってよい。 */
+  done: boolean;
+}
+
 export type RequestFor<Op extends StorageRequest['op']> = Extract<
   StorageRequest,
   { op: Op }
@@ -807,5 +865,7 @@ export interface ResultMap {
   scanAssetRefs: { referenced: string[] };
   storageProfile: StorageProfileResult;
   counts: CountsResult;
+  checkIntegrity: IntegrityCheckResult;
+  rescueEntries: RescuePage;
   close: null;
 }

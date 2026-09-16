@@ -2898,6 +2898,60 @@ describe('本文の csv を SQL から引く(#681 段③)', () => {
   });
 
   /**
+   * 🔴 **調べる口が、本物の sqlite で動く**(#971 段③)。
+   *
+   * ⚠ 「`PRAGMA quick_check` を呼んでいる」だけの test にしない ── 返ってくる
+   *   **形**(何行か / 何が入っているか)が読み手の前提なので、そこまで見る。
+   * 🔑 `schema` を必ず添えることが肝である ── これが空だと、壊れの報告に出る
+   *   `Tree <N>` を名前に直せず「どこが壊れたか分からない」としか言えない。
+   */
+  it('🔴 中身を調べると、健全なら ok と schema が返る(#971 段③)', async () => {
+    await write('rescue-seed', doc('拾われる本文'));
+    const res = await request({ op: 'checkIntegrity' });
+    // ⚠ 実測: 健全なときは **"ok" の 1 行だけ**
+    expect(res.rows, 'quick_check が何も返していない').toEqual(['ok']);
+    // 🔑 空振り防止 ── schema を引けていない走査で「対応づけられる」と言わない
+    expect(res.schema.length, 'schema を 1 つも引けていない').toBeGreaterThan(3);
+    expect(
+      res.schema.some((s) => s.type === 'table' && s.name === 'entries'),
+      'entries を引けていない',
+    ).toBe(true);
+    expect(
+      res.schema.every((s) => Number.isFinite(s.rootpage)),
+      'rootpage が数になっていない(名前に直せない)',
+    ).toBe(true);
+  });
+
+  /**
+   * 🔴 **拾う口が、本文を最後まで返す**(#971 段③)。
+   *
+   * ⚠ **1 回で終わらない前提**なので、`done` になるまで回して数える ──
+   *   1 ページだけ見る test は「2 ページ目が来ない」欠陥を**原理的に見られない**。
+   */
+  it('🔴 拾えるだけ取り出すと、全部のノートが返る(#971 段③)', async () => {
+    for (let i = 0; i < 5; i += 1) await write(`rescue-${i}`, doc(`救出 ${i} の本文`));
+    const seen = new Map<string, string>();
+    let after = 0;
+    let pages = 0;
+    let skipped = 0;
+    for (;;) {
+      const page = await request({ op: 'rescueEntries', afterRowid: after, chunks: 2 });
+      pages += 1;
+      skipped += page.skipped;
+      for (const r of page.rows) seen.set(r.lid, r.body);
+      after = page.lastRowid;
+      if (page.done || pages > 50) break;
+    }
+    expect(pages, '1 ページも回っていない').toBeGreaterThan(0);
+    // 🔑 健全な DB では 1 件も読み飛ばさない(飛ばしていたら、拾い方が壊れている)
+    expect(skipped, '健全なのに読み飛ばした').toBe(0);
+    for (let i = 0; i < 5; i += 1) {
+      expect(seen.get(`rescue-${i}`), `拾えていない: rescue-${i}`).toContain(`救出 ${i} の本文`);
+    }
+  });
+
+
+  /**
    * 🔴 **列の名前の目録**(`csv_columns`。#918 段⑤d-2)。
    *
    * ⚠ 本文の csv は **temp の表**なので `sqlite_master` に出ない ── だから
