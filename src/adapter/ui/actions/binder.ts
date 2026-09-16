@@ -222,6 +222,7 @@ import {
   parseQuickCheck,
   rescueSummary,
 } from '@features/storage/db-rescue';
+import { elapsedText } from '@features/elapsed-text';
 import type {
   IntegrityCheckResult,
   RescuePage,
@@ -6945,8 +6946,9 @@ const ACTIONS: Record<string, ActionHandler> = {
     void services.checkIntegrity().then(
       (res) => {
         const report = parseQuickCheck(res.rows, res.schema);
-        const secs = Math.round(res.elapsedMs / 1000);
-        sum.textContent = `${integritySummary(report)}(${secs} 秒かかりました)`;
+        // ⚠ 経過を自前で組み立てない ── 見せ方は `elapsed-text.ts` の 1 本
+        //    (2 通りの形で出すと、user は「別の量」と読む。#279)
+        sum.textContent = `${integritySummary(report)}(${elapsedText(res.elapsedMs)} かかりました)`;
         // ⚠ 生の行も出す ── こちらの言い換えが外れていても、user が読める材料を残す
         const lines = [...report.brokenTables.map((t) => `本文の表: ${t}`),
           ...report.brokenIndexes.map((i) => `目次: ${i}`),
@@ -6999,7 +7001,8 @@ const ACTIONS: Record<string, ActionHandler> = {
         (capped ? '\n⚠ 量が多いので途中で打ち切りました。\n' : '') +
         `\n---\n\n`;
       downloadBlob(
-        `pkc-rescue-${new Date().toISOString().slice(0, 10)}.md`,
+        // ⚠ `toISOString()` は UTC ── 日付が 1 日ずれる端末が出る(`dayStamp` に寄せる)
+        `pkc-rescue-${dayStamp(new Date())}.md`,
         new Blob([head, ...parts], { type: 'text/markdown' }),
       );
       sum.textContent = rescueSummary({ rows, skipped, empty }) + ' ファイルに書き出しました。';
