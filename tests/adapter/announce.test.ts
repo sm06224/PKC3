@@ -904,7 +904,7 @@ describe('お知らせの文面は固定(#220-7)', () => {
      *   ⚠ 前の文面は**書き換えない**(既読の user にはもう届かないので、
      *   訂正は**新しい 1 件**として足す)。
      */
-    ['2026-09-16-duckdb-parquet-json', 'a62ea173'],
+    ['2026-09-16-duckdb-parquet-json', 'ec2e9a12'],
     ['2026-09-16-duckdb-extensions', 'f7f1445d'],
     ['2026-09-16-rescue-restorable', '4d500f3c'],
     /**
