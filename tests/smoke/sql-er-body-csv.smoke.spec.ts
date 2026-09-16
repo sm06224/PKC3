@@ -56,13 +56,28 @@ test('🔴 本文の名前つき csv が図の四角として出て引ける。�
   await page.keyboard.type('```csv name=だめ な 名前\na,b\n1,2\n```\n');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
-  // ⚠ 空振り防止 ── 本文の囲みが、そもそも表として読めていること
-  //   (読めていなければ、以降の「図に四角が出ない」が別の理由で起きてしまう)
+  /**
+   * ⚠ 空振り防止 ── 本文の囲みが、そもそも表として読めていること
+   *   (読めていなければ、以降の「図に四角が出ない」が別の理由で起きてしまう)。
+   *
+   * 🔴 **囲みは 2 つとも表になる**(2026-09-16 に実ブラウザで測って分かった)。
+   * ⚠ 直す前のこの行は `toBeVisible()` で、囲みを 1 つ足したら
+   *   **strict mode 違反**(2 要素に解決)で落ちた。
+   * 🔑 そして**それが教えてくれたことのほうが大きい** ── 本文を描く側
+   *   (`features/markdown/csv-table.ts`)は **`name=` を 1 度も検めていない**
+   *   (`csvTableNameWhy` / `validCsvTableName` の呼び口が 0 件)。
+   *   つまり「名前が受けられない」で失うのは**本文の見た目ではなく、
+   *   SQL から名前で引けること**である ── だから理由は
+   *   `csv_tables.why`(= SQL の目録)に出る。
+   */
   const bodyTable = page.locator('[data-pkc-field="detail-body"] table');
-  await expect(bodyTable, '本文の csv が表として描かれていない(前提が崩れている)').toBeVisible({
-    timeout: 10_000,
-  });
-  await expect(bodyTable).toContainText('りんご');
+  await expect(bodyTable, '本文の csv が 2 つとも表になっていない(前提が崩れている)').toHaveCount(
+    2,
+    { timeout: 10_000 },
+  );
+  await expect(bodyTable.first()).toContainText('りんご');
+  // 🔴 受けられない名前の囲みも、**本文には出る**(上の docstring)
+  await expect(bodyTable.nth(1), '受けられない名前の囲みが本文に出ていない').toContainText('ab');
 
   /**
    * ── ① SQL で調べる を開く(この PKC のノートが既定 ── 何も選ばない)。
