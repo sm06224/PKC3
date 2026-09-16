@@ -136,7 +136,7 @@ describe('ZIP64 で書いて、読み直す(#971 段④)', () => {
     writeFileSync(path, Buffer.from(await blob.arrayBuffer()));
 
     // ① unzip -t(CRC と構造の検査)
-    const t = execFileSync('unzip', ['-t', path], { encoding: 'utf-8' });
+    const t = execFileSync('unzip', ['-t', path], { encoding: 'utf-8', stdio: 'pipe' });
     expect(t, 'unzip が異常を出した').toMatch(/No errors detected/);
 
     // ② python の zipfile ── **中身の字まで**突き合わせる
@@ -146,7 +146,10 @@ describe('ZIP64 で書いて、読み直す(#971 段④)', () => {
       'assert z.testzip() is None',
       'print(json.dumps({n:z.read(n).decode("utf-8") for n in z.namelist()}))',
     ].join('\n');
-    const out = execFileSync('python3', ['-c', script, path], { encoding: 'utf-8' });
+    const out = execFileSync('python3', ['-c', script, path], {
+      encoding: 'utf-8',
+      stdio: 'pipe',
+    });
     const got = JSON.parse(out) as Record<string, string>;
     for (const f of FILES) {
       expect(got[f.name], `外の読み手が違う中身を返した: ${f.name}`).toBe(f.body);
