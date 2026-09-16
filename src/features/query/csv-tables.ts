@@ -73,6 +73,8 @@ export const CSV_TABLE_CELLS_MAX = 200_000;
  */
 export const CSV_TABLE_RESERVED: readonly string[] = [
   'csv_tables',
+  // ⚠ 列の名前の目録(#918 段⑤d-2)── 取られると、つながり図が本文の表を見失う
+  'csv_columns',
   'containers',
   'entries',
   'entries_fts',

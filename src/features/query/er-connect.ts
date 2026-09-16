@@ -89,3 +89,48 @@ export function pickErConnection(
   }
   return { kind: 'linked', link };
 }
+
+/**
+ * 🔴 **線が 1 本も無い画面で、理由と次の一手を言う**(#918 段⑤d-3)。**pure**。
+ *
+ * ## なぜ要るか
+ *
+ * 段⑤d-1 で「繋ぐ」を足したが、⚠ **線が 0 本の画面は、何も言わないままだった** ──
+ * user から見ると「箱は出たのに線が出ない = 壊れている」としか読めず、
+ * 最初の報告(「ちゃんと描きたいのにできないんだが」)と**同じ所へ戻る**。
+ *
+ * 🔑 だから **0 本である理由**と、**次に何を押せばよいか**を字にする。
+ * ⚠ 「繋ぐ」が既に入のときは**次の一手を書かない** ── すぐ下の案内
+ *   (`connectHintOf`)が同じことを言うので、2 度言うと読み飛ばされる。
+ *
+ * @returns 出す字。`''` なら**何も出さない**。
+ */
+export function erZeroLinesWhy(input: {
+  /** 図に出ている四角の数。 */
+  readonly boxes: number;
+  /** DB が宣言した繋がりの数。 */
+  readonly declared: number;
+  /** 自分で引いた繋がりの数。 */
+  readonly mine: number;
+  /** 線にできずに落ちた繋がりの数。 */
+  readonly dropped: number;
+  /** 「繋ぐ」が入か。 */
+  readonly connecting: boolean;
+}): string {
+  const { boxes, declared, mine, dropped, connecting } = input;
+  if (boxes === 0) return '';
+  // ⚠ 相手が 1 つしかないなら「繋ぐ」を勧めてはいけない ── 同じ表の中は繋げない
+  //   (`pickErConnection` が断る)ので、勧めると**押せない道**へ誘うことになる。
+  if (boxes === 1) return '表が 1 つだけなので、繋ぐ相手がいません。';
+  const next = connecting ? '' : ' 上の「繋ぐ」を押して列を 2 つ押すと、自分で繋げます。';
+  if (dropped > 0) {
+    return `繋がりはありますが、1 本も線にできませんでした(理由はこの下に出ています)。${next}`;
+  }
+  if (declared === 0 && mine === 0) {
+    return `この DB は、表どうしの繋がり(外部キー)を 1 つも宣言していません。${next}`;
+  }
+  // ⚠ ここへは来ない(繋がりが在って落ちてもいないなら、線は引かれている)。
+  //   ⚠ **それらしい字を返さない** ── 起きない形に文言を置くと、
+  //   後から「この字が出た」と読んだ人が存在しない経路を追う。
+  return '';
+}

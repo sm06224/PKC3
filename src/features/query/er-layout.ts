@@ -22,6 +22,7 @@
  */
 
 import { placeLineOf, type PlaceLine, type PlaceRect } from '@features/markdown/place-line';
+import { schemaKindLabel } from './schema-digest';
 import type { SchemaColumn, SchemaLink, SchemaModel, SchemaTable } from './schema-digest';
 
 /** 画面に出す列の数。⚠ これを超えた分は「ほか N 列」に畳む(表の見出しを押せば全部見える)。 */
@@ -91,7 +92,8 @@ export interface ErDiagram {
 
 /** その表の見出しに出す字(幅の見積もりにも、描画にも、同じ物を使う)。 */
 export function erHeadLabel(t: SchemaTable): string {
-  const kind = t.kind === 'view' ? 'ビュー' : '表';
+  // 🔑 字は `schemaKindLabel` 1 か所(markdown と同じ字を出す ── CLAUDE.md §7)
+  const kind = schemaKindLabel(t.kind);
   return t.rows === null ? `${t.name}(${kind})` : `${t.name}(${kind}・${t.rows} 行)`;
 }
 
@@ -104,9 +106,11 @@ export function erColumnLabel(c: SchemaColumn): string {
 /**
  * 🔴 **並べる順**(決定的)。
  *
- * ① **指されている数が多い順**(外部キーの受け手 = 本体らしい表が左上へ来る)
- * ② **行数が多い順**(⚠ 採れていない表は `null` なので**いちばん後ろ**)
- * ③ **名前順**
+ * ① 🔴 **DB の表が先、本文の csv は後**(#918 段⑤d-2)── 混ぜて並べると
+ *    「どれがこの DB の構造か」が読めなくなる(本文の表は**引くたびに組む** temp である)
+ * ② **指されている数が多い順**(外部キーの受け手 = 本体らしい表が左上へ来る)
+ * ③ **行数が多い順**(⚠ 採れていない表は `null` なので**いちばん後ろ**)
+ * ④ **名前順**
  *
  * ⚠ 名前の比較に `localeCompare` を使わない ── 並びが環境の言語設定で変わると、
  *   「同じ構造なら同じ絵」が崩れる。
@@ -114,7 +118,10 @@ export function erColumnLabel(c: SchemaColumn): string {
 export function erOrder(model: SchemaModel): readonly SchemaTable[] {
   const inbound = new Map<string, number>();
   for (const l of model.links) inbound.set(l.to, (inbound.get(l.to) ?? 0) + 1);
+  // 🔑 本文の csv だけを後ろへ ── 他の 3 段は 1 ミリも変えない
+  const rank = (t: SchemaTable): number => (t.kind === 'csv' ? 1 : 0);
   return [...model.tables].sort((a, b) => {
+    if (rank(a) !== rank(b)) return rank(a) - rank(b);
     const ia = inbound.get(a.name) ?? 0;
     const ib = inbound.get(b.name) ?? 0;
     if (ia !== ib) return ib - ia;

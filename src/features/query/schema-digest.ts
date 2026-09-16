@@ -42,6 +42,23 @@ export const SCHEMA_FK_SQL = [
 ].join('\n');
 
 /**
+ * 🔴 **本文の名前つき csv を、つながり図と構造 1 枚に出す**(#918 段⑤d-2)。
+ *
+ * ⚠ 本文の csv は **temp の表**なので `sqlite_master` に出ない ── だから
+ *   `SCHEMA_COLUMNS_SQL` では**一生見つからない**(箱が 1 つも出てこなかった)。
+ * 🔑 worker が毎回組む目録(`csv_tables` / `csv_columns`)から読む。
+ * ⚠ **`sqlite_temp_master` は読まない** ── 名前を修飾しない `pragma_table_info` は
+ *   **temp を先に解決する**ので、本表と混ざって同じ名前が二重に出る(CLAUDE.md §7)。
+ * ⚠ 受けられなかった囲み(`why` が空でない行)は**表ではない**ので外す。
+ */
+export const SCHEMA_CSV_SQL = [
+  'select c.tbl as tbl, c.cid as cid, c.col as col,',
+  "       (select sum(t.rows) from csv_tables t where t.name = c.tbl and t.why = '') as n",
+  '  from csv_columns c',
+  ' order by c.tbl, c.cid',
+].join('\n');
+
+/**
  * 行数を 1 回で採る問い合わせを組む。⚠ 表が 0 件なら `null`
  * (**空の `select` を打たない** ── 構文エラーになる)。
  */
@@ -86,6 +103,11 @@ export interface SchemaDigestInput {
   readonly fks: Grid;
   /** ⚠ **省略可** ── 行数が採れなかった回は、行数の欄を出さない(嘘を書かない)。 */
   readonly counts?: Grid;
+  /**
+   * 🔴 **本文の名前つき csv の目録**(#918 段⑤d-2)。⚠ **省略可** ──
+   *   客の DB(取り込んだ `.sqlite` / `.csv`)には本文の表が無いので渡らない。
+   */
+  readonly csv?: Grid;
 }
 
 /** `Grid` を「列名 → 値」の連想に開く。⚠ 列の順に依存しない(問い合わせを直しても壊れない)。 */
@@ -124,10 +146,26 @@ export interface SchemaColumn {
   readonly primaryKey: boolean;
 }
 
+/**
+ * 表の種類。🔴 **`csv` は本文の名前つき csv**(#918 段⑤d-2)── DB の中の表ではなく、
+ * 引くたびに組み立てられる temp の表である(だから鍵も型も持たない)。
+ */
+export type SchemaKind = 'table' | 'view' | 'csv';
+
+/**
+ * 🔑 **種類を画面の言葉にするのは、ここ 1 か所**(CLAUDE.md §7)──
+ * つながり図と markdown で別の字を出さない。
+ */
+export function schemaKindLabel(kind: SchemaKind): string {
+  if (kind === 'view') return 'ビュー';
+  if (kind === 'csv') return '本文の表';
+  return '表';
+}
+
 /** 表(またはビュー)1 つ。 */
 export interface SchemaTable {
   readonly name: string;
-  readonly kind: 'table' | 'view';
+  readonly kind: SchemaKind;
   /** ⚠ 採れなかった回は `null`。**0 と区別する** ── `0` は「採れて 0 行」である。 */
   readonly rows: number | null;
   readonly columns: readonly SchemaColumn[];
@@ -182,13 +220,42 @@ export function schemaModel(input: SchemaDigestInput): SchemaModel {
     });
   }
 
+  /**
+   * 🔴 **本文の csv の表を、後ろに足す**(#918 段⑤d-2)。
+   * ⚠ **本表と同じ名前は足さない** ── temp は本表を隠すので、図に 2 つ出すと
+   *   「いま押しているのはどちらか」が読めなくなる(`CSV_TABLE_RESERVED` が
+   *   この PKC の表名を断っているので、普通は起きない ── 起きたときに備える)。
+   * ⚠ 型も鍵も持たせない ── csv の見出しには型が書けない。**無い物を書かない**。
+   */
+  const csvOrder: string[] = [];
+  const csvCols = new Map<string, SchemaColumn[]>();
+  const csvRows = new Map<string, number | null>();
+  for (const c of input.csv ? asMaps(input.csv) : []) {
+    const t = text(c['tbl']);
+    if (t === '' || byTable.has(t)) continue;
+    if (!csvCols.has(t)) {
+      csvCols.set(t, []);
+      csvOrder.push(t);
+      csvRows.set(t, rowCount(c['n']));
+    }
+    csvCols.get(t)!.push({ name: text(c['col']), type: '', notNull: false, primaryKey: false });
+  }
+
   return {
-    tables: order.map((t) => ({
-      name: t,
-      kind: kindOf.get(t) ?? 'table',
-      rows: countOf.get(t) ?? null,
-      columns: byTable.get(t) ?? [],
-    })),
+    tables: [
+      ...order.map((t) => ({
+        name: t,
+        kind: kindOf.get(t) ?? ('table' as SchemaKind),
+        rows: countOf.get(t) ?? null,
+        columns: byTable.get(t) ?? [],
+      })),
+      ...csvOrder.map((t) => ({
+        name: t,
+        kind: 'csv' as SchemaKind,
+        rows: csvRows.get(t) ?? null,
+        columns: csvCols.get(t) ?? [],
+      })),
+    ],
     // ⚠ 相手の名前が空の行は落とす(繋がりとして読めない)
     links: asMaps(input.fks)
       .filter((f) => text(f['tbl']) !== '')
@@ -220,11 +287,20 @@ export function renderSchemaDigest(input: SchemaDigestInput): string {
     out.push('表もビューも 1 つもありません。');
     return out.join('\n');
   }
-  out.push(`表 / ビュー: ${model.tables.length} 件`);
+  /**
+   * ⚠ **数えた物の名前だけを書く**(#918 段⑤d-2)── 本文の csv が 1 つも無い相手で
+   *   「本文の表」と名乗ると、**0 件の物を数えたように読める**(AI は名前を信じる)。
+   */
+  const csvCount = model.tables.filter((t) => t.kind === 'csv').length;
+  out.push(
+    csvCount === 0
+      ? `表 / ビュー: ${model.tables.length} 件`
+      : `表 / ビュー: ${model.tables.length - csvCount} 件 / 本文の表: ${csvCount} 件`,
+  );
   out.push('');
 
   for (const t of model.tables) {
-    const kind = t.kind === 'view' ? 'ビュー' : '表';
+    const kind = schemaKindLabel(t.kind);
     const head = t.rows === null ? `## ${t.name}(${kind})` : `## ${t.name}(${kind}・${t.rows} 行)`;
     out.push(head);
     out.push('');

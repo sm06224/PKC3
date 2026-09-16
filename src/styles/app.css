@@ -4300,6 +4300,7 @@ li[data-pkc-row-slot] {
   white-space: nowrap;
 }
 [data-pkc-field='sql-er-note'],
+[data-pkc-field='sql-er-zero'],
 [data-pkc-field='sql-er-dropped'] {
   margin: 0;
   color: var(--muted);

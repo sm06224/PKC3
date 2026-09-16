@@ -1600,6 +1600,8 @@ export type UserAction =
       columns: Grid;
       fks: Grid;
       counts: Grid | null;
+      /** 🔴 本文の名前つき csv の目録(#918 段⑤d-2)。⚠ 客の DB では `null`。 */
+      csv: Grid | null;
     }
   /** 構造を採れなかった(#918 段⑤)。⚠ 黙って空の図を出さない。 */
   | { type: 'SQL_ER_FAILED'; token: number; error: string }
@@ -3866,6 +3868,8 @@ function reduceCore(
         columns: action.columns,
         fks: action.fks,
         ...(action.counts === null ? {} : { counts: action.counts }),
+        // 🔴 本文の csv の表も図に出す(#918 段⑤d-2)
+        ...(action.csv === null ? {} : { csv: action.csv }),
       });
       return {
         state: { ...state, sqlPage: { ...p, er: { ...p.er, loading: false, model } } },

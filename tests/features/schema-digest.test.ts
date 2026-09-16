@@ -39,6 +39,13 @@ describe('構造 1 枚を組む', () => {
     const out = renderSchemaDigest({ source: 'この PKC のノート', columns: COLS, fks: FKS, counts: COUNTS });
     expect(out).toContain('# この PKC のノート の構造');
     expect(out).toContain('表 / ビュー: 3 件');
+    /**
+     * 🔴 **数えていない物の名前を書かない**(#918 段⑤d-2)。
+     * ⚠ 上は `toContain` なので、`表 / ビュー: 3 件 / 本文の表: 0 件` でも**通ってしまう** ──
+     *   AI は見出しの名前を信じるので、0 件の欄を書くと「在るが空」と読む。
+     * 🔑 対照群は `tests/adapter/sql-pane.test.ts`(本文の表が在る回は、その欄が出る)。
+     */
+    expect(out, '本文の csv が 1 つも無いのに、その欄を書いている').not.toContain('本文の表');
     expect(out, '行数が出ていない').toContain('## entries(表・3 行)');
     // ⚠ ビューには行数を付けない(数えると**その場でビューが走る**ので、重い相手で刺さる)
     expect(out, 'ビューだと分からない').toContain('## recent(ビュー)');
@@ -293,5 +300,58 @@ describe('段① の字と模型が食い違わない', () => {
 
 ⚠ ここに在るのは構造だけです(中身は 1 行も含まれていません)。`,
     );
+  });
+});
+
+/**
+ * 🔴 **本文の名前つき csv を混ぜる所**(#918 段⑤d-2)。
+ *
+ * ⚠ ここは**変異試験が SURVIVED で教えた穴**である ── `byTable.has(t)` の門を外しても
+ *   どの test も落ちなかった。理由は「検査が弱い」ではなく **その枝を一度も通っていない**
+ *   (CLAUDE.md §2)── 本文の csv が**本表と同じ名前**になる fixture が 1 つも無かった。
+ * 🔑 だから `schemaModel` を**直に呼んで**、衝突する形を作る。
+ */
+describe('本文の csv を構造へ混ぜる(#918 段⑤d-2)', () => {
+  const CSV = grid(
+    ['tbl', 'cid', 'col', 'n'],
+    [
+      ['棚卸', 0, '_note', 4],
+      ['棚卸', 1, '品名', 4],
+    ],
+  );
+
+  it('🔴 本文の表は後ろに並び、種類が分かる', () => {
+    const m = schemaModel({ source: '', columns: COLS, fks: FKS, counts: COUNTS, csv: CSV });
+    // ⚠ 中の表は 1 つも消えていない(足したぶんで押しのけていない)
+    expect(m.tables.map((t) => t.name)).toEqual(['entries', 'tags', 'recent', '棚卸']);
+    const csv = m.tables.find((t) => t.name === '棚卸');
+    expect(csv?.kind, '本文から来たことが分からない').toBe('csv');
+    expect(csv?.rows, '行数が目録から採れていない').toBe(4);
+    // ⚠ 型も鍵も持たせない ── csv の見出しには型が書けない(無い物を書かない)
+    expect(csv?.columns).toEqual([
+      { name: '_note', type: '', notNull: false, primaryKey: false },
+      { name: '品名', type: '', notNull: false, primaryKey: false },
+    ]);
+  });
+
+  it('🔴 本表と同じ名前の csv は足さない(temp が隠している物を、図に二重に出さない)', () => {
+    const clash = grid(
+      ['tbl', 'cid', 'col', 'n'],
+      [
+        ['entries', 0, 'にせもの', 9],
+        ['棚卸', 0, '品名', 4],
+      ],
+    );
+    const m = schemaModel({ source: '', columns: COLS, fks: FKS, counts: COUNTS, csv: clash });
+    const entries = m.tables.filter((t) => t.name === 'entries');
+    expect(entries, '同じ名前の四角が 2 つ出ている').toHaveLength(1);
+    // 🔑 残っているのは**中の表のほう** ── csv 側で上書きされていない
+    expect(entries[0]?.kind).toBe('table');
+    expect(entries[0]?.columns.map((c) => c.name), '中の表の列が csv で置き換わった').toEqual([
+      'lid',
+      'title',
+    ]);
+    // ⚠ 対照群 ── 衝突していない側はちゃんと足される(全部捨てる形になっていない)
+    expect(m.tables.some((t) => t.name === '棚卸' && t.kind === 'csv'), '衝突しない csv まで落ちた').toBe(true);
   });
 });
