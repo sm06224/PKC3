@@ -115,6 +115,24 @@ export const MANUAL_PAGE = 'manual.html';
 export const DUCKDB_DIR = 'duckdb/';
 
 /**
+ * 🔴 **一式に必ず在る file**(#682 段④b)。⚠ 綴りの正本は
+ * `src/features/query/duckdb-pack.ts` の `DUCKDB_REQUIRED_FILES`
+ * (`tests/duckdb-gate.test.ts` が**集合で**突き合わせる)。
+ *
+ * 🔑 **量ではなく集合で見る** ── 下限(KB)は「空 / 途中で切れた」しか止められず、
+ *   **拡張が 1 つ落ちた**日は総量がほとんど変わらないので素通りする
+ *   (CLAUDE.md §8「件数ではなく集合」)。⚠ そして落ちた拡張は
+ *   **user が parquet を開いた日**まで誰も気づかない。
+ */
+export const DUCKDB_REQUIRED = [
+  'duckdb-eh.wasm',
+  'duckdb-browser-eh.worker.js',
+  'ext/json.duckdb_extension.wasm',
+  'ext/parquet.duckdb_extension.wasm',
+  'ext/sqlite_scanner.duckdb_extension.wasm',
+];
+
+/**
  * 配る物の一覧を data でも置く file(#532 段 B)。⚠ 綴りの正本は
  * `src/features/selfhost/precache-list.ts` の `PRECACHE_LIST_FILE`
  * (`tests/dist-inspect.test.ts` が突き合わせる)。
@@ -496,6 +514,20 @@ export function inspectDist({
       errors.push(
         `${DUCKDB_DIR} が下限を ${kb(duckdbFloorKb * 1024 - bytes)} KB 下回る` +
           `(下限 ${duckdbFloorKb} KB)── 空 / 途中で切れた一式を配ろうとしている`,
+      );
+    }
+    /**
+     * 🔴 **量とは別に、集合で見る**(#682 段④b)。⚠ 拡張 1 つ(最小 821 KB)が
+     *   落ちても総量は 2% しか動かないので、上の下限では止まらない。
+     * ⚠ 旗の有無に依らず見る ── ここは**焼きたての `duckdb/` が在る回**にしか
+     *   入らないので、過去の zip(`duckdb/` 0 件)を巻き込まない。
+     */
+    const have = new Set(duckdb.map((f) => f.path.slice(DUCKDB_DIR.length)));
+    const missing = DUCKDB_REQUIRED.filter((n) => !have.has(n));
+    if (missing.length > 0) {
+      errors.push(
+        `${DUCKDB_DIR} に要る file が無い: ${missing.join(' / ')} ── ` +
+          'DuckDB を選んでも、その形式だけ黙って読めない器が配られる',
       );
     }
   } else if (requireDuckdb) {

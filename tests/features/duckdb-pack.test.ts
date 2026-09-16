@@ -6,25 +6,35 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  DUCKDB_EXTENSIONS,
+  DUCKDB_REQUIRED_FILES,
   DUCKDB_WASM,
   DUCKDB_WORKER,
   duckDbAssetUrl,
+  duckDbExtensionPath,
   readDuckDbPack,
 } from '../../src/features/query/duckdb-pack';
 import { DUCKDB_DIR, DUCKDB_PACK } from '../../build/duckdb-assets-plugin';
 
-/** 実測(2026-09-15)の byte 数。 */
-const REAL = { wasm: 35_913_747, worker: 773_223 };
+/** 実測の byte 数(2026-09-15 = 器 / 2026-09-16 = 拡張)。 */
+const REAL: Readonly<Record<string, number>> = {
+  [DUCKDB_WASM]: 35_913_747,
+  [DUCKDB_WORKER]: 773_223,
+  [duckDbExtensionPath('json')]: 821_413,
+  [duckDbExtensionPath('parquet')]: 3_218_307,
+  [duckDbExtensionPath('sqlite_scanner')]: 1_641_696,
+};
+
+/**
+ * 🔑 **一式は `DUCKDB_REQUIRED_FILES` から組む** ── 手で並べると、
+ * 足した人が並べ忘れた日にこの fixture だけ古くなる(そして
+ * 「実物と同じ形」を名乗ったまま、実物と違う形を検めることになる)。
+ */
+const files = (): { path: string; bytes: number }[] =>
+  DUCKDB_REQUIRED_FILES.map((path) => ({ path, bytes: REAL[path] ?? 0 }));
 
 const pack = (over: Partial<{ version: string; files: unknown }> = {}): string =>
-  JSON.stringify({
-    version: '1.33.1-dev57.0',
-    files: [
-      { path: DUCKDB_WASM, bytes: REAL.wasm },
-      { path: DUCKDB_WORKER, bytes: REAL.worker },
-    ],
-    ...over,
-  });
+  JSON.stringify({ version: '1.33.1-dev57.0', files: files(), ...over });
 
 describe('🔴 目録を検める(#682)', () => {
   it('🟢 実物と同じ形なら読める', () => {
@@ -32,7 +42,9 @@ describe('🔴 目録を検める(#682)', () => {
     expect(r.ok, r.ok ? '' : r.why).toBe(true);
     if (r.ok) {
       expect(r.pack.version).toBe('1.33.1-dev57.0');
-      expect(r.pack.files).toHaveLength(2);
+      // ⚠ 数は `DUCKDB_REQUIRED_FILES` から引く ── 手で書くと、足した日に嘘になる
+      expect(r.pack.files).toHaveLength(DUCKDB_REQUIRED_FILES.length);
+      expect(DUCKDB_REQUIRED_FILES.length, '拡張 3 つを数えていない').toBe(5);
     }
   });
 
@@ -51,23 +63,42 @@ describe('🔴 目録を検める(#682)', () => {
   });
 
   it('🔴 要る file が欠けている → その名前を言って断る', () => {
-    const r = readDuckDbPack(pack({ files: [{ path: DUCKDB_WORKER, bytes: REAL.worker }] }));
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.why).toContain(DUCKDB_WASM);
+    /**
+     * 🔑 **要る物を 1 つずつ抜いて、全部当てる**(#682 段④b で 2 → 5 に増えた)。
+     * ⚠ 代表 1 件だけ抜く形では、**後から足した拡張の門が死んでも緑**になる
+     *   (門を N 個置いたら、N 個目だけが鳴る場面を N 通り作る ── CLAUDE.md §1)。
+     */
+    for (const missing of DUCKDB_REQUIRED_FILES) {
+      const r = readDuckDbPack(pack({ files: files().filter((f) => f.path !== missing) }));
+      expect(r.ok, `${missing} を抜いたのに通った`).toBe(false);
+      if (!r.ok) expect(r.why, '欠けた物の名前を言っていない').toContain(missing);
+    }
   });
 
   it('🔴 空 / 途中で切れた一式 → 数字を出して断る', () => {
-    const r = readDuckDbPack(
-      pack({
-        files: [
-          { path: DUCKDB_WASM, bytes: 12 },
-          { path: DUCKDB_WORKER, bytes: REAL.worker },
-        ],
-      }),
-    );
-    expect(r.ok).toBe(false);
-    // ⚠ 数字を出す ── 「壊れています」だけだと、後から原因を絞れない
-    if (!r.ok) expect(r.why).toMatch(/12 byte/u);
+    // 🔑 下限も**要る物の全部**に効いていることを見る(上と同じ理由)
+    for (const cut of DUCKDB_REQUIRED_FILES) {
+      const r = readDuckDbPack(
+        pack({ files: files().map((f) => (f.path === cut ? { ...f, bytes: 12 } : f)) }),
+      );
+      expect(r.ok, `${cut} が 12 byte なのに通った`).toBe(false);
+      // ⚠ 数字を出す ── 「壊れています」だけだと、後から原因を絞れない
+      if (!r.ok) expect(r.why).toMatch(/12 byte/u);
+    }
+  });
+
+  /**
+   * 🔴 **空振り防止** ── 上の 2 つは「全部落ちる」を見るので、
+   * `readDuckDbPack` が**何をしても false を返す**形に壊れても緑になる。
+   * 🔑 だから「無傷なら通る」を同じ形で 1 本置く。
+   */
+  it('⚠ 対照群 ── どれも抜いていなければ通る', () => {
+    for (const name of DUCKDB_EXTENSIONS) {
+      expect(REAL[duckDbExtensionPath(name)], `${name} の実測値が fixture に無い`).toBeGreaterThan(
+        0,
+      );
+    }
+    expect(readDuckDbPack(pack()).ok).toBe(true);
   });
 
   it('🔴 files が配列でない → 断る', () => {

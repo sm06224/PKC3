@@ -1057,6 +1057,85 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
     'csv なのに選べないエンジンがある',
   ).toEqual([]);
 
+  /**
+   * 🔴 **DuckDB を実ブラウザで起こし、同梱した拡張が本当に読み込まれているか見る**
+   * (#682 段④b)。
+   *
+   * ## なぜここでしか言えないか
+   *
+   * 段④a の実測は **node** で回した(`duckdb-ext-probe.yml`)。⚠ ブラウザ側は
+   * **worker + `registerFileBuffer` を通る別の経路**なので、node で通ったことは
+   * 「ブラウザでも通る」を 1 つも保証しない。🔑 ここが**その唯一の観測点**である。
+   *
+   * ## 🔴 観測点を「読み込まれている物」そのものにする
+   *
+   * ⚠ 「parquet が読める」で見ると、**読める形式を受け口に足す段(④c)まで
+   *   何も測れない**。🔑 だから engine 自身の目録(`duckdb_extensions()`)を引く ──
+   *   これは user が打てる SQL なので、**製品の面をそのまま通る**。
+   *
+   * ## ⚠ 対照群を 2 つ置く
+   *
+   * ① **同梱していない拡張は読み込まれていない**(`httpfs` 等)── これが無いと、
+   *   「全部 true を返す」実装でも緑になる
+   * ② **外へは 1 件も飛んでいない** ── 拡張を読み込む口を足したので、
+   *   **そこから外へ出ていない**ことを、この回の通信そのもので見る
+   *
+   * 🔑 **新しい起動は増やさない**(#820 の規律)── csv を開いているこの道中で見る。
+   */
+  const outward: string[] = [];
+  const watchOutward = (req: { url: () => string }): void => {
+    const u = req.url();
+    if (!u.startsWith('http://localhost') && !u.startsWith('http://127.0.0.1')) outward.push(u);
+  };
+  page.on('request', watchOutward);
+  try {
+    await engine.selectOption('duckdb');
+    await page.fill(
+      '[data-pkc-field="sql-input"]',
+      "SELECT extension_name FROM duckdb_extensions() WHERE loaded ORDER BY 1",
+    );
+    const openedAt = Date.now();
+    await clickReal(page, '[data-pkc-action="run-sql"]');
+    const duckTable = page.locator('[data-pkc-field="sql-table"]');
+    /**
+     * ⚠ 待ちが長いのは **35.9MB の wasm を取って組み上げるから**である
+     *   (配信は同一オリジンの `vite preview`)。落ちた回に理由が読めるよう、
+     *   下で**かかった時間**も出す。
+     */
+    await expect(duckTable, 'DuckDB が答えを返さない').toBeVisible({ timeout: 60_000 });
+    const loaded = await duckTable.locator('tbody tr td:last-child').allTextContents();
+    const tookMs = Date.now() - openedAt;
+
+    // 🔴 同梱した 3 つが、3 つとも読み込まれている
+    for (const want of ['json', 'parquet', 'sqlite_scanner']) {
+      expect(loaded, `${want} が読み込まれていない(${tookMs}ms / ${loaded.join(',')})`).toContain(
+        want,
+      );
+    }
+    /**
+     * ⚠ **対照群①** ── 同梱していない拡張は読み込まれていない。
+     * 🔑 これが無いと、`duckdb_extensions()` の答えを**そのまま全部**拾う
+     *   実装(= 何も確かめていない)でも緑になる。
+     */
+    for (const never of ['httpfs', 'spatial', 'excel']) {
+      expect(loaded, `同梱していない ${never} が読み込まれている`).not.toContain(never);
+    }
+    // ⚠ **空振り防止** ── 目録そのものが空なら、上の `not.toContain` は常に真
+    expect(loaded.length, '読み込まれている物が 1 つも出ていない(目録が空)').toBeGreaterThan(3);
+
+    /**
+     * 🔴 **対照群②** ── この間、外へは 1 件も飛んでいない。
+     * ⚠ `extensions.duckdb.org` を名指しで見ない ── 名指しだと、**別の宛先**へ
+     *   出た日に素通りする(#682 の柱は「勝手に外へ出ない」であって
+     *   「あの CDN へ出ない」ではない)。
+     */
+    expect(outward, `外へ出ている: ${outward.join(' / ')}`).toEqual([]);
+  } finally {
+    page.off('request', watchOutward);
+    // 🔑 **元へ戻す** ── この先の筋書きは sqlite の答えを見る(戻し忘れると全部化ける)
+    await engine.selectOption('sqlite');
+  }
+
   await page.fill('[data-pkc-field="sql-input"]', 'SELECT * FROM csv');
 
   /**

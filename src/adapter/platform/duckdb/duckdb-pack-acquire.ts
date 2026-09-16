@@ -1,7 +1,7 @@
 /**
  * DuckDB wasm 一式の**取得**(#682 段③a)。
  *
- * 同一オリジンの base から `pack.json`(目録)→ 2 file を**1 つずつ** fetch する。
+ * 同一オリジンの base から `pack.json`(目録)→ 実体を**1 つずつ** fetch する。
  * 🔑 Office(`office-pack-acquire.ts`)と同じ形(取得元は同一オリジンのみ / 404 を
  * 沈黙で通さない)を写すが、**中身は違う** ── zip の手動取り込み・gzip・
  * ビルドの素性は無い(#682 段③a の指示。この回では作らない)。
@@ -11,8 +11,7 @@
  * 書き直さない(CLAUDE.md §7「同じ値・同じ判定が複数の場所にある」)。
  */
 import {
-  DUCKDB_WASM,
-  DUCKDB_WORKER,
+  DUCKDB_REQUIRED_FILES,
   duckDbAssetUrl,
   readDuckDbPack,
   type DuckDbPack,
@@ -80,7 +79,11 @@ export async function fetchDuckDbPackManifest(base: string): Promise<DuckDbPack>
 }
 
 /**
- * 同一オリジンから、目録が指す 2 file を**1 つずつ**取る。
+ * 同一オリジンから、目録が指す file を**1 つずつ**取る。
+ *
+ * 🔑 **何を取るかは `DUCKDB_REQUIRED_FILES`(pure)が持つ** ── ここで名前を
+ *   並べ直さない。⚠ #682 段④b で **2 → 5** になったが、並べていたら
+ *   **拡張だけ端末に入らない**(そして「入れたのに parquet が読めない」に化ける)。
  *
  * 🔴 **取った実体の大きさが目録と食い違ったら断る**(出力が届いたかを見る検査 ──
  * 目録を検める入力側の検査とは別物)。ネットワークの途中切断や、キャッシュの
@@ -91,7 +94,7 @@ export async function fetchDuckDbPackFiles(
   pack: DuckDbPack,
   onProgress?: AcquireProgress,
 ): Promise<DuckDbPackFiles> {
-  const names = [DUCKDB_WASM, DUCKDB_WORKER] as const;
+  const names = DUCKDB_REQUIRED_FILES;
   const out: DuckDbPackFiles = new Map();
   for (const [i, name] of names.entries()) {
     onProgress?.(`取得中: ${name}`, i, names.length);
@@ -119,7 +122,7 @@ export async function fetchDuckDbPackFiles(
 }
 
 /**
- * 目録を読んでから 2 file を取る、まとめ口。`duckdb-pack-install.ts` はここだけを呼ぶ。
+ * 目録を読んでから実体を取る、まとめ口。`duckdb-pack-install.ts` はここだけを呼ぶ。
  *
  * 🔴 **別オリジンは `resolveDuckDbBase()` が断る**(この file の上)。
  * ⚠ 直す前のここには「`duckDbAssetUrl` が組むから別 origin を渡す道は無い」と

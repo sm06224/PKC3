@@ -25,8 +25,61 @@ export interface OpenDuckDbInput {
   readonly wasmUrl: string;
   /** ワーカーの在り処(同一オリジンの相対)。 */
   readonly workerUrl: string;
+  /**
+   * 🔴 **開いた直後に読み込む拡張**(#682 段④b。user 要望 2026-09-16
+   * 「拡張はあらかじめ読み込んでおく」)。
+   *
+   * ⚠ 渡すのは**呼び側が組んだ在り処だけ** ── 同一オリジンの相対か、端末の
+   *   一式が貸す `blob:` URL。門は `duckdb-pack-acquire.ts` の
+   *   `resolveDuckDbBase()` に 1 つだけ在る(ここで 2 つ目を作らない)。
+   * ⚠ **省ける**(既定は 0 件)── 省いた器は csv / tsv だけ読める、
+   *   段④b より前と同じ姿になる。
+   */
+  readonly extensions?: readonly { readonly name: string; readonly url: string }[];
   /** 取得の進み具合(0〜1)。⚠ 無くても動く ── 計測のために意味論を変えない。 */
   readonly onProgress?: (ratio: number) => void;
+}
+
+/**
+ * 🔴 **拡張を 1 つ読み込む**(#682 段④b)。
+ *
+ * 打ち方は **`INSTALL '<器の中の file 名>'` → `LOAD <名前>`** ──
+ * 🔑 3 通り(`INSTALL`+`LOAD` / `LOAD '<file>'` / `FORCE INSTALL`)を当てて
+ *   **これだけが通った**(段④a、[run 2](https://github.com/sm06224/PKC3/actions/runs/35097508782))。
+ *
+ * ⚠ **上の 2 行の門(`autoinstall` / `autoload` を切る)を掛けたままで通る**ことは
+ *   同じ run の対照群で実測済み ── つまり
+ *   **「外から取ってこない」と「手元の物を読み込む」は両立する**。
+ *
+ * 🔴 **落ちたら投げる。飲まない。** ⚠ 飲むと「parquet を開いた人だけ、
+ *   遠い所で分かりにくく落ちる」形になる ── どの拡張が読めなかったかを、
+ *   起こすその場で言う。
+ */
+async function loadExtension(
+  db: { registerFileBuffer: (name: string, bytes: Uint8Array) => Promise<void> },
+  conn: { query: (sql: string) => Promise<unknown> },
+  ext: { readonly name: string; readonly url: string },
+): Promise<void> {
+  let bytes: Uint8Array;
+  try {
+    const res = await fetch(ext.url);
+    // ⚠ **沈黙を成功と読まない** ── 404 の HTML を掴んで「読み込んだ」と言わない
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    bytes = new Uint8Array(await res.arrayBuffer());
+  } catch (e) {
+    throw new Error(`DuckDB の拡張 ${ext.name} を取ってこられませんでした(${String(e)})`, {
+      cause: e,
+    });
+  }
+  /**
+   * ⚠ **器の中の file 名は、こちらが決める固定の字にする**(`duckdb-runner.ts` の
+   *   `duckDbFileNameOf` と同じ考え)── 名前は `DUCKDB_EXTENSIONS` の要素なので
+   *   `[a-z_]` しか入らないが、**それを SQL の字へ入れる前提を、ここに書いておく**。
+   */
+  const file = `${ext.name}.duckdb_extension.wasm`;
+  await db.registerFileBuffer(file, bytes);
+  await conn.query(`INSTALL '${file}'`);
+  await conn.query(`LOAD ${ext.name}`);
 }
 
 /**
@@ -65,6 +118,11 @@ export async function openDuckDb(input: OpenDuckDbInput): Promise<DuckDbHandle> 
    */
   await conn.query('SET autoinstall_known_extensions=false');
   await conn.query('SET autoload_known_extensions=false');
+  /**
+   * 🔴 **門を掛けた後に読み込む**(#682 段④b)。⚠ 順番が要る ──
+   * 先に読み込むと、その間だけ自動取得が生きている(外へ出る窓が開く)。
+   */
+  for (const ext of input.extensions ?? []) await loadExtension(db, conn, ext);
   return {
     put: async (name: string, bytes: Uint8Array) => {
       /**

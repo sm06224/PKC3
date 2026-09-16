@@ -33,11 +33,72 @@ export const DUCKDB_WASM = 'duckdb-eh.wasm';
 export const DUCKDB_WORKER = 'duckdb-browser-eh.worker.js';
 
 /**
+ * 🔴 **DuckDB エンジンの版と、台の名前**(#682 段④b)。
+ *
+ * ⚠ **npm の `@duckdb/duckdb-wasm` の版とは別物**である(あちらは `1.33.1-dev57.0`)。
+ *   拡張は**エンジンの版と完全一致**でなければ読み込めないので、ここが正本になる。
+ * 🔑 実測(2026-09-16、`SELECT version()`):`v1.5.4`。台の名前は、拡張を持たない器へ
+ *   `LOAD` を打ったとき engine が error に書いた URL から採った(`wasm_eh`)。
+ * ⚠ **この字は、配る `duckdb-eh.wasm` の中に実在する**(engine が拡張の URL を
+ *   組むため)── `build/duckdb-assets-plugin.ts` がそれを突き合わせて、
+ *   食い違ったらビルドを落とす。
+ */
+export const DUCKDB_ENGINE = { version: 'v1.5.4', platform: 'wasm_eh' } as const;
+
+/**
+ * 🔴 **同梱して、開いた直後に読み込む拡張**(#682 段④b。user 要望 2026-09-16)。
+ *
+ * | 名前 | 何のため |
+ * |---|---|
+ * | `json` | json / ndjson を読む・`COPY … (FORMAT JSON)` |
+ * | `parquet` | parquet を読む・書く |
+ * | `sqlite_scanner` | 取り込んだ `.sqlite` を DuckDB で引く |
+ *
+ * ⚠ **ここに無い拡張は、いまも外へ取りに行かない** ── `duckdb-open.ts` が
+ *   `autoinstall` / `autoload` を切っているので、catalog に無いと即断られる。
+ *   🔑 その対照群は `tests/features/duckdb-pack.test.ts` と probe に在る。
+ */
+export const DUCKDB_EXTENSIONS = ['json', 'parquet', 'sqlite_scanner'] as const;
+
+export type DuckDbExtensionName = (typeof DUCKDB_EXTENSIONS)[number];
+
+/**
+ * 拡張 1 つの、pack の中での path。⚠ **綴りの正本はここ** ── plugin も store も
+ * runner も、この関数を通す(§7「同じ値が複数の場所にある」)。
+ *
+ * ⚠ **版を path に入れない** ── 入れると、端末に入れた一式の中で版が変わったとき
+ *   **古い方が残ったまま名前だけ増える**。🔑 一式は丸ごと入れ替わる物なので、
+ *   版は目録(`pack.json` の `version`)の側が持つ。
+ */
+export function duckDbExtensionPath(name: string): string {
+  return `ext/${name}.duckdb_extension.wasm`;
+}
+
+/**
+ * 一式に必ず在る file の一覧(起動に要る 2 つ + 同梱する拡張)。
+ * 🔑 **数え上げはここ 1 か所** ── 取得も保管も貸し出しもこれを回す。
+ */
+export const DUCKDB_REQUIRED_FILES: readonly string[] = [
+  DUCKDB_WASM,
+  DUCKDB_WORKER,
+  ...DUCKDB_EXTENSIONS.map(duckDbExtensionPath),
+];
+
+/**
  * ⚠ **下限を置く** ── 0 バイトや途中で切れた物を「在る」と数えない。
  * 🔑 実測(2026-09-15):wasm **35,913,747** / worker **773,223** byte。
- *   下限はその半分弱 ── 事故の桁(空 / 切れた)だけを止める。
+ *   拡張は(2026-09-16)json **821,413** / parquet **3,218,307** /
+ *   sqlite_scanner **1,641,696** byte。
+ *   下限はどれもその半分弱 ── 事故の桁(空 / 切れた)だけを止める。
+ * ⚠ **上限は置かない** ── 配る量は判断理由にしない(不可侵指示 2026-08-03)。
  */
-const FLOOR = { [DUCKDB_WASM]: 16_000_000, [DUCKDB_WORKER]: 300_000 } as const;
+const FLOOR: Readonly<Record<string, number>> = {
+  [DUCKDB_WASM]: 16_000_000,
+  [DUCKDB_WORKER]: 300_000,
+  [duckDbExtensionPath('json')]: 400_000,
+  [duckDbExtensionPath('parquet')]: 1_500_000,
+  [duckDbExtensionPath('sqlite_scanner')]: 800_000,
+};
 
 function isFile(v: unknown): v is DuckDbPackFile {
   if (typeof v !== 'object' || v === null) return false;
@@ -68,12 +129,20 @@ export function readDuckDbPack(text: string): PackRead {
   if (!Array.isArray(files) || !files.every(isFile)) {
     return { ok: false, why: 'DuckDB の目録の中身が読めません(取り直してください)' };
   }
-  for (const want of [DUCKDB_WASM, DUCKDB_WORKER] as const) {
+  for (const want of DUCKDB_REQUIRED_FILES) {
     const got = files.find((f) => f.path === want);
     if (got === undefined) {
       return { ok: false, why: `DuckDB の一式に ${want} がありません(取り直してください)` };
     }
-    if (got.bytes < FLOOR[want]) {
+    /**
+     * ⚠ **下限が引けない名前を「通してよい」に倒さない** ── `FLOOR` へ足し忘れた
+     *   file は、0 バイトでも通ってしまう(門を 1 つ撤廃したのと同じ)。
+     */
+    const floor = FLOOR[want];
+    if (floor === undefined) {
+      return { ok: false, why: `DuckDB の ${want} の下限が決まっていません(不具合です)` };
+    }
+    if (got.bytes < floor) {
       // ⚠ 数字を出す ── 「壊れています」だけだと、こちらも後から原因を絞れない
       return { ok: false, why: `DuckDB の ${want} が小さすぎます(${got.bytes} byte。取り直してください)` };
     }

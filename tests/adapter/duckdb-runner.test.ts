@@ -10,21 +10,33 @@ import { describe, expect, it, vi } from 'vitest';
 import type { DuckDbHandle } from '../../src/adapter/platform/duckdb/duckdb-lease';
 import type { DuckDbRaw } from '../../src/features/query/duckdb-rows';
 import {
+  DUCKDB_REQUIRED_FILES,
+  duckDbExtensionPath,
+} from '../../src/features/query/duckdb-pack';
+import {
   DUCKDB_MAX_ROWS,
   DUCKDB_SEAL_SQL,
   DuckDbRunner,
   duckDbFileNameOf,
   duckDbLoadSql,
   sqlQuote,
+  type DuckDbOpenUrls,
   type DuckDbRunnerDeps,
 } from '../../src/adapter/platform/duckdb/duckdb-runner';
 
+/** 実測の byte 数(2026-09-15 = 器 / 2026-09-16 = 拡張)。floor を満たす。 */
+const REAL_BYTES: Readonly<Record<string, number>> = {
+  'duckdb-eh.wasm': 35_913_747,
+  'duckdb-browser-eh.worker.js': 773_223,
+  [duckDbExtensionPath('json')]: 821_413,
+  [duckDbExtensionPath('parquet')]: 3_218_307,
+  [duckDbExtensionPath('sqlite_scanner')]: 1_641_696,
+};
+
+/** ⚠ 目録は `DUCKDB_REQUIRED_FILES` から組む(手で並べると、足した日に古くなる)。 */
 const PACK = JSON.stringify({
   version: '1.33.1',
-  files: [
-    { path: 'duckdb-eh.wasm', bytes: 35_913_747 },
-    { path: 'duckdb-browser-eh.worker.js', bytes: 773_223 },
-  ],
+  files: DUCKDB_REQUIRED_FILES.map((path) => ({ path, bytes: REAL_BYTES[path] ?? 0 })),
 });
 
 /** 打たれた字を順番どおりに積む器。 */
@@ -74,6 +86,21 @@ function make(
   });
   return { runner, open, fetchText, readBytes, made };
 }
+
+/**
+ * 🔴 **同一オリジンから組む拡張の在り処**(#682 段④b)。
+ * ⚠ **字を手で並べてある** ── `duckDbExtensionPath` で組むと、実装と同じ綴りを
+ *   test 側で書き直すだけになり、**同じ盲点を共有する**(CLAUDE.md §1)。
+ *   ここは「user のブラウザが実際に叩く URL」を、読める形で pin する場所である。
+ */
+const NET_EXT = [
+  { name: 'json', url: 'https://example.test/app/duckdb/ext/json.duckdb_extension.wasm' },
+  { name: 'parquet', url: 'https://example.test/app/duckdb/ext/parquet.duckdb_extension.wasm' },
+  {
+    name: 'sqlite_scanner',
+    url: 'https://example.test/app/duckdb/ext/sqlite_scanner.duckdb_extension.wasm',
+  },
+];
 
 const SRC = { lid: 'l1', name: '売上.csv' };
 
@@ -146,6 +173,7 @@ describe('🔴 DuckDB で引く(#682 段②)', () => {
     expect(open).toHaveBeenCalledWith({
       wasmUrl: 'https://example.test/app/duckdb/duckdb-eh.wasm',
       workerUrl: 'https://example.test/app/duckdb/duckdb-browser-eh.worker.js',
+      extensions: NET_EXT,
     });
   });
 
@@ -225,15 +253,22 @@ describe('🔴 DuckDB で引く(#682 段②)', () => {
   });
 });
 
+/**
+ * 端末の一式が貸す拡張の在り処(#682 段④b)。
+ * ⚠ **中身は問わない** ── ここで見たいのは「貸された物がそのまま `open` へ渡るか」で、
+ *   読み込めるかどうかは `duckdb-open` 側の話である。
+ */
+const LENT_EXT = [{ name: 'parquet', url: 'blob:ext-parquet' }] as const;
+
 describe('🔴 入っていれば端末の一式、無ければ fetch(#682 段③b)', () => {
   it('🔴 端末に入っていれば、同一オリジンへの fetch は 0 回', async () => {
     const dispose = vi.fn();
-    const lendInstalled = vi.fn(async () => ({ wasmUrl: 'blob:w', workerUrl: 'blob:k', dispose }));
+    const lendInstalled = vi.fn(async () => ({ wasmUrl: 'blob:w', workerUrl: 'blob:k', extensions: LENT_EXT, dispose }));
     const { runner, fetchText, open, readBytes } = make({ lendInstalled });
     await runner.run({ sql: 'SELECT 1', source: SRC, readBytes });
     expect(lendInstalled, '毎回問うはず').toHaveBeenCalledTimes(1);
     expect(fetchText, '端末に入っているのに目録を取りに行っている').not.toHaveBeenCalled();
-    expect(open).toHaveBeenCalledWith({ wasmUrl: 'blob:w', workerUrl: 'blob:k' });
+    expect(open).toHaveBeenCalledWith({ wasmUrl: 'blob:w', workerUrl: 'blob:k', extensions: LENT_EXT });
     expect(dispose, '起こし終えたら借りた URL を返している').toHaveBeenCalledTimes(1);
   });
 
@@ -246,6 +281,7 @@ describe('🔴 入っていれば端末の一式、無ければ fetch(#682 段�
     expect(open).toHaveBeenCalledWith({
       wasmUrl: 'https://example.test/app/duckdb/duckdb-eh.wasm',
       workerUrl: 'https://example.test/app/duckdb/duckdb-browser-eh.worker.js',
+      extensions: NET_EXT,
     });
   });
 
@@ -257,6 +293,7 @@ describe('🔴 入っていれば端末の一式、無ければ fetch(#682 段�
     expect(open).toHaveBeenCalledWith({
       wasmUrl: 'https://example.test/app/duckdb/duckdb-eh.wasm',
       workerUrl: 'https://example.test/app/duckdb/duckdb-browser-eh.worker.js',
+      extensions: NET_EXT,
     });
   });
 
@@ -267,7 +304,7 @@ describe('🔴 入っていれば端末の一式、無ければ fetch(#682 段�
       n += 1;
       const dispose = vi.fn();
       disposes.push(dispose);
-      return { wasmUrl: `blob:w${n}`, workerUrl: `blob:k${n}`, dispose };
+      return { wasmUrl: `blob:w${n}`, workerUrl: `blob:k${n}`, extensions: LENT_EXT, dispose };
     });
     const { runner, open, readBytes } = make({ lendInstalled });
     await runner.run({ sql: 'SELECT 1', source: SRC, readBytes });
@@ -275,8 +312,8 @@ describe('🔴 入っていれば端末の一式、無ければ fetch(#682 段�
     await runner.run({ sql: 'SELECT 2', source: { lid: 'l2', name: '別.csv' }, readBytes });
 
     expect(lendInstalled, '器を作り直した回数だけ借り直しているはず').toHaveBeenCalledTimes(2);
-    expect(open).toHaveBeenNthCalledWith(1, { wasmUrl: 'blob:w1', workerUrl: 'blob:k1' });
-    expect(open).toHaveBeenNthCalledWith(2, { wasmUrl: 'blob:w2', workerUrl: 'blob:k2' });
+    expect(open).toHaveBeenNthCalledWith(1, { wasmUrl: 'blob:w1', workerUrl: 'blob:k1', extensions: LENT_EXT });
+    expect(open).toHaveBeenNthCalledWith(2, { wasmUrl: 'blob:w2', workerUrl: 'blob:k2', extensions: LENT_EXT });
     expect(disposes[0], '1 回目に借りた分を返している').toHaveBeenCalledTimes(1);
     expect(disposes[1], '2 回目に借りた分も返している').toHaveBeenCalledTimes(1);
   });
@@ -284,9 +321,9 @@ describe('🔴 入っていれば端末の一式、無ければ fetch(#682 段�
   it('🔴 `dispose` は `deps.open()` が終わった後に呼ぶ(順番)', async () => {
     const order: string[] = [];
     const dispose = vi.fn(() => order.push('dispose'));
-    const lendInstalled = vi.fn(async () => ({ wasmUrl: 'blob:w', workerUrl: 'blob:k', dispose }));
+    const lendInstalled = vi.fn(async () => ({ wasmUrl: 'blob:w', workerUrl: 'blob:k', extensions: LENT_EXT, dispose }));
     const answer: DuckDbRaw = { columns: ['n'], types: ['Int32'], rows: [[1]] };
-    const open = vi.fn(async (urls: { wasmUrl: string; workerUrl: string }) => {
+    const open = vi.fn(async (urls: DuckDbOpenUrls) => {
       order.push('open:' + urls.wasmUrl);
       return fakeHandle(answer).h;
     });
@@ -303,7 +340,7 @@ describe('🔴 入っていれば端末の一式、無ければ fetch(#682 段�
 
   it('🔴 `deps.open` が失敗しても、借りた URL は返す(try/finally)', async () => {
     const dispose = vi.fn();
-    const lendInstalled = vi.fn(async () => ({ wasmUrl: 'blob:w', workerUrl: 'blob:k', dispose }));
+    const lendInstalled = vi.fn(async () => ({ wasmUrl: 'blob:w', workerUrl: 'blob:k', extensions: LENT_EXT, dispose }));
     const open = vi.fn(() => Promise.reject(new Error('壊れた wasm')));
     const runner = new DuckDbRunner({
       fetchText: vi.fn(async () => ''),

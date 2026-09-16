@@ -790,11 +790,13 @@ describe('🔴 持ち歩ける 1 枚の雛形(#400 段④ / 2026-08-29 に本番
 describe('🔴 DuckDB の一式(#682)', () => {
   const WASM_BYTES = 35_913_747;
   const WORKER_BYTES = 773_223;
-  const CAP = 39_000;
+  /** 拡張 3 つの実測(2026-09-16)。⚠ 総量では**落ちても分からない**(§集合で見る)。 */
+  const EXT_BYTES = 821_413 + 3_218_307 + 1_641_696;
+  const CAP = 46_000;
   const FLOOR = 20_000;
 
   /** 健全な形に DuckDB を足す。⚠ precache には**載せない**。 */
-  const withDuckdb = (bytes = WASM_BYTES + WORKER_BYTES): Input => {
+  const withDuckdb = (bytes = WASM_BYTES + WORKER_BYTES + EXT_BYTES): Input => {
     const i = healthy('dev');
     return {
       ...i,
@@ -802,8 +804,11 @@ describe('🔴 DuckDB の一式(#682)', () => {
       duckdbFloorKb: FLOOR,
       files: [
         ...i.files,
-        { path: `${DUCKDB_DIR}duckdb-eh.wasm`, bytes: bytes - WORKER_BYTES },
+        { path: `${DUCKDB_DIR}duckdb-eh.wasm`, bytes: bytes - WORKER_BYTES - EXT_BYTES },
         { path: `${DUCKDB_DIR}duckdb-browser-eh.worker.js`, bytes: WORKER_BYTES },
+        { path: `${DUCKDB_DIR}ext/json.duckdb_extension.wasm`, bytes: 821_413 },
+        { path: `${DUCKDB_DIR}ext/parquet.duckdb_extension.wasm`, bytes: 3_218_307 },
+        { path: `${DUCKDB_DIR}ext/sqlite_scanner.duckdb_extension.wasm`, bytes: 1_641_696 },
         { path: `${DUCKDB_DIR}pack.json`, bytes: 200 },
       ],
     };
@@ -827,14 +832,51 @@ describe('🔴 DuckDB の一式(#682)', () => {
   });
 
   it('🔴 cap を超えたら鳴る(別の版を誤って取り込んだ形)', () => {
-    // `mvp`(39.4 MiB)を間違えて足した想定
-    const errs = run(withDuckdb(41_300_000 + WORKER_BYTES));
+    // `mvp`(39.4 MiB)を間違えて足した想定(器が 41.3MB + worker + 拡張)
+    const errs = run(withDuckdb(41_300_000 + WORKER_BYTES + EXT_BYTES));
     expect(errs.join('\n')).toContain('cap を');
   });
 
   it('🔴 下限を割ったら鳴る(空 / 途中で切れた一式)', () => {
-    const errs = run(withDuckdb(WORKER_BYTES + 1_000));
+    const errs = run(withDuckdb(WORKER_BYTES + EXT_BYTES + 1_000));
     expect(errs.join('\n')).toContain('下限を');
+  });
+
+  /**
+   * 🔴 **拡張が 1 つ落ちたら鳴る**(#682 段④b)。
+   *
+   * ⚠ **量の門では止まらない** ── いちばん小さい `json` でも総量の 2% しか動かず、
+   *   下限(20000 KB)の遥か上に残る。🔑 だから**集合で**見る門を別に置いた
+   *   (CLAUDE.md §8「件数ではなく集合」/「入力を守る検査と、出力が届いたかを
+   *   見る検査は別物」)。
+   * 🔑 **1 つずつ抜いて全部当てる** ── 代表 1 件だと、後から足した物が
+   *   一覧から漏れていても緑になる。
+   */
+  it('🔴 拡張が 1 つでも配られていなければ鳴る(量では止まらない)', () => {
+    const full = withDuckdb();
+    for (const missing of [
+      'ext/json.duckdb_extension.wasm',
+      'ext/parquet.duckdb_extension.wasm',
+      'ext/sqlite_scanner.duckdb_extension.wasm',
+      'duckdb-eh.wasm',
+      'duckdb-browser-eh.worker.js',
+    ]) {
+      const errs = run({
+        ...full,
+        files: full.files.filter((f) => f.path !== `${DUCKDB_DIR}${missing}`),
+      });
+      expect(errs.join('\n'), `${missing} が無いのに通った`).toContain(missing);
+      /**
+       * ⚠ **拡張が落ちた回は、量の門が鳴らない**ことまで見る ── ここが
+       *   「集合で見る門を足した理由」そのものである。鳴っていたら、この門は
+       *   1 度も通っていない(CLAUDE.md §2「経路が一度も通っていない」)。
+       * 🔑 器の 2 つ(35MB / 755KB)は**落ちれば量でも鳴る** ── そちらは
+       *   「両方鳴る」が正しい姿なので、この検算の対象にしない。
+       */
+      if (missing.startsWith('ext/')) {
+        expect(errs.join('\n'), `${missing}: 量の門で止まっている`).not.toContain('下限を');
+      }
+    }
   });
 
   it('🔴 precache に載っていたら鳴る(install で 35MB 落とさせない)', () => {

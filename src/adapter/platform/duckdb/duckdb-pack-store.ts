@@ -24,7 +24,13 @@
  * 「meta は書けたが files が半端(= 入っていると嘘をつく)」のどちらかになる。
  * ⚠ ここは分割せず同じ tx に入れる ── quota で落ちるなら丸ごと落ちる。
  */
-import { DUCKDB_WASM, DUCKDB_WORKER } from '@features/query/duckdb-pack';
+import {
+  DUCKDB_EXTENSIONS,
+  DUCKDB_REQUIRED_FILES,
+  DUCKDB_WASM,
+  DUCKDB_WORKER,
+  duckDbExtensionPath,
+} from '@features/query/duckdb-pack';
 
 const DB_NAME = 'pkc3-duckdb-pack';
 const FILES = 'files';
@@ -144,10 +150,25 @@ export class DuckDbPackStore {
    * 🔑 判定は **meta の有無**で行う ── meta は `writeAll` の tx で files と一緒に
    * 書かれるので、「meta が在る」= 「一式が揃って commit された」である。
    * ⚠ files だけ残っている状態(旧版の削除途中など)を「入っている」と読まない。
+   *
+   * 🔴 **いまの一式に足りない物が在れば `null`**(#682 段④b)。
+   * ⚠ 段④b で拡張 3 つが一式に加わったので、**それより前に入れた人の一式**は
+   *   wasm と worker しか持っていない。そのまま「入っている」と答えると
+   *   **その人だけ parquet / json / sqlite が読めない**という、いちばん
+   *   再現しない形になる。
+   * 🔑 だから**判断はここ 1 か所**へ置く ── 画面(入っていますか)も
+   *   貸し出し(`lendInstalledPack`)も同じ答えを見るので、
+   *   「画面は入っていると言うのに、動かすと入っていない扱い」が起きない
+   *   (CLAUDE.md §7「同じ問いに答える口を 2 つ作らない」)。
+   * ⚠ **bytes は消さない** ── 消すのは user が押したときだけ(`remove`)。
+   *   ここは「入れ直してください」と読める状態にするだけである。
    */
   async readMeta(): Promise<DuckDbPackMeta | null> {
     const v = await read(await this.need(), META, (s) => s.get(META_KEY));
-    return isMeta(v) ? v : null;
+    if (!isMeta(v)) return null;
+    const have = new Set(v.files.map((f) => f.name));
+    if (!DUCKDB_REQUIRED_FILES.every((name) => have.has(name))) return null;
+    return v;
   }
 
   /**
@@ -205,8 +226,8 @@ export class DuckDbPackStore {
   }
 
   /**
-   * 起動に要る 2 file(wasm / worker)を、`DuckDbRunnerDeps.lendInstalled` が
-   * 求める形でまとめて貸す(#682 段③b。`main.ts` の配線口)。
+   * 一式(wasm / worker / 拡張)を、`DuckDbRunnerDeps.lendInstalled` が
+   * 求める形でまとめて貸す(#682 段③b / 段④b。`main.ts` の配線口)。
    *
    * 🔑 **判断はここへ寄せる** ── `main.ts` はどの test からも実行されない
    *   (CLAUDE.md §2)ので、main.ts には「揃っているか」「貸す/貸さない」を書かない。
@@ -215,23 +236,45 @@ export class DuckDbPackStore {
    *   通常は `readMeta()` が meta の有無で「揃っている」を判定しているのでここへは
    *   来ないが、`readFile` は名前ごとに独立して照合するため、念のため両方を見る。
    */
-  async lendInstalledPack(): Promise<{ wasmUrl: string; workerUrl: string; dispose: () => void } | null> {
+  async lendInstalledPack(): Promise<
+    | {
+        wasmUrl: string;
+        workerUrl: string;
+        extensions: readonly { readonly name: string; readonly url: string }[];
+        dispose: () => void;
+      }
+    | null
+  > {
     if ((await this.readMeta()) === null) return null;
-    const wasm = await this.lendObjectUrl(DUCKDB_WASM);
-    if (wasm === null) return null;
-    const worker = await this.lendObjectUrl(DUCKDB_WORKER);
-    if (worker === null) {
-      wasm.dispose();
+    /**
+     * ⚠ **借りた分は 1 か所で覚える** ── 途中で 1 つでも貸せなければ、
+     *   それまでに借りた物を**全部**返してから `null` を返す。
+     * 🔑 段④b で借りる数が 2 → 5 に増えたので、`if` を並べる形はやめた
+     *   (並べる形は、足した人が返し忘れるとそこだけ漏れる)。
+     */
+    const lent: Array<{ url: string; dispose: () => void }> = [];
+    const borrow = async (name: string): Promise<string | null> => {
+      const got = await this.lendObjectUrl(name);
+      if (got === null) return null;
+      lent.push(got);
+      return got.url;
+    };
+    const giveBack = (): void => {
+      for (const l of lent) l.dispose();
+    };
+
+    const wasmUrl = await borrow(DUCKDB_WASM);
+    const workerUrl = await borrow(DUCKDB_WORKER);
+    const extensions: { name: string; url: string }[] = [];
+    for (const name of DUCKDB_EXTENSIONS) {
+      const url = await borrow(duckDbExtensionPath(name));
+      if (url !== null) extensions.push({ name, url });
+    }
+    if (wasmUrl === null || workerUrl === null || extensions.length !== DUCKDB_EXTENSIONS.length) {
+      giveBack();
       return null;
     }
-    return {
-      wasmUrl: wasm.url,
-      workerUrl: worker.url,
-      dispose: () => {
-        wasm.dispose();
-        worker.dispose();
-      },
-    };
+    return { wasmUrl, workerUrl, extensions, dispose: giveBack };
   }
 
   /**
