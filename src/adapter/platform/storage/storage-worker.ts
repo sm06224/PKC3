@@ -31,6 +31,14 @@ import {
   looksCorrupt,
   shouldFlagCorrupt,
 } from '@features/storage/db-corruption';
+import {
+  QUOTA_BLOCKED_OPS,
+  QUOTA_ESTIMATE_TIMEOUT_MS,
+  WRITE_QUOTA_REFUSAL,
+  refuseWrite,
+  shouldRecheck,
+  type QuotaSample,
+} from '@features/storage/write-quota';
 import { assetRefsIn, scanAssetRefsInto } from '@features/asset/asset-ref-scan';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import { extractMeta } from '@features/flavor';
@@ -3552,14 +3560,73 @@ const handlers: Handlers = {
  */
 let dbCorrupt = false;
 
+/**
+ * 🔴 **増やす書き込みの前に、空きを見る**(#971 段②の残り)。
+ *
+ * ⚠ ここまでの容量の門は **添付(IDB)にしか掛かっていなかった** ── sqlite が
+ *   育つ経路は素通りで、2026-09-16 に user の DB が 4GB を超えて壊れたのは
+ *   こちら側である。
+ *
+ * ⚠ **毎回は測らない**(`estimate()` は安くない)── 時間と回数の両方で間隔を決める。
+ * ⚠ **読めない端末では断らない** ── 測れないことを理由に保存できないアプリに
+ *   するほうが、はるかに害が大きい(`refuseWrite` が `false` を返す)。
+ */
+let quotaSample: QuotaSample = {};
+let quotaCheckedAt: number | null = null;
+let writesSinceQuota = 0;
+
+async function quotaBlocks(op: string): Promise<boolean> {
+  if (!QUOTA_BLOCKED_OPS.includes(op)) return false;
+  writesSinceQuota += 1;
+  const now = Date.now();
+  if (shouldRecheck({ lastAt: quotaCheckedAt, now, writesSince: writesSinceQuota })) {
+    /**
+     * ⚠ **worker にも `navigator.storage` は在る**が、無い環境(node の unit)も
+     *   ある ── 無ければ**測らないだけ**で、断りはしない。
+     */
+    const api = (globalThis as { navigator?: { storage?: { estimate?: () => Promise<QuotaSample> } } })
+      .navigator?.storage;
+    if (api?.estimate) {
+      try {
+        /**
+         * 🔴 **遅いときは待たない**(#971 段②)。
+         *
+         * ⚠ ここは**書き込みの直前**なので、`estimate()` が戻らなければ
+         *   **その保存ごと止まる** ── 別のタブからの依頼は 10 秒で打ち切られるので、
+         *   測っている間にその期限を使い切ると「**保存できなかった**」になる。
+         * 🔑 打ち切った回は**前回の値のまま**で進む(初回なら `{}` = 通す)。
+         */
+        quotaSample = await Promise.race([
+          api.estimate(),
+          new Promise<QuotaSample>((resolve) =>
+            setTimeout(() => resolve(quotaSample), QUOTA_ESTIMATE_TIMEOUT_MS),
+          ),
+        ]);
+      } catch {
+        // ⚠ 読めなかった = 断る理由にしない(前回の値も捨てない)
+      }
+    }
+    quotaCheckedAt = now;
+    writesSinceQuota = 0;
+  }
+  return refuseWrite(quotaSample);
+}
+
 self.onmessage = (ev: MessageEvent<{ id: number; req: StorageRequest }>) => {
   const { id, req } = ev.data;
   const handler = handlers[req.op] as ((r: StorageRequest) => unknown) | undefined;
   Promise.resolve()
-    .then(() => {
+    .then(async () => {
       // 🔴 壊れていると分かった後は、**書き換える op だけ**断る(#971)
       if (dbCorrupt && CORRUPT_BLOCKED_OPS.includes(req.op)) {
         throw new Error(CORRUPT_REFUSAL);
+      }
+      /**
+       * 🔴 **空きが無いなら、増やす書き込みだけ断る**(#971 段②)。
+       * ⚠ **消す op はここを通らない** ── 止めると空きを作る手段が消えて詰む。
+       */
+      if (await quotaBlocks(req.op)) {
+        throw new Error(WRITE_QUOTA_REFUSAL);
       }
       // 🔴 **未知の op を名指しで断る**。無条件に呼ぶと `TypeError: handler is not
       // a function` になるだけで、**どの op が無いのか分からない**(nightly の
