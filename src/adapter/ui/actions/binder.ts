@@ -5169,10 +5169,29 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   返ってから**欄を引き直し**、挿すのは既にある `insertBlock` に渡す(ここで組み立てない)。
    * ⚠ 何が並ぶかは `DIAGRAM_CHOICES`(表が正本)── 表から消えた id は**黙って落とす**
    *   (無い物を挿そうとして欄を空で書き戻すほうが悪い)。
+   *
+   * 🔴 **#950: 選んでいるときは、先に聞かず ```mermaid で囲む。**
+   *
+   * ⚠ 5 種の一覧は「**空の枠から選んで始める**」ための入口であって、
+   *   **既に打った図の下書きを選んで押した人**には無関係の問い(「どの種類?」)
+   *   になる ── その内容は既にどの種類か決まっている。⚠ 一覧を出したまま
+   *   `insertBlock` を呼ぶと**選んだ字が消える**(#950 の穴そのもの)。
+   * 🔑 だから**選択があるときは一覧を出さず**、共通の fence(すべての種類が
+   *   同じ ` ```mermaid ` で始まる ── `tests/features/text-ops.test.ts`
+   *   「5 つとも mermaid の囲みで始まる」)で直接囲む。
+   * ⚠ **囲み方は `applyFormat(sel, 'mermaid')` に任せる**(`wrapAsBlock` を
+   *   ここで直に呼ばない)── `text-ops.ts` 自身が「規則は 1 つ、binder は
+   *   この関数を呼ぶ」と明記しているのに、ここで `wrapAsBlock` を直書きすると
+   *   同じ判定が 2 か所に生える(CLAUDE.md §7。着地前レビュー ③)。
    */
   'insert-diagram': (_dispatcher, _target, _services, root) => {
     const opened = formatTarget(root);
     if (opened === null) return;
+    if (opened.selectionStart !== opened.selectionEnd) {
+      const sel = { text: opened.value, start: opened.selectionStart, end: opened.selectionEnd };
+      writeBack(opened, applyFormat(sel, 'mermaid'));
+      return;
+    }
     const at = { start: opened.selectionStart, end: opened.selectionEnd };
     void pickDiagramInApp(
       root,
@@ -8453,6 +8472,15 @@ const FORMAT_OF: Readonly<Record<string, FormatOp>> = {
   'format-ruby': 'ruby',
   'format-emdot': 'emdot',
   'format-strike': 'strike',
+  /**
+   * 🔴 **#950 段②**: 帯には既にボタンが在るが、「操作を探す」からは
+   *   1 つも呼べなかった 3 つ ── 鍵は付けない(`defaults: []`。
+   *   `tests/features/keymap.test.ts` の `KEYLESS`)。帯のボタンで
+   *   マウスから完結できるので、鍵の枠は増やさない。
+   */
+  'format-table': 'table',
+  'format-codeblock': 'codeblock',
+  'format-math': 'math',
 };
 
 /**

@@ -2316,6 +2316,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-16(#950 ── 選んだ字を囲む)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-13-pinned-app-settings" …` → 5f10ef4
+     */
+    '横に留めた枠でも、添付の設定を触れるようになりました',
+    /**
      * ⚠ **2026-09-16(#951 ── 帯の灰色)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-13-app-open-target" …` → 0d9cc03
      */

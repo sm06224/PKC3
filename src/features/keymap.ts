@@ -773,6 +773,39 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['editor', 'row'],
     defaults: ['Mod+K'],
   },
+  /**
+   * 🔴 **#950 段②**: 「操作を探す」から呼べるようにする 3 つ。
+   *
+   * ⚠ 帯に既にボタンが在るので**鍵は付けない**(`defaults: []`)── 押し所を
+   *   マウスだけで完結させたいのに、これ以上 `Alt+Shift+…` を消費する理由が無い。
+   *   `defaults` を空にしてよい条件は「名前で呼ぶだけの操作」(この file の
+   *   `defaults` の docstring)で、ここは**まさにそれ**(鍵は要らない・
+   *   名前で探せればよい)。⚠ 空にした 3 つは
+   *   `tests/features/keymap.test.ts` の `KEYLESS` に足すこと。
+   * 🔑 選んでいれば囲む(#950)ことは、`note` にも書く ── パレットの一覧は
+   *   `label` と `note` の両方を探し語に使うので、「囲む」でも当たる。
+   */
+  {
+    id: 'format-table',
+    label: '表',
+    contexts: ['editor', 'row'],
+    defaults: [],
+    note: '選んでいれば、選んだ行を表にします(選んでいなければ 2 列の雛形)',
+  },
+  {
+    id: 'format-codeblock',
+    label: 'コードブロック',
+    contexts: ['editor', 'row'],
+    defaults: [],
+    note: '選んでいれば、選んだ範囲を ``` で囲みます',
+  },
+  {
+    id: 'format-math',
+    label: '数式',
+    contexts: ['editor', 'row'],
+    defaults: [],
+    note: '選んでいれば、選んだ範囲を $$ で囲みます',
+  },
   // ── 追記の欄
   {
     id: 'append-send',
