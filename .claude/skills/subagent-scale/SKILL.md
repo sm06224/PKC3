@@ -68,6 +68,31 @@ Cannot create agent worktree: not in a git repository and
 no WorktreeCreate hooks are configured.
 ```
 
+#### 🔴 まず **自分の cwd** を見る(2026-09-16 に訂正)
+
+⚠ **この error には原因が 2 つある。** 1 稿目は下の片方(hook が無い)だけを
+書いており、そのせいで 2026-09-16 に**要らぬ退避へ倒れかけた**。
+
+| 原因 | 見分け方 | 直し |
+|---|---|---|
+| 🔴 **依頼者の cwd が repo の外** | `pwd` が `/home/user` など | **`cd /home/user/PKC3` するだけ** |
+| `WorktreeCreate` hook が無い | cwd が repo なのに同じ error | 下の退避へ |
+
+⚠ **cwd は勝手に戻る** ── この箱は session の途中で bash の cwd を
+`/home/user` へ戻すことがあり(`sandbox-hygiene`)、その後に投げた
+agent だけがこの error で落ちる。
+🔑 **検算は 1 つ:同じ session でさっき worktree が起動できていたか。**
+できていたなら **hook は在る**ので、病因は cwd の側である
+(2026-09-16 はまさにこれで、`cd` 1 行で通った)。
+
+⚠ そして**下の 2026-08-14 の断定は、いまも検算できていない** ── あの日の真因が
+hook だったのか cwd だったのかは、もう分からない(cwd を控えていない)。
+🔑 だから**「この箱では使えない」と書かない** ── 書くなら
+**その場で `pwd` を見てから**。「できない」は「やらない」より強い主張なので、
+**次に読む人(= 自分)は試さなくなる**。
+
+#### 上を潰しても同じ error が出るとき
+
 ⚠ **repo の側の問題ではない** ── `/home/user/PKC3` は git repo で `git worktree list` も
 通る。`WorktreeCreate` hook が設定されていないのが理由である(hook の書式は**未検証**)。
 

@@ -2196,8 +2196,11 @@ P4 assets → P5 revisions → P6 import/export → P7 v3.0.0(Pages product + PW
 | `.claude/agents/pkc3-verifier.md` | 変異試験を回す | 🔴 **worktree** |
 | `.claude/agents/pkc3-smoker.md` | **対象範囲だけ**の実ブラウザ smoke(動線を名指しする) | 🔴 **worktree** |
 
-⚠ **`isolation: "worktree"` が起動できない箱がある**(2026-08-14 実測
-`no WorktreeCreate hooks are configured`)。🔴 **そのとき書けるエージェントを隔離なしで
+⚠ **`isolation: "worktree"` が起動できないことがある**(2026-08-14 実測
+`no WorktreeCreate hooks are configured`)。🔴 **ただし、そう読む前に `pwd` を見る**
+(2026-09-16 に訂正)── **依頼者の cwd が repo の外だと、同じ文面で落ちる**。
+⚠ この箱は cwd を `/home/user` へ戻すので、**さっきまで起動できていたなら
+hook は在る** ── `cd <作業ツリー>` 1 行で通る。🔴 **そのとき書けるエージェントを隔離なしで
 起動しない** ── 「patch だけ返して」と頼むのは退避策ではない(`Write`/`Edit` を持ったまま
 走るので、守っているのは指示だけである)。正しい退避は **read-only の型に下書きさせ、
 依頼者が当てる**こと。🔑 **規律を守るのは tools の一覧であって、プロンプトの文言ではない。**
