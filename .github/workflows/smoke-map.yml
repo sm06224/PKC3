@@ -24,11 +24,20 @@
 # 🔑 だから `npm run smoke:record`(**1 worker = 1 spec**、取れなかった spec は単独で
 #   回し直す)を使う。⚠ 並列が効かないので **`smoke.yml` より遅い** ── 別の job にする。
 #
-# ## ⚠ この job の所要は **まだ測っていない**
+# ## この job の所要(**初回の実測**。run 35147865178、2026-09-16)
 #
-# `timeout-minutes` は「速度予算の tripwire」ではなく、**まず 1 回通すための上限**である。
-# 🔑 未確認の値を後条件に固めない(CLAUDE.md「未確認は assert ではなく診断で出す」)──
-#   下の step が所要を印字するので、**1 回押して読んでから**この数字を締める。
+# | 段 | 所要 |
+# |---|---|
+# | `smoke:record`(95 spec を 1 本ずつ) | **13 分 34 秒** |
+# | `smoke:map`(束ねる) | **1 秒** |
+# | job 全体(checkout / npm ci / build / playwright 込み) | **14 分 17 秒** |
+#
+# 🔑 **束ねるのは 1 秒** ── 重いのは記録のほうで、しかも**全量 smoke(実測 13.2 分)と
+#   ほぼ同じ**である(1 worker = 1 spec なので並列が効かないぶん、起動が減って相殺している)。
+# ⚠ `timeout-minutes` は **30** ── 実測の約 2 倍。spec は増えるので余裕を持たせてあるが、
+#   **速度予算の tripwire として効かせる**(倍まで伸びたら、そのとき測り直す)。
+# 🔑 所要は下の step が**毎回印字する** ── 締め直すときはその値を使う
+#   (未確認を後条件に固めない、の逆向き:**測ったら締める**)。
 #
 # ⚠ **`on:` に `push` / `pull_request` / `schedule` を足さない。**
 #   これは全量 smoke を回す口なので、足した瞬間に user 指示(2026-09-09 / 09-11)が破れる。
@@ -52,8 +61,8 @@ permissions:
 jobs:
   record:
     runs-on: ubuntu-latest
-    # ⚠ 未測定のため広く取ってある(上のコメント)。1 回押して所要を読んでから締める。
-    timeout-minutes: 90
+    # ⚠ 実測 14 分 17 秒(run 35147865178)の約 2 倍。上のコメントに内訳が在る。
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7

@@ -29,7 +29,7 @@ describe('大きさの見せ方(#454)', () => {
     expect(humanBytes(1500), '四捨五入していない').toBe('1.5 KB');
     expect(humanBytes(1024 * 1024)).toBe('1.0 MB');
     expect(humanBytes(2 * 1024 * 1024)).toBe('2.0 MB');
-    expect(humanBytes(1024 * 1024 * 1024 - 1), 'MB の上に単位を作らない').toBe('1024.0 MB');
+    expect(humanBytes(1023 * 1024 * 1024), 'MB の範囲で MB のまま').toBe('1023.0 MB');
   });
 
   it('🔴 丸めてから単位を決める ── `1024.0 KB` を出さない', () => {
@@ -39,6 +39,37 @@ describe('大きさの見せ方(#454)', () => {
     expect(humanBytes(1048525), '丸めた結果 1024.0 KB になる所を MB へ繰り上げていない').toBe(
       '1.0 MB',
     );
+  });
+
+  /**
+   * 🔴 **GB の段**(2026-09-16、#978。user 裁定「GB で出す」)。
+   *
+   * ⚠ 直す前は **MB で止まって**いたので、保存領域が 4GB を超えた user の画面に
+   *   **`4768.4 MB`** と出ていた(user 報告)。
+   * 🔑 境目の作法は KB→MB と**同じ**である ── **丸めてから単位を決める**ので、
+   *   `1023.9 MB` の次は `1024.0 MB` ではなく **`1.0 GB`** になる。
+   */
+  it('🔴 1024 MB を超えたら GB(user が見ていた 4768.4 MB は 4.7 GB)', () => {
+    // ⚠ **user の画面に実際に出ていた値**(#978 の報告そのもの)
+    expect(humanBytes(5000029798), '4.7 GB になっていない').toBe('4.7 GB');
+    expect(humanBytes(1024 * 1024 * 1024)).toBe('1.0 GB');
+    expect(humanBytes(10 * 1024 * 1024 * 1024)).toBe('10.0 GB');
+  });
+
+  it('🔴 GB でも「丸めてから単位を決める」── `1024.0 MB` を出さない', () => {
+    // ⚠ **境目は 1 バイトで切り替わる**(KB→MB と同じ形で押さえる)
+    expect(humanBytes(1073689395), 'ここはまだ MB').toBe('1023.9 MB');
+    expect(humanBytes(1073689396), '丸めた結果 1024.0 MB になる所を GB へ繰り上げていない').toBe(
+      '1.0 GB',
+    );
+  });
+
+  /**
+   * ⚠ **TB は作らない** ── ブラウザが 1 つの origin へ渡す量がそこまで届かないので、
+   *   置いても**一度も通らない枝**になる(CLAUDE.md §2)。届く日が来たら足す。
+   */
+  it('⚠ GB の上に単位を作らない(TB は置いていない)', () => {
+    expect(humanBytes(2048 * 1024 * 1024 * 1024)).toBe('2048.0 GB');
   });
 
   it('⚠ 0 と小さい数(「0 B」を「」にしない)', () => {
@@ -76,7 +107,8 @@ describe('大きさの見せ方(#454)', () => {
     // ⚠ **空振り防止 2 つ** ── ①走査が届いている ②当の 1 本を実際に拾えている
     //   (拾えなくなったら「1 本も無い」で緑になる = 検査が消える)
     expect(files.length, 'src を走査できていない').toBeGreaterThan(200);
-    expect(hits.get('src/features/human-bytes.ts'), 'human-bytes.ts を拾えていない').toBe(3);
+    // ⚠ B / KB / MB / GB の 4 本(2026-09-16 に GB を足した ── #978)
+    expect(hits.get('src/features/human-bytes.ts'), 'human-bytes.ts を拾えていない').toBe(4);
 
     expect([...hits.keys()].sort(), '大きさを自前で綴っている場所がある').toEqual([
       'src/features/human-bytes.ts',
