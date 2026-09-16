@@ -17,6 +17,7 @@
 """
 
 import atexit
+import os
 import shutil
 import signal
 import subprocess
@@ -109,12 +110,42 @@ def run(cmd, timeout=1800):
     無限ループを作ると test は止まったまま返らない ── それを KILLED と読むと
     「守られている」という**嘘の合格**が残る。ここで例外に変え、呼び側が
     `TIMEOUT(判定不能)` として出す。
+
+    🔴 **時間切れのとき、孫まで殺す**(2026-09-16。実際に踏んだ)。
+    ⚠ `subprocess.run(timeout=…)` が殺すのは**直の子だけ**である。
+      `npx vitest` を回すと木は **npx → sh → node vitest → forks.js × N** と伸び、
+      timeout で npx が死んでも**下は生き残る**。
+    🔴 実測の被害:変異スイープを 3 回回したら worker が **4 本**居残り
+      (38 / 34 / 29 / 21 分)、**load average 11.5 / 4 コア**になった。
+      その状態で回した全量が **24 件落ち、うち 23 件が `Test timed out in 5000ms`**
+      ── ⚠ **無関係な 17 file に散っていた**ので、製品の欠陥に見えた
+      (静かな箱で回し直したら 439 件すべて緑)。
+    🔑 だから**自分の process group を持たせて、group ごと殺す** ──
+      名前で探すのをやめれば、「孫は名前が違う」問題が**構造から消える**
+      (⚠ worker の命令行は `forks.js` で、`vitest run` の字を持っていない)。
     """
+    # 🔑 `start_new_session=True` で**この子を長とする group** を作る。
+    #   ⚠ これが無いと、下の `killpg` が**自分たちまで巻き込む**。
+    proc = subprocess.Popen(
+        cmd, cwd=ROOT, shell=True, capture_output=False,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        start_new_session=True,
+    )
     try:
-        return subprocess.run(
-            cmd, cwd=ROOT, shell=True, capture_output=True, text=True, timeout=timeout
-        )
+        out, err = proc.communicate(timeout=timeout)
+        return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
     except subprocess.TimeoutExpired as e:
+        # ⚠ **TERM → 少し待つ → KILL** ── いきなり KILL だと後始末が走らない
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            try:
+                os.killpg(os.getpgid(proc.pid), sig)
+            except (ProcessLookupError, PermissionError):
+                break
+            try:
+                proc.wait(timeout=5)
+                break
+            except subprocess.TimeoutExpired:
+                continue
         raise TimedOut(f"{timeout}s で返らなかった: {cmd}") from e
 
 
