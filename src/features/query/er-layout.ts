@@ -68,6 +68,11 @@ export interface ErBox {
 export interface ErLine {
   readonly link: SchemaLink;
   readonly line: PlaceLine;
+  /**
+   * 🔴 **自分で引いた線か**(#918 段⑤d-1)。⚠ `false` = DB が宣言した外部キー
+   *   (こちらが作った物ではないので、描く側はここで**消せる口を出さない**)。
+   */
+  readonly mine: boolean;
 }
 
 /** 引けなかった繋がりと、その理由。⚠ **黙って捨てない**(画面に理由を出す)。 */
@@ -125,8 +130,12 @@ export function erOrder(model: SchemaModel): readonly SchemaTable[] {
  *
  * 🔑 四角は**全部同じ幅**にする ── 幅が揃っていないと、格子に並べたときに
  *   線が斜めに走って読めない。⚠ 高さは列の数で変わる(揃える意味が無い)。
+ *
+ * @param mine 🔴 **自分で引いた繋がり**(#918 段⑤d-1)。⚠ 既定値は `[]` ──
+ *   DB が宣言した外部キーしか無い呼び出し元(既存の test / 呼び出し)を
+ *   1 つも直さずに済む形にしてある。
  */
-export function erLayout(model: SchemaModel): ErDiagram {
+export function erLayout(model: SchemaModel, mine: readonly SchemaLink[] = []): ErDiagram {
   const order = erOrder(model);
   if (order.length === 0) {
     return { width: 0, height: 0, boxes: [], lines: [], dropped: [] };
@@ -160,10 +169,16 @@ export function erLayout(model: SchemaModel): ErDiagram {
   }
 
   // ── ③ 線を引く(引けない物は理由つきで残す)
+  // 🔑 **宣言された外部キー + 自分で引いた繋がりを、同じ扱いで通す**(#918 段⑤d-1)。
+  //   判定(相手が図に居るか / 自分自身を指していないか)は出どころで変えない。
   const byName = new Map(boxes.map((b) => [b.table.name, b] as const));
   const lines: ErLine[] = [];
   const dropped: ErDropped[] = [];
-  for (const link of model.links) {
+  const tagged: readonly { readonly link: SchemaLink; readonly mine: boolean }[] = [
+    ...model.links.map((link) => ({ link, mine: false })),
+    ...mine.map((link) => ({ link, mine: true })),
+  ];
+  for (const { link, mine: isMine } of tagged) {
     const from = byName.get(link.from);
     const to = byName.get(link.to);
     if (from === undefined || to === undefined) {
@@ -177,7 +192,7 @@ export function erLayout(model: SchemaModel): ErDiagram {
       dropped.push({ link, why: `「${link.from}」は自分自身を指しています` });
       continue;
     }
-    lines.push({ link, line: placeLineOf(from.rect, to.rect) });
+    lines.push({ link, line: placeLineOf(from.rect, to.rect), mine: isMine });
   }
 
   let width = 0;

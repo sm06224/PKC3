@@ -201,3 +201,39 @@ describe('線を引く(#918 段⑤b)', () => {
     expect(erHeadLabel(tbl('recent', [], null, 'view'))).toBe('recent(ビュー)');
   });
 });
+
+describe('自分で引いた繋がりを混ぜる(#918 段⑤d-1)', () => {
+  it('🔴 mine を渡さないと、宣言された繋がりだけが出る(既定値 [] ── 呼び出し元を直さずに済む)', () => {
+    const d = erLayout(BASE);
+    expect(d.lines.length).toBe(1);
+    expect(d.lines[0]!.mine, '渡していないのに mine が立っている').toBe(false);
+  });
+
+  it('🔴 宣言が 1 本も無い DB でも、mine を渡せば線が出る', () => {
+    const noFk = model([tbl('売上', [col('id'), col('客id')], 3), tbl('客', [col('id')], 2)]);
+    expect(erLayout(noFk).lines, '宣言が無いのに線が出ている').toEqual([]);
+    const withMine = erLayout(noFk, [link('売上', '客id', '客', 'id')]);
+    expect(withMine.lines.length, '自分で引いた線が出ていない').toBe(1);
+    expect(withMine.lines[0]!.mine, '自分で引いた線に mine が立っていない').toBe(true);
+  });
+
+  it('⚠ 宣言された線と自分の線は、同時に別々の線として出る', () => {
+    const m = model(
+      [tbl('売上', [col('id'), col('客id'), col('担当id')], 3), tbl('客', [col('id')], 2), tbl('社員', [col('id')], 4)],
+      [link('売上', '客id', '客', 'id')],
+    );
+    const d = erLayout(m, [link('売上', '担当id', '社員', 'id')]);
+    expect(d.lines.length).toBe(2);
+    const byMine = new Map(d.lines.map((l) => [l.mine, l.link]));
+    expect(byMine.get(false), '宣言された線が消えている').toEqual(link('売上', '客id', '客', 'id'));
+    expect(byMine.get(true), '自分の線が消えている').toEqual(link('売上', '担当id', '社員', 'id'));
+  });
+
+  it('🔴 自分の線も、相手が図に居なければ理由つきで落ちる(判定を出どころで変えない)', () => {
+    const m = model([tbl('売上', [col('客id')], 3)]);
+    const d = erLayout(m, [link('売上', '客id', '客', 'id')]);
+    expect(d.lines).toEqual([]);
+    expect(d.dropped.length).toBe(1);
+    expect(d.dropped[0]!.why).toContain('客');
+  });
+});

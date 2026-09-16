@@ -12,8 +12,9 @@ import { DEFAULT_ENTRY_SORT, NATURAL_DESC, type EntrySort } from '@features/filt
 import { checkReadOnlySql } from '@features/query/sql-guard';
 import { checkDuckDbSql } from '@features/query/duckdb-guard';
 import { DEFAULT_SQL_ENGINE, sqlEngineOf, type SqlEngine } from '@features/query/sql-engine';
-import { schemaModel, type Grid, type SchemaModel } from '@features/query/schema-digest';
+import { schemaModel, type Grid, type SchemaLink, type SchemaModel } from '@features/query/schema-digest';
 import { erSql, type ErAction } from '@features/query/er-sql';
+import { pickErConnection, type ErPendingFrom } from '@features/query/er-connect';
 import { listViewOptions } from './list-view-options';
 import { resolveCanonicalParents, reorderSibling } from '@features/relation/tree';
 import { extractMeta, seedBodyFor } from '@features/flavor';
@@ -303,6 +304,25 @@ export interface SqlPageState {
      *   1 つにすると、走らせただけで図の取得が無効になる)。
      */
     readonly token: number;
+    /**
+     * 🔴 **「繋ぐ」モードが入か**(#918 段⑤d-1。user 報告 2026-09-16
+     *   「er のキー同士の掛け合わせとかちゃんと描きたいのにできない」)。
+     * ⚠ 入切そのものは `model` が変わっても持ち越してよい(user の好みなので)。
+     */
+    readonly connecting: boolean;
+    /**
+     * 🔴 **繋ぎ始めた列**(`null` = まだ押していない。#918 段⑤d-1)。
+     * ⚠ **切にしたら必ず捨てる** ── 残すと、次に入れたときに
+     *   前の相手が復活して見える(押していないのに「ここから」が付いている)。
+     */
+    readonly pendingFrom: ErPendingFrom | null;
+    /**
+     * 🔴 **自分で引いた線**(#918 段⑤d-1)。⚠ **この窓の中だけ**(読み直したら消える)
+     *   ── user のデータではなく、その場で図を読むための手なので憶えない。
+     * ⚠ **相手が変わったら `model` と一緒に必ず捨てる** ── 別の DB の繋がりを
+     *   持ち越すと、名札は新しいのに中身は前の DB という形になる(§4 と同じ実害)。
+     */
+    readonly mine: readonly SchemaLink[];
   };
 }
 
@@ -325,15 +345,34 @@ function erForSource(
 ): { er: SqlPageState['er']; events: DomainEvent[] } {
   if (er.source === source && er.model !== null) return { er, events: [] };
   // ⚠ 閉じているなら捨てるだけ(開くときに採り直す)
+  // 🔑 `mine` / `pendingFrom` も `model` と一緒に捨てる(#918 段⑤d-1)。
+  //   ⚠ `connecting`(入切そのもの)は持ち越す ── user の好みであって、この DB の
+  //   データではない。
   if (!er.open) {
-    return { er: { ...er, loading: false, model: null, note: '', source: '' }, events: [] };
+    return {
+      er: { ...er, loading: false, model: null, note: '', source: '', mine: [], pendingFrom: null },
+      events: [],
+    };
   }
   if (!emit) {
-    return { er: { ...er, loading: true, model: null, note: '', source: '' }, events: [] };
+    return {
+      er: { ...er, loading: true, model: null, note: '', source: '', mine: [], pendingFrom: null },
+      events: [],
+    };
   }
   const token = er.token + 1;
   return {
-    er: { open: true, loading: true, model: null, note: '', source, token },
+    er: {
+      open: true,
+      loading: true,
+      model: null,
+      note: '',
+      source,
+      token,
+      connecting: er.connecting,
+      pendingFrom: null,
+      mine: [],
+    },
     events: [{ type: 'REQUEST_SQL_ER', token, ...(guest ? { guest: true } : {}) }],
   };
 }
@@ -1412,7 +1451,17 @@ export const initialState: AppState = {
     guestPending: '',
     guestChosen: '',
     runToken: 0,
-    er: { open: false, loading: false, model: null, note: '', source: '', token: 0 },
+    er: {
+      open: false,
+      loading: false,
+      model: null,
+      note: '',
+      source: '',
+      token: 0,
+      connecting: false,
+      pendingFrom: null,
+      mine: [],
+    },
   },
   queryKey: null,
   smartHits: new Map<string, SmartHitState>(),
@@ -1554,6 +1603,21 @@ export type UserAction =
     }
   /** 構造を採れなかった(#918 段⑤)。⚠ 黙って空の図を出さない。 */
   | { type: 'SQL_ER_FAILED'; token: number; error: string }
+  /**
+   * 🔴 **「繋ぐ」モードの入切**(#918 段⑤d-1)。
+   * ⚠ 外部キーの宣言が 0 本の DB でも、自分でキーどうしを繋げるようにする。
+   */
+  | { type: 'SQL_ER_CONNECT_TOGGLE' }
+  /**
+   * 🔴 **繋ぐモード中に列を押した**(#918 段⑤d-1)。
+   * ⚠ 1 列目なら「ここから」に、2 列目なら繋がりになる(`pickErConnection` が決める)。
+   */
+  | { type: 'SQL_ER_PICK'; table: string; column: string }
+  /**
+   * 🔴 **自分で引いた線を消す**(#918 段⑤d-1)。⚠ 宣言された外部キーはここへ来ない
+   *   (描画側が `mine` の線にしか消す口を出さない ── 消せない物を消させない)。
+   */
+  | { type: 'SQL_ER_UNLINK'; link: SchemaLink }
   /**
    * 🔴 **答えをノートへ書き出した**(#681 段③ の 3 つ目)。
    * ⚠ ノートを作るのは `CREATE_ENTRY` の仕事 ── ここは**言うだけ**である
@@ -3647,13 +3711,116 @@ function reduceCore(
           ...state,
           sqlPage: {
             ...p,
-            er: { open: true, loading: true, model: null, note: '', source, token },
+            er: {
+              open: true,
+              loading: true,
+              model: null,
+              note: '',
+              source,
+              token,
+              // 🔑 まだ開いたことが無い相手でも、`connecting`(入切そのもの)は
+              //   user の好みなので持ち越す。`mine` / `pendingFrom` は新しい模型の分。
+              connecting: p.er.connecting,
+              pendingFrom: null,
+              mine: [],
+            },
           },
         },
         events: [
           { type: 'REQUEST_SQL_ER', token, ...(p.guest === null ? {} : { guest: true }) },
         ],
       };
+    }
+    /**
+     * 🔴 **「繋ぐ」モードの入切**(#918 段⑤d-1。user 報告 2026-09-16
+     *   「er のキー同士の掛け合わせとかちゃんと描きたいのにできない」)。
+     * ⚠ **切るときは `pendingFrom` を必ず捨てる** ── 残すと、入れ直した回に
+     *   前の相手が復活して見える(押していないのに「ここから」が付いている)。
+     * ⚠ **入れるときも捨てる** ── 前に断られた回の理由(`note`)を、
+     *   新しく入れた回まで持ち越さない。
+     */
+    case 'SQL_ER_CONNECT_TOGGLE': {
+      const p = state.sqlPage;
+      return {
+        state: {
+          ...state,
+          sqlPage: {
+            ...p,
+            er: { ...p.er, connecting: !p.er.connecting, pendingFrom: null, note: '' },
+          },
+        },
+        events: [],
+      };
+    }
+    /**
+     * 🔴 **繋ぐモード中に図の列を押した**(#918 段⑤d-1)。
+     * ⚠ 判定は `pickErConnection`(pure)に寄せる ── ここは結果を state へ写すだけ
+     *   (CLAUDE.md §7「同じ値・同じ判定が複数の場所にある」)。
+     * 🔑 **`erSql` は 1 バイトも変えない** ── 出来た `SchemaLink` を、宣言された
+     *   外部キーとまったく同じ形で `{ kind: 'link', link }` として渡すだけでよい。
+     */
+    case 'SQL_ER_PICK': {
+      const p = state.sqlPage;
+      const result = pickErConnection(p.er.model, p.er.mine, p.er.pendingFrom, action.table, action.column);
+      if (result.kind === 'from') {
+        return {
+          state: {
+            ...state,
+            sqlPage: { ...p, er: { ...p.er, pendingFrom: result.pendingFrom, note: '' } },
+          },
+          events: [],
+        };
+      }
+      if (result.kind === 'cancel') {
+        return {
+          state: { ...state, sqlPage: { ...p, er: { ...p.er, pendingFrom: null, note: '' } } },
+          events: [],
+        };
+      }
+      if (result.kind === 'denied') {
+        // ⚠ **黙って何もしないのは禁止** ── 押したのに繋がらなかった理由を言う。
+        //   ⚠ `pendingFrom` は捨てない ── 押し直しのために「ここから」は残す。
+        return {
+          state: { ...state, sqlPage: { ...p, er: { ...p.er, note: result.why } } },
+          events: [],
+        };
+      }
+      // result.kind === 'linked' ── 図には必ず線を足す。SQL への JOIN 追記は
+      // 「その場で足せるか」に依るので best-effort(足せなければ理由を note で言う)。
+      const mine = [...p.er.mine, result.link];
+      const r = erSql(p.sql, { kind: 'link', link: result.link });
+      return {
+        state: {
+          ...state,
+          sqlPage: {
+            ...p,
+            ...(r.ok ? { sql: r.sql, error: '' } : {}),
+            er: { ...p.er, mine, pendingFrom: null, note: r.ok ? '' : r.why },
+            ...(r.ok && p.historyAt >= 0 ? { historyEdits: withHistoryEdit(p, r.sql) } : {}),
+          },
+        },
+        events: [],
+      };
+    }
+    /**
+     * 🔴 **自分で引いた線を消す**(#918 段⑤d-1)。⚠ **片道の操作を作らない** ──
+     *   置けるだけで外せないと、間違えて引いた線を消すのに model を採り直すしかない
+     *   (CLAUDE.md「面は『映すだけ』にしない」の同じ向き)。
+     * ⚠ 宣言された外部キーはここへ来ない(描画側が `mine` の線にしか消す口を出さない)。
+     */
+    case 'SQL_ER_UNLINK': {
+      const p = state.sqlPage;
+      const mine = p.er.mine.filter(
+        (l) =>
+          !(
+            l.from === action.link.from &&
+            l.fromColumn === action.link.fromColumn &&
+            l.to === action.link.to &&
+            l.toColumn === action.link.toColumn
+          ),
+      );
+      if (mine.length === p.er.mine.length) return { state, events: [] };
+      return { state: { ...state, sqlPage: { ...p, er: { ...p.er, mine } } }, events: [] };
     }
     /**
      * 🔴 **図の中を押した**(#918 段⑤c)。
@@ -3712,7 +3879,11 @@ function reduceCore(
       return {
         state: {
           ...state,
-          sqlPage: { ...p, er: { ...p.er, loading: false, model: null, note: action.error } },
+          sqlPage: {
+            ...p,
+            // 🔑 `model` を捨てる回は `mine` / `pendingFrom` も一緒に捨てる(#918 段⑤d-1)
+            er: { ...p.er, loading: false, model: null, note: action.error, mine: [], pendingFrom: null },
+          },
         },
         events: [],
       };
@@ -3867,8 +4038,9 @@ function reduceCore(
              * ⚠ **「採っています」で止めない**(#918 段⑤)── 開けなかったので
              *   構造は永久に来ない。⚠ 理由は `guestError` が言うので、ここでは繰り返さない
              *   (同じ断りが 2 行出ると、別々のことが起きたように見える)。
+             * 🔑 `mine` / `pendingFrom` も一緒に捨てる(#918 段⑤d-1)。
              */
-            er: { ...state.sqlPage.er, loading: false, model: null, source: '' },
+            er: { ...state.sqlPage.er, loading: false, model: null, source: '', mine: [], pendingFrom: null },
           },
         },
         events: [],

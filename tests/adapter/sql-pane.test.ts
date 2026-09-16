@@ -2620,6 +2620,268 @@ describe('表のつながり図(#918 段⑤)', () => {
   });
 });
 
+describe('🔴 ER の図で、自分でキーどうしを繋ぐ(#918 段⑤d-1)', () => {
+  /**
+   * ⚠ **外部キーの宣言が 1 本も無い DB**(CLAUDE.md §2「fixture のゼロ件次元は
+   *   測っていない次元」── ここまでの段⑤ の検査は全部 FK 付きの DB でしか
+   *   通っていなかった。それが「繋ぐ手段が画面に無い」という穴を見逃した原因)。
+   *
+   * 売上 ── 客id / 担当id の 2 本を、それぞれ 客 / 社員 へ**自分で**繋ぐ。
+   */
+  const noFkReply = async (sql: string): Promise<SqlAnswer> => {
+    if (sql.includes('pragma_table_info')) {
+      return answer(
+        ['kind', 'tbl', 'cid', 'col', 'typ', 'nn', 'pk'],
+        [
+          ['table', '売上', 0, 'id', 'INTEGER', 1, 1],
+          ['table', '売上', 1, '客id', 'INTEGER', 0, 0],
+          ['table', '売上', 2, '担当id', 'INTEGER', 0, 0],
+          ['table', '客', 0, 'id', 'INTEGER', 1, 1],
+          ['table', '社員', 0, 'id', 'INTEGER', 1, 1],
+        ],
+      );
+    }
+    // 🔴 外部キーは 0 本(csv 取込 / FK 無し .sqlite を想定)
+    if (sql.includes('pragma_foreign_key_list')) return answer(['tbl', 'ref', 'col', 'refcol'], []);
+    if (sql.includes('count(*)')) return answer(['tbl', 'n'], [['売上', 3], ['客', 2], ['社員', 4]]);
+    return answer(['a'], [[1]]);
+  };
+
+  /**
+   * ⚠ 対照群 ── 宣言された外部キーを 1 本持つ DB(「宣言 FK は消せない」を見るため)。
+   * `describe('表のつながり図(#918 段⑤)', …)` の `schemaReply` と**同じ構造**にする ──
+   *   別の describe のブロック内 `const` なのでここからは参照できない(ここで作り直す)。
+   */
+  const withFkReply = async (sql: string): Promise<SqlAnswer> => {
+    if (sql.includes('pragma_table_info')) {
+      return answer(
+        ['kind', 'tbl', 'cid', 'col', 'typ', 'nn', 'pk'],
+        [
+          ['table', '売上', 0, 'id', 'INTEGER', 1, 1],
+          ['table', '売上', 1, '客id', 'INTEGER', 0, 0],
+          ['table', '売上', 2, '金額', 'INTEGER', 0, 0],
+          ['table', '客', 0, 'id', 'INTEGER', 1, 1],
+          ['table', '客', 1, '名前', 'TEXT', 0, 0],
+        ],
+      );
+    }
+    if (sql.includes('pragma_foreign_key_list')) {
+      return answer(['tbl', 'ref', 'col', 'refcol'], [['売上', '客', '客id', 'id']]);
+    }
+    if (sql.includes('count(*)')) return answer(['tbl', 'n'], [['売上', 3], ['客', 2]]);
+    return answer(['a'], [[1]]);
+  };
+
+  const settleEr = async (): Promise<void> => {
+    for (let i = 0; i < 20; i += 1) await Promise.resolve();
+  };
+  const erBtn = (pane: HTMLElement): HTMLButtonElement =>
+    pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-er-toggle"]')!;
+  const connectBtn = (pane: HTMLElement): HTMLButtonElement =>
+    pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-er-connect"]')!;
+  const hint = (pane: HTMLElement): string =>
+    pane.querySelector('[data-pkc-field="sql-er-connect-hint"]')?.textContent ?? '';
+  const erNote = (pane: HTMLElement): string =>
+    pane.querySelector('[data-pkc-field="sql-er-note"]')?.textContent ?? '';
+  const lineCount = (pane: HTMLElement): number =>
+    pane.querySelectorAll('[data-pkc-field="sql-er-lines"] line').length;
+  const mineChips = (pane: HTMLElement): HTMLElement[] =>
+    [...pane.querySelectorAll<HTMLElement>('[data-pkc-field="sql-er-link"][data-pkc-mine="true"]')];
+  const fkChips = (pane: HTMLElement): HTMLElement[] =>
+    [...pane.querySelectorAll<HTMLElement>('[data-pkc-field="sql-er-link"][data-pkc-mine="false"]')];
+  const pressColumn = (pane: HTMLElement, table: string, column: string): void => {
+    const el = pane.querySelector<HTMLElement>(
+      `[data-pkc-field="sql-er-column"][data-pkc-name="${table}"][data-pkc-col="${column}"]`,
+    );
+    expect(el, `列の押し所が無い: ${table}.${column}`).toBeTruthy();
+    el!.click();
+  };
+  const columnAt = (pane: HTMLElement, table: string, column: string): HTMLElement =>
+    pane.querySelector<HTMLElement>(
+      `[data-pkc-field="sql-er-column"][data-pkc-name="${table}"][data-pkc-col="${column}"]`,
+    )!;
+  const pressTable = (pane: HTMLElement, table: string): void => {
+    pane.querySelector<HTMLElement>(`[data-pkc-field="sql-er-table"][data-pkc-name="${table}"]`)!.click();
+  };
+
+  it('🔴 外部キーが 0 本の DB でも、「繋ぐ」で線が引ける(欄にも JOIN が組まれる)', async () => {
+    const { pane, box } = setup(noFkReply);
+    erBtn(pane).click();
+    await settleEr();
+    expect(lineCount(pane), '外部キーが無いのに線が出ている').toBe(0);
+    // ⚠ 普段の流れどおり、先に表を押して取り出し元にする(でないと erSql は
+    //   「先に表の名前を押してください」と断る ── それは別の it で見る)
+    pressTable(pane, '売上');
+
+    connectBtn(pane).click();
+    expect(connectBtn(pane).getAttribute('aria-pressed'), '入れたのに押されて見えない').toBe('true');
+    expect(hint(pane), '入れた直後の案内が出ていない').toContain('繋ぎたい列を 2 つ');
+
+    pressColumn(pane, '売上', '客id');
+    expect(hint(pane), '1 列目を押した後の案内が出ていない').toContain('売上.客id');
+
+    pressColumn(pane, '客', 'id');
+    expect(lineCount(pane), '線が引かれていない').toBe(1);
+    expect(box.value, '欄に JOIN が組まれていない').toBe(
+      'select * from 売上\n  join 客 on 客.id = 売上.客id',
+    );
+    const chip = mineChips(pane)[0];
+    expect(chip?.textContent, '自分で引いた札に列どうしが書かれていない').toContain('売上.客id → 客.id');
+    expect(chip?.title, '消せることが伝わらない').toContain('消します');
+  });
+
+  it('⚠ まだどの表も取り出し元に無いと、線は引けても欄は動かず理由が出る(黙って何もしないのは禁止)', async () => {
+    const { pane, box } = setup(noFkReply);
+    erBtn(pane).click();
+    await settleEr();
+    connectBtn(pane).click();
+    pressColumn(pane, '売上', '客id');
+    pressColumn(pane, '客', 'id');
+    // 🔑 「繋ぐ」の主目的(図に線を引く)は達成している
+    expect(lineCount(pane), '欄が組めなかっただけで、線まで引けていない').toBe(1);
+    // ⚠ ただし erSql は「先に表の名前を押してください」と断るので、欄は動かない
+    expect(box.value, '足せないはずなのに欄が動いている').toBe('');
+    expect(erNote(pane), '足せなかった理由が黙って消えている').toContain('先に表の名前');
+  });
+
+  it('🔴 同じ表の中では繋げない(理由が出て、線は増えない)', async () => {
+    const { pane } = setup(noFkReply);
+    erBtn(pane).click();
+    await settleEr();
+    connectBtn(pane).click();
+    pressColumn(pane, '売上', '客id');
+    pressColumn(pane, '売上', '担当id');
+    expect(lineCount(pane), '同じ表なのに線が引けている').toBe(0);
+    expect(erNote(pane)).toBe('同じ表の中では繋げません');
+  });
+
+  it('🔴 もう在る繋がりと同じ組み合わせは断られる(2 本目にはならない)', async () => {
+    const { pane } = setup(noFkReply);
+    erBtn(pane).click();
+    await settleEr();
+    connectBtn(pane).click();
+    pressColumn(pane, '売上', '客id');
+    pressColumn(pane, '客', 'id');
+    expect(lineCount(pane)).toBe(1);
+    // 同じ 2 列をもう一度
+    pressColumn(pane, '売上', '客id');
+    pressColumn(pane, '客', 'id');
+    expect(lineCount(pane), 'もう繋がっているのに増えている').toBe(1);
+    expect(erNote(pane)).toBe('その 2 つはもう繋がっています');
+  });
+
+  it('⚠ 同じ列をもう一度押すとやめられる(片道の操作を作らない)', async () => {
+    const { pane, box } = setup(noFkReply);
+    erBtn(pane).click();
+    await settleEr();
+    connectBtn(pane).click();
+    pressColumn(pane, '売上', '客id');
+    expect(columnAt(pane, '売上', '客id').getAttribute('aria-pressed'), '押した印が付いていない').toBe(
+      'true',
+    );
+    pressColumn(pane, '売上', '客id');
+    expect(
+      columnAt(pane, '売上', '客id').getAttribute('aria-pressed'),
+      'もう一度押したのに印が残っている',
+    ).toBe('false');
+    expect(hint(pane), 'やめたのに「ここから」の案内が残っている').toContain('繋ぎたい列を 2 つ');
+    expect(box.value, 'やめただけなのに欄が動いている').toBe('');
+  });
+
+  it('🔴 切るとやめかけの相手を捨てる(入れ直しても復活しない)', async () => {
+    const { pane, box } = setup(noFkReply);
+    erBtn(pane).click();
+    await settleEr();
+    connectBtn(pane).click();
+    pressColumn(pane, '売上', '客id');
+    expect(hint(pane)).toContain('売上.客id');
+    // 切る
+    connectBtn(pane).click();
+    expect(connectBtn(pane).getAttribute('aria-pressed')).toBe('false');
+    // もう一度入れる ── 前の「ここから」が残っていたら、次の 1 押しで繋がってしまう
+    connectBtn(pane).click();
+    expect(hint(pane), '切ったのに「ここから」が生きている').toContain('繋ぎたい列を 2 つ');
+    pressColumn(pane, '社員', 'id');
+    expect(lineCount(pane), '1 列しか押していないのに線が出ている').toBe(0);
+    expect(hint(pane)).toContain('社員.id');
+    expect(box.value).toBe('');
+  });
+
+  it('🔴 自分で引いた線の札を押すと消える。宣言された外部キーは消えない', async () => {
+    const { pane } = setup(withFkReply);
+    erBtn(pane).click();
+    await settleEr();
+    // このフィクスチャは 売上→客 の宣言済み FK を 1 本持つ
+    expect(fkChips(pane).length, '宣言された FK が出ていない').toBe(1);
+    connectBtn(pane).click();
+    pressColumn(pane, '売上', '金額');
+    // ⚠ 型は数だが SchemaLink としては列名だけが要る ── 別の列名を使い
+    //   「宣言 FK とは別の、自分で引いた線」を 1 本足す
+    pressColumn(pane, '客', '名前');
+    expect(lineCount(pane), '自分の線が引けていない').toBe(2);
+    expect(mineChips(pane).length).toBe(1);
+
+    // 宣言された FK の札を押しても、消えるのではなく JOIN が足される(既存の動きのまま)
+    fkChips(pane)[0]!.click();
+    expect(lineCount(pane), '宣言された FK が消えている').toBe(2);
+
+    // 自分の線の札を押すと消える
+    mineChips(pane)[0]!.click();
+    expect(lineCount(pane), '自分の線が消えていない').toBe(1);
+    expect(mineChips(pane).length).toBe(0);
+    expect(fkChips(pane).length, '宣言された FK まで消えている').toBe(1);
+  });
+
+  it('🔴 見分けが色だけに頼っていない(mine の札に字の手がかりが付く)', async () => {
+    const { pane } = setup(noFkReply);
+    erBtn(pane).click();
+    await settleEr();
+    connectBtn(pane).click();
+    pressColumn(pane, '売上', '客id');
+    pressColumn(pane, '客', 'id');
+    const chip = mineChips(pane)[0]!;
+    expect(chip.querySelector('[data-pkc-field="sql-er-mine-badge"]')?.textContent, '色以外の手がかりが無い').toBe(
+      '自分',
+    );
+    const svgLine = pane.querySelector('[data-pkc-field="sql-er-lines"] line');
+    expect(svgLine?.getAttribute('data-pkc-mine')).toBe('true');
+  });
+
+  it('🔴 調べる相手を変えたら、自分で引いた線を持ち越さない', async () => {
+    const { pane, pick } = setup(noFkReply);
+    erBtn(pane).click();
+    await settleEr();
+    connectBtn(pane).click();
+    pressColumn(pane, '売上', '客id');
+    pressColumn(pane, '客', 'id');
+    expect(lineCount(pane)).toBe(1);
+
+    pick('db1');
+    await settleEr();
+    await settleEr();
+    expect(lineCount(pane), '相手を変えたのに前の DB の繋がりが残っている').toBe(0);
+
+    /**
+     * 🔑 **もう 1 段 ── 単独の経路で捨てているかを見る**。
+     * ⚠ 上の「ノート → db1」は `SET_SQL_SOURCE`(1 段目の捨て)と
+     *   `SQL_GUEST_OPENED`(2 段目の捨て)が**続けて**働くので、片方だけ壊れても
+     *   もう片方が救ってしまう(CLAUDE.md §3.9「同じ物を守る網が 2 枚」)。
+     *   ここで「db1 → ノート」を通すと、`SET_SQL_SOURCE` の**1 回だけ**で
+     *   捨てる経路(2 段目を経由しない)を単独で確かめられる。
+     * ⚠ 「繋ぐ」の入切は相手を変えても持ち越る(user の好みなので)── ここでは
+     *   まだ入ったままなので、もう一度押さない(押すと切ってしまう)。
+     */
+    expect(connectBtn(pane).getAttribute('aria-pressed'), '繋ぐが持ち越っていない').toBe('true');
+    pressColumn(pane, '売上', '客id');
+    pressColumn(pane, '客', 'id');
+    expect(lineCount(pane), 'db1 の図で線が引けていない').toBe(1);
+    pick('');
+    await settleEr();
+    await settleEr();
+    expect(lineCount(pane), '素のノートへ戻したのに db1 の繋がりが残っている').toBe(0);
+  });
+});
+
 describe('🔴 どのエンジンで引くか(#682 段②。user 裁定 2026-09-15 = §9 は A)', () => {
   /**
    * 🔴 **段③c で裏返した**(user 報告 2026-09-16「duckdb の導線が無い」)。

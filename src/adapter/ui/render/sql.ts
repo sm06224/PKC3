@@ -112,7 +112,13 @@ export class SqlRenderer {
    * 採り直したときだけ別の物になるので、これで足りる。
    */
   private erModel: SqlPageState['er']['model'] | undefined = undefined;
-  /** 図の見え方の指紋(開閉 / 採っている最中か / 断りの字)。 */
+  /**
+   * 🔴 **直前に描いた「自分で引いた線」**(#918 段⑤d-1)。⚠ 模型と同じく
+   *   同一性で見る ── 繋ぐ / 消すのたびに reducer が新しい配列を作るので、
+   *   参照が変わったかどうかだけで「描き直す必要があるか」が言える。
+   */
+  private erMine: SqlPageState['er']['mine'] | undefined = undefined;
+  /** 図の見え方の指紋(開閉 / 採っている最中か / 断りの字 / 繋ぐ入切 / ここからの列)。 */
   private erKey = '';
   /**
    * 🔴 **手で高さを決めたか**(#918 段②b)。決めたら**そちらが強い** ──
@@ -588,9 +594,19 @@ export class SqlRenderer {
       if (this.erToggle.textContent !== label) this.erToggle.textContent = label;
       this.erToggle.setAttribute('aria-expanded', p.er.open ? 'true' : 'false');
     }
-    const erKey = `${String(p.er.open)} ${String(p.er.loading)} ${p.er.note}`;
-    if (this.erHost !== null && (this.erModel !== p.er.model || this.erKey !== erKey)) {
+    /**
+     * 🔴 **繋ぐモード / ここからの列も指紋に入れる**(#918 段⑤d-1)。
+     * ⚠ 入れないと、繋ぐを押しても「印」も「案内」も画面に出ない
+     *   (state は動いているのに、描き直しの門が閉じたままになる)。
+     */
+    const pendingKey = p.er.pendingFrom === null ? '' : JSON.stringify(p.er.pendingFrom);
+    const erKey = `${String(p.er.open)} ${String(p.er.loading)} ${p.er.note} ${String(p.er.connecting)} ${pendingKey}`;
+    if (
+      this.erHost !== null &&
+      (this.erModel !== p.er.model || this.erMine !== p.er.mine || this.erKey !== erKey)
+    ) {
       this.erModel = p.er.model;
+      this.erMine = p.er.mine;
       this.erKey = erKey;
       paintSqlEr(this.erHost, p.er);
     }

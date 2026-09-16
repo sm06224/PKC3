@@ -4305,6 +4305,54 @@ li[data-pkc-row-slot] {
   color: var(--muted);
   font-size: 12px;
 }
+/**
+ * 🔴 **「繋ぐ」の帯**(#918 段⑤d-1)。⚠ 押されている札は枠と地の両方で示す
+ *   (`kind-bar` と同じ作法 ── 色だけに頼らない)。
+ */
+[data-pkc-field='sql-er-connect'] {
+  align-self: flex-start;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+[data-pkc-field='sql-er-connect'][aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+[data-pkc-field='sql-er-connect-hint'] {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+/* ⚠ 繋ぎ始めた列 ── 枠で示す(色だけにしない) */
+[data-pkc-field='sql-er-column'][aria-pressed='true'] {
+  border: 1px dashed var(--accent);
+}
+/**
+ * 🔴 **自分で引いた線は、色以外の手がかりも持つ**(#918 段⑤d-1)。
+ * ⚠ 破線にする ── 宣言された外部キー(実線)と見分けが付く。
+ */
+[data-pkc-field='sql-er-lines'] line[data-pkc-mine='true'] {
+  stroke-dasharray: 4 3;
+}
+[data-pkc-field='sql-er-link'][data-pkc-mine='true'] {
+  border-style: dashed;
+}
+[data-pkc-field='sql-er-mine-badge'] {
+  display: inline-block;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 4px;
+  margin-inline-end: 4px;
+  font-size: 10px;
+  color: var(--muted);
+}
 [data-pkc-field='sql-tip'],
 [data-pkc-field='sql-rules'],
 [data-pkc-field='sql-example'],
