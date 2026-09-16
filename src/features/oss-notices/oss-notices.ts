@@ -19,12 +19,20 @@
  * ## ⚠ ここで数えない物(docstring に明記。user 裁定どおり「別に入る物です」)
  *
  * **Office 表示のための LibreOffice 一式**(別 repo で焼く)と、
- * **DuckDB を動かす追加の部品**(duckdb-assets-plugin が配る wasm / worker の実体)は、
- * この一覧に含めない。⚠ **`@duckdb/duckdb-wasm` という npm package 自体は**
- * `package.json` の `dependencies` に在るので**一覧には載る**(その package.json の
- * `license` を素直に読むだけ)── 除外しているのは「DuckDB や LibreOffice が
- * *内部で* 束ねている C++ 側の依存(re2 / parquet / ICU 等)まで洗い出す」
- * という、この回ではやらない全数調査のほうである。
+ * **DuckDB を動かす追加の部品**(duckdb-assets-plugin が配る wasm / worker /
+ * 拡張の実体)は、この一覧に含めない。⚠ **`@duckdb/duckdb-wasm` という npm package
+ * 自体は** `package.json` の `dependencies` に在るので**一覧には載る**
+ * (その package.json の `license` を素直に読むだけ)── 除外しているのは
+ * 「DuckDB や LibreOffice が *内部で* 束ねている C++ 側の依存(re2 / parquet / ICU 等)
+ * まで洗い出す」という、この回ではやらない全数調査のほうである。
+ *
+ * 🔴 **`OSS_SCOPE_NOTE` はいまも正しい**(#682 段④b で読み直した)── 拡張 3 つ
+ * (`json` / `parquet` / `sqlite_scanner`)は `vendor/duckdb-extensions/` に
+ * **repo へ置いた**が、配り方は wasm 本体と同じ「**使うときにこの端末へ入る**」で、
+ * precache にも載せていない。⚠ だから断り書きの字は変えない
+ * (変えると、この一覧の**範囲そのもの**が変わったように読める)。
+ * 🔑 出どころと sha256 と種別(**MIT License** ── DuckDB Foundation / DuckDB Labs)は
+ * `vendor/duckdb-extensions/README.md` に在る。
  */
 
 /**

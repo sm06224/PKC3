@@ -52,12 +52,38 @@
 import { CSV_ATTACHMENT_TABLE_NAME, looksLikeCsvAttachmentName } from '@features/query/csv-attachment';
 import { CSV_SOURCE_COLUMNS } from '@features/query/csv-tables';
 import { duckDbTable } from '@features/query/duckdb-rows';
-import { DUCKDB_WASM, DUCKDB_WORKER, duckDbAssetUrl, readDuckDbPack } from '@features/query/duckdb-pack';
+import {
+  DUCKDB_EXTENSIONS,
+  DUCKDB_EXT_DIR,
+  DUCKDB_WASM,
+  DUCKDB_WORKER,
+  duckDbAssetUrl,
+  readDuckDbPack,
+} from '@features/query/duckdb-pack';
 import { DuckDbLease, type DuckDbHandle } from './duckdb-lease';
 import { resolveDuckDbBase } from './duckdb-pack-acquire';
 
 /** 配る一式の置き場(`build/duckdb-assets-plugin.ts` の `DUCKDB_DIR` と同じ)。 */
 export const DUCKDB_BASE = 'duckdb/';
+
+/**
+ * 器を起こすのに要る在り処ひとそろい(#682 段④b)。
+ *
+ * 🔑 **1 つの型にまとめてある**のは、拡張を**足し忘れられないようにする**ため ──
+ * 貸す側(端末の一式)と組む側(同一オリジン)の**どちらか片方だけが拡張を持つ**と、
+ * 「入れておいた人だけ parquet が読めない」という、いちばん再現しない形になる。
+ * ⚠ `extensions` は**必須の field** にしてある(省ける形にすると、口を後から
+ *   足す人が書き忘れても tsc が黙る ── CLAUDE.md §7 の「optional にしない」)。
+ */
+export interface DuckDbOpenUrls {
+  readonly wasmUrl: string;
+  readonly workerUrl: string;
+  /**
+   * 拡張の置き場と名前。⚠ **必須の field** にしてある ── 省ける形にすると、
+   * 口を後から足す人が書き忘れても tsc が黙る(CLAUDE.md §7)。
+   */
+  readonly extensions: { readonly repository: string; readonly names: readonly string[] };
+}
 
 /**
  * 🔴 **時間の門**(ms)。⚠ sqlite 側(8 秒)と**違う理由で**違う値にしてある:
@@ -77,7 +103,7 @@ export interface DuckDbRunnerDeps {
   /** 同一オリジンの字を取ってくる(目録)。 */
   fetchText(url: string): Promise<string>;
   /** 実体を起こす。⚠ 渡す URL は**こちらが組んだ同一オリジンの物か、端末の一式が貸す blob: URL**。 */
-  open(input: { wasmUrl: string; workerUrl: string }): Promise<DuckDbHandle>;
+  open(input: DuckDbOpenUrls): Promise<DuckDbHandle>;
   /** 基点。既定は `document.baseURI`。 */
   baseUrl?: string;
   /**
@@ -166,7 +192,7 @@ export const DUCKDB_SEAL_SQL = 'SET enable_external_access=false';
 export class DuckDbRunner {
   private readonly lease: DuckDbLease;
   /** 検めた目録(1 度読めば替わらない)。⚠ 読めなかった回は控えない。 */
-  private urls: { wasmUrl: string; workerUrl: string } | null = null;
+  private urls: DuckDbOpenUrls | null = null;
 
   constructor(private readonly deps: DuckDbRunnerDeps) {
     this.lease = new DuckDbLease({
@@ -247,18 +273,37 @@ export class DuckDbRunner {
    * ⚠ 端末側には `this.urls` のような控えを**持たせない** ── 理由はこの file
    *   冒頭の節。
    */
-  private async resolveUrls(): Promise<{
-    urls: { wasmUrl: string; workerUrl: string };
-    dispose: () => void;
-  }> {
+  private async resolveUrls(): Promise<{ urls: DuckDbOpenUrls; dispose: () => void }> {
     const lend = this.deps.lendInstalled;
     if (lend !== undefined) {
       const lent = await lend();
       if (lent !== null) {
-        return { urls: { wasmUrl: lent.wasmUrl, workerUrl: lent.workerUrl }, dispose: lent.dispose };
+        /**
+         * 🔴 **拡張だけは、端末の一式からは貸せない**(#682 段④b。実測 2026-09-16)。
+         * ⚠ engine は拡張を**必ず HTTP GET** で取りに来るので、置き場は
+         *   **path を持つ URL** でなければならない ── `blob:` には path が作れない。
+         * 🔑 だから器と worker は端末から、**拡張はいつも同一オリジンから**。
+         * ⚠ 帰結として、**電波が無いと拡張は読み込めない**(一式を入れてあっても)。
+         */
+        return {
+          urls: { wasmUrl: lent.wasmUrl, workerUrl: lent.workerUrl, extensions: this.extensions() },
+          dispose: lent.dispose,
+        };
       }
     }
     return { urls: await this.resolveNetworkUrls(), dispose: () => undefined };
+  }
+
+  /**
+   * 拡張の置き場(同一オリジン)と名前。
+   * ⚠ **目録を読まずに組める** ── 目録が読めなくても器は起こせるべきだからではなく、
+   *   端末の一式を使う回は**目録を 1 度も引かない**からである(上の `resolveUrls`)。
+   * 🔑 門(`resolveDuckDbBase`)はここでも通す ── 通さない口を 1 つも作らない。
+   */
+  private extensions(): { repository: string; names: readonly string[] } {
+    const base = resolveDuckDbBase(this.deps.packBase ?? DUCKDB_BASE, this.deps.baseUrl ?? document.baseURI);
+    // ⚠ 末尾の `/` は付けない ── engine が `<置き場>/<版>/…` と繋ぐので二重になる
+    return { repository: duckDbAssetUrl(base, DUCKDB_EXT_DIR), names: DUCKDB_EXTENSIONS };
   }
 
   /**
@@ -267,7 +312,7 @@ export class DuckDbRunner {
    * ⚠ **信じずに検める**(`readDuckDbPack`)── 壊れた物を渡すと、上流は
    *   wasm の解釈の所で分かりにくく落ちる(user には「開かない」としか見えない)。
    */
-  private async resolveNetworkUrls(): Promise<{ wasmUrl: string; workerUrl: string }> {
+  private async resolveNetworkUrls(): Promise<DuckDbOpenUrls> {
     const known = this.urls;
     if (known !== null) return known;
     /**
@@ -292,9 +337,10 @@ export class DuckDbRunner {
     }
     const read = readDuckDbPack(text);
     if (!read.ok) throw new Error(read.why);
-    const urls = {
+    const urls: DuckDbOpenUrls = {
       wasmUrl: duckDbAssetUrl(base, DUCKDB_WASM),
       workerUrl: duckDbAssetUrl(base, DUCKDB_WORKER),
+      extensions: this.extensions(),
     };
     this.urls = urls;
     return urls;

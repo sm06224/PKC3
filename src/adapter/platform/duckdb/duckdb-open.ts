@@ -25,8 +25,69 @@ export interface OpenDuckDbInput {
   readonly wasmUrl: string;
   /** ワーカーの在り処(同一オリジンの相対)。 */
   readonly workerUrl: string;
+  /**
+   * 🔴 **開いた直後に読み込む拡張**(#682 段④b。user 要望 2026-09-16
+   * 「拡張はあらかじめ読み込んでおく」)。
+   *
+   * ⚠ **渡すのは「置き場」と「名前」で、file の在り処ではない** ── engine が
+   *   自分で `<置き場>/<版>/<台>/<名前>.duckdb_extension.wasm` を **HTTP GET** する。
+   *   実測(2026-09-16、実ブラウザで 8 通り)で**この道しか通らなかった**。
+   * ⚠ **置き場は同一オリジンでなければならない** ── 門は
+   *   `duckdb-pack-acquire.ts` の `resolveDuckDbBase()` に 1 つだけ在る
+   *   (ここで 2 つ目を作らない)。
+   * ⚠ **省ける**(既定は読み込まない)── 省いた器は csv / tsv だけ読める、
+   *   段④b より前と同じ姿になる。
+   */
+  readonly extensions?: {
+    readonly repository: string;
+    readonly names: readonly string[];
+  };
   /** 取得の進み具合(0〜1)。⚠ 無くても動く ── 計測のために意味論を変えない。 */
   readonly onProgress?: (ratio: number) => void;
+}
+
+/**
+ * 🔴 **同梱した拡張を読み込む**(#682 段④b)。
+ *
+ * ## 打ち方は 8 通り測って 1 つに決まった(2026-09-16、実ブラウザ)
+ *
+ * | 打ち方 | 結果 |
+ * |---|---|
+ * | `registerFileBuffer` + `INSTALL '<file>'` → `LOAD <name>` | 🔴 **外の `extensions.duckdb.org` へ XHR** |
+ * | 同上 + `LOAD '<file>'` / `LOAD '<file>'` だけ | 🔴 `Extension … is not available` |
+ * | `INSTALL '<同一オリジンの URL>'` | 🔴 やはり外へ XHR |
+ * | 取りに来る path を `registerFileBuffer` で先に置く | 🔴 **素通りして HTTP GET が飛ぶ** |
+ * | 🟢 **`SET custom_extension_repository` → `INSTALL <name>` → `LOAD <name>`** | 🟢 **`loaded=true` / 外へ 0 件** |
+ *
+ * 🔴 **段④a(node)の答えは、ここでは使えなかった。** node には
+ * `~/.duckdb/extensions/` という実体の置き場が在るので `INSTALL '<file>'` が
+ * そこへ書き、`LOAD <name>` が見つける。⚠ wasm には無い ──
+ * 配る wasm の中に **`ExtensionDirectory functionality is not supported in duckdb-wasm`**
+ * という字がそのまま入っている。
+ *
+ * ⚠ だから**「node で通った」を「ブラウザで通る」と読んではいけない**
+ * (CLAUDE.md §2「本命の分岐を、unit は 1 度も通らないことがある」の実例)。
+ *
+ * 🔴 **落ちたら投げる。飲まない。** ⚠ 飲むと「parquet を開いた人だけ、
+ * 遠い所で分かりにくく落ちる」形になる。
+ */
+async function loadExtensions(
+  conn: { query: (sql: string) => Promise<unknown> },
+  exts: { readonly repository: string; readonly names: readonly string[] },
+): Promise<void> {
+  if (exts.names.length === 0) return;
+  /**
+   * ⚠ **置き場の字を SQL へ入れる前に検める** ── ここは `document.baseURI` から
+   *   組んだ字しか来ないが、**来ない前提をコードに書かない**(次に書く人が
+   *   別の字を渡した日に、引用符が閉じてしまう)。
+   */
+  await conn.query(`SET custom_extension_repository='${exts.repository.replace(/'/gu, "''")}'`);
+  for (const name of exts.names) {
+    // ⚠ 名前は `DUCKDB_EXTENSIONS` の要素(`[a-z_]` だけ)── それ以外は断る
+    if (!/^[a-z_]+$/u.test(name)) throw new Error(`DuckDB の拡張の名前が不正です: ${name}`);
+    await conn.query(`INSTALL ${name}`);
+    await conn.query(`LOAD ${name}`);
+  }
 }
 
 /**
@@ -65,6 +126,11 @@ export async function openDuckDb(input: OpenDuckDbInput): Promise<DuckDbHandle> 
    */
   await conn.query('SET autoinstall_known_extensions=false');
   await conn.query('SET autoload_known_extensions=false');
+  /**
+   * 🔴 **門を掛けた後に読み込む**(#682 段④b)。⚠ 順番が要る ──
+   * 先に読み込むと、その間だけ自動取得が生きている(外へ出る窓が開く)。
+   */
+  if (input.extensions !== undefined) await loadExtensions(conn, input.extensions);
   return {
     put: async (name: string, bytes: Uint8Array) => {
       /**

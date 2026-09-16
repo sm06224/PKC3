@@ -9,10 +9,15 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { DUCKDB_DIR as PLUGIN_DIR, DUCKDB_PACK } from '../build/duckdb-assets-plugin';
+import {
+  DUCKDB_ENGINE,
+  DUCKDB_EXTENSIONS,
+  DUCKDB_REQUIRED_FILES,
+} from '../src/features/query/duckdb-pack';
 import { DUCKDB_PRECACHE_SKIP } from '../src/adapter/platform/sw/sw-source';
 import { codeOnly } from './helpers/code-only';
 // @ts-expect-error -- 検品規則は素の .mjs(ビルド対象外の CI script 群)
-import { DUCKDB_DIR as INSPECT_DIR } from '../scripts/dist-inspect.mjs';
+import { DUCKDB_DIR as INSPECT_DIR, DUCKDB_REQUIRED as INSPECT_REQUIRED } from '../scripts/dist-inspect.mjs';
 
 describe('🔴 DuckDB の綴りは 1 つ(#682)', () => {
   /**
@@ -27,6 +32,37 @@ describe('🔴 DuckDB の綴りは 1 つ(#682)', () => {
 
   it('目録は配り先の中に在る', () => {
     expect(DUCKDB_PACK.startsWith(PLUGIN_DIR)).toBe(true);
+  });
+
+  /**
+   * 🔴 **要る file の一覧が、製品と検品で同じ集合**(#682 段④b)。
+   *
+   * ⚠ `scripts/dist-inspect.mjs` は素の `.mjs` なので TS を import できず、
+   *   **同じ一覧を 2 か所が持つ**(CLAUDE.md §7)。片方だけ足すと、
+   *   🔴 **配られていない拡張を検品が通す**(そして user が parquet を開いた日に出る)。
+   * 🔑 だから**集合で**留める ── 件数だけだと、同じ数だけ取り違えても合う。
+   */
+  it('🔴 要る file の一覧が、製品(pure)と検品(.mjs)で一致する', () => {
+    expect([...INSPECT_REQUIRED].sort()).toEqual([...DUCKDB_REQUIRED_FILES].sort());
+    // ⚠ 空振り防止 ── 一覧が空なら「一致」は常に真である
+    expect(DUCKDB_REQUIRED_FILES.length).toBe(5);
+  });
+
+  /**
+   * 🔴 **repo に置いた拡張が、宣言どおりの場所に実在する**(#682 段④b)。
+   * ⚠ plugin は build のときに読むので、**無ければ build が落ちる**が、
+   *   それは `npm run build` を回した回にしか分からない ── 単体でも留める。
+   */
+  it('🔴 同梱する拡張が、宣言した版 / 台の folder に実在する', () => {
+    for (const name of DUCKDB_EXTENSIONS) {
+      const path = join(
+        'vendor/duckdb-extensions',
+        DUCKDB_ENGINE.version,
+        DUCKDB_ENGINE.platform,
+        `${name}.duckdb_extension.wasm`,
+      );
+      expect(statSync(path).size, `${path} が空 / 無い`).toBeGreaterThan(400_000);
+    }
   });
 });
 

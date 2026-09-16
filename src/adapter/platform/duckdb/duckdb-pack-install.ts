@@ -19,6 +19,9 @@ import { requestPersist as requestPersistState } from '@adapter/platform/storage
  * 一式を取るのに要る量(概算)。⚠ 目録を読む前の書き置き ──
  * 実測(2026-09-15、`tests/features/duckdb-pack.test.ts` の `REAL`)は
  * wasm 35,913,747 + worker 773,223 byte ≒ 35MB。
+ * ⚠ **拡張(5.3MB)はここに入らない**(#682 段④b)── 端末へ入れても engine が
+ *   使えないので取っていない(`DUCKDB_PACK_FILES` の docstring)。
+ *   🔑 だから配る量が 41MB へ増えても、**この数字は 35MB のままで正しい**。
  * 🔑 少なく言って失敗させるより、多めに言うほうが user は損をしない
  * (`@features/office/office-pack-size.ts` と同じ判断)。
  */

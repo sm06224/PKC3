@@ -82,18 +82,33 @@ test('🔴 ヘルプの面が開き、マニュアルが描かれる', async ({ 
     await outer.evaluate((el) => el.scrollTop),
     '前提が崩れている: 外側が既にスクロールしている',
   ).toBe(0);
-  await page.locator('[data-pkc-field="help-toc-row"]').nth(8).click();
+  /**
+   * 🔴 **押す前に、行を自分で見える所へ送る**(2026-09-16 に測って直した)。
+   *
+   * ⚠ `locator.click()` は**押す前に対象を見える所まで送る**(playwright の既定)。
+   *   目次は行が多いので、下のほうの行を押すと**その送りで外側が動く** ──
+   *   直す前はそれを「飛んだせいで動いた」と読んで落ちていた
+   *   (実測: 押した時点で既に **496**、`jumpTo` に入る前)。
+   * 🔑 **送りと飛びを分ける** ── 先に送って外側の位置を控え、
+   *   **飛ぶ前後で動いていないこと**を見る。これは `toBe(0)` より**強い**:
+   *   外側がどこに在っても「飛びで動かない」を要求する。
+   */
+  const row = page.locator('[data-pkc-field="help-toc-row"]').nth(8);
+  await row.scrollIntoViewIfNeeded();
+  const outerBeforeJump = await outer.evaluate((el) => el.scrollTop);
+  await row.click();
   await expect.poll(async () => manualBox.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
   /**
    * 🔴 **外側は動かない**(着地前レビュー・動線 4、実測で見つかった)。
    * ⚠ `scrollIntoView` は**スクロールできる祖先を全部**動かすので、放っておくと
-   *   外側まで動いて**目次が画面の外へ出る**(実測: 押す前 0 / 押した後 **494**)。
+   *   外側まで動いて**目次が画面の外へ出る**(実測 2026-09-16:門を通る途中は
+   *   **948** まで動き、門が **496** へ戻している)。
    *   目次は「押して読んで、また押す」物なので、1 回で消えては使えない。
    */
   expect(
     await outer.evaluate((el) => el.scrollTop),
-    '外側までスクロールした(目次が画面の外へ出る)',
-  ).toBe(0);
+    '飛んだせいで外側までスクロールした(目次が画面の外へ出る)',
+  ).toBe(outerBeforeJump);
   expect(
     await inFirstScreen('[data-pkc-region="help-toc"]'),
     '押した後、目次が画面から消えた',

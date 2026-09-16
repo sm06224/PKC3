@@ -21,22 +21,29 @@ import {
   fetchDuckDbPackManifest,
 } from '../../src/adapter/platform/duckdb/duckdb-pack-acquire';
 import {
+  DUCKDB_PACK_FILES,
+  DUCKDB_REQUIRED_FILES,
   DUCKDB_WASM,
   DUCKDB_WORKER,
+  duckDbExtensionPath,
   readDuckDbPack,
   type DuckDbPack,
 } from '../../src/features/query/duckdb-pack';
 
-/** 実測(2026-09-15)の byte 数。floor を満たすので readDuckDbPack を通る。 */
-const REAL = { wasm: 35_913_747, worker: 773_223 };
+/** 実測の byte 数(2026-09-15 = 器 / 2026-09-16 = 拡張)。floor を満たす。 */
+const REAL: Readonly<Record<string, number>> = {
+  [DUCKDB_WASM]: 35_913_747,
+  [DUCKDB_WORKER]: 773_223,
+  [duckDbExtensionPath('json')]: 821_413,
+  [duckDbExtensionPath('parquet')]: 3_218_307,
+  [duckDbExtensionPath('sqlite_scanner')]: 1_641_696,
+};
 
+/** ⚠ 一式は `DUCKDB_PACK_FILES` から組む(手で並べると足した日に古くなる)。 */
 const manifestText = (over: Partial<{ version: string; files: unknown }> = {}): string =>
   JSON.stringify({
     version: '1.33.1-dev57.0',
-    files: [
-      { path: DUCKDB_WASM, bytes: REAL.wasm },
-      { path: DUCKDB_WORKER, bytes: REAL.worker },
-    ],
+    files: DUCKDB_REQUIRED_FILES.map((path) => ({ path, bytes: REAL[path] ?? 0 })),
     ...over,
   });
 
@@ -93,15 +100,21 @@ describe('fetchDuckDbPackManifest', () => {
 describe('fetchDuckDbPackFiles', () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  /**
+   * ⚠ 目録は**要る物ぜんぶ**を並べる ── 2 つだけ並べると、拡張の取得が
+   *   落ちても「大きさが目録と違う」の門が鳴らない(目録に無いものは検めない)。
+   * 🔑 `wasm` / `worker` 以外は**器と同じ大きさ**にしておく(fake の応答が
+   *   `wasm` かどうかだけで分岐するため)。
+   */
   const pack = (bytes: { wasm: number; worker: number }): DuckDbPack => ({
     version: 'v1',
-    files: [
-      { path: DUCKDB_WASM, bytes: bytes.wasm },
-      { path: DUCKDB_WORKER, bytes: bytes.worker },
-    ],
+    files: DUCKDB_PACK_FILES.map((path) => ({
+      path,
+      bytes: path === DUCKDB_WASM ? bytes.wasm : bytes.worker,
+    })),
   });
 
-  it('🔴 2 file を 1 つずつ取る(同時に 2 本飛んでいない)', async () => {
+  it('🔴 1 つずつ取る(同時に 2 本飛んでいない)', async () => {
     let inflight = 0;
     let maxInflight = 0;
     const order: string[] = [];
@@ -119,10 +132,15 @@ describe('fetchDuckDbPackFiles', () => {
     const out = await fetchDuckDbPackFiles('duckdb/', pack({ wasm: 5, worker: 3 }));
     expect(maxInflight, '2 本同時に飛んでいた').toBe(1);
     // ⚠ 上と同じ ── 門を通ると絶対の字になる(相対のままなら素通りしている)
-    expect(order).toEqual([
-      new URL(`duckdb/${DUCKDB_WASM}`, document.baseURI).href,
-      new URL(`duckdb/${DUCKDB_WORKER}`, document.baseURI).href,
-    ]);
+    expect(order).toEqual(
+      DUCKDB_PACK_FILES.map((n) => new URL(`duckdb/${n}`, document.baseURI).href),
+    );
+    /**
+     * 🔴 **拡張は取りに行かない**(#682 段④b。実測 2026-09-16)── engine は拡張を
+     *   **HTTP GET** で取りに来るので、`blob:` で貸す端末の一式には置けない。
+     * ⚠ 取ると IDB を食うだけで 1 度も使われない ── だから 2 件のままが正しい。
+     */
+    expect(order, '取る物の数が変わった').toHaveLength(2);
     expect(out.get(DUCKDB_WASM)?.size).toBe(5);
     expect(out.get(DUCKDB_WORKER)?.size).toBe(3);
   });
@@ -160,26 +178,33 @@ describe('fetchDuckDbPackFromBase', () => {
    * 留める ── これより小さくすると目録の段で断られ、大きくすると(実測 wasm 35MB)
    * このオーケストレーション test のためだけに毎回 35MB を確保することになる。
    */
-  const FLOOR_PLUS_ONE = { wasm: 16_000_001, worker: 300_001 };
+  const FLOOR_PLUS_ONE: Readonly<Record<string, number>> = {
+    [DUCKDB_WASM]: 16_000_001,
+    [DUCKDB_WORKER]: 300_001,
+    [duckDbExtensionPath('json')]: 400_001,
+    [duckDbExtensionPath('parquet')]: 1_500_001,
+    [duckDbExtensionPath('sqlite_scanner')]: 800_001,
+  };
+  /** 🔑 目録が言う大きさを、そのまま fake の応答にも使う(食い違い検査に触れない)。 */
+  const sizeOf = (url: string): number => {
+    const hit = DUCKDB_REQUIRED_FILES.find((n) => url.includes(n));
+    return FLOOR_PLUS_ONE[hit ?? DUCKDB_WASM] ?? 1;
+  };
   const floorManifest = (): string =>
     JSON.stringify({
       version: '1.33.1-dev57.0',
-      files: [
-        { path: DUCKDB_WASM, bytes: FLOOR_PLUS_ONE.wasm },
-        { path: DUCKDB_WORKER, bytes: FLOOR_PLUS_ONE.worker },
-      ],
+      files: DUCKDB_REQUIRED_FILES.map((path) => ({ path, bytes: FLOOR_PLUS_ONE[path] ?? 0 })),
     });
 
-  it('目録を読んでから 2 file を取り、版を返す', async () => {
+  it('目録を読んでから実体を取り、版を返す', async () => {
     mockFetch((url) => {
       if (url.endsWith('pack.json')) return new Response(floorManifest(), { status: 200 });
       // ⚠ 実サイズを目録と揃える(食い違い検査に触れないため)
-      const bytes = url.includes(DUCKDB_WASM) ? FLOOR_PLUS_ONE.wasm : FLOOR_PLUS_ONE.worker;
-      return new Response(new Uint8Array(bytes));
+      return new Response(new Uint8Array(sizeOf(url)));
     });
     const { files, version } = await fetchDuckDbPackFromBase('duckdb/');
     expect(version).toBe('1.33.1-dev57.0');
-    expect(files.size).toBe(2);
+    expect(files.size, '取る物の数が変わった').toBe(DUCKDB_PACK_FILES.length);
   });
 
   it('🔴 目録の取得そのものは刻まない ── 進捗は file の取得から始まる', async () => {
@@ -187,8 +212,7 @@ describe('fetchDuckDbPackFromBase', () => {
     //   ここが目録の分まで刻むと、install 側と 2 か所で同じ narrative を持つことになる。
     mockFetch((url) => {
       if (url.endsWith('pack.json')) return new Response(floorManifest(), { status: 200 });
-      const bytes = url.includes(DUCKDB_WASM) ? FLOOR_PLUS_ONE.wasm : FLOOR_PLUS_ONE.worker;
-      return new Response(new Uint8Array(bytes));
+      return new Response(new Uint8Array(sizeOf(url)));
     });
     const seen: string[] = [];
     await fetchDuckDbPackFromBase('duckdb/', (phase) => seen.push(phase));

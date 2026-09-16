@@ -2,6 +2,11 @@ import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { Plugin } from 'vite';
+import {
+  DUCKDB_ENGINE,
+  DUCKDB_EXTENSIONS,
+  duckDbExtensionPath,
+} from '../src/features/query/duckdb-pack.ts';
 
 /**
  * 🔴 **DuckDB の実体を、precache に載せずに配る**(#682 段①。裁定 2026-09-15 = 案 A)。
@@ -52,6 +57,56 @@ export const DUCKDB_PACK = `${DUCKDB_DIR}pack.json`;
  */
 const SHIPPED = ['duckdb-eh.wasm', 'duckdb-browser-eh.worker.js'] as const;
 
+/**
+ * 🔴 **拡張は `node_modules` に 1 件も無い**(#682 段④b。実測 2026-09-16)。
+ *
+ * 出どころは `extensions.duckdb.org` だけで、npm にも package が無い(3 つ試して 404)。
+ * ⚠ そして**開発の箱からは出られない**(403)── だから **repo に置いてある**。
+ * 由来と sha256 は `vendor/duckdb-extensions/README.md`。
+ */
+const VENDOR_DIR = 'vendor/duckdb-extensions';
+
+/**
+ * 🔴 **版が器と食い違ったら、ここで落とす**(#682 段④b)。
+ *
+ * ⚠ 拡張は **engine の版と完全一致**でなければ読み込めないが、こちらが上げるのは
+ *   **npm の `@duckdb/duckdb-wasm`** である ── 2 つは別々に動くので、
+ *   🔴 **npm を上げた日に `vendor/` が黙って古くなる**のがいちばん危ない。
+ *   その壊れ方は「user が parquet を開こうとした日に、初めて分かる」形で出る。
+ *
+ * 🔑 engine は拡張の URL を**この字から**組む(実測 2026-09-16、実ブラウザ:
+ *   `https://extensions.duckdb.org/v1.5.4/wasm_eh/<名前>.duckdb_extension.wasm`)ので、
+ *   **配る wasm の中の字**と `DUCKDB_ENGINE` を突き合わせれば足りる。
+ *
+ * 🔴 **`includes` では足りない**(着地前レビューが実測で示した)──
+ *   `'v1.5.4'` は `'v1.5.40'` / `'v1.5.4-rc1'` にも**含まれる**ので、
+ *   **版が上がった日に素通りする**(この門がいちばん恐れている失敗そのもの)。
+ *   🔑 wasm の中の字は **NUL で区切られた C の文字列**なので、`\0…\0` で囲って
+ *   **丸ごと一致**を取る ── 実測:`\0v1.5.4\0` はちょうど **1 件**、
+ *   `\0wasm_eh\0` も **1 件**。
+ *
+ * ⚠ **これは「字が在る」しか言えない。** 「engine が本当にその版で動く」ことは
+ *   `tests/duckdb-engine-version.test.ts` が**器を起こして直に聞いて**いる
+ *   (CLAUDE.md §8「入力を守る検査と、出力が届いたかを見る検査は別物」)。
+ */
+function assertEngineMatches(wasm: Buffer): void {
+  for (const want of [DUCKDB_ENGINE.version, DUCKDB_ENGINE.platform]) {
+    // ⚠ `latin1` で読むと 1 バイト = 1 文字なので、NUL をそのまま挟める
+    const exact = Buffer.from(`\0${want}\0`, 'latin1');
+    if (!wasm.includes(exact)) {
+      throw new Error(
+        `duckdb: 配る duckdb-eh.wasm の中に「${want}」が丸ごとは無い ── `
+          + 'engine の版が上がったのに vendor/duckdb-extensions がそのままになっている。'
+          + ' 拡張を取り直して DUCKDB_ENGINE を直すこと(vendor/duckdb-extensions/README.md)',
+      );
+    }
+  }
+  // ⚠ **空振り防止** ── 在りえない字が「在る」と出るなら、この突合は何も見ていない
+  if (wasm.includes(Buffer.from('\0v0.0.0-pkc-never\0', 'latin1'))) {
+    throw new Error('duckdb: 版の突合が空振りしている(在りえない字が見つかった)');
+  }
+}
+
 export function duckdbAssetsPlugin(): Plugin {
   return {
     name: 'pkc-duckdb-assets',
@@ -71,16 +126,50 @@ export function duckdbAssetsPlugin(): Plugin {
         }
       ).version;
 
-      const files = SHIPPED.map((name) => {
-        const source = readFileSync(join(distDir, name));
+      const emit = (packPath: string, source: Buffer): { path: string; bytes: number } => {
         /**
          * ⚠ **空振り防止** ── 上流が名前を変えた日に、ここが黙って 0 バイトを
          * 配ると「取ってきたのに動かない」という、いちばん遠い所で出る壊れ方になる。
          */
-        if (source.byteLength === 0) throw new Error(`duckdb: ${name} が 0 バイト`);
-        this.emitFile({ type: 'asset', fileName: `${DUCKDB_DIR}${name}`, source });
-        return { path: name, bytes: source.byteLength };
+        if (source.byteLength === 0) throw new Error(`duckdb: ${packPath} が 0 バイト`);
+        this.emitFile({ type: 'asset', fileName: `${DUCKDB_DIR}${packPath}`, source });
+        return { path: packPath, bytes: source.byteLength };
+      };
+
+      const files = SHIPPED.map((name) => {
+        const source = readFileSync(join(distDir, name));
+        // 🔴 版の突合は**配る wasm そのもの**で行う(`node_modules` の別の file ではなく)
+        if (name.endsWith('.wasm')) assertEngineMatches(source);
+        return emit(name, source);
       });
+
+      /**
+       * 🔴 **拡張を同じ配り先へ足す**(#682 段④b)。
+       * ⚠ `ext/` の下へ置く ── 起動に要る 2 つと混ぜない(読み手が数え分けられる)。
+       */
+      for (const name of DUCKDB_EXTENSIONS) {
+        const packPath = duckDbExtensionPath(name);
+        const from = join(
+          VENDOR_DIR,
+          DUCKDB_ENGINE.version,
+          DUCKDB_ENGINE.platform,
+          `${name}.duckdb_extension.wasm`,
+        );
+        let source: Buffer;
+        try {
+          source = readFileSync(from);
+        } catch {
+          /**
+           * ⚠ **黙って配らない** ── ここを飲むと、拡張の無い一式が配られ、
+           *   症状は「parquet を開いた人だけ落ちる」という遠い所で出る。
+           */
+          throw new Error(
+            `duckdb: 拡張が見つからない(${from})── vendor/duckdb-extensions/README.md の`
+              + '「取り直し方」を見ること',
+          );
+        }
+        files.push(emit(packPath, source));
+      }
 
       this.emitFile({
         type: 'asset',

@@ -126,8 +126,14 @@ def run(cmd, timeout=1800):
     """
     # 🔑 `start_new_session=True` で**この子を長とする group** を作る。
     #   ⚠ これが無いと、下の `killpg` が**自分たちまで巻き込む**。
+    # 🔴 `capture_output` は **`subprocess.run` 専用** ── `Popen` へ渡すと
+    #   `TypeError` で**1 回目の変異の直前に即死する**(2026-09-16 に実測)。
+    #   ⚠ `stdout` / `stderr` を個別に渡している時点で要らない残骸だった。
+    #   🔑 雛形の即死は「変異試験そのものが 1 度も走らない」形なので、
+    #     **回した気になって SURVIVED を見落とす**のではなく、最初の 1 手で止まる
+    #     ── 幸いこの向きだが、直さないと次に写した人が同じ所で止まる。
     proc = subprocess.Popen(
-        cmd, cwd=ROOT, shell=True, capture_output=False,
+        cmd, cwd=ROOT, shell=True,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         start_new_session=True,
     )
