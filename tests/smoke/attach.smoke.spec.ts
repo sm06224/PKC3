@@ -1259,8 +1259,15 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
    */
   await page.fill('[data-pkc-field="sql-input"]', '');
   await clickReal(page, '[data-pkc-action="sql-er-toggle"]');
-  const erBoxCount = await erBox.count();
-  expect(erBoxCount, `.xlsx なのに図の四角が 2 つ未満(この先は測れない): ${String(erBoxCount)}`).toBeGreaterThanOrEqual(2);
+  /**
+   * 🔴 **待つ**(2026-09-16 に 1 稿目がここで落ちた)。⚠ 相手を替えた後に開くと
+   *   `SQL_ER_TOGGLE` が `REQUEST_SQL_ER` を出して**worker と往復する** ── 即時に
+   *   数えると **0** が返る(実測。落ちた回の a11y には、その直後に 3 箱が
+   *   完成して写っていた)。🔑 この file の他の所と同じ**待つ assert** に揃える。
+   * ⚠ **3 つ**である(`sheet1` / `sheet2` / 目録の `xlsx_sheets`)── 数を書くのは、
+   *   「2 つ以上」だと**枚が 1 つに潰れた回**を見逃すからである。
+   */
+  await expect(erBox, '.xlsx で図の四角が 3 つ出ない').toHaveCount(3, { timeout: 15_000 });
   /**
    * 🔴 **宣言された線が 1 本も無い** ── これが user の困りごとの実体である
    *   (`.xlsx` に外部キーの宣言は書けない)。⚠ **前提として測る** ──
@@ -1276,15 +1283,15 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   // 1 つ目の四角の 1 列目 → 「ここから」の印が付く
   const colOf = (box: number) =>
     erBox.nth(box).locator('[data-pkc-field="sql-er-column"]').first();
-  await colOf(0).click();
+  await clickReal(page, colOf(0));
   await expect(colOf(0), '押した列に「ここから」の印が付かない').toHaveAttribute('aria-pressed', 'true');
   // ⚠ **やめられる**(片道の操作を作らない)── もう一度押すと外れる
-  await colOf(0).click();
+  await clickReal(page, colOf(0));
   await expect(colOf(0), 'もう一度押しても「ここから」が外れない').toHaveAttribute('aria-pressed', 'false');
 
   // 別の四角の列を押す → 線が引かれ、`join` が欄に足される
-  await colOf(0).click();
-  await colOf(1).click();
+  await clickReal(page, colOf(0));
+  await clickReal(page, colOf(1));
   const mineChip = page.locator('[data-pkc-action="sql-er-unlink"]');
   await expect(mineChip, '自分で引いた線の札が出ない').toHaveCount(1);
   await expect(
@@ -1299,7 +1306,7 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   expect(dash, `自分の線が破線になっていない: ${dash}`).not.toBe('none');
 
   // 🔴 **消せる** ── 置けるだけで外せない操作を作らない
-  await mineChip.first().click();
+  await clickReal(page, mineChip.first());
   await expect(mineChip, '自分で引いた線を押しても消えない').toHaveCount(0);
 
   /**
@@ -1310,7 +1317,7 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   await clickReal(page, '[data-pkc-action="sql-er-connect-toggle"]');
   await expect(connectBtn, '「繋ぐ」が切にならない').toHaveAttribute('aria-pressed', 'false');
   await page.fill('[data-pkc-field="sql-input"]', 'select * from sheet1');
-  await colOf(0).click();
+  await clickReal(page, colOf(0));
   await expect(
     page.locator('[data-pkc-field="sql-input"]'),
     '繋ぐを切にしたのに、列を押しても取り出す列に足されない',
