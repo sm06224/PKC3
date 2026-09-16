@@ -583,6 +583,28 @@ export function applySchema(database: Database): void {
         addedEntryCols.push(col.name);
       }
     }
+    /**
+     * 🔴 **並べ替えただけで本文が索引に書き直される引き金を、作り直す**(#984)。
+     *
+     * ⚠ 直す前の `entries_fts_au` は `AFTER UPDATE ON entries` で**列の指定が無い**ので、
+     *   `UPDATE entries SET entry_order = ?` でも発火し、**本文まるごと**を
+     *   索引から消して入れ直していた(実測:本文 1,000KB で並べ替え 1 回 95.37ms)。
+     *
+     * 🔴 **`CREATE TRIGGER IF NOT EXISTS` は既存の引き金を書き換えない**ので、
+     *   `schema.ts` の文面を直しただけでは**既に在る DB は古いまま**である
+     *   ── だから**ここで落とす**(下の `SCHEMA_DDL` が新しい文面で作り直す)。
+     *
+     * 🔑 判定は user_version ではなく**いま在る引き金の字**(この file の原則)。
+     *   ⚠ `sqlite_master` の `sql` は**作ったときの原文**がそのまま入っているので、
+     *   `UPDATE OF` が入っているかで新旧が分かる。
+     * ⚠ 引き金が無い DB(新規)では 1 行も返らない ── その回は何もしない。
+     */
+    const ftsAu = database.selectValue(
+      `SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'entries_fts_au'`,
+    ) as string | undefined;
+    if (typeof ftsAu === 'string' && !/UPDATE\s+OF/i.test(ftsAu)) {
+      database.exec('DROP TRIGGER IF EXISTS entries_fts_au');
+    }
     // 新規 DB は最新 DDL がそのまま最新形を作る(既存 DB では no-op)。
     // ⚠ 索引はここで作られる ── 上で列を足した**後**であることが要。
     for (const ddl of SCHEMA_DDL) database.exec(ddl);

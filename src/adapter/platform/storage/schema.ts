@@ -115,7 +115,30 @@ export const FTS_DDL: readonly string[] = [
      INSERT INTO entries_fts(entries_fts, rowid, title, body)
        VALUES ('delete', old.rowid, old.title, old.body);
    END`,
-  `CREATE TRIGGER IF NOT EXISTS entries_fts_au AFTER UPDATE ON entries BEGIN
+  /**
+   * 🔴 **題名と本文を書き換えたときだけ発火させる**(#984。2026-09-16)。
+   *
+   * ⚠ 直す前は `AFTER UPDATE ON entries` だった ── **列の指定が無い**ので、
+   *   sqlite は**どの列の更新でも**発火させる。そのため
+   *   並べ替え(`UPDATE entries SET entry_order = ?`)だけで、
+   *   🔴 **本文まるごとを索引から消して入れ直していた**。
+   *
+   * 実測(本物の worker。並べ替え 1 回に掛かる時間):
+   *
+   * | 本文 | 直す前 |
+   * |---|---|
+   * | 1 KB | 0.69 ms |
+   * | 100 KB | 10.55 ms |
+   * | 1,000 KB | 🔴 **95.37 ms** |
+   *
+   * 🔑 本文を 1000 倍にすると **138 倍** ── 順番の数を 1 つ書き換えるだけなのに、
+   *   **本文の大きさに比例**していた。
+   * ⚠ 触る先も 1 つではない ── `entries_fts_data` / `_idx` / `_docsize` を書き直す。
+   *
+   * ⚠ **`CREATE TRIGGER IF NOT EXISTS` なので、ここを直しても既存の DB は変わらない**
+   *   ── 古い引き金を落とす移行が `storage-worker.ts` に在る(対で効く)。
+   */
+  `CREATE TRIGGER IF NOT EXISTS entries_fts_au AFTER UPDATE OF title, body ON entries BEGIN
      INSERT INTO entries_fts(entries_fts, rowid, title, body)
        VALUES ('delete', old.rowid, old.title, old.body);
      INSERT INTO entries_fts(rowid, title, body) VALUES (new.rowid, new.title, new.body);

@@ -205,3 +205,77 @@ describe('全文検索の索引 migration(2026-08-20 の起動不能)', () => {
     db.close();
   });
 });
+/**
+ * 🔴 **並べ替えで本文が索引に書き直される引き金を、既存の DB でも作り直す**(#984)。
+ *
+ * ⚠ 直す前の `entries_fts_au` は `AFTER UPDATE ON entries`(列の指定なし)なので、
+ *   `UPDATE entries SET entry_order = ?` でも発火し、**本文まるごと**を
+ *   索引から消して入れ直していた(実測:本文 1,000KB で並べ替え 1 回 95.37ms)。
+ *
+ * 🔴 **`CREATE TRIGGER IF NOT EXISTS` は既存の引き金を書き換えない**ので、
+ *   `schema.ts` の文面を直しても**既に在る DB は古いまま**である。
+ * ⚠ そして**台はいつもまっさらな DB を作る**ので、この経路は
+ *   `storage-worker.test.ts` からは 1 度も通らない
+ *   ── 変異試験で「移行を飛ばす」を当てたら **SURVIVED** した(§2 未実行の経路)。
+ */
+describe('🔴 古い引き金を作り直す(#984)', () => {
+  /** ⚠ 旧 DDL は**本物から削って**作る(手で書き写すと、本物が変わった日にここだけ古くなる)。 */
+  const oldTriggerDb = (): Database => {
+    const db = new sqlite3.oo1.DB(':memory:');
+    for (const ddl of SCHEMA_DDL) {
+      db.exec(ddl.replace(/AFTER UPDATE OF title, body ON entries/, 'AFTER UPDATE ON entries'));
+    }
+    return db;
+  };
+  const auSql = (db: Database): string =>
+    String(
+      db.selectValue(
+        `SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'entries_fts_au'`,
+      ) ?? '',
+    );
+
+  it('🔴 古い DB を開くと、引き金が新しい形に差し替わる', () => {
+    const db = oldTriggerDb();
+    // ⚠ 前提の assert ── 旧い形を作れていなければ、下の一致は空振りする
+    expect(auSql(db), '旧い引き金を作れていない').not.toMatch(/UPDATE\s+OF/i);
+    expect(auSql(db), '引き金そのものが無い').toMatch(/entries_fts/);
+
+    applySchema(db);
+
+    expect(auSql(db), '古いまま(移行が効いていない)').toMatch(/UPDATE\s+OF\s+title,\s*body/i);
+    db.close();
+  });
+
+  /**
+   * ⚠ **対照群 ── 差し替えても索引が壊れない**。
+   * 🔑 引き金を落として作り直すので、**そのとき索引が空になっていないか**を見る。
+   */
+  it('⚠ 差し替えた後も、本文で検索して当たる', () => {
+    const db = oldTriggerDb();
+    db.exec({
+      sql: `INSERT INTO entries (cid, lid, title, archetype, created_at, updated_at,
+              entry_order, status, date, archived, body)
+            VALUES ('c1', 'm1', 'だい', 'text', '2020-01-01 00:00:00', '2020-01-01 00:00:00',
+              1, NULL, NULL, 0, ?)`,
+      bind: ['ゆにーくな語がここに在る'],
+    });
+    applySchema(db);
+    const hit = db.selectValue(
+      `SELECT count(*) FROM entries_fts WHERE entries_fts MATCH 'ゆにーくな語'`,
+    );
+    expect(Number(hit), '差し替えたら索引から消えた').toBeGreaterThan(0);
+    db.close();
+  });
+
+  /** 🔴 **新しい DB は触らない**(差し替えが毎回走ると、開くたびに索引を作り直す)。 */
+  it('🔴 既に新しい DB では、差し替えない(冪等)', () => {
+    const db = new sqlite3.oo1.DB(':memory:');
+    for (const ddl of SCHEMA_DDL) db.exec(ddl);
+    const before = auSql(db);
+    expect(before, '新しい DB なのに古い形').toMatch(/UPDATE\s+OF/i);
+    applySchema(db);
+    expect(auSql(db), '作り直してしまった').toBe(before);
+    db.close();
+  });
+});
+
