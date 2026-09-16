@@ -2325,6 +2325,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-16(#973 居場所の番号)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-14-voice-boost" …` → 0307debf
+     */
+    '録った音を、聞くときだけ聞き取りやすく整えられるようになりました',
+    /**
      * ⚠ **2026-09-16(#968 ── 広い csv の重さ)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-14-audio-trim" …` → 000a123b
      */

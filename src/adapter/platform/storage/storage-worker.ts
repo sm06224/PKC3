@@ -1651,14 +1651,44 @@ function writeParent(
     bind: [cid, lid],
   });
   if (parentLid === null) return;
+  /**
+   * 🔴 **ぶつかったら断る ── 黙って上書きしない**(#973)。
+   *
+   * ## 何が起きていたか
+   *
+   * ⚠ 直す前は `ON CONFLICT(cid, id) DO UPDATE` で、**ぶつかりを「上書き」に変えていた**。
+   * 窓を 2 つ開いて同じミリ秒で整理すると同じ id が採番されることがあり
+   * (`generateLid` に乱数が無かった)、そのとき **先に在った別のノートの居場所の行が、
+   * こちらのノートのものに書き換わる** ── 画面では入ったように見えたまま、
+   * 読み込み直すと**別のノートがフォルダから出て、いちばん上へ戻っている**。
+   * ⚠ error は 1 つも出ず、履歴にも残らない。
+   *
+   * ## 🔑 なぜ「残っている行 = 別物」と言い切れるか
+   *
+   * すぐ上の `DELETE` が **この lid の structural を消したあと**なので、
+   * ここで同じ id が残っているなら、それは**他のノートの行**である。
+   * 🔑 だから断ってよい(同じノートを 2 回保存しても、DELETE が先に効くのでぶつからない)。
+   *
+   * ## ⚠ 取り込み(`bulkUpsertRelations`)の `ON CONFLICT` は**正しい**ので触らない
+   *
+   * あちらは id が**取り込んだファイルの中**から来るので、ぶつかり =
+   * 「**同じ関係をもう一度入れた**」である ── 断ると
+   * **同じバックアップを取り込み直しただけで落ちる**。
+   * 🔑 同じ綴りでも目的が違えば直し方も違う(CLAUDE.md §7)。
+   */
+  const taken = database.selectValue('SELECT count(*) FROM relations WHERE cid = ? AND id = ?', [
+    cid,
+    relationId,
+  ]) as number;
+  if (taken > 0) {
+    throw new Error(
+      '居場所を書き込めませんでした(同じ番号が既に使われています)。' +
+        '窓を 2 つ開いている場合は 1 つ閉じて、もう一度お試しください。',
+    );
+  }
   database.exec({
     sql: `INSERT INTO relations (cid, id, from_lid, to_lid, kind, created_at, updated_at)
-          VALUES (?, ?, ?, ?, 'structural', datetime('now'), datetime('now'))
-          ON CONFLICT(cid, id) DO UPDATE SET
-            from_lid = excluded.from_lid,
-            to_lid = excluded.to_lid,
-            kind = excluded.kind,
-            updated_at = excluded.updated_at`,
+          VALUES (?, ?, ?, ?, 'structural', datetime('now'), datetime('now'))`,
     bind: [cid, relationId, parentLid, lid],
   });
 }
