@@ -1480,6 +1480,38 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
    *   ③外を塞いだ後に、写した表から行が返る
    * 🔑 **新しい起動は増やさない**(#820 の規律)── この筋書きの続きで確かめる。
    */
+  /**
+   * 🔴 **`.parquet` は選び所のいちばん下**(#682 段④c)── `.xlsx` より後ろに並ぶ。
+   * ⚠ 「在る」と「その位置に在る」は別の主張である(上の `.xlsx` 対 `.csv` と同じ形)。
+   */
+  const labelsWithParquet = await source.locator('option').allTextContents();
+  const idxXlsx = labelsWithParquet.indexOf('uriage.xlsx');
+  const idxParquet = labelsWithParquet.indexOf('uriage.parquet');
+  expect(idxParquet, '.parquet が選び所に見つからない').toBeGreaterThanOrEqual(0);
+  expect(idxParquet, '.parquet が .xlsx より上(前)に並んでいる').toBeGreaterThan(idxXlsx);
+
+  /**
+   * 🔴 **見張りを付け直す**(2026-09-16、着地前 smoke が空振りを見つけた)。
+   * ⚠ 上の DuckDB の筋書きは `finally` で `page.off('request', watchOutward)` している ──
+   *   つまり**そのまま下で `outward` を見ても、1 件も増えようがない**(恒真の assert)。
+   *   🔴 CLAUDE.md §1「代替物で満たせない条件にする」の、いちばん静かな形である。
+   * 🔑 だから**この回ぶんを別に数える** ── 付け直して、走らせ終わってから外す。
+   */
+  const outwardParquet: string[] = [];
+  /**
+   * ⚠ **全部の数も控える** ── 「外へ 0 件」は、**見張りを付け忘れた版でも成り立つ**。
+   * 🔑 だからこの回に**何か 1 件でも見えたこと**を、同じ見張りで数えて空振りを潰す。
+   */
+  let seenParquet = 0;
+  const watchParquet = (req: { url: () => string }): void => {
+    seenParquet += 1;
+    const u = req.url();
+    if (!u.startsWith('http://localhost') && !u.startsWith('http://127.0.0.1')) {
+      outwardParquet.push(u);
+    }
+  };
+  page.on('request', watchParquet);
+
   await source.selectOption({ label: 'uriage.parquet' });
   await expect(note, '.parquet が開いたことが画面に出ない').toContainText(
     'uriage.parquet を調べています',
@@ -1526,8 +1558,48 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   await expect(page.locator('[data-pkc-field="sql-note"]'), '断り文が出ている').not.toContainText(
     'does not exist',
   );
-  // ⚠ **外へ出ていない**(段② の柱)── localhost 以外への要求が 1 件も無いこと
-  expect(outward, `.parquet を引いたのに外へ出た: ${outward.join(' / ')}`).toEqual([]);
+  /**
+   * ⚠ **外へ出ていない**(段② の柱)── localhost 以外への要求が 1 件も無いこと。
+   * 🔑 数えているのは**この回ぶん**の見張り(上で付け直した物)である。
+   * ⚠ **空振り防止** ── 見張りが本当に動いていたことを、同じ回の中で確かめる
+   *   (`page.on` を付け忘れた版でも `[]` になるので、それだけでは何も言えない)。
+   */
+  expect(seenParquet, '見張りが 1 件も数えていない(付け忘れ = この assert は空振り)').toBeGreaterThan(
+    0,
+  );
+  expect(
+    outwardParquet,
+    `.parquet を引いたのに外へ出た: ${outwardParquet.join(' / ')}`,
+  ).toEqual([]);
+  page.off('request', watchParquet);
+
+  /**
+   * 🔴 **`.parquet` では「つながり図」も「構造をノートへ」も、理由を出して断る**
+   *   (#682 段④c。⚠ 着地前 smoke が「この 2 つは実ブラウザで 1 度も通っていない」と
+   *   指摘したので足した)。
+   *
+   * ⚠ 直す前は worker が **「取り込んだ .sqlite が開かれていません(先に選んでください)」**と
+   *   返していた ── user は `.parquet` を選んだのに別の形式の話をされ、
+   *   **いまやったばかりの操作をもう一度やれ**と言われる。
+   * 🔑 **新しい起動は増やさない** ── この筋書きの続きで確かめる。
+   */
+  await clickReal(page, '[data-pkc-action="sql-er-toggle"]');
+  const erHost = page.locator('[data-pkc-region="sql-er"]');
+  await expect(erHost, '図に採れない理由が出ていない').toContainText('まだ出せません');
+  await expect(erHost, '選んだばかりなのに「先に選んでください」と言っている').not.toContainText(
+    '先に選んで',
+  );
+  // ⚠ 「採っています」のまま止まっていないこと(永久に空の図を作らない)
+  await expect(erHost, '採っています、のまま止まっている').not.toContainText('採っています');
+  await clickReal(page, '[data-pkc-action="sql-er-toggle"]');
+
+  await clickReal(page, '[data-pkc-action="sql-schema-to-note"]');
+  await expect(note, '「構造をノートへ」が .sqlite の話で断っている').toContainText(
+    'まだ出せません',
+  );
+  await expect(note, '選んだばかりなのに「先に選んでください」と言っている').not.toContainText(
+    '先に選んで',
+  );
 
   /**
    * ⑤-b 🔴 **調べている最中にノートを押しても、SQL の面は残る**(#906。user 裁定 2026-09-14)。
@@ -1637,8 +1709,15 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
    *
    * ⚠ ここまでに**走らせた字**(= 履歴に積まれた字。新しい順):
    *   `SELECT * FROM csv`(⑥/⑦。⚠ ⑦ は直前と同じなので積まれない)/
+   *   🔴 `FROM parquet SELECT * LIMIT 20`(⑤-c。#682 段④c で足した)/
    *   `SELECT * FROM sheet1`(⑤)/ `SELECT * FROM xlsx_sheets`(⑤)/
    *   `SELECT * FROM csv`(④)。
+   *
+   * 🔴 **この帳簿は、上の筋書きへ 1 つ足すたびに古くなる**(2026-09-16 に実際に踏んだ)。
+   * ⚠ ⑤-c を足した回は `.parquet` の添付が作られず**ここまで到達しなかった**ので、
+   *   食い違いが**1 回転あとで初めて**露見した。
+   * 🔑 だから下では **`toHaveValue` で 2 番目を名指しする前に、一覧そのものを数える**
+   *   ── 数えておけば、次に足した人はここで落ちて**帳簿を直す所が分かる**。
    */
   const input = page.locator('[data-pkc-field="sql-input"]');
   // 🔑 **打ちかけの字**を置く ── 走らせない(履歴には積まれない字である)
@@ -1659,9 +1738,17 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   await page.keyboard.press('ArrowUp');
   await expect(input, '↑ で前に走らせた字が戻らない').toHaveValue('SELECT * FROM csv');
   await expect(histNote, 'いま何番目かが出ていない').toContainText('前に打った字(1 / ');
-  // 🔴 もう一度 ↑ → さらに前へ(⚠ 同じ字は 2 つ並ばないので、次は sheet1)
+  /**
+   * 🔴 **2 度目の ↑ は、いま「2 番目に新しい字」である**(#682 段④c で 1 つ増えた)。
+   * ⚠ 期待値を書き換えるとき、**上の帳簿も一緒に直す** ── 帳簿と assert が
+   *   別々に古くなると、次に足した人はここで落ちても**どこを直すのか分からない**。
+   * 🔑 ⑤-c(`.parquet` を画面の例文で走らせる)を足したので、いまは parquet の字。
+   *   ⚠ この名指しは「**足した筋書きが本当に履歴へ積まれた**」の観測点でもある。
+   */
   await page.keyboard.press('ArrowUp');
-  await expect(input, '2 度目の ↑ でさらに前へ遡らない').toHaveValue('SELECT * FROM sheet1');
+  await expect(input, '2 度目の ↑ でさらに前へ遡らない(⑤-c の字が履歴に積まれていない)').toHaveValue(
+    'FROM parquet SELECT * LIMIT 20',
+  );
   // 🔴 ↓ で新しいほうへ戻る
   await page.keyboard.press('ArrowDown');
   await expect(input, '↓ で新しいほうへ戻らない').toHaveValue('SELECT * FROM csv');
