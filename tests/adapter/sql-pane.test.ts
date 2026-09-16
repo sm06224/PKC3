@@ -42,7 +42,12 @@ import type {
   SqliteReadableGuestSource,
 } from '../../src/features/query/sql-guest-source';
 // 🔴 手持ちのファイルを開く(#854 段②)── main.ts と**同じ実物**を配線する
-import { readSqlLocalFileBytes, registerSqlLocalFile } from '../../src/adapter/state/sql-local-file';
+import {
+  readSqlLocalFileBytes,
+  registerSqlLocalFile,
+  releaseSqlLocalFile,
+  sqlLocalFileSize,
+} from '../../src/adapter/state/sql-local-file';
 import { SQL_PICK_LOCAL_FILE_VALUE } from '../../src/features/query/sql-local-file';
 
 type SqlAnswer = {
@@ -191,7 +196,22 @@ function setup(
         readAssetBytes,
         // 🔴 手持ちのファイル(#854 段②)── 実物の控えをそのまま繋ぐ
         //    (⚠ `withLocal: false` のときは**この口だけ**外す)
-        ...(opts.withLocal === false ? {} : { readLocalSqlFile: (lid: string) => readSqlLocalFileBytes(lid) }),
+        ...(opts.withLocal === false
+          ? {}
+          : {
+              readLocalSqlFile: (lid: string) => readSqlLocalFileBytes(lid),
+              /**
+               * 🔴 **控えを手放す口も、実物を繋ぐ**(#682 段④c)。
+               * ⚠ 直す前はここを繋いでいなかったので、**この口の経路を
+               *   unit が 1 度も通っていなかった** ── そのせいで
+               *   「選び直した瞬間に、いま控えた file を消す」という欠陥を
+               *   **139 件緑のまま**作った(CLAUDE.md §2)。
+               */
+              releaseLocalSqlFile: (lid: string) => {
+                releaseSqlLocalFile(lid);
+              },
+              localSqlFileSize: (lid: string) => sqlLocalFileSize(lid),
+            }),
         // 🔴 DuckDB の口(#682 段②)── 実物は別ワーカー。ここは**渡された引数**だけを見る
         ...(opts.withDuck === false ? {} : { runDuckDbSql }),
       });
@@ -3295,6 +3315,89 @@ describe('🔴 どのエンジンで引くか(#682 段②。user 裁定 2026-09-
  *   user には「開けません」としか出ない ── 型でも塞いであるが、
  *   **配線が本当にそこを通っていないこと**は、この経路でしか見えない。
  */
+/**
+ * 🔴 **手持ちのファイルを DuckDB で引く**(#682 段②+段④c)。
+ *
+ * ## ⚠ ここは「配った日から 1 度も通っていなかった」道である
+ *
+ * 段② で DuckDB を足したとき、相手の bytes を読む口は 2 人に増えた ──
+ * **選んだ回**(`REQUEST_SQL_GUEST_OPEN`)と**走らせた回**(`DuckDbRunner.load`)。
+ * 🔴 ところが手持ちのファイルの控えは「**1 回読んだら消える**」形だったので、
+ * 走らせた回は**必ず `null`** を受け取っていた(実測 2026-09-16)。
+ * ⚠ **unit も smoke も 1 件も落ちなかった** ── 手持ちのファイルの test は
+ * 「開けたか」までしか見ておらず、DuckDB の test は**添付**しか使っていなかった。
+ * 🔑 だから **2 つが交わる 1 点**をここに置く。
+ */
+describe('🔴 手持ちのファイルを DuckDB で引く(#682 段④c)', () => {
+  it('🔴 手持ちの .csv を選んで DuckDB で走らせると、中身が読める', async () => {
+    const { pickLocalFile, pickEngine, type, runBtn, duckSeen, cells, note } = setup();
+    pickLocalFile(new File(['id,name\n1,a\n'], 'tegara.csv', { type: 'text/csv' }));
+    await settle();
+    expect(note(), '前提が崩れている(手持ちの file が開けていない)').toContain(
+      'tegara.csv を調べています',
+    );
+    pickEngine('duckdb');
+    type('FROM csv SELECT *');
+    runBtn.click();
+    await settle();
+    expect(duckSeen, 'DuckDB へ引きに行っていない').toHaveLength(1);
+    /**
+     * 🔴 **ここが本題** ── 直す前はここが `null` だった(控えが 1 回で消えていた)。
+     * ⚠ 「引きに行った」だけを見ると、`null` を渡して断られた回と区別が付かない。
+     */
+    expect(duckSeen[0]?.bytes, '控えが消えていて、走らせる回に中身を読めていない').toBeGreaterThan(
+      0,
+    );
+    expect(cells()).toEqual([['duck']]);
+  });
+
+  /**
+   * 🔴 **器を起こし直すたびに読む** ── DuckDB は畳んでから起き直すと**また読む**ので、
+   *   「2 回目までは読める」形の実装でも足りない。
+   * 🔑 だから **3 回**走らせて、3 回とも中身が届くことを見る。
+   */
+  it('🔴 同じ相手で何度走らせても、そのたびに中身を読める', async () => {
+    const { pickLocalFile, pickEngine, type, runBtn, duckSeen } = setup();
+    pickLocalFile(new File(['id,name\n1,a\n'], 'tegara.csv', { type: 'text/csv' }));
+    await settle();
+    pickEngine('duckdb');
+    for (const nth of [1, 2, 3]) {
+      type(`FROM csv SELECT ${String(nth)}`);
+      runBtn.click();
+      await settle();
+    }
+    expect(duckSeen).toHaveLength(3);
+    for (const [i, seen] of duckSeen.entries()) {
+      expect(seen.bytes, `${String(i + 1)} 回目で中身が読めていない`).toBeGreaterThan(0);
+    }
+  });
+
+  /**
+   * 🔴 **選び直しても、いま選んだ file が消えない**(#682 段④c で 1 度壊した)。
+   *
+   * ⚠ `SET_SQL_SOURCE` は「**前の相手を閉じる**」→「**新しい相手を開く**」の順に出す。
+   *   控えを手放す口が lid を見ないと、**いま控えたばかりの file を消す**。
+   * 🔑 手持ちの file を**続けて 2 回**選ぶ、が唯一この形を作れる場面である。
+   */
+  it('🔴 手持ちの file を続けて 2 回選んでも、2 つ目が読める', async () => {
+    const { pickLocalFile, pickEngine, type, runBtn, duckSeen, note } = setup();
+    pickLocalFile(new File(['id\n1\n'], 'ichi.csv', { type: 'text/csv' }));
+    await settle();
+    pickLocalFile(new File(['id,name\n2,b\n3,c\n'], 'ni.csv', { type: 'text/csv' }));
+    await settle();
+    expect(note(), '2 つ目が開けていない').toContain('ni.csv を調べています');
+    pickEngine('duckdb');
+    type('FROM csv SELECT *');
+    runBtn.click();
+    await settle();
+    expect(duckSeen[0]?.source.name, '2 つ目を選んだのに 1 つ目を引いている').toBe('ni.csv');
+    expect(
+      duckSeen[0]?.bytes,
+      '選び直したときに、いま控えた file まで手放している',
+    ).toBeGreaterThan(0);
+  });
+});
+
 describe('🔴 .parquet / .json を調べる相手として受ける(#682 段④c)', () => {
   it('🔴 選び所のいちばん下に並び、csv や xlsx より後ろに来る', async () => {
     const { sourceSel } = setup();

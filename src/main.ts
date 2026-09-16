@@ -3716,8 +3716,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      */
     localSqlFileSize: (lid) => sqlLocalFileSize(lid),
     /** 🔴 **控えの終端**(#682 段④c)── 相手を選ぶのをやめたら手を放す。 */
-    releaseLocalSqlFile: () => {
-      releaseSqlLocalFile();
+    releaseLocalSqlFile: (lid) => {
+      releaseSqlLocalFile(lid);
     },
     /**
      * 🔴 **DuckDB で引く口**(#682 段②。user 裁定 2026-09-15)。

@@ -63,9 +63,26 @@ describe('手持ちのファイルの控え', () => {
   it('🔴 手放したら、もう読めない', async () => {
     const lid = registerSqlLocalFile(new File(['zzz'], 'z.parquet'));
     expect(await readSqlLocalFileBytes(lid), '前提が崩れている(放す前に読めていない)').not.toBeNull();
-    releaseSqlLocalFile();
+    releaseSqlLocalFile(lid);
     expect(await readSqlLocalFileBytes(lid), '手放したのに読めてしまう').toBeNull();
     expect(sqlLocalFileSize(lid), '手放したのに大きさが答えられてしまう').toBeNull();
+  });
+
+  /**
+   * 🔴 **手放すのは、名指しした 1 つだけ**(#682 段④c)。
+   *
+   * ⚠ 引数を取らずに全部消す形で 1 度書いてしまい、**手持ちのファイルを選び直す道が
+   *   丸ごと死んだ**(`SET_SQL_SOURCE` は「前の相手を閉じる」→「新しい相手を開く」の
+   *   順に出すので、**いま控えたばかりの file が消える**)。
+   * 🔑 だから「**別の lid を手放しても、いま控えている物は残る**」を直に見る。
+   */
+  it('🔴 別の lid を手放しても、いま控えている file は残る', async () => {
+    const old = registerSqlLocalFile(new File(['old'], 'old.csv'));
+    const now = registerSqlLocalFile(new File(['now'], 'now.parquet'));
+    releaseSqlLocalFile(old);
+    const got = await readSqlLocalFileBytes(now);
+    expect(got, '前の相手を手放したら、いま選んだ file まで消えた').not.toBeNull();
+    expect(new TextDecoder().decode(got!)).toBe('now');
   });
 
   /**

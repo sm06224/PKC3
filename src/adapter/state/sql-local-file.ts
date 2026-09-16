@@ -99,7 +99,13 @@ export function sqlLocalFileSize(lid: string): number | null {
 /**
  * 控えを捨てる。⚠ **終端はここ 1 か所**(と、選び直したときの `registerSqlLocalFile`)。
  * 🔑 呼ぶのは「相手を選ぶのをやめたとき」= `REQUEST_SQL_GUEST_CLOSE`。
+ *
+ * 🔴 **lid を取る。** ⚠ 引数を取らずに全部消す形にすると、手持ちのファイルを
+ *   選び直した瞬間に**いま控えたばかりの file が消える** ── `SET_SQL_SOURCE` は
+ *   `CLOSE`(前の相手)→ `OPEN`(新しい相手)の順に出すので、
+ *   「全部消す」は**未来の相手まで巻き込む**。
+ * @param lid 手放す控えの lid。⚠ いま控えている物と違えば**何もしない**。
  */
-export function releaseSqlLocalFile(): void {
-  pending.clear();
+export function releaseSqlLocalFile(lid: string): void {
+  pending.delete(lid);
 }

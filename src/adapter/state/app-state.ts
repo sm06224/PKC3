@@ -2610,7 +2610,19 @@ export type DomainEvent =
   | { type: 'REQUEST_SQL_ER'; token: number; guest?: boolean }
   /** 取り込んだ `.sqlite` を開く / 手放す(#681 段③ の 2 つ目)。 */
   | { type: 'REQUEST_SQL_GUEST_OPEN'; lid: string; name: string }
-  | { type: 'REQUEST_SQL_GUEST_CLOSE' }
+  | {
+      type: 'REQUEST_SQL_GUEST_CLOSE';
+      /**
+       * 🔴 **いま手放す相手の lid**(#682 段④c)。
+       *
+       * ⚠ **「いま選んだ相手」ではなく「さっきまで選んでいた相手」**である。
+       * 🔑 これが無いと、手持ちのファイルを選び直したときに
+       *   **いま控えたばかりの file を手放してしまう** ── `SET_SQL_SOURCE` は
+       *   `CLOSE` → `OPEN` の順に出すので、lid を見ない `release` は
+       *   **開く前の控えを消す**(直す前に実際にそうなっていた)。
+       */
+      prev: string;
+    }
   /**
    * 集計を頼む(#184)。⚠ 検索と同じ理由で **SQL 側の仕事** ── 本文は常駐していない。
    * ⚠ **目録と表を 1 回の走査で頼む**(`key` が `null` なら目録だけ)── 別々に
@@ -3965,7 +3977,13 @@ function reduceCore(
       if (state.sqlPage.engine === action.engine) return { state, events: [] };
       return { state: { ...state, sqlPage: { ...state.sqlPage, engine: action.engine } }, events: [] };
     case 'SET_SQL_SOURCE': {
-      const events: DomainEvent[] = [{ type: 'REQUEST_SQL_GUEST_CLOSE' }];
+      /**
+       * ⚠ **手放すのは「さっきまでの相手」** ── `guestChosen` はまだ書き換えていないので、
+       *   ここで読むと前の選択が入っている(#682 段④c)。
+       */
+      const events: DomainEvent[] = [
+        { type: 'REQUEST_SQL_GUEST_CLOSE', prev: state.sqlPage.guestChosen },
+      ];
       if (action.lid !== '') {
         events.push({ type: 'REQUEST_SQL_GUEST_OPEN', lid: action.lid, name: action.name });
       }

@@ -542,8 +542,10 @@ export function connectStoreEffects(
      * 🔴 **手持ちのファイルの控えを手放す口**(#682 段④c)。
      * ⚠ 控えは**読んでも消えない**(`sql-local-file.ts` の節)ので、終端はここ ──
      *   相手を選ぶのをやめたら呼ぶ。
+     * 🔴 **手放す lid を渡す。** 渡さない形にすると、選び直した回に
+     *   **いま控えたばかりの file を消す**(`SET_SQL_SOURCE` は `CLOSE` → `OPEN` の順)。
      */
-    releaseLocalSqlFile?: () => void;
+    releaseLocalSqlFile?: (lid: string) => void;
     /**
      * 🔴 **DuckDB で引く口**(#682 段②)。
      * ⚠ **storage worker を通さない** ── DuckDB は別の使い捨てワーカーで走る
@@ -1018,8 +1020,14 @@ export function connectStoreEffects(
          * ⚠ 控えは**読んでも消えない**形に直した(`sql-local-file.ts`)ので、
          *   ここで放さないと「選ぶのをやめたのに `File` を握ったまま」になる
          *   (不可侵指示 2026-07-27「ライフサイクル終端での即破棄」)。
+         * 🔴 **手放すのは `ev.prev`(さっきまでの相手)だけ**である ──
+         *   ⚠ lid を見ずに全部消す形だと、手持ちのファイルを選び直した瞬間に
+         *   **いま控えたばかりの file が消える**(`SET_SQL_SOURCE` は
+         *   `CLOSE` → `OPEN` の順に出す)。実際その形で 1 度書いてしまい、
+         *   **unit は 1 件も落ちなかった**(この口を `main.ts` からしか
+         *   渡していなかったので、test は経路ごと通っていなかった ── §2)。
          */
-        opts.releaseLocalSqlFile?.();
+        if (isSqlLocalFileLid(ev.prev)) opts.releaseLocalSqlFile?.(ev.prev);
         break;
       }
       /**
