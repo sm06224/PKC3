@@ -8,15 +8,27 @@
  */
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error -- 引く規則は素の .mjs(ビルド対象外の CI script 群)
-import { pickSmoke } from '../scripts/pick-smoke.mjs';
+import { pickSmoke, unmappedShare, UNMAPPED_WARN } from '../scripts/pick-smoke.mjs';
 
 type Map = {
   src?: string[];
   specs?: Record<string, number[]>;
   always?: string[];
 };
-type Result = { mode: 'full' | 'pick'; specs: string[]; why: string };
+type Reason =
+  | 'no-map'
+  | 'empty-map'
+  | 'spec-scaffold'
+  | 'outside-src'
+  | 'css'
+  | 'unmapped-src';
+type Result = { mode: 'full' | 'pick'; specs: string[]; why: string; reason?: Reason };
 const pick = pickSmoke as (changed: readonly string[], map: Map | null) => Result;
+const share = unmappedShare as (
+  allSrc: readonly string[],
+  map: Map | null,
+) => { total: number; unmapped: number; ratio: number };
+const WARN = UNMAPPED_WARN as number;
 
 const MAP: Map = {
   src: ['src/a.ts', 'src/b.ts', 'src/lonely.ts'],
@@ -124,5 +136,83 @@ describe('🔴 フルへ倒れる場合(倒れ損なうのが唯一の本当の�
   /** ⚠ 1 件でも読めない物が混じったら、他が引けてもフルである。 */
   it('引ける物と読めない物が混じったら、混ざった時点でフル', () => {
     expect(pick(['src/a.ts', 'src/new.ts'], MAP).mode).toBe('full');
+  });
+});
+
+/**
+ * 🔴 **腐りを鳴らす計器**(#993。2026-09-16)。
+ *
+ * ## なぜ足したか(実測)
+ *
+ * 表(`smoke-map.json`)は **2026-09-09** に生まれてから **1 度も作り直されていない**
+ * (`git log` が 1 commit / `.github/workflows/` に `smoke-map` の字は一度も無い)。
+ * ⚠ それでも古さの警告は**鳴っていなかった** ── 鳴る条件が **14 日**だったのに、
+ * まだ **7 日目**だったからである。
+ *
+ * 🔴 **その間に、471 件中 93 件(19.7%)が表から漏れていた** ── `src` を触ると
+ * ほぼ必ずフルへ倒れる状態で、「途中は引いて回す」という規律が**道具の側で
+ * 成立していなかった**。
+ *
+ * 🔑 **だから鳴る条件を「日数」から「表に無い割合」へ移した。** 日数は原因ではない
+ * ── 倒れるのは「**表に無い file を触ったとき**」なので、1 日古いだけでも、
+ * その日に足された file を触れば倒れる。
+ */
+describe('表の腐りを数える(#993)', () => {
+  it('🔴 表に無い file の件数と割合を出す', () => {
+    const map: Map = { src: ['src/a.ts', 'src/b.ts'] };
+    expect(share(['src/a.ts', 'src/b.ts', 'src/new.ts', 'src/new2.ts'], map)).toEqual({
+      total: 4,
+      unmapped: 2,
+      ratio: 0.5,
+    });
+  });
+
+  /** ⚠ **空振り防止** ── 全部が表に在るとき 0 を返すこと(常に鳴る計器にしない)。 */
+  it('⚠ 全部が表に在れば 0(対照群)', () => {
+    const map: Map = { src: ['src/a.ts', 'src/b.ts'] };
+    expect(share(['src/a.ts', 'src/b.ts'], map)).toMatchObject({ unmapped: 0, ratio: 0 });
+  });
+
+  it('⚠ 表が無い / 数える物が無いときも壊れない', () => {
+    expect(share(['src/a.ts'], null)).toMatchObject({ total: 1, unmapped: 1, ratio: 1 });
+    expect(share([], { src: ['src/a.ts'] })).toMatchObject({ total: 0, ratio: 0 });
+  });
+
+  /**
+   * 🔑 **しきい値は「鳴らない側」へ倒さない。** 2026-09-16 の実測 19.7% は
+   * **鳴る側**でなければならない ── 鳴らなければ、この計器を足した意味が無い。
+   */
+  it('🔴 実測した 19.7% は、しきい値を超えている', () => {
+    expect(WARN).toBeGreaterThan(0);
+    expect(0.197).toBeGreaterThanOrEqual(WARN);
+    // ⚠ 逆側 ── 数件漏れただけで毎回鳴る計器にはしない(読まれなくなる)
+    expect(0.01).toBeLessThan(WARN);
+  });
+});
+
+/**
+ * 🔴 **理由は字ではなく値で返す**(#993)。
+ *
+ * ⚠ 呼び側が `why.includes('新しい file')` で判定すると、**文言を直した日に
+ * 黙って効かなくなる** ── 落ちないので誰も気づかない(鳴らない検査が 1 つ増える)。
+ * 🔑 だから `reason` を等値で pin する ── 増やしたら、ここに並べないと落ちる。
+ */
+describe('フルへ倒れた理由が、機械で読める(#993)', () => {
+  it.each<[string, Map | null, Reason]>([
+    ['src/new.ts', MAP, 'unmapped-src'],
+    ['src/styles/app.css', MAP, 'css'],
+    ['tests/smoke/helpers.ts', MAP, 'spec-scaffold'],
+    ['docs/manual.md', MAP, 'outside-src'],
+    ['src/a.ts', null, 'no-map'],
+    ['src/a.ts', { src: [], specs: {} }, 'empty-map'],
+  ])('%s → reason=%s', (path, map, reason) => {
+    const r = pick([path], map);
+    expect(r.mode).toBe('full');
+    expect(r.reason).toBe(reason);
+  });
+
+  /** ⚠ 引けた回には理由が付かない(付いていたら、倒れた回と見分けが付かない)。 */
+  it('⚠ 引けたときは reason を持たない(対照群)', () => {
+    expect(pick(['src/b.ts'], MAP).reason).toBeUndefined();
   });
 });

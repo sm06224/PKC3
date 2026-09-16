@@ -922,7 +922,20 @@ describe('PR gate の形(2026-08-18 / 2026-09-09)', () => {
     let seen = 0;
     for (const file of readdirSync(DIR).filter((f) => /\.ya?ml$/.test(f))) {
       const text = codeOnly(readFileSync(join(DIR, file), 'utf8'));
-      if (!text.includes('test:smoke')) continue;
+      /**
+       * 🔴 **全量を回す口は、名前が 1 つではない**(2026-09-16、#993 で足した)。
+       *
+       * ⚠ 直す前の検出は `test:smoke` の字だけを見ていた ── ところが
+       *   `npm run smoke:record`(表を作り直すために **全 spec を 1 本ずつ**回す)は
+       *   `npx playwright test` を直に叩くので、**その字を 1 つも持たない**。
+       * 🔴 つまり「全量を回す workflow」を新しく足しても、**この門は数えなかった**。
+       * 🔑 禁止の目的は「**押していないのに全量が走らないこと**」なので、
+       *   見るのは**字ではなく「全量が走るか」**である ── だから口を数え上げる。
+       * ⚠ これは同じ file の 2026-09-11 の失敗(目的ではなく対象で書いたので、
+       *   3 つ目の引き金を自分で例外にした)の**繰り返しになりかけた**所である。
+       */
+      const runsEverything = ['test:smoke', 'smoke:record'].some((w) => text.includes(w));
+      if (!runsEverything) continue;
       seen += 1;
       const head = text.slice(text.indexOf('\non:'), text.indexOf('\njobs:'));
       expect(head, `${file}: on: の塊が読めていない`).toContain('workflow_dispatch');
@@ -932,7 +945,9 @@ describe('PR gate の形(2026-08-18 / 2026-09-09)', () => {
     }
     // ⚠ 空振り防止は**等値**にする ── 「1 件以上」だと、全量を回す口が
     //   1 つ増えても気づけない(増やすなら、ここを直しながら考えること)
-    expect(seen, '全量を回す workflow の数が変わった(いまは smoke.yml だけ)').toBe(1);
+    // 🔑 いまの 2 つ:`smoke.yml`(全量を回す)/ `smoke-map.yml`(表を作り直すために
+    //   全 spec を 1 本ずつ回す。#993)── どちらも `workflow_dispatch` だけである
+    expect(seen, '全量を回す workflow の数が変わった(いまは smoke.yml と smoke-map.yml)').toBe(2);
   });
 
   /**

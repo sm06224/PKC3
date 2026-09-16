@@ -1,0 +1,88 @@
+# PKC3 ── smoke を「引く」ための表を作り直す 🔴 **押したときだけ**(#993)
+#
+# ## なぜ要るか(実測 2026-09-16)
+#
+# 表(`tests/smoke/smoke-map.json`)は **2026-09-09 に生まれてから一度も作り直されて
+# いなかった** ── `.github/workflows/` に `smoke-map` の字は **一度も在ったことがない**
+# (`git log -S 'smoke-map' -- .github/workflows/` が 0 行)。
+# ⚠ その 7 日で `src` の `.ts` **471 件のうち 93 件(19.7%)** が表から漏れ、
+# `src` を触ると `pick-smoke` がほぼ必ずフルへ倒れていた ── つまり
+# **「途中は引いて回す」という規律が、道具の側で成立していなかった**。
+#
+# 🔑 **計器は `scripts/pick-smoke.mjs` が持っている**(表に無い割合を毎回言う)。
+#   ここは**その計器が鳴ったときに押す口**である ── 見つける側と直す側を対にする。
+#
+# ## ⚠ `smoke.yml` に被覆を足す形にしなかった理由(実測)
+#
+# 記録の口は `tests/smoke/helpers.ts` の module 直下に在り、playwright の hook は
+# **その worker が最初に読んだ spec** にしか掛からない(2 本目以降は module cache から
+# 返るので本体が走らない)。🔴 **だから普通に並列で回すと、表が黙って歯抜けになる。**
+# 実測(3 spec / `workers: 2`):**1 本が記録 0 件**。過去の実測(`smoke-record.mjs` の
+# docstring)では `--workers=4` の全量で **95 test 走って記録 11 件**。
+# ⚠ 落ちないので気づけない ── 出来る表が小さくなるだけで、**引かなすぎの側へ効く**。
+#
+# 🔑 だから `npm run smoke:record`(**1 worker = 1 spec**、取れなかった spec は単独で
+#   回し直す)を使う。⚠ 並列が効かないので **`smoke.yml` より遅い** ── 別の job にする。
+#
+# ## ⚠ この job の所要は **まだ測っていない**
+#
+# `timeout-minutes` は「速度予算の tripwire」ではなく、**まず 1 回通すための上限**である。
+# 🔑 未確認の値を後条件に固めない(CLAUDE.md「未確認は assert ではなく診断で出す」)──
+#   下の step が所要を印字するので、**1 回押して読んでから**この数字を締める。
+#
+# ⚠ **`on:` に `push` / `pull_request` / `schedule` を足さない。**
+#   これは全量 smoke を回す口なので、足した瞬間に user 指示(2026-09-09 / 09-11)が破れる。
+#   `tests/workflow-steps.test.ts` が全数走査で止める。
+#
+# 🔴 **出来た表を CI から commit させない。** 成果物(artifact)に出して、押した人が
+#   中身を見てから当てる ── 表は「引く / 引かない」を決める物なので、
+#   **誰も見ていない差分が入る形にしない**。
+name: 表を作り直す (手動)
+on:
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: '何を焼いて記録するか(表は束の中身から組むので、dev と product で別物になる)'
+        required: false
+        default: dev
+        type: choice
+        options: [dev, product]
+permissions:
+  contents: read
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    # ⚠ 未測定のため広く取ってある(上のコメント)。1 回押して所要を読んでから締める。
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # ⚠ 表は **束の sourcemap** から `src` の一覧を採るので、build が要る
+      #   (`scripts/smoke-map.mjs` の `bundledSources`)。⚠ kind を明示する ──
+      #   既定が変わると「記録した物」と「配る物」が静かに別物になる。
+      - run: VITE_PKC_KIND=${{ inputs.kind || 'dev' }} npm run build
+      - run: npx playwright install chromium --with-deps
+      # 🔴 **1 worker = 1 spec で記録する**(上の理由)。所要を印字する ──
+      #   ⚠ `time` の出力は stderr なので、読める形で残す。
+      - name: 記録を取る(1 worker = 1 spec)
+        run: |
+          S=$(date +%s)
+          npm run smoke:record
+          echo "smoke:record の所要 = $(( $(date +%s) - S )) 秒"
+      - name: 表を束ねる
+        run: |
+          S=$(date +%s)
+          npm run smoke:map
+          echo "smoke:map の所要 = $(( $(date +%s) - S )) 秒"
+      # 🔑 出来た表は**成果物として出すだけ** ── 当てるのは人である。
+      #   ⚠ `if-no-files-found: error` ── 黙って空の成果物を出さない
+      #   (「出来た」と「出来た気」を分ける)。
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smoke-map-${{ inputs.kind || 'dev' }}
+          path: tests/smoke/smoke-map.json
+          if-no-files-found: error
