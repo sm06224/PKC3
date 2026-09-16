@@ -92,12 +92,18 @@ export const DUCKDB_REQUIRED_FILES: readonly string[] = [
  *   下限はどれもその半分弱 ── 事故の桁(空 / 切れた)だけを止める。
  * ⚠ **上限は置かない** ── 配る量は判断理由にしない(不可侵指示 2026-08-03)。
  */
+const EXT_FLOOR: Readonly<Record<DuckDbExtensionName, number>> = {
+  json: 400_000,
+  parquet: 1_500_000,
+  sqlite_scanner: 800_000,
+};
+
 const FLOOR: Readonly<Record<string, number>> = {
   [DUCKDB_WASM]: 16_000_000,
   [DUCKDB_WORKER]: 300_000,
-  [duckDbExtensionPath('json')]: 400_000,
-  [duckDbExtensionPath('parquet')]: 1_500_000,
-  [duckDbExtensionPath('sqlite_scanner')]: 800_000,
+  ...Object.fromEntries(
+    DUCKDB_EXTENSIONS.map((name) => [duckDbExtensionPath(name), EXT_FLOOR[name]]),
+  ),
 };
 
 function isFile(v: unknown): v is DuckDbPackFile {
@@ -135,14 +141,14 @@ export function readDuckDbPack(text: string): PackRead {
       return { ok: false, why: `DuckDB の一式に ${want} がありません(取り直してください)` };
     }
     /**
-     * ⚠ **下限が引けない名前を「通してよい」に倒さない** ── `FLOOR` へ足し忘れた
-     *   file は、0 バイトでも通ってしまう(門を 1 つ撤廃したのと同じ)。
+     * 🔑 **下限を引けない名前は在りえない** ── `DUCKDB_REQUIRED_FILES` も `FLOOR` も
+     *   同じ `DUCKDB_EXTENSIONS` から組むので、**足し忘れる形が構造から消えている**
+     *   (`EXT_FLOOR` は `Record<DuckDbExtensionName, number>` なので、名前を 1 つ
+     *   足したら tsc が下限を要求する)。
+     * ⚠ だから「引けなかったとき」の枝は書かない ── 書いても**誰も通らない死んだ枝**に
+     *   なり、鳴らない検査が 1 つ増えるだけである(CLAUDE.md §7)。
      */
-    const floor = FLOOR[want];
-    if (floor === undefined) {
-      return { ok: false, why: `DuckDB の ${want} の下限が決まっていません(不具合です)` };
-    }
-    if (got.bytes < floor) {
+    if (got.bytes < (FLOOR[want] ?? 0)) {
       // ⚠ 数字を出す ── 「壊れています」だけだと、こちらも後から原因を絞れない
       return { ok: false, why: `DuckDB の ${want} が小さすぎます(${got.bytes} byte。取り直してください)` };
     }
