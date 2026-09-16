@@ -92,6 +92,29 @@ git switch -                                                  # 指定 branch �
 戻るので、そこで書き換えると**他人の作業を壊す**。手順は
 `.claude/skills/subagent-scale/SKILL.md` §1。
 
+## 🔴 probe は **repo の外を cwd にして**走らせる(2026-09-16)
+
+`cd /home/user/PKC3 && node probe.mjs` で DuckDB の probe を回したら、
+その中の **`COPY (…) TO 'out.csv'`** が **repo の中に本物の file を書いた**
+(`out.csv` / `tmp_out.csv` が untracked で残り、stop hook が拾って初めて気づいた)。
+
+⚠ **「器の中の file」だと思っていた物が、実 FS に落ちる**のが罠である ──
+wasm の VFS は runtime によって実 FS へ写る(node では写る)。
+⚠ 同じ形は sqlite(`ATTACH 'x.db'`)・Office(書き出し)・playwright(screenshot /
+trace / video)にも在る ── **相対 path を渡す probe は全部これ**である。
+
+🔑 **手順は 1 つ:probe は scratchpad を cwd にして打つ。**
+
+```bash
+cd "$SCRATCH/ddb" && timeout -k 5 100 node probe.mjs > probe.log 2>&1; echo "exit=$?"
+```
+
+⚠ 🔑 **repo の絶対 path で import するのは構わない**
+(`import x from '/home/user/PKC3/node_modules/…'`)── 危ないのは**書き出しの相対 path**で、
+それを決めるのは **cwd** である。
+
+⚠ `.gitignore` に足して隠さない ── 症状が見えなくなるだけで、**次は別の名前で落ちる**。
+
 ## ⚠ 失わないための置き場の選び方
 
 | 置く物 | どこへ | なぜ |
