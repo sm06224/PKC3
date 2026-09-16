@@ -117,6 +117,7 @@ import { showNotices, clearNotices } from '@adapter/ui/render/notices';
 import { createImportUndo, importPanel } from '@adapter/ui/actions/import-undo';
 import { createUpdatePrompt } from '@adapter/ui/render/update-card';
 import { createAnnounce, announceServices } from '@adapter/ui/render/announce';
+import { quotaBootNotice } from '@features/storage/quota-watch';
 import { versionText, MANUAL_TEXT } from '@adapter/ui/render/help';
 import { manualSections } from '@features/help/manual-find';
 import { MANUAL_PAGE_FILE, manualBuildTag } from '@features/help/manual-page';
@@ -2110,6 +2111,27 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   const announce = createAnnounce(regions.announce, appNoticeStore, NOTICES);
 
+  /**
+   * 🔴 **空きが尽きる前に、起動のときに 1 度だけ言う**(#971 段②)。
+   *
+   * ⚠ 直す前は、空きを見るのは**添付を置く瞬間の拒否**だけだった ── つまり
+   *   「もう置けません」で初めて知る形で、**減らす時間が残っていない**。
+   * ⚠ **危ない段のときだけ言う**(`quotaBootNotice` が空を返したら黙る)──
+   *   毎回何か言うと、本当に危ない日の 1 行が同じ顔に埋もれる。
+   * ⚠ 読めない端末では黙る(0 と決めつけない)。
+   */
+  if (navigator.storage?.estimate) {
+    void navigator.storage
+      .estimate()
+      .then((est) => {
+        const line = quotaBootNotice(est);
+        if (line !== '') showStatus(line);
+      })
+      .catch(() => {
+        /* 読めないだけ ── 何も言わない(嘘の安心も、嘘の警告も出さない) */
+      });
+  }
+
   /** 更新の案内(P7 段⑤)。面と「押されたら何をするか」は render 側が持つ。 */
   const updatePrompt = createUpdatePrompt(regions.update, {
     // ⚠ 再読込は open editor の下書きを捨てる(本文は AppState にしか無い)。
@@ -2369,6 +2391,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * ⚠ 数 GB では分の単位になるので、**待たせている間の字は呼び側が出す**。
      */
     checkIntegrity: async () => client.request({ op: 'checkIntegrity' }),
+    /**
+     * 🔴 **ブラウザが言う使用量**(#971 段②)。
+     * ⚠ 読めない端末が在る ── そこでは「読めませんでした」と出す(0 と言わない)。
+     */
+    quotaEstimate: async () =>
+      navigator.storage?.estimate ? await navigator.storage.estimate() : {},
     /**
      * 🔴 **壊れていても読める分だけ拾う**(#971 段③)。
      * ⚠ 1 回で全部返さない ── 数 GB を 1 つの応答に載せると heap に載り切らない。

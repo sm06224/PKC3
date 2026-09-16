@@ -223,6 +223,7 @@ import {
   rescueSummary,
 } from '@features/storage/db-rescue';
 import { elapsedText } from '@features/elapsed-text';
+import { quotaText } from '@features/storage/quota-watch';
 import type {
   IntegrityCheckResult,
   RescuePage,
@@ -867,6 +868,11 @@ export interface BinderServices {
    * ⚠ 無い配線では**押しても何も起きない**ので、器は「調べています…」で止めない。
    */
   storageProfile?(): Promise<StorageProfileResult>;
+  /**
+   * 🔴 **ブラウザが言う使用量**(#971 段②)── 空きが尽きる前に言うための材料。
+   * ⚠ 読めない端末が在るので optional(読めなければ「読めなかった」と出す)。
+   */
+  quotaEstimate?(): Promise<{ usage?: number; quota?: number }>;
   /**
    * 🔴 **中身が壊れていないかを調べる**(#971 段③)。
    * ⚠ 数 GB では**分の単位**で返らない ── 押した側は待っている字を出し続ける。
@@ -6888,6 +6894,26 @@ const ACTIONS: Record<string, ActionHandler> = {
     const sum = root.querySelector<HTMLElement>('[data-pkc-field="storage-profile-summary"]');
     const shared = root.querySelector<HTMLElement>('[data-pkc-field="storage-profile-shared"]');
     if (list === null || sum === null || shared === null) return;
+    /**
+     * 🔴 **ブラウザが言う本当の数も一緒に出す**(#971 段②)。
+     * ⚠ この面が数えるのは**添付の合計だけ**なので、これを出さないと
+     *   user は**本当の残りを知る道が無い**。
+     * ⚠ 添付の集計と**別に**出す ── 足し合わせると「一致しない 2 つの量」が
+     *   1 つの数に見える(#454 と同じ型)。
+     */
+    const quotaEl = root.querySelector<HTMLElement>('[data-pkc-field="storage-quota"]');
+    if (quotaEl !== null && services.quotaEstimate !== undefined) {
+      void services.quotaEstimate().then(
+        (est) => {
+          quotaEl.textContent = quotaText(est);
+          quotaEl.hidden = false;
+        },
+        () => {
+          quotaEl.textContent = quotaText({});
+          quotaEl.hidden = false;
+        },
+      );
+    }
     if (services.storageProfile === undefined) {
       dispatcher.dispatch({ type: 'OP_FAILED', error: 'この環境では容量を数えられません' });
       return;

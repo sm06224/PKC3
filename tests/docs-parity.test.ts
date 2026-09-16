@@ -2325,6 +2325,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-16(#971 段② ── 容量の見張り)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-14-xlsx-sql" …` で引ける
+     */
+    '取り込んだ Excel の file(.xlsx)を、SQL で調べられるようになりました',
+    /**
      * ⚠ **2026-09-16(#971 段③ ── 調べる / 拾えるだけ取り出す)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-14-repeat-move" …` で引ける
      */
