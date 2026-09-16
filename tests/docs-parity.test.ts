@@ -2325,6 +2325,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-16(#971 段④ ── 4GB を超える書庫)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-14-place-shape" …` → aacb256a
+     */
+    '付箋の形を、丸やひし形に変えられるようになりました',
+    /**
      * ⚠ **2026-09-16(#971 段② ── 書き込む前に空きを見る)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-14-sql-stay" …` → ca54f469
      */

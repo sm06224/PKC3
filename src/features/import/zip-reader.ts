@@ -25,9 +25,13 @@
  * 一緒に落として「他人の entry の中身が返る」経路を開けていた(review M-5)。
  *
  * ## 断る条件(すべて可視・黙って落とさない)
- * ZIP64 / method が 0・8 以外 / 暗号化 / 分割書庫 / CD 署名不正 / EOCD なし /
+ * method が 0・8 以外 / 暗号化 / 分割書庫 / CD 署名不正 / EOCD なし /
  * CRC 不一致 / サイズ不一致 / 名前が妥当な UTF-8 でない / 目次と件数の不整合。
  * **skip して欠落させる選択はしない**。
+ *
+ * ⚠ **ZIP64 は 2026-09-16(#971 段④)から読める。** それまでは名指しで断っており、
+ * **4GB を超えた書庫は書き出せず、取り込み直せもしなかった** ── user の DB が
+ * 4GB を超えたとき、持ち出す道がそれで塞がった。
  *
  * ## この層がやらないこと
  * - **名前の無害化**(`..` / 絶対パス / null バイト)── 呼び出し側の責務。
@@ -60,14 +64,20 @@ export interface ZipEntry {
   isDirectory: boolean;
 }
 
+import { readU64 } from '../export/zip-int';
+
 const EOCD_SIG = 0x06054b50;
 const CD_SIG = 0x02014b50;
 const LOCAL_SIG = 0x04034b50;
 const ZIP64_EOCD_SIG = 0x06064b50;
 const ZIP64_LOCATOR_SIG = 0x07064b50;
+/** ZIP64 の追加情報(extra field)の id。 */
+const ZIP64_EXTRA_ID = 0x0001;
 
 /** EOCD は可変長コメント(最大 65535)を持つので、末尾からこの幅を後方走査する。 */
 const EOCD_MAX_SCAN = 65557;
+/** ZIP64 の終端 record(拡張欄を持たない標準の形)の長さ。位置札 20 バイトは別。 */
+const ZIP64_EOCD_FIXED = 56;
 
 /** ZIP64 の印(32bit に収まらない値のプレースホルダ)。 */
 const U32_MAX = 0xffffffff;
@@ -91,6 +101,20 @@ export function crc32Update(state: number, bytes: Uint8Array): number {
 
 export function crc32(bytes: Uint8Array): number {
   return (crc32Update(0xffffffff, bytes) ^ 0xffffffff) >>> 0;
+}
+
+/**
+ * 8 バイトの長さを読む(ZIP64)。綴りは `zip-int.ts` の 1 本だけ。
+ *
+ * ⚠ ここで包み直すのは**例外の型を揃えるため**である ── この層が投げるのは
+ *   `ZipReadError` だけ、と冒頭で約束している(呼び側はその字をそのまま画面に出す)。
+ */
+function u64At(view: DataView, at: number): number {
+  try {
+    return readU64(view, at);
+  } catch (e) {
+    throw new ZipReadError(e instanceof Error ? e.message : String(e));
+  }
 }
 
 /**
@@ -119,37 +143,71 @@ export async function readZipDirectory(zip: Blob): Promise<ZipEntry[]> {
   if (eocd < 0) {
     throw new ZipReadError('ZIP の終端(EOCD)が見つかりません ── 壊れているか ZIP ではありません');
   }
-  // ZIP64 は locator が EOCD の直前に置かれる。**実装せずに名指しで断る**
-  if (eocd >= 20 && tail.getUint32(eocd - 20, true) === ZIP64_LOCATOR_SIG) {
-    throw new ZipReadError('ZIP64 形式には対応していません(4GB 超 / 65535 件超)');
-  }
   // 分割書庫(マルチディスク)── 2 枚目以降は原理的に読めないので、
   // 「読めた気になって欠落する」前に断る
   if (tail.getUint16(eocd + 4, true) !== 0 || tail.getUint16(eocd + 6, true) !== 0) {
     throw new ZipReadError('分割された ZIP(マルチディスク)には対応していません');
   }
 
-  const count = tail.getUint16(eocd + 10, true);
-  const cdSize = tail.getUint32(eocd + 12, true);
-  const cdOffset = tail.getUint32(eocd + 16, true);
-  if (count === 0xffff || cdSize === U32_MAX || cdOffset === U32_MAX) {
-    throw new ZipReadError('ZIP64 形式には対応していません(4GB 超 / 65535 件超)');
+  let count = tail.getUint16(eocd + 10, true);
+  let cdSize = tail.getUint32(eocd + 12, true);
+  let cdOffset = tail.getUint32(eocd + 16, true);
+  const eocdAbs = tailStart + eocd;
+
+  /**
+   * 🔴 **ZIP の前にバイトが付いていることがある**(自己解凍書庫など)。
+   * 中央ディレクトリの位置は **ZIP 部分の先頭からの相対値**なので、前置量を逆算する
+   * (review M-7: 足さないと「壊れています」という**嘘の診断**になる)。
+   */
+  let prefix = eocdAbs - cdSize - cdOffset;
+
+  /**
+   * 🔴 **ZIP64**(#971 段④。2026-09-16 まで、ここは名指しで断っていた)。
+   *
+   * ⚠ 断っていたせいで、**4GB を超えた書庫は取り込み直せなかった** ──
+   *   書き出せるようにするだけでは片道になるので、読む側も同じ日に開ける。
+   * 🔑 **位置札(locator)は終端のすぐ前**に在り、そこから ZIP64 の終端を引く。
+   */
+  if (eocd >= 20 && tail.getUint32(eocd - 20, true) === ZIP64_LOCATOR_SIG) {
+    const relative = u64At(tail, eocd - 20 + 8);
+    const locatorAbs = eocdAbs - 20;
+    /**
+     * ⚠ 前置量が分からないと ZIP64 終端の**実位置**が出ないが、実位置が分からないと
+     *   前置量も出ない ── だから **2 通り当てて、署名が合ったほう**を採る:
+     *   ①前置なし(相対値がそのまま実位置)②位置札の直前に在る(標準の 56 バイト)。
+     * ⚠ どちらも合わなければ**読めたことにしない**(黙って ZIP32 の欄へ落ちない)。
+     */
+    let zip64Abs = -1;
+    for (const cand of [relative, locatorAbs - ZIP64_EOCD_FIXED]) {
+      if (cand < 0 || cand + ZIP64_EOCD_FIXED > zip.size) continue;
+      const buf = await zip.slice(cand, cand + ZIP64_EOCD_FIXED).arrayBuffer();
+      if (new DataView(buf).getUint32(0, true) === ZIP64_EOCD_SIG) {
+        zip64Abs = cand;
+        break;
+      }
+    }
+    if (zip64Abs < 0) {
+      throw new ZipReadError('ZIP64 の終端が見つかりません(壊れているか、分割された ZIP です)');
+    }
+    const z = new DataView(await zip.slice(zip64Abs, zip64Abs + ZIP64_EOCD_FIXED).arrayBuffer());
+    if (z.getUint32(16, true) !== 0 || z.getUint32(20, true) !== 0) {
+      throw new ZipReadError('分割された ZIP(マルチディスク)には対応していません');
+    }
+    count = u64At(z, 32);
+    cdSize = u64At(z, 40);
+    cdOffset = u64At(z, 48);
+    prefix = zip64Abs - cdSize - cdOffset;
+  } else if (count === 0xffff || cdSize === U32_MAX || cdOffset === U32_MAX) {
+    // ⚠ 印は立っているのに位置札が無い ── 読めたことにしない
+    throw new ZipReadError('ZIP64 の位置札が見つかりません(壊れています)');
   }
 
-  // ZIP の**前にバイトが付いている**ことがある(自己解凍書庫など)。CD の offset は
-  // ZIP 部分の先頭からの相対値なので、EOCD の実位置から前置量を逆算する
-  // (review M-7: 足さないと「壊れています」という**嘘の診断**になる)
-  const eocdAbs = tailStart + eocd;
-  const prefix = eocdAbs - cdSize - cdOffset;
   if (prefix < 0 || cdOffset + cdSize + prefix > zip.size) {
     throw new ZipReadError('ZIP の中央ディレクトリが範囲外を指しています(壊れています)');
   }
 
   const cdStart = cdOffset + prefix;
   const cdBuf = await zip.slice(cdStart, cdStart + cdSize).arrayBuffer();
-  if (cdBuf.byteLength >= 4 && new DataView(cdBuf).getUint32(0, true) === ZIP64_EOCD_SIG) {
-    throw new ZipReadError('ZIP64 形式には対応していません');
-  }
   const cd = new DataView(cdBuf);
   const raw = new Uint8Array(cdBuf);
   const utf8 = new TextDecoder('utf-8', { fatal: true });
@@ -166,13 +224,13 @@ export async function readZipDirectory(zip: Blob): Promise<ZipEntry[]> {
     const flags = cd.getUint16(pos + 8, true);
     const method = cd.getUint16(pos + 10, true);
     const crc = cd.getUint32(pos + 16, true);
-    const compressedSize = cd.getUint32(pos + 20, true);
-    const uncompressedSize = cd.getUint32(pos + 24, true);
+    let compressedSize = cd.getUint32(pos + 20, true);
+    let uncompressedSize = cd.getUint32(pos + 24, true);
     const nameLen = cd.getUint16(pos + 28, true);
     const extraLen = cd.getUint16(pos + 30, true);
     const commentLen = cd.getUint16(pos + 32, true);
     const externalAttrs = cd.getUint32(pos + 38, true);
-    const localHeaderOffset = cd.getUint32(pos + 42, true);
+    let localHeaderOffset = cd.getUint32(pos + 42, true);
     // ⚠ 可変長ぶんまで含めて境界を見る(review H-4)── `subarray` は範囲外を
     // **黙って clamp** するので、CD が名前の途中で切れていると名前が静かに縮む
     // (最後の 1 件は次の CD 署名検査にも掛からないので素通りする)
@@ -181,8 +239,53 @@ export async function readZipDirectory(zip: Blob): Promise<ZipEntry[]> {
     }
 
     if (flags & 0x1) throw new ZipReadError('暗号化された ZIP には対応していません');
-    if (compressedSize === U32_MAX || uncompressedSize === U32_MAX || localHeaderOffset === U32_MAX) {
-      throw new ZipReadError('ZIP64 形式には対応していません(4GB 超のファイル)');
+
+    /**
+     * 🔴 **`0xffffffff` は「追加情報の側を見ろ」という印である**(ZIP64、#971 段④)。
+     *
+     * ⚠ **並び順が決まっている** ── 大きさ → 圧縮後 → 位置 → ディスク の順に、
+     *   **印が立っている物だけ**が 8 バイトで並ぶ。前の物を飛ばして後ろだけ読むと
+     *   **別の値を長さとして読む**(静かにずれる)。
+     * ⚠ 2026-09-16 まで、ここは**名指しで断っていた** ── 4GB を超えた書庫は
+     *   書き出せず、取り込み直せもしなかった。
+     */
+    const wantSize = compressedSize === U32_MAX || uncompressedSize === U32_MAX;
+    const wantOffset = localHeaderOffset === U32_MAX;
+    if (wantSize || wantOffset) {
+      const ex = new DataView(cdBuf, pos + 46 + nameLen, extraLen);
+      let ep = 0;
+      let found = false;
+      while (ep + 4 <= extraLen) {
+        const id = ex.getUint16(ep, true);
+        const len = ex.getUint16(ep + 2, true);
+        if (ep + 4 + len > extraLen) {
+          throw new ZipReadError('ZIP の追加情報が途中で切れています(壊れています)');
+        }
+        if (id === ZIP64_EXTRA_ID) {
+          let fp = ep + 4;
+          const take = (): number => {
+            if (fp + 8 > ep + 4 + len) {
+              throw new ZipReadError('ZIP64 の追加情報に必要な長さが入っていません');
+            }
+            const v = u64At(ex, fp);
+            fp += 8;
+            return v;
+          };
+          // ⚠ 大きさは 2 つで 1 組(store でも別々に書かれる)
+          if (wantSize) {
+            uncompressedSize = take();
+            compressedSize = take();
+          }
+          if (wantOffset) localHeaderOffset = take();
+          found = true;
+          break;
+        }
+        ep += 4 + len;
+      }
+      // ⚠ 印が立っているのに追加情報が無い ── **読めたことにしない**
+      if (!found) {
+        throw new ZipReadError('ZIP64 の追加情報が見つかりません(壊れています)');
+      }
     }
 
     // 🔑 bit 11 は**見ない**。妥当な UTF-8 かどうかだけで決める(冒頭の解説参照)

@@ -39,6 +39,10 @@ import {
   shouldRecheck,
   type QuotaSample,
 } from '@features/storage/write-quota';
+import {
+  imageTooBigMessage,
+  looksOutOfMemory,
+} from '@features/storage/image-export-limit';
 import { assetRefsIn, scanAssetRefsInto } from '@features/asset/asset-ref-scan';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import { extractMeta } from '@features/flavor';
@@ -2023,8 +2027,32 @@ const handlers: Handlers = {
   exportImage: () => {
     const api = sqliteApi;
     if (api === null) throw new Error('sqlite が初期化されていません');
+    const database = need();
+    /**
+     * 🔴 **確保に失敗したときに、何が起きたかを言う**(#971 段④の残り)。
+     *
+     * ⚠ ここは **DB を丸ごと 1 本の配列**にするので、wasm(32bit)では
+     *   数 GB を確保できない ── user の保存領域が 4GB を超えたとき、
+     *   **必ずここで詰まる**。直す前は素の error がそのまま出ていた。
+     * 🔑 **先回りして断らない** ── 確保できる上限は端末で変わるので、
+     *   測っていない数で門を作ると**通ったはずの端末で通らなくなる**。
+     *   試して、失敗したときだけ**代わりの道**(一式の書き出し)へ送る。
+     */
+    let size: number | null = null;
+    try {
+      const pages = database.selectValue('PRAGMA page_count') as number | undefined;
+      const per = database.selectValue('PRAGMA page_size') as number | undefined;
+      if (typeof pages === 'number' && typeof per === 'number') size = pages * per;
+    } catch {
+      // ⚠ 測れなかった = 断る理由にしない(下で `null` として扱う)
+    }
     const exportDb = api.capi.sqlite3_js_db_export as unknown as (p: unknown) => Uint8Array;
-    return { image: exportDb((need() as unknown as { pointer: unknown }).pointer) };
+    try {
+      return { image: exportDb((database as unknown as { pointer: unknown }).pointer) };
+    } catch (e) {
+      if (looksOutOfMemory(e)) throw new Error(imageTooBigMessage(size), { cause: e });
+      throw e;
+    }
   },
   /**
    * 🔴 **user が打った SQL を、読むだけで走らせる**(#681 段②)。
