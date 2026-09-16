@@ -119,6 +119,11 @@ describe('止める op の仕分け(#971)', () => {
     //    何も取り出せなくなる。⚠ `rescueEntries` は読むだけ(`SELECT … NOT INDEXED`)
     'checkIntegrity',
     'rescueEntries',
+    // 🔴 **捨てる口**(#986 段③)── ⚠ **書き込みだが、止めてはいけない**。
+    //    このボタンが要る場面は「壊れている」そのものなので、止めると
+    //    **いちばん要るときにだけ効かない**(救出の 2 つと同じ理由)。
+    //    ⚠ しかも `DELETE` ではなく file ごと捨てるので、壊れていても通る。
+    'wipeStorage',
   ];
 
   it('🔴 protocol の op は 1 つ残らず、止めるか通すかが決まっている', () => {
@@ -143,7 +148,7 @@ describe('止める op の仕分け(#971)', () => {
     expect(ghosts, 'protocol に無い op を止めようとしている').toEqual([]);
   });
 
-  it('🔴 持ち出しに要る 6 つは、止めない', () => {
+  it('🔴 壊れているときに要る 7 つは、止めない', () => {
     // 🔑 これが止まると「データは在るのに取り出せない」になる
     // ⚠ `checkIntegrity` / `rescueEntries` は **壊れているときにしか押されない** ──
     //    ここを止めると、この 2 つは**存在しないのと同じ**になる(#971 段③)
@@ -154,6 +159,8 @@ describe('止める op の仕分け(#971)', () => {
       'exportImage',
       'checkIntegrity',
       'rescueEntries',
+      // ⚠ **捨てる口も同じ** ── 塞ぐと「壊れたまま作り直せない」になる(#986 段③)
+      'wipeStorage',
     ]) {
       expect(CORRUPT_BLOCKED_OPS, `持ち出す道を塞いだ: ${o}`).not.toContain(o);
     }

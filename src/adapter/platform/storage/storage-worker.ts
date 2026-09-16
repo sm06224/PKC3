@@ -122,6 +122,23 @@ let initResult: InitResult | null = null;
 let sqliteApi: { capi: Record<string, unknown>; wasm: Record<string, unknown> } | null = null;
 
 /**
+ * 🔴 **SAHPool の口を持っておく**(#986 段③)── **入れ物ごと捨てる**ために要る。
+ *
+ * ## ⚠ なぜ `DELETE` ではないのか
+ *
+ * このボタンが要る当の場面は「**DB が壊れている**」である。
+ * 🔴 壊れた DB へ SQL を打つと `rc 11` で落ちるので(`db-rescue.ts` の実測表:
+ * `REINDEX` / `DROP+CREATE INDEX` / `VACUUM INTO` が **12 回とも rc 11**)、
+ * **`DELETE FROM …` は「使いたいときだけ使えない」道具**になる。
+ * 🔑 だから **file の層**で捨てる ── `wipeFiles()` は SQL を 1 文も打たない。
+ *
+ * ⚠ `init` の中の局所変数のままにしない(`sqliteApi` と同じ理由)── 後から届かない。
+ * ⚠ `memory` VFS のときは `null` のまま ── その場合は**捨てる物がディスクに無い**
+ *   (読み込み直せば消える)ので、呼び側へそう返す。
+ */
+let sahPool: { wipeFiles(): Promise<void> } | null = null;
+
+/**
  * 🔴 **画像を `:memory:` の DB へ流し込む**(#400 段③)。
  *
  * ⚠ **schema を当てる前に呼ぶこと。** `sqlite3_deserialize` は DB を**丸ごと**
@@ -257,6 +274,8 @@ async function init(
   } else {
     try {
       const poolUtil = await sqlite3.installOpfsSAHPoolVfs({ name: dbName });
+      // 🔑 **捨てる口を持っておく**(上の `sahPool` の注記)── ここでしか手に入らない。
+      sahPool = poolUtil as unknown as { wipeFiles(): Promise<void> };
       opened = new poolUtil.OpfsSAHPoolDb(`/${dbName}.db`);
     } catch (e) {
       vfs = 'memory';
@@ -2106,6 +2125,42 @@ const handlers: Handlers = {
    * ⚠ 画像は**正本ではなく、配る 1 枚の中身**である ── 出したところで
    *   「どちらが正本か」は増えない(器はここに在り続ける)。
    */
+  /**
+   * 🔴 **入れ物ごと捨てる**(#986 段③)。⚠ **取り消せない。**
+   *
+   * ## 順番が肝である
+   *
+   * 1. **DB を閉じる** ── 開いたまま file を捨てると、SAHPool が掴んだままになる。
+   *    ⚠ **閉じるのが失敗しても進む** ── 壊れた DB は閉じる操作すら落ちうるが、
+   *    ここで止めると**壊れているときだけ捨てられない**(= いちばん要る場面で効かない)。
+   * 2. **module の控えを落とす** ── 残すと、この後の op が死んだ口を触る。
+   * 3. **file を捨てる**(`wipeFiles`)── SQL を 1 文も打たない。
+   *
+   * ⚠ この後 worker は**何にも答えられない**。呼び側が読み込み直すのが前提である。
+   */
+  wipeStorage: async () => {
+    const pool = sahPool;
+    if (pool === null) {
+      /**
+       * ⚠ **失敗ではない。** OPFS が使えない端末では DB は `:memory:` に在るので、
+       *   読み込み直せば消える ── 捨てる file がそもそも無い。
+       * 🔑 それを**そのまま言う** ── 「消えました」と嘘をつかない。
+       */
+      return {
+        wiped: false,
+        note: 'この端末では中身がメモリ上にあります(読み込み直すと消えます)',
+      };
+    }
+    try {
+      db?.close();
+    } catch {
+      // ⚠ 壊れた DB は閉じる操作も落ちうる ── 捨てる邪魔をさせない
+    }
+    db = null;
+    initResult = null;
+    await pool.wipeFiles();
+    return { wiped: true, note: null };
+  },
   exportImage: () => {
     const api = sqliteApi;
     if (api === null) throw new Error('sqlite が初期化されていません');
