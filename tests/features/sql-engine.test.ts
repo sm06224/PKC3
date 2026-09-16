@@ -24,6 +24,11 @@ describe('どのエンジンで引くか', () => {
       // 🟢 csv / tsv は両方(bytes をどちらの道でも読むので、写しが増えない)
       ['売上.csv', ['sqlite', 'duckdb']],
       ['ログ.TSV', ['sqlite', 'duckdb']],
+      // 🔴 .parquet / .json は **DuckDB だけ**(内蔵の sqlite は中身を読めない。#682 段④c)
+      ['売上.parquet', ['duckdb']],
+      ['明細.json', ['duckdb']],
+      ['ログ.ndjson', ['duckdb']],
+      ['ログ.jsonl', ['duckdb']],
       // .sqlite / .xlsx は sqlite だけ(DuckDB から読むには外の拡張が要る)
       ['家計.sqlite', ['sqlite']],
       ['家計.db', ['sqlite']],
@@ -37,19 +42,43 @@ describe('どのエンジンで引くか', () => {
   });
 
   it('どの相手でも、選べるエンジンは 1 つ以上ある', () => {
-    for (const name of [null, 'a.csv', 'a.sqlite', 'a.xlsx', 'a.zzz']) {
+    for (const name of [null, 'a.csv', 'a.sqlite', 'a.xlsx', 'a.zzz', 'a.parquet', 'a.json']) {
       expect(enginesForSource(name).length, `相手=${String(name)}`).toBeGreaterThan(0);
     }
   });
 
-  it('既定は sqlite で、どの相手でも必ず選べる', () => {
+  /**
+   * 🔴 **この test は 2026-09-16 に裏返した**(#682 段④c)。
+   *
+   * ⚠ 直す前は「**既定は sqlite で、どの相手でも必ず選べる**」と書いてあり、
+   *   `enginesForSource(name)` が **必ず `sqlite` を含む**ことを pin していた。
+   * 🔴 `.parquet` を受けた日に、それは事実でなくなる ── そして
+   *   **それを正しい仕様として pin していたせいで**、`resolveSqlEngine` が
+   *   「選べないので既定へ落とす」= **選べない値へ落とす**になる片手落ちを、
+   *   検算する足場ごと持っていなかった。
+   * 🔑 いま pin するのは「**落ちた先は必ず、その相手で選べる物**」である ──
+   *   既定かどうかではない。
+   */
+  it('🔴 落とし先は、必ずその相手で選べるエンジンである', () => {
     expect(DEFAULT_SQL_ENGINE).toBe('sqlite');
-    for (const name of [null, 'a.csv', 'a.sqlite', 'a.xlsx']) {
-      expect(enginesForSource(name)).toContain(DEFAULT_SQL_ENGINE);
+    const names = [null, 'a.csv', 'a.tsv', 'a.sqlite', 'a.xlsx', 'a.zzz', 'a.parquet', 'a.json', 'a.ndjson'];
+    for (const name of names) {
+      for (const want of SQL_ENGINES) {
+        const got = resolveSqlEngine(want, name);
+        expect(
+          enginesForSource(name),
+          `相手=${String(name)} / 選んだ=${want}: 画面に出ていない値で引こうとしている`,
+        ).toContain(got);
+      }
     }
+    // ⚠ **空振り防止** ── 「既定が必ず選べる」なら、この test は何も主張していない
+    expect(
+      names.filter((n) => !enginesForSource(n).includes(DEFAULT_SQL_ENGINE)).length,
+      '既定が選べない相手が 1 つも無い(この検査は何も見ていない)',
+    ).toBeGreaterThan(0);
   });
 
-  it('相手を選び直して選べなくなったら、既定へ落ちる', () => {
+  it('相手を選び直して選べなくなったら、選べる物へ落ちる', () => {
     // csv では DuckDB が選べる
     expect(resolveSqlEngine('duckdb', '売上.csv')).toBe('duckdb');
     // 🔴 .sqlite へ選び直したら sqlite へ落ちる(画面に無い値で引かせない)
@@ -57,6 +86,13 @@ describe('どのエンジンで引くか', () => {
     expect(resolveSqlEngine('duckdb', null)).toBe('sqlite');
     // sqlite はどこでもそのまま
     expect(resolveSqlEngine('sqlite', '売上.csv')).toBe('sqlite');
+    /**
+     * 🔴 **既定が選べない相手**(#682 段④c)── ここが直す前は `sqlite` を返していた。
+     * ⚠ 症状は「選び所には DuckDB が出ているのに、走らせるのは sqlite」である。
+     */
+    expect(resolveSqlEngine('sqlite', '売上.parquet')).toBe('duckdb');
+    expect(resolveSqlEngine('sqlite', '明細.json')).toBe('duckdb');
+    expect(resolveSqlEngine('duckdb', '売上.parquet')).toBe('duckdb');
   });
 
   it('画面に出す字が両方にあり、空でない', () => {
@@ -74,15 +110,28 @@ describe('🔴 選べない側に添える「どうすれば使えるか」(#682
    *   変異が生き延びる(user は前の相手の理由を読むことになる)。
    */
   it('相手ごとに、選べない理由の字が決まっている', () => {
+    const DUCK_ONLY = '.csv / .tsv / .parquet / .json のときだけ使えます';
+    const SQLITE_NO = 'この形式は DuckDB でだけ引けます';
     const table: Array<[string | null, string | null, string | null]> = [
       // 相手, sqlite の理由, duckdb の理由 ── `null` = 選べる
-      [null, null, '取り込んだ .csv / .tsv を選ぶと使えます'],
+      [null, null, '取り込んだ .csv / .parquet / .json などを選ぶと使えます'],
       ['売上.csv', null, null],
       ['ログ.TSV', null, null],
-      ['家計.sqlite', null, '.csv / .tsv のときだけ使えます'],
-      ['家計.db', null, '.csv / .tsv のときだけ使えます'],
-      ['表.xlsx', null, '.csv / .tsv のときだけ使えます'],
-      ['memo.txt', null, '.csv / .tsv のときだけ使えます'],
+      /**
+       * 🔴 **sqlite の側にも「選べない相手」が生まれた**(#682 段④c)。
+       * ⚠ 直す前のこの表は **sqlite の列が全部 `null`** で、それを
+       *   「どの相手でも必ず選べる」という**正しい仕様として pin していた** ──
+       *   その形だと `resolveSqlEngine` の片手落ち(既定へ落とすと選べない値になる)を
+       *   検算する足場が無い。
+       */
+      ['売上.parquet', SQLITE_NO, null],
+      ['明細.json', SQLITE_NO, null],
+      ['ログ.ndjson', SQLITE_NO, null],
+      ['ログ.JSONL', SQLITE_NO, null],
+      ['家計.sqlite', null, DUCK_ONLY],
+      ['家計.db', null, DUCK_ONLY],
+      ['表.xlsx', null, DUCK_ONLY],
+      ['memo.txt', null, DUCK_ONLY],
     ];
     for (const [name, wantSqlite, wantDuck] of table) {
       expect(sqlEngineHint('sqlite', name), `sqlite 相手=${String(name)}`).toBe(wantSqlite);
@@ -95,7 +144,10 @@ describe('🔴 選べない側に添える「どうすれば使えるか」(#682
    * ⚠ ここが破れると、**選び所には薄い字で出ているのに引ける**(あるいは逆)になる。
    */
   it('理由が付かないものだけが、選べる一覧に入る', () => {
-    for (const name of [null, '売上.csv', 'ログ.TSV', '家計.sqlite', '表.xlsx', 'memo.txt', 'a.zzz']) {
+    for (const name of [
+      null, '売上.csv', 'ログ.TSV', '家計.sqlite', '表.xlsx', 'memo.txt', 'a.zzz',
+      '売上.parquet', '明細.json', 'ログ.ndjson',
+    ]) {
       const byHint = SQL_ENGINES.filter((e) => sqlEngineHint(e, name) === null);
       expect(enginesForSource(name), `相手=${String(name)}`).toEqual(byHint);
     }

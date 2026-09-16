@@ -542,6 +542,58 @@ npm run build && npm run test:smoke -- <spec>   # → 失敗メッセージを�
 同じ字**になる。差そのものが手掛かりである。
 ⚠ 元の失敗は `cause` で残す(診断で**置き換えない**)。
 
+## 🔴 **per-test の timeout より長い `{ timeout }` は、使い切れない**(2026-09-16、#682 段④c)
+
+`playwright.config.ts` の per-test は **30 秒**である。ところが長い筋書きの中に
+**`{ timeout: 60_000 }` を 2 か所**書いてあった ── 🔴 **その 60 秒には
+原理的に到達しない**(先に test ごと落ちる)。
+
+⚠ 落ち方は「**待ちが足りないように見える**」形になるので、読み手は
+**待ちを伸ばす方向へ直しにいく**(そして直らない)。実際この日も
+「60 秒待って返らなかった」ではなく「**30.2 秒で test 時間切れ**」だった。
+
+🔑 **中の `{ timeout }` を伸ばす前に、その test の持ち時間を見る。**
+足りないなら `test.setTimeout(…)` を**その test の頭に**置く
+(同じ file の別の test が既にそうしている、が探す手がかりになる)。
+
+## 🔴 `setInputFiles` を**続けて撃たない** ── 後の 1 件が黙って消える(2026-09-16、#682 段④c)
+
+添付を 3 件、待たずに続けて渡したら **3 件目だけ添付にならなかった**
+(左の一覧は 2 件、状態の行は 2 件目の名前。**page error は 0 件**)。
+
+⚠ 受け口(`binder.ts`)は `el.files` を読んだ直後に **`el.value = ''`** で空にし、
+その先の `attachFiles` は**非同期**である ── つまり
+**飛んでいる取り込みと次の `setInputFiles` が重なると、片方が落ちる**。
+
+🔑 **1 件ずつ、取り込めたことを観測してから次を渡す**:
+
+```ts
+await page.setInputFiles('[data-pkc-field="attach-input"]', { name: 'a.xlsx', ... });
+await expect(sidebar, 'a.xlsx が添付として取り込まれていない').toContainText('a.xlsx');
+await page.setInputFiles('[data-pkc-field="attach-input"]', { name: 'b.parquet', ... });
+await expect(sidebar, 'b.parquet が添付として取り込まれていない').toContainText('b.parquet');
+```
+
+⚠ **待ちを伸ばして直そうとしない** ── 消えた 1 件は**永久に来ない**ので、
+どれだけ待っても同じである(この日は 25 秒 retry してから落ちた)。
+⚠ 同じ形は **1 つの `<input>` を使い回す口**全部に在る(取り込み・設定の読み込み)。
+
+## 🔴 **自分で字を打つと、画面の案内が嘘でも通る**(2026-09-16、#682 段④c)
+
+`.parquet` を引く筋書きで `page.fill(…, 'SELECT * FROM parquet …')` と**手で打って**
+いたら、**画面の手本が `FROM csv …`(打つと英語で断られる字)のまま**でも緑だった。
+
+🔑 **画面に出ている手本を読んで、それを走らせる**:
+
+```ts
+const example = (await page.locator('[data-pkc-field="sql-example"]').textContent()) ?? '';
+expect(example, '手本がいまの相手の名前で書かれていない').toContain('FROM parquet');
+await page.fill('[data-pkc-field="sql-input"]', example.replace(/^例:\s*/u, ''));
+```
+
+⚠ 一般形:**「画面がこう言っている」と「そのとおりにすると動く」は別の主張**である。
+手で打つ smoke は後者しか見ていない ── **前者が嘘になった日に、誰も鳴らない**。
+
 ## 書くときの約束
 
 - `tests/smoke/helpers.ts` を使う: `gotoApp` / `createEntry` / `clickReal` /

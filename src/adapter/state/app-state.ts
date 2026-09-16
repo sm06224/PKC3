@@ -14,6 +14,28 @@ import { checkDuckDbSql } from '@features/query/duckdb-guard';
 import { DEFAULT_SQL_ENGINE, sqlEngineOf, type SqlEngine } from '@features/query/sql-engine';
 import { schemaModel, type Grid, type SchemaLink, type SchemaModel } from '@features/query/schema-digest';
 import { erSql, type ErAction } from '@features/query/er-sql';
+import { isDuckDbOnlySource, sqlGuestSourceOf } from '@features/query/sql-guest-source';
+
+/**
+ * 🔴 **この相手からは構造を採れない、の理由**(#682 段④c)。
+ *
+ * ⚠ 構造を採る 3 本(`schema-digest.ts`)は**内蔵の sqlite へ**打つ ── ところが
+ *   `.parquet` / `.json` は sqlite worker を 1 度も通らない(中身を読めないので)。
+ *   🔴 そのまま頼むと worker が
+ *   **「取り込んだ .sqlite が開かれていません(先に選んでください)」**と返す ──
+ *   user は `.parquet` を選んだのに `.sqlite` の話をされ、**いまやったばかりの操作を
+ *   もう一度やれと言われる**(動線レビュー 2026-09-16 が実測で出した)。
+ * 🔑 だから**頼まない**。理由はここ 1 か所に持ち、3 つの入口(相手を選んだ / 図を開いた /
+ *   構造をノートへ)が同じ字を出す(§7)。
+ *
+ * @returns `null` = 採れる。文字列 = 採れない理由(画面に出す字)。
+ */
+function schemaUnavailable(guest: { readonly lid: string; readonly name: string } | null): string | null {
+  if (guest === null) return null;
+  return isDuckDbOnlySource(sqlGuestSourceOf(guest.lid, guest.name))
+    ? 'この形式のつながり図は、まだ出せません(DuckDB で引く相手です)'
+    : null;
+}
 import { pickErConnection, type ErPendingFrom } from '@features/query/er-connect';
 import { listViewOptions } from './list-view-options';
 import { resolveCanonicalParents, reorderSibling } from '@features/relation/tree';
@@ -336,13 +358,25 @@ export interface SqlPageState {
  *
  * @param emit いま頼んでよい回か(⚠ 相手を**開き終えた**回だけ真 ── 開く前に頼むと
  *   前の相手へ飛ぶ)。偽なら「採っています」のまま待つ。
+ * @param why 🔴 **採れない相手の理由**(#682 段④c)。渡すと**頼まずに、その字を出す** ──
+ *   ⚠ 「採っています」で止めない/生の断り文も出さない。
+ *   出どころは 1 つ:`.parquet` / `.json` は**内蔵の sqlite が中身を読めない**ので、
+ *   構造を採る `select` 3 本(`schema-digest.ts`)を打つ相手が居ない。
  */
 function erForSource(
   er: SqlPageState['er'],
   source: string,
   guest: boolean,
   emit: boolean,
+  why?: string,
 ): { er: SqlPageState['er']; events: DomainEvent[] } {
+  if (why !== undefined) {
+    // ⚠ 閉じていても `note` は書く(開いた瞬間に理由が読める)
+    return {
+      er: { ...er, loading: false, model: null, note: why, source, mine: [], pendingFrom: null },
+      events: [],
+    };
+  }
   if (er.source === source && er.model !== null) return { er, events: [] };
   // ⚠ 閉じているなら捨てるだけ(開くときに採り直す)
   // 🔑 `mine` / `pendingFrom` も `model` と一緒に捨てる(#918 段⑤d-1)。
@@ -2569,8 +2603,9 @@ export type DomainEvent =
        */
       engine: SqlEngine;
       /**
-       * DuckDB で引くときの相手(csv / tsv の 1 件)。⚠ `engine === 'duckdb'` の
-       * ときだけ在る ── DuckDB は**選んだ相手の bytes 1 つ**しか受け取らない。
+       * DuckDB で引くときの相手(csv / tsv / parquet / json の 1 件。#682 段④c)。
+       * ⚠ `engine === 'duckdb'` のときだけ在る ── DuckDB は**選んだ相手の bytes 1 つ**
+       * しか受け取らない。
        */
       duck?: { lid: string; name: string };
     }
@@ -2597,7 +2632,19 @@ export type DomainEvent =
   | { type: 'REQUEST_SQL_ER'; token: number; guest?: boolean }
   /** 取り込んだ `.sqlite` を開く / 手放す(#681 段③ の 2 つ目)。 */
   | { type: 'REQUEST_SQL_GUEST_OPEN'; lid: string; name: string }
-  | { type: 'REQUEST_SQL_GUEST_CLOSE' }
+  | {
+      type: 'REQUEST_SQL_GUEST_CLOSE';
+      /**
+       * 🔴 **いま手放す相手の lid**(#682 段④c)。
+       *
+       * ⚠ **「いま選んだ相手」ではなく「さっきまで選んでいた相手」**である。
+       * 🔑 これが無いと、手持ちのファイルを選び直したときに
+       *   **いま控えたばかりの file を手放してしまう** ── `SET_SQL_SOURCE` は
+       *   `CLOSE` → `OPEN` の順に出すので、lid を見ない `release` は
+       *   **開く前の控えを消す**(直す前に実際にそうなっていた)。
+       */
+      prev: string;
+    }
   /**
    * 集計を頼む(#184)。⚠ 検索と同じ理由で **SQL 側の仕事** ── 本文は常駐していない。
    * ⚠ **目録と表を 1 回の走査で頼む**(`key` が `null` なら目録だけ)── 別々に
@@ -3632,7 +3679,8 @@ function reduceCore(
             ...(state.sqlPage.guest === null ? {} : { guest: true }),
             /**
              * ⚠ **相手は「いま開いている物」から採る** ── `engine` が `duckdb` に
-             *   なるのは相手が csv / tsv のときだけなので(`enginesForSource`)、
+             *   なるのは**取り込んだ file を選んでいるとき**だけなので
+             *   (`enginesForSource` ── csv / tsv / parquet / json。#682 段④c)、
              *   ここで `guest` が `null` になることは無い。⚠ それでも `?.` で書くのは、
              *   将来 engine の表が変わった日に**落ちるのではなく sqlite へ落ちる**ため。
              */
@@ -3673,6 +3721,15 @@ function reduceCore(
     }
     case 'SQL_SCHEMA_TO_NOTE': {
       if (state.sqlPage.running) return { state, events: [] };
+      /**
+       * 🔴 **採れない相手には頼まない**(#682 段④c)── 頼むと worker が
+       *   `.sqlite` の話で断るので、`.parquet` を選んだ user には意味が通らない。
+       * ⚠ `running` を立てない ── 立てると、答えが来ないまま押せなくなる。
+       */
+      const why = schemaUnavailable(state.sqlPage.guest);
+      if (why !== null) {
+        return { state: { ...state, sqlPage: { ...state.sqlPage, error: why, saved: '' } }, events: [] };
+      }
       return {
         state: { ...state, sqlPage: { ...state.sqlPage, running: true, error: '', saved: '' } },
         events: [
@@ -3704,6 +3761,35 @@ function reduceCore(
       if (p.er.model !== null && p.er.source === source) {
         return {
           state: { ...state, sqlPage: { ...p, er: { ...p.er, open: true, note: '' } } },
+          events: [],
+        };
+      }
+      /**
+       * 🔴 **採れない相手なら、開くけれど頼まない**(#682 段④c)。
+       * ⚠ 直す前はここが `note: ''` で**理由を消してから**頼んでいた ──
+       *   `SQL_GUEST_OPENED` が書いた親切な字は、図が閉じている間は画面に出ないので、
+       *   **物語の順(相手を選ぶ → 図を開く)では 1 度も読めなかった**。
+       * ⚠ 「採っています」のまま止めない(`loading: false`)。
+       */
+      const erWhyOpen = schemaUnavailable(p.guest);
+      if (erWhyOpen !== null) {
+        return {
+          state: {
+            ...state,
+            sqlPage: {
+              ...p,
+              er: {
+                ...p.er,
+                open: true,
+                loading: false,
+                model: null,
+                note: erWhyOpen,
+                source,
+                mine: [],
+                pendingFrom: null,
+              },
+            },
+          },
           events: [],
         };
       }
@@ -3952,7 +4038,13 @@ function reduceCore(
       if (state.sqlPage.engine === action.engine) return { state, events: [] };
       return { state: { ...state, sqlPage: { ...state.sqlPage, engine: action.engine } }, events: [] };
     case 'SET_SQL_SOURCE': {
-      const events: DomainEvent[] = [{ type: 'REQUEST_SQL_GUEST_CLOSE' }];
+      /**
+       * ⚠ **手放すのは「さっきまでの相手」** ── `guestChosen` はまだ書き換えていないので、
+       *   ここで読むと前の選択が入っている(#682 段④c)。
+       */
+      const events: DomainEvent[] = [
+        { type: 'REQUEST_SQL_GUEST_CLOSE', prev: state.sqlPage.guestChosen },
+      ];
       if (action.lid !== '') {
         events.push({ type: 'REQUEST_SQL_GUEST_OPEN', lid: action.lid, name: action.name });
       }
@@ -4001,8 +4093,14 @@ function reduceCore(
      */
     case 'SQL_GUEST_OPENED': {
       if (state.sqlPage.guestPending !== action.lid) return { state, events: [] };
-      // 🔴 開けた相手の構造を採り直す(図を開いているときだけ ── §7 の 1 か所)
-      const er = erForSource(state.sqlPage.er, action.lid, true, true);
+      /**
+       * 🔴 開けた相手の構造を採り直す(図を開いているときだけ ── §7 の 1 か所)。
+       * ⚠ **`.parquet` / `.json` は採れない**(#682 段④c)── 構造を採る 3 本は
+       *   内蔵の sqlite へ打つので、**そこに客の DB が無い**。頼めば生の断り文が
+       *   図の所に出るだけなので、**頼まずに理由を書く**。
+       */
+      const erWhy = schemaUnavailable({ lid: action.lid, name: action.name });
+      const er = erForSource(state.sqlPage.er, action.lid, true, true, erWhy ?? undefined);
       return {
         state: {
           ...state,

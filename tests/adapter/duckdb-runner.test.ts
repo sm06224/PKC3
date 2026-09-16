@@ -23,6 +23,7 @@ import {
   type DuckDbOpenUrls,
   type DuckDbRunnerDeps,
 } from '../../src/adapter/platform/duckdb/duckdb-runner';
+import { guestTableNameOf } from '../../src/features/query/sql-guest-source';
 
 /** 実測の byte 数(2026-09-15 = 器 / 2026-09-16 = 拡張)。floor を満たす。 */
 const REAL_BYTES: Readonly<Record<string, number>> = {
@@ -101,7 +102,10 @@ const NET_EXT = {
   names: ['json', 'parquet', 'sqlite_scanner'],
 };
 
-const SRC = { lid: 'l1', name: '売上.csv' };
+const SRC = { kind: 'csv', lang: 'csv', lid: 'l1', name: '売上.csv' } as const;
+const PARQUET = { kind: 'parquet', lid: 'p1', name: '売上.parquet' } as const;
+const JSON_SRC = { kind: 'json', lang: 'json', lid: 'j1', name: '売上.json' } as const;
+const NDJSON = { kind: 'json', lang: 'ndjson', lid: 'j2', name: 'ログ.ndjson' } as const;
 
 describe('🔴 DuckDB で引く(#682 段②)', () => {
   it('🔑 呼ばれるまで起こさない', () => {
@@ -123,7 +127,7 @@ describe('🔴 DuckDB で引く(#682 段②)', () => {
   });
 
   it('🔴 写すのは TABLE ── VIEW にすると、塞いだ後に引けない', () => {
-    const sql = duckDbLoadSql('source.csv', { lid: 'l1', name: 'めも.csv' });
+    const sql = duckDbLoadSql({ kind: 'csv', lang: 'csv', lid: 'l1', name: 'めも.csv' }, 'source.csv');
     expect(sql).toContain('CREATE OR REPLACE TABLE');
     expect(sql).not.toContain('VIEW');
     // 🔑 表の名前と足す 2 列は sqlite 側と同じ(同じ SQL がどちらでも通る)
@@ -132,18 +136,68 @@ describe('🔴 DuckDB で引く(#682 段②)', () => {
     expect(sql).toContain('read_csv_auto');
   });
 
+  /**
+   * 🔴 **形式ごとに読み手を変える**(#682 段④c)。
+   * ⚠ ここを取り違えると、症状は「**開けるのに、走らせると上流の断り文が出る**」
+   *   という遠い所で出る(選び所は DuckDB を出しているので、user には理由が読めない)。
+   */
+  it('🔴 .parquet / .json は、それぞれの読み手で読む', () => {
+    expect(duckDbLoadSql(PARQUET, 'source.parquet')).toContain("read_parquet('source.parquet')");
+    expect(duckDbLoadSql(JSON_SRC, 'source.json')).toContain("read_json_auto('source.json')");
+    expect(duckDbLoadSql(NDJSON, 'source.ndjson')).toContain("read_json_auto('source.ndjson')");
+  });
+
+  /**
+   * 🔴 **表の名前は、画面が言う名前と同じ**(#682 段④c)。
+   * 🔑 どちらも `guestTableNameOf` **1 つ**から出るので食い違えない ── ここは
+   *   「その 1 つを本当に通っているか」を見る(素の字を書き直したら落ちる)。
+   */
+  it('🔴 器に作る表の名前が、画面に出る名前と同じ', () => {
+    for (const src of [SRC, PARQUET, JSON_SRC, NDJSON] as const) {
+      const want = guestTableNameOf(src);
+      expect(
+        duckDbLoadSql(src, duckDbFileNameOf(src)),
+        `${src.name}: 画面は ${want} と言うのに、器は別の名前で作っている`,
+      ).toContain('CREATE OR REPLACE TABLE ' + want + ' ');
+    }
+    // ⚠ 空振り防止 ── 4 つが同じ名前に潰れていない
+    expect(new Set([SRC, PARQUET, JSON_SRC].map((s) => guestTableNameOf(s))).size).toBe(3);
+  });
+
+  /**
+   * 🔴 **`.parquet` / `.json` には `_note` / `_lid` を足さない**(#682 段④c)。
+   * ⚠ 相手の列名は**書いた人が決めている** ── `SELECT *` に見覚えのない列が
+   *   2 つ増えるのは驚きである(csv は sqlite 側と揃える必要があるので足す)。
+   */
+  it('🔴 .parquet / .json の列は、相手の列だけ(こちらが増やさない)', () => {
+    for (const src of [PARQUET, JSON_SRC, NDJSON] as const) {
+      const sql = duckDbLoadSql(src, duckDbFileNameOf(src));
+      expect(sql, `${src.name}: 相手の列を勝手に増やしている`).not.toContain(' AS _note');
+      expect(sql, `${src.name}: 相手の列を勝手に増やしている`).not.toContain(' AS _lid');
+    }
+    // ⚠ 対照群 ── csv では足している(「どの相手でも足さない」に壊れていない)
+    expect(duckDbLoadSql(SRC, 'source.csv')).toContain(' AS _note');
+  });
+
   it("🔴 題名の ' を必ず逃がす(user の字が SQL へ混ざる唯一の口)", () => {
     expect(sqlQuote("it's")).toBe("'it''s'");
-    const sql = duckDbLoadSql('source.csv', { lid: 'l1', name: "a'); DROP TABLE csv; --" });
+    const sql = duckDbLoadSql(
+      { kind: 'csv', lang: 'csv', lid: 'l1', name: "a'); DROP TABLE csv; --" },
+      'source.csv',
+    );
     // ⚠ 逃がしていなければ、ここに閉じていない引用符が残って 2 文目になる
     expect(sql).toContain("'a''); DROP TABLE csv; --'");
   });
 
   it('器の中の file 名は、題名ではなく決め打ち', () => {
-    expect(duckDbFileNameOf('売上.csv')).toBe('source.csv');
-    expect(duckDbFileNameOf('ログ.TSV')).toBe('source.tsv');
-    // ⚠ 題名がどんな字でも、SQL へ入るのはこの 2 つだけ
-    expect(duckDbFileNameOf("a'b.csv")).toBe('source.csv');
+    expect(duckDbFileNameOf(SRC)).toBe('source.csv');
+    expect(duckDbFileNameOf({ kind: 'csv', lang: 'tsv', lid: 'x', name: 'ログ.TSV' })).toBe('source.tsv');
+    // ⚠ 題名がどんな字でも、SQL へ入るのは決め打ちの字だけ
+    expect(duckDbFileNameOf({ kind: 'csv', lang: 'csv', lid: 'x', name: "a'b.csv" })).toBe('source.csv');
+    expect(duckDbFileNameOf(PARQUET)).toBe('source.parquet');
+    // 🔑 `.json` と `.ndjson` は**別の字**にする ── 上流は拡張子で 1 行 1 件を見分ける
+    expect(duckDbFileNameOf(JSON_SRC)).toBe('source.json');
+    expect(duckDbFileNameOf(NDJSON)).toBe('source.ndjson');
   });
 
   it('🔴 相手を替えたら器ごと作り直す(塞いだ器へは差し込めない)', async () => {
@@ -152,7 +206,7 @@ describe('🔴 DuckDB で引く(#682 段②)', () => {
     await runner.run({ sql: 'SELECT 2', source: SRC, readBytes });
     expect(open, '同じ相手で起こし直している').toHaveBeenCalledTimes(1);
     expect(made[0]?.steps.filter((s) => s === DUCKDB_SEAL_SQL), '同じ相手で 2 回塞いでいる').toHaveLength(1);
-    await runner.run({ sql: 'SELECT 3', source: { lid: 'l2', name: '別.csv' }, readBytes });
+    await runner.run({ sql: 'SELECT 3', source: { kind: 'csv', lang: 'csv', lid: 'l2', name: '別.csv' } as const, readBytes });
     expect(open, '相手が替わったのに器を作り直していない').toHaveBeenCalledTimes(2);
     expect(made[0]?.steps).toContain('terminate');
     expect(made[1]?.steps[2]).toBe(DUCKDB_SEAL_SQL);
@@ -160,8 +214,8 @@ describe('🔴 DuckDB で引く(#682 段②)', () => {
 
   it('🔴 同じ題名の別ノートは、別の相手として扱う', async () => {
     const { runner, open, readBytes } = make();
-    await runner.run({ sql: 'SELECT 1', source: { lid: 'l1', name: '売上.csv' }, readBytes });
-    await runner.run({ sql: 'SELECT 2', source: { lid: 'l2', name: '売上.csv' }, readBytes });
+    await runner.run({ sql: 'SELECT 1', source: SRC, readBytes });
+    await runner.run({ sql: 'SELECT 2', source: { kind: 'csv', lang: 'csv', lid: 'l2', name: '売上.csv' } as const, readBytes });
     expect(open, 'lid が違うのに入れ替えていない').toHaveBeenCalledTimes(2);
   });
 
@@ -310,7 +364,7 @@ describe('🔴 入っていれば端末の一式、無ければ fetch(#682 段�
     const { runner, open, readBytes } = make({ lendInstalled });
     await runner.run({ sql: 'SELECT 1', source: SRC, readBytes });
     // ⚠ 相手を替えて器を作り直させる(既存の「相手を替えたら器ごと作り直す」規律)
-    await runner.run({ sql: 'SELECT 2', source: { lid: 'l2', name: '別.csv' }, readBytes });
+    await runner.run({ sql: 'SELECT 2', source: { kind: 'csv', lang: 'csv', lid: 'l2', name: '別.csv' } as const, readBytes });
 
     expect(lendInstalled, '器を作り直した回数だけ借り直しているはず').toHaveBeenCalledTimes(2);
     expect(open).toHaveBeenNthCalledWith(1, { wasmUrl: 'blob:w1', workerUrl: 'blob:k1', extensions: NET_EXT });

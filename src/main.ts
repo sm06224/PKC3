@@ -84,7 +84,12 @@ import {
 } from '@adapter/platform/storage/store-port';
 import { acquireWriterLease } from '@adapter/platform/storage/writer-lease';
 // 🔴 SQL の面で「手持ちのファイル」を開く(#854 段②)
-import { registerSqlLocalFile, takeSqlLocalFileBytes } from '@adapter/state/sql-local-file';
+import {
+  readSqlLocalFileBytes,
+  registerSqlLocalFile,
+  releaseSqlLocalFile,
+  sqlLocalFileSize,
+} from '@adapter/state/sql-local-file';
 import { bundleChannelName, bundleLockName } from '@features/portable/bundle';
 import { readBundle, resolvePortableStart, type PortableStart } from '@adapter/platform/portable-boot';
 import { restoreEmbeddedAssets } from '@adapter/platform/portable-assets';
@@ -3703,7 +3708,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * ⚠ 判断(控えの持ち方 / 即破棄)は `sql-local-file.ts` が持つ ── この file は
      *   どの test からも実行されない(CLAUDE.md §2)ので、ここは渡すだけ。
      */
-    readLocalSqlFile: (lid) => takeSqlLocalFileBytes(lid),
+    readLocalSqlFile: (lid) => readSqlLocalFileBytes(lid),
+    /**
+     * 🔴 **中身を読まずに大きさだけ聞く口**(#682 段④c)。
+     * ⚠ DuckDB でしか読めない相手は開く時点で 1 バイトも読まないので、
+     *   画面へ出す大きさはここから採る。
+     */
+    localSqlFileSize: (lid) => sqlLocalFileSize(lid),
+    /** 🔴 **控えの終端**(#682 段④c)── 相手を選ぶのをやめたら手を放す。 */
+    releaseLocalSqlFile: (lid) => {
+      releaseSqlLocalFile(lid);
+    },
     /**
      * 🔴 **DuckDB で引く口**(#682 段②。user 裁定 2026-09-15)。
      * ⚠ **渡さない版では機能が減るだけ**(選び所には出るが、押すと理由を言って断る)──

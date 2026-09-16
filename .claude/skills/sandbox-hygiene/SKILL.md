@@ -122,6 +122,85 @@ cd "$SCRATCH/ddb" && timeout -k 5 100 node probe.mjs > probe.log 2>&1; echo "exi
 
 ⚠ `.gitignore` に足して隠さない ── 症状が見えなくなるだけで、**次は別の名前で落ちる**。
 
+### 🔴 **同じ日の 2 時間後に、また踏んだ**(2026-09-16、#682 段④c)
+
+⚠ 上の節を書いた本人が、**その 2 時間後**に `cd /home/user/PKC3 && npx tsx probe.mjs` で
+DuckDB の probe を回し、`COPY (…) TO 'out.parquet'` が **`out.parquet` / `ref.parquet` を
+repo の中に書いた**(`git status` の untracked で気づいた ── 危うく `git add -A` で
+commit するところだった)。
+
+🔑 **覚えていたのは「話」であって、「書いている今がその場面だ」とは気づかない**
+(CLAUDE.md §1 の 10 度目と同じ形)。だから**合図を時点で書く**:
+
+> 🔴 **`node` / `npx tsx` で probe を打とうとした瞬間に、`cd` の行き先を見る。**
+> 行き先が repo なら、**その場で scratchpad へ書き換える。**
+
+⚠ **`npx tsx` は `cd` を変えると解決が壊れることがある** ── scratchpad を cwd にすると
+`node_modules` を見失う。🔑 そのときは **cwd は scratchpad のまま、`--tsconfig` や
+絶対 path の import で解決を repo へ向ける**(逆にしない ── 書き出しのほうが危ない)。
+
+### 🔴 同期で取りに行く相手に、**同じプロセスの server を立てない**(2026-09-16)
+
+DuckDB(node 版)へ拡張を配るために、**同じ probe の中で** `http.createServer` を
+立てたら **120 秒で 1 行も返らず、殺すまでぶら下がった**。
+
+⚠ 原因は簡単で、**engine が同期(blocking)で取りに行く**からである ── 同じ event loop に
+居る server は、その間 1 バイトも応答できない(**自分で自分を待つ**)。
+🔑 **server は別プロセスで立てる**(`spawn(process.execPath, ['-e', SERVER, ROOT])`、
+port は `0` にして stdout で受け取る)。
+⚠ 同じ形は **wasm の同期 XHR を使う相手**全部に在る(LibreOffice wasm・sqlite の
+同期 VFS)── 「取りに行く側が同期か」を先に問う。
+
+⚠ そして **`happy-dom` の `XMLHttpRequest` を掴ませない** ── vitest の既定環境では
+node 版 DuckDB が happy-dom の XHR を掴み、「同期の要求で `responseType` は変えられない」で
+落ちる。🔑 その test file には **`/** @vitest-environment node *\/`** を書く。
+
+## 🔴 **worktree は溜まる ── 溜まると `npm run build` が落ちる**(2026-09-16 実測)
+
+```
+Error: ENOSPC: System limit for number of file watchers reached,
+  watch '/home/user/PKC3/.claude/worktrees/agent-…/src/adapter/ui/actions/import-markdown.ts'
+```
+
+⚠ **`vite build`(watch モードではない、ふつうのビルド)が落ちる**のが罠である ──
+「watcher が足りない」と出るのに、こちらは watch していない。
+🔑 実体は **`isolation: "worktree"` のエージェントが置いていった複製**が、
+`.claude/worktrees/` に**そのまま残る**ことである。
+
+実測(この日の 1 セッション):
+
+| | 値 |
+|---|---|
+| 溜まっていた worktree | **75 個** |
+| それが食っていたディスク | **11 GB** |
+| `fs.inotify.max_user_watches` | 130,092 |
+| 掃除した後 | **594 MB** / build は `exit=0` |
+
+⚠ **自分では減らない** ── 依頼したエージェントが終わっても、変更が無いものだけが
+自動で畳まれる(**detached HEAD にしたり commit したものは残る**)。
+⚠ 残骸は `worktree-agent-*` という **branch** も置いていく(この日は **80 本**)。
+
+🔑 **掃除の手順**(⚠ **いま走っているエージェントの物は残す** ── `ls -lt` で
+いちばん新しい物が動いている):
+
+```bash
+cd /home/user/PKC3
+KEEP=agent-<いま走っている id>
+for d in .claude/worktrees/*; do
+  [ "$(basename "$d")" = "$KEEP" ] && continue
+  git worktree remove --force "$d" 2>/dev/null || rm -rf "$d"
+done
+git worktree prune
+LIVE=$(git worktree list --porcelain | grep '^branch' | sed 's#^branch refs/heads/##')
+for b in $(git branch --list 'worktree-agent-*' | tr -d ' *'); do
+  echo "$LIVE" | grep -qx "$b" || git branch -D "$b"
+done
+```
+
+🔑 **合図は 2 つ**:①`ENOSPC` / `watchers` の字を見たら**まずここを数える**
+②**エージェントを 10 本投げたら、そのターンの終わりに掃除する**
+(⚠ 「あとで」は来ない ── 次に気づくのは build が落ちた日である)。
+
 ## ⚠ 失わないための置き場の選び方
 
 | 置く物 | どこへ | なぜ |

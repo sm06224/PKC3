@@ -110,6 +110,16 @@ const DUCKDB_WRITE_WORDS = [
 const DUCKDB_READ_HEADS = ['from', 'pivot', 'unpivot', 'describe', 'summarize', 'table'] as const;
 
 /**
+ * 断り文に並べる「始められる語」。
+ * 🔑 **`DUCKDB_READ_HEADS` から組む** ── 語を足した日に、字が自動で追いつく
+ *   (手で並べると、足した人が直し忘れて**嘘の案内**が残る)。
+ * ⚠ 頭に付く 4 つは sqlite の白名簿(`sql-guard.ts` の `READ_HEADS`)と同じ物である。
+ */
+const DUCKDB_START_WORDS = ['SELECT', 'WITH', 'VALUES', 'EXPLAIN']
+  .concat(DUCKDB_READ_HEADS.map((w) => w.toUpperCase()))
+  .join(' / ');
+
+/**
  * 打たれた字が DuckDB で「読むだけ」か。
  *
  * 🔑 **判定の本体は `checkReadOnlySql` を通す**(§7)── ①1 文だけ ②全角を直す
@@ -163,7 +173,23 @@ export function checkDuckDbSql(input: string): SqlCheck {
    */
   const openless = body.replace(/^[\s(]+/, '');
   const head = /^[a-z]+/i.exec(openless)?.[0]?.toLowerCase() ?? '';
-  if (!DUCKDB_READ_HEADS.includes(head as (typeof DUCKDB_READ_HEADS)[number])) return { ...base, sql };
+  if (!DUCKDB_READ_HEADS.includes(head as (typeof DUCKDB_READ_HEADS)[number])) {
+    /**
+     * 🔴 **断り文まで sqlite の物を返さない**(#682 段④c。動線レビューが出した)。
+     *
+     * ⚠ sqlite の門は「SELECT / WITH / VALUES / EXPLAIN のどれかで始めます」と返す ──
+     *   ところが **同じ画面の手本は `FROM … SELECT …` で始まっている**。
+     *   🔴 user から見ると「FROM で始めてよいのか、駄目なのか」が読めない
+     *   (画面の中で辻褄が合わない ── この repo がいちばん嫌う形)。
+     * 🔑 だから **DuckDB で始められる語を並べ直す** ── 一覧は
+     *   `DUCKDB_READ_HEADS` から組むので、語を足した日に**この字も自動で追いつく**。
+     * ⚠ 断るのは sqlite 側と**同じ場面だけ**(先頭の語が理由のとき)── 書き込みの語や
+     *   `PRAGMA` の断りは、そのまま sqlite 側の字を通す(理由が違う)。
+     */
+    return /では始められません/u.test(base.why)
+      ? { ...base, why: `${base.why.split('(')[0] ?? ''}(DuckDB では ${DUCKDB_START_WORDS} のどれかで始めます)`, sql }
+      : { ...base, sql };
+  }
   /**
    * ⚠ **先頭を救うだけでは足りない** ── `FROM t INSERT …` のような形を通さないよう、
    *   sqlite 側と同じ「書き込みの語が混じっていないか」を**もう一度**当てる。

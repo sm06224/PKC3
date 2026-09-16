@@ -65,7 +65,14 @@ import type {
 import { TAGS_KEY, UNSET as QUERY_UNSET } from '@features/query/group-by';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 // 🔴 添付の .csv / .tsv / .xlsx を「調べる相手」として選べるようにする(#854 段① / 段③)
-import { sqlGuestSourceOf, type SqlGuestSource } from '@features/query/sql-guest-source';
+import {
+  duckDbReadableSourceOf,
+  guestTableNameOf,
+  isDuckDbOnlySource,
+  sqlGuestSourceOf,
+  type DuckDbReadableGuestSource,
+  type SqliteReadableGuestSource,
+} from '@features/query/sql-guest-source';
 // 🔴 手持ちのファイルも同じ選び所から開く(#854 段②)
 import { isSqlLocalFileLid } from '@features/query/sql-local-file';
 import {
@@ -130,7 +137,7 @@ export interface StorePort {
    */
   openSqlGuest?(
     image: Uint8Array,
-    source?: SqlGuestSource,
+    source?: SqliteReadableGuestSource,
   ): Promise<{ tables: string[]; bytes: number; truncated: boolean }>;
   closeSqlGuest?(): Promise<null>;
   /**
@@ -525,6 +532,21 @@ export function connectStoreEffects(
      */
     readLocalSqlFile?: (lid: string) => Promise<Uint8Array | null>;
     /**
+     * 🔴 **手持ちのファイルの大きさだけを、中身を読まずに聞く口**(#682 段④c)。
+     * 🔑 DuckDB でしか読めない相手(`.parquet` / `.json`)は、選んだ時点では
+     *   **1 バイトも読まない** ── それでも画面には大きさを出したいので、ここから採る。
+     * ⚠ 渡されなければ「大きさは 0」と出るだけ(機能は減らない)。
+     */
+    localSqlFileSize?: (lid: string) => number | null;
+    /**
+     * 🔴 **手持ちのファイルの控えを手放す口**(#682 段④c)。
+     * ⚠ 控えは**読んでも消えない**(`sql-local-file.ts` の節)ので、終端はここ ──
+     *   相手を選ぶのをやめたら呼ぶ。
+     * 🔴 **手放す lid を渡す。** 渡さない形にすると、選び直した回に
+     *   **いま控えたばかりの file を消す**(`SET_SQL_SOURCE` は `CLOSE` → `OPEN` の順)。
+     */
+    releaseLocalSqlFile?: (lid: string) => void;
+    /**
      * 🔴 **DuckDB で引く口**(#682 段②)。
      * ⚠ **storage worker を通さない** ── DuckDB は別の使い捨てワーカーで走る
      *   (ノートの DB の錠を握る worker に相乗りさせない ── 不可侵指示 2026-08-03)。
@@ -534,7 +556,7 @@ export function connectStoreEffects(
      */
     runDuckDbSql?: (input: {
       sql: string;
-      source: { lid: string; name: string };
+      source: DuckDbReadableGuestSource;
       /** ⚠ 呼ばれるのは**器へ入れ直すときだけ**(同じ相手を打鍵のたびに読み直さない)。 */
       readBytes: () => Promise<Uint8Array | null>;
     }) => Promise<{ columns: string[]; rows: Array<Array<string | number | null>>; truncated: boolean; ms: number }>;
@@ -545,8 +567,12 @@ export function connectStoreEffects(
   /**
    * 🔴 **調べる相手の中身を読む、たった 1 か所**(#854 段② / #682 段②)。
    *
-   * ⚠ 添付なら**本文から鍵を読んで IDB を引き**、手持ちの file なら**控えを 1 回で
-   *   使い捨てる** ── 道が 2 本あるが、**呼ぶ側はそれを知らなくてよい**。
+   * ⚠ 添付なら**本文から鍵を読んで IDB を引き**、手持ちの file なら**控えを読む** ──
+   *   道が 2 本あるが、**呼ぶ側はそれを知らなくてよい**。
+   * ⚠ **2026-09-16 に訂正**:ここは「手持ちの file は控えを**1 回で使い捨てる**」と
+   *   書いてあったが、🔴 **その形だと DuckDB が 2 人目の読み手になった時点で破れる**
+   *   (開いた回が控えを消すので、走らせる回は必ず `null`)── 実測で確かめて
+   *   `sql-local-file.ts` の側を直した(終端は「選ぶのをやめたとき」)。
    * 🔑 sqlite で開く道(`REQUEST_SQL_GUEST_OPEN`)と DuckDB で引く道が
    *   **同じ 1 本**を通る(§7「同じ問いに答える口を 2 つ作らない」)── 分けると、
    *   片方だけが添付を読めない、という user から見て理由の無い形になる。
@@ -563,6 +589,28 @@ export function connectStoreEffects(
     const body = await store.getBody(lid);
     const key = readAttachmentMeta(body ?? '').assetKey;
     return key === null ? null : readAsset(key);
+  };
+  /**
+   * 🔴 **中身を読まずに大きさだけ採る**(#682 段④c)。
+   *
+   * 🔑 DuckDB でしか読めない相手は、選んだ時点で **1 バイトも読まない** ──
+   *   それでも画面は「◯◯ を調べています(表 1 個 / 1.2 MB)」と出したいので、
+   *   **本文の `attachment.size`** と **`File.size`** から採る。
+   * ⚠ 分からなければ `0`(「大きさが出ない」だけで、開くことは止めない)。
+   * 🔴 **投げない。** ⚠ 1 稿目は上の 1 行を書きながら `store.getBody` の失敗を
+   *   受けておらず、**投げると `SQL_GUEST_OPENED` も `SQL_GUEST_FAILED` も出ない**
+   *   (`afterWrites` は rejection を誰も拾わない)── 画面は「調べています」も
+   *   「開けません」も出ないまま止まる = この repo がいちばん嫌う**無言の dead click**。
+   *   🔑 docstring の主張(「開くことは止めない」)を、実装の側で本当にする。
+   */
+  const sqlSourceSize = async (lid: string): Promise<number> => {
+    try {
+      if (isSqlLocalFileLid(lid)) return opts.localSqlFileSize?.(lid) ?? 0;
+      const body = await store.getBody(lid);
+      return readAttachmentMeta(body ?? '').size ?? 0;
+    } catch {
+      return 0;
+    }
   };
   /** 探す面の debounce の手(#680)。⚠ 解くときに止める ── 解いた後に撃たない。 */
   let detailTimer: ReturnType<typeof setTimeout> | null = null;
@@ -889,6 +937,45 @@ export function connectStoreEffects(
         const local = isSqlLocalFileLid(lid);
         const readLocal = opts.readLocalSqlFile;
         const readAsset = opts.readAssetBytes;
+        /**
+         * 🔴 **何の file かは、ここで題名の拡張子だけを見て決める**
+         *   (#854 段① / 段③)。⚠ **判定を 2 か所に置かない** ── worker 側は
+         *   渡された `source` の `kind` だけで分岐し、拡張子をもう一度見ない(§7)。
+         *   手持ちのファイルも file 名(`name`)は同じ形で来るので、ここは
+         *   添付のときと**まったく同じ 1 行**で足りる。
+         */
+        const source = sqlGuestSourceOf(lid, name);
+        /**
+         * 🔴 **DuckDB でしか読めない相手は、sqlite worker へ行かない**(#682 段④c)。
+         *
+         * ⚠ `.parquet` / `.json` の中身を解釈できるのは DuckDB だけなので、
+         *   ここで `openSqlGuest` を呼ぶと**必ず断られる**(そして user には
+         *   「開けません」としか出ない)。
+         * 🔑 **開く仕事そのものが無い** ── DuckDB は「走らせる」を押したときに
+         *   相手を器へ差し込む(`DuckDbRunner.load`)ので、選んだ時点でやることは
+         *   **表の名前を画面へ出すこと**だけである。
+         * ⚠ だから **bytes を 1 つも読まない**:
+         *   ①大きい parquet を「選んだだけ」で heap へ載せない
+         *    (不可侵指示 2026-07-27)
+         *   ②手持ちの file の控えを**ここで消費しない**
+         * 🔑 表の名前は `guestTableNameOf` **1 つ**が答える ── 器が `CREATE TABLE` する
+         *   名前(`duckdb-runner.ts`)も、画面の案内と手本(`sql-tip.ts`)も、
+         *   **同じこの関数**を呼ぶ(§7「同じ問いに答える口を 2 つ作らない」)。
+         */
+        if (isDuckDbOnlySource(source)) {
+          afterWrites(async () => {
+            if (disposed) return;
+            dispatcher.dispatch({
+              type: 'SQL_GUEST_OPENED',
+              lid,
+              name,
+              tables: [guestTableNameOf(source)],
+              bytes: await sqlSourceSize(lid),
+              truncated: false,
+            });
+          });
+          break;
+        }
         if (!open || (local ? readLocal === undefined : readAsset === undefined)) {
           dispatcher.dispatch({
             type: 'SQL_GUEST_FAILED',
@@ -899,14 +986,6 @@ export function connectStoreEffects(
           });
           break;
         }
-        /**
-         * 🔴 **何の file かは、ここで題名の拡張子だけを見て決める**
-         *   (#854 段① / 段③)。⚠ **判定を 2 か所に置かない** ── worker 側は
-         *   渡された `source` の `kind` だけで分岐し、拡張子をもう一度見ない(§7)。
-         *   手持ちのファイルも file 名(`name`)は同じ形で来るので、ここは
-         *   添付のときと**まったく同じ 1 行**で足りる。
-         */
-        const source = sqlGuestSourceOf(lid, name);
         afterWrites(async () => {
           if (disposed) return;
           try {
@@ -916,6 +995,11 @@ export function connectStoreEffects(
                 local ? '選んだ file を読めませんでした' : '添付の中身が見つかりません',
               );
             }
+            /**
+             * ⚠ ここへ来る `source` は **`SqliteReadableGuestSource | null`** に
+             *   絞り込まれている(すぐ上の `isDuckDbOnlySource` が型の述語)──
+             *   だから「読めない相手が来たら断る」枝は書かない(誰も通らない)。
+             */
             const opened = await open(bytes, source ?? undefined);
             if (disposed) return;
             dispatcher.dispatch({
@@ -941,6 +1025,19 @@ export function connectStoreEffects(
       case 'REQUEST_SQL_GUEST_CLOSE': {
         const shut = store.closeSqlGuest;
         if (shut) void shut().catch(() => undefined);
+        /**
+         * 🔴 **手持ちのファイルの控えも、ここで手放す**(#682 段④c)。
+         * ⚠ 控えは**読んでも消えない**形に直した(`sql-local-file.ts`)ので、
+         *   ここで放さないと「選ぶのをやめたのに `File` を握ったまま」になる
+         *   (不可侵指示 2026-07-27「ライフサイクル終端での即破棄」)。
+         * 🔴 **手放すのは `ev.prev`(さっきまでの相手)だけ**である ──
+         *   ⚠ lid を見ずに全部消す形だと、手持ちのファイルを選び直した瞬間に
+         *   **いま控えたばかりの file が消える**(`SET_SQL_SOURCE` は
+         *   `CLOSE` → `OPEN` の順に出す)。実際その形で 1 度書いてしまい、
+         *   **unit は 1 件も落ちなかった**(この口を `main.ts` からしか
+         *   渡していなかったので、test は経路ごと通っていなかった ── §2)。
+         */
+        if (isSqlLocalFileLid(ev.prev)) opts.releaseLocalSqlFile?.(ev.prev);
         break;
       }
       /**
@@ -1049,8 +1146,18 @@ export function connectStoreEffects(
          */
         if (ev.engine === 'duckdb') {
           const duck = opts.runDuckDbSql;
-          const source = ev.duck;
-          if (duck === undefined || source === undefined) {
+          /**
+           * 🔴 **DuckDB へ渡せる形へ組み直す**(#682 段④c)── `kind` が無いと
+           *   `read_csv_auto` / `read_parquet` / `read_json_auto` を選び分けられない。
+           * 🔑 組むのは `duckDbReadableSourceOf` **1 か所**(一覧は
+           *   `DUCKDB_READABLE_KINDS` が正本)── `sqlEngineHint` が DuckDB を
+           *   選ばせる相手と**同じ一覧から派生**しているので、ここが `null` に
+           *   なるのは「そもそも DuckDB を選べない相手」だけである。
+           * ⚠ だから `null` は**下の「引けません」へ畳む** ── 新しい断り文を作らない。
+           */
+          const source =
+            ev.duck === undefined ? null : duckDbReadableSourceOf(ev.duck.lid, ev.duck.name);
+          if (duck === undefined || source === null) {
             dispatcher.dispatch({
               type: 'SQL_RUN_FAILED',
               token,

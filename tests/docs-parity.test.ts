@@ -2334,6 +2334,12 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-16(#682 段④c parquet / json を調べる)に、いちばん古い 1 件が
+     *   枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-14-sql-answer-to-file" …` → a53609b8
+     */
+    'SQL の答えを、そのまま file に書き出せるようになりました',
+    /**
      * ⚠ **2026-09-16(#682 段④b DuckDB の部品が 41 メガへ)に、いちばん古い 1 件が
      *   枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-14-sql-input-grow" …` → 7a92990c

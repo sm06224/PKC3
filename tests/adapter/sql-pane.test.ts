@@ -37,9 +37,17 @@ import { readFileSync } from 'node:fs';
 import { blocksFor, stripComments, withoutMedia } from '../helpers/css-blocks';
 import { stubStamps } from '../helpers/store-stamps';
 import { stubRevisionOps } from '../helpers/revision-stub';
-import type { SqlGuestSource } from '../../src/features/query/sql-guest-source';
+import type {
+  DuckDbReadableGuestSource,
+  SqliteReadableGuestSource,
+} from '../../src/features/query/sql-guest-source';
 // 🔴 手持ちのファイルを開く(#854 段②)── main.ts と**同じ実物**を配線する
-import { registerSqlLocalFile, takeSqlLocalFileBytes } from '../../src/adapter/state/sql-local-file';
+import {
+  readSqlLocalFileBytes,
+  registerSqlLocalFile,
+  releaseSqlLocalFile,
+  sqlLocalFileSize,
+} from '../../src/adapter/state/sql-local-file';
 import { SQL_PICK_LOCAL_FILE_VALUE } from '../../src/features/query/sql-local-file';
 
 type SqlAnswer = {
@@ -108,11 +116,11 @@ function setup(
    * 🔴 **DuckDB で引く口**(#682 段②)。⚠ 実物は別ワーカーで走る ── ここは
    *   「**どんな相手で、どんな字で呼ばれたか**」と「**中身を読みに来たか**」を見る fake。
    */
-  const duckSeen: Array<{ sql: string; source: { lid: string; name: string }; bytes: number | null }> = [];
+  const duckSeen: Array<{ sql: string; source: DuckDbReadableGuestSource; bytes: number | null }> = [];
   const runDuckDbSql = vi.fn(
     async (input: {
       sql: string;
-      source: { lid: string; name: string };
+      source: DuckDbReadableGuestSource;
       readBytes: () => Promise<Uint8Array | null>;
     }) => {
       const bytes = await input.readBytes();
@@ -124,7 +132,7 @@ function setup(
    *  ⚠ 実物は worker の別接続 ── ここは**渡された引数**だけを見る fake である。 */
   /** 開くのを**手で止められる**門(遅れて届く答えを作るため)。 */
   let holdOpen: null | (() => void) = null;
-  const openSqlGuest = vi.fn(async (image: Uint8Array, source?: SqlGuestSource) => {
+  const openSqlGuest = vi.fn(async (image: Uint8Array, source?: SqliteReadableGuestSource) => {
     if (image.byteLength === 0) {
       throw new Error(
         source === undefined
@@ -175,7 +183,12 @@ function setup(
                 ? '---\nattachment.name: 壊れ.csv\nattachment.asset_key: ast-csv-broken\n---\n'
                 : lid === 'db6'
                   ? '---\nattachment.name: 大きい.tsv\nattachment.asset_key: ast-tsv-ok\n---\n'
-                  : '',
+                  : lid === 'db7'
+                    ? // 🔑 大きさは**本文の `attachment.size`** から採る(中身は読まない。#682 段④c)
+                      '---\nattachment.name: 売上.parquet\nattachment.size: 4096\nattachment.asset_key: ast-parquet\n---\n'
+                    : lid === 'db8'
+                      ? '---\nattachment.name: 明細.ndjson\nattachment.size: 321\nattachment.asset_key: ast-ndjson\n---\n'
+                      : '',
     ...(opts.withOp === false ? {} : { runReadOnlySql, openSqlGuest, closeSqlGuest }),
   }, opts.withOp === false
     ? {}
@@ -183,7 +196,22 @@ function setup(
         readAssetBytes,
         // 🔴 手持ちのファイル(#854 段②)── 実物の控えをそのまま繋ぐ
         //    (⚠ `withLocal: false` のときは**この口だけ**外す)
-        ...(opts.withLocal === false ? {} : { readLocalSqlFile: (lid: string) => takeSqlLocalFileBytes(lid) }),
+        ...(opts.withLocal === false
+          ? {}
+          : {
+              readLocalSqlFile: (lid: string) => readSqlLocalFileBytes(lid),
+              /**
+               * 🔴 **控えを手放す口も、実物を繋ぐ**(#682 段④c)。
+               * ⚠ 直す前はここを繋いでいなかったので、**この口の経路を
+               *   unit が 1 度も通っていなかった** ── そのせいで
+               *   「選び直した瞬間に、いま控えた file を消す」という欠陥を
+               *   **139 件緑のまま**作った(CLAUDE.md §2)。
+               */
+              releaseLocalSqlFile: (lid: string) => {
+                releaseSqlLocalFile(lid);
+              },
+              localSqlFileSize: (lid: string) => sqlLocalFileSize(lid),
+            }),
         // 🔴 DuckDB の口(#682 段②)── 実物は別ワーカー。ここは**渡された引数**だけを見る
         ...(opts.withDuck === false ? {} : { runDuckDbSql }),
       });
@@ -207,7 +235,10 @@ function setup(
       { ...meta('db4', '売上.csv'), archetype: 'attachment' },
       { ...meta('db5', '壊れ.csv'), archetype: 'attachment' },
       { ...meta('db6', '大きい.tsv'), archetype: 'attachment' },
-      // ⚠ **対照群** ── 添付でも `.sqlite` / `.csv` / `.tsv` でないものは並ばない
+      // 🔑 DuckDB でしか読めない相手(#682 段④c)── いちばん下に並ぶはず
+      { ...meta('db7', '売上.parquet'), archetype: 'attachment' },
+      { ...meta('db8', '明細.ndjson'), archetype: 'attachment' },
+      // ⚠ **対照群** ── 添付でも読める拡張子でないものは並ばない
       { ...meta('png1', 'ねこ.png'), archetype: 'attachment' },
     ],
     relations: [],
@@ -3139,7 +3170,11 @@ describe('🔴 どのエンジンで引くか(#682 段②。user 裁定 2026-09-
     await settle();
     expect(duckSeen, 'DuckDB を選んだのに引いていない').toHaveLength(1);
     expect(duckSeen[0]?.sql).toBe('FROM csv SELECT *');
-    expect(duckSeen[0]?.source).toEqual({ lid: 'db4', name: '売上.csv' });
+    /**
+     * 🔴 **`kind` まで渡る**(#682 段④c)── これが無いと
+     *   `read_csv_auto` / `read_parquet` / `read_json_auto` を選び分けられない。
+     */
+    expect(duckSeen[0]?.source).toEqual({ kind: 'csv', lang: 'csv', lid: 'db4', name: '売上.csv' });
     // 🔴 相手の中身を読みに来ている(読まなければ、表は空のままになる)
     expect(duckSeen[0]?.bytes, '相手の中身を読みに来ていない').toBeGreaterThan(0);
     // ⚠ 空振り防止 ── sqlite の口が 1 度でも叩かれていたら、engine を取り違えている
@@ -3262,5 +3297,302 @@ describe('🔴 どのエンジンで引くか(#682 段②。user 裁定 2026-09-
     runBtn.click();
     await settle();
     expect(note()).toContain('取ってこられませんでした');
+  });
+});
+
+/**
+ * 🔴 **`.parquet` / `.json` を調べる相手として受ける**(#682 段④c)。
+ *
+ * ## user の物語(ここを見る)
+ *
+ * ①`.parquet` を取り込む ②「SQL で調べる」を開く ③選び所の**いちばん下**に並ぶ
+ * ④選ぶと「◯◯ を調べています(表 1 個 / …)」と出る ⑤エンジンは **DuckDB** になり、
+ * 「内蔵の sqlite」は薄い字 + 理由 ⑥`SELECT * FROM parquet` が引ける。
+ *
+ * ## ⚠ ここでいちばん大事な 1 件
+ *
+ * 🔴 **sqlite worker を 1 度も叩かない。** 叩けば必ず断られる(中身を解釈できない)ので、
+ *   user には「開けません」としか出ない ── 型でも塞いであるが、
+ *   **配線が本当にそこを通っていないこと**は、この経路でしか見えない。
+ */
+/**
+ * 🔴 **手持ちのファイルを DuckDB で引く**(#682 段②+段④c)。
+ *
+ * ## ⚠ ここは「配った日から 1 度も通っていなかった」道である
+ *
+ * 段② で DuckDB を足したとき、相手の bytes を読む口は 2 人に増えた ──
+ * **選んだ回**(`REQUEST_SQL_GUEST_OPEN`)と**走らせた回**(`DuckDbRunner.load`)。
+ * 🔴 ところが手持ちのファイルの控えは「**1 回読んだら消える**」形だったので、
+ * 走らせた回は**必ず `null`** を受け取っていた(実測 2026-09-16)。
+ * ⚠ **unit も smoke も 1 件も落ちなかった** ── 手持ちのファイルの test は
+ * 「開けたか」までしか見ておらず、DuckDB の test は**添付**しか使っていなかった。
+ * 🔑 だから **2 つが交わる 1 点**をここに置く。
+ */
+describe('🔴 手持ちのファイルを DuckDB で引く(#682 段④c)', () => {
+  it('🔴 手持ちの .csv を選んで DuckDB で走らせると、中身が読める', async () => {
+    const { pickLocalFile, pickEngine, type, runBtn, duckSeen, cells, note } = setup();
+    pickLocalFile(new File(['id,name\n1,a\n'], 'tegara.csv', { type: 'text/csv' }));
+    await settle();
+    expect(note(), '前提が崩れている(手持ちの file が開けていない)').toContain(
+      'tegara.csv を調べています',
+    );
+    pickEngine('duckdb');
+    type('FROM csv SELECT *');
+    runBtn.click();
+    await settle();
+    expect(duckSeen, 'DuckDB へ引きに行っていない').toHaveLength(1);
+    /**
+     * 🔴 **ここが本題** ── 直す前はここが `null` だった(控えが 1 回で消えていた)。
+     * ⚠ 「引きに行った」だけを見ると、`null` を渡して断られた回と区別が付かない。
+     */
+    expect(duckSeen[0]?.bytes, '控えが消えていて、走らせる回に中身を読めていない').toBeGreaterThan(
+      0,
+    );
+    expect(cells()).toEqual([['duck']]);
+  });
+
+  /**
+   * 🔴 **器を起こし直すたびに読む** ── DuckDB は畳んでから起き直すと**また読む**ので、
+   *   「2 回目までは読める」形の実装でも足りない。
+   * 🔑 だから **3 回**走らせて、3 回とも中身が届くことを見る。
+   */
+  it('🔴 同じ相手で何度走らせても、そのたびに中身を読める', async () => {
+    const { pickLocalFile, pickEngine, type, runBtn, duckSeen } = setup();
+    pickLocalFile(new File(['id,name\n1,a\n'], 'tegara.csv', { type: 'text/csv' }));
+    await settle();
+    pickEngine('duckdb');
+    for (const nth of [1, 2, 3]) {
+      type(`FROM csv SELECT ${String(nth)}`);
+      runBtn.click();
+      await settle();
+    }
+    expect(duckSeen).toHaveLength(3);
+    for (const [i, seen] of duckSeen.entries()) {
+      expect(seen.bytes, `${String(i + 1)} 回目で中身が読めていない`).toBeGreaterThan(0);
+    }
+  });
+
+  /**
+   * 🔴 **選び直しても、いま選んだ file が消えない**(#682 段④c で 1 度壊した)。
+   *
+   * ⚠ `SET_SQL_SOURCE` は「**前の相手を閉じる**」→「**新しい相手を開く**」の順に出す。
+   *   控えを手放す口が lid を見ないと、**いま控えたばかりの file を消す**。
+   * 🔑 手持ちの file を**続けて 2 回**選ぶ、が唯一この形を作れる場面である。
+   */
+  it('🔴 手持ちの file を続けて 2 回選んでも、2 つ目が読める', async () => {
+    const { pickLocalFile, pickEngine, type, runBtn, duckSeen, note } = setup();
+    pickLocalFile(new File(['id\n1\n'], 'ichi.csv', { type: 'text/csv' }));
+    await settle();
+    pickLocalFile(new File(['id,name\n2,b\n3,c\n'], 'ni.csv', { type: 'text/csv' }));
+    await settle();
+    expect(note(), '2 つ目が開けていない').toContain('ni.csv を調べています');
+    pickEngine('duckdb');
+    type('FROM csv SELECT *');
+    runBtn.click();
+    await settle();
+    expect(duckSeen[0]?.source.name, '2 つ目を選んだのに 1 つ目を引いている').toBe('ni.csv');
+    expect(
+      duckSeen[0]?.bytes,
+      '選び直したときに、いま控えた file まで手放している',
+    ).toBeGreaterThan(0);
+  });
+});
+
+describe('🔴 .parquet / .json を調べる相手として受ける(#682 段④c)', () => {
+  it('🔴 選び所のいちばん下に並び、csv や xlsx より後ろに来る', async () => {
+    const { sourceSel } = setup();
+    await settle();
+    const labels = [...sourceSel.options].map((o) => o.textContent ?? '');
+    const csv = labels.indexOf('売上.csv');
+    const parquet = labels.indexOf('売上.parquet');
+    const ndjson = labels.indexOf('明細.ndjson');
+    expect(parquet, '.parquet が選び所に並んでいない').toBeGreaterThanOrEqual(0);
+    expect(ndjson, '.ndjson が選び所に並んでいない').toBeGreaterThanOrEqual(0);
+    expect(parquet, '.parquet が .csv より前に出ている').toBeGreaterThan(csv);
+    // ⚠ 対照群 ── 読めない添付は並ばない(白名簿の向きが崩れていない)
+    expect(labels, '読めない添付まで並べている').not.toContain('ねこ.png');
+  });
+
+  it('🔴 選ぶと、sqlite worker を 1 度も叩かずに「調べています」になる', async () => {
+    const { pick, note, openSqlGuest, readAssetBytes, d } = setup();
+    pick('db7');
+    await settle();
+    expect(openSqlGuest, '内蔵の sqlite に .parquet を渡している(必ず断られる)').toHaveBeenCalledTimes(0);
+    /**
+     * 🔴 **中身も読まない**(#682 段④c)── 選んだだけで何十 MB も heap へ載せない
+     *   (不可侵指示 2026-07-27)。読むのは「走らせる」を押したときだけである。
+     */
+    expect(readAssetBytes, '選んだだけで中身を読みに行っている').toHaveBeenCalledTimes(0);
+    expect(note(), '開いたことが画面に出ない').toContain('売上.parquet を調べています');
+    expect(note()).toContain('表 1 個');
+    /**
+     * 🔴 **表の名前そのものを見る**(着地前レビューの変異 2)。
+     * ⚠ 帯に出るのは**個数だけ**なので、`tables: ['csv']` に潰す変異は
+     *   `toContain('表 1 個')` では殺せない ── **state の値**を直に見る。
+     * 🔑 この名前は `guestTableNameOf` から出ており、器が `CREATE TABLE` する名前と
+     *   **同じ 1 か所**である(§7)。
+     */
+    expect(d.getState().sqlPage.guest?.tables, 'user が打つ表の名前が違う').toEqual(['parquet']);
+    // ⚠ 大きさは**本文の `attachment.size`** から採る(中身を読まずに)
+    expect(note(), '大きさが出ていない(中身を読まずに採れているか)').toContain('4.0 KB');
+  });
+
+  /**
+   * 🔴 **画面の案内と手本が、そのまま打てる字である**(#682 段④c)。
+   *
+   * ⚠ 直す前は `sql-tip.ts` が **`csv` を直書き**していたので、`.parquet` を選ぶと
+   *   **画面のいちばん近くに在る手本が、打つと英語で断られる字**だった
+   *   (着地前レビューと動線レビューが独立に同じ 1 件を挙げた)。
+   * 🔑 だから**画面から読んだ字**を見る ── 関数を直に呼ぶ test では、
+   *   描画器が別の字を出していても気づけない。
+   */
+  it('🔴 画面の案内と手本が、いまの相手の表の名前で書かれている', async () => {
+    const { pick, pane } = setup();
+    pick('db7');
+    await settle();
+    const tip = pane.querySelector('[data-pkc-field="sql-tip"]')?.textContent ?? '';
+    const example = pane.querySelector('[data-pkc-field="sql-example"]')?.textContent ?? '';
+    expect(tip, '案内が前の相手(csv)の話をしている').toContain('写した表 parquet です');
+    expect(tip, '足さない列を約束している').not.toContain('_note');
+    expect(example, '手本が打てない字になっている').toContain('FROM parquet');
+    /**
+     * ⚠ **対照群** ── csv では今までどおり(「どの相手でも parquet」に壊れていない)。
+     * 🔑 `.csv` の既定は**内蔵の sqlite** なので、DuckDB の枝を見るには**選び直す**
+     *   ── 選び直さないと、比べているのは別の engine の字である。
+     */
+    const { pick: pick2, pane: pane2, pickEngine } = setup();
+    pick2('db4');
+    await settle();
+    pickEngine('duckdb');
+    await settle();
+    expect(pane2.querySelector('[data-pkc-field="sql-example"]')?.textContent).toContain('FROM csv');
+  });
+
+  it('🔴 エンジンは DuckDB になり、内蔵の sqlite は薄い字で理由が出る', async () => {
+    const { pick, engineSel } = setup();
+    pick('db7');
+    await settle();
+    expect(engineSel.value, '.parquet なのに sqlite で引こうとしている').toBe('duckdb');
+    const lite = [...engineSel.options].find((o) => o.value === 'sqlite');
+    expect(lite?.disabled, '.parquet で内蔵の sqlite を選ばせている').toBe(true);
+    expect(lite?.textContent, 'なぜ選べないかが書いていない').toContain('DuckDB');
+    // ⚠ 対照群 ── csv では sqlite が選べる(「いつも薄い」に壊れていない)
+    const { pick: pick2, engineSel: sel2 } = setup();
+    pick2('db4');
+    await settle();
+    expect([...sel2.options].find((o) => o.value === 'sqlite')?.disabled).toBe(false);
+  });
+
+  it('🔴 走らせると、DuckDB へ kind ごと渡る(読み手を選び分けられる形)', async () => {
+    const { pick, type, runBtn, runReadOnlySql, duckSeen, cells } = setup();
+    pick('db7');
+    await settle();
+    type('SELECT * FROM parquet');
+    runBtn.click();
+    await settle();
+    expect(duckSeen, 'DuckDB へ引きに行っていない').toHaveLength(1);
+    expect(duckSeen[0]?.source, 'kind が渡っていない(読み手を選び分けられない)').toEqual({
+      kind: 'parquet',
+      lid: 'db7',
+      name: '売上.parquet',
+    });
+    // 🔴 **ここで初めて中身を読む**(選んだ時点では読んでいない)
+    expect(duckSeen[0]?.bytes, '相手の中身を読みに来ていない').toBeGreaterThan(0);
+    expect(runReadOnlySql, '内蔵の sqlite でも引いている').toHaveBeenCalledTimes(0);
+    expect(cells()).toEqual([['duck']]);
+  });
+
+  it('🔴 .ndjson は「1 行 1 件」として渡る(.json と別物)', async () => {
+    const { pick, type, runBtn, duckSeen } = setup();
+    pick('db8');
+    await settle();
+    type('SELECT * FROM json');
+    runBtn.click();
+    await settle();
+    expect(duckSeen[0]?.source).toEqual({
+      kind: 'json',
+      lang: 'ndjson',
+      lid: 'db8',
+      name: '明細.ndjson',
+    });
+  });
+
+  /**
+   * 🔴 **つながり図は「採れない理由」を出す**(#682 段④c)。
+   * ⚠ 頼むと、構造を採る 3 本は**内蔵の sqlite へ**飛ぶ ── そこに客の DB は無いので
+   *   生の断り文が図の所に出る。⚠ 頼まないと「採っています」で永久に止まる。
+   *   🔑 だから**頼まずに、理由を書く**。
+   */
+  /**
+   * 🔴 **物語の順で押しても、理由が出る**(#682 段④c。着地前レビュー F2)。
+   *
+   * ⚠ user は「相手を選ぶ → 図を開く」の順に押す。⚠ ところが直す前の
+   *   `SQL_ER_TOGGLE` は **`note` を空に潰してから** sqlite へ頼んでいたので、
+   *   `SQL_GUEST_OPENED` が書いた親切な字は**この順では 1 度も読めなかった**
+   *   (図が閉じている間は画面に出ないので)。
+   * 🔑 下の test は「図を先に開く」順なので、**この口を 1 度も通らない** ──
+   *   だから**両方の順**を置く(§2「経路が一度も通っていない」)。
+   */
+  it('🔴 相手を選んでから図を開いても、採れない理由が出る(.sqlite の話をしない)', async () => {
+    const { pick, pane, runReadOnlySql } = setup();
+    pick('db7');
+    await settle();
+    runReadOnlySql.mockClear();
+    pane.querySelector<HTMLButtonElement>('[data-pkc-action="sql-er-toggle"]')?.click();
+    await settle();
+    const er = pane.querySelector('[data-pkc-region="sql-er"]')?.textContent ?? '';
+    expect(er, '採れない理由が出ていない').toContain('まだ出せません');
+    expect(er, '選んだばかりなのに「先に選んでください」と言っている').not.toContain('先に選んで');
+    expect(runReadOnlySql, '採れないのに内蔵の sqlite へ聞きに行っている').toHaveBeenCalledTimes(0);
+  });
+
+  /**
+   * 🔴 **「構造をノートへ」も同じ門を通る**(着地前レビュー F2 の 2 つ目)。
+   * ⚠ この押し所は**答えが無くても押せる**ので、`.parquet` を選んだまま押せてしまう。
+   */
+  it('🔴 「構造をノートへ」も、.sqlite の話で断らない', async () => {
+    const { pick, pane, schemaBtn, runReadOnlySql, persisted } = setup();
+    pick('db7');
+    await settle();
+    runReadOnlySql.mockClear();
+    schemaBtn.click();
+    await settle();
+    expect(pane.textContent, '採れない理由が出ていない').toContain('まだ出せません');
+    expect(pane.textContent, '選んだばかりなのに「先に選んでください」と言っている').not.toContain(
+      '先に選んで',
+    );
+    expect(runReadOnlySql, '採れないのに内蔵の sqlite へ聞きに行っている').toHaveBeenCalledTimes(0);
+    expect(persisted, '採れないのにノートを作っている').toHaveLength(0);
+    // ⚠ **押せなくなっていない**(`running` を立てたまま止めていない)
+    expect(schemaBtn.disabled, '押したきり、二度と押せなくなっている').toBe(false);
+  });
+
+  /**
+   * 🔴 **手持ちの `.parquet`**(着地前レビュー F6)── `sqlSourceSize` の
+   *   手持ち file の枝を通る**唯一の場面**である。
+   */
+  it('🔴 手持ちの .parquet も、sqlite を叩かずに開ける', async () => {
+    const { pickLocalFile, note, openSqlGuest, engineSel } = setup();
+    pickLocalFile(new File([new Uint8Array(1234)], 'tegara.parquet'));
+    await settle();
+    expect(openSqlGuest, '手持ちの .parquet を内蔵の sqlite へ渡している').toHaveBeenCalledTimes(0);
+    expect(note(), '開いたことが画面に出ない').toContain('tegara.parquet を調べています');
+    // ⚠ 大きさは `File.size` から採る(中身は 1 バイトも読まない)
+    expect(note(), '大きさが出ていない').toContain('1.2 KB');
+    expect(engineSel.value, '手持ちの .parquet で sqlite を選んでいる').toBe('duckdb');
+  });
+
+  it('🔴 つながり図は、採れない理由をその場に出す(永久に「採っています」にしない)', async () => {
+    const { pick, pane, runReadOnlySql } = setup();
+    // 図を開いてから相手を選ぶ(開いているときだけ採りに行く作り)
+    pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-er-toggle"]')?.click();
+    await settle();
+    runReadOnlySql.mockClear();
+    pick('db7');
+    await settle();
+    const er = pane.querySelector('[data-pkc-region="sql-er"]')?.textContent ?? '';
+    expect(er, '採れない理由が出ていない').toContain('まだ出せません');
+    expect(er, '採っています、のまま止まっている').not.toContain('採っています');
+    expect(runReadOnlySql, '採れないのに内蔵の sqlite へ聞きに行っている').toHaveBeenCalledTimes(0);
   });
 });

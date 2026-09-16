@@ -22,16 +22,26 @@ import { join } from 'node:path';
 import { SQLITE_EXTS, sqlSourcesOf } from '../../src/features/query/sqlite-attachment';
 import { csvAttachmentSourcesOf } from '../../src/features/query/csv-attachment';
 import { xlsxAttachmentSourcesOf } from '../../src/features/query/xlsx-attachment';
-import { SQL_GUEST_EXTS, sqlGuestSourceOf } from '../../src/features/query/sql-guest-source';
+import {
+  duckDbOnlySourcesOf,
+  SQL_GUEST_EXTS,
+  sqlGuestSourceOf,
+} from '../../src/features/query/sql-guest-source';
 
 const ROOT = join(import.meta.dirname, '../..');
 const att = (lid: string, title: string) => ({ lid, title, archetype: 'attachment' });
 
 /**
- * 選び所に並べている一覧(`paintSource` と**同じ 3 本**)。
+ * 選び所に並べている一覧(`paintSource` と**同じ 4 本**)。
  * ⚠ ここを手で並べているので、下の「数え上げ」でこの一覧自体の抜けを見る。
  */
-const LISTERS = [sqlSourcesOf, csvAttachmentSourcesOf, xlsxAttachmentSourcesOf];
+const LISTERS = [
+  sqlSourcesOf,
+  csvAttachmentSourcesOf,
+  xlsxAttachmentSourcesOf,
+  // 🔴 `.parquet` / `.json` / `.ndjson` / `.jsonl`(#682 段④c)
+  duckDbOnlySourcesOf,
+];
 
 /** 添付として在りうる題名(選び所に出る物と、出ない物の両方)。 */
 const NAMES = [
@@ -41,6 +51,11 @@ const NAMES = [
   '客.tsv',
   '台帳.xlsx',
   '台帳.XLSX',
+  // 🔴 DuckDB でしか読めない相手(#682 段④c)
+  '売上.parquet',
+  '明細.json',
+  'ログ.ndjson',
+  'ログ.JSONL',
   // ⚠ 出てはいけない物(対照群)
   '古い台帳.xls',
   'ねこ.png',
@@ -83,7 +98,7 @@ describe('選び所と開き方が食い違わない', () => {
     // 🔴 `.xls` は**わざと**どちらにも入れていない(zip ではないので開けない)
     expect(neither, '.xls を受けてしまっている').toContain('古い台帳.xls');
     // 対照群のもう片側 ── ちゃんと並んで開ける物も在る
-    expect(NAMES.filter((n) => listed(n)).length).toBeGreaterThanOrEqual(6);
+    expect(NAMES.filter((n) => listed(n)).length).toBeGreaterThanOrEqual(10);
   });
 });
 
@@ -107,8 +122,10 @@ describe('file 選択画面に出す拡張子と、開き方が食い違わな�
   });
 
   it('⚠ 空振り防止 ── `accept` の一覧は本当に中身を持っている', () => {
-    expect(SQL_GUEST_EXTS.length).toBeGreaterThanOrEqual(6);
+    expect(SQL_GUEST_EXTS.length).toBeGreaterThanOrEqual(10);
     expect(SQL_GUEST_EXTS, '.xlsx が入っていない').toContain('.xlsx');
+    expect(SQL_GUEST_EXTS, '.parquet が入っていない').toContain('.parquet');
+    expect(SQL_GUEST_EXTS, '.ndjson が入っていない').toContain('.ndjson');
     // 🔴 `.xls` は**わざと入れない**(zip ではないので開けない)
     expect(SQL_GUEST_EXTS, '.xls を出してしまっている').not.toContain('.xls');
   });

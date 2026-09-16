@@ -14,6 +14,7 @@
  */
 
 import type { SqlEngine } from './sql-engine';
+import { guestTableNameOf, duckDbReadableSourceOf } from './sql-guest-source';
 
 /** 名前を並べる上限。⚠ 表が何十個も在る DB で、案内文が画面を埋めない。 */
 export const TIP_TABLES_MAX = 8;
@@ -82,17 +83,31 @@ export function sqlTipText(target: SqlTipTarget | null, engine: SqlEngine = 'sql
        *   🔑 知らせないと、**在ることに気づけないまま**になる(user の動機は
        *   「DuckDB を分かち合いたい」なので、隠れているのはいちばん悪い)。
        */
-      '取り込んだ .csv や .tsv を選ぶと、DuckDB でも引けます。'
+      '取り込んだ .csv や .tsv、.parquet や .json を選ぶと、DuckDB でも引けます。'
     );
   }
   if (engine === 'duckdb') {
     /**
      * ⚠ **DuckDB は写した表 1 つしか持たない** ── 先に言わないと、
      *   打ってから英語で「そんな表は無い」と返る。
+     *
+     * 🔴 **表の名前も、足す列も、相手ごとに違う**(#682 段④c)。
+     * ⚠ 直す前のここは **`csv` と `_note` / `_lid` を直書き**していて、
+     *   docstring にも「相手に依らず表の名前は `csv` 固定」と書いてあった ──
+     *   段② の時点では本当だったが、`.parquet` を受けた日に**嘘になった**。
+     *   🔴 そのとき画面は「表 csv です」と言い、手本も `FROM csv …` を出すので、
+     *   **書いてあるとおり打つと英語で断られる**(いちばん悪い形の dead click)。
+     * 🔑 だから名前は `guestTableNameOf` **1 か所**から採る ── 器が
+     *   `CREATE TABLE` する名前と同じ物である(`duckdb-runner.ts` も同じ関数を呼ぶ)。
      */
+    const src = duckDbReadableSourceOf('', target.name);
+    const table = src === null ? (target.tables[0] ?? 'csv') : guestTableNameOf(src);
     return (
-      `いま調べているのは ${target.name} を DuckDB へ写した表 csv です。` +
-      '列は _note と _lid のあとに、file の見出しがそのまま並びます。' +
+      `いま調べているのは ${target.name} を DuckDB へ写した表 ${table} です。` +
+      (src !== null && src.kind !== 'csv'
+        ? // 🔑 `.parquet` / `.json` は**相手の列そのまま**(`_note` / `_lid` を足さない)
+          '列は、その file に書いてある列がそのまま並びます。'
+        : '列は _note と _lid のあとに、file の見出しがそのまま並びます。') +
       'この file を選んでいる間、この PKC のノートの表(entries など)は出てきません。'
     );
   }
@@ -125,11 +140,14 @@ export function sqlRulesText(engine: SqlEngine = 'sqlite'): string {
  */
 export function sqlPlaceholder(target: SqlTipTarget | null, engine: SqlEngine = 'sqlite'): string {
   /**
-   * 🔴 **DuckDB の手本は DuckDB の文法で出す**(#682 段②)。
-   * ⚠ 相手に依らず表の名前は `csv` 固定(写した先の名前)── だから
-   *   `target.tables`(sqlite が読んだ表)を使わない。
+   * 🔴 **DuckDB の手本は DuckDB の文法で、いまの相手の表の名前で出す**(#682 段④c)。
+   * ⚠ 直す前はここが **`FROM csv …` 固定**だった ── `.parquet` を選ぶと
+   *   **手本をそのまま打って英語で断られる**(`sqlTipText` と同じ根)。
    */
-  if (engine === 'duckdb') return 'FROM csv SELECT * LIMIT 20';
+  if (engine === 'duckdb') {
+    const src = target === null ? null : duckDbReadableSourceOf('', target.name);
+    return `FROM ${src === null ? 'csv' : guestTableNameOf(src)} SELECT * LIMIT 20`;
+  }
   if (target === null) {
     return 'SELECT title, updated_at FROM entries ORDER BY updated_at DESC LIMIT 20';
   }

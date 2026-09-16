@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { answerAppDialog, gotoApp, collectPageErrors, clickReal, expectImageRendered, createEntry, useSplitEditor, useListBrowse, expectMainGapUnderBudget } from './helpers';
 // ⚠ 段⑤(xlsx を SQL で調べる)の bytes は Node 側でこの 1 本から組む(#854 段③)。
 import { buildXlsx } from '../features/xlsx-fixture';
+import { buildParquet } from '../features/parquet-fixture';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -948,6 +949,16 @@ test('🔴 大きな画像は縮めるか聞き、断れば原寸のまま入る
  *    DOM 上は「置き換わった」ように見えることがある
  */
 test('🔴 囲みの中身を添付から取る ── csv の添付が表になる(#444 段①)', async ({ page }) => {
+  /**
+   * 🔴 **既定の 30 秒では足りない**(#682 段④c で実測した)。
+   *
+   * ⚠ この筋書きは中に **`{ timeout: 60_000 }` を 2 か所**持っているが、
+   *   `playwright.config.ts` の per-test は **30 秒**なので、
+   *   **その 60 秒は原理的に使い切れない**(先に test ごと落ちる)。
+   * 🔑 DuckDB は器(約 35MB)と拡張 3 つを読み込むので、実測で 30 秒に近づく ──
+   *   同じ file の 837 行が既に `test.setTimeout(120_000)` を置いている(前例)。
+   */
+  test.setTimeout(180_000);
   const errors = collectPageErrors(page);
   await gotoApp(page);
 
@@ -981,6 +992,57 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
     mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     buffer: Buffer.from(xlsxBytes),
   });
+  /**
+   * 🔴 **1 件ずつ、取り込めたのを見てから次を渡す**(#682 段④c で踏んだ)。
+   *
+   * ⚠ `attachFiles` は**非同期**で、受け口(`binder.ts`)は読んだ直後に
+   *   `el.value = ''` で入力欄を空にする ── 🔴 **待たずに次の file を渡すと、
+   *   飛んでいる取り込みと重なって、後の 1 件が黙って消える**。
+   * ⚠ 実測(2026-09-16、両ブラウザ同一):csv → xlsx → parquet と続けて渡したら、
+   *   **3 件目の `.parquet` だけが添付にならなかった**(左の一覧は csv / xlsx の 2 件、
+   *   状態の行は「uriage.xlsx を添付にしました」)。page error は **0 件**で、
+   *   選び所で `.parquet` を探す所が 25 秒 retry して落ちた。
+   * 🔑 だから**一覧に出たことを見てから**次へ進む(待ちを伸ばすのではなく、
+   *   **起きたことを観測してから**進む)。
+   */
+  const sidebar = page.locator('[data-pkc-region="sidebar"]');
+  await expect(sidebar, '.xlsx が添付として取り込まれていない').toContainText('uriage.xlsx');
+
+  /**
+   * 🔴 **`.parquet` も、ここで取り込む**(段⑤-c の下ごしらえ。#682 段④c)。
+   * 🔑 bytes は `tests/features/parquet-fixture.ts` が**その場で組む**
+   *   (`buildXlsx` と同じ向き ── 外から拾ってきた binary を repo へ置かない)。
+   */
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: 'uriage.parquet',
+    mimeType: 'application/octet-stream',
+    buffer: Buffer.from(
+      buildParquet([
+        { name: 'id', type: 'int32', values: [1, 2, 3] },
+        { name: 'shinamono', type: 'utf8', values: ['ringo', 'mikan', 'budou'] },
+      ]),
+    ),
+  });
+  await expect(sidebar, '.parquet が添付として取り込まれていない').toContainText('uriage.parquet');
+
+  /**
+   * 🔴 **`.json` も取り込む**(#682 段④c。着地前 smoke が
+   *   「`.json` は実ブラウザで 1 度も通っていない」と指摘したので足した)。
+   * ⚠ お知らせもマニュアルも `.json` を約束している ── **約束したものは通す**。
+   * 🔑 中身はただの字なので、`buildParquet` のような組み立てが要らない。
+   */
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: 'meisai.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(
+      JSON.stringify([
+        { id: 1, shinamono: 'ringo' },
+        { id: 2, shinamono: 'mikan' },
+      ]),
+      'utf8',
+    ),
+  });
+  await expect(sidebar, '.json が添付として取り込まれていない').toContainText('meisai.json');
 
   await createEntry(page, 'text');
   const ta = page.locator('[data-pkc-field="editor-body"]');
@@ -1424,6 +1486,178 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   await expect(erBox, '図が畳めない').toHaveCount(0);
 
   /**
+   * ⑤-c 🔴 **`.parquet` を、DuckDB で引く**(#682 段④c)。
+   *
+   * ## 🔑 ここでしか言えないこと
+   *
+   * ⚠ unit は「**どんな SQL の字を組んだか**」までしか言えない
+   *   (`tests/duckdb-read-formats.test.ts` は node で engine に打たせるが、
+   *   それも**ブラウザの経路ではない**)。
+   * 🔴 **実ブラウザでしか言えないのは、この 3 つが 1 本に繋がること**:
+   *   ①配った `parquet` 拡張が**同一オリジンから読み込める**
+   *   ②IDB の添付 bytes が器へ差し込まれる
+   *   ③外を塞いだ後に、写した表から行が返る
+   * 🔑 **新しい起動は増やさない**(#820 の規律)── この筋書きの続きで確かめる。
+   */
+  /**
+   * 🔴 **`.parquet` は選び所のいちばん下**(#682 段④c)── `.xlsx` より後ろに並ぶ。
+   * ⚠ 「在る」と「その位置に在る」は別の主張である(上の `.xlsx` 対 `.csv` と同じ形)。
+   */
+  const labelsWithParquet = await source.locator('option').allTextContents();
+  const idxXlsx = labelsWithParquet.indexOf('uriage.xlsx');
+  const idxParquet = labelsWithParquet.indexOf('uriage.parquet');
+  const idxJson = labelsWithParquet.indexOf('meisai.json');
+  /**
+   * ⚠ **基準の側も留める**(2026-09-16、着地前 smoke が指摘)。
+   * 🔴 `idxXlsx` を検めないと、`.xlsx` が選び所から落ちた日に `-1` になり、
+   *   下の「`.xlsx` より後ろ」は**上の行が既に言っていること**へ潰れて**恒真**になる
+   *   (CLAUDE.md §1 の形)。上の `.xlsx` 対 `.csv` は基準の側を 2 通りで留めている。
+   */
+  expect(idxXlsx, '.xlsx が選び所から消えている(この比較の基準が無い)').toBeGreaterThanOrEqual(0);
+  expect(idxParquet, '.parquet が選び所に見つからない').toBeGreaterThanOrEqual(0);
+  expect(idxJson, '.json が選び所に見つからない').toBeGreaterThanOrEqual(0);
+  expect(idxParquet, '.parquet が .xlsx より上(前)に並んでいる').toBeGreaterThan(idxXlsx);
+  expect(idxJson, '.json が .xlsx より上(前)に並んでいる').toBeGreaterThan(idxXlsx);
+
+  /**
+   * 🔴 **見張りを付け直す**(2026-09-16、着地前 smoke が空振りを見つけた)。
+   * ⚠ 上の DuckDB の筋書きは `finally` で `page.off('request', watchOutward)` している ──
+   *   つまり**そのまま下で `outward` を見ても、1 件も増えようがない**(恒真の assert)。
+   *   🔴 CLAUDE.md §1「代替物で満たせない条件にする」の、いちばん静かな形である。
+   * 🔑 だから**この回ぶんを別に数える** ── 付け直して、走らせ終わってから外す。
+   */
+  const outwardDuck: string[] = [];
+  /**
+   * ⚠ **全部の数も控える** ── 「外へ 0 件」は、**見張りを付け忘れた版でも成り立つ**。
+   * 🔑 だからこの回に**何か 1 件でも見えたこと**を、同じ見張りで数えて空振りを潰す。
+   */
+  let seenDuck = 0;
+  const watchDuck = (req: { url: () => string }): void => {
+    seenDuck += 1;
+    const u = req.url();
+    if (!u.startsWith('http://localhost') && !u.startsWith('http://127.0.0.1')) {
+      outwardDuck.push(u);
+    }
+  };
+  page.on('request', watchDuck);
+
+  await source.selectOption({ label: 'uriage.parquet' });
+  await expect(note, '.parquet が開いたことが画面に出ない').toContainText(
+    'uriage.parquet を調べています',
+  );
+  /**
+   * 🔴 **内蔵の sqlite が薄い字になる**(この形式では選べない)。
+   * ⚠ ここが `.csv` / `.xlsx` の**対照群の裏返し**である ── 上の 2 つでは
+   *   sqlite が選べ、DuckDB が薄かった。**薄くする側が入れ替わる**ことを見るので、
+   *   「いつも薄い / いつも薄くない」のどちらの変異も落ちる。
+   */
+  await expect(engine, '.parquet で選び所が消えている').toBeVisible();
+  await expect(engine, '.parquet なのに sqlite で引こうとしている').toHaveValue('duckdb');
+  const liteOption = engine.locator('option[value="sqlite"]');
+  expect(
+    await liteOption.evaluate((o) => (o as HTMLOptionElement).disabled),
+    '.parquet なのに内蔵の sqlite を選ばせている',
+  ).toBe(true);
+  await expect(liteOption, 'なぜ選べないかが書いていない').toContainText('DuckDB');
+
+  /**
+   * 🔴 **画面に出ている手本を、そのまま走らせる**(#682 段④c、着地前レビューの提案)。
+   *
+   * ⚠ 自分で字を打つと、**画面の案内と手本が嘘でも通ってしまう** ── 実際
+   *   `sql-tip.ts` が `csv` を直書きしていて、`.parquet` を選ぶと
+   *   **手本をそのまま打つと英語で断られる**状態だった(unit も smoke も鳴らなかった)。
+   * 🔑 だから「画面に出ている字で本当に引けるか」を、ここで 1 本に繋ぐ。
+   */
+  const example = (await page.locator('[data-pkc-field="sql-example"]').textContent()) ?? '';
+  expect(example, '手本が parquet の名前で書かれていない').toContain('FROM parquet');
+  await page.fill('[data-pkc-field="sql-input"]', example.replace(/^例:\s*/u, ''));
+  await clickReal(page, '[data-pkc-action="run-sql"]');
+  /**
+   * ⚠ **長めに待つ** ── 初回は器(約 35MB)と拡張 3 つを取りに行くので、
+   *   `.csv` の回(既に器が起きている)より時間がかかる。
+   */
+  await expect(sqlTable, '.parquet から行が返らない').toBeVisible({ timeout: 60_000 });
+  expect(
+    await sqlTable.locator('thead th').allTextContents(),
+    '相手の列を勝手に増やしている(parquet には _note / _lid を足さない)',
+  ).toEqual(['id', 'shinamono']);
+  await expect(sqlTable.locator('tbody tr'), '行の数が合わない').toHaveCount(3);
+  await expect(sqlTable, 'parquet の中身が出ていない').toContainText('mikan');
+  // ⚠ 断り文が表の代わりに出ていないこと(「出た」と「正しく出た」を分ける)
+  await expect(page.locator('[data-pkc-field="sql-note"]'), '断り文が出ている').not.toContainText(
+    'does not exist',
+  );
+  /**
+   * ⑤-d 🔴 **`.json` も、同じ道で引ける**(#682 段④c)。
+   *
+   * ⚠ お知らせもマニュアルも `.json` / `.ndjson` / `.jsonl` を約束している ──
+   *   ところが 3 稿目まで **smoke は `.parquet` しか通していなかった**
+   *   (着地前 smoke が指摘)。🔑 約束したものは通す。
+   * ⚠ **器は相手ごとに作り直す**(鍵が変わる)ので、ここでもう 1 度起こし直す ──
+   *   ただし wasm も拡張も**もう取ってある**ので、待ちは短い。
+   * 🔑 ここも**画面の手本をそのまま**走らせる(自分で字を打つと、案内が嘘でも通る)。
+   */
+  await source.selectOption({ label: 'meisai.json' });
+  await expect(note, '.json が開いたことが画面に出ない').toContainText('meisai.json を調べています');
+  await expect(engine, '.json なのに sqlite で引こうとしている').toHaveValue('duckdb');
+  const jsonExample = (await page.locator('[data-pkc-field="sql-example"]').textContent()) ?? '';
+  expect(jsonExample, '手本が json の名前で書かれていない').toContain('FROM json');
+  await page.fill('[data-pkc-field="sql-input"]', jsonExample.replace(/^例:\s*/u, ''));
+  await clickReal(page, '[data-pkc-action="run-sql"]');
+  await expect(sqlTable, '.json から行が返らない').toBeVisible({ timeout: 60_000 });
+  expect(
+    await sqlTable.locator('thead th').allTextContents(),
+    '相手の列を勝手に増やしている(json には _note / _lid を足さない)',
+  ).toEqual(['id', 'shinamono']);
+  await expect(sqlTable.locator('tbody tr'), '行の数が合わない').toHaveCount(2);
+  await expect(sqlTable, 'json の中身が出ていない').toContainText('mikan');
+
+  /**
+   * ⚠ **外へ出ていない**(段② の柱)── localhost 以外への要求が 1 件も無いこと。
+   * 🔑 **`.parquet` と `.json` の両方を通した後**に見る ── 器は相手ごとに
+   *   作り直すので、2 形式ぶんの「起こし直し」が窓の中に入っている。
+   * ⚠ **空振り防止** ── 見張りが本当に動いていたことを、同じ回の中で確かめる
+   *   (`page.on` を付け忘れた版でも `[]` になるので、それだけでは何も言えない)。
+   *   🔑 実測(2026-09-16、両ブラウザ一致):窓の中は **10 件**で、内訳は
+   *   器 / worker / 拡張 3 つ ── どれも同一オリジンだった。
+   */
+  expect(seenDuck, '見張りが 1 件も数えていない(付け忘れ = この assert は空振り)').toBeGreaterThan(0);
+  expect(outwardDuck, `DuckDB で引いたのに外へ出た: ${outwardDuck.join(' / ')}`).toEqual([]);
+  page.off('request', watchDuck);
+
+  // 🔑 図と構造の断りは `.parquet` へ戻して見る(同じ門なので 1 形式で足りる)
+  await source.selectOption({ label: 'uriage.parquet' });
+  await expect(note, '.parquet へ戻せていない').toContainText('uriage.parquet を調べています');
+
+  /**
+   * 🔴 **`.parquet` では「つながり図」も「構造をノートへ」も、理由を出して断る**
+   *   (#682 段④c。⚠ 着地前 smoke が「この 2 つは実ブラウザで 1 度も通っていない」と
+   *   指摘したので足した)。
+   *
+   * ⚠ 直す前は worker が **「取り込んだ .sqlite が開かれていません(先に選んでください)」**と
+   *   返していた ── user は `.parquet` を選んだのに別の形式の話をされ、
+   *   **いまやったばかりの操作をもう一度やれ**と言われる。
+   * 🔑 **新しい起動は増やさない** ── この筋書きの続きで確かめる。
+   */
+  await clickReal(page, '[data-pkc-action="sql-er-toggle"]');
+  const erHost = page.locator('[data-pkc-region="sql-er"]');
+  await expect(erHost, '図に採れない理由が出ていない').toContainText('まだ出せません');
+  await expect(erHost, '選んだばかりなのに「先に選んでください」と言っている').not.toContainText(
+    '先に選んで',
+  );
+  // ⚠ 「採っています」のまま止まっていないこと(永久に空の図を作らない)
+  await expect(erHost, '採っています、のまま止まっている').not.toContainText('採っています');
+  await clickReal(page, '[data-pkc-action="sql-er-toggle"]');
+
+  await clickReal(page, '[data-pkc-action="sql-schema-to-note"]');
+  await expect(note, '「構造をノートへ」が .sqlite の話で断っている').toContainText(
+    'まだ出せません',
+  );
+  await expect(note, '選んだばかりなのに「先に選んでください」と言っている').not.toContainText(
+    '先に選んで',
+  );
+
+  /**
    * ⑤-b 🔴 **調べている最中にノートを押しても、SQL の面は残る**(#906。user 裁定 2026-09-14)。
    *
    * ⚠ 直す前は `SELECT_ENTRY` が `sql` を aside 面として畳んでいたので、
@@ -1529,10 +1763,23 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
    * 🔑 **新しい起動は増やしていない**(#820 の規律)── ⑦ が開いたままの
    *   同じ SQL の面の道中に続ける(`gotoApp` / `page.goto` を足さない)。
    *
-   * ⚠ ここまでに**走らせた字**(= 履歴に積まれた字。新しい順):
-   *   `SELECT * FROM csv`(⑥/⑦。⚠ ⑦ は直前と同じなので積まれない)/
-   *   `SELECT * FROM sheet1`(⑤)/ `SELECT * FROM xlsx_sheets`(⑤)/
-   *   `SELECT * FROM csv`(④)。
+   * ⚠ ここまでに**走らせた字**(= 履歴に積まれた字。新しい順。**全 8 件**):
+   *   1. `SELECT * FROM csv`(⑥/⑦。⚠ ⑦ は直前と同じなので積まれない)
+   *   2. 🔴 `FROM json SELECT * LIMIT 20`(⑤-d。#682 段④c)
+   *   3. 🔴 `FROM parquet SELECT * LIMIT 20`(⑤-c。#682 段④c)
+   *   4. `SELECT * FROM sheet1`(⑤)
+   *   5. `SELECT * FROM xlsx_sheets`(⑤)
+   *   6. `select * from csv`(⑤-a2。図の表を押して組んだ字 ── **小文字なので別扱い**)
+   *   7. `SELECT * FROM csv`(④)
+   *   8. `SELECT extension_name FROM duckdb_extensions() …`(段④b の筋書き)
+   *
+   * 🔴 **この帳簿は、上の筋書きへ 1 つ足すたびに古くなる**(2026-09-16 に 2 度踏んだ)。
+   * ⚠ 1 度目:⑤-c を足したのに 2 番目の期待値を直さず落ちた。
+   * ⚠ 2 度目:帳簿を直したつもりで **5 件しか並べず**、実際の画面は **7 件**だった ──
+   *   🔴 **総数を留めていなかったので、誰も鳴らなかった**
+   *   (`'前に打った字(1 / '` は `1 / 99` でも通る)。着地前 smoke が数えて見つけた。
+   * 🔑 だから**総数まで留める** ── 筋書きへ 1 本足した人は、ここで落ちて
+   *   **帳簿を直す所が分かる**。
    */
   const input = page.locator('[data-pkc-field="sql-input"]');
   // 🔑 **打ちかけの字**を置く ── 走らせない(履歴には積まれない字である)
@@ -1552,10 +1799,25 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   // 🔴 1 行目で ↑ → いちばん新しい「走らせた字」が戻る
   await page.keyboard.press('ArrowUp');
   await expect(input, '↑ で前に走らせた字が戻らない').toHaveValue('SELECT * FROM csv');
-  await expect(histNote, 'いま何番目かが出ていない').toContainText('前に打った字(1 / ');
-  // 🔴 もう一度 ↑ → さらに前へ(⚠ 同じ字は 2 つ並ばないので、次は sheet1)
+  /**
+   * 🔴 **総数まで留める**(#682 段④c の 2 稿目で、ここが緩くて帳簿がずれた)。
+   * ⚠ `'前に打った字(1 / '` で切ると、**何件でも通る** ── 上の帳簿が嘘になっても
+   *   誰も鳴らない(CLAUDE.md §1「代替物で満たせない条件にする」)。
+   */
+  await expect(histNote, 'いま何番目かが出ていない(数が合わなければ上の帳簿を直す)').toContainText(
+    '前に打った字(1 / 8)',
+  );
+  /**
+   * 🔴 **2 度目の ↑ は、いま「2 番目に新しい字」である**(#682 段④c で 1 つ増えた)。
+   * ⚠ 期待値を書き換えるとき、**上の帳簿も一緒に直す** ── 帳簿と assert が
+   *   別々に古くなると、次に足した人はここで落ちても**どこを直すのか分からない**。
+   * 🔑 ⑤-d(`.json` を画面の例文で走らせる)がいちばん新しいので、いまは json の字。
+   *   ⚠ この名指しは「**足した筋書きが本当に履歴へ積まれた**」の観測点でもある。
+   */
   await page.keyboard.press('ArrowUp');
-  await expect(input, '2 度目の ↑ でさらに前へ遡らない').toHaveValue('SELECT * FROM sheet1');
+  await expect(input, '2 度目の ↑ でさらに前へ遡らない(⑤-d の字が履歴に積まれていない)').toHaveValue(
+    'FROM json SELECT * LIMIT 20',
+  );
   // 🔴 ↓ で新しいほうへ戻る
   await page.keyboard.press('ArrowDown');
   await expect(input, '↓ で新しいほうへ戻らない').toHaveValue('SELECT * FROM csv');
