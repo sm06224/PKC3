@@ -22,6 +22,12 @@ import {
 const SEARCH_LIMIT = 200;
 import type { EntryStamps, EntryUpsert } from './schema';
 import { contentHash64Hex } from './content-hash';
+import {
+  CORRUPT_BLOCKED_OPS,
+  CORRUPT_REFUSAL,
+  corruptReport,
+  shouldFlagCorrupt,
+} from '@features/storage/db-corruption';
 import { assetRefsIn, scanAssetRefsInto } from '@features/asset/asset-ref-scan';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import { extractMeta } from '@features/flavor';
@@ -3395,11 +3401,24 @@ const handlers: Handlers = {
   },
 };
 
+/**
+ * 🔴 **中身が壊れていると分かったら、書き込みだけ止める**(#971)。
+ *
+ * ⚠ **一度立ったら下ろさない**(sticky)── 壊れた DB は、次の 1 文で治らない。
+ * 🔑 **読みは通す** ── 読みこそが**持ち出す道**である(全部止めると
+ *   「データは在るのに取り出せない」という、いちばん悪い形になる)。
+ */
+let dbCorrupt = false;
+
 self.onmessage = (ev: MessageEvent<{ id: number; req: StorageRequest }>) => {
   const { id, req } = ev.data;
   const handler = handlers[req.op] as ((r: StorageRequest) => unknown) | undefined;
   Promise.resolve()
     .then(() => {
+      // 🔴 壊れていると分かった後は、**書き換える op だけ**断る(#971)
+      if (dbCorrupt && CORRUPT_BLOCKED_OPS.includes(req.op)) {
+        throw new Error(CORRUPT_REFUSAL);
+      }
       // 🔴 **未知の op を名指しで断る**。無条件に呼ぶと `TypeError: handler is not
       // a function` になるだけで、**どの op が無いのか分からない**(nightly の
       // store probe が P5c で消えた `bulkAddRevisions` を呼び続け、この文言だけを
@@ -3411,7 +3430,26 @@ self.onmessage = (ev: MessageEvent<{ id: number; req: StorageRequest }>) => {
     })
     .then(
       (result) => postMessage({ id, ok: true, result } satisfies StorageResponse),
-      (err: unknown) =>
-        postMessage({ id, ok: false, error: String(err) } satisfies StorageResponse),
+      (err: unknown) => {
+        const raw = String(err);
+        /**
+         * 🔴 **ここが、すべての error が通る 1 か所**(#971)── だから見張りもここに置く。
+         * ⚠ 分けて置くと「**同じ問いに答える口が 2 つ**」になる(CLAUDE.md §7)。
+         */
+        // ⚠ **客の file の破損を、うちの破損として扱わない**(`shouldFlagCorrupt` の註記)
+        const towardGuest =
+          (req as { guest?: unknown }).guest === true ||
+          typeof (req as { guest?: unknown }).guest === 'string';
+        if (!dbCorrupt && shouldFlagCorrupt(req.op, towardGuest, raw)) {
+          dbCorrupt = true;
+          postMessage({
+            id,
+            ok: false,
+            error: corruptReport(req.op, raw),
+          } satisfies StorageResponse);
+          return;
+        }
+        postMessage({ id, ok: false, error: raw } satisfies StorageResponse);
+      },
     );
 };
