@@ -33,9 +33,22 @@ on:
         required: false
         default: parquet json sqlite_scanner
         type: string
+      publish:
+        description: '🔴 手元へ届くよう prerelease へ出す(既定は出さない ── 測るだけ)'
+        required: false
+        default: false
+        type: boolean
 
+# 🔴 **prerelease へ出すために `write` が要る**(`office-wasm-build.yml` と同じ理由。2026-09-16 に user 裁定)。
+#
+# ⚠ **開発の箱からは bytes を手に入れられない**(実測 2026-09-16、 3 通りとも):
+#   ① `extensions.duckdb.org` → `CONNECT tunnel failed, 403`
+#   ② npm の package → **存在しない**(3 つ試して 404)
+#   ③ Actions の artifact → `connect_rejected`(`blob.core.windows.net` は方針で不可)
+# 🔑 一方で **in-scope repo の release 資産は届く**
+#   (`office-wasm-build.yml` が同じ問題を同じ道で解いている)。
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   # 🔑 **1 job = 1 主張**:「3 つを取ってきて、配っている wasm に読み込ませられるか」。
@@ -109,6 +122,41 @@ jobs:
             cat "$GITHUB_WORKSPACE/probe.log"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # ── ④ 🔴 **手元へ届く形で出す**(押したときだけ)
+      #
+      # ⚠ **既定では出さない** ── 測るだけの回で tag を動かさない。
+      # ⚠ 出どころを release の文面に残す ── 後から
+      #   「この bytes は何者か」を引けないと、repo に入れたときに由来が消える。
+      - name: 手元へ届くよう prerelease へ出す
+        if: ${{ inputs.publish }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXT_VERSION: ${{ inputs.version || 'v1.5.4' }}
+          EXT_PLATFORM: ${{ inputs.platform || 'wasm_eh' }}
+        run: |
+          set -euo pipefail
+          tag="duckdb-ext-${EXT_VERSION}-${EXT_PLATFORM}"
+          zip -j -q "/tmp/${tag}.zip" ext/*.wasm
+          sums="$(cd ext && sha256sum *.wasm)"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
+          fi
+          printf '%s\n' \
+            "⚠ 開発の箱から extensions.duckdb.org へ出られないので、ここ経由で渡す(#682 段④b)。" \
+            "" \
+            "出どころ: https://extensions.duckdb.org/${EXT_VERSION}/${EXT_PLATFORM}/<名前>.duckdb_extension.wasm" \
+            "" \
+            "sha256:" \
+            '```' \
+            "${sums}" \
+            '```' > /tmp/notes.md
+          gh release create "$tag" "/tmp/${tag}.zip" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "DuckDB の拡張 ${EXT_VERSION} / ${EXT_PLATFORM}" \
+            --prerelease \
+            --notes-file /tmp/notes.md
+          echo "落とし先: https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/${tag}.zip" >> "$GITHUB_STEP_SUMMARY"
 
       # ⚠ 前が落ちても**この 2 つは必ず走らせる**(#221 の教訓 ── 走らなかった step は
       #   「確かめていない」であって「問題なし」ではない)
