@@ -472,11 +472,51 @@ function scheduleFaceOf(target: HTMLElement): HTMLElement | null {
 
 /** 既定 title の種別ラベル(連番は同 archetype の現在数 + 1)。 */
 
-/** lid: epoch(base36)+ セッション内単調 counter(PKC2 と同系の形式)。 */
+/**
+ * 🔴 **id は、窓をまたいでもぶつからない形にする**(#973)。
+ *
+ * ## 何が起きていたか
+ *
+ * 直す前は `<epoch36>-<counter36 4 桁>` だけだった。⚠ `lidCounter` は
+ * **module の変数**なので、**タブ / 別窓ごとに別の 0 から始まる** ── つまり
+ * 入っているのは「時刻(ミリ秒)」と「**その窓の中の**通し番号」しかない。
+ * 🔴 2 つの窓が同じミリ秒で同じ通し番号を引くと、**文字列が 1 バイト違わず同じ**になる。
+ *
+ * ⚠ ぶつかる幅は「同じミリ秒」だが、`moveEntries` も整理案の適用も
+ *   **for ループの中で連続して呼ぶ**ので、1 回の操作で同じミリ秒に何本も採番される。
+ *
+ * ## 🔑 検出ではなく、ぶつかりようが無くする
+ *
+ * CLAUDE.md §7「衝突は、検出するより『起こらなくする』ほうが強い」── **32 bit の
+ * 乱数**を足す。⚠ **既にある id は 1 つも変わらない**(足すのは新しく採番する分だけ)。
+ *
+ * ## ⚠ 綴りの制約は 2 つあり、どちらも別の file が持っている
+ *
+ * ① `pkc://<cid>/entry/<lid>` の token 規則 `[A-Za-z0-9_-]+`
+ *    (`features/link/permalink.ts` の `TOKEN_RE`)
+ * ② `':'` を含めない(`asset-blob-store.ts` の `assertCid` ── key 空間が混ざる)
+ *
+ * 🔑 base36 と `-` だけなので、両方に収まる(同じ file の `mintContainerId` と同じ考え方)。
+ * ⚠ **前置の衝突**(`entry:n1` が `entry:n12` に当たる)を見る所は別に在り
+ *   (`features/entry-ref/body-links.ts`)、そこは**次の 1 文字が lid の文字でないこと**で
+ *   留めているので、段が 1 つ増えても効き方は変わらない。
+ *
+ * ⚠ `crypto` が無い箱では `Math.random` へ落ちる ── **落ちても字の形は同じ**
+ *   (`store-proxy.ts` / `asset-key.ts` と同じ作法)。
+ */
 let lidCounter = 0;
+function randomSuffix(): string {
+  const c: Crypto | undefined = globalThis.crypto;
+  if (c !== undefined && typeof c.getRandomValues === 'function') {
+    const bytes = new Uint8Array(4);
+    c.getRandomValues(bytes);
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  }
+  return Math.random().toString(36).slice(2, 10).padEnd(8, '0');
+}
 export function generateLid(): string {
   lidCounter += 1;
-  return `${Date.now().toString(36)}-${lidCounter.toString(36).padStart(4, '0')}`;
+  return `${Date.now().toString(36)}-${lidCounter.toString(36).padStart(4, '0')}-${randomSuffix()}`;
 }
 
 /**

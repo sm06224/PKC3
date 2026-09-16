@@ -1075,6 +1075,97 @@ describe('🔴 居場所の張り替え(2026-08-05。フォルダ整理)', () =>
     expect(await relsOf('p-child')).toHaveLength(0);
   });
 
+  /**
+   * 🔴 **ぶつかった番号で、別のノートの居場所を黙って書き換えない**(#973)。
+   *
+   * ## 何が起きていたか
+   *
+   * ⚠ 直す前は `ON CONFLICT(cid, id) DO UPDATE` だったので、同じ番号が来ると
+   *   **先に在った行の中身が入れ替わった** ── 窓 A が書いた「議事録 → 会議」が、
+   *   窓 B の「請求書 → 経理」に**なってしまう**。
+   * 🔴 error は 1 つも出ず、履歴にも残らない ── 画面では入ったように見えたまま、
+   *   読み込み直すと**議事録がフォルダから出て、いちばん上へ戻っている**。
+   *
+   * 🔑 だから見るのは 2 つで、**後ろのほうが本題**である:
+   *   ①断ること ②🔴 **先に在った行が 1 バイトも変わっていないこと**
+   *   (①だけ見ると、断りながら書き換える実装でも緑になる)
+   */
+  it('🔴 同じ番号が来たら断る ── 別のノートの居場所を書き換えない(#973)', async () => {
+    await write('dup-fold-a', '# 会議\n');
+    await write('dup-fold-b', '# 経理\n');
+    await write('dup-note-a', '# 議事録\n');
+    await write('dup-note-b', '# 請求書\n');
+
+    await request({
+      op: 'setEntryParent',
+      cid: 'c1',
+      lid: 'dup-note-a',
+      parentLid: 'dup-fold-a',
+      relationId: 'clash-1',
+    });
+    // ⚠ 前提の assert ── 1 本目が入っていなければ、下の「変わっていない」は空振りする
+    expect((await relsOf('dup-note-a')).map((r) => r.from_lid), '1 本目が入っていない').toEqual([
+      'dup-fold-a',
+    ]);
+
+    await expect(
+      request({
+        op: 'setEntryParent',
+        cid: 'c1',
+        lid: 'dup-note-b',
+        parentLid: 'dup-fold-b',
+        relationId: 'clash-1',
+      }),
+      '同じ番号なのに通った(黙って上書きしている)',
+    ).rejects.toThrow(/既に使われています/);
+
+    // 🔴 ここが本題 ── 先に在った行は 1 バイトも変わっていない
+    const kept = await relsOf('dup-note-a');
+    expect(kept.map((r) => r.from_lid), '議事録がフォルダから出た').toEqual(['dup-fold-a']);
+    // ⚠ 断られた側は、どこにも入っていない(半端な行を残さない)
+    expect(await relsOf('dup-note-b'), '断ったのに行が入った').toHaveLength(0);
+  });
+
+  /**
+   * ⚠ **前提**:同じノートを同じ番号でもう一度入れても通る。
+   * 🔑 すぐ上の `DELETE` がこの lid の structural を先に消すので、ぶつからない
+   *   ── これが通らないと、**保存のたびに断られる**ようになる。
+   */
+  it('⚠ 同じノートを同じ番号で入れ直しても断られない(#973)', async () => {
+    await request({
+      op: 'setEntryParent',
+      cid: 'c1',
+      lid: 'dup-note-a',
+      parentLid: 'dup-fold-a',
+      relationId: 'clash-1',
+    });
+    expect((await relsOf('dup-note-a')).map((r) => r.from_lid)).toEqual(['dup-fold-a']);
+  });
+
+  /**
+   * 🟢 **対照群 ── 取り込みの `ON CONFLICT` は正しいので触っていない**(#973)。
+   *
+   * ⚠ あちらは id が**取り込んだファイルの中**から来るので、ぶつかり =
+   *   「**同じ関係をもう一度入れた**」である ── ここを一緒に断る実装へ変えると、
+   *   **同じバックアップを取り込み直しただけで落ちる**。
+   * 🔑 この対照群を同じ describe に置かないと、
+   *   **片方を直したついでにもう片方を壊したこと**に気づけない(CLAUDE.md §7)。
+   */
+  it('🟢 同じ書庫を 2 回取り込んでも通る(取り込み側は断らない。#973)', async () => {
+    const same = {
+      op: 'bulkUpsertRelations' as const,
+      cid: 'c1',
+      relations: [{ id: 'imp-1', fromLid: 'dup-fold-a', toLid: 'dup-note-b', kind: 'structural' }],
+    };
+    await request(same);
+    await request(same); // ⚠ ここが落ちたら、取り込み直しが壊れている
+    const rows = (await request({ op: 'listRelations', cid: 'c1' })).filter(
+      (r) => r.id === 'imp-1',
+    );
+    expect(rows, '2 回入れたら 2 行になった(上書きになっていない)').toHaveLength(1);
+    expect(rows[0]!.from_lid).toBe('dup-fold-a');
+  });
+
   it('🔴 structural 以外の辺は巻き添えにしない', async () => {
     await request({
       op: 'bulkUpsertRelations',
