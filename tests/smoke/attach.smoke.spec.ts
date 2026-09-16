@@ -1211,8 +1211,25 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
 
   const sqlTable = page.locator('[data-pkc-field="sql-table"]');
   await expect(sqlTable, '添付の csv から行が返らない').toBeVisible({ timeout: 10_000 });
-  const headers = await sqlTable.locator('thead th').allTextContents();
-  expect(headers.slice(0, 2), '先頭の列が _note / _lid でない').toEqual(['_note', '_lid']);
+  /**
+   * 🔴 **前の答えの表を読まない**(2026-09-16 に CI で踏んだ)。
+   *
+   * ⚠ 直す前は `allTextContents()` で**一度だけ**読んでいた。上の DuckDB の筋書きを
+   *   足すまでは、ここが**この spec で最初の問い合わせ**だったので
+   *   `toBeVisible` が本物の待ちになっていた ── ところがいまは
+   *   **前の答えの表が既に出ている**ので、その待ちは**素通りする**。
+   * 🔴 実測(CI):`['extension_name']` を読んで落ちた。⚠ **手元では緑だった** ──
+   *   CI のほうが速く、組み直しより先に読む順番になる(CLAUDE.md §5
+   *   「物事が早く起きて、順番が入れ替わる」)。
+   * 🔑 だから**待てる形で見る** ── `toHaveText` は再試行するので、
+   *   「まだ組み直していない」と「そもそも違う」を取り違えない。
+   */
+  const th = sqlTable.locator('thead th');
+  await expect(th.nth(0), '先頭の列が _note でない(前の答えの表を読んでいる)').toHaveText(
+    '_note',
+    { timeout: 10_000 },
+  );
+  await expect(th.nth(1), '2 列目が _lid でない').toHaveText('_lid');
   await expect(sqlTable.locator('tbody tr'), '行の数が合わない').toHaveCount(2);
   await expect(sqlTable).toContainText('りんご');
   await expect(sqlTable).toContainText('120');
