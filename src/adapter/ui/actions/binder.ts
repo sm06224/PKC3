@@ -7576,17 +7576,28 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (table === '') return;
     dispatcher.dispatch({ type: 'SQL_ER_PRESS', press: { kind: 'table', table } });
   },
-  /** 🔴 **図の列を押した**(#918 段⑤c)── 選ぶ列に足す。 */
+  /**
+   * 🔴 **図の列を押した**(#918 段⑤c / 段⑤d-1)。
+   * ⚠ **「繋ぐ」が入のときは、選ぶ列に足すのではなく「繋ぎ先」を選ぶ**
+   *   ── 押し所の名前(`data-pkc-action`)は同じまま、受け手の中身だけ振り分ける
+   *   (CLAUDE.md §10「置き換えたのに気づけない性質」を作らないため、ここに 1 か所へ寄せる)。
+   */
   'sql-er-column': (dispatcher, target) => {
     const table = target.getAttribute('data-pkc-name') ?? '';
     const column = target.getAttribute('data-pkc-col') ?? '';
     if (table === '' || column === '') return;
+    if (dispatcher.getState().sqlPage.er.connecting) {
+      dispatcher.dispatch({ type: 'SQL_ER_PICK', table, column });
+      return;
+    }
     dispatcher.dispatch({ type: 'SQL_ER_PRESS', press: { kind: 'column', table, column } });
   },
   /**
    * 🔴 **図の繋がり(線の札)を押した**(#918 段⑤c)── `JOIN` を足す。
    * ⚠ 4 つとも要る ── 1 つでも欠けたら**押しても何も起きない**ので、
    *   その場合は何も投げない(理由は `erSql` が言える形にならないため)。
+   * ⚠ 自分で引いた線の札は**別の受け手**(`sql-er-unlink`)を持つ ──
+   *   宣言された外部キーとは `data-pkc-action` の綴りで分けてある(消せる/消せない)。
    */
   'sql-er-link': (dispatcher, target) => {
     const from = target.getAttribute('data-pkc-from') ?? '';
@@ -7598,6 +7609,24 @@ const ACTIONS: Record<string, ActionHandler> = {
       type: 'SQL_ER_PRESS',
       press: { kind: 'link', link: { from, fromColumn, to, toColumn } },
     });
+  },
+  /**
+   * 🔴 **「繋ぐ」モードの入切**(#918 段⑤d-1)。
+   */
+  'sql-er-connect-toggle': (dispatcher) => {
+    dispatcher.dispatch({ type: 'SQL_ER_CONNECT_TOGGLE' });
+  },
+  /**
+   * 🔴 **自分で引いた線の札を押した**(#918 段⑤d-1)── 消す。
+   * ⚠ 4 つとも要る(`sql-er-link` と同じ理由)。
+   */
+  'sql-er-unlink': (dispatcher, target) => {
+    const from = target.getAttribute('data-pkc-from') ?? '';
+    const fromColumn = target.getAttribute('data-pkc-fromcol') ?? '';
+    const to = target.getAttribute('data-pkc-to') ?? '';
+    const toColumn = target.getAttribute('data-pkc-tocol') ?? '';
+    if (from === '' || to === '') return;
+    dispatcher.dispatch({ type: 'SQL_ER_UNLINK', link: { from, fromColumn, to, toColumn } });
   },
   'sql-schema-to-note': (dispatcher) => {
     const state = dispatcher.getState();

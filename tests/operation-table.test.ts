@@ -207,6 +207,13 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    *   こちら(在庫)の側である ── 図の中の 3 つは `UNREGISTERED_POINT` に居る。
    */
   'sql-er-toggle',
+  /**
+   * ⚠ **2026-09-16(#918 段⑤d-1)で 1 件増やした** ── 「繋ぐ」モードの入切
+   *   (外部キーの宣言が無い DB でも、自分でキーどうしを繋げるようにする)。
+   *   ⚠ **名前で呼べないままにする理由**:`sql-er-toggle` と同じ ── つながり図の
+   *   帯にしか無い押し所で、SQL の面を開いていないと出す先が無い。
+   */
+  'sql-er-connect-toggle',
   'stack-save',
   'start-audio-capture', 'start-edit', 'start-screen-capture', 'start-tile-reorder',
   'start-timer', 'stop-capture', 'storage-profile', 'swap-open', 'table-to-csv',
@@ -241,6 +248,12 @@ const UNREGISTERED_POINT: readonly string[] = [
    *   ので、登記してもパレットからは撃てない(`edit-cell` と同じ仕分け)。
    */
   'sql-er-column', 'sql-er-link', 'sql-er-table',
+  /**
+   * ⚠ **2026-09-16(#918 段⑤d-1)で 1 件増やした** ── 自分で引いた線の札を消す。
+   *   🔑 **押した 1 つ**(どの線か)でしか対象が決まらないので、こちらの箱にする
+   *   (`sql-er-link` と同じ仕分け)。
+   */
+  'sql-er-unlink',
   /**
    * ⚠ **2026-09-14(#918 段②a)で 1 件増やした** ── 履歴の一覧から 1 件選ぶ。
    *   🔑 **真の点である** ── 並んだ兄弟(前に打った字)のうち**押した 1 つ**で
@@ -373,12 +386,15 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   登記した ── 受け手は増えない(帯のボタンが既に受けている。橋は `FORMAT_OF`)。
       //   registered / outsideActionsTable / total が +3(受け手ではないので
       //   both / receivers / unregistered は動かない)。
-      total: 312,
-      receivers: 260,
+      // ⚠ 2026-09-16(#918 段⑤d-1): 「繋ぐ」モード(`sql-er-connect-toggle` /
+      //   `sql-er-unlink`)で受け手 +2 ── 登記は増えない(押し所はつながり図の
+      //   帯 / 札にしか無く、鍵も持たない。`sql-er-toggle` / `sql-er-link` と同じ仕分け)。
+      total: 314,
+      receivers: 262,
       registered: 88,
       both: 36,
       outsideActionsTable: 52,
-      unregistered: 224,
+      unregistered: 226,
     });
   });
 

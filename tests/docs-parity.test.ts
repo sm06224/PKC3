@@ -2316,6 +2316,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-16(#918 段⑤d-1 ── 自分で繋ぐ)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-13-schedule-touch-drag" …` → e9defc9
+     */
+    '予定の札を、指でも掴んで動かせるようになりました',
+    /**
      * ⚠ **2026-09-16(#961 ── 横スクロール)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-13-sql-open-local-file" …` → d757603
      */

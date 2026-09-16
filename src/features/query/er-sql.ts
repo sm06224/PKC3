@@ -264,8 +264,31 @@ function build(shape: ErShape, columnsRaw: string, joinsRaw: readonly string[]):
 export function erSql(current: string, action: ErAction): ErSqlResult {
   if (current.trim() === '') {
     if (action.kind === 'table') return { ok: true, sql: `select * from ${erQuote(action.table)}` };
-    const need = action.kind === 'column' ? action.table : action.link.from;
-    return { ok: false, why: `先に表の名前(「${need}」など)を押してください` };
+    /**
+     * 🔴 **空の欄で繋いだら、両方の表から組む**(#918 段⑤d-1。2026-09-16 に足した)。
+     *
+     * ⚠ 直す前はここも「先に表の名前を押してください」と断っていた ── ところが
+     *   **自分でキーを繋ぐ**(段⑤d-1)が入った後は、user は
+     *   **「繋ぎたい 2 つの列」を既に押している**。そこで断るのは、
+     *   **持っている情報で組めるのに、もう 1 手を要求している**ことになる。
+     * 🔑 user の求めは「**掛け合わせを描きたい**」なので、押した 2 つから
+     *   `select * from A join B on …` まで組む(👉 実ブラウザの smoke が
+     *   「線は引けたのに欄が空のまま」で落ちて分かった)。
+     * ⚠ 綴りは小文字 ── 空の欄には**合わせる相手の綴りが無い**ので、
+     *   すぐ上の `table` の分岐と同じ形にする(`kw()` は shape が要る)。
+     */
+    if (action.kind === 'link') {
+      const { from, fromColumn, to, toColumn } = action.link;
+      if (fromColumn === '' || toColumn === '') {
+        return { ok: false, why: `「${from}」と「${to}」を、どの列で繋ぐかが分かりません` };
+      }
+      const cond = `${erQuote(to)}.${erQuote(toColumn)} = ${erQuote(from)}.${erQuote(fromColumn)}`;
+      return {
+        ok: true,
+        sql: `select * from ${erQuote(from)}\n  join ${erQuote(to)} on ${cond}`,
+      };
+    }
+    return { ok: false, why: `先に表の名前(「${action.table}」など)を押してください` };
   }
 
   const shape = parseErSql(current);
