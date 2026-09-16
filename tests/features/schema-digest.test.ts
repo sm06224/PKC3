@@ -39,6 +39,13 @@ describe('構造 1 枚を組む', () => {
     const out = renderSchemaDigest({ source: 'この PKC のノート', columns: COLS, fks: FKS, counts: COUNTS });
     expect(out).toContain('# この PKC のノート の構造');
     expect(out).toContain('表 / ビュー: 3 件');
+    /**
+     * 🔴 **数えていない物の名前を書かない**(#918 段⑤d-2)。
+     * ⚠ 上は `toContain` なので、`表 / ビュー: 3 件 / 本文の表: 0 件` でも**通ってしまう** ──
+     *   AI は見出しの名前を信じるので、0 件の欄を書くと「在るが空」と読む。
+     * 🔑 対照群は `tests/adapter/sql-pane.test.ts`(本文の表が在る回は、その欄が出る)。
+     */
+    expect(out, '本文の csv が 1 つも無いのに、その欄を書いている').not.toContain('本文の表');
     expect(out, '行数が出ていない').toContain('## entries(表・3 行)');
     // ⚠ ビューには行数を付けない(数えると**その場でビューが走る**ので、重い相手で刺さる)
     expect(out, 'ビューだと分からない').toContain('## recent(ビュー)');

@@ -287,7 +287,16 @@ export function renderSchemaDigest(input: SchemaDigestInput): string {
     out.push('表もビューも 1 つもありません。');
     return out.join('\n');
   }
-  out.push(`表 / ビュー / 本文の表: ${model.tables.length} 件`);
+  /**
+   * ⚠ **数えた物の名前だけを書く**(#918 段⑤d-2)── 本文の csv が 1 つも無い相手で
+   *   「本文の表」と名乗ると、**0 件の物を数えたように読める**(AI は名前を信じる)。
+   */
+  const csvCount = model.tables.filter((t) => t.kind === 'csv').length;
+  out.push(
+    csvCount === 0
+      ? `表 / ビュー: ${model.tables.length} 件`
+      : `表 / ビュー: ${model.tables.length - csvCount} 件 / 本文の表: ${csvCount} 件`,
+  );
   out.push('');
 
   for (const t of model.tables) {

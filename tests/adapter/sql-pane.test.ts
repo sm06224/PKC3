@@ -1511,7 +1511,8 @@ describe('構造をノートへ(#918 段①)', () => {
      */
     expect(body, '本文の csv の表が出ていない').toContain('## 売上(本文の表・3 行)');
     expect(body, 'csv の列が出ていない').toContain('| 金額 |');
-    expect(body, '件数が本表だけになっている').toContain('表 / ビュー / 本文の表: 2 件');
+    // 🔑 数えた物の名前だけを書く ── 本文の表が在るときだけ、その欄が出る
+    expect(body, '件数が本表だけになっている').toContain('表 / ビュー: 1 件 / 本文の表: 1 件');
     expect(d.getState().sqlPage.saved, '書き出したと言っていない').toContain('DB の構造');
     // 🔴 **門を緩めていない** ── 打ったのは `select` だけ
     expect(seen.length, '打った数が違う(列 / 繋がり / 本文の csv / 行数の 4 本のはず)').toBe(4);
