@@ -393,6 +393,11 @@ async function browseArchive(
   say(out.length === 0 ? `取り出せませんでした ── ${bad.join(' / ')}` : `${out.length} 件を添付にしました${tail}`);
 }
 import { cleanForClipboard } from '@features/export/clipboard-html';
+import { writeArchive } from '@features/export/pkc3-archive';
+import {
+  rescueArchiveSource,
+  rescueArchiveSummary,
+} from '@features/storage/rescue-archive';
 import { readZipDirectory, readZipEntry, type ZipEntry } from '@features/import/zip-reader';
 import { humanBytes } from '@features/human-bytes';
 import {
@@ -7042,6 +7047,58 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   大半の区画が**エラーではなく空**で返る(区切り 100 行で 38/40)。
    *   だから読み飛ばした数を数えて、必ず一緒に出す。
    */
+  /**
+   * 🔴 **拾ったものを「戻せる形」で書き出す**(#986。user 指示 2026-09-16)。
+   *
+   * ⚠ すぐ下の `db-rescue` は **人が読む形**(.md 1 枚)である ──
+   *   🔴 それを取り込むと**ノートは 1 件**にしかならない
+   *   (素の .md は 1 ファイル = 1 ノート)。こちらは**戻すため**の口である。
+   *
+   * ⚠ **下の口を消さない** ── 壊れているときに
+   *   「とりあえず中身を読みたい」は別の要求である
+   *   (CLAUDE.md「記法を減らすことは、user の動線を減らすことである」)。
+   */
+  'db-rescue-archive': (dispatcher, _target, services, root) => {
+    const sum = root.querySelector<HTMLElement>('[data-pkc-field="db-rescue-summary"]');
+    if (sum === null) return;
+    if (services.rescueEntries === undefined) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この環境では取り出せません' });
+      return;
+    }
+    const pick = services.rescueEntries;
+    const cid = dispatcher.getState().cid;
+    if (cid === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'まだ開いていません' });
+      return;
+    }
+    const { source, stats } = rescueArchiveSource({
+      cid,
+      title: 'PKC から拾い出したノート',
+      pick: (after, chunks) => pick(after, chunks),
+      onProgress: (seen, maxRowid, phase) => {
+        const at = maxRowid === null ? '' : `(${seen} / ${maxRowid})`;
+        // ⚠ 2 周舜めるので、**いまどちらを見ているか**を出す
+        //   (出さないと「進みが巻き戻った」と読まれる)
+        sum.textContent = `${phase === 'meta' ? '一覧を集めています' : '本文を集めています'}… ${at}`;
+        sum.hidden = false;
+      },
+    });
+    sum.textContent = '拾っています…(中身が多いと数分かかります)';
+    sum.hidden = false;
+    void writeArchive(source, new Date().toISOString()).then(
+      (out) => {
+        // ⚠ `toISOString()` は UTC ── 日付が 1 日ずれる端末が出る(`dayStamp` に寄せる)
+        downloadBlob(`pkc-rescue-${dayStamp(new Date())}.pkc3.zip`, out.blob);
+        sum.textContent = `${rescueArchiveSummary(stats())} このファイルを「取り込む」から読み込むと、ノートが戻ります。`;
+        sum.hidden = false;
+      },
+      (e: unknown) => {
+        sum.textContent = '';
+        sum.hidden = true;
+        dispatcher.dispatch({ type: 'OP_FAILED', error: `取り出しが止まりました: ${String(e)}` });
+      },
+    );
+  },
   'db-rescue': (dispatcher, _target, services, root) => {
     const sum = root.querySelector<HTMLElement>('[data-pkc-field="db-rescue-summary"]');
     if (sum === null) return;
