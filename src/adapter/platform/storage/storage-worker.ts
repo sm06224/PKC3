@@ -1819,6 +1819,15 @@ function updateEntryColumn(
  * @param made 作った表の名前を積む先(呼び側が `finally` で落とす)。
  *   ⚠ **戻り値にしない** ── 投げた回に呼び側へ届かず、作りかけが残る。
  */
+/**
+ * 1 回の `INSERT` に積む行数(#968)。
+ *
+ * ⚠ sqlite の「`?` の上限」(既定 **32766**)を割らない大きさにする ── 1 行が
+ *   3 つなので 500 行で 1500 個。⚠ ここを上げるときは**1 行あたりの `?` の数**と
+ *   掛けて確かめる(超えると `too many SQL variables` で落ちる)。
+ */
+const CSV_INSERT_CHUNK = 500;
+
 function buildCsvTables(database: Database, sql: string, made: string[]): void {
   /**
    * ⚠ **粗く絞ってから正しく読む** ── `name=` は本文のどこにでも書けるので、
@@ -1859,8 +1868,18 @@ function buildCsvTables(database: Database, sql: string, made: string[]): void {
   });
   const listed =
     'INSERT INTO temp."csv_tables" (name, note, lid, rows, cols, why) VALUES (?, ?, ?, ?, ?, ?)';
+  /**
+   * ⚠ **名前ごとに 1 度だけ束ねる**(#968)── 直す前は表ごとに `blocks.filter` を
+   *   回しており、**表の数 × 囲みの数**だけ走査していた。
+   */
+  const blocksByName = new Map<string, typeof blocks>();
+  for (const b of blocks) {
+    const list = blocksByName.get(b.name);
+    if (list === undefined) blocksByName.set(b.name, [b]);
+    else list.push(b);
+  }
   for (const t of tables) {
-    for (const b of blocks.filter((x) => x.name === t.name)) {
+    for (const b of blocksByName.get(t.name) ?? []) {
       database.exec({
         sql: listed,
         bind: [t.name, b.noteTitle, b.lid, b.rows.length, b.columns.length, ''],
@@ -1894,10 +1913,21 @@ function buildCsvTables(database: Database, sql: string, made: string[]): void {
   database.exec({
     sql: 'CREATE TEMP TABLE "csv_columns" (tbl TEXT, cid INTEGER, col TEXT)',
   });
-  const listedCol = 'INSERT INTO temp."csv_columns" (tbl, cid, col) VALUES (?, ?, ?)';
-  for (const t of tables) {
-    t.columns.forEach((c, i) => {
-      database.exec({ sql: listedCol, bind: [t.name, i, c] });
+  /**
+   * ⚠ **まとめて入れる**(#968)── 直す前は**列の数だけ `exec`** を打っていた。
+   * 🔑 1 回に積む件数は `CSV_INSERT_CHUNK` ── sqlite の「? の上限」(既定 32766)を
+   *   割らない大きさにする(1 行 3 つなので 500 行 = 1500 個)。
+   * ⚠ **0 件のときは打たない**(`VALUES` の後ろが空の SQL を組まない)。
+   */
+  const colRows: Array<[string, number, string]> = [];
+  for (const t of tables) t.columns.forEach((c, i) => colRows.push([t.name, i, c]));
+  for (let at = 0; at < colRows.length; at += CSV_INSERT_CHUNK) {
+    const chunk = colRows.slice(at, at + CSV_INSERT_CHUNK);
+    database.exec({
+      sql:
+        'INSERT INTO temp."csv_columns" (tbl, cid, col) VALUES ' +
+        chunk.map(() => '(?, ?, ?)').join(', '),
+      bind: chunk.flat(),
     });
   }
 

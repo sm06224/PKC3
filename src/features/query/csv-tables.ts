@@ -324,8 +324,33 @@ export function mergeCsvTables(blocks: readonly CsvTableBlock[]): CsvTable[] {
   }
   const out: CsvTable[] = [];
   for (const [name, list] of byName) {
+    /**
+     * 🔴 **列の重複除去は `Set` で見る**(#968。2026-09-16)。
+     *
+     * ⚠ 直す前は `columns.includes(c)` を列ごとに回しており、**列数の 2 乗**だけ
+     *   比べていた。実測(データ行 0 行・列だけの表):
+     *
+     * | 列 | 直す前 |
+     * |---|---|
+     * | 8,000 | **200.4 ms** |
+     * | 16,000 | 554.5 ms |
+     * | 32,000 | 🔴 **2,510.1 ms** |
+     *
+     * 🔴 これは**その本文を書いた後、どんな軽い問い合わせを打っても毎回**掛かる
+     *   (`buildCsvTables` は打った SQL に関係なく走る)── user には
+     *   「SQL の面が重い」としか見えない。
+     * 🔑 **出る結果は 1 バイトも変わらない** ── 同じ順で、同じ列が並ぶ
+     *   (`Set` は「見たかどうか」だけに使い、並びは `columns` が持つ)。
+     */
     const columns: string[] = [];
-    for (const b of list) for (const c of b.columns) if (!columns.includes(c)) columns.push(c);
+    const seen = new Set<string>();
+    for (const b of list) {
+      for (const c of b.columns) {
+        if (seen.has(c)) continue;
+        seen.add(c);
+        columns.push(c);
+      }
+    }
     const rows: Array<Array<string | null>> = [];
     for (const b of list) {
       const at = new Map(b.columns.map((c, i) => [c, i]));
