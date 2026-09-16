@@ -22,6 +22,7 @@ import { parseFrontmatter } from '../../src/features/markdown/frontmatter';
 import { FRONTMATTER_SCAN_CHARS } from '../../src/features/query/group-by';
 import { createSmartScan, EMPTY_SMART } from '../../src/features/smart/smart-spec';
 import { CSV_TABLE_CELLS_MAX } from '../../src/features/query/csv-tables';
+import { SCHEMA_CSV_SQL } from '../../src/features/query/schema-digest';
 import { buildXlsx } from '../features/xlsx-fixture';
 
 type Op = StorageRequest['op'];
@@ -2861,6 +2862,46 @@ describe('本文の csv を SQL から引く(#681 段③)', () => {
   });
 
   /**
+   * 🔴 **列の名前の目録**(`csv_columns`。#918 段⑤d-2)。
+   *
+   * ⚠ 本文の csv は **temp の表**なので `sqlite_master` に出ない ── だから
+   *   つながり図(ER)には**本文の表だけ 1 つも出てこなかった**。
+   * 🔑 ここは「目録が在る」ではなく、**ER が実際に打つ問い合わせ**
+   *   (`SCHEMA_CSV_SQL`)を**本物の sqlite に当てて**見る ── 綴りを写した
+   *   test は、実装と同じ盲点を共有する(CLAUDE.md §1)。
+   */
+  it('🔴 ER が打つ問い合わせが、本文の csv の表と列を返す(#918 段⑤d-2)', async () => {
+    /**
+     * ⚠ **対照群をこの it の中で作る** ── 断られる名前を後ろの it に頼ると、
+     *   走る順で**対照群が空になる**(空の集合は何を assert しても通る)。
+     */
+    await write('csv-er-bad', fence('csv name=だめ(名前)', ['a', '1']));
+    const r = await run(SCHEMA_CSV_SQL);
+    expect(r.columns, '列の名前が違う(ER の読み方と噛み合わない)').toEqual([
+      'tbl',
+      'cid',
+      'col',
+      'n',
+    ]);
+    const sales = r.rows.filter((x) => x[0] === '売上');
+    expect(sales.length, '売上 の列が 1 つも返っていない').toBeGreaterThan(0);
+    // 🔑 並びは列の順どおり(図の四角に、書いた順で並ぶ)
+    expect(sales.map((x) => x[1]), '列の順が崩れている').toEqual(
+      sales.map((_, i) => i),
+    );
+    // ⚠ どこから来たかの 2 列は**必ず先頭**に付く(引ける列なので、図にも出す)
+    expect(sales.slice(0, 2).map((x) => x[2])).toEqual(['_note', '_lid']);
+    expect(sales.map((x) => x[2]), '本文に書いた列が出ていない').toContain('品名');
+    // 🔴 行数は**積んだ合計**(同じ名前が複数のノートに在る)
+    expect(Number(sales[0]?.[3]), '行数が採れていない').toBeGreaterThan(0);
+    // ⚠ 対照群 ── 受けなかった囲みは表ではないので、ここには出ない
+    expect(r.rows.map((x) => String(x[0])).filter((n) => n.includes('(')), '断った名前が混じっている').toEqual([]);
+    // ⚠ 空振り防止 ── その囲みが**目録には在る**(在らなければ、上の対照群は空を見ている)
+    const rejected = await run("SELECT name FROM csv_tables WHERE why <> '' AND name LIKE 'だめ%'");
+    expect(rejected.rows.length, '断った囲みが目録に出ていない(= 対照群が空)').toBe(1);
+  });
+
+  /**
    * 🔴 **受けられない名前は、理由つきで目録に出る**(#681 段③)。
    *
    * ⚠ 黙って落とすと、user に見えるのは「表が出てこない」だけで、
@@ -2947,16 +2988,18 @@ describe('本文の csv を SQL から引く(#681 段③)', () => {
   it('🔴 走り終わったら、組み立てた表は temp に残らない', async () => {
     await run('SELECT * FROM 売上');
     /**
-     * ⚠ **見ている回にも目録は作られる** ── `csv_tables` は毎回作るので、
-     *   ここに 1 件出るのが**正しい**(0 件を期待すると、この test は永久に落ちる)。
+     * ⚠ **見ている回にも目録は作られる** ── `csv_tables` / `csv_columns`(#918 段⑤d-2)は
+     *   毎回作るので、ここに出るのが**正しい**(0 件を期待すると、この test は永久に落ちる)。
      * 🔑 見たいのは「**前の回の `売上` が残っていないか**」である。
      */
     const left = await run(
       "SELECT name FROM sqlite_temp_master WHERE type = 'table' ORDER BY name",
     );
-    expect(left.rows.map((r) => r[0]), '前の回に組み立てた表が残っている').toEqual([
-      'csv_tables',
-    ]);
+    const names = left.rows.map((r) => r[0]);
+    // 🔑 主張そのもの ── 中身の表が居残っていない(目録が増えても、ここは変わらない)
+    expect(names, '前の回に組み立てた中身の表が残っている').not.toContain('売上');
+    // ⚠ 等値でも留める(目録を足した人はここが落ちて気づく)
+    expect(names, '目録の顔ぶれが変わった').toEqual(['csv_columns', 'csv_tables']);
   });
 
   /**

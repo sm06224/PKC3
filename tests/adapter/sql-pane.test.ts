@@ -1452,7 +1452,12 @@ describe('構造をノートへ(#918 段①)', () => {
     for (let i = 0; i < 16; i += 1) await Promise.resolve();
   };
 
-  /** 3 本の `select` に、それぞれの形で答える fake。 */
+  /**
+   * 4 本の `select` に、それぞれの形で答える fake。
+   * 🔴 4 本目は**本文の名前つき csv の目録**(#918 段⑤d-2)── ここを
+   *   `answer(['a'], [[1]])` の素通りに任せると、**csv の表が 1 つも出ない fixture**に
+   *   なる(CLAUDE.md §2「fixture のゼロ件次元は、測っていない次元」)。
+   */
   const schemaReply = (opts: { countsFail?: boolean } = {}) => {
     const seen: string[] = [];
     const reply = async (sql: string): Promise<SqlAnswer> => {
@@ -1467,6 +1472,18 @@ describe('構造をノートへ(#918 段①)', () => {
         );
       }
       if (sql.includes('pragma_foreign_key_list')) return answer(['tbl', 'ref', 'col', 'refcol'], []);
+      // 🔴 本文の csv の目録(#918 段⑤d-2)。⚠ `count(*)` より先に見る ──
+      //    この問い合わせは `sum(t.rows)` を持つので、後ろに置くと取り違える
+      if (sql.includes('csv_columns')) {
+        return answer(
+          ['tbl', 'cid', 'col', 'n'],
+          [
+            ['売上', 0, '_note', 3],
+            ['売上', 1, '_lid', 3],
+            ['売上', 2, '金額', 3],
+          ],
+        );
+      }
       if (sql.includes('count(*)')) {
         if (opts.countsFail === true) throw new Error('数えられない');
         return answer(['tbl', 'n'], [['entries', 7]]);
@@ -1487,9 +1504,17 @@ describe('構造をノートへ(#918 段①)', () => {
     expect(body, '表が出ていない').toContain('## entries(表・7 行)');
     expect(body, '列が出ていない').toContain('| lid | TEXT | 不可 | 主キー |');
     expect(body, '中身を出していないと言っていない').toContain('中身は 1 行も含まれていません');
+    /**
+     * 🔴 **本文の名前つき csv も 1 枚に入る**(#918 段⑤d-2)。
+     * ⚠ 入っていないと、AI は「引ける表がもう 1 つ在る」ことを知らないまま
+     *   問い合わせを書く(= 書いていない = 無い、と読む)。
+     */
+    expect(body, '本文の csv の表が出ていない').toContain('## 売上(本文の表・3 行)');
+    expect(body, 'csv の列が出ていない').toContain('| 金額 |');
+    expect(body, '件数が本表だけになっている').toContain('表 / ビュー / 本文の表: 2 件');
     expect(d.getState().sqlPage.saved, '書き出したと言っていない').toContain('DB の構造');
     // 🔴 **門を緩めていない** ── 打ったのは `select` だけ
-    expect(seen.length, '打った数が違う(列 / 繋がり / 行数の 3 本のはず)').toBe(3);
+    expect(seen.length, '打った数が違う(列 / 繋がり / 本文の csv / 行数の 4 本のはず)').toBe(4);
     for (const q of seen) expect(q.trimStart().slice(0, 6).toLowerCase()).toBe('select');
   });
 
@@ -2489,6 +2514,21 @@ describe('表のつながり図(#918 段⑤)', () => {
     if (sql.includes('pragma_foreign_key_list')) {
       return answer(['tbl', 'ref', 'col', 'refcol'], [['売上', '客', '客id', 'id']]);
     }
+    /**
+     * 🔴 **本文の名前つき csv の目録**(#918 段⑤d-2)。
+     * ⚠ ここを素通りさせると「**本文の表が 0 件の fixture**」になり、
+     *   図に出るかどうかを**一度も測っていない**ことになる(CLAUDE.md §2)。
+     */
+    if (sql.includes('csv_columns')) {
+      return answer(
+        ['tbl', 'cid', 'col', 'n'],
+        [
+          ['棚卸', 0, '_note', 4],
+          ['棚卸', 1, '_lid', 4],
+          ['棚卸', 2, '品名', 4],
+        ],
+      );
+    }
     if (sql.includes('count(*)')) return answer(['tbl', 'n'], [['売上', 3], ['客', 2]]);
     return answer(['a'], [[1]]);
   };
@@ -2521,11 +2561,13 @@ describe('表のつながり図(#918 段⑤)', () => {
     erBtn(pane).click();
     await settleEr();
     // 🔑 「客」は外部キーで指されているので先頭(= 左上)
-    expect(tables(pane)).toEqual(['客(表・2 行)', '売上(表・3 行)']);
+    // ⚠ 本文の csv(棚卸)は**いちばん後ろ** ── 行数は多いが、DB の構造ではない
+    expect(tables(pane)).toEqual(['客(表・2 行)', '売上(表・3 行)', '棚卸(本文の表・4 行)']);
+    // 🔑 中の表 5 列 + 本文の表 3 列(`_note` / `_lid` / 品名)
     expect(
       pane.querySelectorAll('[data-pkc-field="sql-er-column"]').length,
       '列の押し所が出ていない',
-    ).toBe(5);
+    ).toBe(8);
     expect(pane.querySelectorAll('[data-pkc-field="sql-er-lines"] line').length, '線が無い').toBe(1);
     const chip = pane.querySelector('[data-pkc-field="sql-er-link"]');
     expect(chip?.textContent, '繋がりの札に、どの列どうしかが書かれていない').toBe(
@@ -2591,7 +2633,7 @@ describe('表のつながり図(#918 段⑤)', () => {
     const { pane, pick, runReadOnlySql } = setup(schemaReply);
     erBtn(pane).click();
     await settleEr();
-    expect(tables(pane).length).toBe(2);
+    expect(tables(pane).length, '中の表 2 つ + 本文の表 1 つ').toBe(3);
     const before = runReadOnlySql.mock.calls.length;
 
     // 取り込んだ `.sqlite` へ切り替える(開けたら採り直すはず)
@@ -2606,6 +2648,66 @@ describe('表のつながり図(#918 段⑤)', () => {
       runReadOnlySql.mock.calls.some((c) => c[1].guest === true),
       'よその DB へ向けて採っていない',
     ).toBe(true);
+  });
+
+  /**
+   * 🔴 **本文の名前つき csv も図に出る**(#918 段⑤d-2)。
+   *
+   * ⚠ 本文の csv は **temp の表**なので `sqlite_master` に出ない ── だから
+   *   図には**この PKC の中の表だけ**が並び、`name=棚卸` と書いた user は
+   *   「自分の表がどこにも無い」と読んでいた。
+   */
+  it('🔴 本文の名前つき csv も、図の四角として出る(#918 段⑤d-2)', async () => {
+    const { pane, box } = setup(schemaReply);
+    erBtn(pane).click();
+    await settleEr();
+    // 🔑 種類が字で分かる(「表」でも「ビュー」でもない ── 本文から来ている)
+    expect(tables(pane), '本文の表が図に出ていない').toContain('棚卸(本文の表・4 行)');
+    // ⚠ 対照群 ── 中の表も消えていない(足したぶんで押しのけていない)
+    expect(
+      tables(pane).some((t) => t.startsWith('売上(表')),
+      '中の表が消えた',
+    ).toBe(true);
+
+    // 🔴 押せる ── 出すだけで終わらせない(図から引ける形まで通す)
+    pane
+      .querySelector<HTMLElement>('[data-pkc-field="sql-er-table"][data-pkc-name="棚卸"]')!
+      .click();
+    expect(box.value, '本文の表を押しても SQL が組まれない').toBe('select * from 棚卸');
+    pane
+      .querySelector<HTMLElement>(
+        '[data-pkc-field="sql-er-column"][data-pkc-name="棚卸"][data-pkc-col="品名"]',
+      )!
+      .click();
+    expect(box.value, '本文の表の列が足せない').toBe('select 品名 from 棚卸');
+  });
+
+  /**
+   * 🔴 **客の DB へは、本文の目録を打たない**(#918 段⑤d-2)。
+   * ⚠ 目録(`csv_columns`)は**この PKC の側にしか**組み立てられない ──
+   *   向こうへ打つと「そんな表は無い」で落ちる。
+   */
+  it('🔴 取り込んだ DB では、本文の csv を採りに行かない', async () => {
+    const { pane, pick, runReadOnlySql } = setup(schemaReply);
+    erBtn(pane).click();
+    await settleEr();
+    // ⚠ 対照群 ── ノート側では打っている(打っていなければ、下の 0 件は意味が無い)
+    const asked = runReadOnlySql.mock.calls.map((c) => String(c[0]));
+    expect(
+      asked.filter((q) => q.includes('csv_columns')),
+      'ノート側で本文の目録を打っていない',
+    ).toHaveLength(1);
+
+    const before = runReadOnlySql.mock.calls.length;
+    pick('db1');
+    await settleEr();
+    await settleEr();
+    const after = runReadOnlySql.mock.calls.slice(before).map((c) => String(c[0]));
+    expect(after.length, '相手を変えたのに採り直していない').toBeGreaterThan(0);
+    expect(
+      after.filter((q) => q.includes('csv_columns')),
+      '客の DB へ本文の目録を打っている(向こうには無い)',
+    ).toHaveLength(0);
   });
 
   it('⚠ 構造を採れなかったら、黙らずに理由を出す', async () => {
@@ -2887,6 +2989,88 @@ describe('🔴 ER の図で、自分でキーどうしを繋ぐ(#918 段⑤d-1)'
     await settleEr();
     await settleEr();
     expect(lineCount(pane), '素のノートへ戻したのに db1 の繋がりが残っている').toBe(0);
+  });
+
+  /**
+   * 🔴 **線が 0 本の画面が、何も言わないままだった**(#918 段⑤d-3)。
+   *
+   * ⚠ 段⑤d-1 で「繋ぐ」を足しても、**気づかなければ user は最初の報告と同じ所へ戻る**
+   *   (「箱は出たのに線が出ない = 壊れている」)。
+   */
+  const zeroNote = (pane: HTMLElement): string =>
+    pane.querySelector('[data-pkc-field="sql-er-zero"]')?.textContent ?? '';
+
+  it('🔴 線が 0 本なら、理由と次の一手を図の下に出す(#918 段⑤d-3)', async () => {
+    const { pane } = setup(noFkReply);
+    erBtn(pane).click();
+    await settleEr();
+    // ⚠ 前提を assert する ── 崩れたら「一致しない」ではなく「前提が崩れた」と読めるように
+    expect(lineCount(pane), '前提が崩れている(この fixture は外部キー 0 本)').toBe(0);
+    const s = zeroNote(pane);
+    expect(s, 'なぜ 0 本なのかを言っていない').toContain('宣言していません');
+    expect(s, '次に何を押せばよいか言っていない').toContain('繋ぐ');
+
+    /**
+     * 🔴 **読む順** ── 理由が先、案内が後。
+     * ⚠ 案内(「繋ぎたい列を 2 つ」)だけ先に読んでも、**なぜ繋ぐ必要があるのか**が
+     *   分からない。`DOCUMENT_POSITION_FOLLOWING` で**実際の並び**を見る。
+     */
+    const zeroEl = pane.querySelector('[data-pkc-field="sql-er-zero"]')!;
+    const scrollEl = pane.querySelector('[data-pkc-field="sql-er-scroll"]')!;
+    expect(
+      scrollEl.compareDocumentPosition(zeroEl) & Node.DOCUMENT_POSITION_FOLLOWING,
+      '理由が図より前に出ている',
+    ).toBeTruthy();
+  });
+
+  it('🔴 「繋ぐ」が入のときは、次の一手を二重に言わない(理由は言い続ける)', async () => {
+    const { pane } = setup(noFkReply);
+    erBtn(pane).click();
+    await settleEr();
+    // ⚠ 対照群 ── 切のときは言っている(言わない実装でも、入だけ見たら通る)
+    expect(zeroNote(pane), '切のときに次の一手が出ていない').toContain('押して列を 2 つ');
+
+    connectBtn(pane).click();
+    expect(zeroNote(pane), '入にしたのに理由まで消えている').toContain('宣言していません');
+    expect(zeroNote(pane), '入なのに「繋ぐを押せ」と言い続けている').not.toContain('押して列を 2 つ');
+    // 🔑 代わりに、すぐ下の案内が次の一手を言っている(言う人が 0 人にならない)
+    expect(hint(pane), '次の一手を言う人が 1 人もいない').toContain('繋ぎたい列を 2 つ');
+  });
+
+  it('🔴 線が 1 本でも引けたら、その字は消える(嘘が残らない)', async () => {
+    const { pane } = setup(noFkReply);
+    erBtn(pane).click();
+    await settleEr();
+    expect(zeroNote(pane), '前提が崩れている').not.toBe('');
+    connectBtn(pane).click();
+    pressColumn(pane, '売上', '客id');
+    pressColumn(pane, '客', 'id');
+    expect(lineCount(pane), '線が引けていない(前提が崩れている)').toBe(1);
+    expect(zeroNote(pane), '線が在るのに「0 本です」の字が残っている').toBe('');
+  });
+
+  it('🔴 表が 1 つだけなら「繋ぐ」を勧めない(同じ表の中は繋げない = 押せない道)', async () => {
+    const oneTable = async (sql: string): Promise<SqlAnswer> => {
+      if (sql.includes('pragma_table_info')) {
+        return answer(
+          ['kind', 'tbl', 'cid', 'col', 'typ', 'nn', 'pk'],
+          [
+            ['table', '売上', 0, 'id', 'INTEGER', 1, 1],
+            ['table', '売上', 1, '金額', 'INTEGER', 0, 0],
+          ],
+        );
+      }
+      if (sql.includes('pragma_foreign_key_list')) {
+        return answer(['tbl', 'ref', 'col', 'refcol'], []);
+      }
+      if (sql.includes('count(*)')) return answer(['tbl', 'n'], [['売上', 3]]);
+      return answer(['a'], [[1]]);
+    };
+    const { pane } = setup(oneTable);
+    erBtn(pane).click();
+    await settleEr();
+    expect(zeroNote(pane), '相手がいないことを言っていない').toContain('繋ぐ相手がいません');
+    expect(zeroNote(pane), '押せない道へ誘っている').not.toContain('押して列を 2 つ');
   });
 });
 

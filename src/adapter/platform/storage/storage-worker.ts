@@ -1820,6 +1820,35 @@ function buildCsvTables(database: Database, sql: string, made: string[]): void {
     database.exec({ sql: listed, bind: [r.raw, r.noteTitle, r.lid, r.rows, r.cols, r.why] });
   }
 
+  /**
+   * 🔴 **列の名前の目録**(`csv_columns`。#918 段⑤d-2)。
+   *
+   * ## なぜ「別の表」にしたか
+   *
+   * ⚠ `csv_tables` に列名を**詰め込む**案(`"a, b, c"` の 1 列)は捨てた ──
+   *   csv の見出しは**何でも書ける**ので、区切り字が名前の中に出た回に**静かに割れる**。
+   * 🔑 sqlite 自身が同じ形をしている(`sqlite_master` + `pragma_table_info`)ので、
+   *   **1 行 1 列**に開く ── どんな名前でも壊れないし、user も素直に引ける。
+   *
+   * ## 何に要るか
+   *
+   * 🔴 本文の csv は **temp の表**なので `sqlite_master` に出ない ── つながり図(ER)は
+   *   そこを読むので、**本文の表だけ図に出てこなかった**。
+   * ⚠ 図のために `sqlite_temp_master` を読むのは**採らない** ── 名前を修飾しない
+   *   `pragma_table_info` は **temp を先に解決する**ので、本表と混ざって
+   *   **同じ名前の行が二重に出る**(CLAUDE.md §7)。
+   */
+  fresh('csv_columns');
+  database.exec({
+    sql: 'CREATE TEMP TABLE "csv_columns" (tbl TEXT, cid INTEGER, col TEXT)',
+  });
+  const listedCol = 'INSERT INTO temp."csv_columns" (tbl, cid, col) VALUES (?, ?, ?)';
+  for (const t of tables) {
+    t.columns.forEach((c, i) => {
+      database.exec({ sql: listedCol, bind: [t.name, i, c] });
+    });
+  }
+
   const wanted = new Set(csvTablesMentioned(sql, tables.map((t) => t.name)));
   const build = tables.filter((t) => wanted.has(t.name));
   /**

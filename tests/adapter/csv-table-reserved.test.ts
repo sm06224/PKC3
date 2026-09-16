@@ -48,9 +48,38 @@ describe('csv の表は、中の表を隠さない(#681 段③)', () => {
     }
   });
 
-  /** 🔑 **目録の名前も予約に入っている**(取られると、名前を知る道が消える)。 */
-  it('🔑 目録(csv_tables)も予約されている', () => {
-    expect(CSV_TABLE_RESERVED).toContain('csv_tables');
+  /**
+   * 🔑 **目録の名前も予約に入っている**(取られると、名前を知る道が消える)。
+   *
+   * 🔴 **手で並べない**(#918 段⑤d-2 で 2 つ目の目録 `csv_columns` を足したときに直した)──
+   *   名指しの `it` は**次に足した目録を数え落とす**(足した本人がここを直さない限り、
+   *   誰も気づけない)。⚠ だから **worker が作る temp の目録を全数走査**する。
+   */
+  it('🔑 worker が作る temp の目録は、1 つ残らず予約されている', () => {
+    const src = readFileSync(
+      join(process.cwd(), 'src/adapter/platform/storage/storage-worker.ts'),
+      'utf-8',
+    );
+    /**
+     * ⚠ 拾うのは**名前が字で書いてある物だけ** ── `CREATE TEMP TABLE "${t.name}"`
+     *   (user の csv そのもの)は `$` を受けないこの形に当たらない(当てたら、
+     *   予約リストに user の表名を求めることになる)。
+     */
+    const temps = [
+      ...new Set(
+        [...src.matchAll(/CREATE TEMP TABLE "([A-Za-z_][A-Za-z_0-9]*)"/g)].map((m) =>
+          (m[1] ?? '').toLowerCase(),
+        ),
+      ),
+    ].sort();
+    // ⚠ 空振り防止 ── 1 つも拾えていない走査で「全部予約済み」と言わない
+    expect(temps, '目録を 1 つも拾えていない(走査が壊れている)').toContain('csv_tables');
+    expect(temps.length, '目録が 1 つしか拾えていない').toBeGreaterThan(1);
+    const missing = temps.filter((t) => !CSV_TABLE_RESERVED.includes(t));
+    expect(
+      missing,
+      `worker が作る目録が予約に無い ── CSV_TABLE_RESERVED に足すこと: ${missing.join(' ')}`,
+    ).toEqual([]);
   });
 
   /** ⚠ 対照群 ── 予約でない名前は受ける(全部断る形になっていない)。 */

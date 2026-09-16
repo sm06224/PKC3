@@ -31,6 +31,7 @@
  */
 
 import type { SqlPageState } from '@adapter/state/app-state';
+import { erZeroLinesWhy } from '@features/query/er-connect';
 import { erColumnLabel, erHeadLabel, erLayout } from '@features/query/er-layout';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -211,6 +212,24 @@ export function paintSqlEr(host: HTMLElement, er: SqlPageState['er']): void {
 
   scroll.append(canvas);
   host.append(scroll);
+  /**
+   * 🔴 **線が 1 本も無いなら、理由と次の一手を言う**(#918 段⑤d-3)。
+   * ⚠ **図のすぐ下**に置く ── 「繋ぐ」の案内より先に読ませたい
+   *   (なぜ 0 本なのかが分からないまま案内だけ読んでも、何も繋がらない)。
+   */
+  if (d.lines.length === 0) {
+    line(
+      host,
+      'sql-er-zero',
+      erZeroLinesWhy({
+        boxes: d.boxes.length,
+        declared: er.model.links.length,
+        mine: er.mine.length,
+        dropped: d.dropped.length,
+        connecting: er.connecting,
+      }),
+    );
+  }
   // 🔴 「繋ぐ」の案内(#918 段⑤d-1)。⚠ **図の下**(user 指定の言葉どおり)。
   line(host, 'sql-er-connect-hint', connectHintOf(er));
   // 🔑 押した結果(足した / 足せなかった理由)は**図の外**に置く ── 図を転がしても見える

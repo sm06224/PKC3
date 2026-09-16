@@ -19,6 +19,7 @@ import { REQUEST_TIMEOUT_MS } from '@adapter/platform/storage/store-proxy';
 import { appendBlock } from '@features/markdown/text-ops';
 import {
   SCHEMA_COLUMNS_SQL,
+  SCHEMA_CSV_SQL,
   SCHEMA_FK_SQL,
   countsSql,
   renderSchemaDigest,
@@ -450,9 +451,22 @@ async function fetchSchemaGrids(
     limits: { maxRows: number; maxSteps: number; maxMs: number; guest?: boolean },
   ) => Promise<SchemaGrid & { truncated: boolean; ms: number }>,
   opts: { maxRows: number; maxSteps: number; maxMs: number; guest?: boolean },
-): Promise<{ columns: SchemaGrid; fks: SchemaGrid; counts: SchemaGrid | null }> {
+): Promise<{
+  columns: SchemaGrid;
+  fks: SchemaGrid;
+  counts: SchemaGrid | null;
+  csv: SchemaGrid | null;
+}> {
   const columns = await ask(SCHEMA_COLUMNS_SQL, opts);
   const fks = await ask(SCHEMA_FK_SQL, opts);
+  /**
+   * 🔴 **本文の名前つき csv**(#918 段⑤d-2)。⚠ **客の DB では引かない** ──
+   *   目録(`csv_columns`)は**この PKC の側にしか**組み立てられないので、
+   *   客へ向けて打つと「そんな表は無い」で落ちる(#854 段① の作りどおり)。
+   * ⚠ **落ちても進む**(行数と同じ扱い)── 目録が無い古い worker とも噛み合う。
+   */
+  const csv =
+    opts.guest === true ? null : await ask(SCHEMA_CSV_SQL, opts).catch(() => null);
   /**
    * ⚠ **数えるのは表だけ**(ビューは数えない)── ビューを数えると
    *   **その場でビューが走る**ので、重い相手で刺さる。
@@ -467,7 +481,7 @@ async function fetchSchemaGrids(
   const sql = countsSql(names);
   // ⚠ 行数が採れなくても**構造は出す**(ここだけ握り潰してよい)
   const counts = sql === null ? null : await ask(sql, opts).catch(() => null);
-  return { columns, fks, counts };
+  return { columns, fks, counts, csv };
 }
 
 export function connectStoreEffects(
@@ -953,9 +967,9 @@ export function connectStoreEffects(
         }
         const opts = { maxRows: SQL_MAX_ROWS, maxSteps: SQL_MAX_STEPS, maxMs: SQL_MAX_MS, ...guest };
         void (async (): Promise<void> => {
-          const { columns, fks, counts } = await fetchSchemaGrids(ask, opts);
+          const { columns, fks, counts, csv } = await fetchSchemaGrids(ask, opts);
           if (disposed) return;
-          dispatcher.dispatch({ type: 'SQL_ER_LOADED', token, columns, fks, counts });
+          dispatcher.dispatch({ type: 'SQL_ER_LOADED', token, columns, fks, counts, csv });
         })().catch((e: unknown) => {
           if (disposed) return;
           const raw = e instanceof Error ? e.message : String(e);
@@ -991,7 +1005,7 @@ export function connectStoreEffects(
         }
         const opts = { maxRows: SQL_MAX_ROWS, maxSteps: SQL_MAX_STEPS, maxMs: SQL_MAX_MS, ...guest };
         void (async (): Promise<void> => {
-          const { columns, fks, counts } = await fetchSchemaGrids(ask, opts);
+          const { columns, fks, counts, csv } = await fetchSchemaGrids(ask, opts);
           if (disposed) return;
           const title = schemaNoteTitle(new Date(), where);
           dispatcher.dispatch({
@@ -1004,6 +1018,9 @@ export function connectStoreEffects(
               columns,
               fks,
               ...(counts === null ? {} : { counts }),
+              // 🔴 本文の csv も 1 枚に入れる(#918 段⑤d-2)── AI に渡す構造から
+              //    「引けるのに書いていない表」が落ちないようにする
+              ...(csv === null ? {} : { csv }),
             }),
             parentLid: null,
             relationId,

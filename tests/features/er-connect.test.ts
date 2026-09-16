@@ -6,7 +6,7 @@
  *   「繋ぐ手段が画面に無い」という穴を見逃した原因である(CLAUDE.md §2)。
  */
 import { describe, expect, it } from 'vitest';
-import { pickErConnection } from '@features/query/er-connect';
+import { erZeroLinesWhy, pickErConnection } from '@features/query/er-connect';
 import type { SchemaLink, SchemaModel } from '@features/query/schema-digest';
 
 const link = (from: string, fromColumn: string, to: string, toColumn: string): SchemaLink => ({
@@ -85,5 +85,50 @@ describe('pickErConnection(#918 段⑤d-1)', () => {
     const mine = [link('売上', '客id', '客', 'id')];
     const r = pickErConnection(null, mine, { table: '売上', column: '客id' }, '客', 'id');
     expect(r.kind).toBe('denied');
+  });
+});
+
+/**
+ * 🔴 **線が 0 本の画面で、理由と次の一手を言う**(#918 段⑤d-3)。
+ *
+ * ⚠ ここで見るのは「**それらしい字が出るか**」ではなく、**場合ごとに字が変わるか**である ──
+ *   1 つの文言を返すだけの実装でも「字が出た」は満たせてしまう(CLAUDE.md §1「空振り」)。
+ */
+describe('erZeroLinesWhy(#918 段⑤d-3)', () => {
+  const base = { boxes: 3, declared: 0, mine: 0, dropped: 0, connecting: false };
+
+  it('🔴 外部キーが 0 本なら、理由と「繋ぐ」への誘いを両方言う', () => {
+    const s = erZeroLinesWhy(base);
+    expect(s, '理由を言っていない').toContain('宣言していません');
+    expect(s, '次に何を押せばよいか言っていない').toContain('繋ぐ');
+  });
+
+  it('🔴 「繋ぐ」が既に入なら、次の一手は言わない(すぐ下の案内と二重になる)', () => {
+    const on = erZeroLinesWhy({ ...base, connecting: true });
+    expect(on, '理由は言い続ける').toContain('宣言していません');
+    expect(on, '入のときまで「繋ぐを押せ」と言っている').not.toContain('押して列を 2 つ');
+    // ⚠ 対照群 ── 切のときは言う(言わない実装でも上だけなら通ってしまう)
+    expect(erZeroLinesWhy(base), '切のときに次の一手が消えている').toContain('押して列を 2 つ');
+  });
+
+  it('🔴 表が 1 つだけなら「繋ぐ」を勧めない(同じ表の中は繋げないので押せない道になる)', () => {
+    const s = erZeroLinesWhy({ ...base, boxes: 1 });
+    expect(s, '相手がいないことを言っていない').toContain('繋ぐ相手がいません');
+    expect(s, '押せない道へ誘っている').not.toContain('押して列を 2 つ');
+  });
+
+  it('🔴 繋がりは在るのに全部落ちたときは、別の理由を言う(「宣言していません」は嘘になる)', () => {
+    const s = erZeroLinesWhy({ ...base, declared: 2, dropped: 2 });
+    expect(s, '落ちたことを言っていない').toContain('線にできませんでした');
+    expect(s, '在る物を「無い」と言っている').not.toContain('宣言していません');
+    expect(s, '次の一手が消えている').toContain('繋ぐ');
+  });
+
+  it('⚠ 四角が 1 つも無いときは何も言わない(呼ぶ側が別の字を出している)', () => {
+    expect(erZeroLinesWhy({ ...base, boxes: 0 })).toBe('');
+  });
+
+  it('⚠ 起きない形(繋がりが在って落ちてもいない)には、それらしい字を置かない', () => {
+    expect(erZeroLinesWhy({ ...base, declared: 1, dropped: 0 })).toBe('');
   });
 });

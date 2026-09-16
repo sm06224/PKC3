@@ -2316,6 +2316,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-16(#918 段⑤d-2/d-3 ── 本文の表と 0 本の理由)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-13-search-field-name" …` → e9defc9
+     */
+    '左の「探す」の欄が「本文ごと探す」になりました',
+    /**
      * ⚠ **2026-09-16(#918 段⑤d-1 ── 自分で繋ぐ)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-13-schedule-touch-drag" …` → e9defc9
      */
