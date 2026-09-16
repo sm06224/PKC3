@@ -17,6 +17,9 @@
  * その間にカーソルを置く(打ち始められる)。
  */
 
+import { parseCsv } from './csv-table';
+import { tableToMarkdown } from './table-copy';
+
 export interface TextSelection {
   text: string;
   start: number;
@@ -271,19 +274,304 @@ export const CODE_BLOCK = template(`\`\`\`\n${CARET}\n\`\`\`\n`);
 export const MATH_BLOCK = template(`$$\n${CARET}\n$$\n`);
 
 /**
+ * 🔴 **行の前後で改行が要るか**(#950)。
+ *
+ * ⚠ **1 か所に寄せる** ── 空選択の雛形挿入(`insertBlock`)と、選択を囲む処理
+ *   (`wrapAsBlock` / 表を組む処理)が別々に「行の途中か」を判定すると、
+ *   片方だけ直して食い違う(CLAUDE.md §7)。
+ */
+function lineBreaksAround(text: string, start: number, end: number): { lead: string; tail: string } {
+  const atLineStart = start === 0 || text[start - 1] === '\n';
+  const tailNeedsBreak = end < text.length && text[end] !== '\n';
+  return { lead: atLineStart ? '' : '\n', tail: tailNeedsBreak ? '\n' : '' };
+}
+
+/**
  * 選択(または カーソル位置)に塊を差し込む。
  * ⚠ **行の途中なら改行してから**入れる ── 表や fence が段落の途中に生えると
  * markdown として壊れる。
+ * ⚠ **選んでいるときは呼ばない** ── 選択を丸ごと捨てて置き換える(#950 の穴)。
+ *   呼び側(`applyFormat`)は選択が無いとき(`start === end`)だけここへ来る。
  */
 export function insertBlock(sel: TextSelection, block: TemplateBlock): TextSelection {
   const { text, start, end } = sel;
-  const atLineStart = start === 0 || text[start - 1] === '\n';
-  const lead = atLineStart ? '' : '\n';
-  const tailNeedsBreak = end < text.length && text[end] !== '\n';
-  const body = `${lead}${block.text}${tailNeedsBreak ? '\n' : ''}`;
+  const { lead, tail } = lineBreaksAround(text, start, end);
+  const body = `${lead}${block.text}${tail}`;
   const next = text.slice(0, start) + body + text.slice(end);
   const caret = block.caret < 0 ? start + body.length : start + lead.length + block.caret;
   return { text: next, start: caret, end: caret };
+}
+
+/**
+ * 🔴 **選択を「行として立つ囲み」で囲む**(#950。user 指摘「選んで
+ * 『コードブロック』を押すと、選んだ字が消える。囲むべきだった」)。
+ *
+ * ⚠ `toggleWrap` は**記号 1〜2 文字**(`**` / `` ` ``)が対称に並ぶことを前提に
+ *   しており、ここでの `open` / `close` は**行そのもの**
+ *   (` ``` ` / ` ```mermaid ` / `$$`)なので、判定も挿し方も別に書く。
+ *
+ * 🔑 **選んでいないとき(`start === end`)はここへ来ない** ── 呼び側
+ *   (`applyFormat`)が既存の `insertBlock`(空の雛形)を使う。
+ *
+ * ## 決めたこと
+ *
+ * - **行の途中で選んだ**とき: `insertBlock` と**同じ判断**(`lineBreaksAround`)を
+ *   使い回し、前後に改行を挟む。
+ * - **末尾の改行を含めて選んだ**とき: 内側の改行が 2 重にならないよう、
+ *   選んだ文字列が既に `\n` で終わっているならもう 1 本足さない。
+ * - **言語の指定**(`opts.caretAfterOpen`)── codeblock だけ true にする。
+ *   囲んだ直後、caret を `open` の直後(まだ改行の前)へ置き、
+ *   言語をすぐ打てるようにする。math / mermaid には該当しない
+ *   (言語という概念が無い)ので、代わりに**囲んだ中身を選択状態にする**
+ *   (`toggleWrap` の「付ける」と同じ作法 ── 押した直後に何が起きたか見える)。
+ * - **もう一度押す(既に囲まれている)**とき: 外す(トグル)。
+ *   `tryUnwrapBlock` が 2 通りを見る:
+ *   ① 選択が **fence ごと**(1 行目が `open` で始まり・最終行が `close`)
+ *   ② 選択が **中身だけ**(直前の行が `open` で始まり・直後の行が `close`)
+ *   どちらでもなければ「囲まれていない」として「付ける」側へ進む。
+ *   ⚠ **開き行は `startsWith` で見る**(`===` ではない) ── codeblock は
+ *   言語付きで開くことがある(` ```ts `)。ここを完全一致にすると、
+ *   言語を打ってから選び直しても二度と外せない。閉じ行は言語を持たないので
+ *   完全一致のままでよい。
+ * - **選んだ範囲の中に `close` と同じ行が既に在る**とき: **そのまま囲む**
+ *   (検出も特別扱いもしない)。⚠ これは新しい壊れ方ではない ── 手で
+ *   ``` を入れ子に書いたときと**同じ CommonMark の制約**(内側に同じ長さの
+ *   fence を書くと途中で閉じる)。長さを自動で伸ばす仕組みはこの 1 issue の
+ *   範囲を超える複雑さなので入れない(founding「必要十分」/ 過剰実装を避ける)。
+ */
+export function wrapAsBlock(
+  sel: TextSelection,
+  open: string,
+  close: string,
+  opts: { readonly caretAfterOpen?: boolean } = {},
+): TextSelection {
+  const { text, start, end } = sel;
+  const unwrapped = tryUnwrapBlock(text, start, end, open, close);
+  if (unwrapped !== null) return unwrapped;
+
+  const { lead, tail } = lineBreaksAround(text, start, end);
+  const inner = text.slice(start, end);
+  // ⚠ 選んだ文字列が既に改行で終わっているなら、もう 1 本足さない(内側に空行が増える)
+  const midBreak = inner.endsWith('\n') ? '' : '\n';
+  const body = `${lead}${open}\n${inner}${midBreak}${close}${tail}`;
+  const next = text.slice(0, start) + body + text.slice(end);
+
+  if (opts.caretAfterOpen === true) {
+    const caret = start + lead.length + open.length;
+    return { text: next, start: caret, end: caret };
+  }
+  const innerStart = start + lead.length + open.length + 1;
+  return { text: next, start: innerStart, end: innerStart + inner.length };
+}
+
+/** 文書中の 1 本の fence 行(#950 着地前レビュー ①)。位置と役割を持つ。 */
+interface FenceLine {
+  readonly start: number;
+  readonly end: number;
+  readonly role: 'open' | 'close';
+}
+
+/**
+ * 🔴 **文書の先頭から fence 行を数え、役割(開き/閉じ)を交互に割り当てる**
+ * (#950 着地前レビュー ①。**本文を壊す欠陥**として指摘された)。
+ *
+ * ## なぜ「局所の 2 行」では判定できないか
+ *
+ * codeblock も math も **`open === close`**(` ``` ` / `$$`)なので、
+ * ある 1 行が「開き」か「閉じ」かは**その行だけを見ても分からない**。
+ * 選択の直前・直後の行だけを見る旧実装は、**選択と無関係などこかに在る
+ * 別の囲みの閉じ行と、その次の囲みの開き行**が選択に隣接しているとき、
+ * それを「選択を囲む対」と誤読して外し、**独立した 2 つの囲みを融合させ、
+ * 境界の fence を消していた**(実測で再現された)。
+ *
+ * 🔑 fence は**文書の先頭から数えて奇数番目が開き・偶数番目が閉じ**
+ * (0 始まりなら偶数 index が開き)で必ず交互に現れる ── だから
+ * **文書全体を先頭から 1 回走査**すれば、どの fence がどちらの役かは
+ * 局所情報に頼らず決まる。
+ *
+ * ⚠ `line === close` を先に見る ── codeblock は言語付きで開くことがある
+ * (` ```ts `)ので、`line.startsWith(open)` だけで判定すると**閉じ行
+ * (常に裸の `close`)まで開きと誤認**しうる。裸の fence(`close` と同じ形の
+ * 開き)は `line === close` の分岐で正しく拾われる ── 開き/閉じの**区別は
+ * 内容ではなく出現順**が付けるので、両方とも同じ配列に入れてよい。
+ */
+function fenceLines(text: string, open: string, close: string): readonly FenceLine[] {
+  const out: FenceLine[] = [];
+  let pos = 0;
+  for (;;) {
+    const nl = text.indexOf('\n', pos);
+    const end = nl === -1 ? text.length : nl;
+    const line = text.slice(pos, end);
+    if (line === close || line.startsWith(open)) {
+      out.push({ start: pos, end, role: out.length % 2 === 0 ? 'open' : 'close' });
+    }
+    if (nl === -1) break;
+    pos = nl + 1;
+  }
+  return out;
+}
+
+/**
+ * 既に `open` / `close` で囲まれているかを見て、囲まれていれば外す。
+ * 囲まれていなければ `null`(= 呼び側は「付ける」へ進む)。
+ *
+ * 🔑 `lineRange` で選択を行の境界まで広げてから見る ── 選択が行の途中で
+ * 終わっていても、その行ごと fence かどうかを判定できる。
+ *
+ * 🔴 **役割は `fenceLines`(文書全体の走査)から引く** ── 局所の文字列比較
+ * だけでは開き/閉じを区別できない(上の docstring)。加えて**隣接性
+ * (`closeIdx === openIdx + 1`)も見る** ── これが無いと、選択が**複数の
+ * 完結した囲みをまたいで丸ごと選ばれた**とき、内側の fence 行を巻き込んで
+ * 外し、**内側の fence だけが孤立して残る**(#950 着地前レビュー ①、
+ * ①にも同じ危険が在ると指摘された分)。隣接している = 選択の直前/開始行から
+ * 選択の直後/終了行までの間に**他の fence 行が 1 本も無い**ことなので、
+ * 「単純に囲んだだけ」と判定してよい。
+ */
+function tryUnwrapBlock(
+  text: string,
+  start: number,
+  end: number,
+  open: string,
+  close: string,
+): TextSelection | null {
+  const fences = fenceLines(text, open, close);
+  const roleAt = (pos: number): number => fences.findIndex((f) => f.start === pos);
+  const isAdjacentPair = (openIdx: number, closeIdx: number): boolean =>
+    openIdx !== -1 &&
+    fences[openIdx]!.role === 'open' &&
+    closeIdx === openIdx + 1 &&
+    fences[closeIdx]!.role === 'close';
+
+  const [a, b] = lineRange(text, start, end);
+  const block = text.slice(a, b);
+  const lines = block.split('\n');
+  // ① 選択が fence ごと(先頭行が開き・最終行がその直後の閉じ)
+  if (lines.length >= 2) {
+    const lastLineStart = b - lines[lines.length - 1]!.length;
+    if (isAdjacentPair(roleAt(a), roleAt(lastLineStart))) {
+      const inner = lines.slice(1, -1).join('\n');
+      const next = text.slice(0, a) + inner + text.slice(b);
+      return { text: next, start: a, end: a + inner.length };
+    }
+  }
+  // ② 選択は中身だけ(直前の行が開き・直後の行がその直後の閉じ)
+  if (a > 0 && text[a - 1] === '\n' && b < text.length && text[b] === '\n') {
+    const prevEnd = a - 1;
+    const prevStart = text.lastIndexOf('\n', prevEnd - 1) + 1;
+    const nextStart = b + 1;
+    if (isAdjacentPair(roleAt(prevStart), roleAt(nextStart))) {
+      const nlAfter = text.indexOf('\n', nextStart);
+      const nextEnd = nlAfter === -1 ? text.length : nlAfter;
+      const removedBefore = a - prevStart;
+      const next = text.slice(0, prevStart) + text.slice(a, b) + text.slice(nextEnd);
+      return { text: next, start: start - removedBefore, end: end - removedBefore };
+    }
+  }
+  return null;
+}
+
+/**
+ * 🔴 **選択を表にする**(#950「表について」)。
+ *
+ * ## なぜここで新しい変換を書くか
+ *
+ * 右クリックの「CSV の表にする / Markdown の表にする」(`table-convert.ts`)を
+ * 先に読んだ ── あちらは**既に本文に在る表**の行範囲を読み、形を変えるだけで、
+ * **任意に選んだ字を表に組み立てる口ではない**(表が無ければ何もしない)。
+ * 🔑 だから「表」ボタンの選択時の穴には**寄せられない** ── 別に用意する。
+ *
+ * ## 決めたこと(「選択があるときは選んだ行を素直に表にする」)
+ *
+ * - **行 = 表の行**、**セル = カンマ(既定)または tab で割る**。区切りは
+ *   `pickCsvDelimiter` が数えて選ぶ(tab のほうが多ければ tab ── 表計算からの
+ *   貼り付けは tab 区切りが多い)。⚠ 新しい CSV parser は書かない ──
+ *   `csv-table.ts` の `parseCsv`(引用符・区切り字の逃がしまで面倒を見る、
+ *   既にテスト済みの 1 本)をそのまま使う。
+ * - **組み立ても新しく書かない** ── `table-copy.ts` の `tableToMarkdown`
+ *   (HTML 貼付・RTF 貼付と同じ 1 本)にそのまま渡す。ここで `|` の逃がしや
+ *   見出し補完を書き直すと、3 つ目の「同じ問いに答える口」になる(CLAUDE.md §7)。
+ * - **1 行目を見出しにする** ── この app の CSV フェンスも既定で 1 行目を
+ *   見出しとして読む(`csv-table.ts` の既定)ので、平仄が合う。
+ * - **解析できない(空白だけ)選択**は `insertBlock` の空の雛形へ逃がす ──
+ *   何も囲む中身が無いので、これまでどおりの入口を残す。
+ * - 🔴 **既に表に見える選択(全行が `|` 始まり `|` 終わり)は、変換せずそのまま
+ *   返す**(#950 着地前レビュー ⑥。`looksLikeTable`)── 二重に変換すると
+ *   `|` がセルの値として読まれ、逃がされて壊れる。⚠ **完全なトグル(表 →
+ *   元の CSV/TSV)はここでは作らない**(区切り字と引用符の情報を復元できない)。
+ * - ⚠ **区切り字を 1 つも含まない文章を選ぶと 1 列だけの見出し表になる**
+ *   (`parseCsv` が 1 セルの行として読むため)。これは直さず**残す** ──
+ *   user の裁定が要る所として別に上げる。
+ */
+
+/**
+ * 🔴 **既に表に見えるか**(#950 着地前レビュー ⑥。`wrapSelectionAsTable` が使う)。
+ *
+ * ⚠ 既に `| a | b |` の形をした選択にもう一度「表」を押すと、`|` を丸ごと
+ *   1 セルの値として読み、`gfmCellText` が `|` を `\|` へ逃がすので
+ *   `| \| a \| b \| |` のような壊れた升になる(実測で再現された)。
+ *
+ * 🔑 判定は最小限にする(user 裁定「完全なトグルはこの回では作らない ──
+ *   区切り字と引用符を復元できないので」)。見るのは**中身のある行が
+ *   全部 `|` で始まり `|` で終わっているか**だけ(GFM の表の行は必ずこの形)。
+ *   ⚠ `table-convert.ts` の判定(markdown-it 相当の全ルール)は流用しない
+ *   ── あちらは文書全体の中の行範囲・引用の前置きまで見る「表を**書き換える**」
+ *   ための判定で、ここは「選択を**壊さない**ための最小限の網」でよい
+ *   (過剰実装を避ける)。
+ */
+function looksLikeTable(text: string): boolean {
+  const lines = text.split('\n').filter((l) => l.trim() !== '');
+  return (
+    lines.length > 0 &&
+    lines.every((l) => {
+      const t = l.trim();
+      return t.length >= 2 && t.startsWith('|') && t.endsWith('|');
+    })
+  );
+}
+
+function wrapSelectionAsTable(sel: TextSelection): TextSelection {
+  const { text, start, end } = sel;
+  const inner = text.slice(start, end);
+  if (looksLikeTable(inner)) return sel;
+  const rows = parseCsv(inner, pickCsvDelimiter(inner));
+  const md = rows === null ? null : tableToMarkdown(rows.map((cells, i) => ({ cells, head: i === 0 })));
+  if (md === null) return insertBlock(sel, TABLE_BLOCK);
+  const { lead, tail } = lineBreaksAround(text, start, end);
+  const body = `${lead}${md}\n${tail}`;
+  const next = text.slice(0, start) + body + text.slice(end);
+  const caret = start + lead.length;
+  return { text: next, start: caret, end: caret + md.length };
+}
+
+/**
+ * どちらの区切り字で割るか(#950 着地前レビュー ②)。
+ *
+ * ⚠ **生の文字数(tab の数 vs comma の数)では選ばない** ── 日本語の桁区切り
+ *   カンマ(`1,200,000`)は 1 セルの中に何個でも入るので、tab が 1 個しか無い
+ *   2 列の貼り付け(`備考\t合計は1,200,000円です`)でも comma のほうが多く
+ *   数えられ、tab で割るべき文を comma で割って升をバラバラにしていた
+ *   (実測で再現された)。
+ *
+ * 🔑 代わりに**自己無矛盾性**で選ぶ ── その区切り字で `parseCsv`(引用符も
+ *   面倒を見る既存の 1 本)に割らせて、**全ての行が同じ列数(2 列以上)に
+ *   揃うか**を見る。揃うほうを採れば、桁区切りカンマは「行ごとに列数が
+ *   バラバラ」になって自然と落ちる(上の例のような 1 行だけの選択は
+ *   「1 行だけなら何で割っても揃って見える」ので判別できないが、そのときは
+ *   **生の tab が 1 個でもあるか**で決める ── tab は表計算からの貼り付け
+ *   でほぼ確実に意図的な区切りだが、comma は自然文にも桁区切りにも大量に
+ *   出るので、tab の実在のほうが強い証拠になる)。
+ */
+function pickCsvDelimiter(text: string): string {
+  const isSelfConsistent = (delimiter: string): boolean => {
+    const rows = parseCsv(text, delimiter);
+    if (rows === null || rows.length === 0) return false;
+    const width = rows[0]!.length;
+    return width > 1 && rows.every((row) => row.length === width);
+  };
+  const tabOk = isSelfConsistent('\t');
+  const commaOk = isSelfConsistent(',');
+  if (tabOk !== commaOk) return tabOk ? '\t' : ',';
+  return text.includes('\t') ? '\t' : ',';
 }
 
 /** リンク。選択があればそれを文字列に、無ければ雛形。 */
@@ -394,7 +682,12 @@ export const FORMAT_OPS: readonly {
   { op: 'task', label: 'チェック', hint: 'この行をチェック項目にします(もう一度押すと外れます)' },
   { op: 'quote', label: '引用', hint: 'この行を引用にします(もう一度押すと外れます)' },
   { op: 'link', label: 'リンク', hint: 'リンクの形を入れて、URL の所を選んだ状態にします' },
-  { op: 'table', label: '表', hint: '2 列の表の雛形を差し込みます' },
+  {
+    op: 'table',
+    label: '表',
+    // 🔴 #950: 選んでいれば、選んだ行を表にします(選んだ字は消えません)
+    hint: '2 列の表の雛形を差し込みます(選んでいれば、選んだ行を表にします)',
+  },
   /**
    * 🔴 **「図」は帯に**この表からは**出さない**(#528 案 B。user 裁定 2026-09-04)。
    * ⚠ 帯の「図」は**先に聞く**(5 種の一覧 `DIAGRAM_CHOICES`)ので、
@@ -403,15 +696,31 @@ export const FORMAT_OPS: readonly {
    * ⚠ `op` は消さない ── 雛形の一覧の「図」(`BUILTIN_SNIPPET_OPS`)と
    *   一覧の先頭(フローチャート)が `MERMAID_BLOCK` を挿す口として使う。
    */
-  { op: 'mermaid', label: '図', hint: '図の雛形を差し込みます', onBar: false },
-  { op: 'codeblock', label: 'コードブロック', hint: 'コードブロックの雛形を差し込みます' },
+  {
+    op: 'mermaid',
+    label: '図',
+    // 🔴 #950: 選んでいれば ```mermaid で囲みます(選んだ字は消えません)
+    hint: '図の雛形を差し込みます(選んでいれば、選んだ範囲を ```mermaid で囲みます)',
+    onBar: false,
+  },
+  {
+    op: 'codeblock',
+    label: 'コードブロック',
+    // 🔴 #950: 選んでいれば、選んだ範囲を ``` で囲みます(選んだ字は消えません)
+    hint: 'コードブロックの雛形を差し込みます(選んでいれば、選んだ範囲を ``` で囲みます)',
+  },
   /**
    * 🔴 **数式**(#707。user 裁定 2026-09-06)。⚠ 直す前は「数式が書ける」と知る道が
    *   **起動時のお知らせ 1 回**か、ヘルプ → マニュアルの下のほうだけだった ──
    *   同じ「囲って書く記法」でも、表・図・コードブロックには押す所が在るのに
    *   数式だけ無い、という非対称だった(着地前レビュー・動線 4)。
    */
-  { op: 'math', label: '数式', hint: '中央寄せの数式の雛形を差し込みます($$ で囲みます)' },
+  {
+    op: 'math',
+    label: '数式',
+    // 🔴 #950: 選んでいれば、選んだ範囲を $$ で囲みます(選んだ字は消えません)
+    hint: '中央寄せの数式の雛形を差し込みます(選んでいれば、選んだ範囲を $$ で囲みます)',
+  },
   /**
    * 🔴 **帯には出さない**(`onBar: false`)。⚠ **表は 1 つのまま**にしてある ──
    * 「書式の操作は何があるか」と「帯に何を並べるか」を別の表に分けると、
@@ -442,14 +751,23 @@ export function applyFormat(sel: TextSelection, op: FormatOp): TextSelection {
       return toggleWrap(sel, '`');
     case 'link':
       return insertLink(sel);
+    /**
+     * 🔴 **#950**: 選んでいるときは**囲む**(選んでいなければこれまでどおり
+     * 空の雛形)。⚠ 4 つとも同じ形(`start === end` で分ける)にする ──
+     * 片方だけ直すと「ボタンごとに挙動が違う」という新しい食い違いになる。
+     */
     case 'table':
-      return insertBlock(sel, TABLE_BLOCK);
+      return sel.start === sel.end ? insertBlock(sel, TABLE_BLOCK) : wrapSelectionAsTable(sel);
     case 'mermaid':
-      return insertBlock(sel, MERMAID_BLOCK);
+      return sel.start === sel.end
+        ? insertBlock(sel, MERMAID_BLOCK)
+        : wrapAsBlock(sel, '```mermaid', '```');
     case 'codeblock':
-      return insertBlock(sel, CODE_BLOCK);
+      return sel.start === sel.end
+        ? insertBlock(sel, CODE_BLOCK)
+        : wrapAsBlock(sel, '```', '```', { caretAfterOpen: true });
     case 'math':
-      return insertBlock(sel, MATH_BLOCK);
+      return sel.start === sel.end ? insertBlock(sel, MATH_BLOCK) : wrapAsBlock(sel, '$$', '$$');
     /**
      * ⚠ **綴りは描き手から引いた**(`markdown-render.ts:894` / `:1001`)──
      * 圏点は**新形の `^^`** を使う(`[[em:…]]` は同じ意味の古い形で、

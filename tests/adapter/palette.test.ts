@@ -472,6 +472,25 @@ describe('編集中の記法をパレットから入れる(#425 段②-b)', () =
     expect(ta2.value, '鍵で入っていない(前提が崩れている)').not.toBe('あいうえお');
     expect(viaPalette, '鍵とパレットで入る形が違う').toBe(ta2.value);
   });
+
+  /**
+   * 🔴 **#950 段②**: 帯にしか無かった 3 つ(表 / コードブロック / 数式)が、
+   * 「操作を探す」からも呼べて、しかも**選んだ字を消さずに囲む**ことを見る。
+   * ⚠ `applyFormat` 自体の規則は `tests/features/text-ops.test.ts` が見ている ──
+   *   ここは**パレット経由でもその規則にちゃんと繋がっているか**(繋がりが
+   *   途切れていれば、選んだ範囲を無視して先頭へ入る等の壊れ方をする)。
+   */
+  it('🔴 「コードブロック」がパレットから呼べて、選んだ字を消さずに囲む', async () => {
+    const { root } = setup();
+    const ta = editing(root, 'あいうえお', 1, 4);
+    root.querySelector<HTMLElement>('[data-pkc-action="open-palette"]')!.click();
+    await tick();
+    expect(rowOf('format-codeblock'), 'コードブロックの行が出ていない').toBeDefined();
+    rowOf('format-codeblock')!.click();
+    await tick();
+    await tick();
+    expect(ta.value, '選んだ字が消えた').toBe('あ\n```\nいうえ\n```\nお');
+  });
 });
 
 /**

@@ -443,6 +443,54 @@ describe('「図」を押すと 5 種から選ぶ(#528 案 B)', () => {
     await tick();
     expect(s.q('[data-pkc-action="insert-diagram"]')).toBeNull();
   });
+
+  /**
+   * 🔴 **#950**: 選んでいるときは、5 種の一覧を出さずに ```mermaid で直接囲む。
+   *
+   * ⚠ 一覧は「空の枠から選んで始める」ための入口 ── 既に打った下書きを
+   *   選んで押した人には無関係の問い(「どの種類?」)になり、しかも一覧を
+   *   出したまま `insertBlock` を呼ぶと**選んだ字が消える**(#950 の穴そのもの)。
+   * 🔑 ここが見るのは繋がり(押した所から一覧を出さずに直接書き戻すか)。
+   *   囲む規則そのものは `tests/features/text-ops.test.ts`。
+   */
+  describe('🔴 選んでいるときは一覧を出さず、直接 ```mermaid で囲む(#950)', () => {
+    it('一覧が開かない', async () => {
+      const s = setup([meta('a')], { a: 'まえなかあと' });
+      s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+      await tick();
+      s.q('[data-pkc-action="start-edit"]')!.click();
+      await tick();
+      const ta = s.q<HTMLTextAreaElement>('[data-pkc-field="editor-body"]')!;
+      ta.setSelectionRange(2, 4); // 「なか」を選ぶ
+      s.q('[data-pkc-action="insert-diagram"]')!.click();
+      await tick();
+      expect(openDialog(), '選んでいるのに一覧が開いた').toBeNull();
+    });
+
+    it('選んだ字を消さずに ```mermaid で囲み、state にも届く', async () => {
+      const s = setup([meta('a')], { a: 'まえなかあと' });
+      s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+      await tick();
+      s.q('[data-pkc-action="start-edit"]')!.click();
+      await tick();
+      const ta = s.q<HTMLTextAreaElement>('[data-pkc-field="editor-body"]')!;
+      ta.setSelectionRange(2, 4);
+      s.q('[data-pkc-action="insert-diagram"]')!.click();
+      await tick();
+      expect(ta.value, '選んだ字が消えた').toContain('なか');
+      expect(ta.value).toContain('```mermaid');
+      expect(ta.value.startsWith('まえ')).toBe(true);
+      expect(ta.value.endsWith('あと')).toBe(true);
+      expect(s.d.getState().openBody?.body, 'state に届いていない').toBe(ta.value);
+    });
+
+    /** ⚠ 対照群 ── 選んでいなければ、これまでどおり一覧が開く(壊していない)。 */
+    it('⚠ 対照群:選んでいなければ、これまでどおり一覧が開く', async () => {
+      const { ta } = await openPicker('まえ\n', 3);
+      expect(openDialog(), '空選択なのに一覧が開かない(既存の挙動を壊した)').not.toBeNull();
+      expect(ta.value).toBe('まえ\n');
+    });
+  });
 });
 
 /**

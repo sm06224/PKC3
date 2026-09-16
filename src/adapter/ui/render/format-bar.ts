@@ -207,12 +207,18 @@ export function buildFormatBar(): HTMLElement {
  * ⚠ 鍵は付けない ── 帯の他の道具(日付 / 雛形)は既定の鍵を 1 つずつ食っている。
  *   「図」はこれまで鍵を持っていなかったので、増やさない(15 枠の規律と同じ向き)。
  * ⚠ 文言は**起きること**で書く(user 指示 2026-08-21)。
+ * 🔴 **#950 着地前レビュー ④**: 「選んでいれば一覧を出さず直接 ```mermaid で
+ *   囲む」(binder.ts の `insert-diagram`)に直したのに、この字は「押すと
+ *   一覧が出て雛形を差し込みます」のまま残っていた ── 選んでいるときは
+ *   一覧が出ないので、字が事実と食い違っていた。両方の場合を書く。
  */
 function diagramButton(): HTMLButtonElement {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.setAttribute('data-pkc-action', 'insert-diagram');
-  btn.title = '図の雛形を入れます。押すと、フローチャート / クラス図 / シーケンス図 / 状態遷移図 / ER 図 から選べます';
+  btn.title =
+    '選んでいれば、選んだ範囲を ```mermaid で囲みます。' +
+    '選んでいなければ、フローチャート / クラス図 / シーケンス図 / 状態遷移図 / ER 図 から選べます';
   const text = document.createElement('span');
   text.setAttribute('data-pkc-field', 'label');
   text.textContent = '図';

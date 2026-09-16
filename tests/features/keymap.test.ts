@@ -186,7 +186,11 @@ describe('割当の検め', () => {
    * ⚠ 空でも下の検査は空振りしない ── `KEYLESS` に載っていない全員が
    *   「既定を持つ」側で検められる(= 62 件が実際に見られている)。
    */
-  const KEYLESS: readonly string[] = [];
+  /**
+   * 🔴 **#950 段②**: 帯に既にボタンが在る 3 つ ── マウスだけで完結するので、
+   *   鍵の枠(15 個の設定 flag とは別枠だが、既定の割当は有限)を消費しない。
+   */
+  const KEYLESS: readonly string[] = ['format-table', 'format-codeblock', 'format-math'];
 
   it('🔴 鍵を持たない操作の一覧は、身元で持つ', () => {
     const ids = new Set(KEY_COMMANDS.map((c) => c.id));
