@@ -552,7 +552,14 @@ assert を足す**。門は `scripts/smoke-budget.mjs`(`tests/smoke-budget.test.
 1. **途中は引く**: `node scripts/pick-smoke.mjs --run` ── 触った物から spec を引く。
    ⚠ **読めない物が 1 件でも混じったらフルへ倒れる**(表に無い file / CSS /
    `tests/smoke` の土台 / `src` の外 / 表そのものが無い)。表は
-   `tests/smoke/smoke-map.json`、作り直しは nightly と `npm run smoke:map`
+   `tests/smoke/smoke-map.json`。🔴 **作り直す仕掛けはどこにも無い**(2026-09-16 に実測)──
+   ここは「作り直しは **nightly** と `npm run smoke:map`」と書いてあったが、
+   `.github/workflows/` に `smoke-map` の字は **一度も在ったことがない**
+   (`git log -S 'smoke-map' -- .github/workflows/` が **0 行**)。⚠ だから表は
+   **2026-09-09 のまま**で、いま `src` に在る **474 件のうち 96 件(20.3%)が表に無い**
+   ── **引こうとしてもほぼフルへ倒れる**(この規律が道具の側で成立していない)。
+   手で作り直すなら `PKC3_SMOKE_COVERAGE=1 npm run test:smoke` → `npm run smoke:map`。
+   直しは #993
 2. **着地の直前に 1 回だけフル**。⚠ ここは**引かない** ── 表が言えるのは
    「**あの日の版で動かした**」であって「これから動かしうる」ではない(TIA の定石)
 3. **push はまとめる** ── ⚠ 2026-08-19 の「push 1 回 = CI のフル 1 回」は
