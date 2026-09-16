@@ -2325,6 +2325,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-16(#968 ── 広い csv の重さ)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-14-audio-trim" …` → 000a123b
+     */
+    '録音の前後を削って、その範囲だけを新しい録音にできるようになりました',
+    /**
      * ⚠ **2026-09-16(#971 段④ ── 4GB を超える書庫)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-14-place-shape" …` → aacb256a
      */

@@ -92,6 +92,13 @@ git switch -                                                  # 指定 branch �
 戻るので、そこで書き換えると**他人の作業を壊す**。手順は
 `.claude/skills/subagent-scale/SKILL.md` §1。
 
+🔴 **戻った cwd は、worktree 隔離そのものを起動不能にする**(2026-09-16 実測)。
+cwd が `/home/user` のまま `isolation: "worktree"` を投げると
+`Cannot create agent worktree: not in a git repository` で落ちる ──
+⚠ この文面は**hook が無いときと同じ**なので、
+**「この箱では使えない」と読み違えて要らぬ退避へ倒れる**。
+🔑 **投げる前に `cd <作業ツリー>` を 1 回打つ**だけで消える。
+
 ## 🔴 probe は **repo の外を cwd にして**走らせる(2026-09-16)
 
 `cd /home/user/PKC3 && node probe.mjs` で DuckDB の probe を回したら、

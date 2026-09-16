@@ -23,6 +23,7 @@ import {
   CSV_TABLE_CELLS_MAX,
   CSV_SOURCE_COLUMNS,
 } from '../../src/features/query/csv-tables';
+import type { CsvTableBlock } from '../../src/features/query/csv-tables';
 
 const fence = (info: string, lines: readonly string[]): string =>
   ['```' + info, ...lines, '```', ''].join('\n');
@@ -263,5 +264,62 @@ describe('受けられない名前の理由', () => {
     expect(csvTableNameRaw('csv name=売上(2026)')).toBe('売上(2026)');
     expect(csvTableNameOf('csv name=売上(2026)'), '受けてはいけない').toBeNull();
     expect(csvTableNameRaw('csv')).toBeNull();
+  });
+});
+
+/**
+ * 🔴 **列がいくら増えても、掛かる時間は列に比例するだけ**(#968)。
+ *
+ * ## 何が起きていたか
+ *
+ * 列の重複除去が `columns.includes(c)` で、**列数の 2 乗**だけ比べていた。
+ * ⚠ しかもここは**その本文を書いた後、どんな軽い問い合わせを打っても毎回**走る
+ * (`buildCsvTables` は打った SQL に関係なく走る)── user には
+ * 「SQL の面が重い」としか見えず、**理由がどこにも出ない**。
+ *
+ * | 列(データ行 0 行) | 直す前 | 直した後 |
+ * |---|---|---|
+ * | 8,000 | 200.4 ms | **5.2 ms** |
+ * | 16,000 | 554.5 ms | 11.8 ms |
+ * | 32,000 | 🔴 **2,510.1 ms** | **18.8 ms** |
+ *
+ * ## ⚠ 時間で pin するときは、差を桁で稼ぐ
+ *
+ * 🔑 下の上限(**1 秒**)は、直した後の実測(18.8 ms)の **50 倍以上**の余裕がある。
+ *   ⚠ それでも**直す前は 2.5 秒**なので、2 乗へ戻す変異は必ず落ちる
+ *   ── 端末の速さが 2 倍ぶれても向きは変わらない(CLAUDE.md §2「差は桁で稼ぐ」)。
+ * ⚠ **速さを主張する test にはしない** ── ここが見ているのは
+ *   「**列数の 2 乗になっていない**」という形だけである。
+ */
+describe('列が多くても重くならない(#968)', () => {
+  const wide = (n: number, prefix = 'c'): CsvTableBlock =>
+    ({
+      name: 't',
+      noteTitle: 'n',
+      lid: 'l',
+      columns: Array.from({ length: n }, (_, i) => `${prefix}${i}`),
+      rows: [],
+    }) as unknown as CsvTableBlock;
+
+  it('🔴 32,000 列でも 1 秒を超えない(2 乗へ戻すと 2.5 秒かかる)', () => {
+    const t0 = performance.now();
+    const out = mergeCsvTables([wide(32_000)]);
+    const ms = performance.now() - t0;
+    // ⚠ 前提の assert ── 列を数えていなければ、速いのは当たり前である
+    expect(out[0]!.columns.length, '列を 1 つも拾えていない(この test は何も見ていない)').toBe(
+      32_000 + CSV_SOURCE_COLUMNS.length,
+    );
+    expect(ms, `2 乗へ戻っている(${ms.toFixed(0)}ms)`).toBeLessThan(1000);
+  });
+
+  /**
+   * 🔑 **速くしたぶん、結果が変わっていないこと**を別に見る ──
+   *   `Set` は「見たかどうか」だけに使い、**並びは元のまま**である。
+   */
+  it('🔴 重複は落ちるが、並びは最初に出てきた順のまま', () => {
+    const a = { name: 't', noteTitle: 'n1', lid: 'l1', columns: ['z', 'a', 'z'], rows: [] };
+    const b = { name: 't', noteTitle: 'n2', lid: 'l2', columns: ['a', 'm'], rows: [] };
+    const out = mergeCsvTables([a, b] as unknown as CsvTableBlock[]);
+    expect(out[0]!.columns).toEqual([...CSV_SOURCE_COLUMNS, 'z', 'a', 'm']);
   });
 });
