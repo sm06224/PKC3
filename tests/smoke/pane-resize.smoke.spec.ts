@@ -103,6 +103,27 @@ test('🔴 押しただけなら畳み、掴んで動かした直後は畳まれ
   expect(await widthOf(page, 'sidebar'), '押しても戻らない').toBeGreaterThan(100);
 
   /**
+   * 🔴 **右を畳んでも、全体の横スクロールが有効にならない**(user 報告)。
+   * ⚠ **左だけ畳んでも再現しない**(左の右には本文が残り、はみ出しを吸収する)
+   *   ── だからここで見るのは**右**と**両方**畳んだときだけ。原因は取っ手の印
+   *   (`::after` の `⋮`)が 8px の帯より 1px 広く、**右に何も無くなると
+   *   document の外へ 1px はみ出す**こと(`app.css` の `overflow-x: clip` で塞ぐ)。
+   */
+  const overflowPx = async (): Promise<number> =>
+    page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  await page.locator(grip('inspector')).click();
+  expect(await widthOf(page, 'inspector'), '右が畳めない(前提)').toBe(0);
+  expect(await overflowPx(), '右を畳むと横スクロールが有効になる').toBeLessThanOrEqual(0);
+  await page.locator(grip('sidebar')).click();
+  expect(await widthOf(page, 'sidebar'), '左が畳めない(前提)').toBe(0);
+  expect(await overflowPx(), '両方畳むと横スクロールが有効になる').toBeLessThanOrEqual(0);
+  // 元に戻す ── 以降の主張(②)を汚さない
+  await page.locator(grip('sidebar')).click();
+  await page.locator(grip('inspector')).click();
+  expect(await widthOf(page, 'sidebar'), '左が戻らない(後片付けの前提)').toBeGreaterThan(100);
+  expect(await widthOf(page, 'inspector'), '右が戻らない(後片付けの前提)').toBeGreaterThan(100);
+
+  /**
    * ② 🔴 **掴んで動かした後に畳まれない。** ⚠ ブラウザは指を離した後に `click` も
    * 撃つので、捨てていないと**広げた直後にその面が消える**。
    */

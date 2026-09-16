@@ -2316,6 +2316,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-16(#961 ── 横スクロール)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-13-sql-open-local-file" …` → d757603
+     */
+    '手持ちのファイルも、SQL で調べられるようになりました',
+    /**
      * ⚠ **2026-09-16(#682 段③c ── エンジンの選び所)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-13-sql-csv-attachment" …` → 71c808d
      */
