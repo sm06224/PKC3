@@ -2334,6 +2334,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-16(#996 開けない 1 枚を作らせない)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-14-place-lines" …` → 543599a3
+     */
+    '板の付箋どうしを、線で繋げるようになりました',
+    /**
      * ⚠ **2026-09-16(#978 大きさに GB の段)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-14-sql-rows-window" …` → 44d8553d
      */

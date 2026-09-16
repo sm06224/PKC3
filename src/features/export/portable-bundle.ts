@@ -25,6 +25,10 @@
  * 「書き出せたのに中身が入っていない HTML」が配られる。
  */
 import { base64Chunks } from './pkc3-html';
+import {
+  tooBigToReadBack,
+  tooBigToReadBackMessage,
+} from '../storage/image-export-limit';
 import type { PortableBundle } from '../portable/bundle';
 
 /**
@@ -84,6 +88,20 @@ export async function writePortableBundle(args: {
     throw new Error('DB の中身が空です(書き出すものがありません)');
 
   /**
+   * 🔴 **焼けるが開けない大きさを、焼かせない**(#996)。
+   *
+   * ⚠ 下の `base64Chunks` は文字列を**刻んで `Blob` にする**ので、
+   *   どんなに大きくても**書けてしまう** ── そして読み戻す側は
+   *   `<script>` の `textContent` = **1 本の文字列**なので、
+   *   上限(実測 536,870,880 字 < 上限 <= 536,870,912 字)を超えると
+   *   🔴 **ファイルはできるのに二度と開けない**。
+   * 🔑 だから**ここで断る** ── 断らないと、user は
+   *   「バックアップを取った」と思ったまま**必要になった日に失う**。
+   */
+  if (tooBigToReadBack(image.byteLength))
+    throw new Error(tooBigToReadBackMessage('いまの中身', image.byteLength));
+
+  /**
    * 印を探すのは頭だけ、差し込み先を探すのは**全体の最後**。
    * ⚠ 2 つを「頭 / 残り」で分けて別々に探すと、**雛形が短いときに残りが空**になり
    *   差し込み先を見失う(1 稿目で踏んだ ── test の小さな雛形で落ちた)。
@@ -112,6 +130,17 @@ export async function writePortableBundle(args: {
       // ⚠ 落とさず**名指しで注意**する ── 1 件の変な key で書き出し全体を
       //   失わせない(残りは正しく焼ける)
       warnings.push(`添付の key が扱えない形でした(焼いていません): ${a.key}`);
+      continue;
+    }
+    /**
+     * ⚠ **天井は添付 1 件ごとにも効く** ── 読み戻しは 1 件ずつ
+     *   `textContent` を読む(`portable-assets.ts`)ので、
+     *   **大きい 1 件が入っただけで 1 枚ごと開けなくなる**。
+     * 🔑 **落として続ける**(上の key と同じ作法)── 1 件のために
+     *   残り全部を失わせない。⚠ ただし**名指しで言う**。
+     */
+    if (tooBigToReadBack(a.blob.size)) {
+      warnings.push(tooBigToReadBackMessage(`添付「${a.key}」`, a.blob.size));
       continue;
     }
     parts.push(
