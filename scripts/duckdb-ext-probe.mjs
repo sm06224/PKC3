@@ -184,16 +184,39 @@ async function main() {
   console.log(`# 門ありで読み込まれた物: ${one2(
     "SELECT extension_name FROM duckdb_extensions() WHERE loaded ORDER BY extension_name",
   )}`);
-  /**
-   * 🔑 **対照群 ── 門が「外へ出る側」には効いていること**も見る。
-   * ⚠ これが無いと「門を掛けたつもりで掛かっていない」を見抜けない
-   *(上の行が全部緑になるだけで、何も守っていないことになる)。
-   */
-  line('⚠ 対照群:知らない拡張は外へ取りに行かない(断られるのが正しい)', () =>
-    one2("SELECT * FROM read_parquet('この名前の拡張は無い.parquet')"),
-  );
   conn2.close();
   await db2.terminate?.();
+
+  /**
+   * 🔑 **対照群 ── 門が「外へ出る側」には効いていること**を見る。
+   *
+   * ⚠ これが無いと、上の行が全部緑になっただけで
+   *   「門を掛けたつもりで掛かっていない」を見抜けない。
+   *
+   * 🔴 **1 稿目は空振りだった**(2026-09-16。run 3 で見つけた)。
+   * 同じ器に **parquet を既に読み込んだ後**で `read_parquet(...)` を打っていたので、
+   * 返ってきたのは `IO Error: No files found that match the pattern ...`
+   * ── **ただ file が無いという話**で、門の話ではなかった。
+   * 🔑 だから**何も読み込んでいない器を立て直して**打つ
+   *  (§1「今度は何に救われていないか」)。
+   *
+   * ⚠ **断られるのが正解**なので、`line` を使わない
+   *  ── 使うと**正しい結果が 🔴 で出て**、次に読む人が壊れていると読む。
+   */
+  const db3 = await createDuckDB(bundles(), new VoidLogger(), NODE_RUNTIME);
+  await db3.instantiate();
+  const conn3 = db3.connect();
+  conn3.query('SET autoinstall_known_extensions=false');
+  conn3.query('SET autoload_known_extensions=false');
+  try {
+    conn3.query("SELECT * FROM read_parquet('x.parquet')");
+    console.log('🔴 対照群: 門を掛けたのに通ってしまった(門が効いていない)');
+  } catch (e) {
+    const m = e instanceof Error ? e.message.split('\n')[0] : String(e);
+    console.log(`🟢 対照群: 何も読み込んでいない器では断られる(正しい): ${m}`);
+  }
+  conn3.close();
+  await db3.terminate?.();
 }
 
 main().catch((e) => {
