@@ -83,20 +83,37 @@ describe('readZipDirectory', () => {
     await expect(readZipDirectory(new Blob([buf]))).rejects.toThrow(/範囲外/);
   });
 
-  it('ZIP64 は名指しで断る(実装しないと決めた形式を黙って誤読しない)', async () => {
-    // ① EOCD 直前の ZIP64 locator
+  /**
+   * 🔴 **2026-09-16(#971 段④)に、この test の主張が裏返った。**
+   *
+   * ⚠ 直す前の題名は「**ZIP64 は名指しで断る**」で、① 偽の位置札 ② 件数 `0xffff`
+   *   の 2 つを置いて「`/ZIP64/` を含む字で落ちる」ことを見ていた。
+   * 🔴 **ZIP64 を読めるようにした後も、その 2 つは落ち続ける** ── どちらも
+   *   **中身が伴っていない壊れた ZIP64** なので、別の理由で断られるからである。
+   *   つまり**題名どおりの物を 1 つも守らなくなっていた**(CLAUDE.md §1)。
+   * 🔑 だから主張を分けた:**ちゃんとした ZIP64 は読める**(下の round-trip)/
+   *   **印だけ立っていて中身が無い物は断る**(ここ)。
+   */
+  it('印だけ立っていて中身が無い ZIP64 は断る(黙って ZIP32 の欄へ落ちない)', async () => {
     const base = await buildZip([{ name: 'a.txt', bytes: bytesOf('x') }]);
+
+    // ① 位置札だけ在って、ZIP64 の終端がどこにも無い
     const buf = new Uint8Array(await base.arrayBuffer());
     const withLocator = new Uint8Array(buf.length + 20);
     withLocator.set(buf.subarray(0, buf.length - 22));
     new DataView(withLocator.buffer).setUint32(buf.length - 22, 0x07064b50, true);
     withLocator.set(buf.subarray(buf.length - 22), buf.length - 22 + 20);
-    await expect(readZipDirectory(new Blob([withLocator]))).rejects.toThrow(/ZIP64/);
+    await expect(readZipDirectory(new Blob([withLocator]))).rejects.toThrow(/ZIP64 の終端/);
 
-    // ② 件数 0xffff(ZIP64 のプレースホルダ)
+    // ② 件数が印(0xffff)なのに、位置札が無い
     const buf2 = new Uint8Array(await base.arrayBuffer());
     new DataView(buf2.buffer).setUint16(buf2.length - 22 + 10, 0xffff, true);
-    await expect(readZipDirectory(new Blob([buf2]))).rejects.toThrow(/ZIP64/);
+    await expect(readZipDirectory(new Blob([buf2]))).rejects.toThrow(/位置札/);
+
+    // ③ 中央ディレクトリの大きさが印なのに、位置札が無い
+    const buf3 = new Uint8Array(await base.arrayBuffer());
+    new DataView(buf3.buffer).setUint32(buf3.length - 22 + 12, 0xffffffff, true);
+    await expect(readZipDirectory(new Blob([buf3]))).rejects.toThrow(/位置札/);
   });
 
   it('中央ディレクトリが件数ぶん無ければ断る(途中で切れた ZIP)', async () => {
