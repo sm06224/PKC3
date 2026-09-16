@@ -1025,6 +1025,25 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   });
   await expect(sidebar, '.parquet が添付として取り込まれていない').toContainText('uriage.parquet');
 
+  /**
+   * 🔴 **`.json` も取り込む**(#682 段④c。着地前 smoke が
+   *   「`.json` は実ブラウザで 1 度も通っていない」と指摘したので足した)。
+   * ⚠ お知らせもマニュアルも `.json` を約束している ── **約束したものは通す**。
+   * 🔑 中身はただの字なので、`buildParquet` のような組み立てが要らない。
+   */
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: 'meisai.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(
+      JSON.stringify([
+        { id: 1, shinamono: 'ringo' },
+        { id: 2, shinamono: 'mikan' },
+      ]),
+      'utf8',
+    ),
+  });
+  await expect(sidebar, '.json が添付として取り込まれていない').toContainText('meisai.json');
+
   await createEntry(page, 'text');
   const ta = page.locator('[data-pkc-field="editor-body"]');
   await expect(ta).toBeVisible();
@@ -1487,8 +1506,18 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   const labelsWithParquet = await source.locator('option').allTextContents();
   const idxXlsx = labelsWithParquet.indexOf('uriage.xlsx');
   const idxParquet = labelsWithParquet.indexOf('uriage.parquet');
+  const idxJson = labelsWithParquet.indexOf('meisai.json');
+  /**
+   * ⚠ **基準の側も留める**(2026-09-16、着地前 smoke が指摘)。
+   * 🔴 `idxXlsx` を検めないと、`.xlsx` が選び所から落ちた日に `-1` になり、
+   *   下の「`.xlsx` より後ろ」は**上の行が既に言っていること**へ潰れて**恒真**になる
+   *   (CLAUDE.md §1 の形)。上の `.xlsx` 対 `.csv` は基準の側を 2 通りで留めている。
+   */
+  expect(idxXlsx, '.xlsx が選び所から消えている(この比較の基準が無い)').toBeGreaterThanOrEqual(0);
   expect(idxParquet, '.parquet が選び所に見つからない').toBeGreaterThanOrEqual(0);
+  expect(idxJson, '.json が選び所に見つからない').toBeGreaterThanOrEqual(0);
   expect(idxParquet, '.parquet が .xlsx より上(前)に並んでいる').toBeGreaterThan(idxXlsx);
+  expect(idxJson, '.json が .xlsx より上(前)に並んでいる').toBeGreaterThan(idxXlsx);
 
   /**
    * 🔴 **見張りを付け直す**(2026-09-16、着地前 smoke が空振りを見つけた)。
@@ -1497,20 +1526,20 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
    *   🔴 CLAUDE.md §1「代替物で満たせない条件にする」の、いちばん静かな形である。
    * 🔑 だから**この回ぶんを別に数える** ── 付け直して、走らせ終わってから外す。
    */
-  const outwardParquet: string[] = [];
+  const outwardDuck: string[] = [];
   /**
    * ⚠ **全部の数も控える** ── 「外へ 0 件」は、**見張りを付け忘れた版でも成り立つ**。
    * 🔑 だからこの回に**何か 1 件でも見えたこと**を、同じ見張りで数えて空振りを潰す。
    */
-  let seenParquet = 0;
-  const watchParquet = (req: { url: () => string }): void => {
-    seenParquet += 1;
+  let seenDuck = 0;
+  const watchDuck = (req: { url: () => string }): void => {
+    seenDuck += 1;
     const u = req.url();
     if (!u.startsWith('http://localhost') && !u.startsWith('http://127.0.0.1')) {
-      outwardParquet.push(u);
+      outwardDuck.push(u);
     }
   };
-  page.on('request', watchParquet);
+  page.on('request', watchDuck);
 
   await source.selectOption({ label: 'uriage.parquet' });
   await expect(note, '.parquet が開いたことが画面に出ない').toContainText(
@@ -1559,19 +1588,46 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
     'does not exist',
   );
   /**
+   * ⑤-d 🔴 **`.json` も、同じ道で引ける**(#682 段④c)。
+   *
+   * ⚠ お知らせもマニュアルも `.json` / `.ndjson` / `.jsonl` を約束している ──
+   *   ところが 3 稿目まで **smoke は `.parquet` しか通していなかった**
+   *   (着地前 smoke が指摘)。🔑 約束したものは通す。
+   * ⚠ **器は相手ごとに作り直す**(鍵が変わる)ので、ここでもう 1 度起こし直す ──
+   *   ただし wasm も拡張も**もう取ってある**ので、待ちは短い。
+   * 🔑 ここも**画面の手本をそのまま**走らせる(自分で字を打つと、案内が嘘でも通る)。
+   */
+  await source.selectOption({ label: 'meisai.json' });
+  await expect(note, '.json が開いたことが画面に出ない').toContainText('meisai.json を調べています');
+  await expect(engine, '.json なのに sqlite で引こうとしている').toHaveValue('duckdb');
+  const jsonExample = (await page.locator('[data-pkc-field="sql-example"]').textContent()) ?? '';
+  expect(jsonExample, '手本が json の名前で書かれていない').toContain('FROM json');
+  await page.fill('[data-pkc-field="sql-input"]', jsonExample.replace(/^例:\s*/u, ''));
+  await clickReal(page, '[data-pkc-action="run-sql"]');
+  await expect(sqlTable, '.json から行が返らない').toBeVisible({ timeout: 60_000 });
+  expect(
+    await sqlTable.locator('thead th').allTextContents(),
+    '相手の列を勝手に増やしている(json には _note / _lid を足さない)',
+  ).toEqual(['id', 'shinamono']);
+  await expect(sqlTable.locator('tbody tr'), '行の数が合わない').toHaveCount(2);
+  await expect(sqlTable, 'json の中身が出ていない').toContainText('mikan');
+
+  /**
    * ⚠ **外へ出ていない**(段② の柱)── localhost 以外への要求が 1 件も無いこと。
-   * 🔑 数えているのは**この回ぶん**の見張り(上で付け直した物)である。
+   * 🔑 **`.parquet` と `.json` の両方を通した後**に見る ── 器は相手ごとに
+   *   作り直すので、2 形式ぶんの「起こし直し」が窓の中に入っている。
    * ⚠ **空振り防止** ── 見張りが本当に動いていたことを、同じ回の中で確かめる
    *   (`page.on` を付け忘れた版でも `[]` になるので、それだけでは何も言えない)。
+   *   🔑 実測(2026-09-16、両ブラウザ一致):窓の中は **10 件**で、内訳は
+   *   器 / worker / 拡張 3 つ ── どれも同一オリジンだった。
    */
-  expect(seenParquet, '見張りが 1 件も数えていない(付け忘れ = この assert は空振り)').toBeGreaterThan(
-    0,
-  );
-  expect(
-    outwardParquet,
-    `.parquet を引いたのに外へ出た: ${outwardParquet.join(' / ')}`,
-  ).toEqual([]);
-  page.off('request', watchParquet);
+  expect(seenDuck, '見張りが 1 件も数えていない(付け忘れ = この assert は空振り)').toBeGreaterThan(0);
+  expect(outwardDuck, `DuckDB で引いたのに外へ出た: ${outwardDuck.join(' / ')}`).toEqual([]);
+  page.off('request', watchDuck);
+
+  // 🔑 図と構造の断りは `.parquet` へ戻して見る(同じ門なので 1 形式で足りる)
+  await source.selectOption({ label: 'uriage.parquet' });
+  await expect(note, '.parquet へ戻せていない').toContainText('uriage.parquet を調べています');
 
   /**
    * 🔴 **`.parquet` では「つながり図」も「構造をノートへ」も、理由を出して断る**
@@ -1707,17 +1763,23 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
    * 🔑 **新しい起動は増やしていない**(#820 の規律)── ⑦ が開いたままの
    *   同じ SQL の面の道中に続ける(`gotoApp` / `page.goto` を足さない)。
    *
-   * ⚠ ここまでに**走らせた字**(= 履歴に積まれた字。新しい順):
-   *   `SELECT * FROM csv`(⑥/⑦。⚠ ⑦ は直前と同じなので積まれない)/
-   *   🔴 `FROM parquet SELECT * LIMIT 20`(⑤-c。#682 段④c で足した)/
-   *   `SELECT * FROM sheet1`(⑤)/ `SELECT * FROM xlsx_sheets`(⑤)/
-   *   `SELECT * FROM csv`(④)。
+   * ⚠ ここまでに**走らせた字**(= 履歴に積まれた字。新しい順。**全 8 件**):
+   *   1. `SELECT * FROM csv`(⑥/⑦。⚠ ⑦ は直前と同じなので積まれない)
+   *   2. 🔴 `FROM json SELECT * LIMIT 20`(⑤-d。#682 段④c)
+   *   3. 🔴 `FROM parquet SELECT * LIMIT 20`(⑤-c。#682 段④c)
+   *   4. `SELECT * FROM sheet1`(⑤)
+   *   5. `SELECT * FROM xlsx_sheets`(⑤)
+   *   6. `select * from csv`(⑤-a2。図の表を押して組んだ字 ── **小文字なので別扱い**)
+   *   7. `SELECT * FROM csv`(④)
+   *   8. `SELECT extension_name FROM duckdb_extensions() …`(段④b の筋書き)
    *
-   * 🔴 **この帳簿は、上の筋書きへ 1 つ足すたびに古くなる**(2026-09-16 に実際に踏んだ)。
-   * ⚠ ⑤-c を足した回は `.parquet` の添付が作られず**ここまで到達しなかった**ので、
-   *   食い違いが**1 回転あとで初めて**露見した。
-   * 🔑 だから下では **`toHaveValue` で 2 番目を名指しする前に、一覧そのものを数える**
-   *   ── 数えておけば、次に足した人はここで落ちて**帳簿を直す所が分かる**。
+   * 🔴 **この帳簿は、上の筋書きへ 1 つ足すたびに古くなる**(2026-09-16 に 2 度踏んだ)。
+   * ⚠ 1 度目:⑤-c を足したのに 2 番目の期待値を直さず落ちた。
+   * ⚠ 2 度目:帳簿を直したつもりで **5 件しか並べず**、実際の画面は **7 件**だった ──
+   *   🔴 **総数を留めていなかったので、誰も鳴らなかった**
+   *   (`'前に打った字(1 / '` は `1 / 99` でも通る)。着地前 smoke が数えて見つけた。
+   * 🔑 だから**総数まで留める** ── 筋書きへ 1 本足した人は、ここで落ちて
+   *   **帳簿を直す所が分かる**。
    */
   const input = page.locator('[data-pkc-field="sql-input"]');
   // 🔑 **打ちかけの字**を置く ── 走らせない(履歴には積まれない字である)
@@ -1737,17 +1799,24 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   // 🔴 1 行目で ↑ → いちばん新しい「走らせた字」が戻る
   await page.keyboard.press('ArrowUp');
   await expect(input, '↑ で前に走らせた字が戻らない').toHaveValue('SELECT * FROM csv');
-  await expect(histNote, 'いま何番目かが出ていない').toContainText('前に打った字(1 / ');
+  /**
+   * 🔴 **総数まで留める**(#682 段④c の 2 稿目で、ここが緩くて帳簿がずれた)。
+   * ⚠ `'前に打った字(1 / '` で切ると、**何件でも通る** ── 上の帳簿が嘘になっても
+   *   誰も鳴らない(CLAUDE.md §1「代替物で満たせない条件にする」)。
+   */
+  await expect(histNote, 'いま何番目かが出ていない(数が合わなければ上の帳簿を直す)').toContainText(
+    '前に打った字(1 / 8)',
+  );
   /**
    * 🔴 **2 度目の ↑ は、いま「2 番目に新しい字」である**(#682 段④c で 1 つ増えた)。
    * ⚠ 期待値を書き換えるとき、**上の帳簿も一緒に直す** ── 帳簿と assert が
    *   別々に古くなると、次に足した人はここで落ちても**どこを直すのか分からない**。
-   * 🔑 ⑤-c(`.parquet` を画面の例文で走らせる)を足したので、いまは parquet の字。
+   * 🔑 ⑤-d(`.json` を画面の例文で走らせる)がいちばん新しいので、いまは json の字。
    *   ⚠ この名指しは「**足した筋書きが本当に履歴へ積まれた**」の観測点でもある。
    */
   await page.keyboard.press('ArrowUp');
-  await expect(input, '2 度目の ↑ でさらに前へ遡らない(⑤-c の字が履歴に積まれていない)').toHaveValue(
-    'FROM parquet SELECT * LIMIT 20',
+  await expect(input, '2 度目の ↑ でさらに前へ遡らない(⑤-d の字が履歴に積まれていない)').toHaveValue(
+    'FROM json SELECT * LIMIT 20',
   );
   // 🔴 ↓ で新しいほうへ戻る
   await page.keyboard.press('ArrowDown');
