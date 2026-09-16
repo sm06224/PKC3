@@ -2730,18 +2730,26 @@ describe('🔴 ER の図で、自分でキーどうしを繋ぐ(#918 段⑤d-1)'
     expect(chip?.title, '消せることが伝わらない').toContain('消します');
   });
 
-  it('⚠ まだどの表も取り出し元に無いと、線は引けても欄は動かず理由が出る(黙って何もしないのは禁止)', async () => {
+  /**
+   * 🔴 **2026-09-16 に裏返した**(#918 段⑤d-1)。⚠ 直す前はここが
+   *   「線は引けるが欄は動かず『先に表の名前を押してください』と出る」を pin していた
+   *   ── **実ブラウザの smoke が「線は引けたのに欄が空のまま」で落ちて**分かった。
+   * 🔑 繋ぐ道ができた後は、**押した 2 つで取り出し元も決まる** ── そこで断るのは、
+   *   持っている情報で組めるのに、もう 1 手を要求していることになる。
+   */
+  it('🔴 表を 1 つも押していなくても、繋げば両方の表から組む', async () => {
     const { pane, box } = setup(noFkReply);
     erBtn(pane).click();
     await settleEr();
     connectBtn(pane).click();
     pressColumn(pane, '売上', '客id');
     pressColumn(pane, '客', 'id');
-    // 🔑 「繋ぐ」の主目的(図に線を引く)は達成している
-    expect(lineCount(pane), '欄が組めなかっただけで、線まで引けていない').toBe(1);
-    // ⚠ ただし erSql は「先に表の名前を押してください」と断るので、欄は動かない
-    expect(box.value, '足せないはずなのに欄が動いている').toBe('');
-    expect(erNote(pane), '足せなかった理由が黙って消えている').toContain('先に表の名前');
+    expect(lineCount(pane), '線が引かれていない').toBe(1);
+    expect(box.value, '空の欄から組めていない').toBe(
+      'select * from 売上\n  join 客 on 客.id = 売上.客id',
+    );
+    // ⚠ 組めたのだから、断りの字は残さない(前の断りが居座らないこと)
+    expect(erNote(pane), '組めたのに断りの字が残っている').not.toContain('先に表の名前');
   });
 
   it('🔴 同じ表の中では繋げない(理由が出て、線は増えない)', async () => {
