@@ -14,6 +14,7 @@
 /** @vitest-environment happy-dom */
 import { describe, expect, it, vi } from 'vitest';
 import {
+  pickClock,
   CaptureRefused,
   startCapture,
   type CaptureDeps,
@@ -653,5 +654,36 @@ describe('🔴 長さを容器へ書く(#952 A3)', () => {
     if (blob === null) throw new Error('止めたのに何も返らない');
     const bytes = new Uint8Array(await blob.arrayBuffer());
     expect(durationOf(bytes), '長い値がそのまま書かれていない').toBe(HOURS12);
+  });
+
+  /**
+   * 🔴 **時計は単調なほうを既定にする**(#952 A3。着地前レビューで判明)。
+   *
+   * ⚠ `Date.now()` は **NTP の補正・スリープ復帰・user の時計変更**で**前へも飛ぶ**。
+   *   飛んだぶんがそのまま `Duration` になり、**添付へ恒久的に焼き込まれる** ──
+   *   後ろ向きの飛びは `Math.max(0, …)` で既に潰してあったが、**前向きは無防備**だった。
+   * 🔑 `now()` は**差にしか使っていない**ので、既定を `performance.now()` へ替えても
+   *   意味は変わらず、飛びが構造から消える。
+   * ⚠ **この枝は `deps.now` を渡す test からは 1 度も通らない**ので、
+   *   ここで直に当てる(CLAUDE.md §2「経路が一度も通っていない」)。
+   */
+  describe('どの時計を使うか(pickClock)', () => {
+    it('🔴 performance が在るなら、そちらを使う', () => {
+      const perf = { now: vi.fn(() => 1234.5) };
+      expect(pickClock({ performance: perf })()).toBe(1234.5);
+      expect(perf.now, 'performance を持っているのに Date.now へ落ちている').toHaveBeenCalledTimes(1);
+    });
+
+    it('⚠ 対照群 ── performance が無い箱では Date.now へ落ちる(落とさず壊れない)', () => {
+      const before = Date.now();
+      const v = pickClock({})();
+      expect(v, 'Date.now とかけ離れた値が返っている').toBeGreaterThanOrEqual(before);
+      expect(v).toBeLessThanOrEqual(Date.now());
+    });
+
+    it('⚠ now が関数でない相手にも騙されない(あるのに使えない形)', () => {
+      const broken = { performance: { now: undefined } as unknown as { now(): number } };
+      expect(() => pickClock(broken)(), '呼べない now を掴んで落ちている').not.toThrow();
+    });
   });
 });

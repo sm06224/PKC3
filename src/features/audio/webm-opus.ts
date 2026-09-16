@@ -163,6 +163,13 @@ const ID_SEGMENT = '18538067';
 const ID_INFO = '1549a966';
 const ID_CLUSTER = '1f43b675';
 const ID_DURATION = '4489';
+/**
+ * 🔴 **位置を指す要素**(#952 A3 のレビューで判明)。`SeekHead` / `Cues` は
+ * `Segment` 本体の先頭からの**バイト位置**を持つ ── その後ろへ bytes を挿すと
+ * **指し先がずれる**(書き直さないかぎり)。だから `Info` より前に居たら断る。
+ */
+const ID_SEEK_HEAD = '114d9b74';
+const ID_CUES = '1c53bb6b';
 
 /** opus の既定。⚠ `OpusHead` を読めないときだけ使う。 */
 const DEFAULT_SAMPLE_RATE = 48000;
@@ -571,7 +578,17 @@ function buildClusters(
  * 断る理由(#952 A3)。⚠ どれも「触らない」という**安全側**の答えである ──
  * 書けないと分かったら、元の bytes をそのまま使わせる(録音そのものは壊さない)。
  */
-export type DurationWriteRefusal = 'not-webm' | 'no-info' | 'has-duration' | 'incomplete' | 'broken';
+export type DurationWriteRefusal =
+  | 'not-webm'
+  | 'no-info'
+  | 'has-duration'
+  | 'incomplete'
+  | 'broken'
+  /**
+   * 🔴 **`Info` より前に位置を指す要素(`SeekHead` / `Cues`)が居る**
+   *   ── 挿すと**指し先がずれて、飛べなくなる**。長さが書けないより悪い。
+   */
+  | 'has-seek-index';
 
 export type DurationWriteResult =
   | { readonly ok: true; readonly bytes: Uint8Array }
@@ -653,6 +670,16 @@ export function insertMissingDuration(bytes: Uint8Array, durationMs: number): Du
       break;
     }
     if (id.id === ID_CLUSTER) return { ok: false, reason: 'no-info' };
+    /**
+     * 🔴 **位置を指す要素が `Info` より前に在ったら、触らない**。
+     * ⚠ ここへ bytes を挿すと `SeekPosition` / `CueClusterPosition` が
+     *   **挿した長さぶんずれる** ── 長さは正しく出るのに**飛べなくなる**。
+     * 🔑 断っても呼び側は**元の bytes をそのまま使う**ので、退化するだけである
+     *   (この機能が録音そのものを壊してはいけない)。
+     */
+    if (id.id === ID_SEEK_HEAD || id.id === ID_CUES) {
+      return { ok: false, reason: 'has-seek-index' };
+    }
     if (size.value === null) return { ok: false, reason: 'incomplete' }; // 大きさが不明で先へ飛べない
     p = bodyStart + size.value;
   }
@@ -664,8 +691,21 @@ export function insertMissingDuration(bytes: Uint8Array, durationMs: number): Du
    */
   if (info === null) return { ok: false, reason: 'incomplete' };
 
-  // 🔑 `Info` の中に、もう `Duration` が在るか(往復・二重書きの検算)
+  /**
+   * 🔑 `Info` の中を 1 周して、2 つを同時に見る:
+   *   ① もう `Duration` が在るか(往復・二重書きの検算)
+   *   ② 🔴 **`TimestampScale`**(#952 A3 のレビューで判明)
+   *
+   * 🔴 **`Duration` の単位は ms ではない** ── `TimestampScale`(ナノ秒。既定
+   *   1,000,000 = 1ms)を 1 目盛りとする**目盛りの数**である。⚠ 同じ file の
+   *   `demuxWebmOpus` は正しく `(v * timestampScale) / 1e6` で換算しているのに、
+   *   ここだけ ms を生で書いていた(CLAUDE.md「片側を直したら、対称の反対側を疑う」)。
+   * ⚠ 実測(レビュー時): `TimestampScale = 500000` の webm に 10000ms を書くと、
+   *   仕様どおりの読み手は **5000ms** と読む ── **半分**になる。
+   *   🔴 **失敗せずに、間違った値が書かれる**(この repo がいちばん嫌う形)。
+   */
   let q = info.bodyStart;
+  let scaleNs: number | null = null;
   while (q < info.bodyEnd) {
     const cid = readId(bytes, q);
     if (cid === null) return { ok: false, reason: 'broken' };
@@ -673,10 +713,31 @@ export function insertMissingDuration(bytes: Uint8Array, durationMs: number): Du
     const cSize = readSizeAt(bytes, cSizeFieldStart);
     if (cSize === null || cSize.value === null) return { ok: false, reason: 'broken' };
     if (cid.id === ID_DURATION) return { ok: false, reason: 'has-duration' };
-    q = cSizeFieldStart + cSize.length + cSize.value;
+    const cBodyStart = cSizeFieldStart + cSize.length;
+    if (cid.id === ID_TIMESTAMP_SCALE) {
+      scaleNs = readUint(bytes.subarray(cBodyStart, cBodyStart + cSize.value));
+    }
+    q = cBodyStart + cSize.value;
   }
 
-  const durationElem = element(ID_DURATION, float64Bytes(durationMs));
+  /**
+   * ⚠ **書いていなければ既定(1,000,000ns = 1ms)** ── 仕様の既定値なので、
+   *   読み手も同じに解釈する。
+   *
+   * 🔴 **門は 1 つだけ置く**(変異試験 M-D が SURVIVED で教えた)。
+   * ⚠ 1 稿目は `scaleNs > 0` を別に検めていたが、**外しても落ちなかった** ──
+   *   `scaleNs` が `0` なら `1e6 / 0 = Infinity` になり、**すぐ下の
+   *   `Number.isFinite` が同じ回を捕まえる**からである(`readUint` は負を返さないので
+   *   「0 以下」は実質 `0` だけ)。CLAUDE.md §1「救い手が変わっただけ」/
+   *   §7「同じ問いに答える口を 2 つ作らない」── **片方を壊しても、もう片方が救う**。
+   * 🔑 だから**換算した結果が数でないなら断る**、の 1 本に寄せた ──
+   *   `0`(→ `Infinity`)も、`0ms × Infinity`(→ `NaN`)も、ここ 1 か所で落ちる。
+   *   ⚠ **当てずっぽうで書かない**(長さが無いより、間違った長さのほうが悪い)。
+   */
+  const durationTicks = durationMs * (1e6 / (scaleNs ?? 1_000_000));
+  if (!Number.isFinite(durationTicks)) return { ok: false, reason: 'broken' };
+
+  const durationElem = element(ID_DURATION, float64Bytes(durationTicks));
   const newInfoSize = info.sizeValue + durationElem.length;
   const newInfoSizeBytes = writeSize(newInfoSize);
   const infoSizeDelta = newInfoSizeBytes.length - info.sizeFieldLen;

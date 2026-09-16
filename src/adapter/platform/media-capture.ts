@@ -146,6 +146,30 @@ async function withRecordedDuration(blob: Blob, durationMs: number): Promise<Blo
   }
 }
 
+/**
+ * 🔴 **単調な時計を選ぶ**(#952 A3。着地前レビューで判明)。
+ *
+ * ⚠ ここで測った差は `Duration` として**添付へ恒久的に焼き込まれる**。
+ *   `Date.now()` は **NTP の補正・スリープ復帰・user の時計変更**で前後に飛ぶので、
+ *   飛んだぶんがそのまま長さになる ── **12 時間録れる**ので、飛ぶ窓も広い。
+ * 🔑 `now()` は**差にしか使っていない**(`now() - startedAt` /
+ *   `now() - segStartedAt` / `elapsedMs`)ので、既定を `performance.now()` へ
+ *   替えても意味は変わらず、**時計の飛びが構造から消える**。
+ * ⚠ 後ろ向きの飛びは `Math.max(0, …)` で既に潰してあったが、**前向きは無防備**だった
+ *   ── 片側だけ守るのは、守っていないのと同じ形で残る。
+ *
+ * 🔴 **引数で受けるのは、門が本当に効くことを検められるようにするため**である
+ *   ── `globalThis` を直に読むと、**どちらの枝を通ったか test から見えない**
+ *   (CLAUDE.md §2「経路が一度も通っていない」)。⚠ 製品からは `globalThis` を渡す。
+ *
+ * @param host `performance` を持たない環境(古い箱)では `Date.now` へ落ちる。
+ */
+export function pickClock(host: { performance?: { now(): number } }): () => number {
+  const perf = host.performance;
+  if (perf === undefined || typeof perf.now !== 'function') return () => Date.now();
+  return () => perf.now();
+}
+
 function pick(deps: CaptureDeps, kind: CaptureKind): (c: MediaStreamConstraints) => Promise<MediaStream> {
   const md = (globalThis as { navigator?: { mediaDevices?: MediaDevices } }).navigator?.mediaDevices;
   const fn =
@@ -174,7 +198,7 @@ export async function startCapture(
   deps: CaptureDeps,
   opts: CaptureOptions,
 ): Promise<CaptureHandle> {
-  const now = deps.now ?? (() => Date.now());
+  const now = deps.now ?? pickClock(globalThis);
   const found = deps.Recorder ?? (globalThis as { MediaRecorder?: typeof MediaRecorder }).MediaRecorder;
   if (found === undefined) {
     throw new CaptureRefused('この環境では収録できません(ブラウザが対応していません)');

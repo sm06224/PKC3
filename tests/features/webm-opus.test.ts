@@ -522,6 +522,53 @@ describe('長さを容器へ書く(insertMissingDuration)', () => {
   }
 
   /**
+   * 🔴 **`TimestampScale` が既定でない webm**(#952 A3 のレビューで判明)。
+   * ⚠ `Duration` の単位は ms ではなく**この目盛りの数**である ── 既定
+   *   1,000,000ns(= 1ms)の webm しか fixture に無かったので、**生の ms を
+   *   書いても正しく見えていた**(倍率 1 で見分けが付かない)。
+   * @param scaleNs `null` を渡すと **`TimestampScale` そのものを書かない**
+   *   (仕様の既定 1,000,000ns に落ちるはずの形)。
+   */
+  function liveWebmScaled(scaleNs: number | null): Uint8Array {
+    const head = el('1a45dfa3', el('4282', ascii('webm')));
+    const scale = scaleNs === null ? [] : el('2ad7b1', beBytes(scaleNs));
+    const info = el('1549a966', [...scale, ...el('4d80', ascii('t'))]);
+    const tracks = el('1654ae6b', el('ae', [...el('d7', [1]), ...el('86', ascii('A_OPUS')), ...el('63a2', opusHead())]));
+    const segHeader = [...hex('18538067'), 0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
+    return Uint8Array.from([...head, ...segHeader, ...info, ...tracks]);
+  }
+
+  /** ⚠ 最小のビッグエンディアン(先頭の 0 を落とす ── EBML の uint はこの形)。 */
+  function beBytes(v: number): number[] {
+    const out: number[] = [];
+    let n = v;
+    while (n > 0) {
+      out.unshift(n & 0xff);
+      n = Math.floor(n / 256);
+    }
+    return out.length === 0 ? [0] : out;
+  }
+
+  /**
+   * 🔴 **位置を指す要素(`SeekHead`)が `Info` の前後どちらかに在る webm**
+   *   (#952 A3 のレビューで判明)。
+   * ⚠ 中身は本物の `Seek` でなくてよい ── 見ているのは**居るか / どこに居るか**
+   *   だけである(挿した bytes のぶん指し先がずれるのは、`Info` より**前**に
+   *   居るときだけ)。
+   */
+  function liveWebmSeekHead(where: 'before' | 'after'): Uint8Array {
+    const head = el('1a45dfa3', el('4282', ascii('webm')));
+    const info = el('1549a966', el('2ad7b1', hex('0f4240')));
+    const seek = el('114d9b74', el('4dbb', [...el('53ab', hex('1549a966')), ...el('53ac', [0x10])]));
+    const segHeader = [...hex('18538067'), 0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
+    return Uint8Array.from(
+      where === 'before'
+        ? [...head, ...segHeader, ...seek, ...info]
+        : [...head, ...segHeader, ...info, ...seek],
+    );
+  }
+
+  /**
    * 🔑 **検算は実装と別に歩く**(CLAUDE.md §1「期待値は『別の綴り』ではなく
    *   『別の観測』から作る」)── `readId` / `readSizeAt` は `ebml.test.ts` が
    *   独立に守っている低い層なので、ここで使っても
@@ -654,6 +701,61 @@ describe('長さを容器へ書く(insertMissingDuration)', () => {
     expect(out.ok).toBe(true);
     if (!out.ok) return;
     expect(readDurationMs(out.bytes)).toBe(twelveHoursMs);
+  });
+
+  /**
+   * 🔴 **`Duration` の単位は `TimestampScale` の目盛り**(#952 A3 のレビューで判明)。
+   *
+   * ⚠ ここまでの fixture は**全部 `TimestampScale = 1,000,000`(= 1ms)**だったので、
+   *   倍率が 1 になり、**生の ms を書いても正しく見えていた** ── 計器が 1 ビットも
+   *   動かない形である(CLAUDE.md §1「今度は何に救われていないか」)。
+   * 🔑 だから**倍率が 1 でない目盛り**を 2 つ作って、両側から見る。
+   */
+  it('🔴 TimestampScale が既定でないとき、目盛りの数へ換算して書く', () => {
+    // 🔑 目盛りが半分(500,000ns = 0.5ms)なら、同じ長さは **倍の目盛り数**になる
+    const half = insertMissingDuration(liveWebmScaled(500_000), 10_000);
+    if (!half.ok) throw new Error('書けない');
+    expect(readDurationMs(half.bytes), '生の ms をそのまま書いている(読み手は半分の長さと読む)').toBe(20_000);
+
+    // 🔑 目盛りが 10 倍(10,000,000ns = 10ms)なら、目盛り数は **1/10**
+    const ten = insertMissingDuration(liveWebmScaled(10_000_000), 10_000);
+    if (!ten.ok) throw new Error('書けない');
+    expect(readDurationMs(ten.bytes)).toBe(1_000);
+  });
+
+  it('⚠ 対照群 ── 既定(1,000,000ns)と、書いていないときは ms がそのまま', () => {
+    const std = insertMissingDuration(liveWebmScaled(1_000_000), 10_000);
+    if (!std.ok) throw new Error('書けない');
+    expect(readDurationMs(std.bytes)).toBe(10_000);
+
+    // ⚠ **書いていない**ときは仕様の既定(1,000,000ns)に落ちる ── 当てずっぽうで断らない
+    const none = insertMissingDuration(liveWebmScaled(null), 10_000);
+    if (!none.ok) throw new Error('書けない');
+    expect(readDurationMs(none.bytes)).toBe(10_000);
+  });
+
+  it('🔴 TimestampScale が 0 なら、換算できないので書かない', () => {
+    expect(insertMissingDuration(liveWebmScaled(0), 10_000)).toEqual({ ok: false, reason: 'broken' });
+  });
+
+  /**
+   * 🔴 **位置を指す要素の後ろへ挿さない**(#952 A3 のレビューで判明)。
+   * ⚠ `SeekHead` / `Cues` は `Segment` 本体の先頭からの**バイト位置**を持つので、
+   *   その後ろへ bytes を挿すと**指し先がずれて飛べなくなる** ──
+   *   **長さが書けないより悪い**(長さは正しいのに、シークだけ壊れる)。
+   */
+  it('🔴 SeekHead が Info より前に在ったら、触らない', () => {
+    expect(insertMissingDuration(liveWebmSeekHead('before'), 2500)).toEqual({
+      ok: false,
+      reason: 'has-seek-index',
+    });
+  });
+
+  it('⚠ 対照群 ── SeekHead が Info より後ろなら、挿しても指し先はずれないので書く', () => {
+    const out = insertMissingDuration(liveWebmSeekHead('after'), 2500);
+    expect(out.ok, '前に在る形と区別できていない(どちらも断っている)').toBe(true);
+    if (!out.ok) return;
+    expect(readDurationMs(out.bytes)).toBe(2500);
   });
 
   it('🔴 壊れた長さは書かない(Infinity / NaN / 負)', () => {
