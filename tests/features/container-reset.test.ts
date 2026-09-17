@@ -14,6 +14,7 @@ import {
   resetExplainMessage,
   resetPassphraseLabel,
   resetPassphraseOk,
+  wipedElsewhere,
   type ContainerResetPorts,
 } from '../../src/features/storage/container-reset';
 
@@ -215,5 +216,29 @@ describe('押す前に読ませる字(#986 段③)', () => {
     // ⚠ 空・null・違う字・部分一致は、どれも通さない
     for (const bad of ['', null, 'はい', `${RESET_PASSPHRASE}ます`, 'す'])
       expect(resetPassphraseOk(bad), `${String(bad)} が通った`).toBe(false);
+  });
+});
+
+/**
+ * 🔴 **別のタブが捨てたと聞いたとき**(#986 段③。着地前レビュー 2 本が挙げた)。
+ *
+ * ⚠ 直す前は**無条件に読み込み直していた** ── 編集中のタブでは、自分が何も
+ *   していないのに**打っていた字が黙って消える**。
+ * 🔑 同じ問いには同じ答えを置く(§7)── 更新の案内(`createUpdatePrompt`)は
+ *   `isEditing()` を見て聞く。ここもそれに揃える。
+ */
+describe('別のタブが捨てたとき(#986 段③)', () => {
+  it('🔴 編集中なら、黙って読み込み直さない', () => {
+    const p = wipedElsewhere(true);
+    expect(p.reloadNow, '編集中なのに黙って読み込み直した').toBe(false);
+    expect(p.ask, '聞く字が無い').toBeTruthy();
+    // ⚠ 何が失われるかを言う(「読み込み直しますか」だけでは判断できない)
+    expect(p.ask ?? '', '保存できないことを言っていない').toContain('保存できません');
+  });
+
+  it('⚠ 編集していなければ、そのまま読み込み直す(対照群)', () => {
+    const p = wipedElsewhere(false);
+    expect(p.reloadNow, '失う字が無いのに聞いている').toBe(true);
+    expect(p.ask).toBeNull();
   });
 });

@@ -61,7 +61,19 @@ describe('捨てたことを伝える(#986 段③)', () => {
     const seen: string[] = [];
     const p = h.port();
     connectWipedChannel({ channel: p, id: 'B', onWiped: (cid) => seen.push(cid) });
-    for (const junk of [null, 'ping', { kind: 'changed', cid: 'c1' }, { tag: 'pkc3-wiped' }])
+    for (const junk of [
+      null,
+      'ping',
+      { kind: 'changed', cid: 'c1' },
+      { tag: 'pkc3-wiped' },
+      /**
+       * 🔴 **印だけが違う便り**(変異試験 M12 が SURVIVED で教えた)。
+       * ⚠ 上の 4 件は**別の門**(型 / `from` と `cid` が文字列か)で必ず弾かれるので、
+       *   `tag` を見る行を消しても 5/5 緑のままだった ── 印の門だけが鳴る形が
+       *   **1 件も無かった**(CLAUDE.md §1「門を N 個置いたら、N 個目だけが鳴る場面を作る」)。
+       */
+      { tag: 'pkc3-store-proxy', from: 'A', cid: 'c1' },
+    ])
       p.onmessage?.({ data: junk } as MessageEvent);
     expect(seen, '関係ない便りで読み込み直した').toEqual([]);
   });
@@ -78,5 +90,10 @@ describe('捨てたことを伝える(#986 段③)', () => {
   it('🔑 封筒は 1 か所で組む ── 組んだ物は、そのまま読める', () => {
     expect(readWiped(wipedMessage('A', 'c1'), 'B')).toBe('c1');
     expect(readWiped(wipedMessage('A', 'c1'), 'A'), '自分の分を読んだ').toBeNull();
+    // ⚠ 印が違えば掴まない(上と同じ門を、判定関数へ直に当てる)
+    expect(
+      readWiped({ tag: 'pkc3-store-proxy', from: 'A', cid: 'c1' }, 'B'),
+      '別の印を掴んだ',
+    ).toBeNull();
   });
 });

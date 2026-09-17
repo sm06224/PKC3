@@ -3698,3 +3698,34 @@ describe('SQL の窓が 2 枚でも取り合わない(#836)', () => {
     for (const w of ['g2', 'g3', 'g4', 'g5']) await request({ op: 'closeSqlGuest', guest: w });
   });
 });
+
+/**
+ * 🔴 **入れ物ごと捨てる口**(#986 段③)。
+ *
+ * ⚠ ここ(node)は OPFS が無いので **`:memory:` fallback** で動く ── つまり
+ *   `sahPool === null` の枝が**実物の worker で通る唯一の場所**である。
+ * 🔑 だから見るのは「捨てられたか」ではなく「**捨てられないときに嘘をつかないか**」:
+ *   `wiped: false` を返し、**理由を必ず添える**(「消えました」と言わせない)。
+ * ⚠ SAHPool を本当に消す枝は、この箱では踏めない(nightly の probe の担当)。
+ */
+describe('入れ物ごと捨てる(#986 段③)', () => {
+  const CID = 'c-wipe';
+
+  it('🔴 メモリ上の DB では「捨てた」と言わず、理由を返す', async () => {
+    const r = await request({ op: 'wipeStorage' });
+    expect(r.wiped, 'file が無いのに「捨てた」と言っている').toBe(false);
+    // ⚠ 理由が空だと、画面は「消しました。」とだけ出して**嘘になる**
+    expect(r.note, '捨てられなかった理由が無い').toBeTruthy();
+    expect(r.note ?? '', '理由が user の言葉になっていない').toContain('メモリ');
+  });
+
+  /**
+   * ⚠ **対照群** ── 捨てられなかった回は、DB を閉じてはいけない
+   *  (閉じると、この後の読みが全部落ちる = 壊れていないのに使えなくなる)。
+   */
+  it('⚠ 捨てられなかった回は、DB を閉じない(この後も読める)', async () => {
+    await request({ op: 'wipeStorage' });
+    const metas = await request({ op: 'listEntryMetas', cid: CID });
+    expect(Array.isArray(metas), 'この後 DB が読めなくなった').toBe(true);
+  });
+});

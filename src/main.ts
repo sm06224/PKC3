@@ -107,7 +107,7 @@ import {
 } from '@features/markdown/html-sandbox';
 import { AssetBlobStore } from '@adapter/platform/storage/asset-blob-store';
 import { connectWipedChannel, WIPED_CHANNEL } from '@adapter/platform/storage/wiped-channel';
-import { resetContainer } from '@features/storage/container-reset';
+import { resetContainer, wipedElsewhere } from '@features/storage/container-reset';
 import { appCopyHistory } from '@adapter/platform/copy-history-store';
 import {
   purgeBlockReason,
@@ -667,8 +667,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * ⚠ **名前は可搬単一 HTML ごとに切る** ── `file://` では origin が全部
    *   `file://` に潰れるので、切らないと**別のバンドルのタブ**が読み込み直す
    *   (`noteChannel` と同じ理由・同じ形)。
-   * 🔑 受けたら**読み込み直す**しかない ── そのタブが画面に持っているのは
-   *   もう存在しない入れ物で、1 文字でも書けば**消したノートが 1 件だけ蘇る**。
+   * 🔑 受けたタブが持っているのは**もう存在しない入れ物の一覧**である ──
+   *   書こうとしても worker の `need()` が投げるだけ(幽霊 DB は建たない)だが、
+   *   **理由の読めないエラーに当たり続ける**ので読み込み直す。
+   * ⚠ ただし**編集中なら黙って捨てない**(`wipedElsewhere`)── 打った字は
+   *   `AppState` にしか無い。
    */
   const wipedChannel = connectWipedChannel({
     channel:
@@ -676,8 +679,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         ? new BroadcastChannel(portable ? `${WIPED_CHANNEL}:${portable.bundle.id}` : WIPED_CHANNEL)
         : null,
     id: makeViewWindowToken(),
-    onWiped: () => location.reload(),
+    /**
+     * ⚠ **判断はここに書かない**(`wipedElsewhere`)── この file はどの test からも
+     *   実行されない(CLAUDE.md §2)。⚠ `dispatcher` も `ask` もまだ無いので、
+     *   **繋がるまでは今までどおり読み込み直す**口にしておく(`repaintStatus` と同じ作法)。
+     */
+    onWiped: () => onContainerWiped(),
   });
+  let onContainerWiped: () => void = () => location.reload();
   bootLease = lease;
 
   /**
@@ -873,6 +882,21 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   const tell = (message: string): Promise<void> =>
     alertInApp(root, message).then(() => undefined);
+  /**
+   * 🔴 **別のタブが捨てたと聞いたとき、打っていた字を黙って捨てない**(#986 段③)。
+   * ⚠ 20 行下の更新の案内(`createUpdatePrompt`)と**同じ答え**にしてある(§7)。
+   */
+  onContainerWiped = (): void => {
+    const plan = wipedElsewhere(dispatcher.getState().phase === 'editing');
+    if (plan.ask === null) {
+      location.reload();
+      return;
+    }
+    // 🔴 danger ── 打った字は AppState にしか無いので、本当に戻せない
+    void ask(plan.ask, { okLabel: '読み込み直す', danger: true }).then((yes) => {
+      if (yes) location.reload();
+    });
+  };
   // 🎨 配色は**枠より先**に当てる ── 後だと一瞬だけ既定色で描かれて瞬く
   const bootTheme = initialTheme();
   applyTheme(document.documentElement, bootTheme);

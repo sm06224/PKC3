@@ -33,6 +33,8 @@
  * 「消したはずの本文が、貼り付けの一覧にだけ残る」ことになる。
  */
 
+import { RESCUE_ARCHIVE_LABEL } from './rescue-labels';
+
 /** 捨てるのに要る口。⚠ **全部必須**(optional にすると、渡し忘れが黙って通る)。 */
 export interface ContainerResetPorts {
   /** IDB に在る添付の key(この入れ物の分だけ)。 */
@@ -170,7 +172,7 @@ export function resetExplainMessage(opts: {
    */
   const backup =
     rescued === null
-      ? '🔴 この画面では、まだ拾い出していません。先に「拾って、戻せる形で書き出す」を押してください。'
+      ? `🔴 この画面では、まだ拾い出していません。先に「${RESCUE_ARCHIVE_LABEL}」を押してください。`
       : `この画面で拾えたのは ${rescued.entries} 件です` +
         (rescued.skipped + rescued.empty + rescued.bodyMissing > 0
           ? `(読めなかった区画 ${rescued.skipped} / 空だった区画 ${rescued.empty} / 本文が読めなかったノート ${rescued.bodyMissing} 件)`
@@ -203,4 +205,32 @@ export function resetPassphraseLabel(): string {
 /** 打たれた字が合言葉か。⚠ 前後の空白は `promptInApp` が落としている。 */
 export function resetPassphraseOk(typed: string | null): boolean {
   return typed === RESET_PASSPHRASE;
+}
+
+/**
+ * 🔴 **別のタブが捨てたと聞いたとき、そのタブはどうするか**(#986 段③。
+ * 着地前の動線レビューが出した)。
+ *
+ * ⚠ 直す前は**無条件に読み込み直していた** ── 編集中のタブでは
+ *   **打っていた字が、何の断りもなく消える**(自分は何も操作していないのに)。
+ * 🔑 同じ file の 20 行先に**同じ問いの答えが既に在った** ── 更新の案内
+ *   (`createUpdatePrompt`)は `isEditing()` を見て「編集中の内容は保存されません。
+ *   新しい版に切り替えますか?」と聞く。**同じ問いに 2 通りの答えを置かない**(§7)。
+ *
+ * ⚠ **やめるを選べるようにするのは、諦めさせないためである** ── 捨てられた後の
+ *   worker は `init` を待つ状態なので、このタブはもう保存できない。
+ *   🔑 だから「**コピーする時間**」を渡す(字が消えるのを止める道は、それしか無い)。
+ */
+export const WIPED_ELSEWHERE_ASK =
+  'この PKC の中身は、別のタブで捨てられました。この画面はもう保存できません。' +
+  'いま読み込み直しますか?(やめる を選ぶと、打った字をコピーしてから読み込み直せます)';
+
+/** 別のタブが捨てた ── いま読み込み直してよいか。 */
+export function wipedElsewhere(editing: boolean): {
+  /** 何も聞かずに読み込み直してよい(失う字が無い)。 */
+  readonly reloadNow: boolean;
+  /** 聞くときの字(`reloadNow` が真なら `null`)。 */
+  readonly ask: string | null;
+} {
+  return editing ? { reloadNow: false, ask: WIPED_ELSEWHERE_ASK } : { reloadNow: true, ask: null };
 }

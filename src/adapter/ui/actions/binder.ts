@@ -7100,6 +7100,20 @@ const ACTIONS: Record<string, ActionHandler> = {
    *
    * ⚠ **判断はここに置かない** ── 何をどの順で消すかは
    *   `features/storage/container-reset.ts`、字は同 file の `resetExplainMessage`。
+   *
+   * ## ⚠ なぜ `confirmThen` の `recheck` を通していないか(着地前レビューの問い)
+   *
+   * 他の破壊的な口(`purge-trash` など)は「待っている間に前提が崩れたら撃たない」
+   * 門(`notWhileEditing`)を通すが、ここは通していない ── **理由を書く**
+   * (書かないと、次に読む人が「見落とし」と「意図」を区別できない):
+   *
+   * 1. **効く先が変わらない** ── 撃つ先は `cid` 1 つで、`cid` を書き換える
+   *    reducer は `SYS_BOOTED` しか無い(実行中に別の入れ物へ移らない)。
+   * 2. **編集中でも止めない** ── この口が要るのは**壊れて書き込めない**ときで、
+   *    そこでは `phase` が `editing` のまま動けなくなっていることがある。
+   *    🔴 止めると「**壊れているときだけ捨てられない**」= この機能の趣旨と逆になる。
+   * 3. 待っている間の割り込みは、小窓が `showModal()` で塞いでいる
+   *    (`isAppDialogOpen()` が近道キーも殺す)。
    */
   'container-reset': (dispatcher, _target, services, root) => {
     const sum = root.querySelector<HTMLElement>('[data-pkc-field="container-reset-summary"]');
@@ -7140,6 +7154,8 @@ const ACTIONS: Record<string, ActionHandler> = {
         // ⚠ **`initial` を渡さない** ── 渡すと、空のまま受けたときに
         //    `promptInApp` がその字を返す(= 何も打たずに合言葉が通る)
         okLabel: '捨てる',
+        // 🔴 danger ── ここが**本当に消える 1 押し**である(1 件削除より重い)
+        danger: true,
       });
       // ⚠ 「やめる」は黙って戻る(断りの字を出すと、やめた人を責める形になる)
       if (typed === null) return;

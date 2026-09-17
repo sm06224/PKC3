@@ -210,6 +210,17 @@ export function promptInApp(
     readonly label: string;
     readonly initial?: string;
     readonly okLabel?: string;
+    /**
+     * 🔴 **戻しにくい操作の受けボタンを危険色にする**(#986 段③で足した)。
+     *
+     * ⚠ 直す前は `confirmInApp` にだけ在り、ここに無かった ── その結果
+     *   **入れ物ごと捨てる「捨てる」**が、日付を入れる小窓の「入れる」と
+     *   **見た目で 1 ドットも区別が付かなかった**(1 件消すより重い操作のほうが、
+     *   警告が弱いという逆転)。
+     * 🔑 「地は無彩色、色は情報にだけ使う」(不可侵指示)── いちばん情報として
+     *   使うべき瞬間に使っていないのが誤りだった。
+     */
+    readonly danger?: boolean;
   },
 ): Promise<string | null> {
   return enqueue(async () => {
@@ -231,7 +242,8 @@ export function promptInApp(
       f.ok.click();
     });
     f.ok.textContent = opts.okLabel ?? '決める';
-    f.ok.removeAttribute('data-pkc-danger');
+    if (opts.danger === true) f.ok.setAttribute('data-pkc-danger', '');
+    else f.ok.removeAttribute('data-pkc-danger');
     f.ok.hidden = false;
     f.cancel.textContent = 'やめる';
     f.cancel.hidden = false;

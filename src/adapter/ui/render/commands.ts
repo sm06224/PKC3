@@ -22,6 +22,17 @@
  * **重なりが無いこと**と**合計が変わっていないこと**を pin する。
  */
 import { iconButton } from './icons';
+/**
+ * 🔴 **壊れたときの 4 つの字は features が持つ**(#986 段③)── 断り文
+ * (`db-corruption.ts`)と捨てる窓(`container-reset.ts`)も同じ字を指すので、
+ * ここに書くと**引けない側が手で書く**ことになる(#996 と同じ型)。
+ */
+import {
+  CONTAINER_RESET_LABEL,
+  DB_CHECK_LABEL,
+  RESCUE_ARCHIVE_LABEL,
+  RESCUE_TEXT_LABEL,
+} from '@features/storage/rescue-labels';
 
 export interface CollectionCommand {
   readonly action: string;
@@ -170,14 +181,14 @@ function buildContainerReset(): HTMLElement {
   const note = document.createElement('p');
   note.setAttribute('data-pkc-field', 'container-reset-note');
   note.textContent =
-    '直せないほど壊れたときの、最後の手です。先に上の「拾って、戻せる形で書き出す」で持ち出してから押してください。押しただけでは消えません ── 何が消えるかを出して、もう一度聞きます。';
+    `直せないほど壊れたときの、最後の手です。先に上の「${RESCUE_ARCHIVE_LABEL}」で持ち出してから押してください。押しただけでは消えません ── 何が消えるかを出して、もう一度聞きます。`;
   box.append(note);
 
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.setAttribute('data-pkc-action', 'container-reset');
   btn.setAttribute('data-pkc-field', 'container-reset-run');
-  btn.textContent = '中身を捨てる';
+  btn.textContent = CONTAINER_RESET_LABEL;
   btn.title = 'この入れ物のノートと添付を全部消して、空の状態から始めます(元に戻せません)';
   box.append(btn);
 
@@ -411,7 +422,7 @@ function buildDbRescue(): HTMLElement {
   check.type = 'button';
   check.setAttribute('data-pkc-action', 'db-check');
   check.setAttribute('data-pkc-field', 'db-check-run');
-  check.textContent = '壊れていないか調べる';
+  check.textContent = DB_CHECK_LABEL;
   check.title = '壊れている所があるかを調べます。中身が多いと数分かかります';
   box.append(check);
 
@@ -426,7 +437,7 @@ function buildDbRescue(): HTMLElement {
   restore.type = 'button';
   restore.setAttribute('data-pkc-action', 'db-rescue-archive');
   restore.setAttribute('data-pkc-field', 'db-rescue-archive-run');
-  restore.textContent = '拾って、戻せる形で書き出す';
+  restore.textContent = RESCUE_ARCHIVE_LABEL;
   restore.title =
     '読めるノートを集めて、「取り込む」から読み戻せるファイル(.pkc3.zip)にします';
   box.append(restore);
@@ -441,7 +452,7 @@ function buildDbRescue(): HTMLElement {
   rescue.type = 'button';
   rescue.setAttribute('data-pkc-action', 'db-rescue');
   rescue.setAttribute('data-pkc-field', 'db-rescue-run');
-  rescue.textContent = '拾って、読める形で書き出す';
+  rescue.textContent = RESCUE_TEXT_LABEL;
   rescue.title =
     '読めるノートを集めて 1 つの文章(.md)にします。⚠ 読むための形なので、取り込んでもノートは 1 件になります';
   box.append(rescue);
