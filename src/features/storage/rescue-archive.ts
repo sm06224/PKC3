@@ -264,3 +264,33 @@ export function rescueArchiveSummary(s: RescueStats): string {
   const lost = '⚠ ノート同士のつながり・添付・履歴は、この方法では戻せません。';
   return miss.length === 0 ? `${head}。${lost}` : `${head}(${miss.join(' / ')})。${lost}`;
 }
+
+/**
+ * 🔴 **この画面で、拾って書き出したか**(#986 段③)。
+ *
+ * ⚠ **真偽で持たない ── 件数で持つ。** 「書き出した」という印だけでは
+ *   **0 件のファイルを書き出した人**も「済んだ」側に並んでしまう
+ *   (壊れ方によっては実際に 0 件で出る ── #971 段③ の実測)。
+ * 🔑 だから捨てる前の窓には**拾えた件数をそのまま**出し、
+ *   「これで足りるか」を user に決めさせる。
+ *
+ * ⚠ **この端末に残さない**(`localStorage` に置かない)── 覚えさせると
+ *   **半年前に 1 度書き出した**人が今日も「済み」に見える。
+ *   見たいのは「**いま開いているこの画面で**拾ったか」である。
+ */
+let written: { readonly at: number; readonly stats: RescueStats } | null = null;
+
+/** 書き出せた直後に呼ぶ。⚠ **書き出しが成功した枝でだけ**呼ぶ(頼んだ時点ではない)。 */
+export function noteRescueWritten(stats: RescueStats, at: number): void {
+  written = { at, stats };
+}
+
+/** この画面で拾って書き出した記録(まだなら `null`)。 */
+export function lastRescueWritten(): { readonly at: number; readonly stats: RescueStats } | null {
+  return written;
+}
+
+/** ⚠ test 用 ── module の変数なので、test どうしが影響し合わないように戻せる口を置く。 */
+export function forgetRescueWritten(): void {
+  written = null;
+}

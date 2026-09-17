@@ -11,6 +11,7 @@
  * 例外を上へ投げると、呼び側が握り忘れた瞬間に「進捗の字が出たまま固まる」
  * ように見える。だからこの層で全部受けて、**そのまま画面に出せる文**にして返す。
  */
+import { DUCKDB_PACK_APPROX } from '@features/query/duckdb-pack';
 import { fetchDuckDbPackFromBase, DuckDbPackAcquireError } from './duckdb-pack-acquire';
 import { DuckDbPackStoreError, type DuckDbPackMeta, type DuckDbPackStore } from './duckdb-pack-store';
 import { requestPersist as requestPersistState } from '@adapter/platform/storage-persist';
@@ -25,7 +26,7 @@ import { requestPersist as requestPersistState } from '@adapter/platform/storage
  * 🔑 少なく言って失敗させるより、多めに言うほうが user は損をしない
  * (`@features/office/office-pack-size.ts` と同じ判断)。
  */
-const DUCKDB_PACK_APPROX = '約 35MB';
+
 
 export type DuckDbPackInstallResult =
   | { readonly ok: true; readonly meta: DuckDbPackMeta | null; readonly message: string }

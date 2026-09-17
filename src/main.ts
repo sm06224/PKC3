@@ -106,6 +106,9 @@ import {
   installHtmlSandboxResizer,
 } from '@features/markdown/html-sandbox';
 import { AssetBlobStore } from '@adapter/platform/storage/asset-blob-store';
+import { connectWipedChannel, WIPED_CHANNEL } from '@adapter/platform/storage/wiped-channel';
+import { resetContainer, wipedElsewhere } from '@features/storage/container-reset';
+import { appCopyHistory } from '@adapter/platform/copy-history-store';
 import {
   purgeBlockReason,
   runExplicitPurge,
@@ -657,6 +660,33 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     //    bfcache へ入るときにも飛ぶので、ここで放送路を閉じると戻ってきた窓が壊れる
     window.addEventListener('pagehide', () => noteRegistry.leave());
   }
+
+  /**
+   * 🔴 **「この入れ物は捨てた」を他のタブへ伝える路**(#986 段③)。
+   *
+   * ⚠ **名前は可搬単一 HTML ごとに切る** ── `file://` では origin が全部
+   *   `file://` に潰れるので、切らないと**別のバンドルのタブ**が読み込み直す
+   *   (`noteChannel` と同じ理由・同じ形)。
+   * 🔑 受けたタブが持っているのは**もう存在しない入れ物の一覧**である ──
+   *   書こうとしても worker の `need()` が投げるだけ(幽霊 DB は建たない)だが、
+   *   **理由の読めないエラーに当たり続ける**ので読み込み直す。
+   * ⚠ ただし**編集中なら黙って捨てない**(`wipedElsewhere`)── 打った字は
+   *   `AppState` にしか無い。
+   */
+  const wipedChannel = connectWipedChannel({
+    channel:
+      typeof BroadcastChannel === 'function'
+        ? new BroadcastChannel(portable ? `${WIPED_CHANNEL}:${portable.bundle.id}` : WIPED_CHANNEL)
+        : null,
+    id: makeViewWindowToken(),
+    /**
+     * ⚠ **判断はここに書かない**(`wipedElsewhere`)── この file はどの test からも
+     *   実行されない(CLAUDE.md §2)。⚠ `dispatcher` も `ask` もまだ無いので、
+     *   **繋がるまでは今までどおり読み込み直す**口にしておく(`repaintStatus` と同じ作法)。
+     */
+    onWiped: () => onContainerWiped(),
+  });
+  let onContainerWiped: () => void = () => location.reload();
   bootLease = lease;
 
   /**
@@ -852,6 +882,21 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   const tell = (message: string): Promise<void> =>
     alertInApp(root, message).then(() => undefined);
+  /**
+   * 🔴 **別のタブが捨てたと聞いたとき、打っていた字を黙って捨てない**(#986 段③)。
+   * ⚠ 20 行下の更新の案内(`createUpdatePrompt`)と**同じ答え**にしてある(§7)。
+   */
+  onContainerWiped = (): void => {
+    const plan = wipedElsewhere(dispatcher.getState().phase === 'editing');
+    if (plan.ask === null) {
+      location.reload();
+      return;
+    }
+    // 🔴 danger ── 打った字は AppState にしか無いので、本当に戻せない
+    void ask(plan.ask, { okLabel: '読み込み直す', danger: true }).then((yes) => {
+      if (yes) location.reload();
+    });
+  };
   // 🎨 配色は**枠より先**に当てる ── 後だと一瞬だけ既定色で描かれて瞬く
   const bootTheme = initialTheme();
   applyTheme(document.documentElement, bootTheme);
@@ -2408,6 +2453,31 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      */
     rescueEntries: async (afterRowid: number, chunks: number) =>
       client.request({ op: 'rescueEntries', afterRowid, chunks }),
+    /**
+     * 🔴 **入れ物ごと捨てて、まっさらにする**(#986 段③)。
+     *
+     * ⚠ **ここに判断を書かない** ── 順番も、失敗の数え方も
+     *   `features/storage/container-reset.ts` が持つ(この file はどの test からも
+     *   実行されない ── CLAUDE.md §2)。ここは**口を 5 つ渡すだけ**である。
+     * 🔴 **添付を先に消す** ── IDB なので sqlite が壊れていても消せる
+     *   (逆順だと、DB を捨てた後に添付だけ残る半端になる)。
+     */
+    resetContainer: async (target: string) =>
+      resetContainer(target, {
+        listAssetKeys: (c) => blobs.listKeys(c),
+        deleteAsset: (c, key) => blobs.delete(c, key),
+        wipeStorage: async () => client.request({ op: 'wipeStorage' }),
+        // ⚠ 消えたノート由来の断片を残さない(貼り付けの一覧にだけ本文が残る)
+        forgetLocal: () => {
+          appCopyHistory.clear();
+        },
+        announceWiped: () => wipedChannel.announce(target),
+      }),
+    /**
+     * ⚠ 捨てた後の画面は**もう無い物を映している** ── 読み込み直す。
+     * 🔑 呼ぶのは「消せなかった数」を読ませた**後**である(`binder.ts`)。
+     */
+    reloadApp: () => location.reload(),
     /**
      * 🔴 **スクショの貼付**(#250。user 指示 2026-08-18
      * 「PKC3 でスクショ貼付の導線がない。PKC2 と同様以上に実装してください」)。

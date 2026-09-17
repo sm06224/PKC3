@@ -22,6 +22,17 @@
  * **重なりが無いこと**と**合計が変わっていないこと**を pin する。
  */
 import { iconButton } from './icons';
+/**
+ * 🔴 **壊れたときの 4 つの字は features が持つ**(#986 段③)── 断り文
+ * (`db-corruption.ts`)と捨てる窓(`container-reset.ts`)も同じ字を指すので、
+ * ここに書くと**引けない側が手で書く**ことになる(#996 と同じ型)。
+ */
+import {
+  CONTAINER_RESET_LABEL,
+  DB_CHECK_LABEL,
+  RESCUE_ARCHIVE_LABEL,
+  RESCUE_TEXT_LABEL,
+} from '@features/storage/rescue-labels';
 
 export interface CollectionCommand {
   readonly action: string;
@@ -134,9 +145,58 @@ export function buildSettingsCommands(): HTMLElement {
   wrap.append(buildStorageProfile());
   // 🔴 容量の隣に置く ── 「壊れた」と言われた人が最初に探すのはこの並びである
   wrap.append(buildDbRescue());
+  // 🔴 拾う口の**すぐ下**に置く ── 「拾う → 捨てる → 戻す」が上から順に読める
+  wrap.append(buildContainerReset());
   wrap.append(buildPlanApply());
   wrap.append(buildSettingsFile());
   return wrap;
+}
+
+/**
+ * 🔴 **入れ物ごと捨てて、まっさらにする**(#986 段③。user 裁定 2026-09-16)。
+ *
+ * ## なぜ別の塊にするのか
+ *
+ * すぐ上の `db-rescue` の見出しは「**中身が壊れていないか調べる**」である ──
+ * ⚠ **調べる所に、取り消せない操作を混ぜない**(押し間違いは見出しの読み違いから起きる)。
+ * 🔑 だから見出しごと分け、**拾う口のすぐ下**に置く
+ *   (壊れた人の手順が「調べる → 拾う → **捨てる** → 取り込む」で上から読める)。
+ *
+ * ## ⚠ ここには判断を 1 つも置かない
+ *
+ * 押したときに何を出すか(説明の窓 / 合言葉)は `binder.ts` が、
+ * 何を消すかは `features/storage/container-reset.ts` が持つ。ここは**押し口だけ**。
+ */
+function buildContainerReset(): HTMLElement {
+  const box = document.createElement('section');
+  box.setAttribute('data-pkc-region', 'container-reset');
+  const h = document.createElement('h4');
+  h.textContent = '中身を捨てて、まっさらにする';
+  box.append(h);
+
+  /**
+   * ⚠ **先に読ませる 1 行**(ボタンの `title` はホバーしないと読めない ──
+   *   指で触る端末では**一生読まれない**)。
+   */
+  const note = document.createElement('p');
+  note.setAttribute('data-pkc-field', 'container-reset-note');
+  note.textContent =
+    `直せないほど壊れたときの、最後の手です。先に上の「${RESCUE_ARCHIVE_LABEL}」で持ち出してから押してください。押しただけでは消えません ── 何が消えるかを出して、もう一度聞きます。`;
+  box.append(note);
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.setAttribute('data-pkc-action', 'container-reset');
+  btn.setAttribute('data-pkc-field', 'container-reset-run');
+  btn.textContent = CONTAINER_RESET_LABEL;
+  btn.title = 'この入れ物のノートと添付を全部消して、空の状態から始めます(元に戻せません)';
+  box.append(btn);
+
+  const sum = document.createElement('p');
+  sum.setAttribute('data-pkc-field', 'container-reset-summary');
+  sum.hidden = true;
+  box.append(sum);
+  return box;
 }
 
 /**
@@ -362,7 +422,7 @@ function buildDbRescue(): HTMLElement {
   check.type = 'button';
   check.setAttribute('data-pkc-action', 'db-check');
   check.setAttribute('data-pkc-field', 'db-check-run');
-  check.textContent = '壊れていないか調べる';
+  check.textContent = DB_CHECK_LABEL;
   check.title = '壊れている所があるかを調べます。中身が多いと数分かかります';
   box.append(check);
 
@@ -377,7 +437,7 @@ function buildDbRescue(): HTMLElement {
   restore.type = 'button';
   restore.setAttribute('data-pkc-action', 'db-rescue-archive');
   restore.setAttribute('data-pkc-field', 'db-rescue-archive-run');
-  restore.textContent = '拾って、戻せる形で書き出す';
+  restore.textContent = RESCUE_ARCHIVE_LABEL;
   restore.title =
     '読めるノートを集めて、「取り込む」から読み戻せるファイル(.pkc3.zip)にします';
   box.append(restore);
@@ -392,7 +452,7 @@ function buildDbRescue(): HTMLElement {
   rescue.type = 'button';
   rescue.setAttribute('data-pkc-action', 'db-rescue');
   rescue.setAttribute('data-pkc-field', 'db-rescue-run');
-  rescue.textContent = '拾って、読める形で書き出す';
+  rescue.textContent = RESCUE_TEXT_LABEL;
   rescue.title =
     '読めるノートを集めて 1 つの文章(.md)にします。⚠ 読むための形なので、取り込んでもノートは 1 件になります';
   box.append(rescue);

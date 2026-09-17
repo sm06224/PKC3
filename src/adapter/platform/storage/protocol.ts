@@ -45,6 +45,15 @@ export type StorageRequest =
    * 呼び側は**束ねて遅らせる**(`portable-persist.ts`)。
    */
   | { op: 'exportImage' }
+  /**
+   * 🔴 **入れ物ごと捨てる**(#986 段③)── **壊れた DB でも効く**唯一の消し方。
+   *
+   * ⚠ `DELETE FROM …` は使えない ── このボタンが要る場面は「DB が壊れている」で、
+   *   そこへ SQL を打つと `rc 11` で落ちる(`storage-worker.ts` の `sahPool` の注記)。
+   * ⚠ **これを呼んだ worker は、以後どの op にも答えられない**(DB を閉じて捨てるので)。
+   *   呼び側は**必ず読み込み直す**。
+   */
+  | { op: 'wipeStorage' }
   | { op: 'openContainer'; cid: string; title?: string }
   /**
    * 🔴 **この端末のコンテナ id を決める**(#260)。
@@ -737,6 +746,11 @@ export interface ResultMap {
    * 器へ書かない(空を書くと、次の起動が「記録がある」と読んで中身ごと空になる)。
    */
   exportImage: { image: Uint8Array };
+  /**
+   * 捨てられたか。⚠ `wiped: false` は**失敗ではない** ── この端末では DB が
+   * メモリ上にあり(OPFS が使えない)、**ディスクに捨てる物が無い**という意味である。
+   */
+  wipeStorage: { wiped: boolean; note: string | null };
   openContainer: null;
   /**
    * この端末のコンテナ id。`created` は**採番した回だけ** true

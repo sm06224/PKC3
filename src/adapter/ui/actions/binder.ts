@@ -395,9 +395,21 @@ async function browseArchive(
 import { cleanForClipboard } from '@features/export/clipboard-html';
 import { writeArchive } from '@features/export/pkc3-archive';
 import {
+  lastRescueWritten,
+  noteRescueWritten,
   rescueArchiveSource,
   rescueArchiveSummary,
 } from '@features/storage/rescue-archive';
+import {
+  RESET_PASSPHRASE,
+  resetDoneMessage,
+  resetExplainMessage,
+  resetPassphraseLabel,
+  resetPassphraseOk,
+  type ContainerResetReport,
+} from '@features/storage/container-reset';
+import { OFFICE_PACK_APPROX } from '@features/office/office-pack-size';
+import { DUCKDB_PACK_APPROX } from '@features/query/duckdb-pack';
 import { readZipDirectory, readZipEntry, type ZipEntry } from '@features/import/zip-reader';
 import { humanBytes } from '@features/human-bytes';
 import {
@@ -435,6 +447,7 @@ import {
   sqlExportMime,
 } from '@features/query/sql-export';
 import {
+  alertInApp,
   confirmInApp,
   pickDateInApp,
   pickCommandInApp,
@@ -928,6 +941,20 @@ export interface BinderServices {
    * ⚠ 1 回では終わらない ── `done` になるまで呼び側が繰り返す。
    */
   rescueEntries?(afterRowid: number, chunks: number): Promise<RescuePage>;
+  /**
+   * 🔴 **入れ物ごと捨てて、まっさらにする**(#986 段③)。
+   *
+   * ⚠ **判断はここへ渡さない** ── 何をどの順で消すかは
+   *   `features/storage/container-reset.ts` が 1 か所で持つ。
+   * ⚠ 返るのは**消せなかった数まで含む報告**である(「全部消えた」と読ませない)。
+   */
+  resetContainer?(cid: string): Promise<ContainerResetReport>;
+  /**
+   * 🔴 **読み込み直す**(#986 段③)。⚠ 捨てた後の画面は**もう無い物を映している**。
+   * ⚠ optional なのは test のためだけ ── 実機では必ず渡す
+   *   (渡し忘れると「消しました」の後、画面が古いまま残る)。
+   */
+  reloadApp?(): void;
   /**
    * 🔴 **本文の画像を資産にする**(貼付 = #251 / 押して取り込む = #264 段①)。
    * ⚠ `namePrefix` は**名乗り** ── 置けなかったときの断り文に名前が出るので、
@@ -7058,6 +7085,106 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   「とりあえず中身を読みたい」は別の要求である
    *   (CLAUDE.md「記法を減らすことは、user の動線を減らすことである」)。
    */
+  /**
+   * 🔴 **入れ物ごと捨てて、まっさらにする**(#986 段③。user 裁定 2026-09-16
+   * 「ボタンは推奨で作ってよいが、押したら説明と、本当に実行するかを聞くこと」)。
+   *
+   * ⚠ **押した時点では 1 バイトも消さない。** 窓は 2 枚:
+   *   ① **何が消えて何が残るか**の字(押しても消えない)
+   *   ② **合言葉を打つ**窓(`RESET_PASSPHRASE`)── ⚠ 打たないと実行に進めない。
+   *
+   * 🔑 **書き出しを門にしない**(soft-block)── 「拾って書き出した」という印は
+   *   **0 件でも立つ**ので、門にすると**いちばん詰まっている人だけ**が
+   *   捨てられなくなる。だから①の窓に**拾えた件数をそのまま**出して、
+   *   足りるかどうかは user に決めさせる。
+   *
+   * ⚠ **判断はここに置かない** ── 何をどの順で消すかは
+   *   `features/storage/container-reset.ts`、字は同 file の `resetExplainMessage`。
+   *
+   * ## ⚠ なぜ `confirmThen` の `recheck` を通していないか(着地前レビューの問い)
+   *
+   * 他の破壊的な口(`purge-trash` など)は「待っている間に前提が崩れたら撃たない」
+   * 門(`notWhileEditing`)を通すが、ここは通していない ── **理由を書く**
+   * (書かないと、次に読む人が「見落とし」と「意図」を区別できない):
+   *
+   * 1. **効く先が変わらない** ── 撃つ先は `cid` 1 つで、`cid` を書き換える
+   *    reducer は `SYS_BOOTED` しか無い(実行中に別の入れ物へ移らない)。
+   * 2. **編集中でも止めない** ── この口が要るのは**壊れて書き込めない**ときで、
+   *    そこでは `phase` が `editing` のまま動けなくなっていることがある。
+   *    🔴 止めると「**壊れているときだけ捨てられない**」= この機能の趣旨と逆になる。
+   * 3. 待っている間の割り込みは、小窓が `showModal()` で塞いでいる
+   *    (`isAppDialogOpen()` が近道キーも殺す)。
+   */
+  'container-reset': (dispatcher, _target, services, root) => {
+    const sum = root.querySelector<HTMLElement>('[data-pkc-field="container-reset-summary"]');
+    if (sum === null) return;
+    const reset = services.resetContainer;
+    if (reset === undefined) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この環境では捨てられません' });
+      return;
+    }
+    const cid = dispatcher.getState().cid;
+    if (cid === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'まだ開いていません' });
+      return;
+    }
+    const rescued = lastRescueWritten();
+    const explain = resetExplainMessage({
+      notes: dispatcher.getState().entryMetas.size,
+      /**
+       * 🔴 **大きさは定数から引く**(#996 の教訓 ── 画面に出す字を手で書かない)。
+       * ⚠ ここで「約 93MB」と綴ると、一式を焼き直した日に**両方そのまま**で緑になる。
+       */
+      keeps: [
+        `Office の部品(${OFFICE_PACK_APPROX})`,
+        `DuckDB の部品(${DUCKDB_PACK_APPROX})`,
+        '設定・見た目・ショートカットキーの割り当て・読んだお知らせの印',
+      ],
+      rescued: rescued === null ? null : rescued.stats,
+    });
+    void confirmInApp(root, explain, {
+      // ⚠ **ここで「捨てる」と書かない** ── まだ消えないことを、ボタンの字で言う
+      okLabel: '次へ(まだ消えません)',
+      cancelLabel: 'やめる',
+    }).then(async (answer) => {
+      if (answer !== 'ok') return;
+      const typed = await promptInApp(root, {
+        title: '本当に捨てますか',
+        label: resetPassphraseLabel(),
+        // ⚠ **`initial` を渡さない** ── 渡すと、空のまま受けたときに
+        //    `promptInApp` がその字を返す(= 何も打たずに合言葉が通る)
+        okLabel: '捨てる',
+        // 🔴 danger ── ここが**本当に消える 1 押し**である(1 件削除より重い)
+        danger: true,
+      });
+      // ⚠ 「やめる」は黙って戻る(断りの字を出すと、やめた人を責める形になる)
+      if (typed === null) return;
+      if (!resetPassphraseOk(typed)) {
+        dispatcher.dispatch({
+          type: 'OP_FAILED',
+          error: `${RESET_PASSPHRASE} と打たれなかったので、何も消していません`,
+        });
+        return;
+      }
+      sum.textContent = '消しています…';
+      sum.hidden = false;
+      try {
+        const report = await reset(cid);
+        const done = resetDoneMessage(report);
+        sum.textContent = done;
+        /**
+         * ⚠ **読ませてから読み込み直す** ── すぐ `reload` すると
+         *   「消せなかった添付が N 件」を**誰も読めない**。
+         */
+        await alertInApp(root, done);
+        services.reloadApp?.();
+      } catch (e) {
+        sum.textContent = '';
+        sum.hidden = true;
+        dispatcher.dispatch({ type: 'OP_FAILED', error: `捨てられませんでした: ${String(e)}` });
+      }
+    });
+  },
   'db-rescue-archive': (dispatcher, _target, services, root) => {
     const sum = root.querySelector<HTMLElement>('[data-pkc-field="db-rescue-summary"]');
     if (sum === null) return;
@@ -7089,6 +7216,12 @@ const ACTIONS: Record<string, ActionHandler> = {
       (out) => {
         // ⚠ `toISOString()` は UTC ── 日付が 1 日ずれる端末が出る(`dayStamp` に寄せる)
         downloadBlob(`pkc-rescue-${dayStamp(new Date())}.pkc3.zip`, out.blob);
+        /**
+         * 🔴 **書き出せた枝でだけ記録する**(#986 段③)── 捨てる前の窓が
+         *   「この画面で何件拾えたか」を出すための唯一の材料である。
+         * ⚠ **頼んだ時点で記録しない** ── 落ちた回も「済み」に見えてしまう。
+         */
+        noteRescueWritten(stats(), Date.now());
         sum.textContent = `${rescueArchiveSummary(stats())} このファイルを「取り込む」から読み込むと、ノートが戻ります。`;
         sum.hidden = false;
       },

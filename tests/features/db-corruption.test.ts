@@ -1,3 +1,4 @@
+/** @vitest-environment happy-dom */
 /**
  * 🔴 **中身が壊れたときに、書き込みだけ止める**(#971。user 報告 2026-09-16)。
  *
@@ -9,6 +10,14 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import {
+  CONTAINER_RESET_LABEL,
+  RESCUE_ARCHIVE_LABEL,
+} from '../../src/features/storage/rescue-labels';
+import {
+  COLLECTION_COMMANDS,
+  buildSettingsCommands,
+} from '../../src/adapter/ui/render/commands';
 import {
   CORRUPT_BLOCKED_OPS,
   CORRUPT_REFUSAL,
@@ -119,6 +128,11 @@ describe('止める op の仕分け(#971)', () => {
     //    何も取り出せなくなる。⚠ `rescueEntries` は読むだけ(`SELECT … NOT INDEXED`)
     'checkIntegrity',
     'rescueEntries',
+    // 🔴 **捨てる口**(#986 段③)── ⚠ **書き込みだが、止めてはいけない**。
+    //    このボタンが要る場面は「壊れている」そのものなので、止めると
+    //    **いちばん要るときにだけ効かない**(救出の 2 つと同じ理由)。
+    //    ⚠ しかも `DELETE` ではなく file ごと捨てるので、壊れていても通る。
+    'wipeStorage',
   ];
 
   it('🔴 protocol の op は 1 つ残らず、止めるか通すかが決まっている', () => {
@@ -143,7 +157,7 @@ describe('止める op の仕分け(#971)', () => {
     expect(ghosts, 'protocol に無い op を止めようとしている').toEqual([]);
   });
 
-  it('🔴 持ち出しに要る 6 つは、止めない', () => {
+  it('🔴 壊れているときに要る 7 つは、止めない', () => {
     // 🔑 これが止まると「データは在るのに取り出せない」になる
     // ⚠ `checkIntegrity` / `rescueEntries` は **壊れているときにしか押されない** ──
     //    ここを止めると、この 2 つは**存在しないのと同じ**になる(#971 段③)
@@ -154,6 +168,8 @@ describe('止める op の仕分け(#971)', () => {
       'exportImage',
       'checkIntegrity',
       'rescueEntries',
+      // ⚠ **捨てる口も同じ** ── 塞ぐと「壊れたまま作り直せない」になる(#986 段③)
+      'wipeStorage',
     ]) {
       expect(CORRUPT_BLOCKED_OPS, `持ち出す道を塞いだ: ${o}`).not.toContain(o);
     }
@@ -167,8 +183,42 @@ describe('止める op の仕分け(#971)', () => {
 });
 
 describe('断り文(#971)', () => {
+  /**
+   * 🔴 **押させる字は、画面から引いて突き合わせる**(#996 の教訓 / #986 段③)。
+   *
+   * ⚠ 直す前のこの検査は「`SQL で調べる` の字が在るか」しか見ていなかったので、
+   *   断り文が **画面に無いボタン名**(「答えをファイルへ」。実物は「ファイルへ」)を
+   *   指していたことを **1 度も鳴らさなかった**。
+   * 🔑 **期待値を手で書かない** ── 書くと、ボタンを改名した日に
+   *   **実装も test も同じ古い字のまま緑**になる。
+   */
+  it('🔴 断り文が指すボタンは、画面に在る', () => {
+    const settings = buildSettingsCommands();
+    const onScreen = [...settings.querySelectorAll('button')].map(
+      (b) => b.querySelector('[data-pkc-field="label"]')?.textContent ?? b.textContent ?? '',
+    );
+    // ⚠ 空振り防止 ── 引けていなければ、この検査は何も見ていない
+    expect(onScreen.length, '設定の面からボタンを 1 つも引けていない').toBeGreaterThan(5);
+
+    /**
+     * ⚠ **字は定数から引く**(`rescue-labels.ts`)── 手で書くと、改名した日に
+     *   実装も test も同じ古い字のまま緑になる。
+     * 🔑 **定数だけでは足りない** ── 定数を**画面が本当に使っているか**は
+     *   `onScreen`(描いたボタンの `textContent` = 独立した観測)で見る。
+     *   ⚠ ここが無いと、ボタンが定数を使うのをやめても鳴らない。
+     */
+    for (const label of [RESCUE_ARCHIVE_LABEL, CONTAINER_RESET_LABEL]) {
+      expect(onScreen, `画面に無い字を指している: ${label}`).toContain(label);
+      expect(CORRUPT_REFUSAL, `断り文が「${label}」を案内していない`).toContain(label);
+    }
+    // ⚠ 戻す口は**左の列**に在る(設定ではない)── 一覧は両方見る
+    const importLabel = COLLECTION_COMMANDS.find((c) => c.action === 'import-file')?.label;
+    expect(importLabel, '取り込む口が一覧から消えた').toBeTruthy();
+    expect(CORRUPT_REFUSAL, '戻す口を案内していない').toContain(importLabel as string);
+  });
+
   it('🔑 次の一手が書いてある(「壊れました」で終わらない)', () => {
-    expect(CORRUPT_REFUSAL, '持ち出す道を案内していない').toContain('SQL で調べる');
+    expect(CORRUPT_REFUSAL, '自分の目で見る道を消した').toContain('SQL で調べる');
     expect(CORRUPT_REFUSAL, '読めることを言っていない').toContain('読むことはできます');
     // ⚠ 記法を書かない(素のテキストとして出る面がある)
     expect(CORRUPT_REFUSAL).not.toMatch(/\*\*|`/);
