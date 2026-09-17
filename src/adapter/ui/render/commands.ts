@@ -411,6 +411,37 @@ function buildStorageProfile(): HTMLElement {
  *   出していたのが **.md 1 枚**なので、取り込んでも**ノートは 1 件**にしかならない
  *   (拾えた 4000 件が、戻すと 1 件になる)。だから**戻せる形**の口を足した。
  */
+/**
+ * 🔴 **ホバーしないと読めない説明を、判断の材料にしない**(user 指摘 2026-09-17)。
+ *
+ * user の求め(こちらの解釈):**取り消せない操作に関わる所は、説明的な画面にすること。**
+ *
+ * ⚠ 直す前、壊れたときの 3 つのボタンは**違いを `title` にしか書いていなかった** ──
+ * 🔴 `title` は**指で触る端末では一生読まれない**(user はスマホでも読む)。
+ * ⚠ しかも**すぐ下の「捨てる」の塊には常時見える説明が在る**ので、
+ *   同じ面の中で説明の有無が食い違っていた。
+ *
+ * 🔑 **選び間違いは、捨てる直前に効く** ── 「読める形」だけ書き出して捨てた人は、
+ *   戻すと**ノート 1 件**になる。つまりこの選択は**不可逆な操作の前提条件**である。
+ *   だからここは「危険な操作」の側に数えて、説明を画面へ出す。
+ *
+ * ⚠ `title` は**消さない**(ホバーする人の情報を減らさない)。
+ */
+function rescueNote(field: string, note: string): HTMLElement {
+  const p = document.createElement('p');
+  // ⚠ 器は**ボタンごと**に分ける(1 本の長い段落にすると、どれの説明か読めない)
+  p.setAttribute('data-pkc-field', `${field}-note`);
+  /**
+   * 🔑 **見た目は既に在る物を使う**(`settings-note` ── 小さく、無彩色の控えめな字)。
+   * ⚠ 新しい規則を足さない ── 同じ面に**同じ役目で違う見た目**の字を作らない。
+   * ⚠ すぐ下の「捨てる」の説明には**この class を付けない** ── あちらは
+   *   取り消せない操作の**警告**なので、小さく薄くするのは向きが逆である。
+   */
+  p.className = 'settings-note';
+  p.textContent = note;
+  return p;
+}
+
 function buildDbRescue(): HTMLElement {
   const box = document.createElement('section');
   box.setAttribute('data-pkc-region', 'db-rescue');
@@ -424,7 +455,13 @@ function buildDbRescue(): HTMLElement {
   check.setAttribute('data-pkc-field', 'db-check-run');
   check.textContent = DB_CHECK_LABEL;
   check.title = '壊れている所があるかを調べます。中身が多いと数分かかります';
-  box.append(check);
+  box.append(
+    check,
+    rescueNote(
+      'db-check-run',
+      '壊れている所があるかを調べます。中身が多いと数分かかります。何も書き換えません。',
+    ),
+  );
 
   /**
    * 🔴 **戻せる形で出す**(#986。user 指示 2026-09-16
@@ -440,7 +477,14 @@ function buildDbRescue(): HTMLElement {
   restore.textContent = RESCUE_ARCHIVE_LABEL;
   restore.title =
     '読めるノートを集めて、「取り込む」から読み戻せるファイル(.pkc3.zip)にします';
-  box.append(restore);
+  box.append(
+    restore,
+    // 🔑 **戻すならこちら**、を頭で言う(並んだ 2 つの違いはここだけである)
+    rescueNote(
+      'db-rescue-archive-run',
+      '戻すならこちらです。.pkc3.zip にします。左の列の「取り込む」から読み込むと、ノートがノートとして戻ります。',
+    ),
+  );
 
   /**
    * ⚠ **こちらは消さない** ── 壊れているときに
@@ -455,7 +499,30 @@ function buildDbRescue(): HTMLElement {
   rescue.textContent = RESCUE_TEXT_LABEL;
   rescue.title =
     '読めるノートを集めて 1 つの文章(.md)にします。⚠ 読むための形なので、取り込んでもノートは 1 件になります';
-  box.append(rescue);
+  box.append(
+    rescue,
+    /**
+     * 🔴 **「戻せない」をここに書く。**
+     * ⚠ 直す前はこれが `title` の中だけに在り、⚠ **指で触る端末では 1 度も
+     *   読まれないまま**、これだけ書き出して捨てる人を作れた。
+     */
+    rescueNote(
+      'db-rescue-run',
+      'すぐ中身を読みたいときに。.md 1 枚にします。⚠ 取り込んでもノートは 1 件になるので、戻すためのものではありません。',
+    ),
+  );
+
+  /**
+   * 🔑 **選ばせない逃げ道を 1 行置く** ── 迷っている人は、迷ったまま片方だけ押す。
+   * ⚠ **書き出しは中身を変えない**ことも書く ── 壊れていると聞いた直後の人は、
+   *   「押したら余計に壊れるのでは」と思って何も押せなくなる。
+   */
+  const both = document.createElement('p');
+  both.setAttribute('data-pkc-field', 'db-rescue-both');
+  both.className = 'settings-note';
+  both.textContent =
+    '⚠ どちらにするか迷ったら、両方押してください。どちらも、いまの中身は 1 文字も変えません。';
+  box.append(both);
 
   const sum = document.createElement('p');
   sum.setAttribute('data-pkc-field', 'db-rescue-summary');
