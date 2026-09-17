@@ -198,3 +198,15 @@ export function duckDbAssetUrl(base: string, path: string): string {
   const b = base.endsWith('/') ? base : `${base}/`;
   return `${b}${path}`;
 }
+
+/**
+ * 🔴 **画面に出す「およその大きさ」**(#986 段③で features 側へ移した)。
+ *
+ * ⚠ 直す前は `adapter/platform/duckdb/duckdb-pack-install.ts` の中の非公開の定数で、
+ *   **他の面から引けなかった** ── だから「捨てても残る物」を並べる窓が
+ *   **数を手で書く**しかなくなる(手で書いた数は、一式を替えた日に嘘になる)。
+ * 🔴 **数から組み立てない**(`${…}MB` と書かない)── `tests/features/human-bytes.test.ts` が
+ *   「実行時の値にバイト単位を付ける所は `human-bytes.ts` だけ」を守っている
+ *   (`OFFICE_PACK_APPROX` と同じ作法)。
+ */
+export const DUCKDB_PACK_APPROX = '約 35MB';

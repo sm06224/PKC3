@@ -134,9 +134,58 @@ export function buildSettingsCommands(): HTMLElement {
   wrap.append(buildStorageProfile());
   // 🔴 容量の隣に置く ── 「壊れた」と言われた人が最初に探すのはこの並びである
   wrap.append(buildDbRescue());
+  // 🔴 拾う口の**すぐ下**に置く ── 「拾う → 捨てる → 戻す」が上から順に読める
+  wrap.append(buildContainerReset());
   wrap.append(buildPlanApply());
   wrap.append(buildSettingsFile());
   return wrap;
+}
+
+/**
+ * 🔴 **入れ物ごと捨てて、まっさらにする**(#986 段③。user 裁定 2026-09-16)。
+ *
+ * ## なぜ別の塊にするのか
+ *
+ * すぐ上の `db-rescue` の見出しは「**中身が壊れていないか調べる**」である ──
+ * ⚠ **調べる所に、取り消せない操作を混ぜない**(押し間違いは見出しの読み違いから起きる)。
+ * 🔑 だから見出しごと分け、**拾う口のすぐ下**に置く
+ *   (壊れた人の手順が「調べる → 拾う → **捨てる** → 取り込む」で上から読める)。
+ *
+ * ## ⚠ ここには判断を 1 つも置かない
+ *
+ * 押したときに何を出すか(説明の窓 / 合言葉)は `binder.ts` が、
+ * 何を消すかは `features/storage/container-reset.ts` が持つ。ここは**押し口だけ**。
+ */
+function buildContainerReset(): HTMLElement {
+  const box = document.createElement('section');
+  box.setAttribute('data-pkc-region', 'container-reset');
+  const h = document.createElement('h4');
+  h.textContent = '中身を捨てて、まっさらにする';
+  box.append(h);
+
+  /**
+   * ⚠ **先に読ませる 1 行**(ボタンの `title` はホバーしないと読めない ──
+   *   指で触る端末では**一生読まれない**)。
+   */
+  const note = document.createElement('p');
+  note.setAttribute('data-pkc-field', 'container-reset-note');
+  note.textContent =
+    '直せないほど壊れたときの、最後の手です。先に上の「拾って、戻せる形で書き出す」で持ち出してから押してください。押しただけでは消えません ── 何が消えるかを出して、もう一度聞きます。';
+  box.append(note);
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.setAttribute('data-pkc-action', 'container-reset');
+  btn.setAttribute('data-pkc-field', 'container-reset-run');
+  btn.textContent = '中身を捨てる';
+  btn.title = 'この入れ物のノートと添付を全部消して、空の状態から始めます(元に戻せません)';
+  box.append(btn);
+
+  const sum = document.createElement('p');
+  sum.setAttribute('data-pkc-field', 'container-reset-summary');
+  sum.hidden = true;
+  box.append(sum);
+  return box;
 }
 
 /**

@@ -106,6 +106,9 @@ import {
   installHtmlSandboxResizer,
 } from '@features/markdown/html-sandbox';
 import { AssetBlobStore } from '@adapter/platform/storage/asset-blob-store';
+import { connectWipedChannel, WIPED_CHANNEL } from '@adapter/platform/storage/wiped-channel';
+import { resetContainer } from '@features/storage/container-reset';
+import { appCopyHistory } from '@adapter/platform/copy-history-store';
 import {
   purgeBlockReason,
   runExplicitPurge,
@@ -657,6 +660,24 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     //    bfcache へ入るときにも飛ぶので、ここで放送路を閉じると戻ってきた窓が壊れる
     window.addEventListener('pagehide', () => noteRegistry.leave());
   }
+
+  /**
+   * 🔴 **「この入れ物は捨てた」を他のタブへ伝える路**(#986 段③)。
+   *
+   * ⚠ **名前は可搬単一 HTML ごとに切る** ── `file://` では origin が全部
+   *   `file://` に潰れるので、切らないと**別のバンドルのタブ**が読み込み直す
+   *   (`noteChannel` と同じ理由・同じ形)。
+   * 🔑 受けたら**読み込み直す**しかない ── そのタブが画面に持っているのは
+   *   もう存在しない入れ物で、1 文字でも書けば**消したノートが 1 件だけ蘇る**。
+   */
+  const wipedChannel = connectWipedChannel({
+    channel:
+      typeof BroadcastChannel === 'function'
+        ? new BroadcastChannel(portable ? `${WIPED_CHANNEL}:${portable.bundle.id}` : WIPED_CHANNEL)
+        : null,
+    id: makeViewWindowToken(),
+    onWiped: () => location.reload(),
+  });
   bootLease = lease;
 
   /**
@@ -2408,6 +2429,31 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      */
     rescueEntries: async (afterRowid: number, chunks: number) =>
       client.request({ op: 'rescueEntries', afterRowid, chunks }),
+    /**
+     * 🔴 **入れ物ごと捨てて、まっさらにする**(#986 段③)。
+     *
+     * ⚠ **ここに判断を書かない** ── 順番も、失敗の数え方も
+     *   `features/storage/container-reset.ts` が持つ(この file はどの test からも
+     *   実行されない ── CLAUDE.md §2)。ここは**口を 5 つ渡すだけ**である。
+     * 🔴 **添付を先に消す** ── IDB なので sqlite が壊れていても消せる
+     *   (逆順だと、DB を捨てた後に添付だけ残る半端になる)。
+     */
+    resetContainer: async (target: string) =>
+      resetContainer(target, {
+        listAssetKeys: (c) => blobs.listKeys(c),
+        deleteAsset: (c, key) => blobs.delete(c, key),
+        wipeStorage: async () => client.request({ op: 'wipeStorage' }),
+        // ⚠ 消えたノート由来の断片を残さない(貼り付けの一覧にだけ本文が残る)
+        forgetLocal: () => {
+          appCopyHistory.clear();
+        },
+        announceWiped: () => wipedChannel.announce(target),
+      }),
+    /**
+     * ⚠ 捨てた後の画面は**もう無い物を映している** ── 読み込み直す。
+     * 🔑 呼ぶのは「消せなかった数」を読ませた**後**である(`binder.ts`)。
+     */
+    reloadApp: () => location.reload(),
     /**
      * 🔴 **スクショの貼付**(#250。user 指示 2026-08-18
      * 「PKC3 でスクショ貼付の導線がない。PKC2 と同様以上に実装してください」)。

@@ -125,3 +125,82 @@ export function resetDoneMessage(r: ContainerResetReport): string {
       : '';
   return `${head}${tail}。読み込み直してから、バックアップを取り込んでください。`;
 }
+
+/**
+ * 🔴 **押しても、まだ何も消えない**(user 裁定 2026-09-16)。
+ *
+ * user の求め(こちらの解釈):**ボタンは推奨のとおり作ってよい。ただし押したら、
+ * 何が起きるかの説明と、本当に実行するかの確認を出すこと。**
+ *
+ * ⚠ だから 2 枚出す:**この字の窓**(押しても消えない)→ **合言葉を打つ窓**。
+ * 🔑 合言葉は**この画面に出す**(ノートの題名にしない ── 壊れた DB では
+ *   題名が 1 つも出ないので、**いちばん要る場面で合言葉が読めなくなる**)。
+ */
+export const RESET_PASSPHRASE = 'すてる';
+
+/** 拾い出しの成果のうち、説明の窓が読む分だけ。 */
+export interface ResetRescueSeen {
+  readonly entries: number;
+  readonly skipped: number;
+  readonly empty: number;
+  readonly bodyMissing: number;
+}
+
+/**
+ * 説明の窓に出す字を組む。
+ *
+ * ⚠ **記法を書かない**(`**` / `` ` ``)── 出るのは `textContent` なので
+ *   そのまま記号が見える(お知らせと同じ規律)。改行は `pre-wrap` で効く。
+ *
+ * @param notes いま**一覧に出ている**件数。⚠ 「在る件数」ではない(下の ⚠ を見よ)
+ * @param keeps 消えずに残る物の名前。⚠ **呼び側が定数から組む**
+ *   ── ここで「約 93MB」と手で書くと、一式の大きさを変えた日に嘘になる
+ * @param rescued この画面で拾って書き出した成果(まだなら `null`)
+ */
+export function resetExplainMessage(opts: {
+  readonly notes: number;
+  readonly keeps: readonly string[];
+  readonly rescued: ResetRescueSeen | null;
+}): string {
+  const { notes, keeps, rescued } = opts;
+  /**
+   * 🔴 **「拾ったか」を真偽で言わない**(#971 段③ と同じ向き)。
+   * ⚠ 壊れているときは **0 件のファイル**が書き出せてしまうので、
+   *   「書き出し済み」とだけ出すと**いちばん危ない人が安心する**。
+   */
+  const backup =
+    rescued === null
+      ? '🔴 この画面では、まだ拾い出していません。先に「拾って、戻せる形で書き出す」を押してください。'
+      : `この画面で拾えたのは ${rescued.entries} 件です` +
+        (rescued.skipped + rescued.empty + rescued.bodyMissing > 0
+          ? `(読めなかった区画 ${rescued.skipped} / 空だった区画 ${rescued.empty} / 本文が読めなかったノート ${rescued.bodyMissing} 件)`
+          : '') +
+        '。この件数で足りるかを、ご自身で確かめてください。';
+  return [
+    'この入れ物の中身を、すべて消します。元に戻せません。',
+    '',
+    '消えるもの',
+    `・いま一覧に出ている ${notes} 件のノート(題名・本文・履歴・フォルダ・タグ・付箋・板)`,
+    '・添付したファイルの中身',
+    // 🔑 **0 件と出ていても「空だ」と読ませない** ── 壊れているときは
+    //    一覧そのものが引けていないことがある(見えている数 ≠ 在る数)
+    '⚠ 壊れているときは、一覧に出ていない分も一緒に消えます。',
+    '',
+    '残るもの',
+    ...keeps.map((k) => `・${k}`),
+    '',
+    backup,
+    // ⚠ 黙って他のタブを読み込み直さない ── 先に言う
+    '⚠ 同じ PKC を開いている他のタブも、読み込み直されます。',
+  ].join('\n');
+}
+
+/** 合言葉を聞く窓の 1 行。⚠ **合言葉そのものをここに出す**(覚えさせない)。 */
+export function resetPassphraseLabel(): string {
+  return `消してよければ ${RESET_PASSPHRASE} と打ってください`;
+}
+
+/** 打たれた字が合言葉か。⚠ 前後の空白は `promptInApp` が落としている。 */
+export function resetPassphraseOk(typed: string | null): boolean {
+  return typed === RESET_PASSPHRASE;
+}

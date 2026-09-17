@@ -1,0 +1,355 @@
+/** @vitest-environment happy-dom */
+/**
+ * 🔴 **入れ物ごと捨てる口の、画面の側**(#986 段③)。
+ *
+ * ## user の裁定(2026-09-16、こちらの解釈)
+ *
+ * **ボタンは推奨のとおり作ってよい。ただし押したら、何が起きるかの説明と、
+ * 本当に実行するかの確認を出すこと。**
+ *
+ * ⚠ だからここで守るのは「捨てられること」ではない ── **捨てにくいこと**である:
+ * ① 押しただけでは **1 バイトも消えない**
+ * ② 合言葉を打つまで実行に進めない
+ * ③ 説明の字が、**測った / 定数から引いた値**で書かれている(手書きの数を残さない)
+ *
+ * 消す順番そのものは `tests/features/container-reset.test.ts` が見る。
+ */
+import { beforeEach, describe, expect, it } from 'vitest';
+import type { EntryMeta } from '../../src/core/model/entry-meta';
+import { Dispatcher } from '../../src/adapter/state/dispatcher';
+import { buildShell } from '../../src/adapter/ui/render/shell';
+import { buildSettingsCommands } from '../../src/adapter/ui/render/commands';
+import { bindActions, type BinderServices } from '../../src/adapter/ui/actions/binder';
+import type { ContainerResetReport } from '../../src/features/storage/container-reset';
+import { RESET_PASSPHRASE } from '../../src/features/storage/container-reset';
+import {
+  forgetRescueWritten,
+  noteRescueWritten,
+} from '../../src/features/storage/rescue-archive';
+import { OFFICE_PACK_APPROX } from '../../src/features/office/office-pack-size';
+import { DUCKDB_PACK_APPROX } from '../../src/features/query/duckdb-pack';
+import { DIALOG_REGION } from '../../src/adapter/ui/render/app-dialog';
+
+const meta = (lid: string, title: string): EntryMeta =>
+  ({
+    lid,
+    title,
+    archetype: 'text',
+    createdAt: null,
+    updatedAt: null,
+    entryOrder: 1,
+    status: null,
+    date: null,
+    archived: false,
+  }) as EntryMeta;
+
+/** ⚠ 小窓は `enqueue` の中の `async` なので、microtask を数周ぶん進める。 */
+async function settle(): Promise<void> {
+  for (let i = 0; i < 40; i += 1) await Promise.resolve();
+}
+
+function liveDialog(): HTMLDialogElement | null {
+  const all = document.querySelectorAll<HTMLDialogElement>(`[data-pkc-region="${DIALOG_REGION}"]`);
+  return [...all].find((el) => el.open) ?? null;
+}
+
+const OK = { wiped: true, note: null, assets: 2, assetFailures: 0 } satisfies ContainerResetReport;
+
+/**
+ * 拾い出しの代わり。⚠ 1 ページで終わる最小の形(本物の形は
+ * `tests/features/rescue-archive.test.ts` が見る)。
+ */
+function fakePick(rows: number, skipped: number): NonNullable<BinderServices['rescueEntries']> {
+  let pass = 0;
+  return async (after: number) => {
+    if (after > 0) return { rows: [], lastRowid: after, skipped: 0, empty: 0, maxRowid: rows, done: true };
+    pass += 1;
+    return {
+      rows: Array.from({ length: rows }, (_, i) => ({
+        rowid: i + 1,
+        cid: 'c1',
+        lid: `l${i}`,
+        title: `題名 ${i}`,
+        archetype: 'text',
+        body: `本文 ${i}`,
+      })),
+      lastRowid: rows,
+      // ⚠ 読めなかった区画は 1 周目だけ数える(本物も周ごとに変わりうる)
+      skipped: pass === 1 ? skipped : 0,
+      empty: 0,
+      maxRowid: rows,
+      done: false,
+    };
+  };
+}
+
+function mount(over: {
+  report?: ContainerResetReport;
+  fail?: string;
+  pick?: BinderServices['rescueEntries'];
+} = {}) {
+  document.body.innerHTML = '';
+  const root = document.createElement('div');
+  document.body.append(root);
+  buildShell(root);
+  root.append(buildSettingsCommands());
+  const d = new Dispatcher();
+  d.dispatch({
+    type: 'SYS_BOOTED',
+    cid: 'c1',
+    metas: [meta('a', '一件目'), meta('b', '二件目'), meta('c', '三件目')],
+    relations: [],
+  });
+  /** 🔑 **呼ばれた回数と引数**を採る ── 「消えなかった」を件数で言えるようにする。 */
+  const calls: string[] = [];
+  let reloaded = 0;
+  bindActions(root, d, {
+    ...(over.pick === undefined ? {} : { rescueEntries: over.pick }),
+    resetContainer: async (cid: string) => {
+      calls.push(cid);
+      if (over.fail !== undefined) throw new Error(over.fail);
+      return over.report ?? OK;
+    },
+    reloadApp: () => {
+      reloaded += 1;
+    },
+  });
+  return {
+    root,
+    d,
+    calls,
+    reloaded: () => reloaded,
+    run: root.querySelector<HTMLButtonElement>('[data-pkc-field="container-reset-run"]')!,
+    rescue: root.querySelector<HTMLButtonElement>('[data-pkc-field="db-rescue-archive-run"]')!,
+    summary: () =>
+      root.querySelector('[data-pkc-field="container-reset-summary"]')?.textContent ?? '',
+    body: () => liveDialog()?.querySelector('[data-pkc-field="dialog-body"]')?.textContent ?? '',
+    /** 開いている小窓に答える。⚠ **開いていなければ落とす**(空振り防止)。 */
+    answer: async (which: 'ok' | 'cancel'): Promise<void> => {
+      const dialog = liveDialog();
+      expect(dialog, '小窓が開いていない').not.toBeNull();
+      dialog
+        ?.querySelector<HTMLButtonElement>(
+          `[data-pkc-field="${which === 'ok' ? 'dialog-ok' : 'dialog-cancel'}"]`,
+        )
+        ?.click();
+      await settle();
+    },
+    /** 合言葉の窓に打つ。⚠ 欄が無ければ落とす(1 枚目で止まっていたら分かる)。 */
+    type: async (text: string): Promise<void> => {
+      const input = liveDialog()?.querySelector<HTMLInputElement>(
+        '[data-pkc-field="prompt-input"]',
+      );
+      expect(input, '合言葉を打つ欄が出ていない').not.toBeNull();
+      if (input !== null && input !== undefined) input.value = text;
+      liveDialog()?.querySelector<HTMLButtonElement>('[data-pkc-field="dialog-ok"]')?.click();
+      await settle();
+    },
+  };
+}
+
+beforeEach(async () => {
+  /**
+   * 🔴 **前の it が開けっぱなしにした小窓を、必ず閉じる**(実際に踏んだ)。
+   *
+   * ⚠ 小窓は `enqueue` で**直列**に出る(CLAUDE.md §10「native がついでに
+   *   やっていたこと」の 1 つを自前で持っている)ので、閉じないまま次の it へ
+   *   進むと、**次の `confirmInApp` は永久に自分の番が来ない** ──
+   *   症状は「押しても小窓が出ない」で、**製品の不具合に見える**。
+   * ⚠ `innerHTML = ''` で外しても閉じたことにはならない(待ち行列は module 側)。
+   */
+  for (const d of document.querySelectorAll<HTMLDialogElement>('dialog')) if (d.open) d.close();
+  await settle();
+  document.body.innerHTML = '';
+  // ⚠ module の変数なので、test どうしが影響し合わないように毎回戻す
+  forgetRescueWritten();
+});
+
+describe('押しても、まだ消えない(#986 段③)', () => {
+  it('🔴 押した時点では 1 バイトも消さない ── 出るのは説明の窓だけ', async () => {
+    const m = mount();
+    m.run.click();
+    await settle();
+    expect(m.calls, '押しただけで消えた').toEqual([]);
+    expect(m.body(), '説明が出ていない').toContain('元に戻せません');
+  });
+
+  it('🔴 説明に「消えるもの」と「残るもの」が両方ある', async () => {
+    const m = mount();
+    m.run.click();
+    await settle();
+    const text = m.body();
+    expect(text, '消えるものを言っていない').toContain('消えるもの');
+    expect(text, '残るものを言っていない').toContain('残るもの');
+    // ⚠ 件数は**画面が知っている数**(3 件を入れてある)
+    expect(text, 'ノートの件数が出ていない').toContain('3 件');
+    // 🔴 見えている数を「在る数」と読ませない
+    expect(text, '一覧に出ていない分の断りが無い').toContain('一覧に出ていない分');
+    // ⚠ 黙って他のタブを読み込み直さない
+    expect(text, '他のタブのことを言っていない').toContain('他のタブ');
+  });
+
+  /**
+   * 🔴 **大きさは定数から引く**(#996 の教訓の再発防止)。
+   * ⚠ 期待値を手で「約 93MB」と書かない ── 書くと、**一式を焼き直した日に
+   *   実装と test の両方が同じ古い字のまま緑**になる。
+   */
+  it('🔴 残る部品の大きさは、定数と同じ字で出る', async () => {
+    const m = mount();
+    m.run.click();
+    await settle();
+    expect(m.body(), 'Office の大きさが定数と違う').toContain(OFFICE_PACK_APPROX);
+    expect(m.body(), 'DuckDB の大きさが定数と違う').toContain(DUCKDB_PACK_APPROX);
+  });
+
+  it('🔴 まだ拾っていなければ、そう言う(先に拾わせる)', async () => {
+    const m = mount();
+    m.run.click();
+    await settle();
+    expect(m.body(), '拾っていないことを言っていない').toContain('まだ拾い出していません');
+  });
+
+  /**
+   * 🔴 **「書き出した」を真偽で出さない。** 壊れているときは **0 件のファイル**が
+   *   書き出せてしまうので、件数をそのまま見せる。
+   */
+  it('🔴 拾ってあれば件数を出す ── 0 件でも「済み」と言わない', async () => {
+    noteRescueWritten({ entries: 0, skipped: 7, empty: 3, bodyMissing: 0 }, 1);
+    const m = mount();
+    m.run.click();
+    await settle();
+    expect(m.body(), '拾えた件数が出ていない').toContain('この画面で拾えたのは 0 件です');
+    expect(m.body(), '読めなかった数が出ていない').toContain('読めなかった区画 7');
+    expect(m.body(), '0 件なのに済んだ顔をしている').not.toContain('まだ拾い出していません');
+  });
+
+  it('⚠ 1 枚目でやめたら、合言葉の窓すら出ない(対照群)', async () => {
+    const m = mount();
+    m.run.click();
+    await settle();
+    await m.answer('cancel');
+    expect(liveDialog(), '2 枚目が出た').toBeNull();
+    expect(m.calls, 'やめたのに消えた').toEqual([]);
+  });
+});
+
+describe('合言葉(#986 段③)', () => {
+  it('🔴 合言葉を打つまで消えない ── 違う字では消えない', async () => {
+    const m = mount();
+    m.run.click();
+    await settle();
+    await m.answer('ok');
+    await m.type('はい');
+    expect(m.calls, '合言葉が違うのに消えた').toEqual([]);
+    // ⚠ 無言で断らない(何も起きない dead click を作らない)
+    expect(m.d.getState().error ?? '', '断った理由が出ていない').toContain(RESET_PASSPHRASE);
+  });
+
+  /**
+   * 🔴 **空のまま押しても通らない。**
+   * ⚠ これは `promptInApp` に `initial` を渡していないことの門である ──
+   *   渡すと、空のまま受けたときにその字が返る(= 何も打たずに合言葉が通る)。
+   */
+  it('🔴 何も打たずに「捨てる」を押しても通らない', async () => {
+    const m = mount();
+    m.run.click();
+    await settle();
+    await m.answer('ok');
+    await m.type('');
+    expect(m.calls, '何も打たずに消えた').toEqual([]);
+  });
+
+  it('🔴 合言葉が合えば、いまの入れ物を捨てる', async () => {
+    const m = mount();
+    m.run.click();
+    await settle();
+    await m.answer('ok');
+    await m.type(RESET_PASSPHRASE);
+    expect(m.calls, 'いまの入れ物を捨てていない').toEqual(['c1']);
+  });
+
+  /**
+   * 🔴 **読ませてから読み込み直す** ── すぐ `reload` すると
+   *   「消せなかった添付が N 件」を誰も読めない。
+   */
+  it('🔴 消せなかった添付の数を知らせてから、読み込み直す', async () => {
+    const m = mount({ report: { wiped: true, note: null, assets: 1, assetFailures: 2 } });
+    m.run.click();
+    await settle();
+    await m.answer('ok');
+    await m.type(RESET_PASSPHRASE);
+    // 知らせの窓が出ている(まだ読み込み直していない)
+    expect(m.body(), '消せなかった数を知らせていない').toContain('2 件');
+    expect(m.reloaded(), '読ませる前に読み込み直した').toBe(0);
+    await m.answer('ok');
+    expect(m.reloaded(), '読み込み直していない').toBe(1);
+  });
+
+  it('🔴 捨てられなかったら、黙らずに理由を出す', async () => {
+    const m = mount({ fail: 'OPFS が開けない' });
+    m.run.click();
+    await settle();
+    await m.answer('ok');
+    await m.type(RESET_PASSPHRASE);
+    expect(m.d.getState().error ?? '', '失敗を黙らせた').toContain('OPFS が開けない');
+    expect(m.reloaded(), '失敗したのに読み込み直した').toBe(0);
+  });
+});
+
+/**
+ * 🔴 **拾った件数は、拾った道から来る**(#986 段③)。
+ *
+ * ⚠ 説明の窓が読む「この画面で拾えた件数」は、**実際に書き出せた回だけ**
+ *   記録される ── 頼んだ時点で記録すると、落ちた回も「済み」に見える。
+ * 🔑 だから**同じ画面で 2 つの口を順に押して**突き合わせる
+ *   (片方の口だけを見る test では、繋がっていないことが見えない ── CLAUDE.md §7)。
+ */
+describe('拾ってから捨てる(#986 段③)', () => {
+  it('🔴 拾って書き出した後は、説明の窓にその件数が出る', async () => {
+    /**
+     * ⚠ **一覧の件数(3)とわざと違う数にする** ── 同じ数にすると、
+     *   「拾えた件数」を出さない実装でも**一覧の 3 件に救われて緑**になる
+     *   (CLAUDE.md §1「救い手が別に居る」)。
+     */
+    const m = mount({ pick: fakePick(7, 2) });
+    m.rescue.click();
+    await settle();
+    await settle();
+    m.run.click();
+    await settle();
+    // ⚠ 数字の断片ではなく**文ごと**見る(「7」はどこにでも出うる)
+    expect(m.body(), '拾えた件数が繋がっていない').toContain('この画面で拾えたのは 7 件です');
+    expect(m.body(), '読めなかった区画が出ていない').toContain('読めなかった区画 2');
+    expect(m.body(), '拾ったのに「まだ」と言っている').not.toContain('まだ拾い出していません');
+  });
+
+  /**
+   * ⚠ **対照群** ── 拾う口を押していない回は「まだ」と出る。
+   * 🔑 これが無いと、上の門は「いつも件数が出る」実装でも緑になる。
+   */
+  it('⚠ 拾う口を押していなければ「まだ」と出る(対照群)', async () => {
+    const m = mount({ pick: fakePick(3, 1) });
+    m.run.click();
+    await settle();
+    expect(m.body(), '押していないのに件数が出た').toContain('まだ拾い出していません');
+  });
+
+  /**
+   * 🔴 **書き出せなかった回は記録しない。**
+   * ⚠ `rescueEntries` が落ちる回は `writeArchive` まで届かないので、
+   *   「済み」の顔をしてはいけない。
+   */
+  it('🔴 拾い出しが落ちた回は、済んだ顔をしない', async () => {
+    const m = mount({
+      pick: async () => {
+        throw new Error('rc 11');
+      },
+    });
+    m.rescue.click();
+    await settle();
+    await settle();
+    m.run.click();
+    await settle();
+    expect(m.body(), '落ちたのに済んだ顔をしている').toContain('まだ拾い出していません');
+  });
+});

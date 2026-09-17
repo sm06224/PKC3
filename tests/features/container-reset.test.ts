@@ -8,8 +8,12 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  RESET_PASSPHRASE,
   resetContainer,
   resetDoneMessage,
+  resetExplainMessage,
+  resetPassphraseLabel,
+  resetPassphraseOk,
   type ContainerResetPorts,
 } from '../../src/features/storage/container-reset';
 
@@ -138,5 +142,78 @@ describe('終わった後の字(#986 段③)', () => {
       note: 'メモリ上にあります',
     });
     expect(s).toContain('メモリ上にあります');
+  });
+});
+
+describe('押す前に読ませる字(#986 段③)', () => {
+  const KEEPS = ['Office の部品(約 93MB)', '設定・見た目'];
+
+  it('🔴 消えるものと残るものを、両方言う', () => {
+    const t = resetExplainMessage({ notes: 12, keeps: KEEPS, rescued: null });
+    expect(t, '消えるものを言っていない').toContain('消えるもの');
+    expect(t, '残るものを言っていない').toContain('残るもの');
+    expect(t, '件数が出ていない').toContain('12 件');
+    expect(t, '取り消せないことを言っていない').toContain('元に戻せません');
+  });
+
+  /**
+   * 🔴 **渡された物を 1 つも落とさない。** ⚠ ここが落ちると
+   *   「残ると言われた物が残らない」ではなく「**残るのに書いていない**」になり、
+   *   user は消えたと思って入れ直す(93MB を取り直させる)。
+   */
+  it('🔴 残るものは、渡された数だけ並ぶ', () => {
+    const t = resetExplainMessage({ notes: 0, keeps: KEEPS, rescued: null });
+    for (const k of KEEPS) expect(t, `${k} が落ちた`).toContain(k);
+  });
+
+  /**
+   * 🔴 **0 件でも「済み」と言わない**(#971 段③ と同じ向き)。
+   * ⚠ 壊れているときは 0 件のファイルが書き出せてしまうので、
+   *   真偽ではなく**件数**を見せる。
+   */
+  it('🔴 拾っていなければそう言い、拾ってあれば件数を言う', () => {
+    const none = resetExplainMessage({ notes: 3, keeps: KEEPS, rescued: null });
+    expect(none, 'まだ拾っていないことを言っていない').toContain('まだ拾い出していません');
+
+    const zero = resetExplainMessage({
+      notes: 3,
+      keeps: KEEPS,
+      rescued: { entries: 0, skipped: 5, empty: 2, bodyMissing: 0 },
+    });
+    expect(zero, '0 件なのに済んだ顔をしている').not.toContain('まだ拾い出していません');
+    expect(zero, '拾えた件数が出ていない').toContain('0 件');
+    expect(zero, '読めなかった数が出ていない').toContain('5');
+  });
+
+  it('⚠ 全部拾えた回は、括弧の内訳を出さない(対照群)', () => {
+    const all = resetExplainMessage({
+      notes: 3,
+      keeps: KEEPS,
+      rescued: { entries: 9, skipped: 0, empty: 0, bodyMissing: 0 },
+    });
+    expect(all).toContain('9 件');
+    expect(all, '拾えなかった物が無いのに内訳が出た').not.toContain('読めなかった区画');
+  });
+
+  /** ⚠ 出るのは `textContent` ── 記法を書くと記号がそのまま見える(お知らせと同じ規律)。 */
+  it('⚠ 記法を書かない', () => {
+    const t = resetExplainMessage({ notes: 1, keeps: KEEPS, rescued: null });
+    expect(t, '記法が混じっている').not.toMatch(/[*`]/);
+  });
+
+  /**
+   * 🔴 **合言葉は、その窓に出ている。**
+   * ⚠ ノートの題名にすると、壊れた DB では題名が 1 つも出ないので
+   *   **いちばん要る場面で合言葉が読めなくなる**。
+   */
+  it('🔴 合言葉は窓の中に書いてある(覚えさせない)', () => {
+    expect(resetPassphraseLabel(), '合言葉が窓に出ていない').toContain(RESET_PASSPHRASE);
+  });
+
+  it('🔴 合言葉でなければ通さない', () => {
+    expect(resetPassphraseOk(RESET_PASSPHRASE)).toBe(true);
+    // ⚠ 空・null・違う字・部分一致は、どれも通さない
+    for (const bad of ['', null, 'はい', `${RESET_PASSPHRASE}ます`, 'す'])
+      expect(resetPassphraseOk(bad), `${String(bad)} が通った`).toBe(false);
   });
 });

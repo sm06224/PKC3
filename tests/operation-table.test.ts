@@ -155,6 +155,12 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'capture-trim-clear', 'capture-trim-end', 'capture-trim-run', 'capture-trim-start',
   'choose-office-pack', 'clear-copy-history', 'clear-entry-date', 'clear-entry-filter',
   'clear-kind-filter', 'clear-opened-history', 'clear-selection', 'close-pane',
+  /**
+   * ⚠ **2026-09-17(#986 段③)** ── 入れ物ごと捨てる。
+   * 🔑 **名前で呼べないままにする理由**:取り消せない操作を、パレットから
+   *   1 語で呼べる所に置かない(押し所は設定の中の 1 つだけ)。
+   */
+  'container-reset',
   'contacts-quick-add', 'copy-block-md', 'copy-chapter-md', 'copy-note-md', 'copy-note-rich',
   'copy-section-ref', 'copy-selection-md', 'db-check', 'db-rescue', 'db-rescue-archive',
   'delete-selected', 'deny-external-images',
@@ -396,12 +402,16 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   (`db-rescue-archive`)で受け手 +1 ── 登記は増えない
       //   (押し所は設定の中にしか無く、鍵も持たない ── すぐ隣の
       //   `db-rescue` / `db-check` と同じ仕分け)。
-      total: 317,
-      receivers: 265,
+      // ⚠ 2026-09-17(#986 段③): 「中身を捨てる」(`container-reset`)で受け手 +1
+      //   ── 登記は増えない。🔑 **わざと名前で呼べないままにする**:
+      //   取り消せない操作なので、パレットから 1 語で呼べる所に置かない
+      //   (押し所は設定の中の 1 つだけ。すぐ上の `db-rescue` 3 つと同じ仕分け)。
+      total: 318,
+      receivers: 266,
       registered: 88,
       both: 36,
       outsideActionsTable: 52,
-      unregistered: 229,
+      unregistered: 230,
     });
   });
 
