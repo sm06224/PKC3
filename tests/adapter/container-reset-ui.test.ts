@@ -214,7 +214,10 @@ describe('押しても、まだ消えない(#986 段③)', () => {
    *   書き出せてしまうので、件数をそのまま見せる。
    */
   it('🔴 拾ってあれば件数を出す ── 0 件でも「済み」と言わない', async () => {
-    noteRescueWritten({ entries: 0, skipped: 7, empty: 3, bodyMissing: 0 }, 1);
+    noteRescueWritten(
+      { entries: 0, skipped: 7, empty: 3, bodyMissing: 0, assets: 0, assetBytes: 0, assetMissing: 0 },
+      1,
+    );
     const m = mount();
     m.run.click();
     await settle();

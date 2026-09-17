@@ -2354,6 +2354,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    /**
+     * ⚠ **2026-09-17（#1005 拾い出しに添付を入れる）に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-15-place-name-japanese" …` → cac8d012
+     */
+    '付箋や図の名前に、日本語が使えるようになりました',
     // ⚠ 2026-09-17(壊れたときのボタンに説明を出す)で枠から落ちた
     'SQL の画面で、表のつながりを図で見られるようになりました',
     // ⚠ 2026-09-17(#986 段③)で枠から落ちた

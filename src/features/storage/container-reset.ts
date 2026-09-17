@@ -146,6 +146,12 @@ export interface ResetRescueSeen {
   readonly skipped: number;
   readonly empty: number;
   readonly bodyMissing: number;
+  /** 🔑 **拾い出しに入った添付の件数**（#1005）。 */
+  readonly assets: number;
+  /** 入った添付の合計 bytes。 */
+  readonly assetBytes: number;
+  /** 🔴 鍵は在るのに bytes が取れなかった件数。 */
+  readonly assetMissing: number;
 }
 
 /**
@@ -163,8 +169,18 @@ export function resetExplainMessage(opts: {
   readonly notes: number;
   readonly keeps: readonly string[];
   readonly rescued: ResetRescueSeen | null;
+  /**
+   * 🔴 **いまこの端末に在る添付の件数**（#1005。数えられなければ `null`）。
+   *
+   * ⚠ 拾い出しの側だけを見ても、**足りているかは分からない** ──
+   *   「添付 0 件」が「元から無い人」なのか「**拾えていない人**」なのかが
+   *   見分けられないからである。🔑 だから**端末の在庫と突き合わせる**。
+   * 🔑 bytes は IndexedDB に在り、**sqlite を 1 度も通らない**ので、
+   *   壊れた DB でもこの数は引ける。
+   */
+  readonly assetsOnDisk: number | null;
 }): string {
-  const { notes, keeps, rescued } = opts;
+  const { notes, keeps, rescued, assetsOnDisk } = opts;
   /**
    * 🔴 **「拾ったか」を真偽で言わない**(#971 段③ と同じ向き)。
    * ⚠ 壊れているときは **0 件のファイル**が書き出せてしまうので、
@@ -178,6 +194,27 @@ export function resetExplainMessage(opts: {
           ? `(読めなかった区画 ${rescued.skipped} / 空だった区画 ${rescued.empty} / 本文が読めなかったノート ${rescued.bodyMissing} 件)`
           : '') +
         '。この件数で足りるかを、ご自身で確かめてください。';
+  /**
+   * 🔴 **添付は別に言う**（#1005。user の心配 2026-09-17）。
+   *
+   * ⚠ 直す前はこの窓に添付の字が **1 行も無かった** ──
+   *   そのうえ拾い出しは bytes を 1 つも出していなかったので、
+   *   🔴 **案内どおりに進むと 100% 添付を失う**形だった。
+   * 🔑 だから**端末の在庫と突き合わせて**字にする ──
+   *   数が合わないときだけ強く言う（元から 0 件の人を威さない）。
+   */
+  const attach: string[] = [];
+  if (assetsOnDisk === null) {
+    attach.push('⚠ 添付が何件あるかは、この端末では数えられませんでした。');
+  } else if (assetsOnDisk > 0) {
+    const took = rescued?.assets ?? 0;
+    attach.push(`この端末には添付が ${assetsOnDisk} 件あります。`);
+    attach.push(
+      took >= assetsOnDisk
+        ? `拾い出しには ${took} 件とも入っています。`
+        : `🔴 拾い出しに入っているのは ${took} 件だけです。残りはここで消えます。`,
+    );
+  }
   return [
     'この入れ物の中身を、すべて消します。元に戻せません。',
     '',
@@ -192,6 +229,7 @@ export function resetExplainMessage(opts: {
     ...keeps.map((k) => `・${k}`),
     '',
     backup,
+    ...attach,
     // ⚠ 黙って他のタブを読み込み直さない ── 先に言う
     '⚠ 同じ PKC を開いている他のタブも、読み込み直されます。',
   ].join('\n');

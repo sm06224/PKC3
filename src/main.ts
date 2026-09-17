@@ -2454,6 +2454,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     rescueEntries: async (afterRowid: number, chunks: number) =>
       client.request({ op: 'rescueEntries', afterRowid, chunks }),
     /**
+     * 🔴 **壊れた DB でも拾える添付**(#1005)── ⚠ **sqlite を 1 度も通らない**。
+     * 🔑 `AssetBlobStore` は IndexedDB を直に読むので、DB が完全に読めなくても
+     *   添付の bytes は列挙できて取り出せる(器が別である)。
+     */
+    rescueAssets: {
+      listKeys: (c: string) => blobs.listKeys(c),
+      get: (c: string, key: string) => blobs.get(c, key),
+    },
+    /**
      * 🔴 **入れ物ごと捨てて、まっさらにする**(#986 段③)。
      *
      * ⚠ **ここに判断を書かない** ── 順番も、失敗の数え方も
