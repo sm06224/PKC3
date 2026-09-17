@@ -112,3 +112,70 @@ describe('ノート全体の操作の置き場(#239)', () => {
     expect(purge?.title).toContain('元に戻せません');
   });
 });
+
+/**
+ * 🔴 **ホバーしないと読めない説明を、判断の材料にしない**(user 指摘 2026-09-17)。
+ *
+ * user の求め(こちらの解釈):**取り消せない操作に関わる所は、説明的な画面にすること。**
+ *
+ * ⚠ 守りたいのは「説明が在る」ではなく「**指で触る端末でも読める形で在る**」である ──
+ *   `title` は**ホバーでしか出ない**ので、スマホの user には 1 度も届かない。
+ * 🔑 だから見るのは **`title` を 1 文字も読まずに**、面の**見える字**だけで
+ *   判断できるか(= `title` を全部剥がしても、必要なことが残っているか)。
+ */
+describe('壊れたときの 3 つの口は、見える字で説明する(2026-09-17)', () => {
+  /** 面の**見える字**だけを集める(`title` は読まない)。 */
+  const visibleText = (el: HTMLElement): string =>
+    [...el.querySelectorAll('p')].map((p) => p.textContent ?? '').join('\n');
+
+  it('🔴 「戻せる形」は、取り込むとノートが戻ると見える字で言う', () => {
+    const box = buildSettingsCommands().querySelector<HTMLElement>(
+      '[data-pkc-region="db-rescue"]',
+    )!;
+    const seen = visibleText(box);
+    // ⚠ 送り仮名で外さないよう、語幹まで(「戻ります」/「戻る」の両方に当たる)
+    expect(seen, '戻せることを見える字で言っていない').toContain('ノートとして戻り');
+    expect(seen, 'どこから戻すのかを言っていない').toContain('取り込む');
+  });
+
+  /**
+   * 🔴 **これがいちばん大事な 1 行である。**
+   * ⚠ 「読める形」だけ書き出して「中身を捨てる」を押した人は、戻すと**ノート 1 件**になる
+   *   ── つまりこの選択は**取り消せない操作の前提条件**である。
+   */
+  it('🔴 「読める形」は、戻すためではないと見える字で言う', () => {
+    const box = buildSettingsCommands().querySelector<HTMLElement>(
+      '[data-pkc-region="db-rescue"]',
+    )!;
+    const seen = visibleText(box);
+    expect(seen, '1 件になることを見える字で言っていない').toContain('1 件');
+    expect(seen, '戻すためではないと言っていない').toContain('戻すためのものではありません');
+  });
+
+  it('🔴 迷ったときの逃げ道と、押しても中身が変わらないことを言う', () => {
+    const box = buildSettingsCommands().querySelector<HTMLElement>(
+      '[data-pkc-region="db-rescue"]',
+    )!;
+    const seen = visibleText(box);
+    expect(seen, '迷ったときの逃げ道が無い').toContain('両方');
+    // ⚠ 壊れたと聞いた直後の人は「押すと余計に壊れるのでは」で止まる
+    expect(seen, '押しても中身が変わらないことを言っていない').toContain('変えません');
+  });
+
+  /**
+   * ⚠ **空振り防止(向きは「無いこと」なので、足す側で検める)** ──
+   *   説明を `title` へ戻しただけでは通らないことを見る。
+   */
+  it('⚠ 説明は `title` ではなく、見える字の側に在る', () => {
+    const box = buildSettingsCommands().querySelector<HTMLElement>(
+      '[data-pkc-region="db-rescue"]',
+    )!;
+    // 3 つのボタンそれぞれに、見える説明が 1 つずつ付いている
+    for (const field of ['db-check-run', 'db-rescue-archive-run', 'db-rescue-run']) {
+      const note = box.querySelector<HTMLElement>(`[data-pkc-field="${field}-note"]`);
+      expect(note, `${field} に見える説明が無い`).not.toBeNull();
+      expect((note?.textContent ?? '').length, `${field} の説明が空`).toBeGreaterThan(10);
+      expect(note?.hidden, `${field} の説明が隠れている`).toBe(false);
+    }
+  });
+});

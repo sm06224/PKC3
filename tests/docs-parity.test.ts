@@ -2354,6 +2354,8 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    // ⚠ 2026-09-17(壊れたときのボタンに説明を出す)で枠から落ちた
+    'SQL の画面で、表のつながりを図で見られるようになりました',
     // ⚠ 2026-09-17(#986 段③)で枠から落ちた
     'SQL を打つ欄に、行番号と色が付きました',
     /**
