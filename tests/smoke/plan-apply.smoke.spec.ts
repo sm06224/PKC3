@@ -56,6 +56,31 @@ test('🔴 案を貼ると下見が出て、当てると本当に移る (#429)',
    * 行数で見る ── `data-pkc-entry` は他の面(inspector の「行き先」等)にも
    * 付くので、面をスコープしないと別の物に満たされる(CLAUDE.md §1)。
    */
+  /**
+   * 🔴 **壊れたときに押す 3 つの口**（#1004 / #1005）。
+   *
+   * ⚠ この 3 つは **実ブラウザの検査が 1 本も無かった**
+   *   （2026-09-17 に `grep -rn 'db-check\|db-rescue' tests/smoke/` が **0 件**）。
+   *   🔴 user がいちばん助けが要る場面で押す口なので、
+   *   **掼せて黙っている（dead click）**を誰も見ていなかった。
+   * 🔑 **新しい起動は足さない** ── 設定の面へ来た道中に assert を足す
+   *   （smoke-budget。CLAUDE.md「既に在る道中に assert を足す」）。
+   * ⚠ **押してはいない** ── 拾い出しは file を落とすので、
+   *   この道中の後続の assert が見ている状態を変えてしまう。
+   */
+  const rescueBox = page.locator('[data-pkc-region="db-rescue"]');
+  await expect(rescueBox, '壊れたときの欄が設定の面に出ていない').toBeVisible();
+  for (const field of ['db-check-run', 'db-rescue-archive-run', 'db-rescue-run']) {
+    const btn = page.locator(`[data-pkc-field="${field}"]`);
+    await expect(btn, `${field} が見えない`).toBeVisible();
+    await expect(btn, `${field} が押せない（dead click）`).toBeEnabled();
+    // 🔴 説明の 1 行は**見えている**こと（#1004。title だけだと指では読めない）
+    const note = page.locator(`[data-pkc-field="${field}-note"]`);
+    await expect(note, `${field} の説明の 1 行が見えていない`).toBeVisible();
+    await expect(note, `${field} の説明が空`).not.toHaveText('');
+  }
+
+
   const resetEntryRows = page.locator('[data-pkc-region="filer-table"] tbody tr');
   await expect(resetEntryRows, '前提が崩れている ── フォルダの面に行が出ていない').toHaveCount(2);
 

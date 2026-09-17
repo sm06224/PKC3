@@ -153,6 +153,44 @@ describe('🔴 拾い出しが「戻せる形」で出る(#986)', () => {
   });
 
   /**
+   * 🔴 **一覧に載せていない鍵を返さない**（#1005。変異試験 G2 が SURVIVED で教えた）。
+   *
+   * ⚠ `writeArchive` を通す往復の test では、`getAssetBlob` に来る鍵は
+   *   **必ず `listAssetMetas` が返した鍵**なので、`!tookAssets.has(key)` の枝が
+   *   🔴 **false になる場面が 1 度も無い** ── 門を外しても緑のままだった
+   *   （CLAUDE.md §1「`A || B` を足したら、`B` が false になる形で見る」）。
+   * 🔑 だから**関数を直に叩く** ── 往復経由では原理的に踏めない。
+   * ⚠ この門が死んだと、`writeArchive` の「meta と bytes の数が合う」前提が崩れる。
+   */
+  it('🔴 一覧に載せていない鍵は、読めても返さない', async () => {
+    const idb = new Map<string, Blob>([
+      ['k1', new Blob(['A'])],
+      // ⚠ **一覧には出ないが、読めば読める**鍵（これが対照群の要）
+      ['よそ者', new Blob(['B'])],
+    ]);
+    const f = fakePick({ rows: THREE });
+    const { source } = rescueArchiveSource({
+      cid: 'c1',
+      title: 't',
+      pick: f.pick,
+      assets: {
+        listKeys: async () => ['k1'],
+        get: async (_cid: string, key: string) => idb.get(key) ?? null,
+      },
+    });
+    const metas = await source.listAssetMetas();
+    expect(metas.map((m) => m.key), '前提が崩れている ── 一覧が k1 だけでない').toEqual(['k1']);
+
+    // ⚠ 空振り防止 ── 載せた鍵はちゃんと返る
+    expect(await source.getAssetBlob('k1'), '載せた鍵まで返さない').not.toBeNull();
+    // 🔴 本題 ── 読めるのに返さない
+    expect(
+      await source.getAssetBlob('よそ者'),
+      '一覧に無い鍵を返している（meta と bytes の数が合わなくなる）',
+    ).toBeNull();
+  });
+
+  /**
    * ⚠ **対照群** ── 口を渡さなければ、今までどおり 0 件。
    * 🔑 これが無いと、上の test が「別の経路が添付を入れている」場合と見分けられない。
    */
