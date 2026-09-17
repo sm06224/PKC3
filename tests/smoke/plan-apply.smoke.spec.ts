@@ -90,6 +90,16 @@ test('🔴 案を貼ると下見が出て、当てると本当に移る (#429)',
   await expect(resetPassInput, '合言葉を打つ欄が出ない').toBeVisible();
   await expect(resetEntryRows, '合言葉の窓を出しただけでノートが消えた').toHaveCount(2);
 
+  /**
+   * ⑥.5 🔴 **いちばん重い 1 押しに危険色が付いているか**(#986 段③)。
+   * ⚠ 新しい `gotoApp` / `page.goto` は足さない(smoke-budget: 起動は増やさず、
+   * 既に在る道中に assert を足す)── 合言葉の窓が出ている今がその道中である。
+   */
+  await expect(
+    page.locator('[data-pkc-field="dialog-ok"]'),
+    '「捨てる」ボタンに危険色が付いていない',
+  ).toHaveAttribute('data-pkc-danger', '');
+
   // ⑦ 違う字を打って「捨てる」→ 消えない(断りの字が画面に出る)
   await resetPassInput.fill('ちがう合言葉');
   await clickReal(page, '[data-pkc-field="dialog-ok"]');
