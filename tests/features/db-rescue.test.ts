@@ -1,3 +1,4 @@
+/** @vitest-environment happy-dom */
 /**
  * 🔴 **壊れた DB の報告を読み解く**(#971 段③)。
  *
@@ -13,6 +14,8 @@ import {
   rescueSummary,
   type SchemaRoot,
 } from '../../src/features/storage/db-rescue';
+import { RESCUE_ARCHIVE_LABEL } from '../../src/features/storage/rescue-labels';
+import { buildSettingsCommands } from '../../src/adapter/ui/render/commands';
 
 /** 実測した schema(root page → 何の木か)。 */
 const SCHEMA: SchemaRoot[] = [
@@ -113,18 +116,67 @@ describe('画面に出す字(#971 段③)', () => {
     expect(s, `記法が混じっている: ${s}`).not.toMatch(/[*`_]|\[.*\]\(.*\)/);
   };
 
+  /**
+   * 🔴 **押させる字が、画面に実在するか**(2026-09-18 に直した。#996 と同じ型)。
+   *
+   * ⚠ 直す前この検査は **`'拾えるだけ取り出す'` を手で書いて**いた ── そして
+   *   🔴 **その字は 2026-09-16(#986)に画面から消えていた**(口が 2 つに割れた)。
+   *   つまり **DB が本当に壊れた人にだけ出る 1 行が行き止まり**なのに、
+   *   検査は**その行き止まりを pin していた**(両方そのままで緑になる)。
+   * 🔑 だから**期待値を手で書かない** ── 描いたボタンの字(= 独立した観測)と突き合わせる。
+   */
+  const onScreenLabels = (): string[] => {
+    const box = buildSettingsCommands();
+    return [...box.querySelectorAll('button')].map(
+      (b) => b.querySelector('[data-pkc-field="label"]')?.textContent ?? b.textContent ?? '',
+    );
+  };
+
+  /** 字の中の 「…」 を全部抜く ── user に押させている名前はこれである。 */
+  const quoted = (s: string): string[] => [...s.matchAll(/「([^」]+)」/g)].map((m) => m[1] ?? '');
+
   it('🔴 索引だけのときは「中身は無事かもしれない」と言い、次の一手を書く', () => {
     const s = integritySummary(parseQuickCheck(INDEX_BROKEN, SCHEMA));
     expect(s).toContain('目次');
-    expect(s, '次に何を押すか書いていない').toContain('拾えるだけ取り出す');
+    expect(s, '次に何を押すか書いていない').toContain(RESCUE_ARCHIVE_LABEL);
     noMarkup(s);
   });
 
   it('🔴 表のときは「一部だけ」と正直に言う', () => {
     const s = integritySummary(parseQuickCheck(TABLE_BROKEN, SCHEMA));
     expect(s).toContain('一部');
-    expect(s, '次に何を押すか書いていない').toContain('拾えるだけ取り出す');
+    expect(s, '次に何を押すか書いていない').toContain(RESCUE_ARCHIVE_LABEL);
     noMarkup(s);
+  });
+
+  /**
+   * 🔴 **これが本体の門である** ── 上の 2 つは「定数と一致するか」しか見ていない。
+   * 🔑 ここは **定数が画面に本当に在るか**まで見る(定数だけ直して描画をやめても鳴る)。
+   */
+  it('🔴 断りの字が押させるボタンは、1 つ残らず画面に在る', () => {
+    const labels = onScreenLabels();
+    // ⚠ 空振り防止 ── 設定の面からボタンを引けていなければ、この検査は何も見ていない
+    expect(labels.length, '設定の面からボタンを 1 つも引けていない').toBeGreaterThan(5);
+
+    const all = [
+      integritySummary(parseQuickCheck(INDEX_BROKEN, SCHEMA)),
+      integritySummary(parseQuickCheck(TABLE_BROKEN, SCHEMA)),
+      // 🔑 **どこが壊れたか分からなかった枝**も見る ── ここも 3 つ目の行き止まりだった
+      integritySummary({
+        ok: false,
+        brokenTables: [],
+        brokenIndexes: [],
+        unresolved: ['Tree 9 page 9 cell 0: bad'],
+        lines: [],
+        truncated: false,
+      }),
+    ];
+    const names = [...new Set(all.flatMap(quoted))];
+    // ⚠ 空振り防止 ── 1 つも押させていないなら「次の一手が無い」ということである
+    expect(names.length, '断りの字が、押す所を 1 つも言っていない').toBeGreaterThan(0);
+    for (const n of names) {
+      expect(labels, `画面に無い字を押させている: 「${n}」`).toContain(n);
+    }
   });
 
   it('⚠ 無事なときは、余計な不安を足さない', () => {

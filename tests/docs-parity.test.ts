@@ -2366,6 +2366,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-18(調べた結果からそのまま直せる)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-15-place-line-anchor" …` → 346a83c6
+     */
+    '線を付箋のどこに繋ぐか、決められるようになりました',
+    /**
      * ⚠ **2026-09-18(#1006 中身を残して作り直す)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-15-place-lines-pptx" …` → b9507274
      */
