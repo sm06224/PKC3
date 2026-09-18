@@ -75,6 +75,10 @@ function harness(
     failArchive?: string;
     /** 書き戻しが落ちる。 */
     failWrite?: string;
+    /** 捨てる所そのものが落ちる。 */
+    failWipe?: string;
+    /** 🔴 捨てた後、開き直しが落ちる(`applySchema` の失敗など)。 */
+    failReopen?: string;
     assets?: Map<string, Blob>;
     skippedPerPage?: number;
   } = {},
@@ -103,10 +107,15 @@ function harness(
     },
     wipeStorage: async () => {
       calls.push('wipeStorage');
+      // 🔴 **捨てる所が落ちる**(#1006 の着地前レビュー ── 直す前はここで投げると
+      //    呼び側が「何も消えていません」と嘘を言った)
+      if (over.failWipe !== undefined) throw new Error(over.failWipe);
       return { wiped: true, note: null };
     },
     reopenStorage: async () => {
       calls.push('reopenStorage');
+      // 🔴 **捨てた後に、開き直しが落ちる** ── いちばん危ない所
+      if (over.failReopen !== undefined) throw new Error(over.failReopen);
       return over.fallbackReason === undefined
         ? { fallbackReason: undefined }
         : { fallbackReason: over.fallbackReason };
@@ -417,5 +426,111 @@ describe('🔴 拾った中身で、その場に建て直す(#1006)', () => {
     // ⚠ 0 件の人に「0 件の添付は残ります」と数で言わない
     expect(rebuildExplainMessage({ notes: 1, assetsOnDisk: 0 }), '0 件を数で言っている')
       .not.toContain('添付したファイル 0 件');
+  });
+});
+
+/**
+ * 🔴 **捨てた後に落ちたら、投げずに「結末」として返す**(#1006 の着地前レビューが出した)。
+ *
+ * ## 何が起きていたか
+ *
+ * 直す前は②(捨てる)③(開き直す)が**裸**で、落ちると呼び側の 1 つの `catch` へ
+ * 飛んでいた ── そこは「**何も消えていません**」と言う所である。
+ * 🔴 ②が通った後なら **DB はもう無い**ので、いちばん安心させる字が**いちばん嘘**になる。
+ * ⚠ しかも呼び側は例外のとき**読み込み直さない**ので、`terminate()` 済みの client を
+ * 握ったまま画面が残り、**以後の保存が全部落ちる**(`store client terminated`)。
+ *
+ * ## ⚠ この経路は、直す前は test にも実装にも 1 行も無かった
+ *
+ * 台は `wipeStorage` / `reopenStorage` を**どのケースでも落とさなかった**ので、
+ * 「zip を落とす前だから何も消えていない」という呼び側のコメントは
+ * **どの test にも検算されていなかった**(CLAUDE.md §2「経路が一度も通っていない」)。
+ */
+describe('🔴 捨てた後に落ちた回(#1006)', () => {
+  it('🔴 捨てる所で落ちても、投げずに報告を返す', async () => {
+    const h = harness({ failWipe: '消せません' });
+    const r = await rebuildContainer('c-old', 't', h.ports);
+    expect(r.outcome, '捨てる所で落ちたのに、結末が分けられていない').toBe('storage-lost');
+    expect(r.error, '理由を持っていない').toContain('消せません');
+    // ⚠ 対照群 ── ①(zip)で落ちたときは**投げる**(そちらは「何も消えていない」が真)
+    const zip = harness({ failArchive: '書き出せません' });
+    await expect(rebuildContainer('c-old', 't', zip.ports)).rejects.toThrow('書き出せません');
+  });
+
+  it('🔴 捨てた後に開き直しが落ちても、投げずに報告を返す', async () => {
+    const h = harness({ failReopen: 'DB 画像を読み込めませんでした' });
+    const r = await rebuildContainer('c-old', 't', h.ports);
+    expect(r.outcome).toBe('storage-lost');
+    // 🔑 ②は通っているので、捨てたことは報告に出る
+    expect(r.wiped, '捨てた後なのに「捨てていない」と報告している').toBe(true);
+    expect(r.restored, '書き戻していないのに件数が立っている').toBe(0);
+  });
+
+  it('🔴 落ちても、他のタブへは知らせる(器はもう無いので)', async () => {
+    const h = harness({ failReopen: 'ダメ' });
+    await rebuildContainer('c-old', 't', h.ports);
+    expect(h.calls, '器が無いのに他のタブへ知らせていない').toContain('announceWiped');
+    expect(h.calls, 'この端末の断片を落としていない').toContain('forgetLocal');
+  });
+
+  /**
+   * ⚠ **知らせる所も落ちうる** ── そこで投げると、呼び側はまた例外の枝へ行き、
+   *   **また「何も消えていません」と言う**(直したはずの穴が戻る)。
+   */
+  it('🔴 知らせる所が落ちても、報告だけは必ず返す', async () => {
+    const h = harness({ failReopen: 'ダメ' });
+    const ports: RebuildPorts = {
+      ...h.ports,
+      announceWiped: () => {
+        throw new Error('知らせられません');
+      },
+    };
+    const r = await rebuildContainer('c-old', 't', ports);
+    expect(r.outcome, '知らせに失敗しただけで報告ごと失っている').toBe('storage-lost');
+  });
+
+  it('🔴 字は「何も消えていません」と言わず、ファイルが手元に在ることを言う', () => {
+    const line = rebuildDoneMessage({
+      outcome: 'storage-lost',
+      rescued: { entries: 3, skipped: 0, empty: 0, bodyMissing: 0, assets: 0, assetBytes: 0, assetMissing: 0 },
+      restored: 0,
+      wiped: true,
+      note: null,
+      fallbackReason: null,
+      error: 'DB 画像を読み込めませんでした',
+    });
+    expect(line, '捨てた後なのに「何も消えていません」と言っている').not.toContain(
+      '何も消えていません',
+    );
+    expect(line, 'ファイルが手元に在ることを言っていない').toContain('手元に在ります');
+    expect(line, '読み込み直すよう言っていない').toContain('読み込み直して');
+    expect(line, '戻す道(取り込む)を案内していない').toContain('取り込む');
+  });
+});
+
+/**
+ * 🔴 **戻ってきた画面がどう見えるかを、押す前に言う**(#1006 の動線レビューが出した)。
+ *
+ * ⚠ 「どのフォルダに入っていたか は戻りません」だけだと、user が意味を知るのは
+ *   **戻った画面を見たとき**である ── そして**全部が根元に平らに並んだ画面**は、
+ *   「直った」ではなく「**壊れた**」と読める。
+ * ⚠ マニュアルには書いてあったが、**この窓だけを見て押す人**には届かない。
+ */
+describe('🔴 戻った後の見え方を、先に言う(#1006)', () => {
+  it('🔴 押す前の窓が「フォルダの外に並ぶ」と言う', () => {
+    const m = rebuildExplainMessage({ notes: 3, assetsOnDisk: 0 });
+    expect(m, 'フォルダの外に並ぶことを言っていない').toContain('フォルダの外');
+    expect(m, 'フォルダそのものが残ることを言っていない').toContain('フォルダそのものは空で残ります');
+  });
+
+  it('🔴 終わった後の字も、同じことを言う', async () => {
+    const line = rebuildDoneMessage(await rebuildContainer('c-old', 't', harness().ports));
+    expect(line, '戻った画面の見え方を言っていない').toContain('フォルダの外');
+  });
+
+  it('🔴 押す前の窓が「途中で止められない」と言う', () => {
+    expect(rebuildExplainMessage({ notes: 1, assetsOnDisk: 0 })).toContain(
+      '途中で止めることはできません',
+    );
   });
 });

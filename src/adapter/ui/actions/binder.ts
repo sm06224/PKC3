@@ -439,6 +439,16 @@ import { externalImageBlockReason } from './adopt-favicon';
  *   ── 消し忘れると、その lid は**二度と取り込めなくなる**。
  */
 const adoptingLinkIcons = new Set<string>();
+
+/**
+ * 🔴 **建て直しが走っている間は、2 度目を受けない**(#1006 の動線レビューが出した)。
+ *
+ * ⚠ 走り出すと**押せる物が 1 つも無い**ので、user は固まったと思って**もう一度押す** ──
+ *   ところが窓は毎回出るので、**捨てる → 開き直す が 2 本同時に走りうる**。
+ * ⚠ `disabled` で止めない ── **焦点が外れる**(すぐ上の受け手の注記と同じ理由)。
+ *   🔑 器を触らずに 2 度目を落とすための帳簿である。⚠ `finally` で必ず戻す。
+ */
+let rebuildingContainer = false;
 import { effectiveOpenPlace } from '@features/open-place';
 import { joinCopied, pickMarked } from '@features/clipboard/scrap';
 import { sqlNoteBody, sqlNoteTitle } from '@features/query/sql-to-note';
@@ -7140,6 +7150,15 @@ const ACTIONS: Record<string, ActionHandler> = {
   'container-rebuild': (dispatcher, _target, services, root) => {
     const sum = root.querySelector<HTMLElement>('[data-pkc-field="container-rebuild-summary"]');
     if (sum === null) return;
+    /**
+     * 🔴 **2 度目は黙って落とさない ── 走っていると言う**(動線レビュー)。
+     * ⚠ 何も出さずに無視すると、**押したのに何も起きない**(この repo が
+     *   いちばん嫌う無言の dead click)になる。
+     */
+    if (rebuildingContainer) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'いま作り直しています(終わるまでお待ちください)' });
+      return;
+    }
     const rebuild = services.rebuildContainer;
     if (rebuild === undefined) {
       dispatcher.dispatch({ type: 'OP_FAILED', error: 'この環境では作り直せません' });
@@ -7164,6 +7183,11 @@ const ACTIONS: Record<string, ActionHandler> = {
             (k) => k.length,
             () => null,
           );
+    /**
+     * ⚠ **窓を出す前から握る** ── 窓が開いている間は `showModal()` が背後を
+     *   塞ぐが、**窓を閉じてから走り終わるまで**が無防備だった。
+     */
+    rebuildingContainer = true;
     void counting
       .then((assetsOnDisk) =>
         confirmInApp(
@@ -7197,8 +7221,17 @@ const ACTIONS: Record<string, ActionHandler> = {
           services.reloadApp?.();
         } catch (e) {
           /**
-           * 🔑 **ここへ来たのは zip を落とす前**である(`container-rebuild.ts` は
-           *   落とせなければ捨てずに投げる)── だから「**何も消えていません**」と言える。
+           * 🔑 **ここへ来たのは zip を落とす前**である ── だから
+           *   「**何も消えていません**」と言える。
+           *
+           * ⚠ これは**願いではなく、作りで担保している** ── `container-rebuild.ts` は
+           *   zip を落とした後の段を**丸ごと try で覆い**、落ちても
+           *   `outcome: 'storage-lost'` として**返す**(投げない)。
+           *   🔴 直す前は②③が裸で、**捨てた後に落ちてもここへ来ていた** ──
+           *   いちばん安心させる字が、いちばん嘘になっていた
+           *   (着地前レビューが出した。門は `container-rebuild.test.ts`)。
+           * ⚠ ここでは**読み込み直さない**のも正しい ── ①で落ちたなら
+           *   この画面の保存は生きている(読み込み直すと、打ちかけを捨てさせる)。
            */
           sum.textContent = '';
           sum.hidden = true;
@@ -7207,6 +7240,10 @@ const ACTIONS: Record<string, ActionHandler> = {
             error: `作り直せませんでした(何も消えていません): ${String(e)}`,
           });
         }
+      })
+      // ⚠ **やめた回も落ちた回も戻す** ── 戻し忘れると、二度と作り直せなくなる
+      .finally(() => {
+        rebuildingContainer = false;
       });
   },
   /**

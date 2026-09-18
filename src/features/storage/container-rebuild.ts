@@ -258,7 +258,18 @@ export type RebuildOutcome =
   /** 🔴 開き直せたが**メモリ上**だった ── 書き戻していない(書いても消えるので)。 */
   | 'memory-only'
   /** 🔴 書き戻しに失敗した。 */
-  | 'write-failed';
+  | 'write-failed'
+  /**
+   * 🔴 **捨てた後の段で落ちた**(#1006 の着地前レビューが出した)。
+   *
+   * ⚠ `write-failed` と分ける理由:あちらは**開き直せている**ので、この画面は
+   *   まだ生きている。こちらは **DB を捨てた後に開き直しそのものが落ちた**ので、
+   *   🔴 **この画面の保存機構ごと死んでいる**(古い worker は `terminate()` 済みで、
+   *   共有している client は戻らない ── 以後の保存は全部
+   *   `store client terminated` で落ちる)。
+   * 🔑 だから user に言うことが違う:**必ず読み込み直させる**。
+   */
+  | 'storage-lost';
 
 export interface RebuildReport {
   readonly outcome: RebuildOutcome;
@@ -302,52 +313,118 @@ export async function rebuildContainer(
   await ports.saveArchive(source);
   const rescued = stats();
 
-  // ② sqlite だけ捨てる
-  const wipe = await ports.wipeStorage();
-
-  // ③ 旧 worker を閉じて、新しい worker で開き直す
-  const re = await ports.reopenStorage();
-
   /**
-   * ④ 🔴 **門** ── 退避していたら**書き戻さない**。
+   * 🔴 **ここから先では投げない**(#1006 の着地前レビューが出した)。
    *
-   * ⚠ ここで書くと、user は「戻った」と思って書き続け、
-   *   **タブを閉じた瞬間に全部消える**。🔑 書かずに言うほうが、はるかに良い。
-   * ⚠ 見分けるのは `fallbackReason` である(`vfs === 'memory'` ではない ──
-   *   持ち歩ける 1 枚の HTML は memory を**選んで**いる)。
+   * ⚠ 直す前は②③が裸で、落ちると呼び側の 1 つの `catch` へ飛んでいた ──
+   *   そこは「**何も消えていません**」と言う所である。🔴 ②が通った後なら
+   *   **DB はもう無い**ので、いちばん安心させる字が**いちばん嘘**になっていた。
+   * ⚠ しかも呼び側は例外のとき**読み込み直さない**ので、
+   *   `terminate()` 済みの client を握ったまま画面が残る
+   *   (以後の保存が全部 `store client terminated` で落ちる)。
+   * 🔑 だから**結末として返す** ── 呼び側は返ってきた報告なら必ず読み込み直す。
+   * 🔑 これで呼び側の `catch` が意味するのは「**①で落ちた**」だけになり、
+   *   「何も消えていません」が**作りとして真**になる。
    */
-  const fell = re.fallbackReason !== undefined && re.fallbackReason !== '';
-  if (fell) {
-    // ⚠ 器は空になった ── この端末に残る断片(コピー履歴)を落とす
-    ports.forgetLocal();
+  let wipe: { wiped: boolean; note: string | null } = { wiped: false, note: null };
+  try {
+    // ② sqlite だけ捨てる
+    wipe = await ports.wipeStorage();
+
+    // ③ 旧 worker を閉じて、新しい worker で開き直す
+    const re = await ports.reopenStorage();
+
+    /**
+     * ④ 🔴 **門** ── 退避していたら**書き戻さない**。
+     *
+     * ⚠ ここで書くと、user は「戻った」と思って書き続け、
+     *   **タブを閉じた瞬間に全部消える**。🔑 書かずに言うほうが、はるかに良い。
+     * ⚠ 見分けるのは `fallbackReason` である(`vfs === 'memory'` ではない ──
+     *   持ち歩ける 1 枚の HTML は memory を**選んで**いる)。
+     */
+    const fell = re.fallbackReason !== undefined && re.fallbackReason !== '';
+    if (fell) {
+      // ⚠ 器は空になった ── この端末に残る断片(コピー履歴)を落とす
+      ports.forgetLocal();
+      ports.announceWiped();
+      return {
+        outcome: 'memory-only',
+        rescued,
+        restored: 0,
+        wiped: wipe.wiped,
+        note: wipe.note,
+        fallbackReason: re.fallbackReason ?? '',
+        error: null,
+      };
+    }
+
+    // ⑤ 同じ id で作り直して、書き戻す
+    const entries = rebuiltEntries(got.rows);
+    /**
+     * ⚠ **書き戻す「前」に言う** ── ここは 1 回の bulk なので、終わってから言うと
+     *   いちばん長い間ずっと「**拾っています…**」のままになる(user は
+     *   **止まった**と読んで窓を閉じる ── 閉じられると書き戻しが途中で終わる)。
+     */
+    ports.onProgress?.('write', entries.length, entries.length);
+    try {
+      await ports.openContainer(cid, title);
+      await ports.writeEntries(cid, entries);
+    } catch (e) {
+      ports.forgetLocal();
+      ports.announceWiped();
+      return {
+        outcome: 'write-failed',
+        rescued,
+        restored: 0,
+        wiped: wipe.wiped,
+        note: wipe.note,
+        fallbackReason: null,
+        error: String(e),
+      };
+    }
+
+    /**
+     * ⑥ 🔴 **ここで初めて知らせる。**
+     *
+     * ⚠ これを②や③の側へ出すと、他のタブが**器が空のうちに**読み込み直し、
+     *   **別の id を採番**する ── 器が 2 つ並び、片方だけが以後ずっと返るので、
+     *   **復元した本体が誰からも見えなくなる**。
+     * 🔑 ⚠ **`forgetLocal` はここでは呼ばない** ── 建て直しは lid を持ち越すので、
+     *   コピー履歴の指す先は**生きている**(消すと、戻ったのに履歴だけ失う)。
+     */
     ports.announceWiped();
     return {
-      outcome: 'memory-only',
+      outcome: 'rebuilt',
       rescued,
-      restored: 0,
+      restored: entries.length,
       wiped: wipe.wiped,
       note: wipe.note,
-      fallbackReason: re.fallbackReason ?? '',
+      fallbackReason: null,
       error: null,
     };
-  }
 
-  // ⑤ 同じ id で作り直して、書き戻す
-  const entries = rebuiltEntries(got.rows);
-  /**
-   * ⚠ **書き戻す「前」に言う** ── ここは 1 回の bulk なので、終わってから言うと
-   *   いちばん長い間ずっと「**拾っています…**」のままになる(user は
-   *   **止まった**と読んで窓を閉じる ── 閉じられると書き戻しが途中で終わる)。
-   */
-  ports.onProgress?.('write', entries.length, entries.length);
-  try {
-    await ports.openContainer(cid, title);
-    await ports.writeEntries(cid, entries);
   } catch (e) {
+    /**
+     * 🔴 **捨てた後に落ちた** ── いちばん危ない結末である。
+     *
+     * 🔑 zip は**手元に在る**(①は通っている)ので、user は失っていない。
+     * ⚠ ただし**この画面の保存はもう働かない**ので、必ず読み込み直させる。
+     * ⚠ `forgetLocal` は呼ぶ ── 器は空(か、開けない)ので、コピー履歴の
+     *   指す先が無い。
+     */
     ports.forgetLocal();
-    ports.announceWiped();
+    /**
+     * ⚠ **知らせる所も落ちうる**ので、ここだけは失敗を飲む ──
+     *   知らせに失敗したせいで、**報告そのものを返せなくなる**のがいちばん悪い
+     *   (返せないと呼び側は例外の枝へ行き、また「何も消えていません」と言う)。
+     */
+    try {
+      ports.announceWiped();
+    } catch {
+      /* 知らせられなくても、下の報告は必ず返す */
+    }
     return {
-      outcome: 'write-failed',
+      outcome: 'storage-lost',
       rescued,
       restored: 0,
       wiped: wipe.wiped,
@@ -356,26 +433,6 @@ export async function rebuildContainer(
       error: String(e),
     };
   }
-
-  /**
-   * ⑥ 🔴 **ここで初めて知らせる。**
-   *
-   * ⚠ これを②や③の側へ出すと、他のタブが**器が空のうちに**読み込み直し、
-   *   **別の id を採番**する ── 器が 2 つ並び、片方だけが以後ずっと返るので、
-   *   **復元した本体が誰からも見えなくなる**。
-   * 🔑 ⚠ **`forgetLocal` はここでは呼ばない** ── 建て直しは lid を持ち越すので、
-   *   コピー履歴の指す先は**生きている**(消すと、戻ったのに履歴だけ失う)。
-   */
-  ports.announceWiped();
-  return {
-    outcome: 'rebuilt',
-    rescued,
-    restored: entries.length,
-    wiped: wipe.wiped,
-    note: wipe.note,
-    fallbackReason: null,
-    error: null,
-  };
 }
 
 /**
@@ -412,6 +469,22 @@ export function rebuildDoneMessage(r: RebuildReport): string {
       '読み込み直したあとに「取り込む」から読み込んでください。'
     );
   }
+  if (r.outcome === 'storage-lost') {
+    /**
+     * 🔴 **いちばん危ない結末** ── 捨てた後に、開き直しそのものが落ちた。
+     *
+     * 🔑 言うことは 3 つ:①**ファイルは手元に在る**(怖がらせない)
+     *   ②**この画面の保存はもう働かない**(黙っていると、打った字が
+     *   消え続けるのに気づけない)③**読み込み直してから取り込む**(次の一手)。
+     * ⚠ 「何も消えていません」とは**書かない** ── 捨てた後だからである。
+     */
+    return (
+      `🔴 入れ物を捨てた後に止まりました(${r.error ?? '理由は分かりません'})。` +
+      `いま落とした「${RESCUE_ARCHIVE_LABEL}」のファイルは手元に在ります。` +
+      '⚠ この画面はもう保存できないので、読み込み直してから「取り込む」で戻してください。' +
+      '読み込み直します。'
+    );
+  }
   if (r.outcome === 'write-failed') {
     return (
       `🔴 書き戻せませんでした(${r.error ?? '理由は分かりません'})。` +
@@ -429,7 +502,10 @@ export function rebuildDoneMessage(r: RebuildReport): string {
       ? `。添付 ${r.rescued.assets} 件(${humanBytes(r.rescued.assetBytes)})はそのまま残っています`
       : '';
   // 🔴 戻らなかった物は**黙って 0 件にしない**。⚠ 呼び名は `REBUILD_LOST` から引く
-  const lost = `⚠ ${REBUILD_LOST.join('・')}は戻りません。`;
+  // ⚠ **押す前の窓と同じことを言う** ── 戻った画面の見え方は、ここでも 1 行要る
+  const lost =
+    `⚠ ${REBUILD_LOST.join('・')}は戻りません` +
+    '(ノートはフォルダの外の一覧にまとめて並びます)。';
   return `${head}${kept}。${lost}読み込み直します。`;
 }
 
@@ -472,6 +548,11 @@ export function rebuildExplainMessage(opts: {
     '・集めたノートを、そのまま戻します',
     // 🔑 いちばん怖い所を先に潰す ── 「押したら消える」ではない
     '⚠ ファイルを落とせなかったときは、何も消さずに止まります。',
+    /**
+     * 🔴 **始めたら止められないことを、始める前に言う**(動線レビューが出した)。
+     * ⚠ 走り出すと押せる物が 1 つも無いので、**言っていないと「固まった」と読まれる**。
+     */
+    '⚠ 始めると、途中で止めることはできません。',
     '',
     '残るもの',
     `・いま一覧に出ている ${notes} 件のノート(題名・本文・タグ・チェックの印)`,
@@ -482,6 +563,15 @@ export function rebuildExplainMessage(opts: {
     // ⚠ 呼び名は `REBUILD_LOST` から引く ── 終わった後の字と食い違わせない
     ...REBUILD_LOST.map((x) => `・${x}`),
     '⚠ フォルダそのものとタグは、ノートの中に在るので残ります。',
+    /**
+     * 🔴 **戻ってきた画面がどう見えるかを、先に言う**(#1006 の動線レビューが出した)。
+     *
+     * ⚠ 「どのフォルダに入っていたか は戻りません」だけだと、user は
+     *   **戻った画面を見て初めて**それが何を意味するか分かる ── そして
+     *   **全部が根元に平らに並んだ画面**は「直った」ではなく「**壊れた**」と読める。
+     * 🔑 マニュアルには書いてあったが、**この窓だけを見て押す人**には届かない。
+     */
+    '⚠ 戻した後は、ノートがフォルダの外の一覧にまとめて並びます(フォルダそのものは空で残ります)。',
     // ⚠ 見えている数 ≠ 在る数(壊れているときは一覧そのものが引けていないことがある)
     '⚠ 壊れているときは、一覧に出ていない分を集められないことがあります。',
     '',

@@ -81,6 +81,8 @@ function mount(
     progress?: readonly (readonly ['pick' | 'write', number])[];
     /** ⚠ 渡さなければ配線ごと落とす(= この環境では作り直せない、の対照群)。 */
     wired?: boolean;
+    /** 🔑 走りっぱなしにする(連打の門を見るため ── 解くまで終わらない)。 */
+    hold?: Promise<void>;
   } = {},
 ) {
   document.body.innerHTML = '';
@@ -128,6 +130,7 @@ function mount(
                   '',
               );
             }
+            if (over.hold !== undefined) await over.hold;
             if (over.fail !== undefined) throw new Error(over.fail);
             return over.report ?? DONE;
           },
@@ -380,5 +383,64 @@ describe('作り直しの配線(原文 pin)', () => {
     expect(after, '退避した理由を返していない(書き戻しの門が効かなくなる)').toContain(
       'fallbackReason',
     );
+  });
+});
+
+/**
+ * 🔴 **走っている間に、もう一度押させない**(#1006 の動線レビューが出した)。
+ *
+ * ⚠ 走り出すと**押せる物が 1 つも無い**ので、user は固まったと思って**もう一度押す** ──
+ *   ところが窓は毎回出るので、**捨てる → 開き直す が 2 本同時に走りうる**。
+ * ⚠ `disabled` では止めない(**焦点が外れる**)ので、帳簿で落とす ──
+ *   🔴 ただし**黙って落とさない**:何も出さないと、この repo がいちばん嫌う
+ *   **無言の dead click** になる。
+ */
+describe('連打(#1006)', () => {
+  it('🔴 走っている間の 2 度目は、理由を言って落とす', async () => {
+    /**
+     * ⚠ **`null` で持たない** ── 実行器の中で入るので、tsc は呼び所で
+     *   `never` まで絞ってしまう(実際に落ちた)。何もしない関数で持つ。
+     */
+    let release: () => void = () => {};
+    const held = new Promise<void>((r) => {
+      release = r;
+    });
+    const m = mount({ hold: held });
+    m.run.click();
+    await settle();
+    await m.answer('ok'); // ここから走り出す(まだ終わらない)
+    expect(m.calls, '1 度目が走っていない').toEqual(['c1']);
+
+    m.run.click();
+    await settle();
+    expect(m.calls, '2 本目が走った').toEqual(['c1']);
+    expect(m.errors.join('\n'), '無言で落としている').toContain('いま作り直しています');
+
+    release();
+    await settle();
+  });
+
+  /**
+   * ⚠ **やめた回も帳簿を戻す** ── 戻し忘れると、**二度と作り直せなくなる**
+   *   (押しても「いま作り直しています」と言い続ける)。
+   */
+  it('🔴 やめた後は、もう一度押せる', async () => {
+    const m = mount();
+    m.run.click();
+    await settle();
+    await m.answer('cancel');
+    m.run.click();
+    await settle();
+    expect(m.body(), 'やめた後に押しても窓が出ない').toContain('入れ物を作り直します');
+  });
+
+  it('🔴 落ちた回も、もう一度押せる', async () => {
+    const m = mount({ fail: '書き出せません' });
+    m.run.click();
+    await settle();
+    await m.answer('ok');
+    m.run.click();
+    await settle();
+    expect(m.body(), '落ちた後に押しても窓が出ない').toContain('入れ物を作り直します');
   });
 });
