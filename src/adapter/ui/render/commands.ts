@@ -233,7 +233,7 @@ function buildContainerRepair(): HTMLElement {
   const note = document.createElement('p');
   note.setAttribute('data-pkc-field', 'container-reset-note');
   note.textContent =
-    `🔴 こちらは中身を全部消します。元に戻せません。上の「${CONTAINER_REBUILD_LABEL}」を試しても直らなかったときだけ押してください。`;
+    `⚠ こちらは中身を全部消します。元に戻せません。上の「${CONTAINER_REBUILD_LABEL}」を試しても直らなかったときだけ押してください。`;
   box.append(note);
 
   const btn = document.createElement('button');
