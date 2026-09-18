@@ -399,6 +399,7 @@ import {
   noteRescueWritten,
   rescueArchiveSource,
   rescueArchiveSummary,
+  type RescueAssets,
 } from '@features/storage/rescue-archive';
 import {
   RESET_PASSPHRASE,
@@ -941,6 +942,16 @@ export interface BinderServices {
    * ⚠ 1 回では終わらない ── `done` になるまで呼び側が繰り返す。
    */
   rescueEntries?(afterRowid: number, chunks: number): Promise<RescuePage>;
+  /**
+   * 🔴 **添付の実体を読む口**（#1005。user 指摘 2026-09-17）。
+   *
+   * ⚠ 上の `rescueEntries` は **sqlite を読む**ので、壊れ方によっては拾えない。
+   * 🔑 添付の bytes は **IndexedDB**（`pkc3-assets`）に在り、
+   *   **sqlite を 1 度も通らない** ── だから壊れた DB でも確実に読める。
+   * 🔴 直す前はこの口が無く、拾い出しが添付を 1 バイトも出さないまま
+   *   「中身を捨てる」がその bytes を消していた（= 案内どおりに進むと失う）。
+   */
+  rescueAssets?: RescueAssets;
   /**
    * 🔴 **入れ物ごと捨てて、まっさらにする**(#986 段③)。
    *
@@ -7129,61 +7140,87 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     const rescued = lastRescueWritten();
-    const explain = resetExplainMessage({
-      notes: dispatcher.getState().entryMetas.size,
-      /**
-       * 🔴 **大きさは定数から引く**(#996 の教訓 ── 画面に出す字を手で書かない)。
-       * ⚠ ここで「約 93MB」と綴ると、一式を焼き直した日に**両方そのまま**で緑になる。
-       */
-      keeps: [
-        `Office の部品(${OFFICE_PACK_APPROX})`,
-        `DuckDB の部品(${DUCKDB_PACK_APPROX})`,
-        '設定・見た目・ショートカットキーの割り当て・読んだお知らせの印',
-      ],
-      rescued: rescued === null ? null : rescued.stats,
-    });
-    void confirmInApp(root, explain, {
-      // ⚠ **ここで「捨てる」と書かない** ── まだ消えないことを、ボタンの字で言う
-      okLabel: '次へ(まだ消えません)',
-      cancelLabel: 'やめる',
-    }).then(async (answer) => {
-      if (answer !== 'ok') return;
-      const typed = await promptInApp(root, {
-        title: '本当に捨てますか',
-        label: resetPassphraseLabel(),
-        // ⚠ **`initial` を渡さない** ── 渡すと、空のまま受けたときに
-        //    `promptInApp` がその字を返す(= 何も打たずに合言葉が通る)
-        okLabel: '捨てる',
-        // 🔴 danger ── ここが**本当に消える 1 押し**である(1 件削除より重い)
-        danger: true,
-      });
-      // ⚠ 「やめる」は黙って戻る(断りの字を出すと、やめた人を責める形になる)
-      if (typed === null) return;
-      if (!resetPassphraseOk(typed)) {
-        dispatcher.dispatch({
-          type: 'OP_FAILED',
-          error: `${RESET_PASSPHRASE} と打たれなかったので、何も消していません`,
+    /**
+     * 🔴 **端末に在る添付の数を、捨てる前に数える**（#1005）。
+     *
+     * ⚠ 拾い出しの側だけ見ても「足りているか」は分からない ──
+     *   「添付 0 件」が「元から無い人」なのか「**拾えていない人**」なのかを
+     *   見分けられない。🔑 `listKeys` は **IndexedDB を直に読む**ので、
+     *   sqlite が壊れていてもこの数は引ける。
+     * ⚠ 引けなかったときは **`null`**（**0 件と混ぜない** ──
+     *   「無い」と「数えられない」を同じ字にすると、**失う側の人が安心する**）。
+     */
+    const onDisk = services.rescueAssets;
+    const counting: Promise<number | null> =
+      onDisk === undefined
+        ? Promise.resolve(null)
+        : onDisk.listKeys(cid).then(
+            (k) => k.length,
+            () => null,
+          );
+    void counting
+      .then((assetsOnDisk) =>
+        confirmInApp(
+          root,
+          resetExplainMessage({
+            notes: dispatcher.getState().entryMetas.size,
+            /**
+             * 🔴 **大きさは定数から引く**(#996 の教訓 ── 画面に出す字を手で書かない)。
+             * ⚠ ここで「約 93MB」と綴ると、一式を焼き直した日に**両方そのまま**で緑になる。
+             */
+            keeps: [
+              `Office の部品(${OFFICE_PACK_APPROX})`,
+              `DuckDB の部品(${DUCKDB_PACK_APPROX})`,
+              '設定・見た目・ショートカットキーの割り当て・読んだお知らせの印',
+            ],
+            rescued: rescued === null ? null : rescued.stats,
+            assetsOnDisk,
+          }),
+          {
+            // ⚠ **ここで「捨てる」と書かない** ── まだ消えないことを、ボタンの字で言う
+            okLabel: '次へ(まだ消えません)',
+            cancelLabel: 'やめる',
+          },
+        ),
+      )
+      .then(async (answer) => {
+        if (answer !== 'ok') return;
+        const typed = await promptInApp(root, {
+          title: '本当に捨てますか',
+          label: resetPassphraseLabel(),
+          // ⚠ **`initial` を渡さない** ── 渡すと、空のまま受けたときに
+          //    `promptInApp` がその字を返す(= 何も打たずに合言葉が通る)
+          okLabel: '捨てる',
+          // 🔴 danger ── ここが**本当に消える 1 押し**である(1 件削除より重い)
+          danger: true,
         });
-        return;
-      }
-      sum.textContent = '消しています…';
-      sum.hidden = false;
-      try {
-        const report = await reset(cid);
-        const done = resetDoneMessage(report);
-        sum.textContent = done;
-        /**
-         * ⚠ **読ませてから読み込み直す** ── すぐ `reload` すると
-         *   「消せなかった添付が N 件」を**誰も読めない**。
-         */
-        await alertInApp(root, done);
-        services.reloadApp?.();
-      } catch (e) {
-        sum.textContent = '';
-        sum.hidden = true;
-        dispatcher.dispatch({ type: 'OP_FAILED', error: `捨てられませんでした: ${String(e)}` });
-      }
-    });
+        // ⚠ 「やめる」は黙って戻る(断りの字を出すと、やめた人を責める形になる)
+        if (typed === null) return;
+        if (!resetPassphraseOk(typed)) {
+          dispatcher.dispatch({
+            type: 'OP_FAILED',
+            error: `${RESET_PASSPHRASE} と打たれなかったので、何も消していません`,
+          });
+          return;
+        }
+        sum.textContent = '消しています…';
+        sum.hidden = false;
+        try {
+          const report = await reset(cid);
+          const done = resetDoneMessage(report);
+          sum.textContent = done;
+          /**
+           * ⚠ **読ませてから読み込み直す** ── すぐ `reload` すると
+           *   「消せなかった添付が N 件」を**誰も読めない**。
+           */
+          await alertInApp(root, done);
+          services.reloadApp?.();
+        } catch (e) {
+          sum.textContent = '';
+          sum.hidden = true;
+          dispatcher.dispatch({ type: 'OP_FAILED', error: `捨てられませんでした: ${String(e)}` });
+        }
+      });
   },
   'db-rescue-archive': (dispatcher, _target, services, root) => {
     const sum = root.querySelector<HTMLElement>('[data-pkc-field="db-rescue-summary"]');
@@ -7202,6 +7239,8 @@ const ACTIONS: Record<string, ActionHandler> = {
       cid,
       title: 'PKC から拾い出したノート',
       pick: (after, chunks) => pick(after, chunks),
+      // 🔑 添付の bytes を一緒に入れる（#1005）。⚠ 無ければ入れないだけ
+      ...(services.rescueAssets === undefined ? {} : { assets: services.rescueAssets }),
       onProgress: (seen, maxRowid, phase) => {
         const at = maxRowid === null ? '' : `(${seen} / ${maxRowid})`;
         // ⚠ 2 周舜めるので、**いまどちらを見ているか**を出す

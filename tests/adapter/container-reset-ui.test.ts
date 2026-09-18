@@ -14,6 +14,8 @@
  *
  * 消す順番そのものは `tests/features/container-reset.test.ts` が見る。
  */
+import { readFileSync } from 'node:fs';
+import { codeOnly } from '../helpers/code-only';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
@@ -87,6 +89,11 @@ function mount(over: {
   report?: ContainerResetReport;
   fail?: string;
   pick?: BinderServices['rescueEntries'];
+  /**
+   * 🔴 **端末に在る添付の鍵**（#1005）。
+   * ⚠ 渡さなければ `rescueAssets` ごと配線しない（= 直す前の姿の対照群）。
+   */
+  assetKeys?: readonly string[];
 } = {}) {
   document.body.innerHTML = '';
   const root = document.createElement('div');
@@ -105,6 +112,24 @@ function mount(over: {
   let reloaded = 0;
   bindActions(root, d, {
     ...(over.pick === undefined ? {} : { rescueEntries: over.pick }),
+    /**
+     * 🔴 **binder の配線を通す**（#1005。変異試験 G1 が SURVIVED で教えた）。
+     *
+     * ⚠ 直す前は `rescueAssets` をどの test も渡していなかったので
+     *   （repo 全体で `grep -rln 'rescueAssets' tests/` が **0 件**）、
+     *   🔴 **数える枝そのものが 1 度も実行されていなかった**
+     *   （CLAUDE.md §2「経路が一度も通っていない」）。
+     * ⚠ `resetExplainMessage` を**直に呼ぶ** test は別に在るが、
+     *   そちらは**この配線を 1 行も通らない**。
+     */
+    ...(over.assetKeys === undefined
+      ? {}
+      : {
+          rescueAssets: {
+            listKeys: async (cid: string) => (cid === 'c1' ? [...over.assetKeys!] : []),
+            get: async () => null,
+          },
+        }),
     resetContainer: async (cid: string) => {
       calls.push(cid);
       if (over.fail !== undefined) throw new Error(over.fail);
@@ -214,13 +239,52 @@ describe('押しても、まだ消えない(#986 段③)', () => {
    *   書き出せてしまうので、件数をそのまま見せる。
    */
   it('🔴 拾ってあれば件数を出す ── 0 件でも「済み」と言わない', async () => {
-    noteRescueWritten({ entries: 0, skipped: 7, empty: 3, bodyMissing: 0 }, 1);
+    noteRescueWritten(
+      { entries: 0, skipped: 7, empty: 3, bodyMissing: 0, assets: 0, assetBytes: 0, assetMissing: 0 },
+      1,
+    );
     const m = mount();
     m.run.click();
     await settle();
     expect(m.body(), '拾えた件数が出ていない').toContain('この画面で拾えたのは 0 件です');
     expect(m.body(), '読めなかった数が出ていない').toContain('読めなかった区画 7');
     expect(m.body(), '0 件なのに済んだ顔をしている').not.toContain('まだ拾い出していません');
+  });
+
+  /**
+   * 🔴 **端末の添付の数が、binder を通って窓の字まで届くか**（#1005）。
+   *
+   * ⚠ 変異試験 G1 が SURVIVED で教えた穴である ──
+   *   `listKeys(cid).then((k) => k.length, () => null)` を壊しても
+   *   **どの test も落ちなかった**（渡していないのだから当然である）。
+   * 🔑 見るのは**数そのもの** ── 3 という数は
+   *   `listKeys` が返した鍵の数からしか来ない。
+   * ⚠ 拾い出しはしていないので「**0 件だけです**」側になる
+   *   （= このまま進むと 3 件失う、と言えていること）。
+   */
+  it('🔴 端末の添付の件数が、捨てる前の窓に出る', async () => {
+    const m = mount({ assetKeys: ['k1', 'k2', 'k3'] });
+    m.run.click();
+    await settle();
+    expect(m.body(), '端末の添付の件数が届いていない').toContain(
+      'この端末には添付が 3 件あります',
+    );
+    expect(m.body(), '拾えていないのに残りが消えることを言っていない').toContain(
+      '残りはここで消えます',
+    );
+  });
+
+  /**
+   * ⚠ **対照群** ── 口を渡さなければ添付の話をしない。
+   * 🔑 これが無いと、上の test は「別の経路が 3 と書いている」場合と見分けられない。
+   */
+  it('⚠ 添付の口を渡さなければ、添付の話は出ない（対照群）', async () => {
+    const m = mount();
+    m.run.click();
+    await settle();
+    expect(m.body(), '渡していないのに添付の件数が出ている').not.toContain(
+      'この端末には添付が',
+    );
   });
 
   it('⚠ 1 枚目でやめたら、合言葉の窓すら出ない(対照群)', async () => {
@@ -351,5 +415,35 @@ describe('拾ってから捨てる(#986 段③)', () => {
     m.run.click();
     await settle();
     expect(m.body(), '落ちたのに済んだ顔をしている').toContain('まだ拾い出していません');
+  });
+});
+
+/**
+ * 🔴 **配線の原文 pin**（#1005。変異試験 G3 が SURVIVED で教えた）。
+ *
+ * ⚠ `main.ts` は**どの test からも実行されない**（原文を読む test しか無い）ので、
+ *   🔴 `rescueAssets` の配線を丸ごと外しても **単体は 1 件も落ちない** ──
+ *   実機では「拾い出しの添付が常に 0 件」になるのに、こちらの計器は 1 つも鳴らない。
+ * ⚠ 原文 pin は**弱いと自覚して使う**（CLAUDE.md §2）が、**0 件よりはよい**。
+ * ⚠ 注釈を落としてから見る ── さもないと**自分の解説に満たされる**（§1）。
+ */
+describe('拾い出しに添付の口を渡している（原文 pin）', () => {
+  const MAIN = codeOnly(readFileSync('src/main.ts', 'utf-8'));
+
+  it('空振り防止 ── main.ts の中身を本当に読めている', () => {
+    expect(MAIN.length, 'main.ts を読めていない').toBeGreaterThan(1000);
+    expect(MAIN, 'バインダへ渡す口そのものが無い').toContain('rescueEntries');
+  });
+
+  it('🔴 rescueAssets を渡しており、listKeys と get の両方が在る', () => {
+    const at = MAIN.indexOf('rescueAssets:');
+    expect(at, '🔴 rescueAssets の配線が main.ts に無い（添付が常に 0 件になる）').toBeGreaterThan(0);
+    /**
+     * ⚠ **見るのはその場だけ** ── file 全体で `listKeys` を探すと、
+     *   片づけ（asset-gc）など**別の呼び出しに満たされる**（§1）。
+     */
+    const block = MAIN.slice(at, at + 200);
+    expect(block, 'rescueAssets に listKeys が無い').toContain('listKeys');
+    expect(block, 'rescueAssets に get が無い').toContain('get');
   });
 });

@@ -150,7 +150,7 @@ describe('押す前に読ませる字(#986 段③)', () => {
   const KEEPS = ['Office の部品(約 93MB)', '設定・見た目'];
 
   it('🔴 消えるものと残るものを、両方言う', () => {
-    const t = resetExplainMessage({ notes: 12, keeps: KEEPS, rescued: null });
+    const t = resetExplainMessage({ notes: 12, keeps: KEEPS, rescued: null, assetsOnDisk: 0 });
     expect(t, '消えるものを言っていない').toContain('消えるもの');
     expect(t, '残るものを言っていない').toContain('残るもの');
     expect(t, '件数が出ていない').toContain('12 件');
@@ -163,7 +163,7 @@ describe('押す前に読ませる字(#986 段③)', () => {
    *   user は消えたと思って入れ直す(93MB を取り直させる)。
    */
   it('🔴 残るものは、渡された数だけ並ぶ', () => {
-    const t = resetExplainMessage({ notes: 0, keeps: KEEPS, rescued: null });
+    const t = resetExplainMessage({ notes: 0, keeps: KEEPS, rescued: null, assetsOnDisk: 0 });
     for (const k of KEEPS) expect(t, `${k} が落ちた`).toContain(k);
   });
 
@@ -173,13 +173,14 @@ describe('押す前に読ませる字(#986 段③)', () => {
    *   真偽ではなく**件数**を見せる。
    */
   it('🔴 拾っていなければそう言い、拾ってあれば件数を言う', () => {
-    const none = resetExplainMessage({ notes: 3, keeps: KEEPS, rescued: null });
+    const none = resetExplainMessage({ notes: 3, keeps: KEEPS, rescued: null, assetsOnDisk: 0 });
     expect(none, 'まだ拾っていないことを言っていない').toContain('まだ拾い出していません');
 
     const zero = resetExplainMessage({
       notes: 3,
       keeps: KEEPS,
-      rescued: { entries: 0, skipped: 5, empty: 2, bodyMissing: 0 },
+      assetsOnDisk: 0,
+      rescued: { entries: 0, skipped: 5, empty: 2, bodyMissing: 0, assets: 0, assetBytes: 0, assetMissing: 0 },
     });
     expect(zero, '0 件なのに済んだ顔をしている').not.toContain('まだ拾い出していません');
     expect(zero, '拾えた件数が出ていない').toContain('0 件');
@@ -190,15 +191,69 @@ describe('押す前に読ませる字(#986 段③)', () => {
     const all = resetExplainMessage({
       notes: 3,
       keeps: KEEPS,
-      rescued: { entries: 9, skipped: 0, empty: 0, bodyMissing: 0 },
+      assetsOnDisk: 0,
+      rescued: { entries: 9, skipped: 0, empty: 0, bodyMissing: 0, assets: 0, assetBytes: 0, assetMissing: 0 },
     });
     expect(all).toContain('9 件');
     expect(all, '拾えなかった物が無いのに内訳が出た').not.toContain('読めなかった区画');
   });
 
+  /**
+   * 🔴 **捨てる前に「添付は守られているか」を字にする**（#1005。user の心配 2026-09-17）。
+   *
+   * ⚠ 直す前のこの窓には添付の字が **1 行も無かった**。
+   *   そのうえ拾い出しは bytes を 1 つも出さなかったので、
+   *   🔴 **案内どおりに進むと 100% 添付を失う**形だった。
+   * 🔑 見るのは**端末の在庫との差** ── 拾い出しの件数だけでは
+   *   「添付 0 件」が「元から無い人」なのか「拾えていない人」なのか分からない。
+   */
+  it('🔴 全部入っていればそう言い、欠けていれば何件消えるかを言う', () => {
+    const took = resetExplainMessage({
+      notes: 3,
+      keeps: KEEPS,
+      assetsOnDisk: 3,
+      rescued: { entries: 3, skipped: 0, empty: 0, bodyMissing: 0, assets: 3, assetBytes: 99, assetMissing: 0 },
+    });
+    expect(took, '端末の添付の件数を言っていない').toContain('添付が 3 件あります');
+    expect(took, '全部入ったことを言っていない').toContain('3 件とも入っています');
+
+    // 🔴 欠けている回 ── **何件消えるか**が読めないと、止まる判断ができない
+    const short = resetExplainMessage({
+      notes: 3,
+      keeps: KEEPS,
+      assetsOnDisk: 3,
+      rescued: { entries: 3, skipped: 0, empty: 0, bodyMissing: 0, assets: 1, assetBytes: 9, assetMissing: 2 },
+    });
+    expect(short, '欠けているのに「全部入った」と読める').not.toContain('とも入っています');
+    expect(short, '入った件数が出ていない').toContain('1 件だけです');
+    expect(short, '残りが消えることを言っていない').toContain('残りはここで消えます');
+  });
+
+  /**
+   * 🔴 **拾い出しをまだ押していない人にこそ、添付の数を見せる**。
+   * ⚠ `rescued` が `null` のときに黙ると、**一番危ない人が何も知らない**。
+   */
+  it('🔴 まだ拾っていなくても、添付が何件消えるかは出す', () => {
+    const t = resetExplainMessage({ notes: 3, keeps: KEEPS, rescued: null, assetsOnDisk: 4 });
+    expect(t, '端末の添付の件数を言っていない').toContain('添付が 4 件あります');
+    expect(t, '0 件しか入っていないことを言っていない').toContain('0 件だけです');
+  });
+
+  /**
+   * ⚠ **対照群 2 つ** ── 元から 0 件の人を威さない /
+   *   「無い」と「数えられない」を同じ字にしない。
+   */
+  it('⚠ 添付 0 件なら黙り、数えられなければそう言う', () => {
+    const zero = resetExplainMessage({ notes: 3, keeps: KEEPS, rescued: null, assetsOnDisk: 0 });
+    expect(zero, '0 件なのに添付の件数を言っている').not.toContain('添付が 0 件あります');
+
+    const unknown = resetExplainMessage({ notes: 3, keeps: KEEPS, rescued: null, assetsOnDisk: null });
+    expect(unknown, '数えられなかったことを黙っている').toContain('数えられませんでした');
+  });
+
   /** ⚠ 出るのは `textContent` ── 記法を書くと記号がそのまま見える(お知らせと同じ規律)。 */
   it('⚠ 記法を書かない', () => {
-    const t = resetExplainMessage({ notes: 1, keeps: KEEPS, rescued: null });
+    const t = resetExplainMessage({ notes: 1, keeps: KEEPS, rescued: null, assetsOnDisk: 0 });
     expect(t, '記法が混じっている').not.toMatch(/[*`]/);
   });
 

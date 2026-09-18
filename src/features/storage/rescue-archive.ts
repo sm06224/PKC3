@@ -36,13 +36,34 @@
  * 🔑 **本文が来なかった lid を数えて外へ出す** ── 黙って空本文で埋めない
  *   (「拾えた件数」を「全部」と読ませない、という #971 段③ の規律と同じ向き)。
  *
- * ## 🚫 関係・添付・履歴は拾わない
+ * ## 🚫 関係と履歴は拾わない ── ⚠ **添付は拾う**(#1005 で直した)
  *
- * ⚠ どれも**索引を使う形でしか引けない** ── 壊れた DB では同じ `rc 11` で落ちる
- *   (`db-rescue.ts` の実測表)。だから**空で返し、拾えなかったと明記する**。
+ * 関係・履歴は**索引を使う形でしか引けない**ので、壊れた DB では同じ `rc 11` で落ちる
+ * (`db-rescue.ts` の実測表)。だから**空で返し、拾えなかったと明記する**。
  * 🔴 **黙って 0 件にしない** ── user は「リンクが消えた」ことに気づけない。
+ *
+ * ## 🔴 添付を「拾えない」に混ぜていたのは誤りだった(user 指摘 2026-09-17)
+ *
+ * ⚠ ここは長らく **関係・添付・履歴の 3 つを 1 つの理由で**片付けていた ──
+ * 「索引を使う形でしか引けない」。🔴 **添付の bytes には当たっていない。**
+ *
+ * | | どこに在るか | 壊れた DB で読めるか |
+ * |---|---|---|
+ * | 関係・履歴 | **sqlite にしか無い** | 🚫 読めない(理由は当たっている) |
+ * | 添付の **meta** | sqlite の `assets` 表 | ⚠ 読めないことがある |
+ * | 🔑 **添付の bytes** | **IndexedDB(`pkc3-assets`)** | 🟢 **読める ── sqlite を 1 度も通らない** |
+ *
+ * 🔴 **帰結は実害だった**:拾い出しが添付を 1 バイトも出さないまま、
+ * 「中身を捨てる」(#986 段③)が**その bytes を消していた** ──
+ * つまり**一度も壊れていない添付を、案内どおりに進んだ人が 100% 失う**。
+ *
+ * 🔑 **meta は Blob 自身から組み直せる**(`type` / `size`)ので、`assets` 表が
+ * 読めなくても実用上の欠けはほぼ無い。⚠ `hash` だけは持てない ── **でっち上げず `null`**。
+ * ⚠ 表示名は**拾った本文の中**に在る(`![名前](asset:<key>)`)ので、ここでは要らない。
  */
 import type { ArchiveSource } from '../export/pkc3-archive';
+// ⚠ 実行時の値にバイト単位を付けるのは `human-bytes.ts` の仕事(門が在る)
+import { humanBytes } from '../human-bytes';
 
 /** 拾い出しの 1 ページ(`storage-worker` の `rescueEntries` が返す形)。 */
 export interface RescuePageLike {
@@ -62,6 +83,18 @@ export interface RescuePageLike {
 
 export type RescuePick = (afterRowid: number, chunks: number) => Promise<RescuePageLike>;
 
+/**
+ * 🔑 **添付の実体を読む口**(#1005)。⚠ **sqlite を 1 度も通らない**
+ * (`AssetBlobStore` は IndexedDB を直に読む)── だから壊れた DB でも拾える。
+ * ⚠ **省略可**:渡されなければ今までどおり添付を出さない(壊れる方向へ倒れない)。
+ */
+export interface RescueAssets {
+  /** この入れ物の添付の鍵を全部。⚠ 落ちたら呼び側が握って空にする。 */
+  listKeys(cid: string): Promise<string[]>;
+  /** 1 件の bytes。⚠ 無ければ `null`(**捨てずに数える**)。 */
+  get(cid: string, assetKey: string): Promise<Blob | null>;
+}
+
 /** 拾い出しの成果。⚠ **拾えなかった数を必ず連れて歩く**。 */
 export interface RescueStats {
   /** 一覧に載せた件数(1 周目)。 */
@@ -72,6 +105,15 @@ export interface RescueStats {
   readonly empty: number;
   /** 🔴 **2 周目で本文が来なかった件数**(空本文で戻る)。 */
   readonly bodyMissing: number;
+  /** 🔑 **zip に入れた添付の件数**(#1005)。 */
+  readonly assets: number;
+  /** 入れた添付の合計 bytes。⚠ 0 件なら 0。 */
+  readonly assetBytes: number;
+  /**
+   * 🔴 **鍵は在るのに bytes が取れなかった件数**(#1005)。
+   * ⚠ **0 と混ぜない** ── 「添付が無い人」と「添付が読めなかった人」は別である。
+   */
+  readonly assetMissing: number;
 }
 
 /** ⚠ 1 回に頼む区画の数(既存の拾い出しと同じ ── 大きくすると 1 応答が重い)。 */
@@ -94,6 +136,11 @@ export function rescueArchiveSource(opts: {
   readonly title: string;
   readonly pick: RescuePick;
   readonly onProgress?: RescueProgress;
+  /**
+   * 🔑 **添付の実体を読む口**(#1005)。⚠ 渡さなければ添付を出さない
+   *   (今までどおり)── **壊れる方向へ倒れない**。
+   */
+  readonly assets?: RescueAssets;
 }): { readonly source: ArchiveSource; readonly stats: () => RescueStats } {
   type Meta = Awaited<ReturnType<ArchiveSource['listEntryMetas']>>[number];
   const metas: Meta[] = [];
@@ -101,6 +148,11 @@ export function rescueArchiveSource(opts: {
   const known = new Set<string>();
   /** 🔴 本文が届いた lid ── 届かなかった数を出すために数える。 */
   const gotBody = new Set<string>();
+  /** 🔑 zip に入れた添付(#1005)── `getAssetBlob` が読み直す鍵と、数えた量。 */
+  const tookAssets = new Set<string>();
+  let assetBytes = 0;
+  /** 🔴 鍵は在るのに bytes が取れなかった数。⚠ **0 件と混ぜない**。 */
+  let assetMissing = 0;
   /** ⚠ 本文の代わりに印を入れて出した lid(数えるのは `gotBody` と分ける)。 */
   const placeheld = new Set<string>();
   let skipped = 0;
@@ -233,11 +285,50 @@ export function rescueArchiveSource(opts: {
       }
       return { rows, done: true };
     },
-    // 🚫 下の 4 つは**索引を使う形でしか引けない**ので、壊れた DB では拾えない。
+    /**
+     * 🔴 **添付は拾う**(#1005。user 指摘 2026-09-17)。
+     *
+     * ⚠ ここは長らく `[]` を返していた ── 理由は「索引を使う形でしか引けない」
+     *   だったが、🔑 **bytes は IndexedDB に在り、sqlite を 1 度も通らない**ので
+     *   その理由が当たらない(`AssetBlobStore.listKeys` / `.get`)。
+     * 🔑 **meta は Blob 自身から組む** ── `type` と `size` は Blob が持っている。
+     *   ⚠ `hash` は**持てないので `null`**(でっち上げない)。
+     * ⚠ **鍵は在るのに bytes が取れない**回を数えて外へ出す(黙って減らさない)。
+     */
+    listAssetMetas: async () => {
+      const ports = opts.assets;
+      if (ports === undefined) return [];
+      tookAssets.clear();
+      assetBytes = 0;
+      assetMissing = 0;
+      // ⚠ 一覧が引けないのは「0 件」ではない ── そこで止めず、添付だけ諦める
+      const keys = await ports.listKeys(opts.cid).catch((): string[] => []);
+      const out: Array<{ key: string; mime: string | null; size: number | null; hash: string | null }> = [];
+      for (const key of keys) {
+        const blob = await ports.get(opts.cid, key).catch((): Blob | null => null);
+        if (blob === null) {
+          assetMissing += 1;
+          continue;
+        }
+        tookAssets.add(key);
+        assetBytes += blob.size;
+        // ⚠ 空文字の `type` は「分からない」── `null` にして書出し側の既定へ委ねる
+        out.push({ key, mime: blob.type === '' ? null : blob.type, size: blob.size, hash: null });
+      }
+      return out;
+    },
+    /**
+     * ⚠ **一覧に載せた鍵だけ**返す ── 載せていない鍵を返すと、
+     *   `writeArchive` の「meta と bytes の数が合う」前提が崩れる。
+     */
+    getAssetBlob: async (key) => {
+      const ports = opts.assets;
+      if (ports === undefined || !tookAssets.has(key)) return null;
+      return ports.get(opts.cid, key).catch((): Blob | null => null);
+    },
+    // 🚫 下の 3 つは**sqlite にしか無く、索引を使う形でしか引けない**ので拾えない。
     //    ⚠ 空で返すが、**拾えなかったことは `stats()` の外で必ず字にする**。
     listRelations: async () => [],
-    listAssetMetas: async () => [],
-    getAssetBlob: async () => null,
     listRevisionLids: async () => [],
     getRevisionChain: async () => [],
   };
@@ -249,20 +340,34 @@ export function rescueArchiveSource(opts: {
       skipped,
       empty,
       bodyMissing: metas.length - gotBody.size,
+      assets: tookAssets.size,
+      assetBytes,
+      assetMissing,
     }),
   };
 }
 
-/** 画面に出す 1 行。⚠ **拾えなかった物を必ず並べる**。 */
+/**
+ * 画面に出す 1 行。⚠ **拾えなかった物を必ず並べる**。
+ *
+ * 🔴 **2026-09-17(#1005)に「添付は戻せません」を消した** ── 添付を拾うように
+ *   なったので、⚠ **残し続けると嘘になる**(この字は user の判断材料である)。
+ */
 export function rescueArchiveSummary(s: RescueStats): string {
   const head = `${s.entries} 件を拾って、取り込める形で書き出しました`;
+  // 🔑 添付は**入った件数と量**で言う(「入れました」だけでは足りるか判断できない)
+  const got =
+    s.assets > 0 ? `。添付も ${s.assets} 件(${humanBytes(s.assetBytes)})入れました` : '';
   const miss: string[] = [];
   if (s.skipped > 0) miss.push(`読めなかった区画 ${s.skipped}`);
   if (s.empty > 0) miss.push(`空だった区画 ${s.empty}`);
   if (s.bodyMissing > 0) miss.push(`本文が読めなかったノート ${s.bodyMissing} 件`);
-  // 🔴 関係・添付・履歴は**この道では拾えない** ── 黙って 0 件にしない
-  const lost = '⚠ ノート同士のつながり・添付・履歴は、この方法では戻せません。';
-  return miss.length === 0 ? `${head}。${lost}` : `${head}(${miss.join(' / ')})。${lost}`;
+  // 🔴 **鍵は在るのに中身が取れなかった添付**は、黙って減らさない
+  if (s.assetMissing > 0) miss.push(`中身が取れなかった添付 ${s.assetMissing} 件`);
+  // 🔴 つながりと履歴は**この道では拾えない** ── 黙って 0 件にしない
+  const lost = '⚠ ノート同士のつながりと履歴は、この方法では戻せません。';
+  const body = miss.length === 0 ? head : `${head}(${miss.join(' / ')})`;
+  return `${body}${got}。${lost}`;
 }
 
 /**
