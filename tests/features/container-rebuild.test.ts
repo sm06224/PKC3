@@ -122,6 +122,13 @@ function harness(
     forgetLocal: () => {
       calls.push('forgetLocal');
     },
+    /**
+     * 🔑 **進み具合も同じ列に採る** ── 「いつ言ったか」は順番の話なので、
+     *   別の配列に採ると**書き戻しとの前後が見えなくなる**。
+     */
+    onProgress: (phase) => {
+      calls.push(`progress:${phase}`);
+    },
     announceWiped: () => {
       calls.push('announceWiped');
     },
@@ -154,7 +161,14 @@ describe('🔴 拾った中身で、その場に建て直す(#1006)', () => {
     const h = harness();
     await rebuildContainer('c-old', 't', h.ports);
 
-    const order = h.calls.filter((c) => !c.startsWith('openContainer'));
+    /**
+     * ⚠ **消す / 書く手だけを見る** ── 進み具合(`progress:`)は
+     *   **いつ言ったか**の話なので、順番は別の it が見る(混ぜると
+     *   どちらの主張も読めなくなる ── §「1 つの検査 = 1 つの主張」)。
+     */
+    const order = h.calls.filter(
+      (c) => !c.startsWith('openContainer') && !c.startsWith('progress:'),
+    );
     expect(order).toEqual([
       'saveArchive',
       'wipeStorage',
@@ -326,6 +340,33 @@ describe('🔴 拾った中身で、その場に建て直す(#1006)', () => {
     });
     expect(r.rows).toHaveLength(3);
     expect(passes, '2 周以上舐めている').toBe(1);
+  });
+
+  /**
+   * 🔴 **書き戻す「前」に「戻しています」と言う**(#1006)。
+   *
+   * ⚠ 書き戻しは 1 回の bulk なので、**終わってから言うと間に合わない** ──
+   *   いちばん長い間ずっと「拾っています…」のままになり、user は**止まった**と
+   *   読んで窓を閉じる(閉じられると、書き戻しが途中で終わる)。
+   * ⚠ この順番は**結果を見る assert では 1 ビットも動かない** ── どちらでも
+   *   「3 件戻った」は成り立つ(CLAUDE.md「挙動を変えたのに test が前も後も通るなら、
+   *   それは守っていない」)。
+   */
+  it('🔴 「戻しています」と言ってから書き戻す', async () => {
+    const h = harness();
+    await rebuildContainer('c-old', 't', h.ports);
+    const said = h.calls.indexOf('progress:write');
+    const wrote = h.calls.findIndex((c) => c.startsWith('writeEntries:'));
+    // ⚠ 空振り防止 ── どちらも本当に起きていること
+    expect(said, '戻している途中を 1 度も言っていない').toBeGreaterThan(-1);
+    expect(wrote, '書き戻していない').toBeGreaterThan(-1);
+    expect(said, '書き戻した後に言っている(いちばん長い間、古い字のままになる)').toBeLessThan(
+      wrote,
+    );
+    // ⚠ 対照群 ── 拾っている途中は、その前に言っている
+    const picked = h.calls.indexOf('progress:pick');
+    expect(picked, '拾っている途中を言っていない').toBeGreaterThan(-1);
+    expect(picked, '拾うより先に戻すと言っている').toBeLessThan(said);
   });
 
   /**

@@ -334,6 +334,12 @@ export async function rebuildContainer(
 
   // ⑤ 同じ id で作り直して、書き戻す
   const entries = rebuiltEntries(got.rows);
+  /**
+   * ⚠ **書き戻す「前」に言う** ── ここは 1 回の bulk なので、終わってから言うと
+   *   いちばん長い間ずっと「**拾っています…**」のままになる(user は
+   *   **止まった**と読んで窓を閉じる ── 閉じられると書き戻しが途中で終わる)。
+   */
+  ports.onProgress?.('write', entries.length, entries.length);
   try {
     await ports.openContainer(cid, title);
     await ports.writeEntries(cid, entries);
@@ -350,7 +356,6 @@ export async function rebuildContainer(
       error: String(e),
     };
   }
-  ports.onProgress?.('write', entries.length, entries.length);
 
   /**
    * ⑥ 🔴 **ここで初めて知らせる。**
