@@ -95,6 +95,33 @@ test('🔴 案を貼ると下見が出て、当てると本当に移る (#429)',
    */
   const repairButtons = page.locator('[data-pkc-region="container-repair"] button[data-pkc-action]');
   await expect(repairButtons, '2 段になっていない').toHaveCount(2);
+  /**
+   * 🔴 **件数ではなく「どちらが上か」を見る**(着地前の smoke が指摘した)。
+   *
+   * ⚠ 直す前ここは **2 つ在ること**しか見ておらず、すぐ上の注記だけが
+   *   「並びも見る」と言っていた ── **並べ替えても落ちない**検査だった
+   *   (CLAUDE.md「『これが無いと壊れる』と書いたら、外して壊れることを 1 度は見る」)。
+   * 🔑 画面の**字**で見る(`data-pkc-action` ではなく `textContent`)── user が
+   *   読むのは字であって、こちらの名前ではない。
+   */
+  await expect(repairButtons.nth(0), '上に在るのが「中身を残して、作り直す」ではない').toHaveText(
+    '中身を残して、作り直す',
+  );
+  await expect(repairButtons.nth(1), '下に在るのが「中身を捨てる」ではない').toHaveText(
+    '中身を捨てる',
+  );
+  /**
+   * ⚠ **DOM の順は、画面の上下ではない**(CSS で入れ替わりうる)── 実際に
+   *   置かれた位置(`boundingBox`)で、**作り直すほうが上**であることを見る。
+   */
+  const rebuildBox = await repairButtons.nth(0).boundingBox();
+  const resetBox = await repairButtons.nth(1).boundingBox();
+  expect(rebuildBox, '作り直すボタンが画面に置かれていない').not.toBeNull();
+  expect(resetBox, '捨てるボタンが画面に置かれていない').not.toBeNull();
+  expect(
+    rebuildBox!.y,
+    `画面では「捨てる」のほうが上に在る(作り直す y=${rebuildBox!.y} / 捨てる y=${resetBox!.y})`,
+  ).toBeLessThan(resetBox!.y);
   const rebuildRun = page.locator('[data-pkc-field="container-rebuild-run"]');
   await expect(rebuildRun, '「中身を残して、作り直す」ボタンが見えない').toBeVisible();
   await expect(rebuildRun, '「中身を残して、作り直す」ボタンが押せない(dead click)').toBeEnabled();
