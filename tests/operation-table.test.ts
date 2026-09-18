@@ -160,6 +160,11 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    * 🔑 **名前で呼べないままにする理由**:取り消せない操作を、パレットから
    *   1 語で呼べる所に置かない(押し所は設定の中の 1 つだけ)。
    */
+  /**
+   * ⚠ **2026-09-18(#1006)** ── 中身を残して、入れ物だけ作り直す。
+   * 🔑 名前で呼べないままにする理由はすぐ下と同じ(押し所は設定の中の 1 つだけ)。
+   */
+  'container-rebuild',
   'container-reset',
   'contacts-quick-add', 'copy-block-md', 'copy-chapter-md', 'copy-note-md', 'copy-note-rich',
   'copy-section-ref', 'copy-selection-md', 'db-check', 'db-rescue', 'db-rescue-archive',
@@ -406,12 +411,16 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   ── 登記は増えない。🔑 **わざと名前で呼べないままにする**:
       //   取り消せない操作なので、パレットから 1 語で呼べる所に置かない
       //   (押し所は設定の中の 1 つだけ。すぐ上の `db-rescue` 3 つと同じ仕分け)。
-      total: 318,
-      receivers: 266,
+      // ⚠ 2026-09-18(#1006): 「中身を残して、作り直す」(`container-rebuild`)で受け手 +1
+      //   ── 登記は増えない。🔑 **名前で呼べないままにする**:拾い出してから
+      //   入れ物を作り直すので、パレットから 1 語で呼べる所に置かない
+      //   (押し所は設定の中の 1 つだけ。すぐ下の `container-reset` と同じ仕分け)。
+      total: 319,
+      receivers: 267,
       registered: 88,
       both: 36,
       outsideActionsTable: 52,
-      unregistered: 230,
+      unregistered: 231,
     });
   });
 

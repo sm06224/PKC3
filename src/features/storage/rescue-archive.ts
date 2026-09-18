@@ -95,6 +95,87 @@ export interface RescueAssets {
   get(cid: string, assetKey: string): Promise<Blob | null>;
 }
 
+/** 添付を数えた結果だけ。⚠ `RescueStats` の部分集合として扱う。 */
+export interface AssetTally {
+  readonly assets: number;
+  readonly assetBytes: number;
+  readonly assetMissing: number;
+}
+
+/**
+ * 🔑 **添付を zip へ入れる口を、ここ 1 か所で持つ**（#1006）。
+ *
+ * ⚠ 使うのは **2 つ**ある:
+ * - 拾い出し（`rescueArchiveSource` ── 本文を 2 周舐める形）
+ * - 建て直し（`rebuildArchiveSource` ── 既に 1 周で集めた行を持っている形）
+ *
+ * 🔴 **2 か所に写すと、片方だけ直した日に静かにずれる**
+ * （CLAUDE.md §7「同じ問いに答える口が 2 つあると、片方だけ壊しても届かない」）。
+ *
+ * 🔑 **meta は Blob 自身から組む** ── `type` と `size` は Blob が持っているので、
+ *   sqlite の `assets` 表が読めなくても実用上の欠けはほぼ無い。
+ *   ⚠ `hash` だけは**持てないので `null`**（でっち上げない）。
+ */
+export function assetArchivePorts(
+  cid: string,
+  assets: RescueAssets | undefined,
+): {
+  readonly listAssetMetas: ArchiveSource['listAssetMetas'];
+  readonly getAssetBlob: ArchiveSource['getAssetBlob'];
+  readonly stats: () => AssetTally;
+} {
+  /** 入れた鍵。⚠ `getAssetBlob` は**ここに在る鍵だけ**返す。 */
+  const took = new Set<string>();
+  let bytes = 0;
+  /** 🔴 鍵は在るのに bytes が取れなかった数。⚠ **0 件と混ぜない**。 */
+  let missing = 0;
+  return {
+    /**
+     * 🔴 **添付は拾う**（#1005。user 指摘 2026-09-17）。
+     *
+     * ⚠ 直す前は `[]` を返していた ── 理由は「索引を使う形でしか引けない」
+     *   だったが、🔑 **bytes は IndexedDB に在り、sqlite を 1 度も通らない**ので
+     *   その理由が当たらない。
+     * ⚠ **鍵は在るのに bytes が取れない**回を数えて外へ出す（黙って減らさない）。
+     */
+    listAssetMetas: async () => {
+      if (assets === undefined) return [];
+      took.clear();
+      bytes = 0;
+      missing = 0;
+      // ⚠ 一覧が引けないのは「0 件」ではない ── そこで止めず、添付だけ諦める
+      const keys = await assets.listKeys(cid).catch((): string[] => []);
+      const out: Array<{
+        key: string;
+        mime: string | null;
+        size: number | null;
+        hash: string | null;
+      }> = [];
+      for (const key of keys) {
+        const blob = await assets.get(cid, key).catch((): Blob | null => null);
+        if (blob === null) {
+          missing += 1;
+          continue;
+        }
+        took.add(key);
+        bytes += blob.size;
+        // ⚠ 空文字の `type` は「分からない」── `null` にして書出し側の既定へ委ねる
+        out.push({ key, mime: blob.type === '' ? null : blob.type, size: blob.size, hash: null });
+      }
+      return out;
+    },
+    /**
+     * ⚠ **一覧に載せた鍵だけ**返す ── 載せていない鍵を返すと、
+     *   `writeArchive` の「meta と bytes の数が合う」前提が崩れる。
+     */
+    getAssetBlob: async (key) => {
+      if (assets === undefined || !took.has(key)) return null;
+      return assets.get(cid, key).catch((): Blob | null => null);
+    },
+    stats: () => ({ assets: took.size, assetBytes: bytes, assetMissing: missing }),
+  };
+}
+
 /** 拾い出しの成果。⚠ **拾えなかった数を必ず連れて歩く**。 */
 export interface RescueStats {
   /** 一覧に載せた件数(1 周目)。 */
@@ -148,11 +229,8 @@ export function rescueArchiveSource(opts: {
   const known = new Set<string>();
   /** 🔴 本文が届いた lid ── 届かなかった数を出すために数える。 */
   const gotBody = new Set<string>();
-  /** 🔑 zip に入れた添付(#1005)── `getAssetBlob` が読み直す鍵と、数えた量。 */
-  const tookAssets = new Set<string>();
-  let assetBytes = 0;
-  /** 🔴 鍵は在るのに bytes が取れなかった数。⚠ **0 件と混ぜない**。 */
-  let assetMissing = 0;
+  /** 🔑 添付を zip へ入れる口（#1005）。⚠ 建て直しと**同じ実体**を使う（#1006）。 */
+  const assetPorts = assetArchivePorts(opts.cid, opts.assets);
   /** ⚠ 本文の代わりに印を入れて出した lid(数えるのは `gotBody` と分ける)。 */
   const placeheld = new Set<string>();
   let skipped = 0;
@@ -285,47 +363,8 @@ export function rescueArchiveSource(opts: {
       }
       return { rows, done: true };
     },
-    /**
-     * 🔴 **添付は拾う**(#1005。user 指摘 2026-09-17)。
-     *
-     * ⚠ ここは長らく `[]` を返していた ── 理由は「索引を使う形でしか引けない」
-     *   だったが、🔑 **bytes は IndexedDB に在り、sqlite を 1 度も通らない**ので
-     *   その理由が当たらない(`AssetBlobStore.listKeys` / `.get`)。
-     * 🔑 **meta は Blob 自身から組む** ── `type` と `size` は Blob が持っている。
-     *   ⚠ `hash` は**持てないので `null`**(でっち上げない)。
-     * ⚠ **鍵は在るのに bytes が取れない**回を数えて外へ出す(黙って減らさない)。
-     */
-    listAssetMetas: async () => {
-      const ports = opts.assets;
-      if (ports === undefined) return [];
-      tookAssets.clear();
-      assetBytes = 0;
-      assetMissing = 0;
-      // ⚠ 一覧が引けないのは「0 件」ではない ── そこで止めず、添付だけ諦める
-      const keys = await ports.listKeys(opts.cid).catch((): string[] => []);
-      const out: Array<{ key: string; mime: string | null; size: number | null; hash: string | null }> = [];
-      for (const key of keys) {
-        const blob = await ports.get(opts.cid, key).catch((): Blob | null => null);
-        if (blob === null) {
-          assetMissing += 1;
-          continue;
-        }
-        tookAssets.add(key);
-        assetBytes += blob.size;
-        // ⚠ 空文字の `type` は「分からない」── `null` にして書出し側の既定へ委ねる
-        out.push({ key, mime: blob.type === '' ? null : blob.type, size: blob.size, hash: null });
-      }
-      return out;
-    },
-    /**
-     * ⚠ **一覧に載せた鍵だけ**返す ── 載せていない鍵を返すと、
-     *   `writeArchive` の「meta と bytes の数が合う」前提が崩れる。
-     */
-    getAssetBlob: async (key) => {
-      const ports = opts.assets;
-      if (ports === undefined || !tookAssets.has(key)) return null;
-      return ports.get(opts.cid, key).catch((): Blob | null => null);
-    },
+    listAssetMetas: assetPorts.listAssetMetas,
+    getAssetBlob: assetPorts.getAssetBlob,
     // 🚫 下の 3 つは**sqlite にしか無く、索引を使う形でしか引けない**ので拾えない。
     //    ⚠ 空で返すが、**拾えなかったことは `stats()` の外で必ず字にする**。
     listRelations: async () => [],
@@ -340,9 +379,7 @@ export function rescueArchiveSource(opts: {
       skipped,
       empty,
       bodyMissing: metas.length - gotBody.size,
-      assets: tookAssets.size,
-      assetBytes,
-      assetMissing,
+      ...assetPorts.stats(),
     }),
   };
 }

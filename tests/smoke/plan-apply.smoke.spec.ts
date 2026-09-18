@@ -84,32 +84,107 @@ test('🔴 案を貼ると下見が出て、当てると本当に移る (#429)',
   const resetEntryRows = page.locator('[data-pkc-region="filer-table"] tbody tr');
   await expect(resetEntryRows, '前提が崩れている ── フォルダの面に行が出ていない').toHaveCount(2);
 
-  const resetHeading = page.locator('[data-pkc-region="container-reset"] h4');
-  await expect(resetHeading, '見出しが設定の面に出ていない').toHaveText('中身を捨てて、まっさらにする');
+  const resetHeading = page.locator('[data-pkc-region="container-repair"] h4');
+  await expect(resetHeading, '見出しが設定の面に出ていない').toHaveText(
+    '壊れて直らないときの、最後の手',
+  );
+  /**
+   * 🔴 **2 段になっている**(#1006。user 裁定 2026-09-18)── 上が
+   *   「中身を残して、作り直す」、下が「中身を捨てる」。
+   * ⚠ **並びも見る** ── 逆に並ぶと、壊れた人が**先に取り消せないほう**を読む。
+   */
+  const repairButtons = page.locator('[data-pkc-region="container-repair"] button[data-pkc-action]');
+  await expect(repairButtons, '2 段になっていない').toHaveCount(2);
+  /**
+   * 🔴 **件数ではなく「どちらが上か」を見る**(着地前の smoke が指摘した)。
+   *
+   * ⚠ 直す前ここは **2 つ在ること**しか見ておらず、すぐ上の注記だけが
+   *   「並びも見る」と言っていた ── **並べ替えても落ちない**検査だった
+   *   (CLAUDE.md「『これが無いと壊れる』と書いたら、外して壊れることを 1 度は見る」)。
+   * 🔑 画面の**字**で見る(`data-pkc-action` ではなく `textContent`)── user が
+   *   読むのは字であって、こちらの名前ではない。
+   */
+  await expect(repairButtons.nth(0), '上に在るのが「中身を残して、作り直す」ではない').toHaveText(
+    '中身を残して、作り直す',
+  );
+  await expect(repairButtons.nth(1), '下に在るのが「中身を捨てる」ではない').toHaveText(
+    '中身を捨てる',
+  );
+  /**
+   * ⚠ **DOM の順は、画面の上下ではない**(CSS で入れ替わりうる)── 実際に
+   *   置かれた位置(`boundingBox`)で、**作り直すほうが上**であることを見る。
+   * ⚠ **この 2 行は、変異では 1 度も通っていない**(2026-09-18 に検算した ──
+   *   append の順を入れ替えると、**すぐ上の字の比較が先に落ちる**)。
+   *   🔑 ここが覆うのは「**DOM はそのままで、CSS だけ並びが裏返る**」形であり、
+   *   それを当てる変異はまだ作っていない ── **弱いと自覚して置いている**。
+   */
+  const rebuildBox = await repairButtons.nth(0).boundingBox();
+  const resetBox = await repairButtons.nth(1).boundingBox();
+  expect(rebuildBox, '作り直すボタンが画面に置かれていない').not.toBeNull();
+  expect(resetBox, '捨てるボタンが画面に置かれていない').not.toBeNull();
+  expect(
+    rebuildBox!.y,
+    `画面では「捨てる」のほうが上に在る(作り直す y=${rebuildBox!.y} / 捨てる y=${resetBox!.y})`,
+  ).toBeLessThan(resetBox!.y);
+  const rebuildRun = page.locator('[data-pkc-field="container-rebuild-run"]');
+  await expect(rebuildRun, '「中身を残して、作り直す」ボタンが見えない').toBeVisible();
+  await expect(rebuildRun, '「中身を残して、作り直す」ボタンが押せない(dead click)').toBeEnabled();
+  // 🔴 説明の 1 行は**見えている**こと(title だけだと指では読めない)
+  const rebuildNote = page.locator('[data-pkc-field="container-rebuild-note"]');
+  await expect(rebuildNote, '作り直しの説明が見えていない').toBeVisible();
+  await expect(rebuildNote, '作り直しの説明が空').not.toHaveText('');
   const resetRun = page.locator('[data-pkc-field="container-reset-run"]');
   await expect(resetRun, '「中身を捨てる」ボタンが見えない').toBeVisible();
   await expect(resetRun, '「中身を捨てる」ボタンが押せない(dead click)').toBeEnabled();
 
-  // ③ 押しても、この時点では 1 バイトも消えない
-  await clickReal(page, '[data-pkc-field="container-reset-run"]');
-  const resetDialog = page.locator('[data-pkc-region="app-dialog"]');
-  const resetDialogBody = page.locator('[data-pkc-field="dialog-body"]');
-  await expect(resetDialog, '説明の窓が出ない').toBeVisible();
-  await expect(resetEntryRows, '説明の窓を出しただけでノートが消えた').toHaveCount(2);
-
-  // ④ 「消えるもの」「残るもの」「元に戻せません」が書いてある
-  await expect(resetDialogBody, '「消えるもの」が出ていない').toContainText('消えるもの');
-  await expect(resetDialogBody, '「残るもの」が出ていない').toContainText('残るもの');
-  await expect(resetDialogBody, '「元に戻せません」が出ていない').toContainText('元に戻せません');
-
-  // ⑤ 「やめる」→ 窓が閉じて、一覧は元のまま
+  /**
+   * ③ 🔴 **上のボタンも「押して」みる**(#1006。着地前の smoke が非対称だと指摘した)。
+   *
+   * ⚠ 直す前ここは「**見えている / 押せる**」までしか見ておらず、
+   *   下の「中身を捨てる」だけが最後まで押されていた ── つまり
+   *   **新しく作った動線に、実ブラウザの検査が 1 つも無かった**
+   *   (CLAUDE.md「UI 導線のテストを、全量 smoke で誤魔化すな」)。
+   * ⚠ unit(happy-dom)は `showModal()` の実 dialog を通らないので、
+   *   **ここでしか見られない**。
+   * 🔴 **「始める」は押さない** ── 押すと本当に入れ物を作り直してしまう。
+   *   ここで確かめたいのは「**押しただけでは何も起きない**」ことである。
+   */
+  const dialog = page.locator('[data-pkc-region="app-dialog"]');
+  const dialogBody = page.locator('[data-pkc-field="dialog-body"]');
+  await clickReal(page, '[data-pkc-field="container-rebuild-run"]');
+  await expect(dialog, '作り直しの説明の窓が出ない').toBeVisible();
+  await expect(resetEntryRows, '窓を出しただけでノートが消えた').toHaveCount(2);
+  await expect(dialogBody, '何をするのかが書いていない').toContainText('入れ物を作り直します');
+  // 🔴 戻らない物を、押す前に言い切っている(窓の字が features の一覧と揃っていること)
+  await expect(dialogBody, '戻らない物を言っていない').toContainText('戻らないもの');
+  await expect(dialogBody, '履歴が戻らないことを言っていない').toContainText('履歴');
+  // 🔑 落とせなかったときに止まる、といういちばん怖い所を潰す 1 行
+  await expect(dialogBody, '落とせなかったときに止まることを言っていない').toContainText(
+    '何も消さずに止まります',
+  );
+  // ⚠ 「やめる」→ 窓が閉じて、一覧は元のまま(1 件も消えていない)
   await clickReal(page, '[data-pkc-field="dialog-cancel"]');
-  await expect(resetDialog, 'やめたのに窓が閉じない').toBeHidden();
+  await expect(dialog, 'やめたのに窓が閉じない').toBeHidden();
   await expect(resetEntryRows, 'やめたのにノートが変わった').toHaveCount(2);
 
-  // ⑥ もう一度押して「次へ(まだ消えません)」→ 合言葉を打つ欄が出る
+  // ④ 捨てる側も、押した時点では 1 バイトも消えない
   await clickReal(page, '[data-pkc-field="container-reset-run"]');
-  await expect(resetDialog, '2 度目に押しても説明の窓が出ない').toBeVisible();
+  await expect(dialog, '説明の窓が出ない').toBeVisible();
+  await expect(resetEntryRows, '説明の窓を出しただけでノートが消えた').toHaveCount(2);
+
+  // ⑤ 「消えるもの」「残るもの」「元に戻せません」が書いてある
+  await expect(dialogBody, '「消えるもの」が出ていない').toContainText('消えるもの');
+  await expect(dialogBody, '「残るもの」が出ていない').toContainText('残るもの');
+  await expect(dialogBody, '「元に戻せません」が出ていない').toContainText('元に戻せません');
+
+  // ⑥ 「やめる」→ 窓が閉じて、一覧は元のまま
+  await clickReal(page, '[data-pkc-field="dialog-cancel"]');
+  await expect(dialog, 'やめたのに窓が閉じない').toBeHidden();
+  await expect(resetEntryRows, 'やめたのにノートが変わった').toHaveCount(2);
+
+  // ⑦ もう一度押して「次へ(まだ消えません)」→ 合言葉を打つ欄が出る
+  await clickReal(page, '[data-pkc-field="container-reset-run"]');
+  await expect(dialog, '2 度目に押しても説明の窓が出ない').toBeVisible();
   await clickReal(page, '[data-pkc-field="dialog-ok"]');
   const resetPassInput = page.locator('[data-pkc-field="prompt-input"]');
   await expect(resetPassInput, '合言葉を打つ欄が出ない').toBeVisible();
@@ -125,10 +200,10 @@ test('🔴 案を貼ると下見が出て、当てると本当に移る (#429)',
     '「捨てる」ボタンに危険色が付いていない',
   ).toHaveAttribute('data-pkc-danger', '');
 
-  // ⑦ 違う字を打って「捨てる」→ 消えない(断りの字が画面に出る)
+  // ⑧ 違う字を打って「捨てる」→ 消えない(断りの字が画面に出る)
   await resetPassInput.fill('ちがう合言葉');
   await clickReal(page, '[data-pkc-field="dialog-ok"]');
-  await expect(resetDialog, '合言葉が違うのに窓が残っている').toBeHidden();
+  await expect(dialog, '合言葉が違うのに窓が残っている').toBeHidden();
   await expect(resetEntryRows, '合言葉を打ち間違えたのにノートが消えた').toHaveCount(2);
   await expect(
     page.locator('[data-pkc-field="status-text"]'),

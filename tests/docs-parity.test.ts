@@ -47,6 +47,7 @@ import { RELATION_KINDS } from '../src/features/relation/kinds';
 import { MAX_SMART_TAGS, smartCondError } from '../src/features/smart/smart-spec';
 import { MARKDOWN_EXTENSIONS } from '../src/features/import/plain-markdown';
 import { REVISION_KEEP_LATEST } from '../src/adapter/platform/storage/store-port';
+import { REBUILD_LOST } from '../src/features/storage/container-rebuild';
 import { THEMES } from '../src/adapter/ui/render/theme';
 import { PAGE_FORMATS } from '../src/features/page-format';
 import { EDITOR_MODES } from '../src/features/editor-mode';
@@ -459,11 +460,21 @@ describe('マニュアルと実装の突合', () => {
       '拾って、戻せる形で書き出す',
       '拾って、読める形で書き出す',
       /**
+       * 🔴 **中身を残して、作り直す**(#1006、2026-09-18。user 裁定)。
+       * ⚠ **捨てるの上**に置く ── 壊れた人がまず試すのはこちらだからである
+       *   (逆に並べると、先に取り消せないほうを読む)。
+       * ⚠ 字は「修復」にしない ── 何が残るか読めない内部の言葉である。
+       *   🔑 押す前にいちばん知りたいのは「**消えない**」なので、そこを頭に置く。
+       */
+      '中身を残して、作り直す',
+      /**
        * 🔴 **入れ物ごと捨てる**(#986 段③、2026-09-16。user 裁定)。
        * ⚠ **拾う口のすぐ下**に置く ── 壊れた人の手順が
-       *   「調べる → 拾う → **捨てる** → 取り込む」で上から読める。
+       *   「調べる → 拾う → **作り直す / 捨てる** → 取り込む」で上から読める。
        * ⚠ 字を「初期化」にしない ── 何が起きるか読めない内部の言葉である
        *   (CLAUDE.md「user が見るのは画面であって、こちらの語彙ではない」)。
+       * ⚠ **消していない**(user 裁定 2026-09-18)── 作り直しても直らない相手が
+       *   居るので、ここを畳むと**逃げ道が 1 つ無くなる**。
        */
       '中身を捨てる',
       // 🔴 整理案を適用する(#429 段③)── 「構成をコピー」の**後半**なので同じ面に置く
@@ -2355,6 +2366,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    */
   const DROPPED: readonly string[] = [
     /**
+     * ⚠ **2026-09-18(#1006 中身を残して作り直す)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-15-place-lines-pptx" …` → b9507274
+     */
+    '板の線が、PowerPoint にも出るようになりました',
+    /**
      * ⚠ **2026-09-17（#1005 拾い出しに添付を入れる）に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-15-place-name-japanese" …` → cac8d012
      */
@@ -3414,5 +3430,56 @@ describe('マニュアルだけの窓の節(§4-4)の主張', () => {
 
   it('「入れ替えました」の説明は 1 か所(同じことを 2 度書かない)', () => {
     expect(section.split('入れ替えました').length - 1).toBe(1);
+  });
+});
+
+/**
+ * 🔴 **戻らない物の一覧が、縮んでも鳴る**(#1006。着地前の変異試験 M6 が教えた)。
+ *
+ * ## なぜ要るのか
+ *
+ * `REBUILD_LOST` は「押す前の窓」と「終わった後の字」で**同じ語を使う**ための
+ * 集約である(§7)。⚠ ところが、それを検める test は**どれも
+ * `for (const lost of REBUILD_LOST)` の形**で書かれていた ──
+ * 🔴 **配列から 1 つ落とすと、窓の字も、見に行くループも、同時に縮む**ので、
+ * 「一致している」という主張は**最後まで成り立ってしまう**
+ * (CLAUDE.md §1「期待値を実装と同じ文法の別の綴りで組むと、同じ盲点を共有する」の
+ * **配列版**)。⚠ `length > 0` の空振り防止も、**3 → 2 の縮みには反応しない**。
+ *
+ * ## だから「別の観測」から期待値を作る
+ *
+ * 🔑 マニュアルの表は **`REBUILD_LOST` を 1 行も参照していない** ── user に配る
+ * 正本なので、コードだけを縮めれば**必ず食い違う**。
+ * ⚠ お知らせ(`notice-log.ts`)は使わない ── **配ったら書き換えない**約束なので、
+ * 後で 1 つ足す日に**直せない側**を期待値にしてしまう。
+ */
+describe('作り直しで戻らない物(#1006)', () => {
+  /** マニュアルの「中身を残して、作り直す」の表から、戻らない行だけを引く。 */
+  const lostRowsInManual = (): string[] => {
+    const at = MANUAL.indexOf('### 中身を残して、作り直す');
+    // ⚠ 空振り防止 ── 節そのものが消えたら、ここで落とす(0 行を「一致」と読まない)
+    expect(at, 'マニュアルに「中身を残して、作り直す」の節が無い').toBeGreaterThan(-1);
+    const seg = MANUAL.slice(at, MANUAL.indexOf('\n### ', at + 1));
+    return seg
+      .split('\n')
+      .filter((l) => l.startsWith('| ') && l.includes('戻りません'))
+      .map((l) => (l.split('|')[1] ?? '').replaceAll('**', '').replaceAll('🔴', '').trim());
+  };
+
+  it('🔴 マニュアルの「戻らないもの」と、実装の一覧が等値である', () => {
+    const inManual = lostRowsInManual();
+    // ⚠ 空振り防止 ── 表そのものを引けていなければ、この検査は何も見ていない
+    expect(inManual.length, 'マニュアルから戻らない行を 1 つも引けていない').toBeGreaterThan(0);
+    // 🔴 **等値**で見る ── 「含む」だと、コード側だけ縮めても素通りする
+    expect([...inManual].sort()).toEqual([...REBUILD_LOST].sort());
+  });
+
+  it('⚠ 引き方が効いている ── 戻る行を拾っていない', () => {
+    // 🔑 同じ表に「🟢 戻ります」の行が在る ── それを拾っていたら、引き方が広すぎる
+    const seg = MANUAL.slice(MANUAL.indexOf('### 中身を残して、作り直す'));
+    expect(seg, '前提が崩れている ── 表に「戻ります」の行が無い').toContain('🟢 **戻ります**');
+    for (const row of lostRowsInManual()) {
+      expect(row, `戻る行まで拾っている: ${row}`).not.toContain('戻ります');
+    }
   });
 });
