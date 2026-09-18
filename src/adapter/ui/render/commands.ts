@@ -28,6 +28,7 @@ import { iconButton } from './icons';
  * ここに書くと**引けない側が手で書く**ことになる(#996 と同じ型)。
  */
 import {
+  CONTAINER_REBUILD_LABEL,
   CONTAINER_RESET_LABEL,
   DB_CHECK_LABEL,
   RESCUE_ARCHIVE_LABEL,
@@ -145,43 +146,94 @@ export function buildSettingsCommands(): HTMLElement {
   wrap.append(buildStorageProfile());
   // 🔴 容量の隣に置く ── 「壊れた」と言われた人が最初に探すのはこの並びである
   wrap.append(buildDbRescue());
-  // 🔴 拾う口の**すぐ下**に置く ── 「拾う → 捨てる → 戻す」が上から順に読める
-  wrap.append(buildContainerReset());
+  // 🔴 拾う口の**すぐ下**に置く ── 「調べる → 拾う → **作り直す / 捨てる**」が上から順に読める
+  wrap.append(buildContainerRepair());
   wrap.append(buildPlanApply());
   wrap.append(buildSettingsFile());
   return wrap;
 }
 
 /**
- * 🔴 **入れ物ごと捨てて、まっさらにする**(#986 段③。user 裁定 2026-09-16)。
+ * 🔴 **壊れて直らないときの、最後の手**(#986 段③ → #1006。user 裁定 2026-09-18)。
  *
- * ## なぜ別の塊にするのか
+ * ## なぜ 2 段なのか(user 裁定 2026-09-18)
  *
- * すぐ上の `db-rescue` の見出しは「**中身が壊れていないか調べる**」である ──
- * ⚠ **調べる所に、取り消せない操作を混ぜない**(押し間違いは見出しの読み違いから起きる)。
- * 🔑 だから見出しごと分け、**拾う口のすぐ下**に置く
- *   (壊れた人の手順が「調べる → 拾う → **捨てる** → 取り込む」で上から読める)。
+ * ⚠ 直す前はここに「**中身を捨てる**」しか無かった ── つまり
+ *   **DB が壊れただけの人にも、ノートを全部捨てさせていた**。
+ *   🔑 user の言葉(こちらの解釈):**壊れているのは入れ物の側なのに、
+ *   なぜ中身まで捨てさせられるのか。** まったくそのとおりである。
+ * 🔑 だから**上に「残して作り直す」を置く** ── 拾える物を集めてから入れ物だけ
+ *   作り直し、そのまま戻す。⚠ **下の「捨てる」は消さない**(user 裁定)──
+ *   作り直しても直らない相手が居るので、**動線を 1 つ減らさない**
+ *   (CLAUDE.md「記法を減らすことは、user の動線を減らすことである」)。
+ *
+ * ## ⚠ 見出しは 2 段を覆う字にする
+ *
+ * 「中身を捨てて、まっさらにする」のままだと、⚠ その見出しの下に
+ * 「**中身を残して**、作り直す」が並ぶ ── **見出しとボタンが正面から矛盾する**。
  *
  * ## ⚠ ここには判断を 1 つも置かない
  *
  * 押したときに何を出すか(説明の窓 / 合言葉)は `binder.ts` が、
- * 何を消すかは `features/storage/container-reset.ts` が持つ。ここは**押し口だけ**。
+ * 何を消す / 戻すかは `features/storage/container-{reset,rebuild}.ts` が持つ。
+ * ここは**押し口だけ**である。
  */
-function buildContainerReset(): HTMLElement {
+function buildContainerRepair(): HTMLElement {
   const box = document.createElement('section');
-  box.setAttribute('data-pkc-region', 'container-reset');
+  /**
+   * ⚠ 区画の名前は **`container-repair`**(2026-09-18 に `container-reset` から改名)
+   * ── 2 段になった時点で、片方の名前で区画を呼ぶと**もう片方が見えなくなる**。
+   * 🔑 押し口の名前(`container-reset-*` / `container-rebuild-*`)はそのままである。
+   */
+  box.setAttribute('data-pkc-region', 'container-repair');
   const h = document.createElement('h4');
-  h.textContent = '中身を捨てて、まっさらにする';
+  h.textContent = '壊れて直らないときの、最後の手';
   box.append(h);
 
   /**
    * ⚠ **先に読ませる 1 行**(ボタンの `title` はホバーしないと読めない ──
    *   指で触る端末では**一生読まれない**)。
+   * 🔑 **2 つに共通することだけ**をここに書く ── どちらが何をするかは
+   *   それぞれのボタンの上に書く(混ぜると、どちらの話か読めない)。
+   */
+  const intro = document.createElement('p');
+  intro.setAttribute('data-pkc-field', 'container-repair-note');
+  intro.textContent =
+    `どちらも、押しただけでは何も起きません ── 何が起きるかを出して、もう一度聞きます。先に上の「${RESCUE_ARCHIVE_LABEL}」を押して手元に控えておくと、より安全です。`;
+  box.append(intro);
+
+  /**
+   * 🔴 **上に置く**(user 裁定 2026-09-18)── 壊れた人がまず試すのはこちらである。
+   * ⚠ 字は `features` から引く(#986 段③)── ここに手で書くと、
+   *   断り文やマニュアルが**古い字を指したまま CI も緑**になる(#996 と同じ型)。
+   */
+  const rebuildNote = document.createElement('p');
+  rebuildNote.setAttribute('data-pkc-field', 'container-rebuild-note');
+  rebuildNote.textContent =
+    'ノートと添付を残したまま、入れ物だけ作り直します。押すと、まず読めるノートをファイル(.pkc3.zip)にして手元へ落とし、そのあと同じ中身で戻します。落とせなかったときは、何も消さずに止まります。⚠ どのフォルダに入っていたか・ノート同士に付けた関係・履歴(前の版)は戻りません。';
+  box.append(rebuildNote);
+
+  const rebuild = document.createElement('button');
+  rebuild.type = 'button';
+  rebuild.setAttribute('data-pkc-action', 'container-rebuild');
+  rebuild.setAttribute('data-pkc-field', 'container-rebuild-run');
+  rebuild.textContent = CONTAINER_REBUILD_LABEL;
+  rebuild.title = '読めるノートを集めて書き出してから、入れ物を作り直して同じ中身を戻します(添付はそのまま残ります)';
+  box.append(rebuild);
+
+  const rebuildSum = document.createElement('p');
+  rebuildSum.setAttribute('data-pkc-field', 'container-rebuild-summary');
+  rebuildSum.hidden = true;
+  box.append(rebuildSum);
+
+  /**
+   * 🔴 **下に置く**(取り消せないほう)。⚠ **消さない** ── 作り直しても
+   *   直らない相手が居るので、ここを畳むと**逃げ道が 1 つ無くなる**。
    */
   const note = document.createElement('p');
   note.setAttribute('data-pkc-field', 'container-reset-note');
   note.textContent =
-    `直せないほど壊れたときの、最後の手です。先に上の「${RESCUE_ARCHIVE_LABEL}」で持ち出してから押してください。押しただけでは消えません ── 何が消えるかを出して、もう一度聞きます。`;
+    `🔴 こちらは中身を全部消します。元に戻せません。上の「${CONTAINER_REBUILD_LABEL}」を試しても直らなかったときだけ押してください。`;
   box.append(note);
 
   const btn = document.createElement('button');

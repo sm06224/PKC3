@@ -84,8 +84,24 @@ test('🔴 案を貼ると下見が出て、当てると本当に移る (#429)',
   const resetEntryRows = page.locator('[data-pkc-region="filer-table"] tbody tr');
   await expect(resetEntryRows, '前提が崩れている ── フォルダの面に行が出ていない').toHaveCount(2);
 
-  const resetHeading = page.locator('[data-pkc-region="container-reset"] h4');
-  await expect(resetHeading, '見出しが設定の面に出ていない').toHaveText('中身を捨てて、まっさらにする');
+  const resetHeading = page.locator('[data-pkc-region="container-repair"] h4');
+  await expect(resetHeading, '見出しが設定の面に出ていない').toHaveText(
+    '壊れて直らないときの、最後の手',
+  );
+  /**
+   * 🔴 **2 段になっている**(#1006。user 裁定 2026-09-18)── 上が
+   *   「中身を残して、作り直す」、下が「中身を捨てる」。
+   * ⚠ **並びも見る** ── 逆に並ぶと、壊れた人が**先に取り消せないほう**を読む。
+   */
+  const repairButtons = page.locator('[data-pkc-region="container-repair"] button[data-pkc-action]');
+  await expect(repairButtons, '2 段になっていない').toHaveCount(2);
+  const rebuildRun = page.locator('[data-pkc-field="container-rebuild-run"]');
+  await expect(rebuildRun, '「中身を残して、作り直す」ボタンが見えない').toBeVisible();
+  await expect(rebuildRun, '「中身を残して、作り直す」ボタンが押せない(dead click)').toBeEnabled();
+  // 🔴 説明の 1 行は**見えている**こと(title だけだと指では読めない)
+  const rebuildNote = page.locator('[data-pkc-field="container-rebuild-note"]');
+  await expect(rebuildNote, '作り直しの説明が見えていない').toBeVisible();
+  await expect(rebuildNote, '作り直しの説明が空').not.toHaveText('');
   const resetRun = page.locator('[data-pkc-field="container-reset-run"]');
   await expect(resetRun, '「中身を捨てる」ボタンが見えない').toBeVisible();
   await expect(resetRun, '「中身を捨てる」ボタンが押せない(dead click)').toBeEnabled();

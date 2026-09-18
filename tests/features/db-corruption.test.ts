@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  CONTAINER_REBUILD_LABEL,
   CONTAINER_RESET_LABEL,
   RESCUE_ARCHIVE_LABEL,
 } from '../../src/features/storage/rescue-labels';
@@ -207,7 +208,11 @@ describe('断り文(#971)', () => {
      *   `onScreen`(描いたボタンの `textContent` = 独立した観測)で見る。
      *   ⚠ ここが無いと、ボタンが定数を使うのをやめても鳴らない。
      */
-    for (const label of [RESCUE_ARCHIVE_LABEL, CONTAINER_RESET_LABEL]) {
+    /**
+     * ⚠ **2026-09-18(#1006)に 1 つ増やした** ── 断り文の**先頭の一手**が
+     *   「中身を残して、作り直す」になったので、その字が**画面に実在する**ことを見る。
+     */
+    for (const label of [CONTAINER_REBUILD_LABEL, RESCUE_ARCHIVE_LABEL, CONTAINER_RESET_LABEL]) {
       expect(onScreen, `画面に無い字を指している: ${label}`).toContain(label);
       expect(CORRUPT_REFUSAL, `断り文が「${label}」を案内していない`).toContain(label);
     }

@@ -409,6 +409,12 @@ import {
   resetPassphraseOk,
   type ContainerResetReport,
 } from '@features/storage/container-reset';
+import {
+  rebuildDoneMessage,
+  rebuildExplainMessage,
+  type RebuildProgress,
+  type RebuildReport,
+} from '@features/storage/container-rebuild';
 import { OFFICE_PACK_APPROX } from '@features/office/office-pack-size';
 import { DUCKDB_PACK_APPROX } from '@features/query/duckdb-pack';
 import { readZipDirectory, readZipEntry, type ZipEntry } from '@features/import/zip-reader';
@@ -960,6 +966,15 @@ export interface BinderServices {
    * ⚠ 返るのは**消せなかった数まで含む報告**である(「全部消えた」と読ませない)。
    */
   resetContainer?(cid: string): Promise<ContainerResetReport>;
+  /**
+   * 🔴 **拾った中身で、その場に建て直す**（#1006。user 裁定 2026-09-18）。
+   *
+   * ⚠ **順番と門はここへ渡さない** ── `features/storage/container-rebuild.ts` が 1 か所で持つ。
+   * ⚠ 返るのは**結末を 3 値で持つ報告**である（真偽ではない）──
+   *   「作り直せたがメモリ上だった」は成功でも失敗でもなく、
+   *   **user が次にやることが違う**。
+   */
+  rebuildContainer?(cid: string, onProgress?: RebuildProgress): Promise<RebuildReport>;
   /**
    * 🔴 **読み込み直す**(#986 段③)。⚠ 捨てた後の画面は**もう無い物を映している**。
    * ⚠ optional なのは test のためだけ ── 実機では必ず渡す
@@ -7096,6 +7111,104 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   「とりあえず中身を読みたい」は別の要求である
    *   (CLAUDE.md「記法を減らすことは、user の動線を減らすことである」)。
    */
+  /**
+   * 🔴 **中身を残して、作り直す**(#1006。user 裁定 2026-09-18)。
+   *
+   * ## user が言っていたこと(こちらの解釈)
+   *
+   * 壊れているのは **DB の側**なのに、直す口が「**全部捨てる**」しか無かった ──
+   * なぜ中身まで捨てさせられるのか。🔑 だから**中身を持ち越す道**を作る。
+   *
+   * ## ⚠ ここには順番を 1 つも置かない
+   *
+   * 拾う → zip を落とす → 捨てる → 開き直す → **退避したかを見る** → 書き戻す →
+   * 他のタブへ知らせる、の順は `features/storage/container-rebuild.ts` が持つ。
+   * 🔑 ここは**聞いて、進み具合を出して、読み込み直す**だけである。
+   *
+   * ## ⚠ 合言葉は聞かない(「捨てる」との違い)
+   *
+   * 🔑 こちらは**先に zip が手元へ落ちてから**しか進まないうえ、ノートと添付が
+   *   そのまま戻る ── 捨てる側と同じ重さの門を置くと、**推奨したい側が重くなる**。
+   * ⚠ ただし**戻らない物は窓で言い切る**(`rebuildExplainMessage`)。
+   *
+   * ## ⚠ なぜ `recheck` を通していないか
+   *
+   * 捨てる側(すぐ下)と同じ理由である ── ①効く先は `cid` 1 つ
+   * ②**壊れて編集中のまま動けない**ときにこそ要る口なので、`notWhileEditing` で
+   * 止めると「**壊れているときだけ作り直せない**」= 趣旨と逆になる。
+   */
+  'container-rebuild': (dispatcher, _target, services, root) => {
+    const sum = root.querySelector<HTMLElement>('[data-pkc-field="container-rebuild-summary"]');
+    if (sum === null) return;
+    const rebuild = services.rebuildContainer;
+    if (rebuild === undefined) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この環境では作り直せません' });
+      return;
+    }
+    const cid = dispatcher.getState().cid;
+    if (cid === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'まだ開いていません' });
+      return;
+    }
+    /**
+     * 🔑 **端末に在る添付の件数**(#1005 と同じ口)── `listKeys` は IndexedDB を
+     *   直に読むので、**sqlite が壊れていても引ける**。
+     * ⚠ 引けなければ `null`(**0 件と混ぜない** ── 「無い」と「数えられない」を
+     *   同じ字にすると、失う側の人が安心する)。
+     */
+    const onDisk = services.rescueAssets;
+    const counting: Promise<number | null> =
+      onDisk === undefined
+        ? Promise.resolve(null)
+        : onDisk.listKeys(cid).then(
+            (k) => k.length,
+            () => null,
+          );
+    void counting
+      .then((assetsOnDisk) =>
+        confirmInApp(
+          root,
+          rebuildExplainMessage({ notes: dispatcher.getState().entryMetas.size, assetsOnDisk }),
+          { okLabel: '始める', cancelLabel: 'やめる' },
+        ),
+      )
+      .then(async (answer) => {
+        if (answer !== 'ok') return;
+        sum.textContent = '拾っています…';
+        sum.hidden = false;
+        try {
+          /**
+           * ⚠ **進み具合を出す** ── 壊れた DB を舐めるのは秒では終わらないので、
+           *   何も出さないと「**固まった**」と読まれて窓を閉じられる
+           *   (閉じられると、書き戻す前に止まる)。
+           */
+          const report = await rebuild(cid, (phase, seen) => {
+            sum.textContent =
+              phase === 'pick' ? `拾っています… ${seen} 件` : `戻しています… ${seen} 件`;
+          });
+          const done = rebuildDoneMessage(report);
+          sum.textContent = done;
+          // ⚠ **読ませてから読み込み直す**(すぐ reload すると誰も読めない)
+          await alertInApp(root, done);
+          /**
+           * 🔴 **どの結末でも読み込み直す** ── 開き直した先は**別の worker** なので、
+           *   いま画面が握っている状態は**もう繋がっていない**。
+           */
+          services.reloadApp?.();
+        } catch (e) {
+          /**
+           * 🔑 **ここへ来たのは zip を落とす前**である(`container-rebuild.ts` は
+           *   落とせなければ捨てずに投げる)── だから「**何も消えていません**」と言える。
+           */
+          sum.textContent = '';
+          sum.hidden = true;
+          dispatcher.dispatch({
+            type: 'OP_FAILED',
+            error: `作り直せませんでした(何も消えていません): ${String(e)}`,
+          });
+        }
+      });
+  },
   /**
    * 🔴 **入れ物ごと捨てて、まっさらにする**(#986 段③。user 裁定 2026-09-16
    * 「ボタンは推奨で作ってよいが、押したら説明と、本当に実行するかを聞くこと」)。

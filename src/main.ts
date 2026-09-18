@@ -258,6 +258,11 @@ import {
 import { createAssetGate } from '@adapter/ui/actions/asset-gate';
 import { generateAssetKey } from '@adapter/platform/storage/asset-key';
 import { downloadBlob, downloadUrl } from '@adapter/platform/download';
+import {
+  rebuildContainer,
+  type RebuildProgress,
+} from '@features/storage/container-rebuild';
+import { writeArchive } from '@features/export/pkc3-archive';
 import { downloadSelfhostBundle } from '@adapter/ui/actions/selfhost';
 import { dayStamp } from '@features/datetime/date-math';
 import { APP_VERSION, BUILD_KIND, BUILT_AT } from '@runtime/release-meta';
@@ -2482,6 +2487,66 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         },
         announceWiped: () => wipedChannel.announce(target),
       }),
+    /**
+     * 🔴 **拾った中身で、その場に建て直す**（#1006。user 裁定 2026-09-18）。
+     *
+     * ⚠ **順番と門はここに置かない** ── `features/storage/container-rebuild.ts` が 1 か所で持つ。
+     *   ここにあるのは**口だけ**である。
+     *
+     * 🔴 **`reopenStorage` がこの機能の心臓部である**（実ブラウザで測った、
+     *   2026-09-18）。`wipeStorage` は file の中身を消すだけで、
+     *   **掴んでいる手（Access Handle）を離していない** ── だから
+     *   **旧 worker を `terminate()` してから**新しい worker で開く。
+     *   ⚠ 同じ worker に `init` をもう一度投げると、**例外を出さずに**
+     *   `memory` へ落ちる（`NoModificationAllowedError`）。
+     *
+     * 🔑 **開き直した相手はこの 1 回だけ使い捨てる** ── 終わったら画面を
+     *   読み込み直すので、`main.ts` が握っている配線を**差し替えない**
+     *   （差し替えると、古い client を閉じ込んだ closure が残って静かに壊れる）。
+     */
+    rebuildContainer: async (target: string, onProgress?: RebuildProgress) => {
+      /** 開き直した相手。⚠ `reopenStorage` を通る前は無い。 */
+      let fresh: StoreClient | null = null;
+      const reopened = (): StoreClient => {
+        // ⚠ 順番を間違えたら**黙って書かない** ── その場で落とす
+        if (fresh === null) throw new Error('開き直す前に書き戻そうとしました');
+        return fresh;
+      };
+      return rebuildContainer(target, CONTAINER_TITLE, {
+        pick: async (afterRowid, chunks) =>
+          client.request({ op: 'rescueEntries', afterRowid, chunks }),
+        // 🔑 添付は **IndexedDB を直に読む**（sqlite を 1 度も通らない）
+        assets: {
+          listKeys: (c: string) => blobs.listKeys(c),
+          get: (c: string, key: string) => blobs.get(c, key),
+        },
+        // ① ⚠ **保険が先**。ここで落ちたら 1 バイトも消さずに止まる
+        saveArchive: async (source) => {
+          const out = await writeArchive(source, new Date().toISOString());
+          downloadBlob(`pkc-rescue-${dayStamp(new Date())}.pkc3.zip`, out.blob);
+        },
+        wipeStorage: async () => client.request({ op: 'wipeStorage' }),
+        reopenStorage: async () => {
+          // 🔴 **掴んでいる手を先に離す** ── これが無いと黙って memory へ落ちる
+          client.terminate();
+          const re = await initStorage(portable);
+          fresh = re.client;
+          return { fallbackReason: re.init.fallbackReason };
+        },
+        // ⑤ 🔑 **同じ器の id で作り直す** ── これで添付の鍵がそのまま生きる
+        openContainer: async (c: string, t: string) => {
+          await reopened().request({ op: 'openContainer', cid: c, title: t });
+        },
+        writeEntries: async (c: string, entries) => {
+          await reopened().request({ op: 'bulkUpsertEntries', cid: c, entries: [...entries] });
+        },
+        forgetLocal: () => {
+          appCopyHistory.clear();
+        },
+        announceWiped: () => wipedChannel.announce(target),
+        ...(onProgress === undefined ? {} : { onProgress }),
+      });
+    },
     /**
      * ⚠ 捨てた後の画面は**もう無い物を映している** ── 読み込み直す。
      * 🔑 呼ぶのは「消せなかった数」を読ませた**後**である(`binder.ts`)。

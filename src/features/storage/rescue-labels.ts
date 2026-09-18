@@ -31,5 +31,15 @@ export const RESCUE_TEXT_LABEL = '拾って、読める形で書き出す';
 /** 壊れている所があるかを調べる。 */
 export const DB_CHECK_LABEL = '壊れていないか調べる';
 
+/**
+ * 🔑 **拾った中身で、その場に建て直す**（#1006。user 裁定 2026-09-18）。
+ *
+ * ⚠ 字の選び方に理由がある ── 押す前にいちばん知りたいのは
+ *   「**消えない**」だからである（壊れたと聞いた直後の人は、
+ *   何を押しても消えるのではと怖がって手が止まる）。
+ * 🔑 すぐ下の `CONTAINER_RESET_LABEL` と**対になって読める**（残す / 捨てる）。
+ */
+export const CONTAINER_REBUILD_LABEL = '中身を残して、作り直す';
+
 /** 🔴 入れ物ごと捨てる(取り消せない)。 */
 export const CONTAINER_RESET_LABEL = '中身を捨てる';
