@@ -113,6 +113,10 @@ test('🔴 案を貼ると下見が出て、当てると本当に移る (#429)',
   /**
    * ⚠ **DOM の順は、画面の上下ではない**(CSS で入れ替わりうる)── 実際に
    *   置かれた位置(`boundingBox`)で、**作り直すほうが上**であることを見る。
+   * ⚠ **この 2 行は、変異では 1 度も通っていない**(2026-09-18 に検算した ──
+   *   append の順を入れ替えると、**すぐ上の字の比較が先に落ちる**)。
+   *   🔑 ここが覆うのは「**DOM はそのままで、CSS だけ並びが裏返る**」形であり、
+   *   それを当てる変異はまだ作っていない ── **弱いと自覚して置いている**。
    */
   const rebuildBox = await repairButtons.nth(0).boundingBox();
   const resetBox = await repairButtons.nth(1).boundingBox();
