@@ -837,6 +837,22 @@ v4 の置き場(書き出しは右の列へ / 保守は「保存領域」へ / �
 理由(既に右の列に同じ名前の操作が在る / 場所が空いている / メッセージから飛べる先が要る)は doc に在ったが、**設問に載せていなかった**。
 ⚠ 「回答しない」は裁定ではなく保留である ── その項目は**いまのまま**にし、こちらから再度聞かない(次に user が触れたときに出す)。
 
+### 🔴 サブエージェントは「適切なモデル」でコストを最適化する。ムダ撃ちでクレジットを浪費しない(user 指示 2026-09-20。不可侵)
+
+user 指示(解釈):**サブエージェントに使うモデルは、仕事の重さに合わせて安い側を選べ。そして空振り(ムダ撃ち)で
+クレジットを溶かすな。**
+
+🔑 何が起きていたか:`.claude/agents/*.md` の 6 本は **`model:` を 1 つも書いていなかった**ので、
+起動時に `model` を渡し忘れると**親(高い側)を継ぐ**。この日の調査 3 本は sonnet を明示したが、
+⚠ 1 本は hand-back に表を入れずに返し、**送り直しで同じ調査をもう 1 度回した**(= ムダ撃ち)。
+設問も 5 巡出し、うち 2 巡は前提が違っていて丸ごと捨てた ── これも親モデルでのムダ撃ちである。
+
+🔑 **手順(判断ではなく既定)**:
+① **agent の frontmatter に `model:` を書く**(起動時の指定に頼らない)── 表は `.claude/skills/subagent-scale/SKILL.md` §「モデルの選び方」
+② **投げる前に「返ってくる物の形」を依頼文に書く**(表 / file:line / KILLED・SURVIVED の 3 値)── 形が無い報告は送り直しになり、それがムダ撃ちである
+③ **同じ問いを 2 度投げない** ── 1 本目の報告が足りないなら、**足りない部分だけ**を SendMessage で頼む(再起動しない)
+④ **設問は前提を確かめてから 1 度で出す**(2 巡目〜5 巡目の教訓。設問の出し直しは親モデルの最も高い使い方である)
+
 #### 🔴 面は「映すだけ」にしない ── **双方向**を既定にする(user 指示 2026-08-23。不可侵)
 
 > 「**バカかお前は / なんで双方向にする発想がでねぇんだよ!**」
@@ -2386,14 +2402,18 @@ P4 assets → P5 revisions → P6 import/export → P7 v3.0.0(Pages product + PW
 **規律の正本は本 `CLAUDE.md`**(とくに不可侵指示と「検証の規律」)。
 **手順と道具**は `.claude/` に在る。
 
-| 置き場 | 中身 | 隔離 |
-|---|---|---|
-| `.claude/agents/pkc3-reviewer.md` | 着地前の敵対的レビュアー(**実装の正しさ**) | **read-only** |
-| `.claude/agents/pkc3-ux-reviewer.md` | **user 目線**のレビュアー(動線・物語) | **read-only** |
-| `.claude/agents/pkc3-surveyor.md` | 実地調査員(file:line で根拠) | **read-only** |
-| `.claude/agents/pkc3-implementer.md` | 実装を 1 主題ずつ分担する | 🔴 **worktree** |
-| `.claude/agents/pkc3-verifier.md` | 変異試験を回す | 🔴 **worktree** |
-| `.claude/agents/pkc3-smoker.md` | **対象範囲だけ**の実ブラウザ smoke(動線を名指しする) | 🔴 **worktree** |
+| 置き場 | 中身 | 隔離 | model(user 裁定 2026-09-20「3 段で分ける」) |
+|---|---|---|---|
+| `.claude/agents/pkc3-reviewer.md` | 着地前の敵対的レビュアー(**実装の正しさ**) | **read-only** | sonnet |
+| `.claude/agents/pkc3-ux-reviewer.md` | **user 目線**のレビュアー(動線・物語) | **read-only** | sonnet |
+| `.claude/agents/pkc3-surveyor.md` | 実地調査員(file:line で根拠) | **read-only** | sonnet |
+| `.claude/agents/pkc3-implementer.md` | 実装を 1 主題ずつ分担する | 🔴 **worktree** | sonnet |
+| `.claude/agents/pkc3-verifier.md` | 変異試験を回す(判断はほぼ無く、回数が効く) | 🔴 **worktree** | **haiku** |
+| `.claude/agents/pkc3-smoker.md` | **対象範囲だけ**の実ブラウザ smoke(動線を名指しし、spec を引く判断が要る) | 🔴 **worktree** | sonnet |
+| `.claude/agents/pkc3-runner.md` | **機械的な実行**(全量 test / build / 名指しの smoke / grep の全数)を決まった形で返す。判断しない | 🔴 **worktree**(build / smoke のとき) | **haiku** |
+
+🔑 **3 段の既定**:haiku = 機械的な作業(回して結果を返す / 数える)/ sonnet = file:line で根拠を読む仕事(調査・レビュー・実装の分担)/
+親 = 設計の判断と user とのやり取りだけ。⚠ `model:` は定義 file に書いてある ── 起動時の指定に頼らない。
 
 ⚠ **`isolation: "worktree"` が起動できないことがある**(2026-08-14 実測
 `no WorktreeCreate hooks are configured`)。🔴 **ただし、そう読む前に `pwd` を見る**
