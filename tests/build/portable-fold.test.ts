@@ -14,10 +14,17 @@
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { codeOnly } from '../helpers/code-only';
 // @ts-expect-error -- build script(型定義を持たない .mjs)を実際に走らせて見る
 import { bundleTagCount, externalRefs, manualPageTag, manualPageTagCount, shellOf } from '../../build/portable/shell-scan.mjs';
 
 const FOLD = readFileSync('build/portable/fold.mjs', 'utf-8');
+/**
+ * 🔴 **門が「在る」ことの主張は、注釈を落としてから見る**（CLAUDE.md §1）。
+ * ⚠ この file の注釈には門の綴りがそのまま書いてあるので、原文をそのまま見ると
+ *   **門を外しても緑**になる。
+ */
+const CODE = codeOnly(FOLD);
 const CONFIG = readFileSync('build/portable.config.ts', 'utf-8');
 
 describe('畳む前提(ビルド設定)', () => {
@@ -104,13 +111,40 @@ describe('🔴 当たらなかったら落とす(黙って畳まない)', () => 
     expect(FOLD).toContain('worker の作り方に 1 件も当たらなかった');
   });
 
-  it('🔴 storage worker の wasm 解決式に当たらなければ落とす', () => {
-    // ⚠ ここが当たらないと、blob worker が `blob:…` から wasm を探して**起動しない**
-    expect(FOLD).toContain('storage worker の wasm 解決式に当たらなかった');
+  /**
+   * 🔴 **門は「名前」ではなく「結果」で見る**(2026-09-20、#1014)。
+   *
+   * ⚠ 直す前は `storage worker の wasm 解決式に当たらなかった` という 1 本だけで、
+   *   しかも **`storage-worker` で始まる chunk しか見ていなかった** ── だから
+   *   `sqlite3-worker1-*.js` に**同じ式が残っても黙って通していた**(実測で 1 件)。
+   * 🔑 いまは 2 本:①**1 つも差し替わらなければ落とす**(空振り防止)
+   *   ②**どの chunk にも wasm の file 名を残さない**(畳んだ後に解けない参照 = 起動しない)。
+   */
+  it('🔴 wasm の解決式に 1 件も当たらなければ落とす(空振り防止)', () => {
+    expect(CODE).toContain('wasm の解決式に 1 件も当たらなかった');
   });
 
+  it('🔴 畳んだ後に wasm の参照が残った chunk があれば落とす', () => {
+    // ⚠ 残ると、blob worker が `blob:…` から wasm を探して**起動しない**
+    expect(CODE).toContain('wasm の参照が残った chunk がある');
+    expect(CODE, '名前で絞ると worker1 を取りこぼす').not.toContain("name.startsWith('storage-worker')");
+  });
+
+  /**
+   * 🔴 **上流のコード生成は綴りを変える ── 決め打たない**(#1014)。
+   *
+   * ⚠ vite 8.2.2 → 8.3.0 で `` ``+ ``(空の template literal の連結)が消え、
+   *   **wasm 側と Worker 側の 2 か所とも**当たらなくなって `/dev/` の配信が 2 日止まった。
+   * ⚠ **前の門が先に落ちる**ので、1 つ目を直すまで 2 つ目は見えなかった ──
+   *   だから**両方**を pin する(片方だけだと、次も半分だけ直して終わる)。
+   */
   it('⚠ 呼び出し式の外側の `.href` は optional(綴りを決め打たない)', () => {
-    expect(FOLD, '綴りを 1 通りに決め打っている').toContain("(?:\\\\.href)?");
+    expect(CODE, '綴りを 1 通りに決め打っている').toContain('(?:\\\\.href)?');
+  });
+
+  it('🔴 内側の `` ``+ `` も optional ── wasm 側と Worker 側の両方', () => {
+    const hits = CODE.split('(?:``\\\\+)?').length - 1;
+    expect(hits, '`` ``+ `` を決め打っている箇所が残っている(2 か所とも要る)').toBe(2);
   });
 
   it('畳む対象の file が 1 件に決まらなければ落とす', () => {
