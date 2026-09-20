@@ -107,7 +107,7 @@ export const CORRUPT_BLOCKED_OPS: readonly string[] = [
 export const CORRUPT_REFUSAL =
   '保存されている中身の一部が壊れています。これ以上書き込むと壊れ方が広がるので、' +
   '書き込みだけ止めました。読むことはできます ── ' +
-  `設定 の 書き出しと片づけ にある「${CONTAINER_REBUILD_LABEL}」を押してください。` +
+  `システム の 書き出しと片づけ にある「${CONTAINER_REBUILD_LABEL}」を押してください。` +
   '読めるノートをファイルへ書き出してから入れ物を作り直し、そのまま戻します(添付は触りません)。' +
   `それでも直らないときは、「${RESCUE_ARCHIVE_LABEL}」で取り出してから` +
   `「${CONTAINER_RESET_LABEL}」でまっさらにして、左の列の「取り込む」で戻してください。` +

@@ -310,7 +310,7 @@ describe('お知らせの帯', () => {
       .not.toBeNull();
     // ⚠ **戻し道をその場に書く**(押した後に探させない)
     const mute = region.querySelector('[data-pkc-action="mute-announce"]')!;
-    expect(mute.getAttribute('title') ?? '', '戻せることが書かれていない').toContain('設定');
+    expect(mute.getAttribute('title') ?? '', '戻せることが書かれていない').toContain('システム');
   });
 
   /**
@@ -892,6 +892,13 @@ describe('お知らせの文面は固定(#220-7)', () => {
    */
   const KNOWN: readonly [id: string, digest: string][] = [
     /**
+     * ⚠ **#1017 段⓪(「設定」→「システム」の改名)で足した**(2026-09-20)。
+     *   枠(30 件)が満杯だったので、**いちばん古い 1 件**
+     *   (`2026-09-15-sql-duckdb`)を落とした ── 原本は `CHANGELOG.md` に在る
+     *   (配布済み: origin/main の 0d458fe)。
+     */
+    ['2026-09-20-system-rename', '41696048'],
+    /**
      * ⚠ **#1007 段①(起動のたびに軽く検める)で足した**(2026-09-20)。
      *   枠(30 件)が満杯だったので、**いちばん古い 1 件**
      *   (`2026-09-15-place-line-route`)を落とした ── 原本は `CHANGELOG.md` に在る
@@ -1128,12 +1135,6 @@ describe('お知らせの文面は固定(#220-7)', () => {
      *   枠(30 件)が満杯だったので、**いちばん古い 1 件**(`2026-09-13-import-smart`)を
      *   落とした ── 原本は `CHANGELOG.md` に在る(配布済み: origin/main の f3e3d5b)。
      */
-    /**
-     * ⚠ **#530 段③c(線の通り方)で足した**(2026-09-15、user 裁定)。
-     *   枠(30 件)が満杯だったので、**いちばん古い 1 件**(`2026-09-13-app-group-icon`)を
-     *   落とした ── 原本は `CHANGELOG.md` に在る(配布済み: origin/main の 1295a5d)。
-     */
-    ['2026-09-15-sql-duckdb', '1cc157de'],
     /**
      * ⚠ **#530 段③a(板の付箋どうしを線で繋ぐ)で足した**(2026-09-14)。
      *   枠(30 件)が満杯だったので、**いちばん古い 1 件**(`2026-09-13-tile-reorder-mode`)を

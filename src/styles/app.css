@@ -6247,6 +6247,28 @@ li[data-pkc-row-slot] {
   margin-top: var(--s3);
 }
 
+/* 🔴 「システム」の先頭の目次(#1017 段⓪)。⚠ 畳まない ── 押せば全部見える。 */
+[data-pkc-region='settings-toc'] {
+  padding: var(--s4);
+  border-bottom: 1px solid var(--border);
+}
+[data-pkc-field='settings-toc-row'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+}
+/* 見出しと「上へ」を同じ行に置く(見出しは h3 のまま ── textContent を汚さない)。 */
+[data-pkc-field='settings-heading-row'] {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s3);
+}
+[data-pkc-field='settings-back-to-top'] {
+  font-size: 12px;
+  color: var(--muted);
+}
+
 /* ── フォルダ面の複数選択・まとめて操作・D&D(#240 段②③④)──────────
  *
  * ⚠ **開いている**(`selected`)と**印を付けた**(`marked`)を**別の見え方**にする ──

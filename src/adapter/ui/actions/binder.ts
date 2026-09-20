@@ -368,7 +368,7 @@ async function browseArchive(
   if (wantWindow && win === null) {
     say(
       '別の窓が開けなかったので、この画面で開きます' +
-        '(いつもこの画面でよければ、設定の「開く場所」で選べます)',
+        '(いつもこの画面でよければ、システムの「開く場所」で選べます)',
     );
   }
   const marks =
@@ -8014,6 +8014,22 @@ const ACTIONS: Record<string, ActionHandler> = {
   'revoke-extension': (_dispatcher, target, services) => {
     const key = target.getAttribute('data-pkc-asset-key');
     if (key !== null && key !== '') services.revokeExtension?.(key);
+  },
+  /**
+   * 🔴 **「システム」の目次から節へ飛ぶ / 「上へ」で目次へ戻る**(#1017 段⓪)。
+   * ⚠ 行き先の `data-pkc-section` は `settings.ts` の `buildToc` が焼く(綴りは 1 か所)。
+   *   `top` は実在する id ではなく「目次へ戻る」の合図である。
+   */
+  'system-jump': (_dispatcher, target) => {
+    const id = target.getAttribute('data-pkc-target');
+    if (id === null || id === '') return;
+    const pane = target.closest<HTMLElement>('[data-pkc-view-pane="settings"]');
+    if (pane === null) return;
+    const dest =
+      id === 'top'
+        ? pane.querySelector<HTMLElement>('[data-pkc-region="settings-toc"]')
+        : pane.querySelector<HTMLElement>(`[data-pkc-section="${CSS.escape(id)}"]`);
+    dest?.scrollIntoView({ block: 'start' });
   },
   'set-paste-source': (_dispatcher, target, services) => {
     // ⚠ `set-external-images` と同じ受け方(`<select>` でもボタンでも通す)

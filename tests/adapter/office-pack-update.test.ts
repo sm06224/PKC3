@@ -52,7 +52,7 @@ describe('文言', () => {
     }
   });
 
-  it('設定の面には、両方の版と次の一歩が出る', () => {
+  it('システムの面には、両方の版と次の一歩が出る', () => {
     const text = packUpdateText(diff)!;
     expect(text).toContain('unknown');
     expect(text).toContain('lo-abc-run1');
@@ -63,7 +63,7 @@ describe('文言', () => {
   it('起動時の知らせには、どこへ行けばよいかが出る', () => {
     const text = packUpdateNotice(diff)!;
     expect(text).toContain('Office');
-    expect(text).toContain('設定');
+    expect(text).toContain('システム');
   });
 
   it('黙るときは、どちらも null(空の行を出さない)', () => {

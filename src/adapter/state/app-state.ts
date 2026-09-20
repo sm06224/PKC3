@@ -637,7 +637,7 @@ const VIEW_LABELS: Record<ViewMode, string> = {
   search: '探す',
   dual: '2 ペインで整理',
   sql: 'SQL で調べる',
-  settings: '設定',
+  settings: 'システム',
   flags: 'フラグ',
   help: 'ヘルプ',
 };

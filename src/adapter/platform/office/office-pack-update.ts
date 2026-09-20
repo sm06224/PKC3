@@ -66,11 +66,11 @@ export function packUpdateText(diff: PackVersionDiff): string | null {
 
 /**
  * 起動時に 1 度だけ出す短い知らせ。
- * ⚠ 設定の面と**同じ判定**から出す(2 か所で判定を書かない)。
+ * ⚠ システムの面と**同じ判定**から出す(2 か所で判定を書かない)。
  */
 export function packUpdateNotice(diff: PackVersionDiff): string | null {
   if (diff.kind === 'quiet') return null;
-  return 'Office のひとそろいは、配布元と別の版です(設定 → Office 表示 から入れ直せます)';
+  return 'Office のひとそろいは、配布元と別の版です(システム → Office 表示 から入れ直せます)';
 }
 
 export interface PackUpdateCheckDeps {

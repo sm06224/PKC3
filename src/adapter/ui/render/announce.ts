@@ -183,14 +183,14 @@ export function createAnnounce(
        * ⚠ **数は書かない、組み立てる**(2026-09-08、#751)── 同じ字が 5 か所に
        *   散っていて、上限を動かした日にどれかが嘘になる(CLAUDE.md §7)。
        */
-      `過去のお知らせは「ヘルプ」から${NOTICE_READABLE_TEXT}が読めます。「今後は出さない」は設定の「表示」から戻せます。`;
+      `過去のお知らせは「ヘルプ」から${NOTICE_READABLE_TEXT}が読めます。「今後は出さない」はシステムの「表示」から戻せます。`;
 
     const mute = document.createElement('button');
     mute.type = 'button';
     mute.setAttribute('data-pkc-action', 'mute-announce');
     mute.textContent = '今後は出さない';
     /** ⚠ **戻し道をその場に書く**(押した後に探させない)。 */
-    mute.title = '設定の「表示」からいつでも戻せます';
+    mute.title = 'システムの「表示」からいつでも戻せます';
 
     foot.append(where, mute);
     region.append(foot);

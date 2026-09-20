@@ -438,7 +438,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'open-settings',
-    label: '設定の面へ',
+    label: 'システムの面へ',
     contexts: ['global'],
     defaults: ['Alt+3', 'Mod+Comma'],
     /**
