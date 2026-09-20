@@ -838,6 +838,13 @@ export class SettingsRenderer {
       link.textContent = label;
       row.append(link);
 
+      /**
+       * ⚠ **計器の区画(`jobs`)には「上へ」を置かない** ── そこは「読むだけ」が
+       *   不変量で(P9 段③、`layout.smoke.spec.ts`「設定は user 向けと計器に
+       *   分かれている」が `[data-pkc-action]` 0 件で pin)、押せる物を 1 つでも
+       *   混ぜると壊れる(2026-09-20 の smoke が実際に落ちた)。目次からは飛べる。
+       */
+      if (h.closest('[data-pkc-region="jobs"]') !== null) return;
       const back = document.createElement('button');
       back.type = 'button';
       back.setAttribute('data-pkc-action', 'system-jump');
