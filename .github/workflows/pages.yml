@@ -40,6 +40,16 @@ jobs:
           mkdir -p _site/dev
           cp -r dist/. _site/dev/
       - name: 可搬単一 HTML の雛形(#400 段④)
+        id: portable
+        # 🔴 **雛形が焼けなくても、アプリ本体の配信は止めない**(#1014)。
+        #    ⚠ 2026-09-18 はここが落ちたせいで configure-pages /
+        #    upload-pages-artifact / deploy-pages が **4 つとも skip** され、
+        #    `/dev/` が 2 日間更新されなかった(Build dev は緑だった)。
+        #    🔑 雛形は**アプリの一部ではなく、押したときだけ取りに行く別の成果物**
+        #    なので、無ければアプリが画面で「雛形を取れませんでした」と言う
+        #    (`src/main.ts` の `fetchTemplate`)── **無言の dead click にはならない**。
+        #    ⚠ **黙って配るのではない** ── 下の最後の step が job を赤にする。
+        continue-on-error: true
         run: |
           # 🔴 **`dist` の検品の「後」に置く** ── 雛形はアプリの一部ではなく、
           # 「押したときだけ取りに行く別の成果物」である。dist に混ぜると
@@ -120,3 +130,13 @@ jobs:
           path: _site
       - id: deployment
         uses: actions/deploy-pages@v5
+      # 🔴 **配ったうえで、雛形の失敗を赤として残す**(#1014)。
+      # ⚠ `continue-on-error` だけだと job は緑になる ── それだと
+      #    「雛形がいつの間にか焼けていない」を**誰も知らない**
+      #    (CLAUDE.md「赤が届く先を作る」── Nightly が 13 晩赤かった件と同じ型)。
+      # 🔑 門は `tests/workflow-steps.test.ts`。
+      - name: 雛形が焼けなかったことを赤で残す(#1014)
+        if: steps.portable.outcome == 'failure'
+        run: |
+          echo "::error::可搬単一 HTML の雛形が焼けなかった ── アプリ本体は配ってあるが、「持ち歩ける 1 枚」を押すと取れない状態である"
+          exit 1
