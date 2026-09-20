@@ -24,6 +24,8 @@ import type {
 } from '../../src/adapter/platform/storage/protocol';
 import { CORRUPT_REFUSAL } from '../../src/features/storage/db-corruption';
 import { parseQuickCheck } from '../../src/features/storage/db-rescue';
+import { CONTAINER_REBUILD_LABEL } from '../../src/features/storage/rescue-labels';
+import { runStartupIntegrity } from '../../src/adapter/platform/storage/startup-integrity';
 
 type Op = StorageRequest['op'];
 const pending = new Map<number, (resp: StorageResponse) => void>();
@@ -162,5 +164,53 @@ describe('壊れた DB でも救出の口は押せる(#971 段③)', () => {
     // 🔑 索引だけ壊れているときは**1 行も失われない**(実測)── 全部返ることを見る
     expect(seen.size, `拾えた件数が足りない(${seen.size} / ${seeded})`).toBe(seeded);
     expect(seen.get('k7'), '本文が空で返っている').toContain('壊れる前に書いた本文 7');
+  });
+});
+
+/**
+ * 🔴 **起動の検め(#1007 段①)を、本当に壊れた DB で通す**。
+ *
+ * ⚠ 上の describe で旗が立っている(前提)── ここは**旗が立った後**の振る舞いである:
+ *   計画と表ごとの検めは**通り**、印を残す書き込みだけ**断られる**。
+ */
+describe('起動の検めは、壊れた DB で壊れを名指しし、印を残さない(#1007 段①)', () => {
+  it('🔴 表ごとの検めが、壊れた目次をその表の回で名指しする(他の表は ok)', async () => {
+    const plan = await request({ op: 'integrityPlan' });
+    expect(plan.tables, '本文の表が計画に無い(空振り)').toContain('entries');
+    const hit = await request({ op: 'checkIntegrity', table: 'entries' });
+    const report = parseQuickCheck(hit.rows, hit.schema);
+    expect(report.ok, '壊れているのに entries の回で無事と読んだ').toBe(false);
+    expect(report.brokenIndexes.length).toBeGreaterThan(0);
+    // 🔑 壊れていない表の回は ok ── 表ごとに分けた意味(壊れが他の表に漏れない)
+    for (const table of plan.tables.filter((t) => t !== 'entries')) {
+      const res = await request({ op: 'checkIntegrity', table });
+      expect(res.rows, `${table} まで壊れと言っている`).toEqual(['ok']);
+    }
+  });
+
+  it('🔴 旗が立った後は、印を残す書き込みだけ断られる', async () => {
+    await expect(request({ op: 'integrityStamp', at: '2026-09-20T00:00:00.000Z' })).rejects.toThrow(
+      CORRUPT_REFUSAL,
+    );
+    expect((await request({ op: 'integrityPlan' })).lastCheckedAt, '断られたのに印が残った').toBeNull();
+  });
+
+  it('🔴 駆動部を繋ぐと broken ── 次の一手つきの字が出て、印は残らない', async () => {
+    const broken: string[] = [];
+    const outcome = await runStartupIntegrity({
+      request,
+      isHost: () => true,
+      now: () => Date.now(),
+      wait: async () => {},
+      cancelled: () => false,
+      onBroken: (t) => {
+        broken.push(t);
+      },
+    });
+    expect(outcome).toBe('broken');
+    expect(broken).toHaveLength(1);
+    expect(broken[0]).toContain('起動のときに');
+    expect(broken[0], '次の一手(画面の字)が無い').toContain(CONTAINER_REBUILD_LABEL);
+    expect((await request({ op: 'integrityPlan' })).lastCheckedAt).toBeNull();
   });
 });

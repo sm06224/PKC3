@@ -504,7 +504,35 @@ export type StorageRequest =
    * 🔑 壊れの報告に出る `Tree <N>` を `sqlite_schema.rootpage` と突き合わせて、
    *   **目次か本文かを名前で**返す(実測で対応が取れている)。
    */
-  | { op: 'checkIntegrity' }
+  | {
+      op: 'checkIntegrity';
+      /**
+       * 🔴 **1 つの表だけ検める**(#1007 段①)── `PRAGMA quick_check(<表>)`。
+       *
+       * ⚠ 無ければ**丸ごと**(押した検めはこちら)。
+       * 🔑 起動の検めは表ごとに 1 request で回す ── worker は単一 queue なので、
+       *   丸ごと 1 回だと数 GB で**分の単位、保存が待たされる**。表ごとなら
+       *   表と表の間に保存が割り込め、次の request を出さなければ**止まる**。
+       * ⚠ 名前は `sqlite_schema` に在る表に限る(無ければ落とす ── SQL に user の
+       *   字を通す口にしない)。
+       */
+      table?: string;
+    }
+  /**
+   * 🔴 **起動の検めの計画**(#1007 段①)── 前回いつ検めたかと、検める表の一覧。
+   *
+   * ⚠ 表は **btree を持つもの**(`rootpage > 0`)だけ ── FTS の仮想表そのものは
+   *   `rootpage = 0` で、`quick_check` に渡しても何も見ない(影の表のほうを見る)。
+   * ⚠ 読むだけ(壊れていても通す)。
+   */
+  | { op: 'integrityPlan' }
+  /**
+   * 🔴 **検め終えた印を残す**(#1007 段①)── `settings` 表の 1 行。
+   *
+   * ⚠ 書き込みなので、壊れていると分かった後は**断られる**(`CORRUPT_BLOCKED_OPS`)
+   *   ── それで正しい。壊れている DB に「検めた」印を残すと、次の起動で黙る。
+   */
+  | { op: 'integrityStamp'; at: string }
   /**
    * 🔴 **壊れていても読める分だけノートを拾う**(#971 段③)。
    *
@@ -712,6 +740,14 @@ export interface IntegrityCheckResult {
   elapsedMs: number;
 }
 
+/** 🔴 **起動の検めの計画**(#1007 段①)。 */
+export interface IntegrityPlan {
+  /** 前回検め終えた時刻(ISO)。⚠ 1 度も検めていなければ `null`(0 と言わない)。 */
+  lastCheckedAt: string | null;
+  /** 検める表(btree を持つものだけ。`rootpage` 順)。 */
+  tables: string[];
+}
+
 /** 🔴 **拾えた 1 ページ**(#971 段③)。⚠ 拾えなかった区画の数を必ず載せる。 */
 export interface RescuePage {
   rows: Array<{
@@ -887,6 +923,8 @@ export interface ResultMap {
   storageProfile: StorageProfileResult;
   counts: CountsResult;
   checkIntegrity: IntegrityCheckResult;
+  integrityPlan: IntegrityPlan;
+  integrityStamp: null;
   rescueEntries: RescuePage;
   close: null;
 }

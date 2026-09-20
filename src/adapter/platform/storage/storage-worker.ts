@@ -24,6 +24,7 @@ import type { EntryStamps, EntryUpsert } from './schema';
 import { contentHash64Hex } from './content-hash';
 // 🔑 数だけをここから取る ── 読み解き(日本語)は features 層に置く(#971 段③)
 import { QUICK_CHECK_MAX_ERRORS, RESCUE_CHUNK } from '@features/storage/db-rescue';
+import { INTEGRITY_STAMP_KEY, INTEGRITY_STAMP_SCOPE } from '@features/storage/integrity-schedule';
 import {
   CORRUPT_BLOCKED_OPS,
   CORRUPT_REFUSAL,
@@ -3604,13 +3605,32 @@ const handlers: Handlers = {
    * 🔑 **読み解きはここでやらない** ── 返すのは測った物(生の行 + root の対応表)
    *   だけで、日本語に直すのは `features/storage/db-rescue.ts` である。
    */
-  checkIntegrity: () => {
+  checkIntegrity: (req) => {
     const database = need();
     const started = Date.now();
     const rows: string[] = [];
+    /**
+     * 🔴 **表を名指しされたら、その表(と索引)だけ**(#1007 段①)。
+     *
+     * ⚠ 名前は `sqlite_schema` に**在る表**でなければ通さない ── ここは
+     *   `PRAGMA` の引数に字を埋める口なので、user の字を通す形にしない。
+     *   無ければ落とす(黙って丸ごとへ倒さない ── 倒すと「表ごとに軽く」の
+     *   前提が静かに崩れ、保存が分の単位で待たされる)。
+     * ⚠ 二重引用符で囲む(`"` は `""` へ)── 名前に空白が在っても通る。
+     */
+    let target = `${QUICK_CHECK_MAX_ERRORS}`;
+    if (req.table !== undefined) {
+      const known = database.selectValue(
+        "SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = ?",
+        [req.table],
+      );
+      if (Number(known) !== 1) throw new Error(`検める表が無い: ${req.table}`);
+      target = `"${req.table.replaceAll('"', '""')}"`;
+    }
     database.exec({
-      // ⚠ 埋め込む数はこちらの定数(user の値が SQL に入る口を作らない)
-      sql: `PRAGMA quick_check(${QUICK_CHECK_MAX_ERRORS})`,
+      // ⚠ 埋め込む数はこちらの定数(user の値が SQL に入る口を作らない)。
+      //    表の名前は上で `sqlite_schema` と突き合わせた物だけ。
+      sql: `PRAGMA quick_check(${target})`,
       rowMode: 'array',
       // ⚠ 式の body にしない ── `push` は number を返すので、`false | void` に当たらない
       callback: (r: unknown[]): void => {
@@ -3634,6 +3654,48 @@ const handlers: Handlers = {
       /* 空のまま返す ── 名前に直せないことは呼び側が言う */
     }
     return { rows, schema, elapsedMs: Date.now() - started };
+  },
+  /**
+   * 🔴 **起動の検めの計画**(#1007 段①)。
+   *
+   * ⚠ 印が読めなくても落とさない ── `settings` 表が読めないほど壊れているなら、
+   *   それは「印が無い」= **検める側へ倒す**のが正しい(門の目的は壊れに気づくこと)。
+   * ⚠ 表は `rootpage > 0` だけ ── FTS の仮想表は `rootpage = 0` で、
+   *   `quick_check` に渡しても何も見ない(影の表を見る)。
+   */
+  integrityPlan: () => {
+    const database = need();
+    let lastCheckedAt: string | null = null;
+    try {
+      const v = database.selectValue('SELECT v FROM settings WHERE scope = ? AND k = ?', [
+        INTEGRITY_STAMP_SCOPE,
+        INTEGRITY_STAMP_KEY,
+      ]);
+      lastCheckedAt = v === null || v === undefined ? null : String(v);
+    } catch {
+      /* 読めない = 印が無い(検める) */
+    }
+    const tables: string[] = [];
+    database.exec({
+      sql: "SELECT name FROM sqlite_schema WHERE type = 'table' AND rootpage > 0 ORDER BY rootpage",
+      rowMode: 'array',
+      callback: (r: unknown[]): void => {
+        tables.push(String(r[0]));
+      },
+    });
+    return { lastCheckedAt, tables };
+  },
+  /**
+   * 🔴 **検め終えた印**(#1007 段①)── 壊れが無かった回だけ呼ばれる。
+   * ⚠ 壊れていると分かった後は `CORRUPT_BLOCKED_OPS` が断る(それで正しい)。
+   */
+  integrityStamp: (req) => {
+    need().exec({
+      sql: `INSERT INTO settings(scope, k, v) VALUES (?, ?, ?)
+              ON CONFLICT(scope, k) DO UPDATE SET v = excluded.v`,
+      bind: [INTEGRITY_STAMP_SCOPE, INTEGRITY_STAMP_KEY, req.at],
+    });
+    return null;
   },
   /**
    * 🔴 **壊れていても読める分だけノートを拾う**(#971 段③)。

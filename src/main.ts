@@ -108,6 +108,8 @@ import {
 import { AssetBlobStore } from '@adapter/platform/storage/asset-blob-store';
 import { connectWipedChannel, WIPED_CHANNEL } from '@adapter/platform/storage/wiped-channel';
 import { resetContainer, wipedElsewhere } from '@features/storage/container-reset';
+import { runStartupIntegrity } from '@adapter/platform/storage/startup-integrity';
+import type { StartupIntegrityOutcome } from '@features/storage/integrity-schedule';
 import { appCopyHistory } from '@adapter/platform/copy-history-store';
 import {
   purgeBlockReason,
@@ -331,6 +333,13 @@ export interface AppHandle {
    * ⚠ 未読が 0 件・恒久オフなら**何も出さない**(判定は面の側)。
    */
   presentAnnounce(): void;
+  /**
+   * 🔴 **起動のたびに、軽く検める**(#1007 段①)。
+   * ⚠ **boot の刻印の後**に呼ぶ ── 起動を遅くしない(待つ長さは駆動部が持つ)。
+   * ⚠ 判断は `features/storage/integrity-schedule.ts`、順番は
+   *   `adapter/platform/storage/startup-integrity.ts` に在る ── ここは配線だけ。
+   */
+  startupIntegrity(): Promise<StartupIntegrityOutcome>;
   /**
    * 🔴 **状態の行を塗り直す**(#300 段④)。⚠ 配線が「アプリの窓か」の旗を
    * 倒した瞬間に効かせるために要る ── 旗だけ倒しても、次に何かが起きるまで
@@ -4051,6 +4060,21 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     },
     presentUpdate: (apply) => updatePrompt.present(apply),
     presentAnnounce: () => announce.present(),
+    /**
+     * 🔴 **起動のたびに、軽く検める**(#1007 段①)。
+     * ⚠ `client` は昇格で実体が替わるので**呼ぶたびに読む**(閉じ込めない)。
+     * ⚠ 見つけたら赤い帯へ ── 字は `integritySummary` が持つ(ボタン名の門もそちら)。
+     * ⚠ タブが隠れたら次の表へ進まない(裏で数 GB を読み続けない)。
+     */
+    startupIntegrity: () =>
+      runStartupIntegrity({
+        request: (req) => client.request(req),
+        isHost: () => writerHolder,
+        now: () => Date.now(),
+        wait: (ms) => new Promise((r) => setTimeout(r, ms)),
+        cancelled: () => document.visibilityState === 'hidden',
+        onBroken: (text) => dispatcher.dispatch({ type: 'OP_FAILED', error: text }),
+      }),
     repaintStatus: () => paint(),
     repaintWindowTitle: () => {
       paintTitle();
@@ -4198,6 +4222,14 @@ function bootstrap(): void {
       // PKC2 の教訓 ── 「#root 存在待ち」は HTML load 段階で通過して flake 化する
       root.setAttribute('data-pkc-boot', 'ready');
       preboot?.booted(); // 以後は勝手に読み直さない(下書きを巻き込まない)
+      /**
+       * 🔴 **起動のたびに、軽く検める**(#1007 段①)。⚠ **刻印の後**に始める ──
+       *   起動を遅くしない。結末は DOM 属性に出す(smoke / probe の観測点 ──
+       *   `data-pkc-boot` と同じ検査のための契約)。
+       */
+      void app.startupIntegrity().then((outcome) => {
+        root.setAttribute('data-pkc-integrity', outcome);
+      });
       /**
        * 📣 お知らせ(P11 段⑤)。⚠ **boot 完了の刻印より後**に出す ──
        * 先に出すと、まだ何も映っていない画面に帯だけが立つ。
