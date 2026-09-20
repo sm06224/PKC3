@@ -78,6 +78,8 @@ function deps(
         waited.push(ms);
       },
       cancelled: () => false,
+      visible: () => true,
+      onceVisible: async () => {},
       onBroken: (t: string) => {
         broken.push(t);
       },
@@ -124,27 +126,74 @@ describe('起動の検め ── 駆動部(#1007 段①)', () => {
     expect(d.broken[0]).toContain('起動のときに');
   });
 
-  it('🔴 止めたら次の表を出さず、印も残さない(cancelled)', async () => {
+  it('🔴 閉じられたら次の表を出さず、印も残さない(cancelled)', async () => {
     const w = fakeWorker({ lastCheckedAt: null, tables: ['a', 'b', 'c'] });
-    let seen = 0;
-    const d = deps(w, {
-      // 2 表目を見終えた所で止める
-      cancelled: () => {
-        seen += 1;
-        return seen === 3;
-      },
-    });
+    // a を見終えた所でタブが閉じられる(⚠ 呼び出し回数で数えない ── 回数は実装の都合で動く)
+    let closing = false;
+    const orig = w.request;
+    (w as { request: typeof orig }).request = (async (req: StorageRequest) => {
+      const r = await orig(req as never);
+      if (req.op === 'checkIntegrity' && (req as { table?: string }).table === 'a') closing = true;
+      return r;
+    }) as typeof orig;
+    const d = deps(w, { request: w.request, cancelled: () => closing });
     expect(await runStartupIntegrity(d.deps)).toBe('cancelled');
     const checks = w.log.filter((r) => r.op === 'checkIntegrity') as Array<{ table?: string }>;
     expect(checks.map((c) => c.table)).toEqual(['a']);
     expect(w.log.some((r) => r.op === 'integrityStamp')).toBe(false);
   });
 
-  it('⚠ 待っている間に隠れたら、計画すら頼まない', async () => {
+  it('🔴 隠れている間は次の表を出さず、見えたら続きから進む(止めない)', async () => {
+    const w = fakeWorker({ lastCheckedAt: null, tables: ['a', 'b', 'c'] });
+    let hidden = false;
+    let waits = 0;
+    const d = deps(w, {
+      visible: () => !hidden,
+      onceVisible: async () => {
+        waits += 1;
+        hidden = false; // 見えた
+      },
+    });
+    // a を見終えた所で隠れる
+    const orig = w.request;
+    (w as { request: typeof orig }).request = (async (req: StorageRequest) => {
+      const r = await orig(req as never);
+      if (req.op === 'checkIntegrity' && (req as { table?: string }).table === 'a') hidden = true;
+      return r;
+    }) as typeof orig;
+    d.deps.request = w.request;
+    expect(await runStartupIntegrity(d.deps)).toBe('ok');
+    expect(waits, '隠れたのに待っていない(裏で読み続けた)').toBe(1);
+    const checks = w.log.filter((r) => r.op === 'checkIntegrity') as Array<{ table?: string }>;
+    expect(checks.map((c) => c.table), '見えた後に続きから進んでいない').toEqual(['a', 'b', 'c']);
+    expect(w.log[w.log.length - 1]?.op).toBe('integrityStamp');
+  });
+
+  it('⚠ 待っている間に閉じられたら、計画すら頼まない', async () => {
     const w = fakeWorker({ lastCheckedAt: null });
     const d = deps(w, { cancelled: () => true });
     expect(await runStartupIntegrity(d.deps)).toBe('cancelled');
     expect(w.log).toEqual([]);
+  });
+
+  it('⚠ schema は最初に読めた回の物を持つ(最後の回だけ読めなくても名指しを失わない)', async () => {
+    const w = fakeWorker({
+      lastCheckedAt: null,
+      tables: ['entries', 'relations'],
+      broken: { entries: ['Tree 3 page 3 cell 1: bad'] },
+    });
+    const orig = w.request;
+    (w as { request: typeof orig }).request = (async (req: StorageRequest) => {
+      const r = (await orig(req as never)) as { schema?: unknown[] };
+      // 最後の表の回だけ schema が空で返る
+      if (req.op === 'checkIntegrity' && (req as { table?: string }).table === 'relations') {
+        return { ...r, schema: [] } as never;
+      }
+      return r as never;
+    }) as typeof orig;
+    const d = deps(w, { request: w.request });
+    expect(await runStartupIntegrity(d.deps)).toBe('broken');
+    expect(d.broken[0], '目次の名指しが消えて「どこかまでは分かりません」に落ちた').toContain('目次だけ');
   });
 
   it('🔴 follower(別タブ)は検めない', async () => {
@@ -193,9 +242,39 @@ describe('main.ts の配線(原文 pin ── あの file はどの test から�
   it('🔴 本体か / 隠れたか / 壊れの字の出し先 が配線されている', () => {
     const at = src.indexOf('runStartupIntegrity({');
     expect(at, '駆動部を呼んでいない').toBeGreaterThanOrEqual(0);
-    const block = src.slice(at, src.indexOf('})', at));
+    // ⚠ 閉じは**呼び出しの閉じ**(4 字下げの `});`)で切る ── 最初の `})` で切ると
+    //    引数の中の `})` で止まり、並びを変えただけで偽陽性になる(着地前レビュー 💭5)
+    const end = src.indexOf('\n    });', at);
+    expect(end, '呼び出しの閉じが読めない').toBeGreaterThan(at);
+    const block = src.slice(at, end);
     expect(block, '本体タブの判定が無い(follower も検めてしまう)').toContain('isHost: () => writerHolder');
-    expect(block, '隠れたら止める形になっていない').toContain("document.visibilityState === 'hidden'");
-    expect(block, '壊れの字を赤い帯へ出していない').toContain("type: 'OP_FAILED'");
+    expect(block, '隠れている間は進まない形になっていない').toContain(
+      "visible: () => document.visibilityState !== 'hidden'",
+    );
+    expect(block, '見えたら続く約束が無い(背景で開く user は永久に検め終わらない)').toContain('onceVisible:');
+    expect(block, '閉じる合図で止める形になっていない').toContain('cancelled: () => unloading');
+    /**
+     * 🔴 出し先は**一時の知らせ**(`showStatus`)── `OP_FAILED` ではない。
+     * ⚠ `OP_FAILED` は `SELECT_ENTRY` が `error: null` で消すので、ノートを 1 件選んだ
+     *   瞬間に壊れの知らせが消える(user 目線レビュー 2026-09-20)。
+     */
+    expect(block, '壊れの字を一時の知らせへ出していない').toContain('onBroken: (text) => showStatus(text)');
+    expect(block, 'ノートを選ぶと消える口(OP_FAILED)へ出している').not.toContain('OP_FAILED');
+  });
+
+  it('🔴 follower が本体へ昇格した直後にも 1 回検める', () => {
+    // ⚠ 昇格の印(`promotedHost = host` … `writerHolder = true`)の**後**、本体になった
+    //    知らせの**前**に呼ぶ ── 前だと follower として即終わる
+    const from = src.indexOf('promotedHost = host;');
+    const to = src.indexOf("showStatus('このタブが本体になりました')");
+    expect(from, '昇格の経路が読めない(空振り)').toBeGreaterThanOrEqual(0);
+    expect(to, '昇格の知らせが読めない(空振り)').toBeGreaterThan(from);
+    const promote = src.slice(from, to);
+    expect(promote, '昇格の直後に検めを呼んでいない(昇格したタブは読み直すまで検めない)').toContain(
+      'void startupIntegrity()',
+    );
+    expect(promote.indexOf('writerHolder = true'), '本体の印より前に呼んでいる(follower として即終わる)').toBeLessThan(
+      promote.indexOf('void startupIntegrity()'),
+    );
   });
 });

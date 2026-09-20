@@ -203,6 +203,8 @@ describe('起動の検めは、壊れた DB で壊れを名指しし、印を残
       now: () => Date.now(),
       wait: async () => {},
       cancelled: () => false,
+      visible: () => true,
+      onceVisible: async () => {},
       onBroken: (t) => {
         broken.push(t);
       },

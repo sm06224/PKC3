@@ -1373,6 +1373,42 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     paintOpen();
   };
   /**
+   * 🔴 **起動のたびに、軽く検める**(#1007 段①)。
+   * ⚠ `client` は昇格で実体が替わるので**呼ぶたびに読む**(閉じ込めない)。
+   * ⚠ 見つけたら**一時の知らせ**(`showStatus`)へ ── `OP_FAILED` にしない。
+   *   あちらは `SELECT_ENTRY` が `error: null` で**消す**ので、ノートを 1 件選んだ瞬間に
+   *   壊れの知らせが跡形もなく消える(user 目線レビュー 2026-09-20)。こちらは
+   *   状態変化では消えない(次の一時の知らせが来るまで残る)。
+   *   字は `integritySummary` が持つ(ボタン名の門もそちら)。
+   * ⚠ タブが隠れたら次の表へ進まず**待つ**(裏で数 GB を読み続けない / 止めもしない)。
+   * 🔑 boot の刻印の後(`bootstrap`)と、**follower が本体へ昇格した直後**の 2 か所から呼ぶ
+   *   ── 後者が無いと、本体を閉じて昇格したタブは読み直すまで 1 度も検めない。
+   */
+  const startupIntegrity = (): Promise<StartupIntegrityOutcome> =>
+    runStartupIntegrity({
+      request: (req) => client.request(req),
+      isHost: () => writerHolder,
+      now: () => Date.now(),
+      wait: (ms) => new Promise((r) => setTimeout(r, ms)),
+      cancelled: () => unloading,
+      visible: () => document.visibilityState !== 'hidden',
+      onceVisible: () =>
+        new Promise((resolve) => {
+          const onVisible = (): void => {
+            if (document.visibilityState === 'hidden') return;
+            document.removeEventListener('visibilitychange', onVisible);
+            resolve();
+          };
+          document.addEventListener('visibilitychange', onVisible);
+        }),
+      onBroken: (text) => showStatus(text),
+    });
+  /** タブを閉じる合図 ── 検めは次の表を出さない(出した 1 表は worker が読み切る)。 */
+  let unloading = false;
+  window.addEventListener('pagehide', () => {
+    unloading = true;
+  });
+  /**
    * 🔴 **自分のパソコンで動かす一式を落とす**(#532 段 B)。
    *
    * ⚠ 取りに行く先は**相対**(`./precache.json` / `./assets/…`)── `base: './'` で
@@ -1658,6 +1694,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           //    店(store)が使えるようになる瞬間がずれる**からである(`promote` の
           //    中で新しい worker を建てている)── 早すぎると書きに行って失敗する
           writerHolder = true;
+          /**
+           * 🔴 **昇格した直後にも 1 回検める**(#1007 段①、user 目線レビュー 欠陥 5)。
+           * ⚠ boot の刻印から呼ぶ 1 回は follower として即終わっているので、
+           *   ここが無いと**本体を閉じて昇格したタブは読み直すまで 1 度も検めない**。
+           */
+          void startupIntegrity().then((outcome) => {
+            root.setAttribute('data-pkc-integrity', outcome);
+          });
         }
         syncLine = '';
         showStatus('このタブが本体になりました');
@@ -4060,21 +4104,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     },
     presentUpdate: (apply) => updatePrompt.present(apply),
     presentAnnounce: () => announce.present(),
-    /**
-     * 🔴 **起動のたびに、軽く検める**(#1007 段①)。
-     * ⚠ `client` は昇格で実体が替わるので**呼ぶたびに読む**(閉じ込めない)。
-     * ⚠ 見つけたら赤い帯へ ── 字は `integritySummary` が持つ(ボタン名の門もそちら)。
-     * ⚠ タブが隠れたら次の表へ進まない(裏で数 GB を読み続けない)。
-     */
-    startupIntegrity: () =>
-      runStartupIntegrity({
-        request: (req) => client.request(req),
-        isHost: () => writerHolder,
-        now: () => Date.now(),
-        wait: (ms) => new Promise((r) => setTimeout(r, ms)),
-        cancelled: () => document.visibilityState === 'hidden',
-        onBroken: (text) => dispatcher.dispatch({ type: 'OP_FAILED', error: text }),
-      }),
+    // 🔴 起動のたびに軽く検める(#1007 段①)── 実体は `showStatus` の下
+    startupIntegrity,
     repaintStatus: () => paint(),
     repaintWindowTitle: () => {
       paintTitle();

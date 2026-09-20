@@ -119,6 +119,8 @@ describe('駆動部を本物の worker に繋ぐ', () => {
       now: () => now,
       wait: async () => {},
       cancelled: () => false,
+      visible: () => true,
+      onceVisible: async () => {},
       onBroken: (t: string) => {
         broken.push(t);
       },

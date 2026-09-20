@@ -10,7 +10,15 @@
  * 2. `integrityPlan` ── 前回の印と、検める表の一覧
  * 3. 間隔が空いていなければ `skipped`
  * 4. 表ごとに `checkIntegrity({ table })` ── ⚠ **1 表 1 request**。worker は単一 queue
- *    なので、request の間に保存が割り込める。`cancelled()` が真なら次を出さない
+ *    なので、request の間に保存が割り込める。`cancelled()` が真なら次を出さない。
+ *    隠れている間は次を出さずに**待つ**(止めない ── 背景で開く癖の user でも検め終わる)
+ *
+ * ## ⚠ 1 表の中は割り込めない(既知の穴 ── #1007 に記録)
+ *
+ * `quick_check(<表>)` は同期に走るので、**その 1 表が終わるまで**は保存も待つ。本体タブの
+ * 保存は `StoreClient` が timeout を持たないので**待つだけ**で通るが、別タブ(follower)の
+ * 保存は `StoreProxy` の 10 秒で切られる ── 数 GB の `entries` では**偽の失敗**が出うる
+ * (保存そのものは後で通る)。表を rowid で割る口は sqlite に無い。
  * 5. 畳んで読む ── 壊れが無ければ **印を残して `ok`**。在れば **印を残さず**
  *    `onBroken(字)` で `broken`(次の起動でも言う ── 直すまで黙らない)
  *
@@ -49,8 +57,16 @@ export interface StartupIntegrityDeps {
   readonly now: () => number;
   /** 待つ(⚠ test は 0 で差す)。 */
   readonly wait: (ms: number) => Promise<void>;
-  /** 途中で止めるか ── 表と表の間で読む。 */
+  /** 途中で止めるか(タブを閉じる)── 表と表の間で読む。 */
   readonly cancelled: () => boolean;
+  /**
+   * いま画面に出ているか。⚠ 隠れている間は次の表へ**進まない**(裏で数 GB を読み続けない)
+   *   ── ただし**止めるのではなく待つ**。止めると、背景で開く癖の user は
+   *   何か月も 1 度も検め終わらない(印も残らない)── 着地前レビュー 2026-09-20。
+   */
+  readonly visible: () => boolean;
+  /** 次に画面へ出たときに解ける約束(`visible()` が偽のときだけ待つ)。 */
+  readonly onceVisible: () => Promise<void>;
   /** 壊れが見つかったときに出す(赤い帯)。 */
   readonly onBroken: (text: string) => void;
 }
@@ -60,6 +76,8 @@ export async function runStartupIntegrity(
 ): Promise<StartupIntegrityOutcome> {
   if (!deps.isHost()) return 'follower';
   await deps.wait(INTEGRITY_START_DELAY_MS);
+  if (deps.cancelled()) return 'cancelled';
+  if (!deps.visible()) await deps.onceVisible();
   if (deps.cancelled()) return 'cancelled';
   try {
     const plan = await deps.request({ op: 'integrityPlan' });
@@ -71,9 +89,13 @@ export async function runStartupIntegrity(
     for (const table of plan.tables) {
       // 🔑 止めるのはここ ── 出した request は最後まで走るが、次を出さない
       if (deps.cancelled()) return 'cancelled';
+      // 🔑 隠れたら**待つ**(止めない)── 表と表の間なので、待っている間も保存は通る
+      if (!deps.visible()) await deps.onceVisible();
+      if (deps.cancelled()) return 'cancelled';
       const res = await deps.request({ op: 'checkIntegrity', table });
       perTable.push(res.rows);
-      schema = res.schema;
+      // ⚠ 最初に読めた schema を持つ(最後の回だけ読めなかった、で名指しを失わない)
+      if (schema.length === 0) schema = res.schema;
     }
     const report = parseQuickCheck(mergeQuickCheckRows(perTable), schema);
     if (report.ok) {
