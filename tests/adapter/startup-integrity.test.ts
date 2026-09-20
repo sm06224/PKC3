@@ -169,6 +169,30 @@ describe('起動の検め ── 駆動部(#1007 段①)', () => {
     expect(w.log[w.log.length - 1]?.op).toBe('integrityStamp');
   });
 
+  it('🔴 起動の時点で既に隠れていたら、計画すら出さずに見えるまで待つ(止めない)', async () => {
+    // ⚠ ループの**前**の門 ── 途中で隠れる fixture(上)では 1 度も通らない(変異試験 M22 が SURVIVED で教えた)
+    const w = fakeWorker({ lastCheckedAt: null, tables: ['a'] });
+    let hidden = true;
+    let waits = 0;
+    const orig = w.request;
+    (w as { request: typeof orig }).request = (async (req: StorageRequest) => {
+      // 🔑 「呼ばれた」だけでは足りない ── 呼ばれた**時点で見えている**こと(= 待った後)を見る
+      expect(hidden, `隠れたまま ${req.op} を出した(裏で読み続ける形)`).toBe(false);
+      return orig(req as never);
+    }) as typeof orig;
+    const d = deps(w, {
+      request: w.request,
+      visible: () => !hidden,
+      onceVisible: async () => {
+        waits += 1;
+        hidden = false;
+      },
+    });
+    expect(await runStartupIntegrity(d.deps)).toBe('ok');
+    expect(waits, '見えるまで待っていない').toBe(1);
+    expect(w.log.map((r) => r.op)).toEqual(['integrityPlan', 'checkIntegrity', 'integrityStamp']);
+  });
+
   it('⚠ 待っている間に閉じられたら、計画すら頼まない', async () => {
     const w = fakeWorker({ lastCheckedAt: null });
     const d = deps(w, { cancelled: () => true });
