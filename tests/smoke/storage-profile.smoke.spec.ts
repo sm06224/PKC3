@@ -57,5 +57,21 @@ test('🔴 調べると重い順に並び、押すとそのノートへ飛ぶ (#
     '押しても、そのノートが開かない',
   ).toContainText('容量を見るノート');
 
+  /**
+   * ④ 🔴 **起動の検めが、本物の worker(OPFS)で回り切る**(#1007 段①)。
+   *
+   * ⚠ ここは**新しく起動しない** ── この spec の起動に相乗りする(1 起動 ≈ 1.6 秒が
+   *   以後すべての回に積まれるので、既に在る道中に assert を足す。`smoke-budget`)。
+   * 🔑 unit が原理的に届かない層:表ごとの `quick_check` が**実物の OPFS の DB**で
+   *   通り、印を残して `ok` になる所まで。fresh な context なので印は無い = 必ず回る。
+   * ⚠ 刻印から 5 秒待ってから始まるので、上の操作の後でも少し待つ。
+   */
+  await expect
+    .poll(async () => page.locator('[data-pkc-boot="ready"]').getAttribute('data-pkc-integrity'), {
+      message: '起動の検めが終わらない(回っていない / 印を残せていない)',
+      timeout: 30_000,
+    })
+    .toBe('ok');
+
   expect(errors, `page error: ${errors.join(' / ')}`).toHaveLength(0);
 });

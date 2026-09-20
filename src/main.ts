@@ -108,6 +108,8 @@ import {
 import { AssetBlobStore } from '@adapter/platform/storage/asset-blob-store';
 import { connectWipedChannel, WIPED_CHANNEL } from '@adapter/platform/storage/wiped-channel';
 import { resetContainer, wipedElsewhere } from '@features/storage/container-reset';
+import { runStartupIntegrity } from '@adapter/platform/storage/startup-integrity';
+import type { StartupIntegrityOutcome } from '@features/storage/integrity-schedule';
 import { appCopyHistory } from '@adapter/platform/copy-history-store';
 import {
   purgeBlockReason,
@@ -331,6 +333,13 @@ export interface AppHandle {
    * ⚠ 未読が 0 件・恒久オフなら**何も出さない**(判定は面の側)。
    */
   presentAnnounce(): void;
+  /**
+   * 🔴 **起動のたびに、軽く検める**(#1007 段①)。
+   * ⚠ **boot の刻印の後**に呼ぶ ── 起動を遅くしない(待つ長さは駆動部が持つ)。
+   * ⚠ 判断は `features/storage/integrity-schedule.ts`、順番は
+   *   `adapter/platform/storage/startup-integrity.ts` に在る ── ここは配線だけ。
+   */
+  startupIntegrity(): Promise<StartupIntegrityOutcome>;
   /**
    * 🔴 **状態の行を塗り直す**(#300 段④)。⚠ 配線が「アプリの窓か」の旗を
    * 倒した瞬間に効かせるために要る ── 旗だけ倒しても、次に何かが起きるまで
@@ -1364,6 +1373,42 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     paintOpen();
   };
   /**
+   * 🔴 **起動のたびに、軽く検める**(#1007 段①)。
+   * ⚠ `client` は昇格で実体が替わるので**呼ぶたびに読む**(閉じ込めない)。
+   * ⚠ 見つけたら**一時の知らせ**(`showStatus`)へ ── `OP_FAILED` にしない。
+   *   あちらは `SELECT_ENTRY` が `error: null` で**消す**ので、ノートを 1 件選んだ瞬間に
+   *   壊れの知らせが跡形もなく消える(user 目線レビュー 2026-09-20)。こちらは
+   *   状態変化では消えない(次の一時の知らせが来るまで残る)。
+   *   字は `integritySummary` が持つ(ボタン名の門もそちら)。
+   * ⚠ タブが隠れたら次の表へ進まず**待つ**(裏で数 GB を読み続けない / 止めもしない)。
+   * 🔑 boot の刻印の後(`bootstrap`)と、**follower が本体へ昇格した直後**の 2 か所から呼ぶ
+   *   ── 後者が無いと、本体を閉じて昇格したタブは読み直すまで 1 度も検めない。
+   */
+  const startupIntegrity = (): Promise<StartupIntegrityOutcome> =>
+    runStartupIntegrity({
+      request: (req) => client.request(req),
+      isHost: () => writerHolder,
+      now: () => Date.now(),
+      wait: (ms) => new Promise((r) => setTimeout(r, ms)),
+      cancelled: () => unloading,
+      visible: () => document.visibilityState !== 'hidden',
+      onceVisible: () =>
+        new Promise((resolve) => {
+          const onVisible = (): void => {
+            if (document.visibilityState === 'hidden') return;
+            document.removeEventListener('visibilitychange', onVisible);
+            resolve();
+          };
+          document.addEventListener('visibilitychange', onVisible);
+        }),
+      onBroken: (text) => showStatus(text),
+    });
+  /** タブを閉じる合図 ── 検めは次の表を出さない(出した 1 表は worker が読み切る)。 */
+  let unloading = false;
+  window.addEventListener('pagehide', () => {
+    unloading = true;
+  });
+  /**
    * 🔴 **自分のパソコンで動かす一式を落とす**(#532 段 B)。
    *
    * ⚠ 取りに行く先は**相対**(`./precache.json` / `./assets/…`)── `base: './'` で
@@ -1649,6 +1694,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           //    店(store)が使えるようになる瞬間がずれる**からである(`promote` の
           //    中で新しい worker を建てている)── 早すぎると書きに行って失敗する
           writerHolder = true;
+          /**
+           * 🔴 **昇格した直後にも 1 回検める**(#1007 段①、user 目線レビュー 欠陥 5)。
+           * ⚠ boot の刻印から呼ぶ 1 回は follower として即終わっているので、
+           *   ここが無いと**本体を閉じて昇格したタブは読み直すまで 1 度も検めない**。
+           */
+          void startupIntegrity().then((outcome) => {
+            root.setAttribute('data-pkc-integrity', outcome);
+          });
         }
         syncLine = '';
         showStatus('このタブが本体になりました');
@@ -4051,6 +4104,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     },
     presentUpdate: (apply) => updatePrompt.present(apply),
     presentAnnounce: () => announce.present(),
+    // 🔴 起動のたびに軽く検める(#1007 段①)── 実体は `showStatus` の下
+    startupIntegrity,
     repaintStatus: () => paint(),
     repaintWindowTitle: () => {
       paintTitle();
@@ -4198,6 +4253,14 @@ function bootstrap(): void {
       // PKC2 の教訓 ── 「#root 存在待ち」は HTML load 段階で通過して flake 化する
       root.setAttribute('data-pkc-boot', 'ready');
       preboot?.booted(); // 以後は勝手に読み直さない(下書きを巻き込まない)
+      /**
+       * 🔴 **起動のたびに、軽く検める**(#1007 段①)。⚠ **刻印の後**に始める ──
+       *   起動を遅くしない。結末は DOM 属性に出す(smoke / probe の観測点 ──
+       *   `data-pkc-boot` と同じ検査のための契約)。
+       */
+      void app.startupIntegrity().then((outcome) => {
+        root.setAttribute('data-pkc-integrity', outcome);
+      });
       /**
        * 📣 お知らせ(P11 段⑤)。⚠ **boot 完了の刻印より後**に出す ──
        * 先に出すと、まだ何も映っていない画面に帯だけが立つ。

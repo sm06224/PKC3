@@ -96,6 +96,8 @@ export const QUOTA_ALLOWED_WRITES: readonly string[] = [
   'deleteAssetMeta',
   'renameEntry',
   'reorderEntry',
+  // 起動の検めの印(#1007 段①)── `settings` の 1 行を上書きするだけ(実質増えない)
+  'integrityStamp',
 ];
 
 /**
