@@ -1207,6 +1207,55 @@ describe('#400 段④ ── 雛形を置く順番', () => {
     });
   }
 
+  /**
+   * 🔴 **雛形が焼けなくても、アプリ本体の配信は止めない**(#1014)。
+   *
+   * ⚠ 2026-09-18 にここで踏んだ:`build/portable/fold.mjs` が上流(vite 8.3.0 が
+   *   内包する Rolldown)のコード生成の変化に当たらなくなり、雛形の step が落ちた
+   *   ── その結果 `configure-pages` / `upload-pages-artifact` / **`deploy-pages`** が
+   *   **3 つとも skip** され、**`/dev/` が 2 日間更新されなかった**(Build dev は緑)。
+   *
+   * 🔑 雛形は**アプリの一部ではない**(押したときだけ取りに行く別の成果物)。
+   *   無ければアプリが画面で「雛形を取れませんでした」と言うので、**無言で壊れない**。
+   * ⚠ だが**黙って配るのも不可**である ── 配ったうえで **job は赤**にする。
+   *   赤が消えると「雛形がいつの間にか焼けていない」を誰も知らない
+   *   (CLAUDE.md「赤が届く先を作る」── Nightly が 13 晩赤かった件と同じ型)。
+   *
+   * ⚠ **見るのは実行する行**である ── 注釈には `continue-on-error` も `#1014` も
+   *   書いてあるので、コメントごと数えると**外しても緑**になる(§1 の 5 度目)。
+   */
+  it('🔴 pages.yml: 雛形が落ちても配り、そのうえで job を赤にする(#1014)', () => {
+    const raw = readFileSync(join(DIR, 'pages.yml'), 'utf-8');
+    const code = raw
+      .split('\n')
+      .filter((l) => !/^\s*#/.test(l))
+      .join('\n');
+
+    // ① 雛形の step が、名前(id)を持ち、落ちても止まらない
+    const portable = code.indexOf('npm run build:portable');
+    expect(portable, '雛形を焼く行が無い(空振り)').toBeGreaterThanOrEqual(0);
+    const head = code.slice(0, portable);
+    const stepStart = head.lastIndexOf('- name:');
+    expect(stepStart, '雛形の step の頭が読めない').toBeGreaterThanOrEqual(0);
+    const block = code.slice(stepStart, portable);
+    expect(block, '🔴 雛形の step に id: portable が無い').toContain('id: portable');
+    expect(block, '🔴 雛形が落ちると、以降の配る step が全部 skip される').toContain(
+      'continue-on-error: true',
+    );
+
+    // ② 落ちたことを赤で残す step が在る
+    const guard = code.indexOf("if: steps.portable.outcome == 'failure'");
+    expect(guard, '🔴 雛形の失敗を赤で残す step が無い(緑のまま配ってしまう)').toBeGreaterThanOrEqual(
+      0,
+    );
+    expect(code.slice(guard), '赤で残す step が exit 1 で終わっていない').toContain('exit 1');
+
+    // ③ 🔴 その step は deploy の「後」── 前に置くと、また配信ごと止まる
+    const deploy = code.indexOf('actions/deploy-pages@');
+    expect(deploy, 'deploy-pages が無い(空振り)').toBeGreaterThanOrEqual(0);
+    expect(guard, '🔴 赤で残す step が deploy より前に在る(配信ごと止まる)').toBeGreaterThan(deploy);
+  });
+
   it('🔴 置き先の名前は、アプリが取りに行く名前と同じ', () => {
     // ⚠ 名前が食い違うと、押しても **404 で「書き出せません」**になる ──
     //   しかも CI は緑のままなので、user の報告でしか分からない

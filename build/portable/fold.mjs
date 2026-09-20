@@ -86,22 +86,56 @@ const workerNames = files.filter((f) => /-worker-|worker1|opfs-async-proxy/.test
 if (workerNames.length === 0) throw new Error('worker が 1 件も見つからない(畳む対象が無い)');
 
 const workerSrc = new Map();
+const escWasm = wasm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/**
+ * ⚠ **内側の `new URL(` の手前の `` ``+ `` は、付いたり付かなかったりする**(実測)。
+ *
+ * 🔴 2026-09-18 にこれで `/dev/` の配信が止まった(#1014)── vite 8.2.2 → 8.3.0
+ * (内包する Rolldown が 1.2.5 → 1.2.8)で**空の template literal の連結が消えた**:
+ *
+ * | | 外側の `new URL(` の第 1 引数 |
+ * |---|---|
+ * | 以前 | ``` ``+new URL(`FILE`,self.location.href).href ``` |
+ * | いま | ``` new URL(`FILE`,self.location.href).href ```(先頭の `` ``+ `` が無い) |
+ *
+ * 🔑 下の `new Worker(` 側が、既に同じ理由で `.href` を optional にしている ──
+ * **同じ作法をこちらへも当てる**。
+ * ⚠ ただし**緩めるのは実測した 1 か所だけ**である(第 2 引数の `` ``+ `` は今も
+ * 出ているので必須のまま)── 見ていない揺れを先回りで optional にすると、
+ * **門をそのぶん弱めるだけ**である。
+ */
+const WASM_RESOLVE = new RegExp(
+  'new URL\\((?:``\\+)?new URL\\(`' + escWasm +
+    '`,self\\.location\\.href\\)\\.href,``\\+self\\.location\\.href\\)\\.href',
+  'g',
+);
+/** 解決式を 1 つ以上差し替えられた chunk の数。 */
+let wasmSwapped = 0;
+/** 🔴 差し替えた後も wasm の file 名が残っている chunk(= 解けない参照を抱えたまま)。 */
+const leftovers = [];
 for (const name of workerNames) {
   let src = readFileSync(join(A, name), 'utf-8');
   // ⚠ 解決式ごと置き換える(部分置換だと `self.location.href` が残る)
   const before = src;
-  src = src.replaceAll(
-    new RegExp(
-      'new URL\\(``\\+new URL\\(`' + wasm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') +
-        '`,self\\.location\\.href\\)\\.href,``\\+self\\.location\\.href\\)\\.href',
-      'g',
-    ),
-    JSON.stringify(wasmUrl),
-  );
+  src = src.replaceAll(WASM_RESOLVE, JSON.stringify(wasmUrl));
+  if (src !== before) wasmSwapped += 1;
   workerSrc.set(name, src);
-  if (name.startsWith('storage-worker') && src === before)
-    throw new Error('storage worker の wasm 解決式に当たらなかった(上流の形が変わった)');
+  if (src.includes(wasm)) leftovers.push(name);
 }
+/**
+ * 🔴 **この門の目的は「1 枚に畳んだとき、解けない wasm 参照を残さない」ことである。**
+ *
+ * ⚠ 直す前は `storage-worker` で**始まる chunk だけ**を見ていた ── だから
+ * `sqlite3-worker1-*.js` に**同じ式が残っても黙って通していた**(実測で 1 件あった)。
+ * 🔑 名前ではなく**結果**で見る:① 1 つも差し替わらなければ落とす(空振り防止)
+ * ② **どの chunk にも file 名を残さない**。
+ */
+if (wasmSwapped === 0)
+  throw new Error('wasm の解決式に 1 件も当たらなかった(上流の形が変わった)');
+if (leftovers.length > 0)
+  throw new Error(
+    `wasm の参照が残った chunk がある(畳んだ後に解けない): ${leftovers.join(', ')}`,
+  );
 
 // ── ② 呼び出し側を classic の blob worker へ差し替える
 let app = readFileSync(join(A, pick(/^index-.*\.js$/)), 'utf-8');
@@ -112,9 +146,15 @@ for (const [name, src] of workerSrc) {
    * ⚠ **外側の `.href` は付いたり付かなかったりする**(実測)── 綴りを 1 通りに
    *   決め打つと、当たらないまま「畳んだ」ことになる。だから optional にして、
    *   ⚠ **1 件も当たらなければ落とす**(下の `swapped === 0`)。
+   *
+   * 🔴 **内側の `` ``+ `` も同じだった**(2026-09-20、#1014)── vite 8.3.0 で消えた。
+   *   ⚠ 上の wasm 側と **2 か所とも同じ変化**だったが、前の門が先に落ちるので
+   *   **1 つ目を直すまで 2 つ目は見えなかった**。
+   *   🔑 門を 1 つ直したら、**同じ型の門を全部数え上げる**
+   *   (CLAUDE.md「片側を直したら、対称の反対側を必ず疑う」)。
    */
   const re = new RegExp(
-    'new Worker\\(new URL\\(``\\+new URL\\(`' + esc +
+    'new Worker\\(new URL\\((?:``\\+)?new URL\\(`' + esc +
       '`,import\\.meta\\.url\\)\\.href,``\\+import\\.meta\\.url\\)(?:\\.href)?,\\{type:`module`\\}\\)',
     'g',
   );
