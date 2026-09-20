@@ -66,10 +66,16 @@ CLAUDE.md 側は**スキルへのポインタ**を 1 行持つ(指す先が実�
    ```bash
    # ⚠ `PKC2:.claude/…` は PKC2 側(read-only 参照)を指す規約なので除く ──
    #    除かないと検算が偽陽性を出し、次から無視される
-   grep -rhoE '(PKC2:)?\.claude/[A-Za-z0-9./_-]*' CLAUDE.md .claude docs \
+   # 🔴 走査するのは `.claude` ではなく skills / agents / commands の 3 つである ──
+   #    `.claude/worktrees/` には repo 丸ごとの写しが残るので、`.claude` を指すと
+   #    同じ file を何重にも読み、その中の例示パスまで「無い」と出る
+   grep -rhoE '(PKC2:)?\.claude/[A-Za-z0-9./_-]*' \
+     CLAUDE.md docs .claude/skills .claude/agents .claude/commands \
      | grep -v '^PKC2:' | sed 's/[.,)。]*$//' | sort -u \
      | while read p; do [ -e "$p" ] || echo "無い $p"; done
    ```
+   ⚠ 残る 1 件 `.claude/worktrees/agent-` は **sandbox-hygiene の例示**である
+   (後ろの `…` を regex が落とす)── 壊れたポインタではない。
 6. **古い記述を消す** ── 足すだけでなく**削る**。実態と食い違う記述は、在ることが害
 7. **commit する**。⚠ **実体と導線を同じ commit に入れる** ── 導線だけ先に入れると
    壊れたポインタが残る(#69 で 1 度やった)
