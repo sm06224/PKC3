@@ -168,7 +168,7 @@ export const FLAG_ASSET_INLINE = defineFlag('asset.inline', {
  */
 export const FLAG_EMBED = defineFlag('transport.embed', {
   default: false,
-  foldWhen: '埋め込みの相手(Bookmarklet / 拡張)が出荷され、許可の管理が設定に載ったら',
+  foldWhen: '埋め込みの相手(Bookmarklet / 拡張)が出荷され、許可の管理がシステムに載ったら',
   summary: 'PKC3 を他のページに埋め込んだとき、埋め込み先のページからの依頼を受ける(既定は受けません)',
   needsRestart: true,
 });

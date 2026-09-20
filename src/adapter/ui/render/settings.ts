@@ -172,7 +172,7 @@ export class SettingsRenderer {
 
     const head = document.createElement('div');
     head.setAttribute('data-pkc-field', 'pane-title');
-    head.textContent = '設定';
+    head.textContent = 'システム';
     this.region.append(head);
 
     const body = document.createElement('div');
@@ -748,6 +748,13 @@ export class SettingsRenderer {
     this.officePack = buildOfficePackPanel();
     body.append(this.officePack.root);
     body.append(this.buildJobs());
+    /**
+     * 🔴 **先頭に目次を置く**(#1017 段⓪。user 裁定 2026-09-20「当面の実装は、
+     * システムの中に目次を付けて節の間を移動しやすくするところまで」)。
+     * ⚠ **組み終わった `body` から `h3` を走査して作る**(手で列挙しない)──
+     *   節を足し忘れても目次から抜け落ちない(CLAUDE.md §7)。
+     */
+    this.region.append(this.buildToc(body));
     this.region.append(body);
     this.syncTheme();
     this.syncPageFormat();
@@ -793,6 +800,57 @@ export class SettingsRenderer {
    *   (`same-origin-grants.ts` 冒頭の判断と同じ向き)。
    * ⚠ 「表示」には入れない ── 見た目の好みではなく**外へ何を渡すか**の判断である。
    */
+  /**
+   * 🔴 **先頭に置く目次**(#1017 段⓪)。
+   *
+   * ⚠ **手で節を列挙しない** ── 節を足し忘れると目次から抜け落ちる
+   *   (CLAUDE.md §7「同じ値・同じ判定が複数の場所にある」)。組み終わった
+   *   `body` から `h3` を走査して作る ── 節が増減しても目次は追随する。
+   * ⚠ **畳まない**(`<details>` は使わない)── user 指示「主要な導線は畳まない」
+   *   (`tests/docs-parity.test.ts` が全数走査で落とす)。
+   * ⚠ **`<a href="#…">` は使わない** ── hash はディープリンク
+   *   (`platform/deep-link.ts`)が読むので、押すたびに URL の hash を壊す。
+   *   飛び先は `data-pkc-action="system-jump"` + `data-pkc-target="<id>"` で渡す
+   *   (`binder.ts` の受け手が `scrollIntoView` する)。`top` は実在する id ではなく
+   *   「目次へ戻る」の合図(見出しの id と衝突させない)。
+   * ⚠ **「上へ」は `h3` の子にしない** ── `h.textContent` を読む所が他にもある
+   *   (`tests/docs-parity.test.ts` の §697 突合)。子にすると「表示上へ」のように
+   *   混ざって読める(CLAUDE.md「器を替えても読み取れる値は同じ形か」)。
+   *   代わりに `h3` を**囲む器**を差し込み、「上へ」は**その兄弟**にする。
+   */
+  private buildToc(body: HTMLElement): HTMLElement {
+    const nav = document.createElement('nav');
+    nav.setAttribute('data-pkc-region', 'settings-toc');
+    const row = document.createElement('div');
+    row.setAttribute('data-pkc-field', 'settings-toc-row');
+    nav.append(row);
+    const heads = Array.from(body.querySelectorAll<HTMLHeadingElement>('h3'));
+    heads.forEach((h, i) => {
+      const id = `settings-h3-${i}`;
+      // ⚠ 機能の選択子は `data-pkc-*`(規約)── `id` は使わない
+      h.setAttribute('data-pkc-section', id);
+      const label = h.textContent ?? '';
+
+      const link = document.createElement('button');
+      link.type = 'button';
+      link.setAttribute('data-pkc-action', 'system-jump');
+      link.setAttribute('data-pkc-target', id);
+      link.textContent = label;
+      row.append(link);
+
+      const back = document.createElement('button');
+      back.type = 'button';
+      back.setAttribute('data-pkc-action', 'system-jump');
+      back.setAttribute('data-pkc-target', 'top');
+      back.setAttribute('data-pkc-field', 'settings-back-to-top');
+      back.textContent = '上へ';
+      const wrap = document.createElement('div');
+      wrap.setAttribute('data-pkc-field', 'settings-heading-row');
+      h.replaceWith(wrap);
+      wrap.append(h, back);
+    });
+    return nav;
+  }
   /**
    * 🔴 **最近開いた記録を消す**(#215 残り①)。
    *

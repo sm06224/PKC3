@@ -271,7 +271,13 @@ const UNREGISTERED_POINT: readonly string[] = [
    *   🔑 **真の点である** ── 並んだ兄弟(前に打った字)のうち**押した 1 つ**で
    *   どれかが決まり、state に「いまのその 1 件」は無い。
    */
-  'sql-history-pick', 'stack-link-down', 'stack-link-up', 'stop-timer', 'toc-jump',
+  'sql-history-pick', 'stack-link-down', 'stack-link-up', 'stop-timer',
+  /**
+   * ⚠ **2026-09-20(#1017 段⓪)で 1 件増やした** ── 「システム」の目次から節へ飛ぶ。
+   *   🔑 同時に見えている兄弟(目次の行)のうち**押した 1 つ**でしか対象が決まらない
+   *   (`toc-jump` と同じ仕分け)。
+   */
+  'system-jump', 'toc-jump',
   'toggle-app-group', 'toggle-heading-fold', 'toggle-task', 'unschedule-task', 'unsplit-entry',
   'untag-entry', 'view-asset', 'view-big',
 ];
@@ -415,12 +421,14 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   ── 登記は増えない。🔑 **名前で呼べないままにする**:拾い出してから
       //   入れ物を作り直すので、パレットから 1 語で呼べる所に置かない
       //   (押し所は設定の中の 1 つだけ。すぐ下の `container-reset` と同じ仕分け)。
-      total: 319,
-      receivers: 267,
+      // ⚠ 2026-09-20(#1017 段⓪): 「システム」の目次から節へ飛ぶ(`system-jump`)で
+      //   受け手 +1(登記は増えない ── 押し口は「システム」の中にしか無く、鍵も持たない)。
+      total: 320,
+      receivers: 268,
       registered: 88,
       both: 36,
       outsideActionsTable: 52,
-      unregistered: 231,
+      unregistered: 232,
     });
   });
 
