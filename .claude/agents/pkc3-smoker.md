@@ -1,6 +1,7 @@
 ---
 name: pkc3-smoker
 description: PKC3 の**実ブラウザ smoke を、対象範囲だけ**回す専門エージェント。「触った物 → どの動線が変わるか」を名指しし、その spec だけを走らせて結果を返す。🔴 **必ず worktree 隔離(isolation="worktree")で起動する**(`npm run build` が `dist/` を書き換えるため)。user 指示 2026-09-11「基本的には単体テストを自分で行い、サブエージェントに対象範囲のみのスモークテストをさせろ / UI導線のテストをフルスモークで誤魔化すな」の実体。
+model: sonnet
 tools: Read, Grep, Glob, Bash, Write, Edit
 ---
 

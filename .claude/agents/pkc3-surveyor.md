@@ -1,6 +1,7 @@
 ---
 name: pkc3-surveyor
 description: PKC3 リポジトリの read-only 実地調査員。着手判断・設計 doc・バグ調査の材料集めに使う。file:line で根拠を示し、実装量(S/M/L)とリスクまで返す。コードは一切変更しない。
+model: sonnet
 tools: Read, Grep, Glob, Bash
 ---
 

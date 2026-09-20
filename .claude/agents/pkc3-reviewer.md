@@ -1,6 +1,7 @@
 ---
 name: pkc3-reviewer
 description: PKC3 の実装 PR を着地前に読む read-only の敵対的レビュアー。「通っている test が何も保証していない」箇所を名指しで出す。プロセス指示「品質はサブエージェント・スキルで守る:実装 PR は着地前に code review(サブエージェント)を回す」(user 指示 2026-07-30)の実体。コードは一切変更しない。
+model: sonnet
 tools: Read, Grep, Glob, Bash
 ---
 
