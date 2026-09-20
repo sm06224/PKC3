@@ -134,24 +134,27 @@ Agent({ subagent_type: 'pkc3-surveyor', prompt: '…patch を返せ(file は書�
 「隔離が壊れている」ようには見えないので、**気づかずに古い版を検証して
 『緑でした』と返す**形になりうる(今日は agent が気づいて報告した)。
 
-#### 🔴 「HEAD から切る」は嘘だった ── 切られるのは **upstream** である(2026-09-20、#1007 段①)
+#### 🔴 「HEAD から切る」は嘘だった ── 切られるのは **`origin/main`** である(2026-09-20、#1007 段①。実測 5 本)
 
 ⚠ 上の節は「**HEAD から**新しいツリーを切る」と書いていたが、実測は違った。
-commit 済みの `4c3d282` の上で 3 本投げたら、**3 本とも `4d9a26e`(origin/main)から
+commit 済みの `4c3d282` の上で投げた agent は、**5 本とも `4d9a26e`(origin/main)から
 切られていた** ── reflog に `branch: Created from origin/main` と出る。
-🔑 原因は依頼者の branch の **upstream**:`git checkout -B <branch> origin/main`
-(CLAUDE.md の main 同期の作法)は **tracking を `origin/main` に張る**ので、
-worktree はそこから切られる。**HEAD に積んだ commit は、push していなければ 1 つも入らない。**
-⚠ 上の節の「commit すれば入る」は、**upstream が自分の branch を指しているとき**だけ成り立つ。
+⚠ 1 稿目は「依頼者の branch の upstream が `origin/main` だから」と書いたが、
+**upstream を自分の branch へ張り替えた後の 2 本も同じだった**ので、それも嘘である。
+🔑 切られるのは**常に `origin/main`**(hook の設定 file はこの箱に無い ── ハーネス側の既定)。
+**HEAD に積んだ commit は、push していようがいまいが 1 つも入らない。**
 
-🔑 **投げる前に 1 行**:`git rev-parse --abbrev-ref @{u}` が `origin/main` なら、
-`git push -u origin <branch>` で upstream を自分の branch に張り替えてから投げる
-(⚠ push したくない段階なら `git branch --unset-upstream` でもよいが、
-その場合 worktree が**何から切られるか**は確かめていない ── 投げた後に
-agent の `git log -1` を読む)。
-🔑 **依頼文には必ず base の sha を書く**(上の①)── この日は 3 本とも
-題名を書いてあったので、smoke の agent が**自分で `git checkout <sha>` して**救った。
-sha が無ければ、古い版を「緑でした」と返されて終わっていた。
+🔑 **だから依頼文に sha を書き、agent に自分で合わせさせる**(上の①):
+
+```
+🔴 まず `git log --oneline -1` を見る。<sha> でなければ `git checkout <sha>` で合わせ、
+   <この commit で足した file> が実在することを確かめてから始める。
+```
+
+⚠ **push は要らない** ── worktree は object を共有するので、push 前の commit でも
+`git checkout <sha>` は通る(最初の smoker が実際にそうして救った)。
+⚠ sha を書かずに投げると、**古い版を「緑でした」と返される**(この日、書いていない
+1 本は origin/main で全量を 1 周してから、指摘を受けてやり直した)。
 
 #### 🔴 `git checkout <sha> -- src tests` だけ渡すと、baseline が緑にならない(2026-09-18)
 
