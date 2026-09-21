@@ -12,15 +12,25 @@
  * - マニュアル突合(`docs-parity`)は**在るものの文言**を見るので、消えた物は素通りする
  *
  * 🔑 だから **合計**を pin する。片方から外したら、もう片方に足すまで落ちる。
+ *
+ * ## 2026-09-21 追記(#1017 段④a)
+ *
+ * ⚠ 場所は**3 か所**になった ── コレクション全体の書き出し 4 つは
+ * 「設定」から**右の列(何も選んでいないとき)**へ移った(`COLLECTION_PANE_COMMANDS`)。
+ * `tests/adapter/collection-pane.test.ts` が右の列に実際に描かれることを見る。
  */
 import { describe, expect, it } from 'vitest';
 import {
   COLLECTION_COMMANDS,
+  COLLECTION_PANE_COMMANDS,
   SETTINGS_COMMANDS,
   buildSettingsCommands,
 } from '../../src/adapter/ui/render/commands';
 
-/** 2026-08-17 の分割時点の全数。⚠ **減らすときは user の裁定が要る**(動線が減る)。 */
+/**
+ * 2026-08-17 の分割時点の全数 + #1017 段④a で場所が動いた 4 つ。
+ * ⚠ **減らすときは user の裁定が要る**(動線が減る)。
+ */
 const ALL_ACTIONS = [
   'export-archive',
   'export-html',
@@ -33,16 +43,20 @@ const ALL_ACTIONS = [
   'purge-orphan-assets',
 ] as const;
 
-describe('ノート全体の操作の置き場(#239)', () => {
+describe('ノート全体の操作の置き場(#239 / #1017 段④a)', () => {
   it('🔴 合計が変わっていない ── どこからも消えていない', () => {
-    const all = [...COLLECTION_COMMANDS, ...SETTINGS_COMMANDS].map((c) => c.action).sort();
+    const all = [...COLLECTION_COMMANDS, ...COLLECTION_PANE_COMMANDS, ...SETTINGS_COMMANDS]
+      .map((c) => c.action)
+      .sort();
     expect(all).toEqual([...ALL_ACTIONS]);
   });
 
-  it('🔴 2 か所に同じものを置かない(押した場所で挙動が違う、を作らない)', () => {
+  it('🔴 3 か所に同じものを置かない(押した場所で挙動が違う、を作らない)', () => {
     const left = COLLECTION_COMMANDS.map((c) => c.action);
+    const pane = COLLECTION_PANE_COMMANDS.map((c) => c.action);
     const inSettings = SETTINGS_COMMANDS.map((c) => c.action);
-    expect(left.filter((a) => inSettings.includes(a))).toEqual([]);
+    expect(left.filter((a) => pane.includes(a) || inSettings.includes(a))).toEqual([]);
+    expect(pane.filter((a) => inSettings.includes(a))).toEqual([]);
   });
 
   it('🔴 左の列に残すのは「よく押す / 押せないと詰まる」もの', () => {

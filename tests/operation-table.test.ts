@@ -458,7 +458,16 @@ describe('操作の全数台帳(#582 段①)', () => {
     // ⚠ 2026-09-09(#681 段②): 鍵が 61 → 62(SQL の面へ)
     // ⚠ 2026-09-15(#950): 鍵が 62 → 65(`format-table` / `format-codeblock` / `format-math`。
     //    どれも `defaults: []` ── 帯に既にボタンが在るので鍵は増やさない)
-    expect(s().perBook).toEqual({ key: 65, entry: 16, body: 3, collection: 2, settings: 5 });
+    // ⚠ 2026-09-21(#1017 段④a): `settings` 5 → 1、新しい 6 本目 `collectionPane` 4 ──
+    //    書き出し 4 つが「設定」から右の列(何も選んでいないとき)へ移った。合計は不変。
+    expect(s().perBook).toEqual({
+      key: 65,
+      entry: 16,
+      body: 3,
+      collection: 2,
+      collectionPane: 4,
+      settings: 1,
+    });
   });
 
   it('🔴 押し所へ辿れない登記を、身元で pin する', () => {

@@ -10,6 +10,11 @@
  * 🔑 つまり 5 つは**重複ではなく分割**なので、寄せても消える重複が無い
  * (「三つの似た行 > 早すぎる helper」)。
  *
+ * ⚠ **2026-09-21 追記(#1017 段④a)**: 登記簿は**6 つ**になった ──
+ * `SETTINGS_COMMANDS`(5)のうち書き出し 4 つが `COLLECTION_PANE_COMMANDS`
+ * (右の列。何も選んでいないとき)へ移り、`SETTINGS_COMMANDS` は 1 になった。
+ * **合計の id 数は変わらない**(6 つ = 52+11+2+2+4+1 = 72、重なり 1 件で 71)。
+ *
  * 🔴 **本当の穴は別の所に在った ── 「操作」の id 空間が 2 つある**:
  *
  * | | 数 |
@@ -83,6 +88,17 @@ export function registries() {
     entry: registry('src/features/entry-actions.ts', 'export const ENTRY_MENU_ACTIONS', 'action', '\n];'),
     body: registry('src/features/entry-actions.ts', 'export const BODY_MENU_ACTIONS', 'action', '\n];'),
     collection: registry('src/adapter/ui/render/commands.ts', 'export const COLLECTION_COMMANDS', 'action', '\n] as const;'),
+    /**
+     * 🔴 **2026-09-21(#1017 段④a)で 6 本目として増えた**。
+     * コレクション全体の書き出し 4 つが「設定」から右の列(何も選んでいないとき)へ
+     * 移り、`SETTINGS_COMMANDS` とは別の配列(`COLLECTION_PANE_COMMANDS`)になった。
+     */
+    collectionPane: registry(
+      'src/adapter/ui/render/commands.ts',
+      'export const COLLECTION_PANE_COMMANDS',
+      'action',
+      '\n] as const;',
+    ),
     settings: registry('src/adapter/ui/render/commands.ts', 'export const SETTINGS_COMMANDS', 'action', '\n] as const;'),
   };
 }

@@ -25,6 +25,7 @@ import { SettingsRenderer } from '../src/adapter/ui/render/settings';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildShell } from '../src/adapter/ui/render/shell';
+import { InspectorRenderer } from '../src/adapter/ui/render/inspector';
 import {
   COLLECTION_COMMANDS,
   SETTINGS_COMMANDS,
@@ -422,9 +423,13 @@ describe('マニュアルと実装の突合', () => {
   /**
    * 🔴 **設定へ逃がした操作の文言**(#239)。
    *
-   * ⚠ この 3 つは `buildShell` を見る上の突合には**もう掛からない** ──
+   * ⚠ `buildShell` を見る上の突合には**もう掛からない** ──
    * 改名しても全緑で通り、マニュアルだけが嘘になる(Office 一式の節と同じ形)。
    * 🔑 **実際に描いたボタン**と突き合わせる(ソースを grep しない)。
+   *
+   * ⚠ **書き出し 4 つ(閲覧用 HTML / 持ち歩ける HTML 1 枚 / Markdown / 構成をコピー)は
+   *   ここに無い**(2026-09-21、#1017 段④a)── 右の列(何も選んでいないとき)へ移った。
+   *   その 4 つは下の「コレクションを選んでいるとき」の it が見る。
    */
   it('🔴 設定へ逃がした操作が pin と一致し、マニュアルにも在る', () => {
     const commands = buildSettingsCommands();
@@ -433,13 +438,6 @@ describe('マニュアルと実装の突合', () => {
     );
     // ⚠ **等値**で見る(包含だと足したものが素通りする)
     expect(labels).toEqual([
-      '閲覧用 HTML',
-      // 🔴 可搬単一 HTML(#400 段④)── **読むだけの隣**に置く。同じ「HTML 1 枚」
-      //    なので、離すと user が違いに気づけない
-      '持ち歩ける HTML 1 枚',
-      'Markdown',
-      // 🔴 構成をコピー(#429 段①)── 書き出しの仲間(PKC3 の外へ渡す形にする)
-      '構成をコピー',
       '使っていない添付を消す',
       // 🔴 何が容量を食っているか(#415)── 片づけの**手前**(どれが重いか分からないと片づけられない)
       '調べる',
@@ -491,6 +489,40 @@ describe('マニュアルと実装の突合', () => {
       '設定を書き出す',
       '設定を適用',
     ]);
+    for (const label of labels) {
+      expect(MANUAL, `マニュアルに「${label}」の説明が無い`).toContain(`**${label}**`);
+    }
+  });
+
+  /**
+   * 🔴 **コレクション全体の書き出し 4 つ**(2026-09-21、#1017 段④a)。
+   *
+   * 「何も選んでいない = コレクションを選んでいる」右の列(情報ペイン)へ
+   * `docs/development/ui-total-design-2026-09.md` §4.3 の裁定で移した。
+   * ⚠ `buildShell` だけでは描かれない(`InspectorRenderer.render` が要る)ので、
+   *   専用に組んで見る(`tests/adapter/collection-pane.test.ts` と同じ作法)。
+   */
+  it('🔴 コレクション面の書き出し 4 つが pin と一致し、マニュアルにも在る', () => {
+    const el = document.createElement('div');
+    document.body.append(el);
+    const inspector = new InspectorRenderer(buildShell(el).inspector);
+    inspector.render(initialState);
+    const pane = el.querySelector('[data-pkc-field="collection-pane"]')!;
+    const labels = [...pane.querySelectorAll('button')].map(
+      (b) => b.querySelector('[data-pkc-field="label"]')?.textContent ?? b.textContent ?? '',
+    );
+    // ⚠ **等値**で見る(包含だと足したものが素通りする)
+    expect(labels).toEqual([
+      '閲覧用 HTML',
+      // 🔴 可搬単一 HTML(#400 段④)── **読むだけの隣**に置く。同じ「HTML 1 枚」
+      //    なので、離すと user が違いに気づけない
+      '持ち歩ける HTML 1 枚',
+      'Markdown',
+      // 🔴 構成をコピー(#429 段①)── 書き出しの仲間(PKC3 の外へ渡す形にする)
+      '構成をコピー',
+    ]);
+    // ⚠ 畳んでいないこと(user 指示 2026-08-03「主要な導線を畳まない」)
+    expect(pane.querySelectorAll('details')).toHaveLength(0);
     for (const label of labels) {
       expect(MANUAL, `マニュアルに「${label}」の説明が無い`).toContain(`**${label}**`);
     }
@@ -1898,7 +1930,7 @@ describe('執筆規約 条 9 ── 長い節を増やさない(#793)', () => {
   '探す(アプリ)',
   '数式',
   '文字を貼る(ウェブページ・AI の回答)',
-  '書き出す(左の列のいちばん下と、システムの中)',
+  '書き出す(左の列のいちばん下と、右の列)',
   '書式パネル',
   '本文の中にタグを打つ(編集しながら打てます)',
   '構成をコピー(ノートが増えてきたら)',
@@ -2367,6 +2399,12 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    /**
+     * ⚠ **2026-09-21(#1017 段④a 何も選んでいないときの右の列に書き出しを出す)に、
+     *   いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-15-about-oss" …` → a7c0efe
+     */
+    'ヘルプに、開発者・ソース・使っているオープンソースの一覧が出るようになりました',
     /**
      * ⚠ **2026-09-20(#1017 段⓪「設定」→「システム」の改名)に、いちばん古い 1 件が
      *   枠から出た**。

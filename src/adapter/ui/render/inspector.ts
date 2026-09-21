@@ -43,6 +43,7 @@ import { ScrollMemory } from './scroll-memory';
 import { archetypeLabel } from './sidebar';
 import { formatEntryLink } from '@features/entry-ref/entry-ref-format';
 import { iconButton } from './icons';
+import { COLLECTION_PANE_COMMANDS } from './commands';
 // ⚠ 日付の切り方は `features/datetime/stored-date` が正本(一覧の行と共有)。
 //    ここで独自に parse していた頃は、一覧に日付を出すときに規則が 2 つに増えた
 import { formatStoredDate, storedInstantIso } from '@features/datetime/stored-date';
@@ -163,6 +164,7 @@ export class InspectorRenderer {
     }
 
     if (!meta) {
+      this.updateCollectionInfo(state);
       this.shownLid = null;
       return;
     }
@@ -969,10 +971,7 @@ export class InspectorRenderer {
     this.head = head;
 
     if (shape === 'empty') {
-      const empty = document.createElement('p');
-      empty.setAttribute('data-pkc-field', 'inspector-empty');
-      empty.textContent = '左の一覧から選ぶと、ここに情報が出ます。';
-      this.region.append(empty);
+      this.region.append(this.buildCollectionPane());
       this.scroll.use('');
       return;
     }
@@ -1307,6 +1306,76 @@ export class InspectorRenderer {
     note.hidden = true;
     this.editingNote = note;
     this.region.append(note, actions);
+  }
+
+  /**
+   * 🔴 **何も選んでいない = コレクションを選んでいる**(#1017 段④a)。
+   *
+   * ⚠ ここは「情報が無い」面ではない ── コレクション全体の件数と、
+   *   コレクション全体に効く書き出しをここへ出す
+   *   (`docs/development/ui-total-design-2026-09.md` §3.1 / §4.3)。
+   * 🔑 値は `render()` が毎回計算して差し替える(`updateCollectionInfo`)。
+   *   器は`build()` から 1 度だけ呼ばれる ── file 冒頭「器を捨てない」と同じ作法。
+   * ⚠ **添付の合計バイト数はここに出さない** ── 常設で worker を叩かない
+   *   (founding「重い処理はワーカーへ」)。合計を測りたいときは「システム」の
+   *   「保存領域」→「使用量」(押したときだけ集計する既存の口 `storage-profile`)。
+   * ⚠ **押し口の名前は変えていない** ── `COLLECTION_PANE_COMMANDS` の 4 つは
+   *   2026-09-21 まで設定の面に在ったのと同じ `data-pkc-action` である。
+   */
+  private buildCollectionPane(): HTMLElement {
+    const wrap = document.createElement('div');
+    wrap.setAttribute('data-pkc-field', 'collection-pane');
+
+    const heading = document.createElement('h4');
+    heading.setAttribute('data-pkc-field', 'collection-title');
+    heading.textContent = 'コレクション';
+    wrap.append(heading);
+
+    const info = document.createElement('p');
+    info.setAttribute('data-pkc-field', 'collection-info');
+    wrap.append(info);
+    this.rows.set('collection-info', info);
+
+    const cmds = document.createElement('div');
+    cmds.setAttribute('data-pkc-field', 'collection-commands');
+    for (const { action, label, title } of COLLECTION_PANE_COMMANDS) {
+      const item = document.createElement('div');
+      item.setAttribute('data-pkc-field', 'collection-command-item');
+      const btn = iconButton(action, label);
+      btn.title = title;
+      item.append(btn);
+      /**
+       * 🔑 **既存の `title` を、見える 1 行としても出す**(段④a の指示)。
+       * ⚠ `title` は消さない(ホバーする人の情報を減らさない ──
+       *   `commands.ts` の `rescueNote` と同じ作法)。
+       */
+      const note = document.createElement('p');
+      note.setAttribute('data-pkc-field', `${action}-note`);
+      note.className = 'settings-note';
+      note.textContent = title;
+      item.append(note);
+      cmds.append(item);
+    }
+    wrap.append(cmds);
+    return wrap;
+  }
+
+  /**
+   * コレクション面の件数を、state から毎回計算して差し替える(器は組み直さない)。
+   * ⚠ `entryMetas` の走査だけ(worker は叩かない)。
+   */
+  private updateCollectionInfo(state: AppState): void {
+    const info = this.rows.get('collection-info');
+    if (!info) return;
+    let notes = 0;
+    let attachments = 0;
+    let folders = 0;
+    for (const meta of state.entryMetas.values()) {
+      if (meta.archetype === 'folder') folders++;
+      else if (meta.archetype === 'attachment') attachments++;
+      else notes++;
+    }
+    setText(info, `ノート ${notes} 件 / 添付 ${attachments} 件 / フォルダ ${folders} 件`);
   }
 }
 

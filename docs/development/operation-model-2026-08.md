@@ -125,6 +125,13 @@
 > `export-structure` / `purge-orphan-assets`。
 > 🔑 **件数だけ書くと、次に読む人が検算できない**(CLAUDE.md §8「件数ではなく集合」)。
 > ⚠ `KEY_COMMANDS` が 51 → 52 になったのは #615 で `toggle-append` を足したためである。
+>
+> 🔴 **2026-09-21 追記(#1017 段④a)**: `SETTINGS_COMMANDS` の書き出し 4 つ
+> (`export-html` / `export-portable` / `export-markdown` / `export-structure`)は
+> **`COLLECTION_PANE_COMMANDS`**(右の列。何も選んでいないとき)へ移った ──
+> `docs/development/ui-total-design-2026-09.md` §4.3 の裁定「コレクションの操作は
+> 右の列に出す」。登記簿は **6 つ**になり、`SETTINGS_COMMANDS` は `purge-orphan-assets`
+> の 1 件だけになった(登記済みの合計は変わらず 72、重なり 1 件で 71 id)。
 
 🔑 **既に部分的な正解が芽生えている 3 点**(推薦はこれを一般化するだけ):
 

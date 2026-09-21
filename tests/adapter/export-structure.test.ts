@@ -10,7 +10,7 @@ import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
-import { buildSettingsCommands } from '../../src/adapter/ui/render/commands';
+import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
 
 function meta(lid: string, title: string, order: number, archetype = 'text'): EntryMeta {
   return {
@@ -24,9 +24,7 @@ function setup(metas: EntryMeta[]) {
   document.body.innerHTML = '';
   const root = document.createElement('div');
   document.body.append(root);
-  buildShell(root);
-  // ⚠ この口は**設定の面**に在る ── 器を足さないと押す先が無い
-  root.append(buildSettingsCommands());
+  const regions = buildShell(root);
   const d = new Dispatcher();
   const copied: string[] = [];
   const status: string[] = [];
@@ -50,13 +48,19 @@ function setup(metas: EntryMeta[]) {
     if (e && !errors.includes(e)) errors.push(e);
   });
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas, relations: [] });
+  /**
+   * ⚠ **この口は右の列(何も選んでいないとき)に在る**(#1017 段④a、
+   *   2026-09-21)── 器を組まないと押す先が無い。何も選んでいないので
+   *   `entryMetas` を渡すだけで `InspectorRenderer` が組む。
+   */
+  new InspectorRenderer(regions.inspector).render(d.getState());
   const press = (): void =>
     root.querySelector<HTMLElement>('[data-pkc-action="export-structure"]')!.click();
   return { root, d, copied, status, errors, press };
 }
 
 describe('構成をコピー(#429 段①)', () => {
-  it('🔴 押す口が設定の面に在る', () => {
+  it('🔴 押す口が右の列(何も選んでいないとき)に在る', () => {
     const { root } = setup([meta('a', 'めも', 1)]);
     expect(
       root.querySelector('[data-pkc-action="export-structure"]'),
