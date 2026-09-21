@@ -75,8 +75,11 @@ import { bodyLinkTargets } from '@features/entry-ref/body-links';
 import {
   ADOPT_IMAGES_LABEL,
   adoptImagesLabel,
+  ENTRY_ACTION_GROUPS,
   ENTRY_ACTION_LABELS,
+  ENTRY_ACTION_WIDTH_ATTR,
   entryActionHint,
+  entryActionWidthTier,
 } from '@features/entry-actions';
 import { STACK_ARCHETYPE } from '@features/flavor/stack-flavor';
 
@@ -769,7 +772,19 @@ export class InspectorRenderer {
      *   押せない(畳んである)より悪い。
      */
     const folderBtn = this.buttons.get('export-folder');
-    if (folderBtn) folderBtn.hidden = meta.archetype !== 'folder';
+    if (folderBtn) {
+      folderBtn.hidden = meta.archetype !== 'folder';
+      /**
+       * 🔴 **1 件しか持たない塊(`this-folder`)は、畳むとき塊ごと畳む**
+       *   (#1029 段 C)。⚠ ボタンだけ `hidden` にすると、**塊を包む器
+       *   (`data-pkc-group='this-folder'`)は空のまま残り**、その両隣の間
+       *   (`gap`)が二重に空く(§1「これが無いと壊れると書いたら…」の逆 ──
+       *   ここは「無くても壊れない」ではなく「**在ると余計な間が空く**」)。
+       */
+      if (folderBtn.parentElement instanceof HTMLElement) {
+        folderBtn.parentElement.hidden = folderBtn.hidden;
+      }
+    }
     // 🔴 「この中に新しいノートを作る」も同じ門(#215)── 入れ物でなければ畳む
     const inFolderBtn = this.buttons.get('create-in-folder');
     if (inFolderBtn) inFolderBtn.hidden = meta.archetype !== 'folder';
@@ -1203,17 +1218,44 @@ export class InspectorRenderer {
      *   狭い列で塊ごと溢れて「入り切らないから見えない」が起きる。
      */
     let bucket: HTMLElement | null = null;
+    let bucketGroup: string | undefined;
     const group = (name: string): void => {
       const g = document.createElement('div');
       g.setAttribute('data-pkc-field', 'inspector-action-group');
       g.setAttribute('data-pkc-group', name);
       actions.append(g);
       bucket = g;
+      bucketGroup = name;
     };
     const btn = (action: string, label: string): void => {
       const b = iconButton(action, label);
       (bucket ?? actions).append(b);
       this.buttons.set(action, b);
+    };
+    /**
+     * 🔴 **塊は正本(`ENTRY_ACTION_GROUPS`)から引く**(#1029 段 C)。
+     *
+     * ⚠ 直す前はここに `group('copy')` のように**塊の名前が直書き**されていた ──
+     *   `ENTRY_MENU_ACTIONS`(右クリックと共有する字の正本)の側で塊を変えても
+     *   **ここが追随しない**ので、2 つの面が食い違う日を作る(§7「同じ値を
+     *   複数の描画経路へ渡すものは、経路ごとに pin する」)。
+     * 🔑 だから `ENTRY_MENU_ACTIONS` に載っている 16 件はこの 1 本(`entryBtn`)
+     *   で描く ── 直前のボタンと塊が違えば新しい塊を開き、同じなら同じ塊へ
+     *   続けて足す。**並びは 1 つも変えていない**(呼ぶ順はいままでと同じ)。
+     * ⚠ `adopt-external-images`(枚数つきで動的に組むので、この表の外に在る)
+     *   だけは、いまも直書きの `group('take-in')` を残す ── 塊が 1 件しか
+     *   持たないので、正本から引いても得るものが無い。
+     */
+    const entryBtn = (action: string): void => {
+      const g = ENTRY_ACTION_GROUPS[action];
+      if (g !== undefined && g !== bucketGroup) group(g);
+      const label = ENTRY_ACTION_LABELS[action]!;
+      btn(action, label);
+      /**
+       * 🔴 **幅は「段」で受ける**(#1029 段 C 手 2)── 段の値そのものは CSS が持つ
+       *   (`min-width: max(<段>, max-content)`)。ここは**どちらの段か**だけを書く。
+       */
+      this.buttons.get(action)?.setAttribute(ENTRY_ACTION_WIDTH_ATTR, entryActionWidthTier(label));
     };
     // ⚠ 文言は**実際に落ちるもの**に合わせる(P8 段⑱)── ここは可逆な
     //    アーカイブで、Markdown ではない(マニュアル「出す・取り込む」の表と同じ材料)
@@ -1236,9 +1278,8 @@ export class InspectorRenderer {
      *   「字は 1 か所から来る」が全数で見ている)。
      */
     // ⚠ **並びは右クリックと揃える**(user 裁定 2026-09-04)── 毎日使う
-    //    「参照をコピー」を動かさない(1 稿目は付箋を先頭に置いて全部を 1 つ下げた)
-    group('copy');
-    btn('copy-entry-ref', ENTRY_ACTION_LABELS['copy-entry-ref']!);
+    //    「参照」を動かさない(1 稿目は付箋を先頭に置いて全部を 1 つ下げた)
+    entryBtn('copy-entry-ref');
     /**
      * 🔴 **素の Markdown で写す**(#396)。
      *
@@ -1249,19 +1290,18 @@ export class InspectorRenderer {
      *   実装は在ったが**届いていなかった**。ここが PKC3 の動線である。
      * ⚠ 書き出しの 4 つと違い、**file は落ちない**(clipboard へ写す)── 他のツールへ
      *   そのまま貼るための物だからである。
-     * 🔑 **「参照をコピー」の真横に置く**(#690 I2、2026-09-04)── どちらも clipboard へ
-     *   写す物なので隣り合わせにし、右クリックの並び(参照をコピー / 素の Markdown /
-     *   別のウィンドウで開く)と揃える。⚠ 直す前は書き出しの群れの後ろ(10 番目)に
+     * 🔑 **「参照」の真横に置く**(#690 I2、2026-09-04)── どちらも clipboard へ
+     *   写す物なので隣り合わせにし、右クリックの並び(参照 / Markdown /
+     *   開く)と揃える。⚠ 直す前は書き出しの群れの後ろ(10 番目)に
      *   在り、右クリックとは並びが違っていた。
      */
-    btn('copy-plain-markdown', ENTRY_ACTION_LABELS['copy-plain-markdown']!);
-    group('open');
-    btn('open-note-window', ENTRY_ACTION_LABELS['open-note-window']!);
+    entryBtn('copy-plain-markdown');
+    entryBtn('open-note-window');
     /**
      * 🔴 **保存したスタックを載せる**(#633 段③)。⚠ スタックの入れ物のときだけ出す
      *   (`render` で `hidden` を付け外し ── `export-folder` と同じ作法)。
      */
-    btn('stack-load', ENTRY_ACTION_LABELS['stack-load']!);
+    entryBtn('stack-load');
     /**
      * 🔴 **外部の画像を手元へ取り込む**(#264 段①)。
      *
@@ -1272,8 +1312,7 @@ export class InspectorRenderer {
      */
     group('take-in');
     btn('adopt-external-images', ADOPT_IMAGES_LABEL);
-    group('export');
-    btn('export-entry', ENTRY_ACTION_LABELS['export-entry']!);
+    entryBtn('export-entry');
     /**
      * 🔴 **相手に渡せる 1 枚**(#491)。
      *
@@ -1286,7 +1325,7 @@ export class InspectorRenderer {
      * 🔑 隣の `書き出す` の真横に置く ── 「渡したい」と思った人が
      *   最初に見るのはこの群れである。
      */
-    btn('export-entry-html', ENTRY_ACTION_LABELS['export-entry-html']!);
+    entryBtn('export-entry-html');
     /**
      * 🔴 **このフォルダごと書き出す**(#399 ①)。
      *
@@ -1294,36 +1333,38 @@ export class InspectorRenderer {
      *   形(`Shape`)を増やすと `entry+link` との掛け算になり、組み直しが増える。
      * ⚠ **消さずに畳む**のは、隣の並びを動かさないためである(業務画面の作法
      *   「同じものが常に同じ場所にある」)。
+     * 🔴 **`export-entry` とは塊が違う**(#1029 段 C)── `ENTRY_ACTION_GROUPS`
+     *   `this-folder` が新しい塊を開く(理由は `entry-actions.ts` を見よ)。
+     *   ⚠ **1 件だけの塊が畳まれると、間だけが余る** ── だから `render` は
+     *   この塊(親の `data-pkc-group='this-folder'`)ごと隠す(下を見よ)。
      */
-    btn('export-folder', ENTRY_ACTION_LABELS['export-folder']!);
+    entryBtn('export-folder');
     // 🔴 **Word で出す**(#187 段①)。⚠ 隣の「書き出す」と**別の物**である ──
     //    あちらは取り込み直せるバックアップ、こちらは片道の Word 文書
-    btn('export-entry-docx', ENTRY_ACTION_LABELS['export-entry-docx']!);
+    entryBtn('export-entry-docx');
     /**
      * 🔴 **PowerPoint で出す**(#187 段⑤)。⚠ Word と**切れ方が違う** ──
      *   見出しでスライドが切れるので、説明にもそう書く(押す前に分かるように)。
      */
-    btn('export-entry-pptx', ENTRY_ACTION_LABELS['export-entry-pptx']!);
+    entryBtn('export-entry-pptx');
     /**
      * 🔴 **紙に出す(= PDF)**(#187、2026-08-23)。⚠ 隣の 2 つと違い、
      *   **file は落ちない** ── ブラウザの印刷画面が開き、そこで user が
      *   「PDF として保存」を選ぶ。⚠ だから文言に「保存します」と書かない。
      */
-    btn('export-entry-pdf', ENTRY_ACTION_LABELS['export-entry-pdf']!);
-    if (shape === 'entry+link') btn('write-back-file', ENTRY_ACTION_LABELS['write-back-file']!);
-    group('this-one');
-    btn('show-history', ENTRY_ACTION_LABELS['show-history']!);
+    entryBtn('export-entry-pdf');
+    if (shape === 'entry+link') entryBtn('write-back-file');
+    entryBtn('show-history');
     /**
      * 🔴 **左の列の整理 3 つ**(#215)── 右クリックと**同じ表**から出す(字は 1 か所)。
      * ⚠ `create-in-folder` は**フォルダのときだけ**(`render` で `hidden` を付け外しする ──
      *   `export-folder` と同じ作法。ノートで押すと必ず断られる物を常設しない)。
      * ⚠ 並びは右クリックと揃える(履歴の下・削除の上)。
      */
-    btn('rename-entry-begin', ENTRY_ACTION_LABELS['rename-entry-begin']!);
-    btn('move-to-folder', ENTRY_ACTION_LABELS['move-to-folder']!);
-    btn('create-in-folder', ENTRY_ACTION_LABELS['create-in-folder']!);
-    group('remove');
-    btn('delete-entry', ENTRY_ACTION_LABELS['delete-entry']!);
+    entryBtn('rename-entry-begin');
+    entryBtn('move-to-folder');
+    entryBtn('create-in-folder');
+    entryBtn('delete-entry');
     /**
      * 🔴 **編集中だけ出る 1 行**(#715)── 操作の帯の**直上**に置く(帯と離すと
      *   何の理由か読めない)。字と出し入れは `render` が phase から決める。

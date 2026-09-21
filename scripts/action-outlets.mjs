@@ -181,6 +181,15 @@ export function outlets(names) {
       /data-pkc-action=["']([a-z0-9-]+)["']/g,
       /iconButton\(\s*'([a-z0-9-]+)'/g,
       /\bbtn\(\s*'([a-z0-9-]+)'/g,
+      /**
+       * 🔴 **`entryBtn('x')` も出口の 1 つ**(#1029 段 C)。
+       * ⚠ `inspector.ts` は `ENTRY_MENU_ACTIONS` の 16 件を、この 1 本の
+       *   共通の読み手(塊も字も正本から引く)で描く ── `btn(action, …)` に
+       *   **変数**を渡す形になったので、上の `\bbtn\(` は当たらなくなった。
+       *   ⚠ 直さないと `copy-entry-ref` などが「出口 1 か所」に**見かけ上**
+       *   落ちる(実際には情報ペイン / 右クリックの両方に出ている)。
+       */
+      /\bentryBtn\(\s*'([a-z0-9-]+)'/g,
       /action:\s*'([a-z0-9-]+)'/g,
     ]) {
       for (const m of t.matchAll(re)) add(m[1], where);

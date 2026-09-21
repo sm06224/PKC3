@@ -580,6 +580,22 @@ select:focus-visible {
    *    「何ができるか」を出す面としての意味が無くなる。 */
   min-width: max-content;
 }
+/**
+ * 🔴 **幅は「段」で受ける**(#1029 段 C 手 2)。
+ *
+ * ⚠ **固定幅にはしない** ── `max()` は下限と `max-content` の**大きいほう**を採るので、
+ *   名前が段より長ければ `max-content` が勝つ(2026-08-27 に「+ ノート」が「+ ノ」に
+ *   切れた事故が戻らない)。⚠ **段は 2 つだけ**(3 つ目を作ると、また
+ *   「どれに入れるか」の判断が毎回生える)。
+ * 🔑 `[data-pkc-width]` は `features/entry-actions.ts` の `entryActionWidthTier()` が
+ *   決める(名前の全角換算 8 桁が境目)。値そのもの(4em / 6em)はここにだけ書く。
+ */
+[data-pkc-region='inspector'] [data-pkc-field='inspector-actions'] button[data-pkc-width='short'] {
+  min-width: max(4em, max-content);
+}
+[data-pkc-region='inspector'] [data-pkc-field='inspector-actions'] button[data-pkc-width='long'] {
+  min-width: max(6em, max-content);
+}
 [data-pkc-region='context-menu'] button:hover,
 [data-pkc-region='context-menu'] button:focus-visible {
   background: var(--accent-dim);

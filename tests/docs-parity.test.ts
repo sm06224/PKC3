@@ -582,9 +582,16 @@ describe('マニュアルと実装の突合', () => {
     for (const label of ['バックアップ(このノート)', '履歴', '削除']) {
       const action = ACTION_OF[label]!;
       expect(ENTRY_ACTION_LABELS[action], `字の正本から「${label}」が消えた`).toBe(label);
-      expect(inspector, `情報ペインから「${label}」が消えた`).toContain(
-        `ENTRY_ACTION_LABELS['${action}']`,
-      );
+      /**
+       * 🔴 **引き方は 2 通り**(#1029 段 C で `entryBtn()` に寄せた)。
+       * ⚠ 字面 1 通りだけを見ると、**表から引く形に寄せた日に落ちる** ──
+       *   落ちる理由は「情報ペインから消えた」ではなく「引き方が変わった」で、
+       *   **文言が的を外す**(CLAUDE.md §1「主張そのものが成り立たない」)。
+       */
+      const drawn =
+        inspector.includes(`ENTRY_ACTION_LABELS['${action}']`) ||
+        inspector.includes(`entryBtn('${action}')`);
+      expect(drawn, `情報ペインから「${label}」が消えた`).toBe(true);
     }
     // ⚠ **2 か所に同じボタンを出さない**(押す場所が定まらなくなる)
     for (const label of ['削除', '履歴']) {

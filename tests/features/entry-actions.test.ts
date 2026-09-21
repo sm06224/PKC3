@@ -40,6 +40,7 @@ import {
   TASK_REPEAT_MENU_ACTION,
   repeatMenuActions,
   REPEAT_ATTR,
+  entryActionWidthTier,
 } from '../../src/features/entry-actions';
 
 /** `binder.ts` の受け手の表を読む。⚠ 集め方は `repo-hygiene` と**同じ形**にする。 */
@@ -125,9 +126,21 @@ describe('右クリックに出す操作', () => {
      *   ⚠ 弱い検査だと自覚して使う(原文 pin なので、呼び方を変えれば外れる)。
      */
     const inspector = readFileSync('src/adapter/ui/render/inspector.ts', 'utf-8');
+    /**
+     * 🔴 **引き方は 2 通りある**(#1029 段 C で `entryBtn()` に寄せた)。
+     * ⚠ 直す前はこの検査が `ENTRY_ACTION_LABELS['<綴り>']` という**字面 1 通り**しか
+     *   受けなかったので、**表から引く形に寄せた瞬間に落ちる** ── 落ちる理由は
+     *   「自前の字へ戻った」ではなく「引き方が変わった」であり、**主張が的を外す**。
+     * 🔑 だから**表から引いていること**を、2 つの形のどちらかで認める:
+     *   ① `ENTRY_ACTION_LABELS['<綴り>']`(1 件ずつ引く昔の形)
+     *   ② `entryBtn('<綴り>')`(綴りだけ渡し、字は中で表から引く いまの形)
+     */
     for (const a of ENTRY_MENU_ACTIONS) {
+      const fromTable =
+        inspector.includes(`ENTRY_ACTION_LABELS['${a.action}']`) ||
+        inspector.includes(`entryBtn('${a.action}')`);
       expect(
-        inspector.includes(`ENTRY_ACTION_LABELS['${a.action}']`),
+        fromTable,
         `情報ペインが「${a.label}」の字を自前で持っている(表から引いていない)`,
       ).toBe(true);
       // ⚠ 直書きが**戻っていない**ことも見る(引きつつ横に直書きを残せてしまう)
@@ -136,6 +149,11 @@ describe('右クリックに出す操作', () => {
         `情報ペインに「${a.label}」の直書きが残っている`,
       ).toBe(false);
     }
+    // ⚠ 空振り防止 ── ②の形が 1 件も無いなら、上の `||` は昔の形しか見ていない
+    expect(
+      inspector.includes("entryBtn('copy-entry-ref')"),
+      '前提: いまの引き方(entryBtn)が 1 件も無い',
+    ).toBe(true);
   });
 
   it('⚠ 綴りと字の対応が崩れていない', () => {
@@ -662,5 +680,54 @@ describe('繰り返しの一覧(#855 段 0)', () => {
   it('⚠ 説明は 1 件残らず付いている(右クリックの項目が黙らない)', () => {
     for (const a of [TASK_REPEAT_MENU_ACTION, ...repeatMenuActions('week')])
       expect(a.hint, `「${a.label}」に説明が無い`).not.toBe('');
+  });
+});
+
+/**
+ * 🔴 **名前の幅の「上限」は置かない**(#1029 段 C。**1 稿目を実測で覆した記録**)。
+ *
+ * ⚠ 1 稿目はここに「全角 6 字(12 桁)以内」という門が在った ── 名前から動詞を落とし、
+ *   動詞は**塊の見出し**に言わせる設計だったからである。
+ * 🔴 **実測で覆った**(2026-09-21、実ブラウザ・8 幅・同じ頁で A/B):見出しを出すと
+ *   右の列の折り返しが **+2〜+4 段**増えた(1600px で +4 段)。設計 doc §4.0 の
+ *   「2 段以上増えるなら見出しをやめて名前を作り直す」に当たるので、**見出しを出さず、
+ *   名前は動詞を持ったまま**にした。
+ * ⚠ だから**上限の門は外してある** ── 動詞を含む名前は 12 桁に収まらない
+ *   (「この中に新しいノートを作る」は 26 桁)。⚠ この節を消さないこと:
+ *   消すと、次に読む人が**上限の門をもう一度足して、同じ実測をやり直す**。
+ * 🔑 いま幅のでこぼこを受けているのは**下限の段 2 つ**(すぐ下)である。
+ */
+
+/**
+ * 🔴 **幅は「段」で受ける。段は 2 つだけ**(#1029 段 C 手 2 門④)。
+ *
+ * ⚠ 「CSS を走査して、段の値が 2 種類であることを見る」門 ── 見るのは
+ *   **実行する規則**(`min-width: max(<段>, max-content)`)だけである
+ *   (CLAUDE.md §1「範囲が広すぎて無関係な散文に満たされる」と同じ罠を避けるため、
+ *   コメントを含む file 全体の文字列一致ではなく**構文で拾う**)。
+ */
+describe('幅の段は 2 つだけ(#1029 段 C 手 2)', () => {
+  it('🔴 entryActionWidthTier は short/long の 2 値だけを、両方実際に使う', () => {
+    const tiers = new Set(ENTRY_MENU_ACTIONS.map((a) => entryActionWidthTier(a.label)));
+    // ⚠ 空振り防止 ── 両方の段が実際に使われていること(片方しか出ないと段が 1 つになる)
+    expect([...tiers].sort()).toEqual(['long', 'short']);
+  });
+
+  it('🔴 CSS に現れる幅の段(min-width の下限)は 2 種類だけ', () => {
+    const css = readFileSync('src/styles/app.css', 'utf-8');
+    // 🔑 実行する宣言だけを拾う(`min-width: max(4em, max-content)` の形)
+    const values = [...css.matchAll(/min-width:\s*max\(([0-9.]+em),\s*max-content\)/g)].map(
+      (m) => m[1]!,
+    );
+    // ⚠ 空振り防止 ── 規則そのものが 0 件なら「2 種類」の主張が意味を持たない
+    expect(values.length, '段の規則が CSS に無い(空振り)').toBeGreaterThanOrEqual(2);
+    expect(new Set(values).size, '段が 2 種類ではない(3 つ目が生えた/1 つに潰れた)').toBe(2);
+  });
+
+  it('⚠ 全角 8 桁がちょうど境目(短 ≤ 8 / 長 > 8)', () => {
+    expect(entryActionWidthTier('Markdown')).toBe('short'); // 8 桁ちょうど
+    expect(entryActionWidthTier('スタック')).toBe('short'); // 8 桁ちょうど
+    expect(entryActionWidthTier('PowerPoint')).toBe('long'); // 10 桁
+    expect(entryActionWidthTier('バックアップ')).toBe('long'); // 12 桁
   });
 });
