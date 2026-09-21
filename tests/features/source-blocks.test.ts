@@ -127,7 +127,7 @@ describe('開放終端(S5b の材料)', () => {
   it('行内の開放終端を出す', () => {
     expect(kinds('これは**太字')).toEqual(['inline:太字@0']);
     expect(kinds('これは`コード')).toEqual(['inline:コード@0']);
-    expect(kinds('これは==印')).toEqual(['inline:強調印@0']);
+    expect(kinds('これは==印')).toEqual(['inline:ハイライト@0']);
     expect(kinds('これは~~打消')).toEqual(['inline:打消@0']);
     expect(kinds('これは[リンク')).toEqual(['inline:リンク@0']);
   });

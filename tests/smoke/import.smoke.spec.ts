@@ -14,7 +14,9 @@ import { readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { answerAppDialog, gotoApp, collectPageErrors, clickReal, expectImageRendered, useSplitEditor, useListBrowse } from './helpers';
+import { answerAppDialog, gotoApp, collectPageErrors, clickReal, expectImageRendered, useSplitEditor, useListBrowse,
+  gotoCollectionPane,
+} from './helpers';
 import { withStateOnFail } from './state-dump';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
@@ -918,8 +920,8 @@ test('🔴 可搬 HTML: 書き出したファイルが**単体で開いて読め
   await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(2);
 
   const dl = page.waitForEvent('download');
-  // ⚠ #239 でこの操作は設定の中(書き出しと片づけ)へ移った ── 先に開く
-  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  // ⚠ #1017 段④a でこの操作は右の列(何も選んでいないとき)へ移った ── 先に出す
+  await gotoCollectionPane(page);
   await clickReal(page, '[data-pkc-action="export-html"]');
   const download = await dl;
   expect(download.suggestedFilename()).toMatch(/\.html$/);
@@ -1101,8 +1103,8 @@ test('🔴 md ZIP: 落ちるものを言い、添付が**相対パス**で入る
   await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(2);
 
   const dl = page.waitForEvent('download');
-  // ⚠ #239 でこの操作は設定の中(書き出しと片づけ)へ移った ── 先に開く
-  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  // ⚠ #1017 段④a でこの操作は右の列(何も選んでいないとき)へ移った ── 先に出す
+  await gotoCollectionPane(page);
   await clickReal(page, '[data-pkc-action="export-markdown"]');
   const download = await dl;
   expect(download.suggestedFilename()).toMatch(/\.md\.zip$/);

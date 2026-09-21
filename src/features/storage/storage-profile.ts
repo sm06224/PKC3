@@ -126,7 +126,7 @@ export function profileSummary(result: StorageProfileResult): string {
  */
 export function sharedNote(lines: readonly ProfileLine[]): string {
   return lines.some((l) => l.shared)
-    ? '⚠ 印の付いた行は、同じ添付を別のノートとも使っています。片方を消しても減りません。'
+    ? '⚠ 「共有」と付いた行は、同じ添付を別のノートとも使っています。片方を消しても減りません。'
     : '';
 }
 

@@ -105,7 +105,7 @@ describe('🔴 断るもの(1 つでも通ると、取り消せない壊し方�
     ['UPDATE entries SET title = 1', '読み取り専用です', '書き込みの語'],
     ['SELCT * FROM entries', 'では始められません', '打ち間違い'],
     ['最近直したノートを見たい', 'では始められません', 'まだ SQL ではない'],
-    ['PRAGMA table_info(entries)', 'PRAGMA はこの面では使えません', '読むだけだが使えない命令'],
+    ['PRAGMA table_info(entries)', 'PRAGMA はここでは使えません', '読むだけだが使えない命令'],
   ])('🔴 %s の断り文は「%s」', (sql, want) => {
     const r = checkReadOnlySql(sql as string);
     expect(r.ok).toBe(false);

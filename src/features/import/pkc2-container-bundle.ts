@@ -275,7 +275,7 @@ export async function readInnerBundles(
   for (const e of dir) {
     if (e.isDirectory) continue;
     if (byName.has(e.name)) {
-      throw new ZipReadError(`同じ名前のファイルが 2 つあります: ${e.name}(壊れた ZIP)`);
+      throw new ZipReadError(`同じ名前のファイルが 2 つあります: ${e.name}(この ZIP は読み取れません)`);
     }
     byName.set(e.name, e);
     const n = e.name.normalize('NFC');
@@ -303,7 +303,7 @@ export async function readInnerBundles(
     // PKC2 は preview で**無言 skip**・import で hard fail という非対称を持つ
     // (user は「一覧に出たのに入らない」を経験しうる)── PKC3 は常に断る
     if (filename === '') {
-      throw new ZipReadError(`${where}: manifest に filename がありません(壊れた ZIP)`);
+      throw new ZipReadError(`${where}: manifest に filename がありません(この ZIP は読み取れません)`);
     }
     // PKC2 は同じ filename が 2 回並ぶと**同じ内容を 2 回取り込んで**いた
     if (used.has(filename)) {
@@ -451,7 +451,7 @@ export async function readContainerBundle(zip: Blob): Promise<Pkc2ContainerBundl
     );
   }
   if (!Array.isArray(manifest.entries)) {
-    throw new ZipReadError('manifest に entries の配列がありません(壊れた ZIP)');
+    throw new ZipReadError('manifest に entries の配列がありません(この ZIP は読み取れません)');
   }
 
   const inner = await readInnerBundles(zip, dir, manifest.entries, (me, where, w) =>

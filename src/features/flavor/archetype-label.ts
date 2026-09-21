@@ -32,7 +32,7 @@ export const ARCHETYPE_LABELS: readonly (readonly [string, string])[] = [
   // 🔴 アプリの一覧のグループの目印を憶えるノート(#857 段②)
   ['appgroup', 'アプリのグループ'],
   ['attachment', '添付'],
-  ['snippet', '雛形'],
+  ['snippet', 'テンプレート'],
   ['todo', 'Todo'],
   ['form', 'フォーム'],
 ];

@@ -82,7 +82,7 @@ export async function exportPortable(
   if (deps.insideBundle())
     return fail(
       'この 1 枚から可搬 HTML は作れません ── いま開いているのは配られた 1 枚で、' +
-        'アプリの雛形を取りに行けないためです。ブラウザで開いた PKC3 から書き出してください',
+        'アプリのテンプレートを取りに行けないためです。ブラウザで開いた PKC3 から書き出してください',
     );
 
   deps.notify('可搬 HTML を書き出しています…');

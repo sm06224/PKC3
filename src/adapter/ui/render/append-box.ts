@@ -162,7 +162,7 @@ export class AppendBoxRenderer {
     this.discard = iconButton('cancel-edit', 'キャンセル');
     this.discard.title = CANCEL_EDIT_HINT;
     // 書込が返らないとき ── 最後の出口
-    this.release = iconButton('force-release', '強制解放');
+    this.release = iconButton('force-release', '強制的に終える');
     this.lockBar.append(this.lockText, this.resolve, this.discard, this.release);
 
     this.region.append(this.lockBar, this.form);
@@ -251,7 +251,7 @@ export class AppendBoxRenderer {
     if (mode.kind === 'editing') {
       this.lockText.textContent = 'このノートは編集中です。保存するか、キャンセルすると追記できます。';
     } else if (mode.kind === 'writing') {
-      this.lockText.textContent = '追記を書き込んでいます…(返ってこないときは強制解放)';
+      this.lockText.textContent = '追記を書き込んでいます…(返ってこないときは強制的に終える)';
     }
     // ⚠ **器を出した後**に当てる ── `hidden` のままの欄には焦点が乗らない
     this.focusIfPending(mode);

@@ -1,5 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
-import { clickReal, createEntry, collectPageErrors, gotoApp, useSplitEditor } from './helpers';
+import { clickReal, createEntry, collectPageErrors, gotoApp, useSplitEditor,
+  gotoCollectionPane,
+} from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -238,15 +240,7 @@ test('🔴 構成をコピーすると、貼れる 1 枚が本当に入る (#429
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
 
   // ② 2 件に印を付けて「選択を解除」── これで右の列がコレクションの面になる
-  const rows = page.locator('[data-pkc-region="filer-table"] tbody tr');
-  await expect(rows, '一覧に 2 件出ていない').toHaveCount(2);
-  await rows.nth(0).click();
-  await rows.nth(1).click({ modifiers: ['ControlOrMeta'] });
-  await clickReal(page, '[data-pkc-field="filer-bulk"] [data-pkc-action="clear-selection"]');
-  await expect(
-    page.locator('[data-pkc-field="collection-pane"]'),
-    'コレクションの面が出ていない(選択が外れていない)',
-  ).toBeVisible();
+  await gotoCollectionPane(page);
   await copyAndWait(page, 'export-structure');
 
   // ③ 🔴 **貼れる 1 枚**が入っている ── 木 + コマンドの書き方の両方

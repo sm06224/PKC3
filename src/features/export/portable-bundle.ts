@@ -51,14 +51,14 @@ export function bundleTagHtml(bundle: PortableBundle): string {
 }
 
 /**
- * 雛形の頭に在る印を、この書き出しの印へ差し替える。
- * @throws 印が頭に 1 件で無ければ落とす(黙って差し替えないため)
+ * テンプレートの頭に在る目印を、この書き出しの目印へ差し替える。
+ * @throws 目印が頭に 1 件で無ければ落とす(黙って差し替えないため)
  */
 export function stampHead(head: string, bundle: PortableBundle): string {
   const hits = [...head.matchAll(TAG_RE)];
   if (hits.length !== 1)
     throw new Error(
-      `雛形の印が頭に ${hits.length} 件でした(1 件でなければ差し替えられません)`,
+      `テンプレートの目印がヘッダーに ${hits.length} 件でした(1 件でなければ差し替えられません)`,
     );
   return head.replace(TAG_RE, bundleTagHtml(bundle));
 }
@@ -114,7 +114,7 @@ export async function writePortableBundle(args: {
    * 最後の 1 件は必ず器のほうに当たる。
    */
   const cut = stamped.lastIndexOf('</body>');
-  if (cut < 0) throw new Error('雛形に `</body>` がありません(差し込み先が無い)');
+  if (cut < 0) throw new Error('テンプレートに `</body>` がありません(差し込み先が無い)');
 
   const parts: BlobPart[] = [stamped.slice(0, cut)];
   const warnings: string[] = [];

@@ -55,7 +55,7 @@ describe('候補', () => {
   it('種類の名前も返す(同じ題名が並んだときの見分け)', () => {
     const rows = entryPickRows(w.metas, w.order, '', null);
     expect(rows.find((r) => r.lid === 'd')?.kind).toBe('フォルダ');
-    expect(rows.find((r) => r.lid === 'c')?.kind).toBe('雛形');
+    expect(rows.find((r) => r.lid === 'c')?.kind).toBe('テンプレート');
   });
 
   it('⚠ `order` に無い lid は出さない(一覧に出ていない物を候補にしない)', () => {

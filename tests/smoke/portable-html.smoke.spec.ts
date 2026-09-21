@@ -4,7 +4,9 @@ import { copyFileSync, existsSync, mkdtempSync, readFileSync, writeFileSync } fr
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { join, resolve } from 'node:path';
-import { clickReal, createEntry } from './helpers';
+import { clickReal, createEntry,
+  gotoCollectionPane,
+} from './helpers';
 
 /**
  * 🔴 **可搬単一 HTML が `file://` で起動する**(#400 段①②)。
@@ -224,7 +226,10 @@ test('🔴 書き出した 1 枚が、そのまま PKC3 として開く (#400 �
 
   // ⚠ #239 でこの操作は設定の中(書き出しと片づけ)に在る ── 先に開く
   const dl = page.waitForEvent('download');
-  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  // ⚠ #1017 段④a でこの操作は右の列(何も選んでいないとき)へ移った ── 先に出す
+
+  await gotoCollectionPane(page);
+
   await clickReal(page, '[data-pkc-action="export-portable"]');
   const out = join(mkdtempSync(join(tmpdir(), 'pkc3-out-')), 'carried.html');
   await (await dl).saveAs(out);

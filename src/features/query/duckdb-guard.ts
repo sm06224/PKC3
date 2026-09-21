@@ -148,10 +148,10 @@ export function checkDuckDbSql(input: string): SqlCheck {
   if (hit !== undefined) {
     const why =
       hit === 'install' || hit === 'load'
-        ? `${hit.toUpperCase()} は打てません(拡張を外から取りに行く書き方なので、この面では使えません)`
+        ? `${hit.toUpperCase()} は打てません(拡張を外から取りに行く書き方なので、ここでは使えません)`
         : hit === 'set' || hit === 'reset'
           ? `${hit.toUpperCase()} は打てません(外へ出ない設定を掛けてあるので、打ち直せません)`
-          : `読み取り専用です ── ${hit.toUpperCase()} は打てません(この面は読むだけです)`;
+          : `読み取り専用です ── ${hit.toUpperCase()} は打てません(ここは読むだけです)`;
     return { ok: false, why, sql };
   }
 

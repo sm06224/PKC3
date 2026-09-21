@@ -195,7 +195,7 @@ describe('押す前に読ませる字(#986 段③)', () => {
       rescued: { entries: 9, skipped: 0, empty: 0, bodyMissing: 0, assets: 0, assetBytes: 0, assetMissing: 0 },
     });
     expect(all).toContain('9 件');
-    expect(all, '拾えなかった物が無いのに内訳が出た').not.toContain('読めなかった区画');
+    expect(all, '拾えなかった物が無いのに内訳が出た').not.toContain('読み込めなかった箇所');
   });
 
   /**

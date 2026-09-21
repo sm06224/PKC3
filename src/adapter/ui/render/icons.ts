@@ -105,6 +105,21 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'start-screen-capture': 'monitor',
   'stop-capture': 'stop',
   'discard-capture': 'trash',
+  /**
+   * 🔴 **計るのとアラームの帯にも、同じ絵を付ける**(#1029 段 D-1、2026-09-21)。
+   *
+   * ⚠ 直す前は**収録の帯だけ**に絵が在った ── 同じ字(「止める」「捨てる」)の
+   *   ボタンが、収録では絵つき・計るでは無地で**並びの中で混ざって見えていた**。
+   *   ⚠ 絵の無いほうは字の始まりがずれるので、**弱い操作に見える**。
+   * 🔑 **新しい絵は焼き足していない** ── 停止・ごみ箱・ノート・× は既に書体に在る。
+   *   絵は**区別が付くときだけ**足す(区別の付かない絵を並べると、2026-09-05 の実測
+   *   「50 個のうち 23 個が完全に同じ見た目」を絵でもう一度作ることになる)。
+   */
+  'stop-timer': 'stop',
+  'discard-timer': 'trash',
+  /** アラームの「開く」は**その予定を書いたノートを開く** ── 行き先を絵で言う。 */
+  'open-alarm': 'note',
+  'dismiss-alarm': 'close',
   'start-edit': 'pencil',
   'commit-edit': 'check',
   'cancel-edit': 'close',

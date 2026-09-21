@@ -115,4 +115,4 @@ export function isSealedView(view: string): boolean {
  *   いまの版面の主張はそちらのほうが強い)。
  */
 export const SEALED_TEST_NOTES =
-  'かんばん / カレンダーの smoke は #292 段⑤ で tests/smoke/schedule.smoke.spec.ts へ引っ越し済み(いま封印中の面は無い)';
+  'かんばん / カレンダーの smoke は #292 段⑤ で tests/smoke/schedule.smoke.spec.ts へ引っ越し済み(いま封印中のものは無い)';

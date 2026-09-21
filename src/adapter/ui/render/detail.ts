@@ -2882,7 +2882,7 @@ function appTileControls(rawBody: string, mime: string, lid: string): HTMLElemen
     adopt.setAttribute('data-pkc-action', 'adopt-link-icon');
     adopt.setAttribute('data-pkc-field', 'adopt-link-icon');
     markTargetLid(adopt, lid);
-    adopt.textContent = 'リンク先の印を取り込む';
+    adopt.textContent = 'リンク先のアイコンを取り込む';
     // ⚠ 押す前に**何が起きるか**を言う(勝手に外へ出ないことを、押す前に伝える)
     adopt.title = '押したときに 1 回だけ、そのサイトへ取りに行きます';
     box.append(adopt);

@@ -355,7 +355,7 @@ describe('右クリックの説明(#587 C-1)', () => {
       ['table-to-markdown', '70082c4c'],
       // 🔴 **左の列の行からの整理 3 つ**(#215、2026-09-05)
       ['rename-entry-begin', 'c951ee45'],
-      ['move-to-folder', '4cc90354'],
+      ['move-to-folder', '4f9ac271'],
       ['create-in-folder', '80e07ad8'],
     ];
     const digest = (h: string): string =>

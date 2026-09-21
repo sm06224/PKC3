@@ -46,7 +46,7 @@ export function readU64(view: DataView, at: number): number {
   const hi = view.getUint32(at + 4, true);
   const v = hi * 0x100000000 + lo;
   if (!Number.isSafeInteger(v)) {
-    throw new RangeError('ZIP の中の長さが大きすぎて正確に読めません(壊れています)');
+    throw new RangeError('ZIP の中の長さが大きすぎて正確に読めません');
   }
   return v;
 }

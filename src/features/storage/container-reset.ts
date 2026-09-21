@@ -191,7 +191,7 @@ export function resetExplainMessage(opts: {
       ? `🔴 この画面では、まだ拾い出していません。先に左下の「${BACKUP_LABEL}」を押してください。`
       : `この画面で拾えたのは ${rescued.entries} 件です` +
         (rescued.skipped + rescued.empty + rescued.bodyMissing > 0
-          ? `(読めなかった区画 ${rescued.skipped} / 空だった区画 ${rescued.empty} / 本文が読めなかったノート ${rescued.bodyMissing} 件)`
+          ? `(読み込めなかった箇所 ${rescued.skipped} / 空だった箇所 ${rescued.empty} / 本文が読めなかったノート ${rescued.bodyMissing} 件)`
           : '') +
         '。この件数で足りるかを、ご自身で確かめてください。';
   /**
@@ -223,7 +223,7 @@ export function resetExplainMessage(opts: {
     '・添付したファイルの中身',
     // 🔑 **0 件と出ていても「空だ」と読ませない** ── 壊れているときは
     //    一覧そのものが引けていないことがある(見えている数 ≠ 在る数)
-    '⚠ 壊れているときは、一覧に出ていない分も一緒に消えます。',
+    '⚠ 読めない所があるときは、一覧に出ていない分も一緒に消えます。',
     '',
     '残るもの',
     ...keeps.map((k) => `・${k}`),

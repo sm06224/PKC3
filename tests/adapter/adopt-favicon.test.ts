@@ -121,7 +121,7 @@ describe('ページが指している印から取る(#856 段②)', () => {
     const d = deps({ pages: {}, fetchText: vi.fn(async () => '<p>なにもない</p>') });
     const got = await fetchFavicon('https://e.test/', d);
     expect(got.ok).toBe(false);
-    expect(!got.ok && got.why, '理由が user の言葉になっていない').toContain('印を置いていません');
+    expect(!got.ok && got.why, '理由が user の言葉になっていない').toContain('アイコンを置いていません');
   });
 
   it('🔴 ページが読めなければ、状態番号を落とさずに言う', async () => {

@@ -177,25 +177,25 @@ export function parseQuickCheck(
  *   `中身を残して、作り直す` の 1 押しで通る。拾い出しは**その前の保険**として言う。
  */
 export function integritySummary(r: IntegrityReport): string {
-  if (r.ok) return '壊れている所は見つかりませんでした。';
+  if (r.ok) return '読めない所は見つかりませんでした。';
   const t = r.brokenTables.length;
   const i = r.brokenIndexes.length;
   if (t === 0 && i > 0) {
     return (
-      `壊れていたのは目次だけです(${i} 件)。中身そのものは無事な可能性が高いので、` +
+      `読めなかったのは目次だけです(${i} 件)。中身そのものは無事な可能性が高いので、` +
       `左下の「${BACKUP_LABEL}」で全部取り出せることがあります。` +
       `そのまま直すなら「${CONTAINER_REBUILD_LABEL}」を押してください。`
     );
   }
   if (t > 0) {
     return (
-      `本文をしまっている所が壊れています(${t} 件)。取り出せるのは一部だけになります ── ` +
+      `本文をしまっている所が読めません(${t} 件)。取り出せるのは一部だけになります ── ` +
       `左下の「${BACKUP_LABEL}」を押すと、読める分を集めて書き出します。` +
       `そのあと「${CONTAINER_REBUILD_LABEL}」で、読めた分だけで作り直せます。`
     );
   }
   return (
-    '壊れている所が見つかりましたが、どこかまでは分かりませんでした。' +
+    '読めない所が見つかりましたが、どこかまでは分かりませんでした。' +
     `左下の「${BACKUP_LABEL}」で読める分を書き出してから、` +
     `「${CONTAINER_REBUILD_LABEL}」を押してください。`
   );
@@ -209,7 +209,7 @@ export function rescueSummary(input: {
 }): string {
   const { rows, skipped } = input;
   if (rows === 0) {
-    return '1 件も取り出せませんでした。壊れ方が深いので、この道では戻せません。';
+    return '1 件も取り出せませんでした。読める所が無いので、この道では戻せません。';
   }
   if (skipped === 0) {
     return `${rows} 件を取り出しました。読み飛ばした所はありません。`;

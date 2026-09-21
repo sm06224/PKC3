@@ -125,8 +125,8 @@ export function chooseImage(args: {
 
   if (stored === null)
     return hasEmbedded
-      ? { use: 'embedded', why: '器がまだ空なので、配られた中身を開きます' }
-      : { use: 'fresh', why: '新しい器を作ります' };
+      ? { use: 'embedded', why: '保存領域がまだ空なので、配られた中身を開きます' }
+      : { use: 'fresh', why: '新しい保存領域を作ります' };
 
   /**
    * ⚠ **別のバンドルの記録が返ってきたら、それは器の名前空間が壊れている合図**である。
@@ -134,13 +134,13 @@ export function chooseImage(args: {
    */
   if (stored.bundleId !== bundle.id)
     return hasEmbedded
-      ? { use: 'embedded', why: '器に別のバンドルの記録があるので、配られた中身を開きます' }
-      : { use: 'fresh', why: '器に別のバンドルの記録があるので、新しい器を作ります' };
+      ? { use: 'embedded', why: '保存領域に別のバンドルの記録があるので、配られた中身を開きます' }
+      : { use: 'fresh', why: '保存領域に別のバンドルの記録があるので、新しい保存領域を作ります' };
 
   if (stored.bytes <= 0)
     return hasEmbedded
-      ? { use: 'embedded', why: '器の記録が空だったので、配られた中身を開きます' }
-      : { use: 'fresh', why: '器の記録が空だったので、新しい器を作ります' };
+      ? { use: 'embedded', why: '保存領域の記録が空だったので、配られた中身を開きます' }
+      : { use: 'fresh', why: '保存領域の記録が空だったので、新しい保存領域を作ります' };
 
   if (!hasEmbedded) return { use: 'stored', why: 'この端末に保存された中身を開きます' };
 

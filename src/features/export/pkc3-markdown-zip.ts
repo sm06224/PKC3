@@ -474,7 +474,7 @@ export async function writeMarkdownZip(
   // ── 落ちるものを刻む(§3-2)
   const relations = (await src.listRelations()).length;
   const revisionEntries = (await src.listRevisionLids()).length;
-  if (relations > 0) warnings.push(`関連 ${relations} 件は markdown に居場所が無いので落ちます`);
+  if (relations > 0) warnings.push(`関連 ${relations} 件は markdown では表せないので落ちます`);
   if (revisionEntries > 0) {
     warnings.push(`履歴を持つノート ${revisionEntries} 件の履歴は落ちます`);
   }

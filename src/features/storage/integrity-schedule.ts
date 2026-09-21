@@ -124,6 +124,6 @@ export function mergeQuickCheckRows(perTable: readonly (readonly string[])[]): s
  * ⚠ 健全なときは呼ばない(出す字が無い)── 呼んだら**それは呼び側の誤り**なので落とす。
  */
 export function startupIntegrityNotice(report: IntegrityReport): string {
-  if (report.ok) throw new Error('壊れていないのに、壊れの字を組もうとした');
-  return `起動のときに保存されている中身を自動で調べたところ、壊れが見つかりました。${integritySummary(report)}`;
+  if (report.ok) throw new Error('問題が無いのに、問題ありの字を組もうとした');
+  return `起動のときに保存されている中身を自動で調べたところ、読めない所が見つかりました。${integritySummary(report)}`;
 }

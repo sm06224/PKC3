@@ -284,7 +284,7 @@ describe('レビューで出た 4 件(#683 段②a)', () => {
     await h.trimmer.run('a', 12_000, 65_000);
     // ⚠ **「編集中」と言い切らない** ── 同じ門は追記の短い錠でも閉じる(レビュー 2-A)
     expect(error(h.dispatcher)).toContain('編集を終えるか少し待って');
-    expect(error(h.dispatcher), 'やり直せることを言っていない').toContain('印は残しています');
+    expect(error(h.dispatcher), 'やり直せることを言っていない').toContain('選んだ範囲は残しています');
     // 🔑 **切る前に断る** ── 数秒かけて切ってから捨てない
     expect(h.deps.trim, '編集中なのに切り始めている').not.toHaveBeenCalled();
   });

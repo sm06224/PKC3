@@ -409,7 +409,7 @@ export function sliceLines(body: string, span: { readonly start: number; readonl
 const INLINE_PAIRS: readonly { open: string; close: string; name: string }[] = [
   { open: '**', close: '**', name: '太字' },
   { open: '~~', close: '~~', name: '打消' },
-  { open: '==', close: '==', name: '強調印' },
+  { open: '==', close: '==', name: 'ハイライト' },
   { open: '`', close: '`', name: 'コード' },
 ];
 

@@ -328,11 +328,11 @@ export class CapturesRenderer {
       clear.type = 'button';
       clear.setAttribute('data-pkc-action', 'capture-trim-clear');
       clear.setAttribute('data-pkc-field', 'capture-trim-clear');
-      clear.textContent = '印を消す';
+      clear.textContent = '選んだ範囲を消す';
       // ⚠ 走っている間は印を消させない ── 消しても走っている物は止まらないので、
       //   「消したのに増えた」という読めない結果になる
       clear.disabled = this.trimBusy;
-      clear.title = '「ここから」「ここまで」の印を消します。';
+      clear.title = '「ここから」「ここまで」で選んだ範囲を消します。';
       bar.append(clear);
     }
 
@@ -387,7 +387,7 @@ export class CapturesRenderer {
         stop.setAttribute('data-pkc-action', 'capture-stop');
         stop.setAttribute('data-pkc-field', 'capture-stop');
         stop.textContent = '閉じる';
-        stop.title = '再生をやめて、この中身を器から返します。';
+        stop.title = '再生をやめて、いま使っているメモリを返します。';
         li.append(stop);
         this.trimControls(li, item);
       } else {
