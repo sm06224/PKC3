@@ -44,7 +44,7 @@ test('🔴 「システム」の目次: お知らせが読め、押すと移動�
   expect(
     (await announceItemTitle.textContent()) ?? '',
     'お知らせの題名が最新のものになっていない',
-  ).toContain('「システム」の画面が、型ごとの 6 節に組み替わりました');
+  ).toContain('「システム」の画面が 6 つの節に組み替わりました');
   await dismissAnnounce(page);
 
   // 「システム」を開く
