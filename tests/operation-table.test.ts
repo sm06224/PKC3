@@ -71,6 +71,14 @@ const reg = (): Record<string, { id: string }[]> =>
  */
 const UNBRIDGED: readonly string[] = [
   'append-send',
+  /**
+   * 🔴 #1032「ノートを閉じる」── **押し所を作らないのが、この直しの中身**である。
+   * ⚠ 戻り道が 1 つも無かったのを直すのに、**新しい字を画面に出さない**形を採った:
+   *   マウスは「一覧の何も無い所を押す」(`data-pkc-action` を持たない)、
+   *   キーボードは近道の設定で user が鍵を割り当てる。
+   * 🔑 だから「押し所へ辿れない」は**狙いどおり**であって、抜けではない。
+   */
+  'deselect-entry',
   'dual-copy-to-other',
   'dual-mark',
   'dual-move-to-other',
@@ -317,6 +325,9 @@ describe('操作の全数台帳(#582 段①)', () => {
       outsideActionsTable: x.outsideActionsTable.length,
       unregistered: x.unregistered,
     }).toEqual({
+      // ⚠ 2026-09-21(#1032): 「ノートを閉じる」(`deselect-entry`)で登記 +1 / total +1。
+      //   受け手は増えない ── 押し所を作らない直しなので、マウスの側は「一覧の
+      //   何も無い所を押す」(`data-pkc-action` を持たない)である
       // ⚠ 2026-09-16(#971 段③): 壊れを調べる / 拾い出す(`db-check` / `db-rescue`)で
       //   受け手 +2(登記は増えない ── 押し口は設定の中にしか無く、鍵も持たない)
       // ⚠ 2026-09-13(#884 段①): アプリの開き方(`set-app-open-target`)で受け手 +1
@@ -459,11 +470,11 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-09-21(#1017 段③-2): これまでのお知らせの入口(`open-system-notices`)で
       //   受け手 +1 ── 登記は増えない(押し口はヘルプの中にしか無く、鍵も持たない。
       //   `system-jump` と同じ仕分け)。
-      total: 324,
+      total: 325,
       receivers: 272,
-      registered: 88,
+      registered: 89,
       both: 36,
-      outsideActionsTable: 52,
+      outsideActionsTable: 53,
       unregistered: 236,
     });
   });
@@ -496,8 +507,10 @@ describe('操作の全数台帳(#582 段①)', () => {
     //    どれも `defaults: []` ── 帯に既にボタンが在るので鍵は増やさない)
     // ⚠ 2026-09-21(#1017 段④a): `settings` 5 → 1、新しい 6 本目 `collectionPane` 4 ──
     //    書き出し 4 つが「設定」から右の列(何も選んでいないとき)へ移った。合計は不変。
+    // ⚠ 2026-09-21(#1032): 「ノートを閉じる」で `key` 65 → 66(鍵の既定は持たない ──
+    //    近道の設定とパレットに行として出て、鍵は user が割り当てる)
     expect(s().perBook).toEqual({
-      key: 65,
+      key: 66,
       entry: 16,
       body: 3,
       collection: 2,

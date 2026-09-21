@@ -3116,6 +3116,21 @@ function readSetting(key: string): string | null {
 
 const noop = (): void => {};
 
+/**
+ * 🔴 **行を持つ 3 つの器**(#1032 で 1 か所へ寄せた)。
+ *
+ * ⚠ 左の列は**タブで中身が変わる** ── 「フォルダ」(`filer-table`)/「一覧」
+ *   (`entry-list`)/ 2 ペイン(`dual-table`)の**3 つとも**行を持つ。
+ * 🔴 **1 つ落とすと「そのタブの user だけ効かない」**という、いちばん外しやすい形になる
+ *   (2026-09-09 の UX レビューが、前 2 つを落とした 1 稿目で実際に踏んだ)。
+ * 🔑 だから**字を 1 か所に置く** ── 行を掴む判定(`blockRowTarget`)と、
+ *   「何も無い所を押したら閉じる」(`onClick`)が**同じ表**を読む(§7)。
+ */
+export const ROW_HOST_REGIONS: readonly string[] = ['filer-table', 'dual-table', 'entry-list'];
+
+/** 上の 3 つを選択子にしたもの。 */
+export const ROW_HOST_SELECTOR = ROW_HOST_REGIONS.map((r) => `[data-pkc-region="${r}"]`).join(', ');
+
 export function runGlobalCommand(
   cmd: string,
   root: HTMLElement,
@@ -3136,6 +3151,27 @@ export function runGlobalCommand(
     if (dry) return true;
     prevent();
     dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
+    return true;
+  }
+  if (cmd === 'deselect-entry') {
+    /**
+     * 🔴 **開いているノートを閉じて、コレクションへ戻る**(#1032)。
+     *
+     * ⚠ **開いていなければ効かない**(`false` を返す)── パレットはこの答えを読んで
+     *   行を `disabled` にするので、**押せるのに何も起きない**にならない。
+     * 🔴 **右クリックのメニューが出ている間は譲る** ── `Escape` は
+     *   「メニューを閉じる」にも使う(`onMenuKey`)。ここで先に閉じると、
+     *   **取り消したつもりの user が、読んでいたノートまで失う**
+     *   (判定は `contextMenuOpen` 1 か所から引く ── 2 つ目の数え方を作らない。§7)。
+     * ⚠ 編集中・行の名前を打っている間は、**ここへ来る前に**それぞれの
+     *   `Escape` が握って return する(`onKeydown` の上のほう)。
+     */
+    const st = dispatcher.getState();
+    if (st.phase !== 'ready' || st.selectedLid === null) return false;
+    if (contextMenuOpen(root)) return false;
+    if (dry) return true;
+    prevent();
+    dispatcher.dispatch({ type: 'DESELECT_ENTRY' });
     return true;
   }
   if (cmd === 'cycle-read-columns') {
@@ -9431,7 +9467,43 @@ export function bindActions(
     const el = (ev.target as HTMLElement | null)?.closest<HTMLElement>(
       '[data-pkc-action]',
     );
-    if (!el || !root.contains(el)) return;
+    /**
+     * 🔴 **一覧の「何も無い所」を押したら、開いているノートを閉じる**(#1032)。
+     *
+     * ⚠ **戻る道が画面に 1 つも無かった** ── ノートを 1 件でも選ぶと、
+     *   中央は**そのノート**になり、コレクションの操作(閲覧用 HTML / 持ち歩ける
+     *   HTML 1 枚 / Markdown / 構成をコピー)へは**読み込み直す以外に戻れなかった**。
+     *   「選択を解除」が外すのは**印**(まとめて操作する側)だけで、
+     *   開いているノート(`selectedLid`)には触らない。
+     * 🔑 **新しい字を 1 つも出さない直し** ── いま**何も起きない**場所
+     *   (行と行の間・表の下の余白)が戻り道になる。
+     *   ⚠ 「片道の操作を作らない」(founding ④)の直しであって、機能追加ではない。
+     * ⚠ **押し所の上では何もしない** ── `[data-pkc-action]` を持つ物
+     *   (行・ボタン・選択欄)に当たっていたら、下の本来の処理へ落とす。
+     * 🔴 **見るのは「左の列の器」(`browse-host`)であって、表そのものではない**
+     *   (2026-09-21、実ブラウザで実測して直した)。
+     * ⚠ 1 稿目は行を持つ 3 つの器(`filer-table` / `dual-table` / `entry-list`)を
+     *   見ていたが、**表は中身の高さしか無い** ── 実測で高さ **53px**(見出し + 1 行)、
+     *   その下の **126px** は表の外だった。つまり user が「何も無い所」と思って押す
+     *   場所は**ほとんど表の外**で、この直しは実ブラウザでは**ほぼ効かなかった**
+     *   (unit は器へ直に click を撃てるので緑のままだった ── CLAUDE.md §2
+     *   「経路が一度も通っていない」)。
+     * 🔑 だから器は**左の列そのもの**にする ── タブが何であれ同じ場所である。
+     * ⚠ 押し所の上では何もしない(上の `!el` の条件)ので、器の中に在る
+     *   並べ替えの帯・移動の帯・タブは**そのまま効く**。
+     */
+    if (!el) {
+      const host = (ev.target as HTMLElement | null)?.closest<HTMLElement>(
+        '[data-pkc-region="browse-host"]',
+      );
+      if (host !== null && host !== undefined && root.contains(host)) {
+        const st0 = dispatcher.getState();
+        if (st0.phase === 'ready' && st0.selectedLid !== null)
+          dispatcher.dispatch({ type: 'DESELECT_ENTRY' });
+      }
+      return;
+    }
+    if (!root.contains(el)) return;
     /**
      * 🔴 **表の升の中のリンクは、リンクとして働く**(#708 段④、着地前レビュー・動線 ③)。
      *
@@ -10695,12 +10767,7 @@ export function bindActions(
      *   (2026-09-09 の UX レビュー)── マニュアルは「左の一覧の行」と書いているのに、
      *   その名前のタブでだけ効かない、といういちばん外しやすい形だった。
      */
-    if (
-      el.closest(
-        '[data-pkc-region="filer-table"], [data-pkc-region="dual-table"], [data-pkc-region="entry-list"]',
-      ) === null
-    )
-      return null;
+    if (el.closest(ROW_HOST_SELECTOR) === null) return null;
     const lid = el.getAttribute('data-pkc-entry');
     if (lid === null || lid === '') return null;
     /**
