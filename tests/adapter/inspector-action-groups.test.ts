@@ -16,14 +16,29 @@
  *   直す前(1 本の帯)と見分けが付かない。**塊の名前を等値で pin する**。
  * ⚠ CSS 側も見る ── DOM に塊が在っても、間が 1px のままなら**画面では何も変わらない**
  *   (CLAUDE.md §1「検査が別の理由で成立している」)。
+ *
+ * ## 🔴 段 C で塊が 8 つに増えた(2026-09-21)
+ *
+ * ⚠ `export-entry`(バックアップ)は `when` を持たないので、**フォルダを選んでいても
+ *   常に出る** ── つまりフォルダでは `export-entry` と `export-folder` が
+ *   **同じ字「バックアップ」で同時に**出る(名前を短くした段 C で顕在化した衝突)。
+ *   見出しで区別するには**別の塊**にするしかないが、**並び順は変えられない**
+ *   (`export-folder` の位置は動かさない)ので、`export` の塊が
+ *   `export-folder` を挟んで**2 つに分かれる**(`copy/open/take-in/export/
+ *   this-folder/export/this-one/remove` の 8 つ)。
  */
-import { describe, expect, it, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { initialState, reduce } from '../../src/adapter/state/app-state';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
 import { blocksFor, stripComments, withoutMedia } from '../helpers/css-blocks';
+import {
+  ENTRY_ACTION_WIDTH_ATTR,
+  ENTRY_MENU_ACTIONS,
+  entryActionWidthTier,
+} from '../../src/features/entry-actions';
 
 const meta = (lid: string, title: string, archetype: EntryMeta['archetype']): EntryMeta => ({
   lid,
@@ -57,13 +72,44 @@ function renderInspector(): HTMLElement {
   return root;
 }
 
-describe('右の列の操作は塊に分かれている(#1029 段 B)', () => {
-  it('🔴 塊の名前は等値 ── 1 つにまとめ直したら落ちる', () => {
+/** フォルダ + 元ファイル在りで組む ── `export-folder` / `write-back-file` の両方を描く。 */
+function renderFolderWithLink(): HTMLElement {
+  const root = document.createElement('div');
+  document.body.append(root);
+  const inspector = new InspectorRenderer(buildShell(root).inspector);
+  let s = reduce(initialState, {
+    type: 'SYS_BOOTED',
+    cid: 'c1',
+    metas: [meta('n1', '議事録', 'folder')],
+    relations: [],
+  }).state;
+  s = reduce(s, { type: 'SELECT_ENTRY', lid: 'n1' }).state;
+  s = reduce(s, { type: 'FILE_LINKED', lid: 'n1', name: 'memo.md' }).state;
+  inspector.render(s);
+  return root;
+}
+
+describe('右の列の操作は塊に分かれている(#1029 段 B / 段 C)', () => {
+  it('🔴 塊の名前は等値 ── 1 つにまとめ直したら落ちる(段 C で 8 つに増えた)', () => {
     const root = renderInspector();
     const groups = [
       ...root.querySelectorAll<HTMLElement>('[data-pkc-field="inspector-action-group"]'),
     ].map((g) => g.getAttribute('data-pkc-group'));
-    expect(groups).toEqual(['copy', 'open', 'take-in', 'export', 'this-one', 'remove']);
+    /**
+     * 🔴 **`export` が 2 回出る**(段 C、上の docstring)。⚠ 等値 pin なので、
+     *   `export-folder` の塊を `export` へ戻したら(= 衝突が再発したら)ここが
+     *   6 要素に縮んで落ちる。逆に塊をもっと割ったら 8 要素を超えて落ちる。
+     */
+    expect(groups).toEqual([
+      'copy',
+      'open',
+      'take-in',
+      'export',
+      'this-folder',
+      'export',
+      'this-one',
+      'remove',
+    ]);
   });
 
   it('🔴 操作のボタンは 1 つ残らず塊の中に在る(帯へ直に足したら落ちる)', () => {
@@ -127,6 +173,103 @@ describe('右の列の操作は塊に分かれている(#1029 段 B)', () => {
     expect(btn, '線が戻っている ── 切れ目は間で出す(地は無彩色)').not.toContain('border-top');
     expect(btn, 'ボタン個体に間が付いている ── 行の途中で 1 個だけ浮く').not.toContain(
       'margin-top',
+    );
+  });
+});
+
+/**
+ * 🔴 **右の列(情報ペイン)が描いた塊は、`ENTRY_MENU_ACTIONS` の `group` と等値**
+ * (#1029 段 C 門②)。
+ *
+ * ## なぜ要るか
+ *
+ * 直す前は `inspector.ts` の中に `group('copy')` のように**塊の名前が直書き**
+ * されていた。右クリック(`context-menu.ts`)は同じ塊を `ENTRY_MENU_ACTIONS` の
+ * `group` フィールドから引くので、**2 つの面が別々の場所から塊を読む形**のままだと、
+ * 片方だけ塊を変えた日に右の列と右クリックの見出しが食い違う(CLAUDE.md §7)。
+ *
+ * 🔑 だからここでは**実物の DOM**(`InspectorRenderer` が描いた
+ * `[data-pkc-group]`)と、**実装の `group` フィールド**を直接突き合わせる ──
+ * どちらも「同じ表を読んでいる」という同語反復ではなく、**独立した 2 つの観測**
+ * (描かれた木構造 / 元の配列)を比べる。
+ */
+describe('情報ペインの塊は正本(entry-actions.ts)から来る(#1029 段 C)', () => {
+  it('🔴 塊を持つ 1 件残らず、描かれた data-pkc-group が ENTRY_MENU_ACTIONS の group と一致する', () => {
+    const root = renderFolderWithLink();
+    const withGroup = ENTRY_MENU_ACTIONS.filter((a) => a.group !== undefined);
+    // ⚠ 空振り防止 ── 塊を持つ物が 0 件なら、下のループは何も見ない
+    expect(withGroup.length, '塊を持つ操作が 0 件(空振り)').toBeGreaterThan(10);
+    for (const a of withGroup) {
+      const btn = root.querySelector(`[data-pkc-action="${a.action}"]`);
+      expect(btn, `${a.action} のボタンが描かれていない`).not.toBeNull();
+      const groupEl = btn!.closest('[data-pkc-group]');
+      expect(groupEl, `${a.action} を包む塊(data-pkc-group)が無い`).not.toBeNull();
+      expect(
+        groupEl!.getAttribute('data-pkc-group'),
+        `${a.action} の塊が正本(entry-actions.ts の group)と食い違っている`,
+      ).toBe(a.group);
+    }
+  });
+
+  it('⚠ export-entry と export-folder は別の塊(バックアップの字が同じでも区別できる)', () => {
+    const root = renderFolderWithLink();
+    const entryGroup = root
+      .querySelector('[data-pkc-action="export-entry"]')
+      ?.closest('[data-pkc-group]')
+      ?.getAttribute('data-pkc-group');
+    const folderGroup = root
+      .querySelector('[data-pkc-action="export-folder"]')
+      ?.closest('[data-pkc-group]')
+      ?.getAttribute('data-pkc-group');
+    expect(entryGroup, 'export-entry の塊が読めていない(空振り)').not.toBeUndefined();
+    expect(folderGroup, 'export-folder の塊が読めていない(空振り)').not.toBeUndefined();
+    expect(folderGroup, '同じ塊に入っている(見出しでの区別ができない)').not.toBe(entryGroup);
+  });
+
+  it('🔴 export-folder だけの塊は、畳むとき塊の器ごと畳む(空の塊が余計な間を作らない)', () => {
+    // ⚠ ノート(フォルダではない)で描く ── export-folder が hidden になる場面
+    const root = document.createElement('div');
+    document.body.append(root);
+    const inspector = new InspectorRenderer(buildShell(root).inspector);
+    const s = reduce(initialState, {
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [meta('n1', '議事録', 'text')],
+      relations: [],
+    }).state;
+    inspector.render(reduce(s, { type: 'SELECT_ENTRY', lid: 'n1' }).state);
+    const folderBtn = root.querySelector('[data-pkc-action="export-folder"]');
+    expect(folderBtn, 'export-folder のボタンが描かれていない(空振り)').not.toBeNull();
+    expect((folderBtn as HTMLButtonElement).hidden, 'ノートなのに export-folder が出ている').toBe(
+      true,
+    );
+    const groupEl = folderBtn!.closest('[data-pkc-group]');
+    expect(groupEl, 'export-folder を包む塊が無い(空振り)').not.toBeNull();
+    expect(
+      (groupEl as HTMLElement).hidden,
+      '塊(export-folder だけの器)が畳まれていない(余計な間が残る)',
+    ).toBe(true);
+  });
+
+  it('🔴 描かれたボタンの幅の段が、正本(entryActionWidthTier)と一致する', () => {
+    const root = renderFolderWithLink();
+    for (const a of ENTRY_MENU_ACTIONS) {
+      const btn = root.querySelector(`[data-pkc-action="${a.action}"]`);
+      expect(btn, `${a.action} のボタンが描かれていない`).not.toBeNull();
+      expect(
+        btn!.getAttribute(ENTRY_ACTION_WIDTH_ATTR),
+        `${a.action} の幅の段が正本と食い違っている`,
+      ).toBe(entryActionWidthTier(a.label));
+    }
+  });
+
+  it('🔑 ENTRY_MENU_ACTIONS が使う塊は 6 つ(copy/export/open/remove/this-folder/this-one)', () => {
+    // ⚠ `take-in` は `ENTRY_MENU_ACTIONS` の外(`adopt-external-images`)専用なので含まれない
+    const groups = new Set(
+      ENTRY_MENU_ACTIONS.map((a) => a.group).filter((g): g is string => g !== undefined),
+    );
+    expect([...groups].sort()).toEqual(
+      ['copy', 'export', 'open', 'remove', 'this-folder', 'this-one'].sort(),
     );
   });
 });

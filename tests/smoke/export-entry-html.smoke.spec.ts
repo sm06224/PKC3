@@ -113,13 +113,14 @@ test('🔴 右クリックのメニューにも「閲覧用 HTML」が並ぶ (#4
   const item = page.locator(
     '[data-pkc-region="context-menu"] [data-pkc-action="export-entry-html"]',
   );
-  await expect(item, '右クリックに「閲覧用 HTML」が無い').toBeVisible();
-  // ⚠ **対照群** ── 隣の「書き出す」も並んでいる(メニューそのものが出ている証拠)
+  await expect(item, '右クリックに「HTML」が無い').toBeVisible();
+  // ⚠ **対照群** ── 隣の「バックアップ」も並んでいる(メニューそのものが出ている証拠)
   await expect(
     page.locator('[data-pkc-region="context-menu"] [data-pkc-action="export-entry"]'),
     'メニューが出ていない(空振り)',
   ).toBeVisible();
-  expect(await item.textContent(), '呼び名が字の正本と違う').toContain('閲覧用 HTML');
+  // 🔴 #1029 段 C:字は「HTML」に縮んだ(見出し「書き出す」が動詞を引き受ける)
+  expect(await item.textContent(), '呼び名が字の正本と違う').toContain('HTML');
 
   expect(errors, 'pageerror が出た').toEqual([]);
 });

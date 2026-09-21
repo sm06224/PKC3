@@ -50,7 +50,47 @@ export interface EntryAction {
    *   worker を叩く経路がもう 1 本増える(§7)。
    */
   readonly when?: 'folder' | 'linked' | 'stack';
+  /**
+   * 🔴 **塊(見出し)の綴り**(#1029 段 C)。⚠ 書いていないものは**塊を持たない**
+   *   (見出しの前後に置かれない ── `TASK_REPEAT_MENU_ACTION` のような単発の項目)。
+   *
+   * ## なぜ表に持たせるか
+   *
+   * ⚠ 直す前は**右の列(`inspector.ts`)にだけ**塊があり、`group('copy')` の形で
+   *   **描く側に直書き**されていた。右クリック(`context-menu.ts`)には塊が無いので、
+   *   名前を短くすると(「参照をコピー」→「参照」)右クリックでは**意味が読めなくなる**
+   *   (短い名詞だけが並ぶ)。🔑 塊を**字の正本**へ持たせ、両方の面が同じ塊を使う ──
+   *   右の列は塊の**区切り**(間)に、右クリックは塊の**見出しの行**(押せない字)に使う
+   *   (§7「同じ値を複数の描画経路へ渡すものは、経路ごとに pin する」)。
+   * ⚠ **並びは変えていない** ── `export-folder` だけ隣の `export-entry` と別塊
+   *   (`this-folder`)にした。理由は下の {@link ENTRY_ACTION_GROUP_LABELS} を見よ。
+   */
+  readonly group?: string;
 }
+
+/**
+ * 🔴 **塊の綴り → 見出しの字**(#1029 段 C)。
+ *
+ * ⚠ **`take-in` は右の列の `adopt-external-images`(枚数つきで動的に組む物。
+ *   `ENTRY_MENU_ACTIONS` の外に在る)専用**である ── ここに載せてあるのは、
+ *   将来そちらも同じ表から引けるようにするためで、いまはどの
+ *   {@link ENTRY_MENU_ACTIONS} も `take-in` を名乗らない。
+ * ⚠ **`this-folder` は `export-folder` だけの塊**である ── `export-entry`
+ *   (バックアップ)と同じ「export」塊に入れると、フォルダを選んだときに
+ *   **同じ字「バックアップ」が同じ塊の中に 2 つ並び**、どちらを押しているか
+ *   見出しでも区別できなくなる(`export-entry` に `when` が無く、フォルダでも
+ *   常に出るため ── 1 grep で確かめてある)。塊を分けて、初めて見出しが
+ *   「どちらの物か」を言えるようになる。
+ */
+export const ENTRY_ACTION_GROUP_LABELS: Readonly<Record<string, string>> = {
+  copy: '写す',
+  open: '開く',
+  'take-in': '取り込む',
+  export: '書き出す',
+  'this-folder': 'このフォルダ',
+  'this-one': 'このノート',
+  remove: '消す',
+};
 
 /**
  * 条件を見るのに要る材料。⚠ **本文は要らない**(上の `when` の docstring)。
@@ -130,8 +170,13 @@ export function editingRowMenuActions(): readonly (EntryAction & { readonly hint
  *   ここは「よく使う順」。🔑 **並びが違ってよい**のは、字が同じだからである。
  */
 export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
-  { action: 'copy-entry-ref', label: '参照をコピー' },
-  { action: 'copy-plain-markdown', label: '素の Markdown' },
+  /**
+   * 🔴 **名前を揃え、動詞は塊に任せる**(#1029 段 C)。
+   * ⚠ 「参照**を**コピー**する**」の動詞は、塊の見出し「写す」が言う ──
+   *   だから名詞 1 語(「参照」)まで縮めてよい(`button-rhythm-design-2026-09.md` §2.1)。
+   */
+  { action: 'copy-entry-ref', label: '参照', group: 'copy' },
+  { action: 'copy-plain-markdown', label: 'Markdown', group: 'copy' },
   /**
    * 🔴 **付箋のように何枚でも開ける**(#685 段②、user 裁定 2026-09-04)。
    *
@@ -146,44 +191,64 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    *   既存の並びを動かさない ── 写す 2 つを隣に戻し、その次に置く。
    * 🔑 字は「別の**ウィンドウ**で開く」(#690 I1)── お知らせ・マニュアル・止めたときの
    *   字(「すでに別のウィンドウで開いています」)が全部「ウィンドウ」なので揃える。
+   *
+   * 🔴 **右クリック / 情報ペインは「別ウィンドウ」まで縮める**(#1029 段 C)。
+   * ⚠ **本文の右クリック(`BODY_MENU_ACTIONS`)の同名の項目は縮めない** ──
+   *   あちらには塊(見出し)が無いので、動詞を落とすと何が起きるか読めなくなる
+   *   (`tests/features/entry-actions.test.ts`「小窓の字と並び」が
+   *   **2 面で違ってよいこと**を pin する)。
    */
-  { action: 'open-note-window', label: '別のウィンドウで開く' },
+  { action: 'open-note-window', label: '別ウィンドウ', group: 'open' },
   /**
    * 🔴 **保存したスタックを、いまのスタックの上に積む**(#633 段③。user 裁定 2026-08-30)。
    * ⚠ スタックの入れ物にだけ出す(`when: 'stack'`)── 他のノートで押しても積む物が無い。
    * ⚠ 開いただけでは横の枠は変わらない(設計 doc §2-8)── 押した瞬間に積まれる。
    */
-  { action: 'stack-load', label: 'このスタックを載せる', when: 'stack' },
+  { action: 'stack-load', label: 'スタック', group: 'open', when: 'stack' },
   /**
-   * 🔴 **`バックアップ(このノート)`**(2026-09-21、#1017 段④b)。
+   * 🔴 **`バックアップ`**(2026-09-21、#1017 段④b → #1029 段 C で「(このノート)」を落とす)。
    * ⚠ 直す前の字は「書き出す」で、説明を読まないと何が起きるか分からなかった
    *   (`ui-total-design-2026-09.md` §6.2「見出し = 型の名前、ボタン = 動詞だけ」
    *   ── ここは見出しから切り離して読める場所なので対象を付ける)。
    * 🔑 file 名は `.pkc3-notes.zip`(#1017 段④b の二重拡張子)。
+   * 🔴 **「(このノート)」は塊の見出し「書き出す」には無い**(見出しは対象を言わない ──
+   *   これはノートの操作のメニュー全体が「このノート」に効く前提だからである)。
+   *   ⚠ ただし **`export-folder` とだけは同じ塊に置かない**(すぐ下を見よ)。
    */
-  { action: 'export-entry', label: 'バックアップ(このノート)' },
+  { action: 'export-entry', label: 'バックアップ', group: 'export' },
   /**
    * 🔴 **相手に渡せる 1 枚**(#491。user 報告 2026-08-27
    *   「右クリックで気づきましたが、**書き出しに閲覧配布用HTMLがないのは残念**ですね」)。
    *
-   * ⚠ 隣の `バックアップ(このノート)` と**別の物**である ── あちらは取り込み直せる
+   * ⚠ 隣の `バックアップ` と**別の物**である ── あちらは取り込み直せる
    *   `.pkc3-notes.zip`(PKC3 を持っている人にしか開けない)、こちらは
    *   **ブラウザで開くだけで読める片道の HTML** である。
    * 🔑 **字は設定画面の同名ボタンと揃えた**(`commands.ts` の `export-html`)──
    *   あちらは全部、こちらは 1 件。**同じ形の物に 2 つの呼び名を作らない**。
+   * 🔴 **「閲覧用」は塊の見出し「書き出す」には無い**(#1029 段 C)── 説明
+   *   (`ENTRY_ACTION_HINTS`)が「ブラウザで開くだけで読める」と言い切っている。
    */
-  { action: 'export-entry-html', label: '閲覧用 HTML' },
+  { action: 'export-entry-html', label: 'HTML', group: 'export' },
   /**
    * 🔴 **フォルダのときだけ出す**(#399 ① / #500 案 C)。
    *
-   * 🔴 **`バックアップ(このフォルダ)`**(2026-09-21、#1017 段④b。上と同じ理由)。
-   * ⚠ 隣の `バックアップ(このノート)` と**同じ形の物**(`.pkc3-notes.zip`)なので
+   * 🔴 **`バックアップ`**(2026-09-21、#1017 段④b → #1029 段 C。上と同じ理由)。
+   * ⚠ 隣の `export-entry`(バックアップ)と**同じ形の物**(`.pkc3-notes.zip`)なので
    *   真横に置く ── 違うのは「中に入っているものごと」入る点だけである。
    * 🔑 **右クリックはフォルダにとって自然な手**である ── フォルダは
    *   サイドバーとファイラの**行**として現れるので、そこで押せるようになると
    *   右ペインまで目を移さずに済む。
+   *
+   * 🔴 **`export-entry` とは別の塊にする**(#1029 段 C、実装を読んで確かめた)。
+   * ⚠ `export-entry` は `when` を持たない ── **フォルダを選んでいてもいつも出る**。
+   *   つまりフォルダを選んだ画面には、同じ「バックアップ」という字を持つボタンが
+   *   **2 つ同時に**出る。見出しを共有すると、どちらの塊見出しを読んでも
+   *   区別できない(「押した物と効く先が食い違う」の**字の版**)。
+   * 🔑 塊を分ければ、右クリックには「バックアップ」の直前に**別の見出し**
+   *   (「このフォルダ」)が立ち、右の列には**別の間**が空く ── どちらも
+   *   「これは、もう 1 個のバックアップとは違う」を言える。
    */
-  { action: 'export-folder', label: 'バックアップ(このフォルダ)', when: 'folder' },
+  { action: 'export-folder', label: 'バックアップ', group: 'this-folder', when: 'folder' },
   /**
    * 🔴 **右ペインが唯一の入口だった 3 つ**(#500。2026-08-29 に**実測で確定**)。
    *
@@ -202,9 +267,9 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    *   ペイン 533px の 4 分の 1 を常に食う ── そちらは #501 の整理と一緒に判断する)。
    * ⚠ 並びは「よく使う順」なので、**渡す物の隣**に置く(履歴と削除より上)。
    */
-  { action: 'export-entry-docx', label: 'Word' },
-  { action: 'export-entry-pptx', label: 'PowerPoint' },
-  { action: 'export-entry-pdf', label: 'PDF' },
+  { action: 'export-entry-docx', label: 'Word', group: 'export' },
+  { action: 'export-entry-pptx', label: 'PowerPoint', group: 'export' },
+  { action: 'export-entry-pdf', label: 'PDF', group: 'export' },
   /**
    * 🔴 **開いた元ファイルが在るときだけ出す**(#500 案 C)。
    *
@@ -217,8 +282,17 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    *   🔑 それでよい:この口が要るのは「file を開いて直して戻す」最中の user で、
    *   その人は**自分が何を開いたか知っている**。
    */
-  { action: 'write-back-file', label: '書き戻す', when: 'linked' },
-  { action: 'show-history', label: '履歴' },
+  /**
+   * 🔴 **塊は `export`(#1029 段 C。実装を読んで確かめた)**。
+   * ⚠ 設計 doc の全数調査(§4.1)は「取り込む」に分類していたが、`adopt-external-images`
+   *   (取り込む唯一のもう 1 件)は**本文の右クリックにしか無く**、隣に並ぶ機会が無い ──
+   *   分けると **1 件だけの塊**が右の列に新設され、それだけが `hidden` で消える瞬間、
+   *   周りの間だけが余る(空の塊は「何も無い所に間が空く」を作る ── §1 の no-op と同型)。
+   *   🔑 いまの並び(書き出す 5 つのすぐ下)のまま `export` に残し、
+   *   **見た目を 1px も変えない**ほうを選ぶ。
+   */
+  { action: 'write-back-file', label: '書き戻す', group: 'export', when: 'linked' },
+  { action: 'show-history', label: '履歴', group: 'this-one' },
   /**
    * 🔴 **左の列の行から、整理ができる 3 つ**(#215。user 裁定 2026-09-04「全部推薦で」)。
    *
@@ -235,10 +309,22 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    *   `moveEntries`、作るは `create-entry` と同じ経路(規則を 2 本にしない。§7)。
    * ⚠ 「移す…」は**印が複数あれば印の全部**を動かす(D&D と同じ)── 題名にその件数が出る。
    */
-  { action: 'rename-entry-begin', label: '名前を変える' },
-  { action: 'move-to-folder', label: '移す…' },
-  { action: 'create-in-folder', label: 'この中に新しいノートを作る', when: 'folder' },
-  { action: 'delete-entry', label: '削除' },
+  /**
+   * 🔴 **「名前を変える」→「名前」**(#1029 段 C)── 動詞は塊「このノート」ではなく
+   *   **説明**(`ENTRY_ACTION_HINTS`)が引き受ける(「行の題名の所に入力欄が出ます」)。
+   *   ⚠ 塊の見出し自身は動詞を持たない(「このノート」は対象であって動作ではない)が、
+   *   「名前」の直後に入力欄が出る挙動そのものが動詞の代わりを果たす。
+   */
+  { action: 'rename-entry-begin', label: '名前', group: 'this-one' },
+  { action: 'move-to-folder', label: '移す…', group: 'this-one' },
+  /**
+   * 🔴 **「この中に新しいノートを作る」→「中に作る」**(#1029 段 C)。
+   * ⚠ 「この」を削らないと 12 桁を超える(全角換算 13 桁)── 対象は
+   *   **押した行そのもの**なので、指示語を書かなくても画面から読める
+   *   (`button-rhythm-design-2026-09.md` §2.1 規則 3)。
+   */
+  { action: 'create-in-folder', label: '中に作る', group: 'this-one', when: 'folder' },
+  { action: 'delete-entry', label: '削除', group: 'remove' },
 ];
 
 /**
@@ -854,6 +940,46 @@ export function menuShortcutFor(
 export const ENTRY_ACTION_LABELS: Readonly<Record<string, string>> = Object.fromEntries(
   ENTRY_MENU_ACTIONS.map((a) => [a.action, a.label]),
 );
+
+/**
+ * 🔴 **綴り → 塊の綴り**(#1029 段 C)。⚠ **情報ペイン(`inspector.ts`)はこちらを引く**
+ * ── `group('copy')` のように塊の名前を直書きしない(この file が字の正本になる。§7)。
+ * `entryMenuActions()` の返り値にも同じ `group` が乗るので、右クリックの見出しは
+ * そちらから引く(この表は「常に全部出す」情報ペイン専用)。
+ */
+export const ENTRY_ACTION_GROUPS: Readonly<Record<string, string | undefined>> = Object.fromEntries(
+  ENTRY_MENU_ACTIONS.map((a) => [a.action, a.group]),
+);
+
+/**
+ * 🔴 **名前の全角換算の桁数**(#1029 段 C 手 2)。⚠ **ASCII = 1 / それ以外 = 2**
+ * (design doc §2.1 規則 1 と同じ数え方)。
+ */
+export function entryActionLabelWidth(label: string): number {
+  let w = 0;
+  for (const ch of label) w += ch.codePointAt(0)! <= 0x7f ? 1 : 2;
+  return w;
+}
+
+/** 幅の段。⚠ **2 つだけ**(#1029 段 C 手 2「段を 3 つ以上にしない」)。 */
+export type EntryActionWidthTier = 'short' | 'long';
+
+/**
+ * 🔴 **幅は「段」で受ける**(#1029 段 C 手 2)。
+ *
+ * ⚠ 固定幅にはしない ── これは**下限を選ぶだけ**の関数で、実際の描画は
+ *   CSS の `min-width: max(<段>, max-content)` が持つ(名前が段より長ければ
+ *   `max-content` が勝つので、字が切れる事故(2026-08-27「+ ノート」が
+ *   「+ ノ」に切れた)は起きない)。
+ * 🔑 境目は全角 4 字(8 桁)── ここ以下は**短い段**、それを超えるものは**長い段**
+ *   (design doc §2.2 の「短 ≤ 8 桁 / 長 ≤ 12 桁」と同じ境目)。
+ */
+export function entryActionWidthTier(label: string): EntryActionWidthTier {
+  return entryActionLabelWidth(label) <= 8 ? 'short' : 'long';
+}
+
+/** `data-pkc-width` の属性名。⚠ CSS と unit はこの名前で見る。 */
+export const ENTRY_ACTION_WIDTH_ATTR = 'data-pkc-width';
 
 /**
  * 🔴 **押せる操作の説明 ── ここも字の正本**(#587 改善 C-1)。

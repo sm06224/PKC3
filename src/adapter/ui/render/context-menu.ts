@@ -22,6 +22,12 @@
  * - **閉じたら焦点を返す** ── `window.confirm` を自前に替えたときに落ちた性質と同じ型
  */
 
+import {
+  ENTRY_ACTION_GROUP_LABELS,
+  ENTRY_ACTION_WIDTH_ATTR,
+  entryActionWidthTier,
+} from '@features/entry-actions';
+
 /** メニューの器。⚠ 1 枚だけ ── 2 枚目を作らない(重なると閉じ忘れる)。 */
 const REGION = 'context-menu';
 
@@ -50,10 +56,26 @@ export interface MenuItem {
    *   関係の無い項目まで同じ属性を持ち、読み手が取り違える。
    */
   readonly attrs?: Readonly<Record<string, string>>;
+  /**
+   * 🔴 **塊(見出し)の綴り**(#1029 段 C)。⚠ 書いていないものは**見出しを挟まない**
+   *   (単発の項目 ── `TASK_REPEAT_MENU_ACTION` 等)。
+   *
+   * ⚠ 右クリックには**間**が無いので(1 列のメニュー)、右の列と違って
+   *   **見出しの行そのもの**でしか塊を言えない。字は
+   *   `features/entry-actions.ts` の `ENTRY_ACTION_GROUP_LABELS` 1 か所から引く
+   *   (§7 ── ここで日本語を組み立て直さない)。
+   */
+  readonly group?: string;
 }
 
 /** 近道の字を持つ属性(`data-pkc-shortcut`)。⚠ CSS と unit はこの名前で見る。 */
 export const MENU_SHORTCUT_ATTR = 'data-pkc-shortcut';
+
+/**
+ * 🔴 **塊の見出しの行を持つ印**(`data-pkc-field`)(#1029 段 C)。
+ * ⚠ smoke / unit はこの印で見る。
+ */
+export const MENU_GROUP_FIELD = 'context-menu-group';
 
 export interface OpenMenu {
   /** 閉じる。⚠ **焦点を返す**(開く前に居た所へ)。 */
@@ -137,12 +159,39 @@ export function openContextMenu(
   const el = root.ownerDocument.createElement('div');
   el.setAttribute('data-pkc-region', REGION);
   el.setAttribute('role', 'menu');
+  /**
+   * 🔴 **塊が変わる所に、押せない見出しの行を出す**(#1029 段 C)。
+   *
+   * ⚠ 右の列(`inspector.ts`)は**間**(gap)で塊を切れるが、右クリックは
+   *   縦 1 列のメニューなので、間だけでは「ここからが別の塊」と読めない ──
+   *   だから**見出しの行そのもの**を挟む。
+   * 🔑 出す条件は「直前の項目と塊が違うとき」だけ ── 塊を持たない項目
+   *   (`group: undefined`)の前後には何も挟まない(単発の項目を塊扱いしない)。
+   * ⚠ **押せない**(`<button>` ではなく `<div>`。`data-pkc-action` を持たない)
+   *   ── 押し所を増やさない(既存の項目の並びは 1 つも変えていない)。
+   */
+  let lastGroup: string | undefined;
   for (const it of items) {
+    if (it.group !== undefined && it.group !== lastGroup) {
+      const heading = root.ownerDocument.createElement('div');
+      heading.setAttribute('data-pkc-field', MENU_GROUP_FIELD);
+      heading.setAttribute('role', 'presentation');
+      heading.textContent = ENTRY_ACTION_GROUP_LABELS[it.group] ?? it.group;
+      el.append(heading);
+    }
+    lastGroup = it.group;
     const b = root.ownerDocument.createElement('button');
     b.setAttribute('data-pkc-action', it.action);
     b.setAttribute('role', 'menuitem');
     b.type = 'button';
     b.textContent = it.label;
+    /**
+     * 🔴 **幅は「段」で受ける**(#1029 段 C 手 2)。⚠ 塊を持つ項目(= `ENTRY_MENU_ACTIONS`
+     *   由来)にだけ付ける ── 塊を持たない単発の項目まで段に揃える理由が無い。
+     */
+    if (it.group !== undefined) {
+      b.setAttribute(ENTRY_ACTION_WIDTH_ATTR, entryActionWidthTier(it.label));
+    }
     /**
      * 🔴 **説明は `title`(tooltip)ではなく、下の欄へ出す**(#587 C-1 → C-3。
      *   user 裁定 2026-08-30「一度推奨で入れて、使用感をテストしたい」)。
