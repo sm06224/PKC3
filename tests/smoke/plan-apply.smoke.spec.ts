@@ -75,13 +75,29 @@ test('🔴 壊れの調べと、作り直す/捨てるの 2 段が押せる (#97
   const resetEntryRows = page.locator('[data-pkc-region="filer-table"] tbody tr');
   await expect(resetEntryRows, '前提が崩れている ── フォルダの面に行が出ていない').toHaveCount(2);
 
-  const resetHeading = page.locator('[data-pkc-region="container-repair"] h4');
-  await expect(resetHeading, '見出しが設定の面に出ていない').toHaveText(
-    '壊れて直らないときの、最後の手',
+  /**
+   * 🔴 **見出し「壊れて直らないときの、最後の手」は廃止し、押し口 1 つで
+   *   開閉する箱にした**(2026-09-21、#1017 段③-1。評価語「最後の手」を含むため
+   *   `docs/development/ui-total-design-2026-09.md` §6.1 に抵触する)。
+   * ⚠ 箱は既定で `hidden` ── 開くまで**作り直す / 初期化する は 1 つも見えない**。
+   */
+  const repairToggle = page.locator('[data-pkc-action="toggle-container-repair"]');
+  await expect(repairToggle, '開閉ボタンが設定の面に出ていない').toBeVisible();
+  await expect(repairToggle, '開く前から aria-expanded が true').toHaveAttribute(
+    'aria-expanded',
+    'false',
+  );
+  const repairBox = page.locator('[data-pkc-region="container-repair"]');
+  await expect(repairBox, '開く前から箱が見えている').toBeHidden();
+  await clickReal(page, '[data-pkc-action="toggle-container-repair"]');
+  await expect(repairBox, '押しても箱が開かない').toBeVisible();
+  await expect(repairToggle, '開いたのに aria-expanded が false のまま').toHaveAttribute(
+    'aria-expanded',
+    'true',
   );
   /**
    * 🔴 **2 段になっている**(#1006。user 裁定 2026-09-18)── 上が
-   *   「中身を残して、作り直す」、下が「中身を捨てる」。
+   *   「作り直す」、下が「初期化する」。
    * ⚠ **並びも見る** ── 逆に並ぶと、壊れた人が**先に取り消せないほう**を読む。
    */
   const repairButtons = page.locator('[data-pkc-region="container-repair"] button[data-pkc-action]');
@@ -94,13 +110,11 @@ test('🔴 壊れの調べと、作り直す/捨てるの 2 段が押せる (#97
    *   (CLAUDE.md「『これが無いと壊れる』と書いたら、外して壊れることを 1 度は見る」)。
    * 🔑 画面の**字**で見る(`data-pkc-action` ではなく `textContent`)── user が
    *   読むのは字であって、こちらの名前ではない。
+   * 🔴 **2026-09-21(#1017 段③-1)に「中身を残して、作り直す」「中身を捨てる」から改名した**
+   *   (`ui-total-design-2026-09.md` §6.1)。
    */
-  await expect(repairButtons.nth(0), '上に在るのが「中身を残して、作り直す」ではない').toHaveText(
-    '中身を残して、作り直す',
-  );
-  await expect(repairButtons.nth(1), '下に在るのが「中身を捨てる」ではない').toHaveText(
-    '中身を捨てる',
-  );
+  await expect(repairButtons.nth(0), '上に在るのが「作り直す」ではない').toHaveText('作り直す');
+  await expect(repairButtons.nth(1), '下に在るのが「初期化する」ではない').toHaveText('初期化する');
   /**
    * ⚠ **DOM の順は、画面の上下ではない**(CSS で入れ替わりうる)── 実際に
    *   置かれた位置(`boundingBox`)で、**作り直すほうが上**であることを見る。
@@ -118,21 +132,21 @@ test('🔴 壊れの調べと、作り直す/捨てるの 2 段が押せる (#97
     `画面では「捨てる」のほうが上に在る(作り直す y=${rebuildBox!.y} / 捨てる y=${resetBox!.y})`,
   ).toBeLessThan(resetBox!.y);
   const rebuildRun = page.locator('[data-pkc-field="container-rebuild-run"]');
-  await expect(rebuildRun, '「中身を残して、作り直す」ボタンが見えない').toBeVisible();
-  await expect(rebuildRun, '「中身を残して、作り直す」ボタンが押せない(dead click)').toBeEnabled();
+  await expect(rebuildRun, '「作り直す」ボタンが見えない').toBeVisible();
+  await expect(rebuildRun, '「作り直す」ボタンが押せない(dead click)').toBeEnabled();
   // 🔴 説明の 1 行は**見えている**こと(title だけだと指では読めない)
   const rebuildNote = page.locator('[data-pkc-field="container-rebuild-note"]');
   await expect(rebuildNote, '作り直しの説明が見えていない').toBeVisible();
   await expect(rebuildNote, '作り直しの説明が空').not.toHaveText('');
   const resetRun = page.locator('[data-pkc-field="container-reset-run"]');
-  await expect(resetRun, '「中身を捨てる」ボタンが見えない').toBeVisible();
-  await expect(resetRun, '「中身を捨てる」ボタンが押せない(dead click)').toBeEnabled();
+  await expect(resetRun, '「初期化する」ボタンが見えない').toBeVisible();
+  await expect(resetRun, '「初期化する」ボタンが押せない(dead click)').toBeEnabled();
 
   /**
    * ③ 🔴 **上のボタンも「押して」みる**(#1006。着地前の smoke が非対称だと指摘した)。
    *
    * ⚠ 直す前ここは「**見えている / 押せる**」までしか見ておらず、
-   *   下の「中身を捨てる」だけが最後まで押されていた ── つまり
+   *   下の「初期化する」だけが最後まで押されていた ── つまり
    *   **新しく作った動線に、実ブラウザの検査が 1 つも無かった**
    *   (CLAUDE.md「UI 導線のテストを、全量 smoke で誤魔化すな」)。
    * ⚠ unit(happy-dom)は `showModal()` の実 dialog を通らないので、

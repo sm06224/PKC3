@@ -142,7 +142,12 @@ export interface OfficePackPanel {
 export function buildOfficePackPanel(state: OfficePackState = appOfficePack): OfficePackPanel {
   const root = document.createElement('section');
   root.setAttribute('data-pkc-region', 'settings-office');
-  const head = document.createElement('h3');
+  /**
+   * 🔴 **2026-09-21(#1017 段③-1)に h3 → h4 へ降格した** ── 「システム」の
+   * 「保存領域」h3 の中の 1 節になった(`docs/development/ui-total-design-2026-09.md` §3.2。
+   * 「この端末に置くかどうか」という保存領域の判断であって、見た目の好みではない)。
+   */
+  const head = document.createElement('h4');
   head.textContent = 'Office 表示';
   root.append(head);
 

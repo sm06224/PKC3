@@ -61,7 +61,7 @@ beforeEach(() => {
 });
 
 describe('設定画面に在る(#278 段②)', () => {
-  it('🔴 checkbox が「表示」の節に在り、既定は切', () => {
+  it('🔴 checkbox が「編集」の節に在り、既定は切', () => {
     const { host, box } = setup();
     expect(box, '設定に口が無い').not.toBeNull();
     expect(box!.type).toBe('checkbox');
@@ -69,10 +69,13 @@ describe('設定画面に在る(#278 段②)', () => {
       'set-phone-links',
     );
     expect(box!.checked, '既定が入になっている(選んでいない人の本文が変わる)').toBe(false);
-    // ⚠ ほかの設定と同じ節に置く ── 別の節にすると、探す場所が増える
+    /**
+     * 🔴 **2026-09-21(#1017 段③-1)に「表示」から「システム → 設定 → 編集」へ移した**
+     * (`ui-total-design-2026-09.md` §3.2「表示」= 見た目の好みだけ / 編集 = 書き方の作法)。
+     */
     expect(
-      host.querySelector('[data-pkc-region="settings-user"] [data-pkc-field="phone-links"]'),
-      '「表示」の節の外に置かれている',
+      host.querySelector('[data-pkc-region="settings-edit"] [data-pkc-field="phone-links"]'),
+      '「編集」の節の外に置かれている',
     ).not.toBeNull();
   });
 

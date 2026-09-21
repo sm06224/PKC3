@@ -92,7 +92,11 @@ export function buildKeymapPanel(
   const root = doc.createElement('section');
   root.setAttribute('data-pkc-region', 'settings-keymap');
 
-  const h = doc.createElement('h3');
+  /**
+   * 🔴 **2026-09-21(#1017 段③-1)に h3 → h4 へ降格した** ── 「システム」の
+   * 「設定」h3 の中の 1 節になった(`docs/development/ui-total-design-2026-09.md` §3.2)。
+   */
+  const h = doc.createElement('h4');
   h.textContent = 'ショートカットキー';
   root.append(h);
 

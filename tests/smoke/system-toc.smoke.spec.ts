@@ -25,6 +25,13 @@ test('🔴 「システム」の目次: お知らせが読め、押すと移動�
 }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1280, height: 900 });
+  // ⑥ の台:コピーの履歴を 1 件だけ持って起動する(store は起動時に 1 度読む)
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'pkc3.copy.history',
+      JSON.stringify([{ at: 1, text: 'smoke の下ごしらえ', html: '' }]),
+    );
+  });
   await gotoApp(page);
 
   // ⚠ hash は最初から動かないはず ── 起動直後の値を基準にする
@@ -39,12 +46,12 @@ test('🔴 「システム」の目次: お知らせが読め、押すと移動�
     timeout: 10_000,
   });
   const announceItemTitle = announceBody.locator('section[data-pkc-announce] h3').first();
-  // ⚠ **新しい順**(設計 doc §7、段②b のワーカー可視化の移行が、段②a のメッセージ機能・
-  //   段⓪の改名より新しい)。
+  // ⚠ **新しい順**(#1017 段③-1「システム」を型ごとの 6 節へ、が
+  //   NOTICES の先頭 ── 2026-09-21 の他の 3 件・段②b のワーカー可視化より新しい)。
   expect(
     (await announceItemTitle.textContent()) ?? '',
     'お知らせの題名が最新のものになっていない',
-  ).toContain('ワーカーの動きが「処理の記録」に溜まるようになりました');
+  ).toContain('「システム」の画面が 6 つの節に組み替わりました');
   await dismissAnnounce(page);
 
   // 「システム」を開く
@@ -78,6 +85,14 @@ test('🔴 「システム」の目次: お知らせが読め、押すと移動�
   );
   expect(headingLabels, '目次と見出しの数が一致しない').toHaveLength(tocLabels.length);
   expect(tocLabels, '目次の字が、その順の見出しと一致しない').toEqual(headingLabels);
+
+  // ②-2 🔴 6 節の型ごとの見出しが、この順で並んでいる(#1017 段③-1)。
+  //    ⚠ 新しい起動は足さない(CLAUDE.md smoke-budget)── ②で取得済みの
+  //    `headingLabels` をそのまま検める
+  expect(
+    headingLabels,
+    '「システム」が型ごとの 6 節へ組み替わっていない',
+  ).toEqual(['メッセージ', '設定', '許可', '記録', '保存領域', 'お知らせ']);
 
   // ③ 🔴 目次の**最後**を押すと、その見出しが画面の上のほうへ送られる
   const scroller = page.locator('[data-pkc-region="detail"]');
@@ -128,6 +143,25 @@ test('🔴 「システム」の目次: お知らせが読め、押すと移動�
   expect(tocBox!.y, `「上へ」を押しても目次が画面の上のほうに来ていない(y=${tocBox!.y})`).toBeLessThan(
     300,
   );
+
+  // ⑥ 🔴 記録 → 「コピーの履歴を消す」(#1017 段③-1 で足した押し口)。
+  //    ⚠ 件数の字は `render()` の外で変わる ── 押した後に **その場で** 0 件に
+  //    なることまで見る(状態変化に乗らないので、通知が無いと古い字が残る)
+  const copyCount = page.locator(
+    '[data-pkc-region="settings-copy-history"] [data-pkc-field="copy-history-count"]',
+  );
+  await expect(copyCount, '台の前提が崩れている(1 件で起動していない)').toHaveText(
+    'いま 1 件あります。',
+  );
+  await clickReal(
+    page,
+    '[data-pkc-region="settings-copy-history"] [data-pkc-action="clear-copy-history"]',
+  );
+  await expect(copyCount, '消したのに件数の字が古いまま').toHaveText('いまは 0 件です。');
+  expect(
+    await page.evaluate(() => localStorage.getItem('pkc3.copy.history')),
+    '消したのに端末に残っている',
+  ).toBeNull();
 
   // ⑤ 🔴 ここまでの一連の操作で hash は 1 度も変わっていない(ディープリンク専用)
   const hashAfter = await page.evaluate(() => location.hash);

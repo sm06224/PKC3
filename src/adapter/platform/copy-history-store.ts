@@ -84,6 +84,12 @@ function parse(raw: string | null): CopiedItem[] {
  */
 export class CopyHistoryStore {
   private list: CopiedItem[];
+  /**
+   * 🔴 **変わったら知らせる**(#1017 段③-1)。「システム → 記録」の件数の字は
+   * `render()` の外(binder の `clear-copy-history`)で変わるので、状態変化に
+   * 乗らない ── 通知が無いと「消したのに『いま 1 件あります』のまま」になる。
+   */
+  private readonly listeners = new Set<() => void>();
 
   constructor(private readonly storage: CopyHistoryStorage = browserStorage) {
     this.list = parse(this.storage.get(KEY));
@@ -118,13 +124,27 @@ export class CopyHistoryStore {
   clear(): boolean {
     this.storage.remove(KEY);
     this.list = [];
+    this.notify();
     return true;
+  }
+
+  /** 変わったときに呼ばれる。戻り値で外せる。 */
+  onChange(fn: () => void): () => void {
+    this.listeners.add(fn);
+    return () => {
+      this.listeners.delete(fn);
+    };
+  }
+
+  private notify(): void {
+    for (const fn of this.listeners) fn();
   }
 
   private write(next: CopiedItem[]): boolean {
     try {
       this.storage.set(KEY, JSON.stringify(next));
       this.list = next;
+      this.notify();
       return true;
     } catch {
       // 🔴 **画面の物だけ先に進めない** ── 書けなかったのに一覧へ出すと、

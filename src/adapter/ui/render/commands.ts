@@ -174,19 +174,47 @@ export const SETTINGS_COMMANDS: readonly CollectionCommand[] = [
  * ⚠ **整理案を適用(旧「整理案を適用する」)もここに無い**(2026-09-21、#1017 段④b)──
  *   「構成をコピー」と**同じ 1 つの用事の前半と後半**なので、右の列の隣へ移した
  *   (`inspector.ts` の `buildCollectionPane`)。
+ *
+ * ## 2026-09-21 追記(#1017 段③-1。型システムで言い直した置き場、2 回目)
+ *
+ * 🔴 **「書き出しと片づけ」という 1 つの h3 は廃止**(`ui-total-design-2026-09.md` §3.2)。
+ * ⚠ ここに在った物は**型が 3 つ**に割れていた:
+ * ① `SETTINGS_COMMANDS`(使っていない添付)/ `buildStorageProfile`(何が容量を使っているか)/
+ *    `buildDbRescue`(中身が壊れていないか調べる)── 全部「**保存領域**」という型の値
+ * ② `buildSettingsFile`(設定の持ち出し)── 「**設定**」という型の値。「システム」の
+ *    「設定」h3 の下へ、`settings.ts` が直接呼んで置く(ここでは組み立てない)
+ * ③ `buildContainerRepair`(旧見出し「壊れて直らないときの、最後の手」)──
+ *    **見出しごと廃止**(評価語「最後の手」を含むため、`ui-total-design-2026-09.md`
+ *    §6.1 の 6 条に抵触する)。押し口は「中身が壊れていないか調べる」の中の
+ *    畳んだ箱へ移した(`buildDbRescue` が内部で呼ぶ)。
+ * 🔑 だから `buildSettingsCommands()` はいまも 1 関数だが、**h3 を持たない**
+ *   (呼び側の `settings.ts` が「保存領域」の h3 を組み、この関数の返す断片を
+ *   このアプリのデータ・Office 表示 の間へ挟む)。
  */
-export function buildSettingsCommands(): HTMLElement {
-  const wrap = document.createElement('section');
-  wrap.setAttribute('data-pkc-region', 'settings-commands');
-  const h = document.createElement('h3');
-  h.textContent = '書き出しと片づけ';
-  wrap.append(h);
+export function buildSettingsCommands(): DocumentFragment {
+  const frag = document.createDocumentFragment();
+  // 🔴 容量を**先に**出す(#1017 段③-1、設計 doc §3.2 の並び)──
+  //   「使っていない添付を消す」を押す前に、まずどれが重いかを知りたい
+  frag.append(buildStorageProfile());
+  frag.append(buildPurgeOrphanAssets());
+  // 🔴 壊れの調べは片づけの**隣**に置く ── 「壊れた」と言われた人が最初に探す並び
+  frag.append(buildDbRescue());
+  return frag;
+}
 
-  const note = document.createElement('p');
-  note.setAttribute('data-pkc-field', 'settings-note');
-  note.textContent =
-    '片づけるときに使います。取り込みとバックアップは、いつでも押せるように左下に置いてあります。書き出し(閲覧用 HTML・持ち歩ける HTML 1 枚・Markdown・構成をコピー・整理案を適用)は、右の列(何も選んでいないとき)にあります。';
-  wrap.append(note);
+/**
+ * 🔴 **使っていない添付を消す**(2026-09-21、#1017 段③-1)。
+ *
+ * ⚠ 直す前は「書き出しと片づけ」の下に**見出し無しで**ボタン 1 つだけ置かれていた。
+ *   「保存領域」の中に他の h4(何が容量を使っているか / 中身が壊れていないか調べる)と
+ *   並ぶので、**同じ形(見出し + 説明 + ボタン)**に揃える。
+ */
+function buildPurgeOrphanAssets(): HTMLElement {
+  const box = document.createElement('section');
+  box.setAttribute('data-pkc-region', 'settings-purge-orphan');
+  const h = document.createElement('h4');
+  h.textContent = '使っていない添付';
+  box.append(h);
 
   const row = document.createElement('div');
   row.setAttribute('data-pkc-field', 'settings-command-row');
@@ -195,34 +223,20 @@ export function buildSettingsCommands(): HTMLElement {
     btn.title = title;
     row.append(btn);
   }
-  wrap.append(row);
-  wrap.append(buildStorageProfile());
-  // 🔴 容量の隣に置く ── 「壊れた」と言われた人が最初に探すのはこの並びである
-  wrap.append(buildDbRescue());
-  // 🔴 拾う口の**すぐ下**に置く ── 「調べる → 拾う → **作り直す / 捨てる**」が上から順に読める
-  wrap.append(buildContainerRepair());
-  wrap.append(buildSettingsFile());
-  return wrap;
+  box.append(row);
+  return box;
 }
 
 /**
- * 🔴 **壊れて直らないときの、最後の手**(#986 段③ → #1006。user 裁定 2026-09-18)。
+ * 🔴 **押し口だけを開閉する**(2026-09-21、#1017 段③-1)。⚠ `<details>` は
+ * 使わない(`toggle-plan-apply` / `toggle-replace` と同じ作法)。
  *
- * ## なぜ 2 段なのか(user 裁定 2026-09-18)
+ * ## なぜ畳むのか
  *
- * ⚠ 直す前はここに「**中身を捨てる**」しか無かった ── つまり
- *   **DB が壊れただけの人にも、ノートを全部捨てさせていた**。
- *   🔑 user の言葉(こちらの解釈):**壊れているのは入れ物の側なのに、
- *   なぜ中身まで捨てさせられるのか。** まったくそのとおりである。
- * 🔑 だから**上に「残して作り直す」を置く** ── 拾える物を集めてから入れ物だけ
- *   作り直し、そのまま戻す。⚠ **下の「捨てる」は消さない**(user 裁定)──
- *   作り直しても直らない相手が居るので、**動線を 1 つ減らさない**
- *   (CLAUDE.md「記法を減らすことは、user の動線を減らすことである」)。
- *
- * ## ⚠ 見出しは 2 段を覆う字にする
- *
- * 「中身を捨てて、まっさらにする」のままだと、⚠ その見出しの下に
- * 「**中身を残して**、作り直す」が並ぶ ── **見出しとボタンが正面から矛盾する**。
+ * ⚠ 旧見出し「壊れて直らないときの、最後の手」は評価語・脅し語なので廃止した
+ * (`ui-total-design-2026-09.md` §6.1)。⚠ ただし**中身(2 つのボタン)は消していない**
+ * ── 取り消せない操作なので、**押す前に必ず 1 回踏ませる**入口として畳んだ形にする
+ * (見出しではなく押し口で「もう一段深い」ことを言う)。
  *
  * ## ⚠ ここには判断を 1 つも置かない
  *
@@ -230,17 +244,24 @@ export function buildSettingsCommands(): HTMLElement {
  * 何を消す / 戻すかは `features/storage/container-{reset,rebuild}.ts` が持つ。
  * ここは**押し口だけ**である。
  */
-function buildContainerRepair(): HTMLElement {
-  const box = document.createElement('section');
+function buildContainerRepair(): DocumentFragment {
+  const frag = document.createDocumentFragment();
+
+  const toggle = iconButton('toggle-container-repair', '作り直す・初期化する を出す');
+  toggle.setAttribute('aria-expanded', 'false');
+  toggle.title = 'ここを押すと、入れ物を作り直す・初期化する の 2 つのボタンが出ます';
+  frag.append(toggle);
+
+  const box = document.createElement('div');
   /**
    * ⚠ 区画の名前は **`container-repair`**(2026-09-18 に `container-reset` から改名)
    * ── 2 段になった時点で、片方の名前で区画を呼ぶと**もう片方が見えなくなる**。
    * 🔑 押し口の名前(`container-reset-*` / `container-rebuild-*`)はそのままである。
+   * ⚠ **見出し(h4)は持たない** ── `toggle` の字が見出しの役目を兼ねる。
    */
   box.setAttribute('data-pkc-region', 'container-repair');
-  const h = document.createElement('h4');
-  h.textContent = '壊れて直らないときの、最後の手';
-  box.append(h);
+  box.setAttribute('data-pkc-field', 'container-repair-box');
+  box.hidden = true;
 
   /**
    * ⚠ **先に読ませる 1 行**(ボタンの `title` はホバーしないと読めない ──
@@ -300,7 +321,9 @@ function buildContainerRepair(): HTMLElement {
   sum.setAttribute('data-pkc-field', 'container-reset-summary');
   sum.hidden = true;
   box.append(sum);
-  return box;
+
+  frag.append(box);
+  return frag;
 }
 
 /**
@@ -311,8 +334,12 @@ function buildContainerRepair(): HTMLElement {
  * ⚠ **畳まない**(`<details>` を使わない ── user 指示 2026-08-03)。
  * 🔑 **何を運ぶか / 運ばないかは `features/settings/settings-file.ts` が 1 か所で持つ**
  *   ── ここは押し口と下見の器だけで、判断を 1 つも持たない(§7)。
+ *
+ * 🔴 **export する**(2026-09-21、#1017 段③-1)── 「設定」という型の値なので、
+ *   `settings.ts` が「システム」の「設定」h3 の下へ**直接**呼んで置く
+ *   (`buildSettingsCommands()`(保存領域)には含めない)。
  */
-function buildSettingsFile(): HTMLElement {
+export function buildSettingsFile(): HTMLElement {
   const box = document.createElement('section');
   box.setAttribute('data-pkc-region', 'settings-file');
   const h = document.createElement('h4');
@@ -387,8 +414,10 @@ function buildSettingsFile(): HTMLElement {
  *   分からなかった ── 1 件ずつ開けば大きさは出るが、300 件は開けない。
  * ⚠ **畳まない**(`<details>` を使わない)── user 指示 2026-08-03。
  * 🔑 数えるのは worker の中。ここが受け取るのは**数字だけ**である。
+ *
+ * 🔴 **export する**(2026-09-21、#1017 段③-1)── `buildSettingsCommands()` から呼ぶ。
  */
-function buildStorageProfile(): HTMLElement {
+export function buildStorageProfile(): HTMLElement {
   const box = document.createElement('section');
   box.setAttribute('data-pkc-region', 'storage-profile');
   const h = document.createElement('h4');
@@ -494,5 +523,13 @@ function buildDbRescue(): HTMLElement {
   detail.setAttribute('data-pkc-field', 'db-rescue-detail');
   detail.hidden = true;
   box.append(detail);
+
+  /**
+   * 🔴 **「作り直す・初期化する」を、この h4 の中の畳んだ箱として置く**
+   * (2026-09-21、#1017 段③-1。旧見出し「壊れて直らないときの、最後の手」は廃止)。
+   * ⚠ 点検で問題が見つかったときは `binder.ts` の `db-check` が
+   *   `container-repair-box` の `hidden` を外す(結果の表示と同じ経路)。
+   */
+  box.append(buildContainerRepair());
   return box;
 }
