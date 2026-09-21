@@ -1979,26 +1979,6 @@ li[data-pkc-row-slot] {
   gap: 1px;
   background: var(--surface);
 }
-/**
- * 🔴 **塊の見出し(#1029 段 C)── 同じ行の先頭に、押せない薄い字で置く。**
- *
- * 🔑 縦を食わない置き方である(行は既に在る)── 設計 doc §4.0 の推薦。
- * ⚠ **押し所に見せない**:`cursor` は既定のまま、背景も枠も付けない。
- * ⚠ 丈はボタンと同じ(`--row-h`)── 揃えないと、塊の頭だけ行がずれて見える。
- * ⚠ **縮ませない**(`flex: none`)── 狭い列で見出しが 1 字ずつ折り返すと、
- *   「読めない字が縦に並ぶ」といういちばん悪い形になる。
- */
-[data-pkc-region='inspector'] [data-pkc-field='inspector-action-group-label'] {
-  display: inline-flex;
-  align-items: center;
-  flex: none;
-  height: var(--row-h);
-  padding-inline: var(--s2);
-  color: var(--muted);
-  font-size: var(--btn-fs-sm);
-  white-space: nowrap;
-  user-select: none;
-}
 [data-pkc-region='inspector'] [data-pkc-field='inspector-actions'] button {
   border: none;
   border-radius: 0;

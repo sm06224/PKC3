@@ -34,13 +34,13 @@ import {
   ENTRY_ACTION_LABELS,
   ENTRY_MENU_ACTIONS,
   entryActionHint,
-  entryActionWidthTier,
   entryMenuActions,
   TILE_MENU_ACTIONS,
   tileMenuActions,
   TASK_REPEAT_MENU_ACTION,
   repeatMenuActions,
   REPEAT_ATTR,
+  entryActionWidthTier,
 } from '../../src/features/entry-actions';
 
 /** `binder.ts` の受け手の表を読む。⚠ 集め方は `repo-hygiene` と**同じ形**にする。 */
@@ -124,59 +124,36 @@ describe('右クリックに出す操作', () => {
      * ⚠ 情報ペインが**自前の字**へ戻ると、同じ操作が面によって別の名前で出る。
      * 🔑 だから「情報ペインが表を引いていること」を字面で pin する ──
      *   ⚠ 弱い検査だと自覚して使う(原文 pin なので、呼び方を変えれば外れる)。
-     *
-     * 🔴 **#1029 段 C で読み方が変わった** ── 直す前は 1 つずつ
-     *   `btn('${action}', ENTRY_ACTION_LABELS['${action}']!)` と書いていたので
-     *   `ENTRY_ACTION_LABELS['export-entry']` のような**その場の綴り**が字面に残った。
-     *   直した後は `entryBtn('${action}')` という**共通の 1 本**が
-     *   `ENTRY_ACTION_LABELS[action]`(変数)を読むので、個別の綴りは**消える**
-     *   (これは退行ではない ── 塊も同じ 1 本から引くようになったので、
-     *   むしろ「字の出どころが 1 か所」がより強く成立している)。
      */
     const inspector = readFileSync('src/adapter/ui/render/inspector.ts', 'utf-8');
-    // ⚠ 空振り防止 ── 共通の 1 本(`entryBtn`)がいまも表から引いていること
-    expect(
-      inspector.includes(`ENTRY_ACTION_LABELS[action]`),
-      '情報ペインの共通の読み手(entryBtn)が表から引かなくなっている',
-    ).toBe(true);
+    /**
+     * 🔴 **引き方は 2 通りある**(#1029 段 C で `entryBtn()` に寄せた)。
+     * ⚠ 直す前はこの検査が `ENTRY_ACTION_LABELS['<綴り>']` という**字面 1 通り**しか
+     *   受けなかったので、**表から引く形に寄せた瞬間に落ちる** ── 落ちる理由は
+     *   「自前の字へ戻った」ではなく「引き方が変わった」であり、**主張が的を外す**。
+     * 🔑 だから**表から引いていること**を、2 つの形のどちらかで認める:
+     *   ① `ENTRY_ACTION_LABELS['<綴り>']`(1 件ずつ引く昔の形)
+     *   ② `entryBtn('<綴り>')`(綴りだけ渡し、字は中で表から引く いまの形)
+     */
     for (const a of ENTRY_MENU_ACTIONS) {
+      const fromTable =
+        inspector.includes(`ENTRY_ACTION_LABELS['${a.action}']`) ||
+        inspector.includes(`entryBtn('${a.action}')`);
       expect(
-        inspector.includes(`entryBtn('${a.action}')`),
-        `情報ペインが「${a.label}」を共通の読み手(entryBtn)から出していない`,
+        fromTable,
+        `情報ペインが「${a.label}」の字を自前で持っている(表から引いていない)`,
       ).toBe(true);
       // ⚠ 直書きが**戻っていない**ことも見る(引きつつ横に直書きを残せてしまう)
       expect(
         inspector.includes(`btn('${a.action}', '${a.label}')`),
         `情報ペインに「${a.label}」の直書きが残っている`,
       ).toBe(false);
-      expect(
-        inspector.includes(`ENTRY_ACTION_LABELS['${a.action}']`),
-        `情報ペインに「${a.action}」の個別の直書きが残っている(共通の読み手を経ていない)`,
-      ).toBe(false);
     }
-  });
-
-  it('🔴 塊は正本(entry-actions.ts)から来る(情報ペインと食い違わない)', () => {
-    /**
-     * 🔴 **#1029 段 C の穴埋め**:塊は 6 つ(copy / open / take-in / export /
-     *   this-one / remove)+ 衝突回避の `this-folder` の**7 つ**を、
-     *   情報ペインが `data-pkc-group` として付けているかを、**正本の値**と突き合わせる。
-     * ⚠ **`group('take-in')` の直書きは 1 か所だけ残る**(`adopt-external-images` 用。
-     *   `ENTRY_MENU_ACTIONS` の外なので、この検査の対象ではない)。
-     */
-    const inspector = readFileSync('src/adapter/ui/render/inspector.ts', 'utf-8');
-    for (const a of ENTRY_MENU_ACTIONS) {
-      if (a.group === undefined) continue;
-      expect(
-        inspector.includes(`ENTRY_ACTION_GROUPS[action]`),
-        '情報ペインが塊を正本(ENTRY_ACTION_GROUPS)から引いていない',
-      ).toBe(true);
-    }
-    // ⚠ 空振り防止 ── 16 件のうち塊を持つものが 0 件では、上のループが何も見ない
+    // ⚠ 空振り防止 ── ②の形が 1 件も無いなら、上の `||` は昔の形しか見ていない
     expect(
-      ENTRY_MENU_ACTIONS.filter((a) => a.group !== undefined).length,
-      '塊を持つ操作が 0 件(空振り)',
-    ).toBeGreaterThan(10);
+      inspector.includes("entryBtn('copy-entry-ref')"),
+      '前提: いまの引き方(entryBtn)が 1 件も無い',
+    ).toBe(true);
   });
 
   it('⚠ 綴りと字の対応が崩れていない', () => {
@@ -298,8 +275,7 @@ describe('条件つきの操作(#500 案 C)', () => {
 
   it('⚠ 字は表から来る(情報ペインと食い違わない)', () => {
     // 🔑 上の「字は 1 か所から来る」検査が条件つきの 2 行も見るようになっている
-    // 🔴 #1029 段 C:「(このフォルダ)」は落とし、塊の見出し「このフォルダ」が言う
-    expect(ENTRY_ACTION_LABELS['export-folder']).toBe('バックアップ');
+    expect(ENTRY_ACTION_LABELS['export-folder']).toBe('バックアップ(このフォルダ)');
     expect(ENTRY_ACTION_LABELS['write-back-file']).toBe('書き戻す');
     // ⚠ 取り込みは枚数を含むので表ではなく組み立て関数が持つ
     expect(adoptImagesLabel(1)).toContain(ADOPT_IMAGES_LABEL);
@@ -591,13 +567,9 @@ describe('行の右クリックからの整理(#215)', () => {
   });
 
   it('字は画面で起きることで書いてある', () => {
-    /**
-     * 🔴 #1029 段 C:動詞は塊の見出し「このノート」ではなく、押した結果
-     *   (説明・入力欄が出る挙動)が言うので、名前は名詞まで縮めた。
-     */
-    expect(ENTRY_ACTION_LABELS['rename-entry-begin']).toBe('名前');
+    expect(ENTRY_ACTION_LABELS['rename-entry-begin']).toBe('名前を変える');
     expect(ENTRY_ACTION_LABELS['move-to-folder']).toBe('移す…');
-    expect(ENTRY_ACTION_LABELS['create-in-folder']).toBe('中に作る');
+    expect(ENTRY_ACTION_LABELS['create-in-folder']).toBe('この中に新しいノートを作る');
   });
 });
 
@@ -622,38 +594,21 @@ describe('スタックの字(#633 段①)', () => {
 });
 
 describe('小窓の字と並び(#690 I1 / I2)', () => {
-  /**
-   * 🔴 **#1029 段 C で 2 つの面が意図して食い違うようになった**。
-   *
-   * ⚠ 直す前はこの検査が「同じ操作は 2 つの面で同じ字」を主張していたが、
-   *   `ENTRY_MENU_ACTIONS`(行の右クリック・情報ペイン)は**塊の見出し**
-   *   (「開く」)が動詞を引き受けるので「別ウィンドウ」まで縮められる。
-   *   ⚠ `BODY_MENU_ACTIONS`(本文の右クリック)には塊が無いので、縮めると
-   *   動詞が消えて何が起きるか読めなくなる ── だから**そのまま残す**。
-   * 🔑 だから主張を「2 面は同じ」から「2 面は**それぞれ正しい理由で**違う」へ直した。
-   */
-  it('🔴 ENTRY_MENU_ACTIONS は「別ウィンドウ」(塊「開く」が動詞を持つ)', () => {
-    const label = ENTRY_MENU_ACTIONS.find((a) => a.action === 'open-note-window')?.label;
-    expect(label).toBe('別ウィンドウ');
-  });
-
-  it('🔴 BODY_MENU_ACTIONS は「別のウィンドウで開く」のまま(塊が無いので動詞を落とせない)', () => {
-    const label = BODY_MENU_ACTIONS.find((a) => a.action === 'open-note-window')?.label;
-    expect(label).toBe('別のウィンドウで開く');
+  it('🔴 字は「別のウィンドウで開く」(右クリックと本文のメニューの両方)', () => {
+    const labels = [...ENTRY_MENU_ACTIONS, ...BODY_MENU_ACTIONS]
+      .filter((a) => a.action === 'open-note-window')
+      .map((a) => a.label);
+    expect(labels, '2 つのメニューの両方に出ていない').toHaveLength(2);
+    expect(new Set(labels), '2 つのメニューで字が違う').toEqual(new Set(['別のウィンドウで開く']));
     // ⚠ 「窓」の字に戻していない(お知らせ・マニュアルは「ウィンドウ」)
-    expect(label, '「別の窓で開く」に戻っている').not.toBe('別の窓で開く');
+    for (const l of labels) expect(l, '「別の窓で開く」に戻っている').not.toBe('別の窓で開く');
   });
 
-  it('🔴 右クリックの並びは 参照 / Markdown / 別ウィンドウ(動詞は塊の見出しへ)', () => {
+  it('🔴 右クリックの並びは 参照をコピー / 素の Markdown / 別のウィンドウで開く', () => {
     expect(ENTRY_MENU_ACTIONS.slice(0, 3).map((a) => a.action)).toEqual([
       'copy-entry-ref',
       'copy-plain-markdown',
       'open-note-window',
-    ]);
-    expect(ENTRY_MENU_ACTIONS.slice(0, 3).map((a) => a.label)).toEqual([
-      '参照',
-      'Markdown',
-      '別ウィンドウ',
     ]);
   });
 });
@@ -729,46 +684,19 @@ describe('繰り返しの一覧(#855 段 0)', () => {
 });
 
 /**
- * 🔴 **名前の幅の上限(全角 6 字 = 12 桁)以内**(#1029 段 C 門①)。
+ * 🔴 **名前の幅の「上限」は置かない**(#1029 段 C。**1 稿目を実測で覆した記録**)。
  *
- * ⚠ 「参照」「名前」のように短くしすぎると意味が落ちる懸念は、
- *   `ENTRY_ACTION_GROUP_LABELS`(塊の見出し)と `ENTRY_ACTION_HINTS`(説明)が支える ──
- *   ここは**上限そのものが守られているか**だけを見る(意味の検算は §「情報ペインの
- *   説明」と ⑤-2 と同じ作法で、実物の画面で 1 件ずつ確かめてある。報告を見よ)。
- * 🔑 **全角換算は ASCII=1 / それ以外=2**(design doc §2.1 規則 1 と同じ数え方)。
+ * ⚠ 1 稿目はここに「全角 6 字(12 桁)以内」という門が在った ── 名前から動詞を落とし、
+ *   動詞は**塊の見出し**に言わせる設計だったからである。
+ * 🔴 **実測で覆った**(2026-09-21、実ブラウザ・8 幅・同じ頁で A/B):見出しを出すと
+ *   右の列の折り返しが **+2〜+4 段**増えた(1600px で +4 段)。設計 doc §4.0 の
+ *   「2 段以上増えるなら見出しをやめて名前を作り直す」に当たるので、**見出しを出さず、
+ *   名前は動詞を持ったまま**にした。
+ * ⚠ だから**上限の門は外してある** ── 動詞を含む名前は 12 桁に収まらない
+ *   (「この中に新しいノートを作る」は 26 桁)。⚠ この節を消さないこと:
+ *   消すと、次に読む人が**上限の門をもう一度足して、同じ実測をやり直す**。
+ * 🔑 いま幅のでこぼこを受けているのは**下限の段 2 つ**(すぐ下)である。
  */
-describe('名前の幅の上限(#1029 段 C)', () => {
-  /** ASCII=1 / それ以外=2 で数える全角換算の桁数。 */
-  function zenkakuWidth(s: string): number {
-    let w = 0;
-    for (const ch of s) w += ch.codePointAt(0)! <= 0x7f ? 1 : 2;
-    return w;
-  }
-
-  /**
-   * 🔴 **製品名は除外**(`STANDARD_TERMS` と同じ字を名指し)── 英語の固有名詞は
-   *   縮めようがなく、また既に §6.1 規則 2 で「英語のまま」と決まっている。
-   * ⚠ いまの値は全部 12 桁以内に収まっているが、**将来もっと長い製品名が来たとき**、
-   *   ここに載せずに落ちれば「除外すべきかどうか」を人が判断できる(黙って通さない)。
-   */
-  const EXCLUDE_PRODUCT_NAMES: ReadonlySet<string> = new Set(['Word', 'PowerPoint', 'PDF']);
-
-  it('🔴 ENTRY_MENU_ACTIONS の label は全角 6 字(12 桁)以内(製品名を除く)', () => {
-    const over = ENTRY_MENU_ACTIONS.filter(
-      (a) => !EXCLUDE_PRODUCT_NAMES.has(a.label) && zenkakuWidth(a.label) > 12,
-    ).map((a) => `${a.action}: 「${a.label}」(${zenkakuWidth(a.label)} 桁)`);
-    // ⚠ 空振り防止 ── 表が空なら「超えるものが無い」が意味を持たない
-    expect(ENTRY_MENU_ACTIONS.length, '表が空(空振り)').toBeGreaterThan(10);
-    expect(over, '12 桁を超える名前がある').toEqual([]);
-  });
-
-  it('⚠ 対照群 ── 除外リストに無い製品名なら、この検査は当てにいける', () => {
-    // 🔑 除外リストが無かったら「Markdown」「HTML」も対象になるが、いずれも 12 桁以内
-    //   (製品名の除外は今日の値では発火しない ── 除外の仕組み自体を検める)
-    expect(zenkakuWidth('PowerPoint')).toBe(10);
-    expect(EXCLUDE_PRODUCT_NAMES.has('PowerPoint')).toBe(true);
-  });
-});
 
 /**
  * 🔴 **幅は「段」で受ける。段は 2 つだけ**(#1029 段 C 手 2 門④)。

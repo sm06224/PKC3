@@ -570,33 +570,34 @@ describe('マニュアルと実装の突合', () => {
      *   情報ペインは**その操作を出していること**で見る。
      */
     /**
-     * ⚠ **`export-entry` の字は「バックアップ」へ改名した**
-     *   (2026-09-21、#1017 段④b「バックアップ(このノート)」→ #1029 段 C で
-     *   「(このノート)」を落とし、塊の見出し「書き出す」に任せた)。
-     * 🔴 **#1029 段 C で字の在り処が増えた**(2026-09-21)── `inspector.ts` は
-     *   もう `ENTRY_ACTION_LABELS['export-entry']` のような**個別の綴り**を
-     *   持たない(共通の読み手 `entryBtn` が `ENTRY_ACTION_LABELS[action]` を
-     *   読む)。だから「情報ペインが出していること」は**共通の読み手を経由して
-     *   いること**で見る ── 個別の綴りが消えたのは退行ではない
-     *   (`tests/features/entry-actions.test.ts`「字は 1 か所から来る」に詳しい)。
+     * ⚠ **`export-entry` の字は「バックアップ(このノート)」へ改名した**
+     *   (2026-09-21、#1017 段④b。§3「書き出す」→「バックアップ」の
+     *   使い分けの規則)。
      */
     const ACTION_OF: Record<string, string> = {
-      バックアップ: 'export-entry',
+      'バックアップ(このノート)': 'export-entry',
       履歴: 'show-history',
       削除: 'delete-entry',
     };
-    for (const label of ['バックアップ', '履歴', '削除']) {
+    for (const label of ['バックアップ(このノート)', '履歴', '削除']) {
       const action = ACTION_OF[label]!;
       expect(ENTRY_ACTION_LABELS[action], `字の正本から「${label}」が消えた`).toBe(label);
-      expect(inspector, `情報ペインの共通の読み手(entryBtn)が「${action}」を出していない`).toContain(
-        `entryBtn('${action}')`,
-      );
+      /**
+       * 🔴 **引き方は 2 通り**(#1029 段 C で `entryBtn()` に寄せた)。
+       * ⚠ 字面 1 通りだけを見ると、**表から引く形に寄せた日に落ちる** ──
+       *   落ちる理由は「情報ペインから消えた」ではなく「引き方が変わった」で、
+       *   **文言が的を外す**(CLAUDE.md §1「主張そのものが成り立たない」)。
+       */
+      const drawn =
+        inspector.includes(`ENTRY_ACTION_LABELS['${action}']`) ||
+        inspector.includes(`entryBtn('${action}')`);
+      expect(drawn, `情報ペインから「${label}」が消えた`).toBe(true);
     }
     // ⚠ **2 か所に同じボタンを出さない**(押す場所が定まらなくなる)
     for (const label of ['削除', '履歴']) {
       expect(detail, `「${label}」が本文の上にも残っている`).not.toContain(`, '${label}')`);
     }
-    for (const label of ['編集', '保存', 'キャンセル', '履歴', 'バックアップ', '追記']) {
+    for (const label of ['編集', '保存', 'キャンセル', '履歴', 'バックアップ(このノート)', '追記']) {
       expect(MANUAL, `マニュアルに「${label}」が無い`).toContain(`**${label}**`);
     }
   });

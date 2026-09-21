@@ -370,8 +370,7 @@ test('🔴 編集中に行を右クリックすると「別のウィンドウで
   const items = menu.locator('button[data-pkc-action]');
   await expect(items, '編集中なのに「別のウィンドウで開く」以外が出た').toHaveCount(1);
   await expect(items.first()).toHaveAttribute('data-pkc-action', 'open-note-window');
-  // 🔴 #1029 段 C:字は「別ウィンドウ」に縮んだ(見出し「開く」が動詞を引き受ける)
-  await expect(items.first()).toContainText('別ウィンドウ');
+  await expect(items.first()).toContainText('別のウィンドウで開く');
   // 🔑 lid はボタン自身が運ぶ(「押した行のノート」といういつもの規則 ── 選ばずに済む)
   await expect(items.first(), 'ボタンが押した行の lid を運んでいない').toHaveAttribute(
     'data-pkc-entry',

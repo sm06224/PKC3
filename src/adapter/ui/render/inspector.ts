@@ -75,7 +75,6 @@ import { bodyLinkTargets } from '@features/entry-ref/body-links';
 import {
   ADOPT_IMAGES_LABEL,
   adoptImagesLabel,
-  ENTRY_ACTION_GROUP_LABELS,
   ENTRY_ACTION_GROUPS,
   ENTRY_ACTION_LABELS,
   ENTRY_ACTION_WIDTH_ATTR,
@@ -1224,22 +1223,6 @@ export class InspectorRenderer {
       const g = document.createElement('div');
       g.setAttribute('data-pkc-field', 'inspector-action-group');
       g.setAttribute('data-pkc-group', name);
-      /**
-       * 🔴 **塊の見出しを、同じ行の先頭に小さく置く**(#1029 段 C。設計 doc §4.0 の推薦)。
-       *
-       * 🔑 **名前を短くできる条件はこの見出しである** ── 「参照」「HTML」「名前」は
-       *   それ自体に動詞を持たないので、見出し(「写す」「書き出す」「このノート」)が
-       *   動詞を引き受けて初めて読める。⚠ 見出しを置かずに名前だけ短くすると、
-       *   **user は押すまで何が起きるか分からない**(設計 doc §4.0 の表「見出しを
-       *   置かない → 名前を短くできない ✗」)。
-       * ⚠ **押せない字にする** ── 押し所を増やさない(押せそうで押せないのがいちばん悪い)。
-       *   だから `<span>` で置き、`aria-hidden` にはしない(読み上げでは塊の頭として読める)。
-       * ⚠ 色は使わず薄い字にする(地は無彩色、色は情報にだけ ── user 指示 2026-08-03)。
-       */
-      const heading = document.createElement('span');
-      heading.setAttribute('data-pkc-field', 'inspector-action-group-label');
-      heading.textContent = ENTRY_ACTION_GROUP_LABELS[name] ?? name;
-      g.append(heading);
       actions.append(g);
       bucket = g;
       bucketGroup = name;
