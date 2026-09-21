@@ -16,10 +16,37 @@ import { SettingsRenderer } from '@adapter/ui/render/settings';
 import { initialState } from '@adapter/state/app-state';
 import { PORTABLE_KEYS, SKIPPED_KEYS } from '@features/settings/settings-file';
 import { COLLECTION_PANE_COMMANDS } from '@adapter/ui/render/commands';
+import { NOTICES, NOTICE_SHOW_MAX, noticeDate, type Notice } from '@features/notice/notice-log';
 
 function render(): HTMLElement {
   const host = document.createElement('div');
   new SettingsRenderer(host).render(initialState);
+  return host;
+}
+
+/**
+ * ⚠ **「これまでのお知らせ」の一覧を注入して描く**(#1017 段③-2)。
+ * `noticeList` は `SettingsRenderer` の**末尾**の位置引数(この file の
+ * `constructor` docstring 群が戒めているとおり、途中に入れると他の test を壊す)。
+ */
+function renderWithNotices(list: readonly Notice[]): HTMLElement {
+  const host = document.createElement('div');
+  new SettingsRenderer(
+    host,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    list,
+  ).render(initialState);
   return host;
 }
 
@@ -127,5 +154,120 @@ describe('「システム」の 6 節(#1017 段③-1)', () => {
       (c) => host.querySelector(`[data-pkc-action="${c.action}"]`) !== null,
     ).map((c) => c.action);
     expect(leaked, 'コレクション面の操作が「システム」にも描かれている').toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **「これまでのお知らせ」の一覧(#1017 段③-2)。**
+ *
+ * 裁定 2026-09-20 6 巡目「お知らせの入口はシステムへ移す。ヘルプにもリンク
+ * 1 行を残す」── ここが見るのは**移した先**である(移す前に `help-pane.test.ts`
+ * が守っていた 3 本 + 1 本をそのまま持ってきた。属性名は変えていない)。
+ */
+describe('「これまでのお知らせ」の一覧(#1017 段③-2)', () => {
+  it('🔴 一覧が「お知らせ」の h3 の中に在る(ヘルプから移した)', () => {
+    const host = render();
+    const section = host.querySelector('[data-pkc-region="settings-notices-section"]');
+    expect(section, '「お知らせ」の区画が無い').not.toBeNull();
+    const list = section!.querySelector('[data-pkc-region="help-notices"]');
+    expect(list, '一覧が「お知らせ」の中に無い').not.toBeNull();
+    const h4s = [...section!.querySelectorAll('h4')].map((h) => h.textContent);
+    expect(h4s, 'h4「これまでのお知らせ」がトグルの下に無い').toEqual([
+      'お知らせ',
+      'これまでのお知らせ',
+    ]);
+  });
+
+  it('🔴 お知らせが新しい順に、上限まで出る', () => {
+    const host = renderWithNotices(NOTICES);
+    const ids = [...host.querySelectorAll('[data-pkc-help-notice]')].map(
+      (e) => e.getAttribute('data-pkc-help-notice') ?? '',
+    );
+    expect(ids.length, 'お知らせが 1 件も出ていない(fixture の空振り)').toBeGreaterThan(0);
+    expect(ids.length).toBeLessThanOrEqual(NOTICE_SHOW_MAX);
+    /**
+     * 🔴 **「新しい順」は日付の順である**(2026-08-29 の動線レビュー 欠陥 5。
+     *   `help-pane.test.ts` から移した ── 中身は変えていない)。
+     */
+    const dates = ids.map(noticeDate);
+    expect([...dates].sort().reverse(), '日付が新しい順に並んでいない').toEqual(dates);
+    const order = new Map(NOTICES.map((n, i) => [n.id, i]));
+    const ranks = ids.map((id) => order.get(id) ?? -1);
+    expect(ranks, '登記表に無いお知らせが出ている(空振り)').not.toContain(-1);
+    expect([...ranks].sort((a, b) => a - b), '同じ日が登記表の順で出ていない').toEqual(ranks);
+    // 日付は id から引く(field を二重に持たない)
+    const first = host.querySelector('[data-pkc-field="notice-title"]')?.textContent ?? '';
+    expect(first, '日付が出ていない').toMatch(/^\d{4}-\d{2}-\d{2} /);
+  });
+
+  /**
+   * 🔴 **切るのは `recentNotices` だけ**(P11 の決まり)。
+   * ⚠ 1 巡目は登記表が **1 件**だったので、上限も並びも「測っていない次元」だった
+   *   ── 丸ごと出す変異が素通りした(変異試験で判明)。登記表を注入して試す。
+   */
+  it('🔴 登記表が上限より多くても、出るのは上限まで(新しい順)', () => {
+    const many = Array.from({ length: NOTICE_SHOW_MAX + 4 }, (_, i) => ({
+      id: `2026-02-${String(i + 1).padStart(2, '0')}-x`,
+      title: `t${i}`,
+      items: ['本文'],
+    }));
+    expect(many.length, 'fixture が上限を超えていない(空振り)').toBeGreaterThan(NOTICE_SHOW_MAX);
+    const host = renderWithNotices(many);
+    const ids = [...host.querySelectorAll('[data-pkc-help-notice]')].map(
+      (e) => e.getAttribute('data-pkc-help-notice') ?? '',
+    );
+    expect(ids, '上限まで切っていない').toHaveLength(NOTICE_SHOW_MAX);
+    expect(ids[0], '新しい順になっていない').toBe(`2026-02-${NOTICE_SHOW_MAX + 4}-x`);
+  });
+
+  /**
+   * 🔴 **素のテキストで出す**(帯とは**別の描画経路**である)。
+   * ⚠ CLAUDE.md「同じ値を複数の描画経路へ渡すものは、経路ごとに pin する」──
+   *   帯だけ見ていたので、こちら側を `innerHTML` にする変異が素通りした。
+   */
+  it('🔴 お知らせが素のテキストで出る(HTML として描かない)', () => {
+    const host = renderWithNotices([
+      { id: '2026-08-08-x', title: 't', items: ['<b>太字</b>と <img src="x"> を書いた'] },
+    ]);
+    const li = host.querySelector('[data-pkc-help-notice] li')!;
+    expect(li.children.length, 'HTML として描いている').toBe(0);
+    expect(li.textContent, '原文が消えている').toContain('<b>太字</b>');
+  });
+
+  /**
+   * 🔴 **これまでのお知らせは題名だけ並ぶ**(#719 案 A)。
+   * ⚠ 直す前は 11 件の中身が全部開いたまま**面の先頭**に居た。
+   */
+  it('🔴 お知らせは畳まれて出て、押すと中身が開く', () => {
+    const host = renderWithNotices(NOTICES);
+    const items = [...host.querySelectorAll<HTMLDetailsElement>('[data-pkc-help-notice]')];
+    expect(items.length, 'お知らせが 1 件も出ていない(空振り)').toBeGreaterThan(0);
+    for (const item of items) {
+      expect(item.tagName, 'お知らせが畳める形になっていない').toBe('DETAILS');
+      expect(item.open, '最初から開いている(題名だけ並べる裁定に反する)').toBe(false);
+      expect(
+        item.querySelector('[data-pkc-field="notice-title"]')?.tagName,
+        '題名が summary になっていない(押しても開かない)',
+      ).toBe('SUMMARY');
+      // ⚠ 中身は**在る**(畳んだのであって、落としたのではない)
+      expect(item.querySelectorAll('li').length, 'お知らせの中身が落ちている').toBeGreaterThan(0);
+    }
+  });
+
+  /**
+   * 🔴 **「お知らせを出すか」の断りが、この下の一覧を指す(ヘルプではない)**
+   *   (#1017 段③-2。`tests/adapter/announce.test.ts` の同種の突合と対)。
+   */
+  it('🔴 「出さなくても読める」の断りが、この下の一覧を指す(ヘルプではない)', () => {
+    const host = render();
+    const section = host.querySelector('[data-pkc-region="settings-notices-section"]')!;
+    const notes = [...section.querySelectorAll('[data-pkc-field="settings-note"]')].map(
+      (n) => n.textContent ?? '',
+    );
+    expect(
+      notes.some((t) => t.includes('これまでのお知らせ')),
+      '一覧の在り処が書かれていない',
+    ).toBe(true);
+    expect(notes.some((t) => t.includes('ヘルプ')), 'まだヘルプを指している').toBe(false);
   });
 });

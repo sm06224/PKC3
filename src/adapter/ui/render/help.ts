@@ -38,7 +38,7 @@
  */
 import { APP_ID, APP_VERSION, BUILD_KIND, BUILT_AT } from '@runtime/release-meta';
 import { formatBuildStamp } from '@features/datetime/datetime-format';
-import { NOTICES, noticeDate, recentNotices, type Notice } from '@features/notice/notice-log';
+import { NOTICES, type Notice } from '@features/notice/notice-log';
 import {
   OSS_SCOPE_NOTE,
   OSS_SOURCE_URL,
@@ -180,9 +180,11 @@ export class HelpRenderer {
     /** ⚠ アプリ全体で 1 個の `MarkdownClient` を渡す(面ごとに作らない)。 */
     private readonly markdown: HelpMarkdownPort | null = null,
     /**
-     * 登記表。⚠ **注入できるようにする**(2026-08-08、変異試験の指摘)──
-     * `NOTICES` が 1 件しか無いので、**上限も並びも「測っていない次元」**だった
-     * (`recentNotices` を通さず丸ごと出す変異が素通りした)。
+     * 🔴 **#1017 段③-2 でこの画面からは外した**(一覧の入口を「システム」へ移した
+     *   ── `settings.ts` の `noticeList` がいまの持ち主)。この引数はもう
+     *   **この class の中では読まない**。
+     *   ⚠ それでも**位置は動かさない** ── settings.ts の `monitor` と同じ理由で、
+     *   ここより後ろの全引数へ数十の test が位置引数で届いている(触るなら別 PR で)。
      */
     private readonly notices: readonly Notice[] = NOTICES,
     /**
@@ -588,46 +590,28 @@ export class HelpRenderer {
       this.syncKeys();
     });
 
-    // ── ③ これまでのお知らせ(畳む)──────────────────────
+    // ── ③ これまでのお知らせ ────────────────────────────
     /**
-     * 🔴 **題名だけ並べ、押すと開く**(#719 案 A)。
-     * ⚠ 直す前は 11 件の中身が**全部開いたまま**先頭に居たので、
-     *   マニュアルまで 5455px スクロールする形だった。
-     * ⚠ **`<details>` を使う** ── この repo は「主要な導線を畳まない」を規律に
-     *   持ち、`shell` に `<details>` が 0 件であることを test で pin しているが、
-     *   ここは **shell ではなくヘルプの面**で、畳むのは**読み物**である
-     *   (押す導線ではない)。
+     * 🔴 **入口は「システム」へ移した**(#1017 段③-2。裁定 2026-09-20 6 巡目
+     *   「お知らせの入口はシステムへ移す。ヘルプにもリンク 1 行を残す」)。
+     *
+     * ⚠ 一覧の実体はここにはもう無い ── `settings.ts` の
+     *   `data-pkc-region="settings-notices-section"`(h3「お知らせ」)に移した。
+     *   属性名(`data-pkc-region="help-notices"` / `data-pkc-help-notice` /
+     *   `notice-title`)は**そのまま**移している(名前を変えない)。
+     * 🔑 困っている人がここから迷わず行けるよう、1 行のリンクだけ残す
+     *   ── 押し口を受けるのは `binder.ts` の `open-system-notices` 1 か所
+     *   (この file で直に listener を張らない。#645 の作法と同じ)。
      */
-    const nh = document.createElement('h3');
-    nh.textContent = 'これまでのお知らせ';
-    body.append(nh);
-
-    const list = document.createElement('div');
-    list.setAttribute('data-pkc-region', 'help-notices');
-    // ⚠ **件数を切るのは `recentNotices` だけ**(面ごとに slice を書かない)
-    for (const n of recentNotices(this.notices)) {
-      const item = document.createElement('details');
-      /**
-       * ⚠ **`data-pkc-notice` は使わない** ── 取込の注意(`notices.ts`)が
-       * 既にその名前で、同じ document に居る。名前がかぶると、片方を数える
-       * 検査がもう片方まで拾う(CLAUDE.md「id らしく見える名前は id として扱われる」)。
-       */
-      item.setAttribute('data-pkc-help-notice', n.id);
-      const t = document.createElement('summary');
-      t.setAttribute('data-pkc-field', 'notice-title');
-      // ⚠ 日付は id から引く(field を二重に持たない)
-      t.textContent = `${noticeDate(n.id)} ${n.title}`;
-      const ul = document.createElement('ul');
-      for (const line of n.items) {
-        const li = document.createElement('li');
-        // ⚠ **素のテキスト**として出す(記法は書かない決まり。test が守る)
-        li.textContent = line;
-        ul.append(li);
-      }
-      item.append(t, ul);
-      list.append(item);
-    }
-    body.append(list);
+    const nlink = document.createElement('p');
+    nlink.setAttribute('data-pkc-field', 'help-notices-link');
+    nlink.append('これまでのお知らせは、システム → お知らせ にあります。 ');
+    const openNotices = document.createElement('button');
+    openNotices.type = 'button';
+    openNotices.setAttribute('data-pkc-action', 'open-system-notices');
+    openNotices.textContent = 'お知らせを開く';
+    nlink.append(openNotices);
+    body.append(nlink);
 
     this.manualReady = this.drawManual(currentContainerId);
     void this.manualReady;

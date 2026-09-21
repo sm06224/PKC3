@@ -7979,6 +7979,21 @@ const ACTIONS: Record<string, ActionHandler> = {
     dest?.scrollIntoView({ block: 'start' });
   },
   /**
+   * 🔴 **ヘルプの「お知らせを開く」→ システムの「お知らせ」へ**(#1017 段③-2。
+   *   裁定 2026-09-20 6 巡目「お知らせの入口はシステムへ移す。ヘルプにも
+   *   リンク 1 行を残す」)。
+   *
+   * ⚠ `dispatch` は同期(`Dispatcher.dispatch`)なので、`openView` が返った時点で
+   *   `CenterRouter.render` が既に「システム」を描いている ── `system-jump` と
+   *   違い、押した時点ではまだ settings pane に居ないので `root` から探す。
+   */
+  'open-system-notices': (dispatcher, _target, _services, root) => {
+    openView(dispatcher, 'settings');
+    root
+      .querySelector<HTMLElement>('[data-pkc-region="settings-notices-section"]')
+      ?.scrollIntoView({ block: 'start' });
+  },
+  /**
    * 🔴 **メッセージ(system 領域のノート)を開く**(設計 doc §7、段②a)。
    *
    * ⚠ `select-entry` を使い回さない ── あちらは `entryMetas.has(lid)` を通るので

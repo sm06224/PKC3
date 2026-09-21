@@ -50,7 +50,13 @@ import { appAlarmEnabled, AlarmEnabledStore } from './alarm-enabled';
 import { appVoiceBoost, VoiceBoostStore } from './voice-boost';
 import { appPhoneLinks, PhoneLinksStore } from './phone-links';
 import { EXTERNAL_IMAGE_MODES } from '@features/markdown/external-images';
-import { NOTICE_READABLE_TEXT } from '@features/notice/notice-log';
+import {
+  NOTICE_READABLE_TEXT,
+  NOTICES,
+  noticeDate,
+  recentNotices,
+  type Notice,
+} from '@features/notice/notice-log';
 import { appExternalImages, ExternalImagePolicy } from './external-images';
 import { PASTE_SOURCES } from '@features/markdown/paste-source';
 import { appPasteSource, PasteSourceStore } from './paste-source';
@@ -131,6 +137,13 @@ export class SettingsRenderer {
      *   渡している test が**静かに別の物を受け取る**。
      */
     private readonly voiceBoost: VoiceBoostStore = appVoiceBoost,
+    /**
+     * 🔴 **これまでのお知らせ**(#1017 段③-2)。⚠ **注入できるようにする**
+     *   (ヘルプの旧 `HelpRenderer.notices` と同じ理由、2026-08-08 の変異試験の
+     *   指摘)── `NOTICES` を丸ごと出す変異・上限を守らない変異が誰にも
+     *   殺されなくなる。⚠ **末尾に足す**(すぐ上の戒めのとおり)。
+     */
+    private readonly noticeList: readonly Notice[] = NOTICES,
   ) {}
 
   private sameOriginList: HTMLElement | null = null;
@@ -713,9 +726,11 @@ export class SettingsRenderer {
     nd.append(nlabel);
     const nnote = document.createElement('p');
     nnote.setAttribute('data-pkc-field', 'settings-note');
-    // ⚠ 「いつでも」と書かない ── ヘルプに並ぶのは上限までである(2026-09-08)
+    // ⚠ 「いつでも」と書かない ── 並ぶのは上限までである(2026-09-08)
     // ⚠ **数は書かない、組み立てる**(#751 ── 同じ字が 5 か所に散っていた)
-    nnote.textContent = `出さなくても、過去のお知らせはヘルプから${NOTICE_READABLE_TEXT}が読めます。`;
+    // 🔴 **「ヘルプから」ではなく自己参照**(#1017 段③-2)── 一覧はこのすぐ下
+    //   (`buildNoticeSection` の「これまでのお知らせ」)に移した。
+    nnote.textContent = `出さなくても、過去のお知らせはこの下の「これまでのお知らせ」で${NOTICE_READABLE_TEXT}が読めます。`;
     nd.append(nnote);
     const noticeDl = document.createElement('dl');
     noticeDl.append(nt, nd);
@@ -1088,7 +1103,51 @@ export class SettingsRenderer {
     const h = document.createElement('h4');
     h.textContent = 'お知らせ';
     wrap.append(h, dl);
+    wrap.append(this.buildNoticeList());
     return wrap;
+  }
+
+  /**
+   * 🔴 **これまでのお知らせ**(#1017 段③-2。裁定 2026-09-20 6 巡目「お知らせの
+   *   入口はシステムへ移す。ヘルプにもリンク 1 行を残す」)。
+   *
+   * ⚠ **ヘルプから移した** ── 属性名は変えていない(`data-pkc-region="help-notices"` /
+   *   `data-pkc-help-notice` / `notice-title`)。名前を変えると、この画面と
+   *   ヘルプの両方を数える検査が片方だけ拾う形になる(CLAUDE.md「id らしく
+   *   見える名前は id として扱われる」)。
+   * ⚠ **件数を切るのは `recentNotices` だけ**(面ごとに slice を書かない)。
+   * ⚠ **`<details>` を使う** ── `tests/docs-parity.test.ts:410-432` の
+   *   「主要な導線を畳まない」は `buildShell()` の shell 全体と
+   *   `buildSettingsCommands()` だけを見ており、この画面(`SettingsRenderer`)全体は
+   *   その走査に入らない(同 file:500-534 の `<details>=0` も collection-pane
+   *   だけを見ている)。ここは shell の主要導線ではなく**読み物**である
+   *   ── ヘルプに在ったときと同じ前例(#719 案 A)。
+   */
+  private buildNoticeList(): DocumentFragment {
+    const frag = document.createDocumentFragment();
+    const h2 = document.createElement('h4');
+    h2.textContent = 'これまでのお知らせ';
+    const list = document.createElement('div');
+    list.setAttribute('data-pkc-region', 'help-notices');
+    for (const n of recentNotices(this.noticeList)) {
+      const item = document.createElement('details');
+      item.setAttribute('data-pkc-help-notice', n.id);
+      const t = document.createElement('summary');
+      t.setAttribute('data-pkc-field', 'notice-title');
+      // ⚠ 日付は id から引く(field を二重に持たない)
+      t.textContent = `${noticeDate(n.id)} ${n.title}`;
+      const ul = document.createElement('ul');
+      for (const line of n.items) {
+        const li = document.createElement('li');
+        // ⚠ **素のテキスト**として出す(記法は書かない決まり。test が守る)
+        li.textContent = line;
+        ul.append(li);
+      }
+      item.append(t, ul);
+      list.append(item);
+    }
+    frag.append(h2, list);
+    return frag;
   }
 
   private buildSameOrigin(): HTMLElement {

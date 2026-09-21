@@ -63,10 +63,14 @@ test('🔴 ヘルプの面が開き、マニュアルが描かれる', async ({ 
   });
   expect(await inFirstScreen('[data-pkc-field="help-version"]'), '版が最初の画面に無い').toBe(true);
   expect(await inFirstScreen('[data-pkc-field="help-toc-row"]'), '目次が最初の画面に無い').toBe(true);
-  // ⚠ **空振り防止** ── お知らせが**下にある**こと(上に居たら、上の 2 つは自明に成り立つ)
+  /**
+   * ⚠ **空振り防止** ── リンクがまだ**下にある**こと(#1017 段③-2 で一覧を
+   *   システムへ移した後も、ヘルプの直下(ショートカットキーの節の下)という
+   *   置かれ方そのものは変えていない。上に居たら、上の 2 つは自明に成り立つ)。
+   */
   expect(
-    await inFirstScreen('[data-pkc-help-notice]'),
-    'お知らせがまだ先頭に居る(並べ替えが効いていない)',
+    await inFirstScreen('[data-pkc-field="help-notices-link"]'),
+    'お知らせへのリンクがまだ先頭に居る(並べ替えが効いていない)',
   ).toBe(false);
   /**
    * 🔑 **目次の行を押すと、その節へ送られる**。
@@ -172,9 +176,6 @@ test('🔴 ヘルプの面が開き、マニュアルが描かれる', async ({ 
     '目次の行が少なすぎる(この主張が意味を持たない)',
   ).toBeGreaterThan(30);
 
-  // ② 過去のお知らせが出る
-  await expect(page.locator('[data-pkc-help-notice]').first()).toBeVisible();
-
   /**
    * ③ 🔴 **マニュアルが描かれている**(worker 経路)。
    * ⚠ 器が在るだけでは足りない ── 「読み込んでいます…」のまま止まる形が
@@ -185,6 +186,17 @@ test('🔴 ヘルプの面が開き、マニュアルが描かれる', async ({ 
   await expect(manual.locator('h2', { hasText: '画面を組み替える' })).toBeVisible({
     timeout: 10_000,
   });
+
+  /**
+   * ② 🔴 **これまでのお知らせは「システム」に在り、リンクを押すとそこまで送られる**
+   *   (#1017 段③-2)。⚠ **新しい起動は足さない**(CLAUDE.md smoke-budget)──
+   *   この面から移り、以降は何も見ないので**この起動の末尾**でまとめて見る。
+   */
+  await clickReal(page, '[data-pkc-action="open-system-notices"]');
+  const noticesSection = page.locator('[data-pkc-region="settings-notices-section"]');
+  await expect(noticesSection).toBeVisible();
+  await expect(noticesSection).toBeInViewport();
+  await expect(page.locator('[data-pkc-help-notice]').first()).toBeVisible();
 
   expect(errors).toEqual([]);
 });
@@ -254,7 +266,8 @@ test('🔴 お知らせの帯が出て、閉じると次から出ない', async 
   const band = page.locator('[data-pkc-region="announce"]');
   await expect(band, '起動時にお知らせが出ていない').toBeVisible({ timeout: 10_000 });
   // ⚠ 閉じたら二度と読めない、と思わせない
-  await expect(band.locator('[data-pkc-field="announce-where"]')).toContainText('ヘルプ');
+  // 🔴 #1017 段③-2:一覧の入口はシステムへ移した(ヘルプではない)
+  await expect(band.locator('[data-pkc-field="announce-where"]')).toContainText('システム');
 
   /**
    * ⚠ **帯が出たまま作業できる**(かぶせる窓にしていない)。

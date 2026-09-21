@@ -176,7 +176,13 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'export-settings', 'export-vcards', 'force-release', 'format-text', 'hide-history',
   'hide-revision-preview', 'hide-trash', 'insert-diagram', 'insert-icon', 'install-office-pack',
   'launch-asset', 'launch-asset-extension', 'launch-asset-raw', 'move-order-down',
-  'move-order-up', 'mute-announce', 'next-announce', 'open-manual-window', 'open-today',
+  'move-order-up', 'mute-announce', 'next-announce', 'open-manual-window',
+  /**
+   * ⚠ **2026-09-21(#1017 段③-2)で 1 件増やした** ── ヘルプの「お知らせを開く」。
+   *   🔑 押した所から**何も要らない**(`open-manual-window` と同じ仕分け ──
+   *   行き先は固定で、鍵も持たない)。
+   */
+  'open-system-notices', 'open-today',
   'paste-many-copied', 'phone-menu', 'phone-page', 'pick-app-icon', 'pick-create-kind',
   /**
    * ⚠ **2026-09-14(#530 案 A)で 5 件増やした** ── 板の形(四角 / 角丸 / 丸 /
@@ -450,12 +456,15 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-09-21(#1017 段③-1): 「作り直す・初期化する を出す」の開閉
       //   (`toggle-container-repair`)で受け手 +1 ── 登記は増えない(押し所は
       //   設定の中の 1 つだけ。`toggle-plan-apply` と同じ仕分け)。
-      total: 323,
-      receivers: 271,
+      // ⚠ 2026-09-21(#1017 段③-2): これまでのお知らせの入口(`open-system-notices`)で
+      //   受け手 +1 ── 登記は増えない(押し口はヘルプの中にしか無く、鍵も持たない。
+      //   `system-jump` と同じ仕分け)。
+      total: 324,
+      receivers: 272,
       registered: 88,
       both: 36,
       outsideActionsTable: 52,
-      unregistered: 235,
+      unregistered: 236,
     });
   });
 

@@ -112,8 +112,8 @@ export function createAnnounce(
    *   積むと必ず 30vh の上限に当たる ── **大きいのに読めない**という、
    *   場所と目的を同時に損なう形だった。
    * 🔑 だから**新しい 1 件だけ**を出し、「次へ」で送る。
-   *   残りは見出しの件数で分かり、**まとめて読む道はヘルプに在る**
-   *   (帯の案内文がその場に書いてある)。
+   *   残りは見出しの件数で分かり、**まとめて読む道はシステムに在る**
+   *   (#1017 段③-2 でヘルプから移した。帯の案内文がその場に書いてある)。
    */
   const paint = (): void => {
     if (!store.enabled()) return clear();
@@ -172,7 +172,7 @@ export function createAnnounce(
     close.title =
       unread.length === 1
         ? '読んだことにして閉じます'
-        : `残り ${unread.length} 件を読んだことにして閉じます(ヘルプから${NOTICE_READABLE_TEXT}が読めます)`;
+        : `残り ${unread.length} 件を読んだことにして閉じます(システムから${NOTICE_READABLE_TEXT}が読めます)`;
     head.append(close);
     region.append(head);
 
@@ -220,20 +220,23 @@ export function createAnnounce(
      */
     where.textContent =
       /*
-       * ⚠ **「いつでも」と書かない**(2026-09-08、着地前レビュー)── ヘルプに並ぶのは
+       * ⚠ **「いつでも」と書かない**(2026-09-08、着地前レビュー)── 並ぶのは
        *   `NOTICE_SHOW_MAX` までで、それより古いものはアプリから読めない。
        *   🔑 数を書けば、user は「無くなった」と「まだ在る」を自分で判断できる。
        * ⚠ **数は書かない、組み立てる**(2026-09-08、#751)── 同じ字が 5 か所に
        *   散っていて、上限を動かした日にどれかが嘘になる(CLAUDE.md §7)。
+       * 🔴 **「ヘルプ」→「システム」**(#1017 段③-2)── 一覧の入口をシステムへ
+       *   移した(ヘルプには 1 行のリンクだけ残る)。「今後は出さない」の戻し道も
+       *   #1017 段③-1 で「表示」から「お知らせ」の h3 へ移っている。
        */
-      `過去のお知らせは「ヘルプ」から${NOTICE_READABLE_TEXT}が読めます。「今後は出さない」はシステムの「表示」から戻せます。`;
+      `過去のお知らせは「システム」から${NOTICE_READABLE_TEXT}が読めます。「今後は出さない」はシステムの「お知らせ」から戻せます。`;
 
     const mute = document.createElement('button');
     mute.type = 'button';
     mute.setAttribute('data-pkc-action', 'mute-announce');
     mute.textContent = '今後は出さない';
     /** ⚠ **戻し道をその場に書く**(押した後に探させない)。 */
-    mute.title = 'システムの「表示」からいつでも戻せます';
+    mute.title = 'システムの「お知らせ」からいつでも戻せます';
 
     foot.append(where, mute);
     region.append(foot);
