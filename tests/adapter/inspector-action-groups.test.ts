@@ -101,12 +101,32 @@ describe('右の列の操作は塊に分かれている(#1029 段 B)', () => {
     expect(group[0], '塊の中の間が 1px でない').toMatch(/gap:\s*1px;/);
   });
 
-  it('🔴 役割の切れ目に線を引かない(線と間の混在をやめた ── #1029 段 B)', () => {
+  /**
+   * 🔴 **間は「器」に持たせる。ボタン 1 個ずつに持たせない**(2026-09-21、実ブラウザが捕まえた)。
+   *
+   * ⚠ 1 稿目は 4 つのボタン**それぞれ**に `margin-top` を付けた ── `margin-top` は
+   *   **行の境目ではなく、その要素 1 個**を押し下げるので、境目が行の途中に来る幅
+   *   (実測 1440px 以上)で**「集計」だけが 8px 下へぶら下がった**。
+   *   左の列の高さを数える既存の検査(#475)が、その浮きを **3 段目**として数えて落ちた。
+   * 🔑 だから守るのは「間が在る」ではなく「**行いっぱいの器に間が在る**」である ──
+   *   `flex: 1 0 100%` が無いと、同じ壊れ方が戻る。
+   */
+  it('🔴 左の列の切れ目は、行いっぱいの器が持つ(ボタン個体に間を付けない)', () => {
     const css = withoutMedia(stripComments(readFileSync('src/styles/app.css', 'utf-8')));
-    const settings = blocksFor(css, "[data-pkc-field='app-settings']");
-    expect(settings.length, '設定ボタンの規則が読めていない(空振り)').toBeGreaterThan(0);
-    const joined = settings.join('\n');
-    expect(joined, '切れ目を間で出していない').toContain('margin-top: var(--s3)');
-    expect(joined, '線が戻っている ── 切れ目は間で出す(地は無彩色)').not.toContain('border-top');
+    const group = blocksFor(
+      css,
+      "[data-pkc-region='collection-bar'] [data-pkc-field='collection-app-group']",
+    );
+    expect(group.length, 'アプリ全体の操作の器が読めていない(空振り)').toBe(1);
+    expect(group[0], '切れ目を間で出していない').toContain('margin-top: var(--s3)');
+    expect(group[0], '器が行いっぱいでない ── 行の途中から始まると 1 個だけ浮く').toContain(
+      'flex: 1 0 100%',
+    );
+
+    const btn = blocksFor(css, "[data-pkc-field='app-settings']").join('\n');
+    expect(btn, '線が戻っている ── 切れ目は間で出す(地は無彩色)').not.toContain('border-top');
+    expect(btn, 'ボタン個体に間が付いている ── 行の途中で 1 個だけ浮く').not.toContain(
+      'margin-top',
+    );
   });
 });

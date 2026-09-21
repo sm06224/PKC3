@@ -810,14 +810,27 @@ select:focus-visible {
  * ⚠ 寸法は**隣のボタンと同じ**にする ── 帯にいた頃は薄い帯に合わせて 20px /
  * 11px だったので、そのまま持ってくると 1 つだけ小さいボタンになる
  * (「図案つきボタンの高さが揃っている」が実際に落ちた)。
+/**
  * 🔴 **役割の切れ目は「線」ではなく「間」で出す**(#1029 段 B、2026-09-21)。
  * ⚠ 直す前は `border-top` の 1 本線だった ── 右の列の操作は間で切っているので、
  *   **同じアプリの中に 2 つの作法が同居していた**。どちらかに倒すなら
  *   **間**である(user 指示 2026-08-03「地は無彩色、色は情報にだけ」── 線は情報ではない)。
  * ⚠ ボタンは枠を持たないので、**目に入るのは字の間隔**である ── 下地が同じ色でも
- *   間は読める(線を引かなくても切れ目は伝わる)。 */
-[data-pkc-field='app-settings'] {
+ *   間は読める(線を引かなくても切れ目は伝わる)。
+ *
+ * 🔴 **間は「器」に持たせる。各ボタンに持たせない**(同日、実ブラウザが捕まえた)──
+ *   `margin-top` を 4 つのボタン**それぞれ**に付けたら、境目が行の途中に来る幅
+ *   (1440px 以上)で**1 個だけ 8px 下へぶら下がった**。
+ * 🔑 器は **`flex: 1 0 100%`** で行いっぱいにする ── 必ず行頭から始まるので、
+ *   どの幅でも「1 個だけずれる」が起きない。⚠ 中は自分で折り返す。
+ */
+[data-pkc-region='collection-bar'] [data-pkc-field='collection-app-group'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px;
+  flex: 1 0 100%;
   margin-top: var(--s3);
+  background: var(--surface);
 }
 [data-pkc-field='app-settings'][data-pkc-active] {
   background: var(--accent-dim);
@@ -1407,6 +1420,7 @@ select:focus-visible {
 /* 🔴 **塊の中のボタンも同じ輪に乗せる**(#1029 段 B)── 塊は折り返す器なので、
  * ここに書かないと『輪の規則に乗っていない帯』として検査が落ちる。
  * ⚠ 実害のほうが本体である:乗せ忘れると**塊の中だけ区切りが消えて 1 枚の板に見える**。 */
+[data-pkc-region='collection-bar'] [data-pkc-field='collection-app-group'] button:not(:focus-visible),
 [data-pkc-region='inspector'] [data-pkc-field='inspector-action-group'] button:not(:focus-visible) {
   outline: 1px solid var(--border);
   outline-offset: 0;
