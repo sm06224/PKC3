@@ -24,6 +24,7 @@ import {
 import { PKC_SYMBOLS } from '../../src/features/icon/symbols';
 import { TILE_ICON_CHOICES } from '../../src/features/icon/tile-icons';
 import { blocksFor, stripComments, withoutMedia } from '../helpers/css-blocks';
+import { codeOnly } from '../helpers/code-only';
 import { SidebarRenderer } from '../../src/adapter/ui/render/sidebar';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { initialState, reduce } from '../../src/adapter/state/app-state';
@@ -303,6 +304,63 @@ describe('図案の登記に死んだ行を残さない', () => {
     }
     const unpointed = names.filter((n) => !pointed.has(n) && !literals.has(n));
     expect(unpointed, '誰も指さない図案が増えた ── 呼ぶ道を作るか、落とすか、畳むと書く').toEqual(FOLDED);
+  });
+});
+
+describe('🔴 `iconButton` の第 3 引数の鍵は、登記に在る', () => {
+  /**
+   * ⚠ **2026-09-21 に実害が出た**(#1029 段 A)── `shell.ts` が
+   *   `iconButton('open-today', '今日', 'calendar')` と書いていた。
+   *   第 3 引数は **`ACTION_ICONS` の鍵**を書く所なのに、渡っていたのは
+   *   **図案の名前**(`BROWSE_ICONS.schedule` の値)である。
+   *   `ACTION_ICONS['calendar']` は無いので `undefined` になり、
+   *   `iconButton` は**器ごと出さない** ── つまり「今日」は無地のまま、
+   *   飾ったつもりの 1 行が**1 文字も効いていなかった**。
+   * 🔴 落ちる物が何も無かった:型は `string` なので tsc は黙り、
+   *   画面には字が出ているので smoke も落ちない。**静かに消える**型である。
+   *
+   * 🔑 だから**字面から全数で見る**。⚠ 走査の前に注釈を落とす ── 落とさないと
+   *   **上の解説に書いた `'calendar'` そのもの**に満たされて必ず落ちる
+   *   (CLAUDE.md §1「自分の解説コメントに満たされる」の 3 度目を踏まない)。
+   */
+  it('素の文字列で渡している鍵は、すべて ACTION_ICONS に在る', () => {
+    const calls: [file: string, key: string][] = [];
+    const dynamic: string[] = [];
+    for (const f of tsFiles('src')) {
+      const code = codeOnly(readFileSync(f, 'utf-8'));
+      for (const m of code.matchAll(/iconButton\(([^;]*?)\)/g)) {
+        const args = m[1] as string;
+        // 第 3 引数だけを見る(第 1 = action、第 2 = label)
+        const three = args.match(/^\s*'[^']*'\s*,[^,]*,\s*(?:'([^']*)'|`([^`]*)`)\s*$/);
+        if (three === null) continue;
+        if (three[1] !== undefined) calls.push([f, three[1]]);
+        else dynamic.push(three[2] as string);
+      }
+    }
+    // ⚠ 空振り防止 ── 1 件も拾えていなければ、走査の形が変わっている
+    expect(calls.length, '3 引数の呼びを 1 件も拾えていない(走査が空振り)').toBeGreaterThan(3);
+
+    /**
+     * ⚠ **引く表は頭で決まる**(`iconButton` の中と同じ分け方にする)──
+     *   `archetype:<種別>` は種別の表、それ以外は `ACTION_ICONS`。
+     *   ⚠ ここを揃えないと、正しい呼び(`'archetype:text'`)を落としてしまう
+     *   (1 稿目で実際に落ちた ── 判定を 2 か所に持つと、必ず食い違う。§7)。
+     */
+    const known = (key: string): boolean =>
+      key.startsWith('archetype:')
+        ? ARCHETYPE_ICONS[key.slice('archetype:'.length)] !== undefined
+        : ACTION_ICONS[key] !== undefined;
+    const missing = calls.filter(([, key]) => !known(key));
+    expect(
+      missing,
+      '図案の鍵が登記に無い ── 第 3 引数は ACTION_ICONS の鍵であって、図案の名前ではない',
+    ).toEqual([]);
+
+    // 組み立てて渡す鍵(`archetype:…` / `set-view:…`)は、頭が決まった 2 つだけ
+    const heads = [...new Set(dynamic.map((d) => d.split('$')[0] as string))];
+    expect(heads.sort(), '組み立てて渡す鍵の頭が増えた ── 引く表を決めてから足す').toEqual(
+      ['archetype:', 'set-view:'].sort(),
+    );
   });
 });
 

@@ -82,12 +82,25 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'export-html': 'globe',
   'export-portable': 'archive',
   'export-markdown': 'page',
+  /** 構成(目次の形)を写す ── 中身ではなく**並び**を渡すので一覧の図案。 */
+  'export-structure': 'list',
   'export-entry-docx': 'page',
   'export-entry-pdf': 'printer',
   'purge-orphan-assets': 'broom',
   'create-entry': 'plus',
   'attach-file': 'clip',
   /** 録音・画面収録(#413)。⚠ 止めるのは**四角**(世界共通の停止)。 */
+  /**
+   * 🔴 **「今日」と「時間を計る」は、2026-09-21 まで無地だった**(#1029 段 A)。
+   * ⚠ 「今日」は `iconButton('open-today', '今日', 'calendar')` と**図案の名前**を
+   *   第 3 引数に渡していたが、そこは **`ACTION_ICONS` の鍵**を書く所である ──
+   *   `ACTION_ICONS['calendar']` は無いので `undefined` になり、**器ごと出ていなかった**。
+   *   飾るつもりで書いた字が、1 文字も効いていない形である(§1 の空振り)。
+   * 🔑 だから鍵の側に登記する ── 呼び側は第 3 引数を書かない(`iconButton(action, label)`)。
+   *   門は `tests/adapter/icons.test.ts`「第 3 引数の鍵は登記に在る」。
+   */
+  'open-today': 'calendar',
+  'start-timer': 'timer',
   'start-audio-capture': 'mic',
   'start-screen-capture': 'monitor',
   'stop-capture': 'stop',

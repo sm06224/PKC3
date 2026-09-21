@@ -529,7 +529,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
    * 🔑 文言は**起きること**で書く(user 指示 2026-08-21)── 「日記」ではなく
    *   「今日」。開くと**今日の日付のノート**が出る(無ければ作る)。
    */
-  const today = iconButton('open-today', '今日', 'calendar');
+  const today = iconButton('open-today', '今日');
   today.setAttribute('data-pkc-field', 'open-today');
   today.title = '今日の日付のノートを開きます(無ければ作ります)';
 
