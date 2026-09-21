@@ -14,7 +14,8 @@
  * ⚠ この test の本丸はそこ ── 「追記できる」だけを見ると、消える経路は素通りする。
  */
 import { stubStamps } from '../helpers/store-stamps';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { appMessagePost } from '../../src/adapter/platform/message-post';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
@@ -517,6 +518,8 @@ describe('🔴 強制解放を押したら痕跡が残る(#723)', () => {
     const warns: unknown[][] = [];
     const orig = console.warn;
     console.warn = (...a: unknown[]) => void warns.push(a);
+    // 🔴 「問題」としてメッセージへも流す(段②b)── console と併記
+    const postSpy = vi.spyOn(appMessagePost, 'post').mockImplementation(() => {});
     try {
       s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log' });
       await tick();
@@ -546,8 +549,16 @@ describe('🔴 強制解放を押したら痕跡が残る(#723)', () => {
         writeLockLid: 'log',
         phase: 'ready',
       });
+
+      // ③ メッセージ ── 「問題」として post されている(段②b)
+      expect(postSpy, 'メッセージへ流していない').toHaveBeenCalledTimes(1);
+      expect(postSpy.mock.calls[0]?.[0]).toMatchObject({
+        kind: 'problem',
+        source: 'force-release',
+      });
     } finally {
       console.warn = orig;
+      postSpy.mockRestore();
     }
   });
 

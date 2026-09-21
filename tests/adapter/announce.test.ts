@@ -13,8 +13,9 @@
  *   映さないと古い値が見える(CLAUDE.md「設定画面の値の同期」)
  */
 import { createHash } from 'node:crypto';
-import { describe, expect, it, beforeEach } from 'vitest';
+import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { createAnnounce, announceServices } from '../../src/adapter/ui/render/announce';
+import { appMessagePost } from '../../src/adapter/platform/message-post';
 import { SettingsRenderer } from '../../src/adapter/ui/render/settings';
 import {
   NoticeStore,
@@ -59,6 +60,9 @@ beforeEach(() => {
   region = document.createElement('section');
   region.hidden = true;
   document.body.append(region);
+  // 🔴 「配信」の冪等(段②b、`deliverOnce`)は real の localStorage を使う ──
+  //   test 間で state が漏れないよう、毎回まっさらにする
+  localStorage.clear();
 });
 
 describe('お知らせの帯', () => {
@@ -892,6 +896,13 @@ describe('お知らせの文面は固定(#220-7)', () => {
    */
   const KNOWN: readonly [id: string, digest: string][] = [
     /**
+     * ⚠ **設計 doc §7、段②b(ワーカーの動きを「処理の記録」へ)で足した**
+     *   (2026-09-21)。枠(30 件)が満杯だったので、**いちばん古い 1 件**
+     *   (`2026-09-15-recording-duration-fix`)を落とした ── 原本は
+     *   `CHANGELOG.md`(2026-09-15 の節)に既に在る。
+     */
+    ['2026-09-21-jobs-messages-log', '5a7623d6'],
+    /**
      * ⚠ **設計 doc §7、段②a(メッセージ)で足した**(2026-09-21)。
      *   枠(30 件)が満杯だったので、**いちばん古い 1 件**
      *   (`2026-09-15-about-oss`)を落とした ── 原本は `CHANGELOG.md`(2026-09-15 の節)に
@@ -1111,13 +1122,8 @@ describe('お知らせの文面は固定(#220-7)', () => {
      *   **origin/main に在るもの**から選んだ(0d9cc03)。
      */
     ['2026-09-16-bar-grey-fill', '59ea59b5'],
-    /**
-     * ⚠ **#952 A3(録音の終わり時刻)で足した**(2026-09-15)。
-     *   枠(30 件)が満杯だったので、**いちばん古い 1 件**
-     *   (`2026-09-13-body-icons`)を落とした ── 落とす相手は
-     *   **origin/main に在るもの**から選んだ(ddecd62)。
-     */
-    ['2026-09-15-recording-duration-fix', 'be23ce69'],
+    // ⚠ 2026-09-21(段②b): 枠を超えたので `2026-09-15-recording-duration-fix` も
+    //    登記表から落とした ── この表は登記表と同じ件数でなければならないので行も消す
     // ⚠ 2026-09-21(段④a + 段②a): 枠を 2 件超えたので `2026-09-15-read-columns-crisp-rule` も
     //    登記表から落とした ── この表は登記表と同じ件数でなければならないので行も消す
     /**
@@ -1649,5 +1655,86 @@ describe('登記表と画面のずれ(#596 E)', () => {
     expect(over.filter((n) => !shown.has(n.id)).map((n) => n.id)).toEqual([
       atCap[atCap.length - 1]!.id,
     ]);
+  });
+});
+
+/**
+ * 🔴 **お知らせも「配信」としてメッセージに残る**(設計 doc §7、段②b)。
+ *
+ * ⚠ 守るのは:①初めて出したとき 1 回だけ post する ②同じ id を再描画しても
+ *   2 回目は post しない ③再起動(= 新しい `createAnnounce`)しても、
+ *   既に配信済みの id は post しない(冪等が localStorage で持続する)。
+ */
+describe('お知らせ → メッセージ「配信」(段②b)', () => {
+  it('🔴 初めて出したときに 1 回だけ post する(kind: delivery, title を text に)', () => {
+    const postSpy = vi.spyOn(appMessagePost, 'post').mockImplementation(() => {});
+    try {
+      const a = createAnnounce(region, new NoticeStore(memory()), NOTES);
+      a.present();
+      expect(postSpy).toHaveBeenCalledTimes(1);
+      expect(postSpy.mock.calls[0]?.[0]).toMatchObject({
+        kind: 'delivery',
+        source: 'notice',
+        text: '新しい方',
+      });
+    } finally {
+      postSpy.mockRestore();
+    }
+  });
+
+  it('🔴 同じ 1 件を再描画しても、2 回目は post しない', () => {
+    const postSpy = vi.spyOn(appMessagePost, 'post').mockImplementation(() => {});
+    try {
+      const a = createAnnounce(region, new NoticeStore(memory()), NOTES);
+      a.present();
+      a.present();
+      a.present();
+      expect(postSpy, '再描画のたびに配信し直している').toHaveBeenCalledTimes(1);
+    } finally {
+      postSpy.mockRestore();
+    }
+  });
+
+  it('🔴 起動をまたいでも、配信済みの id はもう post しない(localStorage で持続)', () => {
+    const postSpy = vi.spyOn(appMessagePost, 'post').mockImplementation(() => {});
+    try {
+      // 1 度目の起動
+      createAnnounce(region, new NoticeStore(memory()), NOTES).present();
+      expect(postSpy).toHaveBeenCalledTimes(1);
+      postSpy.mockClear();
+
+      // 🔴 まだ既読は付いていない(既読を鍵にしていないことの前提 ── 空振り防止)
+      const store2 = new NoticeStore(memory());
+      expect(store2.seenIds(), '前提: 既読が付いていない').toEqual([]);
+
+      // 2 度目の起動(新しい region / 新しい NoticeStore ── だが localStorage は同じ)
+      const region2 = document.createElement('section');
+      region2.hidden = true;
+      document.body.append(region2);
+      createAnnounce(region2, store2, NOTES).present();
+      expect(postSpy, '起動をまたいで配信し直している').not.toHaveBeenCalled();
+    } finally {
+      postSpy.mockRestore();
+    }
+  });
+
+  it('新しい 1 件は、古い方が配信済みでも post する(id ごとの冪等)', () => {
+    const postSpy = vi.spyOn(appMessagePost, 'post').mockImplementation(() => {});
+    try {
+      const store = new NoticeStore(memory());
+      // 「新しい方」を配信済みにしておく
+      createAnnounce(region, store, NOTES).present();
+      expect(postSpy).toHaveBeenCalledTimes(1);
+      postSpy.mockClear();
+      // 「新しい方」を読んだことにして、「古い方」を出す
+      store.markSeen(['2026-08-08-b'], NOTES);
+      const region2 = document.createElement('section');
+      document.body.append(region2);
+      createAnnounce(region2, store, NOTES).present();
+      expect(postSpy).toHaveBeenCalledTimes(1);
+      expect(postSpy.mock.calls[0]?.[0]).toMatchObject({ text: '古い方' });
+    } finally {
+      postSpy.mockRestore();
+    }
   });
 });

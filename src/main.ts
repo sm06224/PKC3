@@ -879,6 +879,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     cid,
     appendMessage: (req) => client.request({ op: 'appendMessage', ...req }),
   });
+  /**
+   * 🔴 **job の束ねを、閉じる前に必ず流す**(設計 doc §7、段②b)。
+   * ⚠ `beforeunload` だけに頼らない ── モバイルでは飛ばないことがある。
+   *   `visibilitychange`(hidden)が唯一ほぼ確実な合図で、`pagehide` がその次点
+   *   (上の永続化の flush と同じ理由)。呼ばないと、閉じる直前に溜まった
+   *   job のメッセージがそのまま消える。
+   */
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') appMessagePost.flushJobBuffer();
+  });
+  window.addEventListener('pagehide', () => appMessagePost.flushJobBuffer());
   // boot と再読込は**同じ経路**で state を作る(取込後に別の作り方をしない ──
   // 分岐が増えると「取込直後だけ壊れる」型の差分が入る)
   const loadSnapshot = async () => ({

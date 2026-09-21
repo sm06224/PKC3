@@ -5503,6 +5503,17 @@ const ACTIONS: Record<string, ActionHandler> = {
           lockGen: s.lockGen,
           editingLid: s.openBody?.lid ?? null,
         });
+        /**
+         * 🔴 **console と同じ知らせを「問題」としてメッセージにも残す**
+         * (設計 doc §7、段②b)。⚠ console は開発者しか見ないが、メッセージは
+         *   user 自身が取り出せる(バグ報告の材料)── 固定文(state は載せない
+         *   ── 本文は入れない前提と同じ理由で、let 変数の生値も混ぜない)。
+         */
+        appMessagePost.post({
+          kind: 'problem',
+          source: 'force-release',
+          text: '追記の書き込みを強制的に打ち切りました',
+        });
         services.showStatus?.(
           `追記の書き込みを打ち切りました(${what})。表示が実際の中身より古いことがあります ── 開き直すと直ります`,
         );

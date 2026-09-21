@@ -24,6 +24,47 @@
 import type { Notice } from '@features/notice/notice-log';
 import { NOTICE_READABLE_TEXT, noticeDate, unreadNotices } from '@features/notice/notice-log';
 import type { NoticeStore } from '@adapter/platform/notice-store';
+import { appMessagePost } from '@adapter/platform/message-post';
+
+/**
+ * 🔴 **お知らせも「配信」としてメッセージに残す**(設計 doc §7、段②b)。
+ *
+ * ⚠ **既読(`store.seenIds()`)とは別に、独立して「配信済み」を憶える** ──
+ *   `paint()` は**まだ既読が付いていない**間、再描画のたびに何度も呼ばれる
+ *   (state が変わるたび)。既読を鍵にすると、まさにこれから読ませようとしている
+ *   その 1 件を判定できない(未読だから出しているのに、未読を理由に弾けない)。
+ * ⚠ **在庫の大きさで十分**(`DELIVERED_CAP`)── 登記表(30 件)を大きく超えて
+ *   持つ必要は無い。書けない端末では次回また 1 回多く配信されるだけで実害は無い
+ *   (`markSeen` 等と同じ、壊れても致命的にならない側へ倒す作法)。
+ */
+const DELIVERED_KEY = 'pkc3.notices.delivered';
+const DELIVERED_CAP = 60;
+
+function readDelivered(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DELIVERED_KEY);
+    if (raw === null) return new Set();
+    const parsed: unknown = JSON.parse(raw);
+    return new Set(
+      Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : [],
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+/** ⚠ まだ配っていなければ配って憶える。**冪等**(2 度目以降は何もしない)。 */
+function deliverOnce(n: Notice): void {
+  const delivered = readDelivered();
+  if (delivered.has(n.id)) return;
+  appMessagePost.post({ kind: 'delivery', source: 'notice', text: n.title });
+  delivered.add(n.id);
+  try {
+    localStorage.setItem(DELIVERED_KEY, JSON.stringify([...delivered].slice(-DELIVERED_CAP)));
+  } catch {
+    /* この端末では憶えられない ── 次回もう 1 回配信されるだけ、実害は無い */
+  }
+}
 
 export interface Announce {
   /** 未読が在れば出す。⚠ **無ければ行の高さを 0 に保つ**(空の枠を残さない)。 */
@@ -83,6 +124,8 @@ export function createAnnounce(
      *  画面に出ている 1 件だけでは足りない。送る(`next`)ときだけ先頭を使う。 */
     shown = unread;
     const current = unread[0]!;
+    // 🔴 「初めて出した」ときに 1 回だけ、メッセージへ「配信」として残す(段②b)
+    deliverOnce(current);
     region.textContent = '';
     region.hidden = false;
 
