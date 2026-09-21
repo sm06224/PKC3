@@ -41,7 +41,6 @@ import {
   NOTICE_KEEP_MAX,
   NOTICE_SEEN_MAX,
   NOTICE_SHOW_MAX,
-  noticeDate,
 } from '../../src/features/notice/notice-log';
 
 let region: HTMLElement;
@@ -84,7 +83,7 @@ function fakeTimers() {
 }
 
 describe('ヘルプの面', () => {
-  it('題名と、版・お知らせ・マニュアルの 3 つが出る', () => {
+  it('題名と、版・お知らせへのリンク・マニュアルの 3 つが出る', () => {
     new HelpRenderer(region).render();
     expect(region.querySelector('[data-pkc-field="pane-title"]')?.textContent).toBe('ヘルプ');
     expect(
@@ -112,7 +111,17 @@ describe('ヘルプの面', () => {
       region.querySelector('[data-pkc-field="help-version"]')?.textContent ?? '',
       '面が種別の刻印か日時を落としている(versionText を呼んでいる?)',
     ).toMatch(/\(開発版・\d+\/\d+ \d\d:\d\d\)/);
-    expect(region.querySelector('[data-pkc-region="help-notices"]'), 'お知らせが無い').not.toBeNull();
+    /**
+     * 🔴 **一覧はもう無い ── リンクだけ**(#1017 段③-2)。一覧の実体は
+     * システムへ移した(下の describe「お知らせの一覧」を参照)。
+     */
+    const link = region.querySelector('[data-pkc-field="help-notices-link"]');
+    expect(link, 'お知らせへのリンクが無い').not.toBeNull();
+    expect(link!.textContent, 'システムへの案内が書かれていない').toContain('システム');
+    expect(
+      link!.querySelector('[data-pkc-action="open-system-notices"]'),
+      '押す口が無い',
+    ).not.toBeNull();
     expect(region.querySelector('[data-pkc-region="help-manual"]'), 'マニュアルが無い').not.toBeNull();
   });
 
@@ -174,67 +183,13 @@ describe('ヘルプの面', () => {
     expect(main, '印に versionLine が混ざっている').not.toContain('manualBuildTag(versionLine');
   });
 
-  it('🔴 お知らせが新しい順に、上限まで出る', () => {
-    new HelpRenderer(region).render();
-    const ids = [...region.querySelectorAll('[data-pkc-help-notice]')].map(
-      (e) => e.getAttribute('data-pkc-help-notice') ?? '',
-    );
-    expect(ids.length, 'お知らせが 1 件も出ていない(fixture の空振り)').toBeGreaterThan(0);
-    expect(ids.length).toBeLessThanOrEqual(NOTICE_SHOW_MAX);
-    /**
-     * 🔴 **「新しい順」は日付の順である**(2026-08-29 の動線レビュー 欠陥 5)。
-     *
-     * ⚠ 直す前は `[...ids].sort().reverse()` = **id 全体の綴り順**を要求していたので、
-     *   実装が「同じ日は**英語スラッグの綴り順**」で並ぶことを**この test が pin していた** ──
-     *   その結果、いちばん実害の大きい知らせが **7 番目**へ回り、user は
-     *   「次へ」を 6 回押さないと読めなかった(実測)。
-     * 🔑 見るのは 2 つ:①**日付が新しい順**であること
-     *   ②**同じ日は登記表に書いた順**であること(登記表は先頭に足す規約)。
-     */
-    const dates = ids.map(noticeDate);
-    expect([...dates].sort().reverse(), '日付が新しい順に並んでいない').toEqual(dates);
-    const order = new Map(NOTICES.map((n, i) => [n.id, i]));
-    const ranks = ids.map((id) => order.get(id) ?? -1);
-    expect(ranks, '登記表に無いお知らせが出ている(空振り)').not.toContain(-1);
-    expect([...ranks].sort((a, b) => a - b), '同じ日が登記表の順で出ていない').toEqual(ranks);
-    // 日付は id から引く(field を二重に持たない)
-    const first = region.querySelector('[data-pkc-field="notice-title"]')?.textContent ?? '';
-    expect(first, '日付が出ていない').toMatch(/^\d{4}-\d{2}-\d{2} /);
-  });
-
   /**
-   * 🔴 **切るのは `recentNotices` だけ**(P11 の決まり)。
-   * ⚠ 1 巡目は登記表が **1 件**だったので、上限も並びも「測っていない次元」だった
-   *   ── 丸ごと出す変異が素通りした(変異試験で判明)。登記表を注入して試す。
+   * 🔴 **一覧そのものの test は「システム」側へ移した**(#1017 段③-2)。
+   * ⚠ 一覧の実体がここから無くなったので、`[data-pkc-help-notice]` を注入して
+   *   確かめる 3 本(新しい順・上限・素のテキスト)は
+   *   `tests/adapter/system-sections.test.ts` の
+   *   describe('「これまでのお知らせ」の一覧(#1017 段③-2)') に居る。
    */
-  it('🔴 登記表が上限より多くても、出るのは上限まで(新しい順)', () => {
-    const many = Array.from({ length: NOTICE_SHOW_MAX + 4 }, (_, i) => ({
-      id: `2026-02-${String(i + 1).padStart(2, '0')}-x`,
-      title: `t${i}`,
-      items: ['本文'],
-    }));
-    expect(many.length, 'fixture が上限を超えていない(空振り)').toBeGreaterThan(NOTICE_SHOW_MAX);
-    new HelpRenderer(region, null, many).render();
-    const ids = [...region.querySelectorAll('[data-pkc-help-notice]')].map(
-      (e) => e.getAttribute('data-pkc-help-notice') ?? '',
-    );
-    expect(ids, '上限まで切っていない').toHaveLength(NOTICE_SHOW_MAX);
-    expect(ids[0], '新しい順になっていない').toBe(`2026-02-${NOTICE_SHOW_MAX + 4}-x`);
-  });
-
-  /**
-   * 🔴 **素のテキストで出す**(ヘルプ側。帯とは**別の描画経路**である)。
-   * ⚠ CLAUDE.md「同じ値を複数の描画経路へ渡すものは、経路ごとに pin する」──
-   *   帯だけ見ていたので、ヘルプ側を `innerHTML` にする変異が素通りした。
-   */
-  it('🔴 お知らせが素のテキストで出る(HTML として描かない)', () => {
-    new HelpRenderer(region, null, [
-      { id: '2026-08-08-x', title: 't', items: ['<b>太字</b>と <img src="x"> を書いた'] },
-    ]).render();
-    const li = region.querySelector('[data-pkc-help-notice] li')!;
-    expect(li.children.length, 'HTML として描いている').toBe(0);
-    expect(li.textContent, '原文が消えている').toContain('<b>太字</b>');
-  });
 
   /**
    * 🔴 **マニュアルの箱を出る道が、ヘルプの中に在る**(#645。user 要望 2026-08-31
@@ -269,16 +224,18 @@ describe('ヘルプの面', () => {
   });
 
   /**
-   * ⚠ 見出しが無いと、版の行とお知らせが地続きに見える。
-   * 🔴 **並びは「マニュアル → ショートカット → お知らせ」**(#719。user 裁定
+   * ⚠ 見出しが無いと、版の行とショートカットが地続きに見える。
+   * 🔴 **並びは「マニュアル → ショートカット」**(#719。user 裁定
    *   2026-09-06 = 案 A)── cowork 実測で「使い方を知りたい」で開いた人が最初に
    *   読むのが**リリースノート 11 件**だった(本文 106,339 字 / 5455px)。
-   * ⚠ **等値で pin する** ── 「3 つ在る」だけだと、並びが戻っても落ちない。
+   * ⚠ **等値で pin する** ── 「2 つ在る」だけだと、並びが戻っても落ちない。
+   * ⚠ **h3 は 2 つになった**(#1017 段③-2)── 「これまでのお知らせ」の一覧は
+   *   システムへ移し、ここにはリンクの `<p>` 1 行だけが残る(h3 ではない)。
    */
-  it('🔴 見出しは「マニュアル → ショートカットキー → これまでのお知らせ」の順に出る', () => {
+  it('🔴 見出しは「マニュアル → ショートカットキー」の順に出る', () => {
     new HelpRenderer(region).render();
     const heads = [...region.querySelectorAll('h3')].map((e) => e.textContent);
-    expect(heads, '見出しの並びが違う').toEqual(['マニュアル', 'ショートカットキー', 'これまでのお知らせ']);
+    expect(heads, '見出しの並びが違う').toEqual(['マニュアル', 'ショートカットキー']);
     /**
      * 🔑 **版は先頭のほうに在る**(下へ沈めない ── #719 の裁定)。
      * ⚠ **1 つだけ**であることも見る ── 「上にも出す」形にすると同じ値が 2 経路に
@@ -300,8 +257,8 @@ describe('ヘルプの面', () => {
    *
    * ⚠ 上の `h3` の並びだけでは足りない ── 変異試験で **3 件**が生き延びた:
    *   ①版をマニュアルの見出しの**上**へ戻す ②目次を別窓ボタンの**前**へ戻す
-   *   ③探す欄を目次の**後ろ**へ回す。⚠ どれも h3 は 3 つのまま動かないので、
-   *   「マニュアル → ショートカット → お知らせ」の pin は**1 つも鳴らない**。
+   *   ③探す欄を目次の**後ろ**へ回す。⚠ どれも h3 は動かないので(#1017 段③-2 で
+   *   2 つになった)、「マニュアル → ショートカット」の pin は**1 つも鳴らない**。
    * 🔑 だから**器の直下の子を全部、順番どおりに**留める ── #719 の裁定は
    *   「何が在るか」ではなく「**開いた 1 画面に何がこの順で出るか**」だった。
    * ⚠ 名前は `data-pkc-region` → `data-pkc-field` → `タグ:字` の順に採る。
@@ -341,8 +298,8 @@ describe('ヘルプの面', () => {
       'H3:ショートカットキー',
       'settings-note:Ctrl は',
       'help-keymap',
-      'H3:これまでのお知らせ',
-      'help-notices',
+      // 🔴 #1017 段③-2:一覧はシステムへ移し、ここにはリンクの `<p>` だけ残る
+      'help-notices-link',
     ]);
   });
 
@@ -1068,7 +1025,6 @@ describe('マニュアルの中を探す(#636)', () => {
     expect([...region.querySelectorAll('h3')].map((h) => h.textContent)).toEqual([
       'マニュアル',
       'ショートカットキー',
-      'これまでのお知らせ',
     ]);
   });
 });
@@ -1270,24 +1226,10 @@ describe('ヘルプの面の目次(#719)', () => {
   });
 
   /**
-   * 🔴 **これまでのお知らせは題名だけ並ぶ**(#719 案 A)。
-   * ⚠ 直す前は 11 件の中身が全部開いたまま**面の先頭**に居た。
+   * 🔴 **これまでのお知らせが畳まれて出るかは「システム」側へ移した**
+   *   (#1017 段③-2)。`tests/adapter/system-sections.test.ts` の
+   *   describe('「これまでのお知らせ」の一覧(#1017 段③-2)') に居る。
    */
-  it('🔴 お知らせは畳まれて出て、押すと中身が開く', () => {
-    new HelpRenderer(region).render();
-    const items = [...region.querySelectorAll<HTMLDetailsElement>('[data-pkc-help-notice]')];
-    expect(items.length, 'お知らせが 1 件も出ていない(空振り)').toBeGreaterThan(0);
-    for (const it of items) {
-      expect(it.tagName, 'お知らせが畳める形になっていない').toBe('DETAILS');
-      expect(it.open, '最初から開いている(題名だけ並べる裁定に反する)').toBe(false);
-      expect(
-        it.querySelector('[data-pkc-field="notice-title"]')?.tagName,
-        '題名が summary になっていない(押しても開かない)',
-      ).toBe('SUMMARY');
-      // ⚠ 中身は**在る**(畳んだのであって、落としたのではない)
-      expect(it.querySelectorAll('li').length, 'お知らせの中身が落ちている').toBeGreaterThan(0);
-    }
-  });
   /**
    * 🔴 **押しても外側は動かさない**(着地前レビュー・動線 4、実測)。
    * ⚠ `scrollIntoView` は**スクロールできる祖先を全部**動かすので、外側まで動くと
