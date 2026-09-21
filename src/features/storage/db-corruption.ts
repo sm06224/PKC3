@@ -79,6 +79,9 @@ export const CORRUPT_BLOCKED_OPS: readonly string[] = [
   'restoreRevisionChains',
   // 🔴 起動の検めの印(#1007 段①)── 壊れた DB に「検めた」印を残すと、次の起動で黙る
   'integrityStamp',
+  // 🔴 メッセージの追記(設計 doc §7、段②a)── 書き込みなので止める。
+  //    断られた分は adapter 側の控え(IndexedDB)へ積み、書けるようになった時点で流し込む。
+  'appendMessage',
 ];
 
 /**

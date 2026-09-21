@@ -31,6 +31,8 @@ import { applyPlaceLayout } from './place-board';
 import { installBlockGrip } from './block-grip';
 import { applyStackControls } from './stack-controls';
 import { STACK_ARCHETYPE } from '@features/flavor/stack-flavor';
+// 🔑 system 領域のノートの判定・題名は 1 か所から引く(設計 doc §7、段②a。CLAUDE.md §7)
+import { isSystemMessageLid, titleForMessageLid } from '@features/message/message-log';
 
 /**
  * 🔴 **図とグラフは同じ面に出る**(#188)── 器を埋める呼び出しを 1 つに束ねる。
@@ -568,7 +570,10 @@ export class DetailRenderer {
     // 🔴 **段は h1**(#720)── 理由は下の `renderView` 側の注記を見よ
     const title = document.createElement('h1');
     title.setAttribute('data-pkc-field', this.field('detail-title'));
-    title.textContent = state.entryMetas.get(lid)?.title ?? '';
+    // 🔴 **system 領域のノートは `entryMetas` に無い**(設計 doc §1.1)── 題名は
+    //    固定 lid から引く(段②a)。⚠ system の 2 lid 以外で `entryMetas` に
+    //    無いのは異常系(消えた等)なので、そちらは空のまま(誤った題名を出さない)。
+    title.textContent = state.entryMetas.get(lid)?.title ?? (isSystemMessageLid(lid) ? titleForMessageLid(lid) : '');
     return title;
   }
 
@@ -665,7 +670,9 @@ export class DetailRenderer {
             : { top: 0, left: 0 };
       this.parkedScroll = null;
     }
-    this.titleEl!.textContent = state.entryMetas.get(lid)?.title ?? '';
+    // 🔴 system 領域のノートは `entryMetas` に無い(設計 doc §1.1、段②a)。
+    this.titleEl!.textContent =
+      state.entryMetas.get(lid)?.title ?? (isSystemMessageLid(lid) ? titleForMessageLid(lid) : '');
 
     if (body === null) {
       /**
@@ -674,7 +681,7 @@ export class DetailRenderer {
        * 窓が空いていた。押しても binder が黙って捨てるので、user から見ると
        * 「クリックが効かない」。いまは器を残して押せない状態にする。
        */
-      this.renderBar(state, false);
+      this.renderBar(state, false, lid);
       this.renderPanel(state, lid);
       /**
        * 🔴 **同じノートを見ているあいだは、いま出ている本文を残す**(#782。
@@ -713,7 +720,7 @@ export class DetailRenderer {
       return;
     }
 
-    this.renderBar(state, true);
+    this.renderBar(state, true, lid);
     this.renderPanel(state, lid);
 
     /**
@@ -1040,7 +1047,7 @@ export class DetailRenderer {
    *
    * 🔑 器を組み直すのは**形が変わるときだけ**(編集 / 再保存 / 無し の 3 形)。
    */
-  private renderBar(state: AppState, bodyReady: boolean): void {
+  private renderBar(state: AppState, bodyReady: boolean, lid: string): void {
     /**
      * 🔴 **留めた枠には出さない**(#505 段②)。
      *
@@ -1050,6 +1057,23 @@ export class DetailRenderer {
      */
     if (this.pinnedLid !== null) return;
     const slot = this.barSlot!;
+    /**
+     * 🔴 **system 領域のノートには出さない**(設計 doc §7、段②a)。
+     *
+     * ⚠ 「編集・追記・削除・改名・履歴の押し口は system のノートでは出さない」
+     *   (§7)── ここが**唯一の抜け穴**だった。`entryMetas` に無いことは
+     *   `appendModeOf` / `inspector.ts` を素通りで守るが、この帯だけは
+     *   `state.phase` しか見ていなかったので、`MESSAGES_READ` で選んでいる間も
+     *   「編集」が出て押せてしまう(START_EDIT 自体は `entryMetas` を見ない)。
+     */
+    if (isSystemMessageLid(lid)) {
+      if (this.barShape !== 'none') {
+        this.barShape = 'none';
+        this.barButton = null;
+        slot.textContent = '';
+      }
+      return;
+    }
     // error phase では「編集」を出さない ── START_EDIT は ready 限定なので、
     // 出したまま無言 no-op にしない(review B-1 原則: 無言の操作拒否を作らない)
     const shape: BarShape =

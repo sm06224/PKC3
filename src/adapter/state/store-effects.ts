@@ -1643,6 +1643,31 @@ export function connectStoreEffects(
         });
         break;
       /**
+       * 🔴 **メッセージ(system 領域のノート)の本文を読む**(設計 doc §7、段②a)。
+       *
+       * ⚠ `REQUEST_BODY` と**ここだけ**違う ── `body === null`(行が無い)を
+       *   異常系にしない。`sys-jobs`(処理の記録)は段②b で初めて書かれるので、
+       *   段②a の時点では `postMessage` が 1 度も無ければ行そのものが無い。
+       *   それは壊れではなく「まだ何も無い」なので、**空の本文として受理する**。
+       */
+      case 'REQUEST_MESSAGES_BODY':
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            const body = await store.getBody(ev.lid);
+            if (disposed) return;
+            dispatcher.dispatch({ type: 'BODY_LOADED', lid: ev.lid, body: body ?? '' });
+          } catch (e) {
+            if (!disposed)
+              dispatcher.dispatch({
+                type: 'BODY_LOAD_FAILED',
+                lid: ev.lid,
+                error: String(e),
+              });
+          }
+        });
+        break;
+      /**
        * 🔴 **2 ペインの下見の本文を読む**(#273 残件)。
        *
        * 🔑 **同じ `enqueue` の列に並べる** ── `getBody` を列の外で呼ぶと、

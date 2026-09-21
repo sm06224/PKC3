@@ -248,6 +248,9 @@ import { installLongPress, LONG_PRESS_TARGET, LONG_PRESS_TARGETS } from './long-
 import { isRepeatUnit } from '@features/schedule/repeat';
 import { copyMarkdownAndHtml, copyPlainText } from '@adapter/platform/clipboard';
 import { appCopyHistory } from '@adapter/platform/copy-history-store';
+// 🔑 メッセージの口・字は 1 か所から引く(設計 doc §7、段②a。CLAUDE.md §7)
+import { appMessagePost, setMessageCap } from '@adapter/platform/message-post';
+import { MESSAGE_CAP_OPTIONS, SYSTEM_MESSAGE_LID, titleForMessageLid } from '@features/message/message-log';
 import {
   COPY_HISTORY_EMPTY,
   copyHistoryMenu,
@@ -7212,6 +7215,8 @@ const ACTIONS: Record<string, ActionHandler> = {
           });
           const done = rebuildDoneMessage(report);
           sum.textContent = done;
+          // 🔴 モーダルを出す前に post する(設計 doc §7、段②a)
+          appMessagePost.post({ kind: 'result', source: 'db-rescue-rebuild', text: done });
           // ⚠ **読ませてから読み込み直す**(すぐ reload すると誰も読めない)
           await alertInApp(root, done);
           /**
@@ -7359,6 +7364,13 @@ const ACTIONS: Record<string, ActionHandler> = {
           const report = await reset(cid);
           const done = resetDoneMessage(report);
           sum.textContent = done;
+          /**
+           * 🔴 モーダルを出す前に post する(設計 doc §7、段②a)。
+           * ⚠ **この時点で DB は既に捨てられている**ので、いま書こうとしても
+           *   worker には答えられない ── `appMessagePost` の控え(IndexedDB)へ
+           *   積まり、読み込み直した先の**新しい** DB へ流し込まれる。
+           */
+          appMessagePost.post({ kind: 'result', source: 'db-rescue-reset', text: done });
           /**
            * ⚠ **読ませてから読み込み直す** ── すぐ `reload` すると
            *   「消せなかった添付が N 件」を**誰も読めない**。
@@ -8030,6 +8042,51 @@ const ACTIONS: Record<string, ActionHandler> = {
         ? pane.querySelector<HTMLElement>('[data-pkc-region="settings-toc"]')
         : pane.querySelector<HTMLElement>(`[data-pkc-section="${CSS.escape(id)}"]`);
     dest?.scrollIntoView({ block: 'start' });
+  },
+  /**
+   * 🔴 **メッセージ(system 領域のノート)を開く**(設計 doc §7、段②a)。
+   *
+   * ⚠ `select-entry` を使い回さない ── あちらは `entryMetas.has(lid)` を通るので
+   *   system のノートでは黙って no-op になる(#7「開く / 処理の記録を開く」)。
+   * 🔑 開くのは「既読にする唯一の入口」でもある(§7「既読」)── state 側は
+   *   `MESSAGES_READ` reducer が `error` / `messagesUnread` を消し、
+   *   端末側は `appMessagePost.markRead()` が既読の時刻を進める(2 か所に
+   *   同じ役目を持たせない ── 前者は state、後者は localStorage)。
+   */
+  'open-messages': (dispatcher, target) => {
+    const lid = target.getAttribute('data-pkc-message-lid');
+    if (lid === null || lid === '') return;
+    dispatcher.dispatch({ type: 'MESSAGES_READ', lid });
+    appMessagePost.markRead();
+  },
+  /**
+   * 🔴 **メッセージの保管件数を選ぶ**(設計 doc §7、段②a)。
+   * ⚠ 選べる値以外は `setMessageCap` が黙って無視する(壊れた値を書かせない)。
+   */
+  'set-message-cap': (_dispatcher, target) => {
+    const n = target instanceof HTMLSelectElement ? Number(target.value) : NaN;
+    if (MESSAGE_CAP_OPTIONS.includes(n)) setMessageCap(n);
+  },
+  /**
+   * 🔴 **メッセージを書き出す**(設計 doc §7、段②a)── バグ報告に貼る用。
+   * ⚠ **新しい書き出しの仕組みを作らない**(§7「普通のノートと同じ道具」)──
+   *   本文をそのまま `.md` として落とすだけ(整形・要約はしない)。
+   */
+  'export-messages': (dispatcher, target, services) => {
+    const lid = target.getAttribute('data-pkc-message-lid') ?? SYSTEM_MESSAGE_LID;
+    const read = services.readBodies;
+    if (!read) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この版では書き出せません' });
+      return;
+    }
+    void read([lid]).then((bodies) => {
+      const body = bodies.get(lid) ?? '';
+      const today = dayStamp(new Date());
+      downloadBlob(
+        `${titleForMessageLid(lid)}-${today}.md`,
+        new Blob([body], { type: 'text/markdown' }),
+      );
+    });
   },
   'set-paste-source': (_dispatcher, target, services) => {
     // ⚠ `set-external-images` と同じ受け方(`<select>` でもボタンでも通す)

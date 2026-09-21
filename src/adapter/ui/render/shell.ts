@@ -28,6 +28,8 @@ import {
   alarmEntryText,
   type AlarmDue,
 } from '@features/alarm/alarm-due';
+// 🔑 lid の綴りは 1 か所から引く(設計 doc §7、段②a。CLAUDE.md §7)
+import { SYSTEM_MESSAGE_LID } from '@features/message/message-log';
 
 export interface ShellRegions {
   /** 左の列の中身(探し方で切り替わる)。 */
@@ -56,6 +58,11 @@ export interface ShellRegions {
    * ⚠ 押した先は `undo-move` の受け手(`binder.ts`)。出し入れは `status-open.ts`。
    */
   statusUndo: HTMLElement;
+  /**
+   * 🔴 **未読のメッセージへの入口**(設計 doc §7、段②a)。⚠ 常設で置き、
+   *   未読が 1 件以上あるときだけ `hidden` を外す(`main.ts` が state を見て書く)。
+   */
+  statusMessages: HTMLElement;
   /** 🔴 **狭すぎる端末への断り書き**(#671)。中身は `too-narrow.ts` が出し入れする。 */
   tooNarrow: HTMLElement;
   /** その断り書きの字を置く所。 */
@@ -891,6 +898,30 @@ export function buildShell(root: HTMLElement): ShellRegions {
   statusUndo.textContent = '元に戻す';
   statusUndo.hidden = true;
   /**
+   * 🔴 **未読のメッセージへの入口**(設計 doc §7、段②a)。
+   *
+   * ⚠ 「開く」「元に戻す」と同じ作法 ── **常設で置いて、未読が 1 件以上あるときだけ
+   *   出す**(器を作り直すと、押している最中に指の下から消える)。
+   * ⚠ 押すと「メッセージ」のノートを中央に開く(`open-messages`)── 状態の行に
+   *   知らせを積み続けない(§7「ステータスバーは『いま起きていること』の 1 行に
+   *   戻す」)。
+   */
+  const statusMessages = document.createElement('button');
+  statusMessages.type = 'button';
+  statusMessages.setAttribute('data-pkc-field', 'status-messages');
+  statusMessages.setAttribute('data-pkc-action', 'open-messages');
+  /**
+   * 🔴 **`data-pkc-entry` を使わない**(`data-pkc-message-lid` にする)。
+   *
+   * ⚠ `data-pkc-entry` は「entry の行(または行を代表する要素)」専用の属性で、
+   *   `[data-pkc-entry]` を全体走査する読み手が複数在る(サイドバーの差分描画の
+   *   検査など)。この押し口は**常設**(hidden の付け外しだけで、要素そのものは
+   *   消えない)ので、汎用の `[data-pkc-entry]` に**恒久的に**紛れ込む
+   *   (CLAUDE.md §1「器を替えたら、その器に付いている属性を全部 grep する」)。
+   */
+  statusMessages.setAttribute('data-pkc-message-lid', SYSTEM_MESSAGE_LID);
+  statusMessages.hidden = true;
+  /**
    * 🔴 **狭すぎる端末への断り書き**(user 裁定 2026-09-04、#671)。
    * ⚠ **器は 1 度だけ組む**(`too-narrow.ts` は `hidden` の付け外しだけ)──
    *   作り直すと、押そうとした OK が指の下から消える(収録の帯と同じ理由)。
@@ -909,7 +940,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   tooNarrowOk.type = 'button';
   tooNarrowOk.setAttribute('data-pkc-field', 'too-narrow-ok');
   tooNarrow.append(tooNarrowText, tooNarrowOk);
-  status.append(statusText, statusOpen, statusUndo, tooNarrow);
+  status.append(statusText, statusOpen, statusUndo, statusMessages, tooNarrow);
 
   /**
    * 🔴 **収録中の帯**(#413)── 経過 + 概算の大きさ + 止める / 捨てる。
@@ -1055,6 +1086,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
     statusText,
     statusOpen,
     statusUndo,
+    statusMessages,
     tooNarrow,
     tooNarrowText,
     tooNarrowOk,

@@ -1404,6 +1404,15 @@ export interface AppState {
    */
   lockGen: number;
   error: string | null;
+  /**
+   * 🔴 **未読のメッセージ(注意 / 問題)の数**(設計 doc §7、段②a)。
+   *
+   * ⚠ **`entryMetas` から数え直さない** ── メッセージのノートは system 領域で
+   *   `entryMetas` に入らない(§1.1)ので、別に持つしかない。
+   * 🔑 起動直後は disk の本文から数え直した値を種にし(`main.ts` の boot)、
+   *   以後は post のたびに増え、`MESSAGES_READ` で 0 へ戻る。
+   */
+  messagesUnread: number;
 }
 
 /** 誰が本文を握っているか。⚠ **lid つき**(別のノートは巻き添えにしない)。 */
@@ -1539,6 +1548,7 @@ export const initialState: AppState = {
   launcherReorder: false,
   lockGen: 0,
   error: null,
+  messagesUnread: 0,
 };
 
 export type UserAction =
@@ -1584,6 +1594,17 @@ export type UserAction =
    */
   | { type: 'MOVE_STACK_LINK'; lid: string; line: number; dir: 'up' | 'down' }
   | { type: 'SELECT_ENTRY'; lid: string }
+  /**
+   * 🔴 **メッセージ(system 領域のノート)を開く**(設計 doc §7、段②a)。
+   *
+   * ⚠ **`SELECT_ENTRY` を使い回さない** ── あちらは `state.entryMetas.has(lid)`
+   *   を通るが、メッセージのノートは system 領域なので `entryMetas` に入らない
+   *   (§1.1)。判定を増やさず、system の 2 lid(`sys-messages` / `sys-jobs`)専用の
+   *   別 action にする。
+   * 🔑 **これが「知らせを消す」唯一の入口になる**(§7「既読」)── 開くと
+   *   `error` を消し、未読を 0 にする。
+   */
+  | { type: 'MESSAGES_READ'; lid: string }
   | { type: 'SET_VIEW_MODE'; mode: ViewMode }
   /**
    * 🔴 **開いている拡張の窓が変わった**(#195 / C-5 段②-b)。
@@ -2358,6 +2379,15 @@ export type UserAction =
 export type SystemCommand =
   | { type: 'SYS_BOOTED'; cid: string; metas: EntryMeta[]; relations: Relation[] }
   /**
+   * 🔴 **未読のメッセージの数が変わった**(設計 doc §7、段②a)。
+   *
+   * ⚠ **`appMessagePost`(adapter 側)が唯一の発行元** ── post のたびに増え、
+   *   起動直後は disk の本文から数え直した値で 1 度だけ上書きされる
+   *   (`main.ts` の boot)。⚠ 判定を増やさない ── ここは値を写すだけで、
+   *   「注意 / 問題だけ数える」規則は `countUnread`(features 層)の 1 か所に在る。
+   */
+  | { type: 'MESSAGES_UNREAD_SET'; count: number }
+  /**
    * 探す面の結果が返った(#680)。⚠ `query` は**どの語の答えか**(遅れて返った古い
    * 結果を捨てる ── 打鍵は結果より速い)。
    */
@@ -2505,6 +2535,16 @@ export type Dispatchable = UserAction | SystemCommand;
  */
 export type DomainEvent =
   | { type: 'REQUEST_BODY'; lid: string }
+  /**
+   * 🔴 **メッセージ(system 領域のノート)の本文を読む**(設計 doc §7、段②a)。
+   *
+   * ⚠ `REQUEST_BODY` と分けてある理由 ── あちらは「行が無い」を**異常系**
+   *   (`BODY_LOAD_FAILED`)として扱う。だが `sys-jobs`(処理の記録)は
+   *   **段②b で初めて書かれる**ので、段②a の時点では 1 度も `postMessage`
+   *   されていなければ行そのものが存在しない ── それは壊れではなく
+   *   「まだ何も無い」なので、`null` を**空の本文として受理する**。
+   */
+  | { type: 'REQUEST_MESSAGES_BODY'; lid: string }
   /**
    * 🔴 **2 ペインの下見の本文を読む**(#273 残件)。
    *
@@ -3267,6 +3307,11 @@ function reduceCore(
         ],
       };
     }
+    case 'MESSAGES_UNREAD_SET': {
+      // ⚠ 値を写すだけ ── 「注意 / 問題だけ数える」判定は countUnread(features 層)側
+      if (state.messagesUnread === action.count) return { state, events: [] };
+      return { state: { ...state, messagesUnread: action.count }, events: [] };
+    }
     case 'SELECT_ENTRY': {
       if (state.phase === 'editing') return { state, events: [] }; // 編集中は選択遷移しない
       // error phase(= persist 失敗)でも遷移しない ── openBody の baseline が
@@ -3302,8 +3347,8 @@ function reduceCore(
           : { state: marks, events: [] };
       }
       // 選択が変わったら旧 openBody は破棄(速やかな破棄の原則)し、新 body を要求。
-      // 通知エラー(読み失敗等)は新しい試行でクリア(エラーは state 駆動 ──
-      // 表示寿命が「次の操作まで」で終わらない、P3-5 review #3 の解消)
+      // 🔴 **知らせは選択で消えない**(設計 doc §7、段②a)── 「注意 / 問題」を
+      // 消せるのは「メッセージ」のノートを開いたとき(`MESSAGES_READ`)だけ。
       return {
         state: {
           ...state,
@@ -3316,12 +3361,39 @@ function reduceCore(
           selection: [action.lid],
           selectionAnchor: action.lid,
           openBody: null,
-          error: null,
           revisionPanel: null, // panel は選択に従属(P5b)
           // ⚠ 見ていた版も畳む(#398 段②)── 一覧が畳まれたら差分は孤児になる
           revisionPreview: null,
         },
         events: [{ type: 'REQUEST_BODY', lid: action.lid }],
+      };
+    }
+    case 'MESSAGES_READ': {
+      /**
+       * 🔴 **メッセージ(system 領域のノート)を開く**(設計 doc §7、段②a)。
+       *
+       * ⚠ `SELECT_ENTRY` と**同じ形の遷移**だが、`state.entryMetas.has(lid)` は
+       *   通さない(system 領域のノートは `entryMetas` に無い ── §1.1)。
+       * ⚠ **編集中 / error phase では遷移しない**(`SELECT_ENTRY` と同じ理由 ──
+       *   openBody の baseline が disk 未達 commit の唯一の写しである)。
+       */
+      if (state.phase === 'editing' || state.phase === 'error') return { state, events: [] };
+      const leaveSettings = leavesOnSelect(state.viewMode);
+      return {
+        state: {
+          ...state,
+          ...(leaveSettings ? { viewMode: 'detail' as const } : {}),
+          selectedLid: action.lid,
+          selection: [action.lid],
+          selectionAnchor: action.lid,
+          openBody: null,
+          revisionPanel: null,
+          revisionPreview: null,
+          // 🔴 **既読はここで消える**(§7)── 選ぶだけでは消えない(直前の case の注記)。
+          error: null,
+          messagesUnread: 0,
+        },
+        events: [{ type: 'REQUEST_MESSAGES_BODY', lid: action.lid }],
       };
     }
     case 'BODY_LOADED': {
@@ -3333,7 +3405,7 @@ function reduceCore(
       return {
         state: {
           ...state,
-          error: null, // 読めた = 直前の読み失敗通知は用済み
+          // 🔴 **`error` はここで消さない**(設計 doc §7、段②a)。
           openBody: {
             lid: action.lid,
             body: action.body,
@@ -6273,8 +6345,9 @@ function reduceCore(
       // 選択解除)。openBody は速やかに破棄
       if (state.phase !== 'ready') return { state, events: [] };
       if (state.selectedLid === null) return { state, events: [] };
+      // 🔴 **`error` はここで消さない**(設計 doc §7、段②a)。
       return {
-        state: { ...state, selectedLid: null, openBody: null, error: null },
+        state: { ...state, selectedLid: null, openBody: null },
         events: [],
       };
     }
@@ -6377,7 +6450,7 @@ function reduceCore(
            */
           kindFilter: keepFilter || keep ? state.kindFilter : NO_KINDS,
           freshLid: wantsEdit ? action.lid : null, // 非編集作成は fresh 掃除の対象外
-          error: null,
+          // 🔴 **`error` はここで消さない**(設計 doc §7、段②a)。
           // ⚠ 退かさない作成では、開いている本文もそのまま(新しい物は選ばれていないので持たない)
           openBody: keep
             ? state.openBody
