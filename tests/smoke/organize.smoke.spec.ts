@@ -87,6 +87,37 @@ test('🔴 最初はフォルダの面で開き、2 クリックで中へ入る'
   await expect(rows, '1 クリックで入ってしまった').toHaveCount(2);
 
   /**
+   * 🔴 **フォルダを選ぶと「バックアップ」が 2 つ出る ── 別の塊に分かれている**
+   *   (#1029 段 C)。
+   *
+   * ⚠ 「バックアップ(このノート)」は `when` を持たないので**フォルダでも出る** ──
+   *   つまりこの画面には**似た字のボタンが 2 つ並ぶ**。塊を分けてあるので、
+   *   その間だけ間が空いて「隣どうしだが別の物」が字を読まずに分かる。
+   * 🔑 **新しい起動は足さない**(smoke-budget)── いまフォルダを選んだこの道中に
+   *   assert を置く。⚠ unit(`tests/adapter/inspector-action-groups.test.ts`)は
+   *   happy-dom で同じ主張を見るが、**実際に両方が見えて押せる**ことは見ていない。
+   */
+  const entryBackup = page.locator(
+    '[data-pkc-field="inspector-actions"] [data-pkc-action="export-entry"]',
+  );
+  const folderBackup = page.locator(
+    '[data-pkc-field="inspector-actions"] [data-pkc-action="export-folder"]',
+  );
+  await expect(entryBackup, 'ノートのバックアップが出ていない').toBeVisible();
+  await expect(folderBackup, 'フォルダのバックアップが出ていない(畳まれている)').toBeVisible();
+  const groupOf = async (l: typeof entryBackup): Promise<string | null> =>
+    l.evaluate(
+      (el) =>
+        el.closest('[data-pkc-field="inspector-action-group"]')?.getAttribute('data-pkc-group') ??
+        null,
+    );
+  const [gEntry, gFolder] = [await groupOf(entryBackup), await groupOf(folderBackup)];
+  // ⚠ 空振り防止 ── どちらも塊の外(null)なら「違う」は成り立ってしまう
+  expect(gEntry, 'ノートのバックアップが塊の外に在る').not.toBeNull();
+  expect(gFolder, 'フォルダのバックアップが塊の外に在る').not.toBeNull();
+  expect(gFolder, `2 つのバックアップが同じ塊に在る(${String(gEntry)})`).not.toBe(gEntry);
+
+  /**
    * ③ 2 クリックで入る。
    * ⚠ **間に別の行を押して「連続」を切る** ── 押さないと、②の 1 クリックと
    *   ③の 1 打目が**続けて押した 2 回**に数えられる(閾値 500ms)。実 user も
