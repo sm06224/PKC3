@@ -162,8 +162,8 @@ const CREATE_BUTTONS: readonly { archetype: string; label: string }[] = [
    * ⚠ フォルダの**隣**に置く ── 探すときに 2 か所を見ないで済む。
    */
   { archetype: 'smart', label: 'スマートフォルダ' },
-  // 🔴 **雛形**(#196 / B-2)── 作れないと user は自分の雛形を持てない
-  { archetype: 'snippet', label: '雛形' },
+  // 🔴 **テンプレート**(#196 / B-2)── 作れないと user は自分のテンプレートを持てない
+  { archetype: 'snippet', label: 'テンプレート' },
   { archetype: 'todo', label: 'Todo' },
 ] as const;
 
@@ -219,7 +219,7 @@ export function paintTimerBar(
       const stop = iconButton('stop-timer', '止める');
       stop.setAttribute('data-pkc-timer', run.lid);
       stop.title = '計るのをやめて、そのノートの本文に作業時間を書きます';
-      const drop = iconButton('discard-timer', '捨てる');
+      const drop = iconButton('discard-timer', '書かずにやめる');
       drop.setAttribute('data-pkc-timer', run.lid);
       drop.title = '計るのをやめます(本文には書きません)';
       li.append(text, stop, drop);
@@ -976,9 +976,9 @@ export function buildShell(root: HTMLElement): ShellRegions {
   const stopBtn = iconButton('stop-capture', '止める');
   stopBtn.setAttribute('data-pkc-field', 'stop-capture');
   stopBtn.title = '録音・画面録画を止めて、いま開いているノートに入れます';
-  const dropBtn = iconButton('discard-capture', '捨てる');
+  const dropBtn = iconButton('discard-capture', '残さずにやめる');
   dropBtn.setAttribute('data-pkc-field', 'discard-capture');
-  dropBtn.title = '収録を捨てます(残しません)';
+  dropBtn.title = '収録を残さずにやめます';
   capture.append(captureText, stopBtn, dropBtn);
 
   /**

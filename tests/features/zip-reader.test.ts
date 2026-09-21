@@ -108,12 +108,12 @@ describe('readZipDirectory', () => {
     // ② 件数が印(0xffff)なのに、位置札が無い
     const buf2 = new Uint8Array(await base.arrayBuffer());
     new DataView(buf2.buffer).setUint16(buf2.length - 22 + 10, 0xffff, true);
-    await expect(readZipDirectory(new Blob([buf2]))).rejects.toThrow(/位置札/);
+    await expect(readZipDirectory(new Blob([buf2]))).rejects.toThrow(/位置情報/);
 
     // ③ 中央ディレクトリの大きさが印なのに、位置札が無い
     const buf3 = new Uint8Array(await base.arrayBuffer());
     new DataView(buf3.buffer).setUint32(buf3.length - 22 + 12, 0xffffffff, true);
-    await expect(readZipDirectory(new Blob([buf3]))).rejects.toThrow(/位置札/);
+    await expect(readZipDirectory(new Blob([buf3]))).rejects.toThrow(/位置情報/);
   });
 
   it('中央ディレクトリが件数ぶん無ければ断る(途中で切れた ZIP)', async () => {
@@ -367,7 +367,7 @@ describe('実物の ZIP が持つ形(合成 fixture では見落とす縁)', () 
     const zip = await buildZip([{ name: 'a.txt', bytes: bytesOf('0123456789') }]);
     const [e] = await readZipDirectory(zip);
     await expect(readZipEntry(zip, { ...e!, compressedSize: 4 })).rejects.toThrow(
-      /store なのにサイズ/,
+      /store なのに一致しません/,
     );
   });
 
@@ -402,7 +402,7 @@ describe('実物の ZIP が持つ形(合成 fixture では見落とす縁)', () 
     buf[41] = buf[41]! ^ 0xff;
     const zip2 = new Blob([buf]);
     const [e] = await readZipDirectory(zip2);
-    await expect(readZipEntry(zip2, e!)).rejects.toThrow(/圧縮データが壊れています|CRC/);
+    await expect(readZipEntry(zip2, e!)).rejects.toThrow(/圧縮データを展開できませんでした|CRC/);
   });
 
   /**

@@ -256,12 +256,12 @@ export class SettingsRenderer {
      *   判断(外部の画像)とは別の節である。
      */
     const pt = document.createElement('dt');
-    pt.textContent = '紙面';
+    pt.textContent = 'ページ設定';
     const pd = document.createElement('dd');
     const pselect = document.createElement('select');
     pselect.setAttribute('data-pkc-action', 'set-page-format');
     pselect.setAttribute('data-pkc-field', 'page-format-select');
-    pselect.setAttribute('aria-label', '紙面');
+    pselect.setAttribute('aria-label', 'ページ設定');
     for (const f of PAGE_FORMATS) {
       const opt = document.createElement('option');
       opt.value = f.id;
@@ -276,7 +276,7 @@ export class SettingsRenderer {
       '本文の読み幅と、印刷したときの紙の大きさが決まります。既定は A4 縦です。' +
       'フル HD を選ぶと読み幅の上限が外れ、画面の幅いっぱいまで広がります。' +
       '表・図・コードには読み幅の上限が掛かりませんが、段落と同じ左端に揃います。' +
-      '書き出した HTML は、書き出したときの紙面のまま表示されます。';
+      '書き出した HTML は、書き出したときのページ設定のまま表示されます。';
     pd.append(pnote);
     dl.append(pt, pd);
 
@@ -311,7 +311,7 @@ export class SettingsRenderer {
       '窓が本文の読み幅より広いとき、本文を列の中央に置くか、左端に置くかが決まります。' +
       '表・図・コードも段落と同じ側に揃います。' +
       '窓が読み幅より狭いときは、どちらを選んでも同じ見え方です。' +
-      '紙面が「フル HD」(読み幅の上限なし)のときも同じです。' +
+      'ページ設定が「フル HD」(読み幅の上限なし)のときも同じです。' +
       '書き出した HTML は、書き出したときの置き場所のまま表示されます。';
     pad.append(panote);
     dl.append(pat, pad);
@@ -575,7 +575,7 @@ export class SettingsRenderer {
       '添付の書庫(zip)で「中を見る」を押したとき、一覧を別の窓に出すか、' +
       'この画面の上に出すかが決まります。' +
       '別の窓なら、本文を見ながらどのファイルが要るかを確かめられます。' +
-      '同じ書庫をもう一度押すと、選んだ印はそのままで、その窓が前に出ます。' +
+      '同じ書庫をもう一度押すと、選んでいた行はそのままで、その窓が前に出ます。' +
       'ブラウザが別の窓を止めている場合は、この画面の上に出して、その理由を画面の下に出します。' +
       '⚠ 電話の画面では、どちらを選んでもこの画面に出ます(画面が 1 枚なので、' +
       '別の窓にしても本文と並べられないためです)。' +
@@ -665,7 +665,7 @@ export class SettingsRenderer {
     vnote.setAttribute('data-pkc-field', 'settings-note');
     vnote.textContent =
       '低い唸り(空調や机の振動)を削り、小さい声を持ち上げ、大きすぎる所を抑えます。' +
-      '効くのは PKC の中で鳴らすときだけです(音と動画 の面、本文に出る再生機、添付の下見の 3 か所)。' +
+      '効くのは PKC の中で鳴らすときだけです(音と動画、本文に出る再生機、添付の下見の 3 か所)。' +
       '録った音そのものは変わらないので、切ればいつでも元の聞こえ方に戻りますし、' +
       '書き出したファイルや、閲覧用に書き出した HTML は元のままです。' +
       '入れている間は音を通す仕組みが 1 つ常駐します(切っている間は作られません)。' +

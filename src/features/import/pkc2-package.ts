@@ -100,7 +100,7 @@ export async function readPkc2Package(zip: Blob): Promise<Pkc2Package> {
   // 重複は **断る**(PKC2 は first-wins + warning だが、どちらが正か決められない
   // 以上、片方を静かに捨てる方が危険 ── 設計 doc §4-D)
   if (manifests.length > 1) {
-    throw new ZipReadError(`${MANIFEST} が ${manifests.length} 個あります(壊れた ZIP)`);
+    throw new ZipReadError(`${MANIFEST} が ${manifests.length} 個あります(この ZIP は読み取れません)`);
   }
 
   let manifest: Pkc2PackageManifest;
@@ -123,10 +123,10 @@ export async function readPkc2Package(zip: Blob): Promise<Pkc2Package> {
 
   const containers = dir.filter((e) => e.name === CONTAINER);
   if (containers.length === 0) {
-    throw new ZipReadError(`${CONTAINER} が入っていません(壊れた ZIP)`);
+    throw new ZipReadError(`${CONTAINER} が入っていません(この ZIP は読み取れません)`);
   }
   if (containers.length > 1) {
-    throw new ZipReadError(`${CONTAINER} が ${containers.length} 個あります(壊れた ZIP)`);
+    throw new ZipReadError(`${CONTAINER} が ${containers.length} 個あります(この ZIP は読み取れません)`);
   }
   let container: unknown;
   try {
@@ -161,7 +161,7 @@ export async function readPkc2Package(zip: Blob): Promise<Pkc2Package> {
       continue;
     }
     if (assetSources.has(key)) {
-      throw new ZipReadError(`asset key が重複しています: ${key}(壊れた ZIP)`);
+      throw new ZipReadError(`asset key が重複しています: ${key}(この ZIP は読み取れません)`);
     }
     assetSources.set(key, { zip, entry: e });
   }

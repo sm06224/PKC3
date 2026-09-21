@@ -358,7 +358,7 @@ export function rescueArchiveSource(opts: {
         placeheld.add(m.lid);
         rows.push({
           lid: m.lid,
-          body: `# ${m.title}\n\n⚠ このノートの本文は読み出せませんでした(壊れた所に当たっています)。\n`,
+          body: `# ${m.title}\n\n⚠ このノートの本文は読み出せませんでした(読み込めない箇所に当たっています)。\n`,
         });
       }
       return { rows, done: true };
@@ -396,8 +396,8 @@ export function rescueArchiveSummary(s: RescueStats): string {
   const got =
     s.assets > 0 ? `。添付も ${s.assets} 件(${humanBytes(s.assetBytes)})入れました` : '';
   const miss: string[] = [];
-  if (s.skipped > 0) miss.push(`読めなかった区画 ${s.skipped}`);
-  if (s.empty > 0) miss.push(`空だった区画 ${s.empty}`);
+  if (s.skipped > 0) miss.push(`読み込めなかった箇所 ${s.skipped}`);
+  if (s.empty > 0) miss.push(`空だった箇所 ${s.empty}`);
   if (s.bodyMissing > 0) miss.push(`本文が読めなかったノート ${s.bodyMissing} 件`);
   // 🔴 **鍵は在るのに中身が取れなかった添付**は、黙って減らさない
   if (s.assetMissing > 0) miss.push(`中身が取れなかった添付 ${s.assetMissing} 件`);

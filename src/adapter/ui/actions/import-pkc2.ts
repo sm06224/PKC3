@@ -537,7 +537,7 @@ export async function importPkc2File(
             (
               await readWithFallback(src, zipAlternates?.get(a.oldKey!), (n) =>
                 result.warnings.push(
-                  `添付が壊れていたので ${n} 個目の複製から復元しました: ${a.oldKey}`,
+                  `添付が読み込めなかったので ${n} 個目の複製から復元しました: ${a.oldKey}`,
                 ),
               )
             ).blob,
@@ -549,7 +549,7 @@ export async function importPkc2File(
             hash: null,
           });
           result.warnings.push(
-            `大きすぎる添付は重複排除の対象外です(破損検査は行いました): ${a.oldKey}`,
+            `大きすぎる添付は重複排除の対象外です(読めるかどうかは確かめました): ${a.oldKey}`,
           );
           continue;
         }
@@ -568,7 +568,7 @@ export async function importPkc2File(
         let deflated = false;
         if (src) {
           const got = await readWithFallback(src, zipAlternates?.get(a.oldKey!), (n) =>
-            result.warnings.push(`添付が壊れていたので ${n} 個目の複製から復元しました: ${a.oldKey}`),
+            result.warnings.push(`添付が読み込めなかったので ${n} 個目の複製から復元しました: ${a.oldKey}`),
           );
           raw = await bytesOfSource(got.blob, got.src);
         } else {

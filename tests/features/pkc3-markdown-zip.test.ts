@@ -307,7 +307,7 @@ describe('md ZIP — 片道であることを書き残す', () => {
       source({ entries: [{ lid: 'n1', body: 'x' }], relations: 3, revisionLids: ['n1'] }),
       NOW,
     );
-    expect(out.warnings).toContain('関連 3 件は markdown に居場所が無いので落ちます');
+    expect(out.warnings).toContain('関連 3 件は markdown では表せないので落ちます');
     expect(out.warnings).toContain('履歴を持つノート 1 件の履歴は落ちます');
     expect(out.dropped).toEqual({ relations: 3, revisionEntries: 1 });
   });

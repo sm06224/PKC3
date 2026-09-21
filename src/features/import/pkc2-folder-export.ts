@@ -116,7 +116,7 @@ export async function readFolderExportBundle(zip: Blob): Promise<Pkc2ContainerBu
   }
   if (manifest?.format !== FOLDER_EXPORT_FORMAT) {
     throw new ZipReadError(
-      `この受理器は ${FOLDER_EXPORT_FORMAT} のみ扱えます(format=${String(manifest?.format)})`,
+      `この取り込みは ${FOLDER_EXPORT_FORMAT} のみ扱えます(format=${String(manifest?.format)})`,
     );
   }
   // v2 も受ける ── `.entry.zip` だけ飛ばして残りは取り込む(段⑥ で受理予定)
@@ -126,7 +126,7 @@ export async function readFolderExportBundle(zip: Blob): Promise<Pkc2ContainerBu
     );
   }
   if (!Array.isArray(manifest.entries)) {
-    throw new ZipReadError('manifest に entries の配列がありません(壊れた ZIP)');
+    throw new ZipReadError('manifest に entries の配列がありません(この ZIP は読み取れません)');
   }
 
   const inner = await readInnerBundles(zip, dir, manifest.entries, resolveArchetype);

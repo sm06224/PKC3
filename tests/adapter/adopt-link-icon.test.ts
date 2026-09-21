@@ -169,12 +169,12 @@ describe('押したときに何が起きるか(#856 段②)', () => {
   it('🔴 取れなかったら、理由を出す(黙って終わらない)', async () => {
     const h = setup(urlBody(), async () => ({
       ok: false as const,
-      why: 'そのサイトは印を置いていませんでした',
+      why: 'そのサイトはアイコンを置いていませんでした',
     }));
     await tick();
     h.btn()!.click();
     await tick(40);
-    expect(errorOf(h) ?? '', '理由が出ていない').toContain('印を置いていません');
+    expect(errorOf(h) ?? '', '理由が出ていない').toContain('アイコンを置いていません');
     expect(h.bodies.a1, '取れていないのに鍵を書いた').not.toContain('app_icon_asset_key');
   });
 

@@ -120,7 +120,7 @@ describe('create (P3-7a)', () => {
     expect(ta.value).toBe(seed);
     // 既定 title(日付 + 種別 + 連番)が title input に入っている
     const title = q<HTMLInputElement>('[data-pkc-field="editor-title"]')!;
-    expect(title.value).toMatch(/^\d{4}-\d{2}-\d{2} 雛形 1$/);
+    expect(title.value).toMatch(/^\d{4}-\d{2}-\d{2} テンプレート 1$/);
     // sidebar に行が生えている
     expect(qa(`[data-pkc-entry="${lid}"]`).length).toBeGreaterThan(0);
 

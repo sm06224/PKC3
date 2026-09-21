@@ -170,7 +170,7 @@ export function buildBlockPartition(
     const st = starts[i]!;
     const en = ends[i]!;
     if (st < 0 || en < st) {
-      return { ok: false, reason: `塊 ${i} の範囲が壊れている(${st}..${en})`, starts, ends, derived };
+      return { ok: false, reason: `塊 ${i} の範囲が正しくない(${st}..${en})`, starts, ends, derived };
     }
     if (st <= prevEnd) {
       return {

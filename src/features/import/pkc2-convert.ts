@@ -213,7 +213,7 @@ export function convertPkc2Container(
     for (let i = 0; takenKeys.has(k) && i < 1000; i++) k = opts.genAssetKey();
     if (takenKeys.has(k)) {
       // 1000 回引いて外れない = 生成器が壊れている。黙って上書きさせない
-      throw new Error('asset key の採番が衝突し続けています(生成器の不具合)');
+      throw new Error('asset key の採番が衝突し続けています(採番の仕組みの不具合)');
     }
     takenKeys.add(k);
     return k;
@@ -393,7 +393,7 @@ export function convertPkc2Container(
       id = genRelationId();
       for (let i = 0; takenRelIds.has(id) && i < 1000; i++) id = genRelationId();
       if (takenRelIds.has(id)) {
-        throw new Error('relation id の採番が衝突し続けています(生成器の不具合)');
+        throw new Error('relation id の採番が衝突し続けています(採番の仕組みの不具合)');
       }
     }
     takenRelIds.add(id);

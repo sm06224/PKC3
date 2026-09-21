@@ -344,13 +344,13 @@ export function buildSettingsFile(): HTMLElement {
   box.setAttribute('data-pkc-region', 'settings-file');
   const h = document.createElement('h4');
   h.textContent = '設定の持ち出し';
-  h.title = '見た目・ショートカットキーの割り当て・紙面などを、別の端末へ持っていきます(ノートは移りません)';
+  h.title = '見た目・ショートカットキーの割り当て・ページ設定などを、別の端末へ持っていきます(ノートは移りません)';
   box.append(h);
 
   const note = document.createElement('p');
   note.setAttribute('data-pkc-field', 'settings-file-note');
   note.textContent =
-    '見た目・ペインの畳み方・編集の仕方・紙面・ショートカットキーの割り当てなどを 1 つのファイルにします。ノートは入りません。許可とフラグとお知らせの既読は、その端末のものなので持っていきません。';
+    '見た目・ペインの畳み方・編集の仕方・ページ設定・ショートカットキーの割り当てなどを 1 つのファイルにします。ノートは入りません。許可とフラグとお知らせの既読は、その端末のものなので持っていきません。';
   box.append(note);
 
   const row = document.createElement('div');
@@ -484,7 +484,7 @@ function buildDbRescue(): HTMLElement {
   const box = document.createElement('section');
   box.setAttribute('data-pkc-region', 'db-rescue');
   const h = document.createElement('h4');
-  h.textContent = '中身が壊れていないか調べる';
+  h.textContent = '保存領域に問題が無いか調べる';
   box.append(h);
 
   const check = document.createElement('button');
@@ -492,7 +492,7 @@ function buildDbRescue(): HTMLElement {
   check.setAttribute('data-pkc-action', 'db-check');
   check.setAttribute('data-pkc-field', 'db-check-run');
   check.textContent = DB_CHECK_LABEL;
-  check.title = '壊れている所があるかを調べます。中身が多いと数分かかります';
+  check.title = '保存領域に問題が無いかを調べます。中身が多いと数分かかります';
   box.append(check);
 
   /**
@@ -504,7 +504,7 @@ function buildDbRescue(): HTMLElement {
   checkNote.setAttribute('data-pkc-field', 'db-check-run-note');
   checkNote.className = 'settings-note';
   checkNote.textContent =
-    '壊れている所があるかを調べます。中身が多いと数分かかります。何も書き換えません。' +
+    '保存領域に問題が無いかを調べます。中身が多いと数分かかります。何も書き換えません。' +
     `保存領域に問題があるときは、左下の「${BACKUP_LABEL}」を押すと、いつもどおり読める分だけを集めて書き出します。`;
   box.append(checkNote);
 

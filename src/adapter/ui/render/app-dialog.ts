@@ -514,7 +514,7 @@ export function pickSnippetInApp(
   note: string,
 ): Promise<SnippetChoice | null> {
   return pickRowInApp(host, {
-    title: '雛形を入れる',
+    title: 'テンプレートを入れる',
     field: 'pick-snippet',
     indexAttr: 'data-pkc-snippet-index',
     note,

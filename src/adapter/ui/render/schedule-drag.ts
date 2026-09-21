@@ -185,14 +185,14 @@ function moveRepeat(
     dispatcher.dispatch({ type: 'OP_FAILED', error });
   };
   if (dropDate === '') {
-    deny('繰り返しの予定は「日付なし」へは動かせません(札の「この繰り返しをやめる」で外せます)');
+    deny('繰り返しの予定は「日付なし」へは動かせません(カードの「この繰り返しをやめる」で外せます)');
     return;
   }
   const line = Number(grabbed.line);
   if (!Number.isInteger(line)) return;
   const from = grabbed.from;
   if (from === '') {
-    deny('どの回を動かすのか分かりませんでした(もう一度、札を掴み直してください)');
+    deny('どの回を動かすのか分かりませんでした(もう一度、カードを掴み直してください)');
     return;
   }
   const days = daysBetween(from, dropDate);

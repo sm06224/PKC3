@@ -41,7 +41,7 @@ export const RELATION_LABELS: Readonly<Record<RelationKind, string>> = {
   categorical: '分類',
   temporal: '時系列',
   provenance: '出典',
-  structural: '居場所',
+  structural: 'フォルダ',
 };
 
 export function isRelationKind(v: string): v is RelationKind {

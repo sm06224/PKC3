@@ -87,9 +87,9 @@ const ATTACHMENT_LID = (key: string): string => `bundle-att-${key}`;
 /** 同名が複数あるものを 1 件に絞る(0 件も 2 件以上も断る)。 */
 export function onlyEntry(dir: readonly ZipEntry[], name: string): ZipEntry {
   const hits = dir.filter((e) => e.name === name);
-  if (hits.length === 0) throw new ZipReadError(`${name} が入っていません(壊れた ZIP)`);
+  if (hits.length === 0) throw new ZipReadError(`${name} が入っていません(この ZIP は読み取れません)`);
   if (hits.length > 1) {
-    throw new ZipReadError(`${name} が ${hits.length} 個あります(壊れた ZIP)`);
+    throw new ZipReadError(`${name} が ${hits.length} 個あります(この ZIP は読み取れません)`);
   }
   return hits[0]!;
 }
@@ -196,7 +196,7 @@ export interface SynthRelation {
 
 /** compact mode の warning(batch は export 単位の性質なので 1 回だけ出す)。 */
 export const COMPACTED_WARNING =
-  '書出し時に壊れた添付参照が本文から除かれています(compact mode)';
+  '書出し時に解決できない添付参照が本文から除かれています(compact mode)';
 
 /**
  * 合成 container を組む(§2-5)。attachment × N + 本体 × M。

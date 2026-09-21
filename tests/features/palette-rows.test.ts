@@ -23,6 +23,33 @@ describe('操作を名前で探す(一覧)', () => {
     expect(rows.map((r) => r.id)).toEqual(KEY_COMMANDS.map((c) => c.id));
   });
 
+  /**
+   * 🔴 **画面から消した呼び名でも、探せば当たる**(#1017 段⑤-2 / #690 I5)。
+   *
+   * ⚠ 「小窓」は画面の字としては**使わない語**なので消したが、user は
+   *   **その言葉で憶えている**(#690 で user 自身が探した語である)。
+   *   消しただけだと「**探しても出てこない**」= 動線が 1 つ減る
+   *   (user 裁定 2026-08-07「記法の縮小は user の動線の縮小」と同じ向き)。
+   * 🔑 だから `alias` に残す ── **描画では読まない**ので画面には出ない。
+   * ⚠ この検査が無いと、次に `alias` を消した人が**何も落ちないまま**動線を消せる
+   *   (実際 1 稿目は配線だけ在って検査が 1 つも無かった)。
+   */
+  it('🔴 画面から消した旧い呼び名(小窓)でも、探せば当たる', () => {
+    const hit = idsOf('小窓');
+    expect(hit, '旧い呼び名で探せない ── 画面から消した語の行き先が無い').toContain(
+      'open-note-window',
+    );
+    // ⚠ 空振り防止 ── 全部返っているなら「当たった」は何も言わない
+    expect(hit.length, '絞れていない(全部返っている)').toBeLessThan(KEY_COMMANDS.length);
+  });
+
+  it('⚠ その呼び名は**画面には出ない**(alias は描画で読まない)', () => {
+    const cmd = findCommand('open-note-window');
+    expect(cmd, '相手の命令が無い(空振り)').toBeDefined();
+    expect(cmd?.label ?? '', '画面の字に旧い呼び名が戻っている').not.toContain('小窓');
+    expect(cmd?.note ?? '', '説明に旧い呼び名が戻っている').not.toContain('小窓');
+  });
+
   it('🔴 名前で絞れる ── 当たらないものは落ちる', () => {
     const hit = idsOf('ヘルプ');
     expect(hit, '名前で当たっていない').toContain('open-help');

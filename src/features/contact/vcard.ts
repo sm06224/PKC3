@@ -387,7 +387,7 @@ export function parseVcf(text: string): VcfParseResult {
     if (qpOut?.broken === true && !cur.qpSaid) {
       cur.qpSaid = true;
       warnings.push(
-        `${cardNo()} 枚目: 文字が壊れている所がありました(元の .vcf の書き方が古いのかもしれません)`,
+        `${cardNo()} 枚目: 文字を正しく読み取れない所がありました(元の .vcf の書き方が古いのかもしれません)`,
       );
     }
     const decoded = unescapeValue(qpOut?.text ?? prop.value).trim();

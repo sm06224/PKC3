@@ -252,12 +252,12 @@ export function checkReadOnlySql(input: string): SqlCheck {
     if (head === 'pragma') {
       return {
         ok: false,
-        why: 'PRAGMA はこの面では使えません(列を調べるなら SELECT * FROM pragma_table_info(\'entries\') と打ちます)',
+        why: 'PRAGMA はここでは使えません(列を調べるなら SELECT * FROM pragma_table_info(\'entries\') と打ちます)',
         sql,
       };
     }
     if (WRITE_WORDS.includes(head as (typeof WRITE_WORDS)[number])) {
-      return { ok: false, why: `読み取り専用です ── ${shown} は打てません(この面は読むだけです)`, sql };
+      return { ok: false, why: `読み取り専用です ── ${shown} は打てません(ここは読むだけです)`, sql };
     }
     return {
       ok: false,
@@ -292,7 +292,7 @@ export function checkReadOnlySql(input: string): SqlCheck {
   if (hit !== undefined) {
     return {
       ok: false,
-      why: `読み取り専用です ── ${hit.toUpperCase()} は打てません(この面は読むだけです)`,
+      why: `読み取り専用です ── ${hit.toUpperCase()} は打てません(ここは読むだけです)`,
       sql,
     };
   }

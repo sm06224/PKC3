@@ -128,12 +128,12 @@ export function buildFormatBar(): HTMLElement {
   const insertSnippet = document.createElement('button');
   insertSnippet.type = 'button';
   insertSnippet.setAttribute('data-pkc-action', 'insert-snippet');
-  insertSnippet.setAttribute(HINT_BASE, '雛形を入れる');
+  insertSnippet.setAttribute(HINT_BASE, 'テンプレートを入れる');
   insertSnippet.setAttribute(HINT_COMMAND, 'insert-snippet');
-  insertSnippet.title = hintTitle('雛形を入れる', 'insert-snippet');
+  insertSnippet.title = hintTitle('テンプレートを入れる', 'insert-snippet');
   const insertSnippetLabel = document.createElement('span');
   insertSnippetLabel.setAttribute('data-pkc-field', 'label');
-  insertSnippetLabel.textContent = '雛形';
+  insertSnippetLabel.textContent = 'テンプレート';
   insertSnippet.append(insertSnippetLabel);
   bar.append(insertSnippet);
 

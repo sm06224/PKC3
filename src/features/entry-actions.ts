@@ -952,7 +952,7 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
   // 🔴 **左の列の行からの整理 3 つ**(#215)。⚠ どれも**画面で起きること**で書く
   //    (user 指示 2026-08-21)── 「改名モードへ遷移」ではなく「入力欄が出る」
   'rename-entry-begin': '行の題名の所に入力欄が出ます。Enter で確定、Esc でやめます',
-  'move-to-folder': 'フォルダの一覧から入れ先を選びます。印が複数あれば、その全部を移します',
+  'move-to-folder': 'フォルダの一覧から入れ先を選びます。選択が複数あれば、その全部を移します',
   'create-in-folder': 'このフォルダの中に新しいノートを作って、そのまま編集に入ります',
 };
 

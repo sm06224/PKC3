@@ -346,7 +346,7 @@ export async function readArchive(zip: Blob): Promise<Pkc3Archive> {
 
   const only = (name: string): import('../import/zip-reader').ZipEntry => {
     const hits = dir.filter((e) => e.name === name);
-    if (hits.length === 0) throw new ZipReadError(`${name} が入っていません(壊れた ZIP)`);
+    if (hits.length === 0) throw new ZipReadError(`${name} が入っていません(この ZIP は読み取れません)`);
     if (hits.length > 1) throw new ZipReadError(`${name} が ${hits.length} 個あります`);
     return hits[0]!;
   };

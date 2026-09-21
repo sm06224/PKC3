@@ -64,7 +64,7 @@ export const CONTEXT_LABELS: Readonly<Record<KeyContext, string>> = {
   global: '画面のどこでも',
   editor: '2 ペインの編集(原文と題名の欄)',
   append: '追記の欄',
-  row: '1 面の編集(開いている行の欄)',
+  row: '行の編集(開いている行の欄)',
   live: '1 画面での編集(画面ぜんたい)',
   /**
    * ⚠ **2 ペインでも効く**(2026-08-20)── 開く / ゴミ箱 / 行送りは両方の面で
@@ -114,6 +114,13 @@ export interface KeyCommand {
   readonly whileTyping?: boolean;
   /** ヘルプに出す 1 行の説明(無ければ label だけ出す)。 */
   readonly note?: string;
+  /**
+   * 🔑 **画面には出さない、探すためだけの呼び名の揺れ**(#690 I5)。
+   * ⚠ 一覧の検索は `label` / `note` に加えてここも見るので、user がどの言葉で
+   *   覚えていても当たる ── ただし `note` と違って**描画では読まない**ので、
+   *   画面には出ない字をここへ置ける(§6.1 の名前の規則は「画面の字」が対象)。
+   */
+  readonly alias?: string;
 }
 
 /**
@@ -205,7 +212,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    */
   {
     id: 'insert-snippet',
-    label: '雛形を入れる',
+    label: 'テンプレートを入れる',
     contexts: ['global'],
     defaults: ['Mod+Slash'],
     whileTyping: true,
@@ -246,7 +253,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['filer', 'dual'],
     // ⚠ `F8` は古典 4 実装が一致している鍵 ── 操作行にもそう書いてある
     defaults: ['Delete', 'F8'],
-    note: 'ゴミ箱からいつでも戻せます(印が無ければカーソルの行)',
+    note: 'ゴミ箱からいつでも戻せます(選択が無ければカーソルの行)',
   },
   {
     id: 'filer-select-all',
@@ -269,7 +276,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     label: '次の行へ',
     contexts: ['filer', 'dual'],
     defaults: ['ArrowDown'],
-    note: '2 ペインではカーソルだけが動きます(印は Space)',
+    note: '2 ペインではカーソルだけが動きます(選択は Space)',
   },
   {
     id: 'filer-row-up',
@@ -311,7 +318,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     label: '移す…(入れ先のフォルダを選ぶ)',
     contexts: ['filer'],
     defaults: ['F6'],
-    note: '印があれば、その全部を移します',
+    note: '選択があれば、その全部を移します',
   },
   {
     id: 'filer-new-in-folder',
@@ -330,10 +337,10 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    */
   {
     id: 'dual-mark',
-    label: '印を付ける / 外して次の行へ',
+    label: '選択する / 外して次の行へ',
     contexts: ['dual'],
     defaults: ['Space', 'Insert'],
-    note: 'カーソルは印と別です ── 見て回るのは矢印、選ぶのは Space',
+    note: 'カーソルは選択と別です ── 見て回るのは矢印、選ぶのは Space',
   },
   {
     id: 'dual-copy-to-other',
@@ -341,14 +348,14 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     label: '反対のペインへコピー',
     contexts: ['dual'],
     defaults: ['F5'],
-    note: '元は残ります(印が無ければカーソルの行)',
+    note: '元は残ります(選択が無ければカーソルの行)',
   },
   {
     id: 'dual-move-to-other',
     label: '反対のペインへ移す',
     contexts: ['dual'],
     defaults: ['F6'],
-    note: '印が無ければカーソルの行が動きます',
+    note: '選択が無ければカーソルの行が動きます',
   },
   {
     id: 'dual-rename',
@@ -377,7 +384,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     label: 'いまの場所にノートを作る',
     contexts: ['dual'],
     defaults: ['Shift+F4'],
-    note: '作っても本文の面へは移りません(整理を続けられます)',
+    note: '作っても本文へは移りません(整理を続けられます)',
   },
   {
     id: 'dual-other-pane',
@@ -406,7 +413,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    */
   {
     id: 'view-detail',
-    label: '本文の面へ',
+    label: '本文へ',
     contexts: ['global'],
     defaults: ['Alt+1', 'Mod+Alt+1'],
     whileTyping: true,
@@ -414,7 +421,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'view-query',
-    label: '集計の面へ',
+    label: '集計へ',
     contexts: ['global'],
     defaults: ['Alt+2', 'Mod+Alt+2'],
     whileTyping: true,
@@ -438,7 +445,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'open-settings',
-    label: 'システムの面へ',
+    label: 'システムへ',
     contexts: ['global'],
     defaults: ['Alt+3', 'Mod+Comma'],
     /**
@@ -460,7 +467,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'open-flags',
-    label: 'フラグの面へ',
+    label: 'フラグへ',
     contexts: ['global'],
     defaults: ['Alt+4', 'F12'],
     whileTyping: true,
@@ -503,7 +510,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'open-help',
-    label: 'ヘルプの面へ',
+    label: 'ヘルプへ',
     contexts: ['global'],
     defaults: ['F1', 'Alt+5', 'Mod+Shift+Slash'],
     whileTyping: true,
@@ -516,8 +523,9 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    *   一覧は `KEY_COMMANDS` から出るので、鍵の無い操作は**名前で探せない**。
    *   右クリック / ⋯ / 右の情報にしか無い物は、置き場を知らない人には無いのと同じである。
    * 🔑 受け手は情報ペインのボタン(`binder.ts` の `SHORTCUT_BUTTON`)── 押し方を
-   *   増やさない。⚠ `note` に**呼び名の揺れ**(小窓 / 付箋)を書く ── 一覧の検索は
-   *   `label` と `note` を見るので、user がどの言葉で覚えていても当たる。
+   *   増やさない。⚠ `alias` に**呼び名の揺れ**(旧称)を書く ── 一覧の検索は
+   *   `label` / `note` / `alias` を見るので、user がどの言葉で覚えていても当たる
+   *   (2026-09-21、#1017 段⑤-2:旧称は画面には出ない字なので `alias` へ移した)。
    * ⚠ 既定の鍵は**空にできない**(この表の規則)── `Alt+Shift+W`(Window)は
    *   他のどの既定とも重ならず、ブラウザも取らない。⚠ 文字を打っている間は止まる
    *   (`whileTyping` を付けない)── 編集中に窓が開くと下書きが割れる。
@@ -527,7 +535,8 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     label: '別のウィンドウで開く',
     contexts: ['global'],
     defaults: ['Alt+Shift+W'],
-    note: '開いているノートだけを別のウィンドウ(小窓)で開きます。付箋のように何枚でも並べられます',
+    note: '開いているノートだけを別のウィンドウで開きます。付箋のように何枚でも並べられます',
+    alias: '小窓',
   },
   /**
    * 🔴 **スタックを鍵とパレットから呼ぶ**(#633 段②。user 裁定 2026-08-30
@@ -571,7 +580,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    */
   {
     id: 'view-dual',
-    label: '2 ペインの面へ',
+    label: '2 ペインへ',
     contexts: ['global'],
     /**
      * 🔴 **わきの面は打鍵中でも開く**(U-8。上の `open-settings` と同じ理由)。
@@ -584,7 +593,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
      */
     defaults: ['Alt+6', 'Mod+Alt+6'],
     whileTyping: true,
-    note: '別の場所を左右に開いて、まとめて移す面です(文字を打っている間に効くのは Mod+Alt+6 のほうです)',
+    note: '別の場所を左右に開いて、まとめて移す画面です(文字を打っている間に効くのは Mod+Alt+6 のほうです)',
   },
   /**
    * 🔴 **SQL の面にも戻り道を置く**(#681 段②、2026-09-09 の動線レビュー)。
@@ -600,11 +609,11 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    */
   {
     id: 'view-sql',
-    label: 'SQL の面へ',
+    label: 'SQL へ',
     contexts: ['global'],
     defaults: ['Alt+7', 'Mod+Alt+7'],
     whileTyping: true,
-    note: 'SQL を打って答えを表で見る面です(文字を打っている間に効くのは Mod+Alt+7 のほうです)',
+    note: 'SQL を打って答えを表で見る画面です(文字を打っている間に効くのは Mod+Alt+7 のほうです)',
   },
   {
     id: 'toggle-sidebar',
@@ -675,7 +684,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['global', 'dual'],
     defaults: ['Alt+ArrowLeft'],
     whileTyping: true,
-    note: '2 ペインの面では、そのタブが 1 つ前に見ていた場所へ戻ります',
+    note: '2 ペインでは、そのタブが 1 つ前に見ていた場所へ戻ります',
   },
   {
     id: 'nav-forward',
@@ -683,7 +692,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['global', 'dual'],
     defaults: ['Alt+ArrowRight'],
     whileTyping: true,
-    note: '2 ペインの面では、戻る前に見ていた場所へ進みます',
+    note: '2 ペインでは、戻る前に見ていた場所へ進みます',
   },
   /**
    * 🔴 **下見(選んだ行の中身を、その場で見る)**(#273 残件)。
@@ -790,7 +799,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     label: '表',
     contexts: ['editor', 'row'],
     defaults: [],
-    note: '選んでいれば、選んだ行を表にします(選んでいなければ 2 列の雛形)',
+    note: '選んでいれば、選んだ行を表にします(選んでいなければ 2 列のテンプレート)',
   },
   {
     id: 'format-codeblock',

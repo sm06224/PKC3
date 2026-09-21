@@ -89,7 +89,7 @@ async function tryOne(url: string, deps: FaviconDeps): Promise<Blob | null> {
 export async function fetchFavicon(pageUrl: string, deps: FaviconDeps): Promise<FaviconOutcome> {
   // ── 段 1:決まった場所 ──────────────────────────────
   const well = wellKnownIconUrl(pageUrl);
-  if (well === null) return { ok: false, why: 'このアドレスからは印を探せません' };
+  if (well === null) return { ok: false, why: 'このアドレスからはアイコンを探せません' };
   try {
     const blob = await tryOne(well, deps);
     if (blob !== null) return { ok: true, blob, from: well, step: 1 };
@@ -105,9 +105,9 @@ export async function fetchFavicon(pageUrl: string, deps: FaviconDeps): Promise<
     return { ok: false, why: whyOf(e) };
   }
   const picks = iconPicksFromDocument(doc, pageUrl);
-  if (picks.length === 0) return { ok: false, why: 'そのサイトは印を置いていませんでした' };
+  if (picks.length === 0) return { ok: false, why: 'そのサイトはアイコンを置いていませんでした' };
 
-  let last = '取れた印が画像ではありませんでした';
+  let last = '取れたアイコンが画像ではありませんでした';
   for (const pick of picks.slice(0, MAX_TRIES)) {
     try {
       const blob = await tryOne(pick.url, deps);
@@ -141,7 +141,7 @@ export function externalImageBlockReason(mode: ExternalImageMode): string | null
 }
 
 /** 取り込んだ印の名乗り(#856 段②)。⚠ 添付の一覧に**何の絵か**が出る。 */
-export const LINK_ICON_PREFIX = 'リンクの印';
+export const LINK_ICON_PREFIX = 'リンクのアイコン';
 
 export interface AdoptLinkIconDeps extends FaviconDeps {
   /**

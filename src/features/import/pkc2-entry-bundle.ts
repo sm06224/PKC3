@@ -79,7 +79,7 @@ export async function readEntryBundleParts(
   }
   if (manifest?.format !== ENTRY_BUNDLE_FORMAT) {
     throw new ZipReadError(
-      `この受理器は ${ENTRY_BUNDLE_FORMAT} のみ扱えます(format=${String(manifest?.format)})`,
+      `この取り込みは ${ENTRY_BUNDLE_FORMAT} のみ扱えます(format=${String(manifest?.format)})`,
     );
   }
   if (manifest.version !== 1) {
@@ -129,7 +129,7 @@ export async function readEntryBundleParts(
       continue;
     }
     if (assets.has(key)) {
-      throw new ZipReadError(`asset key が重複しています: ${key}(壊れた ZIP)`);
+      throw new ZipReadError(`asset key が重複しています: ${key}(この ZIP は読み取れません)`);
     }
     assets.set(key, {
       source: { zip, entry: e, base64: true },

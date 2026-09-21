@@ -501,8 +501,8 @@ export function rebuildDoneMessage(r: RebuildReport): string {
     );
   }
   const miss: string[] = [];
-  if (r.rescued.skipped > 0) miss.push(`読めなかった区画 ${r.rescued.skipped}`);
-  if (r.rescued.empty > 0) miss.push(`空だった区画 ${r.rescued.empty}`);
+  if (r.rescued.skipped > 0) miss.push(`読み込めなかった箇所 ${r.rescued.skipped}`);
+  if (r.rescued.empty > 0) miss.push(`空だった箇所 ${r.rescued.empty}`);
   const head = `${r.restored} 件を戻しました${miss.length === 0 ? '' : `(${miss.join(' / ')})`}`;
   // 🔑 添付は「触っていない」と言う ── 数ではなく**事実**が知りたい所である
   const kept =
@@ -563,9 +563,9 @@ export function rebuildExplainMessage(opts: {
     '⚠ 始めると、途中で止めることはできません。',
     '',
     '残るもの',
-    `・いま一覧に出ている ${notes} 件のノート(題名・本文・タグ・チェックの印)`,
+    `・いま一覧に出ている ${notes} 件のノート(題名・本文・タグ・チェック)`,
     attach,
-    '・設定・見た目・ショートカットキーの割り当て・読んだお知らせの印',
+    '・設定・見た目・ショートカットキーの割り当て・読んだお知らせの記録',
     '',
     '🔴 戻らないもの',
     // ⚠ 呼び名は `REBUILD_LOST` から引く ── 終わった後の字と食い違わせない
@@ -581,7 +581,7 @@ export function rebuildExplainMessage(opts: {
      */
     '⚠ 戻した後は、ノートがフォルダの外の一覧にまとめて並びます(フォルダそのものは空で残ります)。',
     // ⚠ 見えている数 ≠ 在る数(壊れているときは一覧そのものが引けていないことがある)
-    '⚠ 壊れているときは、一覧に出ていない分を集められないことがあります。',
+    '⚠ 読めない所があるときは、一覧に出ていない分を集められないことがあります。',
     '',
     // ⚠ 黙って他のタブを読み込み直さない ── 先に言う
     '⚠ 同じ PKC を開いている他のタブも、読み込み直されます。',

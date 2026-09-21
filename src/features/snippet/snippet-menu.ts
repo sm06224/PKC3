@@ -99,12 +99,12 @@ export function snippetMenu(items: readonly SnippetItem[]): readonly SnippetChoi
  */
 export function snippetMenuNote(scan: SnippetScan | null): string {
   // ⚠ `null` は「読み込み前」と「読めなかった」の両方 ── どちらとも取れる字にする
-  if (scan === null) return '自分の雛形は取れていません。組み込みの雛形は使えます。';
+  if (scan === null) return '自分のテンプレートは取れていません。組み込みのテンプレートは使えます。';
   if (scan.truncated)
-    return `雛形が多いので、${SNIPPET_LIMITS.notes} 件までにしています。`;
+    return `テンプレートが多いので、${SNIPPET_LIMITS.notes} 件までにしています。`;
   if (scan.items.length === 0 && scan.total > 0)
-    return '雛形のノートはありますが、中身が空か長すぎるので出せません。';
+    return 'テンプレートのノートはありますが、中身が空か長すぎるので出せません。';
   if (scan.items.length === 0)
-    return 'まだ自分の雛形がありません。左上の作成から「雛形」を選ぶと作れます。';
+    return 'まだ自分のテンプレートがありません。左上の作成から「テンプレート」を選ぶと作れます。';
   return '';
 }

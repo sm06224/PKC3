@@ -108,7 +108,7 @@ export class SearchRenderer {
       open.setAttribute('data-pkc-action', 'open-note-window');
       open.setAttribute('data-pkc-entry', row.lid);
       open.setAttribute('data-pkc-field', 'search-row');
-      open.title = 'このノートを別のウィンドウ(小窓)で開きます。いま読んでいる本文はそのままです';
+      open.title = 'このノートを別のウィンドウで開きます。いま読んでいる本文はそのままです';
       const title = document.createElement('span');
       title.setAttribute('data-pkc-field', 'search-row-title');
       title.textContent = row.title === '' ? '(題名なし)' : row.title;
