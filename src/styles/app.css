@@ -810,9 +810,14 @@ select:focus-visible {
  * ⚠ 寸法は**隣のボタンと同じ**にする ── 帯にいた頃は薄い帯に合わせて 20px /
  * 11px だったので、そのまま持ってくると 1 つだけ小さいボタンになる
  * (「図案つきボタンの高さが揃っている」が実際に落ちた)。
- * ⚠ 役割が違うので**区切り線**を引く(一覧の操作 ↔ アプリ全体の操作) */
+ * 🔴 **役割の切れ目は「線」ではなく「間」で出す**(#1029 段 B、2026-09-21)。
+ * ⚠ 直す前は `border-top` の 1 本線だった ── 右の列の操作は間で切っているので、
+ *   **同じアプリの中に 2 つの作法が同居していた**。どちらかに倒すなら
+ *   **間**である(user 指示 2026-08-03「地は無彩色、色は情報にだけ」── 線は情報ではない)。
+ * ⚠ ボタンは枠を持たないので、**目に入るのは字の間隔**である ── 下地が同じ色でも
+ *   間は読める(線を引かなくても切れ目は伝わる)。 */
 [data-pkc-field='app-settings'] {
-  border-top: 1px solid var(--border);
+  margin-top: var(--s3);
 }
 [data-pkc-field='app-settings'][data-pkc-active] {
   background: var(--accent-dim);
@@ -1398,7 +1403,11 @@ select:focus-visible {
 [data-pkc-region='collection-bar'] button:not(:focus-visible),
 [data-pkc-region='create-bar'] button:not(:focus-visible),
 [data-pkc-region='create-menu'] button:not(:focus-visible),
-[data-pkc-region='inspector'] [data-pkc-field='inspector-actions'] button:not(:focus-visible) {
+[data-pkc-region='inspector'] [data-pkc-field='inspector-actions'] button:not(:focus-visible),
+/* 🔴 **塊の中のボタンも同じ輪に乗せる**(#1029 段 B)── 塊は折り返す器なので、
+ * ここに書かないと『輪の規則に乗っていない帯』として検査が落ちる。
+ * ⚠ 実害のほうが本体である:乗せ忘れると**塊の中だけ区切りが消えて 1 枚の板に見える**。 */
+[data-pkc-region='inspector'] [data-pkc-field='inspector-action-group'] button:not(:focus-visible) {
   outline: 1px solid var(--border);
   outline-offset: 0;
 }
@@ -1897,9 +1906,27 @@ li[data-pkc-row-slot] {
 [data-pkc-region='inspector'] [data-pkc-field='inspector-actions'] {
   display: flex;
   flex-wrap: wrap;
-  gap: 1px;
+  /**
+   * 🔴 **塊の間だけ空ける**(#1029 段 B)── 塊の中は 1px のまま。
+   * ⚠ 間の大きさは**字 1 つ分より広く**する(`--s3` = 0.5rem)── 狭いと
+   *   「詰まっている所」と「切れ目」が見分けられず、切った意味が消える。
+   * 🔑 区切り線は引かない ── 線を足すより、**間のほうが静か**である
+   *   (user 指示 2026-08-03「地は無彩色、色は情報にだけ」)。
+   */
+  gap: 1px var(--s3);
   background: var(--surface);
   border-top: 1px solid var(--border);
+}
+/**
+ * 🔴 **塊そのもの**(#1029 段 B)。⚠ **塊も折り返す** ── 折り返せないと、
+ *   狭い列で塊ごと溢れて「在るのに見えない」が起きる(段⓪ の実測と同じ型)。
+ * ⚠ 塊の中の間は **1px のまま**(直す前の見た目を塊の内側に残す)。
+ */
+[data-pkc-region='inspector'] [data-pkc-field='inspector-action-group'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px;
+  background: var(--surface);
 }
 [data-pkc-region='inspector'] [data-pkc-field='inspector-actions'] button {
   border: none;
@@ -5669,19 +5696,30 @@ li[data-pkc-row-slot] {
   min-height: 32px;
   padding: 0 var(--s3);
 }
-/* 🔴 **知らせの隣の「開く」**(#668 A)。⚠ 出し入れは `status-open.ts` が `hidden` で持つ。
- *   状態の行は 20px なので、OK と同じ 32px にはしない(帯を太らせない)。 */
+/**
+ * 🔴 **知らせの隣の「開く」**(#668 A)。⚠ 出し入れは `status-open.ts` が `hidden` で持つ。
+ *
+ * 🔴 **`min-height: 18px` を落とした**(#1029 段 B、2026-09-21)── **一度も効いていなかった**。
+ * ⚠ 素の `button` が `height` / `min-height` / `max-height` を **3 つとも `--row-h` に固定**
+ *   しているので、下限だけ 18px へ下げても**高さは動かない**。
+ * ⚠ 注釈は「状態の行は 20px なので、OK と同じ 32px にはしない(帯を太らせない)」と
+ *   書いてあったが、**その意図はこの 1 行では実現できていない**
+ *   (CLAUDE.md「『これが無いと壊れる』と書いた規則が no-op だった」の 3 例目)。
+ * 🔑 実ブラウザで測った値(2026-09-21、`getBoundingClientRect`):
+ *   **マウス 26px / 指の端末 34px**。どちらも 18px は 1px も効いていない。
+ * ⚠ だから**消す**(残すと、次に読む人が「ここは 18px だ」と読む)。丈を本当に
+ *   変えたいなら `height` を書く ── ただしそれは**見え方の変更**なので user の裁定が要る。
+ */
 [data-pkc-field='status-open'] {
   flex: 0 0 auto;
-  min-height: 18px;
   padding: 0 var(--s2);
   font-size: 11px;
 }
-/* 🔴 **知らせの隣の「元に戻す」**(#684 段①。塊を動かした直後)── 「開く」と同じ寸法。
+/* 🔴 **知らせの隣の「元に戻す」**(#684 段①。塊を動かした直後)── 「開く」と同じ寸法
+ *   (上の注記のとおり、効いていない `min-height` はこちらからも落とした)。
  *   ⚠ 出し入れは `status-open.ts` が `hidden` で持つ。 */
 [data-pkc-field='status-undo'] {
   flex: 0 0 auto;
-  min-height: 18px;
   padding: 0 var(--s2);
   font-size: 11px;
 }
