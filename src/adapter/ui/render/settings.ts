@@ -1026,6 +1026,9 @@ export class SettingsRenderer {
     count.setAttribute('data-pkc-field', 'copy-history-count');
     this.copyHistoryCount = count;
     wrap.append(count);
+    // ⚠ 「消す」は binder が store を直に触るので、状態変化では描き直されない ──
+    //    store の通知で件数の字を合わせる(器は 1 度しか組まないので購読も 1 度)
+    appCopyHistory.onChange(() => this.syncCopyHistory());
 
     const note = document.createElement('p');
     note.setAttribute('data-pkc-field', 'settings-note');

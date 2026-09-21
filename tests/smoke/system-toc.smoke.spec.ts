@@ -25,6 +25,13 @@ test('🔴 「システム」の目次: お知らせが読め、押すと移動�
 }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1280, height: 900 });
+  // ⑥ の台:コピーの履歴を 1 件だけ持って起動する(store は起動時に 1 度読む)
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'pkc3.copy.history',
+      JSON.stringify([{ at: 1, text: 'smoke の下ごしらえ', html: '' }]),
+    );
+  });
   await gotoApp(page);
 
   // ⚠ hash は最初から動かないはず ── 起動直後の値を基準にする
@@ -136,6 +143,25 @@ test('🔴 「システム」の目次: お知らせが読め、押すと移動�
   expect(tocBox!.y, `「上へ」を押しても目次が画面の上のほうに来ていない(y=${tocBox!.y})`).toBeLessThan(
     300,
   );
+
+  // ⑥ 🔴 記録 → 「コピーの履歴を消す」(#1017 段③-1 で足した押し口)。
+  //    ⚠ 件数の字は `render()` の外で変わる ── 押した後に **その場で** 0 件に
+  //    なることまで見る(状態変化に乗らないので、通知が無いと古い字が残る)
+  const copyCount = page.locator(
+    '[data-pkc-region="settings-copy-history"] [data-pkc-field="copy-history-count"]',
+  );
+  await expect(copyCount, '台の前提が崩れている(1 件で起動していない)').toHaveText(
+    'いま 1 件あります。',
+  );
+  await clickReal(
+    page,
+    '[data-pkc-region="settings-copy-history"] [data-pkc-action="clear-copy-history"]',
+  );
+  await expect(copyCount, '消したのに件数の字が古いまま').toHaveText('いまは 0 件です。');
+  expect(
+    await page.evaluate(() => localStorage.getItem('pkc3.copy.history')),
+    '消したのに端末に残っている',
+  ).toBeNull();
 
   // ⑤ 🔴 ここまでの一連の操作で hash は 1 度も変わっていない(ディープリンク専用)
   const hashAfter = await page.evaluate(() => location.hash);

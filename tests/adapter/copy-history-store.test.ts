@@ -65,6 +65,28 @@ describe('積む・消す', () => {
     expect(f.read(), '消したのに置き場に残っている').toBeNull();
   });
 
+  it('🔴 変わったら知らせる(積む / 1 件消す / 全部消す)── 外した後は鳴らない(#1017 段③-1)', () => {
+    const f = fake();
+    const s = new CopyHistoryStore(f.storage);
+    let n = 0;
+    const off = s.onChange(() => {
+      n += 1;
+    });
+    s.push(item('a'));
+    expect(n, '積んだのに鳴らない').toBe(1);
+    s.drop('a');
+    expect(n, '1 件消したのに鳴らない').toBe(2);
+    s.push(item('b'));
+    s.clear();
+    expect(n, '全部消したのに鳴らない').toBe(4);
+    // ⚠ 空を積んでも鳴らない(書きに行かない = 変わっていない)
+    s.push(item(''));
+    expect(n, '変わっていないのに鳴った').toBe(4);
+    off();
+    s.push(item('c'));
+    expect(n, '外したのに鳴った').toBe(4);
+  });
+
   it('⚠ 空は積まないし、書きにも行かない(無駄な書込をしない)', () => {
     const f = fake();
     const s = new CopyHistoryStore(f.storage);
