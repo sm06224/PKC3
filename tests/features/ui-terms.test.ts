@@ -164,7 +164,7 @@ describe('画面の字に使わない語(ui-terms.ts の BANNED_TERMS)', () => {
     ['src/features/notice/notice-log.ts', '捨てる', 7],
     ['src/features/notice/notice-log.ts', '最後の手', 3],
     ['src/features/notice/notice-log.ts', '札', 2],
-    ['src/features/notice/notice-log.ts', '面', 10],
+    ['src/features/notice/notice-log.ts', '面', 9],
     ['src/features/portable/bundle.ts', '器', 8],
     ['src/features/query/duckdb-guard.ts', '面', 2],
     ['src/features/query/sql-guard.ts', '面', 3],

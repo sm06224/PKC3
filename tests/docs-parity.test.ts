@@ -3400,7 +3400,9 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
      * 🔑 配布済み:`git log --oneline origin/main -S"2026-09-15-place-line-route" …` → 2a2588b
      */
     '線の通り方(まっすぐ・直角・曲線)を選べるようになりました',
-  ];
+    // ⚠ 2026-09-21(#1029 段 A・B)で枠を超えたので落とした(配布済み: dc68117)
+  'どのエンジンで引くかの選び所が、いつも出るようになりました',
+];
 
   it('🔴 アプリから落ちた分が、1 件残らず CHANGELOG に在る', () => {
     expect(DROPPED.length, '既知リストが空(空振り)').toBeGreaterThan(0);

@@ -529,7 +529,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
    * 🔑 文言は**起きること**で書く(user 指示 2026-08-21)── 「日記」ではなく
    *   「今日」。開くと**今日の日付のノート**が出る(無ければ作る)。
    */
-  const today = iconButton('open-today', '今日', 'calendar');
+  const today = iconButton('open-today', '今日');
   today.setAttribute('data-pkc-field', 'open-today');
   today.title = '今日の日付のノートを開きます(無ければ作ります)';
 
@@ -622,15 +622,30 @@ export function buildShell(root: HTMLElement): ShellRegions {
     btn.title = hintTitle('できる操作を名前で絞り込んで、その場で実行します', 'open-palette');
     collectionBar.append(btn);
   }
-  // 🔑 **設定はここ**(P10)。上の帯を撤去したので、アプリ全体の操作が並ぶ
-  // この場所へ移した。⚠ 一覧の操作と**区切って**置く(役割が違う)
+  /**
+   * 🔑 **設定はここ**(P10)。上の帯を撤去したので、アプリ全体の操作が並ぶ
+   * この場所へ移した。⚠ 一覧の操作と**区切って**置く(役割が違う)。
+   *
+   * 🔴 **区切りは「線」ではなく「間」**(#1029 段 B)だが、⚠ **間を各ボタンに
+   *   付けてはいけない**(2026-09-21 に実ブラウザの検査 #475 が捕まえた)──
+   *   `margin-top` は**行の境目ではなく、その要素 1 個**を押し下げるので、
+   *   境目が**行の途中に来る幅**(実測 1440px 以上)では
+   *   **「集計」だけが 8px 下へぶら下がった**(1920px では 2 個)。
+   *   一覧の高さを数える検査が、その浮きを**3 段目**として数えて落ちた。
+   * 🔑 だから**塊を 1 つの器に包み、器に間を持たせる**(右の列の塊と同じ作法)──
+   *   器は行いっぱい(`flex: 1 0 100%`)なので**必ず行頭から始まり**、
+   *   どの幅でも「1 個だけずれる」が起きない。⚠ 器の中は自分で折り返す。
+   */
+  const appGroup = document.createElement('div');
+  appGroup.setAttribute('data-pkc-field', 'collection-app-group');
   for (const { view, label } of VIEW_BUTTONS) {
     if (SEALED_VIEWS.includes(view)) continue;
     const btn = iconButton('set-view', label, `set-view:${view}`);
     btn.setAttribute('data-pkc-view', view);
     btn.setAttribute('data-pkc-field', 'app-settings');
-    collectionBar.append(btn);
+    appGroup.append(btn);
   }
+  collectionBar.append(appGroup);
 
   // ⚠ file picker は常設 hidden input(user-gesture 要件と smoke の setInputFiles の
   // 両方に効く)。⚠ **押すボタンと同じ場所**に置く

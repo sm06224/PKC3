@@ -1189,9 +1189,30 @@ export class InspectorRenderer {
     // ⚠ **操作は対象の隣**(P8)。共通ツールバーに集約しない
     const actions = document.createElement('div');
     actions.setAttribute('data-pkc-field', 'inspector-actions');
+    /**
+     * 🔴 **塊は「線」ではなく「間」で切る**(#1029 段 B)。
+     *
+     * ⚠ 直す前は **17 個が 1 本の帯に流れていた** ── 名前の幅が 17 通り(3〜28 桁)
+     *   なので右端がどこも揃わず、押す物を探すたびに**全部読み直す**ことになっていた
+     *   (user 指摘 2026-09-21「でこぼこで統一感がなく、ストレス」)。
+     * 🔑 **並びは 1 つも変えていない**(押す位置の記憶を壊さない)── 変えたのは
+     *   **どこで息を継ぐか**だけである。
+     * ⚠ **区切り線を引かない** ── 地は無彩色で、色と線は情報にだけ使う
+     *   (user 指示 2026-08-03)。線を 5 本足すと、地のほうが賑やかになる。
+     * ⚠ 塊は**それ自身も折り返す**(CSS の `flex-wrap`)── 折り返せないと、
+     *   狭い列で塊ごと溢れて「入り切らないから見えない」が起きる。
+     */
+    let bucket: HTMLElement | null = null;
+    const group = (name: string): void => {
+      const g = document.createElement('div');
+      g.setAttribute('data-pkc-field', 'inspector-action-group');
+      g.setAttribute('data-pkc-group', name);
+      actions.append(g);
+      bucket = g;
+    };
     const btn = (action: string, label: string): void => {
       const b = iconButton(action, label);
-      actions.append(b);
+      (bucket ?? actions).append(b);
       this.buttons.set(action, b);
     };
     // ⚠ 文言は**実際に落ちるもの**に合わせる(P8 段⑱)── ここは可逆な
@@ -1216,6 +1237,7 @@ export class InspectorRenderer {
      */
     // ⚠ **並びは右クリックと揃える**(user 裁定 2026-09-04)── 毎日使う
     //    「参照をコピー」を動かさない(1 稿目は付箋を先頭に置いて全部を 1 つ下げた)
+    group('copy');
     btn('copy-entry-ref', ENTRY_ACTION_LABELS['copy-entry-ref']!);
     /**
      * 🔴 **素の Markdown で写す**(#396)。
@@ -1233,6 +1255,7 @@ export class InspectorRenderer {
      *   在り、右クリックとは並びが違っていた。
      */
     btn('copy-plain-markdown', ENTRY_ACTION_LABELS['copy-plain-markdown']!);
+    group('open');
     btn('open-note-window', ENTRY_ACTION_LABELS['open-note-window']!);
     /**
      * 🔴 **保存したスタックを載せる**(#633 段③)。⚠ スタックの入れ物のときだけ出す
@@ -1247,7 +1270,9 @@ export class InspectorRenderer {
      * ⚠ **文言に枚数を入れる** ── 押すと**その枚数ぶん外へ通信する**ので、
      *   押す前に規模が分かる形にする(#264 の棄却理由②)。
      */
+    group('take-in');
     btn('adopt-external-images', ADOPT_IMAGES_LABEL);
+    group('export');
     btn('export-entry', ENTRY_ACTION_LABELS['export-entry']!);
     /**
      * 🔴 **相手に渡せる 1 枚**(#491)。
@@ -1286,6 +1311,7 @@ export class InspectorRenderer {
      */
     btn('export-entry-pdf', ENTRY_ACTION_LABELS['export-entry-pdf']!);
     if (shape === 'entry+link') btn('write-back-file', ENTRY_ACTION_LABELS['write-back-file']!);
+    group('this-one');
     btn('show-history', ENTRY_ACTION_LABELS['show-history']!);
     /**
      * 🔴 **左の列の整理 3 つ**(#215)── 右クリックと**同じ表**から出す(字は 1 か所)。
@@ -1296,6 +1322,7 @@ export class InspectorRenderer {
     btn('rename-entry-begin', ENTRY_ACTION_LABELS['rename-entry-begin']!);
     btn('move-to-folder', ENTRY_ACTION_LABELS['move-to-folder']!);
     btn('create-in-folder', ENTRY_ACTION_LABELS['create-in-folder']!);
+    group('remove');
     btn('delete-entry', ENTRY_ACTION_LABELS['delete-entry']!);
     /**
      * 🔴 **編集中だけ出る 1 行**(#715)── 操作の帯の**直上**に置く(帯と離すと

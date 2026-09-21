@@ -215,14 +215,38 @@ test('🔴 構成をコピーすると、貼れる 1 枚が本当に入る (#429
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await gotoApp(page);
 
-  // ① ノートを 1 件作る(空だと断られる ── それは別の検査)
+  /**
+   * 🔴 **押し口は「設定の面」ではなく「右の列」である**(2026-09-21 に直した)。
+   *
+   * ⚠ `export-structure` は **#1017 段④a(`b19e52f`)で右の列へ引っ越した**のに、
+   *   この spec は**設定の面へ移って押す**古い動線のままだった ── つまり
+   *   引っ越した日から **`export-structure: 押し所が画面に無い` で落ち続けていた**
+   *   (CLAUDE.md「口を割ったら、その口の名前を書いている所を全部 grep する」)。
+   *
+   * 🔑 右の列は「**何も選んでいない = コレクションを選んでいる**」ときに出る。
+   *   ⚠ ノートを作ると必ずそれが選ばれるので、**2 件作って両方に印を付け、
+   *   「選択を解除」で外す**(それが画面に在る唯一の外し方である ── 印が
+   *   2 件以上のときだけ出る帯)。
+   */
+  await page.setViewportSize({ width: 1280, height: 800 });
+  // ① ノートを 2 件作る(空だと断られる ── それは別の検査)
   await createEntry(page, 'text');
   const title = page.locator('[data-pkc-field="editor-title"]');
   if (await title.count()) await title.fill('会議メモ');
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await createEntry(page, 'text');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
 
-  // ② 設定の面へ移って押す
-  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  // ② 2 件に印を付けて「選択を解除」── これで右の列がコレクションの面になる
+  const rows = page.locator('[data-pkc-region="filer-table"] tbody tr');
+  await expect(rows, '一覧に 2 件出ていない').toHaveCount(2);
+  await rows.nth(0).click();
+  await rows.nth(1).click({ modifiers: ['ControlOrMeta'] });
+  await clickReal(page, '[data-pkc-field="filer-bulk"] [data-pkc-action="clear-selection"]');
+  await expect(
+    page.locator('[data-pkc-field="collection-pane"]'),
+    'コレクションの面が出ていない(選択が外れていない)',
+  ).toBeVisible();
   await copyAndWait(page, 'export-structure');
 
   // ③ 🔴 **貼れる 1 枚**が入っている ── 木 + コマンドの書き方の両方
