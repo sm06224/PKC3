@@ -25,7 +25,9 @@
 import { test, expect, type Page } from '@playwright/test';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor,
+  gotoCollectionPane,
+} from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -212,8 +214,8 @@ test('🔴 配った HTML の本文が、アプリと同じ見た目で出る', 
 
   // ── 配って、単体で開く(アプリの CSS は届かない)
   const dl = page.waitForEvent('download');
-  // ⚠ #239 でこの操作は設定の中(書き出しと片づけ)へ移った ── 先に開く
-  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  // ⚠ #1017 段④a でこの操作は右の列(何も選んでいないとき)へ移った ── 先に出す
+  await gotoCollectionPane(page);
   await clickReal(page, '[data-pkc-action="export-html"]');
   const file = join(tmpdir(), `pkc3-bodycss-${process.pid}.html`);
   await (await dl).saveAs(file);

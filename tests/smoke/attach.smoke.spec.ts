@@ -6,7 +6,9 @@ import { test, expect } from '@playwright/test';
 import { join } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { answerAppDialog, gotoApp, collectPageErrors, clickReal, expectImageRendered, createEntry, useSplitEditor, useListBrowse, expectMainGapUnderBudget } from './helpers';
+import { answerAppDialog, gotoApp, collectPageErrors, clickReal, expectImageRendered, createEntry, useSplitEditor, useListBrowse, expectMainGapUnderBudget,
+  gotoCollectionPane,
+} from './helpers';
 // ⚠ 段⑤(xlsx を SQL で調べる)の bytes は Node 側でこの 1 本から組む(#854 段③)。
 import { buildXlsx } from '../features/xlsx-fixture';
 import { buildParquet } from '../features/parquet-fixture';
@@ -617,8 +619,8 @@ test('🔴 配った HTML でも PDF が読める大きさで出る', async ({ p
   );
 
   const dl = page.waitForEvent('download');
-  // ⚠ #239 でこの操作は設定の中(書き出しと片づけ)へ移った ── 先に開く
-  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  // ⚠ #1017 段④a でこの操作は右の列(何も選んでいないとき)へ移った ── 先に出す
+  await gotoCollectionPane(page);
   await clickReal(page, '[data-pkc-action="export-html"]');
   const file = join(tmpdir(), `pkc3-pdf-${process.pid}.html`);
   await (await dl).saveAs(file);
@@ -2295,7 +2297,8 @@ test('🔴 書き出した HTML を単体で開いても、囲みの中身が入
   expect(noteTitle, '書いたノートの題名が読めない(この先は測れない)').not.toBe('');
 
   const dl = page.waitForEvent('download');
-  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  // ⚠ #1017 段④a でこの操作は右の列(何も選んでいないとき)へ移った ── 先に出す
+  await gotoCollectionPane(page);
   await clickReal(page, '[data-pkc-action="export-html"]');
   const file = join(tmpdir(), `pkc3-fence-asset-${process.pid}.html`);
   await (await dl).saveAs(file);

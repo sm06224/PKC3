@@ -786,3 +786,48 @@ export function expectMainGapUnderBudget(label: string, m: MainGapSample): void 
     `${label}: メインスレッドが ${m.maxGap}ms 止まった(何もしていない間は ${m.base}ms)`,
   ).toBeLessThan(m.base + MAIN_GAP_BUDGET_MS);
 }
+
+/**
+ * 🔴 **コレクションの面(何も選んでいないときの右の列)を出す**(#1017 段④a の引っ越し先)。
+ *
+ * ⚠ 2026-09-21 に `export-html` / `export-portable` / `export-markdown` /
+ *   `export-structure` が**設定の面から右の列へ移った**が、押しに行く spec は
+ *   **設定の面を開く古い動線**のままで、引っ越した日からフル smoke で落ち続けていた。
+ * 🔑 直し方を**1 か所に置く** ── 各 spec が自前で「選択を外す道」を書くと、
+ *   次に動線が変わった日に**また 7 か所直すことになる**(CLAUDE.md §7)。
+ *
+ * 🔴 **いまは読み込み直すしかない**(#1032)。⚠ ノートを 1 件でも選ぶと、
+ *   その選択を**画面から外す口が 1 つも無い** ── 「選択を解除」が外すのは
+ *   **印(まとめて操作する側)だけ**で、開いているノート(`selectedLid`)には触らない。
+ *   実測(2026-09-21、捨て probe):作って保存した直後は `collection-pane` が
+ *   **0 件**、`page.reload()` の後は **1 件**。
+ * ⚠ **だからここに「印を 2 件付けて解除する」形は書かない** ── 画面に無い道を
+ *   検査が肯定することになる。#1032 で戻り道が付いたら、その口を押す形へ書き換える。
+ */
+export async function gotoCollectionPane(page: Page): Promise<void> {
+  // 🔴 ⚠ 読み直すだけでは足りない ── 開いているノートは**アドレスの `#…entry=` に
+  //   書いてある**(`setHashEntry`)ので、そのまま読み直すと boot が選び直す
+  //   (実測 2026-09-21: print の spec だけ `collection-pane` が hidden のままだった)。
+  //   だから**住所から先に落とす**(`history.replaceState` は読み込みを起こさない)。
+  await page.evaluate(() => {
+    history.replaceState(null, '', location.pathname + location.search);
+  });
+  await page.reload();
+  await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
+  // ⚠ 狭い窓では右の列そのものが出ない(`data-pkc-layout` が tablet / phone)──
+  //   そのまま待つと「選択が残っている」としか出ず、原因が読めない(実測:
+  //   print の spec が A4 幅 794px のままここへ来て 10 秒待った)。
+  const layout = await page
+    .locator('[data-pkc-region="shell"]')
+    .getAttribute('data-pkc-layout')
+    .catch(() => null);
+  // ⚠ 広い窓では属性そのものが無い(= desktop)── `null` を落とさない
+  expect(
+    layout ?? 'desktop',
+    `右の列が出ない幅で呼んでいる(layout=${layout ?? 'desktop'})── 先に窓を広げる`,
+  ).not.toMatch(/^(phone|tablet)$/);
+  await expect(
+    page.locator('[data-pkc-field="collection-pane"]'),
+    'コレクションの面が出ていない(読み直しても選択が残っている)',
+  ).toBeVisible({ timeout: 10_000 });
+}
