@@ -97,6 +97,10 @@ describe('画面の字に使わない語(ui-terms.ts の BANNED_TERMS)', () => {
    * ── 減らしても表を直さないと落ちる形にしてある)。
    *
    * 2026-09-21 実測(#1017 段⑤-1)。新しく増えたら落ちる。
+   * ⚠ `notice-log.ts` の行は**減らない**(配ったお知らせは書き換えない約束 ──
+   *   `announce.test.ts` の KNOWN が digest で止める)。それでも走査から外さない:
+   *   新しいお知らせに使わない語を書くと件数が増えて落ちる = **新規の門**として効く。
+   *   古い分は登記表の枠(30 件)から落ちるときに一緒に減る。
    */
   const KNOWN_BANNED: readonly [file: string, banned: string, count: number][] = [
     ['src/adapter/ui/actions/adopt-favicon.ts', '印', 4],
