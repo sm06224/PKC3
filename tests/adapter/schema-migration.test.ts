@@ -437,6 +437,76 @@ describe('entries の後付け列(#277 段②)', () => {
 });
 
 /**
+ * 🔴 **領域(realm)の後付け列**(設計 doc §1.1、段①)。
+ *
+ * ⚠ **他の後付け列(task_total 等)と作法が逆**である ── あちらは NULL のまま
+ *   足し、次の open で埋め戻す。`realm` は **ALTER 自体が `NOT NULL DEFAULT 'user'`**
+ *   なので、埋め戻しの回転を待たずに **`applySchema` を 1 回通した瞬間**に
+ *   既存行が `'user'` で埋まる(§2「旧い形の fixture が、ここまで古くない」の
+ *   逆 ── ここは 1 回で決着することを確かめたい)。
+ */
+describe('領域(realm)の後付け列(設計 doc §1.1、段①)', () => {
+  it('⚠ 前提: 旧い形の DB には realm 列が無い', () => {
+    const db = oldDb([]);
+    expect(cols(db).has('realm'), '旧い DB の作り方が間違っている(既に列が在る)').toBe(false);
+    db.close();
+  });
+
+  it('🔴 列が足され、既存行が 1 回の open で全部 user になる', () => {
+    const db = oldDb([
+      ['old-1', '# 前からあるノート\n'],
+      ['old-2', '# もう 1 件\n'],
+    ]);
+    applySchema(db);
+    expect(cols(db).has('realm'), '列が足されていない').toBe(true);
+    const realmOf = (lid: string): string =>
+      String(db.selectValue(`SELECT realm FROM entries WHERE lid = ?`, [lid]));
+    expect(realmOf('old-1'), '既存行が user になっていない').toBe('user');
+    expect(realmOf('old-2'), '既存行が user になっていない').toBe('user');
+    db.close();
+  });
+
+  it('⚠ 対照群: NOT NULL なので realm が NULL の行は作れない(埋め戻し経路が要らないことの根拠)', () => {
+    const db = oldDb([['a', 'x']]);
+    applySchema(db);
+    const remaining = Number(
+      db.selectValue(`SELECT count(*) FROM entries WHERE realm IS NULL`) ?? -1,
+    );
+    expect(remaining, '他の後付け列と同じ NULL 埋め戻しが要る形になっている').toBe(0);
+    db.close();
+  });
+
+  /**
+   * 🔴 **system 領域の行は、索引の作り直し / 埋め戻しの再実行(次の open 相当)を
+   * 経ても消えない・書き換わらない**(設計 doc §1.1、段①)。
+   *
+   * ⚠ `applySchema` は「整える」段(索引の作り直し / 派生列の埋め戻し / タグの
+   *   引き直し)を毎回の open で通す ── これは**保存領域そのものの読み手**なので
+   *   realm で絞ってはいけない(§1.1 の注記)。ここでは system 行を直に挿み、
+   *   `applySchema` を**2 回**通してもその行と `realm` が無傷であることを見る。
+   */
+  it('🔴 system 領域の行は「整える」段(索引の作り直し / 埋め戻し)の後も残る', () => {
+    const db = oldDb([['u-1', '# ふつうのノート\n']]);
+    applySchema(db); // 1 度目 ── realm 列が足され、u-1 は 'user' になる
+    db.exec({
+      sql: `INSERT INTO entries (cid, lid, title, archetype, created_at, updated_at,
+              entry_order, status, date, archived, realm, body)
+            VALUES ('c1', 'sys-1', 'システムのノート', 'textlog',
+              '2020-01-01 00:00:00', '2020-01-01 00:00:00', 2, NULL, NULL, 0, 'system', '- [ ] x')`,
+    });
+    applySchema(db); // 2 度目(次の open 相当)── 「整える」段が全行を舐め直す
+    const row = db.selectObjects(`SELECT realm, task_total FROM entries WHERE lid = 'sys-1'`)[0] as
+      | { realm: string; task_total: number | null }
+      | undefined;
+    expect(row, '「整える」段が system 領域の行を消した').not.toBeUndefined();
+    expect(row!.realm, '「整える」段が system 領域の行の realm を書き換えた').toBe('system');
+    // ⚠ 埋め戻しは realm と無関係に効く(task_total は本文から数え直される)
+    expect(row!.task_total, '埋め戻しが system 領域の行には効いていない').toBe(1);
+    db.close();
+  });
+});
+
+/**
  * 🔴 **未計算(NULL)の行も候補に入る**(#277 段②-b)。
  *
  * ⚠ この経路は **worker の test からは踏めない** ── 保存の口(`bindUpsert`)が

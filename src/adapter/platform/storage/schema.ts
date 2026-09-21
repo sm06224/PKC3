@@ -87,7 +87,52 @@ export const ENTRY_ADDED_COLUMNS: readonly { readonly name: string; readonly ddl
    * ⚠ 索引は**作らない**(SQL では絞らず、走査の TS 側で当てる ── `body_chars` と同じ)。
    */
   { name: 'body_tags', ddl: 'TEXT' },
+  /**
+   * 🔴 **領域(realm)── user のノートか、system(アプリ自身)のノートか**
+   * (設計 doc §1.1、ui-total-design-2026-09。段①)。
+   *
+   * ⚠ **`task_total` / `body_chars` / `body_tags` とは作法が逆**である ──
+   *   あちらは「NULL = まだ数えていない」を旧ビルドとの共存に使うので
+   *   NOT NULL にしないが、`realm` に「まだ決めていない」という状態は無い:
+   *   この列が無かった時代のノートは**定義により全部 user のノートである**
+   *   (system 領域という概念自体がこの段で初めて生まれたので、旧ビルドが
+   *   作った行を system と読み違える余地が無い)。
+   * 🔑 だから **`NOT NULL DEFAULT 'user'`** でよい ── ALTER 直後に既存行は
+   *   即座に `'user'` で埋まり、旧ビルドの UPSERT(この列を挙げない INSERT)も
+   *   列の DEFAULT がそのまま効いて `'user'` になる。`NEEDS_BACKFILL` の
+   *   埋め戻し経路は要らない(欠けている行が存在しえない)。
+   * ⚠ 判定を 1 か所に持つため、この列を読む断片は `USER_REALM_SQL` を通す
+   *   ── worker 側で `realm = 'user'` を書き写さない(CLAUDE.md §7)。
+   */
+  { name: 'realm', ddl: "TEXT NOT NULL DEFAULT 'user'" },
 ];
+
+/**
+ * 🔴 **領域(realm)の 2 値**(設計 doc §1.1)。
+ *
+ * - `'user'` ── user が書いた物・user の資産。左の列(一覧 / フォルダ)・検索・
+ *   バックアップに**入る**。
+ * - `'system'` ── アプリが自分について持つ物・アプリが user に言う物
+ *   (段②以降の「メッセージ」)。左の列・検索・バックアップに**入らない**。
+ *
+ * ⚠ **軸はこの 1 つだけ**(user 向け読み手 / 保存領域そのものの読み手を
+ *   分けるのはこの列 1 本 ── §1.1「領域の判定は 1 か所」)。
+ */
+export type Realm = 'user' | 'system';
+
+/**
+ * 🔴 **「user 領域だけを読む」ときに埋め込む断片**(設計 doc §1.1)。
+ *
+ * ⚠ **各読み手が `realm = 'user'` を書き写さない** ── 除外の口が 2 つになると、
+ *   片方だけ壊れて「バックアップに system のノートが漏れる」形で出る(CLAUDE.md §7)。
+ *   worker 側は必ずこの定数を埋め込む(alias が要る所は `` `${alias}.${USER_REALM_SQL}` ``
+ *   のように書く ── 文字列の中身は `realm = 'user'` なので、直前にドットを置けば
+ *   `e.realm = 'user'` になる)。
+ * ⚠ **保存領域そのものの読み手(索引の作り直し / 埋め戻し / 使用量 / 孤児添付判定 /
+ *   getBody・getEntry の lid 直指定 / 中身が壊れていないかの点検)には使わない** ──
+ *   system のノートも中身であり、作り直しで消えてはいけない(§1.1 の注記)。
+ */
+export const USER_REALM_SQL = "realm = 'user'";
 
 export const REVISION_ADDED_COLUMNS: readonly string[] = [
   'title',
@@ -167,6 +212,7 @@ export const SCHEMA_DDL: readonly string[] = [
      task_total INTEGER,
      body_chars INTEGER,
      body_tags TEXT,
+     realm TEXT NOT NULL DEFAULT 'user',
      body TEXT NOT NULL DEFAULT '',
      PRIMARY KEY (cid, lid)
    )`,
@@ -304,6 +350,18 @@ export interface EntryUpsert {
    *   `NOT NULL constraint failed` で**保存そのものが落ちる**(= user のデータが
    *   書けない)。実際 test の cast 越しの呼び出しで踏んだ。
    */
+  /**
+   * 🔴 **省略時 `'user'`**(設計 doc §1.1、段①)。
+   *
+   * ⚠ **既存の呼び側は 1 行も変えない** ── 渡さなければ今までどおり `'user'` の
+   *   ノートができる。段②以降、system 領域のノート(メッセージ)を作る経路だけが
+   *   `realm: 'system'` を渡す。
+   * ⚠ **既存行の書き換え(ON CONFLICT の側)では渡っても無視する**
+   *   (`bindUpsert` / `UPSERT_SQL` の注記)── 一度決まった領域を、本文の保存の
+   *   たびに黙って作り直させない。領域を変えたいときが来たら、そのときの
+   *   専用の口を作る。
+   */
+  realm?: Realm;
 }
 
 /**

@@ -14,6 +14,7 @@ import {
   REVISION_ADDED_COLUMNS,
   ENTRY_ADDED_COLUMNS,
   FTS_DDL,
+  USER_REALM_SQL,
 } from './schema';
 /**
  * 全文検索が 1 度に返す上限(#181)。⚠ **切ったことは呼び側へ言う** ── 黙って
@@ -766,12 +767,17 @@ function runQueryScan(cid: string, key: string | null): {
   const scan = createQueryScan(key);
   let after: { entryOrder: number; lid: string } | undefined;
   for (;;) {
+    /**
+     * 🔴 **集計は system 領域のノートを数えない**(設計 doc §1.1、段①)。
+     * ⚠ 判定は `USER_REALM_SQL` 1 か所を通す。
+     */
     const rows = database.selectObjects(
       after === undefined
-        ? `SELECT lid, entry_order, substr(body, 1, ?) AS head, body_tags FROM entries WHERE cid = ?
+        ? `SELECT lid, entry_order, substr(body, 1, ?) AS head, body_tags FROM entries
+             WHERE cid = ? AND ${USER_REALM_SQL}
              ORDER BY entry_order, lid LIMIT ?`
         : `SELECT lid, entry_order, substr(body, 1, ?) AS head, body_tags FROM entries
-            WHERE cid = ? AND (entry_order > ? OR (entry_order = ? AND lid > ?))
+            WHERE cid = ? AND ${USER_REALM_SQL} AND (entry_order > ? OR (entry_order = ? AND lid > ?))
             ORDER BY entry_order, lid LIMIT ?`,
       after === undefined
         ? [FRONTMATTER_SCAN_CHARS, cid, QUERY_SCAN_CHUNK]
@@ -860,8 +866,14 @@ function runSmartScan(
     },
     lid,
   );
-  /** 列の条件 ── SQL の `AND …` と、その値。 */
-  const conds: string[] = [];
+  /**
+   * 列の条件 ── SQL の `AND …` と、その値。
+   * 🔴 **`USER_REALM_SQL` を必ず先頭に置く**(設計 doc §1.1、段①)── スマートフォルダは
+   *   system 領域のノートを当てない。他の条件が 1 つも無くても `conds` が
+   *   空にならないので、下の `where` 組み立て(`conds.length === 0 ? '' : …`)が
+   *   必ずこの断片を含む。
+   */
+  const conds: string[] = [USER_REALM_SQL];
   const args: (string | number)[] = [];
   if (q.kind !== null) {
     conds.push('archetype = ?');
@@ -1025,7 +1037,11 @@ function runSmartScan(
  */
 export const TASK_CANDIDATE_COND = '(task_total IS NULL OR task_total > 0)';
 
-export const TASK_CANDIDATE_WHERE = `cid = ? AND ${TASK_CANDIDATE_COND}`;
+/**
+ * 🔴 **かんばん・カレンダーは system 領域のノートを出さない**(設計 doc §1.1、段①)。
+ * ⚠ 判定は `USER_REALM_SQL` 1 か所を通す(CLAUDE.md §7 ── 書き写さない)。
+ */
+export const TASK_CANDIDATE_WHERE = `cid = ? AND ${USER_REALM_SQL} AND ${TASK_CANDIDATE_COND}`;
 
 /**
  * 走査で 1 度に読むノートの数。⚠ **本文を丸ごと**読むので、先頭だけ読む
@@ -1060,8 +1076,14 @@ function runContactScan(cid: string): ContactScan {
    * ⚠ 1 稿目は `trashed_at IS NULL` と書いており(**そんな列は無い**)、
    *   worker の test が `no such column` で落として教えた。
    */
+  /**
+   * 🔴 **連絡先は system 領域のノートを数えない**(設計 doc §1.1、段①)。
+   * ⚠ 判定は `USER_REALM_SQL` 1 か所を通す。
+   */
   const totalNotes = Number(
-    database.selectValue('SELECT count(*) FROM entries WHERE cid = ?', [cid]) ?? 0,
+    database.selectValue(`SELECT count(*) FROM entries WHERE cid = ? AND ${USER_REALM_SQL}`, [
+      cid,
+    ]) ?? 0,
   );
   const cards: ContactCard[] = [];
   let scannedNotes = 0;
@@ -1072,10 +1094,10 @@ function runContactScan(cid: string): ContactScan {
     const rows = database.selectObjects(
       after === undefined
         ? `SELECT lid, title, entry_order, body FROM entries
-             WHERE cid = ?
+             WHERE cid = ? AND ${USER_REALM_SQL}
              ORDER BY entry_order, lid LIMIT ?`
         : `SELECT lid, title, entry_order, body FROM entries
-             WHERE cid = ?
+             WHERE cid = ? AND ${USER_REALM_SQL}
              AND (entry_order > ? OR (entry_order = ? AND lid > ?))
             ORDER BY entry_order, lid LIMIT ?`,
       after === undefined
@@ -1288,10 +1310,18 @@ const BACKFILL_CHUNK = 200;
 const NEEDS_BACKFILL =
   'task_total IS NULL OR body_chars IS NULL OR body_tags IS NULL';
 
+/**
+ * 🔴 **`realm` は ON CONFLICT の SET に無い ── わざとである**(設計 doc §1.1、段①)。
+ *
+ * ⚠ INSERT の側にだけ列を持たせ、UPDATE の側では触らない ── 領域は
+ *   「作られたとき」に決まる値で、**本文を保存し直すたびに再判定する物ではない**。
+ *   `EntryUpsert.realm` を省いた呼び側(いまの全経路)は、既存行の領域を
+ *   1 バイトも動かさずに済む。
+ */
 const UPSERT_SQL = `INSERT INTO entries
     (cid, lid, title, archetype, created_at, updated_at,
-     entry_order, status, date, archived, task_total, body_chars, body_tags, body)
-  VALUES (?, ?, ?, ?, datetime('now'), datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?)
+     entry_order, status, date, archived, task_total, body_chars, body_tags, realm, body)
+  VALUES (?, ?, ?, ?, datetime('now'), datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(cid, lid) DO UPDATE SET
     title = excluded.title,
     archetype = excluded.archetype,
@@ -1339,6 +1369,11 @@ function bindUpsert(cid: string, e: EntryUpsert): (string | number | null)[] {
      * ⚠ **frontmatter へは書き戻さない**(裁定 B)── 集約の置き場はこの列である。
      */
     encodeTags(bodyTags(e.body)),
+    /**
+     * 🔴 **省略時 `'user'`**(設計 doc §1.1、段①)。⚠ この値は INSERT の側にしか
+     * 効かない(`UPSERT_SQL` の ON CONFLICT に `realm` が無い ── 上の注記)。
+     */
+    e.realm ?? 'user',
     e.body,
   ];
 }
@@ -1906,9 +1941,11 @@ function buildCsvTables(database: Database, sql: string, made: string[]): void {
    *   ここで当たった本文を `collectCsvTables` が囲みとして読み直す。
    * ⚠ 索引は無いので全走査になる。⚠ それでよい:この op は user が
    *   `Ctrl+Enter` を押したときにだけ走る(打鍵ごとではない)。
+   * 🔴 **system 領域のノートは読まない**(設計 doc §1.1、段①)── これは
+   *   user の本文を表として引く機能であって、system のノートを混ぜる理由が無い。
    */
   const notes = database.selectObjects(
-    "SELECT lid, title, body FROM entries WHERE body LIKE '%name=%'",
+    `SELECT lid, title, body FROM entries WHERE ${USER_REALM_SQL} AND body LIKE '%name=%'`,
   ) as unknown as Array<{ lid: string; title: string; body: string }>;
   /**
    * 🔴 **受けられなかった名前も拾う**(#681 段③)── 目録で理由を言うため。
@@ -2507,12 +2544,29 @@ const handlers: Handlers = {
   },
   listEntryMetas: (req) =>
     // body 列を読まない ── boot / 一覧は O(メタ)(設計 doc §4.1)
+    // 🔴 system 領域のノートは出さない(設計 doc §1.1、段①)
     need().selectObjects(
       `SELECT lid, title, archetype, created_at, updated_at, entry_order,
               status, date, archived, body_chars
-         FROM entries WHERE cid = ? ORDER BY entry_order`,
+         FROM entries WHERE cid = ? AND ${USER_REALM_SQL} ORDER BY entry_order`,
       [req.cid],
     ) as unknown as ResultMap['listEntryMetas'],
+  /**
+   * 🔴 **system 領域のノートだけを一覧する**(設計 doc §1.1、段①)。
+   *
+   * ⚠ **段②(「メッセージ」)がここを使って開く** ── いまはまだ system 領域の
+   *   ノートを作る経路が無いので、この op は空配列を返すだけである
+   *   (実害は無い ── 「作る口だけ用意する」が段①の範囲)。
+   * ⚠ `listEntryMetas` と綴りを揃える(`EntryMetaRow` を共有)── 描画側が
+   *   別の形を覚え直さずに済む。
+   */
+  listSystemEntries: (req) =>
+    need().selectObjects(
+      `SELECT lid, title, archetype, created_at, updated_at, entry_order,
+              status, date, archived, body_chars
+         FROM entries WHERE cid = ? AND realm = 'system' ORDER BY entry_order`,
+      [req.cid],
+    ) as unknown as ResultMap['listSystemEntries'],
   taskScan: (req) => runTaskScan(req.cid),
   contactScan: (req) => runContactScan(req.cid),
   snippetScan: (req) => runSnippetScan(req.cid),
@@ -2573,15 +2627,16 @@ const handlers: Handlers = {
     const plan = planSearch(req.query);
     if (plan.kind === 'none') return { lids: [], truncated: false };
     const limit = Math.max(1, Math.min(req.limit ?? SEARCH_LIMIT, SEARCH_LIMIT));
+    // 🔴 題名の検索は system 領域のノートを出さない(設計 doc §1.1、段①)
     const sql =
       plan.kind === 'fts'
         ? `SELECT e.lid AS lid FROM entries_fts f
              JOIN entries e ON e.rowid = f.rowid
-            WHERE f.entries_fts MATCH ? AND e.cid = ?
+            WHERE f.entries_fts MATCH ? AND e.cid = ? AND e.${USER_REALM_SQL}
             ORDER BY e.entry_order, e.lid LIMIT ?`
         : // 2 文字以下は trigram が当たらないので LIKE(実測)。⚠ ESCAPE を宣言する
           `SELECT lid FROM entries
-            WHERE cid = ? AND (title LIKE ?2 ESCAPE '\\' OR body LIKE ?2 ESCAPE '\\')
+            WHERE cid = ? AND ${USER_REALM_SQL} AND (title LIKE ?2 ESCAPE '\\' OR body LIKE ?2 ESCAPE '\\')
             ORDER BY entry_order, lid LIMIT ?3`;
     const bind =
       plan.kind === 'fts'
@@ -2617,6 +2672,7 @@ const handlers: Handlers = {
     const plan = planSearch(req.query, { syntax: 'query' });
     if (plan.kind === 'none') return { rows: [], truncated: false };
     const limit = Math.max(1, Math.min(req.limit ?? SEARCH_LIMIT, SEARCH_LIMIT));
+    // 🔴 全文検索(探す面)は system 領域のノートを出さない(設計 doc §1.1、段①)
     if (plan.kind === 'fts') {
       const rows = need().selectObjects(
         `SELECT e.lid AS lid, e.title AS title,
@@ -2624,7 +2680,7 @@ const handlers: Handlers = {
                 bm25(entries_fts) AS rank
            FROM entries_fts f
            JOIN entries e ON e.rowid = f.rowid
-          WHERE f.entries_fts MATCH ?1 AND e.cid = ?2 AND e.archived = 0
+          WHERE f.entries_fts MATCH ?1 AND e.cid = ?2 AND e.archived = 0 AND e.${USER_REALM_SQL}
           ORDER BY rank, e.entry_order, e.lid LIMIT ?7`,
         [
           plan.match,
@@ -2662,7 +2718,7 @@ const handlers: Handlers = {
     bind.push(limit + 1);
     const rows = need().selectObjects(
       `SELECT lid, title, body FROM entries
-        WHERE cid = ?1 AND archived = 0 AND ${conds.join(' AND ')}
+        WHERE cid = ?1 AND archived = 0 AND ${USER_REALM_SQL} AND ${conds.join(' AND ')}
         ORDER BY entry_order, lid LIMIT ?${bind.length}`,
       bind,
     ) as Array<{ lid: string; title: string; body: string }>;
@@ -2720,9 +2776,10 @@ const handlers: Handlers = {
      */
     const needles = bodyLinkNeedles(req.lid, req.cid);
     const where = needles.map((_, i) => `body LIKE ?${i + 3} ESCAPE '\\'`).join(' OR ');
+    // 🔴 backlink は system 領域のノートを出さない(設計 doc §1.1、段①)
     const rows = need().selectObjects(
       `SELECT lid, body FROM entries
-        WHERE cid = ?1 AND lid <> ?2 AND archived = 0 AND (${where})
+        WHERE cid = ?1 AND lid <> ?2 AND archived = 0 AND ${USER_REALM_SQL} AND (${where})
         ORDER BY entry_order, lid`,
       [req.cid, req.lid, ...needles.map((n) => toLikePattern(n))],
     ) as Array<{ lid: string; body: string }>;
@@ -2759,12 +2816,17 @@ const handlers: Handlers = {
     // 消えていると位置が解決できず、先頭から読み直して**重複する**
     const database = need();
     const a = req.after;
+    /**
+     * 🔴 **書出し(バックアップ zip / Markdown zip / 閲覧用 HTML)は system 領域の
+     * ノートを含めない**(設計 doc §1.1、段①)── system のノートは user の
+     * ディレクトリと明確に分かれているのが裁定の条件である。
+     */
     const rows = database.selectObjects(
       a === undefined
-        ? `SELECT lid, body, entry_order FROM entries WHERE cid = ?
+        ? `SELECT lid, body, entry_order FROM entries WHERE cid = ? AND ${USER_REALM_SQL}
              ORDER BY entry_order, lid`
         : `SELECT lid, body, entry_order FROM entries
-             WHERE cid = ? AND (entry_order > ? OR (entry_order = ? AND lid > ?))
+             WHERE cid = ? AND ${USER_REALM_SQL} AND (entry_order > ? OR (entry_order = ? AND lid > ?))
              ORDER BY entry_order, lid`,
       a === undefined ? [req.cid] : [req.cid, a.entryOrder, a.entryOrder, a.lid],
     ) as unknown as Array<{ lid: string; body: string; entry_order: number }>;
@@ -3730,13 +3792,25 @@ const handlers: Handlers = {
       const hi = lo + RESCUE_CHUNK - 1;
       let got = 0;
       try {
+        /**
+         * 🔴 **拾い出しは system 領域のノートを出さない**(設計 doc §1.1、段①)。
+         *
+         * ⚠ **`WHERE` へは足さない** ── `got`(= 区画に何か在ったか)は
+         *   「空だった区画」という**壊れの診断**(`rescue-archive.ts` の
+         *   `miss.push`)に使われる。system のノートだけが並ぶ区画を `WHERE` で
+         *   落とすと、**壊れていないのに「空だった」と誤って数える**ことになる
+         *   (CLAUDE.md §1「後条件は確かめた事実の上にだけ書く」の逆 ── ここでは
+         *   「診断の材料を、除外の都合で減らさない」)。
+         * 🔑 だから **`got` は raw の行数のまま**、**`rows` へ積む段だけ**で選ぶ。
+         */
         database.exec({
-          sql: `SELECT rowid, cid, lid, title, archetype, body FROM entries NOT INDEXED
+          sql: `SELECT rowid, cid, lid, title, archetype, body, realm FROM entries NOT INDEXED
                  WHERE rowid BETWEEN ? AND ?`,
           bind: [lo, hi],
           rowMode: 'array',
           callback: (r: unknown[]): void => {
             got += 1;
+            if (r[6] !== 'user') return;
             rows.push({
               rowid: Number(r[0]),
               cid: String(r[1]),
