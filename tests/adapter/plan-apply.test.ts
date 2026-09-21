@@ -5,12 +5,17 @@
  * 純関数の規則は `tests/features/structure-plan.test.ts` が見る。ここで見るのは
  * **画面と state の間** ── 貼ると下見が出るか / 誤りで押せなくなるか /
  * 押したら**本当に構成が変わる**か。
+ *
+ * 🔴 **2026-09-21(#1017 段④b)に、器の置き場を「システム」から右の列
+ * (何も選んでいないとき = コレクション面)へ移した** ── だから `mount()` は
+ * `buildSettingsCommands()` ではなく `InspectorRenderer` で組む。
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
+import { initialState } from '../../src/adapter/state/app-state';
 import { buildShell } from '../../src/adapter/ui/render/shell';
-import { buildSettingsCommands } from '../../src/adapter/ui/render/commands';
+import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 
 function meta(lid: string, title: string, archetype = 'text'): EntryMeta {
@@ -33,9 +38,10 @@ function mount() {
   document.body.innerHTML = '';
   const root = document.createElement('div');
   document.body.append(root);
-  buildShell(root);
-  // ⚠ 設定の面は別に組む(`settings.ts` が本番でそうしている)
-  root.append(buildSettingsCommands());
+  const shell = buildShell(root);
+  // 🔴 貼り付け欄は右の列(コレクション面)に在る(#1017 段④b)
+  const inspector = new InspectorRenderer(shell.inspector);
+  inspector.render(initialState);
   const d = new Dispatcher();
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: SET, relations: [] });
   bindActions(root, d, { showStatus: () => {} });
@@ -59,6 +65,22 @@ function mount() {
 
 beforeEach(() => {
   document.body.innerHTML = '';
+});
+
+describe('貼り付け欄は押したときだけ出す(#1017 段④b)', () => {
+  it('🔴 既定では隠れていて、「整理案を適用」を押すと出る(<details> は使わない)', () => {
+    const m = mount();
+    const box = m.root.querySelector<HTMLElement>('[data-pkc-field="plan-apply-box"]')!;
+    expect(box.hidden, '既定で開いている').toBe(true);
+    expect(m.root.querySelectorAll('details'), '<details> で畳んでいる').toHaveLength(0);
+    const toggle = m.root.querySelector<HTMLButtonElement>(
+      '[data-pkc-action="toggle-plan-apply"]',
+    )!;
+    toggle.click();
+    expect(box.hidden, '押しても開かない').toBe(false);
+    toggle.click();
+    expect(box.hidden, 'もう一度押しても閉じない(双方向)').toBe(true);
+  });
 });
 
 describe('貼ったとき', () => {

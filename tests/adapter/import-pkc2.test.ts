@@ -1209,6 +1209,132 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(restoredChains[0]!.entryLid).toBe('n1');
   });
 
+  /**
+   * 🔴 **判定は末尾ではなく中身**(#1017 段④b)。⚠ ここが「新しい 3 種の末尾を
+   *   足したら、判定を末尾で書いてしまった」を捕まえる ── 3 種 + 旧形式を
+   *   受けるようにした変更のついでに、`file.name` を見る分岐を紛れ込ませても
+   *   **上の一連の `a.pkc3.zip` を使う test は 1 つも落ちない**(名前を変えていない
+   *   ので)。ここは**わざと末尾を外す**ことで、その変異を狙い撃つ。
+   */
+  it('🔴 末尾が `.pkc3.zip` 系のどれでもない名前でも、中身が pkc3-archive なら取り込む', async () => {
+    const { ZipWriter } = await import('../../src/features/export/zip-writer');
+    const { d, deps } = harness();
+    const w = new ZipWriter();
+    await w.add('manifest.json', ['{"format":"pkc3-archive","version":1}']);
+    await w.add('container.json', [
+      JSON.stringify({
+        meta: {},
+        entries: [
+          {
+            lid: 'n1',
+            title: 'ノート',
+            archetype: 'text',
+            body: '本文',
+            entryOrder: 1,
+            createdAt: null,
+            updatedAt: null,
+            status: null,
+            date: null,
+            archived: false,
+          },
+        ],
+        relations: [],
+        revisions: [],
+        assets: [],
+      }),
+    ]);
+    // 🔑 拡張子は `.bin`(3 種の末尾のどれでもなく `.zip`ですらない)
+    expect(await importPkc2File(d, deps, new File([w.finish()], 'weird-name.bin'))).toBe(1);
+  });
+
+  /**
+   * 🔴 **#1017 段④b 追補: 取込前に中身を言う確認**。
+   * ⚠ `writeArchive` が書く manifest には `counts` が在る(上の一連の hand-built
+   * fixture には無いので、それらは確認を出さずに素通る ── 回帰無し)。
+   */
+  describe('取込前の確認(#1017 段④b 追補)', () => {
+    async function pkc3ArchiveFile(name: string): Promise<File> {
+      const { writeArchive } = await import('../../src/features/export/pkc3-archive');
+      const src = {
+        cid: 'c1',
+        title: 'テスト',
+        listEntryMetas: async () => [
+          {
+            lid: 'n1',
+            title: 'ノート',
+            archetype: 'text',
+            created_at: null,
+            updated_at: null,
+            entry_order: 1,
+            status: null,
+            date: null,
+            archived: 0,
+          },
+        ],
+        listBodies: async () => ({ rows: [{ lid: 'n1', body: '本文' }], done: true }),
+        listRelations: async () => [],
+        listAssetMetas: async () => [],
+        getAssetBlob: async () => null,
+        listRevisionLids: async () => [],
+        getRevisionChain: async () => [],
+      };
+      const blob = (await writeArchive(src, '2026-09-21T00:00:00.000Z')).blob;
+      return new File([blob], name);
+    }
+
+    it('🔴 `confirmArchiveImport` が `false` を返すと、1 件も書かずに終える(OP_FAILED も出さない)', async () => {
+      const { d, deps, written, reloadCount, notices } = harness();
+      deps.confirmArchiveImport = async () => false;
+      const file = await pkc3ArchiveFile('a.pkc3-full.zip');
+
+      const result = await importPkc2File(d, deps, file);
+
+      expect(result).toBeNull();
+      expect(written).toHaveLength(0);
+      expect(reloadCount()).toBe(0);
+      // ⚠ やめるのは失敗ではない ── OP_FAILED 相当の notify(取込に失敗…)は出ない
+      expect(notices.some((n) => n.includes('失敗'))).toBe(false);
+      expect(d.getState().error).toBeNull();
+    });
+
+    it('🔑 `confirmArchiveImport` に渡る中身が、書いた archive と一致する', async () => {
+      const { d, deps } = harness();
+      const seen: unknown[] = [];
+      deps.confirmArchiveImport = async (preview) => {
+        seen.push(preview);
+        return true;
+      };
+      const file = await pkc3ArchiveFile('a.pkc3-notes.zip');
+
+      await importPkc2File(d, deps, file);
+
+      expect(seen).toEqual([
+        { noteCount: 1, assetCount: 0, hasRelations: false, hasRevisions: false },
+      ]);
+    });
+
+    it('`true` を返すと、これまでどおり取り込む(旧 `.pkc3.zip` でも同じ)', async () => {
+      const { d, deps, written } = harness();
+      deps.confirmArchiveImport = async () => true;
+      const file = await pkc3ArchiveFile('a.pkc3.zip'); // 旧形式の名前
+
+      const result = await importPkc2File(d, deps, file);
+
+      expect(result).toBe(1);
+      expect(written.map((e) => e.lid)).toEqual(['n1']);
+    });
+
+    it('`confirmArchiveImport` を渡さない配線では、確認せずにこれまでどおり取り込む', async () => {
+      const { d, deps, written } = harness(); // confirmArchiveImport は既定で未設定
+      const file = await pkc3ArchiveFile('a.pkc3-full.zip');
+
+      const result = await importPkc2File(d, deps, file);
+
+      expect(result).toBe(1);
+      expect(written).toHaveLength(1);
+    });
+  });
+
   it('[P6c 段⑥] 🔴 base64 の添付は**閾値超でも**直流ししない', async () => {
     // 閾値超の経路は「Blob をそのまま putBlob」なので、base64 の在り処を
     // 乗せると **base64 の文字列が添付として保存される**(開けないのに

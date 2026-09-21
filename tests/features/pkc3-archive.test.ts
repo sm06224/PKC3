@@ -374,3 +374,36 @@ describe('アーカイブ ZIP — 常駐量の性質', () => {
     }
   });
 });
+
+/**
+ * 🔴 **file 名の末尾(#1017 段④b)は、中身に 1 バイトも触らない**。
+ *
+ * ⚠ 「旧ビルドが `-full.zip` を読めるはず / `-full.zip` と旧 `.pkc3.zip` の中身は
+ *   同一のはず」という主張(`archive-kind.ts` の docstring)は、**`writeArchive` が
+ *   末尾の種類を 1 引数も受け取らない**(呼び出し側が `archiveFileName()` で
+ *   後から文字列を足すだけ)ことから成り立つ ── ここでそれを実測で pin する。
+ *
+ * 🔑 検算は「同じ `source` から作った 2 本の `Blob` が、byte 単位で同一か」。
+ *   ⚠ **`exportedAt` を揃えないと空振りする** ── 揃えなければ「別の Blob」に
+ *   なる理由が呼び出しの時刻の違いなのか、末尾の選び方の違いなのかが
+ *   区別できない(CLAUDE.md §1「前提を書かない一致の主張は成り立たない条件」)。
+ */
+describe('アーカイブ ZIP — file 名の末尾は中身を変えない(#1017 段④b)', () => {
+  it('🔴 呼び出し方を変えても(同じ source・同じ時刻なら)出力は byte 単位で同一', async () => {
+    const src = () =>
+      source({
+        entries: [{ lid: 'n1', title: '議事録', body: '# 議事録\n' }],
+        relations: [],
+        assets: [{ key: 'a', mime: 'image/png', size: 4, hash: null, bytes: 'AAAA' }],
+      });
+    // 🔑 `writeArchive` は「どの末尾で保存されるか」を一切知らない ── 呼ぶたびに
+    //   別の `ArchiveSource`(同じ中身)を渡し、命名の意図が違っても同じ出力になることを見る
+    const a = await writeArchive(src(), NOW); // 「コレクション全体のつもり」
+    const b = await writeArchive(src(), NOW); // 「1 件だけのつもり」
+    const [bufA, bufB] = await Promise.all([a.blob.arrayBuffer(), b.blob.arrayBuffer()]);
+    expect(bufA.byteLength, '空振り防止 ── 0 バイトを比べていない').toBeGreaterThan(0);
+    expect(new Uint8Array(bufA), 'file 名の意図が中身にまで漏れている').toEqual(
+      new Uint8Array(bufB),
+    );
+  });
+});

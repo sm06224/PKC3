@@ -25,9 +25,9 @@
  *   確かめずに信じる(CLAUDE.md「事故の報告ほど、範囲を実測してから書く」)。
  */
 import {
+  BACKUP_LABEL,
   CONTAINER_REBUILD_LABEL,
   CONTAINER_RESET_LABEL,
-  RESCUE_ARCHIVE_LABEL,
 } from './rescue-labels';
 
 /**
@@ -106,13 +106,18 @@ export const CORRUPT_BLOCKED_OPS: readonly string[] = [
  * ⚠ ここに書く**ボタンの字は、画面から引いて突き合わせる**
  *   (`tests/features/db-corruption.test.ts`)── 手で書くと、改名した日に
  *   **両方そのままで緑**になる。
+ *
+ * 🔴 **2026-09-21(#1017 段④b)に、「取り出す」の指し先を替えた**。専用の
+ *   「拾って、戻せる形で書き出す」ボタンは無くなり、いつもの**バックアップ**が
+ *   保存領域に問題があるときは自動で読める分だけを集めて `.pkc3-part.zip` に
+ *   切り替わる(`src/adapter/ui/actions/export-archive.ts`)。
  */
 export const CORRUPT_REFUSAL =
   '保存されている中身の一部が壊れています。これ以上書き込むと壊れ方が広がるので、' +
   '書き込みだけ止めました。読むことはできます ── ' +
   `システム の 書き出しと片づけ にある「${CONTAINER_REBUILD_LABEL}」を押してください。` +
   '読めるノートをファイルへ書き出してから入れ物を作り直し、そのまま戻します(添付は触りません)。' +
-  `それでも直らないときは、「${RESCUE_ARCHIVE_LABEL}」で取り出してから` +
+  `それでも直らないときは、左下の「${BACKUP_LABEL}」で取り出してから` +
   `「${CONTAINER_RESET_LABEL}」でまっさらにして、左の列の「取り込む」で戻してください。` +
   '中身を自分の目で見たいだけなら、「SQL で調べる」の面からも取り出せます。';
 

@@ -220,7 +220,6 @@ import {
 import {
   integritySummary,
   parseQuickCheck,
-  rescueSummary,
 } from '@features/storage/db-rescue';
 import { elapsedText } from '@features/elapsed-text';
 import { quotaText } from '@features/storage/quota-watch';
@@ -396,12 +395,8 @@ async function browseArchive(
   say(out.length === 0 ? `取り出せませんでした ── ${bad.join(' / ')}` : `${out.length} 件を添付にしました${tail}`);
 }
 import { cleanForClipboard } from '@features/export/clipboard-html';
-import { writeArchive } from '@features/export/pkc3-archive';
 import {
   lastRescueWritten,
-  noteRescueWritten,
-  rescueArchiveSource,
-  rescueArchiveSummary,
   type RescueAssets,
 } from '@features/storage/rescue-archive';
 import {
@@ -3947,6 +3942,18 @@ const ACTIONS: Record<string, ActionHandler> = {
       root.querySelector<HTMLInputElement>('[data-pkc-field="replace-find"]')?.focus();
   },
   /**
+   * 🔴 **貼り付け欄は押したときだけ出す**(#1017 段④b。`toggle-replace` と
+   * 同じ作法 ── `<details>` は使わない)。開いたら**貼る欄へ focus**。
+   */
+  'toggle-plan-apply': (_dispatcher, target) => {
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    const box = root.querySelector<HTMLElement>('[data-pkc-field="plan-apply-box"]');
+    if (!box) return;
+    box.hidden = !box.hidden;
+    target.setAttribute('aria-expanded', box.hidden ? 'false' : 'true');
+    if (!box.hidden) root.querySelector<HTMLTextAreaElement>('[data-pkc-field="plan-input"]')?.focus();
+  },
+  /**
    * 🔴 **全部置換**(#191)。⚠ 判定(編集中か / 何件当たるか)は**reducer 1 か所**。
    * ここでは欄の値を渡すだけ ── binder が「0 件なら押さない」等を持つと二重帳簿になる。
    */
@@ -7394,118 +7401,6 @@ const ACTIONS: Record<string, ActionHandler> = {
           dispatcher.dispatch({ type: 'OP_FAILED', error: `捨てられませんでした: ${String(e)}` });
         }
       });
-  },
-  'db-rescue-archive': (dispatcher, _target, services, root) => {
-    const sum = root.querySelector<HTMLElement>('[data-pkc-field="db-rescue-summary"]');
-    if (sum === null) return;
-    if (services.rescueEntries === undefined) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この環境では取り出せません' });
-      return;
-    }
-    const pick = services.rescueEntries;
-    const cid = dispatcher.getState().cid;
-    if (cid === null) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'まだ開いていません' });
-      return;
-    }
-    const { source, stats } = rescueArchiveSource({
-      cid,
-      title: 'PKC から拾い出したノート',
-      pick: (after, chunks) => pick(after, chunks),
-      // 🔑 添付の bytes を一緒に入れる（#1005）。⚠ 無ければ入れないだけ
-      ...(services.rescueAssets === undefined ? {} : { assets: services.rescueAssets }),
-      onProgress: (seen, maxRowid, phase) => {
-        const at = maxRowid === null ? '' : `(${seen} / ${maxRowid})`;
-        // ⚠ 2 周舜めるので、**いまどちらを見ているか**を出す
-        //   (出さないと「進みが巻き戻った」と読まれる)
-        sum.textContent = `${phase === 'meta' ? '一覧を集めています' : '本文を集めています'}… ${at}`;
-        sum.hidden = false;
-      },
-    });
-    sum.textContent = '拾っています…(中身が多いと数分かかります)';
-    sum.hidden = false;
-    void writeArchive(source, new Date().toISOString()).then(
-      (out) => {
-        // ⚠ `toISOString()` は UTC ── 日付が 1 日ずれる端末が出る(`dayStamp` に寄せる)
-        downloadBlob(`pkc-rescue-${dayStamp(new Date())}.pkc3.zip`, out.blob);
-        /**
-         * 🔴 **書き出せた枝でだけ記録する**(#986 段③)── 捨てる前の窓が
-         *   「この画面で何件拾えたか」を出すための唯一の材料である。
-         * ⚠ **頼んだ時点で記録しない** ── 落ちた回も「済み」に見えてしまう。
-         */
-        noteRescueWritten(stats(), Date.now());
-        sum.textContent = `${rescueArchiveSummary(stats())} このファイルを「取り込む」から読み込むと、ノートが戻ります。`;
-        sum.hidden = false;
-      },
-      (e: unknown) => {
-        sum.textContent = '';
-        sum.hidden = true;
-        dispatcher.dispatch({ type: 'OP_FAILED', error: `取り出しが止まりました: ${String(e)}` });
-      },
-    );
-  },
-  'db-rescue': (dispatcher, _target, services, root) => {
-    const sum = root.querySelector<HTMLElement>('[data-pkc-field="db-rescue-summary"]');
-    if (sum === null) return;
-    if (services.rescueEntries === undefined) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この環境では取り出せません' });
-      return;
-    }
-    const pick = services.rescueEntries;
-    /** ⚠ 上限 ── 積みすぎると取り出す前に落ちる。届いたらそこで書き出す。 */
-    const MAX_CHARS = 80_000_000;
-    const parts: string[] = [];
-    let chars = 0;
-    let rows = 0;
-    let skipped = 0;
-    let empty = 0;
-    let after = 0;
-    let capped = false;
-
-    const finish = (): void => {
-      const head =
-        `# PKC から拾い出したノート\n\n` +
-        `${rescueSummary({ rows, skipped, empty })}\n` +
-        (capped ? '\n⚠ 量が多いので途中で打ち切りました。\n' : '') +
-        `\n---\n\n`;
-      downloadBlob(
-        // ⚠ `toISOString()` は UTC ── 日付が 1 日ずれる端末が出る(`dayStamp` に寄せる)
-        `pkc-rescue-${dayStamp(new Date())}.md`,
-        new Blob([head, ...parts], { type: 'text/markdown' }),
-      );
-      sum.textContent = rescueSummary({ rows, skipped, empty }) + ' ファイルに書き出しました。';
-      sum.hidden = false;
-    };
-
-    const step = (): void => {
-      void pick(after, 20).then(
-        (page: RescuePage) => {
-          for (const r of page.rows) {
-            const text = `## ${r.title || r.lid}\n\n${r.body}\n\n`;
-            parts.push(text);
-            chars += text.length;
-          }
-          rows += page.rows.length;
-          skipped += page.skipped;
-          empty += page.empty;
-          after = page.lastRowid;
-          if (chars >= MAX_CHARS) capped = true;
-          const at = page.maxRowid === null ? '' : `(${after} / ${page.maxRowid})`;
-          sum.textContent = `拾っています… ${rows} 件 ${at}`;
-          sum.hidden = false;
-          if (page.done || capped || page.lastRowid <= 0) finish();
-          else step();
-        },
-        (e: unknown) => {
-          // ⚠ 途中で落ちても、**そこまでを書き出す** ── 捨てるのがいちばん悪い
-          if (rows > 0) finish();
-          dispatcher.dispatch({ type: 'OP_FAILED', error: `取り出しが止まりました: ${String(e)}` });
-        },
-      );
-    };
-    sum.textContent = '拾っています…';
-    sum.hidden = false;
-    step();
   },
   /**
    * 🔴 **貼れる 1 行を写す**(#427 段①)。

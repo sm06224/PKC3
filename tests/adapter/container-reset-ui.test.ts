@@ -21,7 +21,7 @@ import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { buildSettingsCommands } from '../../src/adapter/ui/render/commands';
-import { bindActions, type BinderServices } from '../../src/adapter/ui/actions/binder';
+import { bindActions } from '../../src/adapter/ui/actions/binder';
 import type { ContainerResetReport } from '../../src/features/storage/container-reset';
 import { RESET_PASSPHRASE } from '../../src/features/storage/container-reset';
 import {
@@ -57,38 +57,9 @@ function liveDialog(): HTMLDialogElement | null {
 
 const OK = { wiped: true, note: null, assets: 2, assetFailures: 0 } satisfies ContainerResetReport;
 
-/**
- * 拾い出しの代わり。⚠ 1 ページで終わる最小の形(本物の形は
- * `tests/features/rescue-archive.test.ts` が見る)。
- */
-function fakePick(rows: number, skipped: number): NonNullable<BinderServices['rescueEntries']> {
-  let pass = 0;
-  return async (after: number) => {
-    if (after > 0) return { rows: [], lastRowid: after, skipped: 0, empty: 0, maxRowid: rows, done: true };
-    pass += 1;
-    return {
-      rows: Array.from({ length: rows }, (_, i) => ({
-        rowid: i + 1,
-        cid: 'c1',
-        lid: `l${i}`,
-        title: `題名 ${i}`,
-        archetype: 'text',
-        body: `本文 ${i}`,
-      })),
-      lastRowid: rows,
-      // ⚠ 読めなかった区画は 1 周目だけ数える(本物も周ごとに変わりうる)
-      skipped: pass === 1 ? skipped : 0,
-      empty: 0,
-      maxRowid: rows,
-      done: false,
-    };
-  };
-}
-
 function mount(over: {
   report?: ContainerResetReport;
   fail?: string;
-  pick?: BinderServices['rescueEntries'];
   /**
    * 🔴 **端末に在る添付の鍵**（#1005）。
    * ⚠ 渡さなければ `rescueAssets` ごと配線しない（= 直す前の姿の対照群）。
@@ -111,7 +82,6 @@ function mount(over: {
   const calls: string[] = [];
   let reloaded = 0;
   bindActions(root, d, {
-    ...(over.pick === undefined ? {} : { rescueEntries: over.pick }),
     /**
      * 🔴 **binder の配線を通す**（#1005。変異試験 G1 が SURVIVED で教えた）。
      *
@@ -145,7 +115,6 @@ function mount(over: {
     calls,
     reloaded: () => reloaded,
     run: root.querySelector<HTMLButtonElement>('[data-pkc-field="container-reset-run"]')!,
-    rescue: root.querySelector<HTMLButtonElement>('[data-pkc-field="db-rescue-archive-run"]')!,
     summary: () =>
       root.querySelector('[data-pkc-field="container-reset-summary"]')?.textContent ?? '',
     body: () => liveDialog()?.querySelector('[data-pkc-field="dialog-body"]')?.textContent ?? '',
@@ -363,60 +332,20 @@ describe('合言葉(#986 段③)', () => {
 /**
  * 🔴 **拾った件数は、拾った道から来る**(#986 段③)。
  *
- * ⚠ 説明の窓が読む「この画面で拾えた件数」は、**実際に書き出せた回だけ**
- *   記録される ── 頼んだ時点で記録すると、落ちた回も「済み」に見える。
- * 🔑 だから**同じ画面で 2 つの口を順に押して**突き合わせる
- *   (片方の口だけを見る test では、繋がっていないことが見えない ── CLAUDE.md §7)。
+ * ⚠ 2026-09-21(#1017 段④b)に、この画面**専用**の拾う口
+ *   (`db-rescue-archive-run` / `db-rescue-run`)を退役させた ── いまは
+ *   左下の「バックアップ」が、普通に書き出せた回も**同じ状態
+ *   (`noteRescueWritten`)**へ記録する(そうしないと、健全な入れ物では
+ *   この画面が永久に「まだ拾い出していません」と言い続ける ──
+ *   `export-archive.ts` の docstring)。
+ *
+ * 🔑 だから**実際の書き出しから記録まで繋がっているか**は、その書き出しを
+ *   持つ `tests/adapter/export-archive.test.ts` が見る(層をまたいで
+ *   同じことを 2 度見ない)。ここで見るのは
+ *   **「記録さえ在れば、この画面がそれを読むか」**だけで、それは
+ *   上の「まだ拾っていなければ、そう言う」/「拾ってあれば件数を出す」の
+ *   2 本が既に守っている(直接 `noteRescueWritten` を呼ぶ**同じ形**)。
  */
-describe('拾ってから捨てる(#986 段③)', () => {
-  it('🔴 拾って書き出した後は、説明の窓にその件数が出る', async () => {
-    /**
-     * ⚠ **一覧の件数(3)とわざと違う数にする** ── 同じ数にすると、
-     *   「拾えた件数」を出さない実装でも**一覧の 3 件に救われて緑**になる
-     *   (CLAUDE.md §1「救い手が別に居る」)。
-     */
-    const m = mount({ pick: fakePick(7, 2) });
-    m.rescue.click();
-    await settle();
-    await settle();
-    m.run.click();
-    await settle();
-    // ⚠ 数字の断片ではなく**文ごと**見る(「7」はどこにでも出うる)
-    expect(m.body(), '拾えた件数が繋がっていない').toContain('この画面で拾えたのは 7 件です');
-    expect(m.body(), '読めなかった区画が出ていない').toContain('読めなかった区画 2');
-    expect(m.body(), '拾ったのに「まだ」と言っている').not.toContain('まだ拾い出していません');
-  });
-
-  /**
-   * ⚠ **対照群** ── 拾う口を押していない回は「まだ」と出る。
-   * 🔑 これが無いと、上の門は「いつも件数が出る」実装でも緑になる。
-   */
-  it('⚠ 拾う口を押していなければ「まだ」と出る(対照群)', async () => {
-    const m = mount({ pick: fakePick(3, 1) });
-    m.run.click();
-    await settle();
-    expect(m.body(), '押していないのに件数が出た').toContain('まだ拾い出していません');
-  });
-
-  /**
-   * 🔴 **書き出せなかった回は記録しない。**
-   * ⚠ `rescueEntries` が落ちる回は `writeArchive` まで届かないので、
-   *   「済み」の顔をしてはいけない。
-   */
-  it('🔴 拾い出しが落ちた回は、済んだ顔をしない', async () => {
-    const m = mount({
-      pick: async () => {
-        throw new Error('rc 11');
-      },
-    });
-    m.rescue.click();
-    await settle();
-    await settle();
-    m.run.click();
-    await settle();
-    expect(m.body(), '落ちたのに済んだ顔をしている').toContain('まだ拾い出していません');
-  });
-});
 
 /**
  * 🔴 **配線の原文 pin**（#1005。変異試験 G3 が SURVIVED で教えた）。

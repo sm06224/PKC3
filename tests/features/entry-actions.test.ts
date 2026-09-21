@@ -257,7 +257,7 @@ describe('条件つきの操作(#500 案 C)', () => {
 
   it('⚠ 字は表から来る(情報ペインと食い違わない)', () => {
     // 🔑 上の「字は 1 か所から来る」検査が条件つきの 2 行も見るようになっている
-    expect(ENTRY_ACTION_LABELS['export-folder']).toBe('フォルダを書き出す');
+    expect(ENTRY_ACTION_LABELS['export-folder']).toBe('バックアップ(このフォルダ)');
     expect(ENTRY_ACTION_LABELS['write-back-file']).toBe('書き戻す');
     // ⚠ 取り込みは枚数を含むので表ではなく組み立て関数が持つ
     expect(adoptImagesLabel(1)).toContain(ADOPT_IMAGES_LABEL);
@@ -326,9 +326,11 @@ describe('右クリックの説明(#587 C-1)', () => {
     const KNOWN: readonly [string, string][] = [
       // 🔴 付箋(#685 段②、2026-09-04)
       ['open-note-window', 'a3a6b9d4'],
-      ['export-entry', '41c58db6'],
+      // 🔴 2026-09-21(#1017 段④b): バックアップ(このノート/このフォルダ)に改名・
+      //    file 名の末尾を .pkc3-notes.zip に
+      ['export-entry', 'cf003ab6'],
       ['export-entry-html', '7f0a31b1'],
-      ['export-folder', '5636e4f5'],
+      ['export-folder', 'b603d0ed'],
       ['export-entry-docx', 'e79a6f86'],
       ['export-entry-pptx', '60bcb9ea'],
       ['export-entry-pdf', 'c9838f51'],

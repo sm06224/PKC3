@@ -167,7 +167,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'container-rebuild',
   'container-reset',
   'contacts-quick-add', 'copy-block-md', 'copy-chapter-md', 'copy-note-md', 'copy-note-rich',
-  'copy-section-ref', 'copy-selection-md', 'db-check', 'db-rescue', 'db-rescue-archive',
+  'copy-section-ref', 'copy-selection-md', 'db-check',
   'delete-selected', 'deny-external-images',
   'discard-capture', 'dismiss-announce', 'dismiss-notices', 'dismiss-update', 'dual-back',
   'dual-bookmark', 'dual-copy', 'dual-delete', 'dual-focus', 'dual-forward', 'dual-mkdir',
@@ -230,7 +230,13 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'start-audio-capture', 'start-edit', 'start-screen-capture', 'start-tile-reorder',
   'start-timer', 'stop-capture', 'storage-profile', 'swap-open', 'table-to-csv',
   'table-to-markdown', 'toggle-all-app-groups', 'toggle-app-tile', 'toggle-create-menu',
-  'toggle-kind-filter', 'toggle-pane', 'toggle-show-archived', 'toggle-show-done',
+  'toggle-kind-filter', 'toggle-pane',
+  /**
+   * ⚠ **2026-09-21(#1017 段④b)** ── 貼り付け欄の開閉(「整理案を適用」)。
+   * 🔑 `toggle-pane` / `toggle-heading-fold` と同じ仕分け(N・押した所から
+   *   何も要らない。開くか閉じるかは `plan-apply-box` の `hidden` だけで決まる)。
+   */
+  'toggle-plan-apply', 'toggle-show-archived', 'toggle-show-done',
   'toggle-show-undated', 'toggle-todo', 'undo-append', 'undo-import', 'undo-move', 'use-copied',
   /**
    * ⚠ **2026-09-21(設計 doc §7、段②a)で 3 件増やした** ── メッセージを開く /
@@ -432,12 +438,15 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-09-21(設計 doc §7、段②a): メッセージ(`open-messages` / `set-message-cap` /
       //   `export-messages`)で受け手 +3 ── 登記は増えない(押し口は状態の行と
       //   「システム」の中にしか無く、鍵も持たない)。
-      total: 323,
-      receivers: 271,
+      // ⚠ 2026-09-21(#1017 段④b): 専用の取り出しボタン 2 つ(`db-rescue-archive` /
+      //   `db-rescue`)を退役させて受け手 −2、貼り付け欄の開閉(`toggle-plan-apply`)で
+      //   受け手 +1 ── net で受け手 −1(登記は動かない ── 3 つとも登記の外)。
+      total: 322,
+      receivers: 270,
       registered: 88,
       both: 36,
       outsideActionsTable: 52,
-      unregistered: 235,
+      unregistered: 234,
     });
   });
 

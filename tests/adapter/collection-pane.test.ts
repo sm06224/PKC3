@@ -34,8 +34,8 @@ function makeInspector(): { root: HTMLElement; inspector: InspectorRenderer } {
   return { root, inspector: new InspectorRenderer(buildShell(root).inspector) };
 }
 
-describe('右の列(何も選んでいない = コレクション。#1017 段④a)', () => {
-  it('🔴 4 つの書き出し操作が、実際に押せる形で描かれている', () => {
+describe('右の列(何も選んでいない = コレクション。#1017 段④a / 段④b)', () => {
+  it('🔴 4 つの書き出し操作 + 整理案を適用が、実際に押せる形で描かれている', () => {
     const { root, inspector } = makeInspector();
     inspector.render(initialState);
 
@@ -45,13 +45,33 @@ describe('右の列(何も選んでいない = コレクション。#1017 段④
     const actions = [...pane!.querySelectorAll('button[data-pkc-action]')].map((b) =>
       b.getAttribute('data-pkc-action'),
     );
-    expect(actions).toEqual(COLLECTION_PANE_COMMANDS.map((c) => c.action));
+    /**
+     * 🔴 **`toggle-plan-apply` / `apply-plan` は #1017 段④b で足した**
+     * (「構成をコピー」の隣へ「整理案を適用」を移した)。⚠ `COLLECTION_PANE_COMMANDS`
+     * には無い ── 貼り付け欄つきの器なので一律のボタン + 説明の形に収まらない
+     * (`inspector.ts` の `buildPlanApplyItem`)。
+     */
+    expect(actions).toEqual([
+      ...COLLECTION_PANE_COMMANDS.map((c) => c.action),
+      'toggle-plan-apply',
+      'apply-plan',
+    ]);
 
     // ⚠ 畳んでいないこと(user 指示 2026-08-03「主要な導線を畳まない」)
     expect(pane!.querySelectorAll('details')).toHaveLength(0);
+    /**
+     * ⚠ **`apply-plan` だけは `hidden` の内側**(押したときだけ出す貼り付け欄)。
+     * ⚠ 主要な導線そのもの(`toggle-plan-apply`)は隠れていない。
+     */
     for (const el of pane!.querySelectorAll<HTMLElement>('button[data-pkc-action]')) {
-      expect(el.closest('[hidden]'), `${el.getAttribute('data-pkc-action')} が隠れている`).toBeNull();
+      const action = el.getAttribute('data-pkc-action');
+      if (action === 'apply-plan') continue;
+      expect(el.closest('[hidden]'), `${action} が隠れている`).toBeNull();
     }
+    expect(
+      pane!.querySelector('[data-pkc-action="apply-plan"]')?.closest('[hidden]'),
+      '貼り付け欄が既定で隠れていない',
+    ).not.toBeNull();
   });
 
   it('🔴 各ボタンの下に説明(`title`)が見える字としても出る', () => {

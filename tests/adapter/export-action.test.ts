@@ -115,11 +115,11 @@ describe('書出しの実行部 — 注意を握り潰さない', () => {
 });
 
 describe('書出しの実行部 — 形式ごとの出口', () => {
-  it('アーカイブは `.pkc3.zip`、閲覧用は `.html`', async () => {
+  it('アーカイブは `.pkc3-full.zip`、閲覧用は `.html`', async () => {
     const { dispatcher } = fakeDispatcher();
     const a = deps();
     await exportArchive(dispatcher, a, 'archive');
-    expect(a.files[0]!.name).toBe('わたしのノート-20260802.pkc3.zip');
+    expect(a.files[0]!.name).toBe('わたしのノート-20260802.pkc3-full.zip');
 
     const h = deps();
     await exportArchive(dispatcher, h, 'html');
@@ -189,7 +189,7 @@ describe('書出しの実行部 — 形式ごとの出口', () => {
     const { dispatcher } = fakeDispatcher();
     const d = deps();
     await exportArchive(dispatcher, d);
-    expect(d.files[0]!.name).toMatch(/\.pkc3\.zip$/);
+    expect(d.files[0]!.name).toMatch(/\.pkc3-full\.zip$/);
   });
 });
 
@@ -228,13 +228,13 @@ describe('書出しの実行部 — 断るべきときに断る', () => {
 describe('書出しの実行部 — ファイル名', () => {
   it.each([
     ['a/b:c*d?e"f<g>h|i', 'a-b-c-d-e-f-g-h-i'],
-    ['   ', 'pkc3'], // 空にすると「.pkc3.zip」だけの隠しファイルになる
+    ['   ', 'pkc3'], // 空にすると「.pkc3-full.zip」だけの隠しファイルになる
     ['メモ 🎉', 'メモ-🎉'], // サロゲートペアを割らない
   ])('%j → %j', async (title, expected) => {
     const { dispatcher } = fakeDispatcher();
     const d = deps({ source: source({ title }) });
     await exportArchive(dispatcher, d);
-    expect(d.files[0]!.name).toBe(`${expected}-20260802.pkc3.zip`);
+    expect(d.files[0]!.name).toBe(`${expected}-20260802.pkc3-full.zip`);
   });
 });
 

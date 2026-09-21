@@ -15,7 +15,7 @@ import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { answerAppDialog, gotoApp, collectPageErrors, clickReal, expectImageRendered, useSplitEditor, useListBrowse } from './helpers';
-import { peek, withStateOnFail } from './state-dump';
+import { withStateOnFail } from './state-dump';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -105,16 +105,35 @@ test('PKC2 HTML 取込 → entry 出現 → gzip 添付が blob: で描画され
   // 🔴 P8 段⑮: 添付の**展開とハッシュはワーカーがやった**
   //    (user 指示 2026-08-03 不可侵「基本的に重い処理はワーカーにしてください」)。
   //    ⚠ 観測点は「画像が出た」ではない ── 同期経路に落ちても画像は出るので、
-  //    **どこで処理されたか**を見る。設定のジョブ表に `asset` の車線が立つ
+  //    **どこで処理されたか**を見る。
+  //    ⚠ 2026-09-21(#1017 段②b):「処理(ワーカー)」の計器区画は無くなり、
+  //    ワーカーの動きは「処理の記録」(system のノート `sys-jobs`、種類「処理」)へ
+  //    **束ねて**書かれる(50 件 / 5 秒、または画面が隠れた瞬間)。だから先に
+  //    束ねを流し、そのノートを開いて `asset` の行を読む。
+  await page.evaluate(() => {
+    // 「画面が隠れた」を合成して束ねを流す(5 秒待つより決定的)
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+  });
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  await clickReal(
+    page,
+    '[data-pkc-action="open-messages"][data-pkc-message-lid="sys-jobs"]',
+  );
+  const jobsPane = page.locator('[data-pkc-view-pane="detail"]');
   await expect(
-    page.locator('[data-pkc-lane="asset"]'),
-    '添付の展開がメインスレッドで走っている(ワーカーへ出ていない)',
-  ).toHaveCount(1);
-  // ⚠ 「車線が在る」で止めない ── **実際に処理した件数**まで見る
-  //    (spawn しただけで 1 件も流れていない実装が通ってしまう)
-  await expect(page.locator('[data-pkc-lane="asset"] td').nth(4)).not.toHaveText('0');
-  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+    jobsPane.locator('[data-pkc-field="detail-title"]'),
+    '「処理の記録」が中央に開かない',
+  ).toHaveText('処理の記録');
+  // ⚠ 「車線が在る」で止めない ── **実際に完了した**行まで見る
+  //    (spawn しただけで 1 件も流れていない実装が通ってしまう)。
+  //    行の形は job-monitor.ts の `PHASE_LABEL` + lane 名(`asset`)
+  await expect(
+    jobsPane,
+    '添付の展開がメインスレッドで走っている(ワーカーへ出ていない ── 処理の記録に asset の完了が無い)',
+  ).toContainText(/asset ── 完了/, { timeout: 10_000 });
+  // ⚠ ここは detail(処理の記録)の面に居る ── 下の「先に開く」がシステムを開く
 
   // ── 取り込んだ asset は「参照されている」と実 sqlite 走査で判定される ──
   // (旧 key のまま body に残っていたら、ここで未参照として現れる)
@@ -231,7 +250,6 @@ test('PKC2 HTML 取込 → entry 出現 → gzip 添付が blob: で描画され
     page,
     '2 度目の取込で件数が増えていない',
     async () => ({
-      lanes: await peek(page.locator('[data-pkc-lane]')),
       statusBefore,
       pageErrors: errors,
     }),
@@ -783,7 +801,8 @@ test('🔴 バックアップ: 書き出して → 取り込み直すと中身�
   const dl = page.waitForEvent('download');
   await clickReal(page, '[data-pkc-action="export-archive"]');
   const download = await dl;
-  expect(download.suggestedFilename()).toMatch(/\.pkc3\.zip$/);
+  // 🔴 コレクション全体のバックアップの末尾は `.pkc3-full.zip`(#1017 段④b)
+  expect(download.suggestedFilename()).toMatch(/\.pkc3-full\.zip$/);
   const path = await download.path();
   expect(path).not.toBeNull();
 
@@ -793,6 +812,9 @@ test('🔴 バックアップ: 書き出して → 取り込み直すと中身�
     mimeType: 'application/zip',
     buffer: readFileSync(path!),
   });
+  // 🔴 #1017 段④b 追補: PKC3 のバックアップは取込前に中身を確認する ──
+  // ノート・添付・つながり・履歴の表が出て、「取り込む」を押すまで進まない
+  expect(await answerAppDialog(page, 'ok')).toMatch(/ノート \d+ 件/);
 
   // 同じ内容がもう 1 組入る(取込は常に追加 ── 上書きしない)
   await expect(rows).toHaveCount(4);
@@ -856,8 +878,9 @@ test('🔴 このノートを書き出す ── 消す前の導線が実際に�
     () => (window as unknown as { __n?: string[] }).__n ?? [],
   );
   expect(anchorNames).toHaveLength(1);
-  // 題名は**ノートのもの**(コンテナ名 "PKC3" ではない)
-  expect(anchorNames[0]).toMatch(/^ZIP-のノート-\d{8}\.pkc3\.zip\|true$/);
+  // 題名は**ノートのもの**(コンテナ名 "PKC3" ではない)。
+  // 🔴 1 ノートの書出しの末尾は `.pkc3-notes.zip`(#1017 段④b)
+  expect(anchorNames[0]).toMatch(/^ZIP-のノート-\d{8}\.pkc3-notes\.zip\|true$/);
 
   const path = await download.path();
   const names = zipNames(readFileSync(path!));
@@ -869,6 +892,9 @@ test('🔴 このノートを書き出す ── 消す前の導線が実際に�
     mimeType: 'application/zip',
     buffer: readFileSync(path!),
   });
+  // 🔴 #1017 段④b 追補: 1 ノートのバックアップ(`.pkc3-notes.zip` 相当)でも
+  // 同じ確認が出る(判定は manifest.format だけ ── file 名は見ない)
+  expect(await answerAppDialog(page, 'ok')).toMatch(/ノート \d+ 件/);
   await expect(rows).toHaveCount(3);
 
   // 履歴も一緒に戻っている

@@ -238,7 +238,10 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
     // ⚠ 2026-09-21(設計 doc §7、段②a): N +3(`open-messages` / `set-message-cap` /
     //   `export-messages`。メッセージを開く・保管件数を選ぶ・書き出すのも、
     //   押した所から**何も要らない** ── 効く先は固定の lid で決まる)。
-    expect(counts()).toEqual({ P1: 59, P2: 33, E: 25, V: 10, N: 144 });
+    // ⚠ 2026-09-21(#1017 段④b): N −2 + 1(`db-rescue-archive` / `db-rescue` を
+    //   退役させ、`toggle-plan-apply` を足した ── どちらも押した所から
+    //   何も要らない N のまま、net で N −1)。
+    expect(counts()).toEqual({ P1: 59, P2: 33, E: 25, V: 10, N: 143 });
   });
 
   it('🔴 名指しの錨 ── 件数が同じまま入れ替わっても落ちる', () => {

@@ -32,7 +32,7 @@
  * ⚠ 手で書くと、改名した日に**画面に無い字を探させる**(#996 と同じ型 ──
  *   実際にこの file が 2 日間そうなっていた)。
  */
-import { CONTAINER_REBUILD_LABEL, RESCUE_ARCHIVE_LABEL } from './rescue-labels';
+import { BACKUP_LABEL, CONTAINER_REBUILD_LABEL } from './rescue-labels';
 
 export interface SchemaRoot {
   readonly type: string;
@@ -167,6 +167,10 @@ export function parseQuickCheck(
  * ⚠ 門は `tests/features/db-rescue.test.ts` ── **画面の一覧と突き合わせる**
  *   (期待値を手で書くと、両方そのままで緑になる)。
  *
+ * 🔴 **2026-09-21(#1017 段④b)に、指し先を退役した専用ボタンから
+ *   いつもの `BACKUP_LABEL` へ替えた**(その 2 つは無くなった ── 保存領域に
+ *   問題があるときは、いつもの**バックアップ**が自動で読める分だけ集める)。
+ *
  * ## ⚠ 先に案内するのは「作り直す」である(#1006)
  *
  * 🔑 壊れている人がいちばんやりたいのは**元に戻すこと**で、それは
@@ -179,20 +183,20 @@ export function integritySummary(r: IntegrityReport): string {
   if (t === 0 && i > 0) {
     return (
       `壊れていたのは目次だけです(${i} 件)。中身そのものは無事な可能性が高いので、` +
-      `「${RESCUE_ARCHIVE_LABEL}」で全部取り出せることがあります。` +
+      `左下の「${BACKUP_LABEL}」で全部取り出せることがあります。` +
       `そのまま直すなら「${CONTAINER_REBUILD_LABEL}」を押してください。`
     );
   }
   if (t > 0) {
     return (
       `本文をしまっている所が壊れています(${t} 件)。取り出せるのは一部だけになります ── ` +
-      `「${RESCUE_ARCHIVE_LABEL}」を押すと、読める分を集めて書き出します。` +
+      `左下の「${BACKUP_LABEL}」を押すと、読める分を集めて書き出します。` +
       `そのあと「${CONTAINER_REBUILD_LABEL}」で、読めた分だけで作り直せます。`
     );
   }
   return (
     '壊れている所が見つかりましたが、どこかまでは分かりませんでした。' +
-    `「${RESCUE_ARCHIVE_LABEL}」で読める分を書き出してから、` +
+    `左下の「${BACKUP_LABEL}」で読める分を書き出してから、` +
     `「${CONTAINER_REBUILD_LABEL}」を押してください。`
   );
 }

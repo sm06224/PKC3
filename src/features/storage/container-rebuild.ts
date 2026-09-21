@@ -68,6 +68,7 @@
 
 import { extractMeta } from '../flavor';
 import type { ArchiveSource } from '../export/pkc3-archive';
+import { archiveSuffix } from '../export/archive-kind';
 import { humanBytes } from '../human-bytes';
 import {
   assetArchivePorts,
@@ -75,7 +76,14 @@ import {
   type RescuePick,
   type RescueStats,
 } from './rescue-archive';
-import { RESCUE_ARCHIVE_LABEL } from './rescue-labels';
+
+/**
+ * 🔴 **保険の zip の呼び名**(#1017 段④b)。⚠ 以前はボタン名
+ * (`RESCUE_ARCHIVE_LABEL` = 「拾って、戻せる形で書き出す」)を指していたが、
+ * その専用ボタンは無くなった ── いまは**落ちた file の末尾**で言う
+ * (`main.ts` の `saveArchive` が `archiveFileName(base, 'part')` で焼く)。
+ */
+const RESCUE_ARCHIVE_SUFFIX = archiveSuffix('part');
 
 /** 壊れた DB から 1 周で拾えた 1 行。 */
 export interface RescuedRow {
@@ -465,7 +473,7 @@ export function rebuildDoneMessage(r: RebuildReport): string {
   if (r.outcome === 'memory-only') {
     return (
       '🔴 入れ物を作り直せませんでした(この画面では中身がメモリ上にしか置けません)。' +
-      `書き戻していないので、いま落とした「${RESCUE_ARCHIVE_LABEL}」のファイルを、` +
+      `書き戻していないので、いま落とした ${RESCUE_ARCHIVE_SUFFIX} のファイルを、` +
       '読み込み直したあとに「取り込む」から読み込んでください。'
     );
   }
@@ -480,7 +488,7 @@ export function rebuildDoneMessage(r: RebuildReport): string {
      */
     return (
       `🔴 入れ物を捨てた後に止まりました(${r.error ?? '理由は分かりません'})。` +
-      `いま落とした「${RESCUE_ARCHIVE_LABEL}」のファイルは手元に在ります。` +
+      `いま落とした ${RESCUE_ARCHIVE_SUFFIX} のファイルは手元に在ります。` +
       '⚠ この画面はもう保存できないので、読み込み直してから「取り込む」で戻してください。' +
       '読み込み直します。'
     );
@@ -488,7 +496,7 @@ export function rebuildDoneMessage(r: RebuildReport): string {
   if (r.outcome === 'write-failed') {
     return (
       `🔴 書き戻せませんでした(${r.error ?? '理由は分かりません'})。` +
-      `いま落とした「${RESCUE_ARCHIVE_LABEL}」のファイルを、` +
+      `いま落とした ${RESCUE_ARCHIVE_SUFFIX} のファイルを、` +
       '読み込み直したあとに「取り込む」から読み込んでください。'
     );
   }

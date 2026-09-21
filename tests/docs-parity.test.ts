@@ -345,8 +345,19 @@ describe('マニュアルと実装の突合', () => {
   it('🔴 書き出すファイルの拡張子が一致する', () => {
     // ⚠ 「どれがバックアップか」を取り違えると、**戻せない形を保存し続ける**
     const src = readFileSync('src/adapter/ui/actions/export-archive.ts', 'utf-8');
-    for (const ext of ['.pkc3.zip', '.md.zip', '.html']) {
+    for (const ext of ['.md.zip', '.html']) {
       expect(src, `実装が ${ext} を作らない`).toContain(`}${ext}\``);
+      expect(MANUAL, `マニュアルに ${ext} が無い`).toContain(ext);
+    }
+    /**
+     * 🔴 **アーカイブの末尾は `archive-kind.ts` から引く**(#1017 段④b)。
+     * ⚠ `export-archive.ts` は `archiveFileName()` を呼ぶだけで、末尾の
+     *   文字列そのものはもう持たない ── file 名指しで `.pkc3.zip` を
+     *   探すと空振りする(CLAUDE.md §1「救い手が変わっただけ」)。
+     */
+    const kindSrc = readFileSync('src/features/export/archive-kind.ts', 'utf-8');
+    for (const ext of ['.pkc3-full.zip', '.pkc3-notes.zip', '.pkc3-part.zip', '.pkc3.zip']) {
+      expect(kindSrc, `archive-kind.ts が ${ext} を持たない`).toContain(ext);
       expect(MANUAL, `マニュアルに ${ext} が無い`).toContain(ext);
     }
   });
@@ -450,15 +461,12 @@ describe('マニュアルと実装の突合', () => {
        */
       '壊れていないか調べる',
       /**
-       * 🔴 **2 つに割れた**(#986、2026-09-16)── 直す前は「拾えるだけ取り出す」の
-       *   1 つで、出るのは **.md 1 枚**だった。⚠ それを取り込んでも
-       *   **ノートは 1 件**にしかならない(素の .md は 1 ファイル = 1 ノート)ので、
-       *   **戻すための口**(`.pkc3.zip`)を足し、読むための口は名前で区別した。
-       * ⚠ **読む側を消していない** ── 壊れているとき「とりあえず中身を読みたい」は
-       *   戻すのとは別の要求である。
+       * 🔴 **専用の取り出しボタン 2 つを退役させた**(2026-09-21、#1017 段④b)。
+       * ⚠ 直す前はここに「拾って、戻せる形で書き出す」「拾って、読める形で
+       *   書き出す」が並んでいた ── いまは左下の「バックアップ」/ 右の列の
+       *   「Markdown」が、保存領域に問題があるとき**自動で**読める分だけを
+       *   集める(`src/adapter/ui/actions/export-archive.ts`)。
        */
-      '拾って、戻せる形で書き出す',
-      '拾って、読める形で書き出す',
       /**
        * 🔴 **中身を残して、作り直す**(#1006、2026-09-18。user 裁定)。
        * ⚠ **捨てるの上**に置く ── 壊れた人がまず試すのはこちらだからである
@@ -469,22 +477,16 @@ describe('マニュアルと実装の突合', () => {
       '中身を残して、作り直す',
       /**
        * 🔴 **入れ物ごと捨てる**(#986 段③、2026-09-16。user 裁定)。
-       * ⚠ **拾う口のすぐ下**に置く ── 壊れた人の手順が
-       *   「調べる → 拾う → **作り直す / 捨てる** → 取り込む」で上から読める。
        * ⚠ 字を「初期化」にしない ── 何が起きるか読めない内部の言葉である
        *   (CLAUDE.md「user が見るのは画面であって、こちらの語彙ではない」)。
        * ⚠ **消していない**(user 裁定 2026-09-18)── 作り直しても直らない相手が
        *   居るので、ここを畳むと**逃げ道が 1 つ無くなる**。
        */
       '中身を捨てる',
-      // 🔴 整理案を適用する(#429 段③)── 「構成をコピー」の**後半**なので同じ面に置く
-      //    ⚠ 畳んでいない(user 指示 2026-08-03「主要な導線は全部見えている」)
-      '適用する',
       /**
        * 🔴 **設定だけの持ち出し**(#414)── バックアップとは別物(ノートは入らない)。
-       * ⚠ 設定側の字を「適用する」にしない ── 同じ面に整理案の「適用する」が在るので、
-       *   **同じ字のボタンが 2 つ**並んで user が見分けられなくなる
-       *   (この等値 pin がそれを教えた)。
+       * ⚠ 「整理案を適用」の「適用する」は右の列(コレクション面)へ移った
+       *   (2026-09-21、#1017 段④b)ので、ここに同じ字のボタンは無い。
        */
       '設定を書き出す',
       '設定を適用',
@@ -520,8 +522,19 @@ describe('マニュアルと実装の突合', () => {
       'Markdown',
       // 🔴 構成をコピー(#429 段①)── 書き出しの仲間(PKC3 の外へ渡す形にする)
       '構成をコピー',
+      /**
+       * 🔴 **整理案を適用(#1017 段④b)** ── 「構成をコピー」の**後半**なので
+       *   同じ面に置く(設定の中から移した)。押すと貼り付け欄が開き
+       *   (`toggle-plan-apply`)、貼った後に押す提出ボタンが「適用する」
+       *   (`apply-plan`)── **2 つのボタンで 1 つの用事**である。
+       */
+      '整理案を適用',
+      '適用する',
     ]);
-    // ⚠ 畳んでいないこと(user 指示 2026-08-03「主要な導線を畳まない」)
+    // ⚠ 畳んでいないこと(user 指示 2026-08-03「主要な導線を畳まない」)。
+    //   ⚠ 貼り付け欄は `hidden` の div(`<details>` ではない)なので、
+    //   この検査には当たらない ── `tests/adapter/plan-apply.test.ts` /
+    //   `tests/smoke/collection-pane.smoke.spec.ts` が「押すと開く」を見る
     expect(pane.querySelectorAll('details')).toHaveLength(0);
     for (const label of labels) {
       expect(MANUAL, `マニュアルに「${label}」の説明が無い`).toContain(`**${label}**`);
@@ -560,12 +573,17 @@ describe('マニュアルと実装の突合', () => {
      *   同じ字がマニュアルにも在る」。⚠ だから**正本の側で字を確かめ**、
      *   情報ペインは**その操作を出していること**で見る。
      */
+    /**
+     * ⚠ **`export-entry` の字は「バックアップ(このノート)」へ改名した**
+     *   (2026-09-21、#1017 段④b。§3「書き出す」→「バックアップ」の
+     *   使い分けの規則)。
+     */
     const ACTION_OF: Record<string, string> = {
-      書き出す: 'export-entry',
+      'バックアップ(このノート)': 'export-entry',
       履歴: 'show-history',
       削除: 'delete-entry',
     };
-    for (const label of ['書き出す', '履歴', '削除']) {
+    for (const label of ['バックアップ(このノート)', '履歴', '削除']) {
       const action = ACTION_OF[label]!;
       expect(ENTRY_ACTION_LABELS[action], `字の正本から「${label}」が消えた`).toBe(label);
       expect(inspector, `情報ペインから「${label}」が消えた`).toContain(
@@ -576,7 +594,7 @@ describe('マニュアルと実装の突合', () => {
     for (const label of ['削除', '履歴']) {
       expect(detail, `「${label}」が本文の上にも残っている`).not.toContain(`, '${label}')`);
     }
-    for (const label of ['編集', '保存', 'キャンセル', '履歴', '書き出す', '追記']) {
+    for (const label of ['編集', '保存', 'キャンセル', '履歴', 'バックアップ(このノート)', '追記']) {
       expect(MANUAL, `マニュアルに「${label}」が無い`).toContain(`**${label}**`);
     }
   });
@@ -1535,8 +1553,9 @@ describe('導線の置き場所(P8 段⑱)', () => {
   });
 
   it('🔴 1 件書き出しの説明が、実際に落ちる形式と合っている', () => {
-    // 実装は可逆アーカイブ(.pkc3.zip)── かつて tooltip は「Markdown で保存します」だった
-    expect(ENTRY_ACTION_SRC).toContain('.pkc3.zip');
+    // 🔴 実装は可逆アーカイブ(.pkc3-notes.zip、#1017 段④b で `.pkc3.zip` から改名)
+    // ── かつて tooltip は「Markdown で保存します」だった
+    expect(ENTRY_ACTION_SRC).toContain('.pkc3-notes.zip');
     expect(ENTRY_ACTION_SRC, 'Markdown と嘘を書いている').not.toContain('Markdown で保存します');
   });
 });
@@ -2399,6 +2418,12 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    /**
+     * ⚠ **2026-09-21(#1017 段④b バックアップの末尾で中身が分かる)に、いちばん
+     *   古い 1 件が枠から出た**。
+     * 🔑 配布済み:CHANGELOG.md の 2026-09-16 の節に原本
+     */
+    'ボタンの帯の余りが灰色に塗られるのを直しました',
     /**
      * ⚠ **2026-09-21(設計 doc §7、段②b ワーカーの動きを「処理の記録」へ)に、
      *   いちばん古い 1 件が枠から出た**。

@@ -11,9 +11,9 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  BACKUP_LABEL,
   CONTAINER_REBUILD_LABEL,
   CONTAINER_RESET_LABEL,
-  RESCUE_ARCHIVE_LABEL,
 } from '../../src/features/storage/rescue-labels';
 import {
   COLLECTION_COMMANDS,
@@ -216,14 +216,24 @@ describe('断り文(#971)', () => {
      * ⚠ **2026-09-18(#1006)に 1 つ増やした** ── 断り文の**先頭の一手**が
      *   「中身を残して、作り直す」になったので、その字が**画面に実在する**ことを見る。
      */
-    for (const label of [CONTAINER_REBUILD_LABEL, RESCUE_ARCHIVE_LABEL, CONTAINER_RESET_LABEL]) {
+    for (const label of [CONTAINER_REBUILD_LABEL, CONTAINER_RESET_LABEL]) {
       expect(onScreen, `画面に無い字を指している: ${label}`).toContain(label);
       expect(CORRUPT_REFUSAL, `断り文が「${label}」を案内していない`).toContain(label);
     }
-    // ⚠ 戻す口は**左の列**に在る(設定ではない)── 一覧は両方見る
+    /**
+     * 🔴 **2026-09-21(#1017 段④b)に、専用の取り出しボタンを退役させた**。
+     * ⚠ **戻す口は左の列に在る(設定ではない)** ── 一覧は両方見る
+     *   (`取り込む` と同じ理由。片方だけ見ていると、口が引っ越した日に
+     *   「在るのに見つからない」で落ちる)。
+     */
     const importLabel = COLLECTION_COMMANDS.find((c) => c.action === 'import-file')?.label;
     expect(importLabel, '取り込む口が一覧から消えた').toBeTruthy();
     expect(CORRUPT_REFUSAL, '戻す口を案内していない').toContain(importLabel as string);
+    const backupLabel = COLLECTION_COMMANDS.find((c) => c.action === 'export-archive')?.label;
+    expect(backupLabel, 'バックアップ口が一覧から消えた').toBe(BACKUP_LABEL);
+    expect(CORRUPT_REFUSAL, `断り文が「${BACKUP_LABEL}」を案内していない`).toContain(
+      backupLabel as string,
+    );
   });
 
   it('🔑 次の一手が書いてある(「壊れました」で終わらない)', () => {
