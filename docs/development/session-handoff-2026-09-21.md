@@ -65,7 +65,16 @@ digest が止める)。1 語 1 対応ではなく、字を入れる前に 1 件�
 
 ## このセッションで `.claude` / `CLAUDE.md` へ入れたもの(正本はそちら)
 
-<!-- REFLECT_POINTERS -->
+| 罠 | どこへ |
+|---|---|
+| `git cherry-pick --continue` が `#` 始まりの commit 題名をコメントとして食う | `.claude/skills/pr-landing/SKILL.md` |
+| `render()` の外で変わる値(binder が store を直に触る)は、状態変化に乗らず画面が古いまま残る ── store に通知を足す | `.claude/agents/pkc3-reviewer.md` ④b |
+| 着地前 smoke の報告に「見ていない動線」が在ったら、既存の起動へ assert を足して押すまで終わらない | `.claude/agents/pkc3-smoker.md` |
+| 一覧を最後の節へ足すと、目次の着地点が sticky の帯の下に隠れる(`scroll-margin-top`) | `.claude/skills/smoke-testing/SKILL.md` ⑤b |
+| お知らせを登記表の先頭に足すと、別 spec の「最新の題名」の pin が壊れる ── 足す前に前の題名を grep | `.claude/skills/notice-writing/SKILL.md` |
+| smoke を同時に 2 本走らせない(`vite preview` の port が衝突して偽陽性) | `.claude/skills/smoke-testing/SKILL.md` |
+| お知らせの文面に内部の語(型 / 領域 / 区画)を書かない。`ui-terms.ts` の門が `notice-log.ts` も走査する | `.claude/skills/notice-writing/SKILL.md` |
+
 
 ## 🔴 次のセッションへの注意
 
