@@ -35,6 +35,7 @@ import { buildShell } from '../../src/adapter/ui/render/shell';
 import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
 import { blocksFor, stripComments, withoutMedia } from '../helpers/css-blocks';
 import {
+  ENTRY_ACTION_GROUP_LABELS,
   ENTRY_ACTION_WIDTH_ATTR,
   ENTRY_MENU_ACTIONS,
   entryActionWidthTier,
@@ -110,6 +111,59 @@ describe('右の列の操作は塊に分かれている(#1029 段 B / 段 C)', (
       'this-one',
       'remove',
     ]);
+  });
+
+  /**
+   * 🔴 **見出しが無いと、短い名前は読めない**(#1029 段 C。設計 doc §4.0)。
+   *
+   * ⚠ 段 C は 9 件の名前から動詞を落とした(「参照をコピー」→「参照」)。
+   *   動詞を引き受けるのは**塊の見出し**なので、見出しが出ていなければ
+   *   user は「参照」「HTML」「名前」を押すまで何が起きるか分からない。
+   * 🔑 だから見出しは**段 C の前提**であって飾りではない ── 右クリック
+   *   (`context-menu.ts`)だけに付けて右の列に付け忘れると、
+   *   **同じ字が 2 つの面で別の読みやすさになる**(§7)。
+   * ⚠ **期待値を手で書かない** ── 正本(`ENTRY_ACTION_GROUP_LABELS`)から引く。
+   *   手で書くと、見出しの字を変えた日に**両方そのままで緑**になる。
+   */
+  it('🔴 塊の先頭に、正本の見出しが押せない字で出る', () => {
+    const root = renderInspector();
+    const groups = [
+      ...root.querySelectorAll<HTMLElement>('[data-pkc-field="inspector-action-group"]'),
+    ];
+    expect(groups.length, '塊が 1 つも無い(空振り)').toBeGreaterThan(5);
+    for (const g of groups) {
+      const name = g.getAttribute('data-pkc-group')!;
+      const head = g.firstElementChild as HTMLElement | null;
+      expect(head?.getAttribute('data-pkc-field'), `${name}: 塊の先頭が見出しでない`).toBe(
+        'inspector-action-group-label',
+      );
+      expect(head?.textContent, `${name}: 見出しの字が正本と違う`).toBe(
+        ENTRY_ACTION_GROUP_LABELS[name],
+      );
+      // ⚠ 押し所を増やさない ── 押せそうに見えて押せないのがいちばん悪い
+      expect(head?.tagName, `${name}: 見出しが押せる器になっている`).toBe('SPAN');
+      expect(head?.hasAttribute('data-pkc-action'), `${name}: 見出しが押し口を持っている`).toBe(
+        false,
+      );
+    }
+  });
+
+  /**
+   * ⚠ **見出しは薄い字で、丈はボタンと同じ**(CSS。DOM に在っても、
+   *   字が本文と同じ濃さだと塊の頭に見えず、丈が違うと行がずれて見える)。
+   */
+  it('🔴 見出しの見え方を CSS が持っている(薄い / 縮まない / 丈が揃う)', () => {
+    const css = withoutMedia(stripComments(readFileSync('src/styles/app.css', 'utf-8')));
+    const head = blocksFor(
+      css,
+      "[data-pkc-region='inspector'] [data-pkc-field='inspector-action-group-label']",
+    );
+    expect(head.length, '見出しの規則が 1 つも無い(空振り)').toBeGreaterThan(0);
+    const decl = head.join(';');
+    expect(decl, '薄い字になっていない').toContain('color: var(--muted)');
+    expect(decl, '折り返して 1 字ずつ縦に並ぶ').toContain('white-space: nowrap');
+    expect(decl, '狭い列で潰れる(flex: none が無い)').toContain('flex: none');
+    expect(decl, '丈がボタンと揃っていない').toContain('height: var(--row-h)');
   });
 
   it('🔴 操作のボタンは 1 つ残らず塊の中に在る(帯へ直に足したら落ちる)', () => {
