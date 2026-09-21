@@ -461,22 +461,39 @@ describe('reducer: lean aggregate', () => {
     expect(s.openBody?.body).toBe('# A');
   });
 
-  it('error 通知は SELECT_ENTRY 単独でクリアされる(個別 pin)', () => {
+  /**
+   * 🔴 **設計 doc §7、段②a で挙動が変わった**(旧: SELECT_ENTRY / BODY_LOADED が
+   * `error` を消していた)。⚠ 知らせをステータスバーの 1 行から
+   * 「メッセージ」というノートへ移したので、**選ぶだけでは消えない** ──
+   * 消せるのは「メッセージ」を開いたとき(`MESSAGES_READ`)だけになった。
+   */
+  it('🔴 error 通知は SELECT_ENTRY では消えない(設計 doc §7、段②a)', () => {
     let s = booted();
     s = reduce(s, { type: 'SELECT_ENTRY', lid: 'a' }).state;
     s = reduce(s, { type: 'BODY_LOAD_FAILED', lid: 'a', error: 'x' }).state;
     expect(s.error).toMatch(/x/);
     s = reduce(s, { type: 'SELECT_ENTRY', lid: 'b' }).state;
-    expect(s.error).toBeNull();
+    expect(s.error).toMatch(/x/);
   });
 
-  it('error 通知は BODY_LOADED 単独でクリアされる(個別 pin)', () => {
+  it('🔴 error 通知は BODY_LOADED では消えない(設計 doc §7、段②a)', () => {
     let s = booted();
     s = reduce(s, { type: 'SELECT_ENTRY', lid: 'a' }).state;
     s = reduce(s, { type: 'BODY_LOAD_FAILED', lid: 'a', error: 'x' }).state;
     s = reduce(s, { type: 'BODY_LOADED', lid: 'a', body: 'ok' }).state;
-    expect(s.error).toBeNull();
+    expect(s.error).toMatch(/x/);
     expect(s.openBody?.body).toBe('ok');
+  });
+
+  it('🔴 error 通知は MESSAGES_READ で消える(設計 doc §7「既読」の唯一の入口)', () => {
+    let s = booted();
+    s = reduce(s, { type: 'SELECT_ENTRY', lid: 'a' }).state;
+    s = reduce(s, { type: 'BODY_LOAD_FAILED', lid: 'a', error: 'x' }).state;
+    expect(s.error).toMatch(/x/);
+    s = reduce(s, { type: 'MESSAGES_READ', lid: 'sys-messages' }).state;
+    expect(s.error).toBeNull();
+    expect(s.selectedLid).toBe('sys-messages');
+    expect(s.messagesUnread).toBe(0);
   });
 
   it('error phase の SELECT_ENTRY はブロック ── 未達 commit(唯一の写し)を無警告破棄しない', () => {
@@ -641,7 +658,7 @@ describe('effect layer: serialized store I/O', () => {
     off();
   });
 
-  it('load failure sets state.error without killing the queue, cleared on recovery', async () => {
+  it('🔴 load failure sets state.error without killing the queue(設計 doc §7、段②a: 再読込では消えない)', async () => {
     const d = new Dispatcher();
     let calls = 0;
     const store: StorePort = {
@@ -672,7 +689,8 @@ describe('effect layer: serialized store I/O', () => {
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
     await until(() => d.getState().openBody?.body === 'recovered');
     expect(d.getState().openBody?.body).toBe('recovered');
-    expect(d.getState().error).toBeNull(); // 成功でエラー通知はクリア
+    // 🔴 設計 doc §7、段②a ── 再読込の成功では消えない。消えるのは MESSAGES_READ だけ
+    expect(d.getState().error).toMatch(/boom/);
     off();
   });
 

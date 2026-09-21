@@ -23,6 +23,8 @@ import {
 const SEARCH_LIMIT = 200;
 import type { EntryStamps, EntryUpsert } from './schema';
 import { contentHash64Hex } from './content-hash';
+// 🔑 メッセージの本文の形は features 層が持つ(判断を 1 か所に。設計 doc §7、段②a)
+import { trimToCap } from '@features/message/message-log';
 // 🔑 数だけをここから取る ── 読み解き(日本語)は features 層に置く(#971 段③)
 import { QUICK_CHECK_MAX_ERRORS, RESCUE_CHUNK } from '@features/storage/db-rescue';
 import { INTEGRITY_STAMP_KEY, INTEGRITY_STAMP_SCOPE } from '@features/storage/integrity-schedule';
@@ -2567,6 +2569,54 @@ const handlers: Handlers = {
          FROM entries WHERE cid = ? AND realm = 'system' ORDER BY entry_order`,
       [req.cid],
     ) as unknown as ResultMap['listSystemEntries'],
+  /**
+   * 🔴 **メッセージ 1 件を追記する**(設計 doc §7、段②a)。
+   *
+   * ⚠ **本文の書込は `upsertEntry` の外に置く** ── メッセージは `checkpoint`
+   *   (履歴を伸ばす)も `amend`(鎖を張り替える)も要らない(履歴を積まない)ので、
+   *   `writeEntryRow` を通す理由が無い(通すと、要らない鎖の維持コストを払う)。
+   * ⚠ **無ければ作る(冪等)** ── 起動のたびに「メッセージ」「処理の記録」を
+   *   作り直さない。`ON CONFLICT` にはしない(追記は既存行の `body` を
+   *   読んだ値に依存するので、`excluded.body` では前の節を捨ててしまう)。
+   */
+  appendMessage: (req) => {
+    const database = need();
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      const rows = database.selectObjects(
+        'SELECT body FROM entries WHERE cid = ? AND lid = ?',
+        [req.cid, req.lid],
+      ) as Array<{ body: string }>;
+      const existing = rows[0]?.body ?? '';
+      const next = trimToCap(`${existing}${req.section}`, req.cap);
+      if (rows.length === 0) {
+        database.exec({
+          sql: `INSERT INTO entries
+                  (cid, lid, title, archetype, created_at, updated_at,
+                   entry_order, status, date, archived, task_total, body_chars,
+                   body_tags, realm, body)
+                VALUES (?, ?, ?, 'textlog', datetime('now'), datetime('now'),
+                   0, NULL, NULL, 0, NULL, ?, NULL, 'system', ?)`,
+          bind: [req.cid, req.lid, req.title, next.length, next],
+        });
+      } else {
+        database.exec({
+          sql: `UPDATE entries SET body = ?, body_chars = ?, updated_at = datetime('now')
+                  WHERE cid = ? AND lid = ?`,
+          bind: [next, next.length, req.cid, req.lid],
+        });
+      }
+      database.exec('COMMIT');
+      return null;
+    } catch (err) {
+      try {
+        database.exec('ROLLBACK');
+      } catch {
+        /* rollback 失敗は元エラーを優先 */
+      }
+      throw err;
+    }
+  },
   taskScan: (req) => runTaskScan(req.cid),
   contactScan: (req) => runContactScan(req.cid),
   snippetScan: (req) => runSnippetScan(req.cid),

@@ -103,6 +103,11 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
    *   (集計の束ね方 = 本文の鍵の名前)と同じ型である。
    */
   { key: 'pkc3.app-group-folded', label: 'アプリのグループの畳み方' },
+  /**
+   * ⚠ **人に付く好み**である(設計 doc §7、段②a)── 「何件保管したいか」は
+   *   端末の事情ではない。運んでも害は出ない(既定へ丸めて読むだけ)。
+   */
+  { key: 'pkc3.messages.cap', label: 'メッセージの保管件数' },
 ];
 
 /**
@@ -172,6 +177,10 @@ export const SKIPPED_KEYS: readonly { readonly key: string; readonly why: string
   {
     key: 'pkc3.opened-by-us',
     why: '🔴 その窓 1 枚だけの事実(付箋として開いたか)── `sessionStorage` に在り、運ぶ物ではない',
+  },
+  {
+    key: 'pkc3.messages.read-at',
+    why: '既読はその端末で読んだ事実(設計 doc §7、段②a)── pkc3.notices.seen と同じ考え方。運ぶと、別の端末でまだ読んでいないメッセージが既読に化ける',
   },
 ];
 

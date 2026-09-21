@@ -12,6 +12,12 @@
  */
 import { SameOriginGrants } from '@adapter/platform/same-origin-grants';
 import { ExtensionGrants } from '@adapter/platform/extension-grants';
+import { currentMessageCap } from '@adapter/platform/message-post';
+import {
+  MESSAGE_CAP_OPTIONS,
+  SYSTEM_JOB_LID,
+  SYSTEM_MESSAGE_LID,
+} from '@features/message/message-log';
 import type { AppState } from '@adapter/state/app-state';
 import type { PersistState } from '@adapter/platform/storage-persist';
 import { THEMES } from './theme';
@@ -137,6 +143,8 @@ export class SettingsRenderer {
 
   render(state: AppState): void {
     if (this.built) {
+      // 🔴 未読は毎 state で変わりうる(設計 doc §7、段②a)。
+      this.syncMessages(state);
       // 配色は user 操作でしか変わらない ── 毎 state で組み直さない
       this.syncTheme();
       this.syncPageFormat();
@@ -177,6 +185,12 @@ export class SettingsRenderer {
 
     const body = document.createElement('div');
     body.setAttribute('data-pkc-region', 'settings-body');
+
+    /**
+     * 🔴 **メッセージ**(設計 doc §7、段②a)── **先頭(目次の直後)に置く**
+     * (裁定 2026-09-20「システムのノートは system 領域」)。
+     */
+    body.append(this.buildMessages());
 
     /**
      * 🔑 **user 向けの設定と、開発者向けの計器を分ける**(P9 段③)。
@@ -756,6 +770,7 @@ export class SettingsRenderer {
      */
     this.region.append(this.buildToc(body));
     this.region.append(body);
+    this.syncMessages(state);
     this.syncTheme();
     this.syncPageFormat();
     this.syncProseAlign();
@@ -776,7 +791,6 @@ export class SettingsRenderer {
     this.syncNotices();
     this.syncTooNarrow();
     this.refresh();
-    void state;
   }
 
   /**
@@ -994,6 +1008,90 @@ export class SettingsRenderer {
       li.append(name, btn);
       list.append(li);
     }
+  }
+
+  /** メッセージの本文の字。⚠ 未読の数だけ差し替える(器は 1 度だけ組む)。 */
+  private messagesUnreadText: HTMLElement | null = null;
+
+  /**
+   * 🔴 **メッセージ**(設計 doc §7、段②a。裁定 2026-09-20)。
+   *
+   * ⚠ **先頭(目次の直後)に置く**(user 裁定「システムのノートで GO」)。
+   * ⚠ **新しい面を作らない**(§7「新しい画面も道具も作らない」)── 開くのは
+   *   普通のノートと同じ中央の面、書き出すのも普通の `.md` である。
+   */
+  private buildMessages(): HTMLElement {
+    const wrap = document.createElement('section');
+    wrap.setAttribute('data-pkc-region', 'settings-messages');
+    const h = document.createElement('h3');
+    h.textContent = 'メッセージ';
+    wrap.append(h);
+
+    const unread = document.createElement('p');
+    unread.setAttribute('data-pkc-field', 'messages-unread');
+    this.messagesUnreadText = unread;
+    wrap.append(unread);
+
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.setAttribute('data-pkc-action', 'open-messages');
+    open.setAttribute('data-pkc-message-lid', SYSTEM_MESSAGE_LID);
+    open.textContent = '開く';
+
+    /**
+     * 🔴 **処理の記録**(§7「処理」)── 段②b でワーカーの記録を繋ぐまでは
+     *   空のまま開く(#7 の注記どおり、それ自体は実害ではない)。
+     */
+    const openJobs = document.createElement('button');
+    openJobs.type = 'button';
+    openJobs.setAttribute('data-pkc-action', 'open-messages');
+    openJobs.setAttribute('data-pkc-message-lid', SYSTEM_JOB_LID);
+    openJobs.textContent = '処理の記録を開く';
+
+    const dl = document.createElement('dl');
+    const dt = document.createElement('dt');
+    dt.textContent = '保管件数';
+    const dd = document.createElement('dd');
+    const select = document.createElement('select');
+    select.setAttribute('data-pkc-action', 'set-message-cap');
+    select.setAttribute('data-pkc-field', 'messages-cap-select');
+    select.setAttribute('aria-label', 'メッセージの保管件数');
+    for (const n of MESSAGE_CAP_OPTIONS) {
+      const opt = document.createElement('option');
+      opt.value = String(n);
+      opt.textContent = `${n} 件`;
+      select.append(opt);
+    }
+    dd.append(select);
+    dl.append(dt, dd);
+
+    const exportBtn = document.createElement('button');
+    exportBtn.type = 'button';
+    exportBtn.setAttribute('data-pkc-action', 'export-messages');
+    exportBtn.setAttribute('data-pkc-message-lid', SYSTEM_MESSAGE_LID);
+    exportBtn.textContent = '書き出す';
+
+    const note = document.createElement('p');
+    note.setAttribute('data-pkc-field', 'settings-note');
+    note.textContent =
+      'アプリからの知らせ(操作の結果・注意・問題・お知らせ)が溜まります。' +
+      'ノートの中身・題名・添付名は書き込まれません。' +
+      '古い分から自動で消えます(下の保管件数を超えたとき)。バグ報告にはこのノートを貼ってください。';
+
+    wrap.append(open, openJobs, dl, exportBtn, note);
+    return wrap;
+  }
+
+  /** ⚠ 未読は毎 state で変わりうる(器は触らない ── 字と select の値だけ差し替える)。 */
+  private syncMessages(state: AppState): void {
+    if (this.messagesUnreadText)
+      this.messagesUnreadText.textContent =
+        state.messagesUnread > 0 ? `未読 ${state.messagesUnread} 件` : '未読はありません';
+    const select = this.region.querySelector<HTMLSelectElement>(
+      '[data-pkc-field="messages-cap-select"]',
+    );
+    const cur = String(currentMessageCap());
+    if (select && select.value !== cur) select.value = cur;
   }
 
   private buildExternalImages(): HTMLElement {

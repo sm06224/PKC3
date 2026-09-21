@@ -92,6 +92,19 @@ export type StorageRequest =
    */
   | { op: 'listSystemEntries'; cid: string }
   /**
+   * 🔴 **メッセージ 1 件を追記する**(設計 doc §7、段②a)。
+   *
+   * ⚠ **1 tx で「無ければ作る + 追記 + 上限で切る」を閉じる** ── 読んでから
+   *   書くまでの間に別のタブが書くと、その分を消してしまう(#178 と同じ形)。
+   * ⚠ **履歴(revisions)は積まない** ── メッセージは会話の記録であって、
+   *   「戻したい過去の版」ではない。
+   * ⚠ `section` は呼び側(`postMessage`)が組んだ**そのまま足す完成品**である ──
+   *   worker は種類・出所・文の中身を知らない(判断を 1 か所に置く、CLAUDE.md §7)。
+   * ⚠ `lid` は `sys-messages` / `sys-jobs` の 2 つだけを想定するが、
+   *   worker 側では名指しでは検めない(判定を増やさない ── 呼び側 1 か所で足りる)。
+   */
+  | { op: 'appendMessage'; cid: string; lid: string; title: string; section: string; cap: number }
+  /**
    * 🔴 **カンバンの札(チェック項目)を集める**(#277 段②)。
    *
    * ⚠ カンバンが**全ノートの本文を読まない**ための門である ── 面を開くたびの
@@ -812,6 +825,8 @@ export interface ResultMap {
   listContainerIds: { containers: Array<{ cid: string; createdAt: string | null }> };
   listEntryMetas: EntryMetaRow[];
   listSystemEntries: EntryMetaRow[];
+  /** 追記できたら `null`(設計 doc §7、段②a)。 */
+  appendMessage: null;
   /** カンバンの札(ノートの並び → 行番号 順)。⚠ 切ったときは `truncated`。 */
   taskScan: TaskScan;
   /** 連絡先(題名順は描画側)。⚠ 切ったときは `truncated`。 */

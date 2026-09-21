@@ -39,10 +39,11 @@ test('🔴 「システム」の目次: お知らせが読め、押すと移動�
     timeout: 10_000,
   });
   const announceItemTitle = announceBody.locator('section[data-pkc-announce] h3').first();
+  // ⚠ **新しい順**(設計 doc §7、段②a のメッセージ機能が、その後の段⓪の改名より新しい)。
   expect(
     (await announceItemTitle.textContent()) ?? '',
-    'お知らせの題名が改名を告げていない',
-  ).toContain('左下の「設定」が「システム」になりました');
+    'お知らせの題名が最新のものになっていない',
+  ).toContain('アプリからの知らせが「メッセージ」に溜まるようになりました');
   await dismissAnnounce(page);
 
   // 「システム」を開く

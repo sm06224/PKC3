@@ -61,6 +61,7 @@ import {
   FLAG_EMBED,
   FLAG_OFFICE_INPUT_LOG,
   FLAG_PASTE_INSPECT,
+  registeredFlags,
 } from '@features/flags';
 import { appBrowseMode, browseScanOf, isBrowseMode } from '@adapter/ui/render/browse-mode';
 import { SavingIndicator } from '@features/status/saving-line';
@@ -111,6 +112,9 @@ import { resetContainer, wipedElsewhere } from '@features/storage/container-rese
 import { runStartupIntegrity } from '@adapter/platform/storage/startup-integrity';
 import type { StartupIntegrityOutcome } from '@features/storage/integrity-schedule';
 import { appCopyHistory } from '@adapter/platform/copy-history-store';
+// 🔑 メッセージの口は 1 個(設計 doc §7、段②a。CLAUDE.md §7)
+import { appMessagePost, messagesReadAt } from '@adapter/platform/message-post';
+import { countUnread, SYSTEM_MESSAGE_LID } from '@features/message/message-log';
 import {
   purgeBlockReason,
   runExplicitPurge,
@@ -866,6 +870,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   「全部よそ扱い」に落ちて**静かに通ってしまう**。
    */
   root.setAttribute('data-pkc-container', cid);
+  /**
+   * 🔴 **メッセージの口を、client / cid が確定した時点で渡す**(設計 doc §7、段②a)。
+   * ⚠ できるだけ早く ── これより後に投げた `postMessage` は、渡すまでの間は
+   *   控え(IndexedDB)へ積まれるだけになる(黙って消えはしないが、書けるのが遅れる)。
+   */
+  appMessagePost.attach({
+    cid,
+    appendMessage: (req) => client.request({ op: 'appendMessage', ...req }),
+  });
   // boot と再読込は**同じ経路**で state を作る(取込後に別の作り方をしない ──
   // 分岐が増えると「取込直後だけ壊れる」型の差分が入る)
   const loadSnapshot = async () => ({
@@ -880,6 +893,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
 
   const dispatcher = new Dispatcher();
   /**
+   * 🔴 **未読の数を state へ写す**(設計 doc §7、段②a)。
+   * ⚠ **`appMessagePost` が数の正本**(post のたび・`seedUnread` のたび)、
+   *   ここは写すだけ ── 判定を 2 か所に置かない(CLAUDE.md §7)。
+   */
+  appMessagePost.onUnreadChanged((count) =>
+    dispatcher.dispatch({ type: 'MESSAGES_UNREAD_SET', count }),
+  );
+  /**
    * 🔴 **確認はアプリ自身のダイアログ**(#299 段③、2026-08-21。user 裁定
    *   「ブラウザの方のアラートはマウスの動線が多くてウザいから、自前の方が嬉しい」)。
    *
@@ -893,9 +914,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   /**
    * 知らせるだけ(native の `alert` の置き換え)。
    * ⚠ **捨てない** ── 断りの理由はこれでしか届かないので、器は重なったら順番に出す。
+   * 🔴 **モーダルを出す前に post する**(設計 doc §7、段②a)── `alertInApp` の
+   *   3 か所のうちの 1 つ(残り 2 つは `binder.ts` の `db-rescue-*`)。
    */
-  const tell = (message: string): Promise<void> =>
-    alertInApp(root, message).then(() => undefined);
+  const tell = (message: string): Promise<void> => {
+    appMessagePost.post({ kind: 'result', source: 'app', text: message });
+    return alertInApp(root, message).then(() => undefined);
+  };
   /**
    * 🔴 **別のタブが捨てたと聞いたとき、打っていた字を黙って捨てない**(#986 段③)。
    * ⚠ 20 行下の更新の案内(`createUpdatePrompt`)と**同じ答え**にしてある(§7)。
@@ -1283,6 +1308,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   let noticeLine = '';
   /** ⚠ 同じ知らせで何度も塗り直さない(state は毎回流れてくる)。 */
   let noticeShown: string | null = null;
+  /**
+   * 🔴 **`state.error` が新しい値に変わった瞬間だけ post する**(設計 doc §7、段②a)。
+   * ⚠ 240 か所の `OP_FAILED` を 1 つずつ触らない ── ここが唯一の観測点。
+   */
+  let lastPostedError: string | null = null;
   const paint = () => {
     // ⚠ アプリの窓では常設バッジを畳む(上の理由)── `paint` は面が変わるたび
     //    走るので、`onHold` が旗を倒した次の描画から消える。
@@ -1365,6 +1395,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     paintStatusOpen(regions.statusOpen, dispatcher.getState(), noticeLine);
     // 🔴 塊を動かした直後の「元に戻す」も同じ口で出し入れする(#684 段①)
     paintStatusUndo(regions.statusUndo, dispatcher.getState(), noticeLine);
+    /**
+     * 🔴 **未読のメッセージへの入口**(設計 doc §7、段②a)。「開く」「元に戻す」と
+     * 同じ作法 ── 常設で置いて、未読が 1 件以上あるときだけ出す。
+     */
+    const unread = dispatcher.getState().messagesUnread;
+    regions.statusMessages.hidden = unread <= 0;
+    regions.statusMessages.textContent = unread > 0 ? `未読 ${String(unread)} 件` : '';
   };
   /** 一時の知らせ(コピーした / 取り込んだ)。⚠ 状態変化では消えない。 */
   const showStatus = (text: string) => {
@@ -1597,6 +1634,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // ⚠ **エラーの行だけ**を触る ── 一時の知らせを巻き添えにしない
     errorLine = state.error ? `⚠ エラー: ${state.error}` : '';
     /**
+     * 🔴 **`OP_FAILED` → メッセージ「問題」**(設計 doc §7、段②a)。
+     * ⚠ **新しい非 null 値に変わった瞬間だけ** post する(直前と同じ字なら
+     *   何度も積まない ── `state` は毎回流れてくる)。
+     */
+    if (state.error !== null && state.error !== lastPostedError) {
+      lastPostedError = state.error;
+      appMessagePost.post({ kind: 'problem', source: 'app', text: state.error });
+    } else if (state.error === null) {
+      lastPostedError = null;
+    }
+    /**
      * 🔴 **state から来る一時の知らせ**(#402 ①)。
      * ⚠ effect の中(一括タグ)は `showStatus` を持たないので、state を通す ──
      *   ⚠ **`showStatus` と同じ行に載せる**(2 本目の行を作ると、優先順位の
@@ -1604,6 +1652,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      */
     if (state.notice !== null && state.notice !== noticeShown) {
       noticeShown = state.notice;
+      // 🔴 **`OP_NOTICE` → メッセージ「結果」**(設計 doc §7、段②a)。
+      appMessagePost.post({ kind: 'result', source: 'app', text: state.notice });
       showStatus(state.notice);
       return; // `showStatus` が `paint` を呼ぶ
     }
@@ -3962,6 +4012,36 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     metas,
     relations, // 常駐(§6: 肥大が数字で出たら SQL query 化へ移す)
   });
+  /**
+   * 🔴 **起動の要約 → メッセージ「結果」**(設計 doc §7、段②a)。
+   *
+   * ⚠ **初回だけ** ── `SYS_BOOTED` は `reload-snapshot.ts`(別タブの書込)からも
+   *   飛ぶが、あちらは別 module の別経路なのでこの行を通らない。ここは
+   *   `main.ts` の boot 関数が**1 度しか実行されない**ことに乗っている。
+   * ⚠ **本文・題名は含めない**(§7「中身を漏らさない」)── 版・保存先・フラグの数・
+   *   ブラウザ・幅だけの診断行。
+   */
+  {
+    const activeFlags = registeredFlags().filter((f) => appFlags.isOn(f.name)).length;
+    appMessagePost.post({
+      kind: 'result',
+      source: 'app',
+      text: `起動しました:版 ${versionText()} / 保存先 ${init.vfs} / フラグ ${String(activeFlags)} 個 / ブラウザ ${navigator.userAgent} / 幅 ${String(window.innerWidth)}px`,
+    });
+  }
+  /**
+   * 🔴 **起動直後の未読を、disk の本文から数え直す**(設計 doc §7「既読」)。
+   * ⚠ `state.messagesUnread` の既定は 0(app-state.ts)── ここで実際の値に
+   *   上書きする(前回のセッションで読み切れなかった注意 / 問題が在れば拾う)。
+   */
+  void client
+    .request({ op: 'getBody', cid, lid: SYSTEM_MESSAGE_LID })
+    .then((body) => {
+      appMessagePost.seedUnread(countUnread(body ?? '', messagesReadAt()));
+    })
+    .catch(() => {
+      /* 読めなかった ── 未読 0 のまま(次に post があれば増える) */
+    });
   /**
    * ⚠ **旧ビルドの本体に合わせた回は、黙って劣化しない**(#286)。
    * user から見ると「別のタブを閉じるまで直らない」ので、直し方まで出す。

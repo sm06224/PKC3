@@ -222,12 +222,13 @@ describe('create (P3-7a)', () => {
     await tick(30);
     // 守るべき未達 commit は無い ── phase は落ちない(修正前は error phase 固着 +
     // error 表示も後続 BODY_LOADED に消され「無言ロック」だった)。
-    // 通知自体は掃除後の自動選択の成功読込がクリアする(次の成功でクリアの設計)
+    // 🔴 設計 doc §7、段②a ── 知らせはステータスバーではなく「メッセージ」の
+    // ノートへ移ったので、次の成功読込では**消えない**(消えるのは MESSAGES_READ だけ)。
     expect(d.getState().phase).toBe('ready');
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
     await tick(20);
     expect(d.getState().openBody?.body).toBe('# A'); // 選択・読込が生きている
-    expect(d.getState().error).toBeNull();
+    expect(d.getState().error).toMatch(/first write fails/);
   });
 
   it('draft を打った cancel で fresh は解除 ── 後日の無変更 Esc が entry を消さない', async () => {

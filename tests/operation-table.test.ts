@@ -232,6 +232,12 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'table-to-markdown', 'toggle-all-app-groups', 'toggle-app-tile', 'toggle-create-menu',
   'toggle-kind-filter', 'toggle-pane', 'toggle-show-archived', 'toggle-show-done',
   'toggle-show-undated', 'toggle-todo', 'undo-append', 'undo-import', 'undo-move', 'use-copied',
+  /**
+   * ⚠ **2026-09-21(設計 doc §7、段②a)で 3 件増やした** ── メッセージを開く /
+   *   保管件数を選ぶ / 書き出す。🔑 押し所は状態の行の 1 個所と「システム」の
+   *   節の中にしか無く、鍵も持たない(`system-jump` / `set-prose-align` と同じ仕分け)。
+   */
+  'export-messages', 'open-messages', 'set-message-cap',
 ];
 
 /**
@@ -423,12 +429,15 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   (押し所は設定の中の 1 つだけ。すぐ下の `container-reset` と同じ仕分け)。
       // ⚠ 2026-09-20(#1017 段⓪): 「システム」の目次から節へ飛ぶ(`system-jump`)で
       //   受け手 +1(登記は増えない ── 押し口は「システム」の中にしか無く、鍵も持たない)。
-      total: 320,
-      receivers: 268,
+      // ⚠ 2026-09-21(設計 doc §7、段②a): メッセージ(`open-messages` / `set-message-cap` /
+      //   `export-messages`)で受け手 +3 ── 登記は増えない(押し口は状態の行と
+      //   「システム」の中にしか無く、鍵も持たない)。
+      total: 323,
+      receivers: 271,
       registered: 88,
       both: 36,
       outsideActionsTable: 52,
-      unregistered: 232,
+      unregistered: 235,
     });
   });
 
