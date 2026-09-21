@@ -190,7 +190,9 @@ describe('割当の検め', () => {
    * 🔴 **#950 段②**: 帯に既にボタンが在る 3 つ ── マウスだけで完結するので、
    *   鍵の枠(15 個の設定 flag とは別枠だが、既定の割当は有限)を消費しない。
    */
-  const KEYLESS: readonly string[] = ['format-table', 'format-codeblock', 'format-math'];
+  const KEYLESS: readonly string[] = [
+  // 🔑 #1032 ── 鍵は user が決める(`global` は Escape を名乗れない。定義の docstring)
+  'deselect-entry','format-table', 'format-codeblock', 'format-math'];
 
   it('🔴 鍵を持たない操作の一覧は、身元で持つ', () => {
     const ids = new Set(KEY_COMMANDS.map((c) => c.id));

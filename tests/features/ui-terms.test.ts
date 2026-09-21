@@ -104,14 +104,17 @@ describe('画面の字に使わない語(ui-terms.ts の BANNED_TERMS)', () => {
    */
   const KNOWN_BANNED: readonly [file: string, banned: string, count: number][] = [
     ['src/features/keymap.ts', '小窓', 1],
-    ['src/features/notice/notice-log.ts', '印', 2],
+    // ⚠ 2026-09-21(#1032): 2 → 1 ── 枠から落ちた 1 件(`2026-09-16-grip-no-h-scroll`)に
+    //    「印」が 1 つ在った。配布済みの文面は書き換えないので、残りは 1 件のままである
+    ['src/features/notice/notice-log.ts', '印', 1],
     ['src/features/notice/notice-log.ts', '壊れ', 31],
     ['src/features/notice/notice-log.ts', '居場所', 1],
     ['src/features/notice/notice-log.ts', '拾う', 1],
     ['src/features/notice/notice-log.ts', '捨てる', 7],
     ['src/features/notice/notice-log.ts', '最後の手', 3],
     ['src/features/notice/notice-log.ts', '札', 2],
-    ['src/features/notice/notice-log.ts', '面', 9],
+    // ⚠ 2026-09-21(#1032): 9 → 7 ── 枠から落ちた 1 件に「面」が 2 つ在った
+    ['src/features/notice/notice-log.ts', '面', 7],
   ];
 
   it('いまの残りと一致する(増えたら落ちる。直したら KNOWN_BANNED から消す)', () => {

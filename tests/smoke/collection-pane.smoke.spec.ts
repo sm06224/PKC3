@@ -87,7 +87,46 @@ test('🔴 何も選んでいないときの右の列に、コレクションの
   await expect(pane, '選んだのにコレクション面が残っている').toHaveCount(0);
   await expect(page.locator('[data-pkc-field="inspector-title"]')).toBeVisible();
 
-  // ⑤ 選択を外す(このノートを消す)と、コレクション面へ戻る(双方向のもう片側)
+  /**
+   * ⑤ 🔴 **一覧の「何も無い所」を押すと、コレクションへ戻る**(#1032)。
+   *
+   * ⚠ 直す前は、ノートを 1 件でも選ぶと**戻り道が画面に 1 つも無かった**
+   *   (「選択を解除」が外すのは印だけで、開いているノートには触らない)。
+   * 🔑 **新しい起動は足さない** ── ④ で作ったこのノートをそのまま使う。
+   * ⚠ unit(`tests/adapter/deselect-entry.test.ts`)は happy-dom で同じ主張を
+   *   見るが、**実際に器の余白が押せる**(行に覆われていない)ことは見ていない。
+   */
+  const host = page.locator('[data-pkc-region="browse-host"]');
+  await expect(host, '左の列の器が出ていない').toBeVisible();
+  const box = (await host.boundingBox())!;
+  /**
+   * ⚠ **押すのは器の下のほうの余白** ── 行も帯も上から積まれるので、そこは
+   *   何も無い。🔴 1 稿目は `filer-table` の下端を押していたが、**表は中身の
+   *   高さしか無い**(実測:表 53px / その下 126px)ので、押していたのは
+   *   **最後の行の中**だった ── この spec が落ちて実装の器ごと直した
+   *   (CLAUDE.md §2「経路が一度も通っていない」)。
+   * ⚠ 何も無いことを**この場で確かめる**(押し所の上だと、この検査は
+   *   「戻らない」ではなく「別の物が効いた」を見てしまう)。
+   */
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height - 8;
+  const under = await page.evaluate(
+    ([px, py]) => {
+      const el = document.elementFromPoint(px as number, py as number);
+      return el?.closest('[data-pkc-action]') === null ? 'blank' : 'action';
+    },
+    [x, y],
+  );
+  expect(under, '押そうとした所に押し所が在る(前提が崩れている)').toBe('blank');
+  await page.mouse.click(x, y);
+  await expect(
+    page.locator('[data-pkc-field="collection-pane"]'),
+    '一覧の何も無い所を押してもコレクションへ戻らない',
+  ).toBeVisible();
+
+  // ⑥ 消しても戻る(双方向のもう片側 ── 後継が無いときの経路)
+  await clickReal(page, '[data-pkc-region="filer-table"] tbody tr');
+  await expect(page.locator('[data-pkc-field="inspector-title"]')).toBeVisible();
   await clickReal(page, '[data-pkc-action="delete-entry"]');
   await answerAppDialog(page, 'ok');
   await expect(
