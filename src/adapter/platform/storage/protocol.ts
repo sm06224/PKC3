@@ -83,6 +83,15 @@ export type StorageRequest =
   | { op: 'listContainerIds' }
   | { op: 'listEntryMetas'; cid: string }
   /**
+   * 🔴 **system 領域のノートだけを一覧する**(設計 doc §1.1、段①)。
+   *
+   * ⚠ `listEntryMetas` は system 領域を**出さない**(領域の判定は `entries.realm`
+   *   1 か所 ── schema.ts の `USER_REALM_SQL`)。この op はその裏側で、
+   *   段②以降「メッセージ」のノートを開くために使う。段①ではまだ system 領域の
+   *   ノートを作る経路が無いので、常に空配列を返す(実害は無い)。
+   */
+  | { op: 'listSystemEntries'; cid: string }
+  /**
    * 🔴 **カンバンの札(チェック項目)を集める**(#277 段②)。
    *
    * ⚠ カンバンが**全ノートの本文を読まない**ための門である ── 面を開くたびの
@@ -802,6 +811,7 @@ export interface ResultMap {
    */
   listContainerIds: { containers: Array<{ cid: string; createdAt: string | null }> };
   listEntryMetas: EntryMetaRow[];
+  listSystemEntries: EntryMetaRow[];
   /** カンバンの札(ノートの並び → 行番号 順)。⚠ 切ったときは `truncated`。 */
   taskScan: TaskScan;
   /** 連絡先(題名順は描画側)。⚠ 切ったときは `truncated`。 */
