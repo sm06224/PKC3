@@ -2,12 +2,18 @@ import { test, expect } from '@playwright/test';
 import { clickReal, collectPageErrors, createEntry, gotoApp } from './helpers';
 
 /**
- * 🔴 **整理案を貼って、下見してから当てる**(#429 段③④)。
+ * 🔴 **壊れたときに調べる口 + 壊れて直らないときの、最後の手**(#971 段③ / #1006)。
+ *
+ * ⚠ **2026-09-21(#1017 段④b)に、貼り付けの検証をここから外した**。
+ *   「整理案を適用」は「構成をコピー」の隣(右の列。何も選んでいないとき)へ
+ *   移った ── ここ(「システム」の面)では届かないので、
+ *   `tests/smoke/collection-pane.smoke.spec.ts` が見る(あちらは起動直後の
+ *   「何も選んでいない」状態を既に持っているので、新しい `gotoApp` を足さずに
+ *   検められる)。
  *
  * 🔴 **unit では原理的に届かない層だけ**をここで見る:
- * 1. **本物の貼り付け**(`input` が実際に飛ぶか)── unit は手で event を撃っている
- * 2. **`disabled` が本当に押せないか** ── happy-dom は `click()` を素通しさせうる
- * 3. **設定の面を開いてから**辿り着けるか(畳まれていない / 隠れていない)
+ * 1. **`disabled` が本当に押せないか** ── happy-dom は `click()` を素通しさせうる
+ * 2. **設定の面を開いてから**辿り着けるか(畳まれていない / 隠れていない)
  *
  * ⚠ **同じ設定の面に来た道中**で「入れ物ごと捨てる」導線(#986 段③)も見る
  * (smoke-budget: 新しい起動を足さず、既に在る道中に assert を足す)。
@@ -15,34 +21,18 @@ import { clickReal, collectPageErrors, createEntry, gotoApp } from './helpers';
  * 「まだ消えない」「元に戻せません」等の字・「やめる」で戻る・
  * 合言葉を打ち間違えたら消えない、までを見る。
  */
-test('🔴 案を貼ると下見が出て、当てると本当に移る (#429)', async ({ page }) => {
+test('🔴 壊れの調べと、作り直す/捨てるの 2 段が押せる (#971 / #1006)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
 
-  // 相手(フォルダ)と、動かすノートを作る
+  // 🔑 root に 2 件あることだけが要る(下の `resetEntryRows` の前提)
   await createEntry(page, 'folder');
   await page.locator('[data-pkc-field="editor-title"]').fill('資料');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   await createEntry(page, 'text');
   await page.locator('[data-pkc-field="editor-title"]').fill('議事録');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
-
-  /**
-   * lid は画面から取れる ── 行が `data-pkc-entry` に持っている
-   * (情報ペインの「参照をコピー」が出すのと同じ lid)。
-   * ⚠ 既定はフォルダの面なので、**そちらの表**から拾う。
-   */
-  const lids = await page.evaluate(() =>
-    [...document.querySelectorAll('[data-pkc-entry]')].map((el) => ({
-      lid: el.getAttribute('data-pkc-entry') ?? '',
-      title: el.textContent ?? '',
-    })),
-  );
-  const note = lids.find((l) => l.title.includes('議事録'));
-  const box = lids.find((l) => l.title.includes('資料'));
-  expect(note?.lid, '前提が崩れている ── 一覧から lid が取れない').toBeTruthy();
-  expect(box?.lid).toBeTruthy();
 
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
 
@@ -57,27 +47,28 @@ test('🔴 案を貼ると下見が出て、当てると本当に移る (#429)',
    * 付くので、面をスコープしないと別の物に満たされる(CLAUDE.md §1)。
    */
   /**
-   * 🔴 **壊れたときに押す 3 つの口**（#1004 / #1005）。
+   * 🔴 **壊れたときに調べる口**(#1004 / #971 段③)。
    *
-   * ⚠ この 3 つは **実ブラウザの検査が 1 本も無かった**
-   *   （2026-09-17 に `grep -rn 'db-check\|db-rescue' tests/smoke/` が **0 件**）。
-   *   🔴 user がいちばん助けが要る場面で押す口なので、
-   *   **掼せて黙っている（dead click）**を誰も見ていなかった。
    * 🔑 **新しい起動は足さない** ── 設定の面へ来た道中に assert を足す
-   *   （smoke-budget。CLAUDE.md「既に在る道中に assert を足す」）。
-   * ⚠ **押してはいない** ── 拾い出しは file を落とすので、
-   *   この道中の後続の assert が見ている状態を変えてしまう。
+   *   (smoke-budget。CLAUDE.md「既に在る道中に assert を足す」)。
+   *
+   * ⚠ **2026-09-21(#1017 段④b)に、専用の取り出しボタン 2 つを退役させた**
+   *   (`db-rescue-archive-run` / `db-rescue-run`)。保存領域に問題があるときは、
+   *   いつもの「バックアップ」/「Markdown」が自動で読める分だけを集める ──
+   *   その自動フォールバックは `tests/smoke/archive-kind.smoke.spec.ts` が見る
+   *   (壊れた DB を実ブラウザで作るのはコストが高いので、あちらは unit で
+   *   `looksCorrupt` の分岐そのものを決定的に確かめる)。
    */
   const rescueBox = page.locator('[data-pkc-region="db-rescue"]');
   await expect(rescueBox, '壊れたときの欄が設定の面に出ていない').toBeVisible();
-  for (const field of ['db-check-run', 'db-rescue-archive-run', 'db-rescue-run']) {
-    const btn = page.locator(`[data-pkc-field="${field}"]`);
-    await expect(btn, `${field} が見えない`).toBeVisible();
-    await expect(btn, `${field} が押せない（dead click）`).toBeEnabled();
-    // 🔴 説明の 1 行は**見えている**こと（#1004。title だけだと指では読めない）
-    const note = page.locator(`[data-pkc-field="${field}-note"]`);
-    await expect(note, `${field} の説明の 1 行が見えていない`).toBeVisible();
-    await expect(note, `${field} の説明が空`).not.toHaveText('');
+  {
+    const btn = page.locator('[data-pkc-field="db-check-run"]');
+    await expect(btn, 'db-check-run が見えない').toBeVisible();
+    await expect(btn, 'db-check-run が押せない(dead click)').toBeEnabled();
+    // 🔴 説明の 1 行は**見えている**こと(#1004。title だけだと指では読めない)
+    const note = page.locator('[data-pkc-field="db-check-run-note"]');
+    await expect(note, 'db-check-run の説明の 1 行が見えていない').toBeVisible();
+    await expect(note, 'db-check-run の説明が空').not.toHaveText('');
   }
 
 
@@ -209,37 +200,6 @@ test('🔴 案を貼ると下見が出て、当てると本当に移る (#429)',
     page.locator('[data-pkc-field="status-text"]'),
     '断りの字が画面に出ていない',
   ).toContainText('何も消していません');
-
-  const ta = page.locator('[data-pkc-field="plan-input"]');
-  await expect(ta, '整理案の欄が設定の面に出ていない(畳まれている?)').toBeVisible();
-
-  const apply = page.locator('[data-pkc-field="plan-apply"]');
-  await expect(apply, '貼る前から押せる(dead click)').toBeDisabled();
-
-  // ① 🔴 **誤りが在ると押せない**(行番号つきで理由が出る)
-  await ta.fill('mv zzz root');
-  await expect(page.locator('[data-pkc-field="plan-errors"] li')).toHaveCount(1);
-  await expect(page.locator('[data-pkc-field="plan-errors"] li').first()).toContainText('1 行目');
-  await expect(apply, '誤りが在るのに押せる ── 半分だけ当たる').toBeDisabled();
-
-  // ② 正しい案 ── 下見が**題名で**出る
-  await ta.fill(`mv ${note!.lid} ${box!.lid}`);
-  const prev = page.locator('[data-pkc-field="plan-preview"] li');
-  await expect(prev).toHaveCount(1);
-  await expect(prev.first(), '下見が題名で書かれていない').toContainText('議事録');
-  await expect(prev.first()).toContainText('資料');
-  await expect(apply).toBeEnabled();
-
-  // ③ 🔴 **当てると本当に移る**(フォルダ面で中に入って確かめる)
-  await clickReal(page, '[data-pkc-field="plan-apply"]');
-  await expect(ta, '当てた後も案が残っている ── 二重に当ててしまう').toHaveValue('');
-  await expect(apply).toBeDisabled();
-
-  await clickReal(page, '[data-pkc-browse="filer"]');
-  const rows = page.locator('[data-pkc-region="filer-table"] tbody tr');
-  // root には「資料」だけが残る(議事録はその中へ入った)
-  await expect(rows, 'root の行数が変わっていない ── 移っていない').toHaveCount(1);
-  await expect(rows.first()).toContainText('資料');
 
   expect(errors, `page error: ${errors.join(' / ')}`).toHaveLength(0);
 });

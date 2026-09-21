@@ -14,6 +14,9 @@ import { answerAppDialog, clickReal, collectPageErrors, createEntry, gotoApp } f
  *   同じ主張を happy-dom で見ているが、**実際に画面へ描かれて押せる**ことまでは
  *   保証しない)
  * - **押した結果が例外を出さずに終わる**(`export-structure` の 0 件時の枝)
+ * - 🔴 **「整理案を適用」の `hidden` 付け外しが実ブラウザで本当に効くか**
+ *   (#1017 段④b。「構成をコピー」の隣へ移した ── happy-dom は `hidden` の
+ *   描画反映までは保証しない)
  *
  * ⚠ **やらなかったこと**: 「構成をコピー」の**成功**(clipboard に非 0 件の内容が
  *   入る)経路は、この spec では見ていない ── そのためには「ノートが 1 件以上
@@ -49,6 +52,26 @@ test('🔴 何も選んでいないときの右の列に、コレクションの
     await expect(note, `${action} の見える説明が無い`).toBeVisible();
   }
   await expect(pane.locator('details'), '畳まれている').toHaveCount(0);
+
+  /**
+   * 🔴 **「整理案を適用」は貼り付け欄が押したときだけ出る**(#1017 段④b)。
+   *
+   * 🔑 **新しい起動は足さない** ── この spec が既に持っている「何も選んでいない」
+   *   状態(起動直後)を使う(smoke-budget)。実データでの「当てると本当に移る」は
+   *   `tests/adapter/plan-apply.test.ts`(unit)が見る ── ここでは
+   *   **実ブラウザでしか確かめられない層**(`hidden` の付け外しが実際に効くか /
+   *   `<details>` を使っていないか)だけを見る。
+   */
+  const toggle = pane.locator('[data-pkc-action="toggle-plan-apply"]');
+  await expect(toggle, '「整理案を適用」が見えていない').toBeVisible();
+  const planBox = pane.locator('[data-pkc-field="plan-apply-box"]');
+  await expect(planBox, '貼り付け欄が既定で隠れていない').toBeHidden();
+  await clickReal(page, '[data-pkc-field="collection-pane"] [data-pkc-action="toggle-plan-apply"]');
+  await expect(planBox, '押しても貼り付け欄が開かない').toBeVisible();
+  const planInput = page.locator('[data-pkc-field="plan-input"]');
+  await expect(planInput, '整理案の貼り付け欄が見えていない').toBeVisible();
+  const planApplyBtn = page.locator('[data-pkc-field="plan-apply"]');
+  await expect(planApplyBtn, '貼る前から押せる(dead click)').toBeDisabled();
 
   // ③ 押した結果を観測する(0 件のときの断り)── 例外を出さずに終わる
   await clickReal(page, '[data-pkc-field="collection-pane"] [data-pkc-action="export-structure"]');

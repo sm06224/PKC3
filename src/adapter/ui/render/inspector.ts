@@ -1356,8 +1356,94 @@ export class InspectorRenderer {
       item.append(note);
       cmds.append(item);
     }
+    // 🔴 **「構成をコピー」のすぐ隣(下)**(#1017 段④b)── 案を出すのと
+    //   当てるのは同じ 1 つの用事の前半と後半である(入口を 2 か所に散らさない)。
+    cmds.append(this.buildPlanApplyItem());
     wrap.append(cmds);
     return wrap;
+  }
+
+  /**
+   * 🔴 **整理案を貼って、下見してから当てる**(#429 段③④。2026-09-21 に
+   * `commands.ts`(「システム」)から移した ── #1017 段④b)。
+   *
+   * ## なぜ「構成をコピー」の隣か
+   *
+   * 「貼って・見て・直して・押す」は**行き来する**ので、本文を退かす器に置くと
+   * 直すたびに開き直すことになる。🔑 出すのと当てるのは**同じ 1 つの用事の
+   * 前半と後半**なので、入口を隣に置く(§4.3「同じ型の操作は同じ場所」)。
+   *
+   * ## 🔴 貼り付け欄は押したときだけ出す(`<details>` は使わない)
+   *
+   * ⚠ `tests/docs-parity.test.ts` の「主要な導線を畳まない(業務画面の作法)」が
+   *   `<details>` を禁じている ── だから `hidden` の付け外しにする
+   *   (`toggle-plan-apply`。`toggle-replace` と同じ作法)。畳んでいるのは
+   *   **貼り付け欄という補助器具**であって、「整理案を適用」という導線そのものは
+   *   常に見えている。
+   */
+  private buildPlanApplyItem(): HTMLElement {
+    const item = document.createElement('div');
+    item.setAttribute('data-pkc-field', 'collection-command-item');
+
+    const btn = iconButton('toggle-plan-apply', '整理案を適用');
+    btn.title = 'AI から返ってきた整理案(mv / mkdir / rename)を貼ると、何が起きるかを先に見せます';
+    btn.setAttribute('aria-expanded', 'false');
+    item.append(btn);
+
+    const note = document.createElement('p');
+    note.setAttribute('data-pkc-field', 'toggle-plan-apply-note');
+    note.className = 'settings-note';
+    note.textContent = btn.title;
+    item.append(note);
+
+    const box = document.createElement('div');
+    box.setAttribute('data-pkc-region', 'plan-apply');
+    box.setAttribute('data-pkc-field', 'plan-apply-box');
+    box.hidden = true;
+
+    const explain = document.createElement('p');
+    explain.setAttribute('data-pkc-field', 'plan-note');
+    explain.textContent =
+      '「構成をコピー」で出した内容を AI に渡し、返ってきた案をここへ貼ってください。適用する前に、何がどう動くかを全部お見せします。';
+    box.append(explain);
+
+    const ta = document.createElement('textarea');
+    ta.setAttribute('data-pkc-field', 'plan-input');
+    // ⚠ `data-pkc-action` は付けない ── 打鍵の受け口は `onInput` が
+    //   **`data-pkc-field` で**拾う(`entry-filter` / `dual-filter` と同じ形)
+    ta.rows = 6;
+    ta.placeholder = 'mkdir "アーカイブ" as @arc';
+    // ⚠ `placeholder` は名前ではない(値を入れると読み上げから消える)
+    ta.setAttribute('aria-label', '整理案を貼る');
+    box.append(ta);
+
+    /** 誤りの一覧(行番号つき)。⚠ 空のときは畳む(空の枠を出さない)。 */
+    const errs = document.createElement('ul');
+    errs.setAttribute('data-pkc-field', 'plan-errors');
+    errs.hidden = true;
+    box.append(errs);
+
+    /** 下見。⚠ 同上。 */
+    const prev = document.createElement('ul');
+    prev.setAttribute('data-pkc-field', 'plan-preview');
+    prev.hidden = true;
+    box.append(prev);
+
+    const apply = document.createElement('button');
+    apply.type = 'button';
+    apply.setAttribute('data-pkc-action', 'apply-plan');
+    apply.setAttribute('data-pkc-field', 'plan-apply');
+    apply.textContent = '適用する';
+    /**
+     * 🔴 **誤りが 1 行でもあれば押せない**(#429 段③)。
+     * ⚠ 半分だけ当たると、どこまで進んだのか user にも分からなくなる。
+     * ⚠ 既定は `disabled` ── 貼る前から押せる形にしない(dead click を作らない)。
+     */
+    apply.disabled = true;
+    box.append(apply);
+
+    item.append(box);
+    return item;
   }
 
   /**

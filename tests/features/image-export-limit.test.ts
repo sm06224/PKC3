@@ -19,11 +19,13 @@ import {
   COLLECTION_COMMANDS,
   SETTINGS_COMMANDS,
 } from '../../src/adapter/ui/render/commands';
+import { archiveSuffix } from '../../src/features/export/archive-kind';
 
 describe('詰まったときの字(#971 段④)', () => {
   it('🔴 代わりの道を必ず書く(行き止まりにしない)', () => {
     const m = imageTooBigMessage(5_000_000_000);
-    expect(m, '代わりの道が書いていない').toContain('.pkc3.zip');
+    // 🔴 手で綴りを書かない(#1017 段④b)── `archive-kind.ts` から引く
+    expect(m, '代わりの道が書いていない').toContain(archiveSuffix('full'));
     expect(m, '大きさで止まらないことを言っていない').toMatch(/大きさで止まりません/);
   });
 
@@ -125,7 +127,7 @@ describe('読み戻せる大きさか(#996)', () => {
   it('🔴 断り文は「行き止まり」にしない ── 代わりの道を書く', () => {
     const s = tooBigToReadBackMessage('いまの中身', 500 * 1024 * 1024);
     expect(s, '大きさを書いていない').toContain('500.0 MB');
-    expect(s, '代わりの道を書いていない').toContain('.pkc3.zip');
+    expect(s, '代わりの道を書いていない').toContain(archiveSuffix('full'));
     expect(s, '何が起きるか書いていない').toContain('二度と開けません');
     // ⚠ **確保に失敗した側の字と混ざっていない**(user にとって別の出来事)
     expect(s, '確保の話と混ざっている').not.toContain('確保できませんでした');

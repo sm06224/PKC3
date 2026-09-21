@@ -783,7 +783,8 @@ test('🔴 バックアップ: 書き出して → 取り込み直すと中身�
   const dl = page.waitForEvent('download');
   await clickReal(page, '[data-pkc-action="export-archive"]');
   const download = await dl;
-  expect(download.suggestedFilename()).toMatch(/\.pkc3\.zip$/);
+  // 🔴 コレクション全体のバックアップの末尾は `.pkc3-full.zip`(#1017 段④b)
+  expect(download.suggestedFilename()).toMatch(/\.pkc3-full\.zip$/);
   const path = await download.path();
   expect(path).not.toBeNull();
 
@@ -793,6 +794,9 @@ test('🔴 バックアップ: 書き出して → 取り込み直すと中身�
     mimeType: 'application/zip',
     buffer: readFileSync(path!),
   });
+  // 🔴 #1017 段④b 追補: PKC3 のバックアップは取込前に中身を確認する ──
+  // ノート・添付・つながり・履歴の表が出て、「取り込む」を押すまで進まない
+  expect(await answerAppDialog(page, 'ok')).toMatch(/ノート \d+ 件/);
 
   // 同じ内容がもう 1 組入る(取込は常に追加 ── 上書きしない)
   await expect(rows).toHaveCount(4);
@@ -856,8 +860,9 @@ test('🔴 このノートを書き出す ── 消す前の導線が実際に�
     () => (window as unknown as { __n?: string[] }).__n ?? [],
   );
   expect(anchorNames).toHaveLength(1);
-  // 題名は**ノートのもの**(コンテナ名 "PKC3" ではない)
-  expect(anchorNames[0]).toMatch(/^ZIP-のノート-\d{8}\.pkc3\.zip\|true$/);
+  // 題名は**ノートのもの**(コンテナ名 "PKC3" ではない)。
+  // 🔴 1 ノートの書出しの末尾は `.pkc3-notes.zip`(#1017 段④b)
+  expect(anchorNames[0]).toMatch(/^ZIP-のノート-\d{8}\.pkc3-notes\.zip\|true$/);
 
   const path = await download.path();
   const names = zipNames(readFileSync(path!));
@@ -869,6 +874,9 @@ test('🔴 このノートを書き出す ── 消す前の導線が実際に�
     mimeType: 'application/zip',
     buffer: readFileSync(path!),
   });
+  // 🔴 #1017 段④b 追補: 1 ノートのバックアップ(`.pkc3-notes.zip` 相当)でも
+  // 同じ確認が出る(判定は manifest.format だけ ── file 名は見ない)
+  expect(await answerAppDialog(page, 'ok')).toMatch(/ノート \d+ 件/);
   await expect(rows).toHaveCount(3);
 
   // 履歴も一緒に戻っている

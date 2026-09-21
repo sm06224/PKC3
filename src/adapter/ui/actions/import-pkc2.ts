@@ -22,6 +22,7 @@ import { sniffMagic, detectPkc2Format } from '@features/import/detect-format';
 import { parsePkc2Html } from '@features/import/pkc2-html';
 import { decodeAsset } from '@adapter/platform/asset/asset-codec';
 import { readPkc2Package, peekZipFormat } from '@features/import/pkc2-package';
+import { peekArchivePreview, type ArchivePreview } from '@features/import/archive-preview';
 import { readTextBundle, readTextlogBundle } from '@features/import/pkc2-bundle';
 import { readContainerBundle, isBatchFormat } from '@features/import/pkc2-container-bundle';
 import {
@@ -153,6 +154,17 @@ export interface ImportDeps {
    * (実際に mutation が生存していた)。
    */
   hashMaxBytes?: number;
+  /**
+   * 🔴 **PKC3 のバックアップ(`.pkc3-full.zip` / `-notes` / `-part` / 旧
+   * `.pkc3.zip`)を取り込む前に、中身を言って確認する**(#1017 段④b 追補)。
+   *
+   * ⚠ **省略可** ── 渡さなければ確認せずに素通しする(既存の呼び側 / test を壊さない)。
+   * ⚠ **判定は manifest.format だけ**(`peekArchivePreview` 内)。file 名の末尾は
+   * 見ない ── 旧 `.pkc3.zip` でも同じ表が出る(`archive-kind.ts` と同じ規律)。
+   * @returns `false` なら**取込を始めずに終える**(OP_FAILED は出さない ──
+   *   やめるのは失敗ではない)
+   */
+  confirmArchiveImport?(preview: ArchivePreview): Promise<boolean>;
 }
 
 /** base64 → bytes。`fromBase64` があれば中間のバイナリ文字列を作らない。 */
@@ -343,9 +355,13 @@ export async function importPkc2File(
     const isZip = sniffMagic(head) === 'zip';
     if (!isZip && detectPkc2Format(head, null, file.name) !== 'html') {
       // ⚠ **受理するものを全部言う**(P8 段⑲)── かつては存在しない拡張子
-      //    `.pkc2.zip` を名乗り、実際に受理している PKC3 のバックアップに触れていなかった
+      //    `.pkc2.zip` を名乗り、実際に受理している PKC3 のバックアップに触れていなかった。
+      // 🔴 **末尾は判定に使わない**(この分岐の上の `peekZipFormat` が manifest.format
+      //   を読む)が、案内には**受ける全部**を書く(#1017 段④b。3 種 + 旧形式)。
       return fail(
-        `取り込めない形式です(${file.name})── PKC2 の書出し(HTML / ZIP)か PKC3 のバックアップ(.pkc3.zip)、または .md を選んでください`,
+        `取り込めない形式です(${file.name})── PKC2 の書出し(HTML / ZIP)か ` +
+          `PKC3 のバックアップ(.pkc3-full.zip / .pkc3-notes.zip / .pkc3-part.zip / 旧 .pkc3.zip)、` +
+          'または .md を選んでください',
       );
     }
 
@@ -370,6 +386,15 @@ export async function importPkc2File(
       // 📦 **自分の書出しを自分で読み戻す**(P6d)── バックアップの復元。
       // ⚠ PKC2 経路の convert を通さない(body は既に PKC-Markdown。通すと二重変換)
       if (format === ARCHIVE_FORMAT) {
+        // 🔴 **取込前に中身を言う**(#1017 段④b 追補)。⚠ 判定は上の
+        // `peekZipFormat`(manifest.format)と同じ土台 ── file 名は見ないので、
+        // 旧 `.pkc3.zip` でも同じ表が出る。`preview` が `null`(counts の無い
+        // ごく古い manifest)のときは**確認せず素通し**する(壊すより通す)。
+        const preview = await peekArchivePreview(file);
+        if (preview && deps.confirmArchiveImport) {
+          const proceed = await deps.confirmArchiveImport(preview);
+          if (!proceed) return null; // やめるのは失敗ではない ── OP_FAILED は出さない
+        }
         const archive = await readArchive(file);
         restored = restoreArchive(archive, {
           existingLids: await deps.existingLids(),

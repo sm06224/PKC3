@@ -14,6 +14,7 @@ import {
 } from '../../src/features/export/portable-bundle';
 import { MAX_EMBED_TEXT_CHARS } from '../../src/features/storage/image-export-limit';
 import { parseBundleTag, type PortableBundle } from '../../src/features/portable/bundle';
+import { archiveSuffix } from '../../src/features/export/archive-kind';
 
 const OLD: PortableBundle = { id: 'pkcb-template', exportedAt: 0 };
 const NEW: PortableBundle = { id: 'pkcb-0011223344556677', exportedAt: 1_700_000_000_000 };
@@ -303,7 +304,7 @@ describe('🔴 読み戻せない大きさを焼かせない(#996)', () => {
     expect(out.assets, 'その添付を焼いてしまった').toBe(0);
     expect(out.warnings).toHaveLength(1);
     expect(out.warnings[0], '名指ししていない').toContain('a1b2c3d4');
-    expect(out.warnings[0], '代わりの道を書いていない').toContain('.pkc3.zip');
+    expect(out.warnings[0], '代わりの道を書いていない').toContain(archiveSuffix('full'));
     // ⚠ 1 枚そのものは出来ている ── 開ける
     expect(await out.blob.text()).toContain(`"id":"${NEW.id}"`);
   });

@@ -24,8 +24,9 @@
  * 🔑 門は `tests/features/image-export-limit.test.ts` ── **`commands.ts` から
  * label を引いて**、断り文がその字を含むことを見る(綴りを写さない)。
  *
- * 1 枚が焼けなくても、**一式の書き出し(`.pkc3.zip`)は通る**
- * (2026-09-16 から 4GB の壁が無い)。断り文はそこへ送る。
+ * 1 枚が焼けなくても、**一式の書き出し(`.pkc3-full.zip`)は通る**
+ * (2026-09-16 から 4GB の壁が無い。⚠ 末尾は #1017 段④b で `.pkc3.zip` から改名)。
+ * 断り文はそこへ送る。
  */
 import { humanBytes } from '../human-bytes';
 
@@ -43,7 +44,7 @@ export function imageTooBigMessage(bytes: number | null): string {
     `${size}は大きすぎて「持ち歩ける 1 枚」にできませんでした。` +
     '1 枚に焼くときだけ、保存されている中身を丸ごと 1 つの塊にする必要があり、' +
     'そこが確保できませんでした。' +
-    '代わりに 左の列の バックアップ(.pkc3.zip) をお使いください ── ' +
+    '代わりに 左の列の バックアップ(.pkc3-full.zip) をお使いください ── ' +
     'こちらは大きさで止まりません。取り込み直すこともできます。'
   );
 }
@@ -140,7 +141,7 @@ export function tooBigToReadBackMessage(what: string, bytes: number): string {
     '1 枚に焼いた中身は、開くときに丸ごと 1 つの文字列として読み直す必要があり、' +
     `そこに入る上限(約 ${humanBytes(Math.floor((MAX_EMBED_TEXT_CHARS * 3) / 4))})を超えています。` +
     'このまま焼くと、ファイルはできても二度と開けません。' +
-    '代わりに 左の列の バックアップ(.pkc3.zip) をお使いください ── ' +
+    '代わりに 左の列の バックアップ(.pkc3-full.zip) をお使いください ── ' +
     'こちらは大きさで止まりません。取り込み直すこともできます。'
   );
 }

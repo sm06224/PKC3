@@ -14,8 +14,8 @@ import {
   rescueSummary,
   type SchemaRoot,
 } from '../../src/features/storage/db-rescue';
-import { RESCUE_ARCHIVE_LABEL } from '../../src/features/storage/rescue-labels';
-import { buildSettingsCommands } from '../../src/adapter/ui/render/commands';
+import { BACKUP_LABEL } from '../../src/features/storage/rescue-labels';
+import { COLLECTION_COMMANDS, buildSettingsCommands } from '../../src/adapter/ui/render/commands';
 
 /** 実測した schema(root page → 何の木か)。 */
 const SCHEMA: SchemaRoot[] = [
@@ -124,12 +124,18 @@ describe('画面に出す字(#971 段③)', () => {
    *   つまり **DB が本当に壊れた人にだけ出る 1 行が行き止まり**なのに、
    *   検査は**その行き止まりを pin していた**(両方そのままで緑になる)。
    * 🔑 だから**期待値を手で書かない** ── 描いたボタンの字(= 独立した観測)と突き合わせる。
+   *
+   * 🔴 **2026-09-21(#1017 段④b)に、一覧を両方見る形へ広げた**。専用の取り出し
+   *   ボタン 2 つが無くなり、断り文は左下の「バックアップ」(`COLLECTION_COMMANDS`)を
+   *   指すようになった ── `buildSettingsCommands()` だけを見ていると、
+   *   その字は**設定の面には無い**ので「画面に無い字」として誤って落ちる。
    */
   const onScreenLabels = (): string[] => {
     const box = buildSettingsCommands();
-    return [...box.querySelectorAll('button')].map(
+    const settings = [...box.querySelectorAll('button')].map(
       (b) => b.querySelector('[data-pkc-field="label"]')?.textContent ?? b.textContent ?? '',
     );
+    return [...settings, ...COLLECTION_COMMANDS.map((c) => c.label)];
   };
 
   /** 字の中の 「…」 を全部抜く ── user に押させている名前はこれである。 */
@@ -138,14 +144,14 @@ describe('画面に出す字(#971 段③)', () => {
   it('🔴 索引だけのときは「中身は無事かもしれない」と言い、次の一手を書く', () => {
     const s = integritySummary(parseQuickCheck(INDEX_BROKEN, SCHEMA));
     expect(s).toContain('目次');
-    expect(s, '次に何を押すか書いていない').toContain(RESCUE_ARCHIVE_LABEL);
+    expect(s, '次に何を押すか書いていない').toContain(BACKUP_LABEL);
     noMarkup(s);
   });
 
   it('🔴 表のときは「一部だけ」と正直に言う', () => {
     const s = integritySummary(parseQuickCheck(TABLE_BROKEN, SCHEMA));
     expect(s).toContain('一部');
-    expect(s, '次に何を押すか書いていない').toContain(RESCUE_ARCHIVE_LABEL);
+    expect(s, '次に何を押すか書いていない').toContain(BACKUP_LABEL);
     noMarkup(s);
   });
 

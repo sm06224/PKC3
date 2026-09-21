@@ -81,21 +81,16 @@ describe('ノート全体の操作の置き場(#239 / #1017 段④a)', () => {
       // 🔴 何が容量を食っているか(#415)── 片づけの**手前**なので同じ面に置く
       'storage-profile',
       /**
-       * 🔴 **壊れたときの救出**(#971 段③)── 容量の**隣**に置く。
+       * 🔴 **壊れたときに調べる口**(#971 段③)── 容量の**隣**に置く。
        * ⚠ これも「逃がした操作」ではないので `SETTINGS_COMMANDS` には入れず、
        *   この面の中に別の塊として置いてある。
+       *
+       * 🔴 **2026-09-21(#1017 段④b)に、専用の取り出しボタン 2 つを退役させた**
+       *   (`db-rescue-archive` / `db-rescue`)。保存領域に問題があるときは、
+       *   いつもの「バックアップ」/「Markdown」が自動で読める分だけを集める
+       *   (`src/adapter/ui/actions/export-archive.ts`)。
        */
       'db-check',
-      /**
-       * 🔴 **戻せる形で書き出す**(#986、2026-09-16)── 直す前は下の 1 つだけで、
-       *   出るのは **.md 1 枚**だった。⚠ それを取り込んでも**ノートは 1 件**に
-       *   しかならないので(素の .md は 1 ファイル = 1 ノート)、
-       *   **戻すための口**を足した。⚠ **読む側は消していない**。
-       * ⚠ 並びもこの順である ── 壊れたときに user がやりたいのは
-       *   「読む」ではなく「**元に戻す**」ほうだから、先に置く。
-       */
-      'db-rescue-archive',
-      'db-rescue',
       /**
        * 🔴 **壊れて直らないときの、最後の手**(#986 段③ → #1006)。
        * ⚠ これも「逃がした操作」ではないので `SETTINGS_COMMANDS` には入れず、
@@ -108,7 +103,6 @@ describe('ノート全体の操作の置き場(#239 / #1017 段④a)', () => {
        */
       'container-rebuild',
       'container-reset',
-      'apply-plan',
       /**
        * 🔴 **設定だけの持ち出し**(#414)── ⚠ **バックアップとは別物**である
        *   (あちらはノートごと移る)。だから `SETTINGS_COMMANDS`(左下から
@@ -141,44 +135,25 @@ describe('ノート全体の操作の置き場(#239 / #1017 段④a)', () => {
  *   `title` は**ホバーでしか出ない**ので、スマホの user には 1 度も届かない。
  * 🔑 だから見るのは **`title` を 1 文字も読まずに**、面の**見える字**だけで
  *   判断できるか(= `title` を全部剥がしても、必要なことが残っているか)。
+ *
+ * 🔴 **2026-09-21(#1017 段④b)に、専用の取り出しボタン 2 つを退役させた**。
+ * ⚠ 直す前はここで「戻せる形」「読める形」の 2 つの違いを見える字で見ていたが、
+ *   その 2 つは無くなった ── いまは残った「壊れていないか調べる」の説明が
+ *   **次の一手(バックアップ)を見える字で言っているか**だけを見る。
  */
-describe('壊れたときの 3 つの口は、見える字で説明する(2026-09-17)', () => {
+describe('壊れたときの口は、見える字で説明する(2026-09-17 / 2026-09-21)', () => {
   /** 面の**見える字**だけを集める(`title` は読まない)。 */
   const visibleText = (el: HTMLElement): string =>
     [...el.querySelectorAll('p')].map((p) => p.textContent ?? '').join('\n');
 
-  it('🔴 「戻せる形」は、取り込むとノートが戻ると見える字で言う', () => {
+  it('🔴 「壊れていないか調べる」は、次の一手(バックアップ)を見える字で言う', () => {
     const box = buildSettingsCommands().querySelector<HTMLElement>(
       '[data-pkc-region="db-rescue"]',
     )!;
     const seen = visibleText(box);
-    // ⚠ 送り仮名で外さないよう、語幹まで(「戻ります」/「戻る」の両方に当たる)
-    expect(seen, '戻せることを見える字で言っていない').toContain('ノートとして戻り');
-    expect(seen, 'どこから戻すのかを言っていない').toContain('取り込む');
-  });
-
-  /**
-   * 🔴 **これがいちばん大事な 1 行である。**
-   * ⚠ 「読める形」だけ書き出して「中身を捨てる」を押した人は、戻すと**ノート 1 件**になる
-   *   ── つまりこの選択は**取り消せない操作の前提条件**である。
-   */
-  it('🔴 「読める形」は、戻すためではないと見える字で言う', () => {
-    const box = buildSettingsCommands().querySelector<HTMLElement>(
-      '[data-pkc-region="db-rescue"]',
-    )!;
-    const seen = visibleText(box);
-    expect(seen, '1 件になることを見える字で言っていない').toContain('1 件');
-    expect(seen, '戻すためではないと言っていない').toContain('戻すためのものではありません');
-  });
-
-  it('🔴 迷ったときの逃げ道と、押しても中身が変わらないことを言う', () => {
-    const box = buildSettingsCommands().querySelector<HTMLElement>(
-      '[data-pkc-region="db-rescue"]',
-    )!;
-    const seen = visibleText(box);
-    expect(seen, '迷ったときの逃げ道が無い').toContain('両方');
-    // ⚠ 壊れたと聞いた直後の人は「押すと余計に壊れるのでは」で止まる
-    expect(seen, '押しても中身が変わらないことを言っていない').toContain('変えません');
+    const backupLabel = COLLECTION_COMMANDS.find((c) => c.action === 'export-archive')?.label;
+    expect(backupLabel, 'バックアップ口が一覧から消えた').toBeTruthy();
+    expect(seen, '次に何を押すか見える字で言っていない').toContain(backupLabel as string);
   });
 
   /**
@@ -189,12 +164,9 @@ describe('壊れたときの 3 つの口は、見える字で説明する(2026-0
     const box = buildSettingsCommands().querySelector<HTMLElement>(
       '[data-pkc-region="db-rescue"]',
     )!;
-    // 3 つのボタンそれぞれに、見える説明が 1 つずつ付いている
-    for (const field of ['db-check-run', 'db-rescue-archive-run', 'db-rescue-run']) {
-      const note = box.querySelector<HTMLElement>(`[data-pkc-field="${field}-note"]`);
-      expect(note, `${field} に見える説明が無い`).not.toBeNull();
-      expect((note?.textContent ?? '').length, `${field} の説明が空`).toBeGreaterThan(10);
-      expect(note?.hidden, `${field} の説明が隠れている`).toBe(false);
-    }
+    const note = box.querySelector<HTMLElement>('[data-pkc-field="db-check-run-note"]');
+    expect(note, 'db-check-run に見える説明が無い').not.toBeNull();
+    expect((note?.textContent ?? '').length, 'db-check-run の説明が空').toBeGreaterThan(10);
+    expect(note?.hidden, 'db-check-run の説明が隠れている').toBe(false);
   });
 });

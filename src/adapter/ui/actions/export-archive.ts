@@ -10,6 +10,14 @@
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { writeArchive, type ArchiveSource } from '@features/export/pkc3-archive';
+import { archiveFileName, type ArchiveKind } from '@features/export/archive-kind';
+import { looksCorrupt } from '@features/storage/db-corruption';
+import {
+  rescueArchiveSource,
+  noteRescueWritten,
+  type RescueAssets,
+  type RescuePick,
+} from '@features/storage/rescue-archive';
 import {
   collectFenceAssetKeys,
   type RenderMarkdownOptions,
@@ -60,6 +68,20 @@ export interface ExportDeps {
    * `async () => {}` を書く(書かされること自体が「待たない」の明示になる)。
    */
   settle(): Promise<void>;
+  /**
+   * 🔴 **保存領域に問題があるとき、自動で読める分だけ集める**(#1017 段④b)。
+   *
+   * ⚠ **省略可**(コレクション全体の「バックアップ」/「Markdown」以外の呼び出し
+   *   ── 1 ノート・フォルダの書出しからは渡さない。壊れた DB では対象を絞る
+   *   読み方(`singleEntrySource` / `folderSource`)自体が同じ理由で落ちるので、
+   *   拾い出しの対象にならない)。
+   * 🔑 渡っているときだけ、`writeArchive` / `writeMarkdownZip` が corrupt の綴りで
+   *   落ちたら `rescueArchiveSource` へ切り替え、`.pkc3-part.zip` を落とす。
+   */
+  rescue?: {
+    readonly pick: RescuePick;
+    readonly assets?: RescueAssets;
+  };
   /**
    * 🔴 **図・グラフを 1 枚の PNG に焼く**(#187 段②)。焼けなければ `null`。
    *
@@ -115,11 +137,19 @@ const stamp = (d: Date): string => dayStamp(d, '');
 export type ExportKind = 'archive' | 'html' | 'markdown';
 
 /**
+ * 🔴 **アーカイブの出発点の広さ**(#1017 段④b)。⚠ `'part'`(読めた分だけ)は
+ * **自動フォールバック専用**で、呼び出し元からは選べない(下の `exportArchive` の
+ * 中でしか作らない) ── 押した人が意図して選ぶ物ではなく、保存領域に問題が
+ * あったときに製品が代わりに選ぶ形だからである。
+ */
+type ArchiveScope = Extract<ArchiveKind, 'full' | 'notes'>;
+
+/**
  * このノートだけをアーカイブとして書き出す(P6f)。
  *
  * user 指示 2026-08-02:「そういうのは削除じゃなくて**アーカイブエクスポートの
  * 導線**を用意すればいいのでは?」── 消す前に手元へ出せる場所を作る。
- * 形式はバックアップと**同じ** `.pkc3.zip` なので、そのまま取り込み直せる。
+ * 形式はバックアップと**同じ形式**(`.pkc3-notes.zip`)なので、そのまま取り込み直せる。
  */
 export async function exportEntry(
   dispatcher: Dispatcher,
@@ -147,7 +177,10 @@ export async function exportEntry(
     // 🔴 直前の保存が disk に着いてから読む(読みは書込の chain の外に居る)
     await deps.settle();
     const { source, warnings } = await singleEntrySource(deps.source, lid);
-    const n = await exportArchive(dispatcher, { ...deps, source }, kind, warnings);
+    // 🔴 **`archiveScope: 'notes'`**(#1017 段④b)── 1 件だけの書出しは
+    //   自動フォールバックの対象にしない(壊れた DB では絞り込みの読み自体が
+    //   同じ理由で落ちるので、拾い出しの対象にならない)
+    const n = await exportArchive(dispatcher, { ...deps, source }, kind, warnings, 'notes');
     return n;
   } catch (e) {
     dispatcher.dispatch({
@@ -182,7 +215,8 @@ export async function exportFolder(
     // 🔴 直前の保存が disk に着いてから読む(読みは書込の chain の外に居る)
     await deps.settle();
     const { source, warnings } = await folderSource(deps.source, lid);
-    return await exportArchive(dispatcher, { ...deps, source }, 'archive', warnings);
+    // 🔴 `archiveScope: 'notes'`(#1017 段④b。`exportEntry` と同じ理由)
+    return await exportArchive(dispatcher, { ...deps, source }, 'archive', warnings, 'notes');
   } catch (e) {
     dispatcher.dispatch({
       type: 'OP_FAILED',
@@ -190,6 +224,63 @@ export async function exportFolder(
     });
     return null;
   }
+}
+
+/** `exportArchive` が組み立てる出力の形(正常時・自動フォールバック時とも同じ)。 */
+interface ArchiveWriteOut {
+  readonly blob: Blob;
+  readonly warnings: string[];
+  readonly counts: { entries: number; assets: number; relations?: number; revisions?: number };
+}
+
+/**
+ * 🔴 **保存領域に問題があるとき、自動で「読める分だけ」へ倒れる**(#1017 段④b)。
+ *
+ * ## なぜ「バックアップ」と「Markdown」の 2 つが対象か
+ *
+ * どちらも `deps.source.listEntryMetas()` / `listRelations()` などで**全 entry を
+ * 読む**ので、壊れた DB では `rescue-archive.ts` の実測表(§「関係・履歴は索引を
+ * 使う形でしか引けない」)と**同じ理由で rc 11 系の綴りで落ちる**。
+ *
+ * ## 🔑 「大きすぎる」を「壊れている」と偽らない
+ *
+ * `looksCorrupt` が当たらない失敗(disk 容量など)は**そのまま投げ直す** ──
+ * 何でも「壊れている」と読み替えると、user は在りもしない原因(SQL で直す等)を
+ * 追うことになる(`image-export-limit.ts` の「別の理由まで大きすぎると言わない」
+ * と同じ向き)。
+ *
+ * @returns 倒れなかった(`deps.rescue` が渡っていない / corrupt でない)ときは `null`
+ */
+async function fallbackToRescueArchive(
+  deps: ExportDeps,
+  iso: string,
+  base: string,
+  cause: unknown,
+): Promise<{ out: ArchiveWriteOut; name: string; detail: string } | null> {
+  if (!deps.rescue) return null;
+  const message = cause instanceof Error ? cause.message : String(cause);
+  if (!looksCorrupt(message)) return null;
+  const { source, stats } = rescueArchiveSource({
+    cid: deps.source.cid,
+    title: deps.source.title,
+    pick: deps.rescue.pick,
+    // 🔑 添付の bytes を一緒に入れる(#1005 と同じ実体)。⚠ 無ければ入れないだけ
+    ...(deps.rescue.assets === undefined ? {} : { assets: deps.rescue.assets }),
+  });
+  const out = await writeArchive(source, iso);
+  const s = stats();
+  /**
+   * 🔴 **書き出せた枝でだけ記録する**(#986 段③と同じ規律)── 捨てる前の窓
+   * (`container-reset.ts` の `resetExplainMessage`)が「この画面で何件拾えたか」を
+   * 出すための唯一の材料である。⚠ **頼んだ時点で記録しない**(落ちた回も
+   * 「済み」に見えてしまう)── だからここ(成功した後)でだけ呼ぶ。
+   */
+  noteRescueWritten(s, Date.now());
+  const gotBody = s.entries - s.bodyMissing;
+  // 🔑 §5 の検算:「`.pkc3-part.zip` を落としたときは必ず
+  // 『つながりと履歴は入っていません(N 件のうち M 件 / 添付 K 件)』を書く」
+  const detail = `つながりと履歴は入っていません(${s.entries} 件のうち ${gotBody} 件 / 添付 ${s.assets} 件)`;
+  return { out, name: archiveFileName(base, 'part'), detail };
 }
 
 /**
@@ -202,6 +293,11 @@ export async function exportArchive(
   kind: ExportKind = 'archive',
   /** 呼び出し側が先に見つけた注意(1 ノート書出しの「関連は落ちる」等)。 */
   extraWarnings: readonly string[] = [],
+  /**
+   * 🔴 **file 名の末尾を決める**(#1017 段④b)。既定は `'full'`(コレクション
+   * 全体)── `exportEntry` / `exportFolder` は `'notes'` を渡す。
+   */
+  archiveScope: ArchiveScope = 'full',
 ): Promise<number | null> {
   const fail = (msg: string): null => {
     dispatcher.dispatch({ type: 'OP_FAILED', error: msg });
@@ -225,11 +321,7 @@ export async function exportArchive(
     const base = `${safeName(deps.source.title)}-${stamp(now)}`;
     const iso = now.toISOString();
 
-    let out: {
-      blob: Blob;
-      warnings: string[];
-      counts: { entries: number; assets: number; relations?: number; revisions?: number };
-    };
+    let out: ArchiveWriteOut;
     let name: string;
     let detail: string;
     if (kind === 'html') {
@@ -245,30 +337,75 @@ export async function exportArchive(
       // ⚠ **可逆ではない**ことをその場で言う(後から見分けられない形にしない ──
       // PKC2 は light / full の別を manifest にしか書いておらず user が困っていた)
       detail = `${out.counts.entries} 件(添付 ${out.counts.assets})── 閲覧用(取り込み直せません)`;
-    } else if (kind === 'markdown') {
-      const md = await writeMarkdownZip(deps.source, iso);
-      out = md;
-      name = `${base}.md.zip`;
-      // 🔴 **何が落ちたかを件数で言う**(設計 doc §3-2)。PKC2 は落ちたことを
-      // 言わずに出していた ── 「片道です」だけでは user は損失量を測れない
-      const lost: string[] = [];
-      if (md.dropped.relations > 0) lost.push(`関連 ${md.dropped.relations}`);
-      if (md.dropped.revisionEntries > 0) lost.push(`履歴 ${md.dropped.revisionEntries} 件ぶん`);
-      // 🔴 **控え(過去の版)の件数を出す**(#213 / user 裁定 A 2026-08-16)。
-      //    ⚠ 出さないと「添付 200 件」とだけ出て、**なぜ zip が大きいのか**が
-      //    どこにも書かれていない。⚠ 減らすのではなく**言う**のが裁定 A である
-      const assetsText =
-        md.counts.historyAssets > 0
-          ? `添付 ${md.counts.assets}(うち控え ${md.counts.historyAssets})`
-          : `添付 ${md.counts.assets}`;
-      detail =
-        `${md.counts.entries} 件(${assetsText})── 片道` +
-        (lost.length > 0 ? `(${lost.join(' / ')}が落ちます)` : '(取り込み直せません)');
     } else {
-      out = await writeArchive(deps.source, iso);
-      name = `${base}.pkc3.zip`;
-      const c = out.counts;
-      detail = `${c.entries} 件(関連 ${c.relations} / 履歴 ${c.revisions} / 添付 ${c.assets})`;
+      /**
+       * 🔴 **『バックアップ』『Markdown』は、保存領域に問題があるとき自動で
+       * 倒れる**(#1017 段④b)。⚠ 倒れるのは `archiveScope === 'full'` のときだけ
+       * (1 ノート・フォルダの書出しは対象にしない ── `ExportDeps.rescue` の
+       * docstring と同じ理由)。
+       */
+      try {
+        if (kind === 'markdown') {
+          const md = await writeMarkdownZip(deps.source, iso);
+          out = md;
+          name = `${base}.md.zip`;
+          // 🔴 **何が落ちたかを件数で言う**(設計 doc §3-2)。PKC2 は落ちたことを
+          // 言わずに出していた ── 「片道です」だけでは user は損失量を測れない
+          const lost: string[] = [];
+          if (md.dropped.relations > 0) lost.push(`関連 ${md.dropped.relations}`);
+          if (md.dropped.revisionEntries > 0) lost.push(`履歴 ${md.dropped.revisionEntries} 件ぶん`);
+          // 🔴 **控え(過去の版)の件数を出す**(#213 / user 裁定 A 2026-08-16)。
+          //    ⚠ 出さないと「添付 200 件」とだけ出て、**なぜ zip が大きいのか**が
+          //    どこにも書かれていない。⚠ 減らすのではなく**言う**のが裁定 A である
+          const assetsText =
+            md.counts.historyAssets > 0
+              ? `添付 ${md.counts.assets}(うち控え ${md.counts.historyAssets})`
+              : `添付 ${md.counts.assets}`;
+          detail =
+            `${md.counts.entries} 件(${assetsText})── 片道` +
+            (lost.length > 0 ? `(${lost.join(' / ')}が落ちます)` : '(取り込み直せません)');
+        } else {
+          out = await writeArchive(deps.source, iso);
+          name = archiveFileName(base, archiveScope);
+          const c = out.counts;
+          detail = `${c.entries} 件(関連 ${c.relations} / 履歴 ${c.revisions} / 添付 ${c.assets})`;
+          /**
+           * 🔴 **普通に書き出せた「バックアップ」も、「拾えた」に数える**
+           * (#1017 段④b。#986 段③との配線を壊さないための直し)。
+           *
+           * ⚠ 「戻せる形で書き出す」という専用ボタンを退役させたので、
+           *   `noteRescueWritten` を呼ぶ場所が**ここしか無くなった**
+           *   (もう一方は `fallbackToRescueArchive`)。呼ばなくなると、
+           *   健全な入れ物では「入れ物を捨てる」画面が**永久に
+           *   「まだ拾い出していません」と言い続ける**(#986 の門が
+           *   二度と開かない)── コレクション全体のバックアップは
+           *   `container-reset.ts` の言う「戻せる形」そのものなので、
+           *   ここで記録してよい。⚠ **`archiveScope === 'full'` のときだけ**
+           *   (1 ノート・フォルダの書出しは「捨てる」の代わりにならない)。
+           */
+          if (archiveScope === 'full') {
+            noteRescueWritten(
+              {
+                entries: c.entries,
+                skipped: 0,
+                empty: 0,
+                bodyMissing: 0,
+                assets: c.assets,
+                assetBytes: 0,
+                assetMissing: 0,
+              },
+              now.getTime(),
+            );
+          }
+        }
+      } catch (e) {
+        const fb =
+          archiveScope === 'full' ? await fallbackToRescueArchive(deps, iso, base, e) : null;
+        if (fb === null) throw e;
+        out = fb.out;
+        name = fb.name;
+        detail = fb.detail;
+      }
     }
     deps.download(name, out.blob);
     const notes = [...extraWarnings, ...out.warnings];

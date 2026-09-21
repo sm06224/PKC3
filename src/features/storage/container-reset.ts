@@ -33,7 +33,7 @@
  * 「消したはずの本文が、貼り付けの一覧にだけ残る」ことになる。
  */
 
-import { RESCUE_ARCHIVE_LABEL } from './rescue-labels';
+import { BACKUP_LABEL } from './rescue-labels';
 
 /** 捨てるのに要る口。⚠ **全部必須**(optional にすると、渡し忘れが黙って通る)。 */
 export interface ContainerResetPorts {
@@ -188,7 +188,7 @@ export function resetExplainMessage(opts: {
    */
   const backup =
     rescued === null
-      ? `🔴 この画面では、まだ拾い出していません。先に「${RESCUE_ARCHIVE_LABEL}」を押してください。`
+      ? `🔴 この画面では、まだ拾い出していません。先に左下の「${BACKUP_LABEL}」を押してください。`
       : `この画面で拾えたのは ${rescued.entries} 件です` +
         (rescued.skipped + rescued.empty + rescued.bodyMissing > 0
           ? `(読めなかった区画 ${rescued.skipped} / 空だった区画 ${rescued.empty} / 本文が読めなかったノート ${rescued.bodyMissing} 件)`

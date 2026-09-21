@@ -99,7 +99,9 @@ describe('1 ノート書出し — 断るなら読む前に断る', () => {
     const { dispatcher } = fakeDispatcher('ready');
     const d = deps(source());
     expect(await exportEntry(dispatcher, d, 'n1', 'archive')).toBe(1);
-    expect(d.files[0]).toMatch(/\.pkc3\.zip$/);
+    // 🔴 1 ノートの書出しは `.pkc3-notes.zip`(#1017 段④b)── コレクション全体の
+    // `.pkc3-full.zip` とは末尾で見分ける
+    expect(d.files[0]).toMatch(/\.pkc3-notes\.zip$/);
   });
 });
 

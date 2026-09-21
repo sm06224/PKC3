@@ -252,6 +252,7 @@ import { createOfficeSaveBack } from '@adapter/platform/office/office-save-back'
 import { openStageDir } from '@adapter/platform/office/office-stage';
 import { importFiles } from '@adapter/ui/actions/import-file';
 import type { ImportDeps } from '@adapter/ui/actions/import-pkc2';
+import { formatArchivePreviewMessage } from '@features/import/archive-preview';
 import {
   exportArchive,
   exportEntry,
@@ -269,6 +270,7 @@ import {
   type RebuildProgress,
 } from '@features/storage/container-rebuild';
 import { writeArchive } from '@features/export/pkc3-archive';
+import { archiveFileName } from '@features/export/archive-kind';
 import { downloadSelfhostBundle } from '@adapter/ui/actions/selfhost';
 import { dayStamp } from '@features/datetime/date-math';
 import { APP_VERSION, BUILD_KIND, BUILT_AT } from '@runtime/release-meta';
@@ -1868,6 +1870,18 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           getRevisionChain: (entryLid) =>
             client.request({ op: 'exportRevisionChain', cid, entryLid }),
         },
+        /**
+         * 🔴 **保存領域に問題があるとき、自動で「読める分だけ」へ倒れる口**
+         * (#1017 段④b)。⚠ **`rescueEntries`(#971 段③)と同じ実体**を使う ──
+         * 2 か所に書くと片方だけ壊れる(CLAUDE.md §7)。
+         */
+        rescue: {
+          pick: (after, chunks) => client.request({ op: 'rescueEntries', afterRowid: after, chunks }),
+          assets: {
+            listKeys: (c: string) => blobs.listKeys(c),
+            get: (c: string, key: string) => blobs.get(c, key),
+          },
+        },
         download: downloadBlob,
         notify: (message) => showStatus(message),
         // ⚠ **注意の中身**を出す導線(review M1 で一度落ちた)。無いと user が
@@ -2229,6 +2243,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       //    reducer に弾かれて黙って終わる ── 「居たら選ぶ、まだなら待つ」は
       //    `select-when-present.ts` に閉じてある
       focus: (lid) => void selectWhenPresent(dispatcher, lid),
+      /**
+       * 🔴 **PKC3 のバックアップを取り込む前に中身を言う**(#1017 段④b 追補)。
+       * ⚠ 器・列は他の確認と同じ 1 本(`ask` = `confirmInApp`)── 重なったら
+       * 順番に出る(CLAUDE.md §7「同じ判定が複数の場所にある」と同じ向き ──
+       * 確認の器を 2 本目作らない)。
+       */
+      confirmArchiveImport: (preview) =>
+        ask(formatArchivePreviewMessage(preview), { okLabel: '取り込む', cancelLabel: 'やめる' }),
   };
 
   /**
@@ -2635,9 +2657,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           get: (c: string, key: string) => blobs.get(c, key),
         },
         // ① ⚠ **保険が先**。ここで落ちたら 1 バイトも消さずに止まる
+        // 🔴 **末尾は `part`**(#1017 段④b)── つながり・履歴を持たない、
+        //   読めた分だけの形だと file 名で言う(中身の形式は `full` と同一)
         saveArchive: async (source) => {
           const out = await writeArchive(source, new Date().toISOString());
-          downloadBlob(`pkc-rescue-${dayStamp(new Date())}.pkc3.zip`, out.blob);
+          downloadBlob(archiveFileName(`pkc-rescue-${dayStamp(new Date())}`, 'part'), out.blob);
         },
         wipeStorage: async () => client.request({ op: 'wipeStorage' }),
         reopenStorage: async () => {
