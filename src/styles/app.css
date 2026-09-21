@@ -590,12 +590,10 @@ select:focus-visible {
  * 🔑 `[data-pkc-width]` は `features/entry-actions.ts` の `entryActionWidthTier()` が
  *   決める(名前の全角換算 8 桁が境目)。値そのもの(4em / 6em)はここにだけ書く。
  */
-[data-pkc-region='inspector'] [data-pkc-field='inspector-actions'] button[data-pkc-width='short'],
-[data-pkc-region='context-menu'] button[data-pkc-width='short'] {
+[data-pkc-region='inspector'] [data-pkc-field='inspector-actions'] button[data-pkc-width='short'] {
   min-width: max(4em, max-content);
 }
-[data-pkc-region='inspector'] [data-pkc-field='inspector-actions'] button[data-pkc-width='long'],
-[data-pkc-region='context-menu'] button[data-pkc-width='long'] {
+[data-pkc-region='inspector'] [data-pkc-field='inspector-actions'] button[data-pkc-width='long'] {
   min-width: max(6em, max-content);
 }
 [data-pkc-region='context-menu'] button:hover,
@@ -613,25 +611,6 @@ select:focus-visible {
   padding-left: 1.5em;
   font-size: var(--btn-fs-sm);
   color: var(--muted);
-}
-/**
- * 🔴 **塊の見出しの行**(#1029 段 C)。⚠ **押せない字**(`<div>`。ボタンではない)
- *   ── 押し所を増やさない(名前を短くした分を、右の列の「間」の代わりに
- *   ここで言う)。
- * ⚠ 色は使わず**薄い字**にする(地は無彩色、色は情報にだけ ── user 指示 2026-08-03)。
- * ⚠ 先頭の 1 件目にも間が空く(`margin-top`)── 「見出しの前にも息継ぎがある」ほうが、
- *   最初の塊だけ詰まって見えるより読みやすい。
- */
-[data-pkc-field='context-menu-group'] {
-  margin-top: 4px;
-  padding: 2px 6px 0;
-  font-size: 11px;
-  color: var(--muted);
-  cursor: default;
-  user-select: none;
-}
-[data-pkc-field='context-menu-group']:first-child {
-  margin-top: 0;
 }
 /* 🔴 **メニューの下の説明欄**(#587 C-3。user 裁定 2026-08-30「一度推奨で入れて、
  *   使用感をテストしたい」)。指している項目の説明だけをここへ出す(`context-menu.ts`)。
