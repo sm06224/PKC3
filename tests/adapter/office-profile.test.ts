@@ -120,6 +120,29 @@ describe('Office の設定を初期化する(#634)', () => {
   });
 
   /**
+   * 🔴 **マクロを消せなかったことを「問題」としてメッセージへも流す**
+   * (設計 doc §7、段②b)。⚠ console.warn と併記(console は残す)。
+   */
+  it('🔴 マクロが消せなかったら、"problem" として post する', async () => {
+    const { store } = fakeStore({ [OFFICE_PROFILE_KEY]: 'x' });
+    const posted: Array<{ kind: string; source: string; text: string }> = [];
+    resetOfficeProfile(store, fakeMacros('fail').store, undefined, (text) =>
+      posted.push({ kind: 'problem', source: 'office-profile', text }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(posted).toHaveLength(1);
+    expect(posted[0]!.text).toContain('Office のマクロを消せませんでした');
+  });
+
+  it('マクロが消せたときは post しない(対照群)', async () => {
+    const { store } = fakeStore({ [OFFICE_PROFILE_KEY]: 'x' });
+    const posted: string[] = [];
+    resetOfficeProfile(store, fakeMacros('ok').store, undefined, (text) => posted.push(text));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(posted).toEqual([]);
+  });
+
+  /**
    * 🔴 **綴りは 1 つ**(CLAUDE.md §7「同じ値が複数の場所にある」)。
    * ⚠ `host.html` は bundle されないので import で共有できない ── だから
    *   **原文を読んで等値で pin する**。片方だけ変えると、消す口は「消しました」と

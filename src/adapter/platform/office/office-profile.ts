@@ -19,6 +19,7 @@
  *  ならず、`tests/adapter/office-profile.test.ts` が両者を突き合わせて pin する
  *  ── 片方だけ変えると「消したのに戻ってくる」形で静かに壊れる。 */
 import { OFFICE_CHANNEL } from './office-window';
+import { appMessagePost } from '../message-post';
 
 export const OFFICE_PROFILE_KEY = 'pkc3-office-profile';
 
@@ -68,6 +69,14 @@ export function resetOfficeProfile(
   store: ProfileStore,
   macros: MacroStore,
   announce?: () => void,
+  /**
+   * 🔴 マクロを消せなかったことを「問題」としてメッセージへも流す
+   * (設計 doc §7、段②b)。⚠ **末尾に足す**(この file 独自の規約ではないが、
+   *   同型の理由 ── 位置引数で渡す test を壊さない)。既定は real の
+   *   `appMessagePost`、test は差し替えて spy できる。
+   */
+  postProblem: (text: string) => void = (text) =>
+    appMessagePost.post({ kind: 'problem', source: 'office-profile', text }),
 ): ResetResult {
   const had = officeProfileBytes(store) > 0;
   try {
@@ -79,6 +88,8 @@ export function resetOfficeProfile(
   //    消せなかった回は console に残す(設定のほうは消えているので、言うことは変えない)
   void macros.dropMacros().catch((e: unknown) => {
     console.warn('Office のマクロを消せませんでした', e);
+    // ⚠ 例外の原文は `sanitizeMessageText` が 80 字で切る(§7)── ここでは組むだけ
+    postProblem(`Office のマクロを消せませんでした: ${String(e)}`);
   });
   if (announce) {
     try {

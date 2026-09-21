@@ -39,11 +39,12 @@ test('🔴 「システム」の目次: お知らせが読め、押すと移動�
     timeout: 10_000,
   });
   const announceItemTitle = announceBody.locator('section[data-pkc-announce] h3').first();
-  // ⚠ **新しい順**(設計 doc §7、段②a のメッセージ機能が、その後の段⓪の改名より新しい)。
+  // ⚠ **新しい順**(設計 doc §7、段②b のワーカー可視化の移行が、段②a のメッセージ機能・
+  //   段⓪の改名より新しい)。
   expect(
     (await announceItemTitle.textContent()) ?? '',
     'お知らせの題名が最新のものになっていない',
-  ).toContain('アプリからの知らせが「メッセージ」に溜まるようになりました');
+  ).toContain('ワーカーの動きが「処理の記録」に溜まるようになりました');
   await dismissAnnounce(page);
 
   // 「システム」を開く

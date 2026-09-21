@@ -54,6 +54,8 @@ describe('MessagePost.post(中身を漏らさない)', () => {
     const appendMessage = vi.fn().mockResolvedValue(undefined);
     post.attach({ cid: 'c1', appendMessage });
     post.post({ kind: 'job', source: 'compress', text: '3 件' });
+    // ⚠ job は束ねる(段②b)── 明示的に流さないと書かれない
+    post.flushJobBuffer();
     await Promise.resolve();
     await Promise.resolve();
     const call = appendMessage.mock.calls[0]?.[0] as { lid: string; cap: number };
@@ -150,5 +152,85 @@ describe('未読の数', () => {
     post.onUnreadChanged((n) => seen.push(n));
     post.seedUnread(3);
     expect(seen).toEqual([3]);
+  });
+});
+
+/**
+ * 🔴 **job だけ束ねる**(設計 doc §7、段②b)。
+ *
+ * ⚠ 守るのは:①50 件で自動的に 1 回書く ②50 件に満たなくても 5 秒で 1 回書く
+ *   ③`flushJobBuffer()`(pagehide / visibilitychange:hidden の代わり)で残りを流す
+ *   ④**job 以外は束ねない**(対照群 ── 即座に 1 回書く、既存の挙動のまま)。
+ */
+describe('MessagePost ── job だけ束ねる(段②b)', () => {
+  it('🔴 50 件目で、1 回の appendMessage にまとめて書く', async () => {
+    const spool = new FakeSpool();
+    const post = new MessagePost(spool);
+    const appendMessage = vi.fn().mockResolvedValue(undefined);
+    post.attach({ cid: 'c1', appendMessage });
+    await Promise.resolve();
+    for (let i = 0; i < 49; i++) post.post({ kind: 'job', source: 'compress', text: `${i}` });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(appendMessage, '49 件目ではまだ書かない').not.toHaveBeenCalled();
+
+    post.post({ kind: 'job', source: 'compress', text: '49' });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(appendMessage, '50 件目で 1 回書く').toHaveBeenCalledTimes(1);
+    const call = appendMessage.mock.calls[0]?.[0] as { section: string; lid: string };
+    expect(call.lid).toBe(SYSTEM_JOB_LID);
+    // 50 件ぶんの節が、1 回の appendMessage に連結されて渡っている
+    expect(call.section.split('## ').length - 1, '節の数が 50 件でない').toBe(50);
+  });
+
+  it('🔴 50 件に満たなくても、5 秒経てば 1 回書く', async () => {
+    vi.useFakeTimers();
+    try {
+      const spool = new FakeSpool();
+      const post = new MessagePost(spool);
+      const appendMessage = vi.fn().mockResolvedValue(undefined);
+      post.attach({ cid: 'c1', appendMessage });
+      await Promise.resolve();
+      post.post({ kind: 'job', source: 'compress', text: '1 件' });
+      expect(appendMessage, '5 秒経つ前に書いている').not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(appendMessage, '5 秒経っても書いていない').toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('🔴 flushJobBuffer() で、閉じる前の残りを流す(pagehide の代わり)', async () => {
+    const spool = new FakeSpool();
+    const post = new MessagePost(spool);
+    const appendMessage = vi.fn().mockResolvedValue(undefined);
+    post.attach({ cid: 'c1', appendMessage });
+    await Promise.resolve();
+    post.post({ kind: 'job', source: 'compress', text: '1 件' });
+    expect(appendMessage).not.toHaveBeenCalled();
+
+    post.flushJobBuffer();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(appendMessage).toHaveBeenCalledTimes(1);
+
+    // ⚠ 空のまま呼んでも、空の appendMessage を打たない(対照群)
+    post.flushJobBuffer();
+    await Promise.resolve();
+    expect(appendMessage, '溜まっていないのに書いた').toHaveBeenCalledTimes(1);
+  });
+
+  it('job 以外は束ねない(対照群 ── これまでどおり即座に 1 回書く)', async () => {
+    const spool = new FakeSpool();
+    const post = new MessagePost(spool);
+    const appendMessage = vi.fn().mockResolvedValue(undefined);
+    post.attach({ cid: 'c1', appendMessage });
+    post.post({ kind: 'result', source: 'app', text: 'x' });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(appendMessage, '束ねずに済むはずの種類が、束ねられている').toHaveBeenCalledTimes(1);
   });
 });

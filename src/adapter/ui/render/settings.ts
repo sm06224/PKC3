@@ -57,27 +57,12 @@ import { appPasteSource, PasteSourceStore } from './paste-source';
 import { appJobMonitor, type JobMonitor } from '@adapter/platform/job-monitor';
 import { appNoticeStore, type NoticeStore } from '@adapter/platform/notice-store';
 import { appTooNarrowOk, TooNarrowOkStore } from './too-narrow';
-import { ScrollMemory } from './scroll-memory';
 import { buildOfficePackPanel, type OfficePackPanel } from './office-pack-panel';
 import { buildSettingsCommands } from './commands';
 import { buildKeymapPanel, type KeymapPanel } from './keymap-panel';
 
-/** 画面の書き換えを間引く間隔。⚠ **可視化がジャンクの原因になっては本末転倒**。 */
-const REFRESH_MS = 400;
-
 export class SettingsRenderer {
   private built = false;
-  private jobsBody: HTMLElement | null = null;
-  private logBody: HTMLElement | null = null;
-  private unsubscribe: (() => void) | null = null;
-  private pending = false;
-  /**
-   * まだ描いていない変化がある(2026-08-05)。
-   * 通知が来た時点で立ち、実際に描けたときだけ降りる。
-   */
-  private dirty = false;
-  /** ログは 400ms ごとに描き直す ── 読んでいる位置を殺さない(P8 段⑫)。 */
-  private logScroll: ScrollMemory | null = null;
   /** Office 一式の節(#88 / O6-a)。⚠ 器と同じ寿命 ── 自分で変化を購読する。 */
   private officePack: OfficePackPanel | null = null;
   /**
@@ -88,6 +73,15 @@ export class SettingsRenderer {
 
   constructor(
     private readonly region: HTMLElement,
+    /**
+     * ⚠ **段②b でこの画面からは外した**(「処理(ワーカー)── 開発者向け」節を
+     *   `buildJobs()` ごと削除。代わりの入口は「システム → メッセージ →
+     *   処理の記録を開く」)。この引数はもう**この class の中では読まない**。
+     *   ⚠ それでも**位置は動かさない** ── ここより後ろの全引数が、この file の
+     *   規約どおり「末尾に足す」形で積まれており(すぐ下の docstring 群)、
+     *   数十の test が位置引数でそこへ届いている。1 つ抜くと、その全部を
+     *   ずらす作業が要る(この段の主題ではない ── 触るなら別 PR で)。
+     */
     private readonly monitor: JobMonitor = appJobMonitor,
     /** 外部画像の設定(2026-08-06)。⚠ test は自分で `new` して渡す。 */
     private readonly externalImages: ExternalImagePolicy = appExternalImages,
@@ -165,14 +159,6 @@ export class SettingsRenderer {
       this.syncPersist(state);
       this.syncNotices();
       this.syncTooNarrow();
-      // 🔴 **隠れている間に来た変化をここで拾う**(2026-08-05、user 報告)。
-      //    `refresh()` は面が hidden の間は捨てるので(下の説明)、再表示のときに
-      //    誰かが呼び直さないと**表とログは初回ビルドの姿で凍る**。仕事は必ず
-      //    detail 面で起きる = 設定が隠れている間に起きるので、user が自然にやる
-      //    順序(設定を覗く → ノートを書く → もう一度設定)では
-      //    「まだ動いていません」と 2px の空ログのまま**永久に固定**され、
-      //    2 件走った後も画面が嘘をつく。復旧手段はリロードだけだった。
-      if (this.dirty) this.refresh();
       return;
     }
     this.built = true;
@@ -761,7 +747,6 @@ export class SettingsRenderer {
      */
     this.officePack = buildOfficePackPanel();
     body.append(this.officePack.root);
-    body.append(this.buildJobs());
     /**
      * 🔴 **先頭に目次を置く**(#1017 段⓪。user 裁定 2026-09-20「当面の実装は、
      * システムの中に目次を付けて節の間を移動しやすくするところまで」)。
@@ -790,7 +775,6 @@ export class SettingsRenderer {
     this.syncPasteSource();
     this.syncNotices();
     this.syncTooNarrow();
-    this.refresh();
   }
 
   /**
@@ -853,12 +837,11 @@ export class SettingsRenderer {
       row.append(link);
 
       /**
-       * ⚠ **計器の区画(`jobs`)には「上へ」を置かない** ── そこは「読むだけ」が
-       *   不変量で(P9 段③、`layout.smoke.spec.ts`「設定は user 向けと計器に
-       *   分かれている」が `[data-pkc-action]` 0 件で pin)、押せる物を 1 つでも
-       *   混ぜると壊れる(2026-09-20 の smoke が実際に落ちた)。目次からは飛べる。
+       * ⚠ **段②b で「jobs には上へを置かない」分岐を消した** ── その計器の区画
+       *   (`buildJobs()`)自体をこの画面から削除したため、分岐の的が無くなった
+       *   (死んだ分岐を残さない。CLAUDE.md §7)。いまは全節が同じ扱いで
+       *   「上へ」を持つ。
        */
-      if (h.closest('[data-pkc-region="jobs"]') !== null) return;
       const back = document.createElement('button');
       back.type = 'button';
       back.setAttribute('data-pkc-action', 'system-jump');
@@ -1175,160 +1158,6 @@ export class SettingsRenderer {
   }
 
   /**
-   * 🔑 **ジョブの可視化**(P8 段⑩。user 指示 2026-08-03「ジョブスケジューラーは
-   * 可視化機構とセットでお願いします / ログもみたい」)。
-   *
-   * 見えるもの: どのワーカーが生きているか / 待ちと実行中の件数 /
-   * 起動と使い捨ての回数 / 1 件あたりの中央値と最大 / 直近のログ。
-   * ⚠ 本文の中身はログに出さない(**文字数だけ**)── ノートが漏れる。
-   */
-  private buildJobs(): HTMLElement {
-    const wrap = document.createElement('section');
-    wrap.setAttribute('data-pkc-region', 'jobs');
-
-    const h = document.createElement('h3');
-    // ⚠ 見出しで「これは設定ではない」と分かるようにする(P9 段③)。
-    //    ここは**読むだけの計器**で、user が変える物は 1 つも無い
-    h.textContent = '処理(ワーカー)── 開発者向け';
-    wrap.append(h);
-
-    const note = document.createElement('p');
-    note.setAttribute('data-pkc-field', 'settings-note');
-    note.textContent =
-      '重い処理は別スレッド(ワーカー)で動きます。しばらく使われないと自動で終了し、次に必要になったら作り直します。';
-    wrap.append(note);
-
-    const table = document.createElement('table');
-    table.setAttribute('data-pkc-field', 'job-lanes');
-    const thead = document.createElement('thead');
-    const hr = document.createElement('tr');
-    for (const label of ['名前', '状態', '待ち', '実行中', '完了', '失敗', '起動', '中央値', '最大']) {
-      const th = document.createElement('th');
-      th.textContent = label;
-      hr.append(th);
-    }
-    thead.append(hr);
-    this.jobsBody = document.createElement('tbody');
-    table.append(thead, this.jobsBody);
-    wrap.append(table);
-
-    const lh = document.createElement('h4');
-    lh.textContent = 'ログ';
-    wrap.append(lh);
-    this.logBody = document.createElement('ol');
-    this.logBody.setAttribute('data-pkc-field', 'job-log');
-    this.logScroll = new ScrollMemory(this.logBody);
-    wrap.append(this.logBody);
-
-    // ⚠ 通知は来るたびに描かない(**間引く**)── 可視化が重さの原因になる
-    this.unsubscribe?.();
-    this.unsubscribe = this.monitor.subscribe(() => {
-      // 🔴 **届いたことは即座に覚える**(2026-08-05)。`refresh()` の中で立てると、
-      //    400ms の間引きが走る前に user が戻ってきたときに取りこぼす ──
-      //    「まだ描いていない変化がある」は**通知の時点**の事実であって、
-      //    間引きの都合とは別物である
-      this.dirty = true;
-      if (this.pending) return;
-      this.pending = true;
-      setTimeout(() => {
-        this.pending = false;
-        this.refresh();
-      }, REFRESH_MS);
-    });
-    return wrap;
-  }
-
-  /**
-   * 表とログを描き直す。⚠ 設定画面が**表示されていない**ときは何もしない。
-   *
-   * 🔴 `isConnected` では足りない(P8 段⑰。レビュー)── 面の切替は
-   * `hidden` の付け外しだけで、DOM には**繋がったまま**である。つまり
-   * かつてのガードは常に真で、**設定を一度開いたら以後ずっと 400ms ごとに
-   * 隠れた面を作り直して**いた。
-   */
-  private refresh(): void {
-    if (!this.jobsBody || !this.logBody || !this.jobsBody.isConnected) return;
-    // ⚠ `offsetParent` は happy-dom で常に null なので使わない ── 面の切替が
-    //    実際に触っている `hidden` を見る(`CenterRouter` の pane に付く)
-    // ⚠ 隠れているなら描かない。`dirty` は**降ろさない** ── 再表示のときに
-    //    `render()` が拾って追いつく(降ろすと、それが凍結の正体になる)
-    if (this.region.closest('[data-pkc-view-pane][hidden]') !== null) return;
-    this.dirty = false;
-    const lanes = this.monitor.stats();
-    this.jobsBody.textContent = '';
-    if (lanes.length === 0) {
-      const tr = document.createElement('tr');
-      const td = document.createElement('td');
-      td.colSpan = 9;
-      td.setAttribute('data-pkc-field', 'jobs-empty');
-      td.textContent = 'まだ動いていません';
-      tr.append(td);
-      this.jobsBody.append(tr);
-    }
-    for (const l of lanes) {
-      const tr = document.createElement('tr');
-      tr.setAttribute('data-pkc-lane', l.lane);
-      const cells = [
-        l.lane,
-        l.alive ? '動作中' : '停止中',
-        String(l.queued),
-        String(l.running),
-        String(l.done),
-        String(l.failed),
-        `${l.spawns} 回(終了 ${l.kills})`,
-        l.medianMs === null ? '—' : `${l.medianMs}ms`,
-        l.maxMs === null ? '—' : `${l.maxMs}ms`,
-      ];
-      for (const c of cells) {
-        const td = document.createElement('td');
-        td.textContent = c;
-        tr.append(td);
-      }
-      this.jobsBody.append(tr);
-    }
-
-    // ⚠ **書き換える前に**退避 → 入れ終わってから戻す(順番が本体)
-    this.logScroll?.park();
-    this.logBody.textContent = '';
-    const recent = this.monitor.recent(50);
-    // 🔴 0 件のときに何も入れないと、器は**上下の border だけの 2px の線**になる
-    //    (実測)── 「壊れている」と読まれる。表側には `jobs-empty` が在るのに
-    //    ログ側だけ無かった。空状態は**言葉で**出す(min-height を足すのではなく)
-    if (recent.length === 0) {
-      const li = document.createElement('li');
-      li.setAttribute('data-pkc-field', 'job-log-empty');
-      li.textContent = 'まだ記録がありません';
-      this.logBody.append(li);
-    }
-    for (const e of recent) {
-      const li = document.createElement('li');
-      li.setAttribute('data-pkc-phase', e.phase);
-      const t = new Date(e.at);
-      const hhmmss = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}:${String(t.getSeconds()).padStart(2, '0')}`;
-      const parts = [hhmmss, e.lane, PHASE_LABEL[e.phase]];
-      if (e.id !== undefined) parts.push(`#${e.id}`);
-      if (e.ms !== undefined) parts.push(`${e.ms}ms`);
-      if (e.note) parts.push(e.note);
-      li.textContent = parts.join(' ');
-      this.logBody.append(li);
-    }
-    this.logScroll?.use('log');
-  }
-
-  /**
-   * ⚠ **`dispose()` は置かない**(2026-08-06。user 報告 minor
-   * 「`dispose()` に呼び出し元が無い」)。
-   *
-   * かつてここに「面を畳むときに購読を切る」`dispose()` が在ったが、**呼び出し元が
-   * 1 つも無かった** ── 中央の面の切替は `hidden` の付け外しだけで、この器は
-   * 作り直されないので「畳む」瞬間が存在しない。購読は
-   * ① 組み立てのときに `unsubscribe?.()` で張り直す(増えない)
-   * ② 間引いた `refresh()` が**隠れている間は何もしない**
-   * の 2 つで足りている。**呼ばれないのに purpose を主張するメソッド**は、
-   * 次に読む人に「畳めば止まる」と誤解させるので消した。
-   */
-
-  /**
    * ⚠ 画面の値を**いまの設定に合わせる**(2026-08-06)。合わせないと、
    * 設定を変えた後に別の面へ行って戻ってきたとき、選択肢が**古い値のまま**見える
    * ── そして user は「変えたのに戻っている」と読む(`syncTheme` と同じ理由)。
@@ -1606,13 +1435,3 @@ const PERSIST_TEXT: Record<PersistState, string> = {
   unknown: 'まだ確かめていません。最初に何か保存したときに確かめます。',
 };
 
-/** ⚠ 画面に出る語は**そのまま pin される**(`tests/docs-parity.test.ts`)。 */
-const PHASE_LABEL: Record<string, string> = {
-  spawn: '起動',
-  enqueue: '受付',
-  dispatch: '実行開始',
-  done: '完了',
-  fail: '失敗',
-  kill: '終了(しばらく使われないため)',
-  dispose: '破棄',
-};

@@ -182,6 +182,10 @@ export const SKIPPED_KEYS: readonly { readonly key: string; readonly why: string
     key: 'pkc3.messages.read-at',
     why: '既読はその端末で読んだ事実(設計 doc §7、段②a)── pkc3.notices.seen と同じ考え方。運ぶと、別の端末でまだ読んでいないメッセージが既読に化ける',
   },
+  {
+    key: 'pkc3.notices.delivered',
+    why: '「配信」としてメッセージへ流したかの記録(設計 doc §7、段②b)── その端末での事実。運ぶと、別の端末でまだ配信していないお知らせが配信済みに化ける',
+  },
 ];
 
 /** 書き出す形の目印。⚠ 版が変わっても**読めるところまでは読む**(下の注記)。 */

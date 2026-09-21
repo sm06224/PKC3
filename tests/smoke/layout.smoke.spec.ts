@@ -1484,31 +1484,45 @@ test('🔴 何も選んでいない中央に案内が出る(白紙にしない)'
   expect(errors).toEqual([]);
 });
 
-test('🔴 設定は user 向けと計器に分かれている', async ({ page }) => {
+/**
+ * 🔴 **設計 doc §7、段②b**:「処理(ワーカー)── 開発者向け」という
+ * **読むだけの計器区画**は無くなった(`buildJobs()` ごと削除)。
+ * ⚠ 以前のこの test は「計器の区画には操作できる物が無い」ことを見ていたが、
+ *   その区画自体が無い以上、主張を裏返す ── **区画が無いこと**と、
+ *   代わりの入口である「メッセージ」・修復の並ぶ「書き出しと片づけ」には
+ *   **実際に押せる物がある**(ここも読むだけの区画に化けていないこと)を見る。
+ */
+test('🔴 「処理(ワーカー)」の計器区画は無く、メッセージ / 書き出しと片づけには押せる物がある', async ({
+  page,
+}) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1920, height: 1080 });
   await gotoApp(page);
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
 
-  // ① user が変えるものの区画に、変えられる物が**実際に入っている**
+  // ① user が変えるものの区画に、変えられる物が**実際に入っている**(従来どおり)
   const userArea = page.locator('[data-pkc-region="settings-user"]');
   await expect(userArea).toBeVisible();
   await expect(userArea.locator('[data-pkc-field="theme-select"]')).toBeVisible();
 
-  // ② 計器は**別の区画**で、そこに変えられる物が無い(読むだけ)
-  const jobs = page.locator('[data-pkc-region="jobs"]');
-  await expect(jobs).toBeVisible();
+  // ② 🔴 「処理(ワーカー)── 開発者向け」の区画そのものが無い
+  await expect(page.locator('[data-pkc-region="jobs"]')).toHaveCount(0);
+
+  // ③ 🔴 代わりの入口「メッセージ」に押せる物がある(開く / 処理の記録を開く / 保管件数 / 書き出す)
+  const messages = page.locator('[data-pkc-region="settings-messages"]');
+  await expect(messages).toBeVisible();
   expect(
-    await jobs.locator('select, input, [data-pkc-action]').count(),
-    '計器の区画に操作するものが混ざっている',
-  ).toBe(0);
-  // ③ 順番は「変えるもの」が先(計器が画面の頭を占めない)
-  const y = await page.evaluate(() => {
-    const q = (s: string) => document.querySelector(s)?.getBoundingClientRect().y ?? -1;
-    return { user: q('[data-pkc-region="settings-user"]'), jobs: q('[data-pkc-region="jobs"]') };
-  });
-  expect(y.user, '区画が見つからない').toBeGreaterThan(0);
-  expect(y.jobs, '計器が user 向けより上に出ている').toBeGreaterThan(y.user);
+    await messages.locator('select, input, [data-pkc-action]').count(),
+    'メッセージの節に押せる物が無い(読むだけの計器のまま残っている)',
+  ).toBeGreaterThan(0);
+
+  // ④ 🔴 「書き出しと片づけ」(壊れの修復・持ち出し等)にも押せる物がある
+  const repair = page.locator('[data-pkc-region="settings-commands"]');
+  await expect(repair).toBeVisible();
+  expect(
+    await repair.locator('select, input, [data-pkc-action]').count(),
+    '書き出しと片づけの節に押せる物が無い',
+  ).toBeGreaterThan(0);
 
   expect(errors).toEqual([]);
 });

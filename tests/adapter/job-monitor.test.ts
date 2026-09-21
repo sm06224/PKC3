@@ -80,4 +80,51 @@ describe('ジョブの記録', () => {
     expect(s.queued).toBeGreaterThanOrEqual(0);
     expect(s.running).toBeGreaterThanOrEqual(0);
   });
+
+  /**
+   * 🔴 **既定(`messagePost` 省略)は送らない**(段②b)。
+   * ⚠ ここが real の `appMessagePost` を既定にすると、この file の他の全 test
+   *   (indexedDB を持たない環境)が無駄な控え書込・実タイマーを抱える
+   *   ── job-monitor.ts 冒頭の docstring が理由を書いている。
+   */
+  it('🔴 messagePost を渡さなければ、何も送らない(既定は null)', () => {
+    const m = new JobMonitor(() => 0);
+    // ⚠ 例外が飛べば「real の singleton を既定にしてしまった」ことが分かる
+    expect(() => m.record('x', 'spawn')).not.toThrow();
+  });
+});
+
+/**
+ * 🔴 **メッセージ(種類「処理」)へ流す**(設計 doc §7、段②b)。
+ *
+ * ⚠ 束ね(50 件 / 5 秒)は `MessagePost` 側の責務なのでここでは見ない
+ *   (`tests/adapter/message-post.test.ts`)。ここで見るのは
+ *   「`record()` が、何を post に渡しているか」だけ。
+ */
+describe('ジョブの記録 → メッセージ(種類「処理」)', () => {
+  it('🔴 phase / note / ms を組んで post する', () => {
+    const posted: Array<{ kind: string; source: string; text: string }> = [];
+    const m = new JobMonitor(() => 0, { post: (i) => posted.push(i) });
+    m.record('markdown', 'done', { id: 1, ms: 12, note: '3.2k 文字' });
+    expect(posted).toHaveLength(1);
+    expect(posted[0]!.kind).toBe('job');
+    expect(posted[0]!.source).toBe('markdown');
+    expect(posted[0]!.text).toBe('完了 3.2k 文字 12ms');
+  });
+
+  it('note / ms が無い phase では、その部分を省く(spawn / kill)', () => {
+    const posted: Array<{ text: string }> = [];
+    const m = new JobMonitor(() => 0, { post: (i) => posted.push(i) });
+    m.record('x', 'spawn');
+    m.record('x', 'kill');
+    expect(posted.map((p) => p.text)).toEqual(['起動', '終了(しばらく使われないため)']);
+  });
+
+  it('🔴 本文(user の入力)は渡さない ── note は内部の語だけ', () => {
+    const posted: Array<{ text: string }> = [];
+    const m = new JobMonitor(() => 0, { post: (i) => posted.push(i) });
+    // ⚠ note は呼び手(worker-lease.ts)が組む「38KB」のような手掛かりのみ
+    m.record('markdown', 'enqueue', { id: 1, note: '1.2k 文字' });
+    expect(posted[0]!.text).toBe('受付 1.2k 文字');
+  });
 });

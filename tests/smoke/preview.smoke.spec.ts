@@ -104,44 +104,54 @@ test('🔴 プレビューはワーカーが描いている(同期に落ちて�
 });
 
 /**
- * P8 段⑩: **ジョブの可視化とログ**。
+ * 🔴 **P8 段⑩ → 設計 doc §7、段②b**: ジョブの動きは「メッセージ」(種類「処理」)
+ * として `sys-jobs` へ流れる。
  *
  * > user 指示 2026-08-03「**ジョブスケジューラーは可視化機構とセットでお願いします /
  * > ログもみたい**」
+ * > 裁定 2026-09-20「フラグではなく、メッセージの一種。5,000 件保管」
  *
- * ⚠ 「画面が出る」で止めない ── **実際のジョブが数字とログに現れる**ことを見る。
- * 空の表を出すだけの実装でも「出た」は通ってしまう。
+ * ⚠ 「画面が出る」で止めない ── **実際のジョブが記録に現れる**ことを見る。
+ * ⚠ **「処理(ワーカー)── 開発者向け」の区画はもう無い**(段②b で `buildJobs()`
+ *   ごと削除)── 代わりの入口は「システム → メッセージ → 処理の記録を開く」。
+ * ⚠ job は 50 件 / 5 秒で束ねる(`MessagePost.bufferJob`)。ここでは
+ *   `pagehide` を発火して**閉じる前に流す経路**(main.ts の配線)を通して
+ *   すぐ確かめる ── 5 秒の実待ちでコストを積まない(CLAUDE.md「起動を
+ *   1 つ足すと以後すべての回に 1.6 秒」の姉妹規律)。
  */
-test('🔴 設定にジョブの状態とログが出る', async ({ page }) => {
+test('🔴 ワーカーの動きが「メッセージ → 処理の記録」に流れる(段②b)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
 
-  // 何か仕事をさせる(プレビューを描かせる)
+  // 何か仕事をさせる(プレビューを描かせる ── markdown worker が動く)
   await createEntry(page, 'text');
   await page.locator('[data-pkc-field="editor-body"]').fill('# 見出し\n\n本文\n');
   await expect(page.locator('[data-pkc-region="editor-preview"] h1')).toHaveText('見出し');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
+  // 🔴 束ねた job を、閉じる前と同じ経路(pagehide)で流す
+  await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+
   await clickReal(page, '[data-pkc-view="settings"]');
-  const lanes = page.locator('[data-pkc-field="job-lanes"] tbody tr');
-  // ① 🔴 markdown のワーカーが行として出る
-  await expect(lanes.filter({ hasText: 'markdown' })).toHaveCount(1);
-  const row = lanes.filter({ hasText: 'markdown' }).first();
-  // ② 🔴 **完了件数が 1 以上**(空の表を出しているだけではない)
-  const done = await row.locator('td').nth(4).textContent();
-  expect(Number(done), '完了したジョブが数えられていない').toBeGreaterThan(0);
-  // ③ 中央値が出ている(所要時間を測っている)
-  await expect(row.locator('td').nth(7)).not.toHaveText('—');
+  const pane = page.locator('[data-pkc-view-pane="settings"]');
 
-  // ④ 🔴 ログに実際の出来事が並ぶ
-  const log = page.locator('[data-pkc-field="job-log"] li');
-  await expect(log.first()).toBeVisible();
-  await expect(page.locator('[data-pkc-field="job-log"] li[data-pkc-phase="done"]').first()).toContainText('markdown');
-  await expect(page.locator('[data-pkc-field="job-log"] li[data-pkc-phase="spawn"]').first()).toBeVisible();
+  // ① 🔴 「処理(ワーカー)── 開発者向け」の区画そのものが無い
+  await expect(pane.locator('[data-pkc-region="jobs"]')).toHaveCount(0);
 
-  // ⑤ ⚠ ログに**本文の中身**は出さない(文字数だけ)
-  await expect(page.locator('[data-pkc-field="job-log"]')).not.toContainText('見出し');
+  // ② 「処理の記録を開く」を押すと、中央に system ノートとして開く
+  await clickReal(page, '[data-pkc-action="open-messages"][data-pkc-message-lid="sys-jobs"]');
+  const detailPane = page.locator('[data-pkc-view-pane="detail"]');
+  await expect(detailPane.locator('[data-pkc-field="detail-title"]')).toHaveText('処理の記録');
+
+  // ③ 🔴 実際の出来事(lane / phase)が記録に並ぶ
+  await expect(detailPane, 'ワーカーの動きが記録に届いていない').toContainText('markdown', {
+    timeout: 10_000,
+  });
+  await expect(detailPane, '完了が記録に無い').toContainText('完了');
+
+  // ④ ⚠ 記録に**本文の中身**は出さない(文字数だけ)
+  await expect(detailPane).not.toContainText('見出し');
 
   expect(errors).toEqual([]);
 });

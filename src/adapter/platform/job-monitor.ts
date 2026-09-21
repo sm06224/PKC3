@@ -11,7 +11,22 @@
  *  - ログは輪(固定長)。伸び続けない
  *  - 所要時間の標本も固定長(中央値を出すぶんだけ)
  *  - 通知は**まとめて 1 回**(購読側が自分で間引く)
+ *
+ * 🔴 **設計 doc §7、段②b**:ワーカーの動きは「メッセージ」の種類「処理」でもある
+ * (裁定 2026-09-20「フラグではなく、メッセージの一種。5,000 件保管」)。
+ * ⚠ **`settings.ts` の「処理(ワーカー)── 開発者向け」節はここで廃止した** ──
+ * 代わりの入口は「システム → メッセージ → 処理の記録を開く」(system 領域の
+ * ノート `sys-jobs`)。この file の輪(`LOG_CAP` 200)は**この class 自身の
+ * 単体 test のためだけ**に残す(読み手は無い ── いずれ丸ごと削ってよい)。
+ * `record()` は `messagePost`(既定は `appMessagePost`)へ 1 件流す。
+ * ⚠ **既定は `null`**(送らない)── `new JobMonitor()` を使う既存の test /
+ *   `worker-lease` / `*-client` の test は messaging を知らないので、
+ *   ここで real の `appMessagePost` を既定にすると、書けない環境
+ *   (indexedDB を持たない test)で無駄な控え書込・実タイマーが走る
+ *   (CLAUDE.md §7「片側を直したら…」と同型の巻き添え)。
+ *   **本体の `appJobMonitor` だけ**、末尾で明示的に配線する。
  */
+import { appMessagePost, type MessagePost } from './message-post';
 
 export type JobPhase = 'spawn' | 'enqueue' | 'dispatch' | 'done' | 'fail' | 'kill' | 'dispose';
 
@@ -51,6 +66,20 @@ const LOG_CAP = 200;
 /** 所要時間の標本数(中央値・最大を出すぶん)。 */
 const SAMPLE_CAP = 50;
 
+/**
+ * 🔴 メッセージへ流す文の見出し語(設計 doc §7、段②b)。
+ * ⚠ **正本はここ 1 か所**(かつて `settings.ts` の表示にだけ在ったものを移した)。
+ */
+const PHASE_LABEL: Readonly<Record<JobPhase, string>> = {
+  spawn: '起動',
+  enqueue: '受付',
+  dispatch: '実行開始',
+  done: '完了',
+  fail: '失敗',
+  kill: '終了(しばらく使われないため)',
+  dispose: '破棄',
+};
+
 interface LaneState {
   alive: boolean;
   queued: number;
@@ -68,7 +97,15 @@ export class JobMonitor {
   private readonly listeners = new Set<() => void>();
   private readonly now: () => number;
 
-  constructor(now: () => number = () => Date.now()) {
+  constructor(
+    now: () => number = () => Date.now(),
+    /**
+     * メッセージの口(既定は `null` = 送らない)。⚠ **`appJobMonitor` だけ**
+     * 末尾で `appMessagePost` を明示的に渡す ── 既定を real にしない理由は
+     * 冒頭の docstring のとおり。
+     */
+    private readonly messagePost: Pick<MessagePost, 'post'> | null = null,
+  ) {
     this.now = now;
   }
 
@@ -111,6 +148,20 @@ export class JobMonitor {
     }
     this.log.push({ at: this.now(), lane, phase, ...opts });
     if (this.log.length > LOG_CAP) this.log.shift();
+    /**
+     * 🔴 **メッセージ(種類「処理」)へも 1 件流す**(設計 doc §7、段②b)。
+     * ⚠ 本文は入れない(`note` は既に内部の語だけ ── worker-lease.ts の
+     *   `describe`/`sizeOf` が文字数しか渡さない)。`postMessage` 側が
+     *   `sanitizeMessageText` を通すので、ここでは組むだけでよい。
+     * ⚠ **束ねは呼び先(`MessagePost`)の仕事**。ここで間引かない
+     *   (間引くと、束ねが「溜まっているか」を見誤る)。
+     */
+    if (this.messagePost) {
+      const parts = [PHASE_LABEL[phase]];
+      if (opts.note) parts.push(opts.note);
+      if (typeof opts.ms === 'number') parts.push(`${opts.ms}ms`);
+      this.messagePost.post({ kind: 'job', source: lane, text: parts.join(' ') });
+    }
     for (const fn of this.listeners) fn();
   }
 
@@ -159,5 +210,9 @@ export class JobMonitor {
 /**
  * アプリで 1 個だけ使う monitor。⚠ **注入もできる**ようにしておく
  * (test が実物を使えないと、可視化が壊れても誰も気づかない)。
+ *
+ * 🔴 **ここでだけ `appMessagePost` を明示的に渡す**(段②b)── 既定を real に
+ *   しない理由は `JobMonitor` の docstring のとおり。本体で使う唯一の
+ *   monitor だけが、実際にメッセージへ書く。
  */
-export const appJobMonitor = new JobMonitor();
+export const appJobMonitor = new JobMonitor(undefined, appMessagePost);
