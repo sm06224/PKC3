@@ -77,7 +77,7 @@ describe('一覧の上に出す 1 行 (#196 / B-2 段②-b)', () => {
   it('🔴 まだ 1 件も無ければ、作り方を出す', () => {
     const note = snippetMenuNote(scan([]));
     expect(note, '作り方が書いていない').toContain('作成');
-    expect(note).toContain('雛形');
+    expect(note).toContain('テンプレート');
   });
 
   it('🔴 上限で切ったら、切ったと言う(黙って落とさない)', () => {

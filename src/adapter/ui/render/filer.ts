@@ -471,7 +471,7 @@ export class FilerRenderer {
       const hint = document.createElement('p');
       hint.setAttribute('data-pkc-field', 'filer-move-empty');
       // ⚠ 「操作が無い」ではなく「**何をすれば出るか**」を書く
-      hint.textContent = '動かしたいものを選ぶと、ここで居場所を変えられます';
+      hint.textContent = '動かしたいものを選ぶと、ここでフォルダを変えられます';
       host.append(hint);
     } else {
       /**

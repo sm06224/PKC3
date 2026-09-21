@@ -12,7 +12,7 @@
 
 /** 設定画面に出る一覧。⚠ label を変えたらマニュアルも直す(`docs-parity`)。 */
 export const EDITOR_MODES = [
-  { id: 'live', label: '1 面で編集(ライブ)' },
+  { id: 'live', label: '1 画面で編集(ライブ)' },
   { id: 'split', label: '2 ペイン(原文とプレビュー)' },
 ] as const;
 

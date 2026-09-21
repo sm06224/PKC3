@@ -3619,7 +3619,7 @@ async function tocJump(
           dispatcher.getState().phase !== 'ready'
             ? '編集中は本文が表示されていないので移動できません(保存するか、2 ペインにしてください)'
             : (notFound ??
-              'その見出しが本文の面にまだ出ていません(描き直しの途中かもしれません ── もう一度押してください)'),
+              'その見出しが本文にまだ出ていません(描き直しの途中かもしれません ── もう一度押してください)'),
       });
       return;
     }
@@ -6436,7 +6436,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (heading.id === '') {
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: 'この見出しには参照の印が無いので、章の参照を作れません(# 〜 ### の見出しで使えます)',
+        error: 'この見出しには参照できる目印が無いので、章の参照を作れません(# 〜 ### の見出しで使えます)',
       });
       return;
     }
@@ -6775,7 +6775,7 @@ const ACTIONS: Record<string, ActionHandler> = {
         if (!got.ok) {
           dispatcher.dispatch({
             type: 'OP_FAILED',
-            error: `リンク先の印を取り込めませんでした: ${got.why}`,
+            error: `リンク先のアイコンを取り込めませんでした: ${got.why}`,
           });
           return;
         }
@@ -6798,7 +6798,7 @@ const ACTIONS: Record<string, ActionHandler> = {
         if (now !== null && now.lid === lid && now.n === mine + 1) return;
         dispatcher.dispatch({
           type: 'OP_FAILED',
-          error: 'リンク先の印は取れましたが、ほかの保存が動いているので入れられませんでした(もう一度押してください)',
+          error: 'リンク先のアイコンは取れましたが、ほかの保存が動いているので入れられませんでした(もう一度押してください)',
         });
       })
       .finally(() => {
@@ -7373,7 +7373,7 @@ const ACTIONS: Record<string, ActionHandler> = {
             keeps: [
               `Office の部品(${OFFICE_PACK_APPROX})`,
               `DuckDB の部品(${DUCKDB_PACK_APPROX})`,
-              '設定・見た目・ショートカットキーの割り当て・読んだお知らせの印',
+              '設定・見た目・ショートカットキーの割り当て・読んだお知らせの記録',
             ],
             rescued: rescued === null ? null : rescued.stats,
             assetsOnDisk,
@@ -7388,11 +7388,11 @@ const ACTIONS: Record<string, ActionHandler> = {
       .then(async (answer) => {
         if (answer !== 'ok') return;
         const typed = await promptInApp(root, {
-          title: '本当に捨てますか',
+          title: '本当に初期化しますか',
           label: resetPassphraseLabel(),
           // ⚠ **`initial` を渡さない** ── 渡すと、空のまま受けたときに
           //    `promptInApp` がその字を返す(= 何も打たずに合言葉が通る)
-          okLabel: '捨てる',
+          okLabel: '初期化する',
           // 🔴 danger ── ここが**本当に消える 1 押し**である(1 件削除より重い)
           danger: true,
         });

@@ -47,7 +47,7 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
   { key: 'pkc3.pane-sizes', label: '列の幅' },
   { key: 'pkc3.editor-mode', label: '編集の仕方' },
   { key: 'pkc3.open-in-edit', label: '「開く」で編集に入るか' },
-  { key: 'pkc3.page-format', label: '紙面' },
+  { key: 'pkc3.page-format', label: 'ページ設定' },
   /**
    * ⚠ **紙面と対**(#722、2026-09-08)── 片方だけ運ぶと「読み幅は移ったのに
    *   置き場所は既定」になる。⚠ 別の端末でも**同じ意味**になる

@@ -2291,7 +2291,7 @@ describe('スマホの 2 ペイン(1 枚ずつ)(#687)', () => {
     r.render(s);
     expect(otherMarks('right').hidden, '右が相手の印を言っていない').toBe(false);
     expect(otherMarks('right').textContent).toBe(
-      '左のペインに 1 件の印が残っています(ここでコピー・移すを押しても、その印は動きません)',
+      '左のペインに 1 件の選択が残っています(ここでコピー・移すを押しても、その選択は動きません)',
     );
     // ⚠ 焦点の無い側(左)は言わない ── 右には印が無い
     expect(otherMarks('left').hidden).toBe(true);
@@ -2309,7 +2309,7 @@ describe('スマホの 2 ペイン(1 枚ずつ)(#687)', () => {
     s = reduce(s, { type: 'DUAL_SELECT', side: 'left', lid: 'b', mode: 'toggle' }).state;
     s = reduce(s, { type: 'DUAL_FOCUS', side: 'right' }).state;
     r.render(s);
-    expect(otherMarks('right').textContent).toContain('左のペインに 2 件の印');
+    expect(otherMarks('right').textContent).toContain('左のペインに 2 件の選択');
     /**
      * 🔴 **逆向き ── 右に印を置いて左へ戻る**(両ペインを描いた**後**で読む規律を突く)。
      * ⚠ 描く順は左 → 右なので、ループの**中**で相手を読む実装は、左を描く時点で
@@ -2319,7 +2319,7 @@ describe('スマホの 2 ペイン(1 枚ずつ)(#687)', () => {
     s = reduce(s, { type: 'DUAL_FOCUS', side: 'left' }).state;
     r.render(s);
     expect(otherMarks('left').hidden, '左が右の印を言っていない(前回の値を読んだ)').toBe(false);
-    expect(otherMarks('left').textContent).toContain('右のペインに 1 件の印');
+    expect(otherMarks('left').textContent).toContain('右のペインに 1 件の選択');
     expect(otherMarks('right').hidden).toBe(true);
   });
 

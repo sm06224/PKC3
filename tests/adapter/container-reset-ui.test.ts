@@ -216,7 +216,7 @@ describe('押しても、まだ消えない(#986 段③)', () => {
     m.run.click();
     await settle();
     expect(m.body(), '拾えた件数が出ていない').toContain('この画面で拾えたのは 0 件です');
-    expect(m.body(), '読めなかった数が出ていない').toContain('読めなかった区画 7');
+    expect(m.body(), '読めなかった数が出ていない').toContain('読み込めなかった箇所 7');
     expect(m.body(), '0 件なのに済んだ顔をしている').not.toContain('まだ拾い出していません');
   });
 

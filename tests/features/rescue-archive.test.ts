@@ -243,7 +243,7 @@ describe('🔴 拾い出しが「戻せる形」で出る(#986)', () => {
   });
 
   /** 🔴 **拾えなかった区画を、必ず字にする**(「拾えた件数」を「全部」と読ませない)。 */
-  it('🔴 読めなかった区画・空の区画を字に出す', () => {
+  it('🔴 読み込めなかった箇所・空だった箇所を字に出す', () => {
     const s = {
       entries: 10,
       skipped: 4,
@@ -254,8 +254,8 @@ describe('🔴 拾い出しが「戻せる形」で出る(#986)', () => {
       assetMissing: 0,
     };
     const line = rescueArchiveSummary(s);
-    expect(line).toContain('読めなかった区画 4');
-    expect(line).toContain('空だった区画 38');
+    expect(line).toContain('読み込めなかった箇所 4');
+    expect(line).toContain('空だった箇所 38');
     // 🔴 つながりと履歴が戻らないことは**必ず**書く（黙って 0 件にしない）
     expect(line, 'つながりと履歴が戻らないことを言っていない').toContain(
       'ノート同士のつながりと履歴は、この方法では戻せません',

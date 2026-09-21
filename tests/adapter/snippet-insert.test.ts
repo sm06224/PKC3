@@ -264,7 +264,7 @@ describe('雛形が作れる(#196 / B-2)', () => {
   });
 
   it('種別の名前が内部語のままになっていない', () => {
-    expect(archetypeLabel(SNIPPET_ARCHETYPE)).toBe('雛形');
+    expect(archetypeLabel(SNIPPET_ARCHETYPE)).toBe('テンプレート');
   });
 });
 

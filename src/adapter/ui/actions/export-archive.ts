@@ -492,7 +492,7 @@ async function collectOfficeBlocks(
   await deps.settle();
   // ⚠ 1 件だけの読み口(P6f)。⚠ 省略可なので**在ることを確かめてから**呼ぶ
   if (!deps.source.getBody) {
-    fail('本文の読み口が渡っていません');
+    fail('本文を読む機能が渡っていません');
     return null;
   }
   const body = await deps.source.getBody(lid);
@@ -691,7 +691,7 @@ async function exportEntryOffice(
   // ⚠ **知らせを出す前に断る** ── 「書き出しています…」の直後に断り文が出ると、
   //    user には「途中で失敗した」に見える(実際は 1 バイトも読んでいない)
   const renderBody = deps.renderBody;
-  if (!renderBody) return fail('本文を組み立てられませんでした(描画の口が渡っていません)');
+  if (!renderBody) return fail('本文を組み立てられませんでした(描画する機能が渡っていません)');
   deps.notify?.(`${target.app} で書き出しています…`);
   try {
     const got = await collectOfficeBlocks(deps, renderBody, lid, target, fail);

@@ -289,12 +289,12 @@ describe('🔴 拾った中身で、その場に建て直す(#1006)', () => {
   });
 
   /** ⚠ 拾えなかった区画を、必ず字にする(「戻した件数」を「全部」と読ませない)。 */
-  it('⚠ 読めなかった区画を字に出し、戻らない物も言う', async () => {
+  it('⚠ 読み込めなかった箇所を字に出し、戻らない物も言う', async () => {
     const h = harness({ skippedPerPage: 3 });
     const r = await rebuildContainer('c-old', 't', h.ports);
     const line = rebuildDoneMessage(r);
     expect(line).toContain('3 件を戻しました');
-    expect(line, '読めなかった区画を黙っている').toContain('読めなかった区画');
+    expect(line, '読み込めなかった箇所を黙っている').toContain('読み込めなかった箇所');
     for (const lost of REBUILD_LOST) {
       expect(line, `戻らない物「${lost}」を言っていない`).toContain(lost);
     }

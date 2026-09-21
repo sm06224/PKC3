@@ -43,7 +43,7 @@ import { canWriteBody } from './writable-queue';
  *   とだけ書くと、**何も編集していない user**に嘘を言うことになる。
  */
 const BUSY_BODY_TEXT =
-  'いま本文に書き込めないので、切り出したものを保存できません。編集を終えるか少し待ってから、もう一度押してください(印は残しています)。';
+  'いま本文に書き込めないので、切り出したものを保存できません。編集を終えるか少し待ってから、もう一度押してください(選んだ範囲は残しています)。';
 
 export interface CaptureTrimDeps {
   readonly dispatcher: Dispatcher;

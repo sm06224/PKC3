@@ -194,13 +194,13 @@ describe('parseVcf ── 読みは広く', () => {
     const v = 'BEGIN:VCARD\r\nFN;ENCODING=QUOTED-PRINTABLE:=ZZ\r\nTEL:090\r\nEND:VCARD';
     const { cards, warnings } = parseVcf(v);
     expect(cards, '読めた分まで捨てた').toHaveLength(1);
-    expect(warnings.join(''), '化けたのに黙っている').toContain('文字が壊れている');
+    expect(warnings.join(''), '化けたのに黙っている').toContain('文字を正しく読み取れない');
   });
 
   it('🔴 UTF-8 として読めないバイト列も言う(モジバケを黙って通さない)', () => {
     // `=E5` だけ(3 バイト必要な先頭バイト 1 つ)── 復号すると U+FFFD になる
     const v = 'BEGIN:VCARD\r\nFN;ENCODING=QUOTED-PRINTABLE:=E5\r\nTEL:090\r\nEND:VCARD';
-    expect(parseVcf(v).warnings.join('')).toContain('文字が壊れている');
+    expect(parseVcf(v).warnings.join('')).toContain('文字を正しく読み取れない');
   });
 
   it('⚠ 対照群 ── 正しい QP では言わない(嘘の狼を出さない)', () => {
@@ -208,7 +208,7 @@ describe('parseVcf ── 読みは広く', () => {
       'BEGIN:VCARD\r\nFN;ENCODING=QUOTED-PRINTABLE;CHARSET=UTF-8:=E5=B1=B1=E7=94=B0\r\nTEL:090\r\nEND:VCARD';
     const { cards, warnings } = parseVcf(v);
     expect(cards[0]!.name).toBe('山田');
-    expect(warnings.filter((w) => w.includes('文字が壊れている')), '正しいのに壊れと言った').toEqual([]);
+    expect(warnings.filter((w) => w.includes('文字を正しく読み取れない')), '正しいのに壊れと言った').toEqual([]);
   });
 
   /**

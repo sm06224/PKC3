@@ -802,7 +802,7 @@ describe('「図案」を押すと絵の表から選ぶ(#853 段①)', () => {
     const at = labels.indexOf('図案');
     expect(at, '帯に「図案」が無い').toBeGreaterThan(0);
     // ⚠ **入れる道具の並びの末尾**(日付 / ノート / 雛形 の後)── 既に在る 3 つを動かさない
-    expect(labels[at - 1], '「図案」が雛形の隣に居ない').toBe('雛形');
+    expect(labels[at - 1], '「図案」がテンプレートの隣に居ない').toBe('テンプレート');
     expect(buttons[at]!.hasAttribute('data-pkc-format'), 'format-text の口が付いている').toBe(false);
     expect(q('[data-pkc-action="insert-icon"]')).not.toBeNull();
   });

@@ -72,6 +72,12 @@ function rankOf(cmd: KeyCommand, q: string): number | null {
   if (label.startsWith(q)) return 0;
   if (label.includes(q)) return 1;
   if (fold(cmd.note ?? '').includes(q)) return 2;
+  /**
+   * 🔑 **画面に出ない呼び名の揺れも探せる**(#690 I5 / #1017 段⑤-2)。
+   * ⚠ `alias` は `note` と違って**描画されない**(§6.1 の名前の規則は
+   *   画面の字が対象。旧称は画面から消えても、探す欄では今までどおり当たる)。
+   */
+  if (fold(cmd.alias ?? '').includes(q)) return 2;
   // ⚠ id も探せる(`open-help` のような綴りを覚えている人のため)
   if (fold(cmd.id).includes(q)) return 3;
   return null;

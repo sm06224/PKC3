@@ -610,7 +610,7 @@ describe('readContainerBundle — 黙って落とさない', () => {
     );
     const got = await readContainerBundle(zip);
     expect(got.warnings).toEqual([
-      '書出し時に壊れた添付参照が本文から除かれています(compact mode)',
+      '書出し時に解決できない添付参照が本文から除かれています(compact mode)',
     ]);
   });
 
@@ -627,7 +627,7 @@ describe('readContainerBundle — 黙って落とさない', () => {
       [{ name: 'a.text.zip', bytes: await textBundle({ lid: 'n1', compacted: false }) }],
     );
     expect((await readContainerBundle(zip)).warnings).toEqual([
-      '書出し時に壊れた添付参照が本文から除かれています(compact mode)',
+      '書出し時に解決できない添付参照が本文から除かれています(compact mode)',
     ]);
   });
 
