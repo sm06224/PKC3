@@ -206,6 +206,13 @@ npm run typecheck && npm run lint && npm test                              # 載
   git・npm を打つ命令は **`cd /home/user/PKC3 &&` を頭に置く**
 - ⚠ **local に停めた commit は push されていない** ── この箱は作り直される(下の節)。
   停めるのは**次の merge を待つ間**に限り、merge が来たらすぐ載せ直して push する
+- 🔴 **`git cherry-pick --continue` が commit の題名を食う**(2026-09-21)。
+  競合を解いて `GIT_EDITOR=true git cherry-pick --continue` したら、元の題名が
+  `#1017 段④b: …` と **`#` で始まっていた**ので、git がコメント行として**削除**し、
+  本文の 1 行目が題名になった(`git log --oneline` で発覚)。
+  🔑 **題名を `#` で始めない**(`段④b: …(#1017)` の形にする)/ 既に `#` 始まりの
+  題名を戻す必要があるなら `git -c core.commentChar=';' cherry-pick --continue` か
+  `git commit --cleanup=verbatim` で守る
 
 ### ⚠ **remote 追跡 ref も掃除する** ── `--force-with-lease` は**効かない**
 
