@@ -26,7 +26,7 @@ digest が止める)。1 語 1 対応ではなく、字を入れる前に 1 件�
 |---|---|
 | main の HEAD | `92bcc00` #1017 段⑤-1 ── 名前の正本 `ui-terms.ts` と 3 つの門 (#1027) |
 | 作業 branch | `claude/pkc3-pr-1013-fiahtq`(この引き継ぎ PR の分だけ main より先。⚠ merge したら作り直す) |
-| `/dev/` | `Deploy Pages` run 638(`92bcc00`)── 書いている時点で in_progress。1 つ前の run 637(`aaea581`)は success |
+| `/dev/` | `Deploy Pages` run 638(`92bcc00`)**success**(08:42 UTC)。⚠ 実物の bundle は箱から取れない(proxy が `github.io` を拒む)── job の緑まで |
 | 本番 `/` | 🔴 **v3.2.0(8/29)のまま**。引き金は user の示唆待ち(打たない) |
 | open PR | dependabot 3 件(#1003 mermaid 12 / #1001 upload-artifact 7 / #842 vitest 5)── 3 件とも major。触っていない |
 | 予約 | 無し(check-in の trigger は全部削除済み) |
