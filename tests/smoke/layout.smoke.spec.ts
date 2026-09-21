@@ -556,24 +556,51 @@ test('🔴 主要な導線が畳まれず、その場で押せる', async ({ pag
     ).toBeVisible();
   }
   /**
+   * 🔴 **書き出し 4 つは、右の列(何も選んでいないとき)で「畳んでいない」**
+   * (#1017 段④a、2026-09-21)。⚠ 2026-09-20 まではここで設定の面を見ていたが、
+   * `docs/development/ui-total-design-2026-09.md` §4.3 の裁定で移った ──
+   * 「コレクションの操作は右の列に出す」。起動直後は何も選んでいないので、
+   * 遷移せずにそのまま見える。
+   */
+  for (const action of [
+    'export-html',
+    'export-portable',
+    'export-markdown',
+    'export-structure',
+  ]) {
+    await expect(
+      page.locator(`[data-pkc-field="collection-pane"] [data-pkc-action="${action}"]`),
+      `${action} が右の列でも見えていない`,
+    ).toBeVisible();
+  }
+  /**
    * 🔴 **移した先でも「畳んでいない」**(#239、user 指示 2026-08-17)。
    *
-   * ⚠ 逃がすことと畳むことは違う ── 設定は面(region)なので、開けば 3 つとも
+   * ⚠ 逃がすことと畳むことは違う ── 設定は面(region)なので、開けば
    * **見えて押せる**。ここを見ないと「設定へ移した」と称して**実は消えていた**を
    * 素通りさせる(押す口が消えて受け手だけ残る形は、こちらの検査に 1 つも鳴らない)。
    */
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
-  // ⚠ **`export-structure` を足した**(#429 段①)── 逃がした先で見えて押せること
-  for (const action of [
-    'export-html',
-    'export-markdown',
-    'export-structure',
-    'purge-orphan-assets',
-  ]) {
+  for (const action of ['purge-orphan-assets']) {
     await expect(
       page.locator(`[data-pkc-action="${action}"]`),
       `${action} が設定の面でも見えていない`,
     ).toBeVisible();
+  }
+  /**
+   * ⚠ **書き出し 4 つは設定の面にはもう無い**(空振り防止 ── 移し忘れで
+   * 「両方に在る」を見逃さない)。
+   * 🔑 **設定の面(region)の中だけ**を見る ── 右の列(コレクション面)は
+   * `viewMode` に関わらず DOM に常駐しているので、page 全体で数えると
+   * そちらの分まで拾って「消えていない」と誤検知する(CLAUDE.md §1「面へ
+   * スコープする」)。
+   */
+  const settingsRegion = page.locator('[data-pkc-region="settings-commands"]');
+  for (const action of ['export-html', 'export-portable', 'export-markdown', 'export-structure']) {
+    await expect(
+      settingsRegion.locator(`[data-pkc-action="${action}"]`),
+      `${action} が設定の面にまだ残っている`,
+    ).toHaveCount(0);
   }
   // 押せること(覆われていない)まで見る ── 見えていても押せない配置がある
   await clickReal(page, '[data-pkc-action="purge-orphan-assets"]');

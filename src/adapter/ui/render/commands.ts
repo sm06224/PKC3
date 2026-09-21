@@ -18,8 +18,18 @@
  * 🔴 **落ちても誰も気づかない形を作らない。** 2 か所へ書き分けると、片方から消して
  * もう片方へ足し忘れたとき **user から動線が丸ごと消える**(押す口が無い action は
  * `repo-hygiene` の「受け手のいない action」検査とは**逆向き**なので鳴らない)。
- * ここに 2 つ並べ、`tests/adapter/collection-commands.test.ts` が
+ * ここに 3 つ並べ、`tests/adapter/collection-commands.test.ts` が
  * **重なりが無いこと**と**合計が変わっていないこと**を pin する。
+ *
+ * ## 2026-09-21 追記(#1017 段④a。型システムで言い直した置き場)
+ *
+ * 🔑 「書き出す(コレクション全体)」は**コレクションという型の操作**なので、
+ * 「何も選んでいない = コレクションを選んでいる」右の列(情報ペイン)へ移した
+ * (`docs/development/ui-total-design-2026-09.md` §4.3)。⚠ 「設定」は
+ * **好みを変える場所**であって、対象を選んで実行する操作の場所ではなかった
+ * ── だから `COLLECTION_PANE_COMMANDS` を**3 本目の配列**として分けた。
+ * ⚠ **押し口(`data-pkc-action`)は変えていない** ── 受け手は `binder.ts` の
+ * 同じハンドラで、`root` への委譲で拾うのでどの面に描いても効く(§7 と同じ形)。
  */
 import { iconButton } from './icons';
 /**
@@ -61,12 +71,18 @@ export const COLLECTION_COMMANDS: readonly CollectionCommand[] = [
 ] as const;
 
 /**
- * **設定画面へ逃がしたもの**(#239)── どれも「押す前に考える」操作である。
+ * 🔴 **コレクション全体を配る操作**(#1017 段④a)── 右の列(情報ペイン)の、
+ * **何も選んでいないとき**(= コレクションを選んでいるとき)に出す。
  *
- * - `export-html` / `export-markdown` … **配るときだけ**押す(形を選ぶ操作)
- * - `purge-orphan-assets` … 掃除。⚠ しかも**元に戻せない** ── 腰を据えて押す場所が正しい
+ * ⚠ **2026-09-21 まで `SETTINGS_COMMANDS` に混ざっていた**(#239)。
+ * `docs-parity` の等値 pin(§4.3 の型の検算)で「同じ型の操作は同じ場所」に揃えた ──
+ * これは「書き出す(コレクション全体)」という**コレクションの型の操作**であって、
+ * 「好みを変える」設定の話ではなかった。
+ *
+ * - `export-structure` … **書き出しの仲間**。出すのは file ではなくクリップボードだが、
+ *   「PKC3 の外へ渡す形にする」という用事は他の 3 つと同じ
  */
-export const SETTINGS_COMMANDS: readonly CollectionCommand[] = [
+export const COLLECTION_PANE_COMMANDS: readonly CollectionCommand[] = [
   { action: 'export-html', label: '閲覧用 HTML', title: '読むだけの 1 枚にまとめます' },
   {
     action: 'export-portable',
@@ -94,9 +110,6 @@ export const SETTINGS_COMMANDS: readonly CollectionCommand[] = [
   },
   /**
    * 🔴 **構成をテキストでコピー**(#429 段①)── AI に整理を頼むための材料。
-   * ⚠ **「押す前に考える」側**なので設定へ置く(左下は「よく押す / 押せないと詰まる」)。
-   * 🔑 書き出しの仲間である ── 出すのは file ではなくクリップボードだが、
-   *   「PKC3 の外へ渡す形にする」という用事は `export-markdown` と同じ。
    */
   {
     action: 'export-structure',
@@ -104,6 +117,17 @@ export const SETTINGS_COMMANDS: readonly CollectionCommand[] = [
     title:
       'ノートとフォルダの並びを、整理コマンドの書き方つきでクリップボードに入れます。AI に貼って「整理案を考えて」と頼めます',
   },
+] as const;
+
+/**
+ * **設定画面へ逃がしたもの**(#239)── どれも「押す前に考える」操作である。
+ *
+ * ⚠ **書き出し 4 つは 2026-09-21 に `COLLECTION_PANE_COMMANDS` へ移した**
+ *   (#1017 段④a)── ここに残るのは「保存領域の片づけ」だけである。
+ *
+ * - `purge-orphan-assets` … 掃除。⚠ しかも**元に戻せない** ── 腰を据えて押す場所が正しい
+ */
+export const SETTINGS_COMMANDS: readonly CollectionCommand[] = [
   {
     action: 'purge-orphan-assets',
     label: '使っていない添付を消す',
@@ -116,11 +140,13 @@ export const SETTINGS_COMMANDS: readonly CollectionCommand[] = [
  * 「左下にあっても使う頻度が低いボタンは設定画面に逃すこと」)。
  *
  * ⚠ **畳んでいない** ── 2026-08-03 の「主要な導線は全部見えている」は生きている。
- * ここは面(region)なので、開けば 3 つとも見えて押せる。
+ * ここは面(region)なので、開けば 1 つとも見えて押せる。
  * ⚠ **押す口(`data-pkc-action`)は変えていない** ── 場所だけ移した。受け手は
- *   `binder.ts` の同じ 3 つで、`root` への委譲で拾うのでこの面でも効く。
+ *   `binder.ts` の同じハンドラで、`root` への委譲で拾うのでこの面でも効く。
  * ⚠ 一覧は `commands.ts` の 1 か所が持つ(2 か所に書くと、片方から消して
  *   もう片方へ足し忘れたときに**動線が丸ごと消える**)。
+ * ⚠ **書き出し 4 つ(閲覧用 HTML / 持ち歩ける HTML 1 枚 / Markdown / 構成をコピー)は
+ *   ここに無い**(2026-09-21、#1017 段④a)── 右の列(何も選んでいないとき)へ移った。
  */
 export function buildSettingsCommands(): HTMLElement {
   const wrap = document.createElement('section');
@@ -132,7 +158,7 @@ export function buildSettingsCommands(): HTMLElement {
   const note = document.createElement('p');
   note.setAttribute('data-pkc-field', 'settings-note');
   note.textContent =
-    '配るときと、片づけるときに使います。取り込みとバックアップは、いつでも押せるように左下に置いてあります。';
+    '片づけるときに使います。取り込みとバックアップは、いつでも押せるように左下に置いてあります。書き出し(閲覧用 HTML・持ち歩ける HTML 1 枚・Markdown・構成をコピー)は、右の列(何も選んでいないとき)にあります。';
   wrap.append(note);
 
   const row = document.createElement('div');
