@@ -58,8 +58,9 @@ import { appJobMonitor, type JobMonitor } from '@adapter/platform/job-monitor';
 import { appNoticeStore, type NoticeStore } from '@adapter/platform/notice-store';
 import { appTooNarrowOk, TooNarrowOkStore } from './too-narrow';
 import { buildOfficePackPanel, type OfficePackPanel } from './office-pack-panel';
-import { buildSettingsCommands } from './commands';
+import { buildSettingsCommands, buildSettingsFile } from './commands';
 import { buildKeymapPanel, type KeymapPanel } from './keymap-panel';
+import { appCopyHistory } from '@adapter/platform/copy-history-store';
 
 export class SettingsRenderer {
   private built = false;
@@ -159,6 +160,7 @@ export class SettingsRenderer {
       this.syncPersist(state);
       this.syncNotices();
       this.syncTooNarrow();
+      this.syncCopyHistory();
       return;
     }
     this.built = true;
@@ -179,22 +181,38 @@ export class SettingsRenderer {
     body.append(this.buildMessages());
 
     /**
-     * 🔑 **user 向けの設定と、開発者向けの計器を分ける**(P9 段③)。
+     * 🔴 **「設定」(#1017 段③-1)** ── PKC を型システムとして言い直した結果、
+     * system 領域(user 向け)の「好み」という型の入れ物になった
+     * (`docs/development/ui-total-design-2026-09.md` §3.2 の裁定)。
      *
-     * 前は「配色 1 つ + ワーカーの表 + ジョブのログ」が地続きに並んでいて、
-     * 設定を開くと**画面のほとんどが計器**だった(実測: user が変えられるのは 1 つ)。
      * ⚠ **畳まない**(user 指示「主要な導線を畳まない」)── 見出しで区切るだけにする。
-     * ⚠ 設定は**節ごとに分ける**(2026-08-06 に「外部の画像」が入って 2 つになった)。
-     *   ここ「表示」は**見た目の好み**だけ ── 外へ何が伝わるかの判断は別の節に置く
+     * ⚠ 中は h4 で 4 つ(表示 / 編集 / 通知 / 開き方)+ 貼り付け・ショートカットキー・
+     *   設定の持ち出し に分かれる ── 前は 22 件が「表示」1 つの `dl` に地続きに
+     *   並んでいた(実測: 見た目の好みでない項目が 9 件混ざっていた)。
+     */
+    const configSection = document.createElement('section');
+    configSection.setAttribute('data-pkc-region', 'settings-config');
+    const configHead = document.createElement('h3');
+    configHead.textContent = '設定';
+    configSection.append(configHead);
+
+    /**
+     * 🔑 **表示**(見た目の好みだけ)── 外へ何が伝わるかの判断は「許可」に置く
      *   (同じ場所に混ぜると、配色を選ぶ気分で押される)。
      */
     const userSection = document.createElement('section');
     userSection.setAttribute('data-pkc-region', 'settings-user');
-    const userHead = document.createElement('h3');
+    const userHead = document.createElement('h4');
     userHead.textContent = '表示';
     userSection.append(userHead);
 
     const dl = document.createElement('dl');
+    /** 🔴 h4「編集」の中身(#1017 段③-1)。 */
+    const editDl = document.createElement('dl');
+    /** 🔴 h4「通知」の中身(#1017 段③-1)。 */
+    const notifyDl = document.createElement('dl');
+    /** 🔴 h4「開き方」の中身(#1017 段③-1)。 */
+    const openDl = document.createElement('dl');
     const dt = document.createElement('dt');
     dt.textContent = '配色';
     const dd = document.createElement('dd');
@@ -435,7 +453,8 @@ export class SettingsRenderer {
      * ✏️ **編集の仕方**(#104 第 2 弾。user 裁定 2026-08-08「既定でONかつ
      * 設定で2ペイン編集はできるようにする」)。
      * ⚠ **flag ではない**(正規設定)── flag `editor.live` はここへ昇格して退役した。
-     * ⚠ ここ「表示」に置く ── 見た目と書き方の好みで、外へ何が伝わるかの判断ではない。
+     * ⚠ **2026-09-21(#1017 段③-1)に「表示」から h4「編集」へ移した** ──
+     *   書き方の作法であって、見た目の好みではない(`editDl` に入れる)。
      */
     const et = document.createElement('dt');
     et.textContent = '編集の仕方';
@@ -459,7 +478,7 @@ export class SettingsRenderer {
       '2 ペインは左に原文、右にプレビューが並びます。' +
       '切り替えは、次に編集を開いたときから効きます。';
     ed.append(enote);
-    dl.append(et, ed);
+    editDl.append(et, ed);
 
     /**
      * 🔴 **保存が「消えない扱い」か**(#347、user 裁定 2026-08-23
@@ -468,6 +487,11 @@ export class SettingsRenderer {
      * ⚠ **押せるものは置かない。** ここは**知らせるだけ**である ── 帯にもダイアログにも
      * しないのが裁定で、操作の失敗ではないので user の手を止めない。
      * 🔑 だから `dd` に入るのは説明文 1 つだけ(選択欄もチェックも無い)。
+     *
+     * 🔴 **2026-09-21(#1017 段③-1)に「表示」から「保存領域」の h4「このアプリの
+     *   データ」へ移した**(`ui-total-design-2026-09.md` §3.2)。
+     *   ⚠ `dl` には**足さない** ── `this.persistDl` に持たせ、「保存領域」の
+     *   組み立てで使う。
      */
     const st = document.createElement('dt');
     st.textContent = 'このアプリのデータ';
@@ -476,7 +500,8 @@ export class SettingsRenderer {
     snote.setAttribute('data-pkc-field', 'settings-note');
     snote.setAttribute('data-pkc-field-persist', 'persist-state');
     sd.append(snote);
-    dl.append(st, sd);
+    const persistDl = document.createElement('dl');
+    persistDl.append(st, sd);
 
     /**
      * 🔴 **「開く」で編集に入るか**(user 裁定 2026-08-18
@@ -504,7 +529,7 @@ export class SettingsRenderer {
       'ここを入れると、開いた時点で編集に入ります。' +
       '行を 1 回押して選んだだけでは編集に入りません(それは「選ぶ」で、「開く」ではありません)。';
     od.append(onote);
-    dl.append(ot, od);
+    editDl.append(ot, od);
 
     /**
      * 🔴 **別の窓で開くか、この画面で開くか**(#826。user 指摘 2026-09-09
@@ -512,7 +537,8 @@ export class SettingsRenderer {
      * ユーザー設定では？**」)。
      *
      * ⚠ **flag ではない**(正規設定)── 恒久の好みで、畳む予定が無い。
-     * ⚠ 「開いたときの状態」の**すぐ下**に置く ── どちらも「開く」の話である。
+     * ⚠ **2026-09-21(#1017 段③-1)に「表示」から h4「開き方」へ移した** ──
+     *   「アプリの開き方」の**すぐ上**に置く(`openDl`。どちらも「開く」の話である)。
      * 🔑 **いま効く先を書く** ── 効かない所まで効くと読まれると、
      *   「設定したのに変わらない」になる(この repo がいちばん嫌う形)。
      */
@@ -542,7 +568,7 @@ export class SettingsRenderer {
       '別の窓にしても本文と並べられないためです)。' +
       '予定表や連絡先など、ほかの窓の開き方はここでは変わりません。';
     pld.append(plnote);
-    dl.append(plt, pld);
+    openDl.append(plt, pld);
 
     /**
      * 🔴 **アプリをどこに出すか**(#884 段①。user 要望 2026-09-13)。
@@ -576,7 +602,7 @@ export class SettingsRenderer {
       '⚠ ブラウザが窓を止めているときは、これまでどおり止められた理由が画面の下に出ます。' +
       '組み込みのアプリ(予定表・連絡先など)とマニュアルの窓は、ここでは変わりません。';
     atd.append(atnote);
-    dl.append(att, atd);
+    openDl.append(att, atd);
 
     /**
      * 🔴 **予定の時刻に知らせるか**(#280。user 指示 2026-08-19「アラートは
@@ -604,7 +630,7 @@ export class SettingsRenderer {
       '閉じたページを時刻で起こすことができないためです)。' +
       'ここを入れると、起動したときに予定を数えます(切のままなら数えません)。';
     ad.append(anote);
-    dl.append(at, ad);
+    notifyDl.append(at, ad);
 
     /**
      * 🔴 **聞くときだけ音を整える**(#772 段① B)。
@@ -632,7 +658,7 @@ export class SettingsRenderer {
       '入れている間は音を通す仕組みが 1 つ常駐します(切っている間は作られません)。' +
       'お使いのブラウザがこの仕組みを持っていない場合は、整わずにそのまま鳴ります。';
     vd.append(vnote);
-    dl.append(vt, vd);
+    notifyDl.append(vt, vd);
 
     /**
      * 🔴 **本文の素の電話番号を押せる字にするか**(#278 段②)。
@@ -662,7 +688,7 @@ export class SettingsRenderer {
       '切のままなら、本文の見え方はこれまでと 1 文字も変わりません。' +
       '⚠ 電話をかけられるかは端末しだいです(パソコンでは、通話のアプリが入っていないと何も起きません)。';
     phd.append(phnote);
-    dl.append(pht, phd);
+    editDl.append(pht, phd);
 
     /**
      * 📣 **お知らせを出すか**(P11 段⑤)。
@@ -670,6 +696,10 @@ export class SettingsRenderer {
      * 🔑 **ここが「今後は出さない」の戻し道である。** 帯にしか導線が無いと、
      * 一度消した user は二度と戻せない ── 「戻せない導線は作らない」。
      * ⚠ **flag ではない**(正規設定)。開放先は user で、畳む予定も無い。
+     *
+     * 🔴 **2026-09-21(#1017 段③-1)に「表示」から「お知らせ」の h3 へ移した**
+     *   (`ui-total-design-2026-09.md` §3.2「お知らせは system 領域」)。
+     *   ⚠ `dl` には**足さない** ── `noticeDl` に持たせる。
      */
     const nt = document.createElement('dt');
     nt.textContent = 'お知らせ';
@@ -687,7 +717,8 @@ export class SettingsRenderer {
     // ⚠ **数は書かない、組み立てる**(#751 ── 同じ字が 5 か所に散っていた)
     nnote.textContent = `出さなくても、過去のお知らせはヘルプから${NOTICE_READABLE_TEXT}が読めます。`;
     nd.append(nnote);
-    dl.append(nt, nd);
+    const noticeDl = document.createElement('dl');
+    noticeDl.append(nt, nd);
 
     /**
      * 🔴 **狭い画面の断り書き**(#687 E-1、user 裁定 2026-09-04)。
@@ -695,6 +726,10 @@ export class SettingsRenderer {
      * 🔑 **ここが帯の「OK」の戻し道である。** OK は端末に憶えるので、帯にしか
      *   導線が無いと一度押した user は二度と戻せない(お知らせと同じ形)。
      * ⚠ **flag ではない**(正規設定)。開放先は user で、畳む予定も無い。
+     *
+     * 🔴 **2026-09-21(#1017 段③-1)に「表示」から「記録」の h4 へ移した**
+     *   (`ui-total-design-2026-09.md` §3.2「記録 = この端末の行動の事実」)。
+     *   ⚠ `dl` には**足さない** ── `tooNarrowDl` に持たせる。
      */
     const wt = document.createElement('dt');
     wt.textContent = '狭い画面の断り書き';
@@ -712,7 +747,8 @@ export class SettingsRenderer {
       '幅が 360px より狭いと、画面の下に「表示が崩れることがあります」と出ます。' +
       'その「OK」を押すと切れ、次に開いても出ません ── ここで戻せます。';
     wd.append(wnote);
-    dl.append(wt, wd);
+    const tooNarrowDl = document.createElement('dl');
+    tooNarrowDl.append(wt, wd);
 
     /**
      * 🔴 **版はヘルプへ移した**(P11)。
@@ -725,28 +761,108 @@ export class SettingsRenderer {
      */
 
     userSection.append(dl);
-    body.append(userSection);
-    body.append(buildSettingsCommands());
+    configSection.append(userSection);
+
     /**
-     * ⌨ **ショートカットキー**(user 指示 2026-08-18)。⚠ 「表示」の節に混ぜない ──
-     * 見た目の好みではなく**操作の割当**である。⚠ 一覧は `KEY_COMMANDS` から出す
+     * 🔑 **h4「編集」**(2026-09-21、#1017 段③-1)── 編集の仕方 / 開いたときの状態 /
+     * 貼り付け(読み取る形)/ 本文の電話番号 / ショートカットキー。
+     */
+    const editSection = document.createElement('section');
+    editSection.setAttribute('data-pkc-region', 'settings-edit');
+    const editHead = document.createElement('h4');
+    editHead.textContent = '編集';
+    editSection.append(editHead, editDl);
+    configSection.append(editSection);
+    // ⚠ 「貼り付け」は独立した節(#1017 段③-1 以前からの区画名 `settings-paste-source`)。
+    //   読み取る形の dt はその中に在る ── ここでは demote した h4 として置くだけ。
+    configSection.append(this.buildPasteSource());
+    /**
+     * ⌨ **ショートカットキー**(user 指示 2026-08-18)。⚠ 一覧は `KEY_COMMANDS` から出す
      * (PKC2 はここを手書きにしてズレた)。
      */
     this.keymapPanel?.dispose();
     this.keymapPanel = buildKeymapPanel();
-    body.append(this.keymapPanel.root);
-    body.append(this.buildOpenedHistory());
-    body.append(this.buildExternalImages());
-    body.append(this.buildPasteSource());
-    body.append(this.buildSameOrigin());
-    body.append(this.buildExtensions());
+    configSection.append(this.keymapPanel.root);
+
+    /** 🔑 **h4「通知」**(2026-09-21、#1017 段③-1)── 予定の知らせ / 音を聞きやすくする。 */
+    const notifySection = document.createElement('section');
+    notifySection.setAttribute('data-pkc-region', 'settings-notify');
+    const notifyHead = document.createElement('h4');
+    notifyHead.textContent = '通知';
+    notifySection.append(notifyHead, notifyDl);
+    configSection.append(notifySection);
+
+    /** 🔑 **h4「開き方」**(2026-09-21、#1017 段③-1)── 書庫(zip)を開く場所 / アプリの開き方。 */
+    const openSection = document.createElement('section');
+    openSection.setAttribute('data-pkc-region', 'settings-open-ways');
+    const openHead = document.createElement('h4');
+    openHead.textContent = '開き方';
+    openSection.append(openHead, openDl);
+    configSection.append(openSection);
+
+    // 🔑 **h4「設定の持ち出し」**(既に h4 で描かれている ── そのまま置く)。
+    configSection.append(buildSettingsFile());
+    body.append(configSection);
+
     /**
-     * 🔴 **Office 一式**(#88 / O6-a)。⚠ 「表示」の節に混ぜない ── 見た目の
-     * 好みではなく、**この端末に 77MB を置くかどうか**という別の判断である。
-     * ⚠ 器は 1 度だけ組む。状態の変化は panel 自身が購読して字だけ差し替える。
+     * 🔴 **「許可」**(#1017 段③-1)── この端末で許した事実(system 領域、user 向け)。
+     * ⚠ 「取り消す」の入口 3 つを 1 つの h3 の下に揃える(`ui-total-design-2026-09.md` §3.2)。
+     */
+    const permSection = document.createElement('section');
+    permSection.setAttribute('data-pkc-region', 'settings-permissions');
+    const permHead = document.createElement('h3');
+    permHead.textContent = '許可';
+    permSection.append(permHead);
+    permSection.append(this.buildExternalImages());
+    permSection.append(this.buildSameOrigin());
+    permSection.append(this.buildExtensions());
+    body.append(permSection);
+
+    /**
+     * 🔴 **「記録」**(#1017 段③-1)── この端末の行動の事実(system 領域、user 向け)。
+     */
+    const historySection = document.createElement('section');
+    historySection.setAttribute('data-pkc-region', 'settings-history');
+    const historyHead = document.createElement('h3');
+    historyHead.textContent = '記録';
+    historySection.append(historyHead);
+    historySection.append(this.buildOpenedHistory());
+    historySection.append(this.buildCopyHistory());
+    historySection.append(this.buildTooNarrowSection(tooNarrowDl));
+    body.append(historySection);
+
+    /**
+     * 🔴 **「保存領域」**(#1017 段③-1)── この端末の入れ物の状態(system 領域、user 向け)。
+     * ⚠ 並びは設計 doc §3.2 のとおり:このアプリのデータ / 何が容量を使っているか /
+     *   使っていない添付 / 中身が壊れていないか調べる / Office 表示。
+     */
+    const storageSection = document.createElement('section');
+    storageSection.setAttribute('data-pkc-region', 'settings-storage');
+    const storageHead = document.createElement('h3');
+    storageHead.textContent = '保存領域';
+    storageSection.append(storageHead);
+    storageSection.append(this.buildPersistSection(persistDl));
+    storageSection.append(buildSettingsCommands());
+    /**
+     * 🔴 **Office 一式**(#88 / O6-a)── **この端末に 77MB を置くかどうか**という
+     * 保存領域の判断。⚠ 器は 1 度だけ組む。状態の変化は panel 自身が購読して字だけ差し替える。
      */
     this.officePack = buildOfficePackPanel();
-    body.append(this.officePack.root);
+    storageSection.append(this.officePack.root);
+    body.append(storageSection);
+
+    /**
+     * 🔴 **「お知らせ」**(#1017 段③-1)── 開発側からの配信の一覧の入口。
+     * ⚠ ヘルプにも 1 行のリンクを残す(裁定 2026-09-20「困っている人の動線」)。
+     */
+    const noticeSection = document.createElement('section');
+    noticeSection.setAttribute('data-pkc-region', 'settings-notices-section');
+    const noticeHead = document.createElement('h3');
+    noticeHead.textContent = 'お知らせ';
+    noticeSection.append(noticeHead);
+    noticeSection.append(this.buildNoticeSection(noticeDl));
+    body.append(noticeSection);
+
     /**
      * 🔴 **先頭に目次を置く**(#1017 段⓪。user 裁定 2026-09-20「当面の実装は、
      * システムの中に目次を付けて節の間を移動しやすくするところまで」)。
@@ -775,6 +891,7 @@ export class SettingsRenderer {
     this.syncPasteSource();
     this.syncNotices();
     this.syncTooNarrow();
+    this.syncCopyHistory();
   }
 
   /**
@@ -869,7 +986,7 @@ export class SettingsRenderer {
   private buildOpenedHistory(): HTMLElement {
     const wrap = document.createElement('section');
     wrap.setAttribute('data-pkc-region', 'settings-opened');
-    const h = document.createElement('h3');
+    const h = document.createElement('h4');
     h.textContent = '最近開いたノートの記録';
     const note = document.createElement('p');
     note.setAttribute('data-pkc-field', 'settings-note');
@@ -885,10 +1002,96 @@ export class SettingsRenderer {
     return wrap;
   }
 
+  /** いま持っている件数の字。⚠ 器は 1 度だけ組む(器は 1 度しか組まないので、映さないと古い値が見える)。 */
+  private copyHistoryCount: HTMLElement | null = null;
+
+  /**
+   * 🔴 **コピーの履歴**(#1017 段③-1。新設)── 「記録」の h4。
+   *
+   * ⚠ **消す口は既にメニュー(`copyHistoryMenu`)に在る**(`clear-copy-history`)──
+   *   ここは**同じ action** をもう 1 か所から呼べるようにするだけで、
+   *   新しい判断は 1 つも持たない(§7「同じ問いに答える口が 2 つ」を避ける ──
+   *   判定はどちらも `appCopyHistory.clear()` の 1 本)。
+   * ⚠ **一覧そのものは出さない** ── コピーの中身はその場のメニューで貼るものであって、
+   *   設定画面で読み返す物ではない(founding「必要十分」)。
+   */
+  private buildCopyHistory(): HTMLElement {
+    const wrap = document.createElement('section');
+    wrap.setAttribute('data-pkc-region', 'settings-copy-history');
+    const h = document.createElement('h4');
+    h.textContent = 'コピーの履歴';
+    wrap.append(h);
+
+    const count = document.createElement('p');
+    count.setAttribute('data-pkc-field', 'copy-history-count');
+    this.copyHistoryCount = count;
+    wrap.append(count);
+
+    const note = document.createElement('p');
+    note.setAttribute('data-pkc-field', 'settings-note');
+    note.textContent =
+      'PKC の中でコピーすると、この端末に 20 件まで残ります。貼るときは、貼り先を右クリックして選び直せます。' +
+      'この端末にだけ残り、書き出しにも、ほかの端末にも持っていきません。';
+    wrap.append(note);
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.setAttribute('data-pkc-action', 'clear-copy-history');
+    btn.textContent = 'コピーの履歴を消す';
+    wrap.append(btn);
+    return wrap;
+  }
+
+  /** ⚠ 件数は他の面(貼り付けの右クリック)でも増減するので、毎 state で映す。 */
+  private syncCopyHistory(): void {
+    if (!this.copyHistoryCount) return;
+    const n = appCopyHistory.items().length;
+    this.copyHistoryCount.textContent = n > 0 ? `いま ${n} 件あります。` : 'いまは 0 件です。';
+  }
+
+  /**
+   * 🔴 **狭い画面の断り書き**(#1017 段③-1。「表示」から移した dl をそのまま使う)。
+   * ⚠ **判断は 1 つも増やさない** ── 中身(dt/dd)は `render()` が組んだものを渡すだけ。
+   */
+  private buildTooNarrowSection(dl: HTMLElement): HTMLElement {
+    const wrap = document.createElement('section');
+    wrap.setAttribute('data-pkc-region', 'settings-too-narrow');
+    const h = document.createElement('h4');
+    h.textContent = '狭い画面の断り書き';
+    wrap.append(h, dl);
+    return wrap;
+  }
+
+  /**
+   * 🔴 **このアプリのデータ**(#1017 段③-1。「表示」から「保存領域」へ移した)。
+   * ⚠ **判断は 1 つも増やさない** ── 中身(dt/dd)は `render()` が組んだものを渡すだけ。
+   */
+  private buildPersistSection(dl: HTMLElement): HTMLElement {
+    const wrap = document.createElement('section');
+    wrap.setAttribute('data-pkc-region', 'settings-persist');
+    const h = document.createElement('h4');
+    h.textContent = 'このアプリのデータ';
+    wrap.append(h, dl);
+    return wrap;
+  }
+
+  /**
+   * 🔴 **お知らせ**(#1017 段③-1。「表示」から「お知らせ」の h3 へ移した)。
+   * ⚠ **判断は 1 つも増やさない** ── 中身(dt/dd)は `render()` が組んだものを渡すだけ。
+   */
+  private buildNoticeSection(dl: HTMLElement): HTMLElement {
+    const wrap = document.createElement('section');
+    wrap.setAttribute('data-pkc-region', 'settings-notices');
+    const h = document.createElement('h4');
+    h.textContent = 'お知らせ';
+    wrap.append(h, dl);
+    return wrap;
+  }
+
   private buildSameOrigin(): HTMLElement {
     const wrap = document.createElement('section');
     wrap.setAttribute('data-pkc-region', 'settings-same-origin');
-    const h = document.createElement('h3');
+    const h = document.createElement('h4');
     h.textContent = 'ノートを渡して開くことを許したアプリ';
     const note = document.createElement('p');
     note.setAttribute('data-pkc-field', 'settings-note');
@@ -949,7 +1152,7 @@ export class SettingsRenderer {
   private buildExtensions(): HTMLElement {
     const wrap = document.createElement('section');
     wrap.setAttribute('data-pkc-region', 'settings-extensions');
-    const h = document.createElement('h3');
+    const h = document.createElement('h4');
     h.textContent = '目次を見せているアプリ';
     const note = document.createElement('p');
     note.setAttribute('data-pkc-field', 'settings-note');
@@ -1080,7 +1283,7 @@ export class SettingsRenderer {
   private buildExternalImages(): HTMLElement {
     const wrap = document.createElement('section');
     wrap.setAttribute('data-pkc-region', 'settings-external-images');
-    const h = document.createElement('h3');
+    const h = document.createElement('h4');
     h.textContent = '外部の画像';
     wrap.append(h);
 
@@ -1124,7 +1327,7 @@ export class SettingsRenderer {
   private buildPasteSource(): HTMLElement {
     const wrap = document.createElement('section');
     wrap.setAttribute('data-pkc-region', 'settings-paste-source');
-    const h = document.createElement('h3');
+    const h = document.createElement('h4');
     h.textContent = '貼り付け';
     wrap.append(h);
 

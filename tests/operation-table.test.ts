@@ -229,7 +229,13 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'stack-save',
   'start-audio-capture', 'start-edit', 'start-screen-capture', 'start-tile-reorder',
   'start-timer', 'stop-capture', 'storage-profile', 'swap-open', 'table-to-csv',
-  'table-to-markdown', 'toggle-all-app-groups', 'toggle-app-tile', 'toggle-create-menu',
+  'table-to-markdown', 'toggle-all-app-groups', 'toggle-app-tile',
+  /**
+   * ⚠ **2026-09-21(#1017 段③-1)** ── 「作り直す・初期化する を出す」の開閉。
+   * 🔑 `toggle-plan-apply` と同じ仕分け(N・押した所から何も要らない。開くか
+   *   閉じるかは `container-repair-box` の `hidden` だけで決まる)。
+   */
+  'toggle-container-repair', 'toggle-create-menu',
   'toggle-kind-filter', 'toggle-pane',
   /**
    * ⚠ **2026-09-21(#1017 段④b)** ── 貼り付け欄の開閉(「整理案を適用」)。
@@ -441,12 +447,15 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-09-21(#1017 段④b): 専用の取り出しボタン 2 つ(`db-rescue-archive` /
       //   `db-rescue`)を退役させて受け手 −2、貼り付け欄の開閉(`toggle-plan-apply`)で
       //   受け手 +1 ── net で受け手 −1(登記は動かない ── 3 つとも登記の外)。
-      total: 322,
-      receivers: 270,
+      // ⚠ 2026-09-21(#1017 段③-1): 「作り直す・初期化する を出す」の開閉
+      //   (`toggle-container-repair`)で受け手 +1 ── 登記は増えない(押し所は
+      //   設定の中の 1 つだけ。`toggle-plan-apply` と同じ仕分け)。
+      total: 323,
+      receivers: 271,
       registered: 88,
       both: 36,
       outsideActionsTable: 52,
-      unregistered: 234,
+      unregistered: 235,
     });
   });
 

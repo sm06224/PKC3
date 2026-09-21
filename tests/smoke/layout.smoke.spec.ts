@@ -595,7 +595,8 @@ test('🔴 主要な導線が畳まれず、その場で押せる', async ({ pag
    * そちらの分まで拾って「消えていない」と誤検知する(CLAUDE.md §1「面へ
    * スコープする」)。
    */
-  const settingsRegion = page.locator('[data-pkc-region="settings-commands"]');
+  // 🔴 **2026-09-21(#1017 段③-1)に「保存領域」へ改名した**(旧「書き出しと片づけ」)。
+  const settingsRegion = page.locator('[data-pkc-region="settings-storage"]');
   for (const action of ['export-html', 'export-portable', 'export-markdown', 'export-structure']) {
     await expect(
       settingsRegion.locator(`[data-pkc-action="${action}"]`),
@@ -1489,10 +1490,10 @@ test('🔴 何も選んでいない中央に案内が出る(白紙にしない)'
  * **読むだけの計器区画**は無くなった(`buildJobs()` ごと削除)。
  * ⚠ 以前のこの test は「計器の区画には操作できる物が無い」ことを見ていたが、
  *   その区画自体が無い以上、主張を裏返す ── **区画が無いこと**と、
- *   代わりの入口である「メッセージ」・修復の並ぶ「書き出しと片づけ」には
+ *   代わりの入口である「メッセージ」・修復の並ぶ「保存領域」には
  *   **実際に押せる物がある**(ここも読むだけの区画に化けていないこと)を見る。
  */
-test('🔴 「処理(ワーカー)」の計器区画は無く、メッセージ / 書き出しと片づけには押せる物がある', async ({
+test('🔴 「処理(ワーカー)」の計器区画は無く、メッセージ / 保存領域には押せる物がある', async ({
   page,
 }) => {
   const errors = collectPageErrors(page);
@@ -1516,12 +1517,17 @@ test('🔴 「処理(ワーカー)」の計器区画は無く、メッセージ 
     'メッセージの節に押せる物が無い(読むだけの計器のまま残っている)',
   ).toBeGreaterThan(0);
 
-  // ④ 🔴 「書き出しと片づけ」(壊れの修復・持ち出し等)にも押せる物がある
-  const repair = page.locator('[data-pkc-region="settings-commands"]');
+  /**
+   * ④ 🔴 「保存領域」(壊れの修復・容量など)にも押せる物がある。
+   * ⚠ **2026-09-21(#1017 段③-1)に「書き出しと片づけ」の h3 を廃止した** ──
+   *   `buildSettingsCommands()` はいま「保存領域」の中の h4 断片を返すだけで、
+   *   自身の region を持たない(`docs/development/ui-total-design-2026-09.md` §3.2)。
+   */
+  const repair = page.locator('[data-pkc-region="settings-storage"]');
   await expect(repair).toBeVisible();
   expect(
     await repair.locator('select, input, [data-pkc-action]').count(),
-    '書き出しと片づけの節に押せる物が無い',
+    '保存領域の節に押せる物が無い',
   ).toBeGreaterThan(0);
 
   expect(errors).toEqual([]);

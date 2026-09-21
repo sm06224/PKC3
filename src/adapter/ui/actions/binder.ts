@@ -3954,6 +3954,19 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (!box.hidden) root.querySelector<HTMLTextAreaElement>('[data-pkc-field="plan-input"]')?.focus();
   },
   /**
+   * 🔴 **「作り直す・初期化する を出す」の開閉**(#1017 段③-1。`toggle-plan-apply` /
+   * `toggle-replace` と同じ作法 ── `<details>` は使わない)。
+   * ⚠ **開いても focus は動かさない** ── 中は「読んでから押す」ボタン 2 つで、
+   *   入力欄が無い(`toggle-plan-apply` と違い、押し込む先が無い)。
+   */
+  'toggle-container-repair': (_dispatcher, target) => {
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    const box = root.querySelector<HTMLElement>('[data-pkc-field="container-repair-box"]');
+    if (!box) return;
+    box.hidden = !box.hidden;
+    target.setAttribute('aria-expanded', box.hidden ? 'false' : 'true');
+  },
+  /**
    * 🔴 **全部置換**(#191)。⚠ 判定(編集中か / 何件当たるか)は**reducer 1 か所**。
    * ここでは欄の値を渡すだけ ── binder が「0 件なら押さない」等を持つと二重帳簿になる。
    */
@@ -7115,6 +7128,22 @@ const ACTIONS: Record<string, ActionHandler> = {
           list.append(li);
         }
         list.hidden = lines.length === 0;
+        /**
+         * 🔴 **問題が出たときは、作り直す・初期化する の箱を開いた状態で出す**
+         * (#1017 段③-1、`ui-total-design-2026-09.md` §3.2)。⚠ 結果の表示
+         * (`sum` / `list`)と**同じ経路**で `hidden` を外す ── 押し口を
+         * 別に探させない。
+         */
+        if (!report.ok) {
+          const repairBox = root.querySelector<HTMLElement>(
+            '[data-pkc-field="container-repair-box"]',
+          );
+          const repairToggle = root.querySelector<HTMLElement>(
+            '[data-pkc-action="toggle-container-repair"]',
+          );
+          if (repairBox) repairBox.hidden = false;
+          repairToggle?.setAttribute('aria-expanded', 'true');
+        }
       },
       (e: unknown) => {
         sum.textContent = '';

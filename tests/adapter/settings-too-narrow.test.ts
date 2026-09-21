@@ -58,17 +58,20 @@ beforeEach(() => {
 });
 
 describe('設定画面に在る', () => {
-  it('🔴 checkbox が「表示」の節に在り、既定は入', () => {
+  it('🔴 checkbox が「記録」の節に在り、既定は入', () => {
     const { host, box } = setup();
     expect(box, '設定に戻し道が無い').not.toBeNull();
     expect(box!.type).toBe('checkbox');
     expect(box!.getAttribute('data-pkc-action'), '押しても受け手に届かない').toBe(
       'set-too-narrow-enabled',
     );
-    // ⚠ お知らせの隣(同じ「表示」の節)── 別の節に置くと、戻し道を探す場所が増える
+    /**
+     * 🔴 **2026-09-21(#1017 段③-1)に「表示」から「システム → 記録」へ移した**
+     * (`ui-total-design-2026-09.md` §3.2「記録 = この端末の行動の事実」)。
+     */
     expect(
-      host.querySelector('[data-pkc-region="settings-user"] [data-pkc-field="too-narrow-enabled"]'),
-      '「表示」の節に無い',
+      host.querySelector('[data-pkc-region="settings-history"] [data-pkc-field="too-narrow-enabled"]'),
+      '「記録」の節に無い',
     ).not.toBeNull();
     expect(box!.checked, '既定が「出す」になっていない').toBe(true);
   });

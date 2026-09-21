@@ -39,12 +39,12 @@ test('🔴 「システム」の目次: お知らせが読め、押すと移動�
     timeout: 10_000,
   });
   const announceItemTitle = announceBody.locator('section[data-pkc-announce] h3').first();
-  // ⚠ **新しい順**(設計 doc §7、段②b のワーカー可視化の移行が、段②a のメッセージ機能・
-  //   段⓪の改名より新しい)。
+  // ⚠ **新しい順**(#1017 段③-1「システム」を型ごとの 6 節へ、が
+  //   NOTICES の先頭 ── 2026-09-21 の他の 3 件・段②b のワーカー可視化より新しい)。
   expect(
     (await announceItemTitle.textContent()) ?? '',
     'お知らせの題名が最新のものになっていない',
-  ).toContain('ワーカーの動きが「処理の記録」に溜まるようになりました');
+  ).toContain('「システム」の画面が、型ごとの 6 節に組み替わりました');
   await dismissAnnounce(page);
 
   // 「システム」を開く
@@ -78,6 +78,14 @@ test('🔴 「システム」の目次: お知らせが読め、押すと移動�
   );
   expect(headingLabels, '目次と見出しの数が一致しない').toHaveLength(tocLabels.length);
   expect(tocLabels, '目次の字が、その順の見出しと一致しない').toEqual(headingLabels);
+
+  // ②-2 🔴 6 節の型ごとの見出しが、この順で並んでいる(#1017 段③-1)。
+  //    ⚠ 新しい起動は足さない(CLAUDE.md smoke-budget)── ②で取得済みの
+  //    `headingLabels` をそのまま検める
+  expect(
+    headingLabels,
+    '「システム」が型ごとの 6 節へ組み替わっていない',
+  ).toEqual(['メッセージ', '設定', '許可', '記録', '保存領域', 'お知らせ']);
 
   // ③ 🔴 目次の**最後**を押すと、その見出しが画面の上のほうへ送られる
   const scroller = page.locator('[data-pkc-region="detail"]');
