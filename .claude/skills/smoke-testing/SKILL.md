@@ -16,7 +16,7 @@ npm run smoke:pick
 # 🟢 引く先が分かっているなら直に ── **触った spec だけ**(4〜20 秒)
 npm run test:smoke -- tests/smoke/<触った>.smoke.spec.ts
 
-# 🔴 全量(95 spec / 499 test ── 実数は tests/repo-hygiene.test.ts が pin)。
+# 🔴 全量(2026-09-21 現在 101 spec ── この数だけが tests/repo-hygiene.test.ts で pin されている)。
 #    **着地の直前に 1 回だけ**。2026-09-09 実測: 手元 headless_shell・`workers: 4` で
 #    約 7 分(`workers: 1` だった頃は 13.2 分)
 npm run test:smoke
@@ -297,6 +297,43 @@ happy-dom に**無い**もの(= その経路を unit は 1 度も実行しない
 
 🔑 **user に約束した文(マニュアル・お知らせ)を、この表に照らす。**
 「取り消せます」「順番どおり入ります」は unit では書けない ── そこが smoke の出番である。
+
+### 🔴 もう 1 つ ── **unit の click は「その場所が実在するか」を確かめない**(2026-09-21、#1032)
+
+⚠ 上の表は「happy-dom に **無い API**」を数えているが、**器そのものの大きさ**という
+次元が抜けていた。unit は `el.dispatchEvent(new MouseEvent('click'))` を
+**要素へ直に撃てる**ので、⚠ **実ブラウザではそこに 1px も無い器でも緑になる**。
+
+実例:「**一覧の何も無い所を押したら、開いているノートを閉じる**」を足し、
+判定を行を持つ 3 つの表(`filer-table` / `dual-table` / `entry-list`)へ掛けた。
+unit は 7 件緑、変異試験も 4 件 KILLED。🔴 **実ブラウザでは、ほぼ効かなかった**:
+
+| 実測(1280px・ノート 1 件) | |
+|---|---|
+| `filer-table` の高さ | **53px**(見出し + 1 行) |
+| その下(= 表の外。帯と余白) | **126px** |
+
+⚠ つまり user が「何も無い所」と思って押す場所は**ほとんど表の外**で、
+`elementFromPoint` で辿ると `filer-move` の帯や `browse-host` に当たっていた。
+🔑 直したのは test ではなく**器**である ── 判定を**左の列そのもの**
+(`browse-host`)へ移した(押し所の上では何もしないので、帯やタブは素通りする)。
+
+🔑 **だから「場所を押す」検査には、押す前に前提を assert する**:
+
+```ts
+// ⚠ 「何も無い所」を押すつもりなら、そこが本当に何も無いことを**その場で**確かめる
+const under = await page.evaluate(([x, y]) => {
+  const el = document.elementFromPoint(x as number, y as number);
+  return el?.closest('[data-pkc-action]') === null ? 'blank' : 'action';
+}, [x, y]);
+expect(under, '押そうとした所に押し所が在る(前提が崩れている)').toBe('blank');
+```
+
+⚠ これが無いと、落ちたときに「**戻らない**」としか出ない ── 本当の理由
+(「押し所を押していた」)が読めず、実装ではなく test を疑って 1 回転する。
+🔑 検算は 1 つ:**「座標で押す」「余白を押す」と書いたら、その器の高さを 1 度測る**
+(`boundingBox()` は 1 行である)。⚠ 表・リスト・カードは**中身の高さしか無い**ので、
+「見えている空白」は**たいてい別の器**である。
 
 ### 🔴 **両端をまたぐ配線**は、unit が両側とも緑でも繋がっていないことがある
 
