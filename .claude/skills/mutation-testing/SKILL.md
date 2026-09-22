@@ -361,6 +361,45 @@ revisionLids: async () => { if (!entryResolved) parallel = true; return [...]; }
 | **無いこと**(`not.toContain` / `toBe(0)`) | 🔑 **足す**(⚠ 消す変異は当たらない) |
 | **等値**(`toBe` / `toEqual`) | どちらでもよい |
 
+### 3.14. 🔴 `SURVIVED` の 10 個目の顔: **門が「その file に字が在るか」を見ていて、字は別の所にも在った**(2026-09-21、#1032)
+
+⚠ 3.13 は*変異の向き*の話だが、こちらは**門の見ている場所**である ──
+`readFileSync` で source を読み、**その名前が file のどこかに在るか**で守ったつもりになる形。
+
+実例:「左の列の 3 つの器(`filer-table` / `dual-table` / `entry-list`)を
+**1 つ残らず**判定に入れる」を守る門を、こう書いた:
+
+```ts
+const src = readFileSync('src/adapter/ui/actions/binder.ts', 'utf-8');
+for (const region of ['filer-table', 'dual-table', 'entry-list']) {
+  expect(src.includes(`[data-pkc-region="${region}"]`)).toBe(true);  // 🔴 弱い
+}
+```
+
+🔴 **判定から `entry-list` を落としても緑**だった ── その字は
+**同じ file の別の所**(行を掴む判定・焦点の行を引く所・D&D)にも在るからである。
+⚠ 変異試験で **SURVIVED** が出て初めて分かった(CLAUDE.md §1「範囲が広すぎて
+無関係な所に満たされる」の、**同一 file 版**)。
+
+🔑 **直しは「assert を足す」ではなく、正本を 1 つ作ること**:
+
+```ts
+// 製品側 ── 字を 1 か所へ置き、読む所は全部ここから引く(§7)
+export const ROW_HOST_REGIONS: readonly string[] = ['filer-table', 'dual-table', 'entry-list'];
+export const ROW_HOST_SELECTOR = ROW_HOST_REGIONS.map((r) => `[data-pkc-region="${r}"]`).join(', ');
+
+// test ── **配列そのもの**を等値で pin する(file の字面を探さない)
+expect([...ROW_HOST_REGIONS]).toEqual(['filer-table', 'dual-table', 'entry-list']);
+```
+
+同じ変異(配列から 1 つ落とす)は **1 発で KILLED** になった。
+
+⚠ そして**寄せる先を間違えない** ── この件では「行を掴む判定」と「余白を押したら
+閉じる判定」が**同じ 3 つを名指し**していたので 1 か所へ寄せられたが、
+🔴 後から実測で**押す側の器は別物**(`browse-host`)だと分かった。
+🔑 **同じ字だからといって同じ物とは限らない** ── 寄せる前に「この 2 か所は
+**同じ問いに答えているか**」を 1 行で言えるか確かめる(言えないなら 2 つの定数にする)。
+
 ## 🔴 「**N 回目も効くか**」を当てる ── 1 回だけ効いて固まる形(2026-09-04、#689)
 
 ⚠ 台が **1 回しか呼ばない**購読・ハンドラでは、「**初回だけ動いて以後は固まる**」
