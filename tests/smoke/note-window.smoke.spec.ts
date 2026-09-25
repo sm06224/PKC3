@@ -174,11 +174,17 @@ test('🔴 別の窓で開くと、その窓がそのノートを開いて立ち
    * 「付箋のウィンドウも Escape で閉じます」)。
    * ⚠ **新しく窓を起こさない** ── ここまでで既に立ち上がっている `win` で確かめる
    * (このファイルの主目的である「立ち上がりの繋がり」を測る回に相乗りする)。
-   * ⚠ 追記欄に焦点が入ったまま(#690 I4)だと**打っている欄**の門に止められるので、
-   *   焦点を外す(クリック位置に依存させない ── 座標で当てると器の並びが変わった日に
-   *   別の入力欄を押してしまう)。
+   * 🔴 **`blur()` はしない**(#1042 段②)。付箋は追記欄に焦点が入ったまま開く
+   * (`main.ts` の `enterNoteWindow` → `focusInputOnceReady`)ので、
+   * **開いた直後にそのまま押す 1 回目の Escape**が本当に効くかを見る ──
+   * ここで焦点を外して確かめると、「打っている欄では何も打っていなくても
+   * Escape が無反応」という直す前の症状を smoke が永久に見逃す。
    */
-  await win.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await expect(
+    win.locator('[data-pkc-field="append-input"]'),
+    '前提が崩れた(焦点が追記欄に無い)',
+  ).toBeFocused();
+  await expect(win.locator('[data-pkc-field="append-input"]')).toHaveValue('');
   await win.keyboard.press('Escape');
   await win.waitForEvent('close', { timeout: 5_000 });
   expect(win.isClosed(), '付箋のウィンドウが Escape で閉じていない').toBe(true);
