@@ -443,15 +443,15 @@ export class LauncherRenderer {
     row.setAttribute('data-pkc-field', 'tile-row');
     row.append(btn);
     /**
-     * ⚠ 字は**右クリックのメニューと同じ**にする(「上へ」「下へ」)── 同じことを
-     *   する 2 つの口で呼び名を変えると、user は別の操作だと思う。
+     * ⚠ 字は**右クリックのメニューと同じ**にする(「上へ動かす」「下へ動かす」)──
+     *   同じことをする 2 つの口で呼び名を変えると、user は別の操作だと思う。
      * ⚠ **図案だけのボタンにしない**(`icons.ts` の戒め)── 意味は字が持つ。
      * 🔑 身元(`data-pkc-tile`)は**このボタン自身**に写す ── 受け手(`moveTile`)は
      *   押された物からしか辿らない(右クリックのメニューと同じ作法)。
      */
     for (const [action, label, hint] of [
-      ['move-tile-up', '上へ', '1 つ上へ動かします'],
-      ['move-tile-down', '下へ', '1 つ下へ動かします'],
+      ['move-tile-up', '上へ動かす', '1 つ上へ動かします'],
+      ['move-tile-down', '下へ動かす', '1 つ下へ動かします'],
     ] as const) {
       const b = document.createElement('button');
       b.type = 'button';

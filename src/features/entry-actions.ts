@@ -365,8 +365,8 @@ export const BODY_MENU_ACTIONS: readonly EntryAction[] = [
  *   仕組みで、タイルはノートの種類では分かれない)。
  */
 export const TILE_MENU_ACTIONS: readonly EntryAction[] = [
-  { action: 'move-tile-up', label: '上へ' },
-  { action: 'move-tile-down', label: '下へ' },
+  { action: 'move-tile-up', label: '上へ動かす' },
+  { action: 'move-tile-down', label: '下へ動かす' },
 ];
 
 /**
@@ -385,7 +385,7 @@ export const TILE_OPEN_TARGET_ATTR = 'data-pkc-open-target';
 
 const TILE_OPEN_TARGET_VERB: Readonly<Record<AppOpenTarget, string>> = {
   tab: 'ブラウザのタブで開く',
-  window: '別の窓で開く',
+  window: '別のウィンドウで開く',
 };
 
 export function tileOpenTargetMenuActions(
@@ -475,7 +475,7 @@ export const REPEAT_ATTR = 'data-pkc-repeat';
 
 export const TASK_REPEAT_MENU_ACTION: EntryAction & { readonly hint: string } = {
   action: 'open-repeat-menu',
-  label: '繰り返す…',
+  label: '予定を繰り返す…',
   hint: 'この行を毎日・毎週・毎月・毎年にします(やめることもできます)',
 };
 
@@ -507,7 +507,7 @@ export function repeatMenuActions(current: RepeatUnit | null): RepeatMenuItem[] 
   if (current !== null)
     out.push({
       action: 'set-task-repeat',
-      label: 'やめる',
+      label: 'この繰り返しをやめる',
       hint: 'くり返しをやめます(日付は残ります。ノートも本文も消えません)',
       attrs: { [REPEAT_ATTR]: '' },
     });
@@ -543,7 +543,7 @@ export function tileMenuActions(reordering: boolean, currentOpenTarget: AppOpenT
     ...TILE_MENU_ACTIONS,
     reordering
       ? { action: 'end-tile-reorder', label: '並べ替えを終える' }
-      : { action: 'start-tile-reorder', label: '並べ替える' },
+      : { action: 'start-tile-reorder', label: 'タイルを並べ替える' },
   ];
 }
 

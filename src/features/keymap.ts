@@ -527,7 +527,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    */
   {
     id: 'open-copy-history',
-    label: 'コピーした物',
+    label: 'コピーした物を開く',
     contexts: ['global'],
     defaults: ['Mod+Shift+V'],
     note: 'この端末で前にコピーした物を出します。押すともう一度コピーされるので、そのまま貼れます',

@@ -4230,7 +4230,7 @@ const ACTIONS: Record<string, ActionHandler> = {
            */
           {
             action: 'open-copy-history',
-            label: 'コピーした物',
+            label: 'コピーした物を開く',
             hint: 'この端末で前にコピーした物を出します(押すともう一度コピーされます)',
           },
           /**

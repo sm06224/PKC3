@@ -3436,7 +3436,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           root,
           `グループの並び順は、グループごとのノートに憶えます。順番は全部のグループの位置がそろって決まるので、` +
             `まだノートの無い ${String(names.length)} つにも 1 枚ずつできます(${listed}${rest})。`,
-          { okLabel: '並べ替える', cancelLabel: 'やめる' },
+          { okLabel: 'タイルを並べ替える', cancelLabel: 'やめる' },
         )) === 'ok'
       );
     },

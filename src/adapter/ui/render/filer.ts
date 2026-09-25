@@ -505,8 +505,8 @@ export class FilerRenderer {
       const nudge = document.createElement('div');
       nudge.setAttribute('data-pkc-field', 'order-nudge');
       for (const [dir, text] of [
-        ['up', '上へ'],
-        ['down', '下へ'],
+        ['up', '上へ動かす'],
+        ['down', '下へ動かす'],
       ] as const) {
         // 図案は `ACTION_ICONS['move-order-…']` が持つ(表は 1 つ)
         const b = iconButton(`move-order-${dir}`, text);

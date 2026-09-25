@@ -111,7 +111,7 @@ describe('その 1 回だけの開き方(#884 段②)', () => {
     expect(win!.textContent, '既定でないほうにまで印が付いている').not.toContain('(既定)');
     // ⚠ 動詞で書く(設定画面の札をそのまま出さない)── 押すと何が起きるかで読める
     expect(tab!.textContent).toContain('ブラウザのタブで開く');
-    expect(win!.textContent).toContain('別の窓で開く');
+    expect(win!.textContent).toContain('別のウィンドウで開く');
   });
 
   it('🔴 ①b 「別の窓」を設定にしていれば、印はそちらへ移る(対照群)', () => {
