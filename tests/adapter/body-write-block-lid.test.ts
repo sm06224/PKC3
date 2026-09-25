@@ -76,10 +76,10 @@ describe('bodyWriteBlockReason(C6 / #1043) ── lid で判定する', () => {
     expect(bodyWriteBlockReason(editing(s0, 'n1'), 'n2')).toBeNull();
   });
 
-  it('error phase → lid に関わらず断る(出口は「再保存」だけ)', () => {
+  it('error phase → lid に関わらず断る(出口は「ノートを保存し直す」だけ)', () => {
     const s: AppState = { ...s0, phase: 'error' };
-    expect(bodyWriteBlockReason(s, 'n1')).toContain('再保存');
-    expect(bodyWriteBlockReason(s, 'n2')).toContain('再保存');
+    expect(bodyWriteBlockReason(s, 'n1')).toContain('ノートを保存し直す');
+    expect(bodyWriteBlockReason(s, 'n2')).toContain('ノートを保存し直す');
   });
 
   it('initializing → lid に関わらず断る', () => {
@@ -181,11 +181,11 @@ describe('reducer の 9 case(TOGGLE_TODO_STATUS は形が違うので下に別�
         expect(r.state.error ?? '').toContain('編集を終了してから');
       });
 
-      it('④ error phase → 書かず、「再保存」の字(lid に関わらず)', () => {
+      it('④ error phase → 書かず、「ノートを保存し直す」の字(lid に関わらず)', () => {
         const s: AppState = { ...booted(metas), phase: 'error' };
         const r = reduce(s, c.action('n2') as never);
         expect(r.events).toEqual([]);
-        expect(r.state.error ?? '').toContain('再保存');
+        expect(r.state.error ?? '').toContain('ノートを保存し直す');
       });
     });
   }
@@ -219,11 +219,11 @@ describe('TOGGLE_TODO_STATUS ── C6 / #1043', () => {
     expect(r.state.error ?? '').toContain('編集を終了してから');
   });
 
-  it('④ error phase → 書かず、「再保存」の字', () => {
+  it('④ error phase → 書かず、「ノートを保存し直す」の字', () => {
     const s: AppState = { ...booted(metas), phase: 'error' };
     const r = reduce(s, { type: 'TOGGLE_TODO_STATUS', lid: 'n1' } as never);
     expect(r.events).toEqual([]);
-    expect(r.state.error ?? '').toContain('再保存');
+    expect(r.state.error ?? '').toContain('ノートを保存し直す');
   });
 });
 
@@ -261,11 +261,11 @@ describe('bodyRewriteGate(板・本文の塊)── C6 / #1043', () => {
     expect(r.state.error ?? '').toContain('編集を終了してから');
   });
 
-  it('④ error phase → 書かず、「再保存」の字', () => {
+  it('④ error phase → 書かず、「ノートを保存し直す」の字', () => {
     const s: AppState = { ...booted(metas), phase: 'error' };
     const r = reduce(s, move('n1') as never);
     expect(r.events).toEqual([]);
-    expect(r.state.error ?? '').toContain('再保存');
+    expect(r.state.error ?? '').toContain('ノートを保存し直す');
   });
 });
 
