@@ -1050,7 +1050,7 @@ export interface BinderServices {
   closeViewWindow?(): CloseViewWindowResult;
   /**
    * 🔴 **付箋(ノートだけの別ウィンドウ)なら、Escape で窓ごと閉じる**
-   * (#1042 followup。裁定:`docs/development/touch-and-unity-design-2026-09.md`
+   * (#1042 followup / 段④。裁定:`docs/development/touch-and-unity-design-2026-09.md`
    * §5 Q3「付箋のウィンドウも Escape で閉じます」)。
    *
    * ⚠ `closeViewWindow` とは**別の軸**である ── あちらは `view=`(予定表・連絡先など)
@@ -1058,10 +1058,19 @@ export interface BinderServices {
    *   (`main.ts` の `heldNoteWindow`。判断はそちらに在る、binder は呼ぶだけ)。
    * ⚠ **省略可** ── 本体のタブでは配線されない(`undefined` のときは今までどおり
    *   `deselect-entry` がそのまま効く)。
-   * @returns 閉じたら `true`(呼び側は `deselect-entry` を撃たない)。付箋でない /
-   *   閉じられなかったときは `false`(今までどおり `deselect-entry` へ進む)
+   * 🔴 **戻り値は `closeViewWindow` と同じ三値**(#1042 段④)。⚠ 直す前は
+   *   `boolean`(`=== 'closed'` へ潰した値)だったので、**`'refused'` と
+   *   `'not-a-window'` が呼び側から見分けられなかった** ── ブラウザが
+   *   `close()` を拒んだ(`'refused'`)ノートの付箋を Escape で押すと、
+   *   窓は開いたままなのに `deselect-entry` へ**黙って**進み、
+   *   `selectedLid` が空になって「開いています」の放送(`heldNoteWindow` は
+   *   立ったまま)と画面が食い違っていた。
+   * @returns `'closed'` = 窓ごと閉じた(呼び側は `deselect-entry` を撃たない)。
+   *   `'refused'` = 付箋だがブラウザが閉じなかった(理由を出し、`deselect-entry`
+   *   は撃たない ── ノートは開いたままにする)。`'not-a-window'` = 付箋でない
+   *   (今までどおり `deselect-entry` へ進む)
    */
-  closeNoteWindow?(): boolean;
+  closeNoteWindow?(): CloseViewWindowResult;
   /**
    * ランチャーのタイルを起動する(P7b 段⑩)。
    * ⚠ blob の貸し出し・`window.open` は実体側 ── binder は DOM を触らない。
@@ -3424,6 +3433,24 @@ export function runGlobalCommand(
     });
     return true;
   }
+  /**
+   * 🔴 **`close-pane` は、閉じる物が無ければ「効いていない」と答える**
+   * (#1042 段③)。
+   *
+   * ⚠ 下の共通経路(`SHORTCUT_BUTTON`)は「ボタンが在って `disabled` でなければ
+   *   handled」で判定するが、この押しボタンは**面が無いときも `hidden` のまま
+   *   DOM に居続ける**(`center.ts`)ので、常に「押せる」と読めてしまう。
+   *   選択なし・面なしの本文で `Escape` を押すと、`close-pane` の実体は
+   *   `SET_VIEW_MODE 'detail'` を**同じ値で撃ち直すだけ**なのに `handled: true`
+   *   を返し、`ke.preventDefault()` だけが起きて**何も変わらないのに Escape が
+   *   呑まれる**(ブラウザの既定を含め、以後の聞き手にも渡らない)。
+   * 🔑 **「面が在る」も「別ウィンドウである」も、`viewMode !== 'detail'` の
+   *   1 つで言える** ── 別ウィンドウは `view=` を持つ間 `viewMode` が必ず
+   *   その面を指すよう `deep-link.ts` の `apply()` / `onViewChange` が同期で
+   *   揃えている(`view=` が外れた瞬間 `viewMode` も `'detail'` に戻る)ので、
+   *   2 つ目の判定を作らずに済む(CLAUDE.md §7)。
+   */
+  if (cmd === 'close-pane' && dispatcher.getState().viewMode === 'detail') return false;
   const sel = SHORTCUT_BUTTON[cmd];
   if (sel === undefined) return false;
   const btn = root.querySelector<HTMLElement>(sel);
@@ -10208,6 +10235,32 @@ export function bindActions(
       if (keymap.match(ke, 'append') === 'append-send') {
         ke.preventDefault();
         run('append-entry', ke.target as HTMLElement);
+        return;
+      }
+      /**
+       * 🔴 **付箋の窓は、追記欄に焦点が乗ったまま開く**(#1042 段②。裁定:
+       * `docs/development/touch-and-unity-design-2026-09.md` §11 Q3)。
+       *
+       * ⚠ `typing` の門(下の `onShortcut`)は `<textarea>` に焦点があると
+       *   `Escape` を丸ごと止めるので、**1 回目の `Escape` が無反応**になっていた
+       *   (開いた直後に閉じようとした user から見て、押しても何も起きない)。
+       * 🔑 **何も打っていないときだけ**ここで拾って窓を閉じる ── 一文字でも
+       *   打っていたら**今までどおり何もしない**(下書きを Escape 1 発で
+       *   消さない。CLAUDE.md §10「置き換えの作法」と同じ向き:入力中の Escape を
+       *   奪うのは、native の `<textarea>` が持たない挙動を足すことになる)。
+       * ⚠ **付箋でない窓では何もしない** ── `services.closeNoteWindow` は
+       *   `heldNoteWindow` を見て判断する(`main.ts`)ので、本体タブでは
+       *   常に `'not-a-window'`/`undefined` を返し、ここは黙って通過する。
+       * ⚠ **`'refused'`(ブラウザが閉じなかった)も黙らない**(#1042 段④)──
+       *   `close-pane` と同じ理由を出す(`CLOSE_VIEW_WINDOW_REFUSED`)。
+       */
+      if (ke.key === 'Escape' && ke.target instanceof HTMLTextAreaElement && ke.target.value === '') {
+        const closed = services.closeNoteWindow?.() ?? 'not-a-window';
+        if (closed !== 'not-a-window') {
+          ke.preventDefault();
+          if (closed === 'refused')
+            dispatcher.dispatch({ type: 'OP_FAILED', error: CLOSE_VIEW_WINDOW_REFUSED });
+        }
       }
       return;
     }
@@ -12623,11 +12676,23 @@ export function bindActions(
          *   閉じずに空の画面だけが残る、という直す前の症状そのもの)。
          * 🔑 判断は `services.closeNoteWindow` に譲る(binder は `heldNoteWindow`
          *   を持たない ── `main.ts` から渡された関数を呼ぶだけ)。**このウィンドウが
-         *   自分で開いた付箋のときだけ** `true` を返し、窓を閉じる。
-         *   ふつうの本体タブでは `undefined`(呼ばれない = 今までどおり)。
+         *   自分で開いた付箋のときだけ** `'closed'` / `'refused'` を返し、
+         *   ふつうの本体タブでは `'not-a-window'`/`undefined`(呼ばれない=
+         *   今までどおり `deselect-entry` へ進む)。
+         * 🔴 **`'refused'`(ブラウザが閉じなかった)でも `deselect-entry` へは
+         *   進まない**(#1042 段④)。⚠ 直す前は `=== true`(`'closed'` だけを
+         *   拾う boolean)で判定していたので、`'refused'` は `false` 側に
+         *   潰れて**黙って** `deselect-entry` に流れていた ── 窓は開いたままなのに
+         *   `selectedLid` が空になり、「このノートは開いています」の放送
+         *   (`heldNoteWindow` が真の間続く)と画面が食い違う(上の docstring が
+         *   名指しで戒めている、まさにその症状)。
+         * 🔑 `close-pane` と同じ理由を出す(`CLOSE_VIEW_WINDOW_REFUSED`)。
          */
-        if (rcmd === 'deselect-entry' && services.closeNoteWindow?.() === true) {
+        const closed = services.closeNoteWindow?.() ?? 'not-a-window';
+        if (rcmd === 'deselect-entry' && closed !== 'not-a-window') {
           ke.preventDefault();
+          if (closed === 'refused')
+            dispatcher.dispatch({ type: 'OP_FAILED', error: CLOSE_VIEW_WINDOW_REFUSED });
           return true;
         }
         return runGlobalCommand(rcmd, root, dispatcher, keymap, () => ke.preventDefault(), tellUser);

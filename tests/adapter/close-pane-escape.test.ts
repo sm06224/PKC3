@@ -24,9 +24,13 @@
  *    `hidden` なボタンでも「押せた」ことになるので、先に試すとノートが開いていても
  *    `deselect-entry` に出番が来ない ── #1042 C3)
  * 6. 🔴 **付箋のウィンドウでは、`deselect-entry` を撃たずに窓を閉じる**
- *    (#1042 followup 指摘 A)。`services.closeNoteWindow` が `true` を返したら、
- *    `selectedLid` は触らずに終える(#685 の 2 枚目防止を壊さない)
+ *    (#1042 followup 指摘 A)。`services.closeNoteWindow` が `'closed'` を
+ *    返したら、`selectedLid` は触らずに終える(#685 の 2 枚目防止を壊さない)
  * 7. 打っている欄では効かせない
+ * 8. 🔴 **付箋だがブラウザが閉じなかった(`'refused'`)ときも、`deselect-entry`
+ *    へは進まない**(#1042 段④)。`close-pane` と同じ理由を出して
+ *    ノートは開いたままにする ── `boolean` へ潰すと `'refused'` が
+ *    `'not-a-window'` と見分けられず、黙って `deselect-entry` に流れていた
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
@@ -57,7 +61,7 @@ const unbinds: Array<() => void> = [];
 function mount(
   closeViewWindow: () => CloseViewWindowResult = () => 'not-a-window',
   keymap: KeymapStore = new KeymapStore(null),
-  closeNoteWindow?: () => boolean,
+  closeNoteWindow?: () => CloseViewWindowResult,
 ) {
   const root = document.createElement('div');
   document.body.append(root);
@@ -142,9 +146,33 @@ describe('🔴 別のウィンドウ・面を Escape で閉じる(#1042 C3)', ()
   });
 
   /**
+   * 🔴 **選んでいるノートも面も無いとき、Escape は何も閉じず、呑まない**
+   * (#1042 段③)。
+   *
+   * ⚠ 直す前は `close-pane` の押しボタンが `viewMode === 'detail'` でも
+   *   `hidden` のまま DOM に残るので、`SHORTCUT_BUTTON` の共通経路が
+   *   「押せる」と読んで `SET_VIEW_MODE 'detail'` を**同じ値で撃ち直し**、
+   *   `handled: true` を返していた ── 何も変わらないのに
+   *   `ke.preventDefault()` だけが起き、Escape がブラウザや後続の聞き手に
+   *   渡らなくなる(無言で呑み込む)。
+   * 🔑 ここで見るのは 2 つ:①状態が 1 つも動かない ②`defaultPrevented` が
+   *   `false` のまま(= 呑んでいない)。
+   */
+  it('🔴 ノートも面も無いとき、Escape は何もせず、既定動作も止めない', () => {
+    const m = mount();
+    expect(m.d.getState().viewMode, '前提: 面が出ていない').toBe('detail');
+    expect(m.d.getState().selectedLid, '前提: ノートを選んでいない').toBeNull();
+    const ev = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    document.body.dispatchEvent(ev);
+    expect(m.d.getState().viewMode, '面が動いた(何も無いのに撃ち直した)').toBe('detail');
+    expect(m.d.getState().selectedLid, 'ノートが動いた').toBeNull();
+    expect(ev.defaultPrevented, 'Escape を呑んだ(既定動作を止めた)').toBe(false);
+  });
+
+  /**
    * 🔴 **付箋のウィンドウでは `deselect-entry` を撃たずに窓を閉じる**
-   * (#1042 followup 指摘 A)。`closeNoteWindow` が `true` を返す = このウィンドウは
-   * 自分で開いた付箋であり、いま閉じた ── `selectedLid` は触らない
+   * (#1042 followup 指摘 A)。`closeNoteWindow` が `'closed'` を返す = この
+   * ウィンドウは自分で開いた付箋であり、いま閉じた ── `selectedLid` は触らない
    * (付箋の窓は閉じた後で読まれないが、「触っていない」ことを直接見る)。
    */
   it('🔴 付箋のウィンドウでは、Escape が selectedLid を空にせず窓を閉じる', () => {
@@ -154,7 +182,7 @@ describe('🔴 別のウィンドウ・面を Escape で閉じる(#1042 C3)', ()
       new KeymapStore(null),
       () => {
         closed++;
-        return true;
+        return 'closed';
       },
     );
     m.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
@@ -164,30 +192,51 @@ describe('🔴 別のウィンドウ・面を Escape で閉じる(#1042 C3)', ()
   });
 
   /**
-   * 🔴 **対照群:`closeNoteWindow` が無い(本体タブ)/ `false` を返す(付箋でない)
-   * ときは、今までどおり `deselect-entry` が効く**。
+   * 🔴 **付箋だがブラウザが閉じなかった(`'refused'`)ときも、`deselect-entry`
+   * へは進まない**(#1042 段④)。⚠ 直す前は `closeNoteWindow` の戻り値を
+   * `boolean`(`=== 'closed'`)へ潰していたので、`'refused'` は `'not-a-window'`
+   * と見分けが付かず、**黙って** `deselect-entry` が撃たれていた ── 窓は
+   * 開いたままなのにノートだけ閉じ、「開いています」の放送と画面が食い違う。
+   * 🔑 いまは `close-pane` と同じ理由(`CLOSE_VIEW_WINDOW_REFUSED`)を出し、
+   * `selectedLid` は触らない。
    */
-  it('🔴 closeNoteWindow が無い、または false を返すときは、今までどおりノートを閉じる', () => {
+  it('🔴 付箋が閉じられなかった(refused)ときは、理由を出して選択を保つ', () => {
+    const m = mount(
+      () => 'not-a-window',
+      new KeymapStore(null),
+      () => 'refused',
+    );
+    m.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    pressEscape();
+    expect(m.d.getState().selectedLid, 'refused なのに deselect-entry が撃たれた').toBe('a');
+    expect(m.d.getState().error, '断り文が出ていない').toBe(CLOSE_VIEW_WINDOW_REFUSED);
+  });
+
+  /**
+   * 🔴 **対照群:`closeNoteWindow` が無い(本体タブ)/ `'not-a-window'` を
+   * 返す(付箋でない)ときは、今までどおり `deselect-entry` が効く**。
+   */
+  it("🔴 closeNoteWindow が無い、または 'not-a-window' を返すときは、今までどおりノートを閉じる", () => {
     // 無い(本体タブ):既定の mount() は closeNoteWindow を渡さない
     const m1 = mount();
     m1.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
     pressEscape();
     expect(m1.d.getState().selectedLid, 'closeNoteWindow 無しでノートが閉じていない').toBeNull();
 
-    // false(付箋ではない):呼ばれるが、閉じられなかった
+    // not-a-window(付箋ではない):呼ばれるが、閉じられなかった
     let calls = 0;
     const m2 = mount(
       () => 'not-a-window',
       new KeymapStore(null),
       () => {
         calls++;
-        return false;
+        return 'not-a-window';
       },
     );
     m2.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
     pressEscape();
     expect(calls, 'closeNoteWindow が呼ばれていない').toBe(1);
-    expect(m2.d.getState().selectedLid, 'false を返したのにノートが閉じていない').toBeNull();
+    expect(m2.d.getState().selectedLid, "'not-a-window' を返したのにノートが閉じていない").toBeNull();
   });
 
   it('⚠ 打っている欄では、Escape で面が閉じない', () => {

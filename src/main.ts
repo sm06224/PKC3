@@ -3046,15 +3046,20 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   (`heldViewWindow !== null` ではなく `heldNoteWindow`)。
      * ⚠ 判断(この窓は付箋か)は `main.ts` の `heldNoteWindow` に在る ──
      *   binder はこの関数を呼ぶだけで、`heldNoteWindow` を直接読まない。
-     * @returns 閉じたら `true`。付箋でない・閉じられなかったときは `false`
-     *   (binder はそのとき `deselect-entry` へ進む ── 今までどおり)。
+     * 🔴 **`closeViewWindow` と同じ三値をそのまま返す**(#1042 段④)。
+     * ⚠ 直す前は `=== 'closed'` で boolean へ潰していたので、`'refused'`
+     *   (付箋だがブラウザが閉じなかった)が `false` に埋もれ、binder 側は
+     *   「付箋でない」と区別できずに黙って `deselect-entry` へ進んでいた
+     *   (窓は開いたままなのにノートだけ閉じる、という食い違い)。
+     *   `CloseViewWindowResult` をそのまま返せば、呼び側(binder)が
+     *   `'refused'` を見分けて理由を出せる。
      */
     closeNoteWindow: () =>
       closeViewWindow({
         holding: () => heldNoteWindow,
         close: () => window.close(),
         isClosed: () => window.closed,
-      }) === 'closed',
+      }),
     /**
      * 添付の参照をコピーする(P8 段⑱)。
      * ⚠ **結果を出す** ── コピーは押しても画面が変わらない操作なので、
