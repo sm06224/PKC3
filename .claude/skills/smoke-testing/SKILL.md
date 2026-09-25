@@ -693,6 +693,37 @@ await page.fill('[data-pkc-field="sql-input"]', example.replace(/^例:\s*/u, '')
 ⚠ 一般形:**「画面がこう言っている」と「そのとおりにすると動く」は別の主張**である。
 手で打つ smoke は後者しか見ていない ── **前者が嘘になった日に、誰も鳴らない**。
 
+## 🔴 並行に回すときは、ポートを必ず分ける(2026-09-25、#1054)
+
+`tests/smoke/playwright.config.ts` の既定ポートは 1 つで、手元では
+`reuseExistingServer: !CI` である ── **別の作業ツリーが同じポートで `vite preview` を
+上げていると、自分の `dist/` ではなく相手の `dist/` を配って検査する**。
+実例:#1054 段①の比較で、対照群(main の build)を既定ポートで回したら
+**28 件中 24 件が `ERR_CONNECTION_REFUSED`**(相手の preview が落ちた瞬間を踏んだ)。
+その前の回の「3 件落ちた」も、専用ポートで回し直したら両方の版で全部緑だった。
+
+🔑 **サブエージェントや別の作業ツリーと並行に回すときは、毎回これで回す**:
+
+```bash
+PKC3_SMOKE_PORT=<他と被らない番号> CI=1 npx playwright test -c tests/smoke/playwright.config.ts <spec>
+```
+
+⚠ `CI=1` を付けるのは、既に上がっている preview を**使い回させない**ため。
+⚠ 投げる相手にも**番号を指定して渡す**(任せると既定に戻る)。
+
+## 🔴 押す前と押した後で見た目を比べると、`:hover` が答えてしまう(2026-09-25、#1054)
+
+「押すと地の色が変わる」を `clickReal()` の前後の `backgroundColor` で見たら、
+**押している見た目の規則を丸ごと消しても緑**だった(変異試験が SURVIVED)。
+`clickReal()` は `page.mouse.click(x, y)` なので、**押した後もマウスがその上に残り**、
+`button:hover` の地だけで「前と違う」が成り立っていた(CLAUDE.md §4
+「観測点が放っておいても変わる」の smoke 版)。
+
+🔑 直し方は 2 つ組:
+1. **測る前にマウスを外す**(`await page.mouse.move(0, 0)`)
+2. **押していない兄弟と比べる**(同じ帯の別のボタンと地が違うこと)── 1 だけだと、
+   外した先がたまたま別の状態を作っても気づけない
+
 ## 書くときの約束
 
 - `tests/smoke/helpers.ts` を使う: `gotoApp` / `createEntry` / `clickReal` /
