@@ -162,7 +162,7 @@ jobs:
       #   「確かめていない」であって「問題なし」ではない)
       - name: 落とした物を artifact に残す
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: duckdb-ext-${{ inputs.version }}-${{ inputs.platform }}
           path: |
