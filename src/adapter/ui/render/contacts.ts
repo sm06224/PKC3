@@ -212,7 +212,7 @@ export class ContactsRenderer {
   private noteText(state: AppState, shown: number): string {
     if (state.contactScanFailed) return '連絡先を集められませんでした(開き直すと試し直します)';
     const scan = state.contactScan;
-    if (scan === null) return '集めています…';
+    if (scan === null) return '連絡先を集めています…';
     if (scan.cards.length === 0)
       return '連絡先はまだありません。ノートの先頭に tel: か email: を書くと、ここに並びます。';
     if (shown === 0) return '絞り込みに当たる連絡先がありません';

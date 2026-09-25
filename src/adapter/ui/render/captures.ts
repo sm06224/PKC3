@@ -177,7 +177,7 @@ export class CapturesRenderer {
   private noteText(state: AppState, shown: number): string {
     if (state.captureScanFailed)
       return '音と動画を集められませんでした(開き直すと試し直します)';
-    if (state.captureItems === null) return '集めています…';
+    if (state.captureItems === null) return '音と動画を集めています…';
     if (state.captureItems.length === 0)
       return '音と動画はまだありません。左下の 録音 か 画面 で録ると、ここに並びます。';
     if (shown === 0) return '絞り込みに当たるものがありません';
@@ -317,7 +317,7 @@ export class CapturesRenderer {
       run.type = 'button';
       run.setAttribute('data-pkc-action', 'capture-trim-run');
       run.setAttribute('data-pkc-field', 'capture-trim-run');
-      run.textContent = this.trimBusy ? '切り出しています…' : 'この範囲で切り出す';
+      run.textContent = this.trimBusy ? 'この範囲を切り出しています…' : 'この範囲で切り出す';
       run.disabled = this.trimBusy;
       run.title = this.trimBusy
         ? 'いま切り出しています。終わるまでお待ちください。'

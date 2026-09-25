@@ -7150,7 +7150,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: 'この環境では容量を数えられません' });
       return;
     }
-    sum.textContent = '調べています…';
+    sum.textContent = '容量を調べています…';
     sum.hidden = false;
     void services.storageProfile().then(
       (result) => {
@@ -7338,7 +7338,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       )
       .then(async (answer) => {
         if (answer !== 'ok') return;
-        sum.textContent = '拾っています…';
+        sum.textContent = '中身を取り出しています…';
         sum.hidden = false;
         try {
           /**
@@ -7348,7 +7348,9 @@ const ACTIONS: Record<string, ActionHandler> = {
            */
           const report = await rebuild(cid, (phase, seen) => {
             sum.textContent =
-              phase === 'pick' ? `拾っています… ${seen} 件` : `戻しています… ${seen} 件`;
+              phase === 'pick'
+                ? `中身を取り出しています… ${seen} 件`
+                : `ノートを戻しています… ${seen} 件`;
           });
           const done = rebuildDoneMessage(report);
           sum.textContent = done;
@@ -7495,7 +7497,7 @@ const ACTIONS: Record<string, ActionHandler> = {
           });
           return;
         }
-        sum.textContent = '消しています…';
+        sum.textContent = '保存領域を消しています…';
         sum.hidden = false;
         try {
           const report = await reset(cid);

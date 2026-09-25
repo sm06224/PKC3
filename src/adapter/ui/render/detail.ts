@@ -714,7 +714,7 @@ export class DetailRenderer {
         this.bodyHost!.textContent = '';
         const loading = document.createElement('p');
         loading.setAttribute('data-pkc-field', this.field('detail-loading'));
-        loading.textContent = '読み込んでいます…';
+        loading.textContent = '本文を読み込んでいます…';
         this.bodyHost!.append(loading);
       }
       return;

@@ -263,7 +263,7 @@ export class ScheduleRenderer {
   private noteText(state: AppState, total: number, dated: number, groups: number): string {
     if (state.taskScanFailed)
       return '予定を集められませんでした。タブを開き直すともう一度試します。';
-    if (state.taskScan === null) return '集めています…';
+    if (state.taskScan === null) return '予定を集めています…';
     if (state.taskScan.truncated)
       return `多いので途中まで出しています(候補のノートは ${state.taskScan.totalNotes} 件)。`;
     if (total === 0)

@@ -604,7 +604,7 @@ export class InspectorRenderer {
       // ⚠ `null`(まだ引いていない)と `undefined`(その field を持たない state)は
       //    どちらも「**データが無い**」── 片方だけ見ると、部分的な state で落ちる
       if (!back || back.lid !== meta.lid) {
-        backBox.textContent = '調べています…';
+        backBox.textContent = '参照元を調べています…';
       } else if (back.lids.length === 0) {
         backBox.textContent = '無し';
       } else {
