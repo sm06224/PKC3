@@ -430,8 +430,8 @@ export const APP_GROUP_MENU_ACTIONS: readonly EntryAction[] = [
    * ⚠ **掴んで落とす道は作っていない** ── 見出しの掴みは受け口をゼロから作るうえ、
    *   **長押し(= このメニュー)と取り合い**になる。まずここから。
    */
-  { action: 'move-app-group-up', label: '上へ' },
-  { action: 'move-app-group-down', label: '下へ' },
+  { action: 'move-app-group-up', label: '上へ動かす' },
+  { action: 'move-app-group-down', label: '下へ動かす' },
 ];
 
 /**

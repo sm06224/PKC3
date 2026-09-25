@@ -160,6 +160,27 @@ describe('右クリックに出す操作', () => {
     for (const a of ENTRY_MENU_ACTIONS) expect(ENTRY_ACTION_LABELS[a.action]).toBe(a.label);
     expect(Object.keys(ENTRY_ACTION_LABELS)).toHaveLength(ENTRY_MENU_ACTIONS.length);
   });
+
+  /**
+   * 🔴 **グループの見出しの「上へ / 下へ」は、タイルの「上へ動かす / 下へ動かす」と
+   *   同じ字にする**(#857 段③b の動線レビュー、#1046 追跡調査)。
+   * ⚠ 同じことをする 2 つの押し所で呼び名が違うと、user は別の操作だと思う ──
+   *   だから**手で書いた期待値を持たない** ── 一方を直して他方を忘れると、
+   *   字面の一致が崩れたことでしか気づけない(CLAUDE.md §1「期待値は実装の綴りの
+   *   別の書き方ではなく別の観測から作る」の向き)。
+   */
+  it('🔴 グループの並べ替えの字は、タイルの並べ替えの字と同じ', () => {
+    const tileUp = TILE_MENU_ACTIONS.find((a) => a.action === 'move-tile-up');
+    const tileDown = TILE_MENU_ACTIONS.find((a) => a.action === 'move-tile-down');
+    const groupUp = APP_GROUP_MENU_ACTIONS.find((a) => a.action === 'move-app-group-up');
+    const groupDown = APP_GROUP_MENU_ACTIONS.find((a) => a.action === 'move-app-group-down');
+    // ⚠ 空振り防止 ── 綴りを変えて 4 つとも undefined でも「一致した」と読ませない
+    expect([tileUp, tileDown, groupUp, groupDown].every((a) => a !== undefined), '4 つの行を引けていない').toBe(
+      true,
+    );
+    expect(groupUp?.label, 'グループの「上へ」がタイルと違う').toBe(tileUp?.label);
+    expect(groupDown?.label, 'グループの「下へ」がタイルと違う').toBe(tileDown?.label);
+  });
 });
 
 /**

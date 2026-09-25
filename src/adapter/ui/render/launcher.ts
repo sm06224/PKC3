@@ -20,6 +20,7 @@
 import type { AppState } from '@adapter/state/app-state';
 import type { LauncherTile } from '@features/launcher/tiles';
 import { isMovableTile } from '@features/launcher/tile-order';
+import { TILE_MENU_ACTIONS } from '@features/entry-actions';
 import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
 import { allFolded, encodeFolded, isFolded } from '@features/launcher/group-fold';
 import { appGroupIconOf, sortGroupNames } from '@features/launcher/app-group-spec';
@@ -27,6 +28,16 @@ import type { IconValue } from '@features/icon/icon-value';
 import { appGroupFold, type GroupFoldStore } from './group-fold';
 import { setIcon } from './icons';
 import { AssetLends, type AssetLender } from './asset-lends';
+
+/**
+ * 🔴 **並べ替え中の案内は、タイルの並べ替えメニューの字から組む**(#1046 追跡調査)。
+ * ⚠ **手で書き写さない** ── メニュー側の字(`TILE_MENU_ACTIONS`)を直したのに
+ *   ここを直し忘れると、案内だけ古い字のまま残る(押した場所と対で pin する
+ *   ── CLAUDE.md §1)。
+ */
+const TILE_UP_LABEL = TILE_MENU_ACTIONS.find((a) => a.action === 'move-tile-up')?.label ?? '上へ動かす';
+const TILE_DOWN_LABEL =
+  TILE_MENU_ACTIONS.find((a) => a.action === 'move-tile-down')?.label ?? '下へ動かす';
 
 export class LauncherRenderer {
   private lastTiles: LauncherTile[] | null | undefined = undefined;
@@ -233,7 +244,7 @@ export class LauncherRenderer {
      */
     lead.textContent = reordering
       ? // ⚠ モード中は**開かない**ので、開く話を出したままにしない(嘘になる)
-        '並べ替え中です。「上へ」「下へ」で動かします(押しても開きません)'
+        `並べ替え中です。「${TILE_UP_LABEL}」「${TILE_DOWN_LABEL}」で動かします(押しても開きません)`
       : 'アプリは 2 回押すと別のウィンドウで開きます';
     list.append(lead);
     /**
