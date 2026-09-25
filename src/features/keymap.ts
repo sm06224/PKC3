@@ -511,7 +511,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    */
   {
     id: 'open-palette',
-    label: '操作を名前で探す',
+    label: '操作を探す',
     contexts: ['global'],
     defaults: ['Mod+Shift+P'],
     whileTyping: true,
@@ -704,7 +704,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    */
   {
     id: 'nav-back',
-    label: '戻る',
+    label: '前のノートへ戻る',
     contexts: ['global', 'dual'],
     defaults: ['Alt+ArrowLeft'],
     whileTyping: true,
@@ -712,7 +712,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'nav-forward',
-    label: '進む',
+    label: '次のノートへ進む',
     contexts: ['global', 'dual'],
     defaults: ['Alt+ArrowRight'],
     whileTyping: true,

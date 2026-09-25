@@ -2250,7 +2250,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
        * 確認の器を 2 本目作らない)。
        */
       confirmArchiveImport: (preview) =>
-        ask(formatArchivePreviewMessage(preview), { okLabel: '取り込む', cancelLabel: 'やめる' }),
+        ask(formatArchivePreviewMessage(preview), { okLabel: 'ファイルを取り込む', cancelLabel: 'やめる' }),
   };
 
   /**

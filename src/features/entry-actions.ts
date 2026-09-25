@@ -649,9 +649,9 @@ export function withTrailingLast<T extends { readonly action: string }>(
  *   (足したら落ちる形。`KNOWN_DEAD` と同じ作法)。
  */
 export const NOTE_TOOL_ACTIONS: readonly EntryAction[] = [
-  { action: 'attach-file', label: '添付' },
-  { action: 'start-audio-capture', label: '録音' },
-  { action: 'start-screen-capture', label: '画面録画' },
+  { action: 'attach-file', label: 'ファイルを添付' },
+  { action: 'start-audio-capture', label: '録音を始める' },
+  { action: 'start-screen-capture', label: '画面録画を始める' },
   { action: 'start-timer', label: '時間を計る' },
 ];
 

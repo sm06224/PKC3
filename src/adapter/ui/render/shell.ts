@@ -363,8 +363,8 @@ export function buildShell(root: HTMLElement): ShellRegions {
     * 説明の**土台**と**命令 id** だけ持たせ、`applyShortcutHints` が組み立てる。
     */
   for (const [action, glyph, label, title, cmd] of [
-    ['nav-back', '‹', '戻る', '前に見ていたノートへ戻ります', 'nav-back'],
-    ['nav-forward', '›', '進む', '戻る前のノートへ進みます', 'nav-forward'],
+    ['nav-back', '‹', '前のノートへ戻る', '前に見ていたノートへ戻ります', 'nav-back'],
+    ['nav-forward', '›', '次のノートへ進む', '戻る前のノートへ進みます', 'nav-forward'],
   ] as const) {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -550,11 +550,11 @@ export function buildShell(root: HTMLElement): ShellRegions {
    * 🔑 文言は**起きること**で書く(user 指示 2026-08-21)── 「日記」ではなく
    *   「今日」。開くと**今日の日付のノート**が出る(無ければ作る)。
    */
-  const today = iconButton('open-today', '今日');
+  const today = iconButton('open-today', '今日のノートを開く');
   today.setAttribute('data-pkc-field', 'open-today');
   today.title = '今日の日付のノートを開きます(無ければ作ります)';
 
-  const attach = iconButton('attach-file', '添付');
+  const attach = iconButton('attach-file', 'ファイルを添付');
   // ⚠ **`ENTRY_ACTION_HINTS['attach-file']` と同じ意味にする**(#666)── 同じ操作に
   //    2 通りの説明を作らない(スマホの `⋯` から選んだときに出る字と揃える)
   attach.title = 'ファイルを取り込んで、開いているノートの本文に入れます';
@@ -568,10 +568,10 @@ export function buildShell(root: HTMLElement): ShellRegions {
    *   置いており、PKC3 にはそれが無い。⚠ 「画面のどこにも出ていない」は
    *   「届いていない」である(#180 の教訓 3)。
    */
-  const rec = iconButton('start-audio-capture', '録音');
+  const rec = iconButton('start-audio-capture', '録音を始める');
   rec.setAttribute('data-pkc-field', 'start-audio-capture');
   rec.title = 'マイクで録音して、いま開いているノートに入れます';
-  const screen = iconButton('start-screen-capture', '画面録画');
+  const screen = iconButton('start-screen-capture', '画面録画を始める');
   screen.setAttribute('data-pkc-field', 'start-screen-capture');
   screen.title = '画面を録画して、いま開いているノートに入れます';
   /**
@@ -707,7 +707,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   phoneReturn.hidden = true;
   phoneReturn.title = '読んでいたノートへ戻ります';
   const phoneReturnLead = document.createElement('span');
-  phoneReturnLead.textContent = 'ノートへ →';
+  phoneReturnLead.textContent = 'ノートへ戻る →';
   const phoneReturnTitle = document.createElement('span');
   phoneReturnTitle.setAttribute('data-pkc-field', 'phone-return-title');
   phoneReturn.append(phoneReturnLead, phoneReturnTitle);
@@ -738,7 +738,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
     btn.setAttribute('data-pkc-action', 'toggle-pane');
     btn.setAttribute('data-pkc-pane', id);
     btn.setAttribute('aria-pressed', 'true');
-    btn.setAttribute('aria-label', `${PANE_LABELS[id]}の列`);
+    btn.setAttribute('aria-label', `${PANE_LABELS[id]}の列を畳む / 戻す`);
     // 🔴 **帯は 2 つの仕事をする**(#497)── 押すと畳み、掴むと幅が変わる。
     //    ⚠ 掴めることを字にも書く ── `cursor` だけだと、触りの端末には何も出ない。
     btn.title = `${PANE_LABELS[id]}の列を畳む・戻す(左右にドラッグすると幅が変わります。矢印キーでも動かせます)`;
@@ -824,7 +824,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   appendGrip.setAttribute('data-pkc-action', 'toggle-pane');
   appendGrip.setAttribute('data-pkc-pane', 'append');
   appendGrip.setAttribute('aria-pressed', 'true');
-  appendGrip.setAttribute('aria-label', `${PANE_LABELS.append}`);
+  appendGrip.setAttribute('aria-label', `${PANE_LABELS.append}を畳む / 戻す`);
   appendGrip.title = `${PANE_LABELS.append}を畳む・戻す(上下にドラッグすると高さが変わります。矢印キーでも動かせます)`;
   /**
    * 🔴 **スマホ用画面の「ページの帯」**(#632 段①)。
@@ -845,7 +845,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   phoneBack.setAttribute('data-pkc-field', 'phone-back');
   // ⚠ 行き先(`data-pkc-page`)と字は `paintBar` が page ごとに書き換える
   phoneBack.setAttribute('data-pkc-page', 'list');
-  phoneBack.textContent = '← 一覧';
+  phoneBack.textContent = '← 一覧へ戻る';
   const phoneTitle = document.createElement('span');
   phoneTitle.setAttribute('data-pkc-field', 'phone-title');
   const phoneInfo = document.createElement('button');
@@ -854,7 +854,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   phoneInfo.setAttribute('data-pkc-field', 'phone-info');
   phoneInfo.setAttribute('data-pkc-page', 'info');
   phoneInfo.textContent = '情報';
-  phoneInfo.title = 'タグ・目次・関係・書き出す(← ノート で戻ります)';
+  phoneInfo.title = 'タグ・目次・関係・書き出す(← ノートへ戻る で戻ります)';
   /**
    * 🔴 **左の列にしか無い操作への入口**(設計 doc §2-7)。⚠ スマホでは
    *   一覧が見えていないので、**右クリックの項目も「操作を探す」もここからしか届かない**
@@ -865,6 +865,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   phoneMenu.setAttribute('data-pkc-action', 'phone-menu');
   phoneMenu.setAttribute('data-pkc-field', 'phone-menu');
   phoneMenu.textContent = '⋯';
+  phoneMenu.setAttribute('aria-label', 'このノートの操作を開く');
   phoneMenu.title = 'このノートにできること・操作を探す';
   phoneBar.append(phoneBack, phoneTitle, phoneInfo, phoneMenu);
   center.append(replaceBar, detail, appendGrip, append);
@@ -1099,8 +1100,8 @@ export function buildShell(root: HTMLElement): ShellRegions {
   const skip = document.createElement('div');
   skip.setAttribute('data-pkc-region', 'skip-links');
   for (const [region, label] of [
-    ['detail', '本文へ'],
-    ['inspector', '情報へ'],
+    ['detail', '本文へ移る'],
+    ['inspector', '情報へ移る'],
   ] as const) {
     const btn = document.createElement('button');
     btn.type = 'button';

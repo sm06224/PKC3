@@ -125,7 +125,7 @@ export class QueryRenderer {
     const refresh = document.createElement('button');
     refresh.type = 'button';
     refresh.setAttribute('data-pkc-action', 'refresh-query');
-    refresh.textContent = '数え直す';
+    refresh.textContent = '集計を数え直す';
     refresh.title = '書き換えた後の中身で数え直します';
     head.append(title, label, refresh);
 
