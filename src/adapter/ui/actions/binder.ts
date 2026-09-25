@@ -9196,6 +9196,14 @@ export const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
   'open-settings': '[data-pkc-action="set-view"][data-pkc-view="settings"]',
   'open-flags': '[data-pkc-action="set-view"][data-pkc-view="flags"]',
   'open-help': '[data-pkc-action="set-view"][data-pkc-view="help"]',
+  /**
+   * 🔴 **別のウィンドウ・面を閉じる**(#1042 C3)── `center.ts` の「× 閉じる」を
+   * そのまま撃つ。⚠ `close-pane` の文脈は `global` ではなく `window`(下の
+   * `keymap.match(ke, 'window')` から呼ばれる)── `openPaletteFor` の
+   * `rows()` は `contexts.includes('global')` を先に見て素通しするので、
+   * ここに載っていても「操作を探す」には出ない(意図どおり)。
+   */
+  'close-pane': '[data-pkc-action="close-pane"]',
 };
 
 const FORMAT_OF: Readonly<Record<string, FormatOp>> = {
@@ -12195,7 +12203,18 @@ export function bindActions(
     closeContextMenu(root);
   };
   const onMenuKey = (ev: KeyboardEvent): void => {
-    if (ev.key === 'Escape' && contextMenuOpen(root)) closeContextMenu(root);
+    if (ev.key !== 'Escape' || !contextMenuOpen(root)) return;
+    closeContextMenu(root);
+    /**
+     * 🔴 **この 1 段だけを閉じ、後続の `document` の keydown 聞き手には渡さない**
+     * (#1042 C3)。⚠ `deselect-entry` は `contextMenuOpen(root)` を見て**譲る**が、
+     *   その判定は**このメニューが閉じた後**に走る(`onShortcut` は `onMenuKey` より
+     *   後に登録される)ので、素通しすると同じ 1 回の Escape で
+     *   「メニューも閉じ、ノートも閉じる」になってしまう(1 段だけ閉じる、の破り)。
+     * 🔑 `stopPropagation` では足りない ── 同じ `document` に付いた**別の聞き手**
+     *   (`onShortcut`)を止めるには `stopImmediatePropagation` が要る。
+     */
+    ev.stopImmediatePropagation();
   };
   /**
    * 🔴 **張ったら、外す手も同時に作る**(#876、2026-09-13)。
@@ -12488,43 +12507,65 @@ export function bindActions(
         }
       }
     }
-    const cmd = keymap.match(ke, 'global');
-    if (cmd === null) return;
     /**
-     * 打鍵中に効かせてよいか。**コマンドが名乗る** + **その和音が文字を打たない**の
-     * 両方が要る(着地前レビュー 2)── `open-help` は `F1` のために名乗っているが、
-     * 別名の `Alt+5` は mac で `∞` を打つ鍵である。名乗りだけを見ると、
-     * **本文に記号が入らずヘルプが開く**。
+     * 🔴 **`reading`(ノートを読んでいるとき)も同じ列に混ぜる**(#1042 C3)。
+     * ⚠ `global` の側に `Escape` の命令が無い(row-cancel / cancel-edit が
+     *   `row` / `editor` を名乗るので重ならない)ため、混ぜても衝突しない。
      */
-    const chord = chordOf(ke);
-    if (typing && !(findCommand(cmd)?.whileTyping === true && chord !== null && !typesCharacter(chord)))
-      return;
+    const cmd = keymap.match(ke, 'global') ?? keymap.match(ke, 'reading');
+    if (cmd !== null) {
+      /**
+       * 打鍵中に効かせてよいか。**コマンドが名乗る** + **その和音が文字を打たない**の
+       * 両方が要る(着地前レビュー 2)── `open-help` は `F1` のために名乗っているが、
+       * 別名の `Alt+5` は mac で `∞` を打つ鍵である。名乗りだけを見ると、
+       * **本文に記号が入らずヘルプが開く**。
+       */
+      const chord = chordOf(ke);
+      if (
+        typing &&
+        !(findCommand(cmd)?.whileTyping === true && chord !== null && !typesCharacter(chord))
+      )
+        return;
+      /**
+       * 🔴 **ヘルプを読んでいる間は `Ctrl+F` をブラウザに返す**
+       * (#636。user 指示 2026-08-31「**ヘルプ閲覧中はユーザービリティのために
+       * ctrl+f をブラウザに返してください**」)。
+       *
+       * ⚠ 実測(直す前):ヘルプの面で `Ctrl+F` を押すと
+       *   `defaultPrevented === true` / 焦点が `entry-filter` へ移り、**本文の面と
+       *   まったく同じ**だった ── つまり**ブラウザの検索は出ず**、畳んでいた左の列が
+       *   勝手に開き、焦点がノートの絞り込み欄へ飛ぶ。
+       * 🔑 `runGlobalCommand` には**譲る口が既に在る**(`if (!input) return false`)が、
+       *   `entry-filter` は器を組むときに 1 度作られ**畳んでも DOM から消えない**
+       *   (#583 が実測して直した当の性質)ので、**その行は一度も真にならない**。
+       *
+       * 🔴 **だから門は呼び側に置く。** `runGlobalCommand` の中で `false` を返すと、
+       *   パレットが `dry` でその答えを読み、**「いまは押せません」と誤って断って**
+       *   行を `disabled` にする ── 裁定は「Ctrl+F を返す」であって
+       *   「操作を消す」ではない。ここで `return` すれば `prevent()` を通らないので、
+       *   ブラウザの既定動作(ページ内検索)がそのまま出る。
+       * ⚠ **範囲はヘルプだけ。** 設定・フラグ・2 ペインは**操作の面**で、そこで
+       *   絞り込みへ飛ぶのは今も筋が通る。
+       * 🔑 **覆る条件**:設定やフラグが長い読み物になったら、判定を面の種類ごとではなく
+       *   「読む面か」で括り直す。
+       */
+      if (cmd === 'focus-search' && dispatcher.getState().viewMode === 'help') return;
+      if (runGlobalCommand(cmd, root, dispatcher, keymap, () => ke.preventDefault(), tellUser))
+        return;
+    }
     /**
-     * 🔴 **ヘルプを読んでいる間は `Ctrl+F` をブラウザに返す**
-     * (#636。user 指示 2026-08-31「**ヘルプ閲覧中はユーザービリティのために
-     * ctrl+f をブラウザに返してください**」)。
-     *
-     * ⚠ 実測(直す前):ヘルプの面で `Ctrl+F` を押すと
-     *   `defaultPrevented === true` / 焦点が `entry-filter` へ移り、**本文の面と
-     *   まったく同じ**だった ── つまり**ブラウザの検索は出ず**、畳んでいた左の列が
-     *   勝手に開き、焦点がノートの絞り込み欄へ飛ぶ。
-     * 🔑 `runGlobalCommand` には**譲る口が既に在る**(`if (!input) return false`)が、
-     *   `entry-filter` は器を組むときに 1 度作られ**畳んでも DOM から消えない**
-     *   (#583 が実測して直した当の性質)ので、**その行は一度も真にならない**。
-     *
-     * 🔴 **だから門は呼び側に置く。** `runGlobalCommand` の中で `false` を返すと、
-     *   パレットが `dry` でその答えを読み、**「いまは押せません」と誤って断って**
-     *   行を `disabled` にする ── 裁定は「Ctrl+F を返す」であって
-     *   「操作を消す」ではない。ここで `return` すれば `prevent()` を通らないので、
-     *   ブラウザの既定動作(ページ内検索)がそのまま出る。
-     * ⚠ **範囲はヘルプだけ。** 設定・フラグ・2 ペインは**操作の面**で、そこで
-     *   絞り込みへ飛ぶのは今も筋が通る。
-     * 🔑 **覆る条件**:設定やフラグが長い読み物になったら、判定を面の種類ごとではなく
-     *   「読む面か」で括り直す。
+     * 🔴 **別のウィンドウ・面を閉じる**(#1042 C3)── `reading`(ノートを閉じる)が
+     * 何もしなかった(何も開いていない)ときだけ試す。
+     * ⚠ **先に試さない理由**:`close-pane` は `SHORTCUT_BUTTON` 経由で押しボタンを
+     *   直接撃つので、ボタンが `hidden`(面を出していない)でも「押せた」ことになる
+     *   ── 先に試すと、ノートが開いていても `deselect-entry` に一度も出番が来ない。
+     * ⚠ 打っている欄では効かせない(上と同じ理由)。
      */
-    if (cmd === 'focus-search' && dispatcher.getState().viewMode === 'help') return;
-    if (runGlobalCommand(cmd, root, dispatcher, keymap, () => ke.preventDefault(), tellUser))
-      return;
+    if (!typing) {
+      const wcmd = keymap.match(ke, 'window');
+      if (wcmd !== null && runGlobalCommand(wcmd, root, dispatcher, keymap, () => ke.preventDefault(), tellUser))
+        return;
+    }
   };
   /**
    * 🔴 **整理の面の鍵**(user 裁定 2026-08-18)。⚠ **既にある動線を呼ぶだけ**にする ──

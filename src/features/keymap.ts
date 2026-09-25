@@ -50,6 +50,20 @@ export interface Chord {
  * フォルダ固有の操作(親フォルダ・移す・複数選択)は一覧には無いので、
  * `filer` へ混ぜず**必要な 3 つだけ**(次の行へ / 前の行へ / 開く)を共有する。
  */
+/**
+ * 🔴 **`reading` / `window` を分けている理由**(#1042 C3。裁定 2026-09-25 Q3 = A)。
+ *
+ * ⚠ 最初の稿は `deselect-entry` の `Escape` を `global` にしたが、`global` は
+ *   **どの文脈とも重なる**ので `row-cancel`(行の編集をやめる)/ `cancel-edit`
+ *   (編集をやめる)と同じ鍵を名乗れず、`contextsOverlap` に断られた。
+ * 🔑 `reading`(ノートを読んでいるとき)と `window`(別のウィンドウ)は
+ *   **どちらとも重ならない**専用の文脈にして、緩めずに通す。
+ * ⚠ `reading` を `window` より**先に試す**(`binder.ts` の `onShortcut`)──
+ *   `close-pane` は押しボタンの `disabled` しか見ないので(`hidden` は見ない)、
+ *   先に試すと**常に「効いた」ことになり**、ノートが開いていても閉じられなく
+ *   なる。`deselect-entry` は「開いているノートが無ければ何もしない」を
+ *   自分の中で判定するので、先に試しても安全である。
+ */
 export type KeyContext =
   | 'global'
   | 'editor'
@@ -58,7 +72,9 @@ export type KeyContext =
   | 'live'
   | 'filer'
   | 'dual'
-  | 'list';
+  | 'list'
+  | 'reading'
+  | 'window';
 
 /**
  * 🔴 **どこで効くかの見出し**(2026-08-26 に adapter からここへ移した)。
@@ -86,6 +102,10 @@ export const CONTEXT_LABELS: Readonly<Record<KeyContext, string>> = {
   dual: '2 ペインだけの操作(そのペインに焦点があるとき)',
   /** ⚠ こちらは**一覧タブにしか存在しない面**(フォルダの表とは違う flat な行)。 */
   list: '一覧タブ(ノートの行を選んでいるとき)',
+  /** ⚠ 何も編集していないときだけ効く(#1042 C3)。 */
+  reading: 'ノートを読んでいるとき',
+  /** ⚠ 予定表・連絡先の別ウィンドウ、および中央の面(query/settings/help など)。 */
+  window: '別のウィンドウ',
 };
 
 export interface KeyCommand {
@@ -162,27 +182,28 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     note: '選んでいるノートを編集する(ノートを選んでいるときだけ効きます。PKC2 の Ctrl+E と同じ手)',
   },
   /**
-   * 🔴 **開いているノートを閉じて、コレクションへ戻る**(#1032)。
+   * 🔴 **開いているノートを閉じて、コレクションへ戻る**(#1032。
+   * 既定 `Escape` は #1042 C3、裁定 2026-09-25 Q3 = A)。
    *
    * ⚠ **戻る道が画面に 1 つも無かった** ── ノートを選ぶと中央はそのノートになり、
    *   コレクションの操作へは**読み込み直す以外に戻れなかった**(「選択を解除」が
    *   外すのは印だけで、開いているノートには触らない)。
    * 🔑 マウスの側は「一覧の何も無い所を押す」(`binder.ts` の `onClick`)── こちらは
    *   その**近道**である(思想③「マウスで完結し、キーボードは近道」)。
-   * 🔴 **既定の鍵は置かない**(`defaults: []`。`KEYLESS` に身元で挙げてある)。
-   * ⚠ 最初の稿は `Escape` を既定にしたが、**この file 自身の検めが断った** ──
-   *   `global` は**どの文脈とも重なる**ので、`row-cancel`(行の編集をやめる)と
-   *   同じ鍵を名乗れない。🔑 断られたのは正しい:`Escape` を全域で奪うと、
-   *   「行の名前を打つのをやめる」が**このコマンドに食われる**日が来る。
-   * 🔑 だから**鍵は user が決める** ── 近道の設定に行として出るので、
-   *   `Escape` を割り当てたい人は自分で割り当てられる。パレット(操作を探す)
-   *   からも名前で呼べる(`palette-rows.ts` は `KEY_COMMANDS` そのものを並べる)。
+   * 🔴 **最初の稿は `Escape` を `global` の既定にしたが、この file 自身の検めが
+   *   断った**(2026-08 当時)── `global` は**どの文脈とも重なる**ので、
+   *   `row-cancel`(行の編集をやめる)と同じ鍵を名乗れない。
+   * 🔑 **2026-09-25 に専用の文脈(`reading`)を作って解いた**(上の型の注記)。
+   *   `contextsOverlap` は緩めていない ── `reading` は `row` / `editor` とは
+   *   重ならない専用の文脈である。
+   * ⚠ 何も編集していないときだけ効く(判定は `binder.ts` の `deselect-entry` 実装 ──
+   *   `phase !== 'ready'` または `selectedLid === null` なら何もしない)。
    */
   {
     id: 'deselect-entry',
     label: 'ノートを閉じる',
-    contexts: ['global'],
-    defaults: [],
+    contexts: ['reading'],
+    defaults: ['Escape'],
     note: '中央がコレクションの画面に戻ります(一覧の何も無い所を押しても同じです)',
   },
   {
@@ -191,6 +212,28 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['global'],
     defaults: ['Mod+F'],
     note: '左の一覧の絞り込み欄に焦点を移します(ヘルプを開いている間は、ブラウザの検索が出ます)',
+  },
+  /**
+   * 🔴 **別のウィンドウ・面を閉じる**(#1042 C3。裁定 2026-09-25 Q3 = A)。
+   *
+   * ⚠ 実体は既存の `close-pane`(押しボタンは `center.ts` の「× 閉じる」)を
+   *   そのまま呼ぶ ── 2 つ目の「閉じる作法」を作らない(CLAUDE.md §10)。
+   *   予定表・連絡先の別ウィンドウでは `services.closeViewWindow` が
+   *   窓ごと閉じ、中央の面(query / settings / help など)を出しているときは
+   *   本文へ戻る(× と同じ)。
+   * ⚠ **`reading`(上の `deselect-entry`)より後に試す**(`binder.ts`)── 実体は
+   *   押しボタンを `SHORTCUT_BUTTON` 経由で撃つので、`hidden` なボタン
+   *   (面を出していないとき)でも「押せた」ことになってしまう。先に試すと
+   *   ノートが開いていても閉じられなくなる。
+   */
+  {
+    id: 'close-pane',
+    // ⚠ 押しボタン(center.ts の「× パネルを閉じる」)と同じ字にする(#1053 の
+    //   「何を + どうする」規則。この鍵は 2 つ目の「閉じる」ボタンを作らない)。
+    label: 'パネルを閉じる',
+    contexts: ['window'],
+    defaults: ['Escape'],
+    note: '別のウィンドウ(予定表・連絡先)ではウィンドウごと閉じます',
   },
   /**
    * 🔴 **日付を入れる道具**(user 指示 2026-08-23)。

@@ -50,6 +50,11 @@ export { CONTEXT_LABELS };
  */
 const CONTEXT_ORDER: readonly KeyContext[] = [
   'global',
+  // ⚠ `global` の隣に置く(#1042 C3)── `reading`(ノートを読んでいるとき)/
+  //   `window`(別のウィンドウ)は `deselect-entry` / `close-pane` が**専用に**
+  //   名乗る文脈で、足し忘れると「画面のどこでも」へ落ちる(同じ罠。上の注記)。
+  'reading',
+  'window',
   'filer',
   // ⚠ **`filer` の次に置く**(近い面どうしを離さない)。⚠ 足し忘れると、
   //   `dual` しか名乗らないコマンドが `primaryContext` の既定で
