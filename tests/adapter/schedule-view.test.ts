@@ -874,12 +874,14 @@ describe('予定から外す(#498)', () => {
    * ⚠ **押す前に何が起きるか分かる**(user 指示 2026-08-21「画面で何が起きるかで書く」)。
    * 🔑 繰り返しは**規則ごと**消えるので、同じ字にしてはいけない。
    */
-  it('⚠ 繰り返しの札だけ、字が「この繰り返しをやめる」になる', () => {
+  it('⚠ 繰り返しの札だけ、字が「予定から外す(繰り返しも外れます)」になる', () => {
     const s = setup({ e1: '- [ ] 単発 @2026-08-23\n- [ ] 週次 @2026-08-24 毎週\n' });
     const one = off(cardsOf(s.root, '2026-08-23')[0]!)!;
     const rep = off(cardsOf(s.root, '2026-08-24')[0]!)!;
     expect(one.getAttribute('aria-label')).toBe('予定から外す');
-    expect(rep.getAttribute('aria-label')).toBe('この繰り返しをやめる');
+    // ⚠ 右クリックの「この繰り返しをやめる」(set-task-repeat)と字が衝突していたので、
+    //   × は「予定から外す」の系のまま、繰り返しも外れることだけを括弧で足す(#1046)。
+    expect(rep.getAttribute('aria-label')).toBe('予定から外す(繰り返しも外れます)');
     // ⚠ 説明も**別物**(「ノートは消えない」を両方で言う)
     expect(one.title).toContain('ノートも本文も消えません');
     expect(rep.title).toContain('毎週');
