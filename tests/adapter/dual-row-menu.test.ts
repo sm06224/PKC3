@@ -34,12 +34,13 @@ import { paneOf } from '../../src/features/relation/dual-pane';
 import { stubRevisionOps } from '../helpers/revision-stub';
 import { stubStamps } from '../helpers/store-stamps';
 import { answerDialog } from './dialog-helper';
+import { STACK_ARCHETYPE } from '../../src/features/flavor/stack-flavor';
 
-function meta(lid: string, order: number): EntryMeta {
+function meta(lid: string, order: number, archetype = 'text'): EntryMeta {
   return {
     lid,
     title: 't-' + lid,
-    archetype: 'text',
+    archetype,
     createdAt: null,
     updatedAt: null,
     entryOrder: order,
@@ -50,7 +51,9 @@ function meta(lid: string, order: number): EntryMeta {
   };
 }
 
-const METAS = [meta('n1', 1), meta('n2', 2)];
+// ⚠ フォルダとスタックの行も置く ── 置かないと「フォルダにだけ出る」「スタックにだけ出る」
+//   項目の経路を 1 度も通らない(着地前レビューで 3 件の dead click が見つかった理由)
+const METAS = [meta('n1', 1), meta('n2', 2), meta('f1', 3, 'folder'), meta('s1', 4, STACK_ARCHETYPE)];
 
 const MENU = '[data-pkc-region="context-menu"]';
 
@@ -223,6 +226,68 @@ describe('2 ペインの表の行を右クリックしても、2 ペインを抜
     });
     expect(t.d.getState().viewMode, '改名で 2 ペインを抜けた').toBe('dual');
     expect(t.d.getState().error ?? '', '断られた').toBe('');
+  });
+
+  /**
+   * 🔴 **中身を本文の画面に出す 3 項目は、押したときにその行を選ぶ**(着地前レビュー)。
+   *
+   * ⚠ 1 稿目はこの 3 つも選択を動かさずに撃っていた ── 「履歴」は一覧が届いても
+   *   `REVISION_LIST_LOADED` が「いま選んでいるノートと違う」で捨て、「このスタックを
+   *   載せる」は 2 ペインの裏で状態だけ変わり、どちらも**画面に何も出なかった**。
+   *   「この中に新しいノートを作る」は押すと自分で本文の画面へ移っていた。
+   * 🔑 メニューを**開いただけ**では移らない(上の test)── 押した項目が本文の画面を
+   *   要るときだけ、C9 の前と同じく**その行を選んで**移る。
+   */
+  it('🔴 「履歴」は、押したときに押した行を選び、その行の履歴を出す', async () => {
+    const t = setupDual();
+    t.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+    t.d.dispatch({ type: 'SET_VIEW_MODE', mode: 'dual' });
+    rightClick(t.dualRow('left', 'n1'));
+    expect(t.d.getState().viewMode, 'メニューを開いただけで 2 ペインを抜けた').toBe('dual');
+    t.press('show-history');
+    await tick();
+    expect(t.d.getState().selectedLid, '押した行が選ばれていない').toBe('n1');
+    expect(t.d.getState().viewMode, '履歴が出る画面へ移っていない').toBe('detail');
+    expect(t.d.getState().revisionPanel?.lid, '押した行の履歴が出ていない(一覧が捨てられた)').toBe('n1');
+  });
+
+  it('🔴 「このスタックを載せる」は、押したときに押した行を選んでから載せる', async () => {
+    const t = setupDual();
+    t.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+    t.d.dispatch({ type: 'SET_VIEW_MODE', mode: 'dual' });
+    rightClick(t.dualRow('left', 's1'));
+    t.press('stack-load');
+    await tick();
+    expect(t.d.getState().selectedLid, '押したスタックが選ばれていない').toBe('s1');
+    expect(t.d.getState().viewMode, '載せた帯が出る画面へ移っていない').toBe('detail');
+  });
+
+  it('🔴 「この中に新しいノートを作る」は、押した行(フォルダ)の中に作る', async () => {
+    const t = setupDual();
+    t.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+    t.d.dispatch({ type: 'SET_VIEW_MODE', mode: 'dual' });
+    rightClick(t.dualRow('left', 'f1'));
+    const before = new Set(t.d.getState().entryMetas.keys());
+    t.press('create-in-folder');
+    await tick();
+    const made = [...t.d.getState().entryMetas.keys()].filter((k) => !before.has(k));
+    expect(made, 'ノートが 1 件作られていない').toHaveLength(1);
+    expect(
+      t.d.getState().relations.some((r) => r.fromLid === 'f1' && r.toLid === made[0]),
+      '押したフォルダ(f1)の中に作られていない',
+    ).toBe(true);
+  });
+
+  it('⚠ 対照群 ── 本文の画面を要らない項目(削除・コピー・書き出し)には「押したら選ぶ」が付かない', () => {
+    const t = setupDual();
+    rightClick(t.dualRow('left', 'n1'));
+    for (const a of ['delete-entry', 'copy-entry-ref', 'export-entry-docx', 'dual-rename-begin']) {
+      const b = t.root.querySelector(`${MENU} [data-pkc-action="${a}"]`);
+      expect(b, `前提が崩れている: ${a} が無い`).not.toBeNull();
+      expect(b!.hasAttribute('data-pkc-menu-select-first'), `${a} まで押したら 2 ペインを抜ける`).toBe(false);
+    }
+    const h = t.root.querySelector(`${MENU} [data-pkc-action="show-history"]`);
+    expect(h?.hasAttribute('data-pkc-menu-select-first'), '空振り防止: 履歴に印が無い').toBe(true);
   });
 
   describe('編集中でも、同じ扱いになる(#690 ④ A′ の枝と揃える)', () => {

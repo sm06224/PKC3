@@ -2479,6 +2479,27 @@ function tableLineAt(target: Element, body: string | null): number | null {
  *   **もともと開いているノート**を指すので、戻す相手が無い(属性も付かない)。
  */
 const MENU_PREV_LID_ATTR = 'data-pkc-menu-prev-lid';
+/**
+ * 🔴 **押したときだけ、その行を選んでから効かせる**(#1045 C9、着地前レビューで直した)。
+ *
+ * ⚠ 2 ペインの右クリックは**選択を動かさずに**行のメニューを出す(開いただけで
+ *   中央が切り替わらないため)。ところが中身を**中央の本文の画面に出す**項目
+ *   (「履歴」「このスタックを載せる」)は、2 ペインのままだと状態だけ書き換わって
+ *   **画面に何も出ない**(無言の dead click)。「この中に新しいノートを作る」は
+ *   押した瞬間に自分で本文の画面へ移る。
+ * 🔑 だから**押したときに**その行を選ぶ(= C9 の前と同じ動き)── メニューを開いた
+ *   だけでは移らない。受け手は `run` の 1 か所で、属性を持つ項目にだけ効く。
+ */
+const MENU_SELECT_FIRST_ATTR = 'data-pkc-menu-select-first';
+/**
+ * 2 ペインの右クリックで「押したらその行を選ぶ」項目 ── **中身を中央の本文の画面に出す**物だけ。
+ * ⚠ 足すときは「2 ペインのまま押して、画面に何か出るか」を 1 度見る(出ないなら足す)。
+ */
+const DUAL_MENU_SELECT_FIRST: ReadonlySet<string> = new Set([
+  'show-history',
+  'stack-load',
+  'create-in-folder',
+]);
 
 /**
  * 🔴 **クリックでメニューを開く受け手**(#632 段①)。⚠ ここに載せ忘れると、
@@ -9360,6 +9381,11 @@ export function bindActions(
     if (!handler) return;
     if (refuseWhileBusy(action, dispatcher, services)) return;
     if (refuseWithoutNote(action, dispatcher)) return;
+    // 🔴 2 ペインの右クリックの一部の項目は、押したときにその行を選ぶ(`MENU_SELECT_FIRST_ATTR`)
+    if (el.hasAttribute(MENU_SELECT_FIRST_ATTR)) {
+      const lid = el.getAttribute(MENU_LID_ATTR) ?? '';
+      if (lid === '' || !selectEntryOrExplain(dispatcher, lid, 'ノート')) return;
+    }
     /**
      * 🔴 **押す前から**見せていたときだけ畳み直す(#655 ①)── `append-at-heading`
      *   自身が開いた回に、その直後のここで畳んでしまわない(開いた瞬間に消える)。
@@ -11881,10 +11907,12 @@ export function bindActions(
         linkedFile: st.linkedFiles.get(lid) ?? null,
       })
         .filter((a) => a.action !== 'move-to-folder' && a.action !== 'copy-plain-markdown')
-        .map((a) =>
+        .map((a): MenuItem =>
           a.action === 'rename-entry-begin'
             ? { ...a, action: 'dual-rename-begin', attrs: { 'data-pkc-side': side } }
-            : a,
+            : DUAL_MENU_SELECT_FIRST.has(a.action)
+              ? { ...a, attrs: { [MENU_SELECT_FIRST_ATTR]: '' } }
+              : a,
         );
       openContextMenu(
         root,
