@@ -12217,6 +12217,25 @@ export function bindActions(
     closeContextMenu(root);
   };
   const onMenuKey = (ev: KeyboardEvent): void => {
+    /**
+     * 🔴 **`root` が外れていたら何もしない**(#1042 followup。regression 修理)。
+     *
+     * ⚠ `onShortcut` はこの門を最初から持っていた(「test が root を作り直しても、
+     *   古い binder の handler が生き残って二重に作らないため」)が、**同じ
+     *   `document` に付く `onMenuKey` には無かった** ── CLAUDE.md §7
+     *   「片側を直したら、対称の反対側を必ず疑う」を破っていた。
+     * 🔑 これが load-bearing になったのは C3 が `stopImmediatePropagation()` を
+     *   足した日から。⚠ **直す前の実害**:test file がメニューを開いたまま
+     *   `it()` を終える(= `bindActions` の unbind を呼ばない)と、その
+     *   古い(切り離された)`root` を握った `onMenuKey` が `document` に residual で
+     *   残り続ける。以後**同じ file の残り全部の `Escape`** で
+     *   `contextMenuOpen(oldRoot)` が(そのまま消えない開いたメニューにより)
+     *   永久に真を返し、`stopImmediatePropagation()` が**現在のテストの
+     *   `onShortcut` も含めて後続の聞き手を丸ごと黙らせる**
+     *   (`tests/adapter/row-organize.test.ts` の「Esc なら変えずに閉じる」等が
+     *   これで壊れていた)。
+     */
+    if (!root.isConnected) return;
     if (ev.key !== 'Escape' || !contextMenuOpen(root)) return;
     closeContextMenu(root);
     /**
