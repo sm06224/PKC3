@@ -164,7 +164,7 @@ describe('ossNoticesPlugin() の配線', () => {
     expect(load.call(context(), '/src/main.ts')).toBeNull();
   });
 
-  it('🔴 実物の root(このリポジトリ自身)で、7 件の依存を default export で返す', () => {
+  it('🔴 実物の root(このリポジトリ自身)で、依存の一覧を default export で返す', () => {
     const ctx = context();
     const id = resolveId.call(ctx, OSS_NOTICES_ID)!;
     const code = load.call(ctx, id)!;

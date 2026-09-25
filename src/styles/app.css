@@ -463,12 +463,18 @@ button {
   white-space: nowrap;
   vertical-align: middle;
 }
-/* 🔴 **図案は書体の 1 文字**(#770 段①、2026-09-11)。
- * ⚠ 直す前は inline SVG で、`stroke: currentColor` と `stroke-width` を CSS が決めていた。
- *   いまは**字**なので `color` がそのまま効く ── 選択中の行でも 9 テーマでも器の字色に追従する。
- * 🔴 **同梱する**(`src/styles/fonts/pkc-symbols.woff2`、10,640 バイト = 76 種だけの部分集合。
- *   ⚠ 2026-09-12 に 40 → 76 へ増やした ── #770 段② でアプリの目印に選べる絵を足したため)。
- *   ⚠ 外から取りに行かない ── 取れない端末で**図案が全部消える**形にしない。
+/* 🔴 **図案は書体 2 文字の重ね描き**(#1054 段①、2026-09-25 ── 単色 Material
+ * Symbols から **Phosphor Duotone** へ)。
+ * ⚠ 直す前(単色書体)は `color` が字ごと 1 色を決めていた。Duotone は
+ *   「下地(`::before`、薄い色)」+「線(`::after`、濃い色。`margin-left: -1em` で
+ *   下地の上に重ねる ── Phosphor 公式 `style.css` と同じ技法)」の 2 枚重ね。
+ *   `color` は**線**が引き継ぎ(下の危険色・種別チップの上書きが今までどおり効く)、
+ *   **下地**は `--pkc-icon-underlay`(`src/styles/icons.generated.css` が
+ *   `data-pkc-symbol` ごとに tone を割り当てる)が持つ。
+ * 🔴 **同梱する**(`src/styles/fonts/pkc-symbols.woff2`、82 種 × 2 符号位置の
+ *   部分集合。`npm run icons:font` が `node_modules/@phosphor-icons/web` から
+ *   **外の網へ行かずに**焼く)。⚠ 外から取りに行かない ── 取れない端末で
+ *   **図案が全部消える**形にしない。
  * ⚠ `font-display: block` ── 届くまでは**何も出さない**(字が出るより良い)。同一出荷物なので
  *   待ちは実質ゼロである。
  * ⚠ **リガチャは使わない**(符号位置で置く。`features/icon/symbols.ts` の戒め)。
@@ -477,7 +483,7 @@ button {
 @font-face {
   font-family: 'PKC Symbols';
   font-style: normal;
-  font-weight: 500;
+  font-weight: normal;
   font-display: block;
   src: url('./fonts/pkc-symbols.woff2') format('woff2');
 }
@@ -490,21 +496,103 @@ button {
   /* 🔴 **書体で描く**(#770 段①)。⚠ ここを外すと**豆腐**になる ── 私用領域の
    * 符号位置なので、既定の書体には絵が無い。 */
   font-family: 'PKC Symbols';
-  font-weight: 500;
+  font-weight: normal;
   font-variant-ligatures: none;
   -webkit-font-smoothing: antialiased;
   width: 1.15em;
   text-align: center;
   line-height: 1;
   /* ⚠ **器の字の大きさに載せない** ── 帯のボタンは 12px なので、載せると枠の字が
-   * 12.6px(12 × 1.05)= 描く絵は **14.5px**(さらに 1.15em)まで縮む。
-   * Material は 20px 前提の設計なので、そこまで縮むと潰れる。16px で固定する。 */
+   * 12.6px(12 × 1.05)= 描く絵は **14.5px**(さらに 1.15em)まで縮む。16px で固定する。 */
   font-size: 16px;
   /* ⚠ 絵文字は書体で行送りが伸びる ── 枠の高さも固定して押し出させない */
   height: 1.15em;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+/**
+ * 🔴 **duotone の重ね描きの機構**(#1054 段①)。⚠ `content` はここに書かない ──
+ * `data-pkc-symbol` ごとの符号位置は `icons.generated.css` が持つ(生成物を
+ * 2 か所に分けない)。ここに置くのは**絵の種類に依らない共通の見た目**だけ。
+ *
+ * 🔴 **tone は `data-pkc-tone` から読む(#1054 段①-2、2026-09-25 に変わった)**。
+ * ⚠ 直す前(段①)は `icons.generated.css` が `data-pkc-symbol` ごとに
+ *   `--pkc-icon-underlay` を焼いていた ── **絵 1 つに tone は 1 つ**しか
+ *   持てず、同じ絵(`page`)が種別チップでも Word 書き出しでも同じ色になる
+ *   制約があった。いまは **`data-pkc-tone`(`icons.ts` の `setIcon` / `iconButton`
+ *   が action ごとに書く JS 側の属性)**を読む ── 生成 CSS はもう tone を
+ *   持たず、符号位置の `content` だけを焼く。
+ * ⚠ 既定(下の 7 本のどれにも当たらない = `neutral`)は**線も下地も
+ *   `currentColor`**(下地は薄く 0.2、線は素の字と同じ濃さ)── 情報を持たない
+ *   絵はいままでどおり無彩色のまま。
+ * ⚠ **不透明度は `disabled` の減光と掛け算になる**(意図どおり ── 押せない
+ *   ボタンでは下地はさらに薄くなり、線も通常どおり `button:disabled` の
+ *   `opacity: .45` で薄まる)。
+ */
+[data-pkc-icon]::before {
+  color: var(--pkc-icon-underlay, currentColor);
+  opacity: var(--pkc-icon-underlay-opacity, 0.2);
+}
+[data-pkc-icon]::after {
+  margin-left: -1em;
+  color: var(--pkc-icon-line, currentColor);
+}
+/**
+ * 🔴 **7 本 = `IconTone` 8 種のうち `neutral` を除いた数**(#1054 段①-2)。
+ * ⚠ `neutral` は上の既定(フォールバック)がそのまま答えなので規則を持たない ──
+ *   8 本目を書くと「既定と同じ値をもう 1 か所に書く」ことになる(§7)。
+ *
+ * | tone | 線(`::after`) | 下地(`::before`) |
+ * |---|---|---|
+ * | create/capture/io/find/system/danger | tone 色そのまま(不透明度 1.0、対 `--surface` で WCAG 1.4.11 の 3:1 を実測済み ── `tokens.css` の注記) | 同じ tone 色を **0.32** の不透明度で敷く |
+ * | kind | 上書きしない(`currentColor` のまま) | `--pkc-tone-kind`(チップの外では無彩色) |
+ *
+ * ⚠ **`kind` は線を上書きしない** ── チップに入ったとき(`[data-pkc-icon]
+ *   [data-pkc-chip='…']`、下を見よ)が `color` ごと上書きして勝つので、
+ *   ここで線を tone 色にすると**チップの外に出たときだけ**色が変わってしまう。
+ * ⚠ **`danger` は個別の action 上書き(旧 `[data-pkc-action='delete-entry']
+ *   [data-pkc-icon]` 等)を持たない** ── `delete-entry`(`trash`)は絵の既定
+ *   tone が既に `danger`、`purge-orphan-assets` は `icons.ts` の
+ *   `ACTION_TONES` が `danger` へ上書きする。**同じ意味を 2 か所に持たない**。
+ */
+[data-pkc-icon][data-pkc-tone='create'] {
+  --pkc-icon-hue: var(--pkc-hue-create);
+  --pkc-icon-line: var(--pkc-tone-create);
+  --pkc-icon-underlay: var(--pkc-tone-create);
+  --pkc-icon-underlay-opacity: 0.32;
+}
+[data-pkc-icon][data-pkc-tone='capture'] {
+  --pkc-icon-hue: var(--pkc-hue-capture);
+  --pkc-icon-line: var(--pkc-tone-capture);
+  --pkc-icon-underlay: var(--pkc-tone-capture);
+  --pkc-icon-underlay-opacity: 0.32;
+}
+[data-pkc-icon][data-pkc-tone='io'] {
+  --pkc-icon-hue: var(--pkc-hue-io);
+  --pkc-icon-line: var(--pkc-tone-io);
+  --pkc-icon-underlay: var(--pkc-tone-io);
+  --pkc-icon-underlay-opacity: 0.32;
+}
+[data-pkc-icon][data-pkc-tone='find'] {
+  --pkc-icon-hue: var(--pkc-hue-find);
+  --pkc-icon-line: var(--pkc-tone-find);
+  --pkc-icon-underlay: var(--pkc-tone-find);
+  --pkc-icon-underlay-opacity: 0.32;
+}
+[data-pkc-icon][data-pkc-tone='system'] {
+  --pkc-icon-hue: var(--pkc-hue-system);
+  --pkc-icon-line: var(--pkc-tone-system);
+  --pkc-icon-underlay: var(--pkc-tone-system);
+  --pkc-icon-underlay-opacity: 0.32;
+}
+[data-pkc-icon][data-pkc-tone='danger'] {
+  --pkc-icon-line: var(--pkc-tone-danger);
+  --pkc-icon-underlay: var(--pkc-tone-danger);
+  --pkc-icon-underlay-opacity: 0.32;
+}
+[data-pkc-icon][data-pkc-tone='kind'] {
+  --pkc-icon-underlay: var(--pkc-tone-kind);
 }
 button:hover:not(:disabled) {
   background: var(--surface-2);
@@ -515,7 +603,12 @@ button:hover:not(:disabled) {
  *   `:disabled` の規則が無く、情報ペインの操作の帯 12 個は**編集中に `disabled` でも
  *   見た目が同じ**だった ── 押しても何も起きないボタンを user が探す。
  * 🔑 汎用に置く ── 個別に足すと、次に `disabled` を付けたボタンがまた素通りする。
- *   値が違う所(glyph の .35 / dual の .4)は詳細度で勝つので、そのまま残る。 */
+ *   値が違う所(glyph の .35 / dual の .4)は詳細度で勝つので、そのまま残る。
+ * ⚠ **図案の両層(線・下地)も一緒に薄まる**(#1054 段①-2)── `opacity` は
+ *   要素とその子孫を**まとめて**合成するので、`[data-pkc-icon]::before` /
+ *   `::after` が個別に持つ不透明度(0.32 の下地・1.0 の線)と**掛け算になる**
+ *   (0.45 × 0.32 = 実質 0.14、0.45 × 1.0 = 0.45)。tone の色そのものを
+ *   触らずに済む ── 個別に減光する規則を足さない。 */
 button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -1103,58 +1196,96 @@ select:focus-visible {
 
 /* 🔑 **意味を持つ色は使う**(P10、user 指示 2026-08-05「ルールを変え、みやすく
  * 使いやすいのを心がけて」)。消える操作は**危険色**で先に分かるべき情報である。
- * ⚠ ボタン全体を塗らない ── 図案だけ色を持たせ、地は無彩色のまま */
-[data-pkc-action='delete-entry'] [data-pkc-icon],
-[data-pkc-action='purge-orphan-assets'] [data-pkc-icon],
-[data-pkc-action='purge-trash'] [data-pkc-icon] {
-  color: var(--danger);
-}
+ * ⚠ ボタン全体を塗らない ── 図案だけ色を持たせ、地は無彩色のまま
+ *
+ * 🔴 **個別の action 上書きは 2026-09-25(#1054 段①-2)に外した**。
+ * ⚠ 直す前はここに `[data-pkc-action='delete-entry'] [data-pkc-icon]` 等の
+ *   3 つ組を名指しで置き、`color` + `--pkc-icon-underlay` を手で `--danger`
+ *   へ揃えていた。⚠ いまは `[data-pkc-icon][data-pkc-tone='danger']`
+ *   (上の「duotone の重ね描きの機構」)が線・下地とも同じ仕事をするので、
+ *   **同じ意味を 2 か所に持つ**ことになっていた(§7):
+ *   - `delete-entry`(絵は `trash`)── 絵の既定 tone が既に `danger`
+ *   - `purge-orphan-assets`(絵は `broom`、既定は `system`)── `icons.ts` の
+ *     `ACTION_TONES['purge-orphan-assets'] = 'danger'` が上書きする
+ *     (**元に戻せない**掃除なので危険色を保つ、という元の意図はそのまま)
+ *   - `purge-trash` … `filer.ts` が組む生の `<button>` で、**そもそも
+ *     `[data-pkc-icon]` を持たない**(絵の無いボタン)。この規則は最初から
+ *     何にも当たっていなかった(死んだ CSS)。
+ */
 
 /* 🔑 **種別は色でも分かる**(P10)。「何のノートか」は情報なので色を使ってよい。
  * ⚠ 色相は `--fg` と混ぜて作る ── そうすると 9 テーマぶんの token を持たずに、
  *   どのテーマでも地に対して十分な濃さになる(暗い地では明るく寄る)。
  * ⚠ 混ぜ比率は **fg 2〜3 割**。最初 5.5 割でやったら oklab の明度が 0.35 まで落ちて
  *   **色相がほとんど見えなかった**(実測)── 「色を使った」と言えるだけの無味な状態
- * ⚠ 形でも区別できることが前提(色だけに頼らない)── 図案は別々に描いてある */
-[data-pkc-chip='text'] {
+ * ⚠ 形でも区別できることが前提(色だけに頼らない)── 図案は別々に描いてある
+ * 🔴 **セレクタに `[data-pkc-icon]` を足した**(#1054 段①)── チップは
+ *   `iconSpan()` が作るので `data-pkc-icon` を必ず併せ持つ(同じ要素を指す、
+ *   意味は変えない)。⚠ **足す理由は詳細度**:1 属性(0,0,1,0)のままだと
+ *   `[data-pkc-icon][data-pkc-tone='kind']`(上の「duotone の重ね描きの機構」、
+ *   0,0,2,0)に**負けて下地の色が変わらない**(2026-09-25 に `icons.generated.css`
+ *   の per-symbol 規則からここへ移った ── 詳細度の勝敗は変わらず同点のまま)。
+ *   2 属性に揃え、`--pkc-icon-underlay` も `color` と同じ値にして下地も
+ *   種別の色へ揃える(user 裁定の「下地の色は操作の種類ごと」の**チップ版**)。
+ *   ⚠ **`color` の上書きが線も勝つ** ── `kind` の規則は線(`::after`)を
+ *   上書きしないので(`currentColor` のまま)、ここで `color` を書けば
+ *   線もチップの色になる(意図どおり)。 */
+[data-pkc-icon][data-pkc-chip='text'] {
   color: color-mix(in oklab, var(--fg) 25%, #2f6fd0);
+  --pkc-icon-underlay: color-mix(in oklab, var(--fg) 25%, #2f6fd0);
 }
-[data-pkc-chip='textlog'] {
+[data-pkc-icon][data-pkc-chip='textlog'] {
   color: color-mix(in oklab, var(--fg) 25%, #b06a1f);
+  --pkc-icon-underlay: color-mix(in oklab, var(--fg) 25%, #b06a1f);
 }
-[data-pkc-chip='spreadsheet'] {
+[data-pkc-icon][data-pkc-chip='spreadsheet'] {
   color: color-mix(in oklab, var(--fg) 25%, #1f7a5a);
+  --pkc-icon-underlay: color-mix(in oklab, var(--fg) 25%, #1f7a5a);
 }
-[data-pkc-chip='folder'] {
+[data-pkc-icon][data-pkc-chip='folder'] {
   color: color-mix(in oklab, var(--fg) 20%, #c39312);
+  --pkc-icon-underlay: color-mix(in oklab, var(--fg) 20%, #c39312);
 }
 /* 🔴 **スマートフォルダ**(#421 段①)── フォルダと**同系だが別の色**にする。
  * ⚠ 同じ色だと、消せない / 移せない / 中身が勝手に変わる入れ物が
  *   ふつうのフォルダに見える(user は「壊れている」と読む)。 */
-[data-pkc-chip='smart'] {
+[data-pkc-icon][data-pkc-chip='smart'] {
   color: color-mix(in oklab, var(--fg) 20%, #c26a12);
+  --pkc-icon-underlay: color-mix(in oklab, var(--fg) 20%, #c26a12);
 }
 /* 🔴 **スタック**(#633 段③)── 参照で集める入れ物なのでスマートフォルダの系だが、
  * 中へ入れない別物なので**別の色**にする(同じ色だと「開けない入れ物」に見える)。 */
-[data-pkc-chip='stack'] {
+[data-pkc-icon][data-pkc-chip='stack'] {
   color: color-mix(in oklab, var(--fg) 25%, #3a7a9a);
+  --pkc-icon-underlay: color-mix(in oklab, var(--fg) 25%, #3a7a9a);
 }
 /* 🔴 **アプリのグループ**(#857 段②)── 添付(タイルの実体)の系から少しずらす。
  * ⚠ 添付と同じ色にしない ── 一覧で並んだとき「タイルそのもの」と見分けが付かない。 */
-[data-pkc-chip='appgroup'] {
+[data-pkc-icon][data-pkc-chip='appgroup'] {
   color: color-mix(in oklab, var(--fg) 25%, #5a7ac2);
+  --pkc-icon-underlay: color-mix(in oklab, var(--fg) 25%, #5a7ac2);
 }
-[data-pkc-chip='attachment'] {
+[data-pkc-icon][data-pkc-chip='attachment'] {
   color: color-mix(in oklab, var(--fg) 25%, #7a5ac2);
+  --pkc-icon-underlay: color-mix(in oklab, var(--fg) 25%, #7a5ac2);
 }
-[data-pkc-chip='todo'],
-[data-pkc-chip='form'] {
+[data-pkc-icon][data-pkc-chip='todo'],
+[data-pkc-icon][data-pkc-chip='form'] {
   color: color-mix(in oklab, var(--fg) 25%, #b03a5a);
+  --pkc-icon-underlay: color-mix(in oklab, var(--fg) 25%, #b03a5a);
 }
 /* ⚠ 選んでいる行では**行の色に戻す** ── 選択の色より種別の色が強いと、
- *   どれを選んでいるか分からなくなる(選択は種別より上位の情報) */
+ *   どれを選んでいるか分からなくなる(選択は種別より上位の情報)。
+ *
+ * 🔑 **下地は `currentColor`**(= `color: inherit;` で確定した、この要素自身の
+ *   字の色 = 選択行の字の色)。⚠ 1 稿目は `--pkc-icon-underlay: inherit;` と
+ *   書いていた ── 親は宣言していないので保証された無効値になり、`::before` の
+ *   `var(--pkc-icon-underlay, currentColor)` が**フォールバックへ落ちて同じ色**に
+ *   なる(着地前レビューが実 Chromium で確かめた)。つまり壊れてはいなかった ──
+ *   回り道だったので、行き先を直に書いた(#1054 段①-2)。 */
 [data-pkc-selected] [data-pkc-chip] {
   color: inherit;
+  --pkc-icon-underlay: currentColor;
 }
 
 /* 種別のチップ ── **色が分類を担う**(裸の文字を本文の前に置かない)。
@@ -1531,6 +1662,31 @@ button[data-pkc-primary]:active:not(:disabled) {
   background: var(--fg);
   color: var(--surface);
   opacity: 0.72;
+}
+/**
+ * 🔴 **主のボタン(地と字が反転している)の図案は、色相を `--surface` と混ぜる**
+ * (#1054 段①-2。着地前レビューで「+ ノート」の絵だけ色が 1px も見えないと指摘された)。
+ *
+ * ⚠ 一般の tone は `--fg` と混ぜてある(`tokens.css`)── `--surface` の地で線が読める
+ *   ように**地と反対の明るさ**へ寄せるためである。主のボタンは地が `--fg` なので、
+ *   同じ色は**地と同じ明るさ**になって溶ける(light では黒地に暗い緑、dark では白地に
+ *   淡い緑)。1 稿目は線を `currentColor` へ差し戻し、下地だけ 0.55 で敷いていたが、
+ *   **書類・フォルダの絵は下地が角の三角やタブにしか無い**(Phosphor の作り。
+ *   実測で面積 2〜4%)ので、下地だけでは色がほぼ見えなかった。
+ * 🔑 だから**線も下地も**、同じ色相を**混ぜる相手だけ裏返して**使う
+ *   (`--pkc-icon-hue` は tone の規則が立てる)。反転した地に対する線の対比は
+ *   **9 テーマ × 5 色相の全部で 4.07:1 以上**(実ブラウザで `color-mix()` を解決させて
+ *   計測。最小は `solarized-dark` の create)── 一般の tone の 3:1 の契約を満たす。
+ * ⚠ 色相を持たない絵(`neutral` / `kind`)は `--pkc-icon-hue` が無いので
+ *   `currentColor`(= 反転した字の色)へ落ちる ── いままでどおりの無彩色。
+ * ⚠ 詳細度は `button[data-pkc-primary] [data-pkc-icon]`(0,0,2,1)で、
+ *   tone の規則(`[data-pkc-icon][data-pkc-tone='…']`、0,0,2,0)より**型 1 つぶん
+ *   高い** ── ファイルの前後関係に頼らず、どこに書いても勝つ。
+ */
+button[data-pkc-primary] [data-pkc-icon] {
+  --pkc-icon-line: color-mix(in oklab, var(--surface) 32%, var(--pkc-icon-hue, currentColor));
+  --pkc-icon-underlay: color-mix(in oklab, var(--surface) 32%, var(--pkc-icon-hue, currentColor));
+  --pkc-icon-underlay-opacity: 0.55;
 }
 [data-pkc-action='delete-entry'],
 [data-pkc-action='purge-trash'] {

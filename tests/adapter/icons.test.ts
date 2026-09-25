@@ -1,9 +1,12 @@
 /** @vitest-environment happy-dom */
 /**
- * 図案の**配線**(P9 段③ → **#770 段① で書体にした**)。
+ * 図案の**配線**(P9 段③ → #770 段① で書体にした → **#1054 段① で Phosphor
+ * Duotone へ**)。
  *
  * 🔴 経緯:絵文字 → 単色 SVG(2026-08-03 の 2 件に同時に反していたため)→
- *   **Material Symbols の部分集合**(user 要望 2026-09-07)。
+ *   Material Symbols の部分集合(user 要望 2026-09-07)→ **Phosphor Duotone**
+ *   (裁定 2026-09-25、#1046 コメント 5833340597。「いまの Material のアイコンは
+ *   単色で色味に欠け、使っていて気分が上がらない」)。
  *
  * ⚠ **書体そのもの**(豆腐を出さない)は `tests/features/icon-symbols.test.ts` が見る。
  *   ここで見るのは**画面に出るまでの配線**である:
@@ -15,6 +18,7 @@ import { join } from 'node:path';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import {
   ACTION_ICONS,
+  ACTION_TONES,
   ARCHETYPE_ICONS,
   BROWSE_ICONS,
   iconButton,
@@ -75,8 +79,8 @@ describe('図案は書体の 1 文字である(#770 段①)', () => {
   /**
    * 🔴 **図案の大きさを器の字に載せない**(#770 段①)。
    * ⚠ 帯のボタンは 12px なので、`em` で載せると枠の字が 12.6px(12 × 1.05)、
-   *   **描く絵は 14.5px**(さらに 1.15em)まで縮む ── Material は 20px 前提の
-   *   設計なので、そこまで縮むと潰れる。
+   *   **描く絵は 14.5px**(さらに 1.15em)まで縮む ── duotone は下地 + 線の
+   *   2 枚重ねなので、縮むと 2 枚の間隔が潰れて 1 色に見える。
    */
   it('🔴 図案の大きさが px で固定されている(帯の 12px に引きずられない)', () => {
     // 🔑 **構文で拾う**(注釈に満たされない / 子孫選択子に当たらない)──
@@ -87,10 +91,30 @@ describe('図案は書体の 1 文字である(#770 段①)', () => {
     expect(blocks[0], '大きさが器の字に載っている(帯で潰れる)').toMatch(/font-size:\s*\d+px/);
   });
 
+  /**
+   * 🔴 **danger の検め方を「CSS の字面」から「解決した tone」へ変えた**
+   * (#1054 段①-2、2026-09-25)。⚠ 直す前は `[data-pkc-action='delete-entry']`
+   * を名指しした CSS 上書きが在ったので、その字面を grep していた。いまは
+   * `delete-entry` は絵(`trash`)の**既定 tone がもう danger**なので、
+   * 個別の CSS 上書きは無い(§7、同じ意味を 2 か所に持たない)。
+   * 🔑 だから**実際に組んだ DOM の `data-pkc-tone`** を見る ── CSS の字面より
+   * 強い pin(絵の既定値が変わっても、上書きの経路が変わっても、この一致だけは崩れない)。
+   */
   it('🔴 危険な操作と種別に色が付いている(意味を持つ色は使う)', () => {
-    const css = readFileSync('src/styles/app.css', 'utf-8');
     // 消える操作は先に分かるべき情報である
-    expect(css).toMatch(/\[data-pkc-action='delete-entry'\][^{]*\{[^}]*--danger/s);
+    const del = iconButton('delete-entry', '削除');
+    expect(
+      del.querySelector('[data-pkc-icon]')?.getAttribute('data-pkc-tone'),
+      '削除ボタンの図案が danger tone を持っていない',
+    ).toBe('danger');
+    // ⚠ 元に戻せない掃除も同じ危険色(`ACTION_TONES` の上書き)
+    const purge = iconButton('purge-orphan-assets', '使っていない添付を消す');
+    expect(
+      purge.querySelector('[data-pkc-icon]')?.getAttribute('data-pkc-tone'),
+      '使っていない添付を消すボタンの図案が danger tone を持っていない',
+    ).toBe('danger');
+
+    const css = readFileSync('src/styles/app.css', 'utf-8');
     // 種別は「何のノートか」= 情報。⚠ 図案を持つ種別すべてに色がある
     for (const archetype of Object.keys(ARCHETYPE_ICONS))
       expect(css, `種別 ${archetype} のチップに色が無い`).toContain(
@@ -152,8 +176,8 @@ describe('図案は書体の 1 文字である(#770 段①)', () => {
     // ⚠ 差し替えでも器の字は空のまま(ここで字を入れると上の pin が崩れる)
     expect(span.textContent ?? '', '差し替えで器に字が入った').toBe('');
     // 🔑 2 つの名前が**別の絵**を指していること ── 同じなら上の assert は何も守らない
-    expect(PKC_SYMBOLS['folder'].cp, 'page と folder が同じ絵(前提が崩れている)').not.toBe(
-      PKC_SYMBOLS['page'].cp,
+    expect(PKC_SYMBOLS['folder'].icon, 'page と folder が同じ絵(前提が崩れている)').not.toBe(
+      PKC_SYMBOLS['page'].icon,
     );
   });
 });
@@ -261,8 +285,15 @@ describe('図案の登記に死んだ行を残さない', () => {
      *   `box` = 封印中の `todo` の「未完了」の枠。対になる `check-box` は
      *   `ARCHETYPE_ICONS.todo` が使っており、**状態を切り替える押し口が
      *   2026-08-19 に無くなった**(`sealed.ts`)ぶんだけ、こちらが浮いている。
+     *
+     * 🔴 **`folder-plus` / `note-plus` / `eye` は #1054 段②(3 つの帯の
+     *   作り替え)が使う予定で足した**(2026-09-25)── この段①ではまだ
+     *   どこからも呼ばない(書体と表に用意しておくだけ)。⚠ `copy` / `move` /
+     *   `snippet` は同じ段②向けだが、既存の src に**別の意味の同名 literal**が
+     *   在るため、この走査には拾われず `FOLDED` へ足す必要が無い
+     *   (= たまたま「指されている」側に見えるだけで、実際に呼ばれてはいない)。
      */
-    const FOLDED = ['box'];
+    const FOLDED = ['box', 'folder-plus', 'note-plus', 'eye'];
 
     const src = readFileSync('src/features/icon/symbols.ts', 'utf-8');
     const bare = (t: string): string => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
@@ -466,5 +497,59 @@ describe('絵文字を UI に置かない', () => {
     expect(emoji.test("const label = 'ノート';"), '普通の日本語を誤検知する').toBe(false);
     // ⚠ 文中の記号を誤検知しない(上の②の根拠)
     expect(emoji.test('`\u26a0 注意 ${n} 件`'), '文中の記号を誤検知する').toBe(false);
+  });
+});
+
+/**
+ * 🔴 **action ごとの tone を pin する**(#1054 段①-2、2026-09-25。着地前レビューの
+ * 指摘 5 件を実装で直したので、それが直ったままであることを見る)。
+ *
+ * ⚠ **CSS の字面ではなく、組んだ DOM(`data-pkc-tone`)を見る** ── tone の
+ *   決定は `iconButton` の中(`ACTION_TONES[action] ?? 絵の既定`)にあるので、
+ *   そこを直に確かめるほうが強い pin になる(CSS 側は「読み方」を検めるだけ)。
+ */
+describe('🔴 action ごとの tone(レビュー指摘の pin)', () => {
+  function toneOf(action: string, label: string, iconKey?: string): string | null {
+    const btn = iconKey === undefined ? iconButton(action, label) : iconButton(action, label, iconKey);
+    return btn.querySelector('[data-pkc-icon]')?.getAttribute('data-pkc-tone') ?? null;
+  }
+
+  it('Word(export-entry-docx)は io', () => {
+    expect(toneOf('export-entry-docx', 'Word で書き出す')).toBe('io');
+  });
+
+  it('添付(attach-file)は io', () => {
+    expect(toneOf('attach-file', '添付')).toBe('io');
+  });
+
+  it('PowerPoint(export-entry-pptx)は io、かつ絵を持つ(review 指摘:書き出しの中で唯一無地だった)', () => {
+    const btn = iconButton('export-entry-pptx', 'PowerPoint で書き出す');
+    const icon = btn.querySelector('[data-pkc-icon]');
+    expect(icon, 'export-entry-pptx に図案が無い').not.toBeNull();
+    expect(icon?.getAttribute('data-pkc-symbol')).toBe('presentation');
+    expect(icon?.getAttribute('data-pkc-tone')).toBe('io');
+  });
+
+  it('「+ ノート」(create-entry)は create ── iconKey が archetype:* に変わっても揺れない', () => {
+    expect(toneOf('create-entry', '+ ノート', 'archetype:text')).toBe('create');
+    expect(toneOf('create-entry', '+ フォルダ', 'archetype:folder')).toBe('create');
+    // ⚠ iconKey を渡さない(既定 = action)形でも同じ
+    expect(toneOf('create-entry', '新規')).toBe('create');
+  });
+
+  it('launch-asset(アプリを開く)は io であって capture ではない(review 指摘)', () => {
+    const tone = toneOf('launch-asset', 'アプリを開く', 'launch-asset');
+    expect(tone).toBe('io');
+    expect(tone, 'launch-asset が誤って capture のまま').not.toBe('capture');
+  });
+
+  it('🔴 対照群:表に無い action は絵の既定 tone のまま(上書きしすぎていない)', () => {
+    // ⚠ ACTION_TONES を「全 action に効く」ものにしていないか ── delete-entry は
+    //   絵(trash)の既定が既に danger なので、ACTION_TONES に載っていないはず
+    expect(
+      ACTION_TONES['delete-entry'],
+      'delete-entry を ACTION_TONES に足す必要は無い',
+    ).toBeUndefined();
+    expect(toneOf('delete-entry', '削除')).toBe('danger');
   });
 });

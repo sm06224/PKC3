@@ -326,6 +326,65 @@
    */
   --pkc-heading-bar: var(--accent);
 
+  /**
+   * 🔴 **図案の下地の色(tone)**(#1054 段①、2026-09-25)。
+   *
+   * 裁定(#1046 コメント 5833269607)「下地の色を操作の種類ごとに塗り分ける
+   * (作る / 録る / 取り込む・保存 / 探す・集計 / システム / 危険)」。
+   * `src/features/icon/symbols.ts` の `IconTone` に対応する ── 増やしたら両方直す
+   * (`tests/features/icon-symbols.test.ts` が全数で突き合わせる)。
+   *
+   * ⚠ **値の実体はここではなく `color-mix(in oklab, var(--fg) …%, #色)`**
+   *   (直値の hex を書かない)── `--fg` を混ぜるので、**9 配色のどれでも自動で
+   *   追従する**(見出し・種別チップと同じ技法。P8)。だから**テーマごとに書き直す
+   *   必要が無く**、ここ(素の `:root`。上の「幾何とフォント」節と同じ層)に
+   *   1 度だけ置く。⚠ `--pkc-tone-danger` は**新しい色を発明しない**
+   *   (`--danger` をそのまま使う ── 危険操作の色が 2 系統に分かれるのを防ぐ)。
+   * ⚠ `--pkc-tone-kind` はノートの種別チップ専用の**既定値**(= 無彩色)。
+   *   実際に `[data-pkc-chip='…']` の中に出たときは `app.css` 側の規則が
+   *   `--pkc-icon-underlay` ごと上書きする(チップの色と下地の色を合わせるため)。
+   * ⚠ 下地に掛ける**不透明度**(0.32)は `app.css` の
+   *   `[data-pkc-icon][data-pkc-tone='…']` が持つ(色の値そのものにアルファを
+   *   焼き込まない ── disabled の減光と掛け合わさるとき、素の色を保っていた
+   *   ほうが計算しやすい)。
+   *
+   * 🔴 **混ぜ比率は 20% → 32% に上げた**(#1054 段①-2、2026-09-25)。
+   *
+   * > user 裁定(解釈)「いまの色は screenshot でほぼ見えない ── はっきり見せて」
+   *
+   * ⚠ `app.css` が線(`::after`)も tone 色で描くようにしたので、**線の非文字
+   * コントラスト(WCAG 1.4.11、対 `--surface`)が 3:1 を満たすか**を実測する
+   * 必要が出た ── 20% のままだと `nord` テーマの `capture`(2.74)/ `io`(2.89)/
+   * `find`(2.60)が 3:1 を割っていた(9 テーマ × 6 tone、実ブラウザで
+   * `color-mix()` を解決させて計測。手計算しない ── CLAUDE.md「色は目で
+   * 確かめない」と同じ理由)。32% まで上げると **9 テーマ全部、6 tone 全部が
+   * 3:1 以上**になる(最小は `nord` の `find` = 3.20)。⚠ **下地(0.32 の
+   * 不透明度で敷く側)は対象外** ── 3:1 が要るのは「tone そのもの」(= 線が
+   * 使う不透明度 1.0 の色)であって、装飾の薄い tint まで独立に 3:1 を
+   * 満たす必要は無い(満たそうとすると不透明度 0.7 超が要り、下地ではなく
+   * 塗り潰しになる)。
+   */
+  /*
+   * 🔑 **色相は 1 か所に置き、混ぜる相手だけを変える**(#1054 段①-2 の着地前レビュー)。
+   * ⚠ 主のボタン(地と字が反転している)では、`--fg` と混ぜた tone は**地と同じ明るさ**に
+   *   寄るので、下地が地に溶けて見えなかった(「+ ノート」の絵だけ色が無い、と指摘)。
+   *   そこでは `app.css` が同じ色相を **`--surface` と**混ぜる ── 色相を 2 か所に
+   *   書かないために、ここで名前を付ける。
+   */
+  --pkc-hue-create: #1f9e5a;
+  --pkc-hue-capture: #c23670;
+  --pkc-hue-io: #2f6fd0;
+  --pkc-hue-find: #7a4fc2;
+  --pkc-hue-system: #b06a1f;
+  --pkc-tone-create: color-mix(in oklab, var(--fg) 32%, var(--pkc-hue-create));
+  --pkc-tone-capture: color-mix(in oklab, var(--fg) 32%, var(--pkc-hue-capture));
+  --pkc-tone-io: color-mix(in oklab, var(--fg) 32%, var(--pkc-hue-io));
+  --pkc-tone-find: color-mix(in oklab, var(--fg) 32%, var(--pkc-hue-find));
+  --pkc-tone-system: color-mix(in oklab, var(--fg) 32%, var(--pkc-hue-system));
+  --pkc-tone-danger: var(--danger);
+  --pkc-tone-kind: var(--pkc-tone-neutral);
+  --pkc-tone-neutral: var(--muted);
+
   /*
    * 🔴 UI のフォント ── **等幅にしない**。
    * 初期は 'BIZ UDGothic', 'Share Tech Mono', … という並びで、

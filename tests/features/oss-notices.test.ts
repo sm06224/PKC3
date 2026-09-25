@@ -11,6 +11,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import OSS_NOTICES from 'virtual:pkc-oss-notices';
+import { VENDORED_FONT_SOURCES } from '../../build/oss-notices-plugin';
 import {
   OSS_AI_COAUTHOR,
   OSS_DEVELOPER,
@@ -63,11 +64,17 @@ describe('🔴 dependencies の全部が焼いた一覧に載っている(#948 �
    * 🔑 依存を 1 つ増やしても(package.json を直せば)この test の右辺が動くので、
    * 追随を忘れて挙動だけが変わると**ここが落ちる**(実際に §「依存を 1 つ増やして
    * 落ちることを確かめる」を変異試験で確かめてある ── 下の report を参照)。
+   *
+   * 🔴 **例外が 1 つある**(#1054 段①)── `@phosphor-icons/web` は
+   * `devDependencies`(書体を焼くためだけの道具)なのに、glyph データが
+   * 配布物へ入るので `build/oss-notices-plugin.ts` の `VENDORED_FONT_SOURCES` が
+   * 名指しで足す。⚠ **ここでも名指しで足す**(2 つ目の一覧にしない ──
+   * `build` 側の定数をそのまま import して使う)。
    */
   const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as {
     dependencies?: Record<string, string>;
   };
-  const declared = Object.keys(pkg.dependencies ?? {}).sort();
+  const declared = [...Object.keys(pkg.dependencies ?? {}), ...VENDORED_FONT_SOURCES].sort();
 
   it('件数が一致する', () => {
     // ⚠ 空振り防止 ── 前提(dependencies が空でない)を確かめてから比べる
