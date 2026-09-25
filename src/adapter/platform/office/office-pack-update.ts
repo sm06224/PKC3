@@ -60,7 +60,7 @@ export function packUpdateText(diff: PackVersionDiff): string | null {
   if (diff.kind === 'quiet') return null;
   return (
     `配布元には別の版があります ── 手元: ${diff.installed} / 配布元: ${diff.available}。`
-    + '「取得して入れる」で入れ直せます。'
+    + '「配布元から入れる」で入れ直せます。'
   );
 }
 

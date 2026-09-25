@@ -865,11 +865,11 @@ describe('設定の面(割り当て直す口)', () => {
       new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }),
     );
     expect(store.getBindings()['create-entry']).toEqual(['Mod+N']);
-    expect(assign.textContent, 'やめたのに待ち続けている').toBe('割り当て');
+    expect(assign.textContent, 'やめたのに待ち続けている').toBe('キーを割り当てる');
     panel.dispose();
   });
 
-  it('🔴 「既定に戻す」は既定のままなら押せない(何も起きないボタンを出さない)', () => {
+  it('🔴 「割り当てを既定に戻す」は既定のままなら押せない(何も起きないボタンを出さない)', () => {
     // ⚠ 変異試験 M14 が生き延びて判明 ── `disabled` を固定しても誰も落ちなかった。
     //    押せるのに何も起きないボタンは、user から見ると**壊れている**
     const store = new KeymapStore(fakeStorage());

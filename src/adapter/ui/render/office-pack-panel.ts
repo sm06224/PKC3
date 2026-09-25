@@ -9,7 +9,7 @@
  *
  * | 押すもの | 何をするか |
  * |---|---|
- * | **取得して入れる** | 同一 origin の配布元(`/office-pack/`)から取る |
+ * | **配布元から入れる** | 同一 origin の配布元(`/office-pack/`)から取る |
  * | **ファイルから入れる** | 手元の zip を選ぶ。⚠ **CORS の外なので必ず通る** |
  *
  * ⚠ 後者は保険ではない ── user 裁定「うまくいかない場合は、ローカルとかを介して
@@ -179,7 +179,7 @@ export function buildOfficePackPanel(state: OfficePackState = appOfficePack): Of
 
   const row = document.createElement('div');
   row.setAttribute('data-pkc-field', 'office-pack-actions');
-  const fromUrl = button('install-office-pack', '取得して入れる', 'office-pack-url');
+  const fromUrl = button('install-office-pack', '配布元から入れる', 'office-pack-url');
   // ⚠ 「同じ場所」と言わない ── 配布元は**このサイトの直下**であって、
   //    いま開いている頁の隣ではない(2026-08-11 に相対 path で 404 を踏んだ跡)
   fromUrl.title = 'このサイトに置いてある配布元から取ります';
@@ -194,12 +194,12 @@ export function buildOfficePackPanel(state: OfficePackState = appOfficePack): Of
   input.setAttribute('data-pkc-field', 'office-pack-input');
   const fromFile = button('choose-office-pack', 'ファイルから入れる', 'office-pack-file');
   fromFile.title = '手元の lo-wasm-qt6.zip を選びます(配布元につながらない環境でも入れられます)';
-  const remove = button('remove-office-pack', '削除', 'office-pack-remove');
-  remove.title = 'この端末からひとそろいを消します(ノートや添付は消えません)';
+  const remove = button('remove-office-pack', 'Office の一式を消す', 'office-pack-remove');
+  remove.title = 'この端末から Office の一式を消します(ノートや添付は消えません)';
   /**
    * 🔴 **Office の設定を初期状態に戻す**(#634)。
    *
-   * ⚠ **「削除」では戻らない** ── 一式を消しても設定は localStorage に残るので、
+   * ⚠ **「Office の一式を消す」では戻らない** ── 一式を消しても設定は localStorage に残るので、
    *   入れ直しても同じ設定で開く。落ちる設定を保存してしまうと**出られなくなる**
    *   (user 報告 2026-08-30「リボン UI がオンで開くとクラッシュしました」)。
    * ⚠ **押せなくしない。** 何も保存されていなくても「すでに初期状態です」と答える
@@ -246,7 +246,7 @@ export function buildOfficePackPanel(state: OfficePackState = appOfficePack): Of
      */
     fromUrl.disabled = busy;
     fromFile.disabled = busy;
-    // ⚠ 入っていないのに「削除」を押せると、押しても何も起きないボタンになる
+    // ⚠ 入っていないのに「Office の一式を消す」を押せると、押しても何も起きないボタンになる
     remove.disabled = busy || meta === null;
     // ⚠ 設定の初期化は**一式が入っていなくても押せる**(落ちて開けない人が使う口
     //    なので、一式の状態で塞がない)。⚠ 設置中だけは止める

@@ -68,7 +68,7 @@ describe('フラグの面', () => {
     expect(new FlagStore('').isOn(A.name), '保存されていない').toBe(true);
   });
 
-  it('🔴 すべて既定へ戻すと、保存も画面も戻る', () => {
+  it('🔴 すべて既定に戻すと、保存も画面も戻る', () => {
     const store = new FlagStore('');
     const r = new FlagsRenderer(region, store);
     r.render();
@@ -226,7 +226,7 @@ describe('起動前に要るフラグ', () => {
  * 起動前に要る flag を ON にすると、**アプリ自身が** `?pkc-flag=…` を付けて
  * 読み込み直す。ところが画面は「URL に載っている = 手で上書きされている」と読んで
  * その行を `disabled` にしていた ── **アプリが自分の付けた URL を理由に操作を断る**。
- * 「すべて既定へ戻す」も URL が残るので効かず、**完全な袋小路**だった。
+ * 「すべて既定に戻す」も URL が残るので効かず、**完全な袋小路**だった。
  *
  * 🔑 食い違っているときだけが「外から手で上書きされた」である。
  */
@@ -266,7 +266,7 @@ describe('🔴 起動前フラグの往復(袋小路を作らない)', () => {
     );
   });
 
-  it('🔴 「すべて既定へ戻す」で、URL のパラメータごと消えて読み込み直す', () => {
+  it('🔴 「すべて既定に戻す」で、URL のパラメータごと消えて読み込み直す', () => {
     const s1 = new FlagStore('');
     s1.set(BOOT.name, true);
     const search = new URL(s1.restartUrl('https://e/app/')).search;
@@ -325,7 +325,7 @@ describe('🔴 フラグ画面とアプリが同じ store を見る', () => {
     }
   });
 
-  it('🔴 「すべて既定へ戻す」も、アプリが読む側に効く', () => {
+  it('🔴 「すべて既定に戻す」も、アプリが読む側に効く', () => {
     const host = document.createElement('div');
     document.body.append(host);
     const r = new FlagsRenderer(host, undefined, () => {}, () => 'https://e/');

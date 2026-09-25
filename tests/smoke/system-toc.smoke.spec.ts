@@ -4,23 +4,23 @@
  * ## なぜ実ブラウザで見るのか
  *
  * unit(happy-dom)はスクロールを持たないので、目次を押して**実際に本文が送られるか**
- * ・「上へ」で**戻るか**は unit から見えない。また改名の起動時お知らせが
+ * ・「目次へ戻る」で**戻るか**は unit から見えない。また改名の起動時お知らせが
  * **本当にその 1 件目として出るか**も、unit の `NOTICES` 直輸入では
  * 実物の既読管理(`store.seenIds()`)を通らないので確かめられない。
  *
  * 🔑 観測点は 4 つ(1 起動にまとめる ── CLAUDE.md「起動を 1 つ足すと以後すべての
  *   回に 1.6 秒」):
  *  ① 起動直後のお知らせの題名が読める(消す前に読む)
- *  ② 目次のボタンの字が、画面の見出しの字と**同じ順で全部**一致する(「上へ」が
+ *  ② 目次のボタンの字が、画面の見出しの字と**同じ順で全部**一致する(「目次へ戻る」が
  *     見出し側に混ざっていないこと ── #1017 段⓪の docstring が戒めている壊れ方)
  *  ③ 目次の最後を押すと、その見出しが画面の上のほうへ送られる
- *  ④ その節の「上へ」を押すと、目次の位置まで戻る
+ *  ④ その節の「目次へ戻る」を押すと、目次の位置まで戻る
  *  ⑤ ①〜④ の間、`location.hash` は 1 度も変わらない(hash はディープリンク専用)
  */
 import { test, expect } from '@playwright/test';
 import { gotoApp, clickReal, dismissAnnounce, collectPageErrors } from './helpers';
 
-test('🔴 「システム」の目次: お知らせが読め、押すと移動し、上へで戻り、hash は不変', async ({
+test('🔴 「システム」の目次: お知らせが読め、押すと移動し、目次へ戻るで戻り、hash は不変', async ({
   page,
 }) => {
   const errors = collectPageErrors(page);
@@ -75,21 +75,22 @@ test('🔴 「システム」の目次: お知らせが読め、押すと移動�
   );
 
   // ② 🔴 目次のボタンの字と、画面の見出しの字が**同じ順で全部**一致する
-  //    ⚠ 「上へ」が見出しの `h3.textContent` に混ざっていないこと
-  //    (#1017 段⓪ docstring「上へは h3 の子にしない」を実測で確かめる)
+  //    ⚠ 「目次へ戻る」が見出しの `h3.textContent` に混ざっていないこと
+  //    (#1017 段⓪ docstring「目次へ戻るは h3 の子にしない」を実測で確かめる)
   const tocButtons = page.locator(
     '[data-pkc-region="settings-toc"] [data-pkc-action="system-jump"]',
   );
   const tocLabels = await tocButtons.allTextContents();
   expect(tocLabels.length, '目次にボタンが 1 つも無い').toBeGreaterThan(3);
-  expect(tocLabels, '目次に「上へ」が紛れている').not.toContain('上へ');
+  expect(tocLabels, '目次に「目次へ戻る」が紛れている').not.toContain('目次へ戻る');
 
   const headingLabels = await page
     .locator('[data-pkc-view-pane="settings"] h3[data-pkc-section]')
     .allTextContents();
-  expect(headingLabels, '見出しに「上へ」が混ざっている(h3.textContent が汚れた)').not.toContain(
-    '上へ',
-  );
+  expect(
+    headingLabels,
+    '見出しに「目次へ戻る」が混ざっている(h3.textContent が汚れた)',
+  ).not.toContain('目次へ戻る');
   expect(headingLabels, '目次と見出しの数が一致しない').toHaveLength(tocLabels.length);
   expect(tocLabels, '目次の字が、その順の見出しと一致しない').toEqual(headingLabels);
 
@@ -128,7 +129,7 @@ test('🔴 「システム」の目次: お知らせが読め、押すと移動�
   //   「お知らせ」の h3 の中に足したことで、この節が「下に本文がほぼ無い最後の節」
   //   ではなくなり `scrollIntoView` が見出しを画面の先頭ぴったりへ寄せられるように
   //   なった ── ところが先頭には sticky な `pane-bar`(閉じる帯、35px)が乗っており、
-  //   見出しと「上へ」がその真下に隠れて**押せなくなっていた**(下の④で拾う)。
+  //   見出しと「目次へ戻る」がその真下に隠れて**押せなくなっていた**(下の④で拾う)。
   //   `app.css` の `h3[data-pkc-section] { scroll-margin-top: 40px }` で直した。
   expect(afterJumpBox!.y, `見出しが表示域に入っていない(y=${afterJumpBox!.y})`).toBeGreaterThanOrEqual(
     0,
@@ -137,11 +138,11 @@ test('🔴 「システム」の目次: お知らせが読め、押すと移動�
     viewportH,
   );
 
-  // ④ 🔴 その節の「上へ」を押すと、目次の位置(先頭)へ戻る
+  // ④ 🔴 その節の「目次へ戻る」を押すと、目次の位置(先頭)へ戻る
   const backButton = page
     .locator('[data-pkc-view-pane="settings"] [data-pkc-field="settings-back-to-top"]')
     .last();
-  await expect(backButton, '「上へ」ボタンが無い').toBeVisible();
+  await expect(backButton, '「目次へ戻る」ボタンが無い').toBeVisible();
 
   await clickReal(page, backButton);
   await page.waitForTimeout(150);
@@ -149,11 +150,11 @@ test('🔴 「システム」の目次: お知らせが読め、押すと移動�
   const scrollAfterBack = await scroller.evaluate((el) => el.scrollTop);
   expect(
     scrollAfterBack,
-    `「上へ」を押しても目次へ戻っていない(${scrollAfterJump} → ${scrollAfterBack})`,
+    `「目次へ戻る」を押しても目次へ戻っていない(${scrollAfterJump} → ${scrollAfterBack})`,
   ).toBeLessThan(scrollAfterJump);
   const tocBox = await page.locator('[data-pkc-region="settings-toc"]').boundingBox();
   expect(tocBox, '目次が画面から消えた').not.toBeNull();
-  expect(tocBox!.y, `「上へ」を押しても目次が画面の上のほうに来ていない(y=${tocBox!.y})`).toBeLessThan(
+  expect(tocBox!.y, `「目次へ戻る」を押しても目次が画面の上のほうに来ていない(y=${tocBox!.y})`).toBeLessThan(
     300,
   );
 

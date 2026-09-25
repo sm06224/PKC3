@@ -128,7 +128,7 @@ describe('設定 — 素のまま起動を許したアプリ(#301)', () => {
    * 🔴 **配線** ── 面と services が実際につながっているか。
    * ⚠ どちらの unit も見ていない所である(`update-card.test.ts` と同じ理由)。
    */
-  it('🔴 「取り消す」を押すと、その鍵で services が呼ばれる', () => {
+  it('🔴 「許可を取り消す」を押すと、その鍵で services が呼ばれる', () => {
     new SameOriginGrants(st).grant(KEY_A);
     render(stateWith([tile('e1', '見積ツール', KEY_A)]));
     const revokeSameOrigin = vi.fn();

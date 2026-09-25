@@ -7333,7 +7333,7 @@ const ACTIONS: Record<string, ActionHandler> = {
         confirmInApp(
           root,
           rebuildExplainMessage({ notes: dispatcher.getState().entryMetas.size, assetsOnDisk }),
-          { okLabel: '始める', cancelLabel: 'やめる' },
+          { okLabel: '保存領域を作り直す', cancelLabel: 'やめる' },
         ),
       )
       .then(async (answer) => {
@@ -7482,7 +7482,7 @@ const ACTIONS: Record<string, ActionHandler> = {
           label: resetPassphraseLabel(),
           // ⚠ **`initial` を渡さない** ── 渡すと、空のまま受けたときに
           //    `promptInApp` がその字を返す(= 何も打たずに合言葉が通る)
-          okLabel: '初期化する',
+          okLabel: '保存領域を初期化する',
           // 🔴 danger ── ここが**本当に消える 1 押し**である(1 件削除より重い)
           danger: true,
         });

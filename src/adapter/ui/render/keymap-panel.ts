@@ -105,7 +105,7 @@ export function buildKeymapPanel(
   intro.textContent =
     'キーはここで割り当て直せます。1 つの操作に複数の割り当てを持てます。' +
     'Ctrl は Mac では ⌘ でも同じように効きます。' +
-    '「割り当て」を押してから、使いたいキーを押してください(Esc でやめます)。';
+    '「キーを割り当てる」を押してから、使いたいキーを押してください(Esc でやめます)。';
   root.append(intro);
 
   const resetAll = doc.createElement('button');
@@ -151,12 +151,12 @@ export function buildKeymapPanel(
       assign.type = 'button';
       assign.setAttribute('data-pkc-field', 'keymap-assign');
       assign.setAttribute('data-pkc-command', cmd.id);
-      assign.textContent = '割り当て';
+      assign.textContent = 'キーを割り当てる';
       const reset = doc.createElement('button');
       reset.type = 'button';
       reset.setAttribute('data-pkc-field', 'keymap-reset');
       reset.setAttribute('data-pkc-command', cmd.id);
-      reset.textContent = '既定に戻す';
+      reset.textContent = '割り当てを既定に戻す';
       const note = doc.createElement('p');
       note.setAttribute('data-pkc-field', 'settings-note');
       note.textContent = cmd.note ?? '';
@@ -265,11 +265,11 @@ export function buildKeymapPanel(
         tag.append(kbd, drop);
         row.chords.append(tag);
       }
-      // ⚠ 既定のままなら「既定に戻す」は押せない(何も起きないボタンを出さない)
+      // ⚠ 既定のままなら「割り当てを既定に戻す」は押せない(何も起きないボタンを出さない)
       const isDefault = store.isDefault(cmd.id);
       if (row.reset.disabled !== isDefault) row.reset.disabled = isDefault;
       const active = capturing === cmd.id;
-      row.assign.textContent = active ? 'キー待ち…' : '割り当て';
+      row.assign.textContent = active ? 'キー待ち…' : 'キーを割り当てる';
       if (active) row.assign.setAttribute('data-pkc-capturing', '1');
       else row.assign.removeAttribute('data-pkc-capturing');
       // ⚠ 捕まえていない行は、コマンドの説明へ戻す(前の断り文を残さない)

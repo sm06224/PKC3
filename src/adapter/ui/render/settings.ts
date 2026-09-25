@@ -848,8 +848,8 @@ export class SettingsRenderer {
 
     /**
      * 🔴 **「保存領域」**(#1017 段③-1)── この端末の入れ物の状態(system 領域、user 向け)。
-     * ⚠ 並びは設計 doc §3.2 のとおり:このアプリのデータ / 何が容量を使っているか /
-     *   使っていない添付 / 中身が壊れていないか調べる / Office 表示。
+     * ⚠ 並びは設計 doc §3.2 のとおり:このアプリのデータ / 容量の内訳 /
+     *   使っていない添付 / 保存領域の点検 / Office 表示。
      */
     const storageSection = document.createElement('section');
     storageSection.setAttribute('data-pkc-region', 'settings-storage');
@@ -979,7 +979,7 @@ export class SettingsRenderer {
       back.setAttribute('data-pkc-action', 'system-jump');
       back.setAttribute('data-pkc-target', 'top');
       back.setAttribute('data-pkc-field', 'settings-back-to-top');
-      back.textContent = '上へ';
+      back.textContent = '目次へ戻る';
       const wrap = document.createElement('div');
       wrap.setAttribute('data-pkc-field', 'settings-heading-row');
       h.replaceWith(wrap);
@@ -1196,7 +1196,7 @@ export class SettingsRenderer {
       btn.type = 'button';
       btn.setAttribute('data-pkc-action', 'revoke-same-origin');
       btn.setAttribute('data-pkc-asset-key', key);
-      btn.textContent = '取り消す';
+      btn.textContent = '許可を取り消す';
       li.append(name, btn);
       list.append(li);
     }
@@ -1252,7 +1252,7 @@ export class SettingsRenderer {
       btn.type = 'button';
       btn.setAttribute('data-pkc-action', 'revoke-extension');
       btn.setAttribute('data-pkc-asset-key', key);
-      btn.textContent = '取り消す';
+      btn.textContent = '許可を取り消す';
       li.append(name, btn);
       list.append(li);
     }
@@ -1284,7 +1284,7 @@ export class SettingsRenderer {
     open.type = 'button';
     open.setAttribute('data-pkc-action', 'open-messages');
     open.setAttribute('data-pkc-message-lid', SYSTEM_MESSAGE_LID);
-    open.textContent = '開く';
+    open.textContent = 'メッセージを開く';
 
     /**
      * 🔴 **処理の記録**(§7「処理」)── 段②b でワーカーの記録を繋ぐまでは
@@ -1317,7 +1317,7 @@ export class SettingsRenderer {
     exportBtn.type = 'button';
     exportBtn.setAttribute('data-pkc-action', 'export-messages');
     exportBtn.setAttribute('data-pkc-message-lid', SYSTEM_MESSAGE_LID);
-    exportBtn.textContent = '書き出す';
+    exportBtn.textContent = 'メッセージを書き出す';
 
     const note = document.createElement('p');
     note.setAttribute('data-pkc-field', 'settings-note');

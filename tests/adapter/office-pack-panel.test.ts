@@ -249,7 +249,7 @@ describe('受け口(binder)', () => {
     return { root, services, panel };
   }
 
-  it('🔴 「取得して入れる」が実体まで届く', () => {
+  it('🔴 「配布元から入れる」が実体まで届く', () => {
     const { services, panel } = harness();
     panel.root
       .querySelector('[data-pkc-action="install-office-pack"]')!
@@ -295,7 +295,7 @@ describe('受け口(binder)', () => {
     expect(services.installOfficePackFromFile).not.toHaveBeenCalled();
   });
 
-  it('🔴 「削除」が実体まで届く', () => {
+  it('🔴 「Office の一式を消す」が実体まで届く', () => {
     const { services, panel } = harness();
     const btn = panel.root.querySelector<HTMLButtonElement>(
       '[data-pkc-action="remove-office-pack"]',
@@ -380,7 +380,7 @@ describe('配布元との版ちがい', () => {
     expect(line.hidden).toBe(false);
     expect(line.textContent).toContain('unknown');
     expect(line.textContent).toContain('lo-abc-run1');
-    expect(line.textContent).toContain('取得して入れる');
+    expect(line.textContent).toContain('配布元から入れる');
     panel.dispose();
   });
 

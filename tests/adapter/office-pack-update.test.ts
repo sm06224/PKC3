@@ -57,7 +57,7 @@ describe('文言', () => {
     expect(text).toContain('unknown');
     expect(text).toContain('lo-abc-run1');
     // 🔑 次の一歩 ── 押す物の名前で書く(状態だけ言わない)
-    expect(text).toContain('取得して入れる');
+    expect(text).toContain('配布元から入れる');
   });
 
   it('起動時の知らせには、どこへ行けばよいかが出る', () => {

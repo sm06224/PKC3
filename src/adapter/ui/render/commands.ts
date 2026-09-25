@@ -247,9 +247,9 @@ function buildPurgeOrphanAssets(): HTMLElement {
 function buildContainerRepair(): DocumentFragment {
   const frag = document.createDocumentFragment();
 
-  const toggle = iconButton('toggle-container-repair', '作り直す・初期化する を出す');
+  const toggle = iconButton('toggle-container-repair', '作り直す・初期化する のボタンを出す');
   toggle.setAttribute('aria-expanded', 'false');
-  toggle.title = 'ここを押すと、入れ物を作り直す・初期化する の 2 つのボタンが出ます';
+  toggle.title = 'ここを押すと、保存領域を作り直す・初期化する の 2 つのボタンが出ます';
   frag.append(toggle);
 
   const box = document.createElement('div');
@@ -421,14 +421,14 @@ export function buildStorageProfile(): HTMLElement {
   const box = document.createElement('section');
   box.setAttribute('data-pkc-region', 'storage-profile');
   const h = document.createElement('h4');
-  h.textContent = '何が容量を使っているか';
+  h.textContent = '容量の内訳';
   box.append(h);
 
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.setAttribute('data-pkc-action', 'storage-profile');
   btn.setAttribute('data-pkc-field', 'storage-profile-run');
-  btn.textContent = '調べる';
+  btn.textContent = '容量を調べる';
   btn.title = '添付の重い順にノートを並べます。行を押すと、そのノートを開きます';
   box.append(btn);
 
@@ -484,7 +484,7 @@ function buildDbRescue(): HTMLElement {
   const box = document.createElement('section');
   box.setAttribute('data-pkc-region', 'db-rescue');
   const h = document.createElement('h4');
-  h.textContent = '保存領域に問題が無いか調べる';
+  h.textContent = '保存領域の点検';
   box.append(h);
 
   const check = document.createElement('button');

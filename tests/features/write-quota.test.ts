@@ -127,7 +127,7 @@ describe('測り直す間隔(#971 段②)', () => {
 describe('断り文(#971 段②)', () => {
   it('🔴 「消す操作は通る」と言い切る(詰みに見せない)', () => {
     expect(WRITE_QUOTA_REFUSAL, '消せることを言っていない').toContain('消す操作は止めていません');
-    expect(WRITE_QUOTA_REFUSAL, '次の一手が無い').toMatch(/何が容量を使っているか|添付を消す/);
+    expect(WRITE_QUOTA_REFUSAL, '次の一手が無い').toMatch(/容量の内訳|添付を消す/);
   });
 
   it('⚠ 記法を書かない(素のテキストとして出る面がある)', () => {
