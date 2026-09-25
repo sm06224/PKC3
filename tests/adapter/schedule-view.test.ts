@@ -1186,8 +1186,17 @@ describe('繰り返しを断る 2 つの門(#855 段 0)', () => {
     return booted;
   };
 
-  it('🔴 編集中は断る ── 理由は `phaseBlockReason` 1 本から出る', () => {
-    const editing: AppState = { ...ready(), phase: 'editing' };
+  /**
+   * ⚠ 断るのは**編集中のノート自身**のとき(#1043 で lid の判定になった ──
+   *   `bodyWriteBlockReason`)。⚠ editing は実物どおり `openBody` を伴わせる
+   *   (伴わない editing は実物に無い状態で、判定の対象が居なくなる)。
+   */
+  it('🔴 編集中のノート自身は断る ── 理由は `bodyWriteBlockReason` 1 本から出る', () => {
+    const editing: AppState = {
+      ...ready(),
+      phase: 'editing',
+      openBody: { lid: 'e1', body: 'x', baseline: 'x', persisted: 'x', diskAhead: false },
+    };
     const r = reduce(editing, { type: 'SET_TASK_REPEAT', lid: 'e1', line: 0, repeat: 'week' });
     expect(r.events, '編集中なのに本文を書きに行った').toEqual([]);
     expect(r.state.error, '無言で捨てた').toContain('編集を終了してから');

@@ -54,6 +54,7 @@ import { renumberLists } from '@features/markdown/list-renumber';
 import { stripDialect } from '@features/markdown/strip-dialect';
 import {
   blockedActionNote,
+  bodyWriteBlockReason,
   hasAppGroupNote,
   appGroupIconName,
   appGroupOrderCount,
@@ -2601,8 +2602,15 @@ function applyTableFormat(
   to: TableFormat,
 ): void {
   const st = dispatcher.getState();
-  if (st.phase !== 'ready') {
-    dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}表の形を変えてください` });
+  /**
+   * 🔴 **断りは lid で判定する**(C6 / #1043)。⚠ この操作は主の枠(`openBody`)の
+   *   表にしか効かない(右クリックの表メニューは `detail-body` だけに出る)ので、
+   *   編集中は実質いつも同じ lid になる ── それでも判定は他の 6 case と同じ
+   *   `bodyWriteBlockReason` に揃える(§7「同じ判定を複数の場所に書かない」)。
+   */
+  const blocked = bodyWriteBlockReason(st, st.openBody?.lid ?? '');
+  if (blocked !== null) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: `${blocked}表の形を変えてください` });
     return;
   }
   /**
@@ -5707,8 +5715,13 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     const lid = lidOfNode(target, st.openBody?.lid ?? st.selectedLid);
     if (lid === null || lid === undefined) return;
-    if (st.phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}表を打ってください` });
+    /**
+     * 🔴 **断りは lid で判定する**(C6 / #1043)。⚠ 直す前は `phase` だけを見ており、
+     *   編集中は**横に留めた別ノートの升も開けなかった**(押しても無言で戻る)。
+     */
+    const blocked = bodyWriteBlockReason(st, lid);
+    if (blocked !== null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${blocked}表を打ってください` });
       return;
     }
     // ⚠ 2 度押しで欄を作り直さない(打ちかけの字を捨てない)
@@ -5893,8 +5906,10 @@ const ACTIONS: Record<string, ActionHandler> = {
     const st = dispatcher.getState();
     const lid = lidOfNode(target, st.openBody?.lid ?? st.selectedLid);
     if (lid === null || lid === undefined) return;
-    if (st.phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}表を触ってください` });
+    // 🔴 断りは lid で判定する(C6 / #1043)── 別ノートの表は編集中でも触れる。
+    const blocked = bodyWriteBlockReason(st, lid);
+    if (blocked !== null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${blocked}表を触ってください` });
       return;
     }
     dispatcher.dispatch({ type: 'SET_CSV_SHAPE', lid, line, col, what, mode });
@@ -5919,8 +5934,14 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     const lid = lidOfNode(target, st.openBody?.lid ?? st.selectedLid);
     if (lid === null || lid === undefined) return;
-    if (st.phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}チェックしてください` });
+    /**
+     * 🔴 **断りは lid で判定する**(C6 / #1043)。⚠ 直す前は `phase` だけを見ており、
+     *   横に留めた別ノートのチェック(この `lid` は上で押した所から引いている)まで、
+     *   編集中はどれも押しても効かない dead click になっていた。
+     */
+    const blocked = bodyWriteBlockReason(st, lid);
+    if (blocked !== null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${blocked}チェックしてください` });
       return;
     }
     /**

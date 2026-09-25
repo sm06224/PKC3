@@ -212,6 +212,79 @@ describe('チェックの印(#277)', () => {
   });
 
   /**
+   * 🔴 **編集中でも、横に留めた別ノートのチェックは押せる**(C6 / #1043)。
+   *
+   * ⚠ 直す前は `lid` に関わらず `phase !== 'ready'` だけで断っていたので、
+   *   いま編集しているノートと無関係な別ノートのチェックまで dead click に
+   *   なっていた。ここは押した口が `data-pkc-split-lid`(横に留めた枠の印)で
+   *   `n2` を運ぶので、`n1` を編集中でも書込が飛んでよい。
+   */
+  it('🔴 別ノートを編集中でも、横に留めた枠のチェックは書込が飛ぶ', async () => {
+    const { d, root, persisted, store } = setup(
+      [
+        meta('n1', { archetype: 'text', status: null }),
+        meta('n2', { archetype: 'text', status: null }),
+      ],
+      { n1: BODY, n2: BODY },
+    );
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    await tick(20);
+    d.dispatch({ type: 'START_EDIT' });
+    await tick(20);
+    expect(d.getState().phase, '前提が崩れている').toBe('editing');
+    // ⚠ 横に留めた枠は `data-pkc-split-lid` を焼く(`lid-of-node.ts`)
+    const stack = document.createElement('div');
+    stack.setAttribute('data-pkc-split-lid', 'n2');
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.setAttribute('data-pkc-action', 'toggle-task');
+    box.setAttribute('data-pkc-task-line', '2');
+    stack.append(box);
+    root.append(stack);
+    box.click();
+    await tick(20);
+    expect(persisted, '別ノートの書込が飛んでいない').toHaveLength(1);
+    expect(store['n2'], '別ノートの印が反転していない').toBe(
+      ['# 買い物', '', '- [x] 牛乳', '- [x] 卵', '', 'ここは本文。'].join('\n'),
+    );
+    expect(store['n1'], '編集中のノート自身が裏で書き換わった').toBe(BODY);
+  });
+
+  /**
+   * 🔴 **留めた枠に出ているのが編集中のノート自身なら、枠から押しても断る**(C6 / #1043、
+   *   着地前レビュー)。⚠ 判定は「押した枠」ではなく「書く相手の lid」で決まる ──
+   *   枠から押したことを理由に通すと、編集欄の下書きと disk がずれる
+   *   (下書きを保存すると押した変更が消える)。
+   */
+  it('🔴 留めた枠に出ているのが編集中のノート自身なら、枠から押しても断る', async () => {
+    const { d, root, persisted, store } = setup(
+      [
+        meta('n1', { archetype: 'text', status: null }),
+        meta('n2', { archetype: 'text', status: null }),
+      ],
+      { n1: BODY, n2: BODY },
+    );
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    await tick(20);
+    d.dispatch({ type: 'START_EDIT' });
+    await tick(20);
+    expect(d.getState().phase, '前提が崩れている').toBe('editing');
+    const stack = document.createElement('div');
+    stack.setAttribute('data-pkc-split-lid', 'n1');
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.setAttribute('data-pkc-action', 'toggle-task');
+    box.setAttribute('data-pkc-task-line', '2');
+    stack.append(box);
+    root.append(stack);
+    box.click();
+    await tick(20);
+    expect(persisted, '編集中のノート自身へ枠から書いた').toHaveLength(0);
+    expect(store['n1'], '編集中のノート自身が裏で書き換わった').toBe(BODY);
+    expect(d.getState().error ?? '', '無言で終わった').toContain('編集を終了してから');
+  });
+
+  /**
    * 🔴 **本文が変わっていたら黙って別の所を書かない**(#277)。
    * ⚠ 行番号は「描いた時の原文」のものなので、その後の書換でずれることがある。
    */
