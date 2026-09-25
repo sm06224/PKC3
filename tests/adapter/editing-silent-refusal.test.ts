@@ -98,27 +98,52 @@ describe('編集中でも、ゴミ箱は開ける(#319)', () => {
 
 /**
  * 🔴 **動かす操作は、声に出して断る**(#319)。
- * ⚠ 断り文は `binder.ts` の既存 8 か所と同じ型(`編集を終了してから…てください`)。
- *   面ごとに書き分けない ── 「文言は押した場所と対で pin する」。
+ * ⚠ 断り文は `phaseBlockReason` の 1 か所から出る(C11b / #1045。直す前は
+ *   `binder.ts` の既存 8 か所が手で「編集を終了してから…てください」を書いて
+ *   いたが、面ごとに書き分けない ── 「文言は押した場所と対で pin する」)。
+ * 🔑 **字面ではなく実際に撃って見る**(2026-09-25 に直した)── 出どころが
+ *   `phaseBlockReason` へ寄った時点で、handler の中に「編集を終了してから」の
+ *   **リテラル**は無くなる(実行時に組む)。source を grep する検査はそこで
+ *   空振りする ── だから binder を本物どおり動かし、出てくる字を見る。
  */
 describe('編集中の「戻す」「復元」は、理由を出して断る(#319)', () => {
-  it('🔴 binder が編集中に断り、reducer まで撃たない', async () => {
-    const { readFileSync } = await import('node:fs');
-    const src = readFileSync('src/adapter/ui/actions/binder.ts', 'utf-8');
-    // ⚠ コメントに満たされない形で見る(実行する行そのもの)
-    const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  function mount() {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const d = new Dispatcher();
+    buildShell(root);
+    bindActions(root, d);
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', 1)], relations: [] });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: '本文' });
+    d.dispatch({ type: 'START_EDIT' });
+    expect(d.getState().phase, '前提が崩れている(編集中になっていない)').toBe('editing');
+    return { d, root };
+  }
 
-    for (const [action, phrase] of [
-      ['restore-trash', '編集を終了してから戻してください'],
-      ['restore-revision', '編集を終了してから復元してください'],
-    ] as const) {
-      const at = code.indexOf(`'${action}': (`);
-      expect(at, `${action} の受け口が無い(この検査は空振り)`).toBeGreaterThan(-1);
-      // ⚠ その handler の中だけを見る ── file 全体で探すと別の面の断り文に満たされる
-      const body = code.slice(at, code.indexOf("\n  '", at + 10));
-      expect(body, `${action}: 編集中の断りが無い(無言で捨てる)`).toContain(phrase);
-      expect(body, `${action}: phase を見ていない`).toContain("phase !== 'ready'");
-    }
+  function press(root: HTMLElement, action: string, attrs: Record<string, string>): void {
+    const btn = document.createElement('button');
+    btn.setAttribute('data-pkc-action', action);
+    for (const [k, v] of Object.entries(attrs)) btn.setAttribute(k, v);
+    root.append(btn);
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    btn.remove();
+  }
+
+  it('🔴 restore-trash ── binder が編集中に断り、reducer まで撃たない', () => {
+    const { d, root } = mount();
+    press(root, 'restore-trash', { 'data-pkc-rev-id': 'r1', 'data-pkc-trash-lid': 'gone' });
+    expect(d.getState().error, '編集中の断りが無い(無言で捨てる)').toContain(
+      '編集を終了してから戻してください',
+    );
+  });
+
+  it('🔴 restore-revision ── binder が編集中に断り、reducer まで撃たない', () => {
+    const { d, root } = mount();
+    press(root, 'restore-revision', { 'data-pkc-rev-id': 'r1' });
+    expect(d.getState().error, '編集中の断りが無い(無言で捨てる)').toContain(
+      '編集を終了してから復元してください',
+    );
   });
 
   /**

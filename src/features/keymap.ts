@@ -449,7 +449,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['global'],
     defaults: ['Alt+2', 'Mod+Alt+2'],
     whileTyping: true,
-    note: '文字を打っている間に効くのは Mod+Alt+2 のほうです(本文を編集している間は、保存するか取り消してから開けます)',
+    note: '文字を打っている間に効くのは Mod+Alt+2 のほうです(本文を編集している間は、保存するか、キャンセルすると開けます)',
   },
   {
     /**

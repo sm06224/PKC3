@@ -18,6 +18,7 @@
  * **同じ規則が 2 か所**になる(CLAUDE.md §7)。
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
+import { phaseBlockReason } from '@adapter/state/app-state';
 import { safeName } from '@features/export/file-name';
 import { dayStamp } from '@features/datetime/date-math';
 import { writePortableBundle } from '@features/export/portable-bundle';
@@ -72,8 +73,8 @@ export async function exportPortable(
     return null;
   };
   // 編集中は draft が disk と違う ── 「保存したつもりの本文」が入らない形を作らない
-  if (dispatcher.getState().phase !== 'ready')
-    return fail('編集を終了してから書き出してください');
+  const phase = dispatcher.getState().phase;
+  if (phase !== 'ready') return fail(`${phaseBlockReason(phase)}書き出してください`);
 
   /**
    * ⚠ **押せてしまうより、押した理由に答える。** ここを黙って失敗させると

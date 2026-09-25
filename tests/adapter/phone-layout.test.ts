@@ -285,7 +285,7 @@ describe('タブレットの版面(#703)', () => {
     s.d.dispatch({ type: 'START_EDIT' });
     s.field('phone-info').click();
     expect(s.page()).toBe('note');
-    expect(s.said.join(' ') + (s.d.getState().error ?? ''), '無言で断った').toContain('保存するか取り消してから');
+    expect(s.said.join(' ') + (s.d.getState().error ?? ''), '無言で断った').toContain('編集を終了してから');
   });
 
   it('🔴 PC の幅へ広げれば印も帯も消える / スマホが優先(両方真ならスマホ)', () => {
@@ -507,7 +507,7 @@ describe('編集中の戻り(無言の dead click にしない)', () => {
     expect(s.d.getState().phase, '台が編集に入っていない(前提が崩れた)').toBe('editing');
     s.field('phone-back').click();
     expect(s.page(), '編集中に一覧へ戻ってしまった').toBe('note');
-    expect(s.d.getState().error).toContain('保存するか取り消してから');
+    expect(s.d.getState().error).toContain('編集を終了してから');
     s.field('phone-info').click();
     expect(s.page(), '編集中に情報へ移ってしまった').toBe('note');
   });
@@ -934,7 +934,7 @@ describe('探す・絞る・目次(隠れた面へ送らない)', () => {
     s.root.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true, cancelable: true }),
     );
-    expect(s.d.getState().error).toContain('保存するか取り消してから');
+    expect(s.d.getState().error).toContain('編集を終了してから');
     expect(s.page(), '編集中に一覧へ飛んだ').toBe('note');
   });
 
@@ -953,7 +953,7 @@ describe('探す・絞る・目次(隠れた面へ送らない)', () => {
     badge.setAttribute('data-pkc-tag', '買い物');
     s.root.querySelector('[data-pkc-region="detail"]')!.append(badge);
     badge.click();
-    expect(s.d.getState().error, '断っていない').toContain('保存するか取り消してから');
+    expect(s.d.getState().error, '断っていない').toContain('編集を終了してから');
     expect(s.d.getState().filterQuery, '断ったのに絞り込みは起きている').toBe('');
   });
 

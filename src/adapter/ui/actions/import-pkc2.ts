@@ -11,6 +11,7 @@
  * 「溜めない」だけでは不十分で、実測で asset 実体の 3.2 倍が常駐していた)。
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
+import { phaseBlockReason } from '@adapter/state/app-state';
 import {
   duplicateNote,
   findDuplicates,
@@ -341,8 +342,9 @@ export async function importPkc2File(
     return null;
   };
   const reason = (e: unknown): string => (e instanceof Error ? e.message : String(e));
-  if (dispatcher.getState().phase !== 'ready') {
-    return fail('編集を終了してから取り込んでください');
+  const phase = dispatcher.getState().phase;
+  if (phase !== 'ready') {
+    return fail(`${phaseBlockReason(phase)}取り込んでください`);
   }
 
   // 書込の到達点。失敗時に「どこまで書けたか」を user に言うために持つ ──

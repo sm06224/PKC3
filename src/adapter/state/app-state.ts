@@ -659,7 +659,14 @@ export function viewModeLabel(view: ViewMode): string {
 export function phaseBlockReason(phase: AppPhase): string | null {
   if (phase === 'ready') return null;
   if (phase === 'editing') return '編集を終了してから';
-  if (phase === 'error') return '保存をやり直すか取り消してから';
+  /*
+   * 🔴 **保存に失敗して止まったときの出口は「再保存」1 つだけ**(C11 / #1045)。
+   * ⚠ 直す前は「保存をやり直すか**取り消して**から」と言っていたが、この phase では
+   *   取り消し(`CANCEL_EDIT`)は `phase !== 'editing'` で断られ、選択も動かない
+   *   (`SELECT_ENTRY` の error 分岐)── **押せない出口を案内していた**。
+   *   画面に在るのは本文の上の「再保存」ボタンだけである(`detail.ts` の `retry`)。
+   */
+  if (phase === 'error') return SAVE_FAILED_EXIT;
   return '読み込みが終わってから';
 }
 
@@ -697,36 +704,37 @@ export function endEditRefusal(what: string, state: AppState): string {
 }
 
 /**
- * 🔴 **押せないボタンの説明**(#516)。`ready` なら `null`。
- * ⚠ 上の `phaseBlockReason` と**問いが違う**(あちらは帯の断り文、こちらは
- *   ボタンに添える説明)。⚠ ただし**判定は同じ `phase`** なので、
- *   両方をここへ並べて置く ── 片方だけ phase を増やし忘れるのを防ぐ。
+ * 🔴 **保存に失敗して止まったときの出口**(C11 / #1045)── 本文の上に出るボタンの字。
+ * ⚠ ボタンの字(`detail.ts` の `retry.textContent`)と食い違うと、user は
+ *   **無いボタンを探す**。一致は `tests/adapter/refusal-words.test.ts` が
+ *   **描いた画面から字を引いて**見る(ここに手で書いた字どうしを比べない)。
  */
-export function phaseDisabledNote(phase: AppPhase): string | null {
-  if (phase === 'ready') return null;
-  if (phase === 'editing') return '編集中は使えません ── 確定するか取り消してください';
-  if (phase === 'error') return '保存に失敗しているので使えません ── やり直すか取り消してください';
-  return '読み込み中は使えません';
-}
+const SAVE_FAILED_EXIT = '「再保存」を押してから';
 
 /**
  * 編集中に「押せない理由」として画面へ出す 1 行(#715)。
- * ⚠ 出口は**ボタンの字**(保存 / キャンセル)で言う ── {@link phaseDisabledNote} の
- *   「確定するか取り消して」は、画面のどのボタンの字とも一致しない。
+ * ⚠ 出口は**ボタンの字**(保存 / キャンセル)で言う ── 「確定 / 取り消し」は
+ *   画面のどのボタンの字とも一致しない(C11 で最後の 1 系統を消した)。
  */
 export const EDITING_NOTE = '編集中は使えません(保存するか、キャンセルすると戻ります)';
 
 /**
- * 🔴 **user に見せる「押せない理由」**(#516 / #715 / #761)。押せるなら `null`。
+ * 🔴 **user に見せる「押せない理由」**(#516 / #715 / #761 / C11)。押せるなら `null`。
  *
- * ⚠ {@link phaseDisabledNote} との差は**編集中の 1 行だけ**である ── そこだけ
- *   出口をボタンの字で言う({@link EDITING_NOTE})。
- * 🔑 **この使い分けを 2 か所に書かない**(CLAUDE.md §7)── 直す前は
- *   `inspector.ts` にしか無く、左の列の「+ ノート」は**理由を 1 文字も出さずに
- *   黙って捨てて**いた(#761)。寄せたので、次に足す面も同じ字で言える。
+ * 🔑 **押せないボタンに添える字は、ここ 1 か所**(CLAUDE.md §7)── 乗せたときの字
+ *   (`title`)も、右の列の上の 1 行も、左の列の「+ ノート」も、同じ関数から採る。
+ * ⚠ **C11(#1045、2026-09-25)で 1 本にした。** 直す前は隣に `phaseDisabledNote` が
+ *   在り、編集中の字だけが「編集中は使えません ── **確定するか取り消して**ください」
+ *   だった ── 右の列では、**乗せたときの字**(こちら)と**列の上の 1 行**
+ *   ({@link EDITING_NOTE})が、同じ画面で別の出口を言っていた。
+ * ⚠ `phase !== 'ready'` を「編集中」と読み替えない(#516)── 保存に失敗して
+ *   止まったときは、出口が「再保存」1 つしか無い({@link phaseBlockReason} を見よ)。
  */
 export function blockedActionNote(phase: AppPhase): string | null {
-  return phase === 'editing' ? EDITING_NOTE : phaseDisabledNote(phase);
+  if (phase === 'ready') return null;
+  if (phase === 'editing') return EDITING_NOTE;
+  if (phase === 'error') return `保存に失敗しているので使えません(${SAVE_FAILED_EXIT}使えます)`;
+  return '読み込み中は使えません';
 }
 
 /**
@@ -1944,8 +1952,9 @@ export type UserAction =
        */
       batch?: string;
       /**
-       * 編集中の断り文(#684 段④)。⚠ **押した場所と対で書く** ── 既定は
-       * 「一覧の行を…」なので、file を落とす経路はそのままだと嘘を言う。
+       * 編集中の断り文の**続き**(#684 段④。前置きは `bodyRewriteGate` が
+       * `phaseBlockReason` から付ける ── C11b / #1045)。⚠ **押した場所と対で書く**
+       * ── 既定は「、一覧の行を…」なので、file を落とす経路はそのままだと嘘を言う。
        */
       refusal?: string;
       /**
@@ -4323,7 +4332,7 @@ function reduceCore(
         return {
           state: {
             ...state,
-            error: `編集中は${viewModeLabel(action.mode)}を開けません(保存するか、取り消してください)`,
+            error: `編集中は${viewModeLabel(action.mode)}を開けません(保存するか、キャンセルすると開けます)`,
           },
           events: [],
         };
@@ -5710,7 +5719,7 @@ function reduceCore(
      * `bodyRewriteGate` 1 か所 ── 下の 3 つ(#676)と共有する。
      */
     case 'MOVE_PLACE':
-      return bodyRewriteGate(state, action.lid, '編集を終了してから、板の付箋を動かしてください', (shown) => {
+      return bodyRewriteGate(state, action.lid, '、板の付箋を動かしてください', (shown) => {
         if (shown === null) return null; // 画面に無い本文の行番号は信じない
         if (!isPlaceCoord(action.x) || !isPlaceCoord(action.y)) return null;
         const openLine = placeOpenLineOf(shown, action.line);
@@ -5723,7 +5732,7 @@ function reduceCore(
      * (CLAUDE.md「文言は押した場所と対で pin する」)。
      */
     case 'RESIZE_PLACE':
-      return bodyRewriteGate(state, action.lid, '編集を終了してから、板の大きさを変えてください', (shown) => {
+      return bodyRewriteGate(state, action.lid, '、板の大きさを変えてください', (shown) => {
         if (shown === null) return null; // 画面に無い本文の行番号は信じない
         if (!isPlaceCoord(action.w) || !isPlaceCoord(action.h)) return null;
         const openLine = placeOpenLineOf(shown, action.line);
@@ -5736,7 +5745,7 @@ function reduceCore(
      * 🔑 **2 枚とも**開き行を捕える ── 片方だけだと、もう片方が別の塊でも書ける。
      */
     case 'CONNECT_PLACE':
-      return bodyRewriteGate(state, action.lid, '編集を終了してから、板を線で繋いでください', (shown) => {
+      return bodyRewriteGate(state, action.lid, '、板を線で繋いでください', (shown) => {
         if (shown === null) return null; // 画面に無い本文の行番号は信じない
         const from = placeOpenLineOf(shown, action.line);
         const to = placeOpenLineOf(shown, action.toLine);
@@ -5750,28 +5759,28 @@ function reduceCore(
         };
       });
     case 'REMOVE_PLACE':
-      return bodyRewriteGate(state, action.lid, '編集を終了してから、板を消してください', (shown) => {
+      return bodyRewriteGate(state, action.lid, '、板を消してください', (shown) => {
         if (shown === null) return null; // 画面に無い本文の行番号は信じない
         const openLine = placeOpenLineOf(shown, action.line);
         if (openLine === null) return null;
         return { kind: 'place-remove', line: action.line, openLine };
       });
     case 'ADD_PLACE':
-      return bodyRewriteGate(state, action.lid, '編集を終了してから、板を置いてください', (shown) =>
+      return bodyRewriteGate(state, action.lid, '、板を置いてください', (shown) =>
         // ⚠ 画面に出ていない面へは置かない(押し所は面の上にしか無い ── これまでの門を保つ)
         shown !== null && isPlaceCoord(action.x) && isPlaceCoord(action.y)
           ? { kind: 'place-add', x: action.x, y: action.y }
           : null,
       );
     case 'RAISE_PLACE':
-      return bodyRewriteGate(state, action.lid, '編集を終了してから、板を前へ出してください', (shown) => {
+      return bodyRewriteGate(state, action.lid, '、板を前へ出してください', (shown) => {
         if (shown === null) return null; // 画面に無い本文の行番号は信じない
         const openLine = placeOpenLineOf(shown, action.line);
         if (openLine === null) return null;
         return { kind: 'place-raise', line: action.line, openLine };
       });
     case 'SET_PLACE_SHAPE':
-      return bodyRewriteGate(state, action.lid, '編集を終了してから、板の形を変えてください', (shown) => {
+      return bodyRewriteGate(state, action.lid, '、板の形を変えてください', (shown) => {
         if (shown === null) return null; // 画面に無い本文の行番号は信じない
         // ⚠ 綴りは**ここでも**検める ── 型は境界(postMessage / test の手組み)では効かない
         if (!isPlaceShape(action.shape)) return null;
@@ -5786,7 +5795,7 @@ function reduceCore(
      * ⚠ `dragstart` では phase を見ない(掴むのは自由)── 落としたときにここで断る。
      */
     case 'MOVE_BLOCK':
-      return bodyRewriteGate(state, action.lid, '編集を終了してから、本文の塊を動かしてください', (shown) => {
+      return bodyRewriteGate(state, action.lid, '、本文の塊を動かしてください', (shown) => {
         if (shown === null) return null; // 画面に無い本文の行番号は信じない
         const { start, end, toBefore } = action;
         if (!Number.isInteger(start) || !Number.isInteger(end) || !Number.isInteger(toBefore)) return null;
@@ -5808,7 +5817,10 @@ function reduceCore(
       const { fromLid, start, end, toLid } = action;
       if (state.phase !== 'ready')
         return {
-          state: { ...state, error: '編集を終了してから、本文の塊を別のノートへ持っていってください' },
+          state: {
+            ...state,
+            error: `${phaseBlockReason(state.phase)}、本文の塊を別のノートへ持っていってください`,
+          },
           events: [],
         };
       if (fromLid === toLid) return { state, events: [] };
@@ -5851,8 +5863,9 @@ function reduceCore(
      * 🔴 **一覧の行を本文へ落とすとリンクになる**(#684 段②)── 同じ門。空の並びは撃たない。
      * ⚠ 落とした所へ入れる添付(#684 段④)も同じ口を通る ── 入る字が違うだけで、
      *   「本文のここへ 1 塊を差し込む」は同じ 1 つの操作である(§7)。
-     * 🔑 断り文は**押した場所と対**なので、掴んだ物の名前は呼び側が渡す(`refusal`)──
-     *   ここで 1 本に丸めると、file を落とした user が「一覧の行」と言われる。
+     * 🔑 断り文の**続き**は**押した場所と対**なので、掴んだ物の名前は呼び側が渡す
+     *   (`refusal`。前置きは `bodyRewriteGate` が `phaseBlockReason` から付ける ──
+     *   C11b / #1045)── ここで 1 本に丸めると、file を落とした user が「一覧の行」と言われる。
      * ⚠ 段④ は `writable-queue` が**書けるようになってから**撃つので、実際にはここへ
      *   来ない ── それでも既定に頼らず渡すのは、来たときに嘘を言わせないためである。
      * 🔴 **`shown` を読まない**(座標も字も呼び側が持っている)── だから画面に本文が
@@ -5865,7 +5878,7 @@ function reduceCore(
       return bodyRewriteGate(
         state,
         action.lid,
-        action.refusal ?? '編集を終了してから、一覧の行を本文へ落としてください',
+        action.refusal ?? '、一覧の行を本文へ落としてください',
         () =>
           Number.isInteger(action.toBefore) && action.lines.length > 0
             ? {
@@ -7273,7 +7286,7 @@ function reduceCore(
       // ⚠ 入れ物以外では何もしない(押し所はスタックの入れ物にしか生えない ── 綴りの取り違えの防波堤)
       if (state.entryMetas.get(action.lid)?.archetype !== STACK_ARCHETYPE) return { state, events: [] };
       // 🔑 門と event の組み立ては板の書換と**同じ 1 本**(`bodyRewriteGate`(#684 で `placeRewrite` から改名))── 編集中は声に出して断る
-      return bodyRewriteGate(state, action.lid, '編集を終えてから、並べ替えてください', (shown) => {
+      return bodyRewriteGate(state, action.lid, '、並べ替えてください', (shown) => {
         if (shown === null) return null; // 画面に無い本文の行番号は信じない
         const openLine = shown.split('\n')[action.line];
         if (openLine === undefined) return null;
@@ -7884,8 +7897,14 @@ export function screenBodyOf(state: AppState, lid: string): string | null {
  *   ①主の枠が板でなければ黙って no-op ②主の枠も板なら**別のノートの
  *   同じ行を書き換えうる**、の 2 つに落ちていた。
  * 🔑 `screenBodyOf` が「その lid が、いま画面のどこに出ているか」を 1 か所で答える。
+ * 🔴 **前置きは `phaseBlockReason` の 1 か所から**(C11b / #1045)。⚠ 直す前は
+ *   呼び側 9 か所が「編集を終了してから」を手で書いており、`error` の相
+ *   (保存に失敗して止まった)でも同じ字を出していた ── 押せない出口を案内していた
+ *   (C11 / #516 と同じ形)。この門が既に `phase !== 'ready'` を見ているので、
+ *   前置きもここで付け、呼び側は「続き」だけを渡す。
  *
- * @param refusal 編集中の断り文(押した場所と対で書く)
+ * @param refusalSuffix 編集中の断り文の**続き**(前置きは `phaseBlockReason` が付ける。
+ *   押した場所と対で書く)
  * @param build 画面が見ている本文から書換を組む。組めなければ `null` = 黙って no-op
  *   (行が板でない / 値が壊れている ── どれも画面の操作からは起きない形)。
  *   🔴 **`shown` は `null` のことがある**(#684 段④、2026-09-08)── 画面に本文が
@@ -7901,10 +7920,14 @@ export function screenBodyOf(state: AppState, lid: string): string | null {
 function bodyRewriteGate(
   state: AppState,
   lid: string,
-  refusal: string,
+  refusalSuffix: string,
   build: (shown: string | null) => BodyRewrite | null,
 ): ReduceResult {
-  if (state.phase !== 'ready') return { state: { ...state, error: refusal }, events: [] };
+  if (state.phase !== 'ready')
+    return {
+      state: { ...state, error: `${phaseBlockReason(state.phase)}${refusalSuffix}` },
+      events: [],
+    };
   const meta = state.entryMetas.get(lid);
   if (!meta) return { state, events: [] };
   const rewrite = build(screenBodyOf(state, lid));

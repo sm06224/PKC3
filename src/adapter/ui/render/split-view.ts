@@ -30,7 +30,7 @@
  * ⚠ 代わりに `DetailRenderer` へ「留めた枠として描く」門を足した(`pinnedLid`)──
  * そちらは**帯も履歴も出さず**、`data-pkc-field` を `split-*` に変える。
  */
-import type { AppState } from '@adapter/state/app-state';
+import { phaseBlockReason, type AppState } from '@adapter/state/app-state';
 import type { DetailRenderer } from './detail';
 import {
   fittingSplitFrames,
@@ -340,7 +340,8 @@ export class SplitView {
     save.textContent = '保存…';
     if (state.phase === 'editing') {
       save.disabled = true;
-      save.title = '編集を終えてから保存できます';
+      // 🔑 字は `phaseBlockReason` の 1 か所から(C11b / #1045)
+      save.title = `${phaseBlockReason(state.phase)}保存できます`;
     } else {
       save.title = 'いまの並びを「スタック」のノートとして保存します(開いている本文はそのままです)';
     }

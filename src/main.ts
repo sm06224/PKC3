@@ -13,7 +13,7 @@ import 'katex/dist/katex.min.css';
 
 import { Dispatcher } from '@adapter/state/dispatcher';
 import { loadSplitLids, saveSplitLids } from '@adapter/platform/split-store';
-import { isAsidePane, viewModeLabel, type ViewMode } from '@adapter/state/app-state';
+import { isAsidePane, phaseBlockReason, viewModeLabel, type ViewMode } from '@adapter/state/app-state';
 import { bindEditLockRelease } from '@adapter/state/edit-lock-release';
 import { connectStoreEffects, type StoreEffects } from '@adapter/state/store-effects';
 import { DuckDbRunner } from '@adapter/platform/duckdb/duckdb-runner';
@@ -1720,7 +1720,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         type: 'OP_FAILED',
         error:
           '本体タブの交代で、このノートの編集権を別のタブかウィンドウに取られました。' +
-          'ここで保存すると相手の編集を上書きします ── 内容を控えてから編集を取り消してください',
+          'ここで保存すると相手の編集を上書きします ── 内容を控えてから「キャンセル」を押してください',
       });
     });
     let promotedHost: StoreProxyHost | null = null;
@@ -2985,7 +2985,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       const state = dispatcher.getState();
       const fail = (error: string): void => dispatcher.dispatch({ type: 'OP_FAILED', error });
       if (state.phase !== 'ready') {
-        fail('編集を終了してから書き戻してください');
+        fail(`${phaseBlockReason(state.phase)}書き戻してください`);
         return;
       }
       const name = state.linkedFiles.get(lid);
@@ -3812,10 +3812,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       void withAssetGate(async () => {
         try {
           // editing 中は draft が disk と違う参照を持ちうる ── ready 限定で可視ブロック
-          if (dispatcher.getState().phase !== 'ready') {
+          const phase = dispatcher.getState().phase;
+          if (phase !== 'ready') {
             dispatcher.dispatch({
               type: 'OP_FAILED',
-              error: '編集を終了してから整理してください',
+              error: `${phaseBlockReason(phase)}整理してください`,
             });
             return;
           }

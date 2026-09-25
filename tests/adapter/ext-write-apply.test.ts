@@ -102,7 +102,7 @@ describe('🔴 断る形', () => {
     const r = rig({ a: 'ふるい' }, { phase: () => 'editing' });
     const out = await applyExtWriteOps([setBody('a', '新')], r.deps);
     expect(out.ok).toBe(false);
-    expect(!out.ok && out.why).toContain('編集中');
+    expect(!out.ok && out.why).toContain('編集を終了してから');
     expect(r.disk['a'], '編集中なのに書いた').toBe('ふるい');
     expect(r.refreshed(), '書いていないのに取り直した').toBe(0);
   });

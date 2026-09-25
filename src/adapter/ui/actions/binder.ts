@@ -53,12 +53,14 @@ import { quoteOnEnter } from '@features/markdown/quote-assist';
 import { renumberLists } from '@features/markdown/list-renumber';
 import { stripDialect } from '@features/markdown/strip-dialect';
 import {
+  blockedActionNote,
   hasAppGroupNote,
   appGroupIconName,
   appGroupOrderCount,
   hasAppGroupOrder,
   isViewMode,
   nextViewMode,
+  phaseBlockReason,
   screenBodyOf,
   type AppState,
   type ViewMode,
@@ -234,6 +236,8 @@ import {
   resolvePlanTarget,
 } from '@features/structure/structure-plan';
 import { appQueryKey } from '@adapter/ui/render/query-key-store';
+// 🔴 ▼ で選んだ「作る種類」を端末側に覚える(#1045)
+import { appCreateKind } from '@adapter/ui/render/create-kind';
 import { PAINTED_ATTR } from '@adapter/ui/render/detail';
 import { openView } from '@adapter/ui/render/open-view';
 import {
@@ -634,7 +638,7 @@ const dualCreate = (
   const st = dispatcher.getState();
   const what = archetype === 'folder' ? 'フォルダ' : 'ノート';
   if (st.phase !== 'ready') {
-    dispatcher.dispatch({ type: 'OP_FAILED', error: `編集を終了してから${what}を作ってください` });
+    dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}${what}を作ってください` });
     return;
   }
   dispatcher.dispatch({
@@ -665,8 +669,9 @@ const moveEntries = (
   report?: (text: string) => void,
 ): void => {
   if (lids.length === 0) return;
-  if (dispatcher.getState().phase !== 'ready') {
-    dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから動かしてください' });
+  const phase = dispatcher.getState().phase;
+  if (phase !== 'ready') {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}動かしてください` });
     return;
   }
   let moved = 0;
@@ -1835,10 +1840,15 @@ function confirmThen(
 
 /**
  * 4 面が共通で見る前提。⚠ **同じ問いに答える口を増やさない** ──
- * 「編集中か」の判定はここ 1 つで、断り文も押した場所と対で渡す。
+ * 「編集中か」の判定はここ 1 つで、断り文の**続き**も押した場所と対で渡す。
+ * ⚠ 前置きは `phaseBlockReason` から(C11b / #1045)── 手で書いた「編集を終了
+ *   してから」は `error` の相(保存に失敗して止まった)でも同じ字を出していた。
  */
-function notWhileEditing(dispatcher: Dispatcher, refusal: string): () => string | null {
-  return () => (dispatcher.getState().phase === 'ready' ? null : refusal);
+function notWhileEditing(dispatcher: Dispatcher, refusalSuffix: string): () => string | null {
+  return () => {
+    const phase = dispatcher.getState().phase;
+    return phase === 'ready' ? null : `${phaseBlockReason(phase)}${refusalSuffix}`;
+  };
 }
 
 /**
@@ -2395,11 +2405,10 @@ function phoneShowList(dispatcher: Dispatcher): boolean {
    *   「一覧で探してください」というスマホ用の字が出る(着地前レビュー 3)。
    */
   if (!appPhone.isPhone()) return true;
-  if (dispatcher.getState().phase !== 'ready') {
-    dispatcher.dispatch({
-      type: 'OP_FAILED',
-      error: '保存するか取り消してから、一覧で探してください',
-    });
+  const blocked = phaseBlockReason(dispatcher.getState().phase);
+  if (blocked !== null) {
+    // ⚠ 字は 1 か所から(C11 / #1045)── 直す前は「保存するか**取り消して**から」
+    dispatcher.dispatch({ type: 'OP_FAILED', error: `${blocked}、一覧で探してください` });
     return false;
   }
   if (appPhone.reveal('list') === 'needs-detail') {
@@ -2470,6 +2479,27 @@ function tableLineAt(target: Element, body: string | null): number | null {
  *   **もともと開いているノート**を指すので、戻す相手が無い(属性も付かない)。
  */
 const MENU_PREV_LID_ATTR = 'data-pkc-menu-prev-lid';
+/**
+ * 🔴 **押したときだけ、その行を選んでから効かせる**(#1045 C9、着地前レビューで直した)。
+ *
+ * ⚠ 2 ペインの右クリックは**選択を動かさずに**行のメニューを出す(開いただけで
+ *   中央が切り替わらないため)。ところが中身を**中央の本文の画面に出す**項目
+ *   (「履歴」「このスタックを載せる」)は、2 ペインのままだと状態だけ書き換わって
+ *   **画面に何も出ない**(無言の dead click)。「この中に新しいノートを作る」は
+ *   押した瞬間に自分で本文の画面へ移る。
+ * 🔑 だから**押したときに**その行を選ぶ(= C9 の前と同じ動き)── メニューを開いた
+ *   だけでは移らない。受け手は `run` の 1 か所で、属性を持つ項目にだけ効く。
+ */
+const MENU_SELECT_FIRST_ATTR = 'data-pkc-menu-select-first';
+/**
+ * 2 ペインの右クリックで「押したらその行を選ぶ」項目 ── **中身を中央の本文の画面に出す**物だけ。
+ * ⚠ 足すときは「2 ペインのまま押して、画面に何か出るか」を 1 度見る(出ないなら足す)。
+ */
+const DUAL_MENU_SELECT_FIRST: ReadonlySet<string> = new Set([
+  'show-history',
+  'stack-load',
+  'create-in-folder',
+]);
 
 /**
  * 🔴 **クリックでメニューを開く受け手**(#632 段①)。⚠ ここに載せ忘れると、
@@ -2572,7 +2602,7 @@ function applyTableFormat(
 ): void {
   const st = dispatcher.getState();
   if (st.phase !== 'ready') {
-    dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから表の形を変えてください' });
+    dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}表の形を変えてください` });
     return;
   }
   /**
@@ -2930,7 +2960,7 @@ function selectEntryOrExplain(dispatcher: Dispatcher, lid: string, what: string)
   if (state.phase === 'editing') {
     dispatcher.dispatch({
       type: 'OP_FAILED',
-      error: `編集を終了してから${what}を開いてください`,
+      error: `${phaseBlockReason(state.phase)}${what}を開いてください`,
     });
     return false;
   }
@@ -2981,7 +3011,7 @@ function deleteFrom(
     if (st.phase !== 'ready') {
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: '編集を終了してから削除してください',
+        error: `${phaseBlockReason(st.phase)}削除してください`,
       });
       return;
     }
@@ -3024,7 +3054,7 @@ function deleteFrom(
        */
       () => {
         const st = dispatcher.getState();
-        if (st.phase !== 'ready') return '編集を終了してから削除してください';
+        if (st.phase !== 'ready') return `${phaseBlockReason(st.phase)}削除してください`;
         const alive = lids.filter((l) => st.entryMetas.has(l));
         if (alive.length === 0) return '選んでいたものは、もうありません';
         if (alive.length !== lids.length)
@@ -4030,8 +4060,9 @@ const ACTIONS: Record<string, ActionHandler> = {
      * 黙って捨てるのに、末尾の欄クリアだけが走って**成功と同じ見た目**になっていた
      * (user の打った字が消え、関係は増えず、理由も出ない)。
      */
-    if (dispatcher.getState().phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから関係を足してください' });
+    const phase = dispatcher.getState().phase;
+    if (phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}関係を足してください` });
       return;
     }
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
@@ -4077,8 +4108,9 @@ const ACTIONS: Record<string, ActionHandler> = {
   /** 関係を消す(#185)。⚠ **id で消す**(押した札が持っている)。 */
   'remove-relation': (dispatcher, target) => {
     // 🔴 編集中は声に出して断る(#513)── reducer は黙って捨てる
-    if (dispatcher.getState().phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから関係を消してください' });
+    const phase = dispatcher.getState().phase;
+    if (phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}関係を消してください` });
       return;
     }
     const id = target.getAttribute('data-pkc-relation');
@@ -4108,11 +4140,10 @@ const ACTIONS: Record<string, ActionHandler> = {
       appPhone.showNote();
       return;
     }
-    if (dispatcher.getState().phase !== 'ready') {
-      dispatcher.dispatch({
-        type: 'OP_FAILED',
-        error: '保存するか取り消してから戻ってください',
-      });
+    const blocked = phaseBlockReason(dispatcher.getState().phase);
+    if (blocked !== null) {
+      // ⚠ 字は 1 か所から(C11 / #1045)── 直す前は「保存するか**取り消して**から」
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${blocked}戻ってください` });
       return;
     }
     if (page === 'info') {
@@ -4396,7 +4427,7 @@ const ACTIONS: Record<string, ActionHandler> = {
   'schedule-quick-add': (dispatcher, target, services) => {
     const st = dispatcher.getState();
     if (st.phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから足してください' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}足してください` });
       return;
     }
     // 🔴 **押した面の欄**を読む(#673 段②)── `root` から引くと別の面の空欄を読む
@@ -4457,7 +4488,7 @@ const ACTIONS: Record<string, ActionHandler> = {
   'contacts-quick-add': (dispatcher, target, services) => {
     const st = dispatcher.getState();
     if (st.phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから足してください' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}足してください` });
       return;
     }
     const box = target.closest<HTMLElement>('[data-pkc-field="contacts-quick"]');
@@ -4589,7 +4620,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     if (st.phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してからノートを作ってください' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}ノートを作ってください` });
       return;
     }
     createAndEdit(dispatcher, services, 'text', meta.lid);
@@ -4790,7 +4821,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const side = dualSide(target) ?? dispatcher.getState().dual.focus;
     const st = dispatcher.getState();
     if (st.phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから名前を変えてください' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}名前を変えてください` });
       return;
     }
     const marked = paneOf(st.dual, side).selection;
@@ -4901,7 +4932,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const side = dualSide(target) ?? dispatcher.getState().dual.focus;
     const st = dispatcher.getState();
     if (st.phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してからコピーしてください' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}コピーしてください` });
       return;
     }
     const rows = dualPaneRows(st, side);
@@ -5032,10 +5063,11 @@ const ACTIONS: Record<string, ActionHandler> = {
     //    何も返さないので、直す前は**確認ダイアログまで出してから黙って捨てて**いた
     //    ── user は消したつもりで画面を離れる。detail.ts が確立した
     //    「無言の操作拒否を作らない」に揃える。⚠ confirm より**前**に断る
-    if (dispatcher.getState().phase !== 'ready') {
+    const phase = dispatcher.getState().phase;
+    if (phase !== 'ready') {
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: '編集を終了してから削除してください',
+        error: `${phaseBlockReason(phase)}削除してください`,
       });
       return;
     }
@@ -5066,7 +5098,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher,
       () => {
         const st = dispatcher.getState();
-        if (st.phase !== 'ready') return '編集を終了してから削除してください';
+        if (st.phase !== 'ready') return `${phaseBlockReason(st.phase)}削除してください`;
         if (!st.entryMetas.has(lid)) return `「${title}」は、もうありません`;
         return null;
       },
@@ -5676,7 +5708,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = lidOfNode(target, st.openBody?.lid ?? st.selectedLid);
     if (lid === null || lid === undefined) return;
     if (st.phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから表を打ってください' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}表を打ってください` });
       return;
     }
     // ⚠ 2 度押しで欄を作り直さない(打ちかけの字を捨てない)
@@ -5862,7 +5894,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = lidOfNode(target, st.openBody?.lid ?? st.selectedLid);
     if (lid === null || lid === undefined) return;
     if (st.phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから表を触ってください' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}表を触ってください` });
       return;
     }
     dispatcher.dispatch({ type: 'SET_CSV_SHAPE', lid, line, col, what, mode });
@@ -5888,7 +5920,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = lidOfNode(target, st.openBody?.lid ?? st.selectedLid);
     if (lid === null || lid === undefined) return;
     if (st.phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してからチェックしてください' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}チェックしてください` });
       return;
     }
     /**
@@ -5943,8 +5975,9 @@ const ACTIONS: Record<string, ActionHandler> = {
      * 🔴 **編集中は声に出して断る**(#513)── 直す前はピッカーの全手順
      * (開く → 選ぶ → 確定)を完走させてから reducer が黙って捨てていた。
      */
-    if (dispatcher.getState().phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから日付を付けてください' });
+    const phase = dispatcher.getState().phase;
+    if (phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}日付を付けてください` });
       return;
     }
     const lid = dispatcher.getState().selectedLid;
@@ -6048,7 +6081,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     if (st.phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから名前を変えてください' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}名前を変えてください` });
       return;
     }
     dispatcher.dispatch({ type: 'ROW_RENAME_BEGIN', lid });
@@ -6088,7 +6121,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     if (st.phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから動かしてください' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}動かしてください` });
       return;
     }
     const marked = visibleSelection(visibleFilerRows(st), st.selection);
@@ -6599,7 +6632,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (line === null || refuseStaleMenu(dispatcher, target)) return;
     const st = dispatcher.getState();
     if (st.phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから、板を消してください' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}、板を消してください` });
       return;
     }
     const ob = st.openBody;
@@ -6612,7 +6645,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher,
       () => {
         const now = dispatcher.getState();
-        if (now.phase !== 'ready') return '編集を終了してから、板を消してください';
+        if (now.phase !== 'ready') return `${phaseBlockReason(now.phase)}、板を消してください`;
         if (now.openBody?.lid !== lid) return '別のノートに切り替わったので、板は消していません';
         return null;
       },
@@ -7020,7 +7053,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (ta === null) return;
     const st = dispatcher.getState();
     if (st.phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから当ててください' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}当ててください` });
       return;
     }
     const plan = parsePlan(ta.value, st.entryMetas);
@@ -7709,7 +7742,7 @@ const ACTIONS: Record<string, ActionHandler> = {
   'stack-save': (dispatcher, _target, _services, root) => {
     const st = dispatcher.getState();
     if (st.phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終えてから、スタックを保存してください' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}、スタックを保存してください` });
       return;
     }
     const lids = knownSplitLids(st.splitLids, st.entryMetas);
@@ -7881,10 +7914,12 @@ const ACTIONS: Record<string, ActionHandler> = {
    * **本体のボタンの文言・図案**と **`Ctrl+N` の対象**を同時に切り替える。
    * ⚠ 保持場所は `<select>` 1 か所 ── ボタンの属性と select が食い違うと、
    *   押した種類と出来るものが別になる(いちばん困る形)。
+   * 🔴 **端末側にも覚える**(#1045)── 次に起動したとき `shell.ts` がここを読む。
    */
   'pick-create-kind': (_dispatcher, target, _services, root) => {
     const archetype = target.getAttribute('data-pkc-archetype');
     if (!archetype) return;
+    appCreateKind.set(archetype);
     const select = root.querySelector<HTMLSelectElement>('[data-pkc-field="create-kind"]');
     if (select) select.value = archetype;
     const run = root.querySelector<HTMLElement>('[data-pkc-field="create-run"]');
@@ -8271,10 +8306,13 @@ const ACTIONS: Record<string, ActionHandler> = {
     const state = dispatcher.getState();
     if (state.sqlPage.running) return;
     // 🔑 **編集中は断って理由を出す**(`sql-to-note` と同じ ── 黙って捨てない)
+    // ⚠ 字は `blockedActionNote` の 1 か所から(C11b / #1045)── 手書きの
+    //   「編集中は書き出せません(…終えてから押してください)」は `error` の相
+    //   (保存に失敗して止まった)でも同じ字を出していた(#516 と同じ形)。
     if (state.phase !== 'ready') {
       dispatcher.dispatch({
         type: 'SQL_SAVE_FAILED',
-        error: '編集中は書き出せません(本文の編集を終えてから押してください)',
+        error: blockedActionNote(state.phase) ?? '',
       });
       return;
     }
@@ -8383,11 +8421,13 @@ const ACTIONS: Record<string, ActionHandler> = {
      *   **画面が 1 ドットも動かなかった**(user には「壊れている」と
      *   「押せていない」の区別が付かない)。
      * 🔑 一覧の行を押したときと**同じ作法**にする ── 断って、理由を画面へ出す。
+     * ⚠ 字は `blockedActionNote` の 1 か所から(C11b / #1045。理由は隣の
+     *   `sql-schema-to-note` と同じ)。
      */
     if (state.phase !== 'ready') {
       dispatcher.dispatch({
         type: 'SQL_SAVE_FAILED',
-        error: '編集中は書き出せません(本文の編集を終えてから押してください)',
+        error: blockedActionNote(state.phase) ?? '',
       });
       return;
     }
@@ -8849,8 +8889,9 @@ const ACTIONS: Record<string, ActionHandler> = {
      * 🔑 重い手順(ピッカー・ダイアログ)を始めさせる口では、**始める前に**見る ──
      *   reducer / 実行部の門は残す(そちらは別経路からの到達を守っている)。
      */
-    if (dispatcher.getState().phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから取り込んでください' });
+    const phase = dispatcher.getState().phase;
+    if (phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}取り込んでください` });
       return;
     }
     target
@@ -8862,10 +8903,11 @@ const ACTIONS: Record<string, ActionHandler> = {
   'show-history': (dispatcher, target) => {
     // 🔴 **無言で断らない**(P8 段⑲)── `SHOW_HISTORY` は `phase !== 'ready'` で
     //    何も返さず、押しても panel も理由も出なかった
-    if (dispatcher.getState().phase !== 'ready') {
+    const phase = dispatcher.getState().phase;
+    if (phase !== 'ready') {
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: '編集を終了してから履歴を開いてください',
+        error: `${phaseBlockReason(phase)}履歴を開いてください`,
       });
       return;
     }
@@ -8962,8 +9004,9 @@ const ACTIONS: Record<string, ActionHandler> = {
      * 🔑 断り文は**この file の既存 8 か所と同じ型**へ流し込む
      *   (「文言は押した場所と対で pin する」── 面ごとに書き分けない)。
      */
-    if (dispatcher.getState().phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから復元してください' });
+    const phase = dispatcher.getState().phase;
+    if (phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}復元してください` });
       return;
     }
     dispatcher.dispatch({ type: 'RESTORE_REVISION', revId });
@@ -9002,8 +9045,9 @@ const ACTIONS: Record<string, ActionHandler> = {
     const entryLid = target.getAttribute('data-pkc-trash-lid');
     if (!revId || !entryLid) return;
     // 🔴 **編集中は声に出して断る**(#319。理由は `restore-revision` と同じ)
-    if (dispatcher.getState().phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから戻してください' });
+    const phase = dispatcher.getState().phase;
+    if (phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}戻してください` });
       return;
     }
     dispatcher.dispatch({ type: 'RESTORE_TRASH', entryLid, revId });
@@ -9019,7 +9063,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       'ゴミ箱を空にします(捨てたノートの履歴も消え、元に戻せません)。よろしいですか?',
       { okLabel: '空にする', danger: true },
       dispatcher,
-      notWhileEditing(dispatcher, '編集を終了してから空にしてください'),
+      notWhileEditing(dispatcher, '空にしてください'),
       () => dispatcher.dispatch({ type: 'PURGE_TRASH' }),
     );
   },
@@ -9337,6 +9381,11 @@ export function bindActions(
     if (!handler) return;
     if (refuseWhileBusy(action, dispatcher, services)) return;
     if (refuseWithoutNote(action, dispatcher)) return;
+    // 🔴 2 ペインの右クリックの一部の項目は、押したときにその行を選ぶ(`MENU_SELECT_FIRST_ATTR`)
+    if (el.hasAttribute(MENU_SELECT_FIRST_ATTR)) {
+      const lid = el.getAttribute(MENU_LID_ATTR) ?? '';
+      if (lid === '' || !selectEntryOrExplain(dispatcher, lid, 'ノート')) return;
+    }
     /**
      * 🔴 **押す前から**見せていたときだけ畳み直す(#655 ①)── `append-at-heading`
      *   自身が開いた回に、その直後のここで畳んでしまわない(開いた瞬間に消える)。
@@ -11393,7 +11442,7 @@ export function bindActions(
   ): void => {
     const st = dispatcher.getState();
     if (st.phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから並べ替えてください' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}並べ替えてください` });
       return;
     }
     if (st.entrySort !== 'manual') {
@@ -11773,6 +11822,107 @@ export function bindActions(
         carry[MENU_Y_ATTR] = String(Math.max(0, Math.round(ev.clientY - r.top - host.clientTop + host.scrollTop)));
       }
       openContextMenu(root, { x: ev.clientX, y: ev.clientY }, items, root.ownerDocument.activeElement, carry);
+      return;
+    }
+
+    /**
+     * 🔴 **2 ペインの表の行なら、右クリックしても 2 ペインを抜けない**(#1045 C9)。
+     *
+     * ⚠ ここより下(既存の枝)は `selectEntryOrExplain` → `SELECT_ENTRY` を撃つ。
+     *   `leavesOnSelect('dual')` は `true`(`ASIDE_PANES` に `dual` が在り、
+     *   `STAY_ON_SELECT` は `sql` だけ)なので、それを撃つと中央が
+     *   本文の面へ切り替わる ── **左クリックは 2 ペインに残る**のに
+     *   (`dual-row` action → `DUAL_SELECT`)、右クリックだけ画面ごと切り替わっていた。
+     * 🔑 だから**先に**分岐する:押した行が 2 ペインの表(`dual-table`)の中なら、
+     *   `SELECT_ENTRY` の代わりに**左クリックと同じ** `DUAL_SELECT` を撃つ。
+     * ⚠ `ASIDE_PANES` / `STAY_ON_SELECT` / `leavesOnSelect` は触らない ──
+     *   一覧タブ(`filer-table` / `entry-list`)の行は `dual-table` の中に居ないので
+     *   ここには来ない(そちらの「押すと中央へ出る」動きは変えない)。
+     */
+    if (row.closest('[data-pkc-region="dual-table"]') !== null) {
+      ev.preventDefault();
+      /**
+       * 🔑 側は**左クリックと同じ決め方**(`dualSide`)── 押した所から辿る
+       *   (`data-pkc-side` は行そのものにも、面の器にも在る)。⚠ 在り得ない形の
+       *   防波堤 ── `dual-row` の左クリックが `if (side && lid)` で何もしないのと
+       *   同じく、ここも無ければ何もしない(表の行は必ず持つ)。
+       */
+      const side = dualSide(target as HTMLElement);
+      if (side === null) return;
+      /**
+       * 🔑 **選択は動かさない**(= 2 ペインを抜けない)。左クリックと**同じ 1 本**を
+       *   撃つ(`mode: 'set'`)── reducer 自身が知らない lid を no-op で捨てるので、
+       *   下の「見つからない」チェックより先に撃っても安全(順序に意味を持たせない)。
+       */
+      dispatcher.dispatch({ type: 'DUAL_SELECT', side, lid, mode: 'set' });
+      const st = dispatcher.getState();
+      if (!st.entryMetas.has(lid)) {
+        // ⚠ 無言で終わらせない(`selectEntryOrExplain` と同じ字)
+        dispatcher.dispatch({ type: 'OP_FAILED', error: 'ノートが見つかりません' });
+        closeContextMenu(root);
+        return;
+      }
+      if (st.phase === 'editing') {
+        // 🔑 編集中は既存の枝(#690 ④ A′、下の docstring)と**同じ扱い** ──
+        //   出すのは「別のウィンドウで開く」だけ(`MENU_PREV_LID_ATTR` は付けない ──
+        //   選択を動かしていないので戻す相手が居ない)。
+        openContextMenu(
+          root,
+          { x: ev.clientX, y: ev.clientY },
+          editingRowMenuActions(),
+          root.ownerDocument.activeElement,
+          { [MENU_LID_ATTR]: lid },
+        );
+        return;
+      }
+      /**
+       * 🔴 **2 つだけ、この行からは出さない**(#1045 C9。着地前の自己監査で判明)。
+       *
+       * ⚠ どちらも「選択が押した行に揃っている」ことを前提に書かれているが、
+       *   この分岐は選択を動かさない(`selectedLid` / `openBody` / `st.selection` は
+       *   押した行を指さない)。そのまま出すと**押した物と効く先が食い違う**
+       *   (CLAUDE.md 不可侵「絶対に作らない」)。
+       * - `move-to-folder`:「印に入っていれば印の全部を動かす」を
+       *   **左の列の `st.selection` / `visibleFilerRows`**(左のフォルダ絞り)で
+       *   判定する。2 ペインの印は別の場所(`state.dual.panes[side].selection`)に在るので、
+       *   左に古い印が残っていて偶然この lid を含むと**押していないノートまで動く**。
+       * - `copy-plain-markdown`:`st.openBody?.lid === lid` を要求する
+       *   (本文は右クリックで読み直さない、§7)。この分岐は選ばないので
+       *   ほぼ常に不一致 ──「押せるのに必ず失敗する」(#500 案 C の docstring
+       *   「押せるのに必ず失敗するのは、出ない(畳んである)より悪い」)になる。
+       * 🔑 どちらも「選ぶ側(=2 ペインを抜ける)」へ倒す理由が無い ── 移すも写すも、
+       *   一覧タブへ切り替えれば同じボタンで行える。
+       */
+      /**
+       * 🔴 **「名前を変える」は 2 ペインの改名へつなぐ**(#1045 C9、取り込み時に直した)。
+       * ⚠ 行の `rename-entry-begin` は左の列の行に入力欄(`row-rename`)を出す作りで、
+       *   2 ペインの表はそれを描かない ── そのまま出すと**押せるのに断られる**。
+       * 🔑 2 ペインには自前の改名(`dual-rename-begin` = 下の列の「名前」)が在り、
+       *   「その面で選ばれている 1 件」を打ち替える。上の `DUAL_SELECT` がちょうど
+       *   押した行 1 件を選んでいるので、**同じ行がその場で打ち替わる**。
+       *   側は `data-pkc-side` で運ぶ(メニューは root 直下に出るので、押した所からは辿れない)。
+       */
+      const items = entryMenuActions({
+        archetype: st.entryMetas.get(lid)?.archetype ?? null,
+        linkedFile: st.linkedFiles.get(lid) ?? null,
+      })
+        .filter((a) => a.action !== 'move-to-folder' && a.action !== 'copy-plain-markdown')
+        .map((a): MenuItem =>
+          a.action === 'rename-entry-begin'
+            ? { ...a, action: 'dual-rename-begin', attrs: { 'data-pkc-side': side } }
+            : DUAL_MENU_SELECT_FIRST.has(a.action)
+              ? { ...a, attrs: { [MENU_SELECT_FIRST_ATTR]: '' } }
+              : a,
+        );
+      openContextMenu(
+        root,
+        { x: ev.clientX, y: ev.clientY },
+        items,
+        root.ownerDocument.activeElement,
+        // ⚠ `MENU_PREV_LID_ATTR` は付けない ── 選択を動かしていないので戻す相手が居ない
+        //   (直上の編集中の枝と同じ理由)。
+        { [MENU_LID_ATTR]: lid },
+      );
       return;
     }
 
@@ -12496,7 +12646,7 @@ export function bindActions(
     if (st.phase !== 'ready') {
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: '編集を終了してからフォルダの操作をしてください',
+        error: `${phaseBlockReason(st.phase)}フォルダの操作をしてください`,
       });
       return true;
     }
@@ -12631,7 +12781,7 @@ export function bindActions(
     if (st.phase !== 'ready') {
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: '編集を終了してからフォルダの操作をしてください',
+        error: `${phaseBlockReason(st.phase)}フォルダの操作をしてください`,
       });
       return true;
     }

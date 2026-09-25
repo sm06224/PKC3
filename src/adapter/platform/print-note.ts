@@ -27,7 +27,7 @@
  * file に、判断を書かない」)── だから待ちも分岐もここに在り、`main.ts` は
  * 1 行の配線しか持たない。
  */
-import type { AppState, Dispatchable } from '@adapter/state/app-state';
+import { phaseBlockReason, type AppState, type Dispatchable } from '@adapter/state/app-state';
 
 export interface PrintNoteDeps {
   getState(): AppState;
@@ -69,13 +69,13 @@ export async function printNote(deps: PrintNoteDeps, lid: string): Promise<Print
    * ⚠ 情報ペインのボタンは編集中 `disabled` なので普通は届かないが、
    *   近道や別経路から来ることがある ── **判定はここに持つ**。
    */
-  if (deps.getState().phase !== 'ready') {
+  const blocked = phaseBlockReason(deps.getState().phase);
+  if (blocked !== null) {
     // ⚠ **黙って何もしない口を作らない**(P8 段⑲ と同じ ── 押しても 1 ドットも
     //    変わらないと、user には「壊れている」としか見えない)
-    deps.dispatch({
-      type: 'OP_FAILED',
-      error: '編集中は印刷できません(確定するか取り消してください)',
-    });
+    // ⚠ 字は `phaseBlockReason` の 1 か所から(C11 / #1045)── 直す前は
+    //   「確定するか取り消して」と、画面のどのボタンの字でもない出口を言っていた
+    deps.dispatch({ type: 'OP_FAILED', error: `${blocked}印刷してください` });
     return 'not-ready';
   }
 

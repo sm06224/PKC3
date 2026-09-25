@@ -318,7 +318,8 @@ export function putAssetIntoNote(args: PutAssetArgs): void {
         toBefore: hit.to,
         lines: [ref],
         anchor: hit.anchor,
-        refusal: '編集を終了してから、ファイルを本文へ落としてください',
+        // 続きだけ渡す(前置きは bodyRewriteGate が付ける ── C11b / #1045)
+        refusal: '、ファイルを本文へ落としてください',
         ...(batch === undefined ? {} : { batch }),
       });
       place!.placed = true;

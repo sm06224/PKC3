@@ -34,6 +34,7 @@ import type { EntryMeta } from '@core/model/entry-meta';
 import type { ExtWriteOp } from '@features/extension/ext-write';
 import { extractMeta } from '@features/flavor';
 import { contentHash64Hex } from '@adapter/platform/storage/content-hash';
+import { phaseBlockReason, type AppPhase } from '@adapter/state/app-state';
 
 /** 書き込む 1 行(store の `upsertEntry` に渡す形)。 */
 export interface ExtWriteEntry {
@@ -53,7 +54,7 @@ export interface ExtWriteApplyDeps {
    *   待ち終わった直後にアプリ自身の書込が積まれれば基底が変わる。
    */
   run<T>(job: () => Promise<T>): Promise<T>;
-  phase(): string;
+  phase(): AppPhase;
   metaOf(lid: string): EntryMeta | null;
   getBody(lid: string): Promise<string | null>;
   /** @returns `conflict: true` = 先を越された(1 バイトも書いていない)。 */
@@ -72,10 +73,17 @@ export async function applyExtWriteOps(
   deps: ExtWriteApplyDeps,
 ): Promise<ExtWriteApplied> {
   return deps.run(async () => {
-    if (deps.phase() !== 'ready')
+    /*
+     * ⚠ 断り文は `phaseBlockReason` の 1 か所から採る(C11 / #1045)── 直す前は
+     *   「保存するか**取り消して**から」と手で書いていた(画面のボタンは「キャンセル」)。
+     *   しかも `phase !== 'ready'` 全部に「編集中です」と言っていたので、保存に失敗して
+     *   止まっているときも**存在しない編集**を言っていた(#516 と同じ形)。
+     */
+    const blocked = phaseBlockReason(deps.phase());
+    if (blocked !== null)
       return {
         ok: false as const,
-        why: 'PKC3 が編集中です(保存するか取り消してから送ってください)',
+        why: `PKC3 側で${blocked}送ってください`,
       };
     /**
      * ── ① 全部読む。⚠ **1 件でも読めなければ全体を断る**
