@@ -38,6 +38,26 @@ function walk(dir: string, out: string[] = []): string[] {
   return out;
 }
 
+/**
+ * 🔴 **例外:短いタイルの名前と、合成メニューの動詞形の名前**(#1054 段②)。
+ *
+ * ⚠ #716 が守るのは「**無関係に見える 2 か所**が、同じ action なのに別の字を
+ *   名乗ること」── 中央の帯と追記欄は user から見て**別々の場所**なので、
+ *   字が違うと「別の操作か」と読める。
+ * 🔑 ここは**その形と違う**:合成メニューの項目は、**その帯自身の ▼ を開かないと
+ *   出てこない**(タイルの隣にある同じ 1 個の器の中)。短い名前(タイル・
+ *   長押しメニュー)と、OS 風の動詞形の名前(合成メニュー)が**同じ場所から
+ *   同時に読める**ので、「別の操作に見える」という #716 の実害が起きない。
+ * ⚠ **だから緩めるのではなく、既知の対として明示する** ── 3 種目が紛れ込んだら
+ *   (`set.size` が既知の 2 種と食い違ったら)ここでも落ちる。
+ */
+const KNOWN_DIFFERENT: ReadonlyMap<string, readonly string[]> = new Map([
+  ['open-today', ['今日', '今日のノートを開く']],
+  ['attach-file', ['添付', '添付する']],
+  ['start-audio-capture', ['録音', '録音する']],
+  ['start-screen-capture', ['画面録画', '画面を録画する']],
+]);
+
 describe('同じ action のボタンの字は 1 種類(#716)', () => {
   it('🔴 src の iconButton(action, 字) を全数拾って、action ごとに字が 1 種類', () => {
     const labels = new Map<string, Set<string>>();
@@ -56,9 +76,20 @@ describe('同じ action のボタンの字は 1 種類(#716)', () => {
     expect(labels.has('commit-edit'), '前提が崩れている(commit-edit を拾えていない)').toBe(true);
     // ⚠ 2 か所に出ることを前提として pin する ── 1 か所に減ったら、この test の主張が空になる
     const bad = [...labels.entries()]
-      .filter(([, set]) => set.size > 1)
+      .filter(([action, set]) => {
+        const known = KNOWN_DIFFERENT.get(action);
+        if (known === undefined) return set.size > 1;
+        return set.size !== known.length || !known.every((l) => set.has(l));
+      })
       .map(([action, set]) => `${action}: ${[...set].join(' / ')}`);
     expect(bad, '同じ action なのに字が違うボタンがある(user には別の操作に見える)').toEqual([]);
+    // 🔑 既知の対が、実際に「両方在る」ことも見る ── 片方だけになったら既知リストが腐っている
+    for (const [action, known] of KNOWN_DIFFERENT) {
+      expect(
+        [...(labels.get(action) ?? [])].sort(),
+        `${action} の既知の対が崩れている(片方だけになった?)`,
+      ).toEqual([...known].sort());
+    }
   });
 });
 

@@ -1480,57 +1480,38 @@ describe('CSS(構文で読む)', () => {
   });
 
   /**
-   * 🔴 **操作の 7 つも 32px**(user 裁定 2026-09-04、#671)。
-   * ⚠ 1 枚ずつにしてペインの丈が 282px → 571px になったので、6px 増やしても
-   *   表の行はほとんど減らない ── 端末の中の押し所を 1 種類に揃える。
+   * 🔴 **操作の 7 つも均一な正方形タイル**(#1054 段②。上の 2 件を上書き)。
+   *
+   * ⚠ 直す前は「操作行だけ 32px」「375px で語が 15px しか残らず切れるので
+   *   4 列に折り、鍵の字も畳む」という**個別の帯調整**が要った ── 図案だけの
+   *   均一なタイル(`[data-pkc-bar-tile]`)にしたので、**字の長さで幅が変わる
+   *   問題そのものが消え**、この帯だけの特別扱いが要らなくなった。
+   * 🔑 見るのは「共有のタイル規則が当たっていること」と「パソコンでは
+   *   32px・スマホでは 44px という寸法そのもの」(`app.css` 冒頭の共有規則)。
    */
-  it('🔴 スマホでは 2 ペインの操作も 32px', () => {
+  it('🔴 スマホでは 2 ペインの操作も均一な正方形タイル(44px)、パソコンは 32px', () => {
     const css = withoutMedia(bare());
-    const phone = blocksFor(
-      css,
-      `${PHONE} [data-pkc-region='dual-commands'] button`,
-    ).join(' ');
-    expect(phone, '操作の押し所を 32px にしていない').toMatch(decl('min-height', '32px'));
-    // ⚠ 空振り防止 ── パソコン側には丈を足していない(1px も変えない)
-    const wide = blocksFor(css, `[data-pkc-region='dual-commands'] button`).join(' ');
-    expect(wide, 'パソコンの操作にも丈を足している').not.toMatch(decl('min-height', '32px'));
+    const shared = blocksFor(css, `[data-pkc-bar-tile]`).join(' ');
+    expect(shared, '共有タイル規則が 32px を持っていない').toMatch(decl('width', '32px'));
+    const phone = blocksFor(css, `${PHONE} [data-pkc-bar-tile]`).join(' ');
+    expect(phone, 'スマホでタイルを 44px にしていない').toMatch(decl('width', '44px'));
+    // ⚠ 空振り防止 ── 2 ペインの操作行がこの共有属性を実際にまとうことは
+    //   `dual-filer.ts` の unit(`markBarTile` が呼ばれること)で見る
   });
 
   /**
-   * 🔴 **スマホでは操作を 2 段に折る**(着地前の動線レビュー B、2026-09-04 に実測)。
-   *
-   * ⚠ 1 行 7 等分のままだと、375px で**語に使える幅が 15px**(全角 1 字)しか
-   *   残らない ── 実測した `scrollWidth / clientWidth`:
-   *   「右へ写す」53/15、「プレビュー」66/15、「名前」26/15 で **7 つ全部**が切れる。
-   * 🔴 `text-overflow: ellipsis` なので画面には「右…」と出るだけで、
-   *   `textContent` を見る検査は**素通りする**(CLAUDE.md §1)── 実際に切れる幅は
-   *   実ブラウザで測る(`tests/smoke/phone.smoke.spec.ts`)。ここは**規則が在ること**。
+   * 🔴 **鍵の字はもう画面に出さない(`title` の末尾へ移した)**(#1054 段②)。
+   * ⚠ 直す前は `cmd-key` という**見える器**を持っていたが、いまは名前と
+   *   同じく `[data-pkc-bar-tile]` の下で視覚だけ隠す(読み上げには残す)。
    */
-  it('🔴 スマホでは 2 ペインの操作を 4 列に折る', () => {
+  it('🔴 2 ペインの操作の名前(cmd-label)は、タイルの下で見た目だけ隠れる', () => {
     const css = withoutMedia(bare());
-    const phone = blocksFor(css, `${PHONE} [data-pkc-region='dual-commands']`).join(' ');
-    expect(phone, 'スマホで列を切る規則が無い(1 行 7 等分のまま)').toMatch(
-      decl('grid-template-columns', 'repeat\\(4'),
-    );
-    expect(phone, '行送りにしていない(4 つ目で折り返さない)').toMatch(
-      decl('grid-auto-flow', 'row'),
-    );
-    // ⚠ 空振り防止 ── パソコンは 1 行のまま(端が揃う形を崩さない)
-    const wide = blocksFor(css, `[data-pkc-region='dual-commands']`).join(' ');
-    expect(wide, 'パソコンまで折り返している').toMatch(decl('grid-auto-flow', 'column'));
-    /**
-     * 🔴 **4 列に折っても足りなかったので、鍵の字は出さない**(実測)。
-     * ⚠ `barKey` は F キーの無い操作では**最初の割当をそのまま出す**ので、
-     *   「ノート」の鍵が長く、語に残ったのは **18px**(要る 40px)だった。
-     * 🔑 情報は捨てない ── 鍵は説明(`title`)に残す(`dual-filer.ts`)。
-     */
-    const key = blocksFor(css, `${PHONE} [data-pkc-field='cmd-key']`).join(' ');
-    expect(key, 'スマホで鍵の字を畳んでいない(語が 18px まで潰れる)').toMatch(
+    const hidden = blocksFor(css, `[data-pkc-bar-tile] [data-pkc-field='cmd-label']`).join(' ');
+    expect(hidden, '名前を視覚だけ隠す規則が無い').toMatch(decl('clip-path', 'inset\\(50%\\)'));
+    // ⚠ `display: none` にはしない ── それだと読み上げからも消える
+    expect(hidden, 'display: none にしている(読み上げからも消える)').not.toMatch(
       decl('display', 'none'),
     );
-    // ⚠ 空振り防止 ── パソコンでは出したまま(近道の覚え書きを消していない)
-    const wideKey = blocksFor(css, `[data-pkc-field='cmd-key']`).join(' ');
-    expect(wideKey, 'パソコンの鍵まで畳んでいる').not.toMatch(decl('display', 'none'));
   });
 
   /**

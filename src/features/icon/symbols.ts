@@ -184,8 +184,7 @@ export const PKC_SYMBOLS = {
   link: { icon: 'link', tone: 'io' },
   translate: { icon: 'translate', tone: 'system' },
   /**
-   * 🔴 **ここから下は #1054 段② が使う**(2026-09-25。3 つの帯の作り替えで使う予定)。
-   * ⚠ この段(段①)では**まだどこからも参照しない** ── 書体と表に用意しておくだけ。
+   * 🔴 **#1054 段① で用意し、段②(2 ペインの操作行)から使う**。
    */
   copy: { icon: 'copy', tone: 'io' },
   move: { icon: 'arrow-square-right', tone: 'io' },
@@ -193,6 +192,12 @@ export const PKC_SYMBOLS = {
   'note-plus': { icon: 'note-pencil', tone: 'create' },
   eye: { icon: 'eye', tone: 'find' },
   snippet: { icon: 'text-aa', tone: 'neutral' },
+  /**
+   * 🔴 **名前を打ち替える**(#1054 段②、2026-09-25)── 2 ペインの「名前」に絵が
+   *   無かった(段①の一覧に無い)。⚠ **意味を持たない**(タイトルバーの
+   *   カーソルの絵)ので tone は `neutral`。
+   */
+  rename: { icon: 'cursor-text', tone: 'neutral' },
 } as const satisfies Readonly<Record<string, { readonly icon: string; readonly tone: IconTone }>>;
 
 /**

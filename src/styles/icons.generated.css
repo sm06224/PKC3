@@ -504,3 +504,9 @@
 [data-pkc-icon][data-pkc-symbol='snippet']::after {
   content: '\e0a5';
 }
+[data-pkc-icon][data-pkc-symbol='rename']::before {
+  content: '\e0a6';
+}
+[data-pkc-icon][data-pkc-symbol='rename']::after {
+  content: '\e0a7';
+}

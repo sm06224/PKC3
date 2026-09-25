@@ -299,3 +299,80 @@ describe('長押しで印を足す(#687 D-1)', () => {
     expect(rule, 'touch-action を書いている(スクロールが死ぬ)').not.toMatch(/touch-action\s*:/);
   });
 });
+
+/**
+ * 🔴 **3 つの帯のタイルを長押しすると、その帯の全操作を名前つきで一覧する**
+ * (#1054 段②)。⚠ 図案だけのタイルには、指で読む手段が hover(`title`)しか
+ * 無かった(指には `:hover` が無い)ので、長押しでその代わりを出す。
+ */
+describe('3 つの帯のタイルの長押し(#1054 段②)', () => {
+  it('🔴 create-bar のタイルを長押しすると、7 つ全部が名前つきで一覧に出る', () => {
+    const tile = root.querySelector<HTMLElement>('[data-pkc-field="open-today"]')!;
+    expect(tile.hasAttribute('data-pkc-bar-tile'), '前提が崩れている(タイルの印が無い)').toBe(
+      true,
+    );
+    pressFor(tile, LONG_PRESS_MS);
+    expect(contextMenuOpen(root), '長押しでメニューが開かない').toBe(true);
+    const items = [...root.querySelectorAll<HTMLButtonElement>('[data-pkc-region="context-menu"] button')];
+    expect(items.map((b) => b.getAttribute('data-pkc-action'))).toEqual([
+      'create-entry',
+      'toggle-create-menu',
+      'open-today',
+      'attach-file',
+      'start-audio-capture',
+      'start-screen-capture',
+      'start-timer',
+    ]);
+    // 🔑 名前つき(隠れている cmd-label / label と同じ字)── 図案だけでは読めない
+    const todayItem = items.find((b) => b.getAttribute('data-pkc-action') === 'open-today')!;
+    expect(todayItem.textContent).toBe('今日');
+    // 🔑 図案も一緒に出る(icons.ts の `data-pkc-symbol` をそのまま写す)
+    expect(todayItem.querySelector('[data-pkc-icon]')?.getAttribute('data-pkc-symbol')).toBe(
+      'calendar',
+    );
+  });
+
+  it('🔴 長押しの直後の click は、タイル自身の action を撃たない(メニューと二重に効かない)', () => {
+    const before = d.getState().entryMetas.size;
+    const tile = root.querySelector<HTMLElement>('[data-pkc-field="open-today"]')!;
+    pressFor(tile, LONG_PRESS_MS);
+    expect(contextMenuOpen(root), '前提が崩れている').toBe(true);
+    pointer(tile, 'pointerup', 'touch');
+    const ev = click(tile);
+    expect(ev.defaultPrevented, '長押しの直後の click を捨てていない').toBe(true);
+    // ⚠ メニューは開いたまま(捨てたのは「タイル自身の action」であって、
+    //   メニューを閉じる一般の外側クリック判定ではない)
+    expect(contextMenuOpen(root), 'タイル自身の click でメニューまで閉じた').toBe(true);
+    expect(d.getState().entryMetas.size, '今日のノートが二重に出来ている').toBe(before);
+  });
+
+  it('🔴 一覧の項目を押すと、その操作が実際に走る(今日のノートが出来る)', () => {
+    const before = d.getState().entryMetas.size;
+    const tile = root.querySelector<HTMLElement>('[data-pkc-field="open-today"]')!;
+    pressFor(tile, LONG_PRESS_MS);
+    const item = root.querySelector<HTMLElement>(
+      '[data-pkc-region="context-menu"] [data-pkc-action="open-today"]',
+    )!;
+    item.click();
+    expect(d.getState().entryMetas.size, '一覧から押しても今日のノートが出来ない').toBe(
+      before + 1,
+    );
+  });
+
+  it('🔴 押せない(disabled)タイルは一覧に載らない', () => {
+    // ⚠ 実際に disabled になる経路(編集中の門)はここでは配線していないので、
+    //   `barTileMenuItems` の**除外そのもの**を直に見る ── 手で disabled にする
+    const createTile = root.querySelector<HTMLButtonElement>('[data-pkc-field="create-run"]')!;
+    createTile.disabled = true;
+    const tile = root.querySelector<HTMLElement>(
+      '[data-pkc-region="create-bar"] [data-pkc-action="attach-file"]',
+    )!;
+    pressFor(tile, LONG_PRESS_MS);
+    const actions = [
+      ...root.querySelectorAll('[data-pkc-region="context-menu"] button'),
+    ].map((b) => b.getAttribute('data-pkc-action'));
+    expect(actions, '押せないタイルが一覧に残っている').not.toContain('create-entry');
+    // ⚠ 空振り防止 ── 他のタイルは変わらず載っている
+    expect(actions, '関係ないタイルまで消えている').toContain('attach-file');
+  });
+});

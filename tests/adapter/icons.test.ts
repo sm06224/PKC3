@@ -286,14 +286,15 @@ describe('図案の登記に死んだ行を残さない', () => {
      *   `ARCHETYPE_ICONS.todo` が使っており、**状態を切り替える押し口が
      *   2026-08-19 に無くなった**(`sealed.ts`)ぶんだけ、こちらが浮いている。
      *
-     * 🔴 **`folder-plus` / `note-plus` / `eye` は #1054 段②(3 つの帯の
-     *   作り替え)が使う予定で足した**(2026-09-25)── この段①ではまだ
-     *   どこからも呼ばない(書体と表に用意しておくだけ)。⚠ `copy` / `move` /
-     *   `snippet` は同じ段②向けだが、既存の src に**別の意味の同名 literal**が
-     *   在るため、この走査には拾われず `FOLDED` へ足す必要が無い
-     *   (= たまたま「指されている」側に見えるだけで、実際に呼ばれてはいない)。
+     * 🔴 **`folder-plus` / `note-plus` / `eye` / `rename` は #1054 段②で
+     *   `dual-filer.ts` の 2 ペインの操作行に配線した**(2026-09-25、
+     *   `ACTION_ICONS` の `dual-mkdir` / `dual-mknote` / `dual-preview-toggle` /
+     *   `dual-rename-begin`)── もう畳んでいないので `FOLDED` から外れる。
+     *   ⚠ `copy` / `move` / `snippet` も同じ段②で配線したが、既存の src に
+     *   **別の意味の同名 literal**が在るため、この走査には最初から拾われず
+     *   `FOLDED` に足す必要が無かった(= たまたま「指されている」側に見えていた)。
      */
-    const FOLDED = ['box', 'folder-plus', 'note-plus', 'eye'];
+    const FOLDED = ['box'];
 
     const src = readFileSync('src/features/icon/symbols.ts', 'utf-8');
     const bare = (t: string): string => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');

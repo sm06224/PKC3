@@ -864,6 +864,50 @@ select:focus-visible {
   box-shadow: inset 0 -2px 0 var(--fg);
   font-weight: 600;
 }
+/**
+ * 🔴 **均一な正方形タイル(#1054 段②)**── 作る帯 / ノート全体の帯 / 2 ペインの
+ * 操作行の 3 つを、図案だけの同じ大きさの正方形へ統一する。
+ *
+ * 裁定(#1046 コメント 5833269607 / 5833340597。こちらの解釈)「3 つの帯は
+ * 同じ大きさの正方形タイルへ統一してよい」。
+ *
+ * ⚠ **目印は `data-pkc-tile` ではない**(`data-pkc-bar-tile`)── 前者は
+ *   アプリの一覧タイルの並べ替え(#857。値に lid を持つ)が既に使っている
+ *   ── 同じ名前にすると、長押しが「並べ替えモード」に化ける
+ *   (`row.getAttribute('data-pkc-tile')` は空文字も `null` でないので当たる。
+ *   CLAUDE.md §7 の型「同じ名前の器を、値の意味が違う 2 つの機能が奪い合う」)。
+ * ⚠ 名前(`[data-pkc-field='label']` / `'cmd-label']`)は**器の中に残す**
+ *   (見た目だけ隠す) ── 読み上げ・既存の `textContent` 検査・長押しメニューの
+ *   どれもここを読む(CLAUDE.md §10「器を替えても、読み取れる値を変えない」)。
+ */
+[data-pkc-bar-tile] {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  max-height: 32px;
+  padding: 0;
+  gap: 0;
+}
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-bar-tile] {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  max-height: 44px;
+}
+[data-pkc-bar-tile] [data-pkc-field='label'],
+[data-pkc-bar-tile] [data-pkc-field='cmd-label'] {
+  /* 🔴 **視覚だけ隠す**(定番の「見えないが読める」形)── `display: none` にすると
+   *   読み上げからも消える。位置は指定しない(未指定の絶対配置は「元の場所」に
+   *   留まる ── 定番の sr-only recipe と同じ)。 */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 /* 左の列の下端: **ノート全体**に対する操作 */
 [data-pkc-region='collection-bar'] {
   display: flex;
@@ -878,41 +922,27 @@ select:focus-visible {
   border-top: 1px solid var(--border);
   flex: none;
 }
-/* 🔴 **図案を出さない**(#475、2026-08-27)。⚠ タブ(#468)・作る帯(#476)と
- * **同じ手の 3 例目**である ── 230px の器に 7 個を並べると図案の分だけ入らない。
- * 実測(1280x900): ボタンの合計 **544px** に対し器は 230px なので **3 段**になり、
- * 帯が **81px** を取っていた。図案を消して余白を詰めると合計 **362px** = **2 段**、
- * 一覧の高さが **704 → 731px**(+27)。⚠ **中央から 1px も取らない**。
- * 🔑 **どちらか片方では足りない**(実測: 図案だけ 418px / 余白だけ 488px ── どちらも
- *   3 段のまま)。2 つ揃って初めて段が減るので、**対で書く**。
- * ⚠ **作る帯には当てない** ── 同じ手で 250px 以上なら 1 段になるが、
- *   **230px(= 1280px の窓)では 2 段のままで 1px も買えない**。
- *   図案を消すのは user に見える変更なので、買えない所では払わない。 */
-[data-pkc-region='collection-bar'] [data-pkc-icon] {
-  display: none;
-}
+/**
+ * 🔴 **図案を出す(#475 を上書き)**(#1054 段②、2026-09-25)。
+ *
+ * 裁定(#1046 コメント 5833269607 / 5833340597。こちらの解釈)「作る帯・ノート全体の
+ * 帯・2 ペインの操作行は、同じ大きさの正方形タイルへ統一してよい」。
+ *
+ * ⚠ #475 は「図案を出すと 230px の器に 7 個が入らない」ことを理由に図案を消し、
+ *   余白を詰めていた ── **均一な正方形タイル**にすると、字の長さで幅が変わらず、
+ *   詰めるべき余白そのものが無くなる(タイルの寸法は `[data-pkc-bar-tile]` が持つ)。
+ * ⚠ 「収まらなければ折り返す」性質は変わらない ── `[data-pkc-region='collection-bar']`
+ *   の `flex-wrap: wrap` はそのまま。
+ */
 [data-pkc-region='collection-bar'] button {
-  /* ⚠ **伸ばさない**(P9 段②)。`flex: 1 1 auto` は行の余りを**均等に**配るので、
-   * 3 個の行と 2 個の行で 1 個あたりの取り分が変わり、同じボタンが行によって
-   * 98px / 136px と**別の幅**になっていた(実測)。伸ばさなければ自然な幅で揃う */
-  flex: 0 1 auto;
+  /* ⚠ **輪で区切る**(他の折り返す帯と同じ作法。CLAUDE.md §7 の逆 ──
+   *   `border` を残すと隣のタイルと二重線になる。区切りは共有の
+   *   `outline: 1px solid var(--border)` が受け持つ ── 下の連結セレクタを見よ)。
+   *   寸法は `[data-pkc-bar-tile]` が持つ(ここでは書かない)。 */
   border: none;
   border-radius: 0;
-  justify-content: flex-start;
-  font-size: var(--btn-fs-bar);
-  /* ⚠ 語が切れないことは `layout.smoke` の「左の列のボタンは、どの幅でも
-   *   名前が器からはみ出さない」が**帯を名指しせず全数で**見ている(#476)。 */
-  padding: 0 4px;
-  /* 🔴 **押す的を細らせない**(2026-08-27、既存の smoke が捕まえた)。
-   * ⚠ 図案を消して余白を詰めた 1 稿目は、2 文字の「設定」「集計」が
-   *   **58 → 32px** まで細り、`layout.smoke` の「上の帯は無く、設定は左の列から
-   *   押せる」が **40px の下限**で落ちた ── 段を減らすために**的を削っていた**。
-   * 🔑 下限を置いても **2 段のまま**である(実測: 合計 362 → 378px、器 230px)──
-   *   つまり**払わずに済む費用だった**。
-   * ⚠ **検査を緩めて通さない。** あの 40px は「帯にいた頃の 20px / 11px を
-   *   引きずらない」ために置かれた下限であり、こちらの都合で下げてよい物ではない。 */
-  min-width: 40px;
 }
+
 [data-pkc-region='browse-host'] {
   flex: 1;
   min-height: 0;
@@ -1026,29 +1056,19 @@ select:focus-visible {
   border-radius: 0;
 }
 /**
- * 🔴 **語より細くしない**(2026-08-27、cowork レポート #16 が実機で見つけた)。
+ * 🔴 **図案だけの均一なタイルにする(#1054 段②。上の「語より細くしない」を上書き)**。
  *
- * ⚠ **user がいちばん押すボタンの名前が読めなかった** ── 「+ ノート」は
- *   55px 要るのに器は **1920px でも 43px**、1024px では **28px** しか無く、
- *   **「+ ノ」に切れていた**。⚠ 帯は既に折り返していたが、**折り返す前に
- *   ボタンが潰れる**ので、段を増やしても字は戻らない。
- * ⚠ しかも**中央の案内文が「左上の『+ ノート』で作るか」と、その切れた名前を
- *   指していた** ── 案内と現物が食い違っていた。
+ * 裁定(#1046 コメント 5833269607 / 5833340597。こちらの解釈)「作る帯・ノート全体の
+ * 帯・2 ペインの操作行は、同じ大きさの正方形タイルへ統一してよい」。
  *
- * 🔑 直しは**タブ(`browse-tabs`)と同じ規則**である ── 器を `max-content` より
- *   細くしないので、入らなくなった幅で初めて折り返す。
- * ⚠ **図案だけにする案は採らない**(cowork も反対)── 名前が読めないのが
- *   問題なのに、名前を消すことになる。
- *
- * ⚠ 実測(2026-08-27、8 幅):切れは **8/8 → 0/8**、段数は
- *   **どの幅でも今より増えていない**(1920 は 1 段のまま)。
+ * ⚠ 2026-08-27 の「図案だけにする案は採らない」は**当時の代わりが無かった**
+ *   (名前が消えると読む手段が 1 つも残らなかった)からで、いまは
+ *   ①名前を器に残す(見た目だけ隠す)②`title` が名前を持つ③長押しで
+ *   その帯の全操作を名前つきで一覧できる、の 3 つを揃えたので前提が変わった。
+ * ⚠ `border: none; border-radius: 0;` は上の
+ *   `[data-pkc-region='create-bar'] button` が既に持つ ── ここでは重ねない。
+ *   寸法は `[data-pkc-bar-tile]` が持つ。
  */
-[data-pkc-region='create-bar'] button {
-  min-width: max-content;
-  /* ⚠ 効くのは「あと少しで折り返す」幅だけ ── 実測でここが 2px か 8px かが
-   *   **950px が 2 段か 3 段か**を分けた(タブと同じ)。 */
-  padding: 0 2px;
-}
 /**
  * 🔴 **「探す」欄は 8 字より細くしない**(#703)。⚠ 直す前は `min-width: 0` で、1024×768
  *   (左の列 225px)では並び順の `<select>`(内容依存幅)に押されて **56px**(「:」1 字ぶん)に
@@ -1097,19 +1117,13 @@ select:focus-visible {
 [data-pkc-field='kind-clear'] {
   margin-inline-start: auto;
 }
-/* 🔑 **分割ボタン**(P10、user 指示「▼ を押下した際に種別を選択して、
- * 追加ボタンと ctrl+n の対象を更新、+〇〇みたいにボタンを変更すればいい」)。
- * ⚠ 本体が幅を取り、▼ は必要な分だけ。⚠ 一覧は**下に出す**(押した物の下)。 */
-[data-pkc-field='create-run'] {
-  flex: 1;
-  min-width: 0;
-  justify-content: flex-start;
-}
-[data-pkc-field='create-pick'] {
-  flex: none;
-  padding: 0 var(--s2);
-}
-/* 種類の一覧。⚠ 行を分けて全部見せる(畳んだ中でさらに畳まない) */
+/**
+ * 🔴 **分割ボタン → 均一タイル(#1054 段②)**。
+ * ⚠ 直す前は「本体が幅を取り、▼ は必要な分だけ」だったが、両方
+ *   `[data-pkc-bar-tile]` の 32px/44px 正方形になったので、この 2 つの
+ *   個別ルールは要らない(残すと `flex: 1` が正方形を歪める)。
+ */
+/* 種類の一覧(▼ の合成メニュー)。⚠ 行を分けて全部見せる(畳んだ中でさらに畳まない) */
 [data-pkc-region='create-menu'] {
   display: flex;
   flex-wrap: wrap;
@@ -1119,6 +1133,23 @@ select:focus-visible {
    *   いつでも変わる** ── 変わった日に灰色が出る形を残さない。 */
   background: var(--surface);
   border-top: 1px solid var(--border);
+}
+/**
+ * 🔴 **見出し・区切りは行いっぱいに**(#1054 段②)── `collection-app-group` と
+ *   同じ技法(`flex: 1 0 100%`)で、ボタンの並びの中に混ざっても必ず改行する。
+ */
+[data-pkc-field='create-menu-heading'] {
+  flex: 1 0 100%;
+  padding: 2px 8px;
+  font-size: var(--btn-fs-sm);
+  color: var(--muted);
+  font-weight: 600;
+}
+[data-pkc-field='create-menu-separator'] {
+  flex: 1 0 100%;
+  height: 1px;
+  margin: 2px 0;
+  background: var(--border);
 }
 [data-pkc-region='create-menu'] button {
   flex: 1 1 auto;
@@ -1273,6 +1304,15 @@ select:focus-visible {
 [data-pkc-icon][data-pkc-chip='form'] {
   color: color-mix(in oklab, var(--fg) 25%, #b03a5a);
   --pkc-icon-underlay: color-mix(in oklab, var(--fg) 25%, #b03a5a);
+}
+/**
+ * 🔴 **テンプレート**(#1054 段②)── `ARCHETYPE_ICONS` に `snippet` を登記した
+ * (直す前は表に無く、図案が `dot` へ落ちていた)ので、他の種別と同じく色を持たせる。
+ * ⚠ 既存 8 色と被らない系にする(緑寄りの黄 ── どれとも十分に離れている)。
+ */
+[data-pkc-icon][data-pkc-chip='snippet'] {
+  color: color-mix(in oklab, var(--fg) 25%, #7a9a2a);
+  --pkc-icon-underlay: color-mix(in oklab, var(--fg) 25%, #7a9a2a);
 }
 /* ⚠ 選んでいる行では**行の色に戻す** ── 選択の色より種別の色が強いと、
  *   どれを選んでいるか分からなくなる(選択は種別より上位の情報)。
@@ -1578,7 +1618,12 @@ select:focus-visible {
  * ここに書かないと『輪の規則に乗っていない帯』として検査が落ちる。
  * ⚠ 実害のほうが本体である:乗せ忘れると**塊の中だけ区切りが消えて 1 枚の板に見える**。 */
 [data-pkc-region='collection-bar'] [data-pkc-field='collection-app-group'] button:not(:focus-visible),
-[data-pkc-region='inspector'] [data-pkc-field='inspector-action-group'] button:not(:focus-visible) {
+[data-pkc-region='inspector'] [data-pkc-field='inspector-action-group'] button:not(:focus-visible),
+/**
+ * 🔴 **2 ペインの操作行も同じ輪に乗せる**(#1054 段②)── 図案だけの均一な
+ *   タイルへ作り直したので、`gap: 1px` の帯を折り返す他の帯と同じ扱いになる。
+ */
+[data-pkc-region='dual-commands'] button:not(:focus-visible) {
   outline: 1px solid var(--border);
   outline-offset: 0;
 }
@@ -6267,38 +6312,31 @@ li[data-pkc-row-slot] {
   padding: var(--s1) var(--s2);
   border-top: 1px solid var(--border);
 }
-/* 🔴 **操作行は最下段・全幅・等分割**(2026-08-19 の作り直し)。
+/**
+ * 🔴 **操作行は最下段・図案だけの均一なタイル**(#1054 段②。2026-08-19 の
+ * 「全幅・等分割」を上書き)。
  *
- * ⚠ 直す前は**左右ペインの間に縦積み**で、幅が文字数なりだったので
- *   **端が 1 つも揃わなかった**(「醜い」の主因)。
- * 🔑 古典 4 実装は例外なく**最下段の全幅・等分割**である。等分割は
- *   `grid-auto-columns: 1fr` で採る ── 個数が増えても端は揃ったまま。 */
+ * ⚠ 直す前は**キーと語を横並びの文言**にしていた(古典 4 実装 = Total Commander /
+ *   Double Commander / FAR / Krusader に倣った形)。⚠ スマホでは 4 列に折っても
+ *   語が 15px しか残らず全部切れ、鍵の字も畳んでいた(実測は下の削除箇所に
+ *   在った)。🔑 均一な正方形タイルにすると、**字の長さで幅が変わらない**ので、
+ *   その問題自体が消える(名前は `title` と長押しメニューへ移した)。
+ * ⚠ 「全幅・等分割」もやめた ── 個数が変わっても**タイルの大きさは変えない**
+ *   (等分割だと、7 個が均等に伸び縮みして「均一な正方形」ではなくなる)。
+ */
 [data-pkc-region='dual-commands'] {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 1fr;
-  gap: var(--s1);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
   margin-top: var(--s2);
 }
 [data-pkc-region='dual-commands'] button {
-  display: flex;
-  align-items: baseline;
-  justify-content: center;
-  gap: 0.4em;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-}
-/* ⚠ キーは**弱める** ── 語のほうが主で、キーは近道の案内である
- *   (Krusader のバーがそのまま覚え書きになっている形)。 */
-[data-pkc-field='cmd-key'] {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--muted);
-}
-[data-pkc-field='cmd-label'] {
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* ⚠ **輪で区切る**(他の折り返す帯と同じ作法)── `border` を残すと隣の
+   *   タイルと二重線になる。寸法は `[data-pkc-bar-tile]` が持つ。 */
+  border: none;
+  border-radius: 0;
 }
 
 /* ── 画面幅に応じた上書き ─────────────────────────────
@@ -7481,10 +7519,6 @@ h3[data-pkc-section] {
   [data-pkc-field='phone-menu'] {
     min-width: 32px;
   }
-  /* ⚠ `create-bar button` の `min-width: max-content`(0,1,1)に勝つため器を噛ませる */
-  [data-pkc-region='create-bar'] [data-pkc-field='create-pick'] {
-    min-width: 28px;
-  }
   /* ① **チェックの箱**:13 → 24(本文のチェックリストと設定の箱、両方)。
    *    ⚠ issue #706 は 20px を挙げていたが、smoke の主張「押し所は**全数** 24px 以上」と
    *    食い違うので 24 に揃えた(箱を名指しで除くと、検査が名指しの表に戻る)。
@@ -7669,48 +7703,15 @@ h3[data-pkc-section] {
   font-weight: 600;
   margin-inline-end: var(--s1);
 }
-/* 🔴 **操作の 7 つも 32px にする**(user 裁定 2026-09-04)。
- * 🔑 1 枚ずつにしたことで**丈が 282px → 571px** になったので、
- *   6px 増やしても表の行はほとんど減らない(実装後に実測して確かめる)。
- *   これで端末の中の押し所が 1 種類(32px)に揃う。 */
-[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='dual-commands'] button {
-  min-height: 32px;
-}
-/* 🔴 **スマホでは 2 段に折る**(着地前の動線レビュー B、2026-09-04 に実測)。
+/**
+ * 🔴 **スマホの 32px / 折り返しの個別調整は不要になった**(#1054 段②)。
  *
- * ⚠ 1 行 7 等分のままだと、375px で**語に使える幅が 15px**(全角 1 字)しか
- *   残らない。実測した `scrollWidth / clientWidth`:
- *
- *   | 語 | 要る幅 | 空いている幅 |
- *   |---|---|---|
- *   | 右へ写す / 右へ移す / フォルダ | 53px | 🔴 **15px** |
- *   | プレビュー | 66px | 🔴 15px |
- *   | ゴミ箱 / ノート | 40px | 🔴 15px |
- *   | 名前 | 26px | 🔴 15px |
- *
- * 🔴 **7 つ全部が切れていた**(この PR より前から ── ただし
- *   「**行き先を字に入れる**」という user 裁定は、読めなければ**果たせない**)。
- * ⚠ `cmd-label` は `text-overflow: ellipsis` なので、切れても**画面には
- *   「右…」と出るだけ**で、`textContent` を見る検査は**素通りする**
- *   (CLAUDE.md §1)── だから実ブラウザで `scrollWidth <= clientWidth` を見る。
- * 🔑 4 列にすると 1 つ ≒ 94px になり、いちばん長い「プレビュー」(66px)も入る。 */
-[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='dual-commands'] {
-  grid-auto-flow: row;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-/* 🔴 **スマホでは鍵の字を出さない**(実測で決めた。2026-09-04)。
- *
- * ⚠ 4 列に折っても足りなかった ── **鍵の字の長さが操作ごとに違う**からである。
- *   `barKey` は F キーが無い操作では**最初の割当をそのまま出す**ので、
- *   「ノート」は `Ctrl+Shift+N` 相当の長い字になり、実測で
- *   **語に残ったのは 18px**(要る 40px)だった。⚠ 4 列 + 詰めでも直らない。
- * 🔑 **選ばされたら語を採る** ── 鍵は近道の案内、語は操作そのものである。
- *   スマホ用画面(幅 720px 以下)は**キーボードを持たない端末**が主なので、
- *   ここでは語だけを出す。⚠ 情報は捨てない ── 鍵は説明(`title`)に残す
- *   (`dual-filer.ts` の `renderCommands`)。 */
-[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-field='cmd-key'] {
-  display: none;
-}
+ * ⚠ 直す前は「操作の 7 つも 32px にする」「375px で語が 15px しか残らず全部
+ *   切れるので 4 列に折る」「鍵の字も畳む」の 3 つの個別ルールがここに在った ──
+ *   均一な正方形タイル(`[data-pkc-bar-tile]`、スマホは 44px)にしたので、
+ *   **字の長さで幅が変わる問題そのものが消え**、この 3 つは丸ごと要らなくなった。
+ *   鍵は `title` の末尾へ、名前は長押しメニューへ移した(`dual-filer.ts`)。
+ */
 
 
 /* ── 印刷(2026-08-07)────────────────────────────────

@@ -278,7 +278,7 @@ describe('2 ペインの面(描画)', () => {
    * ⚠ **左右ペインの後ろ**に在ることも見る ── 間に挟まる旧配置へ戻す変異は、
    *   並びの assert だけでは殺せない(順番は同じまま場所だけ変わる)。
    */
-  it('🔴 操作行は左右ペインの下にあり、キーと語の並びが固定である', () => {
+  it('🔴 操作行は左右ペインの下にあり、図案だけのタイルの並びが固定である', () => {
     const r = new DualFilerRenderer(region);
     r.render(booted());
     const cmds = region.querySelector('[data-pkc-region="dual-commands"]')!;
@@ -287,23 +287,38 @@ describe('2 ペインの面(描画)', () => {
       body.compareDocumentPosition(cmds) & Node.DOCUMENT_POSITION_FOLLOWING,
       '操作行がペインより前に在る(左右の間へ戻っている)',
     ).toBeTruthy();
-    expect(
-      [...cmds.querySelectorAll('button')].map((b) => [
-        b.getAttribute('data-pkc-action'),
-        b.querySelector('[data-pkc-field="cmd-key"]')?.textContent,
-        b.querySelector('[data-pkc-field="cmd-label"]')?.textContent,
-      ]),
-    ).toEqual([
-      ['dual-copy', 'F5', 'コピー'],
-      ['dual-move', 'F6', '移す'],
-      ['dual-rename-begin', 'F2', '名前'],
-      ['dual-mkdir', 'F7', 'フォルダ'],
+    /**
+     * 🔴 **鍵は `title` の末尾に移った**(#1054 段②)── 図案だけの均一な
+     *   タイルにしたので、見える器(`cmd-key`)は無くなった。ここでは
+     *   ①並びと action ②名前(`cmd-label`。見た目だけ隠す)③タイルの印
+     *   ④ `title` に鍵が含まれること、の 4 つを見る。
+     */
+    const rows = [...cmds.querySelectorAll<HTMLButtonElement>('button')].map((b) => [
+      b.getAttribute('data-pkc-action'),
+      b.hasAttribute('data-pkc-bar-tile'),
+      b.querySelector('[data-pkc-field="cmd-label"]')?.textContent,
+    ]);
+    expect(rows).toEqual([
+      ['dual-copy', true, 'コピー'],
+      ['dual-move', true, '移す'],
+      ['dual-rename-begin', true, '名前'],
+      ['dual-mkdir', true, 'フォルダ'],
       // 🔴 **入れ物だけでなく中身も作れる**(#273)── `F7` と隣り合わない鍵にしてある
       //    (隣り合わせると、押し間違いで**別の種類**ができる)
-      ['dual-mknote', 'Shift + F4', 'ノート'],
-      ['dual-delete', 'F8', 'ゴミ箱'],
+      ['dual-mknote', true, 'ノート'],
+      ['dual-delete', true, 'ゴミ箱'],
       // 🔴 **プレビュー**(#273 残件)── 開かずに中身を確かめる(印は要らない)
-      ['dual-preview-toggle', 'F9', 'プレビュー'],
+      ['dual-preview-toggle', true, 'プレビュー'],
+    ]);
+    const keys = [...cmds.querySelectorAll<HTMLButtonElement>('button')].map((b) => b.title);
+    expect(keys, '鍵が title の末尾に無い').toEqual([
+      expect.stringContaining('(F5)'),
+      expect.stringContaining('(F6)'),
+      expect.stringContaining('(F2)'),
+      expect.stringContaining('(F7)'),
+      expect.stringContaining('(Shift + F4)'),
+      expect.stringContaining('(F8)'),
+      expect.stringContaining('(F9)'),
     ]);
   });
 
@@ -583,9 +598,14 @@ describe('2 ペインの面(描画)', () => {
     });
     const r = new DualFilerRenderer(region, store);
     r.render(booted());
-    const keyOf = (field: string): string =>
-      region.querySelector(`[data-pkc-field="${field}"] [data-pkc-field="cmd-key"]`)
-        ?.textContent ?? '';
+    /**
+     * 🔴 **鍵は `title` の末尾の括弧から読む**(#1054 段②。旧「見える `cmd-key`
+     *   の器」を廃した)。⚠ 全体が一致することを見る(部分一致だと、鍵が
+     *   本文の途中に紛れ込んでも気づけない)。
+     */
+    const keyOf = (field: string): string | null =>
+      region.querySelector(`[data-pkc-field="${field}"]`)?.getAttribute('title')?.match(/\(([^()]+)\)$/)?.[1] ??
+      null;
     expect(keyOf('dual-move'), '既定の鍵が出ていない').toBe('F6');
     /**
      * ⚠ ゴミ箱の既定は `['Delete', 'F8']` で**先頭は Delete** ── ここが
@@ -658,11 +678,12 @@ describe('2 ペインの面(描画)', () => {
     s = reduce(s, { type: 'SET_ENTRY_FILTER', query: 'はこ' }).state; // a が消える
     r.render(s);
     /**
-     * ⚠ **鍵は説明の頭に付く**(#671、2026-09-04)── スマホでは帯から鍵の字を
-     *   落とすので(語が 18px まで潰れる)、説明が唯一の残り場所になった。
+     * 🔴 **鍵は説明の末尾に括弧で付く**(#1054 段②。旧「頭に `[F6] `」から移った)
+     * ── 図案だけの均一なタイルにしたので、語の器(`cmd-key`)ごと視覚から
+     *   消えた(見た目だけ隠す)。説明が唯一の可視の残り場所である。
      */
     expect(move().title, '画面に無い印を数えている').toBe(
-      '[F6] 移すものを選んでから押してください',
+      '移すものを選んでから押してください(F6)',
     );
   });
 
@@ -758,29 +779,34 @@ describe('2 ペインの面(描画)', () => {
     r.render(s);
     const move = () => region.querySelector<HTMLElement>('[data-pkc-field="dual-move"]')!;
     const trash = () => region.querySelector<HTMLElement>('[data-pkc-field="dual-delete"]')!;
-    expect(move().textContent, 'キーと語が違う').toBe('F6移す');
+    /**
+     * 🔴 **図案だけの均一なタイルにした**(#1054 段②)── `textContent` は
+     *   **名前だけ**(見た目だけ隠した `cmd-label`)になり、鍵の字は
+     *   `title` の末尾へ移った(旧「頭に `[F6] `」)。
+     */
+    expect(move().textContent, '名前が変わっている').toBe('移す');
     expect(move().title, '選ぶ前の断りが向きの説明になっている').toBe(
-      '[F6] 移すものを選んでから押してください',
+      '移すものを選んでから押してください(F6)',
     );
     /**
      * ⚠ **断りは呼び名から機械的に組まない**(2026-08-19 に踏んだ)。
      *   `${label}ものを…` と書くと、ゴミ箱だけ
      *   「**ゴミ箱ものを選んでから押してください**」になる。
      */
-    // ⚠ 鍵が頭に付く(上と同じ理由 ── #671)
+    // ⚠ 鍵は末尾に付く(上と同じ理由 ── #1054 段②)
     expect(trash().title, '入れ物の名と動作の名が混ざっている').toBe(
-      '[F8] ゴミ箱へ入れるものを選んでから押してください',
+      'ゴミ箱へ入れるものを選んでから押してください(F8)',
     );
     s = reduce(s, { type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' }).state;
     r.render(s);
-    expect(move().title).toBe('[F6] 左で選んだものを、右のペインへ移します(いま 1 件)');
+    expect(move().title).toBe('左で選んだものを、右のペインへ移します(いま 1 件)(F6)');
 
     s = reduce(s, { type: 'DUAL_FOCUS', side: 'right' }).state;
     s = reduce(s, { type: 'DUAL_SELECT', side: 'right', lid: 'a', mode: 'set' }).state;
     r.render(s);
-    expect(move().textContent, '焦点を変えたら操作の字が動いた').toBe('F6移す');
+    expect(move().textContent, '焦点を変えたら操作の字が動いた').toBe('移す');
     expect(move().title, '焦点を変えても呼び名が反転しない').toBe(
-      '[F6] 右で選んだものを、左のペインへ移します(いま 1 件)',
+      '右で選んだものを、左のペインへ移します(いま 1 件)(F6)',
     );
     // ⚠ ペインの読み上げ名も同じ表から引く(呼び名の入れ替えを 1 か所で殺す)
     expect(

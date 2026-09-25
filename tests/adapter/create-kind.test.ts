@@ -171,3 +171,114 @@ describe('種類を選び直しても、絵の色は変わらない', () => {
     }
   });
 });
+
+/**
+ * 🔴 **▼ は「作る」の合成メニュー**(#1054 段②)── 見出し + 種類 + 区切り +
+ * 今日を開く + 区切り + 道具、という 1 つの並びになる。
+ */
+describe('▼ の合成メニュー(#1054 段②)', () => {
+  function menuOf(root: HTMLElement): HTMLElement {
+    return root.querySelector('[data-pkc-region="create-menu"]')!;
+  }
+
+  it('🔴 並びは 見出し → 種類 6 つ → 区切り → 今日 → 区切り → 道具 4 つ', () => {
+    const root = shell();
+    const menu = menuOf(root);
+    const kids = [...menu.children];
+    const shapeOf = (el: Element): string =>
+      el.tagName === 'BUTTON' ? `button:${el.getAttribute('data-pkc-action')}` : 'field:' + el.getAttribute('data-pkc-field');
+    expect(kids.map(shapeOf)).toEqual([
+      'field:create-menu-heading',
+      'button:pick-create-kind',
+      'button:pick-create-kind',
+      'button:pick-create-kind',
+      'button:pick-create-kind',
+      'button:pick-create-kind',
+      'button:pick-create-kind',
+      'field:create-menu-separator',
+      'button:open-today',
+      'field:create-menu-separator',
+      'button:attach-file',
+      'button:start-audio-capture',
+      'button:start-screen-capture',
+      'button:start-timer',
+    ]);
+    // 🔑 見出し・区切りはボタンを持たない(数える検査が拾わない)
+    expect(menu.querySelector('[data-pkc-field="create-menu-heading"]')?.tagName).not.toBe(
+      'BUTTON',
+    );
+    // 🔑 道具は「その場で動く」名前(タイルと違う ── #716 の既知の対)
+    expect(
+      menu.querySelector('[data-pkc-action="open-today"]')?.textContent,
+    ).toBe('今日のノートを開く');
+    expect(menu.querySelector('[data-pkc-action="attach-file"]')?.textContent).toBe('添付する');
+  });
+
+  it('🔴 種類を選ぶと、その場でちょうど 1 件だけ出来る', () => {
+    const root = shell();
+    const d = new Dispatcher();
+    bindActions(root, d);
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [], relations: [] });
+    const before = d.getState().entryMetas.size;
+    createByUi(root, 'textlog');
+    expect(d.getState().entryMetas.size, '選んだのに 1 件出来ていない').toBe(before + 1);
+  });
+
+  it('🔴 ArrowDown/ArrowUp/Home/End で焦点が動き、折り返す', () => {
+    const root = shell();
+    document.body.append(root);
+    bindActions(root, new Dispatcher());
+    root.querySelector<HTMLElement>('[data-pkc-field="create-pick"]')!.click();
+    const items = [...menuOf(root).querySelectorAll<HTMLButtonElement>('button')];
+    expect(items.length, '前提が崩れている').toBeGreaterThan(3);
+    items[0]!.focus();
+    // ⚠ 実物は「焦点の在る要素」から `keydown` が上がる ── `root` へ直接撃つと
+    //   `ev.target` が `root` になり、`menu.contains(target)` が常に偽になる
+    const fire = (key: string): void => {
+      document.activeElement?.dispatchEvent(
+        new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }),
+      );
+    };
+    fire('ArrowDown');
+    expect(document.activeElement, 'ArrowDown で次に移らない').toBe(items[1]);
+    fire('ArrowUp');
+    expect(document.activeElement, 'ArrowUp で前に戻らない').toBe(items[0]);
+    fire('ArrowUp');
+    expect(document.activeElement, '先頭で ArrowUp が末尾へ折り返さない').toBe(
+      items[items.length - 1],
+    );
+    fire('Home');
+    expect(document.activeElement, 'Home が先頭へ飛ばない').toBe(items[0]);
+    fire('End');
+    expect(document.activeElement, 'End が末尾へ飛ばない').toBe(items[items.length - 1]);
+  });
+
+  it('🔴 Escape で閉じ、▼ へ焦点を返す', () => {
+    const root = shell();
+    document.body.append(root);
+    bindActions(root, new Dispatcher());
+    const pick = root.querySelector<HTMLElement>('[data-pkc-field="create-pick"]')!;
+    pick.click();
+    const menu = menuOf(root);
+    expect(menu.hidden, '前提が崩れている(開いていない)').toBe(false);
+    const first = menu.querySelector<HTMLButtonElement>('button')!;
+    first.focus();
+    first.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    );
+    expect(menu.hidden, 'Escape で閉じない').toBe(true);
+    expect(document.activeElement, '焦点が ▼ へ戻らない').toBe(pick);
+  });
+
+  it('🔴 メニューの外を押すと閉じる(▼ 自身の押しでは閉じ判定を二重にしない)', () => {
+    const root = shell();
+    document.body.append(root);
+    bindActions(root, new Dispatcher());
+    const pick = root.querySelector<HTMLElement>('[data-pkc-field="create-pick"]')!;
+    pick.click();
+    const menu = menuOf(root);
+    expect(menu.hidden).toBe(false);
+    root.querySelector<HTMLElement>('[data-pkc-region="collection-bar"]')!.click();
+    expect(menu.hidden, '外を押しても閉じない').toBe(true);
+  });
+});

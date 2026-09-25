@@ -47,8 +47,23 @@
  *   値は CSS 側の token が決め、`currentColor` の仕組みをそのまま使う。
  * ⚠ **失ったもの**(書体にしたので取り戻せない)は `symbols.ts` の表に書いてある
  *   ── 絵の中の 2 色(`solid` / `soft`)と、線の太さの px 固定。
- * ⚠ 図案だけのボタンを作らない ── 意味は隣の**文字**が持つ(⚠ #1054 段②で
- *   3 つの帯だけこの既定が上書きされる予定 ── 下の ④ を見よ)。
+ * ⚠ 図案だけのボタンを作らない ── 意味は隣の**文字**が持つ。
+ *
+ * ## ⑥ 例外:3 つの帯だけ図案だけにする(#1054 段②、2026-09-25)
+ *
+ * 裁定(#1046 コメント 5833269607 / 5833340597。こちらの解釈)「作る帯・ノート全体の
+ * 帯・2 ペインの操作行は、同じ大きさの正方形タイルへ統一してよい」。
+ *
+ * ⚠ 「意味は隣の文字が持つ」の例外を作るので、代わりを 3 つ揃える:
+ *   ① 名前は**器の中に残す**(`[data-pkc-field='label']` / `'cmd-label'`。
+ *     見た目だけ隠す ── 読み上げと既存の `textContent` 検査を壊さない)
+ *   ② `title` に**近道の鍵**が付くときは括弧で足す(`hintTitle` / 既存の
+ *     `[chord] 説明` を踏襲)
+ *   ③ **長押し**(触る端末)で、その帯の全操作を名前つきで一覧するメニューを出す
+ *     (`long-press.ts` の `LONG_PRESS_BAR_TILE`、`binder.ts` の `openBarTileMenu`)
+ * ⚠ 目印は `data-pkc-bar-tile`(**`data-pkc-tile` とは別の属性**)── 後者は
+ *   アプリの一覧タイルの並べ替え(#857)が値に lid を持つ形で既に使っており、
+ *   同じ名前にすると長押しが「並べ替えモード」に化ける(CLAUDE.md §7 の型)。
  *
  * ## ④ 単色書体を duotone へ替えた(#1054 段①、2026-09-25)
  *
@@ -179,6 +194,18 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   /** 並べ替え(2026-08-06。user 報告 2-10)── 同じ親の下で隣と入れ替える。 */
   'move-order-up': 'chevron-up',
   'move-order-down': 'chevron-down',
+  /**
+   * 🔴 **2 ペインの操作行(#1054 段②)**── `dual-filer.ts` の `renderCommands` が
+   *   `ACTION_ICONS` / `setActionIcon` を直に読む(`iconButton` を通さない ──
+   *   鍵と語を分けた独自の構造を持つため)。
+   */
+  'dual-copy': 'copy',
+  'dual-move': 'move',
+  'dual-rename-begin': 'rename',
+  'dual-mkdir': 'folder-plus',
+  'dual-mknote': 'note-plus',
+  'dual-delete': 'trash',
+  'dual-preview-toggle': 'eye',
   /** 選択の履歴(#190)── ブラウザの戻る・進むと同じ図案にする。 */
   'nav-back': 'chevron-left',
   'nav-forward': 'chevron-right',
@@ -277,6 +304,12 @@ export const ARCHETYPE_ICONS: Readonly<Record<string, IconName>> = {
   attachment: 'clip',
   todo: 'check-box',
   form: 'form',
+  /**
+   * 🔴 **テンプレート**(#1054 段②)── 直す前は表に無く `dot` へ落ちていた
+   * (`ARCHETYPE_ICONS[iconKey] ?? 'dot'`)。`snippet` の絵は #1054 段① で
+   * 書体へ既に焼いてある(`symbols.ts`)── ここに登記していなかっただけ。
+   */
+  snippet: 'snippet',
 };
 
 /** 探し方のタブ → 図案(`browse.ts` が持っていた絵文字をここへ寄せた)。 */
@@ -416,6 +449,22 @@ export const PRIMARY_ATTR = 'data-pkc-primary';
 /** 主の操作にする。⚠ 返り値を使わなくてよい(その場で印が付く)。 */
 export function markPrimary(btn: HTMLButtonElement): HTMLButtonElement {
   return setPrimary(btn, true);
+}
+
+/**
+ * 🔴 **均一な正方形タイルにする**(#1054 段②)。⚠ `data-pkc-tile`(アプリの一覧
+ * タイル並べ替え、`long-press.ts` の `LONG_PRESS_TILE`。値に lid を持つ)とは
+ * **別の属性**にする ── 同じ名前だと、長押しが「並べ替えモード」に化ける
+ * (`row.getAttribute('data-pkc-tile')` は空文字も `null` でないので当たってしまう)。
+ * ⚠ CSS(`app.css` の `[data-pkc-bar-tile]`)と長押し(`long-press.ts` の
+ * `LONG_PRESS_BAR_TILE`)がこの属性名を読む ── 3 か所で綴りを変えない。
+ */
+export const BAR_TILE_ATTR = 'data-pkc-bar-tile';
+
+/** その場でタイルの印を付ける。⚠ 返り値を使わなくてよい。 */
+export function markBarTile(btn: HTMLButtonElement): HTMLButtonElement {
+  btn.setAttribute(BAR_TILE_ATTR, '');
+  return btn;
 }
 
 /**
