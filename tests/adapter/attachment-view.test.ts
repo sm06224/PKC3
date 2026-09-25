@@ -542,7 +542,7 @@ describe('preview を持たない添付', () => {
     const { d, q } = setup({ a1: htmlBody, a2: '# text' }, lender);
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
     await tick(20);
-    expect(q('[data-pkc-field="attachment-no-preview"]')!.textContent).toContain('起動');
+    expect(q('[data-pkc-field="attachment-no-preview"]')!.textContent).toContain('アプリを開く');
   });
 
   it('出せる種類には案内を出さない(邪魔をしない)', async () => {

@@ -321,7 +321,7 @@ function fill(
    */
   const p = doc.createElement('p');
   p.textContent =
-    'このブラウザでは PDF を表示できません。PKC の画面に戻り、添付の「ダウンロード」から保存して開いてください';
+    'このブラウザでは PDF を表示できません。PKC の画面に戻り、添付の「添付をダウンロード」から保存して開いてください';
   obj.append(p);
   doc.body.append(obj);
 }

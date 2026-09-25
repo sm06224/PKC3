@@ -1067,14 +1067,14 @@ describe('札の右クリックから繰り返しを付け替える(#855 段 0)'
     const units = [...root.querySelectorAll('[data-pkc-region="context-menu"] button')].map(
       (b) => b.textContent,
     );
-    // ⚠ いまは繰り返していない ── 4 つ出て、「やめる」は出ない
+    // ⚠ いまは繰り返していない ── 4 つ出て、「この繰り返しをやめる」は出ない
     expect(units).toEqual(['毎日', '毎週', '毎月', '毎年']);
     press(root, '毎週');
     await tick(20);
     expect(store['e1'], '本文に刻みが書かれていない').toBe('- [ ] ゴミ出し @2026-08-25 毎週\n');
   });
 
-  it('🔴 繰り返している札では「やめる」が出て、押すと刻みだけ外れる', async () => {
+  it('🔴 繰り返している札では「この繰り返しをやめる」が出て、押すと刻みだけ外れる', async () => {
     const { root, store } = setup({ e1: '- [ ] ゴミ出し @2026-08-25 毎週\n' });
     const card = cardsOf(root, '2026-08-25')[0]!;
     openMenu(root, card);

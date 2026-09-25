@@ -2587,8 +2587,8 @@ export class DetailRenderer {
         const p = document.createElement('p');
         p.setAttribute('data-pkc-field', 'attachment-no-preview');
         p.textContent = isAppMime(mime)
-          ? 'この種類のファイルは画面に出せません。上の「起動」で開けます(ダウンロードしても開けます)'
-          : 'この種類は画面に出せません。上の「ダウンロード」で保存して開いてください';
+          ? 'この種類のファイルは画面に出せません。上の「アプリを開く」で開けます(ダウンロードしても開けます)'
+          : 'この種類は画面に出せません。上の「添付をダウンロード」で保存して開いてください';
         host.append(p);
         return;
       }
@@ -2644,7 +2644,7 @@ export class DetailRenderer {
         const note = document.createElement('p');
         note.setAttribute('data-pkc-field', 'attachment-pdf-fallback');
         note.textContent =
-          'お使いのブラウザは PDF を画面に出せません。上の「ダウンロード」で保存して開いてください';
+          'お使いのブラウザは PDF を画面に出せません。上の「添付をダウンロード」で保存して開いてください';
         obj.append(note);
         host.append(obj);
       }

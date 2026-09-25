@@ -1720,7 +1720,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         type: 'OP_FAILED',
         error:
           '本体タブの交代で、このノートの編集権を別のタブかウィンドウに取られました。' +
-          'ここで保存すると相手の編集を上書きします ── 内容を控えてから「キャンセル」を押してください',
+          'ここで保存すると相手の編集を上書きします ── 内容を控えてから「編集をやめる」を押してください',
       });
     });
     let promotedHost: StoreProxyHost | null = null;

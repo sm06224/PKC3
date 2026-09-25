@@ -92,7 +92,7 @@ export function createCaptureTrimmer(deps: CaptureTrimDeps): CaptureTrimmer {
         return;
       }
       if (!(endMs > startMs)) {
-        fail('切り出す範囲を「ここから」「ここまで」で決めてください。');
+        fail('切り出す範囲を「ここを始まりにする」「ここを終わりにする」で決めてください。');
         return;
       }
       /**
