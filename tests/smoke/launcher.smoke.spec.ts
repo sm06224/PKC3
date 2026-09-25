@@ -1511,7 +1511,7 @@ test('🔴 登録 → タイル → SPA が動き、開き直しても続きが�
 </scr` + `ipt></body></html>`;
 
   // ① 🔴 **PKC3 の中で**添付して、登録する(PKC2 のデータを一切使わない)
-  await clickReal(page, '[data-pkc-action="attach-file"]');
+  await clickReal(page, '[data-pkc-bar-tile][data-pkc-action="attach-file"]');
   await page.locator('[data-pkc-field="attach-input"]').setInputFiles({
     name: 'memo.html',
     mimeType: 'text/html',
@@ -1824,7 +1824,7 @@ test('🔴 行儀の悪いアプリが保管庫を占有できない(上限は�
   document.body.dataset.done = '1';
 </scr` + `ipt></body></html>`;
 
-  await clickReal(page, '[data-pkc-action="attach-file"]');
+  await clickReal(page, '[data-pkc-bar-tile][data-pkc-action="attach-file"]');
   await page.locator('[data-pkc-field="attach-input"]').setInputFiles({
     name: 'hostile.html',
     mimeType: 'text/html',
@@ -1959,7 +1959,7 @@ test('🔴 添付の「参照をコピー」で、本文に貼れる形が手に
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await gotoApp(page);
 
-  await clickReal(page, '[data-pkc-action="attach-file"]');
+  await clickReal(page, '[data-pkc-bar-tile][data-pkc-action="attach-file"]');
   await page.locator('[data-pkc-field="attach-input"]').setInputFiles({
     name: 'p.png',
     mimeType: 'image/png',
@@ -2048,7 +2048,7 @@ test('🔴 IndexedDB を使うアプリは、素のままで動き、囲いの�
   };
 </scr` + `ipt></body></html>`;
 
-  await clickReal(page, '[data-pkc-action="attach-file"]');
+  await clickReal(page, '[data-pkc-bar-tile][data-pkc-action="attach-file"]');
   await page.locator('[data-pkc-field="attach-input"]').setInputFiles({
     name: 'ledger.html',
     mimeType: 'text/html',
@@ -2138,7 +2138,7 @@ test('🔴 囲いの中のアプリで、ページ内リンクを押してもア
     '<h2 id="tail">末尾の節</h2>' +
     '</body></html>';
 
-  await clickReal(page, '[data-pkc-action="attach-file"]');
+  await clickReal(page, '[data-pkc-bar-tile][data-pkc-action="attach-file"]');
   await page.locator('[data-pkc-field="attach-input"]').setInputFiles({
     name: 'guide.html',
     mimeType: 'text/html',
@@ -2277,7 +2277,7 @@ test('🔴 一度許した素のまま起動は、読み込み直しても聞か
   const attach = async (name: string): Promise<void> => {
     // ⚠ 添付は**本文の面**から ── タイルの面に居ると導線が無い
     await clickReal(page, '[data-pkc-browse="list"]');
-    await clickReal(page, '[data-pkc-action="attach-file"]');
+    await clickReal(page, '[data-pkc-bar-tile][data-pkc-action="attach-file"]');
     await page.locator('[data-pkc-field="attach-input"]').setInputFiles({
       name: `${name}.html`,
       mimeType: 'text/html',
@@ -2551,7 +2551,7 @@ test('🔴 目次を見せて起動すると、アプリがノートの一覧を
   parent.postMessage({ tag: TAG, body: { t: 'hello' } }, '*');
 </scr` + `ipt></body></html>`;
 
-  await clickReal(page, '[data-pkc-action="attach-file"]');
+  await clickReal(page, '[data-pkc-bar-tile][data-pkc-action="attach-file"]');
   await page.locator('[data-pkc-field="attach-input"]').setInputFiles({
     name: 'toc.html',
     mimeType: 'text/html',

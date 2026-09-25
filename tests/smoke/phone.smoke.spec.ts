@@ -984,13 +984,26 @@ for (const [name, w, h] of [
             document.querySelector('[data-pkc-field="dual-rename-begin"]')?.textContent ?? ''
           ).trim(),
           /**
-           * 🔴 **字が切れていないか**(着地前の動線レビュー B、2026-09-04 に実測)。
-           * ⚠ `text-overflow: ellipsis` なので、切れても画面には「右…」と出るだけ ──
-           *   `textContent` を見る検査は**素通りする**(CLAUDE.md §1)。
+           * 🔴 **図案だけの均一なタイルになったので、字の切れではなく寸法を見る**
+           * (#1054 段②。旧「`cmd-label` が `scrollWidth > clientWidth` で切れて
+           *   いないか」は、名前を見た目だけ隠す形にした時点で意味を失った ──
+           *   `clientWidth` が常に 1px なので、常に「切れている」と出てしまう)。
+           * ⚠ **どれも同じ大きさ**(44px 四方)で、帯の外へ出ていないことを見る。
            */
-          cut: [...document.querySelectorAll('[data-pkc-field="cmd-label"]')]
-            .filter((el) => el.scrollWidth > el.clientWidth)
-            .map((el) => `${el.textContent}(${el.scrollWidth}/${el.clientWidth})`),
+          tiles: [
+            ...document.querySelectorAll('[data-pkc-region="dual-commands"] [data-pkc-bar-tile]'),
+          ].map((el) => {
+            const r = el.getBoundingClientRect();
+            const bar = el.closest('[data-pkc-region="dual-commands"]')!.getBoundingClientRect();
+            return {
+              action: el.getAttribute('data-pkc-action'),
+              w: Math.round(r.width),
+              h: Math.round(r.height),
+              overflow: Math.round(
+                Math.max(bar.left - r.left, r.right - bar.right, bar.top - r.top, r.bottom - bar.bottom),
+              ),
+            };
+          }),
         };
       });
 
@@ -1040,13 +1053,18 @@ for (const [name, w, h] of [
      */
     expect(first.moveLabel, '操作の字に行き先が入っていない').toContain('右へ移す');
     /**
-     * 🔴 **その字が、その幅で本当に読める**(着地前の動線レビュー B)。
+     * 🔴 **7 つとも同じ寸法(44px)で、帯からはみ出していない**(#1054 段②)。
      *
-     * ⚠ 直す前の実測(375×667、1 行 7 等分):**7 つ全部**が切れていた ──
-     *   「右へ写す」は **53px 必要 / 15px しか無い**(全角 1 字)。
-     * 🔑 「行き先を字に入れる」という user 裁定は、**読めなければ果たせない**。
+     * ⚠ 直す前の実測(375×667、1 行 7 等分):**7 つ全部**が字として切れていた ──
+     *   「右へ写す」は **53px 必要 / 15px しか無い**(全角 1 字)。図案だけの
+     *   均一なタイルにしたので、字の長さで幅が変わる問題そのものが無くなった。
      */
-    expect(first.cut, `操作の字が切れている: ${first.cut.join(' / ')}`).toEqual([]);
+    expect(first.tiles.length, '2 ペインの操作タイルを 1 つも拾えていない').toBe(7);
+    for (const t of first.tiles) {
+      expect(t.w, `${t.action} の幅が 44px でない(${t.w}px)`).toBe(44);
+      expect(t.h, `${t.action} の高さが 44px でない(${t.h}px)`).toBe(44);
+      expect(t.overflow, `${t.action} が帯から ${t.overflow}px はみ出している`).toBeLessThanOrEqual(0);
+    }
     // 🔑 **行き先が入るのは「コピー」「移す」だけ**(2 件とも見る。#587 D-1 で「写す」→「コピー」)
     expect(first.copyLabel, '「コピー」に行き先が入っていない').toContain('右へコピー');
     /**
@@ -1242,6 +1260,21 @@ test('🔴 スマホで行を 600ms 押し続けると、印が 2 行になる (
   await page.setViewportSize({ width: 375, height: 667 });
   await gotoApp(page);
   await dismissAnnounce(page);
+  /**
+   * 🔴 **スマホ幅でも、左下の 7 個は 1 行に詰め込まれる**(#1054 段②-2、F9)。
+   * ⚠ 一覧のページ(この時点)は左の列そのものなので、`collection-bar` が
+   *   画面いっぱいの幅で出ている ── 375px でも 44px タイル × 7 + gap 6px
+   *   = 314px は 1 行に入る幅がある。
+   */
+  const rowTops = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-pkc-region="collection-bar"] button')].map((b) =>
+      Math.round(b.getBoundingClientRect().top),
+    ),
+  );
+  expect(rowTops, '前提が崩れている(7 個そろっていない)').toHaveLength(7);
+  expect(rowTops, `スマホ幅で複数の段に分かれている: ${JSON.stringify(rowTops)}`).toEqual(
+    new Array(7).fill(rowTops[0]),
+  );
   // ノートを 2 件作る(印を 2 行にするのに 2 行要る)
   for (let i = 0; i < 2; i++) {
     await createEntry(page, 'text');
@@ -1296,6 +1329,54 @@ test('🔴 スマホで行を 600ms 押し続けると、印が 2 行になる (
     await marked(),
     '長押しの直後の短いタップが捨てられた(消費窓が次の押下の click まで食った、または短いタップが長押しになった)',
   ).toBe(1);
+
+  /**
+   * ④ 🔴 **2 ペインの操作タイル(dual-commands)も同じ長押しで名前つきメニュー**
+   *   (#1054 段②-2、F3a)。
+   *
+   * ⚠ 押すのは `dual-preview-toggle`(下見)── 押しても選択や本文を動かさないので、
+   *   タイル自身の action が発火したかを `aria-pressed` の反転だけで見られる。
+   * 🔑 いま `dual.focus` は 'left'(直前の②③で左を叩いた)、`solo`(phone 層)
+   *   なので、`dual-copy` / `dual-move` の項目は「右へコピー」「右へ移す」の形で出る
+   *   (`dual-filer.ts` の `renderCommands`)── これが 7 個の名前つき項目の実例。
+   */
+  const preview = page.locator(
+    '[data-pkc-region="dual-commands"] [data-pkc-action="dual-preview-toggle"]',
+  );
+  const pressedBefore = await preview.getAttribute('aria-pressed');
+  const pbox = await preview.boundingBox();
+  expect(pbox, '前提が崩れている: 下見タイルの寸法が採れない').not.toBeNull();
+  const px = pbox!.x + pbox!.width / 2;
+  const py = pbox!.y + pbox!.height / 2;
+  await cdp.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [{ x: px, y: py }],
+  });
+  await page.waitForTimeout(600);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  const menu = page.locator('[data-pkc-region="context-menu"]');
+  await expect(menu, '長押しで名前つきメニューが開かない').toBeVisible();
+  const menuText = (await menu.textContent()) ?? '';
+  for (const label of [
+    '右へコピー',
+    '右へ移す',
+    '名前',
+    'フォルダ',
+    'ノート',
+    'ゴミ箱',
+    'プレビュー',
+  ]) {
+    expect(menuText, `${label} がメニューに無い(7 操作を数え上げていない)`).toContain(label);
+  }
+  // 🔑 タイル自身の action は発火していない(直後の click が飲み込まれている)
+  await page.waitForTimeout(100);
+  expect(
+    await preview.getAttribute('aria-pressed'),
+    'タイル自身の action が発火した(長押しの直後の click が飲み込まれていない)',
+  ).toBe(pressedBefore);
+  await page.keyboard.press('Escape');
+  await expect(menu, 'Escape でメニューが閉じない').toBeHidden();
+
   expect(errors, `console/pageerror: ${errors.join(' | ')}`).toEqual([]);
 });
 

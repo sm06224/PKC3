@@ -22,12 +22,19 @@
  * - **閉じたら焦点を返す** ── `window.confirm` を自前に替えたときに落ちた性質と同じ型
  */
 
+import { iconSpan, setActionIcon, type IconName } from './icons';
+
 /** メニューの器。⚠ 1 枚だけ ── 2 枚目を作らない(重なると閉じ忘れる)。 */
 const REGION = 'context-menu';
 
 export interface MenuItem {
   readonly action: string;
   readonly label: string;
+  /**
+   * 🔴 **図案**(#1054 段②)。⚠ 空なら**付けない**(器そのものを出さない ──
+   *   `iconButton` と同じ作法。空の枠を置かない)。
+   */
+  readonly icon?: IconName;
   /**
    * 🔴 **その操作の説明**(#587 改善 C-1)。⚠ 空なら**付けない**。
    *
@@ -142,7 +149,19 @@ export function openContextMenu(
     b.setAttribute('data-pkc-action', it.action);
     b.setAttribute('role', 'menuitem');
     b.type = 'button';
-    b.textContent = it.label;
+    /**
+     * 🔴 **図案は `append` で足す。`textContent =` を使わない**(#1054 段②)。
+     * ⚠ `textContent =` は**丸ごと差し替える** ── 先に図案の span を足してから
+     *   `b.textContent = it.label` と書くと、図案ごと消える。
+     * 🔑 `b.textContent` 自体は**変わらない**(図案の span は文字を持たない ──
+     *   `icons.ts` の「器に字を入れない」)ので、既存の受け手はそのまま動く。
+     */
+    if (it.icon !== undefined) {
+      const span = iconSpan(it.icon);
+      setActionIcon(span, it.action, it.icon);
+      b.append(span);
+    }
+    b.append(root.ownerDocument.createTextNode(it.label));
     /**
      * 🔴 **説明は `title`(tooltip)ではなく、下の欄へ出す**(#587 C-1 → C-3。
      *   user 裁定 2026-08-30「一度推奨で入れて、使用感をテストしたい」)。

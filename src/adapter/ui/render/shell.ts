@@ -14,7 +14,7 @@ import { HINT_BASE, HINT_COMMAND, hintTitle } from './shortcut-hint';
 import { COLLECTION_COMMANDS } from './commands';
 // 🔴 前回選んだ「作る種類」を覚える(#1045)
 import { appCreateKind } from './create-kind';
-import { BROWSE_ICONS, iconButton, iconSpan, markPrimary } from './icons';
+import { BROWSE_ICONS, iconButton, iconSpan, markBarTile, markPrimary } from './icons';
 import { COLUMN_PANES, PANE_LABELS } from '@features/pane-visibility';
 import { PHONE_BAR_REGION, PHONE_RETURN_REGION } from './phone-layout';
 import { BROWSE_TABS } from './browse';
@@ -509,6 +509,8 @@ export function buildShell(root: HTMLElement): ShellRegions {
   );
   // 🔑 **一覧の主の操作**(#722 P2-10)── 何も無いところから話が始まる
   markPrimary(create);
+  // 🔴 **均一な正方形タイルにする**(#1054 段②)── 名前は残す(見た目だけ隠す)
+  markBarTile(create);
   create.setAttribute('data-pkc-field', 'create-run');
   create.setAttribute(HINT_BASE, 'この種類で新しく作ります');
   create.setAttribute(HINT_COMMAND, 'create-entry');
@@ -519,27 +521,63 @@ export function buildShell(root: HTMLElement): ShellRegions {
 
   /**
    * ▼(種類を選ぶ)。
-   * ⚠ **文字は入れない** ── 図案が山形そのものなので、`▼` の文字を足すと
-   * **同じものが 2 つ**並ぶ(実機で二重に見えた)。
-   * ⚠ この repo は「図案だけのボタンを作らない」を規律に持つが、ここは
-   * **分割ボタンの片翼**で、意味は隣の本体(`+ ノート`)が持っている ──
-   * 読み上げには `aria-label` で名前を渡す。
+   *
+   * 🔴 **名前を持たせる**(#1054 段②)。⚠ 直す前は文言を空にしていた
+   * (「図案だけのボタンを作らない」の例外を、`aria-label` だけで埋めていた)。
+   * いまは**この帯そのものが図案だけのタイル**になったので、隣の本体に頼らず
+   * 自分の名前を持つ(見た目は隠すが、長押しメニュー・読み上げ・鍵の説明が読む)。
    */
-  const pick = iconButton('toggle-create-menu', '', 'create-menu');
+  const pick = iconButton('toggle-create-menu', '作る種類を選ぶ', 'create-menu');
+  markBarTile(pick);
   pick.setAttribute('data-pkc-field', 'create-pick');
   pick.title = '作る種類を選びます';
   pick.setAttribute('aria-label', '作る種類を選ぶ');
   pick.setAttribute('aria-expanded', 'false');
 
-  // 種類の一覧。⚠ 既定は畳む(選ぶまで場所を取らない)
+  /**
+   * 🔴 **▼ を「作る」の合成メニューにする**(#1054 段②。裁定 #1054 コメント
+   * 5837587559)。⚠ 直す前は「種類を選ぶだけ」の一覧だったが、いまは
+   * **見出し + 種類 + 区切り + 今日を開く + 区切り + 道具(添付・録音・画面録画・
+   * 時間を計る)** という OS 風の 1 つの合成メニューにする ── 帯の 7 個の
+   * タイルのうち ▼ 以外の**全部**を、名前つきでここからも選べるようにする。
+   * ⚠ 見出し・区切りは `<button>` を持たない(ボタンの数を数える検査が拾わない)。
+   */
   const menu = document.createElement('div');
   menu.setAttribute('data-pkc-region', 'create-menu');
+  menu.setAttribute('role', 'menu');
   menu.hidden = true;
+
+  const menuHeading = document.createElement('div');
+  menuHeading.setAttribute('data-pkc-field', 'create-menu-heading');
+  menuHeading.setAttribute('role', 'presentation');
+  menuHeading.textContent = '作る';
+  menu.append(menuHeading);
+
   for (const { archetype, label } of kinds) {
     const item = iconButton('pick-create-kind', label, `archetype:${archetype}`);
     item.setAttribute('data-pkc-archetype', archetype);
+    item.setAttribute('role', 'menuitem');
+    /**
+     * 🔴 **押せないときの理由を乗せたときの説明に出す**(#1054 段②-3。着地前レビュー)。
+     * ⚠ 編集中は `browse.ts` の `BLOCKABLE_FIELDS` が薄くするが、`setBlocked` は
+     *   `HINT_BASE` / `HINT_COMMAND` を持たない物には**理由を書かない**(早期 return)──
+     *   薄いのに、乗せても「なぜ」が出なかった。⚠ 種類ごとの近道は無いので
+     *   `HINT_COMMAND` は空(`chordHint` は何も足さない)。
+     */
+    const base = `${label}を作ります`;
+    item.setAttribute(HINT_BASE, base);
+    item.setAttribute(HINT_COMMAND, '');
+    item.title = hintTitle(base, '');
     menu.append(item);
   }
+
+  const menuSeparator = (): HTMLElement => {
+    const hr = document.createElement('div');
+    hr.setAttribute('data-pkc-field', 'create-menu-separator');
+    hr.setAttribute('role', 'separator');
+    return hr;
+  };
+  menu.append(menuSeparator());
 
   /**
    * 🔴 **今日のノートを開く**(#348、user 裁定 2026-08-23)。
@@ -549,15 +587,37 @@ export function buildShell(root: HTMLElement): ShellRegions {
    *   「書きたい」から「予定を開く」への回り道になる。
    * 🔑 文言は**起きること**で書く(user 指示 2026-08-21)── 「日記」ではなく
    *   「今日」。開くと**今日の日付のノート**が出る(無ければ作る)。
+   * ⚠ **帯のタイルの字は「今日」**(短い)だが、**合成メニューの項目は
+   *   「今日のノートを開く」**(OS 風のメニューは短縮しない ── 裁定に明記)。
    */
+  /**
+   * ⚠ **説明は `HINT_BASE` で持つ**(#1054 段②-3)── 編集中に薄くなったとき、
+   *   `setBlocked` が理由を末尾へ足せるようにする(素の `title` だと理由が書かれない)。
+   *   タイルと一覧の項目で**同じ字**を使う(同じ操作に 2 通りの説明を作らない)。
+   */
+  const todayHint = '今日の日付のノートを開きます(無ければ作ります)';
   const today = iconButton('open-today', '今日');
+  markBarTile(today);
   today.setAttribute('data-pkc-field', 'open-today');
-  today.title = '今日の日付のノートを開きます(無ければ作ります)';
+  today.setAttribute(HINT_BASE, todayHint);
+  today.setAttribute(HINT_COMMAND, '');
+  today.title = hintTitle(todayHint, '');
+  const menuToday = iconButton('open-today', '今日のノートを開く');
+  menuToday.setAttribute('role', 'menuitem');
+  menuToday.setAttribute(HINT_BASE, todayHint);
+  menuToday.setAttribute(HINT_COMMAND, '');
+  menuToday.title = hintTitle(todayHint, '');
+  menu.append(menuToday);
+  menu.append(menuSeparator());
 
   const attach = iconButton('attach-file', '添付');
+  markBarTile(attach);
   // ⚠ **`ENTRY_ACTION_HINTS['attach-file']` と同じ意味にする**(#666)── 同じ操作に
   //    2 通りの説明を作らない(スマホの `⋯` から選んだときに出る字と揃える)
   attach.title = 'ファイルを取り込んで、開いているノートの本文に入れます';
+  const menuAttach = iconButton('attach-file', '添付する');
+  menuAttach.setAttribute('role', 'menuitem');
+  menu.append(menuAttach);
   /**
    * 🔴 **録音・画面収録**(#413。user 要望 2026-07-16
    * 「録音と画面収録を…これで、会議メモをうまく残せるはず」)。
@@ -569,11 +629,19 @@ export function buildShell(root: HTMLElement): ShellRegions {
    *   「届いていない」である(#180 の教訓 3)。
    */
   const rec = iconButton('start-audio-capture', '録音');
+  markBarTile(rec);
   rec.setAttribute('data-pkc-field', 'start-audio-capture');
   rec.title = 'マイクで録音して、いま開いているノートに入れます';
+  const menuRec = iconButton('start-audio-capture', '録音する');
+  menuRec.setAttribute('role', 'menuitem');
+  menu.append(menuRec);
   const screen = iconButton('start-screen-capture', '画面録画');
+  markBarTile(screen);
   screen.setAttribute('data-pkc-field', 'start-screen-capture');
   screen.title = '画面を録画して、いま開いているノートに入れます';
+  const menuScreen = iconButton('start-screen-capture', '画面を録画する');
+  menuScreen.setAttribute('role', 'menuitem');
+  menu.append(menuScreen);
   /**
    * 🔴 **タイマー**(#279。user 指示 2026-08-19「…タイマー…は組み込みアプリで
    * リリースしたい」)。
@@ -583,8 +651,12 @@ export function buildShell(root: HTMLElement): ShellRegions {
    *   (#300 / #292 段⑤ の見分け方「閉じたとき user が失うものは何か」)。
    */
   const timer = iconButton('start-timer', '時間を計る');
+  markBarTile(timer);
   timer.setAttribute('data-pkc-field', 'start-timer');
   timer.title = 'いま開いているノートの作業時間を計ります(止めると、計った時間を本文に書きます)';
+  const menuTimer = iconButton('start-timer', '時間を計る');
+  menuTimer.setAttribute('role', 'menuitem');
+  menu.append(menuTimer);
   createBar.append(kind, create, pick, today, attach, rec, screen, timer);
 
   const attachInput = document.createElement('input');
@@ -619,6 +691,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   collectionBar.setAttribute('data-pkc-region', 'collection-bar');
   for (const { action, label, title } of COLLECTION_COMMANDS) {
     const btn = iconButton(action, label);
+    markBarTile(btn);
     btn.title = title;
     collectionBar.append(btn);
   }
@@ -638,6 +711,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
    */
   {
     const btn = iconButton('open-palette', '操作を探す');
+    markBarTile(btn);
     btn.setAttribute(HINT_BASE, 'できる操作を名前で絞り込んで、その場で実行します');
     btn.setAttribute(HINT_COMMAND, 'open-palette');
     btn.title = hintTitle('できる操作を名前で絞り込んで、その場で実行します', 'open-palette');
@@ -654,16 +728,37 @@ export function buildShell(root: HTMLElement): ShellRegions {
    *   **「集計」だけが 8px 下へぶら下がった**(1920px では 2 個)。
    *   一覧の高さを数える検査が、その浮きを**3 段目**として数えて落ちた。
    * 🔑 だから**塊を 1 つの器に包み、器に間を持たせる**(右の列の塊と同じ作法)──
-   *   器は行いっぱい(`flex: 1 0 100%`)なので**必ず行頭から始まり**、
+   *   器は帯にとって **1 つの並び物**なので、入りきらないときは**塊ごと**次の行へ移り、
    *   どの幅でも「1 個だけずれる」が起きない。⚠ 器の中は自分で折り返す。
+   * ⚠ **#1054 段②-2 で「必ず次の行」をやめた** ── 1 稿目は器を行いっぱい
+   *   (`flex: 1 0 100%`)にして**常に 2 行**にしていたが、絵だけのタイル 7 つは
+   *   1 行に入る。区切りは器の `border-inline-start`(`app.css` の同じ器の規則)。
    */
   const appGroup = document.createElement('div');
   appGroup.setAttribute('data-pkc-field', 'collection-app-group');
+  /**
+   * 🔴 **鍵の一覧の id と揃える**(#1054 段②)── ここは今まで `title` を
+   *   1 つも持たなかった(文字がそのまま名前だったので要らなかった)。
+   *   図案だけのタイルにした以上、hover で読める説明が要る。
+   */
+  const VIEW_HINT_COMMAND: Readonly<Record<string, string>> = {
+    query: 'view-query',
+    settings: 'open-settings',
+    flags: 'open-flags',
+    help: 'open-help',
+  };
   for (const { view, label } of VIEW_BUTTONS) {
     if (SEALED_VIEWS.includes(view)) continue;
     const btn = iconButton('set-view', label, `set-view:${view}`);
+    markBarTile(btn);
     btn.setAttribute('data-pkc-view', view);
     btn.setAttribute('data-pkc-field', 'app-settings');
+    const cmd = VIEW_HINT_COMMAND[view];
+    if (cmd !== undefined) {
+      btn.setAttribute(HINT_BASE, label);
+      btn.setAttribute(HINT_COMMAND, cmd);
+      btn.title = hintTitle(label, cmd);
+    }
     appGroup.append(btn);
   }
   collectionBar.append(appGroup);

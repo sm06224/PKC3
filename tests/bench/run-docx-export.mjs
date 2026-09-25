@@ -116,10 +116,11 @@ const markEnd = (base) =>
   }, base);
 
 // ── 大きいノートを 1 件作る ────────────────────────────────
+// 🔴 #1054 段②: 種類を選ぶとその場で作るので、本体をもう一度押さない
+//   (押すと編集中で disabled になっており timeout する)
 const body = bigBody(BLOCKS);
 await page.click('[data-pkc-field="create-pick"]');
 await page.click('[data-pkc-region="create-menu"] [data-pkc-archetype="text"]');
-await page.click('[data-pkc-field="create-run"]');
 await page.waitForSelector('[data-pkc-field="editor-body"]');
 await page.fill('[data-pkc-field="editor-title"]', '大きい文書');
 /**

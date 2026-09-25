@@ -127,9 +127,10 @@ try {
   await seedEditorArm(page, 'split');
   await page.goto(`http://localhost:${PORT}/`);
   await page.waitForSelector('[data-pkc-boot="ready"]', { timeout: 20_000 });
+  // 🔴 #1054 段②: 種類を選ぶとその場で作るので、本体をもう一度押さない
+  //   (押すと編集中で disabled になっており timeout する)
   await page.click('[data-pkc-field="create-pick"]');
   await page.click('[data-pkc-region="create-menu"] [data-pkc-archetype="text"]');
-  await page.click('[data-pkc-field="create-run"]');
   /**
    * ⚠ `page.fill` は使わない ── 大きい本文だと「要素が安定するまで」待って
    * **30 秒で落ちる**(プレビューが描き続けている間ずっと不安定と判定される)。

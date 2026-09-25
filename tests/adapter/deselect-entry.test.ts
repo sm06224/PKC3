@@ -228,6 +228,34 @@ describe('🔴 Escape で閉じる(#1042 C3)', () => {
   });
 
   /**
+   * 🔴 **作る種類の一覧(▼)が開いている間の Escape は、一覧を閉じるだけ**
+   * (#1054 段②-3。user 目線レビューで判明)。
+   * ⚠ 直す前は、マウスで ▼ を開くと焦点が ▼ に残り、Escape は**一覧を閉じずに**
+   *   読んでいたノートの選択を外していた。項目の中で押した場合も、一覧を閉じた後に
+   *   同じ Escape が `deselect-entry` へ流れて選択を外していた。
+   * 🔑 焦点の置き場 2 通り(▼ / 項目の中)を両方見る ── 片方だけだと、
+   *   もう片方の経路が素通りしても緑になる。
+   */
+  it.each([
+    ['▼ に焦点がある(マウスで開いたまま)', 'pick'],
+    ['一覧の項目に焦点がある', 'item'],
+  ] as const)('🔴 ▼ の一覧が開いている間の Escape は、一覧だけ閉じてノートは残る(%s)', (_label, where) => {
+    const m = mount();
+    m.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    const pick = m.root.querySelector<HTMLElement>('[data-pkc-field="create-pick"]')!;
+    pick.click();
+    const menu = m.root.querySelector<HTMLElement>('[data-pkc-region="create-menu"]')!;
+    expect(menu.hidden, '前提: ▼ を押しても一覧が開いていない').toBe(false);
+    if (where === 'pick') pick.focus();
+    const from = document.activeElement as HTMLElement;
+    expect(where === 'pick' ? from === pick : menu.contains(from), '前提: 焦点の置き場が違う').toBe(true);
+    pressEscape(from);
+    expect(menu.hidden, 'Escape で一覧が閉じていない').toBe(true);
+    expect(m.d.getState().selectedLid, '一覧の裏でノートまで閉じた').toBe('a');
+    expect(document.activeElement, '閉じた後、焦点が ▼ へ戻っていない').toBe(pick);
+  });
+
+  /**
    * 🔴 **打っている欄では、Escape は何もしない**(C3 の明示要件)。
    * ⚠ `entry-filter`(#1042 C2 で焦点を持つようになった一覧の絞り込み欄)に
    * 打っている最中は、`typing` の門が `deselect-entry`(`whileTyping` 無し)を止める。

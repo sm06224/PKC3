@@ -327,12 +327,15 @@ export function collectPageErrors(page: Page): string[] {
  * playwright が落ちるので、それ自体が「封印が効いている」の観測点になる。
  */
 export async function createEntry(page: Page, archetype: string): Promise<void> {
-  // 🔴 **user と同じ手順**(P10 で分割ボタンへ)── ▼ を押して種類を選び、本体を押す。
+  // 🔴 **user と同じ手順**(P10 で分割ボタンへ → #1054 段②で「選ぶ」自体が
+  //   「作る」を兼ねる合成メニューへ)── ▼ を押して種類を選ぶ。
   // ⚠ `selectOption` だけでは足りない ── 本体のボタンが `data-pkc-archetype` を持ち、
   //    binder はそちらを先に見るので、select だけ変えると別の種類が出来る
+  // 🔴 **本体をもう一度押さない**(#1054 段②)── 選んだ時点でその場で作るので、
+  //   直後に本体を押すと**編集中で押せない**(disabled)まま `clickReal` が詰まる
+  //   (実際にフル smoke で 22 件が timeout した)。
   await clickReal(page, '[data-pkc-field="create-pick"]');
   await clickReal(page, `[data-pkc-region="create-menu"] [data-pkc-archetype="${archetype}"]`);
-  await clickReal(page, '[data-pkc-field="create-run"]');
 }
 
 /**

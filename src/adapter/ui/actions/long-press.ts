@@ -72,11 +72,25 @@ export const LONG_PRESS_TILE = '[data-pkc-tile]';
  */
 export const LONG_PRESS_GROUP = '[data-pkc-action="toggle-app-group"]';
 /**
- * 実際に `closest` へ渡す綴り。⚠ **3 つを 1 つの器で受ける** ──
+ * 🔴 **3 つの帯(作る / ノート全体 / 2 ペインの操作)のタイルも受ける**
+ * (#1054 段②。user 裁定「図案だけの均一なタイルにする」)。
+ *
+ * ⚠ **`LONG_PRESS_TILE`(`[data-pkc-tile]`)とは別の属性**にする ──
+ *   あちらは値に lid を持つ(アプリの一覧の並べ替え、#857)。同じ属性名にすると
+ *   `row.getAttribute('data-pkc-tile')` が空文字(`''`、`null` ではない)を返し、
+ *   `PICK_APP_TILE` が **lid 空文字**で発火してしまう(CLAUDE.md §7 の型 ──
+ *   同じ名前の器を、値の意味が違う 2 つの機能が奪い合う)。
+ * 🔑 触ると**その帯の全操作を名前つきで一覧するメニュー**が出る
+ *   (`binder.ts` の `openBarTileMenu`)── 指だけの端末には、図案だけのタイルの
+ *   名前を読む手段が hover(`title`)しか無く、指には `:hover` が無いため。
+ */
+export const LONG_PRESS_BAR_TILE = '[data-pkc-bar-tile]';
+/**
+ * 実際に `closest` へ渡す綴り。⚠ **4 つを 1 つの器で受ける** ──
  * 2 本目の `installLongPress` を足すと、`swallowsClick` / `holds` を
  * **両方に聞いて回る**ことになり、聞き忘れた 1 か所が静かに残る(CLAUDE.md §7)。
  */
-export const LONG_PRESS_TARGETS = `${LONG_PRESS_TARGET}, ${LONG_PRESS_TILE}, ${LONG_PRESS_GROUP}`;
+export const LONG_PRESS_TARGETS = `${LONG_PRESS_TARGET}, ${LONG_PRESS_TILE}, ${LONG_PRESS_GROUP}, ${LONG_PRESS_BAR_TILE}`;
 
 export interface LongPress {
   /** 配線を解く(`bindActions` の teardown から呼ぶ)。 */

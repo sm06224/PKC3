@@ -184,15 +184,28 @@ export const PKC_SYMBOLS = {
   link: { icon: 'link', tone: 'io' },
   translate: { icon: 'translate', tone: 'system' },
   /**
-   * 🔴 **ここから下は #1054 段② が使う**(2026-09-25。3 つの帯の作り替えで使う予定)。
-   * ⚠ この段(段①)では**まだどこからも参照しない** ── 書体と表に用意しておくだけ。
+   * 🔴 **#1054 段① で用意し、段②(2 ペインの操作行)から使う**。
    */
   copy: { icon: 'copy', tone: 'io' },
   move: { icon: 'arrow-square-right', tone: 'io' },
   'folder-plus': { icon: 'folder-plus', tone: 'create' },
-  'note-plus': { icon: 'note-pencil', tone: 'create' },
+  /**
+   * 🔴 **`note-pencil`(ノート + 鉛筆)は「編集」と読める**(#1054 段②-2。
+   *   着地前レビュー)── `rename` を鉛筆系(下記)にすると、隣に鉛筆が 2 本
+   *   並んで区別が付かなくなる。「フォルダを作る」(`folder-plus`)と対になる
+   *   絵にする ── `file-plus`(フォルダの相方は file)。
+   */
+  'note-plus': { icon: 'file-plus', tone: 'create' },
   eye: { icon: 'eye', tone: 'find' },
   snippet: { icon: 'text-aa', tone: 'neutral' },
+  /**
+   * 🔴 **名前を打ち替える**(#1054 段②、2026-09-25)。
+   * ⚠ **段②-2 で直した**(着地前レビュー)── `cursor-text` は「文字入力」を示す
+   *   絵で、色も付かない唯一のタイル(`tone: 'neutral'`)だった。名前を打ち替える
+   *   のは**編集の一種**なので、`pencil-simple-line`(編集の仲間の鉛筆)+
+   *   `tone: 'create'`(「ノートを編集する」と同じ色の系統)へ揃える。
+   */
+  rename: { icon: 'pencil-simple-line', tone: 'create' },
 } as const satisfies Readonly<Record<string, { readonly icon: string; readonly tone: IconTone }>>;
 
 /**

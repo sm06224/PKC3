@@ -352,3 +352,35 @@ describe('図案の規則(自動生成の CSS)', () => {
     }
   });
 });
+
+/**
+ * 🔴 **`rename` / `note-plus` の絵を差し替えた**(#1054 段②-2、着地前レビュー)。
+ *
+ * ① `rename`(2 ペインの「名前」)── `cursor-text`(文字入力。色を持たない
+ *   唯一のタイルだった)から `pencil-simple-line` + `tone: 'create'` へ
+ *   (「ノートを編集する」= `pencil`/`create` と同じ色の系統に揃える)。
+ * ② `note-plus`(2 ペインの「ノート」= `dual-mknote`)── `note-pencil`
+ *   (ノート + 鉛筆 = 「編集」と読める絵。①を鉛筆系にすると隣に鉛筆が 2 本並ぶ)
+ *   から `file-plus` へ(`folder-plus`(フォルダを作る)と対になる絵)。
+ * ⚠ **符号位置(codepoints)は変えない** ── `symbols.ts` の並び順(= key の数と
+ *   順番)を変えていないので、`npm run icons:font` は同じ符号位置に**別の
+ *   Phosphor 絵を焼き直す**だけである(この test は焼き直したことまでは
+ *   見ない ── それは実ブラウザの `tests/smoke/icon-font.smoke.spec.ts` の担当)。
+ */
+describe('rename / note-plus の絵と tone(#1054 段②-2)', () => {
+  it('🔴 rename は pencil-simple-line + create', () => {
+    expect(PKC_SYMBOLS.rename).toEqual({ icon: 'pencil-simple-line', tone: 'create' });
+  });
+
+  it('🔴 note-plus は file-plus(tone は create のまま)', () => {
+    expect(PKC_SYMBOLS['note-plus']).toEqual({ icon: 'file-plus', tone: 'create' });
+  });
+
+  // 🔑 空振り防止 ── 消した絵(cursor-text / note-pencil)が、他の PKC 名から
+  //   まだ指されていないこと(指されていたら「消した」にならない)
+  it('⚠ cursor-text / note-pencil は、もうどの PKC 名からも指されていない', () => {
+    const icons = Object.values(PKC_SYMBOLS).map((v) => v.icon);
+    expect(icons).not.toContain('cursor-text');
+    expect(icons).not.toContain('note-pencil');
+  });
+});

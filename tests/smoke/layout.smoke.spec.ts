@@ -222,27 +222,81 @@ test('🔴 上の帯は無く、設定は左の列から押せる', async ({ pag
   const m = await page.evaluate(() => {
     const btn = document.querySelector('[data-pkc-region="sidebar"] [data-pkc-view="settings"]');
     const r = btn?.getBoundingClientRect();
-    const others = [
-      ...document.querySelectorAll('[data-pkc-region="collection-bar"] button'),
-    ].map((b) => Math.round(b.getBoundingClientRect().height));
+    const tiles = [...document.querySelectorAll('[data-pkc-region="collection-bar"] button')];
+    const others = tiles.map((b) => Math.round(b.getBoundingClientRect().height));
+    const widths = tiles.map((b) => Math.round(b.getBoundingClientRect().width));
+    // 🔴 #1054 段②-2(F9)── 7 個が「詰め込まれて」同じ行に収まっているか
+    const tops = tiles.map((b) => Math.round(b.getBoundingClientRect().top));
     return {
       hasBrand: document.querySelector('[data-pkc-region="brand"]') !== null,
       inSidebar: btn !== null,
       h: r ? Math.round(r.height) : -1,
       w: r ? Math.round(r.width) : -1,
       heights: [...new Set(others)],
+      widths: [...new Set(widths)],
+      tileCount: tiles.length,
+      tops,
     };
   });
   // ① 帯が無い(撤去の pin ── 戻ってきたら落ちる)
   expect(m.hasBrand, '上の帯が戻っている').toBe(false);
   // ② 設定へ行ける(導線ごと消す変異を落とす)
   expect(m.inSidebar, '設定への導線が左の列に無い').toBe(true);
-  // ③ 的が小さすぎない ── ⚠ 帯にいた頃の寸法(20px / 11px)を引きずると
-  //    1 つだけ小さいボタンになる(実際にそうなった)
-  expect(m.h, `設定ボタンが小さい(${m.h}px)`).toBeGreaterThanOrEqual(24);
-  expect(m.w, `設定ボタンが細い(${m.w}px)`).toBeGreaterThanOrEqual(40);
-  // ④ 隣と**同じ高さ**(揃っていない 1 個を作らない)
+  /**
+   * ③ 🔴 **均一な正方形タイル(32px)である**(#1054 段②。上の「40px 以上」を上書き)。
+   * ⚠ 直す前は「帯にいた頃の寸法(20px / 11px)を引きずって 1 つだけ細くならない」を
+   *   見ていたが、いまは**全部が同じ 32px の正方形**という、より強い形になった。
+   */
+  expect(m.h, `設定ボタンが 32px でない(${m.h}px)`).toBe(32);
+  expect(m.w, `設定ボタンが 32px でない(${m.w}px)`).toBe(32);
+  // ④ 隣と**同じ大きさ**(揃っていない 1 個を作らない)
   expect(m.heights, `高さがばらついている: ${JSON.stringify(m.heights)}`).toHaveLength(1);
+  expect(m.widths, `幅がばらついている: ${JSON.stringify(m.widths)}`).toHaveLength(1);
+  /**
+   * ⑤ 🔴 **7 個は「詰め込まれて」同じ行に収まる**(#1054 段②-2、F9。
+   *   user 裁定「詰め込みなさい」)。
+   * ⚠ 直す前は `collection-app-group` が `flex: 1 0 100%` で**必ず次の行**へ
+   *   落ちていたので、7 個は**必ず 2 行**(3 個 + 4 個)になっていた。
+   *   250px 前後の列に 32px の正方形タイル 7 個(+ gap 6px = 230px)は
+   *   1 行に入る幅がある。
+   */
+  expect(m.tileCount, '前提が崩れている(7 個そろっていない)').toBe(7);
+  expect(m.tops, `1 行に収まらず複数の段に分かれている: ${JSON.stringify(m.tops)}`).toEqual(
+    new Array(7).fill(m.tops[0]),
+  );
+
+  /**
+   * ⑥ 🔴 **狭い幅でも「1 個だけ」ずれない**(#1054 段②-3。着地前レビューの指摘)。
+   * ⚠ ⑤は 1 幅しか見ていない ── #1029 段 B で「集計」だけ 8px ぶら下がったのは
+   *   **境目が行の途中に来る幅**だった。🔑 入りきらない幅では**塊ごと**次の行へ
+   *   移るはずなので、見るのは「塊の中は同じ段」(3 個 / 4 個それぞれ)である。
+   * ⚠ 列の幅は 1100px を境に式が変わる(`app.css` の `@media (max-width: 1100px)`)
+   *   ので、その前後と、もっと狭い所を当てる。
+   */
+  for (const width of [1180, 1100, 1000, 900]) {
+    await page.setViewportSize({ width, height: 800 });
+    const rects = await page.evaluate(() =>
+      [...document.querySelectorAll('[data-pkc-region="collection-bar"] button')].map((b) => {
+        const r = b.getBoundingClientRect();
+        return { top: Math.round(r.top), w: Math.round(r.width) };
+      }),
+    );
+    const tops = rects.map((r) => r.top);
+    expect(tops, `${width}px: 前提が崩れている(7 個そろっていない)`).toHaveLength(7);
+    // ⚠ 空振り防止 ── 列が畳まれて全部 0 だと「同じ段」が必ず成り立つ
+    expect(
+      rects.every((r) => r.w > 0),
+      `${width}px: 前提が崩れている(見えていないタイルがある): ${JSON.stringify(rects)}`,
+    ).toBe(true);
+    expect(
+      new Set(tops.slice(0, 3)).size,
+      `${width}px: 取り込む / バックアップ / 操作を探す が段をまたいでいる: ${JSON.stringify(tops)}`,
+    ).toBe(1);
+    expect(
+      new Set(tops.slice(3)).size,
+      `${width}px: 集計 / システム / フラグ / ヘルプ が段をまたいでいる: ${JSON.stringify(tops)}`,
+    ).toBe(1);
+  }
 });
 
 
@@ -308,17 +362,45 @@ test('🔴 左の列のボタンは、どの幅でも名前が器からはみ出
     await gotoApp(page);
     const m = await page.evaluate(() => {
       const side = document.querySelector('[data-pkc-region="sidebar"]')!;
-      const out: { where: string; label: string; outside: number; clip: number }[] = [];
+      const named: { where: string; label: string; outside: number; clip: number }[] = [];
+      /**
+       * 🔴 **均一な正方形タイル(#1054 段②)は、名前を見た目だけ隠す** ──
+       *   `[data-pkc-field='label']` の箱は 1px 四方(視覚を隠す定番の形)なので、
+       *   その箱で「はみ出し」を測ると**意味の無い値**になる(CLAUDE.md §1
+       *   「読み取れる値が変わると分かったら、まず変えずに済む置き方を探す」の
+       *   逆側 ── ここは**観測点そのものを変える**)。
+       *   代わりに**タイル自身が、その帯の外へ出ていないか**を見る。
+       */
+      const tiles: { where: string; action: string; overflow: number }[] = [];
       for (const btn of side.querySelectorAll('button')) {
         // ⚠ 畳まれている物は測らない(器が 0 なので必ず「はみ出し」に見える)
         const box = btn.getBoundingClientRect();
         if (box.width === 0 || box.height === 0) continue;
+        if (btn.hasAttribute('data-pkc-bar-tile')) {
+          const bar = btn.closest('[data-pkc-region]');
+          const barBox = bar?.getBoundingClientRect() ?? null;
+          const overflow =
+            barBox === null
+              ? 0
+              : Math.max(
+                  barBox.left - box.left,
+                  box.right - barBox.right,
+                  barBox.top - box.top,
+                  box.bottom - barBox.bottom,
+                );
+          tiles.push({
+            where: bar?.getAttribute('data-pkc-region') ?? '?',
+            action: btn.getAttribute('data-pkc-action') ?? '?',
+            overflow: Math.round(overflow),
+          });
+          continue;
+        }
         const lab = btn.querySelector('[data-pkc-field="label"]') ?? btn;
         const text = (lab.textContent ?? '').trim();
         // 🔑 **図案だけのボタンは対象外**(名前を持たないので「収まる」が言えない)
         if (text === '') continue;
         const lr = lab.getBoundingClientRect();
-        out.push({
+        named.push({
           where: btn.closest('[data-pkc-region]')?.getAttribute('data-pkc-region') ?? '?',
           label: text,
           // ⚠ **左右の大きいほう** ── 語は中央寄せなので両側へ出る
@@ -326,14 +408,15 @@ test('🔴 左の列のボタンは、どの幅でも名前が器からはみ出
           clip: btn.scrollWidth - btn.clientWidth,
         });
       }
-      return out;
+      return { named, tiles };
     });
 
     // ⚠ 空振り防止 ── ボタンを 1 つも拾えていないのに「はみ出し 0」を作らない
-    expect(m.length, `w=${w}: 左の列で名前つきのボタンを 1 つも拾えていない`).toBeGreaterThanOrEqual(
-      8,
-    );
-    for (const b of m) {
+    expect(
+      m.named.length,
+      `w=${w}: 左の列で名前つきのボタンを 1 つも拾えていない`,
+    ).toBeGreaterThanOrEqual(8);
+    for (const b of m.named) {
       expect(
         b.outside,
         `w=${w}: [${b.where}] 「${b.label}」が器から ${b.outside}px 出ている`,
@@ -341,6 +424,14 @@ test('🔴 左の列のボタンは、どの幅でも名前が器からはみ出
       expect(
         b.clip,
         `w=${w}: [${b.where}] 「${b.label}」が ${b.clip}px 切れている(読めない)`,
+      ).toBeLessThanOrEqual(0);
+    }
+    // ⚠ 空振り防止 ── タイルを 1 つも拾えていないのに「はみ出し 0」を作らない
+    expect(m.tiles.length, `w=${w}: 均一タイルを 1 つも拾えていない`).toBeGreaterThanOrEqual(10);
+    for (const t of m.tiles) {
+      expect(
+        t.overflow,
+        `w=${w}: [${t.where}] 「${t.action}」タイルが帯から ${t.overflow}px 出ている`,
       ).toBeLessThanOrEqual(0);
     }
     /**
@@ -363,7 +454,7 @@ test('🔴 左の列のボタンは、どの幅でも名前が器からはみ出
       });
       expect(rows, `w=${w}: 「作る」帯が ${rows} 段になっている(2 段までにする)`).toBeLessThanOrEqual(2);
     }
-    seen.push({ w, n: m.length });
+    seen.push({ w, n: m.named.length });
   }
   // ⚠ どの幅でも同じ数を見ていること(幅で数が変わるなら、どこかが畳まれている)
   expect(new Set(seen.map((s) => s.n)).size, `幅で拾えた数が違う: ${JSON.stringify(seen)}`).toBe(1);
@@ -1540,17 +1631,21 @@ test('🔴 「処理(ワーカー)」の計器区画は無く、メッセージ 
 });
 
 /**
- * P10: 🔴 **新規は分割ボタン**(user 指示 2026-08-05
+ * P10 → #1054 段②: 🔴 **▼ は「作る」の合成メニュー**(user 指示 2026-08-05
  * 「プルダウン式の新規作成ボタンは使いにくいからマルチメニューに畳んでください。
  *  ▼ を押下した際に種別を選択して、追加ボタンと ctrl+n の対象を更新、
- *  +〇〇みたいにボタンを変更すればいい、これもアイコン欲しいよね」)。
+ *  +〇〇みたいにボタンを変更すればいい、これもアイコン欲しいよね」/
+ * #1054 コメント 5837587559「選ぶと、その場で作る」)。
  *
- * ⚠ 見るのは 3 つ。**どれか 1 つでは足りない**:
+ * ⚠ 見るのは 4 つ。**どれか 1 つでは足りない**:
  *  ① 選ぶと**ボタンの見た目**が変わる(user が「いま何ができるか」を読める)
- *  ② 押すと**その種類**が出来る(見た目と結果が食い違わない)
- *  ③ **Ctrl+N も同じ対象**になる(近道が別のものを作らない)
+ *  ② 選んだ**その場でその種類が出来る**(選ぶ = 作る、の 2026-09-25 の裁定)
+ *  ③ 本体をもう一度押すと、覚えた種類で**もう 1 件**出来る
+ *  ④ **Ctrl+N も同じ対象**になる(近道が別のものを作らない)
  */
-test('🔴 新規の分割ボタン: 選ぶと文言・図案・Ctrl+N の対象が変わる', async ({ page }) => {
+test('🔴 ▼ の合成メニュー: 種類を選ぶとその場で作り、次に開いたときの既定にもなる', async ({
+  page,
+}) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1280, height: 800 });
   await gotoApp(page);
@@ -1573,13 +1668,6 @@ test('🔴 新規の分割ボタン: 選ぶと文言・図案・Ctrl+N の対象
   const iconBefore = await glyph();
   await clickReal(page, '[data-pkc-field="create-pick"]');
   expect(await menu.isVisible(), '▼ を押しても一覧が出ない').toBe(true);
-  await clickReal(page, '[data-pkc-region="create-menu"] [data-pkc-archetype="spreadsheet"]');
-  await expect(run.locator('[data-pkc-field="label"]')).toHaveText('+ 表');
-  expect(await menu.isVisible(), '選んだのに一覧が閉じない').toBe(false);
-  const iconAfter = await glyph();
-  // ⚠ 空振り防止 ── 絵が出ていること(両方 `none` なら「違わない」で緑になる)
-  expect(iconBefore, '図案が 1 つも出ていない(台の空振り)').not.toBe('none');
-  expect(iconAfter, '図案が種類に追従していない').not.toBe(iconBefore);
 
   /**
    * ② 押すと**表**が出来る(文言と結果が食い違わない)。
@@ -1587,36 +1675,89 @@ test('🔴 新規の分割ボタン: 選ぶと文言・図案・Ctrl+N の対象
    * 🔴 **観測点を原文の欄から「押せる升」へ移した**(#753、2026-09-08)──
    *   表は**読む面**で出来るようになったので、`editor-body` はもう出ない。
    * 🔑 むしろこちらのほうが強い ── user が見るのは原文ではなく**表そのもの**である。
+   * 🔴 **#1054 段②で「選ぶ = 作る」になった** ── 種類を選んだ、その 1 手で出来る
+   *   (以前は選んだあと本体をもう一度押す必要があった)。
    */
   const cells = page.locator('[data-pkc-field="detail-body"] [data-pkc-action="edit-cell"]');
   const title = page.locator('[data-pkc-field="detail-title"]').first();
-  await clickReal(page, '[data-pkc-field="create-run"]');
+  await clickReal(page, '[data-pkc-region="create-menu"] [data-pkc-archetype="spreadsheet"]');
+  await expect(run.locator('[data-pkc-field="label"]')).toHaveText('+ 表');
+  expect(await menu.isVisible(), '選んだのに一覧が閉じない').toBe(false);
+  const iconAfter = await glyph();
+  // ⚠ 空振り防止 ── 絵が出ていること(両方 `none` なら「違わない」で緑になる)
+  expect(iconBefore, '図案が 1 つも出ていない(台の空振り)').not.toBe('none');
+  expect(iconAfter, '図案が種類に追従していない').not.toBe(iconBefore);
   /**
    * 🔑 種は 5 列 × 3 行 ── 別の種類が出来ていたら 0 になる(見た目と結果の食い違い)。
    * ⚠ **`await cells.count()` で数えない** ── あれは**その瞬間の枚数**なので、
    *   描き上がる前に数えて 0 を掴む(フル走行で実際に落ちた)。
    *   `toHaveCount` は届くまで待つ。
    */
-  await expect(cells, '出来たものが表でない').toHaveCount(15, { timeout: 10_000 });
+  await expect(cells, '選んだだけで表が出来ていない').toHaveCount(15, { timeout: 10_000 });
   // ⚠ **編集の面に落ちていない**(#753 ── ここが原文の欄だと、升を押しても打てない)
   await expect(page.locator('[data-pkc-field="editor-body"]')).toHaveCount(0);
   await expect(title, '既定の題名が「表」でない').toHaveText(/表 1$/);
 
   /**
-   * ③ 🔴 **Ctrl+N も同じ対象** ── 近道が別のものを作ったら、それは別の機能である。
-   *
+   * ③ 🔴 本体をもう一度押すと、**覚えた種類**でもう 1 件出来る。
    * 🔑 観測点は**題名の連番**(`… 表 2`)── 「新しく 1 件出来た」と「それが表である」を
-   *   1 つで見られる。⚠ 升の数だけを見ると、**何も作られていなくても 15 のまま**なので
-   *   ③が空振りする(1 稿目は一覧の行数で見ようとしたが、この幅では行が出ない)。
+   *   1 つで見られる。
+   */
+  await clickReal(page, '[data-pkc-field="create-run"]');
+  await expect(title, '本体が覚えた種類を無視している').toHaveText(/表 2$/, { timeout: 10_000 });
+  await expect(cells, '本体を押して出来たものが表でない').toHaveCount(15, { timeout: 10_000 });
+
+  /**
+   * ④ 🔴 **Ctrl+N も同じ対象** ── 近道が別のものを作ったら、それは別の機能である。
    */
   await page.keyboard.press('Control+n');
-  await expect(title, 'Ctrl+N が選んだ種類を無視している').toHaveText(/表 2$/, { timeout: 10_000 });
+  await expect(title, 'Ctrl+N が選んだ種類を無視している').toHaveText(/表 3$/, { timeout: 10_000 });
   /**
    * ⚠ **題名が先に変わる** ── `CREATE_ENTRY` は題名を楽観更新するので、
    *   本文(升)はその後に描かれる。フル走行では実際にここで **0** を掴んだ
    *   (単独では通っていた ── CLAUDE.md「flake に見えるものは、たいてい観測点の側」)。
    */
   await expect(cells, 'Ctrl+N で出来たものが表でない').toHaveCount(15, { timeout: 10_000 });
+
+  /**
+   * ⑤ 🔴 **鍵盤操作**(#1054 段②-2、F3b)── 実ブラウザでも `ArrowDown` で
+   *   隣の項目へ焦点が移り、`Escape` で閉じて `▼` へ焦点が戻る。
+   * ⚠ unit(`create-kind.test.ts`)は happy-dom で同じ形を見ているが、
+   *   `document.activeElement` の追従・実 focus の可視化は実ブラウザでしか
+   *   確かめられない。⚠ 開いた直後は焦点が `▼` に在る(`onCreateMenuKey` は
+   *   焦点が項目の中に在るときだけ動く ── unit と同じ理屈で、先頭項目へ
+   *   `focus()` してから矢印を撃つ)。
+   */
+  await clickReal(page, '[data-pkc-field="create-pick"]');
+  expect(await menu.isVisible(), '▼ を押しても一覧が出ない').toBe(true);
+  const items = menu.locator('button');
+  await items.first().focus();
+  await expect(items.first(), '前提が崩れている: 先頭へ焦点が当たらない').toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(items.nth(1), 'ArrowDown で隣へ焦点が移らない').toBeFocused();
+  await page.keyboard.press('Escape');
+  expect(await menu.isVisible(), 'Escape でメニューが閉じない').toBe(false);
+  await expect(
+    page.locator('[data-pkc-field="create-pick"]'),
+    'Escape 後に ▼ へ焦点が戻らない',
+  ).toBeFocused();
+
+  /**
+   * ⑥ 🔴 **左下の「集計」「フラグ」も、押すとその面が開く**(#1054 段②-2、F3c)。
+   * ⚠ #1029 で `collection-app-group` の中へ入って以来、この 2 つを**押す**
+   *   journey が smoke に 1 本も無かった(在ることは見ていても、押して効くかは
+   *   誰も見ていなかった ── CLAUDE.md §「押して効く」まで見る)。
+   */
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="query"]');
+  await expect(
+    page.locator('[data-pkc-region="query-bar"]'),
+    '「集計」を押しても面が開かない',
+  ).toBeVisible();
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="flags"]');
+  await expect(
+    page.locator('[data-pkc-region="flags-body"]'),
+    '「フラグ」を押しても面が開かない',
+  ).toBeVisible();
 
   expect(errors).toEqual([]);
 });

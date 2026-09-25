@@ -91,7 +91,8 @@ import { downloadBlob } from '@adapter/platform/download';
 import { visibleContacts } from '@features/contact/contact-card';
 import { buildVcf, isVcfFileName, vcfNoteOf } from '@features/contact/vcard';
 import { isMarkdownFileName } from '@features/import/plain-markdown';
-import { ARCHETYPE_ICONS, setActionIcon } from '@adapter/ui/render/icons';
+import { ARCHETYPE_ICONS, BAR_TILE_ATTR, setActionIcon } from '@adapter/ui/render/icons';
+import { isIconName } from '@features/icon/symbols';
 import { insertBlockText, insertText, OWN_MEANING } from '@adapter/ui/render/row-swap';
 import { iconShortcodeFor } from '@features/icon/icon-shortcode';
 import { HOLD_ATTR, neighborCell, openCellAt } from '@adapter/ui/render/cell-input';
@@ -768,6 +769,48 @@ const createAndEdit = (
   });
   if (dispatcher.getState().phase === 'editing') void services.acquireEditLock?.(lid);
 };
+
+/**
+ * 🔴 **その帯の「押せる全操作」を、画面から拾って一覧にする**(#1054 段②)。
+ *
+ * ⚠ **表を 2 つ持たない**(§7) ── 名前(`[data-pkc-field='label' / 'cmd-label']`)
+ *   と図案(`data-pkc-symbol`)は、いま画面に出ている物をそのまま読む。
+ *   3 つの帯(作る / ノート全体 / 2 ペインの操作)を 1 つの関数で受けられるのは
+ *   このためである(帯ごとに書き分けない)。
+ * ⚠ **押せない物は載せない**(`disabled`)── 長押しメニューに dead click を増やさない。
+ * 🔑 `data-pkc-view` / `data-pkc-archetype` のような**受け手が読み直す値**は
+ *   `attrs` へそのまま写す(`data-pkc-action` / `data-pkc-bar-tile` / `data-pkc-field`
+ *   の 3 つは除く ── 前者 2 つは別の場所で読み、`data-pkc-field` は写すと
+ *   「その面に 1 つだけ」を前提にした `querySelector` が長押しメニュー側を拾いうる)。
+ */
+function barTileMenuItems(bar: Element): MenuItem[] {
+  const items: MenuItem[] = [];
+  for (const tile of bar.querySelectorAll<HTMLButtonElement>(`[${BAR_TILE_ATTR}]`)) {
+    if (tile.disabled) continue;
+    const action = tile.getAttribute('data-pkc-action');
+    if (action === null || action === '') continue;
+    const label = (
+      tile.querySelector('[data-pkc-field="label"], [data-pkc-field="cmd-label"]')?.textContent ??
+      ''
+    ).trim();
+    if (label === '') continue;
+    const iconAttr = tile.querySelector('[data-pkc-icon]')?.getAttribute('data-pkc-symbol') ?? null;
+    const attrs: Record<string, string> = {};
+    for (const attr of Array.from(tile.attributes)) {
+      if (!attr.name.startsWith('data-pkc-')) continue;
+      if (attr.name === 'data-pkc-action' || attr.name === BAR_TILE_ATTR || attr.name === 'data-pkc-field')
+        continue;
+      attrs[attr.name] = attr.value;
+    }
+    items.push({
+      action,
+      label,
+      ...(iconAttr !== null && isIconName(iconAttr) ? { icon: iconAttr } : {}),
+      ...(Object.keys(attrs).length > 0 ? { attrs } : {}),
+    });
+  }
+  return items;
+}
 
 /**
  * 押した物の行の lid。
@@ -1769,6 +1812,11 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
    * ⚠ 断りは**可視**(帯に理由が出る)なので、無言の dead click は作らない。
    */
   'create-entry',
+  /**
+   * 🔴 **▼ で種類を選ぶのも、いまは `create-entry` と同じ**(#1054 段②)──
+   *   選んだ時点でその場で作るので、`create-entry` を載せた理由がそのまま当たる。
+   */
+  'pick-create-kind',
   'dual-mkdir',
   'dual-mknote',
   'dual-copy',
@@ -7972,6 +8020,13 @@ const ACTIONS: Record<string, ActionHandler> = {
     const open = menu.hidden;
     menu.hidden = !open;
     target.setAttribute('aria-expanded', open ? 'true' : 'false');
+    /**
+     * 🔑 **開いたら、先頭の押せる項目へ焦点を移す**(#1054 段②-3。OS のメニューと同じ)。
+     * ⚠ 直す前は焦点が `▼` に残ったので、開いた直後の `↓` が一覧の中へ届かなかった
+     *   (`onCreateMenuKey` は焦点が項目の中に在るときだけ矢印を握る)。
+     * ⚠ 押せない項目(編集中の「種類」「今日」)は飛ばす ── 焦点が当たらない。
+     */
+    if (open) menu.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
   },
   /**
    * 🔑 **作る種類を選ぶ**(P10)。押した種類を「いま作るもの」にして、
@@ -7979,8 +8034,15 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 保持場所は `<select>` 1 か所 ── ボタンの属性と select が食い違うと、
    *   押した種類と出来るものが別になる(いちばん困る形)。
    * 🔴 **端末側にも覚える**(#1045)── 次に起動したとき `shell.ts` がここを読む。
+   *
+   * 🔴 **選ぶと、その場で作る**(#1054 段②。裁定 #1054 コメント 5837587559)。
+   * ⚠ 直す前は「次の `create-entry` の対象を変えるだけ」で、作るには
+   *   もう一押し(本体のボタン)が要った ── OS 風の合成メニューでは、種類を
+   *   選ぶ**その 1 手**が「作る」を兼ねる。⚠ 入れ先は `create-entry` 自身と
+   *   **同じ規則**(いま見ているフォルダの中。`createAndEdit` を再利用する ──
+   *   §7「同じ判定を 2 か所に書かない」)。
    */
-  'pick-create-kind': (_dispatcher, target, _services, root) => {
+  'pick-create-kind': (dispatcher, target, services, root) => {
     const archetype = target.getAttribute('data-pkc-archetype');
     if (!archetype) return;
     appCreateKind.set(archetype);
@@ -8008,6 +8070,9 @@ const ACTIONS: Record<string, ActionHandler> = {
     root
       .querySelector('[data-pkc-field="create-pick"]')
       ?.setAttribute('aria-expanded', 'false');
+    const st = dispatcher.getState();
+    const parent = st.scopeLid === null ? null : (st.entryMetas.get(st.scopeLid) ?? null);
+    createAndEdit(dispatcher, services, archetype, parent?.lid ?? null);
   },
   /**
    * 🔴 **対象は、押したボタンが持つ**(2026-09-12、#770 段②の着地前レビュー B)。
@@ -9521,6 +9586,23 @@ export function bindActions(
       );
       return;
     }
+    /**
+     * 🔴 **3 つの帯(作る / ノート全体 / 2 ペインの操作)のタイルは、長押しで
+     * その帯の全操作を名前つきで一覧する**(#1054 段②)。
+     *
+     * ⚠ **図案だけのタイル**なので、指だけの端末には名前を読む手段が無い
+     *   (hover の `title` は指には出ない)。⚠ 位置は押した物の外形から採る
+     *   (長押しには座標が無い ── `toggle-app-group` と同じ作法)。
+     */
+    if (row.hasAttribute(BAR_TILE_ATTR)) {
+      const bar = row.closest('[data-pkc-region]');
+      if (bar === null) return;
+      const items = barTileMenuItems(bar);
+      if (items.length === 0) return;
+      const box = row.getBoundingClientRect();
+      openContextMenu(root, { x: box.left, y: box.bottom }, items, row);
+      return;
+    }
     const tile = row.getAttribute('data-pkc-tile');
     if (tile !== null) {
       dispatcher.dispatch({ type: 'PICK_APP_TILE', lid: tile });
@@ -9730,7 +9812,36 @@ export function bindActions(
          *   出たうえに、**指を離した瞬間にそのグループが畳まれる**
          *   (押した物と効く先が食い違う)。
          */
-        pressedAction === 'toggle-app-group') &&
+        pressedAction === 'toggle-app-group' ||
+        /**
+         * 🔴 **3 つの帯のタイルも捨てる**(#1054 段②)── 足さないと、長押しで
+         *   メニューが出た直後に指を離した `click` がタイル自身の action を
+         *   撃ち、**メニューを開いたのに本体まで実行される**(例: 添付の
+         *   タイルを長押しすると、メニューが出たうえでファイル選択も開く)。
+         *   ⚠ **action 名を数え上げない** ── 帯のタイルは全部この 1 属性で
+         *   捨てられる(§7「同じ判定を 1 か所へ」の逆 = 判定を増やさない形)。
+         */
+        el.hasAttribute(BAR_TILE_ATTR) ||
+        /**
+         * 🔴 **開いたばかりのメニューの中も捨てる**(#1054 段②-2、F3a。
+         *   実ブラウザの touch smoke で判明)。
+         *
+         * ⚠ **`ev.target` から辿る `el` は「押した物」ではない** ── 合成
+         *   `click` の的は、指を置いた瞬間の要素ではなく **`click` を撃つ
+         *   その瞬間に (x, y) に在る物**で決まる(実機の仕様。unit の
+         *   手撃ち `dispatchEvent('click', …)` はこの的を再現しない)。
+         *   長押しで開くメニューは**押した場所の真下**に出るので、指を離した
+         *   合図がメニューの**先頭の項目**に**着地して、そのまま実行してしまう**
+         *   ── 実測(#1054 段②-2): `dual-preview-toggle` を長押しすると
+         *   メニューは正しく出るのに、直後の合成 `click` が同じ名前を持つ
+         *   メニューの複製(`role="menuitem"`)を撃ち、`aria-pressed` が
+         *   **メニューを閉じて選ぶ前に**反転していた。
+         * 🔑 だから「押した物の名前」ではなく「**いま開いているメニューの中か**」
+         *   で判定する ── 的が変わっても、消費窓の外にある**次の**タップ
+         *   (新しい `pointerdown` が窓を閉じているので `swallowsClick()` が
+         *   すでに偽)は素通りする ── 意図して押すメニュー項目は殺さない。
+         */
+        el.closest('[data-pkc-region="context-menu"]') !== null) &&
       longPress.swallowsClick()
     ) {
       ev.preventDefault();
@@ -12274,6 +12385,78 @@ export function bindActions(
       return;
     closeContextMenu(root);
   };
+  /**
+   * 🔴 **作る種類の一覧(`create-menu`)は、押したらどこでも閉じる**
+   * (#1054 段②)。⚠ `▼` 自身の押しだけは除く ── `toggle-create-menu` の
+   * 受け手が自分で開閉するので、ここまで閉じると**開いた直後に自分で閉じる**
+   * (`onCloseMenu` と同じ罠、CLAUDE.md §1 の「同じ 1 回のクリックで開き、閉じる」)。
+   * ⚠ **`onClick` より後に登録する** ── 先に登録すると、選んだ種類を作る前に
+   *   メニューが消え、`pick-create-kind` が `target` を見失う。
+   */
+  const onCloseCreateMenu = (ev: Event): void => {
+    const menu = root.querySelector<HTMLElement>('[data-pkc-region="create-menu"]');
+    if (menu === null || menu.hidden) return;
+    const el = (ev.target as HTMLElement | null)?.closest<HTMLElement>('[data-pkc-action]');
+    if (el?.getAttribute('data-pkc-action') === 'toggle-create-menu') return;
+    menu.hidden = true;
+    root.querySelector('[data-pkc-field="create-pick"]')?.setAttribute('aria-expanded', 'false');
+  };
+  /**
+   * 🔴 **`create-menu` の中の鍵盤操作**(#1054 段②)。
+   * ⚠ `ArrowUp`/`ArrowDown`/`Home`/`End` は**この帯の中だけ**握る ──
+   *   `Enter`/`Space` は素の `<button>` が既に持っている(何も書かない)。
+   * ⚠ `Escape` は `onMenuKey`(右クリックのメニュー)と**同じ形**(1 段だけ閉じ、
+   *   `▼` へ焦点を返す)だが、対象の region が違うので**同じ関数を使い回さない**
+   *   (`contextMenuOpen` は `[data-pkc-region="context-menu"]` しか見ない)。
+   */
+  const onCreateMenuKey = (ev: KeyboardEvent): void => {
+    if (!root.isConnected) return;
+    const menu = root.querySelector<HTMLElement>('[data-pkc-region="create-menu"]');
+    if (menu === null || menu.hidden) return;
+    const pick = root.querySelector<HTMLElement>('[data-pkc-field="create-pick"]');
+    /**
+     * 🔴 **開いている間の `Escape` は、焦点がどこに在っても一覧を閉じるだけ**
+     * (#1054 段②-3。user 目線レビューで判明)。
+     * ⚠ 直す前は「焦点が項目の中に在るとき」だけ閉じていた ── マウスで `▼` を
+     *   押して開くと焦点は `▼` に在るので、`Escape` は**一覧を閉じず**、後ろの
+     *   `onShortcut` の `deselect-entry` へ流れて**読んでいたノートの選択だけ外れた**。
+     *   ⚠ 項目の中で押した場合も、閉じた後に同じ `Escape` が `onShortcut` へ流れて
+     *   選択を外していた(`onMenuKey` と同じ罠)。
+     * 🔑 `onMenuKey` と同じく `stopImmediatePropagation` ── この聞き手は `onShortcut` より
+     *   **前に**登録されているので、1 回の `Escape` は 1 段だけ閉じる。
+     */
+    if (ev.key === 'Escape') {
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      menu.hidden = true;
+      pick?.setAttribute('aria-expanded', 'false');
+      pick?.focus();
+      return;
+    }
+    const t = ev.target;
+    if (!(t instanceof HTMLElement) || !menu.contains(t)) return;
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(ev.key)) return;
+    /**
+     * 🔴 **押せない項目は飛ばす**(#1054 段②-2)。⚠ 編集中は「種類」と「今日」が
+     *   `disabled` になる(上の `BLOCKABLE_FIELDS`)── 素通りさせると、矢印が
+     *   押せない項目の上で止まり、そこだけ `Enter` が無反応になる。
+     */
+    const items = [...menu.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
+    if (items.length === 0) return;
+    ev.preventDefault();
+    if (ev.key === 'Home') {
+      items[0]?.focus();
+      return;
+    }
+    if (ev.key === 'End') {
+      items[items.length - 1]?.focus();
+      return;
+    }
+    const idx = items.indexOf(root.ownerDocument.activeElement as HTMLButtonElement);
+    const dir = ev.key === 'ArrowDown' ? 1 : -1;
+    const next = idx === -1 ? 0 : (idx + dir + items.length) % items.length;
+    items[next]?.focus();
+  };
   const onMenuKey = (ev: KeyboardEvent): void => {
     /**
      * 🔴 **`root` が外れていたら何もしない**(#1042 followup。regression 修理)。
@@ -12339,6 +12522,8 @@ export function bindActions(
   // 🔴 **`onClick` より後に登録する**(上の docstring)── 先に登録すると
   //    メニューが消えてから委譲が走り、押しても無言になる。
   listen(root, 'click', onCloseMenu);
+  listen(root, 'click', onCloseCreateMenu);
+  listen(root.ownerDocument, 'keydown', onCreateMenuKey);
   /**
    * 🔴 **スクロールで閉じるのは、開いた「後に」動いたときだけ**(#875、2026-09-13)。
    *

@@ -25,7 +25,7 @@ test('🔴 「今日」を押すと今日の日付のノートが開き、2 度�
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
   });
 
-  await clickReal(page, '[data-pkc-action="open-today"]');
+  await clickReal(page, '[data-pkc-bar-tile][data-pkc-action="open-today"]');
   // ⚠ 作成の直後は**編集に入る** ── 題名は編集の面に出る
   const title = page.locator('[data-pkc-field="editor-title"], [data-pkc-field="detail-title"]');
   await expect(title.first(), '今日の日付のノートが開いていない').toHaveValue(
@@ -34,7 +34,7 @@ test('🔴 「今日」を押すと今日の日付のノートが開き、2 度�
 
   // 編集を確定してから、もう一度押す
   await clickReal(page, '[data-pkc-action="commit-edit"]');
-  await clickReal(page, '[data-pkc-action="open-today"]');
+  await clickReal(page, '[data-pkc-bar-tile][data-pkc-action="open-today"]');
 
   /**
    * 🔴 **2 度目で増えない**(その日の入れ物は 1 つ)。

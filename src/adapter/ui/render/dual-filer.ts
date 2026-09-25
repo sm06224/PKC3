@@ -45,7 +45,7 @@ import { chordLabel, findCommand } from '@features/keymap';
 import { appKeymap, type KeymapStore } from './keymap';
 import { appDualPrefs, DualPrefsStore } from './dual-prefs';
 import { appPhone } from './phone-layout';
-import { ARCHETYPE_ICONS, iconSpan } from './icons';
+import { ACTION_ICONS, ARCHETYPE_ICONS, iconSpan, markBarTile, setActionIcon } from './icons';
 // 🔴 タブの名乗りは左の列と同じ関数(#720)
 import { markTab, markTablist } from './tabs-a11y';
 // 🔴 表を送って見てから離れ、戻ると同じ所(C10 / #1045)。左右で**別々に**覚える
@@ -1335,12 +1335,14 @@ export class DualFilerRenderer {
       b.setAttribute('data-pkc-action', it.action);
       b.setAttribute('data-pkc-field', it.action);
       /**
-       * ⚠ **キーと語は別の要素**にする ── CSS でキーだけ弱めるため。
-       *   `textContent` で 1 本にすると、字の重みを分けられない。
+       * 🔴 **図案だけの均一なタイルにする**(#1054 段②)。⚠ 名前は
+       *   `cmd-label` のまま残す(見た目だけ隠す ── `app.css` の
+       *   `[data-pkc-bar-tile] [data-pkc-field='cmd-label']`)。
        */
-      const keyEl = document.createElement('span');
-      keyEl.setAttribute('data-pkc-field', 'cmd-key');
-      keyEl.textContent = keys[i] ?? '';
+      markBarTile(b);
+      const iconName = ACTION_ICONS[it.action] ?? 'dot';
+      const icon = iconSpan(iconName);
+      setActionIcon(icon, it.action, iconName);
       const label = document.createElement('span');
       label.setAttribute('data-pkc-field', 'cmd-label');
       /**
@@ -1349,18 +1351,18 @@ export class DualFilerRenderer {
        *   どこへ行くのか読めない(パソコンは 2 枚見えているので入れない)。
        */
       label.textContent = solo && it.directed ? `${to}へ${it.label}` : it.label;
-      b.append(keyEl, label);
+      b.append(icon, label);
       /**
-       * ⚠ **鍵は説明にも入れる**(2026-09-04)── スマホでは帯から鍵の字を
-       *   落とすので(`app.css`、語が 18px まで潰れるため)、ここが唯一の
-       *   残り場所になる。⚠ 落とすのは**見た目だけ**で、情報は捨てない。
+       * 🔴 **鍵は `title` の末尾に括弧で足す**(#1054 段②。⚠ 直す前は語の隣に
+       *   見える `cmd-key` の器と、`title` 先頭の `[F6] ` の 2 か所に在ったが、
+       *   図案だけのタイルにしたので**この 1 か所**へ寄せた)。
        */
       const key = keys[i] ?? '';
-      const chord = key === '' ? '' : `[${key}] `;
-      b.title =
+      const body =
         it.empty !== null && count === 0
-          ? `${chord}${it.empty}`
-          : `${chord}${it.hint(SIDE_LABEL[from], to)}${it.empty !== null ? `(いま ${count} 件)` : ''}`;
+          ? it.empty
+          : `${it.hint(SIDE_LABEL[from], to)}${it.empty !== null ? `(いま ${count} 件)` : ''}`;
+      b.title = key === '' ? body : `${body}(${key})`;
       // 🔑 出し入れの口は**押している状態**を出す(点いているか、字だけでは読めない)
       if (it.action === 'dual-preview-toggle')
         b.setAttribute('aria-pressed', state.dual.previewOn ? 'true' : 'false');

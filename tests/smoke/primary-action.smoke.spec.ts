@@ -262,8 +262,13 @@ test('🔴 編集中は「+ ノート」が薄くなり、鍵で撃つと理由�
     await opacityOf('[data-pkc-field="open-today"]'),
     '編集中なのに「今日」が薄くなっていない',
   ).toBeLessThan(0.6);
+  /**
+   * 🔴 **帯のタイルへ絞る**(#1054 段②-2)。⚠ ▼ の合成メニューにも
+   *   同じ `data-pkc-action="attach-file"` の複製が在るので(隠れていても
+   *   `page.locator` は拾う)、絞らないと strict mode で落ちる。
+   */
   expect(
-    await opacityOf('[data-pkc-action="attach-file"]'),
+    await opacityOf('[data-pkc-bar-tile][data-pkc-action="attach-file"]'),
     '編集中でも使える「添付」まで薄くなった(帯ごと薄くしている?)',
   ).toBeGreaterThan(0.9);
 
