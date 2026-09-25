@@ -9,12 +9,24 @@ import { describe, expect, it, beforeEach } from 'vitest';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import type { Dispatcher } from '../../src/adapter/state/dispatcher';
 
-function fake(phase = 'ready') {
+/**
+ * ⚠ **`editing` の既定は「押すセルと同じノート('n1')を編集中」**(C6 / #1043)。
+ *   本物は `phase === 'editing'` のとき `openBody` が必ず在る(`START_EDIT` の
+ *   前提)ので、それを再現する ── ここを `null` のままにすると、押しても
+ *   「lid が違う(=undefined !== 'n1')」に化けて**どの test も編集中の断りを
+ *   検めていないことになる**(§1「検査の主張そのものが成り立たない」)。
+ *   横に留めた**別ノート**を検めたいときだけ `openBodyLid` を渡す。
+ */
+function fake(phase = 'ready', openBodyLid: string | null = phase === 'editing' ? 'n1' : null) {
   const dispatched: Array<Record<string, unknown>> = [];
   return {
     dispatched,
     dispatcher: {
-      getState: () => ({ phase, selectedLid: 'n1', openBody: null }),
+      getState: () => ({
+        phase,
+        selectedLid: 'n1',
+        openBody: openBodyLid === null ? null : { lid: openBodyLid },
+      }),
       dispatch: (a: Record<string, unknown>) => dispatched.push(a),
     } as unknown as Dispatcher,
   };
@@ -151,6 +163,29 @@ describe('セルを押すと、そのセルだけが入力欄になる(#418 段�
     expect(dispatched[0]).toMatchObject({ type: 'OP_FAILED' });
   });
 
+  /**
+   * 🔴 **編集中でも、横に留めた別ノートの升は開ける**(C6 / #1043)。
+   *
+   * ⚠ 直す前は `phase` だけを見ていたので、いま編集しているノートと無関係な
+   *   升まで無言の dead click(または断り文)になっていた。ここは押した升の
+   *   `lid` が編集中(`openBody.lid`)と**違う**ので、通ってよい。
+   */
+  it('🔴 別ノートを編集中でも、升は開いて書き換えられる', () => {
+    const { root, cell } = cellRoot();
+    // ⚠ 横に留めた枠は `data-pkc-split-lid` を焼く(`lid-of-node.ts`)── 主の枠
+    //   ('n1' を編集中)とは別のノート('other')の升であることを、それで示す。
+    cell.setAttribute('data-pkc-split-lid', 'other');
+    const { dispatcher, dispatched } = fake('editing');
+    bindActions(root, dispatcher, {});
+    cell.click();
+    expect(input(cell), '別ノート編集中なのに升が開かない').not.toBeNull();
+    input(cell)!.value = '直した';
+    input(cell)!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(dispatched).toEqual([
+      { type: 'SET_CSV_CELL', lid: 'other', line: 1, col: 0, value: '直した' },
+    ]);
+  });
+
   it('⚠ 2 度押しても欄を作り直さない(打ちかけの字を捨てない)', () => {
     const { root, cell } = cellRoot();
     bindActions(root, fake().dispatcher, {});
@@ -204,6 +239,18 @@ describe('行・列の口を押す(#418 段①)', () => {
     bindActions(root, dispatcher, {});
     btn.click();
     expect(dispatched[0]).toMatchObject({ type: 'OP_FAILED' });
+  });
+
+  /** 🔴 **編集中でも、横に留めた別ノートの行・列は足せる**(C6 / #1043)。 */
+  it('🔴 別ノートを編集中でも、行・列を足せる', () => {
+    const { root, btn } = shapeRoot();
+    btn.setAttribute('data-pkc-split-lid', 'other');
+    const { dispatcher, dispatched } = fake('editing');
+    bindActions(root, dispatcher, {});
+    btn.click();
+    expect(dispatched).toEqual([
+      { type: 'SET_CSV_SHAPE', lid: 'other', line: 1, col: 0, what: 'row', mode: 'add' },
+    ]);
   });
 
   it('⚠ 向きが読めない印は撃たない(壊れた属性で当てずっぽうに書かない)', () => {

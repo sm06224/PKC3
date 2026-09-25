@@ -738,6 +738,30 @@ export function blockedActionNote(phase: AppPhase): string | null {
 }
 
 /**
+ * 🔴 **本文を書き換える操作の門(lid で判定)**(C6 / #1043)。
+ *
+ * ⚠ `phaseBlockReason` は **phase だけ**を見るので、`editing` のときは
+ *   **編集中のノートと無関係な他ノートの書込まで**止めていた ── 横に留めた枠
+ *   (スタック / 2 ペイン)のチェック・表のセル・表の形・表の書式・繰り返し・
+ *   Todo の状態が、編集中はどれも押しても効かなくなっていた(いちばん多い
+ *   dead click)。⚠ 主のノート自身の本文は、編集欄が持つ下書きと disk が
+ *   ずれる(下書きを保存すると押した変更が消える)ので、そこだけは今までどおり断る。
+ *
+ * 🔑 断るのは 3 つだけ:①`editing` で、かつ **`lid` が編集中のノートと同じ**
+ *   とき ②`error`(保存に失敗して止まっている。出口は「再保存」1 つだけ)
+ *   ③`initializing`(読み込みが終わっていない)。**`editing` で別の lid** なら
+ *   通す ── 編集中のノート自身がどれかは `openBody.lid`(#1049 の裁定で
+ *   1 本になった「編集の対象」)で見る。
+ *
+ * @returns 断るなら`{@link phaseBlockReason}` と同じ形の前置き。書いてよいなら `null`。
+ */
+export function bodyWriteBlockReason(state: AppState, lid: string): string | null {
+  if (state.phase === 'editing')
+    return state.openBody?.lid === lid ? phaseBlockReason('editing') : null;
+  return phaseBlockReason(state.phase);
+}
+
+/**
  * 🔴 **もう一度押したら本文へ戻る**(P8 段⑲ の規約を 1 か所へ寄せた。#277 段②-b)。
  *
  * 直す前の 設定 は行きっぱなしで、閉じる導線がどこにも無かった ── user から見ると
@@ -5566,10 +5590,14 @@ function reduceCore(
     }
     /**
      * 🔴 **表のセルを書き換える**(#418 段①)。⚠ `TOGGLE_TASK` と**同じ形**。
+     *
+     * 🔴 **断るのは lid で判定する**(C6 / #1043)。⚠ 直す前は `phase` だけを見て
+     *   **編集中は全ノートを黙って捨てて**いた ── 横に留めた別ノートの升も無言の
+     *   dead click になっていた。編集中のノート自身だけ、声に出して断る。
      */
     case 'SET_CSV_CELL': {
-      // ready 限定(編集中の裏書換を作らない)。未知 lid は no-op
-      if (state.phase !== 'ready') return { state, events: [] };
+      const blocked = bodyWriteBlockReason(state, action.lid);
+      if (blocked !== null) return { state: { ...state, error: `${blocked}、表を打ってください` }, events: [] };
       const meta = state.entryMetas.get(action.lid);
       if (!meta) return { state, events: [] };
       return {
@@ -5593,10 +5621,11 @@ function reduceCore(
     }
     /**
      * 🔴 **表の行・列を足す / 消す**(#418 段①)。⚠ `SET_CSV_CELL` と同じ形。
+     * ⚠ 断りも同じ(C6 / #1043、lid で判定)。
      */
     case 'SET_CSV_SHAPE': {
-      // ready 限定(編集中の裏書換を作らない)。未知 lid は no-op
-      if (state.phase !== 'ready') return { state, events: [] };
+      const blocked = bodyWriteBlockReason(state, action.lid);
+      if (blocked !== null) return { state: { ...state, error: `${blocked}、表を触ってください` }, events: [] };
       const meta = state.entryMetas.get(action.lid);
       if (!meta) return { state, events: [] };
       return {
@@ -5624,8 +5653,10 @@ function reduceCore(
      *   1 本(`REQUEST_BODY_REWRITE`)を通り、面が独自の書込経路を持たない(§7)。
      */
     case 'SET_TABLE_FORMAT': {
-      // ready 限定(編集中の裏書換を作らない)。未知 lid は no-op
-      if (state.phase !== 'ready') return { state, events: [] };
+      // ⚠ 断りは lid で判定する(C6 / #1043)
+      const blocked = bodyWriteBlockReason(state, action.lid);
+      if (blocked !== null)
+        return { state: { ...state, error: `${blocked}、表の形を変えてください` }, events: [] };
       const meta = state.entryMetas.get(action.lid);
       if (!meta) return { state, events: [] };
       return {
@@ -5642,9 +5673,13 @@ function reduceCore(
         ],
       };
     }
+    /**
+     * ⚠ 断りは lid で判定する(C6 / #1043)── 編集中のノート自身だけ断る。
+     *   他ノートのチェックは binder(`toggle-task`)が先に同じ判定を通す。
+     */
     case 'TOGGLE_TASK': {
-      // ready 限定(編集中の裏書換を作らない)。未知 lid は no-op
-      if (state.phase !== 'ready') return { state, events: [] };
+      const blocked = bodyWriteBlockReason(state, action.lid);
+      if (blocked !== null) return { state: { ...state, error: `${blocked}、チェックしてください` }, events: [] };
       const meta = state.entryMetas.get(action.lid);
       if (!meta) return { state, events: [] };
       return {
@@ -5667,8 +5702,10 @@ function reduceCore(
      *   `body-rewrite.ts` が持ち、ここは**単位を選ぶだけ**である。
      */
     case 'MATERIALIZE_REPEAT': {
-      // ready 限定(編集中の裏書換を作らない)。未知 lid は no-op
-      if (state.phase !== 'ready') return { state, events: [] };
+      // ⚠ 断りは lid で判定する(C6 / #1043)
+      const blocked = bodyWriteBlockReason(state, action.lid);
+      if (blocked !== null)
+        return { state: { ...state, error: `${blocked}、その日の分を済ませてください` }, events: [] };
       const meta = state.entryMetas.get(action.lid);
       if (!meta) return { state, events: [] };
       return {
@@ -5691,8 +5728,10 @@ function reduceCore(
      *   何をするかの判断は `body-rewrite.ts` が持つ。
      */
     case 'MOVE_REPEAT_OCCURRENCE': {
-      // ready 限定(編集中の裏書換を作らない)。未知 lid は no-op
-      if (state.phase !== 'ready') return { state, events: [] };
+      // ⚠ 断りは lid で判定する(C6 / #1043)
+      const blocked = bodyWriteBlockReason(state, action.lid);
+      if (blocked !== null)
+        return { state: { ...state, error: `${blocked}、繰り返しの回を動かしてください` }, events: [] };
       const meta = state.entryMetas.get(action.lid);
       if (!meta) return { state, events: [] };
       return {
@@ -5952,9 +5991,13 @@ function reduceCore(
         ],
       };
     }
+    /**
+     * ⚠ 断りは lid で判定する(C6 / #1043)── todo 以外・未知 lid は今までどおり no-op。
+     */
     case 'TOGGLE_TODO_STATUS': {
-      // ready 限定(editing 中の裏書換を作らない)。todo 以外・未知 lid は no-op
-      if (state.phase !== 'ready') return { state, events: [] };
+      const blocked = bodyWriteBlockReason(state, action.lid);
+      if (blocked !== null)
+        return { state: { ...state, error: `${blocked}、状態を切り替えてください` }, events: [] };
       const meta = state.entryMetas.get(action.lid);
       if (!meta || meta.archetype !== 'todo') return { state, events: [] };
       const nextStatus = meta.status === 'done' ? 'open' : 'done';
@@ -7902,8 +7945,12 @@ export function screenBodyOf(state: AppState, lid: string): string | null {
  *   (保存に失敗して止まった)でも同じ字を出していた ── 押せない出口を案内していた
  *   (C11 / #516 と同じ形)。この門が既に `phase !== 'ready'` を見ているので、
  *   前置きもここで付け、呼び側は「続き」だけを渡す。
+ * 🔴 **前置きは lid でも判定する**(C6 / #1043)。⚠ 直す前は `phase` だけを見ており、
+ *   **編集中は板も本文の塊も全ノートぶん止まって**いた ── 横に留めた枠の板を
+ *   動かそうとしても、編集中のノートと無関係に断られていた。
+ *   `bodyWriteBlockReason` が「編集中のノート自身か」まで見る。
  *
- * @param refusalSuffix 編集中の断り文の**続き**(前置きは `phaseBlockReason` が付ける。
+ * @param refusalSuffix 編集中の断り文の**続き**(前置きは `bodyWriteBlockReason` が付ける。
  *   押した場所と対で書く)
  * @param build 画面が見ている本文から書換を組む。組めなければ `null` = 黙って no-op
  *   (行が板でない / 値が壊れている ── どれも画面の操作からは起きない形)。
@@ -7923,9 +7970,12 @@ function bodyRewriteGate(
   refusalSuffix: string,
   build: (shown: string | null) => BodyRewrite | null,
 ): ReduceResult {
-  if (state.phase !== 'ready')
+  // ⚠ 断りは lid で判定する(C6 / #1043)── 編集中のノート自身のときだけ断る。
+  //   別の lid(横に留めた枠の板・本文の塊)は editing 中でもここを通す。
+  const blocked = bodyWriteBlockReason(state, lid);
+  if (blocked !== null)
     return {
-      state: { ...state, error: `${phaseBlockReason(state.phase)}${refusalSuffix}` },
+      state: { ...state, error: `${blocked}${refusalSuffix}` },
       events: [],
     };
   const meta = state.entryMetas.get(lid);
