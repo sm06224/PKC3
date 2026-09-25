@@ -474,7 +474,7 @@ export function rebuildDoneMessage(r: RebuildReport): string {
     return (
       '🔴 入れ物を作り直せませんでした(この画面では中身がメモリ上にしか置けません)。' +
       `書き戻していないので、いま落とした ${RESCUE_ARCHIVE_SUFFIX} のファイルを、` +
-      '読み込み直したあとに「ファイルを取り込む」から読み込んでください。'
+      '読み込み直したあとに「取り込む」から読み込んでください。'
     );
   }
   if (r.outcome === 'storage-lost') {
@@ -489,7 +489,7 @@ export function rebuildDoneMessage(r: RebuildReport): string {
     return (
       `🔴 入れ物を捨てた後に止まりました(${r.error ?? '理由は分かりません'})。` +
       `いま落とした ${RESCUE_ARCHIVE_SUFFIX} のファイルは手元に在ります。` +
-      '⚠ この画面はもう保存できないので、読み込み直してから「ファイルを取り込む」で戻してください。' +
+      '⚠ この画面はもう保存できないので、読み込み直してから「取り込む」で戻してください。' +
       '読み込み直します。'
     );
   }
@@ -497,7 +497,7 @@ export function rebuildDoneMessage(r: RebuildReport): string {
     return (
       `🔴 書き戻せませんでした(${r.error ?? '理由は分かりません'})。` +
       `いま落とした ${RESCUE_ARCHIVE_SUFFIX} のファイルを、` +
-      '読み込み直したあとに「ファイルを取り込む」から読み込んでください。'
+      '読み込み直したあとに「取り込む」から読み込んでください。'
     );
   }
   const miss: string[] = [];

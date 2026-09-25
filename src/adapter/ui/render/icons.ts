@@ -92,7 +92,7 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   /** 録音・画面収録(#413)。⚠ 止めるのは**四角**(世界共通の停止)。 */
   /**
    * 🔴 **「今日」と「時間を計る」は、2026-09-21 まで無地だった**(#1029 段 A)。
-   * ⚠ 「今日」は `iconButton('open-today', '今日の分を開く', 'calendar')` と**図案の名前**を
+   * ⚠ 「今日」は `iconButton('open-today', '今日', 'calendar')` と**図案の名前**を
    *   第 3 引数に渡していたが、そこは **`ACTION_ICONS` の鍵**を書く所である ──
    *   `ACTION_ICONS['calendar']` は無いので `undefined` になり、**器ごと出ていなかった**。
    *   飾るつもりで書いた字が、1 文字も効いていない形である(§1 の空振り)。

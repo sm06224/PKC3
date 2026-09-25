@@ -294,46 +294,52 @@ describe('2 ペインの面(描画)', () => {
         b.querySelector('[data-pkc-field="cmd-label"]')?.textContent,
       ]),
     ).toEqual([
-      ['dual-copy', 'F5', '反対のペインへコピー'],
-      ['dual-move', 'F6', '反対のペインへ移す'],
-      ['dual-rename-begin', 'F2', '名前を変える'],
-      ['dual-mkdir', 'F7', 'フォルダを作る'],
+      ['dual-copy', 'F5', 'コピー'],
+      ['dual-move', 'F6', '移す'],
+      ['dual-rename-begin', 'F2', '名前'],
+      ['dual-mkdir', 'F7', 'フォルダ'],
       // 🔴 **入れ物だけでなく中身も作れる**(#273)── `F7` と隣り合わない鍵にしてある
       //    (隣り合わせると、押し間違いで**別の種類**ができる)
-      ['dual-mknote', 'Shift + F4', 'ノートを作る'],
-      ['dual-delete', 'F8', 'ゴミ箱へ移す'],
+      ['dual-mknote', 'Shift + F4', 'ノート'],
+      ['dual-delete', 'F8', 'ゴミ箱'],
       // 🔴 **プレビュー**(#273 残件)── 開かずに中身を確かめる(印は要らない)
-      ['dual-preview-toggle', 'F9', 'プレビューを出す / しまう'],
+      ['dual-preview-toggle', 'F9', 'プレビュー'],
     ]);
   });
 
   /**
-   * 🔴 **同じ操作の字は「コピー」で揃う**(#587 D-1)。
+   * 🔴 **操作行と、印が無いときの説明は「コピー」で揃う**(#587 D-1)。
    *
    * ⚠ 直す前は 1 つの操作に 3 通りの字が在った ── 操作行「写す」/ 鍵の一覧
    *   「反対のペインへ写す」/ 情報ペイン「参照をコピー」。マニュアル「2 ペインで整理する」 の説明は
    *   「反対側の場所へ**コピー**します」だったので、ボタンの字だけが説明と違っていた。
-   * 🔑 3 つの面を**1 つの it で**見る ── 片方だけ戻す変異(鍵の一覧 / 印が無いときの
-   *   断り)が、上の並びの pin では素通りした(変異試験 T2 / T4 が SURVIVED で教えた)。
+   *
+   * 🔴 **2026-09-25 に、鍵の一覧だけ揃わなくなった**(#1046 追跡調査)。
+   *   ⚠ 3 つの帯が詰まって折り返すことが分かり、この操作行(dual-filer の
+   *   最下段)は main の短い字(「コピー」)へ一旦戻した ── アイコンだけの
+   *   均一なタイルへの作り直しは**別 PR**で行う。⚠ **鍵の一覧
+   *   (`keymap.ts`)は #1046 の字(「反対のペインへコピー」)のまま**にする
+   *   (焦点の無い所から押すと、行き先が画面に見えないので長い字が要る)。
+   *   🔑 だから「3 面で揃う」ではなく「**2 面(操作行・印が無いときの説明)
+   *   は揃い、鍵の一覧は意図して別の字を持つ**」を見る。
    */
-  it('🔴 コピーの字は、操作行・印が無いときの説明・鍵の一覧の 3 面で揃う(#587 D-1)', () => {
+  it('🔴 コピーの字は操作行・印が無いときの説明で揃い、鍵の一覧は意図して別字(#587 D-1 / #1046 追跡調査)', () => {
     const r = new DualFilerRenderer(region);
     r.render(booted());
     const copy = region.querySelector<HTMLElement>('[data-pkc-field="dual-copy"]')!;
-    expect(copy.querySelector('[data-pkc-field="cmd-label"]')?.textContent).toBe(
-      '反対のペインへコピー',
-    );
+    expect(copy.querySelector('[data-pkc-field="cmd-label"]')?.textContent).toBe('コピー');
     // 印が無いときの説明(title)── 「写すものを」ではない
     expect(copy.title, '印が無いときの説明が「コピー」で書かれていない').toContain(
       'コピーするものを選んでから押してください',
     );
-    // 鍵の一覧(設定 / ヘルプ / マニュアル「ショートカットキー」 の名前)
-    expect(findCommand('dual-copy-to-other')?.label, '鍵の一覧の名前が揃っていない').toBe(
-      '反対のペインへコピー',
-    );
-    // ⚠ 「写す」の字がこの操作に 1 つも残っていない
-    for (const text of [copy.textContent ?? '', copy.title, findCommand('dual-copy-to-other')?.label ?? ''])
+    // ⚠ 「写す」の字がこの操作に 1 つも残っていない(操作行・印が無いときの説明)
+    for (const text of [copy.textContent ?? '', copy.title])
       expect(text, `「写す」の字が残っている: ${text}`).not.toContain('写');
+    // 鍵の一覧は #1046 の長い字のまま(操作行とは意図して別字)
+    expect(
+      findCommand('dual-copy-to-other')?.label,
+      '鍵の一覧の名前が #1046 の字から変わった',
+    ).toBe('反対のペインへコピー');
   });
 
   it('🔴 タブの帯: 開いている 1 枚が分かり、最後の 1 枚には閉じる口を出さない', () => {
@@ -752,7 +758,7 @@ describe('2 ペインの面(描画)', () => {
     r.render(s);
     const move = () => region.querySelector<HTMLElement>('[data-pkc-field="dual-move"]')!;
     const trash = () => region.querySelector<HTMLElement>('[data-pkc-field="dual-delete"]')!;
-    expect(move().textContent, 'キーと語が違う').toBe('F6反対のペインへ移す');
+    expect(move().textContent, 'キーと語が違う').toBe('F6移す');
     expect(move().title, '選ぶ前の断りが向きの説明になっている').toBe(
       '[F6] 移すものを選んでから押してください',
     );
@@ -772,7 +778,7 @@ describe('2 ペインの面(描画)', () => {
     s = reduce(s, { type: 'DUAL_FOCUS', side: 'right' }).state;
     s = reduce(s, { type: 'DUAL_SELECT', side: 'right', lid: 'a', mode: 'set' }).state;
     r.render(s);
-    expect(move().textContent, '焦点を変えたら操作の字が動いた').toBe('F6反対のペインへ移す');
+    expect(move().textContent, '焦点を変えたら操作の字が動いた').toBe('F6移す');
     expect(move().title, '焦点を変えても呼び名が反転しない').toBe(
       '[F6] 右で選んだものを、左のペインへ移します(いま 1 件)',
     );

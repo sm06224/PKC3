@@ -550,11 +550,11 @@ export function buildShell(root: HTMLElement): ShellRegions {
    * 🔑 文言は**起きること**で書く(user 指示 2026-08-21)── 「日記」ではなく
    *   「今日」。開くと**今日の日付のノート**が出る(無ければ作る)。
    */
-  const today = iconButton('open-today', '今日の分を開く');
+  const today = iconButton('open-today', '今日');
   today.setAttribute('data-pkc-field', 'open-today');
   today.title = '今日の日付のノートを開きます(無ければ作ります)';
 
-  const attach = iconButton('attach-file', 'ファイルを添付');
+  const attach = iconButton('attach-file', '添付');
   // ⚠ **`ENTRY_ACTION_HINTS['attach-file']` と同じ意味にする**(#666)── 同じ操作に
   //    2 通りの説明を作らない(スマホの `⋯` から選んだときに出る字と揃える)
   attach.title = 'ファイルを取り込んで、開いているノートの本文に入れます';
@@ -568,10 +568,10 @@ export function buildShell(root: HTMLElement): ShellRegions {
    *   置いており、PKC3 にはそれが無い。⚠ 「画面のどこにも出ていない」は
    *   「届いていない」である(#180 の教訓 3)。
    */
-  const rec = iconButton('start-audio-capture', '音を録る');
+  const rec = iconButton('start-audio-capture', '録音');
   rec.setAttribute('data-pkc-field', 'start-audio-capture');
   rec.title = 'マイクで録音して、いま開いているノートに入れます';
-  const screen = iconButton('start-screen-capture', '画面を録る');
+  const screen = iconButton('start-screen-capture', '画面録画');
   screen.setAttribute('data-pkc-field', 'start-screen-capture');
   screen.title = '画面を録画して、いま開いているノートに入れます';
   /**

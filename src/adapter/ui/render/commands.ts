@@ -59,7 +59,7 @@ export interface CollectionCommand {
 export const COLLECTION_COMMANDS: readonly CollectionCommand[] = [
   {
     action: 'import-file',
-    label: 'ファイルを取り込む',
+    label: '取り込む',
     // ⚠ **受けられる物はここに全部書く**(2 巡目の動線レビュー 2026-08-28)──
     //    vCard を足したのにこの字が変わっておらず、user は「対応していない」と読む
     //    (「在るのに見つけられないのは、こちらの動線の不備」── CLAUDE.md)

@@ -179,7 +179,7 @@ export class CapturesRenderer {
       return '音と動画を集められませんでした(開き直すと試し直します)';
     if (state.captureItems === null) return '音と動画を集めています…';
     if (state.captureItems.length === 0)
-      return '音と動画はまだありません。左下の「音を録る」か「画面を録る」で録ると、ここに並びます。';
+      return '音と動画はまだありません。左下の「録音」か「画面録画」で録ると、ここに並びます。';
     if (shown === 0) return '絞り込みに当たるものがありません';
     return `${shown} 件`;
   }
