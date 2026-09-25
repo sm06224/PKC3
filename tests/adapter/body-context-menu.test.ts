@@ -1515,7 +1515,7 @@ describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () =
     expect(r.acts(), '板が無いのに「この板を消す」が出た').not.toContain('remove-place');
   });
 
-  it('🔴 板の上で「この板を消す」→ 確認で「消す」→ 生の body の行番号で place-remove の依頼になる', async () => {
+  it('🔴 板の上で「この板を消す」→ 確認で「この板を消す」→ 生の body の行番号で place-remove の依頼になる', async () => {
     resetAppDialogForTest();
     const r = rig();
     const asks = asksOf(r.d);
@@ -1527,7 +1527,7 @@ describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () =
     r.press('remove-place');
     const ok = document.querySelector<HTMLButtonElement>('[data-pkc-field="dialog-ok"]');
     expect(ok, '確認が出ていない').not.toBeNull();
-    expect(ok!.textContent, '受ける側の字が起きることを言っていない').toBe('消す');
+    expect(ok!.textContent, '受ける側の字が起きることを言っていない').toBe('この板を消す');
     expect(asks, '確認の前に書いた').toHaveLength(0);
     ok!.click();
     await settle();
