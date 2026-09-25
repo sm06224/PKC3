@@ -161,12 +161,14 @@ describe('2 ペインのスクロール位置を覚える(C10 / #1045)', () => {
   });
 
   /**
-   * 🔴 **左右は別の箱**であることの検算。片方だけ動かした変化(左だけスコープを
-   * 移す)では、右の指紋は動かないので `renderTable` を通らない ── 通らない側は
-   * clamp が無くても値を保つ(happy-dom の素の数値のまま)。
-   * ⚠ 通る側(左)は clamp を突破しない(0 に丸められた値を持ち越さない)ことを見る。
+   * 🔴 **左右は別の箱**であることの検算 + **フォルダごとに覚える**こと。
+   * 片方だけ動かした変化(左だけフォルダを移る)では、右の指紋は動かないので
+   * `renderTable` を通らない ── 右は値を保つ。
+   * 🔑 左は**入ったフォルダを先頭から**見せ、**上へ戻ったら元の位置**へ戻す
+   *   (鍵 = フォルダ × 絞り込みの有無)。⚠ 鍵が絞り込みの有無だけだと、
+   *   入ったフォルダが**前のフォルダの位置から**出る(1 稿目はそうだった)。
    */
-  it('🔴 片方のペインだけフォルダへ入っても、もう片方の位置は動かず、入った側も先頭からで飛ばない', () => {
+  it('🔴 片方のペインだけフォルダへ入ると、入った先は先頭から・戻ると元の位置、もう片方は動かない', () => {
     const r = new DualFilerRenderer(region);
     const s0 = booted();
     r.render(s0);
@@ -178,14 +180,18 @@ describe('2 ペインのスクロール位置を覚える(C10 / #1045)', () => {
 
     const s1 = reduce(s0, { type: 'DUAL_SET_SCOPE', side: 'left', lid: 'f1' }).state;
     r.render(s1);
-
     expect(tableOf(region, 'right').scrollTop, '触っていない右が動いた').toBe(400);
-    /**
-     * ⚠ ここは**キーが「絞り込みの有無」だけ**(`browse.ts` / `filer.ts` と同じ
-     * 既存の流儀)なので、フォルダを移った後もキーは変わらず、直前の 300 が
-     * そのまま戻る(実ブラウザでは新しい内容が 300 に届かなければ自動で丸まる ──
-     * ここは「0 へ落ちていない」ことだけを見る)。
-     */
-    expect(tableOf(region, 'left').scrollTop, '中身が入った直後に 0 へ落ちた').toBe(300);
+    expect(tableOf(region, 'left').scrollTop, '入ったフォルダが前のフォルダの位置から出た').toBe(0);
+
+    // 入った先で少し送ってから、上へ戻る
+    left.scrollTop = 40;
+    const s2 = reduce(s1, { type: 'DUAL_SET_SCOPE', side: 'left', lid: null }).state;
+    r.render(s2);
+    expect(tableOf(region, 'left').scrollTop, '上へ戻ったのに元の位置へ戻らない').toBe(300);
+
+    // もう一度入ると、そのフォルダで見ていた位置へ
+    const s3 = reduce(s2, { type: 'DUAL_SET_SCOPE', side: 'left', lid: 'f1' }).state;
+    r.render(s3);
+    expect(tableOf(region, 'left').scrollTop, '入り直したフォルダの位置を忘れた').toBe(40);
   });
 });

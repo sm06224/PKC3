@@ -923,12 +923,15 @@ export class DualFilerRenderer {
       /**
        * 🔴 **`renderTable` は `frame.table.textContent = ''` で丸ごと作り直す**
        * (C10 / #1045)。① 作り直す**前**に退避 ② 入れ**終わってから**戻す
-       * (`scroll-memory.ts` の「順番が本体」)。⚠ 鍵は**絞り込みの有無**
-       * (`filer.ts` / `browse.ts` と同じ規則。「絞り込んだ結果は先頭から」)。
+       * (`scroll-memory.ts` の「順番が本体」)。
+       * 🔑 鍵は **いま開いているフォルダ × 絞り込みの有無** ── 入ったフォルダは
+       *   **先頭から**、上へ戻ったら**元の位置**(ファイルの整理画面の約束)。
+       * ⚠ 絞り込みの有無だけを鍵にすると、フォルダ A を下まで見てから B に入ったとき
+       *   **B が A の位置から出る**(入った先が途中から見える)。
        */
       frame.scroll.park();
       this.renderTable(frame, side, rows, filtered, renaming, state.entrySort, state.entrySortDesc);
-      frame.scroll.use(filtered ? 'q' : '');
+      frame.scroll.use(`${paneScope(pane) ?? ''}${SEP}${filtered ? 'q' : ''}`);
     } else if (dates !== frame.dates) {
       /**
        * 🔴 **日付だけ差し替える**(#270)── 行の node は作り直さない。
