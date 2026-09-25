@@ -286,7 +286,7 @@ test('🔴 Enter で入り、Backspace で戻り、Delete でゴミ箱へ', asyn
   // ④ Delete でゴミ箱へ(確認は**アプリの中**の口を押す ── #299 段②)
   await clickReal(page, '[data-pkc-region="filer-table"] tbody tr[data-pkc-archetype="text"]');
   await page.keyboard.press('Delete');
-  expect(await answerAppDialog(page, 'ok'), '確認が出ていない').toContain('削除');
+  expect(await answerAppDialog(page, 'ok'), '確認が出ていない').toContain('ゴミ箱へ移し');
   await expect(rows, 'ゴミ箱へ入っていない').toHaveCount(1);
 
   /**

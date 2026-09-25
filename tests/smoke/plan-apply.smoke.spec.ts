@@ -1,5 +1,12 @@
 import { test, expect } from '@playwright/test';
 import { clickReal, collectPageErrors, createEntry, gotoApp } from './helpers';
+// ⚠ 手で書き写さない ── 字は `rescue-labels.ts` が正本(CLAUDE.md §1「期待値は
+//   実装の綴りの別の書き方ではなく別の観測から作る」)。改名した日に両方
+//   そのままで緑にならないよう、実装の定数を直に引く。
+import {
+  CONTAINER_REBUILD_LABEL,
+  CONTAINER_RESET_LABEL,
+} from '../../src/features/storage/rescue-labels';
 
 /**
  * 🔴 **壊れたときに調べる口 + 壊れて直らないときの、最後の手**(#971 段③ / #1006)。
@@ -113,8 +120,12 @@ test('🔴 壊れの調べと、作り直す/捨てるの 2 段が押せる (#97
    * 🔴 **2026-09-21(#1017 段③-1)に「中身を残して、作り直す」「中身を捨てる」から改名した**
    *   (`ui-total-design-2026-09.md` §6.1)。
    */
-  await expect(repairButtons.nth(0), '上に在るのが「作り直す」ではない').toHaveText('作り直す');
-  await expect(repairButtons.nth(1), '下に在るのが「初期化する」ではない').toHaveText('初期化する');
+  await expect(repairButtons.nth(0), '上に在るのが「作り直す」ではない').toHaveText(
+    CONTAINER_REBUILD_LABEL,
+  );
+  await expect(repairButtons.nth(1), '下に在るのが「初期化する」ではない').toHaveText(
+    CONTAINER_RESET_LABEL,
+  );
   /**
    * ⚠ **DOM の順は、画面の上下ではない**(CSS で入れ替わりうる)── 実際に
    *   置かれた位置(`boundingBox`)で、**作り直すほうが上**であることを見る。
