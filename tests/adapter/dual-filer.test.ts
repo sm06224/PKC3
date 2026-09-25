@@ -294,16 +294,16 @@ describe('2 ペインの面(描画)', () => {
         b.querySelector('[data-pkc-field="cmd-label"]')?.textContent,
       ]),
     ).toEqual([
-      ['dual-copy', 'F5', 'コピー'],
-      ['dual-move', 'F6', '移す'],
-      ['dual-rename-begin', 'F2', '名前'],
-      ['dual-mkdir', 'F7', 'フォルダ'],
+      ['dual-copy', 'F5', '反対のペインへコピー'],
+      ['dual-move', 'F6', '反対のペインへ移す'],
+      ['dual-rename-begin', 'F2', '名前を変える'],
+      ['dual-mkdir', 'F7', 'フォルダを作る'],
       // 🔴 **入れ物だけでなく中身も作れる**(#273)── `F7` と隣り合わない鍵にしてある
       //    (隣り合わせると、押し間違いで**別の種類**ができる)
-      ['dual-mknote', 'Shift + F4', 'ノート'],
-      ['dual-delete', 'F8', 'ゴミ箱'],
+      ['dual-mknote', 'Shift + F4', 'ノートを作る'],
+      ['dual-delete', 'F8', 'ゴミ箱へ移す'],
       // 🔴 **プレビュー**(#273 残件)── 開かずに中身を確かめる(印は要らない)
-      ['dual-preview-toggle', 'F9', 'プレビュー'],
+      ['dual-preview-toggle', 'F9', 'プレビューを出す / しまう'],
     ]);
   });
 
@@ -320,7 +320,9 @@ describe('2 ペインの面(描画)', () => {
     const r = new DualFilerRenderer(region);
     r.render(booted());
     const copy = region.querySelector<HTMLElement>('[data-pkc-field="dual-copy"]')!;
-    expect(copy.querySelector('[data-pkc-field="cmd-label"]')?.textContent).toBe('コピー');
+    expect(copy.querySelector('[data-pkc-field="cmd-label"]')?.textContent).toBe(
+      '反対のペインへコピー',
+    );
     // 印が無いときの説明(title)── 「写すものを」ではない
     expect(copy.title, '印が無いときの説明が「コピー」で書かれていない').toContain(
       'コピーするものを選んでから押してください',
@@ -750,7 +752,7 @@ describe('2 ペインの面(描画)', () => {
     r.render(s);
     const move = () => region.querySelector<HTMLElement>('[data-pkc-field="dual-move"]')!;
     const trash = () => region.querySelector<HTMLElement>('[data-pkc-field="dual-delete"]')!;
-    expect(move().textContent, 'キーと語が違う').toBe('F6移す');
+    expect(move().textContent, 'キーと語が違う').toBe('F6反対のペインへ移す');
     expect(move().title, '選ぶ前の断りが向きの説明になっている').toBe(
       '[F6] 移すものを選んでから押してください',
     );
@@ -770,7 +772,7 @@ describe('2 ペインの面(描画)', () => {
     s = reduce(s, { type: 'DUAL_FOCUS', side: 'right' }).state;
     s = reduce(s, { type: 'DUAL_SELECT', side: 'right', lid: 'a', mode: 'set' }).state;
     r.render(s);
-    expect(move().textContent, '焦点を変えたら操作の字が動いた').toBe('F6移す');
+    expect(move().textContent, '焦点を変えたら操作の字が動いた').toBe('F6反対のペインへ移す');
     expect(move().title, '焦点を変えても呼び名が反転しない').toBe(
       '[F6] 右で選んだものを、左のペインへ移します(いま 1 件)',
     );
@@ -1727,7 +1729,7 @@ describe('2 ペインのキーボード操作(#273)', () => {
     host.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true }),
     );
-    expect(d.getState().error ?? '').toContain('削除するものを選んでください');
+    expect(d.getState().error ?? '').toContain('ゴミ箱へ移すものを選んでください');
   });
 
   it('🔴 編集中は理由を出して断る(無言で止めない)', () => {

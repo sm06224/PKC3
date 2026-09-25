@@ -273,11 +273,11 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'filer-trash',
-    label: '選んでいるものをゴミ箱へ',
+    label: 'ゴミ箱へ移す',
     contexts: ['filer', 'dual'],
     // ⚠ `F8` は古典 4 実装が一致している鍵 ── 操作行にもそう書いてある
     defaults: ['Delete', 'F8'],
-    note: 'ゴミ箱からいつでも戻せます(選択が無ければカーソルの行)',
+    note: '選んでいるものを移します。ゴミ箱からいつでも戻せます(選択が無ければカーソルの行)',
   },
   {
     id: 'filer-select-all',
@@ -332,10 +332,10 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    */
   {
     id: 'filer-rename',
-    label: '名前を変える(行の題名の所で打ち替える)',
+    label: '名前を変える',
     contexts: ['filer'],
     defaults: ['F2'],
-    note: 'Enter で確定、Esc でやめます',
+    note: '行の題名の所で打ち替えます(Enter で確定、Esc でやめます)',
   },
   {
     id: 'filer-move',
@@ -383,15 +383,17 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'dual-rename',
-    label: '名前を打ち替える',
+    label: '名前を変える',
     contexts: ['dual'],
     defaults: ['F2'],
+    note: 'その場で打ち替えます',
   },
   {
     id: 'dual-new-folder',
-    label: 'いまの場所にフォルダを作る',
+    label: 'フォルダを作る',
     contexts: ['dual'],
     defaults: ['F7'],
+    note: 'いまの場所に作ります',
   },
   /**
    * 🔴 **整理の面で、入れ物だけでなく中身も作れるようにする**(#273)。
@@ -405,10 +407,10 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    */
   {
     id: 'dual-new-note',
-    label: 'いまの場所にノートを作る',
+    label: 'ノートを作る',
     contexts: ['dual'],
     defaults: ['Shift+F4'],
-    note: '作っても本文へは移りません(整理を続けられます)',
+    note: 'いまの場所に作ります(作っても本文へは移りません。整理を続けられます)',
   },
   {
     id: 'dual-other-pane',

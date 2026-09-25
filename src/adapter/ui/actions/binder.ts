@@ -9082,7 +9082,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     confirmThen(
       root,
       'ゴミ箱を空にします(捨てたノートの履歴も消え、元に戻せません)。よろしいですか?',
-      { okLabel: '空にする', danger: true },
+      { okLabel: 'ゴミ箱を空にする', danger: true },
       dispatcher,
       notWhileEditing(dispatcher, '空にしてください'),
       () => dispatcher.dispatch({ type: 'PURGE_TRASH' }),

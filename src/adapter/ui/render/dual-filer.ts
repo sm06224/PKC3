@@ -152,6 +152,15 @@ const COMMAND_ITEMS: readonly {
    */
   readonly directed: boolean;
   /**
+   * 🔴 **1 枚だけ出しているとき(solo)専用の、行き先を足す前の語**(#1046)。
+   * ⚠ `directed` の 2 つだけが持つ ── 2 ペイン(非 solo)では `label` を
+   *   そのまま「反対のペインへ〜」の形で出すが、solo では
+   *   `${to}へ${soloWord}`(例: 右へコピー)にする。`label` をそのまま
+   *   `${to}へ` の後ろへ付けると「右へ反対のペインへコピー」という
+   *   二重の行き先になるので、動詞だけの語を別に持つ。
+   */
+  readonly soloWord?: string;
+  /**
    * 印が 1 つも無いときの断り。`null` = 印を要らない操作。
    *
    * ⚠ **呼び名から機械的に組まない**(2026-08-19)── 1 稿目は
@@ -174,7 +183,8 @@ const COMMAND_ITEMS: readonly {
      * ⚠ スマホでは行き先が付いて「右へコピー」になる(5 字。「プレビュー」と同じ幅で、
      *   4 列の 1 マス ≒ 94px に入る)。
      */
-    label: 'コピー',
+    label: '反対のペインへコピー',
+    soloWord: 'コピー',
     hint: (from, to) => `${from}で選んだものを、${to}のペインへコピーします(元は残ります)`,
     empty: 'コピーするものを選んでから押してください',
   },
@@ -182,7 +192,8 @@ const COMMAND_ITEMS: readonly {
     action: 'dual-move',
     directed: true,
     command: 'dual-move-to-other',
-    label: '移す',
+    label: '反対のペインへ移す',
+    soloWord: '移す',
     hint: (from, to) => `${from}で選んだものを、${to}のペインへ移します`,
     empty: '移すものを選んでから押してください',
   },
@@ -190,7 +201,7 @@ const COMMAND_ITEMS: readonly {
     action: 'dual-rename-begin',
     directed: false,
     command: 'dual-rename',
-    label: '名前',
+    label: '名前を変える',
     hint: () => '選んだ 1 件の名前を、その場で打ち替えます',
     empty: null,
   },
@@ -198,7 +209,7 @@ const COMMAND_ITEMS: readonly {
     action: 'dual-mkdir',
     directed: false,
     command: 'dual-new-folder',
-    label: 'フォルダ',
+    label: 'フォルダを作る',
     hint: (from) => `${from}のペインが開いている場所に、新しいフォルダを作ります`,
     empty: null,
   },
@@ -210,7 +221,7 @@ const COMMAND_ITEMS: readonly {
     action: 'dual-mknote',
     directed: false,
     command: 'dual-new-note',
-    label: 'ノート',
+    label: 'ノートを作る',
     hint: (from) => `${from}のペインが開いている場所に、新しいノートを作ります`,
     empty: null,
   },
@@ -218,7 +229,7 @@ const COMMAND_ITEMS: readonly {
     action: 'dual-delete',
     directed: false,
     command: 'filer-trash',
-    label: 'ゴミ箱',
+    label: 'ゴミ箱へ移す',
     hint: (from) => `${from}で選んだものを、ゴミ箱へ入れます(あとで戻せます)`,
     empty: 'ゴミ箱へ入れるものを選んでから押してください',
   },
@@ -230,7 +241,7 @@ const COMMAND_ITEMS: readonly {
     action: 'dual-preview-toggle',
     directed: false,
     command: 'dual-preview',
-    label: 'プレビュー',
+    label: 'プレビューを出す / しまう',
     hint: (from) => `${from}のペインで指している行の中身を、その場で数行だけ出します`,
     empty: null,
   },
@@ -1348,7 +1359,7 @@ export class DualFilerRenderer {
        * ⚠ 相手のペインが**画面に居ない**ので、「写す」だけでは
        *   どこへ行くのか読めない(パソコンは 2 枚見えているので入れない)。
        */
-      label.textContent = solo && it.directed ? `${to}へ${it.label}` : it.label;
+      label.textContent = solo && it.directed ? `${to}へ${it.soloWord ?? it.label}` : it.label;
       b.append(keyEl, label);
       /**
        * ⚠ **鍵は説明にも入れる**(2026-09-04)── スマホでは帯から鍵の字を
