@@ -102,7 +102,7 @@ describe('既定の鍵(#633 段②)', () => {
   });
 });
 
-describe('いま読んでいるノートをスタックに載せる(stack-push)', () => {
+describe('このノートをスタックに載せる(stack-push)', () => {
   it('🔴 鍵 Alt+Shift+S を押すと、選んでいるノートが PIN_SPLIT_ENTRY で載る', () => {
     const { d, sent } = setup();
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'b' });

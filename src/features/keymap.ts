@@ -208,7 +208,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    */
   {
     id: 'inline-calc',
-    label: 'その場で計算する',
+    label: 'この行を計算する',
     contexts: ['editor', 'row'],
     defaults: ['Alt+Shift+C'],
     whileTyping: true,
@@ -259,7 +259,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    */
   {
     id: 'filer-open',
-    label: '開く(フォルダなら中へ)',
+    label: '行を開く(フォルダなら中へ)',
     contexts: ['filer', 'dual'],
     // ⚠ `F3` は古典 4 実装(TC / DC / FAR / Krusader)の「見る」と同じ位置
     defaults: ['Enter', 'F3'],
@@ -267,7 +267,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'filer-parent',
-    label: '親フォルダへ',
+    label: '親フォルダへ移る',
     contexts: ['filer', 'dual'],
     defaults: ['Backspace', 'Alt+ArrowUp'],
   },
@@ -297,14 +297,14 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    */
   {
     id: 'filer-row-down',
-    label: '次の行へ',
+    label: '次の行へ移る',
     contexts: ['filer', 'dual'],
     defaults: ['ArrowDown'],
     note: '2 ペインではカーソルだけが動きます(選択は Space)',
   },
   {
     id: 'filer-row-up',
-    label: '前の行へ',
+    label: '前の行へ移る',
     contexts: ['filer', 'dual'],
     defaults: ['ArrowUp'],
   },
@@ -361,7 +361,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    */
   {
     id: 'dual-mark',
-    label: '選択する / 外して次の行へ',
+    label: '行の選択を切り替える(次の行へ移る)',
     contexts: ['dual'],
     defaults: ['Space', 'Insert'],
     note: 'カーソルは選択と別です ── 見て回るのは矢印、選ぶのは Space',
@@ -439,7 +439,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    */
   {
     id: 'view-detail',
-    label: '本文へ',
+    label: '本文へ移る',
     contexts: ['global'],
     defaults: ['Alt+1', 'Mod+Alt+1'],
     whileTyping: true,
@@ -447,7 +447,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'view-query',
-    label: '集計へ',
+    label: '集計へ移る',
     contexts: ['global'],
     defaults: ['Alt+2', 'Mod+Alt+2'],
     whileTyping: true,
@@ -464,14 +464,14 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
      * ⚠ 押すたび **1 → 2 → 3 → 4 → 1** と回る。設定画面の並びと同じ順である。
      */
     id: 'cycle-read-columns',
-    label: '本文の段組みを切り替える',
+    label: '段組みを切り替える',
     contexts: ['global'],
     defaults: ['Alt+C'],
     note: '押すたび 1 段 → 2 段 → 3 段 → 4 段 と回ります',
   },
   {
     id: 'open-settings',
-    label: 'システムへ',
+    label: 'システムへ移る',
     contexts: ['global'],
     defaults: ['Alt+3', 'Mod+Comma'],
     /**
@@ -493,7 +493,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'open-flags',
-    label: 'フラグへ',
+    label: 'フラグへ移る',
     contexts: ['global'],
     defaults: ['Alt+4', 'F12'],
     whileTyping: true,
@@ -536,7 +536,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'open-help',
-    label: 'ヘルプへ',
+    label: 'ヘルプへ移る',
     contexts: ['global'],
     defaults: ['F1', 'Alt+5', 'Mod+Shift+Slash'],
     whileTyping: true,
@@ -578,7 +578,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    */
   {
     id: 'stack-push',
-    label: 'いま読んでいるノートをスタックに載せる',
+    label: 'このノートをスタックに載せる',
     contexts: ['global'],
     // 🔑 S = Stack。小窓の W の隣
     defaults: ['Alt+Shift+S'],
@@ -606,7 +606,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    */
   {
     id: 'view-dual',
-    label: '2 ペインへ',
+    label: '2 ペインへ移る',
     contexts: ['global'],
     /**
      * 🔴 **わきの面は打鍵中でも開く**(U-8。上の `open-settings` と同じ理由)。
@@ -635,7 +635,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    */
   {
     id: 'view-sql',
-    label: 'SQL へ',
+    label: 'SQL へ移る',
     contexts: ['global'],
     defaults: ['Alt+7', 'Mod+Alt+7'],
     whileTyping: true,
@@ -643,7 +643,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'toggle-sidebar',
-    label: '左のペインを畳む / 戻す',
+    label: '一覧の列を畳む / 戻す',
     contexts: ['global'],
     defaults: ['Alt+BracketLeft', 'Mod+Backslash'],
     whileTyping: true,
@@ -651,7 +651,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'toggle-inspector',
-    label: '右のペインを畳む / 戻す',
+    label: '情報の列を畳む / 戻す',
     contexts: ['global'],
     defaults: ['Alt+BracketRight', 'Mod+Shift+Backslash'],
     whileTyping: true,
@@ -686,7 +686,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'toggle-focus-mode',
-    label: '両側のペインを畳む / 戻す(集中)',
+    label: '両側の列を畳む / 戻す(集中)',
     contexts: ['global'],
     defaults: ['Mod+Alt+Backslash'],
     whileTyping: true,
@@ -738,7 +738,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   // ── 2 列の編集(原文の欄 / 題名の欄)
   {
     id: 'commit-edit',
-    label: '編集を確定する',
+    label: '編集を保存する',
     contexts: ['editor'],
     defaults: ['Mod+S', 'Mod+Enter'],
     note: 'ブラウザの保存ダイアログは開きません',
@@ -844,7 +844,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   // ── 追記の欄
   {
     id: 'append-send',
-    label: '追記を送る',
+    label: '本文に追記する',
     contexts: ['append'],
     defaults: ['Mod+Enter'],
     note: '追記の欄の中だけ',
@@ -852,7 +852,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   // ── 1 面(ライブ)の行の欄
   {
     id: 'row-commit',
-    label: 'その行を確定して閉じる',
+    label: 'その行の編集を保存する',
     contexts: ['row'],
     // ⚠ `Shift+Tab` を残す(着地前レビュー 9)── 直す前は `ke.key === 'Tab'` で
     //    **修飾を見ていなかった**ので `Shift+Tab` でも確定していた。和音一致に
@@ -880,9 +880,10 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   // ── 1 面(ライブ)の面そのもの
   {
     id: 'edit-all',
-    label: '全文を 1 つの欄で編集する',
+    label: '全文を編集',
     contexts: ['live'],
     defaults: ['Mod+A'],
+    note: '1 つの欄で全文を編集します',
   },
   {
     id: 'undo',
