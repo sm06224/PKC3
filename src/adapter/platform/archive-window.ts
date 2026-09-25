@@ -161,7 +161,7 @@ export function showArchiveWindowError(win: Window, title: string, text: string)
   const close = doc.createElement('button');
   close.type = 'button';
   close.setAttribute('data-pkc-field', 'archive-window-close');
-  close.textContent = '閉じる';
+  close.textContent = 'ウィンドウを閉じる';
   close.addEventListener('click', () => {
     try {
       win.close();

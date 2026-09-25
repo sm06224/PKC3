@@ -3547,7 +3547,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     resetFlags: () => {
       center.resetFlags();
     },
-    /** 帯の「このノートで読み込む」「読み込まない」。⚠ 設定は変えない。 */
+    /** 帯の「外部の画像をこのノートで読み込む」「外部の画像を読み込まない」。⚠ 設定は変えない。 */
     answerExternalImages: (allow) => {
       const lid = dispatcher.getState().selectedLid;
       if (!lid) return;
