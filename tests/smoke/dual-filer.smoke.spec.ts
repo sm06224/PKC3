@@ -813,8 +813,18 @@ test('🔴 下見に本文が出て、留めた場所は読み込み直しても
    */
   const preview = page.locator(`${PANE('left')} [data-pkc-region="dual-preview"]`);
   await expect(preview, '押す前から出ている').toBeHidden();
+  /**
+   * 🔴 **押している見た目**(#1054 段②-2、F5)── `aria-pressed` は前から付いて
+   *   いたが、見た目の規則が無く、点いているのに他のタイルと同じ地のままだった。
+   */
+  const previewTile = page.locator('[data-pkc-action="dual-preview-toggle"]');
+  const bgBefore = await previewTile.evaluate((el) => getComputedStyle(el).backgroundColor);
   await clickReal(page, '[data-pkc-action="dual-preview-toggle"]');
   await expect(preview).toBeVisible();
+  const bgAfter = await previewTile.evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(bgAfter, '押しても地の色が変わらない(押している見た目が付いていない)').not.toBe(
+    bgBefore,
+  );
   // ノートの行(フォルダではないほう)を指す
   await page.locator(`${ROWS('left')}`).filter({ hasNotText: 'とめる場所' }).first().click();
   await expect(preview, '本文が届いていない').toContainText('したみの ほんぶん');

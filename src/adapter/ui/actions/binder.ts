@@ -9814,7 +9814,27 @@ export function bindActions(
          *   ⚠ **action 名を数え上げない** ── 帯のタイルは全部この 1 属性で
          *   捨てられる(§7「同じ判定を 1 か所へ」の逆 = 判定を増やさない形)。
          */
-        el.hasAttribute(BAR_TILE_ATTR)) &&
+        el.hasAttribute(BAR_TILE_ATTR) ||
+        /**
+         * 🔴 **開いたばかりのメニューの中も捨てる**(#1054 段②-2、F3a。
+         *   実ブラウザの touch smoke で判明)。
+         *
+         * ⚠ **`ev.target` から辿る `el` は「押した物」ではない** ── 合成
+         *   `click` の的は、指を置いた瞬間の要素ではなく **`click` を撃つ
+         *   その瞬間に (x, y) に在る物**で決まる(実機の仕様。unit の
+         *   手撃ち `dispatchEvent('click', …)` はこの的を再現しない)。
+         *   長押しで開くメニューは**押した場所の真下**に出るので、指を離した
+         *   合図がメニューの**先頭の項目**に**着地して、そのまま実行してしまう**
+         *   ── 実測(#1054 段②-2): `dual-preview-toggle` を長押しすると
+         *   メニューは正しく出るのに、直後の合成 `click` が同じ名前を持つ
+         *   メニューの複製(`role="menuitem"`)を撃ち、`aria-pressed` が
+         *   **メニューを閉じて選ぶ前に**反転していた。
+         * 🔑 だから「押した物の名前」ではなく「**いま開いているメニューの中か**」
+         *   で判定する ── 的が変わっても、消費窓の外にある**次の**タップ
+         *   (新しい `pointerdown` が窓を閉じているので `swallowsClick()` が
+         *   すでに偽)は素通りする ── 意図して押すメニュー項目は殺さない。
+         */
+        el.closest('[data-pkc-region="context-menu"]') !== null) &&
       longPress.swallowsClick()
     ) {
       ev.preventDefault();
@@ -12397,7 +12417,12 @@ export function bindActions(
       return;
     }
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(ev.key)) return;
-    const items = [...menu.querySelectorAll<HTMLButtonElement>('button')];
+    /**
+     * 🔴 **押せない項目は飛ばす**(#1054 段②-2)。⚠ 編集中は「種類」と「今日」が
+     *   `disabled` になる(上の `BLOCKABLE_FIELDS`)── 素通りさせると、矢印が
+     *   押せない項目の上で止まり、そこだけ `Enter` が無反応になる。
+     */
+    const items = [...menu.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
     if (items.length === 0) return;
     ev.preventDefault();
     if (ev.key === 'Home') {

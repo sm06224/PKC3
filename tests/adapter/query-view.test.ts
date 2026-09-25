@@ -116,6 +116,20 @@ describe('集計の面(#184)', () => {
     }
   });
 
+  /**
+   * 🔴 **「集計」の図案は `≡`(一覧と同じ絵)ではない**(#1054 段②-2)。
+   * ⚠ `list`(≡)は「メニュー」と読まれる ── 一覧タブと同じ絵を、意味の違う
+   *   面に付けていた。門は `data-pkc-symbol`(実際に描く絵の名前)。
+   */
+  it('🔴 「集計」タイルの図案は list(≡)ではない', () => {
+    const { qa } = setup();
+    const btn = qa('[data-pkc-action="set-view"][data-pkc-view="query"]')[0];
+    expect(btn, '集計の導線が画面に無い').toBeDefined();
+    const symbol = btn!.querySelector('[data-pkc-icon]')?.getAttribute('data-pkc-symbol') ?? '';
+    expect(symbol, '図案が付いていない(前提が崩れている)').not.toBe('');
+    expect(symbol, '一覧タブと同じ絵(≡)のままで、集計だと読めない').not.toBe('list');
+  });
+
   it('🔴 導線を押すと面が出て、束ねられる項目の目録が届く', async () => {
     const { q, qa, calls } = setup();
     openQuery(qa);

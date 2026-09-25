@@ -108,7 +108,13 @@ export type { IconName, IconTone };
  * 死んだ表は「在るのに効かない」ので、次に触る人を惑わせる。
  */
 export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
-  'set-view:query': 'list',
+  /**
+   * 🔴 **「集計」は `list`(≡)ではなく `chart`**(#1054 段②-2)。⚠ `≡` は
+   *   「一覧(`BROWSE_ICONS.list`)」と同じ絵で、「メニュー」と読まれる ──
+   *   集計は数え上げ・グラフの面なので、意味が伝わる絵に変える(`list` は
+   *   一覧タブ専用のまま残す)。
+   */
+  'set-view:query': 'chart',
   /**
    * ⚠ **`set-view:dual` は置かない**(2026-09-05 に落とした)── 2 ペインは上の帯
    * (`VIEW_BUTTONS`)ではなく**アプリのタイル**から開くので、この鍵を引く者が

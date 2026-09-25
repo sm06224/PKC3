@@ -222,12 +222,11 @@ test('🔴 上の帯は無く、設定は左の列から押せる', async ({ pag
   const m = await page.evaluate(() => {
     const btn = document.querySelector('[data-pkc-region="sidebar"] [data-pkc-view="settings"]');
     const r = btn?.getBoundingClientRect();
-    const others = [
-      ...document.querySelectorAll('[data-pkc-region="collection-bar"] button'),
-    ].map((b) => Math.round(b.getBoundingClientRect().height));
-    const widths = [
-      ...document.querySelectorAll('[data-pkc-region="collection-bar"] button'),
-    ].map((b) => Math.round(b.getBoundingClientRect().width));
+    const tiles = [...document.querySelectorAll('[data-pkc-region="collection-bar"] button')];
+    const others = tiles.map((b) => Math.round(b.getBoundingClientRect().height));
+    const widths = tiles.map((b) => Math.round(b.getBoundingClientRect().width));
+    // 🔴 #1054 段②-2(F9)── 7 個が「詰め込まれて」同じ行に収まっているか
+    const tops = tiles.map((b) => Math.round(b.getBoundingClientRect().top));
     return {
       hasBrand: document.querySelector('[data-pkc-region="brand"]') !== null,
       inSidebar: btn !== null,
@@ -235,6 +234,8 @@ test('🔴 上の帯は無く、設定は左の列から押せる', async ({ pag
       w: r ? Math.round(r.width) : -1,
       heights: [...new Set(others)],
       widths: [...new Set(widths)],
+      tileCount: tiles.length,
+      tops,
     };
   });
   // ① 帯が無い(撤去の pin ── 戻ってきたら落ちる)
@@ -251,6 +252,18 @@ test('🔴 上の帯は無く、設定は左の列から押せる', async ({ pag
   // ④ 隣と**同じ大きさ**(揃っていない 1 個を作らない)
   expect(m.heights, `高さがばらついている: ${JSON.stringify(m.heights)}`).toHaveLength(1);
   expect(m.widths, `幅がばらついている: ${JSON.stringify(m.widths)}`).toHaveLength(1);
+  /**
+   * ⑤ 🔴 **7 個は「詰め込まれて」同じ行に収まる**(#1054 段②-2、F9。
+   *   user 裁定「詰め込みなさい」)。
+   * ⚠ 直す前は `collection-app-group` が `flex: 1 0 100%` で**必ず次の行**へ
+   *   落ちていたので、7 個は**必ず 2 行**(3 個 + 4 個)になっていた。
+   *   250px 前後の列に 32px の正方形タイル 7 個(+ gap 6px = 230px)は
+   *   1 行に入る幅がある。
+   */
+  expect(m.tileCount, '前提が崩れている(7 個そろっていない)').toBe(7);
+  expect(m.tops, `1 行に収まらず複数の段に分かれている: ${JSON.stringify(m.tops)}`).toEqual(
+    new Array(7).fill(m.tops[0]),
+  );
 });
 
 
@@ -1672,6 +1685,46 @@ test('🔴 ▼ の合成メニュー: 種類を選ぶとその場で作り、次
    *   (単独では通っていた ── CLAUDE.md「flake に見えるものは、たいてい観測点の側」)。
    */
   await expect(cells, 'Ctrl+N で出来たものが表でない').toHaveCount(15, { timeout: 10_000 });
+
+  /**
+   * ⑤ 🔴 **鍵盤操作**(#1054 段②-2、F3b)── 実ブラウザでも `ArrowDown` で
+   *   隣の項目へ焦点が移り、`Escape` で閉じて `▼` へ焦点が戻る。
+   * ⚠ unit(`create-kind.test.ts`)は happy-dom で同じ形を見ているが、
+   *   `document.activeElement` の追従・実 focus の可視化は実ブラウザでしか
+   *   確かめられない。⚠ 開いた直後は焦点が `▼` に在る(`onCreateMenuKey` は
+   *   焦点が項目の中に在るときだけ動く ── unit と同じ理屈で、先頭項目へ
+   *   `focus()` してから矢印を撃つ)。
+   */
+  await clickReal(page, '[data-pkc-field="create-pick"]');
+  expect(await menu.isVisible(), '▼ を押しても一覧が出ない').toBe(true);
+  const items = menu.locator('button');
+  await items.first().focus();
+  await expect(items.first(), '前提が崩れている: 先頭へ焦点が当たらない').toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(items.nth(1), 'ArrowDown で隣へ焦点が移らない').toBeFocused();
+  await page.keyboard.press('Escape');
+  expect(await menu.isVisible(), 'Escape でメニューが閉じない').toBe(false);
+  await expect(
+    page.locator('[data-pkc-field="create-pick"]'),
+    'Escape 後に ▼ へ焦点が戻らない',
+  ).toBeFocused();
+
+  /**
+   * ⑥ 🔴 **左下の「集計」「フラグ」も、押すとその面が開く**(#1054 段②-2、F3c)。
+   * ⚠ #1029 で `collection-app-group` の中へ入って以来、この 2 つを**押す**
+   *   journey が smoke に 1 本も無かった(在ることは見ていても、押して効くかは
+   *   誰も見ていなかった ── CLAUDE.md §「押して効く」まで見る)。
+   */
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="query"]');
+  await expect(
+    page.locator('[data-pkc-region="query-bar"]'),
+    '「集計」を押しても面が開かない',
+  ).toBeVisible();
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="flags"]');
+  await expect(
+    page.locator('[data-pkc-region="flags-body"]'),
+    '「フラグ」を押しても面が開かない',
+  ).toBeVisible();
 
   expect(errors).toEqual([]);
 });

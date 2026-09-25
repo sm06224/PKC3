@@ -969,16 +969,27 @@ select:focus-visible {
  *
  * 🔴 **間は「器」に持たせる。各ボタンに持たせない**(同日、実ブラウザが捕まえた)──
  *   `margin-top` を 4 つのボタン**それぞれ**に付けたら、境目が行の途中に来る幅
- *   (1440px 以上)で**1 個だけ 8px 下へぶら下がった**。
- * 🔑 器は **`flex: 1 0 100%`** で行いっぱいにする ── 必ず行頭から始まるので、
- *   どの幅でも「1 個だけずれる」が起きない。⚠ 中は自分で折り返す。
+ *   (1440px 以上)で**1 個だけ 8px 下へぶら下がった**。この教訓(1 塊に 1 回だけ
+ *   間を付ける)は下でも守っている。
+ *
+ * 🔴 **#1054 段②-2(F9)で `flex: 1 0 100%` を外した**。
+ *
+ * ⚠ 直す前はここを**必ず次の行**へ強制していたので、7 個のタイルが
+ *   (取り込む / バックアップ / 操作を探す)+(集計 / システム / フラグ / ヘルプ)
+ *   の**必ず 2 行**になっていた ── 実測では 250px の列・7×32px のタイルなら
+ *   **1 行に入る幅がある**のに、強制で 2 行目へ落としていた。
+ * 🔑 **入りきらない幅だけ折り返す**(親 `[data-pkc-region='collection-bar']` の
+ *   `flex-wrap: wrap` に任せる)。⚠ 区切りの間は**この器 1 つに** `border-inline-start`
+ *   + `padding-inline-start` として持たせる(個々のボタンには付けない ──
+ *   上と同じ教訓)。1 行に収まればタイルの隙間に細い縦線として、2 行に折れれば
+ *   次の行の頭に同じ線として出る ── どちらでも「ここから別の役割」が読める。
  */
 [data-pkc-region='collection-bar'] [data-pkc-field='collection-app-group'] {
   display: flex;
   flex-wrap: wrap;
   gap: 1px;
-  flex: 1 0 100%;
-  margin-top: var(--s3);
+  padding-inline-start: var(--s3);
+  border-inline-start: 1px solid var(--border);
   background: var(--surface);
 }
 [data-pkc-field='app-settings'][data-pkc-active] {
@@ -6337,6 +6348,19 @@ li[data-pkc-row-slot] {
    *   タイルと二重線になる。寸法は `[data-pkc-bar-tile]` が持つ。 */
   border: none;
   border-radius: 0;
+}
+/**
+ * 🔴 **下見(`dual-preview-toggle`)は「押している状態」を持つ**(#1054 段②-2)。
+ * ⚠ `aria-pressed` は付けてあった(`dual-filer.ts` の `renderCommands`)が、
+ *   見た目の規則が無かった ── 点いているのに、見た目は他のタイルと同じままだった。
+ * 🔑 `[data-pkc-region='kind-bar'] button[aria-pressed='true']` と**同じ地・字色**
+ *   に揃える(このアプリで「押している」を示す色は 1 つ ── CLAUDE.md §7)。
+ *   ⚠ `border-color` は足さない ── この帯のボタンは `border: none`(輪は共有の
+ *   `outline` ではなく `gap` の下地で区切る)なので、境界線を持たない。
+ */
+[data-pkc-region='dual-commands'] [data-pkc-bar-tile][aria-pressed='true'] {
+  background: var(--accent);
+  color: var(--accent-fg);
 }
 
 /* ── 画面幅に応じた上書き ─────────────────────────────

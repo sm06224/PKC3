@@ -33,7 +33,7 @@ import { DetailRenderer } from '../../src/adapter/ui/render/detail';
 import { AppendBoxRenderer } from '../../src/adapter/ui/render/append-box';
 import { BrowseRouter } from '../../src/adapter/ui/render/browse';
 import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
-import { runGlobalCommand } from '../../src/adapter/ui/actions/binder';
+import { bindActions, runGlobalCommand } from '../../src/adapter/ui/actions/binder';
 import { appKeymap } from '../../src/adapter/ui/render/keymap';
 import { blocksFor, decl, mediaBlock, stripComments } from '../helpers/css-blocks';
 import { applyShortcutHints } from '../../src/adapter/ui/render/shortcut-hint';
@@ -494,6 +494,87 @@ describe('編集中の「+ ノート」は理由を言う(#761)', () => {
       expect(el.disabled, `編集中でも動くはずの ${name} が薄くなった`).toBe(false);
       expect(el.getAttribute('data-pkc-blocked'), '理由が付いている').toBeNull();
     }
+  });
+
+  /**
+   * 🔴 **▼ の合成メニューの複製も同じ字で断る**(#1054 段②-2)。
+   *
+   * ⚠ 直す前は帯のタイル(「今日」/ 種類を選ぶ本体)だけを薄くしており、
+   *   **同じ action を持つメニューの複製**(`menuToday` / 種類の一覧)は
+   *   濃いまま押せそうに見えて、押しても何も起きなかった(§7「同じ問いに
+   *   答える口が 2 つあると、片方だけ壊しても届かない」の実例)。
+   * 🔑 対照群は**道具の複製**(添付・録音・画面・計る)── あちらは編集中でも動くので、
+   *   薄くなっていたら「帯ごと薄くする」実装に戻っている。
+   */
+  it('🔴 ▼ メニューの「種類」「今日」も薄くなり、道具の複製は動く(#1054 段②-2)', () => {
+    const { root, d } = mount();
+    bindActions(root, d);
+    const pick = root.querySelector<HTMLButtonElement>(
+      '[data-pkc-region="create-menu"] [data-pkc-action="pick-create-kind"]',
+    );
+    const today = root.querySelector<HTMLButtonElement>(
+      '[data-pkc-region="create-menu"] [data-pkc-action="open-today"]',
+    );
+    const attach = root.querySelector<HTMLButtonElement>(
+      '[data-pkc-region="create-menu"] [data-pkc-action="attach-file"]',
+    );
+    if (pick === null || today === null || attach === null)
+      throw new Error('前提が崩れている: メニューの複製が無い');
+    expect(pick.disabled, '読んでいるのに押せない').toBe(false);
+    expect(today.disabled, '読んでいるのに押せない').toBe(false);
+
+    const before = d.getState().entryMetas.size;
+    d.dispatch({ type: 'START_EDIT' });
+    expect(pick.disabled, '編集中なのに押せる見た目のまま(種類)').toBe(true);
+    expect(today.disabled, '編集中なのに押せる見た目のまま(今日)').toBe(true);
+    expect(pick.getAttribute('data-pkc-blocked'), '理由を持っていない(種類)').toBe(
+      createBtn(root).getAttribute('data-pkc-blocked'),
+    );
+    expect(today.getAttribute('data-pkc-blocked'), '理由を持っていない(今日)').toBe(
+      createBtn(root).getAttribute('data-pkc-blocked'),
+    );
+    // ⚠ 対照群 ── 道具の複製(添付)は編集中でも動く
+    expect(attach.disabled, '編集中でも使える「添付」まで薄くなった').toBe(false);
+    expect(attach.getAttribute('data-pkc-blocked'), '理由が付いている(添付)').toBeNull();
+
+    // 🔑 押しても何も起きない(disabled は click を配送しない ── 実ブラウザと同じ)
+    pick.click();
+    today.click();
+    expect(d.getState().entryMetas.size, '編集中なのに増えている').toBe(before);
+
+    d.dispatch({ type: 'CANCEL_EDIT' });
+    expect(pick.disabled, '編集を終えたのに押せない形のまま(種類)').toBe(false);
+    expect(today.disabled, '編集を終えたのに押せない形のまま(今日)').toBe(false);
+  });
+
+  /**
+   * 🔴 **`Home` は押せる先頭の項目まで飛ぶ**(#1054 段②-2)。
+   *
+   * ⚠ 直す前は `button` を全部拾っていたので、`Home` は**常に DOM の先頭**
+   *   (種類の 1 つ目 = 編集中は disabled)へ焦点を送っていた ── そこで
+   *   `Enter` を押しても無反応で、user は「壊れた」と読む。
+   * 🔑 メニューの先頭は「種類」6 個 + 「今日」= 全部 disabled なので、
+   *   直す前は**この検査が確実に踏む**(たまたま隣り合わせでは踏めない形にした)。
+   */
+  it('🔴 編集中、▼ メニューの `Home` は押せる項目まで飛ぶ(#1054 段②-2)', () => {
+    const { root, d } = mount();
+    bindActions(root, d);
+    d.dispatch({ type: 'START_EDIT' });
+    const menu = root.querySelector<HTMLElement>('[data-pkc-region="create-menu"]');
+    if (menu === null) throw new Error('前提が崩れている: メニューが無い');
+    menu.hidden = false;
+    const timer = root.querySelector<HTMLButtonElement>(
+      '[data-pkc-region="create-menu"] [data-pkc-action="start-timer"]',
+    );
+    if (timer === null) throw new Error('前提が崩れている: 計るの複製が無い');
+    timer.focus();
+    expect(root.ownerDocument.activeElement, '前提が崩れている: 焦点が当たっていない').toBe(
+      timer,
+    );
+    menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+    const focused = root.ownerDocument.activeElement as HTMLButtonElement | null;
+    expect(focused?.disabled, '押せない項目(種類・今日)に焦点が止まった').toBe(false);
+    expect(focused?.getAttribute('data-pkc-action'), '飛んだ先が違う').toBe('attach-file');
   });
 
   /**

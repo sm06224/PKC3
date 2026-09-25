@@ -189,15 +189,23 @@ export const PKC_SYMBOLS = {
   copy: { icon: 'copy', tone: 'io' },
   move: { icon: 'arrow-square-right', tone: 'io' },
   'folder-plus': { icon: 'folder-plus', tone: 'create' },
-  'note-plus': { icon: 'note-pencil', tone: 'create' },
+  /**
+   * 🔴 **`note-pencil`(ノート + 鉛筆)は「編集」と読める**(#1054 段②-2。
+   *   着地前レビュー)── `rename` を鉛筆系(下記)にすると、隣に鉛筆が 2 本
+   *   並んで区別が付かなくなる。「フォルダを作る」(`folder-plus`)と対になる
+   *   絵にする ── `file-plus`(フォルダの相方は file)。
+   */
+  'note-plus': { icon: 'file-plus', tone: 'create' },
   eye: { icon: 'eye', tone: 'find' },
   snippet: { icon: 'text-aa', tone: 'neutral' },
   /**
-   * 🔴 **名前を打ち替える**(#1054 段②、2026-09-25)── 2 ペインの「名前」に絵が
-   *   無かった(段①の一覧に無い)。⚠ **意味を持たない**(タイトルバーの
-   *   カーソルの絵)ので tone は `neutral`。
+   * 🔴 **名前を打ち替える**(#1054 段②、2026-09-25)。
+   * ⚠ **段②-2 で直した**(着地前レビュー)── `cursor-text` は「文字入力」を示す
+   *   絵で、色も付かない唯一のタイル(`tone: 'neutral'`)だった。名前を打ち替える
+   *   のは**編集の一種**なので、`pencil-simple-line`(編集の仲間の鉛筆)+
+   *   `tone: 'create'`(「ノートを編集する」と同じ色の系統)へ揃える。
    */
-  rename: { icon: 'cursor-text', tone: 'neutral' },
+  rename: { icon: 'pencil-simple-line', tone: 'create' },
 } as const satisfies Readonly<Record<string, { readonly icon: string; readonly tone: IconTone }>>;
 
 /**

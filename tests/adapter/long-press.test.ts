@@ -346,6 +346,39 @@ describe('3 つの帯のタイルの長押し(#1054 段②)', () => {
     expect(d.getState().entryMetas.size, '今日のノートが二重に出来ている').toBe(before);
   });
 
+  /**
+   * 🔴 **同じ「尻尾の click」が、開いたばかりのメニューの項目へ着地しても捨てる**
+   * (#1054 段②-2。実ブラウザの touch smoke ── `tests/smoke/phone.smoke.spec.ts`
+   * の長押し journey ── が実際に踏んで判明)。
+   *
+   * ⚠ **実物では `click` の的は「押した瞬間の要素」ではない** ── 合成 `click` は
+   *   **撃つ瞬間の座標**で的が決まる(implicit pointer capture が効くのは
+   *   `pointerup` までで、compatibility mouse event の `click` には効かない)。
+   *   長押しのメニューは押した場所の直下に出るので、指を離した合図が
+   *   **メニューの項目に着地して、選ぶ前にその項目自身の action を実行してしまう**
+   *   (実測:`dual-preview-toggle` を長押しすると、メニューは正しく出るのに
+   *   `aria-pressed` が「選ぶ前」に反転していた)。
+   * 🔑 この test は `.click()` を**タイルではなく項目**へ直接撃つ(unit では
+   *   `ev.target` を選べる ── 実ブラウザの「撃つ瞬間の座標」の代わり)ことで、
+   *   その食い違いを再現する。⚠ **新しい `pointerdown` を挟まない**(挟むと
+   *   `fired` が閉じて「新しい押下」になり、下の test と区別が付かなくなる)。
+   */
+  it('🔴 長押しの直後の click が、開いたばかりのメニューの項目へ着地しても捨てる', () => {
+    const before = d.getState().entryMetas.size;
+    const tile = root.querySelector<HTMLElement>('[data-pkc-field="open-today"]')!;
+    pressFor(tile, LONG_PRESS_MS);
+    expect(contextMenuOpen(root), '前提が崩れている(メニューが開いていない)').toBe(true);
+    const item = root.querySelector<HTMLElement>(
+      '[data-pkc-region="context-menu"] [data-pkc-action="open-today"]',
+    )!;
+    // ⚠ `pointerup` はタイル自身に来る(実物と同じ ── implicit capture)
+    pointer(tile, 'pointerup', 'touch');
+    const ev = click(item);
+    expect(ev.defaultPrevented, '着地したメニューの項目の click を捨てていない').toBe(true);
+    expect(d.getState().entryMetas.size, '選ぶ前に今日のノートが出来ている').toBe(before);
+    // 🔑 対照群は次の it(新しい pointerdown を経て選べば、同じ項目でも実行される)
+  });
+
   it('🔴 一覧の項目を押すと、その操作が実際に走る(今日のノートが出来る)', () => {
     const before = d.getState().entryMetas.size;
     const tile = root.querySelector<HTMLElement>('[data-pkc-field="open-today"]')!;
@@ -353,6 +386,16 @@ describe('3 つの帯のタイルの長押し(#1054 段②)', () => {
     const item = root.querySelector<HTMLElement>(
       '[data-pkc-region="context-menu"] [data-pkc-action="open-today"]',
     )!;
+    /**
+     * 🔴 **実物は「新しい押下」を経て選ぶ**(#1054 段②-2、実ブラウザの touch
+     *   smoke が突いた)。⚠ 指を離した直後(消費窓の内側)にここで `.click()` だけ
+     *   撃つと、**開いたばかりのメニューへ着地した「同じ押下の尻尾」**(実物では
+     *   `click` の的が押した瞬間の要素ではなく撃つ瞬間の座標で決まる ── `binder.ts`
+     *   の注記)と区別が付かない ── `binder.ts` は両方を同じ形で捨てるので、
+     *   ここで区別を付けるには**新しい `pointerdown`** が要る(それが消費窓を閉じる)。
+     */
+    pointer(item, 'pointerdown', 'touch');
+    pointer(item, 'pointerup', 'touch');
     item.click();
     expect(d.getState().entryMetas.size, '一覧から押しても今日のノートが出来ない').toBe(
       before + 1,

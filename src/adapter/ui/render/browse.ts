@@ -73,6 +73,10 @@ export const BROWSE_TABS: readonly { mode: BrowseMode; label: string }[] = [
  *   **編集中でも動く**(預かる)ので、薄くすると嘘になる。
  * 🔑 ここに足すのは「`phase !== 'ready'` で**無言 return する** handler を持つ物」だけ。
  *   ⚠ `binder.ts` の handler を直したら、この一覧も見直す(§7 ── 判定が 2 か所にある)。
+ * ⚠ **選択子は `data-pkc-field` に限らない**(#1054 段②-2)── ▼ の合成メニューの
+ *   項目は面ごとに 1 つの `data-pkc-field` を持たないので、`[data-pkc-region="…"]`
+ *   で範囲を切った `data-pkc-action` の複合選択子も入る(名前が「FIELDS」のままなのは
+ *   PKC2 由来の慣習 ── 中身は「押せない理由を添える先」の一覧である)。
  */
 const BLOCKABLE_FIELDS: readonly string[] = [
   // 今日の日付のノートを開く(`open-today` が `phase !== 'ready'` で黙って降りる)
@@ -84,6 +88,22 @@ const BLOCKABLE_FIELDS: readonly string[] = [
    *   レビューは `error` と書いていたが、その形は**到達しない**。
    */
   '[data-pkc-field="empty-start-create"]',
+  /**
+   * 🔴 **▼ の合成メニューの中の「種類」と「今日」**(#1054 段②-2。
+   *   着地前レビューが指摘)。
+   *
+   * ⚠ 直す前は**帯のタイル(`today` / `create-run`)だけ**を薄くしており、
+   *   同じ action を持つ**メニューの複製**(`menuToday` / 種類の一覧)は濃いまま
+   *   押せそうに見えて、押しても何も起きなかった(`open-today` / `CREATE_ENTRY` は
+   *   `phase !== 'ready'` を黙って捨てる ── 上のタイルと同じ理由)。
+   * ⚠ **道具の複製(添付・録音・画面・計る)は含めない** ── あちらは編集中でも動く
+   *   (`NOTE_TOOL_ACTIONS` が別に断る。ここへ足すと嘘になる)。
+   * 🔑 `[data-pkc-region="create-menu"]` で範囲を切る ── 範囲を切らずに
+   *   `[data-pkc-action="pick-create-kind"]` だけ書くと、他の面に同じ action が
+   *   生えた日にそちらまで薄くなる。
+   */
+  '[data-pkc-region="create-menu"] [data-pkc-action="pick-create-kind"]',
+  '[data-pkc-region="create-menu"] [data-pkc-action="open-today"]',
 ];
 
 export class BrowseRouter {
