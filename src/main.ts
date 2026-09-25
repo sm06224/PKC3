@@ -945,7 +945,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       return;
     }
     // 🔴 danger ── 打った字は AppState にしか無いので、本当に戻せない
-    void ask(plan.ask, { okLabel: '読み込み直す', danger: true }).then((yes) => {
+    void ask(plan.ask, { okLabel: 'この画面を読み込み直す', danger: true }).then((yes) => {
       if (yes) location.reload();
     });
   };
@@ -2006,7 +2006,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   だから**必ず聞く**。⚠ この口を渡さなければ縮まらない(黙って縮める道が無い)。
      */
     askShrink: async (question) =>
-      (await confirmInApp(root, question, { okLabel: '縮める', cancelLabel: 'そのまま' })) === 'ok',
+      (await confirmInApp(root, question, { okLabel: '画像を縮める', cancelLabel: 'そのまま' })) === 'ok',
   };
 
   /**
@@ -3011,7 +3011,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           ask(
             `「${name}」を、いまのノートの内容で上書きします。\n\n` +
               'ファイルの元の内容は失われます(取り消せません)。よろしいですか?',
-            { okLabel: '上書きする', danger: true },
+            { okLabel: 'ファイルを上書きする', danger: true },
           ),
         getBody: async () => (await client.request({ op: 'getBody', cid, lid })) ?? null,
         write: (body) => writeBackFile(handle, body),
@@ -3421,7 +3421,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       (await confirmInApp(
         root,
         `並べ替えをやめて、名前順に戻します。いま並べ替えている ${String(count)} つのグループが、まとめて名前順になります(押した見出しだけではありません)。`,
-        { okLabel: '名前順に戻す', cancelLabel: 'やめる' },
+        { okLabel: 'すべて名前順に戻す', cancelLabel: 'やめる' },
       )) === 'ok',
     confirmAppGroupNotes: async (names) => {
       /**
@@ -3890,7 +3890,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             },
             // ⚠ **知らせるほうは捨てない** ── 走査は worker で数秒かかるので、
             //    その間に別の確認が開いていることがある(器が順番に出す)
-            ask: (msg) => ask(msg, { okLabel: '整理する', danger: true }),
+            ask: (msg) => ask(msg, { okLabel: '添付を整理する', danger: true }),
             tell,
           });
         } catch (e) {

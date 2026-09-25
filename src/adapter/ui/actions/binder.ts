@@ -6662,7 +6662,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     confirmThen(
       root,
       'この板を本文から消しますか?(中に書いた字も消えます。取り消せません)',
-      { okLabel: '消す', danger: true },
+      { okLabel: 'この板を消す', danger: true },
       dispatcher,
       () => {
         const now = dispatcher.getState();

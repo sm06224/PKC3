@@ -511,7 +511,7 @@ describe('まとめて貼るの選び方(#679)', () => {
   it('🔴 1 件も選んでいなければ押せない(無言の dead click を作らない)', async () => {
     const answered = pickScrapInApp(document.body, ROWS);
     expect(okBtn().disabled, '選んでいないのに押せる').toBe(true);
-    expect(okBtn().textContent).toBe('入れる');
+    expect(okBtn().textContent).toBe('選んだ物を入れる');
     pick(0);
     expect(okBtn().disabled).toBe(false);
     expect(okBtn().textContent, '何件入るかが字に出ていない').toBe('選んだ 1 件を入れる');

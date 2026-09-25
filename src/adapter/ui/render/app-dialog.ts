@@ -473,7 +473,7 @@ export function pickDateInApp(
       f.body.append(timeLabel);
     }
 
-    f.ok.textContent = '入れる';
+    f.ok.textContent = '日付を入れる';
     f.ok.removeAttribute('data-pkc-danger');
     f.cancel.textContent = 'やめる';
     f.cancel.hidden = false;
@@ -656,7 +656,7 @@ function pickIconFrom(host: HTMLElement, spec: IconPickSpec): Promise<string | n
     f.dialog.addEventListener('keydown', onArrow);
     f.dialog.addEventListener('click', onOutside);
 
-    f.ok.textContent = '入れる';
+    f.ok.textContent = '図案を入れる';
     f.ok.removeAttribute('data-pkc-danger');
     f.ok.hidden = true;
     f.cancel.textContent = 'やめる';
@@ -956,7 +956,7 @@ function pickRowInApp<T>(host: HTMLElement, spec: PickRowsSpec<T>): Promise<T | 
     f.dialog.addEventListener('keydown', onArrow);
     f.dialog.addEventListener('click', onOutside);
 
-    f.ok.textContent = '入れる';
+    f.ok.textContent = '選んだ物を入れる';
     f.ok.removeAttribute('data-pkc-danger');
     // 🔑 受ける側は**隠す**(`pickSnippetInApp` の docstring)── 消さずに隠す(器を捨てない)
     f.ok.hidden = true;
@@ -1095,7 +1095,7 @@ export function pickCommandInApp(
     });
     draw();
 
-    f.ok.textContent = '実行';
+    f.ok.textContent = '操作を実行する';
     f.ok.removeAttribute('data-pkc-danger');
     // 🔑 受ける側は**隠す**(押した行がそのまま答え)── 消さずに隠す(器を捨てない)
     f.ok.hidden = true;
@@ -1194,7 +1194,7 @@ export function pickEntryInApp(
     });
     draw();
 
-    f.ok.textContent = '入れる';
+    f.ok.textContent = '選んだノートを入れる';
     f.ok.removeAttribute('data-pkc-danger');
     f.ok.hidden = true;
     f.cancel.textContent = 'やめる';
@@ -1288,7 +1288,10 @@ export function pickScrapInApp(
             move.type = 'button';
             move.setAttribute('data-pkc-field', label === '▲' ? 'pick-scrap-up' : 'pick-scrap-down');
             move.textContent = label;
-            move.setAttribute('aria-label', `${row.label} を${label === '▲' ? '前' : '後ろ'}へ`);
+            move.setAttribute(
+              'aria-label',
+              `${row.label} を${label === '▲' ? '前' : '後ろ'}へ動かす`,
+            );
             // 🔑 端では**押せなくする**(押しても動かない口を残さない)
             move.disabled = to < 0 || to >= marks.length;
             move.addEventListener('click', () => {
@@ -1302,7 +1305,7 @@ export function pickScrapInApp(
         list.append(line);
       }
 
-      f.ok.textContent = marks.length === 0 ? '入れる' : `選んだ ${marks.length} 件を入れる`;
+      f.ok.textContent = marks.length === 0 ? '選んだ物を入れる' : `選んだ ${marks.length} 件を入れる`;
       f.ok.disabled = marks.length === 0;
 
       if (focusKey !== null) {
@@ -1417,7 +1420,7 @@ export function pickArchiveInApp(
         list.append(btn);
       }
       const n = countFiles(marks);
-      f.ok.textContent = n === 0 ? '取り出す' : `選んだ ${n} 件を取り出す`;
+      f.ok.textContent = n === 0 ? '選んだ物を取り出す' : `選んだ ${n} 件を取り出す`;
       // ⚠ **0 件では押せない** ── 押しても何も起きない口を作らない
       f.ok.disabled = n === 0;
       if (focusPath !== null) {
