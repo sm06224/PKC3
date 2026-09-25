@@ -132,8 +132,17 @@ body {
    * ⚠ 変数は `shell` の style 属性に置く(`adapter/ui/render/pane-size.ts`)。
    * ⚠ 値は `clamp(0px, Npx, 45vw)` の形なので、**画面が狭くなれば自分で縮む**
    *   ── JS が `resize` を聞き直さなくてよい。 */
+  /* 🔴 **左の列の下限は 242px**(C16 / #1045、2026-09-25 に 200px から上げた)。
+   * ⚠ 直す前は、窓を 1100px から 1px 広げた瞬間に左の列が **242px → 200px** へ縮み
+   *   (1100px 以下は下の `@media` の `22vw` = 242px、1101px からはここの下限 200px)、
+   *   「+ ノート」の列が 3 段に折れていた ── 実測(本物の build)で **1101〜1248px**
+   *   の全域。広げたのに窮屈になる、の形である。
+   * 🔑 242px は**境目の下側の幅そのもの**(1100 × 0.22)── 広げても左の列は縮まない。
+   *   本文が狭くなるのは 1101〜1344px の間だけで、最大 42px。1366px 以上は変わらない
+   *   (18vw のほうが大きい)。⚠ 数は `tests/adapter/shell-grid-css.test.ts` が
+   *   下の `@media` の `22vw` と結んで見る(片方だけ動かすと、また境目で縮む)。 */
   grid-template-columns:
-    var(--pkc-pane-sidebar, minmax(200px, 18vw)) 8px minmax(0, 1fr) 8px
+    var(--pkc-pane-sidebar, minmax(242px, 18vw)) 8px minmax(0, 1fr) 8px
     var(--pkc-pane-inspector, minmax(220px, 15vw));
   /* ⚠ notices と update は**別の行**。同じ area に載せると、両方出たとき重なる */
   /* 🔴 **上の帯を撤去した**(P10、user 指示 2026-08-05)── 載っていたのは
@@ -198,7 +207,8 @@ body {
     'status   status   status   status';
 }
 [data-pkc-region='shell'][data-pkc-hidden-panes~='inspector'] {
-  grid-template-columns: var(--pkc-pane-sidebar, minmax(200px, 18vw)) 8px minmax(0, 1fr) 8px;
+  /* ⚠ 左の列の下限は上の 3 列の版面と同じ 242px(C16)── 右を畳んでも左は縮めない */
+  grid-template-columns: var(--pkc-pane-sidebar, minmax(242px, 18vw)) 8px minmax(0, 1fr) 8px;
   grid-template-areas:
     'sidebar  gripl detail gripr'
     'capture  capture  capture  capture'
@@ -3881,7 +3891,7 @@ li[data-pkc-row-slot] {
 
 /* ══ 連絡先(#278 段①、2026-08-27)══════════════════════════════
  * 🔴 **左の列に置く**(#292 段⑤ の見分け方 ── 閉じても失う物が無い = ノートの見方)。
- * ⚠ 幅は `minmax(200px, 18vw)` なので、**名前と宛先を縦に積む** ──
+ * ⚠ 幅は `minmax(242px, 18vw)` なので、**名前と宛先を縦に積む** ──
  *   横に並べると 200px で電話番号が切れる。
  * 🔴 **中央の面(別窓 / 退避)にも同じ規則**(#278 段③、user 裁定 2026-09-04)──
  *   予定表と同じ形。幅は `[data-pkc-region='detail'] > [data-pkc-view-pane]` が広げる。 */
@@ -3978,7 +3988,7 @@ li[data-pkc-row-slot] {
 /* ══ 録ったもの(#683 段①、2026-09-09)══════════════════════════
  * 🔴 **左の列と中央の面(別窓)に同じ規則**(連絡先と同じ形。user 裁定 2026-09-04
  *   「アプリの基本は別窓」+ #300「中央を占有するな」を両立させる置き方)。
- * ⚠ 左の列は `minmax(200px, 18vw)` なので**縦に積む** ── 名前・種類・押し所を
+ * ⚠ 左の列は `minmax(242px, 18vw)` なので**縦に積む** ── 名前・種類・押し所を
  *   横に並べると 200px で名前が切れる。 */
 [data-pkc-browse-pane='captures'],
 [data-pkc-view-pane='captures'] {
@@ -4490,7 +4500,7 @@ li[data-pkc-row-slot] {
 
 /* ══ 予定(#292 段③、2026-08-23)══════════════════════════════════
  * 🔴 **左の列に置く**(user 指示「もう一つ PKC が開いて混乱する」)── 中央は
- *   本文のまま。⚠ 幅は `minmax(200px, 18vw)` = 1920 で 345px / 下限 200px。
+ *   本文のまま。⚠ 幅は `minmax(242px, 18vw)` = 1920 で 345px / 下限 242px。
  *   7 列の月は下限でも 28px/セルなので、**数字と点だけ**なら入る
  *   (升目の中に予定を並べるのは捨てた ── それは下の束が持つ)。
  * 🔴 **中央の面(別窓 / 退避)にも同じ規則**(#673 段②、user 裁定 2026-09-04)──
