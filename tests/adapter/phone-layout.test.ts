@@ -346,12 +346,12 @@ describe('情報ページ(#609 の行き止まりを作らない)', () => {
     s.field('phone-info').click();
     expect(s.page()).toBe('info');
     const back = s.field('phone-back');
-    expect(back.textContent, '情報ページで「← 一覧」のまま').toBe('← ノート');
+    expect(back.textContent, '情報ページで「← 一覧へ戻る」のまま').toBe('← ノートへ戻る');
     expect(back.getAttribute('data-pkc-page')).toBe('note');
     expect(s.field('phone-info').hidden, 'いま居る場所へ行くボタンが出たまま').toBe(true);
     back.click();
     expect(s.page()).toBe('note');
-    expect(s.field('phone-back').textContent).toBe('← 一覧');
+    expect(s.field('phone-back').textContent).toBe('← 一覧へ戻る');
   });
 
   /**

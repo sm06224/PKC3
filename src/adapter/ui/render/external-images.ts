@@ -170,11 +170,11 @@ export function buildExternalImageBar(images: number, boxes: number): HTMLElemen
   const allow = document.createElement('button');
   allow.type = 'button';
   allow.setAttribute('data-pkc-action', 'allow-external-images');
-  allow.textContent = 'このノートで読み込む';
+  allow.textContent = '外部の画像をこのノートで読み込む';
   const deny = document.createElement('button');
   deny.type = 'button';
   deny.setAttribute('data-pkc-action', 'deny-external-images');
-  deny.textContent = '読み込まない';
+  deny.textContent = '外部の画像を読み込まない';
   bar.append(allow, deny);
   return bar;
 }

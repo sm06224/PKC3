@@ -297,9 +297,9 @@ describe('形を選ぶ口(▾)', () => {
     await flush();
     expect(sink.asked?.map((c) => c.label), '一覧が食い違っている').toEqual([
       '表計算に貼る(TSV)',
-      'Markdown の表',
-      'HTML',
-      'CSV',
+      'Markdown の表でコピー',
+      'HTML でコピー',
+      'CSV でコピー',
       '.csv で保存',
       '本文を CSV の表に書き換える(行と列を足せて、式も使えます)',
     ]);

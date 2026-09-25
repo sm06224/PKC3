@@ -139,7 +139,7 @@ export class SearchRenderer {
   private noteText(page: SearchPageState): string {
     if (page.query.trim() === '') return '語を打つと、題名と本文から探します。行を押すと、そのノートが別のウィンドウで開きます';
     if (page.failed) return 'この版では探せません(ページを読み直すと直ることがあります)';
-    if (page.rowsQuery !== page.query) return '探しています…';
+    if (page.rowsQuery !== page.query) return 'ノートを探しています…';
     if (page.rows.length === 0) return `「${page.query}」に当たるノートはありません`;
     if (page.truncated)
       return `200 件より多く当たりました(関連の高い 200 件を出しています)。語を足して絞ってください`;

@@ -207,7 +207,12 @@ export function patchTaskCard(
    */
   const off = card.querySelector<HTMLButtonElement>('[data-pkc-field="task-unschedule"]');
   if (off) {
-    const label = data.repeat === null ? '予定から外す' : 'この繰り返しをやめる';
+    /**
+     * 🔴 **右クリックの「この繰り返しをやめる」(set-task-repeat)と字が衝突していた**
+     *   (#1046。あちらは**日付を残して**繰り返しだけ外す、× は**日付も繰り返しも**外す ──
+     *   同じ字だと読み上げで区別できない)。⚠ ここは × なので「予定から外す」の系に残す。
+     */
+    const label = data.repeat === null ? '予定から外す' : '予定から外す(繰り返しも外れます)';
     if (off.getAttribute('aria-label') !== label) off.setAttribute('aria-label', label);
     const why =
       data.repeat === null

@@ -945,7 +945,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       return;
     }
     // 🔴 danger ── 打った字は AppState にしか無いので、本当に戻せない
-    void ask(plan.ask, { okLabel: '読み込み直す', danger: true }).then((yes) => {
+    void ask(plan.ask, { okLabel: 'この画面を読み込み直す', danger: true }).then((yes) => {
       if (yes) location.reload();
     });
   };
@@ -1720,7 +1720,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         type: 'OP_FAILED',
         error:
           '本体タブの交代で、このノートの編集権を別のタブかウィンドウに取られました。' +
-          'ここで保存すると相手の編集を上書きします ── 内容を控えてから「キャンセル」を押してください',
+          'ここで保存すると相手の編集を上書きします ── 内容を控えてから「編集をやめる」を押してください',
       });
     });
     let promotedHost: StoreProxyHost | null = null;
@@ -2006,7 +2006,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   だから**必ず聞く**。⚠ この口を渡さなければ縮まらない(黙って縮める道が無い)。
      */
     askShrink: async (question) =>
-      (await confirmInApp(root, question, { okLabel: '縮める', cancelLabel: 'そのまま' })) === 'ok',
+      (await confirmInApp(root, question, { okLabel: '画像を縮める', cancelLabel: 'そのまま' })) === 'ok',
   };
 
   /**
@@ -2333,7 +2333,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     isEditing: () => dispatcher.getState().phase === 'editing',
     confirmDiscard: () =>
       ask('編集中の内容は保存されません。新しい版に切り替えますか?', {
-        okLabel: '切り替える',
+        okLabel: '新しい版に切り替える',
         danger: true,
       }),
   });
@@ -3011,7 +3011,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           ask(
             `「${name}」を、いまのノートの内容で上書きします。\n\n` +
               'ファイルの元の内容は失われます(取り消せません)。よろしいですか?',
-            { okLabel: '上書きする', danger: true },
+            { okLabel: 'ファイルを上書きする', danger: true },
           ),
         getBody: async () => (await client.request({ op: 'getBody', cid, lid })) ?? null,
         write: (body) => writeBackFile(handle, body),
@@ -3421,7 +3421,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       (await confirmInApp(
         root,
         `並べ替えをやめて、名前順に戻します。いま並べ替えている ${String(count)} つのグループが、まとめて名前順になります(押した見出しだけではありません)。`,
-        { okLabel: '名前順に戻す', cancelLabel: 'やめる' },
+        { okLabel: 'すべて名前順に戻す', cancelLabel: 'やめる' },
       )) === 'ok',
     confirmAppGroupNotes: async (names) => {
       /**
@@ -3436,7 +3436,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           root,
           `グループの並び順は、グループごとのノートに憶えます。順番は全部のグループの位置がそろって決まるので、` +
             `まだノートの無い ${String(names.length)} つにも 1 枚ずつできます(${listed}${rest})。`,
-          { okLabel: '並べ替える', cancelLabel: 'やめる' },
+          { okLabel: 'タイルを並べ替える', cancelLabel: 'やめる' },
         )) === 'ok'
       );
     },
@@ -3547,7 +3547,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     resetFlags: () => {
       center.resetFlags();
     },
-    /** 帯の「このノートで読み込む」「読み込まない」。⚠ 設定は変えない。 */
+    /** 帯の「外部の画像をこのノートで読み込む」「外部の画像を読み込まない」。⚠ 設定は変えない。 */
     answerExternalImages: (allow) => {
       const lid = dispatcher.getState().selectedLid;
       if (!lid) return;
@@ -3890,7 +3890,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             },
             // ⚠ **知らせるほうは捨てない** ── 走査は worker で数秒かかるので、
             //    その間に別の確認が開いていることがある(器が順番に出す)
-            ask: (msg) => ask(msg, { okLabel: '整理する', danger: true }),
+            ask: (msg) => ask(msg, { okLabel: '添付を整理する', danger: true }),
             tell,
           });
         } catch (e) {

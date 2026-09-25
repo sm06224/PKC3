@@ -25,12 +25,12 @@ export function showUpdateCard(region: HTMLElement): void {
   const apply = document.createElement('button');
   apply.type = 'button';
   apply.setAttribute('data-pkc-action', 'apply-update');
-  apply.textContent = '再読込';
+  apply.textContent = '新しい版に切り替える';
 
   const later = document.createElement('button');
   later.type = 'button';
   later.setAttribute('data-pkc-action', 'dismiss-update');
-  later.textContent = 'あとで';
+  later.textContent = 'あとで切り替える';
 
   region.append(text, apply, later);
   region.hidden = false;

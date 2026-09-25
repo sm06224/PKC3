@@ -117,7 +117,7 @@ export class AppendBoxRenderer {
      *   「間違えて足したら本文まで開く」になる ── それは動線を 1 つ失うのと同じ。
      * ⚠ 追記が通ったときだけ出す(何も足していないのに押せる口を出さない)。
      */
-    this.undo = iconButton('undo-append', '元に戻す');
+    this.undo = iconButton('undo-append', '追記を元に戻す');
     /**
      * ⚠ **「追記した」とだけ書かない**(#684 段④ の UX レビュー I3)── ここで消えるのは
      *   追記した字だけでなく、**落として差し込んだ添付の行**と**一覧から落としたリンク**
@@ -142,7 +142,7 @@ export class AppendBoxRenderer {
      */
     this.row = document.createElement('div');
     this.row.setAttribute('data-pkc-field', 'append-row');
-    this.row.append(this.input, iconButton('append-entry', '追記'), this.undo);
+    this.row.append(this.input, iconButton('append-entry', '本文に追記する'), this.undo);
     this.form.append(this.target, this.row);
 
     this.lockBar = document.createElement('div');
@@ -157,12 +157,12 @@ export class AppendBoxRenderer {
      *   説明(`title`)も中央と同じ字にする ── 正本は `detail.ts` と 2 か所だが、
      *   `tests/adapter/action-labels.test.ts` が「同じ action は 1 種類の字」で縛る。
      */
-    this.resolve = iconButton('commit-edit', '保存');
+    this.resolve = iconButton('commit-edit', '編集を保存する');
     this.resolve.title = COMMIT_EDIT_HINT;
-    this.discard = iconButton('cancel-edit', 'キャンセル');
+    this.discard = iconButton('cancel-edit', '編集をやめる');
     this.discard.title = CANCEL_EDIT_HINT;
     // 書込が返らないとき ── 最後の出口
-    this.release = iconButton('force-release', '強制的に終える');
+    this.release = iconButton('force-release', '書き込みを打ち切る');
     this.lockBar.append(this.lockText, this.resolve, this.discard, this.release);
 
     this.region.append(this.lockBar, this.form);
@@ -249,9 +249,9 @@ export class AppendBoxRenderer {
     this.discard.hidden = mode.kind !== 'editing';
     this.release.hidden = mode.kind !== 'writing';
     if (mode.kind === 'editing') {
-      this.lockText.textContent = 'このノートは編集中です。保存するか、キャンセルすると追記できます。';
+      this.lockText.textContent = 'このノートは編集中です。「編集を保存する」か「編集をやめる」を押すと追記できます。';
     } else if (mode.kind === 'writing') {
-      this.lockText.textContent = '追記を書き込んでいます…(返ってこないときは強制的に終える)';
+      this.lockText.textContent = '追記を書き込んでいます…(返ってこないときは「書き込みを打ち切る」)';
     }
     // ⚠ **器を出した後**に当てる ── `hidden` のままの欄には焦点が乗らない
     this.focusIfPending(mode);

@@ -108,7 +108,9 @@ describe('画面の字に使わない語(ui-terms.ts の BANNED_TERMS)', () => {
     //    「印」が 1 つ在った。配布済みの文面は書き換えないので、残りは 1 件のままである
     ['src/features/notice/notice-log.ts', '印', 1],
     // ⚠ 2026-09-25(#1043): 31 → 25 ── 枠から落ちた `2026-09-16-db-broken-guard` に 6 つ在った
-    ['src/features/notice/notice-log.ts', '壊れ', 25],
+    // ⚠ 2026-09-25(#1046): 25 → 20 ── 枠から落ちた `2026-09-16-db-rescue` に 5 つ在った
+    //   (落としたから減った。直したのではない)
+    ['src/features/notice/notice-log.ts', '壊れ', 20],
     ['src/features/notice/notice-log.ts', '居場所', 1],
     ['src/features/notice/notice-log.ts', '拾う', 1],
     ['src/features/notice/notice-log.ts', '捨てる', 7],

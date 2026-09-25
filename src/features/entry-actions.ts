@@ -163,7 +163,7 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    *   {@link EntryAction.group} として残り、右の列では**間**(段 B)として効く。
    */
   { action: 'copy-entry-ref', label: '参照をコピー', group: 'copy' },
-  { action: 'copy-plain-markdown', label: '素の Markdown', group: 'copy' },
+  { action: 'copy-plain-markdown', label: '素の Markdown をコピー', group: 'copy' },
   /**
    * 🔴 **付箋のように何枚でも開ける**(#685 段②、user 裁定 2026-09-04)。
    *
@@ -195,7 +195,7 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    * 🔑 file 名は `.pkc3-notes.zip`(#1017 段④b の二重拡張子)。
    * ⚠ **`export-folder` とは同じ塊に置かない**(すぐ下を見よ)。
    */
-  { action: 'export-entry', label: 'バックアップ(このノート)', group: 'export' },
+  { action: 'export-entry', label: 'このノートをバックアップ', group: 'export' },
   /**
    * 🔴 **相手に渡せる 1 枚**(#491。user 報告 2026-08-27
    *   「右クリックで気づきましたが、**書き出しに閲覧配布用HTMLがないのは残念**ですね」)。
@@ -206,7 +206,7 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    * 🔑 **字は設定画面の同名ボタンと揃えた**(`commands.ts` の `export-html`)──
    *   あちらは全部、こちらは 1 件。**同じ形の物に 2 つの呼び名を作らない**。
    */
-  { action: 'export-entry-html', label: '閲覧用 HTML', group: 'export' },
+  { action: 'export-entry-html', label: '閲覧用 HTML で書き出す', group: 'export' },
   /**
    * 🔴 **フォルダのときだけ出す**(#399 ① / #500 案 C)。
    *
@@ -226,7 +226,7 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    *   「バックアップ」)は **2026-09-21 の実測で取り下げた**(見出しが出せないため
    *   ── 上の {@link ENTRY_MENU_ACTIONS} 冒頭)。
    */
-  { action: 'export-folder', label: 'バックアップ(このフォルダ)', group: 'this-folder', when: 'folder' },
+  { action: 'export-folder', label: 'このフォルダをバックアップ', group: 'this-folder', when: 'folder' },
   /**
    * 🔴 **右ペインが唯一の入口だった 3 つ**(#500。2026-08-29 に**実測で確定**)。
    *
@@ -245,9 +245,9 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    *   ペイン 533px の 4 分の 1 を常に食う ── そちらは #501 の整理と一緒に判断する)。
    * ⚠ 並びは「よく使う順」なので、**渡す物の隣**に置く(履歴と削除より上)。
    */
-  { action: 'export-entry-docx', label: 'Word', group: 'export' },
-  { action: 'export-entry-pptx', label: 'PowerPoint', group: 'export' },
-  { action: 'export-entry-pdf', label: 'PDF', group: 'export' },
+  { action: 'export-entry-docx', label: 'Word で書き出す', group: 'export' },
+  { action: 'export-entry-pptx', label: 'PowerPoint で書き出す', group: 'export' },
+  { action: 'export-entry-pdf', label: 'PDF で書き出す', group: 'export' },
   /**
    * 🔴 **開いた元ファイルが在るときだけ出す**(#500 案 C)。
    *
@@ -269,8 +269,8 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    *   🔑 いまの並び(書き出す 5 つのすぐ下)のまま `export` に残し、
    *   **見た目を 1px も変えない**ほうを選ぶ。
    */
-  { action: 'write-back-file', label: '書き戻す', group: 'export', when: 'linked' },
-  { action: 'show-history', label: '履歴', group: 'this-one' },
+  { action: 'write-back-file', label: '元ファイルへ書き戻す', group: 'export', when: 'linked' },
+  { action: 'show-history', label: '履歴を開く', group: 'this-one' },
   /**
    * 🔴 **左の列の行から、整理ができる 3 つ**(#215。user 裁定 2026-09-04「全部推薦で」)。
    *
@@ -290,9 +290,9 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
   /**
    */
   { action: 'rename-entry-begin', label: '名前を変える', group: 'this-one' },
-  { action: 'move-to-folder', label: '移す…', group: 'this-one' },
+  { action: 'move-to-folder', label: 'フォルダへ移す…', group: 'this-one' },
   { action: 'create-in-folder', label: 'この中に新しいノートを作る', group: 'this-one', when: 'folder' },
-  { action: 'delete-entry', label: '削除', group: 'remove' },
+  { action: 'delete-entry', label: 'ゴミ箱へ移す', group: 'remove' },
 ];
 
 /**
@@ -365,8 +365,8 @@ export const BODY_MENU_ACTIONS: readonly EntryAction[] = [
  *   仕組みで、タイルはノートの種類では分かれない)。
  */
 export const TILE_MENU_ACTIONS: readonly EntryAction[] = [
-  { action: 'move-tile-up', label: '上へ' },
-  { action: 'move-tile-down', label: '下へ' },
+  { action: 'move-tile-up', label: '上へ動かす' },
+  { action: 'move-tile-down', label: '下へ動かす' },
 ];
 
 /**
@@ -385,7 +385,7 @@ export const TILE_OPEN_TARGET_ATTR = 'data-pkc-open-target';
 
 const TILE_OPEN_TARGET_VERB: Readonly<Record<AppOpenTarget, string>> = {
   tab: 'ブラウザのタブで開く',
-  window: '別の窓で開く',
+  window: '別のウィンドウで開く',
 };
 
 export function tileOpenTargetMenuActions(
@@ -430,8 +430,8 @@ export const APP_GROUP_MENU_ACTIONS: readonly EntryAction[] = [
    * ⚠ **掴んで落とす道は作っていない** ── 見出しの掴みは受け口をゼロから作るうえ、
    *   **長押し(= このメニュー)と取り合い**になる。まずここから。
    */
-  { action: 'move-app-group-up', label: '上へ' },
-  { action: 'move-app-group-down', label: '下へ' },
+  { action: 'move-app-group-up', label: '上へ動かす' },
+  { action: 'move-app-group-down', label: '下へ動かす' },
 ];
 
 /**
@@ -475,7 +475,7 @@ export const REPEAT_ATTR = 'data-pkc-repeat';
 
 export const TASK_REPEAT_MENU_ACTION: EntryAction & { readonly hint: string } = {
   action: 'open-repeat-menu',
-  label: '繰り返す…',
+  label: '予定を繰り返す…',
   hint: 'この行を毎日・毎週・毎月・毎年にします(やめることもできます)',
 };
 
@@ -507,7 +507,7 @@ export function repeatMenuActions(current: RepeatUnit | null): RepeatMenuItem[] 
   if (current !== null)
     out.push({
       action: 'set-task-repeat',
-      label: 'やめる',
+      label: 'この繰り返しをやめる',
       hint: 'くり返しをやめます(日付は残ります。ノートも本文も消えません)',
       attrs: { [REPEAT_ATTR]: '' },
     });
@@ -543,7 +543,7 @@ export function tileMenuActions(reordering: boolean, currentOpenTarget: AppOpenT
     ...TILE_MENU_ACTIONS,
     reordering
       ? { action: 'end-tile-reorder', label: '並べ替えを終える' }
-      : { action: 'start-tile-reorder', label: '並べ替える' },
+      : { action: 'start-tile-reorder', label: 'タイルを並べ替える' },
   ];
 }
 

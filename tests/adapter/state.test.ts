@@ -155,7 +155,7 @@ describe('reducer: lean aggregate', () => {
     const refused = reduce(s, { type: 'SET_VIEW_MODE', mode: 'query' }).state;
     expect(refused.viewMode, '編集中なのに集計が開いた').toBe('detail');
     expect(refused.error, '黙って捨てている(無言の dead click)').toBe(
-      '編集中は集計を開けません(保存するか、キャンセルすると開けます)',
+      '編集中は集計を開けません(「編集を保存する」か「編集をやめる」を押すと開けます)',
     );
     // ⚠ 対照群 ── 開ける面では理由を出さない(常在する断り文を作らない)
     expect(
@@ -1278,7 +1278,7 @@ describe('編集中の日付は、黙って捨てない(#516)', () => {
     expect(s.phase, '前提が崩れている(error phase になっていない)').toBe('error');
     const out = reduce(s, { type: 'SET_ENTRY_DATE', lid: 'a', date: '2026-09-01' });
     expect(out.state.error, '編集していないのに「編集を終了」と言った').not.toContain('編集を終了');
-    expect(out.state.error).toContain('「再保存」を押してから');
+    expect(out.state.error).toContain('「ノートを保存し直す」を押してから');
   });
 
   it('⚠ 対照群 ── ready なら今までどおり本文へ書きに行く(門が全部を塞いでいない)', () => {

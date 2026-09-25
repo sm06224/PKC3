@@ -42,9 +42,11 @@ export function trimmedCaptureName(name: string, startMs: number, endMs: number)
  */
 export function trimMarkText(startMs: number | null, endMs: number | null): string {
   if (startMs === null && endMs === null) {
-    return '聞きながら「ここから」「ここまで」を押すと、その範囲だけを新しい録音にできます。';
+    return '聞きながら「ここを始まりにする」「ここを終わりにする」を押すと、その範囲だけを新しい録音にできます。';
   }
-  if (endMs === null) return `ここから ${elapsedText(startMs!)} ── 「ここまで」も押してください`;
-  if (startMs === null) return `ここまで ${elapsedText(endMs)} ── 「ここから」も押してください`;
+  if (endMs === null)
+    return `ここから ${elapsedText(startMs!)} ── 「ここを終わりにする」も押してください`;
+  if (startMs === null)
+    return `ここまで ${elapsedText(endMs)} ── 「ここを始まりにする」も押してください`;
   return `${elapsedText(startMs)}〜${elapsedText(endMs)}(${elapsedText(endMs - startMs)})`;
 }

@@ -119,7 +119,7 @@ export class KindBarRenderer {
       off.type = 'button';
       off.setAttribute('data-pkc-action', 'clear-kind-filter');
       off.setAttribute('data-pkc-field', 'kind-clear');
-      off.textContent = '解除';
+      off.textContent = '種類の絞りを外す';
       off.title = '種類の絞りを外して全部出します';
       bar.append(off);
     }

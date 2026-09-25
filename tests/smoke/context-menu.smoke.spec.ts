@@ -52,8 +52,8 @@ test('🔴 行を右クリックすると、その行にできることが出る
   const items = menu.locator('button[data-pkc-action]');
   expect(await items.count(), 'メニューが空').toBeGreaterThanOrEqual(3);
   // ⚠ 名前が出ている(図案だけの箱にしない)
-  await expect(menu, '「削除」が出ていない').toContainText('削除');
-  await expect(menu, '「履歴」が出ていない').toContainText('履歴');
+  await expect(menu, '「ゴミ箱へ移す」が出ていない').toContainText('ゴミ箱へ移す');
+  await expect(menu, '「履歴を開く」が出ていない').toContainText('履歴を開く');
 
   // 🔴 **器の中に収まっている**(画面の外へ出ると下の項目に手が届かない)
   const box = await menu.boundingBox();

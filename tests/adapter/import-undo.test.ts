@@ -45,14 +45,14 @@ describe('取り込みの戻り道(#535 ②)', () => {
     expect(h.undo.pending()).toBeNull();
   });
 
-  it('🔴 憶えた分を、ごみ箱へ入れる口が出る', () => {
+  it('🔴 憶えた分を、ゴミ箱へ入れる口が出る', () => {
     const h = make();
     h.undo.remember(['a', 'b', 'c']);
     const p = h.undo.pending();
     expect(p?.action).toBe('undo-import');
     // ⚠ 押す前の説明は「起きること」で書く(user 指示 2026-08-21)
     expect(p?.title, '件数と行き先が説明に無い').toContain('3 件');
-    expect(p?.title).toContain('ごみ箱');
+    expect(p?.title).toContain('ゴミ箱');
   });
 
   it('🔴 押すと DELETE_ENTRIES が、憶えた分ちょうど飛ぶ', () => {
@@ -62,7 +62,7 @@ describe('取り込みの戻り道(#535 ②)', () => {
     expect(h.sent).toEqual([{ type: 'DELETE_ENTRIES', lids: ['a', 'b'] }]);
     // ⚠ **面を畳む**(戻した後に「取り消す」が残らない)
     expect(h.cleared, '注意の面を畳んでいない').toBe(1);
-    expect(h.said.join(''), '何が起きたか言っていない').toContain('ごみ箱');
+    expect(h.said.join(''), '何が起きたか言っていない').toContain('ゴミ箱');
   });
 
   it('🔴 2 度押しても 2 度は走らない(200 件が 2 回消えない)', () => {

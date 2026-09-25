@@ -1,6 +1,10 @@
 import { test, expect } from '@playwright/test';
 import { gotoApp, clickReal, createEntry, collectPageErrors } from './helpers';
 import { chromiumLaunch } from './playwright.config';
+// ⚠ 手で書き写さない ── `[data-pkc-field="capture-trim"]` の textContent は
+//   `trimMarkText()` の戻り値そのもの(`captures.ts`)。字を直した日に
+//   両方そのままで緑にならないよう、実装の出力を直に引く。
+import { trimMarkText } from '../../src/features/audio/trim-text';
 
 /**
  * 🔴 **録音して止めると、開いていたノートに入る**(#413。user 要望 2026-07-16
@@ -264,7 +268,7 @@ ${(e as Error).message}`,
     .toBeGreaterThanOrEqual(1);
 
   const mark = page.locator('[data-pkc-field="capture-trim"]');
-  await expect(mark, '押し方の案内が出ていない').toContainText('「ここから」');
+  await expect(mark, '押し方の案内が出ていない').toHaveText(trimMarkText(null, null));
 
   /**
    * ⚠ **印は「いま鳴っている所」なので、位置を動かしてから押す。**

@@ -61,9 +61,9 @@ export function createImportUndo(deps: ImportUndoDeps): ImportUndo {
     pending() {
       if (lids.length === 0) return null;
       return {
-        label: '取り消す',
+        label: '取り込みを取り消す',
         action: 'undo-import',
-        title: `いま取り込んだ ${lids.length} 件をごみ箱へ入れます(ごみ箱から戻せます)`,
+        title: `いま取り込んだ ${lids.length} 件をゴミ箱へ入れます(ゴミ箱から戻せます)`,
       };
     },
     undo() {
@@ -72,7 +72,7 @@ export function createImportUndo(deps: ImportUndoDeps): ImportUndo {
       // ⚠ **先に忘れる** ── 帯や面の更新で例外が出ても、2 度目の取り消しを残さない
       lids = [];
       deps.clear();
-      deps.notify('取り込んだ分をごみ箱へ入れました。ごみ箱から戻せます');
+      deps.notify('取り込んだ分をゴミ箱へ入れました。ゴミ箱から戻せます');
     },
   };
 }

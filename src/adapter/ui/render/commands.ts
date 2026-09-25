@@ -107,10 +107,10 @@ export const COLLECTION_COMMANDS: readonly CollectionCommand[] = [
  *   `buildCollectionPane` が、この配列を描いた**直後**に手で組む。
  */
 export const COLLECTION_PANE_COMMANDS: readonly CollectionCommand[] = [
-  { action: 'export-html', label: '閲覧用 HTML', title: '読むだけの 1 枚にまとめます' },
+  { action: 'export-html', label: '閲覧用 HTML で書き出す', title: '読むだけの 1 枚にまとめます' },
   {
     action: 'export-portable',
-    label: '持ち歩ける HTML 1 枚',
+    label: 'HTML 1 枚で書き出す',
     /**
      * 🔴 **「閲覧用 HTML」との違いを、題名ではなく説明で言い切る**(#400 段④)。
      * ⚠ どちらも「HTML 1 枚」なので、**何が違うか**を書かないと選べない ──
@@ -122,7 +122,7 @@ export const COLLECTION_PANE_COMMANDS: readonly CollectionCommand[] = [
   },
   {
     action: 'export-markdown',
-    label: 'Markdown',
+    label: 'Markdown で書き出す',
     /**
      * 🔴 **何のための形かを書く**(#180 の C-2、2026-08-24)。
      * ⚠ 直す前は「Markdown ファイルとして保存します」だけで、**押す理由**が
@@ -247,9 +247,9 @@ function buildPurgeOrphanAssets(): HTMLElement {
 function buildContainerRepair(): DocumentFragment {
   const frag = document.createDocumentFragment();
 
-  const toggle = iconButton('toggle-container-repair', '作り直す・初期化する を出す');
+  const toggle = iconButton('toggle-container-repair', '作り直す・初期化する のボタンを出す');
   toggle.setAttribute('aria-expanded', 'false');
-  toggle.title = 'ここを押すと、入れ物を作り直す・初期化する の 2 つのボタンが出ます';
+  toggle.title = 'ここを押すと、保存領域を作り直す・初期化する の 2 つのボタンが出ます';
   frag.append(toggle);
 
   const box = document.createElement('div');
@@ -421,14 +421,14 @@ export function buildStorageProfile(): HTMLElement {
   const box = document.createElement('section');
   box.setAttribute('data-pkc-region', 'storage-profile');
   const h = document.createElement('h4');
-  h.textContent = '何が容量を使っているか';
+  h.textContent = '容量の内訳';
   box.append(h);
 
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.setAttribute('data-pkc-action', 'storage-profile');
   btn.setAttribute('data-pkc-field', 'storage-profile-run');
-  btn.textContent = '調べる';
+  btn.textContent = '容量を調べる';
   btn.title = '添付の重い順にノートを並べます。行を押すと、そのノートを開きます';
   box.append(btn);
 
@@ -484,7 +484,7 @@ function buildDbRescue(): HTMLElement {
   const box = document.createElement('section');
   box.setAttribute('data-pkc-region', 'db-rescue');
   const h = document.createElement('h4');
-  h.textContent = '保存領域に問題が無いか調べる';
+  h.textContent = '保存領域の点検';
   box.append(h);
 
   const check = document.createElement('button');

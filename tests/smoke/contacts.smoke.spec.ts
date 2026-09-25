@@ -201,7 +201,7 @@ test('🔴 絞り込みで 0 件でも「絞りを外す」から戻れる (#536
  *
  * ## unit では原理的に届かない ── **配線の両端が別々に test されている**から
  *
- * 「取り消す」を出すのは**注意の面**(`notices.ts`)、押されたら実行するのは
+ * 「取り込みを取り消す」を出すのは**注意の面**(`notices.ts`)、押されたら実行するのは
  * **root の委譲**(`binder.ts`)、記憶を持つのは `import-undo.ts`、
  * そして 3 つを結ぶのは **`main.ts`** である。
  * ⚠ `main.ts` は**原文を読む test からしか実行されない**ので、
@@ -212,7 +212,7 @@ test('🔴 絞り込みで 0 件でも「絞りを外す」から戻れる (#536
  * ⚠ 観測点は**面の外**にする ── 面が畳まれただけでは「消えた」と言えない。
  *   連絡先の一覧が **1 → 0** に戻ることまで見る。
  */
-test('🔴 取り込んだ直後に「取り消す」を押すと、入った分がごみ箱へ入る (#535 ②)', async ({
+test('🔴 取り込んだ直後に「取り込みを取り消す」を押すと、入った分がゴミ箱へ入る (#535 ②)', async ({
   page,
 }) => {
   const errors = collectPageErrors(page);
@@ -244,7 +244,7 @@ test('🔴 取り込んだ直後に「取り消す」を押すと、入った分
     timeout: 10_000,
   });
   // ⚠ 押す前の説明は「起きること」で書く
-  await expect(undo).toHaveAttribute('title', /ごみ箱/);
+  await expect(undo).toHaveAttribute('title', /ゴミ箱/);
 
   // 🔑 **前提** ── 取り消す前は連絡先に 1 件並んでいる(空振り防止)
   await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="contacts"]');
@@ -262,7 +262,7 @@ test('🔴 取り込んだ直後に「取り消す」を押すと、入った分
     '取り消したのに連絡先が残っている',
   ).toHaveCount(0, { timeout: 10_000 });
   // 🔑 **どこへ行ったかを言っている**(黙って消さない)
-  await expect(page.locator('[data-pkc-region="status"]')).toContainText('ごみ箱');
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('ゴミ箱');
   // ⚠ 押した後に口が残らない(2 度目は何も消さないので、置いておくと dead click)
   await expect(
     page.locator('[data-pkc-action="undo-import"]'),

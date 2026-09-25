@@ -48,7 +48,7 @@ export const BACKUP_LABEL = 'バックアップ';
  * (`docs/development/ui-total-design-2026-09.md` §6「評価語・脅し語を使わない」)。
  * ⚠ 「壊れ」は不安を煽る語で、user 指摘 2026-09-20 が名指しで挙げた対象そのものである。
  */
-export const DB_CHECK_LABEL = '点検する';
+export const DB_CHECK_LABEL = '保存領域を点検する';
 
 /**
  * 🔑 **拾った中身で、その場に建て直す**（#1006。user 裁定 2026-09-18）。
@@ -62,11 +62,11 @@ export const DB_CHECK_LABEL = '点検する';
  * (同上 §6)。「壊れて直らないときの、最後の手」という見出しは廃止し、
  * この字は「中身が壊れていないか調べる」の中の畳んだ箱から押す。
  */
-export const CONTAINER_REBUILD_LABEL = '作り直す';
+export const CONTAINER_REBUILD_LABEL = '保存領域を作り直す';
 
 /**
  * 🔴 入れ物ごと捨てる(取り消せない)。
  *
  * 🔴 **2026-09-21(#1017 段③-1)に「中身を捨てる」から改名した**(同上 §6)。
  */
-export const CONTAINER_RESET_LABEL = '初期化する';
+export const CONTAINER_RESET_LABEL = '保存領域を初期化する';

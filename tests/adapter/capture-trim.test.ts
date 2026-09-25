@@ -167,7 +167,7 @@ describe('断る道 ── どれも黙って終わらない', () => {
   it('🔴 範囲が決まっていなければ、決めろと言う', async () => {
     const h = harness();
     await h.trimmer.run('a', 1000, 1000);
-    expect(error(h.dispatcher)).toContain('ここから');
+    expect(error(h.dispatcher)).toContain('ここを始まりにする');
     expect(h.deps.trim).not.toHaveBeenCalled();
   });
 

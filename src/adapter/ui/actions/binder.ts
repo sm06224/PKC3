@@ -2784,7 +2784,7 @@ function pickAppendTarget(dispatcher: Dispatcher, root: HTMLElement, line: numbe
       type: 'OP_FAILED',
       error:
         mode.kind === 'editing'
-          ? '編集中は追記欄を使えません(保存するか、キャンセルすると入り先を選べます)'
+          ? '編集中は追記欄を使えません(「編集を保存する」か「編集をやめる」を押すと入り先を選べます)'
           : '追記を書き込んでいる間は、入り先を変えられません',
     });
     return;
@@ -3019,7 +3019,7 @@ function deleteFrom(
     if (st.phase !== 'ready') {
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: `${phaseBlockReason(st.phase)}削除してください`,
+        error: `${phaseBlockReason(st.phase)}ゴミ箱へ移してください`,
       });
       return;
     }
@@ -3028,7 +3028,7 @@ function deleteFrom(
      * 🔴 **見えている行に絞る**(着地前レビュー 2)。印は行が見えなくなっても
      * 残る(絞り込みで消えた / 別タブが消した)ので、素で消すと**画面に無いものが
      * ゴミ箱へ入る**。⚠ 帯に出す数(`filer.ts`)と**同じ規則**を通す ──
-     * 食い違うと「2 件を削除しますか?」と聞いて 3 件消す形になる。
+     * 食い違うと「2 件をゴミ箱へ移しますか?」と聞いて 3 件動かす形になる。
      */
     const lids = operationTargets(rows, selection, cursor);
     if (lids.length === 0) {
@@ -3046,14 +3046,14 @@ function deleteFrom(
         error:
           selection.length > 0
             ? '選んでいた行がいま画面にありません(絞り込みを消すか、選び直してください)'
-            : '削除するものを選んでください(行を押すと選べます)',
+            : 'ゴミ箱へ移すものを選んでください(行を押すと選べます)',
       });
       return;
     }
     confirmThen(
       root,
-      `選んでいる ${lids.length} 件を削除しますか?(ゴミ箱から戻せます)`,
-      { okLabel: '削除', danger: true },
+      `選んでいる ${lids.length} 件をゴミ箱へ移しますか?`,
+      { okLabel: 'ゴミ箱へ移す', danger: true },
       dispatcher,
       /**
        * ⚠ 待っている間に **①編集が始まる ②対象が消える**(別タブ / 取込)。
@@ -3062,7 +3062,7 @@ function deleteFrom(
        */
       () => {
         const st = dispatcher.getState();
-        if (st.phase !== 'ready') return `${phaseBlockReason(st.phase)}削除してください`;
+        if (st.phase !== 'ready') return `${phaseBlockReason(st.phase)}ゴミ箱へ移してください`;
         const alive = lids.filter((l) => st.entryMetas.has(l));
         if (alive.length === 0) return '選んでいたものは、もうありません';
         if (alive.length !== lids.length)
@@ -4230,7 +4230,7 @@ const ACTIONS: Record<string, ActionHandler> = {
            */
           {
             action: 'open-copy-history',
-            label: 'コピーした物',
+            label: 'コピーした物を開く',
             hint: 'この端末で前にコピーした物を出します(押すともう一度コピーされます)',
           },
           /**
@@ -5075,7 +5075,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (phase !== 'ready') {
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: `${phaseBlockReason(phase)}削除してください`,
+        error: `${phaseBlockReason(phase)}ゴミ箱へ移してください`,
       });
       return;
     }
@@ -5101,12 +5101,12 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     confirmThen(
       root,
-      `「${title}」を削除しますか?(ゴミ箱から戻せます)`,
-      { okLabel: '削除', danger: true },
+      `「${title}」をゴミ箱へ移しますか?`,
+      { okLabel: 'ゴミ箱へ移す', danger: true },
       dispatcher,
       () => {
         const st = dispatcher.getState();
-        if (st.phase !== 'ready') return `${phaseBlockReason(st.phase)}削除してください`;
+        if (st.phase !== 'ready') return `${phaseBlockReason(st.phase)}ゴミ箱へ移してください`;
         if (!st.entryMetas.has(lid)) return `「${title}」は、もうありません`;
         return null;
       },
@@ -5566,7 +5566,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       root,
       '追記の書き込みを強制的に打ち切ります。書き込みが実際には進んでいた場合、' +
         'この画面の表示が実際の中身より古くなることがあります(開き直すと直ります)。よろしいですか?',
-      { okLabel: '打ち切る', danger: true },
+      { okLabel: '書き込みを打ち切る', danger: true },
       dispatcher,
       /**
        * 🔴 **ここだけは門を足さない**(#308)。返ってこない書込で**永久に
@@ -6662,7 +6662,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     confirmThen(
       root,
       'この板を本文から消しますか?(中に書いた字も消えます。取り消せません)',
-      { okLabel: '消す', danger: true },
+      { okLabel: 'この板を消す', danger: true },
       dispatcher,
       () => {
         const now = dispatcher.getState();
@@ -7150,7 +7150,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: 'この環境では容量を数えられません' });
       return;
     }
-    sum.textContent = '調べています…';
+    sum.textContent = '容量を調べています…';
     sum.hidden = false;
     void services.storageProfile().then(
       (result) => {
@@ -7333,12 +7333,12 @@ const ACTIONS: Record<string, ActionHandler> = {
         confirmInApp(
           root,
           rebuildExplainMessage({ notes: dispatcher.getState().entryMetas.size, assetsOnDisk }),
-          { okLabel: '始める', cancelLabel: 'やめる' },
+          { okLabel: '保存領域を作り直す', cancelLabel: 'やめる' },
         ),
       )
       .then(async (answer) => {
         if (answer !== 'ok') return;
-        sum.textContent = '拾っています…';
+        sum.textContent = '中身を取り出しています…';
         sum.hidden = false;
         try {
           /**
@@ -7348,7 +7348,9 @@ const ACTIONS: Record<string, ActionHandler> = {
            */
           const report = await rebuild(cid, (phase, seen) => {
             sum.textContent =
-              phase === 'pick' ? `拾っています… ${seen} 件` : `戻しています… ${seen} 件`;
+              phase === 'pick'
+                ? `中身を取り出しています… ${seen} 件`
+                : `ノートを戻しています… ${seen} 件`;
           });
           const done = rebuildDoneMessage(report);
           sum.textContent = done;
@@ -7482,7 +7484,7 @@ const ACTIONS: Record<string, ActionHandler> = {
           label: resetPassphraseLabel(),
           // ⚠ **`initial` を渡さない** ── 渡すと、空のまま受けたときに
           //    `promptInApp` がその字を返す(= 何も打たずに合言葉が通る)
-          okLabel: '初期化する',
+          okLabel: '保存領域を初期化する',
           // 🔴 danger ── ここが**本当に消える 1 押し**である(1 件削除より重い)
           danger: true,
         });
@@ -7495,7 +7497,7 @@ const ACTIONS: Record<string, ActionHandler> = {
           });
           return;
         }
-        sum.textContent = '消しています…';
+        sum.textContent = '保存領域を消しています…';
         sum.hidden = false;
         try {
           const report = await reset(cid);
@@ -7780,7 +7782,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       title: 'スタックを保存する',
       label: `${String(lids.length)} 件の並びを、リンクの箇条書きのノートとして保存します。題名:`,
       initial,
-      okLabel: '保存する',
+      okLabel: 'スタックを保存する',
     }).then((title) => {
       if (title === null) return;
       // ⚠ 開いている間に降ろされていることがある ── 保存するのは**押した時点ではなく決めた時点**の並び
@@ -9082,7 +9084,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     confirmThen(
       root,
       'ゴミ箱を空にします(捨てたノートの履歴も消え、元に戻せません)。よろしいですか?',
-      { okLabel: '空にする', danger: true },
+      { okLabel: 'ゴミ箱を空にする', danger: true },
       dispatcher,
       notWhileEditing(dispatcher, '空にしてください'),
       () => dispatcher.dispatch({ type: 'PURGE_TRASH' }),

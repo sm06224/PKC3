@@ -161,7 +161,7 @@ export function showArchiveWindowError(win: Window, title: string, text: string)
   const close = doc.createElement('button');
   close.type = 'button';
   close.setAttribute('data-pkc-field', 'archive-window-close');
-  close.textContent = '閉じる';
+  close.textContent = 'ウィンドウを閉じる';
   close.addEventListener('click', () => {
     try {
       win.close();
@@ -293,7 +293,7 @@ export function pickInArchiveWindow(win: Window, deps: ArchivePickDeps): Promise
       list.append(btn);
     }
     const n = deps.countFiles(marks);
-    ok.textContent = n === 0 ? '取り出す' : `選んだ ${n} 件を取り出す`;
+    ok.textContent = n === 0 ? '選んだ物を取り出す' : `選んだ ${n} 件を取り出す`;
     // ⚠ **0 件では押せない** ── 押しても何も起きない口を作らない
     ok.disabled = n === 0;
     if (focusPath !== null) {

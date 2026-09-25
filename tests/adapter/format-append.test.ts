@@ -283,9 +283,9 @@ describe('「図」を押すと 5 種から選ぶ(#528 案 B)', () => {
     q('[data-pkc-action="start-edit"]')!.click();
     const buttons = [...root.querySelectorAll('[data-pkc-region="format-bar"] button')];
     const labels = buttons.map((b) => b.querySelector('[data-pkc-field="label"]')?.textContent);
-    const at = labels.indexOf('図');
-    expect(at, '帯に「図」が無い').toBeGreaterThan(0);
-    expect(labels[at - 1], '「図」が表の隣に居ない').toBe('表');
+    const at = labels.indexOf('図を入れる');
+    expect(at, '帯に「図を入れる」が無い').toBeGreaterThan(0);
+    expect(labels[at - 1], '「図を入れる」が表の隣に居ない').toBe('表');
     expect(buttons[at]!.getAttribute('data-pkc-action')).toBe('insert-diagram');
     expect(buttons[at]!.hasAttribute('data-pkc-format'), 'まだ format-text の口が残っている').toBe(false);
     // ⚠ 対照群 ── `format-text` の側には `mermaid` のボタンが**居ない**
@@ -799,10 +799,10 @@ describe('「図案」を押すと絵の表から選ぶ(#853 段①)', () => {
     const { q, root } = await openPicker();
     const buttons = [...root.querySelectorAll('[data-pkc-region="format-bar"] button')];
     const labels = buttons.map((b) => b.querySelector('[data-pkc-field="label"]')?.textContent);
-    const at = labels.indexOf('図案');
-    expect(at, '帯に「図案」が無い').toBeGreaterThan(0);
+    const at = labels.indexOf('図案を入れる');
+    expect(at, '帯に「図案を入れる」が無い').toBeGreaterThan(0);
     // ⚠ **入れる道具の並びの末尾**(日付 / ノート / 雛形 の後)── 既に在る 3 つを動かさない
-    expect(labels[at - 1], '「図案」がテンプレートの隣に居ない').toBe('テンプレート');
+    expect(labels[at - 1], '「図案を入れる」がテンプレートの隣に居ない').toBe('テンプレートを入れる');
     expect(buttons[at]!.hasAttribute('data-pkc-format'), 'format-text の口が付いている').toBe(false);
     expect(q('[data-pkc-action="insert-icon"]')).not.toBeNull();
   });

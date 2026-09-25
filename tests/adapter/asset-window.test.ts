@@ -316,8 +316,8 @@ describe('図の別窓(実寸 + 拡大縮小 ── #527 案 A)', () => {
       expect(labels, `マウスだけで拡大縮小・往復できない(fit=${String(fit)})`).toEqual([
         '−',
         '＋',
-        '実寸',
-        '収める',
+        '実寸で見る',
+        'ウィンドウに収める',
       ]);
     }
   });
@@ -378,10 +378,10 @@ describe('図の別窓(実寸 + 拡大縮小 ── #527 案 A)', () => {
         .find((x) => x.textContent === label)
         ?.dispatchEvent(new Event('click'));
     };
-    press('実寸');
+    press('実寸で見る');
     expect(doc.body.hasAttribute('data-pkc-fit'), '実寸にしたのに収める印が残っている').toBe(false);
     expect(img.style.width, '実寸で原寸にならない').toBe('400px');
-    press('収める');
+    press('ウィンドウに収める');
     expect(doc.body.getAttribute('data-pkc-fit'), '収めるへ戻れない(片道の操作)').toBe('contain');
     expect(img.style.width, '収めるへ戻したのに幅が残っている').toBe('');
   });
@@ -467,7 +467,7 @@ describe('図の別窓(実寸 + 拡大縮小 ── #527 案 A)', () => {
     expect(img.style.width, '− で戻らない').toBe('400px');
     press('−');
     expect(img.style.width, '− で小さくならない').toBe('320px');
-    press('実寸');
+    press('実寸で見る');
     expect(img.style.width, '実寸で原寸へ戻らない').toBe('400px');
   });
 

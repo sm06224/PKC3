@@ -157,7 +157,7 @@ export function createAnnounce(
       const next = document.createElement('button');
       next.type = 'button';
       next.setAttribute('data-pkc-action', 'next-announce');
-      next.textContent = '次へ';
+      next.textContent = '次のお知らせを出す';
       next.title = 'この 1 件を読んだことにして、次のお知らせを出します';
       head.append(label, next);
     } else {
@@ -167,7 +167,7 @@ export function createAnnounce(
     const close = document.createElement('button');
     close.type = 'button';
     close.setAttribute('data-pkc-action', 'dismiss-announce');
-    close.textContent = '閉じる';
+    close.textContent = 'お知らせを閉じる';
     /** ⚠ **押す前に結果が分かるようにする** ── 残りごと既読になることを書く。 */
     close.title =
       unread.length === 1
@@ -229,12 +229,12 @@ export function createAnnounce(
        *   移した(ヘルプには 1 行のリンクだけ残る)。「今後は出さない」の戻し道も
        *   #1017 段③-1 で「表示」から「お知らせ」の h3 へ移っている。
        */
-      `過去のお知らせは「システム」から${NOTICE_READABLE_TEXT}が読めます。「今後は出さない」はシステムの「お知らせ」から戻せます。`;
+      `過去のお知らせは「システム」から${NOTICE_READABLE_TEXT}が読めます。「今後はお知らせを出さない」はシステムの「お知らせ」から戻せます。`;
 
     const mute = document.createElement('button');
     mute.type = 'button';
     mute.setAttribute('data-pkc-action', 'mute-announce');
-    mute.textContent = '今後は出さない';
+    mute.textContent = '今後はお知らせを出さない';
     /** ⚠ **戻し道をその場に書く**(押した後に探させない)。 */
     mute.title = 'システムの「お知らせ」からいつでも戻せます';
 

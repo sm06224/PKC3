@@ -177,9 +177,9 @@ export class CapturesRenderer {
   private noteText(state: AppState, shown: number): string {
     if (state.captureScanFailed)
       return '音と動画を集められませんでした(開き直すと試し直します)';
-    if (state.captureItems === null) return '集めています…';
+    if (state.captureItems === null) return '音と動画を集めています…';
     if (state.captureItems.length === 0)
-      return '音と動画はまだありません。左下の 録音 か 画面 で録ると、ここに並びます。';
+      return '音と動画はまだありません。左下の「録音」か「画面録画」で録ると、ここに並びます。';
     if (shown === 0) return '絞り込みに当たるものがありません';
     return `${shown} 件`;
   }
@@ -287,7 +287,7 @@ export class CapturesRenderer {
     mark.type = 'button';
     mark.setAttribute('data-pkc-action', 'capture-trim-start');
     mark.setAttribute('data-pkc-field', 'capture-trim-start');
-    mark.textContent = 'ここから';
+    mark.textContent = 'ここを始まりにする';
     /**
      * ⚠ **走っている間は印も打たせない**(着地前レビュー 2-C)── 打てても、
      *   走っている物が終わった瞬間に `CLEAR_CAPTURE_TRIM` で**打ち直した印ごと消える**。
@@ -300,7 +300,7 @@ export class CapturesRenderer {
     until.type = 'button';
     until.setAttribute('data-pkc-action', 'capture-trim-end');
     until.setAttribute('data-pkc-field', 'capture-trim-end');
-    until.textContent = 'ここまで';
+    until.textContent = 'ここを終わりにする';
     until.disabled = this.trimBusy;
     until.title = 'いま鳴っている所を、切り出しの終わりにします。';
     bar.append(until);
@@ -317,7 +317,7 @@ export class CapturesRenderer {
       run.type = 'button';
       run.setAttribute('data-pkc-action', 'capture-trim-run');
       run.setAttribute('data-pkc-field', 'capture-trim-run');
-      run.textContent = this.trimBusy ? '切り出しています…' : 'この範囲で切り出す';
+      run.textContent = this.trimBusy ? 'この範囲を切り出しています…' : 'この範囲で切り出す';
       run.disabled = this.trimBusy;
       run.title = this.trimBusy
         ? 'いま切り出しています。終わるまでお待ちください。'
@@ -332,7 +332,7 @@ export class CapturesRenderer {
       // ⚠ 走っている間は印を消させない ── 消しても走っている物は止まらないので、
       //   「消したのに増えた」という読めない結果になる
       clear.disabled = this.trimBusy;
-      clear.title = '「ここから」「ここまで」で選んだ範囲を消します。';
+      clear.title = '「ここを始まりにする」「ここを終わりにする」で選んだ範囲を消します。';
       bar.append(clear);
     }
 
@@ -386,7 +386,7 @@ export class CapturesRenderer {
         stop.type = 'button';
         stop.setAttribute('data-pkc-action', 'capture-stop');
         stop.setAttribute('data-pkc-field', 'capture-stop');
-        stop.textContent = '閉じる';
+        stop.textContent = '再生をやめる';
         stop.title = '再生をやめて、いま使っているメモリを返します。';
         li.append(stop);
         this.trimControls(li, item);
@@ -396,7 +396,7 @@ export class CapturesRenderer {
         play.setAttribute('data-pkc-action', 'capture-play');
         play.setAttribute('data-pkc-entry', item.lid);
         play.setAttribute('data-pkc-field', 'capture-play');
-        play.textContent = item.kind === 'audio' ? '聞く' : '見る';
+        play.textContent = item.kind === 'audio' ? '音を聞く' : '動画を見る';
         li.append(play);
       }
     }

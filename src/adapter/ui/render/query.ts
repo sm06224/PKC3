@@ -125,7 +125,7 @@ export class QueryRenderer {
     const refresh = document.createElement('button');
     refresh.type = 'button';
     refresh.setAttribute('data-pkc-action', 'refresh-query');
-    refresh.textContent = '数え直す';
+    refresh.textContent = '集計を数え直す';
     refresh.title = '書き換えた後の中身で数え直します';
     head.append(title, label, refresh);
 
@@ -179,13 +179,13 @@ export class QueryRenderer {
     const parts: string[] = [];
     /**
      * 🔴 **「まだ」と「駄目だった」を分ける**(レビュー B-5)── 分けないと、
-     * 数えられない環境で「数えています…」が**永久に出続ける**。
+     * 数えられない環境で「集計を数えています…」が**永久に出続ける**。
      */
     if (state.queryFailed) {
       note.textContent = 'この版では集計を数えられませんでした(読み込み直すと直ることがあります)';
       return;
     }
-    if (keys === null) parts.push('数えています…');
+    if (keys === null) parts.push('集計を数えています…');
     else if (keys.scanned === 0) parts.push('ノートがまだありません');
     else parts.push(`${keys.scanned} 件のノートを見ました`);
     if (keys !== null && keys.omittedKeys > 0)
@@ -219,7 +219,7 @@ export class QueryRenderer {
     if (groups === null) {
       const wait = document.createElement('p');
       wait.setAttribute('data-pkc-field', 'query-empty');
-      wait.textContent = '数えています…';
+      wait.textContent = '集計を数えています…';
       table.append(wait);
       return;
     }

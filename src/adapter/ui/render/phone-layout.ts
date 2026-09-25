@@ -473,7 +473,7 @@ export class PhoneLayout {
        */
       const toList = page !== 'info';
       back.setAttribute(PHONE_PAGE_ATTR, toList ? 'list' : 'note');
-      back.textContent = toList ? '← 一覧' : '← ノート';
+      back.textContent = toList ? '← 一覧へ戻る' : '← ノートへ戻る';
       back.title = toList ? '一覧へ戻ります' : 'ノートの本文へ戻ります';
     }
     // ⚠ 情報ページでは「情報」を出さない ── いま居る場所へ行くボタンは dead click

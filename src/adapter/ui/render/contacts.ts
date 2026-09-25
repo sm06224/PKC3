@@ -92,7 +92,7 @@ export class ContactsRenderer {
     const add = document.createElement('button');
     add.type = 'button';
     add.setAttribute('data-pkc-action', 'contacts-quick-add');
-    add.textContent = '足す';
+    add.textContent = '連絡先を足す';
     // ⚠ **どこへ書くか**と**いつ並ぶか**を両方言う ── 「足したのに出てこない」を作らない
     add.title =
       '名前を題名にしたノートを作り、先頭の囲みに tel: / email: / org: を書きます(取り込みと同じ形)。電話かメールが 1 つ以上あると、ここに並びます';
@@ -212,7 +212,7 @@ export class ContactsRenderer {
   private noteText(state: AppState, shown: number): string {
     if (state.contactScanFailed) return '連絡先を集められませんでした(開き直すと試し直します)';
     const scan = state.contactScan;
-    if (scan === null) return '集めています…';
+    if (scan === null) return '連絡先を集めています…';
     if (scan.cards.length === 0)
       return '連絡先はまだありません。ノートの先頭に tel: か email: を書くと、ここに並びます。';
     if (shown === 0) return '絞り込みに当たる連絡先がありません';

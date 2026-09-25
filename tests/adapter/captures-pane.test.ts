@@ -83,7 +83,7 @@ describe('録ったものの面 ── 何が見えるか(#683 段①)', () => {
    *   判明した形)── 取り違えると「集めています…」で**永久に止まって見える**。
    */
   it('🔴 集める前・失敗・0 件・件数で、字が全部違う', () => {
-    expect(note(pane({}).host), 'まだ集めていない').toBe('集めています…');
+    expect(note(pane({}).host), 'まだ集めていない').toBe('音と動画を集めています…');
     expect(note(pane({ captureScanFailed: true }).host)).toContain('集められませんでした');
     expect(note(pane({ captureItems: [] }).host)).toContain('まだありません');
     expect(note(pane({ captureItems: ITEMS() }).host)).toBe('2 件');
@@ -96,7 +96,7 @@ describe('録ったものの面 ── 何が見えるか(#683 段①)', () => {
    */
   it('🔴 集める前 → 失敗 で、画面の字が入れ替わる(指紋が潰していない)', () => {
     const p = pane({});
-    expect(note(p.host)).toBe('集めています…');
+    expect(note(p.host)).toBe('音と動画を集めています…');
     p.paint({ captureScanFailed: true });
     expect(note(p.host), '失敗が「まだ」と同じ指紋になっている').toContain('集められませんでした');
   });
@@ -460,9 +460,9 @@ describe('前後を削る ── 画面に何が出るか(#683 段②a)', () => 
   it('🔴 鳴らしている音の行に「ここから」「ここまで」が出る', async () => {
     const host = await paneReady(playing('a'));
     expect(field(host, 'a', 'capture-media'), '器がまだ出ていない(前提が崩れている)').not.toBeNull();
-    expect(field(host, 'a', 'capture-trim-start')?.textContent).toBe('ここから');
-    expect(field(host, 'a', 'capture-trim-end')?.textContent).toBe('ここまで');
-    expect(field(host, 'a', 'capture-trim')?.textContent).toContain('「ここから」');
+    expect(field(host, 'a', 'capture-trim-start')?.textContent).toBe('ここを始まりにする');
+    expect(field(host, 'a', 'capture-trim-end')?.textContent).toBe('ここを終わりにする');
+    expect(field(host, 'a', 'capture-trim')?.textContent).toContain('「ここを始まりにする」');
   });
 
   it('🔴 鳴らしていない行には 1 つも出ない(押しても時刻が無い)', async () => {
@@ -497,7 +497,7 @@ describe('前後を削る ── 画面に何が出るか(#683 段②a)', () => 
     await Promise.resolve();
     await Promise.resolve();
     p.paint();
-    expect(field(p.host, 'a', 'capture-trim')?.textContent).toContain('「ここから」');
+    expect(field(p.host, 'a', 'capture-trim')?.textContent).toContain('「ここを始まりにする」');
     const before = field(p.host, 'a', 'capture-media');
     expect(before, '前提が崩れている(器が出ていない)').not.toBeNull();
 
@@ -511,9 +511,9 @@ describe('前後を削る ── 画面に何が出るか(#683 段②a)', () => 
       '印を付けたら器が作り直された ── 聞いている音が止まる',
     ).toBe(before);
 
-    // ⚠ 「切り出しています…」でも同じ(こちらも帯だけ差し替える)
+    // ⚠ 「この範囲を切り出しています…」でも同じ(こちらも帯だけ差し替える)
     p.paint({ captureTrim: { lid: 'a', startMs: 12_000, endMs: 65_000 }, captureTrimBusy: true });
-    expect(field(p.host, 'a', 'capture-trim-run')?.textContent).toBe('切り出しています…');
+    expect(field(p.host, 'a', 'capture-trim-run')?.textContent).toBe('この範囲を切り出しています…');
     expect(field(p.host, 'a', 'capture-media'), '走り出したら器が作り直された').toBe(before);
   });
 
@@ -536,7 +536,7 @@ describe('前後を削る ── 画面に何が出るか(#683 段②a)', () => 
     expect(
       run()?.textContent,
       '走っているのに、押した所が何も言わない(指紋に入っていない)',
-    ).toBe('切り出しています…');
+    ).toBe('この範囲を切り出しています…');
     expect(run()?.disabled, '走っている最中も押せてしまう').toBe(true);
     expect(
       p.host.querySelector<HTMLButtonElement>('[data-pkc-field="capture-trim-clear"]')?.disabled,

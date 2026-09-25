@@ -231,7 +231,7 @@ export class FilerRenderer {
 
     const label = document.createElement('span');
     label.setAttribute('data-pkc-field', 'smart-why');
-    if (hit === null) label.textContent = '集めています…';
+    if (hit === null) label.textContent = 'フォルダの中身を集めています…';
     else if (hit.failed) label.textContent = 'この版では集められません';
     else if (isSmartEmpty(hit.spec))
       label.textContent = '条件を選んでください(まだ何も集めません)';
@@ -425,7 +425,7 @@ export class FilerRenderer {
       const count = document.createElement('span');
       count.setAttribute('data-pkc-field', 'filer-bulk-count');
       count.textContent = `${marks.length} 件を選んでいます`;
-      const del = iconButton('delete-selected', 'まとめてゴミ箱へ');
+      const del = iconButton('delete-selected', 'まとめてゴミ箱へ移す');
       // ⚠ 行き先は画面に在る名前で(上の `delete-entry` と同じ直し ── **対称の反対側**)
       del.title = `選んでいる ${marks.length} 件をゴミ箱へ入れます(左の列の「フォルダ」タブの中のゴミ箱から戻せます)`;
       const clear = document.createElement('button');
@@ -505,8 +505,8 @@ export class FilerRenderer {
       const nudge = document.createElement('div');
       nudge.setAttribute('data-pkc-field', 'order-nudge');
       for (const [dir, text] of [
-        ['up', '上へ'],
-        ['down', '下へ'],
+        ['up', '上へ動かす'],
+        ['down', '下へ動かす'],
       ] as const) {
         // 図案は `ACTION_ICONS['move-order-…']` が持つ(表は 1 つ)
         const b = iconButton(`move-order-${dir}`, text);
@@ -856,7 +856,7 @@ export class FilerRenderer {
         move.setAttribute('data-pkc-field', 'crumb-move');
         move.setAttribute('data-pkc-action', 'move-to-folder');
         move.setAttribute('data-pkc-entry', here.lid);
-        move.textContent = '移す…';
+        move.textContent = 'フォルダへ移す…';
         move.title = `いま開いている「${here.title}」を、別のフォルダへ移します`;
         crumb.append(move);
       }
@@ -1013,7 +1013,7 @@ export class FilerRenderer {
       const open = document.createElement('button');
       open.type = 'button';
       open.setAttribute('data-pkc-action', 'show-trash');
-      open.textContent = 'ゴミ箱';
+      open.textContent = 'ゴミ箱を開く';
       trashBar.append(open);
     } else {
       const head = document.createElement('div');
@@ -1025,13 +1025,13 @@ export class FilerRenderer {
       const close = document.createElement('button');
       close.type = 'button';
       close.setAttribute('data-pkc-action', 'hide-trash');
-      close.textContent = '閉じる';
+      close.textContent = 'ゴミ箱を閉じる';
       head.append(label, close);
       if (state.trashPanel.items.length > 0) {
         const purge = document.createElement('button');
         purge.type = 'button';
         purge.setAttribute('data-pkc-action', 'purge-trash');
-        purge.textContent = '空にする';
+        purge.textContent = 'ゴミ箱を空にする';
         head.append(purge);
       }
       trashBar.append(head);
@@ -1048,7 +1048,7 @@ export class FilerRenderer {
         restore.setAttribute('data-pkc-action', 'restore-trash');
         restore.setAttribute('data-pkc-rev-id', t.revId);
         restore.setAttribute('data-pkc-trash-lid', t.entryLid);
-        restore.textContent = '復元';
+        restore.textContent = 'ゴミ箱から戻す';
         li.append(text, restore);
         ul.append(li);
       }

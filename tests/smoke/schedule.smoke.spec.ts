@@ -287,7 +287,7 @@ test('🔴 予定のタブで札を掴んで日へ落とすと、本文の日付
   await cardText.click({ button: 'right' });
   const repeatMenu = page.locator('[data-pkc-region="context-menu"]');
   await expect(repeatMenu, '札を右クリックしてもメニューが出ない').toBeVisible();
-  await expect(repeatMenu, '「繰り返す…」が出ていない').toContainText('繰り返す…');
+  await expect(repeatMenu, '「予定を繰り返す…」が出ていない').toContainText('予定を繰り返す…');
   await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="open-repeat-menu"]');
   await expect(repeatMenu, '刻みの一覧に「毎週」が出ていない').toContainText('毎週');
   await clickReal(
@@ -303,22 +303,22 @@ test('🔴 予定のタブで札を掴んで日へ落とすと、本文の日付
   await clickReal(page, '[data-pkc-action="cancel-edit"]');
 
   /**
-   * ⑦ 🔴 **もう一度「繰り返す…」を開くと「やめる」が出て、押すと消える**
+   * ⑦ 🔴 **もう一度「予定を繰り返す…」を開くと「この繰り返しをやめる」が出て、押すと消える**
    *   (片道の操作を作らない ── CLAUDE.md 2026-08-23)。
    */
   await expect(d3Card, '毎週にした直後、D3 の束の札が 1 枚でなくなった').toHaveCount(1);
   await cardText.click({ button: 'right' });
   await expect(repeatMenu, '2 度目の右クリックでメニューが出ない').toBeVisible();
   await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="open-repeat-menu"]');
-  await expect(repeatMenu, '繰り返している行に「やめる」が出ていない').toContainText('やめる');
+  await expect(repeatMenu, '繰り返している行に「この繰り返しをやめる」が出ていない').toContainText('この繰り返しをやめる');
   await clickReal(
     page,
     '[data-pkc-region="context-menu"] [data-pkc-action="set-task-repeat"][data-pkc-repeat=""]',
   );
-  await expect(repeatMenu, '「やめる」を押してもメニューが閉じない').toHaveCount(0);
-  await expect(d3Card, '「やめる」を押しても札から「毎週」が消えない').not.toContainText('毎週');
+  await expect(repeatMenu, '「この繰り返しをやめる」を押してもメニューが閉じない').toHaveCount(0);
+  await expect(d3Card, '「この繰り返しをやめる」を押しても札から「毎週」が消えない').not.toContainText('毎週');
   await clickReal(page, '[data-pkc-action="start-edit"]');
-  await expect(ta, '「やめる」を押しても本文の「毎週」が消えない').toHaveValue(
+  await expect(ta, '「この繰り返しをやめる」を押しても本文の「毎週」が消えない').toHaveValue(
     `- [ ] 見積を送る @${D3}\n- [ ] 体裁のチェック`,
   );
   await clickReal(page, '[data-pkc-action="cancel-edit"]');

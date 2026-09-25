@@ -164,8 +164,8 @@ describe('並べ替えモード(#857 段①b-2)', () => {
     expect(moveBtns('a1'), 'モードでないのに押し所が出ている').toEqual([]);
     d.dispatch({ type: 'SET_LAUNCHER_REORDER', on: true });
     expect(moveBtns('a1').map((b) => b.textContent), '「上へ」「下へ」が出ていない').toEqual([
-      '上へ',
-      '下へ',
+      '上へ動かす',
+      '下へ動かす',
     ]);
     expect(moveBtns('builtin:dual'), '動かせない組み込みにも押し所を出した').toEqual([]);
   });
@@ -187,7 +187,7 @@ describe('並べ替えモード(#857 段①b-2)', () => {
     expect(order(), '前提が崩れている').toEqual(['a1', 'a2']);
     d.dispatch({ type: 'SET_LAUNCHER_REORDER', on: true });
     const up = moveBtns('a2')[0];
-    expect(up?.textContent).toBe('上へ');
+    expect(up?.textContent).toBe('上へ動かす');
     up!.click();
     expect(order(), '押しても並びが変わらない').toEqual(['a2', 'a1']);
   });
@@ -218,11 +218,11 @@ describe('並べ替えモード(#857 段①b-2)', () => {
 
   it('🔴 ⑧ 右クリックのメニューに、入口と出口の両方が出る', () => {
     rightClick('a1');
-    expect(menuLabels(), 'マウスの入口が無い').toContain('並べ替える');
+    expect(menuLabels(), 'マウスの入口が無い').toContain('タイルを並べ替える');
     d.dispatch({ type: 'SET_LAUNCHER_REORDER', on: true });
     rightClick('a1');
     expect(menuLabels(), '出口がメニューに無い(片道の操作)').toContain('並べ替えを終える');
-    expect(menuLabels(), '入口と出口が同時に出ている').not.toContain('並べ替える');
+    expect(menuLabels(), '入口と出口が同時に出ている').not.toContain('タイルを並べ替える');
   });
 
   /**

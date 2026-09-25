@@ -45,9 +45,9 @@ export const TABLE_COPY_CHOICES: readonly {
   readonly label: string;
 }[] = [
   { id: 'tsv', label: '表計算に貼る(TSV)' },
-  { id: 'markdown', label: 'Markdown の表' },
-  { id: 'html', label: 'HTML' },
-  { id: 'csv', label: 'CSV' },
+  { id: 'markdown', label: 'Markdown の表でコピー' },
+  { id: 'html', label: 'HTML でコピー' },
+  { id: 'csv', label: 'CSV でコピー' },
   { id: 'csv-file', label: '.csv で保存' },
 ];
 

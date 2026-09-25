@@ -263,7 +263,7 @@ export class ScheduleRenderer {
   private noteText(state: AppState, total: number, dated: number, groups: number): string {
     if (state.taskScanFailed)
       return '予定を集められませんでした。タブを開き直すともう一度試します。';
-    if (state.taskScan === null) return '集めています…';
+    if (state.taskScan === null) return '予定を集めています…';
     if (state.taskScan.truncated)
       return `多いので途中まで出しています(候補のノートは ${state.taskScan.totalNotes} 件)。`;
     if (total === 0)
@@ -481,7 +481,7 @@ export class ScheduleRenderer {
     const todayBtn = document.createElement('button');
     todayBtn.type = 'button';
     todayBtn.setAttribute('data-pkc-action', 'schedule-today');
-    todayBtn.textContent = '今月';
+    todayBtn.textContent = '今月に戻る';
     bar.append(nav('‹', -1), month, nav('›', 1), todayBtn);
     /**
      * 🔴 **予定の面から、その場でやることを足す**(#402 ②)。
@@ -530,7 +530,7 @@ export class ScheduleRenderer {
     const qAdd = document.createElement('button');
     qAdd.type = 'button';
     qAdd.setAttribute('data-pkc-action', 'schedule-quick-add');
-    qAdd.textContent = '足す';
+    qAdd.textContent = '予定を足す';
     // ⚠ **どこへ書くか**と**どの日に出るか**を両方言う(#499)── 日付の欄が
     //    何を決めているのかが読めないと、「足したのに出てこない」になる
     qAdd.title =

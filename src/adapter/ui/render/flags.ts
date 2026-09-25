@@ -81,7 +81,7 @@ export class FlagsRenderer {
      */
     note.textContent =
       'ここは開発中の切替です。「システム」の中の設定と違って、いつか畳まれます(畳む条件を各行に書いています)。' +
-      'うまく動かなくなったら「すべて既定へ戻す」を押してください。';
+      'うまく動かなくなったら「すべて既定に戻す」を押してください。';
     body.append(note);
 
     const sum = document.createElement('p');
@@ -157,7 +157,7 @@ export class FlagsRenderer {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.setAttribute('data-pkc-action', 'reset-flags');
-    btn.textContent = 'すべて既定へ戻す';
+    btn.textContent = 'すべて既定に戻す';
     p.append(btn);
     return p;
   }

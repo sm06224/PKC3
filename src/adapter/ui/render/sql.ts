@@ -198,7 +198,7 @@ export class SqlRenderer {
     run.type = 'button';
     run.setAttribute('data-pkc-action', 'run-sql');
     run.setAttribute('data-pkc-field', 'sql-run');
-    run.textContent = '走らせる';
+    run.textContent = 'SQL を走らせる';
     // 🔑 近道も出す(打ち終わって手を動かさずに走らせられる)
     run.title = 'Ctrl+Enter でも走ります';
     /**
@@ -211,7 +211,7 @@ export class SqlRenderer {
     save.type = 'button';
     save.setAttribute('data-pkc-action', 'sql-to-note');
     save.setAttribute('data-pkc-field', 'sql-to-note');
-    save.textContent = 'ノートへ';
+    save.textContent = 'ノートへ書き出す';
     save.title = 'いま出ている答えを、新しいノートに書き出します';
     /**
      * 🔴 **調べる相手**(#681 段③ の 2 つ目)。既定は「この PKC のノート」。
@@ -247,14 +247,14 @@ export class SqlRenderer {
     fileInput.setAttribute('aria-label', '手持ちのファイルを選ぶ');
     /**
      * 🔴 **構造をノートへ**(#918 段①。user 要望 2026-09-14「ai向けに構造吐き出したり」)。
-     * ⚠ **答えが無くても押せる**(「ノートへ」との違い)── 構造は**打つ前**に要る物だから。
-     * 🔑 字で「構造」と言い切る ── 「ノートへ」が 2 つ並ぶと、どちらが何か読めない。
+     * ⚠ **答えが無くても押せる**(「ノートへ書き出す」との違い)── 構造は**打つ前**に要る物だから。
+     * 🔑 字で「構造」と言い切る ── 「ノートへ書き出す」が 2 つ並ぶと、どちらが何か読めない。
      */
     const schema = document.createElement('button');
     schema.type = 'button';
     schema.setAttribute('data-pkc-action', 'sql-schema-to-note');
     schema.setAttribute('data-pkc-field', 'sql-schema-to-note');
-    schema.textContent = '構造をノートへ';
+    schema.textContent = '構造をノートへ書き出す';
     schema.title =
       'いま調べている相手の表・列・型・鍵・繋がり・行数を、ノート 1 枚にします(中身は入りません)。AI に貼るのに使えます。';
     /**
@@ -289,22 +289,22 @@ export class SqlRenderer {
     history.type = 'button';
     history.setAttribute('data-pkc-action', 'sql-history-menu');
     history.setAttribute('data-pkc-field', 'sql-history');
-    history.textContent = '履歴';
+    history.textContent = '履歴から選ぶ';
     history.title = '前に走らせた SQL を一覧から選びます(↑ ↓ でも戻せます)';
     /**
      * 🔴 **答えを file へ書き出す**(#918 段④。user 要望 2026-09-14「`copy to` 使えないし」)。
      *
-     * ⚠ 直す前の持ち帰り方は「**ノートへ**」の 1 本だけで、表計算や別の道具へ渡したい人は
+     * ⚠ 直す前の持ち帰り方は「**ノートへ書き出す**」の 1 本だけで、表計算や別の道具へ渡したい人は
      *   **画面から手で写す**しかなかった。
      * 🔑 **押し所は 1 つ**にして、形(csv / tsv / json)は**一覧から選ばせる** ──
-     *   帯にボタンを 3 つ並べると、いちばんよく使う「走らせる」が押しにくくなる。
-     * ⚠ **答えが無いうちは押せない**(「ノートへ」と同じ ── 押せるのに何も起きない口を作らない)。
+     *   帯にボタンを 3 つ並べると、いちばんよく使う「SQL を走らせる」が押しにくくなる。
+     * ⚠ **答えが無いうちは押せない**(「ノートへ書き出す」と同じ ── 押せるのに何も起きない口を作らない)。
      */
     const toFile = document.createElement('button');
     toFile.type = 'button';
     toFile.setAttribute('data-pkc-action', 'sql-export-menu');
     toFile.setAttribute('data-pkc-field', 'sql-to-file');
-    toFile.textContent = 'ファイルへ';
+    toFile.textContent = 'ファイルへ書き出す';
     toFile.title = 'いま出ている答えを、file に書き出します(CSV / TSV / JSON)';
     bar.append(run, save, toFile, schema, er, history, source, engine, fileInput);
     const tip = document.createElement('p');
@@ -1028,12 +1028,12 @@ function noteLine(p: AppState['sqlPage']): string {
  *   SQL は「データが本当にどうなっているか」を確かめる道具なので、
  *   **在るデータを無いと結論させる**のは、迷わせるより悪い。
  * 🔑 だから**表の上の帯**(常に出ている所)に 1 文足す ── 新しい部品は増やさない。
- * ⚠ **代わりを同じ文に書く**(「ノートへ / ファイルへ」)── 落ちた動線を
+ * ⚠ **代わりを同じ文に書く**(「ノートへ書き出す / ファイルへ書き出す」)── 落ちた動線を
  *   言いっぱなしにしない(CLAUDE.md「捨てるものの表には、代わりに何ができるかを書く」)。
  */
 function windowNote(rows: number): string {
   if (rows <= SQL_WINDOW_MIN) return '';
-  return ' ── 見えている分だけ描いています(全部を探す・写すには ノートへ / ファイルへ)';
+  return ' ── 見えている分だけ描いています(全部を探す・写すには ノートへ書き出す / ファイルへ書き出す)';
 }
 
 /**

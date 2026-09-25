@@ -537,7 +537,7 @@ describe('元に戻す(UNDO_MOVE)', () => {
     const btn = regions.statusUndo;
     expect(btn.getAttribute('data-pkc-field')).toBe('status-undo');
     expect(btn.getAttribute('data-pkc-action'), '受け手の無い口').toBe('undo-move');
-    expect(btn.textContent).toBe('元に戻す');
+    expect(btn.textContent).toBe('移動を元に戻す');
     expect(btn.hidden).toBe(true);
     expect(regions.status.contains(btn), '状態の行の外に居る').toBe(true);
     const LINE = '本文の塊を動かしました';

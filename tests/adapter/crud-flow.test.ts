@@ -332,7 +332,7 @@ describe('delete (P3-7a)', () => {
     expect(d.getState().entryMetas.has('a')).toBe(true);
     // 🔴 **無言で捨てない** ── 理由が出る
     expect(d.getState().error ?? '', '無言で捨てた(理由が出ていない)').toContain(
-      '編集を終了してから削除',
+      '編集を終了してからゴミ箱へ移してください',
     );
   });
 

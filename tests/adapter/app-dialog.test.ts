@@ -79,7 +79,7 @@ describe('アプリ自身の確認ダイアログ(#299)', () => {
   it('知らせるだけの形は、取り消しのボタンを出さない', async () => {
     const p = alertInApp(host, '掃除しました');
     expect(cancelBtn().hidden, '取り消しのボタンが出ている').toBe(true);
-    expect(okBtn().textContent).toBe('閉じる');
+    expect(okBtn().textContent).toBe('メッセージを閉じる');
     okBtn().click();
     expect(await p).toBe('ok');
   });
@@ -511,7 +511,7 @@ describe('まとめて貼るの選び方(#679)', () => {
   it('🔴 1 件も選んでいなければ押せない(無言の dead click を作らない)', async () => {
     const answered = pickScrapInApp(document.body, ROWS);
     expect(okBtn().disabled, '選んでいないのに押せる').toBe(true);
-    expect(okBtn().textContent).toBe('入れる');
+    expect(okBtn().textContent).toBe('選んだ物を入れる');
     pick(0);
     expect(okBtn().disabled).toBe(false);
     expect(okBtn().textContent, '何件入るかが字に出ていない').toBe('選んだ 1 件を入れる');

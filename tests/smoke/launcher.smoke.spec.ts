@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { gzipSync } from 'node:zlib';
+import { TILE_MENU_ACTIONS } from '../../src/features/entry-actions';
 import {
   answerAppDialog,
   gotoApp,
@@ -9,6 +10,14 @@ import {
   expectReachable,
   useSplitEditor,
   useListBrowse, openTile,} from './helpers';
+
+/**
+ * 🔴 **並べ替え中の案内の字は、実装と同じ引き方で作る**(#1046 追跡調査)。
+ * ⚠ 手で書き写すと、実装側の字を直した日に**両方そのままで緑**になる
+ *   (CLAUDE.md「期待値は実装の綴りの別の書き方ではなく別の観測から作る」)。
+ */
+const TILE_UP_LABEL = TILE_MENU_ACTIONS.find((a) => a.action === 'move-tile-up')?.label ?? '';
+const TILE_DOWN_LABEL = TILE_MENU_ACTIONS.find((a) => a.action === 'move-tile-down')?.label ?? '';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -978,7 +987,7 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
    * 2026-09-13「デフォルト選択の他に右クリックからの起動が選べるとなお良い」)。
    *
    * 動線: タイルを右クリック → メニューの先頭に「ブラウザのタブで開く」
-   * 「別の窓で開く」が出る → いまの設定に合うほうに「(既定)」が付く →
+   * 「別のウィンドウで開く」が出る → いまの設定に合うほうに「(既定)」が付く →
    * 片方を選ぶ → その 1 回だけその開き方で開く → 設定は変わっていない。
    * 🔑 起動を 1 つも足していない ── いま出しているこのメニューの道中に足した
    *   (`scripts/smoke-budget.mjs`)。
@@ -989,8 +998,8 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   ).toHaveText('ブラウザのタブで開く(既定)');
   await expect(
     tileMenu.locator('button').nth(1),
-    '2 番目が「別の窓で開く」になっていない',
-  ).toHaveText('別の窓で開く');
+    '2 番目が「別のウィンドウで開く」になっていない',
+  ).toHaveText('別のウィンドウで開く');
 
   // 🔑 対照群 ── 選ぶ前の設定を、設定画面そのもので控える(押す前の基準)
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
@@ -998,7 +1007,7 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   await expect(openTargetSelect, '前提: 設定の初期値が「タブ」ではない').toHaveValue('tab');
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]'); // 元の画面へ戻る
 
-  // 🔴 既定と違うほう(「別の窓で開く」)を選んでも、窓は 1 枚開く
+  // 🔴 既定と違うほう(「別のウィンドウで開く」)を選んでも、窓は 1 枚開く
   await tiles.nth(1).click({ button: 'right' });
   await expect(tileMenu, '設定画面を見た後、もう一度メニューが出せない').toBeVisible();
   const [tileWin] = await Promise.all([
@@ -1252,7 +1261,7 @@ test('🔴 タイルを長押しすると並べ替えモードに入り、開か
   await expect(
     lead,
     'モード中の文言に変わっていない(押しても開かないことを伝えていない)',
-  ).toHaveText('並べ替え中です。「上へ」「下へ」で動かします(押しても開きません)');
+  ).toHaveText(`並べ替え中です。「${TILE_UP_LABEL}」「${TILE_DOWN_LABEL}」で動かします(押しても開きません)`);
   await expect(
     page.locator('[data-pkc-action="move-tile-up"][data-pkc-tile="t2"]'),
     '長押し後もタイルの右に「上へ」が出ない',

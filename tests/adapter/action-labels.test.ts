@@ -130,7 +130,7 @@ describe('編集中の出口 2 か所(#716)', () => {
   it('🔴 追記欄の断り文も同じ字で出口を言う(「編集を破棄」と言わない)', () => {
     const root = editing();
     const reason = root.querySelector('[data-pkc-field="append-lock-reason"]')!.textContent ?? '';
-    expect(reason).toContain('保存するか、キャンセルすると');
+    expect(reason).toContain('「編集を保存する」か「編集をやめる」を押すと');
     expect(reason, 'ボタンに無い字で出口を言っている').not.toContain('編集を破棄');
   });
 });

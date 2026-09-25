@@ -20,6 +20,7 @@
 import type { AppState } from '@adapter/state/app-state';
 import type { LauncherTile } from '@features/launcher/tiles';
 import { isMovableTile } from '@features/launcher/tile-order';
+import { TILE_MENU_ACTIONS } from '@features/entry-actions';
 import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
 import { allFolded, encodeFolded, isFolded } from '@features/launcher/group-fold';
 import { appGroupIconOf, sortGroupNames } from '@features/launcher/app-group-spec';
@@ -27,6 +28,16 @@ import type { IconValue } from '@features/icon/icon-value';
 import { appGroupFold, type GroupFoldStore } from './group-fold';
 import { setIcon } from './icons';
 import { AssetLends, type AssetLender } from './asset-lends';
+
+/**
+ * 🔴 **並べ替え中の案内は、タイルの並べ替えメニューの字から組む**(#1046 追跡調査)。
+ * ⚠ **手で書き写さない** ── メニュー側の字(`TILE_MENU_ACTIONS`)を直したのに
+ *   ここを直し忘れると、案内だけ古い字のまま残る(押した場所と対で pin する
+ *   ── CLAUDE.md §1)。
+ */
+const TILE_UP_LABEL = TILE_MENU_ACTIONS.find((a) => a.action === 'move-tile-up')?.label ?? '上へ動かす';
+const TILE_DOWN_LABEL =
+  TILE_MENU_ACTIONS.find((a) => a.action === 'move-tile-down')?.label ?? '下へ動かす';
 
 export class LauncherRenderer {
   private lastTiles: LauncherTile[] | null | undefined = undefined;
@@ -233,7 +244,7 @@ export class LauncherRenderer {
      */
     lead.textContent = reordering
       ? // ⚠ モード中は**開かない**ので、開く話を出したままにしない(嘘になる)
-        '並べ替え中です。「上へ」「下へ」で動かします(押しても開きません)'
+        `並べ替え中です。「${TILE_UP_LABEL}」「${TILE_DOWN_LABEL}」で動かします(押しても開きません)`
       : 'アプリは 2 回押すと別のウィンドウで開きます';
     list.append(lead);
     /**
@@ -443,15 +454,15 @@ export class LauncherRenderer {
     row.setAttribute('data-pkc-field', 'tile-row');
     row.append(btn);
     /**
-     * ⚠ 字は**右クリックのメニューと同じ**にする(「上へ」「下へ」)── 同じことを
-     *   する 2 つの口で呼び名を変えると、user は別の操作だと思う。
+     * ⚠ 字は**右クリックのメニューと同じ**にする(「上へ動かす」「下へ動かす」)──
+     *   同じことをする 2 つの口で呼び名を変えると、user は別の操作だと思う。
      * ⚠ **図案だけのボタンにしない**(`icons.ts` の戒め)── 意味は字が持つ。
      * 🔑 身元(`data-pkc-tile`)は**このボタン自身**に写す ── 受け手(`moveTile`)は
      *   押された物からしか辿らない(右クリックのメニューと同じ作法)。
      */
     for (const [action, label, hint] of [
-      ['move-tile-up', '上へ', '1 つ上へ動かします'],
-      ['move-tile-down', '下へ', '1 つ下へ動かします'],
+      ['move-tile-up', '上へ動かす', '1 つ上へ動かします'],
+      ['move-tile-down', '下へ動かす', '1 つ下へ動かします'],
     ] as const) {
       const b = document.createElement('button');
       b.type = 'button';

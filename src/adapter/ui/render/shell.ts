@@ -218,10 +218,10 @@ export function paintTimerBar(
       li.setAttribute('data-pkc-timer', run.lid);
       const text = document.createElement('span');
       text.setAttribute('data-pkc-field', 'timer-entry');
-      const stop = iconButton('stop-timer', '止める');
+      const stop = iconButton('stop-timer', '時間を計るのを止める');
       stop.setAttribute('data-pkc-timer', run.lid);
       stop.title = '計るのをやめて、そのノートの本文に作業時間を書きます';
-      const drop = iconButton('discard-timer', '書かずにやめる');
+      const drop = iconButton('discard-timer', '計った時間を書かずにやめる');
       drop.setAttribute('data-pkc-timer', run.lid);
       drop.title = '計るのをやめます(本文には書きません)';
       li.append(text, stop, drop);
@@ -277,11 +277,11 @@ export function paintAlarmBar(root: HTMLElement, due: readonly AlarmDue[]): void
       li.setAttribute('data-pkc-alarm', d.key);
       const text = document.createElement('span');
       text.setAttribute('data-pkc-field', 'alarm-entry');
-      const open = iconButton('open-alarm', '開く');
+      const open = iconButton('open-alarm', '予定のノートを開く');
       open.setAttribute('data-pkc-alarm', d.key);
       open.setAttribute('data-pkc-entry', d.lid);
       open.title = 'その予定を書いたノートを開きます';
-      const close = iconButton('dismiss-alarm', '閉じる');
+      const close = iconButton('dismiss-alarm', '知らせを閉じる');
       close.setAttribute('data-pkc-alarm', d.key);
       close.title = 'この知らせを閉じます(本文は変わりません)';
       li.append(text, open, close);
@@ -363,8 +363,8 @@ export function buildShell(root: HTMLElement): ShellRegions {
     * 説明の**土台**と**命令 id** だけ持たせ、`applyShortcutHints` が組み立てる。
     */
   for (const [action, glyph, label, title, cmd] of [
-    ['nav-back', '‹', '戻る', '前に見ていたノートへ戻ります', 'nav-back'],
-    ['nav-forward', '›', '進む', '戻る前のノートへ進みます', 'nav-forward'],
+    ['nav-back', '‹', '前のノートへ戻る', '前に見ていたノートへ戻ります', 'nav-back'],
+    ['nav-forward', '›', '次のノートへ進む', '戻る前のノートへ進みます', 'nav-forward'],
   ] as const) {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -707,7 +707,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   phoneReturn.hidden = true;
   phoneReturn.title = '読んでいたノートへ戻ります';
   const phoneReturnLead = document.createElement('span');
-  phoneReturnLead.textContent = 'ノートへ →';
+  phoneReturnLead.textContent = 'ノートへ戻る →';
   const phoneReturnTitle = document.createElement('span');
   phoneReturnTitle.setAttribute('data-pkc-field', 'phone-return-title');
   phoneReturn.append(phoneReturnLead, phoneReturnTitle);
@@ -738,7 +738,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
     btn.setAttribute('data-pkc-action', 'toggle-pane');
     btn.setAttribute('data-pkc-pane', id);
     btn.setAttribute('aria-pressed', 'true');
-    btn.setAttribute('aria-label', `${PANE_LABELS[id]}の列`);
+    btn.setAttribute('aria-label', `${PANE_LABELS[id]}の列を畳む / 戻す`);
     // 🔴 **帯は 2 つの仕事をする**(#497)── 押すと畳み、掴むと幅が変わる。
     //    ⚠ 掴めることを字にも書く ── `cursor` だけだと、触りの端末には何も出ない。
     btn.title = `${PANE_LABELS[id]}の列を畳む・戻す(左右にドラッグすると幅が変わります。矢印キーでも動かせます)`;
@@ -824,7 +824,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   appendGrip.setAttribute('data-pkc-action', 'toggle-pane');
   appendGrip.setAttribute('data-pkc-pane', 'append');
   appendGrip.setAttribute('aria-pressed', 'true');
-  appendGrip.setAttribute('aria-label', `${PANE_LABELS.append}`);
+  appendGrip.setAttribute('aria-label', `${PANE_LABELS.append}を畳む / 戻す`);
   appendGrip.title = `${PANE_LABELS.append}を畳む・戻す(上下にドラッグすると高さが変わります。矢印キーでも動かせます)`;
   /**
    * 🔴 **スマホ用画面の「ページの帯」**(#632 段①)。
@@ -845,7 +845,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   phoneBack.setAttribute('data-pkc-field', 'phone-back');
   // ⚠ 行き先(`data-pkc-page`)と字は `paintBar` が page ごとに書き換える
   phoneBack.setAttribute('data-pkc-page', 'list');
-  phoneBack.textContent = '← 一覧';
+  phoneBack.textContent = '← 一覧へ戻る';
   const phoneTitle = document.createElement('span');
   phoneTitle.setAttribute('data-pkc-field', 'phone-title');
   const phoneInfo = document.createElement('button');
@@ -854,7 +854,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   phoneInfo.setAttribute('data-pkc-field', 'phone-info');
   phoneInfo.setAttribute('data-pkc-page', 'info');
   phoneInfo.textContent = '情報';
-  phoneInfo.title = 'タグ・目次・関係・書き出す(← ノート で戻ります)';
+  phoneInfo.title = 'タグ・目次・関係・書き出す(← ノートへ戻る で戻ります)';
   /**
    * 🔴 **左の列にしか無い操作への入口**(設計 doc §2-7)。⚠ スマホでは
    *   一覧が見えていないので、**右クリックの項目も「操作を探す」もここからしか届かない**
@@ -865,6 +865,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   phoneMenu.setAttribute('data-pkc-action', 'phone-menu');
   phoneMenu.setAttribute('data-pkc-field', 'phone-menu');
   phoneMenu.textContent = '⋯';
+  phoneMenu.setAttribute('aria-label', 'このノートの操作を開く');
   phoneMenu.title = 'このノートにできること・操作を探す';
   phoneBar.append(phoneBack, phoneTitle, phoneInfo, phoneMenu);
   center.append(replaceBar, detail, appendGrip, append);
@@ -919,7 +920,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   statusOpen.type = 'button';
   statusOpen.setAttribute('data-pkc-field', 'status-open');
   statusOpen.setAttribute('data-pkc-action', 'swap-open');
-  statusOpen.textContent = '開く';
+  statusOpen.textContent = 'そのノートを開く';
   statusOpen.hidden = true;
   /**
    * 🔴 **知らせの隣の「元に戻す」**(#684 段①。user 指示 2026-08-23「片道の操作を作らない」)。
@@ -931,7 +932,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   statusUndo.type = 'button';
   statusUndo.setAttribute('data-pkc-field', 'status-undo');
   statusUndo.setAttribute('data-pkc-action', 'undo-move');
-  statusUndo.textContent = '元に戻す';
+  statusUndo.textContent = '移動を元に戻す';
   statusUndo.hidden = true;
   /**
    * 🔴 **未読のメッセージへの入口**(設計 doc §7、段②a)。
@@ -994,10 +995,10 @@ export function buildShell(root: HTMLElement): ShellRegions {
   capture.hidden = true;
   const captureText = document.createElement('span');
   captureText.setAttribute('data-pkc-field', 'capture-status');
-  const stopBtn = iconButton('stop-capture', '止める');
+  const stopBtn = iconButton('stop-capture', '収録を止める');
   stopBtn.setAttribute('data-pkc-field', 'stop-capture');
   stopBtn.title = '録音・画面録画を止めて、いま開いているノートに入れます';
-  const dropBtn = iconButton('discard-capture', '残さずにやめる');
+  const dropBtn = iconButton('discard-capture', '収録を残さずにやめる');
   dropBtn.setAttribute('data-pkc-field', 'discard-capture');
   dropBtn.title = '収録を残さずにやめます';
   capture.append(captureText, stopBtn, dropBtn);
@@ -1099,8 +1100,8 @@ export function buildShell(root: HTMLElement): ShellRegions {
   const skip = document.createElement('div');
   skip.setAttribute('data-pkc-region', 'skip-links');
   for (const [region, label] of [
-    ['detail', '本文へ'],
-    ['inspector', '情報へ'],
+    ['detail', '本文へ移る'],
+    ['inspector', '情報へ移る'],
   ] as const) {
     const btn = document.createElement('button');
     btn.type = 'button';

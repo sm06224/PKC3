@@ -874,12 +874,14 @@ describe('予定から外す(#498)', () => {
    * ⚠ **押す前に何が起きるか分かる**(user 指示 2026-08-21「画面で何が起きるかで書く」)。
    * 🔑 繰り返しは**規則ごと**消えるので、同じ字にしてはいけない。
    */
-  it('⚠ 繰り返しの札だけ、字が「この繰り返しをやめる」になる', () => {
+  it('⚠ 繰り返しの札だけ、字が「予定から外す(繰り返しも外れます)」になる', () => {
     const s = setup({ e1: '- [ ] 単発 @2026-08-23\n- [ ] 週次 @2026-08-24 毎週\n' });
     const one = off(cardsOf(s.root, '2026-08-23')[0]!)!;
     const rep = off(cardsOf(s.root, '2026-08-24')[0]!)!;
     expect(one.getAttribute('aria-label')).toBe('予定から外す');
-    expect(rep.getAttribute('aria-label')).toBe('この繰り返しをやめる');
+    // ⚠ 右クリックの「この繰り返しをやめる」(set-task-repeat)と字が衝突していたので、
+    //   × は「予定から外す」の系のまま、繰り返しも外れることだけを括弧で足す(#1046)。
+    expect(rep.getAttribute('aria-label')).toBe('予定から外す(繰り返しも外れます)');
     // ⚠ 説明も**別物**(「ノートは消えない」を両方で言う)
     expect(one.title).toContain('ノートも本文も消えません');
     expect(rep.title).toContain('毎週');
@@ -1060,29 +1062,29 @@ describe('札の右クリックから繰り返しを付け替える(#855 段 0)'
   it('🔴 札を右クリックすると「繰り返す…」が出て、刻みを選ぶと本文に書かれる', async () => {
     const { root, store } = setup({ e1: '- [ ] ゴミ出し @2026-08-25\n' });
     const card = cardsOf(root, '2026-08-25')[0]!;
-    expect(openMenu(root, card), '「繰り返す…」が出ていない').toContain('繰り返す…');
-    press(root, '繰り返す…');
+    expect(openMenu(root, card), '「繰り返す…」が出ていない').toContain('予定を繰り返す…');
+    press(root, '予定を繰り返す…');
     const units = [...root.querySelectorAll('[data-pkc-region="context-menu"] button')].map(
       (b) => b.textContent,
     );
-    // ⚠ いまは繰り返していない ── 4 つ出て、「やめる」は出ない
+    // ⚠ いまは繰り返していない ── 4 つ出て、「この繰り返しをやめる」は出ない
     expect(units).toEqual(['毎日', '毎週', '毎月', '毎年']);
     press(root, '毎週');
     await tick(20);
     expect(store['e1'], '本文に刻みが書かれていない').toBe('- [ ] ゴミ出し @2026-08-25 毎週\n');
   });
 
-  it('🔴 繰り返している札では「やめる」が出て、押すと刻みだけ外れる', async () => {
+  it('🔴 繰り返している札では「この繰り返しをやめる」が出て、押すと刻みだけ外れる', async () => {
     const { root, store } = setup({ e1: '- [ ] ゴミ出し @2026-08-25 毎週\n' });
     const card = cardsOf(root, '2026-08-25')[0]!;
     openMenu(root, card);
-    press(root, '繰り返す…');
+    press(root, '予定を繰り返す…');
     const units = [...root.querySelectorAll('[data-pkc-region="context-menu"] button')].map(
       (b) => b.textContent,
     );
     // ⚠ **いまの刻みは出さない**(押しても何も起きない項目を並べない)
-    expect(units).toEqual(['毎日', '毎月', '毎年', 'やめる']);
-    press(root, 'やめる');
+    expect(units).toEqual(['毎日', '毎月', '毎年', 'この繰り返しをやめる']);
+    press(root, 'この繰り返しをやめる');
     await tick(20);
     expect(store['e1'], '日付まで消えた').toBe('- [ ] ゴミ出し @2026-08-25\n');
   });
@@ -1098,7 +1100,7 @@ describe('札の右クリックから繰り返しを付け替える(#855 段 0)'
     const card = cardsOf(root, '2026-08-23')[0];
     expect(card, '前提が崩れている(2 回目の回が出ていない)').not.toBeUndefined();
     openMenu(root, card!);
-    press(root, '繰り返す…');
+    press(root, '予定を繰り返す…');
     press(root, '毎月');
     await tick(20);
     expect(store['e1'], '開始日が回の日へずれた').toBe('- [ ] 朝会 @2026-08-16 毎月\n');
@@ -1117,7 +1119,7 @@ describe('札の右クリックから繰り返しを付け替える(#855 段 0)'
     const { root, store } = setup({ e1: '- [ ] ゴミ出し @2026-08-25\n' });
     const card = cardsOf(root, '2026-08-25')[0]!;
     openMenu(root, card);
-    press(root, '繰り返す…');
+    press(root, '予定を繰り返す…');
     const btn = [
       ...root.querySelectorAll<HTMLElement>('[data-pkc-region="context-menu"] button'),
     ].find((b) => b.textContent === '毎週');
@@ -1137,7 +1139,7 @@ describe('札の右クリックから繰り返しを付け替える(#855 段 0)'
     const card = cardsOf(root, '2026-08-25')[0];
     expect(card, '前提が崩れている(ノートの札が出ていない)').not.toBeUndefined();
     expect(card!.hasAttribute('data-pkc-whole-note'), '前提が崩れている').toBe(true);
-    expect(openMenu(root, card!), '押しても何も起きない口を出した').not.toContain('繰り返す…');
+    expect(openMenu(root, card!), '押しても何も起きない口を出した').not.toContain('予定を繰り返す…');
   });
 
   /**
@@ -1161,7 +1163,7 @@ describe('札の右クリックから繰り返しを付け替える(#855 段 0)'
     const fake = document.createElement('span');
     fake.setAttribute('data-pkc-task-line', '0');
     card.append(fake);
-    expect(openMenu(root, card), '①の門が効いていない').not.toContain('繰り返す…');
+    expect(openMenu(root, card), '①の門が効いていない').not.toContain('予定を繰り返す…');
   });
 });
 

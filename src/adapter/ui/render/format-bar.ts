@@ -91,7 +91,7 @@ export function buildFormatBar(): HTMLElement {
   insertDate.title = hintTitle('日付を入れる', 'insert-date');
   const insertDateLabel = document.createElement('span');
   insertDateLabel.setAttribute('data-pkc-field', 'label');
-  insertDateLabel.textContent = '日付';
+  insertDateLabel.textContent = '日付を入れる';
   insertDate.append(insertDateLabel);
   bar.append(insertDate);
 
@@ -112,7 +112,7 @@ export function buildFormatBar(): HTMLElement {
   insertEntryLink.title = hintTitle('ノートへのリンク', 'insert-entry-link');
   const insertEntryLinkLabel = document.createElement('span');
   insertEntryLinkLabel.setAttribute('data-pkc-field', 'label');
-  insertEntryLinkLabel.textContent = 'ノート';
+  insertEntryLinkLabel.textContent = 'ノートリンクを入れる';
   insertEntryLink.append(insertEntryLinkLabel);
   bar.append(insertEntryLink);
 
@@ -133,7 +133,7 @@ export function buildFormatBar(): HTMLElement {
   insertSnippet.title = hintTitle('テンプレートを入れる', 'insert-snippet');
   const insertSnippetLabel = document.createElement('span');
   insertSnippetLabel.setAttribute('data-pkc-field', 'label');
-  insertSnippetLabel.textContent = 'テンプレート';
+  insertSnippetLabel.textContent = 'テンプレートを入れる';
   insertSnippet.append(insertSnippetLabel);
   bar.append(insertSnippet);
 
@@ -158,7 +158,7 @@ export function buildFormatBar(): HTMLElement {
   insertIcon.title = '図案を入れます。押すと絵の一覧が出て、選ぶと打っている場所に入ります';
   const insertIconLabel = document.createElement('span');
   insertIconLabel.setAttribute('data-pkc-field', 'label');
-  insertIconLabel.textContent = '図案';
+  insertIconLabel.textContent = '図案を入れる';
   insertIcon.append(insertIconLabel);
   bar.append(insertIcon);
 
@@ -195,7 +195,7 @@ export function buildFormatBar(): HTMLElement {
   toggleReplace.title = hintTitle('本文の置換', 'toggle-replace');
   const label = document.createElement('span');
   label.setAttribute('data-pkc-field', 'label');
-  label.textContent = '置換';
+  label.textContent = '置換の欄を開く / 閉じる';
   toggleReplace.append(label);
   bar.append(toggleReplace);
   return bar;
@@ -221,7 +221,7 @@ function diagramButton(): HTMLButtonElement {
     '選んでいなければ、フローチャート / クラス図 / シーケンス図 / 状態遷移図 / ER 図 から選べます';
   const text = document.createElement('span');
   text.setAttribute('data-pkc-field', 'label');
-  text.textContent = '図';
+  text.textContent = '図を入れる';
   btn.append(text);
   return btn;
 }
