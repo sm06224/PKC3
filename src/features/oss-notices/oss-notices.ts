@@ -26,6 +26,14 @@
  * 「DuckDB や LibreOffice が *内部で* 束ねている C++ 側の依存(re2 / parquet / ICU 等)
  * まで洗い出す」という、この回ではやらない全数調査のほうである。
  *
+ * ## 🔴 逆に、devDependency なのに数える物が 1 つある(#1054 段①)
+ *
+ * `@phosphor-icons/web`(図案の書体 `pkc-symbols.woff2` の焼き元)は実行時に
+ * import されないので `dependencies` の自動収集には出てこないが、glyph データの
+ * 部分集合が配布物に入るので**表記義務は生きている**。`build/oss-notices-plugin.ts`
+ * の `VENDORED_FONT_SOURCES` が名指しで足す(`devDependencies` 全体は数えない ──
+ * eslint / vite のような、出力に 1 bytes も残らない道具まで混ざるのを防ぐため)。
+ *
  * 🔴 **`OSS_SCOPE_NOTE` はいまも正しい**(#682 段④b で読み直した)── 拡張 3 つ
  * (`json` / `parquet` / `sqlite_scanner`)は `vendor/duckdb-extensions/` に
  * **repo へ置いた**が、配り方は wasm 本体と同じ「**使うときにこの端末へ入る**」で、

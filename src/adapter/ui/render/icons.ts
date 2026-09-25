@@ -1,7 +1,7 @@
 /**
- * ボタンの図案 ── **経緯**(絵文字 → 単色 SVG → **書体**)。
+ * ボタンの図案 ── **経緯**(絵文字 → 単色 SVG → 単色書体 → **色つき duotone 書体**)。
  *
- * 🔴 **いまの実装は「Material Symbols の部分集合(woff2)の 1 文字」である。**
+ * 🔴 **いまの実装は「Phosphor Duotone の部分集合(woff2)の 2 文字重ね」である。**
  *   ⚠ この節は**なぜそうなったか**だけを残す ── 実装そのものは下の `setIcon` を読む。
  *   ⚠ 2026-09-11 に**ここを直し忘れていた**(着地前レビュー 6):この上の段落は
  *     「🔑 だから **inline SVG で描く**」「`createElementNS` は parser を通らない」と
@@ -47,12 +47,41 @@
  *   値は CSS 側の token が決め、`currentColor` の仕組みをそのまま使う。
  * ⚠ **失ったもの**(書体にしたので取り戻せない)は `symbols.ts` の表に書いてある
  *   ── 絵の中の 2 色(`solid` / `soft`)と、線の太さの px 固定。
- * ⚠ 図案だけのボタンを作らない ── 意味は隣の**文字**が持つ。
+ * ⚠ 図案だけのボタンを作らない ── 意味は隣の**文字**が持つ(⚠ #1054 段②で
+ *   3 つの帯だけこの既定が上書きされる予定 ── 下の ④ を見よ)。
+ *
+ * ## ④ 単色書体を duotone へ替えた(#1054 段①、2026-09-25)
+ *
+ * 裁定(#1046 コメント 5833340597。こちらの解釈)「いまの Material のアイコンは
+ * 単色で色味に欠け、使っていて気分が上がらない。**書体はこちらのセンスで選んでよい**」。
+ *
+ * 🔑 選んだのは **Phosphor Duotone**(MIT)── 下地(薄い色)+ 線(濃い色)の 2 枚重ねで、
+ *   下地の色を**操作の種類**(作る / 録る / 取り込む・保存 / 探す・集計 / システム / 危険)
+ *   ごとに塗り分ける(`symbols.ts` の `IconTone`)。線は今までどおり `currentColor` ──
+ *   危険操作・種別チップの上書きは**そのまま効く**(`app.css` の該当規則)。
+ * ⚠ **符号位置は Phosphor のものをそのまま使わない** ── `scripts/build-icon-font.mjs` が
+ *   `symbols.ts` の並び順から**こちら側の私用領域へ付け替える**(remap)。
+ * ⚠ **1 絵につき符号位置が 2 つ**(下地・線)になった ── `setIcon` が書く
+ *   `data-pkc-symbol` は変わらない(絵の名前は 1 つのまま)。
+ *
+ * ## ⑤ 色をはっきり見せる。tone は action が決める(#1054 段①-2、2026-09-25)
+ *
+ * > user 裁定(解釈)「④の色は screenshot でほぼ見えない。はっきり見せつつ、
+ * > 落ち着いた業務画面の雰囲気は保て」
+ *
+ * ④ は「線 = 常に `currentColor`、下地だけ tone 色を 0.4 の薄さで敷く」だった ──
+ * だから screenshot での差がほぼ無かった。いまは**線も tone 色**にし
+ * (create/capture/io/find/system/danger の 6 系統。WCAG 1.4.11 の非文字
+ * コントラスト 3:1 を実測して満たす ── `tokens.css` の `--pkc-tone-*` の
+ * 注記を見よ)、下地は同じ色を 0.32 の不透明度で敷く。`kind` / `neutral` は
+ * 従来どおり(線は `currentColor`、下地は薄い)。
+ * ⚠ **tone は絵ではなく action が決める**ようにもした ── 下の `ACTION_TONES`
+ *   (同じ絵でも、使う action が違えば tone が変わりうる)。
  */
 
-import type { IconName } from '@features/icon/symbols';
+import { PKC_SYMBOLS, type IconName, type IconTone } from '@features/icon/symbols';
 
-export type { IconName };
+export type { IconName, IconTone };
 
 /**
  * `data-pkc-action`(または `iconKey`)→ 図案。
@@ -86,6 +115,9 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'export-structure': 'list',
   'export-entry-docx': 'page',
   'export-entry-pdf': 'printer',
+  /** PowerPoint で出す(#1054 段①-2)── 書き出し 3 兄弟(Word/PDF/PowerPoint)の
+   *  最後の 1 つ。⚠ **段①では無地だった**(review 指摘。3 つのうち 2 つにしか絵が無い)。 */
+  'export-entry-pptx': 'presentation',
   'purge-orphan-assets': 'broom',
   'create-entry': 'plus',
   'attach-file': 'clip',
@@ -176,6 +208,55 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
 };
 
 /**
+ * 🔴 **tone は action が決める。絵(glyph)ではない**(#1054 段①-2、2026-09-25)。
+ *
+ * 裁定(#1046 コメント、こちらの解釈)「いまの色は screenshot でほぼ見えない ──
+ * 色をはっきり見せて、業務画面の落ち着いた雰囲気は保て」。
+ *
+ * ⚠ 段①は `symbols.ts` の `tone` を**そのまま**生成 CSS(`data-pkc-symbol` ごと)へ
+ * 焼いていた ── だから**絵 1 つに tone は 1 つ**しか持てず、たとえば `page`
+ * (Word 書き出し / 種別チップ text / Office で開く …)は**どこで使っても同じ tone**
+ * になっていた。⚠ 着地前レビューが指摘した取り違えは、まさにこの制約から来ていた
+ * (`launch-asset` が `play` の既定 tone `capture` を背負ってしまい、実際は
+ * 「アプリを開く」= 入出力の仲間)。
+ *
+ * 🔑 だから **`iconButton` が action ごとにここを引き、無ければ絵の既定値
+ * (`PKC_SYMBOLS[name].tone`)へ落ちる**(`setIcon` が先に既定値を書き、
+ * `iconButton` が上書きする)。表に無い action は絵の既定 tone のまま ──
+ * ここは**絵の既定と食い違う action だけ**を書く(食い違わない大多数を
+ * 並べ直すと、次に絵を変えた日にどちらが正本か分からなくなる。CLAUDE.md
+ * 「三行の重複 > 早すぎる抽象化」の逆:ここは**差分だけ**を持つのが正しい抽象化)。
+ *
+ * ⚠ **鍵は `action`(`data-pkc-action`)であって `iconKey` ではない** ──
+ * `create-entry` は `iconKey` が `archetype:${種類}`(選んだ種類の絵)に変わっても
+ * `action` は常に `create-entry` なので、ここで 1 回書けば**どの種類を選んでも**
+ * 「作る」の色になる。
+ *
+ * | tone | ここに載る action(理由) |
+ * |---|---|
+ * | `create` | `create-entry`(+ ノート。既定は `kind` = 選んだ種類の絵)/ `pick-create-kind`(同じ創作メニューの選択肢 ── 揃えて 1 つの用事に見せる) |
+ * | `io` | `attach-file`(`clip` の既定は `kind`)/ `export-entry-docx`・`export-entry-pptx`(`page`/`presentation` の既定は `kind`)/ `export-markdown`・`export-structure`(既定 `kind`/`find` ── 書き出しの仲間として揃える)/ `launch-asset`(`play` の既定 `capture` は誤り。「アプリを開く」で録るのではない)/ `launch-asset-extension`(`launch-asset` 系 3 兄弟の隣で揃える)/ `open-office`(`page` の既定 `kind`。「外で開く」も入出力) |
+ * | `danger` | `purge-orphan-assets`(`broom` の既定は `system`。**元に戻せない**掃除なので危険色を保つ ── 直す前の `app.css` 個別上書きと同じ意味) |
+ *
+ * ⚠ **`delete-entry` / `delete-selected` / `discard-*` はここに無い** ──
+ * 絵(`trash`)の既定 tone が既に `danger` なので、上書きの必要が無い
+ * (表に無い = 絵の既定のまま、が正しい読み方)。
+ */
+export const ACTION_TONES: Readonly<Record<string, IconTone>> = {
+  'create-entry': 'create',
+  'pick-create-kind': 'create',
+  'attach-file': 'io',
+  'export-entry-docx': 'io',
+  'export-entry-pptx': 'io',
+  'export-markdown': 'io',
+  'export-structure': 'io',
+  'launch-asset': 'io',
+  'launch-asset-extension': 'io',
+  'open-office': 'io',
+  'purge-orphan-assets': 'danger',
+};
+
+/**
  * 🔑 **種別を iconKey として引ける形**(P10 の分割ボタン用)。
  * `iconButton(action, label, 'archetype:text')` で種類の図案が出る ──
  * 表を 2 つ持たずに `ARCHETYPE_ICONS` を使い回す。
@@ -242,9 +323,33 @@ export function iconSpan(name: IconName): HTMLSpanElement {
  *   だった頃、`textContent` への代入は**子ごと消す**ので、一覧の行を作り直さずに種別だけ
  *   変えるとチップが**空になった**(`sidebar.ts` の patch 経路)。いまは属性 1 つなので
  *   その罠は無い ── **同じ理由で、字も入れない**。
+ *
+ * 🔴 **`data-pkc-tone` も一緒に立てる**(#1054 段①-2)── ここは**絵の既定値**
+ *   (`PKC_SYMBOLS[name].tone`)。action に応じた上書きは `iconButton` が行う
+ *   (`ACTION_TONES` を見よ)。⚠ `setIcon` を直に呼ぶ経路(チップ・タイル・
+ *   ランチャー)は action を持たないので、ここで立てた既定のまま出る ──
+ *   それで正しい(絵の意味がそのまま tone になる)。
  */
 export function setIcon(span: Element, name: IconName): void {
   span.setAttribute('data-pkc-symbol', name);
+  span.setAttribute('data-pkc-tone', PKC_SYMBOLS[name].tone);
+}
+
+/**
+ * 🔴 **ボタンの絵を差し替えるときは、action の tone を保つ**(#1054 段①-2 の
+ * 着地前レビューで判明)。
+ *
+ * ⚠ `setIcon` は**絵の既定 tone** を書く ── 作る種類を切り替える経路
+ *   (`binder.ts` の `pick-create-kind`)がそれを直に呼んでいたので、種類を
+ *   選ぶたびに「+ ノート」の絵が**作るの緑から無彩色へ**黙って戻っていた
+ *   (種類の絵は全部 `kind`)。
+ * 🔑 だから `iconButton` とボタンの絵を差し替える経路は**この 1 本**を通る
+ *   (tone の上書きを 2 か所に書かない ── §7)。
+ */
+export function setActionIcon(span: Element, action: string, name: IconName): void {
+  setIcon(span, name);
+  const tone = ACTION_TONES[action];
+  if (tone !== undefined) span.setAttribute('data-pkc-tone', tone);
 }
 
 /**
@@ -265,6 +370,11 @@ export const CANCEL_EDIT_HINT = '変更を捨てて編集を終えます';
  * ⚠ 図案を書体にしたとき、1 稿目は器へ字を入れたので**目に見えない 1 文字**が
  *   前に付いた ── 全量 smoke が 5 件落ちて分かった。いまは絵を CSS が出すので
  *   **SVG だった頃と同じ形**に戻してある(`tests/adapter/icons.test.ts` が等値で留める)。
+ *
+ * 🔴 **tone は `action` で上書きする**(#1054 段①-2)── `iconSpan` が既に絵の既定
+ *   tone を立てているので、`ACTION_TONES[action]` が在るときだけ上書きする
+ *   (鍵は `iconKey` ではなく `action` ── `create-entry` は `iconKey` が
+ *   `archetype:${種類}` に変わっても常に「作る」の色にしたいので)。
  */
 export function iconButton(action: string, label: string, iconKey = action): HTMLButtonElement {
   const btn = document.createElement('button');
@@ -275,7 +385,11 @@ export function iconButton(action: string, label: string, iconKey = action): HTM
     ? (ARCHETYPE_ICONS[iconKey.slice('archetype:'.length)] ?? 'dot')
     : ACTION_ICONS[iconKey];
   // ⚠ 図案の無い action もある(追記 / 強制解放)── そこは器ごと出さない
-  if (name !== undefined) btn.append(iconSpan(name));
+  if (name !== undefined) {
+    const span = iconSpan(name);
+    setActionIcon(span, action, name);
+    btn.append(span);
+  }
   const text = document.createElement('span');
   text.setAttribute('data-pkc-field', 'label');
   text.textContent = label;

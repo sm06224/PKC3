@@ -143,3 +143,31 @@ describe('設定の持ち出し(#414)からは外れている', () => {
     expect(PORTABLE_KEYS.some((p) => p.key === KEY), 'PORTABLE_KEYS に紛れている').toBe(false);
   });
 });
+
+/**
+ * 🔴 **種類を選び直しても、絵の色は「作る」のまま**(#1054 段①-2 の着地前レビュー)。
+ *
+ * ⚠ 直す前は `pick-create-kind` が `setIcon` を直に呼び、**絵の既定 tone**
+ *   (種類の絵は全部 `kind` = 無彩色)を書いていた ── 起動直後は緑なのに、
+ *   ▼ で種類を 1 度選ぶと黙って色が消えた(起動の経路 `iconButton` と
+ *   切り替えの経路が別々に tone を決めていた)。
+ * 🔑 対照群を同じ it に置く:起動直後(切り替え前)も `create` であること ──
+ *   置かないと「最初から緑でなかった」と区別できない。
+ */
+describe('種類を選び直しても、絵の色は変わらない', () => {
+  const runTone = (root: HTMLElement): string | null =>
+    runButton(root)?.querySelector('[data-pkc-icon]')?.getAttribute('data-pkc-tone') ?? null;
+
+  it('🔴 起動直後も、▼ で別の種類を選んだ後も data-pkc-tone は create', () => {
+    const root = shell();
+    bind(root);
+    expect(runTone(root), '起動直後から「作る」の色になっていない(前提が崩れている)').toBe(
+      'create',
+    );
+    for (const archetype of ['folder', 'textlog', 'text']) {
+      createByUi(root, archetype);
+      expect(runArchetype(root), `${archetype} を選べていない(前提が崩れている)`).toBe(archetype);
+      expect(runTone(root), `${archetype} を選んだら「作る」の色が消えた`).toBe('create');
+    }
+  });
+});

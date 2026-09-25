@@ -91,7 +91,7 @@ import { downloadBlob } from '@adapter/platform/download';
 import { visibleContacts } from '@features/contact/contact-card';
 import { buildVcf, isVcfFileName, vcfNoteOf } from '@features/contact/vcard';
 import { isMarkdownFileName } from '@features/import/plain-markdown';
-import { ARCHETYPE_ICONS, setIcon } from '@adapter/ui/render/icons';
+import { ARCHETYPE_ICONS, setActionIcon } from '@adapter/ui/render/icons';
 import { insertBlockText, insertText, OWN_MEANING } from '@adapter/ui/render/row-swap';
 import { iconShortcodeFor } from '@features/icon/icon-shortcode';
 import { HOLD_ATTR, neighborCell, openCellAt } from '@adapter/ui/render/cell-input';
@@ -7996,7 +7996,12 @@ const ACTIONS: Record<string, ActionHandler> = {
       const icon = run.querySelector('[data-pkc-icon]');
       // ⚠ `textContent` で書かない ── 絵は CSS の `::before` が出すので、器の字を
       //    書き換えても 1 ドットも変わらない。差し替えるのは名前(`data-pkc-symbol`)
-      if (icon) setIcon(icon, ARCHETYPE_ICONS[archetype] ?? 'dot');
+      // 🔴 `setIcon` を直に呼ばない ── 絵の既定 tone(種類の絵は全部 `kind`)へ
+      //    戻り、「作る」の色が黙って消える(#1054 段①-2 の着地前レビュー)
+      if (icon) {
+        const action = run.getAttribute('data-pkc-action') ?? 'create-entry';
+        setActionIcon(icon, action, ARCHETYPE_ICONS[archetype] ?? 'dot');
+      }
     }
     const menu = root.querySelector<HTMLElement>('[data-pkc-region="create-menu"]');
     if (menu) menu.hidden = true;

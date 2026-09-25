@@ -1,232 +1,506 @@
 /* 🔴 **自動生成**(`npm run icons:font`)── 手で直さない。
- * 絵の表は `src/features/icon/symbols.ts`、書体は `fonts/pkc-symbols.woff2`。
+ * 絵の表は `src/features/icon/symbols.ts`、書体は `fonts/pkc-symbols.woff2`
+ * (Phosphor Duotone の部分集合。#1054 段①)。
  * ⚠ **器に字を入れない**ので、絵はここが出す(そうしないとボタンの `textContent` に
- *   目に見えない 1 文字が混ざり、文言を読む側が静かに外れる)。 */
+ *   目に見えない字が混ざり、文言を読む側が静かに外れる)。
+ * ⚠ **tone(色)はここに無い**(#1054 段①-2)── `data-pkc-tone` を読む
+ *   `app.css` の `[data-pkc-icon][data-pkc-tone='…']` が持つ(固定 7 本)。
+ *   ここは符号位置(`content`)だけを絵ごとに焼く。 */
 [data-pkc-icon][data-pkc-symbol='settings']::before {
-  content: '\e8b8';
+  content: '\e000';
+}
+[data-pkc-icon][data-pkc-symbol='settings']::after {
+  content: '\e001';
 }
 [data-pkc-icon][data-pkc-symbol='flag']::before {
-  content: '\f0c6';
+  content: '\e002';
+}
+[data-pkc-icon][data-pkc-symbol='flag']::after {
+  content: '\e003';
 }
 [data-pkc-icon][data-pkc-symbol='help']::before {
-  content: '\e8fd';
+  content: '\e004';
+}
+[data-pkc-icon][data-pkc-symbol='help']::after {
+  content: '\e005';
 }
 [data-pkc-icon][data-pkc-symbol='search']::before {
-  content: '\ef7a';
+  content: '\e006';
+}
+[data-pkc-icon][data-pkc-symbol='search']::after {
+  content: '\e007';
 }
 [data-pkc-icon][data-pkc-symbol='arrow-in']::before {
-  content: '\f090';
+  content: '\e008';
+}
+[data-pkc-icon][data-pkc-symbol='arrow-in']::after {
+  content: '\e009';
 }
 [data-pkc-icon][data-pkc-symbol='arrow-out']::before {
-  content: '\f09b';
+  content: '\e00a';
+}
+[data-pkc-icon][data-pkc-symbol='arrow-out']::after {
+  content: '\e00b';
 }
 [data-pkc-icon][data-pkc-symbol='arrow-down']::before {
-  content: '\e5db';
+  content: '\e00c';
+}
+[data-pkc-icon][data-pkc-symbol='arrow-down']::after {
+  content: '\e00d';
 }
 [data-pkc-icon][data-pkc-symbol='archive']::before {
-  content: '\e149';
+  content: '\e00e';
+}
+[data-pkc-icon][data-pkc-symbol='archive']::after {
+  content: '\e00f';
 }
 [data-pkc-icon][data-pkc-symbol='globe']::before {
-  content: '\e80b';
+  content: '\e010';
+}
+[data-pkc-icon][data-pkc-symbol='globe']::after {
+  content: '\e011';
 }
 [data-pkc-icon][data-pkc-symbol='page']::before {
-  content: '\e873';
+  content: '\e012';
+}
+[data-pkc-icon][data-pkc-symbol='page']::after {
+  content: '\e013';
 }
 [data-pkc-icon][data-pkc-symbol='printer']::before {
-  content: '\e8ad';
+  content: '\e014';
+}
+[data-pkc-icon][data-pkc-symbol='printer']::after {
+  content: '\e015';
+}
+[data-pkc-icon][data-pkc-symbol='presentation']::before {
+  content: '\e016';
+}
+[data-pkc-icon][data-pkc-symbol='presentation']::after {
+  content: '\e017';
 }
 [data-pkc-icon][data-pkc-symbol='broom']::before {
-  content: '\e28d';
+  content: '\e018';
+}
+[data-pkc-icon][data-pkc-symbol='broom']::after {
+  content: '\e019';
 }
 [data-pkc-icon][data-pkc-symbol='plus']::before {
-  content: '\e145';
+  content: '\e01a';
+}
+[data-pkc-icon][data-pkc-symbol='plus']::after {
+  content: '\e01b';
 }
 [data-pkc-icon][data-pkc-symbol='clip']::before {
-  content: '\e226';
+  content: '\e01c';
+}
+[data-pkc-icon][data-pkc-symbol='clip']::after {
+  content: '\e01d';
 }
 [data-pkc-icon][data-pkc-symbol='pencil']::before {
-  content: '\f097';
+  content: '\e01e';
+}
+[data-pkc-icon][data-pkc-symbol='pencil']::after {
+  content: '\e01f';
 }
 [data-pkc-icon][data-pkc-symbol='check']::before {
-  content: '\e668';
+  content: '\e020';
+}
+[data-pkc-icon][data-pkc-symbol='check']::after {
+  content: '\e021';
 }
 [data-pkc-icon][data-pkc-symbol='close']::before {
-  content: '\e5cd';
+  content: '\e022';
+}
+[data-pkc-icon][data-pkc-symbol='close']::after {
+  content: '\e023';
 }
 [data-pkc-icon][data-pkc-symbol='clock']::before {
-  content: '\efd6';
+  content: '\e024';
+}
+[data-pkc-icon][data-pkc-symbol='clock']::after {
+  content: '\e025';
 }
 [data-pkc-icon][data-pkc-symbol='trash']::before {
-  content: '\e92e';
+  content: '\e026';
+}
+[data-pkc-icon][data-pkc-symbol='trash']::after {
+  content: '\e027';
 }
 [data-pkc-icon][data-pkc-symbol='list']::before {
-  content: '\e896';
+  content: '\e028';
+}
+[data-pkc-icon][data-pkc-symbol='list']::after {
+  content: '\e029';
 }
 [data-pkc-icon][data-pkc-symbol='folder']::before {
-  content: '\e2c7';
+  content: '\e02a';
+}
+[data-pkc-icon][data-pkc-symbol='folder']::after {
+  content: '\e02b';
 }
 [data-pkc-icon][data-pkc-symbol='folder-smart']::before {
-  content: '\e617';
+  content: '\e02c';
+}
+[data-pkc-icon][data-pkc-symbol='folder-smart']::after {
+  content: '\e02d';
 }
 [data-pkc-icon][data-pkc-symbol='stack']::before {
-  content: '\e53b';
+  content: '\e02e';
+}
+[data-pkc-icon][data-pkc-symbol='stack']::after {
+  content: '\e02f';
 }
 [data-pkc-icon][data-pkc-symbol='apps']::before {
-  content: '\e5c3';
+  content: '\e030';
+}
+[data-pkc-icon][data-pkc-symbol='apps']::after {
+  content: '\e031';
 }
 [data-pkc-icon][data-pkc-symbol='timeline']::before {
-  content: '\e922';
+  content: '\e032';
+}
+[data-pkc-icon][data-pkc-symbol='timeline']::after {
+  content: '\e033';
 }
 [data-pkc-icon][data-pkc-symbol='grid']::before {
-  content: '\e3ec';
+  content: '\e034';
+}
+[data-pkc-icon][data-pkc-symbol='grid']::after {
+  content: '\e035';
 }
 [data-pkc-icon][data-pkc-symbol='box']::before {
-  content: '\e156';
+  content: '\e036';
 }
-[data-pkc-icon][data-pkc-symbol='check-box']::before {
-  content: '\e9de';
-}
-[data-pkc-icon][data-pkc-symbol='form']::before {
-  content: '\e85d';
-}
-[data-pkc-icon][data-pkc-symbol='play']::before {
+[data-pkc-icon][data-pkc-symbol='box']::after {
   content: '\e037';
 }
+[data-pkc-icon][data-pkc-symbol='check-box']::before {
+  content: '\e038';
+}
+[data-pkc-icon][data-pkc-symbol='check-box']::after {
+  content: '\e039';
+}
+[data-pkc-icon][data-pkc-symbol='form']::before {
+  content: '\e03a';
+}
+[data-pkc-icon][data-pkc-symbol='form']::after {
+  content: '\e03b';
+}
+[data-pkc-icon][data-pkc-symbol='play']::before {
+  content: '\e03c';
+}
+[data-pkc-icon][data-pkc-symbol='play']::after {
+  content: '\e03d';
+}
 [data-pkc-icon][data-pkc-symbol='chevron-down']::before {
-  content: '\e5cf';
+  content: '\e03e';
+}
+[data-pkc-icon][data-pkc-symbol='chevron-down']::after {
+  content: '\e03f';
 }
 [data-pkc-icon][data-pkc-symbol='chevron-up']::before {
-  content: '\e5ce';
+  content: '\e040';
+}
+[data-pkc-icon][data-pkc-symbol='chevron-up']::after {
+  content: '\e041';
 }
 [data-pkc-icon][data-pkc-symbol='chevron-left']::before {
-  content: '\e5cb';
+  content: '\e042';
+}
+[data-pkc-icon][data-pkc-symbol='chevron-left']::after {
+  content: '\e043';
 }
 [data-pkc-icon][data-pkc-symbol='chevron-right']::before {
-  content: '\e5cc';
+  content: '\e044';
+}
+[data-pkc-icon][data-pkc-symbol='chevron-right']::after {
+  content: '\e045';
 }
 [data-pkc-icon][data-pkc-symbol='calendar']::before {
-  content: '\ebcc';
+  content: '\e046';
 }
-[data-pkc-icon][data-pkc-symbol='dot']::before {
-  content: '\ef4a';
-}
-[data-pkc-icon][data-pkc-symbol='person']::before {
-  content: '\f0d3';
-}
-[data-pkc-icon][data-pkc-symbol='mic']::before {
-  content: '\e31d';
-}
-[data-pkc-icon][data-pkc-symbol='monitor']::before {
-  content: '\ef5b';
-}
-[data-pkc-icon][data-pkc-symbol='stop']::before {
+[data-pkc-icon][data-pkc-symbol='calendar']::after {
   content: '\e047';
 }
+[data-pkc-icon][data-pkc-symbol='dot']::before {
+  content: '\e048';
+}
+[data-pkc-icon][data-pkc-symbol='dot']::after {
+  content: '\e049';
+}
+[data-pkc-icon][data-pkc-symbol='person']::before {
+  content: '\e04a';
+}
+[data-pkc-icon][data-pkc-symbol='person']::after {
+  content: '\e04b';
+}
+[data-pkc-icon][data-pkc-symbol='mic']::before {
+  content: '\e04c';
+}
+[data-pkc-icon][data-pkc-symbol='mic']::after {
+  content: '\e04d';
+}
+[data-pkc-icon][data-pkc-symbol='monitor']::before {
+  content: '\e04e';
+}
+[data-pkc-icon][data-pkc-symbol='monitor']::after {
+  content: '\e04f';
+}
+[data-pkc-icon][data-pkc-symbol='stop']::before {
+  content: '\e050';
+}
+[data-pkc-icon][data-pkc-symbol='stop']::after {
+  content: '\e051';
+}
 [data-pkc-icon][data-pkc-symbol='terminal']::before {
-  content: '\eb8e';
+  content: '\e052';
+}
+[data-pkc-icon][data-pkc-symbol='terminal']::after {
+  content: '\e053';
 }
 [data-pkc-icon][data-pkc-symbol='computer']::before {
-  content: '\e31e';
+  content: '\e054';
+}
+[data-pkc-icon][data-pkc-symbol='computer']::after {
+  content: '\e055';
 }
 [data-pkc-icon][data-pkc-symbol='phone']::before {
-  content: '\e7ba';
+  content: '\e056';
+}
+[data-pkc-icon][data-pkc-symbol='phone']::after {
+  content: '\e057';
 }
 [data-pkc-icon][data-pkc-symbol='code']::before {
-  content: '\e86f';
+  content: '\e058';
+}
+[data-pkc-icon][data-pkc-symbol='code']::after {
+  content: '\e059';
 }
 [data-pkc-icon][data-pkc-symbol='database']::before {
-  content: '\f20e';
+  content: '\e05a';
+}
+[data-pkc-icon][data-pkc-symbol='database']::after {
+  content: '\e05b';
 }
 [data-pkc-icon][data-pkc-symbol='tools']::before {
-  content: '\f8cd';
+  content: '\e05c';
+}
+[data-pkc-icon][data-pkc-symbol='tools']::after {
+  content: '\e05d';
 }
 [data-pkc-icon][data-pkc-symbol='calculator']::before {
-  content: '\ea5f';
+  content: '\e05e';
+}
+[data-pkc-icon][data-pkc-symbol='calculator']::after {
+  content: '\e05f';
 }
 [data-pkc-icon][data-pkc-symbol='chart']::before {
-  content: '\e26b';
+  content: '\e060';
+}
+[data-pkc-icon][data-pkc-symbol='chart']::after {
+  content: '\e061';
 }
 [data-pkc-icon][data-pkc-symbol='dashboard']::before {
-  content: '\e871';
+  content: '\e062';
+}
+[data-pkc-icon][data-pkc-symbol='dashboard']::after {
+  content: '\e063';
 }
 [data-pkc-icon][data-pkc-symbol='note']::before {
-  content: '\e66d';
+  content: '\e064';
+}
+[data-pkc-icon][data-pkc-symbol='note']::after {
+  content: '\e065';
 }
 [data-pkc-icon][data-pkc-symbol='book']::before {
-  content: '\ea19';
+  content: '\e066';
+}
+[data-pkc-icon][data-pkc-symbol='book']::after {
+  content: '\e067';
 }
 [data-pkc-icon][data-pkc-symbol='news']::before {
-  content: '\eb81';
+  content: '\e068';
+}
+[data-pkc-icon][data-pkc-symbol='news']::after {
+  content: '\e069';
 }
 [data-pkc-icon][data-pkc-symbol='mail']::before {
-  content: '\e159';
+  content: '\e06a';
+}
+[data-pkc-icon][data-pkc-symbol='mail']::after {
+  content: '\e06b';
 }
 [data-pkc-icon][data-pkc-symbol='chat']::before {
-  content: '\e0c9';
+  content: '\e06c';
+}
+[data-pkc-icon][data-pkc-symbol='chat']::after {
+  content: '\e06d';
 }
 [data-pkc-icon][data-pkc-symbol='timer']::before {
-  content: '\e425';
+  content: '\e06e';
+}
+[data-pkc-icon][data-pkc-symbol='timer']::after {
+  content: '\e06f';
 }
 [data-pkc-icon][data-pkc-symbol='map']::before {
-  content: '\e55b';
+  content: '\e070';
+}
+[data-pkc-icon][data-pkc-symbol='map']::after {
+  content: '\e071';
 }
 [data-pkc-icon][data-pkc-symbol='flight']::before {
-  content: '\e539';
+  content: '\e072';
+}
+[data-pkc-icon][data-pkc-symbol='flight']::after {
+  content: '\e073';
 }
 [data-pkc-icon][data-pkc-symbol='music']::before {
-  content: '\e405';
+  content: '\e074';
+}
+[data-pkc-icon][data-pkc-symbol='music']::after {
+  content: '\e075';
 }
 [data-pkc-icon][data-pkc-symbol='movie']::before {
-  content: '\e404';
+  content: '\e076';
+}
+[data-pkc-icon][data-pkc-symbol='movie']::after {
+  content: '\e077';
 }
 [data-pkc-icon][data-pkc-symbol='camera']::before {
-  content: '\e412';
+  content: '\e078';
+}
+[data-pkc-icon][data-pkc-symbol='camera']::after {
+  content: '\e079';
 }
 [data-pkc-icon][data-pkc-symbol='palette']::before {
-  content: '\e40a';
+  content: '\e07a';
+}
+[data-pkc-icon][data-pkc-symbol='palette']::after {
+  content: '\e07b';
 }
 [data-pkc-icon][data-pkc-symbol='game']::before {
-  content: '\ea28';
+  content: '\e07c';
+}
+[data-pkc-icon][data-pkc-symbol='game']::after {
+  content: '\e07d';
 }
 [data-pkc-icon][data-pkc-symbol='cart']::before {
-  content: '\e8cc';
+  content: '\e07e';
+}
+[data-pkc-icon][data-pkc-symbol='cart']::after {
+  content: '\e07f';
 }
 [data-pkc-icon][data-pkc-symbol='money']::before {
-  content: '\f041';
+  content: '\e080';
+}
+[data-pkc-icon][data-pkc-symbol='money']::after {
+  content: '\e081';
 }
 [data-pkc-icon][data-pkc-symbol='work']::before {
-  content: '\e943';
+  content: '\e082';
+}
+[data-pkc-icon][data-pkc-symbol='work']::after {
+  content: '\e083';
 }
 [data-pkc-icon][data-pkc-symbol='school']::before {
-  content: '\e80c';
+  content: '\e084';
+}
+[data-pkc-icon][data-pkc-symbol='school']::after {
+  content: '\e085';
 }
 [data-pkc-icon][data-pkc-symbol='home']::before {
-  content: '\e9b2';
+  content: '\e086';
+}
+[data-pkc-icon][data-pkc-symbol='home']::after {
+  content: '\e087';
 }
 [data-pkc-icon][data-pkc-symbol='food']::before {
-  content: '\e56c';
+  content: '\e088';
+}
+[data-pkc-icon][data-pkc-symbol='food']::after {
+  content: '\e089';
 }
 [data-pkc-icon][data-pkc-symbol='sunny']::before {
-  content: '\e81a';
+  content: '\e08a';
+}
+[data-pkc-icon][data-pkc-symbol='sunny']::after {
+  content: '\e08b';
 }
 [data-pkc-icon][data-pkc-symbol='science']::before {
-  content: '\ea4b';
+  content: '\e08c';
+}
+[data-pkc-icon][data-pkc-symbol='science']::after {
+  content: '\e08d';
 }
 [data-pkc-icon][data-pkc-symbol='pets']::before {
-  content: '\e91d';
+  content: '\e08e';
+}
+[data-pkc-icon][data-pkc-symbol='pets']::after {
+  content: '\e08f';
 }
 [data-pkc-icon][data-pkc-symbol='fitness']::before {
-  content: '\eb43';
+  content: '\e090';
+}
+[data-pkc-icon][data-pkc-symbol='fitness']::after {
+  content: '\e091';
 }
 [data-pkc-icon][data-pkc-symbol='star']::before {
-  content: '\f09a';
+  content: '\e092';
+}
+[data-pkc-icon][data-pkc-symbol='star']::after {
+  content: '\e093';
 }
 [data-pkc-icon][data-pkc-symbol='key']::before {
-  content: '\e73c';
+  content: '\e094';
+}
+[data-pkc-icon][data-pkc-symbol='key']::after {
+  content: '\e095';
 }
 [data-pkc-icon][data-pkc-symbol='link']::before {
-  content: '\e250';
+  content: '\e096';
+}
+[data-pkc-icon][data-pkc-symbol='link']::after {
+  content: '\e097';
 }
 [data-pkc-icon][data-pkc-symbol='translate']::before {
-  content: '\e8e2';
+  content: '\e098';
+}
+[data-pkc-icon][data-pkc-symbol='translate']::after {
+  content: '\e099';
+}
+[data-pkc-icon][data-pkc-symbol='copy']::before {
+  content: '\e09a';
+}
+[data-pkc-icon][data-pkc-symbol='copy']::after {
+  content: '\e09b';
+}
+[data-pkc-icon][data-pkc-symbol='move']::before {
+  content: '\e09c';
+}
+[data-pkc-icon][data-pkc-symbol='move']::after {
+  content: '\e09d';
+}
+[data-pkc-icon][data-pkc-symbol='folder-plus']::before {
+  content: '\e09e';
+}
+[data-pkc-icon][data-pkc-symbol='folder-plus']::after {
+  content: '\e09f';
+}
+[data-pkc-icon][data-pkc-symbol='note-plus']::before {
+  content: '\e0a0';
+}
+[data-pkc-icon][data-pkc-symbol='note-plus']::after {
+  content: '\e0a1';
+}
+[data-pkc-icon][data-pkc-symbol='eye']::before {
+  content: '\e0a2';
+}
+[data-pkc-icon][data-pkc-symbol='eye']::after {
+  content: '\e0a3';
+}
+[data-pkc-icon][data-pkc-symbol='snippet']::before {
+  content: '\e0a4';
+}
+[data-pkc-icon][data-pkc-symbol='snippet']::after {
+  content: '\e0a5';
 }

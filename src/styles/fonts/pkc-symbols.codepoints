@@ -1,76 +1,83 @@
-settings e8b8
-flag f0c6
-help e8fd
-search ef7a
-download f090
-upload f09b
-arrow_downward e5db
-archive e149
-public e80b
-description e873
-print e8ad
-mop e28d
-add e145
-attach_file e226
-edit f097
-check e668
-close e5cd
-schedule efd6
-delete e92e
-list e896
-folder e2c7
-folder_special e617
-layers e53b
-apps e5c3
-timeline e922
-grid_on e3ec
-inbox e156
-check_box e9de
-assignment e85d
-play_arrow e037
-expand_more e5cf
-expand_less e5ce
-chevron_left e5cb
-chevron_right e5cc
-calendar_month ebcc
-circle ef4a
-person f0d3
-mic e31d
-monitor ef5b
-stop e047
-terminal eb8e
-computer e31e
-smartphone e7ba
-code e86f
-database f20e
-build f8cd
-calculate ea5f
-bar_chart e26b
-dashboard e871
-note e66d
-menu_book ea19
-newspaper eb81
-mail e159
-chat e0c9
-timer e425
-map e55b
-flight e539
-music_note e405
-movie e404
-photo_camera e412
-palette e40a
-sports_esports ea28
-shopping_cart e8cc
-paid f041
-work e943
-school e80c
-home e9b2
-restaurant e56c
-sunny e81a
-science ea4b
-pets e91d
-fitness_center eb43
-star f09a
-key e73c
-link e250
-translate e8e2
+settings e000 e001
+flag e002 e003
+help e004 e005
+search e006 e007
+arrow-in e008 e009
+arrow-out e00a e00b
+arrow-down e00c e00d
+archive e00e e00f
+globe e010 e011
+page e012 e013
+printer e014 e015
+presentation e016 e017
+broom e018 e019
+plus e01a e01b
+clip e01c e01d
+pencil e01e e01f
+check e020 e021
+close e022 e023
+clock e024 e025
+trash e026 e027
+list e028 e029
+folder e02a e02b
+folder-smart e02c e02d
+stack e02e e02f
+apps e030 e031
+timeline e032 e033
+grid e034 e035
+box e036 e037
+check-box e038 e039
+form e03a e03b
+play e03c e03d
+chevron-down e03e e03f
+chevron-up e040 e041
+chevron-left e042 e043
+chevron-right e044 e045
+calendar e046 e047
+dot e048 e049
+person e04a e04b
+mic e04c e04d
+monitor e04e e04f
+stop e050 e051
+terminal e052 e053
+computer e054 e055
+phone e056 e057
+code e058 e059
+database e05a e05b
+tools e05c e05d
+calculator e05e e05f
+chart e060 e061
+dashboard e062 e063
+note e064 e065
+book e066 e067
+news e068 e069
+mail e06a e06b
+chat e06c e06d
+timer e06e e06f
+map e070 e071
+flight e072 e073
+music e074 e075
+movie e076 e077
+camera e078 e079
+palette e07a e07b
+game e07c e07d
+cart e07e e07f
+money e080 e081
+work e082 e083
+school e084 e085
+home e086 e087
+food e088 e089
+sunny e08a e08b
+science e08c e08d
+pets e08e e08f
+fitness e090 e091
+star e092 e093
+key e094 e095
+link e096 e097
+translate e098 e099
+copy e09a e09b
+move e09c e09d
+folder-plus e09e e09f
+note-plus e0a0 e0a1
+eye e0a2 e0a3
+snippet e0a4 e0a5
