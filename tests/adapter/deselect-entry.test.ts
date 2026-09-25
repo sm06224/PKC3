@@ -260,8 +260,13 @@ describe('🔴 Escape で閉じる(#1042 C3)', () => {
 
   /**
    * 🔴 **編集中は Escape で閉じない**(`deselect-entry` 自身の `phase !== 'ready'` ガード)。
+   * ⚠ ここは `document.body` へ Escape を撃つ(= 編集欄には焦点が無い)ので、
+   *   `deselect-entry` が譲ることだけを見る ── 編集そのものを取り消す
+   *   `cancel-edit`(`editor` 文脈・編集欄に焦点があるとき)は別経路であり、
+   *   `tests/adapter/editor-flow.test.ts` が見ている(#1042 段⑦、旧題は
+   *   「編集をやめるだけ」と書いていたが、それはここでは検めていなかった)。
    */
-  it('⚠ 編集中は Escape でノートが閉じない(編集をやめるだけ)', () => {
+  it('⚠ 編集中は Escape でノートが閉じない(deselect-entry が phase を見て譲る)', () => {
     const m = mount();
     m.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
     m.d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: '' });
