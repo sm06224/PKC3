@@ -48,6 +48,8 @@ import { appPhone } from './phone-layout';
 import { ARCHETYPE_ICONS, iconSpan } from './icons';
 // 🔴 タブの名乗りは左の列と同じ関数(#720)
 import { markTab, markTablist } from './tabs-a11y';
+// 🔴 表を送って見てから離れ、戻ると同じ所(C10 / #1045)。左右で**別々に**覚える
+import { ScrollMemory } from './scroll-memory';
 
 /**
  * 指紋の区切り。⚠ **題名に現れない字**でなければ、別々の行が同じ指紋になり
@@ -249,6 +251,15 @@ interface PaneFrame {
   /** 留めた場所の帯。⚠ 1 件も無ければ**器ごと畳む**(空の枠を出さない)。 */
   marksBar: HTMLElement;
   table: HTMLElement;
+  /**
+   * 🔴 **`table` は自分で転がる箱**(C10 / #1045。`app.css` の
+   * `[data-pkc-region='dual-table']` が `overflow: auto`)── 外側の `root` は
+   * 転がらない。⚠ `renderTable` は `frame.table.textContent = ''` で**丸ごと
+   * 作り直す**ので、フォルダを移るたびに位置が 0 へ丸められていた
+   * (`scroll-memory.ts` の「絞り込むと中身が縮んで scrollTop が 0 に丸められる」と
+   * 同じ形)。⚠ **左右は別の箱**なので、覚える先も別に持つ(1 本にしない)。
+   */
+  scroll: ScrollMemory;
   foot: HTMLElement;
   /** 🔴 **下見**(#273 残件)。⚠ 出していないときは `hidden`。 */
   preview: HTMLElement;
@@ -692,6 +703,8 @@ export class DualFilerRenderer {
       filter,
       marksBar,
       table,
+      // 🔴 覚える箱は `table` そのもの(C10 / #1045)。`root` ではない ── 転がるのは `table`。
+      scroll: new ScrollMemory(table),
       foot,
       preview,
       otherMarks,
@@ -907,7 +920,15 @@ export class DualFilerRenderer {
       // ⚠ 行の object ごと入れ替わるので、**カーソルの指紋も捨てる** ──
       //   捨てないと「同じ lid だから塗らない」で **枠が消えたまま**になる
       frame.cursor = '';
+      /**
+       * 🔴 **`renderTable` は `frame.table.textContent = ''` で丸ごと作り直す**
+       * (C10 / #1045)。① 作り直す**前**に退避 ② 入れ**終わってから**戻す
+       * (`scroll-memory.ts` の「順番が本体」)。⚠ 鍵は**絞り込みの有無**
+       * (`filer.ts` / `browse.ts` と同じ規則。「絞り込んだ結果は先頭から」)。
+       */
+      frame.scroll.park();
       this.renderTable(frame, side, rows, filtered, renaming, state.entrySort, state.entrySortDesc);
+      frame.scroll.use(filtered ? 'q' : '');
     } else if (dates !== frame.dates) {
       /**
        * 🔴 **日付だけ差し替える**(#270)── 行の node は作り直さない。
