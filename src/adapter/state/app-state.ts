@@ -659,7 +659,14 @@ export function viewModeLabel(view: ViewMode): string {
 export function phaseBlockReason(phase: AppPhase): string | null {
   if (phase === 'ready') return null;
   if (phase === 'editing') return '編集を終了してから';
-  if (phase === 'error') return '保存をやり直すか取り消してから';
+  /*
+   * 🔴 **保存に失敗して止まったときの出口は「再保存」1 つだけ**(C11 / #1045)。
+   * ⚠ 直す前は「保存をやり直すか**取り消して**から」と言っていたが、この phase では
+   *   取り消し(`CANCEL_EDIT`)は `phase !== 'editing'` で断られ、選択も動かない
+   *   (`SELECT_ENTRY` の error 分岐)── **押せない出口を案内していた**。
+   *   画面に在るのは本文の上の「再保存」ボタンだけである(`detail.ts` の `retry`)。
+   */
+  if (phase === 'error') return SAVE_FAILED_EXIT;
   return '読み込みが終わってから';
 }
 
@@ -697,36 +704,37 @@ export function endEditRefusal(what: string, state: AppState): string {
 }
 
 /**
- * 🔴 **押せないボタンの説明**(#516)。`ready` なら `null`。
- * ⚠ 上の `phaseBlockReason` と**問いが違う**(あちらは帯の断り文、こちらは
- *   ボタンに添える説明)。⚠ ただし**判定は同じ `phase`** なので、
- *   両方をここへ並べて置く ── 片方だけ phase を増やし忘れるのを防ぐ。
+ * 🔴 **保存に失敗して止まったときの出口**(C11 / #1045)── 本文の上に出るボタンの字。
+ * ⚠ ボタンの字(`detail.ts` の `retry.textContent`)と食い違うと、user は
+ *   **無いボタンを探す**。一致は `tests/adapter/refusal-words.test.ts` が
+ *   **描いた画面から字を引いて**見る(ここに手で書いた字どうしを比べない)。
  */
-export function phaseDisabledNote(phase: AppPhase): string | null {
-  if (phase === 'ready') return null;
-  if (phase === 'editing') return '編集中は使えません ── 確定するか取り消してください';
-  if (phase === 'error') return '保存に失敗しているので使えません ── やり直すか取り消してください';
-  return '読み込み中は使えません';
-}
+const SAVE_FAILED_EXIT = '「再保存」を押してから';
 
 /**
  * 編集中に「押せない理由」として画面へ出す 1 行(#715)。
- * ⚠ 出口は**ボタンの字**(保存 / キャンセル)で言う ── {@link phaseDisabledNote} の
- *   「確定するか取り消して」は、画面のどのボタンの字とも一致しない。
+ * ⚠ 出口は**ボタンの字**(保存 / キャンセル)で言う ── 「確定 / 取り消し」は
+ *   画面のどのボタンの字とも一致しない(C11 で最後の 1 系統を消した)。
  */
 export const EDITING_NOTE = '編集中は使えません(保存するか、キャンセルすると戻ります)';
 
 /**
- * 🔴 **user に見せる「押せない理由」**(#516 / #715 / #761)。押せるなら `null`。
+ * 🔴 **user に見せる「押せない理由」**(#516 / #715 / #761 / C11)。押せるなら `null`。
  *
- * ⚠ {@link phaseDisabledNote} との差は**編集中の 1 行だけ**である ── そこだけ
- *   出口をボタンの字で言う({@link EDITING_NOTE})。
- * 🔑 **この使い分けを 2 か所に書かない**(CLAUDE.md §7)── 直す前は
- *   `inspector.ts` にしか無く、左の列の「+ ノート」は**理由を 1 文字も出さずに
- *   黙って捨てて**いた(#761)。寄せたので、次に足す面も同じ字で言える。
+ * 🔑 **押せないボタンに添える字は、ここ 1 か所**(CLAUDE.md §7)── 乗せたときの字
+ *   (`title`)も、右の列の上の 1 行も、左の列の「+ ノート」も、同じ関数から採る。
+ * ⚠ **C11(#1045、2026-09-25)で 1 本にした。** 直す前は隣に `phaseDisabledNote` が
+ *   在り、編集中の字だけが「編集中は使えません ── **確定するか取り消して**ください」
+ *   だった ── 右の列では、**乗せたときの字**(こちら)と**列の上の 1 行**
+ *   ({@link EDITING_NOTE})が、同じ画面で別の出口を言っていた。
+ * ⚠ `phase !== 'ready'` を「編集中」と読み替えない(#516)── 保存に失敗して
+ *   止まったときは、出口が「再保存」1 つしか無い({@link phaseBlockReason} を見よ)。
  */
 export function blockedActionNote(phase: AppPhase): string | null {
-  return phase === 'editing' ? EDITING_NOTE : phaseDisabledNote(phase);
+  if (phase === 'ready') return null;
+  if (phase === 'editing') return EDITING_NOTE;
+  if (phase === 'error') return `保存に失敗しているので使えません(${SAVE_FAILED_EXIT}使えます)`;
+  return '読み込み中は使えません';
 }
 
 /**
@@ -4323,7 +4331,7 @@ function reduceCore(
         return {
           state: {
             ...state,
-            error: `編集中は${viewModeLabel(action.mode)}を開けません(保存するか、取り消してください)`,
+            error: `編集中は${viewModeLabel(action.mode)}を開けません(保存するか、キャンセルすると開けます)`,
           },
           events: [],
         };

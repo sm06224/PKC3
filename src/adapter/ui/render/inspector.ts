@@ -37,7 +37,7 @@
  * **毎回値を計算して、違うものだけ書く**なら、その族は原理的に発生しない。
  * ⚠ 器を組み直すのは**形が変わるときだけ**(選択の有無 / 「書き戻す」の有無)。
  */
-import { blockedActionNote, phaseDisabledNote, type AppState } from '@adapter/state/app-state';
+import { blockedActionNote, type AppState } from '@adapter/state/app-state';
 import type { EntryMeta } from '@core/model/entry-meta';
 import { ScrollMemory } from './scroll-memory';
 import { archetypeLabel } from './sidebar';
@@ -102,6 +102,17 @@ function setText(el: HTMLElement, value: string): void {
 /** 属性も同じ ── 同じ値の再代入で mutation observer を起こさない。 */
 function setAttr(el: HTMLElement, name: string, value: string): void {
   if (el.getAttribute(name) !== value) el.setAttribute(name, value);
+}
+
+/**
+ * 押せないボタンに乗せたときの字(C11 / #1045)── 何をするボタンかの 1 行の下に、
+ * 押せない理由を**そのまま**置く。
+ * ⚠ **括弧で包まない** ── 理由の字({@link blockedActionNote})が自分で括弧を
+ *   持つので、包むと「名前を変える(編集中は使えません(保存するか…))」の
+ *   二重の括弧になる。⚠ 字は**列の上の 1 行と 1 文字も違わない**(同じ関数の値)。
+ */
+function withBlockedNote(base: string, note: string): string {
+  return `${base}\n${note}`;
 }
 
 export class InspectorRenderer {
@@ -190,8 +201,12 @@ export class InspectorRenderer {
      *   (保存に失敗したときの保護)でも同じ字が出ていた ── user は編集して
      *   いないのに「確定するか取り消してください」と言われ、**存在しない編集を探す**。
      * 🔑 字の出どころは `app-state.ts` の 1 か所(§7)。
+     * 🔴 **列の上の 1 行と同じ関数を呼ぶ**(C11 / #1045)── 直す前はここだけ
+     *   `phaseDisabledNote` を呼んでいて、同じ画面で**乗せたときの字**は
+     *   「確定するか取り消して」、**列の上の 1 行**は「保存するか、キャンセル」と、
+     *   別の出口を言っていた。
      */
-    const blockedNote = phaseDisabledNote(state.phase) ?? '';
+    const blockedNote = blockedActionNote(state.phase) ?? '';
 
     this.setRow('inspector-title', meta.title);
     this.setRow('inspector-kind', archetypeLabel(meta.archetype));
@@ -517,7 +532,7 @@ export class InspectorRenderer {
           // 🔴 編集中は押せなくする(#513)── reducer は黙って捨てるので、口の側で断る
           del.disabled = editing;
           del.title = editing
-            ? `この関係を消します(${blockedNote})`
+            ? withBlockedNote('この関係を消します', blockedNote)
             : 'この関係を消します(ノートは消えません)';
           item.append(label, go, del);
           relBox.append(item);
@@ -814,7 +829,7 @@ export class InspectorRenderer {
        */
       setAttr(b, 'data-pkc-entry', meta.lid);
       if (b.disabled !== editing) b.disabled = editing;
-      const shown = editing ? `${title}(${blockedNote})` : title;
+      const shown = editing ? withBlockedNote(title, blockedNote) : title;
       if (b.title !== shown) b.title = shown;
     }
     /**
@@ -822,8 +837,7 @@ export class InspectorRenderer {
      * ⚠ 直す前は `disabled` と `title` だけだった ── 見た目は押せるボタンと同じで、
      *   理由は**乗せないと読めない**。押しても何も起きないボタンを user が探していた。
      * ⚠ 字は phase から導く(#516)── 保存に失敗した保護中に「編集中」と言わない。
-     *   編集中だけは、上の `blockedNote`(「確定するか取り消して」)ではなく
-     *   **ボタンの字**(保存 / キャンセル)で出口を言う。
+     *   出口は**ボタンの字**(保存 / キャンセル)で言う(C11 で乗せたときの字と揃えた)。
      */
     if (this.editingNote) {
       /*
@@ -945,13 +959,13 @@ export class InspectorRenderer {
      */
     set.disabled = editing;
     const setBase = has ? '日付を選び直します' : 'このノート 1 件を、その日の予定にします';
-    set.title = editing ? `${setBase}(${blockedNote})` : setBase;
+    set.title = editing ? withBlockedNote(setBase, blockedNote) : setBase;
     // ⚠ **押しても何も起きないボタンを出さない**(日付が無ければ外すものが無い)
     if (clear) {
       clear.hidden = !has;
       clear.disabled = editing;
       clear.title = editing
-        ? `日付を外します(${blockedNote})`
+        ? withBlockedNote('日付を外します', blockedNote)
         : '日付を外します(ノートは消えません)';
     }
   }
@@ -968,7 +982,7 @@ export class InspectorRenderer {
     bar.kind.disabled = editing;
     bar.add.disabled = editing;
     const base = '選んでいるノートから、相手のノートへ関係を張ります';
-    bar.add.title = editing ? `${base}(${blockedNote})` : base;
+    bar.add.title = editing ? withBlockedNote(base, blockedNote) : base;
   }
 
   /** 器を組む(形が変わったときだけ呼ばれる)。 */

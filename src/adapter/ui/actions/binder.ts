@@ -59,6 +59,7 @@ import {
   hasAppGroupOrder,
   isViewMode,
   nextViewMode,
+  phaseBlockReason,
   screenBodyOf,
   type AppState,
   type ViewMode,
@@ -2395,11 +2396,10 @@ function phoneShowList(dispatcher: Dispatcher): boolean {
    *   「一覧で探してください」というスマホ用の字が出る(着地前レビュー 3)。
    */
   if (!appPhone.isPhone()) return true;
-  if (dispatcher.getState().phase !== 'ready') {
-    dispatcher.dispatch({
-      type: 'OP_FAILED',
-      error: '保存するか取り消してから、一覧で探してください',
-    });
+  const blocked = phaseBlockReason(dispatcher.getState().phase);
+  if (blocked !== null) {
+    // ⚠ 字は 1 か所から(C11 / #1045)── 直す前は「保存するか**取り消して**から」
+    dispatcher.dispatch({ type: 'OP_FAILED', error: `${blocked}、一覧で探してください` });
     return false;
   }
   if (appPhone.reveal('list') === 'needs-detail') {
@@ -4108,11 +4108,10 @@ const ACTIONS: Record<string, ActionHandler> = {
       appPhone.showNote();
       return;
     }
-    if (dispatcher.getState().phase !== 'ready') {
-      dispatcher.dispatch({
-        type: 'OP_FAILED',
-        error: '保存するか取り消してから戻ってください',
-      });
+    const blocked = phaseBlockReason(dispatcher.getState().phase);
+    if (blocked !== null) {
+      // ⚠ 字は 1 か所から(C11 / #1045)── 直す前は「保存するか**取り消して**から」
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${blocked}戻ってください` });
       return;
     }
     if (page === 'info') {

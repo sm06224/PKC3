@@ -216,7 +216,7 @@ test('🔴 編集中に ← を押すと理由が出る(黙って何も起きな
   await expect(
     page.locator(REGION('status')),
     '編集中に戻ろうとしても何も出ない(押せない理由が画面に無い)',
-  ).toContainText('保存するか取り消してから');
+  ).toContainText('編集を終了してから');
   // 🔑 ページは動いていない(戻ったふりをしない)
   await expect(page.locator(REGION('center'))).toBeVisible();
 });
