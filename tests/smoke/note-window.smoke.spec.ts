@@ -168,7 +168,36 @@ test('🔴 別の窓で開くと、その窓がそのノートを開いて立ち
     '1 枚目が 2 枚目に潰された(窓を使い回している)',
   ).toContainText('ふたつめ');
 
-  await win.close();
+  /**
+   * ⑦ 🔴 **付箋のウィンドウは Escape で閉じる**(#1042 followup 指摘 A。
+   * 裁定:`docs/development/touch-and-unity-design-2026-09.md` §5 Q3
+   * 「付箋のウィンドウも Escape で閉じます」)。
+   * ⚠ **新しく窓を起こさない** ── ここまでで既に立ち上がっている `win` で確かめる
+   * (このファイルの主目的である「立ち上がりの繋がり」を測る回に相乗りする)。
+   * 🔴 **`blur()` はしない**(#1042 段②)。付箋は追記欄に焦点が入ったまま開く
+   * (`main.ts` の `enterNoteWindow` → `focusInputOnceReady`)ので、
+   * **開いた直後にそのまま押す 1 回目の Escape**が本当に効くかを見る ──
+   * ここで焦点を外して確かめると、「打っている欄では何も打っていなくても
+   * Escape が無反応」という直す前の症状を smoke が永久に見逃す。
+   */
+  await expect(
+    win.locator('[data-pkc-field="append-input"]'),
+    '前提が崩れた(焦点が追記欄に無い)',
+  ).toBeFocused();
+  await expect(win.locator('[data-pkc-field="append-input"]')).toHaveValue('');
+  /**
+   * ⚠ 窓は keydown の中で閉じるので、press() の後半(keyup)が閉じた窓へ届いて
+   *   「Target … closed」で落ちる ── それは**閉じた**ことの表れなので、その 1 種類だけ許す
+   *   (閉じなかったことは `waitForEvent('close')` が時間切れで知らせる)。
+   */
+  await Promise.all([
+    win.waitForEvent('close', { timeout: 5_000 }),
+    win.keyboard.press('Escape').catch((e: unknown) => {
+      if (!/closed/i.test(String(e))) throw e;
+    }),
+  ]);
+  expect(win.isClosed(), '付箋のウィンドウが Escape で閉じていない').toBe(true);
+
   await win2.close();
 
   expect(winErrors, `別の窓で page error: ${winErrors.join(' / ')}`).toEqual([]);

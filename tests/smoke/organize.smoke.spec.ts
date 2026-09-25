@@ -33,7 +33,7 @@ async function makeFolder(page: Page, title: string): Promise<void> {
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 }
 
-test('🔴 最初はフォルダの面で開き、2 クリックで中へ入る', async ({ page }) => {
+test('🔴 最初はフォルダの面で開き、2 クリックで中へ入る', async ({ page, context }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
@@ -131,6 +131,21 @@ test('🔴 最初はフォルダの面で開き、2 クリックで中へ入る'
   // ④ パンくずのルートで戻る(⚠ 開いているノートは閉じない)
   await clickReal(page, '[data-pkc-region="filer-breadcrumb"] button');
   await expect(rows).toHaveCount(2);
+
+  /**
+   * ⑤ 🔴 **ノートの行を 2 回押すと、フォルダとは違って小窓(別ウィンドウ)で開く**
+   * (#1042 C14。同じ「2 回押す」でも、押した行の種類で行き先が分かれることを
+   * 実マウスで見る ── unit の `row-organize.test.ts` は選ぶ・入るまでしか見ない)。
+   * ⚠ **間に別の行を押して「連続」を切る**(③と同じ理由)。
+   */
+  await clickReal(page, folderRow);
+  const popup = context.waitForEvent('page');
+  await doubleClickReal(page, noteRow);
+  const win = await popup;
+  await expect(win.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
+  // ⚠ 小窓に食われて中へ入っていない(まだフォルダの面のまま、行は 2 件)
+  await expect(rows, 'ノートの 2 回押しでフォルダの中へ入ってしまった').toHaveCount(2);
+  await win.close();
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
@@ -459,6 +474,109 @@ test('🔴 ↑↓ で行を送れて、Enter は読むところから始まる',
     ),
     'Enter で本文の面へ焦点が移っていない',
   ).toBe(true);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **一覧タブでも、フォルダの表と同じ ↑↓ / Enter が効く**(#1042 C2)。
+ * ついでに、Escape の 2 つの決着(段③ / 段①-③④)も同じ台で見る ──
+ * 新しく起動すると 1.63 秒が積み上がる(`smoke-budget`)ので、**この一覧タブの
+ * 台に乗る話は同じ起動に相乗りさせる**(残る予算は 2 起動ぶんしかない)。
+ *
+ * 🔴 **unit では届かない層**は上の「↑↓ で行を送れて…」と同じ ── 実キーが
+ * 既定(スクロール)を奪えているか / 焦点が本当に行へ移るか。⚠ ここは
+ * **フォルダの表とは別の器**(`entry-list`)を通るので、共有しているつもりの
+ * 鍵が実際にはこちらへ配線されていない、という取り違えを実ブラウザで見る。
+ * ⚠ **段④⑤は、ここでしか実測できない**(Escape の判定は `contextMenuOpen` /
+ * `viewMode` / `phase` の**実際の版面**を見て分岐するので、happy-dom の
+ * 合成 event では「押した鍵が本当にブラウザの既定(検索・全画面解除)より
+ * 先に消費されるか」までは確かめられない)。
+ */
+test('🔴 一覧タブの ↑↓・Enter・絞り込みと、Escape の 2 段決着 (#1042)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  for (let i = 0; i < 3; i += 1) {
+    await createEntry(page, 'text');
+    await clickReal(page, '[data-pkc-action="commit-edit"]');
+  }
+  await clickReal(page, '[data-pkc-browse="list"]');
+  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  await expect(rows).toHaveCount(3);
+  const focusedLid = () =>
+    page.evaluate(() => {
+      const el = document.activeElement;
+      return el instanceof HTMLElement
+        ? (el.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? 'なし')
+        : 'なし';
+    });
+
+  // ① 1 行目を押してから ↓ ── 焦点が隣の行へ動く
+  await rows.nth(0).click();
+  const first = await focusedLid();
+  expect(first, 'クリックで行に焦点が入らない(空振り)').not.toBe('なし');
+  await page.keyboard.press('ArrowDown');
+  const second = await focusedLid();
+  expect(second, '一覧タブで ↓ を押しても焦点が動かない').not.toBe(first);
+
+  /**
+   * ② Enter は**読む**ところから開く。🔑 **焦点は行に残す** ── 一覧は ↓ で
+   *   読み進める場所なので、クリックで開いたときと同じく行に焦点を置いたままにする
+   *   (続けて ↓ で次のノートへ進める)。⚠ フォルダの表の Enter は本文へ焦点を移すが、
+   *   あちらは「開いて中を触る」場所なので揃えない。
+   */
+  await page.keyboard.press('Enter');
+  await expect(
+    page.locator('[data-pkc-region="detail"] [data-pkc-action="commit-edit"]'),
+    'Enter で編集に入ってしまった(既定は読む)',
+  ).toHaveCount(0);
+  await expect(
+    page.locator(`[data-pkc-region="entry-list"] [data-pkc-entry="${second}"]`),
+    '一覧タブの Enter でそのノートが開いていない',
+  ).toHaveAttribute('data-pkc-selected', '');
+  expect(await focusedLid(), '一覧タブの Enter の後、焦点が行から離れた').toBe(second);
+
+  /**
+   * ③ 🔴 **絞り込みの欄で ↓ を押すと、先頭の行へ焦点が移る**(#1042 C2)。
+   * ⚠ フォルダの表には無い一覧タブ独自の入口 ── 絞り込みながら
+   * キーボードだけで行へ降りられることを見る。
+   */
+  const filter = page.locator('[data-pkc-field="entry-filter"]');
+  await filter.focus();
+  await page.keyboard.press('ArrowDown');
+  const afterFilterDown = await focusedLid();
+  await expect(rows.first()).toHaveAttribute('data-pkc-entry', afterFilterDown);
+
+  /**
+   * ④ 🔴 **何も編集していないとき、Escape はノートを閉じる**(#1042 段①③)。
+   * ⚠ ②で開いたノート(`selectedLid`)がまだ開いたまま ── 面は無い
+   *   (`viewMode === 'detail'`)ので `reading` が先に試される。
+   * 🔑 観測点は**コレクションの面**(`collection-pane.smoke.spec.ts` と同じ)──
+   *   何も選んでいないときだけ出る。
+   */
+  const collectionPane = page.locator('[data-pkc-field="collection-pane"]');
+  await expect(collectionPane, '前提が崩れている(ノートが開いていない)').toBeHidden();
+  await page.keyboard.press('Escape');
+  await expect(collectionPane, 'Escape でノートが閉じていない').toBeVisible();
+
+  /**
+   * ⑤ 🔴 **面が在るときは、面が先に閉じてノートへ戻る**(#1042 followup 指摘 B)。
+   * ノートを開き直し、面(システム)を出してから Escape を 2 回押す ──
+   * 1 回目で面だけが閉じてノートが見え、2 回目でノートが閉じる。
+   */
+  await rows.first().click();
+  await expect(collectionPane, '前提が崩れている(選び直せていない)').toBeHidden();
+  await page.keyboard.press('Alt+3');
+  const settingsPane = page.locator('[data-pkc-view-pane="settings"]');
+  await expect(settingsPane, '前提が崩れている(システムの面が出ていない)').toBeVisible();
+
+  await page.keyboard.press('Escape');
+  await expect(settingsPane, '1 回目の Escape で面が閉じていない').toBeHidden();
+  await expect(collectionPane, '1 回目の Escape でノートまで閉じた(1 段だけ閉じる、の破り)').toBeHidden();
+
+  await page.keyboard.press('Escape');
+  await expect(collectionPane, '2 回目の Escape でノートが閉じていない').toBeVisible();
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

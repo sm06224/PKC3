@@ -3037,6 +3037,30 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         isClosed: () => window.closed,
       }),
     /**
+     * 🔴 **付箋(ノートだけの別ウィンドウ)なら、Escape で窓ごと閉じる**
+     * (#1042 followup。裁定:`docs/development/touch-and-unity-design-2026-09.md`
+     * §5 Q3「付箋のウィンドウも Escape で閉じます」)。
+     *
+     * ⚠ **`closeViewWindow`(上)と同じ道に乗せる** ── 閉じ方の作法を 2 つ作らない
+     *   (CLAUDE.md §10「置き換えの作法」)。違うのは `holding` だけ
+     *   (`heldViewWindow !== null` ではなく `heldNoteWindow`)。
+     * ⚠ 判断(この窓は付箋か)は `main.ts` の `heldNoteWindow` に在る ──
+     *   binder はこの関数を呼ぶだけで、`heldNoteWindow` を直接読まない。
+     * 🔴 **`closeViewWindow` と同じ三値をそのまま返す**(#1042 段④)。
+     * ⚠ 直す前は `=== 'closed'` で boolean へ潰していたので、`'refused'`
+     *   (付箋だがブラウザが閉じなかった)が `false` に埋もれ、binder 側は
+     *   「付箋でない」と区別できずに黙って `deselect-entry` へ進んでいた
+     *   (窓は開いたままなのにノートだけ閉じる、という食い違い)。
+     *   `CloseViewWindowResult` をそのまま返せば、呼び側(binder)が
+     *   `'refused'` を見分けて理由を出せる。
+     */
+    closeNoteWindow: () =>
+      closeViewWindow({
+        holding: () => heldNoteWindow,
+        close: () => window.close(),
+        isClosed: () => window.closed,
+      }),
+    /**
      * 添付の参照をコピーする(P8 段⑱)。
      * ⚠ **結果を出す** ── コピーは押しても画面が変わらない操作なので、
      *    黙って終わると成功したのか分からない

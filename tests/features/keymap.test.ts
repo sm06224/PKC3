@@ -191,8 +191,9 @@ describe('割当の検め', () => {
    *   鍵の枠(15 個の設定 flag とは別枠だが、既定の割当は有限)を消費しない。
    */
   const KEYLESS: readonly string[] = [
-  // 🔑 #1032 ── 鍵は user が決める(`global` は Escape を名乗れない。定義の docstring)
-  'deselect-entry','format-table', 'format-codeblock', 'format-math'];
+  // 🔑 #1042 C3(裁定 2026-09-25 Q3 = A)で `deselect-entry` に既定 `Escape` が付いた
+  // (専用の文脈 `reading` を作って `global` の重なりを避けた。定義の docstring)
+  'format-table', 'format-codeblock', 'format-math'];
 
   it('🔴 鍵を持たない操作の一覧は、身元で持つ', () => {
     const ids = new Set(KEY_COMMANDS.map((c) => c.id));

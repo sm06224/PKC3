@@ -41,6 +41,29 @@ export interface Chord {
  * 🔑 逆に**両方に在る操作**(開く / ゴミ箱 / 行送り)は `filer` 1 つのまま ──
  *   user に同じ操作を 2 回割り当て直させない(#273 で確立した規律)。
  */
+/**
+ * 🔴 **`list` を分けている理由**(#1042 C2)── 一覧タブはフォルダの表と違い
+ * `scopeLid`(現在地)を持たない **flat な行の並び**である。「開く」は同じ意味
+ * (`filer-open` を共有)だが、フォルダの行でも「中へ入る」は起こさない
+ * (`tests/adapter/multi-select.test.ts` が pin する「見えない現在地が動かない」を
+ * 一覧では守る)。`filer-parent` / `filer-select-all` / `filer-rename` などの
+ * フォルダ固有の操作(親フォルダ・移す・複数選択)は一覧には無いので、
+ * `filer` へ混ぜず**必要な 3 つだけ**(次の行へ / 前の行へ / 開く)を共有する。
+ */
+/**
+ * 🔴 **`reading` / `window` を分けている理由**(#1042 C3。裁定 2026-09-25 Q3 = A)。
+ *
+ * ⚠ 最初の稿は `deselect-entry` の `Escape` を `global` にしたが、`global` は
+ *   **どの文脈とも重なる**ので `row-cancel`(行の編集をやめる)/ `cancel-edit`
+ *   (編集をやめる)と同じ鍵を名乗れず、`contextsOverlap` に断られた。
+ * 🔑 `reading`(ノートを読んでいるとき)と `window`(別のウィンドウ)は
+ *   **どちらとも重ならない**専用の文脈にして、緩めずに通す。
+ * ⚠ `reading` を `window` より**先に試す**(`binder.ts` の `onShortcut`)──
+ *   `close-pane` は押しボタンの `disabled` しか見ないので(`hidden` は見ない)、
+ *   先に試すと**常に「効いた」ことになり**、ノートが開いていても閉じられなく
+ *   なる。`deselect-entry` は「開いているノートが無ければ何もしない」を
+ *   自分の中で判定するので、先に試しても安全である。
+ */
 export type KeyContext =
   | 'global'
   | 'editor'
@@ -48,7 +71,10 @@ export type KeyContext =
   | 'row'
   | 'live'
   | 'filer'
-  | 'dual';
+  | 'dual'
+  | 'list'
+  | 'reading'
+  | 'window';
 
 /**
  * 🔴 **どこで効くかの見出し**(2026-08-26 に adapter からここへ移した)。
@@ -74,6 +100,12 @@ export const CONTEXT_LABELS: Readonly<Record<KeyContext, string>> = {
   filer: 'フォルダの一覧と 2 ペイン(行を選んでいるとき)',
   /** ⚠ こちらは**2 ペインにしか存在しない操作**だけ(反対側へ写す / 移す など)。 */
   dual: '2 ペインだけの操作(そのペインに焦点があるとき)',
+  /** ⚠ こちらは**一覧タブにしか存在しない面**(フォルダの表とは違う flat な行)。 */
+  list: '一覧タブ(ノートの行を選んでいるとき)',
+  /** ⚠ 何も編集していないときだけ効く(#1042 C3)。 */
+  reading: 'ノートを読んでいるとき',
+  /** ⚠ 予定表・連絡先の別ウィンドウ、および中央の面(query/settings/help など)。 */
+  window: '別のウィンドウ',
 };
 
 export interface KeyCommand {
@@ -150,27 +182,28 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     note: '選んでいるノートを編集する(ノートを選んでいるときだけ効きます。PKC2 の Ctrl+E と同じ手)',
   },
   /**
-   * 🔴 **開いているノートを閉じて、コレクションへ戻る**(#1032)。
+   * 🔴 **開いているノートを閉じて、コレクションへ戻る**(#1032。
+   * 既定 `Escape` は #1042 C3、裁定 2026-09-25 Q3 = A)。
    *
    * ⚠ **戻る道が画面に 1 つも無かった** ── ノートを選ぶと中央はそのノートになり、
    *   コレクションの操作へは**読み込み直す以外に戻れなかった**(「選択を解除」が
    *   外すのは印だけで、開いているノートには触らない)。
    * 🔑 マウスの側は「一覧の何も無い所を押す」(`binder.ts` の `onClick`)── こちらは
    *   その**近道**である(思想③「マウスで完結し、キーボードは近道」)。
-   * 🔴 **既定の鍵は置かない**(`defaults: []`。`KEYLESS` に身元で挙げてある)。
-   * ⚠ 最初の稿は `Escape` を既定にしたが、**この file 自身の検めが断った** ──
-   *   `global` は**どの文脈とも重なる**ので、`row-cancel`(行の編集をやめる)と
-   *   同じ鍵を名乗れない。🔑 断られたのは正しい:`Escape` を全域で奪うと、
-   *   「行の名前を打つのをやめる」が**このコマンドに食われる**日が来る。
-   * 🔑 だから**鍵は user が決める** ── 近道の設定に行として出るので、
-   *   `Escape` を割り当てたい人は自分で割り当てられる。パレット(操作を探す)
-   *   からも名前で呼べる(`palette-rows.ts` は `KEY_COMMANDS` そのものを並べる)。
+   * 🔴 **最初の稿は `Escape` を `global` の既定にしたが、この file 自身の検めが
+   *   断った**(2026-08 当時)── `global` は**どの文脈とも重なる**ので、
+   *   `row-cancel`(行の編集をやめる)と同じ鍵を名乗れない。
+   * 🔑 **2026-09-25 に専用の文脈(`reading`)を作って解いた**(上の型の注記)。
+   *   `contextsOverlap` は緩めていない ── `reading` は `row` / `editor` とは
+   *   重ならない専用の文脈である。
+   * ⚠ 何も編集していないときだけ効く(判定は `binder.ts` の `deselect-entry` 実装 ──
+   *   `phase !== 'ready'` または `selectedLid === null` なら何もしない)。
    */
   {
     id: 'deselect-entry',
     label: 'ノートを閉じる',
-    contexts: ['global'],
-    defaults: [],
+    contexts: ['reading'],
+    defaults: ['Escape'],
     note: '中央がコレクションの画面に戻ります(一覧の何も無い所を押しても同じです)',
   },
   {
@@ -179,6 +212,28 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['global'],
     defaults: ['Mod+F'],
     note: '左の一覧の絞り込み欄に焦点を移します(ヘルプを開いている間は、ブラウザの検索が出ます)',
+  },
+  /**
+   * 🔴 **別のウィンドウ・面を閉じる**(#1042 C3。裁定 2026-09-25 Q3 = A)。
+   *
+   * ⚠ 実体は既存の `close-pane`(押しボタンは `center.ts` の「× 閉じる」)を
+   *   そのまま呼ぶ ── 2 つ目の「閉じる作法」を作らない(CLAUDE.md §10)。
+   *   予定表・連絡先の別ウィンドウでは `services.closeViewWindow` が
+   *   窓ごと閉じ、中央の面(query / settings / help など)を出しているときは
+   *   本文へ戻る(× と同じ)。
+   * ⚠ **`reading`(上の `deselect-entry`)より後に試す**(`binder.ts`)── 実体は
+   *   押しボタンを `SHORTCUT_BUTTON` 経由で撃つので、`hidden` なボタン
+   *   (面を出していないとき)でも「押せた」ことになってしまう。先に試すと
+   *   ノートが開いていても閉じられなくなる。
+   */
+  {
+    id: 'close-pane',
+    // ⚠ 押しボタン(center.ts の「× パネルを閉じる」)と同じ字にする(#1053 の
+    //   「何を + どうする」規則。この鍵は 2 つ目の「閉じる」ボタンを作らない)。
+    label: 'パネルを閉じる',
+    contexts: ['window'],
+    defaults: ['Escape'],
+    note: '別のウィンドウ(予定表・連絡先)ではウィンドウごと閉じます',
   },
   /**
    * 🔴 **日付を入れる道具**(user 指示 2026-08-23)。
@@ -260,7 +315,9 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   {
     id: 'filer-open',
     label: '行を開く(フォルダなら中へ)',
-    contexts: ['filer', 'dual'],
+    // 🔑 一覧タブも共有(#1042 C2)── 一覧に「中へ入る」先は無いので、
+    //   フォルダの行でも普通のノートと同じく開く(そのまま select-entry)
+    contexts: ['filer', 'dual', 'list'],
     // ⚠ `F3` は古典 4 実装(TC / DC / FAR / Krusader)の「見る」と同じ位置
     defaults: ['Enter', 'F3'],
     note: 'OS のファイラと同じ ── 行を選んで Enter(F3 でも開きます)',
@@ -298,14 +355,15 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   {
     id: 'filer-row-down',
     label: '次の行へ移る',
-    contexts: ['filer', 'dual'],
+    // 🔑 一覧タブも共有(#1042 C2)── 行が焦点を持つ点はフォルダの表と同じ
+    contexts: ['filer', 'dual', 'list'],
     defaults: ['ArrowDown'],
     note: '2 ペインではカーソルだけが動きます(選択は Space)',
   },
   {
     id: 'filer-row-up',
     label: '前の行へ移る',
-    contexts: ['filer', 'dual'],
+    contexts: ['filer', 'dual', 'list'],
     defaults: ['ArrowUp'],
   },
   {
@@ -1164,7 +1222,11 @@ const BARE_ALLOWED = new Set(['Escape', 'Tab']);
  * 🔑 `Enter` / `Delete` / `Backspace` は **OS のファイラの標準**であり、
  * ここを許さないと「平仄を合わせる」(user 裁定 2026-08-18)が実行できない。
  */
-const NON_TYPING_CONTEXTS: ReadonlySet<KeyContext> = new Set<KeyContext>(['filer', 'dual']);
+/**
+ * 🔴 `list`(#1042 C2)も同じ理由で足す ── 一覧タブの行(`<li>`)も文字を打つ
+ * 相手ではない(焦点は行そのもの、入力欄は名前の打ち替え中だけ別に受ける)。
+ */
+const NON_TYPING_CONTEXTS: ReadonlySet<KeyContext> = new Set<KeyContext>(['filer', 'dual', 'list']);
 
 function bareAllowed(key: string, commandId?: string): boolean {
   if (BARE_ALLOWED.has(key) || /^F([1-9]|1[0-9]|2[0-4])$/.test(key)) return true;

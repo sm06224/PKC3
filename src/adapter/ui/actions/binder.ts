@@ -1049,6 +1049,29 @@ export interface BinderServices {
    */
   closeViewWindow?(): CloseViewWindowResult;
   /**
+   * 🔴 **付箋(ノートだけの別ウィンドウ)なら、Escape で窓ごと閉じる**
+   * (#1042 followup / 段④。裁定:`docs/development/touch-and-unity-design-2026-09.md`
+   * §5 Q3「付箋のウィンドウも Escape で閉じます」)。
+   *
+   * ⚠ `closeViewWindow` とは**別の軸**である ── あちらは `view=`(予定表・連絡先など)
+   *   を指している窓、こちらは**ノートを名指した断片**で開いた窓
+   *   (`main.ts` の `heldNoteWindow`。判断はそちらに在る、binder は呼ぶだけ)。
+   * ⚠ **省略可** ── 本体のタブでは配線されない(`undefined` のときは今までどおり
+   *   `deselect-entry` がそのまま効く)。
+   * 🔴 **戻り値は `closeViewWindow` と同じ三値**(#1042 段④)。⚠ 直す前は
+   *   `boolean`(`=== 'closed'` へ潰した値)だったので、**`'refused'` と
+   *   `'not-a-window'` が呼び側から見分けられなかった** ── ブラウザが
+   *   `close()` を拒んだ(`'refused'`)ノートの付箋を Escape で押すと、
+   *   窓は開いたままなのに `deselect-entry` へ**黙って**進み、
+   *   `selectedLid` が空になって「開いています」の放送(`heldNoteWindow` は
+   *   立ったまま)と画面が食い違っていた。
+   * @returns `'closed'` = 窓ごと閉じた(呼び側は `deselect-entry` を撃たない)。
+   *   `'refused'` = 付箋だがブラウザが閉じなかった(理由を出し、`deselect-entry`
+   *   は撃たない ── ノートは開いたままにする)。`'not-a-window'` = 付箋でない
+   *   (今までどおり `deselect-entry` へ進む)
+   */
+  closeNoteWindow?(): CloseViewWindowResult;
+  /**
    * ランチャーのタイルを起動する(P7b 段⑩)。
    * ⚠ blob の貸し出し・`window.open` は実体側 ── binder は DOM を触らない。
    */
@@ -1939,7 +1962,7 @@ function moveOrder(
 /**
  * 🔴 **同じタイルを続けて押したか**(#857 段①b)。
  *
- * ⚠ `maybeEnterFolder` と**同じ作法**(`dblclick` に頼らず、同じ lid への連続押しで
+ * ⚠ `maybeDoubleOpen` と**同じ作法**(`dblclick` に頼らず、同じ lid への連続押しで
  *   見る)。⚠ **3 回目を「もう一度」と数えない** ── 数えると、素早く 3 回押したときに
  *   窓が 2 枚開く。
  *
@@ -1948,7 +1971,7 @@ function moveOrder(
  *   test では前の it が残した「1 回目」を次の it が「2 回目」と読み、
  *   **1 回押しただけで窓が開いた**(しかも通る it と落ちる it が混在して、
  *   原因が 2 つに見えた)。
- * 🔑 `maybeEnterFolder` が**閉包の中**に数を持っているのと同じ形へ寄せる ──
+ * 🔑 `maybeDoubleOpen` が**閉包の中**に数を持っているのと同じ形へ寄せる ──
  *   あちらは `bindActions` の中の `let`、こちらは `ACTIONS` が module に在るので
  *   **器を鍵にした `WeakMap`** にする(器が消えれば数も消える)。
  */
@@ -3410,6 +3433,24 @@ export function runGlobalCommand(
     });
     return true;
   }
+  /**
+   * 🔴 **`close-pane` は、閉じる物が無ければ「効いていない」と答える**
+   * (#1042 段③)。
+   *
+   * ⚠ 下の共通経路(`SHORTCUT_BUTTON`)は「ボタンが在って `disabled` でなければ
+   *   handled」で判定するが、この押しボタンは**面が無いときも `hidden` のまま
+   *   DOM に居続ける**(`center.ts`)ので、常に「押せる」と読めてしまう。
+   *   選択なし・面なしの本文で `Escape` を押すと、`close-pane` の実体は
+   *   `SET_VIEW_MODE 'detail'` を**同じ値で撃ち直すだけ**なのに `handled: true`
+   *   を返し、`ke.preventDefault()` だけが起きて**何も変わらないのに Escape が
+   *   呑まれる**(ブラウザの既定を含め、以後の聞き手にも渡らない)。
+   * 🔑 **「面が在る」も「別ウィンドウである」も、`viewMode !== 'detail'` の
+   *   1 つで言える** ── 別ウィンドウは `view=` を持つ間 `viewMode` が必ず
+   *   その面を指すよう `deep-link.ts` の `apply()` / `onViewChange` が同期で
+   *   揃えている(`view=` が外れた瞬間 `viewMode` も `'detail'` に戻る)ので、
+   *   2 つ目の判定を作らずに済む(CLAUDE.md §7)。
+   */
+  if (cmd === 'close-pane' && dispatcher.getState().viewMode === 'detail') return false;
   const sel = SHORTCUT_BUTTON[cmd];
   if (sel === undefined) return false;
   const btn = root.querySelector<HTMLElement>(sel);
@@ -7851,7 +7892,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    *
    * ## ⚠ ネイティブの `dblclick` に頼らない
    *
-   * フォルダの 2 回押し(`maybeEnterFolder`)と**同じ理由**である ── ブラウザは
+   * フォルダの 2 回押し(`maybeDoubleOpen`)と**同じ理由**である ── ブラウザは
    * 「同じ node を 2 回」でしか `dblclick` を出さないが、この一覧は書込の ack で
    * **丸ごと組み直る**(`launcher.ts` は `textContent = ''` から描く)。
    * 🔑 だから**同じ lid への連続押し**で見る ── node が入れ替わっても lid は同じ。
@@ -9196,6 +9237,14 @@ export const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
   'open-settings': '[data-pkc-action="set-view"][data-pkc-view="settings"]',
   'open-flags': '[data-pkc-action="set-view"][data-pkc-view="flags"]',
   'open-help': '[data-pkc-action="set-view"][data-pkc-view="help"]',
+  /**
+   * 🔴 **別のウィンドウ・面を閉じる**(#1042 C3)── `center.ts` の「× 閉じる」を
+   * そのまま撃つ。⚠ `close-pane` の文脈は `global` ではなく `window`(下の
+   * `keymap.match(ke, 'window')` から呼ばれる)── `openPaletteFor` の
+   * `rows()` は `contexts.includes('global')` を先に見て素通しするので、
+   * ここに載っていても「操作を探す」には出ない(意図どおり)。
+   */
+  'close-pane': '[data-pkc-action="close-pane"]',
 };
 
 const FORMAT_OF: Readonly<Record<string, FormatOp>> = {
@@ -9659,7 +9708,7 @@ export function bindActions(
     /**
      * 🔴 **長押しの直後の `click` は捨てる**(#687 D-1)。
      * ⚠ 指を離すとブラウザは `click` を撃つ ── 下へ流すと `set` が走って
-     *   **足したばかりの印が 1 件に戻り**、さらに `maybeEnterFolder` が
+     *   **足したばかりの印が 1 件に戻り**、さらに `maybeDoubleOpen` が
      *   「1 回目」を数えて、次のタップでフォルダへ入る。**両方を素通りさせない**。
      */
     /**
@@ -9714,19 +9763,34 @@ export function bindActions(
       }
     }
     const action = el.getAttribute('data-pkc-action');
+    /**
+     * 🔴 **一覧タブ(`entry-list`)は「フォルダへ入る」を持たない**(#1042 C14)。
+     * ⚠ `inFiler` と同じ「面で切る」作法(着地前レビュー 4 の続き) ──
+     *   `select-entry` は 6 か所(sidebar / filer / kanban / calendar / query /
+     *   inspector)に在るので、面を限らないと関係の無い面まで拾う。
+     * 🔑 一覧には `scopeLid`(現在地)の概念が無いので、`maybeDoubleOpen` の
+     *   フォルダの分岐は**通さない**(`tests/adapter/multi-select.test.ts`
+     *   「もう一度押す」もフォルダ面の中だけ ── 一覧の 2 回押しで**見えない現在地が
+     *   動かない**を守る)。行の種類に関わらず、別のウィンドウ(付箋)で開く。
+     */
+    const inEntryList = el.closest('[data-pkc-region="entry-list"]') !== null;
     // ⚠ 行を素で押したときだけ「もう一度押した」を数える(修飾つきは印の話)
-    // ⚠ **フォルダ面の中だけ**(上と同じ理由 ── 一覧タブで 2 回押すと、
-    //    見えていない現在地が動いて「+ ノート」の作り先だけが変わる)
+    // ⚠ **一覧 / フォルダ面の中だけ**(上と同じ理由 ── kanban / calendar / query /
+    //    inspector の `select-entry` まで拾うと、見えていない判定が誤って走る)
+    if (inEntryList && action === 'select-entry') {
+      const lid = el.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
+      if (lid !== null) maybeOpenListNote(lid);
+    }
     if (inFiler && action === 'select-entry') {
       const lid = el.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
-      if (lid !== null) maybeEnterFolder(lid);
+      if (lid !== null) maybeDoubleOpen(lid);
     }
-    // ⚠ 2 ペインも**同じ 2 クリック**でフォルダへ入る(規則は 1 本 ── ただし
-    //    入る先はそのペインなので、撃つ action だけが違う)
+    // ⚠ 2 ペインも**同じ 2 クリック**でフォルダへ入る・ノートを別窓へ開く
+    //   (規則は 1 本 ── ただし入る先はそのペインなので、撃つ action だけが違う)
     if (action === 'dual-row') {
       const side = dualSide(el);
       const lid = el.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
-      if (side !== null && lid !== null) maybeEnterFolder(lid, side);
+      if (side !== null && lid !== null) maybeDoubleOpen(lid, side);
     }
     run(action, el);
   };
@@ -10171,6 +10235,32 @@ export function bindActions(
       if (keymap.match(ke, 'append') === 'append-send') {
         ke.preventDefault();
         run('append-entry', ke.target as HTMLElement);
+        return;
+      }
+      /**
+       * 🔴 **付箋の窓は、追記欄に焦点が乗ったまま開く**(#1042 段②。裁定:
+       * `docs/development/touch-and-unity-design-2026-09.md` §11 Q3)。
+       *
+       * ⚠ `typing` の門(下の `onShortcut`)は `<textarea>` に焦点があると
+       *   `Escape` を丸ごと止めるので、**1 回目の `Escape` が無反応**になっていた
+       *   (開いた直後に閉じようとした user から見て、押しても何も起きない)。
+       * 🔑 **何も打っていないときだけ**ここで拾って窓を閉じる ── 一文字でも
+       *   打っていたら**今までどおり何もしない**(下書きを Escape 1 発で
+       *   消さない。CLAUDE.md §10「置き換えの作法」と同じ向き:入力中の Escape を
+       *   奪うのは、native の `<textarea>` が持たない挙動を足すことになる)。
+       * ⚠ **付箋でない窓では何もしない** ── `services.closeNoteWindow` は
+       *   `heldNoteWindow` を見て判断する(`main.ts`)ので、本体タブでは
+       *   常に `'not-a-window'`/`undefined` を返し、ここは黙って通過する。
+       * ⚠ **`'refused'`(ブラウザが閉じなかった)も黙らない**(#1042 段④)──
+       *   `close-pane` と同じ理由を出す(`CLOSE_VIEW_WINDOW_REFUSED`)。
+       */
+      if (ke.key === 'Escape' && ke.target instanceof HTMLTextAreaElement && ke.target.value === '') {
+        const closed = services.closeNoteWindow?.() ?? 'not-a-window';
+        if (closed !== 'not-a-window') {
+          ke.preventDefault();
+          if (closed === 'refused')
+            dispatcher.dispatch({ type: 'OP_FAILED', error: CLOSE_VIEW_WINDOW_REFUSED });
+        }
       }
       return;
     }
@@ -11519,8 +11609,9 @@ export function bindActions(
     }
   };
   /**
-   * 🔴 **フォルダは 2 クリックで開く**(#240 段①。user 指示 2026-08-17
-   * 「フォルダをダブルクリックで開くように変更」)。
+   * 🔴 **フォルダは 2 クリックで開き、ノートは 2 クリックで別のウィンドウへ**
+   * (フォルダ: #240 段①。user 指示 2026-08-17「フォルダをダブルクリックで開くように
+   * 変更」。ノート: #1042 C14。裁定 2026-09-25 Q5 = A「入れる」)。
    *
    * ⚠ **ネイティブの `dblclick` に頼らない。** ブラウザは「同じ node を 2 回」
    * 押したときにしか `dblclick` を出さないので、**2 回のクリックの間に行が
@@ -11528,7 +11619,14 @@ export function bindActions(
    * 実 user も「開かない」を踏む(実ブラウザ smoke で実際に落ちた)。
    * 🔑 だから**同じ lid への連続押し**で見る ── node が入れ替わっても lid は同じ。
    * ⚠ 1 クリック目(= 選ぶ)は `onClick` が撃っている。ここは**現在地だけ**動かす。
-   * ⚠ フォルダ以外では何もしない(ノートを 2 回押しても入る先が無い)。
+   *
+   * 🔑 **フォルダ表 / 2 ペインは判定が 1 か所**(この関数)── フォルダ
+   * (スマートフォルダ含む)なら「中へ入る」、それ以外(ノート)は
+   * `open-note-window` と同じ経路で別のウィンドウ(付箋)を開く。
+   * ⚠ **一覧タブは別関数**(`maybeOpenListNote`、すぐ下)── 一覧に
+   * `scopeLid`(現在地)の概念は無いので、フォルダの行でも「中へ入る」は
+   * 起こさない(`tests/adapter/multi-select.test.ts`「もう一度押す」も
+   * フォルダ面の中だけ ── 見えない現在地が動かないことを pin)。
    */
   const DOUBLE_MS = 500;
   /**
@@ -11539,39 +11637,69 @@ export function bindActions(
    *   左で選んで右で選ぶと、印を付けたかっただけの右が中へ入る。
    */
   let lastRowClick: { key: string; at: number } = { key: '', at: 0 };
-  const maybeEnterFolder = (lid: string, dual: DualSide | null = null): void => {
+  const maybeDoubleOpen = (lid: string, dual: DualSide | null = null): void => {
     const key = `${dual ?? 'filer'}:${lid}`;
     const now = Date.now();
     const again = lastRowClick.key === key && now - lastRowClick.at <= DOUBLE_MS;
     lastRowClick = { key, at: now };
     if (!again) return;
-    // 🔑 「中へ入れるか」の判定は `canEnterScope` 1 か所(スマートフォルダも入れる)
-    if (!canEnterScope(dispatcher.getState().entryMetas.get(lid)?.archetype)) return;
     lastRowClick = { key: '', at: 0 }; // 3 回目を「もう一度」と数えない
-    // ⚠ **入る先はその面の現在地** ── 2 ペインで `SET_SCOPE` を撃つと、
-    //    押していない左の列が動いて、押した側は 1 ミリも動かない
-    dispatcher.dispatch(
-      dual === null
-        ? { type: 'SET_SCOPE', lid }
-        : { type: 'DUAL_SET_SCOPE', side: dual, lid },
-    );
+    // 🔑 「中へ入れるか」の判定は `canEnterScope` 1 か所(スマートフォルダも入れる)
+    if (canEnterScope(dispatcher.getState().entryMetas.get(lid)?.archetype)) {
+      // ⚠ **入る先はその面の現在地** ── 2 ペインで `SET_SCOPE` を撃つと、
+      //    押していない左の列が動いて、押した側は 1 ミリも動かない
+      dispatcher.dispatch(
+        dual === null
+          ? { type: 'SET_SCOPE', lid }
+          : { type: 'DUAL_SET_SCOPE', side: dual, lid },
+      );
+      /**
+       * 🔴 **入った先で焦点を立て直す**(#273、2026-08-24 に実ブラウザで実測)。
+       *
+       * ⚠ 直す前は**マウスで入った瞬間に鍵が 1 つも効かなくなった** ── 入ると
+       *   表の行が丸ごと作り直されるので、押していた行が消えて
+       *   `document.activeElement` が **`body`** に落ちる。すると keydown の的が
+       *   ペインの外になり、`dual` 文脈の一致そのものが起きない
+       *   (`Backspace` で戻ることすらできず、もう一度マウスで押すしかない)。
+       * ⚠ **キーボードで入った回は効いていた** ── `filer-open` が既に
+       *   `carryDualFocus` を呼んでいるからで、**マウスの経路にだけ穴が空いていた**
+       *   (CLAUDE.md「片側を直したら、対称の反対側を必ず疑う」)。
+       * 🔑 立て直しは `carryDualFocus` 1 本 ── 「どの行へ当てるか」の規則を
+       *   2 か所に持たない(見えている行だけを相手にする不変条件つき)。
+       * ⚠ 左の列(`dual === null`)はここでは触らない ── **測っていないから**である
+       *   (同じ穴が在るかは別に確かめる)。
+       */
+      if (dual !== null) carryDualFocus(dual);
+      return;
+    }
     /**
-     * 🔴 **入った先で焦点を立て直す**(#273、2026-08-24 に実ブラウザで実測)。
-     *
-     * ⚠ 直す前は**マウスで入った瞬間に鍵が 1 つも効かなくなった** ── 入ると
-     *   表の行が丸ごと作り直されるので、押していた行が消えて
-     *   `document.activeElement` が **`body`** に落ちる。すると keydown の的が
-     *   ペインの外になり、`dual` 文脈の一致そのものが起きない
-     *   (`Backspace` で戻ることすらできず、もう一度マウスで押すしかない)。
-     * ⚠ **キーボードで入った回は効いていた** ── `filer-open` が既に
-     *   `carryDualFocus` を呼んでいるからで、**マウスの経路にだけ穴が空いていた**
-     *   (CLAUDE.md「片側を直したら、対称の反対側を必ず疑う」)。
-     * 🔑 立て直しは `carryDualFocus` 1 本 ── 「どの行へ当てるか」の規則を
-     *   2 か所に持たない(見えている行だけを相手にする不変条件つき)。
-     * ⚠ 左の列(`dual === null`)はここでは触らない ── **測っていないから**である
-     *   (同じ穴が在るかは別に確かめる)。
+     * 🔴 **フォルダでなければ、別のウィンドウ(付箋)で開く**(#1042 C14)。
+     * ⚠ `open-note-window` の受け手(`services.openNoteWindow`)と**同じ経路**を
+     *   そのまま呼ぶ ── ポップアップ遮断時の代替・同じノートの 2 枚目を作らない
+     *   判定は、そちら 1 本に既に在る(2 つ目の「窓を開く作法」を作らない。CLAUDE.md
+     *   §10「置き換えの作法」)。⚠ **同期に呼ぶ** ── `window.open` は gesture の
+     *   中でしか通らない。
      */
-    if (dual !== null) carryDualFocus(dual);
+    services.openNoteWindow?.(lid);
+  };
+  /**
+   * 🔴 **一覧タブの 2 回押しは、種類を問わず別のウィンドウ(付箋)へ**(#1042 C14)。
+   *
+   * ⚠ `maybeDoubleOpen` から**分けている**(共有すると、フォルダの行で
+   * `canEnterScope` が拾われて `SET_SCOPE` を撃ってしまう ── 一覧タブは
+   * `scopeLid` を描画に使わないので、押しても画面には出ない**見えない現在地の
+   * 移動**になる。`tests/adapter/multi-select.test.ts` がこれを退行として pin
+   * している)。⚠ 鍵空間も**別に持つ**(フォルダ表の 2 回押しと取り違えない)。
+   */
+  let lastListClick: { lid: string; at: number } = { lid: '', at: 0 };
+  const maybeOpenListNote = (lid: string): void => {
+    const now = Date.now();
+    const again = lastListClick.lid === lid && now - lastListClick.at <= DOUBLE_MS;
+    lastListClick = { lid, at: now };
+    if (!again) return;
+    lastListClick = { lid: '', at: 0 }; // 3 回目を「もう一度」と数えない
+    // ⚠ 同期に呼ぶ(`window.open` は gesture の中でしか通らない)。上と同じ経路。
+    services.openNoteWindow?.(lid);
   };
   /**
    * 🔴 **右クリックで、その行にできることを出す**(#426 段①)。
@@ -12142,7 +12270,37 @@ export function bindActions(
     closeContextMenu(root);
   };
   const onMenuKey = (ev: KeyboardEvent): void => {
-    if (ev.key === 'Escape' && contextMenuOpen(root)) closeContextMenu(root);
+    /**
+     * 🔴 **`root` が外れていたら何もしない**(#1042 followup。regression 修理)。
+     *
+     * ⚠ `onShortcut` はこの門を最初から持っていた(「test が root を作り直しても、
+     *   古い binder の handler が生き残って二重に作らないため」)が、**同じ
+     *   `document` に付く `onMenuKey` には無かった** ── CLAUDE.md §7
+     *   「片側を直したら、対称の反対側を必ず疑う」を破っていた。
+     * 🔑 これが load-bearing になったのは C3 が `stopImmediatePropagation()` を
+     *   足した日から。⚠ **直す前の実害**:test file がメニューを開いたまま
+     *   `it()` を終える(= `bindActions` の unbind を呼ばない)と、その
+     *   古い(切り離された)`root` を握った `onMenuKey` が `document` に residual で
+     *   残り続ける。以後**同じ file の残り全部の `Escape`** で
+     *   `contextMenuOpen(oldRoot)` が(そのまま消えない開いたメニューにより)
+     *   永久に真を返し、`stopImmediatePropagation()` が**現在のテストの
+     *   `onShortcut` も含めて後続の聞き手を丸ごと黙らせる**
+     *   (`tests/adapter/row-organize.test.ts` の「Esc なら変えずに閉じる」等が
+     *   これで壊れていた)。
+     */
+    if (!root.isConnected) return;
+    if (ev.key !== 'Escape' || !contextMenuOpen(root)) return;
+    closeContextMenu(root);
+    /**
+     * 🔴 **この 1 段だけを閉じ、後続の `document` の keydown 聞き手には渡さない**
+     * (#1042 C3)。⚠ `deselect-entry` は `contextMenuOpen(root)` を見て**譲る**が、
+     *   その判定は**このメニューが閉じた後**に走る(`onShortcut` は `onMenuKey` より
+     *   後に登録される)ので、素通しすると同じ 1 回の Escape で
+     *   「メニューも閉じ、ノートも閉じる」になってしまう(1 段だけ閉じる、の破り)。
+     * 🔑 `stopPropagation` では足りない ── 同じ `document` に付いた**別の聞き手**
+     *   (`onShortcut`)を止めるには `stopImmediatePropagation` が要る。
+     */
+    ev.stopImmediatePropagation();
   };
   /**
    * 🔴 **張ったら、外す手も同時に作る**(#876、2026-09-13)。
@@ -12315,9 +12473,36 @@ export function bindActions(
       }
       return;
     }
+    /**
+     * 🔴 **一覧の絞り込みの欄から、そのまま行へ降りられる**(#1042 C2)。
+     * ⚠ 2 ペインの絞り込み(下の `dual-filter`)と**同じ形**── これが無いと
+     *   「打って絞る → マウスで行を押す」になり、キーボードだけで完結しない。
+     * ⚠ `Escape` はここでは**何もしない**(C3 の「入力欄では効かせない」規約 ──
+     *   欄を空にする「絞りを外す」ボタンは別に在る)。それ以外の鍵は入力へ通す。
+     */
+    if (el instanceof HTMLInputElement && el.matches('[data-pkc-field="entry-filter"]')) {
+      if (ke.key === 'ArrowDown') {
+        const first = listRowEls()[0]?.getAttribute('data-pkc-entry') ?? null;
+        if (first === null) return;
+        ke.preventDefault();
+        focusListRow(first);
+      }
+      return;
+    }
     if (!typing && el?.closest('[data-pkc-region="filer-table"]')) {
       const fcmd = keymap.match(ke, 'filer');
       if (fcmd !== null && runFilerKey(fcmd)) {
+        ke.preventDefault();
+        return;
+      }
+    }
+    /**
+     * 🔴 **一覧タブでも同じ鍵が効く**(#1042 C2)。⚠ 行き先だけが違う ──
+     * `runFilerKey` の代わりに `runListKey`(フォルダでも中へ入らない)を呼ぶ。
+     */
+    if (!typing && el?.closest('[data-pkc-region="entry-list"]')) {
+      const lcmd = keymap.match(ke, 'list');
+      if (lcmd !== null && runListKey(lcmd)) {
         ke.preventDefault();
         return;
       }
@@ -12408,43 +12593,115 @@ export function bindActions(
         }
       }
     }
-    const cmd = keymap.match(ke, 'global');
-    if (cmd === null) return;
     /**
-     * 打鍵中に効かせてよいか。**コマンドが名乗る** + **その和音が文字を打たない**の
-     * 両方が要る(着地前レビュー 2)── `open-help` は `F1` のために名乗っているが、
-     * 別名の `Alt+5` は mac で `∞` を打つ鍵である。名乗りだけを見ると、
-     * **本文に記号が入らずヘルプが開く**。
+     * 🔴 **`global` は単独で試す**(#1042 C3 / 追補)。
+     * ⚠ 以前は `keymap.match(ke, 'global') ?? keymap.match(ke, 'reading')` で
+     *   **混ぜて**いたが、`reading` / `window` の優先順を「面が在るか」で
+     *   入れ替える必要が出た(下)ので、ここでは分ける。⚠ 動きは変わらない ──
+     *   `global` は `contextsOverlap` により `reading` / `window` と**同じ鍵を
+     *   名乗れない**(`validateBinding`)ので、`gcmd !== null` の鍵は `reading` /
+     *   `window` には元から現れず、下の分岐へ落ちることもない。
      */
-    const chord = chordOf(ke);
-    if (typing && !(findCommand(cmd)?.whileTyping === true && chord !== null && !typesCharacter(chord)))
-      return;
-    /**
-     * 🔴 **ヘルプを読んでいる間は `Ctrl+F` をブラウザに返す**
-     * (#636。user 指示 2026-08-31「**ヘルプ閲覧中はユーザービリティのために
-     * ctrl+f をブラウザに返してください**」)。
-     *
-     * ⚠ 実測(直す前):ヘルプの面で `Ctrl+F` を押すと
-     *   `defaultPrevented === true` / 焦点が `entry-filter` へ移り、**本文の面と
-     *   まったく同じ**だった ── つまり**ブラウザの検索は出ず**、畳んでいた左の列が
-     *   勝手に開き、焦点がノートの絞り込み欄へ飛ぶ。
-     * 🔑 `runGlobalCommand` には**譲る口が既に在る**(`if (!input) return false`)が、
-     *   `entry-filter` は器を組むときに 1 度作られ**畳んでも DOM から消えない**
-     *   (#583 が実測して直した当の性質)ので、**その行は一度も真にならない**。
-     *
-     * 🔴 **だから門は呼び側に置く。** `runGlobalCommand` の中で `false` を返すと、
-     *   パレットが `dry` でその答えを読み、**「いまは押せません」と誤って断って**
-     *   行を `disabled` にする ── 裁定は「Ctrl+F を返す」であって
-     *   「操作を消す」ではない。ここで `return` すれば `prevent()` を通らないので、
-     *   ブラウザの既定動作(ページ内検索)がそのまま出る。
-     * ⚠ **範囲はヘルプだけ。** 設定・フラグ・2 ペインは**操作の面**で、そこで
-     *   絞り込みへ飛ぶのは今も筋が通る。
-     * 🔑 **覆る条件**:設定やフラグが長い読み物になったら、判定を面の種類ごとではなく
-     *   「読む面か」で括り直す。
-     */
-    if (cmd === 'focus-search' && dispatcher.getState().viewMode === 'help') return;
-    if (runGlobalCommand(cmd, root, dispatcher, keymap, () => ke.preventDefault(), tellUser))
-      return;
+    const gcmd = keymap.match(ke, 'global');
+    if (gcmd !== null) {
+      /**
+       * 打鍵中に効かせてよいか。**コマンドが名乗る** + **その和音が文字を打たない**の
+       * 両方が要る(着地前レビュー 2)── `open-help` は `F1` のために名乗っているが、
+       * 別名の `Alt+5` は mac で `∞` を打つ鍵である。名乗りだけを見ると、
+       * **本文に記号が入らずヘルプが開く**。
+       */
+      const chord = chordOf(ke);
+      if (
+        typing &&
+        !(findCommand(gcmd)?.whileTyping === true && chord !== null && !typesCharacter(chord))
+      )
+        return;
+      /**
+       * 🔴 **ヘルプを読んでいる間は `Ctrl+F` をブラウザに返す**
+       * (#636。user 指示 2026-08-31「**ヘルプ閲覧中はユーザービリティのために
+       * ctrl+f をブラウザに返してください**」)。
+       *
+       * ⚠ 実測(直す前):ヘルプの面で `Ctrl+F` を押すと
+       *   `defaultPrevented === true` / 焦点が `entry-filter` へ移り、**本文の面と
+       *   まったく同じ**だった ── つまり**ブラウザの検索は出ず**、畳んでいた左の列が
+       *   勝手に開き、焦点がノートの絞り込み欄へ飛ぶ。
+       * 🔑 `runGlobalCommand` には**譲る口が既に在る**(`if (!input) return false`)が、
+       *   `entry-filter` は器を組むときに 1 度作られ**畳んでも DOM から消えない**
+       *   (#583 が実測して直した当の性質)ので、**その行は一度も真にならない**。
+       *
+       * 🔴 **だから門は呼び側に置く。** `runGlobalCommand` の中で `false` を返すと、
+       *   パレットが `dry` でその答えを読み、**「いまは押せません」と誤って断って**
+       *   行を `disabled` にする ── 裁定は「Ctrl+F を返す」であって
+       *   「操作を消す」ではない。ここで `return` すれば `prevent()` を通らないので、
+       *   ブラウザの既定動作(ページ内検索)がそのまま出る。
+       * ⚠ **範囲はヘルプだけ。** 設定・フラグ・2 ペインは**操作の面**で、そこで
+       *   絞り込みへ飛ぶのは今も筋が通る。
+       * 🔑 **覆る条件**:設定やフラグが長い読み物になったら、判定を面の種類ごとではなく
+       *   「読む面か」で括り直す。
+       */
+      if (gcmd === 'focus-search' && dispatcher.getState().viewMode === 'help') return;
+      if (runGlobalCommand(gcmd, root, dispatcher, keymap, () => ke.preventDefault(), tellUser))
+        return;
+    } else if (!typing) {
+      /**
+       * 🔴 **`reading`(ノートを閉じる)と `window`(面・別窓を閉じる)の優先順は、
+       * 「面が在るか」で入れ替える**(#1042 followup、着地前レビュー 指摘 B)。
+       *
+       * ⚠ **面が在るとき、ノートは見えていない** ── 中央は面(集計・システム・
+       *   フラグ・ヘルプ・2 ペイン・SQL など)に占められているので、その裏で
+       *   `deselect-entry` が先に効くと、user は**見えていないノートを閉じられ**、
+       *   2 回目でようやく面が閉じてコレクションの画面に落ちる ──
+       *   **読みに来ていたノートへ戻れない**(直す前の実害)。
+       * 🔑 面が在るときは **`window` を先に試す**(1 回目で面が閉じてノートへ戻る、
+       *   2 回目でノートが閉じる)。面が無いときは元のとおり **`reading` が先**
+       *   (`close-pane` は `hidden` なボタンでも「押せた」ことになるので、先に
+       *   試すとノートが開いていても `deselect-entry` に出番が来ない ── #1042 C3)。
+       */
+      const paneOpen = dispatcher.getState().viewMode !== 'detail';
+      const rcmd = keymap.match(ke, 'reading');
+      const wcmd = keymap.match(ke, 'window');
+      const tryReading = (): boolean => {
+        if (rcmd === null) return false;
+        /**
+         * 🔴 **付箋のウィンドウでは、`deselect-entry` を撃たずに窓を閉じる**
+         * (#1042 followup 指摘 A。裁定:`docs/development/touch-and-unity-design-2026-09.md`
+         * §5 Q3「付箋のウィンドウも Escape で閉じます」)。
+         *
+         * ⚠ **`selectedLid` を空にしてはいけない** ── 付箋の窓では
+         *   `heldNoteWindow` が真の間、`main.ts` の題名塗り・台帳の放送
+         *   (`noteRegistry.announce`)が `selectedLid` を見て「このノートは
+         *   開いています」を保っている。`deselect-entry` を先に撃つと
+         *   `selectedLid` が `null` になり、**閉じる前に「開いていません」と
+         *   放送してしまう**(#685 の 2 枚目防止を自分で取り下げる ── 窓は
+         *   閉じずに空の画面だけが残る、という直す前の症状そのもの)。
+         * 🔑 判断は `services.closeNoteWindow` に譲る(binder は `heldNoteWindow`
+         *   を持たない ── `main.ts` から渡された関数を呼ぶだけ)。**このウィンドウが
+         *   自分で開いた付箋のときだけ** `'closed'` / `'refused'` を返し、
+         *   ふつうの本体タブでは `'not-a-window'`/`undefined`(呼ばれない=
+         *   今までどおり `deselect-entry` へ進む)。
+         * 🔴 **`'refused'`(ブラウザが閉じなかった)でも `deselect-entry` へは
+         *   進まない**(#1042 段④)。⚠ 直す前は `=== true`(`'closed'` だけを
+         *   拾う boolean)で判定していたので、`'refused'` は `false` 側に
+         *   潰れて**黙って** `deselect-entry` に流れていた ── 窓は開いたままなのに
+         *   `selectedLid` が空になり、「このノートは開いています」の放送
+         *   (`heldNoteWindow` が真の間続く)と画面が食い違う(上の docstring が
+         *   名指しで戒めている、まさにその症状)。
+         * 🔑 `close-pane` と同じ理由を出す(`CLOSE_VIEW_WINDOW_REFUSED`)。
+         */
+        const closed = services.closeNoteWindow?.() ?? 'not-a-window';
+        if (rcmd === 'deselect-entry' && closed !== 'not-a-window') {
+          ke.preventDefault();
+          if (closed === 'refused')
+            dispatcher.dispatch({ type: 'OP_FAILED', error: CLOSE_VIEW_WINDOW_REFUSED });
+          return true;
+        }
+        return runGlobalCommand(rcmd, root, dispatcher, keymap, () => ke.preventDefault(), tellUser);
+      };
+      const tryWindow = (): boolean =>
+        wcmd !== null &&
+        runGlobalCommand(wcmd, root, dispatcher, keymap, () => ke.preventDefault(), tellUser);
+      if (paneOpen ? tryWindow() || tryReading() : tryReading() || tryWindow()) return;
+    }
   };
   /**
    * 🔴 **整理の面の鍵**(user 裁定 2026-08-18)。⚠ **既にある動線を呼ぶだけ**にする ──
@@ -12507,6 +12764,67 @@ export function bindActions(
     const i = cur === null ? -1 : rows.findIndex((m) => m.lid === cur);
     if (i === -1) return (delta > 0 ? rows[0] : rows[rows.length - 1])?.lid ?? null;
     return rows[Math.min(rows.length - 1, Math.max(0, i + delta))]?.lid ?? null;
+  };
+
+  /**
+   * 🔴 **一覧タブの行(#1042 C2)**。⚠ `rowEl` / `focusedRowLid` / `rowAt` と
+   * 同じ形だが、並びは `visibleFilerRows`(scope 内)ではなく**DOM の並び**から
+   * 採る ── 一覧は `scopeLid` を持たない flat な行の並びなので、`sidebar.ts` が
+   * 組んだ DOM 順(絞り込み・並び順を反映済み)がそのまま画面と一致する見方である。
+   * ⚠ 端では止まる(巻き戻さない)── フォルダの表と同じ規則。
+   */
+  const listRowEls = (): HTMLElement[] =>
+    Array.from(
+      root.querySelectorAll<HTMLElement>('[data-pkc-region="entry-list"] > [data-pkc-entry]'),
+    );
+
+  const focusedListRowLid = (): string | null => {
+    const el = root.ownerDocument.activeElement;
+    if (!(el instanceof HTMLElement)) return null;
+    const li = el.closest('[data-pkc-region="entry-list"] > [data-pkc-entry]');
+    return li?.getAttribute('data-pkc-entry') ?? null;
+  };
+
+  const listRowEl = (lid: string): HTMLElement | null =>
+    listRowEls().find((el) => el.getAttribute('data-pkc-entry') === lid) ?? null;
+
+  const focusListRow = (lid: string): void => listRowEl(lid)?.focus();
+
+  const listRowAt = (delta: number): string | null => {
+    const rows = listRowEls();
+    if (rows.length === 0) return null;
+    const cur = focusedListRowLid();
+    const i = cur === null ? -1 : rows.findIndex((el) => el.getAttribute('data-pkc-entry') === cur);
+    if (i === -1)
+      return (delta > 0 ? rows[0] : rows[rows.length - 1])?.getAttribute('data-pkc-entry') ?? null;
+    return (
+      rows[Math.min(rows.length - 1, Math.max(0, i + delta))]?.getAttribute('data-pkc-entry') ??
+      null
+    );
+  };
+
+  /**
+   * 🔴 **一覧タブの鍵**(#1042 C2)。⚠ `runFilerKey` / `runDualKey` と違い、
+   * フォルダの行でも「中へ入る」は起こさない ── 一覧に `scopeLid`(現在地)の
+   * 概念は無い(`tests/adapter/multi-select.test.ts`「もう一度押す」もフォルダ面の
+   * 中だけ ── 見えない現在地が動かないことを既に pin)。**行の種類に関わらず**、
+   * `Enter` はマウスの `select-entry` と**同じ受け手**を呼ぶ(= クリックと同じ)。
+   */
+  const runListKey = (cmd: string): boolean => {
+    if (cmd === 'filer-row-down' || cmd === 'filer-row-up') {
+      const lid = listRowAt(cmd === 'filer-row-down' ? 1 : -1);
+      if (lid === null) return false;
+      focusListRow(lid);
+      return true;
+    }
+    if (cmd === 'filer-open') {
+      const lid = focusedListRowLid();
+      const host = lid === null ? null : listRowEl(lid);
+      if (host === null) return false;
+      run('select-entry', host);
+      return true;
+    }
+    return false;
   };
 
   /**

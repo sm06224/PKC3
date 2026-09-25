@@ -19,7 +19,7 @@
  * 3. ⚠ **開いていなければ何も起きない**(空の dispatch を撃たない)
  * 4. 右クリックのメニューが出ている間は、コマンドが**譲る**(`Escape` の取り合い)
  */
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
@@ -55,13 +55,17 @@ interface Mounted {
   readonly host: HTMLElement;
 }
 
+// 🔴 `bindActions` の teardown を必ず呼ぶ(#1042 C2 の実装中に判明)── `doc, 'keydown',
+//   onShortcut` は `document` に付くので、呼ばずに `it` を終えると次の `it` へ漏れる。
+const unbinds: Array<() => void> = [];
+
 function mount(): Mounted {
   const root = document.createElement('div');
   root.setAttribute('data-pkc-slot', 'root');
   document.body.append(root);
   const d = new Dispatcher();
   const regions = buildShell(root);
-  bindActions(root, d);
+  unbinds.push(bindActions(root, d));
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: METAS, relations: [] });
   const filer = new FilerRenderer(regions.browseHost);
   d.onState((st) => filer.render(st));
@@ -74,8 +78,18 @@ function clickBlank(el: HTMLElement): void {
   el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
 }
 
+/** `Escape` を押す(既定は `document.body` ── 何も特別な欄に焦点が無い状態)。 */
+function pressEscape(el: HTMLElement = document.body): void {
+  el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+}
+
 beforeEach(() => {
   document.body.innerHTML = '';
+});
+
+afterEach(() => {
+  for (const off of unbinds) off();
+  unbinds.length = 0;
 });
 
 describe('一覧の何も無い所を押すと、開いているノートが閉じる(#1032)', () => {
@@ -172,5 +186,93 @@ describe('近道 / パレットからも閉じられる(#1032)', () => {
     openContextMenu(m.root, { x: 10, y: 10 }, [{ action: 'show-history', label: '履歴' }], null);
     expect(run(m), 'メニューが出ているのに閉じた').toBe(false);
     expect(m.d.getState().selectedLid, 'メニューの裏でノートが閉じた').toBe('a');
+  });
+});
+
+/**
+ * 🔴 **`Escape` で閉じる**(#1042 C3。裁定 2026-09-25 Q3 = A)。
+ *
+ * ⚠ 上の describe は `runGlobalCommand` を**直に**呼んでいる ── ここでは
+ * **本物の `Escape` keydown**(`document` へ届く)を撃ち、`deselect-entry` が
+ * 専用の文脈(`reading`)経由で正しく解決されることを見る。
+ */
+describe('🔴 Escape で閉じる(#1042 C3)', () => {
+  it('🔴 何も編集していないときに Escape を押すと、ノートが閉じる', () => {
+    const m = mount();
+    m.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    pressEscape();
+    expect(m.d.getState().selectedLid, 'Escape で閉じていない').toBeNull();
+  });
+
+  it('⚠ 何も開いていなければ、Escape を押しても状態は動かない(空振り防止)', () => {
+    const m = mount();
+    let notified = 0;
+    m.d.onState(() => (notified += 1));
+    pressEscape();
+    expect(notified, '開いていないのに何か dispatch した').toBe(0);
+  });
+
+  /**
+   * 🔴 **メニューが先に閉じる(ノートは残る)**。マウスの `run()` テストと同じ主張を、
+   * 本物の keydown 経路で確かめる ── メニュー自身の Escape ハンドラ(`onMenuKey`)と
+   * `deselect-entry` の `contextMenuOpen` ガードが**両方**正しく効くことを見る。
+   */
+  it('🔴 メニューが出ている間に Escape を押すと、メニューだけ閉じてノートは残る', () => {
+    const m = mount();
+    m.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    openContextMenu(m.root, { x: 10, y: 10 }, [{ action: 'show-history', label: '履歴' }], null);
+    expect(m.root.querySelector('[data-pkc-region="context-menu"]'), '前提: メニューが出ていない').not.toBeNull();
+    pressEscape();
+    expect(m.root.querySelector('[data-pkc-region="context-menu"]'), 'メニューが閉じていない').toBeNull();
+    expect(m.d.getState().selectedLid, 'メニューの裏でノートまで閉じた').toBe('a');
+  });
+
+  /**
+   * 🔴 **打っている欄では、Escape は何もしない**(C3 の明示要件)。
+   * ⚠ `entry-filter`(#1042 C2 で焦点を持つようになった一覧の絞り込み欄)に
+   * 打っている最中は、`typing` の門が `deselect-entry`(`whileTyping` 無し)を止める。
+   */
+  it('⚠ 絞り込みの欄に打っている間、Escape はノートを閉じない', () => {
+    const m = mount();
+    m.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    const filterInput = m.root.querySelector<HTMLInputElement>('[data-pkc-field="entry-filter"]');
+    expect(filterInput, '絞り込みの欄が無い(前提が崩れている)').not.toBeNull();
+    filterInput!.focus();
+    pressEscape(filterInput!);
+    expect(m.d.getState().selectedLid, '打っている欄なのにノートが閉じた').toBe('a');
+  });
+
+  /**
+   * 🔴 **行の名前を打ち替えている間の Escape は、打ち替えをやめるだけ**。
+   * ⚠ フォルダの表の `row-rename` 入力は `onShortcut` の**先頭**(`filer`/`entry-list`
+   * より前)で受けるので、`deselect-entry` へは届かない。
+   */
+  it('⚠ 行の名前を打ち替えている間の Escape は、打ち替えをやめるだけでノートは残る', () => {
+    const m = mount();
+    m.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    m.d.dispatch({ type: 'ROW_RENAME_BEGIN', lid: 'b' });
+    const input = m.root.querySelector<HTMLInputElement>('[data-pkc-field="row-rename"]');
+    expect(input, '打ち替えの欄が出ていない(前提が崩れている)').not.toBeNull();
+    pressEscape(input!);
+    expect(m.d.getState().renamingLid, '打ち替えが終わっていない').toBeNull();
+    expect(m.d.getState().selectedLid, '打ち替えをやめただけでノートまで閉じた').toBe('a');
+  });
+
+  /**
+   * 🔴 **編集中は Escape で閉じない**(`deselect-entry` 自身の `phase !== 'ready'` ガード)。
+   * ⚠ ここは `document.body` へ Escape を撃つ(= 編集欄には焦点が無い)ので、
+   *   `deselect-entry` が譲ることだけを見る ── 編集そのものを取り消す
+   *   `cancel-edit`(`editor` 文脈・編集欄に焦点があるとき)は別経路であり、
+   *   `tests/adapter/editor-flow.test.ts` が見ている(#1042 段⑦、旧題は
+   *   「編集をやめるだけ」と書いていたが、それはここでは検めていなかった)。
+   */
+  it('⚠ 編集中は Escape でノートが閉じない(deselect-entry が phase を見て譲る)', () => {
+    const m = mount();
+    m.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    m.d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: '' });
+    m.d.dispatch({ type: 'START_EDIT' });
+    expect(m.d.getState().phase, '前提: 編集中になっていない').toBe('editing');
+    pressEscape();
+    expect(m.d.getState().selectedLid, '編集中に Escape でノートが閉じた').toBe('a');
   });
 });

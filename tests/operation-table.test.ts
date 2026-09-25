@@ -162,7 +162,8 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    */
   'capture-trim-clear', 'capture-trim-end', 'capture-trim-run', 'capture-trim-start',
   'choose-office-pack', 'clear-copy-history', 'clear-entry-date', 'clear-entry-filter',
-  'clear-kind-filter', 'clear-opened-history', 'clear-selection', 'close-pane',
+  // ⚠ 'close-pane' は 2026-09-25(#1042 C3)に登記した(下の「数が動いたら鳴る」参照)
+  'clear-kind-filter', 'clear-opened-history', 'clear-selection',
   /**
    * ⚠ **2026-09-17(#986 段③)** ── 入れ物ごと捨てる。
    * 🔑 **名前で呼べないままにする理由**:取り消せない操作を、パレットから
@@ -470,12 +471,16 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-09-21(#1017 段③-2): これまでのお知らせの入口(`open-system-notices`)で
       //   受け手 +1 ── 登記は増えない(押し口はヘルプの中にしか無く、鍵も持たない。
       //   `system-jump` と同じ仕分け)。
+      // ⚠ 2026-09-25(#1042 C3): 「閉じて本文へ戻る」(`close-pane`)に既定 `Escape` を
+      //   付け、KEY_COMMANDS へ登記した ── 受け手は既に在った(`center.ts` の
+      //   「× 閉じる」)ので `both` +1 / `registered` +1 / `unregistered` −1、
+      //   `total` は動かない(id 自体は前から `receivers` に数えられていた)。
       total: 325,
       receivers: 272,
-      registered: 89,
-      both: 36,
+      registered: 90,
+      both: 37,
       outsideActionsTable: 53,
-      unregistered: 236,
+      unregistered: 235,
     });
   });
 
@@ -509,8 +514,11 @@ describe('操作の全数台帳(#582 段①)', () => {
     //    書き出し 4 つが「設定」から右の列(何も選んでいないとき)へ移った。合計は不変。
     // ⚠ 2026-09-21(#1032): 「ノートを閉じる」で `key` 65 → 66(鍵の既定は持たない ──
     //    近道の設定とパレットに行として出て、鍵は user が割り当てる)
+    // ⚠ 2026-09-25(#1042 C3): 「閉じて本文へ戻る」(`close-pane`)を新たに
+    //    `KEY_COMMANDS` へ登記して `key` 66 → 67(`deselect-entry` は既に登記済みの
+    //    ままで、既定 `Escape` が付いただけ ── 件数は動かない)
     expect(s().perBook).toEqual({
-      key: 66,
+      key: 67,
       entry: 16,
       body: 3,
       collection: 2,

@@ -50,11 +50,21 @@ export { CONTEXT_LABELS };
  */
 const CONTEXT_ORDER: readonly KeyContext[] = [
   'global',
+  // ⚠ `global` の隣に置く(#1042 C3)── `reading`(ノートを読んでいるとき)/
+  //   `window`(別のウィンドウ)は `deselect-entry` / `close-pane` が**専用に**
+  //   名乗る文脈で、足し忘れると「画面のどこでも」へ落ちる(同じ罠。上の注記)。
+  'reading',
+  'window',
   'filer',
   // ⚠ **`filer` の次に置く**(近い面どうしを離さない)。⚠ 足し忘れると、
   //   `dual` しか名乗らないコマンドが `primaryContext` の既定で
   //   **「画面のどこでも」の下へ落ちる**(嘘の見出し。test が全数で突き合わせる)。
   'dual',
+  // ⚠ 同じ理由で `list` も `filer` の隣に置く(#1042 C2)── いまは
+  //   `filer-row-down` / `filer-row-up` / `filer-open` が `filer` も名乗っているので
+  //   足し忘れても直ちには壊れないが、`list` **だけ**を名乗るコマンドが将来足されたとき
+  //   ここに無いと「画面のどこでも」へ落ちる(同じ罠を先回りしておく)。
+  'list',
   'editor',
   'append',
   'row',

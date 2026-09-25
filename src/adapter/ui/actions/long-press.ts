@@ -34,7 +34,7 @@
  * ## ⚠ `Date.now()` と `setTimeout` を直に使う
  *
  * test は `vi.useFakeTimers()` で両方を進める ── 差し替え口を作ると、
- * 製品と test で**別の時計**を読む形になる(`binder.ts` の `maybeEnterFolder` も
+ * 製品と test で**別の時計**を読む形になる(`binder.ts` の `maybeDoubleOpen` も
  * `Date.now()` を直に読んでいる ── 同じ作法)。
  */
 

@@ -736,6 +736,16 @@ describe('設定の面(割り当て直す口)', () => {
     }
     // 空振り防止 ── 文脈が 1 種類しか描かれていないなら上の全数は意味を持たない
     expect(seen.size, '見出しが 1 種類しか出ていない').toBeGreaterThan(1);
+    /**
+     * 🔴 **#1042 C3 で足した 2 つの新しい見出しが、実際に描かれるか**(task の
+     * 明示要件)── 上の全数チェックは「どれかの見出しの下に居る」しか見ないので、
+     * `deselect-entry` / `close-pane` が**期待した見出しの字**の下に出ることを
+     * 名指しで確かめる。
+     */
+    expect(headingOf.get('deselect-entry'), 'ノートを閉じるの見出しが違う').toBe(
+      'ノートを読んでいるとき',
+    );
+    expect(headingOf.get('close-pane'), '閉じて本文へ戻るの見出しが違う').toBe('別のウィンドウ');
     panel.dispose();
   });
 
@@ -992,17 +1002,19 @@ describe('近道の受け手と、打鍵中の免除(等値で pin する)', () 
        * 🔑 この 1 行が、左の一覧を押して中央が本文へ戻った後の**唯一の戻り道**である。
        */
       'view-sql',
-      /**
-       * ⚠ 2026-09-21 に足した(#1032)── 「ノートを閉じる」は**押しボタンを持たない**。
-       * 🔑 マウスの側は**一覧の何も無い所を押す**(`onClick`)であって、
-       *   押し所(`data-pkc-action`)ではない ── 押し所を増やさずに戻り道を作る、
-       *   というのがこの直しの中身なので、ここは特例でよい。
-       */
-      'deselect-entry',
     ];
     for (const id of special) {
       expect(src, `${id} の特例が消えた`).toContain(`cmd === '${id}'`);
     }
+    /**
+     * 🔴 **`deselect-entry` は 2026-09-21(#1032)にここへ足したが、
+     * 2026-09-25(#1042 C3)に外した** ── 既定 `Escape` を付けるため文脈を
+     * `global` から専用の `reading` へ移したので、下の「全域の命令」からも
+     * 「受け手の表」の対象からも外れる。⚠ ハンドラ(`cmd === 'deselect-entry'`)
+     * 自体は `runGlobalCommand` に残っている ── それは `tests/adapter/
+     * app-dialog.test.ts` 等の直接呼び出しではなく、下の別の assert で見る。
+     */
+    expect(src, 'deselect-entry の受け手が消えた').toContain("cmd === 'deselect-entry'");
     const globals = KEY_COMMANDS.filter((c) => c.contexts.includes('global')).map((c) => c.id);
     const covered = new Set([...byButton, ...special]);
     expect(
@@ -1022,14 +1034,23 @@ describe('近道の受け手と、打鍵中の免除(等値で pin する)', () 
      *   **この不変条件が保たれている限り門は何も止めない**(実測で等価変異)──
      *   だから門ではなく**ここで pin する**(CLAUDE.md「これが無いと壊れる、と
      *   書く前に外して壊れるのを見る」)。
+     *
+     * 🔴 **`window` だけ例外にする**(#1042 C3)── `close-pane` を
+     *   `SHORTCUT_BUTTON` に足した(押しボタンをそのまま撃つ)。`openPaletteFor`
+     *   の `rows()` は `contexts.includes('global')` を**先に**見て
+     *   `window` を素通しする(`binder.ts` の `if (!c.contexts.includes('global'))
+     *   continue;`)ので、`window` の命令が `byButton` に居ても「押せる」と
+     *   嘘をつく経路には入らない。**例外は `window` だけ**(他の非 global 文脈が
+     *   紛れ込むのは今までどおり落とす)。
      */
     const byId = new Map(KEY_COMMANDS.map((c) => [c.id, c]));
-    const notGlobal = [...byButton, ...special].filter(
-      (id) => !(byId.get(id)?.contexts.includes('global') ?? false),
-    );
+    const notGlobal = [...byButton, ...special].filter((id) => {
+      const contexts = byId.get(id)?.contexts ?? [];
+      return !contexts.includes('global') && !contexts.includes('window');
+    });
     expect(
       notGlobal,
-      '全域でない命令が受け手の表に在る(その面にいないのに「押せる」と出る)',
+      '全域でも別ウィンドウでもない命令が受け手の表に在る(その面にいないのに「押せる」と出る)',
     ).toEqual([]);
   });
 

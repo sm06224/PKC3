@@ -27,6 +27,10 @@ import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { appPanes } from '../../src/adapter/ui/render/pane-visibility';
 import { stubRevisionOps } from '../helpers/revision-stub';
 import { answerDialog, dialogMessage } from './dialog-helper';
+import {
+  CLOSE_VIEW_WINDOW_REFUSED,
+  type CloseViewWindowResult,
+} from '../../src/adapter/platform/view-window';
 
 function meta(lid: string, archetype: string): EntryMeta {
   return {
@@ -587,5 +591,105 @@ describe('🔴 強制解放を押したら痕跡が残る(#723)', () => {
     } finally {
       console.warn = orig;
     }
+  });
+});
+
+/**
+ * 🔴 **付箋の窓は、追記欄に焦点が乗ったまま開く**(#1042 段②)。
+ *
+ * `main.ts` の `enterNoteWindow` は `appendBox.focusInputOnceReady()` を
+ * 呼ぶので、開いた直後の焦点は本文ではなく `append-input` に在る。⚠ この欄は
+ * `<textarea>` なので、`onShortcut` の `typing` 門が Escape を丸ごと止め、
+ * 「開いてすぐ Escape を押しても閉じない」という無反応になっていた。
+ */
+function mountNoteWindow(closeNoteWindow: () => CloseViewWindowResult) {
+  const root = document.createElement('div');
+  document.body.append(root);
+  const d = new Dispatcher();
+  const regions = buildShell(root);
+  const detail = new DetailRenderer(regions.detail);
+  const box = new AppendBoxRenderer(regions.append);
+  d.onState((s) => {
+    detail.render(s);
+    box.render(s);
+  });
+  bindActions(root, d, { closeNoteWindow });
+  connectStoreEffects(d, {
+    ...stubRevisionOps(),
+    getBody: async () => '本文',
+    deleteEntry: async () => {},
+    setEntryParent: async () => {},
+    renameEntry: async () => stubStamps(),
+    replaceAssetRefs: () => Promise.reject(new Error('この test では添付の差し替えを使わない')),
+    reorderEntry: async () => stubStamps(),
+    persistEntry: async () => stubStamps(),
+  });
+  d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', 'text')], relations: [] });
+  return { root, d };
+}
+
+function pressEscape(el: HTMLElement): void {
+  el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+}
+
+describe('🔴 付箋の窓 ── 追記欄で Escape(#1042 段②)', () => {
+  it('🔴 何も打っていなければ、Escape で窓を閉じる', async () => {
+    let calls = 0;
+    const { d, root } = mountNoteWindow(() => {
+      calls++;
+      return 'closed';
+    });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    // ⚠ この file は `beforeEach` で `document.body` を掃除しない(既存の作り)ので、
+    //   `document.querySelector` は前の it() の欄を拾う ── 自分の `root` から引く
+    const input = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="append-input"]')!;
+    expect(input.value, '前提が崩れている(欄が空でない)').toBe('');
+    pressEscape(input);
+    expect(calls, 'closeNoteWindow が呼ばれていない').toBe(1);
+  });
+
+  it('⚠ 何か打っていたら、今までどおり何もしない(下書きを Escape 1 発で消さない)', async () => {
+    let calls = 0;
+    const { d, root } = mountNoteWindow(() => {
+      calls++;
+      return 'closed';
+    });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    const input = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="append-input"]')!;
+    input.value = '打ちかけ';
+    pressEscape(input);
+    expect(calls, '打っている最中なのに closeNoteWindow が呼ばれた').toBe(0);
+    expect(input.value, '打った字が消えている').toBe('打ちかけ');
+  });
+
+  it("🔑 対照群:付箋でない窓(closeNoteWindow が 'not-a-window')では、欄が空でも何も閉じない", async () => {
+    let calls = 0;
+    const { d, root } = mountNoteWindow(() => {
+      calls++;
+      return 'not-a-window';
+    });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    const input = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="append-input"]')!;
+    pressEscape(input);
+    // 呼ばれてはいる(呼ぶこと自体は害が無い)が、閉じる側は 'not-a-window' を返した
+    expect(calls, 'closeNoteWindow が呼ばれていない').toBe(1);
+    expect(root.isConnected, '呼び側が何かを壊した').toBe(true);
+  });
+
+  /**
+   * 🔴 **付箋が閉じられなかった(`'refused'`)ときも理由を出す**(#1042 段④)。
+   * ⚠ 空の追記欄からの Escape でも、`close-pane` と同じ断り文を出す ──
+   *   黙っていると「押したのに何も起きない」に見える。
+   */
+  it('🔴 refused のときは理由を出す', async () => {
+    const { d, root } = mountNoteWindow(() => 'refused');
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    const input = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="append-input"]')!;
+    pressEscape(input);
+    expect(d.getState().error, '断り文が出ていない').toBe(CLOSE_VIEW_WINDOW_REFUSED);
   });
 });
