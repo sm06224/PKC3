@@ -322,6 +322,7 @@ export class SplitView {
       off.type = 'button';
       off.setAttribute('data-pkc-action', 'unsplit-entry');
       off.textContent = '×';
+      off.setAttribute('aria-label', 'スタックから降ろす');
       off.title = 'スタックから降ろす(ノートは消えません)';
       card.append(up, off);
       band.append(card);
@@ -337,7 +338,7 @@ export class SplitView {
     const save = doc.createElement('button');
     save.type = 'button';
     save.setAttribute('data-pkc-action', 'stack-save');
-    save.textContent = '保存…';
+    save.textContent = 'スタックを保存…';
     if (state.phase === 'editing') {
       save.disabled = true;
       // 🔑 字は `phaseBlockReason` の 1 か所から(C11b / #1045)
@@ -404,7 +405,7 @@ export class SplitView {
     off.setAttribute('data-pkc-lid', lid);
     // ⚠ 記号だけにしない ── 何が外れるのか読めない
     // 🔑 字は「降ろす」へ(#633 裁定③ ── 載せる / 降ろす で対にする)
-    off.textContent = '× 降ろす';
+    off.textContent = '× スタックから降ろす';
     off.title = 'スタックから降ろす(ノートは消えません)';
     /**
      * 🔴 **この枠を主で開く**(#633 段①)。

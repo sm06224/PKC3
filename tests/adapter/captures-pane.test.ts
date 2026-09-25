@@ -460,9 +460,9 @@ describe('前後を削る ── 画面に何が出るか(#683 段②a)', () => 
   it('🔴 鳴らしている音の行に「ここから」「ここまで」が出る', async () => {
     const host = await paneReady(playing('a'));
     expect(field(host, 'a', 'capture-media'), '器がまだ出ていない(前提が崩れている)').not.toBeNull();
-    expect(field(host, 'a', 'capture-trim-start')?.textContent).toBe('ここから');
-    expect(field(host, 'a', 'capture-trim-end')?.textContent).toBe('ここまで');
-    expect(field(host, 'a', 'capture-trim')?.textContent).toContain('「ここから」');
+    expect(field(host, 'a', 'capture-trim-start')?.textContent).toBe('ここを始まりにする');
+    expect(field(host, 'a', 'capture-trim-end')?.textContent).toBe('ここを終わりにする');
+    expect(field(host, 'a', 'capture-trim')?.textContent).toContain('「ここを始まりにする」');
   });
 
   it('🔴 鳴らしていない行には 1 つも出ない(押しても時刻が無い)', async () => {
@@ -497,7 +497,7 @@ describe('前後を削る ── 画面に何が出るか(#683 段②a)', () => 
     await Promise.resolve();
     await Promise.resolve();
     p.paint();
-    expect(field(p.host, 'a', 'capture-trim')?.textContent).toContain('「ここから」');
+    expect(field(p.host, 'a', 'capture-trim')?.textContent).toContain('「ここを始まりにする」');
     const before = field(p.host, 'a', 'capture-media');
     expect(before, '前提が崩れている(器が出ていない)').not.toBeNull();
 

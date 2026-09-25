@@ -92,7 +92,7 @@ export class ContactsRenderer {
     const add = document.createElement('button');
     add.type = 'button';
     add.setAttribute('data-pkc-action', 'contacts-quick-add');
-    add.textContent = '足す';
+    add.textContent = '連絡先を足す';
     // ⚠ **どこへ書くか**と**いつ並ぶか**を両方言う ── 「足したのに出てこない」を作らない
     add.title =
       '名前を題名にしたノートを作り、先頭の囲みに tel: / email: / org: を書きます(取り込みと同じ形)。電話かメールが 1 つ以上あると、ここに並びます';

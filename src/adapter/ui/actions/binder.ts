@@ -7780,7 +7780,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       title: 'スタックを保存する',
       label: `${String(lids.length)} 件の並びを、リンクの箇条書きのノートとして保存します。題名:`,
       initial,
-      okLabel: '保存する',
+      okLabel: 'スタックを保存する',
     }).then((title) => {
       if (title === null) return;
       // ⚠ 開いている間に降ろされていることがある ── 保存するのは**押した時点ではなく決めた時点**の並び

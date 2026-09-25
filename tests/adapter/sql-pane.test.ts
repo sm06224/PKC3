@@ -385,7 +385,7 @@ describe('SQL を調べる面(#681 段②)', () => {
     const { root, pane, box, runBtn } = setup();
     expect(pane.hidden, 'SQL の面が隠れている').toBe(false);
     expect(box, '打つ欄が無い').not.toBeNull();
-    expect(runBtn.textContent, '押し所の字').toBe('走らせる');
+    expect(runBtn.textContent, '押し所の字').toBe('SQL を走らせる');
     expect(root.querySelector<HTMLElement>('[data-pkc-view-pane="detail"]')!.hidden).toBe(true);
     expect(viewModeLabel('sql'), '面の呼び名').toBe('SQL で調べる');
     // ⚠ ノートを映さない**道具**なので aside(左の一覧を押したら中央はノートへ戻る)

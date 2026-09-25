@@ -92,7 +92,7 @@ export function paintSqlEr(host: HTMLElement, er: SqlPageState['er']): void {
   connectBtn.setAttribute('data-pkc-action', 'sql-er-connect-toggle');
   connectBtn.setAttribute('data-pkc-field', 'sql-er-connect');
   connectBtn.setAttribute('aria-pressed', er.connecting ? 'true' : 'false');
-  connectBtn.textContent = '繋ぐ';
+  connectBtn.textContent = '列を繋ぐ';
   connectBtn.title = er.connecting
     ? '繋ぐのをやめます(いつもどおり、押した列が取り出す列に足されます)'
     : '列どうしを自分で繋ぎます(外部キーが宣言されていない表でも繋げます)';

@@ -37,13 +37,13 @@ describe('切り出したものの名前(裁定 A)', () => {
 
 describe('印の出方', () => {
   it('🔴 印が無いときは押し方を書く(印だけ出しても次が分からない)', () => {
-    expect(trimMarkText(null, null)).toContain('「ここから」');
-    expect(trimMarkText(null, null)).toContain('「ここまで」');
+    expect(trimMarkText(null, null)).toContain('「ここを始まりにする」');
+    expect(trimMarkText(null, null)).toContain('「ここを終わりにする」');
   });
 
   it('🔴 片方だけのときは、もう片方を押せと書く', () => {
-    expect(trimMarkText(12_000, null)).toBe('ここから 0:12 ── 「ここまで」も押してください');
-    expect(trimMarkText(null, 65_000)).toBe('ここまで 1:05 ── 「ここから」も押してください');
+    expect(trimMarkText(12_000, null)).toBe('ここから 0:12 ── 「ここを終わりにする」も押してください');
+    expect(trimMarkText(null, 65_000)).toBe('ここまで 1:05 ── 「ここを始まりにする」も押してください');
   });
 
   it('🔴 両方そろったら、範囲と切り出した後の長さが出る', () => {
