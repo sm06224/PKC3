@@ -12368,9 +12368,36 @@ export function bindActions(
       }
       return;
     }
+    /**
+     * 🔴 **一覧の絞り込みの欄から、そのまま行へ降りられる**(#1042 C2)。
+     * ⚠ 2 ペインの絞り込み(下の `dual-filter`)と**同じ形**── これが無いと
+     *   「打って絞る → マウスで行を押す」になり、キーボードだけで完結しない。
+     * ⚠ `Escape` はここでは**何もしない**(C3 の「入力欄では効かせない」規約 ──
+     *   欄を空にする「絞りを外す」ボタンは別に在る)。それ以外の鍵は入力へ通す。
+     */
+    if (el instanceof HTMLInputElement && el.matches('[data-pkc-field="entry-filter"]')) {
+      if (ke.key === 'ArrowDown') {
+        const first = listRowEls()[0]?.getAttribute('data-pkc-entry') ?? null;
+        if (first === null) return;
+        ke.preventDefault();
+        focusListRow(first);
+      }
+      return;
+    }
     if (!typing && el?.closest('[data-pkc-region="filer-table"]')) {
       const fcmd = keymap.match(ke, 'filer');
       if (fcmd !== null && runFilerKey(fcmd)) {
+        ke.preventDefault();
+        return;
+      }
+    }
+    /**
+     * 🔴 **一覧タブでも同じ鍵が効く**(#1042 C2)。⚠ 行き先だけが違う ──
+     * `runFilerKey` の代わりに `runListKey`(フォルダでも中へ入らない)を呼ぶ。
+     */
+    if (!typing && el?.closest('[data-pkc-region="entry-list"]')) {
+      const lcmd = keymap.match(ke, 'list');
+      if (lcmd !== null && runListKey(lcmd)) {
         ke.preventDefault();
         return;
       }
@@ -12560,6 +12587,67 @@ export function bindActions(
     const i = cur === null ? -1 : rows.findIndex((m) => m.lid === cur);
     if (i === -1) return (delta > 0 ? rows[0] : rows[rows.length - 1])?.lid ?? null;
     return rows[Math.min(rows.length - 1, Math.max(0, i + delta))]?.lid ?? null;
+  };
+
+  /**
+   * 🔴 **一覧タブの行(#1042 C2)**。⚠ `rowEl` / `focusedRowLid` / `rowAt` と
+   * 同じ形だが、並びは `visibleFilerRows`(scope 内)ではなく**DOM の並び**から
+   * 採る ── 一覧は `scopeLid` を持たない flat な行の並びなので、`sidebar.ts` が
+   * 組んだ DOM 順(絞り込み・並び順を反映済み)がそのまま画面と一致する見方である。
+   * ⚠ 端では止まる(巻き戻さない)── フォルダの表と同じ規則。
+   */
+  const listRowEls = (): HTMLElement[] =>
+    Array.from(
+      root.querySelectorAll<HTMLElement>('[data-pkc-region="entry-list"] > [data-pkc-entry]'),
+    );
+
+  const focusedListRowLid = (): string | null => {
+    const el = root.ownerDocument.activeElement;
+    if (!(el instanceof HTMLElement)) return null;
+    const li = el.closest('[data-pkc-region="entry-list"] > [data-pkc-entry]');
+    return li?.getAttribute('data-pkc-entry') ?? null;
+  };
+
+  const listRowEl = (lid: string): HTMLElement | null =>
+    listRowEls().find((el) => el.getAttribute('data-pkc-entry') === lid) ?? null;
+
+  const focusListRow = (lid: string): void => listRowEl(lid)?.focus();
+
+  const listRowAt = (delta: number): string | null => {
+    const rows = listRowEls();
+    if (rows.length === 0) return null;
+    const cur = focusedListRowLid();
+    const i = cur === null ? -1 : rows.findIndex((el) => el.getAttribute('data-pkc-entry') === cur);
+    if (i === -1)
+      return (delta > 0 ? rows[0] : rows[rows.length - 1])?.getAttribute('data-pkc-entry') ?? null;
+    return (
+      rows[Math.min(rows.length - 1, Math.max(0, i + delta))]?.getAttribute('data-pkc-entry') ??
+      null
+    );
+  };
+
+  /**
+   * 🔴 **一覧タブの鍵**(#1042 C2)。⚠ `runFilerKey` / `runDualKey` と違い、
+   * フォルダの行でも「中へ入る」は起こさない ── 一覧に `scopeLid`(現在地)の
+   * 概念は無い(`tests/adapter/multi-select.test.ts`「もう一度押す」もフォルダ面の
+   * 中だけ ── 見えない現在地が動かないことを既に pin)。**行の種類に関わらず**、
+   * `Enter` はマウスの `select-entry` と**同じ受け手**を呼ぶ(= クリックと同じ)。
+   */
+  const runListKey = (cmd: string): boolean => {
+    if (cmd === 'filer-row-down' || cmd === 'filer-row-up') {
+      const lid = listRowAt(cmd === 'filer-row-down' ? 1 : -1);
+      if (lid === null) return false;
+      focusListRow(lid);
+      return true;
+    }
+    if (cmd === 'filer-open') {
+      const lid = focusedListRowLid();
+      const host = lid === null ? null : listRowEl(lid);
+      if (host === null) return false;
+      run('select-entry', host);
+      return true;
+    }
+    return false;
   };
 
   /**

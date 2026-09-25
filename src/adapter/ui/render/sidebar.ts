@@ -72,6 +72,15 @@ export class SidebarRenderer {
     );
     if (!list) throw new Error('sidebar shell missing entry-list region');
     this.list = list;
+    /**
+     * 🔴 **一覧そのものにも焦点を置けるようにする**(#1042 C2)。
+     * `filer.ts` の `table.tabIndex = 0` と同じ作法 ── 行が 1 件も無いとき
+     * (0 件の器)でも、ここが一覧の鍵の受け皿になる。
+     * ⚠ **`0`**(Tab の巡回に入る)── マウスを使わずに行までたどり着けるようにする
+     * (フォルダの表と同じ理由。#215 のお知らせ「マウスを使わずに行までたどり
+     * 着けます」を一覧タブでも成り立たせる)。
+     */
+    this.list.tabIndex = 0;
     this.navBack = sidebarRegion.querySelector<HTMLButtonElement>(
       '[data-pkc-action="nav-back"]',
     );
@@ -278,6 +287,12 @@ export class SidebarRenderer {
     const row = document.createElement('li');
     row.setAttribute('data-pkc-entry', meta.lid);
     row.setAttribute('data-pkc-action', 'select-entry');
+    /**
+     * 🔴 **行に焦点を持たせる**(#1042 C2)。`filer.ts` の `tr.tabIndex = -1` と
+     * 同じ作法 ── 押した行が焦点を持ち、そこから ↑↓ で送る(Tab の巡回には
+     * 入れない。件数が多い一覧を Tab で 1 行ずつ辿らせるのは動線として悪い)。
+     */
+    row.tabIndex = -1;
     // 🔑 種別は**チップ**で出す(P8)。⚠ 以前は CSS の `::before` で
     // 「文 」「了 」のような単漢字を行の頭に生やしていたが、日本語として
     // 存在しない書き方であるうえ、`::before` が `<tr>` に当たると**匿名セルが
@@ -326,9 +341,19 @@ export class SidebarRenderer {
     const prev = this.lastRenaming;
     this.lastRenaming = state.renamingLid;
     if (prev !== null && prev !== state.renamingLid) {
-      const title = this.rows.get(prev)?.querySelector<HTMLElement>('[data-pkc-field="title"]');
+      const row = this.rows.get(prev);
+      const title = row?.querySelector<HTMLElement>('[data-pkc-field="title"]');
       const meta = state.entryMetas.get(prev);
       if (title && meta) title.textContent = meta.title;
+      /**
+       * 🔴 **打ち替えをやめる(Escape)/ 確定すると、焦点をその行へ戻す**(#1042 C2)。
+       * ⚠ `<input>` が DOM から消えると、焦点は行き場を失って `document.body` へ
+       *   落ちる ── 一覧タブへ焦点(#1042 C2 で行が焦点を持つようになった)を
+       *   戻さないと、Escape の直後に ↑↓ が効かない(鍵の面ごと見失う)。
+       * ⚠ 行が絞り込みで外れている(もう画面に無い)ときは `row` が undefined ──
+       *   detached node の `focus()` は no-op なので、そのままで安全。
+       */
+      row?.focus();
     }
     if (state.renamingLid === null) return;
     const title = this.rows

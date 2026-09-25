@@ -41,6 +41,15 @@ export interface Chord {
  * 🔑 逆に**両方に在る操作**(開く / ゴミ箱 / 行送り)は `filer` 1 つのまま ──
  *   user に同じ操作を 2 回割り当て直させない(#273 で確立した規律)。
  */
+/**
+ * 🔴 **`list` を分けている理由**(#1042 C2)── 一覧タブはフォルダの表と違い
+ * `scopeLid`(現在地)を持たない **flat な行の並び**である。「開く」は同じ意味
+ * (`filer-open` を共有)だが、フォルダの行でも「中へ入る」は起こさない
+ * (`tests/adapter/multi-select.test.ts` が pin する「見えない現在地が動かない」を
+ * 一覧では守る)。`filer-parent` / `filer-select-all` / `filer-rename` などの
+ * フォルダ固有の操作(親フォルダ・移す・複数選択)は一覧には無いので、
+ * `filer` へ混ぜず**必要な 3 つだけ**(次の行へ / 前の行へ / 開く)を共有する。
+ */
 export type KeyContext =
   | 'global'
   | 'editor'
@@ -48,7 +57,8 @@ export type KeyContext =
   | 'row'
   | 'live'
   | 'filer'
-  | 'dual';
+  | 'dual'
+  | 'list';
 
 /**
  * 🔴 **どこで効くかの見出し**(2026-08-26 に adapter からここへ移した)。
@@ -74,6 +84,8 @@ export const CONTEXT_LABELS: Readonly<Record<KeyContext, string>> = {
   filer: 'フォルダの一覧と 2 ペイン(行を選んでいるとき)',
   /** ⚠ こちらは**2 ペインにしか存在しない操作**だけ(反対側へ写す / 移す など)。 */
   dual: '2 ペインだけの操作(そのペインに焦点があるとき)',
+  /** ⚠ こちらは**一覧タブにしか存在しない面**(フォルダの表とは違う flat な行)。 */
+  list: '一覧タブ(ノートの行を選んでいるとき)',
 };
 
 export interface KeyCommand {
@@ -260,7 +272,9 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   {
     id: 'filer-open',
     label: '行を開く(フォルダなら中へ)',
-    contexts: ['filer', 'dual'],
+    // 🔑 一覧タブも共有(#1042 C2)── 一覧に「中へ入る」先は無いので、
+    //   フォルダの行でも普通のノートと同じく開く(そのまま select-entry)
+    contexts: ['filer', 'dual', 'list'],
     // ⚠ `F3` は古典 4 実装(TC / DC / FAR / Krusader)の「見る」と同じ位置
     defaults: ['Enter', 'F3'],
     note: 'OS のファイラと同じ ── 行を選んで Enter(F3 でも開きます)',
@@ -298,14 +312,15 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   {
     id: 'filer-row-down',
     label: '次の行へ移る',
-    contexts: ['filer', 'dual'],
+    // 🔑 一覧タブも共有(#1042 C2)── 行が焦点を持つ点はフォルダの表と同じ
+    contexts: ['filer', 'dual', 'list'],
     defaults: ['ArrowDown'],
     note: '2 ペインではカーソルだけが動きます(選択は Space)',
   },
   {
     id: 'filer-row-up',
     label: '前の行へ移る',
-    contexts: ['filer', 'dual'],
+    contexts: ['filer', 'dual', 'list'],
     defaults: ['ArrowUp'],
   },
   {
@@ -1164,7 +1179,11 @@ const BARE_ALLOWED = new Set(['Escape', 'Tab']);
  * 🔑 `Enter` / `Delete` / `Backspace` は **OS のファイラの標準**であり、
  * ここを許さないと「平仄を合わせる」(user 裁定 2026-08-18)が実行できない。
  */
-const NON_TYPING_CONTEXTS: ReadonlySet<KeyContext> = new Set<KeyContext>(['filer', 'dual']);
+/**
+ * 🔴 `list`(#1042 C2)も同じ理由で足す ── 一覧タブの行(`<li>`)も文字を打つ
+ * 相手ではない(焦点は行そのもの、入力欄は名前の打ち替え中だけ別に受ける)。
+ */
+const NON_TYPING_CONTEXTS: ReadonlySet<KeyContext> = new Set<KeyContext>(['filer', 'dual', 'list']);
 
 function bareAllowed(key: string, commandId?: string): boolean {
   if (BARE_ALLOWED.has(key) || /^F([1-9]|1[0-9]|2[0-4])$/.test(key)) return true;
