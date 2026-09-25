@@ -121,6 +121,12 @@ export function paintStatusUndo(btn: HTMLElement, state: StatusUndoState, shownL
   const show = move || append;
   // ⚠ **押し先も切り替える** ── 同じ器で 2 つの取り消しを出すので、
   //    字だけ出して受け手を替え忘れると「押すと別の物が戻る」になる
-  if (show) btn.setAttribute('data-pkc-action', move ? 'undo-move' : 'undo-append');
+  // 🔴 **字も対象に合わせて切り替える**(#1046)── 器を 1 つで済ませているので、
+  //    `data-pkc-action` だけ替えて字を「元に戻す」で固定すると、追記を戻す回に
+  //    「移動を元に戻す」という**起きることと違う字**が出る。
+  if (show) {
+    btn.setAttribute('data-pkc-action', move ? 'undo-move' : 'undo-append');
+    btn.textContent = move ? '移動を元に戻す' : '追記を元に戻す';
+  }
   if (btn.hidden !== !show) btn.hidden = !show;
 }

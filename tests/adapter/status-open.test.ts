@@ -38,7 +38,7 @@ describe('知らせの隣の「開く」(#668 A)', () => {
     // 🔴 #809-4 で `swap-open` へ ── 行き先が枠に居るときは**入れ替える**
     //    (枠に居ないときは reducer が素の `SELECT_ENTRY` へ落とす)
     expect(open.getAttribute('data-pkc-action'), '受け手の無い口').toBe('swap-open');
-    expect(open.textContent).toBe('開く');
+    expect(open.textContent).toBe('そのノートを開く');
     expect(open.hidden, '身元が無いのに出ている').toBe(true);
     // ⚠ 状態の行の**中**に居る(知らせの隣に出る)
     expect(regions.status.contains(open), '状態の行の外に居る').toBe(true);
@@ -108,6 +108,9 @@ describe('知らせの隣の「元に戻す」── 開いていないノート
     paintStatusUndo(b, { lastMove: null, notice: PUT, lastAppend: { lid: 'n2' }, noticeOpen: 'n2' }, PUT);
     expect(b.hidden, '戻す口が出ない(片道になっている)').toBe(false);
     expect(b.getAttribute('data-pkc-action'), '押すと別の物が戻る').toBe('undo-append');
+    // 🔴 #1046: 器を共有するので、字も対象に合わせて切り替わっていること
+    //    (字だけ「移動を元に戻す」で固定されると、起きることと違う字になる)
+    expect(b.textContent, '追記を戻すのに移動の字が出ている').toBe('追記を元に戻す');
   });
 
   it('🔴 ③ 塊を動かした知らせでは、これまでどおり undo-move が勝つ', () => {
@@ -117,6 +120,7 @@ describe('知らせの隣の「元に戻す」── 開いていないノート
     paintStatusUndo(b, { lastMove: {}, notice: MOVED, lastAppend: { lid: 'n2' }, noticeOpen: 'n2' }, MOVED);
     expect(b.hidden).toBe(false);
     expect(b.getAttribute('data-pkc-action'), '塊の知らせなのに追記が戻る').toBe('undo-move');
+    expect(b.textContent, '移動を戻すのに追記の字が出ている').toBe('移動を元に戻す');
   });
 
   it('🔴 ⑤ 材料が別のノートを指していたら出ない', () => {

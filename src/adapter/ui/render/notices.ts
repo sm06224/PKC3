@@ -47,7 +47,7 @@ export function showNotices(
   const close = document.createElement('button');
   close.type = 'button';
   close.setAttribute('data-pkc-action', 'dismiss-notices');
-  close.textContent = '閉じる';
+  close.textContent = 'メッセージを閉じる';
   // ⚠ **閉じるは最後** ── 押し慣れた場所(いちばん右)を動かさない
   head.append(close);
 

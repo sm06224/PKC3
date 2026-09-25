@@ -2333,7 +2333,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     isEditing: () => dispatcher.getState().phase === 'editing',
     confirmDiscard: () =>
       ask('編集中の内容は保存されません。新しい版に切り替えますか?', {
-        okLabel: '切り替える',
+        okLabel: '新しい版に切り替える',
         danger: true,
       }),
   });

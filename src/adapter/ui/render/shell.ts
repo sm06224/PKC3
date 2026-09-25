@@ -218,10 +218,10 @@ export function paintTimerBar(
       li.setAttribute('data-pkc-timer', run.lid);
       const text = document.createElement('span');
       text.setAttribute('data-pkc-field', 'timer-entry');
-      const stop = iconButton('stop-timer', '止める');
+      const stop = iconButton('stop-timer', '時間を計るのを止める');
       stop.setAttribute('data-pkc-timer', run.lid);
       stop.title = '計るのをやめて、そのノートの本文に作業時間を書きます';
-      const drop = iconButton('discard-timer', '書かずにやめる');
+      const drop = iconButton('discard-timer', '計った時間を書かずにやめる');
       drop.setAttribute('data-pkc-timer', run.lid);
       drop.title = '計るのをやめます(本文には書きません)';
       li.append(text, stop, drop);
@@ -277,11 +277,11 @@ export function paintAlarmBar(root: HTMLElement, due: readonly AlarmDue[]): void
       li.setAttribute('data-pkc-alarm', d.key);
       const text = document.createElement('span');
       text.setAttribute('data-pkc-field', 'alarm-entry');
-      const open = iconButton('open-alarm', '開く');
+      const open = iconButton('open-alarm', '予定のノートを開く');
       open.setAttribute('data-pkc-alarm', d.key);
       open.setAttribute('data-pkc-entry', d.lid);
       open.title = 'その予定を書いたノートを開きます';
-      const close = iconButton('dismiss-alarm', '閉じる');
+      const close = iconButton('dismiss-alarm', '知らせを閉じる');
       close.setAttribute('data-pkc-alarm', d.key);
       close.title = 'この知らせを閉じます(本文は変わりません)';
       li.append(text, open, close);
@@ -920,7 +920,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   statusOpen.type = 'button';
   statusOpen.setAttribute('data-pkc-field', 'status-open');
   statusOpen.setAttribute('data-pkc-action', 'swap-open');
-  statusOpen.textContent = '開く';
+  statusOpen.textContent = 'そのノートを開く';
   statusOpen.hidden = true;
   /**
    * 🔴 **知らせの隣の「元に戻す」**(#684 段①。user 指示 2026-08-23「片道の操作を作らない」)。
@@ -932,7 +932,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   statusUndo.type = 'button';
   statusUndo.setAttribute('data-pkc-field', 'status-undo');
   statusUndo.setAttribute('data-pkc-action', 'undo-move');
-  statusUndo.textContent = '元に戻す';
+  statusUndo.textContent = '移動を元に戻す';
   statusUndo.hidden = true;
   /**
    * 🔴 **未読のメッセージへの入口**(設計 doc §7、段②a)。
@@ -995,10 +995,10 @@ export function buildShell(root: HTMLElement): ShellRegions {
   capture.hidden = true;
   const captureText = document.createElement('span');
   captureText.setAttribute('data-pkc-field', 'capture-status');
-  const stopBtn = iconButton('stop-capture', '止める');
+  const stopBtn = iconButton('stop-capture', '収録を止める');
   stopBtn.setAttribute('data-pkc-field', 'stop-capture');
   stopBtn.title = '録音・画面録画を止めて、いま開いているノートに入れます';
-  const dropBtn = iconButton('discard-capture', '残さずにやめる');
+  const dropBtn = iconButton('discard-capture', '収録を残さずにやめる');
   dropBtn.setAttribute('data-pkc-field', 'discard-capture');
   dropBtn.title = '収録を残さずにやめます';
   capture.append(captureText, stopBtn, dropBtn);

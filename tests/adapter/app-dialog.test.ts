@@ -79,7 +79,7 @@ describe('アプリ自身の確認ダイアログ(#299)', () => {
   it('知らせるだけの形は、取り消しのボタンを出さない', async () => {
     const p = alertInApp(host, '掃除しました');
     expect(cancelBtn().hidden, '取り消しのボタンが出ている').toBe(true);
-    expect(okBtn().textContent).toBe('閉じる');
+    expect(okBtn().textContent).toBe('メッセージを閉じる');
     okBtn().click();
     expect(await p).toBe('ok');
   });

@@ -268,7 +268,7 @@ export function alertInApp(host: HTMLElement, message: string): Promise<DialogAn
     const f = ensureFrame(host);
     f.title.textContent = 'お知らせ';
     f.body.textContent = message;
-    f.ok.textContent = '閉じる';
+    f.ok.textContent = 'メッセージを閉じる';
     f.ok.removeAttribute('data-pkc-danger');
     // ⚠ **消さずに隠す**(器を捨てない)── 消すと次の確認で作り直しになる
     f.cancel.hidden = true;

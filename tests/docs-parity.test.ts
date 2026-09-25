@@ -896,7 +896,7 @@ describe('マニュアルと実装の突合', () => {
     const el = document.createElement('section');
     showUpdateCard(el);
     const labels = [...el.querySelectorAll('button')].map((b) => b.textContent ?? '');
-    expect(labels).toEqual(['再読込', 'あとで']);
+    expect(labels).toEqual(['新しい版に切り替える', 'あとで切り替える']);
     for (const label of labels) {
       expect(MANUAL, `マニュアルに「${label}」が無い`).toContain(`**${label}**`);
     }
@@ -1040,7 +1040,7 @@ describe('確認の画面とマニュアルの突合(#299)', () => {
     'main.ts:上書きする', // md 書き出しの同名上書き
     'main.ts:ノートを渡して開く', // 素のまま起動(同一オリジン)
     'main.ts:整理する', // 使っていない添付を消す
-    'main.ts:切り替える', // 編集中の下書きを捨てて新しい版へ(#312 ②)
+    'main.ts:新しい版に切り替える', // 編集中の下書きを捨てて新しい版へ(#312 ②)
     'binder.ts:消す', // 板の付箋を本文の塊ごと消す(#676)── 板の書換は履歴を伸ばさないので戻せない
     /**
      * 🔴 **入れ物ごと捨てる**(#986 段③、2026-09-17)。
@@ -1052,7 +1052,7 @@ describe('確認の画面とマニュアルの突合(#299)', () => {
     /**
      * 🔴 **別のタブが捨てたと聞いて読み込み直す**(#986 段③)。
      * ⚠ 打っていた字は `AppState` にしか無いので、本当に戻せない
-     *   (`main.ts:切り替える` と同じ理由・同じ形)。
+     *   (`main.ts:新しい版に切り替える` と同じ理由・同じ形)。
      */
     'main.ts:読み込み直す',
   ];

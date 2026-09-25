@@ -199,10 +199,10 @@ export class CenterRouter {
     const close = document.createElement('button');
     close.type = 'button';
     close.setAttribute('data-pkc-action', 'close-pane');
-    close.setAttribute('aria-label', '閉じて本文へ戻る');
+    close.setAttribute('aria-label', 'パネルを閉じる');
     // ⚠ 字も出す ── 記号だけだと「何が閉じるのか」が読めない
-    close.textContent = '× 閉じる';
-    close.title = '閉じて本文へ戻る';
+    close.textContent = '× パネルを閉じる';
+    close.title = '閉じると本文へ戻ります';
     this.bar.append(close);
     region.prepend(this.bar);
     this.scroll = new ScrollMemory(region);
