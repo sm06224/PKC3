@@ -544,7 +544,7 @@ describe('マニュアルと実装の突合', () => {
     // entry に対する操作(書き出す / 履歴 / 削除)は右の情報ペインへ移した
     // ⚠ 図案つきボタンは `iconButton(action, label)` で作る ── 文言はその第 2 引数
     const detail = readFileSync('src/adapter/ui/render/detail.ts', 'utf-8');
-    for (const label of ['編集', '保存', 'キャンセル']) {
+    for (const label of ['ノートを編集する', '保存', 'キャンセル']) {
       expect(detail, `本文まわりから「${label}」が消えた`).toContain(`, '${label}')`);
     }
     // 🔴 **追記は本文の上に無い**(P8 段⑧)── 段⑥ ではここに置いたが、
@@ -559,7 +559,7 @@ describe('マニュアルと実装の突合', () => {
       expect(box, `ロックの出口「${label}」が消えた`).toContain(`'${label}'`);
       expect(MANUAL, `マニュアルに「${label}」が無い`).toContain(`**${label}**`);
     }
-    expect(detail, '復元が消えた').toContain("textContent = '復元'");
+    expect(detail, '復元が消えた').toContain("textContent = 'この版に戻す'");
     const inspector = readFileSync('src/adapter/ui/render/inspector.ts', 'utf-8');
     /**
      * ⚠ **字の在り処が変わった**(2026-08-27、#426 段①)── これらは
@@ -597,7 +597,7 @@ describe('マニュアルと実装の突合', () => {
     for (const label of ['削除', '履歴']) {
       expect(detail, `「${label}」が本文の上にも残っている`).not.toContain(`, '${label}')`);
     }
-    for (const label of ['編集', '保存', 'キャンセル', '履歴', 'バックアップ(このノート)', '追記']) {
+    for (const label of ['ノートを編集する', '保存', 'キャンセル', '履歴', 'バックアップ(このノート)', '追記']) {
       expect(MANUAL, `マニュアルに「${label}」が無い`).toContain(`**${label}**`);
     }
   });
@@ -1958,7 +1958,7 @@ describe('執筆規約 条 9 ── 長い節を増やさない(#793)', () => {
   '横に並べて読む(ウルトラワイド向け)',
   '画面が細いとき・スマホで整理するとき',
   '画面のどこでも効くもの',
-  '目次を見せて起動する(アプリにノートの一覧を読ませる)',
+  '目次を見せて開く(アプリにノートの一覧を読ませる)',
   '素のまま起動する(そのアプリにノートを渡す)',
   '行を右クリックする(できることが、その場に出る)',
   '見ているページをブックマークで取り込む',

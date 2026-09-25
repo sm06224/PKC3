@@ -1098,7 +1098,7 @@ export class DetailRenderer {
           // 定まらない(コピーはここ**だけ**に在る)。
           // 🔑 **追記もここに無い**(P8 段⑧)── 編集画面を通らない別の器が持つ
           // 🔑 **読む面の主の操作**(#722 P2-10)── ここから話が進む
-          this.barButton = markPrimary(iconButton('start-edit', '編集'));
+          this.barButton = markPrimary(iconButton('start-edit', 'ノートを編集する'));
           /**
            * 🔴 **コピーの 2 系統 + 選択範囲**(2026-08-08。user 裁定「markdown の
            * テキストとしてのコピーと HTML 書式ありのコピーの両方」)。
@@ -1122,7 +1122,7 @@ export class DetailRenderer {
           const retry = document.createElement('button');
           retry.type = 'button';
           retry.setAttribute('data-pkc-action', 'retry-persist');
-          retry.textContent = '再保存';
+          retry.textContent = 'ノートを保存し直す';
           this.barButton = retry;
           bar.append(this.barButton);
         }
@@ -1963,7 +1963,7 @@ export class DetailRenderer {
       dl.setAttribute('data-pkc-action', 'download-asset');
       dl.setAttribute('data-pkc-asset-key', meta.assetKey);
       dl.setAttribute('data-pkc-asset-name', meta.name || 'download');
-      dl.textContent = 'ダウンロード';
+      dl.textContent = '添付をダウンロード';
       info.append(dl);
       /**
        * 🔴 **書庫は、落とさなくても中が見られる**(#818。user 要望 2026-09-09
@@ -1984,7 +1984,7 @@ export class DetailRenderer {
         peek.setAttribute('data-pkc-asset-key', meta.assetKey);
         peek.setAttribute('data-pkc-asset-name', meta.name || 'archive.zip');
         peek.title = '中の一覧を出して、選んだ物だけ取り出します';
-        peek.textContent = '中を見る';
+        peek.textContent = 'zip の中を見る';
         info.append(peek);
       }
       // 🔴 **本文から参照するための導線**(P8 段⑱。レビュー H)。
@@ -2051,7 +2051,7 @@ export class DetailRenderer {
          *   受け手は「属性 → 無ければ `selectedLid`」の順で読む。
          */
         const launchOf = (b: HTMLElement): HTMLElement => markTargetLid(b, lid);
-        const run = launchOf(iconButton('launch-asset', '起動', 'launch-asset'));
+        const run = launchOf(iconButton('launch-asset', 'アプリを開く', 'launch-asset'));
         run.title = 'PKC3 から切り離して開きます(PKC3 の中身には触れません)';
         info.append(run);
         /**
@@ -2063,7 +2063,7 @@ export class DetailRenderer {
          * 設計: `docs/development/p10-launcher-same-origin-2026-08.md`
          */
         const rawRun = launchOf(
-          iconButton('launch-asset-raw', 'ノートを渡して起動', 'launch-asset-raw'),
+          iconButton('launch-asset-raw', 'ノートを渡して開く', 'launch-asset-raw'),
         );
         rawRun.title =
           'PKC3 と同じ保存領域で開きます。自分でデータを保存するアプリも動きますが、このアプリは PKC3 のノートを全部読めますし、書き換えもできます';
@@ -2083,7 +2083,7 @@ export class DetailRenderer {
             'PKC3 から切り離して開きます(PKC3 の中身には触れません)。このアプリにはノートの目次を見せます ── 取り消しはシステムから';
         } else {
           const extRun = launchOf(
-            iconButton('launch-asset-extension', '目次を見せて起動', 'launch-asset-extension'),
+            iconButton('launch-asset-extension', '目次を見せて開く', 'launch-asset-extension'),
           );
           extRun.title =
             'ノートの題名・種類・日付の一覧だけを見せて開きます。本文と添付は渡りません';
@@ -2708,7 +2708,7 @@ function renderRevisionDiff(revBody: string, currentBody: string): HTMLElement {
   const close = document.createElement('button');
   close.type = 'button';
   close.setAttribute('data-pkc-action', 'hide-revision-preview');
-  close.textContent = '閉じる';
+  close.textContent = 'この版を閉じる';
   head.append(label, close);
   box.append(head);
   const list = document.createElement('ul');
@@ -2740,7 +2740,7 @@ function renderHistoryPanel(
   const close = document.createElement('button');
   close.type = 'button';
   close.setAttribute('data-pkc-action', 'hide-history');
-  close.textContent = '閉じる';
+  close.textContent = '履歴を閉じる';
   head.append(label, close);
   panel.append(head);
   const list = document.createElement('ul');
@@ -2773,7 +2773,7 @@ function renderHistoryPanel(
     restore.type = 'button';
     restore.setAttribute('data-pkc-action', 'restore-revision');
     restore.setAttribute('data-pkc-rev-id', item.id);
-    restore.textContent = '復元';
+    restore.textContent = 'この版に戻す';
     li.append(open, restore);
     // ⚠ **その行の下に置く** ── 一覧の外に出すと、どの版の差分か分からなくなる
     if (preview?.revId === item.id && currentBody !== null) {

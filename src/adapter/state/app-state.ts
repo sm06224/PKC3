@@ -709,7 +709,7 @@ export function endEditRefusal(what: string, state: AppState): string {
  *   **無いボタンを探す**。一致は `tests/adapter/refusal-words.test.ts` が
  *   **描いた画面から字を引いて**見る(ここに手で書いた字どうしを比べない)。
  */
-const SAVE_FAILED_EXIT = '「再保存」を押してから';
+const SAVE_FAILED_EXIT = '「ノートを保存し直す」を押してから';
 
 /**
  * 編集中に「押せない理由」として画面へ出す 1 行(#715)。

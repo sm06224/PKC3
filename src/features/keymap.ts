@@ -143,11 +143,11 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'edit-entry',
-    label: '選んでいるノートを編集する',
+    label: 'ノートを編集する',
     contexts: ['global'],
     defaults: ['Mod+E'],
     // ⚠ 「編集」の押しボタンは**ノートを選んでいるときだけ**在る(着地前レビュー 8)
-    note: 'ノートを選んでいるときだけ効きます(PKC2 の Ctrl+E と同じ手)',
+    note: '選んでいるノートを編集する(ノートを選んでいるときだけ効きます。PKC2 の Ctrl+E と同じ手)',
   },
   /**
    * 🔴 **開いているノートを閉じて、コレクションへ戻る**(#1032)。
