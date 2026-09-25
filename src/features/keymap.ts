@@ -222,7 +222,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    */
   {
     id: 'insert-entry-link',
-    label: 'ノートへのリンク',
+    label: 'ノートへのリンクを入れる',
     contexts: ['global'],
     defaults: ['Mod+Shift+K'],
     whileTyping: true,
@@ -244,7 +244,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'toggle-replace',
-    label: '置換の帯を開く / 閉じる',
+    label: '置換の欄を開く / 閉じる',
     contexts: ['global'],
     defaults: ['Mod+H'],
     whileTyping: true,
@@ -449,7 +449,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['global'],
     defaults: ['Alt+2', 'Mod+Alt+2'],
     whileTyping: true,
-    note: '文字を打っている間に効くのは Mod+Alt+2 のほうです(本文を編集している間は、保存するか、キャンセルすると開けます)',
+    note: '文字を打っている間に効くのは Mod+Alt+2 のほうです(本文を編集している間は、「編集を保存する」か「編集をやめる」を押すと開けます)',
   },
   {
     /**

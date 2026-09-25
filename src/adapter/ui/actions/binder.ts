@@ -2784,7 +2784,7 @@ function pickAppendTarget(dispatcher: Dispatcher, root: HTMLElement, line: numbe
       type: 'OP_FAILED',
       error:
         mode.kind === 'editing'
-          ? '編集中は追記欄を使えません(保存するか、キャンセルすると入り先を選べます)'
+          ? '編集中は追記欄を使えません(「編集を保存する」か「編集をやめる」を押すと入り先を選べます)'
           : '追記を書き込んでいる間は、入り先を変えられません',
     });
     return;
@@ -5566,7 +5566,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       root,
       '追記の書き込みを強制的に打ち切ります。書き込みが実際には進んでいた場合、' +
         'この画面の表示が実際の中身より古くなることがあります(開き直すと直ります)。よろしいですか?',
-      { okLabel: '打ち切る', danger: true },
+      { okLabel: '書き込みを打ち切る', danger: true },
       dispatcher,
       /**
        * 🔴 **ここだけは門を足さない**(#308)。返ってこない書込で**永久に

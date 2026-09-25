@@ -1208,7 +1208,7 @@ test('🔴 編集中は「書き出す / 履歴 / 削除」が押せない(見�
   expect(dim.cursor, '編集中の「削除」の cursor が not-allowed でない').toBe('not-allowed');
   const note = page.locator('[data-pkc-field="inspector-editing-note"]');
   await expect(note, '押せない理由の 1 行が出ていない').toBeVisible();
-  await expect(note).toHaveText(/保存するか、キャンセルすると戻ります/);
+  await expect(note).toHaveText(/「編集を保存する」か「編集をやめる」を押すと戻ります/);
 
   // ③ 取り消すと戻る
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="cancel-edit"]');

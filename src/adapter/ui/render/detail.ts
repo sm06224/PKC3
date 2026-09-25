@@ -1034,8 +1034,8 @@ export class DetailRenderer {
    *
    * - 保存すると storage worker の ack が遅れて届き、`REVISION_LIST_LOADED` /
    *   `ENTRY_RESTORED` が非同期に `renderView` を呼ぶ
-   * - その瞬間「編集」が**別の node** になる。描いている絵は 1 ドットも変わらない
-   *   (`iconButton('start-edit','編集')` は定数)
+   * - その瞬間「ノートを編集する」が**別の node** になる。描いている絵は 1 ドットも変わらない
+   *   (`iconButton('start-edit','ノートを編集する')` は定数)
    * - binder は `root.contains(el)` を通らない target を黙って捨てるので、
    *   保存直後に押すと **無言の dead click**
    *
@@ -1302,8 +1302,8 @@ export class DetailRenderer {
     const bar = document.createElement('div');
     bar.setAttribute('data-pkc-field', 'detail-toolbar');
     // 🔑 **編集中の主の操作**(#722 P2-10)── 打った字を残す出口
-    const commit = markPrimary(iconButton('commit-edit', '保存'));
-    const cancel = iconButton('cancel-edit', 'キャンセル');
+    const commit = markPrimary(iconButton('commit-edit', '編集を保存する'));
+    const cancel = iconButton('cancel-edit', '編集をやめる');
     // ⚠ 説明は追記欄の同じ出口と**同じ字**(#716)── 正本は `icons.ts` の 2 定数
     commit.title = COMMIT_EDIT_HINT;
     cancel.title = CANCEL_EDIT_HINT;
@@ -1685,11 +1685,11 @@ export class DetailRenderer {
       const ok = document.createElement('button');
       ok.type = 'button';
       ok.setAttribute('data-pkc-field', 'fm-commit');
-      ok.textContent = '保存';
+      ok.textContent = '情報を保存する';
       const cancel = document.createElement('button');
       cancel.type = 'button';
       cancel.setAttribute('data-pkc-field', 'fm-cancel');
-      cancel.textContent = 'キャンセル';
+      cancel.textContent = '情報の編集をやめる';
       const close = (): void => {
         fmEditing = false;
         renderFmCard();

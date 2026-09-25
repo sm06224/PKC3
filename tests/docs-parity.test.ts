@@ -544,7 +544,7 @@ describe('マニュアルと実装の突合', () => {
     // entry に対する操作(書き出す / 履歴 / 削除)は右の情報ペインへ移した
     // ⚠ 図案つきボタンは `iconButton(action, label)` で作る ── 文言はその第 2 引数
     const detail = readFileSync('src/adapter/ui/render/detail.ts', 'utf-8');
-    for (const label of ['ノートを編集する', '保存', 'キャンセル']) {
+    for (const label of ['ノートを編集する', '編集を保存する', '編集をやめる']) {
       expect(detail, `本文まわりから「${label}」が消えた`).toContain(`, '${label}')`);
     }
     // 🔴 **追記は本文の上に無い**(P8 段⑧)── 段⑥ ではここに置いたが、
@@ -552,10 +552,10 @@ describe('マニュアルと実装の突合', () => {
     // 追記は編集画面を通らない別の器が持つ(`append-box.ts`)
     expect(detail, '追記が本文の上に戻っている').not.toContain(", '追記')");
     const box = readFileSync('src/adapter/ui/render/append-box.ts', 'utf-8');
-    expect(box, '追記の導線が消えた').toContain("'追記'");
+    expect(box, '追記の導線が消えた').toContain("'本文に追記する'");
     // ⚠ ロックの出口も pin する ── 無くなると「永久に追記できない」が作れる
     // 🔴 字は中央の帯と同じ「保存 / キャンセル」(#716 ── 直す前は「保存して解放 / 編集を破棄」)
-    for (const label of ['保存', 'キャンセル', '強制的に終える']) {
+    for (const label of ['編集を保存する', '編集をやめる', '書き込みを打ち切る']) {
       expect(box, `ロックの出口「${label}」が消えた`).toContain(`'${label}'`);
       expect(MANUAL, `マニュアルに「${label}」が無い`).toContain(`**${label}**`);
     }
@@ -597,7 +597,7 @@ describe('マニュアルと実装の突合', () => {
     for (const label of ['削除', '履歴']) {
       expect(detail, `「${label}」が本文の上にも残っている`).not.toContain(`, '${label}')`);
     }
-    for (const label of ['ノートを編集する', '保存', 'キャンセル', '履歴', 'バックアップ(このノート)', '追記']) {
+    for (const label of ['ノートを編集する', '編集を保存する', '編集をやめる', '履歴', 'バックアップ(このノート)', '本文に追記する']) {
       expect(MANUAL, `マニュアルに「${label}」が無い`).toContain(`**${label}**`);
     }
   });
@@ -642,19 +642,19 @@ describe('マニュアルと実装の突合', () => {
     const barLabels = BAR_FORMAT_OPS.map((o) => o.label);
     const tableAt = barLabels.indexOf('表');
     expect(tableAt, '帯に「表」が無い(前提が崩れている)').toBeGreaterThanOrEqual(0);
-    barLabels.splice(tableAt + 1, 0, '図');
+    barLabels.splice(tableAt + 1, 0, '図を入れる');
     expect(labels).toEqual([
       ...barLabels,
-      '日付',
-      'ノート',
-      'テンプレート',
+      '日付を入れる',
+      'ノートへのリンクを入れる',
+      'テンプレートを入れる',
       // 🔴 2026-09-13(#853 段①): 図案 ── 押すと絵の表が出て、選ぶと `:home:` が入る
       //   ⚠ **入れる道具の並びの末尾**に置く(日付 / ノート / テンプレート と同じ側)。
       //     番号・置換の左に差すので、既に在る 3 つは 1px も動かない。
-      '図案',
+      '図案を入れる',
       // 🔴 #717 で「番号」→「番号を振り直す」── 左の「番号」(記法)と同じ字が 2 つ並んでいた
       '番号を振り直す',
-      '置換',
+      '置換の欄を開く / 閉じる',
     ]);
     expect(labels.length).toBeGreaterThan(0);
     for (const label of labels) {
@@ -1035,7 +1035,7 @@ describe('確認の画面とマニュアルの突合(#299)', () => {
   const DANGER_SITES: readonly string[] = [
     'binder.ts:削除', // まとめて削除(2 ペイン)
     'binder.ts:削除', // 1 件削除(情報ペイン)
-    'binder.ts:打ち切る', // 他のタブの保存権を強制解放
+    'binder.ts:書き込みを打ち切る', // 他のタブの保存権を強制解放
     'binder.ts:空にする', // ゴミ箱を空にする
     'main.ts:上書きする', // md 書き出しの同名上書き
     'main.ts:ノートを渡して開く', // 素のまま起動(同一オリジン)
@@ -1963,6 +1963,13 @@ describe('執筆規約 条 9 ── 長い節を増やさない(#793)', () => {
   '行を右クリックする(できることが、その場に出る)',
   '見ているページをブックマークで取り込む',
   '見出しを右クリックする(その章にできることが出る)',
+  /**
+   * 🔴 #1046 の改名(編集 → ノートを編集する / 保存 → 編集を保存する /
+   * キャンセル → 編集をやめる)で 800 字を 9 字だけ超えた(809 字)。
+   * ⚠ 割るより「増やしてよい」を選んだ ── ボタン名を長くする裁定の直接の結果で、
+   *   本文の構成そのものは変わっていない。
+   */
+  '右の列(情報)',
   '設定',
   '許可',
   '追記',

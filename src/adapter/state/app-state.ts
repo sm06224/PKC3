@@ -716,7 +716,7 @@ const SAVE_FAILED_EXIT = '「ノートを保存し直す」を押してから';
  * ⚠ 出口は**ボタンの字**(保存 / キャンセル)で言う ── 「確定 / 取り消し」は
  *   画面のどのボタンの字とも一致しない(C11 で最後の 1 系統を消した)。
  */
-export const EDITING_NOTE = '編集中は使えません(保存するか、キャンセルすると戻ります)';
+export const EDITING_NOTE = '編集中は使えません(「編集を保存する」か「編集をやめる」を押すと戻ります)';
 
 /**
  * 🔴 **user に見せる「押せない理由」**(#516 / #715 / #761 / C11)。押せるなら `null`。
@@ -4356,7 +4356,7 @@ function reduceCore(
         return {
           state: {
             ...state,
-            error: `編集中は${viewModeLabel(action.mode)}を開けません(保存するか、キャンセルすると開けます)`,
+            error: `編集中は${viewModeLabel(action.mode)}を開けません(「編集を保存する」か「編集をやめる」を押すと開けます)`,
           },
           events: [],
         };
