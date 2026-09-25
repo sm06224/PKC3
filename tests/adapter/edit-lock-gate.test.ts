@@ -9,6 +9,9 @@
  * 4. 作成 → 即編集も編集権を登録する(別タブが 'changed' でこの lid を知る前に)
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import { codeOnly } from '../helpers/code-only';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
@@ -176,5 +179,79 @@ describe('start-edit の編集権ゲート(#177)', () => {
     const lid = d.getState().openBody?.lid;
     expect(lid).toBeTruthy();
     expect(acquired).toContain(lid);
+  });
+});
+
+/**
+ * 🔴 **Ctrl(⌘)+クリックの「その地点から編集」も、同じ門を通る**(#1044 の調査で判明)。
+ *
+ * ⚠ `startEditAt` の注釈は「Ctrl+クリックがロックを取らずに編集へ入っていた」のを直したと
+ *   書いているが、#495 で Ctrl+クリックを「その地点から編集」にしたとき、**ここだけ
+ *   `START_EDIT` の直撃ちに戻っていた** ── 別のタブで編集中のノートにも入れた。
+ */
+describe('Ctrl+クリックの編集権ゲート', () => {
+  const ctrlClickHeading = (root: HTMLElement): void => {
+    const h = root.querySelector('[data-pkc-field="detail-body"] h1');
+    expect(h, '前提が崩れている: 本文の見出しが描かれていない').not.toBeNull();
+    h!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, ctrlKey: true }));
+  };
+
+  it('取れなかったら編集に入らず、断りが出る', async () => {
+    const acquireEditLock = vi.fn(async () => 'denied' as const);
+    const { root, d } = setup({ acquireEditLock });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    ctrlClickHeading(root);
+    await tick();
+    expect(acquireEditLock, 'ロックを問い合わせずに編集へ入った').toHaveBeenCalledWith('a');
+    expect(d.getState().phase, '別のタブで編集中なのに入った').toBe('ready');
+    expect(d.getState().error).toContain('別のタブかウィンドウで編集中');
+  });
+
+  it('⚠ 対照群 ── 取れたら押した行から編集に入る', async () => {
+    const { root, d } = setup({ acquireEditLock: async () => 'granted' });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    ctrlClickHeading(root);
+    await tick();
+    expect(d.getState().phase).toBe('editing');
+    expect(d.getState().editOpenAt, '押した行が渡っていない').toBe(0);
+  });
+});
+
+/**
+ * 🔴 **`START_EDIT` を撃つのは `startEditAt` の中だけ**(全数)。
+ * ⚠ この門は 2 度破れている ── #426 段② で 1 本に寄せたのに、#495(Ctrl+クリック)と
+ *   「常に編集で開く」が直撃ちで足された。注釈で「1 本にした」と書いても、足す人には届かない。
+ */
+describe('編集に入る口は 1 本', () => {
+  function walk(dir: string, out: string[] = []): string[] {
+    for (const name of readdirSync(dir)) {
+      const p = join(dir, name);
+      if (statSync(p).isDirectory()) walk(p, out);
+      else if (p.endsWith('.ts')) out.push(p);
+    }
+    return out;
+  }
+  it('src の中で START_EDIT を dispatch するのは startEditAt の本体だけ', () => {
+    const files = walk(join(__dirname, '../../src'));
+    expect(files.length, '空振り防止: src を読めていない').toBeGreaterThan(100);
+    const outside: string[] = [];
+    let inside = 0;
+    for (const f of files) {
+      let code = codeOnly(readFileSync(f, 'utf8'));
+      const at = code.indexOf('function startEditAt(');
+      if (at >= 0) {
+        // 本体の終わり = 次の行頭の `}`(関数宣言は行頭から始まり、行頭の `}` で閉じる)
+        const end = code.indexOf('\n}\n', at);
+        expect(end, 'startEditAt の本体の終わりが読めない').toBeGreaterThan(at);
+        const body = code.slice(at, end);
+        inside += body.split("dispatch({ type: 'START_EDIT'").length - 1;
+        code = code.slice(0, at) + code.slice(end);
+      }
+      if (code.includes("dispatch({ type: 'START_EDIT'")) outside.push(f);
+    }
+    expect(inside, '空振り防止: startEditAt の中の dispatch が見つからない').toBeGreaterThan(0);
+    expect(outside, 'startEditAt を通らずに編集へ入る口がある(ロックと書込待ちを飛ばす)').toEqual([]);
   });
 });

@@ -9491,7 +9491,14 @@ export function bindActions(
       const line = bodySourceLineAt(dispatcher, ev.target);
       if (line !== null) {
         ev.preventDefault();
-        if (modOnly) dispatcher.dispatch({ type: 'START_EDIT', atLine: line });
+        /*
+         * 🔴 **編集に入る口は `startEditAt` の 1 本**(#426 段② の門)── 直に `START_EDIT` を
+         *   撃つと、別のタブとの編集ロックも、飛んでいる書込を待つのも飛ばす。⚠ #495 で
+         *   Ctrl+クリックを「その地点から編集」にしたとき、ここだけ直撃ちに戻っていた
+         *   (#1044 の調査で判明)── 別のタブで編集中のノートにも入れ、チェックを押した
+         *   直後だと押す前の本文が欄に出た(#288 と同じ形)。
+         */
+        if (modOnly) startEditAt(dispatcher, services, line);
         else pickAppendTarget(dispatcher, root, line);
         return;
       }
@@ -12504,8 +12511,10 @@ export function bindActions(
    */
   const startEditWhenReady = (lid: string): void => {
     const arrived = (s: AppState): boolean => s.openBody?.lid === lid;
+    // 🔴 入る口は `startEditAt` の 1 本(上の Ctrl+クリックと同じ理由 ── 直撃ちは
+    //   別のタブとの編集ロックを飛ばす)
     if (arrived(dispatcher.getState())) {
-      dispatcher.dispatch({ type: 'START_EDIT' });
+      startEditAt(dispatcher, services, null);
       return;
     }
     const off = dispatcher.onState((s) => {
@@ -12515,7 +12524,7 @@ export function bindActions(
       }
       if (!arrived(s)) return;
       off();
-      dispatcher.dispatch({ type: 'START_EDIT' });
+      startEditAt(dispatcher, services, null);
     });
   };
 
