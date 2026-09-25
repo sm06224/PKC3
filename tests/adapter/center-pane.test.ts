@@ -251,6 +251,40 @@ describe('チェックの印(#277)', () => {
   });
 
   /**
+   * 🔴 **留めた枠に出ているのが編集中のノート自身なら、枠から押しても断る**(C6 / #1043、
+   *   着地前レビュー)。⚠ 判定は「押した枠」ではなく「書く相手の lid」で決まる ──
+   *   枠から押したことを理由に通すと、編集欄の下書きと disk がずれる
+   *   (下書きを保存すると押した変更が消える)。
+   */
+  it('🔴 留めた枠に出ているのが編集中のノート自身なら、枠から押しても断る', async () => {
+    const { d, root, persisted, store } = setup(
+      [
+        meta('n1', { archetype: 'text', status: null }),
+        meta('n2', { archetype: 'text', status: null }),
+      ],
+      { n1: BODY, n2: BODY },
+    );
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    await tick(20);
+    d.dispatch({ type: 'START_EDIT' });
+    await tick(20);
+    expect(d.getState().phase, '前提が崩れている').toBe('editing');
+    const stack = document.createElement('div');
+    stack.setAttribute('data-pkc-split-lid', 'n1');
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.setAttribute('data-pkc-action', 'toggle-task');
+    box.setAttribute('data-pkc-task-line', '2');
+    stack.append(box);
+    root.append(stack);
+    box.click();
+    await tick(20);
+    expect(persisted, '編集中のノート自身へ枠から書いた').toHaveLength(0);
+    expect(store['n1'], '編集中のノート自身が裏で書き換わった').toBe(BODY);
+    expect(d.getState().error ?? '', '無言で終わった').toContain('編集を終了してから');
+  });
+
+  /**
    * 🔴 **本文が変わっていたら黙って別の所を書かない**(#277)。
    * ⚠ 行番号は「描いた時の原文」のものなので、その後の書換でずれることがある。
    */

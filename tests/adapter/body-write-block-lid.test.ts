@@ -286,12 +286,14 @@ describe('無言で捨てる case の全数 pin ── C6 / #1043', () => {
   const STATE = codeOnly(readFileSync('src/adapter/state/app-state.ts', 'utf-8'));
 
   /**
-   * ⚠ `[^)]*` で `||` の追加条件(`state.writeLock` 等)まで拾うが、
+   * ⚠ `||` の追加条件は**左右どちらに書かれていても**拾う(着地前レビュー:
+   *   右側だけ許すと `if (x || state.phase !== 'ready')` の順で書いた case が漏れる)。
+   *   `[^)]*` で `||` の追加条件(`state.writeLock` 等)まで拾うが、
    *   `&&` で繋いだ条件(`RENAME_ENTRY_TITLE` の「ready でも editing でもなければ」)
    *   は**別物**なので拾わない ── あちらは元から editing 中も通す作り。
    */
   const SILENT_RE =
-    /if \(state\.phase !== 'ready'(?:\s*\|\|[^)]*)?\)\s*\n?\s*return \{ state, events: \[\] \};/;
+    /if \((?:[^()]*\|\|\s*)?state\.phase !== 'ready'(?:\s*\|\|[^)]*)?\)\s*\n?\s*return \{ state, events: \[\] \};/;
 
   function silentPhaseOnlyCases(src: string): Set<string> {
     const out = new Set<string>();
