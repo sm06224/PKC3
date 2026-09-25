@@ -14,11 +14,19 @@
  * 2. 別ウィンドウ(`services.closeViewWindow` が `'closed'`)は窓ごと閉じ、
  *    本文へは切り替えない(もう画面が無い)
  * 3. 閉じられなかった(`'refused'`)ときは理由を出して本文へ戻る
- * 4. **ノートを閉じる(`deselect-entry`)が先** ── ノートも面も両方在るときは
- *    1 回の Escape ではノートだけが閉じ、面はもう一度押すまで残る
- *    (既知の制約。ノートが見えていない状態で「閉じたのに何も変わらない」を
- *    避けるための順である ── `src/features/keymap.ts` の `KeyContext` docstring)
- * 5. 打っている欄では効かせない
+ * 4. 🔴 **面が在るときは、面(`close-pane`)が先**(#1042 followup 指摘 B)。
+ *    ノートも面も両方在るときは、1 回目の Escape で**面だけ**が閉じてノートへ
+ *    戻り、ノートは 2 回目の Escape で閉じる。⚠ 直す前は逆(`reading` が先)
+ *    だった ── 面の裏でノートは見えていないので、見えていない物を先に閉じると
+ *    「押しても何も変わらない」ように見え、user が読みに来ていたノートへ戻れない
+ *    まま 2 回目でコレクションの画面まで落ちていた
+ * 5. 面が**無い**とき(`viewMode === 'detail'`)は `reading` が先(`close-pane` は
+ *    `hidden` なボタンでも「押せた」ことになるので、先に試すとノートが開いていても
+ *    `deselect-entry` に出番が来ない ── #1042 C3)
+ * 6. 🔴 **付箋のウィンドウでは、`deselect-entry` を撃たずに窓を閉じる**
+ *    (#1042 followup 指摘 A)。`services.closeNoteWindow` が `true` を返したら、
+ *    `selectedLid` は触らずに終える(#685 の 2 枚目防止を壊さない)
+ * 7. 打っている欄では効かせない
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
@@ -49,6 +57,7 @@ const unbinds: Array<() => void> = [];
 function mount(
   closeViewWindow: () => CloseViewWindowResult = () => 'not-a-window',
   keymap: KeymapStore = new KeymapStore(null),
+  closeNoteWindow?: () => boolean,
 ) {
   const root = document.createElement('div');
   document.body.append(root);
@@ -56,7 +65,7 @@ function mount(
   const regions = buildShell(root);
   const center = new CenterRouter(regions.detail);
   d.onState((st) => center.render(st));
-  const services: BinderServices = { closeViewWindow };
+  const services: BinderServices = { closeViewWindow, closeNoteWindow };
   unbinds.push(bindActions(root, d, services, keymap));
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a')], relations: [] });
   const filterInput = () => root.querySelector<HTMLInputElement>('[data-pkc-field="entry-filter"]')!;
@@ -100,24 +109,85 @@ describe('🔴 別のウィンドウ・面を Escape で閉じる(#1042 C3)', ()
   });
 
   /**
-   * 🔴 **ノートを閉じる(`deselect-entry`)が先**(#1042 C3 の既知の順序)。
-   * ⚠ `close-pane` は `SHORTCUT_BUTTON` 経由で押しボタンを直接撃つので、
-   *   ボタンが `hidden`(= 面が `detail` に戻った後)でも「押せた」ことになる ──
-   *   先に試すと `deselect-entry` に一度も出番が来なくなるため、`reading` を
-   *   先に試す(`binder.ts` の `onShortcut`)。結果、ノートと面が両方在るときは
-   *   1 回目でノートだけが閉じ、面は 2 回目の Escape で閉じる。
+   * 🔴 **面が在るとき、面(`close-pane`)が先**(#1042 followup 指摘 B)。
+   * ⚠ 直す前は逆(`reading` が先)だった ── 面の裏でノートは見えていないので、
+   *   見えていないノートを先に閉じると、user から見て「押しても何も変わらない」
+   *   まま 2 回目でコレクションの画面まで落ちる(読みに来ていたノートへ戻れない)。
+   * 🔑 いまは 1 回目で面だけが閉じてノートへ戻り、ノートは 2 回目の Escape で閉じる。
    */
-  it('⚠ ノートと面が両方在るとき、1 回目の Escape はノートだけを閉じる', () => {
+  it('🔴 ノートと面が両方在るとき、1 回目の Escape は面だけを閉じてノートへ戻る', () => {
     const m = mount();
     m.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
     m.d.dispatch({ type: 'SET_VIEW_MODE', mode: 'query' });
     pressEscape();
-    expect(m.d.getState().selectedLid, '1 回目でノートが閉じていない').toBeNull();
-    expect(m.d.getState().viewMode, '1 回目で面まで閉じた(1 段だけ閉じる、を破っている)').toBe(
-      'query',
+    expect(m.d.getState().viewMode, '1 回目で面が閉じていない').toBe('detail');
+    expect(m.d.getState().selectedLid, '1 回目でノートまで閉じた(1 段だけ閉じる、を破っている)').toBe(
+      'a',
     );
     pressEscape();
-    expect(m.d.getState().viewMode, '2 回目で面が閉じていない').toBe('detail');
+    expect(m.d.getState().selectedLid, '2 回目でノートが閉じていない').toBeNull();
+  });
+
+  /**
+   * 🔴 **面が無いときは `reading` が先**(#1042 C3。上の 4/5 を裏から見る control)。
+   * `close-pane` は `hidden` なボタンでも「押せた」ことになるので、先に試すと
+   * ノートが開いていても `deselect-entry` に出番が来ない。
+   */
+  it('🔴 面が無いとき、Escape はノートを閉じる(reading が先)', () => {
+    const m = mount();
+    m.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    expect(m.d.getState().viewMode, '前提: 面が出ていない').toBe('detail');
+    pressEscape();
+    expect(m.d.getState().selectedLid, 'ノートが閉じていない').toBeNull();
+  });
+
+  /**
+   * 🔴 **付箋のウィンドウでは `deselect-entry` を撃たずに窓を閉じる**
+   * (#1042 followup 指摘 A)。`closeNoteWindow` が `true` を返す = このウィンドウは
+   * 自分で開いた付箋であり、いま閉じた ── `selectedLid` は触らない
+   * (付箋の窓は閉じた後で読まれないが、「触っていない」ことを直接見る)。
+   */
+  it('🔴 付箋のウィンドウでは、Escape が selectedLid を空にせず窓を閉じる', () => {
+    let closed = 0;
+    const m = mount(
+      () => 'not-a-window',
+      new KeymapStore(null),
+      () => {
+        closed++;
+        return true;
+      },
+    );
+    m.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    pressEscape();
+    expect(closed, 'closeNoteWindow が呼ばれていない').toBe(1);
+    expect(m.d.getState().selectedLid, '付箋なのに deselect-entry が撃たれた').toBe('a');
+  });
+
+  /**
+   * 🔴 **対照群:`closeNoteWindow` が無い(本体タブ)/ `false` を返す(付箋でない)
+   * ときは、今までどおり `deselect-entry` が効く**。
+   */
+  it('🔴 closeNoteWindow が無い、または false を返すときは、今までどおりノートを閉じる', () => {
+    // 無い(本体タブ):既定の mount() は closeNoteWindow を渡さない
+    const m1 = mount();
+    m1.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    pressEscape();
+    expect(m1.d.getState().selectedLid, 'closeNoteWindow 無しでノートが閉じていない').toBeNull();
+
+    // false(付箋ではない):呼ばれるが、閉じられなかった
+    let calls = 0;
+    const m2 = mount(
+      () => 'not-a-window',
+      new KeymapStore(null),
+      () => {
+        calls++;
+        return false;
+      },
+    );
+    m2.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    pressEscape();
+    expect(calls, 'closeNoteWindow が呼ばれていない').toBe(1);
+    expect(m2.d.getState().selectedLid, 'false を返したのにノートが閉じていない').toBeNull();
   });
 
   it('⚠ 打っている欄では、Escape で面が閉じない', () => {
@@ -156,5 +226,29 @@ describe('🔴 別のウィンドウ・面を Escape で閉じる(#1042 C3)', ()
     expect(m.d.getState().viewMode, '打っている欄なのに window ブロックが面を閉じた').toBe(
       'query',
     );
+  });
+
+  /**
+   * 🔴 **`main.ts` が `closeNoteWindow` を binder へ渡している**(#1042 followup)。
+   *
+   * ⚠ `main.ts` はどの test からも実行されない(CLAUDE.md §2)ので、ここは
+   *   `tests/adapter/center-pane.test.ts` の `settle` の配線 pin と**同じ作法**で
+   *   字面を見る ── **弱いと自覚して使う**。
+   * ⚠ **`closeViewWindow` と同じ道**(`view-window.ts` の `closeViewWindow`、
+   *   `holding` だけ違う)に乗っていることも見る ── 別の閉じ方を作っていないか
+   *   (CLAUDE.md §10)。
+   */
+  it('🔴 main.ts が closeNoteWindow を binder へ渡している(#1042 followup)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { codeOnly } = await import('../helpers/code-only');
+    const code = codeOnly(readFileSync('src/main.ts', 'utf8'));
+    expect(code.length, 'コメント落としが本体まで消した').toBeGreaterThan(1000);
+    expect(code, 'closeNoteWindow の配線が落ちている(付箋で Escape が窓を閉じない)').toMatch(
+      /closeNoteWindow:\s*\(\)\s*=>/,
+    );
+    expect(
+      code,
+      'closeNoteWindow が closeViewWindow(view-window.ts)と別の道で閉じている',
+    ).toMatch(/closeNoteWindow:\s*\(\)\s*=>\s*closeViewWindow\(\{\s*holding:\s*\(\)\s*=>\s*heldNoteWindow/);
   });
 });

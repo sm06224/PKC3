@@ -168,7 +168,21 @@ test('🔴 別の窓で開くと、その窓がそのノートを開いて立ち
     '1 枚目が 2 枚目に潰された(窓を使い回している)',
   ).toContainText('ふたつめ');
 
-  await win.close();
+  /**
+   * ⑦ 🔴 **付箋のウィンドウは Escape で閉じる**(#1042 followup 指摘 A。
+   * 裁定:`docs/development/touch-and-unity-design-2026-09.md` §5 Q3
+   * 「付箋のウィンドウも Escape で閉じます」)。
+   * ⚠ **新しく窓を起こさない** ── ここまでで既に立ち上がっている `win` で確かめる
+   * (このファイルの主目的である「立ち上がりの繋がり」を測る回に相乗りする)。
+   * ⚠ 追記欄に焦点が入ったまま(#690 I4)だと**打っている欄**の門に止められるので、
+   *   焦点を外す(クリック位置に依存させない ── 座標で当てると器の並びが変わった日に
+   *   別の入力欄を押してしまう)。
+   */
+  await win.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await win.keyboard.press('Escape');
+  await win.waitForEvent('close', { timeout: 5_000 });
+  expect(win.isClosed(), '付箋のウィンドウが Escape で閉じていない').toBe(true);
+
   await win2.close();
 
   expect(winErrors, `別の窓で page error: ${winErrors.join(' / ')}`).toEqual([]);

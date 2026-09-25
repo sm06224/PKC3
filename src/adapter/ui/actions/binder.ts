@@ -1049,6 +1049,20 @@ export interface BinderServices {
    */
   closeViewWindow?(): CloseViewWindowResult;
   /**
+   * 🔴 **付箋(ノートだけの別ウィンドウ)なら、Escape で窓ごと閉じる**
+   * (#1042 followup。裁定:`docs/development/touch-and-unity-design-2026-09.md`
+   * §5 Q3「付箋のウィンドウも Escape で閉じます」)。
+   *
+   * ⚠ `closeViewWindow` とは**別の軸**である ── あちらは `view=`(予定表・連絡先など)
+   *   を指している窓、こちらは**ノートを名指した断片**で開いた窓
+   *   (`main.ts` の `heldNoteWindow`。判断はそちらに在る、binder は呼ぶだけ)。
+   * ⚠ **省略可** ── 本体のタブでは配線されない(`undefined` のときは今までどおり
+   *   `deselect-entry` がそのまま効く)。
+   * @returns 閉じたら `true`(呼び側は `deselect-entry` を撃たない)。付箋でない /
+   *   閉じられなかったときは `false`(今までどおり `deselect-entry` へ進む)
+   */
+  closeNoteWindow?(): boolean;
+  /**
    * ランチャーのタイルを起動する(P7b 段⑩)。
    * ⚠ blob の貸し出し・`window.open` は実体側 ── binder は DOM を触らない。
    */
@@ -12508,12 +12522,16 @@ export function bindActions(
       }
     }
     /**
-     * 🔴 **`reading`(ノートを読んでいるとき)も同じ列に混ぜる**(#1042 C3)。
-     * ⚠ `global` の側に `Escape` の命令が無い(row-cancel / cancel-edit が
-     *   `row` / `editor` を名乗るので重ならない)ため、混ぜても衝突しない。
+     * 🔴 **`global` は単独で試す**(#1042 C3 / 追補)。
+     * ⚠ 以前は `keymap.match(ke, 'global') ?? keymap.match(ke, 'reading')` で
+     *   **混ぜて**いたが、`reading` / `window` の優先順を「面が在るか」で
+     *   入れ替える必要が出た(下)ので、ここでは分ける。⚠ 動きは変わらない ──
+     *   `global` は `contextsOverlap` により `reading` / `window` と**同じ鍵を
+     *   名乗れない**(`validateBinding`)ので、`gcmd !== null` の鍵は `reading` /
+     *   `window` には元から現れず、下の分岐へ落ちることもない。
      */
-    const cmd = keymap.match(ke, 'global') ?? keymap.match(ke, 'reading');
-    if (cmd !== null) {
+    const gcmd = keymap.match(ke, 'global');
+    if (gcmd !== null) {
       /**
        * 打鍵中に効かせてよいか。**コマンドが名乗る** + **その和音が文字を打たない**の
        * 両方が要る(着地前レビュー 2)── `open-help` は `F1` のために名乗っているが、
@@ -12523,7 +12541,7 @@ export function bindActions(
       const chord = chordOf(ke);
       if (
         typing &&
-        !(findCommand(cmd)?.whileTyping === true && chord !== null && !typesCharacter(chord))
+        !(findCommand(gcmd)?.whileTyping === true && chord !== null && !typesCharacter(chord))
       )
         return;
       /**
@@ -12549,22 +12567,56 @@ export function bindActions(
        * 🔑 **覆る条件**:設定やフラグが長い読み物になったら、判定を面の種類ごとではなく
        *   「読む面か」で括り直す。
        */
-      if (cmd === 'focus-search' && dispatcher.getState().viewMode === 'help') return;
-      if (runGlobalCommand(cmd, root, dispatcher, keymap, () => ke.preventDefault(), tellUser))
+      if (gcmd === 'focus-search' && dispatcher.getState().viewMode === 'help') return;
+      if (runGlobalCommand(gcmd, root, dispatcher, keymap, () => ke.preventDefault(), tellUser))
         return;
-    }
-    /**
-     * 🔴 **別のウィンドウ・面を閉じる**(#1042 C3)── `reading`(ノートを閉じる)が
-     * 何もしなかった(何も開いていない)ときだけ試す。
-     * ⚠ **先に試さない理由**:`close-pane` は `SHORTCUT_BUTTON` 経由で押しボタンを
-     *   直接撃つので、ボタンが `hidden`(面を出していない)でも「押せた」ことになる
-     *   ── 先に試すと、ノートが開いていても `deselect-entry` に一度も出番が来ない。
-     * ⚠ 打っている欄では効かせない(上と同じ理由)。
-     */
-    if (!typing) {
+    } else if (!typing) {
+      /**
+       * 🔴 **`reading`(ノートを閉じる)と `window`(面・別窓を閉じる)の優先順は、
+       * 「面が在るか」で入れ替える**(#1042 followup、着地前レビュー 指摘 B)。
+       *
+       * ⚠ **面が在るとき、ノートは見えていない** ── 中央は面(集計・システム・
+       *   フラグ・ヘルプ・2 ペイン・SQL など)に占められているので、その裏で
+       *   `deselect-entry` が先に効くと、user は**見えていないノートを閉じられ**、
+       *   2 回目でようやく面が閉じてコレクションの画面に落ちる ──
+       *   **読みに来ていたノートへ戻れない**(直す前の実害)。
+       * 🔑 面が在るときは **`window` を先に試す**(1 回目で面が閉じてノートへ戻る、
+       *   2 回目でノートが閉じる)。面が無いときは元のとおり **`reading` が先**
+       *   (`close-pane` は `hidden` なボタンでも「押せた」ことになるので、先に
+       *   試すとノートが開いていても `deselect-entry` に出番が来ない ── #1042 C3)。
+       */
+      const paneOpen = dispatcher.getState().viewMode !== 'detail';
+      const rcmd = keymap.match(ke, 'reading');
       const wcmd = keymap.match(ke, 'window');
-      if (wcmd !== null && runGlobalCommand(wcmd, root, dispatcher, keymap, () => ke.preventDefault(), tellUser))
-        return;
+      const tryReading = (): boolean => {
+        if (rcmd === null) return false;
+        /**
+         * 🔴 **付箋のウィンドウでは、`deselect-entry` を撃たずに窓を閉じる**
+         * (#1042 followup 指摘 A。裁定:`docs/development/touch-and-unity-design-2026-09.md`
+         * §5 Q3「付箋のウィンドウも Escape で閉じます」)。
+         *
+         * ⚠ **`selectedLid` を空にしてはいけない** ── 付箋の窓では
+         *   `heldNoteWindow` が真の間、`main.ts` の題名塗り・台帳の放送
+         *   (`noteRegistry.announce`)が `selectedLid` を見て「このノートは
+         *   開いています」を保っている。`deselect-entry` を先に撃つと
+         *   `selectedLid` が `null` になり、**閉じる前に「開いていません」と
+         *   放送してしまう**(#685 の 2 枚目防止を自分で取り下げる ── 窓は
+         *   閉じずに空の画面だけが残る、という直す前の症状そのもの)。
+         * 🔑 判断は `services.closeNoteWindow` に譲る(binder は `heldNoteWindow`
+         *   を持たない ── `main.ts` から渡された関数を呼ぶだけ)。**このウィンドウが
+         *   自分で開いた付箋のときだけ** `true` を返し、窓を閉じる。
+         *   ふつうの本体タブでは `undefined`(呼ばれない = 今までどおり)。
+         */
+        if (rcmd === 'deselect-entry' && services.closeNoteWindow?.() === true) {
+          ke.preventDefault();
+          return true;
+        }
+        return runGlobalCommand(rcmd, root, dispatcher, keymap, () => ke.preventDefault(), tellUser);
+      };
+      const tryWindow = (): boolean =>
+        wcmd !== null &&
+        runGlobalCommand(wcmd, root, dispatcher, keymap, () => ke.preventDefault(), tellUser);
+      if (paneOpen ? tryWindow() || tryReading() : tryReading() || tryWindow()) return;
     }
   };
   /**
