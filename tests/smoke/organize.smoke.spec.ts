@@ -520,18 +520,22 @@ test('🔴 一覧タブの ↑↓・Enter・絞り込みと、Escape の 2 段�
   const second = await focusedLid();
   expect(second, '一覧タブで ↓ を押しても焦点が動かない').not.toBe(first);
 
-  // ② Enter は**読む**ところから(フォルダの表と同じ観測点)
+  /**
+   * ② Enter は**読む**ところから開く。🔑 **焦点は行に残す** ── 一覧は ↓ で
+   *   読み進める場所なので、クリックで開いたときと同じく行に焦点を置いたままにする
+   *   (続けて ↓ で次のノートへ進める)。⚠ フォルダの表の Enter は本文へ焦点を移すが、
+   *   あちらは「開いて中を触る」場所なので揃えない。
+   */
   await page.keyboard.press('Enter');
   await expect(
     page.locator('[data-pkc-region="detail"] [data-pkc-action="commit-edit"]'),
     'Enter で編集に入ってしまった(既定は読む)',
   ).toHaveCount(0);
-  expect(
-    await page.evaluate(
-      () => document.activeElement?.closest('[data-pkc-region="detail"]') !== null,
-    ),
-    '一覧タブの Enter で本文の面へ焦点が移っていない',
-  ).toBe(true);
+  await expect(
+    page.locator(`[data-pkc-region="entry-list"] [data-pkc-entry="${second}"]`),
+    '一覧タブの Enter でそのノートが開いていない',
+  ).toHaveAttribute('data-pkc-selected', '');
+  expect(await focusedLid(), '一覧タブの Enter の後、焦点が行から離れた').toBe(second);
 
   /**
    * ③ 🔴 **絞り込みの欄で ↓ を押すと、先頭の行へ焦点が移る**(#1042 C2)。

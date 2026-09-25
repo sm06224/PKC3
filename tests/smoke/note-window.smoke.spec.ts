@@ -185,8 +185,17 @@ test('🔴 別の窓で開くと、その窓がそのノートを開いて立ち
     '前提が崩れた(焦点が追記欄に無い)',
   ).toBeFocused();
   await expect(win.locator('[data-pkc-field="append-input"]')).toHaveValue('');
-  await win.keyboard.press('Escape');
-  await win.waitForEvent('close', { timeout: 5_000 });
+  /**
+   * ⚠ 窓は keydown の中で閉じるので、press() の後半(keyup)が閉じた窓へ届いて
+   *   「Target … closed」で落ちる ── それは**閉じた**ことの表れなので、その 1 種類だけ許す
+   *   (閉じなかったことは `waitForEvent('close')` が時間切れで知らせる)。
+   */
+  await Promise.all([
+    win.waitForEvent('close', { timeout: 5_000 }),
+    win.keyboard.press('Escape').catch((e: unknown) => {
+      if (!/closed/i.test(String(e))) throw e;
+    }),
+  ]);
   expect(win.isClosed(), '付箋のウィンドウが Escape で閉じていない').toBe(true);
 
   await win2.close();
