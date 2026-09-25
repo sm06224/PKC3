@@ -11779,6 +11779,90 @@ export function bindActions(
       return;
     }
 
+    /**
+     * 🔴 **2 ペインの表の行なら、右クリックしても 2 ペインを抜けない**(#1045 C9)。
+     *
+     * ⚠ ここより下(既存の枝)は `selectEntryOrExplain` → `SELECT_ENTRY` を撃つ。
+     *   `leavesOnSelect('dual')` は `true`(`ASIDE_PANES` に `dual` が在り、
+     *   `STAY_ON_SELECT` は `sql` だけ)なので、それを撃つと中央が
+     *   本文の面へ切り替わる ── **左クリックは 2 ペインに残る**のに
+     *   (`dual-row` action → `DUAL_SELECT`)、右クリックだけ画面ごと切り替わっていた。
+     * 🔑 だから**先に**分岐する:押した行が 2 ペインの表(`dual-table`)の中なら、
+     *   `SELECT_ENTRY` の代わりに**左クリックと同じ** `DUAL_SELECT` を撃つ。
+     * ⚠ `ASIDE_PANES` / `STAY_ON_SELECT` / `leavesOnSelect` は触らない ──
+     *   一覧タブ(`filer-table` / `entry-list`)の行は `dual-table` の中に居ないので
+     *   ここには来ない(そちらの「押すと中央へ出る」動きは変えない)。
+     */
+    if (row.closest('[data-pkc-region="dual-table"]') !== null) {
+      ev.preventDefault();
+      /**
+       * 🔑 側は**左クリックと同じ決め方**(`dualSide`)── 押した所から辿る
+       *   (`data-pkc-side` は行そのものにも、面の器にも在る)。⚠ 在り得ない形の
+       *   防波堤 ── `dual-row` の左クリックが `if (side && lid)` で何もしないのと
+       *   同じく、ここも無ければ何もしない(表の行は必ず持つ)。
+       */
+      const side = dualSide(target as HTMLElement);
+      if (side === null) return;
+      /**
+       * 🔑 **選択は動かさない**(= 2 ペインを抜けない)。左クリックと**同じ 1 本**を
+       *   撃つ(`mode: 'set'`)── reducer 自身が知らない lid を no-op で捨てるので、
+       *   下の「見つからない」チェックより先に撃っても安全(順序に意味を持たせない)。
+       */
+      dispatcher.dispatch({ type: 'DUAL_SELECT', side, lid, mode: 'set' });
+      const st = dispatcher.getState();
+      if (!st.entryMetas.has(lid)) {
+        // ⚠ 無言で終わらせない(`selectEntryOrExplain` と同じ字)
+        dispatcher.dispatch({ type: 'OP_FAILED', error: 'ノートが見つかりません' });
+        closeContextMenu(root);
+        return;
+      }
+      if (st.phase === 'editing') {
+        // 🔑 編集中は既存の枝(#690 ④ A′、下の docstring)と**同じ扱い** ──
+        //   出すのは「別のウィンドウで開く」だけ(`MENU_PREV_LID_ATTR` は付けない ──
+        //   選択を動かしていないので戻す相手が居ない)。
+        openContextMenu(
+          root,
+          { x: ev.clientX, y: ev.clientY },
+          editingRowMenuActions(),
+          root.ownerDocument.activeElement,
+          { [MENU_LID_ATTR]: lid },
+        );
+        return;
+      }
+      /**
+       * 🔴 **2 つだけ、この行からは出さない**(#1045 C9。着地前の自己監査で判明)。
+       *
+       * ⚠ どちらも「選択が押した行に揃っている」ことを前提に書かれているが、
+       *   この分岐は選択を動かさない(`selectedLid` / `openBody` / `st.selection` は
+       *   押した行を指さない)。そのまま出すと**押した物と効く先が食い違う**
+       *   (CLAUDE.md 不可侵「絶対に作らない」)。
+       * - `move-to-folder`:「印に入っていれば印の全部を動かす」を
+       *   **左の列の `st.selection` / `visibleFilerRows`**(左のフォルダ絞り)で
+       *   判定する。2 ペインの印は別の場所(`state.dual.panes[side].selection`)に在るので、
+       *   左に古い印が残っていて偶然この lid を含むと**押していないノートまで動く**。
+       * - `copy-plain-markdown`:`st.openBody?.lid === lid` を要求する
+       *   (本文は右クリックで読み直さない、§7)。この分岐は選ばないので
+       *   ほぼ常に不一致 ──「押せるのに必ず失敗する」(#500 案 C の docstring
+       *   「押せるのに必ず失敗するのは、出ない(畳んである)より悪い」)になる。
+       * 🔑 どちらも「選ぶ側(=2 ペインを抜ける)」へ倒す理由が無い ── 移すも写すも、
+       *   一覧タブへ切り替えれば同じボタンで行える。
+       */
+      const items = entryMenuActions({
+        archetype: st.entryMetas.get(lid)?.archetype ?? null,
+        linkedFile: st.linkedFiles.get(lid) ?? null,
+      }).filter((a) => a.action !== 'move-to-folder' && a.action !== 'copy-plain-markdown');
+      openContextMenu(
+        root,
+        { x: ev.clientX, y: ev.clientY },
+        items,
+        root.ownerDocument.activeElement,
+        // ⚠ `MENU_PREV_LID_ATTR` は付けない ── 選択を動かしていないので戻す相手が居ない
+        //   (直上の編集中の枝と同じ理由)。
+        { [MENU_LID_ATTR]: lid },
+      );
+      return;
+    }
+
     ev.preventDefault();
     /**
      * 🔴 **書いている最中でも、「別の窓で開く」だけは出す**(#690 ④ A′、
