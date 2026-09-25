@@ -2850,7 +2850,7 @@ function pickAppendTarget(dispatcher: Dispatcher, root: HTMLElement, line: numbe
    *   `Alt`+クリックは `bodySourceLineAt` が `phase !== 'ready'` で降りる(既定を
    *   奪わないため ── `mod-click-edit.test.ts`「ready でない間は、既定を奪わない」)し、
    *   右クリックの「ここに追記する」は `appendable` が `ready` のときしか並べない。
-   *   編集中の理由は追記欄の帯(「このノートは編集中です…」)が既に出している。
+   *   編集中の理由は追記欄の帯(「編集中」。C4 / #1038 段 D で 1 語になった)が既に出している。
    *   ここに字を置くのは、**3 つ目の入口が生えた日に黙らないため**であって、
    *   いま user に見えている欠陥を直したのではない(#655 ② の前提の訂正)。
    */

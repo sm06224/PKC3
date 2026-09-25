@@ -18,12 +18,27 @@ test('boot → ノート作成 → 編集 → 保存が画面に反映される'
   await gotoApp(page);
 
   await createEntry(page, 'text');
+  /**
+   * 🔴 **C4(#1038 台帳③ 段 D)── 編集中は画面いちばん下の行の先頭に「編集中」**
+   * (設計 doc §1 P3 / §11 Q2 裁定 A)。⚠ happy-dom の unit(`status-line.test.ts`)は
+   * `composeStatusLine` を直接見るだけで、`main.ts` の `paint` が本当に呼ばれて
+   * 実物の DOM に届くかはここでしか分からない(main.ts はどの test からも
+   * 実行されない ── CLAUDE.md §2)。
+   */
+  const statusText = page.locator('[data-pkc-field="status-text"]');
+  await expect(statusText, '編集中の状態語が画面いちばん下に出ていない').toContainText('編集中');
+  expect(
+    (await statusText.textContent()) ?? '',
+    '状態語が先頭に無い(見本 3「編集中 — …」の順)',
+  ).toMatch(/^編集中/);
   const ta = page.locator('[data-pkc-field="editor-body"]');
   await expect(ta).toBeVisible();
   await ta.click();
   await page.keyboard.type('# 視覚検品\n\n==ハイライト== 本文');
 
   await clickReal(page, '[data-pkc-action="commit-edit"]');
+  // ⚠ 対照群 ── 保存して読んでいるだけになったら、状態語は消える
+  await expect(statusText, '保存した後も「編集中」が残っている').not.toContainText('編集中');
   const h1 = page.locator('[data-pkc-field="detail-body"] h1');
   await expect(h1).toBeVisible();
   await expect(h1).toContainText('視覚検品');
@@ -38,6 +53,22 @@ test('boot → ノート作成 → 編集 → 保存が画面に反映される'
 
   // ── P5b: 2 回目の編集 → 履歴 → 復元(前進変異)が画面に反映される ──
   await clickReal(page, '[data-pkc-action="start-edit"]');
+  // 🔴 C4:状態語が戻る(保存で消え、次の編集開始でまた出ることを見る)
+  await expect(statusText, '2 回目の編集で「編集中」が戻っていない').toContainText('編集中');
+  // 🔴 C4:追記欄の断り文も「編集中」の 1 語(§1 P3 test②「同じ定数と等値」)。
+  //   保存 / キャンセルの出口はそのまま残っていることも見る(出口を削っていない)。
+  await expect(
+    page.locator('[data-pkc-field="append-lock-reason"]'),
+    '追記欄の断り文が「編集中」の 1 語になっていない',
+  ).toHaveText('編集中');
+  await expect(
+    page.locator('[data-pkc-field="append-lock"] button[data-pkc-action="commit-edit"]'),
+    '追記欄に保存の出口が無い',
+  ).toBeVisible();
+  await expect(
+    page.locator('[data-pkc-field="append-lock"] button[data-pkc-action="cancel-edit"]'),
+    '追記欄にキャンセルの出口が無い',
+  ).toBeVisible();
   await ta.fill('# 二稿');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   await expect(page.locator('[data-pkc-field="detail-body"] h1')).toContainText('二稿');

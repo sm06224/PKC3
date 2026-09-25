@@ -22,6 +22,7 @@ import { listAppendTargets } from '@features/markdown/append-target';
 import { CANCEL_EDIT_HINT, COMMIT_EDIT_HINT, iconButton } from './icons';
 import { refoldPeeked } from './pane-visibility';
 import { hintTitle } from './shortcut-hint';
+import { EDITING_STATE_WORD } from './status-line';
 // 🔑 指で触るだけの端末かの判定は 1 か所(#722 P2-12)── 各面で `matchMedia` を書かない
 import { isTouchOnly } from './touch-device';
 
@@ -249,7 +250,14 @@ export class AppendBoxRenderer {
     this.discard.hidden = mode.kind !== 'editing';
     this.release.hidden = mode.kind !== 'writing';
     if (mode.kind === 'editing') {
-      this.lockText.textContent = 'このノートは編集中です。「編集を保存する」か「編集をやめる」を押すと追記できます。';
+      /**
+       * 🔴 **1 語だけにする**(C4 / #1038 段 D)。⚠ 直す前は「このノートは編集中
+       * です。「編集を保存する」か「編集をやめる」を押すと追記できます。」という
+       * 文だったが、「編集中」は画面の下の 1 行(`status-line.ts`)も言うように
+       * なったので、同じ状態を 2 通りの言葉で言わない。保存 / キャンセルの出口
+       * (`resolve` / `discard`)は隣に出したままなので、押すものは減らない。
+       */
+      this.lockText.textContent = EDITING_STATE_WORD;
     } else if (mode.kind === 'writing') {
       this.lockText.textContent = '追記を書き込んでいます…(返ってこないときは「書き込みを打ち切る」)';
     }

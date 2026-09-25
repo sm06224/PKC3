@@ -28,6 +28,7 @@ import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
 import { AppendBoxRenderer } from '../../src/adapter/ui/render/append-box';
+import { EDITING_STATE_WORD } from '../../src/adapter/ui/render/status-line';
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
@@ -158,10 +159,28 @@ describe('編集中の出口 2 か所(#716)', () => {
     });
   }
 
-  it('🔴 追記欄の断り文も同じ字で出口を言う(「編集を破棄」と言わない)', () => {
+  /**
+   * 🔴 **C4(#1038 台帳③ 段 D)で書き直した** ── 「編集中」は画面いちばん下の
+   * ステータスバー(`status-line.ts`)も言うようになったので、追記欄はもう
+   * その状態を長い文で言い直さない。⚠ 主張は「同じ定数と等値」(設計 doc §1
+   * P3 の test②)── 文字列を手で書くと、どちらかだけ直した日に緑のまま食い違う。
+   */
+  it('🔴 追記欄の断り文は「編集中」の 1 語(ステータスバーと同じ定数)', () => {
     const root = editing();
     const reason = root.querySelector('[data-pkc-field="append-lock-reason"]')!.textContent ?? '';
-    expect(reason).toContain('「編集を保存する」か「編集をやめる」を押すと');
-    expect(reason, 'ボタンに無い字で出口を言っている').not.toContain('編集を破棄');
+    expect(reason).toBe(EDITING_STATE_WORD);
+  });
+
+  /**
+   * 🔴 **1 語にしても、出口(保存 / キャンセル)は減らない**(§4.2「触らない物」/
+   * §9「これが分かったら覆る」の対照 ── 出口を削る変更ではないことを固定する)。
+   * ⚠ 上の describe の 2 つの it が「2 か所に出て、字が空でない」までは見ているので、
+   *   ここは**追記欄の中で**両方が見えることだけを見る(重複させない)。
+   */
+  it('🔴 追記欄の断り文の隣に、保存 / キャンセルのボタンがそのまま在る', () => {
+    const root = editing();
+    const lockBar = root.querySelector('[data-pkc-field="append-lock"]')!;
+    expect(lockBar.querySelector('button[data-pkc-action="commit-edit"]'), '保存の出口が無い').not.toBeNull();
+    expect(lockBar.querySelector('button[data-pkc-action="cancel-edit"]'), 'キャンセルの出口が無い').not.toBeNull();
   });
 });
