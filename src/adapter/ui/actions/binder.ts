@@ -2610,7 +2610,7 @@ function applyTableFormat(
    */
   const blocked = bodyWriteBlockReason(st, st.openBody?.lid ?? '');
   if (blocked !== null) {
-    dispatcher.dispatch({ type: 'OP_FAILED', error: `${blocked}、表の形を変えてください` });
+    dispatcher.dispatch({ type: 'OP_FAILED', error: `${blocked}表の形を変えてください` });
     return;
   }
   /**
@@ -5721,7 +5721,7 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     const blocked = bodyWriteBlockReason(st, lid);
     if (blocked !== null) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: `${blocked}、表を打ってください` });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${blocked}表を打ってください` });
       return;
     }
     // ⚠ 2 度押しで欄を作り直さない(打ちかけの字を捨てない)
@@ -5909,7 +5909,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     // 🔴 断りは lid で判定する(C6 / #1043)── 別ノートの表は編集中でも触れる。
     const blocked = bodyWriteBlockReason(st, lid);
     if (blocked !== null) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: `${blocked}、表を触ってください` });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${blocked}表を触ってください` });
       return;
     }
     dispatcher.dispatch({ type: 'SET_CSV_SHAPE', lid, line, col, what, mode });
@@ -5941,7 +5941,7 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     const blocked = bodyWriteBlockReason(st, lid);
     if (blocked !== null) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: `${blocked}、チェックしてください` });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${blocked}チェックしてください` });
       return;
     }
     /**

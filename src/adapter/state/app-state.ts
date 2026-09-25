@@ -5597,7 +5597,7 @@ function reduceCore(
      */
     case 'SET_CSV_CELL': {
       const blocked = bodyWriteBlockReason(state, action.lid);
-      if (blocked !== null) return { state: { ...state, error: `${blocked}、表を打ってください` }, events: [] };
+      if (blocked !== null) return { state: { ...state, error: `${blocked}表を打ってください` }, events: [] };
       const meta = state.entryMetas.get(action.lid);
       if (!meta) return { state, events: [] };
       return {
@@ -5625,7 +5625,7 @@ function reduceCore(
      */
     case 'SET_CSV_SHAPE': {
       const blocked = bodyWriteBlockReason(state, action.lid);
-      if (blocked !== null) return { state: { ...state, error: `${blocked}、表を触ってください` }, events: [] };
+      if (blocked !== null) return { state: { ...state, error: `${blocked}表を触ってください` }, events: [] };
       const meta = state.entryMetas.get(action.lid);
       if (!meta) return { state, events: [] };
       return {
@@ -5656,7 +5656,7 @@ function reduceCore(
       // ⚠ 断りは lid で判定する(C6 / #1043)
       const blocked = bodyWriteBlockReason(state, action.lid);
       if (blocked !== null)
-        return { state: { ...state, error: `${blocked}、表の形を変えてください` }, events: [] };
+        return { state: { ...state, error: `${blocked}表の形を変えてください` }, events: [] };
       const meta = state.entryMetas.get(action.lid);
       if (!meta) return { state, events: [] };
       return {
@@ -5679,7 +5679,7 @@ function reduceCore(
      */
     case 'TOGGLE_TASK': {
       const blocked = bodyWriteBlockReason(state, action.lid);
-      if (blocked !== null) return { state: { ...state, error: `${blocked}、チェックしてください` }, events: [] };
+      if (blocked !== null) return { state: { ...state, error: `${blocked}チェックしてください` }, events: [] };
       const meta = state.entryMetas.get(action.lid);
       if (!meta) return { state, events: [] };
       return {
@@ -5705,7 +5705,7 @@ function reduceCore(
       // ⚠ 断りは lid で判定する(C6 / #1043)
       const blocked = bodyWriteBlockReason(state, action.lid);
       if (blocked !== null)
-        return { state: { ...state, error: `${blocked}、その日の分を済ませてください` }, events: [] };
+        return { state: { ...state, error: `${blocked}その日の分を済ませてください` }, events: [] };
       const meta = state.entryMetas.get(action.lid);
       if (!meta) return { state, events: [] };
       return {
@@ -5731,7 +5731,7 @@ function reduceCore(
       // ⚠ 断りは lid で判定する(C6 / #1043)
       const blocked = bodyWriteBlockReason(state, action.lid);
       if (blocked !== null)
-        return { state: { ...state, error: `${blocked}、繰り返しの回を動かしてください` }, events: [] };
+        return { state: { ...state, error: `${blocked}繰り返しの回を動かしてください` }, events: [] };
       const meta = state.entryMetas.get(action.lid);
       if (!meta) return { state, events: [] };
       return {
@@ -5997,7 +5997,7 @@ function reduceCore(
     case 'TOGGLE_TODO_STATUS': {
       const blocked = bodyWriteBlockReason(state, action.lid);
       if (blocked !== null)
-        return { state: { ...state, error: `${blocked}、状態を切り替えてください` }, events: [] };
+        return { state: { ...state, error: `${blocked}状態を切り替えてください` }, events: [] };
       const meta = state.entryMetas.get(action.lid);
       if (!meta || meta.archetype !== 'todo') return { state, events: [] };
       const nextStatus = meta.status === 'done' ? 'open' : 'done';
