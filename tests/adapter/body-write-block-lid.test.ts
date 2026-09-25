@@ -3,8 +3,8 @@
  *
  * ⚠ 直す前は、本文を書き換える reducer の 7 case が `state.phase !== 'ready'`
  *   **だけ**を見て、編集中は**編集中のノートと無関係な別ノートの書込まで**
- *   捨てていた(7 case は無言 / `bodyRewriteGate` は声には出していたが、
- *   判定はやはり phase だけだった)。ここは 3 段で見る:
+ *   捨てていた(7 case は無言 / `bodyRewriteGate` と予定表の日付・繰り返しの
+ *   3 case は声には出していたが、判定はやはり phase だけだった)。ここは 3 段で見る:
  *   ① `bodyWriteBlockReason` 単体(lid の判定そのもの)
  *   ② reducer の各 case(ready / editing+別 lid / editing+同じ lid / error)
  *   ③ 走査による全数 pin(直したはずの 7 case が「無言」の形へ戻っていないか、
@@ -129,9 +129,29 @@ const CASES: CaseSpec[] = [
     }),
     rewriteKind: 'repeat-move',
   },
+  /**
+   * ⚠ 予定表の残り 3 つ(行の予定 / 繰り返し / ノートの日付)も同じ門(#1043 の着地前に足した)。
+   *   直す前は phase だけで断っており、予定表で「この回だけ」は動くのに
+   *   「全部ずらす」(= SET_TASK_DATE)は断られる食い違いが在った。
+   */
+  {
+    name: 'SET_TASK_DATE',
+    action: (lid) => ({ type: 'SET_TASK_DATE', lid, line: 0, date: '2026-09-26', until: null }),
+    rewriteKind: 'line-date',
+  },
+  {
+    name: 'SET_TASK_REPEAT',
+    action: (lid) => ({ type: 'SET_TASK_REPEAT', lid, line: 0, repeat: null }),
+    rewriteKind: 'line-date',
+  },
+  {
+    name: 'SET_ENTRY_DATE',
+    action: (lid) => ({ type: 'SET_ENTRY_DATE', lid, date: '2026-09-26' }),
+    rewriteKind: 'frontmatter',
+  },
 ];
 
-describe('reducer の 6 case(TOGGLE_TODO_STATUS は形が違うので下に別枠) ── C6 / #1043', () => {
+describe('reducer の 9 case(TOGGLE_TODO_STATUS は形が違うので下に別枠) ── C6 / #1043', () => {
   const metas = [meta('n1'), meta('n2')];
 
   for (const c of CASES) {
@@ -306,13 +326,14 @@ describe('無言で捨てる case の全数 pin ── C6 / #1043', () => {
   });
 
   /**
-   * 🔴 **残り 35 件は今回の対象外**(cases_md 参照)。理由は 2 つに大別できる:
+   * 🔴 **残り 35 件は今回の対象外**。理由は 3 つに分かれる:
    * ① **lid で 1 件に絞れない**(複数の lid・全件・app 全体に効く ──
    *    選択 / フィルタ / 一覧の並び替え / タイル・グループの並び替え 等)
    * ② **本文の書換ではない**(削除・関係・タグ・履歴・ゴミ箱・スマート集計・
-   *    追記/取消線・板の目印保存・添付の差し替え等 ── C6 が挙げた
-   *    「チェック・表のセル・表の形・表の書式・繰り返し・Todo の状態」とは
-   *    別の話で、対応するなら別 issue)。
+   *    添付の差し替え等 ── 対応するなら別 issue)
+   * ③ **本文を書き換えるが、主のノートの物**(追記 / 追記を元に戻す /
+   *    移動を元に戻す / 外部画像の取り込み)── 押せる経路が編集中に在るかを
+   *    確かめてから直す(#1051)
    * ⚠ このリストが増減したら、それは①C6 の対象を増やした ②既存の case を
    *   書き換えた、のどちらかである ── どちらでもここを書き直す。
    */

@@ -5489,7 +5489,8 @@ function reduceCore(
        * ⚠ **呼び名は分ける**(行の予定 / ノートの日付)── 一括りにすると
        *   user は別のものを探す(#515 のレビューの指摘と同じ)。
        */
-      const blocked = phaseBlockReason(state.phase);
+      // ⚠ 断りは lid で判定する(C6 / #1043)── 予定表の他の書換(繰り返しの回)と揃える
+      const blocked = bodyWriteBlockReason(state, action.lid);
       if (blocked !== null)
         return {
           state: {
@@ -5531,7 +5532,8 @@ function reduceCore(
      *   本文を読まない(右クリックのたびに worker を叩く経路を増やさない)。
      */
     case 'SET_TASK_REPEAT': {
-      const blocked = phaseBlockReason(state.phase);
+      // ⚠ 断りは lid で判定する(C6 / #1043)── 予定表の他の書換(繰り返しの回)と揃える
+      const blocked = bodyWriteBlockReason(state, action.lid);
       if (blocked !== null)
         return {
           state: {
@@ -5962,7 +5964,8 @@ function reduceCore(
     }
     case 'SET_ENTRY_DATE': {
       // 🔴 **黙って捨てない**(#516)── 理由は上の `SET_TASK_DATE` に書いた
-      const blocked = phaseBlockReason(state.phase);
+      // ⚠ 断りは lid で判定する(C6 / #1043)── 予定表の他の書換(繰り返しの回)と揃える
+      const blocked = bodyWriteBlockReason(state, action.lid);
       if (blocked !== null)
         return {
           state: {
