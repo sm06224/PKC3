@@ -112,9 +112,11 @@ describe('画面の字に使わない語(ui-terms.ts の BANNED_TERMS)', () => {
     ['src/features/notice/notice-log.ts', '拾う', 1],
     ['src/features/notice/notice-log.ts', '捨てる', 7],
     ['src/features/notice/notice-log.ts', '最後の手', 3],
-    ['src/features/notice/notice-log.ts', '札', 2],
+    // ⚠ 2026-09-25(#1045): 「札」2 → 0 で行を消した ── 枠から落ちた 1 件
+    //    (`2026-09-16-er-connect-by-hand`)に 2 つ在った(落としたから減った。直したのではない)
     // ⚠ 2026-09-21(#1032): 9 → 7 ── 枠から落ちた 1 件に「面」が 2 つ在った
-    ['src/features/notice/notice-log.ts', '面', 7],
+    // ⚠ 2026-09-25(#1045): 7 → 6 ── 枠から落ちた `2026-09-16-er-connect-by-hand` に 1 つ在った
+    ['src/features/notice/notice-log.ts', '面', 6],
   ];
 
   it('いまの残りと一致する(増えたら落ちる。直したら KNOWN_BANNED から消す)', () => {
