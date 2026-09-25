@@ -112,7 +112,7 @@ export function buildFormatBar(): HTMLElement {
   insertEntryLink.title = hintTitle('ノートへのリンク', 'insert-entry-link');
   const insertEntryLinkLabel = document.createElement('span');
   insertEntryLinkLabel.setAttribute('data-pkc-field', 'label');
-  insertEntryLinkLabel.textContent = 'ノートへのリンクを入れる';
+  insertEntryLinkLabel.textContent = 'ノートリンクを入れる';
   insertEntryLink.append(insertEntryLinkLabel);
   bar.append(insertEntryLink);
 

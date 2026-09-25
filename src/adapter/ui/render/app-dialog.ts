@@ -1122,7 +1122,7 @@ export function pickCommandInApp(
  *
  * @param rows 探し語を受けて「一覧」と「下に出す 1 行」を返す関数。
  *   ⚠ **打つたびに呼ぶ**(開いた瞬間で固めない)
- * @param opts.title 器の題名。⚠ 省けば「ノートへのリンクを入れる」── 同じ器を
+ * @param opts.title 器の題名。⚠ 省けば「ノートリンクを入れる」── 同じ器を
  *   「移す…」(#215)が入れ先のフォルダを選ぶのに、スタック(#633 段②)が開く 1 枚を選ぶのに
  *   使うので、**何を選んでいるか**を題名で言う(題は押した物の名前でなければ user は別の操作を開いたと思う)
  * @returns 選んだノートの lid。`Escape` / 「やめる」なら `null`
@@ -1134,7 +1134,7 @@ export function pickEntryInApp(
 ): Promise<string | null> {
   return enqueue(async () => {
     const f = ensureFrame(host);
-    f.title.textContent = opts.title ?? 'ノートへのリンクを入れる';
+    f.title.textContent = opts.title ?? 'ノートリンクを入れる';
     f.body.textContent = '';
 
     const input = document.createElement('input');

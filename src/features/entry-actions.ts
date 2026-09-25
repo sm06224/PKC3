@@ -650,8 +650,8 @@ export function withTrailingLast<T extends { readonly action: string }>(
  */
 export const NOTE_TOOL_ACTIONS: readonly EntryAction[] = [
   { action: 'attach-file', label: 'ファイルを添付' },
-  { action: 'start-audio-capture', label: '録音を始める' },
-  { action: 'start-screen-capture', label: '画面録画を始める' },
+  { action: 'start-audio-capture', label: '音を録る' },
+  { action: 'start-screen-capture', label: '画面を録る' },
   { action: 'start-timer', label: '時間を計る' },
 ];
 

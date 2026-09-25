@@ -222,7 +222,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    */
   {
     id: 'insert-entry-link',
-    label: 'ノートへのリンクを入れる',
+    label: 'ノートリンクを入れる',
     contexts: ['global'],
     defaults: ['Mod+Shift+K'],
     whileTyping: true,
