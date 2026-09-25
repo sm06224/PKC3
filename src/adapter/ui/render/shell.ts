@@ -557,6 +557,17 @@ export function buildShell(root: HTMLElement): ShellRegions {
     const item = iconButton('pick-create-kind', label, `archetype:${archetype}`);
     item.setAttribute('data-pkc-archetype', archetype);
     item.setAttribute('role', 'menuitem');
+    /**
+     * 🔴 **押せないときの理由を乗せたときの説明に出す**(#1054 段②-3。着地前レビュー)。
+     * ⚠ 編集中は `browse.ts` の `BLOCKABLE_FIELDS` が薄くするが、`setBlocked` は
+     *   `HINT_BASE` / `HINT_COMMAND` を持たない物には**理由を書かない**(早期 return)──
+     *   薄いのに、乗せても「なぜ」が出なかった。⚠ 種類ごとの近道は無いので
+     *   `HINT_COMMAND` は空(`chordHint` は何も足さない)。
+     */
+    const base = `${label}を作ります`;
+    item.setAttribute(HINT_BASE, base);
+    item.setAttribute(HINT_COMMAND, '');
+    item.title = hintTitle(base, '');
     menu.append(item);
   }
 
@@ -579,12 +590,23 @@ export function buildShell(root: HTMLElement): ShellRegions {
    * ⚠ **帯のタイルの字は「今日」**(短い)だが、**合成メニューの項目は
    *   「今日のノートを開く」**(OS 風のメニューは短縮しない ── 裁定に明記)。
    */
+  /**
+   * ⚠ **説明は `HINT_BASE` で持つ**(#1054 段②-3)── 編集中に薄くなったとき、
+   *   `setBlocked` が理由を末尾へ足せるようにする(素の `title` だと理由が書かれない)。
+   *   タイルと一覧の項目で**同じ字**を使う(同じ操作に 2 通りの説明を作らない)。
+   */
+  const todayHint = '今日の日付のノートを開きます(無ければ作ります)';
   const today = iconButton('open-today', '今日');
   markBarTile(today);
   today.setAttribute('data-pkc-field', 'open-today');
-  today.title = '今日の日付のノートを開きます(無ければ作ります)';
+  today.setAttribute(HINT_BASE, todayHint);
+  today.setAttribute(HINT_COMMAND, '');
+  today.title = hintTitle(todayHint, '');
   const menuToday = iconButton('open-today', '今日のノートを開く');
   menuToday.setAttribute('role', 'menuitem');
+  menuToday.setAttribute(HINT_BASE, todayHint);
+  menuToday.setAttribute(HINT_COMMAND, '');
+  menuToday.title = hintTitle(todayHint, '');
   menu.append(menuToday);
   menu.append(menuSeparator());
 
@@ -706,8 +728,11 @@ export function buildShell(root: HTMLElement): ShellRegions {
    *   **「集計」だけが 8px 下へぶら下がった**(1920px では 2 個)。
    *   一覧の高さを数える検査が、その浮きを**3 段目**として数えて落ちた。
    * 🔑 だから**塊を 1 つの器に包み、器に間を持たせる**(右の列の塊と同じ作法)──
-   *   器は行いっぱい(`flex: 1 0 100%`)なので**必ず行頭から始まり**、
+   *   器は帯にとって **1 つの並び物**なので、入りきらないときは**塊ごと**次の行へ移り、
    *   どの幅でも「1 個だけずれる」が起きない。⚠ 器の中は自分で折り返す。
+   * ⚠ **#1054 段②-2 で「必ず次の行」をやめた** ── 1 稿目は器を行いっぱい
+   *   (`flex: 1 0 100%`)にして**常に 2 行**にしていたが、絵だけのタイル 7 つは
+   *   1 行に入る。区切りは器の `border-inline-start`(`app.css` の同じ器の規則)。
    */
   const appGroup = document.createElement('div');
   appGroup.setAttribute('data-pkc-field', 'collection-app-group');

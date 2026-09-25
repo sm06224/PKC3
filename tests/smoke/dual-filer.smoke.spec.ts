@@ -818,13 +818,33 @@ test('🔴 下見に本文が出て、留めた場所は読み込み直しても
    *   いたが、見た目の規則が無く、点いているのに他のタイルと同じ地のままだった。
    */
   const previewTile = page.locator('[data-pkc-action="dual-preview-toggle"]');
-  const bgBefore = await previewTile.evaluate((el) => getComputedStyle(el).backgroundColor);
+  const bgOf = (sel: string): Promise<string> =>
+    page.locator(sel).evaluate((el) => getComputedStyle(el).backgroundColor);
+  const bgBefore = await bgOf('[data-pkc-action="dual-preview-toggle"]');
   await clickReal(page, '[data-pkc-action="dual-preview-toggle"]');
   await expect(preview).toBeVisible();
-  const bgAfter = await previewTile.evaluate((el) => getComputedStyle(el).backgroundColor);
-  expect(bgAfter, '押しても地の色が変わらない(押している見た目が付いていない)').not.toBe(
-    bgBefore,
+  await expect(previewTile, '押しても押している状態にならない').toHaveAttribute(
+    'aria-pressed',
+    'true',
   );
+  /**
+   * 🔴 **マウスを外してから測る**(#1054 段②-3。変異試験が SURVIVED で教えた)。
+   * ⚠ 押した直後はマウスがタイルの上に残る ── `button:hover` の地だけで
+   *   「押す前と違う」が成り立ち、押している見た目の規則を**丸ごと消しても緑**だった
+   *   (観測点が「放っておいても変わる」、CLAUDE.md §4)。
+   * 🔑 対照群も置く:**押していない隣のタイル**(コピー)と違う地であること。
+   */
+  await page.mouse.move(0, 0);
+  const sibling = '[data-pkc-region="dual-commands"] [data-pkc-action="dual-copy"]';
+  await expect
+    .poll(() => bgOf('[data-pkc-action="dual-preview-toggle"]'), {
+      message: '押しても地の色が変わらない(押している見た目が付いていない)',
+    })
+    .not.toBe(bgBefore);
+  expect(
+    await bgOf('[data-pkc-action="dual-preview-toggle"]'),
+    '押しているタイルが、押していない隣のタイルと同じ地のまま',
+  ).not.toBe(await bgOf(sibling));
   // ノートの行(フォルダではないほう)を指す
   await page.locator(`${ROWS('left')}`).filter({ hasNotText: 'とめる場所' }).first().click();
   await expect(preview, '本文が届いていない').toContainText('したみの ほんぶん');

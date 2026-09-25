@@ -8020,6 +8020,13 @@ const ACTIONS: Record<string, ActionHandler> = {
     const open = menu.hidden;
     menu.hidden = !open;
     target.setAttribute('aria-expanded', open ? 'true' : 'false');
+    /**
+     * 🔑 **開いたら、先頭の押せる項目へ焦点を移す**(#1054 段②-3。OS のメニューと同じ)。
+     * ⚠ 直す前は焦点が `▼` に残ったので、開いた直後の `↓` が一覧の中へ届かなかった
+     *   (`onCreateMenuKey` は焦点が項目の中に在るときだけ矢印を握る)。
+     * ⚠ 押せない項目(編集中の「種類」「今日」)は飛ばす ── 焦点が当たらない。
+     */
+    if (open) menu.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
   },
   /**
    * 🔑 **作る種類を選ぶ**(P10)。押した種類を「いま作るもの」にして、
@@ -12406,16 +12413,28 @@ export function bindActions(
     if (!root.isConnected) return;
     const menu = root.querySelector<HTMLElement>('[data-pkc-region="create-menu"]');
     if (menu === null || menu.hidden) return;
-    const t = ev.target;
-    if (!(t instanceof HTMLElement) || !menu.contains(t)) return;
     const pick = root.querySelector<HTMLElement>('[data-pkc-field="create-pick"]');
+    /**
+     * 🔴 **開いている間の `Escape` は、焦点がどこに在っても一覧を閉じるだけ**
+     * (#1054 段②-3。user 目線レビューで判明)。
+     * ⚠ 直す前は「焦点が項目の中に在るとき」だけ閉じていた ── マウスで `▼` を
+     *   押して開くと焦点は `▼` に在るので、`Escape` は**一覧を閉じず**、後ろの
+     *   `onShortcut` の `deselect-entry` へ流れて**読んでいたノートの選択だけ外れた**。
+     *   ⚠ 項目の中で押した場合も、閉じた後に同じ `Escape` が `onShortcut` へ流れて
+     *   選択を外していた(`onMenuKey` と同じ罠)。
+     * 🔑 `onMenuKey` と同じく `stopImmediatePropagation` ── この聞き手は `onShortcut` より
+     *   **前に**登録されているので、1 回の `Escape` は 1 段だけ閉じる。
+     */
     if (ev.key === 'Escape') {
       ev.preventDefault();
+      ev.stopImmediatePropagation();
       menu.hidden = true;
       pick?.setAttribute('aria-expanded', 'false');
       pick?.focus();
       return;
     }
+    const t = ev.target;
+    if (!(t instanceof HTMLElement) || !menu.contains(t)) return;
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(ev.key)) return;
     /**
      * 🔴 **押せない項目は飛ばす**(#1054 段②-2)。⚠ 編集中は「種類」と「今日」が

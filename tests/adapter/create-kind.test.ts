@@ -253,6 +253,20 @@ describe('▼ の合成メニュー(#1054 段②)', () => {
     expect(document.activeElement, 'End が末尾へ飛ばない').toBe(items[items.length - 1]);
   });
 
+  it('🔴 ▼ を押して開くと、先頭の押せる項目へ焦点が移る(開いた直後の ↓ が一覧に届く)', () => {
+    const root = shell();
+    document.body.append(root);
+    bindActions(root, new Dispatcher());
+    const pick = root.querySelector<HTMLElement>('[data-pkc-field="create-pick"]')!;
+    pick.focus();
+    pick.click();
+    const menu = menuOf(root);
+    expect(menu.hidden, '前提が崩れている(開いていない)').toBe(false);
+    const first = menu.querySelector<HTMLButtonElement>('button:not(:disabled)');
+    expect(first, '前提: 押せる項目が 1 つも無い').not.toBeNull();
+    expect(document.activeElement, '開いても焦点が一覧の先頭へ移らない').toBe(first);
+  });
+
   it('🔴 Escape で閉じ、▼ へ焦点を返す', () => {
     const root = shell();
     document.body.append(root);

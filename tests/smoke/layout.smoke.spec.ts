@@ -264,6 +264,39 @@ test('🔴 上の帯は無く、設定は左の列から押せる', async ({ pag
   expect(m.tops, `1 行に収まらず複数の段に分かれている: ${JSON.stringify(m.tops)}`).toEqual(
     new Array(7).fill(m.tops[0]),
   );
+
+  /**
+   * ⑥ 🔴 **狭い幅でも「1 個だけ」ずれない**(#1054 段②-3。着地前レビューの指摘)。
+   * ⚠ ⑤は 1 幅しか見ていない ── #1029 段 B で「集計」だけ 8px ぶら下がったのは
+   *   **境目が行の途中に来る幅**だった。🔑 入りきらない幅では**塊ごと**次の行へ
+   *   移るはずなので、見るのは「塊の中は同じ段」(3 個 / 4 個それぞれ)である。
+   * ⚠ 列の幅は 1100px を境に式が変わる(`app.css` の `@media (max-width: 1100px)`)
+   *   ので、その前後と、もっと狭い所を当てる。
+   */
+  for (const width of [1180, 1100, 1000, 900]) {
+    await page.setViewportSize({ width, height: 800 });
+    const rects = await page.evaluate(() =>
+      [...document.querySelectorAll('[data-pkc-region="collection-bar"] button')].map((b) => {
+        const r = b.getBoundingClientRect();
+        return { top: Math.round(r.top), w: Math.round(r.width) };
+      }),
+    );
+    const tops = rects.map((r) => r.top);
+    expect(tops, `${width}px: 前提が崩れている(7 個そろっていない)`).toHaveLength(7);
+    // ⚠ 空振り防止 ── 列が畳まれて全部 0 だと「同じ段」が必ず成り立つ
+    expect(
+      rects.every((r) => r.w > 0),
+      `${width}px: 前提が崩れている(見えていないタイルがある): ${JSON.stringify(rects)}`,
+    ).toBe(true);
+    expect(
+      new Set(tops.slice(0, 3)).size,
+      `${width}px: 取り込む / バックアップ / 操作を探す が段をまたいでいる: ${JSON.stringify(tops)}`,
+    ).toBe(1);
+    expect(
+      new Set(tops.slice(3)).size,
+      `${width}px: 集計 / システム / フラグ / ヘルプ が段をまたいでいる: ${JSON.stringify(tops)}`,
+    ).toBe(1);
+  }
 });
 
 

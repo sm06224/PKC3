@@ -533,6 +533,16 @@ describe('編集中の「+ ノート」は理由を言う(#761)', () => {
     expect(today.getAttribute('data-pkc-blocked'), '理由を持っていない(今日)').toBe(
       createBtn(root).getAttribute('data-pkc-blocked'),
     );
+    /**
+     * 🔴 **乗せたときの説明にも理由が出る**(#1054 段②-3。着地前レビュー)。
+     * ⚠ 直す前は `data-pkc-blocked` だけ付いて `title` は素のまま ── 薄いのに、
+     *   乗せても「なぜ押せないか」が出なかった(`setBlocked` は `HINT_BASE` の無い物に
+     *   理由を書かない)。🔑 理由の字は `data-pkc-blocked` と同じ物を 1 か所から引く。
+     */
+    const why = createBtn(root).getAttribute('data-pkc-blocked');
+    expect(why, '前提: 「+ ノート」に理由が付いていない').toBeTruthy();
+    expect(pick.title, '乗せたときの説明に理由が出ない(種類)').toContain(why!);
+    expect(today.title, '乗せたときの説明に理由が出ない(今日)').toContain(why!);
     // ⚠ 対照群 ── 道具の複製(添付)は編集中でも動く
     expect(attach.disabled, '編集中でも使える「添付」まで薄くなった').toBe(false);
     expect(attach.getAttribute('data-pkc-blocked'), '理由が付いている(添付)').toBeNull();
@@ -545,6 +555,9 @@ describe('編集中の「+ ノート」は理由を言う(#761)', () => {
     d.dispatch({ type: 'CANCEL_EDIT' });
     expect(pick.disabled, '編集を終えたのに押せない形のまま(種類)').toBe(false);
     expect(today.disabled, '編集を終えたのに押せない形のまま(今日)').toBe(false);
+    // ⚠ 理由は編集を終えたら消える(残ると、押せるのに「押せない」と言い続ける)
+    expect(pick.title, '編集を終えても理由が残っている(種類)').not.toContain(why!);
+    expect(today.title, '編集を終えても理由が残っている(今日)').not.toContain(why!);
   });
 
   /**
