@@ -125,8 +125,8 @@ describe('④ 列を飛ばす近道(#720)', () => {
       '近道が先頭に無い(Tab の 1 回目で当たらない)',
     ).toBe('skip-links');
     expect([...skip!.querySelectorAll('button')].map((b) => b.textContent)).toEqual([
-      '本文へ',
-      '情報へ',
+      '本文へ移る',
+      '情報へ移る',
     ]);
   });
 
