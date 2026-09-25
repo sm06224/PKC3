@@ -86,7 +86,8 @@ test('🔴 本文を右クリックして横に留めると、2 つの枠が並�
   await createEntry(page, 'text');
   await writeBody(page, `# 資料 A\n\n${LONG}`);
   await createEntry(page, 'text');
-  await writeBody(page, `# 資料 B\n\n${LONG}`);
+  // ⚠ 資料 B にだけチェックを 1 つ持たせる(下の C6 / #1043 で、留めた枠から押す)
+  await writeBody(page, `# 資料 B\n\n- [ ] 牛乳\n\n${LONG}`);
 
   // ③ 本文を右クリック → 「このノートをスタックに載せる」(字は #633 段① で揃えた)
   // ⚠ **段落の上で押す**(器の中央は余白に当たる ── context-menu smoke と同じ作法)
@@ -142,6 +143,37 @@ test('🔴 本文を右クリックして横に留めると、2 つの枠が並�
     page.locator('[data-pkc-split-lid] [data-pkc-field="split-body"] h1').first(),
     '留めた枠が一緒に動いてしまった',
   ).toContainText('資料 B');
+
+  /**
+   * 🔴 **主(資料 A)を編集している間も、留めた枠(資料 B)のチェックは効く**(C6 / #1043)。
+   *
+   * ⚠ 直す前は「編集中か」だけで断っていたので、編集していない資料 B のチェックを
+   *   押しても「編集を終了してからチェックしてください」と断られた。
+   * ⚠ unit(`center-pane.test.ts`)は枠の器を手で組んでいる ── 実物の枠が編集中も
+   *   押せる形で残るかは、ここでしか見えない。
+   * 🔑 起動を増やさない(この test の道中に足した)。
+   */
+  await clickReal(page, '[data-pkc-split-main] [data-pkc-action="start-edit"]');
+  await expect(
+    page.locator('[data-pkc-field="editor-body"]'),
+    '前提が崩れている(主が編集に入っていない)',
+  ).toBeVisible();
+  const pinnedBox = page.locator('[data-pkc-split-lid] [data-pkc-action="toggle-task"]');
+  await expect(pinnedBox, '編集中に留めた枠のチェックが消えた').toHaveCount(1);
+  await expect(pinnedBox).not.toBeChecked();
+  await pinnedBox.click();
+  await expect(pinnedBox, '編集中に留めた枠のチェックを押しても効かない').toBeChecked();
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '別のノートなのに断られた',
+  ).not.toContainText('編集を終了してから');
+  // 編集中のノート(資料 A)は巻き込まれない ── やめて戻れば元の本文のまま
+  await clickReal(page, '[data-pkc-split-main] [data-pkc-action="cancel-edit"]');
+  await expect(
+    page.locator('[data-pkc-split-main] [data-pkc-field="detail-body"] h1').first(),
+    '編集をやめたら主が資料 A でなくなった',
+  ).toContainText('資料 A');
+  await expect(pinnedBox, '編集をやめたら留めた枠のチェックが戻った').toBeChecked();
 
   /**
    * 🔴 **段組み(段①)と喧嘩しない** ── 段組みが効くかは**枠の幅**で決まる。
