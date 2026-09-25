@@ -11847,10 +11847,25 @@ export function bindActions(
        * 🔑 どちらも「選ぶ側(=2 ペインを抜ける)」へ倒す理由が無い ── 移すも写すも、
        *   一覧タブへ切り替えれば同じボタンで行える。
        */
+      /**
+       * 🔴 **「名前を変える」は 2 ペインの改名へつなぐ**(#1045 C9、取り込み時に直した)。
+       * ⚠ 行の `rename-entry-begin` は左の列の行に入力欄(`row-rename`)を出す作りで、
+       *   2 ペインの表はそれを描かない ── そのまま出すと**押せるのに断られる**。
+       * 🔑 2 ペインには自前の改名(`dual-rename-begin` = 下の列の「名前」)が在り、
+       *   「その面で選ばれている 1 件」を打ち替える。上の `DUAL_SELECT` がちょうど
+       *   押した行 1 件を選んでいるので、**同じ行がその場で打ち替わる**。
+       *   側は `data-pkc-side` で運ぶ(メニューは root 直下に出るので、押した所からは辿れない)。
+       */
       const items = entryMenuActions({
         archetype: st.entryMetas.get(lid)?.archetype ?? null,
         linkedFile: st.linkedFiles.get(lid) ?? null,
-      }).filter((a) => a.action !== 'move-to-folder' && a.action !== 'copy-plain-markdown');
+      })
+        .filter((a) => a.action !== 'move-to-folder' && a.action !== 'copy-plain-markdown')
+        .map((a) =>
+          a.action === 'rename-entry-begin'
+            ? { ...a, action: 'dual-rename-begin', attrs: { 'data-pkc-side': side } }
+            : a,
+        );
       openContextMenu(
         root,
         { x: ev.clientX, y: ev.clientY },

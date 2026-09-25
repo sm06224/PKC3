@@ -203,25 +203,26 @@ describe('2 ペインの表の行を右クリックしても、2 ペインを抜
     expect(exported, '書き出しが押した行になっていない').toEqual(['n1']);
   });
 
-  it('🔴 「名前を変える」も、選んでいるノートではなく押した行を対象にする', () => {
+  /**
+   * 🔴 **「名前を変える」は 2 ペインの改名へつなぐ**(取り込み時に直した)。
+   * ⚠ 1 稿目は行の `rename-entry-begin` をそのまま出しており、2 ペインの表は
+   *   `row-rename` の欄を描かないので**押せるのに断られていた**(一瞬 `renamingLid`
+   *   が押した行を指すだけで、欄は出ない)。
+   * 🔑 いまは 2 ペインの自前の改名(`DUAL_RENAME_BEGIN`)が**押した行・押した側**で始まる。
+   */
+  it('🔴 「名前を変える」は、選んでいるノートではなく押した行を、2 ペインのその場で打ち替え始める', () => {
     const t = setupDual();
     t.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
     t.d.dispatch({ type: 'SET_VIEW_MODE', mode: 'dual' });
-    rightClick(t.dualRow('left', 'n1'));
-    /**
-     * ⚠ 2 ペインの表は `[data-pkc-field="row-rename"]` を描かない(独自の
-     *   `dual-rename-begin` を持つ)ので、`rename-entry-begin` は
-     *   フォールバックの末に諦めて `renamingLid` を `null` へ戻す。⚠ それでも
-     *   **一瞬 `n1` を経由すること**(押した行が対象になっていたこと)は見える ──
-     *   `onState` は state が変わった回だけ呼ばれるので、これで十分言える。
-     */
-    const seen: string[] = [];
-    const unsub = t.d.onState((s) => {
-      if (s.renamingLid !== null) seen.push(s.renamingLid);
+    rightClick(t.dualRow('right', 'n1'));
+    expect(t.hasItem('rename-entry-begin'), '左の列用の改名が出ている(2 ペインでは断られる)').toBe(false);
+    t.press('dual-rename-begin');
+    expect(t.d.getState().dual.renaming, '押した行・押した側で打ち替えが始まっていない').toEqual({
+      side: 'right',
+      lid: 'n1',
     });
-    t.press('rename-entry-begin');
-    unsub();
-    expect(seen, '名前を変える先が押した行になっていない').toEqual(['n1']);
+    expect(t.d.getState().viewMode, '改名で 2 ペインを抜けた').toBe('dual');
+    expect(t.d.getState().error ?? '', '断られた').toBe('');
   });
 
   describe('編集中でも、同じ扱いになる(#690 ④ A′ の枝と揃える)', () => {
