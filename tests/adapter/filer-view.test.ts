@@ -56,11 +56,14 @@ function setup(metas: EntryMeta[], relations: Relation[]) {
   // ⚠ ここを dispatch に置き換えると、タブを押しても切り替わらない実装が緑になる
   let mode: 'list' | 'filer' | 'launcher' = 'list';
   d.onState((s) => browse.render(s, mode));
+  // 🔴 「別のウィンドウ(付箋)で開く」の観測点(#1042 C14)── 2 回押しの受け先。
+  const openedWindows: string[] = [];
   bindActions(root, d, {
     setBrowse: (m) => {
       mode = m as typeof mode;
       browse.render(d.getState(), mode);
     },
+    openNoteWindow: (lid) => openedWindows.push(lid),
   });
   connectStoreEffects(d, {
     ...stubRevisionOps(),
@@ -85,7 +88,7 @@ function setup(metas: EntryMeta[], relations: Relation[]) {
     [...pane.querySelectorAll('tbody [data-pkc-entry]')].map((r) =>
       r.getAttribute('data-pkc-entry'),
     );
-  return { root, d, pane, q, rows };
+  return { root, d, pane, q, rows, openedWindows };
 }
 
 describe('filer view (P3-7b)', () => {
@@ -144,19 +147,21 @@ describe('filer view (P3-7b)', () => {
     expect(d.getState().scopeLid).toBe('f1');
   });
 
-  it('🔴 ノートは 2 回押しても「入る」先にならない', () => {
+  it('🔴 ノートは 2 回押しても「入る」先にならない ── 別のウィンドウ(付箋)で開く(#1042 C14)', () => {
     // ⚠ 変異試験 O3 が生き延びて判明 ── 種別の門を外しても誰も落ちなかった。
     //    外すと、ノートを 2 回押しただけで**中身が空の面**に迷い込む
-    const { root, d, q } = setup(METAS, RELS);
+    const { root, d, q, openedWindows } = setup(METAS, RELS);
     root.querySelector<HTMLElement>('[data-pkc-browse="filer"]')!.click();
     const row = q<HTMLElement>('tbody [data-pkc-entry="f1"]')!;
     row.click();
-    row.click(); // f1 はフォルダ ── ここは入る
+    row.click(); // f1 はフォルダ ── ここは入る(控え群 ── #1042 で壊していないことの確認)
     expect(d.getState().scopeLid).toBe('f1');
+    expect(openedWindows, 'フォルダなのに別窓で開いた').toEqual([]);
     const note = q<HTMLElement>('tbody [data-pkc-entry="a"]')!;
     note.click();
-    note.click(); // 'a' はノート ── 入らない
+    note.click(); // 'a' はノート ── 入らず、別のウィンドウ(付箋)で開く
     expect(d.getState().scopeLid, 'ノートに入ってしまった').toBe('f1');
+    expect(openedWindows, '別のウィンドウ(付箋)で開かなかった').toEqual(['a']);
   });
 
   /**

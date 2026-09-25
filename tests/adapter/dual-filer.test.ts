@@ -993,6 +993,8 @@ describe('2 ペインの配線(binder)', () => {
   let d: Dispatcher;
   let region: HTMLElement;
   let r: DualFilerRenderer;
+  // 🔴 「別のウィンドウ(付箋)で開く」の観測点(#1042 C14)── 2 回押しの受け先。
+  let openedWindows: string[];
 
   beforeEach(() => {
     document.body.innerHTML = '';
@@ -1001,7 +1003,8 @@ describe('2 ペインの配線(binder)', () => {
     document.body.append(root);
     d = new Dispatcher();
     buildShell(root);
-    bindActions(root, d);
+    openedWindows = [];
+    bindActions(root, d, { openNoteWindow: (lid) => openedWindows.push(lid) });
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: METAS, relations: RELS });
     region = document.createElement('div');
     root.append(region);
@@ -1047,18 +1050,28 @@ describe('2 ペインの配線(binder)', () => {
    * ⚠ 直す前の形(`SET_SCOPE` を撃つ)だと、**押していない左の列が動いて
    *   押した側は 1 ミリも動かない** ── ここはその向きを突く。
    */
-  it('🔴 フォルダを 2 回押すと、その側だけが中へ入る', () => {
+  it('🔴 フォルダを 2 回押すと、その側だけが中へ入る(控え群 ── #1042 で壊していないことの確認)', () => {
     click(row('left', 'f1'));
     click(row('left', 'f1'));
     expect(paneScope(paneOf(d.getState().dual, 'left'))).toBe('f1');
     expect(paneScope(paneOf(d.getState().dual, 'right')), '反対側まで入った').toBeNull();
     expect(d.getState().scopeLid, '左の列(#240 の現在地)が動いた').toBeNull();
+    expect(openedWindows, 'フォルダなのに別窓で開いた').toEqual([]);
   });
 
-  it('ノートを 2 回押しても、どこにも入らない', () => {
+  it('🔴 ノートを 2 回押すと、どこにも入らず別のウィンドウ(付箋)で開く(#1042 C14・左)', () => {
     click(row('left', 'a'));
     click(row('left', 'a'));
     expect(paneScope(paneOf(d.getState().dual, 'left'))).toBeNull();
+    expect(openedWindows, '別のウィンドウ(付箋)で開かなかった').toEqual(['a']);
+  });
+
+  it('🔴 ノートを 2 回押すと、どこにも入らず別のウィンドウ(付箋)で開く(#1042 C14・右)', () => {
+    // ⚠ 右側でも同じ判定になることを見る(左だけの偶然の一致にしない)
+    click(row('right', 'b'));
+    click(row('right', 'b'));
+    expect(paneScope(paneOf(d.getState().dual, 'right'))).toBeNull();
+    expect(openedWindows, '別のウィンドウ(付箋)で開かなかった').toEqual(['b']);
   });
 
   it('パンくず / タブ / + が効く', () => {

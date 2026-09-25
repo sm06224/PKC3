@@ -1939,7 +1939,7 @@ function moveOrder(
 /**
  * 🔴 **同じタイルを続けて押したか**(#857 段①b)。
  *
- * ⚠ `maybeEnterFolder` と**同じ作法**(`dblclick` に頼らず、同じ lid への連続押しで
+ * ⚠ `maybeDoubleOpen` と**同じ作法**(`dblclick` に頼らず、同じ lid への連続押しで
  *   見る)。⚠ **3 回目を「もう一度」と数えない** ── 数えると、素早く 3 回押したときに
  *   窓が 2 枚開く。
  *
@@ -1948,7 +1948,7 @@ function moveOrder(
  *   test では前の it が残した「1 回目」を次の it が「2 回目」と読み、
  *   **1 回押しただけで窓が開いた**(しかも通る it と落ちる it が混在して、
  *   原因が 2 つに見えた)。
- * 🔑 `maybeEnterFolder` が**閉包の中**に数を持っているのと同じ形へ寄せる ──
+ * 🔑 `maybeDoubleOpen` が**閉包の中**に数を持っているのと同じ形へ寄せる ──
  *   あちらは `bindActions` の中の `let`、こちらは `ACTIONS` が module に在るので
  *   **器を鍵にした `WeakMap`** にする(器が消えれば数も消える)。
  */
@@ -7851,7 +7851,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    *
    * ## ⚠ ネイティブの `dblclick` に頼らない
    *
-   * フォルダの 2 回押し(`maybeEnterFolder`)と**同じ理由**である ── ブラウザは
+   * フォルダの 2 回押し(`maybeDoubleOpen`)と**同じ理由**である ── ブラウザは
    * 「同じ node を 2 回」でしか `dblclick` を出さないが、この一覧は書込の ack で
    * **丸ごと組み直る**(`launcher.ts` は `textContent = ''` から描く)。
    * 🔑 だから**同じ lid への連続押し**で見る ── node が入れ替わっても lid は同じ。
@@ -9659,7 +9659,7 @@ export function bindActions(
     /**
      * 🔴 **長押しの直後の `click` は捨てる**(#687 D-1)。
      * ⚠ 指を離すとブラウザは `click` を撃つ ── 下へ流すと `set` が走って
-     *   **足したばかりの印が 1 件に戻り**、さらに `maybeEnterFolder` が
+     *   **足したばかりの印が 1 件に戻り**、さらに `maybeDoubleOpen` が
      *   「1 回目」を数えて、次のタップでフォルダへ入る。**両方を素通りさせない**。
      */
     /**
@@ -9714,19 +9714,34 @@ export function bindActions(
       }
     }
     const action = el.getAttribute('data-pkc-action');
+    /**
+     * 🔴 **一覧タブ(`entry-list`)は「フォルダへ入る」を持たない**(#1042 C14)。
+     * ⚠ `inFiler` と同じ「面で切る」作法(着地前レビュー 4 の続き) ──
+     *   `select-entry` は 6 か所(sidebar / filer / kanban / calendar / query /
+     *   inspector)に在るので、面を限らないと関係の無い面まで拾う。
+     * 🔑 一覧には `scopeLid`(現在地)の概念が無いので、`maybeDoubleOpen` の
+     *   フォルダの分岐は**通さない**(`tests/adapter/multi-select.test.ts`
+     *   「もう一度押す」もフォルダ面の中だけ ── 一覧の 2 回押しで**見えない現在地が
+     *   動かない**を守る)。行の種類に関わらず、別のウィンドウ(付箋)で開く。
+     */
+    const inEntryList = el.closest('[data-pkc-region="entry-list"]') !== null;
     // ⚠ 行を素で押したときだけ「もう一度押した」を数える(修飾つきは印の話)
-    // ⚠ **フォルダ面の中だけ**(上と同じ理由 ── 一覧タブで 2 回押すと、
-    //    見えていない現在地が動いて「+ ノート」の作り先だけが変わる)
+    // ⚠ **一覧 / フォルダ面の中だけ**(上と同じ理由 ── kanban / calendar / query /
+    //    inspector の `select-entry` まで拾うと、見えていない判定が誤って走る)
+    if (inEntryList && action === 'select-entry') {
+      const lid = el.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
+      if (lid !== null) maybeOpenListNote(lid);
+    }
     if (inFiler && action === 'select-entry') {
       const lid = el.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
-      if (lid !== null) maybeEnterFolder(lid);
+      if (lid !== null) maybeDoubleOpen(lid);
     }
-    // ⚠ 2 ペインも**同じ 2 クリック**でフォルダへ入る(規則は 1 本 ── ただし
-    //    入る先はそのペインなので、撃つ action だけが違う)
+    // ⚠ 2 ペインも**同じ 2 クリック**でフォルダへ入る・ノートを別窓へ開く
+    //   (規則は 1 本 ── ただし入る先はそのペインなので、撃つ action だけが違う)
     if (action === 'dual-row') {
       const side = dualSide(el);
       const lid = el.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
-      if (side !== null && lid !== null) maybeEnterFolder(lid, side);
+      if (side !== null && lid !== null) maybeDoubleOpen(lid, side);
     }
     run(action, el);
   };
@@ -11519,8 +11534,9 @@ export function bindActions(
     }
   };
   /**
-   * 🔴 **フォルダは 2 クリックで開く**(#240 段①。user 指示 2026-08-17
-   * 「フォルダをダブルクリックで開くように変更」)。
+   * 🔴 **フォルダは 2 クリックで開き、ノートは 2 クリックで別のウィンドウへ**
+   * (フォルダ: #240 段①。user 指示 2026-08-17「フォルダをダブルクリックで開くように
+   * 変更」。ノート: #1042 C14。裁定 2026-09-25 Q5 = A「入れる」)。
    *
    * ⚠ **ネイティブの `dblclick` に頼らない。** ブラウザは「同じ node を 2 回」
    * 押したときにしか `dblclick` を出さないので、**2 回のクリックの間に行が
@@ -11528,7 +11544,14 @@ export function bindActions(
    * 実 user も「開かない」を踏む(実ブラウザ smoke で実際に落ちた)。
    * 🔑 だから**同じ lid への連続押し**で見る ── node が入れ替わっても lid は同じ。
    * ⚠ 1 クリック目(= 選ぶ)は `onClick` が撃っている。ここは**現在地だけ**動かす。
-   * ⚠ フォルダ以外では何もしない(ノートを 2 回押しても入る先が無い)。
+   *
+   * 🔑 **フォルダ表 / 2 ペインは判定が 1 か所**(この関数)── フォルダ
+   * (スマートフォルダ含む)なら「中へ入る」、それ以外(ノート)は
+   * `open-note-window` と同じ経路で別のウィンドウ(付箋)を開く。
+   * ⚠ **一覧タブは別関数**(`maybeOpenListNote`、すぐ下)── 一覧に
+   * `scopeLid`(現在地)の概念は無いので、フォルダの行でも「中へ入る」は
+   * 起こさない(`tests/adapter/multi-select.test.ts`「もう一度押す」も
+   * フォルダ面の中だけ ── 見えない現在地が動かないことを pin)。
    */
   const DOUBLE_MS = 500;
   /**
@@ -11539,39 +11562,69 @@ export function bindActions(
    *   左で選んで右で選ぶと、印を付けたかっただけの右が中へ入る。
    */
   let lastRowClick: { key: string; at: number } = { key: '', at: 0 };
-  const maybeEnterFolder = (lid: string, dual: DualSide | null = null): void => {
+  const maybeDoubleOpen = (lid: string, dual: DualSide | null = null): void => {
     const key = `${dual ?? 'filer'}:${lid}`;
     const now = Date.now();
     const again = lastRowClick.key === key && now - lastRowClick.at <= DOUBLE_MS;
     lastRowClick = { key, at: now };
     if (!again) return;
-    // 🔑 「中へ入れるか」の判定は `canEnterScope` 1 か所(スマートフォルダも入れる)
-    if (!canEnterScope(dispatcher.getState().entryMetas.get(lid)?.archetype)) return;
     lastRowClick = { key: '', at: 0 }; // 3 回目を「もう一度」と数えない
-    // ⚠ **入る先はその面の現在地** ── 2 ペインで `SET_SCOPE` を撃つと、
-    //    押していない左の列が動いて、押した側は 1 ミリも動かない
-    dispatcher.dispatch(
-      dual === null
-        ? { type: 'SET_SCOPE', lid }
-        : { type: 'DUAL_SET_SCOPE', side: dual, lid },
-    );
+    // 🔑 「中へ入れるか」の判定は `canEnterScope` 1 か所(スマートフォルダも入れる)
+    if (canEnterScope(dispatcher.getState().entryMetas.get(lid)?.archetype)) {
+      // ⚠ **入る先はその面の現在地** ── 2 ペインで `SET_SCOPE` を撃つと、
+      //    押していない左の列が動いて、押した側は 1 ミリも動かない
+      dispatcher.dispatch(
+        dual === null
+          ? { type: 'SET_SCOPE', lid }
+          : { type: 'DUAL_SET_SCOPE', side: dual, lid },
+      );
+      /**
+       * 🔴 **入った先で焦点を立て直す**(#273、2026-08-24 に実ブラウザで実測)。
+       *
+       * ⚠ 直す前は**マウスで入った瞬間に鍵が 1 つも効かなくなった** ── 入ると
+       *   表の行が丸ごと作り直されるので、押していた行が消えて
+       *   `document.activeElement` が **`body`** に落ちる。すると keydown の的が
+       *   ペインの外になり、`dual` 文脈の一致そのものが起きない
+       *   (`Backspace` で戻ることすらできず、もう一度マウスで押すしかない)。
+       * ⚠ **キーボードで入った回は効いていた** ── `filer-open` が既に
+       *   `carryDualFocus` を呼んでいるからで、**マウスの経路にだけ穴が空いていた**
+       *   (CLAUDE.md「片側を直したら、対称の反対側を必ず疑う」)。
+       * 🔑 立て直しは `carryDualFocus` 1 本 ── 「どの行へ当てるか」の規則を
+       *   2 か所に持たない(見えている行だけを相手にする不変条件つき)。
+       * ⚠ 左の列(`dual === null`)はここでは触らない ── **測っていないから**である
+       *   (同じ穴が在るかは別に確かめる)。
+       */
+      if (dual !== null) carryDualFocus(dual);
+      return;
+    }
     /**
-     * 🔴 **入った先で焦点を立て直す**(#273、2026-08-24 に実ブラウザで実測)。
-     *
-     * ⚠ 直す前は**マウスで入った瞬間に鍵が 1 つも効かなくなった** ── 入ると
-     *   表の行が丸ごと作り直されるので、押していた行が消えて
-     *   `document.activeElement` が **`body`** に落ちる。すると keydown の的が
-     *   ペインの外になり、`dual` 文脈の一致そのものが起きない
-     *   (`Backspace` で戻ることすらできず、もう一度マウスで押すしかない)。
-     * ⚠ **キーボードで入った回は効いていた** ── `filer-open` が既に
-     *   `carryDualFocus` を呼んでいるからで、**マウスの経路にだけ穴が空いていた**
-     *   (CLAUDE.md「片側を直したら、対称の反対側を必ず疑う」)。
-     * 🔑 立て直しは `carryDualFocus` 1 本 ── 「どの行へ当てるか」の規則を
-     *   2 か所に持たない(見えている行だけを相手にする不変条件つき)。
-     * ⚠ 左の列(`dual === null`)はここでは触らない ── **測っていないから**である
-     *   (同じ穴が在るかは別に確かめる)。
+     * 🔴 **フォルダでなければ、別のウィンドウ(付箋)で開く**(#1042 C14)。
+     * ⚠ `open-note-window` の受け手(`services.openNoteWindow`)と**同じ経路**を
+     *   そのまま呼ぶ ── ポップアップ遮断時の代替・同じノートの 2 枚目を作らない
+     *   判定は、そちら 1 本に既に在る(2 つ目の「窓を開く作法」を作らない。CLAUDE.md
+     *   §10「置き換えの作法」)。⚠ **同期に呼ぶ** ── `window.open` は gesture の
+     *   中でしか通らない。
      */
-    if (dual !== null) carryDualFocus(dual);
+    services.openNoteWindow?.(lid);
+  };
+  /**
+   * 🔴 **一覧タブの 2 回押しは、種類を問わず別のウィンドウ(付箋)へ**(#1042 C14)。
+   *
+   * ⚠ `maybeDoubleOpen` から**分けている**(共有すると、フォルダの行で
+   * `canEnterScope` が拾われて `SET_SCOPE` を撃ってしまう ── 一覧タブは
+   * `scopeLid` を描画に使わないので、押しても画面には出ない**見えない現在地の
+   * 移動**になる。`tests/adapter/multi-select.test.ts` がこれを退行として pin
+   * している)。⚠ 鍵空間も**別に持つ**(フォルダ表の 2 回押しと取り違えない)。
+   */
+  let lastListClick: { lid: string; at: number } = { lid: '', at: 0 };
+  const maybeOpenListNote = (lid: string): void => {
+    const now = Date.now();
+    const again = lastListClick.lid === lid && now - lastListClick.at <= DOUBLE_MS;
+    lastListClick = { lid, at: now };
+    if (!again) return;
+    lastListClick = { lid: '', at: 0 }; // 3 回目を「もう一度」と数えない
+    // ⚠ 同期に呼ぶ(`window.open` は gesture の中でしか通らない)。上と同じ経路。
+    services.openNoteWindow?.(lid);
   };
   /**
    * 🔴 **右クリックで、その行にできることを出す**(#426 段①)。

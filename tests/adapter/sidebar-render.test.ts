@@ -1,14 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { SidebarRenderer } from '../../src/adapter/ui/render/sidebar';
+import { Dispatcher } from '../../src/adapter/state/dispatcher';
+import { bindActions } from '../../src/adapter/ui/actions/binder';
 
-function meta(lid: string, order: number, title = 't-' + lid): EntryMeta {
+function meta(lid: string, order: number, title = 't-' + lid, archetype = 'text'): EntryMeta {
   return {
     lid,
     title,
-    archetype: 'text',
+    archetype,
     createdAt: null,
     updatedAt: null,
     entryOrder: order,
@@ -291,5 +293,68 @@ describe('🔴 一覧が 0 件のとき、理由と戻り道を出す(#550)', ()
     expect(clear(root), 'ノートが無いのに「絞りを外す」を出した(dead click)').toBeNull();
     // ⚠ 空振り防止 ── 器ごと出ていないなら、この test は何も見ていない(#722 で器は出る)
     expect(box(root), '0 件の器そのものが出ていない(次の一手も出ていない)').not.toBeNull();
+  });
+});
+
+/**
+ * 🔴 **一覧タブの行を 2 回続けて押すと、別のウィンドウ(付箋)で開く**(#1042 C14)。
+ *
+ * ⚠ フォルダ表 / 2 ペインの「2 回押し」(#240 段①)は「中へ入る」だが、一覧タブに
+ * `scopeLid`(現在地)の概念は無いので、フォルダの行でも「中へ入る」は起こさない
+ * (`tests/adapter/multi-select.test.ts`「もう一度押す」もフォルダ面の中だけ ──
+ * 見えない現在地が動かないことを既に pin している)。行の種類に関わらず、
+ * `open-note-window`(右クリック / 右の列「別のウィンドウで開く」)と**同じ経路**
+ * (`services.openNoteWindow`)で開く。
+ */
+describe('🔴 一覧タブの 2 回押しで別のウィンドウ(付箋)を開く(#1042 C14)', () => {
+  function setupBound(metas: EntryMeta[]) {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const regions = buildShell(root);
+    const sidebar = new SidebarRenderer(regions.sidebar);
+    const d = new Dispatcher();
+    d.onState((st) => sidebar.render(st));
+    const openedWindows: string[] = [];
+    bindActions(root, d, { openNoteWindow: (lid) => openedWindows.push(lid) });
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas, relations: [] });
+    const row = (lid: string) =>
+      root.querySelector<HTMLElement>(`[data-pkc-region="entry-list"] [data-pkc-entry="${lid}"]`)!;
+    return { root, d, row, openedWindows };
+  }
+
+  it('🔴 ノートを 2 回続けて押すと、別のウィンドウ(付箋)で開く', () => {
+    const { row, openedWindows, d } = setupBound([meta('a', 1, '買い物メモ')]);
+    row('a').click();
+    expect(openedWindows, '1 回目で開いてしまった').toEqual([]);
+    row('a').click();
+    expect(openedWindows, '2 回目で開かなかった').toEqual(['a']);
+    // ⚠ 1 回目で中央に出す選択そのものは今までどおり(2 回目でも壊れていない)
+    expect(d.getState().selectedLid).toBe('a');
+  });
+
+  it('🔴 フォルダの行を 2 回続けて押しても、一覧では中へ入らず別のウィンドウ(付箋)で開く', () => {
+    // ⚠ フォルダ表 / 2 ペインとは違う結果になることを言う test ── 一覧に
+    //   `scopeLid` の概念が無いことの確認(見えない現在地を動かさない)
+    const { row, openedWindows, d } = setupBound([meta('f1', 1, 'はこ', 'folder')]);
+    row('f1').click();
+    row('f1').click();
+    expect(openedWindows, 'フォルダなのに別窓で開かなかった').toEqual(['f1']);
+    expect(d.getState().scopeLid, '一覧タブの 2 回押しで見えない現在地が動いた').toBeNull();
+  });
+
+  it('⚠ 間が空いたら「2 回押した」と数えない(席を立って戻ったら開く、を作らない)', () => {
+    // ⚠ 観測点は `Date.now` ── unit の 2 回のクリックは同一ミリ秒で走るので、
+    //   差し替えないと 500ms の窓を 1 度も通らない(通らない経路は守れない)
+    const now = vi.spyOn(Date, 'now');
+    now.mockReturnValue(1_000);
+    const { row, openedWindows } = setupBound([meta('a', 1, '買い物メモ')]);
+    row('a').click();
+    now.mockReturnValue(6_000); // 5 秒後
+    row('a').click();
+    expect(openedWindows, '5 秒空いたのに「続けて押した」と数えた').toEqual([]);
+    now.mockReturnValue(6_200); // 続けて押した
+    row('a').click();
+    expect(openedWindows, '続けて押しても開かない').toEqual(['a']);
+    now.mockRestore();
   });
 });
