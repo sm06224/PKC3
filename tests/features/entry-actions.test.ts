@@ -275,8 +275,8 @@ describe('条件つきの操作(#500 案 C)', () => {
 
   it('⚠ 字は表から来る(情報ペインと食い違わない)', () => {
     // 🔑 上の「字は 1 か所から来る」検査が条件つきの 2 行も見るようになっている
-    expect(ENTRY_ACTION_LABELS['export-folder']).toBe('バックアップ(このフォルダ)');
-    expect(ENTRY_ACTION_LABELS['write-back-file']).toBe('書き戻す');
+    expect(ENTRY_ACTION_LABELS['export-folder']).toBe('このフォルダをバックアップ');
+    expect(ENTRY_ACTION_LABELS['write-back-file']).toBe('元ファイルへ書き戻す');
     // ⚠ 取り込みは枚数を含むので表ではなく組み立て関数が持つ
     expect(adoptImagesLabel(1)).toContain(ADOPT_IMAGES_LABEL);
   });
@@ -568,7 +568,7 @@ describe('行の右クリックからの整理(#215)', () => {
 
   it('字は画面で起きることで書いてある', () => {
     expect(ENTRY_ACTION_LABELS['rename-entry-begin']).toBe('名前を変える');
-    expect(ENTRY_ACTION_LABELS['move-to-folder']).toBe('移す…');
+    expect(ENTRY_ACTION_LABELS['move-to-folder']).toBe('フォルダへ移す…');
     expect(ENTRY_ACTION_LABELS['create-in-folder']).toBe('この中に新しいノートを作る');
   });
 });
@@ -707,10 +707,34 @@ describe('繰り返しの一覧(#855 段 0)', () => {
  *   コメントを含む file 全体の文字列一致ではなく**構文で拾う**)。
  */
 describe('幅の段は 2 つだけ(#1029 段 C 手 2)', () => {
-  it('🔴 entryActionWidthTier は short/long の 2 値だけを、両方実際に使う', () => {
+  /**
+   * 🔴 **#1046 で「短い段」の在庫が尽きた**(2026-09-25)。
+   *
+   * ⚠ 上のブロックで「両方実際に使う」を空振り防止として置いていたが、
+   *   `#1046`(動詞つきの改名)が **この配列の短い 6 件を全部**長い側へ動かした ──
+   *   `Word`(4)→`Word で書き出す`(15)/ `PDF`(3)→`PDF で書き出す`(14)/
+   *   `書き戻す`(8)→`元ファイルへ書き戻す`(20)/ `履歴`(4)→`履歴を開く`(10)/
+   *   `移す…`(6)→`フォルダへ移す…`(16)/ `削除`(4)→`ゴミ箱へ移す`(12)。
+   *   実測(2026-09-25 時点):この配列に 8 桁以下の項目は **0 件**。
+   * 🔑 これは検査が弱ったのではない ── **短い段を使う項目が、いま実在しない**。
+   *   `entryActionWidthTier` と CSS の `[data-pkc-width='short']` は
+   *   **将来また短い名前が増えたときのための機構として残す**(消さない)。
+   * ⚠ だから「両方使う」ではなく「2 値しか無い(3 段目を作らない)」だけを見る形に
+   *   落とす。短い段が復活したら、この it は自動で both を見る形に戻せる
+   *   (下の対照群を、その日のために残してある)。
+   */
+  it('🔴 entryActionWidthTier は short/long の 2 値だけ(いまは全部 long でもよい)', () => {
     const tiers = new Set(ENTRY_MENU_ACTIONS.map((a) => entryActionWidthTier(a.label)));
-    // ⚠ 空振り防止 ── 両方の段が実際に使われていること(片方しか出ないと段が 1 つになる)
-    expect([...tiers].sort()).toEqual(['long', 'short']);
+    for (const t of tiers) expect(['short', 'long']).toContain(t);
+    // ⚠ 空振り防止 ── 配列自体は読めていること
+    expect(ENTRY_MENU_ACTIONS.length).toBeGreaterThan(5);
+    // 🔑 いまの実態を pin する(#1046)── 復活したら、ここが教えてくれる
+    expect([...tiers].sort()).toEqual(['long']);
+  });
+
+  it('⚠ 対照群 ── 8 桁以下の名前を渡せば、いまも short が返る(関数は生きている)', () => {
+    expect(entryActionWidthTier('移す…')).toBe('short');
+    expect(entryActionWidthTier('削除')).toBe('short');
   });
 
   it('🔴 CSS に現れる幅の段(min-width の下限)は 2 種類だけ', () => {

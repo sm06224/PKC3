@@ -421,7 +421,7 @@ export class InspectorRenderer {
            *   押せない物を出すと無言の dead click になるので、**出さない**。
            */
           if (canWriteTags) {
-            const off = iconButton('untag-entry', '外す');
+            const off = iconButton('untag-entry', 'タグを外す');
             off.setAttribute('data-pkc-tag', tag);
             off.setAttribute('data-pkc-field', 'inspector-tag-off');
             off.title = `このノートから「${tag}」を外します(ノートも本文の他の行も消えません)`;
@@ -527,7 +527,7 @@ export class InspectorRenderer {
           go.setAttribute('data-pkc-field', 'relation-target-link');
           // ⚠ 相手が消えていても**黙って空にしない**(何が壊れているか分かる形)
           go.textContent = other?.title ?? '(見つかりません)';
-          const del = iconButton('remove-relation', '消す');
+          const del = iconButton('remove-relation', '関係を消す');
           del.setAttribute('data-pkc-relation', r.id);
           // 🔴 編集中は押せなくする(#513)── reducer は黙って捨てるので、口の側で断る
           del.disabled = editing;
@@ -946,7 +946,7 @@ export class InspectorRenderer {
       clear = document.createElement('button');
       clear.type = 'button';
       clear.setAttribute('data-pkc-action', 'clear-entry-date');
-      clear.textContent = '外す';
+      clear.textContent = '日付を外す';
       dd.append(set, clear);
     }
     const has = meta.date !== null;
@@ -1179,7 +1179,7 @@ export class InspectorRenderer {
      *   **行ごと畳む** ── 「送り先がありません」を常設すると、user は
      *   **押せない物**を毎回読むことになる。畳みは `paintExtSend` が決める。
      */
-    row('アプリへ送る', 'inspector-ext-send');
+    row('送り先のアプリ', 'inspector-ext-send');
     if (shape === 'entry+link') row('元ファイル', 'inspector-linked-file');
     this.region.append(dl);
 
@@ -1515,7 +1515,7 @@ export class InspectorRenderer {
     apply.type = 'button';
     apply.setAttribute('data-pkc-action', 'apply-plan');
     apply.setAttribute('data-pkc-field', 'plan-apply');
-    apply.textContent = '適用する';
+    apply.textContent = 'この整理案を適用';
     /**
      * 🔴 **誤りが 1 行でもあれば押せない**(#429 段③)。
      * ⚠ 半分だけ当たると、どこまで進んだのか user にも分からなくなる。

@@ -339,10 +339,10 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'filer-move',
-    label: '移す…(入れ先のフォルダを選ぶ)',
+    label: 'フォルダへ移す…',
     contexts: ['filer'],
     defaults: ['F6'],
-    note: '選択があれば、その全部を移します',
+    note: '入れ先のフォルダを選びます(選択があれば、その全部を移します)',
   },
   {
     id: 'filer-new-in-folder',

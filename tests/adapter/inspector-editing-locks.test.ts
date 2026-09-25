@@ -228,7 +228,7 @@ describe('編集中の 1 行(#715)', () => {
     expect(note.hidden, '編集中なのに理由が出ない').toBe(false);
     // ⚠ 文言は**画面のボタンの字**と対で pin する ── 「確定 / 取り消し」はどのボタンの字でもない
     expect(note.textContent).toBe(EDITING_NOTE);
-    expect(note.textContent).toContain('保存するか、キャンセルすると');
+    expect(note.textContent).toContain('「編集を保存する」か「編集をやめる」を押すと');
     // 🔴 **直上** ── 帯と離れると何の理由か読めない
     expect(
       note.nextElementSibling?.getAttribute('data-pkc-field'),

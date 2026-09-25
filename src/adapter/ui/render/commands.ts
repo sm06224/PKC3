@@ -107,10 +107,10 @@ export const COLLECTION_COMMANDS: readonly CollectionCommand[] = [
  *   `buildCollectionPane` が、この配列を描いた**直後**に手で組む。
  */
 export const COLLECTION_PANE_COMMANDS: readonly CollectionCommand[] = [
-  { action: 'export-html', label: '閲覧用 HTML', title: '読むだけの 1 枚にまとめます' },
+  { action: 'export-html', label: '閲覧用 HTML で書き出す', title: '読むだけの 1 枚にまとめます' },
   {
     action: 'export-portable',
-    label: '持ち歩ける HTML 1 枚',
+    label: 'HTML 1 枚で書き出す',
     /**
      * 🔴 **「閲覧用 HTML」との違いを、題名ではなく説明で言い切る**(#400 段④)。
      * ⚠ どちらも「HTML 1 枚」なので、**何が違うか**を書かないと選べない ──
@@ -122,7 +122,7 @@ export const COLLECTION_PANE_COMMANDS: readonly CollectionCommand[] = [
   },
   {
     action: 'export-markdown',
-    label: 'Markdown',
+    label: 'Markdown で書き出す',
     /**
      * 🔴 **何のための形かを書く**(#180 の C-2、2026-08-24)。
      * ⚠ 直す前は「Markdown ファイルとして保存します」だけで、**押す理由**が

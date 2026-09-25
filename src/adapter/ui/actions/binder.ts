@@ -3019,7 +3019,7 @@ function deleteFrom(
     if (st.phase !== 'ready') {
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: `${phaseBlockReason(st.phase)}削除してください`,
+        error: `${phaseBlockReason(st.phase)}ゴミ箱へ移してください`,
       });
       return;
     }
@@ -3028,7 +3028,7 @@ function deleteFrom(
      * 🔴 **見えている行に絞る**(着地前レビュー 2)。印は行が見えなくなっても
      * 残る(絞り込みで消えた / 別タブが消した)ので、素で消すと**画面に無いものが
      * ゴミ箱へ入る**。⚠ 帯に出す数(`filer.ts`)と**同じ規則**を通す ──
-     * 食い違うと「2 件を削除しますか?」と聞いて 3 件消す形になる。
+     * 食い違うと「2 件をゴミ箱へ移しますか?」と聞いて 3 件動かす形になる。
      */
     const lids = operationTargets(rows, selection, cursor);
     if (lids.length === 0) {
@@ -3046,14 +3046,14 @@ function deleteFrom(
         error:
           selection.length > 0
             ? '選んでいた行がいま画面にありません(絞り込みを消すか、選び直してください)'
-            : '削除するものを選んでください(行を押すと選べます)',
+            : 'ゴミ箱へ移すものを選んでください(行を押すと選べます)',
       });
       return;
     }
     confirmThen(
       root,
-      `選んでいる ${lids.length} 件を削除しますか?(ゴミ箱から戻せます)`,
-      { okLabel: '削除', danger: true },
+      `選んでいる ${lids.length} 件をゴミ箱へ移しますか?`,
+      { okLabel: 'ゴミ箱へ移す', danger: true },
       dispatcher,
       /**
        * ⚠ 待っている間に **①編集が始まる ②対象が消える**(別タブ / 取込)。
@@ -3062,7 +3062,7 @@ function deleteFrom(
        */
       () => {
         const st = dispatcher.getState();
-        if (st.phase !== 'ready') return `${phaseBlockReason(st.phase)}削除してください`;
+        if (st.phase !== 'ready') return `${phaseBlockReason(st.phase)}ゴミ箱へ移してください`;
         const alive = lids.filter((l) => st.entryMetas.has(l));
         if (alive.length === 0) return '選んでいたものは、もうありません';
         if (alive.length !== lids.length)
@@ -5075,7 +5075,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (phase !== 'ready') {
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: `${phaseBlockReason(phase)}削除してください`,
+        error: `${phaseBlockReason(phase)}ゴミ箱へ移してください`,
       });
       return;
     }
@@ -5101,12 +5101,12 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     confirmThen(
       root,
-      `「${title}」を削除しますか?(ゴミ箱から戻せます)`,
-      { okLabel: '削除', danger: true },
+      `「${title}」をゴミ箱へ移しますか?`,
+      { okLabel: 'ゴミ箱へ移す', danger: true },
       dispatcher,
       () => {
         const st = dispatcher.getState();
-        if (st.phase !== 'ready') return `${phaseBlockReason(st.phase)}削除してください`;
+        if (st.phase !== 'ready') return `${phaseBlockReason(st.phase)}ゴミ箱へ移してください`;
         if (!st.entryMetas.has(lid)) return `「${title}」は、もうありません`;
         return null;
       },

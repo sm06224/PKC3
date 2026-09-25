@@ -856,7 +856,7 @@ export class FilerRenderer {
         move.setAttribute('data-pkc-field', 'crumb-move');
         move.setAttribute('data-pkc-action', 'move-to-folder');
         move.setAttribute('data-pkc-entry', here.lid);
-        move.textContent = '移す…';
+        move.textContent = 'フォルダへ移す…';
         move.title = `いま開いている「${here.title}」を、別のフォルダへ移します`;
         crumb.append(move);
       }
