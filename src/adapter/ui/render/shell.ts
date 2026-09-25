@@ -12,6 +12,8 @@
 import { SEALED_ARCHETYPES, SEALED_VIEWS } from '@features/sealed';
 import { HINT_BASE, HINT_COMMAND, hintTitle } from './shortcut-hint';
 import { COLLECTION_COMMANDS } from './commands';
+// 🔴 前回選んだ「作る種類」を覚える(#1045)
+import { appCreateKind } from './create-kind';
 import { BROWSE_ICONS, iconButton, iconSpan, markPrimary } from './icons';
 import { COLUMN_PANES, PANE_LABELS } from '@features/pane-visibility';
 import { PHONE_BAR_REGION, PHONE_RETURN_REGION } from './phone-layout';
@@ -479,7 +481,25 @@ export function buildShell(root: HTMLElement): ShellRegions {
     kind.append(opt);
   }
 
-  const first = kinds[0];
+  /**
+   * 🔴 **前回選んだ種類を、次の起動でも覚える**(#1045。user 報告
+   * 「▼ で選んでも、次に開くとまた "+ ノート" に戻る」)。
+   *
+   * ⚠ **覚えていた種類が、いまの版では選べない**(封印された / 消えた)なら
+   *   黙って既定(先頭)へ落とす ── 壊れた保存や版違いで作成そのものが
+   *   止まるほうが害が大きい(`CreateKindStore` は有効性を見ないので、
+   *   ここで `kinds` に対して照合する)。
+   */
+  const remembered = appCreateKind.get();
+  const rememberedKind =
+    remembered !== null ? kinds.find(({ archetype }) => archetype === remembered) : undefined;
+  const first = rememberedKind ?? kinds[0];
+  /**
+   * ⚠ **select と本体を揃える**(`pick-create-kind` と同じ理屈 ── 保持場所は
+   *   select 1 か所。食い違うと「押した種類と出来るものが別」になる)。
+   *   既定(先頭)のときも明示しておく ── DOM の初期選択に頼らない。
+   */
+  if (first) kind.value = first.archetype;
   const create = iconButton(
     'create-entry',
     first ? `+ ${first.label}` : '新規',

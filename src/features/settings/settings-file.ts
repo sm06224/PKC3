@@ -135,6 +135,10 @@ export const SKIPPED_KEYS: readonly { readonly key: string; readonly why: string
     why: '中身が lid そのもの(#215 残り①)── 別の container へ運ぶと、そこに居ないノートを「最近開いた」に並べる。そのうえ「何を読んでいたか」は設定ではなく行動の記録なので、渡す物でもない',
   },
   {
+    key: 'pkc3.create-kind',
+    why: '好みの設定ではなく最後の操作の記録である(#1045)── ▼ で選んだ「作る種類」は、その端末でその場で選んだ事実にすぎない。別の端末へ運ぶと、そこで選んだことのない種類が最初から選ばれた状態になる',
+  },
+  {
     key: 'pkc3.external-images',
     why: '許可である ── その端末でその中身を見て許したもの',
   },

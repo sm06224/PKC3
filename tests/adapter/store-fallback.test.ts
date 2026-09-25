@@ -42,6 +42,7 @@ import { QueryKeyStore } from '@adapter/ui/render/query-key-store';
 import { BrowseModeStore } from '@adapter/ui/render/browse-mode';
 import { PaneVisibilityStore } from '@adapter/ui/render/pane-visibility';
 import { GroupFoldStore } from '@adapter/ui/render/group-fold';
+import { CreateKindStore } from '@adapter/ui/render/create-kind';
 
 /**
  * 「保存が無い状態で書いて、読み直したら同じ値が返る」を 1 組で見る。
@@ -128,6 +129,15 @@ const CASES: readonly {
       return { write: (v) => s.set(v as string | null), read: () => s.get() };
     },
     a: 'tags',
+    b: null,
+  },
+  {
+    name: 'CreateKindStore',
+    make: () => {
+      const s = new CreateKindStore(null);
+      return { write: (v) => s.set(v as string | null), read: () => s.get() };
+    },
+    a: 'textlog',
     b: null,
   },
   {

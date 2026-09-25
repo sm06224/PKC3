@@ -235,6 +235,8 @@ import {
   resolvePlanTarget,
 } from '@features/structure/structure-plan';
 import { appQueryKey } from '@adapter/ui/render/query-key-store';
+// 🔴 ▼ で選んだ「作る種類」を端末側に覚える(#1045)
+import { appCreateKind } from '@adapter/ui/render/create-kind';
 import { PAINTED_ATTR } from '@adapter/ui/render/detail';
 import { openView } from '@adapter/ui/render/open-view';
 import {
@@ -7880,10 +7882,12 @@ const ACTIONS: Record<string, ActionHandler> = {
    * **本体のボタンの文言・図案**と **`Ctrl+N` の対象**を同時に切り替える。
    * ⚠ 保持場所は `<select>` 1 か所 ── ボタンの属性と select が食い違うと、
    *   押した種類と出来るものが別になる(いちばん困る形)。
+   * 🔴 **端末側にも覚える**(#1045)── 次に起動したとき `shell.ts` がここを読む。
    */
   'pick-create-kind': (_dispatcher, target, _services, root) => {
     const archetype = target.getAttribute('data-pkc-archetype');
     if (!archetype) return;
+    appCreateKind.set(archetype);
     const select = root.querySelector<HTMLSelectElement>('[data-pkc-field="create-kind"]');
     if (select) select.value = archetype;
     const run = root.querySelector<HTMLElement>('[data-pkc-field="create-run"]');
