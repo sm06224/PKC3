@@ -9,7 +9,7 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
-import type { Dispatchable } from '../../src/adapter/state/app-state';
+import { phaseBlockReason, type Dispatchable } from '../../src/adapter/state/app-state';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
@@ -193,7 +193,9 @@ describe('帯の「保存…」(#633 段③)', () => {
     expect(d.getState().phase, '前提: 編集に入った').toBe('editing');
     const saveEditing = root.querySelector<HTMLButtonElement>('[data-pkc-action="stack-save"]');
     expect(saveEditing?.disabled, '編集中なのに押せる顔をしている').toBe(true);
-    expect(saveEditing?.title).toContain('編集を終えて');
+    // 🔑 字は `phaseBlockReason` の 1 か所から(C11b / #1045)── 直す前は「編集を
+    //   終えてから」と手で書いていたが、他の場所と「編集を終了してから」にそろえた
+    expect(saveEditing?.title).toContain(phaseBlockReason('editing'));
   });
 
   function bindSetup() {

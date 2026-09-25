@@ -9,6 +9,7 @@
  * 掃除されると「meta はあるが bytes が無い」を掴んで欠けたアーカイブができる。
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
+import { phaseBlockReason } from '@adapter/state/app-state';
 import { writeArchive, type ArchiveSource } from '@features/export/pkc3-archive';
 import { archiveFileName, type ArchiveKind } from '@features/export/archive-kind';
 import { looksCorrupt } from '@features/storage/db-corruption';
@@ -169,8 +170,9 @@ export async function exportEntry(
   // ガードが後ろにあると「30MB 読んでから編集中ですと言う」になる。
   // さらに、読みの途中で編集が確定すると body と鎖の基準 tip が別時刻になり、
   // 「読み → 編集 → 保存(ready へ戻る)→ ガード通過」で内部矛盾したアーカイブができる
-  if (dispatcher.getState().phase !== 'ready') {
-    dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから書き出してください' });
+  const phase = dispatcher.getState().phase;
+  if (phase !== 'ready') {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}書き出してください` });
     return null;
   }
   try {
@@ -207,8 +209,9 @@ export async function exportFolder(
   lid: string,
 ): Promise<number | null> {
   // ⚠ **読みの前**に断る(`exportEntry` と同じ理由 ── 30MB 読んでから断らない)
-  if (dispatcher.getState().phase !== 'ready') {
-    dispatcher.dispatch({ type: 'OP_FAILED', error: '編集を終了してから書き出してください' });
+  const phase = dispatcher.getState().phase;
+  if (phase !== 'ready') {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}書き出してください` });
     return null;
   }
   try {
@@ -304,8 +307,9 @@ export async function exportArchive(
     return null;
   };
   // 編集中は draft が disk と違う ── 「保存したつもりの本文」が入らない形を作らない
-  if (dispatcher.getState().phase !== 'ready') {
-    return fail('編集を終了してから書き出してください');
+  const phase = dispatcher.getState().phase;
+  if (phase !== 'ready') {
+    return fail(`${phaseBlockReason(phase)}書き出してください`);
   }
 
   const STARTING: Record<ExportKind, string> = {
@@ -686,8 +690,8 @@ async function exportEntryOffice(
     return false;
   };
   // ⚠ 編集中は draft が disk と違う ── 「保存したつもりの本文」が入らない形を作らない
-  if (dispatcher.getState().phase !== 'ready')
-    return fail('編集を終了してから書き出してください');
+  const phase = dispatcher.getState().phase;
+  if (phase !== 'ready') return fail(`${phaseBlockReason(phase)}書き出してください`);
   // ⚠ **知らせを出す前に断る** ── 「書き出しています…」の直後に断り文が出ると、
   //    user には「途中で失敗した」に見える(実際は 1 バイトも読んでいない)
   const renderBody = deps.renderBody;

@@ -184,3 +184,110 @@ describe('🔴 「確定」「取り消し」で出口を言う断り文が src 
     expect(hits).toEqual([]);
   });
 });
+
+/**
+ * 🔴 **C11b(#1045)── 手書きの「編集を終了してから」/「編集を終えてから」を
+ *   `phaseBlockReason` へ寄せた**。
+ *
+ * 直す前は src の**約 62 か所**が前置きを手で書いており、その多くは
+ * `phase !== 'ready'` で断っていた ── だから**保存に失敗して止まっているとき
+ * (編集していない)にも「編集を終了してから」と言っていた**(#516 と同じ
+ * 「存在しない編集を探させる」誤り)。
+ *
+ * 🔑 寄せなかったのは 2 か所だけ ── **等値で pin する**(直したら消さないと
+ * 落ちる形)。理由はそれぞれの file に書いてある:
+ * - `capture.ts` ── 「編集中は取り込めません。」という**別の一文**が先に在り、
+ *   前置きだけ差し替えても文全体の一致は保てない(状態を 2 重に語る文)
+ * - `view-window.ts` ── ここには `phase` が届いていない(`landed: boolean`
+ *   しか無く、`SET_VIEW_MODE` の条件を辿ってようやく `'editing'` だと分かる)
+ */
+describe('🔴 手書きの前置きは phaseBlockReason へ寄せてある(C11b / #1045)', () => {
+  const PHRASES = ['編集を終了してから', '編集を終えてから'] as const;
+  /** `phaseBlockReason` 自身の定義(ここが「1 か所」の本体。除外してよい)。 */
+  const DEFINITION_FILE = 'src/adapter/state/app-state.ts';
+  /** 寄せなかった 2 か所(理由は上のコメント)。ここだけ手書きの前置きが残ってよい。 */
+  const KNOWN_KEPT: Record<string, string> = {
+    'src/adapter/ui/actions/capture.ts': '編集を終えてから',
+    'src/adapter/platform/view-window.ts': '編集を終えてから',
+  };
+
+  function walkTs(dir: string, out: string[] = []): string[] {
+    for (const name of readdirSync(dir)) {
+      const p = join(dir, name);
+      if (statSync(p).isDirectory()) walkTs(p, out);
+      else if (p.endsWith('.ts')) out.push(p);
+    }
+    return out;
+  }
+  const srcRoot = join(__dirname, '../../src');
+  const files = walkTs(srcRoot);
+  const relOf = (f: string): string => `src${f.slice(srcRoot.length)}`.replace(/\\/g, '/');
+
+  it('空振り防止 ── src の .ts を読めている', () => {
+    expect(files.length).toBeGreaterThan(100);
+  });
+
+  it('この 1 か所(定義)と既知の 2 か所を除いて、src のコードに残っていない', () => {
+    const hits: string[] = [];
+    for (const f of files) {
+      const rel = relOf(f);
+      const code = codeOnly(readFileSync(f, 'utf8'));
+      for (const phrase of PHRASES) {
+        if (!code.includes(phrase)) continue;
+        if (rel === DEFINITION_FILE && phrase === '編集を終了してから') continue;
+        if (KNOWN_KEPT[rel] === phrase) continue;
+        hits.push(`${rel}: ${phrase}`);
+      }
+    }
+    expect(hits).toEqual([]);
+  });
+
+  it('既知リストの 2 か所は、いまも実在する(消えたら KNOWN_KEPT を更新する合図)', () => {
+    for (const [rel, phrase] of Object.entries(KNOWN_KEPT)) {
+      const code = codeOnly(readFileSync(join(__dirname, '../..', rel), 'utf8'));
+      expect(code.includes(phrase), `${rel} に「${phrase}」が見つからない`).toBe(true);
+    }
+  });
+});
+
+/**
+ * 🔴 **error の相でも、代表 3 か所が「編集を終了」を言わない(C11b)**。
+ *
+ * ⚠ 上の門は**字が残っていないこと**しか見ない ── `phaseBlockReason` に
+ *   差し替えたつもりで引数を取り違えていても(例: `state.phase` の代わりに
+ *   固定の `'editing'` を渡す)、字面の検査は気づけない。ここは**実際に
+ *   error 相を作って撃ち**、出てくる字を見る。
+ * 🔑 直す前(d0cfaaf)に戻すと、この 3 件は「再保存」を含まず「編集を終了」を
+ *   含む形で落ちることを 1 度確かめてある(手順は C11b の実装コメントに記録)。
+ */
+describe('🔴 保存に失敗して止まったとき ── 代表 3 か所は「再保存」を言い、「編集を終了」を言わない(C11b)', () => {
+  /** 押した所を模す ── `data-pkc-action` だけ持つ素のボタン(event delegation で受かる)。 */
+  function press(root: HTMLElement, action: string, attrs: Record<string, string> = {}): void {
+    const btn = root.ownerDocument.createElement('button');
+    btn.setAttribute('data-pkc-action', action);
+    for (const [k, v] of Object.entries(attrs)) btn.setAttribute(k, v);
+    root.append(btn);
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    btn.remove();
+  }
+
+  const SITES: ReadonlyArray<{ action: string; attrs?: Record<string, string> }> = [
+    { action: 'delete-entry' },
+    { action: 'rename-entry-begin' },
+    { action: 'restore-revision', attrs: { 'data-pkc-rev-id': 'r1' } },
+  ];
+
+  for (const { action, attrs } of SITES) {
+    it(`${action}`, () => {
+      const { root, d } = mounted();
+      toSaveFailed(d);
+      press(root, action, attrs);
+      const err = d.getState().error;
+      const retry = labelOf(root, 'retry-persist');
+      expect(err, `${action} が押せない理由を出していない(前提が崩れた)`).not.toBe('');
+      expect(err, '押せる出口(再保存)を言っていない').toContain(retry);
+      expect(err, '存在しない編集を案内している').not.toContain('編集を終了');
+      expect(err, '存在しない編集を案内している').not.toContain('編集を終えて');
+    });
+  }
+});

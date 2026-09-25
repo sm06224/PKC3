@@ -8,6 +8,7 @@
  * ⚠ 題名の無いカードは番号名(「連絡先 3」)を振る ── 黙って捨てない。
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
+import { phaseBlockReason } from '@adapter/state/app-state';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import { contactOf } from '@features/contact/contact-card';
 import { parseVcf, vcfNoteOf } from '@features/contact/vcard';
@@ -27,8 +28,9 @@ export async function importVcfFiles(
     dispatcher.dispatch({ type: 'OP_FAILED', error: msg });
     return null;
   };
-  if (dispatcher.getState().phase !== 'ready') {
-    return fail('編集を終了してから取り込んでください');
+  const phase = dispatcher.getState().phase;
+  if (phase !== 'ready') {
+    return fail(`${phaseBlockReason(phase)}取り込んでください`);
   }
   if (files.length === 0) return fail('取り込むファイルがありません');
 

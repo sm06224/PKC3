@@ -9,6 +9,7 @@
  * frontmatter を parse するが、body には手を触れない(P6d 段④ の規律)。
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
+import { phaseBlockReason } from '@adapter/state/app-state';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import { readPlainMarkdown } from '@features/import/plain-markdown';
 import { extractMeta } from '@features/flavor';
@@ -63,8 +64,9 @@ export async function importMarkdownFiles(
     dispatcher.dispatch({ type: 'OP_FAILED', error: msg });
     return null;
   };
-  if (dispatcher.getState().phase !== 'ready') {
-    return fail('編集を終了してから取り込んでください');
+  const phase = dispatcher.getState().phase;
+  if (phase !== 'ready') {
+    return fail(`${phaseBlockReason(phase)}取り込んでください`);
   }
   if (files.length === 0) return fail('取り込むファイルがありません');
 

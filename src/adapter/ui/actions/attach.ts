@@ -15,6 +15,7 @@
  *   ── PKC2 は走査が 500MB データで boot OOM を誘発した)
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
+import { phaseBlockReason } from '@adapter/state/app-state';
 import { dropCursor, noteToPutInto, putAssetIntoNote, type DroppedAt } from './asset-into-note';
 import { createWritableQueue } from './writable-queue';
 import { attachmentBody } from '@features/flavor/attachment-flavor';
@@ -522,13 +523,15 @@ export async function attachFiles(
    *   の鎖が編集の間ずっと詰まり、整理(未参照 GC)まで待たされる。
    * ⚠ 入れ先(`into`)は**押した時点**で控えてある ── 落とした本文のノート
    *   (どこにも落としていなければ、編集していたノート)に入る。
-   * ⚠ `editing` 以外の `ready` でない相(起動前 / 致命エラー)は、これまでどおり断る
-   *   ── 「編集を終えたら」と言っても、その日は来ない。
+   * ⚠ `editing` 以外の `ready` でない相(起動前 / 致命エラー)は、これまでどおり断る。
+   *   ⚠ ここは手で「編集を終了してから」と書かず `phaseBlockReason` から採る
+   *   (C11b / #1045)── 直す前は `error` の相でも「編集を終了してから」と言っていた
+   *   (`editing` 以外を弾く条件そのものが、まさにこの嘘を自覚して書かれていた)。
    */
   if (phase !== 'editing') {
     dispatcher.dispatch({
       type: 'OP_FAILED',
-      error: '編集を終了してから添付してください',
+      error: `${phaseBlockReason(phase)}添付してください`,
     });
     return;
   }

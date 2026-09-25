@@ -29,7 +29,12 @@ import {
 import { REQUEST_TIMEOUT_MS } from '../../src/adapter/platform/storage/store-proxy';
 import { CenterRouter } from '../../src/adapter/ui/render/center';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
-import { isAsidePane, SQL_HISTORY_MAX, viewModeLabel } from '../../src/adapter/state/app-state';
+import {
+  blockedActionNote,
+  isAsidePane,
+  SQL_HISTORY_MAX,
+  viewModeLabel,
+} from '../../src/adapter/state/app-state';
 import { fitSqlInput } from '../../src/adapter/ui/render/sql';
 import { SQL_WINDOW_MIN } from '../../src/features/query/sql-window';
 import { homeTabOf } from '../../src/adapter/ui/render/browse-mode';
@@ -1117,7 +1122,9 @@ describe('着地前レビューの直し(#681)', () => {
     const before = d.getState().entryMetas.size;
     saveBtn.click();
     expect(d.getState().entryMetas.size, '編集中なのにノートを作った').toBe(before);
-    expect(note(), '黙って捨てている(理由が画面に出ない)').toContain('編集中は書き出せません');
+    // 🔑 字は `blockedActionNote` の 1 か所から(C11b / #1045)── 手で書いた
+    //   「編集中は書き出せません」は消えた(この面の外と同じ字にそろえた)
+    expect(note(), '黙って捨てている(理由が画面に出ない)').toContain(blockedActionNote('editing')!);
   });
 
   /**
