@@ -11,7 +11,7 @@
  * 4. **無言で断らない**(編集中は理由を出す)
  * 5. 消えたものが**印に残らない**
  */
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EntryMeta, Relation } from '../../src/core/model/entry-meta';
 import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
 import { answerDialog, dialogMessage } from './dialog-helper';
@@ -520,6 +520,7 @@ describe('フォルダの表の鍵', () => {
     metas: EntryMeta[] = WITH_FOLDER,
     relations: Relation[] = [],
     openInEdit: OpenInEditStore = new OpenInEditStore(memStorage()),
+    services: Parameters<typeof bindActions>[2] = {},
   ) {
     document.body.innerHTML = '';
     const root = document.createElement('div');
@@ -527,7 +528,7 @@ describe('フォルダの表の鍵', () => {
     document.body.append(root);
     const d = new Dispatcher();
     const regions = buildShell(root);
-    bindActions(root, d, {}, new KeymapStore(memStorage()), openInEdit);
+    bindActions(root, d, services, new KeymapStore(memStorage()), openInEdit);
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas, relations });
     const filer = new FilerRenderer(regions.browseHost);
     d.onState((st) => filer.render(st));
@@ -824,6 +825,23 @@ describe('フォルダの表の鍵', () => {
     expect(d.getState().phase, '本文が来る前に編集へ入った').toBe('ready');
     d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: '# a' });
     expect(d.getState().phase, '本文が届いても編集に入らない').toBe('editing');
+  });
+
+  /**
+   * 🔴 **設定で入るときも、編集権の門を通る**(#1044 の調査で判明)。⚠ 直す前は
+   *   `START_EDIT` の直撃ちだったので、別のタブで編集中のノートにも入れた。
+   */
+  it('🔴 設定を入れていても、別のタブで編集中なら入らずに断る', async () => {
+    const store = new OpenInEditStore(memStorage());
+    store.setEnabled(true);
+    const acquireEditLock = vi.fn(async () => 'denied' as const);
+    const { d, clickRow, press } = screen(WITH_FOLDER, [], store, { acquireEditLock });
+    press('Enter', clickRow('a'));
+    d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: '# a' });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(acquireEditLock, 'ロックを問い合わせずに編集へ入った').toHaveBeenCalledWith('a');
+    expect(d.getState().phase, '別のタブで編集中なのに入った').toBe('ready');
+    expect(d.getState().error ?? '').toContain('別のタブかウィンドウで編集中');
   });
 
   it('🔴 設定が入っていても、別のノートへ移ったら後から勝手に編集へ入らない', () => {
