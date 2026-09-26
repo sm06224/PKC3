@@ -62,6 +62,29 @@ description: PKC3 の PR を作ってから CI green 確認 → 自己監査 →
 🔑 **手順:`data-pkc-action` を足したら、`npx vitest run tests/` を 1 回**
 (`tests/adapter` / `tests/features` の下だけでは、この 5 つのうち 2 つに届かない)。
 
+### 🔴 「いつも出る」ようにした物は**共有面**である ── 着地前にフル smoke(2026-09-26)
+
+⚠ #1038 段 D(C4)で、**編集中は画面のいちばん下の行に「編集中」が常に出る**ようにした。
+触った spec(編集の開始 / 付箋 / お知らせの目次 / 書式 / 追記欄)だけ回して着地させたら、
+**main で smoke が 2 本落ちていた**(#1065 で直した):
+
+| 落ちた検査 | 何を前提にしていたか |
+|---|---|
+| `body-links:202` | 「編集に入った時点ではステータスバーが**見えていない**」 |
+| `context-menu:365` | 同上 |
+
+🔴 **しかも片方は、前提を直しただけでは空振りのまま残る形だった** ── 押した後の検査が
+「帯が見える」「『編集』の字を含む」で、どちらも**押す前から「編集中」の 1 語に満たされる**
+(断り文が出なくても通る)。断り文そのものを見る形に直し、変異で落ちることを確かめた。
+
+🔑 **判定は機械的に**:変更が次のどれかなら、触った spec の外に読み手が居る ── **フルを回す**。
+- 今まで**出ていなかった物を、常に出す**ようにした(帯・1 語・印・色)
+- 今まで**出ていた物を、出さない / 短く**した
+- **既定の見え方**(色・字・位置)を変えた
+
+⚠ 「触った file の spec」では引けない ── 読み手は「ステータスバーが見えていない」を
+**前提**として持っているだけで、変えた file の名前も字も含んでいない。
+
 **そのあとに**:
 
 ```bash
@@ -213,6 +236,18 @@ npm run typecheck && npm run lint && npm test                              # 載
   🔑 **題名を `#` で始めない**(`段④b: …(#1017)` の形にする)/ 既に `#` 始まりの
   題名を戻す必要があるなら `git -c core.commentChar=';' cherry-pick --continue` か
   `git commit --cleanup=verbatim` で守る
+  - 🔴 **2026-09-26 に `git rebase --continue` で 3 回続けて踏んだ**(#1038 段 D / G / J を
+    main へ載せ直したとき)。⚠ **この bullet を読まずに**、題名を全部 `#1038 段…` で
+    始めていた。症状は同じ ── 衝突を解いて `GIT_EDITOR=true git rebase --continue` すると、
+    題名が消えて**本文の 1 行目が題名になる**(使い捨ての repo で再現:素通しなら消え、
+    `-c core.commentChar=';'` なら残る)。
+    🔑 **手順にする**:`--continue`(rebase / cherry-pick / merge)は**必ず**
+    `git -c core.commentChar=';' -c core.editor=true rebase --continue` の形で打ち、
+    直後に `git log --format='%h %s' -3` で**題名を目で見る**。
+    ⚠ 消えた題名は `git log -1 --format=%B <元の sha>` から戻せる(元の commit は reflog と
+    worktree に残る)── 戻すときは `git commit --amend -F` で。
+    ⚠ **4 回目が起きたら、文言ではなく `commit-msg` の hook で止める**
+    (`.githooks/` と `scripts/install-hooks.mjs` の形に倣う)
 
 ### ⚠ **remote 追跡 ref も掃除する** ── `--force-with-lease` は**効かない**
 
