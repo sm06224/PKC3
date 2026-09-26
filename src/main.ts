@@ -35,7 +35,7 @@ import {
 import { setFoldNotify } from '@adapter/ui/render/fold-notify';
 import { appTooNarrowOk, installTooNarrow } from '@adapter/ui/render/too-narrow';
 import { paintStatusOpen, paintStatusUndo } from '@adapter/ui/render/status-open';
-import { composeStatusLine } from '@adapter/ui/render/status-line';
+import { composeStatusLine, paintStatusText } from '@adapter/ui/render/status-line';
 import { openStorageWithRetry } from '@adapter/platform/storage/open-with-retry';
 import {
   storageStatusLine,
@@ -1344,7 +1344,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   ── CLAUDE.md §2)。この窓 / 付箋の窓のどちらでも同じ `paint` が走るので、
      *   `heldNoteWindow` でも状態語は出る(K16。畳むのは上の `sync` だけ)。
      */
-    const text = composeStatusLine({
+    const parts = {
       phase: dispatcher.getState().phase,
       statusBase,
       sync,
@@ -1353,7 +1353,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       savingLine: saving.line(),
       noticeLine,
       errorLine,
-    });
+    };
+    const text = composeStatusLine(parts);
     /**
      * 🔴 **断り書きが出ている間は、字が空でも器を畳まない**(#671 の裁定 3)。
      * ⚠ 畳むと **`OK` ごと画面から消える** ── 押す口が無いまま出しっぱなしに
@@ -1364,7 +1365,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     const keep = !regions.tooNarrow.hidden;
     if (text === statusShown && regions.status.hidden === (text === '' && !keep)) return;
     statusShown = text;
-    regions.statusText.textContent = text;
+    // ⚠ 状態の 1 語だけを別の器に入れる(`status-line.ts` の `paintStatusText`)── 字は同じ
+    paintStatusText(regions.statusText, parts);
     regions.status.hidden = text === '' && !keep;
   };
   /** 🔑 ここで初めて `paint` に繋がる(それまでの `onState` は落としてよい)。 */

@@ -90,3 +90,32 @@ export function composeStatusLine(parts: StatusLineParts): string {
     .filter((t) => t !== '')
     .join(' — ');
 }
+
+/**
+ * 🔴 **状態の 1 語だけを別の器に入れて描く**(#1038 台帳③ C4 の着地前レビュー)。
+ *
+ * ⚠ 1 稿目は行全体を 1 つの字として出していた ──「編集中」が「複数タブ: …」のような
+ *   控えめな知らせと**同じ色・同じ大きさ**で並び、user 目線のレビューが
+ *   「気づかれない字は無いのと同じ」と指摘した(設計 doc §9「気づきにくければ色を付ける」)。
+ * 🔑 付けるのは色相ではなく**濃さ**(本文と同じ濃い字 + 太字)── 主のボタンと同じ
+ *   「色ではなく濃さで段を作る」(user 裁定 2026-09-06)。保存に失敗して止まったときだけ
+ *   危険の赤(CSS の `[data-pkc-phase='error']`)。
+ * ⚠ 行の字(`textContent`)は `composeStatusLine` と**1 字も変わらない** ── 字を読む
+ *   受け手(smoke・状態の比較)はそのまま動く。
+ *
+ * @returns 描いた行の字(`composeStatusLine` と同じ値)
+ */
+export function paintStatusText(el: HTMLElement, parts: StatusLineParts): string {
+  const text = composeStatusLine(parts);
+  const word = editingStateWord(parts.phase);
+  if (word === '') {
+    el.textContent = text;
+    return text;
+  }
+  const state = el.ownerDocument.createElement('span');
+  state.setAttribute('data-pkc-field', 'status-state');
+  state.setAttribute('data-pkc-phase', parts.phase);
+  state.textContent = word;
+  el.replaceChildren(state, text.slice(word.length));
+  return text;
+}

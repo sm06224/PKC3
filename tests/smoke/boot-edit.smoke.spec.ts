@@ -31,6 +31,21 @@ test('boot → ノート作成 → 編集 → 保存が画面に反映される'
     (await statusText.textContent()) ?? '',
     '状態語が先頭に無い(見本 3「編集中 — …」の順)',
   ).toMatch(/^編集中/);
+  /**
+   * 🔴 **状態語は行の地の字より濃い**(#1038 台帳③ C4 の着地前レビュー。設計 doc §9)。
+   * ⚠ 字だけ見ると、濃くする規則を消しても緑 ── 実ブラウザで**計算された見た目**を、
+   *   同じ行の地の字(`--muted`)と比べる(対照群を同じ行に置く)。
+   */
+  const look = await page.evaluate(() => {
+    const state = document.querySelector('[data-pkc-field="status-state"]');
+    const line = document.querySelector('[data-pkc-region="status"]');
+    if (state === null || line === null) return null;
+    const a = getComputedStyle(state);
+    return { weight: Number(a.fontWeight), color: a.color, lineColor: getComputedStyle(line).color };
+  });
+  expect(look, '状態語の器(status-state)が無い').not.toBeNull();
+  expect(look!.weight, '状態語が太字でない(控えめな知らせと同じ重さ)').toBeGreaterThanOrEqual(700);
+  expect(look!.color, '状態語が行の地の字と同じ色(濃くなっていない)').not.toBe(look!.lineColor);
   const ta = page.locator('[data-pkc-field="editor-body"]');
   await expect(ta).toBeVisible();
   await ta.click();
@@ -69,6 +84,27 @@ test('boot → ノート作成 → 編集 → 保存が画面に反映される'
     page.locator('[data-pkc-field="append-lock"] button[data-pkc-action="cancel-edit"]'),
     '追記欄にキャンセルの出口が無い',
   ).toBeVisible();
+  /**
+   * 🔴 **出口は「編集中」のすぐ隣に在る**(#1038 台帳③ C4 の着地前レビュー)。
+   * ⚠ 1 稿目は理由の字が残りの幅を全部吸い(`flex: 1`)、1 語になった後ろに帯の半分近い
+   *   空白が出て、保存が右端へ離れていた。🔑 字の右端と保存の左端の間を実寸で測る。
+   * ⚠ **測るのは字の範囲(Range)であって、器の箱ではない** ── `flex: 1` の器は保存の
+   *   直前まで伸びるので、箱の右端で測ると 1 稿目の形でも「隣」に見える(変異試験で
+   *   `flex: 1` へ戻しても緑だった)。
+   */
+  const gap = await page.evaluate(() => {
+    const reason = document.querySelector('[data-pkc-field="append-lock-reason"]');
+    const save = document.querySelector('[data-pkc-field="append-lock"] button[data-pkc-action="commit-edit"]');
+    if (reason === null || save === null) return null;
+    const range = document.createRange();
+    range.selectNodeContents(reason);
+    const r = range.getBoundingClientRect();
+    const b = save.getBoundingClientRect();
+    return { gap: b.left - r.right, sameRow: Math.abs(b.top - r.top) < r.height + b.height };
+  });
+  expect(gap, '追記欄の理由か保存が見つからない').not.toBeNull();
+  expect(gap!.sameRow, '前提: 理由と保存が同じ行に並んでいない').toBe(true);
+  expect(gap!.gap, `「編集中」と保存の間が空きすぎている(${gap!.gap}px)`).toBeLessThan(24);
   await ta.fill('# 二稿');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   await expect(page.locator('[data-pkc-field="detail-body"] h1')).toContainText('二稿');
