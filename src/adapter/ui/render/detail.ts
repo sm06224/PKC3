@@ -46,6 +46,8 @@ function hydrateFigures(root: ParentNode | readonly ParentNode[]): MermaidScope[
 }
 import { applyBlocks, EMPTY_VIEW, type BlockView } from './apply-blocks';
 import { captureCellInput, reopenCellInput } from './cell-input';
+import { installSectionBox, syncSectionBoxSaving } from './section-box';
+import { listAppendTargets, sectionRange } from '@features/markdown/append-target';
 import { RowSwap } from './row-swap';
 import { diffCounts, diffRows, type DiffRow } from '@features/revision/diff-view';
 import type { RenderedWithRanges } from '@adapter/platform/render/markdown-client';
@@ -94,7 +96,7 @@ import {
   BODY_MEDIA_FIELD,
   BODY_MEDIA_CLASS,
 } from '@features/asset/asset-preview-kind';
-import type { AppState, AppPhase } from '@adapter/state/app-state';
+import type { AppState, AppPhase, SectionDraft } from '@adapter/state/app-state';
 import { appEditorMode } from './editor-mode';
 import { appKeymap, type KeymapStore } from './keymap';
 import { appPhoneLinks } from './phone-links';
@@ -364,6 +366,19 @@ export class DetailRenderer {
    */
   private viewToken = 0;
 
+  /**
+   * 🔴 **いま箱を差し込んでいる章の鍵**(#1044 段2)。`null` = 箱は無い。
+   * ⚠ 鍵は `${lid}\u0000${heading}` ── 同じノートで別の章の下書きに変わったら
+   *   (在り得ないはずだが)必ず作り直す側へ落とす防波堤。
+   */
+  private sectionBoxFor: string | null = null;
+  /**
+   * 🔴 **次の paint が終わったら差し込む章の下書き**(#1044 段2)。
+   * ⚠ 箱の差し込みは worker の paint が終わった**後**でないと安全でない
+   *   (描いたばかりの DOM が要る)── `render()` はここへ予約するだけ。
+   */
+  private pendingSectionInstall: { key: string; draft: SectionDraft } | null = null;
+
   /** markdown を描く口(既定は自前。⚠ **要るまで worker は作らない**)。 */
   private readonly markdown: MarkdownClient;
 
@@ -511,6 +526,34 @@ export class DetailRenderer {
     this.shownPanel = null;
   }
 
+  /**
+   * 🔴 **予約されている章の箱を、いま描けた DOM へ差し込む**(#1044 段2)。
+   *
+   * ⚠ **見出しの名前で章を再び探す**(行ではない)── `render()` が予約した時点の
+   *   行は、この paint が終わるまでの間に(理論上は)ずれうる。名前は
+   *   `OPEN_SECTION_DRAFT` を発したときと同じ本文から採っているので、この
+   *   1 回の paint の中では必ず 1 件だけ当たる。
+   * ⚠ 当たらなければ**何もしない**(箱を出さない)── 当てずっぽうで別の場所に
+   *   箱を出す(押した物と効く先が食い違う)よりは、押しても何も起きないほうが安全
+   *   (CLAUDE.md「衝突は、検出するより起こらなくするほうが強い」の隣接判断)。
+   */
+  private installPendingSectionBox(host: HTMLElement, body: string): void {
+    const pending = this.pendingSectionInstall;
+    if (pending === null) return;
+    this.pendingSectionInstall = null;
+    const fm = frontmatterLineCount(body);
+    const matches = listAppendTargets(body).filter((h) => h.text === pending.draft.heading);
+    if (matches.length !== 1) return;
+    const range = sectionRange(body, matches[0]!.slug);
+    if (range === null) return;
+    const box = installSectionBox(host, {
+      from: range.start - fm,
+      to: range.end - fm,
+      text: pending.draft.original,
+    });
+    if (box !== null) this.sectionBoxFor = pending.key;
+  }
+
   render(state: AppState): void {
     /**
      * 🔴 **留めた枠は、選択にも編集にも関係なく「その 1 件」を出す**(#505 段②)。
@@ -542,6 +585,49 @@ export class DetailRenderer {
       return;
     }
     const body = state.openBody?.body ?? null;
+    /**
+     * 🔴 **章の下書きが開いている間は、本文を描き直さない**(#1044 段2)。
+     *
+     * ⚠ アプリ全体は編集中にならない(`phase` は `ready` のまま)ので、上の
+     *   `editing` 早期 return には掛からない ── ここで**別に**止める。
+     * 🔑 開く / 閉じる(= `boxKey` が変わる)ときだけ描き直す。
+     *   開くときは**その場の DOM へ差し込むだけ**(`pendingSectionInstall`。
+     *   本文はまだ変わっていないので worker の paint は要らない)。
+     *   閉じるときは骨組みから作り直す(`skeletonLid = null`)── 箱が本文の一部を
+     *   手で差し替えているので、`applyBlocks` の差分台帳(`bodyView`)を信用しない。
+     */
+    /**
+     * ⚠ **`?? null` で読む**(2026-09-26。全量 test が教えた)── 多数の既存 test が
+     *   `AppState` を手組みの fixture(`as AppState`)で作っており、新しく足した
+     *   `sectionDraft` field を持たない = `undefined`。`!== null` は
+     *   `undefined` を素通しするので、直後の `draft.lid` で丸ごと落ちた
+     *   (42 test file が同じ 1 行で落ちた)。
+     */
+    const draft = state.sectionDraft ?? null;
+    const draftLid = this.pinnedLid ?? state.selectedLid;
+    const boxKey =
+      draft !== null && draftLid !== null && draft.lid === draftLid
+        ? `${draft.lid}\u0000${draft.heading}`
+        : null;
+    if (boxKey !== this.sectionBoxFor) {
+      this.sectionBoxFor = null;
+      if (boxKey === null) {
+        this.skeletonLid = null;
+      } else {
+        this.pendingSectionInstall = { key: boxKey, draft: draft! };
+      }
+      this.renderView(state, body);
+      return;
+    }
+    if (boxKey !== null) {
+      /**
+       * 🔴 **箱は作り直さないが、「保存中」の押せない見た目だけは追随させる**
+       *   (#1044 段2 3巡目の修理、S1)。⚠ 打ちかけの字には触らない
+       *   (`syncSectionBoxSaving` の docstring)。
+       */
+      if (this.bodyHost !== null) syncSectionBoxSaving(this.bodyHost, draft!.saving);
+      return; // 開いている間は、他の理由でも描き直さない
+    }
     /**
      * 指紋は (selectedLid, body, phase, revisionPanel 参照, **revisionPreview 参照**)。
      * title 次元は含めていない ── title 編集が入る段階で entryMetas 参照を足すこと。
@@ -955,6 +1041,12 @@ export class DetailRenderer {
         // ⚠ 帯は**本文が入ってから**組む(数えるものが DOM に無いと 0 件になる)
         this.renderExternalImageBar(lid, host);
         this.restoreScroll();
+        /**
+         * 🔴 **予約が在れば、章の箱を差し込む**(#1044 段2)。⚠ **最後**に置く ──
+         *   ここより前の後処理(畳み・板・掴む口・スタック)は host の直下の塊を
+         *   数えるので、先に塊を箱へ差し替えると数がずれる。
+         */
+        this.installPendingSectionBox(host, body);
         /**
          * 🔴 **描けた印**(#517)。⚠ **世代と器の門を通った後**に焼く ──
          *   前に置くと、捨てるはずの古い結果が印を付けてしまう。

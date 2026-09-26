@@ -6,9 +6,16 @@
  * 漏れた経路だけ**別タブから永久に編集できないノート**が生まれる ── だから
  * 「editing に居る間は対象を控え、離れた瞬間に返す」の 1 か所で守る。
  *
+ * 🔴 **章の欄も同じ 1 か所で守る**(#1044 段2、F-B)。⚠ 章の欄は `phase` を
+ *   `ready` のまま保つので(#1044 段2 設計)、`phase === 'editing'` だけを見ていると
+ *   **章の欄が閉じてもロックが返らない** ── `sectionDraft` が system command で
+ *   閉じる経路(F-A の `guardSectionDraftTransition`)は握っている `services` を
+ *   知らないので、そこで返さないと**そのノートが誰からも編集できなくなる**。
+ *
  * 🔴 main.ts の closure に書かない(CLAUDE.md 2026-08-08 ── どの test からも
  * 実行されない file に判断を書くと、全 tests 緑のまま取り違える)。
  */
+import { unsavedTypingLidOf } from './app-state';
 import type { Dispatcher } from './dispatcher';
 
 export interface EditLockSync {
@@ -27,11 +34,18 @@ export function bindEditLockRelease(
 ): () => void {
   let locked: string | null = null;
   return dispatcher.onState((state) => {
-    if (state.phase === 'editing') {
-      // ⚠ openBody が一瞬 null の遷移でも控えを消さない(?? で保つ)
-      locked = state.openBody?.lid ?? locked;
+    // 🔴 **いま握っているべき lid**(#1044 段2、F-B/F-C)。全文編集と章の欄の
+    //   **どちらか**が握る(`app-state.ts` の `unsavedTypingLidOf` 1 本 ──
+    //   2 つ目の実装をここに作らない。§7)。
+    const held = unsavedTypingLidOf(state);
+    if (held !== null) {
+      locked = held;
       return;
     }
+    // ⚠ `phase === 'editing'` で `openBody` が一瞬 null の遷移でも控えを消さない
+    //   (直す前と同じ作法 ── 章の欄には該当する窓が無い:`sectionDraft` は
+    //   `OPEN_SECTION_DRAFT` が原子的に立て、閉じるときも原子的に `null` にする)
+    if (state.phase === 'editing') return;
     if (locked !== null) {
       sync().releaseEdit(cid, locked);
       locked = null;

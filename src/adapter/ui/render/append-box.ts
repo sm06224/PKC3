@@ -44,7 +44,17 @@ export function appendModeOf(state: AppState): AppendMode {
   if (!lid || state.viewMode !== 'detail') return { kind: 'hidden' };
   if (!isAppendable(state.entryMetas.get(lid)?.archetype)) return { kind: 'hidden' };
   const lock = bodyLockOf(state);
-  if (lock?.lid === lid) return { kind: lock.holder, lid };
+  if (lock?.lid === lid) {
+    /**
+     * 🔴 **章の欄が握っているときは畳む**(#1044 段2、F-C)。⚠ `AppendMode` に
+     *   `section` 用の見た目(専用の帯・出口)は持たせていない ── ここで
+     *   `'editing'` へ流すと**全文編集の「保存 / やめる」ボタン**が出て、押しても
+     *   章の欄には効かない(押した物と効く先が食い違う)。素の追記欄を出さない
+     *   ほうが安全(design doc §3「同じノートへの他の書込は断る」)。
+     */
+    if (lock.holder === 'section') return { kind: 'hidden' };
+    return { kind: lock.holder, lid };
+  }
   // ⚠ 本文が届いていない間は出さない(追記の基底は disk だが、
   //    「開けていないノートに書く」導線は user から見て嘘になる)
   if (state.openBody?.lid !== lid) return { kind: 'hidden' };

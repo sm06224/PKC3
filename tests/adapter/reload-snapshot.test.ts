@@ -188,3 +188,95 @@ describe('読込中に編集が始まった場合(H-3)', () => {
     expect(d.getState().error).toContain('一覧を取り直せませんでした');
   });
 });
+
+/**
+ * 🔴 **章の欄は、もう「断れない経路」の防波堤の対象にしない**
+ *   (#1044 段2 3巡目の修理、S1)。
+ *
+ * ⚠ 2 巡目の修理は「章の欄は `phase` を `ready` のまま保つので、`phase ===
+ *   'ready'` だけでは `SYS_BOOTED` を通してしまい、`openBody` を無条件に捨てて
+ *   下書きを孤児化させる」と考え、`isFullyReady` に `sectionDraft === null` を
+ *   足していた。⚠ **3 巡目でその先送りを外した**(`wait-for-ready.ts` の
+ *   docstring に理由がある ── 同じ container なら選択が保たれ、`render()` の
+ *   boxKey ガードが箱を守り、ノートが消えた回は `guardSectionDraftTransition`
+ *   が閉じて知らせる)。ここは**その 3 つが本当に噛み合って、下書きを孤児化
+ *   させずに一覧が追随すること**を見る。
+ */
+describe('章の欄が開いている間(#1044 段2 3巡目の修理、S1)', () => {
+  /** SYS_BOOTED → SELECT_ENTRY → BODY_LOADED → OPEN_SECTION_DRAFT まで進めた dispatcher。 */
+  function bootedWithSectionDraft(): Dispatcher {
+    const d = booted();
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1')], relations: [] });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '## 見出し\n\n中身\n' });
+    d.dispatch({ type: 'OPEN_SECTION_DRAFT', lid: 'n1', line: 0 });
+    return d;
+  }
+
+  it('🔴 章の欄が開いていても、すぐに入れ替わる(先送りしない)', async () => {
+    const d = bootedWithSectionDraft();
+    expect(d.getState().sectionDraft, '前提が崩れている(開けていない)').not.toBeNull();
+    expect(d.getState().phase, '章の欄は phase を動かさない(前提)').toBe('ready');
+
+    // ⚠ 下書きが指す n1 を**含む**一覧(同じ container・n1 も居る)
+    await reloadSnapshot(
+      d,
+      'c1',
+      async () => ({ metas: [meta('n1'), meta('a')], relations: [] }),
+      { deferNotice: null },
+    );
+    // 🔑 直す前は「章の欄が開いている間は入れ替えない」だったが、いまはすぐに入れ替わる
+    expect(
+      [...d.getState().entryMetas.keys()],
+      '先送りしないはずが、まだ入れ替わっていない',
+    ).toContain('a');
+    // ⚠ n1 が新しい一覧にも在るので、選択は保たれ(SYS_BOOTED の keepLid)、
+    //   下書きも孤児化しない(guardSectionDraftTransition:movedAway/entryGone
+    //   のどちらも false)
+    expect(d.getState().selectedLid, '選択が飛んだ').toBe('n1');
+    expect(d.getState().sectionDraft, '入れ替えたら下書きが消えた(孤児化した)').not.toBeNull();
+    /**
+     * ⚠ **`openBody` は SYS_BOOTED が無条件に捨て、`REQUEST_BODY` を頼み直す**
+     *   (選択を保つときの既定の作法)── この test は素の dispatcher で
+     *   effect を繋いでいないので、ここでは `null` のまま止まる。実配線では
+     *   effect がすぐ読み直し、`render()`(`detail.ts`)の boxKey ガードが
+     *   その間も箱(打ちかけ)を 1px も動かさないことを
+     *   `section-box-flow.test.ts` が実物で見る。
+     */
+    expect(d.getState().openBody, 'openBody が捨てられていない(前提が崩れている)').toBeNull();
+  });
+
+  it('🔴 読込の await の間に章の欄が開いても、もう防波堤で止めない(そのまま入れ替わる)', async () => {
+    const d = booted();
+    let resolveLoad!: (s: { metas: EntryMeta[]; relations: [] }) => void;
+    const load = vi.fn(
+      () => new Promise<{ metas: EntryMeta[]; relations: [] }>((r) => (resolveLoad = r)),
+    );
+    const p = reloadSnapshot(d, 'c1', load, { deferNotice: null });
+    expect(load).toHaveBeenCalledTimes(1); // ready だったので即読みに入った
+    // 読んでいる間に user が章の欄を開く
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1')], relations: [] });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '## 見出し\n\n中身\n' });
+    d.dispatch({ type: 'OPEN_SECTION_DRAFT', lid: 'n1', line: 0 });
+    expect(d.getState().sectionDraft, '前提が崩れている(開けていない)').not.toBeNull();
+    resolveLoad({ metas: [meta('n1'), meta('a')], relations: [] });
+    await p;
+    await new Promise((r) => setTimeout(r, 0));
+    /**
+     * 🔑 直す前はここで `isFullyReady` の防波堤に引っかかり、章の欄を閉じるまで
+     *   `defer()` していた(`load` が 2 回目呼ばれる)。いまは章の欄が開いていても
+     *   `phase` は `ready` のままなので、そのまま入れ替わる(`load` は 1 回のまま)。
+     */
+    expect([...d.getState().entryMetas.keys()], '入れ替わっていない').toContain('a');
+    expect(load, '不要な defer で読み直しが増えた').toHaveBeenCalledTimes(1);
+    expect(d.getState().selectedLid).toBe('n1');
+    expect(d.getState().sectionDraft, '入れ替えたら章の欄が消えた').not.toBeNull();
+  });
+
+  it('対照群: 章の欄が無ければ、いつもどおりその場で入れ替える', async () => {
+    const d = booted();
+    await reloadSnapshot(d, 'c1', async () => ({ metas: [meta('a')], relations: [] }));
+    expect([...d.getState().entryMetas.keys()]).toEqual(['a']);
+  });
+});

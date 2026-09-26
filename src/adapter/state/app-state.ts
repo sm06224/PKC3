@@ -46,6 +46,8 @@ import { applyBodyRewrite, type BodyRewrite } from '@features/markdown/body-rewr
 import type { TableFormat } from '@features/markdown/table-convert';
 import { isPlaceOpen } from '@features/markdown/place-notation';
 import { isPlaceShape, type PlaceShape } from '@features/markdown/place-shape';
+import { sectionAt, sectionRange } from '@features/markdown/append-target';
+import { frontmatterLineCount } from '@features/markdown/frontmatter';
 import {
   BLOCK_MOVED_NOTICE,
   moveLinesWithInverse,
@@ -720,6 +722,91 @@ const SAVE_FAILED_EXIT = '「ノートを保存し直す」を押してから';
 export const EDITING_NOTE = '編集中は使えません(「編集を保存する」か「編集をやめる」を押すと戻ります)';
 
 /**
+ * 🔴 **章の欄が開いている間、そのノートの他の書込を断る字**(#1044 段2)。
+ * ⚠ 出口は**箱のボタンの字**で言う(`EDITING_NOTE` と同じ作法)。
+ */
+export const SECTION_DRAFT_NOTE =
+  '章を編集中は使えません(「章を保存する」か「章の編集をやめる」を押すと戻ります)';
+
+/**
+ * 🔴 **章の保存が断られた理由**(#1044 段2 3巡目の修理、S1)。
+ *
+ * ⚠ **effect が {@link replaceSectionByHeading} の結果からここへ振り分ける**
+ *   (`store-effects.ts`)── 文言は user に見せる字なので**ここ 1 か所**に置き、
+ *   効果層は import して使う(§7:文言を 2 か所に書かない)。
+ * ⚠ `missing`(見出しが消えた)と `mismatch`(中身が違う)は**同じ字**にする ──
+ *   どちらも「もう開いたときの前提が崩れている」で、user がすべきことは同じ
+ *   (コピーして開き直す)。
+ */
+export const SECTION_SAVE_MISMATCH_NOTE =
+  'この章は別の場所で書き換えられました ── 書きかけをコピーしてから、開き直してください';
+export const SECTION_SAVE_AMBIGUOUS_NOTE =
+  'この見出しの字が本文の中に複数あり、どの章か決まりません(章を編集し直してください)';
+/**
+ * 🔴 **章の保存が断られた残り 2 つの理由**(#1044 段2 4巡目の修理、T2)。
+ * ⚠ 直す前は `store-effects.ts` にリテラルで直書きしていた ── ここへ寄せたのは、
+ *   `SECTION_DRAFT_ADVISORY_TEXTS`(下)が**この 4 つ全部**を「章の欄自身の断り文」
+ *   として認識する必要があるため(§7:文言を 2 か所に書かない。手で書き直すと
+ *   効果層(`store-effects.ts`)とここが食い違う日が来る)。
+ */
+export const SECTION_SAVE_NOT_FOUND_NOTE = '章を保存できませんでした(ノートが見つかりません)';
+export const SECTION_SAVE_ANOTHER_WINDOW_NOTE =
+  '別のウィンドウがこのノートを書き替えたため、保存できませんでした(もう一度押してください)';
+
+/** {@link replaceSectionByHeading} の失敗理由 → user に見せる字。 */
+export function sectionSaveFailureNote(reason: 'missing' | 'ambiguous' | 'mismatch'): string {
+  return reason === 'ambiguous' ? SECTION_SAVE_AMBIGUOUS_NOTE : SECTION_SAVE_MISMATCH_NOTE;
+}
+
+/**
+ * 🔴 **章の欄自身の断り文だけを消す**(#1044 段2 2巡目の修理、R5。5巡目の修理、U3で
+ *   「字の集合」から「`state.sectionAdvisory` との等値」へ変えた)。
+ *
+ * ⚠ 直す前は `SECTION_DRAFT_ADVISORY_TEXTS`(固定の字の集合)との一致で判定していた。
+ *   3巡目の修理(S1)で章の保存が effect 化され、保存を断られた理由
+ *   (`SECTION_SAVE_FAILED.error`)が `state.error` に直に乗るようになったが、
+ *   **`REQUEST_SECTION_SAVE` の catch-all**(「章を保存できませんでした: <e>」── 例外の
+ *   `String(e)` を埋め込む**中身が動く字**)は固定の集合に入れられないので漏れ、
+ *   保存が成功した後も画面には**古い catch-all の失敗の字が残った**。
+ * 🔑 **消してよいのは、いま出ている error が「いま章の欄自身が置いた字」であるときだけ**。
+ *   判定は字の中身ではなく「置いたのが章の欄自身か」(`sectionAdvisory` との等値)── これなら
+ *   中身が動く字も等値で通る。他の失敗(disk 書込エラー・commit の不変量違反など無関係な知らせ)
+ *   は握りつぶさない(main.ts の「OP_FAILED は SELECT_ENTRY が消す」と同じ寿命の考え方 ──
+ *   消すのは「その断りを起こした状況が解けた」ときだけ)。
+ * ⚠ **`SECTION_DRAFT_RELOADING_NOTE` は無くなった**(#1044 段2 3巡目の修理、S1)──
+ *   保存は disk から読み直すので、`openBody` の読み直し中かどうかを断り文で
+ *   分ける理由が無くなった(SAVE_SECTION_DRAFT の docstring 参照)。
+ * ⚠ **`error` が別の字で上書きされていたら、控えは自動的に無効になる**(等値が
+ *   成り立たないので消えない)── 明示的な無効化を書く必要は無い。
+ * @returns `error` と `sectionAdvisory` を両方まとめて返す ── 呼び手は
+ *   `...clearedSectionDraftAdvisory(state)` の形でスプレッドする(章の欄が閉じる /
+ *   開き直る箇所では、控えも必ず `null` に戻す)。
+ */
+function clearedSectionDraftAdvisory(state: {
+  readonly error: string | null;
+  readonly sectionAdvisory: string | null;
+}): { error: string | null; sectionAdvisory: null } {
+  const isOwn = state.sectionAdvisory !== null && state.error === state.sectionAdvisory;
+  return { error: isOwn ? null : state.error, sectionAdvisory: null };
+}
+
+/**
+ * 🔴 **章の欄が、system command(別タブの書込・入れ替え・再読込)で閉じたときの字**
+ * (#1044 段2、`guardSectionDraftTransition` 参照)。
+ * ⚠ 断り(user が押した操作を拒む)ではなく**知らせ** ── 書きかけは戻せないことを言う。
+ *
+ * 🔴 **「消えたか入れ替わった」と決めつけない**(#1044 段2 2巡目の修理、R2)。
+ * ⚠ 直す前の字は「このノートが別の場所で消されたか入れ替わったため」だった ──
+ *   ここへ来る回の多くは**このノートは消えても入れ替わってもいない**(別の場所の
+ *   操作が `selectedLid` を動かしただけ)。事実と違う理由を言うと、user は
+ *   起きていないことを気にする(このノートを探しに行く・壊れたと思う)。
+ *   RESTORE_TRASH / RESTORE_REVISION は R2 で起点から断るようにしたので、
+ *   ここへ来るのは**このタブの外**(別タブの container 切替・再読込)だけになった。
+ */
+export const SECTION_DRAFT_CLOSED_BY_SYSTEM_NOTICE =
+  '別の場所の操作でこのノートが切り替わったため、章の編集を終えました(書きかけは保存されていません)';
+
+/**
  * 🔴 **user に見せる「押せない理由」**(#516 / #715 / #761 / C11)。押せるなら `null`。
  *
  * 🔑 **押せないボタンに添える字は、ここ 1 か所**(CLAUDE.md §7)── 乗せたときの字
@@ -739,6 +826,34 @@ export function blockedActionNote(phase: AppPhase): string | null {
 }
 
 /**
+ * 🔴 **画面のどこかに、まだ保存していない打ちかけがあるか**(#1044 段2、F-C)。
+ *
+ * 🔑 「書きかけを守る」ための判定(reload の確認 / 別タブへの通知 / 編集権を
+ *   取られたことを言うかどうか、など)は**必ずここを通す** ── 個別に
+ *   `phase === 'editing'` だけを見ると、章の欄(`sectionDraft`。`phase` は
+ *   `ready` のまま保つ設計 ── 設計 doc §3)の打ちかけを見落とす。
+ * ⚠ **`main.ts` の `location.reload()` 前の確認がまさにこの穴を踏んでいた**
+ *   (`onContainerWiped` / 更新の案内の `isEditing`)── 章の欄に打っていても、
+ *   聞かずに読み込み直していた。
+ */
+export function hasUnsavedTyping(state: AppState): boolean {
+  return state.phase === 'editing' || state.sectionDraft !== null;
+}
+
+/**
+ * 🔴 **打ちかけを持っているノートの lid**(#1044 段2、F-C)。無ければ `null`。
+ *
+ * ⚠ 全文編集と章の欄は**同時に開かない**(章の欄は `phase !== 'ready'` では開かない ──
+ *   設計 doc §3 / `OPEN_SECTION_DRAFT` の phase 検査)ので、優先順位ではなく
+ *   単純な二択でよい。⚠ **`edit-lock-release.ts` の `heldLidOf` と同じ式**
+ *   ── そちらは 2 つ目の実装を作らず、ここを呼ぶ(§7)。
+ */
+export function unsavedTypingLidOf(state: AppState): string | null {
+  if (state.phase === 'editing') return state.openBody?.lid ?? null;
+  return state.sectionDraft?.lid ?? null;
+}
+
+/**
  * 🔴 **本文を書き換える操作の門(lid で判定)**(C6 / #1043)。
  *
  * ⚠ `phaseBlockReason` は **phase だけ**を見るので、`editing` のときは
@@ -748,18 +863,65 @@ export function blockedActionNote(phase: AppPhase): string | null {
  *   dead click)。⚠ 主のノート自身の本文は、編集欄が持つ下書きと disk が
  *   ずれる(下書きを保存すると押した変更が消える)ので、そこだけは今までどおり断る。
  *
- * 🔑 断るのは 3 つだけ:①`editing` で、かつ **`lid` が編集中のノートと同じ**
+ * 🔑 断るのは 4 つだけ:①`editing` で、かつ **`lid` が編集中のノートと同じ**
  *   とき ②`error`(保存に失敗して止まっている。出口は「再保存」1 つだけ)
- *   ③`initializing`(読み込みが終わっていない)。**`editing` で別の lid** なら
- *   通す ── 編集中のノート自身がどれかは `openBody.lid`(#1049 の裁定で
- *   1 本になった「編集の対象」)で見る。
+ *   ③`initializing`(読み込みが終わっていない)④🔴 **章の欄が、その `lid` で
+ *   開いているとき**(#1044 段2 ── 章の欄は `phase` を `ready` のまま保つので、
+ *   ①〜③では捕まらない。同じ理由で**別の lid** なら通す)。
+ *   **`editing` で別の lid** なら通す ── 編集中のノート自身がどれかは
+ *   `openBody.lid`(#1049 の裁定で 1 本になった「編集の対象」)で見る。
  *
  * @returns 断るなら`{@link phaseBlockReason}` と同じ形の前置き。書いてよいなら `null`。
  */
 export function bodyWriteBlockReason(state: AppState, lid: string): string | null {
+  // ⚠ `?.`(`!== null` ではない)── 手組みの state fixture は `sectionDraft` を
+  //   持たない(`undefined`)ことがある。`!== null` は `undefined` を素通しする
+  //   (2026-09-26、全量 test の `detail.ts` と同じ罠)。
+  if (state.sectionDraft?.lid === lid) return SECTION_DRAFT_NOTE;
   if (state.phase === 'editing')
     return state.openBody?.lid === lid ? phaseBlockReason('editing') : null;
   return phaseBlockReason(state.phase);
+}
+
+/**
+ * 🔴 **`bodyWriteBlockReason` が断ったときの `ReduceResult` そのものを組む**
+ *   (#1044 段2 5巡目の修理、U3)。
+ *
+ * ⚠ この門を通す呼び手のうち、**続きの文言を付けずに `blocked` をそのまま
+ *   `error` へ置く回**(`APPEND_TO_ENTRY` 等)だけが対象 ── 続きを付ける回
+ *   (`${blocked}表を打ってください` 等)は元々 `SECTION_DRAFT_NOTE` と一字一句
+ *   一致しないので、いまも「章の欄自身の断り文」として消えない/引き継がれない
+ *   (直す前と同じ振る舞い。範囲を広げない)。
+ * 🔑 `blocked` が `SECTION_DRAFT_NOTE`(章の欄が原因)のときだけ `sectionAdvisory`
+ *   も同時に控える ── phase 由来の断り(編集中 / 読み込み中)は章の欄と無関係なので
+ *   `sectionAdvisory` に触らない。
+ * @returns 断るなら `ReduceResult`。書いてよいなら `null`(呼び手はそのまま続ける)。
+ */
+function bodyWriteBlockResult(state: AppState, lid: string): ReduceResult | null {
+  const blocked = bodyWriteBlockReason(state, lid);
+  if (blocked === null) return null;
+  return {
+    state: {
+      ...state,
+      error: blocked,
+      ...(blocked === SECTION_DRAFT_NOTE ? { sectionAdvisory: blocked } : {}),
+    },
+    events: [],
+  };
+}
+
+/**
+ * 🔴 **「章の欄が開いている(のに別の操作を試みた)」を断る、その場の 1 手**
+ *   (#1044 段2 5巡目の修理、U3)。
+ *
+ * ⚠ 直す前は `error: SECTION_DRAFT_NOTE` だけを置く同じ形が 5 か所(`START_EDIT` /
+ *   `OPEN_SECTION_DRAFT` の二重に開く門 / `RESTORE_REVISION` / `RESTORE_TRASH` /
+ *   `guardSectionDraftTransition` の user action 分岐)に**別々に**書かれており、
+ *   `sectionAdvisory` を足すとなると 5 か所を揃えて直す必要があった(§7)。
+ *   ここへ寄せて、5 か所とも呼ぶだけにする。
+ */
+function sectionDraftBlockedResult(state: AppState): ReduceResult {
+  return { state: { ...state, error: SECTION_DRAFT_NOTE, sectionAdvisory: SECTION_DRAFT_NOTE }, events: [] };
 }
 
 /**
@@ -886,6 +1048,29 @@ export interface OpenBody {
   baseline: string;
   persisted: string;
   diskAhead: boolean;
+}
+
+/**
+ * 🔴 **章だけの下書き**(#1044 段2)。
+ *
+ * ⚠ **原文は見出し行を含む**(`章の範囲 = 見出し(#〜###) から 次の同格以上の
+ *   見出しの手前まで`。`@features/markdown/append-target.ts` の `sectionRange`)。
+ */
+export interface SectionDraft {
+  readonly lid: string;
+  /** 見出しの字。保存のとき、これで章を**名前で**探し直す(行番号ではない)。 */
+  readonly heading: string;
+  /** 開いたときに控えた、この章の原文(見出し行を含む)。保存時の一致判定に使う。 */
+  readonly original: string;
+  /**
+   * 🔴 **保存の要求を disk へ出してから、ack が返るまで**(#1044 段2 3巡目の修理、S1)。
+   *
+   * ⚠ **追記の `writeLock` と同じ理由で要る** ── 保存は disk から読み直して
+   *   差し替えるので、ack が届くまで結果が分からない(全文編集の保存と違い、
+   *   `state.openBody.body` を楽観的に進められない)。⚠ 二重押し・「やめる」・
+   *   離れる操作は**この間だけ**箱の押せない見た目で塞ぐ(`binder.ts` / `detail.ts`)。
+   */
+  readonly saving: boolean;
 }
 
 /** 履歴一覧の 1 行(P5b)。boot では持たない ── SHOW_HISTORY の要求時に引く。 */
@@ -1396,6 +1581,36 @@ export interface AppState {
    */
   editOpenAt: number | null;
   /**
+   * 🔴 **章だけの下書き**(#1044 段2)。`null` = 開いていない。
+   *
+   * ⚠ **アプリ全体の編集中(`phase === 'editing'`)とは別物**である ── 章の欄が
+   *   開いていても `phase` は `'ready'` のまま(一覧・右の列・他のノートは動く)。
+   * ⚠ **打ちかけの字は持たない**(`cell-input.ts` と同じ規律)── 打っている字は
+   *   `<textarea>` そのものに生きていて、state には**開いたときに控えた原文**しか
+   *   無い。理由:打つたびに state を書き換えると、章 1 つの入力が state 全体の
+   *   指紋を動かし、無関係な面まで描き直る。
+   * ⚠ **`heading` は名前で持つ**(行番号ではない)── 保存のとき、別の窓の書込で
+   *   行がずれていても**名前で章を探し直す**ため(設計 doc §3)。
+   */
+  sectionDraft: SectionDraft | null;
+  /**
+   * 🔴 **いま `error` に置いている字が、章の欄自身の断り文なら、その字そのものを控える**
+   *   (#1044 段2 5巡目の修理、U3)。`null` = 章の欄は何も置いていない。
+   *
+   * ⚠ 直す前は `SECTION_DRAFT_ADVISORY_TEXTS`(固定の字の集合)で「章の欄自身の
+   *   断り文か」を判定していた ── **中身が動く字**(`REQUEST_SECTION_SAVE` の
+   *   catch-all「章を保存できませんでした: <e>」)は集合に入れられないので漏れ、
+   *   保存が成功した後も**古い失敗の字が残った**(`clearedSectionDraftAdvisory` が
+   *   「知らない字」として素通しする)。
+   * 🔑 判定は「字の中身」ではなく「**いま error に置いたのは章の欄自身か**」に変えた。
+   *   章の欄が `error` を置くすべての所(このファイル内)で**同時に**この控えも書く。
+   *   消す・引き継ぐ判定は `state.error === state.sectionAdvisory` の等値 1 つで済む
+   *   (中身は問わない ── catch-all の動く文字列も、この等値なら通る)。
+   * ⚠ **`error` が別の字で上書きされたら、この控えは自動的に無効になる**(比較が
+   *   一致しなくなるだけ) ── 明示的に無効化する分岐を書く必要は無い。
+   */
+  sectionAdvisory: string | null;
+  /**
    * タイル設定の書込が飛んでいる数(P8 段⑯)。
    *
    * 🔴 `writeLock` を借りると、**連続した設定変更が無言で落ちる**(登録 →
@@ -1451,8 +1666,11 @@ export interface AppState {
 /** 誰が本文を握っているか。⚠ **lid つき**(別のノートは巻き添えにしない)。 */
 export interface BodyLock {
   lid: string;
-  /** `editing` = 編集中の draft がある / `writing` = 追記の書込が飛んでいる。 */
-  holder: 'editing' | 'writing';
+  /**
+   * `editing` = 編集中の draft がある / `writing` = 追記の書込が飛んでいる /
+   * 🔴 `section` = 章の欄の下書きがある(#1044 段2、F-C)。
+   */
+  holder: 'editing' | 'writing' | 'section';
 }
 
 /**
@@ -1474,6 +1692,14 @@ export function bodyLockOf(state: AppState): BodyLock | null {
   if (state.tileWrite) return { lid: state.tileWrite.lid, holder: 'writing' };
   if (state.phase === 'editing' && state.openBody)
     return { lid: state.openBody.lid, holder: 'editing' };
+  /**
+   * 🔴 **章の欄も握っている**(#1044 段2、F-C)。⚠ 直す前はここが `phase` だけを
+   *   見ていたので、章の欄が開いている間 `appendModeOf` が `{kind:'ready'}` を
+   *   返し続けていた(実測)── 追記欄が使えるように**見えていた**が、追記は
+   *   同じノートへの書込なので設計 doc §3(章の欄が開いている間、同じノートへの
+   *   他の書込は断る)に違反する形で許してしまっていた。
+   */
+  if (state.sectionDraft) return { lid: state.sectionDraft.lid, holder: 'section' };
   return null;
 }
 
@@ -1576,6 +1802,8 @@ export const initialState: AppState = {
   lastAppend: null,
   lastMove: null,
   editOpenAt: null,
+  sectionDraft: null,
+  sectionAdvisory: null,
   tileWrite: null,
   launcherPick: null,
   launcherReorder: false,
@@ -1893,6 +2121,18 @@ export type UserAction =
   | { type: 'UPDATE_OPEN_BODY'; body: string }
   | { type: 'COMMIT_EDIT' }
   | { type: 'CANCEL_EDIT' }
+  /**
+   * 🔴 **章だけの下書きを開く**(#1044 段2)。
+   * @param line 押した見出しの行(frontmatter を外した側。`bodySourceLineAt` と同じ基準)
+   */
+  | { type: 'OPEN_SECTION_DRAFT'; lid: string; line: number }
+  /**
+   * 🔴 **章の欄を保存する**(#1044 段2)。⚠ `text` は箱の**いまの字**
+   *   (見出し行を含む)。断ったら `sectionDraft` は残る(箱は消えない)。
+   */
+  | { type: 'SAVE_SECTION_DRAFT'; text: string }
+  /** 🔴 **章の欄を、書かずに閉じる**(#1044 段2)。 */
+  | { type: 'CANCEL_SECTION_DRAFT' }
   | { type: 'TOGGLE_TODO_STATUS'; lid: string }
   /**
    * 🔴 **カレンダーの日付を付け外しする**(#276)。`null` で外す。
@@ -2562,6 +2802,31 @@ export type SystemCommand =
       lid: string;
       gen: number;
       error: string;
+    }
+  | {
+      /**
+       * 🔴 **章の保存が disk に着いた**(#1044 段2 3巡目の修理、S1)。⚠ **`gen` を
+       *   必ず見る**(強制解放を挟んだあとの遅れた ack を採ると、user が見ている
+       *   本文を巻き戻す ── `ENTRY_APPENDED` と同じ理由)。
+       */
+      type: 'SECTION_SAVED';
+      lid: string;
+      gen: number;
+      /** 身元検査(`app-state.ts` の `SECTION_SAVED` reducer 参照)。 */
+      heading: string;
+      /** 章を差し替えた**後**の全文。 */
+      body: string;
+      status: string | null;
+      date: string | null;
+      archived: boolean;
+    }
+  | {
+      /** 章の保存が断られた。⚠ **ロックは必ず解く**(`saving: false`)。 */
+      type: 'SECTION_SAVE_FAILED';
+      lid: string;
+      gen: number;
+      heading: string;
+      error: string;
     };
 
 export type Dispatchable = UserAction | SystemCommand;
@@ -2965,6 +3230,26 @@ export type DomainEvent =
       /** 取り込みの回の印(#668 C)。effect が `ENTRY_APPENDED` へそのまま返す。 */
       batch?: string;
     }
+  | {
+      /**
+       * 🔴 **章の欄の保存要求**(#1044 段2 3巡目の修理、S1)。⚠ **本文は載せない**
+       *   ── effect が disk から読み直し、`heading` + `original` で章を探し直して
+       *   `text` へ差し替える(`REQUEST_APPEND` と同じ「画面の古い本文を基底に
+       *   しない」作法)。meta snapshot は発火時(reduce)に捕獲(C-1 規律)。
+       */
+      type: 'REQUEST_SECTION_SAVE';
+      lid: string;
+      gen: number;
+      title: string;
+      archetype: string;
+      entryOrder: number;
+      /** 章を名前で探し直す見出しの字。 */
+      heading: string;
+      /** 開いたときに控えた、この章の原文(一致判定に使う)。 */
+      original: string;
+      /** 箱に打たれていた新しい中身(見出し行を含む)。 */
+      text: string;
+    }
   | { type: 'REQUEST_DELETE'; lid: string }
   | {
       /** title 書換の永続化要求(body は effect が disk から読む)。snapshot は
@@ -3093,7 +3378,150 @@ function goHistory(p: SqlPageState, at: number, from: number): SqlPageState {
   return { ...p, sql, historyAt: at < 0 ? -1 : at, historyDraft: draft };
 }
 
+/**
+ * 🔴 **章の欄自身の action(#1044 段2)**。⚠ この 3 つだけは
+ * {@link guardSectionDraftTransition} を通さない ── 章の欄を開く・保存する・
+ * やめるのは、章の欄それ自身が sectionDraft を動かしてよい唯一の場所である。
+ */
+const SECTION_DRAFT_OWN_ACTIONS: ReadonlySet<Dispatchable['type']> = new Set([
+  'OPEN_SECTION_DRAFT',
+  'SAVE_SECTION_DRAFT',
+  'CANCEL_SECTION_DRAFT',
+]);
+
+/**
+ * 🔴 **`SystemCommand` の全数**(#1044 段2)。⚠ user の action と system command の
+ * 見分けを**ここ 1 か所**に置く ── `Record<SystemCommand['type'], true>` なので、
+ * 新しい `SystemCommand` を足して載せ忘れると tsc が落ちる(CLAUDE.md §7 と同じ作法)。
+ */
+const SYSTEM_COMMAND_TYPES: Record<SystemCommand['type'], true> = {
+  SYS_BOOTED: true,
+  MESSAGES_UNREAD_SET: true,
+  SET_SEARCH_DETAIL: true,
+  SEARCH_DETAIL_FAILED: true,
+  STACK_BODY_LOADED: true,
+  BODY_LOADED: true,
+  SPLIT_BODY_LOADED: true,
+  SPLIT_RESTORED: true,
+  BODY_LOAD_FAILED: true,
+  BODY_PERSISTED: true,
+  REMOTE_BODY_CHANGED: true,
+  ENTRY_STAMPED: true,
+  PERSIST_STATE: true,
+  BACKLINKS_LOADED: true,
+  BODY_REWRITTEN: true,
+  OP_FAILED: true,
+  SYS_ERROR: true,
+  REVISION_LIST_LOADED: true,
+  TRASH_LIST_LOADED: true,
+  FILE_LINKED: true,
+  ENTRY_RESTORED: true,
+  TRASH_PURGED: true,
+  ENTRY_APPENDED: true,
+  APPEND_FAILED: true,
+  SECTION_SAVED: true,
+  SECTION_SAVE_FAILED: true,
+};
+
+function isSystemCommand(action: Dispatchable): boolean {
+  return Object.prototype.hasOwnProperty.call(SYSTEM_COMMAND_TYPES, action.type);
+}
+
+/**
+ * 🔴 **章の欄が開いている間、そのノートから離れる遷移を reduce() の外側 1 か所で止める**
+ * (#1044 段2。着地前レビューで確定した欠陥 D1/F3/F1/F2 ── `DELETE_ENTRY` /
+ * `DELETE_ENTRIES` / `DESELECT_ENTRY` / `MESSAGES_READ` は `sectionDraft` を見ないので
+ * どれでも下書きが孤児化し、以後「二重に開かない」門(`OPEN_SECTION_DRAFT` の
+ * `if (state.sectionDraft != null) return`)が効いて**どのノートでも「この章を編集する」が
+ * 無言で効かなくなる**)。
+ *
+ * 🔑 個別の action を 1 つずつ塞がない ── **判定は action の種類ではなく「結果の形」**
+ *   (selectedLid が draft.lid から動いたか / entryMetas から draft.lid が消えたか)
+ *   で見るので、次に選択を動かす case / entry を消す case を足した人が忘れられない
+ *   (CLAUDE.md §7「次に選択を動かす case を足した人が忘れられない形」── 履歴・
+ *   バックリンクを reduce() の外側 1 か所で守っているのと同じ作法)。
+ *
+ * - **user の action** → 丸ごと断る(下書きも、押す前の state も 1 バイトも動かさない)。
+ * - **system command**(別タブの書込・再読込)→ 結果は受け入れる(system の結果を
+ *   拒むと disk と画面がずれる)。sectionDraft だけ閉じ、画面の言葉で知らせる。
+ *
+ * ⚠ **test のため export する**(#1044 段2 2巡目の修理、R6)── `entryGone` 単独
+ *   (`movedAway` が false のまま entry だけ消える)は、いまの reducer のどの
+ *   組合せの action からも単独では起きない(entry を消す既存の case は
+ *   `pruneHistory` 等で選択も一緒に動くのが普通)。「結果の形だけを見る」という
+ *   この関数の主張そのものを守るには、**手で組んだ前後の state**を直に渡して
+ *   `entryGone` だけが true の場面を作る必要がある(`reduce()` 経由では作れない)。
+ */
+export function guardSectionDraftTransition(
+  state: AppState,
+  action: Dispatchable,
+  result: ReduceResult,
+): ReduceResult {
+  const draft = state.sectionDraft;
+  if (draft === null) return result;
+  if (SECTION_DRAFT_OWN_ACTIONS.has(action.type)) return result;
+  const movedAway = state.selectedLid === draft.lid && result.state.selectedLid !== draft.lid;
+  const entryGone = state.entryMetas.has(draft.lid) && !result.state.entryMetas.has(draft.lid);
+  if (!movedAway && !entryGone) {
+    /**
+     * 🔴 **章の欄が開いたままなら、system command は自身の断り文を消さない**
+     *   (#1044 段2 4巡目の修理、T2)。
+     *
+     * ⚠ 実害:`SECTION_SAVE_FAILED` が置いた断り文(例:「この章は別の場所で
+     *   書き換えられました…」)は、まさにその断りの原因(別タブの書込)を見た
+     *   `SYS_BOOTED` が**約 250ms 後**に `error: null` を無条件に置くので画面から
+     *   消える(user 目線レビューの撮影で実測)。ここを通る system command は
+     *   「章の欄を閉じない」側(`movedAway` も `entryGone` も false)なので、
+     *   下の「閉じて知らせる」分岐(`clearedSectionDraftAdvisory` を通す)には
+     *   一度も来ず、`result` がそのまま素通りしていた。
+     * 🔑 **章の欄自身の断り文(`state.error === state.sectionAdvisory`)だけ引き継ぐ**
+     *   (#1044 段2 5巡目の修理、U3で「固定の字の集合」から等値へ変えた)── 無関係な
+     *   error(disk 書込エラー等)は、system command が消してよいなら今までどおり消える
+     *   (ここで戻すのは「消える直前の値が章の欄自身が置いた字だった」ときだけ ──
+     *   対照群は `tests/adapter/section-draft.test.ts` 参照)。
+     */
+    if (
+      isSystemCommand(action) &&
+      result.state.error === null &&
+      result.state.sectionDraft !== null &&
+      state.error !== null &&
+      state.error === state.sectionAdvisory
+    ) {
+      return { ...result, state: { ...result.state, error: state.error } };
+    }
+    return result;
+  }
+  if (!isSystemCommand(action)) {
+    // 🔴 user の action ── 丸ごと断る(下書きは残る。断り文は箱のボタン名で出口を言う)
+    return sectionDraftBlockedResult(state);
+  }
+  /**
+   * 🔴 system command ── 結果は受け入れ、下書きを閉じて知らせる。
+   *
+   * 🔑 **章の欄自身の断り文も消す**(#1044 段2 3巡目の修理、S4)。⚠ 直す前は
+   *   `result.state.error` をそのまま持ち越していた ── 直前に user の action が
+   *   ここで断られて `error: SECTION_DRAFT_NOTE` を置いていた回、system command
+   *   が閉じても**その断り文が残ったまま**「別の場所の操作でこのノートが…」の
+   *   `notice` と同時に出る(`notice` と `error` は別の面なので、どちらも画面に残る)。
+   *   `OPEN_SECTION_DRAFT` / `SAVE_SECTION_DRAFT` 成功と同じ寿命の考え方(R5)を
+   *   ここにも揃える。
+   */
+  return {
+    state: {
+      ...result.state,
+      sectionDraft: null,
+      notice: SECTION_DRAFT_CLOSED_BY_SYSTEM_NOTICE,
+      ...clearedSectionDraftAdvisory(result.state),
+    },
+    events: result.events,
+  };
+}
+
 export function reduce(state: AppState, action: Dispatchable): ReduceResult {
+  return guardSectionDraftTransition(state, action, reduceWithHistory(state, action));
+}
+
+function reduceWithHistory(state: AppState, action: Dispatchable): ReduceResult {
   if (action.type === 'NAV_HISTORY') return navHistory(state, action.dir);
   const result = reduceCore(state, action);
   let history = result.state.selectionHistory;
@@ -5070,6 +5498,14 @@ function reduceCore(
       // (`detail.ts` / ⋯ の `phone-menu`)── ここは backstop。押し口が 1 つ増えた日に
       // 素通りして、アプリが書く記録を user の手で書き換えられる形にしない。
       if (isSystemMessageLid(state.openBody.lid)) return { state, events: [] };
+      /**
+       * 🔴 **章の欄が開いているノートでは、全文編集に入れない**(#1044 段2。
+       *   設計 doc §3)。⚠ **無言では返さない**(design「do not silently drop
+       *   the draft」)── 押した人には「章の欄を閉じれば入れる」と分かる字を出す。
+       */
+      if (state.sectionDraft?.lid === state.openBody.lid) {
+        return sectionDraftBlockedResult(state);
+      }
       // 🔴 **追記の書込が飛んでいる間は編集に入れない**(P8 段⑧)。
       // 入れてしまうと editor が古い body を掴み、着弾した追記を保存で上書きする
       // ── これが「追記が黙って消える」の実体。
@@ -5304,6 +5740,228 @@ function reduceCore(
       };
     }
     /**
+     * 🔴 **章だけの下書きを開く**(#1044 段2)。
+     *
+     * ⚠ 見出しは**押した行**で特定する(`sectionAt`)── ここでは行はまだずれていない
+     *   (開く瞬間なので、押した行がそのまま本文の行である)。保存のときだけ
+     *   **名前で**探し直す(その間に別の窓が書いているかもしれないため)。
+     * ⚠ **章の範囲は追記欄と同じ関数**(`sectionRange`)── 2 つ目の規則を作らない
+     *   (設計 doc §3)。
+     */
+    case 'OPEN_SECTION_DRAFT': {
+      const { lid, line } = action;
+      if (state.phase !== 'ready') return { state, events: [] };
+      if (!state.openBody || state.openBody.lid !== lid) return { state, events: [] };
+      // 🔴 system 領域のノートは編集に入れない(START_EDIT と同じ backstop)
+      if (isSystemMessageLid(lid)) return { state, events: [] };
+      /**
+       * 🔴 **二重に開かない。ただし無言にしない**(#1044 段2、F-E)。
+       *
+       * ⚠ 直す前は無言で何もしなかった ── 呼び手(binder)が同じノートの**別の
+       *   見出し**を押したときも、reducer がここで黙って捨てるので**押しても
+       *   何も起きなかった**(押し間違いと区別できない dead click)。
+       * 🔑 binder 側(`startSectionEditAt`)が `leaveSectionDraftOrAsk` と同じ
+       *   3 択を先に通し、通った後にだけ `OPEN_SECTION_DRAFT` を撃つ ── ここへ
+       *   来るのは**その門を通らずに撃った**とき(防波堤)なので、可視の理由を出す。
+       */
+      if (state.sectionDraft != null) {
+        return sectionDraftBlockedResult(state);
+      }
+      const body = state.openBody.body;
+      const abs = line + frontmatterLineCount(body);
+      const sec = sectionAt(body, abs);
+      const range = sec === null ? null : sectionRange(body, sec.slug);
+      if (sec === null || range === null) {
+        return {
+          state: { ...state, error: '章の範囲を読めませんでした(本文を開き直してください)' },
+          events: [],
+        };
+      }
+      const lines = body.split(/\r?\n/);
+      const original = lines.slice(range.start, range.end).join('\n');
+      /**
+       * 🔴 **開けたら、章の欄自身の断り文は消す**(#1044 段2 2巡目の修理、R5)。
+       * ⚠ 「二重に開かない」門(上)が出した `SECTION_DRAFT_NOTE` は、
+       *   ここまで来た時点で通っている(前の下書きは閉じられている)ので、
+       *   もう画面に残す理由が無い。
+       */
+      return {
+        state: {
+          ...state,
+          sectionDraft: { lid, heading: sec.text, original, saving: false },
+          ...clearedSectionDraftAdvisory(state),
+        },
+        events: [],
+      };
+    }
+    /**
+     * 🔴 **章の欄を保存する**(#1044 段2。3巡目の修理、S1 で読み直しの向きを直した)。
+     *
+     * 🔴 **本文は event に載せない。書く瞬間に disk から読み直す**(#1044 段2 3巡目の
+     *   修理、S1)。⚠ 直す前は `state.openBody.body`(章の欄が開いている間ずっと
+     *   更新されない、画面の古い写し)を土台に差し替えていた ── 別の窓がその間に
+     *   本文を進めていても、章の欄が開いている限り `openBody` は追随しないので、
+     *   保存は**その別の窓の書込を巻き戻す**(disk へは反映されるが、こちらの土台には
+     *   乗っていないので黙って消える)。
+     * 🔑 **追記(`APPEND_TO_ENTRY`)と同じ作法** ── ここでは
+     *   「保存中」の印を立てて要求を出すだけ、探し直し・比較・差し替えは
+     *   effect が disk から読んだ本文へ {@link replaceSectionByHeading} を当てる
+     *   (features 層の純関数 1 本 ── 2 本目の規則を作らない)。
+     * ⚠ **断ったら `sectionDraft` は残す**(箱も残る)── 書きかけを消さない。
+     */
+    case 'SAVE_SECTION_DRAFT': {
+      const draft = state.sectionDraft ?? null;
+      if (draft === null) return { state, events: [] };
+      /**
+       * 🔴 **二重押しは黙って捨てる**(#1044 段2 3巡目の修理、S1)。
+       * ⚠ **追記の `writeLock` と同じ作法**(`app-state.ts` の `APPEND_TO_ENTRY`
+       *   `if (state.writeLock) return { state, events: [] };`)── 箱は
+       *   `saving` の間押せない見た目になる(`detail.ts`)ので、ここは
+       *   その見た目をすり抜けた回の防波堤である。
+       */
+      if (draft.saving) return { state, events: [] };
+      /**
+       * 🔴 **「null章を保存してください」を作らない**(#1044 段2、F-D)。
+       *
+       * ⚠ 直す前は `${phaseBlockReason(state.phase)}章を保存してください` の 1 行で
+       *   3 つの前提を一括で断っていたが、`phaseBlockReason('ready')` は `null` を
+       *   返す ── **phase が `ready` のまま `openBody` だけ欠けている窓**
+       *   (`SYS_BOOTED` が `openBody: null` にしてから `BODY_LOADED` が戻すまでの
+       *   数百 ms。別タブが書くたびに起きる)で、断り文に文字列 `"null"` が混ざっていた。
+       * 🔑 だから **phase の断りだけをここで見る**。⚠ **`openBody` の有無はもう見ない**
+       *   (S1)── 保存は disk から読み直すので、画面側の `openBody` が読み直し中でも
+       *   保存の正しさに影響しない(`SECTION_DRAFT_RELOADING_NOTE` は要らなくなった)。
+       */
+      if (state.phase !== 'ready') {
+        return { state: { ...state, error: `${phaseBlockReason(state.phase)}章を保存してください` }, events: [] };
+      }
+      const meta = state.entryMetas.get(draft.lid);
+      if (!meta) {
+        // openBody は SELECT_ENTRY(存在検査済)経由でしか確立しない ── ここに
+        // 来たら不変量違反(COMMIT_EDIT と同じ backstop)。
+        return { state: { ...state, error: `commit: unknown entry ${draft.lid}` }, events: [] };
+      }
+      return {
+        state: {
+          ...state,
+          sectionDraft: { ...draft, saving: true },
+          ...clearedSectionDraftAdvisory(state),
+        },
+        events: [
+          {
+            type: 'REQUEST_SECTION_SAVE',
+            lid: draft.lid,
+            gen: state.lockGen,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            heading: draft.heading,
+            original: draft.original,
+            text: action.text,
+          },
+        ],
+      };
+    }
+    /**
+     * 🔴 **章の保存が disk に着いた**(#1044 段2 3巡目の修理、S1)。⚠ **世代の合わない
+     *   ack は捨てる**(強制解放の後着 ── `ENTRY_APPENDED` と同じ作法)。
+     * ⚠ **draft の身元も見る**(`lid` + `heading`) ── system command で
+     *   `guardSectionDraftTransition` が sectionDraft を先に閉じていたら(別タブが
+     *   このノートを消した等)、後から来たこの ack は当てない(閉じた後の draft は
+     *   もう「保存の行き先」ではない)。
+     */
+    case 'SECTION_SAVED': {
+      if (action.gen !== state.lockGen) return { state, events: [] };
+      const draft = state.sectionDraft;
+      if (draft === null || draft.lid !== action.lid || draft.heading !== action.heading) {
+        return { state, events: [] };
+      }
+      const meta = state.entryMetas.get(action.lid);
+      const entryMetas = !meta
+        ? state.entryMetas
+        : new Map(state.entryMetas).set(action.lid, {
+            ...meta,
+            status: action.status,
+            date: action.date,
+            archived: action.archived,
+          });
+      const openBody = {
+        lid: action.lid,
+        body: action.body,
+        baseline: action.body,
+        persisted: action.body,
+        diskAhead: false,
+      };
+      /**
+       * 🔴 **保存できたら、章の欄自身の断り文は消す**(#1044 段2 2巡目の修理、R5)。
+       * ⚠ 直す前はここを 1 バイトも触っていなかった ── `SECTION_DRAFT_NOTE` を
+       *   出した後に保存し直しても、画面には「章を編集中は使えません」が保存の
+       *   **成功後も**残っていた。
+       */
+      return {
+        state: {
+          ...state,
+          entryMetas,
+          sectionDraft: null,
+          ...clearedSectionDraftAdvisory(state),
+          openBody,
+          taskScan: refreshTaskCards(state.taskScan, action.lid, action.body),
+          smartHits: refreshSmartHits(state.smartHits, action.lid, action.body, entryMetas),
+          splitBodies: syncSplitBody(state, action.lid, action.body),
+        },
+        events: smartScanFor(state, action.lid),
+      };
+    }
+    /**
+     * 🔴 **章の保存が断られた**(#1044 段2 3巡目の修理、S1)。⚠ **ロックは必ず解く**
+     *   (`saving: false`)── 解かないと箱が永久に押せなくなる。⚠ **draft(箱・書きかけ)
+     *   は残す** ── 断ったのは disk 側の事情で、user が打った字とは無関係。
+     * 🔴 **`sectionAdvisory` も同時に控える**(#1044 段2 5巡目の修理、U3)。
+     *   ⚠ `action.error` は固定の 4 文言だけではない ── `REQUEST_SECTION_SAVE` の
+     *   catch-all(「章を保存できませんでした: <e>」、例外の中身が動く字)もここを通る。
+     *   その動く字も「章の欄自身がいま置いた字」として同じ扱いにするため、
+     *   中身を問わず `action.error` をそのまま控える。
+     */
+    case 'SECTION_SAVE_FAILED': {
+      if (action.gen !== state.lockGen) return { state, events: [] };
+      const draft = state.sectionDraft;
+      if (draft === null || draft.lid !== action.lid || draft.heading !== action.heading) {
+        return { state, events: [] };
+      }
+      return {
+        state: {
+          ...state,
+          sectionDraft: { ...draft, saving: false },
+          error: action.error,
+          sectionAdvisory: action.error,
+        },
+        events: [],
+      };
+    }
+    /**
+     * 🔴 **章の欄を、書かずに閉じる**(#1044 段2)。
+     * ⚠ **閉じたら、章の欄自身の断り文も消す**(#1044 段2 2巡目の修理、R5)──
+     *   `OPEN_SECTION_DRAFT` / `SAVE_SECTION_DRAFT` の成功と同じ寿命の考え方。
+     * 🔴 **保存中は黙って捨てる**(#1044 段2 3巡目の修理、S1)。⚠ `saving` の間に
+     *   閉じさせると、あとから届く保存の ack(成功 / 失敗)が**もう居ない draft**
+     *   を当てようとする ── 身元検査(`SECTION_SAVED` / `SECTION_SAVE_FAILED` の
+     *   `lid`+`heading` 一致)で黒巻き戻しは起きないが、user から見ると
+     *   「やめたのに書きかけが disk へ着く」ことがある(効果が読んだ後に閉じた回)。
+     *   箱は `saving` の間押せない見た目になる(`detail.ts`)ので、ここは
+     *   その見た目をすり抜けた回の防波堤である(`save-section-draft` と同じ作法)。
+     */
+    case 'CANCEL_SECTION_DRAFT':
+      return state.sectionDraft == null || state.sectionDraft.saving
+        ? { state, events: [] }
+        : {
+            state: {
+              ...state,
+              sectionDraft: null,
+              ...clearedSectionDraftAdvisory(state),
+            },
+            events: [],
+          };
+    /**
      * 🔑 **追記**(P8 段⑧)。編集画面を開かず、末尾に足して**直に disk へ書く**。
      *
      * ⚠ **ready 限定 + ロック**。編集中(= draft がある)に裏で書くと、保存で
@@ -5315,6 +5973,23 @@ function reduceCore(
     case 'APPEND_TO_ENTRY': {
       if (state.phase !== 'ready') return { state, events: [] };
       if (state.writeLock) return { state, events: [] };
+      /**
+       * 🔴 **章の欄が、この lid で開いていれば断る**(#1044 段2 2巡目の修理、R11)。
+       *
+       * ⚠ 直す前はここに無く、`phase` は章の欄の間も `ready` のままなので
+       *   上の門を素通りした ── file を落として置き所が解けなかった回(末尾へ
+       *   落ちる回。`attach.ts` の `putAssetIntoNote`)は `INSERT_LINES`
+       *   (`bodyRewriteGate` 経由で `bodyWriteBlockReason` を通る)ではなく
+       *   **ここ**(`APPEND_TO_ENTRY`)を通るので、章の下書きが持つ古い原文の
+       *   すぐ下へ本文が直に書き換わっていた(下書きは気づかず、保存すると
+       *   その 1 行が消える)。
+       * 🔑 `INSERT_LINES` と**同じ関数**(`bodyWriteBlockReason`)で見る
+       *   (§7:同じ判定を複数の場所に書かない)。⚠ ここは `phase === 'ready'` を
+       *   確かめた後なので、返るのは `SECTION_DRAFT_NOTE`(章の欄)か `null` の
+       *   どちらかだけ(前置き結合は要らない)。
+       */
+      const blockedResult = bodyWriteBlockResult(state, action.lid);
+      if (blockedResult !== null) return blockedResult;
       const meta = state.entryMetas.get(action.lid);
       if (!meta) return { state, events: [] };
       if (action.text.trim() === '') return { state, events: [] }; // 空の追記は作らない
@@ -5340,9 +6015,24 @@ function reduceCore(
      * 🔴 **強制解放**(user 指示 2026-08-03)。
      * ⚠ **世代を上げる**のが本体 ── 解放しただけだと、飛んでいる書込の ack が
      * 後から着いて user が見ている本文を巻き戻す。世代が変われば古い ack は捨てる。
+     *
+     * 🔴 **章の欄の保存中にも効く**(#1044 段2 4巡目の修理、T1)。⚠ 直す前は
+     *   `writeLock` / `tileWrite` しか見ておらず、章の欄が `saving: true` のまま
+     *   詰まったとき **逃げ道が 1 つも無かった**(2 つのボタンは押せず(`saving` の
+     *   間は disable)、離れる操作は外側の門(`guardSectionDraftTransition`)が
+     *   断り続け、`F5` 以外に出口が無かった)。
+     * 🔑 **追記(`writeLock`)と同じ「打ち切る」作法を移す** ── ただし章の欄は
+     *   `writeLock` を握らない(追記と違う lock の器)ので、ここで
+     *   `sectionDraft.saving` を直に解く。⚠ **discardDraft では捨てない** ──
+     *   章の欄は「箱と書きかけは残す(user がコピーできる)」が設計(T1)。
+     *   `lockGen` はここで必ず上がるので、その後に遅れて届く `SECTION_SAVED` /
+     *   `SECTION_SAVE_FAILED` は **`gen` 不一致で無視される**(両 reducer が
+     *   既に `action.gen !== state.lockGen` を見ている)── 打ち切った箱を
+     *   後着の ack が閉じたり書き換えたりしない。
      */
     case 'FORCE_RELEASE_LOCK': {
       const draft = action.discardDraft && state.phase === 'editing' && state.openBody;
+      const section = state.sectionDraft;
       return {
         state: {
           ...state,
@@ -5363,6 +6053,7 @@ function reduceCore(
                 },
               }
             : {}),
+          ...(section?.saving ? { sectionDraft: { ...section, saving: false } } : {}),
         },
         events: [],
       };
@@ -6881,6 +7572,26 @@ function reduceCore(
     case 'RESTORE_REVISION': {
       if (state.phase !== 'ready' || !state.selectedLid)
         return { state, events: [] };
+      /**
+       * 🔴 **章の欄が開いている間は断る**(#1044 段2 2巡目の修理、R2)。
+       *
+       * ⚠ 直す前はここを素通りしていた ── `RESTORE_REVISION` 自身は
+       *   `selectedLid` を動かさないので、外側の門(`guardSectionDraftTransition`)
+       *   はこの時点では何も気づかない。効果層が古い版を disk へ書き終えた**後**
+       *   `ENTRY_RESTORED` が届き、`phase !== 'editing'`(章の欄は `phase` を
+       *   `ready` のまま保つ)の枝が `openBody` を丸ごと復元前の版へ差し替える ──
+       *   これは**同じノートの中で** `openBody.lid` が動かないので、外側の門の
+       *   `movedAway` 判定にも `entryGone` 判定にも引っかからない
+       *   (§1「強制する規則は、強制しなければ false になる場面で見ないと空振りする」
+       *   と同じ形 ── selectedLid が動かない経路は素通りする)。放っておくと
+       *   章の下書きは古い `original` を握ったまま、本文だけ復元前の版に変わる。
+       * 🔑 だからここで **断る**(`SAVE_SECTION_DRAFT` / `OPEN_SECTION_DRAFT` と
+       *   同じ字)── system command 側の「知らせて閉じる」は使わない。これは
+       *   user 自身の操作(履歴の戻し)であり、断って選び直させれば済む。
+       */
+      if (state.sectionDraft !== null) {
+        return sectionDraftBlockedResult(state);
+      }
       const meta = state.entryMetas.get(state.selectedLid);
       if (!meta) return { state, events: [] };
       // panel は畳む(復元で履歴が 1 件伸びるので開き直しが正)。meta snapshot は
@@ -6941,6 +7652,24 @@ function reduceCore(
       };
     case 'RESTORE_TRASH': {
       if (state.phase !== 'ready') return { state, events: [] };
+      /**
+       * 🔴 **章の欄が開いている間は断る**(#1044 段2 2巡目の修理、R2)。
+       *
+       * ⚠ 直す前はここを素通りしていた ── `RESTORE_TRASH` 自身は `selectedLid`
+       *   を動かさない(効果層へ `REQUEST_TRASH_RESTORE` を頼むだけ)ので、
+       *   外側の門(`guardSectionDraftTransition`)はこの時点では何も気づかない。
+       *   効果層が復元を終えた**後** `ENTRY_RESTORED` が届き、`phase !== 'editing'`
+       *   の枝が `selectedLid` を復元先へ無条件に動かす ── これはようやく
+       *   外側の門に引っかかるが、system command 側の枝(「結果は受け入れ、
+       *   知らせて閉じる」)を通ってしまい、断り文が
+       *   「このノートが別の場所で消されたか入れ替わったため」と**事実と違う理由**を
+       *   言う(実際はこの user 自身の操作が引き起こした)。
+       * 🔑 だから起点(ここ)で断る ── `REQUEST_TRASH_RESTORE` を出す前に止めれば、
+       *   ENTRY_RESTORED も system 側の枝も一度も走らない。
+       */
+      if (state.sectionDraft !== null) {
+        return sectionDraftBlockedResult(state);
+      }
       if (state.entryMetas.has(action.entryLid)) {
         // lid 衝突(同 lid が再作成済み)── 黙って上書きしない(可視で止める)
         return {
@@ -7245,6 +7974,22 @@ function reduceCore(
         state.entryMetas.get(old)?.archetype === 'folder'
       )
         return reduce(state, { type: 'SELECT_ENTRY', lid: action.lid });
+      /**
+       * 🔴 **枠を触る前に、選択が本当に動けるかを確かめる**(#1044 段2 2巡目の修理、R10)。
+       *
+       * ⚠ 直す前はここで先に `splitLids` を差し替え、その state を内側の `reduce()`
+       *   へ渡していた ── 章の欄が開いている間そのノートから離れる遷移を断る門
+       *   (`guardSectionDraftTransition`)は選択を戻すだけなので、**渡した state に
+       *   すでに焼き込まれていた枠の差し替えは戻らない**。結果「選択の移動は断られた
+       *   のに、枠の並びだけ書き換わる」という部分適用になっていた。
+       * 🔑 断る条件をここに書き写さない(理由が section draft か編集ロックかに関わらず
+       *   同じ形で守れる) ── **触っていない `state` で `reduce()` を試し撃ちし**、
+       *   選択が本当に `action.lid` へ動いたかだけを見る。動かなければ、その結果
+       *   (章の欄の断り文・編集ロックの無言など、理由が何であれ)をそのまま返し、
+       *   枠には 1 バイトも触れない。
+       */
+      const trial = reduce(state, { type: 'SELECT_ENTRY', lid: action.lid });
+      if (trial.state.selectedLid !== action.lid) return trial;
       const swapped = [...state.splitLids];
       swapped[i] = old;
       /**

@@ -12,11 +12,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   appendIntoSection,
+  headingLine,
+  headingRefAt,
   insertedLines,
   listAppendTargets,
   removeInsertedLines,
+  replaceSectionByHeading,
   resolveAppendAt,
+  resolveHeadingRef,
   sectionAt,
+  sectionRange,
 } from '../../src/features/markdown/append-target';
 
 const DOC = [
@@ -275,5 +280,131 @@ describe('押した行の節を引く(sectionAt)', () => {
     expect(sectionAt(body, 5)?.text).toBe('本題');
     // 対照群 ── frontmatter の中の行は、まだどの節にも入らない
     expect(sectionAt(body, 1)).toBeNull();
+  });
+});
+
+/**
+ * 🔴 **章の保存 ── 見出しの名前で探し直し、原文と一致すれば差し替える**
+ *   (#1044 段2 3巡目の修理、S1)。
+ *
+ * ⚠ **旧 reducer(`SAVE_SECTION_DRAFT`)が直に持っていた判定をここへ移した**
+ *   (effect が disk から読み直した本文へ当てる ── §7、2 本目の規則を作らない)。
+ */
+describe('replaceSectionByHeading(#1044 段2 3巡目の修理、S1)', () => {
+  const slugOf = (text: string): string =>
+    listAppendTargets(DOC).find((t) => t.text === text)!.slug;
+  const originalOf = (text: string): string => {
+    const range = sectionRange(DOC, slugOf(text))!;
+    return DOC.split('\n').slice(range.start, range.end).join('\n');
+  };
+
+  it('🔴 一致していれば、その章だけを差し替える(ほかの章は 1 バイトも変わらない)', () => {
+    const original = originalOf('決定事項');
+    const newText = ['## 決定事項', '', '- A を採用する', '- B も採用する'].join('\n');
+    const r = replaceSectionByHeading(DOC, '決定事項', original, newText);
+    expect(r.ok, '一致しているのに断られた').toBe(true);
+    if (!r.ok) throw new Error('unreachable');
+    expect(r.body).toContain('B も採用する');
+    expect(r.body).toContain('出席者は 3 名。'); // 前の章
+    expect(r.body).toContain('## 次回'); // 後の章
+    expect(r.body).toContain('来週。');
+  });
+
+  it('🔴 見出しの字が本文の中に無ければ missing', () => {
+    const remote = DOC.replace('## 決定事項', '## 決めたこと');
+    const r = replaceSectionByHeading(remote, '決定事項', originalOf('決定事項'), 'x');
+    expect(r).toEqual({ ok: false, reason: 'missing' });
+  });
+
+  it('🔴 見出しの字が本文の中に 2 つ以上あれば ambiguous', () => {
+    const remote = DOC.replace('## 次回', '## 決定事項');
+    const r = replaceSectionByHeading(remote, '決定事項', originalOf('決定事項'), 'x');
+    expect(r).toEqual({ ok: false, reason: 'ambiguous' });
+  });
+
+  it('🔴 見出しは 1 つだが中身が原文と違えば mismatch(1 文字も書かない)', () => {
+    const remote = DOC.replace('- A を採用する', '- A と C を採用する');
+    const r = replaceSectionByHeading(remote, '決定事項', originalOf('決定事項'), 'x');
+    expect(r).toEqual({ ok: false, reason: 'mismatch' });
+  });
+
+  it('対照群: 別の章が別窓で書き換えられていても、探している章が無傷なら通る', () => {
+    const remote = DOC.replace('来週。', '来週の火曜。'); // 「次回」章だけ変わった
+    const original = originalOf('決定事項');
+    const r = replaceSectionByHeading(remote, '決定事項', original, '## 決定事項\n\nx');
+    expect(r.ok, '無関係な章の書換えで断られた').toBe(true);
+  });
+});
+
+/**
+ * 🔴 **押した見出しを、行ではなく「字 + 何番目か」で覚え、保存後の本文から
+ *   もう一度引き直す**(#1044 段2 3巡目の修理、S1 ── `shiftLineAfterSectionSave`
+ *   の置き換え)。
+ *
+ * > user の物語:1 章目に 2 行足して保存し、続けて 2 章目を編集したい。
+ *   保存後の本文は effect が disk から読み直したものなので、「保存前の本文 +
+ *   増減した行数」という行の計算はもう前提が崩れている(別の窓が保存の合間に
+ *   上の方へ書いていれば、増減はこちらの章の分だけでは済まない)。
+ */
+describe('headingRefAt / resolveHeadingRef / headingLine(#1044 段2 3巡目の修理、S1)', () => {
+  const oldBody = ['## 1章', '', '中身1', '', '## 2章', '', '中身2', ''].join('\n');
+
+  it('🔴 押した見出しを覚え、保存で行数が増減した後の本文からも同じ見出しを引ける', () => {
+    const ref = headingRefAt(oldBody, 4); // 「## 2章」の行(frontmatter 無しなので原文と同じ)
+    expect(ref).toEqual({ text: '2章', ordinal: 0 });
+    const savedBody = [
+      '## 1章',
+      '',
+      '中身1',
+      'もう1行',
+      'さらに1行',
+      '## 2章',
+      '',
+      '中身2',
+      '',
+    ].join('\n');
+    const target = resolveHeadingRef(savedBody, ref!);
+    expect(target?.text).toBe('2章');
+    const line = headingLine(savedBody, target!.slug);
+    expect(savedBody.split('\n')[line!]).toBe('## 2章');
+  });
+
+  it('🔴 同じ字の見出しが 2 つあっても、ordinal で取り違えない', () => {
+    const dup = ['## x', '', 'a', '', '## x', '', 'b', ''].join('\n');
+    const first = headingRefAt(dup, 0);
+    const second = headingRefAt(dup, 4);
+    expect(first).toEqual({ text: 'x', ordinal: 0 });
+    expect(second).toEqual({ text: 'x', ordinal: 1 });
+    // ⚠ 1 つ目の見出しの上に 3 行足されても、ordinal 1 は変わらず 2 つ目を指す
+    const grown = ['足した1', '足した2', '足した3', ...dup.split('\n')].join('\n');
+    const target = resolveHeadingRef(grown, second!);
+    expect(target?.slug).not.toBe(resolveHeadingRef(grown, first!)?.slug);
+    const line = headingLine(grown, target!.slug);
+    expect(grown.split('\n')[line!]).toBe('## x');
+    expect(line, '1 つ目の見出しではない').toBeGreaterThan(
+      headingLine(grown, resolveHeadingRef(grown, first!)!.slug)!,
+    );
+  });
+
+  it('🔴 押した所に見出しが無ければ null(末尾へ落とさない)', () => {
+    const body = ['まえがき', '', '# 本題', ''].join('\n');
+    expect(headingRefAt(body, 0)).toBeNull();
+  });
+
+  it('🔴 同じ字の見出しの数が(保存後に)減っていれば resolveHeadingRef は null', () => {
+    const dup = ['## x', '', 'a', '', '## x', '', 'b', ''].join('\n');
+    const second = headingRefAt(dup, 4)!;
+    const shrunk = ['## x', '', 'a', ''].join('\n'); // 2 つ目が消えた
+    expect(resolveHeadingRef(shrunk, second)).toBeNull();
+  });
+
+  it('🔴 frontmatter が在っても、剥がした側の行番号で引ける(呼び手の規約)', () => {
+    const withFm = ['---', 'title: t', '---', ...oldBody.split('\n')].join('\n');
+    const ref = headingRefAt(withFm, 4); // 剥がした側では変わらず「## 2章」
+    expect(ref).toEqual({ text: '2章', ordinal: 0 });
+  });
+
+  it('🔴 headingLine は印が解けなければ null', () => {
+    expect(headingLine(oldBody, 'no-such-slug')).toBeNull();
   });
 });

@@ -26,7 +26,7 @@
  * 🔑 **pure module**。DOM も窓も知らない。
  */
 import { makeSlugCounter } from './markdown-toc';
-import { parseFrontmatter } from './frontmatter';
+import { frontmatterLineCount, parseFrontmatter } from './frontmatter';
 
 /** 追記の入り先 1 つ。 */
 export interface AppendTarget {
@@ -87,15 +87,23 @@ export function listAppendTargets(body: string): readonly AppendTarget[] {
   return scanHeadings(body).map(({ slug, text, level }) => ({ slug, text, level }));
 }
 
+/** 章の原文の行範囲(0 起点)。`start` は見出し自身、`end` は**含まない**。 */
+export interface SectionRange {
+  readonly start: number;
+  readonly end: number;
+}
+
 /**
- * その節の**終わり**(= 次の同格以上の見出しの直前)の行を返す。
+ * 🔴 **章の範囲(見出し 〜 次の同格以上の見出しの手前)**(#1044 段2)。
  *
- * @returns 挿す位置の行(0 起点、**その行の前**に入る)。印が無ければ `null`
+ * ⚠ `resolveAppendAt` の**末尾を巻き戻す前**の範囲そのもの ── 章だけ編集(#1044)が
+ *   「見出しから、次の同じ深さか浅い見出しの手前まで」を**この関数 1 本**から引く。
+ *   `resolveAppendAt` はこの関数の `end` から**さらに**空行を巻き戻すので、2 つは
+ *   同じ 1 つの計算(下)を土台にしている(2 つ目の規則を作らない ── CLAUDE.md §7)。
  *
- * ⚠ 末尾の空行は**跨がない** ── 節の末尾に空行が 2 つあるとき、その後ろに入れると
- *   見た目が節の外になる。🔑 **実のある最後の行の次**に入れる。
+ * @returns 印が解けなければ `null`
  */
-export function resolveAppendAt(body: string, slug: string): number | null {
+export function sectionRange(body: string, slug: string): SectionRange | null {
   const heads = scanHeadings(body);
   const at = heads.findIndex((h) => h.slug === slug);
   if (at < 0) return null;
@@ -109,9 +117,24 @@ export function resolveAppendAt(body: string, slug: string): number | null {
       break;
     }
   }
+  return { start: me.line, end };
+}
+
+/**
+ * その節の**終わり**(= 次の同格以上の見出しの直前)の行を返す。
+ *
+ * @returns 挿す位置の行(0 起点、**その行の前**に入る)。印が無ければ `null`
+ *
+ * ⚠ 末尾の空行は**跨がない** ── 節の末尾に空行が 2 つあるとき、その後ろに入れると
+ *   見た目が節の外になる。🔑 **実のある最後の行の次**に入れる。
+ */
+export function resolveAppendAt(body: string, slug: string): number | null {
+  const range = sectionRange(body, slug);
+  if (range === null) return null;
+  const lines = body.split(/\r?\n/);
   // 実のある最後の行まで巻き戻す(空行の下に置かない)
-  let last = end - 1;
-  while (last > me.line && lines[last]!.trim() === '') last--;
+  let last = range.end - 1;
+  while (last > range.start && lines[last]!.trim() === '') last--;
   return last + 1;
 }
 
@@ -224,4 +247,110 @@ export function sectionAt(body: string, line: number): AppendTarget | null {
   }
   if (hit === null) return null;
   return { slug: hit.slug, text: hit.text, level: hit.level };
+}
+
+/**
+ * 🔴 **章だけの保存を、見出しの名前で本文へ差し替える**(#1044 段2 3巡目の修理、S1)。
+ *
+ * ⚠ **`SAVE_SECTION_DRAFT` の reducer が持っていた「探し直し・比較・差し替え」を
+ *   ここへ移した**(2 本目の規則を作らない ── §7)。effect が **disk から読み直した
+ *   本文**をここへ渡す ── reducer は `state.openBody.body`(画面の古い写し)を
+ *   一切使わない(追記 `REQUEST_APPEND` と同じ「本文は event に載せず、書く瞬間に
+ *   disk から読み直す」作法)。
+ *
+ * 🔑 手順:①見出しの**名前**で、渡された本文から章を探し直す(何番目かではなく ──
+ *   別の窓が上の方の見出しを増減させていても、名前なら追える)②見出しが
+ *   **0 個 / 2 個以上**なら断る(どの章か決まらない)③いまの章の中身が
+ *   **開いたときの原文と一致するか**を見る(一致しなければ、別の場所で
+ *   書き換えられている ── 1 文字も書かずに断る)④一致していれば、その範囲を
+ *   `text` で丸ごと差し替える。
+ *
+ * @param body 差し替え先の本文(**disk から読んだ最新の本文** ── frontmatter を含む)
+ * @param heading 章を探す見出しの字(`SectionDraft.heading`)
+ * @param original 開いたときに控えた、この章の原文(`SectionDraft.original`)
+ * @param text 箱に打たれていた新しい中身(見出し行を含む)
+ */
+export type ReplaceSectionResult =
+  | { readonly ok: true; readonly body: string }
+  /**
+   * `missing` = 見出しが 0 個(消えた / 変わった)。`ambiguous` = 見出しが 2 個以上
+   * (どの章か決まらない)。`mismatch` = 見出しは 1 個だが中身が原文と違う(別の場所で
+   * 書き換えられている)。⚠ 呼び側は**理由を分けて言ってよい**が、字は 1 か所
+   * (`app-state.ts` の断り文)に寄せる ── ここでは種類だけ返す。
+   */
+  | { readonly ok: false; readonly reason: 'missing' | 'ambiguous' | 'mismatch' };
+
+export function replaceSectionByHeading(
+  body: string,
+  heading: string,
+  original: string,
+  text: string,
+): ReplaceSectionResult {
+  const matches = listAppendTargets(body).filter((h) => h.text === heading);
+  if (matches.length === 0) return { ok: false, reason: 'missing' };
+  if (matches.length > 1) return { ok: false, reason: 'ambiguous' };
+  const range = sectionRange(body, matches[0]!.slug);
+  if (range === null) return { ok: false, reason: 'missing' };
+  const lines = body.split(/\r?\n/);
+  const current = lines.slice(range.start, range.end).join('\n');
+  if (current !== original) return { ok: false, reason: 'mismatch' };
+  const newBody = [
+    ...lines.slice(0, range.start),
+    ...text.split(/\r?\n/),
+    ...lines.slice(range.end),
+  ].join('\n');
+  return { ok: true, body: newBody };
+}
+
+/**
+ * 🔴 **押した見出しを、行番号ではなく「字 + 同じ字の中で何番目か」で覚える**
+ *   (#1044 段2 3巡目の修理、S1)。
+ *
+ * > user の物語:1 章目に 2 行足して保存し、続けて 2 章目を編集したい。
+ *
+ * ⚠ **`shiftLineAfterSectionSave`(行のずらし算)を置き換える** ── 保存後の本文は
+ *   `SAVE_SECTION_DRAFT` の effect が **disk から読み直した**ものなので、
+ *   「保存する前の本文 + 増減した行数」という前提そのものが崩れている
+ *   (別の窓が保存の合間に上へ書いていれば、行の増減はこちらの章の分だけでは済まない)。
+ * 🔑 だから**行を計算しない**。押した見出しを名前で覚え、**保存後の本文からもう一度
+ *   引き直す**(`resolveHeadingRef`)── 追記の入り先と同じ「そのつど本文から解く」作法
+ *   (#395 段①)。
+ *
+ * ⚠ 同じ字の見出しが 2 つ以上あるとき、**どちらを押したか**を残すために
+ *   `ordinal`(同じ字の中で何番目、0 起点)を持つ。
+ *
+ * @param line 押した見出しの行(frontmatter を剥がした側。`sectionAt` の呼び手と同じ規約)
+ * @returns 押した所に見出しが無ければ `null`
+ */
+export interface HeadingRef {
+  readonly text: string;
+  readonly ordinal: number;
+}
+
+export function headingRefAt(body: string, line: number): HeadingRef | null {
+  const hit = sectionAt(body, line + frontmatterLineCount(body));
+  if (hit === null) return null;
+  const sameText = listAppendTargets(body).filter((h) => h.text === hit.text);
+  const ordinal = sameText.findIndex((h) => h.slug === hit.slug);
+  return ordinal < 0 ? null : { text: hit.text, ordinal };
+}
+
+/**
+ * `headingRefAt` で覚えた見出しを、**別の(保存後の)本文から**引き直す。
+ * ⚠ 同じ字の見出しの数が変わっていれば(押した回より減った等)`null`。
+ */
+export function resolveHeadingRef(body: string, ref: HeadingRef): AppendTarget | null {
+  const sameText = listAppendTargets(body).filter((h) => h.text === ref.text);
+  return sameText[ref.ordinal] ?? null;
+}
+
+/**
+ * その見出し(`slug`)の行(frontmatter を剥がした側)。⚠ **開く口**
+ * (`OPEN_SECTION_DRAFT` / `startSectionEditAt` の `line`)と同じ規約に揃える。
+ *
+ * @returns 印が解けなければ `null`
+ */
+export function headingLine(body: string, slug: string): number | null {
+  const range = sectionRange(body, slug);
+  return range === null ? null : range.start - frontmatterLineCount(body);
 }

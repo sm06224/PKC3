@@ -70,3 +70,99 @@ describe('bindEditLockRelease', () => {
     expect(releaseEdit).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * 🔴 **章の欄も同じ 1 か所で守る**(#1044 段2、F-B)。
+ *
+ * ⚠ 章の欄は `phase` を `ready` のまま保つ(#1044 段2 設計)ので、直す前は
+ *   `bindEditLockRelease` が `phase === 'editing'` だけを見ていて、章の欄の
+ *   ロックが**永久に返らなかった**。
+ */
+describe('bindEditLockRelease(章の欄、#1044 段2 F-B)', () => {
+  const HEAD_BODY = ['## 章', '', '中身', ''].join('\n');
+
+  /** ⚠ bind が先、章の欄を開くのが後(実配線と同じ順序)。 */
+  function bootedSection(sync: () => { releaseEdit: (cid: string, lid: string) => void }): {
+    d: Dispatcher;
+    lid: string;
+  } {
+    const d = new Dispatcher();
+    d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [
+        {
+          lid: 'n1',
+          title: 't',
+          archetype: 'text',
+          createdAt: null,
+          updatedAt: null,
+          entryOrder: 1,
+          status: null,
+          date: null,
+          archived: false,
+          bodyChars: null,
+        },
+      ],
+      relations: [],
+    });
+    bindEditLockRelease(d, sync, 'c1');
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: HEAD_BODY });
+    d.dispatch({ type: 'OPEN_SECTION_DRAFT', lid: 'n1', line: 0 });
+    expect(d.getState().sectionDraft, '章の欄が開いていない(前提が崩れている)').not.toBeNull();
+    expect(d.getState().phase, 'アプリ全体が編集中になった').toBe('ready');
+    return { d, lid: 'n1' };
+  }
+
+  /**
+   * ⚠ **保存は effect 化された**(#1044 段2 3巡目の修理、S1)── `SAVE_SECTION_DRAFT`
+   *   はもう同期に下書きを閉じない(`saving: true` を立てて要求を出すだけ)。
+   *   ロックが返るのは、disk から読み直した effect の ack(`SECTION_SAVED`)が
+   *   届いて下書きが本当に閉じたときである。
+   */
+  it('章を保存すると、握っていた lid が 1 回だけ返る', () => {
+    const releaseEdit = vi.fn();
+    const { d, lid } = bootedSection(() => ({ releaseEdit }));
+    // 無関係な state 変化(章の欄とは関係ない)では返らない
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'x' });
+    expect(releaseEdit).not.toHaveBeenCalled();
+    d.dispatch({ type: 'SAVE_SECTION_DRAFT', text: '## 章\n\n書いた' });
+    // 🔑 要求を出した時点では、まだ下書きも残り、ロックも返らない(ack 待ち)
+    expect(d.getState().sectionDraft, '保存要求の時点で下書きが消えた').not.toBeNull();
+    expect(d.getState().sectionDraft!.saving, '保存中の印が立っていない').toBe(true);
+    expect(releaseEdit, '保存要求の時点でロックを返した(気が早い)').not.toHaveBeenCalled();
+    d.dispatch({
+      type: 'SECTION_SAVED',
+      lid,
+      gen: d.getState().lockGen,
+      heading: '章',
+      body: '## 章\n\n書いた\n',
+      status: null,
+      date: null,
+      archived: false,
+    });
+    expect(d.getState().sectionDraft, '保存後も下書きが残っている').toBeNull();
+    expect(releaseEdit).toHaveBeenCalledTimes(1);
+    expect(releaseEdit).toHaveBeenCalledWith('c1', lid);
+  });
+
+  it('章の編集をやめると、握っていた lid が 1 回だけ返る', () => {
+    const releaseEdit = vi.fn();
+    const { d, lid } = bootedSection(() => ({ releaseEdit }));
+    d.dispatch({ type: 'CANCEL_SECTION_DRAFT' });
+    expect(releaseEdit).toHaveBeenCalledTimes(1);
+    expect(releaseEdit).toHaveBeenCalledWith('c1', lid);
+  });
+
+  it('system command(別タブの書込)で章の欄が閉じても、握っていた lid が 1 回だけ返る', () => {
+    const releaseEdit = vi.fn();
+    const { d, lid } = bootedSection(() => ({ releaseEdit }));
+    // 別タブがそのノートを消した体(同じ cid、metas から n1 が落ちる ── F-A の
+    // guardSectionDraftTransition が system command として下書きを閉じる)
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [], relations: [] });
+    expect(d.getState().sectionDraft, '下書きが閉じていない').toBeNull();
+    expect(releaseEdit).toHaveBeenCalledTimes(1);
+    expect(releaseEdit).toHaveBeenCalledWith('c1', lid);
+  });
+});

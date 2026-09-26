@@ -56,6 +56,7 @@ import {
   blockedActionNote,
   bodyWriteBlockReason,
   hasAppGroupNote,
+  hasUnsavedTyping,
   appGroupIconName,
   appGroupOrderCount,
   hasAppGroupOrder,
@@ -63,6 +64,7 @@ import {
   nextViewMode,
   phaseBlockReason,
   screenBodyOf,
+  SECTION_DRAFT_NOTE,
   type AppState,
   type ViewMode,
 } from '@adapter/state/app-state';
@@ -97,7 +99,14 @@ import { isIconName } from '@features/icon/symbols';
 import { insertBlockText, insertText, OWN_MEANING } from '@adapter/ui/render/row-swap';
 import { iconShortcodeFor } from '@features/icon/icon-shortcode';
 import { HOLD_ATTR, neighborCell, openCellAt } from '@adapter/ui/render/cell-input';
-import { resolveAppendAt, sectionAt } from '@features/markdown/append-target';
+import {
+  resolveAppendAt,
+  sectionAt,
+  headingRefAt,
+  resolveHeadingRef,
+  headingLine,
+} from '@features/markdown/append-target';
+import { waitSectionSaveSettled } from '@adapter/state/section-save-wait';
 import { isTextScale } from '@features/text-scale';
 import { chooseTextScale } from '@adapter/ui/render/text-scale';
 import { isReadColumns } from '@features/read-columns';
@@ -215,6 +224,7 @@ import {
 } from '../render/context-menu';
 import { chordHint, HINT_BLOCKED } from '../render/shortcut-hint';
 import { TARGET_LID_ATTR } from '../render/target-lid';
+import { sectionBoxText, SECTION_BOX_INPUT_FIELD, SECTION_BOX_REGION } from '../render/section-box';
 import { structureText } from '@features/structure/structure-text';
 import {
   profileLineText,
@@ -486,6 +496,7 @@ import {
   pickArchiveInApp,
   pickCopyFormatInApp,
   pickScrapInApp,
+  pickSectionLeaveInApp,
   promptInApp,
   isAppDialogOpen,
   type ArchivePickRow,
@@ -1740,6 +1751,10 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   // 🔑 **右クリックから入る編集も同じ門**(#426 段②。着地前レビュー 🔴1)──
   //    載せ忘れると「取り込み中は帯からは断られ、メニューからは通る」になる
   'edit-from-heading',
+  // 🔑 **章だけ編集も同じ理由**(#1044 段2)── `edit-from-heading` と同じく、
+  //    取込・書出しの最中に書込を始める入口を作らない
+  'edit-section',
+  'save-section-draft',
   'commit-edit',
   'append-entry',
   // ⚠ 選んだ全部の本文を書く(#402 ①)── 取込・書出しの最中に走らせない
@@ -2131,7 +2146,13 @@ function moveTile(dispatcher: Dispatcher, target: HTMLElement, by: -1 | 1): void
  * `SELECT_ENTRY` は編集中 / error / 未知 lid で**黙って何もしない**ので、
  * 素直に撃つと「押しても無言」が残る(直そうとしている当のものになる)。
  */
-function navigateToLink(dispatcher: Dispatcher, target: HTMLElement, raw: string | null): void {
+function navigateToLink(
+  dispatcher: Dispatcher,
+  target: HTMLElement,
+  raw: string | null,
+  root: HTMLElement,
+  services: BinderServices,
+): void {
   const t = parseLinkTarget(raw ?? '');
   if (t.kind === 'invalid') {
     dispatcher.dispatch({ type: 'OP_FAILED', error: 'リンクの書き方が読めません' });
@@ -2144,7 +2165,7 @@ function navigateToLink(dispatcher: Dispatcher, target: HTMLElement, raw: string
     });
     return;
   }
-  if (!selectEntryOrExplain(dispatcher, t.lid, 'リンク先のノート')) return;
+  if (!selectEntryOrExplain(dispatcher, t.lid, 'リンク先のノート', root, services)) return;
   /**
    * 🔴 **`#h/<見出しの id>` が付いていれば、開いた後にその見出しへ飛ぶ**(#579)。
    *
@@ -2427,37 +2448,34 @@ function jumpWhenAppended(
 }
 
 /**
- * 🔴 **編集に入る口は 1 本**(#426 段②。着地前レビュー 🔴1)。
+ * 🔴 **ロックを取ってから、続きを呼ぶ**(#426 段②の門 + #1044 段2)。
  *
- * ⚠ 直す前は `START_EDIT` を撃つ所が **3 か所**あり、門(飛んでいる書込を待つ /
- * 別タブとの編集ロック / 入れたか確かめて返す)を持っていたのは**帯の「編集」だけ**
- * だった ── `Ctrl`(`⌘`)+クリックと、右クリックの「ここから編集する」は
- * **ロックを取らずに編集へ入って**いた(= 同じノートを 2 枚が持ち、後に保存したほうが勝つ)。
- * 🔑 §7 の作法どおり**判定を 1 か所へ寄せる** ── 呼び手は「どの行から開くか」だけ渡す。
+ * ⚠ **断り文はここ 1 か所**(`startEditAt` / `startSectionEditAt` の共通の門)──
+ *   2 か所に書くと片方だけ古くなる(CLAUDE.md §7)。`startEditAt` から抜いただけで
+ *   分岐の順番・待つ物は 1 バイトも変えていない。
  *
- * @param atLine 押した行(`null` = 帯の「編集」= 先頭から)
+ * @param onGranted ロックが要らない / 取れたときに呼ぶ。呼ぶ**直前**に
+ *   `openBody.lid === lid` を確かめてある(呼び手は再確認しなくてよい)。
  */
-function startEditAt(
+function acquireEditLockOrExplain(
   dispatcher: Dispatcher,
   services: BinderServices,
-  atLine: number | null,
+  lid: string,
+  onGranted: () => void,
 ): void {
   const lock = services.acquireEditLock;
-  const lid = dispatcher.getState().openBody?.lid ?? null;
   /**
    * 🔴 **飛んでいる書込を待ってから始める**(#288)。⚠ 待たないと、
    * チェックの印を押した直後の編集で**押す前の本文**が入力欄に出て、
    * 打った時点で印が黙って戻る(2026-08-19 に smoke が実際に踏んだ)。
    * ⚠ 待つのは chain が空になるまで ── 何も飛んでいなければその場で返る。
-   */
-  /**
    * ⚠ **渡されていない環境では今までどおり同期に始まる**(`null`)── test の
    *   fake や旧い配線を非同期に変えない(乗せ換えたとき unit が 40 件落ちた)。
    */
   const ready = services.settle?.() ?? null;
-  if (!lock || lid === null) {
-    if (ready === null) dispatcher.dispatch({ type: 'START_EDIT', ...(atLine === null ? {} : { atLine }) });
-    else void ready.then(() => dispatcher.dispatch({ type: 'START_EDIT', ...(atLine === null ? {} : { atLine }) }));
+  if (!lock) {
+    if (ready === null) onGranted();
+    else void ready.then(onGranted);
     return;
   }
   void (ready === null ? lock(lid) : ready.then(() => lock(lid))).then((grant) => {
@@ -2476,20 +2494,253 @@ function startEditAt(
       });
       return;
     }
-    // 🔴 dispatch の**前**に自分の lid か確かめる(レビュー M-3)── acquire を待つ間に
-    //    user が別のノートを選んでいると、reducer は**そのノート**の編集を受理する
+    // 🔴 呼ぶ**前**に自分の lid か確かめる(レビュー M-3)── acquire を待つ間に
+    //    user が別のノートを選んでいると、**そのノート**の編集を受理してしまう
     //    = ロック無しの編集が成立してしまう。dispatch は同期なのでここの検査に窓は無い
     if (dispatcher.getState().openBody?.lid !== lid) {
       services.releaseEditLock?.(lid);
       return;
     }
+    onGranted();
+  });
+}
+
+/**
+ * 🔴 **編集に入る口は 1 本**(#426 段②。着地前レビュー 🔴1)。
+ *
+ * ⚠ 直す前は `START_EDIT` を撃つ所が **3 か所**あり、門(飛んでいる書込を待つ /
+ * 別タブとの編集ロック / 入れたか確かめて返す)を持っていたのは**帯の「編集」だけ**
+ * だった ── `Ctrl`(`⌘`)+クリックと、右クリックの「ここから編集する」は
+ * **ロックを取らずに編集へ入って**いた(= 同じノートを 2 枚が持ち、後に保存したほうが勝つ)。
+ * 🔑 §7 の作法どおり**判定を 1 か所へ寄せる** ── 呼び手は「どの行から開くか」だけ渡す。
+ *
+ * @param atLine 押した行(`null` = 帯の「編集」= 先頭から)
+ */
+function startEditAt(
+  dispatcher: Dispatcher,
+  services: BinderServices,
+  atLine: number | null,
+): void {
+  const lid = dispatcher.getState().openBody?.lid ?? null;
+  const dispatchStart = (): void =>
     dispatcher.dispatch({ type: 'START_EDIT', ...(atLine === null ? {} : { atLine }) });
+  if (!services.acquireEditLock || lid === null) {
+    const ready = services.settle?.() ?? null;
+    if (ready === null) dispatchStart();
+    else void ready.then(dispatchStart);
+    return;
+  }
+  acquireEditLockOrExplain(dispatcher, services, lid, () => {
+    dispatchStart();
     // ⚠ 「editing に居るか」では足りない ── reducer が断る理由は選択以外にもある
     //    (writeLock / tileWrite 中)。**自分の lid が入ったか**で見る
     const st = dispatcher.getState();
     if (!(st.phase === 'editing' && st.openBody?.lid === lid))
       services.releaseEditLock?.(lid);
   });
+}
+
+/**
+ * 🔴 **「章の下書きを抱えたまま次へ進みたい」を受ける 1 本の関数**
+ *   (#1044 段2 5巡目の修理、U1)。
+ *
+ * ⚠ 直す前は `leaveSectionDraftOrAsk`(別のノートへ移る)と `startSectionEditAt`
+ *   (同じノートの別の見出しを開く)が、**同じ手順**(dirty 判定 → 3 択 → 保存 →
+ *   ack 待ち → 待つ間に system 側で閉じられていないか → 断られたら進まない)を
+ *   別々に書いていた(CLAUDE.md §7「同じ判定を複数の場所に書かない」)。4 巡目の
+ *   T7(待つ間に system 側で閉じていたら保存を試みない)は `leaveSectionDraftOrAsk`
+ *   にだけ入り、`startSectionEditAt` の `choice === 'save'` には無かった ── 待つ間に
+ *   閉じられると、外れた古い箱の字(`host` が外れた node)で SAVE を撃ち
+ *   (reducer は no-op)、`waitSectionSaveSettled` が `sectionDraft === null` を見て
+ *   即 `'saved'` を返し、固定済みの lid に OPEN を撃って無言で終わっていた。
+ *
+ * @param draft 3 択に入る**前**に呼び手が読んだ `sectionDraft`(ここで読み直さない)。
+ *   「待つ間に system 側で閉じられたか」は、この控えとの身元一致(`lid` + `heading`)で見る。
+ * @param opts.captureBeforeSave `SAVE_SECTION_DRAFT` を撃つ**直前**
+ *   (`stillOpen` を確かめた後)に呼ぶ ── 保存前の state から必要な物(見出しの ref 等)を
+ *   控えておくためのフック。使わない呼び手は渡さなくてよい。
+ * @param opts.proceed **非同期に決まった回にだけ**呼ぶ(消して進む / 保存できた /
+ *   待つ間に system 側で既に閉じていた ── どれも「移る・開き直す」自体は構わない、
+ *   保存を試みたかどうかが違うだけ)。呼ばないのは「移らない」を選んだ / 保存が
+ *   断られた、の 2 つだけ(断り文は `state.error` に出ている)。
+ *   `saved` が `false` の回は「保存はしていない」── 呼び手は元の行 / 元の対象で
+ *   進んでよい(既に閉じていた回も含め、system 側の結果は受け入れる)。
+ * @returns `'sync'` なら**変更が無かった**(聞かずに閉じた)── `proceed` は
+ *   **呼んでいない**。呼び手は自分の「進む」処理をその場で(同期に)続けてよい。
+ *   ⚠ ここで `proceed` を呼ばないのは、`leaveSectionDraftOrAsk` の 5 か所の呼び手が
+ *   「`true` が返ったら自分の続きの処理をそのまま続ける」という**同期の契約**を
+ *   持っているため(§10「置き換える前に、置き換えられる側が“ついでに”提供していた
+ *   性質を数え上げる」と同じ向き ── ここでは「同期で返る」という性質)。
+ *   `'async'` なら 3 択(または保存の ack)を待っている ── 呼び手はここで
+ *   return する(進んだかどうかは、後から `proceed` が呼ばれるかどうかで分かる)。
+ */
+function withSectionDraftLeave<T = void>(
+  dispatcher: Dispatcher,
+  root: HTMLElement,
+  draft: NonNullable<AppState['sectionDraft']>,
+  opts: {
+    captureBeforeSave?: () => T;
+    proceed: (saved: boolean, captured: T | undefined) => void;
+  },
+): 'sync' | 'async' {
+  const host = root.querySelector<HTMLElement>('[data-pkc-field="detail-body"]');
+  const current = host === null ? null : sectionBoxText(host);
+  const dirty = current !== null && current !== draft.original;
+  if (!dirty) {
+    // ⚠ 変更が無ければ**聞かずに進む**(design「箱を閉じるだけ」)
+    dispatcher.dispatch({ type: 'CANCEL_SECTION_DRAFT' });
+    return 'sync';
+  }
+  void (async (): Promise<void> => {
+    const choice = await pickSectionLeaveInApp(root);
+    if (choice === 'stay') return;
+    if (choice === 'discard') {
+      dispatcher.dispatch({ type: 'CANCEL_SECTION_DRAFT' });
+      opts.proceed(false, undefined);
+      return;
+    }
+    // choice === 'save' ── 「保存して進む」は保存が成功したときだけ「保存できた」扱い
+    /**
+     * 🔴 **待つ間に system 側で章の欄が閉じていたら、保存したと数えない**
+     *   (#1044 段2 4巡目の修理、T7。5巡目の修理、U1でこの関数へ寄せ、両呼び手の
+     *   共通の門にした)。
+     *
+     * ⚠ 直す前(`leaveSectionDraftOrAsk` 側)はここを見ずに `sectionBoxText(host ??
+     *   root)` を読んでいた ── `host` はダイアログを開く**前**に掴んだ参照なので、
+     *   待っている間に system 側(`guardSectionDraftTransition`)が下書きを閉じて
+     *   `detail.ts` が骨組みを作り直すと、`host` は**外れた古い node**になる
+     *   (CLAUDE.md §9「編集の作法」と同じ罠)。外れていても子は残るので
+     *   `sectionBoxText` は**古い打ちかけの字**を拾ってしまい、そのまま
+     *   `SAVE_SECTION_DRAFT` を撃つと下書きが無いので無言の no-op、続く
+     *   `waitSectionSaveSettled` は `sectionDraft === null` を見て**即 `'saved'`**
+     *   を返す ── 何も書いていないのに「保存できた」扱いで進んでしまう(データは
+     *   system が既に受け入れた結果に守られているので消えないが、成功の報告は嘘になる)。
+     * 🔑 直しは**待つ前に閉じていたかを見る**:いま開いている下書きが
+     *   まだ同じ(`lid` + `heading`)ものかを確かめ、違えば(system が既に
+     *   処理した)保存を試みずに進むだけにする。
+     */
+    const stillOpen = dispatcher.getState().sectionDraft;
+    if (stillOpen === null || stillOpen.lid !== draft.lid || stillOpen.heading !== draft.heading) {
+      opts.proceed(false, undefined);
+      return;
+    }
+    const text = sectionBoxText(host ?? root);
+    if (text === null) return;
+    const captured = opts.captureBeforeSave?.();
+    dispatcher.dispatch({ type: 'SAVE_SECTION_DRAFT', text });
+    const outcome = await waitSectionSaveSettled(dispatcher);
+    if (outcome === 'saved') {
+      opts.proceed(true, captured);
+    }
+    // ⚠ 断られたら(sectionDraft が残る)進まない。断り文は state.error に出ている
+  })();
+  return 'async';
+}
+
+/**
+ * 🔴 **その章だけを、その場の入力欄にする口**(#1044 段2 F-E)。
+ *
+ * ⚠ ロックは `startEditAt` と**同じノート単位**(`acquireEditLockOrExplain` を共有)──
+ *   同じノートを別のタブで全文編集中なら、章の欄も開かない(設計 doc §3)。
+ * ⚠ **reducer が拒否したら(章が引けない等)ロックを返す** ── 開けなかったのに
+ *   ロックだけ握ったままにすると、以後そのノートが誰からも編集できなくなる。
+ * 🔴 **同じノートに既に章の下書きが在るときは、`leaveSectionDraftOrAsk` と同じ
+ *   3 択を通す**(#1044 段2、F-E)。⚠ 直す前は `OPEN_SECTION_DRAFT` の
+ *   「二重に開かない」門(reducer)が無言に捨てていた ── 同じノートの
+ *   **別の見出し**で「この章を編集する」を押しても、何も起きなかった。
+ *   ⚠ このノートのロックは既に握ったまま(新たに取り直さない ── 同じ lid)。
+ *
+ * @param root 章の箱 / 3 択の pane を出す先(`leaveSectionDraftOrAsk` と同じ)
+ * @param line 押した見出しの行(剥がした本文の行番号。`bodySourceLineAt` と同じ基準)
+ */
+function startSectionEditAt(
+  dispatcher: Dispatcher,
+  services: BinderServices,
+  root: HTMLElement,
+  line: number,
+): void {
+  const st0 = dispatcher.getState();
+  const lid = st0.openBody?.lid ?? null;
+  if (lid === null) return; // 開いている本文が無い(押せないはずの防波堤)
+  const open = (openLine: number): void => {
+    dispatcher.dispatch({ type: 'OPEN_SECTION_DRAFT', lid, line: openLine });
+  };
+  /**
+   * 🔴 **開くのは、必ずこの口を通す**(#1044 段2 2巡目の修理、R1)。
+   *
+   * ⚠ 直す前は「同じノートの別の見出しへ切り替える」ときだけ、ここを通さずに
+   *   `open()` を直に撃っていた ── `CANCEL_SECTION_DRAFT` / `SAVE_SECTION_DRAFT`
+   *   は一瞬 `sectionDraft` を `null` にする(閉じてから開く、の間)。その一瞬を
+   *   `bindEditLockRelease`(`unsavedTypingLidOf` 経由)が「もう書きかけが無い」
+   *   と読み、握っていた編集ロックを**本当に手放す**(follower タブでは
+   *   holder へ `edit-release` を送る)。そこで取り直さずに次の見出しを開くと、
+   *   その隙に**別タブが同じノートを編集できてしまう**(#177 と同じ事故)。
+   * 🔑 「閉じずに差し替える」専用の action は作らない ── **開く口は 1 本**
+   *   (`acquireEditLockOrExplain` を通る経路。この関数がもともと持っていた
+   *   「まだ章の下書きが無いとき」の経路と同じ)を、切り替えのときも必ず通す。
+   */
+  const openWithLock = (openLine: number): void => {
+    if (!services.acquireEditLock) {
+      const ready = services.settle?.() ?? null;
+      if (ready === null) open(openLine);
+      else void ready.then(() => open(openLine));
+      return;
+    }
+    acquireEditLockOrExplain(dispatcher, services, lid, () => {
+      open(openLine);
+      if (dispatcher.getState().sectionDraft?.lid !== lid) services.releaseEditLock?.(lid);
+    });
+  };
+  const draft = st0.sectionDraft;
+  if (draft !== null && draft.lid === lid) {
+    const body = st0.openBody!.body;
+    const pressed = sectionAt(body, line + frontmatterLineCount(body));
+    if (pressed !== null && pressed.text === draft.heading) {
+      // ① 同じ見出し ── 開き直さず、箱にフォーカスを戻すだけ
+      root.querySelector<HTMLTextAreaElement>(`[data-pkc-field="${SECTION_BOX_INPUT_FIELD}"]`)?.focus();
+      return;
+    }
+    // ② 別の見出し ── withSectionDraftLeave の共通 3 択(#1044 段2 5巡目の修理、U1)
+    const leave2 = withSectionDraftLeave(dispatcher, root, draft, {
+      /**
+       * 🔴 **保存を撃つ直前の本文で、押した見出しを名前で覚える**
+       *   (#1044 段2 3巡目の修理、S1)。
+       *
+       * ⚠ 直す前は「行のずらし算」(`shiftLineAfterSectionSave`)だった ──
+       *   保存後の本文は**effect が disk から読み直した**ものなので、
+       *   「保存する前の本文 + 増減した行数」という前提が崩れている(別の窓が
+       *   保存の合間に上の方へ書いていれば、増減はこちらの章の分だけでは済まない)。
+       * 🔑 だから**行を計算しない**。押した見出しを「字 + 同じ字の中で何番目か」
+       *   (`headingRefAt`)で覚え、保存が終わった**後**の本文からもう一度
+       *   引き直す(`resolveHeadingRef`)── 追記の入り先と同じ「そのつど本文から
+       *   解く」作法(#395 段①)。⚠ `withSectionDraftLeave` は「保存を撃つ直前」
+       *   (system 側で閉じられていないかを確かめた**後**)にこれを呼ぶ ── だから
+       *   `dispatcher.getState().openBody?.body` は「これから撃つ保存の土台」と一致する。
+       */
+      captureBeforeSave: () => headingRefAt(dispatcher.getState().openBody?.body ?? body, line),
+      /**
+       * @param saved `false` なら「保存はしていない」(変更なし / 消して進む /
+       *   待つ間に system 側で既に閉じていた ── T7 の対、U1)。どの回も**押した
+       *   行のまま**開き直す(保存していないので、行のずれを気にする必要が無い)。
+       */
+      proceed: (saved, ref) => {
+        if (!saved) {
+          openWithLock(line);
+          return;
+        }
+        const savedBody = dispatcher.getState().openBody?.body ?? null;
+        const target =
+          ref == null || savedBody === null ? null : resolveHeadingRef(savedBody, ref);
+        const resolvedLine = target === null ? null : headingLine(savedBody!, target.slug);
+        openWithLock(resolvedLine ?? line);
+      },
+    });
+    // 🔑 `'sync'`(変更なし ── 聞かずに閉じた)は `proceed` が呼ばれていないので、
+    //   ここで自分の続きを呼ぶ(`proceed(false, …)` と同じ「押した行のまま開く」)。
+    if (leave2 === 'sync') openWithLock(line);
+    return;
+  }
+  openWithLock(line);
 }
 
 /**
@@ -3089,7 +3340,58 @@ function isTouchClick(ev: Event): boolean {
   return typeof mm === 'function' && mm('(pointer: coarse)').matches;
 }
 
-function selectEntryOrExplain(dispatcher: Dispatcher, lid: string, what: string): boolean {
+/**
+ * 🔴 **章の下書きを持ったまま移ろうとしたら、先に聞く**(#1044 段2、裁定 Q2 = A)。
+ *
+ * ⚠ **`selectEntryOrExplain` の唯一の入口をここに寄せる**(設計 doc「一覧 / リンク等、
+ *   `SELECT_ENTRY` を撃つ経路はすべてここを通る」)── 別の場所に同じ判定を書かない。
+ * @returns `true` なら**そのまま移ってよい**(下書きが無い / 同じノートを選んだ /
+ *   変更が無いので聞かずに閉じた)。`false` なら**呼び手はここで return する**
+ *   (聞いている最中、または断られた ── 移った先は後で非同期に決まる)。
+ */
+function leaveSectionDraftOrAsk(
+  dispatcher: Dispatcher,
+  root: HTMLElement,
+  services: BinderServices,
+  toLid: string,
+  what: string,
+): boolean {
+  const draft = dispatcher.getState().sectionDraft ?? null;
+  if (draft === null || draft.lid === toLid) return true;
+  /**
+   * ⚠ **ロックはここで返さない**(#1044 段2、F-B)── `bindEditLockRelease` が
+   *   `sectionDraft` を state から直に見て返す。ここで書くのは
+   *   「離れる経路ごとに releaseEdit を書く」を増やす側であり、CLAUDE.md §7 の
+   *   逆(2 か所に同じ判定を書くと片方だけ古くなる)を踏む。
+   * ⚠ **共通の門は `withSectionDraftLeave`**(#1044 段2 5巡目の修理、U1)──
+   *   dirty 判定・3 択・保存・ack 待ち・T7(待つ間に system 側で閉じられたか)は
+   *   `startSectionEditAt` と共有する。ここは「進んでよいときに何をするか」
+   *   (`selectEntryOrExplain` を呼ぶ)だけを持つ ── `saved` の真偽は問わない
+   *   (保存できた・変更なし・消して進む・既に system 側で閉じていた、どの回も
+   *   「移る」自体は構わない)。
+   * ⚠ **`'sync'`(変更なし)の回は `proceed` を呼ばずに `true` を返す** ──
+   *   ここの 5 か所の呼び手(`selectEntryOrExplain` 自身を含む)は「`true` が
+   *   返ったら自分の続きをそのまま同期に続ける」契約を持つ(§10「置き換える前に
+   *   “ついでに”提供していた性質を数え上げる」── ここでは「同期で返る」という性質)。
+   *   `proceed` を同期の枝でも呼ぶと、この関数の呼び手(`selectEntryOrExplain`)を
+   *   **再入で 2 回呼ぶ**ことになり、呼び手の続き(例:リンクの見出しジャンプ)が
+   *   1 回目の呼び出しでは飛ばされてしまう。
+   */
+  return withSectionDraftLeave(dispatcher, root, draft, {
+    proceed: () => {
+      selectEntryOrExplain(dispatcher, toLid, what, root, services);
+    },
+  }) === 'sync';
+}
+
+function selectEntryOrExplain(
+  dispatcher: Dispatcher,
+  lid: string,
+  what: string,
+  root: HTMLElement,
+  services: BinderServices,
+): boolean {
+  if (!leaveSectionDraftOrAsk(dispatcher, root, services, lid, what)) return false;
   const state = dispatcher.getState();
   if (state.phase === 'editing') {
     dispatcher.dispatch({
@@ -3947,15 +4249,15 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ **fragment は見ない** ── 飛び先の要素を出す実装が `src` に無い 4 形が
    *   あるので、いまは lid まで開く(`link-target.ts` に理由)。
    */
-  'navigate-entry-ref': (dispatcher, target) => {
-    navigateToLink(dispatcher, target, target.getAttribute('data-pkc-entry-ref'));
+  'navigate-entry-ref': (dispatcher, target, services, root) => {
+    navigateToLink(dispatcher, target, target.getAttribute('data-pkc-entry-ref'), root, services);
   },
   /**
    * `@[card](…)` の placeholder。⚠ **解決器は `entry:` と同じ 1 本**
    * (target は `entry:` か `pkc://<cid>/entry/<lid>` のどちらか)。
    */
-  'navigate-card-ref': (dispatcher, target) => {
-    navigateToLink(dispatcher, target, target.getAttribute('data-pkc-card-target'));
+  'navigate-card-ref': (dispatcher, target, services, root) => {
+    navigateToLink(dispatcher, target, target.getAttribute('data-pkc-card-target'), root, services);
   },
   /**
    * `pkc://<自分>/asset/<key>` ── 添付の**所有ノートへ飛ぶ**(#100 段②)。
@@ -3974,9 +4276,9 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 理由もどこにも出ない** ── user から見ると「クリックが効かない」。
    * ⚠ 行は 4 つの面が出しているので、**受け手 1 か所で直すと 4 面とも直る**。
    */
-  'select-entry': (dispatcher, target) => {
+  'select-entry': (dispatcher, target, services, root) => {
     const lid = target.getAttribute('data-pkc-entry');
-    if (lid) selectEntryOrExplain(dispatcher, lid, 'ノート');
+    if (lid) selectEntryOrExplain(dispatcher, lid, 'ノート', root, services);
   },
   /**
    * 🔴 **開くときに、いま中央に居るノートと入れ替える**(#809-4)。
@@ -4561,6 +4863,35 @@ const ACTIONS: Record<string, ActionHandler> = {
     dispatcher.dispatch({ type: 'COMMIT_EDIT' });
   },
   'cancel-edit': (dispatcher, _target, _services, root) => cancelFromEditor(dispatcher, root),
+  /**
+   * 🔴 **章の欄を保存する**(#1044 段2)。
+   *
+   * ⚠ 打ちかけの字は state に無い(`cell-input.ts` と同じ規律)── **箱そのもの**
+   *   (`data-pkc-field="section-draft-input"`)から読む。読めなければ何もしない
+   *   (箱が既に無い = 何かの理由で先に閉じている。防波堤)。
+   * ⚠ **ロックはここで返さない**(#1044 段2、F-B)── `bindEditLockRelease` が
+   *   `sectionDraft` を state から直に見て返す(F-A の system command 経由で
+   *   `sectionDraft` が閉じたときも同じ 1 か所が返す)。ここで二重に返しても
+   *   実害は無い(`releaseEdit` は idempotent ── `store-proxy.ts`)が、
+   *   「離れる経路ごとに書く」を増やさない(§7)。
+   */
+  'save-section-draft': (dispatcher, _target, _services, root) => {
+    const lid = dispatcher.getState().sectionDraft?.lid ?? null;
+    if (lid === null) return;
+    const host = root.querySelector<HTMLElement>('[data-pkc-field="detail-body"]');
+    const text = host === null ? null : sectionBoxText(host);
+    if (text === null) return;
+    dispatcher.dispatch({ type: 'SAVE_SECTION_DRAFT', text });
+  },
+  /**
+   * 🔴 **章の編集をやめる**(#1044 段2)。⚠ `cancel-edit` と同じく**聞かない**
+   *   (押すこと自体が「捨ててよい」という声である ── 聞くのは「別のノートを
+   *   選ぶ」ときだけ、設計 doc §3)。
+   * ⚠ **ロックはここで返さない**(#1044 段2、F-B。上の `save-section-draft` と同じ理由)。
+   */
+  'cancel-section-draft': (dispatcher) => {
+    dispatcher.dispatch({ type: 'CANCEL_SECTION_DRAFT' });
+  },
   /**
    * 🔴 **今日のノートを開く**(#348、user 裁定 2026-08-23)。
    *
@@ -5725,11 +6056,33 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔴 **強制解放**(user 指示 2026-08-03「競合ロックと強制解放も念頭に」)。
    * 返ってこない書込で**永久に追記できなくなる**のを防ぐ最後の出口。
    * ⚠ 押した人が結果を分かっていること ── 確認を出す(確認の無い環境は通す)。
+   *
+   * 🔴 **章の欄の保存中にも同じボタンが効く**(#1044 段2 4巡目の修理、T1)。
+   * ⚠ **新しい action は作らない**(追記の「打ち切る」と同じ `force-release` を
+   *   `section-box.ts` からも押す)── `FORCE_RELEASE_LOCK` 自体は両方を解く作りで
+   *   よい(reducer 側は変えない)。
+   *
+   * 🔴 **どちらの箱の断りかは「押されたボタンがどの箱に属するか」で決める**
+   *   (#1044 段2 5巡目の修理、U2)。
+   *
+   * ⚠ 直す前は `bodyLockOf(dispatcher.getState())?.holder === 'section'`(§7 の
+   *   `bodyLockOf` ── writeLock → tileWrite → editing → sectionDraft の**固定の
+   *   優先順位**)で決めていた。⚠ これは「いま何が握っているか」を答える関数であって
+   *   「**どちらの箱を押したか**」には答えていない ── 別のノートで追記の
+   *   `writeLock` が生きていると `bodyLockOf` は必ず `'writing'` を返すので、
+   *   **章の箱**の「打ち切る」を押しても確認文・console・画面の 1 行・メッセージが
+   *   **追記と別のノートの題名**を名乗っていた(押した物と効く先が食い違う。
+   *   CLAUDE.md §7「押した物と効く先が食い違う門は口ごとに要る」と同型)。
+   * 🔑 `target.closest` で押されたボタンが章の箱({@link SECTION_BOX_REGION})の
+   *   中に居るかを見る ── 章の箱の中でなければ追記の箱(2 つしかない。新しい
+   *   3 つ目の呼び手が増えたら、そちらもここへ足す)。
    */
-  'force-release': (dispatcher, _target, services, root) => {
+  'force-release': (dispatcher, target, services, root) => {
+    const isSection = target.closest(`[data-pkc-region="${SECTION_BOX_REGION}"]`) !== null;
     confirmThen(
       root,
-      '追記の書き込みを強制的に打ち切ります。書き込みが実際には進んでいた場合、' +
+      (isSection ? '章' : '追記') +
+        'の書き込みを強制的に打ち切ります。書き込みが実際には進んでいた場合、' +
         'この画面の表示が実際の中身より古くなることがあります(開き直すと直ります)。よろしいですか?',
       { okLabel: '書き込みを打ち切る', danger: true },
       dispatcher,
@@ -5753,12 +6106,12 @@ const ACTIONS: Record<string, ActionHandler> = {
          *   (赤いエラー欄に出すと、押した本人が「壊れた」と読む)。
          */
         const s = dispatcher.getState();
-        const lid = s.writeLock?.lid ?? null;
+        const lid = isSection ? (s.sectionDraft?.lid ?? null) : (s.writeLock?.lid ?? null);
         const title = lid === null ? null : (s.entryMetas.get(lid)?.title ?? null);
         const what = title === null ? '待っている書き込みはありませんでした' : `対象: ${title}`;
         // ⚠ 次の報告に貼ってもらうための計器(#723)。smoke が拾うのは `error` だけなので
         //    `warn` は赤にならない(`tests/smoke/helpers.ts` の `msg.type() !== 'error'`)
-        console.warn('[pkc3] 追記の書き込みを強制的に打ち切りました', {
+        console.warn(`[pkc3] ${isSection ? '章' : '追記'}の書き込みを強制的に打ち切りました`, {
           phase: s.phase,
           writeLockLid: lid,
           lockGen: s.lockGen,
@@ -5773,10 +6126,10 @@ const ACTIONS: Record<string, ActionHandler> = {
         appMessagePost.post({
           kind: 'problem',
           source: 'force-release',
-          text: '追記の書き込みを強制的に打ち切りました',
+          text: `${isSection ? '章' : '追記'}の書き込みを強制的に打ち切りました`,
         });
         services.showStatus?.(
-          `追記の書き込みを打ち切りました(${what})。表示が実際の中身より古いことがあります ── 開き直すと直ります`,
+          `${isSection ? '章' : '追記'}の書き込みを打ち切りました(${what})。表示が実際の中身より古いことがあります ── 開き直すと直ります`,
         );
         dispatcher.dispatch({ type: 'FORCE_RELEASE_LOCK', discardDraft: false });
       },
@@ -6604,6 +6957,17 @@ const ACTIONS: Record<string, ActionHandler> = {
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
     const heading = headingForAction(root, target);
     if (heading !== null) toggleHeadingFold(heading);
+  },
+  /**
+   * 🔴 **その章だけを、読む面のその場で編集する**(#1044 段2)。
+   *
+   * ⚠ **アプリ全体は編集中にならない**(`phase` は `ready` のまま)── 門は
+   * `startSectionEditAt` **1 本**(ロック / reducer への委譲)。
+   */
+  'edit-section': (dispatcher, target, services, root) => {
+    const line = menuCarriedLine(target);
+    if (line === null || refuseStaleMenu(dispatcher, target)) return;
+    startSectionEditAt(dispatcher, services, root, line);
   },
   /**
    * 🔴 **その見出しから編集に入る**(#426 段②)。
@@ -9104,10 +9468,22 @@ const ACTIONS: Record<string, ActionHandler> = {
      *   から捨てていた)。
      * 🔑 重い手順(ピッカー・ダイアログ)を始めさせる口では、**始める前に**見る ──
      *   reducer / 実行部の門は残す(そちらは別経路からの到達を守っている)。
+     *
+     * 🔴 **章の欄が開いている間も同じく断る**(#1044 段2 2巡目の修理、R2)。
+     * ⚠ 章の欄は `phase` を `ready` のまま保つ(設計 doc §3)ので、上の phase
+     *   検査だけでは通ってしまう ── `reloadSnapshot` 側は待つだけに直したので
+     *   データは壊れないが、**選んで終わるまで画面に何も反映されない**のは
+     *   「選ばせる前に断る」の主旨(選ぶ手間を無駄にしない)に反する。
+     * 🔑 文言は手で書かない ── `SECTION_DRAFT_NOTE`(章の欄の断り文はここ 1 か所。
+     *   `refusal-words.test.ts` C11b が手書きの前置きを禁じているのと同じ理由)。
      */
-    const phase = dispatcher.getState().phase;
-    if (phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}取り込んでください` });
+    const st = dispatcher.getState();
+    if (st.sectionDraft !== null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: SECTION_DRAFT_NOTE });
+      return;
+    }
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}取り込んでください` });
       return;
     }
     target
@@ -9608,7 +9984,7 @@ export function bindActions(
     // 🔴 2 ペインの右クリックの一部の項目は、押したときにその行を選ぶ(`MENU_SELECT_FIRST_ATTR`)
     if (el.hasAttribute(MENU_SELECT_FIRST_ATTR)) {
       const lid = el.getAttribute(MENU_LID_ATTR) ?? '';
-      if (lid === '' || !selectEntryOrExplain(dispatcher, lid, 'ノート')) return;
+      if (lid === '' || !selectEntryOrExplain(dispatcher, lid, 'ノート', root, services)) return;
     }
     /**
      * 🔴 **押す前から**見せていたときだけ畳み直す(#655 ①)── `append-at-heading`
@@ -10488,6 +10864,20 @@ export function bindActions(
       return;
     }
     /**
+     * 🔴 **章の欄にも書式の近道を効かせる**(#1044 段2。`row-source` と同じ形 ──
+     *   2 本目の実装を書かない)。⚠ 書式のボタンの帯は出さない(設計 doc §3)が、
+     *   近道は**全文編集と同じ表**(`FORMAT_OF` / `applyFormatTo`)を通す。
+     *   `Ctrl+S` / `Escape` はここでは受けない(押すのは 2 つのボタンのみ ──
+     *   `row-source` が `Ctrl+S`/`Escape` を渡さないのと同じ理由)。
+     */
+    if (field === SECTION_BOX_INPUT_FIELD) {
+      const sectionCmd = keymap.match(ke, 'row');
+      if (sectionCmd === null || FORMAT_OF[sectionCmd] === undefined) return;
+      ke.preventDefault();
+      applyFormatTo(ke.target as HTMLTextAreaElement, sectionCmd);
+      return;
+    }
+    /**
      * 🔴 **雛形を `Tab` で挿す / 次の印へ移る**(#196 / B-2 段②)。
      *
      * ⚠ **短縮語が先、印が後**である ── 短縮語は**カーソルのすぐ手前**(user が
@@ -10720,10 +11110,27 @@ export function bindActions(
      *   「編集を終了してから取り込んでください」を読まされる ── **これまでは
      *   添付できていた**ので、動線を 1 つ奪うことになる。
      * 🔑 だから**取込が受けられるときだけ**倒し、そうでなければ**これまでどおり**添付。
+     *
+     * 🔴 **章の欄が開いている間も倒さない**(#1044 段2 3巡目の修理、S3)。
+     * ⚠ 章の欄は `phase` を `ready` のまま保つ(設計 doc §3)ので、上の
+     *   `phase === 'ready'` だけでは素通りする ── 直す前は章の欄を開いたまま
+     *   `.md` を落とすと**取込へ倒れ、`importMarkdownFiles` の phase 検査
+     *   (`phase !== 'ready'`)も素通りして新しい entry を作っていた**。
+     *   `hasUnsavedTyping` は `phase === 'editing' || sectionDraft !== null` を
+     *   1 か所で見る(§7 と同じ判定を 2 か所に書かない)。
+     * ⚠ **倒さなかった回は添付へ落ちる**(このすぐ下 ── `isBodyInput` / 添付欄)。
+     *   添付は `bodyWriteBlockReason` の門(R11)を通るので、章の欄が開いている
+     *   ノートへ落とすと `SECTION_DRAFT_NOTE` で断られ、理由が出る(無言にならない)。
+     * ⚠ **`phase === 'ready'` は残す**(`initializing` / `error` の扱いを変えない)──
+     *   `hasUnsavedTyping` 単独では `editing` しか phase を見ないので、
+     *   `phase === 'ready'` と組み合わせて初めて元の 4 相の分け方(ready のみ倒す)
+     *   と一致する。
      */
+    const routeSt = dispatcher.getState();
     if (
       services.importFiles &&
-      dispatcher.getState().phase === 'ready' &&
+      routeSt.phase === 'ready' &&
+      !hasUnsavedTyping(routeSt) &&
       files.every((f) => isMarkdownFileName(f.name) || isVcfFileName(f.name))
     ) {
       services.importFiles([...files]);
@@ -12153,6 +12560,15 @@ export function bindActions(
               appendable: level >= 1 && level <= 3 && appendModeOf(dispatcher.getState()).kind === 'ready',
               // 🔴 章の参照(#579)── 描画が id を刻んだ見出しだけ(`#`〜`###`)
               linkable: heading.id !== '',
+              /**
+               * 🔴 **章だけ編集(#1044 段2)**。⚠ `appendable` は使えない
+               *   (append-mode の可否は archetype に依存するが、章だけ編集はどの
+               *   archetype でも成り立つ ── `edit-from-heading` と同じ)。
+               *   条件は「host の直下」(= `foldable` と同じ、append-target.ts の
+               *   `scanHeadings` が引用の中の見出しを見出しと認めないのと同じ理由)+
+               *   `#`〜`###`(`scanHeadings` が数える段はそこまで)。
+               */
+              sectionEditable: heading.parentElement === host && level >= 1 && level <= 3,
               // 🔴 近道の字を右に添える(#587 C 案 2)── 見出しの項目だけ(塊 / 板 / 本文には無い)
             }).map(withShortcut)),
         ...(block === null ? [] : blockMenuActions({ board: block.board, shape: block.shape })),
@@ -12341,7 +12757,7 @@ export function bindActions(
     const prevLid = dispatcher.getState().selectedLid;
     const marksBefore = dispatcher.getState().selection;
     // 🔴 選べなければ出さない(理由は `selectEntryOrExplain` が画面へ出している)
-    if (!selectEntryOrExplain(dispatcher, lid, 'ノート')) {
+    if (!selectEntryOrExplain(dispatcher, lid, 'ノート', root, services)) {
       closeContextMenu(root);
       return;
     }
@@ -13150,7 +13566,7 @@ export function bindActions(
    * ので、その場で撃つと「設定を入れたのに編集にならない」になる。
    */
   const openNote = (lid: string): boolean => {
-    if (!selectEntryOrExplain(dispatcher, lid, 'ノート')) return false;
+    if (!selectEntryOrExplain(dispatcher, lid, 'ノート', root, services)) return false;
     root.querySelector<HTMLElement>('[data-pkc-region="detail"]')?.focus();
     if (openInEdit.enabled()) startEditWhenReady(lid);
     return true;

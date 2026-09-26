@@ -2138,6 +2138,116 @@ li[data-pkc-row-slot] {
   font-size: 12.5px;
   resize: none;
 }
+/* ── 章の欄(#1044 段2 F-F)────────────────────────
+ * 🔴 見出しから次の見出しの手前までを、その場の入力欄にする。
+ * ⚠ 直す前は規則が 1 つも無く、ブラウザ既定の `cols=20`(≒173px)のまま
+ *   782px の読む幅に出ていた。⚠ 文字の大きさ・配色は**変えない**
+ *   (`editor-body` / `row-source` と同じ見え方に揃えるだけ)。
+ *
+ * 🔴 **他の塊と同じ読む列に揃える**(#1044 段2 2巡目の修理、R9 ── `max-width` /
+ *   `margin-inline` の 2 行)。
+ * ⚠ 直す前は無かった ── 章の箱は `.pkc-md-rendered[data-pkc-prose] > :is(p, …)`
+ *   の allow-list に入っていない(塊ではなく `data-pkc-region` で名乗る器なので、
+ *   その allow-list の対象外である)。結果、器(`.pkc-md-rendered`)の全幅まで
+ *   広がり、兄弟の見出し・段落より左右にはみ出して見えた(実測 x=260〜1042 対
+ *   兄弟 x≈315〜987)。
+ * 🔑 **新しい数字は発明しない** ── allow-list の規則(下の節)と**同じ 2 行**
+ *   (`max-width: var(--read-w); margin-inline: var(--prose-lead) auto;`)を当てる。
+ *   子(textarea)は `align-items: stretch` で親の幅になる(R7 ── `width: 100%` は
+ *   書かない)ので、これで箱ぐるみ揃う。
+ * ⚠ **起点を `.pkc-md-rendered[data-pkc-prose] > ` にしない**(1 稿目はそう書いて
+ *   `tests/build/body-css.test.ts` を落とした)── その起点で始まる規則は
+ *   `isBodyRule`(`build/body-css.ts`)が「本文の規則」として書き出し HTML へ
+ *   焼き込む。章の箱は編集専用の app 側の器(`data-pkc-region`)で、書き出しには
+ *   1 度も現れない ── 焼き込むと「器の規則が混ざっている」という当の禁則
+ *   (region / field の選択子を書き出しへ渡さない規律)を割ることになる。
+ *   `[data-pkc-region='section-draft']` は `installSectionBox` だけが作る名前
+ *   なので、起点を付けずに書いても他へは当たらない。
+ */
+/**
+ * 🔴 **`scroll-margin-top` は外した**(#1044 段2 4巡目の修理、T5。3巡目の修理・S2 が
+ *   足した規則を、実ブラウザで測って外した)。
+ *
+ * ⚠ 3巡目は「見出しの行が sticky な帯(`detail-bar-slot`・34px)の下に隠れる」を
+ *   直すつもりでこの 1 行を足したが、変異試験(0px にする)で**実ブラウザの smoke が
+ *   1 件も落ちなかった**(#1044 段2 4巡目の修理、T5)。CLAUDE.md「これが無いと
+ *   壊れる、と書く前に外して壊れることを見る」を踏んだ形だった。
+ * 🔑 実測(headless_shell、1280×800・1366×768・複数の見出し位置)すると、
+ *   `installSectionBox` が呼ぶ `box.scrollIntoView({block:'nearest'})` は
+ *   **この箱を対象にした呼び出しでは、値を 0 / 40 に変えても scrollTop が
+ *   1px も変わらない**(この面固有の理由までは分からない ── 孤立させた最小の
+ *   再現 HTML では逆に値が効くので、この面の他の CSS / DOM 構造のどれかが
+ *   打ち消している)。つまり**この規則は、この場所では効いていない**。
+ * ⚠ 見出しが隠れないこと自体は smoke(`context-menu.smoke.spec.ts` の
+ *   「45 行の章は見出しもボタンも画面に収まり…」)が別の理由で守っている ──
+ *   `scrollIntoView` の "nearest" は、箱が既に(sticky の視覚的な重なりとは無関係に)
+ *   「生の座標として」scrollport に収まっていれば何もしない、という素の挙動だけで
+ *   この面では十分だった。
+ */
+[data-pkc-region='section-draft'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  margin: var(--s2) 0;
+  max-width: var(--read-w);
+  margin-inline: var(--prose-lead) auto;
+}
+/**
+ * ⚠ **`width: 100%` は書かない**(#1044 段2 2巡目の修理、R7。変異試験 F1 が
+ *   生き延びた ── 外しても実ブラウザで崩れなかった)。親の `section-draft` は
+ *   `display: flex; flex-direction: column` なので、子は既定の
+ *   `align-items: stretch` で読む面の幅になる ── `width: 100%` は no-op。
+ *   幅そのものは smoke の「箱の幅 > 読む面の幅 × 0.8」が結果で守る
+ *   (`context-menu.smoke.spec.ts`)。CLAUDE.md「これが無いと壊れる、と書く前に
+ *   外して壊れるのを見る」。
+ *
+ * 🔴 **上限は「見えている高さ」から決める。40 行固定ではない**
+ *   (#1044 段2 3巡目の修理、S2)。
+ *
+ * ⚠ 直す前は `sizeTextareaToContent` の既定 40 行(≈856px)止まりだった。
+ *   45 行の章で実測(1280×800):箱(textarea+ボタン列)の高さ 886px に対し
+ *   読む面(`[data-pkc-region='detail']`、`overflow: auto` の唯一の scroll 箱)の
+ *   見えている高さは **593.9px** しかなく、ボタン列が画面の外へ 292px 沈んでいた
+ *   (1366×768 でも同じ式で沈む ── 読む面の高さは常に `viewport高さ − 206px`)。
+ * 🔑 **`#527`(段組みの図)/ `#523`(`row-source` の段の高さ頭打ち)と同じ規則を
+ *   使い回す**(`var(--pkc-col-h, 100vh)`)。段組みでは実測の段の高さ、
+ *   単段では `100vh` に落ちる ── その `100vh` から、読む面が持つ固定の chrome
+ *   (帯 34px 込みの実測 206px)+ ボタン列(26px)+ 間隔(`--s2` の 2 か所)+
+ *   安全余裕(実測の残り約 20px)を引いた `300px` を既定にする。⚠ **新しい数字は
+ *   発明していない** ── 実測した固定量(206 / 34 / 26)を足して安全余裕を足しただけで、
+ *   削るのは `sizeTextareaToContent` の 40 行という**別の**頭打ちのほうである
+ *   (ここは箱の見た目の上限、あちらは打鍵ごとの reflow を増やさないための
+ *   計算の頭打ち ── 2 つ目の規則を増やしているのではなく、小さい方が効くだけ)。
+ * ⚠ 予備の値を書かない `var()` は**宣言ごと捨てられる**ので必ず書く(#465 / #466)。
+ * ⚠ **`overflow-y: auto` を既定にする**(`[data-pkc-scroll]` の有無に関わらず)
+ *   ── `sizeTextareaToContent` の 40 行の頭打ちより**この上限が先に効く**章
+ *   (viewport が低い日)では `[data-pkc-scroll]` が付かないので、`hidden` のままだと
+ *   打った字が**箱の外へ切れて見えなくなる**(スクロールする手段が無い)。
+ *   ⚠ 短い章(中身が上限より低い)では `overflow: auto` でも scrollbar は出ない
+ *   (溢れていないので no-op)── 対照群は smoke が実測する。
+ */
+[data-pkc-field='section-draft-input'] {
+  box-sizing: border-box;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.7;
+  padding: 2px var(--s2);
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  background: var(--surface);
+  color: var(--fg);
+  resize: vertical;
+  overflow-y: auto;
+  max-height: calc(var(--pkc-col-h, 100vh) - 300px);
+}
+[data-pkc-field='section-draft-input']:focus-visible {
+  outline-width: 1px;
+}
+/* 🔴 保存 / やめる を並べる(#1044 段2、F-F)── 直す前は間隔の規則が無かった */
+[data-pkc-region='section-draft-buttons'] {
+  display: flex;
+  gap: var(--s2);
+}
 /* 何も選んでいないときの案内(P9 段③)。⚠ 上限に収める ── 案内文が
  * 1000px 伸びると、それ自体が読みにくい。
  * ⚠ **紙面フォーマットに連動させない**(`var(--read-w)` を使わない。2026-08-08)──

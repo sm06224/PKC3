@@ -9,7 +9,7 @@
  * frontmatter を parse するが、body には手を触れない(P6d 段④ の規律)。
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
-import { phaseBlockReason } from '@adapter/state/app-state';
+import { phaseBlockReason, hasUnsavedTyping, SECTION_DRAFT_NOTE } from '@adapter/state/app-state';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import { readPlainMarkdown } from '@features/import/plain-markdown';
 import { extractMeta } from '@features/flavor';
@@ -64,9 +64,26 @@ export async function importMarkdownFiles(
     dispatcher.dispatch({ type: 'OP_FAILED', error: msg });
     return null;
   };
-  const phase = dispatcher.getState().phase;
-  if (phase !== 'ready') {
-    return fail(`${phaseBlockReason(phase)}取り込んでください`);
+  const state = dispatcher.getState();
+  /**
+   * 🔴 **章の欄が開いている間も断る**(#1044 段2 3巡目の修理、S3)。
+   * ⚠ 章の欄は `phase` を `ready` のまま保つ(設計 doc §3)ので、
+   *   `phase !== 'ready'` だけでは素通りする ── `binder.ts` の `routeFiles`
+   *   (drop の振り分け)と**同じ判定**(`hasUnsavedTyping`)に揃える(§7)。
+   *   この口は file picker(`import-input` の `change`)からも直に呼ばれるので、
+   *   binder 側の振り分けを迂回しても、ここが最後の門になる。
+   */
+  if (hasUnsavedTyping(state)) {
+    return fail(
+      state.phase === 'editing'
+        ? `${phaseBlockReason(state.phase)}取り込んでください`
+        : SECTION_DRAFT_NOTE,
+    );
+  }
+  // ⚠ `hasUnsavedTyping` は `editing` を既に拾っている ── ここで残るのは
+  //   `initializing` / `error`(読み込み中・保存に失敗して止まっている)
+  if (state.phase !== 'ready') {
+    return fail(`${phaseBlockReason(state.phase)}取り込んでください`);
   }
   if (files.length === 0) return fail('取り込むファイルがありません');
 

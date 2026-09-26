@@ -99,9 +99,22 @@ function ensureGrip(anchor: HTMLElement): HTMLElement {
 /**
  * 塊の原文の行範囲(生の body の座標)。出さない塊は `null`。
  * ⚠ **host の直下だけ**を見る(`applyHeadingFold` と同じ塊の数え方)。
+ *
+ * 🔴 **刻印が無い塊は、必ず先に弾く**(#1044 段2 2巡目の修理、R9 の本当の原因)。
+ *   ⚠ `Number(block.getAttribute(...))` だけで済ませていたときは、属性が
+ *   **無い**(`null`)場合に `Number(null) === 0` になり、「行 0 の塊」と
+ *   誤認していた(`Number(undefined)` なら `NaN` になるが `null` は違う ──
+ *   `!Number.isInteger(line)` の網をすり抜ける)。実害: 章の箱(`section-box.ts`
+ *   の `<div data-pkc-region="section-draft">`)は刻印を持たないので、
+ *   ポインタが箱(の中の textarea)へ移ると、箱そのものを「本文の行 0 の塊」
+ *   として掴めてしまい、取っ手が箱の位置に浮いたまま残った(実ブラウザの
+ *   smoke でしか見えない ── happy-dom は `pointerover` の自動再発火を
+ *   再現しないので unit では踏めない)。
  */
 function blockRange(p: Painted, block: HTMLElement): { start: number; end: number } | null {
-  const line = Number(block.getAttribute('data-pkc-source-line'));
+  const raw = block.getAttribute('data-pkc-source-line');
+  if (raw === null) return null;
+  const line = Number(raw);
   if (!Number.isInteger(line) || line < 0) return null;
   if (headingLevel(block) > 0) {
     const span = chapterSpanOf(p.host, block, p.fmBody.split('\n').length);
@@ -126,6 +139,50 @@ function topBlockOf(host: HTMLElement, target: Element | null): HTMLElement | nu
 function hide(grip: HTMLElement): void {
   if (!grip.hidden) grip.hidden = true;
   gripTargets.delete(grip);
+}
+
+/**
+ * 🔴 **塊を丸ごと外す側が、外す直前に呼ぶ**(#1044 段2 2巡目の修理、R9)。
+ *
+ * ⚠ `installBlockGrip` の「描き直しで塊が入れ替わっていることがある」チェック
+ *   (`shown.isConnected` を見る)は**次の描画が来るまで走らない**。章の箱を
+ *   差し込む render は `installBlockGrip` の**後**に塊を外すので、その間の
+ *   「いま口が指している塊」を確かめる場所が無い ── ここが埋める。
+ * 🔑 **口が「いま指している塊」が、外される塊の集合に含まれているときだけ隠す**
+ *   ── 無関係な塊を指しているとき(章の欄と離れた場所にマウスが在るとき)は
+ *   触らない。
+ *
+ * ⚠ **確かめ方**(`tests/adapter/body-block-drag.test.ts`)。⚠ **この関数だけでは
+ *   R9 の実ブラウザの症状(章の欄を開くと箱の位置に取っ手が浮く)を再現できない**
+ *   ── この repo の render は章の欄を開く描画のたびに `anchor`(口の置き場)の
+ *   中身を丸ごと作り直すので、**口そのものが毎回新しく作られ、この関数が呼ばれる
+ *   時点で `gripTargets` はもう空**(実測: 実ブラウザで `hasTarget: false` を
+ *   確認した)。実害の本当の原因は `follow()` の `blockRange()` 側にあった
+ *   (刻印の無い箱を「行 0 の塊」と誤認する別の穴。直した)。
+ * 🔑 **ここは、それとは独立に正しくしておく保険**である ──「口が外される塊を
+ *   指していたら隠す」という主張そのものは、今の render の作り方に依らず
+ *   常に正しいはずなので、`installBlockGrip` の後始末とは別に置いておく
+ *   (`render` の作りが将来「口を作り直さず生かす」形に変わっても、ここが
+ *   壊れずに効く)。
+ *
+ * ⚠ **`gripAnchorOf(host)` では見つからないことがある**(実ブラウザの smoke が
+ *   拾った ── 1 稿目)。`installBlockGrip` は `DetailRenderer.region`(面全体の
+ *   外側の器)を渡して口を植えるが、こちらが持っているのは `host`
+ *   (`detail-body` ── markdown を描いた**内側**の器)しか無い。`region` と
+ *   `host` の間に `[data-pkc-region="split-frame"]` /
+ *   `[data-pkc-view-pane="detail"]` のどちらも無い構成では、
+ *   `gripAnchorOf(region)` と `gripAnchorOf(host)` が**別の要素**に解決し、
+ *   ここが探す先に口が居ない(何も起きない = 隠せない)。
+ * 🔑 だから**document 全体**から口を探す ── 口はページに 1〜数個しか無いので
+ *   コストは無視できる。この探し方なら呼び手がどの `anchor` を持っているかに
+ *   依存しない。
+ */
+export function releaseGripIfTargeting(host: HTMLElement, removed: readonly HTMLElement[]): void {
+  const doc = host.ownerDocument;
+  for (const grip of doc.querySelectorAll<HTMLElement>(`[data-pkc-field="${BLOCK_GRIP_FIELD}"]`)) {
+    const target = gripTargets.get(grip);
+    if (target !== undefined && removed.includes(target)) hide(grip);
+  }
 }
 
 /**

@@ -8,7 +8,7 @@
  * ⚠ 題名の無いカードは番号名(「連絡先 3」)を振る ── 黙って捨てない。
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
-import { phaseBlockReason } from '@adapter/state/app-state';
+import { hasUnsavedTyping, phaseBlockReason, SECTION_DRAFT_NOTE } from '@adapter/state/app-state';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import { contactOf } from '@features/contact/contact-card';
 import { parseVcf, vcfNoteOf } from '@features/contact/vcard';
@@ -28,9 +28,22 @@ export async function importVcfFiles(
     dispatcher.dispatch({ type: 'OP_FAILED', error: msg });
     return null;
   };
-  const phase = dispatcher.getState().phase;
-  if (phase !== 'ready') {
-    return fail(`${phaseBlockReason(phase)}取り込んでください`);
+  const state = dispatcher.getState();
+  /**
+   * 🔴 **章の欄が開いている間も断る**(#1044 段2 4巡目の修理、T3)。
+   * ⚠ `import-markdown.ts` の `importMarkdownFiles` と**同じ判定**
+   *   (`hasUnsavedTyping`)に揃える(§7)── 直す前はここが `phase` しか見て
+   *   おらず、md 経路と vcf 経路で断りの条件が食い違っていた。
+   */
+  if (hasUnsavedTyping(state)) {
+    return fail(
+      state.phase === 'editing'
+        ? `${phaseBlockReason(state.phase)}取り込んでください`
+        : SECTION_DRAFT_NOTE,
+    );
+  }
+  if (state.phase !== 'ready') {
+    return fail(`${phaseBlockReason(state.phase)}取り込んでください`);
   }
   if (files.length === 0) return fail('取り込むファイルがありません');
 

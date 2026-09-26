@@ -11,6 +11,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
+import { SECTION_DRAFT_NOTE } from '../../src/adapter/state/app-state';
 import { importFiles } from '../../src/adapter/ui/actions/import-file';
 import { importVcfFiles } from '../../src/adapter/ui/actions/import-vcf';
 import type { ImportDeps } from '../../src/adapter/ui/actions/import-pkc2';
@@ -206,6 +207,49 @@ describe('importVcfFiles ── 実行部', () => {
     const got = await importVcfFiles(h.d, h.deps, [vcfFile(CARD)]);
     expect(got).toBeNull();
     expect(h.written).toHaveLength(0);
+  });
+
+  /**
+   * 🔴 **章の欄が開いている間も断る**(#1044 段2 4巡目の修理、T3)。
+   *
+   * ⚠ 章の欄は `phase` を `ready` のまま保つ(設計 doc §3)ので、上の
+   *   「編集中は断る」の判定(直す前は `phase !== 'ready'` だけ)では素通りする ──
+   *   `import-markdown.ts` の `importMarkdownFiles` と**同じ判定**
+   *   (`hasUnsavedTyping`)に揃えた(§7:同じ判定を複数の場所に書かない)。
+   */
+  it('🔴 章の欄が開いている間も断る(md 経路と同じ判定に揃える)', async () => {
+    const h = harness();
+    h.d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [
+        {
+          lid: 'e1',
+          title: 't',
+          archetype: 'text',
+          entryOrder: 1,
+          status: null,
+          date: null,
+          archived: false,
+          bodyChars: null,
+          createdAt: null,
+          updatedAt: null,
+        },
+      ],
+      relations: [],
+    });
+    h.d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
+    h.d.dispatch({ type: 'BODY_LOADED', lid: 'e1', body: '## 見出し\n\n中身\n' });
+    h.d.dispatch({ type: 'OPEN_SECTION_DRAFT', lid: 'e1', line: 0 });
+    expect(h.d.getState().phase, '前提が崩れている(phase が ready でない)').toBe('ready');
+    expect(h.d.getState().sectionDraft, '前提が崩れている(開けていない)').not.toBeNull();
+
+    const got = await importVcfFiles(h.d, h.deps, [vcfFile(CARD)]);
+    expect(got, '章の欄が開いているのに取り込んだ(裏で書いた)').toBeNull();
+    expect(h.written, '章の欄が開いているのに書込が起きた').toHaveLength(0);
+    expect(h.d.getState().error).toBe(SECTION_DRAFT_NOTE);
+    // 対照群 ── 断り文で章の欄自身は消えない(user が打っていた字を守る)
+    expect(h.d.getState().sectionDraft, '断ったのに章の欄が消えた').not.toBeNull();
   });
 });
 

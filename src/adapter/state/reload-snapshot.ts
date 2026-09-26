@@ -6,7 +6,7 @@
  * (この file の test がそれを落とす)。段㉔ の `window-close.ts` と同じ理由。
  */
 import type { Dispatcher } from './dispatcher';
-import { whenPhaseReady } from './wait-for-ready';
+import { isFullyReady, whenPhaseReady } from './wait-for-ready';
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
 
 export interface Snapshot {
@@ -78,14 +78,17 @@ export function reloadSnapshot(
      * ここまでに読込の await が挟まる ── その間に user が編集に入っていると、
      * `SYS_BOOTED` は openBody を無条件に捨てるので**打ちかけの本文が消える**。
      * snapshot は捨てて取り直す(待つ前に取った一覧で上書きしない、と同じ理由)。
+     * ⚠ **章の欄はもうここで先送りしない**(#1044 段2 3巡目の修理、S1 ──
+     *   `wait-for-ready.ts` の docstring に理由がある)。`isFullyReady` の 1 本を
+     *   `whenPhaseReady` と共有する(§7)のは変わらない。
      */
-    if (dispatcher.getState().phase !== 'ready') {
+    if (!isFullyReady(dispatcher.getState())) {
       defer();
       return;
     }
     dispatcher.dispatch({ type: 'SYS_BOOTED', cid, ...snap });
   };
-  if (dispatcher.getState().phase === 'ready') return boot();
+  if (isFullyReady(dispatcher.getState())) return boot();
   const notice = opts?.deferNotice === undefined ? DEFERRED_RELOAD_NOTICE : opts.deferNotice;
   if (notice !== null) dispatcher.dispatch({ type: 'OP_FAILED', error: notice });
   defer();
