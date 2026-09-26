@@ -375,6 +375,62 @@ describe('移す… ── 入れ先のフォルダを選ぶ(#215)', () => {
     ).toEqual(['n1', 'n2', 'n3']);
   });
 
+  /**
+   * 🔴 **trap 1(#1038 台帳③ 段 G-2、段 G の実装者が自己申告)** ── 直前の test は
+   * 選んだ 3 件が**たまたま全部ルート直下**だったので、`visibleFilerRows`
+   * (フォルダの表専用のスコープ = `st.scopeLid` の直下だけ)でも**たまたま**
+   * 通っていた。⚠ 一覧は `scopeLid` の概念が無い flat な並びなので、
+   * 選んだ行が**別々のフォルダの中**に居ても選べる ── その形で右クリックすると、
+   * 直す前は `visibleFilerRows(st)`(現在地はルート)に n1 / n2 のどちらも
+   * 載らないので `visibleSelection` が印を**両方とも**削り、`marked` が空になって
+   * 「押した行 1 件だけ」に化けていた(n2 が黙って外れる)。
+   */
+  it('🔴 一覧タブで、別々のフォルダに居るノートを選んでも黙って外されない', async () => {
+    const r = setup(METAS, [rel('r1', 'f1', 'n1'), rel('r2', 'f2', 'n2')], 'list');
+    r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    r.d.dispatch({ type: 'TOGGLE_SELECT', lid: 'n2' });
+    expect(r.d.getState().selection.length, '前提が崩れている(印が 2 件ではない)').toBe(2);
+    rightClick(r.row('n1'));
+    // 🔴 印を付けた行を右クリックしても、印は 2 件のまま(消えると「1 件を移す」になる)
+    expect(r.d.getState().selection.length, '右クリックで印が消えた').toBe(2);
+    r.press('move-to-folder');
+    await tick();
+    const dialog = [...document.querySelectorAll<HTMLDialogElement>('dialog')].find((x) => x.open);
+    expect(dialog, '入れ先を選ぶ画面が出ていない').toBeDefined();
+    // 🔴 直す前はここが「「t-n1」を移す」になっていた(n2 が黙って外れて 1 件扱いになる)
+    expect(dialog!.querySelector('[data-pkc-field="dialog-title"]')?.textContent).toBe('2 件を移す');
+    const rows = [...dialog!.querySelectorAll<HTMLElement>('[data-pkc-field="entry-pick-row"]')];
+    // ⚠ 移す先は n1 が既に居る f1 ── n2(f2 の子)だけが実際に動く
+    rows.find((x) => x.getAttribute('data-pkc-lid') === 'f1')!.click();
+    await tick();
+    expect(
+      getStructuralChildren('f1', r.d.getState().entryMetas, r.d.getState().relations)
+        .map((m) => m.lid)
+        .sort(),
+      'n2 が別のフォルダから動いていない(黙って外れた)',
+    ).toEqual(['n1', 'n2']);
+  });
+
+  /**
+   * ⚠ **フォルダの表は直す前と同じ**(段 G-2、上の trap 1 の対照群)── 一覧タブへ
+   * `visibleLeftColumnRows` を足しても、フォルダの表を見ているときは
+   * `listTabShowing(root)` が偽なので `visibleFilerRows(st)` のまま。
+   * いまの現在地(`scopeLid`)の外に居る印は、直す前と同じく黙って除外される。
+   */
+  it('⚠ フォルダの表は変わらない ── 現在地の外に居る印は、その表を見ているときは除外される', async () => {
+    const r = setup(METAS, [rel('r1', 'f1', 'n1'), rel('r2', 'f2', 'n2')]);
+    r.d.dispatch({ type: 'SET_SCOPE', lid: 'f1' });
+    r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    r.d.dispatch({ type: 'TOGGLE_SELECT', lid: 'n2' });
+    expect(r.d.getState().selection.length, '前提が崩れている(印が 2 件ではない)').toBe(2);
+    rightClick(r.row('n1'));
+    r.press('move-to-folder');
+    await tick();
+    const dialog = [...document.querySelectorAll<HTMLDialogElement>('dialog')].find((x) => x.open)!;
+    // 🔑 n2 は f2 の中(いまの現在地 f1 の外)なので、印に入っていても数えない
+    expect(dialog.querySelector('[data-pkc-field="dialog-title"]')?.textContent).toBe('「t-n1」を移す');
+  });
+
   it('⚠ 対照群 ── 印の外の行を右クリックしたら、その 1 件だけ動く', async () => {
     const r = setup();
     r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
