@@ -309,6 +309,24 @@ test('🔴 付箋の中から同じノートを押しても 2 枚目は出ない
   ).toContainText('いま見ているこのウィンドウ');
   expect(context.pages().length, '付箋の中から押して 2 枚目が開いた').toBe(before);
 
+  /**
+   * 🔴 **付箋の窓でも、編集を始めると下の行の先頭に「編集中」が出る**(#1038 台帳③ C4)。
+   * ⚠ 付箋の窓は `main.ts` の同じ `paint` を通る(K16)が、この経路を実ブラウザで
+   *   通した検査が 1 本も無かった(着地前レビュー)。この道中に相乗りする(起動を足さない)。
+   * 🔑 濃さの器(`status-state`)に入っていることまで見る ── 字だけだと、器に分ける
+   *   直しを外しても緑になる。
+   */
+  await clickReal(win, '[data-pkc-region="detail"] [data-pkc-action="start-edit"]');
+  await expect(
+    win.locator('[data-pkc-region="status"] [data-pkc-field="status-state"]'),
+    '付箋の窓で編集を始めても、下の行の先頭に「編集中」が出ない',
+  ).toHaveText('編集中');
+  await clickReal(win, '[data-pkc-region="detail"] [data-pkc-action="cancel-edit"]');
+  await expect(
+    win.locator('[data-pkc-region="status"] [data-pkc-field="status-state"]'),
+    '編集をやめても「編集中」が残っている',
+  ).toHaveCount(0);
+
   await win.close();
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

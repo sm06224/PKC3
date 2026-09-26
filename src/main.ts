@@ -35,6 +35,7 @@ import {
 import { setFoldNotify } from '@adapter/ui/render/fold-notify';
 import { appTooNarrowOk, installTooNarrow } from '@adapter/ui/render/too-narrow';
 import { paintStatusOpen, paintStatusUndo } from '@adapter/ui/render/status-open';
+import { composeStatusLine, paintStatusText } from '@adapter/ui/render/status-line';
 import { openStorageWithRetry } from '@adapter/platform/storage/open-with-retry';
 import {
   storageStatusLine,
@@ -1337,9 +1338,23 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * 🔴 **可搬単一 HTML の保存の状態**(#400 段③)。⚠ ふだんは空文字なので
      *   場所を取らない ── 出るのは「長く書けていない」か「書けなかった」ときだけ。
      */
-    const parts = [statusBase, sync, portableAssetNote, persistState, saving.line(), noticeLine, errorLine]
-      .filter((t) => t !== '');
-    const text = parts.join(' — ');
+    /**
+     * 🔴 **先頭に「いま何をしているか」の 1 語を差し込む**(C4 / #1038 段 D)。
+     * ⚠ 判断は `status-line.ts` が持つ(`main.ts` はどの test からも実行されない
+     *   ── CLAUDE.md §2)。この窓 / 付箋の窓のどちらでも同じ `paint` が走るので、
+     *   `heldNoteWindow` でも状態語は出る(K16。畳むのは上の `sync` だけ)。
+     */
+    const parts = {
+      phase: dispatcher.getState().phase,
+      statusBase,
+      sync,
+      portableAssetNote,
+      persistState,
+      savingLine: saving.line(),
+      noticeLine,
+      errorLine,
+    };
+    const text = composeStatusLine(parts);
     /**
      * 🔴 **断り書きが出ている間は、字が空でも器を畳まない**(#671 の裁定 3)。
      * ⚠ 畳むと **`OK` ごと画面から消える** ── 押す口が無いまま出しっぱなしに
@@ -1350,7 +1365,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     const keep = !regions.tooNarrow.hidden;
     if (text === statusShown && regions.status.hidden === (text === '' && !keep)) return;
     statusShown = text;
-    regions.statusText.textContent = text;
+    // ⚠ 状態の 1 語だけを別の器に入れる(`status-line.ts` の `paintStatusText`)── 字は同じ
+    paintStatusText(regions.statusText, parts);
     regions.status.hidden = text === '' && !keep;
   };
   /** 🔑 ここで初めて `paint` に繋がる(それまでの `onState` は落としてよい)。 */

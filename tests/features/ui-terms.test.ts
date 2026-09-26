@@ -113,7 +113,8 @@ describe('画面の字に使わない語(ui-terms.ts の BANNED_TERMS)', () => {
     //   「中身が壊れる」の 1 つが在った
     //   (落としたから減った。直したのではない)
     ['src/features/notice/notice-log.ts', '壊れ', 19],
-    ['src/features/notice/notice-log.ts', '居場所', 1],
+    // ⚠ 2026-09-25(#1038 台帳③ 段 D / C4): 「居場所」1 → 0 で行を消した ── 枠から落ちた
+    //    `2026-09-16-folder-place-keep` の題名に 1 つ在った(落としたから減った。直したのではない)
     ['src/features/notice/notice-log.ts', '拾う', 1],
     ['src/features/notice/notice-log.ts', '捨てる', 7],
     ['src/features/notice/notice-log.ts', '最後の手', 3],
