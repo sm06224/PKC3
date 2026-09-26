@@ -9804,15 +9804,23 @@ export function bindActions(
      */
     const me = ev as MouseEvent;
     /**
-     * 🔴 **フォルダ面の中だけ**(着地前レビュー 4)。`select-entry` は 6 か所に在る
-     * (sidebar / filer / kanban / calendar / query / inspector)ので、面で切らないと:
-     * - 一覧タブの `Ctrl` クリックが**画面に出ない印**を増やす(帯だけが数える)
-     * - `Shift` の範囲は `filerRows` の並びで採るので、**目で見た並びと違う集合**になる
-     *   (フォルダの中の行なら `[]` になり、`preventDefault` 済みなので**選択すら起きない**)
+     * 🔴 **フォルダ面と一覧タブの中だけ**(着地前レビュー 4。一覧タブは
+     * #1038 台帳③ 段 G、C13 / Q6「A + 濃く」で足した)。`select-entry` は
+     * 6 か所に在る(sidebar / filer / kanban / calendar / query / inspector)ので、
+     * 面で切らないと:
+     * - kanban / calendar / query の `Ctrl` クリックが**画面に出ない印**を増やす
+     *   (帯だけが数える)
+     * - `Shift` の範囲は `filerRows` / `listRows` の並びで採るので、**目で見た並びと
+     *   違う集合**になる(フォルダ・一覧のどちらでもない面なら `[]` になり、
+     *   `preventDefault` 済みなので**選択すら起きない**)
      * - inspector の「関連へ飛ぶ」ボタンで `Ctrl` クリックが奪われる
-     * 段②③④は**フォルダ面の機能**である(設計 doc §3)。
+     * 段②③④は**フォルダ面と一覧タブの機能**である(設計 doc §3)。
+     * ⚠ **一覧タブは背景を描き分けるようになったので、この門を広げても安全**
+     *   (直す前は「押しても見えない」が理由で外していた ── `sidebar.ts` の
+     *   `paintMarks` / `app.css` の `[data-pkc-marked]`)。
      */
     const inFiler = el.closest('[data-pkc-region="filer-table"]') !== null;
+    const inEntryList = el.closest('[data-pkc-region="entry-list"]') !== null;
     /**
      * 🔴 **2 ペインの行も同じ作法**(#241 段⑥-a)── `Ctrl` / `Cmd` で足し外し、
      * `Shift` で表示順の範囲。⚠ 面ごとに違う選び方を作らない(user は 1 つの
@@ -9892,7 +9900,7 @@ export function bindActions(
       }
     }
     if (
-      inFiler &&
+      (inFiler || inEntryList) &&
       el.getAttribute('data-pkc-action') === 'select-entry' &&
       (me.ctrlKey || me.metaKey || me.shiftKey)
     ) {
@@ -9900,7 +9908,10 @@ export function bindActions(
       if (lid !== null) {
         ev.preventDefault();
         dispatcher.dispatch(
-          me.shiftKey ? { type: 'SELECT_RANGE', lid } : { type: 'TOGGLE_SELECT', lid },
+          me.shiftKey
+            ? // 🔴 一覧タブは flat な並び(`listRows`)で範囲を採る(C13)
+              { type: 'SELECT_RANGE', lid, ...(inEntryList ? { scope: 'list' as const } : {}) }
+            : { type: 'TOGGLE_SELECT', lid },
         );
         return;
       }
@@ -9916,7 +9927,6 @@ export function bindActions(
      *   「もう一度押す」もフォルダ面の中だけ ── 一覧の 2 回押しで**見えない現在地が
      *   動かない**を守る)。行の種類に関わらず、別のウィンドウ(付箋)で開く。
      */
-    const inEntryList = el.closest('[data-pkc-region="entry-list"]') !== null;
     // ⚠ 行を素で押したときだけ「もう一度押した」を数える(修飾つきは印の話)
     // ⚠ **一覧 / フォルダ面の中だけ**(上と同じ理由 ── kanban / calendar / query /
     //    inspector の `select-entry` まで拾うと、見えていない判定が誤って走る)

@@ -347,6 +347,34 @@ describe('移す… ── 入れ先のフォルダを選ぶ(#215)', () => {
     expect(r.status.at(-1), '行き先を名乗っていない').toBe('3 件を「t-f1」へ入れました');
   });
 
+  /**
+   * 🔴 **一覧タブでも同じ**(#1038 台帳③ 段 G、C13)── 一覧タブで選び足せる
+   * ようになったので、右クリックの「移す…」も**フォルダの表と同じ規則**
+   * (scope=selection)で効くことを見る。
+   */
+  it('🔴 一覧タブでも、印が複数あればその全部が選んだフォルダへ入る', async () => {
+    const r = setup(METAS, [], 'list');
+    r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    r.d.dispatch({ type: 'TOGGLE_SELECT', lid: 'n2' });
+    r.d.dispatch({ type: 'TOGGLE_SELECT', lid: 'n3' });
+    expect(r.d.getState().selection.length, '前提が崩れている(印が 3 件ではない)').toBe(3);
+    rightClick(r.row('n1'));
+    r.press('move-to-folder');
+    await tick();
+    const dialog = [...document.querySelectorAll<HTMLDialogElement>('dialog')].find((x) => x.open);
+    expect(dialog, '入れ先を選ぶ画面が出ていない').toBeDefined();
+    expect(dialog!.querySelector('[data-pkc-field="dialog-title"]')?.textContent).toBe('3 件を移す');
+    const rows = [...dialog!.querySelectorAll<HTMLElement>('[data-pkc-field="entry-pick-row"]')];
+    rows.find((x) => x.getAttribute('data-pkc-lid') === 'f1')!.click();
+    await tick();
+    expect(
+      getStructuralChildren('f1', r.d.getState().entryMetas, r.d.getState().relations)
+        .map((m) => m.lid)
+        .sort(),
+      '一覧タブから移した先で全件が子になっていない',
+    ).toEqual(['n1', 'n2', 'n3']);
+  });
+
   it('⚠ 対照群 ── 印の外の行を右クリックしたら、その 1 件だけ動く', async () => {
     const r = setup();
     r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });

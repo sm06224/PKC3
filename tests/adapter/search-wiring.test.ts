@@ -207,15 +207,16 @@ describe('全文検索の配線(#181)', () => {
   it('🔴 絞り込みを描く 3 面が全部、本文の当たりも見る規則を通っている', () => {
     // ⚠ **カレンダー / かんばんは落とし、予定を足した**(#292 段⑤、2026-08-23)
     //    ── 面が入れ替わっても「1 面でも漏れるとその面でだけ探せない」は同じ
-    for (const face of ['sidebar', 'schedule']) {
+    for (const face of ['schedule']) {
       const src = readFileSync(`src/adapter/ui/render/${face}.ts`, 'utf8');
       expect(src, `${face} が題名だけの絞り込みのまま`).toContain('matchesEntry(');
       expect(src, `${face} に matchesTitle が残っている`).not.toMatch(/matchesTitle\(/);
     }
     /**
-     * ⚠ **フォルダ面だけ経路が変わった**(#240 段②)── 行を決める規則は
-     * `features/relation/filer-list.ts` の `filerRows` 1 か所へ寄せた
-     * (描く側と**範囲選択の reducer** が別の並びを持たないようにするため)。
+     * ⚠ **フォルダ面・一覧タブは経路が変わった**(#240 段② / #1038 台帳③ 段 G、
+     * C13)── 行を決める規則は `features/relation/filer-list.ts` の
+     * `filerRows` / `listRows` 1 か所へ寄せた(描く側と**範囲選択の reducer** が
+     * 別の並びを持たないようにするため)。
      * 🔑 だから見るのは 2 つ: ①面がその関数を通ること ②**本文の当たりを渡すこと**
      *   ③その関数自身が `matchesEntry` を使うこと。
      */
@@ -223,6 +224,12 @@ describe('全文検索の配線(#181)', () => {
     expect(filer, 'フォルダ面が共通の規則を通っていない').toContain('filerRows(');
     expect(filer, 'フォルダ面が本文の当たりを渡していない').toContain('searchHits: state.searchHits');
     expect(filer, 'フォルダ面に題名だけの絞り込みが残っている').not.toMatch(/matchesTitle\(/);
+    const sidebar = readFileSync('src/adapter/ui/render/sidebar.ts', 'utf8');
+    expect(sidebar, '一覧タブが共通の規則を通っていない').toContain('listRows(');
+    expect(sidebar, '一覧タブが本文の当たりを渡していない').toContain(
+      'searchHits: state.searchHits',
+    );
+    expect(sidebar, '一覧タブに題名だけの絞り込みが残っている').not.toMatch(/matchesTitle\(/);
     const rows = readFileSync('src/features/relation/filer-list.ts', 'utf8');
     expect(rows, '共通の規則が題名だけになっている').toContain('matchesEntry(');
   });

@@ -1208,8 +1208,17 @@ select:focus-visible {
   /* 行どうしは**1 本の線**を共有する(下端だけ引く) */
   border-bottom: 1px solid var(--border);
 }
-[data-pkc-region='entry-list'] [data-pkc-entry]:hover {
+[data-pkc-region='entry-list'] [data-pkc-entry]:hover:not([data-pkc-marked]) {
   background: var(--surface-2);
+}
+/* 🔴 **印(複数選択)はフォルダの表・2 ペインの表と同じ 1 つのトークン**
+ * (#1038 台帳③ 段 G、C13 / Q6「A + 濃く」)── 一覧タブも `Ctrl` / `Shift` で
+ * 選び足せるようになった。⚠ hover は marked の行を塗り直さない(`:not`。
+ * 上の hover の規則と同じ理由 ── フォルダの表の 4 状態の作り直しを参照)。
+ * ⚠ 開いているノート(`[data-pkc-selected]`)の `!important` が勝つので、
+ * 「開いていて、かつ印が付いている」行は開いている見え方のまま残る。 */
+[data-pkc-region='entry-list'] [data-pkc-entry][data-pkc-marked] {
+  background: var(--pkc-mark-bg);
 }
 /* 本文の当たりを 200 件で切ったときの字(#680)── 一覧の後ろに 1 行。
  * 色は `--muted`(案内であって行ではない ── 地は無彩色、色は情報にだけ)。 */
@@ -6308,9 +6317,11 @@ li[data-pkc-row-slot] {
  *   **乗せただけの行が、印を付けた行に見えた**(引き継ぎ #312 の最初の仕事①)。
  *   hover は `--surface-hover`(`--surface` と `--surface-2` の間。全テーマで定義)。
  * ⚠ hover は **marked の行を塗り直さない**(`:not`)── 同じ性質(地の明度)を
- *   両方が触るので、除外しないと「乗せている間だけ印が薄く見える」が戻ってくる。 */
+ *   両方が触るので、除外しないと「乗せている間だけ印が薄く見える」が戻ってくる。
+ * 🔴 **印の濃さは一覧・フォルダの表と同じ 1 つのトークン**(#1038 台帳③ 段 G、
+ *   C13 / Q6「A + 濃く」)── `--surface-2` から `--pkc-mark-bg` へ。 */
 [data-pkc-region='dual-table'] tbody tr[data-pkc-marked] td {
-  background: var(--surface-2);
+  background: var(--pkc-mark-bg);
   font-weight: 600;
 }
 [data-pkc-region='dual-table'] tbody tr:hover:not([data-pkc-marked]) td {
@@ -6618,8 +6629,10 @@ h3[data-pkc-section] {
  * 同じ見え方だと「いま中央に出ているのはどれか」が読めなくなる。
  * ⚠ 色は情報にだけ(user 指示 2026-08-03)── 印は**地の明度**、落とし先は**輪郭**。
  */
+/* 🔴 **印は一覧・2 ペインの表と同じ 1 つのトークン**(#1038 台帳③ 段 G、C13 / Q6
+ * 「A + 濃く」)── `--surface-2`(hover とほぼ同じ濃さ)から `--pkc-mark-bg` へ。 */
 [data-pkc-region='filer-table'] tbody tr[data-pkc-marked] {
-  background: var(--surface-2);
+  background: var(--pkc-mark-bg);
 }
 [data-pkc-region='filer-table'] tbody tr[data-pkc-selected] {
   outline: 1px solid var(--accent);

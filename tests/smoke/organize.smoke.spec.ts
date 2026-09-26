@@ -578,6 +578,40 @@ test('🔴 一覧タブの ↑↓・Enter・絞り込みと、Escape の 2 段�
   await page.keyboard.press('Escape');
   await expect(collectionPane, '2 回目の Escape でノートが閉じていない').toBeVisible();
 
+  /**
+   * ⑥ 🔴 **一覧タブでも Ctrl / Shift で選び足せる**(#1038 台帳③ 段 G、C13 /
+   * Q6 裁定「A + 濃く」)。⚠ **unit では届かない層** ── `color-mix()` を実際に
+   * 解決させた背景色を比べる(happy-dom は描画しないので `getComputedStyle` が
+   * 何も言えない)。同じ起動に相乗りさせる(このファイル冒頭の注記どおり)。
+   */
+  await rows.first().click();
+  const titleBefore = await page.locator('[data-pkc-field="detail-title"]').textContent();
+  const bgOf = (loc: import('@playwright/test').Locator) =>
+    loc.evaluate((el) => getComputedStyle(el).backgroundColor);
+  const secondLid = await rows.nth(1).getAttribute('data-pkc-entry');
+  await rows.nth(1).click({ modifiers: ['ControlOrMeta'] });
+  const secondRow = page.locator(`[data-pkc-region="entry-list"] [data-pkc-entry="${secondLid}"]`);
+  await expect(secondRow, 'Ctrl クリックで印が付いていない').toHaveAttribute('data-pkc-marked', '');
+  // ⚠ 選び足しただけでは中央が動かない(依頼文そのもの)
+  await expect(
+    page.locator('[data-pkc-field="detail-title"]'),
+    '選び足しただけで中央のノートが切り替わった',
+  ).toHaveText(titleBefore ?? '');
+  const markedBg = await bgOf(secondRow);
+  const unmarkedBg = await bgOf(rows.nth(2));
+  expect(markedBg, '印の背景が印の無い行と同じ(見分けが付かない)').not.toBe(unmarkedBg);
+  await rows.nth(2).hover();
+  const hoverBg = await bgOf(rows.nth(2));
+  expect(markedBg, '印の背景が hover の背景と同じ(見分けが付かない)').not.toBe(hoverBg);
+  await page.mouse.move(0, 0); // hover を外す(以後の観測に残さない)
+
+  // Shift クリックは表示順の範囲で採る(起点 = 直前に Ctrl で押した secondLid)
+  await rows.nth(2).click({ modifiers: ['Shift'] });
+  await expect(
+    page.locator('[data-pkc-region="entry-list"] [data-pkc-entry][data-pkc-marked]'),
+    '一覧タブの範囲選択が正しい件数を選んでいない',
+  ).toHaveCount(2);
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 

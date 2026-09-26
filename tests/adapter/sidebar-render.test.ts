@@ -148,6 +148,37 @@ describe('sidebar differential rendering (P3-2 DoD)', () => {
     expect(before[1]?.hasAttribute('data-pkc-selected')).toBe(true);
   });
 
+  /**
+   * 🔴 **印(複数選択)も指紋の一部**(#1038 台帳③ 段 G、C13)。⚠ `selectedLid`
+   * を動かさずに `state.selection` だけ動くのが本来の形(Ctrl クリック)
+   * ── `selectionChanged` だけを指紋にすると、このケースで DOM に触れない
+   * (§7「同じ判定が複数の場所にある」の速い経路版)。
+   */
+  it('🔴 印(marked)は selectedLid を動かさずに patch される', () => {
+    const { sidebar, state, rows } = setup([meta('a', 1), meta('b', 2), meta('c', 3)]);
+    const before = rows();
+    let s = reduce(state, { type: 'SELECT_ENTRY', lid: 'a' }).state;
+    s = reduce(s, { type: 'TOGGLE_SELECT', lid: 'c' }).state;
+    // ⚠ この時点で selectedLid は動いていない('a' のまま)。⚠ `SELECT_ENTRY` は
+    //   選択を `[lid]` へ置き換えるので、開いている 'a' 自身も印の集合に居る
+    //   (= 「開いていて、かつ印が付いている」行 ── CSS 側は `!important` で
+    //   開いている見え方を保つ。`tests/adapter/mark-bg-css.test.ts` が pin)
+    expect(s.selectedLid, '印を付けただけで中央が変わった').toBe('a');
+    expect(s.selection).toEqual(['a', 'c']);
+    sidebar.render(s);
+    const after = rows();
+    after.forEach((node, i) => expect(node).toBe(before[i]));
+    expect(before[0]?.hasAttribute('data-pkc-marked'), '開いている a に印が出ていない').toBe(
+      true,
+    );
+    expect(before[1]?.hasAttribute('data-pkc-marked'), '選んでいない b に印が付いた').toBe(false);
+    expect(before[2]?.hasAttribute('data-pkc-marked'), 'c に印が出ていない').toBe(true);
+    // 外すと消える
+    s = reduce(s, { type: 'TOGGLE_SELECT', lid: 'c' }).state;
+    sidebar.render(s);
+    expect(before[2]?.hasAttribute('data-pkc-marked'), '外した印が残っている').toBe(false);
+  });
+
   it('title change patches the one row in place; others untouched', () => {
     const { sidebar, state, rows } = setup([meta('a', 1), meta('b', 2)]);
     const before = rows();
