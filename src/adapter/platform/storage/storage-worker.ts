@@ -194,6 +194,73 @@ function deserializeInto(
   return image.byteLength;
 }
 
+/**
+ * 🔴 **保存先を開こうとしている間だけ、sqlite のエラーログを控える**(#1073)。
+ *
+ * ## なぜ要るか
+ *
+ * 起動の直後に読み込み直すと、前のページの storage worker がまだ OPFS の
+ * SAHPool を掴んでいる間に、新しいページの worker が開こうとする。sqlite は
+ * `NoModificationAllowedError` を `sqlite3.config.error` へ複数行書くが、
+ * `openStorageWithRetry`(open-with-retry.ts)が worker を作り直して待ち、
+ * **2 回目には開ける**(画面には何も出ない)。⚠ それでも console には
+ * 「回復した一時の失敗」がエラーとして残り、開発者には壊れて見える
+ * (`tests/smoke/launcher.smoke.spec.ts` が `collectPageErrors` でおよそ 1 割落ちていた)。
+ *
+ * 🔑 だから **「保存先を開こうとしている間」だけ**、`sqlite3.config.error` の
+ * 呼び出しを console ではなく控えへ溜める。⚠ **`warn` / `log` は触らない**
+ * (範囲を広げない ── ほかの sqlite のエラーを隠さない)。
+ */
+let capturingOpenErrors = false;
+let openErrorLog: string[] = [];
+
+/**
+ * `sqlite3ApiConfig.error` へ渡す口。⚠ 上流の既定(`error: console.error.bind(console)`、
+ * `dist/index.mjs` 3263 付近)と同じ呼び方(可変長引数)。
+ *
+ * ⚠ 「開いている間だけ」の切り替えは `beginOpeningStorage` / `endOpeningStorage` が
+ * 持つ ── この関数自体はフラグを読むだけで、いつ捕まえるかは決めない。
+ * 🔑 test から直に呼べるよう export する(CLAUDE.md §2「取り出せば test できる」──
+ * node で SAHPool の失敗そのものは作れない。詳しくは呼び出し口の注記)。
+ */
+export function sqliteOpenErrorSink(...args: unknown[]): void {
+  if (capturingOpenErrors) {
+    openErrorLog.push(args.map((a) => String(a)).join(' '));
+    return;
+  }
+  console.error(...args);
+}
+
+/**
+ * 保存先を開こうとしている区間へ入る(控えを新しく始める)。
+ * 🔑 node では SAHPool の失敗そのものを再現できない(`installOpfsSAHPoolVfs` が
+ *   `sqlite3.config.error` を呼ぶ前に `Missing required OPFS APIs.` で reject する)
+ *   ので、export して**直に**区間の開始・終了を test する(CLAUDE.md §2)。
+ */
+export function beginOpeningStorage(): void {
+  /**
+   * ⚠ **区間は 1 度に 1 つだけ**(#1073 着地前レビュー ⚠2)── 控えは worker 全体で
+   *   1 つなので、重ねて入ると片方の区間を抜けた瞬間にもう片方の sqlite のエラーが
+   *   漏れる / 混ざる。いまは重なる経路が無い(再試行は毎回新しい worker)が、
+   *   黙って上書きせず**投げて見えるようにする**。
+   */
+  if (capturingOpenErrors) throw new Error('保存先を開く区間が重なりました(#1073)');
+  capturingOpenErrors = true;
+  openErrorLog = [];
+}
+
+/**
+ * 区間を抜ける。⚠ **開けたら `discard: true`**(控えは捨てる)。
+ * 開けずに `:memory:` へ退避した回は `discard: false` ── 戻り値を
+ * `InitResult.fallbackDetail` として診断に載せる(console には出さない)。
+ */
+export function endOpeningStorage(discard: boolean): string[] {
+  capturingOpenErrors = false;
+  const captured = openErrorLog;
+  openErrorLog = [];
+  return discard ? [] : captured;
+}
+
 async function init(
   dbName: string,
   journalMode?: JournalMode,
@@ -251,6 +318,8 @@ async function init(
    */
   (globalThis as unknown as Record<string, unknown>).sqlite3ApiConfig = {
     disable: { vfs: { opfs: true, 'opfs-wl': true } },
+    // 🔴 「保存先を開こうとしている間」だけ控えるための口(#1073。上の注記)。
+    error: sqliteOpenErrorSink,
   };
   const sqlite3 = await sqlite3InitModule();
   sqliteApi = sqlite3 as unknown as { capi: Record<string, unknown>; wasm: Record<string, unknown> };
@@ -263,6 +332,7 @@ async function init(
   let opened: Database;
   let vfs: InitResult['vfs'] = 'opfs-sahpool';
   let fallbackReason: string | undefined;
+  let fallbackDetail: string[] | undefined;
   if (opts?.memory === true) {
     /**
      * 🔴 **頼まれて `:memory:` にした回は「落ちた」と言わない**(#400 段③)。
@@ -276,15 +346,27 @@ async function init(
     vfs = 'memory';
     opened = new sqlite3.oo1.DB(':memory:');
   } else {
+    // 🔴 開こうとしている区間だけ、error を控えへ溜める(#1073。上の注記)
+    beginOpeningStorage();
     try {
       const poolUtil = await sqlite3.installOpfsSAHPoolVfs({ name: dbName });
       // 🔑 **捨てる口を持っておく**(上の `sahPool` の注記)── ここでしか手に入らない。
       sahPool = poolUtil as unknown as { wipeFiles(): Promise<void> };
       opened = new poolUtil.OpfsSAHPoolDb(`/${dbName}.db`);
+      endOpeningStorage(true); // 開けた ── 控えは捨てる
     } catch (e) {
+      fallbackDetail = endOpeningStorage(false); // 開けなかった ── 診断として残す
       vfs = 'memory';
       fallbackReason = String(e);
       opened = new sqlite3.oo1.DB(':memory:');
+    } finally {
+      /**
+       * ⚠ **どの経路で抜けても区間を閉じる**(#1073 着地前レビュー ⚠2)── 上の 2 か所で
+       *   既に閉じていれば何もしない。閉じ忘れると、以後この worker の**無関係な**
+       *   sqlite のエラーまで console に出なくなる(上の try に後から早期 return を
+       *   足した日に、黙ってそうなる)。
+       */
+      if (capturingOpenErrors) endOpeningStorage(true);
     }
   }
 
@@ -340,7 +422,10 @@ async function init(
   db = opened;
   const base = { ...meta, vfs, journalMode: actualJournalMode };
   const withReason = fallbackReason ? { ...base, fallbackReason } : base;
-  initResult = restoredBytes === undefined ? withReason : { ...withReason, restoredBytes };
+  // 🔴 診断として載せるのは開けなかった回だけ(#1073)。console には出さない。
+  const withDetail =
+    fallbackDetail && fallbackDetail.length > 0 ? { ...withReason, fallbackDetail } : withReason;
+  initResult = restoredBytes === undefined ? withDetail : { ...withDetail, restoredBytes };
   return initResult;
 }
 

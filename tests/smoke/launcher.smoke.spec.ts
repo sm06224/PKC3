@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { gzipSync } from 'node:zlib';
 import { TILE_MENU_ACTIONS } from '../../src/features/entry-actions';
+import { STORAGE_FALLBACK_LINE } from '../../src/features/storage/storage-notice';
 import {
   answerAppDialog,
   gotoApp,
@@ -2220,6 +2221,24 @@ test('🔴 一式を入れた端末では Office タイルが出て、押すと�
   });
   // 控え(appOfficePack)は boot で読む ── 仕込んだ後に開き直す
   await gotoApp(page);
+
+  /**
+   * 🔴 **回復した一時の失敗を、壊れとして画面に出さない**(#1073)。
+   *
+   * ⚠ ここは boot の**2 回目**である ── 前のページの storage worker が
+   *   OPFS の SAHPool をまだ掴んでいる間に、新しい worker が開こうとしうる窓
+   *   (open-with-retry.ts が待って開き直す)。⚠ **その回復が画面に「保存先が
+   *   使えません」を残すと、開けているのに壊れて見える**。
+   * ⚠ **この 1 行は、競合が起きた回にしか効かない**(この流れではおよそ 1 割 ──
+   *   #1073 の実測。起きない回は行がそもそも描かれないので、いつでも緑になる)。
+   *   🔑 回復した失敗が console に漏れないことを**この test で**拾うのは末尾の
+   *   `expect(errors).toEqual([])` であり、**決定的に**守っているのは unit
+   *   (`tests/adapter/storage-open-error-sink.test.ts` / `open-with-retry.test.ts`)である。
+   */
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '回復した一時の失敗が、保存先が使えない扱いのまま画面に残っている',
+  ).not.toContainText(STORAGE_FALLBACK_LINE);
 
   await clickReal(page, '[data-pkc-browse="launcher"]');
   /**

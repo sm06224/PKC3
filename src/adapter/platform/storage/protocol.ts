@@ -728,6 +728,14 @@ export interface InitResult {
   /** memory fallback したときだけ入る、落ちた理由(観測可能性 ── review #1)。 */
   fallbackReason?: string;
   /**
+   * 🔴 **保存先を開こうとしている間に sqlite が console へ出そうとしたエラー行**
+   * (#1073)。⚠ memory fallback した回にだけ、控えが 1 件以上あるときだけ入る
+   * (開けた回は捨てる ── `storage-worker.ts` の `beginOpeningStorage` /
+   * `endOpeningStorage`)。**console には出さない診断**であり、`open-with-retry.ts` が
+   * 再試行の全部が尽きたときだけ `report` を 1 回呼び、`main.ts` がそこで出す。
+   */
+  fallbackDetail?: string[];
+  /**
    * 🔴 **画像を実際に流し込んだバイト数**(#400 段③)。渡さなかった回は載らない。
    *
    * ⚠ **これが無いと「復元した」を test から見分けられない** ── 画像を渡しても

@@ -16,7 +16,11 @@ import {
 } from '../../src/adapter/platform/storage/open-with-retry';
 
 /** `vfs` を順に返す台。⚠ 開くたびに別の client を渡す(閉じ忘れが見える形)。 */
-function stand(vfsSeq: readonly string[], retryable = true) {
+function stand(
+  vfsSeq: readonly string[],
+  retryable = true,
+  report?: (detail: { init: { vfs: string }; tries: number }) => void,
+) {
   const opened: string[] = [];
   const closed: string[] = [];
   const waited: number[] = [];
@@ -37,6 +41,7 @@ function stand(vfsSeq: readonly string[], retryable = true) {
         waited.push(ms);
       },
       retryable,
+      report,
     });
   return { run, opened, closed, waited };
 }
@@ -86,6 +91,41 @@ describe('保存先の再試行(#811 の 3 番目)', () => {
       // 対照群 ── 規則そのものは生きている
       expect(b.tries, '落ちた回まで待たなくなった').toBeGreaterThan(1);
     });
+  });
+
+  /**
+   * 🔴 **`report` は「知らせる」の判断を持つ**(#1073)。⚠ ここで殺せない変異は
+   *   `main.ts` の console.error を毎回鳴らす側へ倒す ── 途中で開けた回・
+   *   選んで memory の回まで「壊れて見える」ことになる。
+   */
+  it('🔴 途中で開けたら report を呼ばない', async () => {
+    const calls: Array<{ init: { vfs: string }; tries: number }> = [];
+    const s = stand(['memory', 'opfs-sahpool'], true, (d) => calls.push(d));
+    await s.run();
+    expect(calls, '途中で開けたのに report が呼ばれた').toEqual([]);
+  });
+
+  it('🔴 一発で取れた回も report を呼ばない', async () => {
+    const calls: Array<{ init: { vfs: string }; tries: number }> = [];
+    const s = stand(['opfs-sahpool'], true, (d) => calls.push(d));
+    await s.run();
+    expect(calls, '一発で取れたのに report が呼ばれた').toEqual([]);
+  });
+
+  it('🔴 再試行が尽きても memory のままなら、1 回だけ report を呼ぶ', async () => {
+    const calls: Array<{ init: { vfs: string }; tries: number }> = [];
+    const s = stand(['memory'], true, (d) => calls.push(d));
+    const r = await s.run();
+    expect(calls, 'report が呼ばれていない、または 2 回以上呼ばれた').toHaveLength(1);
+    expect(calls[0]!.init.vfs).toBe('memory');
+    expect(calls[0]!.tries).toBe(r.tries);
+  });
+
+  it('🔴 `retryable: false`(選んで memory)は report を呼ばない', async () => {
+    const calls: Array<{ init: { vfs: string }; tries: number }> = [];
+    const s = stand(['memory'], false, (d) => calls.push(d));
+    await s.run();
+    expect(calls, '選んだ memory なのに report が呼ばれた').toEqual([]);
   });
 
   it('⚠ 待つ間隔は伸びていく(短い解放待ちを最初の 1 回で拾う)', () => {

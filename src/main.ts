@@ -430,6 +430,13 @@ async function initStorage(
     wait: (ms) => new Promise((r) => setTimeout(r, ms)),
     // ⚠ 持ち歩ける 1 枚の HTML は**選んで** `memory` なので、試し直さない
     retryable: portable === null,
+    // 🔴 判断は `open-with-retry.ts` が持つ。ここは呼ぶだけ(#1073。CLAUDE.md §2)
+    report: ({ init: lastInit, tries }) => {
+      console.error(
+        `pkc3: 保存先を ${tries} 回開こうとしても memory のままでした`,
+        ...(lastInit.fallbackDetail ?? []),
+      );
+    },
   });
   return { client, init };
 }
