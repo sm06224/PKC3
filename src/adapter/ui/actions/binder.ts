@@ -202,6 +202,7 @@ import {
   repeatMenuActions,
   REPEAT_ATTR,
   withTrailingLast,
+  withEditReady,
 } from '@features/entry-actions';
 import { currentAppOpenTarget } from '@adapter/ui/render/app-open-target';
 import {
@@ -4305,10 +4306,18 @@ const ACTIONS: Record<string, ActionHandler> = {
            *   ではない。
            */
           ...noteToolActions(),
-          ...entryMenuActions({
-            archetype: st.entryMetas.get(lid)?.archetype ?? null,
-            linkedFile: st.linkedFiles.get(lid) ?? null,
-          }),
+          /**
+           * 🔴 **本文が届くまで「編集」は押せない**(#1038 台帳③ C1)。
+           * ⚠ ここも `selectedLid` = 開いているノートなので、本文の上のボタンと
+           *   **同じ条件**(`openBody?.lid === lid`)で判定する。
+           */
+          ...withEditReady(
+            entryMenuActions({
+              archetype: st.entryMetas.get(lid)?.archetype ?? null,
+              linkedFile: st.linkedFiles.get(lid) ?? null,
+            }),
+            st.openBody?.lid === lid,
+          ),
         ],
         [
           /**
@@ -12150,9 +12159,10 @@ export function bindActions(
         return;
       }
       /**
-       * 🔴 **2 つだけ、この行からは出さない**(#1045 C9。着地前の自己監査で判明)。
+       * 🔴 **3 つだけ、この行からは出さない**(#1045 C9 / #1038 台帳③ C1。
+       *   着地前の自己監査で判明)。
        *
-       * ⚠ どちらも「選択が押した行に揃っている」ことを前提に書かれているが、
+       * ⚠ 3 つとも「選択が押した行に揃っている」ことを前提に書かれているが、
        *   この分岐は選択を動かさない(`selectedLid` / `openBody` / `st.selection` は
        *   押した行を指さない)。そのまま出すと**押した物と効く先が食い違う**
        *   (CLAUDE.md 不可侵「絶対に作らない」)。
@@ -12164,7 +12174,12 @@ export function bindActions(
        *   (本文は右クリックで読み直さない、§7)。この分岐は選ばないので
        *   ほぼ常に不一致 ──「押せるのに必ず失敗する」(#500 案 C の docstring
        *   「押せるのに必ず失敗するのは、出ない(畳んである)より悪い」)になる。
-       * 🔑 どちらも「選ぶ側(=2 ペインを抜ける)」へ倒す理由が無い ── 移すも写すも、
+       * - `start-edit`(#1038 台帳③ C1):`START_EDIT` の reducer は
+       *   `openBody.lid === selectedLid` を要求する(`app-state.ts` の
+       *   `case 'START_EDIT'`)。この分岐は `openBody` も `selectedLid` も
+       *   動かさないので、押すと**選んでいた別のノート**(または何も選んでいなければ
+       *   無言)が編集に入る ── これも押した物と効く先が食い違う。
+       * 🔑 3 つとも「選ぶ側(=2 ペインを抜ける)」へ倒す理由が無い ── 移すも写すも編集も、
        *   一覧タブへ切り替えれば同じボタンで行える。
        */
       /**
@@ -12180,7 +12195,12 @@ export function bindActions(
         archetype: st.entryMetas.get(lid)?.archetype ?? null,
         linkedFile: st.linkedFiles.get(lid) ?? null,
       })
-        .filter((a) => a.action !== 'move-to-folder' && a.action !== 'copy-plain-markdown')
+        .filter(
+          (a) =>
+            a.action !== 'move-to-folder' &&
+            a.action !== 'copy-plain-markdown' &&
+            a.action !== 'start-edit',
+        )
         .map((a): MenuItem =>
           a.action === 'rename-entry-begin'
             ? { ...a, action: 'dual-rename-begin', attrs: { 'data-pkc-side': side } }
@@ -12292,10 +12312,29 @@ export function bindActions(
       ? null
       : (row.querySelector('[data-pkc-task-line]')?.getAttribute('data-pkc-task-line') ?? null);
     const repeatable = taskLine !== null && Number.isInteger(Number(taskLine));
-    const rows = entryMenuActions({
-      archetype: st.entryMetas.get(lid)?.archetype ?? null,
-      linkedFile: st.linkedFiles.get(lid) ?? null,
+    /**
+     * 🔴 **「編集」に近道の字を添え、本文が届くまで押せなくする**(#1038 台帳③ C1)。
+     * ⚠ 添える手は既存の見出し・本文のメニューと**同じ関数**(`menuShortcutFor`。
+     *   #587 改善 C 案 2)── `start-edit` は `edit-entry` の割当へ読み替わる。
+     *   ⚠ 上の分岐(`row === null`)が同じ形の `withShortcut` を持つが、
+     *   `if` の中の `const` なのでここには見えない ── 同じ 1 行をここでも組む。
+     * ⚠ `st` は直前の `selectEntryOrExplain` の**後**の値 ── 本文はここではまだ
+     *   届いていないことがある(worker からの非同期読み)ので、上のボタンと
+     *   同じ条件(`openBody.lid === lid`)で押せるかを決める。
+     */
+    const withRowShortcut = <T extends { readonly action: string }>(
+      a: T,
+    ): T & { readonly shortcut: string } => ({
+      ...a,
+      shortcut: menuShortcutFor(a.action, { mac: isMac(), chord: (id) => chordHint(id, appKeymap) }),
     });
+    const rows = withEditReady(
+      entryMenuActions({
+        archetype: st.entryMetas.get(lid)?.archetype ?? null,
+        linkedFile: st.linkedFiles.get(lid) ?? null,
+      }).map(withRowShortcut),
+      st.openBody?.lid === lid,
+    );
     const items = repeatable
       ? [
           {

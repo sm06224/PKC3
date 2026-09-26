@@ -41,6 +41,7 @@ import {
   repeatMenuActions,
   REPEAT_ATTR,
   entryActionWidthTier,
+  withEditReady,
 } from '../../src/features/entry-actions';
 
 /** `binder.ts` の受け手の表を読む。⚠ 集め方は `repo-hygiene` と**同じ形**にする。 */
@@ -135,7 +136,13 @@ describe('右クリックに出す操作', () => {
      *   ① `ENTRY_ACTION_LABELS['<綴り>']`(1 件ずつ引く昔の形)
      *   ② `entryBtn('<綴り>')`(綴りだけ渡し、字は中で表から引く いまの形)
      */
-    for (const a of ENTRY_MENU_ACTIONS) {
+    /**
+     * 🔴 **`menuOnly` は右の列に出さない**(#1038 台帳③ C1、`start-edit`)。
+     * ⚠ そういう項目は `inspector.ts` が 1 度も引かない ── 「表から引いていない」を
+     *   誤って報告しないよう、この検査からは外す(右の列に出さないこと自体は
+     *   `情報ペインの塊は正本(entry-actions.ts)から来る` 側の検査が見る)。
+     */
+    for (const a of ENTRY_MENU_ACTIONS.filter((a) => a.menuOnly !== true)) {
       const fromTable =
         inspector.includes(`ENTRY_ACTION_LABELS['${a.action}']`) ||
         inspector.includes(`entryBtn('${a.action}')`);
@@ -330,6 +337,23 @@ describe('見出し・本文のメニューの近道(#587 C 案 2)', () => {
     expect(menuShortcutFor('pin-split', { mac: false, chord })).toBe('');
     expect(menuShortcutFor('toggle-heading-fold', { mac: true, chord })).toBe('');
   });
+
+  /**
+   * 🔴 **`start-edit` は `edit-entry` の割当を引く**(#1038 台帳③ C1)。
+   * ⚠ `KEY_COMMANDS` の id はボタンの `action` と綴りが違う ── そのまま
+   *   `chord('start-edit')` を呼ぶと一致する id が無く、字が空のまま出る
+   *   (この doc の §10.3 が指摘した穴。ここで塞いだことを pin する)。
+   */
+  it('🔴 start-edit は自分の綴りではなく edit-entry の割当を引く', () => {
+    const editChord = (id: string): string | null => (id === 'edit-entry' ? 'Mod + E' : null);
+    expect(menuShortcutFor('start-edit', { mac: false, chord: editChord })).toBe('Mod + E');
+    // ⚠ 空振り防止 ── `start-edit` という id で割当が引けても素通りしないことを見る
+    const wrongChord = (id: string): string | null => (id === 'start-edit' ? 'Mod + E' : null);
+    expect(
+      menuShortcutFor('start-edit', { mac: false, chord: wrongChord }),
+      '自分の綴り(start-edit)で引いてしまっている(edit-entry を読み替えていない)',
+    ).toBe('');
+  });
 });
 
 describe('右クリックの説明(#587 C-1)', () => {
@@ -380,6 +404,8 @@ describe('右クリックの説明(#587 C-1)', () => {
       ['pin-split', '1621a667'],
       // 🔴 保存したスタックを載せる(#633 段③)
       ['stack-load', 'd23f50ac'],
+      // 🔴 「このノート」のまとまりの先頭「編集」(#1038 台帳③ C1、2026-09-25)
+      ['start-edit', 'e7a98369'],
       ['show-history', '2511b05b'],
       ['delete-entry', '661f5844'],
       // 🔴 **左の列の道具 4 つ**(#632 段①)── 本文ページの ⋯ から押せるようにした
@@ -530,6 +556,42 @@ describe('右クリックの説明(#587 C-1)', () => {
 
   it('⚠ 知らない綴りには空を返す(呼び側が例外で落ちない)', () => {
     expect(entryActionHint('no-such-action', { archetype: null, linkedFile: null })).toBe('');
+  });
+});
+
+/**
+ * 🔴 **本文が届くまで「編集」を押せなくする**(#1038 台帳③ C1)。
+ * ⚠ 上のボタン(`detail.ts` の `disabled = !bodyReady`)と**同じ条件**で判定する ──
+ *   ここは features 層の pure 関数なので、材料(`bodyReady`)は呼び側から受け取る。
+ */
+describe('withEditReady(#1038 台帳③ C1)', () => {
+  const rows = () => entryMenuActions({ archetype: 'text', linkedFile: null });
+
+  it('🔴 bodyReady が true なら 1 つも変えない(参照も同じ配列)', () => {
+    const items = rows();
+    expect(withEditReady(items, true)).toBe(items);
+  });
+
+  it('🔴 bodyReady が false なら start-edit だけ disabled + 説明を上書きする', () => {
+    const out = withEditReady(rows(), false);
+    const edit = out.find((a) => a.action === 'start-edit');
+    expect(edit?.disabled, 'start-edit が disabled になっていない').toBe(true);
+    expect(edit?.hint, '説明が「本文を読み込んでいます…」に変わっていない').toBe(
+      '本文を読み込んでいます…',
+    );
+    // ⚠ **対照群** ── 他の項目は 1 つも変わらない(disabled も説明も付かない)
+    const others = out.filter((a) => a.action !== 'start-edit');
+    expect(others, '対照群が空(空振り)').not.toHaveLength(0);
+    for (const a of others) {
+      expect(a, `${a.action} に disabled が付いた`).not.toHaveProperty('disabled');
+      expect(a.hint, `${a.action} の説明が書き換わった`).toBe(
+        rows().find((b) => b.action === a.action)?.hint,
+      );
+    }
+  });
+
+  it('⚠ start-edit が出ていない一覧を渡しても落ちない(見出し・本文のメニューと共用できる)', () => {
+    expect(() => withEditReady(bodyMenuActions({ externalImages: 0 }), false)).not.toThrow();
   });
 });
 

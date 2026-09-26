@@ -242,7 +242,12 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    */
   'sql-er-connect-toggle',
   'stack-save',
-  'start-audio-capture', 'start-edit', 'start-screen-capture', 'start-tile-reorder',
+  /**
+   * ⚠ **2026-09-25(#1038 台帳③ C1)で在庫から抜けた** ── 行のメニュー
+   *   (`ENTRY_MENU_ACTIONS`)に「編集」(`start-edit`)を足したので、`entry` book で
+   *   名前が引けるようになった(受け手は前から在った ── 本文の上のボタン)。
+   */
+  'start-audio-capture', 'start-screen-capture', 'start-tile-reorder',
   'start-timer', 'stop-capture', 'storage-profile', 'swap-open', 'table-to-csv',
   'table-to-markdown', 'toggle-all-app-groups', 'toggle-app-tile',
   /**
@@ -475,12 +480,16 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   付け、KEY_COMMANDS へ登記した ── 受け手は既に在った(`center.ts` の
       //   「× 閉じる」)ので `both` +1 / `registered` +1 / `unregistered` −1、
       //   `total` は動かない(id 自体は前から `receivers` に数えられていた)。
+      // ⚠ 2026-09-25(#1038 台帳③ C1):「編集」(`start-edit`)を `ENTRY_MENU_ACTIONS`
+      //   (`entry` book)へ足した ── 受け手は既に在った(本文の上のボタン)ので
+      //   `both` +1 / `registered` +1 / `unregistered` −1、`total` は動かない
+      //   (`close-pane` の直前と同じ形)。
       total: 325,
       receivers: 272,
-      registered: 90,
-      both: 37,
+      registered: 91,
+      both: 38,
       outsideActionsTable: 53,
-      unregistered: 235,
+      unregistered: 234,
     });
   });
 
@@ -517,9 +526,10 @@ describe('操作の全数台帳(#582 段①)', () => {
     // ⚠ 2026-09-25(#1042 C3): 「閉じて本文へ戻る」(`close-pane`)を新たに
     //    `KEY_COMMANDS` へ登記して `key` 66 → 67(`deselect-entry` は既に登記済みの
     //    ままで、既定 `Escape` が付いただけ ── 件数は動かない)
+    // ⚠ 2026-09-25(#1038 台帳③ C1): 行のメニューが 16 → 17(「編集」`start-edit`)
     expect(s().perBook).toEqual({
       key: 67,
-      entry: 16,
+      entry: 17,
       body: 3,
       collection: 2,
       collectionPane: 4,

@@ -155,15 +155,22 @@ describe('2 ペインの表の行を右クリックしても、2 ペインを抜
   });
 
   /**
-   * 🔴 **`move-to-folder` / `copy-plain-markdown` はこの分岐からは出さない**
-   * (#1045 C9。`binder.ts` の docstring と同じ理由)。
+   * 🔴 **`move-to-folder` / `copy-plain-markdown` / `start-edit` はこの分岐からは
+   *   出さない**(#1045 C9 / #1038 台帳③ C1。`binder.ts` の docstring と同じ理由)。
    * ⚠ 空振り防止 ── メニューそのものは出ている(他の項目は在る)ことも確かめる。
    */
-  it('🔴 選択が押した行に揃わない 2 項目は、この分岐のメニューに出ない', () => {
+  it('🔴 選択が押した行に揃わない 3 項目は、この分岐のメニューに出ない', () => {
     const t = setupDual();
     rightClick(t.dualRow('left', 'n1'));
     expect(t.hasItem('move-to-folder'), '選択と食い違う項目が出ている').toBe(false);
     expect(t.hasItem('copy-plain-markdown'), '選択と食い違う項目が出ている').toBe(false);
+    /**
+     * 🔴 **`start-edit` も同じ理由で出さない**(#1038 台帳③ C1)。
+     * ⚠ `START_EDIT` の reducer は `openBody.lid === selectedLid` を要求するが、
+     *   この分岐は `DUAL_SELECT` だけで `selectedLid` / `openBody` を動かさない ──
+     *   出すと「押した行と違うノート(または何も無ければ無言)」が編集に入る。
+     */
+    expect(t.hasItem('start-edit'), '押した行と違うノートを編集する項目が出ている').toBe(false);
     expect(t.hasItem('delete-entry'), '空振り防止(メニューごと出ていない)').toBe(true);
     expect(t.hasItem('copy-entry-ref'), '空振り防止(メニューごと出ていない)').toBe(true);
   });

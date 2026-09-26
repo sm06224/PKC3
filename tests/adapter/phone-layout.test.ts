@@ -558,6 +558,29 @@ describe('⋯(本文ページから届く操作)', () => {
     s.field('phone-menu').click();
     expect(s.menu()).toBeNull();
   });
+
+  /**
+   * 🔴 **⋯ の「編集」も、本文が届くまで押せない**(#1038 台帳③ C1)。
+   * ⚠ `s.open()` は `SELECT_ENTRY` + `BODY_LOADED` を両方撃つので、ここだけ
+   *   `SELECT_ENTRY` だけを撃って「まだ届いていない」場面を作る。
+   */
+  it('🔴 本文が届く前は「編集」が押せない(⋯ でも同じ条件)', () => {
+    const s = setup(true);
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    s.field('phone-menu').click();
+    const editBtn = s.menu()!.querySelector('[data-pkc-action="start-edit"]') as HTMLButtonElement;
+    expect(editBtn, '「編集」が出ていない(前提が崩れている)').not.toBeNull();
+    expect(editBtn.disabled, '本文が届く前なのに押せる').toBe(true);
+  });
+
+  it('🔴 本文が届いた後は「編集」が押せる(⋯ でも同じ条件)', () => {
+    const s = setup(true);
+    s.open('n1');
+    s.field('phone-menu').click();
+    const editBtn = s.menu()!.querySelector('[data-pkc-action="start-edit"]') as HTMLButtonElement;
+    expect(editBtn, '「編集」が出ていない(前提が崩れている)').not.toBeNull();
+    expect(editBtn.disabled, '本文が届いているのに押せない').toBe(false);
+  });
 });
 
 /**

@@ -998,15 +998,30 @@ describe('右クリックの説明(#587 C-1)', () => {
   });
 
   /**
-   * ⚠ **対照群 ── 行のメニューには近道を付けない**(#587 C 案 2)。行の 9 項目は
-   *   説明欄(C-3)で説明する側で、鍵の近道を持つ物でもない ── 近道の字を全項目に
-   *   生やす変異が、上の見出しの検査だけでは素通りする。説明欄はそのまま出る。
+   * 🔴 **近道は「割当を持つ物だけ」に付く**(#1038 台帳③ C1 で更新)。
+   *
+   * ⚠ 直す前はここを「行のメニューには近道を一切付けない」という対照群にしていたが、
+   *   C1 の裁定で「編集」(`start-edit`。`KEY_COMMANDS` の id は `edit-entry`)に
+   *   近道の字(Ctrl+E / ⌘E)を添えることが決まった。⚠ **副作用**として
+   *   `open-note-window`(自身が `KEY_COMMANDS` の id と同じ綴り)にも同じ仕組みで
+   *   近道が付く ── 綴りが一致した結果であって、意図して増やしたものではない
+   *   (§7「同じ機構は 1 つに寄せる」)。
+   * 🔑 **対照群の意味は残す**:割当を持たない他の項目(履歴 / 削除など)には、
+   *   近道の字を全項目へ生やす変異が来ても付かないことを見る。
    */
-  it('⚠ 対照群 ── 行のメニューには近道が付かず、説明欄のまま(#587 C 案 2)', () => {
+  it('⚠ 近道は割当を持つ物だけに付く。履歴・削除には付かない(#587 C 案 2 / #1038 台帳③ C1)', () => {
     const s = setup();
     rightClick(s.row('n1'));
-    const withShortcut = [...s.menu()!.querySelectorAll(`button[${MENU_SHORTCUT_ATTR}]`)];
-    expect(withShortcut.map((b) => b.getAttribute('data-pkc-action')), '行の項目に近道が生えた').toEqual([]);
+    const withShortcut = [...s.menu()!.querySelectorAll(`button[${MENU_SHORTCUT_ATTR}]`)]
+      .map((b) => b.getAttribute('data-pkc-action'))
+      .sort();
+    expect(withShortcut, '近道が付く項目の集合が変わった').toEqual(
+      ['open-note-window', 'start-edit'].sort(),
+    );
+    // ⚠ 割当を持たない項目には付かないままである(対照群の本体)
+    const historyBtn = s.menu()!.querySelector('[data-pkc-action="show-history"]');
+    expect(historyBtn, '前提: 履歴を開くのボタンが無い').not.toBeNull();
+    expect(historyBtn!.hasAttribute(MENU_SHORTCUT_ATTR), '履歴を開くに近道が生えた').toBe(false);
     expect(s.menu()!.querySelector('[data-pkc-field="context-menu-hint"]'), '説明欄が消えた').not.toBeNull();
   });
 
@@ -1614,6 +1629,99 @@ describe('近道の字の見え方(#587 C 案 2)', () => {
     expect(blocks[0], '案内の字が違う').toMatch(decl('content', "'項目に乗せると説明が出ます'"));
     // 案内は説明より薄く(説明と同じ濃さだと「説明」に読める)
     expect(blocks[0], '案内が説明と同じ濃さ').toMatch(decl('color', 'color-mix\\('));
+  });
+});
+
+/**
+ * 🔴 **行の右クリックに「編集」が入る**(#1038 台帳③ C1、user 裁定 2026-09-25 設問 1 = C)。
+ *
+ * ⚠ 字も受け手も本文の上のボタン(`detail.ts` の `start-edit`)と**同じ**にする ──
+ *   右クリック専用の別名は作らない(§7)。右の列にはこの項目を足さない
+ *   (`inspector-action-groups.test.ts` 側で見る)。
+ */
+describe('行の右クリックの「編集」(#1038 台帳③ C1)', () => {
+  it('🔴 「このノート」のまとまり(履歴 / 名前を変える / 移す…)の先頭に在り、まとまりの間が空く', () => {
+    const s = setup();
+    rightClick(s.row('n1'));
+    const menu = s.menu()!;
+    const editBtn = menu.querySelector('[data-pkc-action="start-edit"]');
+    expect(editBtn, '「編集」が出ていない').not.toBeNull();
+    expect(editBtn!.textContent, '字が「ノートを編集する」ではない').toContain('ノートを編集する');
+    const group = editBtn!.closest('[data-pkc-field="context-menu-group"]');
+    expect(group, '塊の器に入っていない').not.toBeNull();
+    expect(group!.getAttribute('data-pkc-group'), '塊の名前が this-one ではない').toBe('this-one');
+    // 🔑 塊の先頭 == 「編集」自身(履歴・名前を変える・移す… より前)
+    expect(group!.firstElementChild, '塊の先頭に居ない').toBe(editBtn);
+    expect(
+      [...group!.querySelectorAll('button')].map((b) => b.getAttribute('data-pkc-action')),
+      '塊の並びが崩れている',
+    ).toEqual(['start-edit', 'show-history', 'rename-entry-begin', 'move-to-folder']);
+    // ⚠ 塊どうしの間が空く印(CSS は app.css 側の test が見る)
+    expect(menu.hasAttribute('data-pkc-with-groups'), '塊の間を空ける印が付いていない').toBe(true);
+  });
+
+  it('🔴 右の列には足していない(本文の上のボタンが持つ ── 同じ操作を 2 か所に置かない)', () => {
+    // ⚠ 空振り防止は `inspector-action-groups.test.ts` 側に在る(この検査は
+    //   「行のメニューに在る物が、右の列には無い」の 1 点だけを見る)
+    const inspector = readFileSync('src/adapter/ui/render/inspector.ts', 'utf-8');
+    expect(inspector.includes("entryBtn('start-edit')"), '右の列にも描いている').toBe(false);
+  });
+
+  /**
+   * 🔴 **本文が届くまで押せない**(上のボタンと同じ条件 `detail.ts` の
+   *   `disabled = !bodyReady`)。⚠ この fixture は `BODY_LOADED` を送っていないので
+   *   `openBody` は届かない ── 無言の dead click を作らないことをここで見る。
+   */
+  it('🔴 本文が届く前は押せない。説明も「本文を読み込んでいます…」に変わる', () => {
+    const s = setup();
+    rightClick(s.row('n1'));
+    const editBtn = s.menu()!.querySelector('[data-pkc-action="start-edit"]') as HTMLButtonElement;
+    expect(editBtn.disabled, '本文が届く前なのに押せる(無言の dead click になる)').toBe(true);
+    expect(editBtn.getAttribute('data-pkc-hint')).toBe('本文を読み込んでいます…');
+    // ⚠ 押しても状態は動かない(ネイティブの disabled が click を無視する)
+    editBtn.click();
+    expect(s.dispatcher.getState().phase, '押せないはずなのに編集に入った').toBe('ready');
+  });
+
+  it('🔴 本文が届いた後は押せて、押すと押した行(右クリックしたノート)の編集に入る', () => {
+    const s = setup();
+    // ⚠ `BODY_LOADED` は `selectedLid === lid` のときだけ受理される(reducer)
+    //   ── 先に選んでおく
+    s.dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    s.dispatcher.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '本文' });
+    rightClick(s.row('n1'));
+    const editBtn = s.menu()!.querySelector('[data-pkc-action="start-edit"]') as HTMLButtonElement;
+    expect(editBtn.disabled, '本文が届いているのに押せない').toBe(false);
+    expect(editBtn.getAttribute('data-pkc-hint')).toBe(
+      'このノートの全文編集に入ります(題名欄と保存 / キャンセルが出ます)',
+    );
+    editBtn.click();
+    expect(s.dispatcher.getState().phase, '編集に入っていない').toBe('editing');
+    expect(s.dispatcher.getState().openBody?.lid, '押した行と違うノートを編集している').toBe('n1');
+  });
+
+  it('🔴 近道の字(Ctrl+E)が右に付く(上のボタンと同じ割当 edit-entry を引く)', () => {
+    const s = setup();
+    rightClick(s.row('n1'));
+    const editBtn = s.menu()!.querySelector('[data-pkc-action="start-edit"]');
+    expect(editBtn!.getAttribute(MENU_SHORTCUT_ATTR), '近道の字が付いていない').toBe('Ctrl + E');
+  });
+
+  /**
+   * 🔴 **塊の間は右の列と同じ `var(--s3)`**(#1038 台帳③ C1)。⚠ DOM に塊が在っても
+   *   CSS の間が 1px のままなら画面では何も変わらない(CLAUDE.md §1)。
+   */
+  it('🔴 塊が在るメニューだけ間が広がる規則が CSS に在る(塊が無いメニューは 1px のまま)', () => {
+    const css = withoutMedia(stripComments(readFileSync('src/styles/app.css', 'utf-8')));
+    const withGroups = blocksFor(css, "[data-pkc-region='context-menu'][data-pkc-with-groups]");
+    expect(withGroups, '塊がある時だけ間を広げる規則が無い').toHaveLength(1);
+    expect(withGroups[0], '間が var(--s3) ではない').toMatch(decl('gap', 'var\\(--s3\\)'));
+    const group = blocksFor(css, "[data-pkc-field='context-menu-group']");
+    expect(group, '塊そのものの規則が無い').toHaveLength(1);
+    expect(group[0], '塊の中の間が 1px でない').toMatch(decl('gap', '1px'));
+    // ⚠ 塊が無い既存のメニュー(見出し・本文)の間はいまも 1px のまま
+    const base = blocksFor(css, "[data-pkc-region='context-menu']");
+    expect(base[0], '塊の無いメニューの既定の間が変わった').toMatch(decl('gap', '1px'));
   });
 });
 

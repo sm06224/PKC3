@@ -210,7 +210,15 @@ describe('右の列の操作は塊に分かれている(#1029 段 B / 段 C)', (
 describe('情報ペインの塊は正本(entry-actions.ts)から来る(#1029 段 C)', () => {
   it('🔴 塊を持つ 1 件残らず、描かれた data-pkc-group が ENTRY_MENU_ACTIONS の group と一致する', () => {
     const root = renderFolderWithLink();
-    const withGroup = ENTRY_MENU_ACTIONS.filter((a) => a.group !== undefined);
+    /**
+     * 🔴 **`menuOnly` は数えない**(#1038 台帳③ C1、`start-edit`)。
+     * ⚠ そういう項目は右の列に描かれない(本文の上のボタンが持つ ── 同じ操作を
+     *   2 か所に置かない)。ここは**描かれている物**を見る検査なので、描かれない
+     *   ことが分かっている物を見ても「無い」以外の結果が出ない(§1 の空振り)。
+     */
+    const withGroup = ENTRY_MENU_ACTIONS.filter(
+      (a) => a.group !== undefined && a.menuOnly !== true,
+    );
     // ⚠ 空振り防止 ── 塊を持つ物が 0 件なら、下のループは何も見ない
     expect(withGroup.length, '塊を持つ操作が 0 件(空振り)').toBeGreaterThan(10);
     for (const a of withGroup) {
@@ -267,7 +275,8 @@ describe('情報ペインの塊は正本(entry-actions.ts)から来る(#1029 段
 
   it('🔴 描かれたボタンの幅の段が、正本(entryActionWidthTier)と一致する', () => {
     const root = renderFolderWithLink();
-    for (const a of ENTRY_MENU_ACTIONS) {
+    // ⚠ `menuOnly` は右の列に描かれない(上のテストと同じ理由)
+    for (const a of ENTRY_MENU_ACTIONS.filter((a) => a.menuOnly !== true)) {
       const btn = root.querySelector(`[data-pkc-action="${a.action}"]`);
       expect(btn, `${a.action} のボタンが描かれていない`).not.toBeNull();
       expect(

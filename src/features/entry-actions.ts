@@ -66,6 +66,16 @@ export interface EntryAction {
    *   (`this-folder`)にした。理由は `export-folder` の項を見よ。
    */
   readonly group?: string;
+  /**
+   * 🔴 **右クリックにだけ出す(右の列には出さない)**(#1038 台帳③ C1)。
+   *
+   * ⚠ 「編集」は本文の上のボタン(`detail.ts` の `start-edit`)が既に持っているので、
+   *   右の列にもう 1 つ置くと**同じ操作が 2 か所**になる(P8 段⑧「編集はここだけ」)。
+   * 🔑 `inspector.ts` は `entryBtn(action)` を**名指しで**呼ぶ(§7 の docstring)ので、
+   *   この綴りを渡さなければ自動的に描かれない ── この flag は**その事実を検査に
+   *   伝える印**である(検査は「塊を持つ物は全部描かれる」を全数で見ているため)。
+   */
+  readonly menuOnly?: boolean;
 }
 
 
@@ -111,6 +121,26 @@ export function entryMenuActions(
      */
     hint: entryActionHint(a.action, ctx),
   }));
+}
+
+/**
+ * 🔴 **本文が届くまで「編集」を押せなくする**(#1038 台帳③ C1)。
+ *
+ * ⚠ 判定の材料(`openBody` が届いているか)は adapter 層(state)の値なので、
+ *   ここでは**結果(`bodyReady`)だけ**を受け取る ── features 層は browser API も
+ *   state も持たない(§0)。上のボタン(`detail.ts` の `disabled = !bodyReady`)と
+ *   **同じ条件**にする ── 別の条件を作ると、片方だけ押せて片方は押せない日が来る。
+ * ⚠ **押せないボタンを黙って出さない**(§7)── 説明欄の字も「読み込み中」に変える
+ *   (乗せても Tab で選んでも、なぜ押せないかが読める)。
+ */
+export function withEditReady<T extends { readonly action: string; readonly hint: string }>(
+  items: readonly T[],
+  bodyReady: boolean,
+): readonly (T & { readonly disabled?: boolean })[] {
+  if (bodyReady) return items;
+  return items.map((a) =>
+    a.action === 'start-edit' ? { ...a, disabled: true, hint: '本文を読み込んでいます…' } : a,
+  );
 }
 
 /**
@@ -270,6 +300,17 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    *   **見た目を 1px も変えない**ほうを選ぶ。
    */
   { action: 'write-back-file', label: '元ファイルへ書き戻す', group: 'export', when: 'linked' },
+  /**
+   * 🔴 **「このノート」のまとまりの先頭に「編集」**(#1038 台帳③ C1、
+   *   user 裁定 2026-09-25 設問 1 = C)。
+   *
+   * ⚠ **字と受け手は本文の上のボタンと同じ**(`start-edit`。`detail.ts:1101`)──
+   *   右クリックだけの別の名前を作らない(§7)。⚠ 右の列には出さない
+   *   ({@link EntryAction.menuOnly})── 本文の上のボタンが既に持っている。
+   * 🔑 位置は 2026-09-04 の裁定(毎日使う項目 = 写す・開く・書き出す を下へ
+   *   ずらさない)を守れる場所 ── その裁定より後ろの、この塊の先頭。
+   */
+  { action: 'start-edit', label: 'ノートを編集する', group: 'this-one', menuOnly: true },
   { action: 'show-history', label: '履歴を開く', group: 'this-one' },
   /**
    * 🔴 **左の列の行から、整理ができる 3 つ**(#215。user 裁定 2026-09-04「全部推薦で」)。
@@ -901,6 +942,13 @@ export function menuShortcutFor(
 ): string {
   if (action === 'edit-from-heading') return `${ctx.mac ? '⌘' : 'Ctrl'} + クリック`;
   if (action === 'append-at-heading') return `${ctx.mac ? '⌥' : 'Alt'} + クリック`;
+  /**
+   * 🔴 **`start-edit` の割当は `edit-entry`**(#1038 台帳③ C1)。
+   * ⚠ `KEY_COMMANDS` の id はボタンの `action` と綴りが違う(`SHORTCUT_BUTTON` が
+   *   逆引きする 1 組と同じ食い違い)── そのまま `ctx.chord('start-edit')` を呼ぶと
+   *   一致する id が無く、字が空のまま出る(#1038 台帳③ の doc §10.3 が指摘した穴)。
+   */
+  if (action === 'start-edit') return ctx.chord('edit-entry') ?? '';
   return ctx.chord(action) ?? '';
 }
 
@@ -1028,6 +1076,9 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
   'pin-split': '一番上に載って横の枠に出ます。上の帯に並び、押せば一番上へ戻せます',
   // 🔴 保存したスタックを載せる(#633 段③)── 積む(入れ替えない)ことと、消えた物の扱いを先に言う
   'stack-load': 'このノートに並んだリンク先を、いま横に出ている物の上に積みます(消えた物は数えて言います)',
+  // 🔴 **本文の上のボタンと同じ字**(#1038 台帳③ C1)── 押した後に起きることは同じ
+  //    (題名欄 + 保存 / キャンセルが出る)ので、説明も揃える
+  'start-edit': 'このノートの全文編集に入ります(題名欄と保存 / キャンセルが出ます)',
   'show-history': '過去の版を一覧します',
   // ⚠ **行き先は画面に在る名前で書く**(2026-08-29 の動線レビュー)── 直す前は
   //    「フォルダ画面」と書いていたが、**その名前の画面は無い**(タブの字は「フォルダ」で、
