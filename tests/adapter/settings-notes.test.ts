@@ -21,7 +21,7 @@
  * ときは、まず門ではなく案を疑う」)── 緩めるなら実測し直して justify を書き直す。
  */
 import { describe, expect, it } from 'vitest';
-import { SettingsRenderer, PERSIST_TEXT } from '@adapter/ui/render/settings';
+import { SettingsRenderer } from '@adapter/ui/render/settings';
 import { initialState } from '@adapter/state/app-state';
 import type { AppState } from '@adapter/state/app-state';
 
@@ -35,6 +35,25 @@ const CHAR_CAP = 55;
  * この 1 件だけが既知の例外(等値 pin ── 増やすなら実測して justify を書く)。
  */
 const KNOWN_MULTILINE_REGIONS: readonly string[] = ['settings-persist'];
+
+/**
+ * 🔴 **2 行まで(110 文字)許す既知の例外**(設計 doc §9 C18「何が起きるか分からない
+ * と言われたら、その 1 件だけ 2 行を許し、上限の既知リストへ等値 pin」)。
+ * ⚠ どちらも **1 行に縮めた 1 稿目が、過去に決めた「先に言う文」を落とした**ので戻したもの
+ *   (全量の unit が捕まえた ── `settings-phone-links.test.ts` / `settings-paste-source.test.ts`)。
+ * 🔑 識別は「その説明が属する設定の部品」で行う(説明の字では探さない ── 字を変えても外れない)。
+ */
+const TWO_LINE_CAP = CHAR_CAP * 2;
+const KNOWN_TWO_LINE: readonly string[] = [
+  '[data-pkc-field="phone-links"]',
+  '[data-pkc-region="settings-paste-source"]',
+];
+const inTwoLine = (note: HTMLElement): boolean => {
+  const dd = note.closest('dd');
+  return KNOWN_TWO_LINE.some(
+    (sel) => note.closest(sel) !== null || (dd !== null && dd.querySelector(sel) !== null),
+  );
+};
 
 function render(state: AppState = initialState): HTMLElement {
   const host = document.createElement('div');
@@ -51,6 +70,18 @@ function ownNotes(host: HTMLElement): HTMLElement[] {
   );
 }
 
+/** 空き容量の警告の字(`settings.ts` の `PERSIST_TEXT` と等値。変えるなら両方)。 */
+const PERSIST_EXPECTED = {
+  denied:
+    '空き容量が足りなくなると、このブラウザがデータを消すことがあります。' +
+    'ホーム画面(デスクトップ)に追加すると、消さない扱いになることがあります。' +
+    'バックアップは左下の「バックアップ」から取れます。',
+  unsupported:
+    'このブラウザは、消さない扱いに対応していません。' +
+    '空き容量が足りなくなると、データが消えることがあります。' +
+    'バックアップを定期的に取ってください(左下の「バックアップ」から取れます)。',
+} as const;
+
 describe('設定の説明は 1 行(#1017 §6.1 規則 3、#1038 段J)', () => {
   it('🔴 空振り防止: settings.ts 直下の note はちょうど 24 段落(doc の数え直しと一致)', () => {
     const notes = ownNotes(render());
@@ -64,10 +95,11 @@ describe('設定の説明は 1 行(#1017 §6.1 規則 3、#1038 段J)', () => {
     for (const note of notes) {
       if (KNOWN_MULTILINE_REGIONS.some((r) => note.closest(`[data-pkc-region="${r}"]`))) continue;
       checked += 1;
+      const cap = inTwoLine(note) ? TWO_LINE_CAP : CHAR_CAP;
       expect(
         (note.textContent ?? '').length,
-        `1 行に収まらない(${(note.textContent ?? '').slice(0, 20)}…)`,
-      ).toBeLessThanOrEqual(CHAR_CAP);
+        `${cap === CHAR_CAP ? '1' : '2'} 行に収まらない(${(note.textContent ?? '').slice(0, 20)}…)`,
+      ).toBeLessThanOrEqual(cap);
     }
     // ⚠ 空振り防止 ── 例外を除いた行が 1 つも無ければ、この検査は何も見ていない
     expect(checked, '例外だけで全部除かれた(空振り)').toBeGreaterThan(15);
@@ -79,10 +111,20 @@ describe('設定の説明は 1 行(#1017 §6.1 規則 3、#1038 段J)', () => {
       const note = host
         .querySelector('[data-pkc-region="settings-persist"]')!
         .querySelector('[data-pkc-field="settings-note"]')!;
-      // ⚠ 等値 pin ── PERSIST_TEXT の警告を 1 バイトも削らない(ruling 6)
-      expect(note.textContent).toBe(PERSIST_TEXT[state]);
+      /**
+       * ⚠ 等値 pin ── 警告を 1 バイトも削らない(ruling 6)。
+       * ⚠ 期待値は**字で書く**(`PERSIST_TEXT` を import しない)── 文言の表を export すると
+       *   別の面が同じ文を出せてしまう(`persist-notice.test.ts`「export されていない」、#347)。
+       */
+      expect(note.textContent).toBe(PERSIST_EXPECTED[state]);
       expect((note.textContent ?? '').length).toBeGreaterThan(CHAR_CAP);
     }
+  });
+
+  it('🔴 2 行まで許した説明は、ちょうど 2 つで、どちらも 1 行の上限を超えている(例外を空で持たない)', () => {
+    const notes = ownNotes(render()).filter(inTwoLine);
+    expect(notes, '2 行の例外が指す説明の数が変わった').toHaveLength(KNOWN_TWO_LINE.length);
+    for (const n of notes) expect((n.textContent ?? '').length).toBeGreaterThan(CHAR_CAP);
   });
 
   it('🔑 検算: 例外リストは実在する region を指している(架空の例外を書かない)', () => {

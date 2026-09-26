@@ -689,9 +689,14 @@ export class SettingsRenderer {
       '日付や章番号は変わりません(0 か + で始まる 10〜11 桁だけを見ています)。' +
       '電話をかけられるかは端末しだいです(パソコンでは何も起きないことがあります)。';
     phd.append(phlabel);
-    phd.append(
-      buildSettingsNote('本文に書いた電話番号を、押せる字にします(本文の見え方だけ変わります)。'),
-    );
+    /**
+     * 🔴 **この説明だけ 2 行まで許す**(#1038 段 J の着地前、全量の unit が捕まえた)。
+     * ⚠ 1 行に縮めた 1 稿目は「日付は変わらない」「切なら 1 文字も変わらない」を落とした ──
+     *   どちらも #278 段②で「いちばん誤解されるのはここ」として**先に言う**と決めた文である
+     *   (`tests/adapter/settings-phone-links.test.ts`)。設計 doc §9 C18 の「その 1 件だけ
+     *   2 行を許す」を当て、`tests/adapter/settings-notes.test.ts` の既知の一覧で固定する。
+     */
+    phd.append(buildSettingsNote('本文の 090-1234-5678 のような番号を、押すと電話をかけられる字にします。日付(2026-09-09)は変わらず、切のままなら本文の見え方は 1 文字も変わりません。'));
     editDl.append(pht, phd);
 
     /**
@@ -1387,7 +1392,13 @@ export class SettingsRenderer {
       'コピーすると同じ内容が複数の形でクリップボードに入り、正確さは相手のアプリで違います。' +
       'フラグ「貼り付けたとき、何が届いてどれを使ったかを画面に出す」で中身の種類が見えます。';
     dd.append(select);
-    dd.append(buildSettingsNote('貼り付けで読み取る形です(崩れるときは切り替えてください)。'));
+    /**
+     * 🔴 **この説明だけ 2 行まで許す**(#1038 段 J の着地前、全量の unit が捕まえた)。
+     * ⚠ 1 稿目はフラグへの案内を `title`(乗せたときの字)へ移したので、**画面の字から消えた**
+     *   ── この設定とフラグは 2 つで 1 組である(`tests/adapter/settings-paste-source.test.ts`)。
+     *   フラグの名前は**画面の字どおり**に書く(縮めると、user がフラグの一覧で探せない)。
+     */
+    dd.append(buildSettingsNote('貼り付けで読み取る形です(崩れるときは切り替えてください)。フラグの「貼り付けたとき、何が届いてどれを使ったかを画面に出す」を入れると、何が届いたかが見えます。'));
     dl.append(dt, dd);
     wrap.append(dl);
     return wrap;
@@ -1656,7 +1667,7 @@ export class SettingsRenderer {
  * ⚠ `unknown` を「断られました」と書かない ── **まだ頼んでいない**のであって、
  * 断られたのではない(起動直後は必ずここを通る)。
  */
-export const PERSIST_TEXT: Record<PersistState, string> = {
+const PERSIST_TEXT: Record<PersistState, string> = {
   persisted: 'このブラウザは、このアプリのデータを消さない扱いにしています。',
   denied:
     '空き容量が足りなくなると、このブラウザがデータを消すことがあります。' +
