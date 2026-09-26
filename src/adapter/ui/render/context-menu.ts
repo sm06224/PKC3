@@ -57,6 +57,23 @@ export interface MenuItem {
    *   関係の無い項目まで同じ属性を持ち、読み手が取り違える。
    */
   readonly attrs?: Readonly<Record<string, string>>;
+  /**
+   * 🔴 **押せない**(#1038 台帳③ C1)。⚠ 空(`undefined` / `false`)なら**付けない**
+   *   (ネイティブの `disabled` が無ければ既定で押せる ── 属性の有無を数える検査を汚さない)。
+   * 🔑 ネイティブの `<button disabled>` にする ── クリックも `Enter` も**ブラウザが
+   *   受け付けない**ので、無言の dead click にならない(押せないこと自体が押せない)。
+   */
+  readonly disabled?: boolean;
+  /**
+   * 🔴 **塊(見出し)の綴り**(#1038 台帳③ C1)。⚠ 書いていないものは**塊を持たない**
+   *   (直の子として並ぶ ── 直す前の見た目のまま)。
+   *
+   * ⚠ **属性名は右の列(`inspector.ts`)と同じ `data-pkc-group` を再利用する**
+   *   (§7「同じ値を複数の描画経路へ渡すものは、経路ごとに pin する」の逆 ── ここは
+   *   **綴りだけ**を共有し、値の出どころは両方とも `entry-actions.ts` の
+   *   `EntryAction.group` である)。2 つ目の属性名は作らない。
+   */
+  readonly group?: string;
 }
 
 /** 近道の字を持つ属性(`data-pkc-shortcut`)。⚠ CSS と unit はこの名前で見る。 */
@@ -144,11 +161,29 @@ export function openContextMenu(
   const el = root.ownerDocument.createElement('div');
   el.setAttribute('data-pkc-region', REGION);
   el.setAttribute('role', 'menu');
+  /**
+   * 🔴 **塊は「間」で切る**(#1038 台帳③ C1。`inspector.ts` §7 の作法と同じ形)。
+   *
+   * ⚠ **並びは 1 つも変えていない** ── `group` が前の項目と同じなら同じ塊へ足すだけ。
+   *   塊を持たない項目(`group` 未設定)はいまどおり `el` の直下へ置く。
+   * 🔑 `data-pkc-with-groups` は「塊を 1 つでも組んだか」の印 ── CSS はこれで
+   *   `el` 自身の間(塊どうしの間)を広げる(塊が無いメニューの間はいまのまま 1px)。
+   */
+  let bucket: HTMLElement | null = null;
+  let bucketGroup: string | undefined;
+  let anyGroup = false;
   for (const it of items) {
     const b = root.ownerDocument.createElement('button');
     b.setAttribute('data-pkc-action', it.action);
     b.setAttribute('role', 'menuitem');
     b.type = 'button';
+    /**
+     * ⚠ 押せない項目の理由は、下の説明欄が出す(`mouseover` / `focusin`)。
+     *   `title` は付けない(#587 C-3「乗せて 1 秒待つ箱を残さない」)── 押せない
+     *   ボタンにも Chromium は `mouseover` を配る(#1038 台帳③ C1 で実測:
+     *   フル / headless_shell の両方で `pointerover` / `mouseover` / `pointerdown` が届いた)。
+     */
+    if (it.disabled === true) b.disabled = true;
     /**
      * 🔴 **図案は `append` で足す。`textContent =` を使わない**(#1054 段②)。
      * ⚠ `textContent =` は**丸ごと差し替える** ── 先に図案の span を足してから
@@ -185,8 +220,23 @@ export function openContextMenu(
      */
     for (const [k, v] of Object.entries(carry)) b.setAttribute(k, v);
     for (const [k, v] of Object.entries(it.attrs ?? {})) b.setAttribute(k, v);
-    el.append(b);
+    if (it.group !== undefined) {
+      if (bucket === null || it.group !== bucketGroup) {
+        bucket = root.ownerDocument.createElement('div');
+        bucket.setAttribute('data-pkc-field', 'context-menu-group');
+        bucket.setAttribute('data-pkc-group', it.group);
+        el.append(bucket);
+        bucketGroup = it.group;
+        anyGroup = true;
+      }
+      bucket.append(b);
+    } else {
+      bucket = null;
+      bucketGroup = undefined;
+      el.append(b);
+    }
   }
+  if (anyGroup) el.setAttribute('data-pkc-with-groups', '');
   root.append(el);
 
   /**

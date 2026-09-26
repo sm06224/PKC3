@@ -684,6 +684,21 @@ select:focus-visible {
   min-width: max-content;
 }
 /**
+ * 🔴 **塊の間だけ空ける**(#1038 台帳③ C1。右の列(`inspector-action-group`)と同じ形)。
+ *
+ * ⚠ **塊が無いメニューは触らない** ── `data-pkc-with-groups` が付いたときだけ
+ *   `el` の間を広げる(見出し・本文のメニューはいまどおり 1px)。
+ * 🔑 塊そのものの中は **1px のまま**(直す前の見た目を塊の内側に残す)。
+ */
+[data-pkc-region='context-menu'][data-pkc-with-groups] {
+  gap: var(--s3);
+}
+[data-pkc-field='context-menu-group'] {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+/**
  * 🔴 **幅は「段」で受ける**(#1029 段 C 手 2)。
  *
  * ⚠ **固定幅にはしない** ── `max()` は下限と `max-content` の**大きいほう**を採るので、

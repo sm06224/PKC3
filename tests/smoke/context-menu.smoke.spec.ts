@@ -54,6 +54,42 @@ test('🔴 行を右クリックすると、その行にできることが出る
   // ⚠ 名前が出ている(図案だけの箱にしない)
   await expect(menu, '「ゴミ箱へ移す」が出ていない').toContainText('ゴミ箱へ移す');
   await expect(menu, '「履歴を開く」が出ていない').toContainText('履歴を開く');
+  /**
+   * 🔴 **「編集」が「このノート」のまとまりの先頭に在り、本文が届いていれば押せる**
+   *   (#1038 台帳③ C1)。⚠ この本文は `commit-edit` を通っているので `openBody`
+   *   が既に届いている(実ブラウザの非同期読みでしか確かめられない ── happy-dom の
+   *   unit は `dispatch` が同期なので、この待ち時間そのものが無い)。
+   */
+  const editBtn = menu.locator('[data-pkc-action="start-edit"]');
+  await expect(editBtn, '「編集」が出ていない').toContainText('ノートを編集する');
+  await expect(editBtn, '本文が届いているのに押せない').toBeEnabled();
+  const editGroup = editBtn.locator('xpath=ancestor::*[@data-pkc-group][1]');
+  await expect(editGroup, '塊の名前が this-one ではない').toHaveAttribute(
+    'data-pkc-group',
+    'this-one',
+  );
+  /**
+   * 🔴 **塊の間は、塊の中より広く見える**(happy-dom は採寸しないので実ブラウザでしか
+   *   確かめられない ── unit は DOM 構造と CSS の宣言文字列までしか見ていない)。
+   * ⚠ 「編集」の**手前**(export の塊との間)は塊どうしの間、「編集」と「履歴を開く」
+   *   の間は同じ塊の中 ── 前者のほうが**広い**はず。
+   */
+  const pdfBtn = menu.locator('[data-pkc-action="export-entry-pdf"]');
+  const historyBtn = menu.locator('[data-pkc-action="show-history"]');
+  const [pdfBox, editBox, historyBox] = await Promise.all([
+    pdfBtn.boundingBox(),
+    editBtn.boundingBox(),
+    historyBtn.boundingBox(),
+  ]);
+  expect(pdfBox, '前提: export-entry-pdf が見えていない').not.toBeNull();
+  expect(editBox, '前提: 編集ボタンが見えていない').not.toBeNull();
+  expect(historyBox, '前提: 履歴を開くが見えていない').not.toBeNull();
+  const betweenGroups = editBox!.y - (pdfBox!.y + pdfBox!.height);
+  const withinGroup = historyBox!.y - (editBox!.y + editBox!.height);
+  expect(
+    betweenGroups,
+    `塊どうしの間(${betweenGroups}px)が塊の中(${withinGroup}px)より広くない`,
+  ).toBeGreaterThan(withinGroup);
 
   // 🔴 **器の中に収まっている**(画面の外へ出ると下の項目に手が届かない)
   const box = await menu.boundingBox();
