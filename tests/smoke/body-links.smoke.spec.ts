@@ -229,7 +229,16 @@ test('🔴 編集中に一覧の行を押すと、理由が画面に出る', asy
     '編集に入っていない(前提が崩れた)',
   ).toBeVisible();
   const status = page.locator('[data-pkc-region="status"]');
-  expect(await status.isVisible(), '編集に入った時点で既に理由が出ている').toBe(false);
+  /**
+   * 🔴 **編集中は、画面下の行に状態の 1 語「編集中」が常に出ている**(#1038 段 D / C4)。
+   * ⚠ だから「帯が見えているか」でも「『編集』の字を含むか」でも、**理由が出たかは
+   *   言えない** ── どちらも押す前から「編集中」の 1 語に満たされる(CLAUDE.md §1
+   *   「別の字に満たされる」)。C4 の後、この検査は前提の 1 行で落ち、押した後の
+   *   2 つは**断り文が出なくても通る形**になっていた。
+   * 🔑 前提は「**状態の 1 語だけで、理由はまだ無い**」、見るのは「**断り文そのもの**」。
+   */
+  const statusText = page.locator('[data-pkc-field="status-text"]');
+  await expect(statusText, '編集に入った時点で既に理由が出ている').toHaveText('編集中');
 
   /**
    * ⚠ **`clickReal` は使わない** ── 断られる操作なので「押した結果」を待たない。
@@ -271,12 +280,13 @@ test('🔴 編集中に一覧の行を押すと、理由が画面に出る', asy
       pageErrors: errors,
     }),
     async () => {
-      await expect(status).toBeVisible();
+      await expect(statusText).not.toHaveText('編集中');
     },
   );
-  await expect(status).toContainText('編集');
+  // 🔑 断り文そのものを見る(「編集中」の 1 語では満たされない字)
+  await expect(statusText).toContainText('ノートを開いてください');
   // ⚠ 押した場所に合った呼び名(行を押したのに「リンク先」と言わない)
-  await expect(status).not.toContainText('リンク先');
+  await expect(statusText).not.toContainText('リンク先');
   // ⚠ 編集は続いている(勝手に移っていない)
   await expect(page.locator('[data-pkc-field="editor-body"]')).toBeVisible();
 
