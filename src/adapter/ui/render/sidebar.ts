@@ -11,8 +11,15 @@
 import { archetypeLabel } from '@features/flavor/archetype-label';
 import type { EntryMeta } from '@core/model/entry-meta';
 import { canNavBack, canNavForward, type AppState } from '@adapter/state/app-state';
-import { entryFilterOf, matchesEntry } from '@features/filter/title-filter';
-import { sortOrder } from '@features/filter/entry-sort';
+import { listViewOptions } from '@adapter/state/list-view-options';
+/**
+ * 🔴 **並び・絞り込みの規則は `listRows` 1 か所**(#1038 台帳③ 段 G、C13)。
+ * ⚠ 直す前はここで `sortOrder` / `entryFilterOf` / `matchesEntry` を直に呼んで
+ *   いた ── reducer の `SELECT_RANGE`(`scope: 'list'`)が**別に**同じ並びを
+ *   組むと、目で見た範囲と選ばれる範囲が食い違う(`filerRows` と同じ理由 ──
+ *   `@features/relation/filer-list.ts` の docstring)。
+ */
+import { listRows } from '@features/relation/filer-list';
 import { ARCHETYPE_ICONS, iconSpan, setIcon, type IconName } from './icons';
 import { formatListDate, formatStoredDate } from '@features/datetime/stored-date';
 // 🔑 空のときの「次の一手」はフォルダの面と**同じ部品**(#722 P2-13)── 2 か所で組まない
@@ -38,6 +45,11 @@ export class SidebarRenderer {
   private lastMetas: ReadonlyMap<string, EntryMeta> | null = null;
   private lastOrder: readonly string[] | null = null;
   private lastSelected: string | null = null;
+  /**
+   * 印(複数選択)の指紋(#1038 台帳③ 段 G、C13)。⚠ **参照ではなく中身**で見る
+   * (`filer.ts` の `lastMarks` と同じ作法 ── 配列は毎回作り直される)。
+   */
+  private lastMarks = '';
   /** ⚠ 絞り込みも**指紋の一部** ── 入れないと、絞っても行が減らない。 */
   private lastHits: ReadonlySet<string> | null = null;
   private lastSort = 'manual';
@@ -115,7 +127,15 @@ export class SidebarRenderer {
     const historyChanged = state.selectionHistory !== this.lastHistory;
     // 🔴 名前の打ち替え(#215)も指紋 ── 入れないと「名前を変える」を押しても欄が出ない
     const renamingChanged = state.renamingLid !== this.lastRenaming;
-    if (!listChanged && !selectionChanged && !historyChanged && !renamingChanged) return; // 指紋一致 ── DOM に触れない
+    /**
+     * 🔴 **印(複数選択)も指紋の一部**(#1038 台帳③ 段 G、C13)。⚠ `selectedLid`
+     * とは別の値 ── `Ctrl` / `Shift` クリックは開いているノートを動かさないので、
+     * `selectionChanged` だけを見ると **`Ctrl` クリックで state だけ動いて画面が
+     * 追いつかない**(`filer.ts` の `paintMarks` が踏んだのと同じ罠)。
+     */
+    const marksChanged = state.selection.join(' ') !== this.lastMarks;
+    if (!listChanged && !selectionChanged && !historyChanged && !renamingChanged && !marksChanged)
+      return; // 指紋一致 ── DOM に触れない
 
     /**
      * 🔴 **欄の同期は、ここではなく `browse.ts` が持つ**(2026-08-29、#536 ② で判明)。
@@ -132,6 +152,8 @@ export class SidebarRenderer {
     // ⚠ 行を作り直した回も当て直す(作り直した行は素の題名で生まれる)
     if (listChanged || renamingChanged) this.paintRenaming(state);
     if (listChanged || selectionChanged) this.patchSelection(state.selectedLid);
+    // ⚠ 行を作り直した回も当て直す(`filer.ts` の `paintMarks` と同じ理由)
+    if (listChanged || marksChanged) this.paintMarks(state);
     if (historyChanged) {
       if (this.navBack) this.navBack.disabled = !canNavBack(state);
       if (this.navForward) this.navForward.disabled = !canNavForward(state);
@@ -143,6 +165,7 @@ export class SidebarRenderer {
     this.lastSort = state.entrySort;
     this.lastSortDesc = state.entrySortDesc;
     this.lastOrder = state.order;
+    this.lastMarks = state.selection.join(' ');
     this.lastFilter = state.filterQuery;
     this.lastKinds = state.kindFilter;
     this.lastSelected = state.selectedLid;
@@ -162,27 +185,19 @@ export class SidebarRenderer {
      * 消していて、**先に取った `cursor` が消えたノードを指す**ため以降の
      * 挿入位置が壊れた(絞り込んでも行が減らない ── smoke で実際に踏んだ)。
      */
-    const filter = entryFilterOf(state.filterQuery, state.searchHits, state.kindFilter);
-    const visible: string[] = [];
-    const wanted = new Set<string>();
     // 一覧に**存在する** lid(絞り込み前)── 行キャッシュの掃除はこちらで判定する
     const alive = new Set<string>();
-    // 🔴 並び順(#183)── 規則は `sortOrder` 1 か所。既定は手動の順
-    for (const lid of sortOrder(
-      state.order,
-      (l) => state.entryMetas.get(l),
-      state.entrySort,
-      state.entrySortDesc,
-      // ⚠ 端末ごとの記録(#215 残り①)── 無い lid は 0(末尾へ回る)
-      (l) => state.openedAt.get(l) ?? 0,
-    )) {
-      const meta = state.entryMetas.get(lid);
-      if (!meta) continue;
-      alive.add(lid);
-      if (!matchesEntry(meta, filter)) continue;
-      wanted.add(lid);
-      visible.push(lid);
+    for (const lid of state.order) {
+      if (state.entryMetas.has(lid)) alive.add(lid);
     }
+    // 🔴 並び順(#183)・絞り込みの規則は `listRows` 1 か所(既定は手動の順)。
+    //   ⚠ 端末ごとの記録(#215 残り①・`openedAt`)は `listViewOptions` が運ぶ。
+    const visible = listRows(state.order, state.entryMetas, {
+      filterQuery: state.filterQuery,
+      searchHits: state.searchHits,
+      ...listViewOptions(state),
+    }).map((m) => m.lid);
+    const wanted = new Set(visible);
     for (const [lid, row] of this.rows) {
       // 絞り込みで外れただけの行は **DOM から外すが、ノードは取っておく**
       // (次の打鍵で戻ってくる ── 作り直しが M-4 の停止の正体だった)
@@ -408,6 +423,19 @@ export class SidebarRenderer {
       this.rows.get(this.lastSelected)?.removeAttribute('data-pkc-selected');
     }
     if (selected) this.rows.get(selected)?.setAttribute('data-pkc-selected', '');
+  }
+
+  /**
+   * 印(複数選択)だけを塗り直す(#1038 台帳③ 段 G、C13)。⚠ `filer.ts` の
+   * `paintMarks` と同じ形 ── 表を組み直さない速い経路でも呼ぶ(呼ばないと
+   * `Ctrl` クリックで state だけ動いて画面が追いつかない)。
+   */
+  private paintMarks(state: AppState): void {
+    const marked = new Set(state.selection);
+    for (const [lid, row] of this.rows) {
+      if (marked.has(lid)) row.setAttribute('data-pkc-marked', '');
+      else row.removeAttribute('data-pkc-marked');
+    }
   }
 }
 

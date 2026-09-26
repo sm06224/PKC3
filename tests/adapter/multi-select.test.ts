@@ -121,6 +121,41 @@ describe('印(複数選択)の意味論', () => {
     expect(r.state.selection, 'データの順で範囲を採っている').toEqual(['c', 'b', 'a']);
   });
 
+  /**
+   * 🔴 **`scope: 'list'` は一覧タブの flat な並びで範囲を採る**(#1038 台帳③
+   * 段 G、C13)。⚠ 省略(= フォルダの表)は `scopeLid` の直下しか見ないので、
+   * **フォルダの中に居る行は範囲から漏れる** ── 一覧タブでその行を目で見て
+   * 範囲の中に入れたのに、印が付かない(いちばん気づけない壊れ方)。
+   */
+  it('🔴 scope: list は flat な並びで採る(フォルダの中の行も範囲に入る)', () => {
+    const metas = [
+      meta('a', 1, 'aa'),
+      meta('folder', 2, 'はこ', 'folder'),
+      meta('nested', 3, 'nn'),
+      meta('b', 4, 'bb'),
+    ];
+    const relations = [rel('r1', 'folder', 'nested')];
+    let s = reduce(initialState, { type: 'SYS_BOOTED', cid: 'c1', metas, relations }).state;
+    s = reduce(s, { type: 'SELECT_ENTRY', lid: 'a' }).state; // 起点 a
+
+    // フォルダの表(scope 省略)── `nested` はフォルダの直下なので root の並びに来ない
+    const filerScope = reduce(s, { type: 'SELECT_RANGE', lid: 'b' });
+    expect(filerScope.state.selection, 'フォルダの表の範囲に nested が混ざった').toEqual([
+      'a',
+      'folder',
+      'b',
+    ]);
+
+    // 一覧タブ(scope: 'list')── flat な並びなので nested も範囲に入る
+    const listScope = reduce(s, { type: 'SELECT_RANGE', lid: 'b', scope: 'list' });
+    expect(listScope.state.selection, '一覧タブで見えている nested が範囲から漏れた').toEqual([
+      'a',
+      'folder',
+      'nested',
+      'b',
+    ]);
+  });
+
   it('絞り込みで見えていないものは範囲に入らない', () => {
     let s = reduce(booted(), { type: 'SELECT_ENTRY', lid: 'a' }).state;
     s = reduce(s, { type: 'SET_ENTRY_FILTER', query: 'z' }).state; // 'zz'(= a)だけ残る
@@ -442,7 +477,7 @@ describe('印が指すものと、画面に見えているもの(#240 着地前�
     expect(d.getState().error ?? '', '無言の dead click になっている').toContain('絞り込み');
   });
 
-  it('🔴 修飾つきのクリックは**フォルダ面の中だけ**(一覧・カンバンで印を作らない)', () => {
+  it('🔴 修飾つきのクリックは**フォルダ面・一覧タブの中だけ**(カンバン等では印を作らない)', () => {
     document.body.innerHTML = '';
     const root = document.createElement('div');
     root.setAttribute('data-pkc-slot', 'root');
@@ -450,9 +485,14 @@ describe('印が指すものと、画面に見えているもの(#240 着地前�
     const d = new Dispatcher();
     bindActions(root, d);
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: METAS, relations: [] });
-    // フォルダ面**ではない**器に、同じ `select-entry` の行を置く(sidebar と同型)
+    /**
+     * 🔴 フォルダ面・一覧タブ**どちらでもない**器に、同じ `select-entry` の行を
+     * 置く(kanban / calendar / query / inspector と同型 ── #1038 台帳③ 段 G、
+     * C13 で一覧タブが対象に入ったので、この test は「対象に入っていない残り」を
+     * 見る形に変えた)。
+     */
     const outside = document.createElement('div');
-    outside.setAttribute('data-pkc-region', 'entry-list');
+    outside.setAttribute('data-pkc-region', 'kanban-cards');
     outside.innerHTML =
       '<button data-pkc-action="select-entry" data-pkc-entry="a">a</button>' +
       '<button data-pkc-action="select-entry" data-pkc-entry="c">c</button>';
@@ -460,10 +500,44 @@ describe('印が指すものと、画面に見えているもの(#240 着地前�
     const btn = (lid: string) => outside.querySelector<HTMLElement>(`[data-pkc-entry="${lid}"]`)!;
     btn('a').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     btn('c').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true }));
-    // 🔑 一覧では **Ctrl クリックも普通のクリック**(印が 2 件に増えず、開き直す)──
-    //    増やすと、画面に印が 1 つも出ないまま帯だけが数える形になる
+    // 🔑 対象に入っていない面では **Ctrl クリックも普通のクリック**(印が 2 件に
+    //    増えず、開き直す)── 増やすと、画面に印が 1 つも出ないまま帯だけが数える形になる
     expect(d.getState().selection, '印の出ない面で印が増えた').toEqual(['c']);
     expect(d.getState().selectedLid, '普通のクリックとして扱われていない').toBe('c');
+  });
+
+  it('🔴 一覧タブでも Ctrl / Shift で選び足せる(C13 / Q6「A + 濃く」)。開いているノートは動かない', () => {
+    document.body.innerHTML = '';
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    document.body.append(root);
+    const d = new Dispatcher();
+    bindActions(root, d);
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: METAS, relations: [] });
+    const list = document.createElement('ul');
+    list.setAttribute('data-pkc-region', 'entry-list');
+    list.innerHTML = METAS.map(
+      (m) => `<li data-pkc-action="select-entry" data-pkc-entry="${m.lid}">${m.lid}</li>`,
+    ).join('');
+    root.append(list);
+    const row = (lid: string) => list.querySelector<HTMLElement>(`[data-pkc-entry="${lid}"]`)!;
+    row('a').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(d.getState().selection).toEqual(['a']);
+    expect(d.getState().selectedLid).toBe('a');
+    row('c').dispatchEvent(
+      new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true }),
+    );
+    expect(d.getState().selection, 'Ctrl クリックが印にならない').toEqual(['a', 'c']);
+    // 🔑 選び足している間、中央はいま開いているノートのまま
+    //    (選び足しただけでは切り替わらない ── 段 G の依頼文そのもの)
+    expect(d.getState().selectedLid, '選び足しただけで中央が動いた').toBe('a');
+    // METAS は a(order 1) b(order 2) c(order 3) d(order 4)。表示順は entryOrder のまま
+    row('d').dispatchEvent(
+      new MouseEvent('click', { bubbles: true, cancelable: true, shiftKey: true }),
+    );
+    // 起点は c(最後に印を動かした行)── 一覧の表示順で c..d(フォルダ表と同じ形)
+    expect(d.getState().selection, '一覧タブの範囲選択が表示順で採れていない').toEqual(['c', 'd']);
+    expect(d.getState().selectedLid, '範囲選択で中央が動いた').toBe('a');
   });
 
   it('🔴 「もう一度押す」もフォルダ面の中だけ(見えない現在地が動かない)', () => {

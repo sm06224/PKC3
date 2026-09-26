@@ -73,6 +73,7 @@ import { appOpenedStore } from '@adapter/platform/opened-store';
 import type { EntryMeta } from '@core/model/entry-meta';
 import {
   filerRows,
+  listRows,
   operationTargets,
   smartLidsOf,
   visibleSelection,
@@ -577,6 +578,54 @@ const visibleFilerRows = (st: AppState): EntryMeta[] =>
     searchHits: st.searchHits,
     ...listViewOptions(st),
   });
+
+/**
+ * 🔴 **一覧タブの行(flat)**(#1038 台帳③ 段 G-2、C13)。⚠ `visibleFilerRows` と
+ * 同じ理由で 1 か所にする ── 描く側(`sidebar.ts`)・範囲選択(reducer の
+ * `SELECT_RANGE scope:'list'`)・ここが別々に並びを組むと、目で見たものと動くものが
+ * 食い違う(CLAUDE.md §7)。
+ */
+const visibleListRows = (st: AppState): EntryMeta[] =>
+  listRows(st.order, st.entryMetas, {
+    filterQuery: st.filterQuery,
+    searchHits: st.searchHits,
+    ...listViewOptions(st),
+  });
+
+/**
+ * 🔴 **いま画面に出ているのは一覧タブか**(#1038 台帳③ 段 G-2。実装者(段 G)の
+ * 自己申告 trap 1 を直すための土台)。
+ *
+ * ⚠ `browseMode`(探し方)は `AppState` に持たない(`REFRESH_TASK_SCAN` の注記
+ * 「探し方(`browseMode`)は state に持たないので、『開いた』を知っているのは
+ * `main.ts` である」のとおり)── reducer からは見えないので、束ねる操作
+ * (`move-to-folder` 等)の相手をどちらの並びで採るかを reducer 側では決められない。
+ * だから **DOM** で見る。
+ * ⚠ 一覧タブは**既存の region(`entry-list`)をそのまま使う**(`browse.ts` の
+ * `BrowseRouter` コンストラクタの註記「一覧だけは既存の region をそのまま使う」)──
+ * タブを切り替えるとき、その pane 自身の `.hidden` を直接付け外しする(`render()` の
+ * `this.panes[this.last].hidden = true; this.panes[mode].hidden = false;`)。
+ * つまり `entry-list` region が `hidden` でなければ、いま出ているのは一覧タブである
+ * (フォルダの表は別の pane(`filer`)に入るので、両方が同時に見えることは無い)。
+ */
+const listTabShowing = (root: HTMLElement): boolean => {
+  const pane = root.querySelector<HTMLElement>('[data-pkc-region="entry-list"]');
+  return pane !== null && !pane.hidden;
+};
+
+/**
+ * 🔴 **束ねる操作が見る集合を、画面に出ているタブへ合わせる**(#1038 台帳③ 段 G-2)。
+ *
+ * ⚠ 直す前はここが**常に** `visibleFilerRows(st)`(フォルダの表専用のスコープ ──
+ * `st.scopeLid` の直下しか見ない)だったので、一覧タブで別々のフォルダに居るノートを
+ * Ctrl で複数選び、右クリック →「フォルダへ移す…」すると、`scopeLid` の外に居る印が
+ * **黙って除外**されていた(段 G の実装者が自己申告した trap 1)。
+ * 🔑 規則の目的は「**いま画面で見えている印だけを相手にする**」ことなので、
+ * 画面に出ているのが一覧タブなら一覧タブの並び(`visibleListRows`)、
+ * フォルダの表なら従来どおりフォルダの並び(`visibleFilerRows`)を見る。
+ */
+const visibleLeftColumnRows = (st: AppState, root: HTMLElement): EntryMeta[] =>
+  listTabShowing(root) ? visibleListRows(st) : visibleFilerRows(st);
 
 /** その entry が**既にそこに居る**か(動かす必要が無い)。 */
 const alreadyThere = (st: AppState, lid: string, parentLid: string | null): boolean => {
@@ -6261,7 +6310,8 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}動かしてください` });
       return;
     }
-    const marked = visibleSelection(visibleFilerRows(st), st.selection);
+    // 🔴 一覧タブが出ていれば一覧の並びで見る(#1038 台帳③ 段 G-2、trap 1)
+    const marked = visibleSelection(visibleLeftColumnRows(st, root), st.selection);
     const lids = marked.includes(lid) ? marked : [lid];
     const title =
       lids.length === 1
@@ -9804,15 +9854,23 @@ export function bindActions(
      */
     const me = ev as MouseEvent;
     /**
-     * 🔴 **フォルダ面の中だけ**(着地前レビュー 4)。`select-entry` は 6 か所に在る
-     * (sidebar / filer / kanban / calendar / query / inspector)ので、面で切らないと:
-     * - 一覧タブの `Ctrl` クリックが**画面に出ない印**を増やす(帯だけが数える)
-     * - `Shift` の範囲は `filerRows` の並びで採るので、**目で見た並びと違う集合**になる
-     *   (フォルダの中の行なら `[]` になり、`preventDefault` 済みなので**選択すら起きない**)
+     * 🔴 **フォルダ面と一覧タブの中だけ**(着地前レビュー 4。一覧タブは
+     * #1038 台帳③ 段 G、C13 / Q6「A + 濃く」で足した)。`select-entry` は
+     * 6 か所に在る(sidebar / filer / kanban / calendar / query / inspector)ので、
+     * 面で切らないと:
+     * - kanban / calendar / query の `Ctrl` クリックが**画面に出ない印**を増やす
+     *   (帯だけが数える)
+     * - `Shift` の範囲は `filerRows` / `listRows` の並びで採るので、**目で見た並びと
+     *   違う集合**になる(フォルダ・一覧のどちらでもない面なら `[]` になり、
+     *   `preventDefault` 済みなので**選択すら起きない**)
      * - inspector の「関連へ飛ぶ」ボタンで `Ctrl` クリックが奪われる
-     * 段②③④は**フォルダ面の機能**である(設計 doc §3)。
+     * 段②③④は**フォルダ面と一覧タブの機能**である(設計 doc §3)。
+     * ⚠ **一覧タブは背景を描き分けるようになったので、この門を広げても安全**
+     *   (直す前は「押しても見えない」が理由で外していた ── `sidebar.ts` の
+     *   `paintMarks` / `app.css` の `[data-pkc-marked]`)。
      */
     const inFiler = el.closest('[data-pkc-region="filer-table"]') !== null;
+    const inEntryList = el.closest('[data-pkc-region="entry-list"]') !== null;
     /**
      * 🔴 **2 ペインの行も同じ作法**(#241 段⑥-a)── `Ctrl` / `Cmd` で足し外し、
      * `Shift` で表示順の範囲。⚠ 面ごとに違う選び方を作らない(user は 1 つの
@@ -9892,7 +9950,7 @@ export function bindActions(
       }
     }
     if (
-      inFiler &&
+      (inFiler || inEntryList) &&
       el.getAttribute('data-pkc-action') === 'select-entry' &&
       (me.ctrlKey || me.metaKey || me.shiftKey)
     ) {
@@ -9900,7 +9958,10 @@ export function bindActions(
       if (lid !== null) {
         ev.preventDefault();
         dispatcher.dispatch(
-          me.shiftKey ? { type: 'SELECT_RANGE', lid } : { type: 'TOGGLE_SELECT', lid },
+          me.shiftKey
+            ? // 🔴 一覧タブは flat な並び(`listRows`)で範囲を採る(C13)
+              { type: 'SELECT_RANGE', lid, ...(inEntryList ? { scope: 'list' as const } : {}) }
+            : { type: 'TOGGLE_SELECT', lid },
         );
         return;
       }
@@ -9916,7 +9977,6 @@ export function bindActions(
      *   「もう一度押す」もフォルダ面の中だけ ── 一覧の 2 回押しで**見えない現在地が
      *   動かない**を守る)。行の種類に関わらず、別のウィンドウ(付箋)で開く。
      */
-    const inEntryList = el.closest('[data-pkc-region="entry-list"]') !== null;
     // ⚠ 行を素で押したときだけ「もう一度押した」を数える(修飾つきは印の話)
     // ⚠ **一覧 / フォルダ面の中だけ**(上と同じ理由 ── kanban / calendar / query /
     //    inspector の `select-entry` まで拾うと、見えていない判定が誤って走る)

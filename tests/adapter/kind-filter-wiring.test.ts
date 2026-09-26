@@ -262,9 +262,14 @@ describe('サイドバーの札', () => {
  * 🔑 だから見るのは「**`state.kindFilter` を渡していること**」である。
  */
 describe('絞りが全部の面に届いている', () => {
+  /**
+   * ⚠ **一覧タブ(`sidebar.ts`)も並びを採る面である**(#1038 台帳③ 段 G、C13)──
+   *   段 G で一覧の並びを `listRows` 1 か所へ寄せたので、ここに数える。
+   */
   const FACES = [
     'src/adapter/ui/render/filer.ts',
     'src/adapter/ui/render/dual-filer.ts',
+    'src/adapter/ui/render/sidebar.ts',
     'src/adapter/state/app-state.ts',
     'src/adapter/ui/actions/binder.ts',
   ];
@@ -285,10 +290,16 @@ describe('絞りが全部の面に届いている', () => {
       expect(src, `${field} が ${from} から来ていない`).toContain(`${field}: ${from},`);
   });
 
-  it('`filerRows` を呼ぶ面は、数えた数だけ `kindFilter` を渡している', () => {
+  it('`filerRows` / `listRows` を呼ぶ面は、数えた数だけ `kindFilter` を渡している', () => {
     for (const f of FACES) {
       const src = readFileSync(f, 'utf8');
-      const calls = (src.match(/filerRows\(/g) ?? []).length;
+      /**
+       * ⚠ **並びを採る関数は 2 つある**(#1038 台帳③ 段 G、C13)── フォルダの表の
+       *   `filerRows` と、一覧タブの flat な `listRows`。`filerRows` だけを数えると、
+       *   一覧の並びを採る呼び出しで絞りを渡し忘れても、**数が合わずに落ちる**のではなく
+       *   **渡した側だけが余って**落ち方が読めなくなる(実際に段 G でそう落ちた)。
+       */
+      const calls = (src.match(/\b(filerRows|listRows)\(/g) ?? []).length;
       /**
        * ⚠ **綴りは 2 通りある**(2026-09-11、#215 残り①)── 同じ 3 つ
        *   (`sort` / `sortDesc` / `kinds`)を 7 か所で書いていたので

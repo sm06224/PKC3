@@ -99,10 +99,10 @@ describe('app.css の規則(hover が --surface-hover を使い、印を塗り�
     expect(hit.join(' ')).toContain('var(--surface-hover)');
   });
 
-  it('🔴 印(marked)の規則は --surface-2 のまま', () => {
+  it('🔴 印(marked)の規則は --pkc-mark-bg(#1038 台帳③ 段 G、C13 / Q6「A + 濃く」)', () => {
     const hit = blocksFor(screenOnly, "[data-pkc-region='dual-table'] tbody tr[data-pkc-marked] td");
     expect(hit.length, '印の規則が無い').toBe(1);
-    expect(hit.join(' ')).toContain('var(--surface-2)');
+    expect(hit.join(' ')).toContain('var(--pkc-mark-bg)');
   });
 
   it('🔴 印を除外しない素の hover 規則が残っていない(印の地を hover が上書きしない)', () => {
@@ -118,7 +118,7 @@ describe('app.css の規則(hover が --surface-hover を使い、印を塗り�
    * こちらにも在った ── dual だけ直すと「1 面のファイラでは乗せた行が印に見える」が残る。
    * ⚠ こちらの印は `td` ではなく `tr` に塗る(行ごと)── 選択子ごと pin する。
    */
-  it('🔴 1 面のファイラでも hover は --surface-hover、印は --surface-2', () => {
+  it('🔴 1 面のファイラでも hover は --surface-hover、印は --pkc-mark-bg', () => {
     const hover = blocksFor(
       screenOnly,
       "[data-pkc-region='filer-table'] tbody tr:hover:not([data-pkc-marked]) td",
@@ -128,7 +128,7 @@ describe('app.css の規則(hover が --surface-hover を使い、印を塗り�
 
     const marked = blocksFor(screenOnly, "[data-pkc-region='filer-table'] tbody tr[data-pkc-marked]");
     expect(marked.length, 'ファイラの印の規則が無い').toBe(1);
-    expect(marked.join(' ')).toContain('var(--surface-2)');
+    expect(marked.join(' ')).toContain('var(--pkc-mark-bg)');
 
     for (const bare of [
       "[data-pkc-region='filer-table'] tr:hover td",
