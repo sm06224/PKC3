@@ -387,8 +387,13 @@ test('🔴 編集中に行を右クリックすると「別のウィンドウで
   await expect(editor, '編集に入っていない(前提が崩れた)').toBeVisible();
   // 下書きに 1 行足す ── 「残る」を見るための印(保存していない字)
   await editor.fill('2 件目\n書きかけ\n');
-  const status = page.locator('[data-pkc-region="status"]');
-  expect(await status.isVisible(), '前提: 編集に入った時点で既に理由が出ている').toBe(false);
+  /**
+   * 🔴 **編集中は、画面下の行に状態の 1 語「編集中」が常に出ている**(#1038 段 D / C4)。
+   * ⚠ だから帯が見えているかでは断り文の有無を言えない ── 見るのは行の字が
+   *   「編集中」の 1 語**だけ**かどうか(後ろに断り文が続いていないか)。
+   */
+  const statusText = page.locator('[data-pkc-field="status-text"]');
+  await expect(statusText, '前提: 編集に入った時点で既に理由が出ている').toHaveText('編集中');
 
   // 🔑 押すのは**選ばれていない行**(選ばれている行なら、動かないのは当然で何も見ていない)
   const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
@@ -413,7 +418,7 @@ test('🔴 編集中に行を右クリックすると「別のウィンドウで
     otherLid!,
   );
   // ⚠ 断り文(「編集を終了してから…」)は**もう出ない** ── 断っていないので
-  expect(await status.isVisible(), '出しているのに断り文が出ている').toBe(false);
+  await expect(statusText, '出しているのに断り文が出ている').toHaveText('編集中');
 
   // ① 押すと窓が開き、その窓は押した行のノートを指す
   const popup = context.waitForEvent('page');
