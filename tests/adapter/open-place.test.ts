@@ -25,6 +25,10 @@ import { SettingsRenderer } from '../../src/adapter/ui/render/settings';
 import { initialState } from '../../src/adapter/state/app-state';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { JobMonitor } from '../../src/adapter/platform/job-monitor';
+import { choiceRowValues, clickChoice, pressedChoiceValue } from '../helpers/choice-row';
+
+const FIELD = 'open-place-select';
+const VALUE_ATTR = 'data-pkc-open-place-value';
 
 beforeEach(() => {
   localStorage.clear();
@@ -63,20 +67,22 @@ describe('保存', () => {
 });
 
 describe('設定画面との配線(#826)', () => {
-  it('🔴 選択欄が **いまの値を映す**(組み済みの器でも)', () => {
+  it('🔴 選択の列が **いまの値を映す**(組み済みの器でも)', () => {
     const root = document.createElement('div');
     document.body.append(root);
     chooseOpenPlace('here');
     const settings = new SettingsRenderer(root, new JobMonitor());
     settings.render(initialState);
-    const select = (): HTMLSelectElement | null =>
-      root.querySelector<HTMLSelectElement>('[data-pkc-field="open-place-select"]');
-    expect(select(), '設定画面に開く場所の選択欄が無い').not.toBeNull();
-    expect(select()!.value, '組み立て直後に古い値が出ている').toBe('here');
+    const pressed = (): string | null => pressedChoiceValue(root, FIELD, VALUE_ATTR);
+    expect(
+      root.querySelector(`[data-pkc-field="${FIELD}"]`),
+      '設定画面に開く場所の列が無い',
+    ).not.toBeNull();
+    expect(pressed(), '組み立て直後に古い値が出ている').toBe('here');
     // ② 器は 1 度しか組まない ── 2 回目の render でも映す
     chooseOpenPlace('window');
     settings.render(initialState);
-    expect(select()!.value, '組み済みの器へ映していない(古い値が見える)').toBe('window');
+    expect(pressed(), '組み済みの器へ映していない(古い値が見える)').toBe('window');
     root.remove();
   });
 
@@ -84,14 +90,12 @@ describe('設定画面との配線(#826)', () => {
     const root = document.createElement('div');
     document.body.append(root);
     new SettingsRenderer(root, new JobMonitor()).render(initialState);
-    const opts = [
-      ...root.querySelectorAll<HTMLOptionElement>('[data-pkc-field="open-place-select"] option'),
-    ].map((o) => o.value);
+    const opts = choiceRowValues(root, FIELD, VALUE_ATTR).map((c) => c.value);
     expect(opts).toEqual(OPEN_PLACES.map((p) => p.id));
     root.remove();
   });
 
-  it('🔴 選択欄 → binder → 実体 が繋がっている(押して無言にならない)', () => {
+  it('🔴 選択の列 → binder → 実体 が繋がっている(押して無言にならない)', () => {
     const root = document.createElement('div');
     document.body.append(root);
     const setOpenPlace = vi.fn();
@@ -99,10 +103,11 @@ describe('設定画面との配線(#826)', () => {
     bindActions(root, dispatcher as never, { setOpenPlace });
     // 本物の設定画面を binder の配下に組む(合成しない)
     new SettingsRenderer(root, new JobMonitor()).render(initialState);
-    const select = root.querySelector<HTMLSelectElement>('[data-pkc-field="open-place-select"]');
-    expect(select, '設定画面に開く場所の選択欄が無い').not.toBeNull();
-    select!.value = 'here';
-    select!.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(
+      root.querySelector(`[data-pkc-field="${FIELD}"]`),
+      '設定画面に開く場所の列が無い',
+    ).not.toBeNull();
+    clickChoice(root, FIELD, VALUE_ATTR, 'here');
     expect(setOpenPlace).toHaveBeenCalledWith('here');
     root.remove();
   });

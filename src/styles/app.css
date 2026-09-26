@@ -1130,12 +1130,26 @@ select:focus-visible {
   color: var(--muted);
   cursor: pointer;
 }
-[data-pkc-region='kind-bar'] button:hover {
+/**
+ * 🔴 **選ばれているボタンの濃さは、ここ 1 本で決める**(#1038 段J-2。
+ * 着地前レビュー「実ブラウザでは選んでいるボタンが他と見分けが付かない」)。
+ *
+ * ⚠ 直す前はここに `[data-pkc-region='kind-bar'] button:hover` /
+ *   `button[aria-pressed='true']` の 2 本があり、`settings.ts` の選択の列
+ *   (`buildChoiceRow`、region を持たない)はどちらにも当たらなかった ──
+ *   `aria-pressed` は正しく付いていたが**色は 1 つも変わっていなかった**。
+ * 🔑 `choice-buttons.ts` の `buildPressedButton()` が kind-bar の札にも
+ *   設定の列にも `data-pkc-choice-btn` を立てるので、その属性で選ぶ
+ *   **この 1 本**へ寄せた(CLAUDE.md §7「同じ問いに答える口が 2 つあると、
+ *   片方だけ壊れる」の CSS 版 ── コピーした 2 本目を作らない)。
+ *   ⚠ 押し所を示す枠だけの `:hover` も、地を伴う `aria-pressed` の濃さも、
+ *   kind-bar と設定の列で**同じ色**にする(見た目の統一。keep 消費先は
+ *   `dual-commands` の押している下見トグルも同じ色 ── 下のコメント参照)。
+ */
+[data-pkc-choice-btn]:hover {
   border-color: var(--accent);
 }
-/* ⚠ 押されている札は**枠と地の両方**で示す ── 枠だけだと、隣に並んだときに
- * どれが選ばれているのか一目で読めない。 */
-[data-pkc-region='kind-bar'] button[aria-pressed='true'] {
+[data-pkc-choice-btn][aria-pressed='true'] {
   border-color: var(--accent);
   background: var(--accent);
   color: var(--accent-fg);
@@ -6399,8 +6413,9 @@ li[data-pkc-row-slot] {
  * 🔴 **下見(`dual-preview-toggle`)は「押している状態」を持つ**(#1054 段②-2)。
  * ⚠ `aria-pressed` は付けてあった(`dual-filer.ts` の `renderCommands`)が、
  *   見た目の規則が無かった ── 点いているのに、見た目は他のタイルと同じままだった。
- * 🔑 `[data-pkc-region='kind-bar'] button[aria-pressed='true']` と**同じ地・字色**
- *   に揃える(このアプリで「押している」を示す色は 1 つ ── CLAUDE.md §7)。
+ * 🔑 `[data-pkc-choice-btn][aria-pressed='true']`(#1038 段J-2 で kind-bar / 設定の
+ *   選択列と共有した、濃さの規則)と**同じ地・字色**に揃える(このアプリで
+ *   「押している」を示す色は 1 つ ── CLAUDE.md §7)。
  *   ⚠ `border-color` は足さない ── この帯のボタンは `border: none`(輪は共有の
  *   `outline` ではなく `gap` の下地で区切る)なので、境界線を持たない。
  */

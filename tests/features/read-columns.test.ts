@@ -33,6 +33,7 @@ import {
   wheelToInline,
 } from '../../src/features/read-columns';
 import { TEXT_SCALES } from '../../src/features/text-scale';
+import { choiceRowValues, clickChoice, pressedChoiceValue } from '../helpers/choice-row';
 import {
   applyReadColumns,
   resetColumnFoldState,
@@ -948,6 +949,9 @@ describe('ホイールの読み替え', () => {
  *   その action を付け忘れても緑**になる。
  */
 describe('段組み(設定画面と配線)', () => {
+  const FIELD = 'read-columns-select';
+  const VALUE_ATTR = 'data-pkc-read-columns-value';
+
   function pane(): { region: HTMLElement; settings: SettingsRenderer } {
     const region = document.createElement('div');
     document.body.append(region);
@@ -958,45 +962,39 @@ describe('段組み(設定画面と配線)', () => {
   it('選択肢が表と 1 対 1(選べない段数・在らない段数を作らない)', () => {
     const { region, settings } = pane();
     settings.render(initialState);
-    const opts = [
-      ...region.querySelectorAll<HTMLOptionElement>(
-        '[data-pkc-field="read-columns-select"] option',
-      ),
-    ];
+    const opts = choiceRowValues(region, FIELD, VALUE_ATTR);
     expect(opts.map((o) => o.value)).toEqual(READ_COLUMN_CHOICES.map((c) => c.id));
-    expect(opts.map((o) => o.textContent)).toEqual(READ_COLUMN_CHOICES.map((c) => c.label));
+    expect(opts.map((o) => o.label)).toEqual(READ_COLUMN_CHOICES.map((c) => c.label));
   });
 
   /**
    * 🔴 **組み立てのときも映す**(#504 の変異試験 M8 が SURVIVED で教えた形)。
    * 器は 1 度しか組まないので、起動時に保存から復元した値をここで映さないと、
-   * 選択欄は既定のまま = **画面が嘘をつく**。
+   * 選択の列は既定のまま = **画面が嘘をつく**。
    */
-  it('🔴 組み立て直後の選択欄が、いま当たっている段数を映す', () => {
+  it('🔴 組み立て直後の選択の列が、いま当たっている段数を映す', () => {
     applyReadColumns(document.documentElement, '3');
     const { region, settings } = pane();
     settings.render(initialState);
-    const select = region.querySelector<HTMLSelectElement>(
-      '[data-pkc-field="read-columns-select"]',
-    );
-    expect(select?.value).toBe('3');
+    expect(pressedChoiceValue(region, FIELD, VALUE_ATTR)).toBe('3');
     // 対照群 ── 別の値でも映る(1 つに固まっているのではない)
     applyReadColumns(document.documentElement, '2');
     settings.render(initialState);
-    expect(select?.value).toBe('2');
+    expect(pressedChoiceValue(region, FIELD, VALUE_ATTR)).toBe('2');
   });
 
-  it('🔴 選択欄 → binder → 実体 が繋がっている(押して無言にならない)', () => {
+  it('🔴 選択の列 → binder → 実体 が繋がっている(押して無言にならない)', () => {
     const root = document.createElement('div');
     document.body.append(root);
     const dispatcher = { getState: () => initialState, dispatch: vi.fn() };
     bindActions(root, dispatcher as never, {});
     const settings = new SettingsRenderer(root, new JobMonitor());
     settings.render(initialState);
-    const select = root.querySelector<HTMLSelectElement>('[data-pkc-field="read-columns-select"]');
-    expect(select, '設定画面に段組みの選択欄が無い').not.toBeNull();
-    select!.value = '2';
-    select!.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(
+      root.querySelector(`[data-pkc-field="${FIELD}"]`),
+      '設定画面に段組みの列が無い',
+    ).not.toBeNull();
+    clickChoice(root, FIELD, VALUE_ATTR, '2');
     // 🔑 実体は DOM(押した結果が画面に当たっている)
     expect(currentReadColumns(document.documentElement)).toBe('2');
     expect(localStorage.getItem('pkc3.read-columns'), '押したのに憶えていない').toBe('2');

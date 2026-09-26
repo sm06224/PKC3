@@ -1,4 +1,4 @@
-import { test, expect, devices } from '@playwright/test';
+import { test, expect, devices, type Page } from '@playwright/test';
 import { inflateSync } from 'node:zlib';
 import {
   gotoApp,
@@ -30,6 +30,45 @@ import {
 test.use({ ...devices['Pixel 5'], hasTouch: true });
 
 const REGION = (name: string): string => `[data-pkc-region="${name}"]`;
+
+/**
+ * 🔴 「システム」のボタンの列(#1038 段J)のうち、選択肢 4 つ以下でボタンの列の
+ * まま残った 7 項目。⚠ **`tests/adapter/settings-choice-rows.test.ts` の
+ * `CHOICE_ROWS` / `layout.smoke.spec.ts` の同名の定数と対**(field 名だけの写し)
+ * ── あちらが増減したら、ここも直す。
+ */
+const SETTINGS_CHOICE_ROW_FIELDS = [
+  'prose-align-select',
+  'text-scale-select',
+  'read-columns-select',
+  'column-rule-select',
+  'open-place-select',
+  'messages-cap-select',
+  'external-images-select',
+] as const;
+
+/** 設定を開いて、`SETTINGS_CHOICE_ROW_FIELDS` の列が 1 行も 2 段以上に折れていないことを見る。 */
+async function expectSettingsChoiceRowsDoNotWrap(page: Page, w: number): Promise<void> {
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  const rowWrap = await page.evaluate((fields: readonly string[]) => {
+    const out: Record<string, number> = {};
+    for (const f of fields) {
+      const row = document.querySelector(`[data-pkc-field="${f}"]`);
+      if (!row) {
+        out[f] = -1;
+        continue;
+      }
+      out[f] = new Set(
+        [...row.querySelectorAll('button')].map((b) => Math.round(b.getBoundingClientRect().top)),
+      ).size;
+    }
+    return out;
+  }, SETTINGS_CHOICE_ROW_FIELDS);
+  for (const f of SETTINGS_CHOICE_ROW_FIELDS) {
+    expect(rowWrap[f], `w=${w}: 設定の「${f}」の列が描かれていない`).toBeGreaterThan(0);
+    expect(rowWrap[f], `w=${w}: 設定の「${f}」の列が ${rowWrap[f]} 行に折れている`).toBe(1);
+  }
+}
 
 /**
  * 🔴 **#588 の実害そのもの**(実測: 480×800・お知らせ開・編集中で本文 18px)。
@@ -696,6 +735,13 @@ test('🔴 360px ちょうどでは断り書きを出さない', async ({ page }
     page.locator(REGION('status')),
     '対応している幅なのに断り書きが出ている',
   ).not.toContainText('表示が崩れることがあります');
+
+  /**
+   * 🔴 **「システム」のボタンの列は 360px でも折れない**(#1038 段J-2)。
+   * ⚠ 新しい起動は足さない ── この test が既に開いている道中で見る
+   * (`scripts/smoke-budget.mjs`)。
+   */
+  await expectSettingsChoiceRowsDoNotWrap(page, 360);
 });
 
 /**
@@ -1577,6 +1623,20 @@ test('🔴 390px の空の PKC で、一覧に「作る」と「取り込む」�
   ).toHaveCount(1, { timeout: 10_000 });
   // 🔑 できたら「次の一手」は引っ込む(空でなくなったので勧める物が変わる)
   await expect(start, 'ノートができたのに「まだ何もありません」の口が残っている').toHaveCount(0);
+
+  /**
+   * 🔴 **「システム」のボタンの列は 390px でも折れない**(#1038 段J-2)。
+   * ⚠ 新しくできたノートは**編集中のまま**開く ── `phonePageOf` は編集中を
+   *   `open` より先に見るので、`phone-back` を押しても `'note'` から動かない
+   *   (先に `commit-edit` で編集を終える必要がある)。編集を終えて初めて
+   *   一覧ページへ戻せる(「システム」の押し口はそちらの帯に在る)。
+   * ⚠ 新しい起動は足さない ── この test が既に開いている道中で見る
+   *   (`scripts/smoke-budget.mjs`)。
+   */
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await clickReal(page, '[data-pkc-field="phone-back"]');
+  await expectSettingsChoiceRowsDoNotWrap(page, 390);
+  await clickReal(page, '[data-pkc-action="close-pane"]'); // 一覧へ戻す(次の assert のため)
 
   expect(errors, `console/pageerror: ${errors.join(' | ')}`).toEqual([]);
 });

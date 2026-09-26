@@ -36,6 +36,7 @@ import {
 } from '@features/filter/title-filter';
 import { kindCounts, type KindCount } from '@features/filter/kind-filter';
 import { kindFilterApplies, type BrowseMode } from './browse-mode';
+import { buildPressedButton } from './choice-buttons';
 
 export class KindBarRenderer {
   private readonly kindBar: HTMLElement | null;
@@ -126,20 +127,19 @@ export class KindBarRenderer {
   }
 
   private kindChip(kind: KindCount, on: boolean): HTMLButtonElement {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.setAttribute('data-pkc-action', 'toggle-kind-filter');
-    btn.setAttribute('data-pkc-kind', kind.archetype);
-    /**
-     * 🔴 **押されているかを読み上げにも出す**(`aria-pressed`)── 色だけで
-     *   表すと、色を見分けられない人には**どれで絞っているか分からない**。
-     */
-    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-    // ⚠ 件数まで出す ── 押す前に何件になるか分かる(押してから驚かない)
-    btn.textContent = `${kind.label} ${kind.count}`;
-    btn.title = on
-      ? `${kind.label}の絞りを外します`
-      : `${kind.label}だけにします(${kind.count} 件)`;
-    return btn;
+    // 🔑 ボタン 1 個の作りは共通の描き手(choice-buttons.ts)へ寄せた
+    //   (#1038 段J ── 設定のボタン列と同じ形)。件数入りの label と on/off の
+    //   title だけがここの持ち物。
+    return buildPressedButton({
+      action: 'toggle-kind-filter',
+      dataAttr: 'data-pkc-kind',
+      value: kind.archetype,
+      // ⚠ 件数まで出す ── 押す前に何件になるか分かる(押してから驚かない)
+      label: `${kind.label} ${kind.count}`,
+      pressed: on,
+      title: on
+        ? `${kind.label}の絞りを外します`
+        : `${kind.label}だけにします(${kind.count} 件)`,
+    });
   }
 }

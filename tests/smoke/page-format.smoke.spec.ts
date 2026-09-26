@@ -335,9 +335,14 @@ test('🔴 本文の置き場所を「左」にすると、段落も表も左端
   // ⚠ 空振り防止 ── 余白が 0 なら「左へ寄った」も自明に成り立つ
   expect(before.l, '器と読み幅が同じで、寄せを見ていない').toBeGreaterThan(20);
 
-  // ② 設定から「左」にする(実際の導線)
+  // ② 設定から「左」にする(実際の導線。#1038 段J でプルダウン → ボタンの列)
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
-  await page.locator('[data-pkc-field="prose-align-select"]').selectOption('start');
+  const startBtn = page.locator(
+    '[data-pkc-field="prose-align-select"] button[data-pkc-prose-align-value="start"]',
+  );
+  await clickReal(page, startBtn);
+  // 🔴 押されている印が押したボタンへ移る(visual parity)
+  await expect(startBtn, '押した先が濃く表示されない').toHaveAttribute('aria-pressed', 'true');
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
 
   await expect.poll(async () => (await box('p')).l, { timeout: 5000 }).toBeLessThanOrEqual(2);
@@ -352,7 +357,10 @@ test('🔴 本文の置き場所を「左」にすると、段落も表も左端
 
   // ④ 戻せる ── 「中央」を選べば元どおり
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
-  await page.locator('[data-pkc-field="prose-align-select"]').selectOption('center');
+  await clickReal(
+    page,
+    page.locator('[data-pkc-field="prose-align-select"] button[data-pkc-prose-align-value="center"]'),
+  );
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
   await expect.poll(async () => (await box('p')).l, { timeout: 5000 }).toBeGreaterThan(20);
 
