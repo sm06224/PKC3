@@ -13,6 +13,7 @@ import { checkReadOnlySql } from '@features/query/sql-guard';
 import { checkDuckDbSql } from '@features/query/duckdb-guard';
 import { DEFAULT_SQL_ENGINE, sqlEngineOf, type SqlEngine } from '@features/query/sql-engine';
 import { schemaModel, type Grid, type SchemaLink, type SchemaModel } from '@features/query/schema-digest';
+import { isSystemMessageLid } from '@features/message/message-log';
 import { erSql, type ErAction } from '@features/query/er-sql';
 import { isDuckDbOnlySource, sqlGuestSourceOf } from '@features/query/sql-guest-source';
 
@@ -5059,6 +5060,11 @@ function reduceCore(
       if (state.phase !== 'ready') return { state, events: [] };
       if (!state.openBody || state.openBody.lid !== state.selectedLid)
         return { state, events: [] };
+      // 🔴 **system 領域のノート(メッセージ・処理の記録)は編集に入れない**
+      // (#1038 台帳③ C1 の着地前レビュー)。⚠ 押し口は描画側が出さない
+      // (`detail.ts` / ⋯ の `phone-menu`)── ここは backstop。押し口が 1 つ増えた日に
+      // 素通りして、アプリが書く記録を user の手で書き換えられる形にしない。
+      if (isSystemMessageLid(state.openBody.lid)) return { state, events: [] };
       // 🔴 **追記の書込が飛んでいる間は編集に入れない**(P8 段⑧)。
       // 入れてしまうと editor が古い body を掴み、着弾した追記を保存で上書きする
       // ── これが「追記が黙って消える」の実体。

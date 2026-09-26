@@ -177,6 +177,12 @@ export function openContextMenu(
     b.setAttribute('data-pkc-action', it.action);
     b.setAttribute('role', 'menuitem');
     b.type = 'button';
+    /**
+     * ⚠ 押せない項目の理由は、下の説明欄が出す(`mouseover` / `focusin`)。
+     *   `title` は付けない(#587 C-3「乗せて 1 秒待つ箱を残さない」)── 押せない
+     *   ボタンにも Chromium は `mouseover` を配る(#1038 台帳③ C1 で実測:
+     *   フル / headless_shell の両方で `pointerover` / `mouseover` / `pointerdown` が届いた)。
+     */
     if (it.disabled === true) b.disabled = true;
     /**
      * 🔴 **図案は `append` で足す。`textContent =` を使わない**(#1054 段②)。

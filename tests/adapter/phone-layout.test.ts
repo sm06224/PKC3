@@ -26,6 +26,7 @@ import {
   TABLET_MAX_PX,
 } from '../../src/features/phone-layout';
 import { ENTRY_MENU_ACTIONS, NOTE_TOOL_ACTIONS } from '../../src/features/entry-actions';
+import { SYSTEM_MESSAGE_LID } from '../../src/features/message/message-log';
 import { blocksFor, decl, mediaBlock, stripComments, withoutMedia } from '../helpers/css-blocks';
 
 /** 幅の見張りの替え玉。⚠ `matches` を手で動かして `change` を撃つ。 */
@@ -580,6 +581,39 @@ describe('⋯(本文ページから届く操作)', () => {
     const editBtn = s.menu()!.querySelector('[data-pkc-action="start-edit"]') as HTMLButtonElement;
     expect(editBtn, '「編集」が出ていない(前提が崩れている)').not.toBeNull();
     expect(editBtn.disabled, '本文が届いているのに押せない').toBe(false);
+  });
+
+  /**
+   * 🔴 **メッセージのノート(system 領域)を開いているときは、⋯ にノートの操作を出さない**
+   * (#1038 台帳③ C1 の着地前レビュー)。
+   * ⚠ 直す前は ⋯ が判定を持たず、「編集」を足したことで**メッセージのノートを全文編集に
+   *   入れられた**(削除・名前を変える なども並んでいた)。本文の上の帯は `detail.ts` が
+   *   system のノートでは出さない ── ⋯ も同じ条件にする。
+   * 🔑 対照群を同じ it に置く:普通のノートでは同じ ⋯ に「編集」が出る。
+   */
+  it('🔴 メッセージのノートでは ⋯ に「編集」も削除も出ず、編集にも入らない', () => {
+    const s = setup(true);
+    s.open('n1');
+    s.field('phone-menu').click();
+    expect(
+      s.menu()!.querySelector('[data-pkc-action="start-edit"]'),
+      '前提: 普通のノートでは ⋯ に「編集」が出る',
+    ).not.toBeNull();
+    s.field('phone-menu').click();
+
+    s.d.dispatch({ type: 'MESSAGES_READ', lid: SYSTEM_MESSAGE_LID });
+    s.d.dispatch({ type: 'BODY_LOADED', lid: SYSTEM_MESSAGE_LID, body: '記録' });
+    expect(s.d.getState().openBody?.lid, '前提: メッセージのノートが開いていない').toBe(
+      SYSTEM_MESSAGE_LID,
+    );
+    s.field('phone-menu').click();
+    const menu = s.menu();
+    for (const a of ['start-edit', 'delete-entry', 'rename-entry-begin', 'move-to-folder'])
+      expect(menu?.querySelector(`[data-pkc-action="${a}"]`) ?? null, `${a} が出ている`).toBeNull();
+
+    // backstop ── 押し口が増えても、reducer が編集に入れない
+    s.d.dispatch({ type: 'START_EDIT' });
+    expect(s.d.getState().phase, 'メッセージのノートが編集に入った').toBe('ready');
   });
 });
 

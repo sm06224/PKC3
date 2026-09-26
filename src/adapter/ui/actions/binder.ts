@@ -256,7 +256,12 @@ import { copyMarkdownAndHtml, copyPlainText } from '@adapter/platform/clipboard'
 import { appCopyHistory } from '@adapter/platform/copy-history-store';
 // 🔑 メッセージの口・字は 1 か所から引く(設計 doc §7、段②a。CLAUDE.md §7)
 import { appMessagePost, setMessageCap } from '@adapter/platform/message-post';
-import { MESSAGE_CAP_OPTIONS, SYSTEM_MESSAGE_LID, titleForMessageLid } from '@features/message/message-log';
+import {
+  isSystemMessageLid,
+  MESSAGE_CAP_OPTIONS,
+  SYSTEM_MESSAGE_LID,
+  titleForMessageLid,
+} from '@features/message/message-log';
 import {
   COPY_HISTORY_EMPTY,
   copyHistoryMenu,
@@ -4305,19 +4310,32 @@ const ACTIONS: Record<string, ActionHandler> = {
            * 🔑 並べる順は**使う頻度**であって、実装の由来(既存の登記 → 足した物)
            *   ではない。
            */
-          ...noteToolActions(),
           /**
-           * 🔴 **本文が届くまで「編集」は押せない**(#1038 台帳③ C1)。
-           * ⚠ ここも `selectedLid` = 開いているノートなので、本文の上のボタンと
-           *   **同じ条件**(`openBody?.lid === lid`)で判定する。
+           * 🔴 **system 領域のノート(メッセージ・処理の記録)には、ノートの操作を出さない**
+           * (#1038 台帳③ C1 の着地前レビュー)。
+           * ⚠ 本文の上の帯は `detail.ts` が system のノートでは出さない(設計 doc §7
+           *   「編集・追記・削除・改名・履歴の押し口は system のノートでは出さない」)が、
+           *   この ⋯ は **判定を持たずに**全部を並べていた ── 「編集」を足したことで、
+           *   メッセージのノートを全文編集に入れられる抜け道になった(reducer でも再現)。
+           * 🔑 判定は `detail.ts` と同じ `isSystemMessageLid` 1 か所から引く(§7)。
            */
-          ...withEditReady(
-            entryMenuActions({
-              archetype: st.entryMetas.get(lid)?.archetype ?? null,
-              linkedFile: st.linkedFiles.get(lid) ?? null,
-            }),
-            st.openBody?.lid === lid,
-          ),
+          ...(isSystemMessageLid(lid)
+            ? []
+            : [
+                ...noteToolActions(),
+                /**
+                 * 🔴 **本文が届くまで「編集」は押せない**(#1038 台帳③ C1)。
+                 * ⚠ ここも `selectedLid` = 開いているノートなので、本文の上のボタンと
+                 *   **同じ条件**(`openBody?.lid === lid`)で判定する。
+                 */
+                ...withEditReady(
+                  entryMenuActions({
+                    archetype: st.entryMetas.get(lid)?.archetype ?? null,
+                    linkedFile: st.linkedFiles.get(lid) ?? null,
+                  }),
+                  st.openBody?.lid === lid,
+                ),
+              ]),
         ],
         [
           /**
