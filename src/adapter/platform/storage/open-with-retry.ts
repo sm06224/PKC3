@@ -60,6 +60,16 @@ export interface OpenWithRetryDeps<C, I extends OpenedLike> {
   retryable: boolean;
   /** 差し替え用(既定は `STORAGE_RETRY_DELAYS_MS`)。 */
   delays?: readonly number[];
+  /**
+   * 🔴 **再試行が全部尽きて、最後も `memory` だったときだけ 1 回呼ぶ**(#1073)。
+   *
+   * ⚠ **途中で開けた回は呼ばない**(その回は「回復した一時の失敗」であって、
+   *   知らせる必要が無い)。⚠ `retryable` が `false`(可搬単一 HTML)の回も呼ばない
+   *   ── そちらは「選んだ形」であって失敗ではない(この file 冒頭の注記)。
+   * 🔑 呼ぶ側(`main.ts`)はここで `console.error` を呼ぶだけ ── 判断は置かない
+   *   (CLAUDE.md §2「main.ts はどの test からも実行されない」)。
+   */
+  report?(detail: { init: I; tries: number }): void;
 }
 
 /**
@@ -85,5 +95,7 @@ export async function openStorageWithRetry<C, I extends OpenedLike>(
     tries += 1;
     if (init.vfs !== 'memory') break;
   }
+  // 🔴 尽きても最後まで memory だったときだけ知らせる(#1073。上の注記)
+  if (init.vfs === 'memory') deps.report?.({ init, tries });
   return { client, init, tries };
 }
