@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, expectReachable } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors } from './helpers';
 
 /**
  * 🔴 **文字の大きさを user が変えられる**(#504。user 指示 2026-08-28)。
@@ -48,11 +48,49 @@ test('🔴 文字の大きさを変えると本文の字が実際に変わり、
   expect(before.font, '既定の字の大きさが 13px でない(表と CSS がずれている)').toBeCloseTo(13, 1);
 
   // ① 設定 → 表示 → 文字の大きさ = 大
+  // ⚠ #1038 段J でプルダウン → 「選ばれている物が濃く表示されるボタンの列」に置き換え
+  //   (選択肢はそのまま)。ボタンなので実クリックできる。
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
-  const select = page.locator('[data-pkc-field="text-scale-select"]');
-  // 🔑 押さずに「届くこと」だけ確かめる(`<select>` は押すと OS の一覧が開く)
-  await expectReachable(page, select);
-  await select.selectOption('large');
+  const row = page.locator('[data-pkc-field="text-scale-select"]');
+  const largeBtn = row.locator('button[data-pkc-text-scale-value="large"]');
+  const standardBtn = row.locator('button[data-pkc-text-scale-value="standard"]');
+  // 🔴 空振り防止 ── 押す前は「標準」が濃く、「大」は濃くない
+  await expect(standardBtn, '前提が崩れている(既定が濃くない)').toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect(largeBtn, '前提が崩れている(押す前から濃い)').toHaveAttribute(
+    'aria-pressed',
+    'false',
+  );
+  /**
+   * 🔴 **色も実際に動くことを見る**(#1038 段J-2。着地前レビュー「実ブラウザでは
+   * 選んでいるボタンが他と見分けが付かない」── `aria-pressed` だけ見る assert は
+   * CSS が 1 行も無くても通ってしまっていた)。
+   * ⚠ `toHaveAttribute` ではなく `getComputedStyle` を読む ── 属性は正しく付いて
+   *   いても地の色が動いていない、という実害を assert の型で見逃さない。
+   */
+  const bg = (loc: typeof largeBtn): Promise<string> =>
+    loc.evaluate((el) => getComputedStyle(el).backgroundColor);
+  const beforeStandardBg = await bg(standardBtn);
+  const beforeLargeBg = await bg(largeBtn);
+  expect(
+    beforeStandardBg,
+    '選ばれている「標準」の下地が、選ばれていない「大」と同じ(CSS が当たっていない)',
+  ).not.toBe(beforeLargeBg);
+
+  await clickReal(page, largeBtn);
+  // 🔴 押した効果(字が実際に大きくなる)と、押されている印(aria-pressed)の
+  //   両方が移ることを見る(visual parity ── #1038 段J)
+  await expect(largeBtn, '押した先が濃く表示されない').toHaveAttribute('aria-pressed', 'true');
+  await expect(standardBtn, '前に選んでいた側の印が残っている').toHaveAttribute(
+    'aria-pressed',
+    'false',
+  );
+  // 🔴 濃さの見た目そのものが、押した先へ移っている(色は 2 択の入れ替わりなので、
+  //   前後の色をそのまま比べれば「移った」ことが言える)
+  expect(await bg(largeBtn), '押した先の下地が濃く動いていない').toBe(beforeStandardBg);
+  expect(await bg(standardBtn), '前に選んでいた側の下地がまだ濃いまま').toBe(beforeLargeBg);
 
   /**
    * ② 本文へ戻って測る ── **その場で効いている**(読み込み直し不要)。

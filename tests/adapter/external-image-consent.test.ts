@@ -13,6 +13,7 @@ import {
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
 import type { AppState } from '../../src/adapter/state/app-state';
 import { MarkdownClient } from '../../src/adapter/platform/render/markdown-client';
+import { clickChoice, pressedChoiceValue } from '../helpers/choice-row';
 
 /** 保存先の代わり(実物の localStorage に触らない ── test が互いに干渉する)。 */
 function fakeStore(initial?: string): Pick<Storage, 'getItem' | 'setItem'> & { value: string | null } {
@@ -437,14 +438,13 @@ describe('設定画面', () => {
     const r = new SettingsRenderer(region, monitor as never, policy);
     const state = { viewMode: 'settings' } as unknown as AppState;
     r.render(state);
-    const select = region.querySelector<HTMLSelectElement>(
-      '[data-pkc-field="external-images-select"]',
-    )!;
-    expect(select, '選択肢が無い').not.toBeNull();
-    expect(select.value).toBe('never');
+    const FIELD = 'external-images-select';
+    const VALUE_ATTR = 'data-pkc-external-images-value';
+    expect(region.querySelector(`[data-pkc-field="${FIELD}"]`), '選択肢が無い').not.toBeNull();
+    expect(pressedChoiceValue(region, FIELD, VALUE_ATTR)).toBe('never');
     policy.setMode('always');
     r.render(state); // 2 度目は組み直さない ── それでも値は追いつく
-    expect(select.value).toBe('always');
+    expect(pressedChoiceValue(region, FIELD, VALUE_ATTR)).toBe('always');
     region.remove();
   });
 });
@@ -477,6 +477,61 @@ describe('binder の口', () => {
     root.querySelector<HTMLButtonElement>('[data-pkc-action="allow-external-images"]')!.click();
     root.querySelector<HTMLButtonElement>('[data-pkc-action="deny-external-images"]')!.click();
     expect(answerExternalImages.mock.calls).toEqual([[true], [false]]);
+    root.remove();
+  });
+});
+
+/**
+ * 🔴 **本物のボタンを押して、binder の口まで届くことを見る**(#1038 段J-2、
+ * 着地前レビュー)。
+ *
+ * ⚠ 上の「binder の口」は**合成した `<select>`**を押しているので、
+ *   本物の設定画面(`SettingsRenderer`)が `data-pkc-action` を付け忘れても
+ *   緑になる形だった(`editor-mode.test.ts` 等、他の 6 項目と同じ手本に揃える
+ *   ── `clickChoice` は本物のボタンを押す)。
+ */
+describe('本物のボタン → binder → 実体(#1038 段J-2)', () => {
+  it('🔴 外部の画像: 本物の設定画面のボタンを押すと setExternalImages が呼ばれる', async () => {
+    const { SettingsRenderer } = await import('../../src/adapter/ui/render/settings');
+    const { bindActions } = await import('../../src/adapter/ui/actions/binder');
+    const root = document.createElement('div');
+    document.body.append(root);
+    const setExternalImages = vi.fn();
+    const dispatcher = { getState: () => ({ entryMetas: new Map() }) as unknown as AppState, dispatch: () => {} };
+    bindActions(root, dispatcher as never, { setExternalImages });
+    const policy = new ExternalImagePolicy(fakeStore('ask'));
+    const monitor = { subscribe: () => () => {}, stats: () => [], recent: () => [] };
+    new SettingsRenderer(root, monitor as never, policy).render({ viewMode: 'settings' } as unknown as AppState);
+    const FIELD = 'external-images-select';
+    const VALUE_ATTR = 'data-pkc-external-images-value';
+    expect(root.querySelector(`[data-pkc-field="${FIELD}"]`), '外部の画像の列が無い').not.toBeNull();
+    clickChoice(root, FIELD, VALUE_ATTR, 'never');
+    expect(setExternalImages).toHaveBeenCalledWith('never');
+    root.remove();
+  });
+
+  it('🔴 保管件数: 本物の設定画面のボタンを押すと保管件数が実際に変わる', async () => {
+    const { SettingsRenderer } = await import('../../src/adapter/ui/render/settings');
+    const { bindActions } = await import('../../src/adapter/ui/actions/binder');
+    const { currentMessageCap, setMessageCap } = await import('../../src/adapter/platform/message-post');
+    localStorage.removeItem('pkc3.messages.cap');
+    // ⚠ 空振り防止 ── 押す前の値が、これから押す値と違うこと
+    expect(currentMessageCap(), '前提が崩れている(押す前から同じ値)').not.toBe(2000);
+    const root = document.createElement('div');
+    document.body.append(root);
+    // ⚠ `set-message-cap` は他の 6 項目と違い services に乗らず、実物の
+    //   `setMessageCap` を直に呼ぶ(binder.ts の実装どおり)── だから DI で
+    //   spy せず、**実際に値が変わったこと**を見る
+    const { JobMonitor } = await import('../../src/adapter/platform/job-monitor');
+    const dispatcher = { getState: () => ({ entryMetas: new Map() }) as unknown as AppState, dispatch: () => {} };
+    bindActions(root, dispatcher as never, {});
+    new SettingsRenderer(root, new JobMonitor()).render({ viewMode: 'settings' } as unknown as AppState);
+    const FIELD = 'messages-cap-select';
+    const VALUE_ATTR = 'data-pkc-message-cap-value';
+    expect(root.querySelector(`[data-pkc-field="${FIELD}"]`), '保管件数の列が無い').not.toBeNull();
+    clickChoice(root, FIELD, VALUE_ATTR, '2000');
+    expect(currentMessageCap(), '押しても保管件数が変わらない(binder の配線切れ)').toBe(2000);
+    setMessageCap(100); // 既定へ戻す(他の test に漏らさない)
     root.remove();
   });
 });

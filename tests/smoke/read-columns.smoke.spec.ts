@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, expectReachable } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors } from './helpers';
 
 /**
  * 🔴 **読む面の段組み送り**(#505 段①。user 指示 2026-08-28)。
@@ -140,10 +140,12 @@ async function editGeom(page: Page): Promise<{
 
 async function setColumns(page: Page, value: string): Promise<void> {
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
-  const select = page.locator('[data-pkc-field="read-columns-select"]');
-  // 🔑 押さずに「届くこと」だけ確かめる(`<select>` は押すと OS の一覧が開く)
-  await expectReachable(page, select);
-  await select.selectOption(value);
+  // ⚠ #1038 段J でプルダウン → ボタンの列に置き換え(選択肢はそのまま)。
+  //   ボタンなので `clickReal` で実クリックできる(`<select>` の「開くと OS の一覧」問題が無い)。
+  await clickReal(
+    page,
+    page.locator(`[data-pkc-field="read-columns-select"] button[data-pkc-read-columns-value="${value}"]`),
+  );
   // ⚠ 本文へ戻る道は**一覧の行を押す**(`set-view` に `detail` は無い)
   await page.locator('[data-pkc-region="filer-table"] tbody tr').first().click();
   await expect(page.locator('[data-pkc-field="detail-body"]')).toBeVisible();
@@ -169,9 +171,11 @@ async function setColumns(page: Page, value: string): Promise<void> {
  */
 async function setTextScale(page: Page, value: string): Promise<void> {
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
-  const select = page.locator('[data-pkc-field="text-scale-select"]');
-  await expectReachable(page, select);
-  await select.selectOption(value);
+  // ⚠ #1038 段J でプルダウン → ボタンの列に置き換え(選択肢はそのまま)
+  await clickReal(
+    page,
+    page.locator(`[data-pkc-field="text-scale-select"] button[data-pkc-text-scale-value="${value}"]`),
+  );
   await page.locator('[data-pkc-region="filer-table"] tbody tr').first().click();
   await expect(page.locator('[data-pkc-field="detail-body"]')).toBeVisible();
   // ⚠ 当たったことを**画面から**確かめる(選んだ = 効いた、にしない)
@@ -853,11 +857,11 @@ test('🔴 段の境界線を「はっきり」にすると、実際に濃くな
   // 🔴 **空振り防止** ── 既定が薄いこと自体を assert する(濃かったらこの test は無意味)
   expect(thin, `既定がもう濃い(${thin.toFixed(2)}:1)── この次元を測れていない`).toBeLessThan(2.5);
 
-  // 🔴 設定から「はっきり」を選ぶ(user が実際に触る導線)
+  // 🔴 設定から「はっきり」を選ぶ(user が実際に触る導線。#1038 段J でボタンの列に置き換え)
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
-  const sel = page.locator('[data-pkc-field="column-rule-select"]');
-  await expectReachable(page, sel);
-  await sel.selectOption('clear');
+  const row = page.locator('[data-pkc-field="column-rule-select"]');
+  const clearBtn = row.locator('button[data-pkc-column-rule-value="clear"]');
+  await clickReal(page, clearBtn);
   await page.locator('[data-pkc-region="filer-table"] tbody tr').first().click();
   await expect(page.locator('[data-pkc-field="detail-body"]')).toBeVisible();
   await expect.poll(async () => (await readGeom(page)).on, { timeout: 5_000 }).toBe(true);
@@ -889,7 +893,7 @@ test('🔴 段の境界線を「はっきり」にすると、実際に濃くな
   // ⚠ **戻せる**(片道にしない)
   await page.locator('[data-pkc-region="filer-table"] tbody tr').first().click();
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
-  await sel.selectOption('thin');
+  await clickReal(page, row.locator('button[data-pkc-column-rule-value="thin"]'));
   await page.locator('[data-pkc-region="filer-table"] tbody tr').first().click();
   await expect.poll(async () => (await readGeom(page)).on, { timeout: 5_000 }).toBe(true);
   const back = await ruleContrast();

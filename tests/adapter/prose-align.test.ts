@@ -22,6 +22,10 @@ import { SettingsRenderer } from '../../src/adapter/ui/render/settings';
 import { initialState } from '../../src/adapter/state/app-state';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { JobMonitor } from '../../src/adapter/platform/job-monitor';
+import { choiceRowValues, clickChoice, pressedChoiceValue } from '../helpers/choice-row';
+
+const FIELD = 'prose-align-select';
+const VALUE_ATTR = 'data-pkc-prose-align-value';
 
 const KEY = 'pkc3.prose-align';
 const ATTR = 'data-pkc-prose-align';
@@ -85,21 +89,20 @@ describe('本文の置き場所(保存と適用)', () => {
 });
 
 describe('設定画面との配線(#722)', () => {
-  it('🔴 選択欄が **いまの値を映す**(組み済みの器でも)', () => {
+  it('🔴 選択の列が **いまの値を映す**(組み済みの器でも)', () => {
     const root = document.createElement('div');
     document.body.append(root);
     applyProseAlign(html(), 'start');
     const settings = new SettingsRenderer(root, new JobMonitor());
     // ① 組み立て直後
     settings.render(initialState);
-    const select = (): HTMLSelectElement | null =>
-      root.querySelector<HTMLSelectElement>('[data-pkc-field="prose-align-select"]');
-    expect(select(), '設定画面に置き場所の選択欄が無い').not.toBeNull();
-    expect(select()!.value, '組み立て直後に古い値が出ている').toBe('start');
+    const pressed = (): string | null => pressedChoiceValue(root, FIELD, VALUE_ATTR);
+    expect(root.querySelector(`[data-pkc-field="${FIELD}"]`), '設定画面に置き場所の列が無い').not.toBeNull();
+    expect(pressed(), '組み立て直後に古い値が出ている').toBe('start');
     // ② 器は 1 度しか組まない ── 2 回目の render でも映す
     applyProseAlign(html(), 'center');
     settings.render(initialState);
-    expect(select()!.value, '組み済みの器へ映していない(古い値が見える)').toBe('center');
+    expect(pressed(), '組み済みの器へ映していない(古い値が見える)').toBe('center');
     root.remove();
   });
 
@@ -107,16 +110,12 @@ describe('設定画面との配線(#722)', () => {
     const root = document.createElement('div');
     document.body.append(root);
     new SettingsRenderer(root, new JobMonitor()).render(initialState);
-    const opts = [
-      ...root.querySelectorAll<HTMLOptionElement>(
-        '[data-pkc-field="prose-align-select"] option',
-      ),
-    ].map((o) => o.value);
+    const opts = choiceRowValues(root, FIELD, VALUE_ATTR).map((c) => c.value);
     expect(opts).toEqual(PROSE_ALIGNS.map((a) => a.id));
     root.remove();
   });
 
-  it('🔴 選択欄 → binder → 実体 が繋がっている(押して無言にならない)', () => {
+  it('🔴 選択の列 → binder → 実体 が繋がっている(押して無言にならない)', () => {
     const root = document.createElement('div');
     document.body.append(root);
     const setProseAlign = vi.fn();
@@ -125,12 +124,8 @@ describe('設定画面との配線(#722)', () => {
     // 本物の設定画面を binder の配下に組む(合成しない)
     const settings = new SettingsRenderer(root, new JobMonitor());
     settings.render(initialState);
-    const select = root.querySelector<HTMLSelectElement>(
-      '[data-pkc-field="prose-align-select"]',
-    );
-    expect(select, '設定画面に置き場所の選択欄が無い').not.toBeNull();
-    select!.value = 'start';
-    select!.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(root.querySelector(`[data-pkc-field="${FIELD}"]`), '設定画面に置き場所の列が無い').not.toBeNull();
+    clickChoice(root, FIELD, VALUE_ATTR, 'start');
     expect(setProseAlign).toHaveBeenCalledWith('start');
     root.remove();
   });

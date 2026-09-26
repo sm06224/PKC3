@@ -67,6 +67,21 @@ import { buildOfficePackPanel, type OfficePackPanel } from './office-pack-panel'
 import { buildSettingsCommands, buildSettingsFile } from './commands';
 import { buildKeymapPanel, type KeymapPanel } from './keymap-panel';
 import { appCopyHistory } from '@adapter/platform/copy-history-store';
+import { buildChoiceRow, syncChoiceRow } from './choice-buttons';
+
+/**
+ * 🔴 **説明は 1 行 + 詳しくは hover / マニュアルへ**(#1017 §6.1 規則 3、
+ * #1038 段J で全 24 項目に適用)。⚠ **不可逆・データが消える警告はここへ流さない**
+ * ── そのまま可視の 1 行に残す(`persist-state` / 「ノートを渡して開くことを
+ * 許したアプリ」の note がその実例。`tests/adapter/settings-notes.test.ts` の
+ * `KNOWN_MULTILINE` が例外を等値 pin する)。
+ */
+function buildSettingsNote(text: string): HTMLParagraphElement {
+  const note = document.createElement('p');
+  note.setAttribute('data-pkc-field', 'settings-note');
+  note.textContent = text;
+  return note;
+}
 
 export class SettingsRenderer {
   private built = false;
@@ -233,6 +248,8 @@ export class SettingsRenderer {
     select.setAttribute('data-pkc-action', 'set-theme');
     select.setAttribute('data-pkc-field', 'theme-select');
     select.setAttribute('aria-label', '配色');
+    // 🔑 説明は 1 行 + hover(#1017 §6.1 規則 3、#1038 段J)。詳しくはマニュアル。
+    select.title = '最初は OS の設定に従い、選ぶとこの端末で覚えます。';
     for (const t of THEMES) {
       const opt = document.createElement('option');
       opt.value = t.id;
@@ -240,11 +257,7 @@ export class SettingsRenderer {
       select.append(opt);
     }
     dd.append(select);
-    const note = document.createElement('p');
-    note.setAttribute('data-pkc-field', 'settings-note');
-    note.textContent =
-      '最初は OS の設定に従います。一度選ぶと、この端末では選んだ配色を覚えます。';
-    dd.append(note);
+    dd.append(buildSettingsNote('選ぶと、この端末で覚えます(最初は OS の設定に従います)。'));
     dl.append(dt, dd);
 
     /**
@@ -262,6 +275,11 @@ export class SettingsRenderer {
     pselect.setAttribute('data-pkc-action', 'set-page-format');
     pselect.setAttribute('data-pkc-field', 'page-format-select');
     pselect.setAttribute('aria-label', 'ページ設定');
+    // ⚠ **何が変わるのか**を書く ── 「紙面」だけでは、画面の話か紙の話か分からない
+    pselect.title =
+      'フル HD を選ぶと読み幅の上限が外れ、画面の幅いっぱいまで広がります。' +
+      '表・図・コードには読み幅の上限が掛かりませんが、段落と同じ左端に揃います。' +
+      '書き出した HTML は、書き出したときのページ設定のまま表示されます。';
     for (const f of PAGE_FORMATS) {
       const opt = document.createElement('option');
       opt.value = f.id;
@@ -269,15 +287,7 @@ export class SettingsRenderer {
       pselect.append(opt);
     }
     pd.append(pselect);
-    const pnote = document.createElement('p');
-    pnote.setAttribute('data-pkc-field', 'settings-note');
-    // ⚠ **何が変わるのか**を書く ── 「紙面」だけでは、画面の話か紙の話か分からない
-    pnote.textContent =
-      '本文の読み幅と、印刷したときの紙の大きさが決まります。既定は A4 縦です。' +
-      'フル HD を選ぶと読み幅の上限が外れ、画面の幅いっぱいまで広がります。' +
-      '表・図・コードには読み幅の上限が掛かりませんが、段落と同じ左端に揃います。' +
-      '書き出した HTML は、書き出したときのページ設定のまま表示されます。';
-    pd.append(pnote);
+    pd.append(buildSettingsNote('本文の読み幅と印刷の紙の大きさが決まります(既定は A4 縦)。'));
     dl.append(pt, pd);
 
     /**
@@ -293,27 +303,24 @@ export class SettingsRenderer {
     const pat = document.createElement('dt');
     pat.textContent = '本文の置き場所';
     const pad = document.createElement('dd');
-    const paselect = document.createElement('select');
-    paselect.setAttribute('data-pkc-action', 'set-prose-align');
-    paselect.setAttribute('data-pkc-field', 'prose-align-select');
-    paselect.setAttribute('aria-label', '本文の置き場所');
-    for (const a of PROSE_ALIGNS) {
-      const opt = document.createElement('option');
-      opt.value = a.id;
-      opt.textContent = a.label;
-      paselect.append(opt);
-    }
-    pad.append(paselect);
-    const panote = document.createElement('p');
-    panote.setAttribute('data-pkc-field', 'settings-note');
+    // 🔴 選択肢 2 つ ── プルダウンをボタンの列にする(#1038 段J、C18 / Q7 の裁定 A)
+    const paRow = buildChoiceRow({
+      field: 'prose-align-select',
+      ariaLabel: '本文の置き場所',
+      action: 'set-prose-align',
+      dataAttr: 'data-pkc-prose-align-value',
+      choices: PROSE_ALIGNS,
+      currentId: '', // render 末尾の syncProseAlign が必ず映す
+    });
     // ⚠ **いつ効くのか**まで書く ── 窓が読み幅より狭ければ、どちらでも同じに見える
-    panote.textContent =
-      '窓が本文の読み幅より広いとき、本文を列の中央に置くか、左端に置くかが決まります。' +
-      '表・図・コードも段落と同じ側に揃います。' +
-      '窓が読み幅より狭いときは、どちらを選んでも同じ見え方です。' +
-      'ページ設定が「フル HD」(読み幅の上限なし)のときも同じです。' +
+    paRow.title =
+      '表・図・コードも段落と同じ側に揃います。窓が読み幅より狭い、または' +
+      'ページ設定が「フル HD」のときはどちらでも同じ見え方です。' +
       '書き出した HTML は、書き出したときの置き場所のまま表示されます。';
-    pad.append(panote);
+    pad.append(paRow);
+    pad.append(
+      buildSettingsNote('窓が読み幅より広いとき、本文を列の中央か左端に置きます(既定は中央)。'),
+    );
     dl.append(pat, pad);
 
     /**
@@ -327,17 +334,16 @@ export class SettingsRenderer {
     const tt = document.createElement('dt');
     tt.textContent = '文字の大きさ';
     const td = document.createElement('dd');
-    const tselect = document.createElement('select');
-    tselect.setAttribute('data-pkc-action', 'set-text-scale');
-    tselect.setAttribute('data-pkc-field', 'text-scale-select');
-    tselect.setAttribute('aria-label', '文字の大きさ');
-    for (const t of TEXT_SCALES) {
-      const opt = document.createElement('option');
-      opt.value = t.id;
-      opt.textContent = t.label;
-      tselect.append(opt);
-    }
-    td.append(tselect);
+    // 🔴 選択肢 4 つ ── プルダウンをボタンの列にする(#1038 段J)
+    const tRow = buildChoiceRow({
+      field: 'text-scale-select',
+      ariaLabel: '文字の大きさ',
+      action: 'set-text-scale',
+      dataAttr: 'data-pkc-text-scale-value',
+      choices: TEXT_SCALES,
+      currentId: '', // render 末尾の syncTextScale が必ず映す
+    });
+    td.append(tRow);
 
     /**
      * 🔴 **本文の段組み**(#505 段①。user 指示 2026-08-28)。
@@ -348,17 +354,20 @@ export class SettingsRenderer {
     const ct = document.createElement('dt');
     ct.textContent = '本文の段組み';
     const cd = document.createElement('dd');
-    const cselect = document.createElement('select');
-    cselect.setAttribute('data-pkc-action', 'set-read-columns');
-    cselect.setAttribute('data-pkc-field', 'read-columns-select');
-    cselect.setAttribute('aria-label', '本文の段組み');
-    for (const c of READ_COLUMN_CHOICES) {
-      const opt = document.createElement('option');
-      opt.value = c.id;
-      opt.textContent = c.label;
-      cselect.append(opt);
-    }
-    cd.append(cselect);
+    // 🔴 選択肢 4 つ ── プルダウンをボタンの列にする(#1038 段J)
+    const cRow = buildChoiceRow({
+      field: 'read-columns-select',
+      ariaLabel: '本文の段組み',
+      action: 'set-read-columns',
+      dataAttr: 'data-pkc-read-columns-value',
+      choices: READ_COLUMN_CHOICES,
+      currentId: '', // render 末尾の syncReadColumns が必ず映す
+    });
+    cRow.title =
+      '読み進める向きが横になり、マウスのホイールでそのまま横へスクロールできます。' +
+      '表と図は段の幅まで縮むので、広く見たいときは段を減らしてください。' +
+      '2 ペインで編集している間は 1 段に戻ります(その場の編集では段のままです)。';
+    cd.append(cRow);
     /**
      * 🔴 **いま実際に何段になっているかを出す**(#526。user 報告 2026-08-28
      * 「**2〜4 のどの数字を選んでもレンダリングは変わらなかった それはバグ?**」)。
@@ -374,15 +383,10 @@ export class SettingsRenderer {
     ceff.setAttribute('data-pkc-field', 'read-columns-effective');
     ceff.setAttribute('data-pkc-note', 'effective');
     cd.append(ceff);
-    const cnote = document.createElement('p');
-    cnote.setAttribute('data-pkc-field', 'settings-note');
-    // ⚠ **何が変わって、何に気をつけるか**を書く(押した後に探させない)
-    cnote.textContent =
-      '横に広い画面で、本文を新聞のように段へ流します。' +
-      '読み進める向きが横になり、マウスのホイールでそのまま横へスクロールできます。' +
-      '画面の幅が足りないときは自動で 1 段に戻ります。' +
-      '表と図は段の幅まで縮むので、広く見たいときは段を減らしてください。' +
-      '2 ペインで編集している間は 1 段に戻ります(その場の編集では段のままです)。';
+    // ⚠ **何が変わって、何に気をつけるか**を書く(押した後に探させない)。詳しくは hover とマニュアル。
+    const cnote = buildSettingsNote(
+      '横に広い画面で、本文を段へ流します(狭いと自動で 1 段に戻ります)。',
+    );
 
     /**
      * 🔴 **段の境界線の濃さ**(#525。user 報告 2026-08-28
@@ -397,32 +401,24 @@ export class SettingsRenderer {
     const rt = document.createElement('dt');
     rt.textContent = '段の境界線';
     const rd = document.createElement('dd');
-    const rselect = document.createElement('select');
-    rselect.setAttribute('data-pkc-action', 'set-column-rule');
-    rselect.setAttribute('data-pkc-field', 'column-rule-select');
-    rselect.setAttribute('aria-label', '段の境界線');
-    for (const c of COLUMN_RULES) {
-      const opt = document.createElement('option');
-      opt.value = c.id;
-      opt.textContent = c.label;
-      rselect.append(opt);
-    }
-    rd.append(rselect);
-    const rnote = document.createElement('p');
-    rnote.setAttribute('data-pkc-field', 'settings-note');
-    rnote.textContent =
-      '段組みで読んでいるときの、段と段のあいだの線です。' +
-      '既定は細い線で、いまと同じ見え方です。' +
-      '見分けにくいときは「はっきり」にしてください。1 段で読んでいるときは関係ありません。';
-    rd.append(rnote);
+    // 🔴 選択肢 3 つ ── プルダウンをボタンの列にする(#1038 段J)
+    const rRow = buildChoiceRow({
+      field: 'column-rule-select',
+      ariaLabel: '段の境界線',
+      action: 'set-column-rule',
+      dataAttr: 'data-pkc-column-rule-value',
+      choices: COLUMN_RULES,
+      currentId: '', // render 末尾の syncReadColumns が必ず映す
+    });
+    rRow.title = '1 段で読んでいるときは関係ありません。既定は細い線で、いまと同じ見え方です。';
+    rd.append(rRow);
+    rd.append(buildSettingsNote('段組みで読むときの、段と段のあいだの線の濃さです。'));
 
-    const tnote = document.createElement('p');
-    tnote.setAttribute('data-pkc-field', 'settings-note');
-    // ⚠ **何が動いて、何が動かないか**を書く(押した後に探させない)
-    tnote.textContent =
-      '本文と画面の字の大きさが変わります。選ぶとその場で変わります。' +
+    // ⚠ **何が動いて、何が動かないか**を書く(押した後に探させない)。詳しくは hover。
+    const tnote = buildSettingsNote('本文と画面の字の大きさを、この端末だけで変えます。');
+    tRow.title =
       '読み幅(1 行の長さ)は動かないので、大きくすると 1 行に入る字が減ります。' +
-      'この端末だけの設定で、ノートの中身には入りません。';
+      'ノートの中身には入りません。';
     td.append(tnote);
     dl.append(tt, td);
     cd.append(cnote);
@@ -438,6 +434,13 @@ export class SettingsRenderer {
      *   「**user が選べる形にできるなら、そちらを先に出す**」(#504 と同じ作法)。
      * ⚠ タグごとに**色**を振る案は出していない ── user 指示 2026-08-03
      *   「地は無彩色、色は情報にだけ使う」を覆す提案になるため。
+     *
+     * 🔴 **選択肢は 3 つだが、プルダウンのまま残す**(#1038 段J、§9 の覆る条件)。
+     *   ⚠ ボタンの列にして実測(`TAB_SWEEP` 全幅)したところ、**720 / 860 / 901 /
+     *   950 / 1101px で 2 行に折れた**(選択肢の字が長い ── 「枠だけのバッジ
+     *   (下地なし・細い枠)」等)。doc §9「切替ボタンの列にして 8 幅のどこかで
+     *   行が 2 段以上に折れる → その項目だけプルダウンへ戻す」のとおり、ここだけ
+     *   プルダウンへ戻した(他の 9 項目は全幅で 1 行に収まる)。
      */
     const gt = document.createElement('dt');
     gt.textContent = '本文のタグの見せ方';
@@ -446,6 +449,7 @@ export class SettingsRenderer {
     gselect.setAttribute('data-pkc-action', 'set-tag-badge');
     gselect.setAttribute('data-pkc-field', 'tag-badge-select');
     gselect.setAttribute('aria-label', '本文のタグの見せ方');
+    gselect.title = '本文に「#買い物 #家事」と書いた行の見え方です。押すとその場で効きます。';
     for (const c of TAG_BADGES) {
       const opt = document.createElement('option');
       opt.value = c.id;
@@ -453,13 +457,9 @@ export class SettingsRenderer {
       gselect.append(opt);
     }
     gd.append(gselect);
-    const gnote = document.createElement('p');
-    gnote.setAttribute('data-pkc-field', 'settings-note');
-    gnote.textContent =
-      '本文に「#買い物 #家事」と書いた行の見え方です。押すとその場で効きます。' +
-      'バッジにすると本文の文章と見分けやすくなります。' +
-      '本文そのものは変わりません(書いた字はそのままです)。';
-    gd.append(gnote);
+    gd.append(
+      buildSettingsNote('本文に書いたタグ(#買い物 など)の見え方です(本文の字は変わりません)。'),
+    );
     dl.append(gt, gd);
 
     /**
@@ -468,6 +468,14 @@ export class SettingsRenderer {
      * ⚠ **flag ではない**(正規設定)── flag `editor.live` はここへ昇格して退役した。
      * ⚠ **2026-09-21(#1017 段③-1)に「表示」から h4「編集」へ移した** ──
      *   書き方の作法であって、見た目の好みではない(`editDl` に入れる)。
+     *
+     * 🔴 **選択肢は 2 つだが、プルダウンのまま残す**(#1038 段J-2、§9 の覆る条件)。
+     *   ⚠ 一度ボタンの列にして実測(`TAB_SWEEP` 全幅 + スマホ幅 360 / 390px)した
+     *   ところ、**スマホ幅の 390px と 360px の両方で 2 行に折れた**(選択肢の字が
+     *   長い ──「1 画面で編集(ライブ)」「2 ペイン(原文とプレビュー)」。`TAB_SWEEP`
+     *   側は 11 幅とも 1 行のまま)。doc §9「切替ボタンの列にして…行が 2 段以上に
+     *   折れる → その項目だけプルダウンへ戻す」のとおり、プルダウンへ戻した
+     *   (本文のタグの見せ方と同じ扱い)。
      */
     const et = document.createElement('dt');
     et.textContent = '編集の仕方';
@@ -476,21 +484,20 @@ export class SettingsRenderer {
     eselect.setAttribute('data-pkc-action', 'set-editor-mode');
     eselect.setAttribute('data-pkc-field', 'editor-mode-select');
     eselect.setAttribute('aria-label', '編集の仕方');
-    for (const m of EDITOR_MODES) {
+    // ⚠ **いつ効くか**を書く ── 書かないと「押したのに変わらない」に見える
+    eselect.title =
+      '既定は「1 画面で編集(ライブ)」で、押した行だけがマークダウンの元の文になり、' +
+      'その場で書き替えられます。2 ペインは左に原文、右にプレビューが並びます。';
+    for (const c of EDITOR_MODES) {
       const opt = document.createElement('option');
-      opt.value = m.id;
-      opt.textContent = m.label;
+      opt.value = c.id;
+      opt.textContent = c.label;
       eselect.append(opt);
     }
     ed.append(eselect);
-    const enote = document.createElement('p');
-    enote.setAttribute('data-pkc-field', 'settings-note');
-    // ⚠ **いつ効くか**を書く ── 書かないと「押したのに変わらない」に見える
-    enote.textContent =
-      '既定は「1 画面で編集(ライブ)」です ── 押した行だけがマークダウンの元の文になり、その場で書き替えられます。' +
-      '2 ペインは左に原文、右にプレビューが並びます。' +
-      '切り替えは、次に編集を開いたときから効きます。';
-    ed.append(enote);
+    ed.append(
+      buildSettingsNote('本文の書き方を選びます(次に編集を開いたときから効きます)。'),
+    );
     editDl.append(et, ed);
 
     /**
@@ -531,17 +538,13 @@ export class SettingsRenderer {
     ocheck.setAttribute('data-pkc-action', 'set-open-in-edit');
     ocheck.setAttribute('data-pkc-field', 'open-in-edit');
     olabel.append(ocheck, document.createTextNode(' 開いたら、そのまま編集に入る'));
-    od.append(olabel);
-    const onote = document.createElement('p');
-    onote.setAttribute('data-pkc-field', 'settings-note');
     // ⚠ **どの操作に効くか**を書く ── 書かないと「行を押しても編集にならない」と読まれる
-    onote.textContent =
-      // ⚠ **記法を書かない** ── ここは `textContent` なので `**` がそのまま画面に出る
-      //   (PKC2 が同じ失敗をしていて、`notice-log.ts` の冒頭がまさにこれを戒めている)
-      '既定では、フォルダの一覧で Enter を押すと、まず「読む」状態で開きます。' +
-      'ここを入れると、開いた時点で編集に入ります。' +
+    olabel.title =
       '行を 1 回押して選んだだけでは編集に入りません(それは「選ぶ」で、「開く」ではありません)。';
-    od.append(onote);
+    od.append(olabel);
+    od.append(
+      buildSettingsNote('既定は「読む」状態で開き、入れると開いた時点で編集に入ります。'),
+    );
     editDl.append(ot, od);
 
     /**
@@ -558,29 +561,23 @@ export class SettingsRenderer {
     const plt = document.createElement('dt');
     plt.textContent = '書庫(zip)を開く場所';
     const pld = document.createElement('dd');
-    const plselect = document.createElement('select');
-    plselect.setAttribute('data-pkc-action', 'set-open-place');
-    plselect.setAttribute('data-pkc-field', 'open-place-select');
-    plselect.setAttribute('aria-label', '書庫(zip)を開く場所');
-    for (const o of OPEN_PLACES) {
-      const opt = document.createElement('option');
-      opt.value = o.id;
-      opt.textContent = o.label;
-      plselect.append(opt);
-    }
-    pld.append(plselect);
-    const plnote = document.createElement('p');
-    plnote.setAttribute('data-pkc-field', 'settings-note');
-    plnote.textContent =
-      '添付の書庫(zip)で「中を見る」を押したとき、一覧を別の窓に出すか、' +
-      'この画面の上に出すかが決まります。' +
-      '別の窓なら、本文を見ながらどのファイルが要るかを確かめられます。' +
-      '同じ書庫をもう一度押すと、選んでいた行はそのままで、その窓が前に出ます。' +
-      'ブラウザが別の窓を止めている場合は、この画面の上に出して、その理由を画面の下に出します。' +
-      '⚠ 電話の画面では、どちらを選んでもこの画面に出ます(画面が 1 枚なので、' +
-      '別の窓にしても本文と並べられないためです)。' +
-      '予定表や連絡先など、ほかの窓の開き方はここでは変わりません。';
-    pld.append(plnote);
+    // 🔴 選択肢 2 つ ── プルダウンをボタンの列にする(#1038 段J)
+    const plRow = buildChoiceRow({
+      field: 'open-place-select',
+      ariaLabel: '書庫(zip)を開く場所',
+      action: 'set-open-place',
+      dataAttr: 'data-pkc-open-place-value',
+      choices: OPEN_PLACES,
+      currentId: '', // render 末尾の syncOpenPlace が必ず映す
+    });
+    plRow.title =
+      '別の窓なら本文を見ながら確かめられます。ブラウザが別の窓を止めている場合は' +
+      'この画面の上に出し、理由を画面の下に出します。電話の画面ではどちらでもこの' +
+      '画面に出ます。予定表や連絡先など、ほかの窓の開き方はここでは変わりません。';
+    pld.append(plRow);
+    pld.append(
+      buildSettingsNote('添付の書庫(zip)の一覧を、別の窓かこの画面のどちらに出すかです。'),
+    );
     openDl.append(plt, pld);
 
     /**
@@ -590,6 +587,13 @@ export class SettingsRenderer {
      * ⚠ すぐ上の「書庫を開く場所」の**下**に置く ── どちらも「開く」の話である。
      * 🔑 **いま効く先を書く** ── 効かない所まで効くと読まれると、
      *   「設定したのに変わらない」になる。
+     *
+     * 🔴 **選択肢は 2 つだが、プルダウンのまま残す**(#1038 段J-2、§9 の覆る条件)。
+     *   ⚠ 一度ボタンの列にして実測(`TAB_SWEEP` 全幅 + スマホ幅 360 / 390px)した
+     *   ところ、**スマホ幅 360px でだけ 2 行に折れた**(390px と `TAB_SWEEP` の
+     *   11 幅は 1 行のまま ──「ブラウザのタブ(既定)」の字が、狭い dd の幅では
+     *   「別の窓」の隣に収まらない)。doc §9「切替ボタンの列にして…行が 2 段以上に
+     *   折れる → その項目だけプルダウンへ戻す」のとおり、プルダウンへ戻した。
      */
     const att = document.createElement('dt');
     att.textContent = 'アプリの開き方';
@@ -598,23 +602,20 @@ export class SettingsRenderer {
     atselect.setAttribute('data-pkc-action', 'set-app-open-target');
     atselect.setAttribute('data-pkc-field', 'app-open-target-select');
     atselect.setAttribute('aria-label', 'アプリの開き方');
-    for (const o of APP_OPEN_TARGETS) {
+    atselect.title =
+      '別の窓は大きさを指定して開くので、画面より大きいときはブラウザが縮めます。' +
+      'ブラウザが窓を止めているときは、止められた理由が画面の下に出ます。' +
+      '組み込みのアプリ(予定表・連絡先など)とマニュアルの窓は、ここでは変わりません。';
+    for (const c of APP_OPEN_TARGETS) {
       const opt = document.createElement('option');
-      opt.value = o.id;
-      opt.textContent = o.label;
+      opt.value = c.id;
+      opt.textContent = c.label;
       atselect.append(opt);
     }
     atd.append(atselect);
-    const atnote = document.createElement('p');
-    atnote.setAttribute('data-pkc-field', 'settings-note');
-    atnote.textContent =
-      'アプリの一覧のタイルを押したとき、ブラウザのタブに出すか、別の窓に出すかが決まります。' +
-      'PKC を「アプリとして追加」して使っている場合も、別の窓として開きます。' +
-      'その窓がタスクバーやドックで PKC と並ぶかは、お使いの OS とブラウザによります。' +
-      '別の窓は大きさを指定して開くので、画面より大きいときはブラウザが縮めます。' +
-      '⚠ ブラウザが窓を止めているときは、これまでどおり止められた理由が画面の下に出ます。' +
-      '組み込みのアプリ(予定表・連絡先など)とマニュアルの窓は、ここでは変わりません。';
-    atd.append(atnote);
+    atd.append(
+      buildSettingsNote('アプリの一覧のタイルを押したとき、タブか別の窓に出すかです。'),
+    );
     openDl.append(att, atd);
 
     /**
@@ -633,16 +634,14 @@ export class SettingsRenderer {
     acheck.setAttribute('data-pkc-action', 'set-alarm-enabled');
     acheck.setAttribute('data-pkc-field', 'alarm-enabled');
     alabel.append(acheck, document.createTextNode(' 予定の時刻になったら音で知らせる'));
+    // ⚠ **できないことを先に書く**(#280)── 鳴る前提で予定を任せて失わせない
+    alabel.title =
+      '本文の行に時刻まで書いた予定が対象です。押すとそのノートを開きます。' +
+      '起動したときに予定を数えます(切のままなら数えません)。';
     ad.append(alabel);
-    const anote = document.createElement('p');
-    anote.setAttribute('data-pkc-field', 'settings-note');
-    anote.textContent =
-      '本文の行に時刻まで書いた予定(- [ ] 打ち合わせ @2026-08-27 14:00)が対象です。' +
-      '時間になると短い音が鳴り、画面の下に知らせが出ます。押すとそのノートを開きます。' +
-      'PKC を開いている間だけ鳴ります ── 閉じている間は鳴りません(ブラウザでは' +
-      '閉じたページを時刻で起こすことができないためです)。' +
-      'ここを入れると、起動したときに予定を数えます(切のままなら数えません)。';
-    ad.append(anote);
+    ad.append(
+      buildSettingsNote('PKC を開いている間だけ鳴ります(閉じている間は鳴りません)。'),
+    );
     notifyDl.append(at, ad);
 
     /**
@@ -660,17 +659,13 @@ export class SettingsRenderer {
     vcheck.setAttribute('data-pkc-action', 'set-voice-boost');
     vcheck.setAttribute('data-pkc-field', 'voice-boost');
     vlabel.append(vcheck, document.createTextNode(' 再生するとき、声を聞き取りやすく整える'));
-    vd.append(vlabel);
-    const vnote = document.createElement('p');
-    vnote.setAttribute('data-pkc-field', 'settings-note');
-    vnote.textContent =
-      '低い唸り(空調や机の振動)を削り、小さい声を持ち上げ、大きすぎる所を抑えます。' +
-      '効くのは PKC の中で鳴らすときだけです(音と動画、本文に出る再生機、添付の下見の 3 か所)。' +
-      '録った音そのものは変わらないので、切ればいつでも元の聞こえ方に戻りますし、' +
-      '書き出したファイルや、閲覧用に書き出した HTML は元のままです。' +
-      '入れている間は音を通す仕組みが 1 つ常駐します(切っている間は作られません)。' +
+    vlabel.title =
+      '効くのは PKC の中で鳴らすときだけです(音と動画、本文に出る再生機、添付の下見)。' +
       'お使いのブラウザがこの仕組みを持っていない場合は、整わずにそのまま鳴ります。';
-    vd.append(vnote);
+    vd.append(vlabel);
+    vd.append(
+      buildSettingsNote('再生する声を聞き取りやすく整えます(録った音そのものは変わりません)。'),
+    );
     notifyDl.append(vt, vd);
 
     /**
@@ -690,17 +685,18 @@ export class SettingsRenderer {
     phcheck.setAttribute('data-pkc-action', 'set-phone-links');
     phcheck.setAttribute('data-pkc-field', 'phone-links');
     phlabel.append(phcheck, document.createTextNode(' 本文に書いた電話番号を押せるようにする'));
+    phlabel.title =
+      '日付や章番号は変わりません(0 か + で始まる 10〜11 桁だけを見ています)。' +
+      '電話をかけられるかは端末しだいです(パソコンでは何も起きないことがあります)。';
     phd.append(phlabel);
-    const phnote = document.createElement('p');
-    phnote.setAttribute('data-pkc-field', 'settings-note');
-    phnote.textContent =
-      '本文に 090-1234-5678 のように書いた番号が、押すと電話をかけられる字になります。' +
-      '全角(０９０－１２３４－５６７８)でも、+81 で始まる形でも同じです。' +
-      '日付(2026-09-09)や章番号(1-2-3)は変わりません ── ' +
-      '0 か + で始まる 10〜11 桁だけを見ています。' +
-      '切のままなら、本文の見え方はこれまでと 1 文字も変わりません。' +
-      '⚠ 電話をかけられるかは端末しだいです(パソコンでは、通話のアプリが入っていないと何も起きません)。';
-    phd.append(phnote);
+    /**
+     * 🔴 **この説明だけ 2 行まで許す**(#1038 段 J の着地前、全量の unit が捕まえた)。
+     * ⚠ 1 行に縮めた 1 稿目は「日付は変わらない」「切なら 1 文字も変わらない」を落とした ──
+     *   どちらも #278 段②で「いちばん誤解されるのはここ」として**先に言う**と決めた文である
+     *   (`tests/adapter/settings-phone-links.test.ts`)。設計 doc §9 C18 の「その 1 件だけ
+     *   2 行を許す」を当て、`tests/adapter/settings-notes.test.ts` の既知の一覧で固定する。
+     */
+    phd.append(buildSettingsNote('本文の 090-1234-5678 のような番号を、押すと電話をかけられる字にします。日付(2026-09-09)は変わらず、切のままなら本文の見え方は 1 文字も変わりません。'));
     editDl.append(pht, phd);
 
     /**
@@ -755,13 +751,9 @@ export class SettingsRenderer {
     wcheck.setAttribute('data-pkc-action', 'set-too-narrow-enabled');
     wcheck.setAttribute('data-pkc-field', 'too-narrow-enabled');
     wlabel.append(wcheck, document.createTextNode(' 狭い画面のときに断り書きを出す'));
+    wlabel.title = '幅が 360px より狭いと出ます。「OK」を押すと切れます ── ここで戻せます。';
     wd.append(wlabel);
-    const wnote = document.createElement('p');
-    wnote.setAttribute('data-pkc-field', 'settings-note');
-    wnote.textContent =
-      '幅が 360px より狭いと、画面の下に「表示が崩れることがあります」と出ます。' +
-      'その「OK」を押すと切れ、次に開いても出ません ── ここで戻せます。';
-    wd.append(wnote);
+    wd.append(buildSettingsNote('幅が狭いときに「表示が崩れることがあります」と出します。'));
     const tooNarrowDl = document.createElement('dl');
     tooNarrowDl.append(wt, wd);
 
@@ -1003,16 +995,14 @@ export class SettingsRenderer {
     wrap.setAttribute('data-pkc-region', 'settings-opened');
     const h = document.createElement('h4');
     h.textContent = '最近開いたノートの記録';
-    const note = document.createElement('p');
-    note.setAttribute('data-pkc-field', 'settings-note');
-    note.textContent =
-      '一覧の並び順で「最近開いた順」を選ぶと、この記録を使って並べます。' +
-      'この端末にだけ残り、書き出しにも、ほかの端末にも持っていきません。' +
-      '消すと、次に開いたものから積み直します。';
+    const note = buildSettingsNote(
+      '並び順「最近開いた順」に使う記録です(この端末だけ・消すと積み直します)。',
+    );
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.setAttribute('data-pkc-action', 'clear-opened-history');
     btn.textContent = '最近開いた記録を消す';
+    btn.title = 'この端末にだけ残り、書き出しにも、ほかの端末にも持っていきません。';
     wrap.append(h, note, btn);
     return wrap;
   }
@@ -1045,17 +1035,15 @@ export class SettingsRenderer {
     //    store の通知で件数の字を合わせる(器は 1 度しか組まないので購読も 1 度)
     appCopyHistory.onChange(() => this.syncCopyHistory());
 
-    const note = document.createElement('p');
-    note.setAttribute('data-pkc-field', 'settings-note');
-    note.textContent =
-      'PKC の中でコピーすると、この端末に 20 件まで残ります。貼るときは、貼り先を右クリックして選び直せます。' +
-      'この端末にだけ残り、書き出しにも、ほかの端末にも持っていきません。';
+    const note = buildSettingsNote('PKC の中でコピーした物を、この端末に 20 件まで残します。');
     wrap.append(note);
 
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.setAttribute('data-pkc-action', 'clear-copy-history');
     btn.textContent = 'コピーの履歴を消す';
+    btn.title =
+      '貼るときは、貼り先を右クリックして選び直せます。この端末にだけ残ります。';
     wrap.append(btn);
     return wrap;
   }
@@ -1155,13 +1143,11 @@ export class SettingsRenderer {
     wrap.setAttribute('data-pkc-region', 'settings-same-origin');
     const h = document.createElement('h4');
     h.textContent = 'ノートを渡して開くことを許したアプリ';
-    const note = document.createElement('p');
-    note.setAttribute('data-pkc-field', 'settings-note');
-    note.textContent =
-      'ここに載っているアプリは、ノート・添付・設定を全部読み書きできます。' +
-      '中身が 1 バイトでも変われば許可は外れ、次に開くときまた聞きます。' +
-      '⚠ これらのアプリは、この一覧そのものも書き換えられます' +
-      '(PKC3 と同じ保存領域で動くので、どこに保存しても、そのアプリから触れます)。';
+    // ⚠ この 1 行の警告は落とさない(不可侵指示「不可逆は必ず言う」に準じる ──
+    //   このアプリは一覧そのものも書き換えられるので、hover やマニュアルへ逃がさない)。
+    const note = buildSettingsNote(
+      'ノート・添付・設定を読み書きできます(この一覧も書き換えられるので注意してください)。',
+    );
     this.sameOriginList = document.createElement('ul');
     this.sameOriginList.setAttribute('data-pkc-field', 'same-origin-list');
     wrap.append(h, note, this.sameOriginList);
@@ -1216,13 +1202,10 @@ export class SettingsRenderer {
     wrap.setAttribute('data-pkc-region', 'settings-extensions');
     const h = document.createElement('h4');
     h.textContent = '目次を見せているアプリ';
-    const note = document.createElement('p');
-    note.setAttribute('data-pkc-field', 'settings-note');
-    // ⚠ **見えるものを書く**(「projection を渡す」では判断できない)
-    note.textContent =
-      'ここに載っているアプリは、ノートの題名・種類・日付と、完了や片づけの状態の一覧を読めます。' +
-      '本文と添付は渡りません。' +
-      '中身が 1 バイトでも変われば許可は外れ、次に開くときまた聞きます。';
+    // ⚠ **見えるものを書く**(「projection を渡す」では判断できない)。詳しくはマニュアル。
+    const note = buildSettingsNote(
+      'ノートの題名・種類・日付・状態の一覧を読めます(本文と添付は渡りません)。',
+    );
     this.extensionList = document.createElement('ul');
     this.extensionList.setAttribute('data-pkc-field', 'extension-list');
     wrap.append(h, note, this.extensionList);
@@ -1300,17 +1283,16 @@ export class SettingsRenderer {
     const dt = document.createElement('dt');
     dt.textContent = '保管件数';
     const dd = document.createElement('dd');
-    const select = document.createElement('select');
-    select.setAttribute('data-pkc-action', 'set-message-cap');
-    select.setAttribute('data-pkc-field', 'messages-cap-select');
-    select.setAttribute('aria-label', 'メッセージの保管件数');
-    for (const n of MESSAGE_CAP_OPTIONS) {
-      const opt = document.createElement('option');
-      opt.value = String(n);
-      opt.textContent = `${n} 件`;
-      select.append(opt);
-    }
-    dd.append(select);
+    // 🔴 選択肢 3 つ ── プルダウンをボタンの列にする(#1038 段J。メッセージの節の 1 項目)
+    const capRow = buildChoiceRow({
+      field: 'messages-cap-select',
+      ariaLabel: 'メッセージの保管件数',
+      action: 'set-message-cap',
+      dataAttr: 'data-pkc-message-cap-value',
+      choices: MESSAGE_CAP_OPTIONS.map((n) => ({ id: String(n), label: `${n} 件` })),
+      currentId: '', // render 末尾の syncMessages が必ず映す
+    });
+    dd.append(capRow);
     dl.append(dt, dd);
 
     const exportBtn = document.createElement('button');
@@ -1318,28 +1300,27 @@ export class SettingsRenderer {
     exportBtn.setAttribute('data-pkc-action', 'export-messages');
     exportBtn.setAttribute('data-pkc-message-lid', SYSTEM_MESSAGE_LID);
     exportBtn.textContent = 'メッセージを書き出す';
+    exportBtn.title = 'ノートの中身・題名・添付名は書き込まれません。バグ報告に貼れます。';
 
-    const note = document.createElement('p');
-    note.setAttribute('data-pkc-field', 'settings-note');
-    note.textContent =
-      'アプリからの知らせ(操作の結果・注意・問題・お知らせ)が溜まります。' +
-      'ノートの中身・題名・添付名は書き込まれません。' +
-      '古い分から自動で消えます(下の保管件数を超えたとき)。バグ報告にはこのノートを貼ってください。';
+    const note = buildSettingsNote(
+      'アプリの知らせが溜まります(上限を超えると古い分から自動で消えます)。',
+    );
 
     wrap.append(open, openJobs, dl, exportBtn, note);
     return wrap;
   }
 
-  /** ⚠ 未読は毎 state で変わりうる(器は触らない ── 字と select の値だけ差し替える)。 */
+  /** ⚠ 未読は毎 state で変わりうる(器は触らない ── 字とボタンの列の押され方だけ差し替える)。 */
   private syncMessages(state: AppState): void {
     if (this.messagesUnreadText)
       this.messagesUnreadText.textContent =
         state.messagesUnread > 0 ? `未読 ${state.messagesUnread} 件` : '未読はありません';
-    const select = this.region.querySelector<HTMLSelectElement>(
-      '[data-pkc-field="messages-cap-select"]',
+    syncChoiceRow(
+      this.region,
+      'messages-cap-select',
+      'data-pkc-message-cap-value',
+      String(currentMessageCap()),
     );
-    const cur = String(currentMessageCap());
-    if (select && select.value !== cur) select.value = cur;
   }
 
   private buildExternalImages(): HTMLElement {
@@ -1353,25 +1334,24 @@ export class SettingsRenderer {
     const dt = document.createElement('dt');
     dt.textContent = '読み込む';
     const dd = document.createElement('dd');
-    const select = document.createElement('select');
-    select.setAttribute('data-pkc-action', 'set-external-images');
-    select.setAttribute('data-pkc-field', 'external-images-select');
-    select.setAttribute('aria-label', '外部の画像を読み込む');
-    for (const m of EXTERNAL_IMAGE_MODES) {
-      const opt = document.createElement('option');
-      opt.value = m.id;
-      opt.textContent = m.label;
-      select.append(opt);
-    }
-    dd.append(select);
-    const note = document.createElement('p');
-    note.setAttribute('data-pkc-field', 'settings-note');
-    note.textContent =
-      '本文に書かれた外部の画像(https:// で始まるもの)と、html のコードブロックの中の画像です。' +
-      '読み込むと、相手のサーバーに「この端末がいまこれを開いた」ことが伝わります。' +
+    // 🔴 選択肢 3 つ ── プルダウンをボタンの列にする(#1038 段J。許可の節の 1 項目)
+    const eiRow = buildChoiceRow({
+      field: 'external-images-select',
+      ariaLabel: '外部の画像を読み込む',
+      action: 'set-external-images',
+      dataAttr: 'data-pkc-external-images-value',
+      choices: EXTERNAL_IMAGE_MODES,
+      currentId: '', // render 末尾の syncExternalImages が必ず映す
+    });
+    eiRow.title =
       '「常に確認」ではノートごとに聞き、答えはタブを閉じるまで覚えます。' +
       '書き出した HTML に画像が入るのは「常にオン」のときだけです。';
-    dd.append(note);
+    dd.append(eiRow);
+    dd.append(
+      buildSettingsNote(
+        '本文と html コードの外部画像を読み込むかです(読み込むと先方に伝わります)。',
+      ),
+    );
     dl.append(dt, dd);
     wrap.append(dl);
     return wrap;
@@ -1408,15 +1388,17 @@ export class SettingsRenderer {
       opt.title = m.hint;
       select.append(opt);
     }
+    select.title =
+      'コピーすると同じ内容が複数の形でクリップボードに入り、正確さは相手のアプリで違います。' +
+      'フラグ「貼り付けたとき、何が届いてどれを使ったかを画面に出す」で中身の種類が見えます。';
     dd.append(select);
-    const note = document.createElement('p');
-    note.setAttribute('data-pkc-field', 'settings-note');
-    note.textContent =
-      'コピーすると、同じ内容が複数の形(ウェブページの形 / リッチテキスト / ただの文字)で' +
-      'クリップボードに入ります。どれが正確かは相手のアプリによって違うので、崩れるときは切り替えてください。' +
-      'フラグの「貼り付けたとき、何が届いてどれを使ったかを画面に出す」を入れると、' +
-      '実際に何が届いたかが見えます(中身は出しません)。';
-    dd.append(note);
+    /**
+     * 🔴 **この説明だけ 2 行まで許す**(#1038 段 J の着地前、全量の unit が捕まえた)。
+     * ⚠ 1 稿目はフラグへの案内を `title`(乗せたときの字)へ移したので、**画面の字から消えた**
+     *   ── この設定とフラグは 2 つで 1 組である(`tests/adapter/settings-paste-source.test.ts`)。
+     *   フラグの名前は**画面の字どおり**に書く(縮めると、user がフラグの一覧で探せない)。
+     */
+    dd.append(buildSettingsNote('貼り付けで読み取る形です(崩れるときは切り替えてください)。フラグの「貼り付けたとき、何が届いてどれを使ったかを画面に出す」を入れると、何が届いたかが見えます。'));
     dl.append(dt, dd);
     wrap.append(dl);
     return wrap;
@@ -1428,11 +1410,12 @@ export class SettingsRenderer {
    * ── そして user は「変えたのに戻っている」と読む(`syncTheme` と同じ理由)。
    */
   private syncExternalImages(): void {
-    const select = this.region.querySelector<HTMLSelectElement>(
-      '[data-pkc-field="external-images-select"]',
+    syncChoiceRow(
+      this.region,
+      'external-images-select',
+      'data-pkc-external-images-value',
+      this.externalImages.getMode(),
     );
-    const cur = this.externalImages.getMode();
-    if (select && select.value !== cur) select.value = cur;
   }
 
   /**
@@ -1524,11 +1507,12 @@ export class SettingsRenderer {
    * ⚠ 正本は DOM(`applyProseAlign` が当てた属性)── 保存を読み直さない。
    */
   private syncProseAlign(): void {
-    const select = this.region.querySelector<HTMLSelectElement>(
-      '[data-pkc-field="prose-align-select"]',
+    syncChoiceRow(
+      this.region,
+      'prose-align-select',
+      'data-pkc-prose-align-value',
+      currentProseAlign(document.documentElement),
     );
-    const cur = currentProseAlign(document.documentElement);
-    if (select && select.value !== cur) select.value = cur;
   }
 
   /**
@@ -1538,11 +1522,7 @@ export class SettingsRenderer {
    *   (見え方のトークンではない)ので、当てる先が無い。
    */
   private syncOpenPlace(): void {
-    const select = this.region.querySelector<HTMLSelectElement>(
-      '[data-pkc-field="open-place-select"]',
-    );
-    const cur = currentOpenPlace();
-    if (select && select.value !== cur) select.value = cur;
+    syncChoiceRow(this.region, 'open-place-select', 'data-pkc-open-place-value', currentOpenPlace());
   }
 
   /**
@@ -1563,11 +1543,12 @@ export class SettingsRenderer {
    * ⚠ 正本は DOM(`applyTextScale` が当てた属性)── 保存を読み直さない。
    */
   private syncTextScale(): void {
-    const select = this.region.querySelector<HTMLSelectElement>(
-      '[data-pkc-field="text-scale-select"]',
+    syncChoiceRow(
+      this.region,
+      'text-scale-select',
+      'data-pkc-text-scale-value',
+      currentTextScale(document.documentElement),
     );
-    const cur = currentTextScale(document.documentElement);
-    if (select && select.value !== cur) select.value = cur;
   }
 
   /**
@@ -1576,20 +1557,19 @@ export class SettingsRenderer {
    * ⚠ 正本は DOM(`applyReadColumns` が当てた属性)── 保存を読み直さない。
    */
   private syncReadColumns(): void {
-    const select = this.region.querySelector<HTMLSelectElement>(
-      '[data-pkc-field="read-columns-select"]',
-    );
     const cur = currentReadColumns(document.documentElement);
-    if (select && select.value !== cur) select.value = cur;
+    syncChoiceRow(this.region, 'read-columns-select', 'data-pkc-read-columns-value', cur);
     this.syncColumnsEffective(cur);
     // ⚠ 段の線も**同じ 1 か所**で映す ── 器は 1 度しか組まないので、映さないと
     //    別の面へ行って戻ったとき古い値が見える(§7)
-    const rule = this.region.querySelector<HTMLSelectElement>(
-      '[data-pkc-field="column-rule-select"]',
+    syncChoiceRow(
+      this.region,
+      'column-rule-select',
+      'data-pkc-column-rule-value',
+      currentColumnRule(document.documentElement),
     );
-    const curRule = currentColumnRule(document.documentElement);
-    if (rule && rule.value !== curRule) rule.value = curRule;
-    // ⚠ タグの見せ方も**同じ 1 か所**で映す(理由は上と同じ)
+    // ⚠ タグの見せ方も**同じ 1 か所**で映す(理由は上と同じ。⚠ ここはプルダウンのまま
+    //   ── #1038 段J §9 の覆る条件で戻した)
     const badge = this.region.querySelector<HTMLSelectElement>(
       '[data-pkc-field="tag-badge-select"]',
     );

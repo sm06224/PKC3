@@ -30,7 +30,11 @@ async function writeNote(page: Page, body: string): Promise<void> {
   await expect(page.locator('[data-pkc-field="detail-body"] p').first()).toBeVisible();
 }
 
-/** 設定の select を選ぶ。⚠ `<select>` は押すと OS の一覧が開くので、届くことだけ見る。 */
+/**
+ * 設定の select を選ぶ。⚠ `<select>` は押すと OS の一覧が開くので、届くことだけ見る。
+ * ⚠ #1038 段J で一度ボタンの列にしたが、実測で `TAB_SWEEP` の複数幅で 2 行に
+ *   折れたため、この項目だけプルダウンへ戻した(§9 の覆る条件)。
+ */
 async function chooseBadge(page: Page, value: string): Promise<void> {
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
   const select = page.locator('[data-pkc-field="tag-badge-select"]');

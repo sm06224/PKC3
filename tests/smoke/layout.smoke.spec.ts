@@ -336,6 +336,24 @@ test('🔴 上の帯は無く、設定は左の列から押せる', async ({ pag
  *   (左の列の下限が 200px で、境目の下側の 242px より狭かった)。
  */
 const TAB_SWEEP = [1920, 1440, 1366, 1280, 1248, 1101, 1024, 950, 901, 860, 720] as const;
+
+/**
+ * 🔴 「システム」のボタンの列(#1038 段J)のうち、選択肢 4 つ以下でボタンの列の
+ * まま残った 7 項目。⚠ **`tests/adapter/settings-choice-rows.test.ts` の
+ * `CHOICE_ROWS` と対**(field 名だけの写し)── あちらが増減したら、ここも直す。
+ * 本文のタグの見せ方 / 編集の仕方 / アプリの開き方 は §9 の覆る条件で
+ * プルダウンへ戻したのでここに含めない(`<select>` は折り返しを気にしない)。
+ */
+const SETTINGS_CHOICE_ROW_FIELDS = [
+  'prose-align-select',
+  'text-scale-select',
+  'read-columns-select',
+  'column-rule-select',
+  'open-place-select',
+  'messages-cap-select',
+  'external-images-select',
+] as const;
+
 /**
  * 🔴 **左の列のボタンは、どの幅でも名前が器に収まっている**(2026-08-27)。
  *
@@ -454,6 +472,38 @@ test('🔴 左の列のボタンは、どの幅でも名前が器からはみ出
       });
       expect(rows, `w=${w}: 「作る」帯が ${rows} 段になっている(2 段までにする)`).toBeLessThanOrEqual(2);
     }
+    /**
+     * 🔴 **設定のボタンの列は、どの幅でも 1 行のまま**(#1038 段J-2、着地前レビュー
+     * ── 実測(`TAB_SWEEP` 全幅 + スマホ幅 360/390px)して行が 2 行以上に折れた
+     * 項目はプルダウンへ戻した。ここは残った 7 項目が**その後も折れないまま**
+     * であることを、既に開いている道中(この test の `gotoApp` の続き)で見る
+     * ── 新しく起動を足さない(`scripts/smoke-budget.mjs`)。
+     * ⚠ お知らせの帯は初回の 1 幅だけ畳む ── 一度畳めば以後の幅では localStorage に
+     *   既読が残るので再度出ない。
+     */
+    if (w === TAB_SWEEP[0]) await dismissAnnounce(page);
+    await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+    const rowWrap = await page.evaluate((fields: readonly string[]) => {
+      const out: Record<string, number> = {};
+      for (const f of fields) {
+        const row = document.querySelector(`[data-pkc-field="${f}"]`);
+        if (!row) {
+          out[f] = -1;
+          continue;
+        }
+        out[f] = new Set(
+          [...row.querySelectorAll('button')].map((b) => Math.round(b.getBoundingClientRect().top)),
+        ).size;
+      }
+      return out;
+    }, SETTINGS_CHOICE_ROW_FIELDS);
+    for (const f of SETTINGS_CHOICE_ROW_FIELDS) {
+      expect(rowWrap[f], `w=${w}: 設定の「${f}」の列が描かれていない`).toBeGreaterThan(0);
+      expect(rowWrap[f], `w=${w}: 設定の「${f}」の列が ${rowWrap[f]} 行に折れている`).toBe(1);
+    }
+    // ⚠ 戻す口は押さない ── 次の幅の頭で `gotoApp` が読み直すので不要
+    //   (押すと幅によって帯の畳み方が変わり、`clickReal` の reachability が
+    //   狭い幅で崩れることがある)
     seen.push({ w, n: m.named.length });
   }
   // ⚠ どの幅でも同じ数を見ていること(幅で数が変わるなら、どこかが畳まれている)

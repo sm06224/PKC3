@@ -409,7 +409,11 @@ test('🔴 設定で配色と文字の大きさを変えて、もう一度押す
   await page.bringToFront();
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
   await page.locator('[data-pkc-field="theme-select"]').selectOption('dracula');
-  await page.locator('[data-pkc-field="text-scale-select"]').selectOption('xlarge');
+  // ⚠ #1038 段J でプルダウン → ボタンの列に置き換え(選択肢はそのまま)
+  await clickReal(
+    page,
+    page.locator('[data-pkc-field="text-scale-select"] button[data-pkc-text-scale-value="xlarge"]'),
+  );
   await expect(page.locator('html')).toHaveAttribute('data-pkc-theme', 'dracula');
 
   // もう一度押す ── ヘルプへ戻らなくても、アプリの一覧のタイルでもよいが、ここは同じボタン

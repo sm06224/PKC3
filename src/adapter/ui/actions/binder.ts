@@ -8294,9 +8294,14 @@ const ACTIONS: Record<string, ActionHandler> = {
   /**
    * 🔴 **メッセージの保管件数を選ぶ**(設計 doc §7、段②a)。
    * ⚠ 選べる値以外は `setMessageCap` が黙って無視する(壊れた値を書かせない)。
+   * ⚠ `set-theme` と同じ受け方(`<select>` でもボタンでも通す ── #1038 段J)。
    */
   'set-message-cap': (_dispatcher, target) => {
-    const n = target instanceof HTMLSelectElement ? Number(target.value) : NaN;
+    const raw =
+      target instanceof HTMLSelectElement
+        ? target.value
+        : target.getAttribute('data-pkc-message-cap-value');
+    const n = raw === null ? NaN : Number(raw);
     if (MESSAGE_CAP_OPTIONS.includes(n)) setMessageCap(n);
   },
   /**
