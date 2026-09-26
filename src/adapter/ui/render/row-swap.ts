@@ -142,6 +142,26 @@ function wrappedExtraRows(ta: HTMLTextAreaElement): number {
   return Math.ceil(overflow / lineHeight);
 }
 
+/**
+ * 🔴 **入力欄の高さを中身に合わせる**(#1044 段2、F-F)。
+ *
+ * ⚠ `syncActiveBox`(この module の本命)が本文差し替え(RowSwap)のために持っている
+ *   計算と**同じ 1 本**にする(2 つ目の実装を作らない ── CLAUDE.md §7)。
+ *   章の欄(`section-box.ts`)もこれを呼ぶ。
+ *
+ * @param cap 上限(行)。省略時は {@link ROWS_CAP}(全文差し替えと同じ 40 ──
+ *   `Ctrl+A` の全文差し替えで 5000 行の箱ができるのを防ぐのと同じ理由)
+ */
+export function sizeTextareaToContent(ta: HTMLTextAreaElement, cap: number = ROWS_CAP): void {
+  const logical = Math.max(1, ta.value.split('\n').length);
+  ta.rows = Math.min(logical, cap);
+  // 🔑 測るのは上限に届いていないときだけ(打鍵ごとの reflow を増やさない)
+  const wanted = logical < cap ? logical + wrappedExtraRows(ta) : logical;
+  if (wanted !== logical) ta.rows = Math.min(wanted, cap);
+  if (wanted > cap) ta.setAttribute('data-pkc-scroll', '1');
+  else ta.removeAttribute('data-pkc-scroll');
+}
+
 /** 入れ子の要素で、行ごとの刻印を持つもの(先に書いた方を優先して探す)。 */
 const SUB_UNITS: readonly { selector: string; type: string }[] = [
   { selector: 'tr', type: 'tr_open' },
@@ -1117,24 +1137,10 @@ export class RowSwap {
      * 高さは中身に合わせる(属性だけ ── 封印中に呼ばれても composition は壊れない)。
      * ⚠ **上限を置く**(S6)── `Ctrl+A` の全文差し替えでは 5000 行の箱ができて
      * しまい、面の scroll が二重になる。上限に当たったら箱の中で scroll させる。
+     * 🔑 計算そのものは {@link sizeTextareaToContent} の 1 本(#1044 段2、F-F ──
+     *   章の欄と共有する。2 つ目の実装を作らない)。
      */
-    const logical = Math.max(1, a.textarea.value.split('\n').length);
-    a.textarea.rows = Math.min(logical, ROWS_CAP);
-    /**
-     * 🔴 **折り返した先も数える**(2026-08-15、user 報告「1 行の選択をすると
-     * 表示が適切なサイズのテキストブロックにならないため編集しにくい」)。
-     *
-     * ⚠ 改行の数だけで高さを決めていたので、**長い 1 段落は必ず `rows=1`** になり、
-     * CSS が `overflow: hidden` なので**末尾しか見えない 1 行の窓**に押し込まれていた
-     * (画面には文の途中から出る)。原文は折り返して表示されるのだから、
-     * 数えるべきは改行ではなく**視覚の行**である。
-     * 🔑 測るのは**上限に届いていないときだけ** ── 届いていれば箱の中で scroll させる
-     * ので、それ以上の測定は要らない(打鍵ごとの reflow を増やさない)。
-     */
-    const wanted = logical < ROWS_CAP ? logical + wrappedExtraRows(a.textarea) : logical;
-    if (wanted !== logical) a.textarea.rows = Math.min(wanted, ROWS_CAP);
-    if (wanted > ROWS_CAP) a.textarea.setAttribute('data-pkc-scroll', '1');
-    else a.textarea.removeAttribute('data-pkc-scroll');
+    sizeTextareaToContent(a.textarea, ROWS_CAP);
     const open = findOpenEnds(a.textarea.value);
     const block = open.find((o) => o.kind !== 'inline') ?? open[0];
     if (block === undefined) a.slot.removeAttribute('data-pkc-open-end');

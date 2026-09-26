@@ -88,6 +88,12 @@ import type { SearchDetailRow } from '@features/filter/search-snippet';
 import type { Relation } from '@core/model/entry-meta';
 import type { Dispatcher } from './dispatcher';
 import type { TagInputField } from './app-state';
+import {
+  sectionSaveFailureNote,
+  SECTION_SAVE_ANOTHER_WINDOW_NOTE,
+  SECTION_SAVE_NOT_FOUND_NOTE,
+} from './app-state';
+import { replaceSectionByHeading } from '@features/markdown/append-target';
 
 /**
  * effect 層が必要とする store 面(test では fake を注入)。
@@ -2978,6 +2984,100 @@ export function connectStoreEffects(
             stamp(ev.lid, stamps);
           } catch (e) {
             fail(`追記を保存できませんでした: ${String(e)}`);
+          }
+        });
+        break;
+      /**
+       * 🔴 **章の欄の保存**(#1044 段2 3巡目の修理、S1)。read→書換→write を
+       * 1 op として直列 queue に載せる(同一 lid の先行 persist の後に読むことが
+       * 保証される ── 追記(`REQUEST_APPEND`)と同じ理由)。
+       *
+       * 🔴 **本文は event に載っていない**。ここで disk から読み直す ── 画面が持つ
+       * `openBody.body` を基底にすると、章の欄が開いている間ずっと届かない別経路の
+       * 書込(別タブ / 別窓)を巻き戻す(`REQUEST_APPEND` の docstring と同じ理由。
+       * `SAVE_SECTION_DRAFT` の docstring 参照)。
+       * ⚠ **失敗しても必ず `SECTION_SAVE_FAILED` を出す**(保存中の錠 `saving` を解く)。
+       *   出さないと user は永久に章を保存できなくなり、理由も分からない。
+       */
+      case 'REQUEST_SECTION_SAVE':
+        enqueue(async () => {
+          if (disposed) return;
+          const fail = (error: string): void => {
+            if (disposed) return;
+            dispatcher.dispatch({
+              type: 'SECTION_SAVE_FAILED',
+              lid: ev.lid,
+              gen: ev.gen,
+              heading: ev.heading,
+              error,
+            });
+          };
+          try {
+            const body = await store.getBody(ev.lid);
+            if (disposed) return;
+            if (body === null) return fail(SECTION_SAVE_NOT_FOUND_NOTE);
+            /**
+             * 🔴 **読んでから書くまでの間に、別の窓が書いていたら読み直してもう一度
+             *   当て直す**(#178 と同じ理由。`REQUEST_APPEND` の `tryAppend` 参照)。
+             * ⚠ **1 回だけ**(無限に回さない)。それでも重なったら黙らない。
+             * ⚠ **`replaceSectionByHeading` の断り(missing / ambiguous / mismatch)は
+             *   読み直しても直らない** ── 見出しの名前と原文の一致で決まるので、
+             *   もう一度読んでも同じ理由で断られる。断ってよい(disk は 1 バイトも
+             *   変わらない ── これが「別の場所でその章自身が書き換えられていた」の
+             *   唯一の正しい結果である)。
+             */
+            const tryReplace = async (
+              base: string,
+            ): Promise<
+              | { readonly ok: true; readonly stamps: EntryStamps; readonly newBody: string; readonly ext: FlavorExtract }
+              | { readonly ok: false; readonly reason: 'missing' | 'ambiguous' | 'mismatch' }
+            > => {
+              const replaced = replaceSectionByHeading(base, ev.heading, ev.original, ev.text);
+              if (!replaced.ok) return { ok: false, reason: replaced.reason };
+              const ext = extractMeta(ev.archetype, replaced.body);
+              const stamps = await store.persistEntry(
+                {
+                  lid: ev.lid,
+                  title: ev.title,
+                  archetype: ev.archetype,
+                  body: replaced.body,
+                  entryOrder: ev.entryOrder,
+                  status: ext.status,
+                  date: ext.date,
+                  archived: ext.archived,
+                },
+                // 🔑 全文編集の保存と同じ形(checkpoint: true ── 章の書換えは文章の書換え)
+                { checkpoint: true, expectHash: contentHash64Hex(base) },
+              );
+              return { ok: true, stamps, newBody: replaced.body, ext };
+            };
+            let attempt = await tryReplace(body);
+            if (!attempt.ok) return fail(sectionSaveFailureNote(attempt.reason));
+            if (attempt.stamps.conflict === true) {
+              // ⚠ **読み直してから**当て直す(古い基底で再送しない)
+              const fresh = await store.getBody(ev.lid);
+              if (disposed) return;
+              if (fresh === null) return fail(SECTION_SAVE_NOT_FOUND_NOTE);
+              attempt = await tryReplace(fresh);
+              if (!attempt.ok) return fail(sectionSaveFailureNote(attempt.reason));
+              if (attempt.stamps.conflict === true)
+                return fail(SECTION_SAVE_ANOTHER_WINDOW_NOTE);
+            }
+            const { stamps, newBody, ext } = attempt;
+            if (disposed) return;
+            dispatcher.dispatch({
+              type: 'SECTION_SAVED',
+              lid: ev.lid,
+              gen: ev.gen,
+              heading: ev.heading,
+              body: newBody,
+              status: ext.status,
+              date: ext.date,
+              archived: ext.archived,
+            });
+            stamp(ev.lid, stamps);
+          } catch (e) {
+            fail(`章を保存できませんでした: ${String(e)}`);
           }
         });
         break;

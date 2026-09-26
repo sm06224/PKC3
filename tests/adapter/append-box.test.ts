@@ -19,10 +19,11 @@ import { appMessagePost } from '../../src/adapter/platform/message-post';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
+import { bodyLockOf, initialState, reduce } from '../../src/adapter/state/app-state';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
-import { AppendBoxRenderer } from '../../src/adapter/ui/render/append-box';
+import { AppendBoxRenderer, appendModeOf } from '../../src/adapter/ui/render/append-box';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { appPanes } from '../../src/adapter/ui/render/pane-visibility';
 import { stubRevisionOps } from '../helpers/revision-stub';
@@ -691,5 +692,51 @@ describe('🔴 付箋の窓 ── 追記欄で Escape(#1042 段②)', () => {
     const input = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="append-input"]')!;
     pressEscape(input);
     expect(d.getState().error, '断り文が出ていない').toBe(CLOSE_VIEW_WINDOW_REFUSED);
+  });
+});
+
+/**
+ * 🔴 **章の欄が握っているときは、追記欄を出さない**(#1044 段2、F-C)。
+ *
+ * ⚠ 直す前は `bodyLockOf` / `appendModeOf` が `phase === 'editing'` だけを見て
+ *   いたので、章の欄(`phase` は `ready` のまま)が開いている間、追記欄は
+ *   `{ kind: 'ready' }` を返し続けていた ── **書けるように見えていた**
+ *   (設計 doc §3「同じノートへの他の書込は断る」に反する)。
+ */
+describe('🔴 追記欄と章の欄(#1044 段2、F-C)', () => {
+  function bootedWithSectionDraft() {
+    let s = reduce(initialState, {
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [meta('n1', 'text')],
+      relations: [],
+    }).state;
+    s = reduce(s, { type: 'SELECT_ENTRY', lid: 'n1' }).state;
+    s = reduce(s, { type: 'BODY_LOADED', lid: 'n1', body: '## 章\n\n中身\n' }).state;
+    return reduce(s, { type: 'OPEN_SECTION_DRAFT', lid: 'n1', line: 0 }).state;
+  }
+
+  it('🔴 bodyLockOf は章の欄を holder: "section" として返す', () => {
+    const s = bootedWithSectionDraft();
+    expect(s.sectionDraft, '前提が崩れている(章の欄が開いていない)').not.toBeNull();
+    expect(bodyLockOf(s)).toEqual({ lid: 'n1', holder: 'section' });
+  });
+
+  it('🔴 appendModeOf は hidden を返す(以前は ready を返し、書けるように見えていた)', () => {
+    const s = bootedWithSectionDraft();
+    expect(appendModeOf(s)).toEqual({ kind: 'hidden' });
+  });
+
+  it('対照群 ── 章の欄が無ければ、いつもどおり ready', () => {
+    let s = reduce(initialState, {
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [meta('n1', 'text')],
+      relations: [],
+    }).state;
+    s = reduce(s, { type: 'SELECT_ENTRY', lid: 'n1' }).state;
+    s = reduce(s, { type: 'BODY_LOADED', lid: 'n1', body: '## 章\n\n中身\n' }).state;
+    expect(bodyLockOf(s)).toBeNull();
+    expect(appendModeOf(s)).toEqual({ kind: 'ready', lid: 'n1' });
   });
 });

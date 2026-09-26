@@ -487,7 +487,9 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     const acts = r.acts();
     // ⚠ 4 つ目「この章をコピー」は #677 で足した(既存の 3 つの**下**)
     // ⚠ 5 つ目「章の参照をコピー」は #579 で足した(写す 2 つを隣に)
-    expect(acts.slice(0, 5), '見出しの 5 つが出ていない').toEqual([
+    // ⚠ 「この章を編集する」は #1044 段2 で**頭**へ足した(「ここから編集する」の上)
+    expect(acts.slice(0, 6), '見出しの 6 つが出ていない').toEqual([
+      'edit-section',
       'edit-from-heading',
       'append-at-heading',
       'toggle-heading-fold',
@@ -501,7 +503,7 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
      * 🔴 **条件つきの「取り込む」まで見る**(着地前レビュー 🔴3)── `BODY_MENU_ACTIONS`
      *   だけと突き合わせる変異は、fixture に外部画像が 0 枚だと素通りした。
      */
-    expect(acts.slice(5), '本文のメニューが消えている / 取り込みが見出しの枝だけ落ちた').toEqual([
+    expect(acts.slice(6), '本文のメニューが消えている / 取り込みが見出しの枝だけ落ちた').toEqual([
       'add-place',
       ...BODY_MENU_ACTIONS.map((a) => a.action),
       'adopt-external-images',
@@ -683,7 +685,8 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     const btn = r.host.querySelector<HTMLElement>('#h-a [data-pkc-field="heading-fold"]');
     expect(btn, '畳みのボタンが出ていない(fixture の前提が崩れている)').not.toBeNull();
     rightClick(btn!);
-    expect(r.acts().slice(0, 4), '帯の上で右クリックすると見出しの物が消える').toEqual([
+    expect(r.acts().slice(0, 5), '帯の上で右クリックすると見出しの物が消える').toEqual([
+      'edit-section',
       'edit-from-heading',
       'append-at-heading',
       'toggle-heading-fold',
@@ -715,6 +718,8 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     );
     // ⚠ 章の範囲も畳みと同じ数え方(直下の並び)なので、入れ子では出さない(#677)
     expect(acts, '入れ子で切り出せない「この章をコピー」を出した').not.toContain('copy-chapter-md');
+    // ⚠ 章だけ編集も append-target.ts の scanHeadings と同じ数え方(#1044 段2)
+    expect(acts, '入れ子で切り出せない「この章を編集する」を出した').not.toContain('edit-section');
   });
 
   /**
@@ -728,6 +733,8 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     const acts = r.acts();
     expect(acts, '編集の口まで落ちている').toContain('edit-from-heading');
     expect(acts, '入り先にできない見出しで追記の口を出した').not.toContain('append-at-heading');
+    // ⚠ 章だけ編集も append-target.ts の scanHeadings と同じ `#`〜`###` 限り(#1044 段2)
+    expect(acts, '`####` で切り出せない「この章を編集する」を出した').not.toContain('edit-section');
   });
 
   /**
@@ -742,6 +749,8 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     const acts = r.acts();
     expect(acts, '編集の口まで落ちている').toContain('edit-from-heading');
     expect(acts, '追記できないノートで追記の口を出した').not.toContain('append-at-heading');
+    // ⚠ 章だけ編集は append-mode に依存しない(`edit-from-heading` と同じ。#1044 段2)
+    expect(acts, '添付のノートで章だけ編集の口が落ちている').toContain('edit-section');
   });
 
   it('🔴 「ここに追記する」で、追記の入り先が動く', () => {
@@ -828,6 +837,68 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
   });
 });
 
+
+/**
+ * 🔴 **留めた枠(split-body)の見出しは、この面のメニューを出さない**(#1044 段2、F-H)。
+ *
+ * ⚠ CLAUDE.md §7「押した物と効く先が食い違う門は口ごとに要る」── `startSectionEditAt`
+ *   は `dispatcher.getState().openBody?.lid`(= 主の枠 / いま選んでいるノート)しか
+ *   見ないので、留めた枠の見出しから「この章を編集する」を撃てると
+ *   **押していないノート**を書き換えかねない。
+ *
+ * 🔑 検算すると、事故は起きない ── 見出しメニュー一式(`edit-section` を含む)を
+ *   組む枝は**`[data-pkc-field="detail-body"]` の中でだけ**動く(`onContextMenu` の
+ *   「横に留めた枠は `split-body` なので、ここには当たらない」)。留めた枠は
+ *   `DetailRenderer` が `field()` で `detail-*` を `split-*` に変えて描く
+ *   (`detail.ts` の `pinnedLid`)ので、この門を素通りしない。この test はその
+ *   **門そのもの**を pin する(実装は直していない)。
+ */
+describe('留めた枠(split-body)の見出しは、この面のメニューを出さない(#1044 段2、F-H)', () => {
+  it('🔴 split-body の見出しを右クリックしても、メニューが 1 つも出ない', () => {
+    document.body.textContent = '';
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    // 主の枠(detail-body)── 対照群として空のまま置く(前提の器)
+    const main = document.createElement('div');
+    main.setAttribute('data-pkc-field', 'detail-body');
+    root.append(main);
+    /**
+     * 留めた枠(`split-body`)── `detail.ts` の `field()` が `pinnedLid !== null` の
+     * とき `detail-*` を `split-*` へ変える形と**同じ属性名**で組む(実物と綴りを揃える)。
+     */
+    const pinned = document.createElement('div');
+    pinned.setAttribute('data-pkc-field', 'split-body');
+    pinned.innerHTML = '<h2 data-pkc-source-line="0" id="h-pinned">留めたノートの章</h2>';
+    root.append(pinned);
+    document.body.append(root);
+    const said: string[] = [];
+    const d = new Dispatcher();
+    bindActions(root, d, { showStatus: (t) => said.push(t) });
+    d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [
+        {
+          lid: 'n1',
+          title: '主のノート',
+          archetype: 'text',
+          created_at: null,
+          updated_at: null,
+          entry_order: 1,
+          status: null,
+          date: null,
+          archived: 0,
+        } as never,
+      ],
+      relations: [],
+    });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '本文' });
+    const heading = root.querySelector<HTMLElement>('#h-pinned')!;
+    rightClick(heading);
+    expect(root.querySelector(MENU), '留めた枠の見出しでメニューが出た').toBeNull();
+  });
+});
 
 /**
  * 🔴 **メニューが出た後にノートが替わっても、別のノートに効かない**(#596 D)。

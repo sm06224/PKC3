@@ -13,7 +13,15 @@ import 'katex/dist/katex.min.css';
 
 import { Dispatcher } from '@adapter/state/dispatcher';
 import { loadSplitLids, saveSplitLids } from '@adapter/platform/split-store';
-import { isAsidePane, phaseBlockReason, viewModeLabel, type ViewMode } from '@adapter/state/app-state';
+import {
+  hasUnsavedTyping,
+  isAsidePane,
+  phaseBlockReason,
+  SECTION_DRAFT_NOTE,
+  unsavedTypingLidOf,
+  viewModeLabel,
+  type ViewMode,
+} from '@adapter/state/app-state';
 import { bindEditLockRelease } from '@adapter/state/edit-lock-release';
 import { connectStoreEffects, type StoreEffects } from '@adapter/state/store-effects';
 import { DuckDbRunner } from '@adapter/platform/duckdb/duckdb-runner';
@@ -236,7 +244,7 @@ import {
   writeBackFile,
   type LaunchedHandle,
 } from '@adapter/platform/launched-files';
-import { whenPhaseReady } from '@adapter/state/wait-for-ready';
+import { whenPhaseReady, whenAcceptingUnrefusedImport } from '@adapter/state/wait-for-ready';
 import { reloadSnapshot } from '@adapter/state/reload-snapshot';
 import type { ExtWriteOp } from '@features/extension/ext-write';
 import { applyExtWriteOps } from '@adapter/state/ext-write-apply';
@@ -940,7 +948,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * ⚠ 20 行下の更新の案内(`createUpdatePrompt`)と**同じ答え**にしてある(§7)。
    */
   onContainerWiped = (): void => {
-    const plan = wipedElsewhere(dispatcher.getState().phase === 'editing');
+    /**
+     * 🔴 **章の欄の打ちかけも守る**(#1044 段2、F-C)。⚠ 直す前は
+     *   `phase === 'editing'` だけを見ていたので、章の欄(`phase` は `ready` の
+     *   まま)に打っていても**聞かずに読み込み直していた**。
+     */
+    const plan = wipedElsewhere(hasUnsavedTyping(dispatcher.getState()));
     if (plan.ask === null) {
       location.reload();
       return;
@@ -1729,9 +1742,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   if (followerConn) {
     const conn = followerConn;
     conn.onEditRevoked((_cid, lid) => {
-      // ⚠ いま編集している当のノートのときだけ言う(そうでない剥奪は user に関係ない)
+      /**
+       * ⚠ いま編集している当のノートのときだけ言う(そうでない剥奪は user に関係ない)。
+       * 🔴 **章の欄でも同じ**(#1044 段2、F-C)── 直す前は `phase === 'editing'` だけを
+       *   見ていたので、章の欄で編集権を取られても**無言**だった(押しても効かない
+       *   ロックを握ったまま、理由も出ない)。
+       */
       const st = dispatcher.getState();
-      if (!(st.phase === 'editing' && st.openBody?.lid === lid)) return;
+      if (unsavedTypingLidOf(st) !== lid) return;
       dispatcher.dispatch({
         type: 'OP_FAILED',
         error:
@@ -2346,7 +2364,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // 🔴 danger ── 下書きは AppState にしか無く beforeunload も無いので本当に戻せない。
     //    「戻しにくい操作は危険色」の規則(docs-parity の DANGER_SITES)に照らして
     //    付いていないほうが誤りだった(#312 の最初の仕事②)
-    isEditing: () => dispatcher.getState().phase === 'editing',
+    // 🔴 章の欄の打ちかけも守る(#1044 段2、F-C。上の `onContainerWiped` と同じ穴)
+    isEditing: () => hasUnsavedTyping(dispatcher.getState()),
     confirmDiscard: () =>
       ask('編集中の内容は保存されません。新しい版に切り替えますか?', {
         okLabel: '新しい版に切り替える',
@@ -2996,10 +3015,25 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * ⚠ 本文は取込時に**原文のまま**入っている(`import-markdown.ts` の規律)ので、
      *   frontmatter を含めて往復する。ここで組み立て直さない。
      * ⚠ 確認を出す ── **user のファイルを上書きする**(取り消せない)操作である。
+     *
+     * 🔴 **章の欄が開いている間も断る**(#1044 段2 5巡目の修理、U4)。
+     * ⚠ 直す前は `phase !== 'ready'` だけを見ていた ── 章の欄は `phase` を
+     *   `ready` のまま保つ(設計 doc §3)ので素通りしていた。断る理由
+     *   (「disk の本文が下書きと違いうる。確定していないものを外へ出さない」)は
+     *   全文編集と章の欄の両方に当たる ── `import-markdown.ts`(S3)と同じ判定
+     *   (`hasUnsavedTyping`)に揃える(§7)。
+     * ⚠ `hasUnsavedTyping` は `editing` を既に拾っている ── 残る
+     *   `phase !== 'ready'` は `initializing` / `error` の backstop。
      */
     writeBackFile: (lid) => {
       const state = dispatcher.getState();
       const fail = (error: string): void => dispatcher.dispatch({ type: 'OP_FAILED', error });
+      if (hasUnsavedTyping(state)) {
+        fail(
+          state.phase === 'editing' ? `${phaseBlockReason(state.phase)}書き戻してください` : SECTION_DRAFT_NOTE,
+        );
+        return;
+      }
       if (state.phase !== 'ready') {
         fail(`${phaseBlockReason(state.phase)}書き戻してください`);
         return;
@@ -3852,7 +3886,26 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       void withAssetGate(async () => {
         try {
           // editing 中は draft が disk と違う参照を持ちうる ── ready 限定で可視ブロック
-          const phase = dispatcher.getState().phase;
+          /**
+           * 🔴 **章の欄が開いている間も断る**(#1044 段2 5巡目の修理、U4)。
+           * ⚠ 直す前は `phase !== 'ready'` だけを見ていた ── 章の欄は `phase` を
+           *   `ready` のまま保つので素通りしていた。理由は上と同じ(下書きが disk
+           *   と違う参照を持ちうる)ので、`import-markdown.ts`(S3)と同じ判定
+           *   (`hasUnsavedTyping`)に揃える(§7)。`phase !== 'ready'` は
+           *   `initializing` / `error` の backstop として残す。
+           */
+          const state = dispatcher.getState();
+          if (hasUnsavedTyping(state)) {
+            dispatcher.dispatch({
+              type: 'OP_FAILED',
+              error:
+                state.phase === 'editing'
+                  ? `${phaseBlockReason(state.phase)}整理してください`
+                  : SECTION_DRAFT_NOTE,
+            });
+            return;
+          }
+          const phase = state.phase;
           if (phase !== 'ready') {
             dispatcher.dispatch({
               type: 'OP_FAILED',
@@ -3924,7 +3977,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             },
             // ⚠ confirm の**後**にもう一度見る(TOCTOU)── 自タブと他タブの両方
             isReady: async () => {
-              if (dispatcher.getState().phase !== 'ready')
+              /**
+               * 🔴 **章の欄が確認の間に開いても中止する**(#1044 段2 5巡目の修理、U4)。
+               * ⚠ 直す前は `phase !== 'ready'` だけ ── 上の門と同じ理由・同じ
+               *   gap(章の欄は `phase` を動かさない)なので、TOCTOU の再検査
+               *   側も揃える(`hasUnsavedTyping` は `phase === 'ready'` かつ
+               *   `sectionDraft !== null` の回も真になる ── `||` で足すだけでよい)。
+               */
+              const state = dispatcher.getState();
+              if (hasUnsavedTyping(state) || state.phase !== 'ready')
                 return { ok: false, reason: '編集が始まったため中止しました' };
               return editingElsewhere();
             },
@@ -4233,7 +4294,19 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       }
       items = items.filter((i) => !isOfficeLaunchFile(i.file.name));
       if (items.length === 0) return;
-      await whenPhaseReady(dispatcher, () =>
+      /**
+       * 🔴 **`phase` だけでなく、章の欄が開いていないことも待つ**
+       *   (#1044 段2 4巡目の修理、T3)。
+       *
+       * ⚠ 章の欄は `phase` を `ready` のまま保つ(設計 doc §3)ので、
+       *   `whenPhaseReady`(= `isFullyReady`。`reloadSnapshot` の先送り判定と
+       *   共有)だと**章の欄が開いている間も即座に進む** ── その先の
+       *   `importMarkdownFiles` / `importVcfFiles` は `hasUnsavedTyping` で
+       *   断る(S3)ので、断れない経路(OS の `launchQueue`)なのに
+       *   **ファイルを失う**。`whenAcceptingUnrefusedImport` は章の欄が
+       *   閉じるまで待つ(`wait-for-ready.ts` 参照)。
+       */
+      await whenAcceptingUnrefusedImport(dispatcher, () =>
         showStatus('編集を終えると、開いたファイルを取り込みます'),
       );
       // 🔴 **同じファイルを 2 回開いても増やさない**(2026-08-05)。

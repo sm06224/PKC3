@@ -35,6 +35,7 @@ import {
   BLOCK_START_ATTR,
   gripLeft,
   installBlockGrip,
+  releaseGripIfTargeting,
 } from '../../src/adapter/ui/render/block-grip';
 import { PAINTED_ATTR } from '../../src/adapter/ui/render/detail';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
@@ -308,6 +309,61 @@ describe('掴む口(block-grip)', () => {
     installBlockGrip(s.region, s.host, 'n1', open);
     s.hover(s.block(2));
     expect(s.grip()!.hidden, '閉じていない塊で出ている').toBe(true);
+  });
+
+  /**
+   * 🔴 **刻印(`data-pkc-source-line`)を持たない塊には口を出さない**
+   *   (#1044 段2 2巡目の修理、R9 の実物)。
+   *
+   * ⚠ 実ブラウザの smoke(`章の箱は段落と同じ左右端 / 取っ手は箱の中に残らない`)が
+   *   拾った本当の原因 ── `Number(el.getAttribute('data-pkc-source-line'))` だけで
+   *   済ませていたときは、属性が**無い**(`null`)場合に `Number(null) === 0` になり
+   *   「行 0 の塊」と誤認していた(章の欄の箱 `<div data-pkc-region="section-draft">`
+   *   は刻印を持たない)。ここは happy-dom だけで(実座標も本物の render も要らず)
+   *   その穴を直接突く。
+   */
+  it('🔴 刻印の無い塊(章の箱のような器)に乗せても口は出ない(Number(null)===0 の穴)', () => {
+    const s = setup();
+    teardown = s.unbind;
+    const boxLike = document.createElement('div');
+    // ⚠ わざと data-pkc-source-line を付けない(section-box.ts の箱と同じ形)
+    const inner = document.createElement('textarea');
+    boxLike.append(inner);
+    s.host.append(boxLike);
+    s.hover(inner);
+    expect(
+      s.grip()!.hidden,
+      '刻印の無い塊を「行 0 の塊」と誤認して口が出た(Number(null) が 0 になる穴)',
+    ).toBe(true);
+    // 対照群 ── 同じ host の、刻印が在る塊には出る(前提が崩れていない)
+    s.hover(s.block(2));
+    expect(s.grip()!.hidden, '対照群: 刻印が在る塊でも出ない(前提が崩れている)').toBe(false);
+  });
+});
+
+/**
+ * 🔴 **塊を丸ごと外す側が、外す直前に呼ぶ**(#1044 段2 2巡目の修理、R9。
+ *   `releaseGripIfTargeting` 単体)。
+ *
+ * ⚠ `block-grip.ts` の docstring が書いているとおり、**この関数は現在の
+ *   render の作り方(章の欄を開くたびに口を作り直す)では実質呼ばれても
+ *   何もしない**(狙った塊を指す前に口そのものが新しくなっている)。
+ *   それでも「口が外される塊を指していたら隠す」という主張自体は正しいので、
+ *   ここでは `installSectionBox` の render を経由せず、関数を直接呼んで確かめる。
+ */
+describe('releaseGripIfTargeting(#1044 段2 R9)', () => {
+  it('🔴 口がいま指している塊が外される集合に入っていれば隠す。無関係な塊は触らない(対照群)', () => {
+    const s = setup();
+    teardown = s.unbind;
+    s.hover(s.block(2)); // 段落 A を掴める状態にする
+    const g = s.grip()!;
+    expect(g.hidden, '前提: 乗せたのに出ていない').toBe(false);
+    // 無関係な塊(章 C)を外しても、指していない ── 触らない
+    releaseGripIfTargeting(s.host, [s.block(19)]);
+    expect(g.hidden, '無関係な塊の削除で隠れた(対照群が崩れている)').toBe(false);
+    // 指している塊(段落 A)が外される集合に入っている ── 隠す
+    releaseGripIfTargeting(s.host, [s.block(2)]);
+    expect(g.hidden, '指している塊が外されるのに、口が残っている').toBe(true);
   });
 });
 

@@ -33,7 +33,10 @@ function dropEvent(files: File[]): Event & { defaultPrevented: boolean } {
 
 const file = (name: string, type = ''): File => new File(['x'], name, { type });
 
-function setup(over: Partial<BinderServices> = {}, phase: 'ready' | 'editing' = 'ready') {
+function setup(
+  over: Partial<BinderServices> = {},
+  phase: 'ready' | 'editing' | 'section-draft' = 'ready',
+) {
   document.body.textContent = '';
   const root = document.createElement('div');
   root.innerHTML =
@@ -75,6 +78,17 @@ function setup(over: Partial<BinderServices> = {}, phase: 'ready' | 'editing' = 
     dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
     dispatcher.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: 'メモ\n' });
     dispatcher.dispatch({ type: 'START_EDIT' });
+  }
+  if (phase === 'section-draft') {
+    /**
+     * 🔴 **章の欄も実物の経路で開く**(#1044 段2 3巡目の修理、S3)。
+     * ⚠ 章の欄は `phase` を `ready` のまま保つ(設計 doc §3)ので、
+     *   `phase === 'ready'` のまま `sectionDraft` だけが立つ ── これが
+     *   `routeFiles` の `phase === 'ready'` 判定だけでは素通りする当の窓である。
+     */
+    dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    dispatcher.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '## 見出し\n\n中身\n' });
+    dispatcher.dispatch({ type: 'OPEN_SECTION_DRAFT', lid: 'n1', line: 0 });
   }
   bindActions(root, dispatcher, services);
   return {
@@ -138,6 +152,37 @@ describe('落とした file の行き先(#535 ①)', () => {
     outside.dispatchEvent(dropEvent([file('contacts.vcf')]));
     expect(calls.attach, '編集中なのに添付へ落ちていない').toHaveLength(1);
     expect(calls.imported, '編集中に取込へ倒した(断り文になる)').toHaveLength(0);
+  });
+
+  /**
+   * 🔴 **章の欄が開いている間も倒さない**(#1044 段2 3巡目の修理、S3)。
+   *
+   * ⚠ 章の欄は `phase` を `ready` のまま保つ(設計 doc §3)ので、上の
+   *   「編集中は倒さない」の判定(`phase === 'ready'`)だけでは素通りする ──
+   *   直す前は章の欄を開いたまま `.vcf` / `.md` を落とすと**取込へ倒れ**、
+   *   `importMarkdownFiles` / `importVcfFiles` の phase 検査(`phase !== 'ready'`)
+   *   も素通りして**新しい entry を作っていた**(章の欄が指すノートとは無関係の
+   *   取込が、user が触っている画面の裏で走る)。
+   * 🔑 `hasUnsavedTyping`(`phase === 'editing' || sectionDraft !== null`)に
+   *   揃えたので、編集中と同じく**添付へ倒れる**。
+   */
+  it('🔴 章の欄が開いている間も倒さない ── これまでどおり**添付**(#1044 段2 3巡目の修理、S3)', () => {
+    const { outside, calls, dispatcher } = setup({}, 'section-draft');
+    expect(dispatcher.getState().phase, '前提が崩れている(phase が ready でない)').toBe('ready');
+    expect(dispatcher.getState().sectionDraft, '前提が崩れている(開けていない)').not.toBeNull();
+
+    outside.dispatchEvent(dropEvent([file('contacts.vcf')]));
+    expect(calls.attach, '章の欄が開いているのに添付へ落ちていない').toHaveLength(1);
+    expect(calls.imported, '章の欄が開いているのに取込へ倒した(無関係な entry を作る)').toHaveLength(
+      0,
+    );
+  });
+
+  it('🔴 章の欄が開いている間の `.md` も同じ(取込の振り分けが受ける 2 種は揃える)', () => {
+    const { outside, calls } = setup({}, 'section-draft');
+    outside.dispatchEvent(dropEvent([file('note.md', 'text/markdown')]));
+    expect(calls.attach).toHaveLength(1);
+    expect(calls.imported).toHaveLength(0);
   });
 
   it('🔴 本文の欄へ落としても取り込む(面で結果を変えない)', () => {

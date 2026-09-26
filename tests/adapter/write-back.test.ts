@@ -136,4 +136,30 @@ describe('main.ts の配線(原文 pin)', () => {
      */
     expect(block, 'settled() を渡していない').toContain('storeEffects?.settled()');
   });
+
+  /**
+   * 🔴 **章の欄が開いている間も断る**(#1044 段2 5巡目の修理、U4)。
+   *
+   * ⚠ 直す前は `state.phase !== 'ready'` だけを見ていた ── 章の欄は `phase` を
+   *   `ready` のまま保つ(設計 doc §3)ので、章の欄が開いている間に書き戻すと
+   *   disk の本文(下書きより古い)が user のファイルへ流れる。
+   * ⚠ `main.ts` はどの test からも実行されない(CLAUDE.md §2)ので、原文 pin で
+   *   妥協する ── `writeBackFile` の block が `hasUnsavedTyping(` を通ることだけ見る
+   *   (`phase !== 'ready'` へ戻す変異(§1「代替物で満たせない条件にする」)が
+   *   このまま `if (state.phase !== 'ready') {` を残しても拾えるよう、
+   *   `hasUnsavedTyping` の呼び出しそのものを見る)。
+   */
+  it('🔴 writeBackFile は hasUnsavedTyping で断る(phase だけの判定に戻っていない)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync('src/main.ts', 'utf-8');
+    const at = src.indexOf('writeBackFile: (lid) => {');
+    expect(at, 'writeBackFile の service が読めない(空振り)').toBeGreaterThan(0);
+    const block = src.slice(at, src.indexOf('\n    },\n', at));
+    expect(block, 'hasUnsavedTyping を通していない(章の欄の gap が戻っている)').toContain(
+      'hasUnsavedTyping(state)',
+    );
+    // ⚠ SECTION_DRAFT_NOTE を使わずに `phaseBlockReason('ready')`(= null)を
+    //   出すと「null書き戻してください」になる(F-D と同じ罠) ── 出し分けを見る
+    expect(block, 'section-draft 側の文言(SECTION_DRAFT_NOTE)が無い').toContain('SECTION_DRAFT_NOTE');
+  });
 });

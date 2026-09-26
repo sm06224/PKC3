@@ -729,6 +729,13 @@ export function noteToolActions(): readonly (EntryAction & { readonly hint: stri
  * 入ったので、ここにも出す(下の注記)。
  */
 export const HEADING_MENU_ACTIONS: readonly EntryAction[] = [
+  /**
+   * 🔴 **その章だけを、読む面のその場で編集する**(#1044 段2。裁定 Q1 = 両方置く)。
+   * ⚠ 「ここから編集する」の**上**に置く(#1044 設計 doc §3)── 章 1 つを直したいだけの
+   *   ときに、画面ごと編集中へ切り替える道具より先に出す。「ここから編集する」は残す
+   *   (減らさない ── user 裁定 2026-08-07「記法を減らすことは動線を減らすこと」と同じ向き)。
+   */
+  { action: 'edit-section', label: 'この章を編集する' },
   { action: 'edit-from-heading', label: 'ここから編集する' },
   { action: 'append-at-heading', label: 'ここに追記する' },
   { action: 'toggle-heading-fold', label: 'この見出しの中身を畳む' },
@@ -768,14 +775,24 @@ export const HEADING_MENU_ACTIONS: readonly EntryAction[] = [
  *   ⚠ `####` 以下で出すと、**押した見出しではなく上の `###`** が入り先になる
  * @param linkable 章の参照を作れるか(#579)── その見出しが **id を持つ**とき
  *   (描画は `#`〜`###` にだけ id を刻む)。無い見出しに出すと、押しても指す先が無い
+ * @param sectionEditable 🔴 **その章だけを編集できるか**(#1044 段2)。⚠ `foldable` と
+ *   **同じ「host の直下」の条件 + 見出しが `#`〜`###` であること**(append-target.ts の
+ *   `scanHeadings` が数えるのはそこまで ── 章の範囲を append 欄と同じ関数で決める
+ *   以上、その関数が数えない見出しには出さない。押しても「章の範囲を読めません」に
+ *   なる口を出さない ── #426 段②の「押しても何も起きない口は畳む」と同じ作法)。
+ *   `appendable` は使えない(append-mode の可否は archetype に依存するが、章だけ編集は
+ *   `edit-from-heading` と同じくどの archetype でも成り立つ)。
  */
 export function headingMenuActions(ctx: {
   readonly folded: boolean;
   readonly foldable: boolean;
   readonly appendable: boolean;
   readonly linkable: boolean;
+  readonly sectionEditable: boolean;
 }): readonly EntryAction[] {
-  const out: EntryAction[] = [{ action: 'edit-from-heading', label: 'ここから編集する' }];
+  const out: EntryAction[] = [];
+  if (ctx.sectionEditable) out.push({ action: 'edit-section', label: 'この章を編集する' });
+  out.push({ action: 'edit-from-heading', label: 'ここから編集する' });
   if (ctx.appendable) out.push({ action: 'append-at-heading', label: 'ここに追記する' });
   if (ctx.foldable) {
     out.push({

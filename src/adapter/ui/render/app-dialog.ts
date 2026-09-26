@@ -867,6 +867,34 @@ export function pickRepeatMoveInApp(
   });
 }
 
+/**
+ * 🔴 **章の下書きが書きかけのまま、別のノートへ移ろうとしたら聞く**
+ * (#1044 段2、裁定 Q2 = A)。
+ *
+ * ⚠ **「捨てて移る」は書けない**(user 裁定 2026-09-20。`ui-terms.ts` の
+ *   `BANNED_TERMS` に「捨てる」が在る)── 「書きかけを消して移る」と、事実だけを言う。
+ * ⚠ **`Escape` / 外を押す / 「移らない」は同じ意味**(= 移らない)── `pickRowInApp`
+ *   の既定(外を押すと `null` = やめる)を活かすため、「移らない」も行の 1 つにする。
+ *
+ * @returns `'save'` / `'discard'` / `'stay'`(`Escape` / 外を押した回も `'stay'` に畳む
+ *   ── 呼び手が `null` を別扱いする必要を無くす)
+ */
+export function pickSectionLeaveInApp(
+  host: HTMLElement,
+): Promise<'save' | 'discard' | 'stay'> {
+  return pickRowInApp<'save' | 'discard' | 'stay'>(host, {
+    title: '書きかけの章があります',
+    field: 'pick-section-leave',
+    indexAttr: 'data-pkc-section-leave-index',
+    note: '',
+    rows: [
+      { label: '章を保存して移る', value: 'save' },
+      { label: '書きかけを消して移る', value: 'discard' },
+      { label: '移らない', value: 'stay' },
+    ],
+  }).then((v) => v ?? 'stay');
+}
+
 /** 「一覧から 1 行選ぶ」器の中身。⚠ `field` は行の `data-pkc-field`(test / smoke が見る)。 */
 interface PickRowsSpec<T> {
   readonly title: string;

@@ -342,3 +342,31 @@ describe('器の無い bytes(#260)', () => {
     expect(calls).toEqual(['stray:c-gone:b', 'stray:c-gone:c']);
   });
 });
+
+/**
+ * 🔴 **`main.ts` の `purgeOrphanAssets` は、章の欄が開いている間も断る**
+ *   (#1044 段2 5巡目の修理、U4)。
+ *
+ * ⚠ 直す前は `phase !== 'ready'` だけを見ていた ── 章の欄は `phase` を `ready` の
+ *   まま保つので、章の欄が開いている間(下書きが disk と違う参照を持ちうる)に
+ *   整理が走ると、その下書きの中にしか無い参照(bytes は在るが disk 未反映)を
+ *   「使っていない」と誤認して消しうる。門は 2 か所(起点の可視ブロック +
+ *   confirm 後の TOCTOU 再検査 `isReady`)ある ── 両方を見る。
+ * ⚠ `main.ts` はどの test からも実行されない(CLAUDE.md §2)ので、原文 pin で
+ *   妥協する ── `hasUnsavedTyping(` を通していることだけ見る。
+ */
+describe('main.ts の purgeOrphanAssets(原文 pin、#1044 段2 5巡目の修理、U4)', () => {
+  it('🔴 起点の可視ブロックと isReady(TOCTOU)の両方が hasUnsavedTyping を通す', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync('src/main.ts', 'utf-8');
+    const at = src.indexOf('purgeOrphanAssets: () =>');
+    expect(at, 'purgeOrphanAssets の service が読めない(空振り)').toBeGreaterThan(0);
+    // ⚠ 次の同じインデントの service 定義(次のプロパティ)まで(末尾を名指しで区切る)
+    const end = src.indexOf("\n  };\n  bindActions(", at);
+    expect(end, '前提が崩れている(block の終端が見つからない)').toBeGreaterThan(at);
+    const block = src.slice(at, end);
+    // ⚠ 2 回とも出る(起点 + isReady の TOCTOU 再検査)ことを数える
+    const hits = block.split('hasUnsavedTyping(').length - 1;
+    expect(hits, 'hasUnsavedTyping を通していない箇所がある(章の欄の gap が戻っている)').toBe(2);
+  });
+});

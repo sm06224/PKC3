@@ -17,6 +17,7 @@ import {
   clickReal,
   createEntry,
   collectPageErrors,
+  dismissAnnounce,
   useSplitEditor,
   useListBrowse,
 } from './helpers';
@@ -648,6 +649,350 @@ test('🔴 見出しを右クリックすると、その章を畳める (#426 �
 });
 
 /**
+ * 🔴 **見出しを右クリックして「この章を編集する」で、その場で章を打ち、
+ *   別のノートを選ぶと聞かれ、保存すると履歴が動く**(#1044 段2)。
+ *
+ * ## unit では原理的に届かない所
+ *
+ * ① **本物の座標**(視覚の裏取り):箱が「見出しの在った場所」に出て、
+ *    残りは読む面のままか ── happy-dom の合成 layout では言えない。
+ * ② **アプリ自身のダイアログの、実物の焦点管理**(`showModal()`)を挟んで
+ *    「移らない」が本当に何もしないか。
+ */
+test('🔴 見出しの「この章を編集する」→ 打つ → 別のノートを選ぶと聞かれる → 保存で履歴が動く (#1044 段2)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  // ノート A(議事録)
+  await createEntry(page, 'text');
+  await page
+    .locator('[data-pkc-field="editor-body"]')
+    .fill('# 議事録\n\n前置き。\n\n## 決定事項\n\n- 牛乳を買う\n\n## 次回\n\n来週。\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(page.locator('[data-pkc-field="detail-body"] h1')).toHaveText('議事録');
+  const noteA = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').first();
+  const noteALid = await noteA.getAttribute('data-pkc-entry');
+
+  // 履歴の基準(新規作成直後の初回保存は積まない ── #723 の docstring どおり)
+  await noteA.click({ button: 'right' });
+  await page.locator(`${MENU} button[data-pkc-action="show-history"]`).click();
+  await expect(page.locator('[data-pkc-field="history-panel"]')).toContainText('履歴はありません');
+  await page.locator('[data-pkc-action="hide-history"]').click();
+
+  // 移る先のノート B
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-body"]').fill('べつのノート\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  // ⚠ 既定の並びは「自分で並べた順」= 作った順 ── ノート B は**2 番目**である
+  //   (`.first()` だと A のまま。実際にこれで 1 回外した)
+  const noteB = page.locator(
+    `[data-pkc-region="entry-list"] [data-pkc-entry]:not([data-pkc-entry="${noteALid}"])`,
+  );
+
+  // ノート A(議事録)へ戻る
+  await page.locator(`[data-pkc-region="entry-list"] [data-pkc-entry="${noteALid}"]`).click();
+  await expect(page.locator('[data-pkc-field="detail-body"] h1')).toHaveText('議事録');
+
+  // ① 見出し「決定事項」を右クリック →「この章を編集する」
+  const head2 = page.locator('[data-pkc-field="detail-body"] h2', { hasText: '決定事項' });
+  await head2.click({ button: 'right' });
+  const menu = page.locator(MENU);
+  await expect(menu, '「この章を編集する」が出ていない').toContainText('この章を編集する');
+  await menu.locator('button[data-pkc-action="edit-section"]').click();
+
+  const box = page.locator('[data-pkc-field="section-draft-input"]');
+  await expect(box, '章の箱が出ていない').toBeVisible();
+  await expect(box).toHaveValue(/決定事項/);
+  await expect(box).toHaveValue(/牛乳を買う/);
+
+  /**
+   * 🔴 視覚の裏取り(実座標):箱は「見出しが在った場所」に出ていて、
+   *   ほかは読む面のまま(前置き・次回の章が消えていない)。
+   */
+  const bodyText = await page.locator('[data-pkc-field="detail-body"]').innerText();
+  expect(bodyText, '前置きが読む面から消えた').toContain('前置き。');
+  expect(bodyText, '次回の章が読む面から消えた').toContain('来週。');
+  const preface = page.locator('[data-pkc-field="detail-body"] p', { hasText: '前置き。' });
+  const nextHeading = page.locator('[data-pkc-field="detail-body"] h2', { hasText: '次回' });
+  const [boxBox, prefaceBox, nextBox] = await Promise.all([
+    box.boundingBox(),
+    preface.boundingBox(),
+    nextHeading.boundingBox(),
+  ]);
+  expect(boxBox, '箱の座標が読めない').not.toBeNull();
+  expect(prefaceBox, '前置きの座標が読めない').not.toBeNull();
+  expect(nextBox, '次回の見出しの座標が読めない').not.toBeNull();
+  // ⚠ 箱は「前置き」の下、「次回」の見出しの上(= 章が在った位置そのもの)
+  expect(boxBox!.y, '箱が前置きより上に出た').toBeGreaterThan(prefaceBox!.y);
+  expect(boxBox!.y, '箱が次回の見出しより下に出た').toBeLessThan(nextBox!.y);
+
+  /**
+   * 🔴 **箱は読む面の幅を使う**(#1044 段2、F-F)。⚠ 直す前は規則が無く、
+   *   ブラウザ既定の `cols=20`(≒173px)のまま出ていた(読む幅の実測 782px に対し
+   *   173px)。
+   */
+  const readBox = await page.locator('[data-pkc-field="detail-body"]').boundingBox();
+  expect(readBox, '読む面の座標が読めない').not.toBeNull();
+  expect(boxBox!.width, '箱が読む面の幅を使っていない(既定の cols のまま?)').toBeGreaterThan(
+    readBox!.width * 0.8,
+  );
+  /**
+   * 🔴 **開いた瞬間、見出し行が箱の中で見える**(#1044 段2、F-F)。⚠ 直す前は
+   *   カーソルを本文の**末尾**に置いていたので、開いた瞬間に textarea が下まで
+   *   scroll し、いちばん見せたい見出し行(1 行目)が箱の中で見えなくなっていた。
+   */
+  expect(
+    await box.evaluate((el) => (el as HTMLTextAreaElement).scrollTop),
+    '開いた瞬間に textarea が下まで scroll した(見出し行が見えない)',
+  ).toBe(0);
+  // 🔴 **箱の上端はビューポート内**(押した直後に画面外へ出ない)。
+  const viewport = page.viewportSize();
+  expect(viewport, 'viewport が読めない').not.toBeNull();
+  expect(boxBox!.y, '箱の上端がビューポートの外(上)に出た').toBeGreaterThanOrEqual(0);
+  expect(boxBox!.y, '箱の上端がビューポートの外(下)に出た').toBeLessThan(viewport!.height);
+
+  // アプリ全体は編集中にならない ── 一覧の他の行はそのまま押せる
+  await expect(noteB, '章の欄が開いている間、一覧が触れなくなった').toBeVisible();
+
+  // ② 打つ
+  await box.fill('## 決定事項\n\n- 牛乳を買う\n- パンを買う');
+
+  // ③ 別のノートを選ぶ → 設問が出る
+  await noteB.click();
+  const dialogTitle = page.locator('[data-pkc-field="dialog-title"]');
+  await expect(dialogTitle, '設問が出ていない').toHaveText('書きかけの章があります');
+
+  // ④「移らない」で、箱と打った字・選択がそのまま
+  await page.locator('[data-pkc-field="pick-section-leave"]', { hasText: '移らない' }).click();
+  // ⚠ 器は使い回すので `dialog-title` は DOM に残る ── 見るのは `<dialog>` の開閉
+  await expect(page.locator('[data-pkc-region="app-dialog"]'), '設問が閉じない').toBeHidden();
+  await expect(box, '「移らない」で箱が消えた').toBeVisible();
+  await expect(box).toHaveValue(/パンを買う/);
+  await expect(
+    page.locator('[data-pkc-field="detail-body"] h1'),
+    '「移らない」で移ってしまった',
+  ).toHaveText('議事録');
+
+  // ⑤「章を保存する」→ 読む面に新しい字、履歴が 1 件増える
+  await page.locator('[data-pkc-action="save-section-draft"]').click();
+  await expect(page.locator('[data-pkc-field="section-draft-input"]'), '保存後も箱が残っている').toHaveCount(
+    0,
+  );
+  await expect(page.locator('[data-pkc-field="detail-body"]'), '保存した字が読む面に出ていない').toContainText(
+    'パンを買う',
+  );
+  await expect(page.locator('[data-pkc-field="detail-body"]'), '前置きが消えた').toContainText('前置き。');
+
+  await page.locator(`[data-pkc-region="entry-list"] [data-pkc-entry="${noteALid}"]`).click({ button: 'right' });
+  await page.locator(`${MENU} button[data-pkc-action="show-history"]`).click();
+  await expect(page.locator('[data-pkc-field="history-panel"]'), '履歴が動いていない').toContainText(
+    '履歴 1 件',
+  );
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **章が上限(40 行)を超えても、開いた瞬間は見出し行が見える**
+ * (#1044 段2 2巡目の修理、R8)。⚠ unit(`section-box.test.ts`)は happy-dom の
+ * layout が無いので折り返し分を測れない ── 実物の版面で「本当に上限に当たった
+ * ときの scrollTop」を見るのはここでしか出来ない。
+ */
+test('🔴 40 行を超える章を開いても、scrollTop は 0(見出しが箱の先頭に見える) (#1044 段2)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  const filler = Array.from({ length: 45 }, (_, i) => `本文 ${i} 行目。`).join('\n');
+  await page.locator('[data-pkc-field="editor-body"]').fill(`## 決定事項\n\n${filler}\n\n## 次回\n\n来週。\n`);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  const head = page.locator('[data-pkc-field="detail-body"] h2', { hasText: '決定事項' });
+  await head.click({ button: 'right' });
+  await page.locator(`${MENU} button[data-pkc-action="edit-section"]`).click();
+  const box = page.locator('[data-pkc-field="section-draft-input"]');
+  await expect(box, '章の箱が出ていない').toBeVisible();
+  // 上限に当たっていることの前提(空振り防止 ── 45 行が既に scroll 対象になっているか)
+  await expect(box, '上限に当たっていない(前提が崩れている)').toHaveAttribute('data-pkc-scroll', '1');
+  expect(
+    await box.evaluate((el) => (el as HTMLTextAreaElement).scrollTop),
+    '上限に当たった章で、開いた瞬間に textarea が下まで scroll した(見出し行が見えない)',
+  ).toBe(0);
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **箱(textarea + ボタンの列)が、読む面の見えている高さに収まる**
+ * (#1044 段2 3巡目の修理、S2)。
+ *
+ * ## 直す前に何が起きていたか
+ *
+ * `sizeTextareaToContent` の上限は**固定 40 行**(≈856px)だった。45 行の章を
+ * 1280×800 で開くと、箱(textarea+ボタンの列)の高さ 886px に対し読む面の見えて
+ * いる高さは 593.9px しかなく、`scrollIntoView({block:'nearest'})` の結果、
+ * ①見出しの行は上端の帯(sticky・34px)の下に隠れ ②「章を保存する / 章の編集を
+ * やめる」は画面外へ沈んでいた(実測)。
+ *
+ * ## unit では原理的に届かない
+ *
+ * happy-dom は layout(`getBoundingClientRect` / `scrollHeight` の実測)を持たない
+ * ── 「帯の下に隠れているか」「ボタンが画面内で押せるか」は実物の版面でしか言えない
+ * (CLAUDE.md 検証の規律 §4)。
+ */
+/**
+ * ⚠ **起動は 1 回で足りる**(#820 の smoke 起動予算)── 45 行の章(本命)と
+ *   4 行の章(対照群)を、同じ page の中で**別のノート**として続けて確かめる。
+ *   `gotoApp` を 2 度呼ばずに済むので、予算(`BOOT_BUDGET`)を動かさない。
+ */
+for (const [w, h] of [
+  [1280, 800],
+  [1366, 768],
+] as const) {
+  test(`🔴 45 行の章は見出しもボタンも画面に収まり箱の中でスクロールする / 4 行の章は内側スクロール無し(${w}x${h}) (#1044 段2)`, async ({
+    page,
+  }) => {
+    const errors = collectPageErrors(page);
+    await page.setViewportSize({ width: w, height: h });
+    await gotoApp(page);
+
+    // ── 本命:45 行の章 ──────────────────────────
+    await createEntry(page, 'text');
+    const filler = Array.from({ length: 45 }, (_, i) => `本文 ${i} 行目。`).join('\n');
+    await page
+      .locator('[data-pkc-field="editor-body"]')
+      .fill(`# 議事録\n\n前置き。\n\n## 決定事項\n\n${filler}\n\n## 次回\n\n来週。\n`);
+    await clickReal(page, '[data-pkc-action="commit-edit"]');
+    const head = page.locator('[data-pkc-field="detail-body"] h2', { hasText: '決定事項' });
+    await head.click({ button: 'right' });
+    await page.locator(`${MENU} button[data-pkc-action="edit-section"]`).click();
+    const box = page.locator('[data-pkc-field="section-draft-input"]');
+    await expect(box, '章の箱が出ていない').toBeVisible();
+
+    // ① 見出しの行(textarea の 1 行目)が帯に覆われていない
+    const taBox = await box.boundingBox();
+    if (taBox === null) throw new Error('前提が崩れている(座標が取れない)');
+    const hitAtHeading = await page.evaluate(
+      ([x, y]) => document.elementFromPoint(x, y)?.getAttribute('data-pkc-field') ?? null,
+      [taBox.x + 10, taBox.y + 5] as [number, number],
+    );
+    expect(hitAtHeading, '見出しの行が帯に覆われている').toBe('section-draft-input');
+
+    // ② 「章を保存する」「章の編集をやめる」が viewport 内で elementFromPoint で当たる
+    for (const action of ['save-section-draft', 'cancel-section-draft']) {
+      const btn = page.locator(`[data-pkc-action="${action}"]`);
+      const btnBox = await btn.boundingBox();
+      expect(btnBox, `${action} の座標が取れない(画面外)`).not.toBeNull();
+      expect(btnBox!.y + btnBox!.height, `${action} が画面の下にはみ出す`).toBeLessThanOrEqual(h);
+      const hit = await page.evaluate(
+        ([x, y]) => document.elementFromPoint(x, y)?.getAttribute('data-pkc-action') ?? null,
+        [btnBox!.x + btnBox!.width / 2, btnBox!.y + btnBox!.height / 2] as [number, number],
+      );
+      expect(hit, `${action} が elementFromPoint で当たらない(覆われている)`).toBe(action);
+    }
+
+    // ③ 箱の中でスクロールする(上限を超えた分は内側 scroll。面全体の scroll と二重にならない)
+    const longOverflow = await box.evaluate(
+      (el: HTMLTextAreaElement) => el.scrollHeight > el.clientHeight,
+    );
+    expect(longOverflow, '上限を超えたのに箱の中でスクロールしていない').toBe(true);
+    await page.locator('[data-pkc-action="cancel-section-draft"]').click();
+
+    // ── 対照群:4 行の章(上限に届かない)は、いつもどおり中身の高さぴったり ──
+    await createEntry(page, 'text');
+    await page
+      .locator('[data-pkc-field="editor-body"]')
+      .fill('# 議事録\n\n前置き。\n\n## 決定事項\n\nl1\nl2\nl3\nl4\n\n## 次回\n\n来週。\n');
+    await clickReal(page, '[data-pkc-action="commit-edit"]');
+    const head2 = page.locator('[data-pkc-field="detail-body"] h2', { hasText: '決定事項' });
+    await head2.click({ button: 'right' });
+    await page.locator(`${MENU} button[data-pkc-action="edit-section"]`).click();
+    const box2 = page.locator('[data-pkc-field="section-draft-input"]');
+    await expect(box2, '章の箱が出ていない(対照群)').toBeVisible();
+    const shortOverflow = await box2.evaluate((el: HTMLTextAreaElement) => ({
+      sh: el.scrollHeight,
+      ch: el.clientHeight,
+    }));
+    expect(
+      shortOverflow.sh,
+      '短い章で内側スクロールが発生した(高さの取り違え)',
+    ).toBeLessThanOrEqual(shortOverflow.ch + 1);
+    expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+  });
+}
+
+/**
+ * 🔴 **章の箱は他の塊と同じ読む列に揃い、掴む取っ手(⠿)は箱の中に残らない**
+ * (#1044 段2 2巡目の修理、R9)。
+ *
+ * ⚠ unit では原理的に届かない 2 つ:① **本物の座標**(左右端の揃い)は
+ *   happy-dom の合成 layout では言えない ② `pointerover` で本物の取っ手が
+ *   本物の座標に浮くことと、DOM 削除後もそこに残ることは実物でしか見えない。
+ *
+ * 手順:見出しに乗せて取っ手を出す(浮いた状態を作る)→ そのまま右クリック →
+ * 「この章を編集する」(見出しの塊が削除される)→ 箱の左右端が段落と揺れず揃う /
+ * 取っ手は隠れている(箱に重なって残っていない)。
+ */
+test('🔴 章の箱は段落と同じ左右端 / 取っ手は箱の中に残らない (#1044 段2)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page
+    .locator('[data-pkc-field="editor-body"]')
+    .fill('前置き。\n\n## 決定事項\n\n- 牛乳を買う\n\n## 次回\n\n来週。\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  const preface = page.locator('[data-pkc-field="detail-body"] p', { hasText: '前置き。' });
+  const head = page.locator('[data-pkc-field="detail-body"] h2', { hasText: '決定事項' });
+  const prefaceBox = await preface.boundingBox();
+  expect(prefaceBox, '前置きの座標が読めない').not.toBeNull();
+
+  // 見出しに乗せて、取っ手を「浮いた」状態にする(章を開く前の実際の使い方どおり)
+  await head.hover();
+  const grip = page.locator('[data-pkc-field="block-grip"]');
+  await expect(grip, '乗せても取っ手が出ない(前提が崩れている)').toBeVisible();
+
+  /**
+   * 🔴 **メニューの押しは JS で撃つ**(マウスを動かさない)。
+   *
+   * ⚠ 直す前は `page.locator(...).click()` で押していた ── Playwright は
+   *   その場所までマウスを実際に動かすので、右クリックで開いたメニューの
+   *   「この章を編集する」の座標(押した見出しより上に出ることがある)まで
+   *   カーソルが移動する。すると **マウスは見出しの上から離れている**ので、
+   *   「取っ手が浮いた状態のまま塊が外れる」を試せていない(取っ手は
+   *   `pointerleave` で先に隠れてしまい、この test が何を守っているのか
+   *   実は分からなくなる ── 実測でも「メニューを閉じた直後の
+   *   `elementFromPoint`」が段落・見出し・箱のどれになるか実行ごとに揺れた)。
+   * 🔑 **マウスをその場に置いたまま**塊を外すには、押しを `HTMLElement.click()`
+   *   (JS 発火。実マウスは動かない)にする ── `data-pkc-action` の受け手は
+   *   `click` event を見るので、これでも実行される。
+   */
+  await head.click({ button: 'right' });
+  await page.evaluate(() => {
+    document
+      .querySelector<HTMLElement>('[data-pkc-region="context-menu"] button[data-pkc-action="edit-section"]')
+      ?.click();
+  });
+  const box = page.locator('[data-pkc-field="section-draft-input"]');
+  await expect(box, '章の箱が出ていない').toBeVisible();
+
+  // ① 取っ手は箱に重なって残っていない(隠れている)
+  await expect(grip, '外した塊の取っ手が浮いたまま残っている(箱の中に見える)').toBeHidden();
+
+  // ② 箱の左右端は、段落(前置き)と同じ読む列に揃う(±2px)
+  const boxBox = await box.boundingBox();
+  expect(boxBox, '箱の座標が読めない').not.toBeNull();
+  expect(Math.abs(boxBox!.x - prefaceBox!.x), '箱の左端が段落とずれている').toBeLessThanOrEqual(2);
+  expect(
+    Math.abs(boxBox!.x + boxBox!.width - (prefaceBox!.x + prefaceBox!.width)),
+    '箱の右端が段落とずれている',
+  ).toBeLessThanOrEqual(2);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
  * 🔴 **見出しを右クリックして「この章をコピー」を押すと、章の原文が clipboard に入る**(#677)。
  *
  * ⚠ unit では原理的に届かない 2 つ:① **本物の `navigator.clipboard`** に届くか
@@ -788,4 +1133,45 @@ test('🔴 本文のメニューを開いた直後、説明欄に「項目に乗
   await page.keyboard.press('Escape');
   await expect(page.locator(MENU)).toHaveCount(0);
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **章の欄は 390px の幅でも横にはみ出さない**(#1044 段2、F-F)。
+ * ⚠ 直す前は箱にサイズの規則が 1 つも無く、ブラウザ既定の `cols=20` のまま
+ *   出ていた ── 幅の狂いなら狭い画面ほど目立つはずなので、そこで見る。
+ */
+test.describe('章の欄(390 幅、#1044 段2 F-F)', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('🔴 箱が画面の右へはみ出さない / 画面全体が横に広がらない', async ({ page }) => {
+    const errors = collectPageErrors(page);
+    await gotoApp(page);
+    /**
+     * 🔴 **お知らせを畳む**(#1044 段2 2巡目の修理、R3)。⚠ 直す前はここが無く、
+     *   390 幅では起動直後のお知らせカードが画面いっぱいに出て `createEntry` の
+     *   押し所を覆うので、このテストは**必ず落ちていた**(`phone.smoke.spec.ts` の
+     *   先例と同じ形)。
+     */
+    await dismissAnnounce(page);
+    await createEntry(page, 'text');
+    await page
+      .locator('[data-pkc-field="editor-body"]')
+      .fill('## 決定事項\n\n- 牛乳を買う\n\n## 次回\n\n来週。\n');
+    await clickReal(page, '[data-pkc-action="commit-edit"]');
+    const head = page.locator('[data-pkc-field="detail-body"] h2', { hasText: '決定事項' });
+    await head.click({ button: 'right' });
+    await page.locator(`${MENU} button[data-pkc-action="edit-section"]`).click();
+    const box = page.locator('[data-pkc-field="section-draft-input"]');
+    await expect(box, '章の箱が出ていない').toBeVisible();
+    const boxBox = await box.boundingBox();
+    expect(boxBox, '箱の座標が読めない').not.toBeNull();
+    expect(boxBox!.x + boxBox!.width, '箱が画面の右へはみ出た').toBeLessThanOrEqual(390 + 1);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      ),
+      '画面全体が横に広がった',
+    ).toBeLessThanOrEqual(1);
+    expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+  });
 });

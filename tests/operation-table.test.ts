@@ -152,7 +152,16 @@ const UNBRIDGED: readonly string[] = [
 const UNREGISTERED_NAMEABLE: readonly string[] = [
   'add-place', 'add-relation', 'add-tag', 'add-url-tile', 'adopt-external-images',
   'adopt-link-icon', 'allow-external-images', 'append-entry', 'apply-plan', 'apply-settings',
-  'apply-update', 'attach-file', 'bulk-tag-add', 'bulk-tag-remove', 'capture-stop',
+  'apply-update', 'attach-file', 'bulk-tag-add', 'bulk-tag-remove',
+  /**
+   * ⚠ **2026-09-26(#1044 段2)で 2 件増やした** ── 章の欄の保存 / やめる。
+   * 🔑 **名前で呼べないままにする理由**:どちらも「**いま開いている章の欄**」に
+   *   効くので、章の欄を開いていないと意味が無い(`commit-edit` 相当だが、
+   *   あちらは `KEY_COMMANDS` に鍵を持つので在庫に居ない ── こちらはまだ鍵を
+   *   持たせていない)。
+   */
+  'cancel-section-draft', 'save-section-draft',
+  'capture-stop',
   /**
    * ⚠ **2026-09-14(#683 段②a)で 4 件増やした** ── 録った音の前後を削る
    *   (印を付ける 2 つ・消す・切り出す)。⚠ **名前で呼べないままにする理由**:
@@ -285,6 +294,12 @@ const UNREGISTERED_POINT: readonly string[] = [
   'append-at-heading', 'browse-archive', 'capture-play', 'copy-asset-ref', 'copy-md-block',
   'deliver-to-extension', 'discard-timer', 'dismiss-alarm', 'download-asset',
   'dual-bookmark-open', 'dual-bookmark-remove', 'dual-crumb', 'dual-tab-activate', 'edit-cell',
+  /**
+   * ⚠ **2026-09-26(#1044 段2)で 1 件増やした** ── 章だけ編集。`edit-from-heading` と
+   *   同じ仕分け(押した見出しの行を `menuCarriedLine` が運ぶ ── パレットから
+   *   「この章を編集する」と呼んでも、どの見出しかが決まらない)。
+   */
+  'edit-section',
   'edit-from-heading', 'export-diagram', 'filter-by-tag', 'move-app-group-down',
   'move-app-group-up', 'move-tile-down', 'move-tile-up', 'navigate-asset-ref',
   'navigate-card-ref', 'navigate-entry-ref', 'open-alarm', 'open-office', 'open-repeat-menu',
@@ -484,12 +499,17 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   (`entry` book)へ足した ── 受け手は既に在った(本文の上のボタン)ので
       //   `both` +1 / `registered` +1 / `unregistered` −1、`total` は動かない
       //   (`close-pane` の直前と同じ形)。
-      total: 325,
-      receivers: 272,
+      // ⚠ 2026-09-26(#1044 段2): 章だけ編集で 3 件増やした
+      //   (`edit-section` / `save-section-draft` / `cancel-section-draft`)── 3 つとも
+      //   登記簿(6 book)には載せない(見出しを指す・章の欄が要る ── パレットからは
+      //   撃てない)ので `receivers` +3 / `total` +3 / `unregistered` +3、
+      //   `registered` / `both` / `outsideActionsTable` は動かない。
+      total: 328,
+      receivers: 275,
       registered: 91,
       both: 38,
       outsideActionsTable: 53,
-      unregistered: 234,
+      unregistered: 237,
     });
   });
 
