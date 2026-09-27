@@ -30,6 +30,7 @@ import { MAX_TAGS, sameTag } from '../flavor/tags';
 // `lib/token.mjs` を生やしていた)。型は本入口から名前付きで取る。
 import type { Token } from 'markdown-it';
 import { mdCellGate, mdCellSpanAt, type MdCellGate } from './table-convert';
+import { allFences } from './source-blocks';
 // PR-W18:HTML footnote plugin(`[^id]` → `<sup class="footnote-ref">`)。
 // CJS package だが exports map で `.mjs` を提供しているため ESM import OK。
 import footnotePlugin from 'markdown-it-footnote';
@@ -666,7 +667,7 @@ md.renderer.rules.fence = function (tokens, idx, options, env, self) {
         firstContentLine = raw + offset + 1;
       }
     }
-    return renderRenderableFence(fence, content, sourceLineAttrs, env, firstContentLine);
+    return renderRenderableFence(fence, content, sourceLineAttrs, env, firstContentLine, token);
   }
   /**
    * ⚠ 素のコード囲みは `defaultFence` が token を読むので、**写しを渡す**
@@ -689,10 +690,11 @@ md.renderer.rules.fence = function (tokens, idx, options, env, self) {
       defaultFence([surrogate], 0, options, env, self),
       'code',
       sourceLineAttrs,
+      fenceEditable(env, token),
     );
   }
   const fenceHtml = defaultFence(tokens, idx, options, env, self);
-  return wrapWithCopyButton(fenceHtml, 'code', sourceLineAttrs);
+  return wrapWithCopyButton(fenceHtml, 'code', sourceLineAttrs, fenceEditable(env, token));
 };
 
 /**
@@ -714,10 +716,21 @@ function renderRenderableFence(
    *   (`interactiveTasks` と同じ作法。書き出し・印刷では押させない)。
    */
   firstContentLine?: number,
+  /**
+   * 🔴 **✎ の閉じ判定に使う token**(#1044 段3)。⚠ `renderFenceFromAsset`(hydrator の
+   *   焼き直し経路)は呼ばない ── `null` のままでよい({@link fenceEditable} が
+   *   `token === null` を `false` にする)。
+   */
+  token: Token | null = null,
 ): string {
   {
     if (fence.mode === 'norender') {
-      return wrapWithCopyButton(renderFenceSourceHtml(content, fence.lang), 'code', sourceLineAttrs);
+      return wrapWithCopyButton(
+        renderFenceSourceHtml(content, fence.lang),
+        'code',
+        sourceLineAttrs,
+        fenceEditable(env, token),
+      );
     }
     /**
      * セルの中の inline markup(`**bold**` / `==highlight==` / `:text:attrs:` 等)
@@ -766,7 +779,12 @@ function renderRenderableFence(
       return buildRenderableBlockHtml(fence, slot, content, sourceLineAttrs, occurrence);
     }
     // csv 系 parse 失敗:従来どおり user のソースを可視で残す。
-    return wrapWithCopyButton(renderFenceSourceHtml(content, fence.lang), 'code', sourceLineAttrs);
+    return wrapWithCopyButton(
+      renderFenceSourceHtml(content, fence.lang),
+      'code',
+      sourceLineAttrs,
+      fenceEditable(env, token),
+    );
   }
 }
 
@@ -974,6 +992,47 @@ md.renderer.rules.th_open = function (tokens, idx, options, env, self) {
 };
 
 /**
+ * 🔴 **その枠に ✎ を出してよいか**(#1044 段3、§9)。2 つを両方見る:
+ * ① `env.interactiveCodeBlocks`(受け手が居る面か)
+ * ② **その枠が閉じているか**(`env.closedFenceLines` ── 開きの行の**原文の**行番号を
+ *   `env.lineMap` で写した上で調べる。末尾まで飲む枠には出さない)。
+ *
+ * ⚠ **`renderFenceFromAsset` の使い捨て env はどちらの key も持たない**ので、
+ *   添付から取った字を hydrator が焼き直す経路は常に `false` になる
+ *   (添付から中身を取る枠に ✎ を出さない、§9 の除外を**構造的に**満たす ──
+ *   もう 1 段の判定をここへ足す必要が無い)。
+ * ⚠ `token` が無ければ(= `renderFenceFromAsset` からの呼び)`false`。
+ */
+function fenceEditable(env: unknown, token: Token | null): boolean {
+  const e = env as
+    | { interactiveCodeBlocks?: boolean; lineMap?: number[]; closedFenceLines?: ReadonlySet<number> }
+    | undefined;
+  if (e?.interactiveCodeBlocks !== true || token === null) return false;
+  const outLine = token.map?.[0];
+  if (typeof outLine !== 'number') return false;
+  const raw = e.lineMap ? (e.lineMap[outLine] ?? outLine) : outLine;
+  return e.closedFenceLines?.has(raw) === true;
+}
+
+/**
+ * 🔴 **コード枠の ✎ ── ⧉ の隣に置く**(#1044 段3)。
+ *
+ * ⚠ **出す条件はこの 1 か所**(§7)── `wrapWithCopyButton` を通る枠は、
+ *   `data-pkc-render-lang` も `data-pkc-fence-asset-key` も持たない「普通のコード枠 /
+ *   `-norender` / csv の読み損ね」だけである(mermaid / chart / html / svg / csv の
+ *   描画成功物は {@link buildRenderableBlockHtml} / {@link buildFenceAssetHtml} を
+ *   通るので、ここへは来ない ── §9 の判定はこの経路の分かれ方そのものから成立する)。
+ * ⚠ **クラスは ⧉ と同じ `pkc-md-copy-btn` を併記**(#708 段① の `▾` と同じ作法)──
+ *   大きさ・出方(乗せた / 焦点が入った / 指で触る端末)の規則を 2 組書かない。
+ */
+function editCodeBlockButtonHtml(): string {
+  return (
+    `<button class="pkc-md-copy-btn pkc-md-edit-btn" data-pkc-action="edit-code-block"` +
+    ` type="button" aria-label="このコードを編集する" title="このコードを編集する">✎</button>`
+  );
+}
+
+/**
  * PR #196: wrap a code block's HTML in a copy-button host. The button
  * carries `data-pkc-action="copy-md-block"` so the existing
  * `action-binder` event delegation picks it up. The host element is
@@ -984,13 +1043,19 @@ md.renderer.rules.th_open = function (tokens, idx, options, env, self) {
  * built from the originating token. Custom fence / table renderers
  * emit their own HTML and bypass token.attrs, so the wrapper has to
  * propagate these attrs explicitly for source ↔ preview sync to work.
+ *
+ * 🔴 **#1044 段3 ── `interactiveCodeBlocks` が真の `code` 枠にだけ ✎ を足す**。
+ *   ⚠ `kind === 'table'` の呼び手は現存しない(型は将来のため残してある)が、
+ *   足すのは `code` に限る(表は既にセルのその場編集を持つ ── 2 つ目の入口を作らない)。
  */
 function wrapWithCopyButton(
   innerHtml: string,
   kind: 'code' | 'table',
   extraAttrs: string = '',
+  interactiveCodeBlocks: boolean = false,
 ): string {
-  return `<div class="pkc-md-block" data-pkc-md-block-kind="${kind}"${extraAttrs}><button class="pkc-md-copy-btn" data-pkc-action="copy-md-block" data-pkc-copy-kind="${kind}" type="button" aria-label="コピー" title="コピー">⧉</button>${innerHtml}</div>`;
+  const editBtn = kind === 'code' && interactiveCodeBlocks ? editCodeBlockButtonHtml() : '';
+  return `<div class="pkc-md-block" data-pkc-md-block-kind="${kind}"${extraAttrs}><button class="pkc-md-copy-btn" data-pkc-action="copy-md-block" data-pkc-copy-kind="${kind}" type="button" aria-label="コピー" title="コピー">⧉</button>${editBtn}${innerHtml}</div>`;
 }
 
 /**
@@ -2687,6 +2752,15 @@ export interface RenderMarkdownOptions {
    * ⚠ 渡さなければ属性は 1 つも出ない = goldens は 1 バイトも動かない。
    */
   readonly interactiveCells?: boolean;
+  /**
+   * 🔴 **コード枠に ✎(その場で編集)を出すか**(#1044 段3。既定 `false` = 出さない)。
+   *
+   * ⚠ **受け手(`edit-code-block`)が居る面だけ** `true` にする ── `interactiveCells` と
+   *   同じ理由。書き出した HTML・印刷・読むだけの窓(章の別ウィンドウ)は受け手が
+   *   居ないので**出ないまま**。
+   * ⚠ 渡さなければ属性は 1 つも出ない = goldens は 1 バイトも動かない。
+   */
+  readonly interactiveCodeBlocks?: boolean;
   /**
    * 🔴 **チェックの印を押せる形で出すか**(#277。既定 `false` = 押せない)。
    *
@@ -5571,6 +5645,20 @@ export function renderMarkdown(
    *   こちらは**書き戻す先を指すため**で、描画には 1 バイトも使わない。
    */
   const originalLines = text.split('\n');
+  /**
+   * 🔴 **閉じているコード枠の開きの行(原文の行番号)**(#1044 段3、§9)。
+   *
+   * ⚠ **✎ は閉じていない枠(末尾まで飲む)には出さない** ── 末尾がどこまでかを
+   *   user が知らないまま差し替えると、閉じの柵を書き足すことになり意図がずれる
+   *   (`openCodeFenceAt` の reducer 側の門と同じ判断。ここは**描く前**に排除する ──
+   *   排除しないと「押せるのに開けない」という dead click になる)。
+   * ⚠ `mdCellGate` と同じ理由で `originalLines` から採る(書き戻す先と同じ字)。
+   */
+  const closedFenceLines: ReadonlySet<number> = new Set(
+    allFences(originalLines.join('\n'))
+      .filter((f) => !f.open)
+      .map((f) => f.start),
+  );
   text = neutralizeSentinels(text);
   // PKC3: IR migration scaffolding(markdown.use_ir)は持ち込まない ──
   // flag 予算(最大 15)と凍結方針(正本 doc §10)。legacy pipeline 一本。
@@ -5757,6 +5845,7 @@ export function renderMarkdown(
     allowExternalImages: boolean;
     interactiveTasks: boolean;
     interactiveCells: boolean;
+    interactiveCodeBlocks: boolean;
     interactiveTags: boolean;
     phoneLinks: boolean;
     taskLineOffset: number;
@@ -5769,8 +5858,11 @@ export function renderMarkdown(
      *   (#747-3。`preprocessAlignPrefix` は行を挿すので、後の字では添字がずれる)。
      */
     cellGate?: MdCellGate;
+    /** 閉じているコード枠の開きの行(原文の行番号)。#1044 段3、上の docstring 参照。 */
+    closedFenceLines: ReadonlySet<number>;
   } = {
     cellGate: mdCellGate(originalLines),
+    closedFenceLines,
     // 🔴 添付から取った字(#444 段②)。⚠ 渡されないのが既定 = 器を置く
     ...(opts.fenceAssets !== undefined ? { fenceAssets: opts.fenceAssets } : {}),
     currentContainerId: opts.currentContainerId ?? '',
@@ -5780,6 +5872,8 @@ export function renderMarkdown(
     interactiveTasks: opts.interactiveTasks === true,
     // 🔴 表のセルを押せる形で出すか(#418 段①)。既定は押せない
     interactiveCells: opts.interactiveCells === true,
+    // 🔴 コード枠に ✎ を出すか(#1044 段3)。既定は出さない
+    interactiveCodeBlocks: opts.interactiveCodeBlocks === true,
     // 🔴 本文中のタグを押せる形で出すか(#550 段③)。既定は押せない
     interactiveTags: opts.interactiveTags === true,
     // 🔴 素の電話番号を押せる形にするか(#278 段②)。既定は切

@@ -30,8 +30,14 @@ import { stubRevisionOps } from '../helpers/revision-stub';
 import { stubStamps } from '../helpers/store-stamps';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { EntryUpsert, EntryStamps } from '../../src/adapter/platform/storage/schema';
+import type { SectionDraft } from '../../src/adapter/state/app-state';
 
 const tick = (ms = 10): Promise<unknown> => new Promise((r) => setTimeout(r, ms));
+
+/** このファイルは章の下書きだけを組む(#1044 段3 で型が一般化された)。 */
+function draftHeading(d: Dispatcher): string | undefined {
+  return (d.getState().sectionDraft as SectionDraft | null)?.heading;
+}
 
 function meta(lid: string): EntryMeta {
   return {
@@ -121,9 +127,7 @@ describe('章の保存が別の窓の書込を消さない(#1044 段2 3巡目の
   it('🔴 ① 別経路が本文の末尾に足した行は、章を保存した後も残る(disk から読み直す)', async () => {
     const b = bench({ n1: DOC });
     await openDraft(b.d, DOC);
-    expect(b.d.getState().sectionDraft?.heading, '前提が崩れている(開けていない)').toBe(
-      '決定事項',
-    );
+    expect(draftHeading(b.d), '前提が崩れている(開けていない)').toBe('決定事項');
     // 🔴 別経路(小窓・別タブ等)が本文の末尾に 1 行足した(disk に直接。openBody は動かさない)
     b.disk['n1'] = DOC + '別経路が足した行\n';
     b.d.dispatch({

@@ -78,12 +78,25 @@ test.describe('指で触る端末', () => {
     expect(await opacityOf(page, '.pkc-render-toggle'), '切替が見えない(触る端末)').toBe(1);
 
     /**
+     * 🔴 **コード枠の ✎ も、同じ「乗せたときだけ出る 2 つ」と同じ規則を借りる**
+     * (#1044 段3)。⚠ 別の道具にせず `.pkc-md-copy-btn` を併記しているので
+     * (`markdown-render.ts` / `app.css`)、乗せずに 1 なら**規則を共有できている
+     * 証拠**になる ── この同じ「起動」に足すだけで済む(新しい page.goto を作らない)。
+     */
+    await expect(
+      page.locator('.pkc-md-edit-btn'),
+      '✎ が 1 つも出ていない(台の空振り)',
+    ).not.toHaveCount(0);
+    expect(await opacityOf(page, '.pkc-md-edit-btn'), '✎ が見えない(触る端末)').toBe(1);
+
+    /**
      * 🔴 **見えているだけでは足りない** ── 指で押せる所に居るかまで見る
      * (`opacity` は「そこに在るように見える」しか言わない。CLAUDE.md の
      * dead click / occlusion の規則と同じ `elementFromPoint` で確かめる)。
      */
     await expectReachable(page, page.locator('.pkc-md-copy-btn').first());
     await expectReachable(page, page.locator('.pkc-render-toggle').first());
+    await expectReachable(page, page.locator('.pkc-md-edit-btn').first());
   });
 
   /**
@@ -284,6 +297,8 @@ test.describe('対照群 ── マウスの端末', () => {
 
     expect(await opacityOf(page, '.pkc-md-copy-btn'), 'マウスの端末で最初から出ている').toBe(0);
     expect(await opacityOf(page, '.pkc-render-toggle'), 'マウスの端末で最初から出ている').toBe(0);
+    // 🔴 コード枠の ✎ も対照群(#1044 段3。この test も同じ「起動」に足すだけで済む)
+    expect(await opacityOf(page, '.pkc-md-edit-btn'), 'マウスの端末で最初から出ている').toBe(0);
 
     const px = await page
       .locator('[data-pkc-field="entry-filter"]')

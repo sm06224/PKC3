@@ -22,7 +22,18 @@ import {
   unsavedTypingLidOf,
   type AppState,
   type Dispatchable,
+  type SectionDraft,
 } from '../../src/adapter/state/app-state';
+
+/**
+ * このファイルは章の下書きだけを組む(#1044 段3 でコード枠も同じ field を
+ * 共有するようになったので、`state.sectionDraft` の型は `PartialDraft`)。
+ * ⚠ ここでは常に章と分かっているので断定する ── コード枠の分岐は
+ * `tests/adapter/code-draft.test.ts` が別に持つ。
+ */
+function sectionDraftOf(state: AppState): SectionDraft {
+  return state.sectionDraft as SectionDraft;
+}
 
 function meta(lid: string): EntryMeta {
   return {
@@ -70,7 +81,7 @@ describe('OPEN_SECTION_DRAFT(#1044 段2)', () => {
     const s = reduce(booted(), { type: 'OPEN_SECTION_DRAFT', lid: 'n1', line: 4 }).state;
     expect(s.sectionDraft, '下書きが開いていない').not.toBeNull();
     expect(s.sectionDraft!.lid).toBe('n1');
-    expect(s.sectionDraft!.heading).toBe('決定事項');
+    expect(sectionDraftOf(s).heading).toBe('決定事項');
     expect(s.sectionDraft!.original).toBe(['## 決定事項', '', '- 牛乳を買う', ''].join('\n'));
     // ⚠ アプリ全体は編集中にならない(設計 doc の中核の主張)
     expect(s.phase).toBe('ready');
@@ -78,7 +89,7 @@ describe('OPEN_SECTION_DRAFT(#1044 段2)', () => {
 
   it('🔴 末尾の章(次の見出しが無い)は、本文の末尾まで控える', () => {
     const s = reduce(booted(), { type: 'OPEN_SECTION_DRAFT', lid: 'n1', line: 8 }).state;
-    expect(s.sectionDraft!.heading).toBe('次回');
+    expect(sectionDraftOf(s).heading).toBe('次回');
     expect(s.sectionDraft!.original).toBe(['## 次回', '', '来週。'].join('\n'));
   });
 
@@ -116,7 +127,7 @@ describe('OPEN_SECTION_DRAFT(#1044 段2)', () => {
     const opened = reduce(booted(), { type: 'OPEN_SECTION_DRAFT', lid: 'n1', line: 4 }).state;
     const again = reduce(opened, { type: 'OPEN_SECTION_DRAFT', lid: 'n1', line: 8 });
     // ⚠ 1 つ目の章のまま(2 つ目の章に差し替わっていない)
-    expect(again.state.sectionDraft!.heading).toBe('決定事項');
+    expect(sectionDraftOf(again.state).heading).toBe('決定事項');
     expect(again.state.error, '無言のまま(押しても何も起きない)').toBe(SECTION_DRAFT_NOTE);
   });
 });
@@ -276,7 +287,7 @@ describe('SECTION_SAVED / SECTION_SAVE_FAILED(#1044 段2 3巡目の修理、S1)'
     });
     expect(r.state.sectionDraft, '断ったのに下書きが消えた').not.toBeNull();
     expect(r.state.sectionDraft!.saving, '保存中の印が解けていない').toBe(false);
-    expect(r.state.sectionDraft!.heading, '断ったのに見出しが変わった').toBe('決定事項');
+    expect(sectionDraftOf(r.state).heading, '断ったのに見出しが変わった').toBe('決定事項');
     expect(r.state.openBody).toBe(s0.openBody); // ⚠ 断ったので openBody は 1 バイトも動かない
     expect(r.state.error ?? '').toContain('別の場所で書き換えられました');
   });
@@ -347,7 +358,7 @@ describe('FORCE_RELEASE_LOCK は章の保存中にも効く(#1044 段2 4巡目�
     expect(r.state.sectionDraft, '打ち切ったのに箱が消えた').not.toBeNull();
     expect(r.state.sectionDraft!.saving, '打ち切ったのに保存中の印が残っている').toBe(false);
     expect(r.state.sectionDraft!.lid).toBe(s0.sectionDraft!.lid);
-    expect(r.state.sectionDraft!.heading).toBe(s0.sectionDraft!.heading);
+    expect(sectionDraftOf(r.state).heading).toBe(sectionDraftOf(s0).heading);
     expect(r.state.sectionDraft!.original).toBe(s0.sectionDraft!.original);
     // 🔑 世代は必ず上がる(後着の ack を無視するための本体)
     expect(r.state.lockGen).toBe(s0.lockGen + 1);
@@ -438,7 +449,7 @@ describe('断った字は、正しく操作した後は消える(#1044 段2 2巡
     // ⚠ CANCEL してから、別の見出し(line 8)を開き直す(binder の 3 択と同じ手順)
     const cancelled = reduce(denied, { type: 'CANCEL_SECTION_DRAFT' }).state;
     const r = reduce(cancelled, { type: 'OPEN_SECTION_DRAFT', lid: 'n1', line: 8 });
-    expect(r.state.sectionDraft!.heading).toBe('次回');
+    expect(sectionDraftOf(r.state).heading).toBe('次回');
     expect(r.state.error, '開けたのに断り文が残っている').toBeNull();
   });
 

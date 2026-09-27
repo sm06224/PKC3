@@ -22,9 +22,18 @@ import { resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
 import { MarkdownClient } from '../../src/adapter/platform/render/markdown-client';
 import type { RenderMarkdownOptions } from '../../src/features/markdown/markdown-render';
 import { bindEditLockRelease } from '../../src/adapter/state/edit-lock-release';
+import type { SectionDraft } from '../../src/adapter/state/app-state';
 import { answerDialog, dialogMessage } from './dialog-helper';
 
 const tick = (ms = 30): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * このファイルは章の下書きだけを組む(#1044 段3 で `sectionDraft` の型が
+ * `PartialDraft` に一般化された ── コード枠の分は `code-box-flow.test.ts` が持つ)。
+ */
+function draftHeading(d: Dispatcher): string | undefined {
+  return (d.getState().sectionDraft as SectionDraft | null)?.heading;
+}
 
 function meta(lid: string, title = 't-' + lid): EntryMeta {
   return {
@@ -172,7 +181,7 @@ describe('章を右クリックから開き、打って保存する(#1044 段2)'
   it('🔴 「この章を編集する」で、章だけが入力欄になる(打ちかけの原文が入る)', async () => {
     const { root, d } = setup();
     await openDraftOnHead2(root, d);
-    expect(d.getState().sectionDraft?.heading).toBe('決定事項');
+    expect(draftHeading(d)).toBe('決定事項');
     const ta = sectionInput(root);
     expect(ta, '箱が出ていない').not.toBeNull();
     expect(ta!.value).toContain('## 決定事項');
@@ -613,13 +622,13 @@ describe('章の欄:同じノートの別の見出しへ切り替えると、ロ
   it('(i) 変更なし → 見出し C が開き、ロックは台帳上このタブが握ったまま', async () => {
     const { root, d, disk, locks, releases } = setup();
     await openDraftOnB(root, d, disk);
-    expect(d.getState().sectionDraft?.heading, '前提が崩れている(B が開けていない)').toBe('B');
+    expect(draftHeading(d), '前提が崩れている(B が開けていない)').toBe('B');
     expect(held({ locks, releases }), '前提が崩れている(開いた時点で握れていない)').toBe(1);
 
     clickEditSectionOnC(root);
     await tick();
 
-    expect(d.getState().sectionDraft?.heading, 'C が開いていない(無言で捨てた?)').toBe('C');
+    expect(draftHeading(d), 'C が開いていない(無言で捨てた?)').toBe('C');
     // 🔑 本命:閉じてから開く間にロックを手放したきりではなく、取り直している
     expect(locks.filter((l) => l === 'n1').length, 'ロックを取り直していない').toBe(2);
     expect(releases.filter((l) => l === 'n1').length, '閉じたときに返していない').toBe(1);
@@ -640,7 +649,7 @@ describe('章の欄:同じノートの別の見出しへ切り替えると、ロ
     pressRow(root, '書きかけを消して移る');
     await tick();
 
-    expect(d.getState().sectionDraft?.heading, 'C が開いていない').toBe('C');
+    expect(draftHeading(d), 'C が開いていない').toBe('C');
     expect(disk.n1, '書かずに移るはずが書いた').toBe(DOC3);
     expect(locks.filter((l) => l === 'n1').length, 'ロックを取り直していない').toBe(2);
     expect(releases.filter((l) => l === 'n1').length).toBe(1);
@@ -668,7 +677,7 @@ describe('章の欄:同じノートの別の見出しへ切り替えると、ロ
     // 🔑 本命(F-E / R1b):行のずれを計算して開くので、C の中身がそのまま開ける
     //   ── 変異(行のずらしを外す)を当てると、B の増えた 2 行の途中や、
     //   ずれた行(C ではない箇所)を C の見出しとして開いてしまう。
-    expect(d.getState().sectionDraft?.heading, '開いた章が C ではない(行のずれが効いていない)').toBe(
+    expect(draftHeading(d), '開いた章が C ではない(行のずれが効いていない)').toBe(
       'C',
     );
     const ta = sectionInput(root)!;
@@ -696,7 +705,7 @@ describe('章の欄:同じノートの別の見出しへ切り替えると、ロ
   it('(iv) 変更なし → 2 回目の acquire が denied → 理由が出て、章の欄は閉じたまま(無言にならない)', async () => {
     const { root, d, disk, locks, releases, setLockAnswer } = setup();
     await openDraftOnB(root, d, disk);
-    expect(d.getState().sectionDraft?.heading, '前提が崩れている(B が開けていない)').toBe('B');
+    expect(draftHeading(d), '前提が崩れている(B が開けていない)').toBe('B');
 
     // 🔴 B を閉じたあと、C への取り直しだけ denied にする(別タブが横取りした体)
     setLockAnswer('denied');
@@ -845,5 +854,38 @@ describe('render() の指紋(#1044 段2、F-G)', () => {
       md.calls,
       '箱が開いている間、無関係な state 変化で markdown を描き直した(門が効いていない)',
     ).toBe(afterOpen);
+  });
+});
+
+/**
+ * 🔴 **`detail.ts` の「箱が開いている間は本文を描き直さない」門(V3、#1044 段3
+ *   2巡目の修理)**。
+ *
+ * ⚠ 上の「render() の指紋」describe は**指紋が変わらない** action(既読数・
+ *   通知・絞り込み)しか撃っておらず、`boxKey !== null` の早期 return を
+ *   1 度も通していなかった(`body` が動かないので、その手前の指紋比較でも
+ *   落ちる ── 検証担当の指摘どおり)。ここは **`BODY_LOADED`**(同じノートの
+ *   本文が別経路・別タブで変わった)で `state.openBody.body` を実際に動かし、
+ *   門を通す。
+ */
+describe('箱が開いている間、別経路の本文更新で打ちかけが消えない(#1044 段3 2巡目の修理、V3)', () => {
+  it('🔴 章の欄が開いている間に BODY_LOADED が来ても、打ちかけの字は消えない', async () => {
+    const { root, d } = setup();
+    await openDraftOnHead2(root, d);
+    const ta = sectionInput(root);
+    expect(ta, '前提が崩れている(箱が出ていない)').not.toBeNull();
+    ta!.value = '## 決定事項\n\n打ちかけ';
+
+    // 🔴 別経路(別タブ等)が同じノートの本文を書き換え、その通知が届く
+    d.dispatch({
+      type: 'BODY_LOADED',
+      lid: 'n1',
+      body: DOC.replace('前置き。', '別窓が書いた。'),
+    });
+    await tick();
+
+    expect(d.getState().sectionDraft, '別経路の読み直しで章の欄が消えた').not.toBeNull();
+    expect(sectionInput(root), '別経路の読み直しで箱が DOM から消えた').not.toBeNull();
+    expect(sectionInput(root)!.value, '打ちかけの字が消えた').toBe('## 決定事項\n\n打ちかけ');
   });
 });

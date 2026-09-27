@@ -47,6 +47,7 @@ import type { TableFormat } from '@features/markdown/table-convert';
 import { isPlaceOpen } from '@features/markdown/place-notation';
 import { isPlaceShape, type PlaceShape } from '@features/markdown/place-shape';
 import { sectionAt, sectionRange } from '@features/markdown/append-target';
+import { openCodeFenceAt } from '@features/markdown/code-fence-edit';
 import { frontmatterLineCount } from '@features/markdown/frontmatter';
 import {
   BLOCK_MOVED_NOTICE,
@@ -722,40 +723,99 @@ const SAVE_FAILED_EXIT = '「ノートを保存し直す」を押してから';
 export const EDITING_NOTE = '編集中は使えません(「編集を保存する」か「編集をやめる」を押すと戻ります)';
 
 /**
- * 🔴 **章の欄が開いている間、そのノートの他の書込を断る字**(#1044 段2)。
- * ⚠ 出口は**箱のボタンの字**で言う(`EDITING_NOTE` と同じ作法)。
+ * 🔴 **「部分の下書き」の種類ごとの言葉**(#1044 段3)。
+ *
+ * ⚠ **章だけの下書き(#1044 段2)を、コード枠の下書きも持てるように一般化した** ──
+ *   `state.sectionDraft`(field 名はそのまま。理由は {@link PartialDraft} の docstring)
+ *   が持つ機構(門・断り文・保存の作法)は種類に依らず同じなので、**種類ごとに違うのは
+ *   言葉だけ**にする。
+ * 🔑 **種類ごとに字を分けるのは、この表 1 つだけ**(§9 の決定)── 同じ判定を
+ *   2 か所に書かない(CLAUDE.md §7)。ここを直せば、以下の全部の断り文・知らせが
+ *   一緒に動く。
  */
-export const SECTION_DRAFT_NOTE =
-  '章を編集中は使えません(「章を保存する」か「章の編集をやめる」を押すと戻ります)';
+interface PartialDraftWords {
+  readonly noun: string;
+  readonly saveVerb: string;
+  readonly cancelVerb: string;
+  /** あいまい(2 個以上一致)の理由の書き出し。 */
+  readonly ambiguousLead: string;
+}
+
+const PARTIAL_DRAFT_WORDS: Record<PartialDraftKind, PartialDraftWords> = {
+  section: {
+    noun: '章',
+    saveVerb: '章を保存する',
+    cancelVerb: '章の編集をやめる',
+    ambiguousLead: 'この見出しの字が本文の中に複数あり',
+  },
+  code: {
+    noun: 'コード',
+    saveVerb: 'コードを保存する',
+    cancelVerb: 'コードの編集をやめる',
+    ambiguousLead: '同じ内容のコード枠が本文の中に複数あり',
+  },
+};
 
 /**
- * 🔴 **章の保存が断られた理由**(#1044 段2 3巡目の修理、S1)。
+ * 🔴 **その種類の下書きが開いている間、そのノートの他の書込を断る字**
+ * (#1044 段2 / 段3)。⚠ 出口は**箱のボタンの字**で言う(`EDITING_NOTE` と同じ作法)。
+ */
+function partialDraftBlockedNote(kind: PartialDraftKind): string {
+  const w = PARTIAL_DRAFT_WORDS[kind];
+  return `${w.noun}を編集中は使えません(「${w.saveVerb}」か「${w.cancelVerb}」を押すと戻ります)`;
+}
+/** ⚠ 既存の名前・値のまま(段2 で出荷済み ── #1044 段3 で 1 バイトも変えない)。 */
+export const SECTION_DRAFT_NOTE = partialDraftBlockedNote('section');
+export const CODE_DRAFT_NOTE = partialDraftBlockedNote('code');
+/** どちらの種類の下書きが原因の断り文か(`bodyWriteBlockResult` が控えるかどうかに使う)。 */
+const PARTIAL_DRAFT_OWN_NOTES: ReadonlySet<string> = new Set([SECTION_DRAFT_NOTE, CODE_DRAFT_NOTE]);
+
+/**
+ * 🔴 **保存が断られた理由(見出し / 枠が消えた・書き換えられた)**
+ * (#1044 段2 3巡目の修理、S1 / 段3)。
  *
- * ⚠ **effect が {@link replaceSectionByHeading} の結果からここへ振り分ける**
- *   (`store-effects.ts`)── 文言は user に見せる字なので**ここ 1 か所**に置き、
- *   効果層は import して使う(§7:文言を 2 か所に書かない)。
- * ⚠ `missing`(見出しが消えた)と `mismatch`(中身が違う)は**同じ字**にする ──
+ * ⚠ **effect が {@link replaceSectionByHeading} / {@link replaceCodeFenceContent} の
+ *   結果からここへ振り分ける**(`store-effects.ts`)── 文言は user に見せる字なので
+ *   **ここ 1 か所**に置き、効果層は import して使う(§7:文言を 2 か所に書かない)。
+ * ⚠ `missing`(見出し / 枠が消えた)と `mismatch`(章:中身が違う)は**同じ字**にする ──
  *   どちらも「もう開いたときの前提が崩れている」で、user がすべきことは同じ
  *   (コピーして開き直す)。
  */
-export const SECTION_SAVE_MISMATCH_NOTE =
-  'この章は別の場所で書き換えられました ── 書きかけをコピーしてから、開き直してください';
-export const SECTION_SAVE_AMBIGUOUS_NOTE =
-  'この見出しの字が本文の中に複数あり、どの章か決まりません(章を編集し直してください)';
+function partialDraftMismatchNote(kind: PartialDraftKind): string {
+  return `この${PARTIAL_DRAFT_WORDS[kind].noun}は別の場所で書き換えられました ── 書きかけをコピーしてから、開き直してください`;
+}
+function partialDraftAmbiguousNote(kind: PartialDraftKind): string {
+  const w = PARTIAL_DRAFT_WORDS[kind];
+  return `${w.ambiguousLead}、どの${w.noun}か決まりません(${w.noun}を編集し直してください)`;
+}
+export const SECTION_SAVE_MISMATCH_NOTE = partialDraftMismatchNote('section');
+export const SECTION_SAVE_AMBIGUOUS_NOTE = partialDraftAmbiguousNote('section');
+export const CODE_SAVE_MISMATCH_NOTE = partialDraftMismatchNote('code');
+export const CODE_SAVE_AMBIGUOUS_NOTE = partialDraftAmbiguousNote('code');
 /**
- * 🔴 **章の保存が断られた残り 2 つの理由**(#1044 段2 4巡目の修理、T2)。
+ * 🔴 **保存が断られた残り 2 つの理由**(#1044 段2 4巡目の修理、T2)。
  * ⚠ 直す前は `store-effects.ts` にリテラルで直書きしていた ── ここへ寄せたのは、
- *   `SECTION_DRAFT_ADVISORY_TEXTS`(下)が**この 4 つ全部**を「章の欄自身の断り文」
+ *   `clearedSectionDraftAdvisory`(下)が**この字全部**を「下書き自身の断り文」
  *   として認識する必要があるため(§7:文言を 2 か所に書かない。手で書き直すと
  *   効果層(`store-effects.ts`)とここが食い違う日が来る)。
+ * ⚠ **「別のウィンドウが…」は種類を名乗らない**(章 / コードのどちらでも同じ字)──
+ *   種類の言葉を持たない字を、無理に words 表から組まない。
  */
-export const SECTION_SAVE_NOT_FOUND_NOTE = '章を保存できませんでした(ノートが見つかりません)';
+function partialDraftNotFoundNote(kind: PartialDraftKind): string {
+  return `${PARTIAL_DRAFT_WORDS[kind].noun}を保存できませんでした(ノートが見つかりません)`;
+}
+export const SECTION_SAVE_NOT_FOUND_NOTE = partialDraftNotFoundNote('section');
+export const CODE_SAVE_NOT_FOUND_NOTE = partialDraftNotFoundNote('code');
 export const SECTION_SAVE_ANOTHER_WINDOW_NOTE =
   '別のウィンドウがこのノートを書き替えたため、保存できませんでした(もう一度押してください)';
 
 /** {@link replaceSectionByHeading} の失敗理由 → user に見せる字。 */
 export function sectionSaveFailureNote(reason: 'missing' | 'ambiguous' | 'mismatch'): string {
   return reason === 'ambiguous' ? SECTION_SAVE_AMBIGUOUS_NOTE : SECTION_SAVE_MISMATCH_NOTE;
+}
+/** {@link replaceCodeFenceContent} の失敗理由 → user に見せる字(#1044 段3)。 */
+export function codeSaveFailureNote(reason: 'missing' | 'ambiguous'): string {
+  return reason === 'ambiguous' ? CODE_SAVE_AMBIGUOUS_NOTE : CODE_SAVE_MISMATCH_NOTE;
 }
 
 /**
@@ -803,8 +863,12 @@ function clearedSectionDraftAdvisory(state: {
  *   RESTORE_TRASH / RESTORE_REVISION は R2 で起点から断るようにしたので、
  *   ここへ来るのは**このタブの外**(別タブの container 切替・再読込)だけになった。
  */
-export const SECTION_DRAFT_CLOSED_BY_SYSTEM_NOTICE =
-  '別の場所の操作でこのノートが切り替わったため、章の編集を終えました(書きかけは保存されていません)';
+function partialDraftClosedBySystemNotice(kind: PartialDraftKind): string {
+  return `別の場所の操作でこのノートが切り替わったため、${PARTIAL_DRAFT_WORDS[kind].noun}の編集を終えました(書きかけは保存されていません)`;
+}
+/** ⚠ 既存の名前・値のまま(段2 で出荷済み)。 */
+export const SECTION_DRAFT_CLOSED_BY_SYSTEM_NOTICE = partialDraftClosedBySystemNotice('section');
+export const CODE_DRAFT_CLOSED_BY_SYSTEM_NOTICE = partialDraftClosedBySystemNotice('code');
 
 /**
  * 🔴 **user に見せる「押せない理由」**(#516 / #715 / #761 / C11)。押せるなら `null`。
@@ -877,7 +941,7 @@ export function bodyWriteBlockReason(state: AppState, lid: string): string | nul
   // ⚠ `?.`(`!== null` ではない)── 手組みの state fixture は `sectionDraft` を
   //   持たない(`undefined`)ことがある。`!== null` は `undefined` を素通しする
   //   (2026-09-26、全量 test の `detail.ts` と同じ罠)。
-  if (state.sectionDraft?.lid === lid) return SECTION_DRAFT_NOTE;
+  if (state.sectionDraft?.lid === lid) return partialDraftBlockedNote(partialDraftKind(state.sectionDraft));
   if (state.phase === 'editing')
     return state.openBody?.lid === lid ? phaseBlockReason('editing') : null;
   return phaseBlockReason(state.phase);
@@ -900,11 +964,12 @@ export function bodyWriteBlockReason(state: AppState, lid: string): string | nul
 function bodyWriteBlockResult(state: AppState, lid: string): ReduceResult | null {
   const blocked = bodyWriteBlockReason(state, lid);
   if (blocked === null) return null;
+  // ⚠ 章 / コードのどちらでも同じ扱い(#1044 段3) ── PARTIAL_DRAFT_OWN_NOTES 参照。
   return {
     state: {
       ...state,
       error: blocked,
-      ...(blocked === SECTION_DRAFT_NOTE ? { sectionAdvisory: blocked } : {}),
+      ...(PARTIAL_DRAFT_OWN_NOTES.has(blocked) ? { sectionAdvisory: blocked } : {}),
     },
     events: [],
   };
@@ -919,9 +984,17 @@ function bodyWriteBlockResult(state: AppState, lid: string): ReduceResult | null
  *   `guardSectionDraftTransition` の user action 分岐)に**別々に**書かれており、
  *   `sectionAdvisory` を足すとなると 5 か所を揃えて直す必要があった(§7)。
  *   ここへ寄せて、5 か所とも呼ぶだけにする。
+ *
+ * 🔴 **#1044 段3 ── どちらの種類が開いているかで字を変える**。⚠ **いま開いている
+ *   下書きの種類**(`state.sectionDraft`)で決める ── これから開こうとしている
+ *   種類ではない(二重に開かない門は「先に居るほうを勝たせる」設計 ── §9)。
  */
 function sectionDraftBlockedResult(state: AppState): ReduceResult {
-  return { state: { ...state, error: SECTION_DRAFT_NOTE, sectionAdvisory: SECTION_DRAFT_NOTE }, events: [] };
+  const note =
+    state.sectionDraft === null
+      ? SECTION_DRAFT_NOTE
+      : partialDraftBlockedNote(partialDraftKind(state.sectionDraft));
+  return { state: { ...state, error: note, sectionAdvisory: note }, events: [] };
 }
 
 /**
@@ -1071,6 +1144,51 @@ export interface SectionDraft {
    *   離れる操作は**この間だけ**箱の押せない見た目で塞ぐ(`binder.ts` / `detail.ts`)。
    */
   readonly saving: boolean;
+}
+
+/**
+ * 🔴 **コード枠だけの下書き**(#1044 段3)。
+ *
+ * ⚠ **{@link SectionDraft} と「同じ器」を分け合う**(§9)── `openLine` を持つのが
+ *   {@link CodeDraft}、`heading` を持つのが `SectionDraft` なので、`'heading' in draft`
+ *   で見分けられる({@link isCodeDraft})。⚠ **判別用の `kind` field は増やさない** ──
+ *   増やすと既存の(段2 で出荷済みの)fixture・test が `SectionDraft` を組む所すべてに
+ *   `kind: 'section'` を書き足す破壊的変更になる(CLAUDE.md §9「置き換えの作法」と
+ *   同じ向き ── 器を替えるなら、既存の読み手が困らない形を選ぶ)。
+ */
+export interface CodeDraft {
+  readonly lid: string;
+  /** 開いたときに控えた、この枠の中身(引用の前置きを剥がした後。開き・閉じの行は含まない)。 */
+  readonly original: string;
+  readonly saving: boolean;
+  /** 開きの行(生の body の行番号)。行がずれていなければ、まずここで探す。 */
+  readonly line: number;
+  /** 開きの行の字(引用の前置きを剥がした後)。行がずれたときの身元の一部。 */
+  readonly openLine: string;
+  /** 引用の深さ(0 = 引用の外)。 */
+  readonly quote: number;
+}
+
+/**
+ * 🔴 **「部分の下書き」── 章の欄とコード枠の欄を、同じ 1 つの機構で持つ**
+ * (#1044 段3、§9)。
+ *
+ * ⚠ **field 名は `sectionDraft` のまま**({@link AppState.sectionDraft})── 段2 が
+ *   出荷した名前を変えると、値の形は変わっていないのに 9 test file(123 箇所)が
+ *   触る field 名だけの理由で書き直しになる。**一般化するのは型(この union)だけ**
+ *   にした(CLAUDE.md「field 名を変えるなら tsc に全数を追わせる」の逆 ──
+ *   変えない選択をしたので、既存の `SectionDraft` を組む fixture は 1 行も直っていない)。
+ */
+export type PartialDraft = SectionDraft | CodeDraft;
+export type PartialDraftKind = 'section' | 'code';
+
+/** `draft` が {@link CodeDraft} か(= `SectionDraft` が必ず持つ `heading` を持たない)。 */
+export function isCodeDraft(draft: PartialDraft): draft is CodeDraft {
+  return !('heading' in draft);
+}
+
+function partialDraftKind(draft: PartialDraft): PartialDraftKind {
+  return isCodeDraft(draft) ? 'code' : 'section';
 }
 
 /** 履歴一覧の 1 行(P5b)。boot では持たない ── SHOW_HISTORY の要求時に引く。 */
@@ -1591,8 +1709,12 @@ export interface AppState {
    *   指紋を動かし、無関係な面まで描き直る。
    * ⚠ **`heading` は名前で持つ**(行番号ではない)── 保存のとき、別の窓の書込で
    *   行がずれていても**名前で章を探し直す**ため(設計 doc §3)。
+   *
+   * 🔴 **#1044 段3 でコード枠の下書きも同じ field で持つ**(型は
+   *   {@link PartialDraft}。field 名は変えていない ── {@link PartialDraft} の
+   *   docstring 参照)。
    */
-  sectionDraft: SectionDraft | null;
+  sectionDraft: PartialDraft | null;
   /**
    * 🔴 **いま `error` に置いている字が、章の欄自身の断り文なら、その字そのものを控える**
    *   (#1044 段2 5巡目の修理、U3)。`null` = 章の欄は何も置いていない。
@@ -2133,6 +2255,18 @@ export type UserAction =
   | { type: 'SAVE_SECTION_DRAFT'; text: string }
   /** 🔴 **章の欄を、書かずに閉じる**(#1044 段2)。 */
   | { type: 'CANCEL_SECTION_DRAFT' }
+  /**
+   * 🔴 **コード枠だけの下書きを開く**(#1044 段3)。
+   * @param line 押した枠の開きの行(frontmatter を外した側。`OPEN_SECTION_DRAFT` と同じ基準)
+   */
+  | { type: 'OPEN_CODE_DRAFT'; lid: string; line: number }
+  /**
+   * 🔴 **コード枠の欄を保存する**(#1044 段3)。⚠ `text` は箱の**いまの字**
+   *   (引用の前置き・開き・閉じの行は含まない)。断ったら `sectionDraft` は残る。
+   */
+  | { type: 'SAVE_CODE_DRAFT'; text: string }
+  /** 🔴 **コード枠の欄を、書かずに閉じる**(#1044 段3)。 */
+  | { type: 'CANCEL_CODE_DRAFT' }
   | { type: 'TOGGLE_TODO_STATUS'; lid: string }
   /**
    * 🔴 **カレンダーの日付を付け外しする**(#276)。`null` で外す。
@@ -2827,6 +2961,34 @@ export type SystemCommand =
       gen: number;
       heading: string;
       error: string;
+    }
+  | {
+      /**
+       * 🔴 **コード枠の保存が disk に着いた**(#1044 段3)。⚠ **`gen` を必ず見る**
+       *   (`SECTION_SAVED` と同じ理由)。
+       */
+      type: 'CODE_SAVED';
+      lid: string;
+      gen: number;
+      /** 身元検査(`app-state.ts` の `CODE_SAVED` reducer 参照)。 */
+      line: number;
+      openLine: string;
+      quote: number;
+      /** 枠を差し替えた**後**の全文。 */
+      body: string;
+      status: string | null;
+      date: string | null;
+      archived: boolean;
+    }
+  | {
+      /** コード枠の保存が断られた。⚠ **ロックは必ず解く**(`saving: false`)。 */
+      type: 'CODE_SAVE_FAILED';
+      lid: string;
+      gen: number;
+      line: number;
+      openLine: string;
+      quote: number;
+      error: string;
     };
 
 export type Dispatchable = UserAction | SystemCommand;
@@ -3250,6 +3412,26 @@ export type DomainEvent =
       /** 箱に打たれていた新しい中身(見出し行を含む)。 */
       text: string;
     }
+  | {
+      /**
+       * 🔴 **コード枠の欄の保存要求**(#1044 段3)。⚠ **本文は載せない** ──
+       *   effect が disk から読み直し、身元({@link CodeFenceIdentity})で枠を
+       *   探し直して `text` へ差し替える(`REQUEST_SECTION_SAVE` と同じ作法)。
+       */
+      type: 'REQUEST_CODE_SAVE';
+      lid: string;
+      gen: number;
+      title: string;
+      archetype: string;
+      entryOrder: number;
+      /** 枠を探し直す身元。 */
+      line: number;
+      openLine: string;
+      original: string;
+      quote: number;
+      /** 箱に打たれていた新しい中身(引用の前置き・開き・閉じの行は含まない)。 */
+      text: string;
+    }
   | { type: 'REQUEST_DELETE'; lid: string }
   | {
       /** title 書換の永続化要求(body は effect が disk から読む)。snapshot は
@@ -3379,14 +3561,17 @@ function goHistory(p: SqlPageState, at: number, from: number): SqlPageState {
 }
 
 /**
- * 🔴 **章の欄自身の action(#1044 段2)**。⚠ この 3 つだけは
- * {@link guardSectionDraftTransition} を通さない ── 章の欄を開く・保存する・
- * やめるのは、章の欄それ自身が sectionDraft を動かしてよい唯一の場所である。
+ * 🔴 **下書き自身の action(#1044 段2 / 段3)**。⚠ この 6 つだけは
+ * {@link guardSectionDraftTransition} を通さない ── 下書きを開く・保存する・
+ * やめるのは、下書きそれ自身が `sectionDraft` を動かしてよい唯一の場所である。
  */
-const SECTION_DRAFT_OWN_ACTIONS: ReadonlySet<Dispatchable['type']> = new Set([
+const PARTIAL_DRAFT_OWN_ACTIONS: ReadonlySet<Dispatchable['type']> = new Set([
   'OPEN_SECTION_DRAFT',
   'SAVE_SECTION_DRAFT',
   'CANCEL_SECTION_DRAFT',
+  'OPEN_CODE_DRAFT',
+  'SAVE_CODE_DRAFT',
+  'CANCEL_CODE_DRAFT',
 ]);
 
 /**
@@ -3421,6 +3606,8 @@ const SYSTEM_COMMAND_TYPES: Record<SystemCommand['type'], true> = {
   APPEND_FAILED: true,
   SECTION_SAVED: true,
   SECTION_SAVE_FAILED: true,
+  CODE_SAVED: true,
+  CODE_SAVE_FAILED: true,
 };
 
 function isSystemCommand(action: Dispatchable): boolean {
@@ -3459,7 +3646,7 @@ export function guardSectionDraftTransition(
 ): ReduceResult {
   const draft = state.sectionDraft;
   if (draft === null) return result;
-  if (SECTION_DRAFT_OWN_ACTIONS.has(action.type)) return result;
+  if (PARTIAL_DRAFT_OWN_ACTIONS.has(action.type)) return result;
   const movedAway = state.selectedLid === draft.lid && result.state.selectedLid !== draft.lid;
   const entryGone = state.entryMetas.has(draft.lid) && !result.state.entryMetas.has(draft.lid);
   if (!movedAway && !entryGone) {
@@ -3510,7 +3697,7 @@ export function guardSectionDraftTransition(
     state: {
       ...result.state,
       sectionDraft: null,
-      notice: SECTION_DRAFT_CLOSED_BY_SYSTEM_NOTICE,
+      notice: partialDraftClosedBySystemNotice(partialDraftKind(draft)),
       ...clearedSectionDraftAdvisory(result.state),
     },
     events: result.events,
@@ -5811,7 +5998,9 @@ function reduceCore(
      */
     case 'SAVE_SECTION_DRAFT': {
       const draft = state.sectionDraft ?? null;
-      if (draft === null) return { state, events: [] };
+      // ⚠ **コード枠の下書きが開いているのに撃たれたら、黙って捨てる**(#1044 段3)──
+      //   binder は種類ごとに別の action を撃つので、ここへ来るのは防波堤のみ。
+      if (draft === null || isCodeDraft(draft)) return { state, events: [] };
       /**
        * 🔴 **二重押しは黙って捨てる**(#1044 段2 3巡目の修理、S1)。
        * ⚠ **追記の `writeLock` と同じ作法**(`app-state.ts` の `APPEND_TO_ENTRY`
@@ -5873,7 +6062,12 @@ function reduceCore(
     case 'SECTION_SAVED': {
       if (action.gen !== state.lockGen) return { state, events: [] };
       const draft = state.sectionDraft;
-      if (draft === null || draft.lid !== action.lid || draft.heading !== action.heading) {
+      if (
+        draft === null ||
+        isCodeDraft(draft) ||
+        draft.lid !== action.lid ||
+        draft.heading !== action.heading
+      ) {
         return { state, events: [] };
       }
       const meta = state.entryMetas.get(action.lid);
@@ -5925,7 +6119,12 @@ function reduceCore(
     case 'SECTION_SAVE_FAILED': {
       if (action.gen !== state.lockGen) return { state, events: [] };
       const draft = state.sectionDraft;
-      if (draft === null || draft.lid !== action.lid || draft.heading !== action.heading) {
+      if (
+        draft === null ||
+        isCodeDraft(draft) ||
+        draft.lid !== action.lid ||
+        draft.heading !== action.heading
+      ) {
         return { state, events: [] };
       }
       return {
@@ -5952,6 +6151,171 @@ function reduceCore(
      */
     case 'CANCEL_SECTION_DRAFT':
       return state.sectionDraft == null || state.sectionDraft.saving
+        ? { state, events: [] }
+        : {
+            state: {
+              ...state,
+              sectionDraft: null,
+              ...clearedSectionDraftAdvisory(state),
+            },
+            events: [],
+          };
+    /**
+     * 🔴 **コード枠だけの下書きを開く**(#1044 段3)。⚠ **段2 と同じ 3 つの門**
+     *   (`OPEN_SECTION_DRAFT` の docstring と同じ):phase 検査 / system 領域の
+     *   backstop / 「二重に開かない。ただし無言にしない」。
+     *
+     * 🔑 枠の特定と身元の取り出しは {@link openCodeFenceAt} **1 本**(features 層の
+     *   純関数 ── reducer に走査の規則を書かない、CLAUDE.md §7)。
+     */
+    case 'OPEN_CODE_DRAFT': {
+      const { lid, line } = action;
+      if (state.phase !== 'ready') return { state, events: [] };
+      if (!state.openBody || state.openBody.lid !== lid) return { state, events: [] };
+      if (isSystemMessageLid(lid)) return { state, events: [] };
+      if (state.sectionDraft != null) {
+        return sectionDraftBlockedResult(state);
+      }
+      const body = state.openBody.body;
+      const abs = line + frontmatterLineCount(body);
+      const identity = openCodeFenceAt(body, abs);
+      if (identity === null) {
+        return {
+          state: { ...state, error: 'このコード枠を編集できませんでした(本文を開き直してください)' },
+          events: [],
+        };
+      }
+      return {
+        state: {
+          ...state,
+          sectionDraft: { lid, ...identity, saving: false },
+          ...clearedSectionDraftAdvisory(state),
+        },
+        events: [],
+      };
+    }
+    /**
+     * 🔴 **コード枠の欄を保存する**(#1044 段3)。⚠ **段2(`SAVE_SECTION_DRAFT`)と
+     *   全く同じ形**(本文は event に載せない / 二重押しは黙って捨てる /
+     *   phase だけを見る / 断ったら draft は残す)。差し替えの純関数だけが違う
+     *   ({@link replaceCodeFenceContent})。
+     */
+    case 'SAVE_CODE_DRAFT': {
+      const draft = state.sectionDraft ?? null;
+      if (draft === null || !isCodeDraft(draft)) return { state, events: [] };
+      if (draft.saving) return { state, events: [] };
+      if (state.phase !== 'ready') {
+        return {
+          state: { ...state, error: `${phaseBlockReason(state.phase)}コードを保存してください` },
+          events: [],
+        };
+      }
+      const meta = state.entryMetas.get(draft.lid);
+      if (!meta) {
+        return { state: { ...state, error: `commit: unknown entry ${draft.lid}` }, events: [] };
+      }
+      return {
+        state: {
+          ...state,
+          sectionDraft: { ...draft, saving: true },
+          ...clearedSectionDraftAdvisory(state),
+        },
+        events: [
+          {
+            type: 'REQUEST_CODE_SAVE',
+            lid: draft.lid,
+            gen: state.lockGen,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            line: draft.line,
+            openLine: draft.openLine,
+            original: draft.original,
+            quote: draft.quote,
+            text: action.text,
+          },
+        ],
+      };
+    }
+    /**
+     * 🔴 **コード枠の保存が disk に着いた**(#1044 段3)。⚠ **世代 + 身元
+     *   (`lid` + `line` + `openLine` + `quote`)の両方を見る**(`SECTION_SAVED` と同じ理由)。
+     */
+    case 'CODE_SAVED': {
+      if (action.gen !== state.lockGen) return { state, events: [] };
+      const draft = state.sectionDraft;
+      if (
+        draft === null ||
+        !isCodeDraft(draft) ||
+        draft.lid !== action.lid ||
+        draft.line !== action.line ||
+        draft.openLine !== action.openLine ||
+        draft.quote !== action.quote
+      ) {
+        return { state, events: [] };
+      }
+      const meta = state.entryMetas.get(action.lid);
+      const entryMetas = !meta
+        ? state.entryMetas
+        : new Map(state.entryMetas).set(action.lid, {
+            ...meta,
+            status: action.status,
+            date: action.date,
+            archived: action.archived,
+          });
+      const openBody = {
+        lid: action.lid,
+        body: action.body,
+        baseline: action.body,
+        persisted: action.body,
+        diskAhead: false,
+      };
+      return {
+        state: {
+          ...state,
+          entryMetas,
+          sectionDraft: null,
+          ...clearedSectionDraftAdvisory(state),
+          openBody,
+          taskScan: refreshTaskCards(state.taskScan, action.lid, action.body),
+          smartHits: refreshSmartHits(state.smartHits, action.lid, action.body, entryMetas),
+          splitBodies: syncSplitBody(state, action.lid, action.body),
+        },
+        events: smartScanFor(state, action.lid),
+      };
+    }
+    /**
+     * 🔴 **コード枠の保存が断られた**(#1044 段3)。⚠ **ロックは必ず解く**
+     *   (`SECTION_SAVE_FAILED` と同じ作法)。
+     */
+    case 'CODE_SAVE_FAILED': {
+      if (action.gen !== state.lockGen) return { state, events: [] };
+      const draft = state.sectionDraft;
+      if (
+        draft === null ||
+        !isCodeDraft(draft) ||
+        draft.lid !== action.lid ||
+        draft.line !== action.line ||
+        draft.openLine !== action.openLine ||
+        draft.quote !== action.quote
+      ) {
+        return { state, events: [] };
+      }
+      return {
+        state: {
+          ...state,
+          sectionDraft: { ...draft, saving: false },
+          error: action.error,
+          sectionAdvisory: action.error,
+        },
+        events: [],
+      };
+    }
+    /**
+     * 🔴 **コード枠の欄を、書かずに閉じる**(#1044 段3。`CANCEL_SECTION_DRAFT` と同じ形)。
+     */
+    case 'CANCEL_CODE_DRAFT':
+      return state.sectionDraft == null || !isCodeDraft(state.sectionDraft) || state.sectionDraft.saving
         ? { state, events: [] }
         : {
             state: {

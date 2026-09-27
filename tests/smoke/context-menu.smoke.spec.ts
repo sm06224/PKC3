@@ -795,6 +795,101 @@ test('🔴 見出しの「この章を編集する」→ 打つ → 別のノー
 });
 
 /**
+ * 🔴 **コード枠の ✎ ── 押す → 箱が枠の位置に出る → 打つ → 保存 → 履歴が動く**
+ * (#1044 段3)。⚠ **図の枠には ✎ が出ない**ことも同じ「起動」で見る
+ * (2 つ目の test にすると、もう 1 回 `gotoApp` が要る ── smoke-budget を増やさない)。
+ * 🔴 **frontmatter つき**(#1044 段3 2巡目の修理、V1)── 二重加算は frontmatter の
+ *   行数が 0 だと発火しない(fixture のゼロ件の次元。CLAUDE.md §2)ので、
+ *   タグを 1 つ持たせる。⚠ **起動は増やさない**(既存 fixture に足すだけ)。
+ * 🔴 **引用(`>`)の中の枠(地の文つき)も同じ起動で見る**(#1044 段3 2巡目の修理、
+ *   V2)。⚠ こちらも 2 つ目の test にせず、同じ本文・同じ起動に相乗りさせる。
+ */
+test('🔴 コード枠の ✎ → 打つ → 保存で disk・履歴が動く。図の枠には出ない (#1044 段3)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page
+    .locator('[data-pkc-field="editor-body"]')
+    .fill(
+      '---\ntags: [x]\n---\n\n# メモ\n\n> 引用の説明文。\n>\n> ```py\n> b = 2\n> ```\n\n```js\nconst a = 1;\n```\n\n```mermaid\ngraph TD;\n  A-->B;\n```\n',
+    );
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(page.locator('[data-pkc-field="detail-body"] h1')).toHaveText('メモ');
+
+  // 🔴 図(mermaid)の枠には ✎ が出ない ── data-pkc-render-lang を持つ枠
+  const mermaidBlock = page.locator('[data-pkc-md-block-kind="code"][data-pkc-render-lang="mermaid"]');
+  await expect(mermaidBlock, '前提が崩れている(mermaid の枠が描けていない)').toBeVisible();
+  await expect(
+    mermaidBlock.locator('[data-pkc-action="edit-code-block"]'),
+    '図の枠に ✎ が出ている',
+  ).toHaveCount(0);
+
+  // 🔴 引用の中の枠(地の文つき)の ✎ を押す(#1044 段3 2巡目の修理、V2)。
+  //   ⚠ 地の文が無いと `<blockquote>` 自身が偶然当たって再現しない ── だから
+  //   ここに「引用の説明文。」を挟んでいる(直す前は箱が 1 バイトも出なかった)。
+  const quoteBlock = page.locator('[data-pkc-md-block-kind="code"]', { hasText: 'b = 2' });
+  const quoteEditBtn = quoteBlock.locator('[data-pkc-action="edit-code-block"]');
+  await expect(quoteEditBtn, '引用の中の ✎ が出ていない').toBeVisible();
+  await quoteEditBtn.click();
+  const quoteBox = page.locator('[data-pkc-field="code-draft-input"]');
+  await expect(quoteBox, '引用の中の箱が出ていない(V2 の再発)').toBeVisible();
+  await expect(quoteBox).toHaveValue('b = 2');
+  await quoteBox.fill('b = 20');
+  await page.locator('[data-pkc-action="save-code-draft"]').click();
+  await expect(page.locator('[data-pkc-field="code-draft-input"]'), '保存後も箱が残っている').toHaveCount(0);
+  await expect(
+    page.locator('[data-pkc-field="detail-body"]'),
+    '打った字が読む面に出ていない(引用の中)',
+  ).toContainText('b = 20');
+  await expect(
+    page.locator('[data-pkc-field="detail-body"]'),
+    '引用の地の文が消えた',
+  ).toContainText('引用の説明文。');
+
+  // ① 普通のコード枠の ✎ を押す
+  const jsBlock = page.locator('[data-pkc-md-block-kind="code"]', { hasText: 'const a = 1;' });
+  const editBtn = jsBlock.locator('[data-pkc-action="edit-code-block"]');
+  await expect(editBtn, '✎ が出ていない').toBeVisible();
+  await editBtn.click();
+
+  const box = page.locator('[data-pkc-field="code-draft-input"]');
+  await expect(box, 'コード枠の箱が出ていない').toBeVisible();
+  await expect(box).toHaveValue('const a = 1;');
+
+  /**
+   * 🔴 視覚の裏取り(実座標):箱は枠が在った場所に出ていて、読む面の幅を使う
+   * (`section-box` の F-F と同じ観点)。
+   */
+  const readBox = await page.locator('[data-pkc-field="detail-body"]').boundingBox();
+  const boxBox = await box.boundingBox();
+  expect(readBox, '読む面の座標が読めない').not.toBeNull();
+  expect(boxBox, '箱の座標が読めない').not.toBeNull();
+  expect(boxBox!.width, '箱が読む面の幅を使っていない').toBeGreaterThan(readBox!.width * 0.8);
+
+  // ② 打つ
+  await box.fill('const a = 2;');
+
+  // ③「コードを保存する」→ 読む面に新しい字、履歴が動く
+  await page.locator('[data-pkc-action="save-code-draft"]').click();
+  await expect(page.locator('[data-pkc-field="code-draft-input"]'), '保存後も箱が残っている').toHaveCount(0);
+  await expect(page.locator('[data-pkc-field="detail-body"]'), '保存した字が読む面に出ていない').toContainText(
+    'const a = 2;',
+  );
+
+  const noteRow = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').first();
+  await noteRow.click({ button: 'right' });
+  await page.locator(`${MENU} button[data-pkc-action="show-history"]`).click();
+  // ⚠ **2 件**(引用の中の枠の保存 + 普通の枠の保存 ── V2 の相乗りで 1 件増えた)
+  await expect(page.locator('[data-pkc-field="history-panel"]'), '履歴が動いていない').toContainText(
+    '履歴 2 件',
+  );
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
  * 🔴 **章が上限(40 行)を超えても、開いた瞬間は見出し行が見える**
  * (#1044 段2 2巡目の修理、R8)。⚠ unit(`section-box.test.ts`)は happy-dom の
  * layout が無いので折り返し分を測れない ── 実物の版面で「本当に上限に当たった

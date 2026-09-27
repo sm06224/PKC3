@@ -250,7 +250,10 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
     //   `edit-from-heading` と同じ仕分け)/ N +2(`save-section-draft` /
     //   `cancel-section-draft`。どちらも押した所から何も要らない ── 効く先は
     //   いま開いている章の下書きで決まる)。
-    expect(counts()).toEqual({ P1: 60, P2: 33, E: 25, V: 10, N: 147 });
+    // ⚠ 2026-09-26(#1044 段3): P1 +1(`edit-code-block`。押した枠 1 つが要る ──
+    //   `edit-section` と同じ仕分け)/ N +2(`save-code-draft` / `cancel-code-draft`。
+    //   どちらも押した所から何も要らない ── 効く先はいま開いているコードの下書きで決まる)。
+    expect(counts()).toEqual({ P1: 61, P2: 33, E: 25, V: 10, N: 149 });
   });
 
   it('🔴 名指しの錨 ── 件数が同じまま入れ替わっても落ちる', () => {

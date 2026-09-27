@@ -19,7 +19,7 @@ import { appMessagePost } from '../../src/adapter/platform/message-post';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
-import { bodyLockOf, initialState, reduce } from '../../src/adapter/state/app-state';
+import { bodyLockOf, initialState, isCodeDraft, reduce } from '../../src/adapter/state/app-state';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
@@ -738,5 +738,43 @@ describe('🔴 追記欄と章の欄(#1044 段2、F-C)', () => {
     s = reduce(s, { type: 'BODY_LOADED', lid: 'n1', body: '## 章\n\n中身\n' }).state;
     expect(bodyLockOf(s)).toBeNull();
     expect(appendModeOf(s)).toEqual({ kind: 'ready', lid: 'n1' });
+  });
+});
+
+/**
+ * 🔴 **コード枠の欄が握っているときも、追記欄を出さない**(#1044 段3 2巡目の
+ *   修理、V4)。
+ *
+ * ⚠ `bodyLockOf` は `state.sectionDraft` が**在ることだけ**を見て
+ *   `holder: 'section'` を返す(章とコード枠は「部分の下書き」という同じ器を
+ *   分け合う ── §9 の決定・`PartialDraft`)ので、コード枠の下書きでも
+ *   **綴りを直さずに**同じ経路で隠れるはずである。⚠ ところが上の describe
+ *   (F-C)は `OPEN_SECTION_DRAFT` しか撃っておらず、`sectionDraft` が
+ *   {@link CodeDraft} である形を**一度も通していなかった**
+ *   (fixture のゼロ件の次元。CLAUDE.md §2)── ここで実地に通す。
+ */
+describe('🔴 追記欄とコード枠の欄(#1044 段3 2巡目の修理、V4)', () => {
+  function bootedWithCodeDraft() {
+    let s = reduce(initialState, {
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [meta('n1', 'text')],
+      relations: [],
+    }).state;
+    s = reduce(s, { type: 'SELECT_ENTRY', lid: 'n1' }).state;
+    s = reduce(s, { type: 'BODY_LOADED', lid: 'n1', body: '```js\nconst a = 1;\n```\n' }).state;
+    return reduce(s, { type: 'OPEN_CODE_DRAFT', lid: 'n1', line: 0 }).state;
+  }
+
+  it('🔴 bodyLockOf はコード枠の欄も holder: "section" として返す', () => {
+    const s = bootedWithCodeDraft();
+    expect(s.sectionDraft, '前提が崩れている(コード枠の欄が開いていない)').not.toBeNull();
+    expect(isCodeDraft(s.sectionDraft!), '前提が崩れている(章の欄が開いた)').toBe(true);
+    expect(bodyLockOf(s)).toEqual({ lid: 'n1', holder: 'section' });
+  });
+
+  it('🔴 appendModeOf は hidden を返す(コード枠の下書きでも追記欄を隠す)', () => {
+    const s = bootedWithCodeDraft();
+    expect(appendModeOf(s)).toEqual({ kind: 'hidden' });
   });
 });

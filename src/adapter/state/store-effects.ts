@@ -90,10 +90,13 @@ import type { Dispatcher } from './dispatcher';
 import type { TagInputField } from './app-state';
 import {
   sectionSaveFailureNote,
+  codeSaveFailureNote,
   SECTION_SAVE_ANOTHER_WINDOW_NOTE,
   SECTION_SAVE_NOT_FOUND_NOTE,
+  CODE_SAVE_NOT_FOUND_NOTE,
 } from './app-state';
 import { replaceSectionByHeading } from '@features/markdown/append-target';
+import { replaceCodeFenceContent } from '@features/markdown/code-fence-edit';
 
 /**
  * effect 層が必要とする store 面(test では fake を注入)。
@@ -3078,6 +3081,88 @@ export function connectStoreEffects(
             stamp(ev.lid, stamps);
           } catch (e) {
             fail(`章を保存できませんでした: ${String(e)}`);
+          }
+        });
+        break;
+      /**
+       * 🔴 **コード枠の欄の保存**(#1044 段3。`REQUEST_SECTION_SAVE` と全く同じ形)。
+       * ⚠ **差し替えの純関数だけが違う**({@link replaceCodeFenceContent})── 直列
+       * queue に載せる理由・disk から読み直す理由・失敗しても必ず ack を出す理由は
+       * `REQUEST_SECTION_SAVE` の docstring と同じ。
+       */
+      case 'REQUEST_CODE_SAVE':
+        enqueue(async () => {
+          if (disposed) return;
+          const identity = { line: ev.line, openLine: ev.openLine, original: ev.original, quote: ev.quote };
+          const fail = (error: string): void => {
+            if (disposed) return;
+            dispatcher.dispatch({
+              type: 'CODE_SAVE_FAILED',
+              lid: ev.lid,
+              gen: ev.gen,
+              line: ev.line,
+              openLine: ev.openLine,
+              quote: ev.quote,
+              error,
+            });
+          };
+          try {
+            const body = await store.getBody(ev.lid);
+            if (disposed) return;
+            if (body === null) return fail(CODE_SAVE_NOT_FOUND_NOTE);
+            const tryReplace = async (
+              base: string,
+            ): Promise<
+              | { readonly ok: true; readonly stamps: EntryStamps; readonly newBody: string; readonly ext: FlavorExtract }
+              | { readonly ok: false; readonly reason: 'missing' | 'ambiguous' }
+            > => {
+              const replaced = replaceCodeFenceContent(base, identity, ev.text);
+              if (!replaced.ok) return { ok: false, reason: replaced.reason };
+              const ext = extractMeta(ev.archetype, replaced.body);
+              const stamps = await store.persistEntry(
+                {
+                  lid: ev.lid,
+                  title: ev.title,
+                  archetype: ev.archetype,
+                  body: replaced.body,
+                  entryOrder: ev.entryOrder,
+                  status: ext.status,
+                  date: ext.date,
+                  archived: ext.archived,
+                },
+                // 🔑 全文編集の保存と同じ形(checkpoint: true ── 枠の書換えは文章の書換え)
+                { checkpoint: true, expectHash: contentHash64Hex(base) },
+              );
+              return { ok: true, stamps, newBody: replaced.body, ext };
+            };
+            let attempt = await tryReplace(body);
+            if (!attempt.ok) return fail(codeSaveFailureNote(attempt.reason));
+            if (attempt.stamps.conflict === true) {
+              const fresh = await store.getBody(ev.lid);
+              if (disposed) return;
+              if (fresh === null) return fail(CODE_SAVE_NOT_FOUND_NOTE);
+              attempt = await tryReplace(fresh);
+              if (!attempt.ok) return fail(codeSaveFailureNote(attempt.reason));
+              if (attempt.stamps.conflict === true)
+                return fail(SECTION_SAVE_ANOTHER_WINDOW_NOTE);
+            }
+            const { stamps, newBody, ext } = attempt;
+            if (disposed) return;
+            dispatcher.dispatch({
+              type: 'CODE_SAVED',
+              lid: ev.lid,
+              gen: ev.gen,
+              line: ev.line,
+              openLine: ev.openLine,
+              quote: ev.quote,
+              body: newBody,
+              status: ext.status,
+              date: ext.date,
+              archived: ext.archived,
+            });
+            stamp(ev.lid, stamps);
+          } catch (e) {
+            fail(`コードを保存できませんでした: ${String(e)}`);
           }
         });
         break;

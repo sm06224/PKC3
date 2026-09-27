@@ -780,10 +780,13 @@ describe('新しい本文が state に入る所は、札の組み直しを通る
      * 🔴 **`SECTION_SAVED` が 7 件目**(#1044 段2 3巡目の修理、S1)── 章の保存が
      *   effect 化され、`openBody` に `body: action.body` を新しく組む口が増えた
      *   (`refreshTaskCards` は既に通してある。§7「数えた数だけ通す」)。
+     * 🔴 **`CODE_SAVED` が 8 件目**(#1044 段3)── コード枠の保存も同じ形で
+     *   `openBody` を新しく組む(`SECTION_SAVED` と全く同じ 3 つの追従を通す)。
      */
     expect([...found.keys()].sort()).toEqual([
       'BODY_LOADED',
       'BODY_REWRITTEN',
+      'CODE_SAVED',
       'ENTRY_APPENDED',
       'ENTRY_BODY_REFRESHED',
       'ENTRY_RESTORED',
@@ -1479,7 +1482,11 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     //    しているか」は本物の版面でしか言えない。既存の道中(R8 の「40 行を
     //    超える章」)には載せられない ── あちらは `scrollTop` だけを見て
     //    viewport の座標を測っていないので、別の主張(1 test = 1 主張)になる。
-    ).toBe(511);
+    // ⚠ 2026-09-26(#1044 段3): `context-menu.smoke.spec.ts` に「コード枠の ✎ →
+    //    打つ → 保存で disk・履歴が動く。図の枠には出ない」1 本を足した
+    //    → 511 → 512。既存の道中(章の欄)には載せられない(#820 の
+    //    `BOOT_BUDGET` の隣に書いた理由と同じ)。
+    ).toBe(512);
   });
 });
 

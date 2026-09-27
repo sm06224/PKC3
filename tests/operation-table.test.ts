@@ -161,6 +161,12 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    *   持たせていない)。
    */
   'cancel-section-draft', 'save-section-draft',
+  /**
+   * ⚠ **2026-09-26(#1044 段3)で 2 件増やした** ── コード枠の欄の保存 / やめる。
+   * 🔑 **名前で呼べないままにする理由**:`cancel-section-draft` / `save-section-draft`
+   *   と同じ(いま開いているコード枠の欄に効くので、開いていないと意味が無い)。
+   */
+  'cancel-code-draft', 'save-code-draft',
   'capture-stop',
   /**
    * ⚠ **2026-09-14(#683 段②a)で 4 件増やした** ── 録った音の前後を削る
@@ -300,6 +306,12 @@ const UNREGISTERED_POINT: readonly string[] = [
    *   「この章を編集する」と呼んでも、どの見出しかが決まらない)。
    */
   'edit-section',
+  /**
+   * ⚠ **2026-09-26(#1044 段3)で 1 件増やした** ── コード枠の ✎。`edit-section` と
+   * 同じ仕分け(押した枠の行を `tableLineAt` が運ぶ ── パレットから
+   * 「このコードを編集する」と呼んでも、どの枠かが決まらない)。
+   */
+  'edit-code-block',
   'edit-from-heading', 'export-diagram', 'filter-by-tag', 'move-app-group-down',
   'move-app-group-up', 'move-tile-down', 'move-tile-up', 'navigate-asset-ref',
   'navigate-card-ref', 'navigate-entry-ref', 'open-alarm', 'open-office', 'open-repeat-menu',
@@ -504,12 +516,17 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   登記簿(6 book)には載せない(見出しを指す・章の欄が要る ── パレットからは
       //   撃てない)ので `receivers` +3 / `total` +3 / `unregistered` +3、
       //   `registered` / `both` / `outsideActionsTable` は動かない。
-      total: 328,
-      receivers: 275,
+      // ⚠ 2026-09-26(#1044 段3): コード枠の ✎ で 3 件増やした
+      //   (`edit-code-block` / `save-code-draft` / `cancel-code-draft`)── `edit-section` と
+      //   同じ理由(枠を指す・コード枠の欄が要る ── パレットからは撃てない)で
+      //   登記簿には載せない。`receivers` +3 / `total` +3 / `unregistered` +3、
+      //   `registered` / `both` / `outsideActionsTable` は動かない。
+      total: 331,
+      receivers: 278,
       registered: 91,
       both: 38,
       outsideActionsTable: 53,
-      unregistered: 237,
+      unregistered: 240,
     });
   });
 

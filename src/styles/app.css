@@ -2248,6 +2248,40 @@ li[data-pkc-row-slot] {
   display: flex;
   gap: var(--s2);
 }
+/**
+ * 🔴 **コード枠の箱**(#1044 段3)── `section-draft` と**同じ 4 つの規則**を
+ * 共有する(器の配置 / 幅は stretch / 高さの上限 / ボタンの並び)。⚠ 2 つ目の
+ * 規則を書かない ── 数値・考え方は上の `section-draft` の docstring と同じ。
+ */
+[data-pkc-region='code-draft'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  margin: var(--s2) 0;
+  max-width: var(--read-w);
+  margin-inline: var(--prose-lead) auto;
+}
+[data-pkc-field='code-draft-input'] {
+  box-sizing: border-box;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.7;
+  padding: 2px var(--s2);
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  background: var(--surface);
+  color: var(--fg);
+  resize: vertical;
+  overflow-y: auto;
+  max-height: calc(var(--pkc-col-h, 100vh) - 300px);
+}
+[data-pkc-field='code-draft-input']:focus-visible {
+  outline-width: 1px;
+}
+[data-pkc-region='code-draft-buttons'] {
+  display: flex;
+  gap: var(--s2);
+}
 /* 何も選んでいないときの案内(P9 段③)。⚠ 上限に収める ── 案内文が
  * 1000px 伸びると、それ自体が読みにくい。
  * ⚠ **紙面フォーマットに連動させない**(`var(--read-w)` を使わない。2026-08-08)──
@@ -2990,6 +3024,14 @@ li[data-pkc-row-slot] {
 .pkc-md-rendered .pkc-md-copy-menu-btn {
   right: 26px;
   width: 18px;
+}
+/* 🔴 **コード枠の ✎ ── ⧉ の左隣**(#1044 段3)。⚠ ▾ と同じ 26px の位置に置く ──
+ * ✎ と ▾ は同じ枠に同時には出ない(✎ は render-lang の無い枠、▾ は csv の
+ * 表として描けた枠にしか出ない ── `markdown-render.ts` の判定を見て確かめた)。
+ * 大きさと出方(乗せた / 焦点が入った / 指で触る端末)は ⧉ の規則を重ねて借りる
+ * (`pkc-md-copy-btn` を併記)── 触れたときに出る作法を 2 組書かない。 */
+.pkc-md-rendered .pkc-md-edit-btn {
+  right: 26px;
 }
 /* 表を出す囲みでは右上に ⧉ ▾ の 2 つが入るので、ソース切替をその左へ寄せる。
  * ⚠ 言語名(csv / tsv / psv)を CSS に書かない ── その一覧は `csv-table.ts` の
