@@ -89,4 +89,9 @@ describe('コード枠の ✎ を出す枠の判定(#1044 段3)', () => {
     host.innerHTML = renderMarkdown(PLAIN, { interactiveCodeBlocks: false } as never);
     expect(host.innerHTML).not.toContain('edit-code-block');
   });
+
+  it('🔴 CRLF 改行のノートでもコード枠の ✎ が出る(#1075, #1094)', () => {
+    const crlfPlain = ['```js', 'const a = 1;', '```'].join('\r\n');
+    expect(editableFenceLangs(crlfPlain)).toEqual(['(plain)']);
+  });
 });

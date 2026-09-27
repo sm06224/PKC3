@@ -30,7 +30,7 @@ import { MAX_TAGS, sameTag } from '../flavor/tags';
 // `lib/token.mjs` を生やしていた)。型は本入口から名前付きで取る。
 import type { Token } from 'markdown-it';
 import { mdCellGate, mdCellSpanAt, type MdCellGate } from './table-convert';
-import { allFences } from './source-blocks';
+import { allFences, splitLines } from './source-blocks';
 // PR-W18:HTML footnote plugin(`[^id]` → `<sup class="footnote-ref">`)。
 // CJS package だが exports map で `.mjs` を提供しているため ESM import OK。
 import footnotePlugin from 'markdown-it-footnote';
@@ -2019,7 +2019,7 @@ function scanContainerDirective<T>(
     return { transformed: source, registry: new Map(), lineMap: lineMapIn };
   }
   const registry = new Map<number, T>();
-  const lines = source.split('\n');
+  const lines = splitLines(source);
   const out: string[] = [];
   const lineMapOut: number[] = [];
   const emit = (s: string, idx: number): void => {
@@ -2269,7 +2269,7 @@ function expandVarsInText(source: string, vars: Record<string, string>): string 
    * ⚠ 目印は**広い側**に取る(狭すぎるとその記法が黙って効かなくなる)。
    */
   if (!source.includes('{{')) return source;
-  const lines = source.split('\n');
+  const lines = splitLines(source);
   let fence: FenceState = { inFence: false, marker: '' };
   return lines.map((line) => {
     const t = fenceTransition(line, fence);
@@ -3066,7 +3066,7 @@ function processFigureBlocks(source: string, lineMapIn: number[]): {
    */
   if (!source.includes(':::')) return { transformed: source, registry: new Map(), lineMap: lineMapIn };
   const registry = new Map<string, FigEntry>();
-  const lines = source.split('\n');
+  const lines = splitLines(source);
   const out: string[] = [];
   const lineMapOut: number[] = [];
   const counter: Record<FigKind, number> = { figure: 0, table: 0, equation: 0 };
@@ -3295,7 +3295,7 @@ function processIfBlocks(source: string, lineMapIn: number[], targetFormat: stri
    * ⚠ 目印は**広い側**に取る(狭すぎるとその記法が黙って効かなくなる)。
    */
   if (!source.includes(':::if')) return { transformed: source, lineMap: lineMapIn };
-  const lines = source.split('\n');
+  const lines = splitLines(source);
   const out: string[] = [];
   const lineMapOut: number[] = [];
   let fence: FenceState = { inFence: false, marker: '' };
@@ -3467,7 +3467,7 @@ function processTocDirective(
    * ⚠ 目印は**広い側**に取る(狭すぎるとその記法が黙って効かなくなる)。
    */
   if (!source.includes(':::toc')) return { transformed: source, lineMap: lineMapIn, records: [] };
-  const lines = source.split('\n');
+  const lines = splitLines(source);
   const out: string[] = [];
   const lineMapOut: number[] = [];
   const records: TocDirectiveRecord[] = [];
@@ -4234,7 +4234,7 @@ function processParagraphAlignDirective(
    * ⚠ 目印は**広い側**に取る(狭すぎるとその記法が黙って効かなくなる)。
    */
   if (!source.includes(':::paragraph')) return { transformed: source, alignMap: new Map(), lineMap: lineMapIn };
-  const lines = source.split('\n');
+  const lines = splitLines(source);
   const alignMap = new Map<number, AlignKind>();
   const out: string[] = [];
   const lineMapOut: number[] = [];
@@ -4292,7 +4292,7 @@ function preprocessAlignPrefix(source: string, lineMapIn: number[]): {
   indentMap: Map<number, true>;
   lineMap: number[];
 } {
-  const lines = source.split('\n');
+  const lines = splitLines(source);
   const alignMap = new Map<number, AlignKind>();
   // L-9(2026-05-08):行頭の `__`(半角 _ × 2)or `＿`(全角 _、U+FF3F)は
   // 段落先頭 1 字下げマーカー。日本語文書の段落字下げ慣習を表現。indentMap は
@@ -4501,10 +4501,10 @@ function stripComments(source: string, lineMapIn?: number[]): {
   if (!source.includes('%%') && !source.includes(':::comment')) {
     return {
       transformed: source,
-      lineMap: lineMapIn ?? Array.from({ length: source.split('\n').length }, (_, i) => i),
+      lineMap: lineMapIn ?? Array.from({ length: splitLines(source).length }, (_, i) => i),
     };
   }
-  const lines = source.split('\n');
+  const lines = splitLines(source);
   const inMap = lineMapIn ?? Array.from({ length: lines.length }, (_, i) => i);
   const outLines: string[] = [];
   const outMap: number[] = [];
@@ -4687,7 +4687,7 @@ function processBreakDirective(source: string): string {
    */
   if (!source.includes(':::break')) return source;
   let fence: FenceState = { inFence: false, marker: '' };
-  return source.split('\n').map((line) => {
+  return splitLines(source).map((line) => {
     const t = fenceTransition(line, fence);
     fence = t.state;
     if (fence.inFence || t.isBoundary) return line;
@@ -4713,7 +4713,7 @@ function processSectionBreaks(source: string): string {
   if (!source.includes('+++')) return source;
   // fenced code block 内では `+++` を marker と認識しない(2026-05-08 hotfix)。
   let fence: FenceState = { inFence: false, marker: '' };
-  return source.split('\n').map((line) => {
+  return splitLines(source).map((line) => {
     const t = fenceTransition(line, fence);
     fence = t.state;
     if (fence.inFence || t.isBoundary) return line;
@@ -4759,7 +4759,7 @@ function ensureBlankAroundSectionBreaks(
   source: string,
   lineMapIn: number[],
 ): { transformed: string; lineMap: number[] } {
-  const inLines = source.split('\n');
+  const inLines = splitLines(source);
   const out: string[] = [];
   const map: number[] = [];
   for (let i = 0; i < inLines.length; i += 1) {
@@ -4989,7 +4989,7 @@ function processTolerantStandaloneAlign(
     return { transformed: source, alignMap: new Map(), lineMap: lineMapIn };
   }
   const alignMap = new Map<number, AlignKind>();
-  const lines = source.split('\n');
+  const lines = splitLines(source);
   const out: string[] = [];
   const lineMapOut: number[] = [];
   let pendingAlign: AlignKind | null = null;
@@ -5157,7 +5157,7 @@ function processAdmonitionAliases(
     void silentWarnings;
     return { transformed: source, lineMap: lineMapIn };
   }
-  const lines = source.split('\n');
+  const lines = splitLines(source);
   const out: string[] = [];
   const lineMapOut: number[] = [];
   let fence: FenceState = { inFence: false, marker: '' };
@@ -5266,7 +5266,7 @@ function processHallucinatedDirectives(
 
   // Step 3: block pattern を行 base で検出(masked 状態でも fence 内には
   // mask placeholder が残り、`:::` 行頭 match しないので安全)。
-  const lines = masked.split('\n');
+  const lines = splitLines(masked);
   const out: string[] = [];
   let inBlockHallucination: { name: string; startIdx: number } | null = null;
   for (let i = 0; i < lines.length; i++) {
@@ -5451,7 +5451,7 @@ function processBlankLineMarkers(source: string, lineMapIn: number[]): {
    */
   // ⚠ 目印は `_` 1 文字 ── 語中の `_` でも素通りしないだけで、誤りにはならない
   if (!source.includes('_')) return { transformed: source, lineMap: lineMapIn };
-  const lines = source.split('\n');
+  const lines = splitLines(source);
   const out: string[] = [];
   const lineMapOut: number[] = [];
   // fenced code block 内では `_` を marker と認識しない(2026-05-08 hotfix)。
@@ -5548,7 +5548,7 @@ function postProcessBlankLineMarkers(html: string): string {
  * - 行の挿入 / 削除はせず content を前置するのみ(lineMap 不変)。
  */
 function preprocessHeadingNumbers(text: string, start: number): string {
-  const lines = text.split('\n');
+  const lines = splitLines(text);
   const out: string[] = [];
   const counters = [0, 0, 0];
   let fenceChar = '';
@@ -5644,7 +5644,7 @@ export function renderMarkdown(
    *   目的が違う ── あちらは**描くために**2 度読んでいた(読み手が 2 つ在る形)。
    *   こちらは**書き戻す先を指すため**で、描画には 1 バイトも使わない。
    */
-  const originalLines = text.split('\n');
+  const originalLines = splitLines(text);
   /**
    * 🔴 **閉じているコード枠の開きの行(原文の行番号)**(#1044 段3、§9)。
    *
@@ -5655,7 +5655,7 @@ export function renderMarkdown(
    * ⚠ `mdCellGate` と同じ理由で `originalLines` から採る(書き戻す先と同じ字)。
    */
   const closedFenceLines: ReadonlySet<number> = new Set(
-    allFences(originalLines.join('\n'))
+    allFences(text)
       .filter((f) => !f.open)
       .map((f) => f.start),
   );
@@ -5674,9 +5674,8 @@ export function renderMarkdown(
   // user の textarea source(原文)の line index を返す。Split View の
   // source-preview-sync が caret line ↔ preview block lookup に使う
   // (2026-05-08 user 報告:Split View 行ズレ修正)。
-  let lineMap: number[] = [];
-  const initialLines = text.split('\n').length;
-  for (let i = 0; i < initialLines; i++) lineMap.push(i);
+  const initialLines = originalLines.length;
+  let lineMap: number[] = Array.from({ length: initialLines }, (_, i) => i);
   // L-4:comment strip + LineMap thread(PR-2X、reform Phase 3)。
   // multi-line `%%%...%%%` / `:::comment...:::` で削除された行を skip しつつ
   // output line → 原文 line index を保持、Split View source-preview-sync の
