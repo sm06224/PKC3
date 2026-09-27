@@ -767,7 +767,7 @@ const BLOCK_MARK = /^ {0,3}(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|>|\|)/;
  * @returns 囲みの字。表と決められなければ `null`
  */
 export function tsvFenceFromPlain(plain: string): string | null {
-  const lines = splitLines(plain);
+  const lines = plain.replace(/\r\n?/g, '\n').split('\n');
   // ⚠ 末尾の空行だけ落とす(先頭・途中の空行は残して判定に効かせる)
   while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
   if (lines.length < 2) return null;
