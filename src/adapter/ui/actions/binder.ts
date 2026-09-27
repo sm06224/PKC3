@@ -13897,7 +13897,35 @@ export function bindActions(
       run('select-entry', host);
       return true;
     }
+    if (cmd === 'filer-open-stack') {
+      const lid = focusedListRowLid();
+      if (lid === null) return false;
+      return openStackNote(lid);
+    }
     return false;
+  };
+
+  /**
+   * 🔴 **選んだノートを横の枠(スタック)へ開く**(#1092)。
+   *
+   * > 「中央のノートは開いたまま、横の枠（スタック）にポンと追加して並べる」
+   *
+   * ⚠ **スマホなど画面が狭いときは並べられない** ── 無理に開かず、
+   *   画面下に「画面が狭いため横に並べられません」と理由を言う。
+   * 🔑 中央のノート(`selectedLid`)は動かさない ── 開くのは横の枠(`splitLids`)だけである。
+   *   既に載っているノートなら先頭へ繰り上がる(`pinSplitLid` の規約)。
+   */
+  const openStackNote = (lid: string): boolean => {
+    if (root.getAttribute('data-pkc-layout') === 'phone') {
+      tellUser('画面が狭いため横に並べられません');
+      return true;
+    }
+    const meta = dispatcher.getState().entryMetas.get(lid);
+    if (!meta) return false;
+    dispatcher.dispatch({ type: 'PIN_SPLIT_ENTRY', lid });
+    const frame = root.querySelector<HTMLElement>(`[data-pkc-split-lid="${lid}"]`);
+    if (frame) frame.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    return true;
   };
 
   /**
@@ -14167,6 +14195,11 @@ export function bindActions(
       }
       return openNote(lid);
     }
+    if (cmd === 'filer-open-stack') {
+      const lid = dualCursor(st, side) ?? paneOf(st.dual, side).selection[0] ?? null;
+      if (lid === null) return false;
+      return openStackNote(lid);
+    }
     /**
      * 🔴 **消すのは、このペインの印だけ**(#273 段②)。
      *
@@ -14290,6 +14323,11 @@ export function bindActions(
         return true;
       }
       return openNote(lid);
+    }
+    if (cmd === 'filer-open-stack') {
+      const lid = focusedRowLid() ?? st.selectedLid;
+      if (lid === null) return false;
+      return openStackNote(lid);
     }
     return false;
   };

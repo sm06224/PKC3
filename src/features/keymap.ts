@@ -322,6 +322,19 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     defaults: ['Enter', 'F3'],
     note: 'OS のファイラと同じ ── 行を選んで Enter(F3 でも開きます)',
   },
+  /**
+   * 🔴 **選んだノートを横の枠(スタック)へ開く**(#1092)。
+   *
+   * ⚠ 中央のノートは開いたまま、横の枠にポンと追加して並べる(Alt+Enter / Option+Enter)。
+   * 🔑 一覧・フォルダ・2 ペインで共通の鍵。
+   */
+  {
+    id: 'filer-open-stack',
+    label: '横の枠(スタック)へ開く',
+    contexts: ['filer', 'dual', 'list'],
+    defaults: ['Alt+Enter'],
+    note: '中央のノートはそのまま、選んだノートを横の枠(スタック)に並べます',
+  },
   {
     id: 'filer-parent',
     label: '親フォルダへ移る',
