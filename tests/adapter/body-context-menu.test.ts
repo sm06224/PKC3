@@ -22,7 +22,11 @@ import { readFileSync } from 'node:fs';
 import { blocksFor, decl, stripComments, withoutMedia } from '../helpers/css-blocks';
 import { appPanes } from '../../src/adapter/ui/render/pane-visibility';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
-import { bindActions, type BinderServices } from '../../src/adapter/ui/actions/binder';
+import {
+  bindActions,
+  runChapterWindowAction,
+  type BinderServices,
+} from '../../src/adapter/ui/actions/binder';
 import { BODY_MENU_ACTIONS, ENTRY_ACTION_HINTS } from '../../src/features/entry-actions';
 import {
   MENU_HINT_FIELD,
@@ -372,7 +376,7 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     '',
   ].join('\n');
 
-  function rig() {
+  function rig(extra: Partial<BinderServices> = {}) {
     document.body.textContent = '';
     const root = document.createElement('div');
     root.setAttribute('data-pkc-slot', 'root');
@@ -417,7 +421,7 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     document.body.append(root);
     const said: string[] = [];
     const d = new Dispatcher();
-    bindActions(root, d, { showStatus: (t) => said.push(t) });
+    bindActions(root, d, { showStatus: (t) => said.push(t), ...extra });
     d.dispatch({
       type: 'SYS_BOOTED',
       cid: 'c1',
@@ -488,13 +492,15 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     // ⚠ 4 つ目「この章をコピー」は #677 で足した(既存の 3 つの**下**)
     // ⚠ 5 つ目「章の参照をコピー」は #579 で足した(写す 2 つを隣に)
     // ⚠ 「この章を編集する」は #1044 段2 で**頭**へ足した(「ここから編集する」の上)
-    expect(acts.slice(0, 6), '見出しの 6 つが出ていない').toEqual([
+    // ⚠ 7 つ目「この章を別のウィンドウで開く」は #1044 段4 で足した(見出しの物の最後)
+    expect(acts.slice(0, 7), '見出しの 7 つが出ていない').toEqual([
       'edit-section',
       'edit-from-heading',
       'append-at-heading',
       'toggle-heading-fold',
       'copy-chapter-md',
       'copy-section-ref',
+      'open-chapter-window',
     ]);
     /**
      * 🔴 **差し替えていないことを、ここで見る。**
@@ -503,7 +509,7 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
      * 🔴 **条件つきの「取り込む」まで見る**(着地前レビュー 🔴3)── `BODY_MENU_ACTIONS`
      *   だけと突き合わせる変異は、fixture に外部画像が 0 枚だと素通りした。
      */
-    expect(acts.slice(6), '本文のメニューが消えている / 取り込みが見出しの枝だけ落ちた').toEqual([
+    expect(acts.slice(7), '本文のメニューが消えている / 取り込みが見出しの枝だけ落ちた').toEqual([
       'add-place',
       ...BODY_MENU_ACTIONS.map((a) => a.action),
       'adopt-external-images',
@@ -720,6 +726,10 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     expect(acts, '入れ子で切り出せない「この章をコピー」を出した').not.toContain('copy-chapter-md');
     // ⚠ 章だけ編集も append-target.ts の scanHeadings と同じ数え方(#1044 段2)
     expect(acts, '入れ子で切り出せない「この章を編集する」を出した').not.toContain('edit-section');
+    // ⚠ 章の別ウィンドウも同じ数え方(#1044 段4)── 出しても「見出しを読めません」になる
+    expect(acts, '入れ子で切り出せない「この章を別のウィンドウで開く」を出した').not.toContain(
+      'open-chapter-window',
+    );
   });
 
   /**
@@ -735,6 +745,9 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     expect(acts, '入り先にできない見出しで追記の口を出した').not.toContain('append-at-heading');
     // ⚠ 章だけ編集も append-target.ts の scanHeadings と同じ `#`〜`###` 限り(#1044 段2)
     expect(acts, '`####` で切り出せない「この章を編集する」を出した').not.toContain('edit-section');
+    expect(acts, '`####` で切り出せない「この章を別のウィンドウで開く」を出した').not.toContain(
+      'open-chapter-window',
+    );
   });
 
   /**
@@ -1871,5 +1884,78 @@ describe('メニューは自分で自分を閉じない(#875)', () => {
     ).toBe(false);
     other.remove();
     root.remove();
+  });
+});
+
+/**
+ * 🔴 **章を別のウィンドウで(#1044 段4)** ── 押した見出しの行を運び、読むだけの窓を開く口へ渡す。
+ */
+describe('見出しの右クリック ── 章を別のウィンドウで(#1044 段4)', () => {
+  const HEAD_BODY_2 = ['## 章', '', '中身', '', '## つぎ', '', 'x'].join('\n');
+  function rig2(extra: Partial<BinderServices> = {}) {
+    document.body.textContent = '';
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    const host = document.createElement('div');
+    host.setAttribute('data-pkc-field', 'detail-body');
+    host.innerHTML =
+      '<h2 data-pkc-source-line="0" id="h-a">章</h2>' +
+      '<p data-pkc-source-line="2">中身</p>' +
+      '<h2 data-pkc-source-line="4" id="h-b">つぎ</h2>';
+    root.append(host);
+    document.body.append(root);
+    const d = new Dispatcher();
+    bindActions(root, d, { showStatus: () => undefined, ...extra });
+    d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [
+        {
+          lid: 'n1',
+          title: '章の在るノート',
+          archetype: 'text',
+          createdAt: null,
+          updatedAt: null,
+          entryOrder: 1,
+          status: null,
+          date: null,
+          archived: false,
+          bodyChars: null,
+        },
+      ],
+      relations: [],
+    });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: HEAD_BODY_2 });
+    return { root, d, a: root.querySelector('#h-a')!, b: root.querySelector('#h-b')! };
+  }
+
+  it('🔴 押すと、押した見出しの行とノートを渡す(2 つ目の見出しは 2 つ目の行)', () => {
+    const calls: [string, number][] = [];
+    const r = rig2({ openChapterWindow: (lid, line) => calls.push([lid, line]) });
+    rightClick(r.b);
+    r.root.querySelector<HTMLElement>(`${MENU} [data-pkc-action="open-chapter-window"]`)!.click();
+    rightClick(r.a);
+    r.root.querySelector<HTMLElement>(`${MENU} [data-pkc-action="open-chapter-window"]`)!.click();
+    expect(calls).toEqual([
+      ['n1', 4],
+      ['n1', 0],
+    ]);
+  });
+
+  it('🔴 窓から来た口は、送れる口の一覧に在る物だけ走らせる', () => {
+    const r = rig2();
+    const other = document.implementation.createHTMLDocument('');
+    const ok = other.createElement('a');
+    ok.setAttribute('data-pkc-action', 'navigate-entry-ref');
+    ok.setAttribute('data-pkc-entry-ref', 'entry:n1');
+    const bad = other.createElement('button');
+    bad.setAttribute('data-pkc-action', 'delete-entry');
+    bad.setAttribute('data-pkc-entry', 'n1');
+    const services: BinderServices = {};
+    expect(runChapterWindowAction(r.d, bad, services, r.root), '一覧に無い口を走らせた').toBe(false);
+    expect(r.d.getState().entryMetas.has('n1'), '一覧に無い口で本文が消えた').toBe(true);
+    expect(runChapterWindowAction(r.d, ok, services, r.root)).toBe(true);
+    expect(r.d.getState().selectedLid).toBe('n1');
   });
 });

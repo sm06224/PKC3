@@ -221,9 +221,11 @@ import {
   bindActions,
   leaveLauncherIf,
   generateLid,
+  runChapterWindowAction,
   runGlobalCommand,
   type BinderServices,
 } from '@adapter/ui/actions/binder';
+import { ChapterWindows } from '@adapter/ui/chapter-windows';
 import { createCaptureService } from '@adapter/ui/actions/capture';
 import { createCaptureTrimmer } from '@adapter/ui/actions/capture-trim';
 import { AudioClient } from '@adapter/platform/audio/audio-client';
@@ -2550,7 +2552,50 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     if (tileSelectsEntry(tile)) dispatcher.dispatch({ type: 'SELECT_ENTRY', lid });
   };
 
+  /**
+   * 🔴 **章の別ウィンドウ(読むだけ)**(#1044 段4。設計 doc §10)。
+   *
+   * 🔑 アプリをもう 1 つ起動しない ── こちらが空の窓を掴んで中身を組む。描画は本文の面と
+   *   **同じ口**(`markdown`)、添付は**同じ貸し手**(`assetLender`)を使う。
+   * ⚠ 窓の中で押された口は、本体で押したときと**同じ受け手**で走らせる
+   *   (`runChapterWindowAction`)── `services` / `root` はここより後で決まるが、呼ばれるのは
+   *   押されたとき(組み上がった後)なので、閉じ込めて読めばよい。
+   */
+  const chapterWindows = new ChapterWindows({
+    getState: () => dispatcher.getState(),
+    getBody: async (lid) => {
+      // 🔴 **書込の列を待ってから読む** ── `getBody` は列の外なので、並んでいる書込を
+      //    追い越すと古い本文を出す(書き出しの `settle` と同じ理由 ── 2026-08-17 実測)
+      await storeEffects?.settled();
+      return (await client.request({ op: 'getBody', cid, lid })) ?? null;
+    },
+    render: (text, opts) => markdown.render(text, opts),
+    allowExternalImages: (lid) => appExternalImages.allows(lid),
+    lend: (key) => assetLender.lend(key),
+    getBlob: (key) => assetLender.getBlob(key),
+    runAction: (el) => {
+      if (!runChapterWindowAction(dispatcher, el, services, root)) return;
+      // 🔑 よそへ移る口は、移った先(このウィンドウ)を手前へ出す
+      if ((el.getAttribute('data-pkc-action') ?? '').startsWith('navigate-')) {
+        try {
+          window.focus();
+        } catch {
+          // 前へ出せない環境が在る ── 移る動き自体は済んでいる
+        }
+      }
+    },
+    fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
+  });
+  dispatcher.onState((state) => chapterWindows.onState(state));
+  window.addEventListener('pagehide', (ev) => {
+    // ⚠ **bfcache へ入るだけ(`persisted`)なら戻ってくる** ── そのときは窓に
+    //    「もう新しくならない」と言わない(`window-close.ts` が踏んだ `pagehide` の罠)
+    if (!ev.persisted) chapterWindows.orphanAll();
+  });
+
   const services: BinderServices = {
+    /** 🔴 章を読むだけの別のウィンドウで(#1044 段4)── 窓は**同期で**掴む。 */
+    openChapterWindow: (lid, line) => void chapterWindows.open(lid, line),
     attachFiles: (files, why, at, intoLid) =>
       void withAssetGate(() => attachFiles(dispatcher, attachDeps, files, why, at, intoLid)),
     // 🔴 録音・画面収録(#413)── 押す口は左の列の「添付」の隣に在る

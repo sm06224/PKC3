@@ -93,6 +93,7 @@ import {
   settingsPlanNote,
 } from '@features/settings/settings-file';
 import { downloadBlob } from '@adapter/platform/download';
+import { CHAPTER_WINDOW_ACTIONS } from '@adapter/platform/chapter-window';
 import { visibleContacts } from '@features/contact/contact-card';
 import { buildVcf, isVcfFileName, vcfNoteOf } from '@features/contact/vcard';
 import { isMarkdownFileName } from '@features/import/plain-markdown';
@@ -1456,6 +1457,12 @@ export interface BinderServices {
    * 🔑 何枚でも開ける(窓を使い回さない)── 付箋である。
    */
   openNoteWindow?(lid: string): void;
+  /**
+   * 🔴 **その見出しの章を、読むだけの別のウィンドウで開く**(#1044 段4)。
+   * ⚠ **同期で**窓を掴むこと(user の操作の続きでしか開けない)。
+   * @param line 押した見出しの行(frontmatter を剥がした側 ── 右クリックが運ぶ値)
+   */
+  openChapterWindow?(lid: string, line: number): void;
   /** 🔴 **このフォルダと配下**をアーカイブとして書き出す(#399 ①)。 */
   exportFolder?(lid: string): void;
   /**
@@ -2182,13 +2189,20 @@ function navigateToLink(
    *   ので、user は本文の中で探し直せる)。
    */
   if (t.section !== null) {
+    /**
+     * ⚠ **押した要素ではなく `root` を渡す**(#1044 段4)── `tocJump` は渡された要素から
+     *   本体の根を辿って本文の面を探す。章の別ウィンドウで押したリンクは**別の document**
+     *   に居るので、押した要素から辿ると本体の面に届かない。押した要素が本体の中に居る
+     *   ときは、辿った先が同じ `root` なので結果は変わらない。
+     */
     void tocJump(
       dispatcher,
-      target,
+      root,
       t.section,
       '見出しが見つかりません(見出しの字が変わったのかもしれません)',
     );
   }
+  void target;
 }
 
 /**
@@ -4385,6 +4399,30 @@ function markTrim(dispatcher: Dispatcher, target: HTMLElement, edge: 'start' | '
     ?.querySelector<HTMLMediaElement>('[data-pkc-field="capture-media"]');
   if (!media) return;
   dispatcher.dispatch({ type: 'SET_CAPTURE_TRIM_MARK', edge, ms: media.currentTime * 1000 });
+}
+
+/**
+ * 🔴 **章の別ウィンドウで押された口を、本体で走らせる**(#1044 段4)。
+ *
+ * 🔑 受け手は本体で押したときと**同じ `ACTIONS`** ── 窓のために 2 本目を書かない(§7)。
+ * ⚠ 走らせてよいのは `CHAPTER_WINDOW_ACTIONS`(読むだけ・よそへ移るだけの口)だけ。
+ *   窓の側でも同じ一覧で押し所を残しているが、**門は両側に置く**(出し分けは見せ方であって、
+ *   門ではない)。
+ * ⚠ 押した要素は**別の document** に居る ── 受け手はその属性を読むだけで、本体の面を
+ *   探すときは `root` を使う(`navigateToLink` の注記)。
+ */
+export function runChapterWindowAction(
+  dispatcher: Dispatcher,
+  target: HTMLElement,
+  services: BinderServices,
+  root: HTMLElement,
+): boolean {
+  const action = target.getAttribute('data-pkc-action') ?? '';
+  if (!CHAPTER_WINDOW_ACTIONS.has(action)) return false;
+  const handler = ACTIONS[action];
+  if (handler === undefined) return false;
+  handler(dispatcher, target, services, root);
+  return true;
 }
 
 const ACTIONS: Record<string, ActionHandler> = {
@@ -7177,6 +7215,20 @@ const ACTIONS: Record<string, ActionHandler> = {
     const line = menuCarriedLine(target);
     if (line === null || refuseStaleMenu(dispatcher, target)) return;
     startSectionEditAt(dispatcher, services, root, line);
+  },
+  /**
+   * 🔴 **その章を、読むだけの別のウィンドウで開く**(#1044 段4。裁定 Q3「読むだけ」)。
+   *
+   * ⚠ **書けるかどうかには依らない**(編集中・別のタブのロックでも開ける)── 読むだけなので、
+   *   本文を 1 バイトも書き換えない。だから `BODY_WRITE_ACTIONS` にも載せない。
+   * ⚠ 身元はメニューが運んだ lid(`refuseStaleMenu` が「いま開いているノート」と一致を確かめる)。
+   */
+  'open-chapter-window': (dispatcher, target, services) => {
+    const line = menuCarriedLine(target);
+    if (line === null || refuseStaleMenu(dispatcher, target)) return;
+    const lid = dispatcher.getState().openBody?.lid;
+    if (lid === undefined) return;
+    services.openChapterWindow?.(lid, line);
   },
   /**
    * 🔴 **その見出しから編集に入る**(#426 段②)。
@@ -12778,6 +12830,12 @@ export function bindActions(
                *   `#`〜`###`(`scanHeadings` が数える段はそこまで)。
                */
               sectionEditable: heading.parentElement === host && level >= 1 && level <= 3,
+              /**
+               * 🔴 **章を別のウィンドウで(#1044 段4)**。⚠ 章の範囲を章の欄と**同じ関数**で
+               *   決めるので、出す見出しも同じ形の条件にする(書けるかどうかには依らない ──
+               *   `sectionEditable` も書ける状態を見ていない、形だけの条件である)。
+               */
+              chapterWindow: heading.parentElement === host && level >= 1 && level <= 3,
               // 🔴 近道の字を右に添える(#587 C 案 2)── 見出しの項目だけ(塊 / 板 / 本文には無い)
             }).map(withShortcut)),
         ...(block === null ? [] : blockMenuActions({ board: block.board, shape: block.shape })),

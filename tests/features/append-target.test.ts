@@ -20,6 +20,7 @@ import {
   replaceSectionByHeading,
   resolveAppendAt,
   resolveHeadingRef,
+  chapterLinesOf,
   sectionAt,
   sectionRange,
 } from '../../src/features/markdown/append-target';
@@ -406,5 +407,47 @@ describe('headingRefAt / resolveHeadingRef / headingLine(#1044 段2 3巡目の�
 
   it('🔴 headingLine は印が解けなければ null', () => {
     expect(headingLine(oldBody, 'no-such-slug')).toBeNull();
+  });
+});
+
+/**
+ * 🔴 **章の別ウィンドウが出す範囲**(#1044 段4)── 見出しは字 + 何番目か、範囲は `sectionRange`。
+ * ⚠ 行は**描画の刻印と同じ座標**(frontmatter を剥がした本文)で返ること ── 受け手は
+ *   `data-pkc-source-line` で塊を拾うので、全文の行を返すと frontmatter の行数だけ上の
+ *   別の塊を拾う。
+ */
+describe('chapterLinesOf(#1044 段4)', () => {
+  const BODY = ['---', 'tags: [x]', '---', '# 一', '', 'a', '', '## 二', '', 'b', '', '# 三', '', 'c'].join('\n');
+
+  it('🔴 押した見出しから、次の同じ深さか浅い見出しの手前まで(剥がした本文の行で)', () => {
+    // 剥がした本文では「# 一」が 0 行目、「## 二」が 4 行目、「# 三」が 8 行目
+    const ref = headingRefAt(BODY, 0);
+    expect(ref, '前提が崩れている(見出しが引けない)').not.toBeNull();
+    const got = chapterLinesOf(BODY, ref!);
+    expect(got).toEqual({ slug: expect.any(String), text: '一', from: 0, to: 8 });
+    const two = chapterLinesOf(BODY, headingRefAt(BODY, 4)!);
+    expect(two, '深い見出しの章が次の浅い見出しで閉じていない').toMatchObject({ text: '二', from: 4, to: 8 });
+  });
+
+  it('🔴 上に行が足されても、同じ章を引き直す(行番号で追わない)', () => {
+    const ref = headingRefAt(BODY, 4)!;
+    const grown = BODY.replace('# 一\n', '# 一\n\n足した行\n足した行\n');
+    const got = chapterLinesOf(grown, ref);
+    expect(got?.text, '別の章を引いた').toBe('二');
+    expect(got?.from, '行のずれを拾っていない').toBe(7);
+  });
+
+  it('🔴 同じ字の見出しが 2 つあっても、押した方を引く', () => {
+    const twin = ['# 決定', '', 'x', '', '# 決定', '', 'y'].join('\n');
+    const second = chapterLinesOf(twin, headingRefAt(twin, 4)!);
+    expect(second).toMatchObject({ from: 4, to: 7 });
+    const first = chapterLinesOf(twin, headingRefAt(twin, 0)!);
+    expect(first).toMatchObject({ from: 0, to: 4 });
+  });
+
+  it('⚠ 見出しの字が変わった・消えたら null(黙って別の章を出さない)', () => {
+    const ref = headingRefAt(BODY, 4)!;
+    expect(chapterLinesOf(BODY.replace('## 二', '## 弐'), ref)).toBeNull();
+    expect(chapterLinesOf(BODY.replace('## 二\n', ''), ref)).toBeNull();
   });
 });

@@ -354,3 +354,35 @@ export function headingLine(body: string, slug: string): number | null {
   const range = sectionRange(body, slug);
   return range === null ? null : range.start - frontmatterLineCount(body);
 }
+
+/** 章の別ウィンドウが出す範囲(#1044 段4)。行は **frontmatter を剥がした側**。 */
+export interface ChapterLines {
+  /** 見出しの印(描画が見出しに刻む id と同じ綴り)。 */
+  readonly slug: string;
+  /** 見出しの字。 */
+  readonly text: string;
+  /** 見出し自身の行(含む)。 */
+  readonly from: number;
+  /** 次の同じ深さか浅い見出しの行 / 末尾(含まない)。 */
+  readonly to: number;
+}
+
+/**
+ * 🔴 **覚えた見出しの章を、いまの本文から引き直す**(#1044 段4、章の別ウィンドウ)。
+ *
+ * 🔑 **章の欄と同じ 2 本を通すだけ** ── 見出しは `resolveHeadingRef`(字 + 何番目か)、
+ *   範囲は `sectionRange`(追記の入り先と同じ)。窓のために 3 本目の規則を作らない
+ *   (CLAUDE.md §7)。
+ * ⚠ 行は**描画の刻印と同じ座標**(frontmatter を剥がした本文)へ直して返す ──
+ *   受け手は `data-pkc-source-line` で塊を拾う(`section-box.ts` の `blocksInRange`)。
+ *
+ * @returns 見出しを見失った(字が変わった / 消えた / 同じ字の見出しの数が変わった)ら `null`
+ */
+export function chapterLinesOf(body: string, ref: HeadingRef): ChapterLines | null {
+  const hit = resolveHeadingRef(body, ref);
+  if (hit === null) return null;
+  const range = sectionRange(body, hit.slug);
+  if (range === null) return null;
+  const fm = frontmatterLineCount(body);
+  return { slug: hit.slug, text: hit.text, from: range.start - fm, to: range.end - fm };
+}

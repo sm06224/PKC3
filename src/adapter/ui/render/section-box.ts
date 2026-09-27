@@ -26,8 +26,10 @@ export const SECTION_BOX_INPUT_FIELD = 'section-draft-input';
  *
  * ⚠ **直下だけ**(`host.children`)── 深く探ると、引用や `:::` の中の見出しの
  *   刻印まで拾い、章の外まで箱に取り込む。
+ * 🔑 章の別ウィンドウ(#1044 段4)も**この 1 本**で塊を拾う ── 章の欄と窓で
+ *   「章に入る塊」の決め方を 2 つにしない(CLAUDE.md §7)。
  */
-function blocksInRange(host: HTMLElement, from: number, to: number): HTMLElement[] {
+export function blocksInRange(host: HTMLElement, from: number, to: number): HTMLElement[] {
   const out: HTMLElement[] = [];
   for (const el of Array.from(host.children)) {
     if (!(el instanceof HTMLElement)) continue;
