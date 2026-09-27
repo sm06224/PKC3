@@ -245,6 +245,18 @@ const STYLED_ELSEWHERE: Readonly<Record<string, string>> = {
   'pkc-link-preview-empty-hint': 'src/adapter/ui/render/link-preview.ts',
   'pkc-link-preview-not-found': 'src/adapter/ui/render/link-preview.ts',
   'pkc-link-preview-foreign-desc': 'src/adapter/ui/render/link-preview.ts',
+  // 🔴 画像・図のその場拡大ライトボックス(#1099)── 本文の画像を押したときに出す暗転拡大モーダル
+  'pkc-lightbox-overlay': 'src/adapter/ui/render/lightbox.ts',
+  'pkc-lightbox-backdrop': 'src/adapter/ui/render/lightbox.ts',
+  'pkc-lightbox-container': 'src/adapter/ui/render/lightbox.ts',
+  'pkc-lightbox-toolbar': 'src/adapter/ui/render/lightbox.ts',
+  'pkc-lightbox-title': 'src/adapter/ui/render/lightbox.ts',
+  'pkc-lightbox-actions': 'src/adapter/ui/render/lightbox.ts',
+  'pkc-lightbox-btn': 'src/adapter/ui/render/lightbox.ts',
+  'pkc-lightbox-open-win-btn': 'src/adapter/ui/render/lightbox.ts',
+  'pkc-lightbox-close-btn': 'src/adapter/ui/render/lightbox.ts',
+  'pkc-lightbox-content': 'src/adapter/ui/render/lightbox.ts',
+  'pkc-lightbox-img': 'src/adapter/ui/render/lightbox.ts',
 };
 
 const NO_STYLE_NEEDED: Readonly<Record<string, string>> = {

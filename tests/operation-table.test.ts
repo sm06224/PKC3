@@ -178,8 +178,9 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    */
   'capture-trim-clear', 'capture-trim-end', 'capture-trim-run', 'capture-trim-start',
   'choose-office-pack', 'clear-copy-history', 'clear-entry-date', 'clear-entry-filter',
-  // ⚠ 'close-pane' は 2026-09-25(#1042 C3)に登記した(下の「数が動いたら鳴る」参照)
   'clear-kind-filter', 'clear-opened-history', 'clear-selection',
+  // ⚠ 2026-09-28(#1099): 'close-lightbox' はライトボックスが開いている間だけ意味を持つので未登記。
+  'close-lightbox',
   /**
    * ⚠ **2026-09-17(#986 段③)** ── 入れ物ごと捨てる。
    * 🔑 **名前で呼べないままにする理由**:取り消せない操作を、パレットから
@@ -533,14 +534,15 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-09-28(#1108): チェックリスト完了項目整理(`sort-tasks`)で
       //   受け手 +1 ── 登記は増えない(押し口は書式バーの中にしか無く、鍵も持たない。
       //   `renumber-lists` と同じ仕分け)。`receivers` +1 / `total` +1 / `unregistered` +1。
-      // ⚠ 2026-09-28(#1107): 最近開いたノート(`open-recent`)で受け手 +1、
-      //   `KEY_COMMANDS` にも登記したため `both` +1 / `receivers` +1 / `registered` +1 / `total` +1。
-      total: 335,
-      receivers: 281,
+      // ⚠ 2026-09-28(#1099): ライトボックスを閉じる(`close-lightbox`)で
+      //   受け手 +1 ── 登記は増えない(ライトボックスが開いている間だけ意味を持つ)。
+      //   `receivers` +1 / `total` +1 / `unregistered` +1。
+      total: 336,
+      receivers: 282,
       registered: 93,
       both: 39,
       outsideActionsTable: 54,
-      unregistered: 242,
+      unregistered: 243,
     });
   });
 
