@@ -84,4 +84,15 @@ describe('番号を振り直す #396', () => {
     const src = '# 見出し\n\n- あ\n- い';
     expect(renumberLists(src)).toBe(src);
   });
+
+  it('🔴 高速化: 番号付きリスト記号を含まない長文で同一参照のまま即時脱出する (#1110)', () => {
+    const text = '箇条書きのみの本文\n- 項目A\n- 項目B\n段落テキスト\n'.repeat(50);
+    expect(renumberLists(text)).toBe(text);
+  });
+
+  it('🔴 CRLF 改行のノートでも改行コードを保持して正しく振り直す (#1110)', () => {
+    const crlfSrc = '1. 行1\r\n5. 行2\r\n3. 行3';
+    expect(renumberLists(crlfSrc)).toBe('1. 行1\r\n2. 行2\r\n3. 行3');
+  });
 });
+
