@@ -204,6 +204,69 @@ describe('#402 ② 予定の面から足す', () => {
   });
 });
 
+/**
+ * 🔴 **編集中でも、今日のノートが別のノートなら足せる**(#1081。user 裁定 2026-09-27「推奨で」)。
+ *
+ * ⚠ 直す前は `phase !== 'ready'` で丸ごと断っていた ── 行き先(今日のノート)は編集中の
+ *   ノートと別のことが多いのに、「編集中でも別のノートは止めない」(C6 / #1043)から外れていた。
+ * 🔑 断るのは、今日のノートが**まだ無い**(作れない)/ 今日のノートを**編集中**のときだけ。
+ */
+describe('#1081 編集中の予定の「足す」', () => {
+  const editing = (s: ReturnType<typeof setup>, lid: string, body: string): void => {
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid });
+    s.d.dispatch({ type: 'BODY_LOADED', lid, body });
+    s.d.dispatch({ type: 'START_EDIT' });
+    expect(s.d.getState().phase, '前提: 編集に入れていない').toBe('editing');
+    expect(s.d.getState().openBody?.lid, '前提: 編集中のノートが違う').toBe(lid);
+  };
+
+  it('🔴 別のノートを編集中でも、今日のノートへ足せる(編集は閉じない)', async () => {
+    const s = setup([meta('t1', { title: TODAY }), meta('o1', { title: '書いているノート' })], {
+      t1: 'メモ\n',
+      o1: '下書き\n',
+    });
+    await tick();
+    editing(s, 'o1', '下書き\n');
+    type(s, '見積を出す', '2026-08-28');
+    s.q('[data-pkc-action="schedule-quick-add"]')!.click();
+    await tick();
+    expect(s.disk['t1'], '編集中に今日のノートへ足せていない').toContain('- [ ] 見積を出す @2026-08-28');
+    expect(s.d.getState().phase, '足したら編集が閉じた').toBe('editing');
+    expect(s.d.getState().openBody?.lid, '編集中のノートが入れ替わった').toBe('o1');
+    expect(s.disk['o1'], '編集中のノートの本文に書いた').toBe('下書き\n');
+    expect(s.q<HTMLInputElement>('[data-pkc-field="schedule-quick-text"]')!.value, '通ったのに欄が残った').toBe('');
+  });
+
+  it('⚠ 今日のノートがまだ無いときは、理由を出して断る(編集中は作れない)。打った字は残す', async () => {
+    const s = setup([meta('o1', { title: '書いているノート' })], { o1: '下書き\n' });
+    await tick();
+    editing(s, 'o1', '下書き\n');
+    const before = s.d.getState().entryMetas.size;
+    type(s, '見積を出す', '2026-08-28');
+    s.q('[data-pkc-action="schedule-quick-add"]')!.click();
+    await tick();
+    expect(s.d.getState().error ?? '', '黙って断った / 理由が違う').toContain('今日のノートがまだ無いので');
+    expect(s.d.getState().entryMetas.size, '編集中に今日のノートを作った').toBe(before);
+    expect(s.q<HTMLInputElement>('[data-pkc-field="schedule-quick-text"]')!.value, '断ったのに欄を空にした').toBe(
+      '見積を出す',
+    );
+  });
+
+  it('⚠ 今日のノートそのものを編集中なら断る(編集中の下書きを裏で書き換えない)', async () => {
+    const s = setup([meta('t1', { title: TODAY })], { t1: 'メモ\n' });
+    await tick();
+    editing(s, 't1', 'メモ\n');
+    type(s, '見積を出す', '2026-08-28');
+    s.q('[data-pkc-action="schedule-quick-add"]')!.click();
+    await tick();
+    expect(s.disk['t1'], '編集中のノートを裏で書き換えた').toBe('メモ\n');
+    expect(s.d.getState().error ?? '', '黙って断った').toContain('編集を終了してから');
+    expect(s.q<HTMLInputElement>('[data-pkc-field="schedule-quick-text"]')!.value, '断ったのに欄を空にした').toBe(
+      '見積を出す',
+    );
+  });
+});
+
 describe('#402 ② その日の束から足す', () => {
   it('🔴 束の「+」を押すと、上の欄にその日が入る(書かない)', async () => {
     const s = setup([meta('t1', { title: TODAY })], {

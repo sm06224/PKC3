@@ -402,6 +402,50 @@ describe('#1051 ── 追記 / 元に戻す 2 つ / 外部画像の取り込み
 });
 
 /**
+ * 🔴 **強制解放で捨てる下書きは、錠を握っていたノートの物だけ**(#1081)。
+ *
+ * ⚠ #1051 から、ノート A の編集中に別のノート B への追記が錠を握れる。直す前の
+ *   `FORCE_RELEASE_LOCK` は `phase === 'editing'` だけを見て A の下書きを捨てていた ──
+ *   B の書込を打ち切っただけで、**無関係な A の打ちかけが消える**。
+ * ⚠ いま `discardDraft: true` を撃つ口は無い(口を足した日に静かに消さないための門)。
+ */
+describe('#1081 ── 強制解放は、錠のノートの下書きだけを捨てる', () => {
+  const s0 = booted([meta('n1', { archetype: 'text' }), meta('n2', { archetype: 'text' })]);
+  const typed = (s: AppState): AppState => ({
+    ...s,
+    openBody: { lid: 'n1', body: '打ちかけ', baseline: 'x', persisted: 'x', diskAhead: false },
+  });
+
+  it('🔴 別のノート(n2)の書込を打ち切っても、編集中の n1 の打ちかけは残る', () => {
+    const s: AppState = { ...typed(editing(s0, 'n1')), writeLock: { lid: 'n2' } };
+    const out = reduce(s, { type: 'FORCE_RELEASE_LOCK', discardDraft: true }).state;
+    expect(out.writeLock, '錠が解けていない').toBeNull();
+    expect(out.phase, '無関係な編集が閉じた').toBe('editing');
+    expect(out.openBody?.body, '無関係な打ちかけが消えた').toBe('打ちかけ');
+  });
+
+  it('⚠ タイルの書込(別のノート)を打ち切っても、編集中の打ちかけは残る', () => {
+    const s: AppState = { ...typed(editing(s0, 'n1')), tileWrite: { lid: 'n2', n: 1 } };
+    const out = reduce(s, { type: 'FORCE_RELEASE_LOCK', discardDraft: true }).state;
+    expect(out.tileWrite).toBeNull();
+    expect(out.openBody?.body, '無関係な打ちかけが消えた').toBe('打ちかけ');
+  });
+
+  it('対照群: 錠が編集中のノート自身なら、これまでどおり下書きを捨てて読む画面へ', () => {
+    const s: AppState = { ...typed(editing(s0, 'n1')), writeLock: { lid: 'n1' } };
+    const out = reduce(s, { type: 'FORCE_RELEASE_LOCK', discardDraft: true }).state;
+    expect(out.phase).toBe('ready');
+    expect(out.openBody?.body, '下書きが disk の値へ戻っていない').toBe('x');
+  });
+
+  it('対照群: 錠が無ければ、これまでどおり下書きを捨てる', () => {
+    const out = reduce(typed(editing(s0, 'n1')), { type: 'FORCE_RELEASE_LOCK', discardDraft: true }).state;
+    expect(out.phase).toBe('ready');
+    expect(out.openBody?.body).toBe('x');
+  });
+});
+
+/**
  * 🔴 **走査で全数 pin する**(#1043 の依頼)。
  *
  * `state.phase !== 'ready'` だけを見て `{ state, events: [] }` を無言で返す

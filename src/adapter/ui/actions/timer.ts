@@ -95,6 +95,10 @@ export function createTimerService(deps: TimerServiceDeps): TimerService {
       deps.notify(`「${run.title}」が見つからないので本文に入れていません(${what})`);
       return;
     }
+    /**
+     * 🔴 **書き先(計っていたノート)を渡す**(#1081)── 編集中でも、計っていたのが
+     *   編集中のノートと**別**なら待たせずに書く。同じノートなら、これまでどおり預かる。
+     */
     const held = queue.push(() => {
       deps.dispatcher.dispatch({
         type: 'APPEND_TO_ENTRY',
@@ -104,7 +108,7 @@ export function createTimerService(deps: TimerServiceDeps): TimerService {
         target: null,
       });
       deps.notify(`「${run.title}」に${what}を書きました`);
-    });
+    }, lid);
     // ⚠ 預かった回は**そう言う**(押したのに何も起きていないように見せない)
     if (held) deps.notify(`「${run.title}」の${what}を預かりました(編集を終えると本文に入れます)`);
   };
