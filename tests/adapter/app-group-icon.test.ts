@@ -13,7 +13,12 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
-import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
+import {
+  appGroupIconName,
+  initialState,
+  reduce,
+  type AppState,
+} from '../../src/adapter/state/app-state';
 import { LauncherRenderer } from '../../src/adapter/ui/render/launcher';
 import { GroupFoldStore } from '../../src/adapter/ui/render/group-fold';
 import { withBuiltinTiles, type LauncherTile } from '../../src/features/launcher/tiles';
@@ -145,6 +150,107 @@ describe('目印を選ぶ(#857 段②)', () => {
       readAppGroupIcon(body!),
       '作った本文から目印が読めない(囲みを書き忘れている)',
     ).toEqual({ symbol: 'calendar' });
+  });
+});
+
+/**
+ * 🔴 **選んだ直後に開き直しても、選んだ絵に枠が付く**(#1076)。
+ *
+ * ⚠ 直す前は `appGroupIcons` が変わるのが**読み直しの ack が返ってから**だった ──
+ *   実ブラウザ smoke(`launcher.smoke.spec.ts` の「枠が付いているのが、さっき選んだ絵ではない」)が
+ *   間欠で赤になり、main でも 3 回に 1 回出ていた。
+ * 🔑 ここでは ack を**わざと返さない**(返さない間に表を開き直した user と同じ状態)。
+ */
+describe('🔴 選んだ直後の表と見出しが、選んだ絵になっている(#1076)', () => {
+  /** 目印 `terminal` が既に付いている群「資料」を持つ state(ack まで済ませる)。 */
+  function withTerminal(): AppState {
+    const st = booted([meta('g0', '資料', APP_GROUP_ARCHETYPE, 2)]);
+    const loaded = reduce(st, {
+      type: 'APP_GROUP_NOTES_LOADED',
+      icons: { 資料: { symbol: 'terminal' } } as AppState['appGroupIcons'],
+      orders: {},
+      gen: st.appGroupGen,
+    }).state;
+    // ⚠ 空振り防止 ── 「選ぶ前の絵」が在ることを先に見る(0 件の次元を作らない)
+    expect(appGroupIconName(loaded, '資料'), '前提が崩れている(選ぶ前の絵が無い)').toBe('terminal');
+    return loaded;
+  }
+
+  it('🔴 在るノートへ書くとき、ack を待たずに選んだ絵になる', () => {
+    const r = reduce(withTerminal(), {
+      type: 'SET_APP_GROUP_ICON',
+      name: '資料',
+      icon: 'calendar',
+      newLid: 'gX',
+    });
+    expect(appGroupIconName(r.state, '資料'), '読み直しが返るまで、選ぶ前の絵のまま').toBe('calendar');
+  });
+
+  it('🔴 作るとき(ノートが無いとき)も、ack を待たずに選んだ絵になる', () => {
+    const r = reduce(booted(), {
+      type: 'SET_APP_GROUP_ICON',
+      name: '資料',
+      icon: 'calendar',
+      newLid: 'g1',
+    });
+    expect(r.state.entryMetas.has('g1'), '前提が崩れている(作る経路を通っていない)').toBe(true);
+    expect(appGroupIconName(r.state, '資料'), '作ったのに、読み直しが返るまで絵が無い').toBe('calendar');
+  });
+
+  it('⚠ 「なし」を選ぶと、ack を待たずに外れる(片道にしない)', () => {
+    const r = reduce(withTerminal(), {
+      type: 'SET_APP_GROUP_ICON',
+      name: '資料',
+      icon: null,
+      newLid: 'gX',
+    });
+    expect(appGroupIconName(r.state, '資料'), '「なし」を選んだのに、外れるのが読み直しの後').toBe('');
+  });
+
+  it('🔴 先に飛んでいた読み直し(選ぶ前の本文)が返っても、選んだ絵は巻き戻らない', () => {
+    const before = withTerminal();
+    // ⚠ 選ぶ**前**に積まれて、まだ返っていない読み直しの世代
+    const flying = before.appGroupGen;
+    const picked = reduce(before, {
+      type: 'SET_APP_GROUP_ICON',
+      name: '資料',
+      icon: 'calendar',
+      newLid: 'gX',
+    }).state;
+    expect(picked.appGroupGen, '前提が崩れている(世代が進んでいない)').not.toBe(flying);
+    const late = reduce(picked, {
+      type: 'APP_GROUP_NOTES_LOADED',
+      icons: before.appGroupIcons,
+      orders: {},
+      gen: flying,
+    }).state;
+    expect(appGroupIconName(late, '資料'), '古い読み直しに、選ぶ前の絵へ巻き戻された').toBe('calendar');
+  });
+
+  /**
+   * ⚠ **対照群** ── 先に当てた絵が disk より強くなってはいけない。
+   * 🔑 書けなかったとき(別の窓が書き替えた等)は、後ろから来る読み直しが disk の値を持って来るので、
+   *   **それが効いて**選ぶ前の絵へ戻る(画面が disk と食い違ったまま残らない)。
+   */
+  it('⚠ 選んだ後に積んだ読み直しは効く(書けなかったら disk の絵に戻る)', () => {
+    const before = withTerminal();
+    const r = reduce(before, {
+      type: 'SET_APP_GROUP_ICON',
+      name: '資料',
+      icon: 'calendar',
+      newLid: 'gX',
+    });
+    const read = r.events.find((e) => e.type === 'REQUEST_APP_GROUP_NOTES') as
+      | { gen: number }
+      | undefined;
+    expect(read, '前提が崩れている(読み直しを積んでいない)').toBeDefined();
+    const back = reduce(r.state, {
+      type: 'APP_GROUP_NOTES_LOADED',
+      icons: before.appGroupIcons,
+      orders: {},
+      gen: read!.gen,
+    }).state;
+    expect(appGroupIconName(back, '資料'), 'disk の答えが画面に効いていない').toBe('terminal');
   });
 });
 

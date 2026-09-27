@@ -532,7 +532,26 @@ describe('🔴 古い読み直しに巻き戻されない(#857 段③)', () => {
     const bumps: Array<{ name: string; r: ReturnType<typeof reduce> }> = [
       { name: 'MOVE_APP_GROUP', r: move(st, '道具', -1) },
       { name: 'RESET_APP_GROUP_ORDER', r: reduce(move(st, '道具', -1).state, { type: 'RESET_APP_GROUP_ORDER' }) },
+      // 🔴 目印も画面を先に動かす(#1076)── 在るノートへ書く経路と、作る経路の両方
+      {
+        name: 'SET_APP_GROUP_ICON(在るノート)',
+        r: reduce(move(st, '道具', -1).state, {
+          type: 'SET_APP_GROUP_ICON',
+          name: '道具',
+          icon: 'calendar',
+          newLid: 'gIcon',
+        }),
+      },
+      {
+        name: 'SET_APP_GROUP_ICON(作る)',
+        r: reduce(st, { type: 'SET_APP_GROUP_ICON', name: '道具', icon: 'calendar', newLid: 'gIcon' }),
+      },
     ];
+    // ⚠ 前提 ── 目印の 2 本が、それぞれ狙った経路を通っている(同じ経路を 2 回見ていない)
+    const wrote = (r: ReturnType<typeof reduce>): boolean =>
+      r.events.some((e) => e.type === 'REQUEST_APP_GROUP_ICON_WRITE');
+    expect(wrote(bumps[2]!.r), '前提が崩れている(在るノートへ書く経路を通っていない)').toBe(true);
+    expect(wrote(bumps[3]!.r), '前提が崩れている(作る経路を通っていない)').toBe(false);
     // ⚠ 空振り防止 ── 1 件でも世代が動いていなければ、この test は何も見ていない
     expect(bumps.filter((b) => b.r.state.appGroupGen > st.appGroupGen).length, '前提が崩れている').toBe(
       bumps.length,
