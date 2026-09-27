@@ -10,7 +10,7 @@
  * 5. 編集中は動かない(reducer の規則を binder に写していない)
  * 6. 画面: ボタンが**押せないときは殺されている** / `Alt+←→` と `F1` が効く
  */
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import {
   EMPTY_HISTORY,
@@ -27,6 +27,7 @@ import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { SidebarRenderer } from '../../src/adapter/ui/render/sidebar';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
+import { resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
 
 function meta(lid: string, over: Partial<EntryMeta> = {}): EntryMeta {
   return {
@@ -177,8 +178,15 @@ describe('履歴の配線(reducer)', () => {
 
 /** 配線 ── 画面の側。 */
 describe('履歴の配線(画面)', () => {
+  const tick = (ms = 10): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
   beforeEach(() => {
+    resetAppDialogForTest();
     document.body.innerHTML = '';
+  });
+
+  afterEach(() => {
+    resetAppDialogForTest();
   });
 
   function mounted() {
@@ -269,4 +277,55 @@ describe('履歴の配線(画面)', () => {
     );
     expect(d.getState().selectedLid).toBe('n2');
   });
+
+  const recent = (root: HTMLElement) =>
+    root.querySelector<HTMLButtonElement>('[data-pkc-action="open-recent"]');
+
+  it('🔴 最近開いたノートのボタン(open-recent)が画面に存在する(#1107)', () => {
+    const { root } = mounted();
+    const btn = recent(root);
+    expect(btn, 'open-recent ボタンが画面に無い').not.toBeNull();
+    expect(btn!.disabled).toBe(false);
+  });
+
+  it('🔴 他に開いたノートが無いときはステータスで通知する(#1107)', () => {
+    let msg = '';
+    const root = document.createElement('div');
+    document.body.append(root);
+    const d = new Dispatcher();
+    buildShell(root);
+    bindActions(root, d, { showStatus: (t) => { msg = t; } });
+    d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [meta('n1'), meta('n2')],
+      relations: [],
+    });
+    recent(root)!.click();
+    expect(msg).toBe('最近開いた他のノートがありません');
+  });
+
+  it('🔴 Alt+H または open-recent クリックでピッカーが開き、選択してジャンプできる(#1107)', async () => {
+    const { root, d } = mounted();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+
+    // Alt+H を押す
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'h', code: 'KeyH', altKey: true, bubbles: true, cancelable: true }),
+    );
+
+    // ダイアログが開く
+    const dialog = root.querySelector<HTMLDialogElement>('[data-pkc-region="app-dialog"]');
+    expect(dialog, 'ピッカーのダイアログが開いていない').not.toBeNull();
+    const rows = dialog!.querySelectorAll<HTMLButtonElement>('[data-pkc-field="entry-pick-row"]');
+    expect(rows.length).toBeGreaterThanOrEqual(1);
+    expect(rows[0]!.getAttribute('data-pkc-lid')).toBe('n1');
+
+    // 項目をクリックして選択
+    rows[0]!.click();
+    await tick();
+    expect(d.getState().selectedLid).toBe('n1');
+  });
 });
+
