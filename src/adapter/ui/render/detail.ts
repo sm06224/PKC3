@@ -168,6 +168,14 @@ export function selfContainerId(state: AppState): string {
 }
 
 /**
+ * 添付から中身を取るコード枠が読めなかったときの断り文。
+ * 🔑 本文の面と章の別ウィンドウ(#1044 段4)で**同じ 1 本**を使う。
+ */
+export function fenceAssetUnreadableText(why: string): string {
+  return `このコードブロックの中身(添付)を読み込めません: ${why}`;
+}
+
+/**
  * 🔴 **読む面の描画の設定を、押せる形の旗を除いて 1 か所で組む**(#1044 段4)。
  *
  * 本文の面(`DetailRenderer`)と章の別ウィンドウ(`chapter-windows.ts`)が**同じ値**で描く
@@ -2631,7 +2639,7 @@ export class DetailRenderer {
       if (!pending) return;
       pending.setAttribute('data-pkc-fence-asset-error', '');
       pending.removeAttribute('data-pkc-fence-asset-pending');
-      pending.textContent = `このコードブロックの中身(添付)を読み込めません: ${why}`;
+      pending.textContent = fenceAssetUnreadableText(why);
     };
     const assets = this.assets;
     await Promise.all(

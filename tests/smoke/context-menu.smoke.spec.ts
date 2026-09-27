@@ -669,7 +669,12 @@ test('🔴 見出しの「この章を編集する」→ 打つ → 別のノー
   await createEntry(page, 'text');
   await page
     .locator('[data-pkc-field="editor-body"]')
-    .fill('# 議事録\n\n前置き。\n\n## 決定事項\n\n- 牛乳を買う\n\n## 次回\n\n来週。\n');
+    .fill(
+      '# 議事録\n\n前置き。\n\n## 決定事項\n\n- 牛乳を買う\n\n' +
+        // 🔴 html の囲み(#1044 段4)── 章の窓で高さ合わせが効くかを見るため(本体でしか受け手が
+        //    無かったので、窓では高さ 0 の空の箱だった ── 着地前レビュー)
+        '```html\n<div style="height:120px">箱の中</div>\n```\n\n## 次回\n\n来週。\n',
+    );
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   await expect(page.locator('[data-pkc-field="detail-body"] h1')).toHaveText('議事録');
   const noteA = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').first();
@@ -714,6 +719,14 @@ test('🔴 見出しの「この章を編集する」→ 打つ → 別のノー
   await expect(chapterBody, '章の窓に前の章が混ざった').not.toContainText('前置き。');
   await expect(chapterBody, '章の窓に次の章が混ざった').not.toContainText('来週。');
   await expect(chapterWin, '窓の題名が「ノート › 見出し」でない').toHaveTitle(/› 決定事項$/);
+  // 🔴 html の囲みは、窓でも中身の高さになる(高さ合わせの受け手が窓にも付いている)
+  const frame = chapterBody.locator('iframe');
+  await expect(frame, '前提が崩れている(html の囲みが窓に無い)').toHaveCount(1);
+  await expect
+    .poll(async () => (await frame.boundingBox())?.height ?? 0, {
+      message: '章の窓の html の囲みが高さ 0 のまま(中身が見えない)',
+    })
+    .toBeGreaterThan(60);
   // ⚠ 読むだけ ── 本文を書き換える口が 1 つも無い(⧉ も取り除かれている)
   await expect(
     chapterWin.locator(

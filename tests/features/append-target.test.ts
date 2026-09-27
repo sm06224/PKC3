@@ -21,6 +21,7 @@ import {
   resolveAppendAt,
   resolveHeadingRef,
   chapterLinesOf,
+  sameHeadingCount,
   sectionAt,
   sectionRange,
 } from '../../src/features/markdown/append-target';
@@ -443,6 +444,20 @@ describe('chapterLinesOf(#1044 段4)', () => {
     expect(second).toMatchObject({ from: 4, to: 7 });
     const first = chapterLinesOf(twin, headingRefAt(twin, 0)!);
     expect(first).toMatchObject({ from: 0, to: 4 });
+  });
+
+  it('🔴 開いた章より前に同じ字の見出しを足したら null(黙って別の章を出さない)', () => {
+    const body = ['# 一', '', 'a', '', '## 二', '', 'もとの中身'].join('\n');
+    const ref = headingRefAt(body, 4)!;
+    const count = sameHeadingCount(body, ref.text);
+    expect(count, '前提が崩れている').toBe(1);
+    const grown = ['## 二', '', '挟んだ中身', '', body].join('\n');
+    // ⚠ 対照群 ── 数を見ないと、挟んだ方(別の章)を返してしまう(直す前の形)
+    const blind = chapterLinesOf(grown, ref)!;
+    expect(grown.split('\n').slice(blind.from, blind.to).join('\n')).toContain('挟んだ中身');
+    expect(chapterLinesOf(grown, ref, count), '同じ字の見出しが増えたのに、別の章を返した').toBeNull();
+    // 数が同じなら普通に引ける
+    expect(chapterLinesOf(body, ref, count)?.text).toBe('二');
   });
 
   it('⚠ 見出しの字が変わった・消えたら null(黙って別の章を出さない)', () => {

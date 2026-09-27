@@ -19,6 +19,7 @@ import {
   CHAPTER_WINDOW_TEXT,
   chapterWindowBuilt,
   chapterWindowName,
+  chapterWindowTouchable,
   grabChapterWindow,
   markChapterWindowOrphaned,
   paintChapterWindow,
@@ -198,6 +199,46 @@ describe('押し所の配線', () => {
     const lines = win.document.querySelectorAll(`[data-pkc-field="${CHAPTER_ORPHAN_FIELD}"]`);
     expect(lines).toHaveLength(1);
     expect(lines[0]?.textContent).toBe(CHAPTER_WINDOW_TEXT.orphan);
+  });
+
+  it('🔴 元のウィンドウが閉じたら、押し所は消す(受け手が居ないので、押しても何も起きない)', () => {
+    const win = fakeWindow();
+    paint(win, '<p><a data-pkc-action="navigate-entry-ref" data-pkc-entry-ref="entry:n2" href="#">別</a></p>');
+    // ⚠ 空振り防止 ── 押し所が在る(頭の「元のウィンドウで開く」と本文のリンク)
+    expect(win.document.querySelectorAll('[data-pkc-action]').length).toBe(2);
+    markChapterWindowOrphaned(win);
+    expect(win.document.querySelectorAll('[data-pkc-action]'), '押し所が残っている').toHaveLength(0);
+    expect(win.document.body.textContent, 'リンクの字まで消えた').toContain('別');
+  });
+
+  it('🔴 組み直したら「もう新しくならない」の一文は消える(読み直した元のウィンドウが追従を再開した)', () => {
+    const win = fakeWindow();
+    paint(win, '<p>x</p>');
+    markChapterWindowOrphaned(win);
+    paint(win, '<p>y</p>');
+    expect(win.document.querySelector(`[data-pkc-field="${CHAPTER_ORPHAN_FIELD}"]`), '一文が残って嘘になった').toBeNull();
+  });
+
+  it('🔴 窓へ落とす操作は止める(落とした URL へ窓ごと移らない)', () => {
+    const win = fakeWindow();
+    paint(win, '<p>x</p>');
+    wireChapterWindow(win, vi.fn());
+    for (const type of ['dragover', 'drop']) {
+      const ev = new Event(type, { cancelable: true });
+      win.document.dispatchEvent(ev);
+      expect(ev.defaultPrevented, `${type} を止めていない`).toBe(true);
+    }
+  });
+
+  it('⚠ 触れない窓(別のページへ移った)を、触れないと判定する', () => {
+    const win = fakeWindow();
+    expect(chapterWindowTouchable(win)).toBe(true);
+    Object.defineProperty(win, 'document', {
+      get() {
+        throw new DOMException('cross-origin', 'SecurityError');
+      },
+    });
+    expect(chapterWindowTouchable(win)).toBe(false);
   });
 });
 

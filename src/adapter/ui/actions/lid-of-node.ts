@@ -21,9 +21,14 @@
  * (変異試験で順を入れ替えても SURVIVED ── 1 つの要素が両方の印を持つ場面が無い)。
  * 🔑 「これが無いと壊れる」と書く前に外して壊れるのを見る、の実行結果である。
  */
+import { CHAPTER_LID_ATTR } from '@adapter/platform/chapter-window';
 
-/** ノートを表す印。⚠ 増えたらここに足す(呼び側に散らさない)。 */
-const OWNER = '[data-pkc-entry],[data-pkc-split-lid]';
+/**
+ * ノートを表す印。⚠ 増えたらここに足す(呼び側に散らさない)。
+ * 🔑 章の別ウィンドウの本文(#1044 段4)も 1 つ ── 窓で押した口が、本体で**いま選んでいる**
+ *   ノートではなく**その章のノート**に効くように。
+ */
+const OWNER = `[data-pkc-entry],[data-pkc-split-lid],[${CHAPTER_LID_ATTR}]`;
 
 /**
  * 押した節点が属するノートの lid。
@@ -37,6 +42,9 @@ export function lidOfNode(node: Element | null, fallback: string | null): string
   const owner = node?.closest<HTMLElement>(OWNER) ?? null;
   if (owner === null) return fallback;
   return (
-    owner.getAttribute('data-pkc-entry') ?? owner.getAttribute('data-pkc-split-lid') ?? fallback
+    owner.getAttribute('data-pkc-entry') ??
+    owner.getAttribute('data-pkc-split-lid') ??
+    owner.getAttribute(CHAPTER_LID_ATTR) ??
+    fallback
   );
 }

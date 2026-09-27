@@ -56,6 +56,19 @@ export const CHAPTER_NOTE_FIELD = 'chapter-window-note';
 export const CHAPTER_ORPHAN_FIELD = 'chapter-window-orphan';
 
 /**
+ * 🔴 **この本文はどのノートの物か**(本文の器に付く)。⚠ `lidOfNode` が読む ──
+ *   窓で押した口(図を保存する等)が、本体で**いま選んでいる**ノートではなく**この章の
+ *   ノート**に効くように(着地前レビュー:図の名前が本体のノートの題名になっていた)。
+ */
+export const CHAPTER_LID_ATTR = 'data-pkc-chapter-lid';
+
+/**
+ * 🔴 **図の通し番号(全文の並びで 0 起点)**。⚠ 「図を保存」の名前の番号 ── 章の窓の図は
+ *   本体の画面に居ないので、本体の画面で数えると必ず 1 番目になる(着地前レビュー)。
+ */
+export const CHAPTER_DIAGRAM_INDEX_ATTR = 'data-pkc-diagram-index';
+
+/**
  * 🔴 **この窓から開いた側で走らせてよい口**(§10.2)。
  *
  * 🔑 **読むだけ・よそへ移るだけ**の口に限る ── どれも本文を 1 バイトも書き換えない:
@@ -179,7 +192,7 @@ export type ChapterWindowContent =
 export const CHAPTER_WINDOW_TEXT = {
   loading: '章を開いています…',
   missing:
-    'この章が見つかりません。見出しの名前が変わったか、章が消えました。元のウィンドウの見出しから開き直してください。',
+    'この章が見つかりません。見出しの名前が変わったか、章が消えたか、同じ名前の見出しが増えました。元のウィンドウの見出しから開き直してください。',
   gone: 'このノートはもうありません。',
   orphan: '元のウィンドウを閉じたため、このウィンドウの中身はもう新しくなりません。',
   jump: '元のウィンドウで開く',
@@ -224,7 +237,11 @@ export function paintChapterWindow(
   copyTokens(doc.documentElement);
   doc.documentElement.lang = 'ja';
 
-  const orphanWas = doc.body.querySelector(`[data-pkc-field="${CHAPTER_ORPHAN_FIELD}"]`) !== null;
+  /**
+   * ⚠ 「元のウィンドウを閉じた」の一文は**持ち越さない**(着地前レビュー)── 組み直しが
+   *   起きた = 誰か(読み直した後の元のウィンドウ)が追従を再開した、なので、一文を
+   *   残すと嘘になる。
+   */
   doc.body.textContent = '';
   doc.body.setAttribute(CHAPTER_BUILT_ATTR, parts.key);
 
@@ -247,7 +264,6 @@ export function paintChapterWindow(
     head.append(jump);
   }
   doc.body.append(head);
-  if (orphanWas) doc.body.append(orphanLine());
 
   if (parts.content.kind !== 'chapter') {
     const note = document.createElement('p');
@@ -286,8 +302,30 @@ export function markChapterWindowOrphaned(win: Window): void {
     const line = orphanLine();
     if (head !== null) head.after(line);
     else body.prepend(line);
+    /**
+     * 🔴 **押し所を外す**(着地前レビュー)── 受け手は閉じた元のウィンドウに居たので、
+     *   押せる見た目のまま残すと**押しても何も起きない**。字は残す(読むことはできる)。
+     */
+    for (const el of Array.from(body.querySelectorAll('[data-pkc-action]'))) {
+      // ⚠ ボタンは消す(字だけのボタンは押せる見た目のまま残る)/ リンクは字を残す
+      if (el.tagName === 'BUTTON') el.remove();
+      else el.removeAttribute('data-pkc-action');
+    }
   } catch {
     // 触れない窓 ── 言えない
+  }
+}
+
+/**
+ * その窓の中身にいま触れるか。⚠ user が窓へ URL を落とすと、その窓は別のページへ移り
+ *   (別の origin)、`document` に触れなくなる ── そのとき組み直しを撃ち続けない。
+ */
+export function chapterWindowTouchable(win: Window): boolean {
+  try {
+    void win.document.body;
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -374,6 +412,14 @@ export function wireChapterWindow(
     ev.preventDefault();
     onAction(el);
   });
+  /**
+   * 🔴 **窓へ落とす操作を止める**(着地前レビュー)── 止めないと、落とした URL へ
+   *   **この窓ごと移る**(ブラウザの既定)。移った先のページは、この窓を開いた
+   *   元のウィンドウを `opener` として持つ。
+   */
+  for (const type of ['dragover', 'drop'] as const) {
+    doc.addEventListener(type, (ev) => ev.preventDefault());
+  }
   doc.addEventListener('keydown', (ev) => {
     if (ev.key !== 'Escape' || ev.defaultPrevented) return;
     try {

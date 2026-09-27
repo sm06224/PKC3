@@ -36,6 +36,7 @@ import type { AppState } from '@adapter/state/app-state';
 import {
   chapterLinesOf,
   headingRefAt,
+  sameHeadingCount,
   type ChapterLines,
   type HeadingRef,
 } from '@features/markdown/append-target';
@@ -50,18 +51,28 @@ import {
   extractDocumentGlobals,
 } from '@features/markdown/document-globals';
 import { readFenceAssetText } from '@features/asset/fence-asset-read';
+import { installHtmlSandboxResizer } from '@features/markdown/html-sandbox';
 import {
   chapterWindowBuilt,
   chapterWindowName,
+  chapterWindowTouchable,
   grabChapterWindow,
   markChapterWindowOrphaned,
   paintChapterWindow,
+  prepareChapterBody,
   wireChapterWindow,
+  CHAPTER_DIAGRAM_INDEX_ATTR,
+  CHAPTER_LID_ATTR,
   CHAPTER_WINDOW_TEXT,
   type ChapterWindowContent,
 } from '@adapter/platform/chapter-window';
 import { blocksInRange } from './render/section-box';
-import { hydrateFigures, readingRenderOptions } from './render/detail';
+import {
+  fenceAssetUnreadableText,
+  hydrateFigures,
+  readingRenderOptions,
+  selfContainerId,
+} from './render/detail';
 import type { MermaidScope } from './render/mermaid-hydrate';
 
 /** 窓が開けなかったとき(`view-window.ts` と同じ字)。 */
@@ -69,6 +80,13 @@ export const CHAPTER_WINDOW_BLOCKED = 'ブラウザが新しいウィンドウ�
 
 /** 押した見出しを読めなかったとき(押した直後に本文が変わった等)。 */
 export const CHAPTER_HEADING_UNREADABLE = '見出しを読めませんでした(もう一度右クリックしてください)';
+
+/**
+ * 同じ名前の窓が、別のページへ移っていて触れないとき(#1044 段4 着地前レビュー)。
+ * ⚠ 窓へ URL を落とすと、その窓はそのページへ移る ── 触れない窓に組み直しを撃ち続けない。
+ */
+export const CHAPTER_WINDOW_ELSEWHERE =
+  'その章のウィンドウは別のページを開いています。そのウィンドウを閉じてから、もう一度開いてください';
 
 export interface ChapterWindowsDeps {
   readonly getState: () => AppState;
@@ -105,13 +123,27 @@ interface OpenChapter {
   readonly win: Window;
   readonly lid: string;
   readonly ref: HeadingRef;
+  /**
+   * 開いた時の「同じ字の見出しの数」(`chapterLinesOf` の `sameCount`)。
+   * ⚠ 数が変わったら見失ったと扱う ── 前に同じ字の見出しを足されると、同じ「何番目」に
+   *   別の章が来るため(着地前レビュー、実測で再現)。
+   */
+  readonly sameCount: number;
   readonly name: string;
   /** 組み直しの世代(遅れて返った描画を当てない)。 */
   gen: number;
   /** 最後に見た合図(`signatureOf`)。 */
   sig: string;
+  /**
+   * いま窓に出している中身の指紋。⚠ **同じなら組み直さない** ── 合図はノート全文で見るので、
+   *   **別の章**を保存しても鳴る。そのたびに組み直すと、画像を返して借り直し、窓がちらつく
+   *   (「書きながら横に置いて読む」の使い方そのもので起きる ── 着地前レビュー)。
+   */
+  shown: string;
   /** 借りた添付・図の後始末。 */
   disposers: Array<() => void>;
+  /** html / svg の囲みの高さ合わせ(窓の document ごとに 1 本)。 */
+  sandbox: { doc: Document; off: () => void } | null;
   pending: unknown;
 }
 
@@ -150,17 +182,30 @@ export class ChapterWindows {
       return false;
     }
     let o = this.windows.get(name);
+    if (!chapterWindowTouchable(win)) {
+      // ⚠ 別のページへ移った窓 ── 組めないので台帳にも載せない(載せると見張りが空回りする)
+      if (o !== undefined) this.dispose(o);
+      this.deps.fail(CHAPTER_WINDOW_ELSEWHERE);
+      return false;
+    }
     if (o === undefined || o.win !== win) {
       if (o !== undefined) this.dispose(o);
-      o = { win, lid, ref, name, gen: 0, sig: '', disposers: [], pending: null };
+      o = {
+        win,
+        lid,
+        ref,
+        sameCount: sameHeadingCount(body, ref.text),
+        name,
+        gen: 0,
+        sig: '',
+        shown: '',
+        disposers: [],
+        sandbox: null,
+        pending: null,
+      };
       this.windows.set(name, o);
       // ⚠ 開いた瞬間に「待っている」と分かる形にする(白紙を見せない)
-      paintChapterWindow(win, {
-        title: titleOf(st, lid, ref.text),
-        noteTitle: noteTitleOf(st, lid),
-        key: name,
-        content: { kind: 'loading' },
-      });
+      this.paintLoading(o, st);
     }
     try {
       win.focus();
@@ -205,6 +250,23 @@ export class ChapterWindows {
     }, DEBOUNCE_MS);
   }
 
+  /**
+   * 「開いています…」を出す(開いた瞬間 / F5 で白くなったとき)。
+   * 🔴 **ここでも配線する**(着地前レビュー)── 配線が描き終わった後だけだと、開いてから
+   *   描き終わるまでの間は **Esc が効かない**(設計 doc §10.2 は条件を付けていない)。
+   */
+  private paintLoading(o: OpenChapter, st: AppState): void {
+    this.release(o);
+    o.shown = '';
+    paintChapterWindow(o.win, {
+      title: titleOf(st, o.lid, o.ref.text),
+      noteTitle: noteTitleOf(st, o.lid),
+      key: o.name,
+      content: { kind: 'loading' },
+    });
+    wireChapterWindow(o.win, this.deps.runAction);
+  }
+
   /** いまの本文で組み直す。⚠ 遅れて返った描画は当てない(`gen`)。 */
   private async repaint(o: OpenChapter): Promise<void> {
     const gen = ++o.gen;
@@ -228,14 +290,15 @@ export class ChapterWindows {
       this.paint(o, st, o.ref.text, { kind: 'gone' });
       return;
     }
-    const lines = chapterLinesOf(body, o.ref);
+    const lines = chapterLinesOf(body, o.ref, o.sameCount);
     if (lines === null) {
       this.paint(o, st, o.ref.text, { kind: 'missing' });
       return;
     }
     const opts = readingRenderOptions(body, {
       allowExternalImages: this.deps.allowExternalImages(o.lid),
-      currentContainerId: st.cid ?? '',
+      // 🔑 本文の面と**同じ 1 本**で決める(`state.cid ?? ''` を面ごとに書かない)
+      currentContainerId: selfContainerId(st),
     });
     const shown = bodyBelowFrontmatter(body);
     let html: string;
@@ -256,22 +319,54 @@ export class ChapterWindows {
     await this.hydrate(o, gen, host, opts);
   }
 
+  /**
+   * 中身を組む。⚠ **いま出している物と同じなら何もしない**(`shown`)── 画像を返して
+   *   借り直す・窓がちらつく、を別の章の保存のたびに起こさない。
+   * @returns 組んだ本文の器。組まなかった(同じだった / 章でない / 触れない)なら `null`
+   */
   private paint(
     o: OpenChapter,
     st: AppState,
     heading: string,
     content: ChapterWindowContent,
   ): HTMLElement | null {
+    const title = titleOf(st, o.lid, heading);
+    const shown = `${content.kind}\u0000${title}\u0000${
+      content.kind === 'chapter' ? content.blocks.map(nodeHtml).join('') : ''
+    }`;
+    if (shown === o.shown && chapterWindowBuilt(o.win)) return null;
     // 🔴 **組み直す前に、前の中身が借りていた物を返す**(画面から消える `<img>` のぶん)
     this.release(o);
     const host = paintChapterWindow(o.win, {
-      title: titleOf(st, o.lid, heading),
+      title,
       noteTitle: noteTitleOf(st, o.lid),
       key: o.name,
       content,
+      // 🔑 **この窓の本文はこのノートの物**(`lidOfNode` が読む ── 図を保存したときの題名)
+      bodyAttrs: { [CHAPTER_LID_ATTR]: o.lid },
     });
+    o.shown = shown;
     wireChapterWindow(o.win, this.deps.runAction);
+    this.ensureSandbox(o);
     return host;
+  }
+
+  /**
+   * 🔴 **html / svg の囲みの高さ合わせを、窓にも付ける**(着地前レビュー)。
+   * ⚠ 囲みは高さ 0 で描かれ、中身が親の窓へ高さを申告する ── 受け手は本体にしか
+   *   付いていないので、窓では**空の箱**のまま残っていた。
+   * ⚠ **document ごとに 1 本**(F5 で document が替わると、前の受け手は消えている)。
+   */
+  private ensureSandbox(o: OpenChapter): void {
+    let doc: Document;
+    try {
+      doc = o.win.document;
+    } catch {
+      return;
+    }
+    if (o.sandbox?.doc === doc) return;
+    o.sandbox?.off();
+    o.sandbox = { doc, off: installHtmlSandboxResizer(o.win) };
   }
 
   /**
@@ -297,7 +392,8 @@ export class ChapterWindows {
           if (pending) {
             pending.setAttribute('data-pkc-fence-asset-error', '');
             pending.removeAttribute('data-pkc-fence-asset-pending');
-            pending.textContent = `このコードブロックの中身(添付)を読み込めません: ${got.why}`;
+            // 🔑 断り文は本文の面と**同じ 1 本**
+            pending.textContent = fenceAssetUnreadableText(got.why);
           }
           return;
         }
@@ -311,6 +407,14 @@ export class ChapterWindows {
       }),
     );
     if (stale()) return;
+    /**
+     * 🔴 **埋めた囲みも、読むだけの形へ整える**(着地前レビュー)── 描画はアプリと同じ関数
+     *   なので、埋めた囲みにも ⧉ と ▾ が付いて来る。整えは描いた直後に 1 度しか通っていない
+     *   ので、後から埋めた所だけ**押しても無言の ⧉** が残っていた。
+     * ⚠ 器まるごとに当て直す(何度通しても同じ結果になる形)── 埋めた所だけに当てると、
+     *   章の中の他の見出しを指すリンクまで「章の外」と読む。
+     */
+    if (fences.length > 0) prepareChapterBody(host);
     // ② 本文に貼った画像(添付)── 同じ鍵は 1 回だけ借りる
     const byKey = new Map<string, HTMLImageElement[]>();
     for (const img of Array.from(host.querySelectorAll<HTMLImageElement>('img[data-pkc-asset-key]'))) {
@@ -355,6 +459,8 @@ export class ChapterWindows {
   private dispose(o: OpenChapter): void {
     o.gen++;
     this.release(o);
+    o.sandbox?.off();
+    o.sandbox = null;
     if (o.pending !== null) {
       const clearT = this.deps.clearTimeout ?? ((h) => clearTimeout(h as ReturnType<typeof setTimeout>));
       clearT(o.pending);
@@ -388,18 +494,17 @@ export class ChapterWindows {
       } catch {
         closed = true;
       }
-      if (closed) {
+      /**
+       * ⚠ **触れない窓(別のページへ移った)は台帳から外す**(着地前レビュー)── 外さないと
+       *   「組めていない = F5 で白くなった」と読んで、**毎秒**全文を描き直し続ける。
+       */
+      if (closed || !chapterWindowTouchable(o.win)) {
         this.dispose(o);
         continue;
       }
       if (!this.orphaned && !chapterWindowBuilt(o.win)) {
         // 🔑 白い窓に「待っている」を先に出す(組み直しは非同期)
-        paintChapterWindow(o.win, {
-          title: titleOf(this.deps.getState(), o.lid, o.ref.text),
-          noteTitle: noteTitleOf(this.deps.getState(), o.lid),
-          key: o.name,
-          content: { kind: 'loading' },
-        });
+        this.paintLoading(o, this.deps.getState());
         void this.repaint(o);
       }
     }
@@ -418,6 +523,14 @@ export function chapterBlocks(html: string, lines: ChapterLines): Node[] {
   tpl.innerHTML = html;
   const box = document.createElement('div');
   box.append(tpl.content);
+  /**
+   * 🔴 **図の通し番号を、全文の並びで焼く**(着地前レビュー)── 「図を保存」の名前
+   *   (`<題名>-図<n>`)の n は本体の面では画面の並びから数えるが、章の窓の図は本体の
+   *   画面に居ないので、数えると**必ず 1 番目**になっていた。
+   */
+  Array.from(box.querySelectorAll('[data-pkc-mermaid-src]')).forEach((el, i) =>
+    el.setAttribute(CHAPTER_DIAGRAM_INDEX_ATTR, String(i)),
+  );
   const blocks: Node[] = blocksInRange(box, lines.from, lines.to);
   const refs = new Set<string>();
   for (const b of blocks) {
@@ -460,6 +573,11 @@ function readyBodyOf(state: AppState, lid: string): string | null {
   // ⚠ 全文編集で開いているのは `openBody` のノートだけ(アプリ全体で 1 つ)
   if (state.phase === 'editing') return null;
   return ob.body;
+}
+
+/** 中身の指紋に使う字(要素なら外側の HTML、それ以外は字)。 */
+function nodeHtml(n: Node): string {
+  return n instanceof Element ? n.outerHTML : (n.textContent ?? '');
 }
 
 function noteTitleOf(state: AppState, lid: string): string {

@@ -1943,6 +1943,37 @@ describe('見出しの右クリック ── 章を別のウィンドウで(#104
     ]);
   });
 
+  it('🔴 窓で押した「図を保存」は、焼いた番号と章のノートを渡す(本体の選択・画面の並びを使わない)', () => {
+    const r = rig2();
+    const other = document.implementation.createHTMLDocument('');
+    const host = other.createElement('div');
+    host.setAttribute('data-pkc-chapter-lid', 'n9');
+    const fig = other.createElement('div');
+    fig.setAttribute('data-pkc-mermaid-src', 'graph TD; C-->D;');
+    fig.setAttribute('data-pkc-diagram-index', '1');
+    const btn = other.createElement('button');
+    btn.setAttribute('data-pkc-action', 'export-diagram');
+    fig.append(btn);
+    host.append(fig);
+    other.body.append(host);
+    const calls: unknown[][] = [];
+    const services: BinderServices = { exportDiagram: (...a: unknown[]) => void calls.push(a) } as never;
+    expect(runChapterWindowAction(r.d, btn, services, r.root)).toBe(true);
+    expect(calls).toEqual([['graph TD; C-->D;', 1, 'n9']]);
+  });
+
+  it('🔴 「実寸で開く」は押した窓を渡す(本体で押したときは本体の窓)', () => {
+    const calls: unknown[][] = [];
+    const r = rig2({ viewBig: (...a: unknown[]) => void calls.push(a) } as never);
+    const img = document.createElement('img');
+    img.setAttribute('data-pkc-action', 'view-big');
+    img.src = 'blob:x';
+    r.root.append(img);
+    img.click();
+    expect(calls.length, '前提が崩れている(受け手に届いていない)').toBe(1);
+    expect(calls[0]![3], '押した窓を渡していない').toBe(window);
+  });
+
   it('🔴 窓から来た口は、送れる口の一覧に在る物だけ走らせる', () => {
     const r = rig2();
     const other = document.implementation.createHTMLDocument('');

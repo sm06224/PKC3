@@ -93,7 +93,10 @@ import {
   settingsPlanNote,
 } from '@features/settings/settings-file';
 import { downloadBlob } from '@adapter/platform/download';
-import { CHAPTER_WINDOW_ACTIONS } from '@adapter/platform/chapter-window';
+import {
+  CHAPTER_DIAGRAM_INDEX_ATTR,
+  CHAPTER_WINDOW_ACTIONS,
+} from '@adapter/platform/chapter-window';
 import { visibleContacts } from '@features/contact/contact-card';
 import { buildVcf, isVcfFileName, vcfNoteOf } from '@features/contact/vcard';
 import { isMarkdownFileName } from '@features/import/plain-markdown';
@@ -1148,7 +1151,16 @@ export interface BinderServices {
    * @param diagramSource 図なら**その原文**。⚠ 渡ったときは `src`(焼いた PNG)を
    *   使わず、**原文からベクタを起こして**開く(user 報告 2026-08-28)。
    */
-  viewBig?(src: string, title: string, diagram?: { kind: 'mermaid' | 'chart'; source: string }): void;
+  /**
+   * @param from 押した窓(⚠ 章の別ウィンドウで押したときは**その窓**から開く ── 押した操作の
+   *   続きは押した窓にしか付かないので、本体から開くとポップアップ阻止に掛かる)
+   */
+  viewBig?(
+    src: string,
+    title: string,
+    diagram?: { kind: 'mermaid' | 'chart'; source: string },
+    from?: Window,
+  ): void;
   /** 未参照 asset の掃除(P4b)。確認・報告の UI も実体側の責務。 */
   purgeOrphanAssets?(): void;
   /** 注意の面を閉じる(P6c review H-2)。 */
@@ -1471,7 +1483,11 @@ export interface BinderServices {
    * @param index 同じ本文の中で**何枚目か**(0 始まり ── 名前は 1 始まりにする)
    */
   /** ⚠ **Promise を返す** ── 押した側が「終わった」を知らないと待ちを出せない。 */
-  exportDiagram?(source: string, index: number): void | Promise<void>;
+  /**
+   * @param lid 図の載っているノート(⚠ 省略すると本体で選んでいるノート ── 章の別ウィンドウや
+   *   留めた枠の図は、押した所から引いた lid を渡す)
+   */
+  exportDiagram?(source: string, index: number, lid?: string): void | Promise<void>;
   /** 文字列をクリップボードへ(P8 段⑱)。⚠ 失敗も可視で終える。 */
   /**
    * clipboard へ写す。
@@ -7090,6 +7106,8 @@ const ACTIONS: Record<string, ActionHandler> = {
       img.src,
       img.alt || '図',
       src !== '' ? { kind: 'mermaid', source: src } : csrc !== '' ? { kind: 'chart', source: csrc } : undefined,
+      // 🔴 **押した窓から開く**(#1044 段4 着地前レビュー)── 本体で押したときは本体そのもの
+      img.ownerDocument.defaultView ?? undefined,
     );
   },
   /**
@@ -7098,12 +7116,23 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 「何枚目か」は**描いた側の並び**から数える ── 器に番号を焼き込むと、
    * 図を 1 個消したときに番号が飛ぶ
    */
-  'export-diagram': (_dispatcher, target, services, root) => {
+  'export-diagram': (dispatcher, target, services, root) => {
     const host = target.closest<HTMLElement>('[data-pkc-mermaid-src]');
     const source = host?.getAttribute('data-pkc-mermaid-src');
     if (!host || !source) return;
+    /**
+     * 🔴 **番号とノートは、押した図から引く**(#1044 段4 着地前レビュー)。
+     * ⚠ 章の別ウィンドウの図は本体の画面に居ないので、本体の画面で数えると**必ず 1 番目**、
+     *   題名は本体で**いま選んでいる**ノートになっていた ── 窓は全文の並びで番号を焼き
+     *   (`CHAPTER_DIAGRAM_INDEX_ATTR`)、本文の器にノートを焼く(`lidOfNode` が読む)。
+     *   焼いていない面(本体)はこれまでどおり画面の並びで数える。
+     */
+    const burned = Number(host.getAttribute(CHAPTER_DIAGRAM_INDEX_ATTR) ?? NaN);
     const all = [...root.querySelectorAll('[data-pkc-mermaid-src]')];
-    const done = services.exportDiagram?.(source, Math.max(0, all.indexOf(host)));
+    const index = Number.isInteger(burned) && burned >= 0 ? burned : Math.max(0, all.indexOf(host));
+    const st = dispatcher.getState();
+    const lid = lidOfNode(host, st.selectedLid);
+    const done = services.exportDiagram?.(source, index, lid ?? undefined);
     // 🔴 **無言で待たせない**(P8 段⑬ review M-3)。ベクタは原文から焼き直すので、
     //    mermaid 本体の読み込みを含めて秒が掛かる。何も起きないように見えると
     //    user は連打する ── 押せなくして、そのボタン自身に状態を出す
@@ -12791,6 +12820,12 @@ export function bindActions(
        */
       const level = heading === null ? 0 : headingLevel(heading);
       /**
+       * 🔑 **章として切り出せる見出しか**(#1044 段2 / 段4)── 本文の直下の `#`〜`###`
+       *   (`append-target.ts` の `scanHeadings` が数えるのはそこまで)。章の欄と章の窓で
+       *   **同じ 1 つ**を使う(写しを 2 つ持たない)。
+       */
+      const chapterable = heading !== null && heading.parentElement === host && level >= 1 && level <= 3;
+      /**
        * 🔴 **`:::` の塊の上なら「この塊をコピー」を足す**(#677)。
        *
        * ⚠ 見出しと**排他にしない** ── `:::` の中の見出しを右クリックしたら、見出しの物と
@@ -12829,13 +12864,13 @@ export function bindActions(
                *   `scanHeadings` が引用の中の見出しを見出しと認めないのと同じ理由)+
                *   `#`〜`###`(`scanHeadings` が数える段はそこまで)。
                */
-              sectionEditable: heading.parentElement === host && level >= 1 && level <= 3,
+              sectionEditable: chapterable,
               /**
                * 🔴 **章を別のウィンドウで(#1044 段4)**。⚠ 章の範囲を章の欄と**同じ関数**で
-               *   決めるので、出す見出しも同じ形の条件にする(書けるかどうかには依らない ──
+               *   決めるので、出す見出しも**同じ条件**にする(書けるかどうかには依らない ──
                *   `sectionEditable` も書ける状態を見ていない、形だけの条件である)。
                */
-              chapterWindow: heading.parentElement === host && level >= 1 && level <= 3,
+              chapterWindow: chapterable,
               // 🔴 近道の字を右に添える(#587 C 案 2)── 見出しの項目だけ(塊 / 板 / 本文には無い)
             }).map(withShortcut)),
         ...(block === null ? [] : blockMenuActions({ board: block.board, shape: block.shape })),

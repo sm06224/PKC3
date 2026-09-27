@@ -378,11 +378,30 @@ export interface ChapterLines {
  *
  * @returns 見出しを見失った(字が変わった / 消えた / 同じ字の見出しの数が変わった)ら `null`
  */
-export function chapterLinesOf(body: string, ref: HeadingRef): ChapterLines | null {
+export function chapterLinesOf(
+  body: string,
+  ref: HeadingRef,
+  /**
+   * 🔴 **開いた時の「同じ字の見出しの数」**(#1044 段4 着地前レビュー)。
+   * ⚠ `resolveHeadingRef` が見失うのは**数が減ったとき**だけ ── 開いた章より**前**に
+   *   同じ字の見出しを足すと、同じ「何番目」に**別の見出し**が来て、窓は黙って別の章を出す
+   *   (実測:前に `## 二` を挟むと、挟んだ方の中身が出た)。章の欄は保存の前に中身を比べるので
+   *   取り違えても断れるが、**読むだけの窓には比べる相手が無い**。
+   * 🔑 だから数が変わったら**見失った**と扱う(後ろに足した場合も見失うが、それは
+   *   「黙って別の章を出す」より安全な側の外し方である)。省略すると数を見ない。
+   */
+  sameCount?: number,
+): ChapterLines | null {
+  if (sameCount !== undefined && sameHeadingCount(body, ref.text) !== sameCount) return null;
   const hit = resolveHeadingRef(body, ref);
   if (hit === null) return null;
   const range = sectionRange(body, hit.slug);
   if (range === null) return null;
   const fm = frontmatterLineCount(body);
   return { slug: hit.slug, text: hit.text, from: range.start - fm, to: range.end - fm };
+}
+
+/** その字の見出し(`#`〜`###`)が本文にいくつ在るか(#1044 段4 ── `chapterLinesOf` の `sameCount`)。 */
+export function sameHeadingCount(body: string, text: string): number {
+  return listAppendTargets(body).filter((h) => h.text === text).length;
 }

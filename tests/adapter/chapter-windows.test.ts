@@ -94,7 +94,10 @@ function booted(body: string, updated: string | null = null): AppState {
   return s;
 }
 
-function fakeWindow(): Window & { closed: boolean } {
+/** 別の document を持つ偽の窓。⚠ `message` の受け手を付け外しできる(html の囲みの高さ合わせ)。 */
+function fakeWindow(): Window & { closed: boolean; listeners: () => number } {
+  const target = new EventTarget();
+  let n = 0;
   const win = {
     document: document.implementation.createHTMLDocument(''),
     closed: false,
@@ -102,15 +105,32 @@ function fakeWindow(): Window & { closed: boolean } {
     close(): void {
       win.closed = true;
     },
+    addEventListener(type: string, fn: EventListener): void {
+      if (type === 'message') n++;
+      target.addEventListener(type, fn);
+    },
+    removeEventListener(type: string, fn: EventListener): void {
+      if (type === 'message') n--;
+      target.removeEventListener(type, fn);
+    },
+    listeners: (): number => n,
   };
-  return win as unknown as Window & { closed: boolean };
+  return win as unknown as Window & { closed: boolean; listeners: () => number };
 }
 
-function setup(opts: { body?: string; open?: 'null' } = {}) {
+function setup(
+  opts: {
+    body?: string;
+    open?: 'null';
+    blob?: Blob | null;
+    externalImages?: boolean;
+  } = {},
+) {
   let state = booted(opts.body ?? BODY);
   const win = fakeWindow();
   const failed: string[] = [];
   const disposed: string[] = [];
+  const figureDisposed: number[] = [];
   const getBody = vi.fn(async (lid: string): Promise<string | null> => (lid === '' ? null : (opts.body ?? BODY)));
   let renderGate: Promise<void> | null = null;
   const cw = new ChapterWindows({
@@ -120,19 +140,21 @@ function setup(opts: { body?: string; open?: 'null' } = {}) {
       if (renderGate !== null) await renderGate;
       return renderMarkdown(t, o);
     },
-    allowExternalImages: () => false,
+    allowExternalImages: () => opts.externalImages ?? false,
     lend: async (key) => ({ url: `blob:${key}`, dispose: () => disposed.push(key) }),
-    getBlob: async () => null,
+    getBlob: async () => opts.blob ?? null,
     runAction: vi.fn(),
     fail: (m) => failed.push(m),
     open: opts.open === 'null' ? () => null : () => win,
-    hydrateFigures: () => [],
+    // ⚠ 図の後始末が呼ばれたかを数える(1 回の後付けで 1 つの scope)
+    hydrateFigures: () => [{ dispose: () => figureDisposed.push(1), prune: () => 0 }],
   });
   return {
     cw,
     win,
     failed,
     disposed,
+    figureDisposed,
     getBody,
     get state(): AppState {
       return state;
@@ -285,6 +307,30 @@ describe('🔴 追従 ── 書き換わったら組み直す', () => {
     expect(r.note()).toBe(CHAPTER_WINDOW_TEXT.gone);
   });
 
+  it('🔴 開いた章より前に同じ字の見出しを足したら「見つかりません」(別の章を黙って出さない)', async () => {
+    const r = setup();
+    r.cw.open('n1', LINE_TWO);
+    await flush();
+    const grown = BODY.replace('# 一\n', '# 一\n\n## 二\n\n前に挟んだ\n\n');
+    r.state = { ...r.state, openBody: { ...r.state.openBody!, body: grown } };
+    r.cw.onState(r.state);
+    await flush();
+    expect(r.win.document.body.textContent ?? '', '挟んだ方の章を出した').not.toContain('前に挟んだ');
+    expect(r.note()).toBe(CHAPTER_WINDOW_TEXT.missing);
+  });
+
+  it('🔴 別の章を書き換えても、この章の中身が同じなら組み直さない(画像を借り直さない)', async () => {
+    const r = setup();
+    r.cw.open('n1', LINE_TWO);
+    await flush();
+    const before = r.host();
+    r.state = { ...r.state, openBody: { ...r.state.openBody!, body: BODY.replace('さんの中身', '三を直した') } };
+    r.cw.onState(r.state);
+    await flush();
+    expect(r.host(), '同じ中身なのに器を作り直した(ちらつく)').toBe(before);
+    expect(r.disposed, '同じ中身なのに画像を返して借り直した').toEqual([]);
+  });
+
   it('🔴 遅れて返った古い描画は当てない', async () => {
     const r = setup();
     let release!: () => void;
@@ -302,15 +348,44 @@ describe('🔴 追従 ── 書き換わったら組み直す', () => {
 });
 
 describe('🔴 寿命 ── 閉じる / F5 / 元のウィンドウが閉じる', () => {
-  it('🔴 窓を閉じたら借りた添付を返し、台帳から外し、見張りを止める', async () => {
+  it('🔴 窓を閉じたら借りた添付・図・高さ合わせを返し、台帳から外し、見張りを止める', async () => {
     const r = setup();
     r.cw.open('n1', LINE_TWO);
     await flush();
+    expect(r.win.listeners(), '前提が崩れている(高さ合わせの受け手が付いていない)').toBe(1);
     r.win.closed = true;
     r.cw.tick();
     expect(r.disposed).toEqual(['ast-1']);
+    expect(r.figureDisposed, '図の後始末が呼ばれていない(ObjectURL が残る)').toEqual([1]);
+    expect(r.win.listeners(), '閉じたのに高さ合わせの受け手が残っている').toBe(0);
     expect(r.cw.size).toBe(0);
     expect(vi.getTimerCount(), '見張りが止まっていない(常駐する)').toBe(0);
+  });
+
+  it('🔴 別のページへ移って触れなくなった窓は、見張りから外す(毎秒描き直し続けない)', async () => {
+    const r = setup();
+    r.cw.open('n1', LINE_TWO);
+    await flush();
+    Object.defineProperty(r.win, 'document', {
+      get() {
+        throw new DOMException('cross-origin', 'SecurityError');
+      },
+    });
+    r.getBody.mockClear();
+    r.cw.tick();
+    await flush();
+    expect(r.cw.size, '触れない窓を台帳に残した').toBe(0);
+    expect(r.disposed, '借りた添付を返していない').toEqual(['ast-1']);
+  });
+
+  it('🔴 開いてから描き終わるまでの間も、Esc で閉じる', async () => {
+    const r = setup();
+    r.gate(new Promise<void>(() => undefined)); // 描画が返らない
+    r.cw.open('n1', LINE_TWO);
+    await flush();
+    expect(r.host(), '前提が崩れている(もう描けている)').toBeNull();
+    r.win.document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(r.win.closed, '描き終わる前は Esc が効かない').toBe(true);
   });
 
   it('🔴 F5 で白くなったら、組み直す', async () => {
@@ -344,6 +419,49 @@ describe('🔴 寿命 ── 閉じる / F5 / 元のウィンドウが閉じる'
     await flush();
     expect(r.cw.size).toBe(1);
     expect(r.host()?.textContent).toContain('二度目');
+  });
+});
+
+describe('🔴 読むだけの形は、後から埋めた所・外の画像にも効く', () => {
+  it('🔴 添付から中身を取るコード枠を埋めた後も、⧉ が残らない', async () => {
+    const body = ['## 二', '', '```csv', '```'].join('\n');
+    const fenceBody = body.replace('```csv\n```', '```csv asset:ast-csv\n```');
+    const r = setup({ body: fenceBody, blob: new Blob(['a,b\n1,2\n']) });
+    r.cw.open('n1', 0);
+    await flush();
+    const host = r.host()!;
+    // ⚠ 空振り防止 ── 埋める所を通った(表が出ている)
+    expect(host.querySelector('[data-pkc-fence-asset-key]'), '前提が崩れている(枠を埋めていない)').toBeNull();
+    expect(host.querySelector('table'), '前提が崩れている(添付の表が出ていない)').not.toBeNull();
+    expect(host.querySelector('[data-pkc-action="copy-md-block"]'), '埋めた枠に ⧉ が残った').toBeNull();
+  });
+
+  it('🔴 外の画像は、本体と同じく同意が無ければ取りに行かない(対照群:同意があれば取りに行く)', async () => {
+    const body = ['## 二', '', '![外](https://example.com/x.png)'].join('\n');
+    const off = setup({ body });
+    off.cw.open('n1', 0);
+    await flush();
+    const imgOff = off.host()!.querySelector('img');
+    expect(imgOff, '前提が崩れている(画像が描かれていない)').not.toBeNull();
+    expect(imgOff!.getAttribute('src') ?? '', '同意なしに外の画像を取りに行く').not.toContain('example.com');
+    const on = setup({ body, externalImages: true });
+    on.cw.open('n1', 0);
+    await flush();
+    expect(on.host()!.querySelector('img')?.getAttribute('src') ?? '', '対照群:同意があるのに取りに行かない').toContain(
+      'example.com',
+    );
+  });
+
+  it('🔴 図には全文の並びの番号を、本文の器にはノートを焼く(図を保存したときの名前)', async () => {
+    const body = ['# 一', '', '```mermaid', 'graph TD; A-->B;', '```', '', '## 二', '', '```mermaid', 'graph TD; C-->D;', '```'].join('\n');
+    const r = setup({ body });
+    r.cw.open('n1', 6);
+    await flush();
+    const host = r.host()!;
+    const fig = host.querySelector('[data-pkc-mermaid-src]');
+    expect(fig?.getAttribute('data-pkc-mermaid-src')).toContain('C-->D');
+    expect(fig?.getAttribute('data-pkc-diagram-index'), '全文で 2 つ目の図なのに番号が違う').toBe('1');
+    expect(host.getAttribute('data-pkc-chapter-lid')).toBe('n1');
   });
 });
 
