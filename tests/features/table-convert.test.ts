@@ -17,6 +17,7 @@ import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import { applyBodyRewrite } from '../../src/features/markdown/body-rewrite';
 import {
   convertTable,
+  fencesBelowFrontmatter,
   tableAt,
   tableConvertRefusal,
   type TableFormat,
@@ -668,3 +669,23 @@ describe('表の形を変える(#708 段②)', () => {
     });
   });
 });
+
+describe('CRLF 改行と fencesBelowFrontmatter の最適化(#1100)', () => {
+  it('🔴 CRLF 改行のノートでも tableAt が正しく表を検出する', () => {
+    const crlf = '---\ntitle: test\n---\r\n| a | b |\r\n|---|---|\r\n| 1 | 2 |\r\n';
+    const at = tableAt(crlf, 4);
+    expect(at).not.toBeNull();
+    expect(at?.format).toBe('markdown');
+    expect(at?.start).toBe(3);
+    expect(at?.end).toBe(5);
+  });
+
+  it('🔴 frontmatter があるノートで fencesBelowFrontmatter が正しくフェンスを抽出する', () => {
+    const doc = '---\ntitle: test\ntags:\n  - a\n---\n\n```js\nconst x = 1;\n```\n';
+    const fences = fencesBelowFrontmatter(doc);
+    expect(fences.length).toBe(1);
+    expect(fences[0]?.start).toBe(6);
+    expect(fences[0]?.end).toBe(8);
+  });
+});
+
