@@ -175,7 +175,8 @@ export function extractHeadingsFromMarkdown(markdown: string): TocHeading[] {
  * 軽量版(TOC 抽出専用、lineMap 不要)。
  */
 function stripMismatchedIfBlocks(source: string, targetFormat: string): string {
-  const lines = source.split('\n');
+  if (!source.includes(':::if')) return source;
+  const lines = source.split(/\r?\n/);
   const out: string[] = [];
   let i = 0;
   let inFence = false;
