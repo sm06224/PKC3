@@ -127,10 +127,14 @@ import { chooseReadColumns, cycleReadColumns } from '@adapter/ui/render/read-col
 import { appendModeOf } from '@adapter/ui/render/append-box';
 import { bodyBelowFrontmatter, frontmatterLineCount } from '@features/markdown/frontmatter';
 import {
+  ENTRY_PICK_LIMIT,
+  type EntryPickRow,
   entryPickNote,
   entryPickRows,
   entryPickTotal,
 } from '@features/entry-ref/entry-pick';
+import { recentNavLids } from '@features/history/opened-log';
+import { formatListDate } from '@features/datetime/stored-date';
 import { formatEntryLink, formatSectionLink } from '@features/entry-ref/entry-ref-format';
 import { knownSplitLids } from '@features/split-frames';
 import { STACK_ARCHETYPE, stackBody } from '@features/flavor/stack-flavor';
@@ -312,6 +316,73 @@ function openCopyHistory(root: HTMLElement, notify: (text: string) => void): voi
     items,
     root.ownerDocument.activeElement,
   );
+}
+
+/**
+ * 🔴 最近開いたノートの履歴一覧(#1107)。
+ * 直近に閲覧・編集したノートを新しい順に一覧し、選んでジャンプする。
+ */
+function openRecentEntries(
+  root: HTMLElement,
+  dispatcher: Dispatcher,
+  notify: (text: string) => void,
+): void {
+  const st = dispatcher.getState();
+  const initialLids = recentNavLids(
+    st.openedAt,
+    st.selectionHistory.past,
+    st.selectionHistory.future,
+    st.selectedLid,
+    (lid) => st.entryMetas.has(lid),
+  );
+  if (initialLids.length === 0) {
+    notify('最近開いた他のノートがありません');
+    return;
+  }
+  void pickEntryInApp(
+    root,
+    (query) => {
+      const now = dispatcher.getState();
+      const lids = recentNavLids(
+        now.openedAt,
+        now.selectionHistory.past,
+        now.selectionHistory.future,
+        now.selectedLid,
+        (lid) => now.entryMetas.has(lid),
+      );
+      const q = normalizeQuery(query);
+      const matched = lids.filter((lid) => {
+        const meta = now.entryMetas.get(lid);
+        return meta !== undefined && matchesTitle(meta.title, q);
+      });
+      const year = new Date().getFullYear();
+      const items: EntryPickRow[] = matched.slice(0, ENTRY_PICK_LIMIT).map((lid) => {
+        const meta = now.entryMetas.get(lid)!;
+        const openedMs = now.openedAt.get(lid);
+        const timeStr = openedMs
+          ? formatListDate(new Date(openedMs).toISOString(), year)
+          : meta.updatedAt
+            ? formatListDate(meta.updatedAt, year)
+            : '';
+        const ancestors = getAncestorFolders(lid, now.entryMetas, now.relations);
+        const folderPath =
+          ancestors.length > 0 ? ancestors.map((a) => a.title).reverse().join('/') : '';
+        const kind =
+          [folderPath, timeStr].filter(Boolean).join(' · ') || archetypeLabel(meta.archetype);
+        return {
+          lid,
+          title: meta.title === '' ? '(題名なし)' : meta.title,
+          kind,
+        };
+      });
+      const note = entryPickNote(items.length, matched.length);
+      return { items, note };
+    },
+    { title: '最近開いたノートへ移る' },
+  ).then((lid) => {
+    if (lid === null) return;
+    dispatcher.dispatch({ type: 'SELECT_ENTRY', lid });
+  });
 }
 
 /**
@@ -4955,6 +5026,9 @@ const ACTIONS: Record<string, ActionHandler> = {
   /** ⚠ 鍵と同じ実体を呼ぶ(口を 2 つ作らない)。 */
   'open-copy-history': (_dispatcher, _target, services, root) => {
     openCopyHistory(root, (t) => services.showStatus?.(t));
+  },
+  'open-recent': (dispatcher, _target, services, root) => {
+    openRecentEntries(root, dispatcher, (t) => services.showStatus?.(t));
   },
   'use-copied': (_dispatcher, target, services) => {
     const raw = target.getAttribute('data-pkc-copied');
@@ -10099,6 +10173,7 @@ export const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
    */
   'nav-back': '[data-pkc-action="nav-back"]',
   'nav-forward': '[data-pkc-action="nav-forward"]',
+  'open-recent': '[data-pkc-action="open-recent"]',
   'create-entry': '[data-pkc-field="create-run"]',
   'edit-entry': '[data-pkc-action="start-edit"]',
   'toggle-replace': '[data-pkc-action="toggle-replace"]',

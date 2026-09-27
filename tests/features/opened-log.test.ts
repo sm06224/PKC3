@@ -10,6 +10,7 @@ import {
   openedMap,
   pruneOpened,
   pushOpened,
+  recentNavLids,
   type OpenedAt,
 } from '../../src/features/history/opened-log';
 
@@ -63,3 +64,59 @@ describe('最近開いた記録(#215 残り①)', () => {
     expect(pushOpened([], '', 1)).toEqual([]);
   });
 });
+
+describe('最近開いたノートの一覧規則(#1107)', () => {
+  it('openedAt の新しい順を優先し、現在地を除外して返す', () => {
+    const openedAt = new Map([
+      ['n3', 300],
+      ['n2', 200],
+      ['n1', 100],
+    ]);
+    const res = recentNavLids(openedAt, [], [], 'n3', () => true);
+    expect(res).toEqual(['n2', 'n1']);
+  });
+
+  it('excludeCurrent: false の場合は現在地も含める', () => {
+    const openedAt = new Map([
+      ['n3', 300],
+      ['n2', 200],
+    ]);
+    const res = recentNavLids(openedAt, [], [], 'n3', () => true, { excludeCurrent: false });
+    expect(res).toEqual(['n3', 'n2']);
+  });
+
+  it('openedAt に無いノートは selectionPast と future から補完する', () => {
+    const openedAt = new Map([['n3', 300]]);
+    const past = ['n0', 'n1', 'n2'];
+    const future = ['n4'];
+    const res = recentNavLids(openedAt, past, future, 'n3', () => true);
+    // n3 は current なので除外。openedAt からは空。
+    // past は末尾から順に n2, n1, n0。future は n4。
+    expect(res).toEqual(['n2', 'n1', 'n0', 'n4']);
+  });
+
+  it('消えたノート(alive が false)や重複は取り除く', () => {
+    const openedAt = new Map([
+      ['n3', 300],
+      ['dead', 250],
+      ['n2', 200],
+    ]);
+    const past = ['n2', 'dead2', 'n1'];
+    const alive = (lid: string) => !lid.startsWith('dead');
+    const res = recentNavLids(openedAt, past, [], 'n3', alive);
+    expect(res).toEqual(['n2', 'n1']);
+  });
+
+  it('limit で件数を制限できる', () => {
+    const openedAt = new Map([
+      ['n5', 500],
+      ['n4', 400],
+      ['n3', 300],
+      ['n2', 200],
+      ['n1', 100],
+    ]);
+    const res = recentNavLids(openedAt, [], [], null, () => true, { limit: 3 });
+    expect(res).toEqual(['n5', 'n4', 'n3']);
+  });
+});
+

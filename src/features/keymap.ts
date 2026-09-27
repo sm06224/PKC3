@@ -605,6 +605,18 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     defaults: ['Mod+Shift+V'],
     note: 'この端末で前にコピーした物を出します。押すともう一度コピーされるので、そのまま貼れます',
   },
+  /**
+   * 🔴 最近開いたノートの履歴一覧(#1107)。
+   * 直近に閲覧・編集したノートへワンタッチで再訪できるようにする。
+   */
+  {
+    id: 'open-recent',
+    label: '最近開いたノートへ移る',
+    contexts: ['global'],
+    defaults: ['Alt+H'],
+    alias: '最近開いたノート 閲覧履歴 履歴',
+    note: '直近に閲覧・編集したノートを新しい順に一覧し、選んでジャンプします',
+  },
   {
     id: 'open-help',
     label: 'ヘルプへ移る',

@@ -365,6 +365,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   for (const [action, glyph, label, title, cmd] of [
     ['nav-back', '‹', '前のノートへ戻る', '前に見ていたノートへ戻ります', 'nav-back'],
     ['nav-forward', '›', '次のノートへ進む', '戻る前のノートへ進みます', 'nav-forward'],
+    ['open-recent', '◷', '最近開いたノートへ移る', '最近開いたノートの一覧を出してジャンプします', 'open-recent'],
   ] as const) {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -375,7 +376,9 @@ export function buildShell(root: HTMLElement): ShellRegions {
     btn.setAttribute(HINT_COMMAND, cmd);
     btn.title = hintTitle(title, cmd);
     btn.textContent = glyph;
-    btn.disabled = true; // 履歴が無い間は押せない(renderer が起こす)
+    if (action !== 'open-recent') {
+      btn.disabled = true; // 履歴が無い間は押せない(renderer が起こす)
+    }
     findBar.append(btn);
   }
 

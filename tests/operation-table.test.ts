@@ -533,10 +533,12 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-09-28(#1108): チェックリスト完了項目整理(`sort-tasks`)で
       //   受け手 +1 ── 登記は増えない(押し口は書式バーの中にしか無く、鍵も持たない。
       //   `renumber-lists` と同じ仕分け)。`receivers` +1 / `total` +1 / `unregistered` +1。
-      total: 334,
-      receivers: 280,
-      registered: 92,
-      both: 38,
+      // ⚠ 2026-09-28(#1107): 最近開いたノート(`open-recent`)で受け手 +1、
+      //   `KEY_COMMANDS` にも登記したため `both` +1 / `receivers` +1 / `registered` +1 / `total` +1。
+      total: 335,
+      receivers: 281,
+      registered: 93,
+      both: 39,
       outsideActionsTable: 54,
       unregistered: 242,
     });
@@ -577,8 +579,9 @@ describe('操作の全数台帳(#582 段①)', () => {
     //    ままで、既定 `Escape` が付いただけ ── 件数は動かない)
     // ⚠ 2026-09-25(#1038 台帳③ C1): 行のメニューが 16 → 17(「編集」`start-edit`)
     // ⚠ 2026-09-28(#1092): 「横の枠(スタック)へ開く」(`filer-open-stack`)で `key` 67 → 68
+    // ⚠ 2026-09-28(#1107): 「最近開いたノートへ移る」(`open-recent`)で `key` 68 → 69
     expect(s().perBook).toEqual({
-      key: 68,
+      key: 69,
       entry: 17,
       body: 3,
       collection: 2,

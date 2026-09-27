@@ -70,3 +70,67 @@ export function openedMap(list: readonly OpenedAt[]): Map<string, number> {
   for (const o of list) if (!m.has(o.lid)) m.set(o.lid, o.at);
   return m;
 }
+
+export interface RecentNavOptions {
+  /** いま開いているノートを除外するか(既定: true)。 */
+  readonly excludeCurrent?: boolean;
+  /** 上限件数(既定: 50)。 */
+  readonly limit?: number;
+}
+
+/**
+ * 最近開いたノートの lid を新しい順に並べる(#1107)。
+ *
+ * 1. `openedAt` の keys(端末ごとの最近開いた順)を優先
+ * 2. `selectionPast`(末尾から逆順)および `selectionFuture` から未登録のノートを補完
+ * 3. 存在しないノート(`alive` が false)は除外
+ * 4. 現在地(`currentLid`)は `excludeCurrent` なら除外
+ */
+export function recentNavLids(
+  openedAt: ReadonlyMap<string, number>,
+  selectionPast: readonly string[],
+  selectionFuture: readonly string[],
+  currentLid: string | null,
+  alive: (lid: string) => boolean,
+  options: RecentNavOptions = {},
+): string[] {
+  const excludeCurrent = options.excludeCurrent ?? true;
+  const limit = options.limit ?? 50;
+  const seen = new Set<string>();
+  const out: string[] = [];
+
+  if (excludeCurrent && currentLid !== null) {
+    seen.add(currentLid);
+  }
+
+  // 1. openedAt の並び順(最近開いた順)
+  for (const lid of openedAt.keys()) {
+    if (!alive(lid)) continue;
+    if (seen.has(lid)) continue;
+    seen.add(lid);
+    out.push(lid);
+    if (out.length >= limit) return out;
+  }
+
+  // 2. セッションの直近過去(末尾から手前へ)
+  for (let i = selectionPast.length - 1; i >= 0; i--) {
+    const lid = selectionPast[i]!;
+    if (!alive(lid)) continue;
+    if (seen.has(lid)) continue;
+    seen.add(lid);
+    out.push(lid);
+    if (out.length >= limit) return out;
+  }
+
+  // 3. セッションの未来(戻るで移動した直近閲覧先)
+  for (const lid of selectionFuture) {
+    if (!alive(lid)) continue;
+    if (seen.has(lid)) continue;
+    seen.add(lid);
+    out.push(lid);
+    if (out.length >= limit) return out;
+  }
+
+  return out;
+}
+
