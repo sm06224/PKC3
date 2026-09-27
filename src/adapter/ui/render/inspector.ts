@@ -53,6 +53,7 @@ import { collectEntryTags } from '@features/flavor/entry-tags';
 import { extractHeadingsFromMarkdown } from '@features/markdown/markdown-toc';
 import { frontmatterProblem } from '@features/markdown/frontmatter';
 import { externalImageUrls } from '@features/asset/inline-url-adopt';
+import { formatBodyStats } from '@features/stats/body-stats';
 import {
   CREATABLE_KINDS,
   RELATION_LABELS,
@@ -764,6 +765,25 @@ export class InspectorRenderer {
     // 🔑 字は端末の暦日、`datetime` 属性は UTC の瞬間(機械可読・読み上げ向け。#709)
     this.setTimeRow('inspector-created', meta.createdAt);
     this.setTimeRow('inspector-updated', meta.updatedAt);
+    /**
+     * 🔴 **本文の文字数と読了目安**(#1112)。
+     * フォルダなど本文を持たないエントリでは非表示。
+     * 本文を開いているときはその長さ、閉じていれば meta.bodyChars を使う。
+     */
+    const statsDd = this.rows.get('inspector-stats');
+    if (statsDd) {
+      const dt = statsDd.previousElementSibling;
+      const isFolder = meta.archetype === 'folder';
+      const bodyChars = state.openBody?.lid === meta.lid
+        ? state.openBody.body.length
+        : meta.bodyChars;
+      const hide = isFolder || bodyChars === null;
+      statsDd.hidden = hide;
+      if (dt instanceof HTMLElement) dt.hidden = hide;
+      if (!hide) {
+        setText(statsDd, formatBodyStats(bodyChars));
+      }
+    }
     this.paintDate(meta, editing, blockedNote);
     this.paintRelationAdd(editing, blockedNote);
     // 🔴 **どのファイルから来たか**を出す(2026-08-05)── 出さないと、書き戻しが
@@ -1053,6 +1073,7 @@ export class InspectorRenderer {
     row('フォルダ', 'inspector-folder');
     row('作成', 'inspector-created');
     row('更新', 'inspector-updated');
+    row('文字数', 'inspector-stats');
     /**
      * 🔴 **ノート 1 件の日付**(#292 段④。frontmatter の `date:`)。
      *
