@@ -52,6 +52,7 @@ import {
 import { quoteOnEnter } from '@features/markdown/quote-assist';
 import { tableOnTab } from '@features/markdown/table-assist';
 import { renumberLists } from '@features/markdown/list-renumber';
+import { sortTasksByStatus } from '@features/markdown/task-sort';
 import { stripDialect } from '@features/markdown/strip-dialect';
 import {
   blockedActionNote,
@@ -7214,6 +7215,29 @@ const ACTIONS: Record<string, ActionHandler> = {
     services.showStatus?.('番号を振り直しました');
   },
   /**
+   * 🔴 チェックリスト（Todo）の完了項目整理 (#1108)。
+   *
+   * 完了した項目（- [x]）を各リストブロックの末尾へ移動する。
+   * 効く先は書式パネルと同じ 1 か所(formatTarget)── 2 列でも live でも動く。
+   * ⚠ setRangeText で Undo 履歴を保持する。
+   */
+  'sort-tasks': (dispatcher, target, services) => {
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    const ta = formatTarget(root);
+    if (ta === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '編集中に押してください' });
+      return;
+    }
+    const next = sortTasksByStatus(ta.value);
+    if (next === ta.value) {
+      services.showStatus?.('完了項目は既に末尾に揃っています');
+      return;
+    }
+    ta.setRangeText(next, 0, ta.value.length, 'end');
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    services.showStatus?.('完了したチェック項目を末尾へ移動しました');
+  },
+  /**
    * 🔴 **素の Markdown で写す**(#396)。
    *
    * > user 明示要望(PKC2 に記録):「方言記法されたエントリから
@@ -10240,6 +10264,7 @@ export const CARET_TOOLS: ReadonlySet<string> = new Set([
   // ⚠ 2026-09-13(#853 段①): 図案の表 ── 同じく編集中の本文へ挿す
   'insert-icon',
   'renumber-lists',
+  'sort-tasks',
 ]);
 
 /**

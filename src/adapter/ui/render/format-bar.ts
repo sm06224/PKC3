@@ -186,6 +186,23 @@ export function buildFormatBar(): HTMLElement {
   renumber.append(renumberLabel);
   bar.append(renumber);
 
+  /**
+   * 🔴 **完了項目を末尾へ**(#1108)。
+   *
+   * チェックリストの完了した項目（- [x]）を各リストブロックの末尾へ移動し、
+   * 未完了タスクを見やすく整理する。
+   */
+  const sortTasks = document.createElement('button');
+  sortTasks.type = 'button';
+  sortTasks.setAttribute('data-pkc-action', 'sort-tasks');
+  // ⚠ 文言は起きることで書く(user 指示 2026-08-21)
+  sortTasks.title = '完了したチェック項目を、リストの末尾へ移動して整理します';
+  const sortTasksLabel = document.createElement('span');
+  sortTasksLabel.setAttribute('data-pkc-field', 'label');
+  sortTasksLabel.textContent = '完了項目を末尾へ';
+  sortTasks.append(sortTasksLabel);
+  bar.append(sortTasks);
+
   const toggleReplace = document.createElement('button');
   toggleReplace.type = 'button';
   toggleReplace.setAttribute('data-pkc-action', 'toggle-replace');

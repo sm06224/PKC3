@@ -223,3 +223,30 @@ describe('表の編集アシスト(Tab / Shift+Tab)が編集欄に繋がって�
   });
 });
 
+describe('チェックリストの完了項目整理が押せる #1108', () => {
+  it('🔴 押すと本文の完了タスクが末尾へ移動する', () => {
+    const status: string[] = [];
+    const { root } = setup({ showStatus: (t: string) => status.push(t) });
+    const ta = editor(root, '- [x] 済\n- [ ] 未', 0);
+    root.querySelector<HTMLElement>('[data-pkc-action="sort-tasks"]')!.click();
+    expect(ta.value, '完了項目が末尾へ移動していない').toBe('- [ ] 未\n- [x] 済');
+    expect(status.join('')).toContain('移動しました');
+  });
+
+  it('🔴 もう揃っていたら、そう言う', () => {
+    const status: string[] = [];
+    const { root } = setup({ showStatus: (t: string) => status.push(t) });
+    editor(root, '- [ ] 未\n- [x] 済', 0);
+    root.querySelector<HTMLElement>('[data-pkc-action="sort-tasks"]')!.click();
+    expect(status.join('')).toContain('既に末尾に揃っています');
+  });
+
+  it('編集していないときは理由を出す', () => {
+    const { root, sent } = setup();
+    sent.length = 0;
+    root.querySelector<HTMLElement>('[data-pkc-action="sort-tasks"]')!.click();
+    expect(sent.some((a) => a.type === 'OP_FAILED')).toBe(true);
+  });
+});
+
+
