@@ -217,6 +217,28 @@ describe('タイマー(#279)', () => {
     expect(b.appends(), '編集を終えても書かれていない').toHaveLength(1);
   });
 
+  /**
+   * 🔴 **計っていたノートが編集中のノートと別なら、編集を待たずに書く**(#1081。user 裁定
+   *   2026-09-27「推奨で」)。⚠ 直す前は、どのノートを計っていても編集中は預かっていた。
+   * ⚠ ④ は**同じノート**を計って編集している回(こちらは今も預かる)── その対照である。
+   */
+  it('🔴 ④b 別のノートを編集中なら、預からずにその場で書く', async () => {
+    const b = bench();
+    b.service.start();
+    b.advance(60_000);
+    // 計っているのは「資料」(a)── 「別のノート」(b)を開いて編集に入る
+    b.d.dispatch({ type: 'SELECT_ENTRY', lid: 'b' });
+    b.d.dispatch({ type: 'BODY_LOADED', lid: 'b', body: '別の本文' });
+    b.d.dispatch({ type: 'START_EDIT' });
+    expect(b.d.getState().phase, '前提が崩れている ── 編集に入れていない').toBe('editing');
+    expect(b.d.getState().openBody?.lid, '前提が崩れている ── 編集中が別のノートでない').toBe('b');
+    b.service.stop('a');
+    await settle();
+    expect(b.appends(), '別のノートを編集中なのに、計っていたノートへ書けていない').toHaveLength(1);
+    expect(b.notices.join('\n'), '別のノートなのに預かった').not.toContain('預かりました');
+    expect(b.notices.join('\n')).toContain('書きました');
+  });
+
   it('🔴 ⑤ 捨てたら本文に触らない', async () => {
     const b = bench();
     b.service.start();

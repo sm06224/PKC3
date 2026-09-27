@@ -6438,7 +6438,20 @@ function reduceCore(
      *   後着の ack が閉じたり書き換えたりしない。
      */
     case 'FORCE_RELEASE_LOCK': {
-      const draft = action.discardDraft && state.phase === 'editing' && state.openBody;
+      /**
+       * 🔴 **捨てる下書きは、錠を握っていたノートの物だけ**(#1081)。
+       * ⚠ 直す前は `phase === 'editing'` だけを見ていた ── #1051 から、ノート A の編集中に
+       *   別のノート B への追記が錠を握れる(`APPEND_TO_ENTRY` は別のノートなら編集中も通す)。
+       *   B の書込が詰まって打ち切ると、**無関係な A の打ちかけが消えていた**。
+       * ⚠ いま `discardDraft: true` を撃つ口は無い(`binder.ts` の `force-release` は `false`
+       *   だけ)── 口を足した日に静かに消さないための門である。
+       */
+      const lockedLid = state.writeLock?.lid ?? state.tileWrite?.lid ?? null;
+      const draft =
+        action.discardDraft &&
+        state.phase === 'editing' &&
+        state.openBody &&
+        (lockedLid === null || lockedLid === state.openBody.lid);
       const section = state.sectionDraft;
       return {
         state: {

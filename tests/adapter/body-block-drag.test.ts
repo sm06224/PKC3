@@ -216,6 +216,98 @@ afterEach(() => {
   teardown = null;
 });
 
+/**
+ * 🔴 **留めた枠の口を、本文の面の口が隠さない**(#1081。実ブラウザで観測した形を組む)。
+ *
+ * ⚠ 置き場は入れ子になる ── 何も留めていない間は本文の面(`view-pane`)、留めると主の器
+ *   (`split-frame`)へ移るが、**面の listener と `painted` は残る**。主の編集に入ると
+ *   主の器が空になり(`renderEditor`)、直す前は面の listener が**子孫**で口を探して
+ *   留めた枠の口を拾い、古い本文で見て隠していた。
+ */
+describe('留めた枠の口 ── 本文の面の口に隠されない(#1081)', () => {
+  const MAIN = '# 主\n\n卵\n';
+  const SIDE = '# さき\n\n牛乳\n\nパン\n';
+  function nested(opts: { mainPainted?: boolean } = {}) {
+    document.body.textContent = '';
+    const mk = (attrs: Record<string, string>): HTMLElement => {
+      const el = document.createElement('div');
+      for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+      return el;
+    };
+    const pane = mk({ 'data-pkc-view-pane': 'detail' });
+    const main = mk({ 'data-pkc-region': 'split-frame', 'data-pkc-split-main': '' });
+    const mainHost = mk({ 'data-pkc-field': 'detail-body' });
+    mainHost.innerHTML = renderMarkdown(MAIN, { sourceLineAnchors: true });
+    main.append(mainHost);
+    const frame = mk({ 'data-pkc-region': 'split-frame', 'data-pkc-split-lid': 'n2' });
+    const frameHost = mk({ 'data-pkc-field': 'split-body' });
+    frameHost.innerHTML = renderMarkdown(SIDE, { sourceLineAnchors: true });
+    frame.append(frameHost);
+    pane.append(main, frame);
+    document.body.append(pane);
+    // ① 留める前:本文の面が主の本文で口を張った(置き場 = 面)
+    installBlockGrip(pane, mainHost, 'n1', MAIN);
+    // ② 留めた後:主の器と留めた枠が、それぞれ自分の口を張った
+    //    ⚠ `mainPainted: false` = 留めた直後で、主の器がまだ 1 度も描いていない間
+    if (opts.mainPainted !== false) installBlockGrip(main, mainHost, 'n1', MAIN);
+    installBlockGrip(frame, frameHost, 'n2', SIDE);
+    const own = (anchor: HTMLElement): HTMLElement | undefined =>
+      [...anchor.children].find(
+        (c): c is HTMLElement => c instanceof HTMLElement && c.getAttribute('data-pkc-field') === 'block-grip',
+      );
+    const hover = (el: Element): void => void el.dispatchEvent(new MouseEvent('pointerover', { bubbles: true }));
+    const visible = (): HTMLElement[] =>
+      [...document.querySelectorAll<HTMLElement>('[data-pkc-field="block-grip"]')].filter((g) => !g.hidden);
+    return { pane, main, mainHost, frame, frameHost, own, hover, visible };
+  }
+
+  it('🔴 主のノートの編集中(主の器が空になった後)も、留めた枠に乗せると留めた枠の口が出る', () => {
+    const t = nested();
+    // ③ 主の編集に入ると、主の器が空になる(`renderEditor` の `textContent = ''`)── 主の器の口も消える
+    t.main.textContent = '';
+    expect(t.own(t.main), '前提: 主の器の口が消えていない').toBeUndefined();
+    t.hover(t.frameHost.querySelector('p')!);
+    const frameGrip = t.own(t.frame)!;
+    expect(frameGrip.hidden, '留めた枠の口が出ない(本文の面が隠した)').toBe(false);
+    expect(frameGrip.getAttribute(BLOCK_LID_ATTR), '口が留めた枠のノートを指していない').toBe('n2');
+    expect(t.visible(), '口が 1 つではない').toHaveLength(1);
+  });
+
+  it('🔴 留めた後の主の器に乗せても、口は 1 つだけ(本文の面が二重に出さない)', () => {
+    const t = nested();
+    t.hover(t.mainHost.querySelector('p')!);
+    expect(t.visible(), '主の本文に乗せたら口が 2 つ出た').toHaveLength(1);
+    expect(t.own(t.main)!.hidden, '主の器の口が出ていない').toBe(false);
+  });
+
+  /**
+   * 🔴 **留めた直後、主の器がまだ描いていない間は、本文の面の口が主の枠の唯一の口**。
+   * ⚠ ここで本文の面まで退くと、**口が 1 つも出ない**(変異試験 M3 が SURVIVED で教えた ──
+   *   「内側の置き場が自分で描いているか」を見ずに退くと、この場面を誰も見ていなかった)。
+   */
+  it('🔴 留めた直後(主の器がまだ描いていない間)は、主の本文に乗せると本文の面の口が出る', () => {
+    const t = nested({ mainPainted: false });
+    expect(t.own(t.main), '前提: 主の器はまだ口を持っていない').toBeUndefined();
+    t.hover(t.mainHost.querySelector('p')!);
+    expect(t.visible(), '主の本文に乗せても口が 1 つも出ない').toHaveLength(1);
+    expect(t.own(t.pane)!.hidden, '本文の面の口が出ていない').toBe(false);
+  });
+
+  it('対照群: 留める前(置き場が本文の面だけ)は、本文の面の口が出る', () => {
+    document.body.textContent = '';
+    const pane = document.createElement('div');
+    pane.setAttribute('data-pkc-view-pane', 'detail');
+    const host = document.createElement('div');
+    host.innerHTML = renderMarkdown(MAIN, { sourceLineAnchors: true });
+    pane.append(host);
+    document.body.append(pane);
+    installBlockGrip(pane, host, 'n1', MAIN);
+    host.querySelector('p')!.dispatchEvent(new MouseEvent('pointerover', { bubbles: true }));
+    const g = [...pane.children].find((c) => c.getAttribute('data-pkc-field') === 'block-grip') as HTMLElement;
+    expect(g.hidden, '留めていないのに本文の面の口が出ない').toBe(false);
+  });
+});
+
 describe('掴む口(block-grip)', () => {
   it('🔴 乗せた塊の横に口が出て、範囲を生の body の行番号で載せる(段落 = 刻印 + frontmatter)', () => {
     const s = setup();

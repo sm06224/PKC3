@@ -74,8 +74,30 @@ export function grippedBlock(grip: Element): HTMLElement | null {
   return gripTargets.get(grip) ?? null;
 }
 
+/** 口の置き場になりうる面(`gripAnchorOf` が解決する 2 つ。同じ綴り)。 */
+const ANCHOR_SELECTOR = '[data-pkc-region="split-frame"], [data-pkc-view-pane="detail"]';
+
+/**
+ * 🔴 **この面が自分で置いた口 ── 直接の子だけ**(#1081)。
+ *
+ * ⚠ 直す前は `anchor.querySelector(...)` で**子孫**を探していた。置き場は入れ子になる ──
+ *   主の枠の置き場は、何も留めていない間は本文の面(`view-pane`)、留めると主の器
+ *   (`split-main` = `split-frame`)へ移るので、**面の listener と `painted` は古いまま残り**、
+ *   その面は留めた枠を丸ごと含む。主のノートの編集に入ると主の器の口が消える
+ *   (`renderEditor` が器を空にする)ので、面の listener の `querySelector` が
+ *   **留めた枠の口**を拾い、古い `painted`(主の本文)で `follow` して**隠していた** ──
+ *   留めた枠の listener が出した直後に、面の listener が消す(実ブラウザで観測)。
+ * 🔑 自分の口は自分の直下にしか置かない(`ensureGrip` の `append`)ので、直接の子で引く。
+ */
+function ownGripOf(anchor: HTMLElement): HTMLElement | null {
+  for (const child of anchor.children) {
+    if (child instanceof HTMLElement && child.getAttribute('data-pkc-field') === BLOCK_GRIP_FIELD) return child;
+  }
+  return null;
+}
+
 function ensureGrip(anchor: HTMLElement): HTMLElement {
-  let grip = anchor.querySelector<HTMLElement>(`[data-pkc-field="${BLOCK_GRIP_FIELD}"]`);
+  let grip = ownGripOf(anchor);
   if (grip === null) {
     grip = anchor.ownerDocument.createElement('button');
     (grip as HTMLButtonElement).type = 'button';
@@ -193,6 +215,18 @@ function follow(anchor: HTMLElement, grip: HTMLElement, target: Element | null):
   const p = painted.get(anchor);
   if (p === undefined || target === null) return hide(grip);
   if (target === grip || grip.contains(target)) return; // 口の上に居る ── そのまま
+  /**
+   * 🔴 **乗せた所が、この面の内側の別の置き場(留めた枠 / 留めた後の主の器)に在り、そちらが
+   *   自分の口を持っているなら、そちらの仕事 ── 退く**(#1081)。
+   * ⚠ 本文の面(`view-pane`)の listener は、枠を留めた後も残っていて、内側の枠の上の
+   *   pointerover も受ける。その `painted` は留める前の主の本文なので、放っておくと
+   *   内側の口と**二重に**自分の口を出す(実ブラウザで観測:主の枠の塊を 1 つ動かした後の
+   *   hover で 2 個)。
+   * ⚠ `painted.has(near)` で見る ── 留めた直後で主の器がまだ 1 度も描いていない間は、
+   *   この面の口が主の枠の唯一の口なので、そこで退くと口が消える。
+   */
+  const near = target.closest<HTMLElement>(ANCHOR_SELECTOR);
+  if (near !== null && near !== anchor && anchor.contains(near) && painted.has(near)) return hide(grip);
   // 板の面では出さない(板は自分の掴み ⠿ を持つ ── 2 つ並ぶと何が動くか読めない)
   if (p.host.classList.contains('pkc-board-host')) return hide(grip);
   const block = topBlockOf(p.host, target);
@@ -262,17 +296,18 @@ export function installBlockGrip(region: HTMLElement, host: HTMLElement, lid: st
   painted.set(anchor, { host, lid, fmBody: bodyBelowFrontmatter(body), fm: frontmatterLineCount(body) });
   const grip = ensureGrip(anchor);
   if (first) {
+    // ⚠ 触るのは**自分の口だけ**(`ownGripOf`)── 子孫で探すと、留めた枠の口を拾って隠す(#1081)
     anchor.addEventListener('pointerover', (e) => {
-      const g = anchor.querySelector<HTMLElement>(`[data-pkc-field="${BLOCK_GRIP_FIELD}"]`);
+      const g = ownGripOf(anchor);
       if (g !== null) follow(anchor, g, e.target as Element | null);
     });
     anchor.addEventListener('pointerleave', () => {
-      const g = anchor.querySelector<HTMLElement>(`[data-pkc-field="${BLOCK_GRIP_FIELD}"]`);
+      const g = ownGripOf(anchor);
       if (g !== null) hide(g);
     });
     // ⚠ 落とした後は塊が動いているので、古い位置に口を残さない
     anchor.addEventListener('dragend', () => {
-      const g = anchor.querySelector<HTMLElement>(`[data-pkc-field="${BLOCK_GRIP_FIELD}"]`);
+      const g = ownGripOf(anchor);
       if (g !== null) hide(g);
     });
   }

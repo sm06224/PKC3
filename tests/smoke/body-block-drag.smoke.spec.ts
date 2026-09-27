@@ -451,5 +451,36 @@ test('🔴 横に留めた枠へファイルを落とすと、その枠のノー
     .toEqual(['留める側', '牛乳', 'パン']);
   await expect(editor, '戻したら編集欄が閉じた(打っていた字を失う)').toBeVisible();
 
+  /**
+   * 🔴 **主のノートの編集中も、留めた枠の塊を掴んで動かし、「元に戻す」で戻せる**(#1081)。
+   *
+   * ⚠ 直す前は、編集中に留めた枠の段落へ乗せても ⠿ が出なかった ── 本文の面に張った
+   *   口の listener が**子孫**で口を探し、留めた枠の口を拾って隠していた(`block-grip.ts`)。
+   * 🔑 ここでしか見られないもの:口が**本当に 1 つだけ**出て、実マウスで掴めて、その間も
+   *   **編集欄が閉じない**こと。
+   */
+  await page.locator(`${SIDE} > p`).first().hover();
+  const grip = page.locator('[data-pkc-field="block-grip"]:visible');
+  await expect(grip, '編集中に、留めた枠の塊へ乗せても口が出ない').toHaveCount(1);
+  const g = (await grip.boundingBox())!;
+  const bread = page.locator(`${SIDE} > p`).last();
+  const b = (await bread.boundingBox())!;
+  await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(g.x + 40, g.y + 40, { steps: 4 });
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height * 0.8, { steps: 8 });
+  await expect(bread, '留めた枠の落とし先に「後」の線が出ない').toHaveAttribute('data-pkc-drop-edge', 'after');
+  await page.mouse.up();
+  await expect
+    .poll(() => kinds(SIDE), { timeout: 8000, message: '編集中に留めた枠の塊が動かない' })
+    .toEqual(['留める側', 'パン', '牛乳']);
+  await expect(undo, '動かした知らせの隣に「元に戻す」が出ない').toBeVisible();
+  await expect(undo, '押すと別の物が戻る').toHaveAttribute('data-pkc-action', 'undo-move');
+  await clickReal(page, '[data-pkc-field="status-undo"]');
+  await expect
+    .poll(() => kinds(SIDE), { timeout: 8000, message: '編集中に「移動を元に戻す」を押しても戻らない' })
+    .toEqual(['留める側', '牛乳', 'パン']);
+  await expect(editor, '塊を動かしたら編集欄が閉じた(打っていた字を失う)').toBeVisible();
+
   expect(errors, 'pageerror が出た').toEqual([]);
 });

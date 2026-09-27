@@ -207,6 +207,11 @@ export const CHAPTER_WINDOW_TEXT = {
   readOnly: '読むだけ',
   /** 乗せたときの説明。⚠ 出口はボタンの字(`jump`)で言う ── 無いボタンを探させない。 */
   readOnlyHint: 'このウィンドウでは書けません。直すときは「元のウィンドウで開く」を押してください。',
+  /**
+   * 元のウィンドウを閉じた後の説明(#1081 の動線レビュー)。⚠ そのとき「元のウィンドウで開く」は
+   *   消える(`markChapterWindowOrphaned`)ので、ボタンの字で案内すると**行き止まり**になる。
+   */
+  readOnlyOrphanHint: 'このウィンドウでは書けません。元のウィンドウを閉じたため、直すときは PKC でこのノートを開き直してください。',
   offChapter: 'この章の外を指すリンクです(元のウィンドウで見てください)',
 } as const;
 
@@ -332,6 +337,13 @@ export function markChapterWindowOrphaned(win: Window): void {
       if (el.tagName === 'BUTTON') el.remove();
       else el.removeAttribute('data-pkc-action');
     }
+    /**
+     * 🔴 **「読むだけ」の説明も差し替える**(#1081 の動線レビュー)── 「元のウィンドウで開く」を
+     *   押してください、のままだと、**いま消したボタン**を探させる(行き止まり)。
+     */
+    body
+      .querySelector(`[data-pkc-field="${CHAPTER_READONLY_FIELD}"]`)
+      ?.setAttribute('title', CHAPTER_WINDOW_TEXT.readOnlyOrphanHint);
   } catch {
     // 触れない窓 ── 言えない
   }

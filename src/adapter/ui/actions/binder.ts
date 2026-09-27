@@ -5190,7 +5190,17 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'schedule-quick-add': (dispatcher, target, services) => {
     const st = dispatcher.getState();
-    if (st.phase !== 'ready') {
+    /**
+     * 🔴 **編集中でも、今日のノートが別のノートなら足せる**(#1081。user 裁定 2026-09-27「推奨で」)。
+     * ⚠ 直す前は `phase !== 'ready'` で**丸ごと**断っていた ── 行き先(今日のノート)は
+     *   編集中のノートと別のことが多いのに、C6 / #1043 の「編集中でも別のノートは止めない」から
+     *   外れていた。
+     * 🔑 断るのは 3 つ:①読み込み中・保存に失敗して止まっている(ここ)②今日のノートが
+     *   **まだ無い**のに編集中(作る `CREATE_ENTRY` は編集中に通らない ── 下)③今日のノートが
+     *   **編集中のノート自身** / 章の欄が開いている / 書込中(reducer の `APPEND_TO_ENTRY` が
+     *   同じ門 `bodyWriteBlockReason` で理由を出して断る)。
+     */
+    if (st.phase !== 'ready' && st.phase !== 'editing') {
       dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}足してください` });
       return;
     }
@@ -5210,6 +5220,19 @@ const ACTIONS: Record<string, ActionHandler> = {
     const title = todayNoteTitle(new Date());
     let lid = findTodayNote(st.entryMetas.values(), title)?.lid ?? null;
     if (lid === null) {
+      /**
+       * ⚠ **作るのは読む画面のときだけ** ── `CREATE_ENTRY` は編集中に通らない(通すと編集の
+       *   状態を置き換える)。理由も「今日のノートがまだ無いから」と言う ── 同じ「足す」が
+       *   今日のノートの有無で通ったり断られたりするので、違いが読めるようにする。
+       * ⚠ 断った回は欄を空にしない(下の `return` は欄に触らない)。
+       */
+      if (st.phase === 'editing') {
+        dispatcher.dispatch({
+          type: 'OP_FAILED',
+          error: `今日のノートがまだ無いので、${phaseBlockReason('editing')}足してください`,
+        });
+        return;
+      }
       lid = generateLid();
       dispatcher.dispatch({
         type: 'CREATE_ENTRY',
