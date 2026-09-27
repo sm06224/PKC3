@@ -7116,7 +7116,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 「何枚目か」は**描いた側の並び**から数える ── 器に番号を焼き込むと、
    * 図を 1 個消したときに番号が飛ぶ
    */
-  'export-diagram': (dispatcher, target, services, root) => {
+  'export-diagram': (_dispatcher, target, services, root) => {
     const host = target.closest<HTMLElement>('[data-pkc-mermaid-src]');
     const source = host?.getAttribute('data-pkc-mermaid-src');
     if (!host || !source) return;
@@ -7130,8 +7130,9 @@ const ACTIONS: Record<string, ActionHandler> = {
     const burned = Number(host.getAttribute(CHAPTER_DIAGRAM_INDEX_ATTR) ?? NaN);
     const all = [...root.querySelectorAll('[data-pkc-mermaid-src]')];
     const index = Number.isInteger(burned) && burned >= 0 ? burned : Math.max(0, all.indexOf(host));
-    const st = dispatcher.getState();
-    const lid = lidOfNode(host, st.selectedLid);
+    // ⚠ 引けなければ `undefined` ── 本体のノートへ落とすのは受け手(`exportDiagram`)の仕事
+    //    (この受け手は選択を読まない ── 押した図の持ち主だけを運ぶ)
+    const lid = lidOfNode(host, null);
     const done = services.exportDiagram?.(source, index, lid ?? undefined);
     // 🔴 **無言で待たせない**(P8 段⑬ review M-3)。ベクタは原文から焼き直すので、
     //    mermaid 本体の読み込みを含めて秒が掛かる。何も起きないように見えると
