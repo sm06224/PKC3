@@ -50,6 +50,7 @@ import {
   formatCalcResult,
 } from '@features/markdown/inline-calc';
 import { quoteOnEnter } from '@features/markdown/quote-assist';
+import { tableOnTab } from '@features/markdown/table-assist';
 import { renumberLists } from '@features/markdown/list-renumber';
 import { stripDialect } from '@features/markdown/strip-dialect';
 import {
@@ -11221,6 +11222,34 @@ export function bindActions(
      *   (キーボードだけで使う人の動線を 1 つ殺す)。
      * ⚠ `isComposing` は上で弾き済み ── 変換中の `Tab` は確定に使われる。
      */
+    /**
+     * 🔴 表の編集アシスト (Tab / Shift+Tab)(#1093)。
+     * 表のセル内ならセル移動や行追加を行う。
+     * ⚠ 表の外なら通常の短縮語・印移動・通常の焦点移動へ通す。
+     */
+    if (
+      (field === 'editor-body' || field === 'row-source') &&
+      ke.key === 'Tab' &&
+      !ke.ctrlKey &&
+      !ke.altKey &&
+      !ke.metaKey &&
+      ke.target instanceof HTMLTextAreaElement
+    ) {
+      const ta = ke.target;
+      const res = tableOnTab(ta.value, ta.selectionStart, ke.shiftKey);
+      if (res !== null) {
+        ke.preventDefault();
+        if (res.kind === 'insert-row') {
+          ta.setSelectionRange(res.insertPos, res.insertPos);
+          insertText(ta, res.text);
+          ta.setSelectionRange(res.start, res.end);
+        } else {
+          ta.setSelectionRange(res.start, res.end);
+        }
+        return;
+      }
+    }
+
     if (field === 'editor-body' && ke.key === 'Tab' && !ke.shiftKey) {
       const ta = ke.target as HTMLTextAreaElement;
       const items = dispatcher.getState().snippetScan?.items ?? [];
