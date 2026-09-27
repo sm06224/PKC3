@@ -7572,8 +7572,11 @@ function reduceCore(
       };
     }
     case 'CREATE_ENTRY': {
-      // ready 限定。lid 衝突は作らない(binder 生成の単調 lid が壊れた場合の防波堤)
-      if (state.phase !== 'ready') return { state, events: [] };
+      // ready 限定(ただし keepSelection 時は編集中でも編集状態を保ったまま作成可能 ── #1085)。
+      // lid 衝突は作らない(binder 生成の単調 lid が壊れた場合の防波堤)
+      // 🔑 `keepSelection` は「読んでいる物を退かさない」なので、編集にも入らない
+      const keep = action.keepSelection === true;
+      if (state.phase !== 'ready' && !(state.phase === 'editing' && keep)) return { state, events: [] };
       if (state.entryMetas.has(action.lid)) {
         return {
           state: { ...state, error: `create: lid collision (${action.lid})` },
@@ -7581,8 +7584,6 @@ function reduceCore(
         };
       }
       const body = action.body ?? seedBodyFor(action.archetype);
-      // 🔑 `keepSelection` は「読んでいる物を退かさない」なので、編集にも入らない
-      const keep = action.keepSelection === true;
       const wantsEdit = action.edit !== false && !keep;
       const ext = extractMeta(action.archetype, body);
       const lastLid = state.order[state.order.length - 1];
@@ -7651,7 +7652,7 @@ function reduceCore(
         state: {
           ...state,
           relations,
-          phase: wantsEdit ? 'editing' : 'ready', // 既定は作成 → 即編集(PKC2 の遷移)
+          phase: keep ? state.phase : wantsEdit ? 'editing' : 'ready', // keepSelection 時は相を維持(#1085)、既定は作成 → 即編集(PKC2 の遷移)
           entryMetas: new Map(state.entryMetas).set(action.lid, meta),
           order: [...state.order, action.lid],
           selectedLid: keep ? state.selectedLid : action.lid,

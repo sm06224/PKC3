@@ -254,6 +254,8 @@ export async function attachOne(
     title: item.name,
     body: attachmentBody({ name: item.name, mime, size: item.size, assetKey, hash }),
     edit: false, // 添付は editor に入らない(PKC2 の silent attach と同じ)
+    // 🔴 編集中は選択も編集も動かさずに作る(#1085)
+    keepSelection: dispatcher.getState().phase === 'editing',
   });
   // 🔴 **作れたことを確かめてから「作れた」と言う。** `CREATE_ENTRY` の reducer は
   //    `phase !== 'ready'` を**黙って捨てる** ── 確かめないと、Office の保存を
@@ -505,7 +507,8 @@ export async function attachFiles(
   };
 
   const phase = dispatcher.getState().phase;
-  if (phase === 'ready') {
+  // 🔴 落とした先が横に留めた別のノート(elsewhere)なら、編集中でも待たずに入る(#1085)
+  if (phase === 'ready' || (phase === 'editing' && elsewhere)) {
     // ⚠ **待ってから返す** ── 呼び側(`withAssetGate`)は取込と整理を排他している
     await run();
     return;
@@ -548,7 +551,7 @@ export async function attachFiles(
    */
   if (place !== undefined && !elsewhere) place.at = null;
   // 🔴 門の中で走らせる(#724 ⑤)── `queue` が走らせる時点では呼び側の鎖は解けている
-  queue.push(() => deps.gate(run));
+  queue.push(() => deps.gate(run), into.lid ?? undefined);
   const what = files.length === 1 ? `「${files[0]!.name}」` : `${files.length} 件`;
   /**
    * 🔴 **線を出した所に入らない回は、その場でそう言う**(#684 ㋑、着地前の
