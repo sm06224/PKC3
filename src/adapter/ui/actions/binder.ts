@@ -235,6 +235,7 @@ import {
   contextMenuOpen,
   openContextMenu,
 } from '../render/context-menu';
+import { setupLinkPreview, closeLinkPreview } from '../render/link-preview';
 import { chordHint, HINT_BLOCKED } from '../render/shortcut-hint';
 import { TARGET_LID_ATTR } from '../render/target-lid';
 import { sectionBoxText, SECTION_BOX_INPUT_FIELD, SECTION_BOX_REGION } from '../render/section-box';
@@ -14525,14 +14526,17 @@ export function bindActions(
   listen(root, 'focusout', onRenameBlur);
   listen(doc, 'keydown', onShortcut);
   listen(root, 'keydown', onKeydown);
+  const teardownLinkPreview = setupLinkPreview(root, dispatcher, services);
   return () => {
     /**
      * 🔑 **張った順に、張った物だけを外す**(#876)── 手で並べ直さない。
      * ⚠ かつてここは 19 行の `removeEventListener` で、**7 件足りなかった**。
      */
+    teardownLinkPreview();
     for (const off of undo) off();
     undo.length = 0;
     closeContextMenu(root);
+    closeLinkPreview(root);
     longPress.dispose();
   };
 }

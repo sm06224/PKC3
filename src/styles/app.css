@@ -8334,3 +8334,90 @@ h3[data-pkc-section] {
 [data-pkc-field='stack-link-move'] button:disabled {
   opacity: 0.35;
 }
+
+/* 🔴 **内部リンクのホバープレビューカード**(#1105)── ノートへのリンクにマウスを重ねたとき、
+ * その場で内容をチラ見できる浮遊カード。
+ * ⚠ 画面からはみ出さないよう position は fixed、z-index は高さを確保。
+ */
+.pkc-link-preview-card {
+  position: fixed;
+  z-index: 1000;
+  width: 300px;
+  max-width: calc(100vw - 16px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: var(--s2) var(--s3);
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--fg);
+  pointer-events: auto;
+  user-select: text;
+  box-sizing: border-box;
+}
+
+.pkc-link-preview-header {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin-bottom: var(--s1);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.pkc-link-preview-archetype {
+  font-weight: 600;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  color: var(--fg);
+  text-transform: uppercase;
+  font-size: 10px;
+}
+
+.pkc-link-preview-date,
+.pkc-link-preview-chars {
+  color: var(--muted);
+}
+
+.pkc-link-preview-title {
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: var(--s1);
+  color: var(--fg);
+  word-break: break-word;
+}
+
+.pkc-link-preview-body {
+  color: var(--muted);
+  font-size: 12px;
+  max-height: 120px;
+  overflow: hidden;
+  word-break: break-word;
+  line-height: 1.45;
+}
+
+.pkc-link-preview-loading {
+  font-style: italic;
+  color: var(--muted);
+}
+
+.pkc-link-preview-empty-hint {
+  font-style: italic;
+  color: var(--muted);
+  opacity: 0.8;
+}
+
+.pkc-link-preview-not-found {
+  color: var(--danger, #d73a49);
+  font-size: 12px;
+  padding: var(--s1) 0;
+}
+
+.pkc-link-preview-foreign-desc {
+  color: var(--muted);
+  font-size: 12px;
+  padding: var(--s1) 0;
+}
+
