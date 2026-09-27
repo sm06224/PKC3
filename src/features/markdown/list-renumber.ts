@@ -41,7 +41,12 @@ function readItem(line: string): { indent: string; sep: string; rest: string } |
  * @returns 振り直した本文。⚠ 番号付きリストが 1 つも無ければ**元のまま**
  */
 export function renumberLists(body: string, mode: ListNumberMode = 'sequential'): string {
-  const lines = body.split('\n');
+  // 🔴 高速化: 番号付きリストの記号が本文に無ければ、行配列化・走査を行わずに即時脱出 (#1110)
+  if (body === '' || !/\d+[.)]/.test(body)) return body;
+
+  const isCrlf = body.includes('\r\n');
+  const eol = isCrlf ? '\r\n' : '\n';
+  const lines = isCrlf ? body.split('\r\n') : body.split('\n');
   const out: string[] = [];
   /** 字下げの幅 → 次に振る番号。⚠ 深い段から抜けたら捨てる。 */
   let counters = new Map<number, number>();
@@ -78,5 +83,5 @@ export function renumberLists(body: string, mode: ListNumberMode = 'sequential')
     counters.set(depth, (counters.get(depth) ?? 0) + 1);
     out.push(`${item.indent}${n}${item.sep}${item.rest}`);
   }
-  return out.join('\n');
+  return out.join(eol);
 }
