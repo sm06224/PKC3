@@ -32,7 +32,7 @@ import { readTags, withTagResult } from '../flavor/tags';
 import { acceptsExternalImage, rewriteAdopted } from '../asset/inline-url-adopt';
 import { DELIMITER, csvEscapeField, parseCsv, type CsvPositions } from './csv-table';
 import { parseRenderableFence } from './markdown-render';
-import { containerAtLine, quoteLead } from './source-blocks';
+import { containerAtLine, quoteLead, splitLines } from './source-blocks';
 import { cutLines, insertLines, moveLines, type InsertAnchor } from './line-move';
 import { gfmCellText } from './html-to-markdown';
 import {
@@ -395,6 +395,32 @@ export type BodyRewrite =
  */
 const LINK_LINE = /^\s*(?:[-*+]|\d+[.)])\s+\[[^\]]*\]\(entry:[A-Za-z0-9_-]+\)/;
 
+/** 🔴 本文の改行コード（CRLF or LF）を検知する(#1075, #1097)。 */
+function detectEol(text: string): '\r\n' | '\n' {
+  return text.includes('\r\n') ? '\r\n' : '\n';
+}
+
+/**
+ * 🔴 **本文から指定行の字を取り出す**(#1097)。
+ *
+ * ⚠ `body.split('\n')` は全文を配列化するため、長大なノートで 1 行だけ
+ *   調べたい場合に大きなメモリ・CPU 負荷を生む。
+ */
+function getLine(body: string, lineIndex: number): string | undefined {
+  if (!Number.isInteger(lineIndex) || lineIndex < 0) return undefined;
+  let start = 0;
+  let cur = 0;
+  while (cur < lineIndex) {
+    const idx = body.indexOf('\n', start);
+    if (idx === -1) return undefined;
+    start = idx + 1;
+    cur += 1;
+  }
+  const end = body.indexOf('\n', start);
+  const raw = end === -1 ? body.slice(start) : body.slice(start, end);
+  return raw.endsWith('\r') ? raw.slice(0, -1) : raw;
+}
+
 /**
  * 🔴 **リンク行を隣と入れ替える**(#633 段④)── 2 行以外は 1 byte も動かさない。
  *
@@ -408,7 +434,7 @@ function moveLinkLine(
 ): string | null {
   const fm = frontmatterLineCount(body);
   if (!Number.isInteger(rw.line) || rw.line < fm) return null;
-  const lines = body.split('\n');
+  const lines = splitLines(body);
   const cur = lines[rw.line];
   if (cur === undefined || cur !== rw.openLine) return null;
   if (!LINK_LINE.test(cur)) return null;
@@ -419,7 +445,8 @@ function moveLinkLine(
   if (!LINK_LINE.test(other) || insideFence(lines, fm, to)) return body;
   lines[rw.line] = other;
   lines[to] = cur;
-  return lines.join('\n');
+  const eol = detectEol(body);
+  return lines.join(eol);
 }
 
 /**
@@ -559,7 +586,7 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
    *   (`REQUEST_BLOCK_HANDOFF`。必ず「入れてから」)、ここはその ack を当て直すだけである。
    */
   if (rewrite.kind === 'cut-lines') return cutLines(body, rewrite)?.body ?? null;
-  const lines = body.split('\n');
+  const lines = splitLines(body);
   const line = lines[rewrite.line];
   if (line === undefined) return null;
   const m = TASK_LINE.exec(line);
@@ -572,7 +599,8 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
    */
   const at = m[1]!.length + 1; // `[` の次
   lines[rewrite.line] = line.slice(0, at) + (checked ? ' ' : 'x') + line.slice(at + 1);
-  return lines.join('\n');
+  const eol = detectEol(body);
+  return lines.join(eol);
 }
 
 /**
@@ -596,7 +624,7 @@ function rewriteLineDate(
     repeat?: RepeatUnit | null;
   },
 ): string | null {
-  const lines = body.split('\n');
+  const lines = splitLines(body);
   const line = lines[rewrite.line];
   if (line === undefined) return null;
   if (!TASK_LINE.test(line)) return null;
@@ -658,7 +686,8 @@ function rewriteLineDate(
   }
   if (next === line) return null;
   lines[rewrite.line] = next;
-  return lines.join('\n');
+  const eol = detectEol(body);
+  return lines.join(eol);
 }
 
 /**
@@ -674,7 +703,7 @@ function materializeRepeat(
   body: string,
   rewrite: { line: number; date: string },
 ): string | null {
-  const lines = body.split('\n');
+  const lines = splitLines(body);
   const line = lines[rewrite.line];
   if (line === undefined) return null;
   const m = TASK_LINE.exec(line);
@@ -706,7 +735,8 @@ function materializeRepeat(
    */
   if (lines.includes(done)) return null;
   lines.splice(rewrite.line + 1, 0, done);
-  return lines.join('\n');
+  const eol = detectEol(body);
+  return lines.join(eol);
 }
 
 /**
@@ -724,7 +754,7 @@ function moveRepeatOccurrence(
   body: string,
   rewrite: { line: number; from: string; to: string },
 ): string | null {
-  const lines = body.split('\n');
+  const lines = splitLines(body);
   const line = lines[rewrite.line];
   if (line === undefined) return null;
   if (!TASK_LINE.test(line)) return null;
@@ -746,12 +776,14 @@ function moveRepeatOccurrence(
     line.slice(found.end);
   if (lines.includes(moved)) return null;
   lines.splice(rewrite.line + 1, 0, moved);
-  return lines.join('\n');
+  const eol = detectEol(body);
+  return lines.join(eol);
 }
 
 /** その行がチェック項目か(呼び側の事前判定用)。 */
 export function isTaskLine(body: string, line: number): boolean {
-  return TASK_LINE.test(body.split('\n')[line] ?? '');
+  const lineText = getLine(body, line);
+  return lineText !== undefined && TASK_LINE.test(lineText);
 }
 
 
@@ -782,6 +814,7 @@ export function isTaskLine(body: string, line: number): boolean {
 function rewriteMdCell(
   lines: string[],
   rewrite: { line: number; col: number; value: string },
+  eol = '\n',
 ): string | null {
   /**
    * 🔑 **門は `mdCellSpanAt` の 1 本だけ**(#747)。⚠ ここに 2 本目を書かない ──
@@ -796,16 +829,17 @@ function rewriteMdCell(
   // ⚠ 同じ字なら書かない(呼び側が「書かない」を選べる ── `csv-cell` と同じ)
   if (line.slice(span.start, span.end) === next) return null;
   lines[rewrite.line] = line.slice(0, span.start) + next + line.slice(span.end);
-  return lines.join('\n');
+  return lines.join(eol);
 }
 
 function rewriteCsvCell(
   body: string,
   rewrite: { line: number; col: number; value: string },
 ): string | null {
-  const lines = body.split('\n');
+  const lines = splitLines(body);
   const line = lines[rewrite.line];
   if (line === undefined) return null;
+  const eol = detectEol(body);
   const table = csvTableAt(body, rewrite.line);
   /**
    * 🔴 **markdown の表の升も、同じ口で打てる**(#708 段④)。
@@ -817,7 +851,7 @@ function rewriteCsvCell(
    * ⚠ 升の数が見出しより少ない行では、読み手が**原文を持たない空の升**で埋める ──
    *   そこは `mdCellSpan` が `null` を返すので、無い物を書き換えない。
    */
-  if (table === null) return rewriteMdCell(lines, rewrite);
+  if (table === null) return rewriteMdCell(lines, rewrite, eol);
   const { delimiter } = table;
   /**
    * 🔴 **引用の前置きは升ではない**(#775)── `> 品名,数` の `> ` を剥がしてから
@@ -859,12 +893,12 @@ function rewriteCsvCell(
     // ⚠ いまの区切りの数は `len - 1`(空行は 0)── そこから `col` 個まで足す
     const gap = delimiter.repeat(rewrite.col - Math.max(spans.length - 1, 0));
     lines[rewrite.line] = head + text + gap + next;
-    return lines.join('\n');
+    return lines.join(eol);
   }
   // ⚠ 範囲は**前置きを剥がした字**の中の位置なので、書き戻しも `text` の上で行う
   if (text.slice(span.start, span.end) === next) return null;
   lines[rewrite.line] = head + text.slice(0, span.start) + next + text.slice(span.end);
-  return lines.join('\n');
+  return lines.join(eol);
 }
 
 /**
@@ -926,7 +960,7 @@ function rewriteTableFormat(
   if (tableConvertRefusal(at, rewrite.to) !== null) return null;
   const text = convertTable(at, rewrite.to);
   if (text === null) return null;
-  const lines = body.split('\n');
+  const lines = splitLines(body);
   /**
    * 🔴 **引用(`>`)の中の表は、前置きを付け直して差し戻す**(#743)。
    *
@@ -941,9 +975,10 @@ function rewriteTableFormat(
   lines.splice(
     at.start,
     at.end - at.start + 1,
-    ...text.split('\n').map((l) => at.quoteLead + l),
+    ...splitLines(text).map((l) => at.quoteLead + l),
   );
-  return lines.join('\n');
+  const eol = detectEol(body);
+  return lines.join(eol);
 }
 
 /**
@@ -1006,7 +1041,8 @@ function rewriteCsvShape(
 ): string | null {
   const table = csvTableAt(body, rewrite.line);
   if (table === null) return null;
-  const lines = body.split('\n');
+  const lines = splitLines(body);
+  const eol = detectEol(body);
   /**
    * 🔴 **引用の前置きを剥がしてから読む**(#775)── `rewriteCsvCell` と同じ作法。
    * ⚠ 剥がさずに `trim()` すると、引用の中の**空の行**(`>`)が「空でない」と読まれ、
@@ -1040,7 +1076,7 @@ function rewriteCsvShape(
       // ⚠ **最後の 1 行は消さない**(表ごと消えて CSV の原文に放り出される)
       if (rows.length <= 1) return null;
       lines.splice(rewrite.line, 1);
-      return lines.join('\n');
+      return lines.join(eol);
     }
     // 足すのは**押した行の下**。⚠ 幅は押した行に揃える(でこぼこにしない)
     // ⚠ 空行から足したら**空行**が入る(「押した行に揃える」の素直な帰結。#780)
@@ -1057,7 +1093,7 @@ function rewriteCsvShape(
      * 🔑 0 で止める ── 区切りが 0 個 = 空の行が入る(「押した行に揃える」の素直な帰結)。
      */
     lines.splice(rewrite.line + 1, 0, prefix + table.delimiter.repeat(Math.max(cells.length - 1, 0)));
-    return lines.join('\n');
+    return lines.join(eol);
   }
 
   /**
@@ -1116,7 +1152,7 @@ function rewriteCsvShape(
       lines[at] = line.slice(0, off + cut.start) + line.slice(off + cut.end);
     }
   }
-  return lines.join('\n');
+  return lines.join(eol);
 }
 
 /**

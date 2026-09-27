@@ -909,3 +909,51 @@ describe('刻みだけ付け替える(#855 段 0 の 3 つ目)', () => {
     );
   });
 });
+
+describe('改行コードの保持と isTaskLine の高速走査(#1097)', () => {
+  it('🔴 isTaskLine が CRLF でも LF でも正しく行を判定する', () => {
+    const docLf = '# 題\n- [ ] タスク 1\n本文\n- [x] タスク 2';
+    expect(isTaskLine(docLf, 0)).toBe(false);
+    expect(isTaskLine(docLf, 1)).toBe(true);
+    expect(isTaskLine(docLf, 2)).toBe(false);
+    expect(isTaskLine(docLf, 3)).toBe(true);
+    expect(isTaskLine(docLf, 99)).toBe(false);
+    expect(isTaskLine(docLf, -1)).toBe(false);
+
+    const docCrlf = '# 題\r\n- [ ] タスク 1\r\n本文\r\n- [x] タスク 2';
+    expect(isTaskLine(docCrlf, 0)).toBe(false);
+    expect(isTaskLine(docCrlf, 1)).toBe(true);
+    expect(isTaskLine(docCrlf, 2)).toBe(false);
+    expect(isTaskLine(docCrlf, 3)).toBe(true);
+  });
+
+  it('🔴 CRLF 改行のノートでタスク切り替え時に CRLF が保持される', () => {
+    const crlf = '- [ ] タスク A\r\n- [ ] タスク B\r\n';
+    const rewritten = applyBodyRewrite(crlf, { kind: 'task', line: 0 });
+    expect(rewritten).toBe('- [x] タスク A\r\n- [ ] タスク B\r\n');
+  });
+
+  it('🔴 CRLF 改行のノートで日付更新時に CRLF が保持される', () => {
+    const crlf = '- [ ] タスク @2026-09-01\r\n- [ ] 別のタスク\r\n';
+    const rewritten = applyBodyRewrite(crlf, { kind: 'line-date', line: 0, date: '2026-09-02' });
+    expect(rewritten).toBe('- [ ] タスク @2026-09-02\r\n- [ ] 別のタスク\r\n');
+  });
+
+  it('🔴 CRLF 改行のノートで CSV セル更新時に CRLF が保持される', () => {
+    const crlf = '```csv\r\na,b\r\n1,2\r\n```\r\n';
+    const rewritten = applyBodyRewrite(crlf, { kind: 'csv-cell', line: 2, col: 1, value: '99' });
+    expect(rewritten).toBe('```csv\r\na,b\r\n1,99\r\n```\r\n');
+  });
+
+  it('🔴 CRLF 改行のノートでリンク行入れ替え時に CRLF が保持される', () => {
+    const crlf = '- [ノート1](entry:lid-1)\r\n- [ノート2](entry:lid-2)\r\n';
+    const rewritten = applyBodyRewrite(crlf, {
+      kind: 'link-move',
+      line: 0,
+      openLine: '- [ノート1](entry:lid-1)',
+      dir: 'down',
+    });
+    expect(rewritten).toBe('- [ノート2](entry:lid-2)\r\n- [ノート1](entry:lid-1)\r\n');
+  });
+});
+
