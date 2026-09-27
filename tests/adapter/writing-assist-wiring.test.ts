@@ -175,3 +175,51 @@ describe('素の Markdown で写せる #396', () => {
     expect(sent.some((a) => a.type === 'OP_FAILED')).toBe(true);
   });
 });
+
+describe('表の編集アシスト(Tab / Shift+Tab)が編集欄に繋がっている #1093', () => {
+  const tab = (ta: HTMLTextAreaElement, over: Partial<KeyboardEventInit> = {}): void => {
+    ta.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true, ...over }),
+    );
+  };
+
+  it('🔴 表のセルで Tab を押すと、次のセルへ移動して内容を選択する', () => {
+    const { root } = setup();
+    const text = '| 列A | 列B |\n|---|---|\n| 1 | 2 |';
+    const ta = editor(root, text, 2); // '列A' の位置
+    tab(ta);
+    expect(ta.selectionStart).toBe(text.indexOf('列B'));
+    expect(ta.selectionEnd).toBe(text.indexOf('列B') + 2);
+  });
+
+  it('🔴 表のセルで Shift+Tab を押すと、前のセルへ戻る', () => {
+    const { root } = setup();
+    const text = '| 列A | 列B |\n|---|---|\n| 1 | 2 |';
+    const posB = text.indexOf('列B');
+    const ta = editor(root, text, posB);
+    tab(ta, { shiftKey: true });
+    expect(ta.selectionStart).toBe(text.indexOf('列A'));
+    expect(ta.selectionEnd).toBe(text.indexOf('列A') + 2);
+  });
+
+  it('🔴 表の最終セルで Tab を押すと、新しい空行が追加されてその第1セルへ移る', () => {
+    const { root } = setup();
+    const text = '| 列A | 列B |\n|---|---|\n| 1 | 2 |';
+    const pos2 = text.indexOf('2');
+    const ta = editor(root, text, pos2);
+    tab(ta);
+    expect(ta.value).toBe('| 列A | 列B |\n|---|---|\n| 1 | 2 |\n|   |   |');
+    // 新しい行の第1セルにカーソルが位置している
+    expect(ta.selectionStart).toBe(text.length + 1 + 2); // '\n| ' の直後
+  });
+
+  it('⚠ 表の外では通常の Tab のまま(preventDefault されない)', () => {
+    const { root } = setup();
+    const text = '通常のテキスト';
+    const ta = editor(root, text, 3);
+    const ev = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+    ta.dispatchEvent(ev);
+    expect(ev.defaultPrevented, '表の外なのに Tab が奪われた').toBe(false);
+  });
+});
+
