@@ -153,6 +153,9 @@ function emitted(): { classes: Set<string>; attrs: Set<string>; empty: string[] 
   const MODES: ReadonlyArray<Record<string, boolean>> = [
     {},
     { interactiveTasks: true, interactiveCells: true },
+    // 🔴 コード枠の ✎(#1044 段3)── 押せる面にしか出ない印なので、これが無いと
+    //   「誰も出さない規則」に見え、逆に規則を消しても気づけない(上の docstring と同じ理由)。
+    { interactiveCodeBlocks: true },
   ];
   for (const [name, src] of CORPUS) {
     const html = MODES.map((m) => renderMarkdown(src, m)).join('');

@@ -868,27 +868,33 @@ export function pickRepeatMoveInApp(
 }
 
 /**
- * 🔴 **章の下書きが書きかけのまま、別のノートへ移ろうとしたら聞く**
- * (#1044 段2、裁定 Q2 = A)。
+ * 🔴 **章 / コード枠の下書きが書きかけのまま、離れようとしたら聞く**
+ * (#1044 段2、裁定 Q2 = A / 段3、§9 決定「章の欄とコード枠の欄は同じ 1 本の関数」)。
  *
  * ⚠ **「捨てて移る」は書けない**(user 裁定 2026-09-20。`ui-terms.ts` の
  *   `BANNED_TERMS` に「捨てる」が在る)── 「書きかけを消して移る」と、事実だけを言う。
  * ⚠ **`Escape` / 外を押す / 「移らない」は同じ意味**(= 移らない)── `pickRowInApp`
  *   の既定(外を押すと `null` = やめる)を活かすため、「移らない」も行の 1 つにする。
+ * ⚠ **`field` / `indexAttr` は種類で分けない**(#1044 段3)── 章とコード枠の欄は
+ *   同時に 1 つしか開かないので、器を 2 系統に増やす理由が無い(§7「判定を
+ *   増やさない」)。字だけが `kind` で変わる。
  *
+ * @param kind 既定 `'section'`(段2 の呼び手をそのまま通す ── 呼び方を変えない)。
  * @returns `'save'` / `'discard'` / `'stay'`(`Escape` / 外を押した回も `'stay'` に畳む
  *   ── 呼び手が `null` を別扱いする必要を無くす)
  */
 export function pickSectionLeaveInApp(
   host: HTMLElement,
+  kind: 'section' | 'code' = 'section',
 ): Promise<'save' | 'discard' | 'stay'> {
+  const noun = kind === 'code' ? 'コード' : '章';
   return pickRowInApp<'save' | 'discard' | 'stay'>(host, {
-    title: '書きかけの章があります',
+    title: `書きかけの${noun}があります`,
     field: 'pick-section-leave',
     indexAttr: 'data-pkc-section-leave-index',
     note: '',
     rows: [
-      { label: '章を保存して移る', value: 'save' },
+      { label: `${noun}を保存して移る`, value: 'save' },
       { label: '書きかけを消して移る', value: 'discard' },
       { label: '移らない', value: 'stay' },
     ],

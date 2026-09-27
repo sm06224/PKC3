@@ -47,6 +47,8 @@ function hydrateFigures(root: ParentNode | readonly ParentNode[]): MermaidScope[
 import { applyBlocks, EMPTY_VIEW, type BlockView } from './apply-blocks';
 import { captureCellInput, reopenCellInput } from './cell-input';
 import { installSectionBox, syncSectionBoxSaving } from './section-box';
+import { installCodeBox, syncCodeBoxSaving } from './code-box';
+import { locateCodeFence } from '@features/markdown/code-fence-edit';
 import { listAppendTargets, sectionRange } from '@features/markdown/append-target';
 import { RowSwap } from './row-swap';
 import { diffCounts, diffRows, type DiffRow } from '@features/revision/diff-view';
@@ -96,7 +98,8 @@ import {
   BODY_MEDIA_FIELD,
   BODY_MEDIA_CLASS,
 } from '@features/asset/asset-preview-kind';
-import type { AppState, AppPhase, SectionDraft } from '@adapter/state/app-state';
+import { isCodeDraft } from '@adapter/state/app-state';
+import type { AppState, AppPhase, PartialDraft } from '@adapter/state/app-state';
 import { appEditorMode } from './editor-mode';
 import { appKeymap, type KeymapStore } from './keymap';
 import { appPhoneLinks } from './phone-links';
@@ -367,17 +370,17 @@ export class DetailRenderer {
   private viewToken = 0;
 
   /**
-   * 🔴 **いま箱を差し込んでいる章の鍵**(#1044 段2)。`null` = 箱は無い。
-   * ⚠ 鍵は `${lid}\u0000${heading}` ── 同じノートで別の章の下書きに変わったら
-   *   (在り得ないはずだが)必ず作り直す側へ落とす防波堤。
+   * 🔴 **いま箱を差し込んでいる下書き(章 / コード枠)の鍵**(#1044 段2 / 段3)。
+   *   `null` = 箱は無い。⚠ 鍵は種類ごとに違う({@link partialDraftBoxKey})。
+   *   同じノートで別の下書きに変わったら(在り得ないはずだが)必ず作り直す側へ落とす防波堤。
    */
   private sectionBoxFor: string | null = null;
   /**
-   * 🔴 **次の paint が終わったら差し込む章の下書き**(#1044 段2)。
+   * 🔴 **次の paint が終わったら差し込む下書き**(#1044 段2 / 段3)。
    * ⚠ 箱の差し込みは worker の paint が終わった**後**でないと安全でない
    *   (描いたばかりの DOM が要る)── `render()` はここへ予約するだけ。
    */
-  private pendingSectionInstall: { key: string; draft: SectionDraft } | null = null;
+  private pendingSectionInstall: { key: string; draft: PartialDraft } | null = null;
 
   /** markdown を描く口(既定は自前。⚠ **要るまで worker は作らない**)。 */
   private readonly markdown: MarkdownClient;
@@ -527,12 +530,13 @@ export class DetailRenderer {
   }
 
   /**
-   * 🔴 **予約されている章の箱を、いま描けた DOM へ差し込む**(#1044 段2)。
+   * 🔴 **予約されている下書きの箱を、いま描けた DOM へ差し込む**(#1044 段2 / 段3)。
    *
-   * ⚠ **見出しの名前で章を再び探す**(行ではない)── `render()` が予約した時点の
-   *   行は、この paint が終わるまでの間に(理論上は)ずれうる。名前は
-   *   `OPEN_SECTION_DRAFT` を発したときと同じ本文から採っているので、この
-   *   1 回の paint の中では必ず 1 件だけ当たる。
+   * ⚠ **章は見出しの名前で、コード枠は身元({@link locateCodeFence})で再び探す**
+   *   (行ではない)── `render()` が予約した時点の行は、この paint が終わるまでの
+   *   間に(理論上は)ずれうる。どちらも `OPEN_SECTION_DRAFT` / `OPEN_CODE_DRAFT`
+   *   を発したときと同じ本文から採っているので、この 1 回の paint の中では
+   *   必ず 1 件だけ当たる。
    * ⚠ 当たらなければ**何もしない**(箱を出さない)── 当てずっぽうで別の場所に
    *   箱を出す(押した物と効く先が食い違う)よりは、押しても何も起きないほうが安全
    *   (CLAUDE.md「衝突は、検出するより起こらなくするほうが強い」の隣接判断)。
@@ -542,14 +546,22 @@ export class DetailRenderer {
     if (pending === null) return;
     this.pendingSectionInstall = null;
     const fm = frontmatterLineCount(body);
-    const matches = listAppendTargets(body).filter((h) => h.text === pending.draft.heading);
+    const { draft } = pending;
+    if (isCodeDraft(draft)) {
+      const located = locateCodeFence(body, draft);
+      if (!located.ok) return;
+      const box = installCodeBox(host, { line: located.fence.start - fm, text: draft.original });
+      if (box !== null) this.sectionBoxFor = pending.key;
+      return;
+    }
+    const matches = listAppendTargets(body).filter((h) => h.text === draft.heading);
     if (matches.length !== 1) return;
     const range = sectionRange(body, matches[0]!.slug);
     if (range === null) return;
     const box = installSectionBox(host, {
       from: range.start - fm,
       to: range.end - fm,
-      text: pending.draft.original,
+      text: draft.original,
     });
     if (box !== null) this.sectionBoxFor = pending.key;
   }
@@ -605,9 +617,16 @@ export class DetailRenderer {
      */
     const draft = state.sectionDraft ?? null;
     const draftLid = this.pinnedLid ?? state.selectedLid;
+    /**
+     * 🔴 **箱の鍵は種類ごとに違う**(#1044 段3)。章は見出しの名前、コード枠は
+     *   身元(行 + 開きの行の字 + 引用の深さ)── どちらも `saving` を含めない
+     *   (保存中に切り替わっても箱を作り直さない。下の `boxKey !== null` 分岐参照)。
+     */
     const boxKey =
       draft !== null && draftLid !== null && draft.lid === draftLid
-        ? `${draft.lid}\u0000${draft.heading}`
+        ? isCodeDraft(draft)
+          ? `${draft.lid}\u0000code\u0000${draft.line}\u0000${draft.quote}\u0000${draft.openLine}`
+          : `${draft.lid}\u0000section\u0000${draft.heading}`
         : null;
     if (boxKey !== this.sectionBoxFor) {
       this.sectionBoxFor = null;
@@ -622,10 +641,13 @@ export class DetailRenderer {
     if (boxKey !== null) {
       /**
        * 🔴 **箱は作り直さないが、「保存中」の押せない見た目だけは追随させる**
-       *   (#1044 段2 3巡目の修理、S1)。⚠ 打ちかけの字には触らない
-       *   (`syncSectionBoxSaving` の docstring)。
+       *   (#1044 段2 3巡目の修理、S1 / 段3)。⚠ 打ちかけの字には触らない
+       *   (`syncSectionBoxSaving` / `syncCodeBoxSaving` の docstring)。
        */
-      if (this.bodyHost !== null) syncSectionBoxSaving(this.bodyHost, draft!.saving);
+      if (this.bodyHost !== null) {
+        if (isCodeDraft(draft!)) syncCodeBoxSaving(this.bodyHost, draft!.saving);
+        else syncSectionBoxSaving(this.bodyHost, draft!.saving);
+      }
       return; // 開いている間は、他の理由でも描き直さない
     }
     /**
@@ -915,6 +937,15 @@ export class DetailRenderer {
          *   書き出した HTML・印刷には受け手(`edit-cell`)が居ない。
          */
         interactiveCells: true,
+        /**
+         * 🔴 **コード枠に ✎ を出し、押せるようにする**(#1044 段3)。
+         *
+         * ⚠ **書ける窓だけ**(本体の読む面 / ノートの別ウィンドウ)── どちらも
+         *   この `DetailRenderer` を通るので、ここ 1 か所で両方に効く(§8 追記の
+         *   裁定「小窓にも出す」)。書き出した HTML・印刷・読むだけの窓
+         *   (章の別ウィンドウ)には渡さないので、押せない形のまま出る。
+         */
+        interactiveCodeBlocks: true,
         /**
          * 🔴 **本文の中のタグを押せるようにする**(#550 段③)。
          *

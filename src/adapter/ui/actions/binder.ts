@@ -60,12 +60,14 @@ import {
   appGroupIconName,
   appGroupOrderCount,
   hasAppGroupOrder,
+  isCodeDraft,
   isViewMode,
   nextViewMode,
   phaseBlockReason,
   screenBodyOf,
   SECTION_DRAFT_NOTE,
   type AppState,
+  type PartialDraft,
   type ViewMode,
 } from '@adapter/state/app-state';
 import { groupsNeedingNote, planGroupMove } from '@features/launcher/group-order';
@@ -107,6 +109,7 @@ import {
   headingLine,
 } from '@features/markdown/append-target';
 import { waitSectionSaveSettled } from '@adapter/state/section-save-wait';
+import { openCodeFenceAt, locateCodeFence } from '@features/markdown/code-fence-edit';
 import { isTextScale } from '@features/text-scale';
 import { chooseTextScale } from '@adapter/ui/render/text-scale';
 import { isReadColumns } from '@features/read-columns';
@@ -225,6 +228,7 @@ import {
 import { chordHint, HINT_BLOCKED } from '../render/shortcut-hint';
 import { TARGET_LID_ATTR } from '../render/target-lid';
 import { sectionBoxText, SECTION_BOX_INPUT_FIELD, SECTION_BOX_REGION } from '../render/section-box';
+import { codeBoxText, CODE_BOX_INPUT_FIELD, CODE_BOX_REGION } from '../render/code-box';
 import { structureText } from '@features/structure/structure-text';
 import {
   profileLineText,
@@ -1755,6 +1759,9 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   //    取込・書出しの最中に書込を始める入口を作らない
   'edit-section',
   'save-section-draft',
+  // 🔑 **コード枠だけ編集も同じ理由**(#1044 段3)
+  'edit-code-block',
+  'save-code-draft',
   'commit-edit',
   'append-entry',
   // ⚠ 選んだ全部の本文を書く(#402 ①)── 取込・書出しの最中に走らせない
@@ -2574,34 +2581,91 @@ function startEditAt(
  *   `'async'` なら 3 択(または保存の ack)を待っている ── 呼び手はここで
  *   return する(進んだかどうかは、後から `proceed` が呼ばれるかどうかで分かる)。
  */
+/**
+ * 🔴 **どの種類の下書きでも、打ちかけの字は同じ 1 か所の綴りから読む**
+ * (#1044 段3、§9「段2 の仕組みを共有する」)。
+ */
+function partialDraftBoxText(host: HTMLElement, draft: PartialDraft): string | null {
+  return isCodeDraft(draft) ? codeBoxText(host) : sectionBoxText(host);
+}
+
+/**
+ * 🔴 **`stillOpen` が、待つ前と同じ下書きか**(#1044 段3)。
+ * ⚠ 章は名前(`heading`)、コード枠は身元(`line` + `openLine` + `quote`)で見る ──
+ *   どちらも `withPartialDraftLeave` の T7 の判定(§9)。
+ */
+function sameDraftIdentity(a: PartialDraft, b: PartialDraft): boolean {
+  if (a.lid !== b.lid || isCodeDraft(a) !== isCodeDraft(b)) return false;
+  if (isCodeDraft(a) && isCodeDraft(b)) {
+    return a.line === b.line && a.openLine === b.openLine && a.quote === b.quote;
+  }
+  return !isCodeDraft(a) && !isCodeDraft(b) && a.heading === b.heading;
+}
+
+/**
+ * 🔴 **章の下書きを抱えたまま次へ進みたい」を受ける 1 本の関数**
+ *   (#1044 段2 5巡目の修理、U1。段3 で**種類に依らず**使えるよう一般化 ──
+ *   §9「段2 の仕組みを共有する。2 つ目を作らない」)。
+ *
+ * ⚠ 直す前は `leaveSectionDraftOrAsk`(別のノートへ移る)と `startSectionEditAt`
+ *   (同じノートの別の見出しを開く)が、**同じ手順**(dirty 判定 → 3 択 → 保存 →
+ *   ack 待ち → 待つ間に system 側で閉じていないか → 断られたら進まない)を
+ *   別々に書いていた(CLAUDE.md §7「同じ判定を複数の場所に書かない」)。4 巡目の
+ *   T7(待つ間に system 側で閉じていたら保存を試みない)は `leaveSectionDraftOrAsk`
+ *   にだけ入り、`startSectionEditAt` の `choice === 'save'` には無かった ── 待つ間に
+ *   閉じられると、外れた古い箱の字(`host` が外れた node)で SAVE を撃ち
+ *   (reducer は no-op)、`waitSectionSaveSettled` が `sectionDraft === null` を見て
+ *   即 `'saved'` を返し、固定済みの lid に OPEN を撃って無言で終わっていた。
+ *
+ * @param draft 3 択に入る**前**に呼び手が読んだ `sectionDraft`(ここで読み直さない)。
+ *   「待つ間に system 側で閉じられたか」は、この控えとの身元一致({@link sameDraftIdentity})
+ *   で見る。
+ * @param opts.captureBeforeSave `SAVE_SECTION_DRAFT` / `SAVE_CODE_DRAFT` を撃つ**直前**
+ *   (`stillOpen` を確かめた後)に呼ぶ ── 保存前の state から必要な物(見出しの ref 等)を
+ *   控えておくためのフック。使わない呼び手は渡さなくてよい。
+ * @param opts.proceed **非同期に決まった回にだけ**呼ぶ(消して進む / 保存できた /
+ *   待つ間に system 側で既に閉じていた ── どれも「移る・開き直す」自体は構わない、
+ *   保存を試みたかどうかが違うだけ)。呼ばないのは「移らない」を選んだ / 保存が
+ *   断られた、の 2 つだけ(断り文は `state.error` に出ている)。
+ *   `saved` が `false` の回は「保存はしていない」── 呼び手は元の行 / 元の対象で
+ *   進んでよい(既に閉じていた回も含め、system 側の結果は受け入れる)。
+ * @returns `'sync'` なら**変更が無かった**(聞かずに閉じた)── `proceed` は
+ *   **呼んでいない**。呼び手は自分の「進む」処理をその場で(同期に)続けてよい。
+ *   `'async'` なら 3 択(または保存の ack)を待っている ── 呼び手はここで
+ *   return する(進んだかどうかは、後から `proceed` が呼ばれるかどうかで分かる)。
+ */
 function withSectionDraftLeave<T = void>(
   dispatcher: Dispatcher,
   root: HTMLElement,
-  draft: NonNullable<AppState['sectionDraft']>,
+  draft: PartialDraft,
   opts: {
     captureBeforeSave?: () => T;
     proceed: (saved: boolean, captured: T | undefined) => void;
   },
 ): 'sync' | 'async' {
+  const code = isCodeDraft(draft);
   const host = root.querySelector<HTMLElement>('[data-pkc-field="detail-body"]');
-  const current = host === null ? null : sectionBoxText(host);
+  const current = host === null ? null : partialDraftBoxText(host, draft);
   const dirty = current !== null && current !== draft.original;
+  const cancel = (): void => {
+    dispatcher.dispatch(code ? { type: 'CANCEL_CODE_DRAFT' } : { type: 'CANCEL_SECTION_DRAFT' });
+  };
   if (!dirty) {
     // ⚠ 変更が無ければ**聞かずに進む**(design「箱を閉じるだけ」)
-    dispatcher.dispatch({ type: 'CANCEL_SECTION_DRAFT' });
+    cancel();
     return 'sync';
   }
   void (async (): Promise<void> => {
-    const choice = await pickSectionLeaveInApp(root);
+    const choice = await pickSectionLeaveInApp(root, code ? 'code' : 'section');
     if (choice === 'stay') return;
     if (choice === 'discard') {
-      dispatcher.dispatch({ type: 'CANCEL_SECTION_DRAFT' });
+      cancel();
       opts.proceed(false, undefined);
       return;
     }
     // choice === 'save' ── 「保存して進む」は保存が成功したときだけ「保存できた」扱い
     /**
-     * 🔴 **待つ間に system 側で章の欄が閉じていたら、保存したと数えない**
+     * 🔴 **待つ間に system 側で下書きが閉じていたら、保存したと数えない**
      *   (#1044 段2 4巡目の修理、T7。5巡目の修理、U1でこの関数へ寄せ、両呼び手の
      *   共通の門にした)。
      *
@@ -2610,24 +2674,24 @@ function withSectionDraftLeave<T = void>(
      *   待っている間に system 側(`guardSectionDraftTransition`)が下書きを閉じて
      *   `detail.ts` が骨組みを作り直すと、`host` は**外れた古い node**になる
      *   (CLAUDE.md §9「編集の作法」と同じ罠)。外れていても子は残るので
-     *   `sectionBoxText` は**古い打ちかけの字**を拾ってしまい、そのまま
-     *   `SAVE_SECTION_DRAFT` を撃つと下書きが無いので無言の no-op、続く
-     *   `waitSectionSaveSettled` は `sectionDraft === null` を見て**即 `'saved'`**
-     *   を返す ── 何も書いていないのに「保存できた」扱いで進んでしまう(データは
-     *   system が既に受け入れた結果に守られているので消えないが、成功の報告は嘘になる)。
+     *   `partialDraftBoxText` は**古い打ちかけの字**を拾ってしまい、そのまま
+     *   SAVE を撃つと下書きが無いので無言の no-op、続く `waitSectionSaveSettled` は
+     *   `sectionDraft === null` を見て**即 `'saved'`** を返す ── 何も書いていないのに
+     *   「保存できた」扱いで進んでしまう(データは system が既に受け入れた結果に
+     *   守られているので消えないが、成功の報告は嘘になる)。
      * 🔑 直しは**待つ前に閉じていたかを見る**:いま開いている下書きが
-     *   まだ同じ(`lid` + `heading`)ものかを確かめ、違えば(system が既に
+     *   まだ同じもの({@link sameDraftIdentity})かを確かめ、違えば(system が既に
      *   処理した)保存を試みずに進むだけにする。
      */
     const stillOpen = dispatcher.getState().sectionDraft;
-    if (stillOpen === null || stillOpen.lid !== draft.lid || stillOpen.heading !== draft.heading) {
+    if (stillOpen === null || !sameDraftIdentity(stillOpen, draft)) {
       opts.proceed(false, undefined);
       return;
     }
-    const text = sectionBoxText(host ?? root);
+    const text = partialDraftBoxText(host ?? root, draft);
     if (text === null) return;
     const captured = opts.captureBeforeSave?.();
-    dispatcher.dispatch({ type: 'SAVE_SECTION_DRAFT', text });
+    dispatcher.dispatch(code ? { type: 'SAVE_CODE_DRAFT', text } : { type: 'SAVE_SECTION_DRAFT', text });
     const outcome = await waitSectionSaveSettled(dispatcher);
     if (outcome === 'saved') {
       opts.proceed(true, captured);
@@ -2695,12 +2759,15 @@ function startSectionEditAt(
   if (draft !== null && draft.lid === lid) {
     const body = st0.openBody!.body;
     const pressed = sectionAt(body, line + frontmatterLineCount(body));
-    if (pressed !== null && pressed.text === draft.heading) {
+    // ⚠ **コード枠の欄が開いているときは「同じ見出し」に当たらない**(#1044 段3)──
+    //   `isCodeDraft` を先に見ないと `draft.heading` が narrow できない(tsc が守る)。
+    if (!isCodeDraft(draft) && pressed !== null && pressed.text === draft.heading) {
       // ① 同じ見出し ── 開き直さず、箱にフォーカスを戻すだけ
       root.querySelector<HTMLTextAreaElement>(`[data-pkc-field="${SECTION_BOX_INPUT_FIELD}"]`)?.focus();
       return;
     }
-    // ② 別の見出し ── withSectionDraftLeave の共通 3 択(#1044 段2 5巡目の修理、U1)
+    // ② 別の見出し(またはコード枠の欄が開いている)── withSectionDraftLeave の
+    //    共通 3 択(#1044 段2 5巡目の修理、U1 / 段3 §9)
     const leave2 = withSectionDraftLeave(dispatcher, root, draft, {
       /**
        * 🔴 **保存を撃つ直前の本文で、押した見出しを名前で覚える**
@@ -2737,6 +2804,91 @@ function startSectionEditAt(
     });
     // 🔑 `'sync'`(変更なし ── 聞かずに閉じた)は `proceed` が呼ばれていないので、
     //   ここで自分の続きを呼ぶ(`proceed(false, …)` と同じ「押した行のまま開く」)。
+    if (leave2 === 'sync') openWithLock(line);
+    return;
+  }
+  openWithLock(line);
+}
+
+/**
+ * 🔴 **その枠だけを、その場の入力欄にする口**(#1044 段3)。⚠ **`startSectionEditAt`
+ *   と同じ形**(ロック / 二重に開かない門 / 3 択)── 章の見出しの名前の代わりに、
+ *   枠の身元({@link CodeFenceIdentity})で「同じ枠か」「別のどの枠へ開き直すか」を見る。
+ *
+ * @param line 押した枠の開きの行(**剥がした本文**の行番号。`bodySourceLineAt` /
+ *   `OPEN_SECTION_DRAFT` と同じ基準)。⚠ `tableLineAt` は frontmatter 込みの行を
+ *   返すので**基準が違う**(#1044 段3 2巡目の修理、V1)── 呼び手が引いてから渡す。
+ */
+function startCodeEditAt(
+  dispatcher: Dispatcher,
+  services: BinderServices,
+  root: HTMLElement,
+  line: number,
+): void {
+  const st0 = dispatcher.getState();
+  const lid = st0.openBody?.lid ?? null;
+  if (lid === null) return;
+  const open = (openLine: number): void => {
+    dispatcher.dispatch({ type: 'OPEN_CODE_DRAFT', lid, line: openLine });
+  };
+  const openWithLock = (openLine: number): void => {
+    if (!services.acquireEditLock) {
+      const ready = services.settle?.() ?? null;
+      if (ready === null) open(openLine);
+      else void ready.then(() => open(openLine));
+      return;
+    }
+    acquireEditLockOrExplain(dispatcher, services, lid, () => {
+      open(openLine);
+      if (dispatcher.getState().sectionDraft?.lid !== lid) services.releaseEditLock?.(lid);
+    });
+  };
+  const draft = st0.sectionDraft;
+  if (draft !== null && draft.lid === lid) {
+    /**
+     * ⚠ **基準を揃えてから比べる**(#1044 段3、着地前レビュー 2 巡目の 🔴)──
+     *   `draft.line` は**生の body** の行(`CodeDraft.line`)、`line` は**剥がした**行。
+     *   そのまま比べると、frontmatter の行数と 2 つの枠の間隔が一致するノートでだけ
+     *   別の枠を「同じ枠」と取り違え、押しても何も起きない。
+     */
+    if (isCodeDraft(draft) && draft.line === line + frontmatterLineCount(st0.openBody!.body)) {
+      // ① 同じ枠 ── 開き直さず、箱にフォーカスを戻すだけ
+      root.querySelector<HTMLTextAreaElement>(`[data-pkc-field="${CODE_BOX_INPUT_FIELD}"]`)?.focus();
+      return;
+    }
+    // ② 別の枠(または章の欄が開いている)── withSectionDraftLeave の共通 3 択
+    const body0 = st0.openBody!.body;
+    /**
+     * 🔴 **押した枠の身元を、保存を撃つ前に控える**(`startSectionEditAt` の
+     *   `headingRefAt` と同じ理由)── 別の枠の保存で行がずれても、身元
+     *   (開きの行の字 + 中身 + 引用の深さ)で開き直す枠を引き直せる。
+     */
+    const identityBefore = openCodeFenceAt(body0, line + frontmatterLineCount(body0));
+    const leave2 = withSectionDraftLeave(dispatcher, root, draft, {
+      captureBeforeSave: () => identityBefore,
+      proceed: (saved, identity) => {
+        if (!saved || identity == null) {
+          openWithLock(line);
+          return;
+        }
+        const savedBody = dispatcher.getState().openBody?.body ?? null;
+        const located = savedBody === null ? null : locateCodeFence(savedBody, identity);
+        /**
+         * 🔴 **`located.fence.start` も frontmatter 込みの行**(`locateCodeFence` /
+         *   `allFences` は `openCodeFenceAt` と同じ生の body の座標系 ── V1 と
+         *   同じ形の三つ目の二重加算(#1044 段3 2巡目の修理)。⚠ `openWithLock` /
+         *   `OPEN_CODE_DRAFT` は**剥がした本文の行**を受けるので、ここで 1 度だけ
+         *   引く。引かずに渡すと frontmatter を持つノートで B を探し直した瞬間、
+         *   もう一度足された行には枠が無く「このコード枠を編集できませんでした」
+         *   に落ちる(V4 の frontmatter つき test が実地で捕まえた)。
+         */
+        openWithLock(
+          located !== null && located.ok
+            ? located.fence.start - frontmatterLineCount(savedBody ?? body0)
+            : line,
+        );
+      },
+    });
     if (leave2 === 'sync') openWithLock(line);
     return;
   }
@@ -4893,6 +5045,60 @@ const ACTIONS: Record<string, ActionHandler> = {
     dispatcher.dispatch({ type: 'CANCEL_SECTION_DRAFT' });
   },
   /**
+   * 🔴 **コード枠の欄を保存する**(#1044 段3。`save-section-draft` と同じ形)。
+   */
+  'save-code-draft': (dispatcher, _target, _services, root) => {
+    const lid = dispatcher.getState().sectionDraft?.lid ?? null;
+    if (lid === null) return;
+    const host = root.querySelector<HTMLElement>('[data-pkc-field="detail-body"]');
+    const text = host === null ? null : codeBoxText(host);
+    if (text === null) return;
+    dispatcher.dispatch({ type: 'SAVE_CODE_DRAFT', text });
+  },
+  /**
+   * 🔴 **コード枠の編集をやめる**(#1044 段3。`cancel-section-draft` と同じく聞かない)。
+   */
+  'cancel-code-draft': (dispatcher) => {
+    dispatcher.dispatch({ type: 'CANCEL_CODE_DRAFT' });
+  },
+  /**
+   * 🔴 **コード枠の ✎ ── その枠だけを、読む面のその場で編集する**(#1044 段3)。
+   *
+   * ⚠ ✎ は eligible な枠だけに焼かれる(`markdown-render.ts` の
+   *   `interactiveCodeBlocks` + 属性判定)ので、ここは**押せた時点で対象**。
+   * ⚠ **横に留めた枠(2 ペイン)は対象外**(章の欄と同じ範囲 ── `state.openBody`
+   *   だけを見る)── そこに乗る枠を押しても無言で戻る(押した物と効く先が
+   *   食い違う事故を避ける。CLAUDE.md §7)。
+   * 🔴 **`tableLineAt` は frontmatter 込みの行を返す**(csv-cell / task と同じ
+   *   基準 ── `MENU_TABLE_ATTR` の docstring)。⚠ `startCodeEditAt` /
+   *   `OPEN_CODE_DRAFT` が受けるのは**剥がした本文の行**(`bodySourceLineAt` /
+   *   `OPEN_SECTION_DRAFT` と同じ基準)なので、**ここで 1 度だけ**引く
+   *   (#1044 段3 2巡目の修理、V1)。⚠ 引かずにそのまま渡すと、reducer が
+   *   もう一度足して frontmatter の行数だけずれ、frontmatter を持つノートでは
+   *   ✎ が必ず「このコード枠を編集できませんでした」に落ちる。
+   * 🔴 **行が引けなければ、無言で戻らず理由を出す**(#1044 段3 2巡目の修理、V2)。
+   *   ⚠ 直す前はここが無言で return していた ── `body === null` /
+   *   `tableLineAt` が `null`(刻印が見つからない)のどちらも、押した user には
+   *   「押したのに何も起きない」としか見えない(いちばん静かな dead click)。
+   *   ⚠ `[data-pkc-split-lid]` の 1 行は**含めない** ── そちらは「押した物と
+   *   効く先が食い違う」を避けるための**意図した**無言(上の注記どおり)。
+   */
+  'edit-code-block': (dispatcher, target, services, root) => {
+    if (target.closest('[data-pkc-split-lid]') !== null) return;
+    const st0 = dispatcher.getState();
+    const body = st0.openBody?.body ?? null;
+    if (body === null) {
+      services.showStatus?.('本文が開いていません(ノートを開いてから押してください)');
+      return;
+    }
+    const rawLine = tableLineAt(target, body);
+    if (rawLine === null) {
+      services.showStatus?.('このコードの枠が見つかりません(本文を開き直してください)');
+      return;
+    }
+    startCodeEditAt(dispatcher, services, root, rawLine - frontmatterLineCount(body));
+  },
+  /**
    * 🔴 **今日のノートを開く**(#348、user 裁定 2026-08-23)。
    *
    * ⚠ **`create-entry` と同じ順序**にする ── 面を detail へ戻してから作る
@@ -6073,15 +6279,18 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   **章の箱**の「打ち切る」を押しても確認文・console・画面の 1 行・メッセージが
    *   **追記と別のノートの題名**を名乗っていた(押した物と効く先が食い違う。
    *   CLAUDE.md §7「押した物と効く先が食い違う門は口ごとに要る」と同型)。
-   * 🔑 `target.closest` で押されたボタンが章の箱({@link SECTION_BOX_REGION})の
-   *   中に居るかを見る ── 章の箱の中でなければ追記の箱(2 つしかない。新しい
-   *   3 つ目の呼び手が増えたら、そちらもここへ足す)。
+   * 🔑 `target.closest` で押されたボタンが章の箱({@link SECTION_BOX_REGION})/
+   *   コード枠の箱({@link CODE_BOX_REGION})の中に居るかを見る ── どちらでも
+   *   なければ追記の箱(3 つしかない。新しい 4 つ目の呼び手が増えたら、
+   *   そちらもここへ足す。#1044 段3 でコード枠を足した)。
    */
   'force-release': (dispatcher, target, services, root) => {
     const isSection = target.closest(`[data-pkc-region="${SECTION_BOX_REGION}"]`) !== null;
+    const isCode = target.closest(`[data-pkc-region="${CODE_BOX_REGION}"]`) !== null;
+    const noun = isSection ? '章' : isCode ? 'コード' : '追記';
     confirmThen(
       root,
-      (isSection ? '章' : '追記') +
+      noun +
         'の書き込みを強制的に打ち切ります。書き込みが実際には進んでいた場合、' +
         'この画面の表示が実際の中身より古くなることがあります(開き直すと直ります)。よろしいですか?',
       { okLabel: '書き込みを打ち切る', danger: true },
@@ -6106,12 +6315,12 @@ const ACTIONS: Record<string, ActionHandler> = {
          *   (赤いエラー欄に出すと、押した本人が「壊れた」と読む)。
          */
         const s = dispatcher.getState();
-        const lid = isSection ? (s.sectionDraft?.lid ?? null) : (s.writeLock?.lid ?? null);
+        const lid = isSection || isCode ? (s.sectionDraft?.lid ?? null) : (s.writeLock?.lid ?? null);
         const title = lid === null ? null : (s.entryMetas.get(lid)?.title ?? null);
         const what = title === null ? '待っている書き込みはありませんでした' : `対象: ${title}`;
         // ⚠ 次の報告に貼ってもらうための計器(#723)。smoke が拾うのは `error` だけなので
         //    `warn` は赤にならない(`tests/smoke/helpers.ts` の `msg.type() !== 'error'`)
-        console.warn(`[pkc3] ${isSection ? '章' : '追記'}の書き込みを強制的に打ち切りました`, {
+        console.warn(`[pkc3] ${noun}の書き込みを強制的に打ち切りました`, {
           phase: s.phase,
           writeLockLid: lid,
           lockGen: s.lockGen,
@@ -6126,10 +6335,10 @@ const ACTIONS: Record<string, ActionHandler> = {
         appMessagePost.post({
           kind: 'problem',
           source: 'force-release',
-          text: `${isSection ? '章' : '追記'}の書き込みを強制的に打ち切りました`,
+          text: `${noun}の書き込みを強制的に打ち切りました`,
         });
         services.showStatus?.(
-          `${isSection ? '章' : '追記'}の書き込みを打ち切りました(${what})。表示が実際の中身より古いことがあります ── 開き直すと直ります`,
+          `${noun}の書き込みを打ち切りました(${what})。表示が実際の中身より古いことがあります ── 開き直すと直ります`,
         );
         dispatcher.dispatch({ type: 'FORCE_RELEASE_LOCK', discardDraft: false });
       },

@@ -336,15 +336,15 @@ describe('無言で捨てる case の全数 pin ── C6 / #1043', () => {
    * ③ **本文を書き換えるが、主のノートの物**(追記 / 追記を元に戻す /
    *    移動を元に戻す / 外部画像の取り込み)── 押せる経路が編集中に在るかを
    *    確かめてから直す(#1051)
-   * ④ 🔴 **`OPEN_SECTION_DRAFT`(#1044 段2)は「別の lid」が在り得ない**
-   *    (`state.openBody.lid !== lid` を別に見ている ── 章の欄は**いま開いている
-   *    ノートの見出しを右クリックしたときだけ**開けるので、`lid` は必ず
-   *    `openBody.lid` と同じである)。かつ**本文を書き換えない**(下書きを
-   *    state に控えるだけ)── C6 の対象そのものに当たらない
+   * ④ 🔴 **`OPEN_SECTION_DRAFT` / `OPEN_CODE_DRAFT`(#1044 段2・段3)は
+   *    「別の lid」が在り得ない**(`state.openBody.lid !== lid` を別に見ている ──
+   *    章の欄・コードの欄は**いま開いているノートの見出し・枠を右クリックしたときだけ**
+   *    開けるので、`lid` は必ず `openBody.lid` と同じである)。かつ**本文を書き換えない**
+   *    (下書きを state に控えるだけ)── C6 の対象そのものに当たらない
    * ⚠ このリストが増減したら、それは①C6 の対象を増やした ②既存の case を
    *   書き換えた、のどちらかである ── どちらでもここを書き直す。
    */
-  it('残り 35 件は変わっていない(増減があれば、この一覧を見直す)', () => {
+  it('残り 36 件は変わっていない(増減があれば、この一覧を見直す)', () => {
     const silent = silentPhaseOnlyCases(STATE);
     const known = [
       'ADD_RELATION',
@@ -360,6 +360,7 @@ describe('無言で捨てる case の全数 pin ── C6 / #1043', () => {
       'MOVE_APP_GROUP',
       'MOVE_ENTRY_ORDER',
       'OFFICE_ASSET_SAVED',
+      'OPEN_CODE_DRAFT',
       'OPEN_SECTION_DRAFT',
       'PREVIEW_REVISION',
       'PURGE_TRASH',
