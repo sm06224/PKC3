@@ -8344,10 +8344,10 @@ h3[data-pkc-section] {
   z-index: 1000;
   width: 300px;
   max-width: calc(100vw - 16px);
-  background: var(--bg);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow);
   padding: var(--s2) var(--s3);
   font-size: 13px;
   line-height: 1.4;
@@ -8370,7 +8370,7 @@ h3[data-pkc-section] {
   font-weight: 600;
   padding: 1px 4px;
   border-radius: 3px;
-  background: var(--bg-hover);
+  background: var(--surface-2);
   color: var(--fg);
   text-transform: uppercase;
   font-size: 10px;

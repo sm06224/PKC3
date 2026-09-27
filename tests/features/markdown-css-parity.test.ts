@@ -233,6 +233,18 @@ const STYLED_ELSEWHERE: Readonly<Record<string, string>> = {
    *   `renderMarkdown` からは 1 度も出てこない。
    */
   'pkc-create-blocked-note': 'src/adapter/ui/render/shell.ts',
+  // 🔴 内部リンクのホバープレビューカード(#1105)── リンクにマウスを重ねたときに出す浮遊カード
+  'pkc-link-preview-card': 'src/adapter/ui/render/link-preview.ts',
+  'pkc-link-preview-header': 'src/adapter/ui/render/link-preview.ts',
+  'pkc-link-preview-archetype': 'src/adapter/ui/render/link-preview.ts',
+  'pkc-link-preview-date': 'src/adapter/ui/render/link-preview.ts',
+  'pkc-link-preview-chars': 'src/adapter/ui/render/link-preview.ts',
+  'pkc-link-preview-title': 'src/adapter/ui/render/link-preview.ts',
+  'pkc-link-preview-body': 'src/adapter/ui/render/link-preview.ts',
+  'pkc-link-preview-loading': 'src/adapter/ui/render/link-preview.ts',
+  'pkc-link-preview-empty-hint': 'src/adapter/ui/render/link-preview.ts',
+  'pkc-link-preview-not-found': 'src/adapter/ui/render/link-preview.ts',
+  'pkc-link-preview-foreign-desc': 'src/adapter/ui/render/link-preview.ts',
 };
 
 const NO_STYLE_NEEDED: Readonly<Record<string, string>> = {

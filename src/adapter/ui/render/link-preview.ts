@@ -91,7 +91,7 @@ export function renderPreviewCard(doc: Document, opts: PreviewCardOptions): HTML
     card.classList.add('pkc-link-preview-empty');
     const msg = doc.createElement('div');
     msg.className = 'pkc-link-preview-not-found';
-    msg.textContent = '⚠ このノートは存在しません';
+    msg.textContent = 'このノートは存在しません';
     card.append(msg);
     return card;
   }
@@ -100,7 +100,7 @@ export function renderPreviewCard(doc: Document, opts: PreviewCardOptions): HTML
     card.classList.add('pkc-link-preview-foreign');
     const msg = doc.createElement('div');
     msg.className = 'pkc-link-preview-foreign-desc';
-    msg.textContent = '🌐 別の PKC のノート（外部参照）';
+    msg.textContent = '別の PKC のノート（外部参照）';
     card.append(msg);
     return card;
   }
