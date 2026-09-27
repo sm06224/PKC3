@@ -16,6 +16,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
+import { APPEND_BUSY_NOTE } from '../../src/adapter/state/app-state';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { ScheduleRenderer } from '../../src/adapter/ui/render/schedule';
@@ -174,6 +175,32 @@ describe('#402 ② 予定の面から足す', () => {
     s.q('[data-pkc-action="schedule-quick-add"]')!.click();
     await tick();
     expect(field.value, '断ったのに欄を空にした').toBe('  ');
+  });
+
+  /**
+   * 🔴 **前の追記の書込が返る前に押しても、打った字は消えない**(#1051)。
+   * ⚠ 直す前は、reducer が錠の門で**黙って**捨てるのに、ここは撃った直後に欄を
+   *   空にしていた ── **打った字ごと消えて、理由も出なかった**。
+   */
+  it('🔴 書込中に押すと、理由を出して打った字を残す(黙って消さない)', async () => {
+    const s = setup([meta('t1', { title: TODAY })], { t1: 'メモ\n' });
+    await tick();
+    // ⚠ 錠は reducer が同期で掛ける ── ack(worker の往復)が返る前の同じ turn で押す
+    s.d.dispatch({ type: 'APPEND_TO_ENTRY', lid: 't1', text: '前の 1 通', heading: null, target: null });
+    expect(s.d.getState().writeLock?.lid, '前提: 書込中になっていない').toBe('t1');
+    const field = s.q<HTMLInputElement>('[data-pkc-field="schedule-quick-text"]')!;
+    type(s, 'ふたつめ', '2026-08-28');
+    s.q('[data-pkc-action="schedule-quick-add"]')!.click();
+    expect(field.value, '断ったのに欄を空にした(打った字が消える)').toBe('ふたつめ');
+    expect(s.d.getState().error, '黙って捨てた').toBe(APPEND_BUSY_NOTE);
+    await tick();
+    expect(s.disk['t1'], '前の 1 通が書けていない').toContain('前の 1 通');
+    expect(s.disk['t1'], '断ったのに書いた').not.toContain('ふたつめ');
+    // 🔑 錠が解けた後に押し直せば入る(断りは一時的)
+    s.q('[data-pkc-action="schedule-quick-add"]')!.click();
+    await tick();
+    expect(s.disk['t1'], '押し直しても入らない').toContain('- [ ] ふたつめ @2026-08-28');
+    expect(field.value, '通ったのに欄が残った').toBe('');
   });
 });
 

@@ -724,6 +724,14 @@ const SAVE_FAILED_EXIT = '「ノートを保存し直す」を押してから';
 export const EDITING_NOTE = '編集中は使えません(「編集を保存する」か「編集をやめる」を押すと戻ります)';
 
 /**
+ * 🔴 **追記の書込が返る前に、もう 1 通押したときの断り文**(#1051)。
+ * ⚠ 直す前は**黙って捨てて**いた(`APPEND_TO_ENTRY` の `writeLock` の門)。
+ * 🔑 並べ替えの同じ場面(`MOVE_APP_TILE` の「いま保存しています。少し待ってから、
+ *   もう一度動かしてください」)と言い方を揃える。
+ */
+export const APPEND_BUSY_NOTE = 'いま保存しています。少し待ってから、もう一度押してください';
+
+/**
  * 🔴 **「部分の下書き」の種類ごとの言葉**(#1044 段3)。
  *
  * ⚠ **章だけの下書き(#1044 段2)を、コード枠の下書きも持てるように一般化した** ──
@@ -952,25 +960,31 @@ export function bodyWriteBlockReason(state: AppState, lid: string): string | nul
  * 🔴 **`bodyWriteBlockReason` が断ったときの `ReduceResult` そのものを組む**
  *   (#1044 段2 5巡目の修理、U3)。
  *
- * ⚠ この門を通す呼び手のうち、**続きの文言を付けずに `blocked` をそのまま
- *   `error` へ置く回**(`APPEND_TO_ENTRY` 等)だけが対象 ── 続きを付ける回
- *   (`${blocked}表を打ってください` 等)は元々 `SECTION_DRAFT_NOTE` と一字一句
- *   一致しないので、いまも「章の欄自身の断り文」として消えない/引き継がれない
- *   (直す前と同じ振る舞い。範囲を広げない)。
+ * ⚠ この門を通す呼び手のうち、**章の欄の断り文をそのまま `error` へ置く回**
+ *   (`APPEND_TO_ENTRY` / `UNDO_APPEND` / `UNDO_MOVE` / `ADOPT_EXTERNAL_IMAGES`)だけが
+ *   対象 ── 続きを付ける回(`${blocked}表を打ってください` 等)は元々
+ *   `SECTION_DRAFT_NOTE` と一字一句一致しないので、いまも「章の欄自身の断り文」として
+ *   消えない/引き継がれない(直す前と同じ振る舞い。範囲を広げない)。
+ * 🔴 **`suffix` は phase 由来の断りにだけ付ける**(#1051)。⚠ `bodyWriteBlockReason` は
+ *   章の欄なら**言い切りの文**(「章を編集中は使えません(…)」)を、phase なら
+ *   **前置き**(「編集を終了してから」)を返す ── 前置きだけを `error` に置くと
+ *   「編集を終了してから」で文が切れる。直す前は呼び手の手前に `phase !== 'ready'` の
+ *   **無言の門**が在ったので、ここへ来るのは言い切りの文だけだった。
  * 🔑 `blocked` が `SECTION_DRAFT_NOTE`(章の欄が原因)のときだけ `sectionAdvisory`
  *   も同時に控える ── phase 由来の断り(編集中 / 読み込み中)は章の欄と無関係なので
  *   `sectionAdvisory` に触らない。
  * @returns 断るなら `ReduceResult`。書いてよいなら `null`(呼び手はそのまま続ける)。
  */
-function bodyWriteBlockResult(state: AppState, lid: string): ReduceResult | null {
+function bodyWriteBlockResult(state: AppState, lid: string, suffix: string): ReduceResult | null {
   const blocked = bodyWriteBlockReason(state, lid);
   if (blocked === null) return null;
   // ⚠ 章 / コードのどちらでも同じ扱い(#1044 段3) ── PARTIAL_DRAFT_OWN_NOTES 参照。
+  const own = PARTIAL_DRAFT_OWN_NOTES.has(blocked);
   return {
     state: {
       ...state,
-      error: blocked,
-      ...(PARTIAL_DRAFT_OWN_NOTES.has(blocked) ? { sectionAdvisory: blocked } : {}),
+      error: own ? blocked : `${blocked}${suffix}`,
+      ...(own ? { sectionAdvisory: blocked } : {}),
     },
     events: [],
   };
@@ -6347,32 +6361,42 @@ function reduceCore(
     /**
      * 🔑 **追記**(P8 段⑧)。編集画面を開かず、末尾に足して**直に disk へ書く**。
      *
-     * ⚠ **ready 限定 + ロック**。編集中(= draft がある)に裏で書くと、保存で
-     * 上書きされて追記が消える。書込中の二重要求も断る(直列 queue には載るが、
+     * ⚠ **編集中のノート自身へは断る + ロック**。編集中のノートへ裏で書くと、
+     * 保存で上書きされて追記が消える。書込中の二重要求も断る(直列 queue には載るが、
      * 2 通目の基底が 1 通目の結果になるかは queue 実装に依存させない)。
      * ⚠ **本文を event に載せない** ── effect が disk から読み直す。画面が持つ
      * 本文を基底にすると、別経路(toggle / 復元)の書込を巻き戻す。
+     *
+     * 🔴 **断るなら声に出す**(#1051)。⚠ 直す前は 1 行目が `phase !== 'ready'`、
+     *   2 行目が `writeLock` で、どちらも `{ state, events: [] }` を返して
+     *   **黙って捨てて**いた。🔴 実害の形:①保存の往復が返る前に「本文に追記する」を
+     *   押すと、**何も起きず理由も出ない**(`format-bar.smoke.spec.ts` が混んだ回に
+     *   踏んだ)②予定の面の「足す」は押した直後に欄を空にするので、
+     *   **打った字ごと消えていた**(binder の `schedule-quick-add`)。
+     * 🔑 断る条件は**本文を書き換える他の操作と同じ門**(`bodyWriteBlockReason`。
+     *   C6 / #1043)── 編集中でも**別のノート**へは通す。⚠ 安全の根拠は 2 つ:
+     *   ①`ENTRY_APPENDED` が `openBody` を差し替えるのは `openBody.lid` が一致する
+     *   ときだけで、編集中のノート自身へは上の門が通さない ②書込中のノートの編集には
+     *   入れない(`START_EDIT` の `writeLock` の門)。
      */
     case 'APPEND_TO_ENTRY': {
-      if (state.phase !== 'ready') return { state, events: [] };
-      if (state.writeLock) return { state, events: [] };
+      const blockedResult = bodyWriteBlockResult(state, action.lid, '追記してください');
+      if (blockedResult !== null) return blockedResult;
+      if (state.writeLock) return { state: { ...state, error: APPEND_BUSY_NOTE }, events: [] };
       /**
-       * 🔴 **章の欄が、この lid で開いていれば断る**(#1044 段2 2巡目の修理、R11)。
+       * 🔴 **章の欄が、この lid で開いていれば断る**(#1044 段2 2巡目の修理、R11)
+       *   ── 上の門(`bodyWriteBlockResult`)がこれも見ている。
        *
-       * ⚠ 直す前はここに無く、`phase` は章の欄の間も `ready` のままなので
-       *   上の門を素通りした ── file を落として置き所が解けなかった回(末尾へ
+       * ⚠ R11 の前は章の欄を見る門が無く、`phase` は章の欄の間も `ready` のままなので
+       *   素通りした ── file を落として置き所が解けなかった回(末尾へ
        *   落ちる回。`attach.ts` の `putAssetIntoNote`)は `INSERT_LINES`
        *   (`bodyRewriteGate` 経由で `bodyWriteBlockReason` を通る)ではなく
        *   **ここ**(`APPEND_TO_ENTRY`)を通るので、章の下書きが持つ古い原文の
        *   すぐ下へ本文が直に書き換わっていた(下書きは気づかず、保存すると
        *   その 1 行が消える)。
        * 🔑 `INSERT_LINES` と**同じ関数**(`bodyWriteBlockReason`)で見る
-       *   (§7:同じ判定を複数の場所に書かない)。⚠ ここは `phase === 'ready'` を
-       *   確かめた後なので、返るのは `SECTION_DRAFT_NOTE`(章の欄)か `null` の
-       *   どちらかだけ(前置き結合は要らない)。
+       *   (§7:同じ判定を複数の場所に書かない)。
        */
-      const blockedResult = bodyWriteBlockResult(state, action.lid);
-      if (blockedResult !== null) return blockedResult;
       const meta = state.entryMetas.get(action.lid);
       if (!meta) return { state, events: [] };
       if (action.text.trim() === '') return { state, events: [] }; // 空の追記は作らない
@@ -6453,8 +6477,9 @@ function reduceCore(
         date: action.date,
         archived: action.archived,
       });
-      // ⚠ 追記は ready 限定なので、openBody は丸ごと差し替えて安全
-      // (editing 中は APPEND_TO_ENTRY 自体が通らない)
+      // ⚠ 編集中のノート自身へは APPEND_TO_ENTRY が通らない(#1051 からは
+      //    別のノートへは編集中も通る)ので、lid が一致する openBody は
+      //    編集欄を持たない ── 丸ごと差し替えて安全
       const openBody =
         state.openBody?.lid === action.lid
           ? {
@@ -6524,9 +6549,16 @@ function reduceCore(
      *   別の行まで消えるのを止める。
      */
     case 'UNDO_APPEND': {
-      if (state.phase !== 'ready') return { state, events: [] };
       const last = state.lastAppend;
       if (!last) return { state, events: [] };
+      /**
+       * 🔴 **断るなら声に出す。判定は lid で**(#1051)。⚠ 直す前は `phase !== 'ready'` で
+       *   **黙って捨てて**いた ── 状態の行の「追記を元に戻す」は phase を見ずに出るので、
+       *   別のノートへの追記が返った後で編集に入ると、押しても何も起きなかった。
+       * ⚠ 断った回は**材料を残す**(編集を終えてから押し直せる)。
+       */
+      const blockedResult = bodyWriteBlockResult(state, last.lid, '追記を元に戻してください');
+      if (blockedResult !== null) return blockedResult;
       const meta = state.entryMetas.get(last.lid);
       if (!meta) return { state: { ...state, lastAppend: null }, events: [] };
       return {
@@ -6657,7 +6689,15 @@ function reduceCore(
      *   **原因と無関係な直し方**を user に指示することになる(理由は binder が言う)。
      */
     case 'ADOPT_EXTERNAL_IMAGES': {
-      if (state.phase !== 'ready') return { state, events: [] };
+      /**
+       * 🔴 **断るなら声に出す。判定は lid で**(#1051)。⚠ 直す前は `phase !== 'ready'` で
+       *   **黙って捨てて**いた ── 画像を取りに行くのは数秒かかるので、その間に
+       *   同じノートの編集へ入ると、binder は「取り込みました」と言うのに
+       *   **本文は 1 文字も変わらなかった**(binder も同じ門で見て、断った回は
+       *   取り込めた旨を言わない)。
+       */
+      const blockedResult = bodyWriteBlockResult(state, action.lid, 'もう一度取り込んでください');
+      if (blockedResult !== null) return blockedResult;
       const meta = state.entryMetas.get(action.lid);
       if (!meta) return { state, events: [] };
       if (Object.keys(action.adopted).length === 0) return { state, events: [] };
@@ -7022,9 +7062,18 @@ function reduceCore(
      *   `move-lines` として届くので、そこでまた「戻す」の材料が入る(= 押し直せる)。
      */
     case 'UNDO_MOVE': {
-      if (state.phase !== 'ready') return { state, events: [] };
       const last = state.lastMove;
       if (!last) return { state, events: [] };
+      /**
+       * 🔴 **断るなら声に出す。判定は lid で**(#1051)。⚠ 直す前は `phase !== 'ready'` で
+       *   **黙って捨てて**いた。`START_EDIT` は材料を捨てるが、🔴 **編集中に横に留めた
+       *   別のノートの塊を動かすと、材料がもう一度入る**(C6 / #1043 で通るようになった
+       *   書換 → `BODY_REWRITTEN`)── 状態の行に「移動を元に戻す」が出て、押しても
+       *   何も起きなかった。
+       * ⚠ 断った回は**材料を残す**(`UNDO_APPEND` と同じ)。
+       */
+      const blockedResult = bodyWriteBlockResult(state, last.lid, '移動を元に戻してください');
+      if (blockedResult !== null) return blockedResult;
       const meta = state.entryMetas.get(last.lid);
       if (!meta) return { state: { ...state, lastMove: null }, events: [] };
       return {

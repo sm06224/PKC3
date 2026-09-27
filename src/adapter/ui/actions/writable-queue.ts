@@ -3,11 +3,12 @@
  *
  * ## なぜ要るか
  *
- * 本文を触る action(`CREATE_ENTRY` / `APPEND_TO_ENTRY`)は、
- * **`phase !== 'ready'` を黙って捨てる**(`app-state.ts`)。つまり
- * **編集している最中は 1 文字も書けない**。
+ * 本文を触る action(`CREATE_ENTRY` / `APPEND_TO_ENTRY`)は、編集中・書込中に
+ * **断る**(`app-state.ts`。`CREATE_ENTRY` は黙って、`APPEND_TO_ENTRY` は #1051 から
+ * 理由を出して)。
  *
- * ⚠ そこで捨てると、**録った物・計った時間が丸ごと消えて、しかも何も言わない**。
+ * ⚠ そこで断られると、**録った物・計った時間が丸ごと消える**(理由が出ても、
+ *   録り直せない物は戻らない)。
  * 🔑 だから「書けないから失敗」ではなく「**書けるようになるまで預かる**」。
  *
  * ## ⚠ 1 段ずらす理由(`queueMicrotask`)
@@ -77,8 +78,8 @@ export function createWritableQueue(dispatcher: Dispatcher): WritableQueue {
    * 🔴 **1 本ずつ流す**(#666 の着地前レビュー D2。`writable-queue.test.ts` が pin)。
    *
    * ⚠ 直す前は預かりを**まとめて**流していた(`splice` して `for` で回す)が、
-   *   `APPEND_TO_ENTRY` は **`writeLock` が立っている間の要求を黙って捨てる**
-   *   (`app-state.ts`「書込中の二重要求も断る」)。1 本目が立てた錠が解けるのは
+   *   `APPEND_TO_ENTRY` は **`writeLock` が立っている間の要求を断る**
+   *   (`app-state.ts`「書込中の二重要求も断る」。当時は黙って捨てていた)。1 本目が立てた錠が解けるのは
    *   **worker の ack が返ったとき**なので、**microtask 1 つでは絶対に解けない** ──
    *   つまり **2 本目以降は必ず捨てられ**、しかも呼び側は「本文に入れました」と言う。
    * ⚠ 実際に起きる形:写真を **3 枚**まとめて落とすと **3 枚目が消える**
