@@ -227,4 +227,47 @@ describe('書き先を渡した預かり(#1081)', () => {
     await tick();
     expect(h.seen, '錠が解けても 2 通目が書かれていない').toEqual(['n2:p', 'n2:q']);
   });
+
+  /**
+   * 🔴 **錠が解けた直後、預かりが走り出す前に来た同じノートの依頼は、割り込まない**。
+   * ⚠ 錠が解けると見張りが 1 段ずらして流す(`queueMicrotask`)── その**間**に同じノートへの
+   *   依頼が来ると、その依頼自身は書ける状態なので、順番を見なければ先に走る
+   *   (変異試験 M6 が SURVIVED で教えた ── この隙を誰も見ていなかった)。
+   */
+  it('🔴 錠が解けた直後に来た同じノートの依頼は、先に預かった物を追い越さない', async () => {
+    const h = editingN1();
+    h.d.dispatch({ type: 'CANCEL_EDIT' });
+    expect(h.q.push(h.append('n2', 'p'), 'n2')).toBe(false);
+    expect(h.q.push(h.append('n1', 'a'), 'n1'), '前提: 錠が掛かっていない').toBe(true);
+    h.unlock();
+    // ⚠ 見張りはまだ流していない(1 段ずらす)── この隙に同じノートの依頼が来る
+    expect(h.q.push(h.append('n1', 'c'), 'n1'), '先に預かった物を追い越して走った').toBe(true);
+    expect(h.seen).toEqual(['n2:p']);
+    await tick();
+    expect(h.seen).toEqual(['n2:p', 'n1:a']);
+    h.unlock();
+    await tick();
+    expect(h.seen, '同じノートの順番が崩れた').toEqual(['n2:p', 'n1:a', 'n1:c']);
+  });
+
+  /**
+   * 🔑 **書き先の分からない預かりが前に在る間は、書き先つきの依頼もその後ろで待つ**
+   *   (着地前レビューの指摘 ── 意図どおりの動きとして固定する)。
+   * ⚠ 書き先の分からない依頼は**どのノートに触るか読めない**(ノートを作る物など)ので、
+   *   それを追い越すと並びが食い違いうる。⚠ いまは同じ預かりに両方を積む呼び手は無い
+   *   (添付・録音は書き先を渡さず、タイマーは必ず渡す)── 混ぜる呼び手を足すときは、
+   *   この順番で待たされることを前提にする(変異試験 M7 がこの場面を教えた)。
+   */
+  it('🔑 書き先の分からない預かりの後ろでは、書き先つきの依頼も追い越さない', async () => {
+    const h = editingN1();
+    expect(h.q.push(h.append('n2', 'u')), '書き先を渡していないのに編集中に走った').toBe(true);
+    expect(h.q.push(h.append('n2', 'x'), 'n2'), '書き先の分からない預かりを追い越した').toBe(true);
+    expect(h.seen).toEqual([]);
+    h.d.dispatch({ type: 'CANCEL_EDIT' });
+    await tick();
+    expect(h.seen).toEqual(['n2:u']);
+    h.unlock();
+    await tick();
+    expect(h.seen).toEqual(['n2:u', 'n2:x']);
+  });
 });

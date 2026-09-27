@@ -227,7 +227,7 @@ afterEach(() => {
 describe('留めた枠の口 ── 本文の面の口に隠されない(#1081)', () => {
   const MAIN = '# 主\n\n卵\n';
   const SIDE = '# さき\n\n牛乳\n\nパン\n';
-  function nested() {
+  function nested(opts: { mainPainted?: boolean } = {}) {
     document.body.textContent = '';
     const mk = (attrs: Record<string, string>): HTMLElement => {
       const el = document.createElement('div');
@@ -248,7 +248,8 @@ describe('留めた枠の口 ── 本文の面の口に隠されない(#1081)'
     // ① 留める前:本文の面が主の本文で口を張った(置き場 = 面)
     installBlockGrip(pane, mainHost, 'n1', MAIN);
     // ② 留めた後:主の器と留めた枠が、それぞれ自分の口を張った
-    installBlockGrip(main, mainHost, 'n1', MAIN);
+    //    ⚠ `mainPainted: false` = 留めた直後で、主の器がまだ 1 度も描いていない間
+    if (opts.mainPainted !== false) installBlockGrip(main, mainHost, 'n1', MAIN);
     installBlockGrip(frame, frameHost, 'n2', SIDE);
     const own = (anchor: HTMLElement): HTMLElement | undefined =>
       [...anchor.children].find(
@@ -277,6 +278,19 @@ describe('留めた枠の口 ── 本文の面の口に隠されない(#1081)'
     t.hover(t.mainHost.querySelector('p')!);
     expect(t.visible(), '主の本文に乗せたら口が 2 つ出た').toHaveLength(1);
     expect(t.own(t.main)!.hidden, '主の器の口が出ていない').toBe(false);
+  });
+
+  /**
+   * 🔴 **留めた直後、主の器がまだ描いていない間は、本文の面の口が主の枠の唯一の口**。
+   * ⚠ ここで本文の面まで退くと、**口が 1 つも出ない**(変異試験 M3 が SURVIVED で教えた ──
+   *   「内側の置き場が自分で描いているか」を見ずに退くと、この場面を誰も見ていなかった)。
+   */
+  it('🔴 留めた直後(主の器がまだ描いていない間)は、主の本文に乗せると本文の面の口が出る', () => {
+    const t = nested({ mainPainted: false });
+    expect(t.own(t.main), '前提: 主の器はまだ口を持っていない').toBeUndefined();
+    t.hover(t.mainHost.querySelector('p')!);
+    expect(t.visible(), '主の本文に乗せても口が 1 つも出ない').toHaveLength(1);
+    expect(t.own(t.pane)!.hidden, '本文の面の口が出ていない').toBe(false);
   });
 
   it('対照群: 留める前(置き場が本文の面だけ)は、本文の面の口が出る', () => {
