@@ -38,6 +38,7 @@ import {
   fenceInfo,
   quoteLead,
   quotePrefix,
+  splitLines,
   type FenceSpan,
 } from './source-blocks';
 import { tableToCsv, tableToMarkdown, type TableCopyRow } from './table-copy';
@@ -400,7 +401,7 @@ function csvFenceAt(lines: readonly string[], span: FenceSpan): TableAt | null {
  * ⚠ frontmatter の中は見ない ── 表は本文にしか無い。
  */
 export function tableAt(body: string, line: number): TableAt | null {
-  const lines = body.split('\n');
+  const lines = splitLines(body);
   const fm = frontmatterLineCount(body);
   if (!Number.isInteger(line) || line < fm || line >= lines.length) return null;
   /**
@@ -462,7 +463,7 @@ export function tableAt(body: string, line: number): TableAt | null {
  * ⚠ **区切りの行(`|---|`)は呼び側が外す** ── ここは走の範囲を返すだけである。
  */
 export function mdTableAt(body: string, line: number): TableAt | null {
-  return mdTableRun(mdCellGate(body.split('\n')), line);
+  return mdTableRun(mdCellGate(splitLines(body)), line);
 }
 
 /**
@@ -539,8 +540,7 @@ function gateFences(gate: MdCellGate): readonly FenceSpan[] {
  * ⚠ 行数も行番号も変わらない ── 囲みの範囲は行で返るので、そのまま突き合わせられる。
  */
 function withoutQuotePrefix(body: string): string {
-  return body
-    .split('\n')
+  return splitLines(body)
     .map((l) => l.slice(quotePrefix(l).length))
     .join('\n');
 }
@@ -560,9 +560,16 @@ function gateQuotedFences(gate: MdCellGate): readonly FenceSpan[] {
  */
 export function fencesBelowFrontmatter(body: string): readonly FenceSpan[] {
   const fm = frontmatterLineCount(body);
-  const below = fm === 0 ? body : body.split('\n').slice(fm).join('\n');
+  if (fm === 0) return allFences(body);
+  let offset = 0;
+  for (let i = 0; i < fm; i++) {
+    const next = body.indexOf('\n', offset);
+    if (next === -1) return [];
+    offset = next + 1;
+  }
+  const below = body.slice(offset);
   const found = allFences(below);
-  return fm === 0 ? found : found.map((f) => ({ ...f, start: f.start + fm, end: f.end + fm }));
+  return found.map((f) => ({ ...f, start: f.start + fm, end: f.end + fm }));
 }
 
 function gateFm(gate: MdCellGate): number {
@@ -688,7 +695,7 @@ export function tableConvertRefusal(at: TableAt, to: TableFormat): string | null
 /** 柵の長さ。⚠ 升の字が ``` で始まると囲みが**そこで閉じる**ので、必ず 1 本長くする。 */
 export function fenceMarkerFor(content: string): string {
   let longest = 0;
-  for (const l of content.split('\n')) {
+  for (const l of splitLines(content)) {
     const m = /^\s*(`+)/.exec(l);
     if (m !== null) longest = Math.max(longest, m[1]!.length);
   }
@@ -760,7 +767,7 @@ const BLOCK_MARK = /^ {0,3}(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|>|\|)/;
  * @returns 囲みの字。表と決められなければ `null`
  */
 export function tsvFenceFromPlain(plain: string): string | null {
-  const lines = plain.replace(/\r\n?/g, '\n').split('\n');
+  const lines = splitLines(plain);
   // ⚠ 末尾の空行だけ落とす(先頭・途中の空行は残して判定に効かせる)
   while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
   if (lines.length < 2) return null;
