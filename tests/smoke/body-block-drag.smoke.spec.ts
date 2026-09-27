@@ -421,5 +421,43 @@ test('🔴 横に留めた枠へファイルを落とすと、その枠のノー
     '主のノート',
   );
 
+  /**
+   * 🔴 **主のノートを編集している間も、留めた枠の塊を動かして「元に戻す」で戻せる**(#1051)。
+   *
+   * ⚠ 直す前は `UNDO_MOVE` が `phase !== 'ready'` で**黙って**捨てていた ── 編集中でも
+   *   留めた枠の塊は動かせる(C6 / #1043)ので知らせの隣に「元に戻す」が出るのに、
+   *   押しても何も起きなかった。
+   * 🔑 ここでしか見られないもの:編集中に**本当に**口が出て、押した後も編集欄が
+   *   閉じないこと(unit は reducer の判定だけを見る)。
+   */
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="start-edit"]');
+  const editor = page.locator('[data-pkc-field="editor-body"]');
+  await expect(editor, '前提: 主のノートの編集に入れていない').toBeVisible();
+  await page.locator(`${SIDE} > p`).first().hover();
+  const grip = page.locator('[data-pkc-field="block-grip"]:visible');
+  await expect(grip, '編集中に、留めた枠の塊へ乗せても口が出ない').toHaveCount(1);
+  const g = (await grip.boundingBox())!;
+  const bread = page.locator(`${SIDE} > p`).last();
+  const b = (await bread.boundingBox())!;
+  await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(g.x + 40, g.y + 40, { steps: 4 });
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height * 0.8, { steps: 8 });
+  await expect(bread, '留めた枠の落とし先に「後」の線が出ない').toHaveAttribute('data-pkc-drop-edge', 'after');
+  await page.mouse.up();
+  await expect
+    .poll(() => kinds(SIDE), { timeout: 8000, message: '編集中に留めた枠の塊が動かない' })
+    .toEqual(['留める側', 'パン', '牛乳']);
+  await expect(undo, '動かした知らせの隣に「元に戻す」が出ない').toBeVisible();
+  await expect(undo, '押すと別の物が戻る').toHaveAttribute('data-pkc-action', 'undo-move');
+  await clickReal(page, '[data-pkc-field="status-undo"]');
+  await expect
+    .poll(() => kinds(SIDE), {
+      timeout: 8000,
+      message: '編集中に「元に戻す」を押しても戻らない(黙って捨てている)',
+    })
+    .toEqual(['留める側', '牛乳', 'パン']);
+  await expect(editor, '戻したら編集欄が閉じた(打っていた字を失う)').toBeVisible();
+
   expect(errors, 'pageerror が出た').toEqual([]);
 });
