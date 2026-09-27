@@ -116,6 +116,12 @@ describe('🔴 読むだけ ── 押して書く口を残さない', () => {
         '<p><a data-pkc-action="filter-by-tag" href="#">#タグ</a></p>',
     )!;
     expect(host.querySelector('[data-pkc-action="copy-md-block"]'), '⧉ が残っている').toBeNull();
+    /**
+     * 🔴 **ボタンそのものが消えていること**(変異試験 P1 が SURVIVED で教えた)── ⧉ を取り除かなくても、
+     *   下の「送れない口の属性を外す」が `data-pkc-action` だけは剥がすので、上の 1 行は通る。
+     *   ⚠ そのとき画面には**押しても何も起きない ⧉** が残る(守りたいのはこちら)。
+     */
+    expect(host.querySelector('pre button'), '⧉ のボタンが残っている(押しても何も起きない)').toBeNull();
     for (const a of Array.from(host.querySelectorAll('[data-pkc-action]'))) {
       expect(CHAPTER_WINDOW_ACTIONS.has(a.getAttribute('data-pkc-action') ?? ''), '送れない口が残っている').toBe(true);
     }
