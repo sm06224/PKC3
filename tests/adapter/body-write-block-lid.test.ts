@@ -9,6 +9,8 @@
  *   ② reducer の各 case(ready / editing+別 lid / editing+同じ lid / error)
  *   ③ 走査による全数 pin(直したはずの 7 case が「無言」の形へ戻っていないか、
  *      かつ**まだ触っていない残り**が変わっていないか)
+ *   ④ #1051 の 4 case(追記 / 追記を元に戻す / 移動を元に戻す / 外部画像の取り込み)
+ *      ── 同じ門へ寄せ、断るなら声に出す。材料(`lastAppend` / `lastMove`)は残す
  *
  * ⚠ **binder(実クリック)の側は別 file が持つ**(押した所と効く先が一致するかは
  *   あちらの領分):`csv-cell-edit.test.ts`(`edit-cell` / `shape-cell`)、
@@ -19,6 +21,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { codeOnly } from '../helpers/code-only';
 import {
+  APPEND_BUSY_NOTE,
   bodyWriteBlockReason,
   initialState,
   reduce,
@@ -270,6 +273,135 @@ describe('bodyRewriteGate(板・本文の塊)── C6 / #1043', () => {
 });
 
 /**
+ * 🔴 **本文を書き換える残りの 4 つも、同じ門で断り、断るなら声に出す**(#1051)。
+ *
+ * ⚠ 直す前は 4 つとも `phase !== 'ready'` で**黙って捨てて**いた。編集中に押せる
+ *   経路が実在した:
+ *   - 追記 ── 保存の往復が返る前に押すと、錠の門でも**黙って**捨てていた(`writeLock`)
+ *   - 追記を元に戻す / 移動を元に戻す ── 状態の行の口は phase を見ずに出る。
+ *     `START_EDIT` は追記の材料と知らせを捨てない / 移動は ack が編集に入った後に返ると
+ *     材料がもう一度入る
+ *   - 外部画像の取り込み ── 取りに行く数秒の間に、同じノートの編集へ入れる
+ * 🔑 判定は他の書換と同じ `bodyWriteBlockReason`(編集中でも**別のノート**へは通す)。
+ */
+describe('#1051 ── 追記 / 元に戻す 2 つ / 外部画像の取り込みも、lid で判定して声に出す', () => {
+  const IMG = 'https://e.com/a.png';
+  interface Spec {
+    name: string;
+    /** その操作を押せる材料を持たせる(元に戻す 2 つは材料が無いと何もしない)。 */
+    arm: (s: AppState, lid: string) => AppState;
+    action: (lid: string) => Record<string, unknown>;
+    /** 通ったときの event の型(と書換の種類)。 */
+    passed: (ev: Record<string, unknown>) => boolean;
+    /** 断る字の続き(前置きは `bodyWriteBlockReason` が付ける)。 */
+    suffix: string;
+    /** 断った回に残っているべき材料(無ければ `null`)。 */
+    material: (s: AppState) => unknown;
+  }
+  const rewriteOf = (ev: Record<string, unknown>): string | undefined =>
+    (ev['rewrite'] as { kind?: string } | undefined)?.kind;
+  const SPECS: Spec[] = [
+    {
+      name: 'APPEND_TO_ENTRY',
+      arm: (s) => s,
+      action: (lid) => ({ type: 'APPEND_TO_ENTRY', lid, text: '足す', heading: null, target: null }),
+      passed: (ev) => ev['type'] === 'REQUEST_APPEND',
+      suffix: '追記してください',
+      material: () => null,
+    },
+    {
+      name: 'UNDO_APPEND',
+      arm: (s, lid) => ({ ...s, lastAppend: { lid, lines: ['足した行'] } }),
+      action: () => ({ type: 'UNDO_APPEND' }),
+      passed: (ev) => ev['type'] === 'REQUEST_BODY_REWRITE' && rewriteOf(ev) === 'undo-append',
+      suffix: '追記を元に戻してください',
+      material: (s) => s.lastAppend,
+    },
+    {
+      name: 'UNDO_MOVE',
+      arm: (s, lid) => ({ ...s, lastMove: { lid, start: 0, end: 1, toBefore: 2, lines: ['a'] } }),
+      action: () => ({ type: 'UNDO_MOVE' }),
+      passed: (ev) => ev['type'] === 'REQUEST_BODY_REWRITE' && rewriteOf(ev) === 'move-lines',
+      suffix: '移動を元に戻してください',
+      material: (s) => s.lastMove,
+    },
+    {
+      name: 'ADOPT_EXTERNAL_IMAGES',
+      arm: (s) => s,
+      action: (lid) => ({ type: 'ADOPT_EXTERNAL_IMAGES', lid, adopted: { [IMG]: 'asset:k1' } }),
+      passed: (ev) => ev['type'] === 'REQUEST_BODY_REWRITE' && rewriteOf(ev) === 'adopt-images',
+      suffix: 'もう一度取り込んでください',
+      material: () => null,
+    },
+  ];
+  const s0 = booted([meta('n1', { archetype: 'text' }), meta('n2', { archetype: 'text' })]);
+  const run = (s: AppState, a: Record<string, unknown>) =>
+    reduce(s, a as unknown as Parameters<typeof reduce>[1]);
+
+  for (const spec of SPECS) {
+    describe(spec.name, () => {
+      it('対照群: ready なら通る', () => {
+        const out = run(spec.arm(s0, 'n2'), spec.action('n2'));
+        expect(out.events.length, '通らなかった').toBe(1);
+        expect(spec.passed(out.events[0] as unknown as Record<string, unknown>)).toBe(true);
+      });
+
+      it('🔴 editing + 別ノート → 通る(横に留めた枠を止めない)', () => {
+        const out = run(spec.arm(editing(s0, 'n1'), 'n2'), spec.action('n2'));
+        expect(out.events.length, '編集中に別のノートまで止めた').toBe(1);
+        expect(spec.passed(out.events[0] as unknown as Record<string, unknown>)).toBe(true);
+        expect(out.state.error ?? null, '通ったのに断りの字を出した').toBeNull();
+      });
+
+      it('🔴 editing + 編集中のノート自身 → 声に出して断り、材料は残す', () => {
+        const before = spec.arm(editing(s0, 'n1'), 'n1');
+        const out = run(before, spec.action('n1'));
+        expect(out.events, '編集中のノートの本文を裏で書き換えた').toEqual([]);
+        expect(out.state.error, '黙って捨てた').toBe(`編集を終了してから${spec.suffix}`);
+        expect(spec.material(out.state), '断ったのに材料を捨てた(押し直せない)').toEqual(spec.material(before));
+      });
+
+      it('🔴 保存に失敗して止まっている → 出口を言って断る', () => {
+        const s: AppState = { ...spec.arm(s0, 'n2'), phase: 'error' };
+        const out = run(s, spec.action('n2'));
+        expect(out.events).toEqual([]);
+        expect(out.state.error ?? '', '黙って捨てた').toContain('ノートを保存し直す');
+        expect(out.state.error ?? '').toContain(spec.suffix);
+      });
+    });
+  }
+
+  it('🔴 APPEND_TO_ENTRY ── 書込中の 2 通目は、声に出して断る(錠は動かさない)', () => {
+    const s: AppState = { ...s0, writeLock: { lid: 'n1' } };
+    const out = run(s, SPECS[0]!.action('n2'));
+    expect(out.events, '書込中に 2 通目を撃った').toEqual([]);
+    expect(out.state.error, '黙って捨てた').toBe(APPEND_BUSY_NOTE);
+    expect(out.state.writeLock, '断ったのに錠を掛け替えた').toEqual({ lid: 'n1' });
+  });
+
+  it('🔴 APPEND_TO_ENTRY ── 別のノートへ通した後、そのノートの ack は編集中の本文に触らない', () => {
+    // ⚠ 通した以上、ack(`ENTRY_APPENDED`)も編集中に返る ── 編集欄の本文を差し替えないこと
+    let s = editing(s0, 'n1');
+    s = run(s, SPECS[0]!.action('n2')).state;
+    expect(s.writeLock?.lid).toBe('n2');
+    s = run(s, {
+      type: 'ENTRY_APPENDED',
+      lid: 'n2',
+      gen: s.lockGen,
+      body: 'n2 の新しい本文',
+      status: 'open',
+      date: null,
+      archived: false,
+      inserted: ['足す'],
+    }).state;
+    expect(s.writeLock, 'ack で錠が解けていない').toBeNull();
+    expect(s.phase).toBe('editing');
+    expect(s.openBody?.lid, '編集欄の対象が入れ替わった').toBe('n1');
+    expect(s.openBody?.body, '編集欄の本文が書き換わった').toBe('x');
+  });
+});
+
+/**
  * 🔴 **走査で全数 pin する**(#1043 の依頼)。
  *
  * `state.phase !== 'ready'` だけを見て `{ state, events: [] }` を無言で返す
@@ -312,7 +444,7 @@ describe('無言で捨てる case の全数 pin ── C6 / #1043', () => {
     expect(silentPhaseOnlyCases(STATE).size).toBeGreaterThan(10);
   });
 
-  it('直した 7 case は、この「無言」の形から消えている', () => {
+  it('直した 11 case(#1043 の 7 + #1051 の 4)は、この「無言」の形から消えている', () => {
     const silent = silentPhaseOnlyCases(STATE);
     for (const name of [
       'TOGGLE_TASK',
@@ -322,21 +454,22 @@ describe('無言で捨てる case の全数 pin ── C6 / #1043', () => {
       'MATERIALIZE_REPEAT',
       'MOVE_REPEAT_OCCURRENCE',
       'TOGGLE_TODO_STATUS',
+      'ADOPT_EXTERNAL_IMAGES',
+      'APPEND_TO_ENTRY',
+      'UNDO_APPEND',
+      'UNDO_MOVE',
     ]) {
       expect(silent.has(name), `${name} がまだ無言のまま`).toBe(false);
     }
   });
 
   /**
-   * 🔴 **残り 36 件は今回の対象外**。理由は 4 つに分かれる:
+   * 🔴 **残り 33 件は今回の対象外**。理由は 3 つに分かれる:
    * ① **lid で 1 件に絞れない**(複数の lid・全件・app 全体に効く ──
    *    選択 / フィルタ / 一覧の並び替え / タイル・グループの並び替え 等)
    * ② **本文の書換ではない**(削除・関係・タグ・履歴・ゴミ箱・スマート集計・
    *    添付の差し替え等 ── 対応するなら別 issue)
-   * ③ **本文を書き換えるが、主のノートの物**(追記 / 追記を元に戻す /
-   *    移動を元に戻す / 外部画像の取り込み)── 押せる経路が編集中に在るかを
-   *    確かめてから直す(#1051)
-   * ④ 🔴 **`OPEN_SECTION_DRAFT` / `OPEN_CODE_DRAFT`(#1044 段2・段3)は
+   * ③ 🔴 **`OPEN_SECTION_DRAFT` / `OPEN_CODE_DRAFT`(#1044 段2・段3)は
    *    「別の lid」が在り得ない**(`state.openBody.lid !== lid` を別に見ている ──
    *    章の欄・コードの欄は**いま開いているノートの見出し・枠を右クリックしたときだけ**
    *    開けるので、`lid` は必ず `openBody.lid` と同じである)。かつ**本文を書き換えない**
@@ -344,12 +477,10 @@ describe('無言で捨てる case の全数 pin ── C6 / #1043', () => {
    * ⚠ このリストが増減したら、それは①C6 の対象を増やした ②既存の case を
    *   書き換えた、のどちらかである ── どちらでもここを書き直す。
    */
-  it('残り 36 件は変わっていない(増減があれば、この一覧を見直す)', () => {
+  it('残り 33 件は変わっていない(増減があれば、この一覧を見直す)', () => {
     const silent = silentPhaseOnlyCases(STATE);
     const known = [
       'ADD_RELATION',
-      'ADOPT_EXTERNAL_IMAGES',
-      'APPEND_TO_ENTRY',
       'ASK_TAG_SUGGESTIONS',
       'BULK_TAG',
       'CREATE_ENTRY',
@@ -382,8 +513,6 @@ describe('無言で捨てる case の全数 pin ── C6 / #1043', () => {
       'SMART_TAGS',
       'START_EDIT',
       'TOGGLE_SELECT',
-      'UNDO_APPEND',
-      'UNDO_MOVE',
     ].sort();
     expect([...silent].sort()).toEqual(known);
   });

@@ -367,30 +367,33 @@ test('🔴 横に留めた枠へファイルを落とすと、その枠のノー
     );
   expect(await kinds(SIDE), '前提: 留めた枠の並び').toEqual(['留める側', '牛乳', 'パン']);
 
-  // 🔴 留めた枠の「牛乳」の下半分へ落とす
-  const target = page.locator(`${SIDE} > p`).first();
-  const t = (await target.boundingBox())!;
-  const at = { x: t.x + t.width / 2, y: t.y + t.height * 0.8 };
-  await page.evaluate((p) => {
-    const dt = new DataTransfer();
-    dt.items.add(new File([new Uint8Array([9, 8, 7, 6])], '猫.png', { type: 'image/png' }));
-    (window as unknown as { __dropDt: DataTransfer }).__dropDt = dt;
-    const el = document.elementFromPoint(p.x, p.y)!;
-    el.dispatchEvent(
-      new DragEvent('dragover', { bubbles: true, cancelable: true, clientX: p.x, clientY: p.y, dataTransfer: dt }),
+  /** 🔴 その枠の「牛乳」(最初の段落)の下半分へ file を落とす。 */
+  const dropFile = async (sel: string, name: string): Promise<void> => {
+    const target = page.locator(`${sel} > p`).first();
+    const t = (await target.boundingBox())!;
+    const at = { x: t.x + t.width / 2, y: t.y + t.height * 0.8, name };
+    await page.evaluate((p) => {
+      const dt = new DataTransfer();
+      dt.items.add(new File([new Uint8Array([9, 8, 7, 6])], p.name, { type: 'image/png' }));
+      (window as unknown as { __dropDt: DataTransfer }).__dropDt = dt;
+      const el = document.elementFromPoint(p.x, p.y)!;
+      el.dispatchEvent(
+        new DragEvent('dragover', { bubbles: true, cancelable: true, clientX: p.x, clientY: p.y, dataTransfer: dt }),
+      );
+    }, at);
+    await expect(target, '留めた枠の本文に「後」の線が出ない').toHaveAttribute(
+      'data-pkc-drop-edge',
+      'after',
     );
-  }, at);
-  await expect(target, '留めた枠の本文に「後」の線が出ない').toHaveAttribute(
-    'data-pkc-drop-edge',
-    'after',
-  );
-  await page.evaluate((p) => {
-    const dt = (window as unknown as { __dropDt: DataTransfer }).__dropDt;
-    const el = document.elementFromPoint(p.x, p.y)!;
-    el.dispatchEvent(
-      new DragEvent('drop', { bubbles: true, cancelable: true, clientX: p.x, clientY: p.y, dataTransfer: dt }),
-    );
-  }, at);
+    await page.evaluate((p) => {
+      const dt = (window as unknown as { __dropDt: DataTransfer }).__dropDt;
+      const el = document.elementFromPoint(p.x, p.y)!;
+      el.dispatchEvent(
+        new DragEvent('drop', { bubbles: true, cancelable: true, clientX: p.x, clientY: p.y, dataTransfer: dt }),
+      );
+    }, at);
+  };
+  await dropFile(SIDE, '猫.png');
 
   await expect
     .poll(() => kinds(SIDE), { timeout: 8000, message: '留めた枠のノートの落とした所に入っていない' })
@@ -420,6 +423,33 @@ test('🔴 横に留めた枠へファイルを落とすと、その枠のノー
   await expect(page.locator(`${HOST} h1`).first(), '戻したら中央が入れ替わった').toContainText(
     '主のノート',
   );
+
+  /**
+   * 🔴 **入れた後に主のノートの編集を始めても、知らせの隣の「元に戻す」で戻せる**(#1051)。
+   *
+   * ⚠ 直す前は `UNDO_APPEND` が `phase !== 'ready'` で**黙って**捨てていた ── 知らせと
+   *   「元に戻す」は編集に入っても残る(`START_EDIT` は `lastAppend` も知らせも捨てない)ので、
+   *   押せるのに何も起きなかった。
+   * 🔑 ここでしか見られないもの:編集中に**本当に**口が出ていて、押すと留めた枠の行だけが
+   *   消え、**編集欄は閉じない**こと(unit は reducer の判定だけを見る)。
+   */
+  await dropFile(SIDE, '犬.png');
+  await expect
+    .poll(() => kinds(SIDE), { timeout: 8000, message: '2 枚目が留めた枠のノートに入っていない' })
+    .toEqual(['留める側', '牛乳', 'IMG', 'パン']);
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="start-edit"]');
+  const editor = page.locator('[data-pkc-field="editor-body"]');
+  await expect(editor, '前提: 主のノートの編集に入れていない').toBeVisible();
+  await expect(undo, '編集に入ったら「元に戻す」が消えた(前提が変わった)').toBeVisible();
+  await expect(undo, '押すと別の物が戻る').toHaveAttribute('data-pkc-action', 'undo-append');
+  await clickReal(page, '[data-pkc-field="status-undo"]');
+  await expect
+    .poll(() => kinds(SIDE), {
+      timeout: 8000,
+      message: '編集中に「元に戻す」を押しても戻らない(黙って捨てている)',
+    })
+    .toEqual(['留める側', '牛乳', 'パン']);
+  await expect(editor, '戻したら編集欄が閉じた(打っていた字を失う)').toBeVisible();
 
   expect(errors, 'pageerror が出た').toEqual([]);
 });

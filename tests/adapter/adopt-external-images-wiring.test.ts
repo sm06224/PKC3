@@ -51,7 +51,11 @@ beforeEach(() => {
   document.body.textContent = '';
 });
 
-function rig(outcome?: (urls: readonly string[]) => AdoptOutcome) {
+/**
+ * @param gate 取りに行っている間を開けておく(渡すと、解くまで `adoptUrls` が返らない)。
+ *   ⚠ 取りに行く数秒の間に user が動く形(#1051)を作るため。
+ */
+function rig(outcome?: (urls: readonly string[]) => AdoptOutcome, gate?: Promise<void>) {
   const root = document.createElement('div');
   document.body.append(root);
   const inspector = new InspectorRenderer(buildShell(root).inspector);
@@ -64,6 +68,7 @@ function rig(outcome?: (urls: readonly string[]) => AdoptOutcome) {
     showStatus: (t) => void status.push(t),
     adoptUrls: async (urls, namePrefix) => {
       asked.push({ urls, prefix: namePrefix });
+      if (gate !== undefined) await gate;
       return (
         outcome?.(urls) ?? {
           adopted: new Map(urls.map((u, i) => [u, `asset:k${i + 1}`])),
@@ -233,5 +238,58 @@ describe('#264 段① 押してから disk へ届くまで', () => {
     if (ev?.type !== 'REQUEST_BODY_REWRITE') throw new Error('unreachable');
     expect(applyBodyRewrite(body, ev.rewrite)).toBe(`![あ](asset:k9)\n![い](${IMG})`);
     expect(r.d.getState().error, '残った 1 件を黙って捨てた').toContain('1 件');
+  });
+});
+
+/**
+ * 🔴 **取りに行っている間に同じノートの編集へ入ったら、「取り込みました」と言わない**(#1051)。
+ *
+ * ⚠ 直す前は reducer が `phase !== 'ready'` で**黙って**捨てるのに、binder は
+ *   「外部の画像 N 枚を手元に取り込みました」と言っていた ── **本文は 1 文字も
+ *   変わらない**のに成功の一報が出る。
+ */
+describe('#1051 取りに行っている間に編集へ入ったとき', () => {
+  function gated() {
+    let open!: () => void;
+    const gate = new Promise<void>((r) => (open = r));
+    return { gate, open: () => open() };
+  }
+
+  it('🔴 同じノートの編集中 → 撃たず、理由を出し、「取り込みました」と言わない', async () => {
+    const g = gated();
+    const r = rig(undefined, g.gate);
+    r.open('n1', `![ず](${IMG})`);
+    r.btn()!.click();
+    await vi.waitFor(() => expect(r.asked).toHaveLength(1));
+    r.d.dispatch({ type: 'START_EDIT' });
+    expect(r.d.getState().phase, '前提: 編集に入れていない').toBe('editing');
+    g.open();
+    await vi.waitFor(() => expect(r.d.getState().error).toBeTruthy());
+    expect(r.d.getState().error, '断りの理由が違う').toBe('編集を終了してからもう一度取り込んでください');
+    expect(
+      r.events.some((e) => e.type === 'REQUEST_BODY_REWRITE'),
+      '編集中のノートの本文を裏で書き換えた',
+    ).toBe(false);
+    expect(
+      r.status.filter((t) => t.includes('取り込みました')),
+      '本文へ当てていないのに「取り込みました」と言った',
+    ).toEqual([]);
+  });
+
+  it('対照群: 別のノートの編集中 → 撃って、「取り込みました」と言う(横に留めた枠を止めない)', async () => {
+    const g = gated();
+    const r = rig(undefined, g.gate);
+    r.open('n1', `![ず](${IMG})`);
+    r.btn()!.click();
+    await vi.waitFor(() => expect(r.asked).toHaveLength(1));
+    r.open('n2', 'べつ');
+    r.d.dispatch({ type: 'START_EDIT' });
+    expect(r.d.getState().openBody?.lid, '前提: 別のノートの編集に入れていない').toBe('n2');
+    g.open();
+    await vi.waitFor(() => expect(r.events.some((e) => e.type === 'REQUEST_BODY_REWRITE')).toBe(true));
+    const ev = r.events.find((e) => e.type === 'REQUEST_BODY_REWRITE');
+    if (ev?.type !== 'REQUEST_BODY_REWRITE') throw new Error('unreachable');
+    expect(ev.lid, '押したノートと別のノートへ当てた').toBe('n1');
+    expect(r.status.some((t) => t.includes('1 枚を手元に取り込みました')), '入ったのに黙っている').toBe(true);
   });
 });

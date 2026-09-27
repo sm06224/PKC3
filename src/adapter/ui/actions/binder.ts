@@ -5222,6 +5222,14 @@ const ACTIONS: Record<string, ActionHandler> = {
         edit: false,
       });
     }
+    /**
+     * 🔴 **通ったときだけ欄を空にする**(#1051)。⚠ 直す前は撃った直後に必ず空にしていた
+     *   ── 前の追記の書込が返る前に押すと reducer が断る(直す前は**黙って**捨てていた)ので、
+     *   **打った字ごと消えていた**。
+     * 🔑 通ったかは reducer が錠を掛けたかで見る(断った回は錠が動かない)── 判定を
+     *   ここに 2 つ目として書かない(§7)。
+     */
+    const lockBefore = dispatcher.getState().writeLock;
     dispatcher.dispatch({
       type: 'APPEND_TO_ENTRY',
       lid,
@@ -5230,7 +5238,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       // ⚠ 末尾へ足す(入り先の選択は本文の面の話 ── ここでは選ばせない)
       target: null,
     });
-    if (textEl) textEl.value = '';
+    if (textEl && dispatcher.getState().writeLock !== lockBefore) textEl.value = '';
     void services;
   },
   /**
@@ -8462,11 +8470,22 @@ const ACTIONS: Record<string, ActionHandler> = {
     services.showStatus?.(`外部の画像 ${urls.length} 枚を取りに行っています…`);
     void adopt(urls, ADOPTED_IMAGE_PREFIX).then(({ adopted, failures }) => {
       if (adopted.size > 0) {
+        /**
+         * 🔴 **本文へ当てられないなら「取り込みました」と言わない**(#1051)。
+         * ⚠ 取りに行っている数秒の間に、同じノートの編集へ入れる ── 直す前は
+         *   reducer が黙って捨てるのに、ここは「取り込みました」と言っていた
+         *   (本文は 1 文字も変わらない)。
+         * 🔑 判定は reducer と**同じ関数**(§7)。断る字は reducer が出すので、
+         *   ここは撃ったうえで**成功の一報と失敗の内訳を出さない**だけにする
+         *   (内訳を出すと `error` の 1 枠を上書きし、断りの理由が消える)。
+         */
+        const blocked = bodyWriteBlockReason(dispatcher.getState(), lid);
         dispatcher.dispatch({
           type: 'ADOPT_EXTERNAL_IMAGES',
           lid,
           adopted: Object.fromEntries(adopted),
         });
+        if (blocked !== null) return;
         services.showStatus?.(`外部の画像 ${adopted.size} 枚を手元に取り込みました`);
       }
       /**
