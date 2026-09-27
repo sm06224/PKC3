@@ -669,7 +669,12 @@ test('🔴 見出しの「この章を編集する」→ 打つ → 別のノー
   await createEntry(page, 'text');
   await page
     .locator('[data-pkc-field="editor-body"]')
-    .fill('# 議事録\n\n前置き。\n\n## 決定事項\n\n- 牛乳を買う\n\n## 次回\n\n来週。\n');
+    .fill(
+      '# 議事録\n\n前置き。\n\n## 決定事項\n\n- 牛乳を買う\n\n' +
+        // 🔴 html の囲み(#1044 段4)── 章の窓で高さ合わせが効くかを見るため(本体でしか受け手が
+        //    無かったので、窓では高さ 0 の空の箱だった ── 着地前レビュー)
+        '```html\n<div style="height:120px">箱の中</div>\n```\n\n## 次回\n\n来週。\n',
+    );
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   await expect(page.locator('[data-pkc-field="detail-body"] h1')).toHaveText('議事録');
   const noteA = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').first();
@@ -695,8 +700,42 @@ test('🔴 見出しの「この章を編集する」→ 打つ → 別のノー
   await page.locator(`[data-pkc-region="entry-list"] [data-pkc-entry="${noteALid}"]`).click();
   await expect(page.locator('[data-pkc-field="detail-body"] h1')).toHaveText('議事録');
 
-  // ① 見出し「決定事項」を右クリック →「この章を編集する」
   const head2 = page.locator('[data-pkc-field="detail-body"] h2', { hasText: '決定事項' });
+
+  /**
+   * ⓪ 🔴 **章を別のウィンドウで(#1044 段4)** ── この起動に相乗りする(smoke-budget を
+   *   増やさない)。unit では届かない 3 つを見る:
+   *   ① **本物の popup** に章だけが出る(前置き・次回は出ない)
+   *   ② 下の ⑤ で章を保存したら、**窓も新しくなる**(横に置いて読む ── 追従)
+   *   ③ 窓の「元のウィンドウで開く」が**別の document の要素のまま**本体の受け手に届く
+   *      (happy-dom は同じ realm なので、ここでしか言えない)
+   */
+  const popupWait = page.waitForEvent('popup');
+  await head2.click({ button: 'right' });
+  await page.locator(`${MENU} button[data-pkc-action="open-chapter-window"]`).click();
+  const chapterWin = await popupWait;
+  const chapterBody = chapterWin.locator('[data-pkc-field="chapter-window-body"]');
+  await expect(chapterBody, '章の窓に章が出ていない').toContainText('牛乳を買う');
+  await expect(chapterBody, '章の窓に前の章が混ざった').not.toContainText('前置き。');
+  await expect(chapterBody, '章の窓に次の章が混ざった').not.toContainText('来週。');
+  await expect(chapterWin, '窓の題名が「ノート › 見出し」でない').toHaveTitle(/› 決定事項$/);
+  // 🔴 html の囲みは、窓でも中身の高さになる(高さ合わせの受け手が窓にも付いている)
+  const frame = chapterBody.locator('iframe');
+  await expect(frame, '前提が崩れている(html の囲みが窓に無い)').toHaveCount(1);
+  await expect
+    .poll(async () => (await frame.boundingBox())?.height ?? 0, {
+      message: '章の窓の html の囲みが高さ 0 のまま(中身が見えない)',
+    })
+    .toBeGreaterThan(60);
+  // ⚠ 読むだけ ── 本文を書き換える口が 1 つも無い(⧉ も取り除かれている)
+  await expect(
+    chapterWin.locator(
+      '[data-pkc-action="toggle-task"], [data-pkc-action="edit-cell"], [data-pkc-action="edit-code-block"], [data-pkc-action="copy-md-block"], [data-pkc-action="edit-section"]',
+    ),
+    '読むだけの窓に書く口が出た',
+  ).toHaveCount(0);
+
+  // ① 見出し「決定事項」を右クリック →「この章を編集する」
   await head2.click({ button: 'right' });
   const menu = page.locator(MENU);
   await expect(menu, '「この章を編集する」が出ていない').toContainText('この章を編集する');
@@ -784,12 +823,39 @@ test('🔴 見出しの「この章を編集する」→ 打つ → 別のノー
     'パンを買う',
   );
   await expect(page.locator('[data-pkc-field="detail-body"]'), '前置きが消えた').toContainText('前置き。');
+  // ⓪-② 🔴 章を保存したら、横に置いた章の窓も新しくなる(#1044 段4)
+  await expect(chapterBody, '章を保存したのに、章の窓が古いまま').toContainText('パンを買う');
 
   await page.locator(`[data-pkc-region="entry-list"] [data-pkc-entry="${noteALid}"]`).click({ button: 'right' });
   await page.locator(`${MENU} button[data-pkc-action="show-history"]`).click();
   await expect(page.locator('[data-pkc-field="history-panel"]'), '履歴が動いていない').toContainText(
     '履歴 1 件',
   );
+
+  /**
+   * ⓪-③ 🔴 **窓の「元のウィンドウで開く」が本体の受け手に届く**(#1044 段4)。
+   *   本体を別のノートへ移してから押すと、本体がそのノートへ戻る。
+   */
+  await page.locator('[data-pkc-action="hide-history"]').click();
+  await noteB.click();
+  await expect(page.locator('[data-pkc-field="detail-body"]'), '前提が崩れている(B へ移れていない)').toContainText(
+    'べつのノート',
+  );
+  await chapterWin
+    .locator('[data-pkc-field="chapter-window-head"] button[data-pkc-action="navigate-entry-ref"]')
+    .click();
+  await expect(
+    page.locator('[data-pkc-field="detail-body"] h1'),
+    '窓の「元のウィンドウで開く」が本体に届いていない',
+  ).toHaveText('議事録');
+  /**
+   * Esc で窓が閉じる。⚠ **`press` ではなく `down`** ── 窓は keydown で閉じるので、
+   *   `press`(down + up)は up を送る前に相手が消えて「page closed」で落ちる
+   *   (1 稿目で踏んだ。閉じる作りのほうは正しい)。
+   */
+  const closed = chapterWin.waitForEvent('close');
+  await chapterWin.keyboard.down('Escape');
+  await closed;
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

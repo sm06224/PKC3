@@ -752,6 +752,12 @@ export const HEADING_MENU_ACTIONS: readonly EntryAction[] = [
    *   `####` 以下に出すと、押しても指す先が無い(`headingMenuActions` の `linkable`)。
    */
   { action: 'copy-section-ref', label: '章の参照をコピー' },
+  /**
+   * 🔴 **その章を、読むだけの別のウィンドウで開く**(#1044 段4。裁定 Q3「読むだけ」)。
+   * ⚠ 「書きながら同じノートの別の章を横に置いて読む」ための物 ── 書くのはいまのウィンドウの
+   *   章の欄で(設計 doc §10)。
+   */
+  { action: 'open-chapter-window', label: 'この章を別のウィンドウで開く' },
 ];
 
 /**
@@ -782,6 +788,8 @@ export const HEADING_MENU_ACTIONS: readonly EntryAction[] = [
  *   なる口を出さない ── #426 段②の「押しても何も起きない口は畳む」と同じ作法)。
  *   `appendable` は使えない(append-mode の可否は archetype に依存するが、章だけ編集は
  *   `edit-from-heading` と同じくどの archetype でも成り立つ)。
+ * @param chapterWindow 🔴 **その章を別のウィンドウで開けるか**(#1044 段4)。⚠ 章の範囲は
+ *   章の欄と同じ関数で決めるので、`sectionEditable` と**同じ形の条件**を渡す。
  */
 export function headingMenuActions(ctx: {
   readonly folded: boolean;
@@ -789,6 +797,7 @@ export function headingMenuActions(ctx: {
   readonly appendable: boolean;
   readonly linkable: boolean;
   readonly sectionEditable: boolean;
+  readonly chapterWindow: boolean;
 }): readonly EntryAction[] {
   const out: EntryAction[] = [];
   if (ctx.sectionEditable) out.push({ action: 'edit-section', label: 'この章を編集する' });
@@ -809,6 +818,9 @@ export function headingMenuActions(ctx: {
   }
   // 🔴 章の参照(#579)── 畳めるかとは無関係(引用や `:::` の中の見出しにも id は刻まれる)
   if (ctx.linkable) out.push({ action: 'copy-section-ref', label: '章の参照をコピー' });
+  // 🔴 章の別ウィンドウ(#1044 段4)── 章の欄と同じ形の条件(書けるかどうかには依らない)
+  if (ctx.chapterWindow)
+    out.push({ action: 'open-chapter-window', label: 'この章を別のウィンドウで開く' });
   return out;
 }
 

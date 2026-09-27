@@ -474,6 +474,12 @@ describe('本文の器の全数(印の付け忘れを数で止める)', () => {
       prose: true,
       why: '配る HTML の本文(#body)と「全体を印刷」の箱',
     },
+    'src/adapter/platform/chapter-window.ts': {
+      host: /className = 'pkc-md-rendered'/g,
+      prose: true,
+      // ⚠ 読む面と**同じ user の文書**(その章)を出す窓なので、読む面と同じ印を持つ(#1044 段4)
+      why: '章の別ウィンドウの本文(user のノートの章)',
+    },
   };
 
   /** src 配下で本文の器を名乗っている file(新しい面を勝手に増やせない)。 */

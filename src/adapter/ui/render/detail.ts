@@ -39,7 +39,7 @@ import { isSystemMessageLid, titleForMessageLid } from '@features/message/messag
  * ⚠ 片方だけ呼ぶ面が生まれると、その面でだけグラフが空のままになる
  *   (2026-08 に mermaid で実際に起きた「器が空のまま残る」の再演)。
  */
-function hydrateFigures(root: ParentNode | readonly ParentNode[]): MermaidScope[] {
+export function hydrateFigures(root: ParentNode | readonly ParentNode[]): MermaidScope[] {
   // ⚠ **数式もここに束ねる**(#707)── 面は 6 か所あるので、別の口を作ると
   //    そのうち 1 つで数式だけ字のまま残る(まさに mermaid が踏んだ形)。
   return [hydrateMermaid(root), hydrateChart(root), hydrateMath(root)];
@@ -163,8 +163,65 @@ const ALREADY_WHOLE_NOTE = 'すでに原文全体を編集しています';
  * 🔑 **1 か所で決める** ── 面ごとに `state.cid ?? ''` を書くと、片方だけ
  *   書き換える変異が「もう片方は正しい」ので気づかれにくい。
  */
-function selfContainerId(state: AppState): string {
+export function selfContainerId(state: AppState): string {
   return state.cid ?? '';
+}
+
+/**
+ * 添付から中身を取るコード枠が読めなかったときの断り文。
+ * 🔑 本文の面と章の別ウィンドウ(#1044 段4)で**同じ 1 本**を使う。
+ */
+export function fenceAssetUnreadableText(why: string): string {
+  return `このコードブロックの中身(添付)を読み込めません: ${why}`;
+}
+
+/**
+ * 🔴 **読む面の描画の設定を、押せる形の旗を除いて 1 か所で組む**(#1044 段4)。
+ *
+ * 本文の面(`DetailRenderer`)と章の別ウィンドウ(`chapter-windows.ts`)が**同じ値**で描く
+ * ── 別々に組むと、見出しの番号・`{{vars}}`・外部画像の扱いが窓だけ食い違う(§7)。
+ * ⚠ **押せる形の旗(`interactive*`)はここに入れない** ── 受け手(binder)が居る面だけが
+ *   足す。章の別ウィンドウには受け手が居ないので、押せない形のまま出る。
+ */
+export function readingRenderOptions(
+  body: string,
+  env: { readonly allowExternalImages: boolean; readonly currentContainerId: string },
+): {
+  vars: Record<string, string>;
+  sourceLineAnchors: true;
+  headingNumber: ReturnType<typeof extractHeadingNumberConfig>;
+  allowExternalImages: boolean;
+  currentContainerId: string;
+  phoneLinks: boolean;
+} {
+  return {
+    vars: extractVars(body),
+    sourceLineAnchors: true,
+    // heading-number は text レベル前処理(LineMap 不変)── 全文 body から抽出
+    headingNumber: extractHeadingNumberConfig(body),
+    /**
+     * 外部画像(2026-08-06、user 裁定)。⚠ **ノートごと**に決まる ──
+     * 「常に確認」で押した同意はこのノートにだけ効く。
+     * ⚠ 本文の画像と箱の CSP は**同じ値**で動く(片方だけ開けない)。
+     */
+    allowExternalImages: env.allowExternalImages,
+    /**
+     * 🔴 **いま開いているコンテナの id**(2026-08-08。Issue #100 段①)。
+     * これが無いと `pkc://<自分>/entry/<lid>` が**必ず**「別の PKC」の枝
+     * (押せない placeholder)へ落ちる ── 受け手(`navigate-entry-ref`)は
+     * #97 で戻っているのに、**焼かれないので 1 度も呼ばれなかった**。
+     */
+    currentContainerId: env.currentContainerId,
+    /**
+     * 🔴 **本文の素の電話番号を押せる字にするか**(#278 段②)。
+     *
+     * ⚠ 押せる形の旗と違い、**受け手はブラウザ**(`tel:` を OS へ渡す)なので
+     *   「この面だけ」ではない ── 決めているのは**設定**である。
+     * ⚠ 既定は切なので、選んでいない人の本文は 1 文字も変わらない。
+     * ⚠ 描くのはワーカーなので、渡すのは**素の真偽値**である(関数は clone できない)。
+     */
+    phoneLinks: appPhoneLinks.enabled(),
+  };
 }
 
 /**
@@ -901,25 +958,16 @@ export class DetailRenderer {
         this.bodyHost!.setAttribute('data-pkc-prose', '');
       }
       const opts = {
-        vars: extractVars(body),
-        sourceLineAnchors: true,
-        // heading-number は text レベル前処理(LineMap 不変)── 全文 body から抽出
-        headingNumber: extractHeadingNumberConfig(body),
         /**
-         * 外部画像(2026-08-06、user 裁定)。⚠ **ノートごと**に決まる ──
-         * 「常に確認」で押した同意はこのノートにだけ効く。
-         * ⚠ 本文の画像と箱の CSP は**同じ値**で動く(片方だけ開けない)。
-         */
-        allowExternalImages: this.externalImages.allows(lid),
-        /**
-         * 🔴 **いま開いているコンテナの id**(2026-08-08。Issue #100 段①)。
-         * これが無いと `pkc://<自分>/entry/<lid>` が**必ず**「別の PKC」の枝
-         * (押せない placeholder)へ落ちる ── 受け手(`navigate-entry-ref`)は
-         * #97 で戻っているのに、**焼かれないので 1 度も呼ばれなかった**。
-         * ⚠ 指紋には足さない ── コンテナが変わる `SYS_BOOTED` は
+         * 🔑 **押せる形の旗を除いた設定は 1 か所で組む**(#1044 段4)── 章の別ウィンドウも
+         *   同じ関数で描く(`readingRenderOptions` の注記)。
+         * ⚠ 指紋には足さない(コンテナの id)── コンテナが変わる `SYS_BOOTED` は
          *   `selectedLid` / `openBody` を捨てるので、指紋は必ず一緒に動く。
          */
-        currentContainerId: selfContainerId(state),
+        ...readingRenderOptions(body, {
+          allowExternalImages: this.externalImages.allows(lid),
+          currentContainerId: selfContainerId(state),
+        }),
         /**
          * 🔴 **チェックの印を押せるようにする**(#277。2026-08-19)。
          * ⚠ **この面だけ**である ── 書き出した HTML・Viewer・印刷には
@@ -956,15 +1004,6 @@ export class DetailRenderer {
          *   受け手(`filter-by-tag`)が居ないので、押せない形のまま出す。
          */
         interactiveTags: true,
-        /**
-         * 🔴 **本文の素の電話番号を押せる字にするか**(#278 段②)。
-         *
-         * ⚠ 上の 3 つと違い、**受け手はブラウザ**(`tel:` を OS へ渡す)なので
-         *   「この面だけ」ではない ── 決めているのは**設定**である。
-         * ⚠ 既定は切なので、選んでいない人の本文は 1 文字も変わらない。
-         * ⚠ 描くのはワーカーなので、渡すのは**素の真偽値**である(関数は clone できない)。
-         */
-        phoneLinks: appPhoneLinks.enabled(),
         /**
          * 🔴 **押した行を原文の行で焼く**(N1)。この面は `fm.body`(frontmatter を
          * 剥がした本文)を描くが、受け手(`body-rewrite.ts`)は**原文**を splice する。
@@ -2600,7 +2639,7 @@ export class DetailRenderer {
       if (!pending) return;
       pending.setAttribute('data-pkc-fence-asset-error', '');
       pending.removeAttribute('data-pkc-fence-asset-pending');
-      pending.textContent = `このコードブロックの中身(添付)を読み込めません: ${why}`;
+      pending.textContent = fenceAssetUnreadableText(why);
     };
     const assets = this.assets;
     await Promise.all(

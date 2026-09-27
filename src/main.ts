@@ -221,9 +221,11 @@ import {
   bindActions,
   leaveLauncherIf,
   generateLid,
+  runChapterWindowAction,
   runGlobalCommand,
   type BinderServices,
 } from '@adapter/ui/actions/binder';
+import { ChapterWindows } from '@adapter/ui/chapter-windows';
 import { createCaptureService } from '@adapter/ui/actions/capture';
 import { createCaptureTrimmer } from '@adapter/ui/actions/capture-trim';
 import { AudioClient } from '@adapter/platform/audio/audio-client';
@@ -2550,7 +2552,50 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     if (tileSelectsEntry(tile)) dispatcher.dispatch({ type: 'SELECT_ENTRY', lid });
   };
 
+  /**
+   * 🔴 **章の別ウィンドウ(読むだけ)**(#1044 段4。設計 doc §10)。
+   *
+   * 🔑 アプリをもう 1 つ起動しない ── こちらが空の窓を掴んで中身を組む。描画は本文の面と
+   *   **同じ口**(`markdown`)、添付は**同じ貸し手**(`assetLender`)を使う。
+   * ⚠ 窓の中で押された口は、本体で押したときと**同じ受け手**で走らせる
+   *   (`runChapterWindowAction`)── `services` / `root` はここより後で決まるが、呼ばれるのは
+   *   押されたとき(組み上がった後)なので、閉じ込めて読めばよい。
+   */
+  const chapterWindows = new ChapterWindows({
+    getState: () => dispatcher.getState(),
+    getBody: async (lid) => {
+      // 🔴 **書込の列を待ってから読む** ── `getBody` は列の外なので、並んでいる書込を
+      //    追い越すと古い本文を出す(書き出しの `settle` と同じ理由 ── 2026-08-17 実測)
+      await storeEffects?.settled();
+      return (await client.request({ op: 'getBody', cid, lid })) ?? null;
+    },
+    render: (text, opts) => markdown.render(text, opts),
+    allowExternalImages: (lid) => appExternalImages.allows(lid),
+    lend: (key) => assetLender.lend(key),
+    getBlob: (key) => assetLender.getBlob(key),
+    runAction: (el) => {
+      if (!runChapterWindowAction(dispatcher, el, services, root)) return;
+      // 🔑 よそへ移る口は、移った先(このウィンドウ)を手前へ出す
+      if ((el.getAttribute('data-pkc-action') ?? '').startsWith('navigate-')) {
+        try {
+          window.focus();
+        } catch {
+          // 前へ出せない環境が在る ── 移る動き自体は済んでいる
+        }
+      }
+    },
+    fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
+  });
+  dispatcher.onState((state) => chapterWindows.onState(state));
+  window.addEventListener('pagehide', (ev) => {
+    // ⚠ **bfcache へ入るだけ(`persisted`)なら戻ってくる** ── そのときは窓に
+    //    「もう新しくならない」と言わない(`window-close.ts` が踏んだ `pagehide` の罠)
+    if (!ev.persisted) chapterWindows.orphanAll();
+  });
+
   const services: BinderServices = {
+    /** 🔴 章を読むだけの別のウィンドウで(#1044 段4)── 窓は**同期で**掴む。 */
+    openChapterWindow: (lid, line) => void chapterWindows.open(lid, line),
     attachFiles: (files, why, at, intoLid) =>
       void withAssetGate(() => attachFiles(dispatcher, attachDeps, files, why, at, intoLid)),
     // 🔴 録音・画面収録(#413)── 押す口は左の列の「添付」の隣に在る
@@ -2903,7 +2948,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   ⚠ 添付の窓(`viewAsset`)とは**別の名前**である ── 同じにすると、
      *   添付を見ながら図を開いたときに**添付の窓が図に置き換わる**。
      */
-    viewBig: (src, title, diagram) => {
+    viewBig: (src, title, diagram, from) => {
       void (async () => {
         try {
           /**
@@ -2954,6 +2999,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             // 🔴 実寸で出し、拡大縮小できるようにする(既定の `'contain'` は添付用)
             fit: 'natural',
             windowName: 'pkc3-view-big',
+            /**
+             * 🔴 **押した窓から開く**(#1044 段4 着地前レビュー)── 章の別ウィンドウで押したとき、
+             *   押した操作の続きは**その窓**にしか付かない。本体から `window.open` すると
+             *   ポップアップ阻止に掛かり、窓を見ている user には何も起きないように見える。
+             */
+            ...(from !== undefined && from !== window
+              ? { open: (u: string, t: string, f: string) => from.open(u, t, f) }
+              : {}),
           });
           if (!win) {
             dispatcher.dispatch({
@@ -3863,8 +3916,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * ⚠ **asset gate の外**でよい ── store も添付も触らず、原文から焼き直すだけ。
      * ⚠ 画面の PNG キャッシュは使わない(user 指示: 書き出しはベクタ)。
      */
-    exportDiagram: (source, index) => {
-      const lid = dispatcher.getState().selectedLid;
+    exportDiagram: (source, index, diagramLid) => {
+      // 🔑 図の載っているノート(押した所から引いた lid)を優先する ── 章の別ウィンドウ・留めた枠の
+      //    図に、本体で**いま選んでいる**ノートの題名を付けない(#1044 段4 着地前レビュー)
+      const lid = diagramLid ?? dispatcher.getState().selectedLid;
       const title = (lid ? dispatcher.getState().entryMetas.get(lid)?.title : '') || '図';
       // ⚠ **Promise を返す**(P8 段⑬ review M-3)── 押した側が待ちを出せるように。
       //    投げない(失敗は OP_FAILED で可視化する)ので、呼び側は finally だけでよい

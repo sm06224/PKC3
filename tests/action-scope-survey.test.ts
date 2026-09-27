@@ -253,7 +253,9 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
     // ⚠ 2026-09-26(#1044 段3): P1 +1(`edit-code-block`。押した枠 1 つが要る ──
     //   `edit-section` と同じ仕分け)/ N +2(`save-code-draft` / `cancel-code-draft`。
     //   どちらも押した所から何も要らない ── 効く先はいま開いているコードの下書きで決まる)。
-    expect(counts()).toEqual({ P1: 61, P2: 33, E: 25, V: 10, N: 149 });
+    // ⚠ 2026-09-27(#1044 段4): P1 +1(`open-chapter-window`。押した見出しの行が要る ──
+    //   `edit-section` と同じ仕分け)。
+    expect(counts()).toEqual({ P1: 62, P2: 33, E: 25, V: 10, N: 149 });
   });
 
   it('🔴 名指しの錨 ── 件数が同じまま入れ替わっても落ちる', () => {

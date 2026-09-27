@@ -312,6 +312,12 @@ const UNREGISTERED_POINT: readonly string[] = [
    * 「このコードを編集する」と呼んでも、どの枠かが決まらない)。
    */
   'edit-code-block',
+  /**
+   * ⚠ **2026-09-27(#1044 段4)で 1 件増やした** ── 章を別のウィンドウで。`edit-section` と
+   *   同じ仕分け(押した見出しの行を `menuCarriedLine` が運ぶ ── パレットから
+   *   「この章を別のウィンドウで開く」と呼んでも、どの章かが決まらない)。
+   */
+  'open-chapter-window',
   'edit-from-heading', 'export-diagram', 'filter-by-tag', 'move-app-group-down',
   'move-app-group-up', 'move-tile-down', 'move-tile-up', 'navigate-asset-ref',
   'navigate-card-ref', 'navigate-entry-ref', 'open-alarm', 'open-office', 'open-repeat-menu',
@@ -358,6 +364,8 @@ describe('操作の全数台帳(#582 段①)', () => {
       outsideActionsTable: x.outsideActionsTable.length,
       unregistered: x.unregistered,
     }).toEqual({
+      // ⚠ 2026-09-27(#1044 段4): 章を別のウィンドウで(`open-chapter-window`)で受け手 +1
+      //   (登記は増えない ── 押し口は見出しの右クリックの中にしか無く、押した見出しが要る P1)
       // ⚠ 2026-09-21(#1032): 「ノートを閉じる」(`deselect-entry`)で登記 +1 / total +1。
       //   受け手は増えない ── 押し所を作らない直しなので、マウスの側は「一覧の
       //   何も無い所を押す」(`data-pkc-action` を持たない)である
@@ -521,12 +529,12 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   同じ理由(枠を指す・コード枠の欄が要る ── パレットからは撃てない)で
       //   登記簿には載せない。`receivers` +3 / `total` +3 / `unregistered` +3、
       //   `registered` / `both` / `outsideActionsTable` は動かない。
-      total: 331,
-      receivers: 278,
+      total: 332,
+      receivers: 279,
       registered: 91,
       both: 38,
       outsideActionsTable: 53,
-      unregistered: 240,
+      unregistered: 241,
     });
   });
 

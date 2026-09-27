@@ -44,9 +44,11 @@ describe('図の書き出し(P8 段⑦)', () => {
     buttons[1]!.click();
     // ⚠ 1 枚目を渡していないこと(index も原文も)を**両方**見る ── 片方だけだと
     // 「常に 0 を渡す」実装が原文の一致で素通りする
-    expect(exportDiagram).toHaveBeenCalledWith('pie\n "x": 1', 1);
+    // ⚠ 3 つ目は図の載っているノート(#1044 段4)── 本体の器は持ち主の印を持たないので
+    //    `undefined`(受け手が本体で選んでいるノートへ落とす)
+    expect(exportDiagram).toHaveBeenCalledWith('pie\n "x": 1', 1, undefined);
     buttons[0]!.click();
-    expect(exportDiagram).toHaveBeenLastCalledWith('graph TD\n A-->B', 0);
+    expect(exportDiagram).toHaveBeenLastCalledWith('graph TD\n A-->B', 0, undefined);
   });
 
   it('原文の無い器では何も起きない(空の図を書き出さない)', () => {

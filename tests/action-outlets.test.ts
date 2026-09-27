@@ -162,7 +162,8 @@ const OBJECT_LONE: readonly string[] = [
   'insert-entry-link',
   // ⚠ `move-entry` は #813(2026-09-09)で受け手ごと外した ── プルダウンを消したので
   //    焼く所が 0 件になった(残る口は `move-to-folder` と D&D)
-  'navigate-entry-ref',
+  // ⚠ `navigate-entry-ref` は 2026-09-27(#1044 段4)に章の別ウィンドウの「元のウィンドウで開く」
+  //    (`chapter-window.ts`)が 2 つ目の出口になったので外した
   'open-alarm',
   /**
    * ⚠ **2026-09-13(#855 段 0 の 3 つ目)に足した 2 件**(下の `set-task-repeat` と 1 組)。
