@@ -157,4 +157,21 @@ describe('locateCodeFence(#1044 段3。replaceCodeFenceContent と同じ探し�
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.fence.start).toBe(1);
   });
+
+  it('🔴 CRLF 改行のノートでも正しく開き、元の改行コードを保って差し替える(#1075)', () => {
+    const crlfBody = ['# Windows で作ったノート', '', '```js', 'const x = 1;', '```', '', '続き'].join('\r\n');
+    const id = openCodeFenceAt(crlfBody, 2);
+    expect(id, 'CRLF の枠を開けなかった').not.toBeNull();
+    expect(id!.original).toBe('const x = 1;');
+
+    const r = replaceCodeFenceContent(crlfBody, id!, 'const x = 2;\nconst y = 3;');
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.body).toBe(
+        ['# Windows で作ったノート', '', '```js', 'const x = 2;', 'const y = 3;', '```', '', '続き'].join('\r\n'),
+      );
+      expect(r.body.includes('\r\n')).toBe(true);
+    }
+  });
 });
+

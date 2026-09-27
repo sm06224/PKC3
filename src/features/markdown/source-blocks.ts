@@ -50,6 +50,17 @@
 
 import { classifyDirectiveOpen } from './directive-open';
 
+/**
+ * 🔴 **本文を行に割る**(#1075)。
+ *
+ * ⚠ `body.split('\n')` は CRLF のときに `\r` を行末に残し、
+ *   正規表現の `$` や字の突き合わせがことごとく壊れる(#1075)。
+ *   CommonMark 準拠の行分割(`\r?\n`)で割る。
+ */
+export function splitLines(text: string): string[] {
+  return text.split(/\r?\n/);
+}
+
 /** 囲いの範囲(行は 0 始まり・両端含む)。 */
 export interface ContainerSpan {
   readonly start: number;
@@ -123,7 +134,7 @@ function isSelfContained(line: string): boolean {
  * (中の囲いは外側の範囲に含まれるので、分割には外側だけが要る)。
  */
 export function scanContainers(text: string): ContainerSpan[] {
-  const lines = text.split('\n');
+  const lines = splitLines(text);
   const out: ContainerSpan[] = [];
   let i = 0;
   while (i < lines.length) {
@@ -340,7 +351,7 @@ export function allFences(body: string): FenceSpan[] {
       i = j + 1;
     }
   };
-  walk(body.split('\n'), 0, 0);
+  walk(splitLines(body), 0, 0);
   // 🔑 **文書順**に返す(引用へ降りる分は後から積まれるので並べ直す)
   return out.sort((a, b) => a.start - b.start);
 }
@@ -380,7 +391,7 @@ export interface BlockSpan {
  * @returns その行が `:::` の開きでなければ `null`
  */
 export function blockSpanAt(body: string, openLine: number): BlockSpan | null {
-  const lines = body.split('\n');
+  const lines = splitLines(body);
   if (openLine < 0 || openLine >= lines.length) return null;
   let from = 0;
   let to = lines.length - 1;
@@ -402,7 +413,8 @@ export function blockSpanAt(body: string, openLine: number): BlockSpan | null {
 
 /** 行範囲(両端含む)を原文のまま切り出す。⚠ 末尾の改行は付けない(行の並びそのもの)。 */
 export function sliceLines(body: string, span: { readonly start: number; readonly end: number }): string {
-  return body.split('\n').slice(span.start, span.end + 1).join('\n');
+  const eol = body.includes('\r\n') ? '\r\n' : '\n';
+  return splitLines(body).slice(span.start, span.end + 1).join(eol);
 }
 
 /** 行内の対になる記号。⚠ **fence の中では数えない**(コードの `**` は装飾ではない)。 */
@@ -443,7 +455,7 @@ export function findOpenEnds(text: string): OpenEnd[] {
       });
     }
   }
-  const lines = text.split('\n');
+  const lines = splitLines(text);
   for (let i = 0; i < lines.length; i += 1) {
     // 囲いの中(fence)は数えない。`:::` の中身は普通の本文なので数える
     const c = containerAtLine(spans, i);

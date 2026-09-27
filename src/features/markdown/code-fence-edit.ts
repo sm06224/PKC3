@@ -160,10 +160,11 @@ export function replaceCodeFenceContent(
   const openLead = quoteLead(lines[target.start]!, target.quote) ?? 0;
   const leadStr = lines[target.start]!.slice(0, openLead);
   const newInner = text.split(/\r?\n/).map((l) => leadStr + l);
+  const eol = body.includes('\r\n') ? '\r\n' : '\n';
   const newBody = [
     ...lines.slice(0, target.start + 1),
     ...newInner,
     ...lines.slice(target.end),
-  ].join('\n');
+  ].join(eol);
   return { ok: true, body: newBody };
 }

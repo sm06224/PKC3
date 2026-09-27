@@ -68,6 +68,17 @@ describe('fence の範囲', () => {
     expect(spans[0]!.open).toBe(true);
     expect(spans[0]!.end).toBe(t.split('\n').length - 1);
   });
+
+  it('🔴 CRLF 改行でも fence を見落とさず正しく検出する(#1075)', () => {
+    const t = '前\r\n```js\r\nconst a = 1;\r\n```\r\n後\r\n';
+    const spans = scanContainers(t);
+    expect(spans).toHaveLength(1);
+    expect(spans[0]).toMatchObject({ start: 1, end: 3, kind: 'fence', open: false, name: 'js' });
+
+    const fences = allFences(t);
+    expect(fences).toHaveLength(1);
+    expect(fences[0]).toMatchObject({ start: 1, end: 3, kind: 'fence', open: false, name: 'js' });
+  });
 });
 
 describe('`:::` の範囲', () => {
