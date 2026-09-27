@@ -15,6 +15,7 @@ import {
   CHAPTER_HEAD_FIELD,
   CHAPTER_NOTE_FIELD,
   CHAPTER_ORPHAN_FIELD,
+  CHAPTER_READONLY_FIELD,
   CHAPTER_WINDOW_ACTIONS,
   CHAPTER_WINDOW_TEXT,
   chapterWindowBuilt,
@@ -102,6 +103,33 @@ describe('窓を組む', () => {
     expect(jump?.getAttribute('data-pkc-action')).toBe('navigate-entry-ref');
     expect(jump?.getAttribute('data-pkc-entry-ref')).toBe('entry:n1#h/sho');
     expect(jump?.textContent).toBe(CHAPTER_WINDOW_TEXT.jump);
+  });
+
+  /**
+   * 🔴 **頭の帯で「読むだけ」と言う**(#1080。user 裁定 2026-09-27「推奨で」)。
+   * ⚠ 直す前は、読むだけだと分かる手がかりが押せないチェックくらいしか無かった。
+   */
+  it('🔴 章を出しているときは、出口の隣に「読むだけ」が出る(乗せると出口の字で説明する)', () => {
+    const win = fakeWindow();
+    paint(win, '<p>x</p>');
+    const head = win.document.querySelector(`[data-pkc-field="${CHAPTER_HEAD_FIELD}"]`)!;
+    const label = head.querySelector(`[data-pkc-field="${CHAPTER_READONLY_FIELD}"]`);
+    expect(label?.textContent, '「読むだけ」が出ていない').toBe(CHAPTER_WINDOW_TEXT.readOnly);
+    // ⚠ 出口の**隣**(直前)── 離れていると何が読むだけなのか読めない
+    expect(label?.nextElementSibling?.textContent).toBe(CHAPTER_WINDOW_TEXT.jump);
+    // ⚠ 押し所ではない(押せる見た目にしない)
+    expect(label?.hasAttribute('data-pkc-action')).toBe(false);
+    expect(label?.tagName).toBe('SPAN');
+    // 🔑 説明は画面に在るボタンの字で出口を言う(無いボタンを探させない)
+    expect(label?.getAttribute('title') ?? '').toContain(`「${CHAPTER_WINDOW_TEXT.jump}」`);
+  });
+
+  it('⚠ 章の代わりの一文のときは「読むだけ」を出さない(読む物が無い)', () => {
+    for (const kind of ['loading', 'missing', 'gone'] as const) {
+      const win = fakeWindow();
+      paintChapterWindow(win, { title: 't', noteTitle: 'n', key: 'k', content: { kind } });
+      expect(win.document.querySelector(`[data-pkc-field="${CHAPTER_READONLY_FIELD}"]`), kind).toBeNull();
+    }
   });
 });
 
@@ -215,6 +243,11 @@ describe('押し所の配線', () => {
     markChapterWindowOrphaned(win);
     expect(win.document.querySelectorAll('[data-pkc-action]'), '押し所が残っている').toHaveLength(0);
     expect(win.document.body.textContent, 'リンクの字まで消えた').toContain('別');
+    // 🔑 「読むだけ」は残す ── 元のウィンドウが閉じても読むだけであることは変わらない(#1080)
+    expect(
+      win.document.querySelector(`[data-pkc-field="${CHAPTER_READONLY_FIELD}"]`)?.textContent,
+      '元のウィンドウが閉じたら「読むだけ」まで消えた',
+    ).toBe(CHAPTER_WINDOW_TEXT.readOnly);
   });
 
   it('🔴 組み直したら「もう新しくならない」の一文は消える(読み直した元のウィンドウが追従を再開した)', () => {

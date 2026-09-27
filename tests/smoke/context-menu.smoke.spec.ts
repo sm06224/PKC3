@@ -719,6 +719,11 @@ test('🔴 見出しの「この章を編集する」→ 打つ → 別のノー
   await expect(chapterBody, '章の窓に前の章が混ざった').not.toContainText('前置き。');
   await expect(chapterBody, '章の窓に次の章が混ざった').not.toContainText('来週。');
   await expect(chapterWin, '窓の題名が「ノート › 見出し」でない').toHaveTitle(/› 決定事項$/);
+  // 🔴 頭の帯で「読むだけ」と言う(#1080)── 実物の窓で、出口の隣に見えている
+  await expect(
+    chapterWin.locator('[data-pkc-field="chapter-window-head"] [data-pkc-field="chapter-window-readonly"]'),
+    '章の窓の頭に「読むだけ」が見えていない',
+  ).toHaveText('読むだけ');
   // 🔴 html の囲みは、窓でも中身の高さになる(高さ合わせの受け手が窓にも付いている)
   const frame = chapterBody.locator('iframe');
   await expect(frame, '前提が崩れている(html の囲みが窓に無い)').toHaveCount(1);

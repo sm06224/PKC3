@@ -56,6 +56,13 @@ export const CHAPTER_NOTE_FIELD = 'chapter-window-note';
 export const CHAPTER_ORPHAN_FIELD = 'chapter-window-orphan';
 
 /**
+ * 🔴 **この窓は読むだけ、と頭の帯で言う字**(#1080。user 裁定 2026-09-27「推奨で」)。
+ * ⚠ 直す前は、読むだけだと分かる手がかりが**押せないチェック**くらいしか無かった ──
+ *   押して何も起きないことに戸惑ってから気づく形だった。
+ */
+export const CHAPTER_READONLY_FIELD = 'chapter-window-readonly';
+
+/**
  * 🔴 **この本文はどのノートの物か**(本文の器に付く)。⚠ `lidOfNode` が読む ──
  *   窓で押した口(図を保存する等)が、本体で**いま選んでいる**ノートではなく**この章の
  *   ノート**に効くように(着地前レビュー:図の名前が本体のノートの題名になっていた)。
@@ -135,6 +142,7 @@ body{background:var(--bg,Canvas);color:var(--fg,CanvasText)}
 [data-pkc-field="${CHAPTER_HEAD_FIELD}"]{position:sticky;top:0;z-index:1;display:flex;gap:8px;align-items:center;padding:6px 12px;border-bottom:1px solid var(--border,rgba(128,128,128,.35));background:var(--bg,Canvas);font-size:12px;color:var(--muted,GrayText)}
 [data-pkc-field="${CHAPTER_HEAD_FIELD}"] strong{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:var(--fg,CanvasText)}
 [data-pkc-field="${CHAPTER_HEAD_FIELD}"] button{font:inherit;color:inherit;background:transparent;border:1px solid var(--border,rgba(128,128,128,.35));border-radius:4px;padding:2px 8px;cursor:pointer}
+[data-pkc-field="${CHAPTER_READONLY_FIELD}"]{white-space:nowrap}
 [data-pkc-field="${CHAPTER_ORPHAN_FIELD}"]{padding:6px 12px;font-size:12px;color:var(--fg,CanvasText);background:var(--muted-bg,rgba(128,128,128,.15))}
 [data-pkc-field="${CHAPTER_BODY_FIELD}"]{padding:12px 16px}
 [data-pkc-field="${CHAPTER_NOTE_FIELD}"]{padding:24px 16px;color:var(--muted,GrayText)}
@@ -196,6 +204,9 @@ export const CHAPTER_WINDOW_TEXT = {
   gone: 'このノートはもうありません。',
   orphan: '元のウィンドウを閉じたため、このウィンドウの中身はもう新しくなりません。',
   jump: '元のウィンドウで開く',
+  readOnly: '読むだけ',
+  /** 乗せたときの説明。⚠ 出口はボタンの字(`jump`)で言う ── 無いボタンを探させない。 */
+  readOnlyHint: 'このウィンドウでは書けません。直すときは「元のウィンドウで開く」を押してください。',
   offChapter: 'この章の外を指すリンクです(元のウィンドウで見てください)',
 } as const;
 
@@ -261,7 +272,17 @@ export function paintChapterWindow(
     jump.setAttribute('data-pkc-action', 'navigate-entry-ref');
     jump.setAttribute('data-pkc-entry-ref', parts.content.jumpRef);
     jump.textContent = CHAPTER_WINDOW_TEXT.jump;
-    head.append(jump);
+    /**
+     * 🔴 **「読むだけ」を出口の隣に薄く添える**(#1080)── 帯の地の字(薄い色)のまま。
+     * ⚠ 章を出しているときだけ ── 「見つかりません」「開いています」では読む物が無い。
+     * ⚠ 元のウィンドウが閉じても**残す**(`markChapterWindowOrphaned` はボタンだけ外す)
+     *   ── 読むだけであることは変わらない。
+     */
+    const readOnly = document.createElement('span');
+    readOnly.setAttribute('data-pkc-field', CHAPTER_READONLY_FIELD);
+    readOnly.textContent = CHAPTER_WINDOW_TEXT.readOnly;
+    readOnly.title = CHAPTER_WINDOW_TEXT.readOnlyHint;
+    head.append(readOnly, jump);
   }
   doc.body.append(head);
 
