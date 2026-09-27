@@ -105,6 +105,16 @@ describe('link-preview', () => {
         '本文を読み込み中…',
       );
     });
+
+    it('closes card using closeLinkPreview', () => {
+      const root = document.createElement('div');
+      document.body.append(root);
+      const card = renderPreviewCard(document, { kind: 'entry', title: 'Card' });
+      root.append(card);
+      expect(linkPreviewOpen(root)).toBe(true);
+      closeLinkPreview(root);
+      expect(linkPreviewOpen(root)).toBe(false);
+    });
   });
 
   describe('positionPreviewCard', () => {
