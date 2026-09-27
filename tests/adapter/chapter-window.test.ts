@@ -244,10 +244,14 @@ describe('押し所の配線', () => {
     expect(win.document.querySelectorAll('[data-pkc-action]'), '押し所が残っている').toHaveLength(0);
     expect(win.document.body.textContent, 'リンクの字まで消えた').toContain('別');
     // 🔑 「読むだけ」は残す ── 元のウィンドウが閉じても読むだけであることは変わらない(#1080)
-    expect(
-      win.document.querySelector(`[data-pkc-field="${CHAPTER_READONLY_FIELD}"]`)?.textContent,
-      '元のウィンドウが閉じたら「読むだけ」まで消えた',
-    ).toBe(CHAPTER_WINDOW_TEXT.readOnly);
+    const label = win.document.querySelector(`[data-pkc-field="${CHAPTER_READONLY_FIELD}"]`);
+    expect(label?.textContent, '元のウィンドウが閉じたら「読むだけ」まで消えた').toBe(CHAPTER_WINDOW_TEXT.readOnly);
+    /**
+     * 🔴 **説明は、消したボタンを案内しない**(#1081 の動線レビュー)── 「元のウィンドウで開く」を
+     *   押してください、のままだと、いま消したボタンを探させる(行き止まり)。
+     */
+    expect(label?.getAttribute('title') ?? '', '消したボタンを案内している').not.toContain(CHAPTER_WINDOW_TEXT.jump);
+    expect(label?.getAttribute('title')).toBe(CHAPTER_WINDOW_TEXT.readOnlyOrphanHint);
   });
 
   it('🔴 組み直したら「もう新しくならない」の一文は消える(読み直した元のウィンドウが追従を再開した)', () => {
