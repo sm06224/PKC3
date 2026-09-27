@@ -7195,6 +7195,18 @@ const ACTIONS: Record<string, ActionHandler> = {
         : csrc !== ''
           ? { kind: 'chart' as const, source: csrc }
           : undefined;
+
+    // 🔴 章ウィンドウなど、別ドキュメントの窓で押されたときはその場で実寸別窓を開く
+    if (img.ownerDocument !== root.ownerDocument) {
+      services.viewBig?.(
+        img.src,
+        img.alt || '図',
+        diagram,
+        img.ownerDocument.defaultView ?? undefined,
+      );
+      return;
+    }
+
     openLightbox(
       root,
       {

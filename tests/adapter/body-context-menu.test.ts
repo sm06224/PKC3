@@ -1970,6 +1970,7 @@ describe('見出しの右クリック ── 章を別のウィンドウで(#104
     img.src = 'blob:x';
     r.root.append(img);
     img.click();
+    r.root.querySelector<HTMLButtonElement>('.pkc-lightbox-open-win-btn')?.click();
     expect(calls.length, '前提が崩れている(受け手に届いていない)').toBe(1);
     expect(calls[0]![3], '押した窓を渡していない').toBe(window);
   });
