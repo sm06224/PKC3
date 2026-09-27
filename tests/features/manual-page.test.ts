@@ -41,6 +41,8 @@ import { MANUAL_PAGE } from '../../scripts/dist-inspect.mjs';
 const TOKENS = readFileSync('src/styles/tokens.css', 'utf8');
 const APP = readFileSync('src/styles/app.css', 'utf8');
 const RENDERED = renderMarkdown(MANUAL_TEXT, {});
+const SECTIONS = manualSections(MANUAL_TEXT);
+const BODY_CSS = extractBodyCss(APP, TOKENS).css;
 
 function bake(over: Partial<Parameters<typeof buildManualPage>[0]> = {}) {
   return buildManualPage({
@@ -48,9 +50,9 @@ function bake(over: Partial<Parameters<typeof buildManualPage>[0]> = {}) {
     version: 'pkc3 v9.9.9',
     tag: 'pkc3 v9.9.9 #deadbeef',
     html: RENDERED,
-    sections: manualSections(MANUAL_TEXT),
+    sections: SECTIONS,
     tokensCss: TOKENS,
-    bodyCss: extractBodyCss(APP, TOKENS).css,
+    bodyCss: BODY_CSS,
     themeStorageKey: THEME_STORAGE_KEY,
     textScaleStorageKey: TEXT_SCALE_STORAGE_KEY,
     ...over,
@@ -70,9 +72,14 @@ describe('焼いたマニュアル — 目次と本文', () => {
     expect(rows.length, '目次が空(空振り)').toBeGreaterThan(100);
     expect(rows.length, '目次の行数が組み立ての報告と違う').toBe(page.toc);
     const main = doc.querySelector('[data-pkc-region="manual-window-main"]')!;
+    // 🔴 100件以上の目次各行で main.querySelector('[id=...]') を呼ぶと happy-dom で
+    //    3.4 秒かかり全量テストでタイムアウトする(#1058)。ID を Set に集めて O(1) で引く
+    const existingIds = new Set(
+      Array.from(main.querySelectorAll<HTMLElement>('[id]'), (el) => el.id),
+    );
     const dead = rows.filter((a) => {
       const href = a.getAttribute('href') ?? '';
-      return !href.startsWith('#') || main.querySelector(`[id="${href.slice(1)}"]`) === null;
+      return !href.startsWith('#') || !existingIds.has(href.slice(1));
     });
     expect(dead.map((a) => a.textContent), '押しても何も起きない行がある').toEqual([]);
   });
