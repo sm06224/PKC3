@@ -236,6 +236,7 @@ import {
   openContextMenu,
 } from '../render/context-menu';
 import { setupLinkPreview, closeLinkPreview } from '../render/link-preview';
+import { setupLightbox, openLightbox, closeLightbox } from '../render/lightbox';
 import { chordHint, HINT_BLOCKED } from '../render/shortcut-hint';
 import { TARGET_LID_ATTR } from '../render/target-lid';
 import { sectionBoxText, SECTION_BOX_INPUT_FIELD, SECTION_BOX_REGION } from '../render/section-box';
@@ -7181,42 +7182,44 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔑 **どの絵に印を付けるかは `render/view-big.ts` が 1 か所で決める**
    *   (編集の面では付けない ── あちらは原文が開くのが動線)。
    */
-  'view-big': (_dispatcher, target, services) => {
+  'view-big': (_dispatcher, target, services, root) => {
     const img = target.closest<HTMLImageElement>('img[data-pkc-action="view-big"]');
     if (!img || img.src === '') return;
-    /**
-     * 🔴 **図は焼いた PNG ではなく、原文から起こしたベクタを開く**
-     * (user 報告 2026-08-28「**別窓で開いた時、ラスタ化された方の画像が開くのは BAD!
-     * 巨大な MerMaid を開いたらぽしょぽしょの図になってしまったよ**」)。
-     *
-     * ⚠ 画面の `<img>` は **本文の表示幅 × dpr** で焼いてある(`mermaid-hydrate.ts` の
-     *   `width: widthOf(p.host)`)── つまり**段に収めるために縮めた図ほど粗い**。
-     *   それを拡大窓で開けば、当然そのまま粗く見える。
-     * 🔑 user 指示 2026-08-03「PNG ラスタをキャッシュして GPU で表示」の**目的は
-     *   本文のスクロール追従**である ── 拡大窓は追従の話ではなく**見るための窓**なので、
-     *   ここでベクタを使うのは指示と衝突しない(むしろ「SVG は書き出しのときだけ」の
-     *   *書き出し* と同じ「原寸で見たい」側である)。
-     * ⚠ **添付の画像は原本がベクタではない**ので、これまでどおり `src` を開く。
-     */
     const mmd = img.closest<HTMLElement>('[data-pkc-mermaid-src]');
     const chart = img.closest<HTMLElement>('[data-pkc-chart-src]');
-    /**
-     * ⚠ **図と grafu で作り直し方が違う**(2026-08-29、棚卸しで判明)。
-     * 🔑 mermaid は SVG を吐くので**ベクタ**にできるが、**chart.js はベクタを吐かない**
-     *   (`chart-raster.ts` の `savable: false` と、その注記)── なので chart は
-     *   **大きく焼き直す**しかない。
-     * 🔴 1 稿目は `data-pkc-mermaid-src` だけを見ていたので、**grafu は小さい PNG が
-     *   開いたまま**だった ── user 報告(ぽしょぽしょ)が grafu では直っていなかった。
-     */
     const src = mmd?.getAttribute('data-pkc-mermaid-src') ?? '';
     const csrc = chart?.getAttribute('data-pkc-chart-src') ?? '';
-    services.viewBig?.(
-      img.src,
-      img.alt || '図',
-      src !== '' ? { kind: 'mermaid', source: src } : csrc !== '' ? { kind: 'chart', source: csrc } : undefined,
-      // 🔴 **押した窓から開く**(#1044 段4 着地前レビュー)── 本体で押したときは本体そのもの
-      img.ownerDocument.defaultView ?? undefined,
+    const diagram =
+      src !== ''
+        ? { kind: 'mermaid' as const, source: src }
+        : csrc !== ''
+          ? { kind: 'chart' as const, source: csrc }
+          : undefined;
+
+    // 🔴 章ウィンドウなど、別ドキュメントの窓で押されたときはその場で実寸別窓を開く
+    if (img.ownerDocument !== root.ownerDocument) {
+      services.viewBig?.(
+        img.src,
+        img.alt || '図',
+        diagram,
+        img.ownerDocument.defaultView ?? undefined,
+      );
+      return;
+    }
+
+    openLightbox(
+      root,
+      {
+        src: img.src,
+        alt: img.alt || '図',
+        diagram,
+        defaultView: img.ownerDocument.defaultView ?? undefined,
+      },
+      services,
     );
+  },
+  'close-lightbox': (_dispatcher, _target, _services, root) => {
+    closeLightbox(root);
   },
   /**
    * 図を保存する(P8 段⑦)。⚠ 画面は PNG だが、**書き出すのはベクタ**
@@ -14527,16 +14530,19 @@ export function bindActions(
   listen(doc, 'keydown', onShortcut);
   listen(root, 'keydown', onKeydown);
   const teardownLinkPreview = setupLinkPreview(root, dispatcher, services);
+  const teardownLightbox = setupLightbox(root);
   return () => {
     /**
      * 🔑 **張った順に、張った物だけを外す**(#876)── 手で並べ直さない。
      * ⚠ かつてここは 19 行の `removeEventListener` で、**7 件足りなかった**。
      */
+    teardownLightbox();
     teardownLinkPreview();
     for (const off of undo) off();
     undo.length = 0;
     closeContextMenu(root);
     closeLinkPreview(root);
+    closeLightbox(root);
     longPress.dispose();
   };
 }
