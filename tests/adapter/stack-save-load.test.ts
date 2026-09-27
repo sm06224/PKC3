@@ -86,6 +86,50 @@ describe('CREATE_ENTRY keepSelection ── 作っても読んでいる本文を
     d.dispatch({ type: 'CREATE_ENTRY', lid: 'new2', title: 'x', archetype: 'stack', body: '', edit: false });
     expect(d.getState().selectedLid).toBe('new2');
   });
+
+  it('🔴 編集中でも keepSelection: true なら編集状態を保ってノートを作れる(#1085)', () => {
+    const d = booted();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: '# A\n' });
+    d.dispatch({ type: 'START_EDIT' });
+    expect(d.getState().phase, '台の前提: 編集中になっていない').toBe('editing');
+    const before = d.getState();
+
+    d.dispatch({
+      type: 'CREATE_ENTRY',
+      lid: 'new-att',
+      title: 'att.png',
+      archetype: 'attachment',
+      body: 'asset:xyz',
+      edit: false,
+      keepSelection: true,
+    });
+
+    const after = d.getState();
+    expect(after.entryMetas.has('new-att'), 'ノートが作られていない').toBe(true);
+    expect(after.order).toContain('new-att');
+    expect(after.phase, '編集相が解かれた').toBe('editing');
+    expect(after.selectedLid, '選択が動いた').toBe('a');
+    expect(after.openBody, '開いている本文が壊れた').toBe(before.openBody);
+  });
+
+  it('⚠ 対照群: 編集中に keepSelection が無ければ作成は弾かれる', () => {
+    const d = booted();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: '# A\n' });
+    d.dispatch({ type: 'START_EDIT' });
+    expect(d.getState().phase).toBe('editing');
+
+    d.dispatch({
+      type: 'CREATE_ENTRY',
+      lid: 'new-blocked',
+      title: 'blocked',
+      archetype: 'text',
+      edit: false,
+    });
+
+    expect(d.getState().entryMetas.has('new-blocked'), '編集中に素の作成が通った').toBe(false);
+  });
 });
 
 describe('LOAD_STACK ── 本文の並びを、いまのスタックの上に積む', () => {

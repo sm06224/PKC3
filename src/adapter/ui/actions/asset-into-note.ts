@@ -377,7 +377,7 @@ export function putAssetIntoNote(args: PutAssetArgs): void {
     }
     // ⚠ 知らせの**後**に数える ── まとめた回の締め(件数)が、この 1 行を上書きする側
     onPut?.(name);
-  });
+  }, lid);
   // ⚠ **預かった回も黙らない**(いつ入るのかを言う)
   if (held)
     notify(`${why}「${name}」を添付にしました(いま本文を書けないので、書けるようになったら入れます)`);

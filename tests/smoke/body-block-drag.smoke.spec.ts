@@ -482,5 +482,21 @@ test('🔴 横に留めた枠へファイルを落とすと、その枠のノー
     .toEqual(['留める側', '牛乳', 'パン']);
   await expect(editor, '塊を動かしたら編集欄が閉じた(打っていた字を失う)').toBeVisible();
 
+  /**
+   * 🔴 **主のノートの編集中も、留めた枠へファイルを落とすと待たずに入り、編集欄は閉じない**(#1085)。
+   *
+   * ⚠ 直す前は、留めた枠へ落としても「編集を終えたら入れます」と預かられ、
+   *   編集を終えるまで入らなかった。
+   * 🔑 ここでしか見られないもの:実ブラウザの D&D で留めた枠へ落とした瞬間に
+   *   留めた枠の本文に画像が入り、主の編集欄は閉じずに文字入力できる状態を保っていること。
+   */
+  await dropFile(SIDE, '編集中ドロップ.png');
+  await expect
+    .poll(() => kinds(SIDE), { timeout: 8000, message: '編集中に留めた枠へ落としたファイルが入っていない' })
+    .toEqual(['留める側', '牛乳', 'IMG', 'パン']);
+  await expect(editor, 'ファイルを落としたら編集欄が閉じた(打っていた字を失う)').toBeVisible();
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('『留める側』');
+  await expect(page.locator('[data-pkc-region="status"]')).not.toContainText('預かりました');
+
   expect(errors, 'pageerror が出た').toEqual([]);
 });
