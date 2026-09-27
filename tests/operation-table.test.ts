@@ -95,6 +95,7 @@ const UNBRIDGED: readonly string[] = [
   'filer-extend-down',
   'filer-extend-up',
   'filer-open',
+  'filer-open-stack',
   'filer-parent',
   'filer-row-down',
   'filer-row-up',
@@ -526,14 +527,14 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   `registered` / `both` / `outsideActionsTable` は動かない。
       // ⚠ 2026-09-26(#1044 段3): コード枠の ✎ で 3 件増やした
       //   (`edit-code-block` / `save-code-draft` / `cancel-code-draft`)── `edit-section` と
-      //   同じ理由(枠を指す・コード枠の欄が要る ── パレットからは撃てない)で
-      //   登記簿には載せない。`receivers` +3 / `total` +3 / `unregistered` +3、
-      //   `registered` / `both` / `outsideActionsTable` は動かない。
-      total: 332,
+      // ⚠ 2026-09-28(#1092): 「横の枠(スタック)へ開く」(`filer-open-stack`)を
+      //   `KEY_COMMANDS` へ登記した ── キーボード操作で横の枠(スタック)に開く
+      //   (`Alt+Enter`)。`registered` +1 / `total` +1 / `outsideActionsTable` +1。
+      total: 333,
       receivers: 279,
-      registered: 91,
+      registered: 92,
       both: 38,
-      outsideActionsTable: 53,
+      outsideActionsTable: 54,
       unregistered: 241,
     });
   });
@@ -572,8 +573,9 @@ describe('操作の全数台帳(#582 段①)', () => {
     //    `KEY_COMMANDS` へ登記して `key` 66 → 67(`deselect-entry` は既に登記済みの
     //    ままで、既定 `Escape` が付いただけ ── 件数は動かない)
     // ⚠ 2026-09-25(#1038 台帳③ C1): 行のメニューが 16 → 17(「編集」`start-edit`)
+    // ⚠ 2026-09-28(#1092): 「横の枠(スタック)へ開く」(`filer-open-stack`)で `key` 67 → 68
     expect(s().perBook).toEqual({
-      key: 67,
+      key: 68,
       entry: 17,
       body: 3,
       collection: 2,

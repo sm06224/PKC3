@@ -431,20 +431,22 @@ describe('🔴 一覧タブでも矢印・Enter・絞り込みからの降下が
     unbind?.();
     unbind = null;
   });
-  function setupBound(metas: EntryMeta[]) {
+  function setupBound(metas: EntryMeta[], services: Record<string, unknown> = {}) {
     const root = document.createElement('div');
     document.body.append(root);
     const regions = buildShell(root);
     const sidebar = new SidebarRenderer(regions.sidebar);
     const d = new Dispatcher();
     d.onState((st) => sidebar.render(st));
-    unbind = bindActions(root, d);
+    unbind = bindActions(root, d, services);
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas, relations: [] });
     const row = (lid: string) =>
       root.querySelector<HTMLElement>(`[data-pkc-region="entry-list"] [data-pkc-entry="${lid}"]`)!;
     const filterInput = root.querySelector<HTMLInputElement>('[data-pkc-field="entry-filter"]')!;
-    const press = (el: HTMLElement, key: string): void => {
-      el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+    const press = (el: HTMLElement, key: string, opts: Partial<KeyboardEventInit> = {}): void => {
+      el.dispatchEvent(
+        new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...opts }),
+      );
     };
     return { root, d, row, filterInput, press };
   }
@@ -514,5 +516,53 @@ describe('🔴 一覧タブでも矢印・Enter・絞り込みからの降下が
     press(input, 'Escape');
     expect(d.getState().renamingLid, '打ち替えが終わっていない').toBeNull();
     expect(document.activeElement, 'やめても行へ焦点が戻っていない').toBe(row('a'));
+  });
+
+  it('🔴 焦点の行で Alt+Enter を押すと、中央のノートは動かさず横の枠(スタック)に開く(#1092)', () => {
+    const { row, press, d } = setupBound([meta('a', 1, 'ノートA'), meta('b', 2, 'ノートB')]);
+    // 先にノートAを中央に開いておく
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    expect(d.getState().selectedLid).toBe('a');
+
+    // ノートBを選んで Alt+Enter を押す
+    row('b').focus();
+    press(row('b'), 'Enter', { altKey: true, code: 'Enter' });
+
+    // 中央のノートAは維持されたまま、ノートBがスタックに載る
+    expect(d.getState().selectedLid, '中央のノートが動いてしまった').toBe('a');
+    expect(d.getState().splitLids, 'スタックに開いていない').toContain('b');
+    expect(d.getState().splitLids[0], '新しく載せた物が先頭に来ていない').toBe('b');
+  });
+
+  it('🔴 すでにスタックに留められているノートで Alt+Enter を押すと、先頭へ上がる(#1092)', () => {
+    const { row, press, d } = setupBound([
+      meta('a', 1, 'ノートA'),
+      meta('b', 2, 'ノートB'),
+      meta('c', 3, 'ノートC'),
+    ]);
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'b' });
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'c' });
+    // スタックは現在 ['c', 'b']
+    expect(d.getState().splitLids).toEqual(['c', 'b']);
+
+    // ノートBで Alt+Enter を押すと一番上へ上がる
+    row('b').focus();
+    press(row('b'), 'Enter', { altKey: true, code: 'Enter' });
+    expect(d.getState().splitLids, '先頭へ繰り上がっていない').toEqual(['b', 'c']);
+  });
+
+  it('🔴 画面が狭いとき(phone)、Alt+Enter を押すと横に開かず画面下に理由を通知する(#1092)', () => {
+    const showStatus = vi.fn();
+    const { root, row, press, d } = setupBound(
+      [meta('a', 1, 'ノートA'), meta('b', 2, 'ノートB')],
+      { showStatus },
+    );
+    root.setAttribute('data-pkc-layout', 'phone');
+
+    row('b').focus();
+    press(row('b'), 'Enter', { altKey: true, code: 'Enter' });
+
+    expect(d.getState().splitLids.length, '狭い画面なのにスタックに載ってしまった').toBe(0);
+    expect(showStatus).toHaveBeenCalledWith('画面が狭いため横に並べられません');
   });
 });
