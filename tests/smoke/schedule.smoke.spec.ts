@@ -26,26 +26,30 @@ test.beforeEach(async ({ page }) => {
  *   (`[data-pkc-drop-date]` は表示中の月にしか無い)が見つからず、3 件が落ちた。
  *   この file の下の方(繰り返しの test)には既に「固定の日を書くと理由の分からない
  *   赤になる」と書いてあった ── 同じ file の中で守られていなかった。
- * 🔑 **今月の中の日**で組む。基点は 22 日まで ── `BASE + 6 ≤ 28` なので、
- *   どの月(2 月も)でも升目が在り、月末に走っても月をまたがない。
- *   過ぎた日でも札は出る(`agenda.ts` は単発の予定を `overdue` として残す)。
+ * 🔑 **今月または翌月の中の日**で組む(#1061)。
+ *   月末(21日以降)に走ると BASE_DAY を 22 に制限した結果、D3(25日)などが過去日になり、
+ *   繰り返しを設定した瞬間に翌週へ飛んで「毎週」が消える(#1061)。
+ *   そのため月末(21日以降)は翌月の 1 日を起点にし、表示月も翌月へ送る。
+ *   どちらの場合も `BASE + 6 ≤ 28` なので、どの月でも升目が在り、月をまたがない。
  */
 const AT = new Date();
-const BASE_DAY = Math.min(AT.getDate(), 22);
-/** 今月の `day` 日の鍵(`YYYY-MM-DD`)。 */
+const USE_NEXT_MONTH = AT.getDate() > 20;
+const TARGET_MONTH = USE_NEXT_MONTH ? new Date(AT.getFullYear(), AT.getMonth() + 1, 1) : AT;
+const BASE_DAY = USE_NEXT_MONTH ? 1 : AT.getDate();
+/** 対象月の `day` 日の鍵(`YYYY-MM-DD`)。 */
 function inMonth(day: number): string {
-  const d = new Date(AT.getFullYear(), AT.getMonth(), day);
+  const d = new Date(TARGET_MONTH.getFullYear(), TARGET_MONTH.getMonth(), day);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 /** 札の「いつまでか」の字(`MM/DD`)。 */
 function mmdd(key: string): string {
   return key.slice(5).replace('-', '/');
 }
-const D0 = inMonth(BASE_DAY); // 8/25 に当たる日
-const D2 = inMonth(BASE_DAY + 2); // 8/27
-const D3 = inMonth(BASE_DAY + 3); // 8/28
-const D5 = inMonth(BASE_DAY + 5); // 8/30
-const D6 = inMonth(BASE_DAY + 6); // 8/31
+const D0 = inMonth(BASE_DAY);
+const D2 = inMonth(BASE_DAY + 2);
+const D3 = inMonth(BASE_DAY + 3);
+const D5 = inMonth(BASE_DAY + 5);
+const D6 = inMonth(BASE_DAY + 6);
 
 /**
  * 🔴 **指で掴んで動かす**(#855 決1。本物の touch)。
@@ -106,6 +110,11 @@ test('🔴 予定のタブで札を掴んで日へ落とすと、本文の日付
   await clickReal(page, '[data-pkc-browse="schedule"]');
   const pane = page.locator('[data-pkc-browse-pane="schedule"]');
   await expect(pane, '予定の面が出ていない').toBeVisible();
+
+  if (USE_NEXT_MONTH) {
+    // 🔴 月末(21日以降)は翌月の升目を使う(#1061)。表示の月も翌月へ送る
+    await clickReal(page, '[data-pkc-action="schedule-nav"][data-pkc-nav-step="1"]');
+  }
 
   /**
    * 🔴 **本文は消えていない。** ①の実害はここだった ── 予定を見るために
@@ -456,6 +465,9 @@ test('🔴 予定のある日とない日で、小さな月の升目の高さが
     );
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   await clickReal(page, '[data-pkc-browse="schedule"]');
+  if (USE_NEXT_MONTH) {
+    await clickReal(page, '[data-pkc-action="schedule-nav"][data-pkc-nav-step="1"]');
+  }
 
   // ⚠ **前提** ── 点が付いた日が実在する(付いていなければ何も検めていない)
   const dotted = page.locator(`[data-pkc-drop-date="${D0}"][data-pkc-has]`);
@@ -506,6 +518,9 @@ test('🔴 期間の札を掴んでずらすと、長さを保ったまま本文
   await clickReal(page, '[data-pkc-browse="schedule"]');
   const pane = page.locator('[data-pkc-browse-pane="schedule"]');
   await expect(pane, '予定の面が出ていない').toBeVisible();
+  if (USE_NEXT_MONTH) {
+    await clickReal(page, '[data-pkc-action="schedule-nav"][data-pkc-nav-step="1"]');
+  }
 
   /**
    * ① 4 日ぶんの札に展開されている(1 枚を日から日へ動かしていない)。
