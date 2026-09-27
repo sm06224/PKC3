@@ -835,9 +835,13 @@ test('🔴 見出しの「この章を編集する」→ 打つ → 別のノー
     page.locator('[data-pkc-field="detail-body"] h1'),
     '窓の「元のウィンドウで開く」が本体に届いていない',
   ).toHaveText('議事録');
-  // Esc で窓が閉じる
+  /**
+   * Esc で窓が閉じる。⚠ **`press` ではなく `down`** ── 窓は keydown で閉じるので、
+   *   `press`(down + up)は up を送る前に相手が消えて「page closed」で落ちる
+   *   (1 稿目で踏んだ。閉じる作りのほうは正しい)。
+   */
   const closed = chapterWin.waitForEvent('close');
-  await chapterWin.keyboard.press('Escape');
+  await chapterWin.keyboard.down('Escape');
   await closed;
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
