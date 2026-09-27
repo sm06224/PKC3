@@ -937,6 +937,40 @@ describe('RESTORE_TRASH / RESTORE_REVISION は起点で断る(#1044 段2 2巡目
 });
 
 /**
+ * 🔴 **元に戻す 2 つと外部画像の取り込みも、章の欄が開いているノート自身へは断る**(#1051)。
+ *
+ * ⚠ 4 つは同じ関数(`bodyWriteBlockResult`)を通るので、`APPEND_TO_ENTRY` の下の検査が
+ *   その関数の「章の欄の断り文は続きを付けずにそのまま出す」を守っている。ここは
+ *   **呼び手ごとに**その門を通っていることを見る ── 1 つだけ別の判定へ分けた日に鳴る
+ *   (着地前レビュー ④)。
+ * 🔑 断った回は**材料を残す**(`lastAppend` / `lastMove`)── 章を保存してから押し直せる。
+ */
+describe('元に戻す 2 つと外部画像の取り込みも、章の欄のノート自身へは断る(#1051)', () => {
+  const CASES: readonly [name: string, arm: (s: AppState) => AppState, action: Dispatchable][] = [
+    ['UNDO_APPEND', (s) => ({ ...s, lastAppend: { lid: 'n1', lines: ['足した行'] } }), { type: 'UNDO_APPEND' }],
+    [
+      'UNDO_MOVE',
+      (s) => ({ ...s, lastMove: { lid: 'n1', start: 0, end: 1, toBefore: 2, lines: ['a'] } }),
+      { type: 'UNDO_MOVE' },
+    ],
+    [
+      'ADOPT_EXTERNAL_IMAGES',
+      (s) => s,
+      { type: 'ADOPT_EXTERNAL_IMAGES', lid: 'n1', adopted: { 'https://e.com/a.png': 'asset:k1' } },
+    ],
+  ];
+  for (const [name, arm, action] of CASES) {
+    it(`🔴 ${name} ── 章の欄の断り文をそのまま出す(続きを付けない)、材料は残す`, () => {
+      const s0 = arm(reduce(booted(), { type: 'OPEN_SECTION_DRAFT', lid: 'n1', line: 4 }).state);
+      expect(s0.sectionDraft, '前提: 章の欄が開いていない').not.toBeNull();
+      const r = reduce(s0, action);
+      expect(r.state).toEqual({ ...s0, error: SECTION_DRAFT_NOTE, sectionAdvisory: SECTION_DRAFT_NOTE });
+      expect(r.events, '断ったのに書換が飛んだ').toEqual([]);
+    });
+  }
+});
+
+/**
  * 🔴 **file をドロップした本文の書込も、章の欄が開いていれば断る**
  * (#1044 段2 2巡目の修理、R11)。
  *
