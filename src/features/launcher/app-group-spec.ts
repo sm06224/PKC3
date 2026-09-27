@@ -133,6 +133,28 @@ export function appGroupIconsOf(
   return Object.fromEntries(out);
 }
 
+/**
+ * 🔴 **選んだ目印を、読み直しを待たずに対応へ当てる**(#1076)。
+ *
+ * ⚠ 値は**書いて読み戻したときと同じ形**で作る ── 種の本文へ `writeAppGroupIcon` で書き、
+ *   `readAppGroupIcon` で読み戻す。自前で組むと読む口が 2 つに割れ、読み直しが
+ *   返った瞬間に値が変わって見える(§7)。
+ * ⚠ 読み戻して何も無ければ**対応から外す**(`appGroupIconsOf` が入れないのと揃える)。
+ * ⚠ 組み立ては `Object.fromEntries`(`appGroupIconsOf` と同じ理由 ── `__proto__`)。
+ */
+export function withAppGroupIcon(
+  icons: AppGroupIcons,
+  name: string,
+  icon: string | null,
+): AppGroupIcons {
+  const key = appGroupName(name);
+  const next = new Map(Object.entries(icons));
+  const v = readAppGroupIcon(writeAppGroupIcon(appGroupSeed(key), icon));
+  if (v.icon === undefined && v.symbol === undefined) next.delete(key);
+  else next.set(key, v);
+  return Object.fromEntries(next);
+}
+
 /** その群の目印。⚠ 引くのはここ 1 か所(`obj[name]` を呼び側に書かせない)。 */
 export function appGroupIconOf(icons: AppGroupIcons, name: string): IconValue | undefined {
   return Object.prototype.hasOwnProperty.call(icons, name) ? icons[name] : undefined;

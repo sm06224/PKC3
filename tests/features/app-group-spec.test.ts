@@ -14,6 +14,7 @@ import {
   appGroupIconsOf,
   appGroupSeed,
   readAppGroupIcon,
+  withAppGroupIcon,
   writeAppGroupIcon,
 } from '../../src/features/launcher/app-group-spec';
 import { parseIconValue } from '../../src/features/icon/icon-value';
@@ -148,5 +149,37 @@ describe('群の名前は、読む側でも書く側でも前後の空白を落�
       body: '---\nattachment.launcher_url: https://b.test/\nattachment.app_group: "   "\n---\n',
     });
     expect(t!.group, '空白だけの名前が群として残っている').toBe('');
+  });
+});
+
+/**
+ * 🔴 **先に当てる目印は、読み直しが持って来る目印と同じ形**(#1076)。
+ *
+ * ⚠ 違うと、読み直しが返った瞬間に見出しの絵が**1 度だけ変わって見える**。
+ * 🔑 期待値は「**user が書いたような本文**(説明文も他の鍵も在る)を読んだ結果」で作る
+ *   ── 実装が使う種の本文とは別の本文なので、種に寄りかかった一致にならない。
+ */
+describe('🔴 先に当てる目印 = 読み直しの目印(#1076)', () => {
+  const USER_BODY =
+    '---\nappgroup.order: 2\nappgroup.icon: 🧮\n---\n\n# 資料\n\n自分で書いた説明。\n';
+  const INPUTS: ReadonlyArray<string | null> = ['calendar', '🧮', '長い長い字', '  terminal  ', '', null];
+
+  it('🔴 どの選び方でも、user の本文へ書いて読んだ結果と一致する', () => {
+    for (const icon of INPUTS) {
+      const fromDisk = appGroupIconsOf([{ title: '資料', body: writeAppGroupIcon(USER_BODY, icon) }]);
+      expect(withAppGroupIcon({ 資料: { icon: '🧮' } }, '資料', icon), `icon=${String(icon)}`).toEqual(fromDisk);
+    }
+  });
+
+  it('⚠ 他の群の目印には触らない', () => {
+    const got = withAppGroupIcon({ 仕事: { symbol: 'terminal' } } as never, '資料', 'calendar');
+    expect(appGroupIconOf(got, '仕事'), '別の群の目印が消えた').toEqual({ symbol: 'terminal' });
+    expect(appGroupIconOf(got, '資料')).toEqual({ symbol: 'calendar' });
+  });
+
+  it('⚠ `__proto__` という名前の群でも、入れ物が壊れない', () => {
+    const got = withAppGroupIcon({}, '__proto__', 'calendar');
+    expect(appGroupIconOf(got, '__proto__'), '名前の群に目印が入っていない').toEqual({ symbol: 'calendar' });
+    expect(Object.getPrototypeOf(got), '入れ物の原型が書き換わった').toBe(Object.prototype);
   });
 });

@@ -78,6 +78,7 @@ import {
   appGroupIconOf,
   appGroupName,
   appGroupSeed,
+  withAppGroupIcon,
   writeAppGroupIcon,
   writeAppGroupOrder,
   type AppGroupIcons,
@@ -5307,11 +5308,27 @@ function reduceCore(
       const name = appGroupName(action.name);
       // ⚠ 名前の無い群は見出しを持たない ── 目印を置く場所がそもそも無い
       if (name === '') return { state, events: [] };
+      /**
+       * 🔴 **画面を先に動かす**(#1076)。
+       *
+       * ⚠ 直す前は `appGroupIcons` が変わるのが**読み直しの ack が返ってから**で、
+       *   その間に「目印を選ぶ…」を開き直すと**選ぶ前の絵に枠が付いていた**
+       *   (表は開いた瞬間の値で組まれ、開いている間は変わらない)── 見出しの絵も同じ間だけ古い。
+       * 🔑 **世代を進める** ── 先に飛んでいた読み直し(この変更を知らない本文)に
+       *   巻き戻させない(§7。`MOVE_APP_GROUP` と同じ作法)。disk の答えは、
+       *   下で積む読み直しが**必ず後ろから**持って来る(書けなかったときはそれで戻る)。
+       */
+      const optimistic = (s: AppState): AppState => ({
+        ...s,
+        appGroupIcons: withAppGroupIcon(s.appGroupIcons, name, action.icon),
+        appGroupGen: s.appGroupGen + 1,
+      });
       const found = findAppGroupLid(state.order, state.entryMetas, name);
       if (found !== null) {
         const meta = state.entryMetas.get(found)!;
+        const next = optimistic(state);
         return {
-          state,
+          state: next,
           events: [
             {
               type: 'REQUEST_APP_GROUP_ICON_WRITE',
@@ -5323,7 +5340,8 @@ function reduceCore(
             },
             // ⚠ 書いた**あと**に読み直す(effect の列は 1 本なので順番は保たれる)──
             //    読み直さないと、押した結果が出るのは「次にタブを開き直したとき」になる
-            readAppGroupNotes(state),
+            // ⚠ **進めた後の世代で**積む(当てる前の state で積むと、出た瞬間に捨てられる)
+            readAppGroupNotes(next),
           ],
         };
       }
@@ -5354,12 +5372,13 @@ function reduceCore(
          */
         keepSelection: true,
       });
+      const next = optimistic(created.state);
       return {
-        state: created.state,
+        state: next,
         events: [
           ...created.events,
           // ⚠ **作った後の並び**で読む(作りたてのノートが入っていないと、目印が出ない)
-          readAppGroupNotes(created.state),
+          readAppGroupNotes(next),
         ],
       };
     }
