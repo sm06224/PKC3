@@ -271,6 +271,8 @@ const STYLED_ELSEWHERE: Readonly<Record<string, string>> = {
   // 🔴 読書進捗バー(#1125)
   'pkc-reading-progress': 'src/adapter/ui/render/reading-progress.ts',
   'pkc-reading-progress-bar': 'src/adapter/ui/render/reading-progress.ts',
+  // 🔴 コードブロック言語バッジ(#1128)
+  'pkc-code-lang': 'src/adapter/ui/render/code-lang.ts',
 };
 
 const NO_STYLE_NEEDED: Readonly<Record<string, string>> = {
