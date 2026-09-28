@@ -1612,6 +1612,17 @@ select:focus-visible {
   padding-bottom: var(--s2);
   border-bottom: 1px solid var(--border);
 }
+/* 🔴 長文ノートの読了目安時間・文字数バッジ(#1137) */
+.pkc-reading-time {
+  color: var(--muted);
+  font-size: 11px;
+  margin: calc(-1 * var(--s2)) 0 var(--s2);
+}
+[data-pkc-field='detail-reading-time'] {
+  color: var(--muted);
+  font-size: 11px;
+  margin: calc(-1 * var(--s2)) 0 var(--s2);
+}
 /* 🔑 **操作の帯は上に貼り付ける**(P8 段⑪)── 長いノートで「編集」を押すために
  * 毎回先頭まで戻るのは、それ自体が余計な往復である(「同じものが常に同じ場所に
  * ある」という業務画面の作法にも合う)。⚠ 地を塗る(本文が透けると読めない)。 */
@@ -8061,12 +8072,14 @@ h3[data-pkc-section] {
   [data-pkc-field='detail-bar-slot'],
   [data-pkc-field='detail-notice-slot'],
   .pkc-md-copy-btn,
-  /* 🔴 画面専用の操作子は紙に要らない(#1129) */
+  /* 🔴 画面専用の操作子は紙に要らない(#1129, #1137) */
   .pkc-back-to-top-container,
   .pkc-reading-progress,
   .pkc-heading-anchor,
   .pkc-code-lang,
   .pkc-quick-toc,
+  .pkc-reading-time,
+  [data-pkc-field='detail-reading-time'],
   /* ⚠ 表の「行・列を足す / 消す」も紙には要らない(#418 段①)── 画面では
    *    触るまで隠しているが、`visibility` は場所を取るので升の幅が変わる */
   .pkc-csv-shape,

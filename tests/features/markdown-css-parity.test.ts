@@ -283,6 +283,8 @@ const STYLED_ELSEWHERE: Readonly<Record<string, string>> = {
   'pkc-quick-toc-title': 'src/adapter/ui/render/quick-toc.ts',
   'pkc-quick-toc-close': 'src/adapter/ui/render/quick-toc.ts',
   'pkc-quick-toc-list': 'src/adapter/ui/render/quick-toc.ts',
+  // 🔴 読了目安時間バッジ(#1137)
+  'pkc-reading-time': 'src/adapter/ui/render/reading-time.ts',
   'pkc-quick-toc-item': 'src/adapter/ui/render/quick-toc.ts',
   'pkc-quick-toc-link': 'src/adapter/ui/render/quick-toc.ts',
 };
