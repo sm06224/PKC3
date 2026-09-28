@@ -64,7 +64,7 @@ const META = (lid: string, title: string, archetype = 'text') =>
 
 function setup(phone: boolean) {
   document.body.textContent = '';
-  localStorage.clear();
+  window.localStorage?.clear();
   const root = document.createElement('div');
   root.setAttribute('data-pkc-slot', 'root');
   document.body.append(root);

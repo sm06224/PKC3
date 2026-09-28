@@ -634,6 +634,8 @@ select {
   padding: 0 var(--s3);
   height: var(--row-h);
   font: inherit;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 textarea {
   height: auto;
@@ -6760,7 +6762,7 @@ li[data-pkc-row-slot] {
 [data-pkc-region='settings-body'] dl {
   margin: 0;
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: var(--s3) var(--s4);
   align-items: start;
 }
@@ -6772,6 +6774,8 @@ li[data-pkc-row-slot] {
 [data-pkc-region='flags-body'] dd,
 [data-pkc-region='settings-body'] dd {
   margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 /* 🔴 **綴りが 2 通りある**(2026-08-08、レビュー指摘)。設定は
    `data-pkc-field='settings-note'`、フラグは `class="settings-note"` で書いていた ──
@@ -7549,6 +7553,46 @@ h3[data-pkc-section] {
   min-height: 32px;
   padding: 0 var(--s2);
 }
+
+/**
+ * 🔴 **スマホ時の設定・フラグ・ヘルプのレイアウト**(#1068)。
+ *
+ * ⚠ 2 列(`auto minmax(0, 1fr)`)のままだと、見出し(`dt`)が横幅を取り、
+ *   右の列(`dd`)のボタン列や説明文が 390px 以下の画面幅を押し広げて
+ *   右端が画面外へ切れていた(実測 511px)。
+ * 🔑 **1 列(`minmax(0, 1fr)`)へ折る** ── 見出しの下に設定が並び、
+ *   ボタン列(`buildChoiceRow`)も 1 行のまま画面幅いっぱい(358px)を使え、
+ *   長い説明文(`settings-note`)やショートカットキーも確実に画面内に収まる。
+ */
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='settings-body'],
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='flags-body'],
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='help-body'] {
+  overflow-x: hidden;
+}
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='settings-body'] dl,
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='flags-body'] dl,
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='help-body'] dl {
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--s2) 0;
+}
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='settings-body'] dt,
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='flags-body'] dt,
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='help-body'] dt {
+  white-space: normal;
+  margin-top: var(--s2);
+}
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='settings-body'] dd,
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='flags-body'] dd,
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='help-body'] dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='settings-body'] select,
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='flags-body'] select,
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='help-body'] select {
+  max-width: 100%;
+}
+
 
 
 /* ── タブレットの版面(#703。user 裁定 2026-09-04 案 A)────────────────

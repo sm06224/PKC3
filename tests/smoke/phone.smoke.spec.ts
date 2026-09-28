@@ -68,6 +68,26 @@ async function expectSettingsChoiceRowsDoNotWrap(page: Page, w: number): Promise
     expect(rowWrap[f], `w=${w}: 設定の「${f}」の列が描かれていない`).toBeGreaterThan(0);
     expect(rowWrap[f], `w=${w}: 設定の「${f}」の列が ${rowWrap[f]} 行に折れている`).toBe(1);
   }
+
+  /**
+   * 🔴 **設定画面が画面右端の外へはみ出さない**(#1068)。
+   * 390px / 360px 等のスマホ幅で、説明文やショートカットキー割当が画面外へ
+   * 突き破らないこと(scrollWidth <= clientWidth)を pin する。
+   */
+  const overflow = await page.evaluate(() => {
+    const root = document.querySelector('[data-pkc-region="settings-body"]') as HTMLElement | null;
+    if (!root) return null;
+    return {
+      scrollWidth: root.scrollWidth,
+      clientWidth: root.clientWidth,
+    };
+  });
+  if (overflow) {
+    expect(
+      overflow.scrollWidth,
+      `w=${w}: 設定画面が横にはみ出している(scrollWidth=${overflow.scrollWidth}, clientWidth=${overflow.clientWidth})`,
+    ).toBeLessThanOrEqual(overflow.clientWidth);
+  }
 }
 
 /**
