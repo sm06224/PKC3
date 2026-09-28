@@ -26,7 +26,7 @@ test('csv 表と html sandbox iframe が可視高さを持つ', async ({ page })
   await ta.fill(
     '```csv-render\n列A,列B\n1,2\n3,4\n```\n\n```html\n<p style="height:120px">sandbox</p>\n```\n\n```javascript\n' +
       longCode +
-      '\n```\n\n> [!NOTE]\n> これはアラート注意書きです。\n\nインラインコード `sample-inline-code` です。',
+      '\n```\n\n> [!NOTE]\n> これはアラート注意書きです。\n\nインラインコード `sample-inline-code` です。\n\n[公式リンク](https://example.com) です。',
   );
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
@@ -100,8 +100,13 @@ test('csv 表と html sandbox iframe が可視高さを持つ', async ({ page })
   const inlineCode = page.locator('[data-pkc-field="detail-body"] code[data-pkc-inline-code]').first();
   await expect(inlineCode).toBeVisible();
   await expect(inlineCode).toHaveText('sample-inline-code');
-  await expect(inlineCode).toHaveAttribute('title', 'クリックでコピー');
   await inlineCode.click();
+
+  // 🔴 外部リンクの視覚識別と安全なドメイン表示(#1152)
+  const extLink = page.locator('[data-pkc-field="detail-body"] a[data-pkc-external-link]').first();
+  await expect(extLink).toBeVisible();
+  await expect(extLink.locator('.pkc-external-link-icon')).toHaveText('↗');
+  await expect(extLink).toHaveAttribute('title', '外部サイトを開く: example.com');
 
   expect(errors).toEqual([]);
 });

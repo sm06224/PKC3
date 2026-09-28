@@ -32,6 +32,7 @@ import { applyCodeLangBadges } from './code-lang';
 import { applyCodeCollapse } from './code-collapse';
 import { applyInlineCodeCopy } from './inline-code-copy';
 import { applyTableSort } from './table-sort';
+import { applyExternalLinks } from './external-link';
 import { applyPlaceLayout } from './place-board';
 import { installBlockGrip } from './block-grip';
 import { applyStackControls } from './stack-controls';
@@ -1158,6 +1159,11 @@ export class DetailRenderer {
          * ⚠ 描画のたびに呼ぶ(冪等)── 塊が差し替わると操作子が消えるため。
          */
         applyTableSort(host);
+        /**
+         * 🔴 **外部リンク識別と安全なドメイン表示**(#1152)。
+         * ⚠ 描画のたびに呼ぶ(冪等)── 塊が差し替わると装飾が消えるため。
+         */
+        applyExternalLinks(host);
         /**
          * 🔴 **自由配置の板**(#283 P4)── `.pkc-place` の塊を、書いてある位置に置く。
          * ⚠ 描画のたびに呼ぶ(冪等)── 塊が差し替わると掴む口と題名の札が

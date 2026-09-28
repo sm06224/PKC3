@@ -2884,6 +2884,21 @@ li[data-pkc-row-slot] {
   opacity: 1;
   color: var(--accent);
 }
+/* 🔴 **Markdown プレビュー内の外部リンクインジケータ**(#1152)。
+ * ⚠ 外部リンク（http/https）の末尾に控えめな ↗ アイコンを表示。
+ * 🔑 デザインシステムトークン `--s1` を使用。 */
+.pkc-md-rendered .pkc-external-link-icon {
+  display: inline-block;
+  margin-left: var(--s1);
+  font-size: 0.85em;
+  opacity: 0.65;
+  text-decoration: none;
+  vertical-align: super;
+  line-height: 0;
+}
+.pkc-md-rendered a[data-pkc-external-link]:hover .pkc-external-link-icon {
+  opacity: 1;
+}
 .pkc-md-rendered hr {
   border: none;
   border-top: 1px solid var(--border);
