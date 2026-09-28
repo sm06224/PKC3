@@ -95,6 +95,21 @@ describe('link-preview', () => {
       );
     });
 
+    it('renders external link preview card with domain, url, and safe hint', () => {
+      const card = renderPreviewCard(document, {
+        kind: 'external',
+        externalUrl: 'https://github.com/sm06224/PKC3',
+        externalDomain: 'github.com',
+        title: 'PKC3 GitHub Repository',
+      });
+      expect(card.classList.contains('pkc-link-preview-external')).toBe(true);
+      expect(card.querySelector('.pkc-link-preview-archetype')?.textContent).toBe('外部リンク ↗');
+      expect(card.querySelector('.pkc-link-preview-domain')?.textContent).toBe('github.com');
+      expect(card.querySelector('.pkc-link-preview-title')?.textContent).toBe('PKC3 GitHub Repository');
+      expect(card.querySelector('.pkc-link-preview-url')?.textContent).toBe('https://github.com/sm06224/PKC3');
+      expect(card.querySelector('.pkc-link-preview-safe-hint')?.textContent).toContain('新しいタブで安全に開きます');
+    });
+
     it('renders loading state when loading is true', () => {
       const card = renderPreviewCard(document, {
         kind: 'entry',
@@ -386,6 +401,34 @@ describe('link-preview', () => {
       // Click
       root.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       expect(linkPreviewOpen(root)).toBe(false);
+
+      teardown();
+    });
+
+    it('shows external link preview card on hovering http/https links', () => {
+      const root = document.createElement('div');
+      document.body.append(root);
+
+      const anchor = document.createElement('a');
+      anchor.setAttribute('href', 'https://example.com/docs');
+      anchor.setAttribute('title', 'ドキュメント');
+      anchor.textContent = '外部サイトリンク';
+      root.append(anchor);
+
+      const dispatcher = createMockDispatcher();
+      const teardown = setupLinkPreview(root, dispatcher);
+
+      expect(linkPreviewOpen(root)).toBe(false);
+
+      anchor.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+      vi.advanceTimersByTime(HOVER_DELAY_MS);
+      expect(linkPreviewOpen(root)).toBe(true);
+
+      const card = root.querySelector(`[data-pkc-region="${LINK_PREVIEW_REGION}"]`);
+      expect(card?.classList.contains('pkc-link-preview-external')).toBe(true);
+      expect(card?.querySelector('.pkc-link-preview-domain')?.textContent).toBe('example.com');
+      expect(card?.querySelector('.pkc-link-preview-title')?.textContent).toBe('ドキュメント');
+      expect(card?.querySelector('.pkc-link-preview-url')?.textContent).toBe('https://example.com/docs');
 
       teardown();
     });

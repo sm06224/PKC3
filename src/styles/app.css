@@ -3687,6 +3687,25 @@ li[data-pkc-row-slot] {
   text-underline-offset: 2px;
 }
 
+/* 🔴 外部リンクの識別アイコン (Issue #1120) ── 外部URLに対して控えめな外部遷移アイコンを付与 */
+.pkc-md-rendered a[href^='http://']:not(:has(img)):not(:has(svg))::after,
+.pkc-md-rendered a[href^='https://']:not(:has(img)):not(:has(svg))::after {
+  content: ' ↗';
+  font-size: 0.85em;
+  font-family: system-ui, -apple-system, sans-serif;
+  opacity: 0.65;
+  margin-left: 0.15em;
+  vertical-align: super;
+  line-height: 0;
+  display: inline-block;
+  text-decoration: none;
+}
+
+.pkc-md-rendered a[href^='http://']:not(:has(img)):not(:has(svg)):hover::after,
+.pkc-md-rendered a[href^='https://']:not(:has(img)):not(:has(svg)):hover::after {
+  opacity: 1;
+}
+
 /* ── fence の描画物(csv の表 / html の器) */
 .pkc-md-rendered .pkc-md-rendered-csv {
   width: 100%;
@@ -8419,6 +8438,31 @@ h3[data-pkc-section] {
   color: var(--muted);
   font-size: 12px;
   padding: var(--s1) 0;
+}
+
+.pkc-link-preview-domain {
+  font-weight: 600;
+  color: var(--fg);
+  word-break: break-all;
+}
+
+.pkc-link-preview-url {
+  color: var(--muted);
+  font-size: 11px;
+  word-break: break-all;
+  margin-bottom: var(--s1);
+  max-height: 3.6em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pkc-link-preview-safe-hint {
+  font-size: 11px;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  padding-top: var(--s1);
+  margin-top: var(--s1);
+  opacity: 0.85;
 }
 
 /* 🔴 **画像添付・図のその場ポップアップ拡大（ライトボックス）**(#1099)── 本文幅に縮小された画像を

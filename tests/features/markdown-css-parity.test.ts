@@ -245,6 +245,9 @@ const STYLED_ELSEWHERE: Readonly<Record<string, string>> = {
   'pkc-link-preview-empty-hint': 'src/adapter/ui/render/link-preview.ts',
   'pkc-link-preview-not-found': 'src/adapter/ui/render/link-preview.ts',
   'pkc-link-preview-foreign-desc': 'src/adapter/ui/render/link-preview.ts',
+  'pkc-link-preview-domain': 'src/adapter/ui/render/link-preview.ts',
+  'pkc-link-preview-url': 'src/adapter/ui/render/link-preview.ts',
+  'pkc-link-preview-safe-hint': 'src/adapter/ui/render/link-preview.ts',
   // 🔴 画像・図のその場拡大ライトボックス(#1099)── 本文の画像を押したときに出す暗転拡大モーダル
   'pkc-lightbox-overlay': 'src/adapter/ui/render/lightbox.ts',
   'pkc-lightbox-backdrop': 'src/adapter/ui/render/lightbox.ts',
