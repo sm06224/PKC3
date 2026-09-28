@@ -25,6 +25,7 @@ import {
   revealBlock,
   toggleHeadingFold,
 } from '../render/heading-fold';
+import { toggleCodeCollapse } from '../render/code-collapse';
 import { blockSpanAt, sliceLines } from '@features/markdown/source-blocks';
 import {
   tableAt,
@@ -7368,6 +7369,15 @@ const ACTIONS: Record<string, ActionHandler> = {
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
     const heading = headingForAction(root, target);
     if (heading !== null) toggleHeadingFold(heading);
+  },
+  /**
+   * 🔴 **長大なコードブロックの折りたたみ／展開切り替え**(#1139)。
+   * ⚠ 本文の中身は 1 バイトも変わらない(見え方だけ)ので、
+   *   `BODY_WRITE_ACTIONS` には載せない(取り込み中でも操作可能)。
+   */
+  'toggle-code-collapse': (_dispatcher, target) => {
+    const block = target.closest<HTMLElement>('.pkc-md-block[data-pkc-md-block-kind="code"]');
+    if (block !== null) toggleCodeCollapse(block);
   },
   /**
    * 🔴 **その章だけを、読む面のその場で編集する**(#1044 段2)。

@@ -104,3 +104,46 @@ test('🔴 svg の囲みは、html と同じ箱で同じように絵になる(#5
 
   expect(errors, errors.join('\n')).toEqual([]);
 });
+
+test('🔴 長大なコードブロック（>= 18行）の折りたたみとワンクリック展開(#1139)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  const longCode = Array.from({ length: 30 }, (_, i) => `console.log("line ${i}");`).join('\n');
+  await createEntry(page, 'text');
+  const ta = page.locator('[data-pkc-field="editor-body"]');
+  await ta.click();
+  await ta.fill('```javascript\n' + longCode + '\n```');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(page.locator('[data-pkc-field="editor-body"]')).not.toBeVisible();
+
+  const block = page.locator('[data-pkc-field="detail-body"] .pkc-md-block[data-pkc-md-block-kind="code"]').first();
+  await expect(block).toBeVisible();
+
+  // 初期状態は折りたたみ
+  await expect(block).toHaveAttribute('data-pkc-code-collapsed', '');
+  const barBtn = block.locator('.pkc-code-collapse-btn');
+  await expect(barBtn).toBeVisible();
+  await expect(barBtn).toHaveText(/すべて表示/);
+
+  // 折りたたみ時の高さ制限
+  const pre = block.locator('pre');
+  const collapsedBox = await pre.boundingBox();
+  expect(collapsedBox!.height).toBeLessThanOrEqual(220);
+
+  // 展開ボタンをクリック
+  await barBtn.click();
+  await expect(block).not.toHaveAttribute('data-pkc-code-collapsed', '');
+  await expect(barBtn).toHaveText(/折りたたむ/);
+
+  // 展開後の高さが大きく伸びていることを確認
+  const expandedBox = await pre.boundingBox();
+  expect(expandedBox!.height).toBeGreaterThan(collapsedBox!.height * 2);
+
+  // 折りたたむボタンをクリック
+  await barBtn.click();
+  await expect(block).toHaveAttribute('data-pkc-code-collapsed', '');
+  await expect(barBtn).toHaveText(/すべて表示/);
+
+  expect(errors).toEqual([]);
+});
