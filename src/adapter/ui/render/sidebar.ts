@@ -24,6 +24,7 @@ import { ARCHETYPE_ICONS, iconSpan, setIcon, type IconName } from './icons';
 import { formatListDate, formatStoredDate } from '@features/datetime/stored-date';
 // 🔑 空のときの「次の一手」はフォルダの面と**同じ部品**(#722 P2-13)── 2 か所で組まない
 import { emptyStartActions } from './empty-start';
+import { paintRowMark } from './selection-mark';
 
 export class SidebarRenderer {
   private readonly list: HTMLElement;
@@ -93,6 +94,7 @@ export class SidebarRenderer {
      * 着けます」を一覧タブでも成り立たせる)。
      */
     this.list.tabIndex = 0;
+    this.list.setAttribute('aria-multiselectable', 'true');
     this.navBack = sidebarRegion.querySelector<HTMLButtonElement>(
       '[data-pkc-action="nav-back"]',
     );
@@ -433,8 +435,7 @@ export class SidebarRenderer {
   private paintMarks(state: AppState): void {
     const marked = new Set(state.selection);
     for (const [lid, row] of this.rows) {
-      if (marked.has(lid)) row.setAttribute('data-pkc-marked', '');
-      else row.removeAttribute('data-pkc-marked');
+      paintRowMark(row, marked.has(lid));
     }
   }
 }

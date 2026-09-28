@@ -43,6 +43,7 @@ import { getAncestorFolders } from '@features/relation/tree';
 import { formatListDate } from '@features/datetime/stored-date';
 import { chordLabel, findCommand } from '@features/keymap';
 import { appKeymap, type KeymapStore } from './keymap';
+import { paintRowMark } from './selection-mark';
 import { appDualPrefs, DualPrefsStore } from './dual-prefs';
 import { appPhone } from './phone-layout';
 import { ACTION_ICONS, ARCHETYPE_ICONS, iconSpan, markBarTile, setActionIcon } from './icons';
@@ -950,8 +951,7 @@ export class DualFilerRenderer {
       frame.marks = marks;
       const set = new Set(pane.selection);
       for (const [lid, el] of frame.rows) {
-        if (set.has(lid)) el.setAttribute('data-pkc-marked', '');
-        else el.removeAttribute('data-pkc-marked');
+        paintRowMark(el, set.has(lid));
       }
     }
     /**
@@ -1173,6 +1173,7 @@ export class DualFilerRenderer {
       return;
     }
     const table = document.createElement('table');
+    table.setAttribute('aria-multiselectable', 'true');
     /**
      * 🔴 **列見出しを持つ**(2026-08-19 の作り直し)。
      *
