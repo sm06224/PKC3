@@ -28,6 +28,7 @@ import { hydrateChart } from './chart-raster';
 import { readFenceAssetText } from '@features/asset/fence-asset-read';
 import { applyHeadingFold } from './heading-fold';
 import { applyHeadingAnchors } from './heading-anchor';
+import { applyCodeLangBadges } from './code-lang';
 import { applyPlaceLayout } from './place-board';
 import { installBlockGrip } from './block-grip';
 import { applyStackControls } from './stack-controls';
@@ -1114,6 +1115,11 @@ export class DetailRenderer {
          * ⚠ 描画のたびに呼ぶ(冪等)── 塊が差し替わるとボタンが消えるため。
          */
         applyHeadingAnchors(host, lid);
+        /**
+         * 🔴 **コードブロックの言語名ラベルバッジ**(#1128)。
+         * ⚠ 描画のたびに呼ぶ(冪等)── 塊が差し替わるとバッジが消えるため。
+         */
+        applyCodeLangBadges(host);
         /**
          * 🔴 **自由配置の板**(#283 P4)── `.pkc-place` の塊を、書いてある位置に置く。
          * ⚠ 描画のたびに呼ぶ(冪等)── 塊が差し替わると掴む口と題名の札が

@@ -3033,6 +3033,26 @@ li[data-pkc-row-slot] {
 .pkc-md-rendered .pkc-md-edit-btn {
   right: 26px;
 }
+/* 🔴 **コードブロックの言語バッジ**(#1128)── 指定された言語名を右上に小さく表示 */
+.pkc-md-rendered .pkc-code-lang {
+  position: absolute;
+  top: 4px;
+  right: 52px;
+  font-size: 0.72em;
+  font-family: var(--font-mono, monospace);
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  pointer-events: none;
+  user-select: none;
+  opacity: 0.6;
+  line-height: 1.2;
+  transition: opacity 0.15s ease;
+}
+.pkc-md-rendered .pkc-md-block:hover .pkc-code-lang {
+  opacity: 0.9;
+}
 /* 表を出す囲みでは右上に ⧉ ▾ の 2 つが入るので、ソース切替をその左へ寄せる。
  * ⚠ 言語名(csv / tsv / psv)を CSS に書かない ── その一覧は `csv-table.ts` の
  *    1 本きりで、ここに写すと 2 か所目になる(片方だけ古くなる) */
@@ -8045,6 +8065,7 @@ h3[data-pkc-section] {
   .pkc-back-to-top-container,
   .pkc-reading-progress,
   .pkc-heading-anchor,
+  .pkc-code-lang,
   /* ⚠ 表の「行・列を足す / 消す」も紙には要らない(#418 段①)── 画面では
    *    触るまで隠しているが、`visibility` は場所を取るので升の幅が変わる */
   .pkc-csv-shape,
