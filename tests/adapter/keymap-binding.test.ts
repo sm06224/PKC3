@@ -38,7 +38,18 @@ function fakeStorage() {
     getItem: (k: string) => map.get(k) ?? null,
     setItem: (k: string, v: string) => void map.set(k, v),
     removeItem: (k: string) => void map.delete(k),
+    clear: () => map.clear(),
   };
+}
+
+if (typeof globalThis.localStorage === 'undefined' || typeof window.localStorage === 'undefined') {
+  const s = fakeStorage();
+  try {
+    Object.defineProperty(globalThis, 'localStorage', { value: s, writable: true, configurable: true });
+    Object.defineProperty(window, 'localStorage', { value: s, writable: true, configurable: true });
+  } catch {
+    // ignore
+  }
 }
 
 describe('割当の保存', () => {
@@ -124,7 +135,7 @@ describe('割当の保存', () => {
 describe('画面への配線', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
-    localStorage.clear();
+    window.localStorage?.clear?.();
   });
 
   function mounted(store = new KeymapStore(fakeStorage())) {
@@ -548,7 +559,7 @@ describe('画面への配線', () => {
 describe('経路ごとの割り当て直し', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
-    localStorage.clear();
+    window.localStorage?.clear?.();
   });
 
   it('🔴 行の欄(row)', () => {
@@ -696,7 +707,7 @@ describe('経路ごとの割り当て直し', () => {
 describe('設定の面(割り当て直す口)', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
-    localStorage.clear();
+    window.localStorage?.clear?.();
   });
 
   it('🔴 どのコマンドも、自分が名乗った文脈の見出しの下に出る', () => {
@@ -1120,7 +1131,7 @@ describe('近道の受け手と、打鍵中の免除(等値で pin する)', () 
 describe('ヘルプの一覧', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
-    localStorage.clear();
+    window.localStorage?.clear?.();
   });
 
   it('🔴 割当を変えると、ヘルプの一覧もその場で変わる(手書きの一覧がズレる型を潰す)', () => {

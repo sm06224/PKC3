@@ -7088,6 +7088,20 @@ h3[data-pkc-section] {
   margin: 0 0 0 var(--s3);
   color: var(--muted);
 }
+[data-pkc-field='help-key-group'] {
+  margin-top: var(--s4);
+  padding-bottom: var(--s1);
+  border-bottom: 1px solid var(--border);
+  color: var(--fg);
+  font-weight: 600;
+  font-size: 12px;
+}
+[data-pkc-field='help-key-group-note'] {
+  display: none;
+}
+[data-pkc-field='help-key-top-bar'] {
+  margin-bottom: var(--s3);
+}
 
 [data-pkc-field='settings-note'],
 .settings-note {

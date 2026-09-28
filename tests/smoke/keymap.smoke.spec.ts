@@ -87,6 +87,11 @@ test('🔴 既定の鍵が実機で効き、設定で割り当て直すと入れ
   await expect(
     page.locator('[data-pkc-field="help-key-chords"][data-pkc-command="toggle-sidebar"]'),
   ).toHaveText('Alt + G');
+  // 🔴 #1145: ヘルプのショートカット一覧が文脈ごとにグループ化され、ジャンプボタンが機能する
+  await expect(page.locator('[data-pkc-field="help-key-group"]').first()).toBeVisible();
+  await expect(page.locator('[data-pkc-field="help-jump-keys"]')).toBeVisible();
+  await clickReal(page, '[data-pkc-field="help-jump-keys"]');
+  await expect(page.locator('[data-pkc-field="help-jump-top"]')).toBeVisible();
 
   // ⑧ すべて既定に戻す → 既定が戻り、割り当てた鍵は効かなくなる
   await page.keyboard.press('Alt+3');
