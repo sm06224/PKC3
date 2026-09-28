@@ -43,7 +43,7 @@ import {
 import { setFoldNotify } from '@adapter/ui/render/fold-notify';
 import { appTooNarrowOk, installTooNarrow } from '@adapter/ui/render/too-narrow';
 import { paintStatusOpen, paintStatusUndo } from '@adapter/ui/render/status-open';
-import { composeStatusLine, paintStatusText } from '@adapter/ui/render/status-line';
+import { composeStatusLine, paintStatusText, shouldHideStatusBar } from '@adapter/ui/render/status-line';
 import { openStorageWithRetry } from '@adapter/platform/storage/open-with-retry';
 import {
   storageStatusLine,
@@ -1378,18 +1378,22 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     };
     const text = composeStatusLine(parts);
     /**
-     * 🔴 **断り書きが出ている間は、字が空でも器を畳まない**(#671 の裁定 3)。
-     * ⚠ 畳むと **`OK` ごと画面から消える** ── 押す口が無いまま出しっぱなしに
+     * 🔴 **断り書きが出ている間、および未読メッセージがある間は、字が空でも器を畳まない**(#671 の裁定 3 / #1071)。
+     * ⚠ 畳むと **`OK` や「未読 N 件」ごと画面から消える** ── 押す口が無いまま出しっぱなしに
      *   なるのと同じで、user は消し方を持たない。
-     * 🔑 器を畳むかどうかを決めるのは**この 1 か所**である ──
-     *   `too-narrow.ts` は自分の `hidden` だけ触り、ここへ知らせる(§7)。
+     * 🔑 器を畳むかどうかを決めるのは**この 1 か所**である ── 判断は `status-line.ts` が持つ。
      */
-    const keep = !regions.tooNarrow.hidden;
-    if (text === statusShown && regions.status.hidden === (text === '' && !keep)) return;
+    const hasUnreadMessages = dispatcher.getState().messagesUnread > 0;
+    const hide = shouldHideStatusBar({
+      text,
+      hasTooNarrow: !regions.tooNarrow.hidden,
+      hasUnreadMessages,
+    });
+    if (text === statusShown && regions.status.hidden === hide) return;
     statusShown = text;
     // ⚠ 状態の 1 語だけを別の器に入れる(`status-line.ts` の `paintStatusText`)── 字は同じ
     paintStatusText(regions.statusText, parts);
-    regions.status.hidden = text === '' && !keep;
+    regions.status.hidden = hide;
   };
   /** 🔑 ここで初めて `paint` に繋がる(それまでの `onState` は落としてよい)。 */
   repaintStatus = paint;

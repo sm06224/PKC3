@@ -13,6 +13,7 @@ import {
   editingStateWord,
   EDITING_STATE_WORD,
   paintStatusText,
+  shouldHideStatusBar,
   type StatusLineParts,
 } from '../../src/adapter/ui/render/status-line';
 
@@ -110,3 +111,56 @@ describe('paintStatusText ── 状態の 1 語を別の器に入れる', () =>
     expect(el.textContent).toBe('コピーしました');
   });
 });
+
+describe('shouldHideStatusBar ── ステータスバーの行を畳むかどうか(#1071、#671)', () => {
+  it('テキストがある場合は畳まない', () => {
+    expect(
+      shouldHideStatusBar({
+        text: '保存しました',
+        hasTooNarrow: false,
+        hasUnreadMessages: false,
+      }),
+    ).toBe(false);
+  });
+
+  it('テキストが空で断り書きも未読も無い場合は畳む', () => {
+    expect(
+      shouldHideStatusBar({
+        text: '',
+        hasTooNarrow: false,
+        hasUnreadMessages: false,
+      }),
+    ).toBe(true);
+  });
+
+  it('🔴 #671: テキストが空でも、幅不足の断り書きがある場合は畳まない(OKボタンを残す)', () => {
+    expect(
+      shouldHideStatusBar({
+        text: '',
+        hasTooNarrow: true,
+        hasUnreadMessages: false,
+      }),
+    ).toBe(false);
+  });
+
+  it('🔴 #1071: テキストが空でも、未読メッセージがある場合は畳まない(未読ボタンへの入口を残す)', () => {
+    expect(
+      shouldHideStatusBar({
+        text: '',
+        hasTooNarrow: false,
+        hasUnreadMessages: true,
+      }),
+    ).toBe(false);
+  });
+
+  it('テキストがあり、かつ未読メッセージもある場合は畳まない', () => {
+    expect(
+      shouldHideStatusBar({
+        text: '編集中',
+        hasTooNarrow: false,
+        hasUnreadMessages: true,
+      }),
+    ).toBe(false);
+  });
+});
+
