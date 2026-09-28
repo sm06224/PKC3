@@ -3297,6 +3297,40 @@ li[data-pkc-row-slot] {
 .pkc-md-rendered .pkc-section-body {
   display: block;
 }
+/* 🔴 **GitHub Flavored Markdown (GFM) Alerts**(#1144)のタイトル・アイコン表示 */
+.pkc-md-rendered blockquote.pkc-section-callout,
+.pkc-md-rendered .pkc-md-alert {
+  color: inherit;
+}
+.pkc-md-rendered .pkc-alert-title {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-weight: 600;
+  margin-top: 0;
+  margin-bottom: var(--s2);
+}
+.pkc-md-rendered .pkc-alert-icon {
+  font-style: normal;
+  line-height: 1;
+}
+.pkc-md-rendered .pkc-section-note .pkc-alert-title,
+.pkc-md-rendered .pkc-section-info .pkc-alert-title {
+  color: color-mix(in oklab, var(--fg) 25%, #2f6fd0);
+}
+.pkc-md-rendered .pkc-section-tip .pkc-alert-title {
+  color: color-mix(in oklab, var(--fg) 25%, #1f7a5a);
+}
+.pkc-md-rendered .pkc-section-important .pkc-alert-title {
+  color: color-mix(in oklab, var(--fg) 25%, #7a5ac2);
+}
+.pkc-md-rendered .pkc-section-warning .pkc-alert-title,
+.pkc-md-rendered .pkc-section-caution .pkc-alert-title {
+  color: color-mix(in oklab, var(--fg) 25%, #b06a1f);
+}
+.pkc-md-rendered .pkc-section-danger .pkc-alert-title {
+  color: color-mix(in oklab, var(--fg) 20%, var(--danger));
+}
 
 /* ── タスク行。⚠ 直す前は**丸ポチとチェック欄が二重に**出ていた */
 .pkc-md-rendered li.pkc-task-item {

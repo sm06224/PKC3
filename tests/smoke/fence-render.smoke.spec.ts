@@ -26,7 +26,7 @@ test('csv 表と html sandbox iframe が可視高さを持つ', async ({ page })
   await ta.fill(
     '```csv-render\n列A,列B\n1,2\n3,4\n```\n\n```html\n<p style="height:120px">sandbox</p>\n```\n\n```javascript\n' +
       longCode +
-      '\n```',
+      '\n```\n\n> [!NOTE]\n> これはアラート注意書きです。',
   );
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
@@ -89,6 +89,12 @@ test('csv 表と html sandbox iframe が可視高さを持つ', async ({ page })
   await barBtn.click();
   await expect(block).toHaveAttribute('data-pkc-code-collapsed', '');
   await expect(barBtn).toHaveText(/すべて表示/);
+
+  // 🔴 GFM Alerts のコールアウト描画(#1144)
+  const alert = page.locator('[data-pkc-field="detail-body"] .pkc-md-alert[data-pkc-role="note"]');
+  await expect(alert).toBeVisible();
+  await expect(alert.locator('.pkc-alert-title')).toContainText('Note');
+  await expect(alert).toContainText('これはアラート注意書きです。');
 
   expect(errors).toEqual([]);
 });
