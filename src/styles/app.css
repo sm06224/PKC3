@@ -8041,6 +8041,10 @@ h3[data-pkc-section] {
   [data-pkc-field='detail-bar-slot'],
   [data-pkc-field='detail-notice-slot'],
   .pkc-md-copy-btn,
+  /* 🔴 画面専用の操作子は紙に要らない(#1129) */
+  .pkc-back-to-top-container,
+  .pkc-reading-progress,
+  .pkc-heading-anchor,
   /* ⚠ 表の「行・列を足す / 消す」も紙には要らない(#418 段①)── 画面では
    *    触るまで隠しているが、`visibility` は場所を取るので升の幅が変わる */
   .pkc-csv-shape,

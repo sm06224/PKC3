@@ -6,6 +6,7 @@
  * `tests/smoke/print.smoke.spec.ts` が見ている(**2 か所で数えない**)。
  */
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import type { AppState, Dispatchable } from '../../src/adapter/state/app-state';
 import { printNote, type PrintNoteDeps } from '../../src/adapter/platform/print-note';
 
@@ -136,4 +137,13 @@ describe('printNote(#187 ── 紙に出す口)', () => {
     await flush();
     expect(h.prints(), '購読が残っていて二度刷った').toBe(1);
   });
+
+  it('🔴 画面専用の操作子（Back to Top、読書進捗バー、見出しアンカー）が紙では display: none になる (#1129)', () => {
+    const css = readFileSync('src/styles/app.css', 'utf8');
+    const printSection = css.slice(css.indexOf('@media print'));
+    expect(printSection).toContain('.pkc-back-to-top-container');
+    expect(printSection).toContain('.pkc-reading-progress');
+    expect(printSection).toContain('.pkc-heading-anchor');
+  });
 });
+
