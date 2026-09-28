@@ -781,6 +781,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
 
   const list = document.createElement('ul');
   list.setAttribute('data-pkc-region', 'entry-list');
+  list.setAttribute('aria-multiselectable', 'true');
   const browseHost = document.createElement('div');
   browseHost.setAttribute('data-pkc-region', 'browse-host');
   browseHost.append(list);

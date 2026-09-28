@@ -42,6 +42,7 @@ import { formatListDate, formatStoredDate } from '@features/datetime/stored-date
 import { ARCHETYPE_ICONS, iconButton, iconSpan } from './icons';
 // 🔑 空のときの「次の一手」は一覧タブと**同じ部品**(#722 P2-13)── 2 か所で組まない
 import { emptyStartActions } from './empty-start';
+import { paintRowMark } from './selection-mark';
 
 
 
@@ -117,8 +118,7 @@ export class FilerRenderer {
   private paintMarks(state: AppState): void {
     const marked = new Set(state.selection);
     for (const [lid, tr] of this.rows) {
-      if (marked.has(lid)) tr.setAttribute('data-pkc-marked', '');
-      else tr.removeAttribute('data-pkc-marked');
+      paintRowMark(tr, marked.has(lid));
     }
     this.lastMarks = state.selection.join(' ');
   }
@@ -876,6 +876,7 @@ export class FilerRenderer {
 
     const table = document.createElement('table');
     table.setAttribute('data-pkc-region', 'filer-table');
+    table.setAttribute('aria-multiselectable', 'true');
     /**
      * 🔴 **表そのものにも焦点を置けるようにする**(2026-08-18 の着地前レビュー 8)。
      * 空のフォルダには置く先の行が無いので、ここが `filer` 文脈の鍵の受け皿になる。
@@ -936,7 +937,7 @@ export class FilerRenderer {
       else if (m.archetype === SMART_ARCHETYPE) tr.setAttribute('data-pkc-drop', 'smart');
       if (m.lid === state.selectedLid) tr.setAttribute('data-pkc-selected', '');
       // ⚠ **開いている**(`selected`)と**印を付けた**(`marked`)は別の印である
-      if (state.selection.includes(m.lid)) tr.setAttribute('data-pkc-marked', '');
+      paintRowMark(tr, state.selection.includes(m.lid));
       const name = document.createElement('td');
       name.setAttribute('data-pkc-field', 'title');
       // ⚠ 図案は**題名の文字列に混ぜない**(P9 段③)。以前は '📁 ' を題名の頭に
