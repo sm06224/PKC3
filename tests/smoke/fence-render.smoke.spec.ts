@@ -22,8 +22,11 @@ test('csv 表と html sandbox iframe が可視高さを持つ', async ({ page })
   await ta.click();
   // 🔴 **一度に入れる**(#561、2026-08-29)── 下の svg と同じ理由。囲みの中身を
   //    1 文字ずつ打つと、**打鍵の途中の書きかけ**が箱に届く。
+  const longCode = Array.from({ length: 30 }, (_, i) => `console.log("line ${i}");`).join('\n');
   await ta.fill(
-    '```csv-render\n列A,列B\n1,2\n```\n\n```html\n<p style="height:120px">sandbox</p>\n```',
+    '```csv-render\n列A,列B\n1,2\n```\n\n```html\n<p style="height:120px">sandbox</p>\n```\n\n```javascript\n' +
+      longCode +
+      '\n```',
   );
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
@@ -44,6 +47,36 @@ test('csv 表と html sandbox iframe が可視高さを持つ', async ({ page })
       { timeout: 10_000 },
     )
     .toBeGreaterThan(100); // 中身(120px)に追従した高さ ── height 0 の再演防止
+
+  // 🔴 長大なコードブロック（>= 18行）の折りたたみとワンクリック展開(#1139)
+  // ⚠ 新しい gotoApp を増やさずに既存の道中に assert を足す(smoke-budget #820)
+  const block = page.locator('[data-pkc-field="detail-body"] .pkc-md-block[data-pkc-md-block-kind="code"]').first();
+  await expect(block).toBeVisible();
+
+  // 初期状態は折りたたみ
+  await expect(block).toHaveAttribute('data-pkc-code-collapsed', '');
+  const barBtn = block.locator('.pkc-code-collapse-btn');
+  await expect(barBtn).toBeVisible();
+  await expect(barBtn).toHaveText(/すべて表示/);
+
+  // 折りたたみ時の高さ制限
+  const pre = block.locator('pre');
+  const collapsedBox = await pre.boundingBox();
+  expect(collapsedBox!.height).toBeLessThanOrEqual(220);
+
+  // 展開ボタンをクリック
+  await barBtn.click();
+  await expect(block).not.toHaveAttribute('data-pkc-code-collapsed', '');
+  await expect(barBtn).toHaveText(/折りたたむ/);
+
+  // 展開後の高さが大きく伸びていることを確認
+  const expandedBox = await pre.boundingBox();
+  expect(expandedBox!.height).toBeGreaterThan(collapsedBox!.height * 2);
+
+  // 折りたたむボタンをクリック
+  await barBtn.click();
+  await expect(block).toHaveAttribute('data-pkc-code-collapsed', '');
+  await expect(barBtn).toHaveText(/すべて表示/);
 
   expect(errors).toEqual([]);
 });

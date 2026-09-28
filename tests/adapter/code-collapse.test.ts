@@ -1,0 +1,209 @@
+/** @vitest-environment happy-dom */
+import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import {
+  applyCodeCollapse,
+  countCodeLines,
+  isCodeCollapsed,
+  setCodeCollapsed,
+  toggleCodeCollapse,
+  CODE_COLLAPSE_LINE_THRESHOLD,
+} from '../../src/adapter/ui/render/code-collapse';
+import { extractMdBlockPlainText, findMdBlockCopySource } from '../../src/adapter/ui/actions/copy-md-block';
+import { readFileSync } from 'node:fs';
+
+describe('code block collapse / expand (Issue #1139)', () => {
+  let host: HTMLElement;
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    host = document.createElement('div');
+    document.body.append(host);
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  describe('countCodeLines', () => {
+    it('counts lines accurately with various line endings', () => {
+      expect(countCodeLines('')).toBe(0);
+      expect(countCodeLines('const a = 1;')).toBe(1);
+      expect(countCodeLines('const a = 1;\n')).toBe(1);
+      expect(countCodeLines('const a = 1;\r\n')).toBe(1);
+      expect(countCodeLines('line 1\nline 2\nline 3')).toBe(3);
+      expect(countCodeLines('line 1\r\nline 2\r\nline 3\r\n')).toBe(3);
+    });
+  });
+
+  describe('applyCodeCollapse', () => {
+    it('skips short code blocks under threshold (< 18 lines)', () => {
+      const shortCode = Array.from({ length: 10 }, (_, i) => `console.log(${i});`).join('\n');
+      host.innerHTML = `
+        <div class="pkc-md-block" data-pkc-md-block-kind="code">
+          <pre><code class="language-javascript">${shortCode}</code></pre>
+        </div>
+      `;
+
+      applyCodeCollapse(host);
+
+      const block = host.querySelector('.pkc-md-block')!;
+      expect(block.hasAttribute('data-pkc-code-collapsible')).toBe(false);
+      expect(block.querySelector('.pkc-code-collapse-bar')).toBeNull();
+      expect(block.querySelector('.pkc-code-collapse-top-btn')).toBeNull();
+    });
+
+    it('attaches collapse controls to long code blocks (>= 18 lines) in initial collapsed state', () => {
+      const longLines = 25;
+      const longCode = Array.from({ length: longLines }, (_, i) => `const row${i} = ${i};`).join('\n');
+      host.innerHTML = `
+        <div class="pkc-md-block" data-pkc-md-block-kind="code">
+          <button class="pkc-md-copy-btn" type="button">⧉</button>
+          <pre><code class="language-typescript">${longCode}</code></pre>
+        </div>
+      `;
+
+      applyCodeCollapse(host);
+
+      const block = host.querySelector<HTMLElement>('.pkc-md-block')!;
+      expect(block.hasAttribute('data-pkc-code-collapsible')).toBe(true);
+      expect(block.getAttribute('data-pkc-code-lines')).toBe(String(longLines));
+      expect(isCodeCollapsed(block)).toBe(true);
+
+      const topBtn = block.querySelector<HTMLButtonElement>('.pkc-code-collapse-top-btn');
+      expect(topBtn).not.toBeNull();
+      expect(topBtn?.getAttribute('aria-expanded')).toBe('false');
+      expect(topBtn?.textContent).toBe('▾');
+      expect(topBtn?.getAttribute('data-pkc-action')).toBe('toggle-code-collapse');
+
+      const bar = block.querySelector<HTMLElement>('.pkc-code-collapse-bar');
+      expect(bar).not.toBeNull();
+      const barBtn = bar?.querySelector<HTMLButtonElement>('.pkc-code-collapse-btn');
+      expect(barBtn).not.toBeNull();
+      expect(barBtn?.getAttribute('aria-expanded')).toBe('false');
+      expect(barBtn?.textContent).toBe(`▾ すべて表示 (${longLines} 行)`);
+      expect(barBtn?.getAttribute('data-pkc-action')).toBe('toggle-code-collapse');
+    });
+
+    it('is idempotent and preserves existing state on re-render', () => {
+      const longCode = Array.from({ length: 20 }, (_, i) => `item_${i}`).join('\n');
+      host.innerHTML = `
+        <div class="pkc-md-block" data-pkc-md-block-kind="code">
+          <pre><code>${longCode}</code></pre>
+        </div>
+      `;
+
+      applyCodeCollapse(host);
+      const block = host.querySelector<HTMLElement>('.pkc-md-block')!;
+
+      // Expand it
+      toggleCodeCollapse(block);
+      expect(isCodeCollapsed(block)).toBe(false);
+
+      // Re-apply
+      applyCodeCollapse(host);
+
+      // Should still be expanded and have exactly 1 bar and 1 top button
+      expect(isCodeCollapsed(block)).toBe(false);
+      expect(block.querySelectorAll('.pkc-code-collapse-bar')).toHaveLength(1);
+      expect(block.querySelectorAll('.pkc-code-collapse-top-btn')).toHaveLength(1);
+    });
+
+    it('skips blocks that have .pkc-render-slot (e.g. CSV table views)', () => {
+      const longCode = Array.from({ length: 30 }, (_, i) => `val,${i}`).join('\n');
+      host.innerHTML = `
+        <div class="pkc-md-block" data-pkc-md-block-kind="code" data-pkc-render-lang="csv">
+          <div class="pkc-render-slot"><table><tbody><tr><td>test</td></tr></tbody></table></div>
+          <pre class="pkc-render-source"><code>${longCode}</code></pre>
+        </div>
+      `;
+
+      applyCodeCollapse(host);
+      expect(host.querySelectorAll('.pkc-code-collapse-bar')).toHaveLength(0);
+    });
+  });
+
+  describe('toggleCodeCollapse & setCodeCollapsed', () => {
+    it('toggles between collapsed and expanded cleanly', () => {
+      const longLines = 22;
+      const longCode = Array.from({ length: longLines }, (_, i) => `x_${i} = ${i};`).join('\n');
+      host.innerHTML = `
+        <div class="pkc-md-block" data-pkc-md-block-kind="code">
+          <pre><code>${longCode}</code></pre>
+        </div>
+      `;
+
+      applyCodeCollapse(host);
+      const block = host.querySelector<HTMLElement>('.pkc-md-block')!;
+      const topBtn = block.querySelector<HTMLButtonElement>('.pkc-code-collapse-top-btn')!;
+      const barBtn = block.querySelector<HTMLButtonElement>('.pkc-code-collapse-btn')!;
+
+      // Initially collapsed
+      expect(isCodeCollapsed(block)).toBe(true);
+      expect(topBtn.textContent).toBe('▾');
+      expect(barBtn.textContent).toBe(`▾ すべて表示 (${longLines} 行)`);
+
+      // Toggle -> Expand
+      toggleCodeCollapse(block);
+      expect(isCodeCollapsed(block)).toBe(false);
+      expect(topBtn.textContent).toBe('▴');
+      expect(topBtn.getAttribute('aria-expanded')).toBe('true');
+      expect(barBtn.textContent).toBe('▴ 折りたたむ');
+      expect(barBtn.getAttribute('aria-expanded')).toBe('true');
+
+      // Toggle -> Collapse
+      toggleCodeCollapse(block);
+      expect(isCodeCollapsed(block)).toBe(true);
+      expect(topBtn.textContent).toBe('▾');
+      expect(topBtn.getAttribute('aria-expanded')).toBe('false');
+      expect(barBtn.textContent).toBe(`▾ すべて表示 (${longLines} 行)`);
+      expect(barBtn.getAttribute('aria-expanded')).toBe('false');
+
+      // Direct setCodeCollapsed
+      setCodeCollapsed(block, false);
+      expect(isCodeCollapsed(block)).toBe(false);
+      expect(barBtn.textContent).toBe('▴ 折りたたむ');
+      setCodeCollapsed(block, true);
+      expect(isCodeCollapsed(block)).toBe(true);
+      expect(barBtn.textContent).toBe(`▾ すべて表示 (${longLines} 行)`);
+    });
+
+    it('exposes correct threshold constant', () => {
+      expect(CODE_COLLAPSE_LINE_THRESHOLD).toBe(18);
+    });
+  });
+
+  describe('copy compatibility (copy-md-block)', () => {
+    it('faithfully copies full code content even when collapsed', () => {
+      const longLines = 24;
+      const codeLines = Array.from({ length: longLines }, (_, i) => `echo "line ${i}"`);
+      const fullText = codeLines.join('\n');
+      host.innerHTML = `
+        <div class="pkc-md-block" data-pkc-md-block-kind="code">
+          <button class="pkc-md-copy-btn" data-pkc-action="copy-md-block" data-pkc-copy-kind="code" type="button">⧉</button>
+          <pre><code class="language-bash">${fullText}</code></pre>
+        </div>
+      `;
+
+      applyCodeCollapse(host);
+      const block = host.querySelector<HTMLElement>('.pkc-md-block')!;
+      expect(isCodeCollapsed(block)).toBe(true);
+
+      const source = findMdBlockCopySource(block);
+      expect(source).not.toBeNull();
+      const extracted = extractMdBlockPlainText(source!);
+      expect(extracted).toBe(fullText);
+    });
+  });
+
+  describe('print styles integrity', () => {
+    it('app.css ensures code collapse controls are hidden and code is fully expanded in print', () => {
+      const css = readFileSync('src/styles/app.css', 'utf-8');
+      const printSection = css.slice(css.indexOf('@media print'));
+      expect(printSection).toContain('.pkc-code-collapse-bar');
+      expect(printSection).toContain('.pkc-code-collapse-top-btn');
+      expect(printSection).toMatch(
+        /\.pkc-md-rendered\s+\.pkc-md-block\[data-pkc-code-collapsed\]\s*>\s*pre\s*\{[^}]*max-height:\s*none\s*!important/i,
+      );
+    });
+  });
+});

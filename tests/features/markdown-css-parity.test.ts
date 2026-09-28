@@ -287,6 +287,10 @@ const STYLED_ELSEWHERE: Readonly<Record<string, string>> = {
   'pkc-reading-time': 'src/adapter/ui/render/reading-time.ts',
   'pkc-quick-toc-item': 'src/adapter/ui/render/quick-toc.ts',
   'pkc-quick-toc-link': 'src/adapter/ui/render/quick-toc.ts',
+  // 🔴 コードブロック折りたたみ(#1139)
+  'pkc-code-collapse-bar': 'src/adapter/ui/render/code-collapse.ts',
+  'pkc-code-collapse-btn': 'src/adapter/ui/render/code-collapse.ts',
+  'pkc-code-collapse-top-btn': 'src/adapter/ui/render/code-collapse.ts',
 };
 
 const NO_STYLE_NEEDED: Readonly<Record<string, string>> = {
