@@ -54,7 +54,7 @@ export function formatBodyPreview(body: string, maxChars = BODY_PREVIEW_MAX_CHAR
 }
 
 export interface PreviewCardOptions {
-  kind: 'entry' | 'not-found' | 'foreign';
+  kind: 'entry' | 'not-found' | 'foreign' | 'external';
   lid?: string;
   title?: string;
   archetype?: string;
@@ -62,6 +62,8 @@ export interface PreviewCardOptions {
   bodyChars?: number | null;
   bodyPreview?: string | null;
   loading?: boolean;
+  externalUrl?: string;
+  externalDomain?: string;
 }
 
 function archetypeLabel(archetype?: string): string {
@@ -86,6 +88,52 @@ export function renderPreviewCard(doc: Document, opts: PreviewCardOptions): HTML
   card.setAttribute('data-pkc-region', LINK_PREVIEW_REGION);
   card.setAttribute('role', 'tooltip');
   card.setAttribute('aria-live', 'polite');
+
+  if (opts.kind === 'external') {
+    card.classList.add('pkc-link-preview-external');
+
+    // Header: 外部リンクバッジ + ドメイン名
+    const header = doc.createElement('div');
+    header.className = 'pkc-link-preview-header';
+
+    const badge = doc.createElement('span');
+    badge.className = 'pkc-link-preview-archetype';
+    badge.setAttribute('data-pkc-archetype', 'external');
+    badge.textContent = '外部リンク ↗';
+    header.append(badge);
+
+    if (opts.externalDomain) {
+      const domainSpan = doc.createElement('span');
+      domainSpan.className = 'pkc-link-preview-domain';
+      domainSpan.textContent = opts.externalDomain;
+      header.append(domainSpan);
+    }
+    card.append(header);
+
+    // Title (if any, e.g. anchor text or custom title)
+    if (opts.title) {
+      const title = doc.createElement('div');
+      title.className = 'pkc-link-preview-title';
+      title.textContent = opts.title;
+      card.append(title);
+    }
+
+    // URL display
+    if (opts.externalUrl) {
+      const urlDiv = doc.createElement('div');
+      urlDiv.className = 'pkc-link-preview-url';
+      urlDiv.textContent = opts.externalUrl;
+      card.append(urlDiv);
+    }
+
+    // Safety hint footer
+    const hint = doc.createElement('div');
+    hint.className = 'pkc-link-preview-safe-hint';
+    hint.textContent = '新しいタブで安全に開きます (別ウィンドウ)';
+    card.append(hint);
+
+    return card;
+  }
 
   if (opts.kind === 'not-found') {
     card.classList.add('pkc-link-preview-empty');
@@ -253,7 +301,7 @@ export function setupLinkPreview(
     // プレビューカード内の要素は除外
     if (target.closest(`[data-pkc-region="${LINK_PREVIEW_REGION}"]`)) return null;
     return target.closest<HTMLElement>(
-      'a[data-pkc-entry-ref], a[data-pkc-action="navigate-entry-ref"], a[data-pkc-action="navigate-card-ref"]',
+      'a[data-pkc-entry-ref], a[data-pkc-action="navigate-entry-ref"], a[data-pkc-action="navigate-card-ref"], a[href^="http://"], a[href^="https://"]',
     );
   };
 
@@ -269,6 +317,31 @@ export function setupLinkPreview(
       anchor.getAttribute('data-pkc-card-target') ??
       anchor.getAttribute('href') ??
       '';
+
+    // 外部リンク（http:// または https://）
+    if (raw.startsWith('http://') || raw.startsWith('https://')) {
+      closeLinkPreview(root);
+      let domain = '';
+      try {
+        const u = new URL(raw);
+        domain = u.hostname;
+      } catch {
+        // invalid URL
+      }
+      const anchorTitle = anchor.getAttribute('title')?.trim() || anchor.textContent?.trim() || '';
+      const card = renderPreviewCard(doc, {
+        kind: 'external',
+        externalUrl: raw,
+        externalDomain: domain,
+        title: anchorTitle && anchorTitle !== raw ? anchorTitle : undefined,
+      });
+      root.append(card);
+      positionPreviewCard(card, anchor, root);
+      activeAnchor = anchor;
+      activeLid = null;
+      return;
+    }
+
     const target = parseLinkTarget(raw);
 
     if (target.kind === 'invalid') return;
