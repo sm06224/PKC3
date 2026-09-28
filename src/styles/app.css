@@ -8618,5 +8618,56 @@ h3[data-pkc-section] {
   line-height: 1;
 }
 
+/* 🔴 **見出しアンカーリンクコピーボタン**(#1124)── 見出しホバー時にアンカーボタンを表示し、ワンクリックで参照リンクをコピー */
+h1:hover > .pkc-heading-anchor,
+h2:hover > .pkc-heading-anchor,
+h3:hover > .pkc-heading-anchor,
+h4:hover > .pkc-heading-anchor,
+h5:hover > .pkc-heading-anchor,
+h6:hover > .pkc-heading-anchor,
+.pkc-heading-anchor:focus-visible,
+.pkc-heading-anchor.pkc-copied {
+  opacity: 0.6;
+  visibility: visible;
+}
+
+.pkc-heading-anchor {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: var(--s1);
+  padding: 0 4px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius);
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+  user-select: none;
+  vertical-align: middle;
+  font-size: 0.75em;
+  line-height: 1;
+}
+
+.pkc-heading-anchor:hover {
+  opacity: 1 !important;
+  color: var(--fg);
+  background: var(--surface-2);
+}
+
+.pkc-heading-anchor::before {
+  content: '#';
+  font-family: monospace;
+  font-weight: bold;
+}
+
+.pkc-heading-anchor.pkc-copied::before {
+  content: '✓';
+  color: var(--success, #28a745);
+}
+
+
 
 

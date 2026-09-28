@@ -265,6 +265,9 @@ const STYLED_ELSEWHERE: Readonly<Record<string, string>> = {
   'pkc-back-to-top': 'src/adapter/ui/render/back-to-top.ts',
   'pkc-back-to-top-icon': 'src/adapter/ui/render/back-to-top.ts',
   'pkc-visible': 'src/adapter/ui/render/back-to-top.ts',
+  // 🔴 見出しアンカーリンクコピーボタン(#1124)
+  'pkc-heading-anchor': 'src/adapter/ui/render/heading-anchor.ts',
+  'pkc-copied': 'src/adapter/ui/render/heading-anchor.ts',
 };
 
 const NO_STYLE_NEEDED: Readonly<Record<string, string>> = {
