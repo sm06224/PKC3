@@ -37,6 +37,7 @@ import { STACK_ARCHETYPE } from '@features/flavor/stack-flavor';
 import { isSystemMessageLid, titleForMessageLid } from '@features/message/message-log';
 import { installBackToTop, type BackToTopHandle } from './back-to-top';
 import { installReadingProgress, type ReadingProgressHandle } from './reading-progress';
+import { installQuickToc, type QuickTocHandle } from './quick-toc';
 
 /**
  * 🔴 **図とグラフは同じ面に出る**(#188)── 器を埋める呼び出しを 1 つに束ねる。
@@ -446,6 +447,8 @@ export class DetailRenderer {
   private backToTopHandle: BackToTopHandle | null = null;
   /** 🔴 長文ノート閲覧時の読書進捗バー(#1125)。 */
   private readingProgressHandle: ReadingProgressHandle | null = null;
+  /** 🔴 長文ノート閲覧時のクイック目次ポップオーバー(#1130)。 */
+  private quickTocHandle: QuickTocHandle | null = null;
 
   /** markdown を描く口(既定は自前。⚠ **要るまで worker は作らない**)。 */
   private readonly markdown: MarkdownClient;
@@ -562,6 +565,8 @@ export class DetailRenderer {
     this.backToTopHandle = null;
     this.readingProgressHandle?.dispose();
     this.readingProgressHandle = null;
+    this.quickTocHandle?.dispose();
+    this.quickTocHandle = null;
   }
 
   /**
@@ -588,6 +593,8 @@ export class DetailRenderer {
     this.backToTopHandle = null;
     this.readingProgressHandle?.dispose();
     this.readingProgressHandle = null;
+    this.quickTocHandle?.dispose();
+    this.quickTocHandle = null;
   }
 
   /**
@@ -840,6 +847,8 @@ export class DetailRenderer {
       this.backToTopHandle = installBackToTop(this.scroller, this.region);
       this.readingProgressHandle?.dispose();
       this.readingProgressHandle = installReadingProgress(this.scroller, this.region);
+      this.quickTocHandle?.dispose();
+      this.quickTocHandle = installQuickToc(this.region, this.bodyHost);
       this.skeletonLid = lid;
       this.bodyKind = null;
       this.bodyView = EMPTY_VIEW;
@@ -1152,6 +1161,7 @@ export class DetailRenderer {
          *   前に置くと、捨てるはずの古い結果が印を付けてしまう。
          */
         host.setAttribute(PAINTED_ATTR, lid);
+        this.quickTocHandle?.update();
       };
       void this.markdown
         .render(shown, opts)
