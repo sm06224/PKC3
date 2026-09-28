@@ -351,7 +351,13 @@ const UNREGISTERED_POINT: readonly string[] = [
    *   (`toc-jump` と同じ仕分け)。
    */
   'system-jump', 'toc-jump',
-  'toggle-app-group', 'toggle-heading-fold', 'toggle-task', 'unschedule-task', 'unsplit-entry',
+  'toggle-app-group',
+  /**
+   * ⚠ **2026-09-29(#1139)で 1 件増やした** ── 長大なコードブロックの折りたたみ／展開。
+   *   押したコードブロックが要る(`toggle-heading-fold` と同じ仕分け)。
+   */
+  'toggle-code-collapse',
+  'toggle-heading-fold', 'toggle-task', 'unschedule-task', 'unsplit-entry',
   'untag-entry', 'view-asset', 'view-big',
 ];
 
@@ -537,12 +543,15 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-09-28(#1099): ライトボックスを閉じる(`close-lightbox`)で
       //   受け手 +1 ── 登記は増えない(ライトボックスが開いている間だけ意味を持つ)。
       //   `receivers` +1 / `total` +1 / `unregistered` +1。
-      total: 336,
-      receivers: 282,
+      // ⚠ 2026-09-29(#1139): 長大なコードブロックの折りたたみ(`toggle-code-collapse`)で
+      //   受け手 +1 ── 登記は増えない(押したコード枠が要る P1 で、`toggle-heading-fold` と同じ仕分け)。
+      //   `receivers` +1 / `total` +1 / `unregistered` +1。
+      total: 337,
+      receivers: 283,
       registered: 93,
       both: 39,
       outsideActionsTable: 54,
-      unregistered: 243,
+      unregistered: 244,
     });
   });
 
