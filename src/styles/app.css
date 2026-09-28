@@ -8668,6 +8668,34 @@ h6:hover > .pkc-heading-anchor,
   color: var(--success, #28a745);
 }
 
+/* 🔴 **読書進捗バー（Reading Progress Indicator）**(#1125)── 本文スクロール進行度をリアルタイム表示 */
+.pkc-reading-progress {
+  position: sticky;
+  top: 0;
+  left: 0;
+  right: 0;
+  width: 100%;
+  height: 2px;
+  background: transparent;
+  z-index: 20;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.pkc-reading-progress.pkc-visible {
+  opacity: 1;
+}
+
+.pkc-reading-progress-bar {
+  height: 100%;
+  width: 0%;
+  background: var(--accent, #3b82f6);
+  transition: width 0.08s ease-out;
+  border-radius: 0 1px 1px 0;
+}
+
+
 
 
 
