@@ -38,6 +38,7 @@ import { isSystemMessageLid, titleForMessageLid } from '@features/message/messag
 import { installBackToTop, type BackToTopHandle } from './back-to-top';
 import { installReadingProgress, type ReadingProgressHandle } from './reading-progress';
 import { installQuickToc, type QuickTocHandle } from './quick-toc';
+import { paintReadingTime } from './reading-time';
 
 /**
  * 🔴 **図とグラフは同じ面に出る**(#188)── 器を埋める呼び出しを 1 つに束ねる。
@@ -328,6 +329,7 @@ export class DetailRenderer {
    */
   private skeletonLid: string | null = null;
   private titleEl: HTMLElement | null = null;
+  private readingTimeEl: HTMLElement | null = null;
   private barSlot: HTMLElement | null = null;
   /**
    * 操作の器の**形**(2026-08-07)。形が同じなら node を使い回す ──
@@ -582,6 +584,7 @@ export class DetailRenderer {
   private dropSkeleton(): void {
     this.skeletonLid = null;
     this.titleEl = null;
+    this.readingTimeEl = null;
     this.barSlot = null;
     this.panelSlot = null;
     this.noticeSlot = null;
@@ -826,6 +829,10 @@ export class DetailRenderer {
        */
       this.titleEl = document.createElement('h1');
       this.titleEl.setAttribute('data-pkc-field', this.field('detail-title'));
+      this.readingTimeEl = document.createElement('div');
+      this.readingTimeEl.setAttribute('data-pkc-field', this.field('detail-reading-time'));
+      this.readingTimeEl.className = 'pkc-reading-time';
+      this.readingTimeEl.hidden = true;
       this.barSlot = document.createElement('div');
       this.barSlot.setAttribute('data-pkc-field', this.field('detail-bar-slot'));
       this.panelSlot = document.createElement('div');
@@ -838,6 +845,7 @@ export class DetailRenderer {
       this.bodyHost.setAttribute('data-pkc-field', this.field('detail-body-host'));
       this.region.append(
         this.titleEl,
+        this.readingTimeEl,
         this.barSlot,
         this.panelSlot,
         this.noticeSlot,
@@ -867,6 +875,9 @@ export class DetailRenderer {
     // 🔴 system 領域のノートは `entryMetas` に無い(設計 doc §1.1、段②a)。
     this.titleEl!.textContent =
       state.entryMetas.get(lid)?.title ?? (isSystemMessageLid(lid) ? titleForMessageLid(lid) : '');
+    if (this.readingTimeEl) {
+      paintReadingTime(this.readingTimeEl, body);
+    }
 
     if (body === null) {
       /**
