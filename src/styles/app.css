@@ -8825,6 +8825,10 @@ h6:hover > .pkc-heading-anchor,
   gap: 2px;
 }
 
+.pkc-quick-toc-item {
+  display: block;
+}
+
 .pkc-quick-toc-item[data-pkc-toc-level='1'] {
   padding-left: 0;
   font-weight: 600;

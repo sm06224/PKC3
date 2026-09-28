@@ -40,7 +40,7 @@ export function installQuickToc(
   const icon = doc.createElement('span');
   icon.className = 'pkc-quick-toc-icon';
   icon.setAttribute('aria-hidden', 'true');
-  icon.textContent = '📑';
+  icon.textContent = '≡';
 
   const label = doc.createElement('span');
   label.className = 'pkc-quick-toc-label';
