@@ -294,6 +294,8 @@ const STYLED_ELSEWHERE: Readonly<Record<string, string>> = {
   'pkc-code-collapse-top-btn': 'src/adapter/ui/render/code-collapse.ts',
   // 🔴 テーブル列ソート(#1150)
   'pkc-table-sort-icon': 'src/adapter/ui/render/table-sort.ts',
+  // 🔴 外部リンクインジケータ(#1152)
+  'pkc-external-link-icon': 'src/adapter/ui/render/external-link.ts',
 };
 
 const NO_STYLE_NEEDED: Readonly<Record<string, string>> = {
