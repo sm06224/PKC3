@@ -51,6 +51,10 @@ test('🔴 表を右クリックして形を変えると、保存された本文
   await expect(table, '表が描かれていない').toHaveCount(1, { timeout: 15_000 });
   // 🔑 **前提**:まだ markdown の表である(行・列の ＋ × は出ていない)
   await expect(page.locator(CSV_ONLY), '前提: もう csv の表になっている').toHaveCount(0);
+  // 🔴 **テーブル列ソート**(#1150): ヘッダーにソート属性とインジケータが付与されていること
+  const th = table.locator('th').first();
+  await expect(th, '表ヘッダーにソート属性が付与されていない').toHaveAttribute('data-pkc-sort-direction', 'none');
+  await expect(th.locator('.pkc-table-sort-icon'), 'ソートインジケータが出ていない').toBeVisible();
 
   // ── ① 表を右クリックすると「CSV の表にする」が出る
   await table.locator('td').first().click({ button: 'right' });
