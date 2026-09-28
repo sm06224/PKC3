@@ -8066,6 +8066,7 @@ h3[data-pkc-section] {
   .pkc-reading-progress,
   .pkc-heading-anchor,
   .pkc-code-lang,
+  .pkc-quick-toc,
   /* ⚠ 表の「行・列を足す / 消す」も紙には要らない(#418 段①)── 画面では
    *    触るまで隠しているが、`visibility` は場所を取るので升の幅が変わる */
   .pkc-csv-shape,
@@ -8719,6 +8720,151 @@ h6:hover > .pkc-heading-anchor,
   transition: width 0.08s ease-out;
   border-radius: 0 1px 1px 0;
 }
+
+/* 🔴 **クイック目次（ToC）ポップオーバー**(#1130)── 本文プレビュー右上に固定される軽量目次ナビゲーション */
+.pkc-quick-toc {
+  position: sticky;
+  top: 8px;
+  float: right;
+  margin-right: 16px;
+  margin-top: 4px;
+  z-index: 50;
+  pointer-events: auto;
+}
+
+.pkc-quick-toc-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: 0.78em;
+  font-weight: 500;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--fg);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.05));
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.pkc-quick-toc-btn:hover {
+  background: var(--surface-2);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.pkc-quick-toc-btn[aria-expanded='true'] {
+  background: var(--surface-2);
+  border-color: var(--accent);
+}
+
+.pkc-quick-toc-icon {
+  font-size: 1.1em;
+  line-height: 1;
+}
+
+.pkc-quick-toc-label {
+  line-height: 1;
+}
+
+.pkc-quick-toc-popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  width: 260px;
+  max-width: 80vw;
+  max-height: 380px;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow, 0 4px 12px rgba(0, 0, 0, 0.15));
+  padding: 8px;
+  z-index: 100;
+}
+
+.pkc-quick-toc-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 6px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.pkc-quick-toc-title {
+  font-size: 0.85em;
+  font-weight: bold;
+  color: var(--fg);
+}
+
+.pkc-quick-toc-close {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 1.1em;
+  line-height: 1;
+  padding: 2px 6px;
+  cursor: pointer;
+  border-radius: var(--radius);
+}
+
+.pkc-quick-toc-close:hover {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+
+.pkc-quick-toc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pkc-quick-toc-item[data-pkc-toc-level='1'] {
+  padding-left: 0;
+  font-weight: 600;
+}
+.pkc-quick-toc-item[data-pkc-toc-level='2'] {
+  padding-left: 8px;
+}
+.pkc-quick-toc-item[data-pkc-toc-level='3'] {
+  padding-left: 16px;
+}
+.pkc-quick-toc-item[data-pkc-toc-level='4'] {
+  padding-left: 24px;
+}
+.pkc-quick-toc-item[data-pkc-toc-level='5'],
+.pkc-quick-toc-item[data-pkc-toc-level='6'] {
+  padding-left: 32px;
+}
+
+.pkc-quick-toc-link {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 4px 6px;
+  border-radius: var(--radius);
+  font-size: 0.82em;
+  color: var(--fg);
+  cursor: pointer;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.pkc-quick-toc-link:hover {
+  background: var(--surface-2);
+  color: var(--accent);
+}
+
 
 
 

@@ -273,6 +273,18 @@ const STYLED_ELSEWHERE: Readonly<Record<string, string>> = {
   'pkc-reading-progress-bar': 'src/adapter/ui/render/reading-progress.ts',
   // 🔴 コードブロック言語バッジ(#1128)
   'pkc-code-lang': 'src/adapter/ui/render/code-lang.ts',
+  // 🔴 クイック目次（ToC）ポップオーバー(#1130)
+  'pkc-quick-toc': 'src/adapter/ui/render/quick-toc.ts',
+  'pkc-quick-toc-btn': 'src/adapter/ui/render/quick-toc.ts',
+  'pkc-quick-toc-icon': 'src/adapter/ui/render/quick-toc.ts',
+  'pkc-quick-toc-label': 'src/adapter/ui/render/quick-toc.ts',
+  'pkc-quick-toc-popover': 'src/adapter/ui/render/quick-toc.ts',
+  'pkc-quick-toc-header': 'src/adapter/ui/render/quick-toc.ts',
+  'pkc-quick-toc-title': 'src/adapter/ui/render/quick-toc.ts',
+  'pkc-quick-toc-close': 'src/adapter/ui/render/quick-toc.ts',
+  'pkc-quick-toc-list': 'src/adapter/ui/render/quick-toc.ts',
+  'pkc-quick-toc-item': 'src/adapter/ui/render/quick-toc.ts',
+  'pkc-quick-toc-link': 'src/adapter/ui/render/quick-toc.ts',
 };
 
 const NO_STYLE_NEEDED: Readonly<Record<string, string>> = {
