@@ -62,6 +62,18 @@ description: PKC3 の PR を作ってから CI green 確認 → 自己監査 →
 🔑 **手順:`data-pkc-action` を足したら、`npx vitest run tests/` を 1 回**
 (`tests/adapter` / `tests/features` の下だけでは、この 5 つのうち 2 つに届かない)。
 
+### 🔴 Markdown 本文の動的装飾・CSS クラス（`.pkc-*`）を足したら、`markdown-css-parity` と `body-css` を検める(2026-09-29)
+
+⚠ `app.css` に `.pkc-*` クラスの規則を足した際、**CI/verify で parity 検査に引っかかる**:
+
+| # | 何が鳴るか | 理由と塞ぎ方 |
+|---|---|---|
+| 1 | `tests/features/markdown-css-parity.test.ts` | **「CSS に誰も出さない pkc-* の規則が残っていない」**。<br>`renderMarkdown` のトークンから直接出力されない動的 DOM デコレータ（`applyTableSort`, `applyExternalLinks` 等）のクラスは、同テストの **`STYLED_ELSEWHERE` に名指しで登録**する。登録しないと orphan として落ちる。 |
+| 2 | `tests/build/body-css.test.ts` | **本文 CSS 規則数上限 tripwire**（上限 220 本未満）。<br>`.pkc-md-rendered` 起点の規則数を増やしすぎると落ちる。セレクタを `:is()` 等で集約し、規則数の膨張を防ぐ。 |
+| 3 | ESLint `no-useless-assignment` | `let diff = 0; if (...) diff = ...; else diff = ...;` のように全分岐で再代入される変数は無駄な代入エラーになる。三項演算子で `const` 初期化する。 |
+
+🔑 **手順: Markdown の動的クラスや本文 CSS を足したら、`npx vitest run tests/features/markdown-css-parity.test.ts tests/build/body-css.test.ts` を実行し、`npm run lint` を確認する。**
+
 ### 🔴 「いつも出る」ようにした物は**共有面**である ── 着地前にフル smoke(2026-09-26)
 
 ⚠ #1038 段 D(C4)で、**編集中は画面のいちばん下の行に「編集中」が常に出る**ようにした。
