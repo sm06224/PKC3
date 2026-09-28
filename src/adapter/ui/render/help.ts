@@ -48,7 +48,14 @@ import {
 } from '@features/oss-notices/oss-notices';
 import OSS_NOTICES from 'virtual:pkc-oss-notices';
 import manualText from '../../../../docs/manual.md?raw';
-import { KEY_COMMANDS, chordLabel } from '@features/keymap';
+import {
+  KEY_COMMANDS,
+  chordLabel,
+  CONTEXT_ORDER,
+  CONTEXT_LABELS,
+  primaryContext,
+  type KeyContext,
+} from '@features/keymap';
 import { appKeymap, type KeymapStore } from './keymap';
 import { findManualRefs, resolveManualRef } from '@features/help/manual-refs';
 import {
@@ -452,11 +459,19 @@ export class HelpRenderer {
     openBtn.textContent = 'マニュアルを別のウィンドウで開く';
     openBtn.title =
       'マニュアルだけのウィンドウを開きます(目次つき・窓いっぱい。Ctrl+F でブラウザの検索が使えます)';
+    const jumpKeysBtn = document.createElement('button');
+    jumpKeysBtn.type = 'button';
+    jumpKeysBtn.setAttribute('data-pkc-field', 'help-jump-keys');
+    jumpKeysBtn.textContent = 'キーボードショートカット一覧へ';
+    jumpKeysBtn.title = 'ショートカットキーの一覧(チートシート)へスクロールします';
+    jumpKeysBtn.addEventListener('click', () => {
+      this.scrollToKeys();
+    });
     const openNote = document.createElement('span');
     openNote.setAttribute('data-pkc-field', 'settings-note');
     // 🔑 **何が起きるか**を押す前に言う(この画面の本文は消えない)
     openNote.textContent = '目次つきで、窓いっぱいに出ます。この画面はそのまま残ります';
-    openBar.append(openBtn, openNote);
+    openBar.append(openBtn, jumpKeysBtn, openNote);
     body.append(openBar);
 
     /**
@@ -619,6 +634,7 @@ export class HelpRenderer {
 
   /**
    * ショートカットの一覧を描く。⚠ **表(`KEY_COMMANDS`)が正本**。
+   * 🔴 **文脈ごとにグループ化して整理されたチートシートにする**(#1145)。
    * ⚠ 割当が空のコマンドも**行ごと出す** ── 「割当なし」が見えないと、
    *   user は「そんな操作は無い」と読む(外した本人が戻せなくなる)。
    */
@@ -627,20 +643,62 @@ export class HelpRenderer {
     if (!host) return;
     const bindings = this.keymap.getBindings();
     host.textContent = '';
+
+    const topBar = document.createElement('div');
+    topBar.setAttribute('data-pkc-field', 'help-key-top-bar');
+    const jumpTopBtn = document.createElement('button');
+    jumpTopBtn.type = 'button';
+    jumpTopBtn.setAttribute('data-pkc-field', 'help-jump-top');
+    jumpTopBtn.textContent = '↑ マニュアルの先頭へ戻る';
+    jumpTopBtn.title = 'ヘルプ画面の先頭(マニュアル)へ戻ります';
+    jumpTopBtn.addEventListener('click', () => {
+      this.scrollToTop();
+    });
+    topBar.append(jumpTopBtn);
+    host.append(topBar);
+
     const dl = document.createElement('dl');
-    for (const cmd of KEY_COMMANDS) {
-      const dt = document.createElement('dt');
-      dt.setAttribute('data-pkc-field', 'help-key-command');
-      dt.setAttribute('data-pkc-command', cmd.id);
-      dt.textContent = cmd.label;
-      const dd = document.createElement('dd');
-      dd.setAttribute('data-pkc-field', 'help-key-chords');
-      dd.setAttribute('data-pkc-command', cmd.id);
-      const list = bindings[cmd.id] ?? cmd.defaults;
-      dd.textContent = list.length === 0 ? '割り当てなし' : list.map((c) => chordLabel(c)).join(' / ');
-      dl.append(dt, dd);
+    let shown: KeyContext | null = null;
+    for (const c of CONTEXT_ORDER) {
+      for (const cmd of KEY_COMMANDS) {
+        if (primaryContext(cmd) !== c) continue;
+        if (shown !== c) {
+          const head = document.createElement('dt');
+          head.setAttribute('data-pkc-field', 'help-key-group');
+          head.textContent = CONTEXT_LABELS[c];
+          const empty = document.createElement('dd');
+          empty.setAttribute('data-pkc-field', 'help-key-group-note');
+          dl.append(head, empty);
+          shown = c;
+        }
+        const dt = document.createElement('dt');
+        dt.setAttribute('data-pkc-field', 'help-key-command');
+        dt.setAttribute('data-pkc-command', cmd.id);
+        dt.textContent = cmd.label;
+        const dd = document.createElement('dd');
+        dd.setAttribute('data-pkc-field', 'help-key-chords');
+        dd.setAttribute('data-pkc-command', cmd.id);
+        const list = bindings[cmd.id] ?? cmd.defaults;
+        dd.textContent = list.length === 0 ? '割り当てなし' : list.map((c) => chordLabel(c)).join(' / ');
+        dl.append(dt, dd);
+      }
     }
     host.append(dl);
+  }
+
+  /** 🔴 ショートカットキーの一覧までスクロールする(#1145)。 */
+  scrollToKeys(): void {
+    this.keys?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  /** 🔴 ヘルプ面(マニュアル)の先頭へスクロールする(#1145)。 */
+  scrollToTop(): void {
+    const outer = this.region.closest<HTMLElement>('[data-pkc-region="detail"]');
+    if (outer !== null && outer !== undefined) {
+      outer.scrollTo({ top: 0, behavior: 'smooth' });
+    } else {
+      this.region.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   }
 
   /**
