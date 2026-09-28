@@ -119,3 +119,23 @@ export function paintStatusText(el: HTMLElement, parts: StatusLineParts): string
   el.replaceChildren(state, text.slice(word.length));
   return text;
 }
+
+/**
+ * 🔴 **ステータスバーの行を畳むかどうかを判定する**(#1071、#671 の裁定 3)。
+ *
+ * 以下のいずれかに当てはまる場合は、行のテキストが空でも畳まず表示する（hidden = false）:
+ * 1. 画面幅不足の断り書きが出ている（`hasTooNarrow === true`）── #671
+ * 2. 未読メッセージが 1 件以上ある（`hasUnreadMessages === true`）── #1071
+ *
+ * それ以外は、行のテキスト（`text === ''`）が空であれば畳む（hidden = true）。
+ */
+export function shouldHideStatusBar(options: {
+  readonly text: string;
+  readonly hasTooNarrow: boolean;
+  readonly hasUnreadMessages: boolean;
+}): boolean {
+  if (options.hasTooNarrow) return false;
+  if (options.hasUnreadMessages) return false;
+  return options.text === '';
+}
+
