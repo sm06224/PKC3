@@ -50,12 +50,10 @@ export function compareRows(
   const valA = parseComparable(cellA);
   const valB = parseComparable(cellB);
 
-  let diff = 0;
-  if (valA.isNum && valB.isNum) {
-    diff = valA.num - valB.num;
-  } else {
-    diff = valA.str.localeCompare(valB.str, undefined, { numeric: true, sensitivity: 'base' });
-  }
+  const diff =
+    valA.isNum && valB.isNum
+      ? valA.num - valB.num
+      : valA.str.localeCompare(valB.str, undefined, { numeric: true, sensitivity: 'base' });
 
   if (diff === 0) {
     // 同値時は元のインデックスで安定ソート
