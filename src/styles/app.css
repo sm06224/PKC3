@@ -2845,6 +2845,16 @@ li[data-pkc-row-slot] {
 .pkc-md-rendered th {
   background: var(--surface-2);
 }
+/* 🔴 **表の偶数行の縞模様（ゼブラストライプ）と行ホバーハイライト**(#1142)。
+ * ⚠ 多行・多列データにおける水平方向の視線追従性を高める。
+ * 🔑 色はデザインシステムトークン `--surface-2` と `--surface-hover` を使用。
+ *    セル編集(`[data-pkc-action='edit-cell']`)や ＋× ボタンはセル内の透過・個別指定で共存。 */
+.pkc-md-rendered table tbody tr:nth-child(even) {
+  background: var(--surface-2);
+}
+.pkc-md-rendered table tbody tr:hover {
+  background: var(--surface-hover);
+}
 .pkc-md-rendered hr {
   border: none;
   border-top: 1px solid var(--border);
@@ -8245,6 +8255,12 @@ h3[data-pkc-section] {
   .pkc-md-rendered .pkc-md-block[data-pkc-code-collapsed] > pre {
     max-height: none !important;
     overflow: visible !important;
+  }
+  /* 🔴 表の縞模様を紙面・PDF でも上品に保持する(#1142) */
+  .pkc-md-rendered table tbody tr:nth-child(even) {
+    background: var(--surface-2);
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
   /**
    * ④ 🔴 **`+++` は改頁である**(出典: PKC2 catalog #14「section break / page break」)。

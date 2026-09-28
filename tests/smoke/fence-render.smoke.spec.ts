@@ -24,7 +24,7 @@ test('csv 表と html sandbox iframe が可視高さを持つ', async ({ page })
   //    1 文字ずつ打つと、**打鍵の途中の書きかけ**が箱に届く。
   const longCode = Array.from({ length: 30 }, (_, i) => `console.log("line ${i}");`).join('\n');
   await ta.fill(
-    '```csv-render\n列A,列B\n1,2\n```\n\n```html\n<p style="height:120px">sandbox</p>\n```\n\n```javascript\n' +
+    '```csv-render\n列A,列B\n1,2\n3,4\n```\n\n```html\n<p style="height:120px">sandbox</p>\n```\n\n```javascript\n' +
       longCode +
       '\n```',
   );
@@ -34,6 +34,18 @@ test('csv 表と html sandbox iframe が可視高さを持つ', async ({ page })
   const table = page.locator('[data-pkc-field="detail-body"] table').first();
   await expect(table).toBeVisible();
   expect((await table.boundingBox())!.height).toBeGreaterThan(0);
+
+  // 🔴 表のゼブラストライプ（偶数行背景）と行ホバーハイライト(#1142)
+  const tableRows = table.locator('tbody tr');
+  await expect(tableRows).toHaveCount(2);
+  const evenRowBg = await tableRows.nth(1).evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(evenRowBg).not.toBe('rgba(0, 0, 0, 0)');
+  expect(evenRowBg).not.toBe('transparent');
+
+  const oddRowBgBefore = await tableRows.nth(0).evaluate((el) => getComputedStyle(el).backgroundColor);
+  await tableRows.nth(0).hover();
+  const oddRowBgHover = await tableRows.nth(0).evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(oddRowBgHover).not.toBe(oddRowBgBefore);
 
   // html: sandbox iframe が resize message で実高さを得る(srcdoc load 後)
   const iframe = page.locator('iframe[data-pkc-html-render-id]');
