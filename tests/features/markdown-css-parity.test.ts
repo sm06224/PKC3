@@ -260,6 +260,11 @@ const STYLED_ELSEWHERE: Readonly<Record<string, string>> = {
   'pkc-lightbox-close-btn': 'src/adapter/ui/render/lightbox.ts',
   'pkc-lightbox-content': 'src/adapter/ui/render/lightbox.ts',
   'pkc-lightbox-img': 'src/adapter/ui/render/lightbox.ts',
+  // 🔴 ページ先頭へ戻るフローティングボタン(#1121)
+  'pkc-back-to-top-container': 'src/adapter/ui/render/back-to-top.ts',
+  'pkc-back-to-top': 'src/adapter/ui/render/back-to-top.ts',
+  'pkc-back-to-top-icon': 'src/adapter/ui/render/back-to-top.ts',
+  'pkc-visible': 'src/adapter/ui/render/back-to-top.ts',
 };
 
 const NO_STYLE_NEEDED: Readonly<Record<string, string>> = {

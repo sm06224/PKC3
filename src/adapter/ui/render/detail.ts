@@ -33,6 +33,7 @@ import { applyStackControls } from './stack-controls';
 import { STACK_ARCHETYPE } from '@features/flavor/stack-flavor';
 // 🔑 system 領域のノートの判定・題名は 1 か所から引く(設計 doc §7、段②a。CLAUDE.md §7)
 import { isSystemMessageLid, titleForMessageLid } from '@features/message/message-log';
+import { installBackToTop, type BackToTopHandle } from './back-to-top';
 
 /**
  * 🔴 **図とグラフは同じ面に出る**(#188)── 器を埋める呼び出しを 1 つに束ねる。
@@ -438,6 +439,8 @@ export class DetailRenderer {
    *   (描いたばかりの DOM が要る)── `render()` はここへ予約するだけ。
    */
   private pendingSectionInstall: { key: string; draft: PartialDraft } | null = null;
+  /** 🔴 長文ノートのページ先頭へ戻るフローティングボタン(#1121)。 */
+  private backToTopHandle: BackToTopHandle | null = null;
 
   /** markdown を描く口(既定は自前。⚠ **要るまで worker は作らない**)。 */
   private readonly markdown: MarkdownClient;
@@ -550,6 +553,8 @@ export class DetailRenderer {
     this.disposeMermaid?.();
     this.disposeMermaid = null;
     for (const sc of this.mermaidScopes.splice(0)) sc.dispose();
+    this.backToTopHandle?.dispose();
+    this.backToTopHandle = null;
   }
 
   /**
@@ -572,6 +577,8 @@ export class DetailRenderer {
     this.bodyKind = null;
     this.bodyView = EMPTY_VIEW;
     this.dropBarState();
+    this.backToTopHandle?.dispose();
+    this.backToTopHandle = null;
   }
 
   /**
@@ -820,6 +827,8 @@ export class DetailRenderer {
         this.noticeSlot,
         this.bodyHost,
       );
+      this.backToTopHandle?.dispose();
+      this.backToTopHandle = installBackToTop(this.scroller, this.region);
       this.skeletonLid = lid;
       this.bodyKind = null;
       this.bodyView = EMPTY_VIEW;
@@ -1183,6 +1192,7 @@ export class DetailRenderer {
     this.pendingScroll = null;
     this.scroller.scrollTop = top;
     if (this.bodyHost !== null) this.bodyHost.scrollLeft = left;
+    this.backToTopHandle?.update();
   }
 
   /**
