@@ -92,6 +92,7 @@ const CORPUS: ReadonlyArray<readonly [string, string]> = [
     [':::note\n注意\n:::', ':::tip\nヒント\n:::', ':::warning\n警告\n:::', ':::danger\n危険\n:::',
      ':::info\n情報\n:::', ':::caution\n用心\n:::', ':::important\n重要\n:::', ':::summary\n要約\n:::'
     ].join('\n\n') + '\n'],
+  ['GFM alerts', '> [!NOTE]\n> 注意\n\n> [!WARNING]\n> 警告\n'],
   ['section / callout の別形', ':::section{role=body}\n本文\n:::\n\n:::callout{type=tip}\n中身\n:::\n'],
   ['admonition', ':::admonition{type=warning title=題}\n中身\n:::\n'],
   ['details', ':::details{summary=たたむ}\n中身\n:::\n'],

@@ -2718,6 +2718,85 @@ md.core.ruler.after('inline', 'pkc-task-list', function (state) {
 });
 
 /**
+ * 🔴 **GitHub Flavored Markdown (GFM) Alerts**(#1144)。
+ *
+ * `> [!NOTE]` / `> [!TIP]` / `> [!IMPORTANT]` / `> [!WARNING]` / `> [!CAUTION]`
+ * の記法を認識し、コールアウト（.pkc-section-callout）としてレンダリングする。
+ */
+const GFM_ALERT_TYPES: Record<string, { role: string; title: string; icon: string }> = {
+  note: { role: 'note', title: 'Note', icon: 'ℹ' },
+  tip: { role: 'tip', title: 'Tip', icon: '💡' },
+  important: { role: 'important', title: 'Important', icon: '🛈' },
+  warning: { role: 'warning', title: 'Warning', icon: '⚠' },
+  caution: { role: 'caution', title: 'Caution', icon: '🛑' },
+};
+
+const GFM_ALERT_RE = /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\](?:\r?\n|\s+|$)/i;
+
+md.core.ruler.after('inline', 'pkc-gfm-alerts', function (state) {
+  const tokens = state.tokens;
+  for (let i = 2; i < tokens.length; i++) {
+    const token = tokens[i]!;
+    if (token.type !== 'inline') continue;
+    if (tokens[i - 1]!.type !== 'paragraph_open') continue;
+    if (tokens[i - 2]!.type !== 'blockquote_open') continue;
+
+    const match = GFM_ALERT_RE.exec(token.content);
+    if (!match) continue;
+
+    const typeKey = match[1]!.toLowerCase();
+    const alertMeta = GFM_ALERT_TYPES[typeKey];
+    if (!alertMeta) continue;
+
+    // blockquote_open を装飾
+    const bqOpen = tokens[i - 2]!;
+    bqOpen.attrJoin('class', `pkc-section-callout pkc-section-${alertMeta.role} pkc-md-alert`);
+    bqOpen.attrSet('data-pkc-role', alertMeta.role);
+
+    // インラインコンテンツから `[!TYPE]` を除去
+    token.content = token.content.slice(match[0].length).replace(/^\n+/, '');
+
+    // children の最初のテキストトークンからも除去し、直後の softbreak も落とす
+    const children = token.children ?? [];
+    for (let c = 0; c < children.length; c++) {
+      const child = children[c]!;
+      if (child.type === 'text') {
+        child.content = child.content.slice(match[0].length);
+        if (child.content === '' && children[c + 1]?.type === 'softbreak') {
+          children.splice(c + 1, 1);
+        }
+        break;
+      }
+    }
+    if (children[0]?.type === 'softbreak') {
+      children.shift();
+    }
+
+    // タイトル行トークンを作成
+    const titleOpen = new state.Token('paragraph_open', 'p', 1);
+    titleOpen.attrs = [['class', 'pkc-alert-title']];
+
+    const titleInline = new state.Token('inline', '', 0);
+    const iconToken = new state.Token('html_inline', '', 0);
+    iconToken.content = `<span class="pkc-alert-icon">${alertMeta.icon}</span> `;
+    const textToken = new state.Token('text', '', 0);
+    textToken.content = alertMeta.title;
+    titleInline.children = [iconToken, textToken];
+
+    const titleClose = new state.Token('paragraph_close', 'p', -1);
+
+    if (token.content.trim() === '' && children.every((ch) => ch.content.trim() === '')) {
+      tokens.splice(i - 1, 3, titleOpen, titleInline, titleClose);
+      i += 1;
+    } else {
+      tokens.splice(i - 1, 0, titleOpen, titleInline, titleClose);
+      i += 3;
+    }
+  }
+  return true;
+});
+
+/**
  * Optional rendering context threaded into markdown-it's `env`.
  *
  * `currentContainerId` lets the `link_open` rule distinguish

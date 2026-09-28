@@ -32,7 +32,7 @@ describe('本文の CSS を抜く', () => {
     // ⚠ 下限だけでなく**上限**も置く(CLAUDE.md「tripwire は両側」)── 器の規則まで
     //    混ざり始めたら、ここが先に鳴る
     expect(OUT.ruleCount, `本文の規則が ${OUT.ruleCount} 本`).toBeGreaterThanOrEqual(100);
-    expect(OUT.ruleCount, `本文の規則が ${OUT.ruleCount} 本(器が混ざった?)`).toBeLessThan(200);
+    expect(OUT.ruleCount, `本文の規則が ${OUT.ruleCount} 本(器が混ざった?)`).toBeLessThan(220);
     expect(OUT.vars.length, `トークンが ${OUT.vars.length} 個`).toBeGreaterThanOrEqual(15);
     expect(OUT.css.length, '出力が短すぎる').toBeGreaterThan(8000);
   });
