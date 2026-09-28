@@ -292,6 +292,8 @@ const STYLED_ELSEWHERE: Readonly<Record<string, string>> = {
   'pkc-code-collapse-bar': 'src/adapter/ui/render/code-collapse.ts',
   'pkc-code-collapse-btn': 'src/adapter/ui/render/code-collapse.ts',
   'pkc-code-collapse-top-btn': 'src/adapter/ui/render/code-collapse.ts',
+  // 🔴 テーブル列ソート(#1150)
+  'pkc-table-sort-icon': 'src/adapter/ui/render/table-sort.ts',
 };
 
 const NO_STYLE_NEEDED: Readonly<Record<string, string>> = {

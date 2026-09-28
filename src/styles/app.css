@@ -2863,6 +2863,27 @@ li[data-pkc-row-slot] {
 .pkc-md-rendered table tbody tr:hover {
   background: var(--surface-hover);
 }
+/* 🔴 **Markdown プレビュー内のテーブル列ソート**(#1150)。
+ * ⚠ 表ヘッダーをクリック可能にし、ソート方向に応じたインジケータ（↕ / ▲ / ▼）を表示。
+ * 🔑 デザインシステムトークン `--surface-hover` と `--accent`、`--s1` を使用。 */
+.pkc-md-rendered table th[data-pkc-sort-direction] {
+  cursor: pointer;
+  user-select: none;
+}
+.pkc-md-rendered table th[data-pkc-sort-direction]:hover {
+  background: var(--surface-hover);
+}
+.pkc-md-rendered .pkc-table-sort-icon {
+  display: inline-block;
+  margin-left: var(--s1);
+  font-size: 0.75em;
+  opacity: 0.45;
+  vertical-align: middle;
+}
+.pkc-md-rendered table th:is([data-pkc-sort-direction='asc'], [data-pkc-sort-direction='desc']) .pkc-table-sort-icon {
+  opacity: 1;
+  color: var(--accent);
+}
 .pkc-md-rendered hr {
   border: none;
   border-top: 1px solid var(--border);
