@@ -268,6 +268,9 @@ const STYLED_ELSEWHERE: Readonly<Record<string, string>> = {
   // 🔴 見出しアンカーリンクコピーボタン(#1124)
   'pkc-heading-anchor': 'src/adapter/ui/render/heading-anchor.ts',
   'pkc-copied': 'src/adapter/ui/render/heading-anchor.ts',
+  // 🔴 読書進捗バー(#1125)
+  'pkc-reading-progress': 'src/adapter/ui/render/reading-progress.ts',
+  'pkc-reading-progress-bar': 'src/adapter/ui/render/reading-progress.ts',
 };
 
 const NO_STYLE_NEEDED: Readonly<Record<string, string>> = {
