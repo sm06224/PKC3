@@ -2758,6 +2758,14 @@ li[data-pkc-row-slot] {
   border-radius: 2px;
   padding: 0 3px;
 }
+.pkc-md-rendered code[data-pkc-inline-code] {
+  cursor: copy;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.pkc-md-rendered code[data-pkc-inline-code]:hover {
+  background: var(--surface-hover);
+  border-color: var(--accent);
+}
 .pkc-md-rendered pre {
   background: var(--surface-2);
   border: 1px solid var(--border);
