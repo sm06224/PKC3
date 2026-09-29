@@ -156,8 +156,17 @@ const SHIPPED_FLOOR_KB = { dev: 3500, product: 800 };
  *   **数式だけ代替書体で出る**のに誰の計器も鳴らない、という形だった。
  *   いまは `cssUrlRefs`(`build/portable/shell-scan.mjs`)が畳んだ CSS も見る。
  *   ⚠ 余裕は約 1240 KB ── **誤取込 1 本は今も止まる**。
+ * 🔑 **2026-09-29(v3.3.0 の本番配布)に 9800 → 11200 KB へ引き上げた**。実測 **9900.7 KB**
+ *   (product。release run 36518880340 の zip と手元の再現が同じ値)── cap を 100.7 KB 超え、
+ *   `pages.yml` の product 検品で **本番配布が止まった**(run 36519233180)。
+ *   ⚠ 取り違えではない:同じ run の dev 側の雛形も 9.67 MB(= 9900 KB)で一致し、
+ *   アプリ本体 8994.1 KB を 1 枚へ inline した大きさとして釣り合う。
+ *   9/06 からの +1344 KB は図案の書体(21 本)・DuckDB の配線・数式などの通常増加。
+ *   ⚠ **この cap は release の zip でしか鳴らない**(dev / nightly は雛形を検品しない)ので、
+ *   触れたことに気づくのが配る日になる ── 夜に見る門は別 issue で追う。
+ *   ⚠ 余裕は約 1300 KB ── **誤取込 1 本は今も止まる**。
  */
-const PORTABLE_CAP_KB = 9800;
+const PORTABLE_CAP_KB = 11200;
 const PORTABLE_FLOOR_KB = 3000;
 
 /**
