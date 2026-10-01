@@ -1305,6 +1305,19 @@ select:focus-visible {
   align-items: center;
   gap: var(--s2);
 }
+/* 🔴 **「中まで全部出す」の間、孫以深の行に添える親フォルダの名前**(#813)。
+ * 題名の右に**小さく薄く**。⚠ 色は**既存の `--muted` 1 色**(地は無彩色・新色を足さない)。
+ * ⚠ 収まらないときは**この名前の側**を `…` で切る(題名を切らない)── 題名は縮まない
+ *   (`min-width: auto`)ので、先に縮むのはここ。⚠ **行の高さを増やさない**(1 行のまま)。 */
+[data-pkc-region='filer-table'] [data-pkc-field='title'] [data-pkc-field='parent-name'] {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 11px;
+}
 
 /* 行の更新日(P9 段②)。⚠ **行の高さを増やさない** ── 題名の右端に細字で置く。
  * 数字は等幅にして桁を揃える(業務画面の作法。ばらつくと走査できない)。 */

@@ -23,7 +23,7 @@ import { filerRowOptions } from '@adapter/state/list-view-options';
 //    「居場所」のプルダウンを外したときに、この面から要らなくなった ──
 //    どちらも `move-to-folder`(探して選ぶ窓)と D&D の側で生きている
 import { getAncestorFolders, listSiblings } from '@features/relation/tree';
-import { filerRows } from '@features/relation/filer-list';
+import { filerRows, flatParentNames } from '@features/relation/filer-list';
 import {
   SMART_ARCHETYPE,
   SMART_FIELDS,
@@ -788,6 +788,17 @@ export class FilerRenderer {
      */
     const q = normalizeQuery(state.filterQuery);
     const list = filerRows(scopeLid, state.entryMetas, state.relations, filerRowOptions(state));
+    /**
+     * 🔴 **「中まで全部出す」の間、孫以深の行に親フォルダの名前を添える**(#813)。
+     * ⚠ どの行に付くかは純関数 `flatParentNames` 1 か所(切 / 直下の行 / スマートフォルダは空)。
+     */
+    const parentNames = flatParentNames(
+      scopeLid,
+      list,
+      state.entryMetas,
+      state.relations,
+      state.filerFlatten,
+    );
 
     /**
      * 🔴 **焦点を落とさずに組み直す**(2026-08-18。実ブラウザで実測)。
@@ -998,6 +1009,19 @@ export class FilerRenderer {
         name.append(chip, input);
       } else {
         name.append(chip, document.createTextNode(m.title));
+        const parentName = parentNames.get(m.lid);
+        if (parentName !== undefined) {
+          /**
+           * 🔴 **題名の右に、小さく薄く**(#813)。⚠ 色は**情報にだけ**(`--muted` 1 色・新色なし)。
+           * ⚠ 長いときは**親の名前の側**を `…` で切る(題名を切らない ── CSS)。
+           * ⚠ `row-rename` の入力欄の行には添えない(打ち替え中は欄だけ)。
+           */
+          const hint = document.createElement('span');
+          hint.setAttribute('data-pkc-field', 'parent-name');
+          hint.textContent = `─ ${parentName}`;
+          name.append(hint);
+          name.title = `${m.title}(${parentName} の中)`;
+        }
       }
       const updated = document.createElement('td');
       // ⚠ 目印を付ける ── 日付だけの変化はここを差し替えて済ませる(#270)
