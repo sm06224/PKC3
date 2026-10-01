@@ -104,6 +104,15 @@ export type OfficeWindowEvent =
   | { readonly type: 'unsupported'; readonly missing: readonly string[] }
   | { readonly type: 'closed' };
 
+/**
+ * 「挿入 → 画像」に並べる添付 1 件(#146)。⚠ 文書と**同じ封筒**に載せる ── 経路を増やさない。
+ * `name` は**元の file 名**、`bytes` はそのまま窓の FS へ書かれる。
+ */
+export interface OfficeImagePayload {
+  readonly name: string;
+  readonly bytes: Uint8Array;
+}
+
 export interface OpenOptions {
   /** 窓に渡す表示名(そのまま file 名になる)。 */
   readonly name?: string;
@@ -155,7 +164,12 @@ export class OfficeWindow {
   private readonly baseUrl: string;
   private readonly inputLog: () => boolean;
   private lastAliveAt = 0;
-  private pendingDoc: { name: string; bytes: Uint8Array; token: string } | null = null;
+  private pendingDoc: {
+    name: string;
+    bytes: Uint8Array;
+    token: string;
+    images: readonly OfficeImagePayload[];
+  } | null = null;
   /** 窓が先に「ちょうだい」と言ってきたが、まだ bytes が無い状態。 */
   private askedForDoc = false;
   private readonly listeners = new Set<(ev: OfficeWindowEvent) => void>();
@@ -196,7 +210,7 @@ export class OfficeWindow {
    */
   open(opts: OpenOptions = {}): OpenOutcome {
     this.pendingDoc = opts.bytes
-      ? { name: opts.name ?? 'document', bytes: opts.bytes, token: '' }
+      ? { name: opts.name ?? 'document', bytes: opts.bytes, token: '', images: [] }
       : null;
     // ⚠ 新しく開く / 読み直させるので、前の「ちょうだい」は無効にする
     this.askedForDoc = false;
@@ -228,11 +242,18 @@ export class OfficeWindow {
    *   保存に載せて返す ── ⚠ **こちらの記憶に頼らない**(窓は `noopener` で handle が
    *   無く、PKC のタブを読み直すと対応表が消えるが、窓は別 process で生き残る)。
    *   ⚠ 省くと、その窓の保存は**新しい添付ノート**になる。
+   * @param images 🔴 **「挿入 → 画像」に並べる添付**(#146)。窓が文書を書く**同じ口**で
+   *   `/home/web_user` へ置く。⚠ 空なら封筒に `images` を**載せない**(今までと 1 バイトも変わらない)
    */
-  provideDocument(name: string, bytes: Uint8Array, token = ''): void {
+  provideDocument(
+    name: string,
+    bytes: Uint8Array,
+    token = '',
+    images: readonly OfficeImagePayload[] = [],
+  ): void {
     // ⚠ 空を渡して Start Center を上書きしない
     if (bytes.byteLength === 0) return;
-    this.pendingDoc = { name, bytes, token };
+    this.pendingDoc = { name, bytes, token, images };
     if (this.askedForDoc) this.sendDocument();
   }
 
@@ -319,9 +340,18 @@ export class OfficeWindow {
     this.askedForDoc = false;
     // ⚠ BroadcastChannel は **transfer できない**(structured clone のみ)ので、
     //    ここだけはコピーになる。大きい文書で効くなら IDB 経由の受け渡しへ替える。
+    //    🔴 画像(`images`)も**同じ封筒**なのでコピーになる ── 合計は
+    //    `OFFICE_IMAGE_BUDGET_BYTES`(64 MB)で止めてある。⚠ 送った後の控え(`pendingDoc`)は
+    //    すぐ手放す(受け取った窓の FS に載るのが唯一の常駐)。
     this.ch.postMessage({
       pkc3Office: 'document',
-      payload: { name: doc.name, bytes: doc.bytes, token: doc.token },
+      payload: {
+        name: doc.name,
+        bytes: doc.bytes,
+        token: doc.token,
+        // ⚠ 0 件なら載せない(封筒を組むのはここ 1 か所 ── §7)
+        ...(doc.images.length > 0 ? { images: doc.images } : {}),
+      },
     });
   }
 }

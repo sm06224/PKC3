@@ -319,6 +319,8 @@ async function seedFakePack(
               }
               // マクロの書き戻し(#431 ②)── 起動(callMain)より前かを順で見る
               if (p.indexOf('/instdir/user/basic/') === 0) window.__order.push('macro');
+              // 「挿入 → 画像」に並べる添付(#146)── 起動(callMain)より前かを順で見る
+              if (p.indexOf('/home/web_user/') === 0) window.__order.push('image');
             },
             // ⚠ **stub は本物の意味論を真似る**: 無い file は throw(#159 の退避が
             //    「file がまだ無い」を静かに飛ばせることを、本物と同じ形で確かめる)
@@ -1203,6 +1205,15 @@ test('🔴 Office の保存が、棚に置かれて鍵が放送される(新規 
           name: '報告書.odt',
           bytes: new TextEncoder().encode('ORIGINAL'),
           token: 'lid-TEST',
+          // 🔴 「挿入 → 画像」に並べる添付(#146)── 同じ封筒に載る。⚠ **同じ道中**で見る
+          //    (新しく起動する test を足さない ── `scripts/smoke-budget.mjs`)。
+          //    保存の判定が**画像で汚れない**ことは、下の「保存された」がちょうど 2 通の
+          //    ままであること(= 画像は保存として数えられていない)でも守られる
+          images: [
+            { name: '猫.png', bytes: new Uint8Array([1, 2, 3]) },
+            { name: '猫.png', bytes: new Uint8Array([4, 5, 6, 7]) },
+            { name: '図.svg', bytes: new Uint8Array([8, 9]) },
+          ],
         },
       });
     };
@@ -1214,6 +1225,31 @@ test('🔴 Office の保存が、棚に置かれて鍵が放送される(新規 
     await page.evaluate(() => (window as unknown as { __loDocPath?: string }).__loDocPath),
     '文書が流し込まれていない ── この test は合言葉を検査できていない',
   ).toBe('/work/報告書.odt');
+
+  /**
+   * 🔴 **画像が /home/web_user に置かれる**(#146 裁定 A)。
+   * 症状:Office の「挿入 → 画像」は Qt のファイルダイアログで、一覧が常に空だった
+   * (箱の FS に PKC が添付を 1 件も置いていなかった)。直しは「文書と同じ封筒で画像を受け、
+   * ダイアログの初期位置(`/home/web_user`)へ**元の名前**で、**起動(callMain)より前**に置く」。
+   * ⚠ 同名は連番(黙って上書きしない)。
+   */
+  const placed = await page.evaluate(() => {
+    const w = window as unknown as {
+      __order: string[];
+      __lo: { FS: { readdir(p: string): string[] } };
+    };
+    return {
+      names: w.__lo.FS.readdir('/home/web_user').filter((n) => n !== '.' && n !== '..').sort(),
+      order: w.__order.slice(),
+    };
+  });
+  expect(placed.names, '画像が /home/web_user に置かれていない').toEqual(
+    ['図.svg', '猫 (2).png', '猫.png'].sort(),
+  );
+  expect(placed.order.indexOf('image'), '画像を置いた記録が無い').toBeGreaterThanOrEqual(0);
+  expect(placed.order.indexOf('callMain'), '画像を callMain より後に置いている').toBeGreaterThan(
+    placed.order.indexOf('image'),
+  );
 
   const got = await page.evaluate(async () => {
     const w = window as unknown as {
@@ -1237,6 +1273,10 @@ test('🔴 Office の保存が、棚に置かれて鍵が放送される(新規 
     // ⚠ stub は本物と同じく親ディレクトリを要求する(MEMFS の ENOENT)
     w.__lo.FS.mkdirTree('/home/web_user');
     w.__lo.FS.mkdirTree('/work');
+    // 🔴 LO が置いた画像を**読んで閉じた**(hook には close が来る)── 保存として数えない(#146)
+    for (const n of ['猫.png', '猫 (2).png', '図.svg']) {
+      w.__lo.FS.close(w.__lo.FS.open('/home/web_user/' + n));
+    }
     // ① **開いた文書以外**の新規保存 = 最終 path へ直接 write して close
     w.__lo.FS.writeFile('/home/web_user/無題 1.odt', 'NEW-DOC-BYTES');
     w.__lo.FS.close(w.__lo.FS.open('/home/web_user/無題 1.odt'));
