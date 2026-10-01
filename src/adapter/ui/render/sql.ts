@@ -48,6 +48,14 @@ import {
 } from '@features/query/sql-window';
 
 /** 表の値を字にする。⚠ `null` と空文字を**見分けられる**ようにする。 */
+/**
+ * 🔴 **調べる相手の仕切りの字**(#992 ③)。⚠ 並びは**この順**(この PKC → 添付 → 手持ちの file)。
+ * 🔑 test はここから引く(字を手で書き写さない)。
+ */
+export const SQL_SOURCE_GROUP_PKC = 'この PKC';
+export const SQL_SOURCE_GROUP_ATTACHED = '添付';
+export const SQL_SOURCE_GROUP_LOCAL = '手持ちの file';
+
 const cellText = (v: string | number | null): string => (v === null ? '(なし)' : String(v));
 
 export class SqlRenderer {
@@ -306,7 +314,13 @@ export class SqlRenderer {
     toFile.setAttribute('data-pkc-field', 'sql-to-file');
     toFile.textContent = 'ファイルへ書き出す';
     toFile.title = 'いま出ている答えを、file に書き出します(CSV / TSV / JSON)';
-    bar.append(run, save, toFile, schema, er, history, source, engine, fileInput);
+    /**
+     * 🔴 **選び所を帯の先頭へ**(#992 ④。Gemini の裁定 2026-10-01 = 答え A)。
+     * ⚠ 直す前は `履歴` の右(6 個のボタンの向こう側)で、user が**最初にやること**
+     *   (相手を選ぶ)がいちばん右に在った。🔑 「選んでから打つ」の順に並べる。
+     * ⚠ 並びだけを動かす ── `data-pkc-*` の名前も、押した先も変えない。
+     */
+    bar.append(source, engine, run, save, toFile, schema, er, history, fileInput);
     const tip = document.createElement('p');
     tip.setAttribute('data-pkc-field', 'sql-tip');
     /**
@@ -461,7 +475,7 @@ export class SqlRenderer {
   private paintSource(state: AppState): void {
     const sel = this.source;
     if (sel === null) return;
-    const sources = [
+    const attached = [
       ...sqlSourcesOf(state.entryMetas.values()),
       ...csvAttachmentSourcesOf(state.entryMetas.values()),
       ...xlsxAttachmentSourcesOf(state.entryMetas.values()),
@@ -478,20 +492,40 @@ export class SqlRenderer {
      *   開いている間だけこの場で足す(閉じれば消える。「憶えない」の裁定どおり)。
      */
     const guest = state.sqlPage.guest;
-    if (guest !== null && isSqlLocalFileLid(guest.lid)) sources.push(guest);
-    const key = sources.map((s) => `${s.lid}:${s.name}`).join('|');
+    const local = guest !== null && isSqlLocalFileLid(guest.lid) ? guest : null;
+    // ⚠ 仕切りが変わっても組み直せるよう、**どの仕切りに居るか**も鍵に入れる
+    const key = [
+      ...attached.map((s) => `a:${s.lid}:${s.name}`),
+      ...(local === null ? [] : [`l:${local.lid}:${local.name}`]),
+    ].join('|');
     if (key !== this.sourceKey) {
       this.sourceKey = key;
       sel.textContent = '';
-      const here = document.createElement('option');
-      here.value = '';
-      here.textContent = 'この PKC のノート';
-      sel.append(here);
-      for (const s of sources) {
+      /**
+       * 🔴 **種類ごとに仕切る**(#992 ③。Gemini の裁定 2026-10-01 = 答え A)。
+       * ⚠ 直す前は**1 本の平らな一覧**で、添付が何十件もあると下まで転がして探した。
+       * 🔑 **並びは変えない**(この PKC → 添付 → 手持ちの file)── 仕切りを足しただけ。
+       * ⚠ **空の仕切りは出さない**(添付が 1 つも無いのに「添付」だけ在る形にしない)。
+       *   手持ちの file は「開く…」が常に在るので、いつも出る。
+       */
+      const group = (label: string): HTMLOptGroupElement => {
+        const g = document.createElement('optgroup');
+        g.label = label;
+        return g;
+      };
+      const option = (value: string, text: string): HTMLOptionElement => {
         const opt = document.createElement('option');
-        opt.value = s.lid;
-        opt.textContent = s.name;
-        sel.append(opt);
+        opt.value = value;
+        opt.textContent = text;
+        return opt;
+      };
+      const pkcGroup = group(SQL_SOURCE_GROUP_PKC);
+      pkcGroup.append(option('', 'この PKC のノート'));
+      sel.append(pkcGroup);
+      if (attached.length > 0) {
+        const g = group(SQL_SOURCE_GROUP_ATTACHED);
+        for (const s of attached) g.append(option(s.lid, s.name));
+        sel.append(g);
       }
       /**
        * 🔴 **「手持ちのファイルを開く…」は常に置く**(#854 段②)。
@@ -500,10 +534,11 @@ export class SqlRenderer {
        *   選び所そのものは**もう隠さない**(実体の無い口ではなく、押せば file
        *   選択画面が開く実在する操作である)。
        */
-      const pick = document.createElement('option');
-      pick.value = SQL_PICK_LOCAL_FILE_VALUE;
-      pick.textContent = '手持ちのファイルを開く…';
-      sel.append(pick);
+      const localGroup = group(SQL_SOURCE_GROUP_LOCAL);
+      // ⚠ いま開いている手持ちの file は**ここ**に並ぶ(添付の下ではない)
+      if (local !== null) localGroup.append(option(local.lid, local.name));
+      localGroup.append(option(SQL_PICK_LOCAL_FILE_VALUE, '手持ちのファイルを開く…'));
+      sel.append(localGroup);
       sel.hidden = false;
     }
     const want = state.sqlPage.guestChosen;

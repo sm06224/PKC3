@@ -35,13 +35,19 @@ import {
   SQL_HISTORY_MAX,
   viewModeLabel,
 } from '../../src/adapter/state/app-state';
-import { fitSqlInput } from '../../src/adapter/ui/render/sql';
+import {
+  fitSqlInput,
+  SQL_SOURCE_GROUP_ATTACHED,
+  SQL_SOURCE_GROUP_LOCAL,
+  SQL_SOURCE_GROUP_PKC,
+} from '../../src/adapter/ui/render/sql';
 import { SQL_WINDOW_MIN } from '../../src/features/query/sql-window';
 import { homeTabOf } from '../../src/adapter/ui/render/browse-mode';
 import { readFileSync } from 'node:fs';
 import { blocksFor, stripComments, withoutMedia } from '../helpers/css-blocks';
 import { stubStamps } from '../helpers/store-stamps';
 import { stubRevisionOps } from '../helpers/revision-stub';
+import { DUCKDB_NETWORK_NOTE } from '../../src/features/query/sql-guest-source';
 import type {
   DuckDbReadableGuestSource,
   SqliteReadableGuestSource,
@@ -220,7 +226,12 @@ function setup(
         // 🔴 DuckDB の口(#682 段②)── 実物は別ワーカー。ここは**渡された引数**だけを見る
         ...(opts.withDuck === false ? {} : { runDuckDbSql }),
       });
+  // 🔑 帯の下の 1 行に出す知らせを控える(#992 ①)
+  const said: string[] = [];
   bindActions(root, d, {
+    showStatus: (t: string) => {
+      said.push(t);
+    },
     // 🔴 main.ts と**同じ実物の配線**(#854 段②)── ここだけ fake にしない
     pickSqlLocalFile: (file: File) => {
       const lid = registerSqlLocalFile(file);
@@ -336,6 +347,7 @@ function setup(
     runReadOnlySql,
     persisted,
     sourceSel,
+    said,
     pick,
     fileInput,
     pickLocalFile,
@@ -3601,5 +3613,117 @@ describe('🔴 .parquet / .json を調べる相手として受ける(#682 段④
     expect(er, '採れない理由が出ていない').toContain('まだ出せません');
     expect(er, '採っています、のまま止まっている').not.toContain('採っています');
     expect(runReadOnlySql, '採れないのに内蔵の sqlite へ聞きに行っている').toHaveBeenCalledTimes(0);
+  });
+});
+
+/**
+ * 🔴 **#992 の 3 件**(Gemini の裁定 2026-10-01 = ①A / ③A / ④A)。
+ * ⚠ 画面の見え方が変わるので、**選び所の仕切り・並び・知らせ**を DOM で見る。
+ */
+describe('🔴 調べる相手の選び所(#992)', () => {
+  it('🔴 ③ 仕切りは「この PKC / 添付 / 手持ちの file」の順で、中の並びは今までどおり', async () => {
+    const { sourceSel } = setup();
+    await settle();
+    const groups = [...sourceSel.querySelectorAll('optgroup')];
+    expect(
+      groups.map((g) => g.label),
+      '仕切りの順番が違う',
+    ).toEqual([SQL_SOURCE_GROUP_PKC, SQL_SOURCE_GROUP_ATTACHED, SQL_SOURCE_GROUP_LOCAL]);
+    const inside = (label: string): string[] =>
+      [...(groups.find((g) => g.label === label)?.querySelectorAll('option') ?? [])].map(
+        (o) => o.textContent ?? '',
+      );
+    expect(inside(SQL_SOURCE_GROUP_PKC)).toEqual(['この PKC のノート']);
+    // 🔑 添付の中の並びは**仕切りを足す前と同じ**(.sqlite → .csv/.tsv → .parquet/.ndjson)
+    const attached = inside(SQL_SOURCE_GROUP_ATTACHED);
+    expect(attached.indexOf('売上.csv'), '.csv が .sqlite より前').toBeGreaterThan(attached.indexOf('売上.sqlite'));
+    expect(attached.indexOf('売上.parquet'), '.parquet が .csv より前').toBeGreaterThan(attached.indexOf('売上.csv'));
+    // ⚠ 対照群 ── 読めない添付は並ばない
+    expect(attached).not.toContain('ねこ.png');
+    expect(inside(SQL_SOURCE_GROUP_LOCAL)).toEqual(['手持ちのファイルを開く…']);
+    // ⚠ 選べる物は仕切りの外に 1 つも無い(平らな option が残っていない)
+    expect(
+      [...sourceSel.children].every((c) => c.tagName === 'OPTGROUP'),
+      '仕切りの外に選べる物が残っている',
+    ).toBe(true);
+  });
+
+  it('🔴 ③ 添付が 1 つも無いときは「添付」の仕切りを出さない(空の仕切りを作らない)', async () => {
+    const { d, sourceSel } = setup();
+    await settle();
+    expect(sourceSel.querySelector('optgroup[label="添付"]'), '前提 ── 添付が在るときは出る').not.toBeNull();
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1', '会議メモ')], relations: [] });
+    await settle();
+    const labels = [...sourceSel.querySelectorAll('optgroup')].map((g) => g.label);
+    expect(labels, '空の仕切りが出ている').toEqual([SQL_SOURCE_GROUP_PKC, SQL_SOURCE_GROUP_LOCAL]);
+  });
+
+  it('🔴 ③ 手持ちの file を開いている間は、その file が「手持ちの file」の仕切りに並ぶ', async () => {
+    const { sourceSel, pickLocalFile } = setup();
+    pickLocalFile(new File([new Uint8Array(1200)], 'tegara.parquet'));
+    await settle();
+    const local = sourceSel.querySelector(`optgroup[label="${SQL_SOURCE_GROUP_LOCAL}"]`)!;
+    expect(
+      [...local.querySelectorAll('option')].map((o) => o.textContent),
+      '開いた file が手持ちの仕切りに無い',
+    ).toEqual(['tegara.parquet', '手持ちのファイルを開く…']);
+    // ⚠ 選び所は開いた file を指したまま(「この PKC」へ戻していない)
+    expect(sourceSel.selectedOptions[0]?.textContent).toBe('tegara.parquet');
+  });
+
+  it('🔴 ④ 帯の先頭に「調べる相手」と「どのエンジンで引くか」が在り、押し所はその後ろに並ぶ', () => {
+    const { pane } = setup();
+    const bar = pane.querySelector('[data-pkc-field="sql-bar"]')!;
+    const fields = [...bar.children].map((c) => c.getAttribute('data-pkc-field'));
+    expect(fields.slice(0, 3), '選び所が先頭にない').toEqual(['sql-source', 'sql-engine', 'sql-run']);
+    // ⚠ 並びだけを動かした ── 帯の部品は 1 つも増えても減ってもいない
+    expect([...fields].sort()).toEqual(
+      [
+        'sql-engine',
+        'sql-er-toggle',
+        'sql-file-input',
+        'sql-history',
+        'sql-run',
+        'sql-schema-to-note',
+        'sql-source',
+        'sql-to-file',
+        'sql-to-note',
+      ].sort(),
+    );
+  });
+
+  it('🔴 ① .parquet を選んだ直後に、電波が要ることを 1 文で言う(走らせる前)', async () => {
+    const { pick, said, runDuckDbSql } = setup();
+    pick('db7');
+    await settle();
+    expect(said, '選んだ直後に知らせていない').toEqual([DUCKDB_NETWORK_NOTE]);
+    expect(runDuckDbSql, '知らせるために走らせてはいけない').toHaveBeenCalledTimes(0);
+  });
+
+  it('🔴 ① .ndjson も同じ ── DuckDB でしか読めない相手は全部言う', async () => {
+    const { pick, said } = setup();
+    pick('db8');
+    await settle();
+    expect(said).toEqual([DUCKDB_NETWORK_NOTE]);
+  });
+
+  it('🔴 ① 手持ちの .parquet を選んだ直後にも言う(添付と同じ知らせ)', async () => {
+    const { pickLocalFile, said } = setup();
+    pickLocalFile(new File([new Uint8Array(1200)], 'tegara.parquet'));
+    await settle();
+    expect(said).toEqual([DUCKDB_NETWORK_NOTE]);
+  });
+
+  it('🔴 ① 対照群:.csv / .sqlite / この PKC に戻るときは言わない(内蔵の sqlite で引ける)', async () => {
+    const { pick, said, pickLocalFile } = setup();
+    pick('db4');
+    await settle();
+    pick('db1');
+    await settle();
+    pick('');
+    await settle();
+    pickLocalFile(new File([new Uint8Array(10)], 'tegara.csv'));
+    await settle();
+    expect(said, '電波が要らない相手にまで知らせている').toEqual([]);
   });
 });

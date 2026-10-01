@@ -107,6 +107,22 @@ export function isDuckDbOnlySource(src: SqlGuestSource | null): src is DuckDbOnl
 }
 
 /**
+ * 🔴 **選んだ直後に言う 1 文**(#992 ①。Gemini の裁定 2026-10-01 = 答え A)。
+ *
+ * ⚠ 直す前は「SQL を走らせる」を押して**初めて**「DuckDB の一式を取ってこられませんでした」と
+ *   分かった。`.parquet` / `.json` には内蔵の sqlite へ逃げる道が無いので、
+ *   **電波が無い場所で選んだ人は、打ち終えてから行き止まる**。
+ * 🔑 **判定は `isDuckDbOnlySource` 1 か所**(選び所の薄い字・開く経路と同じ答えを見る)── 2 本目を作らない。
+ * ⚠ `.csv` は内蔵の sqlite で引けるので**言わない**(DuckDB を選んだ人にだけ初回の読み込みが要る)。
+ */
+export const DUCKDB_NETWORK_NOTE = 'この file は DuckDB で引きます ── 初回は読み込みに電波が要ります';
+
+/** 題名(file の名前)から、選んだ直後に出す知らせを引く。⚠ 言うことが無ければ `null`。 */
+export function duckDbNetworkNoteOf(name: string): string | null {
+  return isDuckDbOnlySource(sqlGuestSourceOf('', name)) ? DUCKDB_NETWORK_NOTE : null;
+}
+
+/**
  * 内蔵の sqlite が読めない相手。
  * 🔑 **`SqliteReadableGuestSource` の裏返しとして組む**(`Exclude`)── 一覧を
  *   もう 1 つ書くと、種類を足した日に**片方だけ増える**(CLAUDE.md §7)。

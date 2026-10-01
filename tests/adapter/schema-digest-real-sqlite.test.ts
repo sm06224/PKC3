@@ -29,6 +29,8 @@ import {
   renderSchemaDigest,
   type Cell,
 } from '../../src/features/query/schema-digest';
+import { checkReadOnlySql } from '../../src/features/query/sql-guard';
+import { SCHEMA_DDL } from '../../src/adapter/platform/storage/schema';
 
 interface Db {
   selectValue: (sql: string) => unknown;
@@ -147,5 +149,95 @@ describe('組む 3 本が、本物の sqlite で通る(#918 段①)', () => {
     expect(out, '中身を出していないと言っていない').toContain('中身は 1 行も含まれていません');
     // 🔴 **中身は 1 文字も出ない**(入れた値そのもので見る)
     expect(out, '中身が混ざっている').not.toContain('あ');
+  });
+});
+
+/**
+ * 🔴 **本文検索の影の表を、図から外す**(#967。user ではなく Gemini の裁定 2026-10-01 = 答え B)。
+ *
+ * ⚠ 実物の DDL(`SCHEMA_DDL`)をそのまま流す ── 自前の表で「影が 5 つ」と言っても、
+ *   本物の FTS5 がいくつ作るかは別の話である(数えたら 13 → 8 になる)。
+ * 🔑 **字面で外していないこと**は、`sales_data`(user が csv から作る表の名前)が
+ *   残ることで見る ── `_data` で終わる名前を外す実装は、ここで落ちる。
+ */
+describe('本文検索の影の表は図に出さない(#967)', () => {
+  let app: Db;
+  const tablesOf = (d: Db): string[] => {
+    const rows: unknown[][] = [];
+    d.exec({ sql: SCHEMA_COLUMNS_SQL, rowMode: 'array', callback: (r) => rows.push(r) });
+    return [...new Set(rows.map((r) => String(r[1])))];
+  };
+  beforeAll(async () => {
+    const api = (await sqlite3InitModule()) as unknown as Sqlite3;
+    app = new api.oo1.DB(':memory:', 'c');
+    for (const ddl of SCHEMA_DDL) app.exec({ sql: ddl });
+  });
+
+  it('⚠ 前提 ── 実物の DB に、影の表が 5 つ在る(外さなければ 13 個出る)', () => {
+    const names: string[] = [];
+    app.exec({
+      sql: "select name from sqlite_master where type = 'table' and name like 'entries_fts%'",
+      rowMode: 'array',
+      callback: (r) => names.push(String(r[0])),
+    });
+    expect(names.sort(), '影の表が 5 つ無い(前提が崩れている)').toEqual([
+      'entries_fts',
+      'entries_fts_config',
+      'entries_fts_data',
+      'entries_fts_docsize',
+      'entries_fts_idx',
+    ]);
+  });
+
+  it('🔴 図の箱は 13 から 8 になる(この PKC 自身の表だけ)', () => {
+    expect(tablesOf(app).sort()).toEqual([
+      'assets',
+      'containers',
+      'entries',
+      'flags',
+      'relations',
+      'revisions',
+      'settings',
+      'workspaces',
+    ]);
+  });
+
+  it('🔴 `_data` で終わる user の表(sales_data)は巻き込まない(字面で外していない対照群)', () => {
+    app.exec({ sql: 'create table sales_data(id integer primary key, v text)' });
+    app.exec({ sql: 'create table entries_fts_data_memo(a)' });
+    try {
+      const t = tablesOf(app);
+      expect(t, '字面で外している ── user の表まで消えた').toContain('sales_data');
+      // ⚠ 影の名前に**前方一致するだけ**の別物も残る(導く名前は完全一致)
+      expect(t, '前方一致で外している').toContain('entries_fts_data_memo');
+      expect(t, '影の表が図に出ている').not.toContain('entries_fts_data');
+    } finally {
+      app.exec({ sql: 'drop table sales_data' });
+      app.exec({ sql: 'drop table entries_fts_data_memo' });
+    }
+  });
+
+  it('🔴 別の名前の本文検索(FTS5)でも、影を名前から導いて外す', () => {
+    app.exec({ sql: 'create virtual table memo using fts5(body)' });
+    try {
+      const t = tablesOf(app);
+      for (const x of ['memo', 'memo_data', 'memo_idx', 'memo_docsize', 'memo_config']) {
+        expect(t, `${x} が図に出ている`).not.toContain(x);
+      }
+    } finally {
+      app.exec({ sql: 'drop table memo' });
+    }
+  });
+
+  it('🔴 外すのは図だけ ── `select` では引き続き打てる', () => {
+    const rows: unknown[][] = [];
+    expect(() =>
+      app.exec({ sql: 'select count(*) from entries_fts_data', rowMode: 'array', callback: (r) => rows.push(r) }),
+    ).not.toThrow();
+    expect(rows).toHaveLength(1);
+    // ⚠ 打つ前の門(白名簿)も通る ── 外したのは図の問い合わせで、門ではない
+    expect(checkReadOnlySql('select count(*) from entries_fts_data').ok, '門が断っている').toBe(true);
+    // ⚠ 打てる側の対照群 ── 仮想表そのものも引ける
+    expect(() => app.exec({ sql: 'select count(*) from entries_fts', rowMode: 'array', callback: () => {} })).not.toThrow();
   });
 });

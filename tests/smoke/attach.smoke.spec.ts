@@ -1265,6 +1265,22 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
     source.locator('option', { hasText: 'uriage.csv' }),
     '.sqlite の下に .csv が並んでいない',
   ).toHaveCount(1);
+  /**
+   * 🔴 **仕切りと帯の並びを、実ブラウザの寸法で見る**(#992 ③ / ④)。
+   * 🔑 **新しい起動は増やさない**(#820)── 既に面を開いているこの道中で見る。
+   * ⚠ ④は DOM の順ではなく**横の位置**で見る(user が見るのは画面の並びである)。
+   */
+  expect(
+    await source.locator('optgroup').evaluateAll((gs) => gs.map((g) => (g as HTMLOptGroupElement).label)),
+    '調べる相手の仕切りが「この PKC / 添付 / 手持ちの file」の順でない',
+  ).toEqual(['この PKC', '添付', '手持ちの file']);
+  const xOf = async (field: string): Promise<number> =>
+    (await page.locator(`[data-pkc-field="${field}"]`).first().boundingBox())!.x;
+  const sourceX = await xOf('sql-source');
+  expect(await xOf('sql-engine'), 'エンジンの選び所が相手の選び所より左にある').toBeGreaterThan(sourceX);
+  for (const f of ['sql-run', 'sql-to-note', 'sql-to-file', 'sql-schema-to-note', 'sql-er-toggle', 'sql-history']) {
+    expect(await xOf(f), `${f} が「調べる相手」より先(左)に出ている`).toBeGreaterThan(sourceX);
+  }
   await source.selectOption({ label: 'uriage.csv' });
   // ⚠ 開くのは非同期(worker が bytes を読んで表を作る)── 開き終わるまで待つ。
   //   ここを待たずに走らせると、まだ `guest === null` のうちに走って
