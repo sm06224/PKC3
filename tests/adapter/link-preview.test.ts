@@ -11,6 +11,7 @@ import {
   HOVER_DELAY_MS,
   CLOSE_DELAY_MS,
 } from '../../src/adapter/ui/render/link-preview';
+import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import type { Dispatcher } from '../../src/adapter/state/dispatcher';
 import type { AppState } from '../../src/adapter/state/app-state';
 
@@ -297,7 +298,7 @@ describe('link-preview', () => {
       ): { open: boolean; foreign: boolean; title: string | null } {
         const root = document.createElement('div');
         document.body.append(root);
-        // ⚠ 下見を拾うのは `a` だけ(`findAnchor`)── 台は `a` に `data-pkc-entry-ref` で置く
+        // 台は `a` に `data-pkc-entry-ref` で置く(`@[card]` の span は下の describe が実物で見る)
         const anchor = document.createElement('a');
         anchor.setAttribute('data-pkc-entry-ref', target);
         root.append(anchor);
@@ -485,6 +486,100 @@ describe('link-preview', () => {
       expect(card?.querySelector('.pkc-link-preview-url')?.textContent).toBe('https://example.com/docs');
 
       teardown();
+    });
+
+    /**
+     * 🔴 **`@[card](…)` に重ねても下見が出る**(#1189)。
+     * ⚠ card は `<a>` ではなく `<span data-pkc-action="navigate-card-ref">` で焼かれる。
+     *   `findAnchor` の選択子が全部 `a[…]` だった頃は、**一度も当たらなかった**。
+     * 🔑 台は**実物の `renderMarkdown`** で焼く(手で作った `<a>` では、焼く側の要素名が
+     *   変わった日にも緑のままになる)。
+     */
+    describe('🔴 @[card] の下見(#1189)', () => {
+      /** 本文を焼いて台へ置き、`pick` が返す要素に mouseover を撃つ。消える前の物を写して返す。 */
+      function hoverBaked(
+        body: string,
+        pick: (root: HTMLElement) => Element,
+        stateOverrides: Partial<AppState> = {},
+      ): { open: boolean; foreign: boolean; notFound: boolean; title: string | null } {
+        const root = document.createElement('div');
+        root.innerHTML = renderMarkdown(body, { currentContainerId: 'c1' });
+        document.body.append(root);
+        const teardown = setupLinkPreview(root, createMockDispatcher(stateOverrides));
+        pick(root).dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+        vi.advanceTimersByTime(HOVER_DELAY_MS);
+        const card = root.querySelector<HTMLElement>(`[data-pkc-region="${LINK_PREVIEW_REGION}"]`);
+        const seen = {
+          open: card !== null,
+          foreign: card?.classList.contains('pkc-link-preview-foreign') ?? false,
+          notFound: card?.querySelector('.pkc-link-preview-not-found') != null,
+          title: card?.querySelector('.pkc-link-preview-title')?.textContent ?? null,
+        };
+        teardown();
+        return seen;
+      }
+
+      const cardOf = (root: HTMLElement): Element => {
+        const el = root.querySelector('[data-pkc-action="navigate-card-ref"]');
+        // 前提: 実物が card を焼いている(焼けていなければ「出ない」が空振りで通る)
+        expect(el, 'card が焼けていない').not.toBeNull();
+        expect(el?.tagName, 'card は a ではなく span で焼かれる').toBe('SPAN');
+        return el!;
+      };
+
+      it('@[card](entry:n1) に重ねると、題名つきの下見が出る', () => {
+        const seen = hoverBaked('@[card](entry:n1)', cardOf);
+        expect(seen.open, '下見が出ていない').toBe(true);
+        expect(seen.title).toBe('ノート1のタイトル');
+        expect(seen.foreign).toBe(false);
+      });
+
+      it('@[card](pkc://自分/entry/n1) も同じ下見が出る', () => {
+        const seen = hoverBaked('@[card](pkc://c1/entry/n1)', cardOf);
+        expect(seen.open).toBe(true);
+        expect(seen.title).toBe('ノート1のタイトル');
+      });
+
+      it('対照群: [字](entry:n1) の下見は今までどおり出る', () => {
+        const seen = hoverBaked('[字](entry:n1)', (root) => root.querySelector('a')!);
+        expect(seen.open).toBe(true);
+        expect(seen.title).toBe('ノート1のタイトル');
+      });
+
+      it('別の PKC を指す card は「別の PKC」の下見が出る(同じ lid が居ても)', () => {
+        const seen = hoverBaked('@[card](pkc://other/entry/n1)', cardOf);
+        expect(seen.open).toBe(true);
+        expect(seen.foreign, '別の PKC の下見ではない').toBe(true);
+        expect(seen.title).toBeNull();
+      });
+
+      it('消えたノートを指す card は「存在しません」の下見が出る', () => {
+        const seen = hoverBaked('@[card](entry:gone)', cardOf);
+        expect(seen.open).toBe(true);
+        expect(seen.notFound).toBe(true);
+      });
+
+      it('card の中の要素(子の span)に重ねても、親の card として拾う', () => {
+        const seen = hoverBaked('@[card](entry:n1)', (root) => {
+          const child = document.createElement('span');
+          child.textContent = '子';
+          cardOf(root).append(child);
+          return child;
+        });
+        expect(seen.open, '子に重ねたら出ない').toBe(true);
+        expect(seen.title).toBe('ノート1のタイトル');
+      });
+
+      it('対照群: card でも外部リンクでもない span に重ねても出ない', () => {
+        const seen = hoverBaked('@[card](entry:n1)', (root) => {
+          const other = document.createElement('span');
+          other.setAttribute('data-pkc-action', 'something-else');
+          other.setAttribute('data-pkc-card-target', 'entry:n1');
+          root.append(other);
+          return other;
+        });
+        expect(seen.open).toBe(false);
+      });
     });
   });
 });
