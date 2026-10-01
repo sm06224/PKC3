@@ -231,14 +231,28 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
   //    対照群が死んでいるなら、**20 秒かかる取り出しを始める前に**落としたい
   expect(base.ticks, '対照群の心拍が取れていない(比べる相手が無い)').toBeGreaterThan(5);
   await page.evaluate(() => {
-    const w = window as unknown as { __gaps: number[]; __hb: number };
+    const w = window as unknown as {
+      __gaps: { at: number; gap: number }[];
+      __hb: number;
+      __t0: number;
+      __lt: PerformanceObserver | null;
+    };
     w.__gaps = [];
-    let last = performance.now();
+    w.__t0 = performance.now();
+    let last = w.__t0;
     w.__hb = window.setInterval(() => {
       const now = performance.now();
-      w.__gaps.push(now - last);
+      w.__gaps.push({ at: last - w.__t0, gap: now - last });
       last = now;
     }, 4);
+    // 🔑 診断(#878 ①)── long task も同じ窓で採る。⚠ 無いブラウザは `null`(0 件と別物)
+    w.__lt = null;
+    try {
+      w.__lt = new PerformanceObserver(() => {});
+      w.__lt.observe({ type: 'longtask', buffered: true });
+    } catch {
+      w.__lt = null;
+    }
   });
   await winOk.click();
   // ⚠ **選んだら窓は閉じる**(取り出した後も選び手が残らない)
@@ -251,10 +265,28 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
     '取り出した物が添付になっていない',
   ).toHaveCount(6, { timeout: 20_000 });
   const load = await page.evaluate(() => {
-    const w = window as unknown as { __gaps: number[]; __hb: number };
+    const w = window as unknown as {
+      __gaps: { at: number; gap: number }[];
+      __hb: number;
+      __t0: number;
+      __lt: PerformanceObserver | null;
+    };
     clearInterval(w.__hb);
-    const g = [...w.__gaps].sort((a, b) => b - a);
-    return { max: Math.round(g[0] ?? 0), ticks: g.length, top: g.slice(0, 5).map((n) => Math.round(n)) };
+    const g = [...w.__gaps].sort((a, b) => b.gap - a.gap);
+    const longtasks = w.__lt
+      ? w.__lt
+          .takeRecords()
+          .filter((e) => e.startTime >= w.__t0)
+          .map((e) => ({ at: Math.round(e.startTime - w.__t0), dur: Math.round(e.duration) }))
+      : null;
+    w.__lt?.disconnect();
+    return {
+      max: Math.round(g[0]?.gap ?? 0),
+      ticks: g.length,
+      top: g.slice(0, 5).map((n) => Math.round(n.gap)),
+      topAt: g.slice(0, 5).map((n) => Math.round(n.at)),
+      longtasks,
+    };
   });
   // 🔑 **値は毎回 log に残る**(#878 ①)── 門も予算も `expectMainGapUnderBudget` が正本
   expectMainGapUnderBudget('取り出し', {
@@ -264,6 +296,8 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
     baseTicks: base.ticks,
     top: load.top,
     baseTop: base.top,
+    topAt: load.topAt,
+    longtasks: load.longtasks,
   });
   await expect(page.locator('[data-pkc-region="entry-list"]')).toContainText('海.jpg');
   await expect(page.locator('[data-pkc-region="entry-list"]')).toContainText('山.jpg');
@@ -422,24 +456,48 @@ test('🔴 大きい添付を貼ってもメインスレッドが固まらない
      * 『測りたい操作以外を全部同じにしたもの』」)。
      */
     const beat = (): {
-      stop: () => { max: number; ticks: number; top: number[] };
+      stop: () => {
+        max: number;
+        ticks: number;
+        top: number[];
+        topAt: number[];
+        longtasks: { at: number; dur: number }[] | null;
+      };
     } => {
-      const gaps: number[] = [];
-      let last = performance.now();
+      const gaps: { at: number; gap: number }[] = [];
+      const t0 = performance.now();
+      let last = t0;
       const hb = setInterval(() => {
         const now = performance.now();
-        gaps.push(now - last);
+        gaps.push({ at: last - t0, gap: now - last });
         last = now;
       }, 4);
+      // 🔑 診断(#878 ①)── long task も同じ窓で採る。⚠ 無いブラウザは `null`(0 件と別物)
+      let lt: PerformanceObserver | null = null;
+      try {
+        lt = new PerformanceObserver(() => {});
+        lt.observe({ type: 'longtask', buffered: true });
+      } catch {
+        lt = null;
+      }
       return {
         stop: () => {
           clearInterval(hb);
-          gaps.sort((a, b) => b - a);
+          gaps.sort((a, b) => b.gap - a.gap);
+          const longtasks = lt
+            ? lt
+                .takeRecords()
+                .filter((e) => e.startTime >= t0)
+                .map((e) => ({ at: Math.round(e.startTime - t0), dur: Math.round(e.duration) }))
+            : null;
+          lt?.disconnect();
           return {
-            max: Math.round(gaps[0] ?? 0),
+            max: Math.round(gaps[0]?.gap ?? 0),
             ticks: gaps.length,
             // 🔑 上位 5 件(#878)── 1 点だと「外れ値 1 個」と「裾ごと持ち上がった」が見分けられない
-            top: gaps.slice(0, 5).map((n) => Math.round(n)),
+            top: gaps.slice(0, 5).map((n) => Math.round(n.gap)),
+            topAt: gaps.slice(0, 5).map((n) => Math.round(n.at)),
+            longtasks,
           };
         },
       };
@@ -482,6 +540,8 @@ test('🔴 大きい添付を貼ってもメインスレッドが固まらない
       baseTicks: base.ticks,
       top: load.top,
       baseTop: base.top,
+      topAt: load.topAt,
+      longtasks: load.longtasks,
     };
   }, SIZE_MB);
 
