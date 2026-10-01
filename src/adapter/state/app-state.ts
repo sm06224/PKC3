@@ -2415,6 +2415,12 @@ export type UserAction =
    */
   | { type: 'TOGGLE_TASK'; lid: string; line: number }
   /**
+   * 🔴 **チェックリストを丸ごと「完了」/「未完了」へそろえる**(#1173)。
+   * ⚠ `TOGGLE_TASK` と**同じ形**:書換は 1 本(`REQUEST_BODY_REWRITE`)を通る。
+   *   `lines` は面が運ぶ**原文の行番号**の並び(判断は `body-rewrite.ts` の `applyTaskRun`)。
+   */
+  | { type: 'SET_TASK_RUN'; lid: string; lines: readonly number[]; to: 'done' | 'open' }
+  /**
    * 🔴 **表のセルを 1 つ書き換える**(#418 段①)。
    * ⚠ `TOGGLE_TASK` と**同じ形**:書換は 1 本(`REQUEST_BODY_REWRITE`)を通り、
    *   面が独自の書込経路を持たない(§7)。何をするかの判断は `body-rewrite.ts`。
@@ -6834,6 +6840,37 @@ function reduceCore(
             archetype: meta.archetype,
             entryOrder: meta.entryOrder,
             rewrite: { kind: 'task', line: action.line },
+          },
+        ],
+      };
+    }
+    /**
+     * 🔴 **リストを丸ごとそろえる**(#1173)。⚠ `TOGGLE_TASK` と**同じ形** ── 断りは lid で判定する。
+     *   繰り返しの行を飛ばした数の知らせは、効果層が本文を読んだ後に言う
+     *   (reducer は本文を持たない)。
+     */
+    case 'SET_TASK_RUN': {
+      const blocked = bodyWriteBlockReason(state, action.lid);
+      if (blocked !== null)
+        return {
+          state: {
+            ...state,
+            error: `${blocked}${action.to === 'done' ? '完了にしてください' : '未完了に戻してください'}`,
+          },
+          events: [],
+        };
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta || action.lines.length === 0) return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_BODY_REWRITE',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            rewrite: { kind: 'task-run', lines: action.lines, to: action.to },
           },
         ],
       };

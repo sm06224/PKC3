@@ -24,6 +24,7 @@ import {
   appGroupMenuActions,
   tableConvertPickLabel,
   tableMenuActions,
+  taskRunMenuActions,
   ADOPT_IMAGES_LABEL,
   adoptImagesLabel,
   BODY_MENU_ACTIONS,
@@ -418,6 +419,9 @@ describe('右クリックの説明(#587 C-1)', () => {
       // 🔴 **表の形を変える 2 つ**(#708 段②、2026-09-05)
       ['table-to-csv', '2658a59b'],
       ['table-to-markdown', '70082c4c'],
+      // 🔴 **リストを丸ごとそろえる 2 つ**(#1173、2026-10-01)
+      ['task-run-open', '8e3e5aee'],
+      ['task-run-done', '926e25f8'],
       // 🔴 **左の列の行からの整理 3 つ**(#215、2026-09-05)
       ['rename-entry-begin', 'c951ee45'],
       ['move-to-folder', '4f9ac271'],
@@ -836,5 +840,29 @@ describe('幅の段は 2 つだけ(#1029 段 C 手 2)', () => {
     expect(entryActionWidthTier('スタック')).toBe('short'); // 8 桁ちょうど
     expect(entryActionWidthTier('PowerPoint')).toBe('long'); // 10 桁
     expect(entryActionWidthTier('バックアップ')).toBe('long'); // 12 桁
+  });
+});
+
+/**
+ * 🔴 **リストを丸ごとそろえる字**(#1173)。
+ *
+ * ⚠ 字は画面に出る物そのまま ── 画面の字を直したら、ここの等値と
+ *   マニュアル(`docs/manual.md`「チェックリストを作る」)の太字を**同時に**直す。
+ */
+describe('リストを丸ごとそろえる字(#1173)', () => {
+  it('🔴 2 つとも出て、向きと字が対になっている(戻す側が先)', () => {
+    const items = taskRunMenuActions();
+    expect(items.map((a) => [a.action, a.label])).toEqual([
+      ['task-run-open', 'このリストをすべて未完了に戻す'],
+      ['task-run-done', 'このリストをすべて完了にする'],
+    ]);
+  });
+
+  it('⚠ 説明が付いている(空の欄を出さない)── 動かない物と戻し方を先に言う', () => {
+    for (const a of taskRunMenuActions()) {
+      expect(a.hint, `${a.action} に説明が無い`).not.toBe('');
+      expect(a.hint).toContain('繰り返し');
+      expect(a.hint).toContain('履歴');
+    }
   });
 });

@@ -922,6 +922,28 @@ export function tableMenuActions(
 }
 
 /**
+ * 🔴 **右クリックしたチェックリストを、丸ごとそろえる**(#1173)。
+ *
+ * > user の物語: 旅行の持ち物リストを、出発のたびに全部「未完了」へ戻したい。
+ * > いまは 15 個を 1 つずつ押している。
+ *
+ * ⚠ 出るのは**チェック項目の字の上だけ**(受け手の判定は `binder.ts`)。箱そのものの上は
+ *   ブラウザ既定のメニューを残す(`input` を奪わない)。
+ * ⚠ 2 つとも**いつも**出す ── 元から全部そろっていれば、押すと「すべて〜になっています」と
+ *   知らせる(無言の dead click にしない)。
+ * ⚠ `BODY_MENU_ACTIONS` には入れない ── あちらは「読んでいる見え方を変える」物の表で、
+ *   これは**本文を書き換える**(`tableMenuActions` と同じ側)。
+ * 🔑 綴りと字を対で書く(`tableMenuActions` と同じ理由 ── 出口を静的に追えるように)。
+ */
+export function taskRunMenuActions(): readonly (EntryAction & { readonly hint: string })[] {
+  const items: readonly EntryAction[] = [
+    { action: 'task-run-open', label: 'このリストをすべて未完了に戻す' },
+    { action: 'task-run-done', label: 'このリストをすべて完了にする' },
+  ];
+  return items.map((a) => ({ ...a, hint: ENTRY_ACTION_HINTS[a.action] ?? '' }));
+}
+
+/**
  * 🔴 **「▾」の小窓に出す、同じ操作の字**(#708 裁定②。user 2026-09-06)。
  *
  * ⚠ **メニューの字と別に要る。** あちらは「表を右クリックした」文脈なので
@@ -1123,6 +1145,11 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
    */
   'table-to-csv': 'この表を升ごと押して打てる形にします。⚠ 桁揃え(:---)は CSV に書けないので落ちます',
   'table-to-markdown': 'この表を Markdown の表(| … |)にします。式は入れられません',
+  // 🔴 **リストを丸ごとそろえる 2 つ**(#1173)。⚠ 入れ子の項目も動くことと、動かない物・戻し方を先に言う
+  'task-run-open':
+    'このリストのチェック(入れ子の分も)をすべて外します。繰り返しの項目は触りません。履歴から元へ戻せます',
+  'task-run-done':
+    'このリストのチェック(入れ子の分も)をすべて付けます。繰り返しの項目は触りません。履歴から元へ戻せます',
   // 🔴 **左の列の行からの整理 3 つ**(#215)。⚠ どれも**画面で起きること**で書く
   //    (user 指示 2026-08-21)── 「改名モードへ遷移」ではなく「入力欄が出る」
   'rename-entry-begin': '行の題名の所に入力欄が出ます。Enter で確定、Esc でやめます',

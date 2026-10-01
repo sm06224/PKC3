@@ -102,6 +102,11 @@ interface CaseSpec {
 const CASES: CaseSpec[] = [
   { name: 'TOGGLE_TASK', action: (lid) => ({ type: 'TOGGLE_TASK', lid, line: 0 }), rewriteKind: 'task' },
   {
+    name: 'SET_TASK_RUN',
+    action: (lid) => ({ type: 'SET_TASK_RUN', lid, lines: [0], to: 'done' }),
+    rewriteKind: 'task-run',
+  },
+  {
     name: 'SET_CSV_CELL',
     action: (lid) => ({ type: 'SET_CSV_CELL', lid, line: 1, col: 0, value: 'x' }),
     rewriteKind: 'csv-cell',

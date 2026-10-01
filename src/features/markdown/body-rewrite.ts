@@ -20,6 +20,7 @@ import { removeInsertedLines } from './append-target';
 import {
   addPlace,
   connectPlaces,
+  fenceMask,
   insideFence,
   movePlace,
   raisePlace,
@@ -90,6 +91,26 @@ export type BodyRewrite =
       kind: 'frontmatter';
       /** ⚠ `undefined` はその鍵を**消す**(`spliceFrontmatterKeys` の作法)。 */
       keys: Record<string, FrontmatterValue | undefined>;
+    }
+  | {
+      /**
+       * 🔴 **チェックリストを丸ごと「完了」/「未完了」へそろえる**(#1173)。
+       *
+       * > user の物語: 旅行の持ち物リストを、出発のたびに全部「未完了」へ戻したい。
+       * > 15 回押すのではなく、1 回で戻したい。
+       *
+       * ⚠ `lines` は**原文の行番号**(0 始まり。`task` と同じ座標系)の並びで、
+       *   面が「そのリストの印の行」を全部運んでくる(入れ子の項目も含む)。
+       * ⚠ **繰り返しの規則の行は触らない**(`task` の注記のとおり、規則の印を押すと
+       *   「この繰り返しは終わり」の意味になり、以後の回が全部消える)── 数だけ返す
+       *   (`applyTaskRun` の `skipped.repeat`)ので、知らせは呼び側が言う。
+       * ⚠ **印の 1 文字だけ**を書き換える(`task` と同じ作法)。
+       * 🔑 履歴には**積む**(効果層が `checkpoint: true` を渡す)── 一度に何件も動くので、
+       *   間違えたら版から戻せることが「元に戻す」の代わりになる。
+       */
+      kind: 'task-run';
+      lines: readonly number[];
+      to: 'done' | 'open';
     }
   | {
       /** チェックの印を反転する。`line` は**原文の行番号**(0 始まり)。 */
@@ -470,6 +491,88 @@ function moveLinkLine(
  */
 const TASK_LINE = /^((?:\s*>)*\s*(?:[-*+]|\d+[.)])\s+)\[([ xX])\](\s|$)/;
 
+/** `applyTaskRun` の結果(#1173)。 */
+export interface TaskRunApplied {
+  /** 書き換えた本文。⚠ 何も動かなければ**同じ文字列**(呼び側が「書かない」を選べる)。 */
+  readonly body: string;
+  /** 実際に印を動かした行の数(元から目的の状態だった行は数えない)。 */
+  readonly changed: number;
+  readonly skipped: {
+    /** 繰り返しの規則の行(触らない)。 */
+    readonly repeat: number;
+    /** チェック項目でなくなっていた行 / 範囲外 / fence の中(当てずっぽうで書かない)。 */
+    readonly invalid: number;
+  };
+}
+
+/**
+ * 🔴 **チェック項目の印を、並びでそろえる**(#1173)。
+ *
+ * 🔑 門は 1 行ごとに 3 つ:①原文の範囲に在り、frontmatter の外 ②`TASK_LINE` に当たる
+ *   (= 項目でなくなった行は書かない)③fence の中ではない(`insideFence` の 1 本)。
+ *   外れた行は**数えて飛ばす**(1 本の外れで他を止めない ── 15 件のうち 1 件が
+ *   ずれていても、残りは正しい行である)。
+ * ⚠ **繰り返しの規則の行は書かない**(`readLineDate(line).repeat !== null`。判定は
+ *   `materializeRepeat` と同じ 1 本)。
+ * ⚠ **印の 1 文字だけ**を書き換える(行を組み直さない)。
+ */
+export function applyTaskRun(
+  body: string,
+  targets: readonly number[],
+  to: 'done' | 'open',
+): TaskRunApplied {
+  const lines = splitLines(body);
+  const fm = frontmatterLineCount(body);
+  const mask = fenceMask(lines, fm);
+  let changed = 0;
+  let repeat = 0;
+  let invalid = 0;
+  const seen = new Set<number>();
+  for (const at of targets) {
+    // ⚠ 同じ行を 2 度数えない(面が入れ子を二重に拾っても、数は 1 件)
+    if (seen.has(at)) continue;
+    seen.add(at);
+    const line = lines[at];
+    if (!Number.isInteger(at) || at < fm || line === undefined || mask[at] === true) {
+      invalid++;
+      continue;
+    }
+    const m = TASK_LINE.exec(line);
+    if (m === null) {
+      invalid++;
+      continue;
+    }
+    const found = readLineDate(line);
+    if (found !== null && found.repeat !== null) {
+      repeat++;
+      continue;
+    }
+    const checked = m[2]!.toLowerCase() === 'x';
+    if (checked === (to === 'done')) continue;
+    const pos = m[1]!.length + 1; // `[` の次
+    lines[at] = line.slice(0, pos) + (to === 'done' ? 'x' : ' ') + line.slice(pos + 1);
+    changed++;
+  }
+  return {
+    body: changed === 0 ? body : lines.join(detectEol(body)),
+    changed,
+    skipped: { repeat, invalid },
+  };
+}
+
+/**
+ * 🔴 **そろえた結果の知らせ**(#1173)。⚠ 繰り返しを飛ばした回と、**何も動かなかった回**だけ
+ * 言う(普通に動いた回は画面の印が答えである)。
+ * 🔑 字は**画面で何が起きたか**で書く ── 「繰り返し」は規則の行(`毎週` など)のこと。
+ */
+export function taskRunNotice(run: TaskRunApplied, to: 'done' | 'open'): string {
+  const parts: string[] = [];
+  if (run.changed > 0) parts.push(`${run.changed} 件を${to === 'done' ? '完了' : '未完了'}にしました`);
+  if (run.skipped.repeat > 0) parts.push(`${run.skipped.repeat} 件は繰り返しなので触りませんでした`);
+  if (parts.length === 0) return to === 'done' ? 'すべて完了になっています' : 'すべて未完了になっています';
+  return parts.join(' / ');
+}
+
 /** タグ 1 つに何が起きたか(#640)。⚠ `wrote` 以外は**本文が変わっていない**。 */
 export type TagOutcome = 'wrote' | 'unchanged' | 'limit' | 'invalid';
 
@@ -540,6 +643,15 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
      */
     // 🔑 **書く形と、理由を数える形は同じ 1 本**(#640)── 下の `applyTagsToBody`
     return applyTagsToBody(body, rewrite.tags, rewrite.mode).body;
+  }
+  if (rewrite.kind === 'task-run') {
+    /**
+     * ⚠ 項目として読めた行が **1 つも無い**ときは `null` = 断る(画面の行番号が古い)。
+     *   ⚠ 読めた行が在って元から全部そろっていれば**同じ本文**を返す(= 書かない・言わない)。
+     */
+    const r = applyTaskRun(body, rewrite.lines, rewrite.to);
+    const valid = new Set(rewrite.lines).size - r.skipped.invalid;
+    return valid <= 0 ? null : r.body;
   }
   if (rewrite.kind === 'repeat-done') return materializeRepeat(body, rewrite);
   if (rewrite.kind === 'repeat-move') return moveRepeatOccurrence(body, rewrite);
