@@ -71,7 +71,10 @@ P4 の実地棚卸し(#283 のコメント 2026-08-28)は、こう書いた:
 
 ### ⚠ A を採ると決まること
 
-- **板 = `whiteboard` archetype のノート**。body は PKC-Markdown
+- 🔴 **【実装に合わせて訂正 2026-10-01】板は `whiteboard` という新しい型のノートではない。**
+  実装は**型を問わず**、本文に `.pkc-place` の塊が在れば板として描く(`src` に `whiteboard` は
+  0 件 ── 板の面を別に持たず、読む面が塊を絶対配置で置く)。body は PKC-Markdown のまま。
+  ⚠ 以後の段(W2 / W4 / W5)も、型を足さずにこの形の上で考える
 - 置かれた 1 枚 = **1 つの format 塊**(`:::format{.pkc-place entry=… x= y= w= h=}`)
 - **書き戻しは板の本文だけ**(`REQUEST_BODY_REWRITE` を 1 本、既存の門と `expectHash` のまま)
 - **アセットも同じ形**で置ける(塊の中に `![](asset:…)` を書く ── 実測で hydration は

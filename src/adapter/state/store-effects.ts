@@ -1749,6 +1749,27 @@ export function connectStoreEffects(
         });
         break;
       /**
+       * 🔴 **板に置いたノートの本文を読む**(#529 W3-①)。
+       *
+       * ⚠ 留めた枠(`REQUEST_SPLIT_BODY`)と違い、**全文を state へ入れない** ──
+       *   reducer(`PLACE_BODY_LOADED`)が切る。ここは全文を**運ぶだけ**で、握らない。
+       * 🔑 読む口は同じ `store.getBody`、**同じ直列の列**(2026-08-17「読みが書込を追い越す」)。
+       * ⚠ **読めなくても黙って終える**(消えたノート = 板は題名の行で断る。補助の表示なので
+       *   失敗を帯に出すと、板を開くたびに赤い字が出る)。
+       */
+      case 'REQUEST_PLACE_BODY':
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            const body = await store.getBody(ev.lid);
+            if (disposed || body === null) return;
+            dispatcher.dispatch({ type: 'PLACE_BODY_LOADED', lid: ev.lid, body });
+          } catch {
+            // ⚠ 読めなかっただけ ── 板が次に描き直されるときにもう一度頼まれる
+          }
+        });
+        break;
+      /**
        * 🔴 **保存したスタックの本文を読む**(#633 段③)── 画面に無いときだけ来る。
        * ⚠ 読めなければ理由を言う(押しても無言、にしない)。読む口は同じ直列の列。
        */

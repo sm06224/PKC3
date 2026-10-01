@@ -9,10 +9,14 @@
  * 差分に影響しない。⚠ ただし塊が差し替わると消えるので、**描画のたびに呼び直す**
  * (`applyHeadingFold` と同じ作法)。
  *
- * ## ⚠ 展開(transclusion)はしない(裁定 2026-08-19 Q1)
+ * ## 🔴 `entry=` の塊は「題名の帯 + 置いたノートの中身(読むだけ)」(#529 W3-①)
  *
- * `entry=` の塊は**題名の札**である ── 中身を写すと正本が 2 つになる。
- * 開けば本体へ飛ぶ(`select-entry` の既存の口に乗せる)。
+ * かつては**題名の札だけ**で「展開(transclusion)はしない」(裁定 2026-08-19 Q1)だったが、
+ * W3-① で覆した(Gemini 裁定 2026-10-01)。**帯はここ**(押すと本体が開く = `select-entry`)、
+ * **中身の描画は `place-embed.ts`**。⚠ 正本は 1 つのまま ── 中身は**読み取り専用の写し**で、
+ * 板からは 1 文字も書けない。
+ * ⚠ 中身で板を伸ばさない ── `w=` / `h=` が無い `entry=` の塊は**既定の大きさで固定**し
+ *   (`PLACE_ENTRY_DEFAULT_*`)、収まらない分は塊の中で送る(線が大きさから端点を決めるため)。
  *
  * ## ⚠ 節点の親子は動かさない
  *
@@ -37,6 +41,7 @@ import {
 } from '@features/markdown/place-line';
 // 🔑 名前に使える字は 1 か所から読む(#530、§7 ── 綴りを写して増やさない)
 import { NAME_RE } from '@features/markdown/block-directive-attrs';
+import { PLACE_ENTRY_DEFAULT_H, PLACE_ENTRY_DEFAULT_W } from '@features/markdown/place-embed';
 
 /**
  * 🔑 **測れない所で使う大きさ**(happy-dom / まだ画面に出ていない面)。
@@ -423,6 +428,11 @@ export function applyPlaceLayout(
   host: HTMLElement,
   resolveTitle: (lid: string) => string | null,
   lineOffset: number,
+  /**
+   * 🔴 その lid の中身を板に出すか(#529 W3-①)。**出すなら** `w=` / `h=` を省いた塊に
+   * 既定の大きさを当てる。⚠ 省略 = 出さない(中身が無い塊は、今までどおり中身の大きさ)。
+   */
+  embeds: (lid: string) => boolean = () => false,
 ): number {
   const blocks = [...host.querySelectorAll<HTMLElement>(PLACE_SELECTOR)];
   if (blocks.length === 0) {
@@ -443,11 +453,18 @@ export function applyPlaceLayout(
     const w = intAttr(el, 'data-pkc-w');
     const h = intAttr(el, 'data-pkc-h');
     const z = intAttr(el, 'data-pkc-z');
+    // 🔑 中身を出す塊は、書いていない辺に**既定の大きさ**を当てる(書いた辺はそのまま)
+    // ⚠ 名前を替える**前**に読む(下の `data-pkc-place-entry` への付け替えは 1 度きり)── 2 回目以降は
+    //   付け替え済みの側から読む
+    const placed = el.getAttribute('data-pkc-place-entry') ?? el.getAttribute('data-pkc-entry') ?? '';
+    const sized = placed !== '' && embeds(placed);
+    const useW = w ?? (sized ? PLACE_ENTRY_DEFAULT_W : null);
+    const useH = h ?? (sized ? PLACE_ENTRY_DEFAULT_H : null);
     el.style.left = `${x}px`;
     el.style.top = `${y}px`;
-    if (w !== null) el.style.width = `${w}px`;
+    if (useW !== null) el.style.width = `${useW}px`;
     else el.style.removeProperty('width');
-    if (h !== null) el.style.height = `${h}px`;
+    if (useH !== null) el.style.height = `${useH}px`;
     else el.style.removeProperty('height');
     if (z !== null) el.style.zIndex = String(z);
     else el.style.removeProperty('z-index');
@@ -477,7 +494,7 @@ export function applyPlaceLayout(
     ensureSizeHandle(el);
     const lid = el.getAttribute('data-pkc-place-entry');
     if (lid !== null && lid !== '') ensureCard(el, lid, resolveTitle);
-    bottom = Math.max(bottom, y + (h ?? 160));
+    bottom = Math.max(bottom, y + (useH ?? 160));
   }
   // 🔑 **線は板を置いた後に引く**(位置が当たっていないと行き先が決まらない)
   applyPlaceLines(host, blocks, lineOffset);

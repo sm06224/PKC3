@@ -36,6 +36,9 @@ import { applyExternalLinks } from './external-link';
 import { applyMissingLinks, clearMissingLinks } from './link-missing';
 import { appMissingLinks } from './missing-links';
 import { applyPlaceLayout } from './place-board';
+import { PlaceEmbeds } from './place-embed';
+import { placeEmbeddable } from '@features/markdown/place-embed';
+import { placeBodiesOf } from '@adapter/state/app-state';
 import { installBlockGrip } from './block-grip';
 import { applyStackControls } from './stack-controls';
 import { STACK_ARCHETYPE } from '@features/flavor/stack-flavor';
@@ -306,6 +309,15 @@ export class DetailRenderer {
    */
   private metasRef: AppState['entryMetas'] | null = null;
   private cidRef = '';
+  /**
+   * 🔴 **いま見ている `placeBodies`**(#529 W3-①)。⚠ **指紋には入れない**(`metasRef` と同じ理由)──
+   * 抜粋が 1 件届くたびに板のノートの本文を描き直さない。変わったときは**中身の器だけ**当て直す
+   * (`syncPlaceEmbeds`)。描画の途中で変わった回のために、worker の描画の後ろ(`paint`)も
+   * ここから読む。
+   */
+  private placeRef: ReturnType<typeof placeBodiesOf> | null = null;
+  /** 板に置いたノートの中身を描く(描き直しをまたいで、控えと「もう頼んだ」を持つ)。 */
+  private readonly placeEmbeds = new PlaceEmbeds();
   /** この render pass が貸し出した ObjectURL の dispose 群。**表示の寿命の
    *  終わり(次の render / 選択遷移)で必ず全部呼ぶ**(生成物のライフサイクル
    *  終端での即破棄 ── user 指示 2026-07-27 不可侵)。 */
@@ -542,6 +554,13 @@ export class DetailRenderer {
      * 留めた枠は自分の器へ。2 か所で書かない(CLAUDE.md §7)。
      */
     private readonly markOn: HTMLElement | null = null,
+    /**
+     * 🔴 **板が、置いたノートの本文を欲しがっている**(#529 W3-①)。
+     *
+     * ⚠ renderer は dispatch しない(層規約)── 撃つのは `main.ts`(`PLACE_BODIES_WANTED`)。
+     * ⚠ 渡さなければ**本文は出ない**(題名の行だけ ── この面だけを組む test を壊さない)。
+     */
+    private readonly onPlaceWanted: ((lids: readonly string[]) => void) | null = null,
   ) {
     this.region = region;
     this.assets = assets;
@@ -715,6 +734,38 @@ export class DetailRenderer {
     else clearMissingLinks(host);
   }
 
+  /**
+   * 🔴 **板に置いたノートの中身を、いま描いてある本文へ当て直す**(#529 W3-①)。
+   * ⚠ 本文は描き直さない(`PlaceEmbeds.sync` は器の中だけを触る。冪等)。
+   * ⚠ 留めた枠でも板は描くので、主の枠 / 留めた枠で分岐しない。
+   */
+  private syncPlaceEmbeds(): void {
+    const host = this.bodyHost;
+    const metas = this.metasRef;
+    const bodies = this.placeRef;
+    const self = this.skeletonLid;
+    if (host === null || this.bodyKind !== 'md' || metas === null || bodies === null || self === null) return;
+    const wanted = this.onPlaceWanted;
+    this.placeEmbeds.sync(host, {
+      selfLid: self,
+      excerptOf: (l) => bodies.get(l),
+      metaOf: (l) => metas.get(l),
+      /**
+       * ⚠ **読み取り専用の設定で描く**:押せる旗(`interactive*`)も行番号(`sourceLineAnchors`)も
+       *   渡さない。外部画像は**同意が取れていない**ので許さない(置いたノートの同意は、
+       *   板のノートのものではない)。
+       */
+      render: (text) => {
+        const opts = {
+          ...readingRenderOptions(text, { allowExternalImages: false, currentContainerId: this.cidRef }),
+          sourceLineAnchors: false,
+        };
+        return this.markdown.render(text, opts).catch(() => renderMarkdown(text, opts));
+      },
+      wanted: (lids) => wanted?.(lids),
+    });
+  }
+
   render(state: AppState): void {
     /**
      * 🔴 **「探す」の控えが動いたら、本文は描き直さず塗りだけ当て直す**(#1102 段①)。
@@ -786,6 +837,16 @@ export class DetailRenderer {
       this.metasRef = state.entryMetas;
       this.cidRef = selfContainerId(state);
       this.syncMissingLinks();
+    }
+    /**
+     * 🔴 **板のための抜粋が動いたら、本文は描き直さず中身の器だけ当て直す**(#529 W3-①)。
+     * ⚠ `metasRef` と同じ理由で**一番上に置く**(下には早期 return が在り、抜粋だけが変わった回は
+     *   本文の指紋が同じなので必ずそこで止まる)。
+     */
+    const placeBodies = placeBodiesOf(state);
+    if (placeBodies !== this.placeRef) {
+      this.placeRef = placeBodies;
+      this.syncPlaceEmbeds();
     }
     /**
      * 🔴 **留めた枠は、選択にも編集にも関係なく「その 1 件」を出す**(#505 段②)。
@@ -997,6 +1058,8 @@ export class DetailRenderer {
       // 🔴 「探す」の帯は主の枠だけ(#1102 段①)── 留めた枠は別のノートを出すので持たない
       if (this.pinnedLid === null) this.searchJumpBar = installSearchJumpBar(this.region);
       this.skeletonLid = lid;
+      // 🔑 別のノートへ移った ── 板の中身の控えも「頼んだ」も持ち越さない(読めなかった lid を頼み直せる)
+      this.placeEmbeds.reset();
       this.bodyKind = null;
       this.bodyView = EMPTY_VIEW;
       // ⚠ 編集から戻ったときは**元の位置へ**。それ以外は**そのノートで読んでいた
@@ -1326,7 +1389,22 @@ export class DetailRenderer {
          * ⚠ 描画のたびに呼ぶ(冪等)── 塊が差し替わると掴む口と題名の札が
          *   消えるため(見出しの畳みと同じ理由)。
          */
-        applyPlaceLayout(host, (l) => state.entryMetas.get(l)?.title ?? null, frontmatterLineCount(body));
+        applyPlaceLayout(
+          host,
+          (l) => state.entryMetas.get(l)?.title ?? null,
+          frontmatterLineCount(body),
+          // 🔑 中身を出す塊(= 既定の大きさで固定する塊)の判定は、描く側(`PlaceEmbeds`)と同じ 1 本
+          (l) => {
+            const m = state.entryMetas.get(l);
+            return m !== undefined && l !== lid && placeEmbeddable(m.archetype);
+          },
+        );
+        /**
+         * 🔴 **置いたノートの中身**(#529 W3-①)── 題名の帯の下に、読み取り専用で描く。
+         * ⚠ 板を置いた**後**に呼ぶ(塊に帯が在って初めて、その直後へ器を置ける)。
+         * ⚠ 描画のたびに呼ぶ(冪等)── 塊が差し替わると器が消えるため(帯と同じ理由)。
+         */
+        this.syncPlaceEmbeds();
         /**
          * 🔴 **本文の塊を掴む口**(#684 段①)── 面に 1 個だけ置き、乗せた塊の横へ移す。
          * ⚠ 描画のたびに呼ぶ(いま描いてある本文を差し替える)。板の面では出ない。
