@@ -235,8 +235,8 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'rename-attachment', 'renumber-lists', 'replace-all', 'reset-app-group-order', 'reset-flags',
   'reset-office-profile', 'retry-persist', 'run-sql', 'schedule-nav', 'schedule-quick-add',
   'schedule-today', 'select-entry', 'set-alarm-enabled', 'set-app-group', 'set-app-icon',
-  'set-app-open-target', 'set-browse', 'set-column-rule', 'set-date-links', 'set-editor-mode', 'set-entry-date',
-  'set-entry-sort', 'set-external-images', 'set-flag', 'set-notices-enabled', 'set-open-in-edit',
+  'set-app-open-target', 'set-browse', 'set-code-collapse', 'set-column-rule', 'set-date-links', 'set-editor-mode', 'set-entry-date',
+  'set-entry-sort', 'set-external-images', 'set-flag', 'set-inline-code-copy', 'set-notices-enabled', 'set-open-in-edit',
   'set-missing-links', 'set-open-place', 'set-page-format', 'set-paste-source', 'set-phone-links', 'set-prose-align',
   'set-query-key', 'set-read-columns', 'set-sql-engine', 'set-sql-source', 'set-sql-text', 'set-tag-badge',
   'set-text-scale', 'set-theme', 'set-too-narrow-enabled', 'set-view', 'set-voice-boost',
@@ -602,12 +602,15 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   (`open-storage-check`)で受け手 +1 ── 登記は増えない(押し口は状態の行にしか無く、
       //   鍵も持たない。`open-system-notices` と同じ仕分け)。
       //   `receivers` +1 / `total` +1 / `unregistered` +1。
-      total: 349,
-      receivers: 292,
+      // ⚠ 2026-10-01(#1087): 手が滑りやすい 2 つの入切(`set-code-collapse` / `set-inline-code-copy`)で
+      //   受け手 +2 / `total` +2 / `unregistered` +2。登記は増えない ── 押し口は設定の checkbox にしか無く、
+      //   鍵も持たない(`set-missing-links` と同じ形)。
+      total: 351,
+      receivers: 294,
       registered: 96,
       both: 39,
       outsideActionsTable: 57,
-      unregistered: 253,
+      unregistered: 255,
     });
   });
 

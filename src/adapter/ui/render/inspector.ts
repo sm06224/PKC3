@@ -811,14 +811,14 @@ export class InspectorRenderer {
     if (statsDd) {
       const dt = statsDd.previousElementSibling;
       const isFolder = meta.archetype === 'folder';
-      const bodyChars = state.openBody?.lid === meta.lid
-        ? state.openBody.body.length
-        : meta.bodyChars;
+      // ⚠ 分数の元は**開いている本文**(題名の下と同じ字)。閉じている間は字数だけ(#1087)
+      const openedBody = state.openBody?.lid === meta.lid ? state.openBody.body : null;
+      const bodyChars = openedBody !== null ? openedBody.length : meta.bodyChars;
       const hide = isFolder || bodyChars === null;
       statsDd.hidden = hide;
       if (dt instanceof HTMLElement) dt.hidden = hide;
       if (!hide) {
-        setText(statsDd, formatBodyStats(bodyChars));
+        setText(statsDd, formatBodyStats(bodyChars, openedBody));
       }
     }
     this.paintDate(meta, editing, blockedNote);

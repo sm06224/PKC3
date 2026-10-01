@@ -29,8 +29,8 @@ import { readFenceAssetText } from '@features/asset/fence-asset-read';
 import { applyHeadingFold } from './heading-fold';
 import { applyHeadingAnchors } from './heading-anchor';
 import { applyCodeLangBadges } from './code-lang';
-import { applyCodeCollapse } from './code-collapse';
-import { applyInlineCodeCopy } from './inline-code-copy';
+import { appCodeCollapse, applyCodeCollapse, clearCodeCollapse } from './code-collapse';
+import { appInlineCodeCopy, applyInlineCodeCopy, clearInlineCodeCopy } from './inline-code-copy';
 import { applyTableSort } from './table-sort';
 import { applyExternalLinks } from './external-link';
 import { applyMissingLinks, clearMissingLinks } from './link-missing';
@@ -1194,13 +1194,18 @@ export class DetailRenderer {
         /**
          * 🔴 **長大なコードブロックの折りたたみ／展開**(#1139)。
          * ⚠ 描画のたびに呼ぶ(冪等)── 塊が差し替わると操作子が消えるため。
+         * ⚠ 設定(#1087、既定は入)が切なら**付けず、付いていた物は外す** ── 変わっていない塊は
+         *   差し替わらず残るので、切り替えた直後の描き直しで外さないと畳まれたままになる。
          */
-        applyCodeCollapse(host);
+        if (appCodeCollapse.enabled()) applyCodeCollapse(host);
+        else clearCodeCollapse(host);
         /**
          * 🔴 **インラインコード（`code`）のワンクリックコピー**(#1148)。
          * ⚠ 描画のたびに呼ぶ(冪等)── 塊が差し替わると操作子が消えるため。
+         * ⚠ 設定(#1087、既定は入)が切なら**付けず、付いていた物は外す**(上と同じ理由)。
          */
-        applyInlineCodeCopy(host);
+        if (appInlineCodeCopy.enabled()) applyInlineCodeCopy(host);
+        else clearInlineCodeCopy(host);
         /**
          * 🔴 **テーブル列ソート機能**(#1150)。
          * ⚠ 描画のたびに呼ぶ(冪等)── 塊が差し替わると操作子が消えるため。

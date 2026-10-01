@@ -107,6 +107,13 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
    */
   { key: 'pkc3.missing-links', label: 'リンク先が無いリンクを点線で見せるか' },
   /**
+   * ⚠ **人に付く好み**(#1087)── 「長いコード枠を最初から畳みたいか」は端末の事情ではない。
+   *   運んだ先に仕組みが無くても害は出ない(畳まれないだけ)。
+   */
+  { key: 'pkc3.code-collapse', label: '長いコード枠を最初から畳むか' },
+  /** ⚠ **人に付く好み**(#1087)── 手が滑りやすいので切りたいかは端末ではなく人で決まる。 */
+  { key: 'pkc3.inline-code-copy', label: '文中の短いコードを押すとコピーするか' },
+  /**
    * ⚠ **`pkc3.panes`(列の畳み方)と同じ扱い**(#857 段④)── 「畳んでおきたい」は
    *   **人に付く**好みである。
    * 🔑 中身はグループの**名前**であって lid ではない ── だから `pkc3.split-lids`

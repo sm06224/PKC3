@@ -1144,6 +1144,16 @@ export interface BinderServices {
    */
   setMissingLinks?(on: boolean): void;
   /**
+   * 🔴 **長いコード枠を最初から畳むか**(#1087)。⚠ **省略可**。
+   * ⚠ 切り替えたら**その場で本文を描き直す**(`setMissingLinks` と同じ理由)。
+   */
+  setCodeCollapse?(on: boolean): void;
+  /**
+   * 🔴 **文中の短いコードを押すとコピーするか**(#1087)。⚠ **省略可**。
+   * ⚠ 切り替えたら**その場で本文を描き直す**(同上)。
+   */
+  setInlineCodeCopy?(on: boolean): void;
+  /**
    * 🔴 **貼る用に画像を持ち歩ける形へ**(#193)。`blob:` → `data:` の対応を返す。
    * ⚠ **省略可** ── 無ければ画像は文字に置き換わる(壊れた画像を貼らせない)。
    */
@@ -10062,6 +10072,14 @@ const ACTIONS: Record<string, ActionHandler> = {
   'set-missing-links': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
     if (target instanceof HTMLInputElement) services.setMissingLinks?.(target.checked);
+  },
+  'set-code-collapse': (_dispatcher, target, services) => {
+    // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
+    if (target instanceof HTMLInputElement) services.setCodeCollapse?.(target.checked);
+  },
+  'set-inline-code-copy': (_dispatcher, target, services) => {
+    // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
+    if (target instanceof HTMLInputElement) services.setInlineCodeCopy?.(target.checked);
   },
   'set-notices-enabled': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
