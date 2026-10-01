@@ -20,7 +20,7 @@
  * ⚠ 描画器は使い回す(`FilerRenderer` / `LauncherRenderer`)── 置き場所が
  * 変わっただけで、中身の意味論は変えていない。
  */
-import { blockedActionNote, type AppState } from '@adapter/state/app-state';
+import { blockedActionNote, canNavBack, canNavForward, type AppState } from '@adapter/state/app-state';
 import { SidebarRenderer } from './sidebar';
 import { ScrollMemory } from './scroll-memory';
 import { FilerRenderer } from './filer';
@@ -137,6 +137,14 @@ export class BrowseRouter {
    * ⚠ 隠す物は**この 3 つだけ**(探す欄・戻る進む・種類の札 `kind-bar` は別の作法で動く)。
    */
   private readonly hideWhileCommand: readonly HTMLElement[];
+  /**
+   * 🔴 **戻る「‹」/ 進む「›」**(#190)。⚠ **面に関係なく**ここが合わせる(#813 段③-a)。
+   * 直す前は一覧の描画器だけが `disabled` を動かしていたので、**既定のフォルダのタブでは
+   * 履歴が積まれてもボタンが死んだまま**だった(押せないので近道の `Alt+←` しか無かった)。
+   */
+  private readonly navBack: HTMLButtonElement | null;
+  private readonly navForward: HTMLButtonElement | null;
+  private lastHistory: AppState['selectionHistory'] | null = null;
   /** 左の列の「+ ノート」(主の操作の印を phase で付け外しする)。 */
   private readonly createRun: HTMLElement | null;
   /** 🔴 指で触る端末へ理由を届ける 1 行(#791 ③)。⚠ CSS が出し分ける。 */
@@ -210,6 +218,8 @@ export class BrowseRouter {
      *   (どの面を開いていても左の列に出ているボタンである)。
      */
     this.createRun = sidebar.querySelector<HTMLElement>('[data-pkc-field="create-run"]');
+    this.navBack = sidebar.querySelector<HTMLButtonElement>('[data-pkc-action="nav-back"]');
+    this.navForward = sidebar.querySelector<HTMLButtonElement>('[data-pkc-action="nav-forward"]');
     this.createBlockedNote = sidebar.querySelector<HTMLElement>(
       '[data-pkc-field="create-blocked-note"]',
     );
@@ -274,6 +284,16 @@ export class BrowseRouter {
     // 🔴 **札の帯は面に関係なく描く**(#478)── 面の中の renderer に持たせると、
     //    その面を開いていない間は**古い DOM のまま**になり、押しても嘘をつく。
     this.kindBar.render(state, mode);
+    /**
+     * 🔴 **戻る・進むの生死も面に関係なく合わせる**(#190 → #813 段③-a)。
+     * ⚠ 選択と連動して動くことが多いが、掃除(`pruneHistory`)だけが動く回もあるので、
+     *   **履歴そのもの**を指紋にする(押せないのに生きている = dead click を作らない)。
+     */
+    if (state.selectionHistory !== this.lastHistory) {
+      if (this.navBack) this.navBack.disabled = !canNavBack(state);
+      if (this.navForward) this.navForward.disabled = !canNavForward(state);
+      this.lastHistory = state.selectionHistory;
+    }
     /**
      * 🔴 **編集中は「+ ノート」を押せない形にする**(#722 P2-10 → #761)。
      *

@@ -10,7 +10,7 @@
  */
 import { archetypeLabel } from '@features/flavor/archetype-label';
 import type { EntryMeta } from '@core/model/entry-meta';
-import { canNavBack, canNavForward, type AppState } from '@adapter/state/app-state';
+import type { AppState } from '@adapter/state/app-state';
 import { listViewOptions } from '@adapter/state/list-view-options';
 /**
  * 🔴 **並び・絞り込みの規則は `listRows` 1 か所**(#1038 台帳③ 段 G、C13)。
@@ -60,10 +60,6 @@ export class SidebarRenderer {
   /** 名前を打ち替えている行(#215)。⚠ 指紋に入れる ── 入れないと入力欄が出ない。 */
   private lastRenaming: string | null = null;
 
-  /** 戻る・進む(#190)。⚠ **押せないときは殺す** ── dead click を作らない。 */
-  private readonly navBack: HTMLButtonElement | null;
-  private readonly navForward: HTMLButtonElement | null;
-  private lastHistory: AppState['selectionHistory'] | null = null;
   /** 0 件のときの字と戻り道。⚠ 器の外に置く(行の数え方を壊さない)。 */
   private emptyNote: HTMLElement | null = null;
   /**
@@ -95,12 +91,6 @@ export class SidebarRenderer {
      */
     this.list.tabIndex = 0;
     this.list.setAttribute('aria-multiselectable', 'true');
-    this.navBack = sidebarRegion.querySelector<HTMLButtonElement>(
-      '[data-pkc-action="nav-back"]',
-    );
-    this.navForward = sidebarRegion.querySelector<HTMLButtonElement>(
-      '[data-pkc-action="nav-forward"]',
-    );
   }
 
   render(state: AppState): void {
@@ -121,12 +111,6 @@ export class SidebarRenderer {
       state.entrySort !== this.lastSort ||
       state.entrySortDesc !== this.lastSortDesc;
     const selectionChanged = state.selectedLid !== this.lastSelected;
-    /**
-     * ⚠ **履歴も指紋の一部**(#190)。選択と連動して動くことが多いが、
-     * 掃除(`pruneHistory`)だけが動く回もあるので**別に見る** ── 入れないと
-     * 「戻れないのにボタンが生きている」状態が残る(dead click の作り方そのもの)。
-     */
-    const historyChanged = state.selectionHistory !== this.lastHistory;
     // 🔴 名前の打ち替え(#215)も指紋 ── 入れないと「名前を変える」を押しても欄が出ない
     const renamingChanged = state.renamingLid !== this.lastRenaming;
     /**
@@ -136,7 +120,7 @@ export class SidebarRenderer {
      * 追いつかない**(`filer.ts` の `paintMarks` が踏んだのと同じ罠)。
      */
     const marksChanged = state.selection.join(' ') !== this.lastMarks;
-    if (!listChanged && !selectionChanged && !historyChanged && !renamingChanged && !marksChanged)
+    if (!listChanged && !selectionChanged && !renamingChanged && !marksChanged)
       return; // 指紋一致 ── DOM に触れない
 
     /**
@@ -156,12 +140,7 @@ export class SidebarRenderer {
     if (listChanged || selectionChanged) this.patchSelection(state.selectedLid);
     // ⚠ 行を作り直した回も当て直す(`filer.ts` の `paintMarks` と同じ理由)
     if (listChanged || marksChanged) this.paintMarks(state);
-    if (historyChanged) {
-      if (this.navBack) this.navBack.disabled = !canNavBack(state);
-      if (this.navForward) this.navForward.disabled = !canNavForward(state);
-    }
 
-    this.lastHistory = state.selectionHistory;
     this.lastMetas = state.entryMetas;
     this.lastHits = state.searchHits;
     this.lastSort = state.entrySort;

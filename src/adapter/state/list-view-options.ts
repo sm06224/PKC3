@@ -12,6 +12,7 @@
 import type { AppState } from './app-state';
 import type { EntrySort } from '@features/filter/entry-sort';
 import { smartLidsOf, type FilerRowsOptions } from '@features/relation/filer-list';
+import { normalizeQuery } from '@features/filter/title-filter';
 
 export interface ListViewOptions {
   readonly sort: EntrySort;
@@ -31,6 +32,21 @@ export function listViewOptions(state: AppState): ListViewOptions {
 }
 
 /**
+ * 🔴 **いま、フォルダの表を「下の階層まで平らに」出しているか**(#813 段③-a)。
+ *
+ * 入り切り(`filerFlatten`)が入っているとき **か、探す欄に語が打ってあるとき**。
+ * ⚠ 語を打ったときは**全階層から当てる** ── 左の列の「一覧」タブが全階層で当てていた
+ *   ので、一覧を外しても**探す範囲が狭まらない**ようにする(直下だけに当てると、
+ *   フォルダの中のノートが無言で 0 件に見える)。語を消せば直下だけへ戻る。
+ * ⚠ 描く側・範囲選択・鍵と一括操作の対象・並べ替えの落とし先は**全部この 1 本**を
+ *   見る(1 つでも `filerFlatten` を直に読むと、目で見た範囲と動く範囲が食い違う ── §7)。
+ * ⚠ 種類の札(`kindFilter`)は含めない ── 依頼は「語」だけである。
+ */
+export function filerFlattenNow(state: AppState): boolean {
+  return state.filerFlatten || normalizeQuery(state.filterQuery) !== '';
+}
+
+/**
  * 🔴 **左の列の「フォルダ」の表に出る行を決める材料は、ここ 1 か所**(#813 段②)。
  *
  * ⚠ 描く側(`render/filer.ts`)・範囲選択と全選択(reducer)・鍵と一括操作の対象
@@ -44,7 +60,7 @@ export function filerRowOptions(state: AppState): FilerRowsOptions {
     smartLids: smartLidsOf(state.scopeLid, state.smartHits),
     filterQuery: state.filterQuery,
     searchHits: state.searchHits,
-    flatten: state.filerFlatten,
+    flatten: filerFlattenNow(state),
     ...listViewOptions(state),
   };
 }

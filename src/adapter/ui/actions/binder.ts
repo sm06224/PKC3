@@ -78,7 +78,7 @@ import {
 } from '@adapter/state/app-state';
 import { groupsNeedingNote, planGroupMove } from '@features/launcher/group-order';
 import { isMovableTile } from '@features/launcher/tile-order';
-import { filerRowOptions, listViewOptions } from '@adapter/state/list-view-options';
+import { filerFlattenNow, filerRowOptions, listViewOptions } from '@adapter/state/list-view-options';
 import { appOpenedStore } from '@adapter/platform/opened-store';
 import { appSearchHistory } from '@adapter/platform/search-history-store';
 import { paintSearchHistory } from '@adapter/ui/render/shell';
@@ -7528,12 +7528,25 @@ const ACTIONS: Record<string, ActionHandler> = {
     dispatcher.dispatch({ type: 'ROW_RENAME_BEGIN', lid });
     const fieldShown = (): boolean =>
       root.querySelector('[data-pkc-field="row-rename"]') !== null;
-    if (!fieldShown()) services.setBrowse?.('list');
+    /**
+     * 🔴 **欄が出なければ、フォルダのタブへ切り替え、それでも出なければその行の親フォルダへ入る**
+     *   (#813 段③-a。以前は「一覧タブへ切り替える」だった)。
+     * ⚠ 一覧は階層を見ない平らな並びだったので、**どのフォルダに居る行でも**欄が出た。
+     *   フォルダの表は**いま居る場所の直下**の行にしか欄を描けない ── 予定・連絡先・音/動画の行
+     *   (別のフォルダに居る)から始めたときは、**親フォルダへ入って**欄を出す
+     *   (行き先は `SET_SCOPE` 1 本 = 戻るのはパンくず / `Backspace`)。
+     * ⚠ 絞り込みで行が消えているときは入っても出ない ── そのときだけ下の断りを出す。
+     */
+    if (!fieldShown()) services.setBrowse?.('filer');
+    if (!fieldShown()) {
+      const parent = getAncestorFolders(lid, st.entryMetas, st.relations)[0] ?? null;
+      dispatcher.dispatch({ type: 'SET_SCOPE', lid: parent?.lid ?? null });
+    }
     if (!fieldShown()) {
       dispatcher.dispatch({ type: 'ROW_RENAME_END' });
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: '名前を変える欄は、左の列の一覧かフォルダのタブの行に出ます(絞り込みで隠れていないか確かめてください)',
+        error: '名前を変える欄は、フォルダのタブの行に出ます(絞り込みで隠れていないか確かめてください)',
       });
     }
   },
@@ -13401,7 +13414,7 @@ export function bindActions(
      * 🔑 `null` を返せば、フォルダの行は**行全体が「中へ入れる」**、ノートの行は落とせない
      *   ── 掴んでフォルダへ移す道(と、パンくずへ落として出す道)は今までどおり効く。
      */
-    if (dispatcher.getState().filerFlatten) return null;
+    if (filerFlattenNow(dispatcher.getState())) return null;
     const r = row.getBoundingClientRect();
     if (!(r.height > 0)) return null;
     const y = (de.clientY - r.top) / r.height;
@@ -14630,10 +14643,22 @@ export function bindActions(
         return;
       }
       if (ke.key === 'ArrowDown') {
-        const first = listRowEls()[0]?.getAttribute('data-pkc-entry') ?? null;
+        /**
+         * 🔴 **降りる先は、いま出ている面の最初の行**(#813 段③-a)。
+         * ⚠ 直す前は一覧の行(`listRowEls`)しか引かなかったので、**既定のフォルダのタブでは
+         *   ↓ を押しても何も起きなかった**(行は DOM に在っても `hidden` の面で、焦点が入らない)。
+         * 🔑 フォルダの面の行は `visibleFilerRows`(描く側と同じ 1 本)から引く ──
+         *   DOM の並びを読むと、絞り込み・並べ替えのとき目で見た順と食い違う。
+         */
+        const first = listTabShowing(root)
+          ? (listRowEls()[0]?.getAttribute('data-pkc-entry') ?? null)
+          : (visibleFilerRows(dispatcher.getState())[0]?.lid ?? null);
         if (first === null) return;
+        const target = listTabShowing(root) ? listRowEl(first) : rowEl(first);
+        // ⚠ 隠れている面(予定・連絡先など)の行へは降りない ── 焦点が入らないのに ↓ だけ奪わない
+        if (target === null || target.closest('[hidden]') !== null) return;
         ke.preventDefault();
-        focusListRow(first);
+        target.focus();
       }
       return;
     }
