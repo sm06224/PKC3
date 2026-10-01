@@ -233,6 +233,7 @@ import { paintCommandList } from '@adapter/ui/render/command-list';
 import {
   blockMenuActions,
   ADD_PLACE_ACTION,
+  REMOVE_PLACE_LINE_ACTION,
   bodyMenuActions,
   editingRowMenuActions,
   entryMenuActions,
@@ -8123,6 +8124,28 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'task-run-open': (dispatcher, target) => setTaskRun(dispatcher, target, 'open'),
   'task-run-done': (dispatcher, target) => setTaskRun(dispatcher, target, 'done'),
+  /**
+   * 🔴 **線を消す**(#530 段③d)── 右クリックした線の開き行を消す。
+   * 🔑 門は `remove-place` と同じ(身元 / phase)。確認は挟まない ── 線は 2 行の宣言で、
+   *   消えても繋がれていた付箋は無傷、もう一度掴めば繋がる(板を消す重さとは違う)。
+   * ⚠ 行の座標は `remove-place` と同じ(frontmatter を剥いだ行番号を運び、ここで足す)。
+   */
+  'remove-place-line': (dispatcher, target) => {
+    const line = menuCarriedBlock(target);
+    if (line === null || refuseStaleMenu(dispatcher, target)) return;
+    const st = dispatcher.getState();
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}、線を消してください` });
+      return;
+    }
+    const ob = st.openBody;
+    if (ob === null) return;
+    dispatcher.dispatch({
+      type: 'REMOVE_PLACE_LINE',
+      lid: ob.lid,
+      line: line + frontmatterLineCount(ob.body),
+    });
+  },
   'remove-place': (dispatcher, target, _services, root) => {
     const line = menuCarriedBlock(target);
     if (line === null || refuseStaleMenu(dispatcher, target)) return;
@@ -13626,6 +13649,36 @@ export function bindActions(
           tileMenuActions(dispatcher.getState().launcherReorder, currentAppOpenTarget()),
           root.ownerDocument.activeElement,
           { 'data-pkc-tile': tileLid },
+        );
+        return;
+      }
+    }
+
+    /**
+     * 🔴 **板どうしを繋ぐ線の上で右クリック**(#530 段③d)── 「この線を消す」。
+     *
+     * ⚠ 掴んで繋げる(`place-connect.ts`)なら、**画面から外せなければならない**(片道にしない)。
+     *   本文を開いて `:::format{.pkc-line …}` を探す道しか無いと、間違えて引いた線が戻せない。
+     * 🔑 押さえるのは**線の道の上だけ**(`place-line-hits` の太い透明の線)── 板の外の普通の本文は
+     *   これまでどおり本文のメニューになる。⚠ **主の枠の本文だけ**(留めた枠の線は別のノートの行を
+     *   指すので、板のメニューと同じく受けない)。
+     * 🔑 行は線の層が焼いた `data-pkc-line-decl`(生の body 基準)から**frontmatter ぶんを引いて**
+     *   運ぶ(受け手 `remove-place-line` が足し戻す ── `remove-place` と同じ座標系)。
+     */
+    const lineHit = target.closest<Element>('[data-pkc-field="place-line-hits"] path');
+    const lineBody = lineHit?.closest('[data-pkc-field="detail-body"]') ?? null;
+    const lineOb = dispatcher.getState().openBody;
+    if (lineHit !== null && lineBody !== null && lineOb !== null) {
+      const decl = Number(lineHit.getAttribute('data-pkc-line-decl'));
+      const rel = decl - frontmatterLineCount(lineOb.body);
+      if (Number.isInteger(decl) && rel >= 0) {
+        ev.preventDefault();
+        openContextMenu(
+          root,
+          { x: ev.clientX, y: ev.clientY },
+          [REMOVE_PLACE_LINE_ACTION],
+          root.ownerDocument.activeElement,
+          { [MENU_LID_ATTR]: lineOb.lid, [MENU_BLOCK_ATTR]: String(rel) },
         );
         return;
       }

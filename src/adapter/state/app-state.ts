@@ -44,7 +44,7 @@ import { extractMeta, seedBodyFor } from '@features/flavor';
 import { isAppendable } from '@features/flavor/append-spec';
 import { applyBodyRewrite, type BodyRewrite } from '@features/markdown/body-rewrite';
 import type { TableFormat } from '@features/markdown/table-convert';
-import { isPlaceOpen } from '@features/markdown/place-notation';
+import { isLineOpen, isPlaceOpen } from '@features/markdown/place-notation';
 import { isPlaceShape, type PlaceShape } from '@features/markdown/place-shape';
 import { sectionAt, sectionRange } from '@features/markdown/append-target';
 import { openCodeFenceAt } from '@features/markdown/code-fence-edit';
@@ -2382,6 +2382,12 @@ export type UserAction =
       toAnchor: string | null;
     }
   | { type: 'REMOVE_PLACE'; lid: string; line: number }
+  /**
+   * 🔴 **線を消す**(#530 段③d)── 掴んで引いた線を、本文を開かずに外す(片道にしない)。
+   * ⚠ `REMOVE_PLACE` と**同じ門**。受ける開き行が**線**であることだけが違う
+   *   (板の行を渡しても消えない)。
+   */
+  | { type: 'REMOVE_PLACE_LINE'; lid: string; line: number }
   | { type: 'ADD_PLACE'; lid: string; x: number; y: number }
   /** 板を前へ出す(#676 段②)── 他の板の z= の最大 + 1 を書く。同じ門。 */
   | { type: 'RAISE_PLACE'; lid: string; line: number }
@@ -7083,6 +7089,13 @@ function reduceCore(
           toAnchor: action.toAnchor,
         };
       });
+    case 'REMOVE_PLACE_LINE':
+      return bodyRewriteGate(state, action.lid, '、線を消してください', (shown) => {
+        if (shown === null) return null; // 画面に無い本文の行番号は信じない
+        const openLine = lineOpenLineOf(shown, action.line);
+        if (openLine === null) return null;
+        return { kind: 'place-line-remove', line: action.line, openLine };
+      });
     case 'REMOVE_PLACE':
       return bodyRewriteGate(state, action.lid, '、板を消してください', (shown) => {
         if (shown === null) return null; // 画面に無い本文の行番号は信じない
@@ -9414,6 +9427,13 @@ function placeOpenLineOf(shown: string, line: number): string | null {
   if (!Number.isInteger(line) || line < 0) return null;
   const openLine = shown.split('\n')[line];
   return openLine !== undefined && isPlaceOpen(openLine) ? openLine : null;
+}
+
+/** `placeOpenLineOf` の線版 ── その行が線の開き行のときだけ、その字そのもの。 */
+function lineOpenLineOf(shown: string, line: number): string | null {
+  if (!Number.isInteger(line) || line < 0) return null;
+  const openLine = shown.split('\n')[line];
+  return openLine !== undefined && isLineOpen(openLine) ? openLine : null;
 }
 
 /** 板の座標・大きさの値 ── 整数で 0 以上だけ(描画も負の値は捨てる)。 */

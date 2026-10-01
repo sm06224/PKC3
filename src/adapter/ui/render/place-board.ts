@@ -53,6 +53,14 @@ const LINE_SELECTOR = '.pkc-format-block.pkc-line';
 
 /** 引いた線を入れる 1 枚。⚠ **線ごとに `<svg>` を作らない**(重ねると当たり判定が塞がる)。 */
 const LINE_LAYER = 'data-pkc-field="place-lines"';
+/**
+ * 🔴 **線を押さえる当たり**(#530 段③d)── 右クリックで「この線を消す」を出す相手。
+ * ⚠ 見える線(`LINE_LAYER`)は **2px で押しにくい**ので、同じ道に**太い透明の線**を重ねた別の層を持つ。
+ *   見える層に `pointer-events` を足すと、層の `none` が守っている「板の外の普通の本文」まで
+ *   巻き込む(CSS 側の註記)── 別の層にすれば、**押せるのは線の道の上だけ**になる。
+ * 🔑 器は見える線と同じ `<path>` だが、**層の名前が違う**ので既存の「線を数える」検査には混ざらない。
+ */
+const LINE_HIT_LAYER = 'data-pkc-field="place-line-hits"';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /**
@@ -79,7 +87,7 @@ function restoreGripFocus(host: HTMLElement): void {
 }
 
 /** 属性の整数(0 以上)。⚠ 読めない値は「無い」扱い(黙って 0 にしない)。 */
-function intAttr(el: Element, name: string): number | null {
+export function intAttr(el: Element, name: string): number | null {
   const raw = el.getAttribute(name);
   if (raw === null) return null;
   const n = Number(raw);
@@ -174,7 +182,7 @@ function ensureCard(
  *   線が全部左上の 1 点へ集まる)。CLAUDE.md §2 の「本命の分岐を unit は通らない」型なので、
  *   **落とし先まで含めて** unit で見る。
  */
-function rectOf(el: HTMLElement): PlaceRect {
+export function rectOf(el: HTMLElement): PlaceRect {
   const w = el.offsetWidth;
   const h = el.offsetHeight;
   return {
@@ -270,17 +278,24 @@ function clearLineNote(el: HTMLElement): void {
  * ⚠ **`pointer-events: none`** を層に当てる ── 当てないと、線の層が板の上に載って
  *   **掴む口が押せなくなる**(無言の dead click)。規則は CSS 側が持つ。
  */
-function applyPlaceLines(host: HTMLElement, boards: readonly HTMLElement[]): number {
+function applyPlaceLines(
+  host: HTMLElement,
+  boards: readonly HTMLElement[],
+  lineOffset: number,
+): number {
   const old = host.querySelector(`[${LINE_LAYER}]`);
+  const oldHits = host.querySelector(`[${LINE_HIT_LAYER}]`);
   const decls = [...host.querySelectorAll<HTMLElement>(LINE_SELECTOR)];
   if (decls.length === 0) {
     old?.remove();
+    oldHits?.remove();
     return 0;
   }
   // ⚠ 板が 1 枚も無いときも**断りは出す** ── 黙って消すと、user は
   //   「線の機能そのものが無い」と読む(それがこの節を書き直した理由である)
   if (boards.length === 0) {
     old?.remove();
+    oldHits?.remove();
     for (const d of decls) ensureLineNote(d, '板(付箋)が 1 枚もありません');
     return 0;
   }
@@ -288,6 +303,8 @@ function applyPlaceLines(host: HTMLElement, boards: readonly HTMLElement[]): num
   for (const el of boards) if (el.id !== '') byId.set(el.id, el);
   const svg = document.createElementNS(SVG_NS, 'svg');
   svg.setAttribute('data-pkc-field', 'place-lines');
+  const hits = document.createElementNS(SVG_NS, 'svg');
+  hits.setAttribute('data-pkc-field', 'place-line-hits');
   /**
    * 🔴 **2 巡する**(#530 段③b)── 1 巡目で「同じ 2 枚の間に何本あるか」を数え、
    * 2 巡目でその数に応じて辺の上に散らす。
@@ -371,11 +388,25 @@ function applyPlaceLines(host: HTMLElement, boards: readonly HTMLElement[]): num
     el.setAttribute('data-pkc-line-to', anchorSpell(ln.to));
     el.setAttribute('data-pkc-line-route', r.route);
     svg.append(el);
+    /**
+     * 🔑 **押さえる層には、その線の開き行の行番号を焼く**(生の body 基準。`data-pkc-place-line`
+     *   と同じ座標系 ── 描画が焼いた `data-pkc-source-line` + frontmatter ぶん)。
+     *   消す口はこの番号で本文の開き行を指す。⚠ 数え直しの第 2 の規則を持たない。
+     */
+    const src = intAttr(r.d, 'data-pkc-source-line');
+    if (src !== null) {
+      const hit = document.createElementNS(SVG_NS, 'path');
+      hit.setAttribute('d', el.getAttribute('d')!);
+      hit.setAttribute('data-pkc-line-decl', String(src + lineOffset));
+      hits.append(hit);
+    }
     drawn += 1;
   }
   old?.remove();
+  oldHits?.remove();
   if (drawn === 0) return 0;
   // ⚠ **いちばん先頭へ置く** ── 板より後ろに敷く(線が板の上に乗ると字が読めない)
+  host.prepend(hits);
   host.prepend(svg);
   return drawn;
 }
@@ -401,7 +432,7 @@ export function applyPlaceLayout(
     // ⚠ **前に引いた線を残さない** ── 板を全部消した本文で、線だけが宙に残る。
     //   🔑 ただし**線の宣言そのものには断りを出す** ── 板を全部消した user に
     //   「線の機能ごと無くなった」と読ませない(動線レビュー ①と同じ向き)。
-    applyPlaceLines(host, []);
+    applyPlaceLines(host, [], lineOffset);
     return 0;
   }
   host.classList.add('pkc-board-host');
@@ -449,7 +480,7 @@ export function applyPlaceLayout(
     bottom = Math.max(bottom, y + (h ?? 160));
   }
   // 🔑 **線は板を置いた後に引く**(位置が当たっていないと行き先が決まらない)
-  applyPlaceLines(host, blocks);
+  applyPlaceLines(host, blocks, lineOffset);
   // ⚠ いちばん下の塊まで scroll で届く高さを器に持たせる(絶対配置は流れに乗らない)
   host.style.minHeight = `${bottom + 40}px`;
   // 🔑 口を作り直した**後**に返す(前に返すと、返した先が次の行で差し替わる)

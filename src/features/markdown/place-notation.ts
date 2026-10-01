@@ -43,19 +43,33 @@ import { blockSpanAt, scanContainers } from './source-blocks';
  * 🔑 描画が `pkc-place` の format 塊として受理する形の全部と、それだけを受理する。
  */
 function placeOpenAttrs(line: string): BlockDirectiveAttrs | null {
+  return formatOpenAttrs(line, 'pkc-place');
+}
+
+/**
+ * 開き行が `cls` を持つ format 塊なら、その属性。違えば null。
+ * 🔑 板(`pkc-place`)と線(`pkc-line`)は**同じ読み方**で受ける ── 受理の形を 2 本書くと、
+ *   描画が線として読む形を消す側が受けない(押しても何も起きない)食い違いが生まれる(§7)。
+ */
+function formatOpenAttrs(line: string, cls: string): BlockDirectiveAttrs | null {
   const named = parseBlockDirectiveOpen(line.trim());
   if (named !== null) {
     if (named.name !== 'format') return null;
-    return named.attrs.classes.includes('pkc-place') ? named.attrs : null;
+    return named.attrs.classes.includes(cls) ? named.attrs : null;
   }
   const tier1 = parseTier1FormatOpen(line);
-  if (tier1 !== null && tier1.classes.includes('pkc-place')) return tier1;
+  if (tier1 !== null && tier1.classes.includes(cls)) return tier1;
   return null;
 }
 
 /** 開き行が板の塊(`.pkc-place` のクラス札)か。 */
 export function isPlaceOpen(line: string): boolean {
   return placeOpenAttrs(line) !== null;
+}
+
+/** 開き行が線の塊(`.pkc-line` のクラス札)か(#530 段③d。消す口が使う)。 */
+export function isLineOpen(line: string): boolean {
+  return formatOpenAttrs(line, 'pkc-line') !== null;
 }
 
 /** fence の開き(``` / ~~~。3 つ以上・行頭 3 空白まで)。 */
@@ -121,13 +135,17 @@ export interface PlaceResize extends PlaceTarget {
  * fence の中でないときだけ、行の並びを返す。ずれていれば null = 断る(店じまいは呼び側)。
  * ⚠ 操作ごとに門を書き直さない ── 1 つが緩むと、その操作だけ**別の塊に効く**(§7)。
  */
-function placeLinesAt(body: string, target: PlaceTarget): { lines: string[]; fm: number } | null {
+function placeLinesAt(
+  body: string,
+  target: PlaceTarget,
+  accept: (line: string) => boolean = isPlaceOpen,
+): { lines: string[]; fm: number } | null {
   const fm = frontmatterLineCount(body);
   if (!Number.isInteger(target.line) || target.line < fm) return null;
   const lines = body.split('\n');
   const line = lines[target.line];
   if (line === undefined || line !== target.openLine) return null;
-  if (!isPlaceOpen(line)) return null;
+  if (!accept(line)) return null;
   if (insideFence(lines, fm, target.line)) return null;
   return { lines, fm };
 }
@@ -184,7 +202,30 @@ function spliceOpenLine(body: string, target: PlaceTarget, tokens: PlaceTokens):
  *   ⚠ 2 本以上は消さない ── 隣の段落の間隔まで詰めると、触っていない所が変わって見える。
  */
 export function removePlace(body: string, target: PlaceTarget): string | null {
-  const at = placeLinesAt(body, target);
+  return removeBlockAt(body, target, isPlaceOpen);
+}
+
+/**
+ * 🔴 **線の塊を 1 つ消す**(#530 段③d)── 掴んで引いた線を、本文を開かずに外す
+ * (user 指示 2026-08-23「片道の操作を作らない」── 置けるなら消せる)。
+ *
+ * 🔑 消し方は `removePlace` と**同じ 1 本**(開き行から閉じの `:::` + 隣の空行 1 本)。
+ *   違うのは「どの開き行を受けるか」だけ ── 板の行を渡しても線は消えず、線の行を渡しても
+ *   板は消えない(押していない物を消さない)。
+ * ⚠ 繋がれていた板は 1 バイトも触らない(付けた名前 `#板1` も残る ── 本文の別の所から
+ *   `from=板1` で指されているかもしれない。勝手に外すと、そちらが**黙って引けなくなる**)。
+ */
+export function removePlaceLine(body: string, target: PlaceTarget): string | null {
+  return removeBlockAt(body, target, isLineOpen);
+}
+
+/** 塊を消す共通部(板 / 線)。⚠ 範囲の取り方・空行の扱いは 1 本。 */
+function removeBlockAt(
+  body: string,
+  target: PlaceTarget,
+  accept: (line: string) => boolean,
+): string | null {
+  const at = placeLinesAt(body, target, accept);
   if (at === null) return null;
   // ⚠ 範囲は frontmatter を剥いだ座標で取る(`directiveBlockAt` と同じ座標系)
   const span = blockSpanAt(at.lines.slice(at.fm).join('\n'), target.line - at.fm);
@@ -414,6 +455,22 @@ function connectSpell(id: string, anchor: string | null | undefined): string | n
   return parseAnchorSpell(anchor) === null ? null : `${id}:${anchor}`;
 }
 
+/** `from=` / `to=` が同じ綴りの線の塊が、fence の外に在るか。 */
+function hasLineBetween(
+  lines: readonly string[],
+  fm: number,
+  fromSpell: string,
+  toSpell: string,
+): boolean {
+  const mask = fenceMask(lines, fm);
+  for (let i = fm; i < lines.length; i += 1) {
+    if (mask[i] === true) continue;
+    const attrs = formatOpenAttrs(lines[i]!, 'pkc-line');
+    if (attrs !== null && attrs.kvs.from === fromSpell && attrs.kvs.to === toSpell) return true;
+  }
+  return false;
+}
+
 /**
  * 🔴 2 枚の板を線で繋いだ本文を返す(名前が無ければ付ける)。断るときは `null`。
  *
@@ -436,6 +493,13 @@ export function connectPlaces(body: string, c: PlaceConnect): string | null {
   const toSpell = connectSpell(to, c.toAnchor);
   if (fromSpell === null || toSpell === null) return null;
   const next = lines.join('\n');
+  /**
+   * 🔑 **同じ 2 点を同じ綴りで結ぶ線が既に在れば、書かない**(= 済んでいる。null ではない)。
+   * ⚠ 同じ掴み方を 2 度すると、**重なって 1 本に見える線が本文に 2 つ**できる ──
+   *   消す口は 1 つずつ消すので、「消したのに線が残る」になる(片道の操作を作らない)。
+   * ⚠ 名前を足した回(`next !== body`)は見ない ── 足したばかりの名前を指す線は在りえない。
+   */
+  if (next === body && hasLineBetween(lines, a.fm, fromSpell, toSpell)) return body;
   // ⚠ 閉じていない塊の中へ足さない(`addPlace` と同じ門)
   const spans = scanContainers(next);
   const last = spans[spans.length - 1];

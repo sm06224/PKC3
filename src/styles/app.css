@@ -3722,6 +3722,26 @@ li[data-pkc-row-slot] {
   stroke: var(--muted);
   stroke-width: 2;
 }
+/* 🔴 **線を押さえる当たり**(#530 段③d)── 右クリックで「この線を消す」を出す相手。
+ *
+ * ⚠ 見える線(上の層)は 2px で押しにくい ── 同じ道に**太い透明の線**を重ねた**別の層**にする。
+ *   見える層へ `pointer-events` を足さないのは、層の `none` が守っている「板の外の普通の本文」を
+ *   巻き込むため。ここは層そのものが `none` で、**線の道の上(`stroke`)だけ**が押せる。
+ * 🔑 `stroke: transparent` でも `pointer-events: stroke` は当たる(塗りの有無で変わらない)。 */
+[data-pkc-field='place-line-hits'] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+[data-pkc-field='place-line-hits'] path {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 12;
+  pointer-events: stroke;
+}
 /* ⚠ 線の宣言そのものは**中身を持たない** ── 出すと空の枠が流れに並ぶ。
  *   🔑 板が置けない面(編集の 2 面・書き出した HTML)でも同じく出さない
  *   (そこでは線も引けないので、宣言だけ見えても読む人には意味が無い)。 */
@@ -3876,6 +3896,84 @@ li[data-pkc-row-slot] {
 .pkc-place > [data-pkc-field='place-grip']:hover,
 .pkc-place > [data-pkc-field='place-grip']:focus-visible {
   color: var(--fg);
+}
+/* 🔴 **掴んで繋ぐ**(#530 段③d)── 付箋に乗せた辺にだけ ● 1 つと両隣の ⊕ 2 つ。
+ *
+ * ⚠ 層は板の**外**(板の `overflow: auto` に切られない)にあり、`pointer-events: none`。
+ *   押せるのは印そのものだけ ── 層が板の上の押し物(札・掴む口)を塞がない。
+ * 🔑 ● と ⊕ は**形で見分ける**(色だけで分けない ── 無彩色の地に色は情報にだけ):
+ *   ● = 塗りつぶし / ⊕ = 白抜きの丸に十字。字(⊕ U+2295)は使わない ── 書体に無いと豆腐になる。
+ * ⚠ 十字は `currentColor` の 2 枚のグラデーションで描く(字を `textContent` に入れない)。 */
+[data-pkc-field='place-connect-handles'] {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  z-index: 1000000;
+  pointer-events: none;
+}
+/* 🔴 **`button` の汎用規則に負けない**(実ブラウザで踏んだ)。
+ *
+ * ① 汎用の `button` は `height` / `min-height` / `max-height` を `--row-h` に固定する ──
+ *   `height: 14px` だけでは**縦長の楕円**(14 × 26)になり、辺の上に**中心が来ない**。
+ *   ⚠ 外すと smoke が「印が丸くない(14 × 26)」で落ちる(変異試験 C1)。
+ * ② 汎用の `button:hover:not(:disabled)` は詳細度 (0,2,1) で `border-color` を `--muted` へ替える。
+ *   こちらの `border` は (0,1,1) なので**負ける** ── hover の分だけ別に置く。
+ * 🔑 `background` の hover 用の規則は**書かない**:`button[…][data-pkc-handle='dot']` が (0,2,1) で
+ *   汎用の hover と**同点**になり、後ろに書いたこちらが勝つ(外しても smoke が緑のまま = 変異試験 C2 が
+ *   SURVIVED で教えた。「これが無いと壊れる」と書いた規則が no-op だった)。 */
+button[data-pkc-field='place-handle'] {
+  display: block;
+  position: absolute;
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  min-width: 0;
+  min-height: 0;
+  max-height: none;
+  margin: -7px 0 0 -7px;
+  padding: 0;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  color: var(--accent);
+  cursor: crosshair;
+  pointer-events: auto;
+  /* ⚠ 掴んだ指の動きをブラウザのスクロールに食わせない(touch で効く) */
+  touch-action: none;
+}
+button[data-pkc-field='place-handle']:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+button[data-pkc-field='place-handle'][data-pkc-handle='dot'] {
+  background: var(--accent);
+}
+button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
+  background:
+    linear-gradient(currentColor, currentColor) center / 60% 2px no-repeat,
+    linear-gradient(currentColor, currentColor) center / 2px 60% no-repeat,
+    var(--surface);
+}
+/* 掴んでいる間の仮の線。⚠ 離したら消える(本文には何も書いていない)。 */
+[data-pkc-field='place-connect-ghost'] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  z-index: 1000000;
+  pointer-events: none;
+}
+[data-pkc-field='place-connect-ghost'] path {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+}
+/* 掴んだまま乗せた付箋 ── 離すとここへ繋がる、という予告 */
+.pkc-place[data-pkc-connect-target] {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 /* 題名の札(`entry=` の塊)── 押すとそのノートを開く */
 .pkc-place > [data-pkc-field='place-card'] {

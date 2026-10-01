@@ -26,6 +26,7 @@ import {
   NEW_PLACE_W,
   raisePlace,
   removePlace,
+  removePlaceLine,
   resizePlace,
 } from '../../src/features/markdown/place-notation';
 
@@ -477,5 +478,139 @@ describe('🔴 板を線で繋ぐ(connectPlaces)(#530 段③d)', () => {
     expect(html, '繋ぎ先が焼かれていない').toContain('data-pkc-to="板2"');
     // 🔑 名前も id として焼かれる(線の描画がこの id を引く)
     expect(html).toContain('id="板1"');
+  });
+});
+
+/**
+ * 🔴 **同じ線を 2 度引かない / 引いた線を消す**(#530 段③d)。
+ *
+ * ⚠ 掴んで繋げる(= 同じ操作を何度でも撃てる)ようになったので、2 つが要る:
+ * 1. 同じ 2 点を同じ綴りで結ぶ線が既に在れば**書かない**(重なって 1 本に見える宣言が 2 つ
+ *    できると、消す口は 1 つずつ消すので「消したのに線が残る」になる)
+ * 2. 引いた線は**本文を開かずに消せる**(片道の操作を作らない)
+ */
+describe('🔴 線の重複と、線を消す(connectPlaces / removePlaceLine)(#530 段③d)', () => {
+  const two = [
+    ':::format{.pkc-place x=0 y=0}',
+    '左',
+    ':::',
+    '',
+    ':::format{.pkc-place x=300 y=0}',
+    '右',
+    ':::',
+    '',
+  ].join('\n');
+  const at = (body: string, line: number): { line: number; openLine: string } => ({
+    line,
+    openLine: body.split('\n')[line]!,
+  });
+
+  it('🔴 同じ綴りでもう 1 度繋いでも、本文は 1 byte も変わらない(済んでいる)', () => {
+    const once = connectPlaces(two, {
+      from: at(two, 0),
+      to: at(two, 4),
+      fromAnchor: 'right',
+      toAnchor: 'left',
+    })!;
+    const twice = connectPlaces(once, {
+      from: at(once, 0),
+      to: at(once, 4),
+      fromAnchor: 'right',
+      toAnchor: 'left',
+    });
+    expect(twice, 'null(= 競合の顔)ではなく、同じ本文を返す').toBe(once);
+  });
+
+  it('🔴 対照群: 繋ぎ目が違えば 2 本目を書く(同じ 2 枚の間の別の線)', () => {
+    const once = connectPlaces(two, {
+      from: at(two, 0),
+      to: at(two, 4),
+      fromAnchor: 'right',
+      toAnchor: 'left',
+    })!;
+    const other = connectPlaces(once, {
+      from: at(once, 0),
+      to: at(once, 4),
+      fromAnchor: 'right@1/4',
+      toAnchor: 'left',
+    })!;
+    expect(other.split('.pkc-line').length - 1, '線が 2 本に増えていない').toBe(2);
+    expect(other.endsWith('from=板1:right@1/4 to=板2:left}\n:::\n')).toBe(true);
+  });
+
+  it('⚠ fence の中に書いた同じ綴りの線は「在る」と数えない(コードの字である)', () => {
+    const fenced = [
+      ':::format{#a .pkc-place x=0 y=0}',
+      ':::',
+      '',
+      ':::format{#b .pkc-place x=300 y=0}',
+      ':::',
+      '',
+      '```',
+      ':::format{.pkc-line from=a:right to=b:left}',
+      ':::',
+      '```',
+      '',
+    ].join('\n');
+    const next = connectPlaces(fenced, {
+      from: at(fenced, 0),
+      to: at(fenced, 3),
+      fromAnchor: 'right',
+      toAnchor: 'left',
+    })!;
+    expect(next, 'コードの字を線と数えて書かなかった').not.toBe(fenced);
+    expect(next.endsWith(':::format{.pkc-line from=a:right to=b:left}\n:::\n')).toBe(true);
+  });
+
+  const withLine = [
+    ':::format{#a .pkc-place x=0 y=0}',
+    '左',
+    ':::',
+    '',
+    ':::format{#b .pkc-place x=300 y=0}',
+    '右',
+    ':::',
+    '',
+    ':::format{.pkc-line from=a:right to=b:left}',
+    ':::',
+    '',
+    '後ろの段落',
+  ].join('\n');
+
+  it('🔴 線の塊だけが消え、繋がれていた板は 1 byte も変わらない', () => {
+    const next = removePlaceLine(withLine, at(withLine, 8))!;
+    expect(next).toBe(
+      [
+        ':::format{#a .pkc-place x=0 y=0}',
+        '左',
+        ':::',
+        '',
+        ':::format{#b .pkc-place x=300 y=0}',
+        '右',
+        ':::',
+        '',
+        '後ろの段落',
+      ].join('\n'),
+    );
+  });
+
+  it('🔴 板の行を渡しても消えない(線の行だけを受ける)/ 線の行を板の消す口に渡しても消えない', () => {
+    expect(removePlaceLine(withLine, at(withLine, 0)), '板を消した').toBeNull();
+    expect(removePlace(withLine, at(withLine, 8)), '板の口が線を消した').toBeNull();
+  });
+
+  it('🔴 門は板と同じ(ずれた開き行 / 閉じていない塊は断る)', () => {
+    expect(
+      removePlaceLine(withLine, { line: 8, openLine: ':::format{.pkc-line from=a to=b}' }),
+      'ずれた開き行で消した',
+    ).toBeNull();
+    const open = ':::format{.pkc-line from=a to=b}';
+    expect(removePlaceLine(`${open}\n後ろの段落`, { line: 0, openLine: open }), '末尾まで消えた')
+      .toBeNull();
+  });
+
+  it('🔑 描画が線として読む形(Tier 1 の寛容形)も消せる', () => {
+    const body = ['::: {.pkc-line from=a to=b}', ':::', '', '残る'].join('\n');
+    expect(removePlaceLine(body, at(body, 0))).toBe('残る');
   });
 });
