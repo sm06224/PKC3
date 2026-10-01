@@ -612,6 +612,43 @@ test('🔴 一覧タブの ↑↓・Enter・絞り込みと、Escape の 2 段�
     '一覧タブの範囲選択が正しい件数を選んでいない',
   ).toHaveCount(2);
 
+  /**
+   * ⑦ 🔴 **探した語が、探す欄の候補に残る**(#1172)── 同じ起動に相乗りさせる。
+   * ⚠ 候補はブラウザ標準の `<datalist>`:**欄が `list` で本当に指しているか**は
+   *   happy-dom では見えない(`el.list` を解決するのは実ブラウザだけ)。
+   * 観測点は `el.list.options` ── 打っている途中では増えず、Enter で増え、
+   * 読み直しても残り、設定の「検索した語の記録を消す」で空になる。
+   */
+  const listOptions = () =>
+    page
+      .locator('[data-pkc-field="entry-filter"]')
+      .evaluate((el) => [...((el as HTMLInputElement).list?.options ?? [])].map((o) => o.value));
+  const box = page.locator('[data-pkc-field="entry-filter"]');
+  expect(await listOptions(), '前提が崩れている(記録が空でない)').toEqual([]);
+  await box.fill('会議メモ');
+  expect(await listOptions(), '打っている途中で候補に載った(確定前に憶えている)').toEqual([]);
+  await box.press('Enter');
+  expect(await listOptions(), 'Enter で確定したのに候補に載らない').toEqual(['会議メモ']);
+  await box.fill('');
+  await box.fill('議事');
+  await page.mouse.click(5, 5); // 欄を離れて確定する(blur)
+  expect(await listOptions(), '欄を離れても憶えない / 新しい順でない').toEqual(['議事', '会議メモ']);
+
+  await page.reload();
+  await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
+  expect(await listOptions(), '読み直したら候補が消えた(端末に残っていない)').toEqual([
+    '議事',
+    '会議メモ',
+  ]);
+
+  await page.keyboard.press('Alt+3');
+  await expect(
+    page.locator('[data-pkc-view-pane="settings"]'),
+    '前提が崩れている(システムの面が出ていない)',
+  ).toBeVisible();
+  await clickReal(page, '[data-pkc-action="clear-search-history"]');
+  expect(await listOptions(), '設定の「検索した語の記録を消す」を押しても候補が残っている').toEqual([]);
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 

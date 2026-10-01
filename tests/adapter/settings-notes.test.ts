@@ -1,7 +1,7 @@
 /** @vitest-environment happy-dom */
 /**
  * 🔴 **設定の説明は 1 行、詳しくは hover とマニュアルへ**
- * (#1017 §6.1 規則 3、#1038 段J で `settings.ts` 直下の全 24 段落へ適用)。
+ * (#1017 §6.1 規則 3、#1038 段J で `settings.ts` 直下の全 24 段落へ適用(2026-10-01、#1172 で 1 段落足して 25))。
  *
  * ## なぜ character cap で見るか
  *
@@ -83,9 +83,9 @@ const PERSIST_EXPECTED = {
 } as const;
 
 describe('設定の説明は 1 行(#1017 §6.1 規則 3、#1038 段J)', () => {
-  it('🔴 空振り防止: settings.ts 直下の note はちょうど 24 段落(doc の数え直しと一致)', () => {
+  it('🔴 空振り防止: settings.ts 直下の note はちょうど 25 段落(#1038 段J の 24 + #1172 の「検索した語の記録」)', () => {
     const notes = ownNotes(render());
-    expect(notes).toHaveLength(24);
+    expect(notes).toHaveLength(25);
   });
 
   it('① 既知の例外(このアプリのデータ)以外は、実測の上限(55 文字)に収まる', () => {

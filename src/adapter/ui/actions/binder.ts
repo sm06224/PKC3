@@ -79,6 +79,8 @@ import { groupsNeedingNote, planGroupMove } from '@features/launcher/group-order
 import { isMovableTile } from '@features/launcher/tile-order';
 import { listViewOptions } from '@adapter/state/list-view-options';
 import { appOpenedStore } from '@adapter/platform/opened-store';
+import { appSearchHistory } from '@adapter/platform/search-history-store';
+import { paintSearchHistory } from '@adapter/ui/render/shell';
 import type { EntryMeta } from '@core/model/entry-meta';
 import {
   filerRows,
@@ -6528,6 +6530,16 @@ const ACTIONS: Record<string, ActionHandler> = {
     dispatcher.dispatch({ type: 'SET_OPENED_AT', openedAt: new Map<string, number>() });
     services.showStatus?.('最近開いたノートの記録を消しました');
   },
+  /**
+   * 🔴 **検索した語の記録を消す**(#1172)。口は設定の「記録」の中。
+   * ⚠ 候補(`<datalist>`)も入れ直す ── store だけ消すと、欄を開いたとき古い語が出る。
+   * ⚠ 消えたことを字で言う(最近開いた記録を消すのと同じ)。
+   */
+  'clear-search-history': (_dispatcher, _target, services, root) => {
+    appSearchHistory.clear();
+    paintSearchHistory(root);
+    services.showStatus?.('検索した語の記録を消しました');
+  },
   'append-entry': (dispatcher, _target, _services, root) => {
     const s = dispatcher.getState();
     const lid = s.selectedLid;
@@ -11159,6 +11171,17 @@ export function bindActions(
       return;
     }
     const field = el.getAttribute('data-pkc-field');
+    /**
+     * 🔴 **探した語は、確定したときに憶える**(#1172)── Enter か、欄を離れたとき。
+     * ⚠ 1 字ごとに撃たない(`input`)── 途中の「ほげ」「ほげほ」が全部候補に並ぶ。
+     * ⚠ 2 字未満は `push` が積まない。⚠ 欄の絞り込み自体(`SET_ENTRY_FILTER`)は
+     *   `input` が既に撃っているので、ここでは dispatch しない。
+     */
+    if (field === 'entry-filter') {
+      appSearchHistory.push(el.value);
+      paintSearchHistory(root);
+      return;
+    }
     /**
      * 🔴 **設定ファイルを選んだら、下見を出す**(#414)── ⚠ **当てない**。
      * ⚠ 読み込みは非同期なので、`change` の中で待つ(押し口は別に在る)。
