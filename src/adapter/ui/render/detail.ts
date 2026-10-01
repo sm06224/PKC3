@@ -91,6 +91,7 @@ import { CANCEL_EDIT_HINT, COMMIT_EDIT_HINT, iconButton, markPrimary } from './i
 import { buildIconPalette, ICON_CHOICE_COUNT } from './icon-palette';
 import { markTargetLid } from './target-lid';
 import { buildFormatBar } from './format-bar';
+import { watchWrapHint } from './format-wrap-hint';
 import { hasSourceSelection } from '../actions/copy-source';
 import {
   appExternalImages,
@@ -580,6 +581,11 @@ export class DetailRenderer {
 
   /** 編集プレビューの予約を捨てる(編集を抜けるとき)。 */
   private cancelPreview: (() => void) | null = null;
+  /**
+   * 書式の帯の説明の切替(#950 ①)が持つ `selectionchange` の購読。
+   * ⚠ **編集を抜けるとき必ず外す**(`disposeLends`)── 編集セッションと同じ寿命。
+   */
+  private unwatchWrapHint: (() => void) | null = null;
   /** 図の後始末(ObjectURL の revoke と観測の解除)。 */
   private disposeMermaid: (() => void) | null = null;
 
@@ -591,6 +597,8 @@ export class DetailRenderer {
     this.fenceTexts.clear();
     this.cancelPreview?.();
     this.cancelPreview = null;
+    this.unwatchWrapHint?.();
+    this.unwatchWrapHint = null;
     this.disposeMermaid?.();
     this.disposeMermaid = null;
     for (const sc of this.mermaidScopes.splice(0)) sc.dispose();
@@ -1702,6 +1710,9 @@ export class DetailRenderer {
     this.region.append(bar);
     // 🔑 **書式パネル**(P8 段⑥)。編集欄のすぐ上 ── 押す物と効く先を離さない
     this.region.append(buildFormatBar());
+    // 🔴 選んでいるあいだだけ、帯の 4 つの説明を「選んだ範囲を囲みます」にする(#950 ①)。
+    //    ⚠ 外すのは `disposeLends`(編集を抜ける / 別のノートへ移るとき)
+    this.unwatchWrapHint = watchWrapHint(this.region);
 
     /**
      * 🔑 **書きながら見える**(P8 段②)。3 列にしたので、中央を 2 分割すれば

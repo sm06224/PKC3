@@ -12,9 +12,19 @@
  * (→ `binder.ts`)。抑止が無いと、押すたびに編集欄が focus を失って画面が
  * ちらつく ── 選択位置そのものは focus を失っても残るので、壊れはしない。
  */
-import { BAR_FORMAT_OPS } from '@features/markdown/text-ops';
+import { BAR_FORMAT_OPS, WRAPS_SELECTION_OPS, type FormatOp } from '@features/markdown/text-ops';
 import { findCommand } from '@features/keymap';
+import { WRAPS_SELECTION_ATTR } from './format-wrap-hint';
 import { HINT_BASE, HINT_COMMAND, hintTitle } from './shortcut-hint';
+
+/**
+ * 🔴 **選ぶと「囲む」側へ倒れるボタンに印を付ける**(#950 ①)。⚠ **どの op か**は
+ *   `WRAPS_SELECTION_OPS`(押したときの振る舞いと同じ集合)が決める ── ここで手で並べない。
+ *   説明の切替は `format-wrap-hint.ts` が印を読んで行う(字は変えない ── 帯の高さが動く)。
+ */
+function markWraps(btn: HTMLElement, op: FormatOp): void {
+  if (WRAPS_SELECTION_OPS.has(op)) btn.setAttribute(WRAPS_SELECTION_ATTR, op);
+}
 
 /** 書式パネルを組む。⚠ 押した所は `data-pkc-format` で分かる(binder が読む)。 */
 export function buildFormatBar(): HTMLElement {
@@ -29,6 +39,7 @@ export function buildFormatBar(): HTMLElement {
     btn.type = 'button';
     btn.setAttribute('data-pkc-action', 'format-text');
     btn.setAttribute('data-pkc-format', op);
+    markWraps(btn, op);
     /**
      * 🔴 **説明(`title`)を付ける**(#717)。⚠ 直す前は 14 個とも無く、「表」「番号」の
      *   1 語で何が起きるか読めなかった。字は表(`FORMAT_OPS.hint`)から引く。
@@ -61,7 +72,12 @@ export function buildFormatBar(): HTMLElement {
      *   表とコードブロックの間に在ったボタンが 1 つ右へ飛ぶ(業務画面の作法
      *   「同じものが常に同じ場所にある」)。だから表の直後に差す。
      */
-    if (op === 'table') bar.append(diagramButton());
+    if (op === 'table') {
+      const diagram = diagramButton();
+      // ⚠ 「図」の押すと囲む側は `mermaid`(表の隣に差すだけで、op は別)
+      markWraps(diagram, 'mermaid');
+      bar.append(diagram);
+    }
   }
   /**
    * 🔴 **置換の切替はここ**(2026-08-15、user 指示「中央の上を潰しすぎ /

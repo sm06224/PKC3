@@ -80,6 +80,24 @@ test('🔴 1 面で、クリックした行だけが原文になる(周りは描
   await row.press('Control+[');
   await expect(row, 'Ctrl+[ で戻らない').toHaveValue('最初の段落です。');
 
+  // ②'' 🔴 #950 ① ── 行の欄で字を選ぶと、帯の 4 つ(表 / 図 / コードブロック / 数式)の
+  //    説明が「選んだ範囲を囲みます」になり、選びを外すと戻る。⚠ 字と帯の高さは動かない
+  const bar = page.locator('[data-pkc-region="format-bar"]');
+  const wraps = bar.locator('[data-pkc-wraps-selection]');
+  const wrapTitles = (): Promise<string[]> => wraps.evaluateAll((els) => els.map((e) => (e as HTMLElement).title));
+  await expect(wraps, '帯の「囲む 4 つ」が拾えていない').toHaveCount(4);
+  const barHeight = await bar.evaluate((e) => (e as HTMLElement).offsetHeight);
+  const labelsBefore = await wraps.locator('[data-pkc-field="label"]').allTextContents();
+  await row.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(0, 3));
+  await expect.poll(wrapTitles, '選んだのに説明が切り替わらない').toEqual(Array(4).fill('選んだ範囲を囲みます'));
+  expect(await bar.evaluate((e) => (e as HTMLElement).offsetHeight), '帯の高さが動いた').toBe(barHeight);
+  expect(await wraps.locator('[data-pkc-field="label"]').allTextContents(), '帯の字が変わった').toEqual(labelsBefore);
+  await row.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(2, 2));
+  await expect
+    .poll(async () => (await wrapTitles()).some((t) => t === '選んだ範囲を囲みます'), '選びを外しても戻らない')
+    .toBe(false);
+  expect(await bar.evaluate((e) => (e as HTMLElement).offsetHeight), '戻したあと帯の高さが動いた').toBe(barHeight);
+
   // ③ 書き換えて確定すると、その行だけが描画に戻る
   await row.fill('書き換えました。');
   await page.keyboard.press('Tab');

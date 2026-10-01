@@ -56,6 +56,24 @@ test('🔴 書式パネルが押せて、寸法が揃っていて、プレビュ
   await clickReal(page, '[data-pkc-format="bold"]');
   await expect(ta).toHaveValue('強調したい');
 
+  // ④' 🔴 #950 ① ── 選んでいるあいだだけ、表 / 図 / コードブロック / 数式の説明が
+  //     「選んだ範囲を囲みます」になる(2 列の面。live の 1 面は live-editor.smoke が見る)。
+  //     ⚠ 字と帯の高さは 1px も動かない
+  const wraps = bar.locator('[data-pkc-wraps-selection]');
+  const wrapTitles = (): Promise<string[]> => wraps.evaluateAll((els) => els.map((e) => (e as HTMLElement).title));
+  await expect(wraps, '帯の「囲む 4 つ」が拾えていない').toHaveCount(4);
+  const labelsBefore = await wraps.locator('[data-pkc-field="label"]').allTextContents();
+  await ta.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(1, 3));
+  await expect.poll(wrapTitles, '選んだのに説明が切り替わらない').toEqual(Array(4).fill('選んだ範囲を囲みます'));
+  const barBoxOn = (await bar.boundingBox())!;
+  expect(barBoxOn.height, '選んだら帯の高さが動いた').toBe(barBox.height);
+  expect(await wraps.locator('[data-pkc-field="label"]').allTextContents(), '帯の字が変わった').toEqual(labelsBefore);
+  await ta.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(2, 2));
+  await expect
+    .poll(async () => (await wrapTitles()).some((t) => t === '選んだ範囲を囲みます'), '選びを外しても戻らない')
+    .toBe(false);
+  expect((await bar.boundingBox())!.height, '戻したあと帯の高さが動いた').toBe(barBox.height);
+
   // ⑤ 雛形も入る(表 = 2 列。⚠ プレビューまで見る ── 記号だけ入って
   // markdown として壊れている、を落とす)
   await ta.fill('');
