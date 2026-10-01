@@ -1458,6 +1458,20 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
     await engine.selectOption('sqlite');
   }
 
+  /**
+   * 🔴 **内蔵の sqlite のままでは、表を作れない**(#918 段⑧の対照群)。
+   *
+   * ⚠ 下の `.json` の筋書きは DuckDB で `CREATE TABLE` を通す ── 通るのは**エンジンが DuckDB の
+   *   ときだけ**で、**同じ字を sqlite で打つと今までどおり断られる**ことを、同じ道中で見る
+   *   (これが無いと、DuckDB の門が sqlite にも効いてしまった日に何も鳴らない)。
+   * 🔑 **新しい起動は増やさない**(#820 の規律)。
+   */
+  await expect(engine, '前提:ここは sqlite を選んでいる').toHaveValue('sqlite');
+  await page.fill('[data-pkc-field="sql-input"]', 'CREATE TABLE memo (a INT)');
+  await clickReal(page, '[data-pkc-action="run-sql"]');
+  await expect(note, 'sqlite で CREATE TABLE が断られていない').toContainText('読み取り専用です');
+  await expect(note, '断り文が「作れた」と読める').not.toContainText('消えます');
+
   await page.fill('[data-pkc-field="sql-input"]', 'SELECT * FROM csv');
 
   /**
@@ -1873,6 +1887,35 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   await expect(sqlTable, 'json の中身が出ていない').toContainText('mikan');
 
   /**
+   * ⑤-e 🔴 **DuckDB で表を作り、その表を引く**(#918 段⑧)。
+   *
+   * ## 🔑 ここでしか言えないこと
+   *
+   * ⚠ unit は「門が通した」「画面が件数を言った」までで、**実ブラウザの DuckDB が、
+   *   外を塞いだ後の器で `CREATE TABLE` を実行でき、次の問い合わせで引ける**ことは言えない
+   *   (`tests/duckdb-write.test.ts` は node の別の経路である)。
+   * 🔴 そして**画面の字**(件数 + 「作った表はウィンドウを閉じると消えます」)が
+   *   実際に出ること。**黙って消えない**ことが、この段の約束である。
+   *
+   * 🔑 **新しい起動は増やさない**(#820 の規律)── 上で `.json` を DuckDB で引いた
+   *   その器(相手は `meisai.json` で 2 行)の続きで打つ。
+   */
+  await page.fill('[data-pkc-field="sql-input"]', 'CREATE TABLE made AS SELECT * FROM json');
+  await clickReal(page, '[data-pkc-action="run-sql"]');
+  await expect(note, '作った直後に、件数が出ない').toContainText('2 行に効きました', { timeout: 60_000 });
+  await expect(note, '作った表の寿命を言っていない(黙って消える)').toContainText(
+    '作った表はウィンドウを閉じると消えます',
+  );
+  // 🔑 書き込みの答えは表にしない(`Count` の 1 升を出さない)
+  await expect(sqlTable, '書き込みの答えを表にしている').toHaveCount(0);
+  await page.fill('[data-pkc-field="sql-input"]', 'SELECT count(*) AS n FROM made');
+  await clickReal(page, '[data-pkc-action="run-sql"]');
+  await expect(sqlTable, '作った表を引けない').toBeVisible({ timeout: 60_000 });
+  // ⚠ 数だけでなく**中身が元と同じ**(2 行 = 元の json の行数)── 空の表でも 0 行を返すので
+  await expect(sqlTable.locator('tbody td'), '作った表の行数が合わない').toHaveText(['2']);
+  await expect(note, '引いた後に、書き込みの知らせが残っている').not.toContainText('消えます');
+
+  /**
    * ⚠ **外へ出ていない**(段② の柱)── localhost 以外への要求が 1 件も無いこと。
    * 🔑 **`.parquet` と `.json` の両方を通した後**に見る ── 器は相手ごとに
    *   作り直すので、2 形式ぶんの「起こし直し」が窓の中に入っている。
@@ -2023,15 +2066,18 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
    * 🔑 **新しい起動は増やしていない**(#820 の規律)── ⑦ が開いたままの
    *   同じ SQL の面の道中に続ける(`gotoApp` / `page.goto` を足さない)。
    *
-   * ⚠ ここまでに**走らせた字**(= 履歴に積まれた字。新しい順。**全 8 件**):
+   * ⚠ ここまでに**走らせた字**(= 履歴に積まれた字。新しい順。**全 10 件**):
    *   1. `SELECT * FROM csv`(⑥/⑦。⚠ ⑦ は直前と同じなので積まれない)
-   *   2. 🔴 `FROM json SELECT * LIMIT 20`(⑤-d。#682 段④c)
-   *   3. 🔴 `FROM parquet SELECT * LIMIT 20`(⑤-c。#682 段④c)
-   *   4. `SELECT * FROM sheet1`(⑤)
-   *   5. `SELECT * FROM xlsx_sheets`(⑤)
-   *   6. `select * from csv`(⑤-a2。図の表を押して組んだ字 ── **小文字なので別扱い**)
-   *   7. `SELECT * FROM csv`(④)
-   *   8. `SELECT extension_name FROM duckdb_extensions() …`(段④b の筋書き)
+   *   2. 🔴 `SELECT count(*) AS n FROM made`(⑤-e。#918 段⑧)
+   *   3. 🔴 `CREATE TABLE made AS SELECT * FROM json`(⑤-e。#918 段⑧。⚠ 書き込みも積まれる)
+   *   4. 🔴 `FROM json SELECT * LIMIT 20`(⑤-d。#682 段④c)
+   *   5. 🔴 `FROM parquet SELECT * LIMIT 20`(⑤-c。#682 段④c)
+   *   6. `SELECT * FROM sheet1`(⑤)
+   *   7. `SELECT * FROM xlsx_sheets`(⑤)
+   *   8. `select * from csv`(⑤-a2。図の表を押して組んだ字 ── **小文字なので別扱い**)
+   *   9. `SELECT * FROM csv`(④)
+   *  10. `SELECT extension_name FROM duckdb_extensions() …`(段④b の筋書き)
+   *   ⚠ 断られた回(⑤-e の前の sqlite の `CREATE TABLE memo …`)は積まれない(走らせていない)
    *
    * 🔴 **この帳簿は、上の筋書きへ 1 つ足すたびに古くなる**(2026-09-16 に 2 度踏んだ)。
    * ⚠ 1 度目:⑤-c を足したのに 2 番目の期待値を直さず落ちた。
@@ -2065,18 +2111,18 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
    *   誰も鳴らない(CLAUDE.md §1「代替物で満たせない条件にする」)。
    */
   await expect(histNote, 'いま何番目かが出ていない(数が合わなければ上の帳簿を直す)').toContainText(
-    '前に打った字(1 / 8)',
+    '前に打った字(1 / 10)',
   );
   /**
    * 🔴 **2 度目の ↑ は、いま「2 番目に新しい字」である**(#682 段④c で 1 つ増えた)。
    * ⚠ 期待値を書き換えるとき、**上の帳簿も一緒に直す** ── 帳簿と assert が
    *   別々に古くなると、次に足した人はここで落ちても**どこを直すのか分からない**。
-   * 🔑 ⑤-d(`.json` を画面の例文で走らせる)がいちばん新しいので、いまは json の字。
+   * 🔑 ⑤-e(DuckDB で表を作って引く。#918 段⑧)がいちばん新しいので、いまはその字。
    *   ⚠ この名指しは「**足した筋書きが本当に履歴へ積まれた**」の観測点でもある。
    */
   await page.keyboard.press('ArrowUp');
-  await expect(input, '2 度目の ↑ でさらに前へ遡らない(⑤-d の字が履歴に積まれていない)').toHaveValue(
-    'FROM json SELECT * LIMIT 20',
+  await expect(input, '2 度目の ↑ でさらに前へ遡らない(⑤-e の字が履歴に積まれていない)').toHaveValue(
+    'SELECT count(*) AS n FROM made',
   );
   // 🔴 ↓ で新しいほうへ戻る
   await page.keyboard.press('ArrowDown');

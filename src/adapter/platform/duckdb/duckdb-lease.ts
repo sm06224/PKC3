@@ -59,6 +59,18 @@ export interface DuckDbJob {
    * 🔑 畳んだら控えも捨てる(起こし直した器には何も入っていない)。
    */
   readonly data?: { readonly key: string; readonly load: (h: DuckDbHandle) => Promise<void> };
+  /**
+   * 🔴 **この打ち込みが通ったら、器を畳まずに持ち続ける**(#918 段⑧)。
+   *
+   * ⚠ 書き込み(`CREATE TABLE` / `INSERT` …)で**作った表は器の中にしか無い** ──
+   *   しばらく使わないからと畳むと、**user が作った表が黙って消える**
+   *   (画面は「ウィンドウを閉じると消えます」と言っているのに、30 秒で消える)。
+   * 🔑 だから `hold` が立った回が通った後は**アイドルで畳まない**。畳まれるのは
+   *   ①ウィンドウを閉じたとき(プロセスごと)②相手を替えたとき(器を作り直す)
+   *   ③時間の門に掛かったとき ④明示の `release()` のどれかだけである。
+   * ⚠ 読むだけの回は今までどおり 30 秒で畳む(常駐メモリを返す規律は変えない)。
+   */
+  readonly hold?: boolean;
 }
 
 export interface DuckDbLeaseOptions {
@@ -82,6 +94,8 @@ export class DuckDbLease {
   private opening: Promise<DuckDbHandle> | null = null;
   /** いま差し込んである相手(`null` = 何も入っていない)。 */
   private loadedKey: string | null = null;
+  /** 🔴 書き込みが通った後は `true`(アイドルで畳まない。⚠ 畳んだら必ず `false` へ戻す)。 */
+  private held = false;
   private flying = 0;
   private timer: unknown = null;
   private readonly idleMs: number;
@@ -132,11 +146,21 @@ export class DuckDbLease {
         // ⚠ **入れ終わってから控える** ── 先に控えると、落ちた回に「入っている」と嘘をつく
         this.loadedKey = job.data.key;
       }
-      return job.maxMs === undefined ? await h.query(job.sql) : await this.raceQuery(h, job.sql, job.maxMs);
+      const answer =
+        job.maxMs === undefined ? await h.query(job.sql) : await this.raceQuery(h, job.sql, job.maxMs);
+      /**
+       * ⚠ **通ってから立てる**(落ちた回は何も作っていない)。
+       * ⚠ **取っ手が同じときだけ** ── 時間の門で畳まれた器は `forget` が `held` を下ろしている。
+       */
+      if (job.hold === true && this.handle === h) this.held = true;
+      return answer;
     } finally {
       this.flying -= 1;
-      // ⚠ **飛んでいる間は畳まない** ── 0 になった回だけ時計を張り直す
-      if (this.flying === 0) this.armIdle();
+      /**
+       * ⚠ **飛んでいる間は畳まない** ── 0 になった回だけ時計を張り直す。
+       * 🔴 **書き込みで作った物を持っている間は、時計そのものを張らない**(`hold`)。
+       */
+      if (this.flying === 0 && !this.held) this.armIdle();
     }
   }
 
@@ -179,6 +203,7 @@ export class DuckDbLease {
       this.handle = null;
       this.opening = null;
       this.loadedKey = null;
+      this.held = false;
     }
     void h.terminate().catch(() => undefined);
   }
@@ -195,6 +220,7 @@ export class DuckDbLease {
     this.opening = null;
     // ⚠ 畳んだら**差し込んだ物も消える** ── 起こし直した器は空である
     this.loadedKey = null;
+    this.held = false;
     if (h === null) return;
     /**
      * ⚠ 畳む側の例外は**飲む** ── ここで投げると、呼び側は「畳めなかった」と

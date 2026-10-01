@@ -56,6 +56,7 @@ import {
   type DuckDbReadableGuestSource,
 } from '@features/query/sql-guest-source';
 import { duckDbTable } from '@features/query/duckdb-rows';
+import { duckDbWriteKind } from '@features/query/duckdb-write';
 import {
   DUCKDB_EXTENSIONS,
   DUCKDB_EXT_DIR,
@@ -291,6 +292,13 @@ export class DuckDbRunner {
     const raw = await this.lease.run({
       sql: input.sql,
       maxMs: DUCKDB_MAX_MS,
+      /**
+       * 🔴 **書き込みが通ったら、アイドルで畳まない**(#918 段⑧)。
+       * ⚠ 作った表は器の中にしか無い ── 30 秒で畳むと、user が作った表が
+       *   「ウィンドウを閉じると消えます」と言いながら**黙って**消える。
+       * 🔑 判定は字の門と**同じ 1 本**(`duckDbWriteKind`)。
+       */
+      hold: duckDbWriteKind(input.sql) !== null,
       // ⚠ 鍵は lid と名前の両方(名前だけだと、同じ題名の別ノートで入れ替わらない)
       data: { key: lid + '|' + name, load: (h) => this.load(h, input.readBytes, input.source) },
     });
