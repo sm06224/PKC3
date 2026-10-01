@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <title>PKC3 probe: storage gauge(#999 段①)</title>
+  </head>
+  <body>
+    <pre id="out">ready</pre>
+    <script type="module">
+      import { StoreClient } from '/src/adapter/platform/storage/store-client.ts';
+
+      /**
+       * 🔴 **保存領域の太り方・片づけの所要を測る頁**(#999 段①)。操作は
+       *   `storage-gauge-probe.mjs` が `window.__GAUGE__` へ当てる。
+       *
+       * ⚠ **片づけ(`optimize` / `VACUUM`)の口は製品に無い**ので、`runReadOnlySql` の
+       *   **複文**(先頭に `PRAGMA query_only = 0`)で打つ ── 製品へ口を足さずに、
+       *   **製品の worker そのもの**で測るための迂回である。⚠ 製品の画面は
+       *   この手を使わない(user の SQL の面は禁止語で弾く)。
+       * ⚠ 途中で worker を `terminate()` できるように握る(タブを閉じる相当。`vacuumKilledAfter`)。
+       */
+      const CID = 'g';
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+      let worker = null;
+      let targetStart = 0;
+      let targetP = null;
+      let store = null;
+
+      // ── 決定的な本文(乱数を使わない ── 再現性のため)。日本語の語を並べる(trigram 索引の実態に寄せる)
+      const KANA = 'あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん';
+      const KANJI = '日月火水木金土年時分人大小中上下本文書記事物語話言思考見聞行来出入立休作使用方法問題答案内外前後新古高低長短東西南北春夏秋冬';
+      const WORDS = (() => {
+        let s = 12345;
+        const next = () => ((s = (Math.imul(s, 1103515245) + 12345) >>> 0) >>> 8);
+        const pool = (KANA + KANJI).split('');
+        const out = [];
+        for (let i = 0; i < 4000; i++) {
+          const len = 2 + (next() % 3);
+          let w = '';
+          for (let j = 0; j < len; j++) w += pool[next() % pool.length];
+          out.push(w);
+        }
+        return out;
+      })();
+      function makeBody(i, kb, salt = 0) {
+        let s = (i * 2654435761 + salt * 40503 + 1) >>> 0;
+        const next = () => ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0) >>> 8);
+        // ⚠ 1 文字 ≒ 3 byte(UTF-8)なので、目標 byte の 1/3 字を並べる
+        const target = Math.max(60, Math.floor((kb * 1024) / 3));
+        let out = `# 語${i}- 本文\n\n`;
+        let len = out.length;
+        while (len < target) {
+          const w = WORDS[next() % WORDS.length];
+          const sep = next() % 9 === 0 ? '。\n' : '、';
+          out += w + sep;
+          len += w.length + sep.length;
+        }
+        return out;
+      }
+      const entryFor = (i, kb, salt = 0, order = i) => ({
+        lid: 'e' + i,
+        title: '題名 ' + i,
+        archetype: 'text',
+        body: makeBody(i, kb, salt),
+        entryOrder: order,
+        status: null,
+        date: null,
+        archived: false,
+      });
+
+      async function openDb(name, retries = 20, journalMode) {
+        let attempts = 0;
+        let last = null;
+        for (;;) {
+          attempts++;
+          // ⚠ worker は `StoreClient` に作らせる(自前の `new Worker(<src の path>)` では
+          //    sqlite の wasm を取りに行く相対 path が解けず、`CompileError` で開けなかった)。
+          //    private の `worker` を読むのは `terminate()` 用 ── 実行時の field は在る。
+          store = new StoreClient();
+          worker = store.worker;
+          try {
+            const init = await store.request({ op: 'init', dbName: name, ...(journalMode ? { journalMode } : {}) });
+            // ⚠ 本物の保存先で開けたことを確かめる(memory に落ちた回の数字を読まない)
+            if (init.vfs !== 'opfs-sahpool') {
+              last = 'vfs=' + init.vfs + ' reason=' + (init.fallbackReason ?? '');
+              throw new Error(last);
+            }
+            await store.request({ op: 'openContainer', cid: CID, title: 'gauge' });
+            return { attempts, vfs: init.vfs, journalMode: init.journalMode };
+          } catch (e) {
+            last = String(e);
+            store.terminate();
+            worker = null;
+            store = null;
+            if (attempts >= retries) throw new Error('開けなかった(' + attempts + ' 回): ' + last);
+            await sleep(500);
+          }
+        }
+      }
+
+      const req = (r) => store.request(r);
+      const gauge = () => req({ op: 'storageGauge' });
+      // 複文で `query_only` を外す ── 打てるのは probe だけ(製品の画面はこの手を使わない)
+      async function raw(sql, maxMs = 3_600_000) {
+        const t0 = performance.now();
+        const res = await req({
+          op: 'runReadOnlySql',
+          sql: 'PRAGMA query_only = 0; ' + sql,
+          maxRows: 10,
+          maxSteps: 2_000_000_000,
+          maxMs,
+        });
+        return { ms: Math.round(performance.now() - t0), workerMs: res.ms };
+      }
+      async function rows(sql) {
+        const res = await req({
+          op: 'runReadOnlySql',
+          sql,
+          maxRows: 5000,
+          maxSteps: 2_000_000_000,
+          maxMs: 600_000,
+        });
+        return res.rows;
+      }
+      async function storageUsage() {
+        const e = await navigator.storage.estimate();
+        return { usage: e.usage ?? null, quota: e.quota ?? null };
+      }
+
+      /** n 件を batch ずつ bulkUpsert。 */
+      async function seed(from, n, kb, batch = 50, salt = 0) {
+        const t0 = performance.now();
+        for (let at = from; at < from + n; at += batch) {
+          const entries = [];
+          for (let i = at; i < Math.min(from + n, at + batch); i++) entries.push(entryFor(i, kb, salt));
+          await req({ op: 'bulkUpsertEntries', cid: CID, entries });
+        }
+        return { ms: Math.round(performance.now() - t0) };
+      }
+
+      /** file が target byte に届くまで kb の本文を足す。 */
+      async function seedToBytes(targetBytes, kb, batch = 50) {
+        const t0 = performance.now();
+        let n = 0;
+        let g = await gauge();
+        let probeMs = g.elapsedMs;
+        while (g.fileBytes < targetBytes) {
+          // 残りを見積もって(1 件あたりの太り)まとめて足す ── 毎回 gauge しない
+          const per = n === 0 ? 0 : (g.fileBytes - 0) / Math.max(1, n);
+          const remain = per > 0 ? Math.ceil((targetBytes - g.fileBytes) / per) : batch * 4;
+          const todo = Math.max(batch, Math.min(remain, batch * 20));
+          await seed(n, todo, kb, batch);
+          n += todo;
+          g = await gauge();
+          probeMs = Math.max(probeMs, g.elapsedMs);
+        }
+        return { entries: n, ms: Math.round(performance.now() - t0), maxGaugeMs: probeMs, gauge: g };
+      }
+
+      /** 経路ごとの 1 操作。 */
+      const PATHS = {
+        // 本文の保存(既定 = amend。履歴は積まない)
+        // ⚠ 本文は「元の本文 + 追記 1 行」── 編集の実態(全文は書き直されるが、中身はほぼ同じ)
+        save: async (k, ctx) => {
+          const i = k % ctx.base;
+          const e = entryFor(i, ctx.kb);
+          await req({
+            op: 'upsertEntry',
+            cid: CID,
+            entry: { ...e, body: e.body + '\n追記 ' + k },
+          });
+        },
+        // 本文の保存 + 履歴を 1 件積む(`checkpoint: true`)
+        saveCheckpoint: async (k, ctx) => {
+          const i = k % ctx.base;
+          const e = entryFor(i, ctx.kb);
+          await req({
+            op: 'upsertEntry',
+            cid: CID,
+            checkpoint: true,
+            entry: { ...e, body: e.body + '\n追記 ' + k },
+          });
+        },
+        // メッセージの追記(処理の記録 = 5,000 節の上限)
+        appendJobs: async (k) => {
+          await req({
+            op: 'appendMessage',
+            cid: CID,
+            lid: 'sys-jobs',
+            title: '処理',
+            section: `## 2026-10-01 12:${String(k % 60).padStart(2, '0')}:00\n**処理** 圧縮 ── ${k} 件目の記録(本文は含まない)\n\n`,
+            cap: 5000,
+          });
+        },
+        // メッセージの追記(既定の上限 500 節)
+        appendMessages: async (k) => {
+          await req({
+            op: 'appendMessage',
+            cid: CID,
+            lid: 'sys-messages',
+            title: 'メッセージ',
+            section: `## 2026-10-01 12:${String(k % 60).padStart(2, '0')}:00\n**結果** 保存 ── ${k} 件目の記録(本文は含まない)\n\n`,
+            cap: 500,
+          });
+        },
+        // 並べ替え(#984 で直った経路 ── 比較の基準)
+        reorder: async (k, ctx) => {
+          await req({ op: 'reorderEntry', cid: CID, lid: 'e' + (k % ctx.base), entryOrder: 100000 + k });
+        },
+      };
+
+      /**
+       * 1 経路を n 回。before / after と、途中の系列(sampleEvery ごと)を返す。
+       * `deleteEntry` は別枠(`runDelete`)。
+       */
+      async function runPath(name, n, ctx, sampleEvery) {
+        const before = await gauge();
+        const series = [];
+        const t0 = performance.now();
+        for (let k = 0; k < n; k++) {
+          await PATHS[name](k, ctx);
+          if ((k + 1) % sampleEvery === 0) {
+            const g = await gauge();
+            series.push({ k: k + 1, fileBytes: g.fileBytes, freeBytes: g.freeBytes, ftsSegments: g.ftsSegments });
+          }
+        }
+        const ms = Math.round(performance.now() - t0);
+        const after = await gauge();
+        return { name, n, ms, before, after, series };
+      }
+
+      /** メッセージの置き場を上限まで埋める(定常の姿から測るため)。 */
+      async function prefillMessages(lid, title, cap) {
+        const one = (k) =>
+          `## 2026-09-30 11:${String(k % 60).padStart(2, '0')}:00\n**処理** 圧縮 ── ${k} 件目の記録(本文は含まない)\n\n`;
+        for (let at = 0; at < cap; at += 100) {
+          let section = '';
+          for (let k = at; k < Math.min(cap, at + 100); k++) section += one(k);
+          await req({ op: 'appendMessage', cid: CID, lid, title, section, cap });
+        }
+      }
+
+      /** 対照群: 何もしない(同じ時間だけ待つ)。 */
+      async function runIdle(waitMs) {
+        const before = await gauge();
+        await sleep(waitMs);
+        const after = await gauge();
+        return { name: 'idle', n: 0, ms: waitMs, before, after, series: [] };
+      }
+
+      /** 削除: 先に n 件を足して、消して、ゴミ箱を空にする。 */
+      async function runDelete(n, kb, fromLid) {
+        await seed(fromLid, n, kb);
+        const before = await gauge();
+        const t0 = performance.now();
+        for (let i = fromLid; i < fromLid + n; i++) await req({ op: 'deleteEntry', cid: CID, lid: 'e' + i });
+        const afterDelete = await gauge();
+        await req({ op: 'purgeTrash', cid: CID });
+        const after = await gauge();
+        return { name: 'delete+purge', n, ms: Math.round(performance.now() - t0), before, afterDelete, after, series: [] };
+      }
+
+      // ── 検索の指紋(rowid が動いていないかを、答えの集合で見る)
+      async function lidSets(queries) {
+        const out = {};
+        for (const q of queries) {
+          const res = await req({ op: 'searchEntries', cid: CID, query: q, limit: 100000 });
+          const lids = [...(res.lids ?? res)].sort();
+          out[q] = lids;
+        }
+        return out;
+      }
+      async function fingerprint(queries) {
+        const counts = await req({ op: 'counts', cid: CID });
+        const rid = await rows(
+          `SELECT count(*), sum(rowid), sum(rowid * (length(lid) + unicode(substr(lid, -1)))), max(rowid), min(rowid) FROM entries WHERE cid = '${CID}'`,
+        );
+        const head = await rows(`SELECT lid, rowid FROM entries WHERE cid = '${CID}' ORDER BY rowid LIMIT 5`);
+        const sets = await lidSets(queries);
+        return { counts, rowidAgg: rid[0], head, sets };
+      }
+
+      async function quickCheck() {
+        const t0 = performance.now();
+        const res = await req({ op: 'checkIntegrity' });
+        return { rows: res.rows, ms: Math.round(performance.now() - t0) };
+      }
+
+      /** VACUUM を打ち、その間の OPFS 使用量を 250ms ごとに採る。 */
+      async function vacuumTimed() {
+        const usageSeries = [];
+        const start = performance.now();
+        usageSeries.push({ t: 0, ...(await storageUsage()) });
+        const iv = setInterval(async () => {
+          try {
+            usageSeries.push({ t: Math.round(performance.now() - start), ...(await storageUsage()) });
+          } catch {
+            /* 採れなかった回は飛ばす */
+          }
+        }, 250);
+        let err = null;
+        let r = null;
+        try {
+          r = await raw('VACUUM');
+        } catch (e) {
+          err = String(e);
+        } finally {
+          clearInterval(iv);
+        }
+        usageSeries.push({ t: Math.round(performance.now() - start), ...(await storageUsage()) });
+        return { ms: Math.round(performance.now() - start), err, workerMs: r?.workerMs ?? null, usageSeries };
+      }
+
+      /**
+       * 殺す相手を投げっぱなしにする(待たない)。殺すのは呼び側(node)。
+       * - `vacuum` … VACUUM
+       * - `update` … 対照: 全ノートの本文を書き換える大きな 1 トランザクション(索引も書き直す)
+       */
+      function startKillTarget(what) {
+        const sql =
+          what === 'update'
+            ? "UPDATE entries SET body = body || ' ' WHERE cid = 'g'"
+            : 'VACUUM';
+        targetStart = performance.now();
+        targetP = raw(sql).then(() => Math.round(performance.now() - targetStart));
+        targetP.catch(() => null);
+        return true;
+      }
+      /** 殺さずに最後まで待つ(対照: 殺さなければ壊れないこと / 所要時間)。 */
+      async function waitTarget() {
+        return targetP;
+      }
+      /** `Worker.terminate()`。⚠ 同期の VACUUM を**止められるとは限らない**(それを測る)。 */
+      function terminateWorker() {
+        worker.terminate();
+        return true;
+      }
+
+      window.__GAUGE__ = {
+        openDb,
+        async close() {
+          try {
+            await req({ op: 'close' });
+          } finally {
+            store.terminate();
+            worker = null;
+            store = null;
+          }
+        },
+        kill() {
+          store.terminate();
+          worker = null;
+          store = null;
+        },
+        gauge,
+        raw,
+        rows,
+        seed,
+        seedToBytes,
+        runPath,
+        prefillMessages,
+        runIdle,
+        runDelete,
+        fingerprint,
+        quickCheck,
+        vacuumTimed,
+        startKillTarget,
+        waitTarget,
+        terminateWorker,
+        storageUsage,
+        sleep,
+        pathNames: () => Object.keys(PATHS),
+        /** 検索の問い(語 + 共通の語)。 */
+        queries: (maxI) => {
+          const qs = [];
+          for (const i of [3, 17, 101, 999, 4321, 12345]) if (i < maxI) qs.push('語' + i + '-');
+          qs.push(WORDS[7], WORDS[400]);
+          return qs;
+        },
+        count: (op) => req(op),
+      };
+      window.__GAUGE_READY__ = true;
+      document.getElementById('out').textContent = 'ready';
+    </script>
+  </body>
+</html>

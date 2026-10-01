@@ -517,6 +517,15 @@ export type StorageRequest =
   | { op: 'storageProfile'; cid: string }
   | { op: 'counts'; cid: string }
   /**
+   * 🔴 **保存領域の太り具合を測る**(#999 段①)── **読むだけ**。
+   *
+   * ⚠ 返すのは数字だけで、本文・題名は 1 バイトも出ない。⚠ 壊れていても通す
+   *   (`quick_check` と同じ扱い ── 読むだけで、`CORRUPT_BLOCKED_OPS` にも
+   *   `QUOTA_BLOCKED_OPS` にも入らない)。
+   * 🔑 何かを片づける op ではない(段②③ の判断材料を測るための計器)。
+   */
+  | { op: 'storageGauge' }
+  /**
    * 🔴 **中身が壊れていないかを調べる**(#971 段③)。
    *
    * ⚠ **時間の上限を掛けない** ── SQL の面は 8 秒で切るので救出には使えない
@@ -746,6 +755,42 @@ export interface InitResult {
   restoredBytes?: number;
 }
 
+/**
+ * 🔴 **保存領域の太り具合**(#999 段①)── `storageGauge` の返り値。
+ *
+ * ⚠ **「file の大きさ」と「中身の大きさ」は別物である**。sqlite は消しても
+ *   file を縮めず、空いたページ(freelist)として持ち続ける ── 太った分は
+ *   `freeBytes` に出る。🔑 戻せる量の上限が `freeBytes`(`VACUUM` で全部返るとは
+ *   限らない ── 返るかどうかは実測の対象)。
+ */
+export interface StorageGauge {
+  /** `PRAGMA page_count`。 */
+  pageCount: number;
+  /** `PRAGMA page_size`(byte)。 */
+  pageSize: number;
+  /** `PRAGMA freelist_count` ── 空いたまま持っているページ数。 */
+  freelistCount: number;
+  /** `pageCount × pageSize`(DB file の大きさ)。 */
+  fileBytes: number;
+  /** `freelistCount × pageSize`(空いたまま抱えている量)。 */
+  freeBytes: number;
+  /**
+   * FTS5 の索引の**段数の代理**= `entries_fts_idx` の `count(DISTINCT segid)`。
+   *
+   * ⚠ 段(segment)の数そのものではなく**索引に葉を持つ段の数**。⚠ 数えるのは
+   *   索引の表(`_idx`)だけなので本文は読まないが、**葉の数に比例して走査する**
+   *   (その時間は `elapsedMs` に含まれる)。表が無い / 読めないときは `null`
+   *   (索引を持たない DB で 0 と嘘を言わない)。
+   */
+  ftsSegments: number | null;
+  /** `PRAGMA journal_mode` の実値(`truncate` / `delete` / `memory` …)。 */
+  journalMode: string;
+  /** `PRAGMA temp_store` の実値(0 = 既定 / 1 = file / 2 = memory)。 */
+  tempStore: number;
+  /** 測るのに掛かった時間(ms)── 「読むだけで安い」の裏取り用。 */
+  elapsedMs: number;
+}
+
 export interface CountsResult {
   entries: number;
   relations: number;
@@ -955,6 +1000,7 @@ export interface ResultMap {
   scanAssetRefs: { referenced: string[] };
   storageProfile: StorageProfileResult;
   counts: CountsResult;
+  storageGauge: StorageGauge;
   checkIntegrity: IntegrityCheckResult;
   integrityPlan: IntegrityPlan;
   integrityStamp: null;

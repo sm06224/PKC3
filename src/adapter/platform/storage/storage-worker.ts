@@ -3794,6 +3794,44 @@ const handlers: Handlers = {
     };
   },
   /**
+   * 🔴 **保存領域の太り具合を測る**(#999 段①)── 読むだけ。
+   *
+   * ⚠ `PRAGMA` は `exportImage` が `page_count` を読む形に倣う(`selectValue`)。
+   * ⚠ **索引の段数だけは「読めないかもしれない」** ── 索引の表が無い / 壊れていると
+   *   `null` で返す(0 と嘘を言わない。⚠ 壊れた DB でも他の数は返す ── 壊れていても
+   *   通す門に置いたので、ここで落とすと「測れない」しか返せなくなる)。
+   * ⚠ `count(*) FROM entries_fts` は使わない(外部内容の表は内容表を数える。
+   *   `entriesFtsRowCount` の註記)── 数えるのは影の表 `entries_fts_idx` の `segid`。
+   */
+  storageGauge: () => {
+    const database = need();
+    const started = Date.now();
+    const num = (sql: string): number => {
+      const v = database.selectValue(sql);
+      return typeof v === 'number' ? v : Number(v ?? 0);
+    };
+    const pageCount = num('PRAGMA page_count');
+    const pageSize = num('PRAGMA page_size');
+    const freelistCount = num('PRAGMA freelist_count');
+    let ftsSegments: number | null = null;
+    try {
+      ftsSegments = num('SELECT count(DISTINCT segid) FROM entries_fts_idx');
+    } catch {
+      /* 索引の表が無い / 読めない = null(下限を 0 と読ませない) */
+    }
+    return {
+      pageCount,
+      pageSize,
+      freelistCount,
+      fileBytes: pageCount * pageSize,
+      freeBytes: freelistCount * pageSize,
+      ftsSegments,
+      journalMode: String(database.selectValue('PRAGMA journal_mode')),
+      tempStore: num('PRAGMA temp_store'),
+      elapsedMs: Date.now() - started,
+    };
+  },
+  /**
    * 🔴 **中身が壊れていないかを調べる**(#971 段③)。
    *
    * ⚠ **時間の上限を掛けない** ── 数 GB では分の単位になるが、ここで切ると
