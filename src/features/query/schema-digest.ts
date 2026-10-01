@@ -21,8 +21,30 @@
  */
 
 /**
+ * 🔴 **本文検索(FTS5 の仮想表)と、その影の表を、図から外す条件**(#967)。
+ *
+ * ⚠ user の構造ではない ── 本文検索のための裏方で、`entries_fts` 1 つに
+ *   `_data` / `_idx` / `_docsize` / `_config`(外部内容でない仮想表は `_content` も)が付き、
+ *   図の箱が **13 のうち 5 つ**も裏方になっていた(`select` では引き続き打てる ── 外すのは図だけ)。
+ * 🔑 **見るのは名前の字面ではなく「仮想表の影であること」** ── `sqlite_master` の `sql` が
+ *   `CREATE VIRTUAL TABLE … USING fts5` の表を探し、その名前から影の名前を**導く**。
+ *   「`_data` で終わる」で外すと、user が csv から作った `sales_data` まで巻き込む。
+ * ⚠ 影の接尾辞は FTS5 が作る固定の 5 つ(`SHADOW_SUFFIXES`)。仮想表自身も外す
+ *   (列は `title` / `body` だけで、user の構造として読める物ではない)。
+ * ⚠ `like` の `_` は 1 字ワイルドカードなので、**名前の比較は `=` で**行う(`like` は固定の語だけ)。
+ */
+const FTS_SHADOW_SUFFIXES = ['_data', '_idx', '_content', '_docsize', '_config'] as const;
+const NOT_FTS_BACKSTAGE = [
+  ' and not exists (',
+  "   select 1 from sqlite_master v where v.type = 'table'",
+  "      and v.sql like 'create virtual table%using fts5%'",
+  `      and m.name in (v.name, ${FTS_SHADOW_SUFFIXES.map((x) => `v.name || '${x}'`).join(', ')}))`,
+].join('\n');
+
+/**
  * 表と列を 1 回で採る。
  * ⚠ **`sqlite_` で始まる物は外す**(sqlite 自身の作業表。user の構造ではない)。
+ * ⚠ **本文検索の仮想表と影の表も外す**(`NOT_FTS_BACKSTAGE`。#967)。
  * ⚠ `notnull` / `from` / `to` は予約語なので **`"` で囲う**。
  */
 export const SCHEMA_COLUMNS_SQL = [
@@ -30,6 +52,7 @@ export const SCHEMA_COLUMNS_SQL = [
   '       p.type as typ, p."notnull" as nn, p.pk as pk',
   '  from sqlite_master m join pragma_table_info(m.name) p',
   " where m.type in ('table','view') and m.name not like 'sqlite_%'",
+  NOT_FTS_BACKSTAGE,
   ' order by m.type, m.name, p.cid',
 ].join('\n');
 

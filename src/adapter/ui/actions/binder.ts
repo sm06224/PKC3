@@ -570,6 +570,7 @@ import { joinCopied, pickMarked } from '@features/clipboard/scrap';
 import { sqlNoteBody, sqlNoteTitle } from '@features/query/sql-to-note';
 // 🔴 手持ちのファイルを開く選び所の印(#854 段②)
 import { SQL_PICK_LOCAL_FILE_VALUE } from '@features/query/sql-local-file';
+import { duckDbNetworkNoteOf } from '@features/query/sql-guest-source';
 import { sqlMenuLabel } from '@features/query/sql-tip';
 import {
   asSqlExportKind,
@@ -9532,7 +9533,14 @@ const ACTIONS: Record<string, ActionHandler> = {
       target instanceof HTMLSelectElement
         ? (target.selectedOptions[0]?.textContent ?? '')
         : (target.getAttribute('data-pkc-sql-source-name') ?? '');
-    dispatcher.dispatch({ type: 'SET_SQL_SOURCE', lid, name: known ?? shown });
+    const name = known ?? shown;
+    dispatcher.dispatch({ type: 'SET_SQL_SOURCE', lid, name });
+    /**
+     * 🔴 **電波が要る相手は、選んだ直後に言う**(#992 ①)。⚠ 判定は
+     *   `duckDbNetworkNoteOf` 1 か所 ── 手持ちの file を選んだ道(`sql-file-input`)も同じ関数を呼ぶ。
+     */
+    const note = duckDbNetworkNoteOf(name);
+    if (note !== null) services.showStatus?.(note);
   },
   /**
    * 🔴 **どのエンジンで引くかを選ぶ**(#682 段②。user 裁定 2026-09-15 = §9 は A)。
@@ -11375,7 +11383,12 @@ export function bindActions(
        */
       const file = el.files?.[0] ?? null;
       el.value = '';
-      if (file) services.pickSqlLocalFile?.(file);
+      if (file) {
+        services.pickSqlLocalFile?.(file);
+        // 🔴 添付を選んだ道(`set-sql-source`)と同じ知らせ(#992 ①)
+        const note = duckDbNetworkNoteOf(file.name);
+        if (note !== null) services.showStatus?.(note);
+      }
     }
   };
   const onKeydown = (ev: Event) => {
