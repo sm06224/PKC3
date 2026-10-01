@@ -50,6 +50,7 @@ import {
   explainCalcMiss,
   formatCalcResult,
 } from '@features/markdown/inline-calc';
+import { alignMdTable } from '@features/markdown/table-align';
 import { quoteOnEnter } from '@features/markdown/quote-assist';
 import { indentLines } from '@features/markdown/indent-assist';
 import { tableOnTab } from '@features/markdown/table-assist';
@@ -10287,6 +10288,27 @@ const EDITOR_RUN: Readonly<Record<string, (ta: HTMLTextAreaElement, notify: (t: 
   outdent: (ta) => {
     runIndent(ta, -1, true);
   },
+  /**
+   * 🔴 **カーソルの在る表の列幅を揃える**(#1171)。
+   * ⚠ 書くのは `insertText`(取り消しの履歴を切らない ── #765)。表の行だけを
+   *   選んで差し替え、**カーソルは同じ升へ戻す**(`alignMdTable` が位置を返す)。
+   * ⚠ 1 面のライブ編集(`row-source`)は**押した 1 行だけ**が欄に入っていて表が
+   *   見えないので、揃えずに行き先を言う(自動で全文編集へ切り替えない)。
+   */
+  'align-table': (ta, notify) => {
+    if (ta.getAttribute('data-pkc-field') === 'row-source') {
+      notify(ALIGN_TABLE_LIVE_NOTE);
+      return;
+    }
+    const done = alignMdTable(ta.value, ta.selectionStart);
+    if ('reason' in done) {
+      notify(done.reason === 'outside' ? '表の外です' : 'もう揃っています');
+      return;
+    }
+    ta.setSelectionRange(done.from, done.to);
+    insertText(ta, done.insert);
+    ta.setSelectionRange(done.caret, done.caret);
+  },
 };
 
 /**
@@ -10316,6 +10338,9 @@ const INDENT_COMMANDS: ReadonlyMap<string, 1 | -1> = new Map([
   ['indent', 1],
   ['outdent', -1],
 ]);
+
+/** 🔑 画面のボタンの字(「全文を編集」)を引いて書く ── `detail.ts` の編集ボタンと同じ字。 */
+const ALIGN_TABLE_LIVE_NOTE = '表の列幅を揃えるには、「全文を編集」に切り替えてください';
 
 /** 🔑 「この命令は本文の欄へ当てるか」に答える口は**ここ 1 つ**(§7)。 */
 function editorCommand(cmd: string): boolean {
@@ -11351,6 +11376,16 @@ export function bindActions(
       if (rowCmd !== null && INDENT_COMMANDS.has(rowCmd)) {
         ke.preventDefault();
         EDITOR_RUN[rowCmd]!(ke.target as HTMLTextAreaElement, () => undefined);
+        return;
+      }
+      /**
+       * 🔴 **user が鍵を割り当てた「表の列幅を揃える」を、1 面の行で押したとき**(#1171)。
+       * ⚠ ここは書式の近道だけを通す門なので、何も言わずに素通りすると
+       *   「鍵を割り当てたのに何も起きない」になる ── 行き先を言う(`EDITOR_RUN` と同じ口)。
+       */
+      if (rowCmd === 'align-table') {
+        ke.preventDefault();
+        EDITOR_RUN[rowCmd]!(ke.target as HTMLTextAreaElement, (t) => services.showStatus?.(t));
         return;
       }
       if (rowCmd === null || FORMAT_OF[rowCmd] === undefined) return;

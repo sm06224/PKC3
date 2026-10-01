@@ -304,6 +304,32 @@ test('🔴 選んでからパレットで記法を入れると、選んだ範囲
   await page.keyboard.type('か');
   await expect(ta, '閉じた後に焦点が返っていない').toHaveValue(/か/);
 
+  /**
+   * 🔴 **表の列幅を揃える**(#1171)── 同じ道中(2 列の欄 + パレット)に 1 つ足す。
+   * ⚠ 本物のブラウザでは `insertText` が `execCommand` で入る(unit の happy-dom は
+   *   手で書き換える側を通る)── **実際に揃い、カーソルが同じ升に残る**ことを見る。
+   */
+  const table = '| 名前 | 価格 |\n|---|---|\n| りんご | 100 |';
+  await ta.fill(table);
+  await ta.evaluate((el, at) => {
+    (el as HTMLTextAreaElement).setSelectionRange(at, at);
+  }, table.indexOf('ご'));
+  await page.keyboard.press('Control+Shift+P');
+  await expect(dialog, '編集中に開けない(表)').toBeVisible();
+  await filter.fill('列幅');
+  await expect(
+    page.locator('[data-pkc-field="palette-row"]').first(),
+    '「表の列幅を揃える」が探せない',
+  ).toHaveAttribute('data-pkc-command', 'align-table');
+  await page.keyboard.press('Enter');
+  await expect(dialog, '選んでも閉じない(表)').toBeHidden();
+  await expect(ta, '表の列幅が揃っていない').toHaveValue(
+    '| 名前   | 価格 |\n| ------ | ---- |\n| りんご | 100  |',
+  );
+  // 🔑 カーソルは同じ升の「ご」の手前に残る(続けて打った字がそこへ入る)
+  await page.keyboard.type('X');
+  await expect(ta, 'カーソルが同じ升に残っていない').toHaveValue(/りんXご/);
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 

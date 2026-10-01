@@ -70,6 +70,11 @@ const reg = (): Record<string, { id: string }[]> =>
  * 🔑 減らしたら**ここから消す**ので、直したことを忘れられない。
  */
 const UNBRIDGED: readonly string[] = [
+  /**
+   * ⚠ 2026-10-01(#1171): 表の列幅を揃える。**押しボタンを持たない** ── `inline-calc` と同じ
+   *   「本文の欄へ当てる命令」の継ぎ目(`EDITOR_RUN`)で受け、「操作を探す」から呼ぶ。
+   */
+  'align-table',
   'append-send',
   /**
    * 🔴 #1032「ノートを閉じる」── **押し所を作らないのが、この直しの中身**である。
@@ -556,11 +561,14 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-01(#1166): 字下げ / 字下げを戻す(`indent` / `outdent`)を `KEY_COMMANDS` へ登記。
       //   押しボタンを持たない(`Tab` と `Ctrl+]` / `Ctrl+[`)ので受け手は増えない。
       //   `registered` +2 / `total` +2 / `outsideActionsTable` +2。
-      total: 339,
+      // ⚠ 2026-10-01(#1171): 表の列幅を揃える(`align-table`)で登記 +1 / total +1 /
+      //   `outsideActionsTable` +1。受け手は増えない ── 押し所を作らず、
+      //   「本文の欄へ当てる命令」の継ぎ目(`EDITOR_RUN`)で受ける(`inline-calc` と同じ仕分け)。
+      total: 340,
       receivers: 283,
-      registered: 95,
+      registered: 96,
       both: 39,
-      outsideActionsTable: 56,
+      outsideActionsTable: 57,
       unregistered: 244,
     });
   });
@@ -602,8 +610,9 @@ describe('操作の全数台帳(#582 段①)', () => {
     // ⚠ 2026-09-28(#1092): 「横の枠(スタック)へ開く」(`filer-open-stack`)で `key` 67 → 68
     // ⚠ 2026-09-28(#1107): 「最近開いたノートへ移る」(`open-recent`)で `key` 68 → 69
     // ⚠ 2026-10-01(#1166): 字下げ / 字下げを戻す(`indent` / `outdent`)で `key` 69 → 71
+    // ⚠ 2026-10-01(#1171): 「表の列幅を揃える」(`align-table`)で `key` 71 → 72(鍵の既定は持たない)
     expect(s().perBook).toEqual({
-      key: 71,
+      key: 72,
       entry: 17,
       body: 3,
       collection: 2,
