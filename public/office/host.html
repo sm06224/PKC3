@@ -105,6 +105,7 @@
 <script src="office-restart-watch.js"></script>
 <script src="office-macros.js"></script>
 <script src="office-format.js"></script>
+<script src="office-images.js"></script>
 <script>
 (function () {
   'use strict';
@@ -363,6 +364,13 @@
         var st0 = FS.stat(window.__loDocPath);
         watch.setBaseline(window.__loDocPath, st0.size, st0.mtime.getTime());
       } catch (e) { /* 無ければ baseline は要らない */ }
+    }
+
+    // 🔴 **置いた画像も「開いただけ」にする**(#146)。⚠ LO が画像を読み終えて閉じても
+    //    `close` は来る ── 載せないと、**画像を挿すたびに新しい添付ノートが増える**
+    if (window.PKC3OfficeImages) {
+      try { window.PKC3OfficeImages.seedBaseline(watch, window.__loImagePlaced); }
+      catch (e) { /* baseline に失敗しても保存の見張りは積む */ }
     }
 
     // ⚠ `mtime` は **Date** である(MEMFS の `getattr` が `new Date(...)` を返す)
@@ -1444,6 +1452,9 @@
     //    (窓は別 process なので生き残る)。だから**窓に預けて返させる**。
     //    ⚠ 空のまま保存が来たら「新規作成」として扱う(新しい添付ノートになる)。
     var docToken = '';
+    // 🔴 **「挿入 → 画像」に並べる添付**(#146)。文書と**同じ封筒**で届く ──
+    //    新しい経路は作らない。⚠ 置き終えたら手放す(MEMFS が持っている ── こちらは二重持ち)
+    var docImages = null;
 
     // 親から文書のバイト列を貰う(無ければ Start Center)。
     var docBytes = await new Promise(function (resolve) {
@@ -1457,6 +1468,7 @@
           clearTimeout(timer);
           ch.onmessage = prev;
           docToken = String((d.payload && d.payload.token) || '');
+          docImages = (d.payload && d.payload.images) || null;
           resolve(new Uint8Array(d.payload.bytes));
           return;
         }
@@ -1585,6 +1597,22 @@
         FS.writeFile(path, docBytes);
         args.push(path);
         window.__loDocPath = path;
+        /**
+         * 🔴 **そのノートの添付(画像)を、Qt のファイルダイアログの初期位置へ置く**(#146)。
+         *
+         * ⚠ **文書と同じ口(ここ)で、`callMain` の前に**書く。判断(名前・上書きしない・
+         *   保存と取り違えない)は `office-images.js` に在る(ここは bundle されず unit が届かない)。
+         * ⚠ 置けなくても起動は続ける ── 画像が並ばないだけで、文書は開く。
+         */
+        window.__loImagePlaced = [];
+        if (docImages && docImages.length && window.PKC3OfficeImages) {
+          try {
+            window.__loImagePlaced = window.PKC3OfficeImages.placeImages(FS, docImages);
+          } catch (e) {
+            console.warn('画像を置けませんでした', e);
+          }
+        }
+        docImages = null;
         // 🔴 渡した形式が保存できないなら、**押す前に**伝える(#225)
         markUnsavable(docName, packAlienOk);
       }

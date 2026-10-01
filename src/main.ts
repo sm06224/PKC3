@@ -187,6 +187,7 @@ import {
   localOpenNotice,
 } from '@features/office/office-launch';
 import { OfficeWindow } from '@adapter/platform/office/office-window';
+import { listNoteImages } from '@adapter/platform/office/office-note-images';
 import { createOfficeOpener } from '@adapter/platform/office/office-open';
 import { watchOfficeHang } from '@adapter/platform/office/office-hang-watch';
 import {
@@ -1210,6 +1211,40 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       const blob = await blobs.get(cid, assetKey);
       return blob ? new Uint8Array(await blob.arrayBuffer()) : null;
     },
+    /**
+     * 🔴 **「挿入 → 画像」に、そのノートの添付(画像)を並べる**(#146 裁定 A)。
+     * ⚠ ここは**道具を渡すだけ** ── 何を並べるか・上限・名前は
+     * `office-note-images.ts` / `features/office/office-images.ts` が持つ。
+     * ⚠ `client` は昇格で実体が替わるので**呼ぶたびに読む**。
+     */
+    listNoteImages: (lids) =>
+      listNoteImages(
+        {
+          getBody: async (lid) => (await client.request({ op: 'getBody', cid, lid })) ?? null,
+          findOwner: async (assetKey) =>
+            ((await client.request({ op: 'findAssetOwner', cid, assetKey })) as { lid: string | null })
+              .lid,
+          // ⚠ bytes は読まない ── IDB の Blob は大きさと種類だけ先に分かる
+          blobInfo: async (assetKey) => {
+            const blob = await blobs.get(cid, assetKey);
+            return blob ? { size: blob.size, type: blob.type } : null;
+          },
+        },
+        lids,
+      ),
+    openNoteLid: () => dispatcher.getState().selectedLid,
+    /**
+     * 🔑 既存の全文検索(`searchEntries`)で「その添付の key を本文に持つノート」を引く ──
+     * 新しい口は作らない。⚠ 数件で切る(1 つの文書を何十ものノートが使っていても、
+     * 並べる画像の元が際限なく増えない。上限は `office-images.ts` の合計 64 MB が最後に止める)。
+     */
+    usersOfAsset: async (assetKey) =>
+      (
+        (await client.request({ op: 'searchEntries', cid, query: assetKey, limit: 8 })) as {
+          lids: string[];
+        }
+      ).lids,
+    notify: (text) => showStatus(text),
   });
   /**
    * markdown を描く口。⚠ **アプリ全体で 1 個**(P8 段⑲)── 面や書出しが

@@ -118,6 +118,20 @@ run2: 10:51:11 → 10:57:12 に実行
 完了を sleep / ポーリングで待たない」)。⚠ `ERR_CONNECTION_REFUSED` が出たら、
 まず「同時に他の smoke / preview が走っていないか」を疑う。
 
+### 🔴 もう 1 つ悪い顔 ── 他人の `vite preview` を**黙って使い回す**(2026-10-01、#813 と #530 の implementer が同時に踏んだ)
+
+⚠ 上は「port が取れずに落ちる」だが、こちらは**落ちない**。playwright の config は
+`reuseExistingServer` なので、**別の worktree が同じ port で preview を立てていると、
+自分の `dist/` ではなく他人の `dist/` を相手に smoke が回る** ── 緑も赤も**他人の版の結果**である。
+実測: 「build しても新しい要素が出ない」で 5 往復探した / 変異試験の最初の 1 回が
+全部空振り(他人の dist なので変異が届いていない)。
+
+🔑 **worktree ごとに port を変える**: `PKC3_SMOKE_PORT` / `PKC3_PLAIN_PORT` / `PKC3_SUBPATH_PORT`
+を自分用の値にして回す。⚠ 回す前に `ss -ltnp | grep <port>` で**自分以外が listen していない**ことを 1 行見る。
+⚠ 他人の preview は止めない(その agent の smoke が落ちる)。
+🔑 検算は 1 つ: **build した直後に、dist に在るはずの字が画面に出るか**を最初の 1 assert にする
+── 出なければ、相手が自分の dist ではない。
+
 ### ⚠ port を分けても、**CPU は分けられない** ── 重い作業と並べたフルは「負荷でだけ」落ちる(2026-09-26)
 
 ⚠ 上の節は port の衝突だが、port を分けて並べても別の形で落ちる。#1038 段 J の
