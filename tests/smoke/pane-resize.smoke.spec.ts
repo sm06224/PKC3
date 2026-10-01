@@ -142,6 +142,48 @@ test('🔴 押しただけなら畳み、掴んで動かした直後は畳まれ
     '縁の「システム」を押しても開かない',
   ).toBeVisible();
   await expect(page.locator(EDGE), '押したら縁が消えた(畳みは続いているはず)').toBeVisible();
+  /**
+   * 🔴 **開いている面の印が、縁のボタンにも付く**(#1206 D1)。⚠ 直す前は縁のボタンに印が付かず、
+   * 「もう一度押すと閉じる」が分からなかった。⚠ 属性が付いただけでは足りない ── **見た目の規則が
+   * 受けている**(他の縁のボタンと地が違う)ことを、実ブラウザの計算後の色で見る。
+   */
+  const edgeBg = (view: string) =>
+    page.evaluate(
+      ([sel, v]) => {
+        const b = document.querySelector<HTMLElement>(`${sel} [data-pkc-view="${v}"]`)!;
+        return { active: b.hasAttribute('data-pkc-active'), bg: getComputedStyle(b).backgroundColor };
+      },
+      [EDGE, view] as const,
+    );
+  // ⚠ 押した直後はポインタが縁のボタンの上に居る ── hover の地(同じ色)と区別が付かなくなるので外す
+  await page.mouse.move(700, 500);
+  const marked = await edgeBg('settings');
+  const plain = await edgeBg('help');
+  expect(marked.active, '縁の「システム」に押された印が付いていない').toBe(true);
+  expect(plain.active, '開いていない面(ヘルプ)にまで印が付いた').toBe(false);
+  expect(marked.bg, '印の付いた縁のボタンが他と同じ見た目(見分けが付かない)').not.toBe(plain.bg);
+  // 帯側(畳んでいる間は見えない)の印も今までどおり付いている(対照群)
+  expect(
+    await page.evaluate(() =>
+      document
+        .querySelector('[data-pkc-region="collection-bar"] [data-pkc-view="settings"]')
+        ?.hasAttribute('data-pkc-active'),
+    ),
+    '帯の印が消えた',
+  ).toBe(true);
+  // もう一度押すと閉じ、印も消える(押された印が「閉じる」を教える)
+  await clickReal(page, `${EDGE} [data-pkc-action="set-view"][data-pkc-view="settings"]`);
+  await expect(
+    page.locator('[data-pkc-view-pane="settings"]'),
+    '縁の「システム」をもう一度押しても閉じない',
+  ).toBeHidden();
+  expect((await edgeBg('settings')).active, '閉じたのに縁の印が残っている').toBe(false);
+  // 🔴 畳んだ「まま」面を開いたときも印が付く(縁を作り直さない道)
+  await clickReal(page, `${EDGE} [data-pkc-action="set-view"][data-pkc-view="help"]`);
+  await expect(page.locator('[data-pkc-view-pane="help"]'), '縁の「ヘルプ」が開かない').toBeVisible();
+  expect((await edgeBg('help')).active, '畳んだまま開いた面の印が縁に付かない').toBe(true);
+  await clickReal(page, `${EDGE} [data-pkc-action="set-view"][data-pkc-view="help"]`);
+  await expect(page.locator('[data-pkc-view-pane="help"]')).toBeHidden();
 
   await page.locator(grip('sidebar')).click();
   expect(await widthOf(page, 'sidebar'), '押しても戻らない').toBeGreaterThan(100);

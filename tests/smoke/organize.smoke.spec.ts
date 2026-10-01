@@ -714,10 +714,35 @@ test('🔴 一覧タブの ↑↓・Enter・絞り込みと、Escape の 2 段�
   await expect(cmdList, '`>` を打っても操作の一覧が出ない').toBeVisible();
   await expect(hostOfNotes, '操作の一覧とノートの一覧が同時に出ている').toBeHidden();
   expect(await listOptions(), '`>` で始まる字が検索語として憶えられた').toEqual([]);
+  /**
+   * 🔴 **`>` の間は、タブ・並び順・作る帯が出ない**(#1206 D2)。⚠ 直す前は 3 つとも残り、
+   * タブを押すと色だけ動いて一覧は操作のままだった(壊れたと読む)。**実ブラウザで見えているか**
+   * を見る(`hidden` が CSS の `display` に負けていないこと)。
+   */
+  await expect(page.locator('[data-pkc-region="browse-tabs"]'), '`>` の間もタブが見えている').toBeHidden();
+  await expect(page.locator('[data-pkc-field="entry-sort"]'), '`>` の間も並び順が見えている').toBeHidden();
+  await expect(page.locator('[data-pkc-region="create-bar"]'), '`>` の間も作る帯が見えている').toBeHidden();
+  await expect(box, '探す欄まで隠れた').toBeVisible();
 
   await box.fill('>集計');
   const queryRow = cmdList.locator('[data-pkc-command="view-query"]');
   await expect(queryRow, '絞った行が出ていない').toBeVisible();
+  /**
+   * 🔴 **行へ `↓` で降りて `Esc` ── 探す欄へ焦点が戻るだけ**(#1206 D4)。⚠ 直す前は
+   * **閉じる操作へ落ちて、開いている面が閉じた**。観測点は開いている面(システム)が残ること
+   * と、`>` の字が残ること。
+   */
+  const settingsStill = page.locator('[data-pkc-view-pane="settings"]');
+  await expect(settingsStill, '前提が崩れている(システムの面が出ていない)').toBeVisible();
+  await box.press('ArrowDown');
+  await expect(
+    page.locator('[data-pkc-region="command-list"] [data-pkc-field="command-row"]:focus'),
+    '`↓` で行へ降りていない(前提)',
+  ).toHaveCount(1);
+  await page.keyboard.press('Escape');
+  await expect(box, '行の上の Esc で探す欄へ焦点が戻らない').toBeFocused();
+  await expect(box, '`>` の字が消えた').toHaveValue('>集計');
+  await expect(settingsStill, '行の上の Esc で開いている面が閉じた').toBeVisible();
   expect(
     await cmdList.evaluate((el) => el.scrollWidth <= el.clientWidth + 1),
     '操作の一覧が横にはみ出している',
@@ -730,6 +755,10 @@ test('🔴 一覧タブの ↑↓・Enter・絞り込みと、Escape の 2 段�
   await expect(box, '実行したのに `>` が欄に残っている').toHaveValue('');
   await expect(cmdList, '実行したのに操作の一覧が残っている').toBeHidden();
   await expect(hostOfNotes, 'ノートの一覧が戻っていない').toBeVisible();
+  // 🔴 #1206 D2 の対照群: 実行して `>` が消えたら、タブ・並び順・作る帯も戻る
+  await expect(page.locator('[data-pkc-region="browse-tabs"]'), '`>` が消えてもタブが戻らない').toBeVisible();
+  await expect(page.locator('[data-pkc-field="entry-sort"]'), '`>` が消えても並び順が戻らない').toBeVisible();
+  await expect(page.locator('[data-pkc-region="create-bar"]'), '`>` が消えても作る帯が戻らない').toBeVisible();
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

@@ -13,7 +13,8 @@
  * ② 送りは**進んだ回数**を積む(数で畳むのは描く側)/ 世代が進む(同じ語でもう一度でも送り直せる)
  * ③ 🔴 **消えるのは「結果の形」で決まる** ── 選択が動く / 編集に入る / 章の欄が開く、**どの経路でも**
  *    (`reduce()` の外側 1 か所)。個別の action を見張っていないことを、複数の経路で見る
- * ④ 断る回は state を 1 ビットも動かさない(参照も同じ)
+ * ④ 断る回は state を 1 ビットも動かさない(参照も同じ)。⚠ **例外は「そのノートを編集中」**
+ *    ── 黙って捨てず `notice` に 1 行置く(#1206 D9)
  */
 import { describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
@@ -60,11 +61,27 @@ describe('SEARCH_JUMP_START: 始まる条件', () => {
     expect(refused.state, '断る回は state を動かさない(参照ごと同じ)').toBe(before);
   });
 
-  it('🔴 編集中は塗らない', () => {
+  it('🔴 編集中は塗らない ── 黙らず、画面下の 1 行で理由を言う(#1206 D9)', () => {
     const editing = reduce(opened(), { type: 'START_EDIT' }).state;
     expect(editing.phase, '前提: 編集に入っている').toBe('editing');
+    expect(editing.notice, '前提: 直前まで知らせは無い').toBeNull();
     const r = reduce(editing, { type: 'SEARCH_JUMP_START', lid: 'a', query: '会議' });
-    expect(r.state).toBe(editing);
+    expect(r.state.searchJump, '塗らない').toBeNull();
+    expect(r.state.notice).toBe('編集を終えると、当たった所に色が付きます');
+    expect(r.state.phase, '編集は続く').toBe('editing');
+  });
+
+  it('🔴 知らせるのは「そのノートを編集中」のときだけ(対照群: 読む画面・別のノート・空の語は知らせない)', () => {
+    const ready = opened();
+    expect(ready.phase, '前提: 読む画面').toBe('ready');
+    expect(start(ready).notice, 'ready なら塗れるので知らせない').toBeNull();
+    const editing = reduce(ready, { type: 'START_EDIT' }).state;
+    // 別のノート宛て ── 塗れない理由は画面に既に在る。黙って参照ごと同じ
+    const other = reduce(editing, { type: 'SEARCH_JUMP_START', lid: 'b', query: '会議' });
+    expect(other.state).toBe(editing);
+    // 空の語 ── 言う意味が無い
+    const blank = reduce(editing, { type: 'SEARCH_JUMP_START', lid: 'a', query: '  ' });
+    expect(blank.state).toBe(editing);
   });
 
   it('空の語・空白だけの語では始まらない', () => {

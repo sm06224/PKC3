@@ -157,3 +157,43 @@ describe('操作を名前で探す(一覧)', () => {
     });
   });
 });
+
+describe('🔴 本文の欄が要る操作の理由(#1206 D3)', () => {
+  const editorOnly = (id: string): boolean => id === 'format-ruby';
+  const whyOf = (id: string, rows: ReturnType<typeof paletteRows>): string =>
+    rows.find((r) => r.id === id)!.why;
+
+  it('🔴 判定を渡したときだけ、その操作の理由が「どこから呼べるか」になる(他の行は今までのまま)', () => {
+    const plain = paletteRows('', BINDINGS, NONE);
+    const hinted = paletteRows('', BINDINGS, NONE, false, () => null, editorOnly);
+    expect(whyOf('format-ruby', plain), '前提: 渡さないと今までの理由').toContain(
+      'にいるときだけ効きます',
+    );
+    expect(whyOf('format-ruby', hinted)).toBe(
+      `${NOT_READY_PREFIX}本文の欄で Ctrl + Shift + P の『操作を探す』から呼べます`,
+    );
+    // 判定が false の行は 1 字も変わらない
+    for (const r of plain) if (r.id !== 'format-ruby') expect(whyOf(r.id, hinted), r.id).toBe(r.why);
+  });
+
+  it('🔴 案内の鍵は user が割り当て直した字に従う / 押せる行には付かない', () => {
+    const rebound = { ...BINDINGS, 'open-palette': ['Alt+9'] };
+    const rows = paletteRows('', rebound, NONE, false, () => null, editorOnly);
+    expect(whyOf('format-ruby', rows)).toContain('Alt + 9');
+    expect(whyOf('format-ruby', rows)).not.toContain('Ctrl');
+    const ready = paletteRows('', BINDINGS, new Set(['format-ruby']), false, () => null, editorOnly);
+    expect(whyOf('format-ruby', ready), '押せる行に案内が付いた').not.toContain(NOT_READY_PREFIX);
+  });
+
+  it('🔴 ボタンが持っている押せない理由(編集中など)は案内より先に出る', () => {
+    const rows = paletteRows(
+      '',
+      BINDINGS,
+      NONE,
+      false,
+      (id) => (id === 'format-ruby' ? '保存しています' : null),
+      editorOnly,
+    );
+    expect(whyOf('format-ruby', rows)).toBe(`${NOT_READY_PREFIX}保存しています`);
+  });
+});

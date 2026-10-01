@@ -132,6 +132,11 @@ export class BrowseRouter {
   /** 🔴 ノートの一覧の器(`>` を打っている間は隠す)と、代わりに出す操作の一覧の器(#274 段①)。 */
   private readonly host: HTMLElement;
   private readonly commandList: HTMLElement | null;
+  /**
+   * 🔴 **`>` の間は出さない帯 3 つ**(#1206 D2)── 探し方のタブ / 並び順 / 作る帯。
+   * ⚠ 隠す物は**この 3 つだけ**(探す欄・戻る進む・種類の札 `kind-bar` は別の作法で動く)。
+   */
+  private readonly hideWhileCommand: readonly HTMLElement[];
   /** 左の列の「+ ノート」(主の操作の印を phase で付け外しする)。 */
   private readonly createRun: HTMLElement | null;
   /** 🔴 指で触る端末へ理由を届ける 1 行(#791 ③)。⚠ CSS が出し分ける。 */
@@ -162,6 +167,14 @@ export class BrowseRouter {
     this.last = initial;
     this.host = host;
     this.commandList = sidebar.querySelector<HTMLElement>('[data-pkc-region="command-list"]');
+    this.hideWhileCommand = [
+      '[data-pkc-region="browse-tabs"]',
+      '[data-pkc-field="entry-sort"]',
+      '[data-pkc-region="create-bar"]',
+    ].flatMap((sel) => {
+      const el = sidebar.querySelector<HTMLElement>(sel);
+      return el === null ? [] : [el];
+    });
     const pane = (mode: BrowseMode): HTMLElement => {
       const el = document.createElement('div');
       el.setAttribute('data-pkc-browse-pane', mode);
@@ -312,6 +325,13 @@ export class BrowseRouter {
     if (this.host.hidden !== commandMode) this.host.hidden = commandMode;
     if (this.commandList !== null && this.commandList.hidden !== !commandMode)
       this.commandList.hidden = !commandMode;
+    /**
+     * 🔴 **`>` の間は、タブ・並び順・作る帯も出さない**(#1206 D2)。⚠ 直す前は残っていて、
+     *   押すとタブの色だけ動くのに**一覧は操作のまま**(壊れたと読む)だった ── 種類の札
+     *   (`kind-bar.ts`)が `>` で隠れるのと**同じ作法**で、`hidden` を付けるだけ(戻すと復帰)。
+     *   「+ ノート」の代わりは `>ノート`(操作の一覧から作れる)。
+     */
+    for (const el of this.hideWhileCommand) if (el.hidden !== commandMode) el.hidden = commandMode;
     // ⚠ 非 active な面には render を呼ばない(裏で毎 state 仕事をしない)
     if (mode === 'list') this.list.render(state);
     else if (mode === 'filer') this.filer.render(state);

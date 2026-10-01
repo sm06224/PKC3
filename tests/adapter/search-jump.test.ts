@@ -166,7 +166,11 @@ describe('帯の字', () => {
   it('n/m 件 / 当たりが無いときはその事実を言う', () => {
     expect(searchJumpLabel(4, 0)).toBe('1/4 件');
     expect(searchJumpLabel(4, 3)).toBe('4/4 件');
-    expect(searchJumpLabel(0, 0)).toBe('本文に当たった所はありません');
+    expect(searchJumpLabel(0, 0)).toBe('本文の字には当たりませんでした(太字やリンクをまたぐ語、図の中は数えません)');
+    // 🔴 #1206 D6: 数えない範囲まで言う(断定にしない)/ 帯に収まる長さ
+    expect(searchJumpLabel(0, 0)).toContain('数えません');
+    expect(searchJumpLabel(0, 0).length, '帯に収まらない長さ').toBeLessThanOrEqual(120);
+    expect(searchJumpLabel(0, 0)).not.toContain('当たった所はありません');
   });
 });
 
@@ -249,7 +253,7 @@ describe('detail: 「探す」からの塗りと帯', () => {
     const { root, detail, s0 } = await open();
     await apply(detail, s0, { type: 'SEARCH_JUMP_START', lid: 'a', query: 'ありえない語' });
     expect(bar(root).hidden).toBe(false);
-    expect(count(root)).toBe('本文に当たった所はありません');
+    expect(count(root)).toBe('本文の字には当たりませんでした(太字やリンクをまたぐ語、図の中は数えません)');
     const btn = (a: string) => root.querySelector<HTMLButtonElement>(`[data-pkc-action="${a}"]`)!;
     expect(btn('search-jump-prev').disabled).toBe(true);
     expect(btn('search-jump-next').disabled).toBe(true);

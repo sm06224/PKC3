@@ -2003,6 +2003,9 @@ export const initialState: AppState = {
   messagesUnread: 0,
 };
 
+/** 🔴 編集中のノートへ「探す」から送られたとき、画面下に出す 1 行(#1206 D9)。 */
+export const SEARCH_JUMP_EDITING_NOTICE = '編集を終えると、当たった所に色が付きます';
+
 export type UserAction =
   /**
    * 🔴 **「探す」で当たった語で、いま開いているノートの本文を塗って送る**(#1102 段①)。
@@ -2010,6 +2013,8 @@ export type UserAction =
    * ⚠ **選んでいるノートのときだけ**・**読む画面(`ready`)のときだけ** ── 編集中は塗らない。
    *   断るときは state を 1 ビットも動かさない(黙って何もしない。呼び側は探した語を運んだだけで、
    *   塗れない理由は画面に既に出ている)。
+   *   ⚠ **ただし「そのノートを編集中」のときだけは、`notice` に 1 行置く**(#1206 D9。
+   *   窓が前に出るのに何も起きないのを、壊れたと読ませない)。
    */
   | { type: 'SEARCH_JUMP_START'; lid: string; query: string }
   /** 🔴 **次 / 前の当たりへ送る**(#1102 段①)。⚠ 端で回る(数で畳むのは描く側)。 */
@@ -8885,6 +8890,22 @@ function reduceCore(
       const query = normalizeFindQuery(action.query);
       // ⚠ 断るときは何も動かさない(上の `UserAction` の注記)。`sectionDraft` は手組み fixture で
       //   `undefined` のことがあるので `!= null`
+      /**
+       * 🔴 **編集中に送られたときは、黙って捨てずに 1 行言う**(#1206 D9)。⚠ 直す前は窓が前に出る
+       *   だけで**塗られもせず、理由も出なかった**(壊れたと読む)。⚠ 言うのは「そのノートを編集中」
+       *   のときだけ ── 別のノートが選ばれている / 語が空 / 編集以外の phase は、塗れない理由が
+       *   画面に既にあるか、言う意味が無いので今までどおり黙る(state は 1 ビットも動かさない)。
+       */
+      if (query !== '' && state.phase === 'editing' && state.selectedLid === action.lid)
+        return {
+          state: {
+            ...state,
+            notice: SEARCH_JUMP_EDITING_NOTICE,
+            noticeOpen: null,
+            noticeCreate: null,
+          },
+          events: [],
+        };
       if (
         query === '' ||
         state.phase !== 'ready' ||

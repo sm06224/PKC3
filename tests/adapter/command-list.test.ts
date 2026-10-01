@@ -281,6 +281,99 @@ describe('行を押す / Enter で、その操作が実行される', () => {
   });
 });
 
+/**
+ * 🔴 **#1206 の動線の直し**(`>` の一覧まわりの 4 件)。
+ *
+ * user から見た物語:探す欄に `>` を打つ → 下のタブや並び順を押す → 色だけ動いて一覧は操作のまま
+ * (D2)/ `>` だけ打って Enter → 打った覚えのないノートの編集に入る(D8)/ 一覧へ `↓` で降りて
+ * `Esc` → 探す欄へ戻らず開いている本文が閉じる(D4)/ `>ルビ` の灰色の理由が、左では作れない状態を
+ * 言う(D3)。
+ */
+describe('#1206 `>` の一覧の動線', () => {
+  const tabsOf = (root: HTMLElement) => root.querySelector<HTMLElement>('[data-pkc-region="browse-tabs"]')!;
+  const sortOf = (root: HTMLElement) => root.querySelector<HTMLElement>('[data-pkc-field="entry-sort"]')!;
+  const createBarOf = (root: HTMLElement) => root.querySelector<HTMLElement>('[data-pkc-region="create-bar"]')!;
+
+  it('🔴 D2: `>` の間はタブ・並び順・作る帯を出さない / 消すと戻る(対照群: 打つ前は 3 つとも出ている)', () => {
+    const { root } = setup();
+    const three = [tabsOf(root), sortOf(root), createBarOf(root)];
+    expect(three.every((el) => el !== null), '前提: 3 つの器が在る').toBe(true);
+    expect(three.map((el) => el.hidden), '前提: 打つ前は 3 つとも出ている').toEqual([false, false, false]);
+    type(root, '>');
+    expect(three.map((el) => el.hidden), '`>` の間もタブ・並び順・作る帯が出ている').toEqual([true, true, true]);
+    type(root, '>ノート');
+    expect(three.map((el) => el.hidden), '字を足したら戻った').toEqual([true, true, true]);
+    type(root, '');
+    expect(three.map((el) => el.hidden), '`>` を消しても 3 つが戻らない').toEqual([false, false, false]);
+    // 隠すのは 3 つだけ ── 探す欄は残る(消すと `>` を直せなくなる)
+    type(root, '>');
+    expect(field(root).hidden, '探す欄まで隠れた').toBe(false);
+    expect(field(root).closest('[hidden]'), '探す欄が隠れた器の中に在る').toBeNull();
+  });
+
+  it('🔴 D8: `>` だけ(後ろが 0 文字)の Enter は何もしない ── 一覧は出したまま(対照群: 1 文字以上なら実行する)', async () => {
+    const { root, sent } = setup();
+    type(root, '>');
+    expect(rows(root).some((b) => !b.disabled), '前提: 押せる行が在る(先頭は「ノートを作る」)').toBe(true);
+    sent.length = 0;
+    keydown(field(root), { key: 'Enter' });
+    await tick();
+    expect(sent.filter((a) => a.type !== 'SET_ENTRY_FILTER'), '`>` だけの Enter で先頭の行が走った').toEqual([]);
+    expect(listOf(root).hidden, '一覧が消えた').toBe(false);
+    // 空白だけも「名前が無い」
+    type(root, '>  ');
+    sent.length = 0;
+    keydown(field(root), { key: 'Enter' });
+    await tick();
+    expect(sent.filter((a) => a.type !== 'SET_ENTRY_FILTER'), '`>` + 空白だけの Enter で走った').toEqual([]);
+    // 対照群: 1 文字でも打てば、そこから実行できる
+    type(root, '>集');
+    sent.length = 0;
+    keydown(field(root), { key: 'Enter' });
+    await tick();
+    expect(
+      sent.some((a) => a.type === 'SET_VIEW_MODE' && a.mode === 'query'),
+      '1 文字以上なら実行されるはず(門が広すぎる)',
+    ).toBe(true);
+  });
+
+  it('🔴 D4: 一覧の行の上の Esc は探す欄へ焦点を戻すだけ ── 本文は閉じず、`>` の字も残る', () => {
+    const { root, d } = setup();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    expect(d.getState().selectedLid, '前提: ノートを開いている').toBe('n1');
+    type(root, '>');
+    keydown(field(root), { key: 'ArrowDown' });
+    const row = rows(root).find((b) => !b.disabled)!;
+    expect(document.activeElement, '前提: 行へ降りている').toBe(row);
+    const ev = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    row.dispatchEvent(ev);
+    expect(document.activeElement, '探す欄へ焦点が戻っていない').toBe(field(root));
+    expect(d.getState().selectedLid, '本文が閉じた').toBe('n1');
+    expect(field(root).value, '`>` の字が消えた').toBe('>');
+    expect(listOf(root).hidden, '一覧が消えた').toBe(false);
+    expect(ev.defaultPrevented, 'Esc の既定動作を止めていない(他の受け手へ落ちる)').toBe(true);
+  });
+
+  it('🔴 D3: 左の `>` では「本文の欄が要る操作」の理由が、呼べる場所を言う(行は隠さない)', () => {
+    const { root, d } = setup();
+    const left = commandRowsFor(root, d, appKeymap, 'ルビ', null);
+    const ruby = left.find((r) => r.id === 'format-ruby');
+    expect(ruby, '行を隠した').toBeDefined();
+    expect(ruby!.ready).toBe(false);
+    expect(ruby!.why).toBe(`${NOT_READY_PREFIX}本文の欄で Ctrl + Shift + P の『操作を探す』から呼べます`);
+    // 対照群 1: 本文の欄から開いたパレット(宛先が在る)は押せる ── 理由は要らない
+    const ta = document.createElement('textarea');
+    document.body.append(ta);
+    const fromEditor = commandRowsFor(root, d, appKeymap, 'ルビ', ta);
+    expect(fromEditor.find((r) => r.id === 'format-ruby')!.ready, 'パレットの小窓では押せるはず').toBe(true);
+    expect(fromEditor.find((r) => r.id === 'format-ruby')!.why).not.toContain('操作を探す');
+    // 対照群 2: 「本文の欄が要る」わけではない操作(2 ペインの編集の確定)は今までの理由のまま
+    const commit = (rs: readonly { id: string; why: string }[]) => rs.find((r) => r.id === 'commit-edit')!.why;
+    expect(commit(commandRowsFor(root, d, appKeymap, '', null))).toContain('にいるときだけ効きます');
+    expect(commit(commandRowsFor(root, d, appKeymap, '', ta))).toContain('にいるときだけ効きます');
+  });
+});
+
 describe('種類の札', () => {
   it('🔴 札を押して絞っているとき、`>` を打つ間だけ札を出さない(押しても見えている物が変わらない)', () => {
     const { root, d } = setup();

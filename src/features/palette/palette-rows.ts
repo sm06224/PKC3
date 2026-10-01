@@ -93,7 +93,12 @@ function rankOf(cmd: KeyCommand, q: string): number | null {
  *   (「ノートを選んでいるときだけ効きます」)── だからそれを引く。
  *   ここで書き直すと、`note` と理由の**2 つの答え**ができる(§7)。
  */
-function reasonOf(cmd: KeyCommand, blocked: string | null): string {
+function reasonOf(
+  cmd: KeyCommand,
+  blocked: string | null,
+  /** 🔴 本文の欄が要る操作への案内の字(#1206 D3)。⚠ 渡されたときだけ使う。 */
+  editorHint: string | null = null,
+): string {
   /*
    * 🔴 **そのボタンが持っている理由を最優先で使う**(#791 ④)。
    *
@@ -104,6 +109,7 @@ function reasonOf(cmd: KeyCommand, blocked: string | null): string {
    *   読み直すと、同じ問いに答える口が 2 つになる(CLAUDE.md §7)。
    */
   if (blocked !== null && blocked !== '') return `${NOT_READY_PREFIX}${blocked}`;
+  if (editorHint !== null) return `${NOT_READY_PREFIX}${editorHint}`;
   if (!cmd.contexts.includes('global')) {
     const where = cmd.contexts.map((c) => CONTEXT_LABELS[c]).join(' / ');
     return `${NOT_READY_PREFIX}${where}にいるときだけ効きます`;
@@ -134,8 +140,21 @@ export function paletteRows(
   ready: ReadonlySet<string>,
   mac = false,
   blockedReason: (id: string) => string | null = () => null,
+  /**
+   * 🔴 **「本文の欄が要る操作」か**(#1206 D3)。⚠ 渡すのは**左の `>` の一覧だけ**
+   *   (本文の欄が無い所から開いた面)── 押せない理由を「いまの文脈」ではなく
+   *   **「どこから呼べるか」**で言う。渡さない(= 本文の欄から開いたパレット)ときは今までの理由。
+   */
+  needsEditorField?: (id: string) => boolean,
 ): readonly PaletteRow[] {
   const q = fold(query.trim());
+  const editorHintText = (): string => {
+    const own = KEY_COMMANDS.find((c) => c.id === 'open-palette');
+    const chord = (bindings['open-palette'] ?? own?.defaults ?? [])
+      .map((b) => chordLabel(b, mac))
+      .join(' / ');
+    return `本文の欄で ${chord} の『操作を探す』から呼べます`;
+  };
   const hits: { row: PaletteRow; rank: number; order: number }[] = [];
   for (const [order, cmd] of KEY_COMMANDS.entries()) {
     const rank = rankOf(cmd, q);
@@ -149,7 +168,11 @@ export function paletteRows(
         label: cmd.label,
         keys: (bindings[cmd.id] ?? cmd.defaults).map((b) => chordLabel(b, mac)),
         ready: ok,
-        why: ok ? (cmd.note ?? '') : reasonOf(cmd, blockedReason(cmd.id)),
+        why: ok ? (cmd.note ?? '') : reasonOf(
+              cmd,
+              blockedReason(cmd.id),
+              needsEditorField?.(cmd.id) === true ? editorHintText() : null,
+            ),
       },
     });
   }

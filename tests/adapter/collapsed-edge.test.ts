@@ -22,7 +22,7 @@ import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { applyPaneVisibility } from '../../src/adapter/ui/render/pane-visibility';
-import { collectionBarItems } from '../../src/adapter/ui/render/collection-bar';
+import { collectionBarItems, markCollectionView } from '../../src/adapter/ui/render/collection-bar';
 import { codeOnly } from '../helpers/code-only';
 import { blocksFor, mediaBlock, stripComments, withoutMedia } from '../helpers/css-blocks';
 
@@ -269,5 +269,47 @@ describe('縁の幅(CSS の原文)', () => {
     ).join('\n');
     expect(grip, '畳んだ帯が右端へ寄っていない').toMatch(/justify-self:\s*end/);
     expect(grip, '畳んだ帯が 8px でない').toMatch(/width:\s*8px/);
+  });
+});
+
+describe('🔴 いま開いている面の印が、縁のボタンにも付く(#1206 D1)', () => {
+  /** 印が付いている面の名前(`data-pkc-view`)を並び順のまま。 */
+  const activeViews = (btns: HTMLElement[]): string[] =>
+    btns
+      .filter((b) => b.hasAttribute('data-pkc-active'))
+      .map((b) => b.getAttribute('data-pkc-view') ?? '');
+
+  it('🔴 畳んだ後に面が変わると、縁の「そのボタン」だけに印が付き、帯の印も今までどおり', () => {
+    const { root } = mounted();
+    applyPaneVisibility(root, ['sidebar']);
+    markCollectionView(root, 'settings');
+    expect(activeViews(edgeButtons(root)), '縁のボタンに印が付かない').toEqual(['settings']);
+    expect(activeViews(barButtons(root)), '帯(対照群)の印が変わった').toEqual(['settings']);
+    markCollectionView(root, 'help');
+    expect(activeViews(edgeButtons(root)), '面を変えても縁の印が動かない').toEqual(['help']);
+    expect(activeViews(barButtons(root))).toEqual(['help']);
+  });
+
+  it('🔴 畳んだ「後」に縁を作ったとき、いまの印を当て直す(作り直しで印が消えない)', () => {
+    const { root } = mounted();
+    // 畳む前に面が決まっている ── main.ts の markView は同じ面なら早く戻るので、
+    // 縁を作るとき自身が現在の印を写さないと、畳んだ直後の縁には印が無い
+    markCollectionView(root, 'settings');
+    expect(root.querySelector(EDGE), '前提: まだ縁が無い').toBeNull();
+    applyPaneVisibility(root, ['sidebar']);
+    expect(activeViews(edgeButtons(root))).toEqual(['settings']);
+    // 戻して面を変え、畳み直しても同じ
+    applyPaneVisibility(root, []);
+    markCollectionView(root, 'help');
+    applyPaneVisibility(root, ['sidebar']);
+    expect(activeViews(edgeButtons(root)), '畳み直した縁が古い面の印を持っている').toEqual(['help']);
+  });
+
+  it('面が「ノート」のとき(印を持つボタンが無い)は縁にも印が付かない', () => {
+    const { root } = mounted();
+    markCollectionView(root, 'detail');
+    applyPaneVisibility(root, ['sidebar']);
+    expect(activeViews(edgeButtons(root))).toEqual([]);
+    expect(activeViews(barButtons(root))).toEqual([]);
   });
 });
