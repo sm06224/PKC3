@@ -133,6 +133,13 @@ test('🔴 本文の entry: リンクを押すと、そのノートが開く(遷
   //   上の #1169 ③ で作った 2026-10-16 のノートが開いているので、リンク先を開き直す。
   await rows.filter({ hasText: '2026-10-15' }).first().click();
   await expect(page.locator('[data-pkc-field="detail-title"]')).toContainText('2026-10-15');
+  // ⚠ 右の列は開いた直後に「参照元」(worker から届く)で後から伸びる ── 実測で
+  //   「ゴミ箱へ移す」が y=582 → 653 → 815 と動き、途中の瞬間に押すとお知らせのカードに
+  //   覆われて落ちた(9 回中 3 回)。伸びる元が届くのを待ってから押す(実時間では待たない)。
+  await expect(
+    page.locator('[data-pkc-field="inspector-backlinks"] [data-pkc-field="inspector-backlink"]'),
+    '参照元(リンク元)が右の列に届いていない',
+  ).toHaveCount(1);
 
   /**
    * 🔴 **無いノートへのリンクは点線になり、ゴミ箱から戻すと開き直さずに消える**(#1174 段①)。
