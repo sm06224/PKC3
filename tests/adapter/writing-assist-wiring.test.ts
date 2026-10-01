@@ -40,7 +40,12 @@ function setup(services: Record<string, unknown> = {}) {
  * ⚠ **`[data-pkc-region="detail"]` の中**に置く ── 書式の効く先を探す
  *   `formatTarget` はその面の中しか見ない(実物と同じ形にしないと空振りする)。
  */
-function editor(root: HTMLElement, value: string, caret: number): HTMLTextAreaElement {
+function editor(
+  root: HTMLElement,
+  value: string,
+  caret: number,
+  field: 'editor-body' | 'row-source' | 'append-input' = 'editor-body',
+): HTMLTextAreaElement {
   let detail = root.querySelector<HTMLElement>('[data-pkc-region="detail"]');
   if (detail === null) {
     detail = document.createElement('div');
@@ -48,7 +53,7 @@ function editor(root: HTMLElement, value: string, caret: number): HTMLTextAreaEl
     root.append(detail);
   }
   const ta = document.createElement('textarea');
-  ta.setAttribute('data-pkc-field', 'editor-body');
+  ta.setAttribute('data-pkc-field', field);
   ta.value = value;
   detail.append(ta);
   ta.setSelectionRange(caret, caret);
@@ -103,6 +108,76 @@ describe('引用の継続が編集欄に繋がっている #396', () => {
     const ta = editor(root, 'ただの本文', 3);
     enter(ta);
     expect(ta.value).toBe('ただの本文');
+  });
+});
+
+describe('リストの継続が編集欄に繋がっている #1167', () => {
+  it('🔴 `- ` の行で Enter を押すと、`- ` が継ぎ足される(全文欄・行の欄の両方)', () => {
+    for (const field of ['editor-body', 'row-source'] as const) {
+      const { root } = setup();
+      const ta = editor(root, '- 牛乳', 4, field);
+      enter(ta);
+      expect(ta.value, `${field}: 継ぎ足されていない(繋がっていない)`).toBe('- 牛乳\n- ');
+    }
+  });
+
+  it('番号は +1、チェックは未完了で続く', () => {
+    const { root } = setup();
+    const a = editor(root, '9. あ', 5);
+    enter(a);
+    expect(a.value).toBe('9. あ\n10. ');
+    const b = editor(root, '- [x] 済', 8);
+    enter(b);
+    expect(b.value).toBe('- [x] 済\n- [ ] ');
+  });
+
+  it('🔴 記号だけの行で Enter を押すと、リストから抜ける', () => {
+    const { root } = setup();
+    const v = '- あ\n- [ ] ';
+    const ta = editor(root, v, v.length);
+    enter(ta);
+    expect(ta.value, '記号が残っている').toBe('- あ\n');
+  });
+
+  /** ⚠ 追記の欄は引用と同じく入れない(Enter は計算にだけ使い、送るのは Ctrl+Enter)。 */
+  it('🔴 追記欄では続けない(対照: 同じ値の全文欄では続く)', () => {
+    const { root } = setup();
+    const ap = editor(root, '- 牛乳', 4, 'append-input');
+    enter(ap);
+    expect(ap.value, '追記欄でリストが続いている').toBe('- 牛乳');
+    const ed = editor(root, '- 牛乳', 4);
+    enter(ed);
+    expect(ed.value).toBe('- 牛乳\n- ');
+  });
+
+  it('⚠ Shift+Enter は記号を付けない普通の改行 / 変換中は触らない', () => {
+    const { root } = setup();
+    const ta = editor(root, '- 牛乳', 4);
+    enter(ta, { shiftKey: true });
+    enter(ta, { ctrlKey: true });
+    ta.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, isComposing: true }),
+    );
+    expect(ta.value).toBe('- 牛乳');
+  });
+
+  /**
+   * 🔑 順番: 計算が先に答えを挿し、リストの継続は**挿した後の値**を読む。
+   * ⚠ 継続が先に走ると `- 2+3=` の `=` の後ろで割れて、答えが次の行へ落ちる。
+   */
+  it('🔴 `- 2+3=` で Enter → 答えが先に入り、その行末から続く', () => {
+    const { root } = setup();
+    const ta = editor(root, '- 2+3=', 6);
+    enter(ta);
+    expect(ta.value).toBe('- 2+3=5\n- ');
+  });
+
+  it('コードの中では続けない', () => {
+    const { root } = setup();
+    const v = '```\n- コード';
+    const ta = editor(root, v, v.length);
+    enter(ta);
+    expect(ta.value).toBe(v);
   });
 });
 

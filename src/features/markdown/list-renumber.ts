@@ -29,6 +29,22 @@
 
 export type ListNumberMode = 'sequential' | 'uniform';
 
+/**
+ * fenced code の開閉を 1 行ぶん進める。`fence` は開いている間だけ記号(`` ` `` か `~`)、
+ * 閉じていれば `''`。
+ *
+ * 🔑 **fence 追跡の正本はここ 1 か所**(§7)── 番号の振り直しと、Enter でリストを
+ *   続ける規則(`quote-assist.ts`)が**同じ判定**で「コードの中か」を決める。
+ *   ⚠ 閉じは**開いた記号と同じ種類で、記号だけの行**(中身のある行は閉じではない)。
+ */
+export function advanceFence(fence: string, line: string): string {
+  const m = /^\s*([`~]{3,})/.exec(line);
+  if (fence !== '') {
+    return m && m[1]![0] === fence && /^\s*[`~]{3,}\s*$/.test(line) ? '' : fence;
+  }
+  return m ? m[1]![0]! : '';
+}
+
 /** `  3. 中身` を読む。番号付きの項目でなければ `null`。 */
 function readItem(line: string): { indent: string; sep: string; rest: string } | null {
   const m = /^(\s*)\d+([.)])(\s+.*)$/.exec(line);
@@ -53,14 +69,14 @@ export function renumberLists(body: string, mode: ListNumberMode = 'sequential')
   let fence = '';
 
   for (const line of lines) {
-    const fenceM = /^\s*([`~]{3,})/.exec(line);
+    const nextFence = advanceFence(fence, line);
     if (fence !== '') {
       out.push(line);
-      if (fenceM && fenceM[1]![0] === fence && /^\s*[`~]{3,}\s*$/.test(line)) fence = '';
+      fence = nextFence;
       continue;
     }
-    if (fenceM) {
-      fence = fenceM[1]![0]!;
+    if (nextFence !== '') {
+      fence = nextFence;
       out.push(line);
       // ⚠ コードの塊はリストを**切る**(前後は別のリストである)
       counters = new Map();
