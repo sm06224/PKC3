@@ -8973,15 +8973,25 @@ h6:hover > .pkc-heading-anchor,
   border-radius: 0 1px 1px 0;
 }
 
-/* 🔴 **クイック目次（ToC）ポップオーバー**(#1130)── 本文プレビュー右上に固定される軽量目次ナビゲーション */
+/* 🔴 **クイック目次（ToC）ポップオーバー**(#1130)── 本文の右上の隅に留める(#1178)。
+ *
+ * 🔑 **「先頭へ戻る」(`.pkc-back-to-top-container`)と同じ作り**:高さ 0 の `sticky` の箱を
+ *   本文の面の直下に置き、右 24px の列に押しを出す(= 2 つで同じ縦の列を作る)。
+ *   ⚠ **DOM の先頭**に置く(`quick-toc.ts` が `prepend`)── `sticky; top` は
+ *   「自分の通常の位置より**下へ**」しか動かせないので、末尾の子だと送った先で画面の外に居る
+ *   (実測: 924px 送ると y=892 / 画面 800 で、押せるのは本文の末尾だけだった)。
+ * ⚠ `top` は**操作の帯**(`detail-bar-slot`・sticky・34px)の下。帯と同じ `top: 0` だと帯の
+ *   右端に重なる。⚠ 高さ 0 なので本文の行を 1 px も押し下げない。 */
 .pkc-quick-toc {
   position: sticky;
-  top: 8px;
-  float: right;
-  margin-right: 16px;
-  margin-top: 4px;
-  z-index: 50;
-  pointer-events: auto;
+  top: 42px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  padding-right: 24px;
+  height: 0;
+  overflow: visible;
+  z-index: 90;
 }
 
 .pkc-quick-toc-btn {
@@ -9021,13 +9031,16 @@ h6:hover > .pkc-heading-anchor,
   line-height: 1;
 }
 
+/* ⚠ 開く位置は**押しのすぐ下・押しと同じ右端**(`.pkc-quick-toc` の `padding-right` と同じ 24px)。
+ *   箱の高さが 0 なので `top` は押しの高さ(約 24px)+ すき間。幅は面の幅を越えない
+ *   (狭い枠・留めた枠で左へはみ出さない)。 */
 .pkc-quick-toc-popover {
   position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
+  top: 30px;
+  right: 24px;
   width: 260px;
-  max-width: 80vw;
-  max-height: 380px;
+  max-width: calc(100% - 32px);
+  max-height: min(380px, 70vh);
   overflow-y: auto;
   background: var(--surface);
   border: 1px solid var(--border);

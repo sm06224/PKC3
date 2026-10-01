@@ -3,6 +3,7 @@
  *
  * 長文ノート閲覧時、本文プレビュー画面に目次ポップオーバーボタンを配置し、
  * インスペクターを開かずにワンタップで目的の見出しへジャンプできるようにする。
+ * 🔑 押しは本文の右上の隅に留まる(#1178)── 「先頭へ戻る」と同じ右の列(`app.css`)。
  */
 import { activeHeadingIndex } from '../../../features/markdown/active-heading';
 import { extractHeadingText } from './heading-anchor';
@@ -93,7 +94,9 @@ export function installQuickToc(
   popover.append(header, list);
   wrapper.append(button, popover);
 
-  container.append(wrapper);
+  // 🔴 **先頭に置く**(#1178)── `sticky; top` は通常の位置より下へしか動けない。
+  //   末尾の子だと、送った先では押しが画面の外に居る。高さ 0 なので本文は押し下げない。
+  container.prepend(wrapper);
 
   /** 目次の行と、その行が指す見出し(同じ添字で対になる)。update() が組み直す。 */
   let itemEls: HTMLElement[] = [];

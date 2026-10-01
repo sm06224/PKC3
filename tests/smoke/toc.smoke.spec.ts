@@ -92,23 +92,45 @@ test('🔴 見出しのあるノートで目次が出て、押すとそこまで
    * ⚠ **印が動くことを 3 通りで見る**(動かない印は飾りである)── 先頭(最初の章の上に
    *   題名が在って線に届かない形)/ 途中(線を越えた最後の章)/ 末尾(最後の章が短くて
    *   線まで届かない形)。
-   * ⚠ この「目次」ボタンは**本文の末尾**に在る(`.pkc-quick-toc` は flex の最後の子で、
-   *   sticky が効かない)── 開くために**まず末尾へ送る**。開いた後の送りは DOM の
-   *   印だけで見る(ポップオーバーも一緒に画面の外へ出るため、見た目の確認は開いた直後に済ませる)。
+   * 🔴 **この「目次」ボタンは本文の右上の隅に留まる**(#1178)── 途中まで送った所
+   *   (900px)で、**画面の中に在って押せる**ことを見る。かつては flex の最後の子で
+   *   本文の末尾にしか無く、924px 送ると y=892(画面 800)で、押すために末尾まで送っていた。
+   *   ⚠ 開いた後の送りは DOM の印だけで見る(ポップオーバーも一緒に動くため、見た目の確認は
+   *   開いた直後に済ませる)。
    */
   const QUICK = '[data-pkc-region="detail"] .pkc-quick-toc';
   const QITEM = `${QUICK} .pkc-quick-toc-item`;
   await scroller.evaluate((el) => {
-    el.scrollTop = el.scrollHeight;
+    el.scrollTop = 900;
   });
+  const viewportH = page.viewportSize()?.height ?? 0;
+  const btnBox = await page.locator(`${QUICK} .pkc-quick-toc-btn`).boundingBox();
+  expect(btnBox, '目次のボタンが描かれていない').not.toBeNull();
+  expect(btnBox!.y, `途中まで送った所で目次のボタンが画面の外(y=${btnBox!.y} / 画面 ${viewportH})`).toBeLessThan(
+    viewportH - btnBox!.height,
+  );
+  expect(btnBox!.y, `目次のボタンが画面の上へはみ出している(y=${btnBox!.y})`).toBeGreaterThanOrEqual(0);
+  // 🔑 「先頭へ戻る」の押しと同じ右の列に居る(= 2 つで 1 組に読める)── 右端が揃う
+  const topBox = await page.locator('[data-pkc-region="detail"] .pkc-back-to-top').boundingBox();
+  expect(topBox, '先頭へ戻るの押しが描かれていない(前提)').not.toBeNull();
+  expect(
+    Math.abs(btnBox!.x + btnBox!.width - (topBox!.x + topBox!.width)),
+    `目次の押しと先頭へ戻るの押しの右端が揃っていない(${btnBox!.x + btnBox!.width} / ${topBox!.x + topBox!.width})`,
+  ).toBeLessThanOrEqual(1);
   await clickReal(page, `${QUICK} .pkc-quick-toc-btn`);
   await expect(page.locator(`${QUICK} .pkc-quick-toc-popover`), 'クイック目次が開かない').toBeVisible();
   await expect(page.locator(QITEM), '前提が崩れている(目次の行が 3 本でない)').toHaveCount(3);
+  // ポップオーバーは押しの近くに開き、画面の内側に収まる
+  const pop = await page.locator(`${QUICK} .pkc-quick-toc-popover`).boundingBox();
+  const vw = page.viewportSize()?.width ?? 0;
+  expect(pop!.y, '目次が押しの下に開いていない').toBeGreaterThanOrEqual(btnBox!.y);
+  expect(pop!.x, '目次が画面の左へはみ出している').toBeGreaterThanOrEqual(0);
+  expect(pop!.x + pop!.width, '目次が画面の右へはみ出している').toBeLessThanOrEqual(vw);
   const activeRows = async (): Promise<number[]> =>
     page.locator(QITEM).evaluateAll((els) =>
       els.flatMap((el, i) => (el.hasAttribute('data-pkc-active') ? [i] : [])),
     );
-  await expect.poll(activeRows, '末尾で開いたのに最後の章が光っていない').toEqual([2]);
+  await expect.poll(activeRows, '途中で開いたのに、いま読んでいる章が光っていない').toEqual([1]);
 
   // 見た目の規則が在る(太字 + 左の線)── 光っていない行との差で見る
   const look = await page.locator(`${QITEM}[data-pkc-active]`).evaluate((el) => {
@@ -136,6 +158,10 @@ test('🔴 見出しのあるノートで目次が出て、押すとそこまで
   await expect.poll(activeRows, '先頭へ送っても印が動かない').toEqual([0]);
   await target.evaluate((el) => el.scrollIntoView({ block: 'start' }));
   await expect.poll(activeRows, '途中の節を上端へ送っても印が動かない').toEqual([1]);
+  await scroller.evaluate((el) => {
+    el.scrollTop = el.scrollHeight;
+  });
+  await expect.poll(activeRows, '末尾まで送っても最後の章が光らない').toEqual([2]);
 
   expect(errors, 'pageerror が出た').toEqual([]);
 });

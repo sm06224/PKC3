@@ -1,6 +1,7 @@
 /** @vitest-environment happy-dom */
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { installQuickToc } from '../../src/adapter/ui/render/quick-toc';
+import { installBackToTop } from '../../src/adapter/ui/render/back-to-top';
 
 describe('quick table of contents (ToC) popover (Issue #1130)', () => {
   let container: HTMLElement;
@@ -118,6 +119,26 @@ describe('quick table of contents (ToC) popover (Issue #1130)', () => {
     expect(popover.hidden).toBe(true);
 
     handle.dispose();
+  });
+
+  /**
+   * 🔴 **本文の右上の隅に留める**(#1178)。`sticky; top` は通常の位置より下へしか動かせないので、
+   * 末尾の子だと送った先で画面の外に居る(実測 y=892 / 画面 800)── **先頭**に置く。
+   * ⚠ 「先頭へ戻る」と**同じ器の子**であること(= 同じ右の列に出る 2 つ)も見る。
+   *   ⚠ 位置そのものの確認は `tests/smoke/toc.smoke.spec.ts`(happy-dom は採寸を持たない)。
+   */
+  it('🔴 本文の器の先頭に置かれ(末尾ではない)、先頭へ戻るの押しと同じ器の子になる', () => {
+    const body = document.createElement('div');
+    container.append(body); // 本文の器(= 既に居る子)
+    const toTop = installBackToTop(document.body, container);
+    const handle = installQuickToc(container, bodyHost);
+
+    expect(handle.element.parentElement, '先頭へ戻るの押しと別の器にある').toBe(toTop.element.parentElement);
+    expect(container.firstElementChild, '末尾の子になっている(送った先で画面の外に居る)').toBe(handle.element);
+    expect(container.lastElementChild, '先頭へ戻るの押しより後ろに居ない前提が崩れている').toBe(toTop.element);
+
+    handle.dispose();
+    toTop.dispose();
   });
 
   it('removes elements and unbinds listeners on dispose', () => {
