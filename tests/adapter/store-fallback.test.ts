@@ -39,6 +39,7 @@ import { CodeCollapseStore } from '@adapter/ui/render/code-collapse';
 import { InlineCodeCopyStore } from '@adapter/ui/render/inline-code-copy';
 import { PhoneLinksStore } from '@adapter/ui/render/phone-links';
 import { DateLinksStore } from '@adapter/ui/render/date-links';
+import { RelativeDaysStore } from '@adapter/ui/render/relative-days';
 import { TooNarrowOkStore } from '@adapter/ui/render/too-narrow';
 import { EditorModeStore } from '@adapter/ui/render/editor-mode';
 import { PaneSizeStore } from '@adapter/ui/render/pane-size';
@@ -103,6 +104,16 @@ const CASES: readonly {
     },
     // ⚠ **既定が入**なので、最初に書くのは**切**にする ── 入から書くと、控えが死んでいて
     //   既定のまま読まれても通ってしまう(代替物で満たせる検査になる)
+    a: false,
+    b: true,
+  },
+  {
+    name: 'RelativeDaysStore',
+    make: () => {
+      const s = new RelativeDaysStore(null);
+      return { write: (v) => s.setEnabled(v as boolean), read: () => s.enabled() };
+    },
+    // ⚠ **既定が入**なので、最初に書くのは**切**にする(`DateLinksStore` と同じ理由)
     a: false,
     b: true,
   },

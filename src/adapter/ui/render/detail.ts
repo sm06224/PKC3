@@ -129,6 +129,7 @@ import { appEditorMode } from './editor-mode';
 import { appKeymap, type KeymapStore } from './keymap';
 import { appPhoneLinks } from './phone-links';
 import { appDateLinks } from './date-links';
+import { syncRelativeDays } from './relative-days';
 import { appVoiceBoostRouter } from './voice-boost';
 import {
   appExtensionGrants,
@@ -1378,6 +1379,12 @@ export class DetailRenderer {
          * ⚠ 描画のたびに呼ぶ(冪等)── 塊が差し替わると装飾が消えるため。
          */
         applyExternalLinks(host);
+        /**
+         * 🔴 **日付の右に「あとN日」を添える**(#1225)。
+         * ⚠ 描画のたびに呼ぶ(冪等)── 塊が差し替わると新しい字には属性が無い。
+         * ⚠ 設定が切なら**付けず、付いていた物は外す**(変わっていない塊は残る)。
+         */
+        syncRelativeDays(host);
         /**
          * 🔴 **リンク先のノートが無い内部リンクの印**(#1174 段①)。
          * ⚠ 描画のたびに呼ぶ(冪等)── 塊が差し替わると印が消えるため。

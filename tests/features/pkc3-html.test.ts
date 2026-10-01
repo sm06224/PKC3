@@ -205,6 +205,8 @@ describe('可搬 HTML', () => {
     expect(text, '本文の日付が消えている').toContain('@2026-10-15');
     expect(text, '押せる印が書き出しに載っている').not.toContain('open-date-note');
     expect(text, '押せる字の class が書き出しに載っている').not.toContain('pkc-date-link');
+    // 🔴 #1225: 「あとN日」の添え字も載らない(書き出した日で凍る嘘になる。字は読む面が属性で差す)
+    expect(text, '「あとN日」の添え字の属性が書き出しに載っている').not.toContain('data-pkc-rel');
   });
 
   it('escapeForScriptData は `<` を退避し、値は変えない', () => {

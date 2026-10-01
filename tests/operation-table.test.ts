@@ -250,7 +250,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'set-app-open-target', 'set-browse', 'set-code-collapse', 'set-column-rule', 'set-date-links', 'set-editor-mode', 'set-entry-date',
   'set-entry-sort', 'set-external-images', 'set-flag', 'set-inline-code-copy', 'set-notices-enabled', 'set-open-in-edit',
   'set-missing-links', 'set-open-place', 'set-page-format', 'set-paste-source', 'set-phone-links', 'set-prose-align',
-  'set-query-key', 'set-read-columns', 'set-sql-engine', 'set-sql-source', 'set-sql-text', 'set-tag-badge',
+  'set-query-key', 'set-read-columns', 'set-relative-days', 'set-sql-engine', 'set-sql-source', 'set-sql-text', 'set-tag-badge',
   'set-text-scale', 'set-theme', 'set-too-narrow-enabled', 'set-view', 'set-voice-boost',
   'show-trash', 'skip-to', 'sort-tasks',
   'smart-cond-add', 'smart-evict', 'smart-field',
@@ -619,6 +619,9 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-01(#1169): 本文の @日付 を押す(`open-date-note`)/ 画面の下の「○○のノートを作る」
       //   (`create-date-note`)/ 設定の入切(`set-date-links`)で受け手 +3 ── 登記は増えない。
       //   `receivers` +3 / `total` +3 / `unregistered` +3。
+      // ⚠ 2026-10-01(#1225): 日付の右に「あとN日」を添える入切(`set-relative-days`)で受け手 +1 /
+      //   `total` +1 / `unregistered` +1。登記は増えない ── 押し口は設定の checkbox にしか無く、
+      //   鍵も持たない(`set-date-links` と同じ形)。
       // ⚠ 2026-10-01(#1174 段①): 無いノートへのリンクの点線(`set-missing-links`)で受け手 +1 /
       //   `total` +1 / `unregistered` +1。登記は増えない ── 押し口は設定の checkbox にしか無く、
       //   鍵も持たない(`set-phone-links` と同じ形)。
@@ -642,12 +645,12 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   `remove-place` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-01(#918 段⑦): SQL の面で足した相手を外す(`remove-sql-source`)で受け手 +1 ── 登記は
       //   増えない(押し口は足した相手の行の中にしか無い)。`receivers` +1 / `total` +1 / `unregistered` +1。
-      total: 358,
-      receivers: 301,
+      total: 359,
+      receivers: 302,
       registered: 96,
       both: 39,
       outsideActionsTable: 57,
-      unregistered: 262,
+      unregistered: 263,
     });
   });
 

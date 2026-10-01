@@ -1152,6 +1152,12 @@ export interface BinderServices {
    */
   setDateLinks?(on: boolean): void;
   /**
+   * 🔴 **日付の右に「あとN日」を添えるか**(#1225)。⚠ **省略可**。
+   * ⚠ 切り替えたら**その場で本文の添え字を付け直す / 外す**(保存だけでは、
+   *   いま読んでいる本文が変わらない)。
+   */
+  setRelativeDays?(on: boolean): void;
+  /**
    * 🔴 **リンク先のノートが無いリンクを点線で見せるか**(#1174 段①)。⚠ **省略可**。
    * ⚠ 切り替えたら**その場で本文の印を付け直す / 外す**(保存しただけでは、
    *   いま読んでいるノートは変わらない = 設定が嘘になる)。
@@ -10334,6 +10340,10 @@ const ACTIONS: Record<string, ActionHandler> = {
   'set-date-links': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
     if (target instanceof HTMLInputElement) services.setDateLinks?.(target.checked);
+  },
+  'set-relative-days': (_dispatcher, target, services) => {
+    // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
+    if (target instanceof HTMLInputElement) services.setRelativeDays?.(target.checked);
   },
   'set-missing-links': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)

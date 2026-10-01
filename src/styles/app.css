@@ -3362,6 +3362,24 @@ li[data-pkc-row-slot] {
   cursor: pointer;
 }
 
+/**
+ * 🔴 **日付の右に添える「あと3日」「5日前」**(#1225)。
+ *
+ * 字は**属性から出す**(`data-pkc-rel`。`relative-days.ts` が読む面にだけ差す)── 描画結果にも
+ * 原文にも書かないので、**選べず・コピーに入らず**、日をまたいでも描き直さずに差し替えられる。
+ * 色は**薄い無彩色**(`--muted`)・**小さめ**・下線なし(日付の点線を字の続きに見せない)。
+ * 🔴 **`[data-pkc-prose]` を起点にする**(上と同じ理由 ── `.pkc-md-rendered` 起点は書き出しへ焼かれる)。
+ */
+[data-pkc-prose] .pkc-date-link[data-pkc-rel]::after {
+  content: ' ' attr(data-pkc-rel);
+  color: var(--muted);
+  font-size: 0.85em;
+  /* ⚠ `inline-block` でなければ、日付の点線の下線が**この字にも伸びる**(装飾は子へ伝わり、
+     `text-decoration: none` では外せない)。 */
+  display: inline-block;
+  white-space: nowrap;
+}
+
 /* 取り込み待ちの器(まだ実体が入っていないことが分かる形にする) */
 .pkc-md-rendered .pkc-transclusion-placeholder,
 .pkc-md-rendered .pkc-card-placeholder {

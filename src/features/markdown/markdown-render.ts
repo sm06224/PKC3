@@ -74,7 +74,7 @@ import {
   parseCardPresentation,
 } from '../link/card-presentation';
 import { findPhones } from '../contact/phone-link';
-import { allDateTokens } from '../schedule/line-date';
+import { allDateTokens, readLineDate } from '../schedule/line-date';
 
 const md = new MarkdownIt({
   html: false,          // Disable HTML tags in source (XSS safety)
@@ -2711,10 +2711,30 @@ md.core.ruler.after('inline', 'pkc-date-link', function (state) {
           out.push(head);
         }
         const tok = new state.Token('html_inline', '', 0);
+        /**
+         * 🔴 **単日でない日付には種類を焼く**(#1225)── 読む面が「あとN日」を添えるのは
+         *   単日だけで、期間(`@a..b`)・繰り返し(`@a 毎週`)には添えない。
+         * ⚠ 読む面は `..b` が**隣の字**になっていて DOM からは見分けられない ── だから
+         *   原文を読める**ここ**で決め、`readLineDate` の規則を 1 か所に保つ。
+         * ⚠ 焼くのは**静的な事実**だけ(日が変わっても変わらない)。「あと3日」の字は
+         *   ここへ書かない(描画結果は日をまたいで使い回される)。単日には何も足さない
+         *   (これまでの出力を 1 バイトも変えない)。
+         */
+        const parsed = readLineDate(t.content.slice(h.start));
+        const kind =
+          parsed === null || parsed.start !== 0
+            ? ''
+            : parsed.until !== null
+              ? 'range'
+              : parsed.repeat !== null
+                ? 'repeat'
+                : '';
         // ⚠ 属性も本文も**必ず escape する**(`tagLineHtml` と同じ作法)
         tok.content =
           `<span class="pkc-date-link" data-pkc-action="open-date-note" ` +
-          `data-pkc-date="${escapeHtmlAttr(h.date)}" role="link" tabindex="0">` +
+          `data-pkc-date="${escapeHtmlAttr(h.date)}" role="link" tabindex="0"` +
+          (kind === '' ? '' : ` data-pkc-date-kind="${kind}"`) +
+          `>` +
           `${md.utils.escapeHtml(t.content.slice(h.start, h.end))}</span>`;
         out.push(tok);
         at = h.end;
