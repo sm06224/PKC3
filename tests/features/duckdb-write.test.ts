@@ -10,6 +10,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DUCKDB_TABLE_LIFETIME,
+  DUCKDB_TABLE_RESET,
   DUCKDB_WRITE_FORMS,
   checkDuckDbRunSql,
   duckDbWriteKind,
@@ -232,8 +233,12 @@ describe('🔴 通った直後に言う 1 行(件数と寿命)', () => {
 
   it('🔴 CREATE TABLE には、作った表の寿命を添える(閉じると消える)', () => {
     const [c, r] = count(2);
-    expect(duckDbWriteNote('create', c, r)).toBe(`2 行に効きました ── ${DUCKDB_TABLE_LIFETIME}`);
+    // 🔴 #918 段⑦(Gemini 裁定 2026-10-01 = 設問 2 は B):相手を足す / 外すと器を作り直す = 作った表も消える
+    expect(duckDbWriteNote('create', c, r)).toBe(
+      `2 行に効きました ── ${DUCKDB_TABLE_LIFETIME}。${DUCKDB_TABLE_RESET}`,
+    );
     expect(DUCKDB_TABLE_LIFETIME).toBe('作った表はウィンドウを閉じると消えます');
+    expect(DUCKDB_TABLE_RESET).toBe('相手を足したり外したりすると、作った表は消えます');
     // 🔑 対照群:表を作らない命令には寿命を言わない / 元の file の注意は行を書き換える命令だけ
     expect(duckDbWriteNote('insert', c, r)).not.toContain('消えます');
     expect(duckDbWriteNote('drop', ['Success'], [])).not.toContain('消えます');

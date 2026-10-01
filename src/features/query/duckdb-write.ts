@@ -77,6 +77,13 @@ export const DUCKDB_WRITE_FORMS = 'CREATE TABLE / INSERT INTO / UPDATE / DELETE 
  */
 export const DUCKDB_TABLE_LIFETIME = '作った表はウィンドウを閉じると消えます';
 
+/**
+ * 🔴 **調べる相手の集合が変わったときの寿命**(#918 段⑦。Gemini 裁定 2026-10-01 = 確認は出さず字で言う)。
+ * ⚠ 2 つ目の file を足す / 外すと**器を作り直す**(外を塞いだ器へは差し込めない)ので、
+ *   作った表も消える。🔑 **字は 1 か所で持つ**(`DUCKDB_TABLE_LIFETIME` と同じ理由)。
+ */
+export const DUCKDB_TABLE_RESET = '相手を足したり外したりすると、作った表は消えます';
+
 /** 頭の語(小文字)。⚠ `bare` は塗り潰し済み。 */
 function headOf(bare: string): string {
   return /^[a-z]+/iu.exec(bare.trim())?.[0]?.toLowerCase() ?? '';
@@ -130,7 +137,7 @@ export function duckDbWriteNote(
 ): string {
   const n = countOf(columns, rows);
   const done = n === null ? '実行しました' : `${String(n)} 行に効きました`;
-  if (kind === 'create') return `${done} ── ${DUCKDB_TABLE_LIFETIME}`;
+  if (kind === 'create') return `${done} ── ${DUCKDB_TABLE_LIFETIME}。${DUCKDB_TABLE_RESET}`;
   if (kind === 'drop') return done;
   return `${done} ── 元の file は書き換わりません`;
 }

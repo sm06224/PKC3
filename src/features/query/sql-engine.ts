@@ -26,6 +26,7 @@
  * | 🔴 添付 / 手持ちの `.parquet` `.json` `.ndjson` `.jsonl` | **DuckDB だけ** | 内蔵の sqlite は中身を解釈できない(#682 段④c) |
  * | 添付の `.sqlite` | sqlite だけ | DuckDB から読むには `sqlite_scanner` を**器の中で**当てる段がまだ無い(#682 の次の段) |
  * | 添付の `.xlsx` | sqlite だけ | DuckDB から読むには `excel` 拡張が要る(同梱していない ── `DUCKDB_EXTENSIONS`) |
+ * | 🔴 **2 つ以上を並べているとき**(#918 段⑦) | **DuckDB だけ** | 内蔵の sqlite は 1 度に 1 つの file しか開けない。並べられるのは DuckDB で読める種類だけなので、この行は上の表と矛盾しない |
  *
  * ⚠ **設計 doc §7 の段① は「この PKC のノートを写したもの」と書いてある** ──
  *   ここはその字と違う。理由は上の表の 1 行目(写す量が未測)で、
@@ -79,8 +80,8 @@ export const SQL_ENGINE_LABEL: Record<SqlEngine, string> = {
  *   2 つ作らない」)── ここで `.csv` を自前に書き直すと、#854 で 1 か所へ寄せた
  *   判定がまた 2 つに割れる。
  */
-export function enginesForSource(name: string | null): readonly SqlEngine[] {
-  return SQL_ENGINES.filter((e) => sqlEngineHint(e, name) === null);
+export function enginesForSource(name: string | null, multi = false): readonly SqlEngine[] {
+  return SQL_ENGINES.filter((e) => sqlEngineHint(e, name, multi) === null);
 }
 
 /**
@@ -105,10 +106,16 @@ export function enginesForSource(name: string | null): readonly SqlEngine[] {
  *
  * @returns `null` = **その相手で選べる**。文字列 = 選べない理由(画面に出す字)。
  */
-export function sqlEngineHint(engine: SqlEngine, name: string | null): string | null {
+export function sqlEngineHint(engine: SqlEngine, name: string | null, multi = false): string | null {
   // ⚠ `lid` は判定に使われない(`sqlGuestSourceOf` は名前の拡張子だけを見る)
   const src = name === null ? null : sqlGuestSourceOf('', name);
   if (engine === 'sqlite') {
+    /**
+     * 🔴 **2 つ以上の file を並べているときは DuckDB だけ**(#918 段⑦。Gemini 裁定 2026-10-01)。
+     * ⚠ 内蔵の sqlite は**1 度に 1 つの file しか開けない**(別の接続を足す道が無い)ので、
+     *   並べた file を 1 つの SQL で引けるのは DuckDB だけである。
+     */
+    if (multi) return '2 つ以上の file を並べているときは DuckDB だけで引けます';
     /**
      * 🔴 **内蔵の sqlite が中身を読めない相手**(#682 段④c)。
      * ⚠ ここが `null` を返し続けると、**画面には「内蔵の sqlite」と出ているのに
@@ -157,8 +164,8 @@ export function sqlEngineHint(engine: SqlEngine, name: string | null): string | 
  *   **型のための受け**であって、通る道ではない(0 件になる形は
  *   `tests/features/sql-engine.test.ts` が全数で潰している)。
  */
-export function resolveSqlEngine(want: SqlEngine, name: string | null): SqlEngine {
-  const usable = enginesForSource(name);
+export function resolveSqlEngine(want: SqlEngine, name: string | null, multi = false): SqlEngine {
+  const usable = enginesForSource(name, multi);
   if (usable.includes(want)) return want;
   if (usable.includes(DEFAULT_SQL_ENGINE)) return DEFAULT_SQL_ENGINE;
   return usable[0] ?? DEFAULT_SQL_ENGINE;
@@ -175,6 +182,8 @@ export function resolveSqlEngine(want: SqlEngine, name: string | null): SqlEngin
 export function sqlEngineOf(page: {
   readonly engine: SqlEngine;
   readonly guest: { readonly name: string } | null;
+  /** 🔴 足した相手(#918 段⑦)。1 件でも在れば**並べている**ので DuckDB 固定。 */
+  readonly extraGuests?: readonly unknown[];
 }): SqlEngine {
-  return resolveSqlEngine(page.engine, page.guest?.name ?? null);
+  return resolveSqlEngine(page.engine, page.guest?.name ?? null, (page.extraGuests?.length ?? 0) > 0);
 }

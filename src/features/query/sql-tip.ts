@@ -15,7 +15,8 @@
 
 import type { SqlEngine } from './sql-engine';
 import { guestTableNameOf, duckDbReadableSourceOf } from './sql-guest-source';
-import { DUCKDB_TABLE_LIFETIME, DUCKDB_WRITE_FORMS } from './duckdb-write';
+import { DUCKDB_TABLE_LIFETIME, DUCKDB_TABLE_RESET, DUCKDB_WRITE_FORMS } from './duckdb-write';
+import { duckDbTableNamesOfNames, sqlMultiNote } from './sql-multi-source';
 
 /** 名前を並べる上限。⚠ 表が何十個も在る DB で、案内文が画面を埋めない。 */
 export const TIP_TABLES_MAX = 8;
@@ -69,7 +70,13 @@ function tableList(tables: readonly string[]): string {
  * 🔴 **案内の 1 行目 ── 何が調べられるか**(#837 K1 で 2 行に割った)。
  * ⚠ 記号を書かない(`textContent` なので、書いた記号はそのまま画面に出る)。
  */
-export function sqlTipText(target: SqlTipTarget | null, engine: SqlEngine = 'sqlite'): string {
+export function sqlTipText(
+  target: SqlTipTarget | null,
+  engine: SqlEngine = 'sqlite',
+  /** 🔴 足した相手の file 名(#918 段⑦)。1 件でも在れば**並べている**。 */
+  more: readonly string[] = [],
+): string {
+  if (target !== null && more.length > 0) return multiTipText([target.name, ...more]);
   if (target === null) {
     return (
       '調べられるのは entries(ノート)/ relations(つながり)/ revisions(履歴)/ ' +
@@ -120,6 +127,28 @@ export function sqlTipText(target: SqlTipTarget | null, engine: SqlEngine = 'sql
 }
 
 /**
+ * 🔴 **2 つ以上の file を並べているときの案内**(#918 段⑦。Gemini 裁定 2026-10-01 = 名前を並べて出す)。
+ *
+ * 1 文目は「いま調べているのは 売上 / 在庫 の 2 つの表です」(裁定の字)。
+ * 🔑 **file 名 → 表の名前**の対応も添える(`2024-sales.csv` → `_2024_sales` は、
+ *   file 名からは想像が付かない ── 引けない名前を打たせない)。
+ */
+function multiTipText(names: readonly string[]): string {
+  const tables = duckDbTableNamesOfNames(names);
+  const pairs = names
+    .map((n, i) => `${n} → ${tables[i] ?? ''}`)
+    .join('、');
+  const anyCsv = names.some((n) => duckDbReadableSourceOf('', n)?.kind === 'csv');
+  return (
+    sqlMultiNote(tables) +
+    `表の名前は file の名前から付けています(${pairs})。` +
+    'JOIN で突き合わせられます。' +
+    (anyCsv ? '.csv / .tsv の表には、先頭に _note と _lid の列が付きます。' : '') +
+    'これらの file を調べている間、この PKC のノートの表(entries など)は出てきません。'
+  );
+}
+
+/**
  * 🔴 **打ち方の約束は engine ごとに違う**(#682 段②)。
  * ⚠ `SQL_RULES` は**同梱の sqlite を実測した字**なので、DuckDB にはそのまま当たらない
  *   (DuckDB には正規表現が在り、FROM 先行が書ける)── 出し分けないと**嘘になる**。
@@ -135,7 +164,7 @@ export function sqlRulesText(engine: SqlEngine = 'sqlite'): string {
    */
   return (
     `表も作れます(${DUCKDB_WRITE_FORMS})。` +
-    `${DUCKDB_TABLE_LIFETIME}(別の file を選び直したときも消えます)。元の file は書き換わりません。` +
+    `${DUCKDB_TABLE_LIFETIME}(別の file を選び直したときも消えます)。${DUCKDB_TABLE_RESET}。元の file は書き換わりません。` +
     'FROM から書き始められます。PIVOT や QUALIFY も打てます。' +
     '外から追加の部品を取ってくる書き方(INSTALL / LOAD)と、設定を変える SET は打てません。' +
     '日本語入力のままでも打てます。'
@@ -147,7 +176,20 @@ export function sqlRulesText(engine: SqlEngine = 'sqlite'): string {
  * 🔑 **相手が変われば手本も変わる** ── 変えないと、打てない字が手本として出る。
  * ⚠ これは**打ち始めた瞬間に消える** ── 消えない側は `sqlExampleText`(#837 K1)。
  */
-export function sqlPlaceholder(target: SqlTipTarget | null, engine: SqlEngine = 'sqlite'): string {
+export function sqlPlaceholder(
+  target: SqlTipTarget | null,
+  engine: SqlEngine = 'sqlite',
+  more: readonly string[] = [],
+): string {
+  /**
+   * 🔴 **並べているときの手本は、1 つ目の表を引く形**(#918 段⑦)。⚠ 表の名前は
+   *   `duckDbTableNamesOfNames` 1 か所 ── 器が作る名前と同じ物を出す(`csv` 固定ではない)。
+   * ⚠ 全部を `,` で並べる形にしない ── 突き合わせる列の無い**総当たり**(行数の掛け算)を手本にしてしまう。
+   */
+  if (target !== null && more.length > 0) {
+    const first = duckDbTableNamesOfNames([target.name, ...more])[0];
+    return `FROM ${first ?? 'csv'} SELECT * LIMIT 20`;
+  }
   /**
    * 🔴 **DuckDB の手本は DuckDB の文法で、いまの相手の表の名前で出す**(#682 段④c)。
    * ⚠ 直す前はここが **`FROM csv …` 固定**だった ── `.parquet` を選ぶと
@@ -182,6 +224,10 @@ export function sqlPlaceholder(target: SqlTipTarget | null, engine: SqlEngine = 
  * 🔑 だから**字として置く**(薄字ではない)── 消えないので、見ながら写せる。
  * ⚠ 中身は `sqlPlaceholder` と**同じ 1 本**から採る(手本を 2 通り持たない)。
  */
-export function sqlExampleText(target: SqlTipTarget | null, engine: SqlEngine = 'sqlite'): string {
-  return `例: ${sqlPlaceholder(target, engine)}`;
+export function sqlExampleText(
+  target: SqlTipTarget | null,
+  engine: SqlEngine = 'sqlite',
+  more: readonly string[] = [],
+): string {
+  return `例: ${sqlPlaceholder(target, engine, more)}`;
 }

@@ -234,6 +234,8 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'place-shape-round',
   'purge-trash', 'raise-place', 'refresh-query', 'remove-office-pack', 'remove-place',
   'remove-place-line',
+  // 🔴 2026-10-01(#918 段⑦): SQL の面で足した相手を外す口。外す相手の lid は押し口自身が運ぶ
+  'remove-sql-source',
   'rename-attachment', 'renumber-lists', 'replace-all', 'reset-app-group-order', 'reset-flags',
   'reset-office-profile', 'retry-persist', 'run-sql', 'schedule-nav', 'schedule-quick-add',
   'schedule-today',
@@ -638,12 +640,14 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-01(#530 段③d): 右クリックした線を消す(`remove-place-line`)で受け手 +1 ── 登記は
       //   増えない(押し口は線の右クリックの中にしか無く、押した線の行を運ぶので名前だけでは呼べない。
       //   `remove-place` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
-      total: 357,
-      receivers: 300,
+      // ⚠ 2026-10-01(#918 段⑦): SQL の面で足した相手を外す(`remove-sql-source`)で受け手 +1 ── 登記は
+      //   増えない(押し口は足した相手の行の中にしか無い)。`receivers` +1 / `total` +1 / `unregistered` +1。
+      total: 358,
+      receivers: 301,
       registered: 96,
       both: 39,
       outsideActionsTable: 57,
-      unregistered: 261,
+      unregistered: 262,
     });
   });
 

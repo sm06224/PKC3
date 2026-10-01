@@ -570,9 +570,14 @@ export function connectStoreEffects(
      */
     runDuckDbSql?: (input: {
       sql: string;
-      source: DuckDbReadableGuestSource;
-      /** ⚠ 呼ばれるのは**器へ入れ直すときだけ**(同じ相手を打鍵のたびに読み直さない)。 */
-      readBytes: () => Promise<Uint8Array | null>;
+      /**
+       * 🔴 **並べる相手**(1〜4 件。#918 段⑦)。⚠ 1 件目が `sqlPage.guest`、2 件目以降が足した相手。
+       */
+      sources: readonly {
+        source: DuckDbReadableGuestSource;
+        /** ⚠ 呼ばれるのは**器へ入れ直すときだけ**(同じ相手を打鍵のたびに読み直さない)。 */
+        readBytes: () => Promise<Uint8Array | null>;
+      }[];
     }) => Promise<{ columns: string[]; rows: Array<Array<string | number | null>>; truncated: boolean; ms: number }>;
   } = {},
 ): StoreEffects {
@@ -1035,6 +1040,17 @@ export function connectStoreEffects(
         });
         break;
       }
+      /**
+       * 🔴 **足した相手の控えを手放す**(#918 段⑦)。⚠ 手持ちの file の控えだけ ── 添付は
+       *   bytes を握っていない(読むたびに IDB から引く)ので、放す物が無い。
+       * 🔑 `REQUEST_SQL_GUEST_CLOSE` と**同じ口**(`releaseLocalSqlFile`)を通す ── 終端を 2 本にしない。
+       */
+      case 'REQUEST_SQL_EXTRA_RELEASE': {
+        for (const lid of ev.lids) {
+          if (isSqlLocalFileLid(lid)) opts.releaseLocalSqlFile?.(lid);
+        }
+        break;
+      }
       /** 客の DB を手放す。⚠ **常駐メモリを返す**ので、失敗しても画面は先へ進める。 */
       case 'REQUEST_SQL_GUEST_CLOSE': {
         const shut = store.closeSqlGuest;
@@ -1169,9 +1185,17 @@ export function connectStoreEffects(
            *   なるのは「そもそも DuckDB を選べない相手」だけである。
            * ⚠ だから `null` は**下の「引けません」へ畳む** ── 新しい断り文を作らない。
            */
-          const source =
-            ev.duck === undefined ? null : duckDbReadableSourceOf(ev.duck.lid, ev.duck.name);
-          if (duck === undefined || source === null) {
+          /**
+           * 🔴 **足した相手も同じ 1 か所で組む**(#918 段⑦)。⚠ 1 件でも組めなければ
+           *   **まとめて「引けません」へ畳む**(読めない相手が混じったまま走らせると、
+           *   一部の表だけが無い器で引くことになる)。
+           */
+          const sources = [
+            ...(ev.duck === undefined ? [] : [ev.duck]),
+            ...(ev.duckExtra ?? []),
+          ].map((d) => duckDbReadableSourceOf(d.lid, d.name));
+          const readable = sources.filter((x): x is DuckDbReadableGuestSource => x !== null);
+          if (duck === undefined || ev.duck === undefined || readable.length !== sources.length) {
             dispatcher.dispatch({
               type: 'SQL_RUN_FAILED',
               token,
@@ -1180,7 +1204,10 @@ export function connectStoreEffects(
             });
             break;
           }
-          void duck({ sql, source, readBytes: () => sqlSourceBytes(source.lid) }).then(
+          void duck({
+            sql,
+            sources: readable.map((source) => ({ source, readBytes: () => sqlSourceBytes(source.lid) })),
+          }).then(
             ({ columns, rows, truncated, ms }) => {
               if (disposed) return;
               dispatcher.dispatch({ type: 'SET_SQL_RESULT', token, sql, columns, rows, truncated, ms });

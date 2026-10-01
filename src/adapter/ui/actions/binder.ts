@@ -585,7 +585,11 @@ import { effectiveOpenPlace } from '@features/open-place';
 import { joinCopied, pickMarked } from '@features/clipboard/scrap';
 import { sqlNoteBody, sqlNoteTitle } from '@features/query/sql-to-note';
 // 🔴 手持ちのファイルを開く選び所の印(#854 段②)
-import { SQL_PICK_LOCAL_FILE_VALUE } from '@features/query/sql-local-file';
+import {
+  addSourceLidOf,
+  SQL_ADD_LOCAL_FILE_VALUE,
+  SQL_PICK_LOCAL_FILE_VALUE,
+} from '@features/query/sql-local-file';
 import { duckDbNetworkNoteOf } from '@features/query/sql-guest-source';
 import { sqlMenuLabel } from '@features/query/sql-tip';
 import {
@@ -1391,8 +1395,9 @@ export interface BinderServices {
    * ⚠ **憶えない**(user 裁定 2026-09-12)── 呼ぶたびに新しく選ばせる。
    *   実体(合成 lid を発行して `SET_SQL_SOURCE` を投げる)は `main.ts` が持つ ──
    *   この file はどの test からも実行されない(CLAUDE.md §2)。
+   * 🔴 `add` が真なら**置き換えではなく足す**(`ADD_SQL_SOURCE`。#918 段⑦)。
    */
-  pickSqlLocalFile?(file: File): void;
+  pickSqlLocalFile?(file: File, add?: boolean): void;
   /**
    * 🔴 **Office 側の設定を初期状態に戻す**(#634)。
    * ⚠ `removeOfficePack` では戻らない ── あれは一式(IndexedDB)だけを消し、
@@ -9741,7 +9746,38 @@ const ACTIONS: Record<string, ActionHandler> = {
       if (target instanceof HTMLSelectElement) {
         target.value = dispatcher.getState().sqlPage.guest?.lid ?? '';
       }
-      root.querySelector<HTMLInputElement>('[data-pkc-field="sql-file-input"]')?.click();
+      const input = root.querySelector<HTMLInputElement>('[data-pkc-field="sql-file-input"]');
+      // ⚠ 前に「足す」で開いて選ばずに閉じた印が残っていても、**置き換え**として開く
+      input?.removeAttribute('data-pkc-sql-pick');
+      input?.click();
+      return;
+    }
+    /**
+     * 🔴 **「もう 1 つ足す…」の中の 2 種類**(#918 段⑦。Gemini 裁定 2026-10-01 = 設問 1 は A)。
+     *
+     * ⚠ どちらも**選び所の値を元へ戻す** ── 足しても 1 件目は変わらないので、選び所は
+     *   1 件目を指したままでなければならない(戻さないと「足す…」で居座る)。
+     * 🔑 手持ちの file は `pickSqlLocalFile` と**同じ file 選択画面**を使う(新しい部品を作らない)。
+     *   違いは**足すか置き換えるか**だけなので、隠した `<input>` に印を付けて見分ける。
+     */
+    if (lid === SQL_ADD_LOCAL_FILE_VALUE) {
+      if (target instanceof HTMLSelectElement) {
+        target.value = dispatcher.getState().sqlPage.guestChosen;
+      }
+      const input = root.querySelector<HTMLInputElement>('[data-pkc-field="sql-file-input"]');
+      input?.setAttribute('data-pkc-sql-pick', 'add');
+      input?.click();
+      return;
+    }
+    const addLid = addSourceLidOf(lid);
+    if (addLid !== null) {
+      const st0 = dispatcher.getState();
+      if (target instanceof HTMLSelectElement) target.value = st0.sqlPage.guestChosen;
+      const addName = st0.entryMetas.get(addLid)?.title ?? '';
+      dispatcher.dispatch({ type: 'ADD_SQL_SOURCE', lid: addLid, name: addName });
+      // 🔴 足した相手が電波の要る形でも、選んだ直後に言う(`#992 ①` と同じ 1 本)
+      const addNote = duckDbNetworkNoteOf(addName);
+      if (addNote !== null) services.showStatus?.(addNote);
       return;
     }
     /**
@@ -9774,6 +9810,14 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     const note = duckDbNetworkNoteOf(name);
     if (note !== null) services.showStatus?.(note);
+  },
+  /**
+   * 🔴 **足した相手を外す**(#918 段⑦)。⚠ 片道にしない ── 足せるなら外せる。
+   * ⚠ lid は押し所の `data-pkc-sql-source` から読む(画面の字を見ない)。
+   */
+  'remove-sql-source': (dispatcher, target) => {
+    const lid = target.getAttribute('data-pkc-sql-source') ?? '';
+    if (lid !== '') dispatcher.dispatch({ type: 'REMOVE_SQL_SOURCE', lid });
   },
   /**
    * 🔴 **どのエンジンで引くかを選ぶ**(#682 段②。user 裁定 2026-09-15 = §9 は A)。
@@ -11645,8 +11689,11 @@ export function bindActions(
        */
       const file = el.files?.[0] ?? null;
       el.value = '';
+      // 🔴 「もう 1 つ足す…」から開いた回は**足す**(#918 段⑦)。⚠ 印は読んだら必ず外す
+      const adding = el.getAttribute('data-pkc-sql-pick') === 'add';
+      el.removeAttribute('data-pkc-sql-pick');
       if (file) {
-        services.pickSqlLocalFile?.(file);
+        services.pickSqlLocalFile?.(file, adding);
         // 🔴 添付を選んだ道(`set-sql-source`)と同じ知らせ(#992 ①)
         const note = duckDbNetworkNoteOf(file.name);
         if (note !== null) services.showStatus?.(note);

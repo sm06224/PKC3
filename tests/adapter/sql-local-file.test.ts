@@ -19,8 +19,10 @@ import {
   readSqlLocalFileBytes,
   registerSqlLocalFile,
   releaseSqlLocalFile,
+  SQL_LOCAL_FILE_KEEP_MAX,
   sqlLocalFileSize,
 } from '../../src/adapter/state/sql-local-file';
+import { SQL_MAX_SOURCES } from '../../src/features/query/sql-multi-source';
 import { isSqlLocalFileLid } from '../../src/features/query/sql-local-file';
 
 describe('手持ちのファイルの控え', () => {
@@ -86,20 +88,45 @@ describe('手持ちのファイルの控え', () => {
   });
 
   /**
-   * 🔴 **読まれなかった控えも、次に選んだ瞬間に消える**(着地前の検算で足した)。
+   * 🔴 **控えは N 件持てる**(#918 段⑦で、「常に 1 つだけ」から変えた)。
    *
-   * ⚠ 放す口だけでは足りない ── **放されない道が在る**(古い worker では上流の門が
-   *   先に断るので、控えは誰にも読まれず、面も閉じられない)。
-   * 🔑 選び所は一度に 1 つしか選べないので、**控える前に前の物を捨てる**。
+   * ⚠ 直す前は 2 件目を控えた瞬間に 1 件目が消えた。複数の file を並べると、DuckDB は走らせるたびに
+   *   **全部の file を読み直す**ので、1 件目が消えていると **走らせて初めて**
+   *   「中身を読めませんでした」と出る(足したときは何も起きないので気づけない)。
+   * 🔑 だから「**2 件目を控えても、1 件目はそのまま読める**」を直に見る。
    */
-  it('🔴 読まれなかった控えは、次に選んだ時点で捨てられる(積み上がらない)', async () => {
-    const stale = registerSqlLocalFile(new File(['old'], 'old.csv'));
-    // ⚠ ここで読まない ── 断られた回(古い worker)を模す
-    registerSqlLocalFile(new File(['new'], 'new.csv'));
-    expect(
-      await readSqlLocalFileBytes(stale),
-      '読まれなかった控えが残っている(選び直すたびに積み上がる)',
-    ).toBeNull();
+  it('🔴 2 件目を控えても、1 件目は読める(並べた file が走らせるときに消えない)', async () => {
+    const a = registerSqlLocalFile(new File(['aaa'], 'a.csv'));
+    const b = registerSqlLocalFile(new File(['bbbb'], 'b.parquet'));
+    const c = registerSqlLocalFile(new File(['cc'], 'c.json'));
+    for (const [lid, text] of [[a, 'aaa'], [b, 'bbbb'], [c, 'cc']] as const) {
+      const got = await readSqlLocalFileBytes(lid);
+      expect(got, `${text} が読めない(後から控えた file に消された)`).not.toBeNull();
+      expect(new TextDecoder().decode(got!)).toBe(text);
+    }
+    // 手放せば、その 1 件だけが読めなくなる(他は残る)
+    releaseSqlLocalFile(b);
+    expect(await readSqlLocalFileBytes(b)).toBeNull();
+    expect(await readSqlLocalFileBytes(a)).not.toBeNull();
+    expect(await readSqlLocalFileBytes(c)).not.toBeNull();
+  });
+
+  /**
+   * 🔴 **安全弁:放されない道が在っても、積み上がらない**(#682 段④c の「読まれなかった控え」の置き換え)。
+   * ⚠ 上限は並べられる数の 2 倍。**正しく使っていれば届かない**数なので、使っている file は消えない。
+   */
+  it('🔴 上限を超えたら、いちばん古い控えから捨てる(新しい物は残る)', async () => {
+    const lids: string[] = [];
+    for (let i = 0; i < SQL_LOCAL_FILE_KEEP_MAX + 3; i += 1) {
+      lids.push(registerSqlLocalFile(new File([String(i)], `f${String(i)}.csv`)));
+    }
+    expect(await readSqlLocalFileBytes(lids[0]!), '古い控えが残っている(積み上がる)').toBeNull();
+    expect(await readSqlLocalFileBytes(lids[2]!)).toBeNull();
+    expect(await readSqlLocalFileBytes(lids[lids.length - 1]!), '新しい控えまで消えた').not.toBeNull();
+    // 使っている数(並べられる上限 + 控えたばかりの 1)は必ず残る
+    const alive = await Promise.all(lids.map((l) => readSqlLocalFileBytes(l)));
+    expect(alive.filter((x) => x !== null).length).toBe(SQL_LOCAL_FILE_KEEP_MAX);
+    expect(SQL_LOCAL_FILE_KEEP_MAX).toBeGreaterThan(SQL_MAX_SOURCES);
   });
 
   /**

@@ -39,9 +39,13 @@
  *   `File`(= disk 上の file への手)だけである。
  */
 import { SQL_LOCAL_FILE_LID_PREFIX } from '@features/query/sql-local-file';
+import { SQL_MAX_SOURCES } from '@features/query/sql-multi-source';
+import type { Dispatchable } from './app-state';
 
 let counter = 0;
 const pending = new Map<string, File>();
+/** 控えを持てる数の安全弁(並べられる上限 `SQL_MAX_SOURCES` の 2 倍)。⚠ 正しく使えば届かない。 */
+export const SQL_LOCAL_FILE_KEEP_MAX = SQL_MAX_SOURCES * 2;
 
 /**
  * 選んだ file を控え、`SET_SQL_SOURCE` へ渡す合成 lid を返す。
@@ -50,14 +54,27 @@ const pending = new Map<string, File>();
  */
 export function registerSqlLocalFile(file: File): string {
   /**
-   * 🔴 **控えは常に 1 つだけ**(着地前の検算で見つけた穴)。
+   * 🔴 **控えは N 件持てる**(#918 段⑦ で直した)。
    *
-   * 🔑 選び所は**一度に 1 つしか選べない**ので、控える前に**前の物を捨てる**だけで
-   *   上限が 1 に閉じる ── 断られた回も、次に選んだ瞬間に返る。
-   * ⚠ 上の「読んでも消さない」に変えた後は、**ここと `releaseSqlLocalFile` が
-   *   唯一の終端**である(だから両方を test で pin する)。
+   * ⚠ 直す前はここで `pending.clear()` して**控えを常に 1 つだけ**にしていた。
+   *   「選び所は一度に 1 つしか選べない」という前提で、**断られた回も次に選んだ瞬間に返る**
+   *   ことを守る作りだった。🔴 **複数の file を並べる(段⑦)と、その前提が崩れる** ──
+   *   2 件目を足した瞬間に**1 件目が読めなくなる**(DuckDB は走らせるたびに全部の file を
+   *   読み直すので、**走らせて初めて「中身を読めませんでした」と出る**。気づきにくい形)。
+   * 🔑 だから消すのは**呼び側が手放したとき**だけにした(`releaseSqlLocalFile`):
+   *   ①`SET_SQL_SOURCE` が前の 1 件目と足した相手を全部 ②外したとき ③足せなかったとき。
+   *   ⚠ 3 つとも reducer が `REQUEST_SQL_EXTRA_RELEASE` / `REQUEST_SQL_GUEST_CLOSE` を出す
+   *   (`tests/adapter/sql-pane.test.ts` が全部の道で「手放した後は読めない」を見る)。
+   * 🔑 **それでも放されない道が在る**(古い worker では上流の門が先に断る等)ので、
+   *   **安全弁**を 1 つ置く ── 並べられる上限(4)の 2 倍を超えたら、**いちばん古い控えから**捨てる。
+   *   ⚠ 正しく使っていれば**届かない数**である(使っている file は最大 4 + 控えたばかりの 1)ので、
+   *   使っている file を消す形にはならない。
    */
-  pending.clear();
+  while (pending.size >= SQL_LOCAL_FILE_KEEP_MAX) {
+    const oldest = pending.keys().next().value;
+    if (oldest === undefined) break;
+    pending.delete(oldest);
+  }
   counter += 1;
   const lid = `${SQL_LOCAL_FILE_LID_PREFIX}${Date.now().toString(36)}-${counter.toString(36)}`;
   pending.set(lid, file);
@@ -108,4 +125,22 @@ export function sqlLocalFileSize(lid: string): number | null {
  */
 export function releaseSqlLocalFile(lid: string): void {
   pending.delete(lid);
+}
+
+/**
+ * 🔴 **選んだ手持ちの file を、SQL の面へ渡す**(#918 段⑦で `main.ts` から取り出した)。
+ *
+ * ⚠ `main.ts` はどの test からも実行されない(CLAUDE.md §2)ので、**置き換える / 足す**の
+ *   分岐をそこへ直書きすると、足す道の配線が**誰にも見られない**。ここへ出して、
+ *   製品も test も**同じ関数**を通す。
+ * 🔑 控えるのは**どちらの道でも**先(合成 lid を発行して bytes の手を握る)。足せなかった回に
+ *   手放すのは reducer の仕事(`ADD_SQL_SOURCE` が `REQUEST_SQL_EXTRA_RELEASE` を出す)。
+ */
+export function pickSqlLocalFileInto(
+  d: { dispatch(action: Dispatchable): void },
+  file: File,
+  add: boolean,
+): void {
+  const lid = registerSqlLocalFile(file);
+  d.dispatch(add ? { type: 'ADD_SQL_SOURCE', lid, name: file.name } : { type: 'SET_SQL_SOURCE', lid, name: file.name });
 }

@@ -18,6 +18,24 @@
 export const SQL_PICK_LOCAL_FILE_VALUE = '__pick_local_file__';
 
 /**
+ * 🔴 **「もう 1 つ足す…」の中の「手持ちのファイルを足す…」**(#918 段⑦)。
+ * ⚠ 上の `SQL_PICK_LOCAL_FILE_VALUE` と**別の値**にする ── 同じ file 選択画面を開くが、
+ *   選んだ file を**足す**のか**置き換える**のかが違う(binder が値で見分ける)。
+ */
+export const SQL_ADD_LOCAL_FILE_VALUE = '__add_local_file__';
+
+/**
+ * 🔴 **足す相手として選んだ添付の印**(#918 段⑦)。`add:` の後ろが lid。
+ * ⚠ 本物の lid は `:` を含まない(`generateLid()`)ので、頭の印と衝突しない。
+ */
+export const SQL_ADD_SOURCE_PREFIX = 'add:';
+
+/** 選び所の値が「足す」の選択か。足す相手の lid を返す(`null` = 足す選択ではない)。 */
+export function addSourceLidOf(value: string): string | null {
+  return value.startsWith(SQL_ADD_SOURCE_PREFIX) ? value.slice(SQL_ADD_SOURCE_PREFIX.length) : null;
+}
+
+/**
  * 手持ちのファイルへ発行する合成 lid の頭。
  * ⚠ **実在するノートの lid とは絶対に被らない** ── `generateLid()` はコロンを
  *   含まないので、頭にコロン付きの印を置けば別物だと機械的に言える。
