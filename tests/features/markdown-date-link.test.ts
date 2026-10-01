@@ -92,4 +92,29 @@ describe('本文の @日付を押せる字にする(#1169)', () => {
     const html = on('| 予定 | 日 |\n|---|---|\n| 提出 | @2026-10-15 |\n');
     expect(html).toContain('data-pkc-date="2026-10-15"');
   });
+
+  /**
+   * 🔴 **単日でない日付には種類が焼かれる**(#1225)── 読む面が「あとN日」を添えるのは単日だけ。
+   * ⚠ 単日には**何も足さない**(上の最初の test が、これまでの出力 1 バイトも変えないことを見ている)。
+   */
+  it('🔴 期間(@a..b)は data-pkc-date-kind="range"、繰り返しは "repeat"、単日には付かない', () => {
+    const range = on('出張 @2026-10-15..2026-10-20 です\n');
+    expect(range).toContain('data-pkc-date-kind="range"');
+    expect(on('出張 @2026-10-15〜2026-10-20 です\n')).toContain('data-pkc-date-kind="range"');
+    const repeat = on('- [ ] ゴミ出し @2026-10-15 毎週\n');
+    expect(repeat).toContain('data-pkc-date-kind="repeat"');
+    // 時刻つきの繰り返しも繰り返し(時刻は日付の隣に在るだけ)
+    expect(on('会議 @2026-10-15 14:00 毎週\n')).toContain('data-pkc-date-kind="repeat"');
+    // 対照群 ── 単日(時刻つきも)には付かない
+    expect(on('見積 @2026-10-15 まで\n')).not.toContain('data-pkc-date-kind');
+    expect(on('会議 @2026-10-15 14:00 開始\n')).not.toContain('data-pkc-date-kind');
+  });
+
+  it('🔴 同じ行の 2 つめの日付は、1 つめの種類に引きずられない(それぞれ自分の後ろを読む)', () => {
+    const html = on('@2026-10-15..2026-10-20 のあと @2026-10-25 に\n');
+    expect(html.match(/data-pkc-date-kind="range"/g)).toHaveLength(1);
+    // 2 つめの `<span …>` に種類が無い
+    const second = html.slice(html.indexOf('data-pkc-date="2026-10-25"'));
+    expect(second.slice(0, second.indexOf('>'))).not.toContain('data-pkc-date-kind');
+  });
 });

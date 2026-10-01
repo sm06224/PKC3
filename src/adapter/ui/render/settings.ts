@@ -53,6 +53,7 @@ import { appCodeCollapse, CodeCollapseStore } from './code-collapse';
 import { appInlineCodeCopy, InlineCodeCopyStore } from './inline-code-copy';
 import { appPhoneLinks, PhoneLinksStore } from './phone-links';
 import { appDateLinks, DateLinksStore } from './date-links';
+import { appRelativeDays, RelativeDaysStore } from './relative-days';
 import { EXTERNAL_IMAGE_MODES } from '@features/markdown/external-images';
 import {
   NOTICE_READABLE_TEXT,
@@ -183,6 +184,11 @@ export class SettingsRenderer {
      * ⚠ **末尾に足す**(すぐ上の戒めのとおり)。
      */
     private readonly inlineCodeCopy: InlineCodeCopyStore = appInlineCodeCopy,
+    /**
+     * 🔴 **本文の日付の右に「あとN日」を添えるか**(#1225)。
+     * ⚠ **末尾に足す**(すぐ上の戒めのとおり)。
+     */
+    private readonly relativeDays: RelativeDaysStore = appRelativeDays,
   ) {}
 
   private sameOriginList: HTMLElement | null = null;
@@ -206,6 +212,7 @@ export class SettingsRenderer {
       this.syncVoiceBoost();
       this.syncPhoneLinks();
       this.syncDateLinks();
+      this.syncRelativeDays();
       this.syncMissingLinks();
       this.syncCodeCollapse();
       this.syncInlineCodeCopy();
@@ -751,6 +758,26 @@ export class SettingsRenderer {
     dld.append(buildSettingsNote('押すと、題名がその日付のノートを開きます(無ければ作るか聞きます)。'));
     editDl.append(dlt, dld);
     /**
+     * 🔴 **日付の右に「あと3日」「5日前」を薄く添えるか**(#1225)。
+     *
+     * ⚠ **既定は入**(`date-links` と同じ ── 見え方が変わるので切れる)。
+     * ⚠ 説明は hover に置く(visible の note を足すと `settings-notes.test.ts` の段落数を動かす)。
+     */
+    const rdt = document.createElement('dt');
+    rdt.textContent = '日付までの日数';
+    const rdd = document.createElement('dd');
+    const rdlabel = document.createElement('label');
+    const rdcheck = document.createElement('input');
+    rdcheck.type = 'checkbox';
+    rdcheck.setAttribute('data-pkc-action', 'set-relative-days');
+    rdcheck.setAttribute('data-pkc-field', 'relative-days');
+    rdlabel.append(rdcheck, document.createTextNode(' 本文の @日付 の右に、今日からの日数を薄く添える'));
+    rdlabel.title =
+      '「今日」「明日」「あと3日」「5日前」のように添えます(日付そのものは変わらず、コピーにも入りません)。' +
+      'チェックを付けた項目、期間(@日付..日付)、繰り返す予定には添えません。';
+    rdd.append(rdlabel);
+    editDl.append(rdt, rdd);
+    /**
      * 🔴 **リンク先のノートが無いリンクを、点線で見せるか**(#1174 段①)。
      *
      * ⚠ **既定は入**(`phone-links` と逆)── 変わるのは下線の種類だけで、字の色は
@@ -1007,6 +1034,7 @@ export class SettingsRenderer {
     this.syncVoiceBoost();
     this.syncPhoneLinks();
     this.syncDateLinks();
+    this.syncRelativeDays();
     this.syncMissingLinks();
     this.syncCodeCollapse();
     this.syncInlineCodeCopy();
@@ -1632,6 +1660,11 @@ export class SettingsRenderer {
   private syncDateLinks(): void {
     const box = this.region.querySelector<HTMLInputElement>('[data-pkc-field="date-links"]');
     if (box) box.checked = this.dateLinks.enabled();
+  }
+
+  private syncRelativeDays(): void {
+    const box = this.region.querySelector<HTMLInputElement>('[data-pkc-field="relative-days"]');
+    if (box) box.checked = this.relativeDays.enabled();
   }
 
   private syncNotices(): void {

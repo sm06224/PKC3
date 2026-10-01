@@ -56,6 +56,7 @@ import { appCodeCollapse } from '@adapter/ui/render/code-collapse';
 import { appInlineCodeCopy } from '@adapter/ui/render/inline-code-copy';
 import { appPhoneLinks } from '@adapter/ui/render/phone-links';
 import { appDateLinks } from '@adapter/ui/render/date-links';
+import { appRelativeDays, syncRelativeDays, watchRelativeDays } from '@adapter/ui/render/relative-days';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { markCollectionView } from '@adapter/ui/render/collection-bar';
 import { installAppendAutofold } from '@adapter/ui/render/append-autofold';
@@ -1752,6 +1753,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * test しか無い面なので、判断を置くと全 tests 緑のまま取り違える)。
    * ⚠ 常駐タイマーは立たない(`visibilitychange` の 1 点だけを見る)。
    */
+  /**
+   * 🔴 **日をまたいだ「あとN日」を、画面へ戻ってきたときに計算し直す**(#1225)。
+   * ⚠ 常駐タイマーは立てない(上の `watchOfficeHang` と同じ ── `visibilitychange` の 1 点だけ)。
+   *   ⚠ ここは**渡すだけ** ── 何を差すか・設定を見るかは `relative-days.ts` が持つ。
+   */
+  watchRelativeDays(document, document);
   watchOfficeHang({
     onEvent: (fn) => officeWindow.onEvent(fn),
     doc: document,
@@ -3756,6 +3763,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       appDateLinks.setEnabled(on);
       center.invalidateDetail();
       center.render(dispatcher.getState());
+    },
+    /**
+     * 🔴 **日付の右に「あとN日」を添えるか**(#1225)。⚠ 添え字は**描いた後に差す**だけなので、
+     *   描き直さず**その場で付け直す / 外す**(読んでいる位置・図を動かさない)。
+     */
+    setRelativeDays: (on) => {
+      appRelativeDays.setEnabled(on);
+      syncRelativeDays(document);
     },
     /**
      * 🔴 **リンク先のノートが無いリンクの点線**(#1174 段①)。⚠ `setPhoneLinks` と同じく

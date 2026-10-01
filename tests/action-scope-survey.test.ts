@@ -268,6 +268,7 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
     //   `toggle-code-collapse` と同じ仕分け)/ P2 +1(`create-date-note`。画面の下の口は
     //   1 つしか出ず、日付は state に在る ── `swap-open` と同じ仕分け)/ N +1
     //   (`set-date-links`。checkbox の値を渡すだけ ── `set-phone-links` と同じ仕分け)。
+    // ⚠ 2026-10-01(#1225): N +1(`set-relative-days`。checkbox の `checked` を渡すだけ ── `set-date-links` と同じ仕分け)。
     // ⚠ 2026-10-01(#1174 段①): N +1(`set-missing-links`。checkbox の `checked` を渡すだけ ── `set-phone-links` と同じ仕分け)。
     // ⚠ 2026-10-01(#1010 B): N +1(`open-storage-check`。保存が止まった断り書きの隣から
     //   「システム」の保存領域の点検へ ── 行き先は固定で、押した所から**何も要らない**。
@@ -283,7 +284,7 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
     //   押した所からは何も要らない ── `remove-place` と同じ仕分け)。
     // ⚠ 2026-10-01(#918 段⑦): N +1(`remove-sql-source`。SQL の面で足した相手を外す口 ── 外す相手の lid は
     //   押し口自身が運ぶので、押した所からは何も要らない。`remove-place-line` と同じ仕分け)。
-    expect(counts()).toEqual({ P1: 66, P2: 34, E: 25, V: 10, N: 166 });
+    expect(counts()).toEqual({ P1: 66, P2: 34, E: 25, V: 10, N: 167 });
   });
 
   it('🔴 名指しの錨 ── 件数が同じまま入れ替わっても落ちる', () => {

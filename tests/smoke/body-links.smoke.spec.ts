@@ -101,6 +101,38 @@ test('🔴 本文の entry: リンクを押すと、そのノートが開く(遷
   expect(look.color, '字の色が本文と違う(色で割らない決め)').toBe(look.parentColor);
   expect(look.cursor, 'ポインタが変わらない').toBe('pointer');
 
+  /**
+   * 🔴 **日付の右の「あと3日」「5日前」**(#1225)。起動を増やさず、同じ日付の字で見る。
+   * 属性の有無だけでは「画面に薄く出ているか」は言えない ── 計算後の `::after` で見る:
+   *   ① 字が出ている(`content` に日数)。**期待は page の今日から別に数える**(実装と同じ式にしない)
+   *   ② 色は本文の字より薄い(`--muted`)・`inline-block`(日付の点線の下線が添え字まで伸びない。
+   *      ⚠ 装飾は子へ伝わるので `text-decoration` の計算値は `none` のままで、**伸びたかは
+   *      値からは読めない** ── 伸びない作り(`inline-block`)のほうを見る)
+   *   ③ 本文の字(`textContent`)には入らない = 選んでもコピーしても入らない
+   */
+  const rel = await day15.evaluate((el) => {
+    const after = getComputedStyle(el, '::after');
+    const d = new Date();
+    const diff = Math.round(
+      (Date.UTC(2026, 9, 15) - Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())) / 86400000,
+    );
+    return {
+      attr: el.getAttribute('data-pkc-rel'),
+      content: after.content,
+      color: after.color,
+      parentColor: getComputedStyle(el).color,
+      display: after.display,
+      text: el.textContent,
+      expected:
+        diff === 0 ? '今日' : diff === 1 ? '明日' : diff > 1 ? `あと${diff}日` : `${-diff}日前`,
+    };
+  });
+  expect(rel.attr, '日付の右に日数が添わっていない').toBe(rel.expected);
+  expect(rel.content, '画面に字が出ていない(::after の受け皿が無い)').toContain(rel.expected);
+  expect(rel.color, '添え字が本文の字と同じ濃さ(薄くない)').not.toBe(rel.parentColor);
+  expect(rel.display, '添え字が inline-block でない(日付の点線の下線が添え字へ伸びる)').toBe('inline-block');
+  expect(rel.text, '添え字が本文の字に入っている(選ぶと・コピーすると入る)').toBe('@2026-10-15');
+
   // ① 在る日 ── そのノートが開く(押した日付の「ノートを開く」に見える)
   await clickReal(page, day15);
   await expect(page.locator('[data-pkc-field="detail-body"]')).toContainText('着いた先の本文');
