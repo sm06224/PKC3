@@ -48,3 +48,21 @@ export function findTodayNote(metas: Iterable<EntryMeta>, title: string): EntryM
   }
   return best;
 }
+
+/**
+ * 🔴 **本文の `@2026-10-15` を押したが、その日のノートが無かったとき**の字(#1169)。
+ *
+ * 🔑 **知らせの字と押し口の字を 1 か所で持つ** ── 出し入れ(`status-open.ts`)と
+ *   出す側(`binder.ts` の受け手)が別々に綴ると、片方だけ変えた日に
+ *   「押し口が出ない」が静かに起きる(CLAUDE.md §7)。
+ * ⚠ 作るのは**押し口を押したとき**で、日付を押した時点では作らない
+ *   (打ち間違いの日付でノートが増えない)。
+ */
+export function dateNoteMissingNotice(date: string): string {
+  return `${date} のノートはまだありません`;
+}
+
+/** その押し口の字。 */
+export function dateNoteCreateLabel(date: string): string {
+  return `${date} のノートを作る`;
+}

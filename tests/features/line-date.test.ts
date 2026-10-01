@@ -4,9 +4,14 @@ import {
   stripLineDate,
   formatLineDate,
   insertionForLineDate,
+  allDateTokens,
 } from '../../src/features/schedule/line-date';
 import { readScheduleDate } from '../../src/features/schedule/schedule-keys';
-import { isScheduleDate, isScheduleTime } from '../../src/features/schedule/schedule-date';
+import {
+  isRealCalendarDate,
+  isScheduleDate,
+  isScheduleTime,
+} from '../../src/features/schedule/schedule-date';
 
 describe('行の日付(@2026-08-25)', () => {
   it('チェック項目の末尾に書いた日付を読む', () => {
@@ -528,5 +533,62 @@ describe('刻み(#344 段②)', () => {
         '@2026-09-20..2026-09-22',
       );
     });
+  });
+});
+
+/**
+ * 🔴 **本文の日付を押せる字にする範囲**(#1169)。
+ * ⚠ 形だけ通る日(`2026-02-31`)は**押せる字にしない** ── 押すと存在しない日の題名で
+ *   ノートを作ることになる。`readLineDate` は逆に通す(予定の並びに出して直せるように)。
+ */
+describe('allDateTokens ── 押せる字の範囲(#1169)', () => {
+  it('実在する日の `@` から日付の末尾までが範囲になる(時刻は含まない)', () => {
+    const line = 'x @2026-10-15 14:00 y';
+    const [t] = allDateTokens(line);
+    expect(t).toEqual({ date: '2026-10-15', start: 2, end: 13 });
+    expect(line.slice(t!.start, t!.end)).toBe('@2026-10-15');
+  });
+
+  it('🔴 1 行に複数あれば全部返す(readLineDate は最初の 1 つだけ)', () => {
+    const line = '@2026-10-15 と @2026-10-20';
+    expect(allDateTokens(line).map((t) => t.date)).toEqual(['2026-10-15', '2026-10-20']);
+    expect(readLineDate(line)?.date).toBe('2026-10-15');
+  });
+
+  it('🔴 形だけ通る日は拾わない(2026-02-31 / 2026-13-01 / 2026-00-10 / 2026-04-31)', () => {
+    for (const bad of ['2026-02-31', '2026-13-01', '2026-00-10', '2026-04-31', '2026-01-00']) {
+      expect(allDateTokens(`@${bad}`), bad).toEqual([]);
+      // 対照群 ── 形の述語は通す(別の問いである)
+      expect(isScheduleDate(bad), bad).toBe(true);
+    }
+  });
+
+  it('閏年は数える(2024-02-29 と 2000-02-29 は在り、2026-02-29 と 1900-02-29 は無い)', () => {
+    expect(isRealCalendarDate('2024-02-29')).toBe(true);
+    expect(isRealCalendarDate('2000-02-29')).toBe(true);
+    expect(isRealCalendarDate('2026-02-29')).toBe(false);
+    expect(isRealCalendarDate('1900-02-29')).toBe(false);
+    expect(isRealCalendarDate('2026-12-31')).toBe(true);
+    // 形が違うものは実在以前に落ちる
+    expect(isRealCalendarDate('2026-8-5')).toBe(false);
+  });
+
+  it('🔴 期間は開始の日だけを範囲にする(`..` 以降は含まない)', () => {
+    const line = '@2026-10-15..2026-10-20 出張';
+    const t = allDateTokens(line);
+    expect(t).toHaveLength(1);
+    expect(t[0]).toEqual({ date: '2026-10-15', start: 0, end: 11 });
+    // 〜 も同じ
+    expect(allDateTokens('@2026-10-15〜2026-10-20').map((x) => x.date)).toEqual(['2026-10-15']);
+  });
+
+  it('期間として成り立たない形(逆順・書きかけ)は字のまま ── readLineDate と同じ向き', () => {
+    expect(allDateTokens('@2026-10-20..2026-10-15')).toEqual([]);
+    expect(allDateTokens('@2026-10-15..')).toEqual([]);
+    expect(readLineDate('@2026-10-20..2026-10-15')).toBeNull();
+  });
+
+  it('日付でない `@` は拾わない(単価・個数・メンション・桁の足りない日付)', () => {
+    expect(allDateTokens('牛乳 @1,500 で / @3 個 / @taro さん / @2026-8-5')).toEqual([]);
   });
 });

@@ -35,6 +35,7 @@ import { OpenInEditStore } from '@adapter/ui/render/open-in-edit';
 import { AlarmEnabledStore } from '@adapter/ui/render/alarm-enabled';
 import { VoiceBoostStore } from '@adapter/ui/render/voice-boost';
 import { PhoneLinksStore } from '@adapter/ui/render/phone-links';
+import { DateLinksStore } from '@adapter/ui/render/date-links';
 import { TooNarrowOkStore } from '@adapter/ui/render/too-narrow';
 import { EditorModeStore } from '@adapter/ui/render/editor-mode';
 import { PaneSizeStore } from '@adapter/ui/render/pane-size';
@@ -89,6 +90,17 @@ const CASES: readonly {
     },
     a: true,
     b: false,
+  },
+  {
+    name: 'DateLinksStore',
+    make: () => {
+      const s = new DateLinksStore(null);
+      return { write: (v) => s.setEnabled(v as boolean), read: () => s.enabled() };
+    },
+    // ⚠ **既定が入**なので、最初に書くのは**切**にする ── 入から書くと、控えが死んでいて
+    //   既定のまま読まれても通ってしまう(代替物で満たせる検査になる)
+    a: false,
+    b: true,
   },
   {
     name: 'TooNarrowOkStore',

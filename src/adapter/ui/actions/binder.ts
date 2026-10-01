@@ -151,7 +151,12 @@ import {
   isDateShortcut,
   shortcutDate,
 } from '@features/schedule/date-shortcuts';
-import { findTodayNote, todayNoteTitle } from '@features/schedule/today-note';
+import { isRealCalendarDate } from '@features/schedule/schedule-date';
+import {
+  dateNoteMissingNotice,
+  findTodayNote,
+  todayNoteTitle,
+} from '@features/schedule/today-note';
 import { formatLineDate } from '@features/schedule/line-date';
 import { isImageAssetMime } from '@features/asset/asset-ref-format';
 import {
@@ -1124,6 +1129,11 @@ export interface BinderServices {
    */
   setPhoneLinks?(on: boolean): void;
   /**
+   * 🔴 **本文の `@日付` を押せる字にするか**(#1169)。⚠ **省略可**。
+   * ⚠ 切り替えたら**その場で本文を描き直す**(`setPhoneLinks` と同じ理由)。
+   */
+  setDateLinks?(on: boolean): void;
+  /**
    * 🔴 **貼る用に画像を持ち歩ける形へ**(#193)。`blob:` → `data:` の対応を返す。
    * ⚠ **省略可** ── 無ければ画像は文字に置き換わる(壊れた画像を貼らせない)。
    */
@@ -1942,6 +1952,13 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
    *   (機械検査は `tests/repo-hygiene.test.ts`)。
    */
   'open-today',
+  /**
+   * 🔴 **画面の下の「○○のノートを作る」は、ノートを 1 件作る**(#1169)── `CREATE_ENTRY` は
+   *   即永続なので、取り込みが entry を総入れ替えしている裏で足させない
+   *   (`contacts-quick-add` と同じ)。⚠ 日付を押すほう(`open-date-note`)は**作らない**
+   *   (開くか、作るかを聞くだけ)ので載せない。機械検査は `tests/repo-hygiene.test.ts`。
+   */
+  'create-date-note',
   // ⚠ 今日のノートの本文を書く(#402 ②)── 取込・書出しの最中に走らせない
   'schedule-quick-add',
   // 🔴 連絡先を 1 件作る(#278 段③)── `CREATE_ENTRY` は即永続なので同じ門(機械検査は repo-hygiene)
@@ -3697,6 +3714,99 @@ function leaveSectionDraftOrAsk(
       selectEntryOrExplain(dispatcher, toLid, what, root, services);
     },
   }) === 'sync';
+}
+
+/**
+ * 本文の日付(`@2026-10-15`)が指すノートを探して、**あれば開く**(#1169)。
+ *
+ * 🔴 **規則は 1 本** ── あるなら `navigateToLink` と**同じ道**(`selectEntryOrExplain`)で開く。
+ *   ⚠ 編集中の断り文は「リンク先」ではなく**日付で名指しする**(`2026-10-15 のノート`)──
+ *   user が押したのは日付なので、「リンク先」と言われても何のことか分からない。
+ * ⚠ **`phase !== 'ready'` で黙って返さない**(`open-today` の形をそのまま写さない)──
+ *   押したのに何も起きない dead click になる。断る 2 つ(編集中 / 保存に失敗して止まっている)は
+ *   `phaseBlockReason` の 1 本で理由を言う。
+ *
+ * @returns 続きが要るとき(開いておらず、断ってもいない)だけ日付。それ以外は `null`
+ */
+function resolveDateNote(
+  dispatcher: Dispatcher,
+  rawDate: string | null,
+  root: HTMLElement,
+  services: BinderServices,
+): string | null {
+  const date = rawDate ?? '';
+  // ⚠ 属性は書き換えられうる ── 実在する日でなければ、ノートを作らない
+  if (!isRealCalendarDate(date)) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: '日付の書き方が読めません' });
+    return null;
+  }
+  const what = `${date} のノート`;
+  const st = dispatcher.getState();
+  const found = findTodayNote(st.entryMetas.values(), date);
+  if (found !== null) {
+    selectEntryOrExplain(dispatcher, found.lid, what, root, services);
+    return null;
+  }
+  const block = phaseBlockReason(st.phase);
+  if (block !== null) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: `${block}${what}を開いてください` });
+    return null;
+  }
+  return date;
+}
+
+/**
+ * 日付を押した。ノートがあれば開き、**無ければ作るかどうかを聞く**(作らない)。
+ * ⚠ 作らないのは、打ち間違いの日付でノートが増えないようにするため ──
+ *   書く物が無いので `BODY_WRITE_ACTIONS` には載せない(`createDateNote` が書く側)。
+ */
+function openDateNote(
+  dispatcher: Dispatcher,
+  rawDate: string | null,
+  root: HTMLElement,
+  services: BinderServices,
+): void {
+  const date = resolveDateNote(dispatcher, rawDate, root, services);
+  if (date === null) return;
+  const message = dateNoteMissingNotice(date);
+  dispatcher.dispatch({ type: 'OP_NOTICE', message, createDate: date });
+  /**
+   * ⚠ **状態の行へも直に書く** ── 同じ知らせが続けて来ても、行が別の字に上書きされた後なら
+   *   state の `notice` は動かず再掲されない(`main.ts` の `noticeShown`)。押したのに
+   *   「作る」が出ない dead click になるので、字は `showStatus` でも必ず出す。
+   */
+  services.showStatus?.(message);
+}
+
+/**
+ * 画面の下の「○○のノートを作る」を押した。**作って、開く**(編集には入らない)。
+ * ⚠ 編集に入らない ── 読んでいた本文から日付を押しただけで、書く気になったとは限らない
+ *   (予定の面から足すときと同じ作り)。
+ * ⚠ 押す前に誰かが作っていたら、作らずにそれを開く(`resolveDateNote` が先に探す)。
+ */
+function createDateNote(
+  dispatcher: Dispatcher,
+  rawDate: string | null,
+  root: HTMLElement,
+  services: BinderServices,
+): void {
+  const date = resolveDateNote(dispatcher, rawDate, root, services);
+  if (date === null) return;
+  const lid = generateLid();
+  dispatcher.dispatch({
+    type: 'CREATE_ENTRY',
+    archetype: 'text',
+    lid,
+    title: date,
+    parentLid: null,
+    relationId: generateLid(),
+    edit: false,
+  });
+  // ⚠ 作れなかった回(lid 衝突 ── reducer が理由を立てる)は、知らせで上書きしない
+  if (!dispatcher.getState().entryMetas.has(lid)) return;
+  // 🔑 「作る」の口を畳む(知らせの字が変わると、`paintStatusCreate` が畳む)
+  dispatcher.dispatch({ type: 'OP_NOTICE', message: `${date} のノートを作りました` });
+  appPhone.showNote();
 }
 
 function selectEntryOrExplain(
@@ -5587,6 +5697,23 @@ const ACTIONS: Record<string, ActionHandler> = {
     });
     // ⚠ `create-entry` と同じ ── 作成 → 即編集の編集権を取る
     if (dispatcher.getState().phase === 'editing') void services.acquireEditLock?.(lid);
+  },
+  /**
+   * 🔴 **本文の `@2026-10-15` を押すと、その日のノートを開く**(#1169)。
+   *
+   * > user の物語:予定に `@日付` と書いた。その日に書き留めたノート(題名が日付)へ
+   * > **1 手で**飛びたい。無ければ、その場で作って書き始めたい。
+   *
+   * 🔑 探し方・作り方は「今日」(`open-today`)と**同じ 1 本**(`findTodayNote` / 題名は日付)。
+   * ⚠ 日付を押した時点では**作らない**(打ち間違いの日付でノートが増えない)── 無ければ
+   *   画面の下に「○○のノートを作る」を出し、**それを押したとき**に作る(`create-date-note`)。
+   */
+  'open-date-note': (dispatcher, target, services, root) => {
+    openDateNote(dispatcher, target.getAttribute('data-pkc-date'), root, services);
+  },
+  /** 🔴 画面の下の「○○のノートを作る」── 作って、開く(`open-date-note` の続き)。 */
+  'create-date-note': (dispatcher, target, services, root) => {
+    createDateNote(dispatcher, target.getAttribute('data-pkc-date'), root, services);
   },
   'create-entry': (dispatcher, target, services) => {
     // 🔑 種類は**隣の `<select>`**から取る(P8 ── ボタンを種類ぶん並べない)。
@@ -9884,6 +10011,10 @@ const ACTIONS: Record<string, ActionHandler> = {
   'set-phone-links': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
     if (target instanceof HTMLInputElement) services.setPhoneLinks?.(target.checked);
+  },
+  'set-date-links': (_dispatcher, target, services) => {
+    // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
+    if (target instanceof HTMLInputElement) services.setDateLinks?.(target.checked);
   },
   'set-notices-enabled': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)

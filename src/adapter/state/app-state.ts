@@ -1400,6 +1400,14 @@ export interface AppState {
    * ⚠ `notice` と**対で**書く(`OP_NOTICE` が両方を置く)── 次の知らせで消える。
    */
   noticeOpen: string | null;
+  /**
+   * 🔴 **その知らせの隣に「○○のノートを作る」で出す日付**(#1169)。`null` = 出さない。
+   *
+   * 本文の `@2026-10-15` を押したのに、その日のノートが無かったとき、知らせと対で書く
+   * (`OP_NOTICE` が両方を置く)。⚠ 出し入れは `status-open.ts` が**字の一致**で決める ──
+   * 別の知らせに上書きされたら、この値が残っていても出ない(`noticeOpen` と同じ作法)。
+   */
+  noticeCreate: string | null;
   /** ゴミ箱 panel(filer)。開いた時点のスナップショット + 明示更新。 */
   trashPanel: { items: readonly TrashItem[] } | null;
   /**
@@ -1933,6 +1941,7 @@ export const initialState: AppState = {
   notice: null,
   refusedTags: { 'smart-cond': [], 'bulk-tag': [] },
   noticeOpen: null,
+  noticeCreate: null,
   trashPanel: null,
   linkedFiles: new Map(),
   writeLock: null,
@@ -2690,6 +2699,11 @@ export type UserAction =
       message: string;
       /** 隣に「開く」で出す物の lid(#668 A)。省略 = 押す口を出さない。 */
       open?: string;
+      /**
+       * 🔴 隣に「○○のノートを作る」で出す日付(#1169)。省略 = 押す口を出さない。
+       * ⚠ 出す字は `dateNoteMissingNotice` と対(出し入れは `status-open.ts`)。
+       */
+      createDate?: string;
     }
   /**
    * 🔴 **押したのに入らなかったタグ**(#640 案 A)── 効果層が断った名前を欄へ戻すために撃つ。
@@ -8755,7 +8769,12 @@ function reduceCore(
       //    消してよい理由は無い(`main.ts` が別の行として組んでいる)
       // ⚠ 「開く」の身元は知らせと**対で**置く ── 添えない知らせが来たら消える
       return {
-        state: { ...state, notice: action.message, noticeOpen: action.open ?? null },
+        state: {
+          ...state,
+          notice: action.message,
+          noticeOpen: action.open ?? null,
+          noticeCreate: action.createDate ?? null,
+        },
         events: [],
       };
     /**

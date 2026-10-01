@@ -51,14 +51,14 @@ dual-bookmark-open dual-bookmark-remove dual-tab-activate unsplit-entry dual-cru
 stack-link-up stack-link-down capture-play move-tile-up move-tile-down
 open-repeat-menu set-task-repeat toggle-app-group pick-app-group-icon sql-history-pick
 move-app-group-up move-app-group-down open-tile-as
-sql-er-table sql-er-column sql-er-link sql-er-unlink system-jump jump-to-asset-use`.split(/\s+/);
+sql-er-table sql-er-column sql-er-link sql-er-unlink system-jump jump-to-asset-use open-date-note`.split(/\s+/);
 
 /** 点を取るが、state の現在値(`selectedLid` / `dual.focus`)で代替できる。 */
 export const P2 = `select-entry delete-entry enter-folder toggle-todo move-order-up move-order-down
 adopt-external-images write-back-file export-entry export-entry-pdf export-entry-docx export-entry-pptx
 export-entry-html export-folder copy-entry-ref open-note-window stack-load dual-row dual-focus dual-tab-add dual-tab-close
 dual-rename-begin dual-back dual-forward dual-bookmark dual-mkdir dual-mknote dual-copy dual-delete
-rename-entry-begin move-to-folder create-in-folder swap-open`
+rename-entry-begin move-to-folder create-in-folder swap-open create-date-note`
   .split(/\s+/);
 
 /** 閉じた選択肢から 1 つ ── パレットには**値ごとに 1 行**出せる。 */

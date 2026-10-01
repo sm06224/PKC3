@@ -229,6 +229,14 @@ const STYLED_ELSEWHERE: Readonly<Record<string, string>> = {
    */
   'pkc-cell-tap-hint': 'src/features/markdown/markdown-render.ts',
   /**
+   * 本文の `@2026-10-15`(押すとその日のノートを開く。#1169)。
+   * ⚠ これも**本文の描画物である**が、出るのは `interactiveDates` を渡した面だけ
+   *   (= 受け手が居る読む面だけ)なので、既定で描く走査には現れない。
+   *   書き出しの `<style>` に焼かれないよう、規則は `.pkc-md-rendered` を起点にしていない
+   *   (`app.css` の注記)── だから `markdown-css-parity` の「書き出しに載る」検査の外である。
+   */
+  'pkc-date-link': 'src/features/markdown/markdown-render.ts',
+  /**
    * 指で触る端末で、「作る」が押せない理由を出す 1 行(#791 ③)。
    * ⚠ これは**本文の描画物ではない** ── 器(shell)が組み立てる帯の部品なので、
    *   `renderMarkdown` からは 1 度も出てこない。

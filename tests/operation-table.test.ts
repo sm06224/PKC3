@@ -205,7 +205,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'container-rebuild',
   'container-reset',
   'contacts-quick-add', 'copy-block-md', 'copy-chapter-md', 'copy-note-md', 'copy-note-rich',
-  'copy-section-ref', 'copy-selection-md', 'db-check',
+  'copy-section-ref', 'copy-selection-md', 'create-date-note', 'db-check',
   'delete-selected', 'deny-external-images',
   'discard-capture', 'dismiss-announce', 'dismiss-notices', 'dismiss-update', 'dual-back',
   'dual-bookmark', 'dual-copy', 'dual-delete', 'dual-focus', 'dual-forward', 'dual-mkdir',
@@ -235,7 +235,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'rename-attachment', 'renumber-lists', 'replace-all', 'reset-app-group-order', 'reset-flags',
   'reset-office-profile', 'retry-persist', 'run-sql', 'schedule-nav', 'schedule-quick-add',
   'schedule-today', 'select-entry', 'set-alarm-enabled', 'set-app-group', 'set-app-icon',
-  'set-app-open-target', 'set-browse', 'set-column-rule', 'set-editor-mode', 'set-entry-date',
+  'set-app-open-target', 'set-browse', 'set-column-rule', 'set-date-links', 'set-editor-mode', 'set-entry-date',
   'set-entry-sort', 'set-external-images', 'set-flag', 'set-notices-enabled', 'set-open-in-edit',
   'set-open-place', 'set-page-format', 'set-paste-source', 'set-phone-links', 'set-prose-align',
   'set-query-key', 'set-read-columns', 'set-sql-engine', 'set-sql-source', 'set-sql-text', 'set-tag-badge',
@@ -340,7 +340,8 @@ const UNREGISTERED_POINT: readonly string[] = [
   'open-chapter-window',
   'edit-from-heading', 'export-diagram', 'filter-by-tag', 'move-app-group-down',
   'move-app-group-up', 'move-tile-down', 'move-tile-up', 'navigate-asset-ref',
-  'navigate-card-ref', 'navigate-entry-ref', 'open-alarm', 'open-office', 'open-repeat-menu',
+  'navigate-card-ref', 'navigate-entry-ref', 'open-alarm', 'open-date-note', 'open-office',
+  'open-repeat-menu',
   'open-tile', 'open-tile-as', 'pick-app-group-icon', 'preview-revision', 'remove-relation',
   'restore-revision', 'restore-trash', 'revoke-extension', 'revoke-same-origin',
   'schedule-pick-day', 'schedule-quick-here', 'set-task-repeat', 'shape-cell',
@@ -396,6 +397,11 @@ describe('操作の全数台帳(#582 段①)', () => {
       outsideActionsTable: x.outsideActionsTable.length,
       unregistered: x.unregistered,
     }).toEqual({
+      // ⚠ 2026-09-30(#1169): 本文の `@日付` の 3 つ(`open-date-note` / `create-date-note` /
+      //   `set-date-links`)で受け手 +3 ── 登記は増えない(押し口は本文の日付・画面の下の
+      //   知らせの隣・設定の checkbox にしか無く、鍵も持たない)。`open-date-note` は
+      //   押した日付が要る P1、残り 2 つは名前だけで呼べる側(`set-phone-links` /
+      //   `swap-open` と同じ仕分け)
       // ⚠ 2026-09-27(#1044 段4): 章を別のウィンドウで(`open-chapter-window`)で受け手 +1
       //   (登記は増えない ── 押し口は見出しの右クリックの中にしか無く、押した見出しが要る P1)
       // ⚠ 2026-09-21(#1032): 「ノートを閉じる」(`deselect-entry`)で登記 +1 / total +1。
@@ -586,12 +592,15 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-01(#1172): 検索した語の記録を消す(`clear-search-history`)で
       //   受け手 +1 ── 登記は増えない(押し口は設定の中にしか無い。`clear-opened-history` と同じ仕分け)。
       //   `receivers` +1 / `total` +1 / `unregistered` +1。
-      total: 344,
-      receivers: 287,
+      // ⚠ 2026-10-01(#1169): 本文の @日付 を押す(`open-date-note`)/ 画面の下の「○○のノートを作る」
+      //   (`create-date-note`)/ 設定の入切(`set-date-links`)で受け手 +3 ── 登記は増えない。
+      //   `receivers` +3 / `total` +3 / `unregistered` +3。
+      total: 347,
+      receivers: 290,
       registered: 96,
       both: 39,
       outsideActionsTable: 57,
-      unregistered: 248,
+      unregistered: 251,
     });
   });
 

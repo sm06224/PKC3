@@ -40,6 +40,29 @@ export function isScheduleDate(value: string): boolean {
 }
 
 /**
+ * 🔴 **暦に実在する日か**(#1169)。⚠ `isScheduleDate` とは**別の問い**である ──
+ * あちらは「形」(`2026-02-31` も通す。この file の頭の裁定)、こちらは
+ * 「**押して開く先がある日か**」。
+ *
+ * 🔑 本文の `@2026-02-31` を**押せる字にしない**ための門である。押せるのに押すと
+ *   存在しない日の題名でノートが作られてしまう ── 通せば「打ち間違いが見える形で残る」
+ *   (この file の頭)側の利点も消える(押せる字になると、間違いに見えない)。
+ * ⚠ 形の判定は `isScheduleDate` を**通す**(2 本目の形を書かない ── CLAUDE.md §7)。
+ *   ここが足すのは月・日の範囲だけ。閏年は `Date` に頼らず自前で数える
+ *   (`Date` に通すと `2026-02-30` が 3 月 2 日へ寄って**真になる**)。
+ */
+export function isRealCalendarDate(value: string): boolean {
+  if (!isScheduleDate(value)) return false;
+  const y = Number(value.slice(0, 4));
+  const m = Number(value.slice(5, 7));
+  const d = Number(value.slice(8, 10));
+  if (m < 1 || m > 12 || d < 1) return false;
+  const leap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+  const last = m === 2 ? (leap ? 29 : 28) : m === 4 || m === 6 || m === 9 || m === 11 ? 30 : 31;
+  return d <= last;
+}
+
+/**
  * 時刻の形か。🔴 **厳密に `HH:MM`**(桁を詰める)。
  *
  * ⚠ `3:00` を通さないのは、行の走査で**本文の数字を時刻と読み違えない**ため

@@ -42,7 +42,7 @@ import {
 } from '@adapter/ui/render/read-columns';
 import { setFoldNotify } from '@adapter/ui/render/fold-notify';
 import { appTooNarrowOk, installTooNarrow } from '@adapter/ui/render/too-narrow';
-import { paintStatusOpen, paintStatusUndo } from '@adapter/ui/render/status-open';
+import { paintStatusCreate, paintStatusOpen, paintStatusUndo } from '@adapter/ui/render/status-open';
 import { composeStatusLine, paintStatusText, shouldHideStatusBar } from '@adapter/ui/render/status-line';
 import { openStorageWithRetry } from '@adapter/platform/storage/open-with-retry';
 import {
@@ -52,6 +52,7 @@ import {
 } from '@features/storage/storage-notice';
 import { appOpenInEdit } from '@adapter/ui/render/open-in-edit';
 import { appPhoneLinks } from '@adapter/ui/render/phone-links';
+import { appDateLinks } from '@adapter/ui/render/date-links';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { installAppendAutofold } from '@adapter/ui/render/append-autofold';
 import { appPaneSizes, applyPaneSizes } from '@adapter/ui/render/pane-size';
@@ -1450,6 +1451,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     paintStatusOpen(regions.statusOpen, dispatcher.getState(), noticeLine);
     // 🔴 塊を動かした直後の「元に戻す」も同じ口で出し入れする(#684 段①)
     paintStatusUndo(regions.statusUndo, dispatcher.getState(), noticeLine);
+    // 🔴 日付のノートが無かった直後の「○○のノートを作る」も同じ口で出し入れする(#1169)
+    paintStatusCreate(regions.statusCreate, dispatcher.getState(), noticeLine);
     /**
      * 🔴 **未読のメッセージへの入口**(設計 doc §7、段②a)。「開く」「元に戻す」と
      * 同じ作法 ── 常設で置いて、未読が 1 件以上あるときだけ出す。
@@ -3649,6 +3652,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      */
     setPhoneLinks: (on) => {
       appPhoneLinks.setEnabled(on);
+      center.invalidateDetail();
+      center.render(dispatcher.getState());
+    },
+    /**
+     * 🔴 **本文の `@日付` を押せる字にするか**(#1169)。⚠ `setPhoneLinks` と同じく
+     *   **描き直しまでが 1 組**(保存だけでは、いま読んでいるノートが変わらない)。
+     */
+    setDateLinks: (on) => {
+      appDateLinks.setEnabled(on);
       center.invalidateDetail();
       center.render(dispatcher.getState());
     },

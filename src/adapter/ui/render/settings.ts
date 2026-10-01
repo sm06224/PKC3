@@ -49,6 +49,7 @@ import { appOpenInEdit, OpenInEditStore } from './open-in-edit';
 import { appAlarmEnabled, AlarmEnabledStore } from './alarm-enabled';
 import { appVoiceBoost, VoiceBoostStore } from './voice-boost';
 import { appPhoneLinks, PhoneLinksStore } from './phone-links';
+import { appDateLinks, DateLinksStore } from './date-links';
 import { EXTERNAL_IMAGE_MODES } from '@features/markdown/external-images';
 import {
   NOTICE_READABLE_TEXT,
@@ -159,6 +160,11 @@ export class SettingsRenderer {
      *   殺されなくなる。⚠ **末尾に足す**(すぐ上の戒めのとおり)。
      */
     private readonly noticeList: readonly Notice[] = NOTICES,
+    /**
+     * 🔴 **本文の `@日付` を押せる字にするか**(#1169)。
+     * ⚠ **末尾に足す**(すぐ上の戒めのとおり)。
+     */
+    private readonly dateLinks: DateLinksStore = appDateLinks,
   ) {}
 
   private sameOriginList: HTMLElement | null = null;
@@ -181,6 +187,7 @@ export class SettingsRenderer {
       this.syncAlarmEnabled();
       this.syncVoiceBoost();
       this.syncPhoneLinks();
+      this.syncDateLinks();
       this.syncExternalImages();
       this.syncPasteSource();
       this.syncSameOrigin(state);
@@ -700,6 +707,30 @@ export class SettingsRenderer {
     editDl.append(pht, phd);
 
     /**
+     * 🔴 **本文の `@日付` を押せる字にするか**(#1169)。
+     *
+     * ⚠ **既定は入**(電話番号と逆 ── `date-links.ts` の頭)。見え方が変わる
+     *   (点線の下線が付く)ので、**切れる**ようにしてある。
+     * ⚠ 説明は 1 行(`settings-notes.test.ts` の上限)── 詳しい動きは hover とマニュアルへ。
+     */
+    const dlt = document.createElement('dt');
+    dlt.textContent = '本文の日付';
+    const dld = document.createElement('dd');
+    const dllabel = document.createElement('label');
+    const dlcheck = document.createElement('input');
+    dlcheck.type = 'checkbox';
+    dlcheck.setAttribute('data-pkc-action', 'set-date-links');
+    dlcheck.setAttribute('data-pkc-field', 'date-links');
+    dllabel.append(dlcheck, document.createTextNode(' 本文の @日付 を押すと、その日のノートを開く'));
+    dllabel.title =
+      '@2026-10-15 のように書いた日付に点線の下線が付きます(字の色は変わりません)。' +
+      '題名がその日付のノートが無ければ、作るかどうかを画面の下で聞きます。' +
+      '切ると、日付はふつうの字のままです。';
+    dld.append(dllabel);
+    dld.append(buildSettingsNote('押すと、題名がその日付のノートを開きます(無ければ作るか聞きます)。'));
+    editDl.append(dlt, dld);
+
+    /**
      * 📣 **お知らせを出すか**(P11 段⑤)。
      *
      * 🔑 **ここが「今後は出さない」の戻し道である。** 帯にしか導線が無いと、
@@ -892,6 +923,7 @@ export class SettingsRenderer {
     this.syncAlarmEnabled();
     this.syncVoiceBoost();
     this.syncPhoneLinks();
+    this.syncDateLinks();
     this.syncSameOrigin(state);
     this.syncExtensions(state);
     this.syncPersist(state);
@@ -1494,6 +1526,11 @@ export class SettingsRenderer {
   private syncPhoneLinks(): void {
     const box = this.region.querySelector<HTMLInputElement>('[data-pkc-field="phone-links"]');
     if (box) box.checked = this.phoneLinks.enabled();
+  }
+
+  private syncDateLinks(): void {
+    const box = this.region.querySelector<HTMLInputElement>('[data-pkc-field="date-links"]');
+    if (box) box.checked = this.dateLinks.enabled();
   }
 
   private syncNotices(): void {

@@ -264,7 +264,11 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
     // ⚠ 2026-10-01(#1170): P1 +1(`jump-to-asset-use`。右の列の「添付」の行 ── 同時に見えている
     //   兄弟(行)のうち押した 1 つの key が要る。`toc-jump` と同じ仕分け)。
     // ⚠ 2026-10-01(#1172): N +1(`clear-search-history`。検索した語の記録を消す ── `clear-opened-history` と同じ仕分け)。
-    expect(counts()).toEqual({ P1: 64, P2: 33, E: 25, V: 10, N: 155 });
+    // ⚠ 2026-09-30(#1169): P1 +1(`open-date-note`。押した日付 1 つが要る ──
+    //   `toggle-code-collapse` と同じ仕分け)/ P2 +1(`create-date-note`。画面の下の口は
+    //   1 つしか出ず、日付は state に在る ── `swap-open` と同じ仕分け)/ N +1
+    //   (`set-date-links`。checkbox の値を渡すだけ ── `set-phone-links` と同じ仕分け)。
+    expect(counts()).toEqual({ P1: 65, P2: 34, E: 25, V: 10, N: 156 });
   });
 
   it('🔴 名指しの錨 ── 件数が同じまま入れ替わっても落ちる', () => {
