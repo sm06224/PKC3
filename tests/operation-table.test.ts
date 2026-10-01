@@ -190,7 +190,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    */
   'capture-trim-clear', 'capture-trim-end', 'capture-trim-run', 'capture-trim-start',
   'choose-office-pack', 'clear-copy-history', 'clear-entry-date', 'clear-entry-filter',
-  'clear-kind-filter', 'clear-opened-history', 'clear-selection',
+  'clear-kind-filter', 'clear-opened-history', 'clear-search-history', 'clear-selection',
   // ⚠ 2026-09-28(#1099): 'close-lightbox' はライトボックスが開いている間だけ意味を持つので未登記。
   'close-lightbox',
   /**
@@ -583,12 +583,15 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-01(#1170): 右の列の「添付」の行(`jump-to-asset-use`)で
       //   受け手 +1 ── 登記は増えない(押した行の key が要る P1 で、`toc-jump` と同じ仕分け)。
       //   `receivers` +1 / `total` +1 / `unregistered` +1。
-      total: 343,
-      receivers: 286,
+      // ⚠ 2026-10-01(#1172): 検索した語の記録を消す(`clear-search-history`)で
+      //   受け手 +1 ── 登記は増えない(押し口は設定の中にしか無い。`clear-opened-history` と同じ仕分け)。
+      //   `receivers` +1 / `total` +1 / `unregistered` +1。
+      total: 344,
+      receivers: 287,
       registered: 96,
       both: 39,
       outsideActionsTable: 57,
-      unregistered: 247,
+      unregistered: 248,
     });
   });
 

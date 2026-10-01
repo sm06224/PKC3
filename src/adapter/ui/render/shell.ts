@@ -14,6 +14,7 @@ import { HINT_BASE, HINT_COMMAND, hintTitle } from './shortcut-hint';
 import { COLLECTION_COMMANDS } from './commands';
 // 🔴 前回選んだ「作る種類」を覚える(#1045)
 import { appCreateKind } from './create-kind';
+import { appSearchHistory } from '@adapter/platform/search-history-store';
 import { BROWSE_ICONS, iconButton, iconSpan, markBarTile, markPrimary } from './icons';
 import { COLUMN_PANES, PANE_LABELS } from '@features/pane-visibility';
 import { PHONE_BAR_REGION, PHONE_RETURN_REGION } from './phone-layout';
@@ -169,6 +170,27 @@ const CREATE_BUTTONS: readonly { archetype: string; label: string }[] = [
   { archetype: 'todo', label: 'Todo' },
 ] as const;
 
+
+/** 「本文ごと探す」欄の候補(`<datalist>`)の id。 */
+export const SEARCH_HISTORY_LIST_ID = 'pkc-search-history';
+
+function fillSearchHistory(list: HTMLElement): void {
+  list.textContent = '';
+  for (const t of appSearchHistory.list()) {
+    const opt = document.createElement('option');
+    opt.value = t;
+    list.append(opt);
+  }
+}
+
+/**
+ * 🔴 **探した語の候補を入れ直す**(#1172)。積んだ直後と、消した直後に呼ぶ。
+ * ⚠ 器が無ければ**何もしない**(`buildShell` より先に呼ばれても落ちない)。
+ */
+export function paintSearchHistory(root: HTMLElement): void {
+  const list = root.querySelector<HTMLElement>(`#${SEARCH_HISTORY_LIST_ID}`);
+  if (list !== null) fillSearchHistory(list);
+}
 
 /**
  * 🔴 **収録中の帯を出す / 畳む**(#413)。
@@ -407,7 +429,18 @@ export function buildShell(root: HTMLElement): ShellRegions {
   filter.title = '題名と本文から探します(Esc で、打った字を消します)';
   // ⚠ `placeholder` は名前ではない ── 値を入れると読み上げから消える
   filter.setAttribute('aria-label', '題名と本文から探す');
-  findBar.append(filter);
+  /**
+   * 🔴 **最近探した語を、ブラウザ標準の候補として出す**(#1172)。
+   * ⚠ 自前の吹き出しは作らない ── `<datalist>` は打った字をそのまま通すので、
+   *   候補は近道であって、打てる語を縛らない(情報ペインのタグ候補と同じ作り)。
+   * ⚠ 候補は**端末ごと**の記録(`search-history-store.ts`)── 器は 1 度しか組まないので、
+   *   積んだ後・消した後は `paintSearchHistory` で選択肢だけ入れ直す。
+   */
+  filter.setAttribute('list', SEARCH_HISTORY_LIST_ID);
+  const historyList = document.createElement('datalist');
+  historyList.id = SEARCH_HISTORY_LIST_ID;
+  fillSearchHistory(historyList);
+  findBar.append(filter, historyList);
 
   /**
    * 🔴 **並び順**(#183 / 台帳 #180 の A-3)。⚠ **手で並べ替える導線は既にある**
