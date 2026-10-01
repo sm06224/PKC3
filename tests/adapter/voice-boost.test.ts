@@ -230,3 +230,23 @@ describe('再生機を作る面は、全部つなぎに通している(全数)',
     expect(players()).toEqual(['captures.ts', 'detail.ts']);
   });
 });
+
+/**
+ * 書き出した閲覧用 HTML は**整えない**(🟣 Gemini 裁定 2026-10-01、#772 設問 1 = A)。
+ *
+ * あちらは設定を持ち歩かないので、受け取った人には**元の音**で鳴る。上の全数走査は
+ * `render/` だけを見るので、ここだけ別に pin する ── 散文で「対象外」と書いてあるだけでは、
+ * 誰かが「配った HTML でも整えたい」と鎖を足した日に**裁定が黙って覆る**。
+ * ⚠ 覆す条件: user か Gemini が「書き出した HTML でも整えてよい」と言ったとき(設問 1 の B)。
+ */
+describe('書き出した HTML は整えない(#772 設問 1 = A の pin)', () => {
+  const file = join(process.cwd(), 'src/features/export/pkc3-html.ts');
+
+  it('🔴 再生機は作る(空振り防止)が、整える鎖は 1 本も持たない', () => {
+    const src = codeOnly(readFileSync(file, 'utf-8'));
+    const players = (src.match(/\.controls=true/g) ?? []).length;
+    expect(players, '書き出し HTML に再生機を作る所が無い(前処理が壊れている)').toBeGreaterThanOrEqual(2);
+    expect(src.includes('appVoiceBoostRouter'), '書き出し HTML が整える鎖を持っている ── 裁定(設問 1 = A)と食い違う').toBe(false);
+    expect(src.includes('voice-boost'), '書き出し HTML が voice-boost を import している').toBe(false);
+  });
+});
