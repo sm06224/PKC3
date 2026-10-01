@@ -986,6 +986,21 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     defaults: ['Mod+BracketLeft'],
     note: 'いまの行(選んでいれば選んだ行すべて)の字下げを 1 段戻します',
   },
+  /**
+   * 🔴 **表の列幅を揃える**(#1171)。
+   * ⚠ 鍵は付けない(`defaults: []`)── 「操作を探す」から呼べ、鍵が欲しい人は
+   *   設定で割り当てる(裁定: Gemini との合意 A)。空にしてよい条件は
+   *   「名前で呼ぶだけの操作」で、ここはまさにそれ。`KEYLESS` に足すこと。
+   * 🔑 `note` に**やること**を書く ── 一覧は `label` と `note` の両方を探し語に使うので、
+   *   「桁」「整える」でも当たる。
+   */
+  {
+    id: 'align-table',
+    label: '表の列幅を揃える',
+    contexts: ['editor', 'row'],
+    defaults: [],
+    note: 'カーソルの在る表の、列の幅を空白で揃えます(中の字は変えません)。1 画面編集の行では「全文を編集」に切り替えてから',
+  },
   // ── 追記の欄
   {
     id: 'append-send',

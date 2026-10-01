@@ -193,7 +193,9 @@ describe('割当の検め', () => {
   const KEYLESS: readonly string[] = [
   // 🔑 #1042 C3(裁定 2026-09-25 Q3 = A)で `deselect-entry` に既定 `Escape` が付いた
   // (専用の文脈 `reading` を作って `global` の重なりを避けた。定義の docstring)
-  'format-table', 'format-codeblock', 'format-math'];
+  'format-table', 'format-codeblock', 'format-math',
+  // 🔴 #1171: 表の列幅を揃える ── 「操作を探す」から呼ぶ。鍵は user が設定で割り当てる
+  'align-table'];
 
   it('🔴 鍵を持たない操作の一覧は、身元で持つ', () => {
     const ids = new Set(KEY_COMMANDS.map((c) => c.id));
