@@ -300,8 +300,11 @@ export function setupLinkPreview(
     if (!(target instanceof Element)) return null;
     // プレビューカード内の要素は除外
     if (target.closest(`[data-pkc-region="${LINK_PREVIEW_REGION}"]`)) return null;
+    // 🔴 `@[card](…)` は `<span data-pkc-action="navigate-card-ref">` で焼かれる(`a` ではない)。
+    //   選択子に `a` を付けると card には**一度も当たらない**(#1189)── 要素名を留めない。
+    //   ⚠ 外部リンク(`href`)は `a` のまま(`a` 以外の `href` 持ちを拾わない)。
     return target.closest<HTMLElement>(
-      'a[data-pkc-entry-ref], a[data-pkc-action="navigate-entry-ref"], a[data-pkc-action="navigate-card-ref"], a[href^="http://"], a[href^="https://"]',
+      'a[data-pkc-entry-ref], a[data-pkc-action="navigate-entry-ref"], [data-pkc-action="navigate-card-ref"], a[href^="http://"], a[href^="https://"]',
     );
   };
 
