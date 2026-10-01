@@ -342,7 +342,8 @@ export function setupLinkPreview(
       return;
     }
 
-    const target = parseLinkTarget(raw);
+    // 🔴 自分の PKC の id を渡す(#1187)── 渡さないと `foreign` の下見カードが出ない。
+    const target = parseLinkTarget(raw, dispatcher.getState().cid ?? '');
 
     if (target.kind === 'invalid') return;
 

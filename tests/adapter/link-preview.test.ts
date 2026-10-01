@@ -282,6 +282,60 @@ describe('link-preview', () => {
       teardown();
     });
 
+    /**
+     * 🔴 **別の PKC を指す pkc:// リンクは「別の PKC」の下見を出す**(#1187)。
+     * ⚠ 自分の id を渡していなかった頃は `foreign` が立たず、「このノートは存在しません」
+     *   (または**偶然同じ lid の別ノート**の下見)が出ていた。
+     * 🔑 対照群は同じ lid・同じ形で **自分の id** ── 通常の下見が出る(= 外と見なす条件が
+     *   「id が違う」であって「pkc:// 形だから」ではない)。
+     */
+    describe('🔴 別の PKC を指す pkc:// リンク(#1187)', () => {
+      /** ⚠ teardown が下見を消すので、消す前に見た物を写して返す。 */
+      function hoverCard(
+        target: string,
+        stateOverrides: Partial<AppState> = {},
+      ): { open: boolean; foreign: boolean; title: string | null } {
+        const root = document.createElement('div');
+        document.body.append(root);
+        // ⚠ 下見を拾うのは `a` だけ(`findAnchor`)── 台は `a` に `data-pkc-entry-ref` で置く
+        const anchor = document.createElement('a');
+        anchor.setAttribute('data-pkc-entry-ref', target);
+        root.append(anchor);
+        const teardown = setupLinkPreview(root, createMockDispatcher(stateOverrides));
+        anchor.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+        vi.advanceTimersByTime(HOVER_DELAY_MS);
+        const card = root.querySelector<HTMLElement>(`[data-pkc-region="${LINK_PREVIEW_REGION}"]`);
+        const seen = {
+          open: card !== null,
+          foreign: card?.classList.contains('pkc-link-preview-foreign') ?? false,
+          title: card?.querySelector('.pkc-link-preview-title')?.textContent ?? null,
+        };
+        teardown();
+        return seen;
+      }
+
+      it('別の PKC の id なら、別の PKC の下見が出る(居る lid でも)', () => {
+        const seen = hoverCard('pkc://other/entry/n1');
+        expect(seen.open, '下見が出ていない').toBe(true);
+        expect(seen.foreign, '別の PKC の下見ではない').toBe(true);
+        expect(seen.title, '同じ lid の別ノートを見せた').toBeNull();
+      });
+
+      it('対照群: 自分の id なら通常の下見が出る', () => {
+        const seen = hoverCard('pkc://c1/entry/n1');
+        expect(seen.open).toBe(true);
+        expect(seen.foreign).toBe(false);
+        expect(seen.title).toBe('ノート1のタイトル');
+      });
+
+      it('cid が無い(null)間は外と見なさない', () => {
+        const seen = hoverCard('pkc://other/entry/n1', { cid: null } as Partial<AppState>);
+        expect(seen.open).toBe(true);
+        expect(seen.foreign).toBe(false);
+        expect(seen.title).toBe('ノート1のタイトル');
+      });
+    });
+
     it('shows not-found card when lid does not exist in entryMetas', () => {
       const root = document.createElement('div');
       document.body.append(root);

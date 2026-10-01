@@ -165,6 +165,42 @@ describe('🔴 断るときは理由を出す', () => {
   });
 
   /**
+   * 🔴 **別の PKC の id を持つ card は、断る**(#1187)。
+   *
+   * ⚠ 自分の id を渡していなかった頃は `foreign` が立たず、「リンク先のノートが
+   *   見つかりません」になり、**偶然同じ lid が在れば別のノートが開いた**。
+   *   上の asset の test は携帯参照の asset 形が `invalid` で落ちるだけで、この枝を通らない。
+   * 🔑 lid は**居るもの**(`b`)を使う ── 居ない lid だと「見つかりません」でも
+   *   「何か断った」は成り立ち、この枝の有無が見分けられない。
+   */
+  it('🔴 別の PKC の id を持つ card は、居る lid でも開かず「別の PKC」と言う', () => {
+    const { dispatcher, lastError } = makeDispatcher();
+    stop = bindActions(root, dispatcher);
+    cardRef('pkc://other/entry/b').click();
+    expect(dispatcher.getState().selectedLid, '別の PKC のリンクで同じ lid のノートが開いた').toBeNull();
+    expect(lastError()).toBe('このリンクは別の PKC のノートを指しています');
+  });
+
+  it('対照群: 自分の id の card は今までどおり開き、断りは出ない', () => {
+    const { dispatcher, lastError } = makeDispatcher();
+    stop = bindActions(root, dispatcher);
+    cardRef('pkc://default/entry/b').click();
+    expect(dispatcher.getState().selectedLid).toBe('b');
+    expect(lastError()).toBeNull();
+  });
+
+  it('cid が無い(null)状態では外と見なさない(従来どおり lid で開く)', () => {
+    const { dispatcher } = makeDispatcher();
+    stop = bindActions(root, dispatcher);
+    // ⚠ cid の無い状態は reducer 経由では作れないので、読み口だけを差す
+    const real = dispatcher.getState();
+    const spy = vi.spyOn(dispatcher, 'getState').mockImplementation(() => ({ ...real, cid: null }));
+    cardRef('pkc://other/entry/b').click();
+    spy.mockRestore();
+    expect(dispatcher.getState().selectedLid, '外と見なして断った').toBe('b');
+  });
+
+  /**
    * ⚠ **編集中は移らない**(下書きを守る)。⚠ 面の切替とは**別の判断**である ──
    *   あちらは面が常駐するので開けるようにした(user 裁定 2026-08-08)。
    */

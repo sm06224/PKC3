@@ -2294,7 +2294,12 @@ function navigateToLink(
   root: HTMLElement,
   services: BinderServices,
 ): void {
-  const t = parseLinkTarget(raw ?? '');
+  /**
+   * 🔴 **自分の PKC の id を渡す**(#1187)── 渡さないと `foreign` が立たず、別の PKC を指す
+   *   リンクが「見つかりません」になる(偶然同じ lid が在れば**別のノートが開く**)。
+   *   `cid` が無い(`null`)間は空文字 = 従来どおり外と見なさない(`link-target.ts` の既定)。
+   */
+  const t = parseLinkTarget(raw ?? '', dispatcher.getState().cid ?? '');
   if (t.kind === 'invalid') {
     dispatcher.dispatch({ type: 'OP_FAILED', error: 'リンクの書き方が読めません' });
     return;
