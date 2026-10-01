@@ -34,6 +34,7 @@ import { join } from 'node:path';
 import { OpenInEditStore } from '@adapter/ui/render/open-in-edit';
 import { AlarmEnabledStore } from '@adapter/ui/render/alarm-enabled';
 import { VoiceBoostStore } from '@adapter/ui/render/voice-boost';
+import { MissingLinksStore } from '@adapter/ui/render/missing-links';
 import { PhoneLinksStore } from '@adapter/ui/render/phone-links';
 import { DateLinksStore } from '@adapter/ui/render/date-links';
 import { TooNarrowOkStore } from '@adapter/ui/render/too-narrow';
@@ -99,6 +100,17 @@ const CASES: readonly {
     },
     // ⚠ **既定が入**なので、最初に書くのは**切**にする ── 入から書くと、控えが死んでいて
     //   既定のまま読まれても通ってしまう(代替物で満たせる検査になる)
+    a: false,
+    b: true,
+  },
+  {
+    // ⚠ 既定が「入」の store ── a を切(false)にしておくと、控えが死んでいて
+    //   既定へ戻る実装(読みが常に true)を 1 回目の読みで捕まえられる
+    name: 'MissingLinksStore',
+    make: () => {
+      const s = new MissingLinksStore(null);
+      return { write: (v) => s.setEnabled(v as boolean), read: () => s.enabled() };
+    },
     a: false,
     b: true,
   },

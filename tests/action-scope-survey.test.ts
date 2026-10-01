@@ -268,7 +268,8 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
     //   `toggle-code-collapse` と同じ仕分け)/ P2 +1(`create-date-note`。画面の下の口は
     //   1 つしか出ず、日付は state に在る ── `swap-open` と同じ仕分け)/ N +1
     //   (`set-date-links`。checkbox の値を渡すだけ ── `set-phone-links` と同じ仕分け)。
-    expect(counts()).toEqual({ P1: 65, P2: 34, E: 25, V: 10, N: 156 });
+    // ⚠ 2026-10-01(#1174 段①): N +1(`set-missing-links`。checkbox の `checked` を渡すだけ ── `set-phone-links` と同じ仕分け)。
+    expect(counts()).toEqual({ P1: 65, P2: 34, E: 25, V: 10, N: 157 });
   });
 
   it('🔴 名指しの錨 ── 件数が同じまま入れ替わっても落ちる', () => {

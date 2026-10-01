@@ -101,6 +101,12 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
    */
   { key: 'pkc3.date-links', label: '本文の日付を押せるようにするか' },
   /**
+   * ⚠ **人に付く好み**である(#1174 段①)── 「無いノートへのリンクに点線を見たいか」は
+   *   端末の事情ではない。運んだ先に点線の仕組みが無くても**害が出ない**
+   *   (印が出ないだけ)。
+   */
+  { key: 'pkc3.missing-links', label: 'リンク先が無いリンクを点線で見せるか' },
+  /**
    * ⚠ **`pkc3.panes`(列の畳み方)と同じ扱い**(#857 段④)── 「畳んでおきたい」は
    *   **人に付く**好みである。
    * 🔑 中身はグループの**名前**であって lid ではない ── だから `pkc3.split-lids`

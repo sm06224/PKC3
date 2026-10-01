@@ -237,7 +237,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'schedule-today', 'select-entry', 'set-alarm-enabled', 'set-app-group', 'set-app-icon',
   'set-app-open-target', 'set-browse', 'set-column-rule', 'set-date-links', 'set-editor-mode', 'set-entry-date',
   'set-entry-sort', 'set-external-images', 'set-flag', 'set-notices-enabled', 'set-open-in-edit',
-  'set-open-place', 'set-page-format', 'set-paste-source', 'set-phone-links', 'set-prose-align',
+  'set-missing-links', 'set-open-place', 'set-page-format', 'set-paste-source', 'set-phone-links', 'set-prose-align',
   'set-query-key', 'set-read-columns', 'set-sql-engine', 'set-sql-source', 'set-sql-text', 'set-tag-badge',
   'set-text-scale', 'set-theme', 'set-too-narrow-enabled', 'set-view', 'set-voice-boost',
   'show-trash', 'skip-to', 'sort-tasks',
@@ -595,12 +595,15 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-01(#1169): 本文の @日付 を押す(`open-date-note`)/ 画面の下の「○○のノートを作る」
       //   (`create-date-note`)/ 設定の入切(`set-date-links`)で受け手 +3 ── 登記は増えない。
       //   `receivers` +3 / `total` +3 / `unregistered` +3。
-      total: 347,
-      receivers: 290,
+      // ⚠ 2026-10-01(#1174 段①): 無いノートへのリンクの点線(`set-missing-links`)で受け手 +1 /
+      //   `total` +1 / `unregistered` +1。登記は増えない ── 押し口は設定の checkbox にしか無く、
+      //   鍵も持たない(`set-phone-links` と同じ形)。
+      total: 348,
+      receivers: 291,
       registered: 96,
       both: 39,
       outsideActionsTable: 57,
-      unregistered: 251,
+      unregistered: 252,
     });
   });
 

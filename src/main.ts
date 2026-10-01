@@ -51,6 +51,7 @@ import {
   storageWhereLine,
 } from '@features/storage/storage-notice';
 import { appOpenInEdit } from '@adapter/ui/render/open-in-edit';
+import { appMissingLinks } from '@adapter/ui/render/missing-links';
 import { appPhoneLinks } from '@adapter/ui/render/phone-links';
 import { appDateLinks } from '@adapter/ui/render/date-links';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
@@ -3661,6 +3662,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      */
     setDateLinks: (on) => {
       appDateLinks.setEnabled(on);
+      center.invalidateDetail();
+      center.render(dispatcher.getState());
+    },
+    /**
+     * 🔴 **リンク先のノートが無いリンクの点線**(#1174 段①)。⚠ `setPhoneLinks` と同じく
+     *   **描き直しまでが 1 組**(保存だけでは、いま読んでいる本文の印が変わらない)。
+     */
+    setMissingLinks: (on) => {
+      appMissingLinks.setEnabled(on);
       center.invalidateDetail();
       center.render(dispatcher.getState());
     },

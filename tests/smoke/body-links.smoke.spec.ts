@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, expectReachable, useSplitEditor, useListBrowse } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, expectReachable, useSplitEditor, useListBrowse, answerAppDialog } from './helpers';
 import { peek, withStateOnFail } from './state-dump';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
@@ -128,6 +128,93 @@ test('🔴 本文の entry: リンクを押すと、そのノートが開く(遷
     page.locator('[data-pkc-field="editor-body"]'),
     '作ったら編集に入ってしまった(読んでいた物の続きで開くだけのはず)',
   ).toBeHidden();
+
+  // 🔑 橋 ── 下の #1174 は「リンク先(題名 2026-10-15)のノートが開いている」所から始まる。
+  //   上の #1169 ③ で作った 2026-10-16 のノートが開いているので、リンク先を開き直す。
+  await rows.filter({ hasText: '2026-10-15' }).first().click();
+  await expect(page.locator('[data-pkc-field="detail-title"]')).toContainText('2026-10-15');
+
+  /**
+   * 🔴 **無いノートへのリンクは点線になり、ゴミ箱から戻すと開き直さずに消える**(#1174 段①)。
+   *
+   * ⚠ 上の道中の続きに載せる(新しく起動しない)── 開いているのはリンク先のノートなので、
+   *   それをゴミ箱へ入れ、リンク元を選び直すと「先が無いリンク」が描かれる。
+   * 🔑 見るのは**実ブラウザの計算後の見た目**(属性ではなく下線の種類と色。unit は
+   *   CSS を持たないので、受け皿の規則が在るかは実ブラウザでしか見えない)。
+   */
+  await clickReal(page, '[data-pkc-action="delete-entry"]');
+  await answerAppDialog(page, 'ok');
+  await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]:has-text("リンク元")');
+  const missing = page.locator('[data-pkc-field="detail-body"] a[data-pkc-link-missing]');
+  await expect(missing, '先のノートを捨てたのに、リンクに印が付いていない').toHaveCount(1);
+  await expect(missing).toHaveAttribute('title', /このノートは見つかりません/);
+  const lookMissing = await page.evaluate(() => {
+    const el = document.querySelector<HTMLElement>(
+      '[data-pkc-field="detail-body"] a[data-pkc-link-missing]',
+    )!;
+    // 対照群: 先が在る普通のリンクと**字の色が同じ**(色は変えず、下線の種類だけ変える)
+    const plain = document.createElement('a');
+    plain.setAttribute('href', 'https://example.invalid/');
+    el.after(plain);
+    const cs = getComputedStyle(el);
+    const ps = getComputedStyle(plain);
+    const out = {
+      style: cs.textDecorationStyle,
+      line: cs.textDecorationLine,
+      color: cs.color,
+      plainColor: ps.color,
+      plainStyle: ps.textDecorationStyle,
+    };
+    plain.remove();
+    return out;
+  });
+  expect(lookMissing.style, '点線になっていない(CSS の受け皿が無い)').toBe('dotted');
+  expect(lookMissing.line).toContain('underline');
+  expect(lookMissing.plainStyle, '対照群が最初から点線(比べる意味が無い)').not.toBe('dotted');
+  expect(lookMissing.color, '字の色まで変わっている').toBe(lookMissing.plainColor);
+
+  /**
+   * 🔴 **戻すと、リンク元を開き直さなくても点線が消える**(再描画なしの当て直し)。
+   *
+   * ⚠ 主の枠では確かめられない ── ゴミ箱から戻すと**戻したノートが主の枠に開く**ので、
+   *   リンク元はどのみち開き直される。だから**リンク元を横に留めた枠**に置いて、
+   *   主の枠で出し入れする(留めた枠は選択に追随しない = 本文は描き直されない)。
+   * ⚠ 留めた枠の本文は `split-body`(主の `detail-body` とは別の欄)。
+   */
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.locator('[data-pkc-field="detail-body"] p').first().click({ button: 'right' });
+  const menu = page.locator('[data-pkc-region="context-menu"]');
+  await expect(menu, '本文で右クリックしてもメニューが出ない').toBeVisible();
+  await menu.locator('button[data-pkc-action="pin-split"]').click();
+  const pinned = page.locator('[data-pkc-field="split-body"]');
+  await expect(
+    pinned.locator('a[data-pkc-link-missing]'),
+    '留めた枠でも、先の無いリンクに点線が付いている',
+  ).toHaveCount(1);
+
+  await clickReal(page, '[data-pkc-browse="filer"]');
+  await clickReal(page, '[data-pkc-action="show-trash"]');
+  await clickReal(page, '[data-pkc-action="restore-trash"]');
+  // 前提: 戻したノートが主の枠に開いた(= 留めた枠の本文は選択の変化で描き直されていない)
+  await expect(page.locator('[data-pkc-split-main] [data-pkc-field="detail-title"]')).toContainText(
+    '2026-10-15',
+  );
+  await expect(
+    pinned.locator('a[data-pkc-action="navigate-entry-ref"]'),
+    '前提: 留めた枠のリンクが見えていない',
+  ).toHaveCount(1);
+  await expect(
+    pinned.locator('a[data-pkc-link-missing]'),
+    '戻したのに、留めた枠の点線が残っている',
+  ).toHaveCount(0);
+
+  // 対照群 ── また捨てれば付く(「一度外れたら二度と付かない」ではない)
+  await clickReal(page, '[data-pkc-action="delete-entry"]');
+  await answerAppDialog(page, 'ok');
+  await expect(
+    pinned.locator('a[data-pkc-link-missing]'),
+    '捨て直したのに、留めた枠の点線が付かない',
+  ).toHaveCount(1);
 
   expect(errors).toEqual([]);
 });

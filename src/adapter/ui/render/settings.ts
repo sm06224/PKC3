@@ -48,6 +48,7 @@ import { appEditorMode, EditorModeStore } from './editor-mode';
 import { appOpenInEdit, OpenInEditStore } from './open-in-edit';
 import { appAlarmEnabled, AlarmEnabledStore } from './alarm-enabled';
 import { appVoiceBoost, VoiceBoostStore } from './voice-boost';
+import { appMissingLinks, MissingLinksStore } from './missing-links';
 import { appPhoneLinks, PhoneLinksStore } from './phone-links';
 import { appDateLinks, DateLinksStore } from './date-links';
 import { EXTERNAL_IMAGE_MODES } from '@features/markdown/external-images';
@@ -165,6 +166,11 @@ export class SettingsRenderer {
      * ⚠ **末尾に足す**(すぐ上の戒めのとおり)。
      */
     private readonly dateLinks: DateLinksStore = appDateLinks,
+    /**
+     * 🔴 **リンク先のノートが無いリンクを点線で見せるか**(#1174 段①)。
+     * ⚠ **末尾に足す**(すぐ上の戒めのとおり)。
+     */
+    private readonly missingLinks: MissingLinksStore = appMissingLinks,
   ) {}
 
   private sameOriginList: HTMLElement | null = null;
@@ -188,6 +194,7 @@ export class SettingsRenderer {
       this.syncVoiceBoost();
       this.syncPhoneLinks();
       this.syncDateLinks();
+      this.syncMissingLinks();
       this.syncExternalImages();
       this.syncPasteSource();
       this.syncSameOrigin(state);
@@ -729,6 +736,32 @@ export class SettingsRenderer {
     dld.append(dllabel);
     dld.append(buildSettingsNote('押すと、題名がその日付のノートを開きます(無ければ作るか聞きます)。'));
     editDl.append(dlt, dld);
+    /**
+     * 🔴 **リンク先のノートが無いリンクを、点線で見せるか**(#1174 段①)。
+     *
+     * ⚠ **既定は入**(`phone-links` と逆)── 変わるのは下線の種類だけで、字の色は
+     *   そのまま。出るのは**押すと必ず「見つかりません」になるリンク**だけである。
+     *   見え方を変えたくない人のために切れる(user 指示 2026-08-28「変更はユーザーに委ねて欲しい」)。
+     * ⚠ 字は「何が起きるか」で書く(「リンク切れ」は内部の言葉。使わない語は
+     *   `ui-terms.ts` の BANNED_TERMS)。
+     */
+    const mlt = document.createElement('dt');
+    mlt.textContent = 'リンク先が無いリンク';
+    const mld = document.createElement('dd');
+    const mllabel = document.createElement('label');
+    const mlcheck = document.createElement('input');
+    mlcheck.type = 'checkbox';
+    mlcheck.setAttribute('data-pkc-action', 'set-missing-links');
+    mlcheck.setAttribute('data-pkc-field', 'missing-links');
+    mllabel.append(mlcheck, document.createTextNode(' ノートが見つからないリンクを、点線で見せる'));
+    mllabel.title =
+      '押すと「見つかりません」になるリンクに点線の下線を引きます(字の色は変わりません)。' +
+      'ゴミ箱に入れた・取り込みで外れた・別の PKC から貼ったノートが対象で、' +
+      '別の PKC を指すリンクは変わりません。';
+    // ⚠ 説明は hover に置く ── visible の note を足すと「note は 24 段落」の数え直し
+    //   (`settings-notes.test.ts` / 設計 doc)を動かす。1 行で足りる設定なので足さない。
+    mld.append(mllabel);
+    editDl.append(mlt, mld);
 
     /**
      * 📣 **お知らせを出すか**(P11 段⑤)。
@@ -924,6 +957,7 @@ export class SettingsRenderer {
     this.syncVoiceBoost();
     this.syncPhoneLinks();
     this.syncDateLinks();
+    this.syncMissingLinks();
     this.syncSameOrigin(state);
     this.syncExtensions(state);
     this.syncPersist(state);
@@ -1521,6 +1555,11 @@ export class SettingsRenderer {
   private syncVoiceBoost(): void {
     const box = this.region.querySelector<HTMLInputElement>('[data-pkc-field="voice-boost"]');
     if (box) box.checked = this.voiceBoost.enabled();
+  }
+
+  private syncMissingLinks(): void {
+    const box = this.region.querySelector<HTMLInputElement>('[data-pkc-field="missing-links"]');
+    if (box) box.checked = this.missingLinks.enabled();
   }
 
   private syncPhoneLinks(): void {
