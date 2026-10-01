@@ -67,7 +67,7 @@ const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
  * 🔑 1 度の走査で全行ぶん出す ── 板を全部数える `raisePlace` が行ごとに走査し直すと
  *   O(n²) になるので、`insideFence` もこれを引く(判定は 1 本)。
  */
-function fenceMask(lines: readonly string[], from: number): boolean[] {
+export function fenceMask(lines: readonly string[], from: number): boolean[] {
   const mask: boolean[] = new Array<boolean>(lines.length).fill(false);
   let fence: string | null = null;
   for (let i = from; i < lines.length; i += 1) {

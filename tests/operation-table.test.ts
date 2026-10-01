@@ -278,7 +278,13 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    */
   'start-audio-capture', 'start-screen-capture', 'start-tile-reorder',
   'start-timer', 'stop-capture', 'storage-profile', 'swap-open', 'table-to-csv',
-  'table-to-markdown', 'toggle-all-app-groups', 'toggle-app-tile',
+  'table-to-markdown',
+  /**
+   * ⚠ **2026-10-01(#1173)** ── 右クリックしたチェックリストを丸ごとそろえる 2 つ。
+   * 🔑 `table-to-csv` と同じ仕分け(N・行番号はメニューが運ぶので押した所から何も要らない)。
+   */
+  'task-run-done', 'task-run-open',
+  'toggle-all-app-groups', 'toggle-app-tile',
   /**
    * ⚠ **2026-09-21(#1017 段③-1)** ── 「作り直す・初期化する を出す」の開閉。
    * 🔑 `toggle-plan-apply` と同じ仕分け(N・押した所から何も要らない。開くか
@@ -564,12 +570,16 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-01(#1171): 表の列幅を揃える(`align-table`)で登記 +1 / total +1 /
       //   `outsideActionsTable` +1。受け手は増えない ── 押し所を作らず、
       //   「本文の欄へ当てる命令」の継ぎ目(`EDITOR_RUN`)で受ける(`inline-calc` と同じ仕分け)。
-      total: 340,
-      receivers: 283,
+      // ⚠ 2026-10-01(#1173): 右クリックしたチェックリストを丸ごとそろえる 2 つ
+      //   (`task-run-open` / `task-run-done`)で受け手 +2 ── 登記は増えない(押し口は本文の
+      //   右クリックにしか無く、`table-to-csv` と同じ仕分け)。
+      //   `receivers` +2 / `total` +2 / `unregistered` +2。
+      total: 342,
+      receivers: 285,
       registered: 96,
       both: 39,
       outsideActionsTable: 57,
-      unregistered: 244,
+      unregistered: 246,
     });
   });
 

@@ -23,12 +23,13 @@ test('🔴 チェックを押すと本文に残り、開き直しても消えな
   await clickReal(page, '[data-pkc-region="editor-live"]');
   await live
     .locator('[data-pkc-field="row-source"]')
-    .fill('# 買い物\n\n- [ ] 牛乳\n- [ ] 卵');
+    // 🔑 入れ子と繰り返しの行を持たせる(#1173 の「リストをそろえる」が同じ道中で見られる)
+    .fill('# 買い物\n\n- [ ] 牛乳\n- [ ] 卵\n  - [ ] Mサイズ\n- [ ] ゴミ出し @2026-09-07 毎週');
   await page.keyboard.press('Tab');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
   const boxes = page.locator('[data-pkc-view-pane="detail"] [data-pkc-action="toggle-task"]');
-  await expect(boxes, 'チェックが押せる形で出ていない').toHaveCount(2);
+  await expect(boxes, 'チェックが押せる形で出ていない').toHaveCount(4);
   await expect(boxes.nth(0)).not.toBeChecked();
 
   // ① 🔴 実クリック → 描き直された後も印が残っている
@@ -50,6 +51,62 @@ test('🔴 チェックを押すと本文に残り、開き直しても消えな
   // ③ もう一度押すと外れる(片道にしない)
   await back.nth(0).click();
   await expect(back.nth(0), '外れない').not.toBeChecked();
+
+  /**
+   * ④ 🔴 **項目の字を右クリックして、リストを丸ごとそろえる**(#1173)。
+   *
+   * ⚠ **本物の右クリック**(合成 event ではブラウザ既定を見られない)。字の上で押す ──
+   *   箱の上はブラウザ既定のメニューを残す(奪わない)ので、ここでは出ない。
+   * 🔑 観測点は**画面の箱**(押したリストの全部が変わり、繰り返しの行だけ残る)と、
+   *   **読み込み直しても残ること**(本文へ書かれた証拠)。
+   */
+  const pane = page.locator('[data-pkc-view-pane="detail"]');
+  const MENU = '[data-pkc-region="context-menu"]';
+  await pane.locator('li.pkc-task-item', { hasText: '牛乳' }).first().click({
+    button: 'right',
+    position: { x: 60, y: 8 },
+  });
+  const run = page.locator(`${MENU} [data-pkc-action="task-run-done"]`);
+  await expect(run, '字の上で右クリックしても「すべて完了にする」が出ない').toHaveText(
+    'このリストをすべて完了にする',
+  );
+  await expect(page.locator(`${MENU} [data-pkc-action="task-run-open"]`)).toHaveText(
+    'このリストをすべて未完了に戻す',
+  );
+  await clickReal(page, run);
+  await expect(back.nth(0), '牛乳が完了にならない').toBeChecked();
+  await expect(back.nth(1), '卵が完了にならない').toBeChecked();
+  await expect(back.nth(2), '入れ子の Mサイズが完了にならない').toBeChecked();
+  await expect(back.nth(3), '🔴 繰り返しの行まで完了にした').not.toBeChecked();
+  await expect(
+    page.getByText('1 件は繰り返しなので触りませんでした'),
+    '繰り返しを飛ばした知らせが出ていない',
+  ).toBeVisible();
+
+  // 🔴 読み込み直しても残る(保存されている)
+  await page.reload();
+  // ⚠ 題名は「ノート 1」(付けていない)── ② と同じく先頭の行を開き、本文が出るのを待つ
+  const rows = page.locator('[data-pkc-region="filer-table"] tbody tr');
+  await expect(rows.first(), '読み直したら一覧が空').toBeVisible({ timeout: 15_000 });
+  await rows.first().click();
+  await expect(pane, '買い物のノートが開けていない').toContainText('買い物');
+  await expect(back.nth(0), '読み直したら完了が消えた(保存されていない)').toBeChecked();
+  await expect(back.nth(2), '読み直したら入れ子の完了が消えた').toBeChecked();
+  await expect(back.nth(3), '読み直したら繰り返しの行が動いていた').not.toBeChecked();
+
+  // ⑤ 戻せる(片道にしない)── 「すべて未完了に戻す」
+  await pane.locator('li.pkc-task-item', { hasText: '卵' }).first().click({
+    button: 'right',
+    position: { x: 60, y: 8 },
+  });
+  await clickReal(page, `${MENU} [data-pkc-action="task-run-open"]`);
+  for (const n of [0, 1, 2, 3]) {
+    await expect(back.nth(n), `${n} 番目が未完了に戻らない`).not.toBeChecked();
+  }
+
+  // ⑥ 箱の上の右クリックは、ブラウザ既定のメニューを残す(こちらのメニューを出さない)
+  await back.nth(0).click({ button: 'right' });
+  await expect(page.locator(MENU), '箱の上でこちらのメニューが出た').toHaveCount(0);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

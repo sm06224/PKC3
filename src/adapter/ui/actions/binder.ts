@@ -221,6 +221,7 @@ import {
   NOTE_TOOL_ACTIONS,
   noteToolActions,
   tableMenuActions,
+  taskRunMenuActions,
   tableConvertPickLabel,
   appGroupMenuActions,
   tileMenuActions,
@@ -1918,6 +1919,12 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
    */
   'toggle-task',
   /**
+   * 🔴 **リストを丸ごとそろえるのも本文を書く**(#1173)── `toggle-task` と同じ
+   *   `REQUEST_BODY_REWRITE` を撃つので、同じ門をくぐらせる(印の数だけ書く点も同じ)。
+   */
+  'task-run-open',
+  'task-run-done',
+  /**
    * 🔴 **表のセルを打つのも本文を書く**(#418 段①)── `toggle-task` と同じ
    *   `REQUEST_BODY_REWRITE` を撃つので、同じ門をくぐらせる。
    * ⚠ 押した時点では欄を開くだけだが、**確定で書く** ── 門は入口に置く。
@@ -3084,6 +3091,33 @@ const MENU_Y_ATTR = 'data-pkc-menu-y';
  * ⚠ 座標系は**生の body**(frontmatter 込み)── `csv-cell` / `task` と同じ。
  */
 const MENU_TABLE_ATTR = 'data-pkc-menu-table';
+/**
+ * 🔴 **右クリックしたチェックリストの、項目の行番号**(#1173)。`,` で区切った**原文の行番号**
+ * (`data-pkc-task-line` と同じ座標系)。⚠ 押した瞬間の DOM から数える ── メニューの器は
+ * 本文の外に出るので、受け手の時点では読めない。
+ */
+const MENU_TASK_LINES_ATTR = 'data-pkc-menu-task-lines';
+
+/**
+ * 🔴 **右クリックした項目が属するリストの、チェック項目の行番号**(#1173)。無ければ `null`。
+ *
+ * ⚠ **字の上だけ**(`<input>` の上は呼び側が既定のメニューを残す)。引くのは
+ *   `li.pkc-task-item` の**親のリスト**で、数えるのは**その中の全部の箱**(入れ子の子リストも含む)。
+ * ⚠ 行番号は箱が焼いた `data-pkc-task-line` から読む(読む面だけが焼く ── 書き出し・印刷の
+ *   `disabled` の箱には無いので、そこでは出ない)。
+ */
+function taskRunLinesAt(target: Element, host: HTMLElement | null): number[] | null {
+  const li = target.closest('li.pkc-task-item');
+  if (li === null || host === null || !host.contains(li)) return null;
+  const list = li.closest('ul, ol');
+  if (list === null) return null;
+  const lines: number[] = [];
+  for (const box of list.querySelectorAll('input.pkc-task-checkbox[data-pkc-task-line]')) {
+    const n = Number(box.getAttribute('data-pkc-task-line'));
+    if (Number.isInteger(n) && n >= 0) lines.push(n);
+  }
+  return lines.length === 0 ? null : lines;
+}
 
 /**
  * 🔴 **押した所の表が、原文の何行目から始まるか**(#708 段②)。表でなければ `null`。
@@ -3291,6 +3325,24 @@ function applyTableFormat(
     return;
   }
   dispatcher.dispatch({ type: 'SET_TABLE_FORMAT', lid: ob.lid, line, to });
+}
+
+/**
+ * 🔴 **リストを丸ごとそろえる受け手の実体**(#1173)── 向きだけが違う 2 つを 1 本にする。
+ * ⚠ 何をするかの判断は `body-rewrite.ts`(`applyTaskRun`)── ここは**運ばれた行を渡す**だけ。
+ *   断りは reducer(`SET_TASK_RUN`)が lid で言う(`toggle-task` と同じ)。
+ */
+function setTaskRun(dispatcher: Dispatcher, target: HTMLElement, to: 'done' | 'open'): void {
+  if (refuseStaleMenu(dispatcher, target)) return;
+  const raw = target.getAttribute(MENU_TASK_LINES_ATTR) ?? '';
+  const lines = raw
+    .split(',')
+    .filter((x) => x !== '')
+    .map(Number)
+    .filter((n) => Number.isInteger(n) && n >= 0);
+  const lid = target.getAttribute(MENU_LID_ATTR) ?? '';
+  if (lines.length === 0 || lid === '') return;
+  dispatcher.dispatch({ type: 'SET_TASK_RUN', lid, lines, to });
 }
 
 function menuCarriedLine(target: Element): number | null {
@@ -7616,6 +7668,12 @@ const ACTIONS: Record<string, ActionHandler> = {
     setTableFormat(dispatcher, target, 'markdown', services),
   'table-to-csv': (dispatcher, target, services) =>
     setTableFormat(dispatcher, target, 'csv', services),
+  /**
+   * 🔴 **右クリックしたチェックリストを丸ごとそろえる**(#1173)。
+   * 🔑 向きだけが違う 2 つを 1 本にする(`table-to-*` と同じ作法 ── §7)。
+   */
+  'task-run-open': (dispatcher, target) => setTaskRun(dispatcher, target, 'open'),
+  'task-run-done': (dispatcher, target) => setTaskRun(dispatcher, target, 'done'),
   'remove-place': (dispatcher, target, _services, root) => {
     const line = menuCarriedBlock(target);
     if (line === null || refuseStaleMenu(dispatcher, target)) return;
@@ -13166,6 +13224,12 @@ export function bindActions(
        */
       const tableLine = tableLineAt(target, ob?.body ?? null);
       const table = tableLine === null || ob === null ? null : tableAt(ob.body, tableLine);
+      /**
+       * 🔴 **チェック項目の字の上なら「リストをそろえる」を足す**(#1173)。
+       * ⚠ `input`(箱そのもの)の上は**手前の門が既定のメニューを残して**ここへ来ない。
+       *   行番号は**この項目にだけ**載せる(`attrs`。表と同じ作法)。
+       */
+      const taskLines = taskRunLinesAt(target, host);
       const items = [
         ...(heading === null || line === null
           ? []
@@ -13203,6 +13267,12 @@ export function bindActions(
           : tableMenuActions({ from: table.format }).map((a) => ({
               ...a,
               attrs: { [MENU_TABLE_ATTR]: String(tableLine) },
+            }))),
+        ...(taskLines === null
+          ? []
+          : taskRunMenuActions().map((a) => ({
+              ...a,
+              attrs: { [MENU_TASK_LINES_ATTR]: taskLines.join(',') },
             }))),
         // 🔴 板を置く口は**いつも**出す(#676)── 押した座標は下の carry が運ぶ
         ADD_PLACE_ACTION,

@@ -31,7 +31,12 @@ import {
   insertedLines,
   resolveAppendAt,
 } from '@features/markdown/append-target';
-import { applyBodyRewrite, applyTagsToBody } from '@features/markdown/body-rewrite';
+import {
+  applyBodyRewrite,
+  applyTagsToBody,
+  applyTaskRun,
+  taskRunNotice,
+} from '@features/markdown/body-rewrite';
 import { cutLines, insertLines } from '@features/markdown/line-move';
 import { clipPreview } from '@features/relation/dual-pane';
 import {
@@ -3351,7 +3356,21 @@ export function connectStoreEffects(
              * 取りやめ操作に「開き直してください」という嘘の赤帯が出る。
              * ⚠ どの rewrite でも同じ ── 同じ bytes の書き直しは更新日時だけ動かす。
              */
-            if (newBody === body) return;
+            /**
+             * 🔴 **リストをそろえた回の知らせ**(#1173)。⚠ 本文を読んだここでしか数えられない
+             *   (reducer は本文を持たない)。数え方は書く側と**同じ `applyTaskRun`**(§7)。
+             * ⚠ 何も動かなくても言う ── 黙ると「押したのに何も起きない」になる。
+             */
+            const runTo = ev.rewrite.kind === 'task-run' ? ev.rewrite.to : null;
+            const run =
+              ev.rewrite.kind === 'task-run' && runTo !== null
+                ? applyTaskRun(body, ev.rewrite.lines, runTo)
+                : null;
+            if (newBody === body) {
+              if (run !== null && runTo !== null && !disposed)
+                dispatcher.dispatch({ type: 'OP_NOTICE', message: taskRunNotice(run, runTo) });
+              return;
+            }
             const ext = extractMeta(ev.archetype, newBody);
             /**
              * 🔴 **読んでから書くまでの間に別の窓が書いていたら、1 バイトも書かない**
@@ -3380,7 +3399,15 @@ export function connectStoreEffects(
                 date: ext.date,
                 archived: ext.archived,
               },
-              { expectHash: contentHash64Hex(body) },
+              /**
+               * 🔴 **リストをそろえる回だけ履歴に積む**(#1173)。⚠ 1 回で何件も動くので、
+               *   間違えたら版から戻せる(「元に戻す」の知らせは段②)。他の書換(1 件の印・
+               *   改名)は amend のまま ── 履歴を印の数だけ伸ばさない。
+               */
+              {
+                expectHash: contentHash64Hex(body),
+                ...(ev.rewrite.kind === 'task-run' ? { checkpoint: true } : {}),
+              },
             );
             if (stamps.conflict === true) {
               dispatcher.dispatch({
@@ -3410,6 +3437,8 @@ export function connectStoreEffects(
                 archived: ext.archived,
               });
             stamp(ev.lid, stamps);
+            if (run !== null && runTo !== null && run.skipped.repeat > 0 && !disposed)
+              dispatcher.dispatch({ type: 'OP_NOTICE', message: taskRunNotice(run, runTo) });
           } catch (e) {
             // toggle の失敗は非致命(local state は動いておらず、再クリックが
             // retry)── phase を落として app を止めない(P3-6b review #1)
