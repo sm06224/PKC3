@@ -7,7 +7,7 @@
  *   (⚠ 2026-09-05 に **`console.info` / `console.log`** も数えるようにした ──
  *    アプリの束から出たものだけ。理由は `collectPageErrors` の中に書いた)
  */
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { consoleOrigin, firstAppFrame, isAppOrigin, rawFrame } from './page-errors';
 
 export async function gotoApp(page: Page): Promise<void> {
@@ -851,4 +851,54 @@ export async function gotoCollectionPane(page: Page): Promise<void> {
     page.locator('[data-pkc-field="collection-pane"]'),
     'コレクションの面が出ていない(読み直しても選択が残っている)',
   ).toBeVisible({ timeout: 10_000 });
+}
+
+/**
+ * 🔴 **絵を押す → その場で拡大(lightbox)が開く → 「⧉」で別窓**(#1099 / #1183。mermaid / read-columns の smoke が使う)。
+ *
+ * ⚠ #1099 より前は「絵を押すと別窓」だった ── 押したまま別窓の event を待つ test は
+ *   30 秒で落ちていた(製品は無傷。期待が古かった)。別窓は lightbox の「⧉」から開く。
+ * ⚠ 「何も起きない」を許さない:拡大が開いたこと / 絵が同じ物であること / 別窓が
+ *   まだ開いていないことを見る。`closeFirst` なら Esc で閉じて**絵が元の位置に戻る**ことも
+ *   見てから開き直す(1 本だけに掛ける ── 起動は増えず、操作が数回増えるだけ)。
+ */
+export async function openBigWindowViaLightbox(
+  page: Page,
+  context: BrowserContext,
+  img: Locator,
+  closeFirst: boolean,
+): Promise<Page> {
+  const opened: string[] = [];
+  const onPage = (p: Page): void => {
+    opened.push(p.url());
+  };
+  context.on('page', onPage);
+  const lightbox = page.locator('[data-pkc-region="lightbox"]');
+  const srcBody = await img.getAttribute('src');
+  // ⚠ 押す前に見える所へ寄せる ── 寄せないと押すときのスクロールが「元の位置」の比較に混ざる
+  await img.scrollIntoViewIfNeeded();
+  const boxBefore = await img.boundingBox();
+  expect(boxBefore, '前提: 絵の位置が取れない').not.toBeNull();
+  const open = async (): Promise<void> => {
+    await img.click();
+    await expect(lightbox, '絵を押しても拡大が開かない(何も起きない)').toHaveCount(1);
+    await expect(
+      lightbox.locator('img.pkc-lightbox-img'),
+      '拡大の絵が本文の絵と違う',
+    ).toHaveAttribute('src', srcBody!);
+  };
+  if (closeFirst) {
+    await open();
+    await page.keyboard.press('Escape');
+    await expect(lightbox, 'Esc で拡大が閉じない').toHaveCount(0);
+    expect(await img.boundingBox(), '閉じたら絵が元の位置に戻る').toEqual(boxBefore);
+  }
+  await open();
+  expect(opened, '押しただけで別窓が開いている(その場で拡大のはず)').toEqual([]);
+  const [win] = await Promise.all([
+    context.waitForEvent('page'),
+    lightbox.locator('.pkc-lightbox-open-win-btn').click(),
+  ]);
+  context.off('page', onPage);
+  return win;
 }
