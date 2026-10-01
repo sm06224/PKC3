@@ -32,14 +32,26 @@ test('🔴 チェックを押すと本文に残り、開き直しても消えな
   await expect(boxes, 'チェックが押せる形で出ていない').toHaveCount(4);
   await expect(boxes.nth(0)).not.toBeChecked();
 
+  /**
+   * 🔴 **右の列の「チェック項目」が押すたびに動く**(#1216)。⚠ 新しい起動は足さない ──
+   * 既にある道中(押す → 往復 → 一括)に assert を足す。
+   * 🔑 観測点は右の列の値の字(`inspector-tasks`)。項目は 4 件(入れ子も数える)。
+   */
+  const progress = page.locator('[data-pkc-region="inspector"] [data-pkc-field="inspector-tasks"]');
+  await expect(progress, '右の列にチェック項目の行が出ていない').toHaveText('0 / 4 完了 (0%)');
+  await expect(progress).toBeVisible();
+
   // ① 🔴 実クリック → 描き直された後も印が残っている
   await boxes.nth(0).click();
   await expect(boxes.nth(0), '押した印が描き直しで消えた').toBeChecked();
   await expect(boxes.nth(1), '押していない方まで変わった').not.toBeChecked();
+  await expect(progress, '押したのに右の数が動かない').toHaveText('1 / 4 完了 (25%)');
 
   // ② 🔴 別のノートへ行って戻る ── ここが直す前の壊れ方だった
   await createEntry(page, 'text');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
+  // 🔴 チェック項目の無いノートでは行ごと畳まれる(対照群: 上で出ていた)
+  await expect(progress, '項目の無いノートで行が残った').toBeHidden();
   await page.locator('[data-pkc-region="filer-table"] tbody tr').first().click();
   await expect(
     page.locator('[data-pkc-view-pane="detail"]'),
@@ -47,10 +59,12 @@ test('🔴 チェックを押すと本文に残り、開き直しても消えな
   ).toContainText('買い物');
   const back = page.locator('[data-pkc-view-pane="detail"] [data-pkc-action="toggle-task"]');
   await expect(back.nth(0), '往復したら印が消えた(保存されていない)').toBeChecked();
+  await expect(progress, '往復したら右の数が戻らない').toHaveText('1 / 4 完了 (25%)');
 
   // ③ もう一度押すと外れる(片道にしない)
   await back.nth(0).click();
   await expect(back.nth(0), '外れない').not.toBeChecked();
+  await expect(progress, '外したのに右の数が減らない').toHaveText('0 / 4 完了 (0%)');
 
   /**
    * ④ 🔴 **項目の字を右クリックして、リストを丸ごとそろえる**(#1173)。
@@ -78,6 +92,7 @@ test('🔴 チェックを押すと本文に残り、開き直しても消えな
   await expect(back.nth(1), '卵が完了にならない').toBeChecked();
   await expect(back.nth(2), '入れ子の Mサイズが完了にならない').toBeChecked();
   await expect(back.nth(3), '🔴 繰り返しの行まで完了にした').not.toBeChecked();
+  await expect(progress, '一括で完了にしたのに右の数が動かない').toHaveText('3 / 4 完了 (75%)');
   await expect(
     page.getByText('1 件は繰り返しなので触りませんでした'),
     '繰り返しを飛ばした知らせが出ていない',
@@ -93,6 +108,7 @@ test('🔴 チェックを押すと本文に残り、開き直しても消えな
   await expect(back.nth(0), '読み直したら完了が消えた(保存されていない)').toBeChecked();
   await expect(back.nth(2), '読み直したら入れ子の完了が消えた').toBeChecked();
   await expect(back.nth(3), '読み直したら繰り返しの行が動いていた').not.toBeChecked();
+  await expect(progress, '読み直したら右の数が違う').toHaveText('3 / 4 完了 (75%)');
 
   // ⑤ 戻せる(片道にしない)── 「すべて未完了に戻す」
   await pane.locator('li.pkc-task-item', { hasText: '卵' }).first().click({
@@ -103,6 +119,7 @@ test('🔴 チェックを押すと本文に残り、開き直しても消えな
   for (const n of [0, 1, 2, 3]) {
     await expect(back.nth(n), `${n} 番目が未完了に戻らない`).not.toBeChecked();
   }
+  await expect(progress, '戻したのに右の数が動かない').toHaveText('0 / 4 完了 (0%)');
 
   // ⑥ 箱の上の右クリックは、ブラウザ既定のメニューを残す(こちらのメニューを出さない)
   await back.nth(0).click({ button: 'right' });

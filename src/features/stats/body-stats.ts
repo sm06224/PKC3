@@ -40,3 +40,26 @@ export function formatBodyStats(chars: number | null, body: string | null = null
   if (estimate.label === null) return `${formattedChars} 文字`;
   return `${formattedChars} 文字 (読了 約 ${estimate.minutes} 分)`;
 }
+
+/**
+ * 🔴 **チェック項目の進み具合**(#1216)。右の列の「チェック項目」の行の字。
+ *
+ * ## user がやりたいこと
+ *
+ * 買い物リストや手順のノートを開いたまま、「あと何件か」を本文を数えずに知りたい。
+ *
+ * ## 規律
+ *
+ * 1. 🔑 **数えるのは呼ぶ側**(`listTaskItems` ── かんばんの札と同じ物)。ここは字を組むだけ。
+ *    ⚠ `countTaskCandidates` は「多めに数える鍵」なので画面に出さない(task-count.ts の注記)。
+ * 2. 🔴 **割合は切り捨て** ── 199/200 を「100%」と出すと、終わっていないのに終わって見える。
+ * 3. 🔑 **0 件は `null`**(呼ぶ側が行ごと畳む)。「0 / 0 完了 (NaN%)」を出さない。
+ *
+ * 例: `(10, 4)` → `'4 / 10 完了 (40%)'` / `(0, 0)` → `null`
+ */
+export function formatTaskProgress(total: number, done: number): string | null {
+  if (!(total > 0)) return null;
+  const d = Math.min(Math.max(done, 0), total);
+  const pct = Math.floor((d * 100) / total);
+  return `${d} / ${total} 完了 (${pct}%)`;
+}

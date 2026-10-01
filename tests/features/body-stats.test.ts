@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatBodyStats } from '../../src/features/stats/body-stats';
+import { formatBodyStats, formatTaskProgress } from '../../src/features/stats/body-stats';
 
 /**
  * 🔴 右の列の読了目安は、題名の下と**同じ 1 本の算出**(#1087、裁定 2026-10-01)。
@@ -54,5 +54,29 @@ describe('formatBodyStats ── 文字数と読了目安(#1112 / #1087)', () =>
   it('「N 文字」は生の長さのまま(カンマ区切り)', () => {
     const body = 'あ'.repeat(10000);
     expect(formatBodyStats(body.length, body)).toBe('10,000 文字 (読了 約 20 分)');
+  });
+});
+
+describe('formatTaskProgress ── チェック項目の進み具合(#1216)', () => {
+  it('「済み / 全部 完了 (割合%)」', () => {
+    expect(formatTaskProgress(10, 4)).toBe('4 / 10 完了 (40%)');
+    expect(formatTaskProgress(1, 1)).toBe('1 / 1 完了 (100%)');
+    expect(formatTaskProgress(5, 0)).toBe('0 / 5 完了 (0%)');
+  });
+
+  it('🔴 割合は切り捨て(99.5% を 100% と出さない)', () => {
+    expect(formatTaskProgress(200, 199)).toBe('199 / 200 完了 (99%)');
+    expect(formatTaskProgress(3, 2)).toBe('2 / 3 完了 (66%)');
+    expect(formatTaskProgress(3, 1)).toBe('1 / 3 完了 (33%)');
+    expect(formatTaskProgress(8, 7)).toBe('7 / 8 完了 (87%)');
+  });
+
+  it('🔴 0 件は null(0 / 0 を出さず、呼ぶ側が行ごと畳む)', () => {
+    expect(formatTaskProgress(0, 0)).toBeNull();
+    expect(formatTaskProgress(Number.NaN, 0)).toBeNull();
+  });
+
+  it('全部より多い済みは全部に丸める(100% を超えない)', () => {
+    expect(formatTaskProgress(2, 5)).toBe('2 / 2 完了 (100%)');
   });
 });
