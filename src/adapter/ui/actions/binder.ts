@@ -176,6 +176,7 @@ import {
   DIAGRAM_CHOICES,
   DIAGRAM_TEMPLATES,
   insertBlock,
+  linkifyPastedUrl,
   type FormatOp,
 } from '@features/markdown/text-ops';
 import { insertSnippet, nextSnippetSlot } from '@features/snippet/snippet-expand';
@@ -11676,6 +11677,31 @@ export function bindActions(
       containerId: st.cid,
       titleOf: (lid) => st.entryMetas.get(lid)?.title ?? null,
     });
+    const source = services.pasteSource?.() ?? DEFAULT_PASTE_SOURCE;
+    /**
+     * 🔴 **選んだ字へ URL を貼ると `[選んだ字](URL)` にする**(#1165)。
+     *
+     * ⚠ **HTML / RTF の変換より先に見る** ── Slack などのコピーは `text/html` に
+     *   `<a>` を、`text/plain` に URL を載せる。HTML が先に当たると、選んだ字が
+     *   **消えて**リンク文字列に置き換わる(「選んだ字をリンクにしたい」の逆)。
+     * ⚠ **設定「変換しない」では何もしない** ── `choosePaste` が「1 種類だけ
+     *   書き換わると設定の字が嘘になる」と言っているのと同じ理由である
+     *   (判定の許可は `source !== 'plain'` の 1 行 ── ここで渡す)。
+     * 🔑 パーマリンク(内部リンク)が当たったときは**そちらが勝つ**(上の判定)。
+     * 🔑 差すのは `insertText` ── **1 回の Undo で選んだ字へ戻る**。
+     */
+    if (permalink === null) {
+      const from = {
+        text: target.value,
+        start: target.selectionStart ?? 0,
+        end: target.selectionEnd ?? 0,
+      };
+      const linked = linkifyPastedUrl(from, plain, source !== 'plain');
+      if (linked !== null) {
+        insertText(target, linked.text.slice(from.start, linked.end));
+        return true;
+      }
+    }
     /**
      * 🔴 **どれを読むかは設定が決める**(user 指示 2026-08-25)。
      * ⚠ **順番をここに書かない** ── 判定は `choosePaste` の 1 か所である
@@ -11684,7 +11710,7 @@ export function bindActions(
      *   解析しない(押した瞬間に止まらないための作法)。
      */
     const chosen = choosePaste({
-      source: services.pasteSource?.() ?? DEFAULT_PASTE_SOURCE,
+      source,
       sizes: { html: html.length, rtf: rtf.length, plain: plain.length },
       convert: {
         permalink: () => permalink,

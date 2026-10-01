@@ -15,6 +15,7 @@ import {
   appendAt,
   appendBlock,
   FORMAT_OPS,
+  linkifyPastedUrl,
   TABLE_BLOCK,
   CODE_BLOCK,
   MERMAID_BLOCK,
@@ -863,5 +864,75 @@ describe('🔴 閉じ記号の通り抜け(9 対の全数)', () => {
       end: 3,
     });
     expect(autoPairFor(at('```', 3), '`')).toBeNull();
+  });
+});
+
+/**
+ * 🔴 **#1165**: 選んだ字へ URL を貼ると `[選んだ字](URL)`。
+ * ⚠ 「リンクにする」より**「リンクにしない」形**のほうが多い ── 貼った字は user の物なので、
+ * 4 条件(選びがある / 1 行 / URL 1 本だけ / 設定が許す)の**どれか 1 つが欠けたら null**。
+ */
+describe('選んだ字へ URL を貼る', () => {
+  const URL1 = 'https://example.com/a?b=1';
+
+  it('🔴 選んだ字がラベルになり、caret はリンク全体の末尾へ行く', () => {
+    const out = linkifyPastedUrl(sel('前 |選んだ| 後'), URL1, true);
+    expect(out).not.toBeNull();
+    expect(out!.text).toBe(`前 [選んだ](${URL1}) 後`);
+    expect(out!.start).toBe(out!.end);
+    // caret の右には元の続き(` 後`)だけが在る
+    expect(out!.text.slice(out!.end)).toBe(' 後');
+  });
+
+  it('🔴 前後に空白・改行が付いた URL でも 1 本ならリンクにする(コピーの末尾改行)', () => {
+    const out = linkifyPastedUrl(sel('|あ|'), `  ${URL1}\n`, true);
+    expect(out!.text).toBe(`[あ](${URL1})`);
+  });
+
+  it('🔴 選んでいなければ null(素の貼付に任せる)', () => {
+    expect(linkifyPastedUrl({ text: 'あ', start: 1, end: 1 }, URL1, true)).toBeNull();
+  });
+
+  it('🔴 空白だけを選んでいるときも null(空のラベルのリンクを作らない)', () => {
+    expect(linkifyPastedUrl(sel('a| |b'), URL1, true)).toBeNull();
+  });
+
+  it('🔴 複数行の選びは null(行をまたぐ字を 1 つのラベルへ潰さない)', () => {
+    expect(linkifyPastedUrl(sel('|あ\nい|'), URL1, true)).toBeNull();
+    expect(linkifyPastedUrl(sel('|あ\r\nい|'), URL1, true)).toBeNull();
+  });
+
+  it('🔴 URL でない物は null', () => {
+    for (const p of ['ただの文', 'example.com', 'ftp://example.com/a', 'javascript:alert(1)', 'https://', '']) {
+      expect(linkifyPastedUrl(sel('|あ|'), p, true), p).toBeNull();
+    }
+  });
+
+  it('🔴 URL が 1 本でない貼付(文に混じる / 2 本)は null', () => {
+    expect(linkifyPastedUrl(sel('|あ|'), `見て ${URL1}`, true)).toBeNull();
+    expect(linkifyPastedUrl(sel('|あ|'), `${URL1} ${URL1}`, true)).toBeNull();
+    expect(linkifyPastedUrl(sel('|あ|'), `${URL1}\n${URL1}`, true)).toBeNull();
+  });
+
+  it('🔴 設定が許さないとき(allowed=false)は、条件が全部そろっていても null', () => {
+    expect(linkifyPastedUrl(sel('|あ|'), URL1, false)).toBeNull();
+    // 対照群: 同じ入力で許せばリンクになる(上の null が「設定のせい」だけだと言える)
+    expect(linkifyPastedUrl(sel('|あ|'), URL1, true)).not.toBeNull();
+  });
+
+  it('🔴 選んだ字の `[` `]` は escape する(リンクが途中で切れない)', () => {
+    const out = linkifyPastedUrl(sel('|買い物 [済]|'), URL1, true);
+    expect(out!.text).toBe(`[買い物 \\[済\\]](${URL1})`);
+  });
+
+  it('🔴 宛先に `)` が在れば `<…>` で囲む(リンクが途中で切れない。組み立ては formatMarkdownLink の 1 本)', () => {
+    const u = 'https://ja.wikipedia.org/wiki/Foo_(bar)';
+    const out = linkifyPastedUrl(sel('|Foo|'), u, true);
+    expect(out!.text).toBe(`[Foo](<${u}>)`);
+  });
+
+  it('http:// も大文字のスキームも受ける', () => {
+    expect(linkifyPastedUrl(sel('|あ|'), 'http://a.test/', true)!.text).toBe('[あ](http://a.test/)');
+    expect(linkifyPastedUrl(sel('|あ|'), 'HTTPS://A.TEST/', true)!.text).toBe('[あ](HTTPS://A.TEST/)');
   });
 });
