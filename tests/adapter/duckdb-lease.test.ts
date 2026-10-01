@@ -246,3 +246,165 @@ describe('🔴 時間で切る(#682 段②)', () => {
     expect(t.armed).toBe(1);
   });
 });
+
+/**
+ * 🔴 **書き込みで作った物を、アイドルで畳まない**(#918 段⑧)。
+ *
+ * ## ① 何が起きていたか(直す前)
+ *
+ * ⚠ 画面は「作った表は**ウィンドウを閉じると**消えます」と言う。ところが器は
+ *   **30 秒使わないと畳まれる**(上の「常駐しない」)── 畳めば作った表は**黙って**消える。
+ *   🔴 user は「ウィンドウを閉じていないのに表が消えた」を、英語の
+ *   「Table with name … does not exist」で知ることになる。
+ *
+ * ## ② 何を守るか
+ *
+ * - 書き込みが**通った**後は、アイドルで畳まない(時計そのものを張らない)
+ * - 🔑 **読むだけの回は今までどおり畳む**(常駐メモリを返す規律は変えていない)
+ * - 畳まれるのは「明示の `release()` / 相手の入れ替え / 時間の門」だけで、
+ *   🔴 **畳んだら `held` を必ず下ろす**(下ろし忘れると、以後ずっと畳まれない)
+ */
+describe('🔴 書き込みで作った物は、アイドルで畳まない(#918 段⑧)', () => {
+  it('🔴 書き込みが通った後は、畳む時計を張らない ── 読むだけを挟んでも張らない', async () => {
+    const h = handle();
+    const t = fakeTimers();
+    const lease = new DuckDbLease({ open: () => Promise.resolve(h), ...t });
+    await lease.run({ sql: 'create table t (a int)', hold: true });
+    expect(t.armed, '作った表があるのに、畳む時計が張られている').toBe(0);
+    // 🔑 その後の読むだけの回も張らない(作った表を持ったまま)
+    await lease.run({ sql: 'select * from t' });
+    expect(t.armed, '読むだけの回が、作った表ごと畳む時計を張っている').toBe(0);
+    t.fire();
+    await Promise.resolve();
+    expect(h.terminated, '作った表ごと畳んだ').toBe(0);
+    expect(lease.awake).toBe(true);
+  });
+
+  it('⚠ 対照群 ── 書き込みでない回は、今までどおり畳む', async () => {
+    const h = handle();
+    const t = fakeTimers();
+    const lease = new DuckDbLease({ open: () => Promise.resolve(h), ...t });
+    await lease.run({ sql: 'select 1' });
+    expect(t.armed).toBe(1);
+    // `hold: false` を明示しても同じ
+    await lease.run({ sql: 'select 2', hold: false });
+    expect(t.armed).toBe(1);
+    t.fire();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(h.terminated).toBe(1);
+  });
+
+  it('🔴 先に張ってあった時計も、書き込みが通れば外れる', async () => {
+    const h = handle();
+    const t = fakeTimers();
+    const lease = new DuckDbLease({ open: () => Promise.resolve(h), ...t });
+    await lease.run({ sql: 'select 1' });
+    expect(t.armed, '前提:読むだけの回で時計が張られている').toBe(1);
+    await lease.run({ sql: 'create table t (a int)', hold: true });
+    expect(t.armed, '張ってあった時計が残っている(作った表ごと畳まれる)').toBe(0);
+  });
+
+  it('🔴 落ちた書き込みは「作った」と数えない ── 時計は張る', async () => {
+    const h = handle();
+    h.query = () => Promise.reject(new Error('Catalog Error'));
+    const t = fakeTimers();
+    const lease = new DuckDbLease({ open: () => Promise.resolve(h), ...t });
+    await expect(lease.run({ sql: 'insert into nope values (1)', hold: true })).rejects.toThrow('Catalog Error');
+    expect(t.armed, '何も作っていないのに、器を持ち続けている').toBe(1);
+  });
+
+  it('🔴 明示の release() は畳み、held も下ろす(以後の読むだけは、また畳まれる)', async () => {
+    const t = fakeTimers();
+    const lease = new DuckDbLease({ open: () => Promise.resolve(handle()), ...t });
+    await lease.run({ sql: 'create table t (a int)', hold: true });
+    await lease.release();
+    expect(lease.awake, '明示の release が効いていない').toBe(false);
+    await lease.run({ sql: 'select 1' });
+    expect(t.armed, 'held を下ろし忘れている(以後ずっと畳まれない)').toBe(1);
+  });
+
+  it('🔴 相手を替えると器ごと作り直し、held も下ろす', async () => {
+    const first = handle();
+    const second = handle();
+    const hs = [first, second];
+    const t = fakeTimers();
+    const lease = new DuckDbLease({ open: () => Promise.resolve(hs.shift() as DuckDbHandle), ...t });
+    const load = vi.fn(() => Promise.resolve());
+    await lease.run({ sql: 'create table t (a int)', hold: true, data: { key: 'a', load } });
+    expect(t.armed).toBe(0);
+    await lease.run({ sql: 'select 1', data: { key: 'b', load } });
+    // 🔑 前の器(作った表ごと)は畳まれ、新しい器は読むだけなので畳む時計が張られる
+    expect(first.terminated, '相手を替えたのに前の器が残っている').toBe(1);
+    expect(t.armed, '新しい器にまで held が引き継がれている').toBe(1);
+  });
+
+  it('🔴 時間の門で畳まれたら、held も下ろす', async () => {
+    const t = fakeTimers();
+    let stuckNext = false;
+    const h: DuckDbHandle & { terminated: number } = {
+      terminated: 0,
+      put: () => Promise.resolve(),
+      query: () => (stuckNext ? new Promise<DuckDbRaw>(() => undefined) : Promise.resolve(ANSWER)),
+      terminate: () => {
+        h.terminated += 1;
+        return Promise.resolve();
+      },
+    };
+    const lease = new DuckDbLease({ open: () => Promise.resolve(h), ...t });
+    await lease.run({ sql: 'create table t (a int)', hold: true });
+    stuckNext = true;
+    const flying = lease.run({ sql: 'select long', maxMs: 10 });
+    await new Promise((r) => setTimeout(r, 0));
+    t.fire();
+    await expect(flying).rejects.toThrow(DUCKDB_TOO_LONG);
+    expect(lease.awake, '時間の門で畳んだ器を持ち続けている').toBe(false);
+    // 🔑 起こし直した後の読むだけは、また畳まれる
+    stuckNext = false;
+    await lease.run({ sql: 'select 1' });
+    expect(t.armed, '畳んだのに held が残っている').toBe(1);
+  });
+
+  it('🔴 同時に飛んでいた別の問い合わせが畳んだ器には、held を立てない(古い器の書き込みが新しい器を縛らない)', async () => {
+    /**
+     * ⚠ 面は 1 度に 1 本しか走らせないので実機では起きにくいが、`DuckDbJob.maxMs` の注釈が
+     *   「同時に飛んでいる別の問い合わせも道連れになる」と書いている形である。
+     * 🔑 書き込み A が飛んでいる間に、B が時間の門で器を畳む → A が返る。
+     *   このとき `held` を立てると、**起こし直した新しい器**が以後ずっと畳まれない。
+     */
+    let settleA!: (v: DuckDbRaw) => void;
+    const mk = (): DuckDbHandle & { terminated: number } => {
+      const h: DuckDbHandle & { terminated: number } = {
+        terminated: 0,
+        put: () => Promise.resolve(),
+        query: (sql: string) =>
+          sql === 'A'
+            ? new Promise<DuckDbRaw>((res) => {
+                settleA = res;
+              })
+            : sql === 'B'
+              ? new Promise<DuckDbRaw>(() => undefined)
+              : Promise.resolve(ANSWER),
+        terminate: () => {
+          h.terminated += 1;
+          return Promise.resolve();
+        },
+      };
+      return h;
+    };
+    const hs = [mk(), mk()];
+    const t = fakeTimers();
+    const lease = new DuckDbLease({ open: () => Promise.resolve(hs.shift() as DuckDbHandle), ...t });
+    const a = lease.run({ sql: 'A', hold: true });
+    const b = lease.run({ sql: 'B', maxMs: 10 });
+    const bFailed = expect(b).rejects.toThrow(DUCKDB_TOO_LONG);
+    await new Promise((r) => setTimeout(r, 0));
+    t.fire();
+    await bFailed;
+    settleA(ANSWER);
+    await a;
+    // 起こし直した新しい器へ、読むだけの回
+    await lease.run({ sql: 'select 1' });
+    expect(t.armed, '畳まれた器の書き込みが、新しい器を畳めなくしている').toBe(1);
+  });
+});

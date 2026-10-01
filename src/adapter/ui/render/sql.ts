@@ -34,6 +34,7 @@ import { xlsxAttachmentSourcesOf } from '@features/query/xlsx-attachment';
 import { isSqlLocalFileLid, SQL_PICK_LOCAL_FILE_VALUE } from '@features/query/sql-local-file';
 import { humanBytes } from '@features/human-bytes';
 import { sqlExampleText, sqlPlaceholder, sqlRulesText, sqlTipText } from '@features/query/sql-tip';
+import { duckDbWriteKind, duckDbWriteNote } from '@features/query/duckdb-write';
 import {
   SQL_ENGINE_LABEL,
   SQL_ENGINES,
@@ -677,7 +678,13 @@ export class SqlRenderer {
      * 🔑 **「ノートへ」と「ファイルへ」は同じ 1 本から採る**(§7)── 片方だけ
      *   押せる状態を作らない(どちらも「いま出ている答え」を持ち帰る口である)。
      */
-    const canTakeAnswer = !p.running && p.ranSql !== '' && p.columns.length > 0;
+    /**
+     * 🔴 **書き込みの答えは持ち帰らない**(#918 段⑧)── 答えは「N 行に効きました」の 1 行で、
+     *   表(`Count` の 1 升)を「ノートへ」「ファイルへ」で持ち帰らせても意味が無い
+     *   (押せるのに何も得られない口を作らない)。
+     */
+    const canTakeAnswer =
+      !p.running && p.ranSql !== '' && p.columns.length > 0 && duckDbWriteKind(p.ranSql) === null;
     if (this.save !== null) this.save.disabled = !canTakeAnswer;
     if (this.toFile !== null) this.toFile.disabled = !canTakeAnswer;
     this.paintSource(state);
@@ -748,7 +755,12 @@ export class SqlRenderer {
     this.tbody = null;
     this.rowH = 0;
     this.drawn = null;
-    if (p.columns.length === 0) return;
+    /**
+     * 🔴 **書き込みの答えは表にしない**(#918 段⑧)。⚠ 上の 1 行(`noteLine`)が
+     *   「N 行に効きました」と言うので、`Count` の 1 升だけの表を出すと同じことを 2 回言う。
+     * 🔑 判定は字の門と**同じ 1 本**(`duckDbWriteKind`)。
+     */
+    if (p.columns.length === 0 || duckDbWriteKind(p.ranSql) !== null) return;
     const table = document.createElement('table');
     table.setAttribute('data-pkc-field', 'sql-table');
     const thead = document.createElement('thead');
@@ -1046,6 +1058,14 @@ function noteLine(p: AppState['sqlPage']): string {
       : `${p.guest.name} を調べています(表 ${String(p.guest.tables.length)} 個 / ${humanBytes(p.guest.bytes)})${truncNote}`;
 
   const took = `(${String(p.ms)} ミリ秒)`;
+  /**
+   * 🔴 **書き込みが通ったら、件数と寿命を言う**(#918 段⑧)。
+   * ⚠ **「0 行 ── 条件に当たるものがありませんでした」より先に判定する** ──
+   *   `CREATE TABLE`(`AS` なし)は 0 行を返すので、後ろに置くと
+   *   「条件に当たらなかった」と読める字が出る(何も間違っていないのに)。
+   */
+  const wrote = duckDbWriteKind(p.ranSql);
+  if (wrote !== null) return `${duckDbWriteNote(wrote, p.columns, p.rows)}${took}${where}`;
   if (p.truncated)
     return `${String(p.rows.length)} 行${took} ── 多すぎるので途中まで出しています(LIMIT や条件で絞ると全部見えます)${where}`;
   if (p.rows.length === 0)

@@ -3320,6 +3320,182 @@ describe('🔴 どのエンジンで引くか(#682 段②。user 裁定 2026-09-
 });
 
 /**
+ * 🔴 **DuckDB のときだけ、表を作れる**(#918 段⑧)。
+ *
+ * ## user の物語(ここを見る)
+ *
+ * ①取り込んだ `.csv` を選び ②エンジンを DuckDB にし ③`CREATE TABLE …` を打って走らせる
+ * ④「◯ 行に効きました ── 作った表はウィンドウを閉じると消えます」と出る
+ * ⑤`SELECT` で作った表を引ける ⑥**内蔵の sqlite のまま同じ字を打つと、今までどおり断られる**。
+ *
+ * ⚠ ここが見るのは**画面と配線**で、engine が実際に実行できるかは
+ *   `tests/duckdb-write.test.ts`(実物)、字の門は `tests/features/duckdb-write.test.ts` が見る。
+ */
+describe('🔴 DuckDB では表を作れる / sqlite では断る(#918 段⑧)', () => {
+  /** 書き込みが返す形(実測:`Count` の列に 1 行)。 */
+  const counted = (n: number) => ({
+    columns: ['Count'],
+    rows: [[n]] as Array<Array<string | number | null>>,
+    truncated: false,
+    ms: 4,
+  });
+
+  it('🔴 DuckDB で CREATE TABLE を打つと通り、件数と寿命を言う(表は出さない)', async () => {
+    const { pick, pickEngine, type, runBtn, note, duckSeen, runDuckDbSql, runReadOnlySql, pane } = setup();
+    runDuckDbSql.mockResolvedValueOnce(counted(3));
+    pick('db4');
+    await settle();
+    pickEngine('duckdb');
+    type('CREATE TABLE 集計 AS SELECT * FROM csv');
+    runBtn.click();
+    await settle();
+    expect(runDuckDbSql, 'DuckDB へ渡していない').toHaveBeenCalledTimes(1);
+    expect(runReadOnlySql, 'sqlite も叩いている').toHaveBeenCalledTimes(0);
+    void duckSeen;
+    expect(note(), '件数を言っていない').toContain('3 行に効きました');
+    expect(note(), '作った表の寿命を言っていない').toContain('作った表はウィンドウを閉じると消えます');
+    // 🔴 「条件に当たるものがありませんでした」と読める字を出さない
+    expect(note()).not.toContain('条件に当たる');
+    // 🔑 `Count` の 1 升だけの表を出さない(同じことを 2 回言わない)
+    expect(pane.querySelector('[data-pkc-field="sql-table"]'), '書き込みの答えを表にしている').toBeNull();
+  });
+
+  it('🔴 件数が返らない書き込み(AS の無い CREATE TABLE)は「実行しました」', async () => {
+    const { pick, pickEngine, type, runBtn, note, runDuckDbSql } = setup();
+    runDuckDbSql.mockResolvedValueOnce({ columns: ['Count'], rows: [], truncated: false, ms: 1 });
+    pick('db4');
+    await settle();
+    pickEngine('duckdb');
+    type('CREATE TABLE 空 (a INT)');
+    runBtn.click();
+    await settle();
+    expect(note()).toContain('実行しました');
+    // ⚠ 0 行の答え(`SELECT` が空だったとき)の字を出さない
+    expect(note()).not.toContain('0 行');
+  });
+
+  it('🔴 INSERT / UPDATE / DELETE は件数と「元の file は書き換わりません」を言う(寿命は言わない)', async () => {
+    const { pick, pickEngine, type, runBtn, note, runDuckDbSql } = setup();
+    pick('db4');
+    await settle();
+    pickEngine('duckdb');
+    for (const [sql, n] of [
+      ['INSERT INTO t VALUES (1)', 1],
+      ["UPDATE csv SET _note = 'x'", 5],
+      ['DELETE FROM csv WHERE id = 1', 0],
+    ] as const) {
+      runDuckDbSql.mockResolvedValueOnce(counted(n));
+      type(sql);
+      runBtn.click();
+      await settle();
+      expect(note(), sql).toContain(`${String(n)} 行に効きました`);
+      expect(note(), sql).toContain('元の file は書き換わりません');
+      expect(note(), `${sql}: 表を作っていないのに寿命を言っている`).not.toContain('消えます');
+    }
+  });
+
+  it('🔴 書き込みの答えは、ノートへ / ファイルへ 持ち帰らせない(押せるのに何も得られない口を作らない)', async () => {
+    const { pick, pickEngine, type, runBtn, saveBtn, runDuckDbSql, pane } = setup();
+    pick('db4');
+    await settle();
+    pickEngine('duckdb');
+    // 対照群:読むだけの答えは持ち帰れる
+    type('FROM csv SELECT *');
+    runBtn.click();
+    await settle();
+    expect(saveBtn.disabled, '前提:読むだけの答えなのに持ち帰れない').toBe(false);
+    runDuckDbSql.mockResolvedValueOnce(counted(2));
+    type('INSERT INTO t VALUES (1)');
+    runBtn.click();
+    await settle();
+    expect(saveBtn.disabled, '書き込みの答えを持ち帰らせている').toBe(true);
+    expect(pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-to-file"]')?.disabled).toBe(true);
+  });
+
+  it('🔑 書き込みの後に SELECT を打つと、表が普通に出る(note も戻る)', async () => {
+    const { pick, pickEngine, type, runBtn, note, cells, runDuckDbSql } = setup();
+    pick('db4');
+    await settle();
+    pickEngine('duckdb');
+    runDuckDbSql.mockResolvedValueOnce(counted(1));
+    type('CREATE TABLE t AS SELECT 1');
+    runBtn.click();
+    await settle();
+    expect(note()).toContain('作った表はウィンドウを閉じると消えます');
+    type('SELECT * FROM t');
+    runBtn.click();
+    await settle();
+    expect(cells(), '作った表を引いた答えが出ていない').toEqual([['duck']]);
+    expect(note(), '前の書き込みの知らせが残っている').not.toContain('消えます');
+  });
+
+  it('🔴 内蔵の sqlite のまま同じ字を打つと、今までどおり断る(DuckDB へも sqlite へも送らない)', async () => {
+    const { pick, type, runBtn, note, runDuckDbSql, runReadOnlySql } = setup();
+    // ⚠ 相手を選ばない = この PKC のノート(正本)。ここへ書く道が無いことが主張である
+    for (const sql of [
+      'CREATE TABLE t (a INT)',
+      'INSERT INTO entries VALUES (1)',
+      'UPDATE entries SET title = 1',
+      'DELETE FROM entries',
+      'DROP TABLE entries',
+    ]) {
+      type(sql);
+      runBtn.click();
+      await settle();
+      expect(note(), `${sql}: 断り文が出ていない`).toContain('読み取り専用です');
+      expect(note(), sql).toContain('ここは読むだけです');
+    }
+    expect(runReadOnlySql, 'sqlite へ書き込みを送っている').toHaveBeenCalledTimes(0);
+    expect(runDuckDbSql, 'DuckDB へ送っている').toHaveBeenCalledTimes(0);
+    void pick;
+  });
+
+  it('🔴 取り込んだ csv でも、sqlite を選んでいる間は断る(engine で門を選んでいる)', async () => {
+    const { pick, type, runBtn, note, runDuckDbSql, runReadOnlySql } = setup();
+    pick('db4');
+    await settle();
+    type('CREATE TABLE t AS SELECT * FROM csv');
+    runBtn.click();
+    await settle();
+    expect(note()).toContain('読み取り専用です');
+    expect(runReadOnlySql).toHaveBeenCalledTimes(0);
+    expect(runDuckDbSql).toHaveBeenCalledTimes(0);
+  });
+
+  it('🔴 DuckDB でも、白名簿の外は断る(引きに行かない)', async () => {
+    const { pick, pickEngine, type, runBtn, note, runDuckDbSql } = setup();
+    pick('db4');
+    await settle();
+    pickEngine('duckdb');
+    for (const sql of ['CREATE VIEW v AS SELECT 1', "COPY csv TO 'o.csv'", 'ALTER TABLE csv ADD COLUMN x INT']) {
+      type(sql);
+      runBtn.click();
+      await settle();
+      // 🔑 どの断り方でも、書ける形を挙げる(次に何を打てばよいかが読める)
+      expect(note(), sql).toContain('CREATE TABLE / INSERT INTO / UPDATE / DELETE FROM / DROP TABLE');
+      // ⚠ DuckDB では書けるので「ここは読むだけです」とは言わない
+      expect(note(), sql).not.toContain('ここは読むだけです');
+    }
+    expect(runDuckDbSql, '断ったのに引きに行った').toHaveBeenCalledTimes(0);
+  });
+
+  it('🔴 打ち方の約束は engine で入れ替わる ── DuckDB は表を作れて寿命を言い、sqlite は読むだけのまま', async () => {
+    const { pick, pickEngine, rules } = setup();
+    pick('db4');
+    await settle();
+    // 対照群:sqlite の約束は今までどおり
+    expect(rules()).toContain('読むだけ');
+    pickEngine('duckdb');
+    await settle();
+    expect(rules(), 'DuckDB なのに「読むだけ」と言っている(嘘になる)').not.toContain('読むだけ');
+    expect(rules(), '表を作れることを言っていない').toContain('CREATE TABLE');
+    expect(rules(), '作った表の寿命を、打つ前に言っていない').toContain('作った表はウィンドウを閉じると消えます');
+    expect(rules(), '別の file を選び直すと消えることを言っていない').toContain('別の file を選び直した');
+    expect(rules(), '元の file を触らないことを言っていない').toContain('元の file は書き換わりません');
+  });
+});
+
+/**
  * 🔴 **`.parquet` / `.json` を調べる相手として受ける**(#682 段④c)。
  *
  * ## user の物語(ここを見る)

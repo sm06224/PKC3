@@ -10,7 +10,7 @@
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
 import { DEFAULT_ENTRY_SORT, NATURAL_DESC, type EntrySort } from '@features/filter/entry-sort';
 import { checkReadOnlySql } from '@features/query/sql-guard';
-import { checkDuckDbSql } from '@features/query/duckdb-guard';
+import { checkDuckDbRunSql } from '@features/query/duckdb-write';
 import { DEFAULT_SQL_ENGINE, sqlEngineOf, type SqlEngine } from '@features/query/sql-engine';
 import { schemaModel, type Grid, type SchemaLink, type SchemaModel } from '@features/query/schema-digest';
 import { isSystemMessageLid } from '@features/message/message-log';
@@ -4388,7 +4388,11 @@ function reduceCore(
        *   「画面は sqlite なのに DuckDB の門を通す」が起きる。
        */
       const engine = sqlEngineOf(state.sqlPage);
-      const checked = engine === 'duckdb' ? checkDuckDbSql(state.sqlPage.sql) : checkReadOnlySql(state.sqlPage.sql);
+      /**
+       * 🔴 **書ける門は DuckDB のときだけ**(#918 段⑧)。⚠ sqlite の門(`checkReadOnlySql`)は
+       *   **そのまま** ── この PKC のノートの DB に書く道を作らない(1 行で全ノートを消せる口になる)。
+       */
+      const checked = engine === 'duckdb' ? checkDuckDbRunSql(state.sqlPage.sql) : checkReadOnlySql(state.sqlPage.sql);
       if (!checked.ok) {
         return {
           state: {

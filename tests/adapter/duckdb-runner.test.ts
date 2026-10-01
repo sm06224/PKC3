@@ -66,6 +66,7 @@ function make(
     bytes?: Uint8Array | null;
     pack?: string;
     lendInstalled?: DuckDbRunnerDeps['lendInstalled'];
+    idleMs?: number;
   } = {},
 ) {
   const answer = opts.answer ?? { columns: ['n'], types: ['Int32'], rows: [[1]] };
@@ -84,6 +85,7 @@ function make(
     // ⚠ 未指定なら key ごと渡さない ── `lendInstalled: undefined` を明示するのと
     //   実害は無いが、既存 test の deps 形をそのまま保つ
     ...(opts.lendInstalled === undefined ? {} : { lendInstalled: opts.lendInstalled }),
+    ...(opts.idleMs === undefined ? {} : { idleMs: opts.idleMs }),
   });
   return { runner, open, fetchText, readBytes, made };
 }
@@ -406,5 +408,51 @@ describe('🔴 入っていれば端末の一式、無ければ fetch(#682 段�
     const readBytes = vi.fn(() => Promise.resolve(new Uint8Array([1])));
     await expect(runner.run({ sql: 'SELECT 1', source: SRC, readBytes })).rejects.toThrow('壊れた wasm');
     expect(dispose, 'open が失敗しても借りた URL を返しているはず').toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * 🔴 **書き込みを打った回は、アイドルで畳まない**(#918 段⑧)。
+ *
+ * ⚠ 実時間の時計を使う(runner は `DuckDbLease` の時計を差せない形)── 待ちは 40ms 程度である。
+ * 🔑 見るのは「**書き込みの字を打ったか**」で器の寿命が変わること(`duckDbWriteKind` との配線)。
+ *   lease 側の規則は `duckdb-lease.test.ts` が見る ── ここは**配線**を見る。
+ */
+describe('🔴 書き込みの字を打つと、器を持ち続ける(#918 段⑧)', () => {
+  const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+  it('🔴 CREATE TABLE を打った後は、しばらく使わなくても畳まない', async () => {
+    const { runner, made, readBytes } = make({ idleMs: 5 });
+    await runner.run({ sql: 'CREATE TABLE t (a INT)', source: SRC, readBytes });
+    await wait(40);
+    expect(runner.awake, '作った表ごと畳んでいる').toBe(true);
+    expect(made[0]?.steps).not.toContain('terminate');
+    // 🔑 明示の release は畳む(ウィンドウを閉じる側の口)
+    await runner.release();
+    expect(runner.awake).toBe(false);
+  });
+
+  it('⚠ 対照群 ── 読むだけの字を打った後は、今までどおり畳む', async () => {
+    const { runner, made, readBytes } = make({ idleMs: 5 });
+    await runner.run({ sql: 'SELECT * FROM csv', source: SRC, readBytes });
+    await wait(40);
+    expect(runner.awake, '読むだけなのに畳んでいない(常駐メモリを返す規律が外れた)').toBe(false);
+    expect(made[0]?.steps).toContain('terminate');
+  });
+
+  it('🔴 書き込みの種類 5 つとも持ち続ける(1 つだけ漏れない)', async () => {
+    for (const sql of [
+      'CREATE TABLE t (a INT)',
+      'INSERT INTO t VALUES (1)',
+      "UPDATE t SET a = 2",
+      'DELETE FROM t',
+      'DROP TABLE t',
+    ]) {
+      const { runner, readBytes } = make({ idleMs: 5 });
+      await runner.run({ sql, source: SRC, readBytes });
+      await wait(40);
+      expect(runner.awake, `${sql} の後に畳んでいる`).toBe(true);
+      await runner.release();
+    }
   });
 });

@@ -15,6 +15,7 @@
 
 import type { SqlEngine } from './sql-engine';
 import { guestTableNameOf, duckDbReadableSourceOf } from './sql-guest-source';
+import { DUCKDB_TABLE_LIFETIME, DUCKDB_WRITE_FORMS } from './duckdb-write';
 
 /** 名前を並べる上限。⚠ 表が何十個も在る DB で、案内文が画面を埋めない。 */
 export const TIP_TABLES_MAX = 8;
@@ -83,12 +84,12 @@ export function sqlTipText(target: SqlTipTarget | null, engine: SqlEngine = 'sql
        *   🔑 知らせないと、**在ることに気づけないまま**になる(user の動機は
        *   「DuckDB を分かち合いたい」なので、隠れているのはいちばん悪い)。
        */
-      '取り込んだ .csv や .tsv、.parquet や .json を選ぶと、DuckDB でも引けます。'
+      '取り込んだ .csv や .tsv、.parquet や .json を選ぶと、DuckDB でも引けます(DuckDB では表を作ることもできます)。'
     );
   }
   if (engine === 'duckdb') {
     /**
-     * ⚠ **DuckDB は写した表 1 つしか持たない** ── 先に言わないと、
+     * ⚠ **DuckDB は最初は写した表 1 つしか持たない**(自分で作れば増える ── #918 段⑧)── 先に言わないと、
      *   打ってから英語で「そんな表は無い」と返る。
      *
      * 🔴 **表の名前も、足す列も、相手ごとに違う**(#682 段④c)。
@@ -125,8 +126,16 @@ export function sqlTipText(target: SqlTipTarget | null, engine: SqlEngine = 'sql
  */
 export function sqlRulesText(engine: SqlEngine = 'sqlite'): string {
   if (engine !== 'duckdb') return SQL_RULES;
+  /**
+   * 🔴 **DuckDB では書ける**(#918 段⑧)。⚠ 直す前の「読むだけで、書き換えはできません」は
+   *   **この engine では嘘になる**ので外した(sqlite の約束 `SQL_RULES` は変えない)。
+   * 🔴 **寿命を先に言う** ── 作った表は**ウィンドウを閉じると消える**(別の file を選び直した
+   *   ときも器を作り直すので消える)。黙って消えると、user は保存されたと読む。
+   * 🔑 字は `duckdb-write.ts` の 2 つの定数から組む(知らせの字と食い違わない)。
+   */
   return (
-    '読むだけで、書き換えはできません。' +
+    `表も作れます(${DUCKDB_WRITE_FORMS})。` +
+    `${DUCKDB_TABLE_LIFETIME}(別の file を選び直したときも消えます)。元の file は書き換わりません。` +
     'FROM から書き始められます。PIVOT や QUALIFY も打てます。' +
     '外から追加の部品を取ってくる書き方(INSTALL / LOAD)と、設定を変える SET は打てません。' +
     '日本語入力のままでも打てます。'
