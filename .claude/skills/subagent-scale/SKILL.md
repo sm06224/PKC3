@@ -77,6 +77,18 @@ Agent({ subagent_type: 'pkc3-implementer', isolation: 'worktree', prompt: … })
 終わった**(`URL.revokeObjectURL` が消えていた)。自分の変更と混ざるので diff でも
 気づきにくい。⚠ だから `pkc3-reviewer` / `pkc3-surveyor` は read-only に固定してある。
 
+### 🔴 worktree を分けても**共有される物が 3 つ**ある(2026-10-01、同じ日に 3 本の implementer が踏んだ)
+
+| 共有される物 | 何が起きたか | 依頼文に書くこと |
+|---|---|---|
+| **scratchpad**(`/tmp/claude-*/…/scratchpad/`) | 同名の `mut.py` / `bk/` を別の agent が上書き | 「scratchpad に置く file は名前に `<issue 番号>-` を前置」 |
+| **変異試験の backup dir** | 2 本が `scratchpad/bk/` に同名で backup → 片方の復元が**もう片方の編集を書き戻した**(`app-state.ts` の編集が丸ごと消え、再適用で救った) | 「backup は `<file>.mutbak` の隣置きか `mktemp -d`」(`mutation-testing` SKILL §1.1) |
+| **`vite preview` の port** | playwright が `reuseExistingServer` で**他人の dist** を相手に回り、緑も赤も他人の版 | 「`PKC3_SMOKE_PORT` 等を自分用の値に。回す前に `ss -ltnp` で確かめる」(`smoke-testing` SKILL) |
+
+🔑 **隔離しているのは `git` の作業ツリーだけ**である。`/tmp` と TCP の port は箱の中で 1 つ。
+⚠ 気づけた手掛かりは 3 つとも「**数字が想定の桁と違う**」だった(`git diff --stat` の行数 / build したのに出ない要素 / 空振りの変異)
+── 依頼文で**返す物に数を入れさせる**と、相手が自分で気づける。
+
 ### ⚠ worktree 隔離が起動できない箱がある(2026-08-14 実測)
 
 ```
