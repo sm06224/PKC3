@@ -73,6 +73,13 @@ test('🔴 1 面で、クリックした行だけが原文になる(周りは描
   await expect(live.locator('h1')).toHaveText('題');
   await expect(live.locator('p')).toContainText(['次の段落です。']);
 
+  // ②' 🔴 字下げの鍵(#1166)── ライブの行の欄でも効く。⚠ `Tab` はここでは行の確定
+  //    (下の ③)なので、字下げは Ctrl+] / Ctrl+[ だけが受ける
+  await row.press('Control+]');
+  await expect(row, 'ライブの行の欄で Ctrl+] が字下げしない').toHaveValue('  最初の段落です。');
+  await row.press('Control+[');
+  await expect(row, 'Ctrl+[ で戻らない').toHaveValue('最初の段落です。');
+
   // ③ 書き換えて確定すると、その行だけが描画に戻る
   await row.fill('書き換えました。');
   await page.keyboard.press('Tab');

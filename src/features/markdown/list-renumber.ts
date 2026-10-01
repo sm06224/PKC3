@@ -45,6 +45,16 @@ export function advanceFence(fence: string, line: string): string {
   return m ? m[1]![0]! : '';
 }
 
+/**
+ * 🔑 **リストの記号の読み取りの正本**(§7)── Enter で続ける規則(`quote-assist.ts`)と
+ * 字下げの規則(`indent-assist.ts`)が**同じ綴り**で「リストの行か」を決める。
+ * 行頭の字下げ・記号(`-` `*` `+` / `1.` `1)`)・記号の後ろの空白(必須)。
+ */
+export const LIST_LEAD = /^(\s*)([-*+]|\d+[.)])(\s+)/;
+
+/** 水平線(`---` / `* * *`)。⚠ 記号と空白と中身に**見える**が、リストではない。 */
+export const THEMATIC_BREAK = /^\s*([-*_])(?:\s*\1){2,}\s*$/;
+
 /** `  3. 中身` を読む。番号付きの項目でなければ `null`。 */
 function readItem(line: string): { indent: string; sep: string; rest: string } | null {
   const m = /^(\s*)\d+([.)])(\s+.*)$/.exec(line);

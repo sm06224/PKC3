@@ -51,6 +51,7 @@ import {
   formatCalcResult,
 } from '@features/markdown/inline-calc';
 import { quoteOnEnter } from '@features/markdown/quote-assist';
+import { indentLines } from '@features/markdown/indent-assist';
 import { tableOnTab } from '@features/markdown/table-assist';
 import { renumberLists } from '@features/markdown/list-renumber';
 import { sortTasksByStatus } from '@features/markdown/task-sort';
@@ -10279,7 +10280,42 @@ const EDITOR_RUN: Readonly<Record<string, (ta: HTMLTextAreaElement, notify: (t: 
     ta.setSelectionRange(action.at, action.at);
     insertText(ta, action.text);
   },
+  /** 🔴 字下げ(#1166)── 当て方は `runIndent` 1 か所。何も変わらなければ静かに何もしない。 */
+  indent: (ta) => {
+    runIndent(ta, 1, true);
+  },
+  outdent: (ta) => {
+    runIndent(ta, -1, true);
+  },
 };
+
+/**
+ * 🔴 **字下げを欄へ当てる、唯一の口**(#1166)── `Tab` の経路・鍵(`Ctrl+]` / `Ctrl+[`)・
+ * 「操作を探す」の 3 つが同じ関数を通る(§7)。
+ *
+ * ⚠ 書くのは **`insertText`(= `execCommand`)で行の範囲だけ**を置き換える ──
+ *   `ta.value =` で全文を代入すると**取り消しの履歴が切れる**(#765 で実測)。
+ * @param explicit 鍵 / 操作を探す(普通の 1 行にも効く)。`Tab` は `false`
+ * @returns 何か書いたら `true`。⚠ `false` なら**何も触っていない**(`Tab` は握らない)
+ */
+function runIndent(ta: HTMLTextAreaElement, dir: 1 | -1, explicit: boolean): boolean {
+  const res = indentLines(
+    { text: ta.value, start: ta.selectionStart, end: ta.selectionEnd },
+    dir,
+    { explicit },
+  );
+  if (res === null) return false;
+  ta.setSelectionRange(res.from, res.to);
+  insertText(ta, res.insert);
+  ta.setSelectionRange(res.start, res.end);
+  return true;
+}
+
+/** 字下げの 2 命令(`keymap.ts` の id)。1 面の行の欄はこの 2 つだけ `EDITOR_RUN` を通す。 */
+const INDENT_COMMANDS: ReadonlyMap<string, 1 | -1> = new Map([
+  ['indent', 1],
+  ['outdent', -1],
+]);
 
 /** 🔑 「この命令は本文の欄へ当てるか」に答える口は**ここ 1 つ**(§7)。 */
 function editorCommand(cmd: string): boolean {
@@ -11311,6 +11347,12 @@ export function bindActions(
      */
     if (field === 'row-source') {
       const rowCmd = keymap.match(ke, 'row');
+      // 🔴 字下げ(#1166)は `Tab` が行の保存なので、鍵(`Ctrl+]` / `Ctrl+[`)で受ける
+      if (rowCmd !== null && INDENT_COMMANDS.has(rowCmd)) {
+        ke.preventDefault();
+        EDITOR_RUN[rowCmd]!(ke.target as HTMLTextAreaElement, () => undefined);
+        return;
+      }
       if (rowCmd === null || FORMAT_OF[rowCmd] === undefined) return;
       ke.preventDefault();
       // 🔑 当て方は `applyFormatTo` 1 か所(§7 ── パレットも同じ口を通る)
@@ -11372,6 +11414,7 @@ export function bindActions(
 
     if (field === 'editor-body' && ke.key === 'Tab' && !ke.shiftKey) {
       const ta = ke.target as HTMLTextAreaElement;
+      const plainTab = !ke.ctrlKey && !ke.altKey && !ke.metaKey;
       const items = dispatcher.getState().snippetScan?.items ?? [];
       const collapsed = ta.selectionStart === ta.selectionEnd;
       const hit = collapsed ? abbrBeforeCaret(ta.value, ta.selectionStart, items) : null;
@@ -11394,6 +11437,30 @@ export function bindActions(
         ta.setSelectionRange(slot.start, slot.end);
         return;
       }
+      /**
+       * 🔴 **リストの行 / 複数行の選択の `Tab` は字下げ**(#1166)。
+       * ⚠ **短縮語・印・表より後ろ**に置く ── 雛形を呼ぶ `Tab` と表のセル移動を奪わない。
+       * ⚠ 握るのは**リストの項目か複数行のときだけ**(`indentLines` が `null` を返したら
+       *   何もしない = 焦点が出ていく。意図した出口 ── 上の戒めのとおり常に握らない)。
+       */
+      if (plainTab && runIndent(ta, 1, false)) {
+        ke.preventDefault();
+        return;
+      }
+    }
+    // 🔴 `Shift`+`Tab` は**戻せる字下げがあるときだけ**握る(無ければ焦点が前へ出る)。
+    //   ⚠ 表のセルは上の `tableOnTab` が先に取っている
+    if (
+      field === 'editor-body' &&
+      ke.key === 'Tab' &&
+      ke.shiftKey &&
+      !ke.ctrlKey &&
+      !ke.altKey &&
+      !ke.metaKey &&
+      runIndent(ke.target as HTMLTextAreaElement, -1, false)
+    ) {
+      ke.preventDefault();
+      return;
     }
     if (field !== 'editor-body' && field !== 'editor-title') return;
     // PKC2 慣例: Ctrl/Cmd+S = 保存(ブラウザの保存ダイアログも抑止)、

@@ -6,7 +6,7 @@
  *   #397 で「作ったのに繋いでいない 3 件」を直したばかりなので、
  *   同じ穴を自分で開けない。
  */
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Dispatchable } from '../../src/adapter/state/app-state';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
@@ -295,6 +295,138 @@ describe('表の編集アシスト(Tab / Shift+Tab)が編集欄に繋がって�
     const ev = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
     ta.dispatchEvent(ev);
     expect(ev.defaultPrevented, '表の外なのに Tab が奪われた').toBe(false);
+  });
+});
+
+describe('字下げ(Tab / Shift+Tab / Ctrl+] / Ctrl+[)が編集欄に繋がっている #1166', () => {
+  const key = (ta: HTMLTextAreaElement, over: KeyboardEventInit): KeyboardEvent => {
+    const ev = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...over });
+    ta.dispatchEvent(ev);
+    return ev;
+  };
+  const tab = (ta: HTMLTextAreaElement, over: KeyboardEventInit = {}) =>
+    key(ta, { key: 'Tab', ...over });
+  const ctrl = (ta: HTMLTextAreaElement, glyph: '[' | ']') =>
+    key(ta, {
+      key: glyph,
+      code: glyph === ']' ? 'BracketRight' : 'BracketLeft',
+      ctrlKey: true,
+    });
+
+  /** ⚠ 取り消しの履歴が切れない書き方(`execCommand('insertText')`)を通ったかを見る。 */
+  const inserted: string[] = [];
+  beforeEach(() => {
+    inserted.length = 0;
+    // happy-dom に `execCommand` は無い ── 選択を置き換える本物の意味論を真似る
+    (document as unknown as { execCommand: unknown }).execCommand = vi.fn(
+      (cmd: string, _ui?: boolean, value?: string) => {
+        if (cmd !== 'insertText') return false;
+        const ta = document.activeElement as HTMLTextAreaElement | null;
+        const target = ta instanceof HTMLTextAreaElement ? ta : lastTa;
+        inserted.push(value ?? '');
+        const { selectionStart: s, selectionEnd: e, value: v } = target;
+        const at = s + (value ?? '').length;
+        target.value = v.slice(0, s) + (value ?? '') + v.slice(e);
+        target.setSelectionRange(at, at);
+        target.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
+      },
+    );
+  });
+  afterEach(() => {
+    delete (document as unknown as { execCommand?: unknown }).execCommand;
+  });
+  let lastTa!: HTMLTextAreaElement;
+  const open = (value: string, caret: number, field: 'editor-body' | 'row-source' = 'editor-body') => {
+    const { root } = setup();
+    lastTa = editor(root, value, caret, field);
+    return lastTa;
+  };
+
+  it('🔴 リストの行の Tab は字下げし、キーを握る', () => {
+    const ta = open('- 牛乳\n- パン', 8);
+    const ev = tab(ta);
+    expect(ta.value).toBe('- 牛乳\n  - パン');
+    expect(ev.defaultPrevented, '字下げしたのにキーを握っていない(焦点も動く)').toBe(true);
+    expect(ta.selectionStart, 'caret が行の中身に付いていない').toBe(10);
+  });
+
+  it('🔴 番号付きは 3 つ入る', () => {
+    const ta = open('1. あ', 5);
+    tab(ta);
+    expect(ta.value).toBe('   1. あ');
+  });
+
+  /** ⚠ 取り消し(Ctrl+Z)が効く書き方か ── `ta.value =` の代入は履歴を切る(#765)。 */
+  it('🔴 書くのは insertText(取り消しの履歴を切らない)で、行の範囲だけ', () => {
+    const ta = open('- 牛乳\n- パン', 8);
+    tab(ta);
+    expect(inserted, 'insertText を通っていない').toEqual(['  - パン']);
+  });
+
+  it('🔴 普通の段落の Tab は握らない(焦点が出ていく)', () => {
+    const ta = open('通常のテキスト', 3);
+    const ev = tab(ta);
+    expect(ev.defaultPrevented, '普通の行なのに Tab が奪われた').toBe(false);
+    expect(ta.value).toBe('通常のテキスト');
+    expect(inserted).toEqual([]);
+  });
+
+  it('複数行を選んで Tab ── 地の文も入る', () => {
+    const ta = open('あ\nい\nう', 0);
+    ta.setSelectionRange(0, 3);
+    const ev = tab(ta);
+    expect(ta.value).toBe('  あ\n  い\nう');
+    expect(ev.defaultPrevented).toBe(true);
+  });
+
+  it('🔴 Shift+Tab は戻せる字下げがあるときだけ握る', () => {
+    const ta = open('- a\n  - b', 9);
+    const ev = tab(ta, { shiftKey: true });
+    expect(ta.value).toBe('- a\n- b');
+    expect(ev.defaultPrevented).toBe(true);
+    // 対照群:もう戻せない行は握らない(焦点が前へ出る)
+    const again = tab(ta, { shiftKey: true });
+    expect(again.defaultPrevented, '戻せる字下げが無いのに Shift+Tab が奪われた').toBe(false);
+    expect(ta.value).toBe('- a\n- b');
+  });
+
+  it('🔴 遠くのコードの塊の ${HOME} が、リストの行の Tab を奪わない', () => {
+    const text = `- 牛乳\n${'あ'.repeat(500)}\n\`\`\`sh\necho \${HOME}\n\`\`\`\n`;
+    const ta = open(text, 4);
+    const ev = tab(ta);
+    expect(ev.defaultPrevented).toBe(true);
+    expect(ta.value.startsWith('  - 牛乳\n'), '印へ飛んで字下げされていない').toBe(true);
+    expect(ta.selectionStart).toBe(6);
+  });
+
+  it('対照群:雛形の印(塊の外)が在れば、リストの行でも印が先(雛形を呼ぶ Tab を奪わない)', () => {
+    const ta = open('- 牛乳 ${数}', 0);
+    tab(ta);
+    expect(ta.value, '印があるのに字下げが先に走った').toBe('- 牛乳 ${数}');
+    expect(ta.value.slice(ta.selectionStart, ta.selectionEnd)).toBe('${数}');
+  });
+
+  it('🔴 Ctrl+] / Ctrl+[ は 2 列の欄で字下げ / 戻す(普通の 1 行にも効く)', () => {
+    const ta = open('ふつう', 3);
+    const ev = ctrl(ta, ']');
+    expect(ta.value).toBe('  ふつう');
+    expect(ev.defaultPrevented).toBe(true);
+    ctrl(ta, '[');
+    expect(ta.value).toBe('ふつう');
+  });
+
+  it('🔴 1 面のライブの行の欄でも Ctrl+] / Ctrl+[ が効く(Tab は行の保存のまま)', () => {
+    const ta = open('1. あ', 5, 'row-source');
+    const ev = ctrl(ta, ']');
+    expect(ta.value).toBe('   1. あ');
+    expect(ev.defaultPrevented).toBe(true);
+    ctrl(ta, '[');
+    expect(ta.value).toBe('1. あ');
+    // 🔑 行の欄の Tab は字下げではない(行の保存は `row-swap.ts` が持つ)
+    const t = tab(ta);
+    expect(ta.value, 'ライブの行の欄で Tab が字下げになった').toBe('1. あ');
+    void t;
   });
 });
 

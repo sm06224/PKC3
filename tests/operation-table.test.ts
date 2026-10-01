@@ -103,6 +103,13 @@ const UNBRIDGED: readonly string[] = [
   'filer-trash',
   'focus-search',
   /**
+   * ⚠ 2026-10-01(#1166): 字下げ / 字下げを戻す(`indent` / `outdent`)。**押しボタンを持たない** ──
+   *   `inline-calc` と同じ「本文の欄へ当てる命令」の継ぎ目(`EDITOR_RUN`)で受ける。
+   *   2 列の欄の `Tab`(リスト行 / 複数行のときだけ)は鍵の表の外で `binder.ts` が直に見る。
+   */
+  'indent',
+  'outdent',
+  /**
    * ⚠ 2026-09-08(#766 D-2): その場で計算する。**押しボタンを持たない** ──
    *   書式の帯は 14 個で横に長く、これ以上増やせない(D-3 を退けた理由)ので、
    *   記法(`FORMAT_OF`)と同じ「本文の欄へ当てる命令」の継ぎ目(`EDITOR_RUN`)で受ける。
@@ -546,11 +553,14 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-09-29(#1139): 長大なコードブロックの折りたたみ(`toggle-code-collapse`)で
       //   受け手 +1 ── 登記は増えない(押したコード枠が要る P1 で、`toggle-heading-fold` と同じ仕分け)。
       //   `receivers` +1 / `total` +1 / `unregistered` +1。
-      total: 337,
+      // ⚠ 2026-10-01(#1166): 字下げ / 字下げを戻す(`indent` / `outdent`)を `KEY_COMMANDS` へ登記。
+      //   押しボタンを持たない(`Tab` と `Ctrl+]` / `Ctrl+[`)ので受け手は増えない。
+      //   `registered` +2 / `total` +2 / `outsideActionsTable` +2。
+      total: 339,
       receivers: 283,
-      registered: 93,
+      registered: 95,
       both: 39,
-      outsideActionsTable: 54,
+      outsideActionsTable: 56,
       unregistered: 244,
     });
   });
@@ -591,8 +601,9 @@ describe('操作の全数台帳(#582 段①)', () => {
     // ⚠ 2026-09-25(#1038 台帳③ C1): 行のメニューが 16 → 17(「編集」`start-edit`)
     // ⚠ 2026-09-28(#1092): 「横の枠(スタック)へ開く」(`filer-open-stack`)で `key` 67 → 68
     // ⚠ 2026-09-28(#1107): 「最近開いたノートへ移る」(`open-recent`)で `key` 68 → 69
+    // ⚠ 2026-10-01(#1166): 字下げ / 字下げを戻す(`indent` / `outdent`)で `key` 69 → 71
     expect(s().perBook).toEqual({
-      key: 69,
+      key: 71,
       entry: 17,
       body: 3,
       collection: 2,

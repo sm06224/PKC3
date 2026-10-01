@@ -1100,6 +1100,13 @@ export class RowSwap {
       }
       // ⚠ ↑↓ 以外を打ったら数え直す(§「別のことをしたら捨てる」)
       this.boundaryStep = NO_BOUNDARY_STEP;
+      /**
+       * 🔴 **`Ctrl` / `Cmd` を押した打鍵は「字」ではないので補わない**(#1166)。
+       *   字下げの `Ctrl+[` は `key` が `[` なので、補うと**字下げしたうえに `[]` が入った**
+       *   (実ブラウザで実測)。⚠ `Ctrl`+`Alt`(= 一部の配列の AltGr で `[` を打つ形)は
+       *   字なので除く ── 外すと、その配列で括弧が補われなくなる。
+       */
+      if ((ke.ctrlKey || ke.metaKey) && !ke.altKey) return;
       this.autoPair(ke);
     });
     /**
