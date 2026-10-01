@@ -270,6 +270,7 @@ import {
 } from '@features/storage/db-rescue';
 import { elapsedText } from '@features/elapsed-text';
 import { quotaText } from '@features/storage/quota-watch';
+import { EDIT_ELSEWHERE_ERROR } from '@features/message/caution-events';
 import type {
   IntegrityCheckResult,
   RescuePage,
@@ -2656,7 +2657,7 @@ function acquireEditLockOrExplain(
         type: 'OP_FAILED',
         error:
           grant === 'denied'
-            ? 'このノートは別のタブかウィンドウで編集中です(そちらを閉じるか保存してください)'
+            ? EDIT_ELSEWHERE_ERROR
             : '最初に開いた PKC のタブと通信できません(少し待ってもう一度お試しください)',
       });
       return;

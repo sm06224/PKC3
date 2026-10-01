@@ -144,7 +144,7 @@ import { showNotices, clearNotices } from '@adapter/ui/render/notices';
 import { createImportUndo, importPanel } from '@adapter/ui/actions/import-undo';
 import { createUpdatePrompt } from '@adapter/ui/render/update-card';
 import { createAnnounce, announceServices } from '@adapter/ui/render/announce';
-import { quotaBootNotice } from '@features/storage/quota-watch';
+import { messageKindForOpError, quotaCaution } from '@features/message/caution-events';
 import { versionText, MANUAL_TEXT } from '@adapter/ui/render/help';
 import { manualSections } from '@features/help/manual-find';
 import { MANUAL_PAGE_FILE, manualBuildTag } from '@features/help/manual-page';
@@ -1703,7 +1703,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      */
     if (state.error !== null && state.error !== lastPostedError) {
       lastPostedError = state.error;
-      appMessagePost.post({ kind: 'problem', source: 'app', text: state.error });
+      // ⚠ 種類は文で決まる(別のタブが編集中 = 「注意」/ それ以外 = 「問題」)。
+      //   判断は `caution-events.ts` に在る ── ここに分岐を書かない
+      appMessagePost.post({
+        kind: messageKindForOpError(state.error),
+        source: 'app',
+        text: state.error,
+      });
     } else if (state.error === null) {
       lastPostedError = null;
     }
@@ -2362,7 +2368,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *
    * ⚠ 直す前は、空きを見るのは**添付を置く瞬間の拒否**だけだった ── つまり
    *   「もう置けません」で初めて知る形で、**減らす時間が残っていない**。
-   * ⚠ **危ない段のときだけ言う**(`quotaBootNotice` が空を返したら黙る)──
+   * ⚠ **危ない段のときだけ言う**(`quotaCaution` が `null` を返したら黙る)──
    *   毎回何か言うと、本当に危ない日の 1 行が同じ顔に埋もれる。
    * ⚠ 読めない端末では黙る(0 と決めつけない)。
    */
@@ -2370,8 +2376,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     void navigator.storage
       .estimate()
       .then((est) => {
-        const line = quotaBootNotice(est);
-        if (line !== '') showStatus(line);
+        const caution = quotaCaution(est);
+        if (caution !== null) {
+          // 🔴 画面下の 1 行は今までどおり出し、同じ字をメッセージへ「注意」で積む(#1017)
+          appMessagePost.post(caution);
+          showStatus(caution.text);
+        }
       })
       .catch(() => {
         /* 読めないだけ ── 何も言わない(嘘の安心も、嘘の警告も出さない) */
