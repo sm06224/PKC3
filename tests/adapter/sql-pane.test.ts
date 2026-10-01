@@ -37,6 +37,7 @@ import {
 } from '../../src/adapter/state/app-state';
 import {
   fitSqlInput,
+  SQL_SOURCE_GROUP_ADD,
   SQL_SOURCE_GROUP_ATTACHED,
   SQL_SOURCE_GROUP_LOCAL,
   SQL_SOURCE_GROUP_PKC,
@@ -55,11 +56,11 @@ import type {
 // 🔴 手持ちのファイルを開く(#854 段②)── main.ts と**同じ実物**を配線する
 import {
   readSqlLocalFileBytes,
-  registerSqlLocalFile,
+  pickSqlLocalFileInto,
   releaseSqlLocalFile,
   sqlLocalFileSize,
 } from '../../src/adapter/state/sql-local-file';
-import { SQL_PICK_LOCAL_FILE_VALUE } from '../../src/features/query/sql-local-file';
+import { SQL_ADD_LOCAL_FILE_VALUE, SQL_PICK_LOCAL_FILE_VALUE } from '../../src/features/query/sql-local-file';
 
 type SqlAnswer = {
   columns: string[];
@@ -127,15 +128,33 @@ function setup(
    * 🔴 **DuckDB で引く口**(#682 段②)。⚠ 実物は別ワーカーで走る ── ここは
    *   「**どんな相手で、どんな字で呼ばれたか**」と「**中身を読みに来たか**」を見る fake。
    */
-  const duckSeen: Array<{ sql: string; source: DuckDbReadableGuestSource; bytes: number | null }> = [];
+  const duckSeen: Array<{
+    sql: string;
+    /** 1 件目(= 今までの test が見ていた物)。 */
+    source: DuckDbReadableGuestSource;
+    bytes: number | null;
+    /** 🔴 並べた相手の全部と、その中身を読めた大きさ(#918 段⑦)。 */
+    all: DuckDbReadableGuestSource[];
+    allBytes: Array<number | null>;
+  }> = [];
   const runDuckDbSql = vi.fn(
     async (input: {
       sql: string;
-      source: DuckDbReadableGuestSource;
-      readBytes: () => Promise<Uint8Array | null>;
+      sources: readonly {
+        source: DuckDbReadableGuestSource;
+        readBytes: () => Promise<Uint8Array | null>;
+      }[];
     }) => {
-      const bytes = await input.readBytes();
-      duckSeen.push({ sql: input.sql, source: input.source, bytes: bytes?.byteLength ?? null });
+      const read = await Promise.all(input.sources.map((s) => s.readBytes()));
+      const first = input.sources[0];
+      if (first === undefined) throw new Error('相手が空で呼ばれた');
+      duckSeen.push({
+        sql: input.sql,
+        source: first.source,
+        bytes: read[0]?.byteLength ?? null,
+        all: input.sources.map((s) => s.source),
+        allBytes: read.map((b) => b?.byteLength ?? null),
+      });
       return { columns: ['g'], rows: [['duck']] as Array<Array<string | number | null>>, truncated: false, ms: 2 };
     },
   );
@@ -233,9 +252,8 @@ function setup(
       said.push(t);
     },
     // 🔴 main.ts と**同じ実物の配線**(#854 段②)── ここだけ fake にしない
-    pickSqlLocalFile: (file: File) => {
-      const lid = registerSqlLocalFile(file);
-      d.dispatch({ type: 'SET_SQL_SOURCE', lid, name: file.name });
+    pickSqlLocalFile: (file: File, add?: boolean) => {
+      pickSqlLocalFileInto(d, file, add === true);
     },
   });
   d.dispatch({
@@ -3901,5 +3919,342 @@ describe('🔴 調べる相手の選び所(#992)', () => {
     pickLocalFile(new File([new Uint8Array(10)], 'tegara.csv'));
     await settle();
     expect(said, '電波が要らない相手にまで知らせている').toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **複数の file を並べて、1 つの SQL で引く**(#918 段⑦。Gemini 裁定 2026-10-01)。
+ *
+ * ## user の物語(ここを見る)
+ *
+ * ①取り込んだ `売上.csv` を選ぶ ②調べる相手の一覧の**末尾**「もう 1 つ足す…」から
+ * 添付か手持ちの file を足す ③案内が「いま調べているのは 売上 / … の N つの表です」と言い直す
+ * ④走らせると**全部の file が器へ届く** ⑤足した相手の **×** で外せる(片道にしない)
+ * ⑥足す / 外す / 選び直すと、**作った表は消える**と字で言っている(確認は出さない)。
+ *
+ * ⚠ ここが見るのは**画面と配線**(控えの手放しも含む)。名前の規則は
+ * `tests/features/sql-multi-source.test.ts`、器は `tests/adapter/duckdb-runner-multi.test.ts`、
+ * 実物の engine で JOIN できることは `tests/duckdb-write.test.ts` が見る。
+ */
+describe('🔴 複数の file を並べて引く(#918 段⑦)', () => {
+  const groups = (sel: HTMLSelectElement): string[] =>
+    [...sel.querySelectorAll('optgroup')].map((g) => g.label);
+  const optionValues = (sel: HTMLSelectElement): string[] =>
+    [...sel.querySelectorAll('option')].map((o) => o.value);
+  const chips = (pane: HTMLElement): string[] =>
+    [...pane.querySelectorAll('[data-pkc-field="sql-extra"]')].map(
+      (e) => e.querySelector('[data-pkc-field="sql-extra-name"]')?.textContent ?? '',
+    );
+  const dropBtn = (pane: HTMLElement, lid: string): HTMLButtonElement | null =>
+    pane.querySelector<HTMLButtonElement>(`[data-pkc-action="remove-sql-source"][data-pkc-sql-source="${lid}"]`);
+  const extrasHost = (pane: HTMLElement): HTMLElement =>
+    pane.querySelector<HTMLElement>('[data-pkc-field="sql-extras"]')!;
+
+  /** 「もう 1 つ足す…」から添付を足す。 */
+  const addAttached = (s: ReturnType<typeof setup>, lid: string): void => {
+    s.sourceSel.selectedIndex = [...s.sourceSel.options].findIndex((o) => o.value === `add:${lid}`);
+    s.sourceSel.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  /** 「手持ちのファイルを足す…」→ file を選ぶ(実機の 2 段と同じ)。 */
+  const addLocal = (s: ReturnType<typeof setup>, file: File): void => {
+    s.sourceSel.selectedIndex = [...s.sourceSel.options].findIndex((o) => o.value === SQL_ADD_LOCAL_FILE_VALUE);
+    s.sourceSel.dispatchEvent(new Event('change', { bubbles: true }));
+    Object.defineProperty(s.fileInput, 'files', { value: [file], configurable: true });
+    s.fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  /** 足せなかった / 外した / 選び直したときに出る「手放して」の合図を控える。 */
+  const releases = (d: Dispatcher): string[][] => {
+    const seen: string[][] = [];
+    d.onEvent((e) => {
+      if (e.type === 'REQUEST_SQL_EXTRA_RELEASE') seen.push([...e.lids]);
+    });
+    return seen;
+  };
+
+  it('🔴 足す口は一覧の末尾。1 件目が DuckDB で読める相手のときだけ出る(出せない形では出さない)', async () => {
+    const s = setup();
+    // 何も選んでいない(この PKC のノート)/ sqlite を選んでいる ── 足す口は無い
+    expect(groups(s.sourceSel), 'ノートを調べているのに足す口が出ている').not.toContain(SQL_SOURCE_GROUP_ADD);
+    s.pick('db1');
+    await settle();
+    expect(groups(s.sourceSel), 'sqlite を調べているのに足す口が出ている').not.toContain(SQL_SOURCE_GROUP_ADD);
+    expect(optionValues(s.sourceSel).some((v) => v.startsWith('add:') || v === SQL_ADD_LOCAL_FILE_VALUE)).toBe(false);
+    // csv を選ぶと出る ── そして**末尾**
+    s.pick('db4');
+    await settle();
+    const gs = groups(s.sourceSel);
+    expect(gs[gs.length - 1], '足す口が一覧の末尾に無い').toBe(SQL_SOURCE_GROUP_ADD);
+    const vals = optionValues(s.sourceSel);
+    expect(vals).toContain('add:db7');
+    expect(vals).toContain('add:db8');
+    expect(vals).toContain(SQL_ADD_LOCAL_FILE_VALUE);
+    // 自分自身は足せない相手に並ばない
+    expect(vals).not.toContain('add:db4');
+    // 🔴 足せない形(.sqlite)は薄い字で理由つき ── 消さない(在るのに出てこない、にしない)
+    const sqliteOpt = s.sourceSel.querySelector<HTMLOptionElement>('option[value="add:db1"]');
+    expect(sqliteOpt, '.sqlite の添付が足す口から消えている').not.toBeNull();
+    expect(sqliteOpt?.disabled).toBe(true);
+    expect(sqliteOpt?.textContent).toContain('DuckDB では読めない');
+    // 選び所は 1 件目を指したまま
+    expect(s.sourceSel.value).toBe('db4');
+  });
+
+  it('🔴 添付を足す:相手が 2 つになり、案内が名前を並べ、DuckDB 固定になり、走らせると全部が器へ届く', async () => {
+    const s = setup();
+    s.pick('db4'); // 売上.csv
+    await settle();
+    // 足す前:今までどおり(内蔵の sqlite で、表は csv)
+    expect(s.tipText()).toContain('この file に在る表: csv');
+    expect(extrasHost(s.pane).hidden, '足していないのに行が出ている').toBe(true);
+    s.runDuckDbSql.mockClear();
+    addAttached(s, 'db7'); // 売上.parquet(同じ stem)
+    await settle();
+    expect(s.sourceSel.value, '足したら選び所が 1 件目から動いた').toBe('db4');
+    expect(chips(s.pane)).toEqual(['売上.parquet(表 売上_2)']);
+    expect(extrasHost(s.pane).hidden).toBe(false);
+    // 🔴 案内:裁定の字(名前を並べる)+ 同名は _2
+    expect(s.tipText()).toContain('いま調べているのは 売上 / 売上_2 の 2 つの表です');
+    expect(s.tipText(), '足したのに 1 件のときの表の名前 csv を言っている').not.toContain('在る表: csv');
+    // 🔴 engine は DuckDB 固定(sqlite を選んでいた人も)
+    expect(s.engineSel.value).toBe('duckdb');
+    expect(s.engineSel.querySelector<HTMLOptionElement>('option[value="sqlite"]')?.disabled).toBe(true);
+    expect(s.engineSel.querySelector<HTMLOptionElement>('option[value="sqlite"]')?.textContent).toContain('DuckDB だけ');
+    // 走らせる:全部の相手が 1 本の呼び出しで届く(sqlite へは行かない)
+    s.type('FROM 売上 SELECT 1');
+    s.runBtn.click();
+    await settle();
+    expect(s.runReadOnlySql, 'sqlite へ飛んでいる').toHaveBeenCalledTimes(0);
+    expect(s.runDuckDbSql).toHaveBeenCalledTimes(1);
+    const seen = s.duckSeen[s.duckSeen.length - 1]!;
+    expect(seen.all.map((x) => x.name)).toEqual(['売上.csv', '売上.parquet']);
+    expect(seen.all.map((x) => x.kind)).toEqual(['csv', 'parquet']);
+    expect(seen.allBytes, '足した相手の中身が読めていない').toEqual([4, 4]);
+    // 足した相手は、足した一覧から外れる(もう並べてある)
+    expect(optionValues(s.sourceSel)).not.toContain('add:db7');
+  });
+
+  it('🔴 1 件のときの呼び出しは今までどおり(相手は 1 つだけ)── 足さない人の画面は動かない', async () => {
+    const s = setup();
+    s.pick('db4');
+    await settle();
+    s.pickEngine('duckdb');
+    s.type('FROM csv SELECT 1');
+    s.runBtn.click();
+    await settle();
+    expect(s.duckSeen[0]?.all.map((x) => x.name)).toEqual(['売上.csv']);
+  });
+
+  it('🔴 ×で外せる(片道にしない)── 外すと 1 件のときの案内・engine の選び所・呼び出しへ戻る', async () => {
+    const s = setup();
+    s.pick('db4');
+    await settle();
+    addAttached(s, 'db7');
+    await settle();
+    const drop = dropBtn(s.pane, 'db7');
+    expect(drop, '足した相手に × が無い').not.toBeNull();
+    expect(drop?.textContent).toBe('×');
+    drop!.click();
+    await settle();
+    expect(chips(s.pane)).toEqual([]);
+    expect(extrasHost(s.pane).hidden, '外したのに行が残っている').toBe(true);
+    expect(s.tipText(), '外したのに案内が 1 件のときへ戻らない').toContain('この file に在る表: csv');
+    expect(s.engineSel.querySelector<HTMLOptionElement>('option[value="sqlite"]')?.disabled, 'sqlite を選べないまま').toBe(false);
+    // 外した相手は、また足せる側へ戻る
+    expect(optionValues(s.sourceSel)).toContain('add:db7');
+    s.pickEngine('duckdb');
+    s.type('FROM csv SELECT 1');
+    s.runBtn.click();
+    await settle();
+    expect(s.duckSeen[s.duckSeen.length - 1]?.all.map((x) => x.name)).toEqual(['売上.csv']);
+  });
+
+  it('🔴 足す / 外すと、出ていた答えは消える(別の file の組の話になる)', async () => {
+    const s = setup();
+    s.pick('db4');
+    await settle();
+    s.pickEngine('duckdb');
+    s.type('FROM csv SELECT 1');
+    s.runBtn.click();
+    await settle();
+    expect(s.cells().length, '前提:答えが出ていない').toBeGreaterThan(0);
+    addAttached(s, 'db7');
+    await settle();
+    expect(s.cells(), '足したのに前の組の答えが残っている').toEqual([]);
+    s.type('FROM 売上 SELECT 1');
+    s.runBtn.click();
+    await settle();
+    expect(s.cells().length).toBeGreaterThan(0);
+    dropBtn(s.pane, 'db7')!.click();
+    await settle();
+    expect(s.cells(), '外したのに前の組の答えが残っている').toEqual([]);
+  });
+
+  it('🔴 走っている最中に足したら、遅れて届いた前の組の答えは捨てる', async () => {
+    const s = setup();
+    s.pick('db4');
+    await settle();
+    s.pickEngine('duckdb');
+    let finish: (() => void) | null = null;
+    s.runDuckDbSql.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = () => resolve({ columns: ['old'], rows: [['前の組']], truncated: false, ms: 1 });
+        }),
+    );
+    s.type('FROM csv SELECT 1');
+    s.runBtn.click();
+    await settle();
+    addAttached(s, 'db7');
+    await settle();
+    (finish as (() => void) | null)?.();
+    await settle();
+    expect(s.cells(), '足した後に、前の組の答えを受けている').toEqual([]);
+    expect(s.runBtn.disabled, '「走らせています…」のまま止まっている').toBe(false);
+  });
+
+  it('🔴 上限 4:4 つ並んだら足す口が消え、理由を言う。5 つ目は断りの字(黙って足さない)', async () => {
+    const s = setup();
+    s.pick('db4');
+    await settle();
+    for (const lid of ['db5', 'db6', 'db7']) {
+      addAttached(s, lid);
+      await settle();
+    }
+    expect(chips(s.pane)).toHaveLength(3);
+    expect(groups(s.sourceSel), '上限なのに足す口が出ている').not.toContain(SQL_SOURCE_GROUP_ADD);
+    expect(extrasHost(s.pane).textContent).toContain('4 つまで');
+    s.d.dispatch({ type: 'ADD_SQL_SOURCE', lid: 'db8', name: '明細.ndjson' });
+    await settle();
+    expect(chips(s.pane), '5 つ目が足せてしまっている').toHaveLength(3);
+    expect(s.note()).toContain('4 つまで');
+    // 外すと、また足せる
+    dropBtn(s.pane, 'db6')!.click();
+    await settle();
+    expect(groups(s.sourceSel)).toContain(SQL_SOURCE_GROUP_ADD);
+  });
+
+  it('🔴 .xlsx / .sqlite は 2 件目として足せない(理由を 1 行)── 足した扱いにならず、控えも手放す', async () => {
+    const s = setup();
+    const seen = releases(s.d);
+    s.pick('db4');
+    await settle();
+    // 手持ちの .xlsx を足そうとする(選び所では薄い字だが、file 選択画面は何でも選べる)
+    addLocal(s, new File([new Uint8Array(8)], '帳簿.xlsx'));
+    await settle();
+    expect(chips(s.pane), '.xlsx が足せてしまっている').toEqual([]);
+    expect(s.note()).toContain('帳簿.xlsx は DuckDB で読めないので足せません');
+    expect(s.engineSel.value, '足せていないのに engine が動いた').toBe('sqlite');
+    // 🔴 断った file の控えは手放す(File を握ったまま残さない)
+    expect(seen).toHaveLength(1);
+    expect(await readSqlLocalFileBytes(seen[0]![0]!), '断った file の控えが残っている').toBeNull();
+    // .sqlite も同じ
+    addLocal(s, new File([new Uint8Array(8)], '別.sqlite'));
+    await settle();
+    expect(s.note()).toContain('別.sqlite は DuckDB で読めないので足せません');
+    expect(chips(s.pane)).toEqual([]);
+  });
+
+  it('🔴 手持ちの file を足す:2 件目を足しても 1 件目が読める / 外すとその控えだけ手放す', async () => {
+    const s = setup();
+    const seen = releases(s.d);
+    s.pickLocalFile(new File([new Uint8Array(10)], 'ほか.csv'));
+    await settle();
+    addLocal(s, new File([new Uint8Array(20)], '在庫.parquet'));
+    await settle();
+    addLocal(s, new File([new Uint8Array(30)], '客.json'));
+    await settle();
+    expect(chips(s.pane)).toEqual(['在庫.parquet(表 在庫)', '客.json(表 客)']);
+    expect(s.tipText()).toContain('いま調べているのは ほか / 在庫 / 客 の 3 つの表です');
+    s.type('FROM ほか SELECT 1');
+    s.runBtn.click();
+    await settle();
+    // 🔴 3 つとも読めている(1 件目が、足した 2 件に消されていない)
+    expect(s.duckSeen[s.duckSeen.length - 1]?.allBytes).toEqual([10, 20, 30]);
+    // 外す → その 1 件の控えだけ手放す
+    dropBtn(s.pane, s.d.getState().sqlPage.extraGuests[0]!.lid)!.click();
+    await settle();
+    expect(seen).toHaveLength(1);
+    expect(await readSqlLocalFileBytes(seen[0]![0]!), '外した file の控えが残っている').toBeNull();
+    s.type('FROM ほか SELECT 2');
+    s.runBtn.click();
+    await settle();
+    expect(s.duckSeen[s.duckSeen.length - 1]?.allBytes, '外していない file が読めなくなった').toEqual([10, 30]);
+  });
+
+  it('🔴 1 件目を選び直すと、足した相手は全部外れ、手持ちの file の控えも全部手放す', async () => {
+    const s = setup();
+    const seen = releases(s.d);
+    s.pick('db4');
+    await settle();
+    addLocal(s, new File([new Uint8Array(20)], '在庫.parquet'));
+    await settle();
+    addAttached(s, 'db7');
+    await settle();
+    const lids = s.d.getState().sqlPage.extraGuests.map((g) => g.lid);
+    expect(lids).toHaveLength(2);
+    s.pick('db6'); // 1 件目を選び直す
+    await settle();
+    expect(s.d.getState().sqlPage.extraGuests, '選び直したのに足した相手が残っている').toEqual([]);
+    expect(extrasHost(s.pane).hidden).toBe(true);
+    expect(seen.flat(), '足した相手の控えを手放していない').toEqual(expect.arrayContaining(lids));
+    expect(await readSqlLocalFileBytes(lids[0]!), '手持ちの file の控えが残っている').toBeNull();
+  });
+
+  it('🔴 消える扱い(設問 2 = B):確認は出さず、字で言う(通った直後の 1 行と案内文)', async () => {
+    const s = setup();
+    s.pick('db4');
+    await settle();
+    addAttached(s, 'db7');
+    await settle();
+    // 確認の窓は出ない(足したその場で反映される)
+    expect(chips(s.pane)).toHaveLength(1);
+    expect(document.querySelector('dialog[open]'), '確認の窓が出ている').toBeNull();
+    // 打つ前の約束に書いてある
+    expect(s.rules()).toContain('足したり外したりすると、作った表は消えます');
+    // 表を作った直後の 1 行にも出る
+    s.runDuckDbSql.mockResolvedValueOnce({ columns: ['Count'], rows: [[2]], truncated: false, ms: 3 });
+    s.type('CREATE TABLE t AS SELECT 1');
+    s.runBtn.click();
+    await settle();
+    expect(s.note()).toContain('作った表はウィンドウを閉じると消えます');
+    expect(s.note()).toContain('足したり外したりすると、作った表は消えます');
+  });
+
+  it('🔴 2 件以上のとき、構造をノートへ / つながり図は「まだ出せません」(頼まない)', async () => {
+    const s = setup();
+    s.pick('db4');
+    await settle();
+    addAttached(s, 'db7');
+    await settle();
+    s.runReadOnlySql.mockClear();
+    s.schemaBtn.click();
+    await settle();
+    expect(s.note()).toContain('まだ出せません');
+    expect(s.runReadOnlySql, '採れないのに sqlite へ頼んでいる').toHaveBeenCalledTimes(0);
+    expect(s.persisted, '構造のノートが書かれている').toEqual([]);
+    // 図を開く
+    s.pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-er-toggle"]')!.click();
+    await settle();
+    expect(s.pane.querySelector('[data-pkc-region="sql-er"]')?.textContent).toContain('まだ出せません');
+  });
+
+  it('🔴 足した相手の名前(日本語)が、× の読み上げ名と答えの上の行に出る(画面と実体が同じ名前)', async () => {
+    const s = setup();
+    s.pick('db4');
+    await settle();
+    addAttached(s, 'db8');
+    await settle();
+    expect(dropBtn(s.pane, 'db8')?.getAttribute('aria-label')).toBe('明細.ndjson を外す');
+    expect(s.note()).toContain('売上.csv / 明細.ndjson を並べて調べています(表 2 個)');
+  });
+
+  it('電波が要る相手(parquet / json)を足したら、足した直後に言う(選んだ道と同じ知らせ)', async () => {
+    const s = setup();
+    s.pick('db4');
+    await settle();
+    expect(s.said).toEqual([]);
+    addAttached(s, 'db7');
+    await settle();
+    expect(s.said).toEqual([DUCKDB_NETWORK_NOTE]);
   });
 });

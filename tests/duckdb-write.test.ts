@@ -31,8 +31,9 @@ import { dirname, join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { DUCKDB_SEAL_SQL, duckDbFileNameOf, duckDbLoadSql } from '../src/adapter/platform/duckdb/duckdb-runner';
 import { duckDbReadableSourceOf } from '../src/features/query/sql-guest-source';
-import { checkDuckDbRunSql, duckDbWriteKind, duckDbWriteNote } from '../src/features/query/duckdb-write';
+import { checkDuckDbRunSql, DUCKDB_TABLE_RESET, duckDbWriteKind, duckDbWriteNote } from '../src/features/query/duckdb-write';
 import { duckDbTable, type DuckDbRaw } from '../src/features/query/duckdb-rows';
+import { duckDbTableNamesOf } from '../src/features/query/sql-multi-source';
 
 const require = createRequire(import.meta.url);
 const DIST = dirname(require.resolve('@duckdb/duckdb-wasm/dist/duckdb-eh.wasm'));
@@ -71,7 +72,13 @@ function run(input: string): { raw: DuckDbRaw; note: string } {
   return { raw, note: kind === null ? '' : duckDbWriteNote(kind, t.columns, t.rows) };
 }
 
-beforeAll(async () => {
+/** 実物の engine を起こす(node 版)。⚠ 器を塞ぐと二度と開けられないので、**シナリオごとに 1 つ**起こす。 */
+interface DuckDbLike {
+  instantiate: () => Promise<unknown>;
+  connect: () => Conn;
+  registerFileBuffer: (name: string, bytes: Uint8Array) => void;
+}
+async function newDb(): Promise<DuckDbLike> {
   const mod = (await import(/* @vite-ignore */ join(DIST, 'duckdb-node-blocking.cjs'))) as unknown as {
     default?: Record<string, unknown>;
   };
@@ -79,11 +86,7 @@ beforeAll(async () => {
     ConsoleLogger: new (l: unknown) => unknown;
     LogLevel: { ERROR: unknown };
     NODE_RUNTIME: unknown;
-    createDuckDB: (b: unknown, l: unknown, r: unknown) => Promise<{
-      instantiate: () => Promise<unknown>;
-      connect: () => Conn;
-      registerFileBuffer: (name: string, bytes: Uint8Array) => void;
-    }>;
+    createDuckDB: (b: unknown, l: unknown, r: unknown) => Promise<DuckDbLike>;
   };
   const db = await duck.createDuckDB(
     {
@@ -94,6 +97,11 @@ beforeAll(async () => {
     duck.NODE_RUNTIME,
   );
   await db.instantiate();
+  return db;
+}
+
+beforeAll(async () => {
+  const db = await newDb();
   const c = db.connect();
   conn = c;
   /**
@@ -118,7 +126,7 @@ describe('🔴 塞いだ後の器で、書き込みの 5 形が動く(実物の 
   it('🔴 CREATE TABLE(AS 無し)── 0 行を返し、「実行しました」と言う', () => {
     const { raw, note } = run('CREATE TABLE memo (k INT, v TEXT)');
     expect(raw.rows).toHaveLength(0);
-    expect(note).toBe('実行しました ── 作った表はウィンドウを閉じると消えます');
+    expect(note).toBe(`実行しました ── 作った表はウィンドウを閉じると消えます。${DUCKDB_TABLE_RESET}`);
   });
 
   it('🔴 INSERT ── 件数が返り、入れた行が引ける', () => {
@@ -145,7 +153,7 @@ describe('🔴 塞いだ後の器で、書き込みの 5 形が動く(実物の 
 
   it('🔴 CREATE TABLE … AS SELECT ── 写した表から作れる(件数つき)', () => {
     const { note } = run('CREATE TABLE copy_of_csv AS SELECT * FROM csv WHERE id >= 2');
-    expect(note).toBe('2 行に効きました ── 作った表はウィンドウを閉じると消えます');
+    expect(note).toBe(`2 行に効きました ── 作った表はウィンドウを閉じると消えます。${DUCKDB_TABLE_RESET}`);
     expect(duckDbTable(ask('SELECT id FROM copy_of_csv ORDER BY id')).rows).toEqual([[2], [3]]);
   });
 
@@ -172,5 +180,83 @@ describe('🔴 塞いだ後の器で、書き込みの 5 形が動く(実物の 
       expect(() => ask(sql), `塞いだのに通った: ${sql}`).toThrow(/Permission|disabled/u);
     }
     expect(() => ask('SELECT * FROM leak')).toThrow();
+  });
+});
+
+/**
+ * 🔴 **2 つの file を 1 つの器へ並べて、1 つの SQL で JOIN する**(#918 段⑦。実物の engine)。
+ *
+ * ⚠ 製品(`DuckDbRunner.load`)と**同じ順番・同じ名前**で器を作る:
+ *   全部の file を差し込んで写す → **最後に 1 度だけ塞ぐ** → user の字。
+ *   名前は `duckDbTableNamesOf`(画面の案内と**同じ 1 本**)から取る ── 画面に出る名前で引けること。
+ * ⚠ node と実ブラウザは別の経路(冒頭)── 画面から打って通るのは smoke が見る。
+ */
+describe('🔴 2 つの file を並べて、JOIN で突き合わせられる(実物の engine)', () => {
+  let multi: Conn | null = null;
+  const q = (sql: string): DuckDbRaw => {
+    const table = (multi as Conn).query(sql);
+    const columns = table.schema.fields.map((f) => f.name);
+    return {
+      columns,
+      types: table.schema.fields.map((f) => String(f.type)),
+      rows: table.toArray().map((r) => {
+        const o = r.toJSON();
+        return columns.map((c) => o[c]);
+      }),
+    };
+  };
+
+  beforeAll(async () => {
+    const db = await newDb();
+    const c = db.connect();
+    multi = c;
+    const files = [
+      { lid: 'a', name: '売上.csv', text: '品番,数\nA1,3\nB2,5\nC3,7\n' },
+      { lid: 'b', name: '2024-在庫.tsv', text: '品番\t在庫\nA1\t100\nC3\t30\nD4\t9\n' },
+    ];
+    const sources = files.map((f) => {
+      const s = duckDbReadableSourceOf(f.lid, f.name);
+      if (s === null) throw new Error(`前提が崩れている(${f.name})`);
+      return s;
+    });
+    const tables = duckDbTableNamesOf(sources);
+    sources.forEach((s, i) => {
+      const file = duckDbFileNameOf(s, i);
+      db.registerFileBuffer(file, new TextEncoder().encode(files[i]!.text));
+      c.query(duckDbLoadSql(s, file, tables[i]));
+    });
+    c.query(DUCKDB_SEAL_SQL);
+  }, 120_000);
+
+  it('🔴 表の名前は file 名から(csv ではない)。数字で始まる名前は _ が付く', () => {
+    const names = duckDbTable(q("SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' ORDER BY table_name")).rows.map((r) => r[0]);
+    expect(names).toEqual(['_2024_在庫', '売上']);
+  });
+
+  it('🔴 2 つの表を JOIN した結果が返る(両方の file の列が 1 行に並ぶ)', () => {
+    const r = duckDbTable(
+      q('SELECT 売上.品番 AS 品番, 売上.数 AS 数, _2024_在庫.在庫 AS 在庫 FROM 売上 JOIN _2024_在庫 ON 売上.品番 = _2024_在庫.品番 ORDER BY 売上.品番'),
+    );
+    expect(r.columns).toEqual(['品番', '数', '在庫']);
+    expect(r.rows).toEqual([
+      ['A1', 3, 100],
+      ['C3', 7, 30],
+    ]);
+  });
+
+  it('🔴 どの file の行かは _note / _lid の列で分かる(csv / tsv の表)', () => {
+    const r = duckDbTable(q('SELECT DISTINCT _note, _lid FROM _2024_在庫'));
+    expect(r.rows).toEqual([['2024-在庫.tsv', 'b']]);
+  });
+
+  it('🔴 塞ぎは 2 件を並べた後でも効いている(外へは出られない / file を読み直せない)', () => {
+    expect(() => q("SELECT * FROM read_csv_auto('source.csv')"), '塞いだのに file を読み直せる').toThrow();
+    expect(() => q("SELECT * FROM read_csv_auto('source_2.tsv')"), '2 件目の file を読み直せる').toThrow();
+    expect(() => q("SELECT * FROM read_csv_auto('https://example.com/a.csv')")).toThrow(/Permission|disabled/u);
+  });
+
+  it('作った表を JOIN に使える(書き込みと並べるが両立する)', () => {
+    q('CREATE TABLE 結果 AS SELECT 売上.品番 AS 品番 FROM 売上 JOIN _2024_在庫 USING (品番)');
+    expect(duckDbTable(q('SELECT count(*) AS n FROM 結果')).rows).toEqual([[2]]);
   });
 });

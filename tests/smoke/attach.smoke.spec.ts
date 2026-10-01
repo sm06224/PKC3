@@ -1616,11 +1616,12 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
    *   飛んで aside 面(`sql`)から detail へ戻される(上の下ごしらえのコメント)。
    */
   await expect(
-    source.locator('option', { hasText: 'uriage.xlsx' }),
+    // 🔴 「もう 1 つ足す…」の仕切りにも同じ名前が出る(#918 段⑦)── 数えるのは**添付の仕切り**の中だけ
+    source.locator('optgroup[label="添付"] option', { hasText: 'uriage.xlsx' }),
     '.csv の下に .xlsx が並んでいない',
   ).toHaveCount(1);
   // 🔴 **`.xlsx` は `.csv` の下**(#854 段①②③、`paintSource` の並び順)
-  const optionLabels = await source.locator('option').allTextContents();
+  const optionLabels = await source.locator('optgroup:not([label="もう 1 つ足す…"]) option').allTextContents();
   const csvIndex = optionLabels.indexOf('uriage.csv');
   const xlsxIndex = optionLabels.indexOf('uriage.xlsx');
   expect(csvIndex, '.csv が選び所に見つからない').toBeGreaterThanOrEqual(0);
@@ -1786,7 +1787,7 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
    * 🔴 **`.parquet` は選び所のいちばん下**(#682 段④c)── `.xlsx` より後ろに並ぶ。
    * ⚠ 「在る」と「その位置に在る」は別の主張である(上の `.xlsx` 対 `.csv` と同じ形)。
    */
-  const labelsWithParquet = await source.locator('option').allTextContents();
+  const labelsWithParquet = await source.locator('optgroup:not([label="もう 1 つ足す…"]) option').allTextContents();
   const idxXlsx = labelsWithParquet.indexOf('uriage.xlsx');
   const idxParquet = labelsWithParquet.indexOf('uriage.parquet');
   const idxJson = labelsWithParquet.indexOf('meisai.json');
@@ -1923,6 +1924,92 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   // ⚠ 数だけでなく**中身が元と同じ**(2 行 = 元の json の行数)── 空の表でも 0 行を返すので
   await expect(sqlTable.locator('tbody td'), '作った表の行数が合わない').toHaveText(['2']);
   await expect(note, '引いた後に、書き込みの知らせが残っている').not.toContainText('消えます');
+
+  /**
+   * ⑤-f 🔴 **2 つの file を並べて、1 つの SQL で JOIN する**(#918 段⑦。Gemini 裁定 2026-10-01)。
+   *
+   * ## 🔑 ここでしか言えないこと
+   *
+   * ⚠ unit は「足した相手が全部、1 本の呼び出しで届く」「器を作り直す」までで、
+   *   **実ブラウザの DuckDB が、2 つの file を差し込んで両方を表へ写し、外を 1 度だけ塞いだ後で
+   *   JOIN できる**ことは言えない(`tests/duckdb-write.test.ts` は node の別の経路である)。
+   * 🔴 そして**足したら作った表が消える**(裁定 B = 確認を出さず字で言う)ことも、実物の器で見る。
+   *
+   * 🔑 **新しい起動は増やさない**(#820)── ⑤-e の続き(相手は `meisai.json`、作った表 `made` が在る)。
+   * ⚠ **観測点は「答えの表」を待ってから読む**(`toHaveText` で待つ形)── 直前の答えの表が
+   *   残っているうちに読むと、前の答えを読んで通ってしまう(2026-10-01 に直した罠と同じ)。
+   */
+  const addGroup = source.locator('optgroup[label="もう 1 つ足す…"]');
+  await expect(addGroup, '「もう 1 つ足す…」が相手の一覧に無い').toHaveCount(1);
+  expect(
+    await source.locator('optgroup').evaluateAll((gs) => (gs[gs.length - 1] as HTMLOptGroupElement).label),
+    '「もう 1 つ足す…」が一覧の末尾に無い',
+  ).toBe('もう 1 つ足す…');
+  // 🔴 足せない形(.xlsx)は薄い字で理由つき(消えていない / 選べない)
+  const xlsxAdd = addGroup.locator('option', { hasText: 'uriage.xlsx' });
+  await expect(xlsxAdd, '.xlsx が足す口から消えている(理由つきの薄い字のはず)').toHaveCount(1);
+  expect(await xlsxAdd.evaluate((o) => (o as HTMLOptionElement).disabled), '.xlsx を足せてしまう').toBe(true);
+  await expect(xlsxAdd).toContainText('DuckDB では読めない');
+  // ⚠ 同じ名前が「添付」の仕切りにも在る ── 足す口の中の物を value で名指しする
+  const addParquetValue = await addGroup
+    .locator('option', { hasText: 'uriage.parquet' })
+    .first()
+    .getAttribute('value');
+  expect(addParquetValue, '足す口に uriage.parquet が無い').toMatch(/^add:/u);
+  await source.selectOption({ value: addParquetValue ?? '' });
+  const extraRow = page.locator('[data-pkc-field="sql-extra"]');
+  await expect(extraRow, '足した相手の行が出ない').toHaveCount(1);
+  await expect(extraRow, '足した相手の表の名前(file の名前から)が出ていない').toContainText(
+    'uriage.parquet(表 uriage)',
+  );
+  await expect(
+    page.locator('[data-pkc-field="sql-tip"]'),
+    '案内が名前を並べ直していない',
+  ).toContainText('いま調べているのは meisai / uriage の 2 つの表です');
+  await expect(note, '足した直後に「何を調べているか」を言い直していない').toContainText(
+    'meisai.json / uriage.parquet を並べて調べています',
+  );
+  // 選び所は 1 件目(meisai.json)を指したまま ── 足しても居座らない
+  expect(await source.evaluate((s) => (s as HTMLSelectElement).selectedOptions[0]?.textContent)).toBe('meisai.json');
+  // 🔴 足したら、作った表は消えている(器を作り直した)── 字で言っていた約束を実物で見る
+  // ⚠ 存在しない表を `FROM made` と打たない ── DuckDB の worker は断りを console に出すので、
+  //   末尾の「ページが吐いたエラーが 0 件」の見張りに**意図した断りが掛かる**。目録で数える
+  await page.fill(
+    '[data-pkc-field="sql-input"]',
+    "SELECT count(*) AS n FROM duckdb_tables() WHERE table_name = 'made'",
+  );
+  await clickReal(page, '[data-pkc-action="run-sql"]');
+  await expect(
+    sqlTable.locator('tbody td'),
+    '足したのに、作った表がまだ在る(器を作り直していない)',
+  ).toHaveText(['0'], { timeout: 60_000 });
+  // 🔴 2 つの表を JOIN で突き合わせる(両方の file の列が 1 行に並ぶ)
+  await page.fill(
+    '[data-pkc-field="sql-input"]',
+    'SELECT meisai.shinamono AS m, uriage.shinamono AS u FROM meisai JOIN uriage USING (id) ORDER BY id',
+  );
+  await clickReal(page, '[data-pkc-action="run-sql"]');
+  await expect(sqlTable.locator('thead th'), 'JOIN の答えの列が出ない').toHaveText(['m', 'u'], {
+    timeout: 60_000,
+  });
+  // ⚠ 総当たり(行数の掛け算)ではなく、id で突き合わさっていること(2 行 × 3 行 = 6 ではない)
+  await expect(sqlTable.locator('tbody td'), 'JOIN の中身が合わない').toHaveText([
+    'ringo',
+    'ringo',
+    'mikan',
+    'mikan',
+  ]);
+  // 🔴 × で外せる(片道にしない)── 外すと 1 件のときへ戻る
+  await extraRow.locator('[data-pkc-action="remove-sql-source"]').click();
+  await expect(extraRow, '× を押しても外れない').toHaveCount(0);
+  await expect(page.locator('[data-pkc-field="sql-tip"]'), '外したのに案内が戻らない').not.toContainText(
+    '2 つの表です',
+  );
+  await page.fill('[data-pkc-field="sql-input"]', 'SELECT count(*) AS n FROM json');
+  await clickReal(page, '[data-pkc-action="run-sql"]');
+  await expect(sqlTable.locator('tbody td'), '外した後に、1 件のときの表の名前(json)で引けない').toHaveText(['2'], {
+    timeout: 60_000,
+  });
 
   /**
    * ⚠ **外へ出ていない**(段② の柱)── localhost 以外への要求が 1 件も無いこと。
@@ -2075,17 +2162,20 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
    * 🔑 **新しい起動は増やしていない**(#820 の規律)── ⑦ が開いたままの
    *   同じ SQL の面の道中に続ける(`gotoApp` / `page.goto` を足さない)。
    *
-   * ⚠ ここまでに**走らせた字**(= 履歴に積まれた字。新しい順。**全 10 件**):
+   * ⚠ ここまでに**走らせた字**(= 履歴に積まれた字。新しい順。**全 13 件**):
    *   1. `SELECT * FROM csv`(⑥/⑦。⚠ ⑦ は直前と同じなので積まれない)
-   *   2. 🔴 `SELECT count(*) AS n FROM made`(⑤-e。#918 段⑧)
-   *   3. 🔴 `CREATE TABLE made AS SELECT * FROM json`(⑤-e。#918 段⑧。⚠ 書き込みも積まれる)
-   *   4. 🔴 `FROM json SELECT * LIMIT 20`(⑤-d。#682 段④c)
-   *   5. 🔴 `FROM parquet SELECT * LIMIT 20`(⑤-c。#682 段④c)
-   *   6. `SELECT * FROM sheet1`(⑤)
-   *   7. `SELECT * FROM xlsx_sheets`(⑤)
-   *   8. `select * from csv`(⑤-a2。図の表を押して組んだ字 ── **小文字なので別扱い**)
-   *   9. `SELECT * FROM csv`(④)
-   *  10. `SELECT extension_name FROM duckdb_extensions() …`(段④b の筋書き)
+   *   2. 🔴 `SELECT count(*) AS n FROM json`(⑤-f。#918 段⑦。外した後に 1 件のときの名前で引く)
+   *   3. 🔴 `SELECT meisai.shinamono AS m, uriage.shinamono AS u FROM meisai JOIN uriage …`(⑤-f。#918 段⑦)
+   *   4. 🔴 `SELECT count(*) AS n FROM duckdb_tables() WHERE table_name = 'made'`(⑤-f。足したら作った表が消える)
+   *   5. 🔴 `SELECT count(*) AS n FROM made`(⑤-e。#918 段⑧)
+   *   6. 🔴 `CREATE TABLE made AS SELECT * FROM json`(⑤-e。#918 段⑧。⚠ 書き込みも積まれる)
+   *   7. 🔴 `FROM json SELECT * LIMIT 20`(⑤-d。#682 段④c)
+   *   8. 🔴 `FROM parquet SELECT * LIMIT 20`(⑤-c。#682 段④c)
+   *   9. `SELECT * FROM sheet1`(⑤)
+   *  10. `SELECT * FROM xlsx_sheets`(⑤)
+   *  11. `select * from csv`(⑤-a2。図の表を押して組んだ字 ── **小文字なので別扱い**)
+   *  12. `SELECT * FROM csv`(④)
+   *  13. `SELECT extension_name FROM duckdb_extensions() …`(段④b の筋書き)
    *   ⚠ 断られた回(⑤-e の前の sqlite の `CREATE TABLE memo …`)は積まれない(走らせていない)
    *
    * 🔴 **この帳簿は、上の筋書きへ 1 つ足すたびに古くなる**(2026-09-16 に 2 度踏んだ)。
@@ -2120,18 +2210,18 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
    *   誰も鳴らない(CLAUDE.md §1「代替物で満たせない条件にする」)。
    */
   await expect(histNote, 'いま何番目かが出ていない(数が合わなければ上の帳簿を直す)').toContainText(
-    '前に打った字(1 / 10)',
+    '前に打った字(1 / 13)',
   );
   /**
    * 🔴 **2 度目の ↑ は、いま「2 番目に新しい字」である**(#682 段④c で 1 つ増えた)。
    * ⚠ 期待値を書き換えるとき、**上の帳簿も一緒に直す** ── 帳簿と assert が
    *   別々に古くなると、次に足した人はここで落ちても**どこを直すのか分からない**。
-   * 🔑 ⑤-e(DuckDB で表を作って引く。#918 段⑧)がいちばん新しいので、いまはその字。
+   * 🔑 ⑤-f(2 つの file を並べて引く。#918 段⑦)がいちばん新しいので、いまはその字。
    *   ⚠ この名指しは「**足した筋書きが本当に履歴へ積まれた**」の観測点でもある。
    */
   await page.keyboard.press('ArrowUp');
-  await expect(input, '2 度目の ↑ でさらに前へ遡らない(⑤-e の字が履歴に積まれていない)').toHaveValue(
-    'SELECT count(*) AS n FROM made',
+  await expect(input, '2 度目の ↑ でさらに前へ遡らない(⑤-f の字が履歴に積まれていない)').toHaveValue(
+    'SELECT count(*) AS n FROM json',
   );
   // 🔴 ↓ で新しいほうへ戻る
   await page.keyboard.press('ArrowDown');

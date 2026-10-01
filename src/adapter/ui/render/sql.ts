@@ -26,12 +26,27 @@ import type { AppState, SqlPageState } from '@adapter/state/app-state';
 import { sqlSourcesOf } from '@features/query/sqlite-attachment';
 import { sqlLineHtml } from '@features/query/sql-lines';
 import { paintSqlEr } from './sql-er';
-import { duckDbOnlySourcesOf, SQL_GUEST_EXTS } from '@features/query/sql-guest-source';
+import {
+  duckDbOnlySourcesOf,
+  isDuckDbReadableSource,
+  sqlGuestSourceOf,
+  SQL_GUEST_EXTS,
+} from '@features/query/sql-guest-source';
+import {
+  ADD_UNREADABLE_HINT,
+  duckDbTableNamesOfNames,
+  SQL_MAX_SOURCES,
+} from '@features/query/sql-multi-source';
 // 🔴 添付の .csv / .tsv / .xlsx も同じ選び所へ並べる(#854 段① / 段③)
 import { csvAttachmentSourcesOf } from '@features/query/csv-attachment';
 import { xlsxAttachmentSourcesOf } from '@features/query/xlsx-attachment';
 // 🔴 手持ちのファイルを開く(#854 段②)
-import { isSqlLocalFileLid, SQL_PICK_LOCAL_FILE_VALUE } from '@features/query/sql-local-file';
+import {
+  isSqlLocalFileLid,
+  SQL_ADD_LOCAL_FILE_VALUE,
+  SQL_ADD_SOURCE_PREFIX,
+  SQL_PICK_LOCAL_FILE_VALUE,
+} from '@features/query/sql-local-file';
 import { humanBytes } from '@features/human-bytes';
 import { sqlExampleText, sqlPlaceholder, sqlRulesText, sqlTipText } from '@features/query/sql-tip';
 import { duckDbWriteKind, duckDbWriteNote } from '@features/query/duckdb-write';
@@ -56,6 +71,13 @@ import {
 export const SQL_SOURCE_GROUP_PKC = 'この PKC';
 export const SQL_SOURCE_GROUP_ATTACHED = '添付';
 export const SQL_SOURCE_GROUP_LOCAL = '手持ちの file';
+/**
+ * 🔴 **「もう 1 つ足す…」の仕切り**(#918 段⑦。Gemini 裁定 2026-10-01 = 設問 1 は A)。
+ * ⚠ 並びは**いちばん最後**(一覧の末尾)。中身は「足せる添付」と「手持ちのファイルを足す…」。
+ */
+export const SQL_SOURCE_GROUP_ADD = 'もう 1 つ足す…';
+/** 手持ちの file を**足す**ほうの項目の字(`手持ちのファイルを開く…` の隣の物)。 */
+export const SQL_ADD_LOCAL_FILE_LABEL = '手持ちのファイルを足す…';
 
 const cellText = (v: string | number | null): string => (v === null ? '(なし)' : String(v));
 
@@ -92,6 +114,13 @@ export class SqlRenderer {
   private engine: HTMLSelectElement | null = null;
   /** 直前に組んだエンジンの選択肢の指紋(相手が変わったときだけ組み直す)。 */
   private engineKey: string | null = null;
+  /**
+   * 🔴 **足した相手の一覧**(#918 段⑦)。⚠ 足していなければ**畳む**(1px も場所を取らない ──
+   *   足さない人の画面は 1 件のときと 1 ドットも変わらない)。
+   */
+  private extras: HTMLElement | null = null;
+  /** 直前に組んだ足した相手の指紋(変わったときだけ組み直す)。 */
+  private extrasKey: string | null = null;
   /** 案内の 1 段落(#681 F2 ── 相手に合わせて書き換える)。 */
   private tip: HTMLElement | null = null;
   /** 打ち方の約束(#682 段② ── engine に合わせて書き換える)。 */
@@ -322,6 +351,14 @@ export class SqlRenderer {
      * ⚠ 並びだけを動かす ── `data-pkc-*` の名前も、押した先も変えない。
      */
     bar.append(source, engine, run, save, toFile, schema, er, history, fileInput);
+    /**
+     * 🔴 **足した相手を並べる行**(#918 段⑦)。各行に **×**(外す)── 片道にしない。
+     * ⚠ 足していなければ `hidden`(中身は `paintExtras` が組む)。
+     */
+    const extras = document.createElement('div');
+    extras.setAttribute('data-pkc-field', 'sql-extras');
+    extras.hidden = true;
+    this.extras = extras;
     const tip = document.createElement('p');
     tip.setAttribute('data-pkc-field', 'sql-tip');
     /**
@@ -407,7 +444,7 @@ export class SqlRenderer {
       layer.scrollTop = box.scrollTop;
       layer.scrollLeft = box.scrollLeft;
     });
-    head.append(title, erHost, wrap, historyNote, bar, tip, rules, example);
+    head.append(title, erHost, wrap, historyNote, bar, extras, tip, rules, example);
     this.host.append(head, note, body);
     this.box = box;
     this.layer = layer;
@@ -495,9 +532,25 @@ export class SqlRenderer {
     const guest = state.sqlPage.guest;
     const local = guest !== null && isSqlLocalFileLid(guest.lid) ? guest : null;
     // ⚠ 仕切りが変わっても組み直せるよう、**どの仕切りに居るか**も鍵に入れる
+    /**
+     * 🔴 **「もう 1 つ足す…」を出してよいか**(#918 段⑦)。⚠ 1 件目が DuckDB で読める相手で、
+     *   上限に達していないときだけ(押せるのに必ず断られる口を作らない)。
+     *   🔑 足した相手(`extraGuests`)は一覧から**外す** ── もう並べてあるので、選べても
+     *   「もう並べてあります」と断られるだけになる。
+     */
+    const extraGuests = state.sqlPage.extraGuests;
+    const canAdd =
+      guest !== null &&
+      isDuckDbReadableSource(sqlGuestSourceOf('', guest.name)) &&
+      1 + extraGuests.length < SQL_MAX_SOURCES;
+    const addable = canAdd
+      ? attached.filter((s) => s.lid !== guest.lid && !extraGuests.some((e) => e.lid === s.lid))
+      : [];
     const key = [
       ...attached.map((s) => `a:${s.lid}:${s.name}`),
       ...(local === null ? [] : [`l:${local.lid}:${local.name}`]),
+      // ⚠ 足せる相手の組も指紋に入れる(入れないと、足した直後に一覧が古いまま残る)
+      ...(canAdd ? ['+', ...addable.map((s) => `+${s.lid}`)] : []),
     ].join('|');
     if (key !== this.sourceKey) {
       this.sourceKey = key;
@@ -540,10 +593,77 @@ export class SqlRenderer {
       if (local !== null) localGroup.append(option(local.lid, local.name));
       localGroup.append(option(SQL_PICK_LOCAL_FILE_VALUE, '手持ちのファイルを開く…'));
       sel.append(localGroup);
+      /**
+       * 🔴 **一覧の末尾に「もう 1 つ足す…」**(#918 段⑦。設問 1 = A)。
+       * ⚠ **足せない形の添付は薄い字で理由つきに並べる**(`engine` の選び所と同じ作法)──
+       *   消すと「在るのに出てこない」になる。`value` が `add:` で始まるので、
+       *   `.sqlite` / `.xlsx` を押しても**置き換わらない**(`binder.ts` が足す口へ通す)。
+       */
+      if (canAdd) {
+        const addGroup = group(SQL_SOURCE_GROUP_ADD);
+        for (const s of addable) {
+          const readable = isDuckDbReadableSource(sqlGuestSourceOf('', s.name));
+          const opt = option(
+            `${SQL_ADD_SOURCE_PREFIX}${s.lid}`,
+            readable ? s.name : `${s.name} ── ${ADD_UNREADABLE_HINT}`,
+          );
+          opt.disabled = !readable;
+          addGroup.append(opt);
+        }
+        addGroup.append(option(SQL_ADD_LOCAL_FILE_VALUE, SQL_ADD_LOCAL_FILE_LABEL));
+        sel.append(addGroup);
+      }
       sel.hidden = false;
     }
     const want = state.sqlPage.guestChosen;
     if (sel.value !== want) sel.value = want;
+  }
+
+  /**
+   * 🔴 **足した相手の一覧を揃える**(#918 段⑦)。各行に **×**(押すと外れる)。
+   *
+   * ⚠ **組み直す合図は「足した相手の組」**(並び順も含む)── 外した直後に古い行が残ると、
+   *   user は「外れていない」と読む。⚠ 足していなければ畳む(`hidden`)。
+   * 🔑 表の名前は `duckDbTableNamesOfNames` 1 か所 ── 案内文・器が作る名前と同じ物を出す
+   *   (「この file は何という表か」を画面の 1 行で読める)。
+   * ⚠ 上限に達したら理由を 1 行出す ── 選び所から「足す」が消えるので、黙って消えると
+   *   「どこへ行った」になる。
+   */
+  private paintExtras(state: AppState): void {
+    const host = this.extras;
+    if (host === null) return;
+    const p = state.sqlPage;
+    const names = p.guest === null ? [] : [p.guest.name, ...p.extraGuests.map((e) => e.name)];
+    const key = [p.guest?.lid ?? '', ...p.extraGuests.map((e) => `${e.lid}:${e.name}`)].join('|');
+    if (key === this.extrasKey) return;
+    this.extrasKey = key;
+    host.textContent = '';
+    host.hidden = p.extraGuests.length === 0;
+    if (p.extraGuests.length === 0) return;
+    const tables = duckDbTableNamesOfNames(names);
+    p.extraGuests.forEach((e, i) => {
+      const row = document.createElement('span');
+      row.setAttribute('data-pkc-field', 'sql-extra');
+      row.setAttribute('data-pkc-sql-extra', e.lid);
+      const label = document.createElement('span');
+      label.setAttribute('data-pkc-field', 'sql-extra-name');
+      label.textContent = `${e.name}(表 ${tables[i + 1] ?? ''})`;
+      const drop = document.createElement('button');
+      drop.type = 'button';
+      drop.setAttribute('data-pkc-action', 'remove-sql-source');
+      drop.setAttribute('data-pkc-sql-source', e.lid);
+      drop.setAttribute('aria-label', `${e.name} を外す`);
+      drop.title = `${e.name} を外します(作った表は消えます)`;
+      drop.textContent = '×';
+      row.append(label, drop);
+      host.append(row);
+    });
+    if (1 + p.extraGuests.length >= SQL_MAX_SOURCES) {
+      const full = document.createElement('span');
+      full.setAttribute('data-pkc-field', 'sql-extras-full');
+      full.textContent = `並べられるのは ${String(SQL_MAX_SOURCES)} つまでです`;
+      host.append(full);
+    }
   }
 
   /**
@@ -572,7 +692,9 @@ export class SqlRenderer {
     const sel = this.engine;
     if (sel === null) return;
     const name = state.sqlPage.guest?.name ?? null;
-    const hints = SQL_ENGINES.map((e) => sqlEngineHint(e, name));
+    // 🔴 並べているときは sqlite を選べない(#918 段⑦)── 理由まで指紋に入る(下の `key`)
+    const multi = state.sqlPage.extraGuests.length > 0;
+    const hints = SQL_ENGINES.map((e) => sqlEngineHint(e, name, multi));
     const key = hints.map((h) => h ?? '').join('|');
     if (key !== this.engineKey) {
       this.engineKey = key;
@@ -688,6 +810,7 @@ export class SqlRenderer {
     if (this.save !== null) this.save.disabled = !canTakeAnswer;
     if (this.toFile !== null) this.toFile.disabled = !canTakeAnswer;
     this.paintSource(state);
+    this.paintExtras(state);
     /**
      * 🔴 **案内も手本も、いま調べている相手へ揃える**(#681 の着地前レビュー F2)。
      * ⚠ 直す前は静的な字だったので、取り込んだ `.sqlite` を選んでも
@@ -701,14 +824,16 @@ export class SqlRenderer {
      *   (「REGEXP は使えません」は DuckDB では誤り)。
      */
     const engine: SqlEngine = sqlEngineOf(p);
-    const tipText = sqlTipText(target, engine);
+    // 🔴 足した相手の名前(#918 段⑦)── 案内も手本も、並べた全部の表の名前を出す
+    const more = p.extraGuests.map((g) => g.name);
+    const tipText = sqlTipText(target, engine, more);
     if (this.tip !== null && this.tip.textContent !== tipText) this.tip.textContent = tipText;
     const rulesText = sqlRulesText(engine);
     if (this.rules !== null && this.rules.textContent !== rulesText) this.rules.textContent = rulesText;
-    const hint = sqlPlaceholder(target, engine);
+    const hint = sqlPlaceholder(target, engine, more);
     if (this.box !== null && this.box.placeholder !== hint) this.box.placeholder = hint;
     // 🔴 **消えない手本も相手へ揃える**(#837 K1)── 薄字と同じ 1 本から採る
-    const example = sqlExampleText(target, engine);
+    const example = sqlExampleText(target, engine, more);
     if (this.example !== null && this.example.textContent !== example) {
       this.example.textContent = example;
     }
@@ -739,6 +864,8 @@ export class SqlRenderer {
       p.saved,
       // ⚠ 調べる相手が変わったら、上の行を必ず言い直す(#681 段③ の 2 つ目)
       p.guest?.lid ?? '',
+      // ⚠ 足した / 外したら、上の行(何を調べているか)を必ず言い直す(#918 段⑦)
+      p.extraGuests.map((g) => g.lid).join(','),
       p.guestError,
     ].join(' ');
     if (fingerprint === this.last) return;
@@ -1028,7 +1155,13 @@ function noteLine(p: AppState['sqlPage']): string {
    */
   const truncNote =
     p.guest !== null && p.guest.truncated ? '(行が多いので、先頭だけを表にしています)' : '';
-  const where = p.guest === null ? '' : ` ── ${p.guest.name} を調べています${truncNote}`;
+  /**
+   * 🔴 **並べているときは、全部の名前を言う**(#918 段⑦)。⚠ 1 件目だけを言うと、
+   *   2 つ並べたのに「売上.csv を調べています」と読める(いちばん気づけない外し方)。
+   */
+  const everyName =
+    p.guest === null ? '' : [p.guest.name, ...p.extraGuests.map((g) => g.name)].join(' / ');
+  const where = p.guest === null ? '' : ` ── ${everyName} を調べています${truncNote}`;
   /**
    * 🔴 **開けなかったことを、いちばん上で言う**(#681 段③ の 2 つ目)。
    * ⚠ 黙って「この PKC」へ戻ると、選んだ人には**選べなかった**ようにしか見えない。
@@ -1055,7 +1188,10 @@ function noteLine(p: AppState['sqlPage']): string {
   if (p.ranSql === '')
     return p.guest === null
       ? ''
-      : `${p.guest.name} を調べています(表 ${String(p.guest.tables.length)} 個 / ${humanBytes(p.guest.bytes)})${truncNote}`;
+      : p.extraGuests.length > 0
+        ? // 🔴 並べているとき(#918 段⑦)── 大きさは 1 件目だけしか持っていないので言わない
+          `${everyName} を並べて調べています(表 ${String(1 + p.extraGuests.length)} 個)${truncNote}`
+        : `${p.guest.name} を調べています(表 ${String(p.guest.tables.length)} 個 / ${humanBytes(p.guest.bytes)})${truncNote}`;
 
   const took = `(${String(p.ms)} ミリ秒)`;
   /**

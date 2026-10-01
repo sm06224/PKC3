@@ -119,7 +119,7 @@ describe('🔴 DuckDB で引く(#682 段②)', () => {
 
   it('🔴 打つ順番が「差し込む → 写し切る → 塞ぐ → user の字」である', async () => {
     const { runner, made, readBytes } = make();
-    await runner.run({ sql: 'SELECT * FROM csv', source: SRC, readBytes });
+    await runner.run({ sql: 'SELECT * FROM csv', sources: [{ source: SRC, readBytes }] });
     const steps = made[0]?.steps ?? [];
     expect(steps[0]).toBe('put:source.csv');
     expect(steps[1], '写し切る前に塞いでいる(実測では写せない)').toContain('CREATE OR REPLACE TABLE csv');
@@ -204,11 +204,11 @@ describe('🔴 DuckDB で引く(#682 段②)', () => {
 
   it('🔴 相手を替えたら器ごと作り直す(塞いだ器へは差し込めない)', async () => {
     const { runner, open, made, readBytes } = make();
-    await runner.run({ sql: 'SELECT 1', source: SRC, readBytes });
-    await runner.run({ sql: 'SELECT 2', source: SRC, readBytes });
+    await runner.run({ sql: 'SELECT 1', sources: [{ source: SRC, readBytes }] });
+    await runner.run({ sql: 'SELECT 2', sources: [{ source: SRC, readBytes }] });
     expect(open, '同じ相手で起こし直している').toHaveBeenCalledTimes(1);
     expect(made[0]?.steps.filter((s) => s === DUCKDB_SEAL_SQL), '同じ相手で 2 回塞いでいる').toHaveLength(1);
-    await runner.run({ sql: 'SELECT 3', source: { kind: 'csv', lang: 'csv', lid: 'l2', name: '別.csv' } as const, readBytes });
+    await runner.run({ sql: 'SELECT 3', sources: [{ source: { kind: 'csv', lang: 'csv', lid: 'l2', name: '別.csv' } as const, readBytes }] });
     expect(open, '相手が替わったのに器を作り直していない').toHaveBeenCalledTimes(2);
     expect(made[0]?.steps).toContain('terminate');
     expect(made[1]?.steps[2]).toBe(DUCKDB_SEAL_SQL);
@@ -216,14 +216,14 @@ describe('🔴 DuckDB で引く(#682 段②)', () => {
 
   it('🔴 同じ題名の別ノートは、別の相手として扱う', async () => {
     const { runner, open, readBytes } = make();
-    await runner.run({ sql: 'SELECT 1', source: SRC, readBytes });
-    await runner.run({ sql: 'SELECT 2', source: { kind: 'csv', lang: 'csv', lid: 'l2', name: '売上.csv' } as const, readBytes });
+    await runner.run({ sql: 'SELECT 1', sources: [{ source: SRC, readBytes }] });
+    await runner.run({ sql: 'SELECT 2', sources: [{ source: { kind: 'csv', lang: 'csv', lid: 'l2', name: '売上.csv' } as const, readBytes }] });
     expect(open, 'lid が違うのに入れ替えていない').toHaveBeenCalledTimes(2);
   });
 
   it('目録は同一オリジンから引き、実体の在り処もそこから組む', async () => {
     const { runner, fetchText, open, readBytes } = make();
-    await runner.run({ sql: 'SELECT 1', source: SRC, readBytes });
+    await runner.run({ sql: 'SELECT 1', sources: [{ source: SRC, readBytes }] });
     expect(fetchText).toHaveBeenCalledWith('https://example.test/app/duckdb/pack.json');
     expect(open).toHaveBeenCalledWith({
       wasmUrl: 'https://example.test/app/duckdb/duckdb-eh.wasm',
@@ -251,12 +251,12 @@ describe('🔴 DuckDB で引く(#682 段②)', () => {
       baseUrl: 'https://example.test/app/',
       packBase: 'https://evil.test/duckdb/',
     });
-    await expect(evil.run({ sql: 'SELECT 1', source: SRC, readBytes })).rejects.toThrow('同じ場所');
+    await expect(evil.run({ sql: 'SELECT 1', sources: [{ source: SRC, readBytes }] })).rejects.toThrow('同じ場所');
     expect(fetchText, '断ったのに、外の宛先へ取りに行っている').toHaveBeenCalledTimes(0);
     expect(open, '断ったのに器を起こしている').toHaveBeenCalledTimes(0);
 
     // ⚠ **対照群** ── 同じ口を既定のまま使えば通る(断りが「いつも出る」形になっていない)
-    await runner.run({ sql: 'SELECT 1', source: SRC, readBytes });
+    await runner.run({ sql: 'SELECT 1', sources: [{ source: SRC, readBytes }] });
     expect(fetchText).toHaveBeenCalledWith('https://example.test/app/duckdb/pack.json');
     expect(open).toHaveBeenCalledTimes(1);
   });
@@ -268,39 +268,39 @@ describe('🔴 DuckDB で引く(#682 段②)', () => {
       open: () => Promise.reject(new Error('起こしてはいけない')),
       baseUrl: 'https://example.test/app/',
     });
-    await expect(bad.run({ sql: 'SELECT 1', source: SRC, readBytes })).rejects.toThrow('つながっているか');
+    await expect(bad.run({ sql: 'SELECT 1', sources: [{ source: SRC, readBytes }] })).rejects.toThrow('つながっているか');
     // ⚠ 対照群 ── 取れる側では起きる(断りが「いつも出る」形になっていない)
-    await runner.run({ sql: 'SELECT 1', source: SRC, readBytes });
+    await runner.run({ sql: 'SELECT 1', sources: [{ source: SRC, readBytes }] });
     expect(open).toHaveBeenCalledTimes(1);
   });
 
   it('⚠ 目録が壊れていたら、起こす前に断る', async () => {
     const { runner, open, readBytes } = make({ pack: '{"version":"1","files":[]}' });
-    await expect(runner.run({ sql: 'SELECT 1', source: SRC, readBytes })).rejects.toThrow('duckdb-eh.wasm');
+    await expect(runner.run({ sql: 'SELECT 1', sources: [{ source: SRC, readBytes }] })).rejects.toThrow('duckdb-eh.wasm');
     expect(open, '検める前に起こしている').toHaveBeenCalledTimes(0);
   });
 
   it('⚠ 相手の中身を読めなければ、名前を添えて断る', async () => {
     const { runner, readBytes } = make({ bytes: null });
-    await expect(runner.run({ sql: 'SELECT 1', source: SRC, readBytes })).rejects.toThrow('売上.csv');
+    await expect(runner.run({ sql: 'SELECT 1', sources: [{ source: SRC, readBytes }] })).rejects.toThrow('売上.csv');
   });
 
   it('上限で切ったら、切ったと言う', async () => {
     const rows = Array.from({ length: DUCKDB_MAX_ROWS + 5 }, (_, i) => [i]);
     const { runner, readBytes } = make({ answer: { columns: ['n'], types: ['Int32'], rows } });
-    const r = await runner.run({ sql: 'SELECT 1', source: SRC, readBytes });
+    const r = await runner.run({ sql: 'SELECT 1', sources: [{ source: SRC, readBytes }] });
     expect(r.truncated).toBe(true);
     expect(r.rows).toHaveLength(DUCKDB_MAX_ROWS);
     // ⚠ 対照群 ── 上限の内なら切らない
     const { runner: small, readBytes: readBytes2 } = make();
-    expect((await small.run({ sql: 'SELECT 1', source: SRC, readBytes: readBytes2 })).truncated).toBe(false);
+    expect((await small.run({ sql: 'SELECT 1', sources: [{ source: SRC, readBytes: readBytes2 }] })).truncated).toBe(false);
   });
 
   it('返す形は sqlite 側と同じ(列 / 行 / 切った印 / 時間)', async () => {
     const { runner, readBytes } = make({
       answer: { columns: ['c'], types: ['Int64'], rows: [[3n]] },
     });
-    const r = await runner.run({ sql: 'SELECT count(*) AS c FROM csv', source: SRC, readBytes });
+    const r = await runner.run({ sql: 'SELECT count(*) AS c FROM csv', sources: [{ source: SRC, readBytes }] });
     expect(r.columns).toEqual(['c']);
     // 🔴 BigInt のまま流すと、書き出しが落ちる
     expect(r.rows).toEqual([[3]]);
@@ -313,7 +313,7 @@ describe('🔴 入っていれば端末の一式、無ければ fetch(#682 段�
     const dispose = vi.fn();
     const lendInstalled = vi.fn(async () => ({ wasmUrl: 'blob:w', workerUrl: 'blob:k', dispose }));
     const { runner, fetchText, open, readBytes } = make({ lendInstalled });
-    await runner.run({ sql: 'SELECT 1', source: SRC, readBytes });
+    await runner.run({ sql: 'SELECT 1', sources: [{ source: SRC, readBytes }] });
     expect(lendInstalled, '毎回問うはず').toHaveBeenCalledTimes(1);
     expect(fetchText, '端末に入っているのに目録を取りに行っている').not.toHaveBeenCalled();
     /**
@@ -332,7 +332,7 @@ describe('🔴 入っていれば端末の一式、無ければ fetch(#682 段�
   it('⚠ 対照群 ── 入っていなければ、いまどおり同一オリジンへ fetch する', async () => {
     const lendInstalled = vi.fn(async () => null);
     const { runner, fetchText, open, readBytes } = make({ lendInstalled });
-    await runner.run({ sql: 'SELECT 1', source: SRC, readBytes });
+    await runner.run({ sql: 'SELECT 1', sources: [{ source: SRC, readBytes }] });
     expect(lendInstalled).toHaveBeenCalledTimes(1);
     expect(fetchText, '未設置なのに fetch していない').toHaveBeenCalledWith('https://example.test/app/duckdb/pack.json');
     expect(open).toHaveBeenCalledWith({
@@ -345,7 +345,7 @@ describe('🔴 入っていれば端末の一式、無ければ fetch(#682 段�
   it('🔴 `lendInstalled` を渡さない既存の呼び方は、そのまま同一オリジンへ倒れる(後方互換)', async () => {
     // ⚠ opts.lendInstalled を渡さない ── deps に `lendInstalled` キー自体が無い形
     const { runner, fetchText, open, readBytes } = make();
-    await runner.run({ sql: 'SELECT 1', source: SRC, readBytes });
+    await runner.run({ sql: 'SELECT 1', sources: [{ source: SRC, readBytes }] });
     expect(fetchText).toHaveBeenCalledWith('https://example.test/app/duckdb/pack.json');
     expect(open).toHaveBeenCalledWith({
       wasmUrl: 'https://example.test/app/duckdb/duckdb-eh.wasm',
@@ -364,9 +364,9 @@ describe('🔴 入っていれば端末の一式、無ければ fetch(#682 段�
       return { wasmUrl: `blob:w${n}`, workerUrl: `blob:k${n}`, dispose };
     });
     const { runner, open, readBytes } = make({ lendInstalled });
-    await runner.run({ sql: 'SELECT 1', source: SRC, readBytes });
+    await runner.run({ sql: 'SELECT 1', sources: [{ source: SRC, readBytes }] });
     // ⚠ 相手を替えて器を作り直させる(既存の「相手を替えたら器ごと作り直す」規律)
-    await runner.run({ sql: 'SELECT 2', source: { kind: 'csv', lang: 'csv', lid: 'l2', name: '別.csv' } as const, readBytes });
+    await runner.run({ sql: 'SELECT 2', sources: [{ source: { kind: 'csv', lang: 'csv', lid: 'l2', name: '別.csv' } as const, readBytes }] });
 
     expect(lendInstalled, '器を作り直した回数だけ借り直しているはず').toHaveBeenCalledTimes(2);
     expect(open).toHaveBeenNthCalledWith(1, { wasmUrl: 'blob:w1', workerUrl: 'blob:k1', extensions: NET_EXT });
@@ -391,7 +391,7 @@ describe('🔴 入っていれば端末の一式、無ければ fetch(#682 段�
       lendInstalled,
     });
     const readBytes = vi.fn(() => Promise.resolve(new Uint8Array([1])));
-    await runner.run({ sql: 'SELECT 1', source: SRC, readBytes });
+    await runner.run({ sql: 'SELECT 1', sources: [{ source: SRC, readBytes }] });
     expect(order, 'open が終わる前に dispose している').toEqual(['open:blob:w', 'dispose']);
   });
 
@@ -406,7 +406,7 @@ describe('🔴 入っていれば端末の一式、無ければ fetch(#682 段�
       lendInstalled,
     });
     const readBytes = vi.fn(() => Promise.resolve(new Uint8Array([1])));
-    await expect(runner.run({ sql: 'SELECT 1', source: SRC, readBytes })).rejects.toThrow('壊れた wasm');
+    await expect(runner.run({ sql: 'SELECT 1', sources: [{ source: SRC, readBytes }] })).rejects.toThrow('壊れた wasm');
     expect(dispose, 'open が失敗しても借りた URL を返しているはず').toHaveBeenCalledTimes(1);
   });
 });
@@ -423,7 +423,7 @@ describe('🔴 書き込みの字を打つと、器を持ち続ける(#918 段�
 
   it('🔴 CREATE TABLE を打った後は、しばらく使わなくても畳まない', async () => {
     const { runner, made, readBytes } = make({ idleMs: 5 });
-    await runner.run({ sql: 'CREATE TABLE t (a INT)', source: SRC, readBytes });
+    await runner.run({ sql: 'CREATE TABLE t (a INT)', sources: [{ source: SRC, readBytes }] });
     await wait(40);
     expect(runner.awake, '作った表ごと畳んでいる').toBe(true);
     expect(made[0]?.steps).not.toContain('terminate');
@@ -434,7 +434,7 @@ describe('🔴 書き込みの字を打つと、器を持ち続ける(#918 段�
 
   it('⚠ 対照群 ── 読むだけの字を打った後は、今までどおり畳む', async () => {
     const { runner, made, readBytes } = make({ idleMs: 5 });
-    await runner.run({ sql: 'SELECT * FROM csv', source: SRC, readBytes });
+    await runner.run({ sql: 'SELECT * FROM csv', sources: [{ source: SRC, readBytes }] });
     await wait(40);
     expect(runner.awake, '読むだけなのに畳んでいない(常駐メモリを返す規律が外れた)').toBe(false);
     expect(made[0]?.steps).toContain('terminate');
@@ -449,7 +449,7 @@ describe('🔴 書き込みの字を打つと、器を持ち続ける(#918 段�
       'DROP TABLE t',
     ]) {
       const { runner, readBytes } = make({ idleMs: 5 });
-      await runner.run({ sql, source: SRC, readBytes });
+      await runner.run({ sql, sources: [{ source: SRC, readBytes }] });
       await wait(40);
       expect(runner.awake, `${sql} の後に畳んでいる`).toBe(true);
       await runner.release();

@@ -5081,6 +5081,36 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   gap: var(--s2);
 }
 /**
+ * 🔴 **足した相手の行**(#918 段⑦)。⚠ 足していなければ `hidden`(UA の `[hidden]` が畳む ──
+ *   ここで `display` を書くのは、`hidden` を上書きしないよう**足した相手が居るときだけ効く**
+ *   形にするため)。地は無彩色 ── 色は付けない(押せることは **×** の形で言う)。
+ */
+[data-pkc-field='sql-extras']:not([hidden]) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+}
+[data-pkc-field='sql-extra'] {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 var(--s1) 0 var(--s2);
+}
+[data-pkc-field='sql-extra'] button {
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 0 var(--s1);
+}
+[data-pkc-field='sql-extras-full'] {
+  color: var(--muted);
+}
+/**
  * 🔴 **表のつながり図**(#918 段⑤。置き場の裁定 2026-09-15 = SQL の窓の中に畳める欄)。
  *
  * ⚠ **開いている間だけ場所を取る** ── 閉じているときは `hidden` で 1px も取らない

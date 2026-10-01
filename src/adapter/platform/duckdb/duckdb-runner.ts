@@ -49,13 +49,13 @@
  * 呼ぶ ── この file 冒頭の実測表のとおり、その後は blob: URL が生きている
  * 必要が無い。
  */
-import { CSV_ATTACHMENT_TABLE_NAME } from '@features/query/csv-attachment';
 import { CSV_SOURCE_COLUMNS } from '@features/query/csv-tables';
 import {
   guestTableNameOf,
   type DuckDbReadableGuestSource,
 } from '@features/query/sql-guest-source';
 import { duckDbTable } from '@features/query/duckdb-rows';
+import { duckDbTableNamesOf } from '@features/query/sql-multi-source';
 import { duckDbWriteKind } from '@features/query/duckdb-write';
 import {
   DUCKDB_EXTENSIONS,
@@ -135,10 +135,10 @@ export interface DuckDbRunnerDeps {
   lendInstalled?: () => Promise<{ wasmUrl: string; workerUrl: string; dispose: () => void } | null>;
 }
 
-export interface DuckDbRunInput {
-  readonly sql: string;
+/** 器へ差し込む相手 1 件(#918 段⑦ で、1 件から N 件へ)。 */
+export interface DuckDbInputSource {
   /**
-   * 相手 1 件。
+   * 相手。
    * 🔴 **型が `DuckDbReadableGuestSource`** なので、`.xlsx` や `.sqlite` を
    *   ここへ渡す道は**構造から消えている**(#682 段④c)── だから下の
    *   `duckDbLoadSql` に「読めない相手が来たら断る」枝が要らない。
@@ -149,11 +149,22 @@ export interface DuckDbRunInput {
    *
    * 🔑 **ここが受け取る形にしてあるのは、lid から bytes を出す道が
    *   `store-effects.ts` に 1 本だけ在るから**である(添付なら本文から鍵を読んで
-   *   IDB を引き、手持ちの file なら控えを 1 回で使い捨てる)。
+   *   IDB を引き、手持ちの file なら控えを読む)。
    *   ⚠ こちらで組み直すと、同じ問いに答える口が 2 つになる(§7)。
    * ⚠ 読めなければ `null`(断る理由を画面へ出す)。
    */
   readonly readBytes: () => Promise<Uint8Array | null>;
+}
+
+export interface DuckDbRunInput {
+  readonly sql: string;
+  /**
+   * 🔴 **器へ並べる相手**(1〜`SQL_MAX_SOURCES` 件。#918 段⑦)。
+   * ⚠ **集合(順番も含む)が変わったら器ごと作り直す** ── 外を塞いだ器へは差し込めない
+   *   (`DuckDbLease` の鍵)。作り直せば `hold` も解ける(作った表は消える)。
+   * ⚠ 空は受けない(呼び側が `source` を 1 つも持たない回は走らせない)。
+   */
+  readonly sources: readonly DuckDbInputSource[];
 }
 
 export interface DuckDbRunResult {
@@ -176,14 +187,21 @@ export function sqlQuote(s: string): string {
  * ⚠ **`.csv` は実測済み / `.tsv` は未測** ── 区切りの見分けは上流の推定に任せている。
  *   外した回は上流の断り文がそのまま画面に出る(黙って化けはしない)。
  */
-export function duckDbFileNameOf(source: DuckDbReadableGuestSource): string {
+export function duckDbFileNameOf(source: DuckDbReadableGuestSource, slot = 0): string {
+  /**
+   * 🔴 **N 件を並べるときは、器の中の名前もぶつからないようにする**(#918 段⑦)。
+   * ⚠ `slot` が 0 の回(= 1 件目 / 1 件だけ)は**今までと 1 バイトも変えない**(`source.csv`)。
+   *   2 件目以降は `source_2.csv` …(同じ名前を 2 度 `put` すると**入れ替わる**ので、
+   *   2 件目が 1 件目を黙って上書きする)。
+   */
+  const stem = slot === 0 ? 'source' : `source_${String(slot + 1)}`;
   switch (source.kind) {
     case 'csv':
-      return source.lang === 'tsv' ? 'source.tsv' : 'source.csv';
+      return source.lang === 'tsv' ? `${stem}.tsv` : `${stem}.csv`;
     case 'parquet':
-      return 'source.parquet';
+      return `${stem}.parquet`;
     case 'json':
-      return source.lang === 'ndjson' ? 'source.ndjson' : 'source.json';
+      return source.lang === 'ndjson' ? `${stem}.ndjson` : `${stem}.json`;
     default: {
       // ⚠ 種類を足した人がここを書き忘れたら tsc が落とす(`if` を並べると黙って素通りする)
       const never: never = source;
@@ -226,21 +244,32 @@ function duckDbReadFrom(source: DuckDbReadableGuestSource, file: string): string
  *      **書いた人が列名を決めている形式**である。`SELECT *` に見覚えのない列が
  *      2 つ増えるのは驚きであり、⚠ 相手が `_note` という列を持っていたら
  *      **名前がぶつかって、そもそも開けない**。
- * 🔑 これが分かったら覆る条件:**複数の相手を 1 つの器へ並べて引けるようにしたとき**
- *   (どの file の行かを見分ける列が要るようになる)。
+ * 🔑 覆る条件は「**複数の相手を 1 つの器へ並べて引けるようにしたとき**」と書いていた ──
+ *   #918 段⑦ でその日が来たが、**覆さなかった**:並べたときは**表の名前そのものが file 名**
+ *   (`duckDbTableNamesOf`)なので、どの file の行かは表を見れば分かる。
+ *   ⚠ 列を足すと「相手の列名を勝手に増やさない」が再び破れる(上の ②)。
  *
  * ⚠ **VIEW にしない** ── VIEW は打つたびに file を読み直すので、
  *   外を塞いだ後に**引けなくなる**(実測で `Permission Error`)。
  */
-export function duckDbLoadSql(source: DuckDbReadableGuestSource, file: string): string {
+export function duckDbLoadSql(
+  source: DuckDbReadableGuestSource,
+  file: string,
+  /**
+   * 🔴 **作る表の名前**(#918 段⑦)。省けば今までどおり(1 件のときの `csv` / `json` / `parquet`)。
+   * ⚠ 2 件以上のときは `duckDbTableNamesOf` が file 名から決めた物を渡す
+   *   (画面の案内と**同じ 1 本**から)。
+   */
+  table: string = guestTableNameOf(source),
+): string {
   const from = duckDbReadFrom(source, file);
   if (source.kind !== 'csv') {
-    return 'CREATE OR REPLACE TABLE ' + guestTableNameOf(source) + ' AS SELECT * FROM ' + from;
+    return 'CREATE OR REPLACE TABLE ' + table + ' AS SELECT * FROM ' + from;
   }
   const noteCol = CSV_SOURCE_COLUMNS[0] ?? '_note';
   const lidCol = CSV_SOURCE_COLUMNS[1] ?? '_lid';
   return (
-    'CREATE OR REPLACE TABLE ' + CSV_ATTACHMENT_TABLE_NAME + ' AS SELECT ' +
+    'CREATE OR REPLACE TABLE ' + table + ' AS SELECT ' +
     sqlQuote(source.name) + ' AS ' + noteCol + ', ' + sqlQuote(source.lid) + ' AS ' + lidCol + ', * ' +
     'FROM ' + from
   );
@@ -288,7 +317,7 @@ export class DuckDbRunner {
 
   async run(input: DuckDbRunInput): Promise<DuckDbRunResult> {
     const started = Date.now();
-    const { lid, name } = input.source;
+    if (input.sources.length === 0) throw new Error('調べる相手がありません');
     const raw = await this.lease.run({
       sql: input.sql,
       maxMs: DUCKDB_MAX_MS,
@@ -299,8 +328,16 @@ export class DuckDbRunner {
        * 🔑 判定は字の門と**同じ 1 本**(`duckDbWriteKind`)。
        */
       hold: duckDbWriteKind(input.sql) !== null,
-      // ⚠ 鍵は lid と名前の両方(名前だけだと、同じ題名の別ノートで入れ替わらない)
-      data: { key: lid + '|' + name, load: (h) => this.load(h, input.readBytes, input.source) },
+      /**
+       * ⚠ 鍵は lid と名前の両方(名前だけだと、同じ題名の別ノートで入れ替わらない)。
+       * 🔴 **N 件の全部を鍵に入れる**(#918 段⑦)── 足す / 外す / 順番が変わるたびに
+       *   鍵が変わるので、`DuckDbLease` が**器を作り直す**(`hold` も解ける ──
+       *   作った表は消える。画面は「足したり外したりすると、作った表は消えます」と言う)。
+       */
+      data: {
+        key: input.sources.map((s) => s.source.lid + '|' + s.source.name).join('||'),
+        load: (h) => this.load(h, input.sources),
+      },
     });
     const table = duckDbTable(raw);
     const truncated = table.rows.length > DUCKDB_MAX_ROWS;
@@ -313,20 +350,21 @@ export class DuckDbRunner {
   }
 
   /**
-   * 相手を差し込み、表へ写し切り、**外を塞ぐ**。
+   * 相手を全部差し込み、表へ写し切り、**外を塞ぐ**。
    * ⚠ **この 3 つは 1 組** ── 途中で止めると、外が開いたままの器が残る。
    *   🔑 落ちた回は `DuckDbLease` が「入っている」と控えないので、次に**やり直す**。
+   * 🔴 **塞ぐのは全部を写し切った後に 1 度だけ**(#918 段⑦)── 1 件ごとに塞ぐと
+   *   2 件目を差し込めない(塞いだ後は file を読めない)。
    */
-  private async load(
-    h: DuckDbHandle,
-    readBytes: () => Promise<Uint8Array | null>,
-    source: DuckDbReadableGuestSource,
-  ): Promise<void> {
-    const bytes = await readBytes();
-    if (bytes === null) throw new Error(source.name + ' の中身を読めませんでした');
-    const file = duckDbFileNameOf(source);
-    await h.put(file, bytes);
-    await h.query(duckDbLoadSql(source, file));
+  private async load(h: DuckDbHandle, sources: readonly DuckDbInputSource[]): Promise<void> {
+    const tables = duckDbTableNamesOf(sources.map((s) => s.source));
+    for (const [i, { source, readBytes }] of sources.entries()) {
+      const bytes = await readBytes();
+      if (bytes === null) throw new Error(source.name + ' の中身を読めませんでした');
+      const file = duckDbFileNameOf(source, i);
+      await h.put(file, bytes);
+      await h.query(duckDbLoadSql(source, file, tables[i]));
+    }
     await h.query(DUCKDB_SEAL_SQL);
   }
 

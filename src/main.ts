@@ -102,7 +102,7 @@ import { acquireWriterLease } from '@adapter/platform/storage/writer-lease';
 // 🔴 SQL の面で「手持ちのファイル」を開く(#854 段②)
 import {
   readSqlLocalFileBytes,
-  registerSqlLocalFile,
+  pickSqlLocalFileInto,
   releaseSqlLocalFile,
   sqlLocalFileSize,
 } from '@adapter/state/sql-local-file';
@@ -3540,9 +3540,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * ⚠ 開く手順・拡張子の判定・断り文は**添付を開くときと同じ 1 本の経路**
      *   (`store-effects.ts` の `REQUEST_SQL_GUEST_OPEN`)を通る。
      */
-    pickSqlLocalFile: (file) => {
-      const lid = registerSqlLocalFile(file);
-      dispatcher.dispatch({ type: 'SET_SQL_SOURCE', lid, name: file.name });
+    pickSqlLocalFile: (file, add) => {
+      // 🔴 置き換えるか足すかの分岐は `sql-local-file.ts` に在る(この file はどの test からも実行されない)
+      pickSqlLocalFileInto(dispatcher, file, add === true);
     },
     removeOfficePack: () => {
       void officeInstaller.remove().then(finishOfficePack);

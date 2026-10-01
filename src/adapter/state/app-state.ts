@@ -16,6 +16,7 @@ import { schemaModel, type Grid, type SchemaLink, type SchemaModel } from '@feat
 import { isSystemMessageLid } from '@features/message/message-log';
 import { erSql, type ErAction } from '@features/query/er-sql';
 import { isDuckDbOnlySource, sqlGuestSourceOf } from '@features/query/sql-guest-source';
+import { checkAddSource, type SqlExtraSource } from '@features/query/sql-multi-source';
 
 /**
  * 🔴 **この相手からは構造を採れない、の理由**(#682 段④c)。
@@ -31,11 +32,54 @@ import { isDuckDbOnlySource, sqlGuestSourceOf } from '@features/query/sql-guest-
  *
  * @returns `null` = 採れる。文字列 = 採れない理由(画面に出す字)。
  */
-function schemaUnavailable(guest: { readonly lid: string; readonly name: string } | null): string | null {
+function schemaUnavailable(
+  guest: { readonly lid: string; readonly name: string } | null,
+  /** 🔴 足した相手の数(#918 段⑦)。1 件でも在れば、構造は**まだ出せない**。 */
+  extras = 0,
+): string | null {
   if (guest === null) return null;
+  if (extras > 0) return '2 つ以上の file を並べているときの構造は、まだ出せません(DuckDB で引く相手です)';
   return isDuckDbOnlySource(sqlGuestSourceOf(guest.lid, guest.name))
     ? 'この形式のつながり図は、まだ出せません(DuckDB で引く相手です)'
     : null;
+}
+/**
+ * 🔴 **足した相手の集合を差し替える**(足した / 外した の両方がここを通る。#918 段⑦)。
+ *
+ * ⚠ **答えを捨てる**(`SET_SQL_SOURCE` と同じ理由)── 相手の集合が変われば、
+ *   出ている表は**別の file の組の話**である。残すと「新しい組を引いた答え」に見える。
+ * ⚠ **走っている答えも無効にする**(札を進める)── 走っている最中に集合を変えられるので、
+ *   遅れて届いた**前の組の答え**を受けると、名札は新しいのに中身は前の組になる。
+ * 🔑 つながり図は**採れない**(2 件以上)── 開いていれば理由を書く。1 件へ戻った回は
+ *   `erForSource` が採り直す(1 件のときの作りに戻る)。
+ */
+function withSqlSourceSet(
+  state: AppState,
+  extras: readonly SqlExtraSource[],
+): { state: AppState; events: DomainEvent[] } {
+  const p = state.sqlPage;
+  const why = schemaUnavailable(p.guest, extras.length);
+  const er = erForSource(p.er, p.guest?.lid ?? '', p.guest !== null, p.guest !== null, why ?? undefined);
+  return {
+    state: {
+      ...state,
+      sqlPage: {
+        ...p,
+        extraGuests: extras,
+        runToken: p.runToken + 1,
+        running: false,
+        ranSql: '',
+        columns: [],
+        rows: [],
+        truncated: false,
+        ms: 0,
+        error: '',
+        saved: '',
+        er: er.er,
+      },
+    },
+    events: er.events,
+  };
 }
 import { pickErConnection, type ErPendingFrom } from '@features/query/er-connect';
 import { filerRowOptions, listViewOptions } from './list-view-options';
@@ -268,6 +312,18 @@ export interface SqlPageState {
      */
     readonly truncated: boolean;
   } | null;
+  /**
+   * 🔴 **足した相手**(2 件目以降。#918 段⑦。Gemini 裁定 2026-10-01)。
+   *
+   * 🔑 1 件目は `guest` が持つ ── **ここは「足した分」だけ**にして、1 件のときの
+   *   これまでの作り(選び所 / 開く / 構造)を 1 バイトも変えない。
+   * ⚠ **1 件でも在れば DuckDB 固定**(`sqlEngineOf`)。⚠ 1 件目を選び直したら**全部外れる**
+   *   (`SET_SQL_SOURCE`)── 選び直しは「別の調べ物を始める」操作なので、足した相手は
+   *   持ち越さない(持ち越すと、画面に出ていない相手を引くことになる)。
+   * ⚠ 手持ちの file は控えが `sql-local-file.ts` に在る ── **外す / 選び直す / 足せなかった**の
+   *   どれでも reducer が `REQUEST_SQL_EXTRA_RELEASE` で手放させる。
+   */
+  readonly extraGuests: readonly SqlExtraSource[];
   /** 開こうとして失敗した理由(空 = 無い)。⚠ 黙って何も起きない形を作らない。 */
   readonly guestError: string;
   /**
@@ -1938,6 +1994,7 @@ export const initialState: AppState = {
     historyDraft: '',
     historyEdits: [],
     guest: null,
+    extraGuests: [],
     guestError: '',
     guestPending: '',
     guestChosen: '',
@@ -2167,6 +2224,14 @@ export type UserAction =
    * ⚠ 選び直しは**前の相手を必ず手放す**(常駐メモリを返す)。
    */
   | { type: 'SET_SQL_SOURCE'; lid: string; name: string }
+  /**
+   * 🔴 **調べる相手を、もう 1 つ足す**(#918 段⑦。Gemini 裁定 2026-10-01 = 設問 1 は A)。
+   * ⚠ 足せない相手(`.xlsx` / `.sqlite` / 上限 / 重複)は**断りの字**を返す(黙って何も起きない形を作らない)。
+   * ⚠ **足したら答えを捨てる**(相手の集合が変わるので、出ている表は別の話になる)。
+   */
+  | { type: 'ADD_SQL_SOURCE'; lid: string; name: string }
+  /** 🔴 足した相手を外す(#918 段⑦)。⚠ **片道にしない** ── 足せるなら外せる。 */
+  | { type: 'REMOVE_SQL_SOURCE'; lid: string }
   /**
    * 🔴 **どのエンジンで引くかを選んだ**(#682 段②)。
    * ⚠ **走っている答えを捨てない** ── 相手は変わっていないので、いま出ている表は
@@ -3222,6 +3287,11 @@ export type DomainEvent =
        * しか受け取らない。
        */
       duck?: { lid: string; name: string };
+      /**
+       * 🔴 **足した相手**(#918 段⑦)。⚠ **1 件以上のときだけ在る**(1 件のときは今までどおり
+       *   `duck` だけ)。`duck` が 1 件目で、ここが 2 件目以降(並べる順)。
+       */
+      duckExtra?: readonly { lid: string; name: string }[];
     }
   /**
    * 🔴 **調べている相手の構造を採ってきてほしい**(#918 段①)。
@@ -3259,6 +3329,13 @@ export type DomainEvent =
        */
       prev: string;
     }
+  /**
+   * 🔴 **足した相手の控えを手放す**(#918 段⑦)。
+   * ⚠ `REQUEST_SQL_GUEST_CLOSE` とは別 ── あちらは sqlite 側の接続も閉じる。足した相手は
+   *   sqlite へ開いていないので、**閉じる物が無い**(手持ちの file の控えを放すだけ)。
+   * 🔑 出す所は 3 つ:外した / 足せなかった / 1 件目を選び直して全部外れた。
+   */
+  | { type: 'REQUEST_SQL_EXTRA_RELEASE'; lids: readonly string[] }
   /**
    * 集計を頼む(#184)。⚠ 検索と同じ理由で **SQL 側の仕事** ── 本文は常駐していない。
    * ⚠ **目録と表を 1 回の走査で頼む**(`key` が `null` なら目録だけ)── 別々に
@@ -4552,6 +4629,14 @@ function reduceCore(
             ...(engine === 'duckdb' && state.sqlPage.guest !== null
               ? { duck: { lid: state.sqlPage.guest.lid, name: state.sqlPage.guest.name } }
               : {}),
+            /**
+             * 🔴 **足した相手も、いまの相手から採る**(#918 段⑦)。⚠ `engine` を見ない ──
+             *   足した相手が在れば `sqlEngineOf` が DuckDB へ固定するので、ここへ来る回は
+             *   必ず DuckDB である(`engine === 'duckdb'` を重ねると、決める口が 2 つになる)。
+             */
+            ...(state.sqlPage.extraGuests.length > 0
+              ? { duckExtra: state.sqlPage.extraGuests.map((g) => ({ lid: g.lid, name: g.name })) }
+              : {}),
           },
         ],
       };
@@ -4591,7 +4676,7 @@ function reduceCore(
        *   `.sqlite` の話で断るので、`.parquet` を選んだ user には意味が通らない。
        * ⚠ `running` を立てない ── 立てると、答えが来ないまま押せなくなる。
        */
-      const why = schemaUnavailable(state.sqlPage.guest);
+      const why = schemaUnavailable(state.sqlPage.guest, state.sqlPage.extraGuests.length);
       if (why !== null) {
         return { state: { ...state, sqlPage: { ...state.sqlPage, error: why, saved: '' } }, events: [] };
       }
@@ -4636,7 +4721,7 @@ function reduceCore(
        *   **物語の順(相手を選ぶ → 図を開く)では 1 度も読めなかった**。
        * ⚠ 「採っています」のまま止めない(`loading: false`)。
        */
-      const erWhyOpen = schemaUnavailable(p.guest);
+      const erWhyOpen = schemaUnavailable(p.guest, p.extraGuests.length);
       if (erWhyOpen !== null) {
         return {
           state: {
@@ -4910,6 +4995,17 @@ function reduceCore(
       const events: DomainEvent[] = [
         { type: 'REQUEST_SQL_GUEST_CLOSE', prev: state.sqlPage.guestChosen },
       ];
+      /**
+       * 🔴 **足した相手は、1 件目を選び直したら全部外す**(#918 段⑦)。⚠ 外した分の控え
+       *   (手持ちの file)も**ここで手放す** ── 手放さないと、選び直すたびに
+       *   `File` を握ったまま積み上がる(不可侵指示 2026-07-27)。
+       */
+      if (state.sqlPage.extraGuests.length > 0) {
+        events.push({
+          type: 'REQUEST_SQL_EXTRA_RELEASE',
+          lids: state.sqlPage.extraGuests.map((g) => g.lid),
+        });
+      }
       if (action.lid !== '') {
         events.push({ type: 'REQUEST_SQL_GUEST_OPEN', lid: action.lid, name: action.name });
       }
@@ -4926,6 +5022,7 @@ function reduceCore(
           sqlPage: {
             ...state.sqlPage,
             guest: null,
+            extraGuests: [],
             guestError: '',
             guestPending: action.lid,
             // 🔴 選び所の見た目は、開けたかどうかに関わらずここで確定させる
@@ -4949,6 +5046,46 @@ function reduceCore(
           },
         },
         events,
+      };
+    }
+    /**
+     * 🔴 **調べる相手をもう 1 つ足す**(#918 段⑦。Gemini 裁定 2026-10-01 = 設問 1 は A、設問 2 は B)。
+     *
+     * ⚠ **確認は出さない**(設問 2 = B)── 代わりに字で言う(案内文と、作った表が通った直後の 1 行)。
+     *   足すと**器を作り直す**ので、作った表は消える(`DUCKDB_TABLE_RESET`)。
+     * ⚠ **足せない相手は断りの字を返す**(黙って何も起きない形を作らない)。断った回も
+     *   **控えは手放す**(手持ちの file を選んだ直後に断ると、`File` が握られたまま残る)。
+     * 🔑 開く仕事は無い ── 足した相手は DuckDB が走らせる回に読む(sqlite へは開かない)。
+     */
+    case 'ADD_SQL_SOURCE': {
+      const p = state.sqlPage;
+      const checked = checkAddSource(p.guest, p.extraGuests, { lid: action.lid, name: action.name });
+      /**
+       * ⚠ **使っている相手の控えは手放さない** ── 同じ lid をもう一度足した回(`はもう並べてあります`)に
+       *   手放すと、**使っている file を消す**。判定は lid の一致で見る(種類に寄りかからない)。
+       */
+      const inUse = p.guest?.lid === action.lid || p.extraGuests.some((e) => e.lid === action.lid);
+      if (!checked.ok) {
+        return {
+          state: { ...state, sqlPage: { ...p, error: checked.why } },
+          events: inUse ? [] : [{ type: 'REQUEST_SQL_EXTRA_RELEASE', lids: [action.lid] }],
+        };
+      }
+      const extras = [...p.extraGuests, { lid: action.lid, name: action.name }];
+      return withSqlSourceSet(state, extras);
+    }
+    /**
+     * 🔴 **足した相手を外す**(#918 段⑦)。⚠ 1 件目は外せない(選び所で別の相手を選ぶ ──
+     *   外す口は「足した分」にだけ在る)。足していない lid は**何もしない**(控えも手放さない)。
+     */
+    case 'REMOVE_SQL_SOURCE': {
+      const p = state.sqlPage;
+      if (!p.extraGuests.some((e) => e.lid === action.lid)) return { state, events: [] };
+      const extras = p.extraGuests.filter((e) => e.lid !== action.lid);
+      const next = withSqlSourceSet(state, extras);
+      return {
+        state: next.state,
+        events: [...next.events, { type: 'REQUEST_SQL_EXTRA_RELEASE', lids: [action.lid] }],
       };
     }
     /**
