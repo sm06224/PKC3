@@ -95,6 +95,7 @@ import type {
   KeyResult as QueryKeys,
 } from '@features/query/group-by';
 import { NO_KINDS, entryFilterOf, normalizeQuery, visibleOrder } from '@features/filter/title-filter';
+import { commandQueryOf } from '@features/palette/command-query';
 import { toggleKind } from '@features/filter/kind-filter';
 import { STRUCTURAL, type RelationKind } from '@features/relation/kinds';
 import { replaceAll } from '@features/markdown/body-replace';
@@ -4155,7 +4156,16 @@ function reduceCore(
           launcherReorder:
             normalizeQuery(action.query) === '' ? state.launcherReorder : false,
         },
-        events: [{ type: 'REQUEST_SEARCH', query: action.query }],
+        /**
+         * 🔴 **`>` で始まる字は、本文を探さない**(#274 段①)── 操作の名前を探している
+         *   のであって、`>` ごと SQL で全文検索しても当たりは 0 件で、worker を無駄に叩く。
+         * ⚠ 語は `filterQuery` に**写す**(欄の字の正本は state)。一覧を操作に替えるのは
+         *   描く側(`browse.ts`)で、ここは検索を撃たないことだけを決める。
+         */
+        events:
+          commandQueryOf(action.query) !== null
+            ? []
+            : [{ type: 'REQUEST_SEARCH', query: action.query }],
       };
     /**
      * 🔴 **種類の札を押した / もう一度押した**(#411)。

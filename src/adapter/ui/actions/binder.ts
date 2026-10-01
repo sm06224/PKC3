@@ -218,8 +218,17 @@ import { appPanes, applyPaneVisibility, refoldPeeked } from '@adapter/ui/render/
 import { appPhone } from '@adapter/ui/render/phone-layout';
 import { appKeymap, type KeymapStore } from '@adapter/ui/render/keymap';
 import { appOpenInEdit, OpenInEditStore } from '@adapter/ui/render/open-in-edit';
-import { chordOf, findCommand, isMac, typesCharacter, KEY_COMMANDS } from '@features/keymap';
-import { paletteRows } from '@features/palette/palette-rows';
+import {
+  chordOf,
+  findCommand,
+  isMac,
+  typesCharacter,
+  KEY_COMMANDS,
+  type KeyCommand,
+} from '@features/keymap';
+import { paletteRows, type PaletteRow } from '@features/palette/palette-rows';
+import { commandQueryOf } from '@features/palette/command-query';
+import { paintCommandList } from '@adapter/ui/render/command-list';
 import {
   blockMenuActions,
   ADD_PLACE_ACTION,
@@ -4344,6 +4353,73 @@ export function runGlobalCommand(
 }
 
 /**
+ * 🔴 **操作の一覧の行を組む口は 1 つ**(#274 段①)。
+ *
+ * ⚠ 操作のパレット(`openPaletteFor`)と、左の列の探す欄に `>` を打ったときの一覧が
+ *   **同じ行を出す** ── 「いま押せるか」の判定(`runGlobalCommand` の dry)・押せない理由・
+ *   絞り込み(`paletteRows`)を 2 本に分けると、同じ語に別の答えが出る(§7)。
+ * @param target 開いた瞬間に焦点が在った本文の欄(記法の命令が押せるかを決める)。
+ *   ⚠ 左の列の欄から呼ぶときは `null`(記法は本文の欄に居ないと押せない)
+ */
+export function commandRowsFor(
+  root: HTMLElement,
+  dispatcher: Dispatcher,
+  keymap: KeymapStore,
+  query: string,
+  target: HTMLTextAreaElement | null,
+): readonly PaletteRow[] {
+  const ready = new Set<string>();
+  for (const c of KEY_COMMANDS) {
+    /**
+     * ⚠ **この門は「いま」何も止めていない**(2026-08-26 の変異試験 M9 が
+     *   SURVIVED で教えた)── 全域でない命令は `runGlobalCommand` の
+     *   どの枝にも当たらず、どのみち `false` が返る。
+     * 🔑 **不変条件のほうを pin してある**:`SHORTCUT_BUTTON` と特例に
+     *   載るのは全域の命令だけ ── `tests/adapter/keymap-binding.test.ts` の
+     *   「全域でない命令が受け手の表に在る」が見る(壊すと落ちるのを実測済み)。
+     * ⚠ だからここを消す変異が生き延びても **test の穴ではない** ──
+     *   残してあるのは、表に全域でない命令が紛れた日に
+     *   **この面が「押せる」と嘘をつかない**ためである
+     *   (CLAUDE.md「『これが無いと壊れる』とは書かない」)。
+     */
+    /**
+     * 🔴 **記法は、開いたとき本文の欄に居たなら押せる**(#425 段②-b)。
+     * ⚠ 全域の命令ではないので下の門を通らない ── ここで先に拾う。
+     * 🔑 判定は `applyFormatTo` と**同じ表**(`FORMAT_OF`)を見る ──
+     *   別の一覧を持つと「出るのに押せない」が静かに生まれる(§7)。
+     */
+    if (target !== null && editorCommand(c.id)) {
+      ready.add(c.id);
+      continue;
+    }
+    if (!c.contexts.includes('global')) continue;
+    if (runGlobalCommand(c.id, root, dispatcher, keymap, noop, noop, true)) ready.add(c.id);
+  }
+  /**
+   * ⚠ **自分自身は並べない** ── パレットからパレットを開く行に意味は無い。
+   * 🔑 外すのは**ここ 1 か所** ── `ready` の側でも外すと、片方を消しても
+   *   もう片方が救うので、**どちらが効いているか分からなくなる**(§1)。
+   */
+  /**
+   * 🔴 **押せない理由は、そのボタン自身から引く**(#791 ④。user 裁定 2026-09-08)。
+   *
+   * ⚠ 直す前は `keymap.ts` の `note`(静的な字)しか出ておらず、
+   *   ①**出口(保存 / キャンセル)を言わない** ②**保存に失敗している保護中でも
+   *   「編集中は効きません」と出る**(#516 が直したはずの形)を踏んでいた。
+   * 🔑 `SHORTCUT_BUTTON` で当のボタンを引き、`setBlocked` が置いた
+   *   `data-pkc-blocked` を読む ── ここで phase を読み直すと**判定が 2 か所**になる(§7)。
+   */
+  const blockedReason = (id: string): string | null => {
+    const sel = SHORTCUT_BUTTON[id];
+    if (sel === undefined) return null;
+    return root.querySelector(sel)?.getAttribute(HINT_BLOCKED) ?? null;
+  };
+  return paletteRows(query, keymap.getBindings(), ready, isMac(), blockedReason).filter(
+    (r) => r.id !== 'open-palette',
+  );
+}
+
+/**
  * 🔴 **操作を名前で探す面を開く**(#425 段①)。
  *
  * ⚠ **一覧は開いた瞬間に固めない** ── `paletteRows` は打つたびに呼ばれ、
@@ -4384,57 +4460,7 @@ export function openPaletteFor(
    */
   const range =
     target === null ? null : { start: target.selectionStart, end: target.selectionEnd };
-  const rows = (query: string) => {
-    const ready = new Set<string>();
-    for (const c of KEY_COMMANDS) {
-      /**
-       * ⚠ **この門は「いま」何も止めていない**(2026-08-26 の変異試験 M9 が
-       *   SURVIVED で教えた)── 全域でない命令は `runGlobalCommand` の
-       *   どの枝にも当たらず、どのみち `false` が返る。
-       * 🔑 **不変条件のほうを pin してある**:`SHORTCUT_BUTTON` と特例に
-       *   載るのは全域の命令だけ ── `tests/adapter/keymap-binding.test.ts` の
-       *   「全域でない命令が受け手の表に在る」が見る(壊すと落ちるのを実測済み)。
-       * ⚠ だからここを消す変異が生き延びても **test の穴ではない** ──
-       *   残してあるのは、表に全域でない命令が紛れた日に
-       *   **この面が「押せる」と嘘をつかない**ためである
-       *   (CLAUDE.md「『これが無いと壊れる』とは書かない」)。
-       */
-      /**
-       * 🔴 **記法は、開いたとき本文の欄に居たなら押せる**(#425 段②-b)。
-       * ⚠ 全域の命令ではないので下の門を通らない ── ここで先に拾う。
-       * 🔑 判定は `applyFormatTo` と**同じ表**(`FORMAT_OF`)を見る ──
-       *   別の一覧を持つと「出るのに押せない」が静かに生まれる(§7)。
-       */
-      if (target !== null && editorCommand(c.id)) {
-        ready.add(c.id);
-        continue;
-      }
-      if (!c.contexts.includes('global')) continue;
-      if (runGlobalCommand(c.id, root, dispatcher, keymap, noop, noop, true)) ready.add(c.id);
-    }
-    /**
-     * ⚠ **自分自身は並べない** ── パレットからパレットを開く行に意味は無い。
-     * 🔑 外すのは**ここ 1 か所** ── `ready` の側でも外すと、片方を消しても
-     *   もう片方が救うので、**どちらが効いているか分からなくなる**(§1)。
-     */
-    /**
-     * 🔴 **押せない理由は、そのボタン自身から引く**(#791 ④。user 裁定 2026-09-08)。
-     *
-     * ⚠ 直す前は `keymap.ts` の `note`(静的な字)しか出ておらず、
-     *   ①**出口(保存 / キャンセル)を言わない** ②**保存に失敗している保護中でも
-     *   「編集中は効きません」と出る**(#516 が直したはずの形)を踏んでいた。
-     * 🔑 `SHORTCUT_BUTTON` で当のボタンを引き、`setBlocked` が置いた
-     *   `data-pkc-blocked` を読む ── ここで phase を読み直すと**判定が 2 か所**になる(§7)。
-     */
-    const blockedReason = (id: string): string | null => {
-      const sel = SHORTCUT_BUTTON[id];
-      if (sel === undefined) return null;
-      return root.querySelector(sel)?.getAttribute(HINT_BLOCKED) ?? null;
-    };
-    return paletteRows(query, keymap.getBindings(), ready, isMac(), blockedReason).filter(
-      (r) => r.id !== 'open-palette',
-    );
-  };
+  const rows = (query: string) => commandRowsFor(root, dispatcher, keymap, query, target);
   void pickCommandInApp(root, rows).then((picked) => {
     if (picked === null) return;
     // ⚠ 既定を止める口は要らない(打鍵ではないので) ── 実行だけする
@@ -4484,6 +4510,107 @@ export function openPaletteFor(
     }
     applyFormatTo(target, picked, range ?? undefined, notify);
   });
+}
+
+/**
+ * 🔴 **左の列の探す欄に `>` を打ったときの、操作の実行**(#274 段①。姿 = D)。
+ *
+ * ## 実行の道は 1 本
+ *
+ * 宣言の無い操作は `runGlobalCommand`(鍵・パレットと同じ道)をそのまま呼ぶ ──
+ * ⚠ 2 本目の実行経路を作らない(§7)。**宣言のある操作(`KeyCommand.needs`)だけ**、
+ * 選んだ後に相手のノートを `pickEntryInApp`(題名で探して選ぶ小窓)で聞いてから実行する。
+ */
+export interface CommandEnv {
+  readonly root: HTMLElement;
+  readonly dispatcher: Dispatcher;
+  readonly keymap: KeymapStore;
+  /** 🔴 画面へ 1 行出す口(#522)。⚠ optional にしない。 */
+  readonly notify: (text: string) => void;
+}
+
+/** 相手のノートが決まったあとに走る実体。 */
+export type CommandWithEntry = (lid: string, env: CommandEnv) => void;
+
+/**
+ * 🔑 **相手のノートを選んでから実行する操作の実体**(`KeyCommand.needs: 'entry'` と 1:1)。
+ *
+ * 🔴 2026-10-01 時点で **0 件** ── 既存の「移す」系(フォルダへ移す… / 反対のペインへ移す)は
+ * 実行の中で行き先を**自分で聞く**ので、宣言は要らなかった。欄と配線だけ先に用意してある。
+ * ⚠ `needs` を足したら、ここにも同じ id を足す(食い違いは
+ *   `tests/adapter/command-list.test.ts` が全数で見る)。
+ */
+export const COMMAND_WITH_ENTRY: Readonly<Record<string, CommandWithEntry>> = {};
+
+/**
+ * 一覧の行を実行する。
+ * @returns 実行を始めたか(`false` = 受け付けなかった。⚠ 理由は `notify` で言う)
+ * @param opts.onDone 実行が**済んだ**ときだけ呼ぶ(相手を選ぶ小窓をやめたときは呼ばない ──
+ *   打った字を残して、選び直せるようにする)
+ * @param opts.commands / opts.withEntry test が差し替える(既定は本物の表)
+ */
+export function runCommandRow(
+  id: string,
+  env: CommandEnv,
+  opts: {
+    readonly onDone?: () => void;
+    readonly commands?: readonly KeyCommand[];
+    readonly withEntry?: Readonly<Record<string, CommandWithEntry>>;
+  } = {},
+): boolean {
+  const cmd = (opts.commands ?? KEY_COMMANDS).find((c) => c.id === id);
+  if (cmd === undefined) return false;
+  if (cmd.needs === 'entry') {
+    const exec = (opts.withEntry ?? COMMAND_WITH_ENTRY)[id];
+    if (exec === undefined) {
+      env.notify('この操作はいま実行できません');
+      return false;
+    }
+    void pickEntryInApp(
+      env.root,
+      (query) => {
+        const now = env.dispatcher.getState();
+        const items = entryPickRows(now.entryMetas, now.order, query, null);
+        return {
+          items,
+          note: entryPickNote(items.length, entryPickTotal(now.entryMetas, now.order, query, null)),
+        };
+      },
+      { title: `${cmd.label}(相手のノートを選びます)` },
+    ).then((lid) => {
+      if (lid === null) return;
+      exec(lid, env);
+      opts.onDone?.();
+    });
+    return true;
+  }
+  if (!runGlobalCommand(id, env.root, env.dispatcher, env.keymap, noop, env.notify)) {
+    // ⚠ 描いてから状態が動いて押せなくなった回 ── 黙らない(dead click にしない)
+    env.notify('この操作はいま実行できません');
+    return false;
+  }
+  opts.onDone?.();
+  return true;
+}
+
+/**
+ * 🔴 **`>` を打っている間、操作の一覧を描き直す**(#274 段①)。
+ *
+ * ⚠ 「いま押せるか」は**画面のボタン**で決まる(`commandRowsFor`)ので、打鍵のときだけでなく
+ *   **状態が動くたびに**呼ぶ ── 打った後にノートを選ぶと押せる操作が変わる。
+ *   ⚠ 描く側が指紋を見て、変わらないなら触らない(矢印で動かしている焦点を消さない)。
+ * ⚠ `>` でないとき・器が無い面では何もしない。
+ */
+export function repaintCommandList(
+  root: HTMLElement,
+  dispatcher: Dispatcher,
+  keymap: KeymapStore,
+): void {
+  const q = commandQueryOf(dispatcher.getState().filterQuery);
+  if (q === null) return;
+  const host = root.querySelector<HTMLElement>('[data-pkc-region="command-list"]');
+  if (host === null) return;
+  paintCommandList(host, commandRowsFor(root, dispatcher, keymap, q, null));
 }
 
 
@@ -5300,6 +5427,27 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'open-palette': (dispatcher, _target, services, root) =>
     openPaletteFor(root, dispatcher, appKeymap, (t) => services.showStatus?.(t)),
+  /**
+   * 🔴 **左の列に出た操作の一覧の行を押した**(#274 段①。姿 = D)。
+   * ⚠ 実行は `runCommandRow` ── 鍵・パレットと同じ `runGlobalCommand` の道(2 本目を作らない)。
+   * ⚠ 済んだら欄を空にして、ノートの一覧へ戻す(`>` を残すと、操作を実行した後も
+   *   一覧が操作のまま居座る)。⚠ **実行が欄を書き換えていたら触らない**(別の語を消さない)。
+   */
+  'run-command-row': (dispatcher, target, services, root) => {
+    const id = target.closest<HTMLElement>('[data-pkc-command]')?.getAttribute('data-pkc-command');
+    if (id === null || id === undefined) return;
+    const from = dispatcher.getState().filterQuery;
+    runCommandRow(
+      id,
+      { root, dispatcher, keymap: appKeymap, notify: (t) => services.showStatus?.(t) },
+      {
+        onDone: () => {
+          if (dispatcher.getState().filterQuery === from)
+            dispatcher.dispatch({ type: 'SET_ENTRY_FILTER', query: '' });
+        },
+      },
+    );
+  },
   /**
    * 🔴 **コピーした物を選ぶ**(#678)── **もう一度コピーする**(その場へ差し込まない)。
    *
@@ -14234,6 +14382,29 @@ export function bindActions(
       return;
     }
     /**
+     * 🔴 **操作の一覧の行の上で、`↑` `↓` で行を移る**(#274 段①)。
+     * ⚠ 先頭から `↑` で探す欄へ戻る ── 降りた手が、打ち直しに戻れないと行き止まりになる。
+     * ⚠ `Enter` / `Space` は行(ボタン)の既定が実行する ── ここでは握らない。
+     */
+    if (
+      el instanceof HTMLButtonElement &&
+      el.matches('[data-pkc-field="command-row"]') &&
+      (ke.key === 'ArrowDown' || ke.key === 'ArrowUp')
+    ) {
+      const rows = Array.from(
+        root.querySelectorAll<HTMLButtonElement>(
+          '[data-pkc-region="command-list"] [data-pkc-field="command-row"]',
+        ),
+      ).filter((b) => !b.disabled);
+      const at = rows.indexOf(el);
+      ke.preventDefault();
+      if (ke.key === 'ArrowDown') rows[at + 1]?.focus();
+      else if (at <= 0)
+        root.querySelector<HTMLInputElement>('[data-pkc-field="entry-filter"]')?.focus();
+      else rows[at - 1]?.focus();
+      return;
+    }
+    /**
      * 🔴 **一覧の絞り込みの欄から、そのまま行へ降りられる**(#1042 C2)。
      * ⚠ 2 ペインの絞り込み(下の `dual-filter`)と**同じ形**── これが無いと
      *   「打って絞る → マウスで行を押す」になり、キーボードだけで完結しない。
@@ -14241,6 +14412,35 @@ export function bindActions(
      *   欄を空にする「絞りを外す」ボタンは別に在る)。それ以外の鍵は入力へ通す。
      */
     if (el instanceof HTMLInputElement && el.matches('[data-pkc-field="entry-filter"]')) {
+      /**
+       * 🔴 **`>` を打っている間は、鍵が操作の一覧に効く**(#274 段①)。
+       * ⚠ `Enter` = **押せる先頭の行を実行**(操作のパレットと同じ ── 一覧へ焦点を移して
+       *   から押させると、絞って即実行という速さが消える)。⚠ 変換確定の Enter では実行しない。
+       * ⚠ `↓` = 先頭の行へ降りる(ノートの一覧と同じ ── 行は押せるボタンなので、
+       *   そこから `Enter` / `Space` で実行できる)。
+       */
+      if (commandQueryOf(el.value) !== null) {
+        const rows = (): HTMLButtonElement[] =>
+          Array.from(
+            root.querySelectorAll<HTMLButtonElement>(
+              '[data-pkc-region="command-list"] [data-pkc-field="command-row"]',
+            ),
+          );
+        if (ke.key === 'Enter' && !ke.isComposing) {
+          const first = rows().find((b) => !b.disabled);
+          if (first === undefined) return;
+          ke.preventDefault();
+          first.click();
+          return;
+        }
+        if (ke.key === 'ArrowDown') {
+          const first = rows().find((b) => !b.disabled);
+          if (first === undefined) return;
+          ke.preventDefault();
+          first.focus();
+        }
+        return;
+      }
       if (ke.key === 'ArrowDown') {
         const first = listRowEls()[0]?.getAttribute('data-pkc-entry') ?? null;
         if (first === null) return;
