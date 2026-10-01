@@ -148,6 +148,21 @@ export function collectionBarItems(): readonly CollectionBarItem[] {
 }
 
 /**
+ * 🔴 **いま開いている面の印を、`data-pkc-view` を持つボタンの全部へ当てる**(#1206 D1)。
+ *
+ * ⚠ 探す先は**帯(左の列の中)だけでなく畳んだ縁(shell 直下)も含む** ── 直す前は左の列の
+ *   中だけを探したので、列を畳んで縁の「システム」を押すと面は開くのに**縁のボタンに印が付かず**、
+ *   「もう一度押すと閉じる」が分からなかった。
+ * 🔑 引数は `shell` を渡す(縁は shell の子なので、列の中だけを渡すと同じ欠陥に戻る)。
+ */
+export function markCollectionView(scope: ParentNode, view: string): void {
+  for (const btn of scope.querySelectorAll('[data-pkc-view]')) {
+    if (btn.getAttribute('data-pkc-view') === view) btn.setAttribute('data-pkc-active', '');
+    else btn.removeAttribute('data-pkc-active');
+  }
+}
+
+/**
  * 1 つぶんのボタンを組む。⚠ **帯と縁が同じ関数で組む** ── 属性を手で写さない。
  * ⚠ 帯の出力は #582 より前と**1 バイトも変えない**(`aria-label` は縁が足す)。
  */

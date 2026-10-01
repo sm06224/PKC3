@@ -57,6 +57,7 @@ import { appInlineCodeCopy } from '@adapter/ui/render/inline-code-copy';
 import { appPhoneLinks } from '@adapter/ui/render/phone-links';
 import { appDateLinks } from '@adapter/ui/render/date-links';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
+import { markCollectionView } from '@adapter/ui/render/collection-bar';
 import { installAppendAutofold } from '@adapter/ui/render/append-autofold';
 import { appPaneSizes, applyPaneSizes } from '@adapter/ui/render/pane-size';
 import { appGroupFold } from '@adapter/ui/render/group-fold';
@@ -1282,12 +1283,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   let markedView: string | null = null;
   const markView = (view: string) => {
     if (view === markedView) return;
-    // ⚠ 設定ボタンは**左の列**へ移った(P10 で上の帯を撤去)── 探す先も変える
-    for (const btn of regions.sidebar.querySelectorAll('[data-pkc-view]')) {
-      if (btn.getAttribute('data-pkc-view') === view)
-        btn.setAttribute('data-pkc-active', '');
-      else btn.removeAttribute('data-pkc-active');
-    }
+    // ⚠ 設定ボタンは**左の列**へ移った(P10 で上の帯を撤去)── 探す先も変える。
+    // 🔴 探す先は shell 全体(#1206 D1)── 畳んだ縁のボタンも同じ印を持つ
+    markCollectionView(root, view);
     markedView = view;
   };
   markView('detail');

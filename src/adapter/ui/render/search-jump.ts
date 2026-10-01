@@ -192,9 +192,14 @@ export interface SearchJumpBarHandle {
   dispose(): void;
 }
 
-/** 帯の字。⚠ 当たりが 1 件も無いときは、その事実を言う(数字の 0 で黙らない)。 */
+/**
+ * 帯の字。⚠ 当たりが 1 件も無いときは、その事実を言う(数字の 0 で黙らない)。
+ * 🔴 0 件の字は**数えない範囲まで言う**(#1206 D6)── 抜粋に語が見えているのに「当たった所は
+ *   ありません」と断定すると嘘になる(太字・リンクをまたぐ語 / 図や html の囲みの中は数えない
+ *   ── `search-hits.ts`、設計 doc §3)。
+ */
 export function searchJumpLabel(total: number, index: number): string {
-  return total <= 0 ? '本文に当たった所はありません' : `${index + 1}/${total} 件`;
+  return total <= 0 ? '本文の字には当たりませんでした(太字やリンクをまたぐ語、図の中は数えません)' : `${index + 1}/${total} 件`;
 }
 
 /**

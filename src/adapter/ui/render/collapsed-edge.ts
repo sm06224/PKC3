@@ -28,7 +28,7 @@
  *   「畳んだのに縁が無い」「戻したのに縁が残る」が起きる)。
  * - スマホ用画面は列を畳まない(`applyPaneVisibility` が `sidebar` を写さない)ので、ここへも来ない。
  */
-import { collectionBarButton, collectionBarItems } from './collection-bar';
+import { collectionBarButton, collectionBarItems, markCollectionView } from './collection-bar';
 
 const EDGE_REGION = 'collapsed-edge';
 
@@ -67,6 +67,13 @@ export function paintCollapsedEdge(shell: HTMLElement, collapsed: boolean): HTML
     if (btn.title === '') btn.title = item.label;
     edge.append(btn);
   }
+  // 🔴 いま開いている面の印を**作ったときに当て直す**(#1206 D1)。縁は畳んでいる間だけ在る器なので、
+  //   作り直すたびに印が消える ── `markView`(main.ts)は同じ面なら早く戻るので、そちらには任せられない。
+  //   現在の面は、DOM に残っている左の列のボタンの印から読む(列は畳んでも消えず、`display: none` なだけ)。
+  const current = shell
+    .querySelector('[data-pkc-region="sidebar"] [data-pkc-view][data-pkc-active]')
+    ?.getAttribute('data-pkc-view');
+  if (current !== null && current !== undefined) markCollectionView(edge, current);
   // 左の掴む帯の**すぐ後ろ**へ(同じマスに載る)。⚠ 一覧(`sidebar`)より後ろなので、
   //   鍵の受け手が `querySelector` で引く先は従来どおり一覧の側の 1 件目である。
   const grip = childWhere(

@@ -4427,9 +4427,22 @@ export function commandRowsFor(
     if (sel === undefined) return null;
     return root.querySelector(sel)?.getAttribute(HINT_BLOCKED) ?? null;
   };
-  return paletteRows(query, keymap.getBindings(), ready, isMac(), blockedReason).filter(
-    (r) => r.id !== 'open-palette',
-  );
+  /**
+   * 🔴 **左の `>` の一覧では、本文の欄が要る操作の理由を「どうすれば呼べるか」で言う**(#1206 D3)。
+   * ⚠ 直す前は「2 ペインの編集 / 行の編集にいるときだけ効きます」── 左で打っている限り
+   *   その状態は作れず、**行き止まりに読めた**。⚠ 宛先が `null`(左の欄から)のときだけ ──
+   *   本文の欄から開いたパレットの理由は変えない。
+   * 🔑 「本文の欄が要る」の判定は `editorCommand` **1 つ**(上の `ready` と同じ表)。
+   */
+  const needsEditorField = target === null ? editorCommand : undefined;
+  return paletteRows(
+    query,
+    keymap.getBindings(),
+    ready,
+    isMac(),
+    blockedReason,
+    needsEditorField,
+  ).filter((r) => r.id !== 'open-palette');
 }
 
 /**
@@ -14491,8 +14504,18 @@ export function bindActions(
     if (
       el instanceof HTMLButtonElement &&
       el.matches('[data-pkc-field="command-row"]') &&
-      (ke.key === 'ArrowDown' || ke.key === 'ArrowUp')
+      (ke.key === 'ArrowDown' || ke.key === 'ArrowUp' || ke.key === 'Escape')
     ) {
+      /**
+       * 🔴 **行の上の `Esc` は、探す欄へ焦点を戻すだけ**(#1206 D4)。⚠ 直す前は行の上で
+       *   `Esc` を押すと**閉じる操作へ落ちて、開いている本文が閉じた**(降りた手を戻したかっただけ)。
+       *   `>` の字は残す(消すのは探す欄の `Esc` の仕事)── 戻って打ち直せる。
+       */
+      if (ke.key === 'Escape') {
+        ke.preventDefault();
+        root.querySelector<HTMLInputElement>('[data-pkc-field="entry-filter"]')?.focus();
+        return;
+      }
       const rows = Array.from(
         root.querySelectorAll<HTMLButtonElement>(
           '[data-pkc-region="command-list"] [data-pkc-field="command-row"]',
@@ -14529,6 +14552,12 @@ export function bindActions(
             ),
           );
         if (ke.key === 'Enter' && !ke.isComposing) {
+          /**
+           * 🔴 **`>` だけのときの `Enter` は何もしない**(#1206 D8)。⚠ 直す前は先頭の行
+           *   (空の探し語では「ノートを作る」)が走り、**打った覚えのない新しいノートの編集に入った**。
+           *   行の一覧は出したまま ── 名前を 1 字でも打てば、そこから実行できる。
+           */
+          if ((commandQueryOf(el.value) ?? '').trim() === '') return;
           const first = rows().find((b) => !b.disabled);
           if (first === undefined) return;
           ke.preventDefault();
