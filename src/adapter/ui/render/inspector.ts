@@ -51,10 +51,11 @@ import { formatStoredDate, storedInstantIso } from '@features/datetime/stored-da
 import { readTags, sameTag } from '@features/flavor/tags';
 import { collectEntryTags } from '@features/flavor/entry-tags';
 import { extractHeadingsFromMarkdown } from '@features/markdown/markdown-toc';
+import { listTaskItems } from '@features/markdown/task-count';
 import { listAssetUses, type AssetUse } from '@features/asset/asset-refs-in-body';
 import { frontmatterProblem } from '@features/markdown/frontmatter';
 import { externalImageUrls } from '@features/asset/inline-url-adopt';
-import { formatBodyStats } from '@features/stats/body-stats';
+import { formatBodyStats, formatTaskProgress } from '@features/stats/body-stats';
 import {
   CREATABLE_KINDS,
   RELATION_LABELS,
@@ -154,6 +155,12 @@ export class InspectorRenderer {
    *   ⚠ lid で憶えると、同じノートを書き換えたときに古い枚数が残る。
    */
   private imgCount: { body: string; count: number } | null = null;
+
+  /**
+   * 🔴 **チェック項目の件数**(#1216)。`imgCount` と同じ作り ── 本文の字を鍵に憶え、
+   * 描き直しのたびに行を走査し直さない。⚠ 本文が読めなくなったら手放す(常駐させない)。
+   */
+  private taskCount: { body: string; total: number; done: number } | null = null;
 
   /**
    * 🔴 **説明文の空の添付に出す「元の file 名」**(#1207 I4)。
@@ -878,6 +885,36 @@ export class InspectorRenderer {
         setText(statsDd, formatBodyStats(bodyChars, openedBody));
       }
     }
+    /**
+     * 🔴 **チェック項目の進み具合**(#1216)。「文字数」の直下に 1 行。
+     * ⚠ **0 件なら行ごと畳む**(`<dt>` も一緒に ── 目次・添付と同じ作法)。本文が読めていない
+     *   (一覧を眺めているだけ / フォルダ)ときも畳む ── 嘘の「0 件」を出さない。
+     * ⚠ 数えるのは `listTaskItems`(かんばんの札と同じ。押せる物だけ)。
+     * 🔑 押すと本文が書き換わり、この面は状態が動くたびに描き直すので、新しい配線は無い。
+     *   ⚠ 編集中は**保存後に**数が動く(文字数と同じ限界)。
+     */
+    const tasksDd = this.rows.get('inspector-tasks');
+    if (tasksDd) {
+      const dt = tasksDd.previousElementSibling;
+      const taskBody = state.openBody?.lid === meta.lid ? state.openBody.body : null;
+      let text: string | null = null;
+      if (taskBody === null) {
+        this.taskCount = null;
+      } else {
+        if (this.taskCount?.body !== taskBody) {
+          const items = listTaskItems(taskBody);
+          this.taskCount = {
+            body: taskBody,
+            total: items.length,
+            done: items.filter((i) => i.done).length,
+          };
+        }
+        text = formatTaskProgress(this.taskCount.total, this.taskCount.done);
+      }
+      tasksDd.hidden = text === null;
+      if (dt instanceof HTMLElement) dt.hidden = text === null;
+      if (text !== null) setText(tasksDd, text);
+    }
     this.paintDate(meta, editing, blockedNote);
     this.paintRelationAdd(editing, blockedNote);
     // 🔴 **どのファイルから来たか**を出す(2026-08-05)── 出さないと、書き戻しが
@@ -1168,6 +1205,7 @@ export class InspectorRenderer {
     row('作成', 'inspector-created');
     row('更新', 'inspector-updated');
     row('文字数', 'inspector-stats');
+    row('チェック項目', 'inspector-tasks');
     /**
      * 🔴 **ノート 1 件の日付**(#292 段④。frontmatter の `date:`)。
      *
