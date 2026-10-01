@@ -1359,6 +1359,41 @@ describe('findAssetOwner(#100 段②)', () => {
     expect(hit.lid).toBe('fa-att');
   });
 
+  it('🔴 持ち主の元の file 名(attachment.name)も返る。名前が空なら null(#1207 I4)', async () => {
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('fa-att', ATT, { archetype: 'attachment', entryOrder: 1 }),
+      checkpoint: false,
+    });
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('fa-noname', ATT.replace('ast-own-1', 'ast-own-2').replace('p.png', ''), {
+        archetype: 'attachment',
+        entryOrder: 2,
+      }),
+      checkpoint: false,
+    });
+    const named = (await request({ op: 'findAssetOwner', cid: 'c1', assetKey: 'ast-own-1' })) as {
+      lid: string | null;
+      name: string | null;
+    };
+    expect(named).toEqual({ lid: 'fa-att', name: 'p.png' });
+    const blank = (await request({ op: 'findAssetOwner', cid: 'c1', assetKey: 'ast-own-2' })) as {
+      lid: string | null;
+      name: string | null;
+    };
+    expect(blank, '名前が空なのに空文字を返した(呼び側が id へ戻せない)').toEqual({
+      lid: 'fa-noname',
+      name: null,
+    });
+    const miss = (await request({ op: 'findAssetOwner', cid: 'c1', assetKey: 'ast-none' })) as {
+      name: string | null;
+    };
+    expect(miss.name).toBeNull();
+  });
+
   it('見つからなければ null(呼び側が断る ── 黙る dead click にしない)', async () => {
     const miss = (await request({
       op: 'findAssetOwner',

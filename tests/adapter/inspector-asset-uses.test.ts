@@ -49,12 +49,13 @@ beforeEach(() => {
   document.body.textContent = '';
 });
 
-function setup(body: string | null) {
+function setup(body: string | null, resolver?: (key: string) => Promise<string | null>) {
   const root = document.createElement('div');
   document.body.append(root);
   const d = new Dispatcher();
   const regions = buildShell(root);
   const inspector = new InspectorRenderer(regions.inspector);
+  if (resolver) inspector.setAssetNameResolver(resolver);
   d.onState((s) => inspector.render(s));
   bindActions(root, d);
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1')], relations: [] });
@@ -130,9 +131,66 @@ describe('添付の行(#1170)', () => {
     expect(rows(root).map((b) => b.textContent)).toEqual(['x']);
   });
 
-  it('名前が空の参照は key を短くして出す', () => {
+  it('名前が空の参照は key を短くして出す(元の file 名を引く口が無いとき)', () => {
     const { root } = setup('![](asset:ast-0123456789abcdef)\n');
     expect(rows(root)[0]!.textContent).toBe('ast-0123…');
+  });
+});
+
+/**
+ * 🔴 **見出しは「本文で使う添付」、説明文が空なら元の file 名**(#1207 I4。🟣 Gemini 裁定 2026-10-01 = A)。
+ *
+ * 右の列の「添付」は、押すと添付ではなく本文の使っている場所へ飛ぶ ── 名前が「添付」だけだと、
+ * 添付の一覧に見える。説明文の空の画像は、内部の id(`ast-0123…`)が行の字になっていた。
+ */
+describe('「本文で使う添付」の名前(#1207 I4)', () => {
+  const EMPTY = '![](asset:ast-0123456789abcdef)\n';
+  const headingOf = (root: HTMLElement): string =>
+    (box(root).previousElementSibling as HTMLElement).textContent ?? '';
+
+  it('🔴 見出しの字は「本文で使う添付」(「添付」だけだと一覧に見える)', () => {
+    const { root } = setup(BODY);
+    expect(headingOf(root)).toBe('本文で使う添付');
+  });
+
+  it('🔴 説明文が空なら、引けた元の file 名を出す(押す先の key は変わらない)', async () => {
+    const resolve = vi.fn(async () => '現場写真.png' as string | null);
+    const { root } = setup(EMPTY, resolve);
+    await settle();
+    expect(resolve, '元の名前を引いていない').toHaveBeenCalledWith('ast-0123456789abcdef');
+    expect(rows(root)[0]!.textContent, '内部の id のまま').toBe('現場写真.png');
+    expect(rows(root)[0]!.title, '説明も名前になっていない').toContain('「現場写真.png」');
+    expect(rows(root)[0]!.getAttribute('data-pkc-asset-key')).toBe('ast-0123456789abcdef');
+  });
+
+  it('🔴 説明文が在るなら説明文を出し、名前は引かない(対照群)', async () => {
+    const resolve = vi.fn(async () => '別の名前.png' as string | null);
+    const { root } = setup('![設計図](asset:ast-a)\n', resolve);
+    await settle();
+    expect(rows(root)[0]!.textContent).toBe('設計図');
+    expect(resolve, '説明文が在るのに名前を引いた').not.toHaveBeenCalled();
+  });
+
+  it('🔴 名前が分からない(null / 引けない)ときは今までどおり id を短くして出す', async () => {
+    const none = setup(EMPTY, async () => null);
+    await settle();
+    expect(rows(none.root)[0]!.textContent).toBe('ast-0123…');
+    document.body.textContent = '';
+    const failed = setup(EMPTY, async () => {
+      throw new Error('worker down');
+    });
+    await settle();
+    expect(rows(failed.root)[0]!.textContent, '引けないときに行が消えた / 壊れた').toBe('ast-0123…');
+  });
+
+  it('🔴 描き直しのたびには引かない(1 つの key につき 1 度)/ 引けた名前は描き直しでも残る', async () => {
+    const resolve = vi.fn(async () => '現場写真.png' as string | null);
+    const { root, d } = setup(EMPTY, resolve);
+    await settle();
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: EMPTY + '\n追記\n' });
+    await settle();
+    expect(resolve.mock.calls.length, '描き直しのたびに引いている').toBe(1);
+    expect(rows(root)[0]!.textContent, '描き直したら名前が id へ戻った').toBe('現場写真.png');
   });
 });
 

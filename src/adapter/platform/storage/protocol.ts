@@ -888,8 +888,12 @@ export interface ResultMap {
   getBody: string | null;
   /** 読めたものだけ(要求順)。⚠ 無い lid は**黙って落ちる**。 */
   getBodies: Array<{ lid: string; body: string }>;
-  /** 所有 entry の lid。見つからなければ null(呼び側が user へ断る)。 */
-  findAssetOwner: { lid: string | null };
+  /**
+   * 所有 entry の lid。見つからなければ null(呼び側が user へ断る)。
+   * `name` は所有 entry の `attachment.name`(元の file 名)── 読めない / 空なら null
+   * (#1207 I4: 右の列の「本文で使う添付」が、説明文の空の添付に file 名を出す)。
+   */
+  findAssetOwner: { lid: string | null; name: string | null };
   /**
    * 当たった lid。⚠ **並びは entry_order**(一覧と同じ)── 関連度順にしない。
    * 一覧の並びが検索のたびに変わると、user は「どこへ行ったか」を見失う。

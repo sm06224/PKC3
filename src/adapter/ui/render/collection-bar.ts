@@ -14,7 +14,13 @@
  * ⚠ `data-pkc-action` の名前は**既存のまま**(受け手を増やさない)。
  */
 import { SEALED_VIEWS } from '@features/sealed';
-import { HINT_BASE, HINT_COMMAND, hintTitle } from './shortcut-hint';
+import {
+  HINT_ALSO_COMMAND,
+  HINT_ALSO_SUFFIX,
+  HINT_BASE,
+  HINT_COMMAND,
+  hintTitle,
+} from './shortcut-hint';
 import { COLLECTION_COMMANDS } from './commands';
 import { iconButton, markBarTile } from './icons';
 
@@ -96,7 +102,12 @@ export interface CollectionBarItem {
   /** `title` をそのまま持つ物(取り込む / バックアップ)。 */
   readonly title?: string;
   /** 鍵の綴りを足す物(`applyShortcutHints` が読む)。 */
-  readonly hint?: { readonly base: string; readonly command: string };
+  readonly hint?: {
+    readonly base: string;
+    readonly command: string;
+    /** もう 1 つ添える近道(#1207 I5)。割当が無ければ出ない。 */
+    readonly also?: { readonly command: string; readonly suffix: string };
+  };
   /** `set-view` の行き先。 */
   readonly view?: string;
   /** 区切りの塊。`app` = 設定・フラグ・ヘルプなど「アプリ全体」の側。 */
@@ -129,7 +140,17 @@ export function collectionBarItems(): readonly CollectionBarItem[] {
     action: 'open-palette',
     label: '操作を探す',
     iconKey: 'open-palette',
-    hint: { base: PALETTE_HINT, command: 'open-palette' },
+    /**
+     * 🔴 **探す系のボタンは足さない**(#1207 I5。🟣 Gemini 裁定 2026-10-01)── 畳んだ縁の 7 つは
+     *   「アプリ全体の操作」で、ノートを絞り込む欄は列を戻さないと出ない。代わりに
+     *   この説明へ「探す欄へ移る鍵」を添える(押すと畳んだ列が戻って焦点が入る。実体は `focus-search`)。
+     * ⚠ 鍵の綴りは**割当から引く**(手で `Ctrl+F` と書かない ── mac は `⌘`、user が変えたら変わる)。
+     */
+    hint: {
+      base: PALETTE_HINT,
+      command: 'open-palette',
+      also: { command: 'focus-search', suffix: ' で探す欄へ' },
+    },
     group: 'main',
   });
   for (const { view, label } of VIEW_BUTTONS) {
@@ -176,7 +197,11 @@ export function collectionBarButton(item: CollectionBarItem): HTMLButtonElement 
   if (item.hint !== undefined) {
     btn.setAttribute(HINT_BASE, item.hint.base);
     btn.setAttribute(HINT_COMMAND, item.hint.command);
-    btn.title = hintTitle(item.hint.base, item.hint.command);
+    if (item.hint.also !== undefined) {
+      btn.setAttribute(HINT_ALSO_COMMAND, item.hint.also.command);
+      btn.setAttribute(HINT_ALSO_SUFFIX, item.hint.also.suffix);
+    }
+    btn.title = hintTitle(item.hint.base, item.hint.command, undefined, null, item.hint.also ?? null);
   }
   if (item.title !== undefined) btn.title = item.title;
   return btn;

@@ -265,6 +265,40 @@ test('🔴 掴んでフォルダに落とすと入り、パンくずに落とす
   await expect(rows, '押したのにフォルダの中のノートが出ない').toHaveCount(2);
   await expect(flatBtn).toHaveAttribute('aria-pressed', 'true');
   /**
+   * 🔴 **入れている間は「全部出しています(N 件)」**(#1207 I6)。⚠ 道中に載せる(新しい起動は足さない)。
+   * 実ブラウザで見るのは unit が持てない 2 つ:**薄い字**(共通の `--muted`)と、**押し口の左隣・
+   * 帯の右端寄せ**(`margin-inline-start: auto` が効いている)。N は上の `rows` の数(2)と同じ。
+   */
+  const flatNote = page.locator(
+    '[data-pkc-region="filer-breadcrumb"] [data-pkc-field="filer-flatten-note"]',
+  );
+  await expect(flatNote, '入れたのに「全部出しています」が出ない').toHaveText('全部出しています(2 件)');
+  const noteLook = await page.evaluate(() => {
+    const n = document.querySelector<HTMLElement>('[data-pkc-field="filer-flatten-note"]')!;
+    const bar = n.parentElement!;
+    // ⚠ 押し口は**一言と同じ帯の中**から引く(document 全体で引くと別の面の同名の欄に当たる)
+    const b = bar.querySelector<HTMLElement>('[data-pkc-field="filer-flatten"]')!;
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--muted)';
+    document.body.append(probe);
+    const muted = getComputedStyle(probe).color;
+    probe.remove();
+    const nr = n.getBoundingClientRect();
+    const br = b.getBoundingClientRect();
+    return {
+      color: getComputedStyle(n).color,
+      muted,
+      gap: Math.round((br.left - nr.right) * 10) / 10,
+      sameLine: Math.abs(nr.top - br.top) < br.height,
+      rightGap: Math.round((bar.getBoundingClientRect().right - br.right) * 10) / 10,
+    };
+  });
+  expect(noteLook.color, '一言が薄い字(--muted)でない').toBe(noteLook.muted);
+  expect(noteLook.sameLine, '一言が押し口と別の行に落ちている').toBe(true);
+  expect(noteLook.gap, `一言が押し口の左隣でない(間 ${noteLook.gap}px)`).toBeLessThanOrEqual(8);
+  expect(noteLook.gap).toBeGreaterThanOrEqual(0);
+  expect(noteLook.rightGap, `押し口が帯の右端でない(${noteLook.rightGap}px)`).toBeLessThanOrEqual(2);
+  /**
    * 🔴 **親フォルダの名前を題名の右に添える**(#813 残り。🟣 Gemini 裁定 2026-10-01 = A)。
    * ⚠ 道中に載せる(新しい起動は足さない)。ここで見るのは unit が持てない **実ブラウザの計算後**:
    *   ① フォルダの中のノートの行だけに出る(ルート直下のフォルダ自身の行には出ない)
@@ -324,6 +358,7 @@ test('🔴 掴んでフォルダに落とすと入り、パンくずに落とす
   await clickReal(page, '[data-pkc-region="filer-breadcrumb"] [data-pkc-field="filer-flatten"]');
   await expect(rows, '切に戻したのに平らなまま').toHaveCount(1);
   await expect(page.locator('[data-pkc-field="parent-name"]'), '切なのに親の名前が残っている').toHaveCount(0);
+  await expect(flatNote, '切なのに「全部出しています」が残っている').toHaveCount(0);
   expect(await page.evaluate(() => localStorage.getItem('pkc3.filer-flatten'))).toBe('0');
 
   // ② 中に入れば居る(2 クリック)

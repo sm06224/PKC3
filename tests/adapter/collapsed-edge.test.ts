@@ -23,6 +23,8 @@ import { buildShell } from '../../src/adapter/ui/render/shell';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { applyPaneVisibility } from '../../src/adapter/ui/render/pane-visibility';
 import { collectionBarItems, markCollectionView } from '../../src/adapter/ui/render/collection-bar';
+import { KeymapStore } from '../../src/adapter/ui/render/keymap';
+import { applyShortcutHints } from '../../src/adapter/ui/render/shortcut-hint';
 import { codeOnly } from '../helpers/code-only';
 import { blocksFor, mediaBlock, stripComments, withoutMedia } from '../helpers/css-blocks';
 
@@ -311,5 +313,59 @@ describe('🔴 いま開いている面の印が、縁のボタンにも付く(#
     applyPaneVisibility(root, ['sidebar']);
     expect(activeViews(edgeButtons(root))).toEqual([]);
     expect(activeViews(barButtons(root))).toEqual([]);
+  });
+});
+
+describe('🔴 縁の「操作を探す」に、探す欄へ移る鍵を添える(#1207 I5。🟣 Gemini 裁定 2026-10-01 = B)', () => {
+  /** その test だけの保存(共有の localStorage を汚さない)。 */
+  function memStore(): KeymapStore {
+    const m = new Map<string, string>();
+    return new KeymapStore({
+      getItem: (k) => m.get(k) ?? null,
+      setItem: (k, v) => void m.set(k, v),
+      removeItem: (k) => void m.delete(k),
+    });
+  }
+  const palette = (root: HTMLElement): HTMLButtonElement =>
+    edgeButtons(root).find((b) => b.getAttribute('data-pkc-action') === 'open-palette')!;
+
+  it('🔴 説明に「Ctrl + F で探す欄へ」が入り、探す系のボタンは足していない', () => {
+    const { root } = mounted();
+    const before = edgeButtons(root);
+    applyPaneVisibility(root, ['sidebar']);
+    const edge = edgeButtons(root);
+    expect(edge.length, '縁のボタンが出ていない(台の空振り)').toBeGreaterThan(5);
+    // 押し口は増やしていない(帯と同じ操作のまま ── 一覧の外へ「探す」を足していない)
+    expect(before.length).toBe(0);
+    expect(edge.map(keyOf)).toEqual(barButtons(root).map(keyOf));
+    const title = palette(root).title;
+    expect(title, '探す欄へ移る鍵が説明に無い').toContain('Ctrl + F で探す欄へ');
+    expect(title, '操作を探す自身の鍵まで消えた').toContain('(Ctrl + Shift + P)');
+    // 対照群: ほかの縁のボタンには添えない(「操作を探す」だけの一言)
+    for (const b of edge.filter((x) => x !== palette(root))) {
+      expect(b.title, `${keyOf(b)} にまで添えた`).not.toContain('探す欄へ');
+    }
+  });
+
+  it('🔴 鍵の綴りは割当から作る ── 変えたら変わり、全部外したら一言ごと消える', () => {
+    const { root } = mounted();
+    applyPaneVisibility(root, ['sidebar']);
+    const k = memStore();
+    k.removeBinding('focus-search', 'Mod+F');
+    expect(k.addBinding('focus-search', 'Alt+9'), '前提: 割当を変えられない').toBeNull();
+    expect(applyShortcutHints(root, k), '1 つも書き換えていない(空振り)').toBeGreaterThan(0);
+    expect(palette(root).title, '割当を変えたのに古い鍵のまま').toContain('Alt + 9 で探す欄へ');
+    expect(palette(root).title).not.toContain('Ctrl + F');
+    k.removeBinding('focus-search', 'Alt+9');
+    applyShortcutHints(root, k);
+    expect(palette(root).title, '割当が無いのに鍵を書いている').not.toContain('探す欄へ');
+    expect(palette(root).title, '操作を探す自身の鍵は残る').toContain('(Ctrl + Shift + P)');
+  });
+
+  it('🔴 帯(列を畳んでいないとき)の同じボタンも、同じ登記簿から同じ説明になる', () => {
+    const { root } = mounted();
+    const bar = barButtons(root).find((b) => b.getAttribute('data-pkc-action') === 'open-palette')!;
+    applyPaneVisibility(root, ['sidebar']);
+    expect(palette(root).title, '縁と帯で説明が違う(登記簿が 2 つに割れた)').toBe(bar.title);
   });
 });

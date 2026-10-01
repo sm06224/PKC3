@@ -1158,6 +1158,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   );
   const inspector = new InspectorRenderer(regions.inspector);
   /**
+   * 右の列の「本文で使う添付」で、説明文の空の添付に**元の file 名**を出す(#1207 I4)。
+   * 名前は添付ノートの frontmatter にあるので、持ち主の逆引き(`findAssetOwner`)から取る。
+   * ⚠ `client` は昇格で実体が替わるので**呼ぶたびに読む**。
+   */
+  inspector.setAssetNameResolver(
+    async (assetKey) =>
+      ((await client.request({ op: 'findAssetOwner', cid, assetKey })) as { name: string | null })
+        .name,
+  );
+  /**
    * 🔴 **既定はフォルダ、前回の選択を覚える**(#240 段⑤。user 指示 2026-08-17)。
    * ⚠ 既定は `browse-mode.ts` 1 か所が持つ ── ここに書くと、また 4 か所に散る。
    */

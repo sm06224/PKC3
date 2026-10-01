@@ -185,6 +185,27 @@ test('🔴 押しただけなら畳み、掴んで動かした直後は畳まれ
   await clickReal(page, `${EDGE} [data-pkc-action="set-view"][data-pkc-view="help"]`);
   await expect(page.locator('[data-pkc-view-pane="help"]')).toBeHidden();
 
+  /**
+   * 🔴 **縁の「操作を探す」の説明に、探す欄へ移る鍵を添える**(#1207 I5。🟣 Gemini 裁定 2026-10-01 = B)。
+   * ⚠ 探す系のボタンは足さない(縁の 7 つのまま)。⚠ **添えた鍵が嘘でない**ことまで通す ──
+   *   その鍵を押すと**畳んだ列が戻って**、探す欄(絞り込み)に焦点が入る(#583)。説明だけ見て
+   *   「押しても何も起きない鍵」を書いていないかは、実ブラウザで押さないと分からない。
+   */
+  await expect(
+    page.locator(`${EDGE} [data-pkc-action="open-palette"]`),
+    '縁の「操作を探す」の説明に、探す欄へ移る鍵が無い',
+  ).toHaveAttribute('title', /(Ctrl|⌘).*F で探す欄へ/);
+  await page.keyboard.press('Control+f');
+  expect(await widthOf(page, 'sidebar'), '説明に書いた鍵を押しても、畳んだ列が戻らない').toBeGreaterThan(100);
+  await expect(
+    page.locator('[data-pkc-field="entry-filter"]'),
+    '説明に書いた鍵を押しても、探す欄に焦点が入らない',
+  ).toBeFocused();
+  await expect(page.locator(EDGE), '列が戻ったのに縁が残っている').toHaveCount(0);
+  // 畳み直す(以降の「押して戻す」の前提へ揃える)
+  await page.locator(grip('sidebar')).click();
+  await expect(page.locator(EDGE), '畳み直したのに縁が出ない').toBeVisible();
+
   await page.locator(grip('sidebar')).click();
   expect(await widthOf(page, 'sidebar'), '押しても戻らない').toBeGreaterThan(100);
   // 🔴 戻すと縁は消え、帯が一覧の下に戻る(双方向)

@@ -2735,6 +2735,7 @@ const handlers: Handlers = {
      * 見つかったら false を返して走査を止める(GC の scanText と同じ作法)。
      */
     let found: string | null = null;
+    let name: string | null = null;
     need().exec({
       sql: "SELECT lid, body FROM entries WHERE cid = ? AND archetype = 'attachment'",
       bind: [req.cid],
@@ -2742,13 +2743,16 @@ const handlers: Handlers = {
       callback: (row) => {
         // ⚠ 型は SqlValue のまま来る ── rowMode 'object' の実行時形へ狭める
         const r = row as unknown as { lid: string; body: string };
-        if (readAttachmentMeta(r.body).assetKey === req.assetKey) {
+        const meta = readAttachmentMeta(r.body);
+        if (meta.assetKey === req.assetKey) {
           found = r.lid;
+          // 元の file 名(#1207 I4)。⚠ 空なら null ── 呼び側が「名前が無い」と読む
+          name = meta.name !== '' ? meta.name : null;
           return false; // 走査を止める
         }
       },
     });
-    return { lid: found };
+    return { lid: found, name };
   },
   /**
    * 🔴 **本文の全文検索**(#181)。引き方の規則は `planSearch` が 1 か所で持つ。
