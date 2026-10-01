@@ -612,4 +612,32 @@ describe('横に留めた並びの憶え方(#505 段②)', () => {
       '誰の字でも消している(1 枚目の成功が、2 度押しの理由を読む前に消す)',
     ).toContain('VIEW_WINDOW_OPENING');
   });
+
+  /**
+   * 🔴 **「探す」から運ぶ語の配線 3 つ**(#1102 段①)。
+   * ⚠ **弱い pin だと自覚して使う** ── `main.ts` は unit から実行されない。語が途中で落ちても
+   *   窓は開くので、**画面は正しく見える**(塗られないだけ ── いちばん気づけない形)。
+   *   継ぎ目ごとの振る舞いは `search-jump-wiring.test.ts` が本物どうしで見ている。
+   */
+  it('🔴 「探す」の語: 新しい窓の URL に載せる / 開いている窓へ頼む / 開いた窓が受ける', () => {
+    const body = codeOnly(MAIN);
+    // ① 新しい窓へ: `openViewInWindow` の deps に `find` を渡している
+    const open = body.indexOf('noteRegistry.reserve(');
+    expect(open, '付箋を開く配線が無い').toBeGreaterThan(-1);
+    expect(body.slice(open, open + 1600), '新しい窓の URL に語を載せていない').toContain(
+      '...(find === undefined ? {} : { find })',
+    );
+    // ② 開いている窓へ: 前に出す頼みに語を添える
+    expect(body, '開いている窓への頼みに語を添えていない').toContain(
+      'noteRegistry.raise(lid, find)',
+    );
+    // ③ 開いた窓が受ける: 住所の語を、選んだ後で SEARCH_JUMP_START にする
+    const jump = body.indexOf('searchJump: (lid, find) =>');
+    expect(jump, '開いた窓が語を受ける配線が無い').toBeGreaterThan(-1);
+    expect(body.slice(jump, jump + 200), '受けた語で塗りを始めていない').toContain(
+      "type: 'SEARCH_JUMP_START'",
+    );
+    // ④ 頼まれた窓も、前に出すだけで終わらず、塗って送る
+    expect(body, '頼まれた窓が語を受けていない').toContain('jumpFromRaise?.(find)');
+  });
 });

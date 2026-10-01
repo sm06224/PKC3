@@ -50,6 +50,8 @@ interface Wire {
   readonly id: string;
   readonly lid?: string;
   readonly to?: string;
+  /** 「前に出て」に添える、「探す」で当たった語(#1102 段①)。 */
+  readonly find?: string;
 }
 
 export interface NoteRegistryDeps {
@@ -57,8 +59,12 @@ export interface NoteRegistryDeps {
   readonly channel: Broadcaster | null;
   /** この窓の id。⚠ 自分の放送を数えないために要る。 */
   readonly id: string;
-  /** 「前に出て」と頼まれたときに呼ばれる。 */
-  readonly onRaise: () => void;
+  /**
+   * 「前に出て」と頼まれたときに呼ばれる。
+   * 🔴 **`find` は「探す」で当たった語**(#1102 段①)── 開いている窓へ頼むときも、
+   * 新しい窓へ渡すときと同じく**本文の当たった所へ送って塗る**ために運ぶ。無ければ `undefined`。
+   */
+  readonly onRaise: (find?: string) => void;
   /** いまの時刻。⚠ test が動かせるように口にする(既定は `Date.now`)。 */
   readonly now?: () => number;
   /** 見込みが自然に外れるまで(既定 `RESERVE_MS`)。 */
@@ -124,7 +130,7 @@ export interface NoteRegistry {
    * `pagehide` を出さずに消えた(クラッシュ / OS kill / タブ破棄)ときの保険である。
    * 答えが返らなければ、次に聞かれたときに行を捨てて**開けるようにする**。
    */
-  raise(lid: string): void;
+  raise(lid: string, find?: string): void;
   /**
    * 🔴 **窓を離れるときに呼ぶ**(台帳から自分を外す)。⚠ **放送路は閉じない**。
    *
@@ -228,7 +234,8 @@ export function createNoteRegistry(raw: NoteRegistryDeps): NoteRegistry {
         drop(w.id);
         return;
       }
-      if (w.tag === NOTE_RAISE && w.to === deps.id) deps.onRaise();
+      if (w.tag === NOTE_RAISE && w.to === deps.id)
+        deps.onRaise(typeof w.find === 'string' && w.find !== '' ? w.find : undefined);
     };
     send({ tag: NOTE_ROLL_CALL, id: deps.id });
   }
@@ -243,10 +250,14 @@ export function createNoteRegistry(raw: NoteRegistryDeps): NoteRegistry {
       mine === lid ? 'self' : answering(lid) || alive(lid) ? 'other' : null,
     reserve: (lid) => pending.set(lid, deps.now() + deps.reserveMs),
     release: (lid) => void pending.delete(lid),
-    raise: (lid) => {
+    raise: (lid, find) => {
       const to = byLid.get(lid);
       if (to === undefined) return;
-      send({ tag: NOTE_RAISE, id: deps.id, to });
+      send(
+        find === undefined || find === ''
+          ? { tag: NOTE_RAISE, id: deps.id, to }
+          : { tag: NOTE_RAISE, id: deps.id, to, find },
+      );
       // 🔑 生死も聞く(上の docstring)── 答えが返らなければ `alive` が行を捨てる
       askedAt.set(to, deps.now());
       send({ tag: NOTE_ROLL_CALL, id: deps.id });

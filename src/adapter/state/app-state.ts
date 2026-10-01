@@ -97,6 +97,7 @@ import type {
 import { NO_KINDS, entryFilterOf, normalizeQuery, visibleOrder } from '@features/filter/title-filter';
 import { commandQueryOf } from '@features/palette/command-query';
 import { toggleKind } from '@features/filter/kind-filter';
+import { normalizeFindQuery } from '@features/filter/search-hits';
 import { STRUCTURAL, type RelationKind } from '@features/relation/kinds';
 import { replaceAll } from '@features/markdown/body-replace';
 import {
@@ -1227,6 +1228,20 @@ export interface RevisionItem {
   removed: number | null;
 }
 
+/**
+ * 🔴 **「探す」から塗っている控え**(#1102 段①)── {@link AppState.searchJump}。
+ */
+export interface SearchJump {
+  /** 塗っているノート。⚠ これと `selectedLid` が食い違ったら消える。 */
+  readonly lid: string;
+  /** 探した語(整え済み)。⚠ 当たりの数え方は `features/filter/search-hits.ts` の 1 本。 */
+  readonly query: string;
+  /** 送りを進めた回数(負もあり)。⚠ 位置は描く側が数で畳む。 */
+  readonly step: number;
+  /** START / 送りのたびに進む。 */
+  readonly gen: number;
+}
+
 /** ゴミ箱一覧の 1 行(= entries に居ない entry_lid の最新 revision)。 */
 export interface TrashItem {
   revId: string;
@@ -1757,6 +1772,19 @@ export interface AppState {
    */
   sectionAdvisory: string | null;
   /**
+   * 🔴 **「探す」から本文の当たった所へ送って塗っている間の控え**(#1102 段①)。`null` = 塗っていない。
+   *
+   * 🔑 持つのは**何で探したか(`query`)と、送りを進めた回数(`step`)だけ** ── 当たりの数も位置も
+   *   **本文の DOM を数えないと分からず**、reducer は DOM を知らない。数えて「1/4 件」にするのは
+   *   描く側(`detail.ts`)で、`step` を数で畳む(端で回る。`wrapHitIndex`)。
+   * ⚠ `gen` は START / 送りのたびに進む ── 描く側が「送り先が変わったか」を見る物差し
+   *   (同じ語でもう一度 START されたら、同じ位置へもう一度送る)。
+   * ⚠ **`reduce()` の外側 1 か所で消す**(`dropStaleSearchJump`)── ノートが変わる / 編集に入る case を
+   *   1 つずつ見張ると、次に足した case が必ず忘れる(章の欄の `guardSectionDraftTransition` と同じ作り)。
+   * ⚠ 手組みの state fixture は持たない = `undefined`。読むのは **`?? null`**。
+   */
+  searchJump: SearchJump | null;
+  /**
    * タイル設定の書込が飛んでいる数(P8 段⑯)。
    *
    * 🔴 `writeLock` を借りると、**連続した設定変更が無言で落ちる**(登録 →
@@ -1951,6 +1979,7 @@ export const initialState: AppState = {
   editOpenAt: null,
   sectionDraft: null,
   sectionAdvisory: null,
+  searchJump: null,
   tileWrite: null,
   launcherPick: null,
   launcherReorder: false,
@@ -1960,6 +1989,18 @@ export const initialState: AppState = {
 };
 
 export type UserAction =
+  /**
+   * 🔴 **「探す」で当たった語で、いま開いているノートの本文を塗って送る**(#1102 段①)。
+   *
+   * ⚠ **選んでいるノートのときだけ**・**読む画面(`ready`)のときだけ** ── 編集中は塗らない。
+   *   断るときは state を 1 ビットも動かさない(黙って何もしない。呼び側は探した語を運んだだけで、
+   *   塗れない理由は画面に既に出ている)。
+   */
+  | { type: 'SEARCH_JUMP_START'; lid: string; query: string }
+  /** 🔴 **次 / 前の当たりへ送る**(#1102 段①)。⚠ 端で回る(数で畳むのは描く側)。 */
+  | { type: 'SEARCH_JUMP_STEP'; by: 1 | -1 }
+  /** 🔴 **塗りと送りの帯を消す**(#1102 段①。帯の × / `Esc`)。 */
+  | { type: 'SEARCH_JUMP_END' }
   /**
    * 🔴 **このノートを横に並べる / 並べるのをやめる**(#505 段②)。
    *
@@ -3740,8 +3781,26 @@ export function guardSectionDraftTransition(
   };
 }
 
+/**
+ * 🔴 **塗っているノートから離れた / 編集に入った / 章の欄を開いたら、塗りを消す**(#1102 段①)。
+ *
+ * 🔑 個別の action を見張らない ── **判定は結果の形**(選んでいる lid / `phase` / 章の欄)。
+ *   次に選択を動かす case を足した人が忘れられない(`guardSectionDraftTransition` と同じ理由)。
+ * ⚠ **`ready` でないと塗らない**(編集中は本文が描かれていない / 編集を始めたら消す)。
+ * ⚠ 消えた後に残る物は無い ── 塗りは DOM の側の物で、`null` を見た描く側が片付ける。
+ */
+export function dropStaleSearchJump(result: ReduceResult): ReduceResult {
+  const j = result.state.searchJump ?? null;
+  if (j === null) return result;
+  const st = result.state;
+  if (st.selectedLid === j.lid && st.phase === 'ready' && st.sectionDraft == null) return result;
+  return { ...result, state: { ...st, searchJump: null } };
+}
+
 export function reduce(state: AppState, action: Dispatchable): ReduceResult {
-  return guardSectionDraftTransition(state, action, reduceWithHistory(state, action));
+  return dropStaleSearchJump(
+    guardSectionDraftTransition(state, action, reduceWithHistory(state, action)),
+  );
 }
 
 function reduceWithHistory(state: AppState, action: Dispatchable): ReduceResult {
@@ -8778,6 +8837,36 @@ function reduceCore(
         },
         events: [],
       };
+    case 'SEARCH_JUMP_START': {
+      const query = normalizeFindQuery(action.query);
+      // ⚠ 断るときは何も動かさない(上の `UserAction` の注記)。`sectionDraft` は手組み fixture で
+      //   `undefined` のことがあるので `!= null`
+      if (
+        query === '' ||
+        state.phase !== 'ready' ||
+        state.selectedLid !== action.lid ||
+        state.sectionDraft != null
+      )
+        return { state, events: [] };
+      return {
+        state: {
+          ...state,
+          searchJump: { lid: action.lid, query, step: 0, gen: (state.searchJump?.gen ?? 0) + 1 },
+        },
+        events: [],
+      };
+    }
+    case 'SEARCH_JUMP_STEP': {
+      const j = state.searchJump ?? null;
+      if (j === null) return { state, events: [] };
+      return {
+        state: { ...state, searchJump: { ...j, step: j.step + action.by, gen: j.gen + 1 } },
+        events: [],
+      };
+    }
+    case 'SEARCH_JUMP_END':
+      if ((state.searchJump ?? null) === null) return { state, events: [] };
+      return { state: { ...state, searchJump: null }, events: [] };
     case 'OP_NOTICE':
       // ⚠ **`error` を触らない** ── 知らせが出たからといって、出ているエラーを
       //    消してよい理由は無い(`main.ts` が別の行として組んでいる)

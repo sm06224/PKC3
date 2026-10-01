@@ -234,7 +234,15 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'purge-trash', 'raise-place', 'refresh-query', 'remove-office-pack', 'remove-place',
   'rename-attachment', 'renumber-lists', 'replace-all', 'reset-app-group-order', 'reset-flags',
   'reset-office-profile', 'retry-persist', 'run-sql', 'schedule-nav', 'schedule-quick-add',
-  'schedule-today', 'select-entry', 'set-alarm-enabled', 'set-app-group', 'set-app-icon',
+  'schedule-today',
+  /**
+   * ⚠ **2026-10-01(#1102 段①)で 3 件増やした** ── 「探す」から送った本文の、前 / 次の当たりへ・
+   *   塗りを消す。🔑 **名前で呼べないままにする理由**:`close-lightbox` と同じ ── 「探す」から
+   *   本文へ送った直後の帯が出ている間だけ意味を持つ(出ていなければ、呼んでも何も動かない)。
+   *   帯の外から呼ぶ道は `Esc`(`deselect-entry` の 1 段目)が持つ。
+   */
+  'search-jump-end', 'search-jump-next', 'search-jump-prev',
+  'select-entry', 'set-alarm-enabled', 'set-app-group', 'set-app-icon',
   'set-app-open-target', 'set-browse', 'set-code-collapse', 'set-column-rule', 'set-date-links', 'set-editor-mode', 'set-entry-date',
   'set-entry-sort', 'set-external-images', 'set-flag', 'set-inline-code-copy', 'set-notices-enabled', 'set-open-in-edit',
   'set-missing-links', 'set-open-place', 'set-page-format', 'set-paste-source', 'set-phone-links', 'set-prose-align',
@@ -399,6 +407,10 @@ describe('操作の全数台帳(#582 段①)', () => {
       outsideActionsTable: x.outsideActionsTable.length,
       unregistered: x.unregistered,
     }).toEqual({
+      // ⚠ 2026-10-01(#1102 段①): 「探す」から送った本文の帯の 3 つ(`search-jump-prev` /
+      //   `search-jump-next` / `search-jump-end`)で受け手 +3 ── 登記は増えない(押し口は帯の中にしか
+      //   無く、鍵も持たない。`Esc` は `deselect-entry` の 1 段目で、登記の数は動かない)。
+      //   押した所から何も要らない N(`close-lightbox` と同じ仕分け)
       // ⚠ 2026-09-30(#1169): 本文の `@日付` の 3 つ(`open-date-note` / `create-date-note` /
       //   `set-date-links`)で受け手 +3 ── 登記は増えない(押し口は本文の日付・画面の下の
       //   知らせの隣・設定の checkbox にしか無く、鍵も持たない)。`open-date-note` は
@@ -610,12 +622,14 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-01(#274 段①): 左の列の探す欄に `>` を打つと出る操作の一覧の行(`run-command-row`)で
       //   受け手 +1 ── 登記は増えない(押し口は一覧の行にしか無く、押した行の命令が要る P1)。
       //   `receivers` +1 / `total` +1 / `unregistered` +1。
-      total: 352,
-      receivers: 295,
+      // ⚠ 2026-10-01(#1102 段①): 「探す」から送った本文の帯の 3 押し所(`search-jump-prev` / `search-jump-next` / `search-jump-end`)で
+      //   受け手 +3 ── 登記は増えない。`receivers` +3 / `total` +3 / `unregistered` +3。
+      total: 355,
+      receivers: 298,
       registered: 96,
       both: 39,
       outsideActionsTable: 57,
-      unregistered: 256,
+      unregistered: 259,
     });
   });
 

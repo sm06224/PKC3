@@ -275,7 +275,9 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
     // ⚠ 2026-10-01(#1087): N +2(`set-code-collapse` / `set-inline-code-copy`。checkbox の `checked` を渡すだけ ── 同じ仕分け)。
     // ⚠ 2026-10-01(#274 段①): P1 +1(`run-command-row`。左の列の探す欄に `>` を打つと出る操作の
     //   一覧の行 ── 同時に見えている行のうち押した 1 つの命令が要る。`toc-jump` と同じ仕分け)。
-    expect(counts()).toEqual({ P1: 66, P2: 34, E: 25, V: 10, N: 160 });
+    // ⚠ 2026-10-01(#1102 段①): N +3(`search-jump-prev` / `search-jump-next` / `search-jump-end`。
+    //   「探す」から送った本文の帯の押し所 ── 押した所から何も要らない。`clear-search-history` と同じ仕分け)。
+    expect(counts()).toEqual({ P1: 66, P2: 34, E: 25, V: 10, N: 163 });
   });
 
   it('🔴 名指しの錨 ── 件数が同じまま入れ替わっても落ちる', () => {

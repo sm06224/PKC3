@@ -58,11 +58,13 @@ import type { BrowseMode } from '@adapter/ui/render/browse-mode';
 import { VIEW_MODES, isViewMode, type ViewMode } from '../state/app-state';
 import { isSealedView } from '../../features/sealed';
 import {
+  dropViewFindFromHash,
   dropViewFromHash,
   dropViewWindowToken,
   isHeadingAnchor,
   parseViewDeepLink,
   parseViewDeepLinkEntry,
+  parseViewDeepLinkFind,
   parseViewWindowToken,
   setHashEntry,
 } from '../../features/link/permalink';
@@ -82,6 +84,12 @@ export interface DeepLinkTarget {
    * ⚠ `view` は残す ── 合図は放送した瞬間に用済みだが、面はまだ見ている。
    */
   readonly dropToken: () => void;
+  /**
+   * 🔴 **「探す」で当たった語(`find`)だけを落とす**(#1102 段①)。
+   * ⚠ **履歴を積まない**(`replaceState`)。⚠ 残すと、栞や `F5` のたびに本文が塗られる。
+   * ⚠ 省略可(古い test の的)── 無ければ落とせないだけで、他は壊れない。
+   */
+  readonly dropFind?: () => void;
   /**
    * 🔴 **住所を、いま見ているノートへ書き換える**(#689 案 B、2026-09-04)。
    *
@@ -125,6 +133,14 @@ export function windowDeepLinkTarget(): DeepLinkTarget {
         null,
         '',
         `${location.pathname}${location.search}${dropViewWindowToken(location.hash)}`,
+      );
+    },
+    dropFind: () => {
+      if (typeof history !== 'object' || typeof location !== 'object') return;
+      history.replaceState(
+        null,
+        '',
+        `${location.pathname}${location.search}${dropViewFindFromHash(location.hash)}`,
       );
     },
     setEntry: (containerId, lid) => {
@@ -364,6 +380,14 @@ export interface DeepLinkWiring {
    */
   readonly selectEntry?: (containerId: string, lid: string) => void;
   /**
+   * 🔴 **「探す」で当たった語で、いま選んだノートの本文を塗って送る**(#1102 段①)。
+   *
+   * ⚠ **`selectEntry` の後**に呼ぶ(選んでいない物は塗れない)。⚠ 語は**使ったらアドレスから
+   * 外す**(`DeepLinkTarget.dropFind`)── 栞や `F5` に探していた語を焼き付けない。
+   * ⚠ ノートを名指すだけの断片(面を指していない)でだけ呼ぶ ── 面には塗る本文が無い。
+   */
+  readonly searchJump?: (lid: string, find: string) => void;
+  /**
    * 🔴 **いま断片が指している面が変わったら呼ばれる**(#300 段③ の直し)。
    *
    * `null` = もう指していない(user が自分で離れた)。
@@ -489,6 +513,16 @@ export function connectViewDeepLink(wiring: DeepLinkWiring): () => void {
       if (here !== null) {
         rememberEntryHash();
         wiring.selectEntry?.(here.containerId, here.lid);
+        /**
+         * 🔴 **探していた語があれば、当たった所へ送って塗る**(#1102 段①)。
+         * ⚠ **取ったらすぐ落とす** ── 住所の追随(`setEntry`)は他の key を残すので、
+         *   落とさないと次のノートへ移っても語が付いて回る。
+         */
+        const find = parseViewDeepLinkFind(target.hash);
+        if (find !== null) {
+          wiring.searchJump?.(here.lid, find);
+          target.dropFind?.();
+        }
       }
       return;
     }

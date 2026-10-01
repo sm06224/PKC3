@@ -182,7 +182,10 @@ describe('探す面(#680)', () => {
     const btn = rows()[1]!.querySelector<HTMLButtonElement>('[data-pkc-action="open-note-window"]')!;
     expect(btn.getAttribute('data-pkc-entry')).toBe('n2');
     btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    expect(openNoteWindow, '小窓が開かない').toHaveBeenCalledWith('n2');
+    // 🔴 探した語を運ぶ(#1102 段①)── 開いた窓が本文の当たった所へ送って塗る。語が落ちると
+    //   「押したのに塗られない」になる(窓は開くので画面は正しく見える)
+    expect(btn.getAttribute('data-pkc-find')).toBe('会議');
+    expect(openNoteWindow, '小窓が開かない / 語を運んでいない').toHaveBeenCalledWith('n2', '会議');
     expect(openNoteWindow).toHaveBeenCalledTimes(1);
     // ⚠ 中央の面は変わらない(本文へ落ちない ── 小窓で開いたので)
     expect(d.getState().viewMode).toBe('search');

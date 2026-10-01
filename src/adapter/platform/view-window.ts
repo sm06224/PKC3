@@ -194,6 +194,12 @@ export interface ViewWindowDeps {
    * ⚠ 省略可 ── 渡さない配線(古い test)では今までどおり黙る。
    */
   readonly notify?: (message: string) => void;
+  /**
+   * 🔴 **「探す」で当たった語**(#1102 段①)。⚠ 付箋(ノートを開く窓)でだけ使う ──
+   * 開いた窓が、本文の中の当たった所へ送って塗る。**使ったら窓がアドレスから外す**。
+   * ⚠ 省略可 ── 渡さなければ、これまでどおり(語を運ばない)。
+   */
+  readonly find?: string;
 }
 
 /**
@@ -232,6 +238,7 @@ export async function openViewInWindow(
   const url = formatViewDeepLink(deps.baseUrl(), view, {
     ...(here === null ? {} : { containerId: here.containerId, entry: here.lid }),
     token,
+    ...(deps.find === undefined ? {} : { find: deps.find }),
   });
   if (url === null) {
     /**

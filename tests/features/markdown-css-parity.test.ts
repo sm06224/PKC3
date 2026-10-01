@@ -292,6 +292,10 @@ const STYLED_ELSEWHERE: Readonly<Record<string, string>> = {
   'pkc-quick-toc-title': 'src/adapter/ui/render/quick-toc.ts',
   'pkc-quick-toc-close': 'src/adapter/ui/render/quick-toc.ts',
   'pkc-quick-toc-list': 'src/adapter/ui/render/quick-toc.ts',
+  // 🔴 「探す」から送ったときの「1/4 件 ‹ ›」の帯(#1102 段①)
+  'pkc-search-jump': 'src/adapter/ui/render/search-jump.ts',
+  'pkc-search-jump-count': 'src/adapter/ui/render/search-jump.ts',
+  'pkc-search-jump-btn': 'src/adapter/ui/render/search-jump.ts',
   // 🔴 読了目安時間バッジ(#1137)
   'pkc-reading-time': 'src/adapter/ui/render/reading-time.ts',
   'pkc-quick-toc-item': 'src/adapter/ui/render/quick-toc.ts',

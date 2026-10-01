@@ -26,7 +26,7 @@ import { hydrateMath } from './math-hydrate';
 import { markViewBig } from './view-big';
 import { hydrateChart } from './chart-raster';
 import { readFenceAssetText } from '@features/asset/fence-asset-read';
-import { applyHeadingFold } from './heading-fold';
+import { applyHeadingFold, revealBlock } from './heading-fold';
 import { applyHeadingAnchors } from './heading-anchor';
 import { applyCodeLangBadges } from './code-lang';
 import { appCodeCollapse, applyCodeCollapse, clearCodeCollapse } from './code-collapse';
@@ -44,6 +44,15 @@ import { isSystemMessageLid, titleForMessageLid } from '@features/message/messag
 import { installBackToTop, type BackToTopHandle } from './back-to-top';
 import { installReadingProgress, type ReadingProgressHandle } from './reading-progress';
 import { installQuickToc, type QuickTocHandle } from './quick-toc';
+import {
+  clearHitHighlights,
+  collectHitRanges,
+  installSearchJumpBar,
+  paintHitRanges,
+  scrollToHit,
+  type SearchJumpBarHandle,
+} from './search-jump';
+import { wrapHitIndex } from '@features/filter/search-hits';
 import { paintReadingTime } from './reading-time';
 
 /**
@@ -111,7 +120,7 @@ import {
   BODY_MEDIA_CLASS,
 } from '@features/asset/asset-preview-kind';
 import { isCodeDraft } from '@adapter/state/app-state';
-import type { AppState, AppPhase, PartialDraft } from '@adapter/state/app-state';
+import type { AppState, AppPhase, PartialDraft, SearchJump } from '@adapter/state/app-state';
 import { appEditorMode } from './editor-mode';
 import { appKeymap, type KeymapStore } from './keymap';
 import { appPhoneLinks } from './phone-links';
@@ -467,6 +476,12 @@ export class DetailRenderer {
   private readingProgressHandle: ReadingProgressHandle | null = null;
   /** 🔴 長文ノート閲覧時のクイック目次ポップオーバー(#1130)。 */
   private quickTocHandle: QuickTocHandle | null = null;
+  /** 🔴 「探す」から送ったときの「1/4 件 ‹ ›」の帯(#1102 段①)。⚠ 主の枠だけ(留めた枠は持たない)。 */
+  private searchJumpBar: SearchJumpBarHandle | null = null;
+  /** 🔴 いま塗っている「探す」の控え(state の写し)。⚠ 留めた枠は読むだけで、塗りの表には触らない。 */
+  private jump: SearchJump | null = null;
+  /** 最後に送った世代(`SearchJump.gen`)。⚠ 同じ世代では送り直さない(描き直しのたびに跳ねない)。 */
+  private jumpSentGen = 0;
 
   /** markdown を描く口(既定は自前。⚠ **要るまで worker は作らない**)。 */
   private readonly markdown: MarkdownClient;
@@ -585,6 +600,18 @@ export class DetailRenderer {
     this.readingProgressHandle = null;
     this.quickTocHandle?.dispose();
     this.quickTocHandle = null;
+    this.disposeSearchJump();
+  }
+
+  /**
+   * 🔴 **「探す」の塗りと帯を片付ける**(#1102 段①)。⚠ 塗りは Range(節点)を掴むので、
+   *   骨組みを捨てるときに表から外す。⚠ 留めた枠は**表に触らない**(主の枠の塗りを消さない)。
+   */
+  private disposeSearchJump(): void {
+    this.searchJumpBar?.dispose();
+    this.searchJumpBar = null;
+    this.jumpSentGen = 0;
+    if (this.pinnedLid === null) clearHitHighlights();
   }
 
   /**
@@ -614,6 +641,7 @@ export class DetailRenderer {
     this.readingProgressHandle = null;
     this.quickTocHandle?.dispose();
     this.quickTocHandle = null;
+    this.disposeSearchJump();
   }
 
   /**
@@ -680,6 +708,67 @@ export class DetailRenderer {
   }
 
   render(state: AppState): void {
+    /**
+     * 🔴 **「探す」の控えが動いたら、本文は描き直さず塗りだけ当て直す**(#1102 段①)。
+     * ⚠ 本文を描く側(`renderCore`)には早期 return が何本も在り、塗りだけが変わった回は
+     *   必ずそこで止まる ── だから**外側**に置く。
+     * ⚠ `?? null` で読む(手組みの state fixture は `searchJump` を持たない)。
+     * ⚠ 留めた枠は**塗りの表に触らない**(`syncSearchJump` / `disposeSearchJump` の門)── 主の枠の
+     *   塗りを、留めた枠が消したり上書きしたりしない。
+     */
+    const jump = state.searchJump ?? null;
+    const jumpChanged = jump !== this.jump;
+    this.jump = jump;
+    this.renderCore(state);
+    if (jumpChanged) this.syncSearchJump();
+  }
+
+  /**
+   * 🔴 **「探す」の塗りと送りを、いまの本文へ当てる**(#1102 段①)。
+   *
+   * - 控えが無い → 塗りを表から外し、帯を隠す
+   * - 本文がまだ描けていない → **何もしない**(描き終わりの `syncSearchJump` が来る)
+   * - 描けている → 当たりを数え直して塗り、帯を「n/m 件」にする。送るのは**世代が変わったときだけ**
+   *
+   * ⚠ 読む画面の本文(`mode === 'view'` の md)だけ ── 編集中は塗らない
+   *   (控えは reducer が編集に入った時点で消す)。
+   */
+  private syncSearchJump(): void {
+    if (this.pinnedLid !== null) return;
+    const jump = this.jump;
+    const host = this.bodyHost;
+    if (jump === null) {
+      clearHitHighlights();
+      this.searchJumpBar?.update(null, 0);
+      this.jumpSentGen = 0;
+      return;
+    }
+    if (
+      host === null ||
+      this.mode !== 'view' ||
+      this.bodyKind !== 'md' ||
+      this.skeletonLid !== jump.lid ||
+      host.getAttribute(PAINTED_ATTR) !== jump.lid
+    )
+      return;
+    const ranges = collectHitRanges(host, jump.query);
+    const index = wrapHitIndex(jump.step, ranges.length);
+    paintHitRanges(ranges, index);
+    // 🔑 「目次」の隣へ置く ── 目次が出ているときだけ、その幅の分を右へ空ける
+    const toc = this.quickTocHandle;
+    const gap = toc !== null && !toc.element.hidden ? toc.button.offsetWidth + 8 : 0;
+    this.searchJumpBar?.update({ total: ranges.length, index, query: jump.query }, gap);
+    if (jump.gen === this.jumpSentGen) return;
+    this.jumpSentGen = jump.gen;
+    const hit = ranges[index];
+    if (hit === undefined) return;
+    // 🔴 畳んだ章の中なら、開いてから送る(`tocJump` と同じ作法。覆っている畳みだけ開く)
+    const at = hit.startContainer.parentElement;
+    if (at !== null) revealBlock(host, at);
+    scrollToHit(this.scroller, host, hit);
+  }
+
+  private renderCore(state: AppState): void {
     /**
      * 🔴 **`entryMetas` が変わったら、本文は描き直さず印だけ当て直す**(#1174 段①)。
      * ⚠ **一番上に置く** ── 下には早期 return が何本も在り、ゴミ箱から戻した回は
@@ -897,6 +986,8 @@ export class DetailRenderer {
       this.readingProgressHandle = installReadingProgress(this.scroller, this.region);
       this.quickTocHandle?.dispose();
       this.quickTocHandle = installQuickToc(this.region, this.bodyHost, this.scroller);
+      // 🔴 「探す」の帯は主の枠だけ(#1102 段①)── 留めた枠は別のノートを出すので持たない
+      if (this.pinnedLid === null) this.searchJumpBar = installSearchJumpBar(this.region);
       this.skeletonLid = lid;
       this.bodyKind = null;
       this.bodyView = EMPTY_VIEW;
@@ -1255,6 +1346,9 @@ export class DetailRenderer {
          */
         host.setAttribute(PAINTED_ATTR, lid);
         this.quickTocHandle?.update();
+        // 🔴 描き終わったので、「探す」の塗りを当て直す(#1102 段①)── 塊が差し替わると Range が
+        //   消えた節点を指す。⚠ 送るのは世代が変わったときだけ(`jumpSentGen`)
+        this.syncSearchJump();
       };
       void this.markdown
         .render(shown, opts)

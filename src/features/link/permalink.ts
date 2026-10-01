@@ -436,6 +436,26 @@ export function dropViewWindowToken(raw: string): string {
 }
 
 /**
+ * 🔴 **「探す」で当たった語**(#1102 段①)。
+ *
+ * 「探す」の結果の行から別のウィンドウでノートを開くとき、**どの語で探していたか**を
+ * 連れて行く ── 開いた窓が、本文の中の当たった所へ送って塗るために要る。
+ * ⚠ **使ったらアドレスから外す**(`dropViewFindFromHash`)── 栞や `F5` に探していた語が
+ *   焼き付くと、次に開くたびに本文が塗られる(頼んでいない見え方の変更)。
+ * ⚠ 値は**整えない**(整えるのは受け側の `normalizeFindQuery` ── features/filter)。
+ *   ここは取り出すだけ。空 / 無いは `null`。
+ */
+export function parseViewDeepLinkFind(raw: string): string | null {
+  const find = hashParams(raw)?.get('find') ?? null;
+  return find === null || find === '' ? null : find;
+}
+
+/** 🔴 **探していた語だけを落とす**(#1102 段①)。⚠ `container` / `entry` / `view` は残す。 */
+export function dropViewFindFromHash(raw: string): string {
+  return dropHashKeys(raw, ['find']);
+}
+
+/**
  * 🔴 **住所を、いま見ているノートへ追随させる**(#689、2026-09-04)。
  *
  * ## ⚠ なぜ要るか ── 住所が黙って嘘になる
@@ -522,6 +542,11 @@ export interface ViewDeepLinkInput {
   readonly entry?: string;
   /** 1 回限りの合図(`w`)。開いた窓が起動の最初に放送して返す。 */
   readonly token?: string;
+  /**
+   * 🔴 **「探す」で当たった語**(`find`。#1102 段①)。⚠ ノート(`container`+`entry`)と
+   * 一緒にだけ運ぶ ── 行き先の無い語は意味が無いので、ノートが載らなかったときは落とす。
+   */
+  readonly find?: string;
 }
 
 export function formatViewDeepLink(
@@ -554,6 +579,9 @@ export function formatViewDeepLink(
   if (view === null && !carried) return null;
   if (view !== null) parts.push(`view=${encodeURIComponent(view)}`);
   if (token !== undefined && TOKEN_RE.test(token)) parts.push(`w=${encodeURIComponent(token)}`);
+  // ⚠ ノートが載ったときだけ(上の理由)。空は載せない
+  if (carried && input.find !== undefined && input.find !== '')
+    parts.push(`find=${encodeURIComponent(input.find)}`);
   return `${baseUrl}${PKC_FRAGMENT_PREFIX}${parts.join('&')}`;
 }
 
