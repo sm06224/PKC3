@@ -127,6 +127,12 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
    *   端末の事情ではない。運んでも害は出ない(既定へ丸めて読むだけ)。
    */
   { key: 'pkc3.messages.cap', label: 'メッセージの保管件数' },
+  /**
+   * ⚠ **人に付く好み**である(#813 段②)── 「フォルダの面で下の階層まで平らに見たいか」は
+   *   端末の事情ではない(`pkc3.dual-preview` と同じ考え方)。🔑 中身は `0` / `1` だけで、
+   *   lid を持たない ── 別の container へ運んでも「居ないノートを指す」が起きない。
+   */
+  { key: 'pkc3.filer-flatten', label: 'フォルダのタブで下の階層まで全部出すか' },
 ];
 
 /**

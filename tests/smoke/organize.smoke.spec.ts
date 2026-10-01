@@ -239,6 +239,55 @@ test('🔴 掴んでフォルダに落とすと入り、パンくずに落とす
   await expect(page.locator('[data-pkc-region="filer-breadcrumb"]')).not.toContainText('はこ');
   await expect(rows, 'ルートから消えていない').toHaveCount(1);
 
+  /**
+   * 🔴 **「中まで全部出す」**(#813 段②。🟣 Gemini 裁定 2026-10-01 の C)。
+   *
+   * ⚠ **新しい起動は足さない**(smoke-budget)── いま「ノートがフォルダの中に居る」木が
+   *   できたこの道中に載せる。直下だけ(1 行)と平ら(2 行)の**差が出る**形はここだけ。
+   * ⚠ unit は属性と行数を見る。ここで見るのは **実ブラウザの計算後の色**
+   *   (押された印に**見た目の規則が在るか** ── 属性を付けただけで色が動かない失敗を
+   *   #1038 段 J で踏んだ)と、実際の `localStorage`。
+   */
+  const flatBtn = page.locator('[data-pkc-region="filer-breadcrumb"] [data-pkc-field="filer-flatten"]');
+  await expect(flatBtn, '帯に「中まで全部出す」が無い').toBeVisible();
+  await expect(flatBtn).toHaveAttribute('aria-pressed', 'false');
+  const bgOf = (): Promise<string> =>
+    flatBtn.evaluate((el) => getComputedStyle(el).backgroundColor);
+  /**
+   * 🔴 **マウスを外してから測る**(`dual-filer.smoke.spec.ts` の同じ注記)。押した直後はマウスが
+   * ボタンの上に残り、`button:hover:not(:disabled)`(詳細度が `[data-pkc-choice-btn]
+   * [aria-pressed='true']` より高い)の地が勝つ ── 押された色を測ったつもりで**hover の色**を
+   * 読む(実際にこの spec の 1 稿目が `--surface-2` を読んで落ちた)。
+   */
+  await page.mouse.move(0, 0);
+  const bgOff = await bgOf();
+  await clickReal(page, '[data-pkc-region="filer-breadcrumb"] [data-pkc-field="filer-flatten"]');
+  await expect(rows, '押したのにフォルダの中のノートが出ない').toHaveCount(2);
+  await expect(flatBtn).toHaveAttribute('aria-pressed', 'true');
+  const accent = await page.evaluate(() => {
+    const probe = document.createElement('div');
+    probe.style.background = 'var(--accent)';
+    document.body.append(probe);
+    const c = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return c;
+  });
+  await page.mouse.move(0, 0);
+  const bgOn = await bgOf();
+  expect(bgOn, `押された見た目の色が切のときと同じ(${bgOn})`).not.toBe(bgOff);
+  expect(bgOn, `押された色が共通の「押している」色(--accent)でない(${bgOn} / ${accent})`).toBe(
+    accent,
+  );
+  // 実ブラウザの `localStorage` へ憶えている(次に開いても入っている)
+  expect(
+    await page.evaluate(() => localStorage.getItem('pkc3.filer-flatten')),
+    '端末へ憶えていない',
+  ).toBe('1');
+  // 切に戻すと直下だけ(対照群 ── 平らが「常に 2 行」ではないこと)
+  await clickReal(page, '[data-pkc-region="filer-breadcrumb"] [data-pkc-field="filer-flatten"]');
+  await expect(rows, '切に戻したのに平らなまま').toHaveCount(1);
+  expect(await page.evaluate(() => localStorage.getItem('pkc3.filer-flatten'))).toBe('0');
+
   // ② 中に入れば居る(2 クリック)
   await page.locator(folderRow).dblclick();
   await expect(rows, 'フォルダへ入っていない').toHaveCount(1);

@@ -413,6 +413,8 @@ export class DualFilerRenderer {
         // 🔑 **絞り込みの規則は 1 本**(reducer / binder と同じ `paneFilterOptions`)
         ...paneFilterOptions(pane, state.filterQuery, state.searchHits),
         ...listViewOptions(state),
+        // ⚠ 2 ペインは「中まで全部出す」(左の列の入り切り)を**持たない**(#813 段②)
+        flatten: false,
       });
       this.renderPane(frame.panes[side], side, state, pane, rows, bookmarks);
     }

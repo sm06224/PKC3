@@ -174,6 +174,7 @@ import { isProseAlign } from '@features/prose-align';
 import { appExternalImages } from '@adapter/ui/render/external-images';
 import { appPasteSource } from '@adapter/ui/render/paste-source';
 import { appDualPrefs } from '@adapter/ui/render/dual-prefs';
+import { appFilerFlatten } from '@adapter/ui/render/filer-flatten';
 import { isPasteSource } from '@features/markdown/paste-source';
 import { launchTile } from '@adapter/ui/launch-tile';
 import { collectExistingLids } from '@features/import/existing-lids';
@@ -3750,6 +3751,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     rememberDualPreview: (on) => {
       appDualPrefs.setPreview(on);
     },
+    /** 🔴 **「中まで全部出す」を憶える**(#813 段②)。⚠ 効かせるのは reducer。 */
+    rememberFilerFlatten: (on) => {
+      appFilerFlatten.setEnabled(on);
+    },
     /**
      * 🚩 フラグ(P11。user 指示 2026-08-07)。⚠ **設定ではない** ──
      * 開発者・パワーユーザー向けで、`foldWhen` の条件が来たら畳まれる。
@@ -4342,6 +4347,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   if (appDualPrefs.isPreviewOn()) {
     dispatcher.dispatch({ type: 'DUAL_SET_PREVIEW', on: true });
+  }
+  /**
+   * 🔑 **前に入れた「中まで全部出す」は、次に開いても入っている**(#813 段②)。
+   * ⚠ 下見と同じ作法 ── 憶えているのは端末側、効かせるのは state で、起動で 1 度だけ写す。
+   *   `SYS_BOOTED` の**後**に出す(前だと boot が state を組み直して消える)。
+   */
+  if (appFilerFlatten.enabled()) {
+    dispatcher.dispatch({ type: 'SET_FILER_FLATTEN', on: true });
   }
   /**
    * 🔑 **前に横へ留めたノートは、次に開いても留まっている**(#505 段②)。

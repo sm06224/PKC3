@@ -109,6 +109,33 @@ export function collectSubtreeLids(
   return out;
 }
 
+/**
+ * 🔴 **いまの場所の「配下ぜんぶ」を階層を無視して平らに**(#813 段②。「中まで全部出す」)。
+ *
+ * - `scopeLid === null`(ルート)= **全件**(= 一覧タブに出る集合)
+ * - フォルダ = その**配下だけ**(フォルダ自身は含めない ── 現在地はパンくずが言っている。
+ *   ⚠ 別の枝は出ない)
+ *
+ * 🔑 配下の決め方は `collectSubtreeLids`(正準親の解決を 1 度だけ・環の guard 付き)と
+ *   **同じ 1 本**を通す ── 木の読み方を 2 本にしない(§7)。
+ * ⚠ 並びは entryOrder 順(一覧タブの手動の順と同じ)。木の深さ優先にはしない ──
+ *   「いまの一覧タブと同じ」を保ち、並び順の選択(`sortOrder`)が呼び側で上書きする。
+ */
+export function getFlatDescendants(
+  scopeLid: string | null,
+  metas: ReadonlyMap<string, EntryMeta>,
+  relations: readonly Relation[],
+): EntryMeta[] {
+  if (scopeLid === null) return Array.from(metas.values()).sort(byOrder);
+  const out: EntryMeta[] = [];
+  for (const lid of collectSubtreeLids(scopeLid, metas, relations)) {
+    if (lid === scopeLid) continue;
+    const m = metas.get(lid);
+    if (m) out.push(m);
+  }
+  return out.sort(byOrder);
+}
+
 /** 正準親を持たない entry(= root 直下、entryOrder 順)。 */
 export function getRootEntries(
   metas: ReadonlyMap<string, EntryMeta>,

@@ -18,12 +18,12 @@
  */
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
 import { TAG_INPUT_FIELDS, type AppState, type TagInputField } from '@adapter/state/app-state';
-import { listViewOptions } from '@adapter/state/list-view-options';
+import { filerRowOptions } from '@adapter/state/list-view-options';
 // ⚠ `resolveCanonicalParents` / `listMoveTargets` は #813(2026-09-09)で
 //    「居場所」のプルダウンを外したときに、この面から要らなくなった ──
 //    どちらも `move-to-folder`(探して選ぶ窓)と D&D の側で生きている
 import { getAncestorFolders, listSiblings } from '@features/relation/tree';
-import { filerRows, smartLidsOf } from '@features/relation/filer-list';
+import { filerRows } from '@features/relation/filer-list';
 import {
   SMART_ARCHETYPE,
   SMART_FIELDS,
@@ -43,6 +43,7 @@ import { ARCHETYPE_ICONS, iconButton, iconSpan } from './icons';
 // 🔑 空のときの「次の一手」は一覧タブと**同じ部品**(#722 P2-13)── 2 か所で組まない
 import { emptyStartActions } from './empty-start';
 import { paintRowMark } from './selection-mark';
+import { buildPressedButton } from './choice-buttons';
 
 
 
@@ -73,6 +74,11 @@ export class FilerRenderer {
   private lastSort: AppState['entrySort'] | null = null;
   /** ⚠ 向きも指紋(2 ペイン側で実際に踏んだ ── 同型なのでこちらも入れる)。 */
   private lastSortDesc: boolean | null = null;
+  /**
+   * 🔴 **「中まで全部出す」も指紋**(#813 段②)── 入れないと、押しても表が描き直されない
+   * (`filerRows` へ渡しているのに指紋に入れ忘れた、の再演 ── 並び順・種類の絞りと同じ型)。
+   */
+  private lastFlatten: boolean | null = null;
   private lastHits: AppState['searchHits'] = null;
   /** 🔴 当たりは state の別の場所で変わる(#421 段①)── 指紋に入れる。 */
   private lastSmartHits: AppState['smartHits'] | null = null;
@@ -502,6 +508,12 @@ export class FilerRenderer {
        */
       const siblings = listSiblings(moving.lid, state.entryMetas, state.relations);
       const at = siblings.findIndex((m) => m.lid === moving.lid);
+      /**
+       * 🔴 **「中まで全部出す」の間は、上へ / 下へを出さない**(#813 段②)。
+       * ⚠ これが入れ替えるのは**同じフォルダの中の隣**で、階層をまたいだ平らな並びでは
+       *   「隣」は画面のすぐ上 / 下の行ではない ── 押すと**別の所の行が動いて**見える。
+       *   意味が無いので出さない(切に戻せば同じ場所に出る)。
+       */
       const nudge = document.createElement('div');
       nudge.setAttribute('data-pkc-field', 'order-nudge');
       for (const [dir, text] of [
@@ -516,7 +528,7 @@ export class FilerRenderer {
         if (b.disabled) b.title = dir === 'up' ? 'すでに先頭です' : 'すでに末尾です';
         nudge.append(b);
       }
-      host.append(nudge);
+      if (!state.filerFlatten) host.append(nudge);
     }
 
     if (scope) {
@@ -663,6 +675,7 @@ export class FilerRenderer {
       state.kindFilter !== this.lastKinds ||
       state.entrySort !== this.lastSort ||
       state.entrySortDesc !== this.lastSortDesc ||
+      state.filerFlatten !== this.lastFlatten ||
       state.searchHits !== this.lastHits ||
       /**
        * 🔴 **当たりが届いたら組み直す**(#421 段①)。⚠ 入れないと、集め終わって
@@ -757,6 +770,7 @@ export class FilerRenderer {
     this.lastKinds = state.kindFilter;
     this.lastSort = state.entrySort;
     this.lastSortDesc = state.entrySortDesc;
+    this.lastFlatten = state.filerFlatten;
     this.lastHits = state.searchHits;
     this.lastSmartHits = state.smartHits;
     this.lastMarks = state.selection.join(' ');
@@ -773,12 +787,7 @@ export class FilerRenderer {
      * 並べ替えを 1 度も見ておらず、一覧タブで題名順にしても中は作成順のままだった。
      */
     const q = normalizeQuery(state.filterQuery);
-    const list = filerRows(scopeLid, state.entryMetas, state.relations, {
-      smartLids: smartLidsOf(scopeLid, state.smartHits),
-      filterQuery: state.filterQuery,
-      searchHits: state.searchHits,
-      ...listViewOptions(state),
-    });
+    const list = filerRows(scopeLid, state.entryMetas, state.relations, filerRowOptions(state));
 
     /**
      * 🔴 **焦点を落とさずに組み直す**(2026-08-18。実ブラウザで実測)。
@@ -860,6 +869,31 @@ export class FilerRenderer {
         move.title = `いま開いている「${here.title}」を、別のフォルダへ移します`;
         crumb.append(move);
       }
+    }
+    /**
+     * 🔴 **「中まで全部出す」**(#813 段②。🟣 Gemini 裁定 2026-10-01 の C)。
+     *
+     * 左の列の「一覧」タブを外す前に、**全件を平らに見る道**をこの面に作る。入れると、
+     * いま居る場所の下の階層まで平らに出る(ルートで入れれば全件、フォルダの中で入れれば
+     * そのフォルダの配下だけ)。切にしておけば、いままでどおり直下だけ。
+     * ⚠ **パンくずの帯に置く** ── 「いま居る場所」を言っている同じ帯なので、
+     *   何の配下を出しているかが隣で読める。⚠ ルートでも出す(全件を見る入口はルートである)。
+     * ⚠ 押した状態は他の入り切りと**同じ器・同じ濃さ**(`buildPressedButton`)。
+     * ⚠ スマートフォルダの中は効かない(中身は条件の当たりで、もともと平ら)── そこでは
+     *   押しても何も変わらないので出さない(無言の dead click を作らない)。
+     */
+    if (scope?.archetype !== SMART_ARCHETYPE) {
+      const flat = buildPressedButton({
+        action: 'toggle-filer-flatten',
+        dataAttr: 'data-pkc-field',
+        value: 'filer-flatten',
+        label: '中まで全部出す',
+        pressed: state.filerFlatten,
+        title: state.filerFlatten
+          ? 'いま、下の階層まで平らに出しています。押すと、直下だけに戻します'
+          : '押すと、いま居る場所の下の階層まで、全部を平らに並べます',
+      });
+      crumb.append(flat);
     }
     this.region.append(crumb);
     /**

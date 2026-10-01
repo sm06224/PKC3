@@ -11,6 +11,7 @@
  */
 import type { AppState } from './app-state';
 import type { EntrySort } from '@features/filter/entry-sort';
+import { smartLidsOf, type FilerRowsOptions } from '@features/relation/filer-list';
 
 export interface ListViewOptions {
   readonly sort: EntrySort;
@@ -26,5 +27,24 @@ export function listViewOptions(state: AppState): ListViewOptions {
     sortDesc: state.entrySortDesc,
     kinds: state.kindFilter,
     openedAt: state.openedAt,
+  };
+}
+
+/**
+ * 🔴 **左の列の「フォルダ」の表に出る行を決める材料は、ここ 1 か所**(#813 段②)。
+ *
+ * ⚠ 描く側(`render/filer.ts`)・範囲選択と全選択(reducer)・鍵と一括操作の対象
+ *   (`binder.ts` の `visibleFilerRows`)の 4 か所が、同じ 5 つの材料を手で組んでいた。
+ *   「中まで全部出す」(`filerFlatten`)を足すとき 4 か所を探すことになり、**書き忘れた
+ *   経路だけ階層どおりの行で数える**(目で見た範囲と選ばれる範囲が食い違う ── §7)。
+ * ⚠ 2 ペインは**この関数を使わない**(面ごとに絞り込みの語が別で、入り切りも持たない)。
+ */
+export function filerRowOptions(state: AppState): FilerRowsOptions {
+  return {
+    smartLids: smartLidsOf(state.scopeLid, state.smartHits),
+    filterQuery: state.filterQuery,
+    searchHits: state.searchHits,
+    flatten: state.filerFlatten,
+    ...listViewOptions(state),
   };
 }

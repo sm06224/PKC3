@@ -305,6 +305,12 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    * 🔑 `toggle-pane` / `toggle-heading-fold` と同じ仕分け(N・押した所から
    *   何も要らない。開くか閉じるかは `plan-apply-box` の `hidden` だけで決まる)。
    */
+  /**
+   * ⚠ **2026-10-01(#813 段②)** ── フォルダの面の帯の「中まで全部出す」の入り切り。
+   * 🔑 `toggle-show-archived` と同じ仕分け(N・押した所から何も要らない。押すたびに
+   *   state の旗が反転するだけ)。押し口は帯のボタンだけで、鍵も持たない。
+   */
+  'toggle-filer-flatten',
   'toggle-plan-apply', 'toggle-show-archived', 'toggle-show-done',
   'toggle-show-undated', 'toggle-todo', 'undo-append', 'undo-import', 'undo-move', 'use-copied',
   /**
@@ -624,12 +630,15 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   `receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-01(#1102 段①): 「探す」から送った本文の帯の 3 押し所(`search-jump-prev` / `search-jump-next` / `search-jump-end`)で
       //   受け手 +3 ── 登記は増えない。`receivers` +3 / `total` +3 / `unregistered` +3。
-      total: 355,
-      receivers: 298,
+      // ⚠ 2026-10-01(#813 段②): フォルダの面の帯の「中まで全部出す」(`toggle-filer-flatten`)で
+      //   受け手 +1 ── 登記は増えない(押し口は帯の中にしか無く、鍵も持たない)。
+      //   `receivers` +1 / `total` +1 / `unregistered` +1。押した所から何も要らない N。
+      total: 356,
+      receivers: 299,
       registered: 96,
       both: 39,
       outsideActionsTable: 57,
-      unregistered: 259,
+      unregistered: 260,
     });
   });
 
