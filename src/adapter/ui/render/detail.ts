@@ -75,6 +75,7 @@ import { installCodeBox, syncCodeBoxSaving } from './code-box';
 import { locateCodeFence } from '@features/markdown/code-fence-edit';
 import { listAppendTargets, sectionRange } from '@features/markdown/append-target';
 import { RowSwap } from './row-swap';
+import { isTouchOnly } from './touch-device';
 import { diffCounts, diffRows, type DiffRow } from '@features/revision/diff-view';
 import type { RenderedWithRanges } from '@adapter/platform/render/markdown-client';
 import {
@@ -263,6 +264,15 @@ export const PAINTED_ATTR = 'data-pkc-painted';
  *   (常駐メモリの主張が変わる)。古いものから忘れる。
  */
 const READ_POSITION_CAP = 200;
+
+/**
+ * 🔴 **本文が空のときの案内の字**(#1221)。2 列の欄(`placeholder`)と 1 面の紙
+ * (`data-pkc-empty-hint`)が**同じ字**を使う ── 言い分けない。
+ * ⚠ 触るだけの端末では「クリック」ではなく「押して」(`append-box.ts` の鍵の名前と同じ作法)。
+ */
+function emptyBodyHint(): string {
+  return isTouchOnly() ? 'ここを押して書き始めます' : 'ここをクリックして書き始めます';
+}
 
 /**
  * 🔴 **組み直しをまたいで焦点を戻す押し所**(#856 段②で 1 つ増えた)。
@@ -601,6 +611,12 @@ export class DetailRenderer {
 
   /** 編集プレビューの予約を捨てる(編集を抜けるとき)。 */
   private cancelPreview: (() => void) | null = null;
+  /**
+   * 🔴 **題名で `Enter` を押したときの行き先**(#1221)。⚠ 本文の欄は 2 つの形
+   * (1 面 / 2 列)で作りが違うので、**組んだ側が名乗る**(`renderEditor` が
+   * 入るたびに空へ戻し、`renderLiveEditor` / 2 列の組み立てが差す)。
+   */
+  private enterBody: (() => void) | null = null;
   /**
    * 書式の帯の説明の切替(#950 ①)が持つ `selectionchange` の購読。
    * ⚠ **編集を抜けるとき必ず外す**(`disposeLends`)── 編集セッションと同じ寿命。
@@ -1781,7 +1797,36 @@ export class DetailRenderer {
     titleInput.setAttribute('data-pkc-field', 'editor-title');
     titleInput.setAttribute('aria-label', 'ノートの題名');
     titleInput.value = state.entryMetas.get(open.lid)?.title ?? '';
+    /**
+     * 🔴 **題名で `Enter` = 本文へ**(#1221)。保存の近道(`Mod+Enter`)とは別 ──
+     * 修飾キーが付いたら何もしない(`commit-edit` の鍵に譲る)。
+     * ⚠ **変換中は取らない** ── IME の確定の `Enter` で本文へ飛ぶと、題名が確定しない。
+     */
+    this.enterBody = null;
+    titleInput.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'Enter' || ev.isComposing || ev.keyCode === 229) return;
+      if (ev.ctrlKey || ev.metaKey || ev.altKey || ev.shiftKey) return;
+      ev.preventDefault();
+      this.enterBody?.();
+    });
     this.region.append(titleInput);
+    /**
+     * 🔴 **作った直後だけ、題名へ焦点を当てて既定の題名を全選択する**(#1221)。
+     *
+     * ⚠ 印は `state.freshLid === open.lid`(`CREATE_ENTRY` が立て、保存 / 改名で消える)。
+     *   **「編集」ボタンで入る既存ノートには当てない** ── 開いただけで題名が選ばれると、
+     *   本文を直したいだけの user が題名を打ち消す。
+     * ⚠ **触るだけの端末(`isTouchOnly`)では当てない** ── ソフトキーボードが画面の
+     *   下半分を隠し、縦の単位(`100vh`)はそれを追わないので本文が見えなくなる。
+     *   案内の字(下)だけ出して、押した所から始める。
+     * ⚠ 当てるのは**組み終えた後**(下の `focusTitle`)── 先に当てると、後ろの
+     *   `ta.focus()` が奪う。`?? null` は手組みの fixture(`freshLid` を持たない)への備え。
+     */
+    const focusTitle = (state.freshLid ?? null) === open.lid && !isTouchOnly();
+    const settleTitle = (): void => {
+      titleInput.focus();
+      titleInput.select();
+    };
 
     const bar = document.createElement('div');
     bar.setAttribute('data-pkc-field', 'detail-toolbar');
@@ -1837,6 +1882,7 @@ export class DetailRenderer {
     };
     if (liveEditorEnabled()) {
       this.renderLiveEditor(open.body, previewOpts, state.editOpenAt);
+      if (focusTitle) settleTitle();
       return;
     }
     const split = document.createElement('div');
@@ -1845,6 +1891,13 @@ export class DetailRenderer {
     ta.setAttribute('data-pkc-field', 'editor-body');
     ta.setAttribute('aria-label', '本文(原文)');
     ta.value = open.body;
+    // 🔴 空のとき薄い字で書き始めを案内する(#1221)。書けば消えるのは placeholder の仕様
+    ta.placeholder = emptyBodyHint();
+    this.enterBody = () => {
+      ta.focus();
+      // ⚠ 本文の**先頭**から(題名の次に読む場所。既存の本文を押しのけない)
+      ta.setSelectionRange(0, 0);
+    };
     const preview = document.createElement('div');
     preview.setAttribute('data-pkc-region', 'editor-preview');
     preview.className = 'pkc-md-rendered';
@@ -1944,7 +1997,8 @@ export class DetailRenderer {
       follow.dispose();
       for (const sc of scopes.splice(0)) sc.dispose();
     };
-    ta.focus();
+    if (focusTitle) settleTitle();
+    else ta.focus();
   }
 
   /**
@@ -2007,6 +2061,16 @@ export class DetailRenderer {
     //    塊が散文だったときだけ `row-swap.ts` が印を付ける(表・コード・図を押した
     //    編集欄まで散文の幅に縮めないため)。
     pane.setAttribute('data-pkc-prose', '');
+    /**
+     * 🔴 **本文が空のとき、薄い字で書き始めを案内する**(#1221)。
+     *
+     * ⚠ 字は**属性で持ち、出すのは CSS**(`:empty::before`)── 要素を子に足すと
+     *   `applyBlocks` の「ノードの数が合っているか」(`intact`)が崩れ、塊を全部
+     *   作り直す。`:empty` は**子が 1 つも無い**ときだけ真なので、本文が在る間と
+     *   行の欄(`RowSwap` の器)を開いている間は**自然に消える**(こちらから消さない)。
+     * ⚠ 押せば開くのは既存の「本文の下の余白を押す」(`RowSwap.handleClick`)── 同じ口。
+     */
+    pane.setAttribute('data-pkc-empty-hint', emptyBodyHint());
     /** お知らせの行。⚠ **参照で持つ**(querySelector で探すと、退避で作り直した
      *  ときに別のものを掴む ── 実際にそう外した)。 */
     const note = document.createElement('p');
@@ -2266,6 +2330,10 @@ export class DetailRenderer {
      *   開かない**ほうが正しい(押した所と違う所が開くと user は混乱する)。
      */
     if (openAt !== null) swap.openAt(openAt);
+    // 🔴 題名で `Enter` を押したとき(#1221)── 本文の最初の行。空なら書き足す行
+    this.enterBody = () => {
+      swap.openFirst();
+    };
     editAll.addEventListener('click', () => {
       if (!swap.activateAll()) note.textContent = 'この本文は「全文を編集」に切り替えられません';
     });

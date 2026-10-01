@@ -2190,6 +2190,16 @@ li[data-pkc-row-slot] {
   resize: vertical;
 }
 
+/* 🔴 **本文が空のとき、紙の上に薄く書き始めを案内する**(#1221)。
+ * ⚠ 字は `detail.ts` が `data-pkc-empty-hint` に持つ。**`:empty` は子が 1 つも無いときだけ**
+ *   真なので、本文が在る間・行の欄を開いている間は規則が当たらない(消す処理を別に持たない)。
+ * ⚠ 地は無彩色 ── `--muted` だけを使う(色は情報にだけ)。押せば開く(余白を押す導線と同じ)。 */
+[data-pkc-region='editor-live']:empty::before {
+  content: attr(data-pkc-empty-hint);
+  color: var(--muted);
+  cursor: text;
+}
+
 /* お知らせの行(無言で断らない)。⚠ 常に同じ場所に在る = 出ても配置が動かない */
 [data-pkc-field='row-note'] {
   min-height: 1.2em;

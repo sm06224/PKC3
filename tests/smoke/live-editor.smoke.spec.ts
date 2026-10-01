@@ -40,14 +40,47 @@ async function gotoLive(page: Page): Promise<void> {
  * ⚠ test 用の裏口(`window.__setBody` の類)は置かない ── 入口自体が
  * 検査対象だからである。
  */
-async function openLive(page: Page, body: string): Promise<void> {
+async function openLive(
+  page: Page,
+  body: string,
+  /** 🔴 #1221 ── 題名で `Enter` を押して本文へ入る(既定は余白を押す入口)。 */
+  viaEnter = false,
+): Promise<void> {
   await createEntry(page, 'text');
   // ⚠ 作った直後は 2 列ではなく 1 面が出ている(**既定が live** ── #104 第 2 弾)
   const live = page.locator('[data-pkc-region="editor-live"]');
   await expect(live).toBeVisible();
-  await clickReal(page, '[data-pkc-region="editor-live"]');
+  /**
+   * 🔴 **作った直後は題名に焦点が在り、既定の題名が全選択されている**(#1221)。
+   * ⚠ 見るのは**実際の焦点と選択**(`activeElement` / `selectionStart..End`)── 属性や
+   *   `autofocus` の有無ではない。`createEntry` は user と同じ手順(メニューから選ぶ)
+   *   なので、その後に別の処理が焦点を奪えば**ここで落ちる**。
+   */
+  const title = page.locator('[data-pkc-field="editor-title"]');
+  await expect(title, '作った直後に題名へ焦点が当たっていない').toBeFocused();
+  const sel = await title.evaluate((el) => {
+    const i = el as HTMLInputElement;
+    return { value: i.value, start: i.selectionStart, end: i.selectionEnd };
+  });
+  expect(sel.value, '既定の題名が入っていない(全選択の前提が崩れている)').not.toBe('');
+  expect([sel.start, sel.end], '既定の題名が全選択されていない').toEqual([0, sel.value.length]);
+  /**
+   * 🔴 **本文が空のとき、紙の上に案内が出る**(#1221)── 疑似要素なので**計算後の値**で見る。
+   * ⚠ 字は「クリック」(この箱は触る端末ではない)。
+   */
+  const hint = (): Promise<string> =>
+    live.evaluate((el) => getComputedStyle(el, '::before').content);
+  expect(await hint(), '空の本文に案内の字が出ていない').toBe('"ここをクリックして書き始めます"');
+  if (viaEnter) {
+    await title.press('Enter');
+  } else {
+    await clickReal(page, '[data-pkc-region="editor-live"]');
+  }
   const row = live.locator('[data-pkc-field="row-source"]');
   await expect(row, '空のノートで行が開かない(1 文字も打てない)').toBeVisible();
+  // 🔴 行を開いたら案内は消える(「打つと消える」。`:empty` が外れる)
+  expect(await hint(), '行を開いても案内が残っている').toBe('none');
+  if (viaEnter) await expect(row, '題名で Enter を押しても本文へ焦点が移らない').toBeFocused();
   await row.fill(body.replace(/\n$/, ''));
   await page.keyboard.press('Tab');
   await expect(live.locator('[data-pkc-field="row-source"]')).toHaveCount(0);
@@ -58,7 +91,8 @@ test('🔴 1 面で、クリックした行だけが原文になる(周りは描
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoLive(page);
-  await openLive(page, '# 題\n\n最初の段落です。\n\n次の段落です。\n');
+  // 🔴 #1221: この入り口だけ「題名で Enter」で本文へ入る(ほかは余白を押す入口のまま)
+  await openLive(page, '# 題\n\n最初の段落です。\n\n次の段落です。\n', true);
 
   const live = page.locator('[data-pkc-region="editor-live"]');
   // ① 2 列の原文欄は出ていない(1 面に畳んだ)
@@ -815,6 +849,27 @@ test('🔴 設定「編集の仕方」= 2 ペインで、次の編集から 2 �
   await expect(page.locator('[data-pkc-region="editor-split"]')).toBeVisible();
   await expect(page.locator('[data-pkc-region="editor-live"]')).toHaveCount(0);
   await expect(page.locator('[data-pkc-field="editor-body"]')).toBeVisible();
+  // 🔴 #1221: 2 列でも作った直後は題名に焦点 + 全選択 / 空の欄に案内 / Enter で本文の欄へ
+  const title = page.locator('[data-pkc-field="editor-title"]');
+  await expect(title, '2 列: 作った直後に題名へ焦点が当たっていない').toBeFocused();
+  const len = await title.evaluate((el) => (el as HTMLInputElement).value.length);
+  expect(len, '2 列: 既定の題名が入っていない').toBeGreaterThan(0);
+  expect(
+    await title.evaluate((el) => {
+      const i = el as HTMLInputElement;
+      return [i.selectionStart, i.selectionEnd];
+    }),
+    '2 列: 既定の題名が全選択されていない',
+  ).toEqual([0, len]);
+  await expect(page.locator('[data-pkc-field="editor-body"]')).toHaveAttribute(
+    'placeholder',
+    'ここをクリックして書き始めます',
+  );
+  await title.press('Enter');
+  await expect(
+    page.locator('[data-pkc-field="editor-body"]'),
+    '2 列: 題名で Enter を押しても本文の欄へ焦点が移らない',
+  ).toBeFocused();
 });
 
 /**

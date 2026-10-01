@@ -129,6 +129,12 @@ test('🔴 近道はブラウザの既定を止める(保存ダイアログ / �
   });
 
   await page.keyboard.press('Control+n');
+  /**
+   * 🔴 #1221: 作った直後は**題名の欄に焦点が在る**(打っている最中)── 打鍵中は
+   * `Alt+3` のような近道を受けない(本文を打っているときと同じ規則)。この spec が
+   * 見るのは「受けた鍵の既定を止める」ことなので、焦点を外してから押す。
+   */
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.keyboard.press('Alt+3');
   // ⚠ 対照群 ── 誰も割り当てていない鍵は**止めない**(全部止める実装を落とす)
   await page.keyboard.press('Control+Shift+F9');

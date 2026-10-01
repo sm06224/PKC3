@@ -206,7 +206,8 @@ export interface RowSwapUpdate {
 type PendingOpen =
   | { kind: 'line'; line: number; caret: 'start' | 'end' }
   | { kind: 'append' }
-  | { kind: 'all' };
+  | { kind: 'all' }
+  | { kind: 'first' };
 
 interface Active {
   /** 塊の添字(`view.blocks` の中)。⚠ 描き直しのたびに引き直す。 */
@@ -281,6 +282,9 @@ export class RowSwap {
   private staleAfter: { end: number; delta: number } | null = null;
   /** 予約(上記)。**開く操作が 1 つでも通ったら捨てる**(`open()` が消す)。 */
   private pendingOpen: PendingOpen | null = null;
+  /** `update()` を 1 度でも受けたか。⚠ 受ける前は塊の表が空なので「最初の行」が引けない
+   *  (`openFirst` が予約に回す)。 */
+  private painted = false;
   private readonly onClick: (ev: Event) => void;
   private readonly onDown: (ev: Event) => void;
 
@@ -362,6 +366,7 @@ export class RowSwap {
       return { ok: true, inserted: [] };
     }
     this.awaitingUpdate = false;
+    this.painted = true;
     // 描き直しが届いた = 座標は組み直される ── 古い座標の窓はここで閉じる
     this.staleAfter = null;
     const blocks = splitTopLevelBlocks(html);
@@ -646,6 +651,10 @@ export class RowSwap {
       this.activateAll();
       return;
     }
+    if (p.kind === 'first') {
+      this.openFirst();
+      return;
+    }
     const idx = this.blockIndexForLine(p.line);
     // 予約した行の持ち主が消えた(確定で塊が合体した等)── それ以上は追わない
     if (idx !== null) this.activateLine(idx, p.caret);
@@ -664,6 +673,29 @@ export class RowSwap {
    */
   openAt(line: number): void {
     this.pendingOpen = { kind: 'line', line, caret: 'end' };
+  }
+
+  /**
+   * 🔴 **本文の最初の行を開く**(#1221。題名で `Enter` を押したとき)。
+   *
+   * > user の物語: 新しいノートの題名を打ち終えた ── そのまま本文を書き始めたい。
+   *
+   * - 本文が在れば**最初の行の先頭**に caret を置いて開く(原文を持つ塊だけ数える ──
+   *   脚注の区切りのような導出物は行を持たない)
+   * - 本文が空なら**末尾に足す行**(`appendRow`)── 空のノートの唯一の入口と同じ口
+   * ⚠ **最初の描き直しの前は開けない**(塊の表がまだ空で、本文が在るのに「空」と読む)
+   *   ── 予約に回し、着弾後に果たす(`openAt` と同じ仕組み)。
+   * @returns 開いた / 予約した なら true
+   */
+  openFirst(): boolean {
+    if (!this.painted) {
+      this.pendingOpen = { kind: 'first' };
+      return true;
+    }
+    for (let i = 0; i < this.starts.length; i += 1) {
+      if (this.starts[i]! >= 0) return this.activateLine(i, 'start');
+    }
+    return this.appendRow();
   }
 
   /** 添字の塊を、caret を端に置いて開く(矢印キーと予約の共通口)。 */
