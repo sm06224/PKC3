@@ -415,14 +415,24 @@ export const CANCEL_EDIT_HINT = '変更を捨てて編集を終えます';
  *   (鍵は `iconKey` ではなく `action` ── `create-entry` は `iconKey` が
  *   `archetype:${種類}` に変わっても常に「作る」の色にしたいので)。
  */
-export function iconButton(action: string, label: string, iconKey = action): HTMLButtonElement {
+export function iconButton(
+  action: string,
+  label: string,
+  iconKey: string | null = action,
+): HTMLButtonElement {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.setAttribute('data-pkc-action', action);
   // ⚠ `archetype:<種別>` は種別の表から引く(分割ボタンが使う)── 表を 2 つ持たない
-  const name = iconKey.startsWith('archetype:')
-    ? (ARCHETYPE_ICONS[iconKey.slice('archetype:'.length)] ?? 'dot')
-    : ACTION_ICONS[iconKey];
+  // 🔴 `null` は「この面は字だけにする」(#1029 段 D-2。右の列の操作)── 図案を引かない。
+  //   ⚠ 空文字や `'none'` にしない(`ACTION_ICONS` の鍵に化けて、登記に無い鍵として
+  //   全数検査に拾われる)。`undefined` も使わない(既定値が `action` に戻る)。
+  const name =
+    iconKey === null
+      ? undefined
+      : iconKey.startsWith('archetype:')
+        ? (ARCHETYPE_ICONS[iconKey.slice('archetype:'.length)] ?? 'dot')
+        : ACTION_ICONS[iconKey];
   // ⚠ 図案の無い action もある(追記 / 強制解放)── そこは器ごと出さない
   if (name !== undefined) {
     const span = iconSpan(name);
