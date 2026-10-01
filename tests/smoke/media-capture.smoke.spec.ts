@@ -271,6 +271,17 @@ ${(e as Error).message}`,
   await expect(mark, '押し方の案内が出ていない').toHaveText(trimMarkText(null, null));
 
   /**
+   * 🔴 **説明文の位置**(#683 の裁定 C)── 目印が 1 つも無いあいだは**ボタンより前**、
+   *   付けたら**ボタンの後ろ**。⚠ 実ブラウザの DOM の順で見る(帯は印のたびに組み直される)。
+   */
+  const noteBeforeButtons = (): Promise<boolean> =>
+    mark.evaluate((note) => {
+      const start = note.parentElement?.querySelector('[data-pkc-field="capture-trim-start"]');
+      return start != null && (note.compareDocumentPosition(start) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+    });
+  expect(await noteBeforeButtons(), '目印が無いのに、説明文がボタンの後ろに居る').toBe(true);
+
+  /**
    * ⚠ **印は「いま鳴っている所」なので、位置を動かしてから押す。**
    * 🔑 動かせたことを**先に確かめる** ── 動かせていなければ 2 つの印が同じ値になり、
    *   reducer が片方を落とすので、**この段の失敗が「印が付かない」に化ける**
@@ -332,6 +343,7 @@ ${(e as Error).message}`,
   const at0 = await seek(1.0);
   await clickReal(page, '[data-pkc-field="capture-trim-start"]');
   await expect(mark, '「ここから」の印が付いていない').toContainText('ここから 0:01');
+  expect(await noteBeforeButtons(), '目印を付けたのに、説明文が前に居座っている').toBe(false);
   /**
    * 🔴 **印を付けても、聞いている器は作り直されない**(この段で見つけた欠陥)。
    * ⚠ 作り直されると `<audio>` が**頭へ戻って鳴り出す** ── 印は「聞きながら」
