@@ -459,7 +459,7 @@ export class InspectorRenderer {
            *   押せない物を出すと無言の dead click になるので、**出さない**。
            */
           if (canWriteTags) {
-            const off = iconButton('untag-entry', 'タグを外す');
+            const off = iconButton('untag-entry', 'タグを外す', null);
             off.setAttribute('data-pkc-tag', tag);
             off.setAttribute('data-pkc-field', 'inspector-tag-off');
             off.title = `このノートから「${tag}」を外します(ノートも本文の他の行も消えません)`;
@@ -565,7 +565,7 @@ export class InspectorRenderer {
           go.setAttribute('data-pkc-field', 'relation-target-link');
           // ⚠ 相手が消えていても**黙って空にしない**(何が壊れているか分かる形)
           go.textContent = other?.title ?? '(見つかりません)';
-          const del = iconButton('remove-relation', '関係を消す');
+          const del = iconButton('remove-relation', '関係を消す', null);
           del.setAttribute('data-pkc-relation', r.id);
           // 🔴 編集中は押せなくする(#513)── reducer は黙って捨てるので、口の側で断る
           del.disabled = editing;
@@ -1085,7 +1085,7 @@ export class InspectorRenderer {
         const cands = document.createElement('datalist');
         cands.id = 'pkc-tag-candidates';
         this.tagCandidates = cands;
-        const add = iconButton('add-tag', 'タグを足す');
+        const add = iconButton('add-tag', 'タグを足す', null);
         add.title =
           'このノートにタグを足します(本文の先頭の「この文書の情報」に入ります)。井桁を付けて空白で並べると、まとめて足せます';
         form.append(input, cands, add);
@@ -1268,7 +1268,7 @@ export class InspectorRenderer {
       opt.textContent = RELATION_LABELS[k];
       kind.append(opt);
     }
-    const add = iconButton('add-relation', '関係を足す');
+    const add = iconButton('add-relation', '関係を足す', null);
     add.title = '選んでいるノートから、相手のノートへ関係を張ります';
     addBar.append(target, list, kind, add);
     this.region.append(addBar);
@@ -1301,7 +1301,7 @@ export class InspectorRenderer {
       bucketGroup = name;
     };
     const btn = (action: string, label: string): void => {
-      const b = iconButton(action, label);
+      const b = iconButton(action, label, null);
       (bucket ?? actions).append(b);
       this.buttons.set(action, b);
     };
@@ -1482,7 +1482,7 @@ export class InspectorRenderer {
     for (const { action, label, title } of COLLECTION_PANE_COMMANDS) {
       const item = document.createElement('div');
       item.setAttribute('data-pkc-field', 'collection-command-item');
-      const btn = iconButton(action, label);
+      const btn = iconButton(action, label, null);
       btn.title = title;
       item.append(btn);
       /**
@@ -1526,7 +1526,7 @@ export class InspectorRenderer {
     const item = document.createElement('div');
     item.setAttribute('data-pkc-field', 'collection-command-item');
 
-    const btn = iconButton('toggle-plan-apply', '整理案を適用');
+    const btn = iconButton('toggle-plan-apply', '整理案を適用', null);
     btn.title = 'AI から返ってきた整理案(mv / mkdir / rename)を貼ると、何が起きるかを先に見せます';
     btn.setAttribute('aria-expanded', 'false');
     item.append(btn);
