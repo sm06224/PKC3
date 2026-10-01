@@ -312,8 +312,29 @@ export class RowSwap {
   dispose(): void {
     this.host.removeEventListener('click', this.onClick, false);
     this.host.removeEventListener('mousedown', this.onDown, false);
-    this.active?.textarea.remove();
+    /**
+     * 🔴 **打ちかけの字を先に確定してから、欄を外す**(#1219)。
+     *
+     * 直す前は `this.active?.textarea.remove(); this.active = null;` の順だった。
+     * 焦点のある `<textarea>` を外すと Chromium は**外す直前に同期で `blur` を飛ばし**、
+     * その handler(`commitActive` → `restoreActive`)が**先に欄を外して塊を作り直す**。
+     * 戻ってきた外側の `remove()` は親が無いので `NotFoundError` ── 例外で描き直しが
+     * 途中で止まり、書式の帯・保存ボタン群・`editor-live` が残った。
+     * 実マウスは mousedown で焦点が動いて `blur` が先に確定するので、**mousedown の無い
+     * 押し方**(`el.click()` / 近道)でだけ出る。
+     * ⚠ 同じ罠は `restoreActive` / `closeQuietly` では手当て済み(活性を先に落とす)。
+     *
+     * 🔑 **「捨てる」形(活性を先に null にして確定しない)は採らない** ── その瞬間の
+     *   打ちかけが消える。実マウスの経路(blur が確定する)と同じ結果に揃える。
+     * ⚠ `force` ── 変換中・ダイアログ中でも確定する。ここで見送ると、その後は
+     *   `compositionend` も `blur` も**もう誰も聴いていない**ので、打ちかけが永久に消える。
+     * ⚠ 確定は `commitActive` の 1 本(高々 1 回 ── 活性は `restoreActive` が先に落とす)。
+     */
+    this.commitActive(true);
+    const rest = this.active;
+    // ⚠ 確定が活性を残したとき(= 想定外)も、外す前に落とす(blur の再入を防ぐ)
     this.active = null;
+    rest?.textarea.remove();
   }
 
   get isActive(): boolean {
@@ -1270,11 +1291,14 @@ export class RowSwap {
     this.syncActiveBox();
   }
 
-  /** 確定して閉じる。⚠ 変換中は確定しない(`pendingCommit` に回す)。 */
-  commitActive(): boolean {
+  /**
+   * 確定して閉じる。⚠ 変換中は確定しない(`pendingCommit` に回す)。
+   * `force` は `dispose` だけが立てる(後から確定する機会が無いとき ── 変換中・ダイアログ中の見送りをやめる)。
+   */
+  commitActive(force = false): boolean {
     const a = this.active;
     if (a === null) return true;
-    if (a.composing) {
+    if (a.composing && !force) {
       a.pendingCommit = true;
       return false;
     }
@@ -1294,7 +1318,7 @@ export class RowSwap {
      *   別の所を押せば、そのときの `blur` が普通に確定する。
      * ⚠ **変換中(`composing`)の扱いは上のまま** ── そちらが先に効く。
      */
-    if (isAppDialogOpen()) return false;
+    if (!force && isAppDialogOpen()) return false;
     const text = a.textarea.value;
     const start = a.startLine;
     const end = a.endLine;
