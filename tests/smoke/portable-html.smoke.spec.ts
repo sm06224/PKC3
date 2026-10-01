@@ -244,6 +244,73 @@ test('🔴 書き出した 1 枚が、そのまま PKC3 として開く (#400 �
   const carried = await page.context().newPage();
   await carried.goto(pathToFileURL(out).href);
   await expect(carried.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
+  /**
+   * 🔑 診断(#1066)── **assert より前に 1 行で残す**(落ちた回にだけ欲しい)。
+   *
+   * ⚠ 分けたいのは「書き出した 1 枚の中の DB 画像が古かった」か「画像は新しいのに、
+   *   boot が別の画像(端末の器)を選んだ」か。判定は assert しない(門は下のまま)。
+   * ⚠ 焼いた画像の `<script>` は boot が **DOM から外す**(`takeEmbeddedImage`)ので、
+   *   開いた後の page からは読めない ── **書き出した file の原文**から読む。
+   *   選んだ理由(`choice.why`)は **画面にも `window` にも console にも出ていない**ので、
+   *   読めるのは材料(器の記録と印の時刻)まで ── 比べるのは `chooseImage` の規則どおり
+   *   `savedAt >= exportedAt` なら器が選ばれる。
+   */
+  const tagText =
+    /<script type="application\/json" data-pkc-bundle>([^<]*)<\/script>/.exec(bytes)?.[1] ?? null;
+  const imagePayloads = [
+    ...bytes.matchAll(
+      /<script type="application\/octet-stream;base64" data-pkc-db-image>([^<]*)<\/script>/g,
+    ),
+  ].map((mm) => mm[1]!.trim().length);
+  let bundleId: string | null = null;
+  let exportedAt: number | null = null;
+  try {
+    const parsed = JSON.parse(tagText ?? '') as { id?: string; exportedAt?: number };
+    bundleId = parsed.id ?? null;
+    exportedAt = parsed.exportedAt ?? null;
+  } catch {
+    // ⚠ 読めなければ null のまま出す(診断が落ちて本題の assert を隠さない)
+  }
+  const boot = await carried
+    .evaluate(async (id) => {
+      const domImage = document.querySelector('script[data-pkc-db-image]') !== null;
+      if (!id) return { domImage, stored: 'no-id' };
+      const stored = await new Promise<string>((res) => {
+        const rq = indexedDB.open(`pkc3-bundle-${id}`);
+        rq.onerror = () => res('open-error');
+        rq.onsuccess = () => {
+          const db = rq.result;
+          if (!db.objectStoreNames.contains('image')) {
+            db.close();
+            res('no-store');
+            return;
+          }
+          const g = db.transaction('image', 'readonly').objectStore('image').get('db');
+          g.onerror = () => {
+            db.close();
+            res('get-error');
+          };
+          g.onsuccess = () => {
+            db.close();
+            const r = g.result as
+              | { bundleId?: string; exportedAt?: number; savedAt?: number; image?: { byteLength?: number } }
+              | undefined;
+            res(
+              r === undefined
+                ? 'none'
+                : `bundleId=${r.bundleId === id ? 'same' : 'other'} exportedAt=${r.exportedAt} savedAt=${r.savedAt} bytes=${r.image?.byteLength ?? 'n/a'}`,
+            );
+          };
+        };
+      });
+      return { domImage, stored };
+    }, bundleId)
+    .catch((e: unknown) => ({ domImage: null, stored: `evaluate-error:${String(e)}` }));
+  console.log(
+    `[#1066] portable fileBytes=${bytes.length} bundleTag=${tagText === null ? 'none' : 'found'}` +
+      ` exportedAt=${exportedAt} imageScripts=${imagePayloads.length} imagePayloadLen=[${imagePayloads.join(',')}]` +
+      ` domImageAfterBoot=${boot.domImage} stored={${boot.stored}} bootChoice=n/a(not-exposed)`,
+  );
   await clickReal(carried, '[data-pkc-browse="list"]');
   await expect(
     carried.locator('[data-pkc-region="entry-list"]'),

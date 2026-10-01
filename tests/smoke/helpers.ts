@@ -771,6 +771,21 @@ export interface MainGapSample {
   readonly top: readonly number[];
   /** 対照群の上位 5 件。⚠ **両方無いと「箱が忙しかった」が言えない**。 */
   readonly baseTop: readonly number[];
+  /**
+   * 🔴 **上位の欠測が、窓の何 ms 目に起きたか**(`top` と同じ並び。欠測が**始まった**時刻。#878 ①、2026-10-01)。
+   *
+   * ⚠ 大きさだけでは「ある瞬間に 1 回止まった(離散の事象)」と「窓の全体で床が上がった」が
+   *   読めない。失敗した回は 83 / 98 / 109ms、通った回は 19〜35ms と**2 つの塊**に割れており、
+   *   前者なら**時刻が窓の同じ辺りに寄る**はずである(= 診断のための記録。門は見ない)。
+   */
+  readonly topAt?: readonly number[];
+  /**
+   * 🔴 **同じ窓の long task**(開始の窓内オフセットと長さ。#878 ①)。
+   *
+   * ⚠ `undefined` / `null` は「この計器が採れていない」(API が無い / 採っていない)── **0 件(`[]`)と別物**で、
+   *   0 件は「採れたが長い塊は無かった(= 欠測は別の理由)」を言う。
+   */
+  readonly longtasks?: readonly { at: number; dur: number }[] | null;
 }
 
 export function expectMainGapUnderBudget(label: string, m: MainGapSample): void {
@@ -779,7 +794,10 @@ export function expectMainGapUnderBudget(label: string, m: MainGapSample): void 
     `[#878] gap ${label} maxGap=${m.maxGap} base=${m.base} over=${m.maxGap - m.base}` +
       ` budget=${MAIN_GAP_BUDGET_MS} ticks=${m.ticks}/${m.baseTicks}` +
       // 🔑 上位 5 件(#878)── 1 回の走りで**裾の形**が読める(走りを増やさずに済む)
-      ` top=[${m.top.join(',')}] baseTop=[${m.baseTop.join(',')}]`,
+      ` top=[${m.top.join(',')}] baseTop=[${m.baseTop.join(',')}]` +
+      // 🔑 いつ起きたか / 長い塊だったか(#878 ①)── 1 行のまま(`grep '\[#878\]'` で拾える)
+      ` topAt=[${(m.topAt ?? []).join(',')}]` +
+      ` longtask=${m.longtasks == null ? 'n/a' : `[${m.longtasks.map((t) => `${t.at}+${t.dur}`).join(',')}]`}`,
   );
   // ⚠ 空振り防止 ── 心拍が回っていなければ最大欠測は 0 になり、門は常に通る
   expect(m.ticks, `${label}: 心拍が取れていない(計器が死んでいる)`).toBeGreaterThan(5);
