@@ -92,6 +92,19 @@ test('🔴 引用の行で計算しても、取り消しで打った字へ戻れ
     '> 1200*1.1=',
   );
 
+  /**
+   * 🔴 **リストの行も同じ Enter で続き、記号だけの行で抜ける**(#1167)。
+   * ⚠ 計算が先に答えを挿し、継続は**挿した後の行末**から続く(順番の実機確認)。
+   * 🔑 新しく起動せず、この道中の続きで見る(起動は 1 件増やすと以後すべての回に響く)。
+   */
+  await ta.fill('');
+  await ta.click();
+  await page.keyboard.type('- 2+3=');
+  await page.keyboard.press('Enter');
+  await expect(ta).toHaveValue('- 2+3=5\n- ');
+  await page.keyboard.press('Enter');
+  await expect(ta, '記号だけの行で Enter を押しても抜けない').toHaveValue('- 2+3=5\n');
+
   expect(errors, errors.join('\n')).toHaveLength(0);
 });
 
