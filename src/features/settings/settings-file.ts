@@ -105,7 +105,7 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
    *   端末の事情ではない。運んだ先に点線の仕組みが無くても**害が出ない**
    *   (印が出ないだけ)。
    */
-  { key: 'pkc3.missing-links', label: 'リンク先が無いリンクを点線で見せるか' },
+  { key: 'pkc3.missing-links', label: 'リンク先が無いリンクを薄い字と点線で見せるか' },
   /**
    * ⚠ **人に付く好み**(#1087)── 「長いコード枠を最初から畳みたいか」は端末の事情ではない。
    *   運んだ先に仕組みが無くても害は出ない(畳まれないだけ)。

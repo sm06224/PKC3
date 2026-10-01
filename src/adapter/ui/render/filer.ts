@@ -894,6 +894,16 @@ export class FilerRenderer {
      *   押しても何も変わらないので出さない(無言の dead click を作らない)。
      */
     if (scope?.archetype !== SMART_ARCHETYPE) {
+      /**
+       * 🔴 **入れている間の一言**(#1207 I6。🟣 Gemini 裁定 2026-10-01 = A)。
+       *
+       * 押した状態は端末に憶えるので、**翌日開くと平らなまま**で理由が分からない。
+       * 帯の右端の押下表示だけが手がかりだった ── 入っている間は隣に**理由と件数**を言う。
+       * ⚠ 数は**いま表に並べている行数**(`list`)── 別に数え直さない(§7)。
+       * ⚠ 切れば出ない(器ごと作らない)。
+       * ⚠ **一言と押し口は 1 つの塊に入れて右へ寄せる** ── 別々に並べると、列が狭いとき
+       *   折り返しで**押し口だけが左の行へ落ちる**(実ブラウザで 251px ずれた)。
+       */
       const flat = buildPressedButton({
         action: 'toggle-filer-flatten',
         dataAttr: 'data-pkc-field',
@@ -904,7 +914,17 @@ export class FilerRenderer {
           ? 'いま、下の階層まで平らに出しています。押すと、直下だけに戻します'
           : '押すと、いま居る場所の下の階層まで、全部を平らに並べます',
       });
-      crumb.append(flat);
+      if (state.filerFlatten) {
+        const group = document.createElement('span');
+        group.setAttribute('data-pkc-field', 'filer-flatten-group');
+        const note = document.createElement('span');
+        note.setAttribute('data-pkc-field', 'filer-flatten-note');
+        note.textContent = `全部出しています(${list.length} 件)`;
+        group.append(note, flat);
+        crumb.append(group);
+      } else {
+        crumb.append(flat);
+      }
     }
     this.region.append(crumb);
     /**

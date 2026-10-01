@@ -51,7 +51,7 @@ import { formatStoredDate, storedInstantIso } from '@features/datetime/stored-da
 import { readTags, sameTag } from '@features/flavor/tags';
 import { collectEntryTags } from '@features/flavor/entry-tags';
 import { extractHeadingsFromMarkdown } from '@features/markdown/markdown-toc';
-import { listAssetUses } from '@features/asset/asset-refs-in-body';
+import { listAssetUses, type AssetUse } from '@features/asset/asset-refs-in-body';
 import { frontmatterProblem } from '@features/markdown/frontmatter';
 import { externalImageUrls } from '@features/asset/inline-url-adopt';
 import { formatBodyStats } from '@features/stats/body-stats';
@@ -154,6 +154,66 @@ export class InspectorRenderer {
    *   ⚠ lid で憶えると、同じノートを書き換えたときに古い枚数が残る。
    */
   private imgCount: { body: string; count: number } | null = null;
+
+  /**
+   * 🔴 **説明文の空の添付に出す「元の file 名」**(#1207 I4)。
+   *
+   * 名前は添付ノートの本文(frontmatter)にしか無く、**この面は同期に描く**ので、
+   * 引くのは非同期の口(`setAssetNameResolver`)に任せ、**届いたら行の字だけ差し替える**
+   * (面全体は描き直さない)。⚠ **状態が動くたびに render する**面なので、
+   * 引いた結果は key ごとに憶える(`null` = 引いたが名前が無かった。**引き直さない**)。
+   */
+  private assetNameResolver: ((key: string) => Promise<string | null>) | null = null;
+  private readonly assetNames = new Map<string, string | null>();
+  private readonly assetNamesAsked = new Set<string>();
+  /** いま出している添付の行(key → 使われ方)。届いた名前を当てるときに引く。 */
+  private assetUses = new Map<string, AssetUse>();
+
+  /** 添付の元の file 名を引く口(main が渡す)。渡さなければ今までどおり key を短くして出す。 */
+  setAssetNameResolver(resolve: (key: string) => Promise<string | null>): void {
+    this.assetNameResolver = resolve;
+  }
+
+  /** 行に出す字。**説明文 → 元の file 名 → key を短くしたもの** の順。 */
+  private assetLabel(u: AssetUse): string {
+    if (u.label !== '') return u.label;
+    const named = this.assetNames.get(u.key);
+    if (named) return named;
+    return u.key.length > 12 ? `${u.key.slice(0, 8)}…` : u.key;
+  }
+
+  private paintAssetButton(go: HTMLElement, u: AssetUse): void {
+    const name = this.assetLabel(u);
+    go.title =
+      u.count > 1
+        ? `本文の「${name}」へ移動します(最初の場所へ。本文で ${u.count} 回使っています)`
+        : `本文の「${name}」へ移動します`;
+    go.textContent = name;
+  }
+
+  /** 説明文の空の行の名前を、まだ引いていなければ 1 度だけ引く。 */
+  private askAssetName(u: AssetUse): void {
+    const resolve = this.assetNameResolver;
+    if (!resolve || u.label !== '' || this.assetNamesAsked.has(u.key)) return;
+    this.assetNamesAsked.add(u.key);
+    void resolve(u.key).then(
+      (name) => {
+        this.assetNames.set(u.key, name);
+        if (!name) return;
+        const use = this.assetUses.get(u.key);
+        if (!use) return;
+        const box = this.rows.get('inspector-assets');
+        const go = [...(box?.querySelectorAll<HTMLElement>('[data-pkc-asset-key]') ?? [])].find(
+          (b) => b.getAttribute('data-pkc-asset-key') === u.key,
+        );
+        if (go) this.paintAssetButton(go, use);
+      },
+      () => {
+        // 引けなかったら、また聞けるようにする(今の字 = key の短縮のまま)
+        this.assetNamesAsked.delete(u.key);
+      },
+    );
+  }
 
   constructor(private readonly region: HTMLElement) {
     this.scroll = new ScrollMemory(region);
@@ -324,6 +384,7 @@ export class InspectorRenderer {
       const empty = uses.length === 0;
       assetBox.hidden = empty;
       if (dt instanceof HTMLElement) dt.hidden = empty;
+      this.assetUses = new Map(uses.map((u) => [u.key, u]));
       for (const u of uses) {
         const item = document.createElement('div');
         item.setAttribute('data-pkc-field', 'inspector-asset-item');
@@ -332,14 +393,10 @@ export class InspectorRenderer {
         go.setAttribute('data-pkc-action', 'jump-to-asset-use');
         go.setAttribute('data-pkc-asset-key', u.key);
         go.setAttribute('data-pkc-field', 'inspector-asset-link');
-        const name = u.label !== '' ? u.label : u.key.length > 12 ? `${u.key.slice(0, 8)}…` : u.key;
-        go.title =
-          u.count > 1
-            ? `本文の「${name}」へ移動します(最初の場所へ。本文で ${u.count} 回使っています)`
-            : `本文の「${name}」へ移動します`;
-        go.textContent = name;
+        this.paintAssetButton(go, u);
         item.append(go);
         assetBox.append(item);
+        this.askAssetName(u);
       }
     }
     const tagBox = this.rows.get('inspector-tag-chips');
@@ -1144,7 +1201,7 @@ export class InspectorRenderer {
      * ⚠ 値は押せる札なので `setRow` ではなく専用の器を持つ。
      */
     row('目次', 'inspector-toc');
-    row('添付', 'inspector-assets');
+    row('本文で使う添付', 'inspector-assets');
     /**
      * 🔴 **タグ**(#182 / 台帳 #180 の A-2)。⚠ 値は文字ではなく**押せる札**なので、
      * `setRow`(textContent 差し替え)ではなく専用の器を持つ。

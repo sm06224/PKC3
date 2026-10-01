@@ -446,7 +446,7 @@ test('添付取込 → entry 出現 → image preview が可視高さを持つ',
   const filler = Array.from({ length: 90 }, (_, i) => `段落 ${i + 1} です。`).join('\n\n');
   await ta.fill(
     `![点](asset:${assetKey})\n\n[点をDL](asset:${assetKey})\n\n${filler}\n\n` +
-      `![ふたつめ](asset:${assetKey2})\n\n段落 A\n\n段落 B\n\n![みっつめ](asset:${assetKey3})\n\n${filler}`,
+      `![ふたつめ](asset:${assetKey2})\n\n段落 A\n\n段落 B\n\n![](asset:${assetKey3})\n\n${filler}`,
   );
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
@@ -473,7 +473,18 @@ test('添付取込 → entry 出現 → image preview が可視高さを持つ',
   await expect(assetRows, '右の列に「添付」の行が 3 行出ていない').toHaveCount(3);
   await expect(assetRows.nth(0)).toHaveText('点');
   await expect(assetRows.nth(1)).toHaveText('ふたつめ');
-  await expect(assetRows.nth(2)).toHaveText('みっつめ');
+  /**
+   * 🔴 **見出しは「本文で使う添付」、説明文の空の添付には元の file 名**(#1207 I4)。
+   * ⚠ 3 つ目は説明文を**わざと空**にしてある(`![](asset:…)`)── 直す前は内部の id(`ast-xxxx…`)が出ていた。
+   *   名前は添付ノートの中にしか無く、storage worker から非同期で届く ── 実物の経路を通す。
+   */
+  await expect(
+    page.locator('[data-pkc-field="inspector-assets"]').locator('xpath=preceding-sibling::dt[1]'),
+    '右の列の見出しが「本文で使う添付」でない',
+  ).toHaveText('本文で使う添付');
+  await expect(assetRows.nth(2), '説明文が空の添付に元の file 名が出ていない(id のまま)').toHaveText(
+    'みっつめ.png',
+  );
   const inView = (loc: typeof img1) =>
     loc.evaluate((el) => {
       const r = el.getBoundingClientRect();

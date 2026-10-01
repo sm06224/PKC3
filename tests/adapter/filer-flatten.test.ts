@@ -284,6 +284,82 @@ describe('🔴 親フォルダの名前を行に添える(#813 残り。🟣 Gem
   });
 });
 
+describe('🔴 入れている間は「全部出しています(N 件)」と言う(#1207 I6。🟣 Gemini 裁定 2026-10-01 = A)', () => {
+  /**
+   * 押した状態は端末に憶えるので、翌日開くと平らなままで理由が分からなかった。
+   * 手がかりは帯の右端の押下表示だけ。入っている間は隣に**理由と件数**を言う。
+   */
+  const noteOf = (pane: HTMLElement): HTMLElement | null =>
+    pane.querySelector('[data-pkc-region="filer-breadcrumb"] [data-pkc-field="filer-flatten-note"]');
+
+  it('🔴 切のときは出ない。入れると「全部出しています(N 件)」で、N は表に並んでいる行の数', async () => {
+    const { pane, toggle, rows } = setup();
+    expect(noteOf(pane), '切なのに一言が出ている').toBeNull();
+    toggle()!.click();
+    await tick();
+    expect(rows().length, '前提: 全件が平らに出ていない').toBe(7);
+    expect(noteOf(pane), '入れたのに一言が出ない').not.toBeNull();
+    expect(noteOf(pane)!.textContent).toBe('全部出しています(7 件)');
+    // 直下だけの 3 件ではない(= 平らに出した行を数えている)
+    expect(noteOf(pane)!.textContent).not.toContain('3 件');
+  });
+
+  it('🔴 切れば消える(双方向)', async () => {
+    const { pane, toggle } = setup();
+    toggle()!.click();
+    await tick();
+    expect(noteOf(pane), '前提: 入れても出ていない').not.toBeNull();
+    toggle()!.click();
+    await tick();
+    expect(noteOf(pane), '切ったのに一言が残っている').toBeNull();
+  });
+
+  it('🔴 N は居る場所に追従する(フォルダの配下だけ)/ 絞り込むと、並んでいる行の数に追従する', async () => {
+    const { pane, toggle, d, rows } = setup();
+    toggle()!.click();
+    await tick();
+    d.dispatch({ type: 'SET_SCOPE', lid: 'f1' });
+    await tick();
+    expect(rows().length, '前提: 配下が 3 行でない').toBe(3);
+    expect(noteOf(pane)!.textContent, '降りたのに N が古い').toBe('全部出しています(3 件)');
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 't-b' });
+    await tick();
+    expect(rows().length, '前提: 絞り込みで 1 行になっていない').toBe(1);
+    expect(noteOf(pane)!.textContent, '絞り込んだのに N が古い(表に無い行を数えている)').toBe(
+      '全部出しています(1 件)',
+    );
+  });
+
+  it('🔴 親フォルダ名(#813)は壊していない ── 一言と同居する', async () => {
+    const { pane, toggle } = setup();
+    toggle()!.click();
+    await tick();
+    expect(noteOf(pane)).not.toBeNull();
+    expect(
+      pane.querySelector('tbody [data-pkc-entry="b"] [data-pkc-field="parent-name"]')?.textContent,
+    ).toBe('─ t-f2');
+  });
+
+  it('🔴 一言は押下表示の左隣(押し口は帯の右端に残る)/ スマートフォルダの中では出ない', async () => {
+    const { pane, toggle, d } = setup([...METAS, meta('s', 8, 'smart')], RELS);
+    toggle()!.click();
+    await tick();
+    expect(noteOf(pane)!.nextElementSibling, '一言が押下表示の隣にない').toBe(toggle());
+    // 🔴 一言と押し口は**同じ塊**(別々に並べると、狭い列の折り返しで押し口だけ左の行へ落ちる)
+    expect(
+      noteOf(pane)!.parentElement?.getAttribute('data-pkc-field'),
+      '一言と押し口が 1 つの塊に入っていない',
+    ).toBe('filer-flatten-group');
+    expect(noteOf(pane)!.parentElement!.parentElement?.getAttribute('data-pkc-region')).toBe(
+      'filer-breadcrumb',
+    );
+    d.dispatch({ type: 'SET_SCOPE', lid: 's' });
+    await tick();
+    expect(d.getState().filerFlatten, '前提: 入ったままのはず').toBe(true);
+    expect(noteOf(pane), '効かない場所(スマートフォルダ)で「全部出しています」と言っている').toBeNull();
+  });
+});
+
 describe('🔴 平らに出している間の、範囲選択・全選択・印(#813 段②)', () => {
   const ready = () => {
     const s0 = reduce(initialState, { type: 'SYS_BOOTED', cid: 'c', metas: METAS, relations: RELS }).state;

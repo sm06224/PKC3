@@ -165,7 +165,14 @@ test('🔴 本文の entry: リンクを押すと、そのノートが開く(遷
     el.after(plain);
     const cs = getComputedStyle(el);
     const ps = getComputedStyle(plain);
+    // 🔴 薄い字(`--muted`)の実際の色 ── 変数を解く対照物を 1 つ置いて読む(属性・変数名では見ない)
+    const muteProbe = document.createElement('span');
+    muteProbe.style.color = 'var(--muted)';
+    el.after(muteProbe);
+    const mutedColor = getComputedStyle(muteProbe).color;
+    muteProbe.remove();
     const out = {
+      muted: mutedColor,
       style: cs.textDecorationStyle,
       line: cs.textDecorationLine,
       color: cs.color,
@@ -178,7 +185,15 @@ test('🔴 本文の entry: リンクを押すと、そのノートが開く(遷
   expect(lookMissing.style, '点線になっていない(CSS の受け皿が無い)').toBe('dotted');
   expect(lookMissing.line).toContain('underline');
   expect(lookMissing.plainStyle, '対照群が最初から点線(比べる意味が無い)').not.toBe('dotted');
-  expect(lookMissing.color, '字の色まで変わっている').toBe(lookMissing.plainColor);
+  /**
+   * 🔴 **消えたリンクは薄い字**(#1207 I2)。押せる @日付(上。字の色は本文のまま + 点線)と
+   *   同じ点線なので、**押しても見つからない側だけ**を薄くして意味を分ける。
+   *   計算後の色で見る(属性や CSS の字面では「薄く見える」は言えない)。
+   */
+  expect(lookMissing.color, '消えたリンクが薄い字(--muted)でない').toBe(lookMissing.muted);
+  expect(lookMissing.color, '消えたリンクが普通のリンクと同じ色(押せない印にならない)').not.toBe(
+    lookMissing.plainColor,
+  );
 
   /**
    * 🔴 **戻すと、リンク元を開き直さなくても点線が消える**(再描画なしの当て直し)。

@@ -2957,9 +2957,12 @@ li[data-pkc-row-slot] {
 .pkc-md-rendered a[data-pkc-external-link]:hover .pkc-external-link-icon {
   opacity: 1;
 }
-/* 🔴 **リンク先のノートが無い内部リンク**(#1174 段①)。点線の下線だけ ── 字の色は変えない。
+/* 🔴 **リンク先のノートが無い内部リンク**(#1174 段①、#1207 I2)。薄い字 + 点線の下線。
+ * 🔑 点線は「押せる字」(本文の `@日付`、字の色は本文のまま)にも使う ── 同じ点線が
+ *   逆の意味にならないよう、**押しても見つからない物だけ字を薄くする**(押せない物は薄く)。
  * 🔑 印は属性(`data-pkc-link-missing`)で受ける。card(`@[card](entry:…)`)の器にも付く。 */
 .pkc-md-rendered [data-pkc-link-missing] {
+  color: var(--muted);
   text-decoration: underline dotted;
 }
 .pkc-md-rendered hr {
@@ -6066,6 +6069,24 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
  * `[data-pkc-choice-btn][aria-pressed='true']` が持つ(ここで濃さを足さない) */
 [data-pkc-region='filer-breadcrumb'] [data-pkc-field='filer-flatten'] {
   margin-inline-start: auto;
+}
+/* 🔴 **入れている間の一言**(#1207 I6)は押下表示の**左隣**へ。⚠ **一言と押し口は 1 つの塊**にして
+ * 塊ごと右へ寄せる ── 別々に寄せると、列が狭いとき折り返しで押し口だけが左の行へ落ちる
+ * (実ブラウザで測った)。塊の中は右詰め(狭ければ一言が上の行へ回る)。
+ * 地は無彩色 + 薄い字(情報にだけ色)。 */
+[data-pkc-region='filer-breadcrumb'] [data-pkc-field='filer-flatten-group'] {
+  margin-inline-start: auto;
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--s1);
+}
+[data-pkc-region='filer-breadcrumb'] [data-pkc-field='filer-flatten-group'] [data-pkc-field='filer-flatten'] {
+  margin-inline-start: 0;
+}
+[data-pkc-region='filer-breadcrumb'] [data-pkc-field='filer-flatten-note'] {
+  color: var(--muted);
 }
 [data-pkc-region='filer-table'] {
   width: 100%;

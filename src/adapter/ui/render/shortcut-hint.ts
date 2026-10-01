@@ -34,6 +34,14 @@ import { appKeymap, type KeymapStore } from './keymap';
 export const HINT_BASE = 'data-pkc-hint-base';
 export const HINT_COMMAND = 'data-pkc-hint-command';
 /**
+ * 🔴 **もう 1 つ、近道を添える**(#1207 I5)。主の命令(`HINT_COMMAND`)の綴りの後ろに
+ * 「。<別の命令の鍵><この字>」を足す ── 「操作を探す」に、探す欄へ移る鍵を添えるのが最初の使い手。
+ * ⚠ **2 つとも属性で持つ**(`applyShortcutHints` が割当の変更で組み直すので、
+ *   `title` へ直に書くと、鍵を変えた直後だけ古い綴りが残る)。
+ */
+export const HINT_ALSO_COMMAND = 'data-pkc-hint-also-command';
+export const HINT_ALSO_SUFFIX = 'data-pkc-hint-also-suffix';
+/**
  * 🔴 **いま押せない理由**(#761)。押せるときは属性ごと外す。
  *
  * ⚠ **`disabled` と対で置く** ── `disabled` だけだと、鍵で撃った人にも
@@ -70,10 +78,22 @@ export function hintTitle(
   keymap: KeymapStore = appKeymap,
   /** 🔴 いま押せない理由(#761)。⚠ 在るときは末尾へ足す ── `#715` と同じ作法。 */
   blocked: string | null = null,
+  /** 🔴 もう 1 つ添える近道(#1207 I5)。⚠ 割当が無ければ**丸ごと出さない**(嘘の鍵を書かない)。 */
+  also: { readonly command: string; readonly suffix: string } | null = null,
 ): string {
   const hint = chordHint(commandId, keymap);
-  const head = hint === null ? base : `${base}(${hint})`;
+  const alsoChord = also === null ? null : chordHint(also.command, keymap);
+  const withMain = hint === null ? base : `${base}(${hint})`;
+  const head =
+    also === null || alsoChord === null ? withMain : `${withMain}。${alsoChord}${also.suffix}`;
   return blocked === null || blocked === '' ? head : `${head}(${blocked})`;
+}
+
+/** 器が持つ「もう 1 つの近道」の属性を読む(無ければ `null`)。 */
+function alsoOf(el: HTMLElement): { command: string; suffix: string } | null {
+  const command = el.getAttribute(HINT_ALSO_COMMAND);
+  const suffix = el.getAttribute(HINT_ALSO_SUFFIX);
+  return command === null || suffix === null ? null : { command, suffix };
 }
 
 /**
@@ -100,7 +120,7 @@ export function setBlocked(
   const base = el.getAttribute(HINT_BASE);
   const id = el.getAttribute(HINT_COMMAND);
   if (base === null || id === null) return;
-  const next = hintTitle(base, id, keymap, blocked);
+  const next = hintTitle(base, id, keymap, blocked, alsoOf(el));
   if (el.title !== next) el.title = next;
 }
 
@@ -118,7 +138,7 @@ export function applyShortcutHints(root: ParentNode, keymap: KeymapStore = appKe
     if (base === null || id === null) continue;
     // ⚠ **理由を消さない**(#761)── 割当を変えるたびに呼ばれるので、
     //    ここで土台だけを書き戻すと「押せない理由」が静かに消える
-    el.title = hintTitle(base, id, keymap, el.getAttribute(HINT_BLOCKED));
+    el.title = hintTitle(base, id, keymap, el.getAttribute(HINT_BLOCKED), alsoOf(el));
     applied += 1;
   }
   return applied;
