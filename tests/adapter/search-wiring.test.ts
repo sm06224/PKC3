@@ -222,7 +222,20 @@ describe('全文検索の配線(#181)', () => {
      */
     const filer = readFileSync('src/adapter/ui/render/filer.ts', 'utf8');
     expect(filer, 'フォルダ面が共通の規則を通っていない').toContain('filerRows(');
-    expect(filer, 'フォルダ面が本文の当たりを渡していない').toContain('searchHits: state.searchHits');
+    /**
+     * ⚠ **2026-10-01(#813 段②)に経路が 1 つ増えた**:フォルダ面の材料(絞り込みの語 /
+     * 本文の当たり / 並び / 入り切り)は `filerRowOptions`(`list-view-options.ts`)1 か所で組む
+     * ── 描く側・範囲選択・鍵の行送りの 4 か所が別々に組むと、書き忘れた経路だけ違う並びになる。
+     * 🔑 だから見るのは「面がその 1 本を通る」と「**その 1 本が**本文の当たりを渡す」の 2 つ
+     * (字面の `searchHits: state.searchHits` は後者へ移った。書き換えたのは「事実が動いた」ため)。
+     */
+    expect(filer, 'フォルダ面が材料を組む 1 か所(filerRowOptions)を通っていない').toContain(
+      'filerRowOptions(state)',
+    );
+    const options = readFileSync('src/adapter/state/list-view-options.ts', 'utf8');
+    expect(options, 'フォルダ面の材料が本文の当たりを渡していない').toContain(
+      'searchHits: state.searchHits',
+    );
     expect(filer, 'フォルダ面に題名だけの絞り込みが残っている').not.toMatch(/matchesTitle\(/);
     const sidebar = readFileSync('src/adapter/ui/render/sidebar.ts', 'utf8');
     expect(sidebar, '一覧タブが共通の規則を通っていない').toContain('listRows(');

@@ -290,6 +290,14 @@ describe('絞りが全部の面に届いている', () => {
       expect(src, `${field} が ${from} から来ていない`).toContain(`${field}: ${from},`);
   });
 
+  it('🔴 寄せた `filerRowOptions` は、絞り・並びの材料(`listViewOptions`)を撒いている', () => {
+    // ⚠ 上の数え上げは `filerRowOptions(state)` を 1 回と数える ── その中身が空なら全部素通りする
+    const src = readFileSync('src/adapter/state/list-view-options.ts', 'utf8');
+    const at = src.indexOf('export function filerRowOptions');
+    expect(at, '`filerRowOptions` が無い(この検査は空振り)').toBeGreaterThan(0);
+    expect(src.slice(at), '絞りが届かない面ができる').toContain('...listViewOptions(state),');
+  });
+
   it('`filerRows` / `listRows` を呼ぶ面は、数えた数だけ `kindFilter` を渡している', () => {
     for (const f of FACES) {
       const src = readFileSync(f, 'utf8');
@@ -308,9 +316,16 @@ describe('絞りが全部の面に届いている', () => {
        * 🔑 寄せた側は下の `it` が「`state.kindFilter` を渡していること」を見る ──
        *   だから**ここは両方の綴りを数える**(寄せ切れていない面も落とせる)。
        */
+      /**
+       * ⚠ **綴りは 3 通りになった**(#813 段②)── 左の列の「フォルダ」の表は材料 5 つ
+       *   (絞りの語 / 本文の当たり / 並び / 入り切り …)を `filerRowOptions(state)` 1 か所へ
+       *   寄せた。その中で `...listViewOptions(state)` を撒いていること(= 絞りが届くこと)は
+       *   下の `it` が `list-view-options.ts` の原文で見る。
+       */
       const passed =
         (src.match(/kinds: (st|state)\.kindFilter,/g) ?? []).length +
-        (src.match(/\.\.\.listViewOptions\((st|state)\),/g) ?? []).length;
+        (src.match(/\.\.\.listViewOptions\((st|state)\),/g) ?? []).length +
+        (src.match(/\bfilerRowOptions\((st|state)\)/g) ?? []).length;
       expect(calls, `${f}: 前提が崩れている(呼び出しが 1 つも無い)`).toBeGreaterThan(0);
       expect(passed, `${f}: ${calls} 回呼んでいるのに ${passed} 回しか渡していない`).toBe(
         calls,

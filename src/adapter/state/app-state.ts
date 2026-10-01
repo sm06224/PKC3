@@ -38,7 +38,7 @@ function schemaUnavailable(guest: { readonly lid: string; readonly name: string 
     : null;
 }
 import { pickErConnection, type ErPendingFrom } from '@features/query/er-connect';
-import { listViewOptions } from './list-view-options';
+import { filerRowOptions, listViewOptions } from './list-view-options';
 import { resolveCanonicalParents, reorderSibling } from '@features/relation/tree';
 import { extractMeta, seedBodyFor } from '@features/flavor';
 import { isAppendable } from '@features/flavor/append-spec';
@@ -1272,6 +1272,20 @@ export interface AppState {
    */
   scopeLid: string | null;
   /**
+   * 🔴 **「中まで全部出す」**(#813 段②。🟣 Gemini 裁定 2026-10-01 の C)。
+   *
+   * 入のとき、左の列の「フォルダ」の表は**いま居る場所の配下を階層をまたいで全部**
+   * 平らに出す(ルートで入れれば全件、フォルダの中で入れればそのフォルダの配下だけ)。
+   * 切 = 直下だけ(いままでどおり)。
+   *
+   * ⚠ **現在地とは別の値**である ── 入れたままフォルダへ降りると、その配下の全部が出る
+   *   (現在地に追従)。パンくずで戻っても入り切りは保つ。
+   * ⚠ **この端末に憶える**(`FilerFlattenStore`)── 起動で 1 度だけ写す(`main.ts`)。
+   *   ノートのデータではなく、見え方である(container に入れない)。
+   * ⚠ 2 ペインの面は持たない(`filerRows` へ `flatten: false` を渡す)。
+   */
+  filerFlatten: boolean;
+  /**
    * 🔴 **左の列の行で、名前を打ち替えている lid**(#215)。`null` = 打ち替えていない。
    *
    * ⚠ **state 駆動**で入力欄を出す(2 ペインの `dual.renaming` と同じ作法)── DOM を
@@ -1886,6 +1900,7 @@ export const initialState: AppState = {
   openBody: null,
   selectedLid: null,
   scopeLid: null,
+  filerFlatten: false,
   renamingLid: null,
   dual: initialDual,
   selection: [],
@@ -2674,6 +2689,11 @@ export type UserAction =
    * 本文が閉じると、フォルダを辿る間じゅう本文が消える)。
    */
   | { type: 'SET_SCOPE'; lid: string | null }
+  /**
+   * 「中まで全部出す」を入れる / 切る(#813 段②)。⚠ 憶える(端末)のは呼び手の仕事 ──
+   * reducer は state だけを動かす(`DUAL_SET_PREVIEW` と同じ作り)。
+   */
+  | { type: 'SET_FILER_FLATTEN'; on: boolean }
   /**
    * 印の付け外し(`Ctrl` / `Cmd` クリック。#240 段②)。
    * ⚠ **開いているノートは動かさない** ── 動かすと `Ctrl` クリックのたびに
@@ -7631,12 +7651,7 @@ function reduceCore(
               searchHits: state.searchHits,
               ...listViewOptions(state),
             })
-          : filerRows(state.scopeLid, state.entryMetas, state.relations, {
-              smartLids: smartLidsOf(state.scopeLid, state.smartHits),
-              filterQuery: state.filterQuery,
-              searchHits: state.searchHits,
-              ...listViewOptions(state),
-            });
+          : filerRows(state.scopeLid, state.entryMetas, state.relations, filerRowOptions(state));
       const range = rangeInRows(rows, state.selectionAnchor, action.lid);
       if (range.length === 0) return { state, events: [] };
       // ⚠ 起点は動かさない ── 動かすと `Shift` を押すたびに範囲が縮んでいく
@@ -7645,12 +7660,12 @@ function reduceCore(
     case 'SELECT_ALL': {
       if (state.phase !== 'ready') return { state, events: [] };
       // ⚠ 規則は `filerRows` 1 か所(描く側・範囲選択と同じ答えになる)
-      const rows = filerRows(state.scopeLid, state.entryMetas, state.relations, {
-        smartLids: smartLidsOf(state.scopeLid, state.smartHits),
-        filterQuery: state.filterQuery,
-        searchHits: state.searchHits,
-        ...listViewOptions(state),
-      }).map((m) => m.lid);
+      const rows = filerRows(
+        state.scopeLid,
+        state.entryMetas,
+        state.relations,
+        filerRowOptions(state),
+      ).map((m) => m.lid);
       if (rows.length === 0) return { state, events: [] };
       return {
         state: { ...state, selection: rows, selectionAnchor: rows[rows.length - 1] ?? null },
@@ -7682,6 +7697,20 @@ function reduceCore(
         state: { ...state, scopeLid: action.lid, selection: [], selectionAnchor: null },
         // 🔑 入った先がスマートフォルダなら集め直す(判定は `smartScanFor` 1 か所)
         events: smartScanFor(state, action.lid),
+      };
+    }
+    case 'SET_FILER_FLATTEN': {
+      if (state.filerFlatten === action.on) return { state, events: [] };
+      /**
+       * 🔴 **印は「いま出ている行」のもの**(`SET_SCOPE` と同じ理由)。出る行の集合が
+       * 変わるので外す ── 残すと、画面に無い行の印を帯が数えて「画面に無いものが
+       * ゴミ箱へ入る」。起点も一緒に外す(別の並びの行を起点に `Shift` で範囲を採らない)。
+       * ⚠ **開いているノート(`selectedLid`)は動かさない** ── 見え方を変えただけで
+       *   中央の本文が閉じない。
+       */
+      return {
+        state: { ...state, filerFlatten: action.on, selection: [], selectionAnchor: null },
+        events: [],
       };
     }
     case 'DESELECT_ENTRY': {
@@ -8309,6 +8338,8 @@ function reduceCore(
         // 🔑 **絞り込みの規則は 1 本**(`paneFilterOptions`)── 描く側と同じものを見る
         ...paneFilterOptions(pane, state.filterQuery, state.searchHits),
         ...listViewOptions(state),
+        // ⚠ 2 ペインは「中まで全部出す」(左の列の入り切り)を**持たない**(#813 段②)
+        flatten: false,
       });
       let next: DualPaneState;
       if (action.mode === 'range') {

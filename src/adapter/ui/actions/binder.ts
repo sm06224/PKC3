@@ -78,7 +78,7 @@ import {
 } from '@adapter/state/app-state';
 import { groupsNeedingNote, planGroupMove } from '@features/launcher/group-order';
 import { isMovableTile } from '@features/launcher/tile-order';
-import { listViewOptions } from '@adapter/state/list-view-options';
+import { filerRowOptions, listViewOptions } from '@adapter/state/list-view-options';
 import { appOpenedStore } from '@adapter/platform/opened-store';
 import { appSearchHistory } from '@adapter/platform/search-history-store';
 import { paintSearchHistory } from '@adapter/ui/render/shell';
@@ -693,12 +693,7 @@ export function generateLid(): string {
  * 食い違う**(CLAUDE.md §7)。
  */
 const visibleFilerRows = (st: AppState): EntryMeta[] =>
-  filerRows(st.scopeLid, st.entryMetas, st.relations, {
-    smartLids: smartLidsOf(st.scopeLid, st.smartHits),
-    filterQuery: st.filterQuery,
-    searchHits: st.searchHits,
-    ...listViewOptions(st),
-  });
+  filerRows(st.scopeLid, st.entryMetas, st.relations, filerRowOptions(st));
 
 /**
  * 🔴 **一覧タブの行(flat)**(#1038 台帳③ 段 G-2、C13)。⚠ `visibleFilerRows` と
@@ -794,6 +789,8 @@ const dualPaneRows = (st: AppState, side: DualSide): EntryMeta[] => {
     smartLids: smartLidsOf(paneScope(pane), st.smartHits),
     ...paneFilterOptions(pane, st.filterQuery, st.searchHits),
     ...listViewOptions(st),
+    // ⚠ 2 ペインは「中まで全部出す」(左の列の入り切り)を**持たない**(#813 段②)
+    flatten: false,
   });
 };
 
@@ -1569,6 +1566,12 @@ export interface BinderServices {
    *   ── 分けてあるのは、下見の要否を毎回の描画で読むと storage を叩くからである。
    */
   rememberDualPreview?(on: boolean): void;
+  /**
+   * 🔴 **フォルダの面の「中まで全部出す」を憶える**(#813 段②)。
+   * ⚠ **効かせるのは reducer**(`SET_FILER_FLATTEN`)で、ここは**憶えるだけ**
+   *   (`rememberDualPreview` と同じ作り)。
+   */
+  rememberFilerFlatten?(on: boolean): void;
   /** このノートを Word(.docx)で書き出す(#187 段①)。 */
   exportEntryDocx?(lid: string): void;
   /** このノートを PowerPoint(.pptx)で書き出す(#187 段⑤)。 */
@@ -7349,6 +7352,16 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 板の「完了」を開く / 畳む(2026-08-20。設計 doc §4-4)。
    * ⚠ `toggle-show-archived`(片付けた**ノート**)とは別物 ── 相乗りさせない。
    */
+  /**
+   * 🔴 **フォルダの面の「中まで全部出す」を入れる / 切る**(#813 段②)。
+   * ⚠ **効かせる(state)と憶える(端末)を両方やる** ── 片方だけだと
+   *   「押したのに変わらない」か「押したのに次に開くと戻っている」になる。
+   */
+  'toggle-filer-flatten': (dispatcher, _target, services) => {
+    const on = !dispatcher.getState().filerFlatten;
+    dispatcher.dispatch({ type: 'SET_FILER_FLATTEN', on });
+    services.rememberFilerFlatten?.(on);
+  },
   'toggle-show-done': (dispatcher) =>
     dispatcher.dispatch({ type: 'TOGGLE_SHOW_DONE_TASKS' }),
   /**
@@ -13287,6 +13300,15 @@ export function bindActions(
       '[data-pkc-region="filer-table"] tbody [data-pkc-entry]',
     );
     if (!row || !root.contains(row)) return null;
+    /**
+     * 🔴 **「中まで全部出す」の間は、行の上下端を並べ替えにしない**(#813 段②)。
+     * ⚠ 並べ替えは**同じフォルダの中の兄弟**だけが対象(`reorderDropped`)── 階層を
+     *   またいだ平らな並びで端へ落としても、動くのは別のフォルダの物ばかりで
+     *   「並べ替えられるのは同じフォルダの中だけ」と断られる(光るのに効かない線)。
+     * 🔑 `null` を返せば、フォルダの行は**行全体が「中へ入れる」**、ノートの行は落とせない
+     *   ── 掴んでフォルダへ移す道(と、パンくずへ落として出す道)は今までどおり効く。
+     */
+    if (dispatcher.getState().filerFlatten) return null;
     const r = row.getBoundingClientRect();
     if (!(r.height > 0)) return null;
     const y = (de.clientY - r.top) / r.height;

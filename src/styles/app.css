@@ -5921,6 +5921,11 @@ li[data-pkc-row-slot] {
   margin-bottom: var(--s3);
   font-size: 12px;
 }
+/* 🔴 **「中まで全部出す」は帯の右端へ**(#813 段②)。⚠ 色は共有の
+ * `[data-pkc-choice-btn][aria-pressed='true']` が持つ(ここで濃さを足さない) */
+[data-pkc-region='filer-breadcrumb'] [data-pkc-field='filer-flatten'] {
+  margin-inline-start: auto;
+}
 [data-pkc-region='filer-table'] {
   width: 100%;
   /* 🔴 **列幅を固定する**(P8 段⑱)── 一覧は同じ題名を … で畳むのに、

@@ -277,7 +277,9 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
     //   一覧の行 ── 同時に見えている行のうち押した 1 つの命令が要る。`toc-jump` と同じ仕分け)。
     // ⚠ 2026-10-01(#1102 段①): N +3(`search-jump-prev` / `search-jump-next` / `search-jump-end`。
     //   「探す」から送った本文の帯の押し所 ── 押した所から何も要らない。`clear-search-history` と同じ仕分け)。
-    expect(counts()).toEqual({ P1: 66, P2: 34, E: 25, V: 10, N: 163 });
+    // ⚠ 2026-10-01(#813 段②): N +1(`toggle-filer-flatten`。フォルダの面の帯の入り切り ──
+    //   押した所から何も要らない。`toggle-show-archived` と同じ仕分け)。
+    expect(counts()).toEqual({ P1: 66, P2: 34, E: 25, V: 10, N: 164 });
   });
 
   it('🔴 名指しの錨 ── 件数が同じまま入れ替わっても落ちる', () => {

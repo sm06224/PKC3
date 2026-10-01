@@ -11,7 +11,7 @@
  * する(段⑤)前に、**効かない操作子を既定の面に出さない**ために揃える。
  */
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
-import { getRootEntries, getStructuralChildren } from './tree';
+import { getFlatDescendants, getRootEntries, getStructuralChildren } from './tree';
 import { entryFilterOf, matchesEntry } from '@features/filter/title-filter';
 import { sortOrder, type EntrySort } from '@features/filter/entry-sort';
 import { SMART_ARCHETYPE } from '@features/smart/smart-spec';
@@ -62,6 +62,23 @@ export const smartLidsOf = (
 ): readonly string[] | null => (scopeLid === null ? null : (smartHits.get(scopeLid)?.lids ?? null));
 
 /**
+ * フォルダの表の行を決める材料。
+ *
+ * 🔴 **`flatten` は省略可にしない**(#813 段②)── 描く側・範囲選択・鍵の行送りは
+ *   同じ並びを見なければならない。渡し忘れた経路だけ**階層どおりの行**で数えると、
+ *   「中まで全部出す」を入れたとき**目で見た範囲と選ばれる範囲が食い違う**。
+ */
+export interface FilerRowsOptions extends FilerListOptions {
+  /**
+   * 「中まで全部出す」(#813 段②)。入のとき、いまの場所の**配下を階層をまたいで全部**
+   * 平らに出す(ルートなら全件)。切 = 直下だけ(いままでどおり)。
+   * ⚠ スマートフォルダの中は**切り替えの対象外**(中身は条件の当たりで、もともと平ら)。
+   * ⚠ 2 ペインの面は常に `false` を渡す(この入り切りは左の列の「フォルダ」だけのもの)。
+   */
+  readonly flatten: boolean;
+}
+
+/**
  * いま見ているフォルダに出る行(絞り込み済み・並べ替え済み)。
  * @param scopeLid `null` = ルート
  */
@@ -69,7 +86,7 @@ export function filerRows(
   scopeLid: string | null,
   entryMetas: ReadonlyMap<string, EntryMeta>,
   relations: readonly Relation[],
-  opts: FilerListOptions,
+  opts: FilerRowsOptions,
 ): EntryMeta[] {
   /**
    * 🔴 **スマートフォルダの中身は「条件で当たったもの」**(#421 段①)。
@@ -82,9 +99,11 @@ export function filerRows(
       ? (opts.smartLids ?? [])
           .map((lid) => entryMetas.get(lid))
           .filter((m): m is EntryMeta => m !== undefined)
-      : scopeLid === null
-        ? getRootEntries(entryMetas, relations)
-        : getStructuralChildren(scopeLid, entryMetas, relations);
+      : opts.flatten
+        ? getFlatDescendants(scopeLid, entryMetas, relations)
+        : scopeLid === null
+          ? getRootEntries(entryMetas, relations)
+          : getStructuralChildren(scopeLid, entryMetas, relations);
   const filter = entryFilterOf(opts.filterQuery, opts.searchHits, opts.kinds);
   const shown = base.filter((m) => matchesEntry(m, filter));
   // ⚠ 並べ替えは lid の列で行う(規則は `sortOrder` 1 か所)── ここで比較を書き直さない
