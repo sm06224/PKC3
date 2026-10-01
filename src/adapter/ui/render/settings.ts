@@ -767,7 +767,7 @@ export class SettingsRenderer {
     mlcheck.type = 'checkbox';
     mlcheck.setAttribute('data-pkc-action', 'set-missing-links');
     mlcheck.setAttribute('data-pkc-field', 'missing-links');
-    mllabel.append(mlcheck, document.createTextNode(' ノートが見つからないリンクを、点線で見せる'));
+    mllabel.append(mlcheck, document.createTextNode(' ノートが見つからないリンクを、薄い字と点線で見せる'));
     mllabel.title =
       '押すと「見つかりません」になるリンクに点線の下線を引きます(字の色は変わりません)。' +
       'ゴミ箱に入れた・取り込みで外れた・別の PKC から貼ったノートが対象で、' +
