@@ -537,3 +537,121 @@ describe('貼付の切替(設定)と診断(フラグ)', () => {
     expect(ta.value, '欄に勝手に字を入れた').toBe('');
   });
 });
+
+/**
+ * 🔴 **選んだ字へ URL を貼る**(#1165)。規則は `tests/features/text-ops.test.ts`
+ * (`linkifyPastedUrl`)── ここは**配線**(設定が届いているか / HTML の変換より先か /
+ * 差した後の caret)だけを見る。
+ */
+describe('選んだ字へ URL を貼る', () => {
+  const URL1 = 'https://example.com/a';
+
+  /** `ta` に本文を置き、`from`〜`to` を選ぶ。 */
+  function selecting(ta: HTMLTextAreaElement, value: string, from: number, to: number) {
+    ta.value = value;
+    ta.selectionStart = from;
+    ta.selectionEnd = to;
+  }
+
+  it('🔴 選んで URL を貼ると `[選んだ字](URL)` になり、caret はリンクの末尾へ行く', () => {
+    const { ta } = setup();
+    selecting(ta, '前 選んだ 後', 2, 5);
+    const e = pasteEvent({ 'text/plain': URL1 });
+    ta.dispatchEvent(e);
+    expect(e.defaultPrevented, '既定の貼付(選んだ字が消える)を止めていない').toBe(true);
+    expect(ta.value).toBe(`前 [選んだ](${URL1}) 後`);
+    const end = `前 [選んだ](${URL1})`.length;
+    expect(ta.selectionStart).toBe(end);
+    expect(ta.selectionEnd).toBe(end);
+  });
+
+  it('🔴 継ぎ足しの欄でも効く(貼付の変換が効く欄と同じ)', () => {
+    const { append } = setup();
+    selecting(append, 'メモ', 0, 2);
+    append.dispatchEvent(pasteEvent({ 'text/plain': URL1 }));
+    expect(append.value).toBe(`[メモ](${URL1})`);
+  });
+
+  /**
+   * 🔴 Slack などのコピーは `text/html` に `<a>`、`text/plain` に URL を載せる。
+   * HTML の変換が先に当たると**選んだ字が消えて URL に置き換わる**。
+   */
+  it('🔴 HTML も載っているとき、URL を選んだ字のリンクにする側が勝つ', () => {
+    const { ta } = setup();
+    selecting(ta, 'メモ', 0, 2);
+    ta.dispatchEvent(
+      pasteEvent({ 'text/html': `<a href="${URL1}">${URL1}</a>`, 'text/plain': URL1 }),
+    );
+    expect(ta.value).toBe(`[メモ](${URL1})`);
+  });
+
+  it('🔴 設定が「変換しない」なら素の貼付(選んだ字を書き換えない)', () => {
+    const { ta } = setup({ pasteSource: () => 'plain' });
+    selecting(ta, 'メモ', 0, 2);
+    const e = pasteEvent({ 'text/plain': URL1 });
+    ta.dispatchEvent(e);
+    expect(e.defaultPrevented, '「変換しない」なのにリンクにしている').toBe(false);
+    expect(ta.value).toBe('メモ');
+    // 対照群: 同じ場面で設定が自動ならリンクになる(上の結果が設定のせいだと言える)
+    const auto = setup();
+    selecting(auto.ta, 'メモ', 0, 2);
+    auto.ta.dispatchEvent(pasteEvent({ 'text/plain': URL1 }));
+    expect(auto.ta.value).toBe(`[メモ](${URL1})`);
+  });
+
+  it('🔴 選んでいなければ、いままでどおり(素の貼付に任せる)', () => {
+    const { ta } = setup();
+    selecting(ta, 'メモ', 1, 1);
+    const e = pasteEvent({ 'text/plain': URL1 });
+    ta.dispatchEvent(e);
+    expect(e.defaultPrevented, '選びが無いのに横取りした').toBe(false);
+    expect(ta.value).toBe('メモ');
+  });
+
+  it('🔴 複数行を選んでいるときは素の貼付', () => {
+    const { ta } = setup();
+    selecting(ta, 'あ\nい', 0, 3);
+    const e = pasteEvent({ 'text/plain': URL1 });
+    ta.dispatchEvent(e);
+    expect(e.defaultPrevented, '複数行をリンクのラベルにした').toBe(false);
+    expect(ta.value).toBe('あ\nい');
+  });
+
+  it('🔴 URL でない貼付は、選んでいても素の貼付', () => {
+    const { ta } = setup();
+    selecting(ta, 'メモ', 0, 2);
+    const e = pasteEvent({ 'text/plain': 'ただの文' });
+    ta.dispatchEvent(e);
+    expect(e.defaultPrevented).toBe(false);
+    expect(ta.value).toBe('メモ');
+  });
+
+  it('🔴 本文の欄でなければ何もしない(探す欄の選びを書き換えない)', () => {
+    const { outside } = setup();
+    outside.value = 'メモ';
+    outside.selectionStart = 0;
+    outside.selectionEnd = 2;
+    const e = pasteEvent({ 'text/plain': URL1 });
+    outside.dispatchEvent(e);
+    expect(e.defaultPrevented, '本文以外でリンクにしている').toBe(false);
+    expect(outside.value).toBe('メモ');
+  });
+
+  it('差したものは **state にも届く**(画面だけ変わって保存されない、を作らない)', () => {
+    const { root, dispatcher } = setup();
+    const host = root.querySelector('[data-pkc-region="detail"]')!;
+    const ta = document.createElement('textarea');
+    ta.setAttribute('data-pkc-field', 'editor-body');
+    host.append(ta);
+    dispatcher.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [], relations: [] });
+    dispatcher.dispatch({ type: 'CREATE_ENTRY', lid: 'e1', archetype: 'text', title: 'n' });
+    dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
+    dispatcher.dispatch({ type: 'BODY_LOADED', lid: 'e1', body: 'メモ' });
+    dispatcher.dispatch({ type: 'START_EDIT' });
+    selecting(ta, 'メモ', 0, 2);
+    ta.dispatchEvent(pasteEvent({ 'text/plain': URL1 }));
+    expect(dispatcher.getState().openBody?.body ?? '', 'state に届いていない').toBe(
+      `[メモ](${URL1})`,
+    );
+  });
+});

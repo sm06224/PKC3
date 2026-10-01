@@ -211,6 +211,24 @@ test('🔴 markdown 原文を渡してくるコピー(AI の「コピー」)は�
   });
   expect(stoppedRich, '形のあるコピーまで素通りしている').toBe(true);
 
+  // 🔴 **選んだ字へ URL を貼る**(#1165)── 同じ器の続きで見る(起こし直さない)。
+  //    HTML(`<a>`)も載せる ── 変換が先に当たると選んだ字が URL に置き換わる。
+  //    ⚠ 取り消しは `execCommand` の経路でしか 1 回で戻らない(unit は fallback を通る)
+  await page.locator(ROW).fill('メモ');
+  await page.evaluate((sel) => {
+    (document.querySelector(sel) as HTMLTextAreaElement).setSelectionRange(0, 2);
+  }, ROW);
+  const linked = await pasteText(page, ROW, {
+    html: '<a href="https://e.com/a">https://e.com/a</a>',
+    plain: 'https://e.com/a',
+  });
+  expect(linked, '選んだ字へ URL を貼ったのに既定の貼付(選んだ字が消える)を止めていない').toBe(true);
+  await expect(page.locator(ROW), '選んだ字がリンクになっていない').toHaveValue(
+    '[メモ](https://e.com/a)',
+  );
+  await page.keyboard.press('Control+z');
+  await expect(page.locator(ROW), '取り消しで選んだ字に戻っていない').toHaveValue('メモ');
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 

@@ -18,6 +18,7 @@
  */
 
 import { parseCsv } from './csv-table';
+import { formatMarkdownLink } from './link-format';
 import { tableToMarkdown } from './table-copy';
 
 export interface TextSelection {
@@ -582,6 +583,39 @@ export function insertLink(sel: TextSelection): TextSelection {
   // url を選択状態にする(すぐ貼り付けられる)
   const at = sel.start + label.length + 3;
   return { text, start: at, end: at + 3 };
+}
+
+/**
+ * 🔴 **選んだ字へ URL を貼ると `[選んだ字](URL)` にする**(#1165)。
+ *
+ * ⚠ **迷ったら `null`(= 素の貼付に任せる)** ── 貼った字は user の物なので、
+ *   リンクにするのは次の 4 つが**全部**そろったときだけである:
+ *   ① 字を選んでいる ② 選びが 1 行に収まる(複数行を 1 つのラベルに潰さない)
+ *   ③ 貼る物が **`http(s)://` の URL 1 本だけ**(前後の空白は無視、中に空白があれば散文)
+ *   ④ 呼び側が「設定が許している」と言った(`allowed`)。
+ *
+ * 🔑 **④ は呼び側の責任で渡させる** ── 設定「変換しない」のとき書き換えると
+ *   `paste-source.ts` の言う「設定の字が嘘になる」。この関数が設定を知らない形にして、
+ *   **渡し忘れたら tsc が落とす**(optional にしない)。
+ * 🔑 組み立ては `formatMarkdownLink`(ラベルの `[` `]` の escape と、宛先に `)` などが
+ *   在るときの `<…>` 囲み)の 1 本 ── escape を 2 本目に書かない(§7)。
+ * 🔑 戻りの選択は **リンク全体の末尾**(caret)。続けて打てる。
+ */
+export function linkifyPastedUrl(
+  sel: TextSelection,
+  pasted: string,
+  allowed: boolean,
+): TextSelection | null {
+  if (!allowed) return null;
+  if (sel.start >= sel.end) return null;
+  const label = sel.text.slice(sel.start, sel.end);
+  if (label.trim() === '' || /[\r\n]/.test(label)) return null;
+  const url = pasted.trim();
+  if (!/^https?:\/\/[^\s]+$/i.test(url)) return null;
+  const link = formatMarkdownLink(label, url);
+  const text = sel.text.slice(0, sel.start) + link + sel.text.slice(sel.end);
+  const caret = sel.start + link.length;
+  return { text, start: caret, end: caret };
 }
 
 /**
