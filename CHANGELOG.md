@@ -17,7 +17,8 @@
 
 ### DuckDB で引くときは表を作れるようになりました(ウィンドウを閉じると消えます)
 
-- 取り込んだ .csv / .parquet / .json を DuckDB で引いているときは、CREATE TABLE / INSERT INTO / UPDATE / DELETE FROM / DROP TABLE が打てます。作った表はウィンドウを閉じるか別の file を選び直すと消え、元の file は書き換わりません
+- 取り込んだ .csv / .parquet / .json を DuckDB で引いているときは、CREATE TABLE / INSERT INTO / UPDATE / DELETE FROM / DROP TABLE が打てます
+- 作った表はウィンドウを閉じるか別の file を選び直すと消えます。元の file は書き換わりません
 - 通った直後の 1 行に、効いた行数と「作った表はウィンドウを閉じると消えます」が出ます。書き込みの答えは表にせず、ノートやファイルへも持ち出せません
 - sqlite(ノートの表)はこれまでどおり読むだけです。打つ前の案内の文もそれぞれの engine に合わせました
 
