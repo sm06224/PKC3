@@ -90,7 +90,7 @@ jobs:
       # 🔑 出来た表は**成果物として出すだけ** ── 当てるのは人である。
       #   ⚠ `if-no-files-found: error` ── 黙って空の成果物を出さない
       #   (「出来た」と「出来た気」を分ける)。
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: smoke-map-${{ inputs.kind || 'dev' }}
           path: tests/smoke/smoke-map.json
