@@ -308,6 +308,7 @@ test('🔴 #pkc?view=schedule で開くと、予定表が中央に出て集め�
  */
 test('🔴 #pkc?view=search で開くと、探す面が中央に出て本文の語で当たる (#680)', async ({
   page,
+  context,
 }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -318,7 +319,15 @@ test('🔴 #pkc?view=search で開くと、探す面が中央に出て本文の�
   const live = page.locator('[data-pkc-region="editor-live"]');
   await expect(live).toBeVisible();
   await clickReal(page, '[data-pkc-region="editor-live"]');
-  await live.locator('[data-pkc-field="row-source"]').fill('探す面の本文に書いた けんさくご という語');
+  /**
+   * 🔴 **語を本文の「奥」に 2 回書く**(#1102 段①)── 開いた窓で、送った位置が画面の中に在ることを
+   *   見るには、**送らなければ見えない所**に当たりが要る(短い本文だと、送らなくても見えて通る)。
+   *   ⚠ 2 回の間は 40 字より離す ── 一覧の抜粋に印が 1 つだけ出る前提(下の `row.locator('mark')`)を保つ。
+   */
+  const filler = (n: number): string => `ここは長い文です${'あ'.repeat(n)}。`;
+  await live
+    .locator('[data-pkc-field="row-source"]')
+    .fill(`探す面の本文に書いた ${filler(700)} けんさくご という語 ${filler(700)} けんさくご の 2 つ目`);
   await page.keyboard.press('Tab');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   // ⚠ 追記の入り先(`append-target`)は見出しの無い本文では畳まれる ── 描けた印で待つ
@@ -344,6 +353,95 @@ test('🔴 #pkc?view=search で開くと、探す面が中央に出て本文の�
   await expect(row.locator('mark'), '当たった語に印が無い').toHaveText('けんさくご');
   // ⚠ 面の語で左の一覧は絞られない(別のもの)
   await expect(page.locator('[data-pkc-field="entry-filter"]')).toHaveValue('');
+
+  /**
+   * 🔴 **行を押すと、開いた窓で、探した語が塗られ、当たりが画面の中に送られる**(#1102 段①)。
+   *
+   * ## unit では届かない層
+   *
+   * 塗り(`CSS.highlights`)も送った位置(`getBoundingClientRect`)も happy-dom には無い。
+   * ⚠ **起動は足していない** ── 既存の探す面の道中で、行を押して出る**窓**を見るだけ
+   *   (窓は `gotoApp` / `page.goto` を通らない)。
+   * ⚠ 塗りは `getComputedStyle` では読めない ── 観測点は **①塗りの表の件数 ②送った後の当たりが
+   *   画面の中 ③塗りを消す前後で、その位置の画素が変わる**(= 本当に見える色が付いている)。
+   *   ③は `::highlight` の色が効いていること(`var()` が解けていること)の証拠でもある。
+   */
+  const popup = context.waitForEvent('page');
+  await clickReal(page, '[data-pkc-search-row] [data-pkc-action="open-note-window"]');
+  const win = await popup;
+  const winErrors = collectPageErrors(win);
+  await expect(win.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
+  const hits = () =>
+    win.evaluate(() => {
+      const css = (window as unknown as { CSS: { highlights?: Map<string, Set<Range>> } }).CSS;
+      return {
+        supported: css.highlights !== undefined,
+        all: css.highlights?.get('pkc-search-hit')?.size ?? 0,
+        current: css.highlights?.get('pkc-search-hit-current')?.size ?? 0,
+      };
+    });
+  await expect
+    .poll(async () => (await hits()).all, {
+      message: '開いた窓で、探した語が塗られていない(find が窓まで届いていない / 描き終わりで塗っていない)',
+      timeout: 20_000,
+    })
+    .toBe(2);
+  expect((await hits()).current, 'いまの 1 つが強く塗られていない').toBe(1);
+  await expect(
+    win.locator('[data-pkc-field="search-jump-count"]'),
+    '帯に「1/2 件」が出ていない',
+  ).toHaveText('1/2 件');
+  // 🔑 語は使ったらアドレスから外れる(栞・F5 に焼き付かない)
+  expect(win.url(), '探した語が住所に残っている').not.toContain('find=');
+
+  /** いまの 1 つの位置(画面の座標)。 */
+  const currentRect = () =>
+    win.evaluate(() => {
+      const css = (window as unknown as { CSS: { highlights: Map<string, Set<Range>> } }).CSS;
+      const range = [...css.highlights.get('pkc-search-hit-current')!][0]!;
+      const r = range.getBoundingClientRect();
+      return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, h: window.innerHeight, w: window.innerWidth };
+    });
+  const inView = async (label: string): Promise<{ top: number; bottom: number; left: number; right: number }> => {
+    const r = await currentRect();
+    expect(r.bottom - r.top, `${label}: 当たりの箱が無い`).toBeGreaterThan(0);
+    expect(r.top, `${label}: 当たりが画面の上へはみ出している(top=${r.top})`).toBeGreaterThanOrEqual(0);
+    expect(r.bottom, `${label}: 当たりが画面の下へはみ出している(bottom=${r.bottom} / 画面 ${r.h})`).toBeLessThanOrEqual(r.h);
+    return r;
+  };
+  // ② 送った位置が画面の中に在る(本文の奥に在るので、送らなければ見えない)
+  await expect
+    .poll(async () => win.evaluate(() => document.querySelector('[data-pkc-region="detail"]')!.scrollTop), {
+      message: '送っていない(scrollTop が 0 のまま)',
+    })
+    .toBeGreaterThan(300);
+  const first = await inView('1 件目');
+  // ③ 塗りが画素として見える ── 塗りを消す前後で、その位置の画素が変わる
+  const clip = { x: Math.max(0, first.left), y: Math.max(0, first.top), width: Math.max(1, first.right - first.left), height: Math.max(1, first.bottom - first.top) };
+  const painted = await win.screenshot({ clip });
+
+  // ‹ › で送る ── 2 件目へ、画面の中へ
+  await clickReal(win, '[data-pkc-action="search-jump-next"]');
+  await expect(win.locator('[data-pkc-field="search-jump-count"]')).toHaveText('2/2 件');
+  const second = await inView('2 件目');
+  expect(second.top, '次を押しても当たりの位置が動いていない').not.toBeCloseTo(first.top, 0);
+  // 端で回る
+  await clickReal(win, '[data-pkc-action="search-jump-next"]');
+  await expect(win.locator('[data-pkc-field="search-jump-count"]'), '端で回っていない').toHaveText('1/2 件');
+  await inView('回って 1 件目');
+
+  // × で、塗りも帯も消える
+  await clickReal(win, '[data-pkc-action="search-jump-end"]');
+  expect((await hits()).all, '× を押しても塗りが残っている').toBe(0);
+  await expect(win.locator('[data-pkc-field="search-jump-count"]')).toBeHidden();
+  const bare = await win.screenshot({ clip });
+  expect(
+    Buffer.compare(painted, bare),
+    '塗りを消しても画素が変わらない = 塗りは付いていたが、見える色が無かった(::highlight の色が解けていない)',
+  ).not.toBe(0);
+  expect(winErrors, '開いた窓に pageerror / console.error が出ている').toEqual([]);
+  await win.close();
+  await page.bringToFront();
 
   /**
    * 🔴 **同じ道中で SQL の面まで見る**(#681 段②)。

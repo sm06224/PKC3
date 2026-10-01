@@ -8347,6 +8347,9 @@ h3[data-pkc-section] {
   /* 🔴 画面専用の操作子は紙に要らない(#1129, #1137) */
   .pkc-back-to-top-container,
   .pkc-reading-progress,
+  /* ⚠ 「探す」から送ったときの帯も紙には要らない(#1102 段①)── 塗り(`::highlight`)は
+   *    印刷に出ないので、帯だけを隠せば紙は元のまま */
+  .pkc-search-jump,
   .pkc-heading-anchor,
   .pkc-code-lang,
   .pkc-quick-toc,
@@ -9038,6 +9041,81 @@ h6:hover > .pkc-heading-anchor,
   height: 0;
   overflow: visible;
   z-index: 90;
+}
+
+/* 🔴 **「探す」から送ったときの「1/4 件 ‹ ›」**(#1102 段①)── 本文の右上、**目次の隣**。
+ *
+ * 🔑 目次(`.pkc-quick-toc`)と**同じ作り**:高さ 0 の `sticky` の箱を本文の面の先頭に置く
+ *   (本文の行を 1px も押し下げない / 送った先でも右上に居る)。
+ * ⚠ 右の `padding` は **24px(目次と同じ列)+ 目次の押しの幅**(`detail.ts` が測って
+ *   `--pkc-search-jump-gap` に入れる。目次が出ていなければ 0)── 並べると重ならない。
+ * ⚠ 地は無彩色、色は**当たりの塗りにだけ**使う(帯は他の押しと同じ配色)。 */
+.pkc-search-jump {
+  position: sticky;
+  top: 42px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-start;
+  gap: 2px;
+  padding-right: calc(24px + var(--pkc-search-jump-gap, 0px));
+  height: 0;
+  overflow: visible;
+  z-index: 90;
+  pointer-events: none;
+}
+
+.pkc-search-jump > * {
+  pointer-events: auto;
+}
+
+.pkc-search-jump-count {
+  padding: 3px 8px;
+  font-size: 0.78em;
+  line-height: 1;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.05));
+  white-space: nowrap;
+}
+
+.pkc-search-jump-btn {
+  padding: 3px 7px;
+  font-size: 0.85em;
+  line-height: 1;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.05));
+  cursor: pointer;
+  user-select: none;
+}
+
+.pkc-search-jump-btn:hover:not(:disabled) {
+  background: var(--surface-2);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.pkc-search-jump-btn:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+/* 🔴 **当たった語の塗り**(Custom Highlight API ── 本文の節点は 1 つも増えない)。
+ * ⚠ 名前は `search-jump.ts` の `HIT_HIGHLIGHT` / `HIT_CURRENT_HIGHLIGHT` と同じ字。
+ * ⚠ 使える所は色・背景だけ(`::highlight` の制限)。いまの 1 つは塗りを濃くして見分ける。
+ * 色は「探す」の抜粋の当たった語(`search-row-snippet mark`)と**同じ配色**にそろえる。 */
+::highlight(pkc-search-hit) {
+  background-color: var(--accent-dim);
+  color: var(--accent-dim-fg);
+}
+
+::highlight(pkc-search-hit-current) {
+  background-color: var(--accent);
+  color: var(--accent-fg);
 }
 
 .pkc-quick-toc-btn {

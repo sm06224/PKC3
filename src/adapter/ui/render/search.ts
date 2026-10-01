@@ -21,6 +21,14 @@
 import type { AppState, SearchPageState } from '@adapter/state/app-state';
 import { splitSnippet } from '@features/filter/search-snippet';
 
+/**
+ * 🔴 **行のボタンが持つ、探した語**(#1102 段①)。受け手(`binder.ts` の `open-note-window`)が
+ * 読んで、開く窓へ運ぶ ── **綴りはここ 1 か所**(受け手は import する。§7)。
+ * ⚠ 値は**結果が返ってきたときの語**(`rowsQuery`)── 打ち直している最中の語ではない
+ *   (行に載っている抜粋は、その語で引いた物である)。
+ */
+export const SEARCH_FIND_ATTR = 'data-pkc-find';
+
 export class SearchRenderer {
   private readonly host: HTMLElement;
   /** 直前に描いた指紋。⚠ 同じなら触らない(押している最中に行を作り直さない)。 */
@@ -108,7 +116,10 @@ export class SearchRenderer {
       open.setAttribute('data-pkc-action', 'open-note-window');
       open.setAttribute('data-pkc-entry', row.lid);
       open.setAttribute('data-pkc-field', 'search-row');
-      open.title = 'このノートを別のウィンドウで開きます。いま読んでいる本文はそのままです';
+      // 🔴 語を運ぶ(#1102 段①)── 開いた窓が、本文の当たった所へ送って塗る
+      open.setAttribute(SEARCH_FIND_ATTR, page.rowsQuery);
+      open.title =
+        'このノートを別のウィンドウで開き、本文の当たった所へ送ります。いま読んでいる本文はそのままです';
       const title = document.createElement('span');
       title.setAttribute('data-pkc-field', 'search-row-title');
       title.textContent = row.title === '' ? '(題名なし)' : row.title;

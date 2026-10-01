@@ -26,6 +26,7 @@ import {
   toggleHeadingFold,
 } from '../render/heading-fold';
 import { toggleCodeCollapse } from '../render/code-collapse';
+import { SEARCH_FIND_ATTR } from '../render/search';
 import { blockSpanAt, sliceLines } from '@features/markdown/source-blocks';
 import {
   tableAt,
@@ -1589,8 +1590,10 @@ export interface BinderServices {
    *
    * ⚠ **同期に呼べること** ── `window.open` は click の gesture の中でしか通らない。
    * 🔑 何枚でも開ける(窓を使い回さない)── 付箋である。
+   * 🔴 **`find` は「探す」で当たった語**(#1102 段①)── 開いた窓が、本文の当たった所へ送って塗る。
+   *   ⚠ 省略 = これまでどおり(語を運ばない)。
    */
-  openNoteWindow?(lid: string): void;
+  openNoteWindow?(lid: string, find?: string): void;
   /**
    * 🔴 **その見出しの章を、読むだけの別のウィンドウで開く**(#1044 段4)。
    * ⚠ **同期で**窓を掴むこと(user の操作の続きでしか開けない)。
@@ -3206,6 +3209,12 @@ function tableLineAt(target: Element, body: string | null): number | null {
  *   **もともと開いているノート**を指すので、戻す相手が無い(属性も付かない)。
  */
 const MENU_PREV_LID_ATTR = 'data-pkc-menu-prev-lid';
+
+/**
+ * 🔴 **「探す」の行が持つ、探した語**(#1102 段①)。⚠ 綴りは `render/search.ts` が焼く物と
+ * **同じ字**(`SEARCH_FIND_ATTR`)── 2 か所に書かない(§7)。
+ */
+const FIND_ATTR = SEARCH_FIND_ATTR;
 /**
  * 🔴 **押したときだけ、その行を選んでから効かせる**(#1045 C9、着地前レビューで直した)。
  *
@@ -5041,6 +5050,21 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (key === '') return;
     appPhone.reveal('note');
     void jumpToAssetUse(dispatcher, target, key);
+  },
+  /**
+   * 🔴 **「探す」から送った本文の、前 / 次の当たりへ**(#1102 段①)。
+   * ⚠ 端で回る(数で畳むのは描く側 ── 当たりの数は本文の DOM を数えないと分からない)。
+   * ⚠ 押した所から何も要らない(塗っているのは 1 つの本文だけ)。
+   */
+  'search-jump-prev': (dispatcher) => {
+    dispatcher.dispatch({ type: 'SEARCH_JUMP_STEP', by: -1 });
+  },
+  'search-jump-next': (dispatcher) => {
+    dispatcher.dispatch({ type: 'SEARCH_JUMP_STEP', by: 1 });
+  },
+  /** 🔴 **塗りと帯を消す**(#1102 段①)。⚠ `Esc` も同じ 1 本(`tryReading`)。 */
+  'search-jump-end': (dispatcher) => {
+    dispatcher.dispatch({ type: 'SEARCH_JUMP_END' });
   },
   /**
    * 🔴 **目次から本文の見出しへ飛ぶ**(#493)。
@@ -10392,7 +10416,10 @@ const ACTIONS: Record<string, ActionHandler> = {
       });
       return;
     }
-    services.openNoteWindow?.(lid);
+    // 🔴 **「探す」の行は、探した語を運ぶ**(#1102 段①)── 受け側が当たった所へ送って塗る。
+    //   ⚠ 語を持たない口(一覧の ⋯ など)は今までどおり `undefined`
+    const find = target.getAttribute(FIND_ATTR);
+    services.openNoteWindow?.(lid, find === null || find === '' ? undefined : find);
     /**
      * 🔴 **読んでいたノートへ戻す**(#685 動線レビュー 欠陥 2)。
      * ⚠ **開いた後に撃つ** ── `window.open` は gesture の中でしか通らないので、
@@ -14622,6 +14649,23 @@ export function bindActions(
       const wcmd = keymap.match(ke, 'window');
       const tryReading = (): boolean => {
         if (rcmd === null) return false;
+        /**
+         * 🔴 **「探す」の塗りが出ている間の `Esc` は、まず塗りを消すだけ**(#1102 段①)。
+         *
+         * ⚠ 先に消さないと、付箋の窓では**窓ごと閉じ**、本体ではノートが閉じる ── 当たりを
+         *   見ていた user が、塗りを消したいだけの `Esc` で**読んでいた本文を失う**。
+         * 🔑 1 回の `Esc` で 1 段だけ(次の `Esc` で今までどおりノートが閉じる)。
+         * ⚠ 右クリックのメニューが出ている間は譲る(`deselect-entry` と同じ判定の 1 本)。
+         */
+        if (
+          rcmd === 'deselect-entry' &&
+          dispatcher.getState().searchJump != null &&
+          !contextMenuOpen(root)
+        ) {
+          ke.preventDefault();
+          dispatcher.dispatch({ type: 'SEARCH_JUMP_END' });
+          return true;
+        }
         /**
          * 🔴 **付箋のウィンドウでは、`deselect-entry` を撃たずに窓を閉じる**
          * (#1042 followup 指摘 A。裁定:`docs/development/touch-and-unity-design-2026-09.md`

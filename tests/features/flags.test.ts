@@ -332,6 +332,9 @@ describe('🔴 クエリパラメータの抜け穴を作らない', () => {
       '`${location.pathname}${location.search}${dropViewFromHash(location.hash)}`,',
       // ⚠ 合図(`w`)だけを落とす口(#300 段③ の直し)── 同じ作法で `search` は残す
       '`${location.pathname}${location.search}${dropViewWindowToken(location.hash)}`,',
+      // ⚠ 「探す」で当たった語(`find`。#1102 段①)だけを落とす口 ── 同じ作法で `search` は残す
+      //   (key の取り出しは `permalink.ts` の `dropViewFindFromHash` であってここではない)
+      '`${location.pathname}${location.search}${dropViewFindFromHash(location.hash)}`,',
       /**
        * ⚠ 住所を書き換える口(#689 案 B)── **落とすのではなく書き換える**が、
        *   `search` の扱いは同じ(そのまま持ち越す)。⚠ ここで `search` を落とすと、

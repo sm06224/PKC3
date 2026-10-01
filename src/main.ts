@@ -691,12 +691,21 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const noteChannel = portable
     ? `${NOTE_REGISTRY_CHANNEL}:${portable.bundle.id}`
     : NOTE_REGISTRY_CHANNEL;
+  /**
+   * 🔴 **「探す」から開いている窓へ頼まれた語**(#1102 段①)。⚠ `dispatcher` は台帳より
+   * **後**に建つので、箱だけ先に置き、建った後で埋める(台帳の便りが先に届いても落ちない)。
+   */
+  let jumpFromRaise: ((find: string) => void) | null = null;
   const noteRegistry = createNoteRegistry({
     channel: typeof BroadcastChannel === 'function' ? new BroadcastChannel(noteChannel) : null,
     id: makeViewWindowToken(),
     // ⚠ 「前に出る」は実測できていない(headless では親子とも `hasFocus` が真)──
     //    例外を投げないことだけ確かめてある。だから**画面の字では約束しない**
-    onRaise: () => window.focus(),
+    onRaise: (find) => {
+      window.focus();
+      // 🔑 前に出すだけで終わらせない ── 「探す」で押したのなら、当たった所へ送って塗る
+      if (find !== undefined) jumpFromRaise?.(find);
+    },
   });
   if (typeof window === 'object') {
     // ⚠ **閉じない。名乗りを 1 通出すだけ**(着地前レビュー ⚠2)── `pagehide` は
@@ -928,6 +937,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const { metas, relations } = await loadSnapshot();
 
   const dispatcher = new Dispatcher();
+  // 🔴 **「探す」から頼まれた語で、いま開いているノートの当たった所へ送って塗る**(#1102 段①)。
+  //   判断(編集中は塗らない / 選んでいない物は塗らない)は reducer の `SEARCH_JUMP_START` が持つ
+  jumpFromRaise = (find) => {
+    const lid = dispatcher.getState().selectedLid;
+    if (lid !== null) dispatcher.dispatch({ type: 'SEARCH_JUMP_START', lid, query: find });
+  };
   /**
    * 🔴 **未読の数を state へ写す**(設計 doc §7、段②a)。
    * ⚠ **`appMessagePost` が数の正本**(post のたび・`seedUnread` のたび)、
@@ -3893,7 +3908,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * ⚠ **押した行のノート**を連れて行く(`selectedLid` ではない)── ⋯ は
      *   行から開くので、選ばれている物と違うことがある。
      */
-    openNoteWindow: (lid) => {
+    openNoteWindow: (lid, find) => {
       /**
        * 🔴 **同じノートの 2 枚目は作らない**(user 裁定 2026-09-04)。
        * ⚠ 判定は**同期**(台帳は放送で先に埋まっている)── ここで待つと
@@ -3903,7 +3918,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       const where = noteRegistry.whereIs(lid);
       if (where !== null) {
         // ⚠ **この窓が出している**なら、前に出す相手が居ない(いま見ているのがそれ)
-        if (where === 'other') noteRegistry.raise(lid);
+        if (where === 'other') noteRegistry.raise(lid, find);
+        // 🔑 この窓が出しているなら、前に出す相手が居ない ── ここで塗って送る(#1102 段①)
+        else if (find !== undefined) jumpFromRaise?.(find);
         // 🔑 字は `deep-link.ts`(#690 I3 ── 別の窓なら**その窓の題名**を添える。
         //    形は `windowTitleFor` と同じなので、タスクバーの字でそのまま探せる)
         dispatcher.dispatch({
@@ -3928,6 +3945,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         open: openNoteWindowUrl,
         baseUrl: currentBaseUrl,
         selected: () => ({ containerId: cid, lid }),
+        // 🔴 「探す」で当たった語を連れて行く(#1102 段①)── 開いた窓が本文の当たった所へ送って塗る
+        ...(find === undefined ? {} : { find }),
         newToken: makeViewWindowToken,
         waitForOpen: waitForViewWindow,
         // ⚠ 付箋に退避先は無い ── `view === null` のとき呼ばれない
@@ -4568,6 +4587,10 @@ function bootstrap(): void {
          * ⚠ 題名を変えるのは**タスクバーで見分けるため** ── 直す前は
          *   何枚開いても全部「PKC3」で、どれがどれか押すまで分からなかった。
          */
+        // 🔴 **「探す」で当たった語で、本文の当たった所へ送って塗る**(#1102 段①)。
+        //    ⚠ 選んだ後に呼ばれる ── 判断(選んでいる物か / 編集中でないか)は reducer が持つ
+        searchJump: (lid, find) =>
+          app.dispatcher.dispatch({ type: 'SEARCH_JUMP_START', lid, query: find }),
         onHold: (view) => {
           heldViewWindow = view;
           // ⚠ **その場で塗り直す** ── 旗を倒しただけでは、次に何かが起きるまで
