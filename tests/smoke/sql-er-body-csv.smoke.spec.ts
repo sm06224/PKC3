@@ -88,7 +88,22 @@ test('🔴 本文の名前つき csv が図の四角として出て引ける。�
   );
   await expect(bodyTable.first()).toContainText('りんご');
   // 🔴 受けられない名前の囲みも、**本文には出る**(上の docstring)
-  await expect(bodyTable.nth(1), '受けられない名前の囲みが本文に出ていない').toContainText('ab');
+  /**
+   * 🔴 見出しのセルは**1 つずつ**、並べ替えの印(`.pkc-table-sort-icon`。#1151)を除いた字で読む。
+   * ⚠ 表全体の `textContent` は印が混じって `a↕b↕12` になる ── 印の字そのものは pin しない
+   *   (印の字を変えた日にまた落ちる)。除くのは**印の要素**で、字面ではない。
+   */
+  const badNameTable = bodyTable.nth(1);
+  await expect(badNameTable.locator('th'), '受けられない名前の囲みが本文に出ていない').toHaveCount(2);
+  const headerTexts = await badNameTable.locator('th').evaluateAll((ths) =>
+    ths.map((th) => {
+      const c = th.cloneNode(true) as HTMLElement;
+      c.querySelectorAll('.pkc-table-sort-icon').forEach((n) => n.remove());
+      return (c.textContent ?? '').trim();
+    }),
+  );
+  expect(headerTexts, '見出しが a / b になっていない').toEqual(['a', 'b']);
+  await expect(badNameTable.locator('tbody td')).toHaveText(['1', '2']);
 
   /**
    * ── ① SQL で調べる を開く(この PKC のノートが既定 ── 何も選ばない)。

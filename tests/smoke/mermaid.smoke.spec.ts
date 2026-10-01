@@ -1,5 +1,12 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
+import {
+  gotoApp,
+  clickReal,
+  createEntry,
+  collectPageErrors,
+  useSplitEditor,
+  openBigWindowViaLightbox,
+} from './helpers';
 import { MERMAID_FORMS } from '../fixtures/mermaid-forms';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
@@ -659,7 +666,7 @@ test('🔴 一覧から選んだ UML の雛形は、そのまま図になる(#52
  *    ⚠ 実際、印を付けたまま測ったら**窓が開いて行は開かなかった**
  *    (= 図の原文を直す道を丸ごと奪っていた)。実ブラウザで測って気づいた
  */
-test('🔴 図を押すと別窓で実寸で開き、拡大縮小できる (#527 案 A)', async ({ page, context }) => {
+test('🔴 図を押すとその場で拡大し、「⧉」で別窓の実寸が開いて拡大縮小できる (#527 案 A / #1099)', async ({ page, context }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1400, height: 900 });
   await gotoApp(page);
@@ -679,8 +686,8 @@ test('🔴 図を押すと別窓で実寸で開き、拡大縮小できる (#527
     '常設のボタンが増えている(#501 と逆向き)',
   ).toHaveCount(0);
 
-  // ① 押すと別窓が開く
-  const [win] = await Promise.all([context.waitForEvent('page'), img.click()]);
+  // ① 押すとその場で拡大 → 閉じて元の位置 → 「⧉」で別窓が開く(#1099)
+  const win = await openBigWindowViaLightbox(page, context, img, true);
   await win.waitForLoadState('domcontentloaded');
 
   const g = await win.evaluate(() => {
@@ -761,7 +768,7 @@ test('🔴 図を押して開く別窓は、焼いた PNG ではなくベクタ 
   expect(body.type, '前提が崩れている ── 本文が既に PNG ではない').toBe('image/png');
 
   const img = host.locator('img');
-  const [win] = await Promise.all([context.waitForEvent('page'), img.click()]);
+  const win = await openBigWindowViaLightbox(page, context, img, false);
   await win.waitForSelector('[data-pkc-field="asset-window-image"]', { timeout: 15_000 });
   const shown = await win.evaluate(async () => {
     const i = document.querySelector(
@@ -830,7 +837,7 @@ test('🔴 grafu を押して開く別窓は、画面より大きく焼き直さ
   const bodyPng = body!;
   expect(bodyPng.type, '前提が崩れている ── grafu が PNG ではない').toBe('image/png');
 
-  const [win] = await Promise.all([context.waitForEvent('page'), host.locator('img').click()]);
+  const win = await openBigWindowViaLightbox(page, context, host.locator('img'), false);
   await win.waitForSelector('[data-pkc-field="asset-window-image"]', { timeout: 20_000 });
   const shown = await win.evaluate(async () => {
     const i = document.querySelector('[data-pkc-field="asset-window-image"]') as HTMLImageElement;

@@ -62,8 +62,22 @@ test('csv 表と html sandbox iframe が可視高さを持つ', async ({ page })
 
   // 🔴 長大なコードブロック（>= 18行）の折りたたみとワンクリック展開(#1139)
   // ⚠ 新しい gotoApp を増やさずに既存の道中に assert を足す(smoke-budget #820)
-  const block = page.locator('[data-pkc-field="detail-body"] .pkc-md-block[data-pkc-md-block-kind="code"]').first();
+  // 🔴 **畳みの対象になる枠を名指しする**(#1183)。⚠ `.first()` で掴むと、本文の先頭に在る
+  //    csv の囲み(描画済みスロットを持つので畳みの対象外)に当たる ── 畳みの検査が、
+  //    畳まれない物を見て落ちる。js の枠(`pre > code.language-javascript`)を、描画済み
+  //    スロットを持たない物として掴む。
+  const block = page
+    .locator('[data-pkc-field="detail-body"] .pkc-md-block[data-pkc-md-block-kind="code"]')
+    .filter({ has: page.locator(':scope > pre > code.language-javascript') })
+    .filter({ hasNot: page.locator('.pkc-render-slot') });
+  await expect(block, '畳みの対象の js のコード枠が 1 つだけ掴めていない').toHaveCount(1);
   await expect(block).toBeVisible();
+  // ⚠ 前提: fixture が畳みの閾値(18 行。`code-collapse.ts`)を超えている
+  //   ── 超えていないと「畳まれない」が正しい挙動になり、下の検査が別の理由で落ちる。
+  expect(
+    longCode.split('\n').length,
+    '前提: fixture の行数が畳みの閾値(18 行)に届いていない',
+  ).toBeGreaterThanOrEqual(18);
 
   // 初期状態は折りたたみ
   await expect(block).toHaveAttribute('data-pkc-code-collapsed', '');

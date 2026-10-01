@@ -884,7 +884,8 @@ test('🔴 画像の別の窓は img で開く(PDF の箱にならない)', asyn
 });
 
 /**
- * 🔴 **本文に貼った画像も、押すと別窓で大きく見られる**(#527、2026-08-28)。
+ * 🔴 **本文に貼った画像も、押すと大きく見られる**(#527、2026-08-28。#1099 で
+ * 「押す」はその場の拡大になり、別窓は拡大の「⧉」から開く)。
  *
  * ⚠ 先に着地したのは**図(mermaid)だけ**で、user の頼みは
  * 「対象は画像だけでなく**レンダリング結果全部**」だった ── 本文の画像は
@@ -897,7 +898,7 @@ test('🔴 画像の別の窓は img で開く(PDF の箱にならない)', asyn
  *    happy-dom では「代入した値が読める」以上のことが言えない
  * 3. **実寸が「縮む前の大きさ」か**(本文の画像は器の幅に合わせて縮めてある)
  */
-test('🔴 本文に貼った画像を押すと、別窓で実寸で開き、掴んで送れる (#527)', async ({
+test('🔴 本文に貼った画像を押すとその場で拡大し、閉じられ、「⧉」で別窓の実寸が開いて掴んで送れる (#527 / #1099)', async ({
   page,
   context,
 }) => {
@@ -941,7 +942,64 @@ test('🔴 本文に貼った画像を押すと、別窓で実寸で開き、掴
   // ⚠ **押せることが画面に出ている**(印だけ付けても user は気づかない)
   expect(await img.getAttribute('title'), '押せることが画面に出ていない').toContain('別のウィンドウ');
 
-  const [win] = await Promise.all([context.waitForEvent('page'), img.click()]);
+  /**
+   * 🔴 **押すと、まず「その場で拡大」(lightbox)が開く ── 別窓は開かない**(#1099)。
+   * ⚠ この test は#1099 より前の「押すと別窓」を前提にしていて、押したまま
+   *   別窓の event を待って 30 秒で落ちていた(製品は無傷。期待が古かった)。
+   *   🔑 **別窓は lightbox の「⧉」から**開く ── そこから先(実寸 / 拡大 / 掴み送り)は
+   *   これまでどおり別窓の仕事である。
+   * ⚠ 「何も起きない」を許さない:開いたこと / 絵が同じこと / 閉じる 3 通り
+   *   (Esc / 背景 / ✕)/ 閉じたら**元の位置に絵が戻る**ことを見る。
+   */
+  const opened: string[] = [];
+  context.on('page', (p) => opened.push(p.url()));
+  const lightbox = page.locator('[data-pkc-region="lightbox"]');
+  const lbImg = lightbox.locator('img.pkc-lightbox-img');
+  await expect(lightbox, '前提: 押す前から lightbox が出ている').toHaveCount(0);
+  const srcBody = await img.getAttribute('src');
+  // ⚠ 押す前に**絵を見える所へ寄せておく** ── 寄せないと、押すときに playwright が
+  //   スクロールして位置が動き、「閉じたら元の位置」の比較が自分の操作を数えてしまう
+  await img.scrollIntoViewIfNeeded();
+  const boxBefore = await img.boundingBox();
+  expect(boxBefore, '前提: 本文の絵の位置が取れない').not.toBeNull();
+
+  const openLightbox = async () => {
+    await img.click();
+    await expect(lightbox, '絵を押しても拡大が開かない(何も起きない)').toHaveCount(1);
+    await expect(lbImg, '拡大の絵が本文の絵と違う').toHaveAttribute('src', srcBody!);
+    await expect(lbImg).toBeVisible();
+    // ⚠ 絵が**実際に描かれている**(読み込めていない空の枠を通さない)
+    expect(
+      await lbImg.evaluate((i) => (i as HTMLImageElement).naturalWidth),
+      '拡大の絵が読めていない',
+    ).toBe(600);
+  };
+  const expectClosed = async (how: string) => {
+    await expect(lightbox, `${how}で拡大が閉じない`).toHaveCount(0);
+    const boxAfter = await img.boundingBox();
+    expect(boxAfter, `${how}で閉じたら本文の絵が元の位置に戻る`).toEqual(boxBefore);
+  };
+
+  // Esc で閉じる
+  await openLightbox();
+  await page.keyboard.press('Escape');
+  await expectClosed('Esc');
+  // ✕ で閉じる
+  await openLightbox();
+  await lightbox.locator('.pkc-lightbox-close-btn').click();
+  await expectClosed('✕');
+  // 背景(暗い所)を押して閉じる ── 絵・帯の外の隅
+  await openLightbox();
+  await page.mouse.click(4, 4);
+  await expectClosed('背景');
+  expect(opened, 'ここまでで別窓が開いている(押すとその場で拡大のはず)').toEqual([]);
+
+  // 🔴 「⧉ 別窓で開く」で、同じ絵が別窓で開く
+  await openLightbox();
+  const [win] = await Promise.all([
+    context.waitForEvent('page'),
+    lightbox.locator('.pkc-lightbox-open-win-btn').click(),
+  ]);
   await win.waitForSelector('[data-pkc-field="asset-window-image"]', { timeout: 10_000 });
   const read = async () =>
     win.evaluate(() => {
@@ -997,6 +1055,8 @@ test('🔴 本文に貼った画像を押すと、別窓で実寸で開き、掴
     back.innerW,
   );
   await win.close();
+  // 別窓へ切り出しても、本文は無傷(拡大は開いたままでも閉じてもよいが、絵は居る)
+  await expect(img).toHaveAttribute('src', srcBody!);
 
   expect(errors).toEqual([]);
 });

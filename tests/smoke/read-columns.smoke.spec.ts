@@ -1,5 +1,11 @@
 import { test, expect, type Page } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors } from './helpers';
+import {
+  gotoApp,
+  clickReal,
+  createEntry,
+  collectPageErrors,
+  openBigWindowViaLightbox,
+} from './helpers';
 
 /**
  * 🔴 **読む面の段組み送り**(#505 段①。user 指示 2026-08-28)。
@@ -716,10 +722,13 @@ test('🔴 段組みで縦に長い図が段に収まり、押し所も同じ段
    *   **別窓の実寸が、いま画面に出ている大きさより大きいこと** ── ここが等しければ、
    *   「大きく見る」と言いながら同じ大きさを出していることになる。
    */
-  const [win] = await Promise.all([
-    context.waitForEvent('page'),
-    page.locator('[data-pkc-field="detail-body"] [data-pkc-mermaid-src] img').click(),
-  ]);
+  // 🔴 押すとその場で拡大 → 「⧉」で別窓(#1099。以前は押すと別窓だった)
+  const win = await openBigWindowViaLightbox(
+    page,
+    context,
+    page.locator('[data-pkc-field="detail-body"] [data-pkc-mermaid-src] img'),
+    false,
+  );
   await win.waitForLoadState('domcontentloaded');
   const big = await win.evaluate(() => {
     const i = document.querySelector('[data-pkc-field="asset-window-image"]') as HTMLImageElement;
