@@ -371,15 +371,25 @@ test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き
   expect(errors, 'pageerror が出た').toEqual([]);
 });
 
-test('🔴 entry= の塊は題名の札になり、押すとそのノートを開く (#283 P4)', async ({ page }) => {
+test('🔴 entry= の塊は題名の帯 + 中身(読み取り専用)になり、押すとそのノートを開く (#283 P4 / #529 W3-①)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1400, height: 900 });
   await gotoApp(page);
 
+  /**
+   * 🔴 **置いたノートの中身**(#529 W3-①)。表・チェック・見出しと、**切る量(4,000 字)を超える長さ**を持つ。
+   * ⚠ 空振り防止:この本文が実際に表とチェックを持ち、量を超えていることを下で assert する。
+   * 🔑 **新しい起動は増やさない**(#820)── 既にこの test が通る道中に足す。
+   */
+  const longBody =
+    '# 相手の見出し\n\n中身\n\n| 品 | 数 |\n|---|---|\n| 牛乳 | 2 |\n\n- [ ] 牛乳\n\n' +
+    Array.from({ length: 400 }, (_, i) => `続きの行 ${String(i)} です。`).join('\n\n');
+  expect(longBody.length, '台の前提:切る量を超えていない').toBeGreaterThan(4000);
+
   // 相手のノートを先に作り、lid を一覧の行から読む
   await createEntry(page, 'text');
   await page.fill('[data-pkc-field="editor-title"]', '相手のノート');
-  await page.fill('[data-pkc-field="editor-body"]', '中身\n');
+  await page.fill('[data-pkc-field="editor-body"]', longBody);
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
   await page.waitForSelector('[data-pkc-action="start-edit"]');
   const lid = await page
@@ -388,26 +398,107 @@ test('🔴 entry= の塊は題名の札になり、押すとそのノートを�
     .getAttribute('data-pkc-entry');
   expect(lid, '前提が崩れている(相手の lid が読めない)').not.toBeNull();
 
-  // 板のノートを作る(札 1 枚)
+  // 短いほうのノート(w= h= を省いた塊の相手 ── 既定の大きさの対照)
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', '短いノート');
+  await page.fill('[data-pkc-field="editor-body"]', 'みじかい本文\n');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  // ⚠ 一覧の先頭は新しい順とは限らない ── 題名で引く
+  const shortLid = await page
+    .locator('[data-pkc-region="sidebar"] [data-pkc-entry]', { hasText: '短いノート' })
+    .first()
+    .getAttribute('data-pkc-entry');
+  expect(shortLid, '前提が崩れている(短いノートの lid が読めない)').not.toBeNull();
+  expect(shortLid).not.toBe(lid);
+
+  // 板のノートを作る(w= h= を書いた塊 1 枚 + 省いた塊 1 枚)
   await createEntry(page, 'text');
   await page.fill('[data-pkc-field="editor-title"]', '板');
   await page.fill(
     '[data-pkc-field="editor-body"]',
-    `:::format{.pkc-place entry=${lid} x=60 y=30 w=240 h=100}\n:::\n`,
+    `:::format{#big .pkc-place entry=${lid} x=60 y=30 w=240 h=100}\n:::\n\n` +
+      `:::format{#dflt .pkc-place entry=${shortLid} x=60 y=200}\n:::\n`,
   );
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
   await page.waitForSelector('[data-pkc-action="start-edit"]');
 
-  // 🔴 札に相手の題名が出る(展開ではない ── 中身は写らない)
-  const card = page.locator('[data-pkc-field="place-card"]');
-  await expect(card, '札に題名が出ていない').toHaveText('相手のノート');
+  const big = page.locator('[data-pkc-region="detail"] #big');
+  const dflt = page.locator('[data-pkc-region="detail"] #dflt');
+  const bigCard = big.locator(':scope > [data-pkc-field="place-card"]');
+  const bigBody = big.locator(':scope > [data-pkc-field="place-body"]');
 
-  // 🔴 押すと相手のノートが開く
-  await clickReal(page, '[data-pkc-field="place-card"]');
+  // 🔴 帯に相手の題名が出る(今までどおり)
+  await expect(bigCard, '帯に題名が出ていない').toHaveText('相手のノート');
+  // 🔴 帯の下に、相手の本文(見出し・表・チェック)が読み取り専用で出る
+  await expect(bigBody, '置いたノートの中身が出ていない').toContainText('中身');
+  await expect(bigBody.locator('table')).toHaveCount(1);
+  const cb = bigBody.locator('input[type="checkbox"]');
+  await expect(cb, '台の前提:チェックが出ていない').toHaveCount(1);
+  await expect(cb, 'チェックが押せる形で出ている').toBeDisabled();
+  await expect(dflt.locator(':scope > [data-pkc-field="place-body"]')).toContainText('みじかい本文');
+
+  // 🔴 大きさ:w= h= は固定、省略は既定(320 × 240)── 中身(長い本文)で伸びない
+  const bb = (await big.boundingBox())!;
+  expect([Math.round(bb.width), Math.round(bb.height)], 'w= h= で固定されていない').toEqual([240, 100]);
+  const db = (await dflt.boundingBox())!;
+  expect([Math.round(db.width), Math.round(db.height)], '省略時の既定の大きさでない').toEqual([320, 240]);
+
+  /**
+   * 🔴 **本文を送っても、掴む口と大きさの持ち手は塊の中に居続ける**。
+   * ⚠ 塊そのものが送ると、絶対配置の子(口)が一緒に流れて消える ── CSS の
+   *   `.pkc-place[data-pkc-place-embedded] { overflow: hidden }` と本文の器だけが送る作りが守る。
+   */
+  const scrolled = await bigBody.evaluate((el) => {
+    el.scrollTop = 80;
+    return { body: el.scrollTop, block: (el.parentElement as HTMLElement).scrollTop };
+  });
+  expect(scrolled.body, '本文の器が送れていない(収まらない分が切れて見えない)').toBeGreaterThan(0);
+  expect(scrolled.block, '塊そのものが送られている(掴む口が流れる)').toBe(0);
+  const bBox = (await big.boundingBox())!;
+  for (const field of ['place-grip', 'place-size']) {
+    const gb = (await big.locator(`:scope > [data-pkc-field="${field}"]`).boundingBox())!;
+    const inside =
+      gb.x >= bBox.x - 1 &&
+      gb.y >= bBox.y - 1 &&
+      gb.x + gb.width <= bBox.x + bBox.width + 1 &&
+      gb.y + gb.height <= bBox.y + bBox.height + 1;
+    expect(inside, `本文を送ったら ${field} が塊の外へ出た`).toBe(true);
+  }
+
+  // 🔴 量を超えた本文は、末尾に「続きは元のノートで」(切った。全部は出ていない)
+  const more = bigBody.locator('[data-pkc-field="place-body-more"]');
+  await expect(more).toHaveText('続きは元のノートで');
+  await expect(bigBody).not.toContainText('続きの行 399 です');
+  // 対照群 ── 短いノートには出ない
+  await expect(dflt.locator('[data-pkc-field="place-body-more"]')).toHaveCount(0);
+
+  // 🔴 見出しは見出しでない(板のノートの目次に混ざらない)/ id は無い
+  await expect(bigBody.locator('h1, h2, h3, [id]')).toHaveCount(0);
+
+  // 🔴 中身の上で右クリックしても、出るのは**板のメニュー**(置いたノートの行メニューではない)
+  //    ── 中身に行番号を焼いていないので、押した所が板のノートの別の行に化けない
+  await bigBody.evaluate((el) => {
+    el.scrollTop = 0;
+  });
+  await bigBody.locator('[data-pkc-embedded-heading]').first().click({ button: 'right' });
+  await expect(
+    page.locator('[data-pkc-region="context-menu"]').getByText('この板をコピー'),
+    '中身の上の右クリックで板のメニューが出ない',
+  ).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  // 🔴 チェックの枠を押しても、何も書かれない(開き直した相手のチェックは空のまま)
+  await cb.click({ force: true });
+  await clickReal(page, '#big [data-pkc-field="place-card"]');
   await expect(
     page.locator('[data-pkc-region="detail"] [data-pkc-field="detail-title"]'),
-    '押しても相手が開かない',
+    '帯を押しても相手が開かない',
   ).toHaveText('相手のノート');
+  await expect(
+    page.locator('[data-pkc-region="detail"] [data-pkc-field="detail-body"] input.pkc-task-checkbox'),
+    '板から押したチェックが相手に書かれた',
+  ).not.toBeChecked();
 
   expect(errors, 'pageerror が出た').toEqual([]);
 });

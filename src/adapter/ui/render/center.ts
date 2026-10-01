@@ -172,6 +172,11 @@ export class CenterRouter {
      *   時点で誰かが `render` を呼び直す必要がある)。
      */
     onCaptureReady?: () => void,
+    /**
+     * 🔴 **板が、置いたノートの本文を欲しがっている**(#529 W3-①)。⚠ renderer は dispatch
+     * しない(層規約)── 撃つのは `main.ts`。渡さなければ板は題名の行だけを出す。
+     */
+    onPlaceWanted?: (lids: readonly string[]) => void,
   ) {
     const pane = (view: PaneView): HTMLElement => {
       const el = document.createElement('div');
@@ -268,9 +273,21 @@ export class CenterRouter {
           undefined,
           null,
           this.panes.detail,
+          onPlaceWanted ?? null,
         ),
       (host, lid) =>
-        new DetailRenderer(host, assets, markdown, null, undefined, undefined, undefined, lid),
+        new DetailRenderer(
+          host,
+          assets,
+          markdown,
+          null,
+          undefined,
+          undefined,
+          undefined,
+          lid,
+          undefined,
+          onPlaceWanted ?? null,
+        ),
     );
     this.detail = this.split.main;
     this.scroll.use('detail');

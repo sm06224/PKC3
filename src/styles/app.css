@@ -4009,6 +4009,71 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   background: var(--accent-dim);
   color: var(--accent-dim-fg);
 }
+/* 🔴 **置いたノートの中身**(#529 W3-①)── 題名の帯の下に、読み取り専用で出す。
+ *
+ * 🔑 高さは `w=` / `h=` か既定(`place-embed.ts`)で**固定**してある ── 中身では伸びない。
+ *   塊を縦に並べる箱にして、**本文の器だけが縮んで**収まらない分を**器の中で**送る
+ *   (器が `overflow: auto` なので flex の最小の高さが 0 になる ── `min-height: 0` は足していない。
+ *   外しても変わらなかった = 変異試験 M27 が生き延びた。CLAUDE.md §1 の同じ型)。
+ * ⚠ 塊そのものを送らせない理由:右上の掴む口と右下の大きさの持ち手は塊の子で絶対配置なので、
+ *   塊が送ると一緒に流れて消える。送るのが本文の器だけなら、持ち手は塊の中に居続ける
+ *   (smoke:本文を送っても `place-grip` / `place-size` が塊の内側に居る)。
+ * ⚠ `overflow: hidden` を塊に足しても、この fixture では何も変わらなかった(変異試験 M23 が
+ *   生き延びた)── 本文の器が縮むので、塊の側は溢れない。だから足していない。 */
+.pkc-place[data-pkc-place-embedded] {
+  display: flex;
+  flex-direction: column;
+}
+.pkc-place[data-pkc-place-embedded] > [data-pkc-field='place-card'] {
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+.pkc-place > [data-pkc-field='place-body'] {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 4px 6px 12px;
+  font-size: 0.9em;
+  overflow-wrap: anywhere;
+}
+/* 置いたノートの見出しは**見出しでない行**(目次・章の右クリックを奪わない)── 太さだけで段を見せる */
+[data-pkc-field='place-body'] [data-pkc-embedded-heading] {
+  margin: 0.6em 0 0.2em;
+  font-weight: 700;
+}
+[data-pkc-field='place-body'] [data-pkc-embedded-heading='1'] {
+  font-size: 1.25em;
+}
+[data-pkc-field='place-body'] [data-pkc-embedded-heading='2'] {
+  font-size: 1.15em;
+}
+[data-pkc-field='place-body'] [data-pkc-embedded-heading='3'] {
+  font-size: 1.05em;
+}
+/* 図・画像は描かない(W3-②)── 1 行で「元のノートで」と言う */
+[data-pkc-field='place-body-skip'] {
+  color: var(--muted);
+  font-size: 0.85em;
+}
+/* 入れ子の置いたノート(題名だけの行)と「続きは元のノートで」── どちらも押すと元のノートを開く */
+[data-pkc-field='place-body-link'],
+[data-pkc-field='place-body-more'] {
+  display: block;
+  margin: 2px 0;
+  padding: 2px 4px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  text-align: start;
+  cursor: pointer;
+  text-decoration: underline;
+}
+[data-pkc-field='place-body-link']:hover,
+[data-pkc-field='place-body-link']:focus-visible,
+[data-pkc-field='place-body-more']:hover,
+[data-pkc-field='place-body-more']:focus-visible {
+  background: var(--accent-dim);
+  color: var(--accent-dim-fg);
+}
 
 /* ── 強調の印(`==印==`)。地に色を敷く数少ない例外 ── **印そのものが情報**。
  * ⚠ `==印==` が出すのは **class を持たない `<mark>`**、`:文字:…:` が出すのが

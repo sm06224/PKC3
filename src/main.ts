@@ -1288,6 +1288,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     () => storageWhereLine(init.vfs, init.fallbackReason),
     // 🔴 録ったものの中身を借り終えた合図(#683 段①)── 左の列と同じ口を渡す
     () => repaintPanes(),
+    /**
+     * 🔴 **板が、置いたノートの本文を欲しがっている**(#529 W3-①)。renderer は dispatch
+     * しない(層規約)ので、ここで投げる。⚠ 判断は reducer(`PLACE_BODIES_WANTED`)が持つ。
+     */
+    (lids) => dispatcher.dispatch({ type: 'PLACE_BODIES_WANTED', lids }),
   );
   // いま居る場所の印(変わったときだけ属性を触る)
   let markedView: string | null = null;

@@ -145,6 +145,13 @@ import { normalizeFindQuery } from '@features/filter/search-hits';
 import { STRUCTURAL, type RelationKind } from '@features/relation/kinds';
 import { replaceAll } from '@features/markdown/body-replace';
 import {
+  excerptOf,
+  PLACE_BODY_CAP,
+  placeEmbeddable,
+  sameExcerpt,
+  type PlaceExcerpt,
+} from '@features/markdown/place-embed';
+import {
   EMPTY_HISTORY,
   canGoBack,
   canGoForward,
@@ -1394,6 +1401,18 @@ export interface AppState {
    */
   splitBodies: ReadonlyMap<string, string>;
   /**
+   * 🔴 **板に置いたノートの、板に出す分の本文**(#529 W3-①)。
+   *
+   * ⚠ `splitBodies` とは**別の入れ物**である ── あちらは全文(留めた枠は読むための本文そのもの)、
+   *   こちらは **`PLACE_BODY_CLIP` 字までに切った抜粋**で、**書込の元にしてはならない**
+   *   (切った本文から行番号を取って書き戻すと、残りが消える)。
+   *   `screenBodyOf` が見ないのはこのためである。
+   * 🔑 上限 `PLACE_BODY_CAP` 件(古い物から手放す)── 常駐が板の枚数に比例して伸びない。
+   * ⚠ **無い = まだ読めていない**(空文字ではない)。
+   * ⚠ 手組みの fixture には無いので、読むときは `placeBodiesOf` を通す。
+   */
+  placeBodies: ReadonlyMap<string, PlaceExcerpt>;
+  /**
    * 🔴 **いま開いている拡張の窓**(#195 / C-5 段②-b)。
    *
    * ⚠ **なぜ state に載せるのか** ── 台帳の実体は
@@ -1963,6 +1982,7 @@ export const initialState: AppState = {
   selectionAnchor: null,
   splitLids: [],
   splitBodies: new Map<string, string>(),
+  placeBodies: new Map<string, PlaceExcerpt>(),
   openExtensions: [],
   freshLid: null,
   viewMode: 'detail',
@@ -2993,6 +3013,14 @@ export type SystemCommand =
    * あちらは `openBody` を作る(= 編集の下書きになる)。
    */
   | { type: 'SPLIT_BODY_LOADED'; lid: string; body: string }
+  /**
+   * 🔴 **板が、置いたノートの本文を欲しがっている**(#529 W3-①)。
+   * ⚠ 描く側(renderer)は dispatch しない(層規約)ので、配線(`main.ts`)が撃つ。
+   * 🔑 まだ持っていない物だけ `REQUEST_PLACE_BODY` になる(描き直すたびに読み直さない)。
+   */
+  | { type: 'PLACE_BODIES_WANTED'; lids: readonly string[] }
+  /** 板のための本文が読めた(#529 W3-①)。⚠ **全文を受けて、ここで切る**(切る規則は 1 か所)。 */
+  | { type: 'PLACE_BODY_LOADED'; lid: string; body: string }
   /** 前回の並びを憶えていたので戻す(#505 段②)。⚠ 起動時に 1 度だけ。 */
   | { type: 'SPLIT_RESTORED'; lids: readonly string[] }
   | { type: 'BODY_LOAD_FAILED'; lid: string; error: string }
@@ -3206,6 +3234,11 @@ export type DomainEvent =
    * 並んでいる書込を追い越す(2026-08-17 に踏んだ形)。
    */
   | { type: 'REQUEST_SPLIT_BODY'; lid: string }
+  /**
+   * 🔴 **板に置いたノートの本文を読む**(#529 W3-①)。⚠ 読む口は同じ `store.getBody`、
+   * **同じ直列の列**に並べる(書込を追い越さない)。
+   */
+  | { type: 'REQUEST_PLACE_BODY'; lid: string }
   /**
    * 🔴 **スマートフォルダの中身を集める**(#421 段①)。
    *
@@ -3772,6 +3805,8 @@ const SYSTEM_COMMAND_TYPES: Record<SystemCommand['type'], true> = {
   STACK_BODY_LOADED: true,
   BODY_LOADED: true,
   SPLIT_BODY_LOADED: true,
+  PLACE_BODIES_WANTED: true,
+  PLACE_BODY_LOADED: true,
   SPLIT_RESTORED: true,
   BODY_LOAD_FAILED: true,
   BODY_PERSISTED: true,
@@ -5682,7 +5717,7 @@ function reduceCore(
        *   **その結果が戻る経路も同じ数だけ要る**(CLAUDE.md §7)。
        */
       if (ob?.lid !== action.lid) {
-        return { state: { ...released, splitBodies: syncSplitBody(state, action.lid, body) }, events: [] };
+        return { state: { ...released, ...syncShownBodies(state, action.lid, body) }, events: [] };
       }
       /**
        * 🔴 **留めた枠にも追随させる**(#848、2026-09-13)。
@@ -5705,7 +5740,7 @@ function reduceCore(
           state: {
             ...released,
             openBody: { ...ob, persisted: body, diskAhead: true },
-            splitBodies: syncSplitBody(state, action.lid, body),
+            ...syncShownBodies(state, action.lid, body),
           },
           events: [],
         };
@@ -5714,7 +5749,7 @@ function reduceCore(
         state: {
           ...released,
           openBody: { lid: action.lid, body, baseline: body, persisted: body, diskAhead: false },
-          splitBodies: syncSplitBody(state, action.lid, body),
+          ...syncShownBodies(state, action.lid, body),
         },
         events: [],
       };
@@ -6395,7 +6430,7 @@ function reduceCore(
           openBody,
           taskScan: refreshTaskCards(state.taskScan, action.lid, action.body),
           smartHits: refreshSmartHits(state.smartHits, action.lid, action.body, entryMetas),
-          splitBodies: syncSplitBody(state, action.lid, action.body),
+          ...syncShownBodies(state, action.lid, action.body),
         },
         events: smartScanFor(state, action.lid),
       };
@@ -6573,7 +6608,7 @@ function reduceCore(
           openBody,
           taskScan: refreshTaskCards(state.taskScan, action.lid, action.body),
           smartHits: refreshSmartHits(state.smartHits, action.lid, action.body, entryMetas),
-          splitBodies: syncSplitBody(state, action.lid, action.body),
+          ...syncShownBodies(state, action.lid, action.body),
         },
         events: smartScanFor(state, action.lid),
       };
@@ -6795,7 +6830,7 @@ function reduceCore(
            * ⚠ 同じ穴を #757 が `BODY_REWRITTEN` で塞いだばかりで、その注記が
            *   「§7 ── 片方だけ直る」と戒めている。**4 か所目がここだった。**
            */
-          splitBodies: syncSplitBody(state, action.lid, action.body),
+          ...syncShownBodies(state, action.lid, action.body),
           // 🔑 タグが変われば、開いている入れ物の中身も変わる(#421 / user 要望 2026-08-26)
           smartHits: refreshSmartHits(
             state.smartHits,
@@ -7639,7 +7674,7 @@ function reduceCore(
        *   全部 `REQUEST_BODY_REWRITE` → `BODY_REWRITTEN` を通り、
        *   `BODY_PERSISTED` は**通らない**(`store-effects.ts` が `BODY_REWRITTEN` しか出さない)。
        */
-      const rewrittenSplit = syncSplitBody(state, action.lid, action.body);
+      const rewrittenShown = syncShownBodies(state, action.lid, action.body);
       return {
         state: {
           ...state,
@@ -7652,7 +7687,7 @@ function reduceCore(
           lastAppend,
           notice,
           noticeOpen,
-          splitBodies: rewrittenSplit,
+          ...rewrittenShown,
         },
         events: [],
       };
@@ -7689,9 +7724,8 @@ function reduceCore(
        * ⚠ `openBody` の早期 return の**前**に置く ── 後ろに置くと、
        *   選択が移った後の ack で留めた枠が更新されない(片側だけ在る非対称)。
        */
-      const persistedSplit = syncSplitBody(state, action.lid, action.body);
-      const base =
-        persistedSplit === state.splitBodies ? state : { ...state, splitBodies: persistedSplit };
+      const persistedShown = syncShownBodies(state, action.lid, action.body);
+      const base = sameShownBodies(state, persistedShown) ? state : { ...state, ...persistedShown };
       // ack された内容を disk 事実として記録(選択が移って openBody が破棄
       // 済みなら捨てる ── stale ack で別 entry の作業域を汚さない)
       if (!state.openBody || state.openBody.lid !== action.lid)
@@ -7715,9 +7749,8 @@ function reduceCore(
     case 'REMOTE_BODY_CHANGED': {
       // 🔴 留めた枠は**編集中かどうかに関わらず**追随させる(#505 段②)──
       //    別の窓が書いたものを、こちらの留めた枠が古いまま映し続けない
-      const remoteSplit = syncSplitBody(state, action.lid, action.body);
-      const base =
-        remoteSplit === state.splitBodies ? state : { ...state, splitBodies: remoteSplit };
+      const remoteShown = syncShownBodies(state, action.lid, action.body);
+      const base = sameShownBodies(state, remoteShown) ? state : { ...state, ...remoteShown };
       // ⚠ 編集中だけ ── `ready` は `reloadSnapshot` が先送りなしで面倒を見る
       //   (両方で受けると、同じ問いに答える口が 2 つになる。CLAUDE.md §7)
       if (state.phase !== 'editing') return { state: base, events: [] };
@@ -8876,6 +8909,35 @@ function reduceCore(
       bodies.set(action.lid, action.body);
       return { state: { ...state, splitBodies: bodies }, events: [] };
     }
+    case 'PLACE_BODIES_WANTED': {
+      /**
+       * ⚠ **居ないノートは頼まない**(消えた lid を読んでも何も無い。板は題名の行で断る)。
+       * ⚠ **フォルダ・添付は頼まない**(フォルダは本文が無く、添付は自前の見せ方を持つ ──
+       *   描く側も同じ判定で札だけにする)。
+       * 🔑 持っている物も頼まない。⚠ 1 度に頼める数は `PLACE_BODY_CAP` まで
+       *   (それ以上は持てないので、頼んでも手放すだけになる)。
+       */
+      const have = placeBodiesOf(state);
+      const want: string[] = [];
+      for (const lid of action.lids) {
+        if (want.length >= PLACE_BODY_CAP) break;
+        if (have.has(lid) || want.includes(lid)) continue;
+        const meta = state.entryMetas.get(lid);
+        if (meta === undefined || !placeEmbeddable(meta.archetype)) continue;
+        want.push(lid);
+      }
+      return {
+        state,
+        events: want.map((lid) => ({ type: 'REQUEST_PLACE_BODY', lid })),
+      };
+    }
+    case 'PLACE_BODY_LOADED': {
+      const have = placeBodiesOf(state);
+      const next = excerptOf(action.body);
+      const prev = have.get(action.lid);
+      if (prev !== undefined && sameExcerpt(prev, next)) return { state, events: [] };
+      return { state: { ...state, placeBodies: withPlaceBody(have, action.lid, next) }, events: [] };
+    }
     case 'SPLIT_RESTORED': {
       const restored = normalizeSplitLids(action.lids);
       if (restored.length === 0) return { state, events: [] };
@@ -9661,6 +9723,65 @@ function syncSplitBody(state: AppState, lid: string, body: string): ReadonlyMap<
   const next = new Map(state.splitBodies);
   next.set(lid, body);
   return next;
+}
+
+/** 手組みの fixture には `placeBodies` が無い ── 読む口は 1 本(`?? ` を散らさない)。 */
+const NO_PLACE_BODIES: ReadonlyMap<string, PlaceExcerpt> = new Map<string, PlaceExcerpt>();
+export function placeBodiesOf(state: AppState): ReadonlyMap<string, PlaceExcerpt> {
+  return state.placeBodies ?? NO_PLACE_BODIES;
+}
+
+/**
+ * 板のための本文を 1 件入れる。⚠ **入れ直した物を「いちばん新しい」へ**(Map は挿入順)し、
+ * 上限(`PLACE_BODY_CAP`)を超えたら**いちばん古い物から**手放す。
+ */
+function withPlaceBody(
+  bodies: ReadonlyMap<string, PlaceExcerpt>,
+  lid: string,
+  excerpt: PlaceExcerpt,
+): ReadonlyMap<string, PlaceExcerpt> {
+  const next = new Map(bodies);
+  next.delete(lid);
+  next.set(lid, excerpt);
+  while (next.size > PLACE_BODY_CAP) {
+    const oldest = next.keys().next().value;
+    if (oldest === undefined) break;
+    next.delete(oldest);
+  }
+  return next;
+}
+
+/**
+ * 🔴 **画面に出ている本文を、書込に追随させる 2 つの入れ物**(#529 W3-①)。
+ *
+ * 横に留めた枠(`splitBodies`)と、板に置いたノートの抜粋(`placeBodies`)は、
+ * **同じ書込の口**(`BODY_REWRITTEN` / `BODY_PERSISTED` / `REMOTE_BODY_CHANGED` / 追記 / 保存 …)
+ * で追随させる ── 口を 2 本に分けると、片方だけ古いまま映す(#757 / #684 ㋑ で 2 度踏んだ形)。
+ * ⚠ 持っていない lid では**何もしない**(触っていない Map を作り直すと、面が毎回組み直る)。
+ * ⚠ 板のほうは**切った抜粋を入れ直す**(全文を持たない)。
+ */
+function syncShownBodies(
+  state: AppState,
+  lid: string,
+  body: string,
+): { splitBodies: ReadonlyMap<string, string>; placeBodies: ReadonlyMap<string, PlaceExcerpt> } {
+  const splitBodies = syncSplitBody(state, lid, body);
+  const have = placeBodiesOf(state);
+  const prev = have.get(lid);
+  if (prev === undefined) return { splitBodies, placeBodies: state.placeBodies };
+  const next = excerptOf(body);
+  if (sameExcerpt(prev, next)) return { splitBodies, placeBodies: state.placeBodies };
+  const bodies = new Map(have);
+  bodies.set(lid, next); // ⚠ 並びは動かさない(書込は「最近読んだ」ではない)
+  return { splitBodies, placeBodies: bodies };
+}
+
+/** `syncShownBodies` の答えが、いまの state と同じか(同じなら state を差し替えない)。 */
+function sameShownBodies(
+  state: AppState,
+  shown: { splitBodies: ReadonlyMap<string, string>; placeBodies: ReadonlyMap<string, PlaceExcerpt> },
+): boolean {
+  return shown.splitBodies === state.splitBodies && shown.placeBodies === state.placeBodies;
 }
 
 function withoutLid<T extends { readonly lid: string }>(
