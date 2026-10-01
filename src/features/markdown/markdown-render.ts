@@ -558,7 +558,7 @@ function buildFenceAssetHtml(
  *   **鍵を数え上げる側**(`collectFenceAssetKeys`)が同じ見出しを別の綴りで
  *   読むと、片方だけが古くなっても誰も気づかない。
  */
-function fenceAssetOfInfo(info: string): { parse: FenceAssetParse; withoutAsset: string } {
+export function fenceAssetOfInfo(info: string): { parse: FenceAssetParse; withoutAsset: string } {
   const parse = takeFenceAsset(info);
   /**
    * ⚠ **`asset:` の語を抜いた残り**が、そのまま「ふつうの見出し」である。
@@ -599,6 +599,17 @@ export function collectFenceAssetKeys(text: string): string[] {
     out.push(parse.key);
   }
   return out;
+}
+
+/**
+ * 🔴 **本文を markdown-it の token 列へ割るだけの口**(#1170)。
+ *
+ * ⚠ 添付の参照を**本文の順に数え上げる**側(`features/asset/asset-refs-in-body.ts`)が使う。
+ *   `md` を輸出せずこの 1 本だけ開ける ── 設定(linkify / typographer …)を
+ *   呼び側が持つと、描く側と読み方がずれる(§7)。
+ */
+export function parseMarkdownTokens(text: string): Token[] {
+  return md.parse(text, {});
 }
 
 md.renderer.rules.fence = function (tokens, idx, options, env, self) {

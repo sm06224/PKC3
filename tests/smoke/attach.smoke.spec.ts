@@ -395,17 +395,139 @@ test('添付取込 → entry 出現 → image preview が可視高さを持つ',
     .locator('[data-pkc-action="download-asset"]')
     .first()
     .getAttribute('data-pkc-asset-key');
+  /**
+   * 🔴 **画像を 2 枚足す**(#1170)── 右の「添付」の行が**3 行**並び、行ごとに別の画像へ
+   *   着地することを見るために要る。⚠ 同じ道中に足す(`gotoApp` を足さない)。
+   *   **背の高い絵**(ふたつめ)を、飛び先(みっつめ)の**すぐ上**に置く ── `loading="lazy"` の画像は
+   *   読み込むまで高さが無く、**飛んだ後にすぐ上の絵が育つと、飛び先が画面の外へ押し流される**
+   *   (下の飛び先の検査が見る)。
+   */
+  const attachPng = async (name: string, w: number, h: number, color: string): Promise<string> => {
+    const bytes = await page.evaluate(
+      async ([w, h, color]) => {
+        const c = document.createElement('canvas');
+        c.width = w as number;
+        c.height = h as number;
+        const g = c.getContext('2d')!;
+        g.fillStyle = color as string;
+        g.fillRect(0, 0, c.width, c.height);
+        g.fillStyle = '#ffffff';
+        g.fillRect(10, 10, 40, 40);
+        const blob: Blob = await new Promise((ok) => c.toBlob((b) => ok(b!), 'image/png')!);
+        return Array.from(new Uint8Array(await blob.arrayBuffer()));
+      },
+      [w, h, color] as const,
+    );
+    await page.setInputFiles('[data-pkc-field="attach-input"]', {
+      name,
+      mimeType: 'image/png',
+      buffer: Buffer.from(bytes),
+    });
+    // ⚠ 取り込みは非同期 ── 行が出てから、その行を開いて鍵を読む
+    //   (添付を開いたまま足しても、開いている物は最初の 1 枚のまま)
+    const row = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]', { hasText: name });
+    await expect(row).toHaveCount(1);
+    await row.click();
+    const key = await page
+      .locator(`[data-pkc-action="download-asset"][data-pkc-asset-name="${name}"]`)
+      .getAttribute('data-pkc-asset-key');
+    expect(key, `前提: ${name} の鍵が取れていない`).toBeTruthy();
+    return key!;
+  };
+  const assetKey2 = await attachPng('ふたつめ.png', 500, 700, '#aa6644');
+  const assetKey3 = await attachPng('みっつめ.png', 200, 120, '#44aa66');
+  expect(new Set([assetKey, assetKey2, assetKey3]).size, '前提: 3 枚が別の添付になっていない').toBe(3);
+
   await createEntry(page, 'text');
   const ta = page.locator('[data-pkc-field="editor-body"]');
   await expect(ta).toBeVisible();
-  await ta.click();
-  await page.keyboard.type(`![点](asset:${assetKey})\n\n[点をDL](asset:${assetKey})`);
+  // ⚠ 間に段落を挟む ── 飛び先は最初の画面の外に出す(飛ばないと見えない形にする)。
+  //   背の高い絵(ふたつめ)は飛び先(みっつめ)の**2 段落上**
+  const filler = Array.from({ length: 90 }, (_, i) => `段落 ${i + 1} です。`).join('\n\n');
+  await ta.fill(
+    `![点](asset:${assetKey})\n\n[点をDL](asset:${assetKey})\n\n${filler}\n\n` +
+      `![ふたつめ](asset:${assetKey2})\n\n段落 A\n\n段落 B\n\n![みっつめ](asset:${assetKey3})\n\n${filler}`,
+  );
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
   await expectImageRendered(page, 'img[data-pkc-asset-key]'); // hydrator が実際に差した
   // DL link も実クリック可能(href 無し ── ナビゲーションを起こさない)
   await clickReal(page, 'a[data-pkc-action="download-asset"]');
   expect(page.url()).not.toContain('asset:'); // asset: へ遷移していない
+
+  /**
+   * 🔴 **右の「添付」の行を押すと、本文のその画像へ飛んで光る**(#1170)。
+   *
+   * ⚠ 見るのは**画面の位置**である(`scrollIntoView` を呼んだかではない)── 画像は
+   *   `loading="lazy"` で、読み込むまで高さが無い。**飛んだ後に上の画像が育つと、
+   *   飛び先が画面の外へ押し流される**ので、**読み込みが済んだ後の位置**で見る。
+   * ⚠ 「点」は本文に 2 回(画像 + リンク)書いてある ── 行は 1 つで、最初の出番(画像)へ飛ぶ。
+   */
+  const imgOf = (key: string) =>
+    page.locator(`[data-pkc-field="detail-body"] img[data-pkc-asset-key="${key}"]`);
+  const img1 = imgOf(assetKey!);
+  const img2 = imgOf(assetKey2);
+  const img3 = imgOf(assetKey3);
+  await expect(img3).toHaveAttribute('src', /^blob:/, { timeout: 10_000 });
+  const assetRows = page.locator('[data-pkc-action="jump-to-asset-use"]');
+  await expect(assetRows, '右の列に「添付」の行が 3 行出ていない').toHaveCount(3);
+  await expect(assetRows.nth(0)).toHaveText('点');
+  await expect(assetRows.nth(1)).toHaveText('ふたつめ');
+  await expect(assetRows.nth(2)).toHaveText('みっつめ');
+  const inView = (loc: typeof img1) =>
+    loc.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const host = el.closest('[data-pkc-region="detail"]')!.getBoundingClientRect();
+      const mid = (r.top + r.bottom) / 2;
+      // ⚠ 画像が器より背が高いこともある ── 「全体が収まる」ではなく**中心が器の中**で見る(block: 'center')
+      return r.height > 0 && mid >= host.top && mid <= host.bottom;
+    });
+  const rowOf = (key: string) =>
+    page.locator(`[data-pkc-action="jump-to-asset-use"][data-pkc-asset-key="${key}"]`);
+  /**
+   * ⚠ **描き直してから押す** ── ここまでの操作で本文は末尾までスクロールされ、画像は全部
+   *   読み込み済みである。**別のノートへ移って戻る**と、先頭から描き直され、遠くの画像は
+   *   `loading="lazy"` のまま(読み込むまで高さが無い)── 実際に使うときの姿になる。
+   */
+  const noteLid = await page
+    .locator('[data-pkc-region="entry-list"] [data-pkc-entry][data-pkc-selected]')
+    .getAttribute('data-pkc-entry');
+  await page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]', { hasText: 'dot.png' }).click();
+  await page.locator(`[data-pkc-region="entry-list"] [data-pkc-entry="${noteLid}"]`).click();
+  await expect(img3).toHaveAttribute('src', /^blob:/, { timeout: 10_000 });
+  // ⚠ 先頭から読み始めた姿にする(遠くの画像は読み込まれていない)
+  await page.locator('[data-pkc-region="detail"]').evaluate((e) => {
+    e.scrollTop = 0;
+  });
+  // ① 🔴 すぐ上に背の高い絵がある飛び先(みっつめ)。上の絵の読み込みで押し流されない
+  await rowOf(assetKey3).click();
+  await expect(img3, '押した行の画像が光っていない').toHaveAttribute('data-pkc-flash', 'true');
+  // 🔴 **印に見た目の規則がある**(属性だけでは画像は光らない ── 地が絵に隠れる)。計算後の値で見る
+  await expect(img3, '光った画像に輪郭が付いていない(属性だけで見た目が動いていない)').toHaveCSS(
+    'outline-style',
+    'solid',
+  );
+  await expect(img3).toHaveCSS('outline-width', '3px');
+  await expect
+    .poll(
+      async () => ({
+        upperLoaded: await img2.evaluate((e: HTMLImageElement) => e.complete && e.naturalWidth > 0),
+        inView: await inView(img3),
+      }),
+      {
+        message: '3 枚目の行を押したのに、画像が画面に収まっていない(上の絵の読み込みでずれた)',
+        timeout: 5_000,
+      },
+    )
+    .toEqual({ upperLoaded: true, inView: true });
+  // ② 別の行は別の画像へ(行ごとに飛び先が違う)
+  await rowOf(assetKey2).click();
+  await expect(img2, '2 枚目の行を押したのに、2 枚目が光っていない').toHaveAttribute('data-pkc-flash', 'true');
+  await expect.poll(() => inView(img2), { message: '2 枚目が画面に収まっていない', timeout: 5_000 }).toBe(true);
+  // ③ 本文に 2 回(画像 + リンク)ある添付は 1 行 ── 最初の出番(画像)へ戻る
+  await rowOf(assetKey!).click();
+  await expect(img1, '1 枚目の行を押したのに、1 枚目が光っていない').toHaveAttribute('data-pkc-flash', 'true');
+  await expect.poll(() => inView(img1), { message: '1 枚目が画面に収まっていない', timeout: 5_000 }).toBe(true);
 
   // ── P4b: 「添付の整理」(orphan GC)の end-to-end 配線 ──
   // この asset は attachment frontmatter と本文 asset: の両方から参照されて

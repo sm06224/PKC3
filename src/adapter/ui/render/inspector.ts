@@ -51,6 +51,7 @@ import { formatStoredDate, storedInstantIso } from '@features/datetime/stored-da
 import { readTags, sameTag } from '@features/flavor/tags';
 import { collectEntryTags } from '@features/flavor/entry-tags';
 import { extractHeadingsFromMarkdown } from '@features/markdown/markdown-toc';
+import { listAssetUses } from '@features/asset/asset-refs-in-body';
 import { frontmatterProblem } from '@features/markdown/frontmatter';
 import { externalImageUrls } from '@features/asset/inline-url-adopt';
 import { formatBodyStats } from '@features/stats/body-stats';
@@ -303,6 +304,42 @@ export class InspectorRenderer {
           item.append(go);
           tocBox.append(item);
         }
+      }
+    }
+    /**
+     * 🔴 **本文が使っている添付の行**(#1170)。押すと**本文のその場所へ飛んで光る**
+     * (目次と同じ作り ── `jump-to-asset-use`)。
+     *
+     * ⚠ **文字だけの行**(絵は付けない)。⚠ **添付を開くのは本文の絵を押す今までどおり** ──
+     *   この行は「どこで使っているか」へ飛ぶだけで、2 つの意味を 1 つの押しに載せない。
+     * ⚠ **使っていないノートでは行ごと畳む**(`<dt>` も一緒に)── 目次と同じ作法。
+     * ⚠ 同じ添付を何度使っていても 1 行(最初の出現へ飛ぶ)。
+     */
+    const assetBox = this.rows.get('inspector-assets');
+    if (assetBox) {
+      const body = state.openBody?.lid === meta.lid ? state.openBody.body : null;
+      const uses = body === null ? [] : listAssetUses(body);
+      assetBox.textContent = '';
+      const dt = assetBox.previousElementSibling;
+      const empty = uses.length === 0;
+      assetBox.hidden = empty;
+      if (dt instanceof HTMLElement) dt.hidden = empty;
+      for (const u of uses) {
+        const item = document.createElement('div');
+        item.setAttribute('data-pkc-field', 'inspector-asset-item');
+        const go = document.createElement('button');
+        go.type = 'button';
+        go.setAttribute('data-pkc-action', 'jump-to-asset-use');
+        go.setAttribute('data-pkc-asset-key', u.key);
+        go.setAttribute('data-pkc-field', 'inspector-asset-link');
+        const name = u.label !== '' ? u.label : u.key.length > 12 ? `${u.key.slice(0, 8)}…` : u.key;
+        go.title =
+          u.count > 1
+            ? `本文の「${name}」へ移動します(最初の場所へ。本文で ${u.count} 回使っています)`
+            : `本文の「${name}」へ移動します`;
+        go.textContent = name;
+        item.append(go);
+        assetBox.append(item);
       }
     }
     const tagBox = this.rows.get('inspector-tag-chips');
@@ -1107,6 +1144,7 @@ export class InspectorRenderer {
      * ⚠ 値は押せる札なので `setRow` ではなく専用の器を持つ。
      */
     row('目次', 'inspector-toc');
+    row('添付', 'inspector-assets');
     /**
      * 🔴 **タグ**(#182 / 台帳 #180 の A-2)。⚠ 値は文字ではなく**押せる札**なので、
      * `setRow`(textContent 差し替え)ではなく専用の器を持つ。
