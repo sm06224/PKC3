@@ -218,6 +218,72 @@ describe('🔴 「中まで全部出す」── 押す道中(#813 段②)', () 
   });
 });
 
+describe('🔴 親フォルダの名前を行に添える(#813 残り。🟣 Gemini 裁定 2026-10-01 = A)', () => {
+  /** 行 → 添えた字(無ければ `null`)。 */
+  const hintOf = (pane: HTMLElement, lid: string): string | null =>
+    pane.querySelector(`tbody [data-pkc-entry="${lid}"] [data-pkc-field="parent-name"]`)
+      ?.textContent ?? null;
+  const hintCount = (pane: HTMLElement): number =>
+    pane.querySelectorAll('[data-pkc-field="parent-name"]').length;
+
+  it('切のときは 1 行にも出ない', () => {
+    const { pane } = setup();
+    expect(hintCount(pane)).toBe(0);
+  });
+
+  it('🔴 ルートで入: 孫以深の行に親の名前が出て、直下の行には出ない(字は DOM に在る)', async () => {
+    const { pane, toggle } = setup();
+    toggle()!.click();
+    await tick();
+    // 空振り防止 ── 孫(b)が実際に行として載っている
+    expect(pane.querySelector('tbody [data-pkc-entry="b"]'), '前提: 孫が載っていない').not.toBeNull();
+    expect(hintOf(pane, 'b')).toBe('─ t-f2');
+    expect(hintOf(pane, 'a')).toBe('─ t-f1');
+    expect(hintOf(pane, 'c')).toBe('─ t-f3');
+    // 親が無い直下の行(f1 / f3 / x)には出ない
+    for (const lid of ['f1', 'f3', 'x']) expect(hintOf(pane, lid), `${lid} に出ている`).toBeNull();
+    // 重ねたときの説明にも親の名前が入る
+    const td = pane.querySelector<HTMLElement>('tbody [data-pkc-entry="b"] [data-pkc-field="title"]')!;
+    expect(td.title).toContain('t-f2');
+  });
+
+  it('🔴 フォルダの中で入: そのフォルダの直下の行には出ず、孫以深だけ(降りると付け替わる)', async () => {
+    const { pane, toggle, d } = setup();
+    d.dispatch({ type: 'SET_SCOPE', lid: 'f1' });
+    toggle()!.click();
+    await tick();
+    expect(hintOf(pane, 'b')).toBe('─ t-f2');
+    expect(hintOf(pane, 'f2'), '直下の行に出ている').toBeNull();
+    expect(hintOf(pane, 'a'), '直下の行に出ている').toBeNull();
+    // もう 1 つ降りると、b も直下になって出なくなる
+    d.dispatch({ type: 'SET_SCOPE', lid: 'f2' });
+    await tick();
+    expect(pane.querySelector('tbody [data-pkc-entry="b"]'), '前提: b が出ていない').not.toBeNull();
+    expect(hintOf(pane, 'b')).toBeNull();
+  });
+
+  it('切に戻すと消える(双方向)', async () => {
+    const { pane, toggle } = setup();
+    toggle()!.click();
+    await tick();
+    expect(hintCount(pane)).toBeGreaterThan(0);
+    toggle()!.click();
+    await tick();
+    expect(hintCount(pane)).toBe(0);
+  });
+
+  it('親フォルダを改名すると、添えた字も追従する(古い名前が残らない)', async () => {
+    const { pane, toggle, d } = setup();
+    toggle()!.click();
+    await tick();
+    expect(hintOf(pane, 'b')).toBe('─ t-f2');
+    const renamed = METAS.map((m) => (m.lid === 'f2' ? { ...m, title: '改名後' } : m));
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: renamed, relations: RELS });
+    await tick();
+    expect(hintOf(pane, 'b')).toBe('─ 改名後');
+  });
+});
+
 describe('🔴 平らに出している間の、範囲選択・全選択・印(#813 段②)', () => {
   const ready = () => {
     const s0 = reduce(initialState, { type: 'SYS_BOOTED', cid: 'c', metas: METAS, relations: RELS }).state;

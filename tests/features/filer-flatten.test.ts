@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest';
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
 import {
   filerRows,
+  flatParentNames,
   listRows,
   type FilerRowsOptions,
 } from '@features/relation/filer-list';
@@ -173,5 +174,78 @@ describe('🔴 `getFlatDescendants`(#813 段②)', () => {
     expect(getFlatDescendants(null, METAS, RELS).map((m) => m.lid)).toEqual([
       'f1', 'f2', 'b', 'a', 'f3', 'c', 'x',
     ]);
+  });
+});
+
+describe('🔴 親フォルダの名前を添える行(`flatParentNames`。#813 残り・🟣 Gemini 裁定 2026-10-01 = A)', () => {
+  /** 期待値は**手で書いた木の読み**(題名は `t-<lid>`)。実装の関数を呼ばない。 */
+  const names = (
+    scope: string | null,
+    flatten: boolean,
+    metas: ReadonlyMap<string, EntryMeta> = METAS,
+  ): Record<string, string> => {
+    const list = filerRows(scope, metas, RELS, { ...OPTS, flatten });
+    return Object.fromEntries(flatParentNames(scope, list, metas, RELS, flatten));
+  };
+
+  it('🔴 切のときは**1 行も**添えない(直下だけなので親は自明)', () => {
+    // 空振り防止 ── 入に直した同じ木では添える行が在るので、空なのは「規則」による
+    expect(names(null, false)).toEqual({});
+    expect(names('f1', false)).toEqual({});
+    expect(Object.keys(names(null, true)).length).toBeGreaterThan(0);
+  });
+
+  it('🔴 切は「行が直下だけだから空」ではなく**規則として**空(孫の載った行を渡しても添えない)', () => {
+    // ⚠ 切の行は直下だけで、親 = いまの場所なので門が無くても空になる(変異 M1 が生き延びた)。
+    //   門そのものを見るため、**平らな行**(孫が載っている)を切の印で渡す
+    const flatRows = filerRows(null, METAS, RELS, { ...OPTS, flatten: true });
+    expect(flatRows.some((m) => m.lid === 'b'), '前提: 孫が載っていない').toBe(true);
+    expect(flatParentNames(null, flatRows, METAS, RELS, false).size).toBe(0);
+    expect(flatParentNames(null, flatRows, METAS, RELS, true).size).toBeGreaterThan(0);
+  });
+
+  it('🔴 ルートで入: 直下(親が無い行)には出さず、フォルダの中に居る行だけ親の名前が付く', () => {
+    expect(names(null, true)).toEqual({
+      f2: 't-f1',
+      b: 't-f2',
+      a: 't-f1',
+      c: 't-f3',
+    });
+    // 親が無い 3 行(f1 / f3 / x)は付かない
+    for (const root of ['f1', 'f3', 'x']) expect(names(null, true)).not.toHaveProperty(root);
+  });
+
+  it('🔴 フォルダの中で入: 直下の行(親 = いま見ているフォルダ)には出さず、孫以深だけ', () => {
+    // f1 の配下: f2・a は直下(出さない)/ b は孫(親は f2)
+    const inF1 = names('f1', true);
+    expect(inF1).toEqual({ b: 't-f2' });
+    // 空振り防止 ── 直下の行が実際に平らな行に載っている上で付いていない
+    const rowsInF1 = filerRows('f1', METAS, RELS, { ...OPTS, flatten: true }).map((m) => m.lid);
+    expect(rowsInF1).toEqual(expect.arrayContaining(['f2', 'a', 'b']));
+    expect(inF1).not.toHaveProperty('f2');
+    expect(inF1).not.toHaveProperty('a');
+    // 降りた先(f2)の直下だけなら 1 つも付かない
+    expect(names('f2', true)).toEqual({});
+  });
+
+  it('スマートフォルダの中は付けない(入でも。中身は条件の当たりで、親の名前に意味が無い)', () => {
+    const metas = new Map(METAS);
+    metas.set('s', meta('s', 9, SMART_ARCHETYPE));
+    const list = filerRows('s', metas, RELS, { ...OPTS, flatten: true, smartLids: ['b', 'c'] });
+    expect(lids(list)).toEqual(['b', 'c']); // 前提: 親の在る行が載っている
+    expect(flatParentNames('s', list, metas, RELS, true).size).toBe(0);
+  });
+
+  it('題名が空の親は添えない(「─」だけの字を出さない)', () => {
+    const metas = new Map(METAS);
+    metas.set('f3', meta('f3', 5, 'folder', ''));
+    expect(names(null, true, metas)).toEqual({ f2: 't-f1', b: 't-f2', a: 't-f1' });
+  });
+
+  it('多重親は正準親(entryOrder 最小)の名前 ── 木の読み方を 2 本にしない', () => {
+    // c は f3(order 5)と f1(order 1)の両方の子 → 正準親は f1
+    const rels = [...RELS, rel('r5', 'f1', 'c')];
+    const list = filerRows(null, METAS, rels, { ...OPTS, flatten: true });
+    expect(flatParentNames(null, list, METAS, rels, true).get('c')).toBe('t-f1');
   });
 });

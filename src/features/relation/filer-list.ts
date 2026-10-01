@@ -11,7 +11,12 @@
  * する(段⑤)前に、**効かない操作子を既定の面に出さない**ために揃える。
  */
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
-import { getFlatDescendants, getRootEntries, getStructuralChildren } from './tree';
+import {
+  getFlatDescendants,
+  getRootEntries,
+  getStructuralChildren,
+  resolveCanonicalParents,
+} from './tree';
 import { entryFilterOf, matchesEntry } from '@features/filter/title-filter';
 import { sortOrder, type EntrySort } from '@features/filter/entry-sort';
 import { SMART_ARCHETYPE } from '@features/smart/smart-spec';
@@ -117,6 +122,42 @@ export function filerRows(
   )
     .map((lid) => byLid.get(lid))
     .filter((m): m is EntryMeta => m !== undefined);
+}
+
+/**
+ * 🔴 **「中まで全部出す」の行に添える親フォルダの名前**(#813 残り。🟣 Gemini 裁定 2026-10-01 = A)。
+ *
+ * 平らに出すと、階層が見えなくなって「どこの物か」が読めない ── 行の題名の右に
+ * **親フォルダの名前**を添える。lid → 親の題名。**載っていない lid は添えない**。
+ *
+ * - 切(`flatten: false`)= 空(直下だけなので親は自明)
+ * - **いま見ているフォルダの直下の行**には出さない(親 = いま見ているフォルダで冗長)。
+ *   出すのは**孫以深**(親がいまの場所と違う行)だけ
+ * - ルートで入 = 直下(親が無い行)には出さず、**フォルダの中に居る行**だけ出す
+ * - スマートフォルダの中 = 空(`filerRows` が平らの切替を見ない場所 ── 中身は条件の当たりで、
+ *   親の名前を添える意味が無い)
+ *
+ * ⚠ 親は**正準親**(`resolveCanonicalParents` 1 本)で引く ── 木の読み方を 2 本にしない(§7)。
+ * ⚠ 題名が空の親は添えない(字が無い物を「─」だけで出さない)。
+ */
+export function flatParentNames(
+  scopeLid: string | null,
+  rows: readonly EntryMeta[],
+  entryMetas: ReadonlyMap<string, EntryMeta>,
+  relations: readonly Relation[],
+  flatten: boolean,
+): ReadonlyMap<string, string> {
+  const out = new Map<string, string>();
+  if (!flatten) return out;
+  if (scopeLid !== null && entryMetas.get(scopeLid)?.archetype === SMART_ARCHETYPE) return out;
+  const parentOf = resolveCanonicalParents(entryMetas, relations);
+  for (const m of rows) {
+    const parent = parentOf.get(m.lid);
+    if (parent === undefined || parent === scopeLid) continue;
+    const title = entryMetas.get(parent)?.title ?? '';
+    if (title !== '') out.set(m.lid, title);
+  }
+  return out;
 }
 
 /**

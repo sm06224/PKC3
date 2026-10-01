@@ -802,6 +802,42 @@ export const BAR_FORMAT_OPS: readonly { op: FormatOp; label: string; hint: strin
 
 const LINE_OPS: ReadonlySet<string> = new Set(Object.keys(LINE_MARKS));
 
+/**
+ * 🔴 **選んでいるときは「選んだ範囲を囲む」側へ倒れる 4 つ**(#950。表 / 図 / コードブロック / 数式)。
+ *
+ * ⚠ **正本はここ 1 つ**。振る舞い(`applyBlockOp` の門)と、帯の説明を「選んだ範囲を囲みます」へ
+ *   切り替えるボタンの集合(`format-bar.ts` / `format-wrap-hint.ts`)が**同じ集合**から出る ──
+ *   手で 4 つ並べ直すと、片方だけ増えて「説明は囲むと言うのに、押すと雛形が入る」が静かに生まれる(§7)。
+ * ⚠ 太字などの**インライン記法**は含めない ── あれは選んでいなくても `**` を置くだけで、
+ *   「選ぶと挙動が変わる」ボタンではない(説明は最初から「選んだ範囲を〜」と書いてある)。
+ */
+export const WRAPS_SELECTION_OPS: ReadonlySet<FormatOp> = new Set<FormatOp>([
+  'table',
+  'mermaid',
+  'codeblock',
+  'math',
+]);
+
+/** 4 つの**門**。選んでいなければ空の雛形、選んでいれば囲む(`WRAPS_SELECTION_OPS` が 1 つの入口)。 */
+function applyBlockOp(sel: TextSelection, op: FormatOp): TextSelection {
+  if (!WRAPS_SELECTION_OPS.has(op)) return sel;
+  const empty = sel.start === sel.end;
+  switch (op) {
+    case 'table':
+      return empty ? insertBlock(sel, TABLE_BLOCK) : wrapSelectionAsTable(sel);
+    case 'mermaid':
+      return empty ? insertBlock(sel, MERMAID_BLOCK) : wrapAsBlock(sel, '```mermaid', '```');
+    case 'codeblock':
+      return empty
+        ? insertBlock(sel, CODE_BLOCK)
+        : wrapAsBlock(sel, '```', '```', { caretAfterOpen: true });
+    case 'math':
+      return empty ? insertBlock(sel, MATH_BLOCK) : wrapAsBlock(sel, '$$', '$$');
+    default:
+      return sel;
+  }
+}
+
 /** 1 つの入口。⚠ 分岐をここに閉じ込める(呼ぶ側に op ごとの知識を漏らさない)。 */
 export function applyFormat(sel: TextSelection, op: FormatOp): TextSelection {
   if (LINE_OPS.has(op)) return toggleLinePrefix(sel, op as LinePrefix);
@@ -816,21 +852,15 @@ export function applyFormat(sel: TextSelection, op: FormatOp): TextSelection {
       return insertLink(sel);
     /**
      * 🔴 **#950**: 選んでいるときは**囲む**(選んでいなければこれまでどおり
-     * 空の雛形)。⚠ 4 つとも同じ形(`start === end` で分ける)にする ──
-     * 片方だけ直すと「ボタンごとに挙動が違う」という新しい食い違いになる。
+     * 空の雛形)。⚠ 4 つは**同じ門**(`WRAPS_SELECTION_OPS` ── 下の `applyBlockOp`)を
+     * 通す ── 片方だけ直すと「ボタンごとに挙動が違う」という新しい食い違いになり、
+     * 帯の説明(「選んだ範囲を囲みます」)も**同じ集合**から出す。
      */
     case 'table':
-      return sel.start === sel.end ? insertBlock(sel, TABLE_BLOCK) : wrapSelectionAsTable(sel);
     case 'mermaid':
-      return sel.start === sel.end
-        ? insertBlock(sel, MERMAID_BLOCK)
-        : wrapAsBlock(sel, '```mermaid', '```');
     case 'codeblock':
-      return sel.start === sel.end
-        ? insertBlock(sel, CODE_BLOCK)
-        : wrapAsBlock(sel, '```', '```', { caretAfterOpen: true });
     case 'math':
-      return sel.start === sel.end ? insertBlock(sel, MATH_BLOCK) : wrapAsBlock(sel, '$$', '$$');
+      return applyBlockOp(sel, op);
     /**
      * ⚠ **綴りは描き手から引いた**(`markdown-render.ts:894` / `:1001`)──
      * 圏点は**新形の `^^`** を使う(`[[em:…]]` は同じ意味の古い形で、

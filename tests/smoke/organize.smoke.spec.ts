@@ -264,6 +264,43 @@ test('🔴 掴んでフォルダに落とすと入り、パンくずに落とす
   await clickReal(page, '[data-pkc-region="filer-breadcrumb"] [data-pkc-field="filer-flatten"]');
   await expect(rows, '押したのにフォルダの中のノートが出ない').toHaveCount(2);
   await expect(flatBtn).toHaveAttribute('aria-pressed', 'true');
+  /**
+   * 🔴 **親フォルダの名前を題名の右に添える**(#813 残り。🟣 Gemini 裁定 2026-10-01 = A)。
+   * ⚠ 道中に載せる(新しい起動は足さない)。ここで見るのは unit が持てない **実ブラウザの計算後**:
+   *   ① フォルダの中のノートの行だけに出る(ルート直下のフォルダ自身の行には出ない)
+   *   ② **小さく薄い**(`--muted` の色・題名より小さい字)③ **行の高さを増やさない**(1 行のまま)
+   */
+  const hint = page.locator(`${noteRow} [data-pkc-field="parent-name"]`);
+  await expect(hint, '孫の行に親フォルダの名前が出ていない').toHaveText('─ はこ');
+  await expect(
+    page.locator(`${folderRow} [data-pkc-field="parent-name"]`),
+    'ルート直下の行(親が無い)に出ている',
+  ).toHaveCount(0);
+  const look = await page.evaluate((sel) => {
+    const h = document.querySelector(`${sel} [data-pkc-field="parent-name"]`)!;
+    const title = h.parentElement!;
+    const probe = document.createElement('div');
+    probe.style.color = 'var(--muted)';
+    document.body.append(probe);
+    const muted = getComputedStyle(probe).color;
+    probe.remove();
+    const cs = getComputedStyle(h);
+    return {
+      color: cs.color,
+      muted,
+      titleColor: getComputedStyle(title).color,
+      size: parseFloat(cs.fontSize),
+      titleSize: parseFloat(getComputedStyle(title).fontSize),
+      ellipsis: cs.textOverflow,
+      rowH: h.closest('tr')!.getBoundingClientRect().height,
+      hintH: h.getBoundingClientRect().height,
+    };
+  }, noteRow);
+  expect(look.color, '親の名前が共通の薄い色(--muted)でない').toBe(look.muted);
+  expect(look.color, '親の名前が題名と同じ濃さ').not.toBe(look.titleColor);
+  expect(look.size, '親の名前が題名より小さくない').toBeLessThan(look.titleSize);
+  expect(look.ellipsis, '親の名前の側が … で切れない').toBe('ellipsis');
+  expect(look.hintH, '親の名前が行からはみ出している').toBeLessThanOrEqual(look.rowH);
   const accent = await page.evaluate(() => {
     const probe = document.createElement('div');
     probe.style.background = 'var(--accent)';
@@ -286,6 +323,7 @@ test('🔴 掴んでフォルダに落とすと入り、パンくずに落とす
   // 切に戻すと直下だけ(対照群 ── 平らが「常に 2 行」ではないこと)
   await clickReal(page, '[data-pkc-region="filer-breadcrumb"] [data-pkc-field="filer-flatten"]');
   await expect(rows, '切に戻したのに平らなまま').toHaveCount(1);
+  await expect(page.locator('[data-pkc-field="parent-name"]'), '切なのに親の名前が残っている').toHaveCount(0);
   expect(await page.evaluate(() => localStorage.getItem('pkc3.filer-flatten'))).toBe('0');
 
   // ② 中に入れば居る(2 クリック)

@@ -304,6 +304,7 @@ import {
 import { parseLinkTarget } from '@features/entry-ref/link-target';
 import { flashCopied, handleCopyMdBlock } from './copy-md-block';
 import { finishCopy, selectedMarkdown } from './copy-source';
+import { formatTarget } from './format-target';
 import { installLongPress, LONG_PRESS_TARGET, LONG_PRESS_TARGETS } from './long-press';
 import { isRepeatUnit } from '@features/schedule/repeat';
 import { copyMarkdownAndHtml, copyPlainText } from '@adapter/platform/clipboard';
@@ -1712,30 +1713,6 @@ function renameFromEditorInput(dispatcher: Dispatcher, root: HTMLElement): void 
   const lid = dispatcher.getState().openBody?.lid;
   if (input && lid)
     dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid, title: input.value });
-}
-
-/** いま画面に出ている編集欄(root にスコープする ── document 全域は他 root を拾う)。 */
-function editorBody(root: HTMLElement): HTMLTextAreaElement | null {
-  return root.querySelector<HTMLTextAreaElement>(
-    '[data-pkc-region="detail"] [data-pkc-field="editor-body"]',
-  );
-}
-
-/**
- * 🔴 **書式の効く先**(2026-08-08)。2 列なら `editor-body`、live の 1 面なら
- * **活性の行の入力欄**(`row-source`)── 直す前は live 面で書式パネルと
- * Ctrl+B/I/K が `editor-body` を探して**無言 no-op** だった(押しても何も
- * 起きず、理由もどこにも出ない)。
- * ⚠ 2 つは同時には存在しない(live ↔ 2 列は排他。live の退避は `editor-body`)。
- * ⚠ `writeBack` の `value` 直代入は行の中の Ctrl+Z を捨てる ── 行は Escape で
- * 丸ごと戻せるので、2 列の editor と同じ理由で受け入れる。
- */
-function formatTarget(root: HTMLElement): HTMLTextAreaElement | null {
-  return (
-    root.querySelector<HTMLTextAreaElement>(
-      '[data-pkc-region="detail"] [data-pkc-field="row-source"]',
-    ) ?? editorBody(root)
-  );
 }
 
 /** 読む面の描画済み本文(コピーの書式付き / 選択範囲が読む)。 */

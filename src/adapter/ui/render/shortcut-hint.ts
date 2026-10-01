@@ -42,6 +42,16 @@ export const HINT_COMMAND = 'data-pkc-hint-command';
  *   ②鍵の受け手(`runGlobalCommand`)が、押せないときこの字を画面へ出す。
  */
 export const HINT_BLOCKED = 'data-pkc-blocked';
+/**
+ * 🔴 **いま「選んだ範囲を囲みます」と言っている**印(#950 ①。書式の帯の 4 つ)。
+ *
+ * ⚠ 説明の**土台そのものが切り替わる**ので、{@link applyShortcutHints} もこの印を読む ──
+ *   読まないと、割当を変えた瞬間に土台が元の説明へ書き戻され、選んでいるのに
+ *   「空の〜を差し込みます」と言う。切り替える側は `render/format-wrap-hint.ts`。
+ */
+export const HINT_WRAP_ON = 'data-pkc-wrap-on';
+/** 選んでいるときの説明(帯の 4 つ共通。字は変えず、重ねたときの説明だけ)。 */
+export const WRAP_HINT = '選んだ範囲を囲みます';
 
 /**
  * その命令の**いまの第 1 割当**を画面の綴りで返す。⚠ 割当が 1 つも無ければ `null`
@@ -102,7 +112,8 @@ export function applyShortcutHints(root: ParentNode, keymap: KeymapStore = appKe
   const targets = root.querySelectorAll<HTMLElement>(`[${HINT_COMMAND}]`);
   let applied = 0;
   for (const el of targets) {
-    const base = el.getAttribute(HINT_BASE);
+    // ⚠ **選んでいる間は土台が違う**(#950 ①)── 元の土台へ戻すと切替が割当変更で消える
+    const base = el.hasAttribute(HINT_WRAP_ON) ? WRAP_HINT : el.getAttribute(HINT_BASE);
     const id = el.getAttribute(HINT_COMMAND);
     if (base === null || id === null) continue;
     // ⚠ **理由を消さない**(#761)── 割当を変えるたびに呼ばれるので、
