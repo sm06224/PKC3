@@ -9121,6 +9121,16 @@ h6:hover > .pkc-heading-anchor,
   color: var(--accent);
 }
 
+/* 🔴 **いま読んでいる章**(#1168)── 太字 + 左の細い線。色は `--accent` を読むので 9 テーマとも追従する。
+   ⚠ 線は `inset box-shadow`(枠だと 2px 分だけ字が右へずれ、章が変わるたびに目次が揺れる)。 */
+.pkc-quick-toc-item[data-pkc-active] {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.pkc-quick-toc-item[data-pkc-active] > .pkc-quick-toc-link {
+  font-weight: 700;
+}
+
 
 
 

@@ -860,7 +860,7 @@ export class DetailRenderer {
       this.readingProgressHandle?.dispose();
       this.readingProgressHandle = installReadingProgress(this.scroller, this.region);
       this.quickTocHandle?.dispose();
-      this.quickTocHandle = installQuickToc(this.region, this.bodyHost);
+      this.quickTocHandle = installQuickToc(this.region, this.bodyHost, this.scroller);
       this.skeletonLid = lid;
       this.bodyKind = null;
       this.bodyView = EMPTY_VIEW;

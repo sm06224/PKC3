@@ -84,6 +84,59 @@ test('🔴 見出しのあるノートで目次が出て、押すとそこまで
   expect(box!.y, `見出しが上へ来ていない(${beforeY} → ${box!.y})`).toBeLessThan(beforeY - 300);
   expect(box!.y, `画面の上のほうに来ていない(y=${box!.y})`).toBeLessThan(300);
 
+  /**
+   * 🔴 **本文の「目次」を開くと、いま読んでいる章の行が光る**(#1168)。
+   *
+   * ⚠ 観測点は 2 つ ── ①**印の位置**(`data-pkc-active` が**どの行か**。1 行だけ)
+   *   ②**その印に見た目が在る**(計算後の太さと左の線 ── 属性だけでは「付けた」しか言えない)。
+   * ⚠ **印が動くことを 3 通りで見る**(動かない印は飾りである)── 先頭(最初の章の上に
+   *   題名が在って線に届かない形)/ 途中(線を越えた最後の章)/ 末尾(最後の章が短くて
+   *   線まで届かない形)。
+   * ⚠ この「目次」ボタンは**本文の末尾**に在る(`.pkc-quick-toc` は flex の最後の子で、
+   *   sticky が効かない)── 開くために**まず末尾へ送る**。開いた後の送りは DOM の
+   *   印だけで見る(ポップオーバーも一緒に画面の外へ出るため、見た目の確認は開いた直後に済ませる)。
+   */
+  const QUICK = '[data-pkc-region="detail"] .pkc-quick-toc';
+  const QITEM = `${QUICK} .pkc-quick-toc-item`;
+  await scroller.evaluate((el) => {
+    el.scrollTop = el.scrollHeight;
+  });
+  await clickReal(page, `${QUICK} .pkc-quick-toc-btn`);
+  await expect(page.locator(`${QUICK} .pkc-quick-toc-popover`), 'クイック目次が開かない').toBeVisible();
+  await expect(page.locator(QITEM), '前提が崩れている(目次の行が 3 本でない)').toHaveCount(3);
+  const activeRows = async (): Promise<number[]> =>
+    page.locator(QITEM).evaluateAll((els) =>
+      els.flatMap((el, i) => (el.hasAttribute('data-pkc-active') ? [i] : [])),
+    );
+  await expect.poll(activeRows, '末尾で開いたのに最後の章が光っていない').toEqual([2]);
+
+  // 見た目の規則が在る(太字 + 左の線)── 光っていない行との差で見る
+  const look = await page.locator(`${QITEM}[data-pkc-active]`).evaluate((el) => {
+    const weightOf = (e: Element | null): number =>
+      Number(getComputedStyle(e?.querySelector('.pkc-quick-toc-link') as Element).fontWeight);
+    return {
+      weight: weightOf(el),
+      plainWeight: weightOf(document.querySelector('.pkc-quick-toc-item:not([data-pkc-active])')),
+      shadow: getComputedStyle(el).boxShadow,
+      plainShadow: getComputedStyle(
+        document.querySelector('.pkc-quick-toc-item:not([data-pkc-active])') as Element,
+      ).boxShadow,
+    };
+  });
+  expect(look.weight, '光った行が太字でない').toBeGreaterThanOrEqual(700);
+  expect(look.plainWeight, '光っていない行まで太い(区別が付かない)').toBeLessThan(look.weight);
+  expect(look.plainShadow, '前提が崩れている(光っていない行に線が在る)').toBe('none');
+  expect(look.shadow, '光った行に左の線が無い').not.toBe('none');
+  expect(look.shadow, '線が 色 + 左 2px の inset でない').toMatch(/rgb.*\b2px\b.*inset/);
+
+  // 先頭へ送る → 1 行目 / 途中の節を上端へ → 2 行目
+  await scroller.evaluate((el) => {
+    el.scrollTop = 0;
+  });
+  await expect.poll(activeRows, '先頭へ送っても印が動かない').toEqual([0]);
+  await target.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+  await expect.poll(activeRows, '途中の節を上端へ送っても印が動かない').toEqual([1]);
+
   expect(errors, 'pageerror が出た').toEqual([]);
 });
 
