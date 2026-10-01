@@ -33,6 +33,8 @@ import { applyCodeCollapse } from './code-collapse';
 import { applyInlineCodeCopy } from './inline-code-copy';
 import { applyTableSort } from './table-sort';
 import { applyExternalLinks } from './external-link';
+import { applyMissingLinks, clearMissingLinks } from './link-missing';
+import { appMissingLinks } from './missing-links';
 import { applyPlaceLayout } from './place-board';
 import { installBlockGrip } from './block-grip';
 import { applyStackControls } from './stack-controls';
@@ -285,6 +287,15 @@ export class DetailRenderer {
   private lastPanel: AppState['revisionPanel'] = null;
   /** 見ている版(#398 段②)。⚠ **指紋の一部**(上の注記)。 */
   private lastPreview: AppState['revisionPreview'] = null;
+  /**
+   * 🔴 **いま見ている `entryMetas`**(#1174 段①)。⚠ **指紋には入れない** ── 入れると
+   * ゴミ箱へ入れる・戻すたびに本文を描き直す(スクロールと図が壊れる)。
+   * 参照が変わったときだけ、描き直さずに「無いノートへのリンク」の印だけ当て直す
+   * (`syncMissingLinks`)。描画の途中で変わった回のために、worker の描画の後ろ
+   * (`paint`)もここから読む(閉じ込めた古い `state` を読まない)。
+   */
+  private metasRef: AppState['entryMetas'] | null = null;
+  private cidRef = '';
   /** この render pass が貸し出した ObjectURL の dispose 群。**表示の寿命の
    *  終わり(次の render / 選択遷移)で必ず全部呼ぶ**(生成物のライフサイクル
    *  終端での即破棄 ── user 指示 2026-07-27 不可侵)。 */
@@ -654,7 +665,31 @@ export class DetailRenderer {
     if (box !== null) this.sectionBoxFor = pending.key;
   }
 
+  /**
+   * 🔴 **無いノートへのリンクの印を、いま描いてある本文へ当て直す**(#1174 段①)。
+   * ⚠ 描き直さない ── `applyMissingLinks` は属性だけを足し引きする(冪等)。
+   *   設定が切のときは印を外す(切り替えた直後の描き直しで、差分で残った節点に
+   *   前の印が居座らないように)。
+   */
+  private syncMissingLinks(): void {
+    const host = this.bodyHost;
+    if (host === null || this.bodyKind !== 'md' || this.metasRef === null) return;
+    const metas = this.metasRef;
+    if (appMissingLinks.enabled()) applyMissingLinks(host, (l) => metas.has(l), this.cidRef);
+    else clearMissingLinks(host);
+  }
+
   render(state: AppState): void {
+    /**
+     * 🔴 **`entryMetas` が変わったら、本文は描き直さず印だけ当て直す**(#1174 段①)。
+     * ⚠ **一番上に置く** ── 下には早期 return が何本も在り、ゴミ箱から戻した回は
+     *   本文の指紋が同じなので必ずそこで止まる(= 印が消えない)。
+     */
+    if (state.entryMetas !== this.metasRef) {
+      this.metasRef = state.entryMetas;
+      this.cidRef = selfContainerId(state);
+      this.syncMissingLinks();
+    }
     /**
      * 🔴 **留めた枠は、選択にも編集にも関係なく「その 1 件」を出す**(#505 段②)。
      *
@@ -1176,6 +1211,12 @@ export class DetailRenderer {
          * ⚠ 描画のたびに呼ぶ(冪等)── 塊が差し替わると装飾が消えるため。
          */
         applyExternalLinks(host);
+        /**
+         * 🔴 **リンク先のノートが無い内部リンクの印**(#1174 段①)。
+         * ⚠ 描画のたびに呼ぶ(冪等)── 塊が差し替わると印が消えるため。
+         * ⚠ 読むのは `this.metasRef`(描画を待つ間に変わった回の最新)。
+         */
+        this.syncMissingLinks();
         /**
          * 🔴 **自由配置の板**(#283 P4)── `.pkc-place` の塊を、書いてある位置に置く。
          * ⚠ 描画のたびに呼ぶ(冪等)── 塊が差し替わると掴む口と題名の札が

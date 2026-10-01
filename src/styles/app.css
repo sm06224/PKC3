@@ -2902,6 +2902,11 @@ li[data-pkc-row-slot] {
 .pkc-md-rendered a[data-pkc-external-link]:hover .pkc-external-link-icon {
   opacity: 1;
 }
+/* 🔴 **リンク先のノートが無い内部リンク**(#1174 段①)。点線の下線だけ ── 字の色は変えない。
+ * 🔑 印は属性(`data-pkc-link-missing`)で受ける。card(`@[card](entry:…)`)の器にも付く。 */
+.pkc-md-rendered [data-pkc-link-missing] {
+  text-decoration: underline dotted;
+}
 .pkc-md-rendered hr {
   border: none;
   border-top: 1px solid var(--border);

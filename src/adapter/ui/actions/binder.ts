@@ -1134,6 +1134,12 @@ export interface BinderServices {
    */
   setDateLinks?(on: boolean): void;
   /**
+   * 🔴 **リンク先のノートが無いリンクを点線で見せるか**(#1174 段①)。⚠ **省略可**。
+   * ⚠ 切り替えたら**その場で本文の印を付け直す / 外す**(保存しただけでは、
+   *   いま読んでいるノートは変わらない = 設定が嘘になる)。
+   */
+  setMissingLinks?(on: boolean): void;
+  /**
    * 🔴 **貼る用に画像を持ち歩ける形へ**(#193)。`blob:` → `data:` の対応を返す。
    * ⚠ **省略可** ── 無ければ画像は文字に置き換わる(壊れた画像を貼らせない)。
    */
@@ -10015,6 +10021,10 @@ const ACTIONS: Record<string, ActionHandler> = {
   'set-date-links': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
     if (target instanceof HTMLInputElement) services.setDateLinks?.(target.checked);
+  },
+  'set-missing-links': (_dispatcher, target, services) => {
+    // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
+    if (target instanceof HTMLInputElement) services.setMissingLinks?.(target.checked);
   },
   'set-notices-enabled': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
