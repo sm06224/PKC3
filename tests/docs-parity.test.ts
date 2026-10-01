@@ -1566,8 +1566,13 @@ describe('導線の置き場所(P8 段⑱)', () => {
       expect(COMMANDS, `${label} が実装から消えた`).toContain(`'${label}'`);
       expect(MANUAL, `${label} がマニュアルに無い`).toContain(label);
     }
-    // 左の列が持つのは「よく押すもの」だけ ── 器そのものは shell.ts に在る
-    expect(SHELL, '左の列が操作の帯を持たなくなった').toContain('COLLECTION_COMMANDS');
+    // 左の列が持つのは「よく押すもの」だけ ── 器は shell.ts、並べる一覧は collection-bar.ts に在る
+    // (#582 で一覧を shell から出した。畳んだ縁も同じ一覧を読むため)
+    expect(SHELL, '左の列が操作の帯の一覧を読まなくなった').toContain('collectionBarItems');
+    expect(
+      readFileSync('src/adapter/ui/render/collection-bar.ts', 'utf-8'),
+      '帯の一覧が COLLECTION_COMMANDS を読まなくなった',
+    ).toContain('COLLECTION_COMMANDS');
   });
 
   it('🔴 添付の参照を本文へ入れる導線が**実在する**(書ける形式なのに書けない、を作らない)', () => {

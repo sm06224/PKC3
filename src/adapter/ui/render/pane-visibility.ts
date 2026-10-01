@@ -16,6 +16,7 @@ import {
   type PaneId,
 } from '@features/pane-visibility';
 import { appPhone } from './phone-layout';
+import { paintCollapsedEdge } from './collapsed-edge';
 
 /** ⚠ 列の畳みだけをスマホで落とす ── 表は `features` 側の 1 本を引く。 */
 const COLUMN_SET: ReadonlySet<PaneId> = new Set<ColumnPaneId>(COLUMN_PANES);
@@ -279,6 +280,12 @@ export function applyPaneVisibility(root: HTMLElement, hidden: readonly PaneId[]
   const value = encodeHidden(shown);
   if (value === '') shell.removeAttribute('data-pkc-hidden-panes');
   else shell.setAttribute('data-pkc-hidden-panes', value);
+  /**
+   * 🔴 **左の列を畳んだら、縁に帯の操作を残す**(#582)。⚠ 畳みを写す**この 1 か所**で出し入れする
+   * (呼び手を増やすと「畳んだのに縁が無い」が起きる)。判定は `shown` ── スマホ用画面で
+   * 畳みを写さない回は縁も出さない。
+   */
+  paintCollapsedEdge(shell, shown.includes('sidebar'));
   /**
    * 🔴 **こちらが畳んでいる追記欄には、「ここに追記する」の帯を出す**(#701)。
    * ⚠ user が自分で畳んだ回には出さない ── あれは「閲覧メインだから消したい」で、
