@@ -99,8 +99,58 @@ test('🔴 押しただけなら畳み、掴んで動かした直後は畳まれ
   expect(await widthOf(page, 'sidebar'), '押しても畳めない').toBe(0);
   // ⚠ **帯は残る**(残らないと二度と戻せない)
   await expect(page.locator(grip('sidebar')), '畳んだら帯まで消えた').toBeVisible();
+
+  /**
+   * 🔴 **畳んだ縁に、帯の操作が縦に残る**(#582。🟣 Gemini 裁定 2026-10-01 = 案 A)。
+   * ⚠ 直す前は、列の下の 7 つ(取り込む / バックアップ / 操作を探す / 集計 / システム /
+   *   フラグ / ヘルプ)が列ごと消え、マウスだけの人は設定へ届かなかった。
+   * 🔑 観測は**画面に出ている実物**:縁と帯の合計幅(40px 以下)/ 押し所が**全部見えて**
+   *   一覧の下にあった数と同じ / 地が無彩色 / 掴む帯と重ならない。
+   */
+  const EDGE = '[data-pkc-region="collapsed-edge"]';
+  await expect(page.locator(EDGE), '畳んだのに縁が無い').toBeVisible();
+  const edge = await page.evaluate((sel) => {
+    const el = document.querySelector<HTMLElement>(sel)!;
+    const r = el.getBoundingClientRect();
+    const g = document
+      .querySelector<HTMLElement>('[data-pkc-region="pane-grip"][data-pkc-pane="sidebar"]')!
+      .getBoundingClientRect();
+    const btns = [...el.querySelectorAll<HTMLElement>('button')];
+    const bg = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(getComputedStyle(el).backgroundColor);
+    return {
+      cell: Math.round(g.right - r.left),
+      overlap: Math.round((r.right - g.left) * 10) / 10,
+      visible: btns.filter((b) => {
+        const q = b.getBoundingClientRect();
+        return q.width > 0 && q.height > 0 && q.bottom <= innerHeight && q.right <= g.left + 0.5;
+      }).length,
+      want: document.querySelectorAll('[data-pkc-region="collection-bar"] button').length,
+      named: btns.filter((b) => (b.getAttribute('aria-label') ?? '') !== '' && b.title !== '').length,
+      grey: bg !== null && bg[1] === bg[2] && bg[2] === bg[3],
+    };
+  }, EDGE);
+  expect(edge.want, '一覧の下の帯が空(台の空振り)').toBeGreaterThan(5);
+  expect(edge.cell, `縁 + 掴む帯が ${edge.cell}px(目安 40px 以下)`).toBeLessThanOrEqual(40);
+  expect(edge.overlap, `縁が掴む帯に ${edge.overlap}px 重なっている`).toBeLessThanOrEqual(0.5);
+  expect(edge.visible, '縁のボタンが全部は見えていない / 帯の数と違う').toBe(edge.want);
+  expect(edge.named, '名前(aria-label)か説明(title)が無い縁のボタンがある').toBe(edge.want);
+  expect(edge.grey, '縁の地が無彩色でない').toBe(true);
+  // 🔴 **押せる**(見えているだけで押せない縁を作らない)── 実物の座標で押して、システムが開く
+  await clickReal(page, `${EDGE} [data-pkc-action="set-view"][data-pkc-view="settings"]`);
+  await expect(
+    page.locator('[data-pkc-view-pane="settings"]'),
+    '縁の「システム」を押しても開かない',
+  ).toBeVisible();
+  await expect(page.locator(EDGE), '押したら縁が消えた(畳みは続いているはず)').toBeVisible();
+
   await page.locator(grip('sidebar')).click();
   expect(await widthOf(page, 'sidebar'), '押しても戻らない').toBeGreaterThan(100);
+  // 🔴 戻すと縁は消え、帯が一覧の下に戻る(双方向)
+  await expect(page.locator(EDGE), '戻したのに縁が残っている').toHaveCount(0);
+  await expect(
+    page.locator('[data-pkc-region="collection-bar"] button').first(),
+    '戻したのに一覧の下の帯が見えない',
+  ).toBeVisible();
 
   /**
    * 🔴 **右を畳んでも、全体の横スクロールが有効にならない**(user 報告)。

@@ -39,6 +39,14 @@ python3 /tmp/mut-<主題>.py M1 M3      # id を指定
 1. **置き場を分ける**(`…/scratchpad/mine/mutate-<主題>.mjs`)── 名前だけでなく**階層**を分ける
 2. **自分のハーネスだと分かる印を出力に出す**(先頭に `harness=<主題> muts=<件数>` など)
 3. ⚠ **件数を数える** ── 渡した変異の数と、返ってきた行の数が合わない回は**読まない**
+4. 🔴 **backup の置き場も自分専用にする**(2026-10-01、#274 と #1102 の implementer が
+   **同時に**踏んだ)。両方が自前のハーネスで backup を `…/scratchpad/bk/` に
+   **同じ file 名**(`src__adapter__state__app-state.ts` など)で書いたため、
+   片方の復元が**もう片方の版を書き戻し**、`app-state.ts` の編集が丸ごと消えた
+   (気づけたのは `git diff --stat` の行数が想定の桁より小さかったから)。
+   🔑 backup は **target の隣(`<file>.mutbak`。雛形 `templates/mutate.py` の作法)か
+   `mktemp -d`** に置く。共有 dir に置くなら名前に主題を前置する ──
+   ⚠ そして**変異試験の後に `git diff --stat` を読む**(行数が想定の桁か)
 
 ⚠ サブエージェントが `read-only` の型でも `Bash` は持つ。**規律を守るのは tools の
 一覧であって、相手の善意ではない**(CLAUDE.md「規律を守るのは tools の一覧」)。

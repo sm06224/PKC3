@@ -9,9 +9,9 @@
  *
  * 🔑 **3 列**(一覧 / 本文 / 付随情報)。編集に入っても列は動かない。
  */
-import { SEALED_ARCHETYPES, SEALED_VIEWS } from '@features/sealed';
+import { SEALED_ARCHETYPES } from '@features/sealed';
 import { HINT_BASE, HINT_COMMAND, hintTitle } from './shortcut-hint';
-import { COLLECTION_COMMANDS } from './commands';
+import { collectionBarButton, collectionBarItems } from './collection-bar';
 // 🔴 前回選んだ「作る種類」を覚える(#1045)
 import { appCreateKind } from './create-kind';
 import { appSearchHistory } from '@adapter/platform/search-history-store';
@@ -106,61 +106,6 @@ export interface ShellRegions {
    */
   announce: HTMLElement;
 }
-
-/**
- * 🔴 **上下の帯を撤去した**(P10、user 指示 2026-08-05
- * 「UI の上下の帯は不要だと思う。大して働いていない。設定への導線だけどこかに
- * 残す必要がある」)。
- *
- * 上の帯に載っていたのは「PKC3」の文字と設定ボタンだけだった ──
- * 現在地を出すはずの `brand-context` は**書き手が 1 つも無く**、ずっと空だった。
- * 下の帯は 99% の時間「pkc3 v3.0.0」を出していた(版はホバーと設定へ移した)。
- *
- * 設定は**左の列の下**へ移した ── そこはもともと「アプリ / ノート全体に対する
- * 操作」が並ぶ場所で、設定もその一員である。
- * ⚠ 探し方のタブには**しない** ── タブは「どう探すか」の軸で、設定は探し方ではない。
- */
-const VIEW_BUTTONS: readonly { view: string; label: string }[] = [
-  /**
-   * 集計(#184)。⚠ **一番上**に置く ── 日々使う面であり、設定・フラグ・ヘルプ
-   * (困ったときに見る面)より手前にあるべき。PKC2 は同等の面を右ペインの
-   * セレクトの奥に埋め、**自動では 1 度も出ない**ままにして死なせた。
-   */
-  { view: 'query', label: '集計' },
-  /**
-   * 🔴 **2 ペインはここに置かない**(user 指摘 2026-08-19
-   * 「2 ペインファイラは**アプリとして** Office のように組み込みの導線を用意しろ」)。
-   *
-   * ⚠ 1 稿目はここ(集計・設定・フラグ・ヘルプが並ぶ「アプリ全体の操作」)に
-   * 置いたが、user が言った「組み込み」は**アプリの一覧**である ── Office と
-   * 同じく `features/launcher/tiles.ts` の**組み込みタイル**が導線になった。
-   * ⚠ ここに残すと同じ物の入口が 2 か所になり、「同じものが常に同じ場所にある」が
-   *   崩れる(この帯は面の切替ではなく、アプリ全体の操作が並ぶ場所である)。
-   * 🔑 鍵(`Alt+6`)は残す ── 近道と導線は別の軸。
-   *
-   * 🔴 **「設定」→「システム」に改名**(#1017 段⓪。user 裁定 2026-09-20)。
-   * ⚠ 内部の id(`'settings'` / `ViewMode`)は変えない ── 変わるのは画面の字だけ。
-   */
-  { view: 'settings', label: 'システム' },
-  // ⚠ 開発者・パワーユーザー向け(P11)。システムとは**別の面**にする(裁定 Q3)
-  { view: 'flags', label: 'フラグ' },
-  /**
-   * ヘルプ(P11。user 指示 2026-08-07「ヘルプ画面にはマニュアル導線も含めて
-   * ください」)。⚠ **一番下**に置く ── 「困ったら最後に見る場所」の位置。
-   *
-   * 🔴 **アプリの一覧にも「マニュアル」が在るが、こちらは消さない**(#531、2026-09-11)。
-   *
-   * ⚠ すぐ上の「2 ペイン」の戒めは「**同じ物の入口が 2 か所になるな**」と書いてあり、
-   *   字面だけ読むとここも消す側に見える ── **消さない理由を書いておく**:
-   *   ① **中身が違う**。左のこれは**面**(版・お知らせ・ショートカット・マニュアル)で、
-   *      アプリの一覧のタイルは**マニュアルだけの別窓**である
-   *   ② **困っている人の動線である**。ヘルプは「何かがおかしいとき」に押すので、
-   *      **探させてはいけない** ── アプリの一覧まで辿らせるのは、その状況で最も遠い
-   *   ③ 別窓は**ポップアップを止めている端末では開かない**。左のこれが退避先になる
-   * 🔑 ここを消すのは、上の 3 つが**全部**崩れたときだけである。
-   */
-  { view: 'help', label: 'ヘルプ' },
-] as const;
 
 /**
  * 作れるもの。⚠ 封印中のものは出さない。
@@ -742,77 +687,21 @@ export function buildShell(root: HTMLElement): ShellRegions {
   /** ノート全体に対する操作(取り込む / 書き出す / 片づける)。 */
   const collectionBar = document.createElement('div');
   collectionBar.setAttribute('data-pkc-region', 'collection-bar');
-  for (const { action, label, title } of COLLECTION_COMMANDS) {
-    const btn = iconButton(action, label);
-    markBarTile(btn);
-    btn.title = title;
-    collectionBar.append(btn);
-  }
   /**
-   * 🔴 **操作を名前で探す**(#425 段①)。
+   * 🔴 **並ぶ物は `collection-bar.ts` の一覧から組む**(#582)。
    *
-   * ⚠ **ボタンを先に置く**(不可侵指示「マウスだけで完結し、キーボードは近道」)──
-   *   鍵(`Ctrl/⌘+Shift+P`)だけにすると**画面のどこにも無い機能**になる
-   *   (`nav-back` / `nav-forward` を足したときと同じ理由。上の記録)。
-   * ⚠ 置き場は**設定・フラグ・ヘルプの隣** ── どれも「アプリ全体の操作」であり、
-   *   `COLLECTION_COMMANDS`(取り込む / バックアップ = **書き出しと片づけ**)とは
-   *   役割が違う。⚠ あちらの表に混ぜると、
-   *   `tests/adapter/collection-commands.test.ts` が守っている
-   *   「書き出しと片づけの全数」の意味が濁る。
-   * ⚠ 鍵の綴りは `applyShortcutHints` が組み立てる(直書きしない ── mac では
-   *   `⌘`、user が割当を変えれば説明だけが嘘になる)。
-   */
-  {
-    const btn = iconButton('open-palette', '操作を探す');
-    markBarTile(btn);
-    btn.setAttribute(HINT_BASE, 'できる操作を名前で絞り込んで、その場で実行します');
-    btn.setAttribute(HINT_COMMAND, 'open-palette');
-    btn.title = hintTitle('できる操作を名前で絞り込んで、その場で実行します', 'open-palette');
-    collectionBar.append(btn);
-  }
-  /**
-   * 🔑 **設定はここ**(P10)。上の帯を撤去したので、アプリ全体の操作が並ぶ
-   * この場所へ移した。⚠ 一覧の操作と**区切って**置く(役割が違う)。
-   *
-   * 🔴 **区切りは「線」ではなく「間」**(#1029 段 B)だが、⚠ **間を各ボタンに
-   *   付けてはいけない**(2026-09-21 に実ブラウザの検査 #475 が捕まえた)──
-   *   `margin-top` は**行の境目ではなく、その要素 1 個**を押し下げるので、
-   *   境目が**行の途中に来る幅**(実測 1440px 以上)では
-   *   **「集計」だけが 8px 下へぶら下がった**(1920px では 2 個)。
-   *   一覧の高さを数える検査が、その浮きを**3 段目**として数えて落ちた。
-   * 🔑 だから**塊を 1 つの器に包み、器に間を持たせる**(右の列の塊と同じ作法)──
-   *   器は帯にとって **1 つの並び物**なので、入りきらないときは**塊ごと**次の行へ移り、
-   *   どの幅でも「1 個だけずれる」が起きない。⚠ 器の中は自分で折り返す。
-   * ⚠ **#1054 段②-2 で「必ず次の行」をやめた** ── 1 稿目は器を行いっぱい
-   *   (`flex: 1 0 100%`)にして**常に 2 行**にしていたが、絵だけのタイル 7 つは
-   *   1 行に入る。区切りは器の `border-inline-start`(`app.css` の同じ器の規則)。
+   * ⚠ 左の列を畳むと帯ごと消えるので、**畳んだ縁(`collapsed-edge.ts`)も同じ一覧から
+   *   射影する** ── ここで 1 つずつ手で組むと、縁との間で**登記簿が 2 つ**になる。
+   * ⚠ 一覧の並びは 取り込む / バックアップ → 操作を探す(#425。鍵 `Ctrl/⌘+Shift+P` の
+   *   ボタン側)→ 集計 / システム / フラグ / ヘルプ。設定側の 4 つは**役割が違う**ので
+   *   「間」で区切る塊(`collection-app-group`)に入れる ── 間は各ボタンではなく**器**が持つ
+   *   (各ボタンの `margin-top` は行の途中に来る幅で 1 個だけ浮く。2026-09-21 の実測、
+   *   #1029 段 B / #1054 段②-2)。⚠ 区切りの見た目は `app.css` の同じ器の規則。
    */
   const appGroup = document.createElement('div');
   appGroup.setAttribute('data-pkc-field', 'collection-app-group');
-  /**
-   * 🔴 **鍵の一覧の id と揃える**(#1054 段②)── ここは今まで `title` を
-   *   1 つも持たなかった(文字がそのまま名前だったので要らなかった)。
-   *   図案だけのタイルにした以上、hover で読める説明が要る。
-   */
-  const VIEW_HINT_COMMAND: Readonly<Record<string, string>> = {
-    query: 'view-query',
-    settings: 'open-settings',
-    flags: 'open-flags',
-    help: 'open-help',
-  };
-  for (const { view, label } of VIEW_BUTTONS) {
-    if (SEALED_VIEWS.includes(view)) continue;
-    const btn = iconButton('set-view', label, `set-view:${view}`);
-    markBarTile(btn);
-    btn.setAttribute('data-pkc-view', view);
-    btn.setAttribute('data-pkc-field', 'app-settings');
-    const cmd = VIEW_HINT_COMMAND[view];
-    if (cmd !== undefined) {
-      btn.setAttribute(HINT_BASE, label);
-      btn.setAttribute(HINT_COMMAND, cmd);
-      btn.title = hintTitle(label, cmd);
-    }
-    appGroup.append(btn);
+  for (const item of collectionBarItems()) {
+    (item.group === 'app' ? appGroup : collectionBar).append(collectionBarButton(item));
   }
   collectionBar.append(appGroup);
 

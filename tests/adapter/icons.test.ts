@@ -31,6 +31,7 @@ import { blocksFor, stripComments, withoutMedia } from '../helpers/css-blocks';
 import { codeOnly } from '../helpers/code-only';
 import { SidebarRenderer } from '../../src/adapter/ui/render/sidebar';
 import { buildShell } from '../../src/adapter/ui/render/shell';
+import { collectionBarItems } from '../../src/adapter/ui/render/collection-bar';
 import { initialState, reduce } from '../../src/adapter/state/app-state';
 import type { AppState } from '../../src/adapter/state/app-state';
 
@@ -388,11 +389,25 @@ describe('🔴 `iconButton` の第 3 引数の鍵は、登記に在る', () => {
       '図案の鍵が登記に無い ── 第 3 引数は ACTION_ICONS の鍵であって、図案の名前ではない',
     ).toEqual([]);
 
-    // 組み立てて渡す鍵(`archetype:…` / `set-view:…`)は、頭が決まった 2 つだけ
+    // 組み立てて渡す鍵は `archetype:…` だけ(`set-view:…` は #582 で一覧(`collection-bar.ts`)の
+    // 持ち物になり、字面からは見えない ── 下の実行時の検査が全数で見る)
     const heads = [...new Set(dynamic.map((d) => d.split('$')[0] as string))];
     expect(heads.sort(), '組み立てて渡す鍵の頭が増えた ── 引く表を決めてから足す').toEqual(
-      ['archetype:', 'set-view:'].sort(),
+      ['archetype:'].sort(),
     );
+  });
+
+  /**
+   * 🔴 **帯の一覧の図案の鍵も、登記に在る**(#582)。⚠ 上の字面の走査は
+   * `iconButton('set-view', label, `set-view:${view}`)` を拾っていたが、帯の一覧を
+   * `collection-bar.ts` の**データ**へ出したので `iconButton(item.action, …)` になり、
+   * 鍵の綴りが走査の目に入らない。🔑 一覧を**実行して**全数を見る(静かに無地になる型を止める)。
+   */
+  it('帯の一覧の図案の鍵は、すべて ACTION_ICONS に在る', () => {
+    const items = collectionBarItems();
+    expect(items.length, '帯の一覧が空(空振り)').toBeGreaterThan(5);
+    const missing = items.filter((i) => ACTION_ICONS[i.iconKey] === undefined).map((i) => i.iconKey);
+    expect(missing, '帯の図案の鍵が登記に無い ── 器ごと出ず、無地のタイルになる').toEqual([]);
   });
 });
 
