@@ -688,8 +688,10 @@ describe('お知らせの登記表', () => {
      * 🔑 **登記表と表示上限は同じ数である**(2026-08-29 の不変条件)──
      *   `NOTICE_KEEP_MAX` は式で `NOTICE_SHOW_MAX` を指しているので、
      *   ここはその**式が生きていること**を見る(数を 2 か所に書かない)。
+     * 🔴 **30 → 50**(2026-10-01)。1 日で 17 件足した日に、**その日のうちに足した
+     *   未読のお知らせ**が押し出された(同じ壊れ方が 1 日の中で起きた)。
      */
-    expect(NOTICE_SHOW_MAX, '表示上限が変わった').toBe(30);
+    expect(NOTICE_SHOW_MAX, '表示上限が変わった').toBe(50);
     expect(NOTICE_KEEP_MAX, '登記表 = 画面に出るもの、が崩れた').toBe(NOTICE_SHOW_MAX);
     expect(NOTICE_ITEMS_MAX, '項目数の上限が変わった').toBe(6);
     expect(NOTICE_ITEM_CHARS_MAX, '字数の上限が変わった').toBe(120);
