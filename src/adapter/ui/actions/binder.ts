@@ -4400,6 +4400,13 @@ async function waitPainted(
 }
 
 /**
+ * 本文へ飛ぶ操作(目次・添付の行)を、編集中に断る文言。
+ * 🔑 **1 本にする**(§7)── 目次と添付で別々に書くと、片方だけ言い回しが変わる。
+ */
+const JUMP_REFUSED_WHILE_EDITING =
+  '編集中は本文が表示されていないので移動できません(保存するか、2 ペインにしてください)';
+
+/**
  * 🔴 **目次の行から本文の見出しへ飛ぶ**(#514 / #517)。
  *
  * ⚠ **本文以外の面を開いたままなら、先に本文の面へ戻す**(#514)── 面は hidden で
@@ -4450,7 +4457,7 @@ async function tocJump(
         type: 'OP_FAILED',
         error:
           dispatcher.getState().phase !== 'ready'
-            ? '編集中は本文が表示されていないので移動できません(保存するか、2 ペインにしてください)'
+            ? JUMP_REFUSED_WHILE_EDITING
             : (notFound ??
               'その見出しが本文にまだ出ていません(描き直しの途中かもしれません ── もう一度押してください)'),
       });
@@ -4470,6 +4477,81 @@ async function tocJump(
     const foldHost = foldHostOf(hit) ?? hit.parentElement;
     if (foldHost !== null) revealBlock(foldHost, hit);
     hit.scrollIntoView({ block: 'start' });
+}
+
+/**
+ * 🔴 **添付の行から、本文でそれを使っている最初の場所へ飛んで光らせる**(#1170)。
+ *
+ * 🔑 道筋は `tocJump` と同じ(面を本文へ戻す → 描き終わりを待つ → 探す → 畳んだ章を開く →
+ *   送る)。違うのは**探し方**だけ:見出しの id ではなく、添付の key を持つ
+ *   画像 / リンク / 囲みの**最初の 1 つ**。
+ * ⚠ **添付を開くのではない**(本文の絵を押す今までどおり)── ここは「どこで使っているか」へ
+ *   飛ぶだけ。
+ * ⚠ 編集中(1 面)は本文が描かれていない ── 断り文は目次と同じ(`JUMP_REFUSED_WHILE_EDITING`)。
+ * ⚠ 見つからない(描き直しの途中 / 本文が書き換わった)ときは理由を出す ── 黙ると dead click。
+ */
+async function jumpToAssetUse(
+  dispatcher: Dispatcher,
+  target: HTMLElement,
+  key: string,
+): Promise<void> {
+  if (dispatcher.getState().viewMode !== 'detail') {
+    dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
+  }
+  const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+  const detail = root.querySelector<HTMLElement>('[data-pkc-region="detail"]');
+  await waitPainted(detail, dispatcher.getState().selectedLid);
+  // ⚠ key を属性の選択子に書かない(key に何が入るか分からない ── escape が要らない等値で比べる)
+  const hit = detail
+    ? [
+        ...detail.querySelectorAll<HTMLElement>(
+          '.pkc-asset-ref, .pkc-asset-link, [data-pkc-fence-asset-key]',
+        ),
+      ].find(
+        (el) =>
+          (el.getAttribute('data-pkc-asset-key') ?? el.getAttribute('data-pkc-fence-asset-key')) ===
+          key,
+      )
+    : undefined;
+  if (!hit) {
+    if (dispatcher.getState().phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: JUMP_REFUSED_WHILE_EDITING });
+    } else {
+      dispatcher.dispatch({ type: 'OP_NOTICE', message: '本文に見つかりませんでした' });
+    }
+    return;
+  }
+  const foldHost = foldHostOf(hit) ?? hit.parentElement;
+  if (foldHost !== null) revealBlock(foldHost, hit);
+  scrollSettled(detail!, hit);
+  flashCopied(hit);
+}
+
+/**
+ * 🔴 **画像の読み込みで位置がずれても、飛び先に居続ける**(#1170)。
+ *
+ * ⚠ 本文の画像は `loading="lazy"` で、読み込むまで高さが無い。**送った後に上の画像が
+ *   育つと、飛び先が画面の外へ押し流される**(「飛んだのに見えない」)。
+ * 🔑 送った後の短い間だけ、器の中の画像の `load`(捕まえる側で拾う)のたびに送り直す。
+ * ⚠ **user が自分で動かしたら手を離す**(wheel / touch / key)── 勝手に引き戻さない。
+ * ⚠ 期限つき(永久に聞かない)。
+ */
+function scrollSettled(host: HTMLElement, el: HTMLElement): void {
+  const go = (): void => el.scrollIntoView({ block: 'center' });
+  go();
+  let done = false;
+  const stop = (): void => {
+    if (done) return;
+    done = true;
+    clearTimeout(timer);
+    host.removeEventListener('load', go, true);
+    for (const t of ['wheel', 'touchstart', 'keydown', 'pointerdown'])
+      host.ownerDocument.removeEventListener(t, stop, true);
+  };
+  const timer = setTimeout(stop, 1500);
+  host.addEventListener('load', go, true);
+  for (const t of ['wheel', 'touchstart', 'keydown', 'pointerdown'])
+    host.ownerDocument.addEventListener(t, stop, true);
 }
 
 
@@ -4685,6 +4767,16 @@ const ACTIONS: Record<string, ActionHandler> = {
    * タグ絞り込み機構を作らない(#181 の全文検索が frontmatter ごと引く)。
    * ⚠ 欄の値も state 経由で同期される(renderer が書き戻す)。
    */
+  /**
+   * 🔴 **添付の行 → 本文でそれを使っている最初の場所へ飛んで光る**(#1170)。
+   * ⚠ 目次の行と同じく情報ペインの中に在るので、スマホでは本文のページへ戻す。
+   */
+  'jump-to-asset-use': (dispatcher, target) => {
+    const key = target.getAttribute('data-pkc-asset-key') ?? '';
+    if (key === '') return;
+    appPhone.reveal('note');
+    void jumpToAssetUse(dispatcher, target, key);
+  },
   /**
    * 🔴 **目次から本文の見出しへ飛ぶ**(#493)。
    *

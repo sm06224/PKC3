@@ -369,6 +369,12 @@ const UNREGISTERED_POINT: readonly string[] = [
    *   (`toc-jump` と同じ仕分け)。
    */
   'system-jump', 'toc-jump',
+  /**
+   * ⚠ **2026-10-01(#1170)で 1 件増やした** ── 右の列の「添付」の行から、本文でその添付を
+   *   使っている場所へ飛ぶ。🔑 同時に見えている兄弟(行)のうち**押した 1 つ**の key で
+   *   対象が決まる(`toc-jump` と同じ仕分け)。
+   */
+  'jump-to-asset-use',
   'toggle-app-group',
   /**
    * ⚠ **2026-09-29(#1139)で 1 件増やした** ── 長大なコードブロックの折りたたみ／展開。
@@ -574,12 +580,15 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   (`task-run-open` / `task-run-done`)で受け手 +2 ── 登記は増えない(押し口は本文の
       //   右クリックにしか無く、`table-to-csv` と同じ仕分け)。
       //   `receivers` +2 / `total` +2 / `unregistered` +2。
-      total: 342,
-      receivers: 285,
+      // ⚠ 2026-10-01(#1170): 右の列の「添付」の行(`jump-to-asset-use`)で
+      //   受け手 +1 ── 登記は増えない(押した行の key が要る P1 で、`toc-jump` と同じ仕分け)。
+      //   `receivers` +1 / `total` +1 / `unregistered` +1。
+      total: 343,
+      receivers: 286,
       registered: 96,
       both: 39,
       outsideActionsTable: 57,
-      unregistered: 246,
+      unregistered: 247,
     });
   });
 
