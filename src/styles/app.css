@@ -960,7 +960,9 @@ select:focus-visible {
   border-radius: 0;
 }
 
-[data-pkc-region='browse-host'] {
+/* 🔑 command-list = `>` を打ったとき、ノートの一覧の場所に出る操作の一覧(#274 段①)── 同じ場所・同じ流し方 */
+[data-pkc-region='browse-host'],
+[data-pkc-region='command-list'] {
   flex: 1;
   min-height: 0;
   display: flex;
@@ -7475,6 +7477,7 @@ h3[data-pkc-section] {
  *   ノートを選ぶ器(`entry-pick-row`。**題名は user が書くので、いくらでも長い**)。
  *   片方だけ直すと、もう片方が同じ症状で残る。 */
 [data-pkc-field='palette-row'],
+[data-pkc-field='command-row'],
 [data-pkc-field='entry-pick-row'] {
   /* 🔑 器いっぱいの行にする(`inline-flex` のままだと中身なりに伸びる) */
   display: flex;
@@ -7497,13 +7500,15 @@ h3[data-pkc-section] {
 }
 /* 名前は左、割当は右端。⚠ 押せない理由は**次の行へ落とす**(`flex-basis: 100%`)──
  * 名前と同じ行に混ぜると、読み手には 1 つの長い名前に見える。 */
-[data-pkc-field='palette-keys'] {
+[data-pkc-field='palette-keys'],
+[data-pkc-field='command-keys'] {
   margin-inline-start: auto;
   color: var(--muted);
   font-size: 11px;
   white-space: nowrap;
 }
 [data-pkc-field='palette-why'],
+[data-pkc-field='command-why'],
 [data-pkc-field='entry-pick-kind'] {
   flex-basis: 100%;
   color: var(--muted);

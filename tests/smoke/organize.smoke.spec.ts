@@ -649,6 +649,39 @@ test('🔴 一覧タブの ↑↓・Enter・絞り込みと、Escape の 2 段�
   await clickReal(page, '[data-pkc-action="clear-search-history"]');
   expect(await listOptions(), '設定の「検索した語の記録を消す」を押しても候補が残っている').toEqual([]);
 
+  /**
+   * ⑧ 🔴 **探す欄に `>` を打つと、一覧が操作に替わり、押すと効く**(#274 段①。姿 = D)
+   * ── 同じ起動に相乗りさせる(起動は増やさない)。
+   * ⚠ unit は描画しないので、**行が実際に収まって見えるか**(横にはみ出さない)・
+   *   **実マウスで押して効くか**・**欄を離れた(change)ときに記録へ積まれないか**は
+   *   ここでしか見えない。
+   * 🔑 ⑦ の直後なので記録は空 ── `>` の字が積まれれば `listOptions()` が動く。
+   */
+  const hostOfNotes = page.locator('[data-pkc-region="browse-host"]');
+  const cmdList = page.locator('[data-pkc-region="command-list"]');
+  await expect(cmdList, '前提が崩れている(打つ前から操作の一覧が出ている)').toBeHidden();
+  await box.fill('>ノートを作る');
+  await page.mouse.click(5, 5); // 欄を離れて確定する(change)
+  await expect(cmdList, '`>` を打っても操作の一覧が出ない').toBeVisible();
+  await expect(hostOfNotes, '操作の一覧とノートの一覧が同時に出ている').toBeHidden();
+  expect(await listOptions(), '`>` で始まる字が検索語として憶えられた').toEqual([]);
+
+  await box.fill('>集計');
+  const queryRow = cmdList.locator('[data-pkc-command="view-query"]');
+  await expect(queryRow, '絞った行が出ていない').toBeVisible();
+  expect(
+    await cmdList.evaluate((el) => el.scrollWidth <= el.clientWidth + 1),
+    '操作の一覧が横にはみ出している',
+  ).toBe(true);
+  await clickReal(page, '[data-pkc-region="command-list"] [data-pkc-command="view-query"]');
+  await expect(
+    page.locator('[data-pkc-view-pane="query"]'),
+    '行を押したのに操作が効いていない',
+  ).toBeVisible();
+  await expect(box, '実行したのに `>` が欄に残っている').toHaveValue('');
+  await expect(cmdList, '実行したのに操作の一覧が残っている').toBeHidden();
+  await expect(hostOfNotes, 'ノートの一覧が戻っていない').toBeVisible();
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 

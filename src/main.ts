@@ -227,6 +227,7 @@ import {
   generateLid,
   runChapterWindowAction,
   runGlobalCommand,
+  repaintCommandList,
   type BinderServices,
 } from '@adapter/ui/actions/binder';
 import { ChapterWindows } from '@adapter/ui/chapter-windows';
@@ -1284,6 +1285,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       editing: state.phase === 'editing',
       title: state.selectedLid === null ? '' : (state.entryMetas.get(state.selectedLid)?.title ?? ''),
     });
+    /**
+     * 🔴 **探す欄に `>` を打っている間の操作の一覧は、描き終えた画面で組む**(#274 段①)。
+     *
+     * ⚠ 「いま押せるか」は**画面のボタン**(中央の「編集」・右の列の操作)で決まるので、
+     *   **全部の面を描き終えた後**でないと 1 手古い答えになる ── だから描画の最後に置く。
+     * ⚠ `binder` の中で `dispatcher.onState` を張らない(`bindActions` に渡る
+     *   dispatcher の test 替え玉が `onState` を持たない)── 描く順を決めるのはここである。
+     * ⚠ `>` でなければ何もしない。描く側が指紋を見るので、同じ中身なら行に触らない。
+     */
+    repaintCommandList(root, dispatcher, appKeymap);
   });
   // status: provenance + エラーの可視化(review B-1 ── 無言の操作拒否を作らない)
   // 🔑 常時見えるのは**版だけ**(P8)。`opfs-sahpool` のような開発者語は

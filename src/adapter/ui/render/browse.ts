@@ -36,6 +36,7 @@ import { DEFAULT_BROWSE_MODE, type BrowseMode } from './browse-mode';
 import { KindBarRenderer } from './kind-bar';
 import { setPrimary } from './icons';
 import { setBlocked } from './shortcut-hint';
+import { commandQueryOf } from '@features/palette/command-query';
 
 /**
  * タブ。⚠ 文言は「探し方」を表す(「詳細」のような場所の名前にしない)。
@@ -128,6 +129,9 @@ export class BrowseRouter {
   private readonly scroll: ScrollMemory;
   /** 探す欄(面の外に在る ── どの面でも見えている)。 */
   private readonly filterInput: HTMLInputElement | null;
+  /** 🔴 ノートの一覧の器(`>` を打っている間は隠す)と、代わりに出す操作の一覧の器(#274 段①)。 */
+  private readonly host: HTMLElement;
+  private readonly commandList: HTMLElement | null;
   /** 左の列の「+ ノート」(主の操作の印を phase で付け外しする)。 */
   private readonly createRun: HTMLElement | null;
   /** 🔴 指で触る端末へ理由を届ける 1 行(#791 ③)。⚠ CSS が出し分ける。 */
@@ -156,6 +160,8 @@ export class BrowseRouter {
     onCaptureReady: () => void = () => {},
   ) {
     this.last = initial;
+    this.host = host;
+    this.commandList = sidebar.querySelector<HTMLElement>('[data-pkc-region="command-list"]');
     const pane = (mode: BrowseMode): HTMLElement => {
       const el = document.createElement('div');
       el.setAttribute('data-pkc-browse-pane', mode);
@@ -293,6 +299,19 @@ export class BrowseRouter {
      */
     if (this.filterInput !== null && this.filterInput.value !== state.filterQuery)
       this.filterInput.value = state.filterQuery;
+    /**
+     * 🔴 **`>` を打っている間は、ノートの一覧の場所に操作の一覧を出す**(#274 段①。姿 = D)。
+     *
+     * ⚠ **新しい面ではない** ── 同じ場所の中身が替わるだけで、探す欄から手を離さずに
+     *   戻れる(`>` を消す)。⚠ 行は `binder.ts` が描く(「いま押せるか」が画面のボタンで
+     *   決まるので、描画器は state だけでは組めない)。ここは**出し入れだけ**。
+     * ⚠ 面の描画(下)は止めない ── 隠すだけなので、戻ったとき指紋が合っていれば
+     *   触らずに済む(5000 行を作り直さない)。
+     */
+    const commandMode = commandQueryOf(state.filterQuery) !== null;
+    if (this.host.hidden !== commandMode) this.host.hidden = commandMode;
+    if (this.commandList !== null && this.commandList.hidden !== !commandMode)
+      this.commandList.hidden = !commandMode;
     // ⚠ 非 active な面には render を呼ばない(裏で毎 state 仕事をしない)
     if (mode === 'list') this.list.render(state);
     else if (mode === 'filer') this.filer.render(state);

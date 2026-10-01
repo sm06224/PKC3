@@ -342,6 +342,8 @@ const UNREGISTERED_POINT: readonly string[] = [
   'move-app-group-up', 'move-tile-down', 'move-tile-up', 'navigate-asset-ref',
   'navigate-card-ref', 'navigate-entry-ref', 'open-alarm', 'open-date-note', 'open-office',
   'open-repeat-menu',
+  // ⚠ 2026-10-01(#274 段①): 左の列の操作の一覧の行。押した行の命令が要る P1(`toc-jump` と同じ仕分け)
+  'run-command-row',
   'open-tile', 'open-tile-as', 'pick-app-group-icon', 'preview-revision', 'remove-relation',
   'restore-revision', 'restore-trash', 'revoke-extension', 'revoke-same-origin',
   'schedule-pick-day', 'schedule-quick-here', 'set-task-repeat', 'shape-cell',
@@ -605,12 +607,15 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-01(#1087): 手が滑りやすい 2 つの入切(`set-code-collapse` / `set-inline-code-copy`)で
       //   受け手 +2 / `total` +2 / `unregistered` +2。登記は増えない ── 押し口は設定の checkbox にしか無く、
       //   鍵も持たない(`set-missing-links` と同じ形)。
-      total: 351,
-      receivers: 294,
+      // ⚠ 2026-10-01(#274 段①): 左の列の探す欄に `>` を打つと出る操作の一覧の行(`run-command-row`)で
+      //   受け手 +1 ── 登記は増えない(押し口は一覧の行にしか無く、押した行の命令が要る P1)。
+      //   `receivers` +1 / `total` +1 / `unregistered` +1。
+      total: 352,
+      receivers: 295,
       registered: 96,
       both: 39,
       outsideActionsTable: 57,
-      unregistered: 255,
+      unregistered: 256,
     });
   });
 

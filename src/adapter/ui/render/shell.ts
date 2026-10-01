@@ -437,7 +437,13 @@ export function buildShell(root: HTMLElement): ShellRegions {
    * 「題名で絞り込みます」と書いてあった ── いまは**本文も探す**ので、そのままだと
    * 「本文は探せない」という嘘を user に見せ続ける(§1 の「文言と実装の食い違い」)。
    */
-  filter.title = '題名と本文から探します(Esc で、打った字を消します)';
+  /**
+   * 🔴 **`>` を打つと操作を探せることを、hover で 1 行言う**(#274 段①。姿 = D)。
+   * ⚠ placeholder は変えない(#852 で「本文ごと探す」と名乗った字 ── 見え方は user のもの)。
+   * ⚠ 指だけの端末には吹き出しが出ない ── そこは既存の「操作を探す」(左下)が入口である。
+   */
+  filter.title =
+    '題名と本文から探します(Esc で、打った字を消します)。先頭に > を打つと、操作を探せます';
   // ⚠ `placeholder` は名前ではない ── 値を入れると読み上げから消える
   filter.setAttribute('aria-label', '題名と本文から探す');
   /**
@@ -855,7 +861,25 @@ export function buildShell(root: HTMLElement): ShellRegions {
   phoneReturnTitle.setAttribute('data-pkc-field', 'phone-return-title');
   phoneReturn.append(phoneReturnLead, phoneReturnTitle);
   // ⚠ 一覧は createBar の**外**(下)── 中に入れると 1 行に混ざって折り返す
-  sidebar.append(phoneReturn, tabs, findBar, kindBar, createBar, menu, browseHost, collectionBar);
+  /**
+   * 🔴 **`>` を打ったとき、ノートの一覧の代わりに出す操作の一覧**(#274 段①)。
+   * ⚠ 器だけ置く(`hidden`)── 行は `binder.ts` が描き、出し入れは `browse.ts` が
+   *   `filterQuery` から決める。新しい入口ではなく、**同じ場所の中身が替わる**だけである。
+   */
+  const commandList = document.createElement('div');
+  commandList.setAttribute('data-pkc-region', 'command-list');
+  commandList.hidden = true;
+  sidebar.append(
+    phoneReturn,
+    tabs,
+    findBar,
+    kindBar,
+    createBar,
+    menu,
+    browseHost,
+    commandList,
+    collectionBar,
+  );
 
   // ── 中央(いま開いているもの)────────────────────────
   // 🔑 本文と**追記欄は別の器**にする(P8 段⑧)。本文は書き換わるたびに作り直すので、

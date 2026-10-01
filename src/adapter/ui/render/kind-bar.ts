@@ -35,6 +35,7 @@ import {
   type FilterTarget,
 } from '@features/filter/title-filter';
 import { kindCounts, type KindCount } from '@features/filter/kind-filter';
+import { commandQueryOf } from '@features/palette/command-query';
 import { kindFilterApplies, type BrowseMode } from './browse-mode';
 import { buildPressedButton } from './choice-buttons';
 
@@ -91,8 +92,14 @@ export class KindBarRenderer {
      *   効かない面に出しても、そこで解除しても**その面は何も変わらない**。
      *   🔑 効く面へ戻れば「解除」は出る(絞りは state に残っている)。
      */
+    /**
+     * 🔴 **`>` を打っている間は札を出さない**(#274 段①)── 一覧が操作に替わっているので、
+     *   ノートの種類で絞る札は**押しても見えている物が変わらない**(dead click)。
+     */
     const show =
-      kindFilterApplies(mode) && (kinds.length > 1 || state.kindFilter.size > 0);
+      commandQueryOf(state.filterQuery) === null &&
+      kindFilterApplies(mode) &&
+      (kinds.length > 1 || state.kindFilter.size > 0);
     /**
      * 🔴 **効いているのは「畳んだときの指紋を別にしてある」ほう**である
      *   (2026-08-27、変異試験 K3 が SURVIVED で教えた)。
