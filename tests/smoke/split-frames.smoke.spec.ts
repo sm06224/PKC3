@@ -87,7 +87,8 @@ test('🔴 本文を右クリックして横に留めると、2 つの枠が並�
   await writeBody(page, `# 資料 A\n\n${LONG}`);
   await createEntry(page, 'text');
   // ⚠ 資料 B にだけチェックを 1 つ持たせる(下の C6 / #1043 で、留めた枠から押す)
-  await writeBody(page, `# 資料 B\n\n- [ ] 牛乳\n\n${LONG}`);
+  // ⚠ 日付も 1 つ(#1169 ── 主を編集している間に留めた枠の `@日付` を押すと、理由が出る)
+  await writeBody(page, `# 資料 B\n\n- [ ] 牛乳\n\n締切は @2026-10-15 です\n\n${LONG}`);
 
   // ③ 本文を右クリック → 「このノートをスタックに載せる」(字は #633 段① で揃えた)
   // ⚠ **段落の上で押す**(器の中央は余白に当たる ── context-menu smoke と同じ作法)
@@ -167,6 +168,24 @@ test('🔴 本文を右クリックして横に留めると、2 つの枠が並�
     page.locator('[data-pkc-region="status"]'),
     '別のノートなのに断られた',
   ).not.toContainText('編集を終了してから');
+  /**
+   * 🔴 **主を編集している間に、留めた枠の `@2026-10-15` を押すと、理由が出る**(#1169)。
+   *
+   * ⚠ 編集中は別のノートへ移れない(下書きを守る)── そのとき**押したのに無言**にしない。
+   * 断り文は「リンク先」ではなく**押した日付で名指しする**(`2026-10-15 のノート`)。
+   * 🔑 起動を増やさない(この test の道中に足した)。⚠ 資料 B の枠は編集中も日付を押せる字で
+   *   残る(上のチェックと同じ)── 押せる字が消えていたら、ここで前提が崩れたと落ちる。
+   */
+  const pinnedDate = page.locator('[data-pkc-split-lid] [data-pkc-action="open-date-note"]');
+  await expect(pinnedDate, '編集中に留めた枠の @日付が押せる字で残っていない').toHaveCount(1);
+  await pinnedDate.click();
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '編集中に日付を押しても理由が出ない(無言の dead click)',
+  ).toContainText('編集を終了してから2026-10-15 のノートを開いてください');
+  // 🔑 主は編集のまま(日付のノートへ移っていない)
+  await expect(page.locator('[data-pkc-field="editor-body"]'), '編集が壊れた').toBeVisible();
+
   // 編集中のノート(資料 A)は巻き込まれない ── やめて戻れば元の本文のまま
   await clickReal(page, '[data-pkc-split-main] [data-pkc-action="cancel-edit"]');
   await expect(

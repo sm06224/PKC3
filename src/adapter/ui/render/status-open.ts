@@ -68,6 +68,7 @@ export interface StatusUndoState {
 }
 
 import { BLOCK_MOVED_NOTICE } from '@features/markdown/line-move';
+import { dateNoteCreateLabel, dateNoteMissingNotice } from '@features/schedule/today-note';
 
 /**
  * 🔴 **知らせの隣の「元に戻す」を出し入れする**(#684 段①)。
@@ -128,5 +129,48 @@ export function paintStatusUndo(btn: HTMLElement, state: StatusUndoState, shownL
     btn.setAttribute('data-pkc-action', move ? 'undo-move' : 'undo-append');
     btn.textContent = move ? '移動を元に戻す' : '追記を元に戻す';
   }
+  if (btn.hidden !== !show) btn.hidden = !show;
+}
+
+export interface StatusCreateState {
+  /** 「○○のノートを作る」で出す日付(`OP_NOTICE` の `createDate`)。 */
+  readonly noticeCreate: string | null;
+  readonly notice: string | null;
+  readonly phase: string;
+}
+
+/**
+ * 🔴 **知らせの隣の「○○のノートを作る」を出し入れする**(#1169)。
+ *
+ * 本文の `@2026-10-15` を押したのに、その日のノートが無かった直後だけ出る。
+ * 畳む条件は「開く」と同じ作法 ── どれか 1 つでも当たれば畳む:
+ *
+ * | 条件 | なぜ |
+ * |---|---|
+ * | 日付が無い(`noticeCreate === null`) | 添えていない知らせに押す口を残さない |
+ * | **出ている字が「…まだありません」そのものでない** | 別の知らせに上書きされた後に残ると、user は**その知らせの続き**と読む |
+ * | **読む画面でない**(編集中など) | 押しても断られるだけの口を出さない(`CREATE_ENTRY` は編集中に通らない) |
+ *
+ * ⚠ 出す条件は**日付ごとの字の一致**で見る ── `noticeCreate` だけだと、
+ *   別の知らせが上書きした後に前の日付の口が残る。
+ * 🔑 押した先は `create-date-note` の受け手(`binder.ts`)── 書くのは日付と字と `hidden` だけ。
+ */
+export function paintStatusCreate(
+  btn: HTMLElement,
+  state: StatusCreateState,
+  shownLine: string,
+): void {
+  const date = state.noticeCreate;
+  const show =
+    date !== null &&
+    state.phase === 'ready' &&
+    state.notice === dateNoteMissingNotice(date) &&
+    shownLine === state.notice;
+  if (date !== null && show) {
+    btn.setAttribute('data-pkc-date', date);
+    const label = dateNoteCreateLabel(date);
+    // ⚠ 同じ字を書き直さない(状態の行は打鍵ごとに描き直される)
+    if (btn.textContent !== label) btn.textContent = label;
+  } else btn.removeAttribute('data-pkc-date');
   if (btn.hidden !== !show) btn.hidden = !show;
 }

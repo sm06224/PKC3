@@ -3282,6 +3282,23 @@ li[data-pkc-row-slot] {
   margin-bottom: 4px;
 }
 
+/**
+ * 🔴 **本文の `@2026-10-15`(押すとその日のノートを開く)**(#1169)。
+ *
+ * 見た目は**点線の下線だけ**(字の色は変えない ── 読んでいる最中の本文を色で割らない。
+ * 地は無彩色、色は情報にだけ)。押せることは下線とポインタで伝える。
+ * 🔴 **`.pkc-md-rendered` を起点にしない** ── 起点にすると書き出す HTML の `<style>` へ
+ *   焼かれる(`build/body-css.ts` の判定は「全節が `.pkc-md-rendered` で始まるか」)。
+ *   この字は**読む面だけ**が押せる形で出す(書き出しには出ない)ので、書き出しの
+ *   CSS は 1 バイトも動かさない。`[data-pkc-prose]` は読む面の器が持つ印である。
+ */
+[data-pkc-prose] .pkc-date-link {
+  color: inherit;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
 /* 取り込み待ちの器(まだ実体が入っていないことが分かる形にする) */
 .pkc-md-rendered .pkc-transclusion-placeholder,
 .pkc-md-rendered .pkc-card-placeholder {
@@ -6410,6 +6427,14 @@ li[data-pkc-row-slot] {
  *   (上の注記のとおり、効いていない `min-height` はこちらからも落とした)。
  *   ⚠ 出し入れは `status-open.ts` が `hidden` で持つ。 */
 [data-pkc-field='status-undo'] {
+  flex: 0 0 auto;
+  padding: 0 var(--s2);
+  font-size: 11px;
+}
+
+/* 🔴 **日付のノートが無かった直後の「○○のノートを作る」**(#1169)── 「開く」と同じ寸法。
+ *   ⚠ 出し入れは `status-open.ts` が `hidden` で持つ。 */
+[data-pkc-field='status-create-date'] {
   flex: 0 0 auto;
   padding: 0 var(--s2);
   font-size: 11px;

@@ -95,6 +95,12 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
    */
   { key: 'pkc3.phone-links', label: '本文の電話番号を押せるようにするか' },
   /**
+   * ⚠ **人に付く好み**である(#1169)── 「本文の `@日付` を押してその日のノートを開きたい」
+   *   かどうかは端末の事情ではない(`pkc3.phone-links` と同じ考え方)。
+   * ⚠ 既定は**入**(`phone-links` と逆)なので、運ばれるのは**切にした人の `0`** が主になる。
+   */
+  { key: 'pkc3.date-links', label: '本文の日付を押せるようにするか' },
+  /**
    * ⚠ **`pkc3.panes`(列の畳み方)と同じ扱い**(#857 段④)── 「畳んでおきたい」は
    *   **人に付く**好みである。
    * 🔑 中身はグループの**名前**であって lid ではない ── だから `pkc3.split-lids`

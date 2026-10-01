@@ -51,7 +51,12 @@
  *
  * 🔑 **pure module**。DOM も DB も知らない。
  */
-import { isScheduleDate, isScheduleRange, isScheduleTime } from './schedule-date';
+import {
+  isRealCalendarDate,
+  isScheduleDate,
+  isScheduleRange,
+  isScheduleTime,
+} from './schedule-date';
 import {
   REPEAT_WORDS,
   SUBSTITUTE_WORD,
@@ -214,6 +219,41 @@ export function readLineDate(line: string): LineDate | null {
     };
   }
   return null;
+}
+
+/** 本文の字としての 1 つの日付(押せる字にする範囲)。 */
+export interface DateToken {
+  /** `YYYY-MM-DD`。⚠ 期間(`@a..b`)なら**開始** ── 押して開くのは開始の日である。 */
+  readonly date: string;
+  /** `@` から**日付の末尾まで**(時刻・期間の終わり・刻みは含まない)。 */
+  readonly start: number;
+  readonly end: number;
+}
+
+/**
+ * 🔴 **行に書かれた日付を全部**(#1169。本文の `@2026-10-15` を押せる字にする側)。
+ *
+ * ⚠ `readLineDate` は「その行の予定はいつか」に**1 つだけ**答える(最初の 1 つ)。
+ *   こちらは「押せる字はどこか」に答えるので**全部**返す ── 問いが違う。
+ *   🔑 ただし**走査の網は同じ `AT_DATE` 1 本**(2 本目の網を作らない)。
+ * ⚠ **実在する日だけ**(`isRealCalendarDate`)。形だけ通る `@2026-02-31` は
+ *   押せる字にしない ── 押すと存在しない日の題名でノートを作ることになる。
+ * ⚠ 期間は `readLineDate` と**同じ規則で成り立つものだけ**(逆順・書きかけは字のまま)。
+ *   成り立てば**開始の日**だけを範囲にする(`..` 以降は押せない字のまま残る)。
+ */
+export function allDateTokens(line: string): DateToken[] {
+  const out: DateToken[] = [];
+  AT_DATE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = AT_DATE.exec(line)) !== null) {
+    const date = m[1]!;
+    if (!isScheduleDate(date)) continue;
+    const rawUntil = m[2];
+    if (rawUntil !== undefined && !isScheduleRange(date, rawUntil)) continue;
+    if (!isRealCalendarDate(date)) continue;
+    out.push({ date, start: m.index, end: m.index + 1 + date.length });
+  }
+  return out;
 }
 
 /**

@@ -33,7 +33,8 @@ test('🔴 本文の entry: リンクを押すと、そのノートが開く(遷
 
   // ① リンク先のノートを作る(lid は一覧の行から採る ── 手で作らない)
   await createEntry(page, 'text');
-  await page.locator('[data-pkc-field="editor-title"]').fill('リンク先');
+  // 🔑 題名は日付にする ── 下の #1169 で、本文の `@2026-10-15` が**この既存のノート**を開くかを見る
+  await page.locator('[data-pkc-field="editor-title"]').fill('2026-10-15');
   await page.locator('[data-pkc-field="editor-body"]').fill('着いた先の本文。\n');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   const targetLid = await page
@@ -47,7 +48,7 @@ test('🔴 本文の entry: リンクを押すと、そのノートが開く(遷
   await page.locator('[data-pkc-field="editor-title"]').fill('リンク元');
   await page
     .locator('[data-pkc-field="editor-body"]')
-    .fill(`[あちらへ](entry:${targetLid ?? ''})\n`);
+    .fill(`[あちらへ](entry:${targetLid ?? ''})\n\n@2026-10-15 と @2026-10-16 の件\n`);
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
   // 🔴 焼く側が本当に action を付けている(unit の手組みが嘘でないこと)
@@ -61,6 +62,72 @@ test('🔴 本文の entry: リンクを押すと、そのノートが開く(遷
   await expect(page.locator('[data-pkc-field="detail-body"]')).toContainText('着いた先の本文');
   // 🔴 **遷移していない**(`entry:` へ飛ぼうとしていない)
   expect(page.url(), 'ブラウザが未知スキームへ遷移した').toBe(urlBefore);
+
+  /**
+   * 🔴 **本文の `@2026-10-15` を押すと、その日(題名が日付)のノートが開く**(#1169)。
+   *
+   * 起動を増やさない ── 上のノート 2 つ(題名 `2026-10-15` のノートと、本文に日付を 2 つ
+   * 書いたノート)をそのまま使う。unit(happy-dom)では届かない 3 つを見る:
+   *   ① **見た目** ── 点線の下線がつき、**字の色は本文のまま**(`getComputedStyle`。
+   *      属性の有無だけでは「押せる字に見えるか」は言えない)
+   *   ② 実ブラウザのクリックで開く。無い日は**作らずに聞き**、押したときだけ作る
+   *   ③ 描いた字が `@2026-10-15` のまま(勝手に書き換えていない)
+   */
+  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  const backToSource = async (): Promise<void> => {
+    await rows.filter({ hasText: 'リンク元' }).first().click();
+    await expect(
+      page.locator('[data-pkc-field="detail-body"] [data-pkc-action="open-date-note"]'),
+      '本文の @日付が押せる字になっていない(前提が崩れた)',
+    ).toHaveCount(2);
+  };
+  await backToSource();
+  const day15 = page.locator('[data-pkc-action="open-date-note"][data-pkc-date="2026-10-15"]');
+  const look = await day15.evaluate((el) => {
+    const cs = getComputedStyle(el);
+    const parent = getComputedStyle(el.parentElement!);
+    return {
+      line: cs.textDecorationLine,
+      style: cs.textDecorationStyle,
+      color: cs.color,
+      parentColor: parent.color,
+      cursor: cs.cursor,
+      text: el.textContent,
+    };
+  });
+  expect(look.text, '字が書き換わっている').toBe('@2026-10-15');
+  expect(look.line, '下線が無い(押せる字に見えない)').toContain('underline');
+  expect(look.style, '点線でない').toBe('dotted');
+  expect(look.color, '字の色が本文と違う(色で割らない決め)').toBe(look.parentColor);
+  expect(look.cursor, 'ポインタが変わらない').toBe('pointer');
+
+  // ① 在る日 ── そのノートが開く(押した日付の「ノートを開く」に見える)
+  await clickReal(page, day15);
+  await expect(page.locator('[data-pkc-field="detail-body"]')).toContainText('着いた先の本文');
+  expect(page.url(), '日付を押してブラウザが遷移した').toBe(urlBefore);
+
+  // ② 無い日 ── 押しただけでは作らず、画面の下で聞く
+  await backToSource();
+  const before = await rows.count();
+  await clickReal(page, '[data-pkc-action="open-date-note"][data-pkc-date="2026-10-16"]');
+  const status = page.locator('[data-pkc-region="status"]');
+  await expect(status, 'ノートが無いのに何も言わない(無言の dead click)').toContainText(
+    '2026-10-16 のノートはまだありません',
+  );
+  const create = page.locator('[data-pkc-field="status-create-date"]');
+  await expect(create, '「作る」が出ていない').toBeVisible();
+  await expect(create).toHaveText('2026-10-16 のノートを作る');
+  expect(await rows.count(), '押しただけでノートが増えた').toBe(before);
+
+  // ③ 「作る」を押したときだけ作り、開く(編集には入らない)
+  await clickReal(page, create);
+  await expect(rows.filter({ hasText: '2026-10-16' }), '作っていない').toHaveCount(1);
+  await expect(status).toContainText('2026-10-16 のノートを作りました');
+  await expect(create, '作った後も「作る」が残っている').toBeHidden();
+  await expect(
+    page.locator('[data-pkc-field="editor-body"]'),
+    '作ったら編集に入ってしまった(読んでいた物の続きで開くだけのはず)',
+  ).toBeHidden();
 
   expect(errors).toEqual([]);
 });

@@ -74,6 +74,7 @@ import {
   parseCardPresentation,
 } from '../link/card-presentation';
 import { findPhones } from '../contact/phone-link';
+import { allDateTokens } from '../schedule/line-date';
 
 const md = new MarkdownIt({
   html: false,          // Disable HTML tags in source (XSS safety)
@@ -2663,6 +2664,74 @@ md.core.ruler.after('inline', 'pkc-phone', function (state) {
   return true;
 });
 
+/**
+ * 🔴 **本文の `@2026-10-15` を、押せる字にする**(#1169)。
+ *
+ * > 予定やチェックリストに `@日付` と書いた user が、その日のノートへ**1 手で**飛べる。
+ *
+ * ⚠ **既定は切**(`env.interactiveDates`)── 受け手(`open-date-note`)が居る面だけ
+ *   `true` にする(押せるのに何も起きないと dead click になる。`interactiveTags` と同じ理由)。
+ *   書き出した HTML には受け手が居ないので、**1 バイトも変わらない**。
+ * ⚠ 日付の判定は `schedule/line-date.ts` の `allDateTokens` が**1 か所で**持つ(実在しない日・
+ *   単価・個数は拾わない)。ここは拾った所を切って `<a>` にするだけである。
+ * ⚠ **リンクの中では当てない**(`[予定 @2026-10-15](…)` の字を入れ子にしない)。
+ *   `code_inline` は別の token 型なので、`text` だけを見れば自然に外れる。
+ * 🔑 **`<a>` ではなく `<span role="link" tabindex="0">`**(`@card` の札と同じ形)── href を
+ *   持たない `<a>` は**キーボードで焦点が乗らない**。この形なら binder の
+ *   「`tabindex="0"` の押せる物は Enter / Space で押せる」の既存の道に乗る。
+ * ⚠ 字は**打ったまま**(`@2026-10-15`)── 勝手に書き換えたように見せない。
+ *   期間(`@a..b`)は開始の日だけを押せる字にし、`..b` は字のまま後ろに残る。
+ */
+md.core.ruler.after('inline', 'pkc-date-link', function (state) {
+  if ((state.env as { interactiveDates?: boolean }).interactiveDates !== true) return true;
+  for (const token of state.tokens) {
+    if (token.type !== 'inline') continue;
+    const children = token.children;
+    if (!children) continue;
+    const out: typeof children = [];
+    let inLink = 0;
+    let changed = false;
+    for (const t of children) {
+      if (t.type === 'link_open') inLink += 1;
+      else if (t.type === 'link_close') inLink -= 1;
+      if (t.type !== 'text' || inLink > 0) {
+        out.push(t);
+        continue;
+      }
+      const hits = allDateTokens(t.content);
+      if (hits.length === 0) {
+        out.push(t);
+        continue;
+      }
+      let at = 0;
+      for (const h of hits) {
+        if (h.start > at) {
+          const head = new state.Token('text', '', 0);
+          head.content = t.content.slice(at, h.start);
+          out.push(head);
+        }
+        const tok = new state.Token('html_inline', '', 0);
+        // ⚠ 属性も本文も**必ず escape する**(`tagLineHtml` と同じ作法)
+        tok.content =
+          `<span class="pkc-date-link" data-pkc-action="open-date-note" ` +
+          `data-pkc-date="${escapeHtmlAttr(h.date)}" role="link" tabindex="0">` +
+          `${md.utils.escapeHtml(t.content.slice(h.start, h.end))}</span>`;
+        out.push(tok);
+        at = h.end;
+        changed = true;
+      }
+      if (at < t.content.length) {
+        const tail = new state.Token('text', '', 0);
+        tail.content = t.content.slice(at);
+        out.push(tail);
+      }
+    }
+    // ⚠ 当たらなかった段落は**触らない**(token の同一性を無駄に壊さない)
+    if (changed) token.children = out;
+  }
+  return true;
+});
+
 md.core.ruler.after('inline', 'pkc-task-list', function (state) {
   const tokens = state.tokens;
   let taskIndex = 0;
@@ -2879,6 +2948,15 @@ export interface RenderMarkdownOptions {
    *   🔑 だから**渡すのは設定を読める面**である(`detail.ts` など)。
    */
   readonly phoneLinks?: boolean;
+  /**
+   * 🔴 **本文の `@2026-10-15` を押せる字にするか**(#1169。既定 `false` = 押せない)。
+   *
+   * ⚠ **受け手(`open-date-note`)が居る面だけ** `true` にする(`interactiveTags` と同じ理由)。
+   *   渡さなければ属性は 1 つも出ない = 書き出しの goldens は 1 バイトも動かない。
+   * ⚠ ワーカー越しの描画では `opts` の**正規化の 1 行**を通らないと黙って落ちる
+   *   (`renderMarkdown` の env 組み立て)。
+   */
+  readonly interactiveDates?: boolean;
   /**
    * 🔴 **チェックの印が指す行を、原文の行へ戻すためのずらし**(N1)。
    *
@@ -5937,6 +6015,7 @@ export function renderMarkdown(
     interactiveCodeBlocks: boolean;
     interactiveTags: boolean;
     phoneLinks: boolean;
+    interactiveDates: boolean;
     taskLineOffset: number;
     lineMap?: number[];
     fenceAssets?: Readonly<Record<string, string>>;
@@ -5967,6 +6046,8 @@ export function renderMarkdown(
     interactiveTags: opts.interactiveTags === true,
     // 🔴 素の電話番号を押せる形にするか(#278 段②)。既定は切
     phoneLinks: opts.phoneLinks === true,
+    // 🔴 本文の `@日付` を押せる字にするか(#1169)。既定は押せない
+    interactiveDates: opts.interactiveDates === true,
     // 🔴 剥がして描く面だけがずらす(既定 0)。理由は上の option の注記
     taskLineOffset: Number.isInteger(opts.taskLineOffset) ? (opts.taskLineOffset as number) : 0,
   };

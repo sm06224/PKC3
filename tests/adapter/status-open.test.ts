@@ -16,7 +16,11 @@
  */
 import { describe, expect, it } from 'vitest';
 import { buildShell } from '../../src/adapter/ui/render/shell';
-import { paintStatusOpen, paintStatusUndo } from '../../src/adapter/ui/render/status-open';
+import {
+  paintStatusCreate,
+  paintStatusOpen,
+  paintStatusUndo,
+} from '../../src/adapter/ui/render/status-open';
 
 const LINE = '「見積.pdf」を添付にしました(開いているのは『フォルダ』なので、本文には入れていません)';
 
@@ -145,5 +149,73 @@ describe('知らせの隣の「元に戻す」── 開いていないノート
     const b = undoBtn();
     paintStatusUndo(b, { lastMove: null, notice: PUT, lastAppend: null, noticeOpen: 'n2' }, PUT);
     expect(b.hidden).toBe(true);
+  });
+});
+
+/**
+ * 🔴 **本文の `@日付` を押したがノートが無かったときの「○○のノートを作る」**(#1169)。
+ *
+ * 畳む 3 条件は「開く」と同じ作法 ── 日付が無い / 出ている字が「まだありません」でない /
+ * 読む画面でない(編集中に出しても押せば断られるだけ)。
+ */
+describe('知らせの隣の「○○のノートを作る」(#1169)', () => {
+  const MISSING = '2026-10-15 のノートはまだありません';
+  const ready = { noticeCreate: '2026-10-15', notice: MISSING, phase: 'ready' } as const;
+
+  it('🔴 器が押し口を持ち、create-date-note の受け手へ繋がっている', () => {
+    document.body.textContent = '';
+    const root = document.createElement('div');
+    document.body.append(root);
+    const regions = buildShell(root);
+    const b = regions.statusCreate;
+    expect(b.getAttribute('data-pkc-field')).toBe('status-create-date');
+    expect(b.getAttribute('data-pkc-action'), '受け手の無い口').toBe('create-date-note');
+    expect(b.hidden, '日付が無いのに出ている').toBe(true);
+    expect(regions.status.contains(b), '状態の行の外に居る').toBe(true);
+  });
+
+  it('🔴 条件が揃えば、日付と字を書いて出す', () => {
+    const b = btn();
+    paintStatusCreate(b, ready, MISSING);
+    expect(b.hidden).toBe(false);
+    expect(b.getAttribute('data-pkc-date'), '受け手が読む属性に日付が無い').toBe('2026-10-15');
+    expect(b.textContent).toBe('2026-10-15 のノートを作る');
+  });
+
+  it('🔴 別の日付の知らせに替われば、字も日付も追従する(前の日付を残さない)', () => {
+    const b = btn();
+    paintStatusCreate(b, ready, MISSING);
+    const next = '2026-10-16 のノートはまだありません';
+    paintStatusCreate(b, { noticeCreate: '2026-10-16', notice: next, phase: 'ready' }, next);
+    expect(b.getAttribute('data-pkc-date')).toBe('2026-10-16');
+    expect(b.textContent).toBe('2026-10-16 のノートを作る');
+  });
+
+  it('🔴 畳む条件 ── 日付が無い / 字が上書きされた / 読む画面でない', () => {
+    const shown = (): HTMLElement => {
+      const b = btn();
+      paintStatusCreate(b, ready, MISSING);
+      expect(b.hidden, '前提: 出ていない').toBe(false);
+      return b;
+    };
+    let b = shown();
+    paintStatusCreate(b, { ...ready, noticeCreate: null }, MISSING);
+    expect(b.hidden, '日付が無いのに残っている').toBe(true);
+    expect(b.hasAttribute('data-pkc-date'), '畳んだのに日付が残っている').toBe(false);
+
+    // 🔴 状態の行だけが別の字に上書きされた(コピーした等)── state の知らせは動かない
+    b = shown();
+    paintStatusCreate(b, ready, 'コピーしました');
+    expect(b.hidden, '上書きされた後も残っている(押すと「コピー」の続きに見える)').toBe(true);
+
+    // 🔴 state の知らせが別の物に替わった(日付だけ残っている)
+    b = shown();
+    paintStatusCreate(b, { ...ready, notice: 'コピーしました' }, 'コピーしました');
+    expect(b.hidden, '別の知らせの隣に前の日付が残っている').toBe(true);
+
+    // 🔴 編集中は出さない(`CREATE_ENTRY` は編集中に通らない)
+    b = shown();
+    paintStatusCreate(b, { ...ready, phase: 'editing' }, MISSING);
+    expect(b.hidden, '編集中に出ている(押しても断られるだけ)').toBe(true);
   });
 });

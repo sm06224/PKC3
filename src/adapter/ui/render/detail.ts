@@ -113,6 +113,7 @@ import type { AppState, AppPhase, PartialDraft } from '@adapter/state/app-state'
 import { appEditorMode } from './editor-mode';
 import { appKeymap, type KeymapStore } from './keymap';
 import { appPhoneLinks } from './phone-links';
+import { appDateLinks } from './date-links';
 import { appVoiceBoostRouter } from './voice-boost';
 import {
   appExtensionGrants,
@@ -1048,6 +1049,17 @@ export class DetailRenderer {
          *   受け手(`filter-by-tag`)が居ないので、押せない形のまま出す。
          */
         interactiveTags: true,
+        /**
+         * 🔴 **本文の `@2026-10-15` を押せるようにする**(#1169)。
+         *
+         * > user の物語:予定に `@日付` と書いて、その日のノートへ**1 手で**飛びたい。
+         *
+         * ⚠ **この面だけ**である(理由は上の 3 つと同じ)── 受け手(`open-date-note`)が
+         *   居ない書き出した HTML・印刷・章の別ウィンドウ・プレビュー・添付の説明は、
+         *   ふつうの字のまま出す。
+         * ⚠ 決めているのは**設定**(既定は入)。描くのはワーカーなので素の真偽値で渡す。
+         */
+        interactiveDates: appDateLinks.enabled(),
         /**
          * 🔴 **押した行を原文の行で焼く**(N1)。この面は `fm.body`(frontmatter を
          * 剥がした本文)を描くが、受け手(`body-rewrite.ts`)は**原文**を splice する。

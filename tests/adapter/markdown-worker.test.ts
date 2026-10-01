@@ -78,6 +78,23 @@ describe('markdown worker', () => {
   });
 
   /**
+   * 🔴 **本文の `@日付` を押せる字にする旗も落とさない**(#1169)。
+   *
+   * 読む面はワーカー経由で描くので、素通しでないと「同期経路では押せるのに、
+   * ワーカーが立っていると押せない」という**環境で挙動が割れる**形になる。
+   */
+  it('🔴 opts の interactiveDates を落とさない(@日付が worker でも押せる)', () => {
+    const text = '予定 @2026-10-15\n';
+    const on = send(1, text, { interactiveDates: true }) as { result: string };
+    const off = send(2, text) as { result: string };
+    // ⚠ **違いが出ること**を先に確かめる ── 同じなら opts を見ていない実装でも通る
+    expect(on.result).not.toBe(off.result);
+    expect(on.result).toContain('data-pkc-action="open-date-note"');
+    expect(off.result).not.toContain('open-date-note');
+    expect(on.result).toBe(renderMarkdown(text, { interactiveDates: true }));
+  });
+
+  /**
    * 🔴 **囲みの中身(添付)も落とさない**(#444 段②)。
    *
    * 書き出しは `renderBody` 経由で**ワーカーへ行くことがある** ── ここが素通しで

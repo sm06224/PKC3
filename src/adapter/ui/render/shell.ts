@@ -62,6 +62,12 @@ export interface ShellRegions {
    */
   statusUndo: HTMLElement;
   /**
+   * 🔴 **知らせの隣の「○○のノートを作る」**(#1169)── 本文の `@日付` を押したのに
+   *   その日のノートが無かった直後だけ出る。⚠ 押した先は `create-date-note` の受け手
+   *   (`binder.ts`)。出し入れと日付は `status-open.ts` が書く。
+   */
+  statusCreate: HTMLElement;
+  /**
    * 🔴 **未読のメッセージへの入口**(設計 doc §7、段②a)。⚠ 常設で置き、
    *   未読が 1 件以上あるときだけ `hidden` を外す(`main.ts` が state を見て書く)。
    */
@@ -1067,6 +1073,16 @@ export function buildShell(root: HTMLElement): ShellRegions {
   statusUndo.textContent = '移動を元に戻す';
   statusUndo.hidden = true;
   /**
+   * 🔴 **知らせの隣の「○○のノートを作る」**(#1169)。⚠ 「開く」「元に戻す」と同じ作法 ──
+   * 常設で置いて要るときだけ出す(`status-open.ts` が日付・字・`hidden` を書く)。
+   * 🔑 実行の口は `create-date-note` の受け手 1 つ(`binder.ts`)── ここに listener を張らない。
+   */
+  const statusCreate = document.createElement('button');
+  statusCreate.type = 'button';
+  statusCreate.setAttribute('data-pkc-field', 'status-create-date');
+  statusCreate.setAttribute('data-pkc-action', 'create-date-note');
+  statusCreate.hidden = true;
+  /**
    * 🔴 **未読のメッセージへの入口**(設計 doc §7、段②a)。
    *
    * ⚠ 「開く」「元に戻す」と同じ作法 ── **常設で置いて、未読が 1 件以上あるときだけ
@@ -1109,7 +1125,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   tooNarrowOk.type = 'button';
   tooNarrowOk.setAttribute('data-pkc-field', 'too-narrow-ok');
   tooNarrow.append(tooNarrowText, tooNarrowOk);
-  status.append(statusText, statusOpen, statusUndo, statusMessages, tooNarrow);
+  status.append(statusText, statusOpen, statusUndo, statusCreate, statusMessages, tooNarrow);
 
   /**
    * 🔴 **収録中の帯**(#413)── 経過 + 概算の大きさ + 止める / 捨てる。
@@ -1255,6 +1271,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
     statusText,
     statusOpen,
     statusUndo,
+    statusCreate,
     statusMessages,
     tooNarrow,
     tooNarrowText,

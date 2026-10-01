@@ -72,6 +72,7 @@ const PORTABLE_FIELD_OF: Record<string, string> = {
   'pkc3.open-place': 'open-place-select',
   'pkc3.app-open-target': 'app-open-target-select',
   'pkc3.phone-links': 'phone-links',
+  'pkc3.date-links': 'date-links',
   /**
    * 🔴 **唯一の例外**(裁定 2026-09-20)── メッセージの保管件数は
    * 「メッセージ」節の値で、system 領域の「設定」ではない。

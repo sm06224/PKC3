@@ -187,6 +187,26 @@ describe('可搬 HTML', () => {
     expect(d.entries.map((e) => e.title)).toEqual(['<!-- 下書き', '<script の使い方']);
   });
 
+  /**
+   * 🔴 **本文の `@日付` を押せる字にする直し(#1169)は、書き出す HTML を 1 バイトも変えない**。
+   *
+   * 押した受け手(`open-date-note`)は読む面にしか居ない。書き出した HTML に印や下線の規則が
+   * 載ると、**押せるように見えて何も起きない字**を配ることになる。
+   * ⚠ 描く側の旗(`interactiveDates`)は既定で切、見た目の規則は `.pkc-md-rendered` を
+   *   起点にしない(焼かれる CSS に入らない)── どちらが外れても、ここが落ちる。
+   */
+  it('🔴 本文の @日付は、書き出した HTML では押せる字にならない(印も規則も載らない)', async () => {
+    const out = await writePortableHtml(
+      source({ entries: [{ lid: 'n1', body: '- [ ] 見積を送る @2026-10-15\n' }] }),
+      NOW,
+    );
+    const text = await out.blob.text();
+    // ⚠ 空振り防止 ── 日付そのものは字として在る(本文が消えていない)
+    expect(text, '本文の日付が消えている').toContain('@2026-10-15');
+    expect(text, '押せる印が書き出しに載っている').not.toContain('open-date-note');
+    expect(text, '押せる字の class が書き出しに載っている').not.toContain('pkc-date-link');
+  });
+
   it('escapeForScriptData は `<` を退避し、値は変えない', () => {
     expect(escapeForScriptData('a</script>b<!--c')).toBe('a\\u003c/script>b\\u003c!--c');
     expect(escapeForScriptData('x > y')).toBe('x > y'); // それ以外は触らない
