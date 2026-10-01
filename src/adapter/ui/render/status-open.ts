@@ -27,6 +27,8 @@
  *   だから書くのは `data-pkc-entry`(受け手が読む属性)と `hidden` の 2 つだけ。
  */
 
+import { isCorruptRefusalLine } from '@features/storage/db-corruption';
+
 export interface StatusOpenState {
   /** 「開く」で出す物の lid(`OP_NOTICE` の `open`)。 */
   readonly noticeOpen: string | null;
@@ -51,6 +53,25 @@ export function paintStatusOpen(
   if (show) btn.setAttribute('data-pkc-entry', lid);
   else btn.removeAttribute('data-pkc-entry');
   // ⚠ 同じ値を書き直さない(状態の行は打鍵ごとに描き直される)
+  if (btn.hidden !== !show) btn.hidden = !show;
+}
+
+/**
+ * 🔴 **断り書きの隣の「保存領域の点検を開く」を出し入れする**(#1010 B)。
+ *
+ * 保存が止まったとき画面の下の 1 行に出る「保存されている中身の一部が読み込めません…」は
+ * この物語の出発点なのに、**押しても設定へ飛ばなかった**(字を読んで、自分で「システム」を
+ * 開き、「保存領域」まで探す必要があった)。
+ *
+ * 🔑 出す条件は 1 つ ── **いま画面に出ている 1 行が、その断り書きを含む**こと。
+ *   別の知らせが上書きしたら(字が変わるので)その瞬間に畳む = 「コピーしました」の隣に
+ *   点検の入口が残らない(「開く」と同じ作法)。
+ * 🔑 押した先は `open-storage-check` の受け手(`binder.ts`)── 書くのは `hidden` だけ。
+ *
+ * @param text いま状態の行に出ている字の全部(`composeStatusLine` の結果)
+ */
+export function paintStatusRescue(btn: HTMLElement, text: string): void {
+  const show = isCorruptRefusalLine(text);
   if (btn.hidden !== !show) btn.hidden = !show;
 }
 

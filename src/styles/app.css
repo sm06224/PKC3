@@ -6423,7 +6423,8 @@ li[data-pkc-row-slot] {
  * ⚠ だから**消す**(残すと、次に読む人が「ここは 18px だ」と読む)。丈を本当に
  *   変えたいなら `height` を書く ── ただしそれは**見え方の変更**なので user の裁定が要る。
  */
-[data-pkc-field='status-open'] {
+[data-pkc-field='status-open'],
+[data-pkc-field='status-rescue'] {
   flex: 0 0 auto;
   padding: 0 var(--s2);
   font-size: 11px;

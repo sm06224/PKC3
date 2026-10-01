@@ -24,6 +24,7 @@ import {
   BAR_FORMAT_OPS,
   type FormatOp,
   type TextSelection,
+  tableOpMadeSingleColumn,
 } from '../../src/features/markdown/text-ops';
 
 /** `|` で選択範囲を書く記法(見て分かる fixture を作る)。 */
@@ -447,6 +448,19 @@ describe('🔴 選んだものを囲む(#950)', () => {
       const out = applyFormat({ text: 'ただの文', start: 0, end: 4 }, 'table');
       expect(out.text).toContain('ただの文');
       expect(out.text).toContain('|');
+    });
+
+    /** 🔴 #950 ③: 「1 列だった」と言える条件。⚠ 判定は表を作る本体と同じ 1 か所(別に割り直さない)。 */
+    it('tableOpMadeSingleColumn: 区切りの無い選択だけが true(対照群を並べる)', () => {
+      const sel = (text: string, start = 0, end = text.length) => ({ text, start, end });
+      expect(tableOpMadeSingleColumn(sel('ただの文'))).toBe(true);
+      expect(tableOpMadeSingleColumn(sel('一行目\n二行目'))).toBe(true);
+      // 区切りが在る / 選んでいない / 既に表 / 空白だけ ── 言わない
+      expect(tableOpMadeSingleColumn(sel('A,B\n1,2'))).toBe(false);
+      expect(tableOpMadeSingleColumn(sel('A\tB'))).toBe(false);
+      expect(tableOpMadeSingleColumn(sel('ただの文', 2, 2))).toBe(false);
+      expect(tableOpMadeSingleColumn(sel('| a | b |\n| - | - |'))).toBe(false);
+      expect(tableOpMadeSingleColumn(sel('   '))).toBe(false);
     });
 
     /**

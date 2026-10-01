@@ -33,7 +33,7 @@ export const ARCHETYPE_LABELS: readonly (readonly [string, string])[] = [
   ['appgroup', 'アプリのグループ'],
   ['attachment', '添付'],
   ['snippet', 'テンプレート'],
-  ['todo', 'Todo'],
+  ['todo', 'チェックリスト'],
   ['form', 'フォーム'],
 ];
 

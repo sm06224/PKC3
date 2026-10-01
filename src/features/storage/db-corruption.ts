@@ -122,6 +122,18 @@ export const CORRUPT_REFUSAL =
   '中身を自分の目で見たいだけなら、「SQL で調べる」からも取り出せます。';
 
 /**
+ * 🔴 **この字は「保存されている中身の一部が読み込めません」の断り書きか**(#1010 B)。
+ *
+ * ⚠ 画面の下の 1 行は、断り書きの**前に「エラー:」が付いたり、後ろに「(op で検出: …)」が
+ *   続いたりする**(`corruptReport`)── だから先頭一致ではなく**含むか**で見る。
+ * 🔑 押せる入口(保存領域の点検へ連れて行く)を出すかどうかの判定は**ここ 1 か所**
+ *   (`status-open.ts` の `paintStatusRescue`)。
+ */
+export function isCorruptRefusalLine(text: string): boolean {
+  return text.includes(CORRUPT_REFUSAL);
+}
+
+/**
  * 壊れていると分かった回に、**元の字を残したまま**読める形にする。
  * ⚠ 元の字を捨てない ── 切り分けに要る(どの op のどこで出たか)。
  */

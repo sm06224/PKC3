@@ -21,7 +21,7 @@ import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
-import { bindActions } from '../../src/adapter/ui/actions/binder';
+import { applyFormatTo, bindActions, type BinderServices } from '../../src/adapter/ui/actions/binder';
 import {
   BAR_FORMAT_OPS,
   DIAGRAM_CHOICES,
@@ -59,7 +59,11 @@ async function tick(ms = 10): Promise<void> {
   await new Promise((r) => setTimeout(r, ms));
 }
 
-function setup(metas: EntryMeta[], bodies: Record<string, string>) {
+function setup(
+  metas: EntryMeta[],
+  bodies: Record<string, string>,
+  services: BinderServices = {},
+) {
   const root = document.createElement('div');
   document.body.append(root);
   const d = new Dispatcher();
@@ -69,7 +73,7 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>) {
     d.dispatch({ type: 'UPDATE_OPEN_BODY', body }),
   );
   d.onState((s) => detail.render(s));
-  bindActions(root, d);
+  bindActions(root, d, services);
   const persisted: EntryUpsert[] = [];
   connectStoreEffects(d, {
     ...stubRevisionOps(),
@@ -131,6 +135,61 @@ describe('書式パネル(P8 段⑥)', () => {
     expect(q('[data-pkc-region="editor-preview"]')!.querySelector('strong')?.textContent).toBe(
       '強調',
     );
+  });
+
+  /**
+   * 🔴 **区切りの無い文章を選んで「表」を押したら、1 列の表にして、そう言う**(#950 ③)。
+   *
+   * ⚠ 見るのは「押した場所と対」── 同じ「表」ボタンでも、**区切りの在る選択 / 選んでいない /
+   *   既に表**では言わない(対照群)。字だけ `toContain` すると、毎回言う実装も通る。
+   */
+  describe('「表」を押したときの 1 列の知らせ(#950 ③)', () => {
+    const NOTE = '1 列の表にしました(区切りが見つかりませんでした)';
+    async function openAndPress(body: string, range: [number, number], op = 'table') {
+      const said: string[] = [];
+      const { d, q } = setup([meta('a')], { a: body }, { showStatus: (t) => said.push(t) });
+      d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+      await tick();
+      q('[data-pkc-action="start-edit"]')!.click();
+      const ta = press(q, op, range);
+      return { said, ta };
+    }
+
+    it('区切りの無い文章を選んで押すと、1 列の表になり、画面の下で言う(字は消えない)', async () => {
+      const { said, ta } = await openAndPress('ただの文章です', [0, 7]);
+      expect(ta.value).toContain('ただの文章です');
+      expect(ta.value).toContain('|');
+      expect(said).toEqual([NOTE]);
+    });
+
+    it('対照群: カンマで区切れる選択は 2 列の表になり、何も言わない', async () => {
+      const { said, ta } = await openAndPress('A,B\n1,2', [0, 7]);
+      expect(ta.value).toContain('| A');
+      expect(said).toEqual([]);
+    });
+
+    it('対照群: 選んでいなければ空の雛形を入れるだけで、何も言わない', async () => {
+      const { said } = await openAndPress('あいう', [1, 1]);
+      expect(said).toEqual([]);
+    });
+
+    /** 🔴 鍵 / パレットの口(`applyFormatTo`)も同じ知らせを言う(ボタンだけ言うと「鍵では無言」になる)。 */
+    it('鍵・パレットの口でも、同じ字で言う(対照群: 言う口を渡さなければ何も出ない)', () => {
+      const ta = document.createElement('textarea');
+      ta.value = 'ただの文章です';
+      const said: string[] = [];
+      expect(applyFormatTo(ta, 'format-table', { start: 0, end: 7 }, (t) => said.push(t))).toBe(true);
+      expect(said).toEqual([NOTE]);
+      expect(ta.value).toContain('ただの文章です');
+      const quiet = document.createElement('textarea');
+      quiet.value = 'ただの文章です';
+      expect(applyFormatTo(quiet, 'format-table', { start: 0, end: 7 })).toBe(true);
+    });
+
+    it('対照群: 「表」以外のボタンでは言わない', async () => {
+      const { said } = await openAndPress('ただの文章です', [0, 7], 'bold');
+      expect(said).toEqual([]);
+    });
   });
 
   it('🔴 パネルのボタンは**表と 1 対 1**(押しても何も起きないボタンが無い)', async () => {

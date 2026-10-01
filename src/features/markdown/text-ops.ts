@@ -500,8 +500,8 @@ function tryUnwrapBlock(
  *   `|` がセルの値として読まれ、逃がされて壊れる。⚠ **完全なトグル(表 →
  *   元の CSV/TSV)はここでは作らない**(区切り字と引用符の情報を復元できない)。
  * - ⚠ **区切り字を 1 つも含まない文章を選ぶと 1 列だけの見出し表になる**
- *   (`parseCsv` が 1 セルの行として読むため)。これは直さず**残す** ──
- *   user の裁定が要る所として別に上げる。
+ *   (`parseCsv` が 1 セルの行として読むため)。表にしたうえで、**押した側が
+ *   「1 列の表にしました」と知らせる**(`tableOpMadeSingleColumn`。#950 ③)。
  */
 
 /**
@@ -530,19 +530,48 @@ function looksLikeTable(text: string): boolean {
   );
 }
 
-function wrapSelectionAsTable(sel: TextSelection): TextSelection {
+/**
+ * 選んだ字から表を作る本体。⚠ 「何を返すか」と「1 列だけだったか」を**同じ 1 か所**で決める
+ * (#950 ③)── 知らせを出す側が別に割り直すと、**同じ問いに答える口が 2 つ**になる(§7)。
+ *
+ * 🔑 `singleColumn` は「**区切りが見つからなくて、選んだ字がそのまま 1 列の表になった**」。
+ *   既に表に見える選択 / 空白だけの選択(雛形へ逃がす)は**変換していない**ので false。
+ */
+function planSelectionTable(sel: TextSelection): { next: TextSelection; singleColumn: boolean } {
   const { text, start, end } = sel;
   const inner = text.slice(start, end);
-  if (looksLikeTable(inner)) return sel;
+  if (looksLikeTable(inner)) return { next: sel, singleColumn: false };
   const rows = parseCsv(inner, pickCsvDelimiter(inner));
   const md = rows === null ? null : tableToMarkdown(rows.map((cells, i) => ({ cells, head: i === 0 })));
-  if (md === null) return insertBlock(sel, TABLE_BLOCK);
+  if (rows === null || md === null) return { next: insertBlock(sel, TABLE_BLOCK), singleColumn: false };
   const { lead, tail } = lineBreaksAround(text, start, end);
   const body = `${lead}${md}\n${tail}`;
   const next = text.slice(0, start) + body + text.slice(end);
   const caret = start + lead.length;
-  return { text: next, start: caret, end: caret + md.length };
+  return {
+    next: { text: next, start: caret, end: caret + md.length },
+    singleColumn: rows.every((cells) => cells.length <= 1),
+  };
 }
+
+function wrapSelectionAsTable(sel: TextSelection): TextSelection {
+  return planSelectionTable(sel).next;
+}
+
+/**
+ * 🔴 **「表」を押した結果が、区切りの無い 1 列の表だったか**(#950 ③)。
+ *
+ * ⚠ 選んでいなければ(雛形を差し込むだけ)false ── 空の選択は `planSelectionTable` が
+ *   雛形へ逃がすので、ここで別に弾かない(弾く門は外しても変わらない = no-op だった)。
+ *   呼び側は**押す前の選択**を渡す。
+ * 🔑 字は消えず 1 列の表になるので、user には**起きたことを 1 行で言う**(無言にしない)。
+ */
+export function tableOpMadeSingleColumn(sel: TextSelection): boolean {
+  return planSelectionTable(sel).singleColumn;
+}
+
+/** 区切りの無い文章を表にしたときの知らせ(画面の下の 1 行)。 */
+export const SINGLE_COLUMN_TABLE_NOTE = '1 列の表にしました(区切りが見つかりませんでした)';
 
 /**
  * どちらの区切り字で割るか(#950 着地前レビュー ②)。

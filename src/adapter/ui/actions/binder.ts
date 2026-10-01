@@ -186,7 +186,10 @@ import {
   DIAGRAM_TEMPLATES,
   insertBlock,
   linkifyPastedUrl,
+  SINGLE_COLUMN_TABLE_NOTE,
+  tableOpMadeSingleColumn,
   type FormatOp,
+  type TextSelection,
 } from '@features/markdown/text-ops';
 import { insertSnippet, nextSnippetSlot } from '@features/snippet/snippet-expand';
 import { abbrBeforeCaret } from '@features/snippet/snippet-table';
@@ -4468,7 +4471,7 @@ export function openPaletteFor(
       runEditor(target, notify);
       return;
     }
-    applyFormatTo(target, picked, range ?? undefined);
+    applyFormatTo(target, picked, range ?? undefined, notify);
   });
 }
 
@@ -6510,7 +6513,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 挿す仕事は**既にある 1 本ずつ**へ渡す(`applyFormat` / `insertSnippet`)──
    *   ここで組み立てると、帯のボタンと一覧で結果が食い違う(CLAUDE.md §7)。
    */
-  'insert-snippet': (dispatcher, _target, _services, root) => {
+  'insert-snippet': (dispatcher, _target, services, root) => {
     const opened = formatTarget(root);
     if (opened === null) return;
     const at = { start: opened.selectionStart, end: opened.selectionEnd };
@@ -6528,7 +6531,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       ta.setSelectionRange(at.start, at.end);
       const sel = { text: ta.value, start: ta.selectionStart, end: ta.selectionEnd };
       if (picked.kind === 'format') {
-        writeBack(ta, applyFormat(sel, picked.op));
+        writeBack(ta, applyFormatSaying(sel, picked.op, (t) => services.showStatus?.(t)));
         return;
       }
       /**
@@ -6626,12 +6629,19 @@ const ACTIONS: Record<string, ActionHandler> = {
       insertText(ta, iconShortcodeFor(name));
     });
   },
-  'format-text': (_dispatcher, target, _services, root) => {
+  'format-text': (_dispatcher, target, services, root) => {
     const op = target.getAttribute('data-pkc-format') as FormatOp | null;
     // ⚠ live の 1 面では活性の行(`row-source`)に効く(`formatTarget` の注記)
     const ta = formatTarget(root);
     if (!op || !ta) return;
-    writeBack(ta, applyFormat({ text: ta.value, start: ta.selectionStart, end: ta.selectionEnd }, op));
+    writeBack(
+      ta,
+      applyFormatSaying(
+        { text: ta.value, start: ta.selectionStart, end: ta.selectionEnd },
+        op,
+        (t) => services.showStatus?.(t),
+      ),
+    );
   },
   /**
    * 🔑 **追記**(P8 段⑧)。編集画面を開かず、打った内容をそのまま末尾へ足す。
@@ -9390,6 +9400,20 @@ const ACTIONS: Record<string, ActionHandler> = {
       ?.scrollIntoView({ block: 'start' });
   },
   /**
+   * 🔴 **保存が止まった断り書きから、「システム」の「保存領域の点検」へ**(#1010 B)。
+   *
+   * ⚠ 新しい仕組みを作らない ── `open-system-notices` と同じ形(`openView` は同期で
+   *   「システム」を描き終えるので、その後に飛び先の節を探せる)。
+   * ⚠ 飛び先は点検の節(`db-rescue`)。断り書きが「点検で『作り直す・初期化する のボタンを出す』を
+   *   押し」と案内する入口がそこにある。
+   */
+  'open-storage-check': (dispatcher, _target, _services, root) => {
+    openView(dispatcher, 'settings');
+    root
+      .querySelector<HTMLElement>('[data-pkc-region="db-rescue"]')
+      ?.scrollIntoView({ block: 'start' });
+  },
+  /**
    * 🔴 **メッセージ(system 領域のノート)を開く**(設計 doc §7、段②a)。
    *
    * ⚠ `select-entry` を使い回さない ── あちらは `entryMetas.has(lid)` を通るので
@@ -10675,6 +10699,8 @@ export function applyFormatTo(
    *   `openCommandPalette` の註記(焦点が返る瞬間の選択は `0,0` である)。
    */
   range?: { readonly start: number; readonly end: number },
+  /** 🔴 起きたことを画面の下の 1 行で言う口(#950 ③。「表」が 1 列になったとき)。 */
+  say?: (text: string) => void,
 ): boolean {
   const op = FORMAT_OF[cmd];
   /**
@@ -10686,16 +10712,32 @@ export function applyFormatTo(
   if (op === undefined) return false;
   writeBack(
     ta,
-    applyFormat(
+    applyFormatSaying(
       {
         text: ta.value,
         start: range?.start ?? ta.selectionStart,
         end: range?.end ?? ta.selectionEnd,
       },
       op,
+      say,
     ),
   );
   return true;
+}
+
+/**
+ * 🔴 **記法を当てて、起きたことを言う**(#950 ③)。⚠ 書式の帯 / 鍵 / パレット / 雛形の一覧は
+ *   **全部ここを通す**(口が 4 つあり、片方だけ言うと「ボタンでは出るのに鍵では無言」になる)。
+ * 🔑 言うのは「区切りの無い文章を選んで**表**を押し、1 列の表になった」ときだけ。
+ *   字は消えず表になるので、止めずに**知らせるだけ**にする。
+ */
+function applyFormatSaying(
+  sel: TextSelection,
+  op: FormatOp,
+  say: ((text: string) => void) | undefined,
+): TextSelection {
+  if (op === 'table' && tableOpMadeSingleColumn(sel)) say?.(SINGLE_COLUMN_TABLE_NOTE);
+  return applyFormat(sel, op);
 }
 
 /**
@@ -11723,7 +11765,9 @@ export function bindActions(
       if (rowCmd === null || FORMAT_OF[rowCmd] === undefined) return;
       ke.preventDefault();
       // 🔑 当て方は `applyFormatTo` 1 か所(§7 ── パレットも同じ口を通る)
-      applyFormatTo(ke.target as HTMLTextAreaElement, rowCmd);
+      applyFormatTo(ke.target as HTMLTextAreaElement, rowCmd, undefined, (t) =>
+        services.showStatus?.(t),
+      );
       return;
     }
     /**
@@ -11737,7 +11781,9 @@ export function bindActions(
       const sectionCmd = keymap.match(ke, 'row');
       if (sectionCmd === null || FORMAT_OF[sectionCmd] === undefined) return;
       ke.preventDefault();
-      applyFormatTo(ke.target as HTMLTextAreaElement, sectionCmd);
+      applyFormatTo(ke.target as HTMLTextAreaElement, sectionCmd, undefined, (t) =>
+        services.showStatus?.(t),
+      );
       return;
     }
     /**
@@ -11855,7 +11901,9 @@ export function bindActions(
       // 本文だけ。題名に太字を入れても意味が無い。⚠ `isComposing` は上で弾き済み
       ke.preventDefault();
       // 🔑 当て方は `applyFormatTo` 1 か所(§7 ── パレットも同じ口を通る)
-      applyFormatTo(ke.target as HTMLTextAreaElement, cmd);
+      applyFormatTo(ke.target as HTMLTextAreaElement, cmd, undefined, (t) =>
+        services.showStatus?.(t),
+      );
     } else if (cmd === 'cancel-edit') {
       ke.preventDefault();
       cancelFromEditor(dispatcher, root);
