@@ -61,6 +61,7 @@ import { installAppendAutofold } from '@adapter/ui/render/append-autofold';
 import { appPaneSizes, applyPaneSizes } from '@adapter/ui/render/pane-size';
 import { appGroupFold } from '@adapter/ui/render/group-fold';
 import { installPaneResize } from '@adapter/ui/render/pane-resize';
+import { installPlaceConnect } from '@adapter/ui/render/place-connect';
 import { installPlaceDrag } from '@adapter/ui/render/place-drag';
 import { installScheduleDrag } from '@adapter/ui/render/schedule-drag';
 import { appKeymap } from '@adapter/ui/render/keymap';
@@ -1097,6 +1098,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   installPaneResize(root);
   /** 🔴 板の塊を掴んで動かす配線(#283 P4-b)。⚠ 外さない(アプリと同寿命)。 */
   installPlaceDrag(root, dispatcher);
+  /** 🔴 付箋に乗せて ● を掴み、別の付箋へ引いて繋ぐ配線(#530 段③d)。⚠ 外さない(アプリと同寿命)。 */
+  installPlaceConnect(root, dispatcher);
   /**
    * 🔴 **予定の札を、指でも掴んで動かせるようにする配線**(#855 決1)。
    * ⚠ マウスは既存の HTML5 drag(`binder.ts`)のまま ── ここは指・ペンだけを

@@ -228,10 +228,12 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    *   **板の右クリック**だけで、`menuCarriedBlock` が運ぶ**その板の行**が要る
    *   ── パレットから「ひし形にする」と呼んでも、どの板かが決まらない。
    * 🔑 同じ理由で `raise-place` / `remove-place` も未登記である(並びを揃えた)。
+   *   ⚠ 2026-10-01(#530 段③d)で `remove-place-line`(右クリックした線を消す)も同じ理由で足した。
    */
   'place-shape-arrow', 'place-shape-diamond', 'place-shape-ellipse', 'place-shape-rect',
   'place-shape-round',
   'purge-trash', 'raise-place', 'refresh-query', 'remove-office-pack', 'remove-place',
+  'remove-place-line',
   'rename-attachment', 'renumber-lists', 'replace-all', 'reset-app-group-order', 'reset-flags',
   'reset-office-profile', 'retry-persist', 'run-sql', 'schedule-nav', 'schedule-quick-add',
   'schedule-today',
@@ -633,12 +635,15 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-01(#813 段②): フォルダの面の帯の「中まで全部出す」(`toggle-filer-flatten`)で
       //   受け手 +1 ── 登記は増えない(押し口は帯の中にしか無く、鍵も持たない)。
       //   `receivers` +1 / `total` +1 / `unregistered` +1。押した所から何も要らない N。
-      total: 356,
-      receivers: 299,
+      // ⚠ 2026-10-01(#530 段③d): 右クリックした線を消す(`remove-place-line`)で受け手 +1 ── 登記は
+      //   増えない(押し口は線の右クリックの中にしか無く、押した線の行を運ぶので名前だけでは呼べない。
+      //   `remove-place` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
+      total: 357,
+      receivers: 300,
       registered: 96,
       both: 39,
       outsideActionsTable: 57,
-      unregistered: 260,
+      unregistered: 261,
     });
   });
 

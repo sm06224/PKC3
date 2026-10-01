@@ -475,6 +475,147 @@ test('🔴 本文を右クリックして「ここに板を置く」と、押し
   await expect(page.locator('[data-pkc-region="detail"] #p1')).toHaveAttribute('data-pkc-x', '120');
   await expect(page.locator('[data-pkc-region="detail"] #p2')).toHaveAttribute('data-pkc-x', '460');
 
+  /**
+   * 🔴 **掴んで繋ぐ**(#530 段③d。🟣 Gemini 裁定 A / A)── 置いたばかりの**名前の無い板**から、
+   * 名前の在る `#今日` へ、実マウスで線を引く。
+   *
+   * ⚠ ここが**実ブラウザでしか見られない所**である ── 乗せて印が出る(hover)/ 掴んだ ● が
+   *   印の層(`pointer-events: none` の中の `auto`)から実際に掴める / 仮の線が最前面に描かれる /
+   *   実寸で測った辺の位置 ── どれも happy-dom(layout を持たない)では 1 度も走らない。
+   * 🔑 **新しい起動は増やさない**(#820 の規律)── 板を置いたこの筋書きの続きで見る。
+   * 🔑 相手は**名前の在る `#今日`**(対照群: 名前の在る板は 1 byte も書き換わらない)。
+   */
+  const mine = page.locator(`[data-pkc-field="detail-body"] .pkc-place[data-pkc-x="${expectX}"]`);
+  const mb = (await mine.boundingBox())!;
+  const handleLoc = page.locator('[data-pkc-field="place-handle"]');
+  await expect(handleLoc, '乗せていないのに印が出ている').toHaveCount(0);
+  /**
+   * 🔴 左の辺のすぐ内側へ乗せる → 左の辺にだけ ● 1 つと ⊕ 2 つ。
+   * ⚠ **左の辺を使う理由**:置いた板(x=60..300)の下の辺は `#p1`(x=120..440、y=40..240)と重なる
+   *   ので、そこへ乗せると**板の手前に居る別の板**へ当たりうる。左の辺(x=60)は `#p1`(x=120〜)の
+   *   外で、どの高さでも他の板に当たらない(空き地を x で稼ぐ ── 上の「y に賭けない」と同じ作法)。
+   */
+  await page.mouse.move(mb.x + 8, mb.y + mb.height / 2, { steps: 3 });
+  await expect(handleLoc, '乗せた辺に ● と ⊕ の 3 つが出ていない').toHaveCount(3);
+  const spells = await handleLoc.evaluateAll((els) =>
+    els.map((e) => `${e.getAttribute('data-pkc-handle')}:${e.getAttribute('data-pkc-anchor')}`).sort(),
+  );
+  expect(spells, '左の辺の ● 1 つ・⊕ 2 つ(他の辺には出ない)').toEqual([
+    'dot:left',
+    'plus:left@1/4',
+    'plus:left@3/4',
+  ]);
+  /**
+   * 🔴 **● と ⊕ は、実ブラウザの計算後の色 / 形で見分けられる**(CLAUDE.md「押されている / 選ばれている」を
+   *   足したら、見た目の規則に受け皿が在るかを計算後の色で見る)。⚠ 属性(`data-pkc-handle`)の
+   *   検査は「付けた」しか言わない ── CSS に受け皿が無ければ 3 つとも同じ見た目になる。
+   */
+  const looks = await handleLoc.evaluateAll((els) =>
+    els.map((e) => {
+      const cs = getComputedStyle(e);
+      return {
+        kind: e.getAttribute('data-pkc-handle'),
+        bg: cs.backgroundColor,
+        bc: cs.borderTopColor,
+        img: cs.backgroundImage !== 'none',
+        w: e.getBoundingClientRect().width,
+        h: e.getBoundingClientRect().height,
+        cx: e.getBoundingClientRect().x + e.getBoundingClientRect().width / 2,
+        cy: e.getBoundingClientRect().y + e.getBoundingClientRect().height / 2,
+      };
+    }),
+  );
+  const dotLook = looks.find((l) => l.kind === 'dot')!;
+  const plusLook = looks.find((l) => l.kind === 'plus')!;
+  expect(dotLook.bg, '● が塗られていない(透明)').not.toBe('rgba(0, 0, 0, 0)');
+  expect(plusLook.bg, '⊕ の地が ● と同じ色(塗りつぶしと白抜きが見分けられない)').not.toBe(dotLook.bg);
+  expect(plusLook.img, '⊕ に十字が描かれていない').toBe(true);
+  expect(dotLook.img, '● に十字が描かれている').toBe(false);
+  expect(dotLook.w, '印が小さすぎて狙えない').toBeGreaterThanOrEqual(12);
+  /**
+   * 🔴 **丸く、辺の真上に中心が来る**。⚠ 汎用の `button`(高さを `--row-h` に固定)に負けると
+   *   14 × 26 の縦長の楕円になり、中心が辺から 6px 下へずれる ── 1 稿目は幅しか見ておらず、
+   *   この崩れを素通りした(実ブラウザで ⊕ に乗せようとして外れて初めて分かった)。
+   */
+  expect(Math.abs(dotLook.w - dotLook.h), `印が丸くない(${dotLook.w} × ${dotLook.h})`).toBeLessThan(1);
+  expect(Math.abs(dotLook.cx - mb.x), '● の中心が左の辺の上に無い').toBeLessThan(1.5);
+  expect(Math.abs(dotLook.cy - (mb.y + mb.height / 2)), '● の中心が辺の真ん中に無い').toBeLessThan(1.5);
+  // 🔴 ⊕ に乗せると、そこが ● になる(さらに細かく選べる)
+  const plusBox = (await page.locator('[data-pkc-handle="plus"][data-pkc-anchor="left@1/4"]').boundingBox())!;
+  await page.mouse.move(plusBox.x + plusBox.width / 2, plusBox.y + plusBox.height / 2, { steps: 3 });
+  await expect(
+    page.locator('[data-pkc-handle="dot"]'),
+    '⊕ に乗せたのに ● が動いていない',
+  ).toHaveAttribute('data-pkc-anchor', 'left@1/4');
+  /**
+   * 🔴 **乗せている最中も ● は塗られたまま・枠も同じ色**(いま ● の上にマウスが在る)。⚠ 汎用の
+   *   `button:hover` は枠の色を `--muted` へ替える(詳細度が勝つ)── 印の hover 規則が外れると、乗せた瞬間に
+   *   ● の縁が灰色になる(変異試験 C2)。
+   */
+  expect(
+    await page.locator('[data-pkc-handle="dot"]').evaluate((el) => getComputedStyle(el).backgroundColor),
+    '乗せた ● の塗りが hover で変わった(汎用の button:hover に負けている)',
+  ).toBe(dotLook.bg);
+  expect(
+    await page.locator('[data-pkc-handle="dot"]').evaluate((el) => getComputedStyle(el).borderTopColor),
+    '乗せた ● の枠の色が hover で変わった(汎用の button:hover に負けている)',
+  ).toBe(dotLook.bc);
+  // 🔴 ● を実マウスで掴み、`#今日` の左の辺の近くで離す
+  const dotBox = (await page.locator('[data-pkc-handle="dot"]').boundingBox())!;
+  const kyou = page.locator('[data-pkc-region="detail"] [id="今日"]');
+  const kb = (await kyou.boundingBox())!;
+  const kyouBefore = await kyou.evaluate((el) => el.outerHTML.length);
+  await page.mouse.move(dotBox.x + dotBox.width / 2, dotBox.y + dotBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(kb.x + 6, kb.y + kb.height / 2, { steps: 6 });
+  // 🔴 掴んでいる間は仮の線が出て、乗せた付箋に予告が付く(本文はまだ書かれていない)
+  await expect(page.locator('[data-pkc-field="place-connect-ghost"] path'), '仮の線が出ていない').toHaveCount(1);
+  await expect(kyou, '乗せた付箋に予告が付いていない').toHaveAttribute('data-pkc-connect-target', '');
+  // ⚠ 属性が付いただけでは画面は変わらない ── 予告の枠が実際に描かれている(計算後の値)
+  expect(
+    await kyou.evaluate((el) => getComputedStyle(el).outlineStyle),
+    '乗せた付箋に予告の枠が描かれていない(規則が無い)',
+  ).toBe('solid');
+  expect(
+    await page.locator('[data-pkc-field="place-connect-ghost"] path').evaluate((el) => getComputedStyle(el).fill),
+    '仮の線が塗り潰されている',
+  ).toBe('none');
+  await expect(mine, '掴んでいる間に本文へ名前が書かれた').not.toHaveAttribute('id', /.+/);
+  await page.mouse.up();
+  // 🔴 観測点は**本文から描き直された物**: 名前の無かった板に `板1` が付き、左の辺の 1/4 から相手の左の辺へ線が引かれる
+  await expect(mine, '名前の無い付箋に名前が足されていない').toHaveAttribute('id', '板1', { timeout: 5000 });
+  const made = page.locator(
+    '[data-pkc-field="place-lines"] path[data-pkc-line-from="left@1/4"][data-pkc-line-to="left"]',
+  );
+  await expect(made, '繋いだ線が 1 本、画面に描かれていない').toHaveCount(1, { timeout: 5000 });
+  await expect(page.locator('[data-pkc-field="place-lines"] path'), '線は 5 本(元の 4 + 新しい 1)').toHaveCount(5);
+  // ⚠ 離したら仮の線も印も残らない / 名前が在った付箋は書き換わっていない
+  await expect(page.locator('[data-pkc-field="place-connect-ghost"]'), '仮の線が残っている').toHaveCount(0);
+  expect(await kyou.evaluate((el) => el.outerHTML.length), '名前の在る付箋が書き換わった').toBe(kyouBefore);
+  await expect(kyou).not.toHaveAttribute('data-pkc-connect-target', '');
+  // 🔴 付箋の外で離したら何も書かない(線は 5 本のまま)
+  await page.mouse.move(mb.x + 8, mb.y + mb.height / 2, { steps: 3 });
+  const dot2 = (await page.locator('[data-pkc-handle="dot"]').boundingBox())!;
+  await page.mouse.move(dot2.x + dot2.width / 2, dot2.y + dot2.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(mb.x + mb.width + 600, mb.y + 400, { steps: 5 });
+  await page.mouse.up();
+  await expect(page.locator('[data-pkc-field="place-lines"] path'), '付箋の外で離したのに線が増えた').toHaveCount(5);
+  // 🔴 引いた線は右クリックで消せる(片道にしない)── 線の道の真ん中を押す
+  const mid = await made.evaluate((el) => {
+    const path = el as unknown as SVGPathElement;
+    const pt = path.getPointAtLength(path.getTotalLength() / 2);
+    const m = path.getScreenCTM()!;
+    return { x: pt.x * m.a + pt.y * m.c + m.e, y: pt.x * m.b + pt.y * m.d + m.f };
+  });
+  await page.mouse.click(mid.x, mid.y, { button: 'right' });
+  const lineMenu = page.locator('[data-pkc-region="context-menu"]');
+  await expect(lineMenu.locator('[data-pkc-action="remove-place-line"]'), '線の上で「この線を消す」が出ていない').toBeVisible();
+  await lineMenu.locator('[data-pkc-action="remove-place-line"]').click();
+  await expect(page.locator('[data-pkc-field="place-lines"] path'), '線が消えていない').toHaveCount(4, { timeout: 5000 });
+  await expect(made, '消したのは繋いだ線だけでなければならない').toHaveCount(0);
+  await expect(mine, '線を消したら付箋まで消えた').toHaveAttribute('id', '板1');
+
   expect(errors, 'pageerror が出た').toEqual([]);
 });
 

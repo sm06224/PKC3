@@ -79,6 +79,26 @@ interface Drag {
 }
 
 /**
+ * 掴んだ塊が指す「どのノートの何行目か」。読めなければ null(書かない)。
+ *
+ * 🔴 **どの枠の板か**(#281 検算 2026-08-30)── 1 稿目は `openBody` だけを
+ * 見ていたので、**横に留めた枠**の付箋を動かすと主の枠のノートを相手にしていた。
+ * 引き方は `lid-of-node.ts` の 1 か所(`data-pkc-entry` / `data-pkc-split-lid`)。
+ * 🔑 掴んで繋ぐ(`place-connect.ts`)も**この 1 本**で引く ── 写しを持つと、動かす手と
+ *   繋ぐ手で別のノートを指す形が生まれる(§7)。
+ */
+export function placeTargetOf(
+  block: HTMLElement,
+  dispatcher: Dispatcher,
+): { lid: string; line: number } | null {
+  const lineRaw = block.getAttribute('data-pkc-place-line');
+  const line = Number(lineRaw);
+  const lid = lidOfNode(block, dispatcher.getState().openBody?.lid ?? null);
+  if (lineRaw === null || !Number.isInteger(line) || lid === null) return null;
+  return { lid, line };
+}
+
+/**
  * root へ 1 度だけ配線する(`installPaneResize` と同じ作法)。
  * @returns 外す関数。アプリ本体では外さない(同寿命)が、test は外せる必要がある。
  */
@@ -151,20 +171,8 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
     d.block.style.top = `${d.startY}px`;
   };
 
-  /**
-   * 掴んだ塊が指す「どのノートの何行目か」。読めなければ null(書かない)。
-   *
-   * 🔴 **どの枠の板か**(#281 検算 2026-08-30)── 1 稿目は `openBody` だけを
-   * 見ていたので、**横に留めた枠**の付箋を動かすと主の枠のノートを相手にしていた。
-   * 引き方は `lid-of-node.ts` の 1 か所(`data-pkc-entry` / `data-pkc-split-lid`)。
-   */
-  const targetOf = (block: HTMLElement): { lid: string; line: number } | null => {
-    const lineRaw = block.getAttribute('data-pkc-place-line');
-    const line = Number(lineRaw);
-    const lid = lidOfNode(block, dispatcher.getState().openBody?.lid ?? null);
-    if (lineRaw === null || !Number.isInteger(line) || lid === null) return null;
-    return { lid, line };
-  };
+  const targetOf = (block: HTMLElement): { lid: string; line: number } | null =>
+    placeTargetOf(block, dispatcher);
 
   const onPointerUp = (e: PointerEvent): void => {
     if (drag === null || e.pointerId !== drag.pointerId) return;

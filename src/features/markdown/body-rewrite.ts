@@ -25,6 +25,7 @@ import {
   movePlace,
   raisePlace,
   removePlace,
+  removePlaceLine,
   resizePlace,
   setPlaceShape,
 } from './place-notation';
@@ -185,6 +186,16 @@ export type BodyRewrite =
       to: { line: number; openLine: string };
       fromAnchor: string | null;
       toAnchor: string | null;
+    }
+  | {
+      /**
+       * 🔴 **線の塊を消す**(#530 段③d。掴んで引いた線を外す ── 片道の操作を作らない)。
+       * `line` / `openLine` の意味と門は `place-remove` と同じ。違うのは**受ける開き行が線**
+       * であることだけ(板の行を渡しても消えない)── 判定は `place-notation.ts` の 1 本。
+       */
+      kind: 'place-line-remove';
+      line: number;
+      openLine: string;
     }
   | {
       /**
@@ -659,6 +670,7 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
   if (rewrite.kind === 'place-size') return resizePlace(body, rewrite);
   if (rewrite.kind === 'place-remove') return removePlace(body, rewrite);
   if (rewrite.kind === 'place-raise') return raisePlace(body, rewrite);
+  if (rewrite.kind === 'place-line-remove') return removePlaceLine(body, rewrite);
   if (rewrite.kind === 'place-shape') return setPlaceShape(body, rewrite, rewrite.shape);
   if (rewrite.kind === 'place-add') return addPlace(body, rewrite.x, rewrite.y);
   if (rewrite.kind === 'place-connect') {
