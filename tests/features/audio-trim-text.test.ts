@@ -4,7 +4,7 @@
  * ⚠ 見るのは **user が読む物**だけ ── 名前の付け方と、印の出方。
  */
 import { describe, expect, it } from 'vitest';
-import { trimmedCaptureName, trimMarkText } from '../../src/features/audio/trim-text';
+import { trimmedCaptureName, trimMarkText, trimNoteFirst } from '../../src/features/audio/trim-text';
 import { canTrimCapture, trimUnavailableText } from '../../src/features/capture/capture-trim-gate';
 import type { CaptureItem } from '../../src/features/capture/capture-item';
 
@@ -32,6 +32,43 @@ describe('切り出したものの名前(裁定 A)', () => {
     expect(trimmedCaptureName(once, 3_000, 20_000)).toBe(
       '録音 (0:12〜1:05) (0:03〜0:20).webm',
     );
+  });
+});
+
+describe('🔴 1 秒未満だけを切ったときの名前(裁定 B。2026-10-01)', () => {
+  it('🔴 0.1〜0.9 秒 → 小数つき(いままでは `(0:00〜0:00)` で見分けられなかった)', () => {
+    expect(trimmedCaptureName('録音.webm', 100, 900)).toBe('録音 (0:00.1〜0:00.9).webm');
+  });
+
+  it('🔴 1 秒以上の名前はいまと同じ(小数を出さない)', () => {
+    expect(trimmedCaptureName('録音.webm', 2_000, 5_000)).toBe('録音 (0:02〜0:05).webm');
+    // ⚠ 小数の端数があっても、別の秒に落ちるなら今までどおり(切り捨て)
+    expect(trimmedCaptureName('録音.webm', 2_300, 5_700)).toBe('録音 (0:02〜0:05).webm');
+  });
+
+  it('🔴 境目 0.9〜1.1 秒(別の秒に落ちる)→ 今までどおり', () => {
+    expect(trimmedCaptureName('録音.webm', 900, 1_100)).toBe('録音 (0:00〜0:01).webm');
+  });
+
+  it('🔴 同じ秒の中(1.2〜1.8)→ 小数つき', () => {
+    expect(trimmedCaptureName('録音.webm', 1_200, 1_800)).toBe('録音 (0:01.2〜0:01.8).webm');
+  });
+
+  it('⚠ 拡張子の前に入る・1 時間を超えても同じ形(小数は 0.1 秒きざみで切り捨て)', () => {
+    expect(trimmedCaptureName('a.webm', 3_723_250, 3_723_990)).toBe('a (1:02:03.2〜1:02:03.9).webm');
+  });
+
+  it('⚠ 帯の時間表示は触らない(裁定 C の却下)── 小数は名前だけ', () => {
+    expect(trimMarkText(100, 900)).toBe('0:00〜0:00(0:00)');
+  });
+});
+
+describe('🔴 説明文を前に出すか(裁定 C。2026-10-01)', () => {
+  it('目印が 1 つも無いときだけ前', () => {
+    expect(trimNoteFirst(null, null)).toBe(true);
+    expect(trimNoteFirst(0, null), '0 ミリ秒の印も「付いている」').toBe(false);
+    expect(trimNoteFirst(null, 5_000)).toBe(false);
+    expect(trimNoteFirst(1_000, 5_000)).toBe(false);
   });
 });
 

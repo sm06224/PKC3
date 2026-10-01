@@ -32,7 +32,7 @@ import {
   type CaptureItem,
 } from '@features/capture/capture-item';
 import { canTrimCapture, trimUnavailableText } from '@features/capture/capture-trim-gate';
-import { trimMarkText } from '@features/audio/trim-text';
+import { trimMarkText, trimNoteFirst } from '@features/audio/trim-text';
 import { humanBytes } from '@features/human-bytes';
 import type { AssetLender } from './detail';
 import { appVoiceBoostRouter } from './voice-boost';
@@ -283,6 +283,18 @@ export class CapturesRenderer {
   /** 帯の中身(印の 2 つ・切り出す・印を消す・いまの印の字)。 */
   private fillTrimBar(bar: HTMLElement, item: CaptureItem): void {
     if (!canTrimCapture(item)) return;
+    const startMs = this.trim?.startMs ?? null;
+    const endMs = this.trim?.endMs ?? null;
+    /**
+     * 🔴 **説明文の位置**(#683 の裁定 C)。目印が 1 つも無いときは**前**(最初に読む物)、
+     *   付けたら**ボタンの後ろ**(作業が始まったら操作が前)。
+     * 🔑 帯は印が動くたびに `syncTrimBar` が**中身ごと組み直す**ので、位置もここで決まれば
+     *   印を外して 0 に戻ったとき、また前へ来る(双方向)。
+     */
+    const about = document.createElement('span');
+    about.setAttribute('data-pkc-field', 'capture-trim');
+    about.textContent = trimMarkText(startMs, endMs);
+    if (trimNoteFirst(startMs, endMs)) bar.append(about);
     const mark = document.createElement('button');
     mark.type = 'button';
     mark.setAttribute('data-pkc-action', 'capture-trim-start');
@@ -305,8 +317,6 @@ export class CapturesRenderer {
     until.title = 'いま鳴っている所を、切り出しの終わりにします。';
     bar.append(until);
 
-    const startMs = this.trim?.startMs ?? null;
-    const endMs = this.trim?.endMs ?? null;
     if (startMs !== null && endMs !== null) {
       /**
        * 🔴 **走っている間は、押した所で分かるようにする**(着地前の動線レビュー 欠陥 3)。
@@ -336,10 +346,7 @@ export class CapturesRenderer {
       bar.append(clear);
     }
 
-    const about = document.createElement('span');
-    about.setAttribute('data-pkc-field', 'capture-trim');
-    about.textContent = trimMarkText(startMs, endMs);
-    bar.append(about);
+    if (!trimNoteFirst(startMs, endMs)) bar.append(about);
   }
 
   private row(item: CaptureItem): HTMLLIElement {

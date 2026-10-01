@@ -13,6 +13,24 @@
 import { elapsedText } from '../elapsed-text';
 
 /**
+ * 🔴 **1 秒未満だけを切ったときの名前は小数を出す**(#683 の裁定 B。2026-10-01)。
+ *
+ * ⚠ いままでは `(0:00〜0:00)` になり、**どこを切ったか見分けられなかった**。
+ * 🔑 **小数を出すのは「始まりと終わりが同じ秒に落ちる」ときだけ** ──
+ *   `(0:02〜0:05)` のような 1 秒以上の名前は**1 バイトも変えない**
+ *   (境目の 0.9〜1.1 は別の秒に落ちるので、今までどおり `0:00〜0:01`)。
+ * ⚠ 小数は **0.1 秒きざみで切り捨て**(`elapsedText` が秒を切り捨てるのと同じ向き)。
+ * ⚠ 帯の時間表示(`trimMarkText`)とタイマーは**触らない**(別の量ではないが、
+ *   小数を出す場面を名前だけに絞るのが裁定)。
+ */
+function rangeText(startMs: number, endMs: number): string {
+  const secOf = (ms: number): number => Math.floor(Math.max(0, ms) / 1000);
+  if (secOf(startMs) !== secOf(endMs)) return `${elapsedText(startMs)}〜${elapsedText(endMs)}`;
+  const tenth = (ms: number): number => Math.floor((Math.max(0, ms) % 1000) / 100);
+  return `${elapsedText(startMs)}.${tenth(startMs)}〜${elapsedText(endMs)}.${tenth(endMs)}`;
+}
+
+/**
  * `録音-2026-09-12-143000.webm` + 12〜65 秒 → `録音-2026-09-12-143000 (0:12〜1:05).webm`。
  *
  * ⚠ **拡張子の前に入れる** ── 後ろに付けると `.webm (0:12〜1:05)` になり、
@@ -23,11 +41,23 @@ import { elapsedText } from '../elapsed-text';
  *   古いほうを捨てると「元のどこだったか」が消える。長くなったら改名でよい。
  */
 export function trimmedCaptureName(name: string, startMs: number, endMs: number): string {
-  const range = `(${elapsedText(startMs)}〜${elapsedText(endMs)})`;
+  const range = `(${rangeText(startMs, endMs)})`;
   const dot = name.lastIndexOf('.');
   // ⚠ 先頭の `.` は拡張子ではない(`.gitignore` のような名前)
   if (dot <= 0) return `${name} ${range}`;
   return `${name.slice(0, dot)} ${range}${name.slice(dot)}`;
+}
+
+/**
+ * 🔴 **説明文をボタンより前に出すか**(#683 の裁定 C。2026-10-01)。
+ *
+ * 🔑 **最初に読む物が前、作業が始まったら操作が前**:
+ *   目印が 1 つも無いときは**押し方の案内が最初に読む物**なので前へ出し、
+ *   1 つでも付けたら(= 作業が始まったら)**ボタンが前**へ戻る。
+ * ⚠ **双方向** ── 印を消して 0 に戻れば、また前へ来る(片道にしない)。
+ */
+export function trimNoteFirst(startMs: number | null, endMs: number | null): boolean {
+  return startMs === null && endMs === null;
 }
 
 /**

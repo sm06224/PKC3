@@ -517,6 +517,43 @@ describe('前後を削る ── 画面に何が出るか(#683 段②a)', () => 
     expect(field(p.host, 'a', 'capture-media'), '走り出したら器が作り直された').toBe(before);
   });
 
+  /**
+   * 🔴 **説明文の位置**(#683 の裁定 C。2026-10-01)。
+   * ⚠ 見るのは DOM の順(`compareDocumentPosition`)── 描かれた順がそのまま画面の順。
+   * 🔑 3 点を同じ器の続きで見る:印 0 → 前 / 1 つ付ける → 後ろ / 外して 0 → また前
+   *   (片道にしない)。⚠ 位置を固定する変異(常に前 / 常に後ろ)は、どちらかの点で落ちる。
+   */
+  it('🔴 目印が 1 つも無ければ説明文が前、付けたら後ろ、外して 0 に戻ればまた前', async () => {
+    const p = pane(playing('a'), lender());
+    await Promise.resolve();
+    await Promise.resolve();
+    p.paint();
+    /** 説明文が「ここを始まりにする」ボタンより前か。 */
+    const noteBeforeButtons = (): boolean => {
+      const note = field(p.host, 'a', 'capture-trim');
+      const start = field(p.host, 'a', 'capture-trim-start');
+      expect(note, '説明文が出ていない(前提が崩れている)').not.toBeNull();
+      expect(start, '押し所が出ていない(前提が崩れている)').not.toBeNull();
+      return (note!.compareDocumentPosition(start!) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+    };
+    expect(noteBeforeButtons(), '目印が無いのに、説明文がボタンの後ろに居る').toBe(true);
+
+    p.paint({ captureTrim: { lid: 'a', startMs: 12_000, endMs: null } });
+    expect(noteBeforeButtons(), '目印を付けたのに、説明文が前に居座っている').toBe(false);
+
+    // ⚠ もう片方の印だけでも同じ(「1 つでも付けたら」)
+    p.paint({ captureTrim: { lid: 'a', startMs: null, endMs: 65_000 } });
+    expect(noteBeforeButtons(), '終わりだけ付けたのに、説明文が前に居る').toBe(false);
+
+    // 両方そろっても後ろのまま(「切り出す」が出る形でも並びは同じ)
+    p.paint({ captureTrim: { lid: 'a', startMs: 12_000, endMs: 65_000 } });
+    expect(noteBeforeButtons(), '両方付けたのに、説明文が前に居る').toBe(false);
+
+    // 🔴 外して 0 に戻れば、また前へ来る(片道にしない)
+    p.paint({ captureTrim: null });
+    expect(noteBeforeButtons(), '印を外して 0 に戻ったのに、説明文が前へ戻らない').toBe(true);
+  });
+
   /** 🔴 **切り出せない形には口を出さず、理由を書く**(押したら断る、にしない)。 */
   /**
    * 🔴 **走っている間は、押した所で分かる**(着地前の動線レビュー 欠陥 3)。
