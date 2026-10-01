@@ -16,6 +16,16 @@
  * ⑤ **導出物は開かない** ── 原文の行が無いので、差し替えると本文が壊れる
  */
 import { describe, expect, it, vi } from 'vitest';
+
+/**
+ * 🔴 アプリのダイアログが開いているか(`dispose` が確定を見送らないことの検査用)。
+ * ⚠ `vi.mock` は file 単位 ── 既定は `false` なので、他の test は本物と同じ振る舞いのまま。
+ */
+const dialogState = vi.hoisted(() => ({ open: false }));
+vi.mock('../../src/adapter/ui/render/app-dialog', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/adapter/ui/render/app-dialog')>();
+  return { ...actual, isAppDialogOpen: () => dialogState.open || actual.isAppDialogOpen() };
+});
 import { RowSwap, blockWithSubSlot } from '../../src/adapter/ui/render/row-swap';
 import { renderMarkdownWithRanges } from '../../src/features/markdown/source-ranges';
 import { KEY_COMMANDS } from '../../src/features/keymap';
@@ -48,6 +58,32 @@ interface Rig {
   /** 溜めた描き直しを流す(`defer` のとき)。 */
   flush(): void;
   body(): string;
+}
+
+/**
+ * 🔴 **実機の `remove()` を真似る**(stub は本物の意味論に合わせる ── CLAUDE.md)。
+ *
+ * Chromium は**焦点のある `<textarea>` を外す直前に、同期で `blur` を飛ばす**。その handler が
+ * 先に欄を外していたら、外側の `remove()` は親が無いので `NotFoundError` を投げる。
+ * happy-dom は `blur` を飛ばさず、親の無い `remove()` も黙って済ませる ── 両方をここで足す。
+ * ⚠ `blur` の handler の中での入れ子の `remove()` は、素直に外すだけ(再び `blur` は飛ばない)。
+ */
+function chromiumRemove(ta: HTMLTextAreaElement): void {
+  const origRemove = ta.remove.bind(ta);
+  let removing = false;
+  ta.remove = (): void => {
+    if (removing) {
+      origRemove();
+      return;
+    }
+    removing = true;
+    ta.dispatchEvent(new Event('blur'));
+    removing = false;
+    if (ta.parentNode === null) {
+      throw new DOMException('The node to be removed is no longer a child of this node.', 'NotFoundError');
+    }
+    origRemove();
+  };
 }
 
 /**
@@ -572,23 +608,93 @@ describe('RowSwap — 確定と取り消し', () => {
     openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     ta.value = 'かえた';
-    /**
-     * ⚠ **環境の意味論を真似る**(stub は本物に合わせる ── CLAUDE.md)。
-     * Chromium は**焦点のある textarea を DOM から外すと同期で `blur` を飛ばす**。
-     * happy-dom は飛ばさないので、その 1 点だけを手で足す。
-     * 実機ではこれで `commit` が 2 回走り、view の組み直しが二重になって
-     * `NotFoundError` の pageerror が出ていた(smoke で捕まえた)。
-     */
-    const origRemove = ta.remove.bind(ta);
-    ta.remove = (): void => {
-      origRemove();
-      ta.dispatchEvent(new Event('blur'));
-    };
+    chromiumRemove(ta);
     ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
     expect(r.commits, '同じ編集が 2 回確定した').toHaveLength(1);
     r.flush();
     expect(findByText(r.host, 'p', 'かえた')).toBeTruthy();
     expect(r.host.querySelector('[data-pkc-row-slot]')).toBeNull();
+  });
+
+  /**
+   * 🔴 **`dispose` が、欄を外す最中の `blur` に先を越される**(#1219)。
+   *
+   * 直す前は `active?.textarea.remove(); active = null;` の順で、`blur`(→ 確定 →
+   * 欄を外して塊を作り直す)が先に走り、戻ってきた外側の `remove()` が
+   * `NotFoundError` を投げた。⚠ 上の再入の test の stub は `remove → blur` の順で
+   * **実機と逆**だったので、この順序は 1 度も通っていなかった(`chromiumRemove` が実機の順)。
+   */
+  describe('dispose(#1219)', () => {
+    it('🔴 打ちかけの字は 1 回だけ確定され、例外を投げず、活性が残らない', () => {
+      const r = rig();
+      openClick(findByText(r.host, 'p', '最初の段落。'));
+      const ta = box(r.host)!;
+      ta.value = '打ちかけ';
+      chromiumRemove(ta);
+      expect(() => r.swap.dispose()).not.toThrow();
+      expect(r.commits, '打ちかけが消えた / 二重に確定した').toEqual([
+        { start: 2, end: 2, text: '打ちかけ' },
+      ]);
+      expect(r.swap.isActive).toBe(false);
+      expect(r.host.querySelector('[data-pkc-row-slot]')).toBeNull();
+      expect(r.host.querySelector('textarea')).toBeNull();
+    });
+
+    it('何も打っていなければ確定は 0 回(対照群)── それでも例外は出ない', () => {
+      const r = rig();
+      openClick(findByText(r.host, 'p', '最初の段落。'));
+      chromiumRemove(box(r.host)!);
+      expect(() => r.swap.dispose()).not.toThrow();
+      expect(r.commits).toEqual([]);
+      expect(r.swap.isActive).toBe(false);
+      // 塊は描画へ戻っている(穴が残らない)
+      expect(findByText(r.host, 'p', '最初の段落。')).toBeTruthy();
+    });
+
+    it('🔴 変換中でも打ちかけを確定する(後から `compositionend` を聴く者が居ない)', () => {
+      const r = rig();
+      openClick(findByText(r.host, 'p', '最初の段落。'));
+      const ta = box(r.host)!;
+      ta.dispatchEvent(new Event('compositionstart'));
+      ta.value = 'にほんご';
+      expect(r.swap.isComposing).toBe(true);
+      chromiumRemove(ta);
+      expect(() => r.swap.dispose()).not.toThrow();
+      expect(r.commits, '変換中の字が消えた').toEqual([{ start: 2, end: 2, text: 'にほんご' }]);
+      expect(r.swap.isActive).toBe(false);
+    });
+
+    it('🔴 ダイアログが開いていても打ちかけを確定する(見送ると blur も聴く者も居ない)', () => {
+      const r = rig();
+      openClick(findByText(r.host, 'p', '最初の段落。'));
+      const ta = box(r.host)!;
+      ta.value = '打ちかけ';
+      chromiumRemove(ta);
+      dialogState.open = true;
+      try {
+        // 対照群: 普通の確定(blur)はダイアログ中は見送る ── 規則が生きていること
+        expect(r.swap.commitActive()).toBe(false);
+        expect(r.commits).toEqual([]);
+        expect(() => r.swap.dispose()).not.toThrow();
+      } finally {
+        dialogState.open = false;
+      }
+      expect(r.commits, 'ダイアログ中の打ちかけが消えた').toEqual([
+        { start: 2, end: 2, text: '打ちかけ' },
+      ]);
+      expect(r.swap.isActive).toBe(false);
+    });
+
+    it('🔴 2 回呼んでも確定は増えない(活性が残らない)', () => {
+      const r = rig();
+      openClick(findByText(r.host, 'p', '最初の段落。'));
+      const ta = box(r.host)!;
+      ta.value = '打ちかけ';
+      chromiumRemove(ta);
+      r.swap.dispose();
+      r.swap.dispose();
+      expect(r.commits).toHaveLength(1);
+    });
   });
 
   it('別の行をクリックすると、前の行が確定してから開く', () => {

@@ -105,7 +105,46 @@ test('🔴 1 面で、クリックした行だけが原文になる(周りは描
   await expect(live).toContainText('書き換えました。');
   await expect(live).toContainText('次の段落です。');
   await expect(live.locator('h1')).toHaveText('題');
-  expect(errors).toEqual([]);
+
+  /**
+   * ④ 🔴 **行の欄を開いたまま、mousedown 無しで「保存」「やめる」を押す**(#1219)。
+   *
+   * ⚠ 実マウスは mousedown で焦点が動いて `blur` が先に確定するので、この経路を通らない。
+   *   `el.click()` は焦点を動かさない ── 欄が**開いたまま**描き直しへ入り、`dispose` が
+   *   焦点のある `<textarea>` を外す(= `blur` が**外す最中に**走る)。直す前は
+   *   `NotFoundError` で描き直しが途中で止まり、書式の帯・保存ボタン群・`editor-live` が残った。
+   * ⚠ 新しい `gotoApp` は足さない(既にある道中の続きで見る)。
+   */
+  const pressBare = (action: string): Promise<void> =>
+    page.locator(`[data-pkc-action="${action}"]`).first().evaluate((el) => (el as HTMLElement).click());
+  const leftOvers = async (): Promise<Record<string, number>> => ({
+    live: await page.locator('[data-pkc-region="editor-live"]').count(),
+    bar: await page.locator('[data-pkc-region="format-bar"]').count(),
+    commit: await page.locator('[data-pkc-action="commit-edit"]:visible').count(),
+    cancel: await page.locator('[data-pkc-action="cancel-edit"]:visible').count(),
+  });
+  const GONE = { live: 0, bar: 0, commit: 0, cancel: 0 };
+
+  // ④-1 保存: 打ちかけの字が保存される
+  await modClickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
+  await expect(row).toBeFocused();
+  await row.fill('打ちかけのまま保存。');
+  await pressBare('commit-edit');
+  await expect.poll(leftOvers, '保存で編集の道具が残った(描き直しが途中で止まった)').toEqual(GONE);
+  await expect(page.locator('[data-pkc-field="detail-body"]')).toContainText('打ちかけのまま保存。');
+  expect(errors, '保存で pageerror').toEqual([]);
+
+  // ④-2 やめる: 打ちかけの字は捨てられ、道具が残らない
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await expect(live).toBeVisible();
+  await modClickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
+  await expect(row).toBeFocused();
+  await row.fill('打ちかけのままやめる。');
+  await pressBare('cancel-edit');
+  await expect.poll(leftOvers, 'やめるで編集の道具が残った').toEqual(GONE);
+  await expect(page.locator('[data-pkc-field="detail-body"]')).toContainText('打ちかけのまま保存。');
+  await expect(page.locator('[data-pkc-field="detail-body"]')).not.toContainText('打ちかけのままやめる。');
+  expect(errors, 'やめるで pageerror').toEqual([]);
 });
 
 test('🔴 ① 行の途中をクリックすると、原文の**その位置**に caret が入る', async ({ page }) => {

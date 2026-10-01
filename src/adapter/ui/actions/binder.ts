@@ -1709,6 +1709,28 @@ function editorTitle(root: HTMLElement): HTMLInputElement | null {
   );
 }
 
+/**
+ * 🔴 **開いている行の欄の打ちかけを、保存の前に state へ届ける**(#1219)。
+ *
+ * 実マウスは `mousedown` で焦点が動いて行の欄が `blur` し、行の確定が先に走る。
+ * ところが `mousedown` の無い押し方(`el.click()` / 支援技術の押下)は焦点が動かないので、
+ * 打ちかけが state に無いまま `COMMIT_EDIT` が走り、**保存に入らない**
+ * (保存後の描き直しが欄の `blur` で確定しても、もう編集は終わっている)。
+ * 🔑 `blur()` を呼ぶだけ ── 確定の規則は `RowSwap.commitActive` の 1 か所のまま
+ *   (ここに 2 本目の確定を書かない)。題名欄を読む `renameFromEditorInput` と同じ向きの手当て。
+ * ⚠ 行の欄に焦点が無ければ何もしない(2 列の全文欄は `input` で state に届いている)。
+ */
+function settleRowEditor(root: HTMLElement): void {
+  const el = document.activeElement;
+  if (
+    el instanceof HTMLTextAreaElement &&
+    el.getAttribute('data-pkc-field') === 'row-source' &&
+    root.contains(el)
+  ) {
+    el.blur();
+  }
+}
+
 /** editor 表示中なら title input の現在値で RENAME を先行 dispatch する
  *  (楽観 meta 更新 → 直後の COMMIT_EDIT が新 title で行を組む。
  *  input が見つからなければ何もしない = 既存 title 維持 ── PKC2 の
@@ -5600,6 +5622,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     // ⚠ 第 4 引数の **root** を使う(target ではない)── 追記欄の出口は detail の
   //    兄弟なので、押したボタンから題名欄へは辿れない(P8 段⑲)
   'commit-edit': (dispatcher, _target, _services, root) => {
+    settleRowEditor(root);
     renameFromEditorInput(dispatcher, root);
     dispatcher.dispatch({ type: 'COMMIT_EDIT' });
   },
