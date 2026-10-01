@@ -5,6 +5,58 @@
  * ドキュメント全体の見通し・スクロール性を向上させる。
  */
 
+
+const KEY = 'pkc3.code-collapse';
+
+function readStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
+  try {
+    return typeof localStorage !== 'undefined' ? localStorage : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * **長いコード枠を最初から畳むか**(#1087)。切ると畳まない(展開ボタンも出さない。字は全部見える)。
+ *
+ * ⚠ **既定は入**(`missing-links` と同じ ── 入のまま配ってあった機能の**逃げ道**を足すだけで、
+ *   何も選んでいない人の見え方は変えない。#1087)。
+ * ⚠ **flag ではない**(正規設定)── 開放先は user で、畳む予定も無い。
+ * ⚠ **container に入れない** ── ノートのデータではなく、この端末の読み方である。
+ * ⚠ 保存の値は `0`(切)だけを書く側で意味づける ── 鍵が無い / 読めない端末は「入」。
+ */
+export class CodeCollapseStore {
+  /** 保存が読めない環境の控え(この session では効いている)。既定は「入」。 */
+  private fallback = true;
+
+  constructor(
+    private readonly storage: Pick<Storage, 'getItem' | 'setItem'> | null = readStorage(),
+  ) {}
+
+  /** ⚠ **読むたびに保存を見る**(`MissingLinksStore` と同じ理由 ── 書き手が複数)。 */
+  enabled(): boolean {
+    // 🔴 **保存が無い環境では控えを読む**(`?.` では `catch` に入らない)
+    if (this.storage === null) return this.fallback;
+    try {
+      return this.storage.getItem(KEY) !== '0';
+    } catch {
+      return this.fallback;
+    }
+  }
+
+  setEnabled(on: boolean): void {
+    this.fallback = on;
+    try {
+      this.storage?.setItem(KEY, on ? '1' : '0');
+    } catch {
+      // 保存できないだけ ── この session では効いている(控えが持つ)
+    }
+  }
+}
+
+/** アプリ共有の 1 個。⚠ 読む側は必ずこれを引く。 */
+export const appCodeCollapse = new CodeCollapseStore();
+
 /**
  * 折りたたみ対象とする最小行数の閾値。
  * 18行（約380px）以上で長大と判定し、折りたたみ操作子を付与する。
@@ -141,5 +193,23 @@ export function applyCodeCollapse(host: HTMLElement): void {
 
     bar.append(barBtn);
     block.append(bar);
+  }
+}
+
+/**
+ * 🔴 **付けた畳みの操作子を全部外す**(設定を切ったとき。#1087)。
+ *
+ * ⚠ 本文の塊は `applyBlocks` が**変わったものだけ**差し替えるので、切り替えた直後の描き直しでも
+ *   畳んだ塊は**そのまま残る** ── 外さないと、切ったのに畳まれたままになる(設定が嘘になる)。
+ * ⚠ 外すのは**自分が足した物だけ**(属性 3 つ + ボタン + 下部のバー)。`pre` の中身には触れない。
+ */
+export function clearCodeCollapse(host: HTMLElement): void {
+  const blocks = host.querySelectorAll<HTMLElement>('.pkc-md-block[data-pkc-code-collapsible]');
+  for (const block of blocks) {
+    block.removeAttribute('data-pkc-code-collapsible');
+    block.removeAttribute('data-pkc-code-collapsed');
+    block.removeAttribute('data-pkc-code-lines');
+    block.querySelector(':scope > .pkc-code-collapse-top-btn')?.remove();
+    block.querySelector(':scope > .pkc-code-collapse-bar')?.remove();
   }
 }

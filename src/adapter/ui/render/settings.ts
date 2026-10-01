@@ -49,6 +49,8 @@ import { appOpenInEdit, OpenInEditStore } from './open-in-edit';
 import { appAlarmEnabled, AlarmEnabledStore } from './alarm-enabled';
 import { appVoiceBoost, VoiceBoostStore } from './voice-boost';
 import { appMissingLinks, MissingLinksStore } from './missing-links';
+import { appCodeCollapse, CodeCollapseStore } from './code-collapse';
+import { appInlineCodeCopy, InlineCodeCopyStore } from './inline-code-copy';
 import { appPhoneLinks, PhoneLinksStore } from './phone-links';
 import { appDateLinks, DateLinksStore } from './date-links';
 import { EXTERNAL_IMAGE_MODES } from '@features/markdown/external-images';
@@ -171,6 +173,16 @@ export class SettingsRenderer {
      * ⚠ **末尾に足す**(すぐ上の戒めのとおり)。
      */
     private readonly missingLinks: MissingLinksStore = appMissingLinks,
+    /**
+     * 🔴 **長いコード枠を最初から畳むか**(#1087)。
+     * ⚠ **末尾に足す**(すぐ上の戒めのとおり)。
+     */
+    private readonly codeCollapse: CodeCollapseStore = appCodeCollapse,
+    /**
+     * 🔴 **文中の短いコードを押すとコピーするか**(#1087)。
+     * ⚠ **末尾に足す**(すぐ上の戒めのとおり)。
+     */
+    private readonly inlineCodeCopy: InlineCodeCopyStore = appInlineCodeCopy,
   ) {}
 
   private sameOriginList: HTMLElement | null = null;
@@ -195,6 +207,8 @@ export class SettingsRenderer {
       this.syncPhoneLinks();
       this.syncDateLinks();
       this.syncMissingLinks();
+      this.syncCodeCollapse();
+      this.syncInlineCodeCopy();
       this.syncExternalImages();
       this.syncPasteSource();
       this.syncSameOrigin(state);
@@ -762,6 +776,42 @@ export class SettingsRenderer {
     //   (`settings-notes.test.ts` / 設計 doc)を動かす。1 行で足りる設定なので足さない。
     mld.append(mllabel);
     editDl.append(mlt, mld);
+    /**
+     * 🔴 **手が滑りやすい 2 つを切れるようにする**(#1087。決めたのは 2026-10-01、
+     *   #1163 の約束事で Gemini の答え)。⚠ **既定は入のまま** ── 配ってあった動きを変えず、
+     *   いやな人の逃げ道だけを足す。切っても他の見え方は変わらない。
+     * ⚠ 説明は hover に置く(`missing-links` と同じ ── visible の note を足すと
+     *   `settings-notes.test.ts` の段落数を動かす)。
+     * ⚠ 字は「何が起きるか」で書く(「インラインコード」は内部の言葉 ── `ui-terms.ts` の BANNED_TERMS)。
+     */
+    const cct = document.createElement('dt');
+    cct.textContent = '長いコード枠';
+    const ccd = document.createElement('dd');
+    const cclabel = document.createElement('label');
+    const cccheck = document.createElement('input');
+    cccheck.type = 'checkbox';
+    cccheck.setAttribute('data-pkc-action', 'set-code-collapse');
+    cccheck.setAttribute('data-pkc-field', 'code-collapse');
+    cclabel.append(cccheck, document.createTextNode(' 長いコード枠を最初から畳む'));
+    cclabel.title =
+      '18 行以上のコード枠を、最初は低く畳んで見せます(押すと全部見えます)。' +
+      '切ると、最初から字が全部見えます(開閉のボタンも出ません)。';
+    ccd.append(cclabel);
+    editDl.append(cct, ccd);
+    const icct = document.createElement('dt');
+    icct.textContent = '文中の短いコード';
+    const iccd = document.createElement('dd');
+    const icclabel = document.createElement('label');
+    const icccheck = document.createElement('input');
+    icccheck.type = 'checkbox';
+    icccheck.setAttribute('data-pkc-action', 'set-inline-code-copy');
+    icccheck.setAttribute('data-pkc-field', 'inline-code-copy');
+    icclabel.append(icccheck, document.createTextNode(' 本文の `code` を押すとコピーする'));
+    icclabel.title =
+      '本文の中の `code` のように書いた短いコードを押すと、その字をコピーします。' +
+      '切ると、押しても何も起きず、ふつうの字として選べます(コード枠のコピーは変わりません)。';
+    iccd.append(icclabel);
+    editDl.append(icct, iccd);
 
     /**
      * 📣 **お知らせを出すか**(P11 段⑤)。
@@ -958,6 +1008,8 @@ export class SettingsRenderer {
     this.syncPhoneLinks();
     this.syncDateLinks();
     this.syncMissingLinks();
+    this.syncCodeCollapse();
+    this.syncInlineCodeCopy();
     this.syncSameOrigin(state);
     this.syncExtensions(state);
     this.syncPersist(state);
@@ -1555,6 +1607,16 @@ export class SettingsRenderer {
   private syncVoiceBoost(): void {
     const box = this.region.querySelector<HTMLInputElement>('[data-pkc-field="voice-boost"]');
     if (box) box.checked = this.voiceBoost.enabled();
+  }
+
+  private syncCodeCollapse(): void {
+    const box = this.region.querySelector<HTMLInputElement>('[data-pkc-field="code-collapse"]');
+    if (box) box.checked = this.codeCollapse.enabled();
+  }
+
+  private syncInlineCodeCopy(): void {
+    const box = this.region.querySelector<HTMLInputElement>('[data-pkc-field="inline-code-copy"]');
+    if (box) box.checked = this.inlineCodeCopy.enabled();
   }
 
   private syncMissingLinks(): void {

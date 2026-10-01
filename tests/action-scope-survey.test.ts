@@ -272,7 +272,8 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
     // ⚠ 2026-10-01(#1010 B): N +1(`open-storage-check`。保存が止まった断り書きの隣から
     //   「システム」の保存領域の点検へ ── 行き先は固定で、押した所から**何も要らない**。
     //   `open-system-notices` と同じ仕分け)。
-    expect(counts()).toEqual({ P1: 65, P2: 34, E: 25, V: 10, N: 158 });
+    // ⚠ 2026-10-01(#1087): N +2(`set-code-collapse` / `set-inline-code-copy`。checkbox の `checked` を渡すだけ ── 同じ仕分け)。
+    expect(counts()).toEqual({ P1: 65, P2: 34, E: 25, V: 10, N: 160 });
   });
 
   it('🔴 名指しの錨 ── 件数が同じまま入れ替わっても落ちる', () => {

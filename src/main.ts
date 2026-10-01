@@ -52,6 +52,8 @@ import {
 } from '@features/storage/storage-notice';
 import { appOpenInEdit } from '@adapter/ui/render/open-in-edit';
 import { appMissingLinks } from '@adapter/ui/render/missing-links';
+import { appCodeCollapse } from '@adapter/ui/render/code-collapse';
+import { appInlineCodeCopy } from '@adapter/ui/render/inline-code-copy';
 import { appPhoneLinks } from '@adapter/ui/render/phone-links';
 import { appDateLinks } from '@adapter/ui/render/date-links';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
@@ -3673,6 +3675,20 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      */
     setMissingLinks: (on) => {
       appMissingLinks.setEnabled(on);
+      center.invalidateDetail();
+      center.render(dispatcher.getState());
+    },
+    /**
+     * 🔴 **長いコード枠の最初の畳み / 文中の短いコードのコピー**(#1087)。⚠ `setMissingLinks` と同じく
+     *   **描き直しまでが 1 組**(保存だけでは、いま読んでいる本文の見え方が変わらない)。
+     */
+    setCodeCollapse: (on) => {
+      appCodeCollapse.setEnabled(on);
+      center.invalidateDetail();
+      center.render(dispatcher.getState());
+    },
+    setInlineCodeCopy: (on) => {
+      appInlineCodeCopy.setEnabled(on);
       center.invalidateDetail();
       center.render(dispatcher.getState());
     },

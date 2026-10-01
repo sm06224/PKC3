@@ -35,6 +35,8 @@ import { OpenInEditStore } from '@adapter/ui/render/open-in-edit';
 import { AlarmEnabledStore } from '@adapter/ui/render/alarm-enabled';
 import { VoiceBoostStore } from '@adapter/ui/render/voice-boost';
 import { MissingLinksStore } from '@adapter/ui/render/missing-links';
+import { CodeCollapseStore } from '@adapter/ui/render/code-collapse';
+import { InlineCodeCopyStore } from '@adapter/ui/render/inline-code-copy';
 import { PhoneLinksStore } from '@adapter/ui/render/phone-links';
 import { DateLinksStore } from '@adapter/ui/render/date-links';
 import { TooNarrowOkStore } from '@adapter/ui/render/too-narrow';
@@ -109,6 +111,25 @@ const CASES: readonly {
     name: 'MissingLinksStore',
     make: () => {
       const s = new MissingLinksStore(null);
+      return { write: (v) => s.setEnabled(v as boolean), read: () => s.enabled() };
+    },
+    a: false,
+    b: true,
+  },
+  {
+    // ⚠ 既定が「入」の store(#1087)── a を切(false)にして、控えが死んでいて既定へ戻る実装を捕まえる
+    name: 'CodeCollapseStore',
+    make: () => {
+      const s = new CodeCollapseStore(null);
+      return { write: (v) => s.setEnabled(v as boolean), read: () => s.enabled() };
+    },
+    a: false,
+    b: true,
+  },
+  {
+    name: 'InlineCodeCopyStore',
+    make: () => {
+      const s = new InlineCodeCopyStore(null);
       return { write: (v) => s.setEnabled(v as boolean), read: () => s.enabled() };
     },
     a: false,
