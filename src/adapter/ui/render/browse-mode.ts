@@ -2,9 +2,12 @@
  * 探し方(左の列のタブ)の既定と記憶(#240 段⑤。user 指示 2026-08-17
  * 「そもそも左ペインの一覧表示はあまり意味がない。フォルダ表示メインに」)。
  *
- * 🔴 **既定はフォルダ**。⚠ ただし**一覧タブは残す** ── user 指摘は「あまり意味がない」
- * であって「消せ」ではなく、消すと**全件を一望する面**と #183 の並べ替えを見る場所が
- * 無くなる(記法と同じで、動線を減らす向きの整理はしない)。
+ * 🔴 **既定はフォルダ**。⚠ 「一覧」タブは #813 段③ で**外した**(🟣 Gemini 裁定 2026-10-01 = A)。
+ * 全件を一望する道は**フォルダの帯の「中まで全部出す」**(ルートで入れれば全件)と、
+ * **探す欄に語を打つと下の階層まで全部から当たる**ことが担う(段③-a で、一覧にしか無かった
+ * 動線 ── ↓ で行へ降りる / 戻る進むの生死 / 200 件で切れた知らせ / 絞りを外す / 改名の逃げ先 ──
+ * をフォルダへ移してから外した)。
+ * ⚠ 端末に `list` を憶えている人は、次に開くと**フォルダ**で出る(下の `BrowseModeStore.get`)。
  *
  * ⚠ 1 鍵だけ(`pkc3.theme` / `pkc3.panes` と同じ作法)。**container に入れない** ──
  * 「どう探すか」は画面側の都合であって、ノートのデータではない。
@@ -25,7 +28,6 @@
 import type { ViewMode } from '@adapter/state/app-state';
 
 export const BROWSE_MODES = [
-  'list',
   'filer',
   'launcher',
   'schedule',
@@ -42,18 +44,18 @@ export const DEFAULT_BROWSE_MODE: BrowseMode = 'filer';
 /**
  * 🔴 **種類の絞り(`kindFilter`)が実際に効く探し方**(#478)。
  *
- * ⚠ **一覧に無い面では、押しても何も起きない**のに**絞りだけ入る** ──
+ * ⚠ **効かない面では、押しても何も起きない**のに**絞りだけ入る** ──
  *   その面では何も変わらないので user は気づかず、
- *   あとで一覧へ行くと**ノートが消えている**。
+ *   あとでフォルダへ行くと**ノートが消えている**。
  *
  * 🔑 中身は**実装を読んで決めた**(推測ではない):
- *   `kindFilter` を読んでいるのは `filer.ts` / `dual-filer.ts`(一覧・フォルダ)と
+ *   `kindFilter` を読んでいるのは `filer.ts` / `dual-filer.ts`(フォルダ)と
  *   `schedule.ts:139`(予定)だけで、`contacts.ts` / `launcher.ts` は **0 件**。
  * ⚠ **面が `kindFilter` を読むようになったら、ここへ足す**
  *   ── 足さないと「効くのに札が出ない」になる(逆向きの穴)。
  *   `tests/adapter/kind-bar.test.ts` が両方向を突き合わせる。
  */
-export const KIND_FILTER_MODES: readonly BrowseMode[] = ['list', 'filer', 'schedule'];
+export const KIND_FILTER_MODES: readonly BrowseMode[] = ['filer', 'schedule'];
 
 /** その探し方で種類の絞りが効くか。 */
 export function kindFilterApplies(mode: BrowseMode): boolean {
@@ -147,7 +149,12 @@ export class BrowseModeStore {
     private readonly storage: Pick<Storage, 'getItem' | 'setItem'> | null = readStorage(),
   ) {}
 
-  /** ⚠ 読めない値・知らない値は既定へ落ちる(壊れた保存で面が出ないほうが害が大きい)。 */
+  /**
+   * ⚠ 読めない値・知らない値は既定へ落ちる(壊れた保存で面が出ないほうが害が大きい)。
+   * 🔴 **憶えた `list`(外した「一覧」)も「知らない値」** ── だから**フォルダ**で開く
+   *   (#813 段③)。⚠ 読み替えの行き先は**既定そのもの**にしてあり、別に表を持たない
+   *   (既定を変える日に、読み替えだけ古い行き先のまま残らない)。
+   */
   get(): BrowseMode {
     try {
       if (this.storage === null) return this.fallback;

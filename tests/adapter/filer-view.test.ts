@@ -54,7 +54,7 @@ function setup(metas: EntryMeta[], relations: Relation[]) {
   const browse = new BrowseRouter(regions.sidebar, regions.browseHost);
   // 🔑 探し方の切替は **service** が受ける(state ではなく画面側の都合 ── P8 段⑤)。
   // ⚠ ここを dispatch に置き換えると、タブを押しても切り替わらない実装が緑になる
-  let mode: 'list' | 'filer' | 'launcher' = 'list';
+  let mode: 'filer' | 'launcher' = 'filer';
   d.onState((s) => browse.render(s, mode));
   // 🔴 「別のウィンドウ(付箋)で開く」の観測点(#1042 C14)── 2 回押しの受け先。
   const openedWindows: string[] = [];

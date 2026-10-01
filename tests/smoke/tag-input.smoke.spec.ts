@@ -63,7 +63,7 @@ test('🔴 情報ペインでタグを打つと本文に入り、開き直して
   // 🔴 **読み直しても残る**(disk まで届いた証拠)
   await page.reload();
   await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
-  await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry], [data-pkc-entry]');
+  await clickReal(page, '[data-pkc-region="filer-table"] [data-pkc-entry], [data-pkc-entry]');
   await expect(page.locator(CHIPS).first(), '読み直したら消えた').toContainText('買い物');
 
   expect(errors, 'pageerror が出た').toEqual([]);

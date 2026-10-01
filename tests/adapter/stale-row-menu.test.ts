@@ -76,8 +76,8 @@ function setup() {
   const d = new Dispatcher();
   const regions = buildShell(root);
   const browse = new BrowseRouter(regions.sidebar, regions.browseHost);
-  // ⚠ mode は常に 'list' で描く(タブは押さない ── 一覧だけで足りる主張)
-  d.onState((s) => browse.render(s, 'list'));
+  // ⚠ mode は常に 'filer' で描く(タブは押さない ── フォルダの面だけで足りる主張)
+  d.onState((s) => browse.render(s, 'filer'));
   bindActions(root, d);
   const deleted: string[] = [];
   connectStoreEffects(d, {
@@ -93,8 +93,8 @@ function setup() {
     setEntryParent: async () => {},
   });
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: METAS, relations: [] });
-  const pane = root.querySelector<HTMLElement>('[data-pkc-region="entry-list"]');
-  expect(pane, '前提が崩れている: 一覧の器が無い').not.toBeNull();
+  const pane = root.querySelector<HTMLElement>('[data-pkc-region="filer-table"]');
+  expect(pane, '前提が崩れている: フォルダの表が無い').not.toBeNull();
   const row = (lid: string): HTMLElement => {
     const el = pane!.querySelector<HTMLElement>(`[data-pkc-entry="${lid}"]`);
     expect(el, `前提が崩れている: 台に ${lid} の行が無い`).not.toBeNull();

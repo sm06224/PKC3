@@ -1,14 +1,15 @@
 /**
- * 印(複数選択)の地の明度は、一覧タブ・フォルダの表・2 ペインの表が**同じ 1 つの
- * トークン**を読むこと(#1038 台帳③ 段 G、C13 / Q6 裁定「A + 濃く」)。
+ * 印(複数選択)の地の明度は、フォルダの表・2 ペインの表が**同じ 1 つの
+ * トークン**を読むこと(#1038 台帳③ 段 G、C13 / Q6 裁定「A + 濃く」。
+ * 「一覧」タブは #813 段③ で外した)。
  *
  * 🔴 守る主張:
  * 1. `--pkc-mark-bg` は `--fg` と `--surface` の `color-mix`(色相を発明しない ──
  *    地は無彩色、色は情報にだけ)。**テーマごとには定義しない**(9 テーマ全部に
  *    自動で追従する `--pkc-tag-bg` と同じ技法)
- * 2. 一覧・フォルダの表・2 ペインの表の `[data-pkc-marked]` 規則が、**3 つとも**
- *    `var(--pkc-mark-bg)` を読む(2 か所だけ直して 1 か所が古いまま、を防ぐ)
- * 3. 一覧タブの hover は marked の行を塗り直さない(`:not([data-pkc-marked])`)
+ * 2. フォルダの表・2 ペインの表の `[data-pkc-marked]` 規則が、**2 つとも**
+ *    `var(--pkc-mark-bg)` を読む(1 か所だけ直して 1 か所が古いまま、を防ぐ)
+ * 3. 外した「一覧」の規則(`entry-list`)が CSS に残っていない
  * 4. 開いている行(`[data-pkc-selected]`)は `!important` を保つ ── 無いと
  *    「開いていて、かつ印が付いている」行の見え方が CSS の詳細度・順序で
  *    ひっくり返りうる(「開いて見える」が読み手の環境で変わる、を防ぐ)
@@ -41,7 +42,6 @@ describe('印(marked)の地の明度は 1 つのトークン(#1038 台帳③ 段
   it.each([
     ["[data-pkc-region='filer-table'] tbody tr[data-pkc-marked]", 'フォルダの表'],
     ["[data-pkc-region='dual-table'] tbody tr[data-pkc-marked] td", '2 ペインの表'],
-    ["[data-pkc-region='entry-list'] [data-pkc-entry][data-pkc-marked]", '一覧タブ'],
   ])('🔴 %s(%s)が var(--pkc-mark-bg) を読む', (sel) => {
     const hit = blocksFor(screenOnly, sel);
     expect(hit.length, `${sel} の規則が無い(1 つではない)`).toBe(1);
@@ -54,15 +54,13 @@ describe('印(marked)の地の明度は 1 つのトークン(#1038 台帳③ 段
     );
   });
 
-  it('🔴 一覧タブの hover は marked の行を塗り直さない', () => {
-    const hover = blocksFor(
-      screenOnly,
-      "[data-pkc-region='entry-list'] [data-pkc-entry]:hover:not([data-pkc-marked])",
-    );
-    expect(hover.length, '一覧タブの hover 規則が無い').toBe(1);
-    // ⚠ `:not` を外した素の hover 規則が復活していないこと(dual/filer と同じ検算)
-    const bare = blocksFor(screenOnly, "[data-pkc-region='entry-list'] [data-pkc-entry]:hover");
-    expect(bare, '一覧タブに素の hover 規則が復活している').toEqual([]);
+  it('🔴 外した「一覧」の規則が CSS に残っていない(死んだ規則を残さない)', () => {
+    const raw = readFileSync('src/styles/app.css', 'utf-8');
+    // ⚠ コメントを落としてから見る(解説に旧い名前を書いても落ちない ── 見るのは実行する規則)
+    const css = stripComments(raw);
+    expect(css, '「一覧」の器の規則が残っている').not.toContain('entry-list');
+    // 空振り防止 ── 正規の側(フォルダの表)の規則は在る
+    expect(blocksFor(screenOnly, "[data-pkc-region='filer-table'] tbody tr[data-pkc-marked]").length).toBe(1);
   });
 
   it('🔴 開いている行(data-pkc-selected)は !important を保つ(印との組合せが崩れない)', () => {

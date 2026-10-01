@@ -10,8 +10,7 @@ import { readFileSync } from 'node:fs';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
 import { buildShell } from '../../src/adapter/ui/render/shell';
-import { SidebarRenderer } from '../../src/adapter/ui/render/sidebar';
-import { KindBarRenderer } from '../../src/adapter/ui/render/kind-bar';
+import { BrowseRouter } from '../../src/adapter/ui/render/browse';
 import type { BrowseMode } from '../../src/adapter/ui/render/browse-mode';
 
 function meta(lid: string, order: number, over: Partial<EntryMeta> = {}): EntryMeta {
@@ -151,26 +150,22 @@ describe('消したあとの後継', () => {
 describe('サイドバーの札', () => {
   /**
    * ⚠ **札を描く renderer が変わった**(2026-08-27、#478)── 帯は左の列に在って
-   *   面をまたぐので、**面の中(`SidebarRenderer`)から器の側(`KindBarRenderer`)へ
-   *   移した**(移す前は一覧以外のタブで 1 度も描き直されず、押しても嘘をついた)。
+   *   面をまたぐので、**面の中から器の側(`KindBarRenderer`)へ移した**
+   *   (移す前は描いた面以外のタブで 1 度も描き直されず、押しても嘘をついた)。
    * 🔑 **見たいことは 1 つも変えていない** ── 下の assert はそのままで、
    *   **駆動する相手だけ**を差し替えている。
-   * ⚠ `sidebar.render` も併せて呼ぶ ── 行(`entry-list`)は今もそちらが描くので、
-   *   「札を押すと行が減る」を見る test はその両方が要る。
+   * ⚠ 「一覧」の描画器は #813 段③ で外したので、行はフォルダの表(`BrowseRouter`)が描く ──
+   *   「札を押すと行が減る」を見る test は札と行の両方が要る。
    */
   const mount = () => {
     const root = document.createElement('div');
     document.body.append(root);
-    buildShell(root);
-    const region = root.querySelector<HTMLElement>('[data-pkc-region="sidebar"]')!;
-    const list = new SidebarRenderer(region);
-    const bar = new KindBarRenderer(region);
-    // ⚠ 既定は一覧(札が出る面)── 面ごとの出し分けは `kind-bar.test.ts` が見る
+    const regions = buildShell(root);
+    const region = regions.sidebar;
+    const browse = new BrowseRouter(regions.sidebar, regions.browseHost, 'filer');
+    // ⚠ 既定はフォルダ(札が出る面)── 面ごとの出し分けは `kind-bar.test.ts` が見る
     const sidebar = {
-      render: (state: AppState, mode: BrowseMode = 'list'): void => {
-        list.render(state);
-        bar.render(state, mode);
-      },
+      render: (state: AppState, mode: BrowseMode = 'filer'): void => browse.render(state, mode),
     };
     return { root, sidebar, region };
   };
@@ -195,7 +190,7 @@ describe('サイドバーの札', () => {
     const { sidebar, region } = mount();
     let s = boot(SET);
     sidebar.render(s);
-    const rows = () => region.querySelectorAll('[data-pkc-region="entry-list"] li').length;
+    const rows = () => region.querySelectorAll('[data-pkc-region="filer-table"] tbody tr').length;
     expect(rows()).toBe(4);
     s = reduce(s, { type: 'TOGGLE_KIND_FILTER', archetype: 'attachment' }).state;
     sidebar.render(s);
@@ -237,7 +232,7 @@ describe('サイドバーの札', () => {
     let s = boot([meta('a', 1), meta('b', 2, { archetype: 'folder' })]);
     s = reduce(s, { type: 'TOGGLE_KIND_FILTER', archetype: 'attachment' }).state;
     sidebar.render(s);
-    expect(region.querySelectorAll('[data-pkc-region="entry-list"] li')).toHaveLength(0);
+    expect(region.querySelectorAll('[data-pkc-region="filer-table"] tbody tr')).toHaveLength(0);
     expect(
       region.querySelector('[data-pkc-field="kind-clear"]'),
       '0 件の画面から戻る道が無い(user が閉じ込められる)',
@@ -262,14 +257,10 @@ describe('サイドバーの札', () => {
  * 🔑 だから見るのは「**`state.kindFilter` を渡していること**」である。
  */
 describe('絞りが全部の面に届いている', () => {
-  /**
-   * ⚠ **一覧タブ(`sidebar.ts`)も並びを採る面である**(#1038 台帳③ 段 G、C13)──
-   *   段 G で一覧の並びを `listRows` 1 か所へ寄せたので、ここに数える。
-   */
+  /** ⚠ 並びを採る面。「一覧」(`sidebar.ts` / `listRows`)は #813 段③ で外した。 */
   const FACES = [
     'src/adapter/ui/render/filer.ts',
     'src/adapter/ui/render/dual-filer.ts',
-    'src/adapter/ui/render/sidebar.ts',
     'src/adapter/state/app-state.ts',
     'src/adapter/ui/actions/binder.ts',
   ];
@@ -298,16 +289,10 @@ describe('絞りが全部の面に届いている', () => {
     expect(src.slice(at), '絞りが届かない面ができる').toContain('...listViewOptions(state),');
   });
 
-  it('`filerRows` / `listRows` を呼ぶ面は、数えた数だけ `kindFilter` を渡している', () => {
+  it('`filerRows` を呼ぶ面は、数えた数だけ `kindFilter` を渡している', () => {
     for (const f of FACES) {
       const src = readFileSync(f, 'utf8');
-      /**
-       * ⚠ **並びを採る関数は 2 つある**(#1038 台帳③ 段 G、C13)── フォルダの表の
-       *   `filerRows` と、一覧タブの flat な `listRows`。`filerRows` だけを数えると、
-       *   一覧の並びを採る呼び出しで絞りを渡し忘れても、**数が合わずに落ちる**のではなく
-       *   **渡した側だけが余って**落ち方が読めなくなる(実際に段 G でそう落ちた)。
-       */
-      const calls = (src.match(/\b(filerRows|listRows)\(/g) ?? []).length;
+      const calls = (src.match(/\bfilerRows\(/g) ?? []).length;
       /**
        * ⚠ **綴りは 2 通りある**(2026-09-11、#215 残り①)── 同じ 3 つ
        *   (`sort` / `sortDesc` / `kinds`)を 7 か所で書いていたので
@@ -350,7 +335,6 @@ describe('絞りが全部の面に届いている', () => {
    */
   it('🔴 `filterQuery` を指紋にしている面は、`kindFilter` も指紋にしている', () => {
     const FACES = [
-      'src/adapter/ui/render/sidebar.ts',
       'src/adapter/ui/render/filer.ts',
       'src/adapter/ui/render/dual-filer.ts',
       'src/adapter/ui/render/schedule.ts',
@@ -383,8 +367,8 @@ describe('絞りが全部の面に届いている', () => {
     }
   });
 
-  it('語だけを見る面(サイドバー / 予定)も `kindFilter` を通している', () => {
-    for (const f of ['src/adapter/ui/render/sidebar.ts', 'src/adapter/ui/render/schedule.ts']) {
+  it('語だけを見る面(予定)も `kindFilter` を通している', () => {
+    for (const f of ['src/adapter/ui/render/schedule.ts']) {
       const src = readFileSync(f, 'utf8');
       expect(src, `${f} が種類の絞りを渡していない`).toContain('state.kindFilter');
     }

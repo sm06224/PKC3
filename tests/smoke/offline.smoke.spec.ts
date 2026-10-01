@@ -1,11 +1,10 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, collectPageErrors, clickReal, createEntry, useSplitEditor, useListBrowse } from './helpers';
+import { gotoApp, collectPageErrors, clickReal, createEntry, useSplitEditor } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
 // 既定(live)の顔は live-editor.smoke.spec.ts が守る。
 test.beforeEach(async ({ page }) => {
-  await useListBrowse(page);
   await useSplitEditor(page);
 });
 
@@ -50,9 +49,9 @@ test('🔴 オフラインで再読込しても、作ったノートが読める
   });
 
   // ② **中身が読める** ── sidebar に出て、開くと本文が描画される
-  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  const rows = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
   await expect(rows).toHaveCount(1);
-  await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]');
+  await clickReal(page, '[data-pkc-region="filer-table"] [data-pkc-entry]');
   await expect(page.locator('[data-pkc-field="detail-body"] h1')).toHaveText(
     'オフラインで読む',
   );

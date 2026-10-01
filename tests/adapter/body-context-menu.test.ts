@@ -72,7 +72,7 @@ function setup(over: Partial<BinderServices> = {}) {
      */
     '<div data-pkc-view-pane="settings"><p data-pkc-field="settei">設定の中身</p></div>' +
     '</div>' +
-    '<div data-pkc-region="entry-list">' +
+    '<div data-pkc-region="filer-table">' +
     '<li data-pkc-entry="n1">行</li>' +
     // 🔴 **フォルダの行**(#500 案 C)── 条件つきの物が出る側の対照群
     '<li data-pkc-entry="f1">フォルダ</li>' +

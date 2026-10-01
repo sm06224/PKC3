@@ -7,7 +7,7 @@
  * 食い違いになる(CLAUDE.md §7「同じ判定が複数の場所にある」)。
  *
  * ⚠ 並び順(#183)を**ここで掛ける**。直す前、フォルダ面は並び順を 1 度も見ておらず、
- * 一覧タブで「題名順」に変えてもフォルダの中は作成順のままだった ── 既定をフォルダに
+ * 並べ替えの欄で「題名順」に変えてもフォルダの中は作成順のままだった ── 既定をフォルダに
  * する(段⑤)前に、**効かない操作子を既定の面に出さない**ために揃える。
  */
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
@@ -158,41 +158,6 @@ export function flatParentNames(
     if (title !== '') out.set(m.lid, title);
   }
   return out;
-}
-
-/**
- * 🔴 **一覧タブに出る行**(#1038 台帳③ 段 G、C13)。⚠ `filerRows` と**同じ理由**で
- * 1 か所にする(このファイル冒頭の docstring)── 描く側(`sidebar.ts`)と選ぶ側
- * (reducer の `SELECT_RANGE`)が別々に並びを組むと、目で見た範囲と選ばれる範囲が
- * 食い違う。
- *
- * ⚠ **`filerRows` とは「見る集合」が違う**── フォルダの表はフォルダの構造
- *   (`scopeLid` の直下)だけを見るが、一覧タブは**フォルダ構造を見ない flat な
- *   並び**(`order` に載っている全件)である。だから `scopeLid` を渡さない ──
- *   渡せる引数を作ると「一覧なのにフォルダ構造で絞られる」を作り込むことになる。
- * @param order 一覧に**存在する**全 lid(絞り込み前。`AppState.order`)
- */
-export function listRows(
-  order: readonly string[],
-  entryMetas: ReadonlyMap<string, EntryMeta>,
-  opts: FilerListOptions,
-): EntryMeta[] {
-  const base = order
-    .map((lid) => entryMetas.get(lid))
-    .filter((m): m is EntryMeta => m !== undefined);
-  const filter = entryFilterOf(opts.filterQuery, opts.searchHits, opts.kinds);
-  const shown = base.filter((m) => matchesEntry(m, filter));
-  // ⚠ 並べ替えは lid の列で行う(規則は `sortOrder` 1 か所)── ここで比較を書き直さない
-  const byLid = new Map(shown.map((m) => [m.lid, m]));
-  return sortOrder(
-    shown.map((m) => m.lid),
-    (lid) => byLid.get(lid),
-    opts.sort,
-    opts.sortDesc,
-    (lid) => opts.openedAt.get(lid) ?? 0,
-  )
-    .map((lid) => byLid.get(lid))
-    .filter((m): m is EntryMeta => m !== undefined);
 }
 
 /**

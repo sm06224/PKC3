@@ -1,11 +1,10 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor, useListBrowse } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
 // 既定(live)の顔は live-editor.smoke.spec.ts が守る。
 test.beforeEach(async ({ page }) => {
-  await useListBrowse(page);
   await useSplitEditor(page);
 });
 
@@ -158,7 +157,7 @@ test('🔴 打って押すと、編集画面を開かずに末尾へ足される
   // ⑤ 🔴 **再読込しても残っている**(disk に着いている)
   await page.reload();
   await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15000 });
-  await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]');
+  await clickReal(page, '[data-pkc-region="filer-table"] [data-pkc-entry]');
   await expect(page.locator('[data-pkc-field="detail-body"]')).toContainText('2 件目');
 
   expect(errors).toEqual([]);
@@ -231,8 +230,8 @@ test('🔴 追記すると足した所へ動き、保存しても先頭へ戻ら
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
   const detail = page.locator('[data-pkc-region="detail"]');
-  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
-  await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]');
+  const rows = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
+  await clickReal(page, '[data-pkc-region="filer-table"] [data-pkc-entry]');
   await expect(page.locator('[data-pkc-field="detail-body"]')).toBeVisible();
 
   await detail.evaluate((el) => (el.scrollTop = 700));

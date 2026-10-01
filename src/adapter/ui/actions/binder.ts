@@ -85,12 +85,11 @@ import { paintSearchHistory } from '@adapter/ui/render/shell';
 import type { EntryMeta } from '@core/model/entry-meta';
 import {
   filerRows,
-  listRows,
   operationTargets,
   smartLidsOf,
   visibleSelection,
 } from '@features/relation/filer-list';
-import { archetypeLabel } from '@adapter/ui/render/sidebar';
+import { archetypeLabel } from '@features/flavor/archetype-label';
 import { SMART_FIELDS, type SmartField } from '@features/smart/smart-spec';
 import {
   buildSettingsFile as buildSettingsFileData,
@@ -700,54 +699,6 @@ export function generateLid(): string {
  */
 const visibleFilerRows = (st: AppState): EntryMeta[] =>
   filerRows(st.scopeLid, st.entryMetas, st.relations, filerRowOptions(st));
-
-/**
- * 🔴 **一覧タブの行(flat)**(#1038 台帳③ 段 G-2、C13)。⚠ `visibleFilerRows` と
- * 同じ理由で 1 か所にする ── 描く側(`sidebar.ts`)・範囲選択(reducer の
- * `SELECT_RANGE scope:'list'`)・ここが別々に並びを組むと、目で見たものと動くものが
- * 食い違う(CLAUDE.md §7)。
- */
-const visibleListRows = (st: AppState): EntryMeta[] =>
-  listRows(st.order, st.entryMetas, {
-    filterQuery: st.filterQuery,
-    searchHits: st.searchHits,
-    ...listViewOptions(st),
-  });
-
-/**
- * 🔴 **いま画面に出ているのは一覧タブか**(#1038 台帳③ 段 G-2。実装者(段 G)の
- * 自己申告 trap 1 を直すための土台)。
- *
- * ⚠ `browseMode`(探し方)は `AppState` に持たない(`REFRESH_TASK_SCAN` の注記
- * 「探し方(`browseMode`)は state に持たないので、『開いた』を知っているのは
- * `main.ts` である」のとおり)── reducer からは見えないので、束ねる操作
- * (`move-to-folder` 等)の相手をどちらの並びで採るかを reducer 側では決められない。
- * だから **DOM** で見る。
- * ⚠ 一覧タブは**既存の region(`entry-list`)をそのまま使う**(`browse.ts` の
- * `BrowseRouter` コンストラクタの註記「一覧だけは既存の region をそのまま使う」)──
- * タブを切り替えるとき、その pane 自身の `.hidden` を直接付け外しする(`render()` の
- * `this.panes[this.last].hidden = true; this.panes[mode].hidden = false;`)。
- * つまり `entry-list` region が `hidden` でなければ、いま出ているのは一覧タブである
- * (フォルダの表は別の pane(`filer`)に入るので、両方が同時に見えることは無い)。
- */
-const listTabShowing = (root: HTMLElement): boolean => {
-  const pane = root.querySelector<HTMLElement>('[data-pkc-region="entry-list"]');
-  return pane !== null && !pane.hidden;
-};
-
-/**
- * 🔴 **束ねる操作が見る集合を、画面に出ているタブへ合わせる**(#1038 台帳③ 段 G-2)。
- *
- * ⚠ 直す前はここが**常に** `visibleFilerRows(st)`(フォルダの表専用のスコープ ──
- * `st.scopeLid` の直下しか見ない)だったので、一覧タブで別々のフォルダに居るノートを
- * Ctrl で複数選び、右クリック →「フォルダへ移す…」すると、`scopeLid` の外に居る印が
- * **黙って除外**されていた(段 G の実装者が自己申告した trap 1)。
- * 🔑 規則の目的は「**いま画面で見えている印だけを相手にする**」ことなので、
- * 画面に出ているのが一覧タブなら一覧タブの並び(`visibleListRows`)、
- * フォルダの表なら従来どおりフォルダの並び(`visibleFilerRows`)を見る。
- */
-const visibleLeftColumnRows = (st: AppState, root: HTMLElement): EntryMeta[] =>
-  listTabShowing(root) ? visibleListRows(st) : visibleFilerRows(st);
 
 /** その entry が**既にそこに居る**か(動かす必要が無い)。 */
 const alreadyThere = (st: AppState, lid: string, parentLid: string | null): boolean => {
@@ -4066,18 +4017,17 @@ function readSetting(key: string): string | null {
 const noop = (): void => {};
 
 /**
- * 🔴 **行を持つ 3 つの器**(#1032 で 1 か所へ寄せた)。
+ * 🔴 **行を持つ 2 つの器**(#1032 で 1 か所へ寄せた。「一覧」の器は #813 段③ で外した)。
  *
- * ⚠ 左の列は**タブで中身が変わる** ── 「フォルダ」(`filer-table`)/「一覧」
- *   (`entry-list`)/ 2 ペイン(`dual-table`)の**3 つとも**行を持つ。
- * 🔴 **1 つ落とすと「そのタブの user だけ効かない」**という、いちばん外しやすい形になる
- *   (2026-09-09 の UX レビューが、前 2 つを落とした 1 稿目で実際に踏んだ)。
+ * ⚠ 左の列の行は「フォルダ」(`filer-table`)/ 2 ペイン(`dual-table`)の**2 つ**が持つ。
+ * 🔴 **1 つ落とすと「その面の user だけ効かない」**という、いちばん外しやすい形になる
+ *   (2026-09-09 の UX レビューが、3 つのうち 2 つを落とした 1 稿目で実際に踏んだ)。
  * 🔑 だから**字を 1 か所に置く** ── 行を掴む判定(`blockRowTarget`)と、
  *   「何も無い所を押したら閉じる」(`onClick`)が**同じ表**を読む(§7)。
  */
-export const ROW_HOST_REGIONS: readonly string[] = ['filer-table', 'dual-table', 'entry-list'];
+export const ROW_HOST_REGIONS: readonly string[] = ['filer-table', 'dual-table'];
 
-/** 上の 3 つを選択子にしたもの。 */
+/** 上の 2 つを選択子にしたもの。 */
 export const ROW_HOST_SELECTOR = ROW_HOST_REGIONS.map((r) => `[data-pkc-region="${r}"]`).join(', ');
 
 export function runGlobalCommand(
@@ -7506,8 +7456,8 @@ const ACTIONS: Record<string, ActionHandler> = {
    *
    * ⚠ 入力欄は **state 駆動**(`ROW_RENAME_BEGIN` → 面が行の題名の所に欄を描く)──
    *   2 ペインの `dual-rename-begin` と同じ作法。確定は `RENAME_ENTRY_TITLE` 1 つ。
-   * ⚠ 欄を描くのは**左の列の一覧とフォルダの面だけ**である。予定・連絡先の行から
-   *   押した場合は欄が出ない ── だから**一覧の面へ切り替えて**出し、それでも出なければ
+   * ⚠ 欄を描くのは**フォルダの面だけ**である。予定・連絡先の行から
+   *   押した場合は欄が出ない ── だから**フォルダの面へ切り替えて**出し、それでも出なければ
    *   (絞り込みで行が消えている等)理由を出して畳む。黙って `renamingLid` を立てたまま
    *   終わると、次にその行が出た瞬間に欄が現れる(押していないのに)。
    */
@@ -7530,7 +7480,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       root.querySelector('[data-pkc-field="row-rename"]') !== null;
     /**
      * 🔴 **欄が出なければ、フォルダのタブへ切り替え、それでも出なければその行の親フォルダへ入る**
-     *   (#813 段③-a。以前は「一覧タブへ切り替える」だった)。
+     *   (#813 段③。以前は「一覧タブへ切り替える」だった)。
      * ⚠ 一覧は階層を見ない平らな並びだったので、**どのフォルダに居る行でも**欄が出た。
      *   フォルダの表は**いま居る場所の直下**の行にしか欄を描けない ── 予定・連絡先・音/動画の行
      *   (別のフォルダに居る)から始めたときは、**親フォルダへ入って**欄を出す
@@ -7578,8 +7528,9 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}動かしてください` });
       return;
     }
-    // 🔴 一覧タブが出ていれば一覧の並びで見る(#1038 台帳③ 段 G-2、trap 1)
-    const marked = visibleSelection(visibleLeftColumnRows(st, root), st.selection);
+    // 🔴 いま画面に出ている行の印だけを相手にする(`visibleFilerRows` 1 本 ──
+    //   「中まで全部出す」/ 語を打っている間は階層をまたいだ平らな行で採る)
+    const marked = visibleSelection(visibleFilerRows(st), st.selection);
     const lids = marked.includes(lid) ? marked : [lid];
     const title =
       lids.length === 1
@@ -11333,7 +11284,7 @@ export function bindActions(
      *   (行・ボタン・選択欄)に当たっていたら、下の本来の処理へ落とす。
      * 🔴 **見るのは「左の列の器」(`browse-host`)であって、表そのものではない**
      *   (2026-09-21、実ブラウザで実測して直した)。
-     * ⚠ 1 稿目は行を持つ 3 つの器(`filer-table` / `dual-table` / `entry-list`)を
+     * ⚠ 1 稿目は行を持つ器(`filer-table` / `dual-table` / 「一覧」の `entry-list`)を
      *   見ていたが、**表は中身の高さしか無い** ── 実測で高さ **53px**(見出し + 1 行)、
      *   その下の **126px** は表の外だった。つまり user が「何も無い所」と思って押す
      *   場所は**ほとんど表の外**で、この直しは実ブラウザでは**ほぼ効かなかった**
@@ -11413,23 +11364,18 @@ export function bindActions(
      */
     const me = ev as MouseEvent;
     /**
-     * 🔴 **フォルダ面と一覧タブの中だけ**(着地前レビュー 4。一覧タブは
-     * #1038 台帳③ 段 G、C13 / Q6「A + 濃く」で足した)。`select-entry` は
-     * 6 か所に在る(sidebar / filer / kanban / calendar / query / inspector)ので、
+     * 🔴 **フォルダ面の中だけ**(着地前レビュー 4)。`select-entry` は
+     * 5 か所に在る(filer / kanban / calendar / query / inspector)ので、
      * 面で切らないと:
      * - kanban / calendar / query の `Ctrl` クリックが**画面に出ない印**を増やす
      *   (帯だけが数える)
-     * - `Shift` の範囲は `filerRows` / `listRows` の並びで採るので、**目で見た並びと
-     *   違う集合**になる(フォルダ・一覧のどちらでもない面なら `[]` になり、
+     * - `Shift` の範囲は `filerRows` の並びで採るので、**目で見た並びと
+     *   違う集合**になる(フォルダの面でなければ `[]` になり、
      *   `preventDefault` 済みなので**選択すら起きない**)
      * - inspector の「関連へ飛ぶ」ボタンで `Ctrl` クリックが奪われる
-     * 段②③④は**フォルダ面と一覧タブの機能**である(設計 doc §3)。
-     * ⚠ **一覧タブは背景を描き分けるようになったので、この門を広げても安全**
-     *   (直す前は「押しても見えない」が理由で外していた ── `sidebar.ts` の
-     *   `paintMarks` / `app.css` の `[data-pkc-marked]`)。
+     * 段②③④は**フォルダ面の機能**である(設計 doc §3)。
      */
     const inFiler = el.closest('[data-pkc-region="filer-table"]') !== null;
-    const inEntryList = el.closest('[data-pkc-region="entry-list"]') !== null;
     /**
      * 🔴 **2 ペインの行も同じ作法**(#241 段⑥-a)── `Ctrl` / `Cmd` で足し外し、
      * `Shift` で表示順の範囲。⚠ 面ごとに違う選び方を作らない(user は 1 つの
@@ -11509,7 +11455,7 @@ export function bindActions(
       }
     }
     if (
-      (inFiler || inEntryList) &&
+      inFiler &&
       el.getAttribute('data-pkc-action') === 'select-entry' &&
       (me.ctrlKey || me.metaKey || me.shiftKey)
     ) {
@@ -11518,31 +11464,16 @@ export function bindActions(
         ev.preventDefault();
         dispatcher.dispatch(
           me.shiftKey
-            ? // 🔴 一覧タブは flat な並び(`listRows`)で範囲を採る(C13)
-              { type: 'SELECT_RANGE', lid, ...(inEntryList ? { scope: 'list' as const } : {}) }
+            ? { type: 'SELECT_RANGE', lid }
             : { type: 'TOGGLE_SELECT', lid },
         );
         return;
       }
     }
     const action = el.getAttribute('data-pkc-action');
-    /**
-     * 🔴 **一覧タブ(`entry-list`)は「フォルダへ入る」を持たない**(#1042 C14)。
-     * ⚠ `inFiler` と同じ「面で切る」作法(着地前レビュー 4 の続き) ──
-     *   `select-entry` は 6 か所(sidebar / filer / kanban / calendar / query /
-     *   inspector)に在るので、面を限らないと関係の無い面まで拾う。
-     * 🔑 一覧には `scopeLid`(現在地)の概念が無いので、`maybeDoubleOpen` の
-     *   フォルダの分岐は**通さない**(`tests/adapter/multi-select.test.ts`
-     *   「もう一度押す」もフォルダ面の中だけ ── 一覧の 2 回押しで**見えない現在地が
-     *   動かない**を守る)。行の種類に関わらず、別のウィンドウ(付箋)で開く。
-     */
     // ⚠ 行を素で押したときだけ「もう一度押した」を数える(修飾つきは印の話)
-    // ⚠ **一覧 / フォルダ面の中だけ**(上と同じ理由 ── kanban / calendar / query /
+    // ⚠ **フォルダ面の中だけ**(上と同じ理由 ── kanban / calendar / query /
     //    inspector の `select-entry` まで拾うと、見えていない判定が誤って走る)
-    if (inEntryList && action === 'select-entry') {
-      const lid = el.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
-      if (lid !== null) maybeOpenListNote(lid);
-    }
     if (inFiler && action === 'select-entry') {
       const lid = el.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
       if (lid !== null) maybeDoubleOpen(lid);
@@ -12847,11 +12778,9 @@ export function bindActions(
     const el = (target as HTMLElement | null)?.closest<HTMLElement>('[data-pkc-entry]');
     if (!el || !root.contains(el)) return null;
     /**
-     * ⚠ 左の列は**タブで中身が変わる** ── 「フォルダ」(`filer-table`)/「一覧」
-     *   (`entry-list`)/ 2 ペイン(`dual-table`)の**3 つとも**行を持つ。
-     * 🔴 1 稿目は前 2 つを落としており、**「一覧」タブの user だけ無言で落とせなかった**
-     *   (2026-09-09 の UX レビュー)── マニュアルは「左の一覧の行」と書いているのに、
-     *   その名前のタブでだけ効かない、といういちばん外しやすい形だった。
+     * ⚠ 左の列の行は「フォルダ」(`filer-table`)/ 2 ペイン(`dual-table`)の**2 つ**が持つ。
+     * 🔴 行を持つ器を 1 つ落とすと、**その面の user だけ無言で落とせない**
+     *   (2026-09-09 の UX レビューが、「一覧」の器を落とした 1 稿目で実際に踏んだ)。
      */
     if (el.closest(ROW_HOST_SELECTOR) === null) return null;
     const lid = el.getAttribute('data-pkc-entry');
@@ -13549,10 +13478,6 @@ export function bindActions(
    * 🔑 **フォルダ表 / 2 ペインは判定が 1 か所**(この関数)── フォルダ
    * (スマートフォルダ含む)なら「中へ入る」、それ以外(ノート)は
    * `open-note-window` と同じ経路で別のウィンドウ(付箋)を開く。
-   * ⚠ **一覧タブは別関数**(`maybeOpenListNote`、すぐ下)── 一覧に
-   * `scopeLid`(現在地)の概念は無いので、フォルダの行でも「中へ入る」は
-   * 起こさない(`tests/adapter/multi-select.test.ts`「もう一度押す」も
-   * フォルダ面の中だけ ── 見えない現在地が動かないことを pin)。
    */
   const DOUBLE_MS = 500;
   /**
@@ -13606,25 +13531,6 @@ export function bindActions(
      *   §10「置き換えの作法」)。⚠ **同期に呼ぶ** ── `window.open` は gesture の
      *   中でしか通らない。
      */
-    services.openNoteWindow?.(lid);
-  };
-  /**
-   * 🔴 **一覧タブの 2 回押しは、種類を問わず別のウィンドウ(付箋)へ**(#1042 C14)。
-   *
-   * ⚠ `maybeDoubleOpen` から**分けている**(共有すると、フォルダの行で
-   * `canEnterScope` が拾われて `SET_SCOPE` を撃ってしまう ── 一覧タブは
-   * `scopeLid` を描画に使わないので、押しても画面には出ない**見えない現在地の
-   * 移動**になる。`tests/adapter/multi-select.test.ts` がこれを退行として pin
-   * している)。⚠ 鍵空間も**別に持つ**(フォルダ表の 2 回押しと取り違えない)。
-   */
-  let lastListClick: { lid: string; at: number } = { lid: '', at: 0 };
-  const maybeOpenListNote = (lid: string): void => {
-    const now = Date.now();
-    const again = lastListClick.lid === lid && now - lastListClick.at <= DOUBLE_MS;
-    lastListClick = { lid, at: now };
-    if (!again) return;
-    lastListClick = { lid: '', at: 0 }; // 3 回目を「もう一度」と数えない
-    // ⚠ 同期に呼ぶ(`window.open` は gesture の中でしか通らない)。上と同じ経路。
     services.openNoteWindow?.(lid);
   };
   /**
@@ -13983,7 +13889,7 @@ export function bindActions(
      * 🔑 だから**先に**分岐する:押した行が 2 ペインの表(`dual-table`)の中なら、
      *   `SELECT_ENTRY` の代わりに**左クリックと同じ** `DUAL_SELECT` を撃つ。
      * ⚠ `ASIDE_PANES` / `STAY_ON_SELECT` / `leavesOnSelect` は触らない ──
-     *   一覧タブ(`filer-table` / `entry-list`)の行は `dual-table` の中に居ないので
+     *   フォルダのタブ(`filer-table`)の行は `dual-table` の中に居ないので
      *   ここには来ない(そちらの「押すと中央へ出る」動きは変えない)。
      */
     if (row.closest('[data-pkc-region="dual-table"]') !== null) {
@@ -14044,7 +13950,7 @@ export function bindActions(
        *   動かさないので、押すと**選んでいた別のノート**(または何も選んでいなければ
        *   無言)が編集に入る ── これも押した物と効く先が食い違う。
        * 🔑 3 つとも「選ぶ側(=2 ペインを抜ける)」へ倒す理由が無い ── 移すも写すも編集も、
-       *   一覧タブへ切り替えれば同じボタンで行える。
+       *   フォルダのタブへ切り替えれば同じボタンで行える。
        */
       /**
        * 🔴 **「名前を変える」は 2 ペインの改名へつなぐ**(#1045 C9、取り込み時に直した)。
@@ -14644,17 +14550,14 @@ export function bindActions(
       }
       if (ke.key === 'ArrowDown') {
         /**
-         * 🔴 **降りる先は、いま出ている面の最初の行**(#813 段③-a)。
-         * ⚠ 直す前は一覧の行(`listRowEls`)しか引かなかったので、**既定のフォルダのタブでは
-         *   ↓ を押しても何も起きなかった**(行は DOM に在っても `hidden` の面で、焦点が入らない)。
-         * 🔑 フォルダの面の行は `visibleFilerRows`(描く側と同じ 1 本)から引く ──
+         * 🔴 **降りる先は、フォルダの表の最初の行**(#813 段③-a → ③-b)。
+         * ⚠ 直す前は一覧の行しか引かなかったので、**既定のフォルダのタブでは ↓ を押しても
+         *   何も起きなかった**。🔑 行は `visibleFilerRows`(描く側と同じ 1 本)から引く ──
          *   DOM の並びを読むと、絞り込み・並べ替えのとき目で見た順と食い違う。
          */
-        const first = listTabShowing(root)
-          ? (listRowEls()[0]?.getAttribute('data-pkc-entry') ?? null)
-          : (visibleFilerRows(dispatcher.getState())[0]?.lid ?? null);
+        const first = visibleFilerRows(dispatcher.getState())[0]?.lid ?? null;
         if (first === null) return;
-        const target = listTabShowing(root) ? listRowEl(first) : rowEl(first);
+        const target = rowEl(first);
         // ⚠ 隠れている面(予定・連絡先など)の行へは降りない ── 焦点が入らないのに ↓ だけ奪わない
         if (target === null || target.closest('[hidden]') !== null) return;
         ke.preventDefault();
@@ -14665,17 +14568,6 @@ export function bindActions(
     if (!typing && el?.closest('[data-pkc-region="filer-table"]')) {
       const fcmd = keymap.match(ke, 'filer');
       if (fcmd !== null && runFilerKey(fcmd)) {
-        ke.preventDefault();
-        return;
-      }
-    }
-    /**
-     * 🔴 **一覧タブでも同じ鍵が効く**(#1042 C2)。⚠ 行き先だけが違う ──
-     * `runFilerKey` の代わりに `runListKey`(フォルダでも中へ入らない)を呼ぶ。
-     */
-    if (!typing && el?.closest('[data-pkc-region="entry-list"]')) {
-      const lcmd = keymap.match(ke, 'list');
-      if (lcmd !== null && runListKey(lcmd)) {
         ke.preventDefault();
         return;
       }
@@ -14954,72 +14846,6 @@ export function bindActions(
     const i = cur === null ? -1 : rows.findIndex((m) => m.lid === cur);
     if (i === -1) return (delta > 0 ? rows[0] : rows[rows.length - 1])?.lid ?? null;
     return rows[Math.min(rows.length - 1, Math.max(0, i + delta))]?.lid ?? null;
-  };
-
-  /**
-   * 🔴 **一覧タブの行(#1042 C2)**。⚠ `rowEl` / `focusedRowLid` / `rowAt` と
-   * 同じ形だが、並びは `visibleFilerRows`(scope 内)ではなく**DOM の並び**から
-   * 採る ── 一覧は `scopeLid` を持たない flat な行の並びなので、`sidebar.ts` が
-   * 組んだ DOM 順(絞り込み・並び順を反映済み)がそのまま画面と一致する見方である。
-   * ⚠ 端では止まる(巻き戻さない)── フォルダの表と同じ規則。
-   */
-  const listRowEls = (): HTMLElement[] =>
-    Array.from(
-      root.querySelectorAll<HTMLElement>('[data-pkc-region="entry-list"] > [data-pkc-entry]'),
-    );
-
-  const focusedListRowLid = (): string | null => {
-    const el = root.ownerDocument.activeElement;
-    if (!(el instanceof HTMLElement)) return null;
-    const li = el.closest('[data-pkc-region="entry-list"] > [data-pkc-entry]');
-    return li?.getAttribute('data-pkc-entry') ?? null;
-  };
-
-  const listRowEl = (lid: string): HTMLElement | null =>
-    listRowEls().find((el) => el.getAttribute('data-pkc-entry') === lid) ?? null;
-
-  const focusListRow = (lid: string): void => listRowEl(lid)?.focus();
-
-  const listRowAt = (delta: number): string | null => {
-    const rows = listRowEls();
-    if (rows.length === 0) return null;
-    const cur = focusedListRowLid();
-    const i = cur === null ? -1 : rows.findIndex((el) => el.getAttribute('data-pkc-entry') === cur);
-    if (i === -1)
-      return (delta > 0 ? rows[0] : rows[rows.length - 1])?.getAttribute('data-pkc-entry') ?? null;
-    return (
-      rows[Math.min(rows.length - 1, Math.max(0, i + delta))]?.getAttribute('data-pkc-entry') ??
-      null
-    );
-  };
-
-  /**
-   * 🔴 **一覧タブの鍵**(#1042 C2)。⚠ `runFilerKey` / `runDualKey` と違い、
-   * フォルダの行でも「中へ入る」は起こさない ── 一覧に `scopeLid`(現在地)の
-   * 概念は無い(`tests/adapter/multi-select.test.ts`「もう一度押す」もフォルダ面の
-   * 中だけ ── 見えない現在地が動かないことを既に pin)。**行の種類に関わらず**、
-   * `Enter` はマウスの `select-entry` と**同じ受け手**を呼ぶ(= クリックと同じ)。
-   */
-  const runListKey = (cmd: string): boolean => {
-    if (cmd === 'filer-row-down' || cmd === 'filer-row-up') {
-      const lid = listRowAt(cmd === 'filer-row-down' ? 1 : -1);
-      if (lid === null) return false;
-      focusListRow(lid);
-      return true;
-    }
-    if (cmd === 'filer-open') {
-      const lid = focusedListRowLid();
-      const host = lid === null ? null : listRowEl(lid);
-      if (host === null) return false;
-      run('select-entry', host);
-      return true;
-    }
-    if (cmd === 'filer-open-stack') {
-      const lid = focusedListRowLid();
-      if (lid === null) return false;
-      return openStackNote(lid);
-    }
-    return false;
   };
 
   /**

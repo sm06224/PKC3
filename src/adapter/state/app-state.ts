@@ -162,7 +162,7 @@ import {
   pushSelection,
   type SelectionHistory,
 } from '@features/nav/selection-history';
-import { filerRows, listRows, rangeInRows, smartLidsOf } from '@features/relation/filer-list';
+import { filerRows, rangeInRows, smartLidsOf } from '@features/relation/filer-list';
 import {
   EMPTY_SMART,
   SMART_ARCHETYPE,
@@ -2800,13 +2800,11 @@ export type UserAction =
    * 起点から押した行までを**表示順で**印にする(`Shift` クリック。#240 段②)。
    * ⚠ 表示順は `filerRows` 1 か所が決める ── データの順で採ると、
    * 目で見た範囲と違うものが選ばれる。
-   *
-   * 🔴 **`scope: 'list'` = 一覧タブの表示順**(#1038 台帳③ 段 G、C13)。
-   * ⚠ 一覧タブは `scopeLid`(現在地)を持たない flat な並びなので、`filerRows`
-   *   (フォルダ構造で絞る)をそのまま使うと、別の階層に居る印が範囲から漏れる ──
-   *   `listRows`(フォルダ構造を見ない)で採る。省略 = フォルダの表(既定)。
+   * ⚠ 「中まで全部出す」/ 語を打っている間は、階層をまたいだ**平らな並び**で採る
+   *   (`filerRowOptions` が持つ ── 描く側と同じ 1 本)。
+   *   「一覧」タブ専用だった `scope: 'list'` は #813 段③ で消えた。
    */
-  | { type: 'SELECT_RANGE'; lid: string; scope?: 'list' }
+  | { type: 'SELECT_RANGE'; lid: string }
   /** 印を全部外す。 */
   | { type: 'CLEAR_SELECTION' }
   /**
@@ -7826,20 +7824,9 @@ function reduceCore(
       /**
        * 🔴 **表示順で採る**(#240 段②)。⚠ データの順(`order`)で採ると、
        * 並べ替えや絞り込みを掛けているとき**目で見た範囲と違うものが選ばれる**。
-       * 規則は `filerRows` / `listRows` 1 か所(描く側と同じ関数)。
-       *
-       * 🔴 **`scope: 'list'` は一覧タブの並び**(#1038 台帳③ 段 G、C13)── 一覧は
-       * `scopeLid` を持たない flat な並びなので、`filerRows` を使うと**別の階層に
-       * 居る印が範囲から漏れる**(=フォルダの直下しか見ない)。
+       * 規則は `filerRows` 1 か所(描く側と同じ関数)。
        */
-      const rows =
-        action.scope === 'list'
-          ? listRows(state.order, state.entryMetas, {
-              filterQuery: state.filterQuery,
-              searchHits: state.searchHits,
-              ...listViewOptions(state),
-            })
-          : filerRows(state.scopeLid, state.entryMetas, state.relations, filerRowOptions(state));
+      const rows = filerRows(state.scopeLid, state.entryMetas, state.relations, filerRowOptions(state));
       const range = rangeInRows(rows, state.selectionAnchor, action.lid);
       if (range.length === 0) return { state, events: [] };
       // ⚠ 起点は動かさない ── 動かすと `Shift` を押すたびに範囲が縮んでいく

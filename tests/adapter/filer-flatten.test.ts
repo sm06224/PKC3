@@ -94,7 +94,7 @@ function setup(metas: EntryMeta[] = METAS, relations: Relation[] = RELS) {
   const d = new Dispatcher();
   const regions = buildShell(root);
   const browse = new BrowseRouter(regions.sidebar, regions.browseHost);
-  let mode: 'list' | 'filer' | 'launcher' = 'list';
+  let mode: 'filer' | 'launcher' = 'filer';
   d.onState((s) => browse.render(s, mode));
   // ⚠ 憶えるのは端末の保存(本物の store を **null の保存**で包んで観測する)
   const store = new FilerFlattenStore(null);

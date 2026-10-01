@@ -40,7 +40,7 @@
 import { blockedActionNote, type AppState } from '@adapter/state/app-state';
 import type { EntryMeta } from '@core/model/entry-meta';
 import { ScrollMemory } from './scroll-memory';
-import { archetypeLabel } from './sidebar';
+import { archetypeLabel } from '@features/flavor/archetype-label';
 import { formatEntryLink } from '@features/entry-ref/entry-ref-format';
 import { iconButton } from './icons';
 import { COLLECTION_PANE_COMMANDS } from './commands';

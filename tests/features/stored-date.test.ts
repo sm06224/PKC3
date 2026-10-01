@@ -163,10 +163,9 @@ describe('規則は 1 つ', () => {
     );
   });
 
-  it('🔴 3 つの表示元がすべて共有の関数を使っている', () => {
+  it('🔴 表示元(情報ペイン・フォルダの表)がすべて共有の関数を使っている(「一覧」の描画器は #813 段③ で消えた)', () => {
     for (const f of [
       'src/adapter/ui/render/inspector.ts',
-      'src/adapter/ui/render/sidebar.ts',
       'src/adapter/ui/render/filer.ts',
     ]) {
       expect(readFileSync(f, 'utf-8'), `${f} が stored-date を使っていない`).toContain(

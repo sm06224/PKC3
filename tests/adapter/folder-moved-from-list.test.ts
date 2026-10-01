@@ -1,11 +1,11 @@
 /** @vitest-environment happy-dom */
 /**
- * 🔴 **「一覧」でしかできなかった 5 つを、フォルダのタブでもできる**(#813 段③-a)。
+ * 🔴 **「一覧」でしかできなかった 5 つと探す範囲を、フォルダのタブが担う**(#813 段③)。
  *
- * 一覧タブを外す前に、**同じ操作を一覧とフォルダの両方で撃って同じ結果になる**ことを見る
- * (消した後は片側が無くなるので、段③-b でフォルダ側だけの pin に書き換える)。
+ * 段③-a では、同じ操作を一覧とフォルダの両方で撃って同じ結果になることを見てから
+ * 一覧を外した。ここはその**フォルダ側だけの pin**である。
  *
- * | | 操作 | 一覧 | フォルダ(直す前) |
+ * | | 操作 | 一覧タブがあった頃 | フォルダ(段③-a の前) |
  * |---|---|---|---|
  * | B | 探す欄で ↓ | 最初の行へ降りる | 何も起きない |
  * | C | 2 件選んだ後の「‹」 | 押せる | **死んだまま** |
@@ -46,7 +46,7 @@ const rel = (id: string, from: string, to: string): Relation => ({
 const METAS = [meta('f1', 1, 'folder'), meta('a', 2), meta('b', 3), meta('x', 4)];
 const RELS = [rel('r1', 'f1', 'a')];
 
-function mount(initial: BrowseMode) {
+function mount(initial: BrowseMode = 'filer') {
   document.body.textContent = '';
   const root = document.createElement('div');
   document.body.append(root);
@@ -67,23 +67,17 @@ function mount(initial: BrowseMode) {
 
 /** いま見えている面の行。 */
 const shownRows = (root: HTMLElement): string[] =>
-  [
-    ...root.querySelectorAll<HTMLElement>(
-      '[data-pkc-region="entry-list"] > [data-pkc-entry], [data-pkc-region="filer-table"] tbody [data-pkc-entry]',
-    ),
-  ]
+  [...root.querySelectorAll<HTMLElement>('[data-pkc-region="filer-table"] tbody [data-pkc-entry]')]
     .filter((el) => el.closest('[hidden]') === null)
     .map((el) => el.getAttribute('data-pkc-entry') ?? '');
 
-const MODES = ['list', 'filer'] as const;
-
-describe.each(MODES)('一覧とフォルダで同じ結果 — %s', (mode) => {
+describe('一覧から移した動線 — フォルダのタブ', () => {
   beforeEach(() => {
     document.body.textContent = '';
   });
 
   it('B: 探す欄で ↓ を押すと、いま出ている面の最初の行へ焦点が降りる', () => {
-    const { root } = mount(mode);
+    const { root } = mount('filer');
     const input = root.querySelector<HTMLInputElement>('[data-pkc-field="entry-filter"]')!;
     input.focus();
     const ev = new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true });
@@ -94,7 +88,7 @@ describe.each(MODES)('一覧とフォルダで同じ結果 — %s', (mode) => {
   });
 
   it('C: 2 件選ぶと「‹」が押せる / 戻ると「›」が押せる(面に関係なく)', () => {
-    const { d, root } = mount(mode);
+    const { d, root } = mount('filer');
     const back = root.querySelector<HTMLButtonElement>('[data-pkc-action="nav-back"]')!;
     const fwd = root.querySelector<HTMLButtonElement>('[data-pkc-action="nav-forward"]')!;
     expect(back.disabled).toBe(true);
@@ -109,12 +103,12 @@ describe.each(MODES)('一覧とフォルダで同じ結果 — %s', (mode) => {
   });
 
   it('D: 本文の当たりが 200 件で切れたら、そう言う(切れていなければ言わない)', () => {
-    const { d, root } = mount(mode);
+    const { d, root } = mount('filer');
     d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'q' });
     d.dispatch({ type: 'SET_SEARCH_HITS', query: 'q', lids: ['b'], truncated: false });
     const note = (): HTMLElement | null =>
       root.querySelector<HTMLElement>(
-        '[data-pkc-field="entry-list-more"], [data-pkc-field="filer-more"]',
+        '[data-pkc-field="filer-more"]',
       );
     expect(note(), '切れていないのに言っている').toBeNull();
     d.dispatch({ type: 'SET_SEARCH_HITS', query: 'q', lids: ['b'], truncated: true });
@@ -122,7 +116,7 @@ describe.each(MODES)('一覧とフォルダで同じ結果 — %s', (mode) => {
   });
 
   it('E: 絞りで 0 件のとき「絞りを外す」が出て、押すと語が空になる', () => {
-    const { d, root } = mount(mode);
+    const { d, root } = mount('filer');
     expect(root.querySelector('[data-pkc-action="clear-entry-filter"]'), '絞っていないのに出ている').toBeNull();
     d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'zzzz' });
     const clear = root.querySelector<HTMLElement>('[data-pkc-action="clear-entry-filter"]');
@@ -133,7 +127,7 @@ describe.each(MODES)('一覧とフォルダで同じ結果 — %s', (mode) => {
   });
 
   it('E2: 種類の札だけで 0 件のときも、同じ字で「絞りを外す」が出る(札だけでは外せない行き止まりにしない)', () => {
-    const { d, root } = mount(mode);
+    const { d, root } = mount('filer');
     d.dispatch({ type: 'TOGGLE_KIND_FILTER', archetype: 'todo' }); // 在るノートに todo は 1 件も無い
     expect(shownRows(root)).toEqual([]);
     const clear = root.querySelector<HTMLElement>('[data-pkc-action="clear-entry-filter"]');
@@ -143,18 +137,33 @@ describe.each(MODES)('一覧とフォルダで同じ結果 — %s', (mode) => {
     expect(d.getState().kindFilter.size, '札が外れていない').toBe(0);
   });
 
+  it('A2: 種類の札だけでも、フォルダの中のノートが当たる / 札を外すと直下だけへ戻る', () => {
+    const { d, root } = mount('filer');
+    // 対照群: 札も語も無ければ、いま居る場所(ルート)の直下だけ ── `a` は `f1` の中
+    expect(shownRows(root), '対照群: 何も絞っていないのに階層をまたいでいる').toEqual(['f1', 'b', 'x']);
+    d.dispatch({ type: 'TOGGLE_KIND_FILTER', archetype: 'text' });
+    expect(shownRows(root), '札だけでは、フォルダの中の a が当たらない(一覧タブは当てていた)').toEqual([
+      'a',
+      'b',
+      'x',
+    ]);
+    expect(d.getState().filerFlatten, '札を押しただけで入り切りが入っている').toBe(false);
+    expect(root.querySelector('[data-pkc-field="parent-name"]')?.textContent).toBe('─ t-f1');
+    d.dispatch({ type: 'CLEAR_KIND_FILTER' });
+    expect(shownRows(root), '札を外しても平らなまま').toEqual(['f1', 'b', 'x']);
+  });
+
   it('A: 語を打つとフォルダの中のノートも当たる / 消すと元へ戻る', () => {
-    const { d, root } = mount(mode);
-    // 前提: フォルダの表は、打つ前は直下だけ(一覧は最初から全件なので前提を置かない)
-    if (mode === 'filer') expect(shownRows(root)).not.toContain('a');
+    const { d, root } = mount('filer');
+    // 前提: 打つ前は直下だけ(`a` は `f1` の中)
+    expect(shownRows(root)).not.toContain('a');
     d.dispatch({ type: 'SET_ENTRY_FILTER', query: 't-a' });
     expect(shownRows(root), 'フォルダの中の a が当たらない').toEqual(['a']);
     expect(d.getState().filerFlatten, '語を打っただけで入り切りが入っている').toBe(false);
-    // 平らに出した行には、どのフォルダの中かが付く(#813 の親フォルダ名)── フォルダの表だけの物
-    if (mode === 'filer')
-      expect(root.querySelector('[data-pkc-field="parent-name"]')?.textContent).toBe('─ t-f1');
+    // 平らに出した行には、どのフォルダの中かが付く(#813 の親フォルダ名)
+    expect(root.querySelector('[data-pkc-field="parent-name"]')?.textContent).toBe('─ t-f1');
     d.dispatch({ type: 'SET_ENTRY_FILTER', query: '' });
-    expect(shownRows(root).includes('a')).toBe(mode === 'list');
+    expect(shownRows(root), '語を消しても平らなまま').not.toContain('a');
   });
 });
 

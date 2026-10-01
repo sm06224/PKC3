@@ -31,16 +31,15 @@ import {
   smartFieldValue,
   type SmartField,
 } from '@features/smart/smart-spec';
-import { ARCHETYPE_LABELS } from '@features/flavor/archetype-label';
+import { ARCHETYPE_LABELS, archetypeLabel } from '@features/flavor/archetype-label';
 import { normalizeQuery } from '@features/filter/title-filter';
 // 🔑 種別の呼び名は **1 本**(P8 段⑲)── かつてここだけ独自表を持ち、
 //    同じノートがフォルダ画面では「シート」、他の全画面では「表」と出ていた
-import { archetypeLabel } from './sidebar';
 // ⚠ 日付の切り方は `features/datetime/stored-date` が正本(情報列・一覧の行と共有)。
 //    ここに 3 つ目の parse を置いていたので寄せた(規則は 1 つ ── CLAUDE.md)
 import { formatListDate, formatStoredDate } from '@features/datetime/stored-date';
 import { ARCHETYPE_ICONS, iconButton, iconSpan } from './icons';
-// 🔑 空のときの「次の一手」は一覧タブと**同じ部品**(#722 P2-13)── 2 か所で組まない
+// 🔑 空のときの「次の一手」の部品(#722 P2-13。かつては一覧タブと 2 か所で組まない形で共有していた)
 import { emptyStartActions } from './empty-start';
 import { paintRowMark } from './selection-mark';
 import { buildPressedButton } from './choice-buttons';

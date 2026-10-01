@@ -30,7 +30,7 @@ function setup(over: Partial<BinderServices> = {}) {
   root.innerHTML =
     '<div data-pkc-region="detail"><textarea data-pkc-field="row-source"></textarea></div>' +
     '<div data-pkc-region="append"><textarea data-pkc-field="append-input"></textarea></div>' +
-    '<div data-pkc-region="entry-list"><input data-pkc-field="find" /></div>';
+    '<div data-pkc-region="filer-table"><input data-pkc-field="find" /></div>';
   document.body.append(root);
   const asked: (readonly string[])[] = [];
   const services: BinderServices = {

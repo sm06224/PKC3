@@ -53,7 +53,7 @@ test('🔴 最初はフォルダの面で開き、2 クリックで中へ入る'
    */
   const shadows = await page.evaluate(() => {
     const on = document.querySelector('[data-pkc-browse="filer"][data-pkc-active]');
-    const off = document.querySelector('[data-pkc-browse="list"]:not([data-pkc-active])');
+    const off = document.querySelector('[data-pkc-browse="launcher"]:not([data-pkc-active])');
     if (on === null || off === null) throw new Error('前提が崩れている: タブが揃っていない');
     return {
       on: getComputedStyle(on).boxShadow,
@@ -601,21 +601,20 @@ test('🔴 ↑↓ で行を送れて、Enter は読むところから始まる',
 });
 
 /**
- * 🔴 **一覧タブでも、フォルダの表と同じ ↑↓ / Enter が効く**(#1042 C2)。
+ * 🔴 **フォルダの表の ↑↓ / Enter / 探す欄からの ↓**(#1042 C2 → #813 段③)。
+ * 「一覧」タブを外した(#813 段③)ので、かつて一覧タブの台だった話はここ(フォルダの表)で見る。
  * ついでに、Escape の 2 つの決着(段③ / 段①-③④)も同じ台で見る ──
- * 新しく起動すると 1.63 秒が積み上がる(`smoke-budget`)ので、**この一覧タブの
- * 台に乗る話は同じ起動に相乗りさせる**(残る予算は 2 起動ぶんしかない)。
+ * 新しく起動すると 1.63 秒が積み上がる(`smoke-budget`)ので、**この台に乗る話は
+ * 同じ起動に相乗りさせる**(残る予算は 2 起動ぶんしかない)。
  *
  * 🔴 **unit では届かない層**は上の「↑↓ で行を送れて…」と同じ ── 実キーが
- * 既定(スクロール)を奪えているか / 焦点が本当に行へ移るか。⚠ ここは
- * **フォルダの表とは別の器**(`entry-list`)を通るので、共有しているつもりの
- * 鍵が実際にはこちらへ配線されていない、という取り違えを実ブラウザで見る。
+ * 既定(スクロール)を奪えているか / 焦点が本当に行へ移るか。
  * ⚠ **段④⑤は、ここでしか実測できない**(Escape の判定は `contextMenuOpen` /
  * `viewMode` / `phase` の**実際の版面**を見て分岐するので、happy-dom の
  * 合成 event では「押した鍵が本当にブラウザの既定(検索・全画面解除)より
  * 先に消費されるか」までは確かめられない)。
  */
-test('🔴 一覧タブの ↑↓・Enter・絞り込みと、Escape の 2 段決着 (#1042)', async ({ page }) => {
+test('🔴 フォルダの表の ↑↓・Enter・探す欄からの ↓ と、Escape の 2 段決着 (#1042 / #813)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
@@ -623,8 +622,7 @@ test('🔴 一覧タブの ↑↓・Enter・絞り込みと、Escape の 2 段�
     await createEntry(page, 'text');
     await clickReal(page, '[data-pkc-action="commit-edit"]');
   }
-  await clickReal(page, '[data-pkc-browse="list"]');
-  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  const rows = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
   await expect(rows).toHaveCount(3);
   const focusedLid = () =>
     page.evaluate(() => {
@@ -640,13 +638,12 @@ test('🔴 一覧タブの ↑↓・Enter・絞り込みと、Escape の 2 段�
   expect(first, 'クリックで行に焦点が入らない(空振り)').not.toBe('なし');
   await page.keyboard.press('ArrowDown');
   const second = await focusedLid();
-  expect(second, '一覧タブで ↓ を押しても焦点が動かない').not.toBe(first);
+  expect(second, 'フォルダの表で ↓ を押しても焦点が動かない').not.toBe(first);
 
   /**
-   * ② Enter は**読む**ところから開く。🔑 **焦点は行に残す** ── 一覧は ↓ で
-   *   読み進める場所なので、クリックで開いたときと同じく行に焦点を置いたままにする
-   *   (続けて ↓ で次のノートへ進める)。⚠ フォルダの表の Enter は本文へ焦点を移すが、
-   *   あちらは「開いて中を触る」場所なので揃えない。
+   * ② Enter は**読む**ところから開く(編集には入らない)。
+   *   ⚠ フォルダの表の Enter は本文へ焦点を移す(「開いて中を触る」場所なので)── かつて
+   *   一覧タブは行に焦点を残していたが、一覧を外した(#813 段③)ので揃える必要は無い。
    */
   await page.keyboard.press('Enter');
   await expect(
@@ -654,14 +651,13 @@ test('🔴 一覧タブの ↑↓・Enter・絞り込みと、Escape の 2 段�
     'Enter で編集に入ってしまった(既定は読む)',
   ).toHaveCount(0);
   await expect(
-    page.locator(`[data-pkc-region="entry-list"] [data-pkc-entry="${second}"]`),
-    '一覧タブの Enter でそのノートが開いていない',
+    page.locator(`[data-pkc-region="filer-table"] [data-pkc-entry="${second}"]`),
+    'フォルダの表の Enter でそのノートが開いていない',
   ).toHaveAttribute('data-pkc-selected', '');
-  expect(await focusedLid(), '一覧タブの Enter の後、焦点が行から離れた').toBe(second);
 
   /**
    * ③ 🔴 **絞り込みの欄で ↓ を押すと、先頭の行へ焦点が移る**(#1042 C2)。
-   * ⚠ フォルダの表には無い一覧タブ独自の入口 ── 絞り込みながら
+   * ⚠ かつて一覧タブにしか無かった入口(#813 段③-a でフォルダへ移した)── 絞り込みながら
    * キーボードだけで行へ降りられることを見る。
    */
   const filter = page.locator('[data-pkc-field="entry-filter"]');
@@ -701,7 +697,7 @@ test('🔴 一覧タブの ↑↓・Enter・絞り込みと、Escape の 2 段�
   await expect(collectionPane, '2 回目の Escape でノートが閉じていない').toBeVisible();
 
   /**
-   * ⑥ 🔴 **一覧タブでも Ctrl / Shift で選び足せる**(#1038 台帳③ 段 G、C13 /
+   * ⑥ 🔴 **フォルダの表で Ctrl / Shift で選び足せる**(#1038 台帳③ 段 G、C13 /
    * Q6 裁定「A + 濃く」)。⚠ **unit では届かない層** ── `color-mix()` を実際に
    * 解決させた背景色を比べる(happy-dom は描画しないので `getComputedStyle` が
    * 何も言えない)。同じ起動に相乗りさせる(このファイル冒頭の注記どおり)。
@@ -712,7 +708,7 @@ test('🔴 一覧タブの ↑↓・Enter・絞り込みと、Escape の 2 段�
     loc.evaluate((el) => getComputedStyle(el).backgroundColor);
   const secondLid = await rows.nth(1).getAttribute('data-pkc-entry');
   await rows.nth(1).click({ modifiers: ['ControlOrMeta'] });
-  const secondRow = page.locator(`[data-pkc-region="entry-list"] [data-pkc-entry="${secondLid}"]`);
+  const secondRow = page.locator(`[data-pkc-region="filer-table"] [data-pkc-entry="${secondLid}"]`);
   await expect(secondRow, 'Ctrl クリックで印が付いていない').toHaveAttribute('data-pkc-marked', '');
   // ⚠ 選び足しただけでは中央が動かない(依頼文そのもの)
   await expect(
@@ -730,8 +726,8 @@ test('🔴 一覧タブの ↑↓・Enter・絞り込みと、Escape の 2 段�
   // Shift クリックは表示順の範囲で採る(起点 = 直前に Ctrl で押した secondLid)
   await rows.nth(2).click({ modifiers: ['Shift'] });
   await expect(
-    page.locator('[data-pkc-region="entry-list"] [data-pkc-entry][data-pkc-marked]'),
-    '一覧タブの範囲選択が正しい件数を選んでいない',
+    page.locator('[data-pkc-region="filer-table"] [data-pkc-entry][data-pkc-marked]'),
+    'フォルダの表の範囲選択が正しい件数を選んでいない',
   ).toHaveCount(2);
 
   /**

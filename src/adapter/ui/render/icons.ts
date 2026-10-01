@@ -110,9 +110,8 @@ export type { IconName, IconTone };
 export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   /**
    * 🔴 **「集計」は `list`(≡)ではなく `chart`**(#1054 段②-2)。⚠ `≡` は
-   *   「一覧(`BROWSE_ICONS.list`)」と同じ絵で、「メニュー」と読まれる ──
-   *   集計は数え上げ・グラフの面なので、意味が伝わる絵に変える(`list` は
-   *   一覧タブ専用のまま残す)。
+   *   「メニュー」と読まれる ── 集計は数え上げ・グラフの面なので、意味が伝わる絵に変える
+   *   (`list` は、かつて左の列の「一覧」タブの図案だった。#813 段③ でタブごと外した)。
    */
   'set-view:query': 'chart',
   /**
@@ -320,7 +319,6 @@ export const ARCHETYPE_ICONS: Readonly<Record<string, IconName>> = {
 
 /** 探し方のタブ → 図案(`browse.ts` が持っていた絵文字をここへ寄せた)。 */
 export const BROWSE_ICONS: Readonly<Record<string, IconName>> = {
-  list: 'list',
   filer: 'folder',
   launcher: 'apps',
   schedule: 'calendar',

@@ -4,9 +4,10 @@
  * ## なぜ要ったか
  *
  * 3 本の probe(sidebar / editor / kanban)は器を
- * `[data-pkc-region="entry-list"]` と**名指し**していた。ところが #259 で
- * **既定のタブがフォルダ(`filer-table`)になった** ── `entry-list` は
- * `hidden` で常駐する側に回り、**行が永久に 0 件**になる。
+ * 「一覧」タブの器(`entry-list`)と**名指し**していた。ところが #259 で
+ * **既定のタブがフォルダ(`filer-table`)になった** ── 一覧の器は
+ * `hidden` で常駐する側に回り、**行が永久に 0 件**になる
+ * (その器自体は #813 段③ で外した)。
  * 症状は「60 秒 待って timeout」で、原因はどこにも書かれない。
  * 実測(2026-08-18): `entry-list` = hidden / 0 行、`filer-table` = 表示 / 15000 行。
  *
@@ -26,15 +27,21 @@
  * 面は `hidden` でも CSS でも隠れうるので、**画面に出ているか**を直に見る。
  */
 
-/** 一覧の面(タブで入れ替わる)。⚠ 増えたらここに足す ── 名指しはここ 1 か所。 */
-export const LIST_FACES = ['entry-list', 'filer-table'];
+/**
+ * 一覧の面(タブで入れ替わる)。⚠ 増えたらここに足す ── 名指しはここ 1 か所。
+ * 🔴 かつては `['entry-list', 'filer-table']` の 2 面だったが、「一覧」タブは #813 段③ で
+ *   外した ── いまは `filer-table` 1 つである(面が複数のときの「ちょうど 1 つ見えている」
+ *   の判断は `faces` 引数で残してあり、`tests/adapter/probe-browse-face.test.ts` が見る)。
+ */
+export const LIST_FACES = ['filer-table'];
 
 /**
  * いま見えている一覧の面を解く。
  * @param {import('@playwright/test').Page} page
+ * @param {readonly string[]} [faces] ⚠ 既定は `LIST_FACES`。test が複数の面で判断を見るために差せる
  * @returns {Promise<{ region: string, selector: string }>}
  */
-export async function resolveListFace(page) {
+export async function resolveListFace(page, faces = LIST_FACES) {
   const seen = await page.evaluate((faces) => {
     return faces.map((region) => {
       const el = document.querySelector(`[data-pkc-region="${region}"]`);
@@ -46,13 +53,13 @@ export async function resolveListFace(page) {
         visible: el !== null && el.getClientRects().length > 0,
       };
     });
-  }, LIST_FACES);
+  }, [...faces]);
 
   const missing = seen.filter((f) => !f.present).map((f) => f.region);
   if (missing.length > 0) {
     throw new Error(
       `一覧の面が DOM に無い: ${missing.join(', ')} ── ` +
-        `名前が変わったか、面ごと消えた(${LIST_FACES.join(' / ')} を見直すこと)`,
+        `名前が変わったか、面ごと消えた(${faces.join(' / ')} を見直すこと)`,
     );
   }
   const visible = seen.filter((f) => f.visible).map((f) => f.region);
@@ -71,7 +78,7 @@ export async function resolveListFace(page) {
  *
  * ⚠ この helper は 2026-08-18 に **probe 3 本のために**書かれたが、
  * **bench 4 本は名指しのまま残っていた** ── `run-app-session` / `run-live-editor` /
- * `run-raster-cap` / `run-second-tab` は全部 `[data-pkc-region="entry-list"] …` を
+ * `run-raster-cap` / `run-second-tab` は全部 一覧の器の名指しを
  * 直に書いており、既定がフォルダになった日から**行を 1 つも掴めない**。
  * 実測(2026-08-22): `run-second-tab.mjs --rounds=1 --notes=1` は
  * `locator.click: Timeout 30000ms exceeded` で落ちる。

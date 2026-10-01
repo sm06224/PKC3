@@ -18,7 +18,6 @@ import {
   createEntry,
   collectPageErrors,
   useSplitEditor,
-  useListBrowse,
 } from './helpers';
 
 test.beforeEach(async ({ page }) => {
@@ -325,7 +324,6 @@ test('🔴 ⠿ を一覧の行へ落とすと、その塊が別のノートへ�
  */
 test('🔴 横に留めた枠へファイルを落とすと、その枠のノートへ入る (#684 ㋑)', async ({ page }) => {
   const errors = collectPageErrors(page);
-  await useListBrowse(page);
   await page.setViewportSize({ width: 1600, height: 900 });
   await gotoApp(page);
 
@@ -349,7 +347,7 @@ test('🔴 横に留めた枠へファイルを落とすと、その枠のノー
 
   // 主の枠は別のノートへ ── ここで「見ているノート ≠ 留めた枠のノート」が成立する
   await page
-    .locator('[data-pkc-region="entry-list"] [data-pkc-entry]')
+    .locator('[data-pkc-region="filer-table"] [data-pkc-entry]')
     .filter({ hasText: '主のノート' })
     .first()
     .click();

@@ -217,7 +217,7 @@ describe('タブを出たら、借りた絵を返す(#856 段②)', () => {
     expect(lend, '前提が崩れている(借りていない)').toHaveBeenCalledWith('k1');
     expect(disposed, '前提が崩れている(もう返している)').toEqual([]);
 
-    browse.render(state, 'list');
+    browse.render(state, 'filer');
     expect(disposed, 'タブを出たのに握ったまま(行き来した回数ぶん積み上がる)').toEqual(['k1']);
   });
 });

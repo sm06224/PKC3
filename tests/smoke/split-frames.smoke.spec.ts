@@ -4,7 +4,6 @@ import {
   clickReal,
   createEntry,
   collectPageErrors,
-  useListBrowse,
   useSplitEditor,
 } from './helpers';
 
@@ -71,7 +70,6 @@ async function frames(page: Page): Promise<{ x: number; top: number; lid: string
 
 /** ⚠ 打ち込みを安定させる仕込み(`context-menu.smoke.spec.ts` と同じ)。 */
 test.beforeEach(async ({ page }) => {
-  await useListBrowse(page);
   await useSplitEditor(page);
 });
 
@@ -135,7 +133,7 @@ test('🔴 本文を右クリックして横に留めると、2 つの枠が並�
   expect(after[0]!.top, '主の枠は動いていない').toBe(0);
 
   // 🔴 **一覧を押しても、留めた枠は動かない**(横に並べて突き合わせる、が成立する)
-  await page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').first().click();
+  await page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').first().click();
   await expect(
     page.locator('[data-pkc-split-main] [data-pkc-field="detail-body"] h1').first(),
     '主の枠が押したノートへ入れ替わっていない',
@@ -310,7 +308,7 @@ test('🔴 狭い窓では枠が畳まれ、押しても入れ替わらない (#
   // ② 🔴 **押しても入れ替わらない**(直す前は 0 / 3 / 0 / 3)
   const seen: number[] = [];
   for (let i = 0; i < 4; i += 1) {
-    await page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').nth(i % 2).click();
+    await page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').nth(i % 2).click();
     await expect(page.locator('[data-pkc-split-main]')).toBeVisible();
     seen.push(await count());
   }
@@ -494,7 +492,7 @@ test('🔴 帯の「保存…」で星つきの入れ物ができ、載せ直す
 
   // ⚠ 帯の札は**ノートの題名**(本文の `#` ではない)。一覧は作った順なので
   //   1 行目 = 資料 A のノート、2 行目 = 資料 B のノート(いま開いている)
-  const titles = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry] [data-pkc-field="title"]');
+  const titles = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry] [data-pkc-field="title"]');
   await expect(titles).toHaveCount(2);
   const titleA = (await titles.nth(0).textContent()) ?? '';
   const titleB = (await titles.nth(1).textContent()) ?? '';
@@ -502,7 +500,7 @@ test('🔴 帯の「保存…」で星つきの入れ物ができ、載せ直す
   expect(titleA).not.toBe(titleB);
   // 資料 B(いま開いている)を載せ、次に資料 A を載せる → 一番上は A
   await page.keyboard.press('Alt+Shift+S');
-  await page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').first().click();
+  await page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').first().click();
   await page.keyboard.press('Alt+Shift+S');
   const cards = page.locator('[data-pkc-field="stack-card"] [data-pkc-action="pin-split"]');
   await expect(cards).toHaveText([titleA, titleB]);
@@ -518,7 +516,7 @@ test('🔴 帯の「保存…」で星つきの入れ物ができ、載せ直す
     '保存したら読んでいた本文が退いた',
   ).toContainText('資料 A');
   // 一覧に星つき(スタックのチップ)で並ぶ
-  const row = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]', { hasText: '今週の束' });
+  const row = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]', { hasText: '今週の束' });
   await expect(row, '保存した入れ物が一覧に無い').toHaveCount(1);
   await expect(row.locator('[data-pkc-chip="stack"]'), 'スタックのチップが付いていない').toHaveCount(1);
 

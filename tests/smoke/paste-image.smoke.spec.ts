@@ -14,7 +14,7 @@
  *   **確定後に `<img>` が実寸を持つ**ところまで見る(§4「届いた証拠」)。
  */
 import { test, expect, type Page } from '@playwright/test';
-import { clickReal, modClickReal, createEntry, collectPageErrors, expectImageRendered, gotoApp, useSplitEditor, useListBrowse } from './helpers';
+import { clickReal, modClickReal, createEntry, collectPageErrors, expectImageRendered, gotoApp, useSplitEditor } from './helpers';
 
 // 1x1 PNG(67 bytes)── attach.smoke.spec.ts と同じ絵
 const PNG_1X1_B64 =
@@ -71,12 +71,6 @@ async function openLiveRow(page: Page): Promise<void> {
   ).toBeVisible();
 }
 
-// 🔑 #240 段⑤ で左の列の既定は**フォルダ**になった ── この file は一覧の行を
-// 掴むので、一覧タブで開く仕込みを入れる(既定の顔は organize.smoke が守る)。
-test.beforeEach(async ({ page }) => {
-  await useListBrowse(page);
-});
-
 test('🔴 編集中の本文に貼ると、確定後に画像として出る', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -96,7 +90,7 @@ test('🔴 編集中の本文に貼ると、確定後に画像として出る', 
 
   // ② 🔴 **ノートは増えていない**(編集中に CREATE_ENTRY を撃つと黙殺される ──
   //    bytes だけ書かれて参照が消える形になっていないことを、件数で確かめる)
-  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(1);
+  await expect(page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]')).toHaveCount(1);
 
   // ③ 🔴 **取り消せる**(お知らせとマニュアルが約束している ── `Ctrl+Z`)
   //    ⚠ unit では確かめられない(happy-dom は `execCommand` を持たないので
@@ -320,11 +314,11 @@ test('🔴 編集していないときに貼ると、添付のノートになる
   const errors = collectPageErrors(page);
   await gotoApp(page);
 
-  await sendFiles(page, '[data-pkc-region="entry-list"]', 'paste', [
+  await sendFiles(page, '[data-pkc-region="filer-table"]', 'paste', [
     { name: 'clip.png', type: 'image/png', b64: PNG_1X1_B64 },
   ]);
 
-  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  const rows = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
   await expect(rows, '添付のノートが出来ていない').toHaveCount(1, { timeout: 15_000 });
   await expect(rows.first()).toHaveAttribute('data-pkc-archetype', 'attachment');
   await expectImageRendered(page, '[data-pkc-field="attachment-media"]');

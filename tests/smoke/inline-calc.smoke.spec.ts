@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { collectPageErrors, createEntry, gotoApp, useListBrowse, useSplitEditor } from './helpers';
+import { collectPageErrors, createEntry, gotoApp, useSplitEditor } from './helpers';
 
 /**
  * 🔴 **その場で計算**(#764。user 裁定 2026-09-06「PKC2 と同じで」)。
@@ -14,7 +14,6 @@ import { collectPageErrors, createEntry, gotoApp, useListBrowse, useSplitEditor 
  * 🔑 だから見るのは **user が見る所** ── 打ち終えた欄の字そのものである。
  */
 test.beforeEach(async ({ page }) => {
-  await useListBrowse(page);
   await useSplitEditor(page);
 });
 

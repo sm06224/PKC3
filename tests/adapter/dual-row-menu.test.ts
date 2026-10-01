@@ -76,8 +76,8 @@ beforeEach(() => {
 
 /**
  * 2 ペインの台。⚠ 中央は `DualFilerRenderer`(`dual-filer.test.ts` の
- * 「2 ペインの配線(binder)」と同じ形)。左の列(`entry-list`)も同時に描く ──
- * 対照群(一覧タブの行を右クリック)を同じ台で取るため。
+ * 「2 ペインの配線(binder)」と同じ形)。左の列(フォルダのタブ `filer-table`)も同時に描く ──
+ * 対照群(左の列の行を右クリック)を同じ台で取るため。
  */
 function setupDual(services: Parameters<typeof bindActions>[2] = {}) {
   const root = document.createElement('div');
@@ -89,7 +89,7 @@ function setupDual(services: Parameters<typeof bindActions>[2] = {}) {
   const browse = new BrowseRouter(regions.sidebar, regions.browseHost);
   d.onState((s) => {
     dual.render(s);
-    browse.render(s, 'list');
+    browse.render(s, 'filer');
   });
   bindActions(root, d, services);
   const deleted: string[] = [];
@@ -116,9 +116,9 @@ function setupDual(services: Parameters<typeof bindActions>[2] = {}) {
   };
   const listRow = (lid: string): HTMLElement => {
     const el = regions.browseHost.querySelector<HTMLElement>(
-      `[data-pkc-region="entry-list"] [data-pkc-entry="${lid}"]`,
+      `[data-pkc-region="filer-table"] tbody [data-pkc-entry="${lid}"]`,
     );
-    expect(el, `前提が崩れている: 一覧に ${lid} の行が無い`).not.toBeNull();
+    expect(el, `前提が崩れている: 左の列(フォルダのタブ)に ${lid} の行が無い`).not.toBeNull();
     return el!;
   };
   const press = (action: string): void => {
@@ -333,15 +333,15 @@ describe('2 ペインの表の行を右クリックしても、2 ペインを抜
   });
 
   /**
-   * ⚠ **対照群** ── 一覧タブ(`entry-list`、2 ペインの表ではない)の行を右クリックすれば、
+   * ⚠ **対照群** ── 左の列(フォルダのタブ `filer-table`、2 ペインの表ではない)の行を右クリックすれば、
    *   これまでどおり選ばれて中央が本文の面へ切り替わる。これが無いと、
    *   「何も切り替わらなくなった」実装でも上の test だけでは分からない。
    */
-  it('⚠ 対照群 ── 一覧タブの行は、今までどおり選ばれて本文の面が出る', () => {
+  it('⚠ 対照群 ── 左の列の行は、今までどおり選ばれて本文の面が出る', () => {
     const t = setupDual();
     expect(t.d.getState().viewMode, '前提が崩れている').toBe('dual');
     rightClick(t.listRow('n2'));
-    expect(t.d.getState().viewMode, '一覧タブの行が 2 ペインの扱いになった').toBe('detail');
-    expect(t.d.getState().selectedLid, '一覧タブの行が選ばれていない').toBe('n2');
+    expect(t.d.getState().viewMode, '左の列の行が 2 ペインの扱いになった').toBe('detail');
+    expect(t.d.getState().selectedLid, '左の列の行が選ばれていない').toBe('n2');
   });
 });

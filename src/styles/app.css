@@ -1245,41 +1245,10 @@ select:focus-visible {
   flex: 1;
   min-width: 0;
 }
-/* ⚠ **余白もギャップも置かない**(user 指示)。行は共有の 1 本線で区切る */
-[data-pkc-region='entry-list'] {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  min-height: 0;
-}
-/* ⚠ **フル幅の横線を引かない**(区切りは背景と余白でつける)。
- * 以前は全行に画面いっぱいの罫線があり、線だけが目立って中身が散っていた。 */
-[data-pkc-region='entry-list'] [data-pkc-entry] {
-  display: flex;
-  align-items: center;
-  gap: var(--s2);
-  min-height: var(--row-h);
-  padding: 0 var(--s2);
-  cursor: pointer;
-  border-left: 2px solid transparent;
-  /* 行どうしは**1 本の線**を共有する(下端だけ引く) */
-  border-bottom: 1px solid var(--border);
-}
-[data-pkc-region='entry-list'] [data-pkc-entry]:hover:not([data-pkc-marked]) {
-  background: var(--surface-2);
-}
-/* 🔴 **印(複数選択)はフォルダの表・2 ペインの表と同じ 1 つのトークン**
- * (#1038 台帳③ 段 G、C13 / Q6「A + 濃く」)── 一覧タブも `Ctrl` / `Shift` で
- * 選び足せるようになった。⚠ hover は marked の行を塗り直さない(`:not`。
- * 上の hover の規則と同じ理由 ── フォルダの表の 4 状態の作り直しを参照)。
- * ⚠ 開いているノート(`[data-pkc-selected]`)の `!important` が勝つので、
- * 「開いていて、かつ印が付いている」行は開いている見え方のまま残る。 */
-[data-pkc-region='entry-list'] [data-pkc-entry][data-pkc-marked] {
-  background: var(--pkc-mark-bg);
-}
-/* 本文の当たりを 200 件で切ったときの字(#680)── 一覧の後ろに 1 行。
+/* 本文の当たりを 200 件で切ったときの字(#680)── フォルダの表の後ろに 1 行
+ * (かつて一覧タブの `entry-list-more` だった ── #813 段③ で移した)。
  * 色は `--muted`(案内であって行ではない ── 地は無彩色、色は情報にだけ)。 */
-[data-pkc-field='entry-list-more'] {
+[data-pkc-field='filer-more'] {
   margin: 0;
   padding: var(--s2);
   color: var(--muted);
@@ -6259,8 +6228,8 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   padding: var(--s3) 0;
 }
 /* 🔴 **空の一覧に置く「次の一手」**(#722 P2-13)。
- * ⚠ フォルダの面(上の `filer-empty`)と一覧タブ(`entry-list-empty`)で
- *   **同じ器**を使うので、規則もここ 1 つに置く ── 面ごとに書くと片方だけ直る。
+ * ⚠ 器(`empty-start`)は 1 つ ── 規則もここ 1 つに置く(面が増えたとき
+ *   面ごとに書くと片方だけ直る。「一覧」タブは #813 段③ で外した)。
  * ⚠ 幅で出し分けない ── 狭い画面では本文の面が別ページなので、
  *   案内はここにしか出せない(#722 の指摘そのもの)。 */
 [data-pkc-field='empty-start'] {

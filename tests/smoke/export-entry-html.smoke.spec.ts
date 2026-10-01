@@ -22,13 +22,11 @@ import {
   createEntry,
   collectPageErrors,
   useSplitEditor,
-  useListBrowse,
 } from './helpers';
 
 test.beforeEach(async ({ page }) => {
   // ⚠ 行の在り処と編集の道具は `context-menu.smoke.spec.ts` と同じにする
   //    (2 つ目の作法を作らない)
-  await useListBrowse(page);
   await useSplitEditor(page);
 });
 
@@ -107,7 +105,7 @@ test('🔴 右クリックのメニューにも「閲覧用 HTML」が並ぶ (#4
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
   await page.waitForSelector('[data-pkc-action="start-edit"]');
 
-  const row = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').first();
+  const row = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').first();
   await expect(row, '行が出ていない').toBeVisible();
   await row.click({ button: 'right' });
   const item = page.locator(

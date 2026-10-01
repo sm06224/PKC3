@@ -19,7 +19,6 @@ import {
   collectPageErrors,
   dismissAnnounce,
   useSplitEditor,
-  useListBrowse,
 } from './helpers';
 
 /**
@@ -28,7 +27,6 @@ import {
  * ⚠ 一覧の面も明示する ── 行(`data-pkc-entry`)を右クリックする spec なので。
  */
 test.beforeEach(async ({ page }) => {
-  await useListBrowse(page);
   await useSplitEditor(page);
 });
 
@@ -41,7 +39,7 @@ test('🔴 行を右クリックすると、その行にできることが出る
   await page.locator('[data-pkc-field="editor-body"]').fill('右クリックの的\n');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
-  const row = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').first();
+  const row = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').first();
   await expect(row, '行が出ていない').toBeVisible();
   await expect(page.locator(MENU), '押す前からメニューが出ている').toHaveCount(0);
 
@@ -130,7 +128,7 @@ test('🔴 メニューの下に、指している項目の説明が出る(乗�
   await page.locator('[data-pkc-field="editor-body"]').fill('説明の的\n');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
-  const row = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').first();
+  const row = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').first();
   await row.click({ button: 'right' });
   const menu = page.locator(MENU);
   await expect(menu).toBeVisible();
@@ -219,7 +217,7 @@ test('🔴 画面の下・右で右クリックしても、説明の欄まで画
   const vp = page.viewportSize()!;
 
   // ── 縦: 一覧のいちばん下の行
-  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  const rows = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
   const last = rows.last();
   await last.scrollIntoViewIfNeeded();
   const lastBox = (await last.boundingBox())!;
@@ -298,7 +296,7 @@ test('🔴 メニューの項目を押すと、その操作が実際に走る', 
   await page.locator('[data-pkc-field="editor-body"]').fill('履歴を見る的\n');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
-  const row = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').first();
+  const row = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').first();
   await row.click({ button: 'right' });
   await expect(page.locator(MENU)).toBeVisible();
 
@@ -397,7 +395,7 @@ test('🔴 編集中に行を右クリックすると「別のウィンドウで
   await expect(statusText, '前提: 編集に入った時点で既に理由が出ている').toHaveText('編集中');
 
   // 🔑 押すのは**選ばれていない行**(選ばれている行なら、動かないのは当然で何も見ていない)
-  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  const rows = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
   const selectedLid = await rows.locator('xpath=self::*[@data-pkc-selected]').first().getAttribute('data-pkc-entry');
   const other = rows.locator('xpath=self::*[not(@data-pkc-selected)]').first();
   const otherLid = await other.getAttribute('data-pkc-entry');
@@ -486,7 +484,7 @@ test('🔴 右ペインが届かないノートでも、右クリックから紙
   await page.locator('[data-pkc-field="editor-body"]').fill(`# 刷りたいノート\n\n${heads}`);
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
-  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  const rows = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
   await expect(rows, '前提: 行が 2 つ出ていない').toHaveCount(2);
 
   /**
@@ -677,7 +675,7 @@ test('🔴 見出しの「この章を編集する」→ 打つ → 別のノー
     );
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   await expect(page.locator('[data-pkc-field="detail-body"] h1')).toHaveText('議事録');
-  const noteA = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').first();
+  const noteA = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').first();
   const noteALid = await noteA.getAttribute('data-pkc-entry');
 
   // 履歴の基準(新規作成直後の初回保存は積まない ── #723 の docstring どおり)
@@ -693,11 +691,11 @@ test('🔴 見出しの「この章を編集する」→ 打つ → 別のノー
   // ⚠ 既定の並びは「自分で並べた順」= 作った順 ── ノート B は**2 番目**である
   //   (`.first()` だと A のまま。実際にこれで 1 回外した)
   const noteB = page.locator(
-    `[data-pkc-region="entry-list"] [data-pkc-entry]:not([data-pkc-entry="${noteALid}"])`,
+    `[data-pkc-region="filer-table"] [data-pkc-entry]:not([data-pkc-entry="${noteALid}"])`,
   );
 
   // ノート A(議事録)へ戻る
-  await page.locator(`[data-pkc-region="entry-list"] [data-pkc-entry="${noteALid}"]`).click();
+  await page.locator(`[data-pkc-region="filer-table"] [data-pkc-entry="${noteALid}"]`).click();
   await expect(page.locator('[data-pkc-field="detail-body"] h1')).toHaveText('議事録');
 
   const head2 = page.locator('[data-pkc-field="detail-body"] h2', { hasText: '決定事項' });
@@ -831,7 +829,7 @@ test('🔴 見出しの「この章を編集する」→ 打つ → 別のノー
   // ⓪-② 🔴 章を保存したら、横に置いた章の窓も新しくなる(#1044 段4)
   await expect(chapterBody, '章を保存したのに、章の窓が古いまま').toContainText('パンを買う');
 
-  await page.locator(`[data-pkc-region="entry-list"] [data-pkc-entry="${noteALid}"]`).click({ button: 'right' });
+  await page.locator(`[data-pkc-region="filer-table"] [data-pkc-entry="${noteALid}"]`).click({ button: 'right' });
   await page.locator(`${MENU} button[data-pkc-action="show-history"]`).click();
   await expect(page.locator('[data-pkc-field="history-panel"]'), '履歴が動いていない').toContainText(
     '履歴 1 件',
@@ -949,7 +947,7 @@ test('🔴 コード枠の ✎ → 打つ → 保存で disk・履歴が動く�
     'const a = 2;',
   );
 
-  const noteRow = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').first();
+  const noteRow = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').first();
   await noteRow.click({ button: 'right' });
   await page.locator(`${MENU} button[data-pkc-action="show-history"]`).click();
   // ⚠ **2 件**(引用の中の枠の保存 + 普通の枠の保存 ── V2 の相乗りで 1 件増えた)

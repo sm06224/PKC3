@@ -25,7 +25,6 @@ import {
   createEntry,
   dismissAnnounce,
   gotoApp,
-  useListBrowse,
   useSplitEditor,
 } from './helpers';
 
@@ -117,7 +116,6 @@ test.describe('指で触る端末(#706)', () => {
     const errors = collectPageErrors(page);
     await page.setViewportSize({ width: 390, height: 844 });
     await useSplitEditor(page);
-    await useListBrowse(page);
     await gotoApp(page);
     await dismissAnnounce(page);
     await noteWithTargets(page);
@@ -168,7 +166,6 @@ test.describe('指で触る端末(#706)', () => {
     const errors = collectPageErrors(page);
     await page.setViewportSize({ width: 390, height: 844 });
     await useSplitEditor(page);
-    await useListBrowse(page);
     await gotoApp(page);
     await dismissAnnounce(page);
     await createEntry(page, 'text');
@@ -225,7 +222,6 @@ test.describe('指で触る端末(#706)', () => {
     const errors = collectPageErrors(page);
     await page.setViewportSize({ width: 390, height: 844 });
     await useSplitEditor(page);
-    await useListBrowse(page);
     await gotoApp(page);
     await dismissAnnounce(page);
     await noteWithTargets(page);
@@ -252,7 +248,7 @@ test.describe('指で触る端末(#706)', () => {
     await clickReal(page, '[data-pkc-field="phone-back"]');
     await clickReal(
       page,
-      page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]', { hasText: '買い物リスト' }),
+      page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]', { hasText: '買い物リスト' }),
     );
     await expect(
       page.locator('li.pkc-task-item [data-pkc-action="toggle-task"]').first(),
@@ -266,7 +262,6 @@ test.describe('指で触る端末(#706)', () => {
 test.describe('対照群 ── マウスの端末', () => {
   test('⚠ 行の高さも ‹ › の色も、これまでのまま', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
-    await useListBrowse(page);
     await gotoApp(page);
     await dismissAnnounce(page);
     await createEntry(page, 'text');

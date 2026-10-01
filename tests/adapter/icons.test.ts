@@ -29,7 +29,7 @@ import { PKC_SYMBOLS } from '../../src/features/icon/symbols';
 import { TILE_ICON_CHOICES } from '../../src/features/icon/tile-icons';
 import { blocksFor, stripComments, withoutMedia } from '../helpers/css-blocks';
 import { codeOnly } from '../helpers/code-only';
-import { SidebarRenderer } from '../../src/adapter/ui/render/sidebar';
+import { BrowseRouter } from '../../src/adapter/ui/render/browse';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { collectionBarItems } from '../../src/adapter/ui/render/collection-bar';
 import { initialState, reduce } from '../../src/adapter/state/app-state';
@@ -204,7 +204,9 @@ describe('一覧のチップ ── 行を作り直さずに種別が変わっ�
   it('🔴 種別だけ変えた patch 経路でチップが空にならない', () => {
     const root = document.createElement('div');
     const regions = buildShell(root);
-    const sidebar = new SidebarRenderer(regions.sidebar);
+    // 🔴 左の列の行はフォルダの表が描く(「一覧」の描画器は #813 段③ で外した)
+    const browse = new BrowseRouter(regions.sidebar, regions.browseHost, 'filer');
+    const sidebar = { render: (s: Parameters<BrowseRouter['render']>[0]): void => browse.render(s, 'filer') };
 
     sidebar.render(stateWith(meta('a', 'text')));
     const chip = root.querySelector('[data-pkc-chip]');
@@ -227,7 +229,9 @@ describe('一覧のチップ ── 行を作り直さずに種別が変わっ�
   it('🔴 未知の種別でもチップが空にならない(行の頭が揃う)', () => {
     const root = document.createElement('div');
     const regions = buildShell(root);
-    const sidebar = new SidebarRenderer(regions.sidebar);
+    // 🔴 左の列の行はフォルダの表が描く(「一覧」の描画器は #813 段③ で外した)
+    const browse = new BrowseRouter(regions.sidebar, regions.browseHost, 'filer');
+    const sidebar = { render: (s: Parameters<BrowseRouter['render']>[0]): void => browse.render(s, 'filer') };
     sidebar.render(stateWith(meta('a', 'なにか未知')));
     // ⚠ 未知は `dot`(表に無い種別で器ごと消えると、行の頭が 1 件だけ揃わない)
     expect(

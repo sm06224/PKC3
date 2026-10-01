@@ -16,9 +16,13 @@ export interface ListFace {
 }
 
 /** いま見えている一覧の面を解く(1 つに定まらなければ throw)。 */
-export declare function resolveListFace(page: {
-  evaluate: (fn: (faces: string[]) => unknown, arg: string[]) => Promise<unknown>;
-}): Promise<ListFace>;
+export declare function resolveListFace(
+  page: {
+    evaluate: (fn: (faces: string[]) => unknown, arg: string[]) => Promise<unknown>;
+  },
+  /** 既定は `LIST_FACES`。面が複数のときの判断を unit で見るために差せる(#813 段③)。 */
+  faces?: readonly string[],
+): Promise<ListFace>;
 
 /** 面を解いて、行が出そろうのを待つ。 */
 export declare function waitForRows(

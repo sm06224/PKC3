@@ -15,7 +15,6 @@ import {
   clickReal,
   collectPageErrors,
   expectReachable,
-  useListBrowse,
 } from './helpers';
 
 const BODY = ['# 買い物メモ', '', '#買い物 #家事', '', '牛乳と洗剤を買う。'].join('\n');
@@ -40,7 +39,7 @@ async function chooseBadge(page: Page, value: string): Promise<void> {
   const select = page.locator('[data-pkc-field="tag-badge-select"]');
   await expectReachable(page, select);
   await select.selectOption(value);
-  await page.locator('[data-pkc-region="entry-list"] [data-pkc-action="select-entry"]').first().click();
+  await page.locator('[data-pkc-region="filer-table"] [data-pkc-action="select-entry"]').first().click();
   await expect(page.locator('[data-pkc-field="detail-body"]')).toBeVisible();
 }
 
@@ -51,7 +50,6 @@ test('🔴 本文のタグが札で出て、押すと一覧が絞られる (#550
    *   `entry-filter` が畳まれている(値は state に入っても画面に出ない)。
    *   観測点は**user が実際に見る欄**にする。
    */
-  await useListBrowse(page);
   await gotoApp(page);
   await writeNote(page, BODY);
 
@@ -82,7 +80,6 @@ test('🔴 本文のタグが札で出て、押すと一覧が絞られる (#550
 
 test('🔴 見せ方を「文字のまま」にすると、下地が消える (#550 段③)', async ({ page }) => {
   const errors = collectPageErrors(page);
-  await useListBrowse(page);
   await gotoApp(page);
   await writeNote(page, BODY);
 

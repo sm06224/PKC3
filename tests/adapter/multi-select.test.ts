@@ -122,12 +122,14 @@ describe('印(複数選択)の意味論', () => {
   });
 
   /**
-   * 🔴 **`scope: 'list'` は一覧タブの flat な並びで範囲を採る**(#1038 台帳③
-   * 段 G、C13)。⚠ 省略(= フォルダの表)は `scopeLid` の直下しか見ないので、
-   * **フォルダの中に居る行は範囲から漏れる** ── 一覧タブでその行を目で見て
-   * 範囲の中に入れたのに、印が付かない(いちばん気づけない壊れ方)。
+   * 🔴 **平らに出しているとき(「中まで全部出す」)は、階層をまたいだ並びで範囲を採る**
+   * (#1038 台帳③ 段 G、C13 → #813 段③)。
+   *
+   * ⚠ 平らでないとき(省略)は `scopeLid` の直下しか見ないので、フォルダの中に居る行は
+   *   範囲から漏れる ── 平らな表でその行を目で見て範囲の中に入れたのに、印が付かない
+   *   (いちばん気づけない壊れ方)。かつては「一覧」タブ専用の `scope: 'list'` が担っていた。
    */
-  it('🔴 scope: list は flat な並びで採る(フォルダの中の行も範囲に入る)', () => {
+  it('🔴 平らに出しているときは、階層をまたぐ並びで採る(フォルダの中の行も範囲に入る)', () => {
     const metas = [
       meta('a', 1, 'aa'),
       meta('folder', 2, 'はこ', 'folder'),
@@ -138,17 +140,19 @@ describe('印(複数選択)の意味論', () => {
     let s = reduce(initialState, { type: 'SYS_BOOTED', cid: 'c1', metas, relations }).state;
     s = reduce(s, { type: 'SELECT_ENTRY', lid: 'a' }).state; // 起点 a
 
-    // フォルダの表(scope 省略)── `nested` はフォルダの直下なので root の並びに来ない
-    const filerScope = reduce(s, { type: 'SELECT_RANGE', lid: 'b' });
-    expect(filerScope.state.selection, 'フォルダの表の範囲に nested が混ざった').toEqual([
+    // 平らでない表 ── `nested` はフォルダの直下なので root の並びに来ない
+    const direct = reduce(s, { type: 'SELECT_RANGE', lid: 'b' });
+    expect(direct.state.selection, '平らでない表の範囲に nested が混ざった').toEqual([
       'a',
       'folder',
       'b',
     ]);
 
-    // 一覧タブ(scope: 'list')── flat な並びなので nested も範囲に入る
-    const listScope = reduce(s, { type: 'SELECT_RANGE', lid: 'b', scope: 'list' });
-    expect(listScope.state.selection, '一覧タブで見えている nested が範囲から漏れた').toEqual([
+    // 平らに出す ── nested も範囲に入る(⚠ 入り切りは印と起点を外すので、選び直す)
+    let flatState = reduce(s, { type: 'SET_FILER_FLATTEN', on: true }).state;
+    flatState = reduce(flatState, { type: 'SELECT_ENTRY', lid: 'a' }).state;
+    const flat = reduce(flatState, { type: 'SELECT_RANGE', lid: 'b' });
+    expect(flat.state.selection, '平らな表で見えている nested が範囲から漏れた').toEqual([
       'a',
       'folder',
       'nested',
@@ -293,14 +297,29 @@ describe('探し方の既定と記憶(#240 段⑤)', () => {
     const map = new Map<string, string>();
     const st = { getItem: (k: string) => map.get(k) ?? null, setItem: (k: string, v: string) => void map.set(k, v) };
     const s = new BrowseModeStore(st);
-    s.set('list');
-    expect(new BrowseModeStore(st).get(), '覚えていない').toBe('list');
+    s.set('launcher');
+    expect(new BrowseModeStore(st).get(), '覚えていない').toBe('launcher');
     map.set('pkc3.browse', 'ghost');
     expect(new BrowseModeStore(st).get(), '知らない値で面が出なくなる').toBe('filer');
   });
 
+  /**
+   * 🔴 **「一覧」を憶えていた人は、次に開くとフォルダ**(#813 段③)。
+   * ⚠ `list` は知らない値になったので既定へ落ちる ── 面が出ない(白い画面)ほうが害が大きい。
+   *   🔑 行き先は**既定そのもの**(別の表を持たない ── 既定を変える日に読み替えだけ古くならない)。
+   */
+  it('🔴 憶えていた「一覧」(`list`)は、フォルダとして開く', () => {
+    const map = new Map<string, string>([['pkc3.browse', 'list']]);
+    const st = { getItem: (k: string) => map.get(k) ?? null, setItem: (k: string, v: string) => void map.set(k, v) };
+    expect(new BrowseModeStore(st).get(), '外した「一覧」を憶えたまま開いた').toBe(DEFAULT_BROWSE_MODE);
+    expect(new BrowseModeStore(st).get()).toBe('filer');
+    // ⚠ 対照群 ── ほかのタブの記憶は今までどおり(全部をフォルダへ落としていない)
+    map.set('pkc3.browse', 'schedule');
+    expect(new BrowseModeStore(st).get()).toBe('schedule');
+  });
+
   it('🔴 最初に出る面が、選ばれているタブと一致する', () => {
-    // ⚠ 器の hidden を 'list' 固定で組んでいると、**タブはフォルダなのに中身は一覧**
+    // ⚠ 器の hidden を固定で組んでいると、**タブは選ばれているのに中身は別の面**
     //    という食い違いが出る(段⑤ の実装中に実際に踏んだ)
     const root = document.createElement('div');
     document.body.append(root);
@@ -308,16 +327,24 @@ describe('探し方の既定と記憶(#240 段⑤)', () => {
     const router = new BrowseRouter(regions.sidebar, regions.browseHost, 'filer');
     router.render(booted(), 'filer');
     const filerPane = regions.browseHost.querySelector<HTMLElement>('[data-pkc-browse-pane="filer"]')!;
-    const listPane = regions.browseHost.querySelector<HTMLElement>('[data-pkc-region="entry-list"]')!;
     expect(filerPane.hidden, 'フォルダの面が隠れたまま').toBe(false);
-    expect(listPane.hidden, '一覧の面が重なって出ている').toBe(true);
+    const others = [...regions.browseHost.querySelectorAll<HTMLElement>('[data-pkc-browse-pane]')].filter(
+      (p) => p !== filerPane,
+    );
+    expect(others.length, '前提が崩れている(ほかの面が 1 つも無い)').toBeGreaterThan(0);
+    expect(others.filter((p) => !p.hidden).map((p) => p.getAttribute('data-pkc-browse-pane')), 'ほかの面が重なって出ている').toEqual([]);
   });
 
-  it('🔴 一覧タブは残っている(消さない)', () => {
+  it('🔴 「一覧」タブは外してある(タブは 5 枚)/ 器にも「一覧」の面が無い', () => {
     const root = document.createElement('div');
     document.body.append(root);
-    buildShell(root);
-    expect(root.querySelector('[data-pkc-browse="list"]'), '一覧の導線が消えた').not.toBeNull();
+    const regions = buildShell(root);
+    expect(root.querySelector('[data-pkc-browse="list"]'), '外した「一覧」の導線が残っている').toBeNull();
+    const tabs = [...root.querySelectorAll('[data-pkc-action="set-browse"]')].map((b) =>
+      b.getAttribute('data-pkc-browse'),
+    );
+    expect(tabs).toEqual(['filer', 'launcher', 'schedule', 'contacts', 'captures']);
+    expect(regions.browseHost.querySelector('[data-pkc-region="entry-list"]'), '一覧の器が残っている').toBeNull();
   });
 
   it('🔴 boot が記憶した探し方で開く(配線の pin)', () => {
@@ -477,7 +504,7 @@ describe('印が指すものと、画面に見えているもの(#240 着地前�
     expect(d.getState().error ?? '', '無言の dead click になっている').toContain('絞り込み');
   });
 
-  it('🔴 修飾つきのクリックは**フォルダ面・一覧タブの中だけ**(カンバン等では印を作らない)', () => {
+  it('🔴 修飾つきのクリックは**フォルダ面の中だけ**(カンバン等では印を作らない)', () => {
     document.body.innerHTML = '';
     const root = document.createElement('div');
     root.setAttribute('data-pkc-slot', 'root');
@@ -486,10 +513,8 @@ describe('印が指すものと、画面に見えているもの(#240 着地前�
     bindActions(root, d);
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: METAS, relations: [] });
     /**
-     * 🔴 フォルダ面・一覧タブ**どちらでもない**器に、同じ `select-entry` の行を
-     * 置く(kanban / calendar / query / inspector と同型 ── #1038 台帳③ 段 G、
-     * C13 で一覧タブが対象に入ったので、この test は「対象に入っていない残り」を
-     * 見る形に変えた)。
+     * 🔴 フォルダ面**ではない**器に、同じ `select-entry` の行を置く
+     * (kanban / calendar / query / inspector と同型)。
      */
     const outside = document.createElement('div');
     outside.setAttribute('data-pkc-region', 'kanban-cards');
@@ -506,40 +531,6 @@ describe('印が指すものと、画面に見えているもの(#240 着地前�
     expect(d.getState().selectedLid, '普通のクリックとして扱われていない').toBe('c');
   });
 
-  it('🔴 一覧タブでも Ctrl / Shift で選び足せる(C13 / Q6「A + 濃く」)。開いているノートは動かない', () => {
-    document.body.innerHTML = '';
-    const root = document.createElement('div');
-    root.setAttribute('data-pkc-slot', 'root');
-    document.body.append(root);
-    const d = new Dispatcher();
-    bindActions(root, d);
-    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: METAS, relations: [] });
-    const list = document.createElement('ul');
-    list.setAttribute('data-pkc-region', 'entry-list');
-    list.innerHTML = METAS.map(
-      (m) => `<li data-pkc-action="select-entry" data-pkc-entry="${m.lid}">${m.lid}</li>`,
-    ).join('');
-    root.append(list);
-    const row = (lid: string) => list.querySelector<HTMLElement>(`[data-pkc-entry="${lid}"]`)!;
-    row('a').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    expect(d.getState().selection).toEqual(['a']);
-    expect(d.getState().selectedLid).toBe('a');
-    row('c').dispatchEvent(
-      new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true }),
-    );
-    expect(d.getState().selection, 'Ctrl クリックが印にならない').toEqual(['a', 'c']);
-    // 🔑 選び足している間、中央はいま開いているノートのまま
-    //    (選び足しただけでは切り替わらない ── 段 G の依頼文そのもの)
-    expect(d.getState().selectedLid, '選び足しただけで中央が動いた').toBe('a');
-    // METAS は a(order 1) b(order 2) c(order 3) d(order 4)。表示順は entryOrder のまま
-    row('d').dispatchEvent(
-      new MouseEvent('click', { bubbles: true, cancelable: true, shiftKey: true }),
-    );
-    // 起点は c(最後に印を動かした行)── 一覧の表示順で c..d(フォルダ表と同じ形)
-    expect(d.getState().selection, '一覧タブの範囲選択が表示順で採れていない').toEqual(['c', 'd']);
-    expect(d.getState().selectedLid, '範囲選択で中央が動いた').toBe('a');
-  });
-
   it('🔴 「もう一度押す」もフォルダ面の中だけ(見えない現在地が動かない)', () => {
     document.body.innerHTML = '';
     const root = document.createElement('div');
@@ -554,13 +545,13 @@ describe('印が指すものと、画面に見えているもの(#240 着地前�
       relations: [],
     });
     const outside = document.createElement('div');
-    outside.setAttribute('data-pkc-region', 'entry-list');
+    outside.setAttribute('data-pkc-region', 'kanban-cards');
     outside.innerHTML = '<button data-pkc-action="select-entry" data-pkc-entry="f">f</button>';
     root.append(outside);
     const btn = outside.querySelector('button')!;
     btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    expect(d.getState().scopeLid, '一覧タブの 2 回押しで現在地が動いた').toBeNull();
+    expect(d.getState().scopeLid, '面の外の 2 回押しで現在地が動いた').toBeNull();
   });
 });
 
@@ -937,10 +928,10 @@ describe('フォルダの表の鍵', () => {
     expect(d.getState().phase, '選び直しただけで編集へ入った').toBe('ready');
   });
 
-  it('🔴 面の外では効かない(一覧タブで Enter を押しても現在地が動かない)', () => {
+  it('🔴 面の外では効かない(フォルダの表の外で Enter を押しても現在地が動かない)', () => {
     const { d, root, press } = screen();
     const outside = document.createElement('div');
-    outside.setAttribute('data-pkc-region', 'entry-list');
+    outside.setAttribute('data-pkc-region', 'kanban-cards');
     outside.innerHTML = '<button data-pkc-entry="f">f</button>';
     root.append(outside);
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'f' });

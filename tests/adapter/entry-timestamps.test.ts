@@ -24,7 +24,7 @@ import type { EntryStamps, EntryUpsert } from '../../src/adapter/platform/storag
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
-import { SidebarRenderer } from '../../src/adapter/ui/render/sidebar';
+import { BrowseRouter } from '../../src/adapter/ui/render/browse';
 import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
@@ -374,7 +374,9 @@ describe('③ 情報列に日付が出る', () => {
     document.body.append(root);
     const d = new Dispatcher();
     const regions = buildShell(root);
-    const sidebar = new SidebarRenderer(regions.sidebar);
+    // 🔴 左の列の行はフォルダの表が描く(「一覧」の描画器は #813 段③ で外した)
+    const browse = new BrowseRouter(regions.sidebar, regions.browseHost, 'filer');
+    const sidebar = { render: (s: Parameters<BrowseRouter['render']>[0]): void => browse.render(s, 'filer') };
     const detail = new DetailRenderer(regions.detail);
     const inspector = new InspectorRenderer(regions.inspector);
     d.onState((s) => {

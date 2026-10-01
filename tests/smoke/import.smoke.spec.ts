@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { answerAppDialog, gotoApp, collectPageErrors, clickReal, expectImageRendered, useSplitEditor, useListBrowse,
+import { answerAppDialog, gotoApp, collectPageErrors, clickReal, expectImageRendered, useSplitEditor,
   gotoCollectionPane,
 } from './helpers';
 import { withStateOnFail } from './state-dump';
@@ -23,7 +23,6 @@ import { withStateOnFail } from './state-dump';
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
 // 既定(live)の顔は live-editor.smoke.spec.ts が守る。
 test.beforeEach(async ({ page }) => {
-  await useListBrowse(page);
   await useSplitEditor(page);
 });
 
@@ -96,7 +95,7 @@ test('PKC2 HTML 取込 → entry 出現 → gzip 添付が blob: で描画され
   await (await chooser).setFiles(FILE());
 
   // 再読込(sqlite から引き直し)を経て 2 件が sidebar に現れる
-  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  const rows = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
   await expect(rows).toHaveCount(2);
   await expect(rows.first()).toContainText('旧ノート'); // meta.entry_order の順
 
@@ -432,7 +431,7 @@ test('.pkc2.zip 取込 → entry 出現 → 生バイナリ添付が blob: で�
     buffer: pkc2Zip(),
   });
 
-  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  const rows = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
   await expect(rows).toHaveCount(2);
 
   // ZIP から直接流した bytes が実 IDB に入り、実描画される(base64 を経由しない)
@@ -518,7 +517,7 @@ test('batch bundle 取込 → 内側 ZIP が再入され、共有添付が 1 本
   });
 
   // 本体 2 件 + attachment 1 件 = 3(attachment が 2 件なら畳めていない)
-  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  const rows = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
   await expect(rows).toHaveCount(3);
 
   // 🔑 内側 ZIP の view から流した bytes が実 IDB に入り、実描画される。
@@ -575,7 +574,7 @@ test('注意が複数あるとき **全件**が画面に出る(1 行の status �
     buffer: zip,
   });
 
-  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(3);
+  await expect(page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]')).toHaveCount(3);
 
   // 🔑 3 件とも出る。**1 件目だけ**なら段④ の「どのファイルか冠する」設計が空振り
   const notices = page.locator('[data-pkc-region="notices"] [data-pkc-notice]');
@@ -660,11 +659,14 @@ test('folder-export 取込 → filer で階層が実際にたどれる', async (
     buffer: folderExportZip(),
   });
 
-  // folder 5 件 + 本体 2 件
-  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(7);
-
-  await clickReal(page, '[data-pkc-browse="filer"]');
   const rows = page.locator('[data-pkc-region="filer-table"] tbody tr');
+  // 最上位は 2 件(階層が効いている)。folder 5 件 + 本体 2 件の 7 件が全部取り込まれていることは、
+  // 「中まで全部出す」で平らに数える(かつては「一覧」タブが全件を出していた ── #813 段③)
+  await expect(rows).toHaveCount(2);
+  await clickReal(page, '[data-pkc-field="filer-flatten"]');
+  await expect(rows, '7 件(folder 5 + 本体 2)が全部取り込まれていない').toHaveCount(7);
+  await clickReal(page, '[data-pkc-field="filer-flatten"]');
+  await expect(rows).toHaveCount(2);
 
   // 🔑 最上位は **root + 循環から救出された 1 件**(階層が効いていれば 7 件並ばない)。
   // 🔴 循環が切れていないと循環上の 2 件は root にも配下にも出ず**完全に消える**
@@ -699,7 +701,6 @@ test('folder-export 取込 → filer で階層が実際にたどれる', async (
   const subLid = await page
     .locator('[data-pkc-region="filer-table"] tbody tr[data-pkc-archetype="folder"]')
     .getAttribute('data-pkc-entry');
-  // ⚠ 一覧タブにも同じ lid の行が居る(隠れている)── **表の中**を押す
   // ⚠ 入るのは 2 クリック(#240 段①)
   await enterFolderRow(page, `[data-pkc-region="filer-table"] [data-pkc-entry="${subLid}"]`);
   await expect(rows.locator('[data-pkc-field="title"]')).toHaveText(['空フォルダ', '議事録']);
@@ -719,8 +720,8 @@ test('段⑥: `.entry.zip` の base64 添付が実 IDB で画像として描画�
     buffer: readFileSync(`${process.cwd()}/tests/fixtures/pkc2/attachment.entry.zip`),
   });
 
-  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(1);
-  await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]');
+  await expect(page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]')).toHaveCount(1);
+  await clickReal(page, '[data-pkc-region="filer-table"] [data-pkc-entry]');
   // 実ブラウザが画像として decode できる = base64 が正しく復号されている
   await expectImageRendered(page, '[data-pkc-field="attachment-media"]');
 
@@ -758,7 +759,7 @@ test('🔴 P7 段②: 素の md を取り込む ── 宣言(file_handlers)と�
   ]);
 
   // 実 sqlite からの再読込を経て 2 件が sidebar に現れる
-  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  const rows = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
   await expect(rows).toHaveCount(2);
   await expect(rows.locator('[data-pkc-field="title"]')).toHaveText(['会議メモ', '正本']);
 
@@ -796,7 +797,7 @@ test('🔴 バックアップ: 書き出して → 取り込み直すと中身�
     mimeType: 'application/zip',
     buffer: pkc2Zip(),
   });
-  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  const rows = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
   await expect(rows).toHaveCount(2);
 
   // 📤 書き出す(実ブラウザの Blob → <a download> 経路を通す)
@@ -823,14 +824,14 @@ test('🔴 バックアップ: 書き出して → 取り込み直すと中身�
   // 添付も戻っている(content addressing なので blob は 1 本のまま)
   const restored = rows.filter({ hasText: 'dot.png' });
   await expect(restored).toHaveCount(2);
-  await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]:last-child');
+  await clickReal(page, '[data-pkc-region="filer-table"] [data-pkc-entry]:last-child');
   await expectImageRendered(page, '[data-pkc-field="attachment-media"]');
 
   // 🔴 **履歴も戻る**(P6e)。ここは実 sqlite の逆向きパッチを通る唯一の検証 ──
   // 鎖の decode は worker の中にしかないので、unit では届かない。
   // ⚠ 見るのは件数ではなく**本文**。件数だけだと「別の状態列が入った」を見逃す
   const restoredNote = rows.filter({ hasText: 'ZIP のノート' }).last();
-  await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]:nth-child(3)');
+  await clickReal(page, '[data-pkc-region="filer-table"] [data-pkc-entry]:nth-child(3)');
   await expect(restoredNote).toBeVisible();
   await clickReal(page, '[data-pkc-action="show-history"]');
   await expect(page.locator('[data-pkc-rev-order]')).toHaveCount(2);
@@ -862,7 +863,7 @@ test('🔴 このノートを書き出す ── 消す前の導線が実際に�
     mimeType: 'application/zip',
     buffer: pkc2Zip(),
   });
-  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  const rows = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
   await expect(rows).toHaveCount(2);
 
   // 履歴を持つノートを開く ── 書き出しは履歴ごと出る
@@ -900,7 +901,7 @@ test('🔴 このノートを書き出す ── 消す前の導線が実際に�
   await expect(rows).toHaveCount(3);
 
   // 履歴も一緒に戻っている
-  await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]:last-child');
+  await clickReal(page, '[data-pkc-region="filer-table"] [data-pkc-entry]:last-child');
   await clickReal(page, '[data-pkc-action="show-history"]');
   await expect(page.locator('[data-pkc-rev-order]')).toHaveCount(2);
 
@@ -917,7 +918,7 @@ test('🔴 可搬 HTML: 書き出したファイルが**単体で開いて読め
     mimeType: 'application/zip',
     buffer: pkc2Zip(),
   });
-  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(2);
+  await expect(page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]')).toHaveCount(2);
 
   const dl = page.waitForEvent('download');
   // ⚠ #1017 段④a でこの操作は右の列(何も選んでいないとき)へ移った ── 先に出す
@@ -1100,7 +1101,7 @@ test('🔴 md ZIP: 落ちるものを言い、添付が**相対パス**で入る
     mimeType: 'application/zip',
     buffer: pkc2Zip(),
   });
-  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(2);
+  await expect(page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]')).toHaveCount(2);
 
   const dl = page.waitForEvent('download');
   // ⚠ #1017 段④a でこの操作は右の列(何も選んでいないとき)へ移った ── 先に出す

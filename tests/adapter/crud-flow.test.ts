@@ -12,7 +12,7 @@ import { answerDialog } from './dialog-helper';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
-import { SidebarRenderer } from '../../src/adapter/ui/render/sidebar';
+import { BrowseRouter } from '../../src/adapter/ui/render/browse';
 import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
@@ -52,7 +52,9 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>) {
   document.body.append(root);
   const d = new Dispatcher();
   const regions = buildShell(root);
-  const sidebar = new SidebarRenderer(regions.sidebar);
+  // 🔴 左の列の行はフォルダの表が描く(「一覧」の描画器は #813 段③ で外した)
+    const browse = new BrowseRouter(regions.sidebar, regions.browseHost, 'filer');
+    const sidebar = { render: (s: Parameters<BrowseRouter['render']>[0]): void => browse.render(s, 'filer') };
   const detail = new DetailRenderer(regions.detail);
   // 🔑 削除 / 履歴 / 書き出す は**情報ペイン**が持つ(P8)
   const inspector = new InspectorRenderer(regions.inspector);
@@ -186,7 +188,9 @@ describe('create (P3-7a)', () => {
     document.body.append(root);
     const d = new Dispatcher();
     const regions = buildShell(root);
-    const sidebar = new SidebarRenderer(regions.sidebar);
+    // 🔴 左の列の行はフォルダの表が描く(「一覧」の描画器は #813 段③ で外した)
+    const browse = new BrowseRouter(regions.sidebar, regions.browseHost, 'filer');
+    const sidebar = { render: (s: Parameters<BrowseRouter['render']>[0]): void => browse.render(s, 'filer') };
     const detail = new DetailRenderer(regions.detail);
     d.onState((s) => {
       sidebar.render(s);
