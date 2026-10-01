@@ -1656,8 +1656,16 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   await page.fill('[data-pkc-field="sql-input"]', 'SELECT * FROM xlsx_sheets');
   await clickReal(page, '[data-pkc-action="run-sql"]');
   await expect(sqlTable, 'xlsx_sheets から行が返らない').toBeVisible({ timeout: 10_000 });
-  const sheetHeaders = await sqlTable.locator('thead th').allTextContents();
-  expect(sheetHeaders, 'xlsx_sheets の列名が違う').toEqual(['name', 'sheet', 'rows']);
+  // ⚠ 1564 行と同じ形 ── `toBeVisible` は**前の答えの表**でも素通りするので、列名は
+  //   再試行する `toHaveText` で待つ(負荷で 2 回目の答えが遅れると古い列を読む。
+  //   2026-10-01 のフル記録で `['name','sheet','rows']` を sheet1 の列として読んで落ちた)
+  const sheetTh = sqlTable.locator('thead th');
+  await expect(sheetTh.nth(0), 'xlsx_sheets の 1 列目が name でない(前の答えの表を読んでいる)').toHaveText(
+    'name',
+    { timeout: 10_000 },
+  );
+  await expect(sheetTh.nth(1), 'xlsx_sheets の 2 列目が sheet でない').toHaveText('sheet');
+  await expect(sheetTh.nth(2), 'xlsx_sheets の 3 列目が rows でない').toHaveText('rows');
   await expect(sqlTable.locator('tbody tr'), '枚の数が合わない').toHaveCount(2);
   await expect(sqlTable).toContainText('sheet1');
   await expect(sqlTable).toContainText('売上');
@@ -1668,12 +1676,13 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   await page.fill('[data-pkc-field="sql-input"]', 'SELECT * FROM sheet1');
   await clickReal(page, '[data-pkc-action="run-sql"]');
   await expect(sqlTable, 'sheet1 から行が返らない').toBeVisible({ timeout: 10_000 });
-  const xlsxHeaders = await sqlTable.locator('thead th').allTextContents();
-  expect(xlsxHeaders.slice(0, 3), '先頭の列が _note / _lid / _sheet でない').toEqual([
+  const xlsxTh = sqlTable.locator('thead th');
+  await expect(xlsxTh.nth(0), '先頭の列が _note でない(前の答えの表 xlsx_sheets を読んでいる)').toHaveText(
     '_note',
-    '_lid',
-    '_sheet',
-  ]);
+    { timeout: 10_000 },
+  );
+  await expect(xlsxTh.nth(1), '2 列目が _lid でない').toHaveText('_lid');
+  await expect(xlsxTh.nth(2), '3 列目が _sheet でない').toHaveText('_sheet');
   await expect(sqlTable.locator('tbody tr'), '行の数が合わない').toHaveCount(2);
   await expect(sqlTable).toContainText('りんご');
   // _sheet 列に本当の枚の名前(売上)が入っている
