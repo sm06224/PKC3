@@ -220,7 +220,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    *   🔑 押した所から**何も要らない**(`open-manual-window` と同じ仕分け ──
    *   行き先は固定で、鍵も持たない)。
    */
-  'open-system-notices', 'open-today',
+  'open-storage-check', 'open-system-notices', 'open-today',
   'paste-many-copied', 'phone-menu', 'phone-page', 'pick-app-icon', 'pick-create-kind',
   /**
    * ⚠ **2026-09-14(#530 案 A)で 5 件増やした** ── 板の形(四角 / 角丸 / 丸 /
@@ -598,12 +598,16 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-01(#1174 段①): 無いノートへのリンクの点線(`set-missing-links`)で受け手 +1 /
       //   `total` +1 / `unregistered` +1。登記は増えない ── 押し口は設定の checkbox にしか無く、
       //   鍵も持たない(`set-phone-links` と同じ形)。
-      total: 348,
-      receivers: 291,
+      // ⚠ 2026-10-01(#1010 B): 保存が止まった断り書きの隣の「保存領域の点検を開く」
+      //   (`open-storage-check`)で受け手 +1 ── 登記は増えない(押し口は状態の行にしか無く、
+      //   鍵も持たない。`open-system-notices` と同じ仕分け)。
+      //   `receivers` +1 / `total` +1 / `unregistered` +1。
+      total: 349,
+      receivers: 292,
       registered: 96,
       both: 39,
       outsideActionsTable: 57,
-      unregistered: 252,
+      unregistered: 253,
     });
   });
 

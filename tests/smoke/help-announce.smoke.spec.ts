@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
+import { CORRUPT_REFUSAL } from '../../src/features/storage/db-corruption';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -197,6 +198,31 @@ test('🔴 ヘルプの面が開き、マニュアルが描かれる', async ({ 
   await expect(noticesSection).toBeVisible();
   await expect(noticesSection).toBeInViewport();
   await expect(page.locator('[data-pkc-help-notice]').first()).toBeVisible();
+
+  /**
+   * ③ 🔴 **保存が止まった断り書きの隣の「保存領域の点検を開く」を押すと、
+   *   「システム」の「保存領域の点検」へ送られる**(#1010 B)。⚠ **新しい起動は足さない**
+   *   ── 上の②の続き(いま居るのは「システム」で、お知らせの節は点検の節より**下**)。
+   * ⚠ **本物の壊れた DB は作れない**ので、状態の行へ断り書きを**手で書き**、押し口の
+   *   `hidden` を外す(= `main.ts` の仕事を真似る)。⚠ だからこの段が見るのは
+   *   「**押すと飛ぶ**」ことと「**長い断り書きの隣でも押し口が画面に収まる**」ことだけで、
+   *   **出す条件**は unit(`tests/adapter/status-open.test.ts`)が見る。
+   */
+  await page.evaluate((line) => {
+    const status = document.querySelector('[data-pkc-region="status"]') as HTMLElement | null;
+    const text = document.querySelector('[data-pkc-field="status-text"]');
+    const btn = document.querySelector('[data-pkc-field="status-rescue"]') as HTMLElement | null;
+    if (status === null || text === null || btn === null) throw new Error('前提が崩れている: 状態の行が無い');
+    text.textContent = line;
+    status.hidden = false;
+    btn.hidden = false;
+  }, `⚠ エラー: ${CORRUPT_REFUSAL}`);
+  const rescueBtn = page.locator('[data-pkc-field="status-rescue"]');
+  await expect(rescueBtn, '長い断り書きの隣で押し口が画面の外へ押し出されている').toBeInViewport();
+  const rescueSection = page.locator('[data-pkc-region="db-rescue"]');
+  await expect(rescueSection, '前提が崩れている: 点検の節が、押す前から画面に収まっている').not.toBeInViewport();
+  await clickReal(page, '[data-pkc-field="status-rescue"]');
+  await expect(rescueSection).toBeInViewport();
 
   expect(errors).toEqual([]);
 });

@@ -14,13 +14,19 @@
  * ⚠ `main.ts` の配線(`paintOpen`)は test から届かない ── だから判断はここに在る
  *   (CLAUDE.md §2「どの test からも実行されない file に、判断を書かない」)。
  */
-import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { afterEach, describe, expect, it } from 'vitest';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import {
   paintStatusCreate,
   paintStatusOpen,
+  paintStatusRescue,
   paintStatusUndo,
 } from '../../src/adapter/ui/render/status-open';
+import { CORRUPT_REFUSAL, corruptReport } from '../../src/features/storage/db-corruption';
+import { Dispatcher } from '../../src/adapter/state/dispatcher';
+import { CenterRouter } from '../../src/adapter/ui/render/center';
+import { bindActions } from '../../src/adapter/ui/actions/binder';
 
 const LINE = '「見積.pdf」を添付にしました(開いているのは『フォルダ』なので、本文には入れていません)';
 
@@ -217,5 +223,94 @@ describe('知らせの隣の「○○のノートを作る」(#1169)', () => {
     b = shown();
     paintStatusCreate(b, { ...ready, phase: 'editing' }, MISSING);
     expect(b.hidden, '編集中に出ている(押しても断られるだけ)').toBe(true);
+  });
+});
+
+/**
+ * 🔴 **保存が止まった断り書きの隣の「保存領域の点検を開く」**(#1010 B)。
+ *
+ * 断り書きは「システム の 保存領域 の「保存領域の点検」で…」と道順を言うのに、
+ * **押しても設定へ飛ばなかった**。守るのは:
+ * ① 器が押し口を持ち、受け手 `open-storage-check` へ繋がっている
+ * ② **断り書きが出ている間だけ**出る(別の知らせが上書きしたら畳む ── 対照群つき)
+ * ③ 🔴 **押すと「システム」が開き、点検の節へ送られる**(押した場所と効く先を対で)
+ *
+ * ⚠ ②の「出す条件」は `main.ts` から届かないので判断はここ(`status-open.ts`)に在る。
+ */
+describe('保存が止まった断り書きの隣の「保存領域の点検を開く」(#1010 B)', () => {
+  afterEach(() => {
+    document.body.textContent = '';
+  });
+
+  it('🔴 ① 器が押し口を持ち、受け手へ繋がっている(最初は畳んである)', () => {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const regions = buildShell(root);
+    const b = regions.statusRescue;
+    expect(b.getAttribute('data-pkc-action'), '受け手の無い口').toBe('open-storage-check');
+    expect(b.textContent).toBe('保存領域の点検を開く');
+    expect(b.hidden, '断り書きが無いのに出ている').toBe(true);
+    expect(regions.status.contains(b), '状態の行の外に居る').toBe(true);
+  });
+
+  it('🔴 ② 断り書きが出ている間だけ出る(前置き・後ろの「で検出」付きでも)', () => {
+    const b = btn();
+    paintStatusRescue(b, `⚠ エラー: ${CORRUPT_REFUSAL}`);
+    expect(b.hidden, '断り書きの隣に出ていない').toBe(false);
+    paintStatusRescue(b, `⚠ エラー: Error: ${corruptReport('upsertEntry', 'SQLITE_CORRUPT')}`);
+    expect(b.hidden, '「で検出」付きの断り書きで畳んでいる').toBe(false);
+    // 対照群 ── 別の知らせが上書きしたら畳む(「コピーしました」の隣に残さない)
+    paintStatusRescue(b, 'コピーしました');
+    expect(b.hidden, '別の知らせの隣に残っている').toBe(true);
+    // 対照群 ── 似た字の別のエラーでは出さない
+    paintStatusRescue(b, '⚠ エラー: 保存されている中身を読み込めませんでした');
+    expect(b.hidden, '別のエラーに点検の入口を出した').toBe(true);
+    paintStatusRescue(b, '');
+    expect(b.hidden).toBe(true);
+  });
+
+  /**
+   * ⚠ **弱い pin である**(CLAUDE.md §2「どの test からも実行されない file」)── `main.ts` は
+   *   test から実行されないので、配線(状態の行を塗るたびに押し口へ字を渡す)は**原文で見る**。
+   *   見るのは**実行する行**(注釈の行は除く)。①〜③ は押し口の判断と受け手を見ている。
+   */
+  it('⚠ ④ main.ts が、状態の行へ出した字をそのまま押し口へ渡している(原文 pin)', () => {
+    const code = readFileSync('src/main.ts', 'utf-8')
+      .split('\n')
+      .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+      .join('\n');
+    expect(code).toContain('paintStatusRescue(regions.statusRescue, text);');
+  });
+
+  it('🔴 ③ 押すと「システム」が開き、「保存領域の点検」の節へ送られる', async () => {
+    const scrolled: Element[] = [];
+    const original = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = function (this: HTMLElement) {
+      scrolled.push(this);
+    };
+    try {
+      const root = document.createElement('div');
+      document.body.append(root);
+      const d = new Dispatcher();
+      const regions = buildShell(root);
+      const center = new CenterRouter(regions.detail, () => new Date(2026, 9, 1));
+      d.onState((st) => center.render(st));
+      bindActions(root, d);
+      d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [], relations: [] });
+      expect(d.getState().viewMode, '前提: 設定はまだ開いていない').not.toBe('settings');
+
+      // 実 UI と同じ ── 器の押し口を出して押す
+      regions.statusRescue.hidden = false;
+      regions.statusRescue.click();
+
+      expect(d.getState().viewMode, '押しても「システム」が開かない').toBe('settings');
+      const target = scrolled.find((el) => el.getAttribute('data-pkc-region') === 'db-rescue');
+      expect(target, '点検の節へ送られていない').toBeDefined();
+      expect(root.contains(target!), '送った先が画面の外の要素').toBe(true);
+      // 対照群 ── 目次の「上へ」のように別の節へ送っていない
+      expect(scrolled.every((el) => el === target), '点検の節以外へも送っている').toBe(true);
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original;
+    }
   });
 });

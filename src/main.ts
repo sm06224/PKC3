@@ -42,7 +42,7 @@ import {
 } from '@adapter/ui/render/read-columns';
 import { setFoldNotify } from '@adapter/ui/render/fold-notify';
 import { appTooNarrowOk, installTooNarrow } from '@adapter/ui/render/too-narrow';
-import { paintStatusCreate, paintStatusOpen, paintStatusUndo } from '@adapter/ui/render/status-open';
+import { paintStatusCreate, paintStatusOpen, paintStatusRescue, paintStatusUndo } from '@adapter/ui/render/status-open';
 import { composeStatusLine, paintStatusText, shouldHideStatusBar } from '@adapter/ui/render/status-line';
 import { openStorageWithRetry } from '@adapter/platform/storage/open-with-retry';
 import {
@@ -1393,6 +1393,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     });
     if (text === statusShown && regions.status.hidden === hide) return;
     statusShown = text;
+    // 🔴 保存が止まった断り書きの隣の入口(#1010 B)── 判断は `status-open.ts`
+    paintStatusRescue(regions.statusRescue, text);
     // ⚠ 状態の 1 語だけを別の器に入れる(`status-line.ts` の `paintStatusText`)── 字は同じ
     paintStatusText(regions.statusText, parts);
     regions.status.hidden = hide;

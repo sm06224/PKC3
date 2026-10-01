@@ -68,6 +68,11 @@ export interface ShellRegions {
    */
   statusCreate: HTMLElement;
   /**
+   * 🔴 **断り書きの隣の「保存領域の点検を開く」**(#1010 B)── 保存が止まったときだけ出る。
+   * ⚠ 押した先は `open-storage-check` の受け手(`binder.ts`)。出し入れは `status-open.ts`。
+   */
+  statusRescue: HTMLElement;
+  /**
    * 🔴 **未読のメッセージへの入口**(設計 doc §7、段②a)。⚠ 常設で置き、
    *   未読が 1 件以上あるときだけ `hidden` を外す(`main.ts` が state を見て書く)。
    */
@@ -173,7 +178,7 @@ const CREATE_BUTTONS: readonly { archetype: string; label: string }[] = [
   { archetype: 'smart', label: 'スマートフォルダ' },
   // 🔴 **テンプレート**(#196 / B-2)── 作れないと user は自分のテンプレートを持てない
   { archetype: 'snippet', label: 'テンプレート' },
-  { archetype: 'todo', label: 'Todo' },
+  { archetype: 'todo', label: 'チェックリスト' },
 ] as const;
 
 
@@ -1083,6 +1088,20 @@ export function buildShell(root: HTMLElement): ShellRegions {
   statusCreate.setAttribute('data-pkc-action', 'create-date-note');
   statusCreate.hidden = true;
   /**
+   * 🔴 **保存が止まった断り書きの隣の「保存領域の点検を開く」**(#1010 B)。
+   *
+   * 断り書きは「システム の 保存領域 の「保存領域の点検」で…」と道順を言うが、
+   * **押しても設定へ飛ばなかった**(読んで、自分で開いて、探す必要があった)。
+   * ⚠ 「開く」「元に戻す」と同じ作法 ── 常設で置いて要るときだけ出す(`status-open.ts` が
+   *   `hidden` を書く)。実行の口は `open-storage-check` の受け手 1 つ(`binder.ts`)。
+   */
+  const statusRescue = document.createElement('button');
+  statusRescue.type = 'button';
+  statusRescue.setAttribute('data-pkc-field', 'status-rescue');
+  statusRescue.setAttribute('data-pkc-action', 'open-storage-check');
+  statusRescue.textContent = '保存領域の点検を開く';
+  statusRescue.hidden = true;
+  /**
    * 🔴 **未読のメッセージへの入口**(設計 doc §7、段②a)。
    *
    * ⚠ 「開く」「元に戻す」と同じ作法 ── **常設で置いて、未読が 1 件以上あるときだけ
@@ -1125,7 +1144,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   tooNarrowOk.type = 'button';
   tooNarrowOk.setAttribute('data-pkc-field', 'too-narrow-ok');
   tooNarrow.append(tooNarrowText, tooNarrowOk);
-  status.append(statusText, statusOpen, statusUndo, statusCreate, statusMessages, tooNarrow);
+  status.append(statusText, statusOpen, statusUndo, statusCreate, statusRescue, statusMessages, tooNarrow);
 
   /**
    * 🔴 **収録中の帯**(#413)── 経過 + 概算の大きさ + 止める / 捨てる。
@@ -1272,6 +1291,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
     statusOpen,
     statusUndo,
     statusCreate,
+    statusRescue,
     statusMessages,
     tooNarrow,
     tooNarrowText,

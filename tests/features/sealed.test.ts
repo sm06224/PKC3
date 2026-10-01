@@ -125,6 +125,21 @@ describe('封印 ── 畳んであるが、壊してはいない', () => {
   });
 
   /**
+   * 🔴 **種類の名前は日本語の「チェックリスト」**(#1038 G19。英語の「Todo」だけが浮いていた)。
+   * ⚠ 見るのは**選ぶ一覧の `todo` の項目の字**と、**一覧・情報ペインが引く呼び名**の両方 ──
+   *   片方だけ直すと、作るときと一覧で名前が食い違う(2 か所に別々の表が在る)。
+   */
+  it('🔴 `todo` の項目の字は「チェックリスト」(作る一覧と呼び名の表が揃う)', async () => {
+    const opened = await buildShellWithSeal({ archetypes: [], views: [] });
+    const option = [...opened.querySelectorAll('[data-pkc-field="create-kind"] option')].find(
+      (o) => (o as HTMLOptionElement).value === 'todo',
+    );
+    expect(option?.textContent).toBe('チェックリスト');
+    const { archetypeLabel } = await import('@features/flavor/archetype-label');
+    expect(archetypeLabel('todo')).toBe('チェックリスト');
+  });
+
+  /**
    * 🔴 **解いたときに実際に戻るもの / 戻らないもの**。
    *
    * `sealed.ts` の散文が「1 語消すだけ」と嘘をついていたので、ここで機械化する。
