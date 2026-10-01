@@ -961,6 +961,31 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     defaults: [],
     note: '選んでいれば、選んだ範囲を $$ で囲みます',
   },
+  /**
+   * 🔴 **字下げ / 字下げを戻す**(#1166)。
+   *
+   * ⚠ **`Tab` は登録しない**(`Tab` は焦点の出口 ── 1 面の行の欄では「その行を保存」でもある)。
+   *   `Tab` でも字下げできるのは 2 列の本文の欄の**リスト行 / 複数行の選択のときだけ**で、
+   *   それは `binder.ts` が直に見る(この表の外)。**この 2 つは `Tab` を使えない面でも、
+   *   同じことをする鍵**である ── 1 面の行の欄(`row`)で字下げする入口はこれだけ。
+   * ⚠ `Mod+BracketRight` / `Mod+BracketLeft` は `Alt+…` の 2 つ(一覧 / 情報の列)とは別。
+   *   `editor` / `row` 文脈の中でぶつかる割当は無い(`tests/features/keymap.test.ts`)。
+   * 🔑 リストの項目なら記号の幅(`- ` は 2、`1. ` は 3)、普通の行なら 2 つ分の空白。
+   */
+  {
+    id: 'indent',
+    label: '字下げする',
+    contexts: ['editor', 'row'],
+    defaults: ['Mod+BracketRight'],
+    note: 'いまの行(選んでいれば選んだ行すべて)を内側へ入れます。リストなら入れ子になります',
+  },
+  {
+    id: 'outdent',
+    label: '字下げを戻す',
+    contexts: ['editor', 'row'],
+    defaults: ['Mod+BracketLeft'],
+    note: 'いまの行(選んでいれば選んだ行すべて)の字下げを 1 段戻します',
+  },
   // ── 追記の欄
   {
     id: 'append-send',

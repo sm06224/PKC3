@@ -46,6 +46,7 @@
 import { pad2 } from '@features/datetime/datetime-format';
 import { dateKey } from '@features/schedule/month-grid';
 import type { TextSelection } from '@features/markdown/text-ops';
+import { advanceFence } from '@features/markdown/list-renumber';
 
 /**
  * 🔴 **動的値は 4 つだけ**(設計 §4.6)。
@@ -130,17 +131,59 @@ export function snippetSlots(text: string): SnippetSlot[] {
 }
 
 /**
+ * 🔴 **コードの塊の中の印は、近くに居ないと `Tab` を取らない**(#1166)。
+ *
+ * ⚠ 印の探索は**本文の全部**を前へ向かって見る ── だから 500 字先の ``` の中に
+ *   `${HOME}`(シェルや JS のテンプレートリテラル。**普通に書く字**)があると、
+ *   リストの行でも段落でも **`Tab` が毎回そこへ飛び**、字下げも焦点移動も二度と効かない。
+ * 🔑 規則は「**fenced code の中の印は、caret が同じ塊の中に居るか、近く
+ *   (`FENCED_SLOT_REACH` 字以内)に在るときだけ印として数える**」の 1 つ。
+ *   - 塊の**外**の印は従来どおり(離れていても飛ぶ)── 長い雛形の 2 つ目の欄を殺さない
+ *   - 雛形が塊を含むとき(`題 ${題}` の直後に ``` + `${本文}`)は**近い**ので飛べる
+ *   - ⚠ 状態は持たない(「いま展開した雛形の範囲」を覚えると、間に打った字で全部ずれる ──
+ *     この file の頭の理由)。距離だけで決める
+ */
+export const FENCED_SLOT_REACH = 200;
+
+/** fenced code の塊(開く行の頭 〜 閉じる行の終わり)。閉じなければ本文の終わりまで。 */
+function fenceRegions(text: string): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  let fence = '';
+  let open = 0;
+  let at = 0;
+  for (const line of text.split('\n')) {
+    const after = advanceFence(fence, line);
+    if (fence === '' && after !== '') open = at;
+    if (fence !== '' && after === '') out.push([open, at + line.length]);
+    fence = after;
+    at += line.length + 1;
+  }
+  if (fence !== '') out.push([open, text.length]);
+  return out;
+}
+
+/**
  * 🔴 **次に埋める場所**(`Tab` が呼ぶ)。
  *
  * ⚠ **そのつど走査する**(位置を覚えない)── 覚えると、間に打った 1 文字で全部ずれる。
  * ⚠ 見つからなければ `null` ── 呼び側は **`Tab` を素通しする**(既定の焦点移動が
  *   生きる)。⚠ ここで常に握ると、編集欄から `Tab` で出られなくなる。
+ * ⚠ コードの塊の中の印は `FENCED_SLOT_REACH` の規則で絞る(上)。
  *
  * @param from この位置**以降**で探す(`caret` を渡す)
  */
 export function nextSnippetSlot(text: string, from: number): SnippetSlot | null {
   const slots = snippetSlots(text);
-  return slots.find((s) => s.start >= from) ?? null;
+  let fences: Array<[number, number]> | null = null;
+  for (const s of slots) {
+    if (s.start < from) continue;
+    fences ??= fenceRegions(text);
+    const r = fences.find(([a, b]) => s.start >= a && s.start <= b);
+    if (r === undefined) return s;
+    if (from >= r[0] && from <= r[1]) return s;
+    if (s.start - from <= FENCED_SLOT_REACH) return s;
+  }
+  return null;
 }
 
 /**

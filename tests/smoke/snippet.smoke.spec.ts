@@ -129,6 +129,35 @@ test('🔴 短縮語が当たらない Tab は、これまでどおり次へ移�
   const stillHere = await ta.evaluate((el) => document.activeElement === el);
   expect(stillHere, 'Tab を握ったまま(編集欄から出られない)').toBe(false);
 
+  /**
+   * 🔴 **リストの行の `Tab` は字下げ**(#1166)── 同じ道中に足す(起動は増やさない)。
+   * ⚠ 握るのは**リストの行 / 複数行の選択だけ**。握ったら**取り消し(Ctrl+Z)で 1 回で
+   *   戻る**こと ── `ta.value =` の代入だと履歴が切れる(実ブラウザでしか見えない)。
+   */
+  await ta.focus();
+  await ta.fill('- 牛乳\n- パン');
+  await ta.press('Control+End');
+  await ta.press('Tab');
+  await expect(ta, 'リストの行の Tab で字下げされていない').toHaveValue('- 牛乳\n  - パン');
+  expect(
+    await ta.evaluate((el) => document.activeElement === el),
+    'リストの行の Tab で焦点が出た(字下げしたのに既定の動作も走った)',
+  ).toBe(true);
+  await ta.press('Control+z');
+  await expect(ta, '字下げが取り消し 1 回で戻らない(履歴が切れている)').toHaveValue(
+    '- 牛乳\n- パン',
+  );
+  await ta.press('Control+End');
+  await ta.press('Tab');
+  await ta.press('Shift+Tab');
+  await expect(ta, 'Shift+Tab で戻らない').toHaveValue('- 牛乳\n- パン');
+  // 🔴 戻せる字下げが無いときの Shift+Tab は、焦点が出ていく(出口を塞がない)
+  await ta.press('Shift+Tab');
+  expect(
+    await ta.evaluate((el) => document.activeElement === el),
+    '字下げが無いのに Shift+Tab を握った(編集欄から出られない)',
+  ).toBe(false);
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 

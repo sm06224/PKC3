@@ -1130,6 +1130,36 @@ describe('RowSwap — 開放終端 と auto pair', () => {
     expect(ta.selectionEnd).toBe(3);
   });
 
+  /**
+   * 🔴 **Ctrl / Cmd を押した `[` は字ではない**(#1166)── 字下げを戻す `Ctrl+[` で
+   * `[]` が入った(実ブラウザで実測)。対照群:同じ `[` を素で打てば入る(上)/
+   * `Ctrl`+`Alt`(一部の配列の AltGr)で打った `[` は字なので補う。
+   */
+  it('🔴 auto pair: Ctrl / Cmd を押した `[` では補わない', () => {
+    for (const mod of [{ ctrlKey: true }, { metaKey: true }]) {
+      const r = rig();
+      openClick(findByText(r.host, 'p', '最初の段落。'));
+      const ta = box(r.host)!;
+      ta.value = '';
+      ta.setSelectionRange(0, 0);
+      const ev = new KeyboardEvent('keydown', { key: '[', bubbles: true, cancelable: true, ...mod });
+      ta.dispatchEvent(ev);
+      expect(ta.value, `${Object.keys(mod)[0]} で括弧が入った`).toBe('');
+    }
+  });
+
+  it('対照群:Ctrl+Alt(AltGr)で打った `[` は字なので補う', () => {
+    const r = rig();
+    openClick(findByText(r.host, 'p', '最初の段落。'));
+    const ta = box(r.host)!;
+    ta.value = '';
+    ta.setSelectionRange(0, 0);
+    ta.dispatchEvent(
+      new KeyboardEvent('keydown', { key: '[', bubbles: true, cancelable: true, ctrlKey: true, altKey: true }),
+    );
+    expect(ta.value).toBe('[]');
+  });
+
 });
 
 describe('RowSwap — 端で同じ向きに 2 回押すと隣の塊へ(#524。user 指示 2026-08-28)', () => {

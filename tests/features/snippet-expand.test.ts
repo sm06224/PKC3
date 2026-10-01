@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  FENCED_SLOT_REACH,
   fillSnippetVars,
   insertSnippet,
   nextSnippetSlot,
@@ -103,6 +104,42 @@ describe('次の場所(Tab)', () => {
     expect(typed.slice(nextSnippetSlot(typed, at)!.start, nextSnippetSlot(typed, at)!.end)).toBe(
       '${乙}',
     );
+  });
+});
+
+/**
+ * 🔴 **コードの塊の中の `${HOME}` は、遠くから `Tab` を取らない**(#1166)。
+ *
+ * ⚠ 直す前は本文の全部を前へ向かって探したので、500 字先の ``` の中の `${HOME}`
+ *   (シェルや JS に普通に書く字)が、リストの行でも段落でも `Tab` を毎回奪った。
+ */
+describe('コードの塊の中の印', () => {
+  const FAR = `- 牛乳\n${'あ'.repeat(500)}\n\`\`\`sh\necho \${HOME}\n\`\`\`\n`;
+
+  it('🔴 500 字先の塊の中の ${HOME} は、caret が外に居れば印にならない', () => {
+    expect(nextSnippetSlot(FAR, 0)).toBe(null);
+    expect(nextSnippetSlot(FAR, 4)).toBe(null);
+  });
+
+  it('🔴 対照群:同じ印が塊の外(離れていても)なら従来どおり飛ぶ', () => {
+    const t = `- 牛乳\n${'あ'.repeat(500)}\n\${HOME}\n`;
+    expect(nextSnippetSlot(t, 0)?.label).toBe('HOME');
+  });
+
+  it('対照群:近ければ(雛形が塊を含む形)塊の中の印へも飛べる', () => {
+    const t = '題 ${題}\n```\n${本文}\n```';
+    expect(nextSnippetSlot(t, t.indexOf('${題}') + 5)?.label).toBe('本文');
+    expect(t.indexOf('${本文}') - 5).toBeLessThan(FENCED_SLOT_REACH);
+  });
+
+  it('対照群:caret が同じ塊の中に居れば、離れていても次の印へ飛べる', () => {
+    const t = `\`\`\`\n\${a}\n${'x'.repeat(500)}\n\${b}\n\`\`\``;
+    expect(nextSnippetSlot(t, t.indexOf('${a}') + 4)?.label).toBe('b');
+  });
+
+  it('塊の外の印は、手前の遠い塊に邪魔されずに拾う', () => {
+    const t = `前${'あ'.repeat(300)}\n\`\`\`\n\${x}\n\`\`\`\n${'あ'.repeat(500)}\n\${外}`;
+    expect(nextSnippetSlot(t, 0)?.label).toBe('外');
   });
 });
 

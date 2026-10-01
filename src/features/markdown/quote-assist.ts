@@ -1,4 +1,4 @@
-import { advanceFence } from './list-renumber';
+import { LIST_LEAD, THEMATIC_BREAK, advanceFence } from './list-renumber';
 
 /**
  * 🔴 **引用(`>`)を書き続けられるようにする**(#396、PKC2 領域 6 の移植)。
@@ -88,10 +88,10 @@ interface ListMarker {
  * ⚠ **水平線は除く**(`* * *` は `*` + 空白 + 中身に見えるが、記号ではない)。
  */
 function readListMarker(rest: string): ListMarker | null {
-  if (/^\s*([-*_])(?:\s*\1){2,}\s*$/.test(rest)) return null;
+  if (THEMATIC_BREAK.test(rest)) return null;
   // ⚠ 記号の後ろの空白は**必須**(`-` や `1.` だけを打っている途中で Enter を押しても、
   //   それは記号ではない ── 消したり続けたりしない)
-  const m = /^(\s*)([-*+]|\d+[.)])(\s+)/.exec(rest);
+  const m = LIST_LEAD.exec(rest);
   if (m === null) return null;
   const indent = m[1]!;
   const mark = m[2]!;
