@@ -56,6 +56,7 @@ import { appCodeCollapse } from '@adapter/ui/render/code-collapse';
 import { appInlineCodeCopy } from '@adapter/ui/render/inline-code-copy';
 import { appPhoneLinks } from '@adapter/ui/render/phone-links';
 import { appDateLinks } from '@adapter/ui/render/date-links';
+import { appColorSwatch } from '@adapter/ui/render/color-swatch';
 import { appRelativeDays, syncRelativeDays, watchRelativeDays } from '@adapter/ui/render/relative-days';
 import { appPanes, applyPaneVisibility } from '@adapter/ui/render/pane-visibility';
 import { markCollectionView } from '@adapter/ui/render/collection-bar';
@@ -3781,6 +3782,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     setRelativeDays: (on) => {
       appRelativeDays.setEnabled(on);
       syncRelativeDays(document);
+    },
+    /**
+     * 🔴 **本文の色コードの左に色の見本を出すか**(#1224)。⚠ 見本は**描くときに焼く**ので、
+     *   `setDateLinks` と同じく**描き直しまでが 1 組**(保存だけでは、いま読んでいるノートが変わらない)。
+     */
+    setColorSwatch: (on) => {
+      appColorSwatch.setEnabled(on);
+      center.invalidateDetail();
+      center.render(dispatcher.getState());
     },
     /**
      * 🔴 **リンク先のノートが無いリンクの点線**(#1174 段①)。⚠ `setPhoneLinks` と同じく

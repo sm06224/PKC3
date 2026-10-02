@@ -253,7 +253,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    */
   'search-jump-end', 'search-jump-next', 'search-jump-prev',
   'select-entry', 'set-alarm-enabled', 'set-app-group', 'set-app-icon',
-  'set-app-open-target', 'set-browse', 'set-code-collapse', 'set-column-rule', 'set-date-links', 'set-editor-mode', 'set-entry-date',
+  'set-app-open-target', 'set-browse', 'set-code-collapse', 'set-color-swatch', 'set-column-rule', 'set-date-links', 'set-editor-mode', 'set-entry-date',
   'set-entry-sort', 'set-external-images', 'set-flag', 'set-inline-code-copy', 'set-notices-enabled', 'set-open-in-edit',
   'set-missing-links', 'set-open-place', 'set-page-format', 'set-paste-source', 'set-phone-links', 'set-prose-align',
   'set-query-key', 'set-read-columns', 'set-relative-days', 'set-sql-engine', 'set-sql-source', 'set-sql-text', 'set-tag-badge',
@@ -654,12 +654,15 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-01(#1213): 行を上 / 下へ動かす(`move-line-up` / `move-line-down`)を `KEY_COMMANDS` へ
       //   登記。押しボタンを持たない(`Alt+↑` / `Alt+↓`)ので受け手は増えない。
       //   `registered` +2 / `total` +2 / `outsideActionsTable` +2。
-      total: 361,
-      receivers: 302,
+      // ⚠ 2026-10-02(#1224): 本文の色コードの見本を出す入切(`set-color-swatch`)で受け手 +1 /
+      //   `total` +1 / `unregistered` +1。登記は増えない ── 押し口は設定の checkbox にしか無く、
+      //   鍵も持たない(`set-relative-days` と同じ形)。
+      total: 362,
+      receivers: 303,
       registered: 98,
       both: 39,
       outsideActionsTable: 59,
-      unregistered: 263,
+      unregistered: 264,
     });
   });
 

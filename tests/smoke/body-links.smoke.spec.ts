@@ -47,7 +47,10 @@ test('🔴 本文の entry: リンクを押すと、そのノートが開く(遷
   await page.locator('[data-pkc-field="editor-title"]').fill('リンク元');
   await page
     .locator('[data-pkc-field="editor-body"]')
-    .fill(`[あちらへ](entry:${targetLid ?? ''})\n\n@2026-10-15 と @2026-10-16 の件\n`);
+    // 🔴 3 行目は色コード(#1224)── 起動を増やさず、同じ「リンク元」で見本を見る
+    .fill(
+      `[あちらへ](entry:${targetLid ?? ''})\n\n@2026-10-15 と @2026-10-16 の件\n\n色は \`#3b82f6\` と \`#FFF\` と \`#3b82f6\` です\n`,
+    );
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
   // 🔴 焼く側が本当に action を付けている(unit の手組みが嘘でないこと)
@@ -131,6 +134,54 @@ test('🔴 本文の entry: リンクを押すと、そのノートが開く(遷
   expect(rel.color, '添え字が本文の字と同じ濃さ(薄くない)').not.toBe(rel.parentColor);
   expect(rel.display, '添え字が inline-block でない(日付の点線の下線が添え字へ伸びる)').toBe('inline-block');
   expect(rel.text, '添え字が本文の字に入っている(選ぶと・コピーすると入る)').toBe('@2026-10-15');
+
+  /**
+   * 🔴 **色コードの左の見本**(#1224)。属性の有無だけでは「画面に色が出ているか」は言えない ──
+   * 計算後の見た目で見る:
+   *   ① 3 つ出ている(`#3b82f6` / `#FFF` / `#3b82f6`)。色は **page の `<code>` の字から**採る
+   *      (期待を実装の式と同じにしない)
+   *   ② 塗りは字の指定の色(`#3b82f6` = rgb(59, 130, 246)、`#FFF` = rgb(255, 255, 255))で、
+   *      文字の高さに合わせた四角(幅 ≒ 高さ ≒ 0.9em)・`inline-block`
+   *   ③ **字を持たない**(段落の `textContent` は見本を足す前と同じ ── 選んでもコピーしても入らない)
+   */
+  const swatchLook = await page.evaluate(() => {
+    const p = [...document.querySelectorAll('[data-pkc-field="detail-body"] p')].find((x) =>
+      (x.textContent ?? '').startsWith('色は'),
+    );
+    if (!p) return null;
+    const sws = [...p.querySelectorAll<HTMLElement>('[data-pkc-color-swatch]')];
+    return {
+      text: p.textContent,
+      codes: [...p.querySelectorAll('code')].map((c) => c.textContent),
+      sws: sws.map((e) => {
+        const cs = getComputedStyle(e);
+        return {
+          bg: cs.backgroundColor,
+          w: parseFloat(cs.width),
+          h: parseFloat(cs.height),
+          fs: parseFloat(getComputedStyle(e.parentElement!).fontSize),
+          display: cs.display,
+          own: e.textContent,
+          next: e.nextElementSibling?.tagName ?? '',
+        };
+      }),
+    };
+  });
+  expect(swatchLook, '色コードの段落が出ていない(fixture の空振り)').not.toBeNull();
+  expect(swatchLook!.codes, '<code> の字が想定と違う').toEqual(['#3b82f6', '#FFF', '#3b82f6']);
+  expect(swatchLook!.text, '見本が段落の字に入っている').toBe('色は #3b82f6 と #FFF と #3b82f6 です');
+  expect(swatchLook!.sws.map((e) => e.bg)).toEqual([
+    'rgb(59, 130, 246)',
+    'rgb(255, 255, 255)',
+    'rgb(59, 130, 246)',
+  ]);
+  for (const e of swatchLook!.sws) {
+    expect(e.display, '見本が inline-block でない').toBe('inline-block');
+    expect(Math.abs(e.w - e.fs * 0.9), '幅が 0.9em でない').toBeLessThan(1);
+    expect(Math.abs(e.h - e.fs * 0.9), '高さが 0.9em でない').toBeLessThan(1);
+    expect(e.own, '見本が字を持っている').toBe('');
+    expect(e.next, '見本の右がコードでない(左に置けていない)').toBe('CODE');
+  }
 
   // ① 在る日 ── そのノートが開く(押した日付の「ノートを開く」に見える)
   await clickReal(page, day15);

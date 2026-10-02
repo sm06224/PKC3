@@ -75,6 +75,7 @@ import {
 } from '../link/card-presentation';
 import { findPhones } from '../contact/phone-link';
 import { allDateTokens, readLineDate } from '../schedule/line-date';
+import { isColorCode } from './color-code';
 
 const md = new MarkdownIt({
   html: false,          // Disable HTML tags in source (XSS safety)
@@ -2752,6 +2753,49 @@ md.core.ruler.after('inline', 'pkc-date-link', function (state) {
   return true;
 });
 
+/**
+ * 🔴 **本文のバッククォートで囲んだ色コードの左に、色の見本を置く**(#1224)。
+ *
+ * > `` `#3b82f6` `` と書いた user が、**どんな色かをコードの隣の小さな四角で見られる**。
+ *
+ * ⚠ **既定は切**(`env.colorSwatches`)── 読む面(`detail.ts`)だけが設定に従って渡す。
+ *   書き出した HTML・Word・印刷・別窓・プレビューは**1 バイトも変わらない**
+ *   (空の `<span>` は Word で落ち、紙には載せたくない ── 色は `<code>` の字で足りる)。
+ * ⚠ 出すのは**インラインコードの中身が色コードちょうど**のときだけ(地の文の `#3b82f6` と、
+ *   コード囲み(```)の中は `code_inline` ではないので自然に外れる)。判定は `color-code.ts` の 1 本。
+ * ⚠ **リンクの中のコードには出さない**(押すとリンクへ飛ぶのか色を選ぶのか分からない。
+ *   `inline-code-copy` が `a > code` を外すのと同じ)。
+ * 🔑 **見本の要素は字を持たない**(`textContent` / 選択 / コピーに入らない ── CLAUDE.md §10)。
+ *   色は属性(`--pkc-swatch`)で渡し、塗るのは CSS(`.pkc-color-swatch`)。
+ */
+md.core.ruler.after('inline', 'pkc-color-swatch', function (state) {
+  if ((state.env as { colorSwatches?: boolean }).colorSwatches !== true) return true;
+  for (const token of state.tokens) {
+    if (token.type !== 'inline') continue;
+    const children = token.children;
+    if (!children) continue;
+    const out: typeof children = [];
+    let inLink = 0;
+    let changed = false;
+    for (const t of children) {
+      if (t.type === 'link_open') inLink += 1;
+      else if (t.type === 'link_close') inLink -= 1;
+      if (t.type === 'code_inline' && inLink === 0 && isColorCode(t.content)) {
+        const tok = new state.Token('html_inline', '', 0);
+        tok.content =
+          `<span class="pkc-color-swatch" data-pkc-color-swatch ` +
+          `style="--pkc-swatch: ${escapeHtmlAttr(t.content)}" aria-hidden="true"></span>`;
+        out.push(tok);
+        changed = true;
+      }
+      out.push(t);
+    }
+    // ⚠ 当たらなかった段落は**触らない**(token の同一性を無駄に壊さない)
+    if (changed) token.children = out;
+  }
+  return true;
+});
+
 md.core.ruler.after('inline', 'pkc-task-list', function (state) {
   const tokens = state.tokens;
   let taskIndex = 0;
@@ -2977,6 +3021,15 @@ export interface RenderMarkdownOptions {
    *   (`renderMarkdown` の env 組み立て)。
    */
   readonly interactiveDates?: boolean;
+  /**
+   * 🔴 **本文のバッククォートで囲んだ色コードの左に、色の見本を出すか**(#1224。既定 `false`)。
+   *
+   * ⚠ **読む面だけ**が設定に従って渡す。書き出した HTML・Word・印刷・別窓・プレビューは
+   *   渡さない = 見本の要素は 1 つも出ず、**出力は 1 バイトも変わらない**。
+   * ⚠ ワーカー越しの描画では `opts` の**正規化の 1 行**を通らないと黙って落ちる
+   *   (`renderMarkdown` の env 組み立て)。
+   */
+  readonly colorSwatches?: boolean;
   /**
    * 🔴 **チェックの印が指す行を、原文の行へ戻すためのずらし**(N1)。
    *
@@ -6036,6 +6089,7 @@ export function renderMarkdown(
     interactiveTags: boolean;
     phoneLinks: boolean;
     interactiveDates: boolean;
+    colorSwatches: boolean;
     taskLineOffset: number;
     lineMap?: number[];
     fenceAssets?: Readonly<Record<string, string>>;
@@ -6068,6 +6122,8 @@ export function renderMarkdown(
     phoneLinks: opts.phoneLinks === true,
     // 🔴 本文の `@日付` を押せる字にするか(#1169)。既定は押せない
     interactiveDates: opts.interactiveDates === true,
+    // 🔴 色コードの左に見本を出すか(#1224)。既定は出さない
+    colorSwatches: opts.colorSwatches === true,
     // 🔴 剥がして描く面だけがずらす(既定 0)。理由は上の option の注記
     taskLineOffset: Number.isInteger(opts.taskLineOffset) ? (opts.taskLineOffset as number) : 0,
   };

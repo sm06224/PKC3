@@ -74,6 +74,7 @@ const PORTABLE_FIELD_OF: Record<string, string> = {
   'pkc3.phone-links': 'phone-links',
   'pkc3.date-links': 'date-links',
   'pkc3.relative-days': 'relative-days',
+  'pkc3.color-swatch': 'color-swatch',
   'pkc3.missing-links': 'missing-links',
   'pkc3.code-collapse': 'code-collapse',
   'pkc3.inline-code-copy': 'inline-code-copy',
