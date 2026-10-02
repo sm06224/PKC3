@@ -1650,6 +1650,51 @@ test('🔴 「処理(ワーカー)」の計器区画は無く、メッセージ 
     '保存領域の節に押せる物が無い',
   ).toBeGreaterThan(0);
 
+  /**
+   * ⑤ 🔴 **保存領域の大きさ / 縮める**(#999)── 新しい起動は足さず、④と同じ道中で見る。
+   *   見出しと押し口が在り、字が「調べています…」のまま残らず(見込みか押せない理由に
+   *   変わり)、押せないなら**理由が読める**。押せるなら押して、処理のメッセージに
+   *   結果が積まれる(空の DB は「縮める分がありません」で押せない側のはず)。
+   */
+  const vacuum = repair.locator('[data-pkc-region="storage-vacuum"]');
+  await expect(vacuum, '「保存領域の大きさ」の区画が保存領域の節に無い').toBeVisible();
+  await expect(vacuum.locator('h4')).toHaveText('保存領域の大きさ');
+  const vacuumRun = vacuum.locator('[data-pkc-action="storage-vacuum"]');
+  await expect(vacuumRun, '「縮める」ボタンが無い').toBeVisible();
+  await expect(vacuumRun.locator('[data-pkc-field="label"]')).toHaveText('縮める');
+  const vacuumNote = vacuum.locator('[data-pkc-field="vacuum-note"]');
+  // 測り終わると「調べています…」から別の字へ変わる(測れなかった字も「変わった」側)
+  await expect(vacuumNote, '字が「調べています…」のまま残っている').not.toContainText(
+    '調べています',
+    { timeout: 10_000 },
+  );
+  const vacuumText = ((await vacuumNote.textContent()) ?? '').trim();
+  expect(vacuumText.length, '押す前の字(見込み / 押せない理由)が空').toBeGreaterThan(0);
+  if (await vacuumRun.isDisabled()) {
+    // 押せないときは、理由が読める(押せないのに字が無い = 行き止まり)
+    expect(vacuumText, `押せないのに理由が読めない(${vacuumText})`).toMatch(
+      /縮める分がありません|空きが足りない|測れませんでした|縮められません|縮めています/,
+    );
+  } else {
+    expect(vacuumText, `押せるのに見込みが読めない(${vacuumText})`).toContain('見込み');
+    await clickReal(page, vacuumRun);
+    // 結果は処理のメッセージへ積まれる(「処理の記録」のノートを開いて読む)。
+    // ⚠ 処理(job)の記録は 5 秒(または 50 件)ごとにまとめて書く(`message-post.ts`)ので、
+    //   押した直後に開くと**まだ無い**(実測)。開いたノートは自動では読み直さないので、
+    //   束ねの間隔を越えてから開く。
+    await page.waitForTimeout(6_000);
+    await clickReal(
+      page,
+      page.locator('[data-pkc-view-pane="settings"] [data-pkc-action="open-messages"]', {
+        hasText: '処理の記録を開く',
+      }),
+    );
+    await expect(
+      page.locator('[data-pkc-view-pane="detail"]'),
+      '縮めた結果が処理のメッセージに積まれない',
+    ).toContainText('保存領域を縮めました', { timeout: 20_000 });
+  }
+
   expect(errors).toEqual([]);
 });
 

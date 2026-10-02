@@ -140,4 +140,17 @@ describe('空きが無いときの書き込み(#971 段②)', () => {
     ).rejects.toThrow(WRITE_QUOTA_REFUSAL);
     await expect(request({ op: 'optimizeIndexes' })).rejects.toThrow(WRITE_QUOTA_REFUSAL);
   });
+
+  /**
+   * 🔴 **保存領域を縮めるのも、床を割った端末には打たない**(#999)。
+   * ⚠ 床(64MB)は最後の網で、「いまの大きさと同じだけの空きが在るか」は押す前に
+   *   `vacuumBlock`(`tests/features/vacuum.test.ts`)が見る。
+   */
+  it('🔴 一杯のとき、保存領域を縮める操作は断られる(作業中に一時的に増えるため)', async () => {
+    await expect(
+      request({ op: 'upsertEntry', cid: 'c1', entry: entry('k-pre2') }),
+      '前提: 一杯の状態が続いていない',
+    ).rejects.toThrow(WRITE_QUOTA_REFUSAL);
+    await expect(request({ op: 'vacuum' })).rejects.toThrow(WRITE_QUOTA_REFUSAL);
+  });
 });

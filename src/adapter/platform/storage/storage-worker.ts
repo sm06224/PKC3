@@ -3884,6 +3884,23 @@ const handlers: Handlers = {
     return { elapsedMs, before, after: measureGauge(database) };
   },
   /**
+   * 🔴 **保存領域を縮める**(#999。Gemini 裁定 A)── `VACUUM` を 1 回。
+   *
+   * ⚠ **押した user からしか来ない**(自動の係は打たない ── `optimizeIndexes` にも足さない)。
+   * ⚠ 同期の handler なので**終わるまで他の op は待つ**(= その間は保存できない。
+   *   呼び側が長さの見込みを先に言う ── `vacuumEstimateText`)。
+   * 🔑 途中でタブが殺されても巻き戻る(#1218、`reserved-lock.ts`)。
+   * 🔑 前後の計器は `optimizeIndexes` と同じ口(`measureGauge`)で採る。
+   */
+  vacuum: () => {
+    const database = need();
+    const before = measureGauge(database);
+    const started = Date.now();
+    database.exec('VACUUM');
+    const elapsedMs = Date.now() - started;
+    return { elapsedMs, before, after: measureGauge(database) };
+  },
+  /**
    * 🔴 **中身が壊れていないかを調べる**(#971 段③)。
    *
    * ⚠ **時間の上限を掛けない** ── 数 GB では分の単位になるが、ここで切ると

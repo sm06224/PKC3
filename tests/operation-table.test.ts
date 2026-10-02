@@ -311,7 +311,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    *   名前が引けるようになった(受け手は前から在った ── 本文の上のボタン)。
    */
   'start-audio-capture', 'start-screen-capture', 'start-tile-reorder',
-  'start-timer', 'stop-capture', 'storage-profile', 'swap-open', 'table-to-csv',
+  'start-timer', 'stop-capture', 'storage-profile', 'storage-vacuum', 'swap-open', 'table-to-csv',
   'table-to-markdown',
   /**
    * ⚠ **2026-10-01(#1173)** ── 右クリックしたチェックリストを丸ごとそろえる 2 つ。
@@ -446,6 +446,9 @@ describe('操作の全数台帳(#582 段①)', () => {
       outsideActionsTable: x.outsideActionsTable.length,
       unregistered: x.unregistered,
     }).toEqual({
+      // ⚠ 2026-10-02(#999): システム → 保存領域の「縮める」(`storage-vacuum`)で受け手 +1 ── 登記は増えない
+      //   (押し口は設定の欄にしか無く、鍵も持たない)。`receivers` +1 / `total` +1 / `unregistered` +1。
+      //   押した所から何も要らない N(`storage-profile` と同じ仕分け)
       // ⚠ 2026-10-02(#1264 §2 欠陥 4-a): PC の帯の「更新」(`pc-refresh-folder`)で受け手 +1 ── 登記は増えない
       //   (押し口は PC のタブの帯にしか無く、鍵も持たない)。`receivers` +1 / `total` +1 / `unregistered` +1。
       //   「別のフォルダ…」は既に在る `pc-pick-folder` を呼ぶので数は動かない。
@@ -699,12 +702,12 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-02(#215 段①②): 左の列の「PC」のタブの押し口 4 つ(`pc-pick-folder` / `pc-cut-folder` / `pc-more` /
       //   `pc-open-file`)で受け手 +4 ── 登記は増えない(押し口はタブの中にしか無く、鍵も持たない)。
       //   `receivers` +4 / `total` +4 / `unregistered` +4。
-      total: 374,
-      receivers: 315,
+      total: 375,
+      receivers: 316,
       registered: 98,
       both: 39,
       outsideActionsTable: 59,
-      unregistered: 276,
+      unregistered: 277,
     });
   });
 

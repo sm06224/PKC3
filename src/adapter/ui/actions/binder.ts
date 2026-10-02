@@ -322,6 +322,7 @@ import { copyMarkdownAndHtml, copyPlainText } from '@adapter/platform/clipboard'
 import { appCopyHistory } from '@adapter/platform/copy-history-store';
 // 🔑 メッセージの口・字は 1 か所から引く(設計 doc §7、段②a。CLAUDE.md §7)
 import { appMessagePost, setMessageCap } from '@adapter/platform/message-post';
+import { appStorageVacuum } from '@adapter/platform/storage/vacuum-run';
 import {
   isSystemMessageLid,
   MESSAGE_CAP_OPTIONS,
@@ -8919,6 +8920,23 @@ const ACTIONS: Record<string, ActionHandler> = {
         dispatcher.dispatch({ type: 'OP_FAILED', error: `調べられませんでした: ${String(e)}` });
       },
     );
+  },
+  /**
+   * 🔴 **保存領域を縮める**(#999。Gemini 裁定 A)。
+   *
+   * ⚠ **押した user だけが打つ** ── 自動の係はこの口を呼ばない(原文 pin が見張る)。
+   * ⚠ **判断はここに無い** ── 押せるか / 空きが足りるか / 順番(書込の列に載せる)/
+   *   処理の記録への積みは `StorageVacuum`(`platform/storage/vacuum-run.ts`)が持つ。
+   *   ここは**結果の字を画面の知らせへ出すだけ**である。
+   * ⚠ 押せない物は画面側が `disabled` にしているが、**それでも来たら理由を言う**
+   *   (黙って落とすと dead click になる)。
+   */
+  'storage-vacuum': (dispatcher, _target, services) => {
+    void appStorageVacuum.run().then((r) => {
+      // 🔑 成功は一時の知らせ(エラーの行ではない)/ 断りと失敗はエラーの行
+      if (r.kind === 'done') services.showStatus?.(r.text);
+      else dispatcher.dispatch({ type: 'OP_FAILED', error: r.text });
+    });
   },
   /**
    * 🔴 **拾えるだけ取り出す**(#971 段③)。

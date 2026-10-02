@@ -86,6 +86,10 @@ export const QUOTA_BLOCKED_OPS: readonly string[] = [
   // 🔴 索引の片づけ(#999 段③)── 畳む途中で新しい段を先に書くので**一時的に増える**。
   //    user が押した操作ではなく自動で打つので、空きが無い端末には打たない側へ倒す
   'optimizeIndexes',
+  // 🔴 保存領域を縮める(#999)── 作業中に**いまの大きさと同じだけ**一時的に増える。
+  //    ⚠ ここは床(64MB)で断るだけ ── 「いまの大きさぶんの空きが在るか」は
+  //    押す前に `features/storage/vacuum.ts` の `vacuumBlock` が見る(押せなくする)
+  'vacuum',
 ];
 
 /**
@@ -131,11 +135,25 @@ export function shouldRecheck(input: {
  *   倒し方が逆で、理由も逆である(あちらは書くほど壊れが広がるので止める側が安全)。
  */
 export function refuseWrite(sample: QuotaSample): boolean {
+  const room = quotaRoom(sample);
+  if (room === null) return false;
+  return room < WRITE_FLOOR_BYTES;
+}
+
+/**
+ * 🔴 **ブラウザが言う、あと置ける量**(`quota − usage`)。
+ *
+ * ⚠ **読めないときは `null`**(0 と決めつけない)── 「読めない」を「空きが無い」と
+ *   取り違えると、測れない端末で保存も縮めるのもできなくなる。
+ * 🔑 **空きを問う門は、全部ここを通る**(`refuseWrite` = 増やす書き込み /
+ *   `vacuumBlock` = 縮める操作)── 「読めない端末では断らない」の判定を 2 か所に書かない。
+ */
+export function quotaRoom(sample: QuotaSample): number | null {
   const { usage, quota } = sample;
-  if (usage === undefined || quota === undefined) return false;
-  if (!Number.isFinite(usage) || !Number.isFinite(quota)) return false;
-  if (quota <= 0) return false;
-  return quota - usage < WRITE_FLOOR_BYTES;
+  if (usage === undefined || quota === undefined) return null;
+  if (!Number.isFinite(usage) || !Number.isFinite(quota)) return null;
+  if (quota <= 0) return null;
+  return quota - usage;
 }
 
 /**
