@@ -183,6 +183,50 @@ test('🔴 本文の entry: リンクを押すと、そのノートが開く(遷
     expect(e.next, '見本の右がコードでない(左に置けていない)').toBe('CODE');
   }
 
+  /**
+   * 🔴 **見本を押して色を選び直すと、本文のその 1 つのコードだけが変わる**(#1224 段②)。
+   *
+   * ⚠ 選ぶ窓(`<input type="color">`)は headless では**開いて選ぶ操作ができない**ので、押して出来た
+   *   窓の入力へ `input` → `change` を**合成して撃つ**(本物の窓を閉じたときと同じ 2 つの出来事)。
+   *   見ているのは「押す → 窓が出る → `change` 1 回 → 本文が書き換わり、見本が新しい色で描き直される」の配線。
+   *   ① 押せない綴り(`#FFF`)は押しても窓が出ない ② 3 つ目(同じ `#3b82f6` の 2 つ目)を押すと、
+   *   **3 つ目だけ**が変わる(1 つ目はそのまま)③ `input` だけでは書かない(色を探す間は何も変わらない)
+   */
+  const codesOf = (): Promise<string[]> =>
+    page.evaluate(() => {
+      const p = [...document.querySelectorAll('[data-pkc-field="detail-body"] p')].find((x) =>
+        (x.textContent ?? '').startsWith('色は'),
+      );
+      return [...(p?.querySelectorAll('code') ?? [])].map((c) => c.textContent ?? '');
+    });
+  const swatchAt = (i: number) =>
+    page.locator('[data-pkc-field="detail-body"] [data-pkc-color-swatch]').nth(i);
+  await expect(swatchAt(1), '押せない綴りが button になっている').not.toHaveAttribute('role', 'button');
+  await clickReal(page, swatchAt(1));
+  await expect(page.locator('input[data-pkc-field="color-pick"]'), '押せない綴りで窓が開いた').toHaveCount(0);
+  await clickReal(page, swatchAt(2));
+  await expect(page.locator('input[data-pkc-field="color-pick"]'), '押しても色を選ぶ窓が出ない').toHaveCount(1);
+  await page.evaluate(() => {
+    const input = document.querySelector<HTMLInputElement>('input[data-pkc-field="color-pick"]')!;
+    input.value = '#aa0000';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  // ③ `input` だけでは書かない
+  expect(await codesOf(), '色を探している最中(input)に書いている').toEqual(['#3b82f6', '#FFF', '#3b82f6']);
+  await page.evaluate(() => {
+    const input = document.querySelector<HTMLInputElement>('input[data-pkc-field="color-pick"]')!;
+    input.value = '#10b981';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  // ② 3 つ目だけが変わり、見本も新しい色で描き直される
+  await expect
+    .poll(codesOf, { message: '押した見本のコードが書き換わらない' })
+    .toEqual(['#3b82f6', '#FFF', '#10b981']);
+  await expect(swatchAt(2)).toHaveCSS('background-color', 'rgb(16, 185, 129)');
+  await expect(swatchAt(0), '押していない 1 つ目まで変わった').toHaveCSS('background-color', 'rgb(59, 130, 246)');
+  await expect(page.locator('input[data-pkc-field="color-pick"]'), '使い終わった窓が残っている').toHaveCount(0);
+
   // ① 在る日 ── そのノートが開く(押した日付の「ノートを開く」に見える)
   await clickReal(page, day15);
   await expect(page.locator('[data-pkc-field="detail-body"]')).toContainText('着いた先の本文');

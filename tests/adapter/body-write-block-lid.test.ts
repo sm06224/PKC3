@@ -102,6 +102,12 @@ interface CaseSpec {
 const CASES: CaseSpec[] = [
   { name: 'TOGGLE_TASK', action: (lid) => ({ type: 'TOGGLE_TASK', lid, line: 0 }), rewriteKind: 'task' },
   {
+    // #1224: 色の見本を押して色を直す。断りは他の書換と同じ 1 本の門(新しい断り文を作らない)
+    name: 'SET_COLOR_CODE',
+    action: (lid) => ({ type: 'SET_COLOR_CODE', lid, line: 0, nth: 0, from: '#3b82f6', to: '#ef4444' }),
+    rewriteKind: 'color',
+  },
+  {
     name: 'SET_TASK_RUN',
     action: (lid) => ({ type: 'SET_TASK_RUN', lid, lines: [0], to: 'done' }),
     rewriteKind: 'task-run',

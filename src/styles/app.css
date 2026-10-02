@@ -3453,8 +3453,18 @@ li[data-pkc-row-slot] {
   margin-right: 0.3em;
   border: 1px solid var(--border);
   border-radius: 0.2em;
-  background: var(--pkc-swatch);
+  background: var(--pkc-swatch, transparent);
   box-sizing: border-box;
+}
+/* 🔴 押して色を直せる見本(6 桁小文字。#1224 段②)だけ、押せる形に見せる。
+   ⚠ 押せない見本(3 桁・大文字・8 桁)は飾りのまま ── ポインタも枠も変えない。 */
+[data-pkc-prose] .pkc-color-swatch[role='button'] {
+  cursor: pointer;
+}
+[data-pkc-prose] .pkc-color-swatch[role='button']:hover,
+[data-pkc-prose] .pkc-color-swatch[role='button']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 /* 取り込み待ちの器(まだ実体が入っていないことが分かる形にする) */

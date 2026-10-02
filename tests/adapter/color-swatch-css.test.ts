@@ -19,12 +19,27 @@ describe('色の見本の見た目(#1224)', () => {
     const blocks = blocksFor(css, SEL);
     expect(blocks.length, '見本の規則が無い(空振り)').toBe(1);
     const b = blocks[0]!;
-    expect(b).toMatch(decl('background', 'var\\(--pkc-swatch\\)'));
+    expect(b).toMatch(decl('background', 'var\\(--pkc-swatch, transparent\\)'));
     expect(b).toMatch(decl('display', 'inline-block'));
     expect(b).toMatch(decl('width', '0\\.9em'));
     expect(b).toMatch(decl('height', '0\\.9em'));
     // 白や黒の見本が地に溶けない縁(無彩色のトークン)
     expect(b).toMatch(decl('border', '1px solid var\\(--border\\)'));
+  });
+
+  it('🔴 押して直せる見本(role=button)だけ、ポインタが変わり、触れる・焦点が乗ると枠が出る', () => {
+    const btn = "[data-pkc-prose] .pkc-color-swatch[role='button']";
+    const base = blocksFor(css, btn);
+    expect(base.length, '押せる見本の規則が無い(空振り)').toBe(1);
+    expect(base[0]).toMatch(decl('cursor', 'pointer'));
+    // 触れたときと、キーボードで焦点が乗ったときの両方に、色の情報でない枠(accent)
+    const hover = blocksFor(css, `${btn}:hover`);
+    const focus = blocksFor(css, `${btn}:focus-visible`);
+    expect(hover.length, 'hover の規則が無い').toBe(1);
+    expect(focus.length, 'focus-visible の規則が無い').toBe(1);
+    expect(hover[0]).toMatch(decl('outline', '2px solid var\\(--accent\\)'));
+    // 押せない見本(role なし)にはポインタを付けない ── 基本の規則は cursor を持たない
+    expect(blocksFor(css, SEL)[0]).not.toMatch(/cursor/);
   });
 
   it('🔴 書き出しの CSS に焼かれない(`.pkc-md-rendered` 起点でない = 読む面の印だけが持つ)', () => {

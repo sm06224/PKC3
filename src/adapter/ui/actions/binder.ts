@@ -14,6 +14,7 @@
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { lidOfNode } from './lid-of-node';
+import { isEditableColor } from '@features/markdown/color-code';
 import type { DroppedAt } from './asset-into-note';
 import { deliveredEntryOf, type ExtDeliveredEntry } from '@features/extension/ext-delivery';
 import { isLaunchableUrl, tileSelectsEntry } from '@features/launcher/tiles';
@@ -1935,6 +1936,12 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
    * 🔑 抜けを機械で止める検査は `tests/repo-hygiene.test.ts`。
    */
   'toggle-task',
+  /**
+   * 🔴 **色の見本を押して色を直すのも本文を書く**(#1224)── `toggle-task` と同じ
+   *   `REQUEST_BODY_REWRITE` を撃つので、同じ門をくぐらせる。
+   * ⚠ 押した時点では選ぶ窓を開くだけだが、**選び終えて書く** ── 門は入口に置く。
+   */
+  'pick-color',
   /**
    * 🔴 **リストを丸ごとそろえるのも本文を書く**(#1173)── `toggle-task` と同じ
    *   `REQUEST_BODY_REWRITE` を撃つので、同じ門をくぐらせる(印の数だけ書く点も同じ)。
@@ -7300,6 +7307,63 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     dispatcher.dispatch({ type: 'SET_CSV_SHAPE', lid, line, col, what, mode });
+  },
+  /**
+   * 🔴 **色の見本を押して、本文の色コードを選び直す**(#1224。Gemini 裁定 2026-10-01 Q2 = B)。
+   *
+   * > user の物語:`#3b82f6` の隣の四角を押す → 色を選ぶ窓が開く → 選ぶ → **本文のそのコードだけ**が
+   * > 新しい色の字に変わり、四角も新しい色になる。
+   *
+   * ⚠ 押せるのは**6 桁小文字の見本だけ**(描く側が `pick-color` を焼くのはその形だけ)。
+   * ⚠ **`change` で 1 回だけ撃つ**(`input` のたびに保存しない ── 色を探して動かす間は何も書かない)。
+   *   選ぶ窓を閉じたり同じ色を選んだときは**何も書かない**。
+   * ⚠ 押す前に**編集中かを見て断る**(開いても書けない窓を出さない)。断り文は他の本文の書換と同じ 1 本
+   *   (`bodyWriteBlockReason`)。⚠ 選び終えたときに**もう一度** reducer が見る(待つ間に編集が始まった形)。
+   * ⚠ どのノートの行かは**押した所から引く**(`toggle-task` と同じ ── 横に留めた別のノートの見本を
+   *   押したとき、開いているノートの同じ行を書き換えない)。
+   * 🔑 選ぶ窓(`<input type="color">`)は画面の外の使い捨て 1 つ ── 開くたびに前の物を外して作り直す。
+   */
+  'pick-color': (dispatcher, target) => {
+    const line = Number(target.getAttribute('data-pkc-color-line'));
+    const nth = Number(target.getAttribute('data-pkc-color-nth'));
+    const from = target.getAttribute('data-pkc-color-value') ?? '';
+    if (!Number.isInteger(line) || line < 0 || !Number.isInteger(nth) || nth < 0) return;
+    // 押して直せるのは 6 桁小文字だけ(描く側が焼くのもその形。属性を書き換えられても書かない)
+    if (!isEditableColor(from)) return;
+    const st = dispatcher.getState();
+    const lid = lidOfNode(target, st.openBody?.lid ?? st.selectedLid);
+    if (lid === null || lid === undefined) return;
+    const blocked = bodyWriteBlockReason(st, lid);
+    if (blocked !== null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${blocked}色を直してください` });
+      return;
+    }
+    const doc = target.ownerDocument;
+    doc.querySelector('input[data-pkc-field="color-pick"]')?.remove();
+    const input = doc.createElement('input');
+    input.type = 'color';
+    input.value = from;
+    input.setAttribute('data-pkc-field', 'color-pick');
+    input.setAttribute('aria-hidden', 'true');
+    input.tabIndex = -1;
+    // 押した見本の位置に(窓がそこへ開く)。見えず・触れず・場所を取らない
+    const rect = target.getBoundingClientRect();
+    input.style.cssText =
+      `position:fixed;left:${rect.left}px;top:${rect.top}px;width:1px;height:1px;` +
+      'opacity:0;pointer-events:none;border:0;padding:0;';
+    input.addEventListener('change', () => {
+      const to = input.value;
+      input.remove();
+      if (!isEditableColor(to) || to === from) return;
+      dispatcher.dispatch({ type: 'SET_COLOR_CODE', lid, line, nth, from, to });
+    });
+    doc.body.append(input);
+    try {
+      input.showPicker();
+    } catch {
+      // `showPicker` が無い / 断られる環境は、`click` で開く(どちらも押した直後の動作)
+      input.click();
+    }
   },
   'toggle-task': (dispatcher, target) => {
     const raw = target.getAttribute('data-pkc-task-line');

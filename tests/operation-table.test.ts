@@ -368,6 +368,8 @@ const UNREGISTERED_POINT: readonly string[] = [
   'open-repeat-menu',
   // ⚠ 2026-10-01(#274 段①): 左の列の操作の一覧の行。押した行の命令が要る P1(`toc-jump` と同じ仕分け)
   'run-command-row',
+  // ⚠ 2026-10-02(#1224 段②): 色の見本。押した見本の行・何番目・色が要る P1(`edit-cell` と同じ仕分け)
+  'pick-color',
   'open-tile', 'open-tile-as', 'pick-app-group-icon', 'preview-revision', 'remove-relation',
   'restore-revision', 'restore-trash', 'revoke-extension', 'revoke-same-origin',
   'schedule-pick-day', 'schedule-quick-here', 'set-task-repeat', 'shape-cell',
@@ -657,12 +659,14 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-02(#1224): 本文の色コードの見本を出す入切(`set-color-swatch`)で受け手 +1 /
       //   `total` +1 / `unregistered` +1。登記は増えない ── 押し口は設定の checkbox にしか無く、
       //   鍵も持たない(`set-relative-days` と同じ形)。
-      total: 362,
-      receivers: 303,
+      // ⚠ 2026-10-02(#1224 段②): 色の見本を押して色を選び直す(`pick-color`)で受け手 +1 / `total` +1 /
+      //   `unregistered` +1。登記は増えない ── 押し口は本文の見本にしか無く、押した 1 つでしか対象が決まらない。
+      total: 363,
+      receivers: 304,
       registered: 98,
       both: 39,
       outsideActionsTable: 59,
-      unregistered: 264,
+      unregistered: 265,
     });
   });
 

@@ -75,7 +75,7 @@ import {
 } from '../link/card-presentation';
 import { findPhones } from '../contact/phone-link';
 import { allDateTokens, readLineDate } from '../schedule/line-date';
-import { isColorCode } from './color-code';
+import { confirmColorSpan, isColorCode, isEditableColor } from './color-code';
 
 const md = new MarkdownIt({
   html: false,          // Disable HTML tags in source (XSS safety)
@@ -2770,23 +2770,80 @@ md.core.ruler.after('inline', 'pkc-date-link', function (state) {
  */
 md.core.ruler.after('inline', 'pkc-color-swatch', function (state) {
   if ((state.env as { colorSwatches?: boolean }).colorSwatches !== true) return true;
-  for (const token of state.tokens) {
+  /**
+   * 🔴 **押して直せる見本には「何行目の何番目か」を焼く**(#1224 段②)。
+   *
+   * ⚠ 行は `toggle-task` / 表のセルと**同じ 3 段**(前処理後の行 → `lineMap` で原文へ逆引き →
+   *   `taskLineOffset` を足す)。**1 段でも飛ばすと別の行を書き換える**。
+   * ⚠ 「何番目」は**その行の色コード全部**(リンクの中・押せない綴りも含む)を左から数える ──
+   *   書き換える側(`body-rewrite.ts`)が原文の行を `colorSpansOfLine` で走って数えるのと同じ数え方。
+   *   同じ行にまたがる複数の inline(表の升)も、行ごとに通して数える(`nthOnLine`)。
+   * 🔴 **焼く前に、原文の同じ所と食い違わないか確かめる**(`confirmColorSpan`)── 食い違うなら
+   *   (複数行にまたがるコード・前処理で消えた字がある行)**押せる形にしない**(見本だけ出る)。
+   */
+  const env = state.env as {
+    lineMap?: number[];
+    taskLineOffset?: number;
+    cellGate?: MdCellGate;
+  };
+  const offset = env.taskLineOffset ?? 0;
+  const nthOnLine = new Map<number, number>();
+  const tokens = state.tokens;
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i]!;
     if (token.type !== 'inline') continue;
     const children = token.children;
     if (!children) continue;
+    // その inline の 1 行目(前処理後の行)。表の升は `map` を持たないので、囲んでいる行から引く
+    let outLine: number | undefined = token.map?.[0];
+    if (typeof outLine !== 'number') {
+      const prev = tokens[i - 1]?.type;
+      if (prev === 'td_open' || prev === 'th_open') {
+        for (let k = i - 1; k >= 0; k -= 1) {
+          if (tokens[k]!.type === 'tr_open') {
+            outLine = tokens[k]!.map?.[0] ?? undefined;
+            break;
+          }
+        }
+      }
+    }
     const out: typeof children = [];
     let inLink = 0;
+    let breaks = 0;
     let changed = false;
     for (const t of children) {
       if (t.type === 'link_open') inLink += 1;
       else if (t.type === 'link_close') inLink -= 1;
-      if (t.type === 'code_inline' && inLink === 0 && isColorCode(t.content)) {
-        const tok = new state.Token('html_inline', '', 0);
-        tok.content =
-          `<span class="pkc-color-swatch" data-pkc-color-swatch ` +
-          `style="--pkc-swatch: ${escapeHtmlAttr(t.content)}" aria-hidden="true"></span>`;
-        out.push(tok);
-        changed = true;
+      else if (t.type === 'softbreak' || t.type === 'hardbreak') breaks += 1;
+      if (t.type === 'code_inline' && isColorCode(t.content)) {
+        // この色コードが、その行の何番目か(出さない物も数える)
+        let wire = '';
+        if (typeof outLine === 'number') {
+          const o = outLine + breaks;
+          const raw = env.lineMap ? (env.lineMap[o] ?? o) : o;
+          const nth = nthOnLine.get(raw) ?? 0;
+          nthOnLine.set(raw, nth + 1);
+          if (
+            isEditableColor(t.content) &&
+            env.cellGate !== undefined &&
+            confirmColorSpan(env.cellGate.lines[raw], nth, t.content)
+          ) {
+            wire =
+              ` data-pkc-action="pick-color" data-pkc-color-line="${raw + offset}"` +
+              ` data-pkc-color-nth="${nth}" data-pkc-color-value="${escapeHtmlAttr(t.content)}"` +
+              ` role="button" tabindex="0" aria-label="色を選び直す" title="押して色を選び直す"`;
+          }
+        }
+        if (inLink === 0) {
+          const tok = new state.Token('html_inline', '', 0);
+          tok.content =
+            `<span class="pkc-color-swatch" data-pkc-color-swatch${wire}` +
+            ` style="--pkc-swatch: ${escapeHtmlAttr(t.content)}"` +
+            (wire === '' ? ' aria-hidden="true"' : '') +
+            `></span>`;
+          out.push(tok);
+          changed = true;
+        }
       }
       out.push(t);
     }

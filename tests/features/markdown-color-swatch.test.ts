@@ -99,9 +99,17 @@ describe('見本は字を持たない(#1224。CLAUDE.md §10)', () => {
     }
   });
 
-  it('🔴 見本は読み上げの対象にならない(aria-hidden)', () => {
-    for (const s of swatches(on('`#3b82f6`\n'))) {
+  it('🔴 飾りの見本は読み上げの対象にならない(aria-hidden)/ 押せる見本は名前を持つ', () => {
+    // 押せない綴り(3 桁・大文字・8 桁)は飾り
+    for (const s of swatches(on('`#fff` `#3B82F6` `#3b82f680`\n'))) {
       expect(s.getAttribute('aria-hidden')).toBe('true');
+      expect(s.getAttribute('role'), '飾りが button になっている').toBeNull();
+    }
+    // 押せる見本(6 桁小文字)は button なので aria-hidden にしない(押せるのに読み上げから消える形を作らない)
+    for (const s of swatches(on('`#3b82f6`\n'))) {
+      expect(s.getAttribute('aria-hidden'), '押せる見本が読み上げから消えている').toBeNull();
+      expect(s.getAttribute('role')).toBe('button');
+      expect(s.getAttribute('aria-label'), '押せる見本に名前が無い').toBeTruthy();
     }
   });
 

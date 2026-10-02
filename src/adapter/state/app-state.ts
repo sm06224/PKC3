@@ -2583,6 +2583,13 @@ export type UserAction =
    */
   | { type: 'SET_TASK_RUN'; lid: string; lines: readonly number[]; to: 'done' | 'open' }
   /**
+   * 🔴 **本文の色コードを 1 つ書き換える**(#1224)。⚠ `TOGGLE_TASK` と**同じ形**:書換は 1 本
+   *   (`REQUEST_BODY_REWRITE` の `kind: 'color'`)を通り、面が独自の書込経路を持たない(§7)。
+   * ⚠ `line` は**原文の行番号**、`nth` は**その行の何番目の色コードか**、`from` は**押した時点の字**
+   *   (6 桁小文字)、`to` は選んだ色(6 桁小文字)。判断は `body-rewrite.ts` の `rewriteColor`。
+   */
+  | { type: 'SET_COLOR_CODE'; lid: string; line: number; nth: number; from: string; to: string }
+  /**
    * 🔴 **表のセルを 1 つ書き換える**(#418 段①)。
    * ⚠ `TOGGLE_TASK` と**同じ形**:書換は 1 本(`REQUEST_BODY_REWRITE`)を通り、
    *   面が独自の書込経路を持たない(§7)。何をするかの判断は `body-rewrite.ts`。
@@ -7128,6 +7135,35 @@ function reduceCore(
             archetype: meta.archetype,
             entryOrder: meta.entryOrder,
             rewrite: { kind: 'task', line: action.line },
+          },
+        ],
+      };
+    }
+    /**
+     * 🔴 **本文の色コードを 1 つ書き換える**(#1224)。⚠ `TOGGLE_TASK` と**同じ形** ──
+     *   断りは lid で判定する(新しい断り文を作らない。理由は `bodyWriteBlockReason` の 1 本)。
+     */
+    case 'SET_COLOR_CODE': {
+      const blocked = bodyWriteBlockReason(state, action.lid);
+      if (blocked !== null) return { state: { ...state, error: `${blocked}色を直してください` }, events: [] };
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta) return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_BODY_REWRITE',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            rewrite: {
+              kind: 'color',
+              line: action.line,
+              nth: action.nth,
+              from: action.from,
+              to: action.to,
+            },
           },
         ],
       };
