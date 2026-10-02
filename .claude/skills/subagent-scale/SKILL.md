@@ -103,6 +103,28 @@ Agent({ subagent_type: 'pkc3-implementer', isolation: 'worktree', prompt: … })
 ⚠ 1 行目は**依頼文に書いておく**(agent が `npm ci` を始めると、ディスクの枠と時間を使う)。
 2 行目の検査は agent 側で外せない ── 迂回を探さず、割る。
 
+#### 🔴 4 つ目 ── worktree は **main から**作られる。依頼者の HEAD ではない(2026-10-02、同じ日に 3 度)
+
+| 起きたこと | 何が違っていたか |
+|---|---|
+| 全量 unit のランナーが「緑」を返したが、HEAD は **`ab8e7ec5`(main)** ── 測ってほしかった `f1ca1ef8`(依頼者の branch)ではなかった | **別の物を測った緑**。信じて push していれば CI で初めて分かった |
+| #275 の implementer が「起動時の HEAD は `bd56d472` で、指定の `c34dae73` ではなかった」と報告 | agent が自分で `git checkout` して揃えた(揃えない agent も居る) |
+| #1231 段①の implementer も `ab8e7ec5` → `6756c1f9` へ自分で移した | 依頼文に「違えば checkout」と書いてあったので助かった |
+
+🔑 **依頼文の 1 行目を「🔴 最初に `git checkout <sha>` を打ち、`git rev-parse HEAD` を報告の 1 行目に書く。
+違えば止まる」にする。** sha は依頼者が `git rev-parse` で引いた 40 桁(または短縮)を**そのまま貼る**。
+⚠ branch 名で checkout させない ── 本体で checkout 中の branch は worktree から取れない(detached の sha でよい)。
+⚠ local だけの commit(push 前)でも worktree からは見える(object store は共有)── sha で指せば足りる。
+🔑 **ランナーの表の 1 行目は必ず HEAD** にし、受け取ったらまず**依頼した sha と突き合わせる**
+(§「返ってきた数字は、どの commit の数字か」の、いちばん近い所版)。
+
+#### ⚠ smoke の port は **3 つ**使う(2026-10-02、#1231 段①)
+
+`PKC3_SMOKE_PORT=N` を渡しても playwright の `webServer` は **N / N+1 / N+2** を握る。agent ごとに 10 刻みで
+範囲を割っていれば重ならないが、**同じ範囲の中で 2 回目を回すとき**(変異試験のループなど)に自分と重なる ──
+`EADDRINUSE` で smoke が立たず、**変異が全部 KILLED に見える**(偽の KILLED。`mutation-testing` §2.1)。
+🔑 依頼文に「port は N 固定(3 つ使う)。立たなかったら INFRA として読む」と書く。
+
 ### ⚠ worktree 隔離が起動できない箱がある(2026-08-14 実測)
 
 ```
