@@ -145,7 +145,9 @@ describe('make-pack ── 目録を作る', () => {
   it('version は内容由来:既知の値 / 同じ中身なら日時や run id が違っても同じ / 1 byte 変えると変わる', async () => {
     const a = fakePack();
     const b = fakePack();
-    const pa = await make({ outDir: a, now: NOW });
+    // ⚠ env を渡さないと process.env を読む ── CI では GITHUB_RUN_ID が在るので「無い」側の対照群にならない
+    //   (2026-10-02 に CI で踏んだ: expected '36969955893' to be null)。空の env を明示する
+    const pa = await make({ outDir: a, now: NOW, env: {} });
     const pb = await make({ outDir: b, now: new Date('2030-01-01T00:00:00Z'), env: { GITHUB_RUN_ID: '999' } });
     // 同じ中身 ── 日時 / run id は build にだけ入り、version には入らない
     expect(pb.version).toBe(pa.version);
