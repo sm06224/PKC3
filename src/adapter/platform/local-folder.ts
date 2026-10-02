@@ -16,9 +16,21 @@
  *
  * ## 何をするか(読むだけ)
  *
- * ① `pick()` ── OS のフォルダ選択 → **直下だけ**を列挙 → 名前順 ② 見える分(200 件ずつ)の
- * 大きさ・更新日を読む ③ `open(i)` ── 行の file を読んで `deps.open` へ渡す(取り込みは
- * 既存の口 ── ここは取り込みの規則を持たない)④ `cut()` ── handle を捨てる。
+ * ① `pick()` ── OS のフォルダ選択 → **直下だけ**を列挙 → 名前順(見せるのは 200 件ずつ)
+ * ② `open(i)` ── 行の file を読んで `deps.open` へ渡す(取り込みは既存の口 ──
+ * ここは取り込みの規則を持たない)③ `cut()` ── handle を捨てる。
+ *
+ * ## 🔴 一覧を出すとき、`getFile()` を 1 件も呼ばない(#1271)
+ *
+ * かつては見える 200 件の大きさ・更新日を出すために、各行の `getFile()` を呼んでいた。
+ * ⚠ OneDrive / iCloud Drive / Dropbox の「ファイルオンデマンド」のフォルダでは、OS は
+ * `getFile()` を**「実体の要求」と読み**、まだ手元に無い file を**一斉にダウンロードする**
+ * (一覧を出しただけで数十〜数百件。通信とディスクを食う ── Gemini の実機報告)。
+ * 🔑 **`getFile()` は「その 1 件を取り込む」と user が押した `open(i)` の中だけ**で呼ぶ。
+ * 大きさ・更新日は**一覧では出さない**(描画器が「—」を出す)。⚠ 「大きさも見せたい」と思っても、
+ * 一覧で `getFile()` / `stat` 相当を呼ばない ── 手元に在る物だけ読む、は判別できない
+ * (File System Access API に「実体が手元に在るか」を訊く口は無い)。
+ * 門は `tests/adapter/local-folder.test.ts`(`pick` / `more` の後に `getFile` が 0 回)。
  *
  * 🔴 **消す口・改名・移動は 1 つも作らない**(裁定。`tests/adapter/local-folder.test.ts` が
  * 公開面を全数で見る)。⚠ 書き戻しは**既存の「元ファイルへ書き戻す」**(`launched-files.ts`)が担う。
@@ -100,8 +112,6 @@ export interface LocalFolderRow {
   readonly label: string;
   /** 元の file へ書き戻せるか。⚠ フォルダは `false`。 */
   readonly writeBack: boolean;
-  readonly size: number | null;
-  readonly modified: number | null;
 }
 
 export interface LocalFolderView {
@@ -123,9 +133,6 @@ interface Slot {
   readonly name: string;
   readonly kind: 'file' | 'directory';
   readonly handle: FolderEntryHandle;
-  size: number | null;
-  modified: number | null;
-  stat: 'todo' | 'done';
 }
 
 const DIR_LABEL = 'フォルダ';
@@ -164,8 +171,6 @@ export class LocalFolder {
         kind: s.kind,
         label: kind === null ? DIR_LABEL : kind.label,
         writeBack: kind?.writeBack ?? false,
-        size: s.size,
-        modified: s.modified,
       });
     }
     return {
@@ -245,9 +250,6 @@ export class LocalFolder {
           name: h.name,
           kind: h.kind === 'directory' ? 'directory' : 'file',
           handle: h,
-          size: null,
-          modified: null,
-          stat: 'todo',
         });
         this.counted = found.length;
         // ⚠ 200 件ごとに数を見せる(毎件描くと、大きいフォルダで描画が列挙を追い越す)
@@ -269,32 +271,6 @@ export class LocalFolder {
     this.shown = Math.min(FOLDER_PAGE, this.slots.length);
     this.phase = 'listed';
     this.changed();
-    void this.fillStats(gen);
-  }
-
-  /**
-   * 見えている行の大きさと更新日を読む。⚠ **見える分だけ**(1 万件のフォルダで
-   * 1 万回 `getFile` を撃たない)。読めない行は「—」のまま(0 と読ませない)。
-   */
-  private async fillStats(gen: number): Promise<void> {
-    const upto = Math.min(this.shown, this.slots.length);
-    let touched = false;
-    for (let i = 0; i < upto; i++) {
-      const s = this.slots[i]!;
-      if (s.stat === 'done') continue;
-      s.stat = 'done';
-      if (s.kind !== 'file' || typeof s.handle.getFile !== 'function') continue;
-      try {
-        const f = await s.handle.getFile();
-        if (gen !== this.generation) return;
-        s.size = f.size;
-        s.modified = f.lastModified;
-        touched = true;
-      } catch {
-        if (gen !== this.generation) return;
-      }
-    }
-    if (touched && gen === this.generation) this.changed();
   }
 
   /** 「さらに表示」。⚠ 権限が切れていたら、足さずに「切れた」と言う。 */
@@ -308,7 +284,6 @@ export class LocalFolder {
     if (gen !== this.generation) return;
     this.shown = Math.min(this.shown + FOLDER_PAGE, this.slots.length);
     this.changed();
-    void this.fillStats(gen);
   }
 
   /** 「切る」。⚠ **handle を捨てる**(列挙の途中でも効く ── 続きは世代の札で捨てる)。 */

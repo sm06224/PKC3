@@ -90,7 +90,7 @@ function make(dir: DirectoryHandleLike | (() => Promise<DirectoryHandleLike>)): 
   return { folder, opened, failed, changes: () => changes, picks };
 }
 
-/** 非同期の連なり(列挙・大きさの読み込み)が落ち着くまで待つ。⚠ 数えた回数ではなく時間で待つ。 */
+/** 非同期の連なり(列挙)が落ち着くまで待つ。⚠ 数えた回数ではなく時間で待つ。 */
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 20));
 
 describe('繋いで一覧する(段①)', () => {
@@ -113,19 +113,34 @@ describe('繋いで一覧する(段①)', () => {
     expect(picks).toEqual([{ mode: 'read' }]);
   });
 
-  it('🔴 見える行の大きさと更新日を読む ── 読めない行は null(0 と読ませない)', async () => {
-    const ok = fileHandle('a.md', { size: 7 });
-    const bad = fileHandle('b.md', { fail: true });
-    const { folder } = make(dirHandle([ok, bad]));
+  it('🔴 一覧を出すだけでは getFile を 1 件も呼ばない ── 押した 1 件だけ(#1271: クラウド同期のフォルダで実体が一斉に落ちる)', async () => {
+    const files = Array.from({ length: 450 }, (_, i) => fileHandle(`f${String(i).padStart(3, '0')}.md`));
+    const { folder, opened } = make(dirHandle(files));
     await folder.pick();
     await flush();
-    const rows = folder.view().rows;
-    expect(rows[0]!.size).toBe(7);
-    expect(rows[0]!.modified).toBe(Date.UTC(2026, 8, 30, 12, 0));
-    expect(rows[1]!.size, '読めなかった行が 0 になっている').toBeNull();
+    expect(folder.view().rows).toHaveLength(FOLDER_PAGE);
+    expect(files.filter((f) => f.gets > 0), '一覧を出しただけで getFile が呼ばれた').toHaveLength(0);
+    // 「さらに表示」でも呼ばない
+    await folder.more();
+    await flush();
+    expect(folder.view().rows).toHaveLength(400);
+    expect(files.filter((f) => f.gets > 0), '「さらに表示」で getFile が呼ばれた').toHaveLength(0);
+    // 対照群 ── 行を押した 1 件だけ読む(0 回のまま取り込めない、を作らない)
+    await folder.open(3);
+    expect(files.map((f) => f.gets).reduce((a, b) => a + b, 0), '押した 1 件だけのはず').toBe(1);
+    expect(files[3]!.gets).toBe(1);
+    expect(opened).toHaveLength(1);
   });
 
-  it('🔴 200 件で切れて「さらに表示」── 大きさを読むのも見える分だけ', async () => {
+  it('🔴 行に大きさ・更新日を持たせない(実値を出すには一覧で getFile が要る)', async () => {
+    const { folder } = make(dirHandle([fileHandle('a.md', { size: 7 })]));
+    await folder.pick();
+    await flush();
+    const row = folder.view().rows[0]!;
+    expect(Object.keys(row).sort()).toEqual(['index', 'kind', 'label', 'name', 'writeBack']);
+  });
+
+  it('🔴 200 件で切れて「さらに表示」', async () => {
     const files = Array.from({ length: 450 }, (_, i) => fileHandle(`f${String(i).padStart(3, '0')}.md`));
     const { folder } = make(dirHandle(files));
     await folder.pick();
@@ -134,8 +149,6 @@ describe('繋いで一覧する(段①)', () => {
     expect(v.total).toBe(450);
     expect(v.rows).toHaveLength(FOLDER_PAGE);
     expect(v.more).toBe(true);
-    // ⚠ 1 万件のフォルダで 1 万回 getFile を撃たない ── 見える 200 件だけ
-    expect(files.filter((f) => f.gets > 0)).toHaveLength(FOLDER_PAGE);
     await folder.more();
     await flush();
     v = folder.view();
@@ -375,8 +388,8 @@ describe('🔴 消す口・改名・移動を作らない(裁定)', () => {
     const names = Object.getOwnPropertyNames(LocalFolder.prototype)
       .filter((n) => n !== 'constructor')
       .sort();
-    // ⚠ private の補助(readable / lose / changed / fillStats)は TS の private で、実行時には見える
-    expect(names).toEqual(['changed', 'cut', 'fillStats', 'heldHandle', 'lose', 'more', 'open', 'pick', 'readable', 'view'].sort());
+    // ⚠ private の補助(readable / lose / changed)は TS の private で、実行時には見える
+    expect(names).toEqual(['changed', 'cut', 'heldHandle', 'lose', 'more', 'open', 'pick', 'readable', 'view'].sort());
     expect(names.filter((n) => /remove|delete|rename|move|unlink|write|trash/i.test(n))).toEqual([]);
   });
 

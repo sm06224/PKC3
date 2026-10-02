@@ -13,7 +13,7 @@ import { BROWSE_ICONS } from '@adapter/ui/render/icons';
 import { buildShell } from '@adapter/ui/render/shell';
 import { initialState } from '@adapter/state/app-state';
 import { Dispatcher } from '@adapter/state/dispatcher';
-import { PC_CONTACT_NOTE, PC_DIRECTORY_NOTE } from '@features/local-folder/folder-entries';
+import { PC_CONTACT_NOTE, PC_DIRECTORY_NOTE, PC_STATS_NOTE } from '@features/local-folder/folder-entries';
 import { bindActions } from '@adapter/ui/actions/binder';
 import {
   LocalFolder,
@@ -21,10 +21,15 @@ import {
   type FolderEntryHandle,
 } from '@adapter/platform/local-folder';
 
+/** ⚠ `getFile` を呼んだ回数を数える(#1271 ── 一覧を出すだけでは 0 回でなければならない)。 */
+let getFileCalls = 0;
 const file = (name: string): FolderEntryHandle => ({
   kind: 'file',
   name,
-  getFile: async () => new File(['abc'], name, { lastModified: Date.UTC(2026, 8, 30) }),
+  getFile: async () => {
+    getFileCalls += 1;
+    return new File(['abc'], name, { lastModified: Date.UTC(2026, 8, 30) });
+  },
 });
 
 function dir(entries: FolderEntryHandle[], perm = { state: 'granted' }): DirectoryHandleLike {
@@ -109,7 +114,8 @@ describe('繋ぐ前 / 繋いだ後', () => {
     expect(q(pane, '[data-pkc-field="pc-list"]')).toBeNull();
   });
 
-  it('🔴 選ぶと帯にフォルダ名と「切る」、行に 名前 / 種類 / 大きさ / 更新日', async () => {
+  it('🔴 選ぶと帯にフォルダ名と「切る」、行に 名前 / 種類 / 大きさ「—」/ 更新日「—」(一覧では file を読まない #1271)', async () => {
+    getFileCalls = 0;
     const { pane, folder } = setup(async () => dir([file('メモ.md'), file('猫.png')]));
     await folder.pick();
     await settle();
@@ -121,9 +127,10 @@ describe('繋ぐ前 / 繋いだ後', () => {
     const md = rows[0]!;
     expect(q(md, '[data-pkc-field="pc-name"]')?.textContent).toBe('メモ.md');
     const meta = q(md, '[data-pkc-field="pc-meta"]')?.textContent ?? '';
-    expect(meta).toContain('Markdown');
-    expect(meta, '大きさ').toContain('3 B');
-    expect(meta, '更新日').toContain('2026/09/30');
+    // 🔴 大きさ・更新日は読まない ── 実値(3 B / 2026/09/30)が出ていたら getFile を撃っている
+    expect(meta).toBe('Markdown · — · —');
+    expect(q(md, '[data-pkc-field="pc-meta"]')?.getAttribute('title'), '「—」のわけがホバーに無い').toBe(PC_STATS_NOTE);
+    expect(getFileCalls, '一覧を出しただけで getFile が呼ばれた(クラウド同期のフォルダで実体を一斉に取りに行く)').toBe(0);
   });
 
   it('🔴 書き戻せない種類(画像)の行にだけ「書き戻せません」── Markdown には出さない', async () => {

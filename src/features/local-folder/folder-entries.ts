@@ -39,6 +39,13 @@ export const PC_DIRECTORY_NOTE =
 /** vCard の行に見える字で添える(ホバーだけにしない)。 */
 export const PC_CONTACT_NOTE = '連絡先として取り込みます';
 
+/**
+ * 🔴 大きさ・更新日が「—」のわけ(#1271)。一覧では file を**読まない** ── 読むと、クラウド同期の
+ * フォルダ(OneDrive / iCloud / Dropbox のファイルオンデマンド)で未ダウンロードの実体が一斉に落ちてくる。
+ * ホバーに出す(「—」を壊れと読ませない)。
+ */
+export const PC_STATS_NOTE = '大きさと更新日は、開くときに読みます(一覧では file の中身を読みません)';
+
 /** 取り込まれ方。 */
 export type FolderFileRoute = 'note' | 'contact' | 'attachment';
 
