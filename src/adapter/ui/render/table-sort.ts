@@ -148,10 +148,15 @@ export function applyTableSort(root: ParentNode = document): void {
         // セル内のリンク等のクリック時は発火させない
         const target = e.target as HTMLElement | null;
         if (target && target.tagName === 'A') return;
+        // 🔴 升の中のボタン(見出しの ✎)・開いている編集欄の中の押しは並べ替えない(#1240)
+        if (target?.closest('button, input') != null) return;
         triggerSort();
       });
 
       th.addEventListener('keydown', (e) => {
+        // 🔴 見出しの中の欄・ボタンで打った鍵は並べ替えの鍵ではない(#1240)── 欄で
+        //   空白を打つと `preventDefault` が字を消し、Enter が並べ替えてしまう
+        if (e.target !== th) return;
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           triggerSort();

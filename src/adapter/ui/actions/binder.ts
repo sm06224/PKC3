@@ -116,7 +116,12 @@ import { ARCHETYPE_ICONS, BAR_TILE_ATTR, setActionIcon } from '@adapter/ui/rende
 import { isIconName } from '@features/icon/symbols';
 import { insertBlockText, insertText, OWN_MEANING } from '@adapter/ui/render/row-swap';
 import { iconShortcodeFor } from '@features/icon/icon-shortcode';
-import { HOLD_ATTR, neighborCell, openCellAt } from '@adapter/ui/render/cell-input';
+import {
+  HOLD_ATTR,
+  neighborCell,
+  openCellAt,
+  opensOnSinglePress,
+} from '@adapter/ui/render/cell-input';
 import {
   resolveAppendAt,
   sectionAt,
@@ -1978,6 +1983,8 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
    * ⚠ 押した時点では欄を開くだけだが、**確定で書く** ── 門は入口に置く。
    */
   'edit-cell',
+  // 🔴 見出しの ✎ も `edit-cell` へ渡すだけ(#1240)── 欄を開いて確定で書くのは同じ
+  'edit-header-cell',
   // ⚠ 行・列の足し引きも同じ `REQUEST_BODY_REWRITE` を撃つ(#418 段①)
   'shape-cell',
   /**
@@ -7322,6 +7329,22 @@ const ACTIONS: Record<string, ActionHandler> = {
     input.select();
   },
   /**
+   * 🔴 **見出しの升の ✎ を押したら、その見出しを編集する**(#1240。裁定 A)。
+   *
+   * > 見出しの升は 1 回押すと**並べ替え**(#1150)なので、編集は 2 回押しか、升の右の ✎ から。
+   *
+   * 🔑 **欄を開く仕事は `edit-cell` の 1 か所のまま**(§7)── ここは「どの升か」を
+   *   入っている `th` から引いて渡すだけ。⚠ 判定・断り(編集中 / 字を選んでいる最中 /
+   *   2 度押し)は全部 `edit-cell` が持つので、ここへ複製しない。
+   */
+  'edit-header-cell': (dispatcher, target, services, root) => {
+    const cell = target.closest<HTMLElement>('th[data-pkc-action="edit-cell"]');
+    if (cell === null) return;
+    // ⚠ ✎ を押したのは**明示の意思**なので、残っている字の選択で止めない(2 回押しの `onDblClick` と同じ)
+    cell.ownerDocument.getSelection()?.removeAllRanges();
+    ACTIONS['edit-cell']!(dispatcher, cell, services, root);
+  },
+  /**
    * 🔴 **表の行・列を足す / 消す**(#418 段①)。
    *
    * 🔑 打てるだけでは動線が元に戻る ── 5 列で足りなくなった瞬間に
@@ -11548,6 +11571,17 @@ export function bindActions(
     if (el.getAttribute('data-pkc-action') === 'edit-cell') {
       const link = (ev.target as HTMLElement | null)?.closest<HTMLElement>('a[href]');
       if (link != null && el.contains(link)) return;
+      /**
+       * 🔴 **見出しの升は、1 回押しでは編集欄を開かない**(#1240)。
+       *
+       * ⚠ 見出しの 1 回押しは**並べ替え**(`table-sort.ts`)── 同じ押しで欄まで開くと、
+       *   開いたばかりの欄が並べ替えで壊れる / 欄が開くのに並べ替えも走る。
+       *   見出しは**2 回押し**(下の `onDblClick`)か升の右の ✎ から開く。
+       * 🔑 判定は `opensOnSinglePress` 1 か所(升の種類で決める ── 受け手の順番に頼らない)。
+       *   ✎ 自身は升ではない(`button`)ので、ここでは止まらない。
+       *   ⚠ 鍵(Enter / Space)の受け口(`onKeydown`)も同じ関数を通る。
+       */
+      if (!opensOnSinglePress(el)) return;
     }
     /**
      * 🔴 **アプリ内リンクは、ブラウザに遷移させない**(2026-08-08)。
@@ -12152,7 +12186,16 @@ export function bindActions(
      */
     if (ke.key === 'Enter' || ke.key === ' ') {
       const el = ke.target instanceof HTMLElement ? ke.target : null;
-      if (el?.getAttribute('tabindex') === '0' && el.hasAttribute('data-pkc-action')) {
+      /**
+       * 🔴 **見出しの升は Enter / Space でも編集欄を開かない**(#1240)── 見出しは
+       *   `tabindex="0"` を持つ(並べ替えのため)ので、ここへ入って `edit-cell` を撃っていた。
+       *   並べ替えは見出し自身の鍵の受け手が受ける。判定は `opensOnSinglePress` 1 か所。
+       */
+      if (
+        el?.getAttribute('tabindex') === '0' &&
+        el.hasAttribute('data-pkc-action') &&
+        opensOnSinglePress(el)
+      ) {
         // ⚠ Space は既定でページを送る ── 押した先が動くほうが正しい
         ke.preventDefault();
         run(el.getAttribute('data-pkc-action'), el);
@@ -14569,6 +14612,28 @@ export function bindActions(
 
   listen(root, 'contextmenu', onContextMenu);
   listen(root, 'click', onClick);
+  /**
+   * 🔴 **升を 2 回押すと、編集欄を開く**(#1240)── 見出しの升の入口。
+   *
+   * ⚠ 見出しは 1 回押しが並べ替えなので、編集は 2 回押しか ✎ から。本文の升は
+   *   1 回押しで既に開いている(欄が在れば `edit-cell` が何もしない)。
+   *   ⚠ `cell-input.ts` の `pressCellToEdit`(確定後の隣の升 / 描き直し後の開き直し)も
+   *   この経路を通る ── `click()` は見出しで開かないので。
+   * ⚠ **字を選んでいる最中の門を通すため、選択を先に畳む** ── 2 回押しは**語を選ぶ**ので、
+   *   そのまま `edit-cell` へ渡すと「選択中は開かない」に当たる。欄の中の 2 回押し
+   *   (語を選びたい)は触らない。
+   */
+  const onDblClick = (ev: Event): void => {
+    const t = ev.target as HTMLElement | null;
+    if (t === null || t.closest('[data-pkc-field="cell-input"]') !== null) return;
+    const el = t.closest<HTMLElement>('[data-pkc-action="edit-cell"]');
+    if (el === null || !root.contains(el)) return;
+    const link = t.closest<HTMLElement>('a[href]');
+    if (link !== null && el.contains(link)) return;
+    el.ownerDocument.getSelection()?.removeAllRanges();
+    run('edit-cell', el);
+  };
+  listen(root, 'dblclick', onDblClick);
   // 🔴 **`onClick` より後に登録する**(上の docstring)── 先に登録すると
   //    メニューが消えてから委譲が走り、押しても無言になる。
   listen(root, 'click', onCloseMenu);

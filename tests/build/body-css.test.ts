@@ -32,7 +32,9 @@ describe('本文の CSS を抜く', () => {
     // ⚠ 下限だけでなく**上限**も置く(CLAUDE.md「tripwire は両側」)── 器の規則まで
     //    混ざり始めたら、ここが先に鳴る
     expect(OUT.ruleCount, `本文の規則が ${OUT.ruleCount} 本`).toBeGreaterThanOrEqual(100);
-    expect(OUT.ruleCount, `本文の規則が ${OUT.ruleCount} 本(器が混ざった?)`).toBeLessThan(220);
+    // ⚠ 2026-10-02(#1240): 上限 220 → 225 ── 見出しの ✎ の規則 7 本が本文の規則に入り、220 本になった。
+    //   どれも `.pkc-md-rendered` で始まる本文の部品の規則で、器の規則ではない(混ざった数ではない)
+    expect(OUT.ruleCount, `本文の規則が ${OUT.ruleCount} 本(器が混ざった?)`).toBeLessThan(225);
     expect(OUT.vars.length, `トークンが ${OUT.vars.length} 個`).toBeGreaterThanOrEqual(15);
     expect(OUT.css.length, '出力が短すぎる').toBeGreaterThan(8000);
   });

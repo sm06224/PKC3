@@ -4376,6 +4376,53 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   line-height: 1.4;
   cursor: pointer;
 }
+/* 🔴 **見出しの升の ✎**(#1240)── 見出しは 1 回押すと並べ替えなので、編集の入口を
+ *    升の右に置く。触るまで出さず、出る場所は升の右端。
+ *    🔑 **焦点でも出す**(`:focus-within`)── キーボードだけの user に見えるように。
+ *    🔴 **場所は升の右に常に空けておく**(`padding-inline-end`)── 実ブラウザで実測して直した:
+ *    1 稿目は升の上に重ねていたので、**字の短い見出し(「数」)は中心が ✎ に覆われ**、
+ *    並べ替えの 1 回押しが ✎(= 編集)に化けた。出たり消えたりで列幅が動くのも避ける。
+ *    🔴 **印(✎)は CSS で出す。ボタンに字を入れない**(升の字に混ざるため。`＋×` と同じ)。 */
+.pkc-md-rendered th:has(> .pkc-cell-edit-btn) {
+  position: relative;
+  padding-inline-end: calc(var(--s3) + 24px);
+}
+.pkc-md-rendered .pkc-cell-edit-btn {
+  visibility: hidden;
+  position: absolute;
+  top: 50%;
+  right: var(--s2);
+  transform: translateY(-50%);
+  padding: 0 3px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+/* 🔴 **いちばん右の見出しは、⧉ / ▾ の帯の左へ逃がす**(#1240)。表の右上にはコピーの
+ *    ⧉ と形を選ぶ ▾ が**升の上に重なって**居る(右から約 44px)── 右端に置くと ✎ が**その下に隠れて
+ *    押せない**(実ブラウザで実測した)。⚠ そのぶん右の見出しだけ幅を空ける。 */
+.pkc-md-rendered .pkc-md-block th:last-child:has(> .pkc-cell-edit-btn) {
+  padding-inline-end: calc(var(--s3) + 24px + 48px);
+}
+.pkc-md-rendered .pkc-md-block th:last-child > .pkc-cell-edit-btn {
+  right: 50px;
+}
+.pkc-md-rendered .pkc-cell-edit-btn::before {
+  content: '✎';
+}
+.pkc-md-rendered th:hover > .pkc-cell-edit-btn,
+.pkc-md-rendered th:focus-within > .pkc-cell-edit-btn,
+.pkc-md-rendered .pkc-cell-edit-btn:focus {
+  visibility: visible;
+}
+.pkc-md-rendered .pkc-cell-edit-btn:hover {
+  color: var(--fg);
+  border-color: var(--accent);
+}
 .pkc-md-rendered .pkc-md-rendered-csv tr:hover .pkc-csv-shape,
 .pkc-md-rendered .pkc-md-rendered-csv td:focus-within .pkc-csv-shape,
 .pkc-md-rendered .pkc-md-rendered-csv th:focus-within .pkc-csv-shape,
@@ -8898,6 +8945,8 @@ h3[data-pkc-section] {
   /* ⚠ 表の「行・列を足す / 消す」も紙には要らない(#418 段①)── 画面では
    *    触るまで隠しているが、`visibility` は場所を取るので升の幅が変わる */
   .pkc-csv-shape,
+  /* ⚠ 見出しの ✎(#1240)も紙には要らない ── 押せる物が無い */
+  .pkc-cell-edit-btn,
   /* ⚠ 収録中の帯も紙には要らない(#413)── 押せる物が無い。
    * 🔴 **印刷の節はここ 1 つ**(file の末尾)── 途中に `@media print` を作ると、
    *    「最初の `@media` まで」で切って画面の規則を読む検査の**範囲が縮む**

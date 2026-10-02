@@ -7,7 +7,7 @@
  * 🔑 ここが見るのは、smoke では**条件を作りにくい 1 つ**である:
  *   **行がずれた回に、別の升へ開き直さないか**。
  *
- * ⚠ `reopenCellInput` は `cell.click()` を撃つだけで、欄を組むのは `binder.ts` である
+ * ⚠ `reopenCellInput` は `dblclick` を撃つだけで(#1240 で `click()` から変えた)、欄を組むのは `binder.ts` である
  *   (§7:口を 2 つ作らない)。だから台は**その binder の代わり**を置く ──
  *   ⚠ 代わりは**本物と同じ作法**にする(`data-pkc-field="cell-input"` を付け、
  *   升の字を欄の初期値にする)。甘くすると、本物では起きない緑が出る(CLAUDE.md §3)。
@@ -37,13 +37,17 @@ function host(cells: readonly [number, number, string][]): HTMLElement {
   const h = document.createElement('div');
   for (const [line, col, raw] of cells) {
     const td = cell(line, col, raw);
-    td.addEventListener('click', () => {
+    const open = (): void => {
       // ⚠ 本物と同じ ── 升の字を初期値にして、全部選ぶ
       const input = document.createElement('input');
       input.setAttribute('data-pkc-field', 'cell-input');
       input.value = td.getAttribute('data-pkc-cell-raw') ?? '';
       td.replaceChildren(input);
-    });
+    };
+    // ⚠ 開くのは `dblclick` だけ ── プログラムから開く道(`pressCellToEdit`)は `dblclick` で、
+    //   見出しの升は `click` では開かない(#1240)。`click` でも開く台にすると、
+    //   `reopenCellInput` が `click()` へ戻っても緑のまま通る
+    td.addEventListener('dblclick', open);
     h.append(td);
   }
   document.body.replaceChildren(h);
@@ -57,7 +61,7 @@ const openInput = (h: HTMLElement): HTMLInputElement | null =>
 /** 升を押して、打ちかけの字を入れる。 */
 function typeInto(h: HTMLElement, nth: number, value: string): HTMLInputElement {
   const td = [...h.querySelectorAll<HTMLElement>('[data-pkc-action="edit-cell"]')][nth]!;
-  td.click();
+  td.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
   const input = openInput(h)!;
   input.value = value;
   // ⚠ 字を打った後は末尾に caret が在る(happy-dom は `value` を入れても動かさない)
@@ -326,7 +330,8 @@ describe('隣の升へ移る(#750 I1)', () => {
     b.className = 'pkc-md-block';
     for (const [line, col, raw] of cells) {
       const td = cell(line, col, raw);
-      td.addEventListener('click', () => {
+      // ⚠ プログラムから開く道は `dblclick`(#1240)── 見出しの升は `click` で開かない
+      td.addEventListener('dblclick', () => {
         const input = document.createElement('input');
         input.setAttribute('data-pkc-field', 'cell-input');
         input.value = td.getAttribute('data-pkc-cell-raw') ?? '';
