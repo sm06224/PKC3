@@ -3459,8 +3459,11 @@ export function connectStoreEffects(
             if (stamps.conflict === true) {
               dispatcher.dispatch({
                 type: 'OP_FAILED',
+                // 🔑 ファイル名の回は、題名だけが先に変わっている ── 何が変わらなかったかを言う(#1220)
                 error:
-                  '別のウィンドウがこのノートを書き替えたため、反映できませんでした(もう一度押してください)',
+                  ev.rewrite.kind === 'attachment-name'
+                    ? 'ファイル名は変えられませんでした(別のウィンドウがこのノートを書き替えました。もう一度変えてください)'
+                    : '別のウィンドウがこのノートを書き替えたため、反映できませんでした(もう一度押してください)',
               });
               return;
             }
@@ -3501,7 +3504,13 @@ export function connectStoreEffects(
             // toggle の失敗は非致命(local state は動いておらず、再クリックが
             // retry)── phase を落として app を止めない(P3-6b review #1)
             if (!disposed)
-              dispatcher.dispatch({ type: 'OP_FAILED', error: String(e) });
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error:
+                  ev.rewrite.kind === 'attachment-name'
+                    ? `ファイル名は変えられませんでした(${String(e)})`
+                    : String(e),
+              });
           }
         });
         break;

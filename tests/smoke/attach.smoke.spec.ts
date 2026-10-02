@@ -2722,6 +2722,16 @@ test('🔴 添付の HTML が、本文に書いたのと同じ箱で描かれる
   const rename = pinned.locator('[data-pkc-field="attachment-rename"]');
   await rename.fill('留めた枠から改名した添付');
   await rename.blur();
+  /**
+   * 🔴 **ダウンロードのファイル名も一緒に変わる**(#1220 穴②、裁定 A。同じ道中の続き ──
+   *   新しい起動を足さない)。観測点は**ダウンロードの押し所が持つ名前**(`<a download>` へ渡る値)で、
+   *   ⚠ この headless Chromium は非 ASCII の `download` 名を落とす(`suggestedFilename` は使えない)ので、
+   *   アプリが持つ属性そのものを見る。拡張子は元の `card.html` から足される(打った字には無い)。
+   */
+  await expect(
+    pinned.locator('[data-pkc-action="download-asset"]'),
+    '改名したのにダウンロードのファイル名が変わっていない(拡張子は元のまま足される)',
+  ).toHaveAttribute('data-pkc-asset-name', '留めた枠から改名した添付.html');
 
   /**
    * 🔴 対照群 ── 主の枠(いま開いている別のノート)は 1 バイトも変わっていない。

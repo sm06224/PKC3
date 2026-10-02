@@ -9,6 +9,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { readLineDate } from '../../src/features/schedule/line-date';
+import { readAttachmentMeta } from '../../src/features/flavor/attachment-flavor';
 import {
   applyBodyRewrite,
   applyTaskRun,
@@ -1095,5 +1096,68 @@ describe('チェックリストをそろえる(#1173)', () => {
     expect(taskRunNotice(run(0, 2), 'open')).toBe('2 件は繰り返しなので触りませんでした');
     expect(taskRunNotice(run(0, 0), 'done')).toBe('すべて完了になっています');
     expect(taskRunNotice(run(0, 0), 'open')).toBe('すべて未完了になっています');
+  });
+});
+
+describe('添付のファイル名の 1 行(#1220 穴②、裁定 A)', () => {
+  /** ⚠ 期待値は**手で組んだ原文**(`attachmentBody` の出力を写さない)。説明の本文も付ける。 */
+  const ATT = [
+    '---',
+    'attachment.name: scan.pdf',
+    'attachment.mime: application/pdf',
+    'attachment.size: 12345',
+    'attachment.asset_key: ast-keep-me',
+    'attachment.hash: abc123',
+    '---',
+    '',
+    '説明です。',
+    'attachment.name: これは説明の本文の行(書き換えない)',
+    '',
+  ].join('\n');
+
+  it('🔴 attachment.name の 1 行だけが変わり、ほかの行は 1 byte も動かない', () => {
+    const out = applyBodyRewrite(ATT, { kind: 'attachment-name', typed: '請求書' })!;
+    const lines = ATT.split('\n');
+    const next = out.split('\n');
+    expect(next).toHaveLength(lines.length);
+    expect(next[1]).toBe('attachment.name: 請求書.pdf');
+    // 変わったのは 1 行だけ ── mime / size / asset_key / hash と説明は等値
+    expect(next.filter((_, i) => i !== 1)).toEqual(lines.filter((_, i) => i !== 1));
+  });
+
+  it('CRLF の本文でも、その 1 行だけを書き換える(改行コードは保つ)', () => {
+    const crlf = ATT.replace(/\n/g, '\r\n');
+    const out = applyBodyRewrite(crlf, { kind: 'attachment-name', typed: '請求書' })!;
+    expect(out).toBe(crlf.replace('attachment.name: scan.pdf', 'attachment.name: 請求書.pdf'));
+  });
+
+  it('🔴 拡張子は「書く直前の本文」の名前から決める(画面の古い名前ではない)', () => {
+    const moved = ATT.replace('scan.pdf', 'moved.zip'); // 別の窓が先に変えていた形
+    const out = applyBodyRewrite(moved, { kind: 'attachment-name', typed: '請求書' })!;
+    expect(out.split('\n')[1]).toBe('attachment.name: 請求書.zip');
+  });
+
+  it('🔴 attachment.name が無い本文には何も書かない(鍵を足さない・同じ本文を返す)', () => {
+    const tile = '---\nattachment.launcher_url: https://example.com\n---\n';
+    expect(applyBodyRewrite(tile, { kind: 'attachment-name', typed: '名前' })).toBe(tile);
+    const note = '# ただのノート\n\n本文\n';
+    expect(applyBodyRewrite(note, { kind: 'attachment-name', typed: '名前' })).toBe(note);
+    // 説明の中にだけ在る `attachment.name:` の行は、設定の行ではない
+    const only = '---\ntags: [あ]\n---\nattachment.name: 説明の中の行\n';
+    expect(applyBodyRewrite(only, { kind: 'attachment-name', typed: '名前' })).toBe(only);
+  });
+
+  it('同じ名前になるなら、同じ本文を返す(書かない・言わない)', () => {
+    expect(applyBodyRewrite(ATT, { kind: 'attachment-name', typed: 'scan.pdf' })).toBe(ATT);
+  });
+
+  it('書いた名前は読み口(readAttachmentMeta)で同じ字に戻る(引用が要る名前でも)', () => {
+    for (const typed of ['#1 報告', 'a: b', '[x]', 'true', '123', '- 先頭がハイフン']) {
+      const out = applyBodyRewrite(ATT, { kind: 'attachment-name', typed })!;
+      // `:` は _ に置き換わるので、読み口の答えは「置き換え後 + .pdf」
+      const want = typed.trim().replace(/:/g, '_') + '.pdf';
+      expect(readAttachmentMeta(out).name, `「${typed}」が往復しない`).toBe(want);
+      expect(readAttachmentMeta(out).assetKey).toBe('ast-keep-me');
+    }
   });
 });

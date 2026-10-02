@@ -123,6 +123,7 @@ import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import {
   ATTACHMENT_FOLD_FIELD,
   ATTACHMENT_FOLD_NOTE,
+  ATTACHMENT_RENAME_LABEL,
   HIDDEN_HEAD_ATTR,
   foldAttachmentHead,
   joinHiddenHead,
@@ -2883,12 +2884,14 @@ export class DetailRenderer {
       rename.type = 'text';
       rename.setAttribute('data-pkc-action', 'rename-attachment');
       rename.setAttribute('data-pkc-field', 'attachment-rename');
-      rename.setAttribute('aria-label', 'この添付の名前');
+      rename.setAttribute('aria-label', ATTACHMENT_RENAME_LABEL);
       // 🔴 **押した欄が対象を持つ**(#848)── 留めた枠でも、その枠のノートに効く
       markTargetLid(rename, lid);
       rename.value = entryTitle;
       // ⚠ 文言は**起きること**で書く(user 指示 2026-08-21)
-      rename.title = '名前を書き換えて、この欄の外を押すと保存されます';
+      // 🔴 題名とダウンロードのファイル名が一緒に変わる(拡張子は元のまま足される。#1220 裁定 A)
+      rename.title =
+        'ノートの題名とダウンロードのファイル名を書き換えて、この欄の外を押すと保存されます。ファイル名の拡張子は元のままです';
       host.append(rename);
 
       /**

@@ -52,6 +52,48 @@ export function readAttachmentMeta(body: string): {
 }
 
 /**
+ * 🔴 **添付の改名欄で打った字から、ダウンロードのファイル名を作る**(#1220 穴②、裁定 A)。
+ *
+ * > user の物語:添付の名前の欄に「請求書」と打った。ノートの題名が「請求書」になり、
+ * > ダウンロードしたファイルも「請求書.pdf」になってほしい(拡張子を打ち直させない)。
+ *
+ * ⚠ 中身は変わらない(種類と大きさは中身から決まる)ので、**拡張子は偽らせない**:
+ *   ① 打った字が元の拡張子で終わっていれば、そのまま ② 拡張子が無ければ元の拡張子を足す
+ *   ③ **別の拡張子で終わっていても変えない** ── 元の拡張子を付け直す
+ *   (元 `scan.pdf` に `請求書.txt` → `請求書.txt.pdf`。`.txt` に見せかけた pdf を作らない)。
+ * ⚠ 元が拡張子を持たない(`README` / `.gitignore` のように先頭だけが `.`)なら、打った字のまま。
+ * ⚠ 拡張子は**最後の `.` から後ろ**だけ(`a.tar.gz` なら `.gz`)。大文字小文字は区別せず比べる
+ *   (`.PDF` と `.pdf` は同じ拡張子)。空白を含む後ろ(`報告 v1.2 最終`)は拡張子と見なさない。
+ * ⚠ ファイル名に使えない字(`/ \ : * ? " < > |` と制御文字)は `_` に置き換える。
+ *   ⚠ 書き出しの名前の規則(`export/file-name.ts` の `safeName`)は**別物**:あちらは `-` に
+ *   置き換え・空白も落とし・60 字で切る(書き出す一式の名前用)。ここは user が付けた名前を
+ *   できるだけそのまま残す側なので、規則を流用すると名前が黙って縮む。
+ * ⚠ 打った字は前後の空白を落とす。落とした後に何も残らなければ元の名前のまま。
+ *
+ * @param typed    改名欄に打たれた字(ノートの題名と同じ字)
+ * @param original いま本文にあるファイル名(`attachment.name`)── 呼び側は **disk の値**を渡す
+ */
+export function attachmentFileName(typed: string, original: string): string {
+  const cleaned = [...typed.trim()]
+    .map((ch) => {
+      const c = ch.codePointAt(0)!;
+      // ⚠ 制御文字は正規表現に書かない(no-control-regex / 生バイト混入の予防)
+      return c < 0x20 || c === 0x7f || '\\/:*?"<>|'.includes(ch) ? '_' : ch;
+    })
+    .join('');
+  if (cleaned === '') return original;
+  const dot = original.lastIndexOf('.');
+  // 先頭だけの `.`(隠しファイル名)と、末尾の `.`(拡張子が空)は拡張子と見なさない
+  if (dot <= 0 || dot === original.length - 1) return cleaned;
+  const ext = original.slice(dot);
+  // ⚠ 空白を含む後ろ(`報告 v1.2 最終`)は拡張子ではない ── 足すと名前が壊れる
+  if (/\s/.test(ext)) return cleaned;
+  // ⚠ 拡張子だけを打った(`.pdf`)ときは「名前が無い」ので足す(`.pdf.pdf`)
+  if (cleaned.length > ext.length && cleaned.toLowerCase().endsWith(ext.toLowerCase())) return cleaned;
+  return cleaned + ext;
+}
+
+/**
  * PKC2 attachment-presenter.ts の AttachmentBody と同じ field 集合・同じ寛容 parse。
  * launcher / extension 系のメタ(#790 / #796 / #926 / #928)も欠損なく写す。
  */

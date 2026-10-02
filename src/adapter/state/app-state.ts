@@ -2601,6 +2601,13 @@ export type UserAction =
    */
   | { type: 'SET_COLOR_CODE'; lid: string; line: number; nth: number; from: string; to: string }
   /**
+   * 🔴 **添付のダウンロードのファイル名を書き換える**(#1220 穴②、裁定 A)。
+   * ⚠ `TOGGLE_TASK` と**同じ形**:書換は 1 本(`REQUEST_BODY_REWRITE` の `kind: 'attachment-name'`)を通る。
+   * ⚠ `name` は**打たれた字そのまま**(拡張子の足し方・使えない字の置き換えは、書く直前に
+   *   disk の本文から決める ── `attachmentFileName`)。題名は `RENAME_ENTRY_TITLE` の別の 1 本。
+   */
+  | { type: 'SET_ATTACHMENT_NAME'; lid: string; name: string }
+  /**
    * 🔴 **表のセルを 1 つ書き換える**(#418 段①)。
    * ⚠ `TOGGLE_TASK` と**同じ形**:書換は 1 本(`REQUEST_BODY_REWRITE`)を通り、
    *   面が独自の書込経路を持たない(§7)。何をするかの判断は `body-rewrite.ts`。
@@ -7177,6 +7184,30 @@ function reduceCore(
               from: action.from,
               to: action.to,
             },
+          },
+        ],
+      };
+    }
+    /**
+     * 🔴 **添付のファイル名を書き換える**(#1220)。⚠ `SET_COLOR_CODE` と**同じ形** ── 断りは lid で判定する。
+     * ⚠ 題名は呼び手が先に `RENAME_ENTRY_TITLE` で撃つ(題名の門は別 ── 編集中でも通る)。
+     *   断りの文は他の本文の書換と同じ 1 本(`bodyWriteBlockResult`)。
+     */
+    case 'SET_ATTACHMENT_NAME': {
+      const blockedResult = bodyWriteBlockResult(state, action.lid, 'ファイル名を変えてください');
+      if (blockedResult !== null) return blockedResult;
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta) return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_BODY_REWRITE',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            rewrite: { kind: 'attachment-name', typed: action.name },
           },
         ],
       };

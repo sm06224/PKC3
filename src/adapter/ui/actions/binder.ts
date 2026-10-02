@@ -8366,8 +8366,14 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 改名の機構は在ったのに(`RENAME_ENTRY_TITLE`)、**添付の詳細面に口が
    *   無かった** ── 一覧へ戻って `F2` を押すか、編集画面を開くしかなかった。
    *   情報ペインの原則「**操作は対象の隣**」と自己矛盾していた。
-   * ⚠ **新しい改名の規則を作らない** ── 既存の 1 つを撃つだけ
+   * ⚠ **題名の改名の規則を作らない** ── 既存の 1 つを撃つだけ
    *   (`binder.ts` の別の 2 か所と同じ action)。
+   * 🔴 **ダウンロードのファイル名も一緒に変える**(#1220 穴②、裁定 A)。⚠ 添付の本文の
+   *   `attachment.name:` は編集欄から畳んだので(`attachment-edit-fold.ts`)、**ここが
+   *   ファイル名を変えられる唯一の場所**になる。題名は `RENAME_ENTRY_TITLE`(本文に触らない)、
+   *   ファイル名は `SET_ATTACHMENT_NAME`(書く直前に disk から読み直し、その 1 行だけを差し替える)
+   *   の **2 本を順に撃つ** ── 1 本にまとめると、題名の改名が本文の書込の衝突に巻き込まれる。
+   * ⚠ 範囲はこの欄だけ。一覧の `F2` / 右クリックの改名は題名だけを変える(ファイル名は変わらない)。
    */
   'rename-attachment': (dispatcher, target) => {
     // 🔴 **押した欄が対象を持つ**(#848)── 留めた枠でも、その枠のノートを改名する
@@ -8380,6 +8386,8 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid, title });
+    // ⚠ 題名を先に撃つ ── 後ろの書換は更新済みの題名を持って本文を書く(古い題名で戻さない)
+    dispatcher.dispatch({ type: 'SET_ATTACHMENT_NAME', lid, name: title });
   },
   /**
    * ランチャーのタイル設定(P8 段⑭)。
