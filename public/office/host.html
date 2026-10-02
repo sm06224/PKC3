@@ -215,6 +215,8 @@
   var unsavedOpenBtn = document.getElementById('unsaved-open');
   var unsavedCancelBtn = document.getElementById('unsaved-cancel');
   var focusBeforeUnsaved = null;
+  // 🔴 Escape(document の capture)と背景の mousedown(焦点を「やめる」へ)── 判断は `office-unsaved.js`(#1266)
+  var unsavedKeys = window.PKC3OfficeUnsaved && window.PKC3OfficeUnsaved.createDialogKeys(document, unsavedEl, unsavedCancelBtn);
   var unsavedGate = window.PKC3OfficeUnsaved && window.PKC3OfficeUnsaved.createGate({
     getLo: function () { return window.__lo; },
     isDead: function () { return dead; },
@@ -222,11 +224,13 @@
     show: function () {
       focusBeforeUnsaved = document.activeElement;
       unsavedEl.hidden = false;
+      if (unsavedKeys) unsavedKeys.arm();
       // ⚠ 既定の焦点は「やめる」(うっかり Enter で消さない)
       try { unsavedCancelBtn.focus(); } catch (e) { /* 無視 */ }
     },
     hide: function () {
       unsavedEl.hidden = true;
+      if (unsavedKeys) unsavedKeys.disarm();
       // 🔑 **閉じたら焦点を返す**(置き換えの作法。自前の箱は native と違い焦点を戻さない)
       var f = focusBeforeUnsaved; focusBeforeUnsaved = null;
       try { if (f && document.contains(f) && typeof f.focus === 'function') f.focus(); } catch (e) { /* 戻せない */ }
@@ -242,9 +246,6 @@
   }
   unsavedOpenBtn.addEventListener('click', function () { if (unsavedGate) unsavedGate.accept(); });
   unsavedCancelBtn.addEventListener('click', function () { if (unsavedGate) unsavedGate.cancel(); });
-  unsavedEl.addEventListener('keydown', function (ev) {
-    if (ev.key === 'Escape') { ev.preventDefault(); unsavedCancelBtn.click(); }
-  });
 
   // ── 異常終了を**見える形にする**(#117)──────────────────────────────
   //

@@ -217,6 +217,14 @@ function keyOf(ex: PlaceExcerpt): string {
 }
 
 /**
+ * 枠の接頭辞の連番。🔴 **`PlaceEmbeds` ごとに数えない(module に 1 つ)** ── 主の枠と、横に留めた枠は
+ * 別の `DetailRenderer` = 別の `PlaceEmbeds` で、同じ document に居る。0 から数え直すと
+ * `place-1-fn1` が 2 枚の板で重複し、脚注・目次が document 順で最初の相手へ飛ぶ。
+ * ⚠ `reset` でも戻さない(古い `href` が別の枠を指さない)。
+ */
+let nsSeq = 0;
+
+/**
  * 板の中の `entry=` の塊に、置いたノートの中身を描く(**描画のたびに呼んでよい**。冪等)。
  *
  * 呼ぶのは 2 つの場面:本文の板が描き直されたとき(`applyPlaceLayout` の後)と、
@@ -253,8 +261,6 @@ export class PlaceEmbeds {
   private readonly scopes: MermaidScope[] = [];
   /** この回で器を埋め直した枠(まとめて 1 回で図の塊を作る ── 観測器を枠ごとに積まない)。 */
   private fresh: HTMLElement[] = [];
-  /** 枠の接頭辞の連番。⚠ `reset` でも戻さない(古い `href` が別の枠を指さない)。 */
-  private nsSeq = 0;
 
   /** 近づいたかの観測(板に 1 つ)。`null` = まだ作っていない / 観測できない環境。 */
   private watcher: VisibleWatch | null = null;
@@ -365,7 +371,7 @@ export class PlaceEmbeds {
       // 🔴 近づいていない枠は中身を作らない(帯だけ)
       if (this.watcher !== null && !this.near.has(block)) continue;
       const key = keyOf(ex);
-      const slot = ensureSlot(block, () => `place-${String(++this.nsSeq)}-`);
+      const slot = ensureSlot(block, () => `place-${String(++nsSeq)}-`);
       if (slot.getAttribute(KEY_ATTR) === key) continue;
       if (ex.att !== undefined) {
         this.fillAttachment(slot, key, ex.att, meta.title, lid, deps);
@@ -418,7 +424,11 @@ export class PlaceEmbeds {
   /** 枠の中の添付画像を借りて差す(⚠ 印は差す前に付ける ── 押し所と `src` の有無は別の話)。 */
   private hydrateImages(slot: HTMLElement, deps: PlaceEmbedDeps): void {
     const imgs = [...slot.querySelectorAll<HTMLImageElement>('img[data-pkc-asset-key]')];
-    if (imgs.length === 0) return;
+    if (imgs.length === 0) {
+      // 🔴 画像を消した本文へ描き直した枠 ── 前の貸出を返す(`hydrate` の頭の `prune` を通らない道)
+      this.lends.get(slot)?.prune();
+      return;
+    }
     for (const img of imgs) markViewBig(img);
     if (deps.lender === null) {
       for (const img of imgs) img.setAttribute('data-pkc-asset-missing', '');
@@ -458,6 +468,8 @@ export class PlaceEmbeds {
       note.textContent = PLACE_PDF_NOTE;
       slot.append(note);
     }
+    // 🔴 画像でなくなった枠(画像の添付 → PDF の添付)── 前の画像の貸出をここで返す
+    if (att.kind !== 'image') this.lends.get(slot)?.prune();
     slot.setAttribute(KEY_ATTR, key);
     slot.removeAttribute(PENDING_ATTR);
   }

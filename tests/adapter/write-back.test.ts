@@ -204,6 +204,75 @@ describe('元のファイルへ書き戻す', () => {
 });
 
 /**
+ * 🔴 **`settle` の 2 か所(確認の前 / 確認の後)を、それぞれ単独で守る**(#1266)。
+ *
+ * ⚠ 上の `lagging()` は「待つ前は**保存前の本文(空ではない)**、待った後は保存した本文」── 待たなくても
+ *   空の門は通るので、**1 回目の `settle` を外しても緑**だった(変異で生き延びた)。2 回目も同じ:
+ *   確認の間の変更は `getBody` を**直に書き換える**形で、`settle` を待たなくても見えていた。
+ * 🔑 台を「**書込が飛んでいる間は disk に載っていない**」形にする(`settle` が解けて初めて載る)。
+ *   これなら、待たない側は**空 / 古い本文**を読み、観測点(書かれた中身・断り)が分かれる。
+ */
+describe('settle は確認の前と後の両方で待つ', () => {
+  /** 飛んでいる書込を持つ台。`settle()` が解けるまで、`post` した本文は `getBody` に見えない。 */
+  function inFlight(initial: string) {
+    let committed = initial;
+    const queue: string[] = [];
+    const store = {
+      settleCalls: 0,
+      post: (b: string): void => {
+        queue.push(b);
+      },
+      settle: async (): Promise<void> => {
+        store.settleCalls += 1;
+        for (const b of queue.splice(0)) committed = b;
+      },
+      getBody: async (): Promise<string | null> => committed,
+    };
+    return store;
+  }
+
+  it('🔴 空のノートに字を打って保存し、すぐ押すと、打った字が書かれる(待たずに読むと空で断る)', async () => {
+    const store = inFlight(''); // ディスクは空のまま
+    store.post('打った字'); // 保存の書込が飛んでいる
+    const { deps, written, said } = harness({ settle: store.settle, getBody: store.getBody });
+    await writeBackEntry(deps);
+    expect(said, '待たずに空を読んで断った').toEqual(['done:書き戻しました: メモ.md']);
+    expect(written).toEqual(['打った字']);
+  });
+
+  it('🔴 確認の間に飛んでくる書込も、2 回目の待ちで着地してから読む(書く物は確認の後の本文)', async () => {
+    const store = inFlight('確認の前の本文');
+    const { deps, written } = harness({
+      settle: store.settle,
+      getBody: store.getBody,
+      confirm: async () => {
+        store.post('確認の間に飛んで来た本文'); // 窓が開いている間に別の保存が飛ぶ
+        return true;
+      },
+    });
+    await writeBackEntry(deps);
+    expect(written, '確認の間の保存を待たず、古い本文を書いた(巻き戻し)').toEqual(['確認の間に飛んで来た本文']);
+    expect(store.settleCalls, '待つのは確認の前と後で 2 回').toBe(2);
+  });
+
+  it('⚠ 対照群: 飛んでいる書込が無くても、待ちは 2 回呼ばれ、書かれる本文は変わらない', async () => {
+    const store = inFlight('そのままの本文');
+    const { deps, written } = harness({ settle: store.settle, getBody: store.getBody });
+    await writeBackEntry(deps);
+    expect(written).toEqual(['そのままの本文']);
+    expect(store.settleCalls).toBe(2);
+  });
+
+  it('⚠ 「やめる」なら 2 回目の待ちも読みも起きない(待ちは確認の前の 1 回だけ)', async () => {
+    const store = inFlight('本文');
+    const { deps, written } = harness({ settle: store.settle, getBody: store.getBody, confirm: async () => false });
+    await writeBackEntry(deps);
+    expect(written).toEqual([]);
+    expect(store.settleCalls).toBe(1);
+  });
+});
+
+/**
  * ⚠ **配線は原文 pin で妥協する**(`main.ts` はどの test からも実行されない)。
  * 🔑 見るのは 2 つ:①`writeBackEntry` を通していること
  * ②その場に **`getBody` を直に呼ぶ古い形が戻っていない**こと。

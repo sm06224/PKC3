@@ -645,6 +645,58 @@ describe('窓が「替えない」と言ったとき(#1228 穴②)', () => {
     expect(docs(h).map((d) => d.payload.name)).toEqual(['a.docx']);
   });
 
+  /**
+   * 🔴 **2 件続けて頼み、片方だけが「やめた」より先に届く**(#1266。真偽 1 つの印では、先に届いた 1 件で
+   * 「届いていない文書は無い」になり、後の 1 件が窓へ送られて**元の文書が出たままの窓へ別の文書が入った**)。
+   * ⚠ 届く順は 2 通り ── どちらも数える(印が「最後に頼んだ 1 件」にだけ効く形だと、片方で落ちる)。
+   */
+  it('🔴 2 件頼み、1 件が届いた後の「やめた」── 後から届く 1 件も受け取らない(元の文書のまま)', () => {
+    const h = windowShowing();
+    h.ow.open({ name: 'b.docx', expectDocument: true });
+    h.ow.open({ name: 'c.docx', expectDocument: true });
+    h.ow.provideDocument('b.docx', new Uint8Array([2]), 'lid-B');
+    h.ch.deliver('reload-declined');
+    h.ow.provideDocument('c.docx', new Uint8Array([3]), 'lid-C');    // 遅れて届く
+    h.ch.deliver('ready-for-document');
+    expect(docs(h).map((d) => d.payload.name), 'c が窓へ送られた').toEqual(['a.docx']);
+    expect(docs(h)[0]!.payload.token).toBe('lid-A');
+  });
+
+  it('🔴 2 件頼み、後の 1 件が先に届いた後の「やめた」── 遅れて届く先の 1 件も受け取らない', () => {
+    const h = windowShowing();
+    h.ow.open({ name: 'b.docx', expectDocument: true });
+    h.ow.open({ name: 'c.docx', expectDocument: true });
+    h.ow.provideDocument('c.docx', new Uint8Array([3]), 'lid-C');
+    h.ch.deliver('reload-declined');
+    h.ow.provideDocument('b.docx', new Uint8Array([2]), 'lid-B');    // 遅れて届く
+    h.ch.deliver('ready-for-document');
+    expect(docs(h).map((d) => d.payload.name), 'b が窓へ送られた').toEqual(['a.docx']);
+  });
+
+  it('🔴 2 件頼み、どちらも届く前の「やめた」── 後から届く 2 件とも受け取らない(捨てる数は届いていない数)', () => {
+    const h = windowShowing();
+    h.ow.open({ name: 'b.docx', expectDocument: true });
+    h.ow.open({ name: 'c.docx', expectDocument: true });
+    h.ch.deliver('reload-declined');
+    h.ow.provideDocument('b.docx', new Uint8Array([2]), 'lid-B');
+    h.ow.provideDocument('c.docx', new Uint8Array([3]), 'lid-C');
+    h.ch.deliver('ready-for-document');
+    expect(docs(h).map((d) => d.payload.name), 'b か c が窓へ送られた').toEqual(['a.docx']);
+  });
+
+  it('⚠ 対照群: 2 件頼み、「やめた」より前に 2 件とも届いたなら、捨てる印は残らない(次の依頼は受け取る)', () => {
+    const h = windowShowing();
+    h.ow.open({ name: 'b.docx', expectDocument: true });
+    h.ow.open({ name: 'c.docx', expectDocument: true });
+    h.ow.provideDocument('b.docx', new Uint8Array([2]));
+    h.ow.provideDocument('c.docx', new Uint8Array([3]));
+    h.ch.deliver('reload-declined');
+    h.ow.open({ name: 'd.docx', expectDocument: true });
+    h.ow.provideDocument('d.docx', new Uint8Array([4]), 'lid-D');
+    h.ch.deliver('ready-for-document');
+    expect(docs(h).map((d) => d.payload.name)).toEqual(['d.docx']);
+  });
+
   it('refresh を持つ元の文書は、「やめた」の後の送り直しでも「いま」の中身を引き直す', async () => {
     vi.useFakeTimers();
     const h = harness();

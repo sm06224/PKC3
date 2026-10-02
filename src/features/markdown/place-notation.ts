@@ -67,6 +67,25 @@ export function isPlaceOpen(line: string): boolean {
   return placeOpenAttrs(line) !== null;
 }
 
+/**
+ * 🔴 **この本文の板が置いているノートの lid**(`entry=`)。fence の中の行は数えない。
+ *
+ * 用途は「いま画面に出ている板が要る抜粋を、上限で手放さない」(`app-state.ts` の `withPlaceBody`)。
+ * 🔑 受理は `placeOpenAttrs`(= 描画と同じ関数)の 1 本 ── 描画が `data-pkc-place-entry` へ焼く値は
+ *   この `kvs.entry` そのもの(`place-board.ts`)なので、数える相手が描画とずれない。
+ */
+export function placeEntryLids(body: string): string[] {
+  const lines = body.split('\n');
+  const mask = fenceMask(lines, frontmatterLineCount(body));
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    if (mask[i] === true) continue;
+    const entry = placeOpenAttrs(lines[i]!)?.kvs.entry;
+    if (typeof entry === 'string' && entry !== '') out.push(entry);
+  }
+  return out;
+}
+
 /** 開き行が線の塊(`.pkc-line` のクラス札)か(#530 段③d。消す口が使う)。 */
 export function isLineOpen(line: string): boolean {
   return formatOpenAttrs(line, 'pkc-line') !== null;

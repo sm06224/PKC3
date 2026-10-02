@@ -137,8 +137,54 @@
     };
   }
 
+  /**
+   * 🔴 **確認の箱が開いている間だけ効く「やめる」の近道 2 つ**(#1266)。
+   *
+   * 箱は焦点を「やめる」へ置いて開くが、**暗い背景を押すと焦点が `body` へ落ちる**(背景は焦点を受けない)。
+   * 箱の中だけで Escape を受けていると、そこでは**何も起きず、鍵は LO へ流れる**
+   * (確認が出たまま Escape が LO の取り消しに化ける)。だから 2 つを**両方**置く:
+   *   ① `document` の capture で Escape を受ける ── 焦点がどこに在っても効き、LO へ流さない
+   *   ② 背景の `mousedown` で焦点を「やめる」へ戻す ── ボタンの押しは邪魔しない
+   * ⚠ 片方だけだと、別の受け手(新しい入力欄など)を足した日に戻る。
+   * @param doc `addEventListener` / `removeEventListener` を持つ `document`
+   * @param el 箱の外側(暗い背景)/ @param cancelBtn 「やめる」
+   */
+  function createDialogKeys(doc, el, cancelBtn) {
+    var armed = false;
+    function onKey(ev) {
+      if (ev.key !== 'Escape') return;
+      ev.preventDefault();
+      ev.stopPropagation(); // LO(Qt)へ Escape を流さない
+      cancelBtn.click();
+    }
+    function onDown(ev) {
+      var t = ev.target;
+      // ボタンの押しは通す(「開く」「やめる」自身の click を殺さない)
+      if (t && typeof t.closest === 'function' && t.closest('button')) return;
+      ev.preventDefault();
+      try { cancelBtn.focus(); } catch (e) { /* 戻せない */ }
+    }
+    return {
+      /** 箱を開くとき。 */
+      arm: function () {
+        if (armed) return;
+        armed = true;
+        doc.addEventListener('keydown', onKey, true);
+        el.addEventListener('mousedown', onDown);
+      },
+      /** 箱を閉じるとき(⚠ 外す ── 閉じた後の Escape を LO から奪わない)。 */
+      disarm: function () {
+        if (!armed) return;
+        armed = false;
+        doc.removeEventListener('keydown', onKey, true);
+        el.removeEventListener('mousedown', onDown);
+      },
+    };
+  }
+
   root.PKC3OfficeUnsaved = {
     anyModified: anyModified,
     createGate: createGate,
+    createDialogKeys: createDialogKeys,
   };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
