@@ -93,3 +93,13 @@ export function diffCounts(from: string, to: string): { added: number; removed: 
   }
   return { added, removed };
 }
+
+/**
+ * 履歴の日時を `YYYY-MM-DD HH:MM` に縮める(#1231 段①。版を名指しする字に使う)。
+ * ⚠ 読めない形はそのまま返す(縮めようとして字を落とさない)。`null` はそのまま `null`。
+ */
+export function shortStamp(createdAt: string | null): string | null {
+  if (createdAt === null) return null;
+  const m = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/.exec(createdAt);
+  return m === null ? createdAt : `${m[1]} ${m[2]}`;
+}

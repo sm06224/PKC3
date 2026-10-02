@@ -6715,6 +6715,40 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   color: var(--muted);
   font-style: italic;
 }
+/* 🔴 **左右に並べた差分**(#1231 段①)。左 = 相手 / 右 = この版。
+ * ⚠ **同じ行の 2 つの升は同じ高さ**になる(grid が行ごとに高さを揃える)── 消えた行は左だけ、
+ *   足した行は右だけに出て、反対側は空の升。畳み(`gap`)は両列にまたがる。 */
+[data-pkc-field='revision-diff'] ul[data-pkc-diff-layout='side'] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: var(--s2);
+  list-style: none;
+}
+[data-pkc-diff-layout='side'] > [data-pkc-diff='gap'] {
+  grid-column: 1 / -1;
+}
+/* 列の頭(どちらが相手で、どちらがこの版か) */
+[data-pkc-field='revision-diff'] > div[data-pkc-field='revision-diff-cols'] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: var(--s2);
+  justify-content: stretch;
+  margin-top: var(--s2);
+  color: var(--muted);
+  font-weight: 600;
+}
+/* 🔑 **字単位の強調**は、行の色(`--ok` / `--danger`)を**濃い下地**にして読ませる ── 新しい色は作らない。
+ * ⚠ 色は補助である(行の頭の + / − が字で置いてある)。 */
+mark[data-pkc-diff-char] {
+  color: inherit;
+  border-radius: 2px;
+}
+mark[data-pkc-diff-char='add'] {
+  background: color-mix(in oklab, var(--ok, #1a7f37) 30%, transparent);
+}
+mark[data-pkc-diff-char='del'] {
+  background: color-mix(in oklab, var(--danger, #a40e26) 30%, transparent);
+}
 
 /* 🔑 **長い題名を畳む規則は 1 か所にまとめる**(P8 段㉒)。
  * 一覧・ランチャー・表・パンくず ── 面ごとに書くと、次に増えた面でまた抜ける
@@ -8548,6 +8582,22 @@ h3[data-pkc-section] {
 [data-pkc-region='shell'][data-pkc-layout='tablet'][data-pkc-page='note'] [data-pkc-region='center'],
 [data-pkc-region='shell'][data-pkc-layout='tablet'][data-pkc-page='info'] [data-pkc-region='center'] {
   padding-top: var(--pkc-phone-bar);
+}
+
+/* 🔴 **版面が狭いときは差分を 1 列へ戻す**(#1231 段①)── 左右に割ると 1 列あたりが読めない幅になる。
+ * 1 列では消えた行(相手)→ 足した行(この版)の順に積まれ、空の升と**同じ行の重複**は出さない。 */
+@media (max-width: 48rem) {
+  [data-pkc-field='revision-diff'] ul[data-pkc-diff-layout='side'] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  /* ⚠ 上の `[data-pkc-field='revision-diff'] li { display: block }`(0,1,1)に勝つ詳細度にする(属性 2 つ以上) */
+  [data-pkc-diff-layout='side'] > [data-pkc-diff='empty'],
+  [data-pkc-diff-layout='side'] > [data-pkc-diff='same'][data-pkc-diff-side='right'] {
+    display: none;
+  }
+  [data-pkc-field='revision-diff'] > div[data-pkc-field='revision-diff-cols'] {
+    display: none;
+  }
 }
 
 /**

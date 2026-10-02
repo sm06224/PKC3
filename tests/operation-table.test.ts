@@ -281,7 +281,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'set-app-open-target', 'set-browse', 'set-code-collapse', 'set-color-swatch', 'set-column-rule', 'set-date-links', 'set-editor-mode', 'set-entry-date',
   'set-entry-sort', 'set-external-images', 'set-flag', 'set-inline-code-copy', 'set-notices-enabled', 'set-open-in-edit', 'set-pdf-reader',
   'set-missing-links', 'set-open-place', 'set-page-format', 'set-paste-source', 'set-phone-links', 'set-prose-align',
-  'set-query-key', 'set-read-columns', 'set-relative-days', 'set-sql-engine', 'set-sql-source', 'set-sql-text', 'set-tag-badge',
+  'set-query-key', 'set-read-columns', 'set-relative-days', 'set-revision-compare', 'set-sql-engine', 'set-sql-source', 'set-sql-text', 'set-tag-badge',
   'set-text-scale', 'set-theme', 'set-too-narrow-enabled', 'set-view', 'set-voice-boost',
   'show-trash', 'skip-to', 'sort-tasks',
   'smart-cond-add', 'smart-evict', 'smart-field',
@@ -458,6 +458,9 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-02(#999): システム → 保存領域の「縮める」(`storage-vacuum`)で受け手 +1 ── 登記は増えない
       //   (押し口は設定の欄にしか無く、鍵も持たない)。`receivers` +1 / `total` +1 / `unregistered` +1。
       //   押した所から何も要らない N(`storage-profile` と同じ仕分け)
+      // ⚠ 2026-10-02(#1231 段①): 履歴の面の「くらべる相手」(`set-revision-compare`)で受け手 +1 ── 登記は増えない
+      //   (押し口は履歴の差分の頭の選択欄にしか無く、鍵も持たない)。`receivers` +1 / `total` +1 / `unregistered` +1。
+      //   閉じた選択肢を 1 つ選ぶ E(`set-prose-align` と同じ仕分け)。
       // ⚠ 2026-10-02(#1233): 選んだ字を整える 5 つ(`tidy-join-lines` / `tidy-to-halfwidth` /
       //   `tidy-kana-to-fullwidth` / `tidy-squeeze-blank-lines` / `tidy-strip-bullets`)で登記 +5 /
       //   total +5 / `outsideActionsTable` +5。受け手は増えない ── 押し所を作らず、「本文の欄へ当てる命令」の
@@ -718,12 +721,12 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-02(#215 段①②): 左の列の「PC」のタブの押し口 4 つ(`pc-pick-folder` / `pc-cut-folder` / `pc-more` /
       //   `pc-open-file`)で受け手 +4 ── 登記は増えない(押し口はタブの中にしか無く、鍵も持たない)。
       //   `receivers` +4 / `total` +4 / `unregistered` +4。
-      total: 381,
-      receivers: 317,
+      total: 382,
+      receivers: 318,
       registered: 103,
       both: 39,
       outsideActionsTable: 64,
-      unregistered: 278,
+      unregistered: 279,
     });
   });
 

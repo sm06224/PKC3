@@ -2690,14 +2690,36 @@ export function connectStoreEffects(
       case 'REQUEST_REVISION_BODY':
         enqueue(async () => {
           if (disposed) return;
+          /**
+           * 🔴 **くらべる相手として読むとき**(#1231 段①)は、**同じ読み口**で読んで結果だけ別の action に載せる
+           *   (新しい読み方を作らない)。⚠ 読めなかったときは赤い帯ではなく**その場の字**で言う
+           *   (`REVISION_COMPARE_LOADED` の `text: null`)── 相手を選び直せば済むので。
+           */
+          const against = ev.forCompareOf === undefined ? null : `rev:${ev.revId}`;
+          const compareDone = (text: string | null): void =>
+            dispatcher.dispatch({
+              type: 'REVISION_COMPARE_LOADED',
+              lid: ev.lid,
+              previewRevId: ev.forCompareOf!,
+              against: against!,
+              text,
+            });
           try {
             const rev = await store.getRevision(ev.revId);
             if (disposed) return;
             if (rev === null) {
+              if (against !== null) {
+                compareDone(null);
+                return;
+              }
               dispatcher.dispatch({
                 type: 'OP_FAILED',
                 error: 'その版の本文を読めませんでした(履歴が整理された可能性があります)',
               });
+              return;
+            }
+            if (against !== null) {
+              compareDone(rev.body);
               return;
             }
             dispatcher.dispatch({
@@ -2707,11 +2729,15 @@ export function connectStoreEffects(
               body: rev.body,
             });
           } catch (e) {
-            if (!disposed)
-              dispatcher.dispatch({
-                type: 'OP_FAILED',
-                error: `版の読み出しに失敗しました: ${String(e)}`,
-              });
+            if (disposed) return;
+            if (against !== null) {
+              compareDone(null);
+              return;
+            }
+            dispatcher.dispatch({
+              type: 'OP_FAILED',
+              error: `版の読み出しに失敗しました: ${String(e)}`,
+            });
           }
         });
         break;

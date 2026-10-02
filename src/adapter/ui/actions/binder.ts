@@ -1649,6 +1649,12 @@ export interface BinderServices {
    */
   writeBackFile?(lid: string): void;
   /**
+   * 🔴 **結びついている PC のファイルの、いまの中身を読む**(#1231 段①。履歴の面の「くらべる相手」)。
+   * `null` = 読めなかった / 大きすぎる(**「同じ」と言わない**)。⚠ 読むだけ ── 書かない。
+   * ⚠ 呼んでよいのは**相手に選んだ瞬間**だけ(一覧では呼ばない = #1271)。
+   */
+  readLinkedFile?(lid: string): Promise<string | null>;
+  /**
    * 🔴 **パソコンのフォルダ**(#215 段①②。🟣 Gemini 裁定 2026-10-01)。
    * ⚠ handle は `LocalFolder` が持つ ── binder は「押された」を伝えるだけで、
    *   選ぶ・列挙・許可の確かめ・取り込みの振り分けは全部実体側。
@@ -10876,6 +10882,30 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'hide-revision-preview': (dispatcher) => {
     dispatcher.dispatch({ type: 'HIDE_REVISION_PREVIEW' });
+  },
+  /**
+   * 🔴 **くらべる相手を選ぶ**(#1231 段①)。⚠ **読むだけ**(`BODY_WRITE_ACTIONS` に載せない)。
+   * 版を相手にするときの読みは reducer の event(`REQUEST_REVISION_BODY`)が運ぶ。
+   * PC のファイルだけは **handle が state に居ない**ので、ここで `services.readLinkedFile` を呼ぶ。
+   * ⚠ 返りは**選んだ時の版・相手と照らされる**(reducer の `REVISION_COMPARE_LOADED`)── 遅れて着いても上書きしない。
+   */
+  'set-revision-compare': (dispatcher, target, services) => {
+    if (!(target instanceof HTMLSelectElement)) return;
+    const value = target.value;
+    dispatcher.dispatch({ type: 'SET_REVISION_COMPARE', value });
+    const pv = dispatcher.getState().revisionPreview;
+    if (value !== 'file' || pv === null || pv.compare.kind !== 'file' || pv.compare.load.state !== 'loading')
+      return;
+    const { lid, revId } = pv;
+    const done = (text: string | null): void =>
+      dispatcher.dispatch({ type: 'REVISION_COMPARE_LOADED', lid, previewRevId: revId, against: 'file', text });
+    const read = services.readLinkedFile;
+    // ⚠ 読む口が無い環境では「読めませんでした」で終える(「読んでいます…」のまま止めない)
+    if (read === undefined) {
+      done(null);
+      return;
+    }
+    void read(lid).then(done, () => done(null));
   },
   'restore-revision': (dispatcher, target) => {
     // 前進変異(復元前に現状が履歴に積まれる)なので confirm は要らない ──
