@@ -386,7 +386,11 @@ describe('check-pack ── 門ごとに別の文言で落ちる', () => {
     expect(r.problems[0]?.message).toContain('onnxruntime-common');
   });
 
-  it('CLI:通れば 0 / 落ちれば 1 で、stderr に門の名前と文言が出る', async () => {
+  /**
+   * ⚠ この 1 件だけ timeout を伸ばす ── node を子プロセスで 2 回起動する(通る回 / 落ちる回)ので、
+   *   箱で別の仕事が並走すると 5 秒の既定を超えて落ちる(2026-10-02 に実測。単独なら緑)。
+   */
+  it('CLI:通れば 0 / 落ちれば 1 で、stderr に門の名前と文言が出る', { timeout: 20_000 }, async () => {
     const ok = fakePack();
     await make({ outDir: ok, now: NOW });
     const out = execFileSync('node', [CHECK_CLI, '--out', ok], { encoding: 'utf8', stdio: 'pipe' });
