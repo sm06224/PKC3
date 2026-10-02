@@ -1219,8 +1219,22 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     //    (フラグ画面で切り替えたら、次に開く窓から効く)
     inputLog: () => appFlags.isOn(FLAG_OFFICE_INPUT_LOG.name),
   });
+  /**
+   * 🔴 **ノート(lid)が「いま」持っている添付の key**(frontmatter が正本)。
+   * 🔑 保存の引き取り(`readAttachment`)と、窓を読み直すときの引き直し(`currentAssetKey`)の
+   * **同じ問い**なので 1 か所にする(§7)。
+   */
+  const currentAttachmentKey = async (lid: string): Promise<string | null> => {
+    const meta = dispatcher.getState().entryMetas.get(lid);
+    if (meta?.archetype !== 'attachment') return null;
+    const body = (await client.request({ op: 'getBody', cid, lid })) ?? null;
+    if (body === null) return null;
+    return readAttachmentMeta(body).assetKey;
+  };
   const officeOpener = createOfficeOpener({
     officeWindow,
+    // 🔴 窓を「読み込み直す」とき、保存済みの最新を渡す(#1228 穴①)
+    currentAssetKey: currentAttachmentKey,
     isPackInstalled: () => appOfficePack.isInstalled(),
     readAsset: async (assetKey) => {
       const blob = await blobs.get(cid, assetKey);
@@ -2171,11 +2185,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         ? Promise.resolve(null)
         : localOffice.writeBack(token, bytes),
     readAttachment: async (lid) => {
-      const meta = dispatcher.getState().entryMetas.get(lid);
-      if (meta?.archetype !== 'attachment') return null;
-      const body = (await client.request({ op: 'getBody', cid, lid })) ?? null;
-      if (body === null) return null;
-      const key = readAttachmentMeta(body).assetKey;
+      const key = await currentAttachmentKey(lid);
       return key === null ? null : { assetKey: key };
     },
     createNote: async (save, bytes) => {

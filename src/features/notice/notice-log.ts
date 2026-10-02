@@ -168,6 +168,14 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-10-02-office-reload-resend',
+    title: 'Office の窓で「読み込み直す」を押しても、開いていた文書がそのまま開き直るようになりました',
+    items: [
+      'Office の窓が止まって「読み込み直す」を押したとき、開いていた文書がそのまま開き直ります(これまでは文書が渡されず、何も開いていない画面になっていました)。窓の中で保存済みの分は最新の版が開きます。',
+      '保存していない変更は、読み込み直すと消えます(「読み込み直す」の意味どおりです)。',
+    ],
+  },
+  {
     id: '2026-10-02-folder-overview',
     title: 'フォルダを選ぶと、中央に中のノートとフォルダの数と一覧が出るようになりました',
     items: [

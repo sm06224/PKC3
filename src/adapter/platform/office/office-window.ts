@@ -53,6 +53,15 @@ export const OFFICE_ADOPTED = 'adopted';
 
 /** 窓が生きていると見なす猶予。heartbeat はこれより短い間隔で来る。 */
 export const ALIVE_TTL_MS = 4000;
+/**
+ * 🔴 **窓が「閉じた」と言ってから、送った文書を覚えておく間**(#1228 穴①)。
+ *
+ * ⚠ 「読み込み直す」(`location.reload()`)でも窓は `pagehide` → `closed` を放送する ──
+ * **閉じたのか読み直しなのかは、この通知だけでは区別できない**。読み直しなら数秒のうちに
+ * 作り直した窓が `ready-for-document` で戻ってくるので、その間だけ捨てずに待つ。
+ * 戻って来なければ本当に閉じたので、ここで bytes を手放す(heap に抱え続けない)。
+ */
+export const RESEND_GRACE_MS = 30_000;
 
 export type OfficeWindowEvent =
   /**
@@ -113,6 +122,22 @@ export interface OfficeImagePayload {
   readonly bytes: Uint8Array;
 }
 
+/** 窓へ渡す文書の中身(bytes と、並べる画像)。 */
+export interface OfficeDocumentSource {
+  readonly bytes: Uint8Array;
+  readonly images?: readonly OfficeImagePayload[];
+}
+
+/**
+ * 🔴 **いまの文書を読み直す口**(#1228 穴①)。窓が作り直されて文書を再び求めたときに呼ぶ。
+ *
+ * ⚠ 窓の中で保存すると添付は**別の key に差し替わる**ので、最初に渡した bytes は古い。
+ * 呼び側が「そのノートの**いま**の添付」を引ける口を渡せば、読み直した窓は
+ * 保存済みの最新を開く(古い版を開いて編集し、保存で新しい版を上書きする、を作らない)。
+ * `null` は「もう読めない」(ノートが消えた等)── このときは何も送らない。
+ */
+export type OfficeDocumentRefresh = () => Promise<OfficeDocumentSource | null>;
+
 export interface OpenOptions {
   /** 窓に渡す表示名(そのまま file 名になる)。 */
   readonly name?: string;
@@ -169,7 +194,23 @@ export class OfficeWindow {
     bytes: Uint8Array;
     token: string;
     images: readonly OfficeImagePayload[];
+    refresh: OfficeDocumentRefresh | null;
   } | null = null;
+  /**
+   * 🔴 **最後に窓へ送った文書の控え**(#1228 穴①)。窓が**作り直されて**もう一度
+   * `ready-for-document` と言ってきたとき(停止の帯の「読み込み直す」)に送り直すために要る ──
+   * 無いと、読み直した窓は 15 秒待って Start Center になる。
+   * ⚠ `refresh` を持つ文書は **bytes / images を抱えない**(読み直すときに引く)。
+   * ⚠ 窓が閉じて `RESEND_GRACE_MS` 戻らなければ捨てる / 新しい文書を頼む `open()` でも捨てる。
+   */
+  private lastSent: {
+    name: string;
+    token: string;
+    bytes: Uint8Array | null;
+    images: readonly OfficeImagePayload[];
+    refresh: OfficeDocumentRefresh | null;
+  } | null = null;
+  private graceTimer: ReturnType<typeof setTimeout> | null = null;
   /** 窓が先に「ちょうだい」と言ってきたが、まだ bytes が無い状態。 */
   private askedForDoc = false;
   private readonly listeners = new Set<(ev: OfficeWindowEvent) => void>();
@@ -210,11 +251,15 @@ export class OfficeWindow {
    */
   open(opts: OpenOptions = {}): OpenOutcome {
     this.pendingDoc = opts.bytes
-      ? { name: opts.name ?? 'document', bytes: opts.bytes, token: '', images: [] }
+      ? { name: opts.name ?? 'document', bytes: opts.bytes, token: '', images: [], refresh: null }
       : null;
     // ⚠ 新しく開く / 読み直させるので、前の「ちょうだい」は無効にする
     this.askedForDoc = false;
     const wantsDoc = opts.bytes !== undefined || opts.expectDocument === true;
+    // 🔴 別の文書が来る(or 窓を新しく作る)ので、前の文書の控えは捨てる。⚠ 残すと
+    //    「次の文書がまだ届いていない間に窓が ready と言った」とき**前の文書を送る**。
+    //    ⚠ 生きている窓へ `open({})`(Start Center だけ)と頼むときは窓の中身が変わらないので残す
+    if (wantsDoc || !this.isProbablyOpen()) this.dropLastSent();
 
     if (this.isProbablyOpen()) {
       // ⚠ 2 つ立てると常駐が倍になる(1 窓 約 750MB 実測)。開かずに頼む
@@ -250,10 +295,11 @@ export class OfficeWindow {
     bytes: Uint8Array,
     token = '',
     images: readonly OfficeImagePayload[] = [],
+    refresh: OfficeDocumentRefresh | null = null,
   ): void {
     // ⚠ 空を渡して Start Center を上書きしない
     if (bytes.byteLength === 0) return;
-    this.pendingDoc = { name, bytes, token, images };
+    this.pendingDoc = { name, bytes, token, images, refresh };
     if (this.askedForDoc) this.sendDocument();
   }
 
@@ -289,6 +335,7 @@ export class OfficeWindow {
   }
 
   dispose(): void {
+    this.dropLastSent();
     this.listeners.clear();
     this.ch.onmessage = null;
     this.ch.close();
@@ -323,7 +370,11 @@ export class OfficeWindow {
     const ev = parseEvent(data);
     if (!ev) return;
     if (ev.type === 'alive') this.lastAliveAt = this.now();
-    if (ev.type === 'closed') this.lastAliveAt = 0;
+    if (ev.type === 'closed') {
+      this.lastAliveAt = 0;
+      // ⚠ 読み直しでも `closed` は来る(上の `RESEND_GRACE_MS`)── すぐには捨てず、戻らなければ捨てる
+      this.armGrace();
+    }
     if (ev.type === 'ready-for-document') {
       // ⚠ **bytes がまだ無いこともある**(添付を IDB から読んでいる最中)。
       //    その時は覚えておき、届いたら送る ── 取りこぼすと窓が 15 秒待って諦める
@@ -335,9 +386,55 @@ export class OfficeWindow {
 
   private sendDocument(): void {
     const doc = this.pendingDoc;
-    if (!doc) return;
+    if (!doc) {
+      // 🔴 **作り直された窓がもう一度求めてきた**(#1228 穴①)── 最後に送った文書を送り直す。
+      //    ⚠ 「1 回目」と区別するのは `pendingDoc` の有無だけ ── 1 回目は送った時点で空になるので、
+      //    同じ求めに 2 通は送らない
+      this.resendLast();
+      return;
+    }
     this.pendingDoc = null;
     this.askedForDoc = false;
+    // ⚠ 窓が戻ってきた ── 閉じる猶予は解く(次に閉じたとき、また掛ける)
+    this.clearGrace();
+    // ⚠ 控えは `refresh` が無いときだけ bytes を持つ(在るなら読み直すので抱えない)
+    this.lastSent = {
+      name: doc.name,
+      token: doc.token,
+      bytes: doc.refresh ? null : doc.bytes,
+      images: doc.refresh ? [] : doc.images,
+      refresh: doc.refresh,
+    };
+    this.post(doc.name, doc.bytes, doc.token, doc.images);
+  }
+
+  private resendLast(): void {
+    const last = this.lastSent;
+    if (!last) return;
+    this.askedForDoc = false;
+    this.clearGrace();
+    if (last.refresh) {
+      // ⚠ 窓の中で保存済みなら本体の添付は差し替わっている ── **いまの**添付を引き直して送る
+      void last.refresh().then(
+        (src) => {
+          // 待つ間に別の文書へ替わった / 閉じた なら送らない(古い文書を出さない)
+          if (this.lastSent !== last || src === null || src.bytes.byteLength === 0) return;
+          this.post(last.name, src.bytes, last.token, src.images ?? []);
+        },
+        () => { /* 読めなかった ── 窓は 15 秒で Start Center になる */ },
+      );
+      return;
+    }
+    if (last.bytes) this.post(last.name, last.bytes, last.token, last.images);
+  }
+
+  /** 文書の封筒を組む口(**ここ 1 か所** ── §7)。 */
+  private post(
+    name: string,
+    bytes: Uint8Array,
+    token: string,
+    images: readonly OfficeImagePayload[],
+  ): void {
     // ⚠ BroadcastChannel は **transfer できない**(structured clone のみ)ので、
     //    ここだけはコピーになる。大きい文書で効くなら IDB 経由の受け渡しへ替える。
     //    🔴 画像(`images`)も**同じ封筒**なのでコピーになる ── 合計は
@@ -346,13 +443,32 @@ export class OfficeWindow {
     this.ch.postMessage({
       pkc3Office: 'document',
       payload: {
-        name: doc.name,
-        bytes: doc.bytes,
-        token: doc.token,
+        name,
+        bytes,
+        token,
         // ⚠ 0 件なら載せない(封筒を組むのはここ 1 か所 ── §7)
-        ...(doc.images.length > 0 ? { images: doc.images } : {}),
+        ...(images.length > 0 ? { images } : {}),
       },
     });
+  }
+
+  private armGrace(): void {
+    this.clearGrace();
+    if (!this.lastSent) return;
+    this.graceTimer = setTimeout(() => {
+      this.graceTimer = null;
+      this.lastSent = null;
+    }, RESEND_GRACE_MS);
+  }
+
+  private clearGrace(): void {
+    if (this.graceTimer !== null) clearTimeout(this.graceTimer);
+    this.graceTimer = null;
+  }
+
+  private dropLastSent(): void {
+    this.clearGrace();
+    this.lastSent = null;
   }
 }
 
