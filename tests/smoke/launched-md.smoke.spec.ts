@@ -152,8 +152,10 @@ test('🔴 PC のタブ: 選ぶ → 並ぶ → 押すと取り込んで開く(md
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.addInitScript(() => {
-    const w = window as unknown as { __picked?: unknown[] };
+    const w = window as unknown as { __picked?: unknown[]; __getFile?: string[] };
     w.__picked = [];
+    // 🔴 `getFile` を呼んだ file の名前(#1271 ── 一覧を出すだけでは 1 件も呼ばれない)
+    w.__getFile = [];
     const png = Uint8Array.from(
       atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='),
       (c) => c.charCodeAt(0),
@@ -162,7 +164,10 @@ test('🔴 PC のタブ: 選ぶ → 並ぶ → 押すと取り込んで開く(md
       const h = {
         kind: 'file',
         name,
-        getFile: () => Promise.resolve(new File(parts, name, { type, lastModified: Date.UTC(2026, 8, 30) })),
+        getFile: () => {
+          w.__getFile!.push(name);
+          return Promise.resolve(new File(parts, name, { type, lastModified: Date.UTC(2026, 8, 30) }));
+        },
         // ⚠ 本物は「同じ file を指すか」を答える(名前ではなく実体)
         isSameEntry: (other: unknown) => Promise.resolve(other === h),
         queryPermission: () => Promise.resolve('granted'),
@@ -219,6 +224,13 @@ test('🔴 PC のタブ: 選ぶ → 並ぶ → 押すと取り込んで開く(md
     await page.evaluate(() => (window as unknown as { __picked: unknown[] }).__picked),
     '書く許可でフォルダを選ばせている',
   ).toEqual([{ mode: 'read' }]);
+  // 🔴 #1271: 一覧を出しただけでは `getFile` を 1 件も呼ばない(クラウド同期のフォルダで実体が一斉に落ちる)。
+  // 大きさ・更新日は「—」(実値が出ていたら、どこかで読んでいる)
+  await expect(pane.locator('[data-pkc-pc-row] [data-pkc-field="pc-meta"]').nth(1)).toHaveText('Markdown · — · —');
+  expect(
+    await page.evaluate(() => (window as unknown as { __getFile: string[] }).__getFile),
+    '一覧を出しただけで getFile が呼ばれた',
+  ).toEqual([]);
   // 目印: 書き戻せる Markdown には出ず、画像にだけ出る / フォルダの行は押せない
   const row = (name: string) => pane.locator('[data-pkc-pc-row]').filter({ hasText: name });
   await expect(row('メモ.md').locator('[data-pkc-field="pc-readonly"]')).toHaveCount(0);
@@ -239,6 +251,10 @@ test('🔴 PC のタブ: 選ぶ → 並ぶ → 押すと取り込んで開く(md
   // ③ md の行を押す → 取り込まれて中央に開き、元ファイルの名前が出て、書き戻す押し所が在る
   await clickReal(page, row('メモ.md').locator('button'));
   await expect(page.locator('[data-pkc-region="detail"]')).toContainText('本文です。');
+  expect(
+    await page.evaluate(() => (window as unknown as { __getFile: string[] }).__getFile),
+    '押した 1 件だけ読むはず',
+  ).toEqual(['メモ.md']);
   await expect(page.locator('[data-pkc-field="inspector-linked-file"]')).toHaveText('メモ.md');
   await expect(page.locator('[data-pkc-action="write-back-file"]').first()).toBeVisible();
   // ④ 🔴 開いても、左の列は「PC」のまま(別の場所を守る)

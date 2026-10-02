@@ -5,7 +5,7 @@
  * ## 画面で何が起きるか
  *
  * 1. 「フォルダを選ぶ…」を押す → OS のフォルダ選択が出る
- * 2. 選ぶと、**そのフォルダの直下**が名前順に並ぶ(名前 / 種類 / 大きさ / 更新日)。
+ * 2. 選ぶと、**そのフォルダの直下**が名前順に並ぶ(名前 / 種類。大きさ・更新日は「—」── 一覧では file を読まない、#1271)。
  *    200 件で切れて「さらに表示」
  * 3. ファイルの行を押すと、**PKC に取り込んで中央に開く**(このタブは開いたまま)
  * 4. 「切る」で繋ぎを外す(次に開いたときは繋がっていない)
@@ -23,6 +23,7 @@ import {
   FOLDER_PAGE,
   PC_CONTACT_NOTE,
   PC_DIRECTORY_NOTE,
+  PC_STATS_NOTE,
   fileKindOf,
   folderModifiedText,
   folderSizeText,
@@ -146,7 +147,9 @@ export class PcFolderRenderer {
   private row(row: LocalFolderRow): HTMLLIElement {
     const li = document.createElement('li');
     li.setAttribute('data-pkc-pc-row', String(row.index));
-    const meta = [row.label, folderSizeText(row.size), folderModifiedText(row.modified)].join(' · ');
+    // 🔴 大きさ・更新日は**一覧では読まない**(#1271)── 読むには `getFile()` が要り、クラウド同期の
+    // フォルダ(ファイルオンデマンド)では未ダウンロードの実体を一斉に取りに行く。列は残して「—」を出す
+    const meta = [row.label, folderSizeText(null), folderModifiedText(null)].join(' · ');
     if (row.kind === 'directory') {
       // ⚠ フォルダは押せない(直下だけ ── 中へは入らない)。押せる見た目にしない
       // 🔴 ただし押されても**無言にしない**(#1264 §1)── ホバーと、押した後の状態の行に同じ字
@@ -176,6 +179,7 @@ export class PcFolderRenderer {
     const about = document.createElement('span');
     field(about, 'pc-meta');
     about.textContent = meta;
+    about.title = PC_STATS_NOTE;
     open.append(name, about);
     // 🔴 連絡先になることを、ホバーに頼らず見える字で言う(#1264 §1)
     if (fileKindOf(row.name).route === 'contact') {
