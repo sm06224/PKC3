@@ -22,6 +22,7 @@
  * ⚠ **取り込み口は `attachOne` の 1 本**(`attach` として注入する)── 2 つ目を作らない。
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
+import type { StatusOptions } from '@adapter/ui/render/status-notice';
 import { humanBytes } from '@features/human-bytes';
 import { captureBarLine, captureFileName, CAPTURE_LABEL } from '@features/asset/capture-text';
 import { elapsedText } from '@features/elapsed-text';
@@ -66,7 +67,7 @@ export interface CaptureServiceDeps {
   /** 帯を描き直す合図。⚠ `null` = 収録していない(帯を畳む)。 */
   readonly onChange: (line: string | null) => void;
   /** 一時の知らせ(エラーの行とは別)。 */
-  readonly notify: (text: string) => void;
+  readonly notify: (text: string, opts?: StatusOptions) => void;
   /** ブラウザの口(test は fake を入れる)。 */
   readonly capture?: CaptureDeps;
   /** 収録を始める口。⚠ test はここを差し替える。 */
@@ -228,13 +229,14 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
     if (attached === null) {
       // ⚠ **黙って消さない** ── 空き不足なら `attachOne` が理由を出しているが、
       //   出していない断り方(reducer が捨てた等)もあるので、ここでも 1 行言う
-      deps.notify(`${why}${CAPTURE_LABEL[kind]}を取り込めませんでした`);
+      // 🔴 種類は「注意」(失敗は未読に数える。既定の「結果」だと見落とされる ── 着地後レビュー ⚠3)
+      deps.notify(`${why}${CAPTURE_LABEL[kind]}を取り込めませんでした`, { kind: 'caution' });
       return false;
     }
     putAssetIntoNote({
       dispatcher: deps.dispatcher,
       queue,
-      notify: deps.notify,
+      notify: (text) => deps.notify(text), // ⚠ そのまま渡さない(`putAssetIntoNote` の第 2 引数は「開く」の身元で、種類ではない)
       into,
       attachedLid: attached.lid,
       assetKey: attached.assetKey,

@@ -293,11 +293,11 @@ describe('🔴 字が同じでも、欄を確定すればファイル名が題�
 });
 
 describe('🔴 ファイル名が変わった回は、元と新しい名前を状態の行へ言う(#1264 §1)', () => {
-  it('食い違いを揃えた回: 「ファイル名を scan.pdf → 請求書.pdf にしました」(打っていなくても無言にしない)', async () => {
+  it('食い違いを揃えた回: 「ファイル名を「scan.pdf」→「請求書.pdf」にしました」(打っていなくても無言にしない)', async () => {
     const r = setup(ATT, { title: '請求書' });
     await commitUntouched(r, 'blur');
     expect(r.persists).toHaveLength(1);
-    expect(r.d.getState().notice).toBe('ファイル名を scan.pdf → 請求書.pdf にしました');
+    expect(r.d.getState().notice).toBe('ファイル名を「scan.pdf」→「請求書.pdf」にしました');
   });
 
   it('対照群:すでに揃っていて名前が変わらない回は何も言わない', async () => {

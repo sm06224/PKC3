@@ -92,6 +92,21 @@ export function composeStatusLine(parts: StatusLineParts): string {
 }
 
 /**
+ * 🔴 **読み上げの対象になる子の印**(#1017 C5 着地後レビュー ⚠1)。
+ * `shell.ts` が `aria-live` つきで作り、`paintStatusText` が**同じ要素を使い続ける**。
+ */
+export const STATUS_LIVE_FIELD = 'status-live';
+
+/** 読み上げの子を作る(`shell.ts` と `paintStatusText` の 2 か所が同じ形で作る ── 形はここが正本)。 */
+export function createStatusLive(doc: Document): HTMLElement {
+  const live = doc.createElement('span');
+  live.setAttribute('data-pkc-field', STATUS_LIVE_FIELD);
+  live.setAttribute('aria-live', 'polite');
+  live.setAttribute('aria-atomic', 'true');
+  return live;
+}
+
+/**
  * 🔴 **状態の 1 語だけを別の器に入れて描く**(#1038 台帳③ C4 の着地前レビュー)。
  *
  * ⚠ 1 稿目は行全体を 1 つの字として出していた ──「編集中」が「複数タブ: …」のような
@@ -103,20 +118,46 @@ export function composeStatusLine(parts: StatusLineParts): string {
  * ⚠ 行の字(`textContent`)は `composeStatusLine` と**1 字も変わらない** ── 字を読む
  *   受け手(smoke・状態の比較)はそのまま動く。
  *
+ * 🔴 **読み上げに載せるのは「知らせ」と「エラー」だけ**(#1017 C5 着地後レビュー ⚠1)。
+ * ⚠ 1 稿目は footer 全体に `aria-live` を付けたので、状態語・保存先の注意・`⏳ 保存中…` の
+ *   出入りのたびに読み上げが起きた(ここが毎回子を作り直すので、`aria-atomic=false` でも
+ *   全部が「追加」に見える)。🔑 だから**知らせとエラーを写す子 1 つ**(`status-live`)だけに
+ *   `aria-live` を付け、その外(状態語・保存先・保存中)は読み上げの外に置く。
+ * ⚠ **その子は作り直さない** ── 外して付け直すと、読み上げの対象として登録される前の
+ *   要素に字が入った形になり、読まれないことがある。字が**変わったときだけ**書く。
+ *
  * @returns 描いた行の字(`composeStatusLine` と同じ値)
  */
 export function paintStatusText(el: HTMLElement, parts: StatusLineParts): string {
   const text = composeStatusLine(parts);
   const word = editingStateWord(parts.phase);
-  if (word === '') {
-    el.textContent = text;
-    return text;
+  const doc = el.ownerDocument;
+  // 読み上げに載せる尾 = 行の末尾(知らせ + エラー)。⚠ 区切りの ' — ' は頭の側に置く
+  const liveText = [parts.noticeLine, parts.errorLine].filter((t) => t !== '').join(' — ');
+  const head = text.slice(0, text.length - liveText.length);
+
+  let live: HTMLElement | null = null;
+  for (const c of Array.from(el.children)) {
+    if (c.getAttribute('data-pkc-field') === STATUS_LIVE_FIELD) live = c as HTMLElement;
   }
-  const state = el.ownerDocument.createElement('span');
-  state.setAttribute('data-pkc-field', 'status-state');
-  state.setAttribute('data-pkc-phase', parts.phase);
-  state.textContent = word;
-  el.replaceChildren(state, text.slice(word.length));
+  if (live === null) {
+    live = createStatusLive(doc);
+    el.append(live);
+  }
+  // 🔑 live 以外を消す(live 自体は触らない ── 登録済みの要素を作り直さない)
+  for (const c of Array.from(el.childNodes)) if (c !== live) c.remove();
+  if (word !== '') {
+    const state = doc.createElement('span');
+    state.setAttribute('data-pkc-field', 'status-state');
+    state.setAttribute('data-pkc-phase', parts.phase);
+    state.textContent = word;
+    el.insertBefore(state, live);
+    const rest = head.slice(word.length);
+    if (rest !== '') el.insertBefore(doc.createTextNode(rest), live);
+  } else if (head !== '') {
+    el.insertBefore(doc.createTextNode(head), live);
+  }
+  if (live.textContent !== liveText) live.textContent = liveText;
   return text;
 }
 
