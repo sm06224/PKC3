@@ -42,6 +42,7 @@ const MODULE = resolve(`${DIR}/probe-watchdog.mjs`);
  * 🔑 新しい probe を足したら**ここも足す**(足さないと落ちる)= 忘れられない。
  */
 const WATCHED = [
+  'autorecovery-probe.mjs',
   'boot-probe.mjs',
   'combo-popup-probe.mjs',
   'convert-to-probe.mjs',
