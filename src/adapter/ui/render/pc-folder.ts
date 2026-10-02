@@ -25,9 +25,11 @@ import {
   PC_DIRECTORY_NOTE,
   PC_STATS_NOTE,
   fileKindOf,
+  iconFor,
   folderModifiedText,
   folderSizeText,
 } from '@features/local-folder/folder-entries';
+import { iconSpan } from './icons';
 
 const field = (el: HTMLElement, name: string): void => el.setAttribute('data-pkc-field', name);
 
@@ -39,6 +41,20 @@ function button(action: string, name: string, text: string, title?: string): HTM
   b.textContent = text;
   if (title !== undefined) b.title = title;
   return b;
+}
+
+/**
+ * 行の 1 行目 ── 種類の絵 + 名前(#1272)。
+ * ⚠ 名前の span(`pc-name`)の**外**に絵を置く ── 名前の `textContent` に絵が混ざらない。
+ */
+function head(row: LocalFolderRow): HTMLSpanElement {
+  const h = document.createElement('span');
+  field(h, 'pc-head');
+  const name = document.createElement('span');
+  field(name, 'pc-name');
+  name.textContent = row.name;
+  h.append(iconSpan(iconFor(row)), name);
+  return h;
 }
 
 function para(name: string, text: string): HTMLParagraphElement {
@@ -155,13 +171,10 @@ export class PcFolderRenderer {
       // 🔴 ただし押されても**無言にしない**(#1264 §1)── ホバーと、押した後の状態の行に同じ字
       li.setAttribute('data-pkc-action', 'pc-dir-note');
       li.title = PC_DIRECTORY_NOTE;
-      const name = document.createElement('span');
-      field(name, 'pc-name');
-      name.textContent = row.name;
       const about = document.createElement('span');
       field(about, 'pc-meta');
       about.textContent = row.label;
-      li.append(name, about);
+      li.append(head(row), about);
       return li;
     }
     const open = button(
@@ -173,14 +186,11 @@ export class PcFolderRenderer {
         : '取り込んで開きます(PKC の添付や連絡先になります)。元のファイルへは書き戻せません',
     );
     open.setAttribute('data-pkc-pc-index', String(row.index));
-    const name = document.createElement('span');
-    field(name, 'pc-name');
-    name.textContent = row.name;
     const about = document.createElement('span');
     field(about, 'pc-meta');
     about.textContent = meta;
     about.title = PC_STATS_NOTE;
-    open.append(name, about);
+    open.append(head(row), about);
     // 🔴 連絡先になることを、ホバーに頼らず見える字で言う(#1264 §1)
     if (fileKindOf(row.name).route === 'contact') {
       const contact = document.createElement('span');

@@ -240,6 +240,49 @@ test('🔴 PC のタブ: 選ぶ → 並ぶ → 押すと取り込んで開く(md
   await expect(row('名刺.vcf').locator('[data-pkc-field="pc-contact-note"]')).toHaveText('連絡先として取り込みます');
   await expect(row('メモ.md').locator('[data-pkc-field="pc-contact-note"]')).toHaveCount(0);
   await expect(row('下の階層')).toHaveAttribute('title', /中へは入りません/);
+  // 🔴 行頭に種類の絵(#1272)── 属性だけでなく、実ブラウザで ::before が字を出し、名前と中心が揃っている
+  await expect(pane.locator('[data-pkc-pc-row] [data-pkc-icon]')).toHaveCount(4);
+  for (const [name, symbol] of [
+    ['下の階層', 'folder'],
+    ['メモ.md', 'note'],
+    ['猫.png', 'camera'],
+    ['名刺.vcf', 'person'],
+  ] as const) {
+    const head = row(name).locator('[data-pkc-field="pc-head"]');
+    await expect(head.locator('[data-pkc-icon]'), `${name} の絵`).toHaveAttribute('data-pkc-symbol', symbol);
+    const seen = await head.evaluate(async (el) => {
+      await document.fonts.ready;
+      const icon = el.querySelector('[data-pkc-icon]') as HTMLElement;
+      const nameEl = el.querySelector('[data-pkc-field="pc-name"]') as HTMLElement;
+      const a = icon.getBoundingClientRect();
+      const b = nameEl.getBoundingClientRect();
+      return {
+        content: getComputedStyle(icon, '::before').content,
+        iconW: a.width,
+        dy: Math.abs(a.top + a.height / 2 - (b.top + b.height / 2)),
+      };
+    });
+    expect(seen.content, `${name}: 絵が描かれていない`).not.toMatch(/^(none|normal|"")$/);
+    expect(seen.iconW, `${name}: 絵に幅が無い`).toBeGreaterThan(4);
+    expect(seen.dy, `${name}: 絵と名前の中心がずれている`).toBeLessThan(3);
+  }
+  // 🔴 普通の一覧(#1272)── 下地は透明(余りが灰色のベタにならない)/ 各行に下罫線 / フォルダの行と他の行で文字の左端が同じ
+  const look = await pane.locator('[data-pkc-field="pc-list"]').evaluate((ul) => {
+    const lis = [...ul.querySelectorAll<HTMLElement>(':scope > li')];
+    const left = (li: HTMLElement) =>
+      (li.querySelector('[data-pkc-icon]') as HTMLElement).getBoundingClientRect().left - li.getBoundingClientRect().left;
+    const cs = getComputedStyle(ul);
+    return {
+      bg: cs.backgroundColor,
+      gap: cs.rowGap,
+      borders: lis.map((li) => getComputedStyle(li).borderBottomWidth),
+      lefts: lis.map(left),
+    };
+  });
+  expect(look.bg, '一覧の下地が塗られている(余りがベタになる)').toBe('rgba(0, 0, 0, 0)');
+  expect(look.gap, '行の間を gap で空けている(下地が透ける)').toBe('normal');
+  expect(look.borders, '各行の下罫線').toEqual(['1px', '1px', '1px', '1px']);
+  expect(Math.max(...look.lefts) - Math.min(...look.lefts), '行頭の絵の左端が行ごとにずれている').toBeLessThan(1);
   await clickReal(page, row('下の階層'));
   await expect(
     page.locator('[data-pkc-region="status"]'),

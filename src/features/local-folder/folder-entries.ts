@@ -24,6 +24,7 @@ import { isVcfFileName } from '@features/contact/vcard';
 import { isOfficeLaunchFile } from '@features/office/office-launch';
 import { humanBytes } from '@features/human-bytes';
 import { formatDate } from '@features/datetime/datetime-format';
+import type { IconName } from '@features/icon/symbols';
 
 /** 1 回に出す件数の上限(「さらに表示」で同じだけ足す)。 */
 export const FOLDER_PAGE = 200;
@@ -55,9 +56,14 @@ export interface FolderFileKind {
   readonly label: string;
   /** 元の file へ書き戻せるか(Markdown だけ)。 */
   readonly writeBack: boolean;
+  /** 行頭の絵(#1272)。⚠ 種類の判定と**同じ場所**で決める ── 絵のための拡張子判定を別に持たない。 */
+  readonly icon: IconName;
 }
 
 const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.avif', '.svg'] as const;
+
+const AUDIO_EXTS = ['.mp3', '.wav', '.m4a', '.ogg', '.oga', '.flac', '.aac', '.opus'] as const;
+const VIDEO_EXTS = ['.mp4', '.webm', '.mov', '.m4v', '.mkv', '.avi', '.ogv'] as const;
 
 const endsWithAny = (name: string, exts: readonly string[]): boolean => {
   const lower = name.toLowerCase();
@@ -69,13 +75,16 @@ const endsWithAny = (name: string, exts: readonly string[]): boolean => {
  * ⚠ 拡張子だけで見る(中身では決めない ── 取込の振り分けと同じ作法)。
  */
 export function fileKindOf(name: string): FolderFileKind {
-  if (isMarkdownFileName(name)) return { route: 'note', label: 'Markdown', writeBack: true };
-  if (isVcfFileName(name)) return { route: 'contact', label: 'vCard', writeBack: false };
-  if (isOfficeLaunchFile(name)) return { route: 'attachment', label: 'Office', writeBack: false };
-  if (endsWithAny(name, IMAGE_EXTS)) return { route: 'attachment', label: '画像', writeBack: false };
-  if (endsWithAny(name, ['.pdf'])) return { route: 'attachment', label: 'PDF', writeBack: false };
-  if (endsWithAny(name, ['.txt'])) return { route: 'attachment', label: 'テキスト', writeBack: false };
-  return { route: 'attachment', label: 'ファイル', writeBack: false };
+  if (isMarkdownFileName(name)) return { route: 'note', label: 'Markdown', writeBack: true, icon: 'note' };
+  if (isVcfFileName(name)) return { route: 'contact', label: 'vCard', writeBack: false, icon: 'person' };
+  if (isOfficeLaunchFile(name)) return { route: 'attachment', label: 'Office', writeBack: false, icon: 'presentation' };
+  if (endsWithAny(name, IMAGE_EXTS)) return { route: 'attachment', label: '画像', writeBack: false, icon: 'camera' };
+  if (endsWithAny(name, ['.pdf'])) return { route: 'attachment', label: 'PDF', writeBack: false, icon: 'page' };
+  if (endsWithAny(name, ['.txt'])) return { route: 'attachment', label: 'テキスト', writeBack: false, icon: 'clip' };
+  // ⚠ 音・動画は種類の字を持たない(「ファイル」のまま)── 絵だけ分ける(字を変えるのは見え方の変更)
+  if (endsWithAny(name, AUDIO_EXTS)) return { route: 'attachment', label: 'ファイル', writeBack: false, icon: 'music' };
+  if (endsWithAny(name, VIDEO_EXTS)) return { route: 'attachment', label: 'ファイル', writeBack: false, icon: 'movie' };
+  return { route: 'attachment', label: 'ファイル', writeBack: false, icon: 'clip' };
 }
 
 /** 一覧の 1 行(列挙した物。大きさと更新日は、見える分だけ後から読む)。 */
@@ -104,4 +113,12 @@ export function folderSizeText(size: number | null): string {
 /** 更新日の字。⚠ 読めていない(`null`)ときは「—」。 */
 export function folderModifiedText(modified: number | null): string {
   return modified === null ? '—' : formatDate(new Date(modified));
+}
+
+/**
+ * 行頭の絵(#1272)。フォルダ → `folder`、file は `fileKindOf` の `icon`。
+ * ⚠ 描画器はこれを呼ぶだけ ── 種類 → 絵の対応は**ここ 1 か所**。
+ */
+export function iconFor(entry: FolderEntry): IconName {
+  return entry.kind === 'directory' ? 'folder' : fileKindOf(entry.name).icon;
 }
