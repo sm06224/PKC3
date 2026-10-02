@@ -37,6 +37,7 @@ import footnotePlugin from 'markdown-it-footnote';
 import { makeSlugCounter } from './markdown-toc';
 import { highlightCode, isHighlightable } from './code-highlight';
 import { detectCsvLang, renderCsvFence } from './csv-table';
+import { isSqlEmbedInfo, sqlEmbedHostHtml } from './sql-embed';
 import { buildHtmlSandboxIframe } from './html-sandbox';
 import {
   EXTERNAL_IMAGE_ATTR,
@@ -655,6 +656,26 @@ md.renderer.rules.fence = function (tokens, idx, options, env, self) {
     content = asFenceContent(lent);
     effectiveInfo = withoutAsset;
   }
+  /**
+   * 🔴 **` ```sql embed ` は、コード枠の下に答えの器を足す**(#1223)。
+   *
+   * ⚠ **枠そのものは素の ` ```sql ` と 1 バイトも違わない**(色づけ・⧉・✎ もそのまま。
+   *   差は末尾の器 1 つだけ)── 答えを描かない面(1 画面編集・添付の説明・章の別窓・
+   *   クリップボード)でも、**原文のコード枠のまま**読める。
+   * ⚠ **添付から取った字は対象外**(`fenceAsset.kind === 'none'` のときだけ)── あちらは
+   *   別の経路(`renderFenceFromAsset`)で描き直されるので、器だけ残して空になるのを避ける。
+   * ⚠ `parseRenderableFence` の**外**で見る ── `sql` を registry へ足すと
+   *   `sql-render` / `sql-norender` や切替の ‹/› まで受けてしまう。
+   */
+  if (fenceAsset.kind === 'none' && isSqlEmbedInfo(info)) {
+    return wrapWithCopyButton(
+      defaultFence(tokens, idx, options, env, self),
+      'code',
+      sourceLineAttrs,
+      fenceEditable(env, token),
+      sqlEmbedHostHtml(content),
+    );
+  }
   const fence = parseRenderableFence(effectiveInfo);
   if (fence) {
     /**
@@ -1066,9 +1087,14 @@ function wrapWithCopyButton(
   kind: 'code' | 'table',
   extraAttrs: string = '',
   interactiveCodeBlocks: boolean = false,
+  /**
+   * 🔴 **枠の末尾に足す物**(#1223。` ```sql embed ` の答えの器だけが使う)。
+   * ⚠ 既定は空 ── 渡さなければ**今までと 1 バイトも違わない**(素の ` ```sql ` の約束)。
+   */
+  trailHtml: string = '',
 ): string {
   const editBtn = kind === 'code' && interactiveCodeBlocks ? editCodeBlockButtonHtml() : '';
-  return `<div class="pkc-md-block" data-pkc-md-block-kind="${kind}"${extraAttrs}><button class="pkc-md-copy-btn" data-pkc-action="copy-md-block" data-pkc-copy-kind="${kind}" type="button" aria-label="コピー" title="コピー">⧉</button>${editBtn}${innerHtml}</div>`;
+  return `<div class="pkc-md-block" data-pkc-md-block-kind="${kind}"${extraAttrs}><button class="pkc-md-copy-btn" data-pkc-action="copy-md-block" data-pkc-copy-kind="${kind}" type="button" aria-label="コピー" title="コピー">⧉</button>${editBtn}${innerHtml}${trailHtml}</div>`;
 }
 
 /**

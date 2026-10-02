@@ -2050,6 +2050,31 @@ button[data-pkc-primary] [data-pkc-icon] {
   color: var(--fg);
 }
 
+/* ── 本文に埋め込んだ SQL の答え(#1223)──────────────
+ * コード枠の下に出る表。⚠ 答えを描かない面(1 画面編集・添付の説明・章の別ウィンドウ)では
+ * 器が**空のまま**残るので、空のときは場所を取らない(高さ 0 で、余白も付けない)。
+ * 🔴 **空のとき `display: none` にしない** ── 引くのは「見えたとき」(`IntersectionObserver`)で、
+ *   `display: none` の要素は**永久に見えない**ので、答えが 1 度も引かれなくなる
+ *   (実ブラウザの smoke で表が出ずに分かった。happy-dom の観測器の偽物は気づけない)。
+ * ⚠ 横に長い表は器の中でだけ送る(本文の幅を押し広げない)。
+ * ⚠ 本文の規則(`.pkc-md-rendered` 起点)ではないので書き出しの `<style>` へは焼かれない ──
+ *   書き出した HTML は答えを素の `<table>` として焼き、見た目は閲覧側の表の規則に任せる。 */
+[data-pkc-sql-embed] {
+  overflow-x: auto;
+}
+[data-pkc-sql-embed]:not(:empty) {
+  margin-top: var(--s2);
+}
+[data-pkc-sql-embed] [data-pkc-field='sql-embed-note'] {
+  margin: var(--s2) 0 0;
+  color: var(--muted);
+}
+[data-pkc-sql-embed] [data-pkc-field='sql-embed-more'] {
+  margin-top: var(--s2);
+  font-size: var(--btn-fs-bar);
+  padding: 0 var(--s2);
+}
+
 /* ── 書式パネル(P8 段⑥)──────────────────────────
  * 🔑 **編集欄のすぐ上**に、共有の 1 本線で貼り付ける(段④ の規約:境界線は共有、
  * ギャップは置かない)。14 個入るので狭いときは折り返す ── 畳まない

@@ -18,6 +18,8 @@
  * ── 元の画面には指 1 本触れない(触ると「コピーしたら画面が変わった」になる)。
  */
 
+import { SQL_EMBED_ATTR } from '../markdown/sql-embed';
+
 /** 掃除の結果。⚠ **落としたものを数えて返す**(黙って消さない)。 */
 export interface CleanResult {
   html: string;
@@ -101,6 +103,16 @@ export function cleanForClipboard(
     }
   }
   for (const el of [...root.querySelectorAll('[hidden]')]) {
+    el.remove();
+    removed += 1;
+  }
+  /**
+   * 🔴 **本文に埋め込んだ SQL の答えは貼らない**(#1223)。
+   *
+   * ⚠ 答えは**引いた時点の写し**で、貼り先では古くなっても誰も引き直せない。**原文の SQL は
+   *   コード枠として残る**(器の外にある)ので、貼った先でも「何を引いたか」は読める。
+   */
+  for (const el of [...root.querySelectorAll(`[${SQL_EMBED_ATTR}]`)]) {
     el.remove();
     removed += 1;
   }

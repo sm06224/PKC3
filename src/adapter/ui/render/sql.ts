@@ -57,6 +57,7 @@ import {
   sqlEngineOf,
   type SqlEngine,
 } from '@features/query/sql-engine';
+import { sqlCellText } from '@features/markdown/sql-embed';
 import {
   SQL_WINDOW_MIN,
   sqlWindowOf,
@@ -79,7 +80,8 @@ export const SQL_SOURCE_GROUP_ADD = 'もう 1 つ足す…';
 /** 手持ちの file を**足す**ほうの項目の字(`手持ちのファイルを開く…` の隣の物)。 */
 export const SQL_ADD_LOCAL_FILE_LABEL = '手持ちのファイルを足す…';
 
-const cellText = (v: string | number | null): string => (v === null ? '(なし)' : String(v));
+// 🔑 字にする規則は 1 か所(本文に埋め込んだ SQL の答えと同じ ── #1223)
+const cellText = sqlCellText;
 
 export class SqlRenderer {
   private readonly host: HTMLElement;

@@ -25,6 +25,7 @@ import { hydrateMermaid, type MermaidScope } from './mermaid-hydrate';
 import { hydrateMath } from './math-hydrate';
 import { markViewBig } from './view-big';
 import { hydrateChart } from './chart-raster';
+import { SqlEmbedHydrator } from './sql-embed-hydrate';
 import { readFenceAssetText } from '@features/asset/fence-asset-read';
 import { applyHeadingFold, revealBlock } from './heading-fold';
 import { applyHeadingAnchors } from './heading-anchor';
@@ -477,6 +478,12 @@ export class DetailRenderer {
    */
   private readonly mermaidScopes: MermaidScope[] = [];
   /**
+   * 🔴 **本文に埋め込んだ SQL の答え**(#1223)。⚠ **読む面と 2 列の下見だけ**が呼ぶ
+   * (1 画面編集・添付の説明・添付から取った囲みは呼ばない ── 原文のコード枠のまま)。
+   * ⚠ 面ごとに 1 つ(観測器をその中で 1 つに保つ)。手放すのは `disposeLends` と同じ所。
+   */
+  private readonly sqlEmbeds = new SqlEmbedHydrator();
+  /**
    * 編集へ入る直前の scroll。⚠ 編集の面は別物なので骨組みごと作り直すが、
    * **戻ってきたら元の位置へ戻す** ── 保存しただけで先頭へ飛ぶのも同じ no-op。
    */
@@ -667,6 +674,7 @@ export class DetailRenderer {
     this.disposeMermaid?.();
     this.disposeMermaid = null;
     for (const sc of this.mermaidScopes.splice(0)) sc.dispose();
+    this.sqlEmbeds.release();
     this.backToTopHandle?.dispose();
     this.backToTopHandle = null;
     this.readingProgressHandle?.dispose();
@@ -1450,6 +1458,12 @@ export class DetailRenderer {
         pruneScopes(this.mermaidScopes);
         this.pruneLends();
         /**
+         * 🔴 **本文に埋め込んだ SQL の答え**(#1223)。⚠ **`inserted` の外**で呼ぶ ── 答えの鮮度は
+         * 「本文」で決まる(同じ本文のうちは引き直さない / 保存して本文が変われば、SQL の
+         * 枠が差し替わっていなくても引き直す。csv の表だけ編集した場合がまさにこれ)。
+         */
+        this.sqlEmbeds.sync(host, body);
+        /**
          * 🔴 **見出しの畳み**(#396)。⚠ **描画のたびに呼ぶ** ── 塊が差し替わると
          *   押す口が消えるので(`applyBlocks` は描画 HTML どうしを比べるため、
          *   ここで足す口は差分に影響しない)。
@@ -2095,6 +2109,13 @@ export class DetailRenderer {
         pruneScopes(scopes);
         // 🔴 消えた `<img>` のぶんを返す(#250 ── 読む面と同じ規律)
         this.pruneLends();
+        /**
+         * 🔴 **本文に埋め込んだ SQL の答え**(#1223。2 列の下見も描く)。
+         * ⚠ 鍵は**編集に入った時点の保存済みの本文**(`open.body`)── 打っている最中の字では
+         *   ない。引く相手は保存済みのノートなので、打鍵では答えの元が動かない
+         *   (SQL の字が変われば別の問い合わせとして引く。保存して抜ければ読む面が引き直す)。
+         */
+        this.sqlEmbeds.sync(preview, open.body);
       },
       (e) => {
         // 🔴 **白紙にしない**。理由を出して原文だけは読めるようにする
