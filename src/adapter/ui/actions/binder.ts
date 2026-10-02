@@ -4949,7 +4949,27 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'select-entry': (dispatcher, target, services, root) => {
     const lid = target.getAttribute('data-pkc-entry');
-    if (lid) selectEntryOrExplain(dispatcher, lid, 'ノート', root, services);
+    if (!lid) return;
+    if (!selectEntryOrExplain(dispatcher, lid, 'ノート', root, services)) return;
+    /**
+     * 🔴 **フォルダの概要の行なら、左の列もそのフォルダの中へ移す**(#1222。Gemini 裁定
+     * 2026-10-01 = A)。
+     *
+     * > user の物語:フォルダを開くと中央に直下の一覧が出る。その行を押したら、
+     * > **そのノートが中央に開き、左の列もそのフォルダの中へ移る**(左の列が別の場所を
+     * > 指したままだと、開いたノートの隣が見えない)。サブフォルダの行なら、そのフォルダを選ぶ。
+     *
+     * ⚠ **新しい action を作らない** ── 開く側は一覧 / フォルダ / かんばんの行と**同じ 1 本**
+     *   (編集中の断り・章の下書きの確認・本文ページへ出る、が全部同じ)。概要の器だけが
+     *   `data-pkc-overview-scope`(= その概要が属するフォルダ)を運ぶ。
+     * ⚠ **開けなかったら左の列は動かさない**(上の `return`。断られたのに場所だけ変わると
+     *   画面が食い違う)。⚠ 動かす先は器が運ぶフォルダ ── 概要は常に直下だけなので、
+     *   器のフォルダ = 押した行の親である(木から引き直さない)。
+     */
+    const scope = target
+      .closest('[data-pkc-overview-scope]')
+      ?.getAttribute('data-pkc-overview-scope');
+    if (scope) dispatcher.dispatch({ type: 'SET_SCOPE', lid: scope });
   },
   /**
    * 🔴 **開くときに、いま中央に居るノートと入れ替える**(#809-4)。

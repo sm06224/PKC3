@@ -1648,6 +1648,59 @@ select:focus-visible {
   font-size: 11px;
   margin: calc(-1 * var(--s2)) 0 var(--s2);
 }
+/* 🔴 **フォルダの概要**(#1222)── 説明(本文)の下に置く。⚠ 地は無彩色・色は図案だけ
+ * (`--muted` 1 色・新色なし)。行は題名の右端に更新日を細字で置く(行の高さを増やさない)。 */
+[data-pkc-region='folder-overview'] {
+  margin-top: var(--s3);
+  padding-top: var(--s2);
+  border-top: 1px solid var(--border);
+}
+[data-pkc-region='folder-overview'] [data-pkc-field='overview-summary'],
+[data-pkc-region='folder-overview'] [data-pkc-field='overview-more'] {
+  margin: 0 0 var(--s2);
+  color: var(--muted);
+  font-size: 11px;
+}
+[data-pkc-region='folder-overview'] [data-pkc-field='overview-more'] {
+  margin: var(--s2) 0 0;
+}
+[data-pkc-region='folder-overview'] [data-pkc-field='overview-list'] {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+/* 🔴 **画面の外の行は組まない**(#1222 の応答の実測)── 直下 2,000 件のフォルダでは概要が 100 行
+ * (約 500 節点)を足し、**強制レイアウトが約 13ms**かかっていた(行を押した回の long task が
+ * 3 回中 3 回 50ms を超えた)。`content-visibility: auto` で画面の外の行の配置を飛ばすと
+ * 約 1.5ms になり、同じ操作で long task は 0 件になった。⚠ 行の高さは約 24px
+ * (`contain-intrinsic-block-size` はその見積もり ── 一度見えた行は実寸を憶える `auto`)。 */
+[data-pkc-region='folder-overview'] [data-pkc-field='overview-list'] > li {
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto 24px;
+}
+[data-pkc-region='folder-overview'] [data-pkc-action='select-entry'] {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  width: 100%;
+  padding: 3px var(--s2);
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+[data-pkc-region='folder-overview'] [data-pkc-action='select-entry']:hover {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+[data-pkc-region='folder-overview'] [data-pkc-field='overview-title'] {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 /* 🔑 **操作の帯は上に貼り付ける**(P8 段⑪)── 長いノートで「編集」を押すために
  * 毎回先頭まで戻るのは、それ自体が余計な往復である(「同じものが常に同じ場所に
  * ある」という業務画面の作法にも合う)。⚠ 地を塗る(本文が透けると読めない)。 */
@@ -8637,6 +8690,8 @@ h3[data-pkc-section] {
   [data-pkc-region='announce'],
   [data-pkc-field='detail-bar-slot'],
   [data-pkc-field='detail-notice-slot'],
+  /* ⚠ フォルダの概要も紙には要らない(#1222)── 画面の補助 */
+  [data-pkc-region='folder-overview'],
   .pkc-md-copy-btn,
   /* 🔴 画面専用の操作子は紙に要らない(#1129, #1137) */
   .pkc-back-to-top-container,
