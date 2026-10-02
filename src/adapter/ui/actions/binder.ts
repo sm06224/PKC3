@@ -58,6 +58,7 @@ import { alignMdTable } from '@features/markdown/table-align';
 import { quoteOnEnter } from '@features/markdown/quote-assist';
 import { indentLines } from '@features/markdown/indent-assist';
 import { swapLines } from '@features/markdown/line-swap';
+import { TIDY_NOTES, tidySelection, type TidyOp } from '@features/markdown/text-tidy';
 import { tableOnTab } from '@features/markdown/table-assist';
 import { renumberLists } from '@features/markdown/list-renumber';
 import { sortTasksByStatus } from '@features/markdown/task-sort';
@@ -11073,6 +11074,15 @@ export const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
   'close-pane': '[data-pkc-action="close-pane"]',
 };
 
+/** 整える 5 つ(#1233)。⚠ 命令 id(`keymap.ts`)→ 整え方(`text-tidy.ts`)。 */
+const TIDY_COMMANDS: ReadonlyMap<string, TidyOp> = new Map<string, TidyOp>([
+  ['tidy-join-lines', 'join-lines'],
+  ['tidy-to-halfwidth', 'to-halfwidth'],
+  ['tidy-kana-to-fullwidth', 'kana-to-fullwidth'],
+  ['tidy-squeeze-blank-lines', 'squeeze-blank-lines'],
+  ['tidy-strip-bullets', 'strip-bullets'],
+]);
+
 const FORMAT_OF: Readonly<Record<string, FormatOp>> = {
   'format-bold': 'bold',
   'format-italic': 'italic',
@@ -11168,7 +11178,39 @@ const EDITOR_RUN: Readonly<Record<string, (ta: HTMLTextAreaElement, notify: (t: 
     insertText(ta, done.insert);
     ta.setSelectionRange(done.caret, done.caret);
   },
+  /**
+   * 🔴 **選んだ字を整える 5 つ**(#1233)── 当て方は `runTidy` 1 か所(下の `TIDY_COMMANDS` が
+   * 命令 id と整え方を 1:1 で持つ)。⚠ 5 本を手で並べ直さず、表から作る。
+   */
+  ...Object.fromEntries(
+    [...TIDY_COMMANDS].map(([id, op]) => [
+      id,
+      (ta: HTMLTextAreaElement, notify: (t: string) => void) => runTidy(ta, op, notify),
+    ]),
+  ),
 };
+
+/**
+ * 🔴 **選んだ字を整えて、欄へ当てる、唯一の口**(#1233)── 鍵・「操作を探す」が同じ関数を通る(§7)。
+ *
+ * ⚠ 書くのは **`insertText`(= `execCommand`)で置き換える範囲だけ** ── `ta.value =` で
+ *   全文を代入すると**取り消しの履歴が切れる**(#765)。字下げ(`runIndent`)と同じ作法。
+ * ⚠ 選んでいない / もう整っているときは**何も書かず**、理由を 1 行で言う(無言にしない)。
+ */
+function runTidy(ta: HTMLTextAreaElement, op: TidyOp, notify: (t: string) => void): void {
+  const res = tidySelection(
+    { text: ta.value, start: ta.selectionStart, end: ta.selectionEnd },
+    op,
+  );
+  if (res.kind === 'none') {
+    notify(TIDY_NOTES[res.reason]);
+    return;
+  }
+  const { edit } = res;
+  ta.setSelectionRange(edit.from, edit.to);
+  insertText(ta, edit.insert);
+  ta.setSelectionRange(edit.start, edit.end);
+}
 
 /**
  * 🔴 **字下げを欄へ当てる、唯一の口**(#1166)── `Tab` の経路・鍵(`Ctrl+]` / `Ctrl+[`)・
@@ -12331,7 +12373,7 @@ export function bindActions(
        * ⚠ ここは書式の近道だけを通す門なので、何も言わずに素通りすると
        *   「鍵を割り当てたのに何も起きない」になる ── 行き先を言う(`EDITOR_RUN` と同じ口)。
        */
-      if (rowCmd === 'align-table') {
+      if (rowCmd === 'align-table' || (rowCmd !== null && TIDY_COMMANDS.has(rowCmd))) {
         ke.preventDefault();
         EDITOR_RUN[rowCmd]!(ke.target as HTMLTextAreaElement, (t) => services.showStatus?.(t));
         return;

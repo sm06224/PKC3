@@ -71,6 +71,15 @@ const reg = (): Record<string, { id: string }[]> =>
  */
 const UNBRIDGED: readonly string[] = [
   /**
+   * ⚠ 2026-10-02(#1233): 選んだ字を整える 5 つ。**押しボタンを持たない** ── `align-table` と同じ
+   *   「本文の欄へ当てる命令」の継ぎ目(`EDITOR_RUN`)で受け、「操作を探す」から呼ぶ。
+   */
+  'tidy-join-lines',
+  'tidy-to-halfwidth',
+  'tidy-kana-to-fullwidth',
+  'tidy-squeeze-blank-lines',
+  'tidy-strip-bullets',
+  /**
    * ⚠ 2026-10-01(#1171): 表の列幅を揃える。**押しボタンを持たない** ── `inline-calc` と同じ
    *   「本文の欄へ当てる命令」の継ぎ目(`EDITOR_RUN`)で受け、「操作を探す」から呼ぶ。
    */
@@ -449,6 +458,10 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-02(#999): システム → 保存領域の「縮める」(`storage-vacuum`)で受け手 +1 ── 登記は増えない
       //   (押し口は設定の欄にしか無く、鍵も持たない)。`receivers` +1 / `total` +1 / `unregistered` +1。
       //   押した所から何も要らない N(`storage-profile` と同じ仕分け)
+      // ⚠ 2026-10-02(#1233): 選んだ字を整える 5 つ(`tidy-join-lines` / `tidy-to-halfwidth` /
+      //   `tidy-kana-to-fullwidth` / `tidy-squeeze-blank-lines` / `tidy-strip-bullets`)で登記 +5 /
+      //   total +5 / `outsideActionsTable` +5。受け手は増えない ── 押し所を作らず、「本文の欄へ当てる命令」の
+      //   継ぎ目(`EDITOR_RUN`)で受ける(`align-table` と同じ仕分け)。
       // ⚠ 2026-10-02(#1264 §2 欠陥 4-a): PC の帯の「更新」(`pc-refresh-folder`)で受け手 +1 ── 登記は増えない
       //   (押し口は PC のタブの帯にしか無く、鍵も持たない)。`receivers` +1 / `total` +1 / `unregistered` +1。
       //   「別のフォルダ…」は既に在る `pc-pick-folder` を呼ぶので数は動かない。
@@ -702,11 +715,11 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-02(#215 段①②): 左の列の「PC」のタブの押し口 4 つ(`pc-pick-folder` / `pc-cut-folder` / `pc-more` /
       //   `pc-open-file`)で受け手 +4 ── 登記は増えない(押し口はタブの中にしか無く、鍵も持たない)。
       //   `receivers` +4 / `total` +4 / `unregistered` +4。
-      total: 375,
+      total: 380,
       receivers: 316,
-      registered: 98,
+      registered: 103,
       both: 39,
-      outsideActionsTable: 59,
+      outsideActionsTable: 64,
       unregistered: 277,
     });
   });
@@ -750,8 +763,9 @@ describe('操作の全数台帳(#582 段①)', () => {
     // ⚠ 2026-10-01(#1166): 字下げ / 字下げを戻す(`indent` / `outdent`)で `key` 69 → 71
     // ⚠ 2026-10-01(#1171): 「表の列幅を揃える」(`align-table`)で `key` 71 → 72(鍵の既定は持たない)
     // ⚠ 2026-10-01(#1213): 行を上 / 下へ動かす(`move-line-up` / `move-line-down`)で `key` 72 → 74
+    // ⚠ 2026-10-02(#1233): 選んだ字を整える 5 つ(`tidy-*`)で `key` 74 → 79(鍵の既定は持たない)
     expect(s().perBook).toEqual({
-      key: 74,
+      key: 79,
       entry: 17,
       body: 3,
       collection: 2,

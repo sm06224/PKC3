@@ -1022,6 +1022,50 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     defaults: [],
     note: 'カーソルの在る表の、列の幅を空白で揃えます(中の字は変えません)。1 画面編集の行では「全文を編集」に切り替えてから',
   },
+  /**
+   * 🔴 **選んだ字を整える 5 つ**(#1233。Gemini 裁定 A ── 別アプリは作らず、本文で字を選んで
+   * 「操作を探す」から呼ぶ)。
+   * ⚠ 鍵は付けない(`defaults: []`)── 名前で呼ぶだけの操作で、鍵が欲しい人は設定で割り当てる。
+   *   既定を置くと、user が割り当てた鍵と重なって検め(重複の断り)が鳴る。`KEYLESS` に足すこと。
+   * 🔑 `note` に**やること**を書く ── 一覧は `label` と `note` の両方を探し語に使うので、
+   *   「折り返し」「半角」「ｱｲｳ」でも当たる。
+   * 🔑 規則は `features/markdown/text-tidy.ts` の 1 か所(`TIDY_COMMANDS` が id を持つ)。
+   */
+  {
+    id: 'tidy-join-lines',
+    label: '改行を詰める',
+    contexts: ['editor', 'row'],
+    defaults: [],
+    note: '選んだ行を 1 行にします(折り返しの改行を詰める)。日本語どうしは空白なし、英数字どうしは半角空白 1 つで結びます',
+  },
+  {
+    id: 'tidy-to-halfwidth',
+    label: '全角を半角にそろえる',
+    contexts: ['editor', 'row'],
+    defaults: [],
+    note: '選んだ範囲の全角の英数字・記号・空白を半角にします(カナと漢字は変えません)',
+  },
+  {
+    id: 'tidy-kana-to-fullwidth',
+    label: '半角カナを全角にそろえる',
+    contexts: ['editor', 'row'],
+    defaults: [],
+    note: '選んだ範囲の半角カナ(ｱｲｳ)を全角(アイウ)にします。濁点・半濁点もまとめます',
+  },
+  {
+    id: 'tidy-squeeze-blank-lines',
+    label: '空行を減らす',
+    contexts: ['editor', 'row'],
+    defaults: [],
+    note: '選んだ行の中で、続いている空行を 1 つにします',
+  },
+  {
+    id: 'tidy-strip-bullets',
+    label: '箇条書きの記号を外す',
+    contexts: ['editor', 'row'],
+    defaults: [],
+    note: '選んだ行の頭の「- 」「* 」「+ 」を、付いている行すべてから外します(チェック項目は変えません)',
+  },
   // ── 追記の欄
   {
     id: 'append-send',
