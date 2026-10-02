@@ -35,6 +35,7 @@ function gauge(freeBytes: number): StorageGauge {
     ftsSegments: 1,
     journalMode: 'truncate',
     tempStore: 0,
+    synchronous: 2,
     elapsedMs: 1,
   };
 }

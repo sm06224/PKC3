@@ -809,6 +809,8 @@ export interface StorageGauge {
   journalMode: string;
   /** `PRAGMA temp_store` の実値(0 = 既定 / 1 = file / 2 = memory)。 */
   tempStore: number;
+  /** `PRAGMA synchronous` の実値(0 OFF / 1 NORMAL / 2 FULL / 3 EXTRA)。FULL と決めた(#1007 段③)。 */
+  synchronous: number;
   /** 測るのに掛かった時間(ms)── 「読むだけで安い」の裏取り用。 */
   elapsedMs: number;
 }

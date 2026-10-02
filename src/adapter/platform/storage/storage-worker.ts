@@ -430,6 +430,17 @@ async function init(
     const requested: JournalMode =
       journalMode && JOURNAL_MODES.includes(journalMode) ? journalMode : 'truncate';
     actualJournalMode = String(opened.selectValue(`PRAGMA journal_mode=${requested}`));
+    /**
+     * 🔴 **`synchronous` は FULL と決めた**(#1007 段③)。sqlite の既定も FULL(2)だが、
+     * 既定に頼ると ① 上流が既定を変えた日 ② `journal_mode` を WAL へ変えた日(WAL なら
+     * NORMAL でよい、と読む人が居る)に、**誰にも告げず耐久性が落ちる**。壊れに強くする側
+     * (#1007)の決定なので字で置く。⚠ NORMAL にしない ── truncate / delete の journal で
+     * NORMAL は電源断の瞬間に DB が壊れうる(sqlite の docs)。
+     * 読み戻し値は `storageGauge` の `synchronous` で見える(test が 2 = FULL を pin)。
+     * ⚠ 既定と同じ値なので、この行を消しても読み戻しは 2 のまま ── 消したことは
+     *   `tests/adapter/storage-worker-gauge.test.ts` の原文の pin だけが止める。
+     */
+    opened.exec('PRAGMA synchronous = FULL');
   } catch (e) {
     opened.close();
     throw e;
@@ -877,6 +888,7 @@ function measureGauge(database: Database): StorageGauge {
     ftsSegments,
     journalMode: String(database.selectValue('PRAGMA journal_mode')),
     tempStore: num('PRAGMA temp_store'),
+    synchronous: num('PRAGMA synchronous'),
     elapsedMs: Date.now() - started,
   };
 }
