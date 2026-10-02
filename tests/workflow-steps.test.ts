@@ -1186,6 +1186,200 @@ describe('過去の zip を、新しい要求で落とさない(旗の名前に�
   });
 });
 
+/**
+ * 🔴 **dependabot の auto-merge は、CI を待ってから merge し、`/dev/` を配り直す**(#1039)。
+ *
+ * ⚠ 直す前は `gh pr merge --auto` の 1 行で、穴が 2 つあった:
+ *   ① main に必須の検査が無いので **その場で merge** していた(`verify` の 4 分前)。
+ *   ② `GITHUB_TOKEN` の push は workflow を起こさないので **`pages.yml` が走らず**、
+ *      main より 1 commit 古い `/dev/` を配っていた(2026-09-24 に実測)。
+ * 🔑 字面の pin だけでは「待つ loop が 1 度も回らない」「自分を待って止まる」を
+ *   検出できない(§2)── だから **`run:` を `bash -e` で実際に走らせ**、`gh` を
+ *   差し替えて 4 通りの終わり方を見る(#849 と同じ作法)。
+ */
+describe('#1039 ── dependabot の auto-merge は CI を待ち、/dev/ を配り直す', () => {
+  const YML = join(DIR, 'dependabot-auto-merge.yml');
+  const raw = readFileSync(YML, 'utf-8');
+  const code = raw
+    .split('\n')
+    .filter((l) => !/^\s*#/.test(l))
+    .join('\n');
+
+  /** `id: merge` の step の `run: |` の中身(10 字下げの続き)。 */
+  function mergeRun(): string {
+    const lines = code.split('\n');
+    const at = lines.findIndex((l) => /^ {8}run: \|/.test(l));
+    expect(at, 'run: | が無い(空振り)').toBeGreaterThan(-1);
+    const body: string[] = [];
+    for (const l of lines.slice(at + 1)) {
+      if (l.trim() === '') continue;
+      if (!/^ {10}/.test(l)) break;
+      body.push(l.slice(10));
+    }
+    expect(body.length, 'run の中身が読めていない').toBeGreaterThan(5);
+    return body.join('\n');
+  }
+
+  it('🔴 --auto を使っていない(その場で merge する穴)', () => {
+    expect(code).not.toContain('--auto');
+  });
+
+  it('🔴 ③ の `gh workflow run` に要る actions: write を持つ', () => {
+    expect(code).toMatch(/^permissions:\n(?: {2}.*\n)*? {2}actions: write$/m);
+  });
+
+  it('🔴 自分(check run 名 = job 名)を待っていない', () => {
+    expect(code, 'job 名が auto-merge でない(自分を除く名前が外れる)').toMatch(/^ {2}auto-merge:$/m);
+    expect(mergeRun()).toContain('select(.name != "auto-merge")');
+  });
+
+  it('🔴 順番: 待つ → merge → pages.yml を起こす', () => {
+    const run = mergeRun();
+    const wait = run.indexOf('check-runs');
+    const merge = run.indexOf('gh pr merge --squash');
+    const deploy = run.indexOf('gh workflow run pages.yml');
+    expect(wait, '検査を読んでいない').toBeGreaterThanOrEqual(0);
+    expect(merge, 'merge していない').toBeGreaterThan(wait);
+    expect(deploy, '/dev/ を配り直していない').toBeGreaterThan(merge);
+  });
+
+  /**
+   * 🔴 **本物の道具で走らせる。** `gh` を差し替え、`api` には fixture を返させ、
+   * `pr merge` / `workflow run` は log に書かせる。⚠ 4 通り揃えるのが肝 ──
+   * 緑だけ見ると「何をしても merge する」実装と区別が付かない。
+   */
+  type Case = { name: string; checks: string[]; exit: number; calls: string[] };
+  const green = JSON.stringify([
+    { name: 'verify', status: 'completed', conclusion: 'success' },
+    { name: 'audit', status: 'completed', conclusion: 'skipped' },
+  ]);
+  const red = JSON.stringify([
+    { name: 'verify', status: 'completed', conclusion: 'failure' },
+    { name: 'audit', status: 'completed', conclusion: 'success' },
+  ]);
+  const pending = JSON.stringify([{ name: 'verify', status: 'in_progress', conclusion: null }]);
+  const cases: Case[] = [
+    { name: '緑なら merge → pages.yml', checks: [green], exit: 0, calls: ['pr merge --squash', 'workflow run pages.yml --ref main'] },
+    { name: '赤なら merge しない', checks: [red], exit: 1, calls: [] },
+    { name: '検査 0 件のまま上限 → merge しない', checks: ['[]'], exit: 1, calls: [] },
+    { name: '走行中 → 緑(待ってから merge)', checks: [pending, pending, green], exit: 0, calls: ['pr merge --squash', 'workflow run pages.yml --ref main'] },
+  ];
+  for (const c of cases) {
+    it(`🔴 bash -e で実際に走らせる: ${c.name}`, () => {
+      const dir = mkdtempSync(join(tmpdir(), 'pkc3-dependabot-'));
+      try {
+        // fixture は呼ばれるたびに次へ進む(最後の物で止まる)
+        c.checks.forEach((j, i) => writeFileSync(join(dir, `checks.${i}.json`), j));
+        writeFileSync(join(dir, 'calls.log'), '');
+        writeFileSync(
+          join(dir, 'gh'),
+          [
+            '#!/bin/sh',
+            'case "$1" in',
+            '  api)',
+            '    i=$(cat "$PKC3_FAKE_DIR/i" 2>/dev/null || echo 0)',
+            '    f="$PKC3_FAKE_DIR/checks.$i.json"',
+            '    [ -f "$f" ] || f="$PKC3_FAKE_DIR/checks.$((i-1)).json"',
+            '    echo $((i+1)) > "$PKC3_FAKE_DIR/i"',
+            '    cat "$f";;',
+            '  *) echo "$*" >> "$PKC3_FAKE_DIR/calls.log";;',
+            'esac',
+          ].join('\n') + '\n',
+          { mode: 0o755 },
+        );
+        const r = spawnSync('bash', ['-e', '-c', mergeRun()], {
+          env: {
+            ...process.env,
+            PATH: `${dir}:${process.env['PATH'] ?? ''}`,
+            PKC3_FAKE_DIR: dir,
+            PR_URL: 'https://example.invalid/pr/1',
+            HEAD_SHA: 'deadbeef',
+            REPO: 'o/r',
+            PKC3_WAIT_SECONDS: '2',
+            PKC3_POLL_SECONDS: '0',
+          },
+          encoding: 'utf-8',
+          stdio: 'pipe',
+          timeout: 20_000,
+        });
+        expect(r.status, `exit が違う\nstdout: ${r.stdout}\nstderr: ${r.stderr}`).toBe(c.exit);
+        const calls = readFileSync(join(dir, 'calls.log'), 'utf-8')
+          .split('\n')
+          .filter(Boolean)
+          .map((l) => l.replace(/ https?:\S+/, ''));
+        expect(calls).toEqual(c.calls);
+        // 🔴 「走行中 → 緑」は、**緑の fixture まで読んでから** merge したことを見る ──
+        //    呼んだ回数を見ないと、走行中のまま merge する実装(pending を数えない)も
+        //    同じ calls / exit になる(変異 M5 が SURVIVED で教えた)
+        const apiCalls = Number(readFileSync(join(dir, 'i'), 'utf-8').trim());
+        expect(apiCalls, '最後の fixture まで読む前に終わっている').toBeGreaterThanOrEqual(c.checks.length);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
+/**
+ * 🔴 **夜の門: `/dev/` が main の HEAD を配っているか**(#1039)。
+ * 直しただけでは、次に引き金が外れた日にまた静かに止まる ── 「main の HEAD に
+ * Deploy Pages の run が在るか」を夜に引き、無ければ赤(台帳の issue へ出る)。
+ */
+describe('#1039 ── 夜に「/dev/ が main の HEAD を配ったか」を見る', () => {
+  const YML = join(DIR, 'nightly.yml');
+  const code = readFileSync(YML, 'utf-8')
+    .split('\n')
+    .filter((l) => !/^\s*#/.test(l))
+    .join('\n');
+
+  function stepRun(): string {
+    const lines = code.split('\n');
+    const at = lines.findIndex((l) => l.trim() === 'id: pages_deployed_check');
+    expect(at, 'pages_deployed_check の step が無い').toBeGreaterThan(-1);
+    const runAt = lines.findIndex((l, i) => i > at && /^ {8}run: \|/.test(l));
+    expect(runAt, 'run: | が無い').toBeGreaterThan(at);
+    const body: string[] = [];
+    for (const l of lines.slice(runAt + 1)) {
+      if (l.trim() === '') continue;
+      if (!/^ {10}/.test(l)) break;
+      body.push(l.slice(10));
+    }
+    expect(body.length).toBeGreaterThan(2);
+    return body.join('\n');
+  }
+
+  it('🔴 step が在り、前が落ちても走り、pages.yml の run を引く', () => {
+    const lines = code.split('\n');
+    const at = lines.findIndex((l) => l.trim() === 'id: pages_deployed_check');
+    expect(at).toBeGreaterThan(-1);
+    const block = lines.slice(at, at + 4).join('\n');
+    expect(block, '前が落ちると走らない(#221 の教訓)').toContain('!cancelled()');
+    expect(stepRun()).toContain('--workflow pages.yml');
+    expect(code, 'gh run list に要る actions: read が無い').toMatch(/^permissions:\n(?: {2}.*\n)*? {2}actions: read$/m);
+  });
+
+  for (const c of [
+    { name: 'run が無ければ赤', found: '0', exit: 1 },
+    { name: 'run が在れば緑', found: '1', exit: 0 },
+  ]) {
+    it(`🔴 bash -e で実際に走らせる: ${c.name}`, () => {
+      const dir = mkdtempSync(join(tmpdir(), 'pkc3-pages-check-'));
+      try {
+        writeFileSync(join(dir, 'gh'), `#!/bin/sh\necho ${c.found}\n`, { mode: 0o755 });
+        const r = spawnSync('bash', ['-e', '-c', stepRun()], {
+          env: { ...process.env, PATH: `${dir}:${process.env['PATH'] ?? ''}`, REPO: 'o/r', SHA: 'deadbeef' },
+          encoding: 'utf-8',
+          stdio: 'pipe',
+          timeout: 20_000,
+        });
+        expect(r.status, `stdout: ${r.stdout}\nstderr: ${r.stderr}`).toBe(c.exit);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
 describe('#400 段④ ── 雛形を置く順番', () => {
   const cases = [
     { file: 'pages.yml', check: 'check-dist.mjs dev' },
