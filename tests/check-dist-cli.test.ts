@@ -82,9 +82,9 @@ describe('検品 CLI', () => {
       writeFileSync(join(dir, 'index.html'), '<!doctype html>');
       const withFlag = run(['dev', dir, '--require-pdf']);
       expect(withFlag.code).toBe(1);
-      expect(withFlag.out).toContain('焼きたてなのに dist に pdf/ が無い');
+      expect(withFlag.out).toContain('焼きたてなのに dist に pdf/lib/ が無い');
       // 対照群 ── 旗が無ければその門は鳴らない(他の理由では落ちるが、この文言は出ない)
-      expect(run(['dev', dir]).out).not.toContain('焼きたてなのに dist に pdf/');
+      expect(run(['dev', dir]).out).not.toContain('焼きたてなのに dist に pdf/lib/');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

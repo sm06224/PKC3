@@ -320,6 +320,19 @@ describe('ノートへ引く', () => {
   });
 });
 
+describe('窓の側も、自分宛ての封筒だけ読む(実物の parse)', () => {
+  it('自分の token の封筒は読み、他の窓宛て・封筒でないものは null', () => {
+    const own = wire.envelope('doc', 'mine', { url: 'blob:x' });
+    expect(wire.parse(own, 'mine')).toEqual({ kind: 'doc', payload: { url: 'blob:x' } });
+    // 🔴 token の検めを外すと、他の窓宛ての「文書を渡す」を自分のものとして読んでしまう
+    expect(wire.parse(own, 'someone-else')).toBeNull();
+    expect(wire.parse(null, 'mine')).toBeNull();
+    expect(wire.parse('str', 'mine')).toBeNull();
+    expect(wire.parse({ token: 'mine' }, 'mine')).toBeNull();
+    expect(wire.parse({ [PDF_TAG]: 5, token: 'mine' }, 'mine')).toBeNull();
+  });
+});
+
 describe('放送は全タブに届く ── 自分が開いた窓だけ受ける', () => {
   it('知らない token の合図(他のタブの窓)には、何も起きない', () => {
     const g = rig();

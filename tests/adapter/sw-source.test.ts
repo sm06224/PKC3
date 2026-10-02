@@ -337,10 +337,15 @@ describe('規則(純関数)', () => {
     ['assets/index-AAAAAAAA.js.map', false], // ⚠ dev では 3.2MB ある
     ['sw.js', false], // SW 自身は SW が配らない
     // 🔴 PDF を PKC の画面で読む窓の一式は、設定で選んだ人が押したときだけ取りに行く物(#275 段①)
-    ['pdf/host.html', false],
     ['pdf/lib/pdf.min.mjs', false],
     ['pdf/lib/cmaps/Adobe-Japan1-UCS2.bcmap', false],
-    // 対照群 ── 名前が似ているだけの物は載る(接頭辞の `pdf/` だけを外す)
+    // 🔴 窓の小さな HTML / JS は**載る** ── 載せないと、オフラインで窓を開いたとき service worker が
+    //    `index.html` へ退避して PKC をもう 1 枚開く(窓は開き、本体が取れなければ内蔵の表示へ退避する形にする)
+    ['pdf/host.html', true],
+    ['pdf/reader.js', true],
+    ['pdf/reader-wire.js', true],
+    ['pdf/page-cache.js', true],
+    // 対照群 ── 名前が似ているだけの物は載る(接頭辞の `pdf/lib/` だけを外す)
     ['assets/pdf-viewer-AAAAAAAA.js', true],
     ['pdf.js', true],
   ])('precache 対象: %s → %s', (path, expected) => {

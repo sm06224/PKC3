@@ -55,6 +55,10 @@ import { appOpenInEdit } from '@adapter/ui/render/open-in-edit';
 import { appMissingLinks } from '@adapter/ui/render/missing-links';
 import { appCodeCollapse } from '@adapter/ui/render/code-collapse';
 import { appInlineCodeCopy } from '@adapter/ui/render/inline-code-copy';
+import { appPdfReader } from '@adapter/ui/render/pdf-reader-setting';
+import { PdfReaderHost } from '@adapter/platform/pdf/pdf-window';
+import { openInPdfReader } from '@adapter/platform/pdf/open-in-reader';
+import { quoteIntoNote } from '@adapter/platform/pdf/quote-into-note';
 import { appPhoneLinks } from '@adapter/ui/render/phone-links';
 import { appDateLinks } from '@adapter/ui/render/date-links';
 import { appColorSwatch } from '@adapter/ui/render/color-swatch';
@@ -1632,6 +1636,29 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     paintOpen();
   };
   /**
+   * 🔴 **PDF を PKC の画面で読む窓**(#275 段①。設定で選んだ人だけ ── 呼ぶのは `viewAsset`)。
+   * ⚠ **最初に使うときまで作らない**(放送の口を使わない人に開かない)。窓の合図は全部ここへ来る。
+   * ⚠ ここは**配線だけ**である ── 開く / 渡す / 受ける作法は `PdfReaderHost`、引く先と形は
+   *   `features/pdf/pdf-quote.ts` が持つ(`main.ts` は原文を読む test しか持てないので判断を置かない)。
+   * 🔑 ノートへ書くのは**既存の追記**(`APPEND_TO_ENTRY`)── 新しい書込経路を作らない。
+   */
+  let pdfHost: PdfReaderHost | null = null;
+  const pdfReaderHost = (): PdfReaderHost => {
+    pdfHost ??= new PdfReaderHost({
+      onQuote: (session, text, page) => quoteIntoNote(dispatcher, session, text, page, showStatus),
+      onFellBack: (session) =>
+        showStatus(`「${session.name}」は PKC の画面で読めなかったため、ブラウザの表示で開きました`),
+      onLoadFailed: (session) =>
+        dispatcher.dispatch({ type: 'OP_FAILED', error: `PDF を開けませんでした: ${session.name}` }),
+      onOpenFailed: () =>
+        dispatcher.dispatch({
+          type: 'OP_FAILED',
+          error: '別のウィンドウを開けませんでした(ポップアップが止められています)',
+        }),
+    });
+    return pdfHost;
+  };
+  /**
    * 🔴 **起動のたびに、軽く検める**(#1007 段①)。
    * ⚠ `client` は昇格で実体が替わるので**呼ぶたびに読む**(閉じ込めない)。
    * ⚠ 見つけたら**一時の知らせ**(`showStatus`)へ ── `OP_FAILED` にしない。
@@ -3156,7 +3183,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       }
       return out;
     },
-    viewAsset: (assetKey, name, mime) => {
+    viewAsset: (assetKey, name, mime, lid) => {
       void (async () => {
         try {
           // ⚠ 出せない種類は**借りる前に**断る(貸してから捨てる形にしない)
@@ -3166,6 +3193,26 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
               type: 'OP_FAILED',
               error: `この種類は別のウィンドウで開けません: ${name}`,
             });
+            return;
+          }
+          /**
+           * 🔴 **PDF は、設定で選んだ人だけ PKC の画面で読む**(#275 段①。裁定: 既定は切)。
+           * ⚠ 切のままなら**下の `<object>` の窓が今までどおり開く**(見え方は変わらない)。
+           * ⚠ 開けなかったとき・読めなかったときの扱いは `PdfReaderHost` が持つ(読めなければ
+           *   窓の側が内蔵の表示へ退避する ── ここへは戻らない)。
+           */
+          if (
+            await openInPdfReader(
+              {
+                enabled: () => appPdfReader.enabled(),
+                host: pdfReaderHost,
+                lend: (key) => blobs.lendObjectUrl(cid, key),
+                fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
+                note: showStatus,
+              },
+              { kind, assetKey, name, lid: lid ?? null },
+            )
+          ) {
             return;
           }
           const lent = await blobs.lendObjectUrl(cid, assetKey);
@@ -3963,6 +4010,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       appInlineCodeCopy.setEnabled(on);
       center.invalidateDetail();
       center.render(dispatcher.getState());
+    },
+    setPdfReader: (on) => {
+      // ⚠ 描き直さない ── 効くのは次に「別のウィンドウで見る」を押したとき
+      appPdfReader.setEnabled(on);
     },
     setPasteSource: (id) => {
       if (!isPasteSource(id)) return;

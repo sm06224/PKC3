@@ -469,6 +469,8 @@ describe('PDF の添付(窓内 + 別窓)', () => {
     expect(view!.getAttribute('data-pkc-asset-key')).toBe('ast-pdf');
     expect(view!.getAttribute('data-pkc-asset-mime')).toBe('application/pdf');
     expect(view!.getAttribute('data-pkc-asset-name')).toBe('見積.pdf');
+    // 🔴 押した添付のノートを運ぶ(PDF を PKC の画面で読む窓の「ノートへ引く」の起点。#275 段①)
+    expect(view!.getAttribute('data-pkc-target-lid'), '引く先を解く起点が運ばれていない').toBe('a1');
     // ⚠ 何が起きるかが読めること(画像と PDF で言い方を分ける)
     expect(view!.getAttribute('title')).toContain('PDF');
     // ⚠ 図案の鍵(`ACTION_ICONS`)を壊すと**黙って図案なし**になる ── ここで鳴らす

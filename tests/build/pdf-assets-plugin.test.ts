@@ -10,7 +10,7 @@
 import { statSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { Plugin } from 'vite';
-import { PDF_DIR, PDF_LIB, pdfAssetsPlugin } from '../../build/pdf-assets-plugin';
+import { PDF_DIR, pdfAssetsPlugin } from '../../build/pdf-assets-plugin';
 // @ts-expect-error -- 検品規則は素の .mjs(ビルド対象外の CI script 群)
 import { PDF_DIR as INSPECT_PDF_DIR, PDF_REQUIRED } from '../../scripts/dist-inspect.mjs';
 
@@ -37,20 +37,19 @@ describe('pdfAssetsPlugin', () => {
   it('検品が「要る」と言う lib の file を 1 つ残らず写す(両側の綴りが同じ)', () => {
     expect(PDF_DIR).toBe(INSPECT_PDF_DIR);
     for (const n of PDF_REQUIRED as string[]) {
-      if (!n.startsWith('lib/')) continue; // host.html / reader.js などは public/pdf/ から来る
       expect(names.has(`${PDF_DIR}${n}`), `${n} を写していない`).toBe(true);
     }
   });
 
-  it('全部 `pdf/lib/` の下へ置く', () => {
-    for (const f of files) expect(f.fileName.startsWith(PDF_LIB), f.fileName).toBe(true);
+  it('全部 `pdf/lib/` の下へ置く(窓の小さな HTML / JS は public/pdf/ 直下から来る)', () => {
+    for (const f of files) expect(f.fileName.startsWith(PDF_DIR), f.fileName).toBe(true);
   });
 
   it('日本語を読むための cmap と、画像の復号 wasm が入っている', () => {
-    expect(names.has(`${PDF_LIB}cmaps/Adobe-Japan1-UCS2.bcmap`)).toBe(true);
-    expect(names.has(`${PDF_LIB}cmaps/90ms-RKSJ-H.bcmap`)).toBe(true);
+    expect(names.has(`${PDF_DIR}cmaps/Adobe-Japan1-UCS2.bcmap`)).toBe(true);
+    expect(names.has(`${PDF_DIR}cmaps/90ms-RKSJ-H.bcmap`)).toBe(true);
     for (const w of ['jbig2', 'openjpeg', 'qcms_bg']) {
-      expect(names.has(`${PDF_LIB}wasm/${w}.wasm`), `${w}.wasm`).toBe(true);
+      expect(names.has(`${PDF_DIR}wasm/${w}.wasm`), `${w}.wasm`).toBe(true);
     }
   });
 
@@ -65,9 +64,9 @@ describe('pdfAssetsPlugin', () => {
   });
 
   it('本体と解析 worker は minified の版(配る量を抑える)', () => {
-    expect(names.has(`${PDF_LIB}pdf.min.mjs`)).toBe(true);
-    expect(names.has(`${PDF_LIB}pdf.worker.min.mjs`)).toBe(true);
-    expect(names.has(`${PDF_LIB}pdf.mjs`)).toBe(false);
+    expect(names.has(`${PDF_DIR}pdf.min.mjs`)).toBe(true);
+    expect(names.has(`${PDF_DIR}pdf.worker.min.mjs`)).toBe(true);
+    expect(names.has(`${PDF_DIR}pdf.mjs`)).toBe(false);
   });
 
   /**
@@ -78,7 +77,7 @@ describe('pdfAssetsPlugin', () => {
    */
   it('🔴 本体も解析 worker も legacy の版(素の版は新しい機能を持たないブラウザで描けない)', () => {
     const size = (rel: string): number => statSync(`node_modules/pdfjs-dist/${rel}`).size;
-    const got = (n: string): number | undefined => files.find((f) => f.fileName === `${PDF_LIB}${n}`)?.bytes;
+    const got = (n: string): number | undefined => files.find((f) => f.fileName === `${PDF_DIR}${n}`)?.bytes;
     expect(got('pdf.min.mjs')).toBe(size('legacy/build/pdf.min.mjs'));
     expect(got('pdf.worker.min.mjs')).toBe(size('legacy/build/pdf.worker.min.mjs'));
     // ⚠ 空振り防止 ── 2 つの版は実際に大きさが違う(同じなら、この比較は何も見分けていない)
@@ -87,8 +86,8 @@ describe('pdfAssetsPlugin', () => {
   });
 
   it('ライセンスの全文を同梱する(Apache-2.0 の本体 / 標準書体 / 復号 wasm)', () => {
-    expect(names.has(`${PDF_LIB}LICENSE`)).toBe(true);
-    expect(names.has(`${PDF_LIB}standard_fonts/LICENSE_LIBERATION`)).toBe(true);
-    expect(names.has(`${PDF_LIB}wasm/LICENSE_OPENJPEG`)).toBe(true);
+    expect(names.has(`${PDF_DIR}LICENSE`)).toBe(true);
+    expect(names.has(`${PDF_DIR}standard_fonts/LICENSE_LIBERATION`)).toBe(true);
+    expect(names.has(`${PDF_DIR}wasm/LICENSE_OPENJPEG`)).toBe(true);
   });
 });

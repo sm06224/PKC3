@@ -2819,6 +2819,8 @@ export class DetailRenderer {
         view.setAttribute('data-pkc-asset-key', meta.assetKey);
         view.setAttribute('data-pkc-asset-name', meta.name || (pdf ? 'PDF' : '画像'));
         view.setAttribute('data-pkc-asset-mime', meta.mime);
+        // 🔴 押した添付のノート(PDF を PKC の画面で読む窓の「ノートへ引く」の起点。#275 段①)
+        markTargetLid(view, lid);
         view.title = pdf
           ? 'PDF を別のウィンドウで開きます(大きく開くのでページを読めます)'
           : '画像を別のウィンドウで開きます(本文を書きながら見られます)';

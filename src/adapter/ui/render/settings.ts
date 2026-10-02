@@ -52,6 +52,7 @@ import { appVoiceBoost, VoiceBoostStore } from './voice-boost';
 import { appMissingLinks, MissingLinksStore } from './missing-links';
 import { appCodeCollapse, CodeCollapseStore } from './code-collapse';
 import { appInlineCodeCopy, InlineCodeCopyStore } from './inline-code-copy';
+import { appPdfReader, PdfReaderStore } from './pdf-reader-setting';
 import { appPhoneLinks, PhoneLinksStore } from './phone-links';
 import { appDateLinks, DateLinksStore } from './date-links';
 import { appRelativeDays, RelativeDaysStore } from './relative-days';
@@ -203,6 +204,11 @@ export class SettingsRenderer {
      *   (見込みも押せるかも判断しない)。⚠ **末尾に足す**(すぐ上の戒めのとおり)。
      */
     private readonly vacuum: StorageVacuum = appStorageVacuum,
+    /**
+     * 🔴 **PDF を PKC の画面で開くか**(#275 段①)。
+     * ⚠ **末尾に足す**(すぐ上の戒めのとおり)。
+     */
+    private readonly pdfReader: PdfReaderStore = appPdfReader,
   ) {}
 
   private sameOriginList: HTMLElement | null = null;
@@ -231,6 +237,7 @@ export class SettingsRenderer {
       this.syncMissingLinks();
       this.syncCodeCollapse();
       this.syncInlineCodeCopy();
+      this.syncPdfReader();
       this.syncExternalImages();
       this.syncPasteSource();
       this.syncSameOrigin(state);
@@ -885,6 +892,27 @@ export class SettingsRenderer {
       '切ると、押しても何も起きず、ふつうの字として選べます(コード枠のコピーは変わりません)。';
     iccd.append(icclabel);
     editDl.append(icct, iccd);
+    /**
+     * 🔴 **PDF を PKC の画面で開くか**(#275 段①。裁定: **選んだ人だけ**・既定は切)。
+     * ⚠ 切のままなら、添付の「別のウィンドウで見る」はブラウザ内蔵の表示のまま(見え方は変わらない)。
+     * ⚠ 説明は hover に置く(`missing-links` と同じ ── visible の note を足すと段落数を動かす)。
+     * ⚠ 字は「何が起きるか」で書く(内部の部品名を出さない)。
+     */
+    const pdft = document.createElement('dt');
+    pdft.textContent = 'PDF';
+    const pdfd = document.createElement('dd');
+    const pdflabel = document.createElement('label');
+    const pdfcheck = document.createElement('input');
+    pdfcheck.type = 'checkbox';
+    pdfcheck.setAttribute('data-pkc-action', 'set-pdf-reader');
+    pdfcheck.setAttribute('data-pkc-field', 'pdf-reader');
+    pdflabel.append(pdfcheck, document.createTextNode(' PDF を PKC の画面で開く(字を選んでノートへ引ける)'));
+    pdflabel.title =
+      '添付の PDF の「別のウィンドウで見る」を、PKC の画面で読む窓にします。' +
+      '字を選んで「ノートへ引く」を押すと、頁番号つきで添付のノートの末尾に引用として足せます。' +
+      '切ると、ブラウザ内蔵の表示で開きます(読めない PDF のときも自動でそちらになります)。';
+    pdfd.append(pdflabel);
+    editDl.append(pdft, pdfd);
 
     /**
      * 📣 **お知らせを出すか**(P11 段⑤)。
@@ -1091,6 +1119,7 @@ export class SettingsRenderer {
     this.syncMissingLinks();
     this.syncCodeCollapse();
     this.syncInlineCodeCopy();
+    this.syncPdfReader();
     this.syncSameOrigin(state);
     this.syncExtensions(state);
     this.syncPersist(state);
@@ -1716,6 +1745,11 @@ export class SettingsRenderer {
   private syncInlineCodeCopy(): void {
     const box = this.region.querySelector<HTMLInputElement>('[data-pkc-field="inline-code-copy"]');
     if (box) box.checked = this.inlineCodeCopy.enabled();
+  }
+
+  private syncPdfReader(): void {
+    const box = this.region.querySelector<HTMLInputElement>('[data-pkc-field="pdf-reader"]');
+    if (box) box.checked = this.pdfReader.enabled();
   }
 
   private syncMissingLinks(): void {

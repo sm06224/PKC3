@@ -27,6 +27,7 @@ import {
   DUCKDB_DIR,
   PDF_DIR,
   PDF_REQUIRED,
+  PDF_SHELL_FILES,
   // @ts-expect-error -- 検品規則は素の .mjs(ビルド対象外の CI script 群)
 } from '../scripts/dist-inspect.mjs';
 
@@ -923,7 +924,7 @@ describe('🔴 DuckDB の一式(#682)', () => {
 });
 
 /**
- * 🔴 **PDF を PKC の画面で読む窓の一式は「precache に載せず、別立てで見る」**(#275 段①)。
+ * 🔴 **PDF を PKC の画面で読む窓の重い実体(`pdf/lib/`)は「precache に載せず、別立てで見る」**(#275 段①)。
  *
  * ⚠ DuckDB と同じ理屈 ── アプリの cap から外した瞬間、この中身は **0 バイトでも 100 MB でも通る**ようになる
  *   ので、外したぶんの門(上限・下限・集合)を置き直した。**その門が鳴ること**をここで見る。
@@ -936,7 +937,7 @@ describe('🔴 PDF を PKC の画面で読む窓の一式(#275 段①)', () => {
   /** 一式の総量(実測 4101 KB 相当)。 */
   const TOTAL = 4_200_000;
 
-  /** 健全な形に PDF の窓を足す。⚠ precache には**載せない**。`PDF_REQUIRED` を 1 つ残らず置く。 */
+  /** 健全な形に PDF の窓の実体を足す。⚠ precache には**載せない**。`PDF_REQUIRED` を 1 つ残らず置く。 */
   const withPdf = (total = TOTAL, drop: string | null = null): Input => {
     const i = healthy('dev');
     const names = PDF_REQUIRED.filter((n: string) => n !== drop);
@@ -990,7 +991,7 @@ describe('🔴 PDF を PKC の画面で読む窓の一式(#275 段①)', () => {
     const i = withPdf();
     // ⚠ 二重帳簿を両方書き換える(片方だけ足すと「食い違い」の門が先に鳴って、ここの門が通らない)
     const listed = JSON.parse(i.text.get(LIST) as string) as string[];
-    const withIt = [...listed, `./${PDF_DIR}reader.js`];
+    const withIt = [...listed, `./${PDF_DIR}pdf.min.mjs`];
     const text = new Map(i.text);
     text.set(LIST, JSON.stringify(withIt));
     text.set(
@@ -1002,6 +1003,47 @@ describe('🔴 PDF を PKC の画面で読む窓の一式(#275 段①)', () => {
 
   it('🔴 旗を立てたのに無ければ鳴る(plugin が外れた版を配らせない)', () => {
     expect(run({ ...healthy('dev'), requirePdf: true }).join('\n')).toContain(`dist に ${PDF_DIR} が無い`);
+  });
+
+  /**
+   * 🔴 **窓の小さな HTML / JS は「ふつうの配る物」**(precache に載る)── 在ることは旗が立った回だけ要求し、
+   *   載り方は precache の突合(上の `missing` / `extra`)が見る。
+   * 🔑 窓の JS が `./lib/…` を参照しても、別立ての実体を「在る」として引く(precache の突合には混ぜない)。
+   */
+  it('🔴 旗を立てたら、窓の小さな file が 1 つでも無ければ鳴る(1 つずつ抜いて全部当てる)', () => {
+    const full = withPdf();
+    const withShell = (drop: string | null): Input => {
+      const names = (PDF_SHELL_FILES as string[]).filter((n) => n !== drop);
+      const listed = [...(JSON.parse(full.text.get(LIST) as string) as string[]), ...names.map((n) => `./${n}`)];
+      const text = new Map(full.text);
+      text.set(LIST, JSON.stringify(listed));
+      text.set('sw.js', `const PRECACHE = ${JSON.stringify(listed)};\nself.addEventListener("fetch", () => {});`);
+      return {
+        ...full,
+        requirePdf: true,
+        files: [...full.files, ...names.map((n) => ({ path: n, bytes: 3_000 }))],
+        text,
+      };
+    };
+    expect(run(withShell(null)), '全部揃っているのに鳴っている').toEqual([]);
+    for (const missing of PDF_SHELL_FILES as string[]) {
+      expect(run(withShell(missing)).join('\n'), `${missing} が無いのに通った`).toContain(missing);
+    }
+  });
+
+  it('窓の JS が `./lib/…` を参照しても、実体が在れば「dist に無い」と言わない(別立てを引く)', () => {
+    const full = withPdf();
+    const names = PDF_SHELL_FILES as string[];
+    const listed = [...(JSON.parse(full.text.get(LIST) as string) as string[]), ...names.map((n) => `./${n}`)];
+    const text = new Map(full.text);
+    text.set(LIST, JSON.stringify(listed));
+    text.set('sw.js', `const PRECACHE = ${JSON.stringify(listed)};\nself.addEventListener("fetch", () => {});`);
+    text.set('pdf/reader.js', "const m = await import('./lib/pdf.min.mjs');");
+    const files = [...full.files, ...names.map((n) => ({ path: n, bytes: 3_000 }))];
+    expect(run({ ...full, files, text }), '別立ての実体を引けていない').toEqual([]);
+    // 対照群 ── 実体が無ければ、参照切れとして鳴る(上の許しが「何でも通す」になっていない)
+    const lacking = files.filter((f) => f.path !== `${PDF_DIR}pdf.min.mjs`);
+    expect(run({ ...full, files: lacking, text }).join('\n')).toContain('参照されている生成物が dist に無い');
   });
 
   it('🟢 旗が無ければ、無くても通る ── 過去の zip を今の規則で落とさない', () => {

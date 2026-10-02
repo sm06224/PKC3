@@ -135,13 +135,23 @@ export const DUCKDB_REQUIRED = [
 ];
 
 /**
- * 🔴 **PDF を PKC の画面で読む窓の一式を置く所**(#275 段①)。
+ * 🔴 **PDF を PKC の画面で読む窓の重い実体(pdf.js 本体 + 日本語の cmap など)を置く所**(#275 段①)。
  *
  * ⚠ DuckDB と**同じ扱い** ── 設定で選んだ人が押したときだけ取りに行く物なので、precache にも
  *   アプリの配る量にも数えない。🔴 そのぶん**別立ての予算**(上限と下限)を下に置く。
+ * 🔑 窓の小さな HTML / JS(`pdf/host.html` など 4 file)は**ふつうの配る物**で、precache に載る
+ *   (載せないと、オフラインで窓を開いたとき service worker が `index.html` へ退避して PKC をもう 1 枚開く)。
  * ⚠ 綴りの正本は `build/pdf-assets-plugin.ts` の `PDF_DIR`(`tests/dist-inspect.test.ts` が突き合わせる)。
  */
-export const PDF_DIR = 'pdf/';
+export const PDF_DIR = 'pdf/lib/';
+
+/** 窓の小さな HTML / JS。⚠ `public/pdf/` 直下の全部(焼きたての一式にだけ在ることを要求する)。 */
+export const PDF_SHELL_FILES = [
+  'pdf/host.html',
+  'pdf/reader.js',
+  'pdf/reader-wire.js',
+  'pdf/page-cache.js',
+];
 
 /**
  * 🔴 **一式に必ず在る file**(#275 段①)。⚠ 量ではなく**集合**で見る ── 下限(KB)は
@@ -149,16 +159,12 @@ export const PDF_DIR = 'pdf/';
  * (そして落ちた日本語は、user が日本語の PDF を開いた日まで誰も気づかない)。
  */
 export const PDF_REQUIRED = [
-  'host.html',
-  'reader.js',
-  'reader-wire.js',
-  'page-cache.js',
-  'lib/pdf.min.mjs',
-  'lib/pdf.worker.min.mjs',
-  'lib/cmaps/Adobe-Japan1-UCS2.bcmap',
-  'lib/cmaps/90ms-RKSJ-H.bcmap',
-  'lib/cmaps/UniJIS-UTF16-H.bcmap',
-  'lib/standard_fonts/LiberationSans-Regular.ttf',
+  'pdf.min.mjs',
+  'pdf.worker.min.mjs',
+  'cmaps/Adobe-Japan1-UCS2.bcmap',
+  'cmaps/90ms-RKSJ-H.bcmap',
+  'cmaps/UniJIS-UTF16-H.bcmap',
+  'standard_fonts/LiberationSans-Regular.ttf',
 ];
 
 /**
@@ -225,6 +231,7 @@ export function inspectDist({
       !f.path.startsWith(DUCKDB_DIR) &&
       !f.path.startsWith(PDF_DIR),
   );
+  const pdfPaths = new Set(pdf.map((f) => f.path));
   const kb = (b) => (b / 1024).toFixed(1);
   const shippedBytes = shipped.reduce((a, f) => a + f.bytes, 0);
   const mapBytes = maps.reduce((a, f) => a + f.bytes, 0);
@@ -287,7 +294,9 @@ export function inspectDist({
       return;
     }
     const target = resolveFrom(referrer, ref);
-    if (paths.has(target)) referenced.add(target);
+    // 🔑 別立ての実体(`pdf/lib/`)も「在る」ものとして引く ── 窓の JS(`pdf/reader.js`)が参照するが、
+    //    precache の突合(`paths`)には含めない(重い実体を precache と cap の外に置くため)
+    if (paths.has(target) || pdfPaths.has(target)) referenced.add(target);
     else wanted.set(target, referrer);
   };
   /** manifest / precache の「置き場を指す文字列」を、鍵の名前に依らず拾う。 */
@@ -622,8 +631,24 @@ export function inspectDist({
   } else if (requirePdf) {
     errors.push(
       `焼きたてなのに dist に ${PDF_DIR} が無い ── PDF を PKC の画面で読む設定にしても` +
-        '窓が開かない(plugin が emit していないか、public/pdf が消えた)',
+        '窓が本体を取れない(plugin が emit していない)',
     );
+  }
+
+  /**
+   * 🔴 **窓の小さな HTML / JS が在ること**(#275 段①)。⚠ 旗が立った回だけ ── 過去の zip(v3.3.0 など)には無い。
+   * 🔑 これらは**ふつうの配る物**なので precache への載り方は上の突合が見る。ここが見るのは「在ること」だけ
+   *   (`public/pdf/` が丸ごと消えると、設定を入にした人の窓が 404 になり、ポップアップ阻止と同じ断りが出る)。
+   */
+  if (requirePdf) {
+    const everything = new Set(files.map((f) => f.path));
+    const missingShell = PDF_SHELL_FILES.filter((n) => !everything.has(n));
+    if (missingShell.length > 0) {
+      errors.push(
+        `焼きたてなのに PDF の窓の file が無い: ${missingShell.join(' / ')} ── ` +
+          '設定を入にした人の窓が開かない(public/pdf が消えた)',
+      );
+    }
   }
 
   // ── ⑥ 焼いたマニュアル(#645 段②)── **届いたか**を出力の側で見る

@@ -114,6 +114,10 @@ describe('resolveQuoteTarget ── どのノートへ引くか', () => {
 
   it('居場所(フォルダ)は結びつきではない / 追記できない種類(フォルダ・別の添付・todo)は選ばない', () => {
     expect(resolveQuoteTarget('att', metas, [rel('r1', 'dir', 'att', 'structural')])).toBe('att');
+    // 🔴 追記できるノートでも、居場所の関係なら結びつきではない(フォルダの除外とは別に、居場所そのものを数えない)
+    expect(resolveQuoteTarget('att', metas, [rel('r1', 'note', 'att', 'structural')])).toBe('att');
+    // 対照群 ── 同じ相手でも意味の関係なら引く先になる(上の除外が相手の種類ではなく関係の種類で効いている)
+    expect(resolveQuoteTarget('att', metas, [rel('r1', 'note', 'att', 'semantic')])).toBe('note');
     expect(resolveQuoteTarget('att', metas, [rel('r1', 'dir', 'att', 'semantic')])).toBe('att');
     expect(resolveQuoteTarget('att', metas, [rel('r1', 'att2', 'att', 'semantic')])).toBe('att');
     expect(resolveQuoteTarget('att', metas, [rel('r1', 'todo', 'att', 'semantic')])).toBe('att');

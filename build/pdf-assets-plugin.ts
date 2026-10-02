@@ -10,7 +10,10 @@ import type { Plugin } from 'vite';
  *
  * 裁定(Gemini、#275):設定で**選んだ人だけ**が PKC の画面で PDF を読む。既定はブラウザ内蔵の表示。
  * だから pdf.js 本体と日本語の cmap(合わせて数 MB)は**選んだ人が押したときだけ取りに行く**物で、
- * 全員が install で落とす precache に載せない(`shouldPrecache` が `pdf/` を外す)。
+ * 全員が install で落とす precache に載せない(`shouldPrecache` が `pdf/lib/` を外す)。
+ * 🔑 窓の小さな HTML / JS(`public/pdf/` 直下の 4 file)は**precache に載る** ── 載せないと、オフラインで窓を開いたとき
+ *   service worker が `index.html` へ退避して**PKC をもう 1 枚開く**(マニュアルの窓と同じ穴)。載せておけば
+ *   窓は開き、本体(`lib/`)が取れなくても**内蔵の表示へ自動で退避**する。
  * ⚠ 「配る量は気にしない」(不可侵指示 2026-08-03)は**全員が使う物**の話で、
  *   選んだ人だけが使う物を全員へ配ってよい理由にはならない。
  *
@@ -35,15 +38,16 @@ import type { Plugin } from 'vite';
  *
  * ## ⚠ この plugin が置く物を消したら鳴る所
  *
- * - `shouldPrecache`(`src/adapter/platform/sw/sw-source.ts`)が `pdf/` を**外す**
+ * - `shouldPrecache`(`src/adapter/platform/sw/sw-source.ts`)が `pdf/lib/` を**外す**
  * - `scripts/dist-inspect.mjs` が **別立ての予算と、在るべき file の集合**で見る
  *   (外したぶんの門を置き直す ── 外した瞬間、この中身は 0 バイトでも 100 MB でも通る)
  */
 
-/** 配る先の接頭辞。⚠ 綴りの正本はここ(`PDF_PRECACHE_SKIP` / `dist-inspect.mjs` の `PDF_DIR` と突合)。 */
-export const PDF_DIR = 'pdf/';
-/** pdf.js の実体を置く下位の所。⚠ `public/pdf/reader.js` が `./lib/` で読む。 */
-export const PDF_LIB = `${PDF_DIR}lib/`;
+/**
+ * 配る先の接頭辞(= pdf.js の実体を置く所)。⚠ 綴りの正本はここ(`PDF_PRECACHE_SKIP` /
+ * `dist-inspect.mjs` の `PDF_DIR` と突合)。⚠ `public/pdf/reader.js` が `./lib/` で読む。
+ */
+export const PDF_DIR = 'pdf/lib/';
 
 /** 単体で写す file(`node_modules/pdfjs-dist/` からの相対 → `pdf/lib/` からの相対)。 */
 const SINGLE: ReadonlyArray<readonly [string, string]> = [
@@ -81,7 +85,7 @@ export function pdfAssetsPlugin(): Plugin {
          *   「窓は開くのに何も読めない」という、いちばん遠い所で出る壊れ方になる。
          */
         if (source.byteLength === 0) throw new Error(`pdf: ${rel} が 0 バイト`);
-        this.emitFile({ type: 'asset', fileName: `${PDF_LIB}${rel}`, source });
+        this.emitFile({ type: 'asset', fileName: `${PDF_DIR}${rel}`, source });
       };
       for (const [from, to] of SINGLE) emit(to, readFileSync(join(root, from)));
       for (const { dir, keep } of TREES) {

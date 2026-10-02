@@ -132,11 +132,12 @@ export const DUCKDB_PRECACHE_SKIP = 'duckdb/';
  * 🔴 **PDF を PKC の画面で読む窓の一式は precache に載せない**(#275 段①)。
  *
  * 設定で選んだ人が押したときだけ取りに行く物(pdf.js 本体 + 日本語の cmap で数 MB)なので、
- * DuckDB と同じ扱いにする。⚠ 窓の小さな HTML / JS(`public/pdf/`)も同じ接頭辞の下に在るので
- * 一緒に外れる(窓だけ載って中身が無い、を作らない)。
+ * DuckDB と同じ扱いにする。🔑 外すのは**重い実体(`pdf/lib/`)だけ**で、窓の小さな HTML / JS
+ * (`public/pdf/` 直下の 4 file)は載せる ── 載せないと、オフラインで窓を開いたとき service worker が
+ * `index.html` へ退避して**PKC をもう 1 枚開く**(窓は開き、本体が取れなければ内蔵の表示へ退避する形にする)。
  * ⚠ 綴りの正本は `build/pdf-assets-plugin.ts` の `PDF_DIR`(`tests/adapter/sw-source.test.ts` が突合)。
  */
-export const PDF_PRECACHE_SKIP = 'pdf/';
+export const PDF_PRECACHE_SKIP = 'pdf/lib/';
 
 /** hash 付きの生成物(名前が変われば別 URL)。cache-first にしてよい。 */
 export const HASHED_ASSET = /-[A-Za-z0-9_-]{8}\.(?:js|mjs|cjs|wasm|css)$/;

@@ -1160,6 +1160,11 @@ export interface BinderServices {
    */
   setInlineCodeCopy?(on: boolean): void;
   /**
+   * 🔴 **PDF を PKC の画面で開くか**(#275 段①)。⚠ **省略可**。
+   * ⚠ 切り替えても本文は描き直さない ── 効くのは**次に「別のウィンドウで見る」を押したとき**だけ。
+   */
+  setPdfReader?(on: boolean): void;
+  /**
    * 🔴 **貼る用に画像を持ち歩ける形へ**(#193)。`blob:` → `data:` の対応を返す。
    * ⚠ **省略可** ── 無ければ画像は文字に置き換わる(壊れた画像を貼らせない)。
    */
@@ -1250,8 +1255,10 @@ export interface BinderServices {
    * 🔴 **添付を別の窓で見る**(#192 で画像、2026-08-15 に PDF を追加)。
    * ⚠ 実体は adapter/platform 側(ObjectURL の寿命が絡むので、binder は**呼ぶだけ**)。
    * ⚠ `mime` は**押した要素が運ぶ** ── 開く側で引き直さない。
+   * 🔴 `lid` は**押した添付のノート**(#275 段①)── PDF を PKC の画面で読む窓が「ノートへ引く」の
+   *   起点にする。⚠ 押した瞬間の選択を読まない(留めた枠では選択と食い違う。`targetLid` と同じ理由)。
    */
-  viewAsset?(assetKey: string, name: string, mime: string): void;
+  viewAsset?(assetKey: string, name: string, mime: string, lid?: string): void;
   /**
    * 🔴 **画面に出ている絵を、別窓で大きく見る**(#527。user 指示 2026-08-28
    * 「**別ウィンドウで実寸で開いて拡大縮小できるようにしてほしい**」)。
@@ -9412,13 +9419,15 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔴 **画像を別窓で見る**(#192)。⚠ 開けなかったとき(popup 阻止)の後始末は
    *   呼ばれる側が持つ ── ここで持つと、経路が増えたときに片方だけ古くなる。
    */
-  'view-asset': (_dispatcher, target, services) => {
+  'view-asset': (dispatcher, target, services) => {
     const key = target.getAttribute('data-pkc-asset-key');
     const name = target.getAttribute('data-pkc-asset-name') ?? '添付';
     // ⚠ MIME を**押した要素から**運ぶ ── 開く側で引き直すと、開くまでに
     //    選択が移った場合に**別の添付の種類**で開いてしまう
     const mime = target.getAttribute('data-pkc-asset-mime') ?? '';
-    if (key) services.viewAsset?.(key, name, mime);
+    // 🔴 押した添付のノート(属性が無ければ選択へ落ちる ── 他の口と同じ作法)
+    const lid = targetLid(dispatcher, target);
+    if (key) services.viewAsset?.(key, name, mime, lid ?? undefined);
   },
   'dismiss-notices': (_dispatcher, _target, services) => {
     services.dismissNotices?.();
@@ -10550,6 +10559,10 @@ const ACTIONS: Record<string, ActionHandler> = {
   'set-inline-code-copy': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
     if (target instanceof HTMLInputElement) services.setInlineCodeCopy?.(target.checked);
+  },
+  'set-pdf-reader': (_dispatcher, target, services) => {
+    // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
+    if (target instanceof HTMLInputElement) services.setPdfReader?.(target.checked);
   },
   'set-notices-enabled': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)

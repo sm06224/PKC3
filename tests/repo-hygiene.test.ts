@@ -1321,7 +1321,10 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     //    落とすことを見る spec を 1 本足した → 100 → 101。🔴 **ここでしか見えない**:
     //    unit は `deps.download` を差し替えて見るので、本物の `<a download>` 経路
     //    (`downloadBlob`)は 1 度も通っていない
-    expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(101);
+    // ⚠ 2026-10-02(#275 段①): PDF を PKC の画面で読む窓の spec を 1 本足した → 101 → 102。
+    //    🔴 ここでしか見えない:窓は別 HTML・別 worker・別 browsing context で、頁が PNG の `<img>` に焼かれて
+    //    外れた頁の ObjectURL が返ること / 字を選んで本体のノートへ届くことは、実ブラウザでしか言えない
+    expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(102);
     expect(
       counts.reduce((a, b) => a + b, 0),
       'smoke の test が増減した(足したらこの数を直す)',
@@ -1497,7 +1500,9 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     //    2 回押しても増えない)は unit からは届かない。既存の道中には載せられない ── あの spec は
     //    `launchQueue` を差す物語で、こちらは `showDirectoryPicker` を差して**別の入口**から入る。
     //    起動の予算(#820)は 503 → 504(残り 0)で、予算の数字は動かしていない。
-    ).toBe(512);
+    // ⚠ 2026-10-02(#275 段①): `pdf-reader.smoke.spec.ts`(新設・test 1 本・起動 1 回)→ 512 → 513。
+    //    既存の道中には載せられない(`scripts/smoke-budget.mjs` の 505 の行を参照)。起動の予算は 504 → 505。
+    ).toBe(513);
   });
 });
 
