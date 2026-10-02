@@ -20,6 +20,14 @@
  *                理由は `asis` の結果(`fd_sync` が JSPI の suspend 側 import で、LO の main ループの外から
  *                呼ぶ同期呼びでは suspend できず `SuspendError`)── 差し替えが「何を変えるか」を見るための腕。
  *
+ * ## 製品の窓の腕(#1228 段 1 の着手の条件。`public/office/office-shadow.js` の差し替えの口 / 影の書き出しを入れた後)
+ *  - `ctrls-control` … 差し替えの口を持たない**元の窓**(`PKC3_SS_BASE_PUBLIC` の `host.html`)で、打つ → Ctrl+S
+ *  - `ctrls-gate`    … 製品の窓(口は入っている・**影は書かない**)で、打つ → Ctrl+S ── 口そのものが Ctrl+S を壊さないか
+ *  - `ctrls-shadow`  … 製品の窓で、打つ → **口を通して影を 1 回書く** → Ctrl+S ── ①(差し替えが Ctrl+S を壊さないか)
+ *  - `lat-control` / `lat-shadow` … 影の書き出しの塞ぎが打鍵の体感に出るか(②)。影を書く最中に打ったキーが届くまで
+ *  - `e2e-control` / `e2e-shadow` … 製品の窓の**自動の契機**(打ち続ける間は書かない → 3 秒止まると 1 回)と、
+ *    影を書いた直後の最初の打鍵が届くまで(対照 = 元の窓)
+ *
  * ⚠ 結果の解釈は書かない(JSON に値を出すだけ)。対照群が届かない回(`unoOk` が無い / 文書が組まれない)は
  *   `verdict: '判定不能'` を付ける。
  *
@@ -55,6 +63,8 @@ const REPEAT = Number(process.env.PKC3_SS_REPEAT ?? 10);
 const SETTLE = Number(process.env.PKC3_SS_SETTLE ?? 12);
 const EXE = process.env.PKC3_CHROMIUM ?? '/opt/pw-browsers/chromium';
 const KEEP = process.env.PKC3_SS_KEEP ?? '';
+/** 差し替えの口を持たない**元の** `public/`(元の版の `public` の展開先)。`/base/…` で配る。 */
+const BASE_PUBLIC = process.env.PKC3_SS_BASE_PUBLIC ?? '';
 const FIXDIR = process.env.PKC3_SS_FIXDIR ?? `${tmpdir()}/pkc3-ss-fx-${process.pid}`;
 
 const FIXTURES = ['small-odt', 'small-docx', 'large-odt', 'large-docx'];
@@ -224,7 +234,9 @@ const server = await new Promise((ok) => {
       'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'require-corp',
       'Cross-Origin-Resource-Policy': 'same-origin', 'Cache-Control': 'no-store',
     };
-    const f = p.startsWith('/office-pack/') ? join(PACK, p.slice('/office-pack/'.length)) : join(PUBLIC, p);
+    const f = p.startsWith('/office-pack/') ? join(PACK, p.slice('/office-pack/'.length))
+      : p.startsWith('/base/') && BASE_PUBLIC ? join(BASE_PUBLIC, p.slice('/base/'.length))
+        : join(PUBLIC, p);
     readFile(f)
       .then((b) => { res.writeHead(200, { ...head, 'Content-Type': MIME[extname(p)] ?? 'application/octet-stream' }); res.end(b); })
       .catch((e) => { res.writeHead(404, head); res.end(String(e)); });
@@ -276,6 +288,8 @@ const INIT = ({ doc, name }) => {
     const d = ev.data;
     if (!d || !d.pkc3Office) return;
     if (d.pkc3Office === 'saved') W.__saved.push({ key: d.payload.key, size: d.payload.size });
+    if (d.pkc3Office === 'shadow-written') (W.__shadowWritten ??= []).push({ at: d.payload.at, seenAt: Date.now() });
+    if (d.pkc3Office === 'shadow-failed') (W.__shadowFailed ??= []).push({ reason: d.payload.reason, seenAt: Date.now() });
     if (d.pkc3Office !== 'ready-for-document') return;
     const rawDoc = W.atob(doc);
     const u8 = new Uint8Array(rawDoc.length);
@@ -376,6 +390,61 @@ const HELPERS = `(async () => {
       return r;
     },
     mkdir(p) { try { FS.mkdir(p); return 'mkdir'; } catch (e) { return String(e.message || e).slice(0, 60); } },
+    mkdirTree(p) { try { FS.mkdirTree(p); return true; } catch (e) { return String(e.message || e).slice(0, 60); } },
+    /** 製品の窓の差し替えの口(\`window.__loShadowGate\`)を通して書く。⚠ 口が無い窓(元の版)では呼ばない。 */
+    storeGated(url, props) {
+      const g = window.__loShadowGate;
+      if (!g) return { ok: false, err: 'no-gate' };
+      let r;
+      g.begin();
+      try { r = window.__ss.store(url, props); } finally { g.end(); }
+      return r;
+    },
+    /** 影の棚(OPFS)の中身。⚠ 製品の窓だけ。 */
+    async shelfList() {
+      try {
+        const root = await navigator.storage.getDirectory();
+        const top = await root.getDirectoryHandle('pkc3-office-shadow');
+        const out = [];
+        for await (const [n, h] of top.entries()) {
+          if (h.kind !== 'directory') continue;
+          for await (const [fn, fh] of h.entries()) { const f = await fh.getFile(); out.push({ dir: n, name: fn, size: f.size }); }
+        }
+        return out;
+      } catch (e) { return []; }
+    },
+    /** 差し替えの口の begin / end の時刻を採る(影の書き出しの塞ぎの区間)。 */
+    instrumentGate() {
+      const g = window.__loShadowGate;
+      if (!g || g.__inst) return false;
+      g.__inst = true; window.__blocks = [];
+      const b = g.begin.bind(g); const e = g.end.bind(g);
+      g.begin = () => { window.__blocks.push({ b: performance.now(), e: null }); return b(); };
+      g.end = () => { const l = window.__blocks[window.__blocks.length - 1]; if (l && l.e === null) l.e = performance.now(); return e(); };
+      return true;
+    },
+    /** 次のキー 1 つが本文に届くまで(② の観測点)。⚠ \`event.timeStamp\` = 入力が窓へ着いた時刻(塞がれていても進まない)。 */
+    latWatch() {
+      const W = window;
+      const l = { base: readText().len, downAt: null, seenAt: null, stopped: false };
+      W.__lat = l;
+      const onKey = (e) => { if (l.downAt === null) l.downAt = e.timeStamp; };
+      document.addEventListener('keydown', onKey, true);
+      const poll = () => {
+        if (l.stopped) { document.removeEventListener('keydown', onKey, true); return; }
+        if (l.downAt !== null && l.seenAt === null) {
+          const t = readText();
+          if (typeof t.len === 'number' && t.len > l.base) { l.seenAt = performance.now(); l.stopped = true; document.removeEventListener('keydown', onKey, true); return; }
+        }
+        setTimeout(poll, 5);
+      };
+      poll();
+    },
+    latResult() {
+      const l = window.__lat || {};
+      l.stopped = true;
+      return { reached: l.seenAt !== null && l.downAt !== null, ms: l.seenAt !== null && l.downAt !== null ? Math.round((l.seenAt - l.downAt) * 10) / 10 : null, downAt: l.downAt === null ? null : Math.round(l.downAt) };
+    },
     ls(dir) {
       try { return FS.readdir(dir).filter((n) => n !== '.' && n !== '..').map((n) => ({ n: n, size: FS.stat(dir + '/' + n).size })); }
       catch (e) { return { err: String(e.message || e).slice(0, 60) }; }
@@ -622,6 +691,230 @@ async function runCase(fx, fixName, arm) {
   return c;
 }
 
+// ───────────────────────── 製品の窓の腕(①: Ctrl+S / ②: 打鍵の体感 / e2e: 自動の契機) ─────────────────────────
+
+/** 製品の影の宛先(MEMFS)。`public/office/office-shadow.js` の `SHADOW_DIR` と同じ綴り。 */
+const PRODUCT_SHADOW_DIR = '/tmp/pkc3-shadow';
+
+/** 影の中身を native `soffice` で開いて、字が入っているかを外から見る(⚠ 自作 fixture のみ)。 */
+function nativeText(name, buf, needle) {
+  const dir = join(FIXDIR, 'verify');
+  const src = join(dir, name);
+  try {
+    execFileSync('mkdir', ['-p', dir]);
+    execFileSync('sh', ['-c', 'cat > "$1"', 'sh', src], { input: buf });
+    execFileSync('soffice', [`-env:UserInstallation=file://${FIXDIR}/prof-v`, '--headless', '--convert-to', 'txt:Text', '--outdir', dir, src],
+      { stdio: 'ignore', timeout: 120000 });
+    const txt = execFileSync('cat', [join(dir, `${name.replace(/\.[^.]+$/, '')}.txt`)]).toString('utf8');
+    return { opened: true, hasTyped: txt.includes(needle), head: txt.slice(0, 40) };
+  } catch (e) {
+    return { opened: false, err: String(e.message ?? e).slice(0, 80) };
+  }
+}
+
+async function runProduct(fx, fixName, arm) {
+  const ext = fixName.endsWith('docx') ? 'docx' : 'odt';
+  const [family, kind] = arm.split('-');             // ctrls|lat|e2e , control|gate|shadow
+  const prefix = kind === 'control' ? '/base' : '';
+  const c = { fixture: fixName, arm, host: kind === 'control' ? 'base(差し替えの口なし)' : '製品の窓', docBytes: fx.bytes, loadavgStart: loadavg().map((x) => round(x, 10)) };
+  const t00 = Date.now();
+  const raw = await readFile(fx.path);
+  const profile = `${tmpdir()}/pkc3-ss-${process.pid}-${fixName}-${arm}`;
+  const browser = await chromium.launchPersistentContext(profile, {
+    headless: true, viewport: { width: 1280, height: 900 }, args: ['--no-sandbox', '--disable-dev-shm-usage'], executablePath: EXE,
+  });
+  currentBrowser = browser;
+  const page = await browser.newPage();
+  c.console = []; c.pageErrors = [];
+  page.on('console', (m) => {
+    const t = `[${m.type()}] ${m.text()}`;
+    if (!/[^\x20-\x7e]/.test(t) && c.console.length < 25 && /error|abort|unreachable|out of bounds|Suspend|invalid|shadow/i.test(t)) c.console.push(t.slice(0, 200));
+  });
+  page.on('pageerror', (e) => { if (c.pageErrors.length < 10) c.pageErrors.push(String(e).slice(0, 200)); });
+  // ⚠ 窓が固まる(起動直後の落ち)と `page.evaluate` は**永久に返らない** ── 時間で切って判定不能にする
+  const ev = (js) => Promise.race([
+    page.evaluate(js),
+    new Promise((_, rej) => { setTimeout(() => rej(new Error('evaluate が返らない(90 秒)')), 90000).unref?.(); }),
+  ]);
+  const typeText = async (s, delay = 60) => { await page.keyboard.type(s, { delay }); await page.waitForTimeout(1500); };
+  try {
+    wd.mark(`${fixName}:${arm} 起動`);
+    await page.goto(`${base}${prefix}/office/host.html`, { waitUntil: 'domcontentloaded' });
+    c.coi = await ev('crossOriginIsolated');
+    c.staged = await stagePack(page);
+    await page.addInitScript(INIT, { doc: raw.toString('base64'), name: fx.name });
+    await page.goto(`${base}${prefix}/office/host.html?await-doc=1&name=${encodeURIComponent(fx.name)}`, { waitUntil: 'commit' });
+    c.paintedAfterSec = await waitPainted(page, 300);
+    await page.waitForTimeout(SETTLE * 1000);
+    const h = await ev(HELPERS).catch((e) => ({ ok: false, why: String(e).slice(0, 200) }));
+    c.helpers = h;
+    if (!h.ok) { c.verdict = '判定不能'; c.verdictWhy = `UNO の道具が立たない: ${h.why}`; return c; }
+    c.gate = await ev('window.__loShadowGate ? { present: true, active: window.__loShadowGate.isActive(), counts: window.__loShadowGate.counts() } : { present: false }');
+    let st0 = null;
+    for (let i = 0; i < 40; i += 1) {
+      st0 = await ev('window.__ss.state()');
+      if (st0.text && st0.text.len > 0) break;
+      await page.waitForTimeout(1500);
+    }
+    c.loaded = st0;
+    if (!st0.text || !(st0.text.len > 0)) { c.verdict = '判定不能'; c.verdictWhy = '文書の本文が読めない(開けていない)'; return c; }
+    c.docSizeBefore = (await ev(`window.__ss.read('/work/${fx.name}', false)`)).size ?? null;
+    c.unoOk = typeof st0.mod === 'number';
+    if (!c.unoOk) { c.verdict = '判定不能'; c.verdictWhy = 'isModified が読めない'; return c; }
+
+    if (family === 'ctrls') {
+      // 打つ → (影を書く)→ Ctrl+S → 保存された file を外から開く
+      await typeText('SHADOWTYPED');
+      c.s1 = await ev('window.__ss.state()');
+      c.typedLanded = c.s1.mod === 1 && c.s1.text.idx >= 0;
+      if (!c.typedLanded) { c.verdict = '判定不能'; c.verdictWhy = '打った字が届いていない(isModified が 1 でない / 本文に無い)'; return c; }
+      if (kind === 'shadow') {
+        await ev(`window.__ss.mkdirTree('${PRODUCT_SHADOW_DIR}')`);
+        const url = `file://${PRODUCT_SHADOW_DIR}/shadow.${ext}`;
+        const r = await ev(`window.__ss.storeGated(${JSON.stringify(url)}, ${JSON.stringify([['FilterName', FILTER[ext]]])})`);
+        const f = await ev(`window.__ss.read('${PRODUCT_SHADOW_DIR}/shadow.${ext}', true)`);
+        c.shadow = { ...r, file: f.missing ? { missing: true } : { ...zipInfo(Buffer.from(f.b64 ?? '', 'base64'), 'SHADOWTYPED'), size: f.size } };
+        c.afterShadow = await ev('window.__ss.state()');
+        c.gateAfterShadow = await ev('window.__loShadowGate.counts()');
+        await page.waitForTimeout(1500);
+      }
+      wd.mark(`${fixName}:${arm} Ctrl+S`);
+      await ev('window.__saved.length = 0');
+      const mt0 = await ev(`(() => { try { return window.__lo.FS.stat('/work/${fx.name}').mtime.getTime(); } catch (e) { return null; } })()`);
+      await page.keyboard.press('Control+s');
+      if (ext === 'docx') {
+        // 非 ODF の保存は「Word の形式のままにしますか」と訊く(答える鍵は `save-existing-probe.mjs` の実測: Alt+e)
+        await page.waitForTimeout(3000);
+        await page.keyboard.press('Alt+e');
+      }
+      let saved = [];
+      for (let i = 0; i < 40; i += 1) {
+        await page.waitForTimeout(1000);
+        saved = await ev('window.__saved');
+        if (saved.length > 0) break;
+      }
+      await page.waitForTimeout(1500);
+      c.saved = saved;
+      c.afterCtrlS = await ev('window.__ss.state()');
+      const mt1 = await ev(`(() => { try { return window.__lo.FS.stat('/work/${fx.name}').mtime.getTime(); } catch (e) { return null; } })()`);
+      c.mtimeMoved = mt0 !== null && mt1 !== null ? mt1 !== mt0 : null;
+      const f = await ev(`window.__ss.read('/work/${fx.name}', true)`);
+      const buf = Buffer.from(f.b64 ?? '', 'base64');
+      c.savedFile = { ...zipInfo(buf, 'SHADOWTYPED'), size: f.size, grew: typeof c.docSizeBefore === 'number' ? f.size !== c.docSizeBefore : null };
+      c.native = nativeText(`${fixName}-${arm}-${process.pid}.${ext}`, buf, 'SHADOWTYPED');
+      c.gateEnd = await ev('window.__loShadowGate ? window.__loShadowGate.counts() : null');
+      // 判定(値の読みではなく「測れたか」だけ): 保存が通った = 放送が来て isModified が 0
+      c.verdict = '測れた';
+    } else if (family === 'lat') {
+      await typeText('SHADOWTYPED');
+      const s1 = await ev('window.__ss.state()');
+      if (!(s1.mod === 1 && s1.text.idx >= 0)) { c.verdict = '判定不能'; c.verdictWhy = '打った字が届いていない'; return c; }
+      await ev(`window.__ss.mkdirTree('${PRODUCT_SHADOW_DIR}')`);
+      const url = `file://${PRODUCT_SHADOW_DIR}/shadow.${ext}`;
+      const props = JSON.stringify([['FilterName', FILTER[ext]]]);
+      c.trials = [];
+      for (let i = 0; i < 3; i += 1) {
+        await page.waitForTimeout(1500);
+        await ev('window.__ss.latWatch()');
+        const t = { i };
+        if (kind === 'shadow') {
+          // 影の書き出しを 30ms 後に起こし、その最中(80ms 後)にキーを打つ ── 塞がれた分だけ届くのが遅れる
+          await ev(`(() => { window.__blk = null; setTimeout(() => { window.__blk = window.__ss.storeGated(${JSON.stringify(url)}, ${props}); }, 30); return 0; })()`);
+          await page.waitForTimeout(80);
+        }
+        await page.keyboard.press('x');
+        await page.waitForTimeout(2500);
+        t.key = await ev('window.__ss.latResult()');
+        if (kind === 'shadow') t.write = await ev('window.__blk');
+        c.trials.push(t);
+      }
+      c.verdict = '測れた';
+    } else if (family === 'e2e') {
+      // 製品の自動の契機(打ち続ける間は書かない → 3 秒止まると 1 回)と、書いた後 / 書く最中の最初の打鍵の届き方。
+      // ⚠ 元の窓(control)は影の口を持たないので、**同じ打ち方・同じ待ち**で打鍵の届き方だけを採る(対照群)。
+      const shadow = kind === 'shadow';
+      if (shadow) c.instrumented = await ev('window.__ss.instrumentGate()');
+      await typeText('SHADOWTYPED');
+      const s1 = await ev('window.__ss.state()');
+      if (!(s1.mod === 1 && s1.text.idx >= 0)) { c.verdict = '判定不能'; c.verdictWhy = '打った字が届いていない'; return c; }
+      // 打った印の後の最初の 4 秒で最初の影ができるので、いったん落ち着かせて基線にする
+      await page.waitForTimeout(6000);
+      c.afterSettle = { shelf: shadow ? await ev('window.__ss.shelfList()') : null, written: await ev('(window.__shadowWritten || []).length'), failed: await ev('window.__shadowFailed || []') };
+      // ── ① 打ち続ける(間隔 200ms・約 8 秒)── 書き出しの口(gated)が増えず、放送も増えない
+      const w0 = await ev('(window.__shadowWritten || []).length');
+      const g0 = shadow ? await ev('window.__loShadowGate.counts().gated') : null;
+      const blocks0 = shadow ? await ev('window.__blocks.length') : null;
+      const t0 = Date.now();
+      let probeShelf = 0;
+      for (let i = 0; i < 40; i += 1) {
+        await page.keyboard.press('a');
+        await page.waitForTimeout(200);
+        if (shadow && i % 8 === 7) probeShelf = Math.max(probeShelf, (await ev('window.__ss.shelfList()')).length);
+      }
+      const tEnd = Date.now();
+      c.whileTyping = {
+        spanMs: tEnd - t0, newWritten: (await ev('(window.__shadowWritten || []).length')) - w0,
+        newGated: shadow ? (await ev('window.__loShadowGate.counts().gated')) - g0 : null,
+        newBlocks: shadow ? (await ev('window.__blocks.length')) - blocks0 : null,
+        shelfFiles: probeShelf,
+      };
+      // ── ② 止まる → 3 秒の後に 1 回書く。書かれるまでを 1 秒刻みで見る(止まってからの経過 ms)
+      const wBefore = await ev('(window.__shadowWritten || []).length');
+      let appeared = null;
+      for (let i = 0; i < 24; i += 1) {
+        await page.waitForTimeout(250);
+        const n = (await ev('(window.__shadowWritten || []).length')) - wBefore;
+        if (n > 0) { appeared = Date.now() - tEnd; break; }
+      }
+      c.afterStop = { writtenAfterMs: appeared };
+      await page.waitForTimeout(shadow ? 6000 : 1000);
+      c.afterStop.totalWritten = (await ev('(window.__shadowWritten || []).length')) - wBefore;
+      c.afterStop.failed = await ev('window.__shadowFailed || []');
+      if (shadow) {
+        c.afterStop.shelf = await ev('window.__ss.shelfList()');
+        c.afterStop.lastBlock = await ev('window.__blocks[window.__blocks.length - 1]');
+        c.afterStop.blockMs = c.afterStop.lastBlock && c.afterStop.lastBlock.e !== null ? Math.round((c.afterStop.lastBlock.e - c.afterStop.lastBlock.b) * 10) / 10 : null;
+        c.afterStop.gate = await ev('window.__loShadowGate.counts()');
+      }
+      // ── ③ 影を書いた直後(or 同じだけ待った後)の最初の打鍵が届くまで。3 回
+      c.firstKeyAfterWrite = [];
+      for (let i = 0; i < 3; i += 1) {
+        await page.waitForTimeout(1500);
+        await ev('window.__ss.latWatch()');
+        await page.keyboard.press('x');
+        await page.waitForTimeout(2000);
+        c.firstKeyAfterWrite.push(await ev('window.__ss.latResult()'));
+      }
+      // ── ④ 止まって 3 秒の頃に打つ(書き出しの最中に当たりうる)。⚠ 打つと静止が振り出しに戻るので、
+      //     「打つ → Δ 待つ → 打つ」を 4 通りの Δ で。各回の打鍵が、その時刻の書き出しの区間に重なったかも採る
+      c.keyDuringWindow = [];
+      for (const delta of [2950, 3100, 3400, 3800]) {
+        await ev('window.__ss.latWatch()');
+        await page.keyboard.press('z');                // 静止の振り出し(この打鍵の届き方は採らない)
+        await page.waitForTimeout(delta);
+        await ev('window.__ss.latResult(), window.__ss.latWatch()');
+        await page.keyboard.press('y');
+        await page.waitForTimeout(2500);
+        const r = await ev('window.__ss.latResult()');
+        const blocks = shadow ? await ev('window.__blocks') : [];
+        const overlapped = r.downAt !== null && blocks.some((b) => b.e !== null && r.downAt >= b.b - 5 && r.downAt <= b.e + 5);
+        c.keyDuringWindow.push({ deltaMs: delta, ...r, overlappedBlock: shadow ? overlapped : null });
+      }
+      c.verdict = '測れた';
+    }
+  } catch (e) {
+    c.error = String(e).slice(0, 400);
+    c.verdict = '判定不能';
+  } finally {
+    c.elapsedSec = Math.round((Date.now() - t00) / 1000);
+    c.loadavgEnd = loadavg().map((x) => round(x, 10));
+    await browser.close().catch(() => {});
+    await rm(profile, { recursive: true, force: true }).catch(() => {});
+    currentBrowser = null;
+  }
+  return c;
+}
+
 // ───────────────────────── 本体 ─────────────────────────
 
 try {
@@ -643,10 +936,12 @@ try {
       // ⚠ LO wasm は起動直後の打鍵で稀に落ちる(`RuntimeError: … signature mismatch`)。影を書く前の話なので、
       //   「打った字が届かなかった」回だけ**作り直して**最大 3 回まで測り直す(落ちた回は `attempts` に残す)。
       const attempts = [];
-      let c = await runCase(fx, fixName, arm);
-      while (c.verdict === '判定不能' && attempts.length < 2 && /打った字が届いていない/.test(c.verdictWhy ?? '')) {
+      const run = (...a) => (/^(ctrls|lat|e2e)-/.test(arm) ? runProduct(...a) : runCase(...a));
+      let c = await run(fx, fixName, arm);
+      while (c.verdict === '判定不能' && attempts.length < 2
+        && /打った字が届いていない|UNO の道具が立たない|evaluate が返らない|本文が読めない/.test(`${c.verdictWhy ?? ''} ${c.error ?? ''}`)) {
         attempts.push({ verdictWhy: c.verdictWhy, pageErrors: c.pageErrors, loaded: c.loaded?.text?.len ?? null });
-        c = await runCase(fx, fixName, arm);
+        c = await run(fx, fixName, arm);
       }
       c.attempts = attempts;
       result.cases.push(c);
