@@ -96,7 +96,7 @@ Agent({ subagent_type: 'pkc3-implementer', isolation: 'worktree', prompt: … })
 
 | 起きること | 手順 |
 |---|---|
-| **`node_modules` が無い** → `npx vitest` / `tsc` が動かない | `ln -s /home/user/PKC3/node_modules node_modules`(🔴 **commit しない**。`git add` は file 名を指す)。vite の `fs.allow` は symlink を辿る。⚠ 副作用は `node_modules/.vite` 等への書込が本体へ戻ること(ディスクの枠が厳しければ実コピーにする ── `sandbox-hygiene`) |
+| **`node_modules` が無い** → `npx vitest` / `tsc` が動かない | `ln -s /home/user/PKC3/node_modules node_modules`(🔴 **commit しない**。`git add` は file 名を指す)。🔴 **vite の dev server を立てるなら `server.fs.allow` が要る**(2026-10-02。⚠ この行は「`fs.allow` は symlink を辿る」と書いていたが誤り ── worktree は `/home/user/PKC3/.claude/worktrees/…` で、symlink の先 `/home/user/PKC3/node_modules` は許可の外なので dev server が断る)。`server: { fs: { allow: ['/home/user/PKC3'] } }` を足した config を**worktree の中に**置き `--config` で渡す(`/tmp` に置くと config から `vite` を解決できない)。`vite build` / `preview` / vitest だけなら要らない。⚠ 副作用は `node_modules/.vite` 等への書込が本体へ戻ること(ディスクの枠が厳しければ実コピーにする ── `sandbox-hygiene`) |
 | 🔴 **`git` を含む複合コマンド / heredoc + パイプを断られる**(`too complex to verify that it stays inside the worktree`) | 命令を**素の 1 本ずつ**に割る。割れない物は **script file に書いて `sh <file>`**(`Write` で書く。heredoc で書かない) |
 | 🔴 **依頼者の cwd が `/home/user` に戻っていると `isolation: "worktree"` が `not in a git repository` で落ちる**(2026-10-02 にも 1 度踏んだ) | **`Agent` を投げる直前の Bash で `cd /home/user/PKC3 && pwd`** を打つ(下の「まず自分の cwd を見る」の実例) |
 
@@ -318,6 +318,14 @@ CLAUDE.md の「**済んだと書くときは観測点を挙げる**」の**発�
 ⚠ 観測点(sha)を書かない前提は、**受け手の箱では検算できない** ──
 そして検算できない前提は、**外れたときに相手の失敗に見える**。
 
+🔴 **依頼文に書く sha は、`git rev-parse` の出力を貼る**(2026-10-02)。runner への依頼に
+40 桁の sha を書くとき、手元には短い `81034f1b` しか無いのに、**長い形を作文した**
+(`81034f1b61c2…` という実在しない字)。agent の `git checkout --detach 81034f1b`
+(短い形)の fallback で救われたが、無ければ**別の木で全量を回していた**。
+🔑 検算は 1 つ:**「その 40 桁を、いまどこから読んだか」を言えるか。** 言えないなら
+`git rev-parse <短い sha>` を打ってから貼る。短い sha しか無いなら**短いまま**書く
+(長く見える字は、それらしいので誰も疑わない)。
+
 ### 🔴 read-only の agent でも、こちらが編集し続けると報告が混ざる(2026-09-13)
 
 ⚠ CLAUDE.md は「**read-only なら同居してよい**」と書いており、それ自体は正しい
@@ -440,7 +448,7 @@ CLAUDE.md の「**済んだと書くときは観測点を挙げる**」の**発�
 「**worktree が消えていたら、その命令は依頼者のツリーに当たる**」と書けば、
 agent 側でも条件を検算できる(CLAUDE.md「戒めには何のための禁止かを書く」)。
 
-## 2. 投げ方 ── プロンプトに必ず入れる 5 つ
+## 2. 投げ方 ── プロンプトに必ず入れる 5 つ(+ レビューのとき 6 つ目)
 
 1. **範囲を確定する** ── 「この PR」ではなく `git diff <base>..HEAD` の base を書く
 2. **すでに済んでいることを書く** ── typecheck / lint / unit 件数 / smoke / 変異試験の
@@ -450,6 +458,11 @@ agent 側でも条件を検算できる(CLAUDE.md「戒めには何のための�
    生成物や `test-results/` を書き換えると依頼者のツリーが壊れる
 4. **CONFIRMED と 未検証 を分けて出させる** ── これが無いと疑いが断定に化ける
 5. **「無ければ無いと言え」** ── 件数を埋めるための発明を禁じる
+6. 🔑 **レビューには「この差し替えが壊しうる物」を 3〜5 個、名指しで書く**(2026-10-02)。
+   今日の着地後レビュー 3 本が当たったのは、依頼文に「2 本目の接続 / 関数の寿命 /
+   事前呼び出しの副作用 / `as` で黙らせた所」と**仮説を列挙した**ときだった。reviewer は
+   変異をそこへ当てる ── 書かないと「test が弱い」の一般論が返り、**送り直し**(ムダ撃ち)になる。
+   ⚠ 仮説は**当てさせる的**であって、**結論ではない**(「壊れているはず」と書かない)
 
 ⚠ **同じプロンプトを N 本投げるより、観点を変えて N 本**投げる(多様性 > 冗長)。
 同じ観点の重複は、同じ見落としを N 回するだけである。
@@ -579,6 +592,16 @@ runner の全量 `npm test`(d80601a)を、smoke(build + playwright)と変異ス�
 手順:**全量で時間切れが出たら、その file だけ単独で回し直してから**赤緑を書く。
 ⚠ `--testTimeout` を上げて通さない(負荷でだけ出る遅さを、検査の側で消すことになる)。
 単独でも落ちる物だけを「落ちた」と報告する(`.claude/agents/pkc3-runner.md` にも写してある)。
+
+🔴 **同じ日の 3 度目は agent 3 本(build / smoke / probe)と並べた形**(2026-10-02)。全量 unit(約 8 分)を
+2 回回して、**2 回とも**同じ 2 file だけが 5 秒の時間切れで落ちた(`detail-scroll` の「200 件まで」/
+`asr-pack-build` の CLI)。単独では緑で、製品は無傷。
+🔑 **全量 unit の runner は、他の重い agent(build / smoke / probe)が 1 本以下のときに投げる**。
+落ちた file が時間切れなら、**単独で回し直してから**読む。
+🔑 **2 回とも同じ file** なら負荷でだけ出る遅さが**その test の持ち物**である ── グローバルの
+`--testTimeout` ではなく、**その 2 件にだけ明示の timeout**を付けた(#1274、test だけ。製品は触らない)。
+上の「`--testTimeout` を上げて通さない」は、**全体を緩めて隠す**ことの禁止であって、
+負荷で遅いと分かった 1 件に**名指しで余裕を持たせる**ことは含まない。
 
 ### 🔴 3.4. **並行に走らせた記録は、ラベルと中身がずれる**(2026-09-18、#1007)
 

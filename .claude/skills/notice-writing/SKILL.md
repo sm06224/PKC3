@@ -93,6 +93,17 @@ user 指示 2026-08-07:
 `最新のお知らせ` の題名を等値で持つので、**以後のお知らせ全部で落ちるはず**だったが、
 CI は smoke を回さないので鳴らず、2026-10-02 に直した。helper が張り替える(手で足すときも忘れない)。
 
+🔴 **helper の失敗を `| tail` で食わない**(2026-10-02)。`python3 add-notice.py … | tail -3 && npx vitest …`
+と繋いだら、helper は「122 字で止まる」と断ったのに、**パイプの終了コードは `tail` の 0** なので
+`&&` が続き、**お知らせが 1 件も入っていない木で門を回して緑を読んだ**(CLAUDE.md §6 の
+`| tail` の顔)。🔑 `python3 -B … > /tmp/…/notice.log 2>&1; echo "exit=$?"` と **log へ落として
+`$?` を読み**、log の末尾が `digest` / `dropped title` を出していることを見てから vitest を回す。
+
+🔴 **登記表が枠(`NOTICE_SHOW_MAX`)に達していれば、helper は 1 file も書かずに止まり、落とす id を言う**
+(2026-10-02。1 稿目は枠を見ず、**51 件目を書いて** `announce` / `help-pane` の 4 件が落ちるまで
+気づけなかった ── 出力の `dropped title None` は合図にならない)。止まったら、言われた id を
+**5 番目の引数**で渡して書き直す。
+
 ⚠ 走らせた後は `npx vitest run tests/adapter/announce.test.ts tests/adapter/help-pane.test.ts
 tests/docs-parity.test.ts tests/features/ui-terms.test.ts`(マニュアルも触ったなら
 `tests/features/manual-refs.test.ts` も)。⚠ helper は**書く file を固定の形で探す**ので、
