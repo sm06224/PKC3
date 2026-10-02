@@ -10,7 +10,9 @@ import {
   createEntry,
   expectReachable,
   useSplitEditor,
-  openTile,} from './helpers';
+  openTile,
+  writesLanded,
+} from './helpers';
 
 /**
  * 🔴 **並べ替え中の案内の字は、実装と同じ引き方で作る**(#1046 追跡調査)。
@@ -962,7 +964,13 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
    * ⑦-5 🔴 **添付ノートに書かれている** ── 読み直しても同じ並び。
    * ⚠ 画面は**楽観で先に**動かしてあるので、⑦-3 だけでは「画面が動いた」しか言えない
    *   (disk に 1 バイトも書けていなくても ⑦-3 は緑になる)。
+   * 🔴 **読み直す前に、飛んでいる書込が着くのを待つ**(#1056)── ⑦-3 の poll が満たすのは**楽観の画面**で、
+   *   並べ替えの書込(getBody → 行ごとの persist → ack)は後から飛ぶ。待たずに `reload()` を撃つと、
+   *   2 並列で回したとき 20/20 で `data-pkc-saving` が立っている最中に当たり、まれに並びが戻る
+   *   (旧 worker が OPFS を握ったまま新しい worker が開けない回も同じ出所)。⚠ 待ちは検査の都合であって、
+   *   製品が「読み直しても書込を失わない」ことの主張ではない(それは別の裁定)。
    */
+  await writesLanded(page);
   await page.reload();
   await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
   await clickReal(page, '[data-pkc-browse="launcher"]');
