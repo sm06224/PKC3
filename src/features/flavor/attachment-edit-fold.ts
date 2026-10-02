@@ -28,12 +28,13 @@ export const HIDDEN_HEAD_ATTR = 'data-pkc-hidden-head';
 export const ATTACHMENT_FOLD_FIELD = 'attachment-fold-note';
 
 /**
- * 添付の画面の**改名欄**の名前(`aria-label`)。
+ * 添付の画面の**改名欄**の名前(欄の左に出る見える字。`label` で欄に結ぶ)。
  *
  * 🔑 畳みの 1 行(下)が**この字で**欄を指す ── 実在しない押し所を案内しない
- *   (`tests/adapter/attachment-edit-fold.test.ts` が描いた欄の `aria-label` と突き合わせる)。
+ *   (`tests/adapter/attachment-rename-filename.test.ts` が描いた欄の `label` の字と突き合わせる)。
+ * ⚠ 1 稿目は `aria-label` だけの「この添付の名前」で、画面には出ていなかった(#1264 欠陥 7-b)。
  */
-export const ATTACHMENT_RENAME_LABEL = 'この添付の名前';
+export const ATTACHMENT_RENAME_LABEL = '名前';
 
 /**
  * 畳んだことを言う 1 行。

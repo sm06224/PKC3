@@ -466,6 +466,18 @@ describe('書き出しの settle の配線', () => {
   });
 
   /**
+   * 🔴 **書込の出入りが「離れますか」の確認へ繋がっている**(#1056)。
+   *
+   * ⚠ 判断は `unload-guard.ts` が持つ(`tests/adapter/unload-guard.test.ts` が実際の
+   *   `beforeunload` を撃って見ている)。ここが守るのは**配線** ── 落ちると確認が一度も出ないまま
+   *   全 unit が緑になる(`main.ts` は実行されない)。⚠ 登録は `window` に 1 つ(重複を作らない)。
+   */
+  it('🔴 書込の出入りが beforeunload の確認(unload-guard)へ繋がっている', () => {
+    expect(MAIN, '確認の持ち主を作っていない').toContain('createUnloadGuard(window)');
+    expect(MAIN, '書込の出入りを確認へ渡していない').toContain('unloadGuard.setWriting(writing)');
+  });
+
+  /**
    * 🔴 **PowerPoint の口が実際に繋がっている**(#187 段⑤)。
    *
    * ⚠ `main.ts` は **test から 1 度も実行されない**(原文を読む test しか無い)ので、

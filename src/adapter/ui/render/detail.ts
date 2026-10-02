@@ -119,7 +119,11 @@ import {
   extractHeadingNumberConfig,
   applyDocumentGlobals,
 } from '@features/markdown/document-globals';
-import { ATTACHMENT_NAME_ATTR, readAttachmentMeta } from '@features/flavor/attachment-flavor';
+import {
+  ATTACHMENT_NAME_ATTR,
+  attachmentFileName,
+  readAttachmentMeta,
+} from '@features/flavor/attachment-flavor';
 import {
   ATTACHMENT_FOLD_FIELD,
   ATTACHMENT_FOLD_NOTE,
@@ -299,6 +303,9 @@ function emptyBodyHint(): string {
  *   ここへ足しても**間に合わない**(組み直しの時点で、もう外れている)。
  */
 const REFOCUS_ACTIONS: readonly string[] = ['pick-app-icon', 'adopt-link-icon'];
+
+/** 添付の改名欄の id の連番(描くたびに進める。同じ document に同じ id を並べない)。 */
+let attachmentRenameSeq = 0;
 
 export class DetailRenderer {
   private readonly region: HTMLElement;
@@ -2927,7 +2934,21 @@ export class DetailRenderer {
       rename.type = 'text';
       rename.setAttribute('data-pkc-action', 'rename-attachment');
       rename.setAttribute('data-pkc-field', 'attachment-rename');
-      rename.setAttribute('aria-label', ATTACHMENT_RENAME_LABEL);
+      /**
+       * 🔴 **欄の左に、見える字で「名前」**(#1264 欠陥 7-b)。
+       * ⚠ 直す前は `aria-label` だけで、画面には `scan.pdf — application/pdf — 1.2MB` の
+       *   直下に**欄だけ**が出ていた ── どちらが何の名前か字で分からなかった。
+       * 🔑 `label` を `for` で欄に結ぶ(欄の名前は `label` から決まるので `aria-label` は付けない)。
+       *   ⚠ id は**描くたびに別の値**にする ── 留めた枠(横に並べた枠)でも同じ添付を出せるので、
+       *   lid から作ると同じ document に同じ id が 2 つ並ぶ。
+       */
+      attachmentRenameSeq += 1;
+      const renameId = `pkc-attachment-rename-${attachmentRenameSeq}`;
+      rename.id = renameId;
+      const renameLabel = document.createElement('label');
+      renameLabel.setAttribute('data-pkc-field', 'attachment-rename-label');
+      renameLabel.htmlFor = renameId;
+      renameLabel.textContent = ATTACHMENT_RENAME_LABEL;
       // 🔴 **押した欄が対象を持つ**(#848)── 留めた枠でも、その枠のノートに効く
       markTargetLid(rename, lid);
       rename.value = entryTitle;
@@ -2937,7 +2958,29 @@ export class DetailRenderer {
       // 🔴 題名とダウンロードのファイル名が一緒に変わる(拡張子は元のまま足される。#1220 裁定 A)
       rename.title =
         'ノートの題名とダウンロードのファイル名を書き換えて、この欄の外を押すと保存されます。ファイル名の拡張子は元のままです';
-      host.append(rename);
+      const renameRow = document.createElement('div');
+      renameRow.setAttribute('data-pkc-field', 'attachment-rename-row');
+      renameRow.append(renameLabel, rename);
+      host.append(renameRow);
+      /**
+       * 🔴 **欄の下に、ダウンロードのファイル名を薄く**(#1264 欠陥 7-b)。
+       * ⚠ 組む規則は書き込む側と**同じ 1 本**(`attachmentFileName`)── ここに 2 本目を書かない。
+       *   欄を打ち替えると追従する(`input`)。⚠ いまのファイル名を持たない添付(ファイルを持たない
+       *   タイル)には出さない ── 組む元が無い。
+       */
+      if (meta.name) {
+        const hint = document.createElement('div');
+        hint.setAttribute('data-pkc-field', 'attachment-rename-hint');
+        const hintId = `${renameId}-hint`;
+        hint.id = hintId;
+        rename.setAttribute('aria-describedby', hintId);
+        const showName = (): void => {
+          hint.textContent = `ダウンロードのファイル名: ${attachmentFileName(rename.value, meta.name)}`;
+        };
+        showName();
+        rename.addEventListener('input', showName);
+        host.append(hint);
+      }
 
       /**
        * 🔴 **出すかどうかは `appTileControls` が 1 か所で決める**(#856 段①、2026-09-12)。

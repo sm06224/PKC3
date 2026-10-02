@@ -13,6 +13,7 @@ import 'katex/dist/katex.min.css';
 
 import { Dispatcher } from '@adapter/state/dispatcher';
 import { loadSplitLids, saveSplitLids } from '@adapter/platform/split-store';
+import { createUnloadGuard } from '@adapter/platform/unload-guard';
 import {
   hasUnsavedTyping,
   isAsidePane,
@@ -783,6 +784,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   実行されない(CLAUDE.md §2)。ここは**繋ぐだけ**。
    */
   const saving = new SavingIndicator(() => repaintStatus());
+  /**
+   * 🔴 **書き込みの最中にタブを閉じる・読み直すときだけ「離れますか」**(#1056)。
+   * ⚠ 判断は `unload-guard.ts` ── ここは**繋ぐだけ**(0 件のときは何も出さない)。
+   */
+  const unloadGuard = createUnloadGuard(window);
   /** ⚠ `paint` はずっと後で組まれるので、繋がるまでは何もしない口にしておく。 */
   let repaintStatus: () => void = () => undefined;
   const armPersist = (real: StoreClient): void => {
@@ -4462,6 +4468,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     onWriting: (writing) => {
       root.toggleAttribute('data-pkc-saving', writing);
       saving.setWriting(writing);
+      unloadGuard.setWriting(writing);
     },
     /**
      * 🔴 **添付の bytes を読む口**(#681 段③ の 2 つ目)。

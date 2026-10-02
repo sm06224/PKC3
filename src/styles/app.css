@@ -4686,6 +4686,27 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   font-size: 12px;
   margin-bottom: var(--s3);
 }
+/* 🔴 **改名欄の左の「名前」と、下の薄い 1 行**(#1264 欠陥 7-b)。⚠ 欄だけだと、どちらが何の名前か
+ *   字で分からなかった。色は情報にだけ(1 行は `--muted`)。 */
+[data-pkc-field='attachment-rename-row'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+[data-pkc-field='attachment-rename-row'] > input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+[data-pkc-field='attachment-rename-label'] {
+  color: var(--muted);
+  font-size: 12px;
+  flex: none;
+}
+[data-pkc-field='attachment-rename-hint'] {
+  color: var(--muted);
+  font-size: 12px;
+  margin: var(--s1) 0 var(--s3);
+}
 [data-pkc-field='attachment-media'] {
   max-width: 100%;
   border: 1px solid var(--border);
